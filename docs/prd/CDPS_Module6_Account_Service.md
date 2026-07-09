@@ -1,4 +1,4 @@
-# HRIS — Module 6: Account & Service
+# CDPS — Module 6: Account & Service
 
 > **Position in the journey:** the **translation layer** between "client bought a Service" (Module 4) and "execution teams have work to do" (Modules 7–10). Account receives the client the moment Finance verifies first payment (Module 5 §5), assigns an Account Manager (AM), decides — **per Service, not per client** — whether that Service needs a Strategy & Plan first or can be broken down straight into Briefs, then dispatches Briefs to Creative / Ads / KOL / Live Stream. Account is also the **primary complaint door** in practice.
 

@@ -1,4 +1,4 @@
-# HRIS — Module 2: Marketing
+# CDPS — Module 2: Marketing
 
 > **Position in the journey:** the first operational division. Marketing runs campaigns (online/offline) on a budget, pours leads into the **Leads Database** (Module 1), and is measured on whether those leads convert — with **ROAS** as the most important objective. This module does **not** re-store leads; it holds the **per-campaign performance record** and reads lead counts + quality from Module 1. The Campaign as a first-class cross-journey entity is formalised in **Module 3**; here it is the unit of measurement.
 

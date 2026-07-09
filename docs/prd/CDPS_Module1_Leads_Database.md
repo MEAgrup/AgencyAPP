@@ -1,4 +1,4 @@
-# HRIS — Module 1: Leads Database
+# CDPS — Module 1: Leads Database
 
 > **Position in the journey:** the single source of truth that sits *before* and *under* the Sales module. Marketing pours leads in; Sales claims and works them; every dashboard (Marketing CPL/ROAS, Sales conversion, Campaign) reads from here. It does not contradict the reference Sales module — it generalises the lead lifecycle so a lead can exist *before* it becomes a sales-owned Prospect, and adds a **competitive-claim** path for marketing pool leads.
 

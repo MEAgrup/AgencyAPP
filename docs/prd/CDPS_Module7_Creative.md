@@ -1,4 +1,4 @@
-# HRIS — Module 7: Creative
+# CDPS — Module 7: Creative
 
 > **Position in the journey:** the **execution-side detail** for every Brief that Module 6 dispatched to the Creative division. Module 6 defined the Brief's handoff contract and its division-level Kanban (`[To Do]` → … → `[Approved]`/`[Revision Requested]`); this module defines what actually happens **inside** that Kanban for Creative — output types, the per-unit **Asset** breakdown (because "12 Product Videos" is one Brief but twelve separate things to shoot, submit, and review), time-tracking, auto-logged daily output, and the KPIs (speed, quantity, GMV impact) that feed Team Performance later.
 

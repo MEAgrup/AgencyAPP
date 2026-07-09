@@ -1,6 +1,6 @@
-# HRIS — Module 10: Live Stream
+# CDPS — Module 10: Live Stream
 
-> **Position in the journey:** the **confirmed exception** to every execution-division pattern used in Modules 7–9. MEA does **not** run live streaming itself — it's outsourced to a **sister-company vendor**. This module is a **tracker, not an execution system**: there's no internal Kanban, no PIC doing the work inside HRIS, no Asset/Campaign/Booking fan-out tied to internal staff. What this module records is simpler and narrower — **what MEA (via the AM) requested from the vendor, and what the vendor actually delivered** — so live-stream results still feed Client Health and reporting like every other division's work, without pretending MEA controls a process it doesn't.
+> **Position in the journey:** the **confirmed exception** to every execution-division pattern used in Modules 7–9. MEA does **not** run live streaming itself — it's outsourced to a **sister-company vendor**. This module is a **tracker, not an execution system**: there's no internal Kanban, no PIC doing the work inside CDPS, no Asset/Campaign/Booking fan-out tied to internal staff. What this module records is simpler and narrower — **what MEA (via the AM) requested from the vendor, and what the vendor actually delivered** — so live-stream results still feed Client Health and reporting like every other division's work, without pretending MEA controls a process it doesn't.
 
 ## Contents
 1. Background & Objective
@@ -35,11 +35,11 @@ Expected result: AM has a clean record of what was asked of the vendor, what cam
 
 ### Rules
 1. AM creates a Session once the Live Stream Brief is dispatched — fields: requested date/time, platform (TikTok Shop Live / Shopee Live), target duration, products/talent to feature, special instructions.
-2. The request is sent to the vendor **outside the system** (the vendor has no HRIS access) — this record exists so MEA has its own copy of what was asked, independent of whatever the vendor's side shows.
+2. The request is sent to the vendor **outside the system** (the vendor has no CDPS access) — this record exists so MEA has its own copy of what was asked, independent of whatever the vendor's side shows.
 3. Vendor confirmation (accepting the schedule) is logged manually by AM once received — `[Confirmed by Vendor]`.
 
 ### Flow
-1. AM fills in the request fields, sends it to the vendor via whatever channel they normally use (WhatsApp/email — outside HRIS scope).
+1. AM fills in the request fields, sends it to the vendor via whatever channel they normally use (WhatsApp/email — outside CDPS scope).
 2. Vendor confirms → AM marks `[Confirmed by Vendor]`.
 3. Session sits at this status until the scheduled date passes and results come in (§4).
 
@@ -57,7 +57,7 @@ Alpha Digital later **adds a Live Stream package as an upsell** (a new Service o
 4. A `[Discrepancy Flagged]` Session does **not** block the Brief from later closing once the discrepancy is addressed/accepted — it's a visibility flag, not a hard gate.
 
 ### Flow
-1. Session airs (outside HRIS).
+1. Session airs (outside CDPS).
 2. AM logs results + vendor report link → `[Completed]`.
 3. AM reconciles against the original request → `[Reconciled]` or `[Discrepancy Flagged]`.
 4. If flagged, SPV/Account follows up with the vendor; once resolved (or accepted as-is), AM updates to `[Reconciled]`.

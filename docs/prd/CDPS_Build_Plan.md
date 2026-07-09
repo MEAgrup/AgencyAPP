@@ -12,21 +12,21 @@
 |---|---|---|
 | P0 | `CDPS_Phase0_Foundation_v2.md` | **v2 — updated** (adds §8 Integration Contract, §9 Notification Spec in-app, §10 Master Service List, §11 Portal security) |
 | 0 | `CDPS_Module0_Sales.md` | **Final — all decisions confirmed** (OD-1/2/3 resolved 9 Jul 2026) |
-| 1 | `HRIS_Module1_Leads_Database.md` | Final, unchanged |
-| 2 | `HRIS_Module2_Marketing.md` | Final, unchanged — *use your existing copy* |
-| 3 | `HRIS_Module3_Campaign.md` | Final, unchanged — *use your existing copy* |
+| 1 | `CDPS_Module1_Leads_Database.md` | Final, unchanged |
+| 2 | `CDPS_Module2_Marketing.md` | Final, unchanged — *use your existing copy* |
+| 3 | `CDPS_Module3_Campaign.md` | Final, unchanged — *use your existing copy* |
 | 4 | `CDPS_Module4_Client_Record_v2.md` | **v2 — updated** (adds Commission & Payment PIC + Sales Allocation per OD-1; module-number refs fixed). Supersedes the v1 file. |
-| 5 | `HRIS_Module5_Admin_Finance.md` | Final, unchanged |
-| 6 | `HRIS_Module6_Account_Service.md` | Final, unchanged |
-| 7 | `HRIS_Module7_Creative.md` | Final, unchanged |
-| 8 | `HRIS_Module8_Ads.md` | Final, unchanged |
-| 9 | `HRIS_Module9_KOL.md` | Final, unchanged |
-| 10 | `HRIS_Module10_Live_Stream.md` | Final, unchanged — *use your existing copy* |
-| 11 | `HRIS_Module11_PM_Kanban.md` | Final, unchanged — *use your existing copy* |
-| 12 | `HRIS_Module12_Task_Execution.md` | Final, unchanged — *use your existing copy* |
-| 13 | `HRIS_Module13_Client_Health_Report.md` | Final, unchanged — *use your existing copy* |
-| 14 | `HRIS_Module14_Team_Performance.md` | Final, unchanged — *use your existing copy* |
-| 15 | `HRIS_Module15_Client_Team_Portal.md` | Final, unchanged — *use your existing copy* |
+| 5 | `CDPS_Module5_Admin_Finance.md` | Final, unchanged |
+| 6 | `CDPS_Module6_Account_Service.md` | Final, unchanged |
+| 7 | `CDPS_Module7_Creative.md` | Final, unchanged |
+| 8 | `CDPS_Module8_Ads.md` | Final, unchanged |
+| 9 | `CDPS_Module9_KOL.md` | Final, unchanged |
+| 10 | `CDPS_Module10_Live_Stream.md` | Final, unchanged — *use your existing copy* |
+| 11 | `CDPS_Module11_PM_Kanban.md` | Final, unchanged — *use your existing copy* |
+| 12 | `CDPS_Module12_Task_Execution.md` | Final, unchanged — *use your existing copy* |
+| 13 | `CDPS_Module13_Client_Health_Report.md` | Final, unchanged — *use your existing copy* |
+| 14 | `CDPS_Module14_Team_Performance.md` | Final, unchanged — *use your existing copy* |
+| 15 | `CDPS_Module15_Client_Team_Portal.md` | Final, unchanged — *use your existing copy* |
 | — | `CDPS_Build_Plan.md` (this file) | New |
 
 *"Use your existing copy" = the file from the original batch is already final; no content changed, so no regenerated version is issued (avoids accidental drift). This manifest supersedes README v2's file list.*

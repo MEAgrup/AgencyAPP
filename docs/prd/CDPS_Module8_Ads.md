@@ -1,4 +1,4 @@
-# HRIS — Module 8: Ads
+# CDPS — Module 8: Ads
 
 > **Position in the journey:** the **execution-side detail** for every Brief that Module 6 dispatched to Ads. Unlike Creative's Assets (one-time submit-and-approve outputs), an ad campaign is a **living thing** — it launches, runs, gets optimized, and only the *initial setup* maps cleanly onto Module 6's Brief Kanban. This module separates "was the campaign set up correctly per the brief" (closes the Brief) from "how is the campaign actually performing over time" (the **Ad Campaign** record, which keeps running after the Brief is closed) — and closes the attribution loop opened in Module 7 §8 by writing GMV results back onto the specific Creative Asset that drove them.
 

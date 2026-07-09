@@ -21,7 +21,7 @@
 
 ## 1. Scope & how to read this system
 
-MEA Agency's internal HRIS is a **cross-division project-management + performance system**. It does three jobs at once:
+MEA Agency's CDPS is a **cross-division project-management + performance system**. It does three jobs at once:
 
 1. **Kanban tasks across divisions** — a service list closed by Sales becomes tasks that flow Account → Creative / Ads / KOL (and Live Stream — see OA-1), with dependencies and load monitoring.
 2. **Cross-division performance evaluation** — each division is scored partly on the *outcomes felt by others* (e.g. Ads scored partly on client satisfaction, Account on number of complaints).

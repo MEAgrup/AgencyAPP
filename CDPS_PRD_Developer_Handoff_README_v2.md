@@ -4,7 +4,7 @@
 
 This package is the full Client Delivery & Performance System (CDPS) specification for MEA Agency — Phase 0 foundation, the Sales reference module (Module 0), and all 15 modules, covering the complete client lifecycle from lead intake through delivery, scoring, and client/team-facing portals.
 
-> **Naming note:** earlier files were prefixed "HRIS" for historical reasons. This system is **CDPS**, not an HRIS — MEA's actual HRIS (employee data, attendance, leave) is a separate existing internal system that CDPS integrates with (see §3). New/updated files use the CDPS prefix.
+> **Naming note:** all module PRD files now use the **CDPS** prefix. "HRIS" in this package refers exclusively to the separate existing internal HR system (employee data, attendance, leave) that CDPS integrates with (see §3) — it is never a name for this system.
 
 ---
 
@@ -12,23 +12,23 @@ This package is the full Client Delivery & Performance System (CDPS) specificati
 
 | # | File | Covers |
 |---|---|---|
-| P0 | `HRIS_Phase0_Foundation.md` | House conventions, entity/ID registry (with as-built reconciliation), role matrix, global status conventions, validated client journey |
+| P0 | `CDPS_Phase0_Foundation_v2.md` | House conventions, entity/ID registry (with as-built reconciliation), role matrix, global status conventions, validated client journey |
 | **0** | **`CDPS_Module0_Sales.md`** ⭐ new | **Sales reference module, merged & reconciled: lead registration, qualified form (extended per Module 4), negotiation + approval, closing (Client/Transaction/Service ID generation). 3 Open Decisions in §9.** |
-| 1 | `HRIS_Module1_Leads_Database.md` | Lead intake (Marketing + Sales), dedup, competitive claim, lead quality |
-| 2 | `HRIS_Module2_Marketing.md` | Campaign performance record, CPL/ROAS/Collected-ROAS, lead-quality dashboard |
-| 3 | `HRIS_Module3_Campaign.md` | Campaign as acquisition thread, lifecycle, end-to-end traceability |
-| 4 | `HRIS_Module4_Client_Record.md` | Client Record, field provenance/lock matrix, Void Service, payment-intent handoff |
-| 5 | `HRIS_Module5_Admin_Finance.md` | Payment verification, 4 schemes, routing gate, reminder dashboard, contract gate |
-| 6 | `HRIS_Module6_Account_Service.md` | AM assignment, Strategy & Plan, Service→Brief breakdown, complaint doors |
-| 7 | `HRIS_Module7_Creative.md` | Asset sub-entity, time-tracking, revision loop, Creative KPIs |
-| 8 | `HRIS_Module8_Ads.md` | Ad Campaign vs. Brief, periodic metrics/ROAS, Optimization Log, attribution feedback |
-| 9 | `HRIS_Module9_KOL.md` | Creator Booking, QC/escalation, Creator List, Creator Payment Request |
-| 10 | `HRIS_Module10_Live_Stream.md` | Vendor-results tracker (outsourced, not internal execution) |
-| 11 | `HRIS_Module11_PM_Kanban.md` | Cross-division Unified Board, Dependency mechanism |
-| 12 | `HRIS_Module12_Task_Execution.md` | Canonical Task engine — Turnaround, Speed Score, Revision Count |
-| 13 | `HRIS_Module13_Client_Health_Report.md` | Client Health Score (0–100), monthly snapshot, bands |
-| 14 | `HRIS_Module14_Team_Performance.md` | Per-staff KPI Profile + Client-Outcome Modifier, monthly Performance Score |
-| 15 | `HRIS_Module15_Client_Team_Portal.md` | Client Portal, Team Portal, Management Dashboard |
+| 1 | `CDPS_Module1_Leads_Database.md` | Lead intake (Marketing + Sales), dedup, competitive claim, lead quality |
+| 2 | `CDPS_Module2_Marketing.md` | Campaign performance record, CPL/ROAS/Collected-ROAS, lead-quality dashboard |
+| 3 | `CDPS_Module3_Campaign.md` | Campaign as acquisition thread, lifecycle, end-to-end traceability |
+| 4 | `CDPS_Module4_Client_Record_v2.md` | Client Record, field provenance/lock matrix, Void Service, payment-intent handoff |
+| 5 | `CDPS_Module5_Admin_Finance.md` | Payment verification, 4 schemes, routing gate, reminder dashboard, contract gate |
+| 6 | `CDPS_Module6_Account_Service.md` | AM assignment, Strategy & Plan, Service→Brief breakdown, complaint doors |
+| 7 | `CDPS_Module7_Creative.md` | Asset sub-entity, time-tracking, revision loop, Creative KPIs |
+| 8 | `CDPS_Module8_Ads.md` | Ad Campaign vs. Brief, periodic metrics/ROAS, Optimization Log, attribution feedback |
+| 9 | `CDPS_Module9_KOL.md` | Creator Booking, QC/escalation, Creator List, Creator Payment Request |
+| 10 | `CDPS_Module10_Live_Stream.md` | Vendor-results tracker (outsourced, not internal execution) |
+| 11 | `CDPS_Module11_PM_Kanban.md` | Cross-division Unified Board, Dependency mechanism |
+| 12 | `CDPS_Module12_Task_Execution.md` | Canonical Task engine — Turnaround, Speed Score, Revision Count |
+| 13 | `CDPS_Module13_Client_Health_Report.md` | Client Health Score (0–100), monthly snapshot, bands |
+| 14 | `CDPS_Module14_Team_Performance.md` | Per-staff KPI Profile + Client-Outcome Modifier, monthly Performance Score |
+| 15 | `CDPS_Module15_Client_Team_Portal.md` | Client Portal, Team Portal, Management Dashboard |
 
 Module 0 changes previously applied cross-module context: the Qualified Lead Form now explicitly carries the 5 fields Module 4 expects at the Qualified stage (Nama PIC, Platform List, GMV saat ini 3-month avg, Target GMV, Marketing Budget); terminal statuses standardized to `Closed-Success` / `Closed-Lost`; scouted-vs-pool ownership split with Module 1 made explicit.
 

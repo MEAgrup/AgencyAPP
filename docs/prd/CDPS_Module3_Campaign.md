@@ -1,4 +1,4 @@
-# HRIS — Module 3: Campaign
+# CDPS — Module 3: Campaign
 
 > **Position in the journey:** the **thread**. A Campaign (`CMP-…`) is MEA's own lead-generation / acquisition effort. It is created by Marketing, carried into Sales ("Campaign: text terusan dari marketing"), and stays attached — via the leads it produces and the clients those leads become — all the way to Account and execution. It is the single key that answers *"which campaign ultimately produced this serviced client, and what did it cost vs return?"*
 >

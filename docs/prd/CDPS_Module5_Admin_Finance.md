@@ -1,4 +1,4 @@
-# HRIS — Module 5: Admin & Finance
+# CDPS — Module 5: Admin & Finance
 
 > **Position in the journey:** the **verification gate** between Sales closing a deal and Account actually starting work. Sales sets a *Payment Intent* on the Client Record (Module 4 §5); this module makes it **real** — confirming money actually arrived, handling the four payment schemes (Lunas / Bayar Sebagian / Termin / Bayar di Belakang), chasing overdue installments, and only then releasing the client into the **Account & Service** queue (Module 6). Nothing reaches execution without passing through here.
 

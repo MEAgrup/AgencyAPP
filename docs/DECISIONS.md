@@ -13,6 +13,7 @@
 | 2026-07-09 | **Notifikasi v1: in-app/workspace only** (Phase 0 v2 §9); tanpa email/WA; kanal bisa ditambah belakangan tanpa mengubah event producer. | Cukup untuk operasional internal; menghindari kompleksitas integrasi WA di v1. | Nerissa |
 | 2026-07-09 | Paket direname **CDPS** (bukan HRIS); HRIS = sistem existing terpisah. | Mencegah salah paham scope developer. | Nerissa (via COO office review) |
 | 2026-07-09 | Build order: Sprint 0 → Wave 1 (M0,M1,M4,M5) → Wave 2 (M6,M12,M7,M8,M9,M10) → Wave 3 (M2,M3,M11,M13,M14,M15); wave gate ketat. | Money path dulu; M12 dibangun awal Wave 2 karena M7–M9 plug ke engine-nya. | Nerissa |
+| 2026-07-09 | Seluruh file PRD modul di-rename dari prefix `HRIS_` ke `CDPS_` + normalisasi nama file ke underscore (tanpa spasi); judul dokumen modul diubah `# HRIS —` → `# CDPS —`; istilah "HRIS" kini eksklusif untuk sistem HR eksternal (kontrak di `docs/HRIS_API_CONTRACT.md`). | Keseragaman penamaan, mencegah salah paham scope (lanjutan keputusan rename CDPS 2026-07-09). | Nerissa |
 
 ## Open
 

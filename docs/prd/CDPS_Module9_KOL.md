@@ -1,4 +1,4 @@
-# HRIS — Module 9: KOL
+# CDPS — Module 9: KOL
 
 > **Position in the journey:** the **execution-side detail** for every Brief that Module 6 dispatched to KOL. This is **MEA Agency's KOL booking service for its own clients** — distinct from MCN MEA's creator-affiliate economy (GO Ladder, Deal Activation Rate, GMV-leakage tracking) covered elsewhere; KOL here means "secure creator(s) to produce content for Client X's campaign," not "manage MEA's affiliate creator roster." The unit of work is the **Creator Booking** — closer in spirit to Creative's Asset (fan-out per unit) but with an extra wrinkle Creative and Ads don't have: **the creator is an external party MEA doesn't fully control**, so the lifecycle needs room for sourcing, negotiation, and the possibility a creator simply doesn't deliver.
 
