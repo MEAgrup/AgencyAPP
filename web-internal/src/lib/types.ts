@@ -1,0 +1,120 @@
+// Shared API/domain types for CDPS web-internal.
+// Mirrors the fixed API contract exactly — no invented fields.
+
+export interface Employee {
+  employee_id: string;
+  nama: string;
+  email: string;
+  divisi: string;
+  jabatan: string;
+}
+
+export interface Role {
+  division: string;
+  level: string;
+  od: boolean;
+  director: boolean;
+}
+
+export interface MeResponse {
+  employee: Employee;
+  role: Role;
+}
+
+export interface NotificationItem {
+  id: string;
+  event_type: string;
+  entity_type: string;
+  entity_id: string;
+  deep_link: string;
+  actor: string;
+  created_at: string;
+  read_at: string | null;
+}
+
+export interface NotificationsResponse {
+  data: NotificationItem[];
+  unread_count: number;
+}
+
+export interface AdminEmployee {
+  employee_id: string;
+  nama: string;
+  email: string;
+  divisi: string;
+  jabatan: string;
+  status_aktif: boolean;
+  flagged: boolean;
+}
+
+export interface EmployeeSyncResult {
+  synced: number;
+  deactivated: number;
+  flagged: number;
+}
+
+export interface RoleMapping {
+  id: string;
+  divisi: string;
+  jabatan: string;
+  division: string;
+  level: string;
+}
+
+export interface LayeredRole {
+  employee_id: string;
+  role: 'od' | 'director';
+  enabled: boolean;
+}
+
+export interface MasterService {
+  id: string;
+  name: string;
+  standard_price: number;
+  commission_rule: string;
+  active: boolean;
+  version_no: number;
+  effective_from: string;
+}
+
+export interface DemoTask {
+  id: string;
+  title: string;
+  status: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface AuditEntry {
+  actor: string;
+  action: string;
+  before_json: unknown;
+  after_json: unknown;
+  created_at: string;
+}
+
+export interface DemoTaskDetail {
+  task: {
+    id: string;
+    title: string;
+    description: string;
+    status: string;
+    created_by: string;
+    created_at: string;
+  };
+  allowed_transitions: string[];
+  audit: AuditEntry[];
+}
+
+export const DIVISIONS = [
+  'marketing',
+  'sales',
+  'finance',
+  'account',
+  'creative',
+  'ads',
+  'kol',
+  'livestream',
+] as const;
+
+export const LEVELS = ['staff', 'lead'] as const;
