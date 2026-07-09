@@ -32,7 +32,11 @@ func TestParseCommissionRule(t *testing.T) {
 	for _, c := range cases {
 		r := mustRule(t, c.rule)
 		price, _ := money.Parse(c.price)
-		if got := r.Compute(price); got != c.want {
+		got, err := r.Compute(price)
+		if err != nil {
+			t.Fatalf("Compute(%q): %v", c.rule, err)
+		}
+		if got != c.want {
 			t.Errorf("rule %q on %s = %s, want %s", c.rule, c.price, got.Format(), c.want.Format())
 		}
 		if r.String() != c.rule {
@@ -45,9 +49,31 @@ func TestParseCommissionRuleRejectsUnknown(t *testing.T) {
 	for _, bad := range []string{
 		"", "10%", "10 percent", "flat 500000", "flat Rp abc",
 		"5% of price", "tiered", "Rp 500.000",
+		// Malformed thousands grouping must be rejected, not guessed:
+		"flat Rp 500.00", "flat Rp 1.5", "flat Rp ....500", "flat Rp 500.000.",
+		"flat Rp 1.2345", "flat Rp .500",
 	} {
 		if _, err := ParseCommissionRule(bad); !errors.Is(err, ErrBadCommissionRule) {
 			t.Errorf("ParseCommissionRule(%q) err = %v, want ErrBadCommissionRule", bad, err)
+		}
+	}
+}
+
+func TestParseCommissionRuleFlatShapes(t *testing.T) {
+	rp := func(s string) money.Money { m, _ := money.Parse(s); return m }
+	cases := map[string]money.Money{
+		"flat Rp 500000":    rp("500000.00"), // plain, no separators
+		"flat Rp 500.000":   rp("500000.00"), // grouped
+		"flat Rp 1.250.000": rp("1250000.00"),
+	}
+	for rule, want := range cases {
+		r := mustRule(t, rule)
+		got, err := r.Compute(rp("1000000.00"))
+		if err != nil {
+			t.Fatalf("Compute(%q): %v", rule, err)
+		}
+		if got != want {
+			t.Errorf("%q -> %s, want %s", rule, got.Format(), want.Format())
 		}
 	}
 }

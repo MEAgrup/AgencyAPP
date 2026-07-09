@@ -42,6 +42,10 @@ func Parse(s string) (Money, error) {
 	if i := strings.IndexByte(s, '.'); i >= 0 {
 		intPart, fracPart = s[:i], s[i+1:]
 	}
+	// Require at least one digit somewhere: reject "", "-", "+", ".", "-.".
+	if intPart == "" && fracPart == "" {
+		return 0, fmt.Errorf("%w: %q", ErrBadAmount, s)
+	}
 	if intPart == "" {
 		intPart = "0"
 	}
@@ -121,14 +125,20 @@ func groupThousands(digits string) string {
 // PercentOf returns pct percent of base, rounded half-up to a whole rupiah
 // (the result is always an exact multiple of 100 minor units). pctNumerator and
 // pctScale express the percentage exactly: value = pctNumerator / 10^pctScale.
-// e.g. 4.5% -> (45, 1); 10% -> (10, 0). All arithmetic is exact via math/big.
-func PercentOf(base Money, pctNumerator int64, pctScale int) Money {
+// e.g. 4.5% -> (45, 1); 10% -> (10, 0). All arithmetic is exact via math/big;
+// a result that cannot be represented in a Money (int64 minor units) returns
+// ErrBadAmount rather than silently wrapping.
+func PercentOf(base Money, pctNumerator int64, pctScale int) (Money, error) {
 	// commission_rupiah = base_minor * pct / (100 * 100)  where pct = num/10^scale
 	//                   = base_minor * num / (10000 * 10^scale)
 	num := new(big.Int).Mul(big.NewInt(int64(base)), big.NewInt(pctNumerator))
 	den := new(big.Int).Mul(big.NewInt(10000), pow10(pctScale))
 	rupiah := roundHalfUp(num, den)
-	return Money(rupiah * 100)
+	minor := rupiah.Mul(rupiah, big.NewInt(100))
+	if !minor.IsInt64() {
+		return 0, fmt.Errorf("%w: commission result out of range", ErrBadAmount)
+	}
+	return Money(minor.Int64()), nil
 }
 
 func pow10(n int) *big.Int {
@@ -140,17 +150,17 @@ func pow10(n int) *big.Int {
 	return r
 }
 
-// roundHalfUp returns round(num/den) with .5 rounding away from zero. den > 0.
-func roundHalfUp(num, den *big.Int) int64 {
+// roundHalfUp returns round(num/den) with .5 rounding away from zero. den > 0
+// and even (a multiple of 10000). Returns a *big.Int so the caller can range-check.
+func roundHalfUp(num, den *big.Int) *big.Int {
 	neg := num.Sign() < 0
 	n := new(big.Int).Abs(num)
 	// (n + den/2) / den
 	half := new(big.Int).Rsh(den, 1) // den is even (multiple of 10000); exact
 	n.Add(n, half)
 	q := new(big.Int).Quo(n, den)
-	r := q.Int64()
 	if neg {
-		r = -r
+		q.Neg(q)
 	}
-	return r
+	return q
 }

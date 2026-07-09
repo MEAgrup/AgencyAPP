@@ -20,6 +20,14 @@ func TestAllocationValidate(t *testing.T) {
 			wantErr: nil,
 		},
 		{
+			name: "primary id with surrounding whitespace still matches allocation",
+			parties: ClosingParties{
+				PrimarySalespersonID: "  EMP-BUDI  ",
+				Allocations:          []Allocation{{"EMP-BUDI", 10000}},
+			},
+			wantErr: nil,
+		},
+		{
 			name: "two-way 50/50 with PIC",
 			parties: ClosingParties{
 				PrimarySalespersonID:   "EMP-BUDI",

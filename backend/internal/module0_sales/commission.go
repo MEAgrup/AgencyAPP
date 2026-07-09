@@ -45,8 +45,10 @@ var (
 )
 
 var (
-	rePct  = regexp.MustCompile(`^(\d+)(?:\.(\d+))?% of standard price$`)
-	reFlat = regexp.MustCompile(`^flat Rp ([\d.]+)$`)
+	rePct = regexp.MustCompile(`^(\d+)(?:\.(\d+))?% of standard price$`)
+	// Amount is either a plain digit run ("500000") or properly thousands-grouped
+	// ("500.000", "1.250.000"). Malformed dot patterns ("500.00", "1.5") are rejected.
+	reFlat = regexp.MustCompile(`^flat Rp (\d+|\d{1,3}(?:\.\d{3})+)$`)
 )
 
 // CommissionRule is a parsed, immutable commission rule for one service.
@@ -84,10 +86,11 @@ func ParseCommissionRule(rule string) (CommissionRule, error) {
 }
 
 // Compute returns the commission for one service given its standard price.
-// Percentage commissions round half-up to a whole rupiah (DECISIONS O14).
-func (r CommissionRule) Compute(standardPrice money.Money) money.Money {
+// Percentage commissions round half-up to a whole rupiah (DECISIONS O14). An
+// out-of-range percentage result surfaces as an error rather than wrapping.
+func (r CommissionRule) Compute(standardPrice money.Money) (money.Money, error) {
 	if r.isFlat {
-		return r.flat
+		return r.flat, nil
 	}
 	return money.PercentOf(standardPrice, r.pctNum, r.pctScale)
 }
@@ -149,7 +152,10 @@ func BuildQuote(lines []ServiceLine) (Quote, error) {
 	}
 	q := Quote{Lines: make([]LineQuote, 0, len(lines))}
 	for _, l := range lines {
-		komisi := l.Rule.Compute(l.StandardPrice)
+		komisi, err := l.Rule.Compute(l.StandardPrice)
+		if err != nil {
+			return Quote{}, err
+		}
 		q.EstimasiNilai += l.StandardPrice
 		q.TotalKomisi += komisi
 		q.Lines = append(q.Lines, LineQuote{

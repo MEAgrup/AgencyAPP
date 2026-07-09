@@ -32,7 +32,8 @@ func TestParseAndDecimal(t *testing.T) {
 }
 
 func TestParseRejects(t *testing.T) {
-	for _, in := range []string{"", "abc", "1.234", "1..2", "1,000", "Rp5"} {
+	// Includes bare sign/dot strings that must NOT silently parse as 0.
+	for _, in := range []string{"", "abc", "1.234", "1..2", "1,000", "Rp5", "-", "+", ".", "-.", "+."} {
 		if _, err := Parse(in); err == nil {
 			t.Errorf("Parse(%q) should have failed", in)
 		}
@@ -80,8 +81,22 @@ func TestPercentOf(t *testing.T) {
 		{"0.5 rounds up", rp("12345700.00"), 5, 1, rp("61729.00")},
 	}
 	for _, c := range cases {
-		if got := PercentOf(c.base, c.num, c.scale); got != c.want {
+		got, err := PercentOf(c.base, c.num, c.scale)
+		if err != nil {
+			t.Errorf("%s: PercentOf error: %v", c.name, err)
+			continue
+		}
+		if got != c.want {
 			t.Errorf("%s: PercentOf = %s, want %s", c.name, got.Format(), c.want.Format())
 		}
+	}
+}
+
+func TestPercentOfOverflow(t *testing.T) {
+	// An absurd percentage whose result cannot fit int64 minor units must error,
+	// not silently wrap to a negative amount.
+	base, _ := Parse("9999999999999.99")
+	if _, err := PercentOf(base, 9000000000000000000, 0); err == nil {
+		t.Error("PercentOf with overflowing result should return an error")
 	}
 }

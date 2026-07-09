@@ -57,7 +57,8 @@ type ClosingParties struct {
 // their own BI messages; structural problems fall back to the incomplete
 // default.
 func (c ClosingParties) Validate() error {
-	if strings.TrimSpace(c.PrimarySalespersonID) == "" || len(c.Allocations) == 0 {
+	primary := strings.TrimSpace(c.PrimarySalespersonID)
+	if primary == "" || len(c.Allocations) == 0 {
 		return ErrAllocationIncomplete
 	}
 	if len(c.Allocations) > MaxSalespeople {
@@ -76,7 +77,7 @@ func (c ClosingParties) Validate() error {
 			return ErrAllocationIncomplete // a salesperson may appear at most once
 		}
 		seen[id] = true
-		if id == c.PrimarySalespersonID {
+		if id == primary {
 			primaryIncluded = true
 		}
 		sum += a.BasisPoints
@@ -91,10 +92,7 @@ func (c ClosingParties) Validate() error {
 	// Commission & Payment PIC: mandatory when >1 salesperson, must be a member.
 	if len(c.Allocations) > 1 {
 		pic := strings.TrimSpace(c.CommissionPaymentPICID)
-		if pic == "" {
-			return ErrAllocationIncomplete
-		}
-		if !seen[pic] {
+		if pic == "" || !seen[pic] {
 			return ErrAllocationIncomplete
 		}
 	}
