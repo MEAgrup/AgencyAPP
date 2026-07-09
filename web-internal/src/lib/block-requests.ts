@@ -60,7 +60,7 @@ export function findPendingBlockRequest(audit: AuditEntry[]): PendingBlockReques
     if (!isSubmitAction(entry.action)) continue;
     const id = extractId(entry.after_json) ?? extractId(entry.before_json);
     if (!id || resolvedIds.has(id)) continue;
-    pending = { id, submittedBy: entry.actor, submittedAt: entry.created_at };
+    pending = { id, submittedBy: entry.actor_employee_id, submittedAt: entry.created_at };
   }
   return pending;
 }

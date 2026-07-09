@@ -14,9 +14,16 @@ interface FormState {
   standard_price: string;
   commission_rule: string;
   active: boolean;
+  effective_from: string;
 }
 
-const EMPTY_FORM: FormState = { name: '', standard_price: '', commission_rule: '', active: true };
+const EMPTY_FORM: FormState = {
+  name: '',
+  standard_price: '',
+  commission_rule: '',
+  active: true,
+  effective_from: todayISO(),
+};
 
 export default function MasterServicesPage() {
   const [effectiveAt, setEffectiveAt] = useState(todayISO());
@@ -66,6 +73,7 @@ export default function MasterServicesPage() {
       standard_price: String(service.standard_price),
       commission_rule: service.commission_rule,
       active: service.active,
+      effective_from: todayISO(),
     });
     setFormError(null);
     setShowForm(true);
@@ -75,11 +83,13 @@ export default function MasterServicesPage() {
     e.preventDefault();
     setFormError(null);
     setSubmitting(true);
+    // Backend expects standard_price as a decimal string and requires effective_from.
     const payload = {
       name: form.name,
-      standard_price: Number(form.standard_price),
+      standard_price: form.standard_price,
       commission_rule: form.commission_rule,
       active: form.active,
+      effective_from: form.effective_from,
     };
     try {
       if (editingId) {
@@ -169,6 +179,16 @@ export default function MasterServicesPage() {
                   onChange={(e) => setForm((f) => ({ ...f, standard_price: e.target.value }))}
                 />
               </div>
+            </div>
+            <div className="field">
+              <label htmlFor="effective_from">Berlaku Sejak</label>
+              <input
+                id="effective_from"
+                type="date"
+                required
+                value={form.effective_from}
+                onChange={(e) => setForm((f) => ({ ...f, effective_from: e.target.value }))}
+              />
             </div>
             <div className="field">
               <label htmlFor="commission_rule">Aturan Komisi</label>

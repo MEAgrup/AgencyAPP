@@ -192,7 +192,7 @@ export default function DemoTaskDetailPage({ params }: { params: Promise<{ id: s
               <tbody>
                 {audit.map((entry, idx) => (
                   <tr key={`${entry.created_at}-${idx}`}>
-                    <td>{entry.actor}</td>
+                    <td>{entry.actor_employee_id}</td>
                     <td>{entry.action}</td>
                     <td>{extractStatusLabel(entry.before_json) ?? summarizeJson(entry.before_json)}</td>
                     <td>{extractStatusLabel(entry.after_json) ?? summarizeJson(entry.after_json)}</td>

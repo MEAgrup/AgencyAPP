@@ -70,7 +70,7 @@ export interface LayeredRole {
 export interface MasterService {
   id: string;
   name: string;
-  standard_price: number;
+  standard_price: string;
   commission_rule: string;
   active: boolean;
   version_no: number;
@@ -86,7 +86,7 @@ export interface DemoTask {
 }
 
 export interface AuditEntry {
-  actor: string;
+  actor_employee_id: string;
   action: string;
   before_json: unknown;
   after_json: unknown;

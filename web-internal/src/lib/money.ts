@@ -2,12 +2,14 @@
 // Thousands separated by dots, comma decimals. Division-by-zero / missing
 // derived values render as an em dash, never an error.
 
-export function formatIDR(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
+export function formatIDR(value: number | string | null | undefined): string {
+  // Backend sends DECIMAL columns as strings (e.g. "10000000.00").
+  const num = typeof value === 'string' ? Number(value) : value;
+  if (num === null || num === undefined || Number.isNaN(num)) {
     return '—'; // —
   }
-  const isNegative = value < 0;
-  const intPart = Math.trunc(Math.abs(value)).toString();
+  const isNegative = num < 0;
+  const intPart = Math.trunc(Math.abs(num)).toString();
   const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
   return `${isNegative ? '-' : ''}Rp. ${grouped},00`;
 }

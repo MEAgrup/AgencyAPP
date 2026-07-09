@@ -1,0 +1,11 @@
+employee_id,nama,email,divisi,jabatan,status_aktif,password
+EMP-0001,Budi Santoso,budi@mea.co.id,Sales,Sales Executive,true,rahasia123
+EMP-0002,Sinta Rahma,sinta@mea.co.id,Account,Account Manager,true,rahasia123
+EMP-0003,Rian Pratama,rian@mea.co.id,Creative,Creative Designer,true,rahasia123
+EMP-0004,Kenny Wijaya,kenny@mea.co.id,Ads,Ads Specialist,true,rahasia123
+EMP-0005,Putri Lestari,putri@mea.co.id,KOL,KOL Specialist,true,rahasia123
+EMP-0006,Dewi Anggraini,dewi@mea.co.id,Sales,Sales Head,true,rahasia123
+EMP-0007,Fajar Nugroho,fajar@mea.co.id,Finance,Finance Staff,true,rahasia123
+EMP-0008,Yohan Saputra,yohan@mea.co.id,Management,Director,true,rahasia123
+EMP-0009,Nerissa Arviana,nerissa@mea.co.id,Management,Director,true,rahasia123
+EMP-0010,Hans Kurniawan,hans@mea.co.id,Management,Director,true,rahasia123
