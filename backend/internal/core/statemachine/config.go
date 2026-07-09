@@ -80,6 +80,10 @@ func defaultMachines() map[string]*Machine {
 				{from: "Negotiation - Pending Approval", to: "Negotiation - Rejected", requireLead: true},
 				{from: "Negotiation - Revision Required", to: "Negotiation - Approved", requireLead: true},
 				{from: "Negotiation - Revision Required", to: "Negotiation - Pending Approval"},
+				// DECISIONS O16: a rejected proposal may be resubmitted (new version)
+				// or the attempt closed as lost.
+				{from: "Negotiation - Rejected", to: "Negotiation - Pending Approval"},
+				{from: "Negotiation - Rejected", to: "Closed-Lost"},
 				{from: "Negotiation - Approved", to: "Closed-Success"},
 				{from: "Negotiation - Approved", to: "Closed-Lost"},
 				{from: "Negotiation - Auto Approved", to: "Closed-Success"},

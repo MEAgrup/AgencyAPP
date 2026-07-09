@@ -103,6 +103,13 @@ func (a *App) Router() http.Handler {
 	// Audit
 	mux.HandleFunc("GET /api/v1/audit", a.protect(a.handleAudit))
 
+	// Wave 1 money-path routes. Each build stream owns its own registration file
+	// so the two teams never edit the same router block:
+	//   - registerLeadsSalesRoutes   -> routes_leads_sales.go   (M1 + M0, Team A)
+	//   - registerClientFinanceRoutes -> routes_client_finance.go (M4 + M5, Team B)
+	a.registerLeadsSalesRoutes(mux)
+	a.registerClientFinanceRoutes(mux)
+
 	return mux
 }
 

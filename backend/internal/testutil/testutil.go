@@ -42,6 +42,18 @@ func DB(t *testing.T) *sql.DB {
 // dataTables are truncated by Clean, children before parents not required since
 // FK checks are disabled during truncation.
 var dataTables = []string{
+	// Wave 1 money-path entities (children before parents).
+	"installments",
+	"transactions",
+	"services",
+	"client_sales_allocations",
+	"client_platforms",
+	"clients",
+	"negotiation_proposal_lines",
+	"negotiation_proposals",
+	"prospect_attempt_nq_reasons",
+	"prospect_attempts",
+	"leads",
 	"demo_task_block_requests",
 	"demo_tasks",
 	"notifications",
