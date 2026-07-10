@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/meagrup/agencyapp/backend/internal/core/money"
+	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
 	"github.com/meagrup/agencyapp/backend/internal/module4_client"
 )
 
@@ -147,6 +148,31 @@ func (a *App) handleEditClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"changes": applied})
+}
+
+// handleVoidService voids a Service and cascade-cancels its non-Approved child
+// Briefs (M4-OA-5, W1-12).
+func (a *App) handleVoidService(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	res, err := a.clientSvc().VoidService(r.Context(), actor, r.PathValue("id"))
+	if err != nil {
+		var blocked *statemachine.BlockedError
+		var roleErr *statemachine.RoleError
+		switch {
+		case errors.Is(err, module4_client.ErrVoidForbidden):
+			writeErr(w, http.StatusForbidden, statemachine.RoleDeniedMessage)
+		case errors.As(err, &roleErr):
+			writeErr(w, http.StatusForbidden, roleErr.Message)
+		case errors.As(err, &blocked):
+			writeErr(w, http.StatusUnprocessableEntity, blocked.Message)
+		case errors.Is(err, module4_client.ErrNotFound):
+			writeErr(w, http.StatusNotFound, "[layanan tidak ditemukan]")
+		default:
+			writeErr(w, http.StatusInternalServerError, "[terjadi kesalahan sistem]")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 func (a *App) handleGetClient(w http.ResponseWriter, r *http.Request) {

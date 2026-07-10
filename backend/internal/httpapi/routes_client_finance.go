@@ -14,4 +14,6 @@ func (a *App) registerClientFinanceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/clients/{id}", a.protect(a.handleGetClient))
 	// M4 §4 — lock matrix field corrections (W1-11).
 	mux.HandleFunc("PATCH /api/v1/clients/{id}", a.protect(a.handleEditClient))
+	// M4-OA-5 — Void Service + cascade (W1-12).
+	mux.HandleFunc("POST /api/v1/services/{id}/void", a.protect(a.handleVoidService))
 }

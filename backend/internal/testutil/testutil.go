@@ -45,6 +45,7 @@ var dataTables = []string{
 	// Wave 1 money-path entities (children before parents).
 	"installments",
 	"transactions",
+	"briefs",
 	"services",
 	"client_sales_allocations",
 	"client_platforms",

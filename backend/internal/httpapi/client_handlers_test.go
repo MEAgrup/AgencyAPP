@@ -161,3 +161,51 @@ func TestClientEndpoints_LockMatrix(t *testing.T) {
 		t.Fatalf("sales lead reassign pic: %d", code)
 	}
 }
+
+func seedCFService(t *testing.T, clientID, serviceID string) {
+	t.Helper()
+	d := testutil.DB(t)
+	seedCFClient(t, clientID, "EMP-BUDI", false)
+	if _, err := d.ExecContext(context.Background(),
+		`INSERT INTO services (id, client_id, master_service_id, master_version_no, name, standard_price, commission_rule, status, created_by)
+		 VALUES (?, ?, 'MSV-01', 1, 'Jasa X', '5000000.00', '10% of standard price', '[Briefed]', 'TEST')`,
+		serviceID, clientID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ExecContext(context.Background(),
+		`INSERT INTO briefs (id, service_id, title, status, created_by) VALUES (?, ?, 'B', '[To Do]', 'TEST')`,
+		serviceID+"-BRF", serviceID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestServiceVoidEndpoint(t *testing.T) {
+	srv, done := setupCF(t)
+	defer done()
+	seedCFService(t, "CLI-S", "SVC-1")
+
+	// Sales staff denied.
+	budi := login(t, srv, "budi@mea.co.id")
+	if code, _ := do(t, budi, "POST", srv.URL+"/api/v1/services/SVC-1/void", nil); code != 403 {
+		t.Fatalf("sales staff void: %d want 403", code)
+	}
+	// OD denied (read-only).
+	odi := login(t, srv, "odi@mea.co.id")
+	if code, _ := do(t, odi, "POST", srv.URL+"/api/v1/services/SVC-1/void", nil); code != 403 {
+		t.Fatalf("OD void: %d want 403", code)
+	}
+	// Account Lead allowed; cascade cancels the child brief.
+	alia := login(t, srv, "alia@mea.co.id")
+	code, body := do(t, alia, "POST", srv.URL+"/api/v1/services/SVC-1/void", nil)
+	if code != 200 {
+		t.Fatalf("account lead void: %d %v", code, body)
+	}
+	if voided, _ := body["voided_briefs"].([]any); len(voided) != 1 {
+		t.Fatalf("voided_briefs = %v, want 1", body["voided_briefs"])
+	}
+	// Re-void blocked (terminal).
+	code, body = do(t, alia, "POST", srv.URL+"/api/v1/services/SVC-1/void", nil)
+	if code != 422 || body["message"] != "[transisi status tidak diizinkan]" {
+		t.Fatalf("re-void: %d %v", code, body)
+	}
+}
