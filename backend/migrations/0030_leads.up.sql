@@ -20,6 +20,7 @@ CREATE TABLE leads (
   winning_attempt           VARCHAR(32)  NULL,                   -- PRSP- set at win resolution (W1-03)
   scouted_owner_employee_id VARCHAR(32)  NULL,                   -- denormalized exclusive owner (scouted); dedup block name + M1-OA-5
   manual_review_flag        TINYINT(1)   NOT NULL DEFAULT 0,     -- phone match + name differs substantially (M1-OA-4)
+  pool_entered_at           DATETIME(6)  NULL,                   -- when the record (re)entered [Pool]; basis of the COMPUTED 24h stale flag (M1-OA-7)
   created_at                DATETIME(6)  NOT NULL,               -- immutable
   updated_at                DATETIME(6)  NOT NULL,
   PRIMARY KEY (lead_id),

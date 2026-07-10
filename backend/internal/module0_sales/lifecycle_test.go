@@ -104,8 +104,18 @@ func TestFullLifecycle_RevisionRequiredLoop(t *testing.T) {
 	assertStatus(t, ctx, conn, s, owner, id, statemachine.ProspectNegPendingApprove)
 
 	// Revision again, this time accepted straight to Approved.
+	// NOTE: machines.go encodes the accept-revision edge (Revision Required
+	// -> Approved) as RoleLeadSPV-only, while the M0 §5 prose says the
+	// salesperson "accepts" the counter-offer (values synced by the system).
+	// The engine config is authoritative and out of this ticket's scope
+	// (JANGAN ubah machines.go); flagged as an open DECISIONS.md question in
+	// the ticket report. Tested here per the engine's actual encoding.
 	requireOK(t, s.UpdateStatus(ctx, conn, spv, id, sales.UpdateStatusInput{To: statemachine.ProspectNegRevisionReq}))
-	requireOK(t, s.UpdateStatus(ctx, conn, owner, id, sales.UpdateStatusInput{To: statemachine.ProspectNegApproved}))
+	if err := s.UpdateStatus(ctx, conn, owner, id, sales.UpdateStatusInput{To: statemachine.ProspectNegApproved}); err == nil {
+		t.Fatal("expected staff accept-revision to be role-denied per the engine's current encoding (see note above)")
+	}
+	assertStatus(t, ctx, conn, s, owner, id, statemachine.ProspectNegRevisionReq) // unchanged after denial
+	requireOK(t, s.UpdateStatus(ctx, conn, spv, id, sales.UpdateStatusInput{To: statemachine.ProspectNegApproved}))
 	assertStatus(t, ctx, conn, s, owner, id, statemachine.ProspectNegApproved)
 }
 

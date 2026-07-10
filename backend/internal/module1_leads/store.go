@@ -18,19 +18,20 @@ var ErrCampaignNotFound = errors.New("leads: campaign not found")
 
 const leadColumns = `lead_id, lead_name, phone_raw, phone_normalized, email, source,
 	origin_division, origin_campaign, last_touch_campaign, record_status,
-	winning_attempt, scouted_owner_employee_id, manual_review_flag`
+	winning_attempt, scouted_owner_employee_id, manual_review_flag, pool_entered_at`
 
 func scanLead(row interface{ Scan(...any) error }) (*Lead, error) {
 	var (
-		l                                                        Lead
-		email, originCampaign, lastTouch, winning, scoutedOwner  sql.NullString
-		manualReview                                             bool
-		status                                                   string
+		l                                                       Lead
+		email, originCampaign, lastTouch, winning, scoutedOwner sql.NullString
+		manualReview                                            bool
+		status                                                  string
+		poolEnteredAt                                           sql.NullTime
 	)
 	if err := row.Scan(
 		&l.LeadID, &l.LeadName, &l.PhoneRaw, &l.PhoneNormalized, &email, &l.Source,
 		&l.OriginDivision, &originCampaign, &lastTouch, &status,
-		&winning, &scoutedOwner, &manualReview,
+		&winning, &scoutedOwner, &manualReview, &poolEnteredAt,
 	); err != nil {
 		return nil, err
 	}
@@ -41,6 +42,9 @@ func scanLead(row interface{ Scan(...any) error }) (*Lead, error) {
 	l.WinningAttempt = winning.String
 	l.ScoutedOwnerEmployeeID = scoutedOwner.String
 	l.ManualReviewFlag = manualReview
+	if poolEnteredAt.Valid {
+		l.PoolEnteredAt = poolEnteredAt.Time
+	}
 	return &l, nil
 }
 
@@ -69,15 +73,20 @@ func GetLead(ctx context.Context, q db.Queryer, leadID string) (*Lead, error) {
 }
 
 // insertLead writes a new lead row. record_status/origin_division/source are
-// caller-set; created_at == updated_at == now.
+// caller-set; created_at == updated_at == now. pool_entered_at is set when the
+// record is born into [Pool] (Marketing import), else NULL.
 func insertLead(ctx context.Context, q db.Queryer, l Lead, now time.Time) error {
+	var poolEntered any
+	if l.RecordStatus == StatusPool {
+		poolEntered = now
+	}
 	_, err := q.ExecContext(ctx,
 		`INSERT INTO leads (`+leadColumns+`, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		l.LeadID, l.LeadName, l.PhoneRaw, l.PhoneNormalized, nullStr(l.Email), l.Source,
 		l.OriginDivision, nullStr(l.OriginCampaign), nullStr(l.LastTouchCampaign), string(l.RecordStatus),
 		nullStr(l.WinningAttempt), nullStr(l.ScoutedOwnerEmployeeID), l.ManualReviewFlag,
-		now, now,
+		poolEntered, now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("leads: insert %s: %w", l.LeadID, err)
@@ -86,9 +95,16 @@ func insertLead(ctx context.Context, q db.Queryer, l Lead, now time.Time) error 
 }
 
 // setRecordStatus updates only record_status (+ optional scouted owner) and
-// updated_at. Used by reopen and by future attempt-driven integration. The
-// audit row is the caller's responsibility (service layer).
+// updated_at; entering [Pool] also stamps pool_entered_at (M1-OA-7 stale
+// basis). Used by reopen and by future attempt-driven integration. The audit
+// row is the caller's responsibility (service layer).
 func setRecordStatus(ctx context.Context, q db.Queryer, leadID string, status RecordStatus, scoutedOwner string, now time.Time) error {
+	if status == StatusPool {
+		_, err := q.ExecContext(ctx,
+			`UPDATE leads SET record_status = ?, scouted_owner_employee_id = ?, pool_entered_at = ?, updated_at = ? WHERE lead_id = ?`,
+			string(status), nullStr(scoutedOwner), now, now, leadID)
+		return err
+	}
 	_, err := q.ExecContext(ctx,
 		`UPDATE leads SET record_status = ?, scouted_owner_employee_id = ?, updated_at = ? WHERE lead_id = ?`,
 		string(status), nullStr(scoutedOwner), now, leadID)

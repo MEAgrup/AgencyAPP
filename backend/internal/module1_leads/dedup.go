@@ -45,10 +45,11 @@ const (
 // RecordSnapshot is the minimal existing-record state the dedup decision needs.
 // A nil snapshot means "no existing record for this normalized phone".
 type RecordSnapshot struct {
-	LeadID           string
-	RecordStatus     RecordStatus
-	OriginCampaign   string
-	ScoutedOwnerName string // resolved employee name, for the scouted block message
+	LeadID            string
+	RecordStatus      RecordStatus
+	OriginCampaign    string
+	LastTouchCampaign string // already-recorded Last-Touch ("" if none)
+	ScoutedOwnerName  string // resolved employee name, for the scouted block message
 }
 
 // Decision is the dedup engine's verdict for one intake.
@@ -63,7 +64,9 @@ type Decision struct {
 	// to ExistingLeadID; import supplies its own per-row reason).
 	Message string
 	// WriteLastTouch is true only for OutcomeBlockPool when the intake campaign
-	// differs from the record's Origin Campaign (§5 Last-Touch tracking).
+	// differs from the campaign already on file — Origin Campaign, or the
+	// Last-Touch already recorded (§5 Last-Touch tracking; re-touching by the
+	// same campaign never rewrites the field).
 	WriteLastTouch bool
 }
 
@@ -91,11 +94,15 @@ func Decide(existing *RecordSnapshot, door Door, intakeCampaign string) Decision
 		}
 	case StatusPool:
 		// Row 2: already in DB as [Pool] → block as duplicate record; write
-		// Last-Touch if the intake campaign differs from Origin Campaign.
+		// Last-Touch if the intake campaign differs from the one on file
+		// (Origin, and the Last-Touch already recorded). Never overwrites
+		// Origin Campaign.
 		return Decision{
 			Outcome:        OutcomeBlockPool,
 			ExistingLeadID: existing.LeadID,
-			WriteLastTouch: intakeCampaign != "" && intakeCampaign != existing.OriginCampaign,
+			WriteLastTouch: intakeCampaign != "" &&
+				intakeCampaign != existing.OriginCampaign &&
+				intakeCampaign != existing.LastTouchCampaign,
 		}
 	case StatusRejected, StatusNotQualified:
 		// Row 3: all attempts terminal (rejected) → allow re-entry, reopen.

@@ -15,12 +15,12 @@ import (
 
 // Audit action strings (entity_type is always "lead").
 const (
-	auditEntityLead   = "lead"
-	actionCreate      = "create"
-	actionReopen      = "reopen"
-	actionBlockedDup  = "dedup_blocked_duplicate" // M1-OA-6: attribution logged, not counted
-	actionLastTouch   = "last_touch_update"
-	actionManualFlag  = "manual_review_flag"
+	auditEntityLead  = "lead"
+	actionCreate     = "create"
+	actionReopen     = "reopen"
+	actionBlockedDup = "dedup_blocked_duplicate" // M1-OA-6: attribution logged, not counted
+	actionLastTouch  = "last_touch_update"
+	actionManualFlag = "manual_review_flag"
 )
 
 // ValidationError carries a byte-exact BI mandatory-field message (CLAUDE.md
@@ -227,9 +227,10 @@ func (s *Service) snapshot(ctx context.Context, tx *sql.Tx, existing *Lead) *Rec
 		return nil
 	}
 	snap := &RecordSnapshot{
-		LeadID:         existing.LeadID,
-		RecordStatus:   existing.RecordStatus,
-		OriginCampaign: existing.OriginCampaign,
+		LeadID:            existing.LeadID,
+		RecordStatus:      existing.RecordStatus,
+		OriginCampaign:    existing.OriginCampaign,
+		LastTouchCampaign: existing.LastTouchCampaign,
 	}
 	if existing.RecordStatus == StatusScoutedActive {
 		snap.ScoutedOwnerName = employeeName(ctx, tx, existing.ScoutedOwnerEmployeeID)

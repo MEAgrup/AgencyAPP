@@ -77,10 +77,13 @@ func nameDiffersSubstantially(a, b string) bool {
 	if na == "" || nb == "" {
 		return false // cannot judge; do not raise a false flag
 	}
-	if na == nb {
+	// Compare space-insensitively as well, so "SINI-STORE" (punctuation
+	// dropped -> "sinistore") still matches "Sini Store".
+	ca, cb := strings.ReplaceAll(na, " ", ""), strings.ReplaceAll(nb, " ", "")
+	if ca == cb {
 		return false
 	}
-	if strings.Contains(na, nb) || strings.Contains(nb, na) {
+	if strings.Contains(ca, cb) || strings.Contains(cb, ca) {
 		return false
 	}
 	return true

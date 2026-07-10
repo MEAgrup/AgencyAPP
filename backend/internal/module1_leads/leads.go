@@ -17,6 +17,8 @@
 // (CLAUDE.md convention #3) exactly as a transition would be.
 package leads
 
+import "time"
+
 // Division is a lead's Origin Division (§9.3, {Marketing, Sales}). The string
 // values also match the HRIS `divisi` used by authz for the permission checks
 // in §9.1.
@@ -109,6 +111,10 @@ type Lead struct {
 	WinningAttempt         string // "" until win resolution (W1-03)
 	ScoutedOwnerEmployeeID string // "" for pool leads
 	ManualReviewFlag       bool
+	// PoolEnteredAt is when the record (re)entered [Pool]; zero when the lead
+	// has never been in the pool. Basis of the COMPUTED 24h stale flag
+	// (M1-OA-7) — the flag itself is never stored.
+	PoolEnteredAt time.Time
 }
 
 // CampaignStub is a row of the temporary campaign gate stub (see
