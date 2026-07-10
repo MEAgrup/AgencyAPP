@@ -9,9 +9,7 @@ import "net/http"
 // handler here (and in sibling *_handlers.go files you create), so Team A's
 // router file is never touched.
 func (a *App) registerClientFinanceRoutes(mux *http.ServeMux) {
-	// Example (uncomment/extend as tickets land):
-	//   mux.HandleFunc("GET /api/v1/clients/{id}", a.protect(a.handleGetClient))
-	//   mux.HandleFunc("POST /api/v1/clients/{id}/payment-intent", a.protect(a.handlePaymentIntent))
-	//   mux.HandleFunc("POST /api/v1/transactions/{id}/verify", a.protect(a.handleVerifyPayment))
-	//   mux.HandleFunc("POST /api/v1/services/{id}/void", a.protect(a.handleVoidService))
+	// M4 — Client Record (W1-10 provenance/visibility).
+	mux.HandleFunc("GET /api/v1/clients", a.protect(a.handleListClients))
+	mux.HandleFunc("GET /api/v1/clients/{id}", a.protect(a.handleGetClient))
 }
