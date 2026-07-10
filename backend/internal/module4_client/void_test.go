@@ -10,11 +10,14 @@ import (
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
 )
 
-// seedService creates a client + one service + the given briefs (id->status).
-func seedService(t *testing.T, s *Service, clientID, serviceID, serviceStatus string, briefs map[string]string) {
+// seedService creates a client (released per the released flag) + one service
+// + the given briefs (id->status). released matters because VoidService now
+// gates on the same client visibility(actor) predicate as Get/List (FIX2) —
+// Account can only void a service on a RELEASED client.
+func seedService(t *testing.T, s *Service, clientID, serviceID, serviceStatus string, released bool, briefs map[string]string) {
 	t.Helper()
 	ctx := context.Background()
-	insertClient(t, s, clientID, "EMP-BUDI", false, "EMP-BUDI")
+	insertClient(t, s, clientID, "EMP-BUDI", released, "EMP-BUDI")
 	if _, err := s.DB.ExecContext(ctx,
 		`INSERT INTO services (id, client_id, master_service_id, master_version_no, name, standard_price, commission_rule, status, created_by)
 		 VALUES (?, ?, 'MSV-01', 1, 'Jasa X', '5000000.00', '10% of standard price', ?, 'TEST')`,
@@ -51,7 +54,7 @@ func serviceStatus(t *testing.T, s *Service, id string) string {
 func TestVoidServiceCascade(t *testing.T) {
 	s := newService(t)
 	ctx := context.Background()
-	seedService(t, s, "CLI-V", "SVC-V", "[Briefed]", map[string]string{
+	seedService(t, s, "CLI-V", "SVC-V", "[Briefed]", true, map[string]string{
 		"BRF-1": "[To Do]",
 		"BRF-2": "[In Progress]",
 		"BRF-3": BriefApproved, // must be left intact
@@ -109,7 +112,7 @@ func TestVoidServiceCascade(t *testing.T) {
 func TestVoidServiceAuthorisation(t *testing.T) {
 	s := newService(t)
 	ctx := context.Background()
-	seedService(t, s, "CLI-V", "SVC-V", "[Briefed]", map[string]string{"BRF-1": "[To Do]"})
+	seedService(t, s, "CLI-V", "SVC-V", "[Briefed]", false, map[string]string{"BRF-1": "[To Do]"})
 
 	// Sales staff and OD are denied; the service stays [Briefed] and the brief
 	// stays [To Do].
@@ -125,12 +128,40 @@ func TestVoidServiceAuthorisation(t *testing.T) {
 		t.Errorf("denied void must not touch briefs")
 	}
 
-	// Sales Lead may void.
+	// Sales Lead may void even though the client is NOT released — Sales Lead
+	// sees all Sales clients regardless of the Account release gate (M4 §6).
 	if _, err := s.VoidService(ctx, salesLead("S2"), "SVC-V"); err != nil {
 		t.Fatalf("sales lead void: %v", err)
 	}
 	if serviceStatus(t, s, "SVC-V") != StatusServiceVoided {
 		t.Errorf("sales lead void did not apply")
+	}
+}
+
+// TestVoidServiceVisibilityGate (FIX2): Account Lead may only void a service
+// whose owning client is visible to them — i.e. released. Sales Lead and
+// Director are unaffected by the release gate.
+func TestVoidServiceVisibilityGate(t *testing.T) {
+	s := newService(t)
+	ctx := context.Background()
+	seedService(t, s, "CLI-VG-UNREL", "SVC-VG-1", "[Briefed]", false, map[string]string{"BRF-1": "[To Do]"})
+	seedService(t, s, "CLI-VG-REL", "SVC-VG-2", "[Briefed]", true, map[string]string{"BRF-2": "[To Do]"})
+
+	// Account Lead on an UNRELEASED client's service: invisible -> ErrNotFound,
+	// the exact regression this fix closes (previously silently allowed).
+	if _, err := s.VoidService(ctx, accountLead("A2"), "SVC-VG-1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("account lead void on unreleased client err = %v, want ErrNotFound", err)
+	}
+	if serviceStatus(t, s, "SVC-VG-1") != "[Briefed]" {
+		t.Errorf("blocked void must not change service status")
+	}
+
+	// Account Lead on a RELEASED client's service succeeds.
+	if _, err := s.VoidService(ctx, accountLead("A2"), "SVC-VG-2"); err != nil {
+		t.Fatalf("account lead void on released client: %v", err)
+	}
+	if serviceStatus(t, s, "SVC-VG-2") != StatusServiceVoided {
+		t.Errorf("account lead void on released client did not apply")
 	}
 }
 

@@ -188,6 +188,15 @@ func (a *App) handleChangeScheme(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
+// MsgFinanceAccessDenied is the pure permission-gate denial for Module 5
+// endpoints (Queue/LoadTransaction/Verify/CreateSchedule/ChangeScheme/
+// FlagBermasalah/VoteBermasalah's division/level checks, module5_finance.
+// ErrForbidden) — distinct from statemachine.RoleDeniedMessage, which is
+// reserved for an actual state-machine transition role denial. Reads like GET
+// /finance/queue were previously (mis)reported with the transition-denial
+// string even though no transition was ever attempted.
+const MsgFinanceAccessDenied = "[anda tidak memiliki akses ke data keuangan ini]"
+
 // writeFinanceErr maps Module 5 domain errors to HTTP status + exact BI message.
 func (a *App) writeFinanceErr(w http.ResponseWriter, err error) {
 	var blocked *statemachine.BlockedError
@@ -196,7 +205,7 @@ func (a *App) writeFinanceErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, module5_finance.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "[transaksi tidak ditemukan]")
 	case errors.Is(err, module5_finance.ErrForbidden):
-		writeErr(w, http.StatusForbidden, statemachine.RoleDeniedMessage)
+		writeErr(w, http.StatusForbidden, MsgFinanceAccessDenied)
 	case errors.Is(err, module5_finance.ErrContractRequired):
 		writeErr(w, http.StatusUnprocessableEntity, module5_finance.MsgContractRequired)
 	case errors.Is(err, module5_finance.ErrScheduleExists):

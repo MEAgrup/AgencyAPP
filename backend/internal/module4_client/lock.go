@@ -172,9 +172,18 @@ func (s *Service) Edit(ctx context.Context, actor permission.Actor, clientID str
 	}
 	defer tx.Rollback()
 
-	// Lock the client row; also proves existence.
+	// Lock the client row, subject to the SAME visibility(actor) predicate as
+	// Get/List (M4 §6); also proves existence. A client invisible to the actor
+	// (e.g. an unreleased client, to Account) is indistinguishable from one that
+	// does not exist — same rule as Get, closing the gap the row-lock probe used
+	// to leave open.
+	clause, visArgs, ok := visibility(actor)
+	if !ok {
+		return nil, ErrNotFound
+	}
 	var exists string
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM clients WHERE id = ? FOR UPDATE`, clientID).Scan(&exists); err != nil {
+	lockQ := `SELECT id FROM clients c WHERE c.id = ? AND (` + clause + `) FOR UPDATE`
+	if err := tx.QueryRowContext(ctx, lockQ, append([]any{clientID}, visArgs...)...).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -186,11 +195,13 @@ func (s *Service) Edit(ctx context.Context, actor permission.Actor, clientID str
 		f := lockMatrix[field]
 
 		newVal := raw
+		var newMoney money.Money
 		if f.money {
 			m, perr := money.Parse(raw)
 			if perr != nil {
 				return nil, ErrInvalidField
 			}
+			newMoney = m
 			newVal = m.Decimal()
 		}
 
@@ -211,7 +222,23 @@ func (s *Service) Edit(ctx context.Context, actor permission.Actor, clientID str
 		}); err != nil {
 			return nil, err
 		}
-		applied = append(applied, FieldChange{Field: field, Before: before, After: newVal})
+
+		// The audit row above keeps the canonical decimal (recomputability,
+		// CLAUDE.md #4); the RETURNED change renders money in the house IDR
+		// convention (CLAUDE.md #7). Non-money fields, and an empty ("") before
+		// on a field that was previously unset, are returned unchanged.
+		respBefore, respAfter := before, newVal
+		if f.money {
+			respAfter = newMoney.Format()
+			if before != "" {
+				beforeMoney, perr := money.Parse(before)
+				if perr != nil {
+					return nil, perr
+				}
+				respBefore = beforeMoney.Format()
+			}
+		}
+		applied = append(applied, FieldChange{Field: field, Before: respBefore, After: respAfter})
 	}
 
 	if err := tx.Commit(); err != nil {

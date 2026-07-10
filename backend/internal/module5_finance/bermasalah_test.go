@@ -24,6 +24,18 @@ func bermasalahFlag(t *testing.T, s *Service, trxID string) bool {
 	return b != 0
 }
 
+// releaseTrx stamps released_to_account_at so Account's SPV vote is visible to
+// them (M5 §5 Rule 2, trxVisibility) — the joint-approval fixtures below give
+// SPV Account an actual seat to vote from, matching the same visibility gate
+// Flag/Vote now enforce (FIX3).
+func releaseTrx(t *testing.T, s *Service, trxID string) {
+	t.Helper()
+	if _, err := s.DB.ExecContext(context.Background(),
+		`UPDATE transactions SET released_to_account_at = NOW() WHERE id = ?`, trxID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFlagBermasalah_HappyPathAndAuthority(t *testing.T) {
 	s := newSvc(t)
 	seedClient(t, s, "CLI-BM", "EMP-BUDI")
@@ -95,6 +107,10 @@ func TestVoteBermasalah_StaffAndODCannotVote(t *testing.T) {
 	s := newSvc(t)
 	seedClient(t, s, "CLI-NV", "EMP-BUDI")
 	seedTrx(t, s, "TRX-NV", "CLI-NV", SchemeLunas, "20000000.00", "")
+	// Release so Account's own visibility isn't the reason for denial here —
+	// this test asserts NO VOTING SEAT (division/level gate), not invisibility.
+	// See TestVoteBermasalah_VisibilityGateBlocksWrite for the visibility gate.
+	releaseTrx(t, s, "TRX-NV")
 	if err := s.FlagBermasalah(context.Background(), financeStaff, "TRX-NV", "reason"); err != nil {
 		t.Fatalf("flag: %v", err)
 	}
@@ -110,6 +126,9 @@ func TestVoteBermasalah_JointApprovalResolves(t *testing.T) {
 	s := newSvc(t)
 	seedClient(t, s, "CLI-JOINT", "EMP-BUDI")
 	seedTrx(t, s, "TRX-JOINT", "CLI-JOINT", SchemeLunas, "20000000.00", "")
+	// SPV Account only has a seat here once the transaction is visible to
+	// Account (M5 §5 Rule 2) — released, same as the read path requires.
+	releaseTrx(t, s, "TRX-JOINT")
 	if err := s.FlagBermasalah(context.Background(), financeStaff, "TRX-JOINT", "reversal"); err != nil {
 		t.Fatalf("flag: %v", err)
 	}
@@ -160,6 +179,7 @@ func TestVoteBermasalah_DisagreementEscalatesThenDirectorRules(t *testing.T) {
 	s := newSvc(t)
 	seedClient(t, s, "CLI-ESC", "EMP-BUDI")
 	seedTrx(t, s, "TRX-ESC", "CLI-ESC", SchemeLunas, "20000000.00", "")
+	releaseTrx(t, s, "TRX-ESC") // SPV Account needs visibility to have a seat.
 	if err := s.FlagBermasalah(context.Background(), financeStaff, "TRX-ESC", "reversal"); err != nil {
 		t.Fatalf("flag: %v", err)
 	}
@@ -219,6 +239,7 @@ func TestBermasalah_ReflagAfterResolveStartsNewCycle(t *testing.T) {
 	s := newSvc(t)
 	seedClient(t, s, "CLI-CYCLE", "EMP-BUDI")
 	seedTrx(t, s, "TRX-CYCLE", "CLI-CYCLE", SchemeLunas, "20000000.00", "")
+	releaseTrx(t, s, "TRX-CYCLE") // SPV Account needs visibility to have a seat.
 
 	// Cycle 1: flagged, resolved by both SPVs.
 	if err := s.FlagBermasalah(context.Background(), financeStaff, "TRX-CYCLE", "reversal 1"); err != nil {
@@ -267,5 +288,37 @@ func TestGetBermasalahStatus_VisibilityFollowsTransaction(t *testing.T) {
 		if _, err := s.GetBermasalahStatus(context.Background(), actor, "TRX-GVIS"); err != nil {
 			t.Errorf("actor %s status err = %v, want nil", actor.EmployeeID, err)
 		}
+	}
+}
+
+// TestVoteBermasalah_VisibilityGateBlocksWrite (FIX3): an actor whose
+// trxVisibility excludes the transaction must be denied BEFORE any write, the
+// same as the read path denies them — not merely "no seat" (ErrForbidden),
+// but ErrNotFound, and zero approval rows written.
+func TestVoteBermasalah_VisibilityGateBlocksWrite(t *testing.T) {
+	s := newSvc(t)
+	seedClient(t, s, "CLI-VISV", "EMP-BUDI")
+	seedTrx(t, s, "TRX-VISV", "CLI-VISV", SchemeLunas, "20000000.00", "") // never released
+	if err := s.FlagBermasalah(context.Background(), financeStaff, "TRX-VISV", "reversal"); err != nil {
+		t.Fatalf("flag: %v", err)
+	}
+
+	// SPV Account has a voting seat (Lead of Account), but the transaction is
+	// pre-release and therefore invisible to Account (M5 §5 Rule 2) — same as
+	// LoadTransaction/GetBermasalahStatus would report for this actor.
+	if err := s.VoteBermasalah(context.Background(), accountLead, "TRX-VISV", DecisionSetuju, ""); err != ErrNotFound {
+		t.Fatalf("invisible-actor vote err = %v, want ErrNotFound", err)
+	}
+	var cnt int
+	if err := s.DB.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM transaction_issue_approvals WHERE transaction_id = 'TRX-VISV'`).Scan(&cnt); err != nil {
+		t.Fatal(err)
+	}
+	if cnt != 0 {
+		t.Errorf("approval rows = %d, want 0 (invisible actor must not write)", cnt)
+	}
+	// The flag itself is untouched too.
+	if !bermasalahFlag(t, s, "TRX-VISV") {
+		t.Error("blocked vote must not clear the flag")
 	}
 }

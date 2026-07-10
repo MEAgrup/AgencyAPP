@@ -86,6 +86,12 @@ func TestEditAppliesAndAudits(t *testing.T) {
 	seedAlphaDigital(t, s)
 	ctx := context.Background()
 	id := "CLI-202605-0021"
+	// Account only ever acts on a RELEASED client (M4 §6) — the row-lock probe
+	// now applies the same visibility(actor) gate as Get/List (FIX1), so the
+	// Account Lead / Account staff edits below need this client released.
+	if _, err := s.DB.ExecContext(ctx, `UPDATE clients SET released_to_account_at = NOW() WHERE id = ?`, id); err != nil {
+		t.Fatal(err)
+	}
 
 	// Account Lead corrects a profile field (logged).
 	applied, err := s.Edit(ctx, accountLead("A2"), id, map[string]string{FieldToko: "Alpha Digital Official"})
@@ -118,14 +124,19 @@ func TestEditAppliesAndAudits(t *testing.T) {
 		t.Fatalf("client_id edit err = %v, want ErrFieldLocked", err)
 	}
 
-	// Money field revised by Account staff — stored as DECIMAL.
-	if _, err := s.Edit(ctx, accountStaff("A1"), id, map[string]string{FieldTargetGMV: "150000000"}); err != nil {
+	// Money field revised by Account staff — stored as DECIMAL, but the
+	// RETURNED FieldChange renders the house IDR convention (CLAUDE.md #7).
+	moneyApplied, err := s.Edit(ctx, accountStaff("A1"), id, map[string]string{FieldTargetGMV: "150000000"})
+	if err != nil {
 		t.Fatalf("target_gmv edit: %v", err)
+	}
+	if moneyApplied[0].Before != "Rp. 100.000.000,00" || moneyApplied[0].After != "Rp. 150.000.000,00" {
+		t.Errorf("target_gmv FieldChange = %+v, want house-formatted before/after", moneyApplied[0])
 	}
 	var target string
 	s.DB.QueryRowContext(ctx, `SELECT target_gmv FROM clients WHERE id = ?`, id).Scan(&target)
 	if target != "150000000.00" {
-		t.Errorf("target_gmv = %q, want 150000000.00", target)
+		t.Errorf("target_gmv = %q, want 150000000.00 (canonical decimal, unaffected by response formatting)", target)
 	}
 	// Sales Lead reassigns Sales PIC.
 	if _, err := s.Edit(ctx, salesLead("S2"), id, map[string]string{FieldSalesPIC: "EMP-CITRA"}); err != nil {
@@ -172,6 +183,36 @@ func TestEditRejectsEmptyAndUnknown(t *testing.T) {
 	s.DB.QueryRowContext(ctx, `SELECT toko FROM clients WHERE id = ?`, id).Scan(&toko)
 	if toko != "Alpha Digital" {
 		t.Errorf("denied batch must not partially apply; toko = %q", toko)
+	}
+}
+
+// TestEditVisibilityGate (FIX1): the row-lock probe applies the SAME
+// visibility(actor) predicate as Get/List — a client invisible to the actor
+// must 404, not silently allow the write.
+func TestEditVisibilityGate(t *testing.T) {
+	s := newService(t)
+	ctx := context.Background()
+	insertClient(t, s, "CLI-UNREL", "EMP-BUDI", false)
+	insertClient(t, s, "CLI-REL", "EMP-BUDI", true)
+
+	// (a) Account staff on a NON-released client: invisible -> ErrNotFound, the
+	// exact regression this fix closes (previously silently allowed).
+	if _, err := s.Edit(ctx, accountStaff("A1"), "CLI-UNREL", map[string]string{FieldTargetGMV: "1000000"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("account staff edit on unreleased client err = %v, want ErrNotFound", err)
+	}
+
+	// (b) The same actor, same field, on a RELEASED client still succeeds.
+	if _, err := s.Edit(ctx, accountStaff("A1"), "CLI-REL", map[string]string{FieldTargetGMV: "1000000"}); err != nil {
+		t.Fatalf("account staff edit on released client: %v", err)
+	}
+
+	// (c) OD / Director see everything (visibility "1=1") — a non-released
+	// client is still editable for the fields their role covers.
+	if _, err := s.Edit(ctx, odActor("O1"), "CLI-UNREL", map[string]string{FieldGMVBaseline: "1000000"}); err != nil {
+		t.Fatalf("od edit on unreleased client: %v", err)
+	}
+	if _, err := s.Edit(ctx, directorActor("D1"), "CLI-UNREL", map[string]string{FieldTargetGMV: "1000000"}); err != nil {
+		t.Fatalf("director edit on unreleased client: %v", err)
 	}
 }
 

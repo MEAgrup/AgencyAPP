@@ -150,10 +150,19 @@ func TestClientEndpoints_LockMatrix(t *testing.T) {
 	if code != 403 || body["message"] != "[field ini terkunci, tidak bisa diubah]" {
 		t.Fatalf("total_sales edit: %d %v", code, body)
 	}
-	// Account revises Target GMV (money field).
-	code, _ = do(t, amel, "PATCH", srv.URL+"/api/v1/clients/CLI-REL", map[string]any{"target_gmv": "50000000"})
+	// Account revises Target GMV (money field): the response renders the house
+	// IDR convention (CLAUDE.md #7), not the raw decimal (FIX5).
+	code, body = do(t, amel, "PATCH", srv.URL+"/api/v1/clients/CLI-REL", map[string]any{"target_gmv": "50000000"})
 	if code != 200 {
 		t.Fatalf("account target_gmv: %d", code)
+	}
+	changes, _ := body["changes"].([]any)
+	if len(changes) != 1 {
+		t.Fatalf("changes = %v, want 1 entry", body["changes"])
+	}
+	ch := changes[0].(map[string]any)
+	if ch["before"] != "Rp. 20.000.000,00" || ch["after"] != "Rp. 50.000.000,00" {
+		t.Errorf("target_gmv change render = %+v, want house-formatted before/after", ch)
 	}
 	// Sales Lead reassigns Sales PIC.
 	code, _ = do(t, dewi, "PATCH", srv.URL+"/api/v1/clients/CLI-REL", map[string]any{"sales_pic_id": "EMP-ANDI"})
@@ -162,10 +171,36 @@ func TestClientEndpoints_LockMatrix(t *testing.T) {
 	}
 }
 
-func seedCFService(t *testing.T, clientID, serviceID string) {
+// TestLayeredSalesStaffPlusOD_ClientListIncludesUnreleased (FIX6, DoD layered-
+// role coverage): Budi is an ordinary Sales staff account, ALSO layered OD
+// (auth.ResolveActor overlays OD onto the underlying division/level — it never
+// replaces it). OD's read scope wins for GET /clients: Budi sees every client,
+// including ones he doesn't own and ones not yet released to Account, which a
+// plain Sales staff account could not.
+func TestLayeredSalesStaffPlusOD_ClientListIncludesUnreleased(t *testing.T) {
+	srv, done := setupCF(t)
+	defer done()
+	d := testutil.DB(t)
+	testutil.InsertLayeredRole(t, d, "EMP-BUDI", "od")
+
+	seedCFClient(t, "CLI-LSOD-OWN", "EMP-BUDI", false)   // Budi's own, unreleased
+	seedCFClient(t, "CLI-LSOD-OTHER", "EMP-ANDI", false) // another's, unreleased
+
+	budi := login(t, srv, "budi@mea.co.id")
+	code, body := do(t, budi, "GET", srv.URL+"/api/v1/clients", nil)
+	if code != 200 {
+		t.Fatalf("layered staff+OD list: %d", code)
+	}
+	data, _ := body["data"].([]any)
+	if len(data) != 2 {
+		t.Fatalf("layered staff+OD list len = %d, want 2 (OD read scope wins, incl. unreleased/other-owned)", len(data))
+	}
+}
+
+func seedCFService(t *testing.T, clientID, serviceID string, released bool) {
 	t.Helper()
 	d := testutil.DB(t)
-	seedCFClient(t, clientID, "EMP-BUDI", false)
+	seedCFClient(t, clientID, "EMP-BUDI", released)
 	if _, err := d.ExecContext(context.Background(),
 		`INSERT INTO services (id, client_id, master_service_id, master_version_no, name, standard_price, commission_rule, status, created_by)
 		 VALUES (?, ?, 'MSV-01', 1, 'Jasa X', '5000000.00', '10% of standard price', '[Briefed]', 'TEST')`,
@@ -182,7 +217,7 @@ func seedCFService(t *testing.T, clientID, serviceID string) {
 func TestServiceVoidEndpoint(t *testing.T) {
 	srv, done := setupCF(t)
 	defer done()
-	seedCFService(t, "CLI-S", "SVC-1")
+	seedCFService(t, "CLI-S", "SVC-1", false) // pre-verification (unreleased)
 
 	// Sales staff denied.
 	budi := login(t, srv, "budi@mea.co.id")
@@ -194,18 +229,34 @@ func TestServiceVoidEndpoint(t *testing.T) {
 	if code, _ := do(t, odi, "POST", srv.URL+"/api/v1/services/SVC-1/void", nil); code != 403 {
 		t.Fatalf("OD void: %d want 403", code)
 	}
-	// Account Lead allowed; cascade cancels the child brief.
+	// Account Lead on an UNRELEASED client's service: invisible (M4 §6) -> 404,
+	// same as Get would report (FIX2 — was previously silently allowed).
 	alia := login(t, srv, "alia@mea.co.id")
 	code, body := do(t, alia, "POST", srv.URL+"/api/v1/services/SVC-1/void", nil)
+	if code != 404 || body["message"] != "[layanan tidak ditemukan]" {
+		t.Fatalf("account lead void unreleased: %d %v, want 404 [layanan tidak ditemukan]", code, body)
+	}
+
+	// Sales Lead sees every Sales client regardless of release -> void
+	// succeeds; cascade cancels the child brief.
+	dewi := login(t, srv, "dewi@mea.co.id")
+	code, body = do(t, dewi, "POST", srv.URL+"/api/v1/services/SVC-1/void", nil)
 	if code != 200 {
-		t.Fatalf("account lead void: %d %v", code, body)
+		t.Fatalf("sales lead void: %d %v", code, body)
 	}
 	if voided, _ := body["voided_briefs"].([]any); len(voided) != 1 {
 		t.Fatalf("voided_briefs = %v, want 1", body["voided_briefs"])
 	}
 	// Re-void blocked (terminal).
-	code, body = do(t, alia, "POST", srv.URL+"/api/v1/services/SVC-1/void", nil)
+	code, body = do(t, dewi, "POST", srv.URL+"/api/v1/services/SVC-1/void", nil)
 	if code != 422 || body["message"] != "[transisi status tidak diizinkan]" {
 		t.Fatalf("re-void: %d %v", code, body)
+	}
+
+	// Account Lead on a RELEASED client's service succeeds.
+	seedCFService(t, "CLI-S2", "SVC-2", true)
+	code, body = do(t, alia, "POST", srv.URL+"/api/v1/services/SVC-2/void", nil)
+	if code != 200 {
+		t.Fatalf("account lead void released: %d %v", code, body)
 	}
 }

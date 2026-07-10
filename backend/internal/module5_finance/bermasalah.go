@@ -74,9 +74,16 @@ func (s *Service) FlagBermasalah(ctx context.Context, actor permission.Actor, tr
 	}
 	defer tx.Rollback()
 
+	// Resolve the transaction through the SAME visibility predicate the read
+	// path (LoadTransaction/trxVisibility) uses, before any write — an actor who
+	// could not GET this transaction must not be able to flag it either.
+	clause, visArgs, ok := trxVisibility(actor)
+	if !ok {
+		return ErrForbidden
+	}
 	var bermasalah int
-	err = tx.QueryRowContext(ctx,
-		`SELECT bermasalah FROM transactions WHERE id = ? FOR UPDATE`, transactionID).Scan(&bermasalah)
+	q := `SELECT t.bermasalah FROM transactions t JOIN clients c ON c.id = t.client_id WHERE t.id = ? AND (` + clause + `) FOR UPDATE`
+	err = tx.QueryRowContext(ctx, q, append([]any{transactionID}, visArgs...)...).Scan(&bermasalah)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -148,10 +155,17 @@ func (s *Service) VoteBermasalah(ctx context.Context, actor permission.Actor, tr
 	}
 	defer tx.Rollback()
 
+	// Resolve the transaction through the SAME visibility predicate the read
+	// path uses, before any write — a vote/ruling from an actor who could not
+	// even see this transaction must not be recorded (M5 §5 Rule 2).
+	clause, visArgs, ok := trxVisibility(actor)
+	if !ok {
+		return ErrForbidden
+	}
 	var bermasalah int
 	var flaggedAt sql.NullTime
-	err = tx.QueryRowContext(ctx,
-		`SELECT bermasalah, bermasalah_flagged_at FROM transactions WHERE id = ? FOR UPDATE`, transactionID).
+	q := `SELECT t.bermasalah, t.bermasalah_flagged_at FROM transactions t JOIN clients c ON c.id = t.client_id WHERE t.id = ? AND (` + clause + `) FOR UPDATE`
+	err = tx.QueryRowContext(ctx, q, append([]any{transactionID}, visArgs...)...).
 		Scan(&bermasalah, &flaggedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound

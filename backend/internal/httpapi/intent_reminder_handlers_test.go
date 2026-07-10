@@ -117,6 +117,27 @@ func TestSetPaymentIntent_HTTP(t *testing.T) {
 	}
 }
 
+// TestLayeredSalesStaffPlusOD_PaymentIntentStaysStaffScoped (FIX6, DoD layered-
+// role coverage): Budi is an ordinary Sales staff account, ALSO layered OD.
+// The intent handoff is a staff-scoped write (the client's Primary Sales
+// PIC) — the OD layer (read-only) grants no extra write authority here, but
+// it also does not take the existing staff-scope write away: Budi, still the
+// owning Sales PIC, may set the intent exactly as before.
+func TestLayeredSalesStaffPlusOD_PaymentIntentStaysStaffScoped(t *testing.T) {
+	srv, done := setupFin(t)
+	defer done()
+	d := testutil.DB(t)
+	testutil.InsertLayeredRole(t, d, "EMP-BUDI", "od")
+	seedIntentClient(t, "CLI-LSOD", "TRX-LSOD", "EMP-BUDI")
+
+	budi := login(t, srv, "budi@mea.co.id")
+	code, body := do(t, budi, "POST", srv.URL+"/api/v1/clients/CLI-LSOD/payment-intent",
+		map[string]any{"payment_intent": "[Termin]"})
+	if code != 200 {
+		t.Fatalf("layered staff+OD intent on own client = %d %v, want 200 (staff-scope write preserved)", code, body)
+	}
+}
+
 func TestReminderDashboardAndScan_HTTP(t *testing.T) {
 	srv, done := setupFin(t)
 	defer done()

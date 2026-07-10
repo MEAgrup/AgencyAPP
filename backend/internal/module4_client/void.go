@@ -55,9 +55,17 @@ func (s *Service) VoidService(ctx context.Context, actor permission.Actor, servi
 	}
 	defer tx.Rollback()
 
-	// Prove the service exists (clean 404 instead of the engine's generic error).
+	// Prove the service exists AND its owning client is visible to the actor
+	// (M4 §6, same predicate as Get/List) — clean 404 instead of the engine's
+	// generic error, and closing the gap that otherwise let Account Lead void a
+	// service on a client Account cannot even read yet (pre-release).
+	clause, visArgs, ok := visibility(actor)
+	if !ok {
+		return VoidResult{}, ErrNotFound
+	}
 	var probe string
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM services WHERE id = ?`, serviceID).Scan(&probe); err != nil {
+	probeQ := `SELECT s.id FROM services s JOIN clients c ON c.id = s.client_id WHERE s.id = ? AND (` + clause + `)`
+	if err := tx.QueryRowContext(ctx, probeQ, append([]any{serviceID}, visArgs...)...).Scan(&probe); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return VoidResult{}, ErrNotFound
 		}

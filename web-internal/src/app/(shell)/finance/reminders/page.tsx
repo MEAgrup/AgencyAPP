@@ -6,6 +6,11 @@ import { errorMessage } from '@/lib/api';
 import { getReminders, scanReminders, type RemindersResponse, type ScanResult } from '@/lib/finance';
 import StatusBadge from '@/components/StatusBadge';
 
+// Exact installment status the row-highlight rule targets (M5 §6). A
+// substring match here would also flag '[Belum Jatuh Tempo]' rows, since it
+// contains 'Jatuh Tempo' as a substring.
+const STATUS_JATUH_TEMPO = '[Jatuh Tempo]';
+
 export default function RemindersPage() {
   const [data, setData] = useState<RemindersResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -93,7 +98,7 @@ export default function RemindersPage() {
               </thead>
               <tbody>
                 {data.reminders.map((r) => (
-                  <tr key={r.installment_id} className={r.status.includes('Jatuh Tempo') && r.days_overdue > 0 ? 'flaggedRow' : ''}>
+                  <tr key={r.installment_id} className={r.status === STATUS_JATUH_TEMPO && r.days_overdue > 0 ? 'flaggedRow' : ''}>
                     <td>
                       <Link href={`/clients/${r.client_id}`}>{r.client_id}</Link>
                     </td>

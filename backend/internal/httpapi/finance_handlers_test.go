@@ -158,10 +158,12 @@ func TestVerify_PermissionAndHappyPath(t *testing.T) {
 			map[string]any{"amount": amount, "received_date": "2026-06-03"})
 	}
 
-	// Non-finance denied (Sales owner, Account, OD).
+	// Non-finance denied (Sales owner, Account, OD). This is a pure permission
+	// gate (module5_finance.ErrForbidden), not a transition denial, so it
+	// renders the finance-access message, not statemachine.RoleDeniedMessage.
 	for _, email := range []string{"budi@mea.co.id", "amel@mea.co.id", "odi@mea.co.id"} {
-		if code, body := verify(email, "1000000.00"); code != 403 || body["message"] != statemachine.RoleDeniedMessage {
-			t.Errorf("%s verify = %d %v, want 403 + role-denied", email, code, body)
+		if code, body := verify(email, "1000000.00"); code != 403 || body["message"] != httpapi.MsgFinanceAccessDenied {
+			t.Errorf("%s verify = %d %v, want 403 + %q", email, code, body, httpapi.MsgFinanceAccessDenied)
 		}
 	}
 	// Finance staff verifies -> partial, outstanding recomputed.
@@ -281,5 +283,35 @@ func TestScheme_HTTP(t *testing.T) {
 	if code, _ := do(t, finhead, "POST", srv.URL+"/api/v1/transactions/TRX-CH/scheme",
 		map[string]any{"payment_intent_scheme": "[Termin]", "reason": "klien minta cicil"}); code != 200 {
 		t.Errorf("finance lead scheme = 200 expected")
+	}
+}
+
+// TestLayeredSalesStaffPlusOD_FinanceReadYesWriteNo (FIX6, DoD layered-role
+// coverage): Budi is an ordinary Sales staff account (owns clients) who is
+// ALSO layered OD (auth.ResolveActor overlays OD onto the underlying
+// division/level, it never replaces it). OD's read scope wins for the finance
+// queue; neither the OD layer (read-only) nor the Sales-staff layer (no
+// Module 5 write authority) grants a finance WRITE.
+func TestLayeredSalesStaffPlusOD_FinanceReadYesWriteNo(t *testing.T) {
+	srv, done := setupFin(t)
+	defer done()
+	d := testutil.DB(t)
+	testutil.InsertLayeredRole(t, d, "EMP-BUDI", "od")
+	seedFinTrx(t, "CLI-LSOD", "TRX-LSOD", "[Bayar Sebagian]", "10000000.00", false)
+
+	budi := login(t, srv, "budi@mea.co.id")
+
+	// (b) OD read scope wins: the finance queue is visible despite Budi being
+	// Sales staff, who alone has no Module 5 queue access (M5 §8.1).
+	if code, _ := do(t, budi, "GET", srv.URL+"/api/v1/finance/queue", nil); code != 200 {
+		t.Errorf("layered staff+OD finance queue = %d, want 200", code)
+	}
+
+	// (c) Neither layer grants a finance WRITE — denied with the FIX-4
+	// finance-access message (a pure permission gate, not a transition denial).
+	code, body := do(t, budi, "POST", srv.URL+"/api/v1/transactions/TRX-LSOD/verify",
+		map[string]any{"amount": "1000000.00", "received_date": "2026-06-03"})
+	if code != 403 || body["message"] != httpapi.MsgFinanceAccessDenied {
+		t.Errorf("layered staff+OD verify = %d %v, want 403 %q", code, body, httpapi.MsgFinanceAccessDenied)
 	}
 }
