@@ -66,3 +66,39 @@ Setelah daftar tervalidasi: input via admin MSL (`web-internal /master-services`
 |---|---|---|
 | #1 Endpoint HRIS asli | ❌ (fallback CSV/mock aktif) | ✅ login & sync riil harus jalan |
 | #2 MSL riil | ❌ (seed contoh aktif) | ✅ komisi harus dispot-check vs MSL riil oleh Sales Head |
+
+---
+
+## Permintaan #3 — Sample data migrasi spreadsheet, W1-19 (ke: Yohan — menindaklanjuti DECISIONS O6)
+
+W1-19 = **impor satu kali data operasional existing** (yang sekarang hidup di spreadsheet) ke CDPS saat go-live Wave 1. Dua kelompok data, dua jalur masuk:
+
+1. **Leads existing (belum closing)** → masuk lewat **engine dedup M1** (bukan INSERT langsung): normalisasi telepon, tabel keputusan duplikat (aktif ⇒ ditolak dengan pesan BI; Rejected/Not-Qualified ⇒ reopen ke Pool), audit provenance per baris.
+2. **Klien aktif existing (sudah closing sebelum CDPS)** → dibuat sebagai `CLI-` + `SVC-` + `TRX-` + `INST-` sesuai skema 0002, supaya Finance bisa lanjut menagih termin berjalan (reminder W1-17 langsung hidup) dan Account melihat klien sebagai released.
+
+Proses: **dry-run report dulu** (valid / duplikat / error per baris, rekonsiliasi hitungan) → real run setelah disetujui. Parser dibangun **setelah sample masuk** (keputusan O6) supaya mengikuti bentuk kolom riil — karena itu sample ini jalur kritis.
+
+### Kolom minimum yang dibutuhkan pada sample
+**Sheet LEADS (satu baris = satu lead):**
+`nama_lead, no_telepon, email (ops), sumber (form/scout/dll), campaign_asal (ops), sales_pemegang (ops), status_terakhir (pool/diproses/not-qualified/rejected), catatan (ops)`
+
+**Sheet KLIEN AKTIF (satu baris = satu klien; layanan & termin boleh sheet terpisah ber-key nama klien):**
+`toko, nama_pic, kota, link_toko, kategori, platform_list (+link toko per platform, tanggal mulai dikelola), gmv_baseline_bulanan, target_gmv, marketing_budget (ops), sales_pic, alokasi_sales (nama:% — Σ100%), commission_payment_pic, tanggal_closing, layanan_dibeli (nama + harga deal per layanan), nilai_transaksi_total, skema_pembayaran (Lunas/Sebagian/Termin/Bayar di Belakang), jadwal_termin (amount + due date per termin, Σ = total), pembayaran_terverifikasi (amount + tanggal per pembayaran yang sudah masuk), link_kontrak (ops)`
+
+> Data kotor/tidak lengkap tidak masalah untuk sample — justru dibutuhkan agar dry-run report dan aturan penolakan bisa dirancang realistis. Kirim apa adanya.
+
+## Permintaan #4 — Data & prasyarat UAT W1-20 (ke: Nerissa/Yohan + Sales Head)
+
+W1-20 = **satu deal nyata dijalankan end-to-end** lintas hasil kedua stream: registrasi lead → attempt → Qualified Form → negosiasi (approval SPV) → Closing (generate `CLI-`/`TRX-`/`SVC-`) → Payment Intent → jadwal Termin → verifikasi pembayaran pertama → klien rilis ke antrean Account → reminder installment; komisi di-spot-check manual vs MSL oleh Sales Head. Go/no-go Wave 2 dicatat di DECISIONS.md.
+
+### Yang dibutuhkan
+1. **Prasyarat teknis (internal dev):** PR foundation + PR Akun A (M0/M1, s.d. W1-09 Closing) + PR stream B (#2) ter-merge ke `main`; environment staging dengan MariaDB + migrasi 0001–0012.
+2. **Permintaan #1 & #2 di atas terpenuhi:** endpoint HRIS staging (login & sync karyawan riil, daftar divisi/jabatan riil untuk role mapping) dan **MSL riil tervalidasi** (dasar spot-check komisi).
+3. **Akun peran lengkap** (karyawan riil hasil sync HRIS, ter-mapping): Sales Staff, Sales Head/SPV, Finance Staff, Finance Head/SPV, Account Staff, Account Lead, OD (layered), Director (layered).
+4. **Satu deal riil/realistis:**
+   - Identitas lead (nama, telepon, sumber/campaign).
+   - Data Qualified: identitas klien (toko, PIC, kota, link, kategori), platform list, GMV baseline (rata-rata 3 bulan), Target GMV, Marketing Budget.
+   - Proposal negosiasi: layanan (≤5) + harga (standar/custom) → butuh approval SPV bila custom.
+   - Closing Form: salespeople (≤5) + alokasi Σ100% + Commission & Payment PIC.
+   - Payment Intent + jadwal Termin (amount + due date, Σ = nilai transaksi).
+   - Bukti pembayaran pertama (nominal, tanggal, link bukti transfer) + link kontrak.
