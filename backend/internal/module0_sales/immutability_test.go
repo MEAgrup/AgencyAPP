@@ -2,6 +2,7 @@ package sales_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -72,12 +73,26 @@ func TestImmutability_AuditTrailShape(t *testing.T) {
 			t.Errorf("row %d actor = %q, want %q", i, recs[i].Actor, owner.EmployeeID)
 		}
 	}
-	if string(recs[1].Before) != `{"status":"Pending Validation"}` || string(recs[1].After) != `{"status":"New Lead"}` {
+	// Compare decoded values, not raw bytes: MySQL 8's native JSON type
+	// re-serializes with different whitespace than MariaDB's verbatim TEXT.
+	if jsonStatus(t, recs[1].Before) != "Pending Validation" || jsonStatus(t, recs[1].After) != "New Lead" {
 		t.Errorf("row 1 before/after = %s -> %s", recs[1].Before, recs[1].After)
 	}
-	if string(recs[2].Before) != `{"status":"New Lead"}` || string(recs[2].After) != `{"status":"Contacted"}` {
+	if jsonStatus(t, recs[2].Before) != "New Lead" || jsonStatus(t, recs[2].After) != "Contacted" {
 		t.Errorf("row 2 before/after = %s -> %s", recs[2].Before, recs[2].After)
 	}
+}
+
+// jsonStatus decodes a {"status": ...} audit payload and returns the status.
+func jsonStatus(t *testing.T, raw []byte) string {
+	t.Helper()
+	var v struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatalf("unmarshal audit payload %s: %v", raw, err)
+	}
+	return v.Status
 }
 
 // TestImmutability_BlockedTransitionZeroSideEffects proves a rejected
