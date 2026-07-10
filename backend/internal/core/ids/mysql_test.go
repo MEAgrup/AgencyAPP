@@ -71,7 +71,9 @@ func TestNext_MonthRollover(t *testing.T) {
 	ctx := context.Background()
 	gen := ids.NewMySQL()
 
-	jul, err := gen.Next(ctx, conn, ids.PrefixClient, time.Date(2026, time.July, 31, 23, 59, 0, 0, time.UTC))
+	// Times chosen so their WIB (UTC+7) period is unambiguous: 12:00Z on
+	// Jul 31 is 19:00 WIB (still July); 00:00Z on Aug 1 is 07:00 WIB (August).
+	jul, err := gen.Next(ctx, conn, ids.PrefixClient, time.Date(2026, time.July, 31, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("july: %v", err)
 	}
@@ -84,6 +86,24 @@ func TestNext_MonthRollover(t *testing.T) {
 	}
 	if want := "CLI-202608-0001"; aug != want {
 		t.Fatalf("august id = %q, want %q (rollover must restart)", aug, want)
+	}
+}
+
+// TestNext_PeriodZoneWIB pins the docs/DECISIONS.md O10 behavior: the period
+// is evaluated in WIB (UTC+7), so an instant late on Jul 31 UTC that has
+// already crossed midnight in WIB gets the August period.
+func TestNext_PeriodZoneWIB(t *testing.T) {
+	conn := testdb.New(t)
+	ctx := context.Background()
+	gen := ids.NewMySQL()
+
+	// 2026-07-31T18:30:00Z == 2026-08-01 01:30 WIB → period must be 202608.
+	got, err := gen.Next(ctx, conn, ids.PrefixClient, time.Date(2026, time.July, 31, 18, 30, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	if want := "CLI-202608-0001"; got != want {
+		t.Fatalf("WIB-boundary id = %q, want %q", got, want)
 	}
 }
 

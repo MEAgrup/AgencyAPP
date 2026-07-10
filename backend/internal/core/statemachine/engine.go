@@ -2,15 +2,23 @@ package statemachine
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/meagrup/agencyapp/backend/internal/core/audit"
 	"github.com/meagrup/agencyapp/backend/internal/core/db"
 	"github.com/meagrup/agencyapp/backend/internal/core/events"
 )
+
+// ActorSystem is the sentinel actor for system/batch/cascade-driven work. It
+// is the ONLY actor permitted to take an Auto edge (see Transition.Auto); any
+// other actor is blocked. Auto/batch jobs must set TransitionRequest.Actor to
+// this exact string.
+const ActorSystem = "system"
 
 // ErrActorRequired is returned (before any side effect) when a transition or
 // flag change is attempted without an actor. Actor is mandatory across CDPS
@@ -43,6 +51,7 @@ func (e *BlockedError) Error() string { return e.Message }
 const (
 	reasonNotAllowed = "not_allowed"
 	reasonRoleDenied = "role_denied"
+	reasonAutoOnly   = "auto_only" // Auto edge attempted by a non-system actor
 )
 
 // Store persists the authoritative status for an entity. In later waves the
@@ -72,11 +81,19 @@ type Engine struct {
 	flags FlagStore
 	audit audit.Logger
 	bus   events.Bus
+
+	// pending buffers events produced inside a caller-owned *sql.Tx until that
+	// tx commits, so a notification (published via the Center's own connection)
+	// can never describe a transition the caller later rolled back. Keyed by
+	// the *sql.Tx pointer; drained by PublishPending / discarded by DropPending
+	// (both driven by InTx for the recommended entry point). mu guards it.
+	mu      sync.Mutex
+	pending map[*sql.Tx][]events.Event
 }
 
 // New builds an Engine. flags may be nil if the caller never uses flag APIs.
 func New(store Store, flags FlagStore, logger audit.Logger, bus events.Bus) *Engine {
-	return &Engine{store: store, flags: flags, audit: logger, bus: bus}
+	return &Engine{store: store, flags: flags, audit: logger, bus: bus, pending: map[*sql.Tx][]events.Event{}}
 }
 
 // TransitionRequest describes one status change.
@@ -102,9 +119,22 @@ func mustJSON(v any) json.RawMessage {
 }
 
 // Transition validates req against the entity's machine and, on success,
-// atomically (within q) writes the new status, appends one immutable audit
-// row, and publishes one event. On a blocked transition it returns a
-// *BlockedError and changes nothing.
+// writes the new status, appends one immutable audit row, and publishes one
+// event. On a blocked transition it returns a *BlockedError and changes
+// nothing.
+//
+// Transaction contract: q may be a *sql.DB or a *sql.Tx.
+//   - *sql.DB: the status write, audit row and event all happen immediately;
+//     the event is published on the bus synchronously before Transition
+//     returns.
+//   - *sql.Tx: the status write and audit row go through the tx (so they
+//     commit/roll back atomically with the caller's work), but the event is
+//     BUFFERED, not published, because notification fan-out (notify.Center)
+//     writes via its own connection and must not observe a transition the
+//     caller later rolls back. The caller MUST drain the buffer AFTER
+//     committing (PublishPending) or discard it on rollback (DropPending).
+//     Use Engine.InTx to get this right automatically -- it is the
+//     recommended Wave-1 entry point.
 func (e *Engine) Transition(ctx context.Context, q db.Queryer, req TransitionRequest) error {
 	m, ok := machines[req.EntityType]
 	if !ok {
@@ -125,6 +155,11 @@ func (e *Engine) Transition(ctx context.Context, q db.Queryer, req TransitionReq
 		// (they have no outgoing edges), which is exactly the desired "no
 		// transition out of a terminal state" behaviour.
 		return &BlockedError{Entity: req.EntityType, From: from, To: req.To, Message: m.BlockMsg, Reason: reasonNotAllowed}
+	}
+	// Auto edges are system/cascade-only: only the system actor may take them.
+	// A human/role actor is blocked here with ZERO side effects.
+	if t.Auto && req.Actor != ActorSystem {
+		return &BlockedError{Entity: req.EntityType, From: from, To: req.To, Message: m.BlockMsg, Reason: reasonAutoOnly}
 	}
 	if len(t.Roles) > 0 && !hasAnyRole(req.ActorRoles, t.Roles) {
 		return &BlockedError{Entity: req.EntityType, From: from, To: req.To, Message: m.BlockMsg, Reason: reasonRoleDenied}
@@ -154,7 +189,7 @@ func (e *Engine) Transition(ctx context.Context, q db.Queryer, req TransitionReq
 	for k, v := range req.Payload {
 		payload[k] = v
 	}
-	e.bus.Publish(ctx, events.Event{
+	e.emit(ctx, q, events.Event{
 		Name:       name,
 		EntityType: string(req.EntityType),
 		EntityID:   req.EntityID,
@@ -162,6 +197,70 @@ func (e *Engine) Transition(ctx context.Context, q db.Queryer, req TransitionReq
 		At:         time.Now().UTC(),
 		Payload:    payload,
 	})
+	return nil
+}
+
+// emit publishes evt immediately when q is not a *sql.Tx, or buffers it
+// against the tx (to be drained by PublishPending after commit) when it is.
+func (e *Engine) emit(ctx context.Context, q db.Queryer, evt events.Event) {
+	if tx, ok := q.(*sql.Tx); ok {
+		e.mu.Lock()
+		if e.pending == nil {
+			e.pending = map[*sql.Tx][]events.Event{}
+		}
+		e.pending[tx] = append(e.pending[tx], evt)
+		e.mu.Unlock()
+		return
+	}
+	e.bus.Publish(ctx, evt)
+}
+
+// PublishPending publishes and clears every event buffered against tx. Call it
+// AFTER the tx has committed successfully. It is safe to call for a tx that
+// buffered nothing (no-op). InTx calls this for you.
+func (e *Engine) PublishPending(ctx context.Context, tx *sql.Tx) {
+	e.mu.Lock()
+	evts := e.pending[tx]
+	delete(e.pending, tx)
+	e.mu.Unlock()
+	for _, evt := range evts {
+		e.bus.Publish(ctx, evt)
+	}
+}
+
+// DropPending discards every event buffered against tx WITHOUT publishing.
+// Call it when the tx rolls back (or its commit fails), so a rolled-back
+// transition never produces a notification. InTx calls this for you.
+func (e *Engine) DropPending(tx *sql.Tx) {
+	e.mu.Lock()
+	delete(e.pending, tx)
+	e.mu.Unlock()
+}
+
+// InTx is the recommended entry point for a transactional transition. It
+// begins a tx on conn, runs fn (which should call Transition/SetFlag with the
+// supplied tx), and then:
+//   - on fn error: rolls back and discards any buffered events (DropPending);
+//   - on commit error: discards buffered events too;
+//   - on success: commits, THEN publishes the buffered events (PublishPending).
+//
+// This guarantees notifications fire only for transitions that actually
+// committed, and only after they are durable.
+func (e *Engine) InTx(ctx context.Context, conn *sql.DB, fn func(tx *sql.Tx) error) error {
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if err := fn(tx); err != nil {
+		_ = tx.Rollback()
+		e.DropPending(tx)
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		e.DropPending(tx)
+		return err
+	}
+	e.PublishPending(ctx, tx)
 	return nil
 }
 
@@ -229,7 +328,7 @@ func (e *Engine) applyFlag(ctx context.Context, q db.Queryer, req FlagRequest, s
 	}); err != nil {
 		return err
 	}
-	e.bus.Publish(ctx, events.Event{
+	e.emit(ctx, q, events.Event{
 		Name:       string(req.EntityType) + "." + action,
 		EntityType: string(req.EntityType),
 		EntityID:   req.EntityID,

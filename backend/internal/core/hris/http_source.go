@@ -24,10 +24,9 @@ type HTTPSource struct {
 	HTTPClient *http.Client
 	// PageSize defaults to 100 when <= 0.
 	PageSize int
-
-	// maxPages guards against a misbehaving server looping forever; 0 means
-	// use the package default.
-	maxPages int
+	// MaxPages guards against a misbehaving server looping forever; 0 (or <= 0)
+	// means use the package default (defaultMaxPages).
+	MaxPages int
 }
 
 const (
@@ -62,7 +61,7 @@ func (h *HTTPSource) Fetch(ctx context.Context, updatedSince time.Time) ([]Emplo
 	if pageSize <= 0 {
 		pageSize = defaultPageSize
 	}
-	maxPages := h.maxPages
+	maxPages := h.MaxPages
 	if maxPages <= 0 {
 		maxPages = defaultMaxPages
 	}

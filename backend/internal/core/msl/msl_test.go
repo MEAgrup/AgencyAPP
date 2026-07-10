@@ -224,9 +224,15 @@ func TestListAndGetEntry_ReadOpenToAuthenticatedRoles(t *testing.T) {
 		t.Fatalf("expected 1 entry, got %d", len(list))
 	}
 
-	// Unmapped/unauthenticated identity denied even for reads.
+	// Unmapped/unauthenticated identity denied even for reads, with the same
+	// typed authz denial the write path returns.
 	unmapped := authz.Identity{EmployeeID: "EMP-404"}
 	if _, err := msl.GetEntry(ctx, conn, unmapped, entry.ID); err == nil {
 		t.Fatal("expected unmapped identity to be denied read access")
+	} else if !errors.Is(err, authz.ErrDenied) {
+		t.Fatalf("expected authz.ErrDenied on read, got %v", err)
+	}
+	if _, err := msl.ListEntries(ctx, conn, unmapped); !errors.Is(err, authz.ErrDenied) {
+		t.Fatalf("expected authz.ErrDenied on list, got %v", err)
 	}
 }

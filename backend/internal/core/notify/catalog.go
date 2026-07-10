@@ -90,6 +90,38 @@ func (c *Catalog) Lookup(name string) (CatalogEntry, bool) {
 	return entry, ok
 }
 
+// Replace overwrites an already-registered entry in place, keyed by
+// EventName. Unlike Register it REQUIRES the event to be present already and
+// errors if it is not -- this is the sanctioned way for an owning module to
+// swap a DefaultCatalog notYetWired placeholder for a real resolver/render
+// once its tables exist, without the "already registered" error Register
+// would raise. The replacement is validated like any other entry.
+func (c *Catalog) Replace(entry CatalogEntry) error {
+	if err := entry.validate(); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, exists := c.entries[entry.EventName]; !exists {
+		return fmt.Errorf("notify: event %q not registered; use Register to add it", entry.EventName)
+	}
+	c.entries[entry.EventName] = entry
+	return nil
+}
+
+// EventNames returns every registered event name (unordered). It exists so
+// other packages/tests can cross-check that the event slugs they publish are
+// actually cataloged here (e.g. the statemachine per-edge Event overrides).
+func (c *Catalog) EventNames() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	out := make([]string, 0, len(c.entries))
+	for name := range c.entries {
+		out = append(out, name)
+	}
+	return out
+}
+
 // notYetWired is the RecipientResolver for catalog entries whose recipient
 // rule needs data owned by a module that has not been built yet (Sprint 0
 // ships only the core engines -- M0/M5/M6/M9/M10/M11/M12/M13/M14 tables do
@@ -145,9 +177,10 @@ func staticRender(title string) RenderFunc {
 //     yet, so there is no table/entity this package can honestly query to
 //     resolve "Superior (Sales Head/SPV)", "AM + SPV Account", "KOL Lead",
 //     etc. Do not fill these in from this package; the owning module should
-//     call Catalog.Register again with a real resolver once it has the data
-//     (Catalog has no in-place "replace" -- see Center for a re-registration
-//     helper note).
+//     call Catalog.Replace (or Center.Replace) with a real resolver once it
+//     has the data -- Replace swaps an existing entry in place, which is what
+//     an owning module wants instead of Register (Register would error on the
+//     already-present EventName).
 func DefaultCatalog() *Catalog {
 	c := NewCatalog()
 	for _, entry := range defaultEntries() {

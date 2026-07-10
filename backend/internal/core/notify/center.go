@@ -92,6 +92,13 @@ func (c *Center) Register(entry CatalogEntry) error {
 	return c.catalog.Register(entry)
 }
 
+// Replace overwrites an already-registered catalog entry in place. See
+// Catalog.Replace -- this is how an owning module swaps a DefaultCatalog
+// notYetWired placeholder for a real resolver once its tables exist.
+func (c *Center) Replace(entry CatalogEntry) error {
+	return c.catalog.Replace(entry)
+}
+
 // Subscribe wires the Center into bus: every published event is checked
 // against the catalog, and cataloged events fan out into one notification
 // row per resolved recipient using q for all writes. Uncataloged events are

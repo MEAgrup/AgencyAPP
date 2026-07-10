@@ -180,12 +180,16 @@ type Transition struct {
 	// Roles, when non-empty, restricts this edge to actors holding at least
 	// one of these CDPS roles. Empty = any authenticated actor may perform it.
 	Roles []Role
-	// Auto marks a system/batch/cascade-driven edge (actor usually "system",
-	// e.g. due-date rollover, void cascade, pool-competition auto-close). The
-	// engine does not yet special-case Auto; it is recorded for later waves.
+	// Auto marks a system/batch/cascade-driven edge (e.g. due-date rollover,
+	// void cascade, pool-competition auto-close). The engine ENFORCES this:
+	// an Auto edge may only be taken by the system actor (ActorSystem); a
+	// human/role actor attempting it is blocked (BlockedError, reason
+	// "auto_only") with zero side effects.
 	Auto bool
-	// Event, when set, overrides Machine.EventName for this edge. Reserved for
-	// wiring the Phase 0 v2 §9 notification catalog in a later wave.
+	// Event, when non-empty, overrides Machine.EventName for the event the
+	// engine publishes on this edge. Used to fire a specific Phase 0 v2 §9
+	// notification-catalog slug (see backend/internal/core/notify) instead of
+	// the machine-generic name.
 	Event string
 	// Note documents non-obvious edges / flagged interpretations inline.
 	Note string
@@ -304,14 +308,14 @@ func prospectMachine() *Machine {
 			{From: ProspectNewLead, To: ProspectContacted},
 			{From: ProspectContacted, To: ProspectQualified, Note: "only via successful Qualified Form submit"},
 			{From: ProspectContacted, To: ProspectNotQualified},
-			{From: ProspectQualified, To: ProspectNegPendingApprove},
+			{From: ProspectQualified, To: ProspectNegPendingApprove, Event: "m0.negotiation.pending_approval_submitted"},
 			{From: ProspectQualified, To: ProspectNegAutoApproved, Note: "no-negotiation path"},
 			// Negotiation decisions are the Superior's call (PERMISSIONS M0: Sales Head/SPV only).
-			{From: ProspectNegPendingApprove, To: ProspectNegApproved, Roles: leadOnly},
-			{From: ProspectNegPendingApprove, To: ProspectNegRevisionReq, Roles: leadOnly},
-			{From: ProspectNegPendingApprove, To: ProspectNegRejected, Roles: leadOnly},
+			{From: ProspectNegPendingApprove, To: ProspectNegApproved, Roles: leadOnly, Event: "m0.negotiation.decision"},
+			{From: ProspectNegPendingApprove, To: ProspectNegRevisionReq, Roles: leadOnly, Event: "m0.negotiation.decision"},
+			{From: ProspectNegPendingApprove, To: ProspectNegRejected, Roles: leadOnly, Event: "m0.negotiation.decision"},
 			{From: ProspectNegRevisionReq, To: ProspectNegApproved, Roles: leadOnly, Note: "accept revision"},
-			{From: ProspectNegRevisionReq, To: ProspectNegPendingApprove, Note: "resubmit, new version (salesperson)"},
+			{From: ProspectNegRevisionReq, To: ProspectNegPendingApprove, Event: "m0.negotiation.pending_approval_submitted", Note: "resubmit, new version (salesperson)"},
 			// Closing only from Approved / Auto Approved.
 			{From: ProspectNegApproved, To: ProspectClosedSuccess},
 			{From: ProspectNegAutoApproved, To: ProspectClosedSuccess},
@@ -465,7 +469,7 @@ func creatorBookingMachine() *Machine {
 			{From: BkgContentSubmitted, To: BkgQCReview},
 			{From: BkgQCReview, To: BkgQCPassed},
 			{From: BkgQCReview, To: BkgQCFailedRev},
-			{From: BkgQCReview, To: BkgEscalated, Note: "FLAGGED: resolution target of Escalated unspecified"},
+			{From: BkgQCReview, To: BkgEscalated, Event: "m9.qc_or_booking.escalated", Note: "FLAGGED: resolution target of Escalated unspecified"},
 			{From: BkgQCReview, To: BkgDropped},
 			{From: BkgQCFailedRev, To: BkgContentSubmitted, Note: "creator fixes; counter +1; cap per M9"},
 		},
@@ -503,7 +507,7 @@ func liveStreamSessionMachine() *Machine {
 			{From: LssRequested, To: LssConfirmedByVendor},
 			{From: LssConfirmedByVendor, To: LssCompleted, Note: "result fields + Vendor Report Link mandatory"},
 			{From: LssCompleted, To: LssReconciled},
-			{From: LssCompleted, To: LssDiscrepancy, Note: "notes mandatory; SPV notified real-time"},
+			{From: LssCompleted, To: LssDiscrepancy, Event: "m10.session.discrepancy_flagged", Note: "notes mandatory; SPV notified real-time"},
 			{From: LssDiscrepancy, To: LssReconciled, Note: "non-blocking; may later reconcile"},
 		},
 	}

@@ -26,10 +26,23 @@
 ### Cara menjalankan
 Lihat `docs/DEV_ENVIRONMENT.md`. Ringkas: MySQL/MariaDB lokal → `make migrate-up` → `make seed` → `make test`. Test DB-bound membuat database terisolasi per run dan skip bila DB tak tersedia.
 
-### Keputusan & pertanyaan terbuka yang lahir dari sesi ini
-- **Decided (dev-level):** baris 2026-07-10 di `docs/DECISIONS.md` (trigger immutability, MSL full-snapshot, dsb.) — perlu review Yohan.
-- **Open baru: O10–O17** di `docs/DECISIONS.md` — paling penting sebelum Wave 1: **O10** (timezone `YYYYMM` ID), **O11/O12** (sumber `Closed-Lost` & source-set `[Closed - Kalah Kompetisi]`), **O15** (konfirmasi slug event notifikasi), **O16** (recipient event ops HRIS sync).
-- Commission rule di seed MSL adalah placeholder `{"type":"pending_master_list"}` — menunggu daftar tervalidasi Sales Head (Build Plan R3). Wave 1 W1-06 TIDAK boleh menghitung komisi dari placeholder ini.
+### Code review Sprint 0 (2026-07-10, high-effort, 8 finder + verify)
+22 kandidat → 12 dilaporkan. **Diperbaiki di commit review-fix:**
+- **Auto-edge enforcement** (statemachine): edge `Auto` (Void cascade, intake-collision, Jatuh Tempo, Kalah Kompetisi) kini hanya boleh oleh aktor `"system"` — sebelumnya staff mana pun bisa memicunya.
+- **Event override** per edge state-machine agar slug katalog notifikasi (m0/m9/m10) benar-benar terpicu — sebelumnya nama event generik tak pernah match katalog.
+- **Notifikasi transaksional**: `Engine.InTx` + buffer pending-event → publish HANYA setelah commit; rollback membuang event (tidak ada notifikasi phantom).
+- **notify `Catalog.Replace`**: modul Wave-1 bisa mengganti resolver placeholder `notYetWired` tanpa membangun ulang katalog.
+- **ID bulan = WIB** (O10): `ids.PeriodZone` UTC+7 sebelum format `YYYYMM`.
+- **db.WithParams**: perbaiki bug `&parseTime` di cmd/seed (DSN tanpa `?` merusak nama DB) + multiStatements di cmd/migrate.
+- **hris flagMissing** kini revoke session karyawan yang hilang dari full-sync; **sync ditulis ke audit log** (opsional `Syncer.Audit`, di-wire di seed).
+- **msl read** mengembalikan `authz.DeniedError`, bukan pesan validasi field.
+- **authz HTTP middleware** (S0-08 AC) + **testdb down-migration test** (CI kini menguji `.down.sql`) + `HTTPSource.MaxPages` diexport.
+- **Cleanup ditunda** (dicatat, non-blocking): shared `audittest` fake (3 fake audit.Logger drift), batch upsert syncer & batch insert notify (N+1 di skala 100+), helper audit-append bersama, dimensi Field/Stage di `authz.Request` untuk lock-matrix W1-11 (aditif, kerjakan saat M4), `msl.Store` pakai `*sql.DB` bukan `db.Queryer` (perlu Queryer untuk closing atomik W1-09), `Resolver` interface single-impl, loop parse CSV.
+
+### Keputusan & pertanyaan terbuka
+- **Decided baru (2026-07-10, Yohan):** O1 (`SVC-YYYYMM-NNNN`), O10 (ID bulan WIB), O11 (`Closed-Lost` hanya dari `Negotiation - Rejected`), O15 (14 slug event notifikasi kanonik). Lihat `docs/DECISIONS.md`.
+- **Masih Open** menandai wave berikut: **O12** (source-set Kalah Kompetisi — Wave 1 W1-03), **O16** (recipient event ops HRIS — S0-12), **O17** (`audit.Entry.At` wajib?), O13/O14 (Wave 2 M6/M9).
+- Commission rule di seed MSL = placeholder `{"type":"pending_master_list"}` — menunggu daftar tervalidasi Sales Head (Build Plan R3). Wave 1 W1-06 TIDAK boleh menghitung komisi dari placeholder ini.
 
 ### Langkah berikutnya (jalur 1/A)
 1. **S0-12** exit review (manusia) + go/no-go Wave 1.

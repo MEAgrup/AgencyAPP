@@ -214,6 +214,64 @@ func TestCenter_MarkReadOnAnotherUsersNotificationFails(t *testing.T) {
 	}
 }
 
+// TestCenter_ReplaceWiresRealResolverAndNotificationLands proves an owning
+// module can swap a DefaultCatalog notYetWired placeholder for a real
+// resolver via Center.Replace, after which the event fans out to a real
+// notification row. It also checks Replace of an unknown event errors.
+func TestCenter_ReplaceWiresRealResolverAndNotificationLands(t *testing.T) {
+	conn := testdb.New(t)
+	ctx := context.Background()
+
+	center := NewCenter(DefaultCatalog())
+
+	// Replacing an event that was never registered must error (use Register).
+	if err := center.Replace(CatalogEntry{
+		EventName:  "does.not.exist",
+		Recipients: func(context.Context, db.Queryer, events.Event) ([]string, error) { return []string{"EMP-000001"}, nil },
+		Render:     func(events.Event) (string, string, string) { return "t", "b", "" },
+	}); err == nil {
+		t.Fatal("expected Replace of unregistered event to error")
+	}
+
+	const eventName = "m9.qc_or_booking.escalated" // a real DefaultCatalog placeholder
+	if err := center.Replace(CatalogEntry{
+		EventName:   eventName,
+		Module:      "M9",
+		Description: "wired for test",
+		Recipients: func(ctx context.Context, q db.Queryer, e events.Event) ([]string, error) {
+			return []string{"EMP-000042"}, nil
+		},
+		Render: func(e events.Event) (title, body, deepLink string) {
+			return "Booking escalated", "b", "/booking/" + e.EntityID
+		},
+	}); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+
+	bus := events.NewInMemoryBus()
+	center.Subscribe(bus, conn)
+	bus.Publish(ctx, events.Event{
+		Name:       eventName,
+		EntityType: "creator_booking",
+		EntityID:   "BKG-202607-0001",
+		At:         time.Now().UTC(),
+	})
+
+	inbox, err := center.Inbox(ctx, conn, "EMP-000042", false, 10, 0)
+	if err != nil {
+		t.Fatalf("inbox: %v", err)
+	}
+	if len(inbox) != 1 {
+		t.Fatalf("expected 1 notification after Replace-wired resolver, got %d", len(inbox))
+	}
+	if inbox[0].Title != "Booking escalated" {
+		t.Errorf("title = %q, want %q", inbox[0].Title, "Booking escalated")
+	}
+	if inbox[0].EventName != eventName {
+		t.Errorf("event name = %q, want %q", inbox[0].EventName, eventName)
+	}
+}
+
 func TestNotifications_DirectDeleteIsBlockedByTrigger(t *testing.T) {
 	conn := testdb.New(t)
 	ctx := context.Background()

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/meagrup/agencyapp/backend/internal/core/audit"
 	"github.com/meagrup/agencyapp/backend/internal/core/hris"
 	"github.com/meagrup/agencyapp/backend/internal/core/testdb"
 )
@@ -252,6 +253,14 @@ func testFullSyncFlagsMissing(t *testing.T, newSource sourceFactory) {
 		t.Fatalf("initial full sync: %v", err)
 	}
 
+	// EMP-0002 has a live session; when they vanish from the sync their CDPS
+	// access must be revoked (an HRIS-removed employee loses access next sync).
+	tokenHash := strings.Repeat("b", 64)
+	insertSession(t, db, "EMP-0002", tokenHash)
+	if sessionRevoked(t, db, tokenHash) {
+		t.Fatalf("session revoked before employee went missing")
+	}
+
 	// EMP-0002 disappears from a subsequent full sync payload.
 	dir.set([]hris.Employee{
 		{EmployeeID: "EMP-0001", Nama: "Sinta", Email: "sinta@mea.co.id", Divisi: "Account", Jabatan: "AM", StatusAktif: true, UpdatedAt: mustTime(t, "2026-07-01T08:00:00Z")},
@@ -262,6 +271,9 @@ func testFullSyncFlagsMissing(t *testing.T, newSource sourceFactory) {
 	}
 	if res.FlaggedMissing != 1 {
 		t.Fatalf("expected exactly 1 newly flagged employee, got %+v", res)
+	}
+	if !sessionRevoked(t, db, tokenHash) {
+		t.Fatalf("session of missing employee was not revoked")
 	}
 
 	row := fetchEmployee(t, db, "EMP-0002")
@@ -305,6 +317,69 @@ func testFullSyncFlagsMissing(t *testing.T, newSource sourceFactory) {
 	row = fetchEmployee(t, db, "EMP-0002")
 	if row.MissingFromSync {
 		t.Fatalf("EMP-0002 should no longer be flagged missing after reappearing: %+v", row)
+	}
+}
+
+// TestSyncerAudits verifies FIX 4 (CLAUDE.md convention #3): a Syncer wired
+// with an Audit logger appends one history row per employee-row mutation, and
+// an unchanged re-sync appends none.
+func TestSyncerAudits(t *testing.T) {
+	db := testdb.New(t)
+	dir := newFakeDirectory(
+		hris.Employee{EmployeeID: "EMP-0001", Nama: "Sinta", Email: "sinta@mea.co.id", Divisi: "Account", Jabatan: "AM", StatusAktif: true, UpdatedAt: mustTime(t, "2026-07-01T08:00:00Z")},
+		hris.Employee{EmployeeID: "EMP-0002", Nama: "Budi", Email: "budi@mea.co.id", Divisi: "Creative", Jabatan: "Designer", StatusAktif: true, UpdatedAt: mustTime(t, "2026-07-01T09:00:00Z")},
+	)
+	src := newCSVSourceFor(t, dir)
+	logger := audit.NewMySQL()
+	syncer := &hris.Syncer{DB: db, Audit: logger}
+	ctx := context.Background()
+
+	countEmployeeAudit := func() int {
+		recs, err := logger.List(ctx, db, audit.Filter{EntityType: "employee", Limit: 1000})
+		if err != nil {
+			t.Fatalf("list audit: %v", err)
+		}
+		return len(recs)
+	}
+	countAction := func(action string) int {
+		recs, err := logger.List(ctx, db, audit.Filter{EntityType: "employee", Action: action, Limit: 1000})
+		if err != nil {
+			t.Fatalf("list audit: %v", err)
+		}
+		return len(recs)
+	}
+
+	if _, err := syncer.Sync(ctx, src, time.Time{}); err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+	if got := countEmployeeAudit(); got != 2 {
+		t.Fatalf("first sync of 2 employees should append 2 audit rows, got %d", got)
+	}
+	if got := countAction("create"); got != 2 {
+		t.Fatalf("expected 2 create audit rows, got %d", got)
+	}
+
+	// Unchanged re-sync: no mutations, so no new audit rows.
+	if _, err := syncer.Sync(ctx, src, time.Time{}); err != nil {
+		t.Fatalf("second sync: %v", err)
+	}
+	if got := countEmployeeAudit(); got != 2 {
+		t.Fatalf("unchanged re-sync must append no audit rows, total = %d", got)
+	}
+
+	// One field change → exactly one "update" audit row.
+	dir.set([]hris.Employee{
+		{EmployeeID: "EMP-0001", Nama: "Sinta Rahma", Email: "sinta@mea.co.id", Divisi: "Account", Jabatan: "AM", StatusAktif: true, UpdatedAt: mustTime(t, "2026-07-05T08:00:00Z")},
+		{EmployeeID: "EMP-0002", Nama: "Budi", Email: "budi@mea.co.id", Divisi: "Creative", Jabatan: "Designer", StatusAktif: true, UpdatedAt: mustTime(t, "2026-07-01T09:00:00Z")},
+	})
+	if _, err := syncer.Sync(ctx, src, time.Time{}); err != nil {
+		t.Fatalf("update sync: %v", err)
+	}
+	if got := countAction("update"); got != 1 {
+		t.Fatalf("expected 1 update audit row, got %d", got)
+	}
+	if got := countEmployeeAudit(); got != 3 {
+		t.Fatalf("expected 3 total employee audit rows, got %d", got)
 	}
 }
 

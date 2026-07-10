@@ -62,19 +62,26 @@ var _ Generator = (*MySQL)(nil)
 const nextSeqStmt = "INSERT INTO id_sequences (prefix, period, seq) VALUES (?, ?, LAST_INSERT_ID(1)) " +
 	"ON DUPLICATE KEY UPDATE seq = LAST_INSERT_ID(seq + 1)"
 
+// PeriodZone is the business timezone (WIB, UTC+7) in which the id period
+// (YYYYMM) month boundary is evaluated, per docs/DECISIONS.md O10 (approved by
+// Yohan 2026-07-10). A fixed-offset zone is used deliberately so id generation
+// carries no tzdata dependency.
+var PeriodZone = time.FixedZone("WIB", 7*3600)
+
 // Next issues the next id for prefix at business time at, formatted as
 // PREFIX-YYYYMM-NNNN. NNNN is zero-padded to a minimum of 4 digits; once the
 // monthly sequence passes 9999 the numeric part simply grows (10000, ...),
 // preserving ordering — it is never truncated or reset within the month.
 //
-// The period (YYYYMM) is taken from at as passed by the caller; Next performs
-// no timezone conversion, so callers are responsible for supplying at in the
-// business timezone they want the month boundary evaluated in.
+// The period (YYYYMM) is derived from at converted into PeriodZone (WIB),
+// so the month boundary is always evaluated in MEA's business timezone
+// regardless of the location carried by the caller-supplied at
+// (docs/DECISIONS.md O10).
 func (MySQL) Next(ctx context.Context, q db.Queryer, prefix string, at time.Time) (string, error) {
 	if _, ok := registry[prefix]; !ok {
 		return "", fmt.Errorf("%w: %q", ErrUnknownPrefix, prefix)
 	}
-	period := at.Format("200601")
+	period := at.In(PeriodZone).Format("200601")
 
 	res, err := q.ExecContext(ctx, nextSeqStmt, prefix, period)
 	if err != nil {

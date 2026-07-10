@@ -120,7 +120,7 @@ func seedEmployees(ctx context.Context, conn *sql.DB) error {
 	src := &hris.CSVSource{Open: func() (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader(string(employeesCSV))), nil
 	}}
-	syncer := &hris.Syncer{DB: conn, Bus: events.NewInMemoryBus()}
+	syncer := &hris.Syncer{DB: conn, Bus: events.NewInMemoryBus(), Audit: audit.NewMySQL()}
 	if _, err := syncer.Sync(ctx, src, time.Time{}); err != nil {
 		return fmt.Errorf("employee sync: %w", err)
 	}

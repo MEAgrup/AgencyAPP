@@ -87,6 +87,14 @@ func (s *Store) requireSalesWrite(actor authz.Identity) error {
 	return s.checker.Check(actor, authz.Request{Action: authz.ActionWrite, Division: DivisiSales})
 }
 
+// readDenied returns the typed authz denial for an unauthenticated/unmapped
+// identity on the read path, so callers can errors.Is(err, authz.ErrDenied)
+// exactly as they do for write denials (rather than string-matching a
+// mandatory-field validation message that never applied to reads).
+func readDenied(actor authz.Identity) error {
+	return &authz.DeniedError{EmployeeID: actor.EmployeeID, Reason: "unmapped identity has no read access to the Master Service List"}
+}
+
 // CreateInput is the payload for CreateEntry; all fields are mandatory.
 type CreateInput struct {
 	Name           string
@@ -266,10 +274,11 @@ func (s *Store) DeactivateEntry(ctx context.Context, conn *sql.DB, actor authz.I
 
 // GetEntry reads the current header row. Reads are open to any
 // authenticated internal role (Phase 0 §10 -- ownership restricts writes,
-// not reads); an unmapped/unauthenticated Identity is denied.
+// not reads); an unmapped/unauthenticated Identity is denied with the same
+// typed authz denial the write path returns (errors.Is(err, authz.ErrDenied)).
 func GetEntry(ctx context.Context, q db.Queryer, actor authz.Identity, entryID int64) (*ServiceEntry, error) {
 	if !actor.Authenticated() {
-		return nil, validationErr()
+		return nil, readDenied(actor)
 	}
 	var e ServiceEntry
 	var active bool
@@ -287,10 +296,11 @@ func GetEntry(ctx context.Context, q db.Queryer, actor authz.Identity, entryID i
 }
 
 // ListEntries reads every current header row, any authenticated internal
-// role.
+// role. An unmapped/unauthenticated Identity is denied with the same typed
+// authz denial the write path returns (errors.Is(err, authz.ErrDenied)).
 func ListEntries(ctx context.Context, q db.Queryer, actor authz.Identity) ([]ServiceEntry, error) {
 	if !actor.Authenticated() {
-		return nil, validationErr()
+		return nil, readDenied(actor)
 	}
 	rows, err := q.QueryContext(ctx, `SELECT id, name, active, created_at, created_by FROM service_entries ORDER BY id`)
 	if err != nil {
