@@ -85,11 +85,23 @@ via admin MSL / seed CSV.
 
 ## 5. Ringkasan aksi terbuka
 
-| # | Aksi | Siapa |
-|---|---|---|
-| 1 | Share sheet `19pfVwm…` ("daily lead" / "prospek dan closing") ke akun Google konektor sesi | Yohan |
-| 2 | Putuskan O22 (impor lead historis: per-lead dari sheet #1, atau hanya prospek berjalan, atau skip) | Yohan + Nerissa |
-| 3 | Putuskan O23 (definisi klien aktif, mapping skema DP/Monthly/Deposit, form pelengkap field wajib, basis TRX) | Nerissa + Finance/Account |
-| 4 | Validasi `MSL_DRAFT_KOMPILASI.csv` → isi standard_price + commission_rule | Sales Head (CUCU N. — Head of Sales Jasa) |
-| 5 | Serahkan daftar NIK→email karyawan (O21) + validasi `HRIS_ROLE_MAPPING_DRAFT.md` | HR + OD/Nerissa |
-| 6 | Setelah 1–3: tulis parser W1-19 (adapter tipis di atas `internal/importer`) + dry-run report | Sesi build |
+> **UPDATE 2026-07-10 (sore):** data per-lead & per-deal DITERIMA via upload workbook
+> "Data Cena Sales Performance" (tab `Daily Leads` 1.769 lead ber-telepon, `PROSPECT&CLOSING`/
+> `Sheet72` per-deal + kontak). O22 & O23 diputus Nerissa (lihat DECISIONS 2026-07-10) dan
+> **parser + tooling W1-19 sudah dibangun**: `backend/cmd/import` (leads-dryrun/apply, gen-form,
+> clients-dryrun/apply, dormant-dryrun/apply — Director-only) + migrasi 0013 (`clients.dormant_at`).
+> Angka smoke riil (run-date 2026-07-10): ledger 1.517 baris → **1.336 klien unik = 239 kandidat
+> aktif (form pelengkap) + 1.097 dormant** (1.096 valid; 1 baris error data riil: `link_toko`
+> terlalu panjang — koreksi di sumber); Daily Leads → **18 lead lolos filter B** (Qualify/Hot/Warm,
+> sejak 2026-01-10), semua valid, 0 duplikat.
+
+| # | Aksi | Siapa | Status |
+|---|---|---|---|
+| 1 | ~~Share sheet `19pfVwm…`~~ → terpenuhi via upload workbook Cena (bentuk kolom sama; kalau ada file per-sales lain, parser yang sama jalan) | Yohan | ✅ |
+| 2 | ~~Putuskan O22~~ → Pilihan B (Qualify + Hot/Warm, 6 bulan) | Nerissa | ✅ |
+| 3 | ~~Putuskan O23~~ → semua klien diimpor (non-aktif dormant), DP→Sebagian, Monthly→Termin, kosong→form, 1 klien = 1 TRX | Nerissa | ✅ |
+| 4 | Validasi `MSL_DRAFT_KOMPILASI.csv` → isi standard_price + commission_rule | Sales Head | ⏳ |
+| 5 | Serahkan daftar NIK→email karyawan (O21) + validasi `HRIS_ROLE_MAPPING_DRAFT.md` | HR + OD/Nerissa | ⏳ |
+| 6 | ~~Tulis parser W1-19~~ → selesai (`internal/importer/parse_*.go`, `cmd/import`) | Sesi build | ✅ |
+| 7 | **Isi form pelengkap 239 klien aktif** (hasil `gen-form`; kolom kota/kategori/GMV/alokasi NIK/jadwal termin/pembayaran masuk/kontrak; konfirmasi_aktif Y/N) lalu `clients-dryrun` → `clients-apply` | CRO + Finance | ⏳ |
+| 8 | Susun `--sales-map` (nama panggilan sheet → NIK; 18 lead & 239 klien memakai nickname: Cena, Esal, dst.) | Sales Head + HR | ⏳ |
