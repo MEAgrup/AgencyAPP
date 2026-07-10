@@ -192,6 +192,12 @@ func (s *Service) verifyInstallment(ctx context.Context, tx *sql.Tx, actor permi
 	}); err != nil {
 		return err
 	}
+	// [Jatuh Tempo] is a parallel flag, not the status itself (M5 §2) — clear
+	// it automatically now that this installment is verified (W1-17).
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE installments SET jatuh_tempo = 0 WHERE id = ?`, req.InstallmentID); err != nil {
+		return err
+	}
 	return nil
 }
 

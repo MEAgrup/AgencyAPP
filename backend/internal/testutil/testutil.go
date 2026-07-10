@@ -43,6 +43,7 @@ func DB(t *testing.T) *sql.DB {
 // FK checks are disabled during truncation.
 var dataTables = []string{
 	// Wave 1 money-path entities (children before parents).
+	"transaction_issue_approvals",
 	"payment_verifications",
 	"installments",
 	"transactions",
