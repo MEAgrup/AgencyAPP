@@ -1,0 +1,13 @@
+employee_id,nama,email,divisi,jabatan,status_aktif,updated_at
+EMP-0001,Budi Santoso,budi@mea.co.id,Sales,Sales Executive,true,2026-01-05T08:00:00+07:00
+EMP-0002,Hendra Wijaya,hendra@mea.co.id,Sales,Sales Head,true,2026-01-05T08:00:00+07:00
+EMP-0003,Dewi Lestari,dewi@mea.co.id,Finance,Finance Staff,true,2026-01-05T08:00:00+07:00
+EMP-0004,Rina Kusuma,rina@mea.co.id,Finance,SPV Finance,true,2026-01-05T08:00:00+07:00
+EMP-0005,Sinta Rahma,sinta@mea.co.id,Account,Account Manager,true,2026-01-05T08:00:00+07:00
+EMP-0006,Bagus Prasetyo,bagus@mea.co.id,Account,Account Lead,true,2026-01-05T08:00:00+07:00
+EMP-0007,Rian Pratama,rian@mea.co.id,Creative,Editor,true,2026-01-05T08:00:00+07:00
+EMP-0008,Maya Anggraini,maya@mea.co.id,Creative,Creative Lead,true,2026-01-05T08:00:00+07:00
+EMP-0009,Yohan Saputra,yohan.od@mea.co.id,Operations,OD Officer,true,2026-01-05T08:00:00+07:00
+EMP-0010,Nerissa Halim,nerissa@mea.co.id,Management,Director,true,2026-01-05T08:00:00+07:00
+EMP-0011,Kenny Gunawan,kenny@mea.co.id,Ads,Advertiser,true,2026-01-05T08:00:00+07:00
+EMP-0012,Putri Maharani,putri@mea.co.id,KOL,KOL Coordinator,true,2026-01-05T08:00:00+07:00
