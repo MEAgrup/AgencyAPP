@@ -79,6 +79,76 @@ func (a *App) handleListClients(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": views})
 }
 
+// clientEditBody is the PATCH request DTO. Only these scalar fields are
+// forwarded to Edit; every one is a lock-matrix row so the enforcement stays
+// server-side. Fields never editable (client_id/origin_campaign_id/
+// transaction_id/total_sales) are present so an attempt is rejected, not
+// silently ignored.
+type clientEditBody struct {
+	ClientID         *string `json:"client_id"`
+	NamaPIC          *string `json:"nama_pic"`
+	Toko             *string `json:"toko"`
+	Kota             *string `json:"kota"`
+	LinkToko         *string `json:"link_toko"`
+	Kategori         *string `json:"kategori"`
+	GMVBaseline      *string `json:"gmv_baseline"`
+	TargetGMV        *string `json:"target_gmv"`
+	MarketingBudget  *string `json:"marketing_budget"`
+	TotalSales       *string `json:"total_sales"`
+	OriginCampaignID *string `json:"origin_campaign_id"`
+	TransactionID    *string `json:"transaction_id"`
+	SalesPICID       *string `json:"sales_pic_id"`
+	CommissionPICID  *string `json:"commission_payment_pic_id"`
+}
+
+func (b clientEditBody) changes() map[string]string {
+	m := map[string]string{}
+	put := func(field string, v *string) {
+		if v != nil {
+			m[field] = *v
+		}
+	}
+	put(module4_client.FieldClientID, b.ClientID)
+	put(module4_client.FieldNamaPIC, b.NamaPIC)
+	put(module4_client.FieldToko, b.Toko)
+	put(module4_client.FieldKota, b.Kota)
+	put(module4_client.FieldLinkToko, b.LinkToko)
+	put(module4_client.FieldKategori, b.Kategori)
+	put(module4_client.FieldGMVBaseline, b.GMVBaseline)
+	put(module4_client.FieldTargetGMV, b.TargetGMV)
+	put(module4_client.FieldMarketingBudget, b.MarketingBudget)
+	put(module4_client.FieldTotalSales, b.TotalSales)
+	put(module4_client.FieldOriginCampaign, b.OriginCampaignID)
+	put(module4_client.FieldTransactionID, b.TransactionID)
+	put(module4_client.FieldSalesPIC, b.SalesPICID)
+	put(module4_client.FieldCommissionPIC, b.CommissionPICID)
+	return m
+}
+
+func (a *App) handleEditClient(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	var body clientEditBody
+	if err := decodeJSON(r, &body); err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, module4_client.MsgIncomplete)
+		return
+	}
+	applied, err := a.clientSvc().Edit(r.Context(), actor, r.PathValue("id"), body.changes())
+	if err != nil {
+		switch {
+		case errors.Is(err, module4_client.ErrFieldLocked):
+			writeErr(w, http.StatusForbidden, module4_client.MsgFieldLocked)
+		case errors.Is(err, module4_client.ErrInvalidField):
+			writeErr(w, http.StatusUnprocessableEntity, module4_client.MsgIncomplete)
+		case errors.Is(err, module4_client.ErrNotFound):
+			writeErr(w, http.StatusNotFound, "[klien tidak ditemukan]")
+		default:
+			writeErr(w, http.StatusInternalServerError, "[terjadi kesalahan sistem]")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"changes": applied})
+}
+
 func (a *App) handleGetClient(w http.ResponseWriter, r *http.Request) {
 	actor, _ := actorFrom(r.Context())
 	c, err := a.clientSvc().Get(r.Context(), actor, r.PathValue("id"))

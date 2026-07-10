@@ -125,3 +125,39 @@ func TestClientEndpoints_Visibility(t *testing.T) {
 		t.Errorf("gmv_baseline render = %v", cl["gmv_baseline"])
 	}
 }
+
+func TestClientEndpoints_LockMatrix(t *testing.T) {
+	srv, done := setupCF(t)
+	defer done()
+	seedCFClient(t, "CLI-REL", "EMP-BUDI", true)
+
+	amel := login(t, srv, "amel@mea.co.id") // Account staff
+	alia := login(t, srv, "alia@mea.co.id") // Account lead
+	dewi := login(t, srv, "dewi@mea.co.id") // Sales lead
+
+	// Account staff cannot correct a locked profile field -> 403 exact message.
+	code, body := do(t, amel, "PATCH", srv.URL+"/api/v1/clients/CLI-REL", map[string]any{"toko": "Baru"})
+	if code != 403 || body["message"] != "[field ini terkunci, tidak bisa diubah]" {
+		t.Fatalf("account staff profile edit: %d %v", code, body)
+	}
+	// Account Lead may correct it.
+	code, _ = do(t, alia, "PATCH", srv.URL+"/api/v1/clients/CLI-REL", map[string]any{"toko": "Toko Baru"})
+	if code != 200 {
+		t.Fatalf("account lead profile edit: %d", code)
+	}
+	// Nobody edits total_sales (auto) — even via the endpoint.
+	code, body = do(t, dewi, "PATCH", srv.URL+"/api/v1/clients/CLI-REL", map[string]any{"total_sales": "999"})
+	if code != 403 || body["message"] != "[field ini terkunci, tidak bisa diubah]" {
+		t.Fatalf("total_sales edit: %d %v", code, body)
+	}
+	// Account revises Target GMV (money field).
+	code, _ = do(t, amel, "PATCH", srv.URL+"/api/v1/clients/CLI-REL", map[string]any{"target_gmv": "50000000"})
+	if code != 200 {
+		t.Fatalf("account target_gmv: %d", code)
+	}
+	// Sales Lead reassigns Sales PIC.
+	code, _ = do(t, dewi, "PATCH", srv.URL+"/api/v1/clients/CLI-REL", map[string]any{"sales_pic_id": "EMP-ANDI"})
+	if code != 200 {
+		t.Fatalf("sales lead reassign pic: %d", code)
+	}
+}

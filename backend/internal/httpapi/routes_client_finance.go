@@ -12,4 +12,6 @@ func (a *App) registerClientFinanceRoutes(mux *http.ServeMux) {
 	// M4 — Client Record (W1-10 provenance/visibility).
 	mux.HandleFunc("GET /api/v1/clients", a.protect(a.handleListClients))
 	mux.HandleFunc("GET /api/v1/clients/{id}", a.protect(a.handleGetClient))
+	// M4 §4 — lock matrix field corrections (W1-11).
+	mux.HandleFunc("PATCH /api/v1/clients/{id}", a.protect(a.handleEditClient))
 }
