@@ -24,4 +24,16 @@ func (a *App) registerClientFinanceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/transactions/{id}/verify", a.protect(a.handleVerify))
 	mux.HandleFunc("POST /api/v1/transactions/{id}/contract", a.protect(a.handleAttachContract))
 	mux.HandleFunc("POST /api/v1/transactions/{id}/scheme", a.protect(a.handleChangeScheme))
+
+	// M4 §5 — Payment-intent handoff, Sales -> Finance (W1-13).
+	mux.HandleFunc("POST /api/v1/clients/{id}/payment-intent", a.protect(a.handleSetPaymentIntent))
+
+	// M5 §6 — Payment reminder dashboard, dual-audience (W1-17).
+	mux.HandleFunc("GET /api/v1/finance/reminders", a.protect(a.handleFinanceReminders))
+	mux.HandleFunc("POST /api/v1/finance/reminders/scan", a.protect(a.handleScanReminders))
+
+	// M5 §5 Rule 5 / M5-OA-5 — [Bermasalah] flag + joint resolution (W1-18).
+	mux.HandleFunc("POST /api/v1/transactions/{id}/bermasalah", a.protect(a.handleFlagBermasalah))
+	mux.HandleFunc("POST /api/v1/transactions/{id}/bermasalah/resolve", a.protect(a.handleResolveBermasalah))
+	mux.HandleFunc("GET /api/v1/transactions/{id}/bermasalah", a.protect(a.handleGetBermasalah))
 }
