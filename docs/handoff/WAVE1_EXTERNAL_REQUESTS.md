@@ -102,3 +102,32 @@ W1-20 = **satu deal nyata dijalankan end-to-end** lintas hasil kedua stream: reg
    - Closing Form: salespeople (≤5) + alokasi Σ100% + Commission & Payment PIC.
    - Payment Intent + jadwal Termin (amount + due date, Σ = nilai transaksi).
    - Bukti pembayaran pertama (nominal, tanggal, link bukti transfer) + link kontrak.
+
+---
+
+## Jawaban diterima (2026-07-10, via Nerissa)
+
+### Permintaan #1 — HRIS: endpoint DITUNDA, data karyawan riil via spreadsheet
+Tim internal HRIS **belum sempat mengerjakan** 2 endpoint staging. Interim yang diputuskan: pakai **data karyawan asli dalam format aslinya** dari spreadsheet berikut, masuk lewat jalur fallback CSV (`EmployeeSource`) yang memang sudah disiapkan:
+- Data karyawan (format asli): https://docs.google.com/spreadsheets/d/1rLCbdGk7zZ6TaK2-3f2DO4PwhS4TIxh7Nz8uHmq8_g8/edit?usp=sharing
+
+Konsekuensi: (a) adapter kolom `format asli → employees.csv` dibuat begitu isi sheet terbaca; (b) daftar `divisi`/`jabatan` riil untuk tabel role-mapping diambil dari sheet yang sama; (c) sinkronisasi periodik & auth via HRIS tetap menunggu endpoint — login staging sementara tetap via mock HRIS yang diisi data riil.
+
+### Permintaan #2 — Sumber kompilasi MSL riil (dari Sales Head/SPV)
+- Dashboard team account: https://docs.google.com/spreadsheets/d/1aLNK1m2fIbCC9La3j4IlUZJuc1FrTvGIMAJNYKQ4yAM/edit?usp=drivesdk
+- Database client: https://docs.google.com/spreadsheets/d/1uAUws99FedD4q2IMuVI8Wz4jWGOIIOv4YdDUHwbQ3zI/edit?usp=sharing
+
+Catatan: kedua sheet adalah **sumber mentah** — daftar layanan + harga standar + aturan komisi final tetap perlu dikompilasi ke format tabel Permintaan #2 (name, standard_price, commission_rule, active, effective_from) dan divalidasi Sales Head sebelum seed.
+
+### Permintaan #3 — Sample data migrasi W1-19 (dari Yohan, DECISIONS O6)
+- **Dashboard sales**: https://docs.google.com/spreadsheets/d/1ZeRvOvtW6rTgP0tK7B-N3ziRTxQEUgKMZ2wVMDyEtGs/edit?usp=drivesdk — lead masuk dicek di tab **dashboard iklan** dan **dashboard organik**.
+- **Daily lead / prospek & closing**: https://docs.google.com/spreadsheets/d/19pfVwm_mvfkbx35aVEL1OWSzshRAIFPg4jpRSRraRmU/edit?usp=drivesdk — quality lead di tab **daily lead**; closingan di tab **prospek dan closing**.
+- **Rekapan input sales (harian)**: https://docs.google.com/spreadsheets/d/1KtN_vAo1U6hK9r3aFl45fMzezL7sy38cm0uA_3NQoIo/edit?usp=drivesdk — per tanggal: berapa lead masuk dan klasifikasinya (masuk **seller** / **affiliate** / **ga respon** / **bad respon**).
+
+### ⚠ Kendala akses (blocking ekstraksi, bukan blocking kode)
+Environment build remote **tidak bisa membuka docs.google.com** (network policy proxy menolak CONNECT; konektor Google Drive org ada tapi tidak diaktifkan untuk sesi). Parser W1-19, adapter HRIS, dan seed MSL riil menunggu SALAH SATU dari:
+1. Konektor **Google Drive diaktifkan** pada sesi Claude Code (org sudah memasangnya), atau
+2. Network policy environment mengizinkan `docs.google.com`, atau
+3. Tiap sheet di-export **CSV/XLSX dan di-commit ke repo** (mis. `backend/testdata/import_samples/`) / dilampirkan ke sesi.
+
+Begitu salah satu jalur terbuka, sisa Jalur B (parser bentuk-kolom, adapter HRIS, kompilasi MSL) tinggal eksekusi — import core, dry-run engine, dan replay pembayaran sudah selesai & teruji.
