@@ -9,6 +9,10 @@
   GRANT ALL PRIVILEGES ON `cdps\_test%`.* TO 'cdps'@'localhost';
   GRANT CREATE, DROP ON *.* TO 'cdps'@'localhost'; -- tests create isolated DBs
   ```
+- **MySQL 8 with binary logging enabled** (its default): also run
+  `SET GLOBAL log_bin_trust_function_creators = 1;` as root, or the trigger
+  creation in the migrations fails with Error 1419. Not needed on MariaDB
+  unless binlog is turned on.
 - `make migrate-up` applies migrations to `cdps_dev`.
 - `make test` runs all backend tests. Tests that need MySQL read
   `CDPS_TEST_MYSQL_DSN` (default `cdps:cdps@tcp(127.0.0.1:3306)/cdps_test?parseTime=true&multiStatements=true`)

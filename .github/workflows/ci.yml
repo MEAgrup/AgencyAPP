@@ -25,7 +25,10 @@ jobs:
           go-version-file: backend/go.mod
       - name: Grant test-database privileges
         run: |
-          mysql -h 127.0.0.1 -uroot -proot -e "GRANT ALL PRIVILEGES ON \`cdps\\_test%\`.* TO 'cdps'@'%'; GRANT CREATE, DROP ON *.* TO 'cdps'@'%'; FLUSH PRIVILEGES;"
+          # log_bin_trust_function_creators: MySQL 8 ships with binlog on, so
+          # creating the audit/notification triggers as a non-SUPER user fails
+          # with Error 1419 without it.
+          mysql -h 127.0.0.1 -uroot -proot -e "SET GLOBAL log_bin_trust_function_creators = 1; GRANT ALL PRIVILEGES ON \`cdps\\_test%\`.* TO 'cdps'@'%'; GRANT CREATE, DROP ON *.* TO 'cdps'@'%'; FLUSH PRIVILEGES;"
       - name: Vet
         run: cd backend && go vet ./...
       - name: Test
