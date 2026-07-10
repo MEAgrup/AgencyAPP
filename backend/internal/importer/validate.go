@@ -2,8 +2,9 @@ package importer
 
 // validate.go holds the PURE per-row validation used identically by DryRun (to
 // classify a row) and by Apply (to fail a row BEFORE any DB write, so a bad row
-// never lands). Every message is sourced from an existing engine constant — no
-// new BI strings are minted here.
+// never lands). Messages reuse existing engine constants wherever one fits; the
+// go-live-only positional-ordering rule has no PRD-verbatim string, so it mints
+// errPaymentOrder (flagged for docs/DECISIONS.md).
 
 import (
 	"errors"
@@ -20,6 +21,13 @@ var errLeadIncomplete = errors.New(module1_leads.MsgRowIncomplete)
 
 // errClientIncomplete uses the house default incomplete message.
 var errClientIncomplete = errors.New(module0_sales.IncompleteMessage)
+
+// errPaymentOrder is a NEW go-live (W1-19) engineering-enforcement BI string:
+// for scheduled schemes the verified payments map POSITIONALLY to the termin
+// schedule (payment i <-> termin i), so their receipt dates must be
+// non-decreasing; an out-of-order sequence signals a mis-mapped row and is
+// rejected. Flagged for docs/DECISIONS.md (no PRD-verbatim string exists).
+var errPaymentOrder = errors.New("[urutan pembayaran tidak sesuai jadwal termin]")
 
 // validScheme reports whether s is exactly one of the four M4 §5 payment schemes.
 func validScheme(s string) bool {
@@ -166,6 +174,16 @@ func validatePayments(row ClientRow) error {
 	}
 	if sum > int64(total) {
 		return module5_finance.ErrOverVerified
+	}
+
+	// Positional payment->installment mapping guard (scheduled schemes): payment i
+	// settles termin i, so receipt dates must be non-decreasing.
+	if hasSchedule(row.SkemaPembayaran) {
+		for i := 1; i < len(row.PembayaranTerverifikasi); i++ {
+			if row.PembayaranTerverifikasi[i].Tanggal.Before(row.PembayaranTerverifikasi[i-1].Tanggal) {
+				return errPaymentOrder
+			}
+		}
 	}
 
 	reachesLunas := false

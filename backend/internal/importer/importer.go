@@ -182,6 +182,10 @@ type ClientRow struct {
 	Layanan                 []ServiceRow
 	NilaiTransaksiTotal     money.Money
 	SkemaPembayaran         string
+	// JadwalTermin and PembayaranTerverifikasi are POSITIONALLY mapped for
+	// scheduled schemes (Termin / Bayar di Belakang): PembayaranTerverifikasi[i]
+	// settles JadwalTermin[i] (validated to match its amount, in order). Payments
+	// must be listed in schedule order with non-decreasing dates.
 	JadwalTermin            []TerminRow
 	PembayaranTerverifikasi []PaymentRow
 	LinkKontrak             string

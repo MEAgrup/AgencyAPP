@@ -4,9 +4,11 @@ package importer
 // path 1). It reuses the exported dedup DECISION (module1_leads.Decide) and phone
 // NORMALIZATION; only the phone-match SELECT is replicated here because
 // module1_leads.matchByPhone (and its terminal-attempt set) are unexported and
-// that package must not be edited (flagged for the orchestrator). The match query
-// LEFT JOINs employees so a still-active attempt is detected even when the owning
-// employee has not yet synced from HRIS.
+// that package must not be edited (flagged for the orchestrator, DECISIONS O19).
+// The match query INNER JOINs employees — byte-identical to live matchByPhone —
+// so an attempt owned by an employee_id not present in employees is DROPPED by
+// the join exactly as live Register would drop it, keeping import dry-run/apply
+// outcomes aligned with what a live registration produces.
 
 import (
 	"context"
@@ -61,9 +63,9 @@ func (s *Service) matchLead(ctx context.Context, q rowQuerier, phoneNorm string)
 		return nil, err
 	}
 	rows, err := q.QueryContext(ctx,
-		`SELECT COALESCE(e.nama, pa.owner_employee_id), pa.status
+		`SELECT e.nama, pa.status
 		   FROM prospect_attempts pa
-		   LEFT JOIN employees e ON e.employee_id = pa.owner_employee_id
+		   JOIN employees e ON e.employee_id = pa.owner_employee_id
 		  WHERE pa.lead_id = ?`, m.ID)
 	if err != nil {
 		return nil, err

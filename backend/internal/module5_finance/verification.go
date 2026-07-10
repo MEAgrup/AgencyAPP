@@ -36,62 +36,87 @@ type VerifyRequest struct {
 // contract gate (M5 §7 Rule 2) and the routing gate all commit or roll back
 // together, so a blocked verification leaves no trace.
 func (s *Service) Verify(ctx context.Context, actor permission.Actor, transactionID string, req VerifyRequest) (TransactionRecord, error) {
-	if !canVerify(actor) {
-		return TransactionRecord{}, ErrForbidden
-	}
-	if req.Amount <= 0 || req.ReceivedDate.IsZero() {
-		return TransactionRecord{}, ErrIncomplete
-	}
-
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return TransactionRecord{}, err
 	}
 	defer tx.Rollback()
 
+	if err := s.verifyTx(ctx, tx, actor, transactionID, req); err != nil {
+		return TransactionRecord{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return TransactionRecord{}, err
+	}
+	return s.LoadTransaction(ctx, actor, transactionID)
+}
+
+// VerifyInTx runs the full verification write flow inside a caller-owned
+// transaction (no BeginTx / Commit / LoadTransaction). It exists ONLY for the
+// one-time go-live importer (W1-19), which replays already-verified payments
+// inside its per-row transaction (Apply) or dry-run savepoint (DryRun) so the
+// official money path — over-verify guard, per-installment rule, [Lunas]
+// contract gate and routing gate — fires without self-committing. The caller
+// owns the transaction lifecycle.
+func (s *Service) VerifyInTx(ctx context.Context, tx *sql.Tx, actor permission.Actor, transactionID string, req VerifyRequest) error {
+	return s.verifyTx(ctx, tx, actor, transactionID, req)
+}
+
+// verifyTx is the body of Verify between BeginTx and Commit: permission + input
+// checks, the FOR UPDATE lock, the over-verification guard, the branch
+// (per-installment vs direct), the payment-status transition, the [Lunas]
+// contract gate and the routing gate — all against the caller's tx.
+func (s *Service) verifyTx(ctx context.Context, tx *sql.Tx, actor permission.Actor, transactionID string, req VerifyRequest) error {
+	if !canVerify(actor) {
+		return ErrForbidden
+	}
+	if req.Amount <= 0 || req.ReceivedDate.IsZero() {
+		return ErrIncomplete
+	}
+
 	// Lock the TRX row and read authoritative state.
 	var total, status, clientID string
 	var contract sql.NullString
 	var releasedAt sql.NullTime
-	err = tx.QueryRowContext(ctx,
+	err := tx.QueryRowContext(ctx,
 		`SELECT total_agreed_value, payment_status, client_id, contract_attachment, released_to_account_at
 		   FROM transactions WHERE id = ? FOR UPDATE`, transactionID).Scan(&total, &status, &clientID, &contract, &releasedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return TransactionRecord{}, ErrNotFound
+		return ErrNotFound
 	}
 	if err != nil {
-		return TransactionRecord{}, err
+		return err
 	}
 	totalMoney, err := money.Parse(total)
 	if err != nil {
-		return TransactionRecord{}, err
+		return err
 	}
 
 	// Current aggregate (pre-event) for the over-verification guard.
 	insts, err := loadInstallments(ctx, tx, transactionID)
 	if err != nil {
-		return TransactionRecord{}, err
+		return err
 	}
 	direct, err := directVerifiedTotal(ctx, tx, transactionID)
 	if err != nil {
-		return TransactionRecord{}, err
+		return err
 	}
 	pre := aggregate(totalMoney, insts, direct)
 	if err := CheckVerification(totalMoney, pre.AmountVerified(), req.Amount); err != nil {
-		return TransactionRecord{}, err // ErrOverVerified / ErrEmptySchedule (PRD-verbatim)
+		return err // ErrOverVerified / ErrEmptySchedule (PRD-verbatim)
 	}
 
 	// Branch: per-installment vs direct verification.
 	if req.InstallmentID != "" {
 		if err := s.verifyInstallment(ctx, tx, actor, transactionID, req); err != nil {
-			return TransactionRecord{}, err
+			return err
 		}
 	} else {
 		if len(insts) > 0 {
-			return TransactionRecord{}, ErrDirectOnScheduled
+			return ErrDirectOnScheduled
 		}
 		if err := insertVerification(ctx, tx, actor, transactionID, "", req); err != nil {
-			return TransactionRecord{}, err
+			return err
 		}
 	}
 
@@ -99,17 +124,17 @@ func (s *Service) Verify(ctx context.Context, actor permission.Actor, transactio
 	var triggerVerID int64
 	if err := tx.QueryRowContext(ctx,
 		`SELECT id FROM payment_verifications WHERE transaction_id = ? ORDER BY id DESC LIMIT 1`, transactionID).Scan(&triggerVerID); err != nil {
-		return TransactionRecord{}, err
+		return err
 	}
 
 	// Recompute the aggregate AFTER the event and drive the payment status.
 	insts, err = loadInstallments(ctx, tx, transactionID)
 	if err != nil {
-		return TransactionRecord{}, err
+		return err
 	}
 	direct, err = directVerifiedTotal(ctx, tx, transactionID)
 	if err != nil {
-		return TransactionRecord{}, err
+		return err
 	}
 	desired := aggregate(totalMoney, insts, direct).DesiredStatus()
 
@@ -117,7 +142,7 @@ func (s *Service) Verify(ctx context.Context, actor permission.Actor, transactio
 		// [Lunas] contract gate (M5 §7 Rule 2): block the WHOLE verification if the
 		// contract is missing. Rollback leaves no log written.
 		if desired == TrxLunas && !contract.Valid {
-			return TransactionRecord{}, ErrContractRequired
+			return ErrContractRequired
 		}
 		res, err := s.Engine.Transition(ctx, tx, statemachine.Request{
 			Machine:      statemachine.MTransactionPayment,
@@ -129,18 +154,14 @@ func (s *Service) Verify(ctx context.Context, actor permission.Actor, transactio
 			Actor:        actor,
 		})
 		if err != nil {
-			return TransactionRecord{}, err
+			return err
 		}
 		// Routing gate: first confirmed money in releases the client (W1-16).
 		if err := s.applyRoutingGate(ctx, tx, actor, transactionID, clientID, res.From, res.To, triggerVerID); err != nil {
-			return TransactionRecord{}, err
+			return err
 		}
 	}
-
-	if err := tx.Commit(); err != nil {
-		return TransactionRecord{}, err
-	}
-	return s.LoadTransaction(ctx, actor, transactionID)
+	return nil
 }
 
 // verifyInstallment verifies one INST- row in full: the amount must equal the
@@ -221,19 +242,36 @@ func insertVerification(ctx context.Context, tx *sql.Tx, actor permission.Actor,
 // Rule 4 — superseding is logged, never deleted). Authority: Finance, the
 // client's Sales PIC / allocation member / Sales Lead, or Director.
 func (s *Service) AttachContract(ctx context.Context, actor permission.Actor, transactionID, link string) error {
-	if link == "" {
-		return ErrIncomplete
-	}
-
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
+	if err := s.attachContractTx(ctx, tx, actor, transactionID, link); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// AttachContractInTx runs AttachContract's write flow inside a caller-owned
+// transaction (no BeginTx / Commit). It exists ONLY for the one-time go-live
+// importer (W1-19), which attaches the contract in the same transaction that
+// creates the client and replays its payments so the closing payment clears the
+// [Lunas] gate. The caller owns the transaction lifecycle.
+func (s *Service) AttachContractInTx(ctx context.Context, tx *sql.Tx, actor permission.Actor, transactionID, link string) error {
+	return s.attachContractTx(ctx, tx, actor, transactionID, link)
+}
+
+// attachContractTx is the body of AttachContract between BeginTx and Commit.
+func (s *Service) attachContractTx(ctx context.Context, tx *sql.Tx, actor permission.Actor, transactionID, link string) error {
+	if link == "" {
+		return ErrIncomplete
+	}
+
 	var clientID, salesPIC string
 	var before sql.NullString
-	err = tx.QueryRowContext(ctx,
+	err := tx.QueryRowContext(ctx,
 		`SELECT t.client_id, c.sales_pic_id, t.contract_attachment
 		   FROM transactions t JOIN clients c ON c.id = t.client_id
 		  WHERE t.id = ? FOR UPDATE`, transactionID).Scan(&clientID, &salesPIC, &before)
@@ -256,15 +294,12 @@ func (s *Service) AttachContract(ctx context.Context, actor permission.Actor, tr
 		`UPDATE transactions SET contract_attachment = ? WHERE id = ?`, link, transactionID); err != nil {
 		return err
 	}
-	if err := audit.Write(ctx, tx, audit.Record{
+	return audit.Write(ctx, tx, audit.Record{
 		EntityType: "transaction", EntityID: transactionID, Actor: actor.EmployeeID,
 		Action: "contract:attached",
 		Before: map[string]string{"contract_attachment": before.String},
 		After:  map[string]string{"contract_attachment": link},
-	}); err != nil {
-		return err
-	}
-	return tx.Commit()
+	})
 }
 
 // canVerify: Admin & Finance (any level) or Director (M5 §3 Rule 5 / §8.1).

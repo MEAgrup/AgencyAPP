@@ -10,14 +10,25 @@ package importer
 // with a SAVEPOINT: a row that errors/blocks is rolled back to its savepoint
 // (its partial writes vanish) while successful rows stay VISIBLE to later rows;
 // the whole transaction is rolled back at the end, so the DB is never mutated.
-// (Verify/AttachContract self-commit and cannot join this transaction, so the
-// verified-payment plan is validated purely — validatePayments — rather than
-// replayed during a dry run.)
+// Client rows now replay their payments too — via the finance InTx variants on
+// the same tx (AttachContractInTx / VerifyInTx) — so a dry run exercises the
+// FULL official money path (routing gate, [Lunas] contract gate, over-verify)
+// with zero mutation, instead of only pre-validating the plan.
 //
-// Apply commits per row: a row is one unit of work. Creation is atomic in its
-// own transaction (rolled back utuh on any error); on success it commits, then
-// the payment replay runs through the official money paths. One failed row never
-// stops the others, and each row reports its issued IDs.
+// A SAVEPOINT rollback/release that itself errors (e.g. a deadlock that rolled
+// back the whole transaction) makes every later row's verdict untrustworthy, so
+// it ABORTS the entire DryRun with a wrapping error rather than being swallowed.
+//
+// DryRun lock retention: the whole batch runs in ONE transaction, and InnoDB
+// does NOT release row locks on ROLLBACK TO SAVEPOINT — the FOR UPDATE / gap
+// locks each row takes on id_sequences (via ident.Next) are held until the final
+// batch rollback. Concurrent LIVE id issuance for the same prefixes therefore
+// blocks for the whole dry run. Run imports in a maintenance window.
+//
+// Apply is per-row atomic in ONE transaction: create (CLI/SVC/TRX/INST) +
+// contract attach + every payment replay, then a single commit. On ANY error the
+// whole row rolls back utuh — nothing lands and no IssuedIDs are reported. One
+// failed row never stops the others.
 
 import (
 	"context"
@@ -26,6 +37,28 @@ import (
 
 	"github.com/meagrup/agencyapp/backend/internal/core/permission"
 )
+
+// savepoint / rollbackToSavepoint / releaseSavepoint wrap the SAVEPOINT verbs.
+// The rollback/release errors are FATAL to a dry run: if the engine cannot honour
+// them the transaction state is unknown and the report can no longer be trusted.
+func savepoint(ctx context.Context, tx *sql.Tx, name string) error {
+	_, err := tx.ExecContext(ctx, "SAVEPOINT "+name)
+	return err
+}
+
+func rollbackToSavepoint(ctx context.Context, tx *sql.Tx, name string) error {
+	if _, err := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT "+name); err != nil {
+		return fmt.Errorf("dry run aborted: ROLLBACK TO SAVEPOINT %s failed, report untrustworthy: %w", name, err)
+	}
+	return nil
+}
+
+func releaseSavepoint(ctx context.Context, tx *sql.Tx, name string) error {
+	if _, err := tx.ExecContext(ctx, "RELEASE SAVEPOINT "+name); err != nil {
+		return fmt.Errorf("dry run aborted: RELEASE SAVEPOINT %s failed, report untrustworthy: %w", name, err)
+	}
+	return nil
+}
 
 // DryRun validates every row and writes nothing (all work is rolled back).
 func (s *Service) DryRun(ctx context.Context, actor permission.Actor, leads []LeadRow, clients []ClientRow) (Report, error) {
@@ -40,10 +73,18 @@ func (s *Service) DryRun(ctx context.Context, actor permission.Actor, leads []Le
 
 	var rep Report
 	for i, row := range leads {
-		rep.add(s.dryRunLead(ctx, tx, actor, row, i))
+		out, fatal := s.dryRunLead(ctx, tx, actor, row, i)
+		if fatal != nil {
+			return Report{}, fatal
+		}
+		rep.add(out)
 	}
 	for i, row := range clients {
-		rep.add(s.dryRunClient(ctx, tx, actor, row, i))
+		out, fatal := s.dryRunClient(ctx, tx, actor, row, i)
+		if fatal != nil {
+			return Report{}, fatal
+		}
+		rep.add(out)
 	}
 	rep.recount()
 	// Explicit rollback so a rollback error surfaces (the defer would swallow it).
@@ -53,59 +94,79 @@ func (s *Service) DryRun(ctx context.Context, actor permission.Actor, leads []Le
 	return rep, nil
 }
 
-func (s *Service) dryRunLead(ctx context.Context, tx *sql.Tx, actor permission.Actor, row LeadRow, index int) RowOutcome {
+// dryRunLead returns the row verdict and, as its second value, a BATCH-FATAL
+// error: a nil fatal means continue; a non-nil fatal means a savepoint op failed
+// and the whole DryRun must abort (the report is no longer trustworthy).
+func (s *Service) dryRunLead(ctx context.Context, tx *sql.Tx, actor permission.Actor, row LeadRow, index int) (RowOutcome, error) {
 	out := RowOutcome{Index: index, Entity: "lead"}
 	if err := validateLeadRow(row); err != nil {
 		out.Status, out.Message = RowError, err.Error()
-		return out
+		return out, nil
 	}
 	sp := fmt.Sprintf("sp_lead_%d", index)
-	if _, err := tx.ExecContext(ctx, "SAVEPOINT "+sp); err != nil {
+	if err := savepoint(ctx, tx, sp); err != nil {
 		out.Status, out.Message = RowError, err.Error()
-		return out
+		return out, nil
 	}
 	res, err := s.applyLeadTx(ctx, tx, actor, row, index)
 	if err != nil {
-		_, _ = tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT "+sp)
+		if fatal := rollbackToSavepoint(ctx, tx, sp); fatal != nil {
+			return out, fatal
+		}
 		out.Status, out.Message = RowError, err.Error()
-		return out
+		return out, nil
 	}
 	switch res.Action {
 	case "block":
 		// Nothing to keep for a blocked row; discard its provenance write too.
-		_, _ = tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT "+sp)
+		if fatal := rollbackToSavepoint(ctx, tx, sp); fatal != nil {
+			return out, fatal
+		}
 		out.Status, out.Message = RowDuplikat, res.Message
 	case "reopen":
 		// Keep it visible so a later same-phone row dedups against the reopen.
-		_, _ = tx.ExecContext(ctx, "RELEASE SAVEPOINT "+sp)
+		if fatal := releaseSavepoint(ctx, tx, sp); fatal != nil {
+			return out, fatal
+		}
 		out.Status, out.Detail = RowValid, "reopen "+res.LeadID
 	default: // create
-		_, _ = tx.ExecContext(ctx, "RELEASE SAVEPOINT "+sp)
+		if fatal := releaseSavepoint(ctx, tx, sp); fatal != nil {
+			return out, fatal
+		}
 		out.Status = RowValid
 	}
-	return out
+	return out, nil
 }
 
-func (s *Service) dryRunClient(ctx context.Context, tx *sql.Tx, actor permission.Actor, row ClientRow, index int) RowOutcome {
+// dryRunClient exercises the FULL money path (create + contract attach + payment
+// replay) under a savepoint, then rolls it back. Second return value is a
+// batch-fatal savepoint error (see dryRunLead).
+func (s *Service) dryRunClient(ctx context.Context, tx *sql.Tx, actor permission.Actor, row ClientRow, index int) (RowOutcome, error) {
 	out := RowOutcome{Index: index, Entity: "client"}
 	if err := validateClientRow(row); err != nil {
 		out.Status, out.Message = RowError, err.Error()
-		return out
+		return out, nil
 	}
 	sp := fmt.Sprintf("sp_client_%d", index)
-	if _, err := tx.ExecContext(ctx, "SAVEPOINT "+sp); err != nil {
+	if err := savepoint(ctx, tx, sp); err != nil {
 		out.Status, out.Message = RowError, err.Error()
-		return out
+		return out, nil
 	}
-	// Exercise the real inserts to catch any DB-level problem, then discard.
-	if _, err := s.createClientTx(ctx, tx, actor, row, index); err != nil {
-		_, _ = tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT "+sp)
+	// Run the real create + contract attach + payment replay to surface any
+	// routing/contract-gate/over-verify or DB-level problem, then discard (clients
+	// need no cross-row visibility).
+	if _, err := s.landClientTx(ctx, tx, actor, row, index); err != nil {
+		if fatal := rollbackToSavepoint(ctx, tx, sp); fatal != nil {
+			return out, fatal
+		}
 		out.Status, out.Message = RowError, err.Error()
-		return out
+		return out, nil
 	}
-	_, _ = tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT "+sp) // clients need no cross-row visibility
+	if fatal := rollbackToSavepoint(ctx, tx, sp); fatal != nil {
+		return out, fatal
+	}
 	out.Status = RowValid
-	return out
+	return out, nil
 }
 
 // Apply lands the rows for real. Director only.
@@ -161,8 +222,6 @@ func (s *Service) applyLead(ctx context.Context, actor permission.Actor, row Lea
 
 func (s *Service) applyClient(ctx context.Context, actor permission.Actor, row ClientRow, index int) RowOutcome {
 	out := RowOutcome{Index: index, Entity: "client"}
-	// Validate BEFORE any write: a row that would fail replay is rejected here,
-	// giving effective per-row atomicity across the create + replay phases.
 	if err := validateClientRow(row); err != nil {
 		out.Status, out.Message = RowFailed, err.Error()
 		return out
@@ -173,23 +232,17 @@ func (s *Service) applyClient(ctx context.Context, actor permission.Actor, row C
 		out.Status, out.Message = RowFailed, err.Error()
 		return out
 	}
-	ids, err := s.createClientTx(ctx, tx, actor, row, index)
+	defer tx.Rollback()
+
+	// ONE transaction: create + contract attach + all payment replays. Any error
+	// rolls the whole row back utuh — nothing landed, no IssuedIDs reported.
+	ids, err := s.landClientTx(ctx, tx, actor, row, index)
 	if err != nil {
-		_ = tx.Rollback()
-		out.Status, out.Message = RowFailed, err.Error()
-		return out // rolled back utuh: nothing landed
-	}
-	if err := tx.Commit(); err != nil {
-		_ = tx.Rollback()
 		out.Status, out.Message = RowFailed, err.Error()
 		return out
 	}
-
-	// Post-commit: attach contract + replay verified payments via the official
-	// money paths. Pre-validated, so a failure here is an unexpected system error;
-	// report it with the IDs already issued (creation is committed).
-	if err := s.replayPayments(ctx, actor, row, ids); err != nil {
-		out.Status, out.Message, out.IssuedIDs = RowFailed, err.Error(), ids.all()
+	if err := tx.Commit(); err != nil {
+		out.Status, out.Message = RowFailed, err.Error()
 		return out
 	}
 	out.Status, out.IssuedIDs = RowApplied, ids.all()

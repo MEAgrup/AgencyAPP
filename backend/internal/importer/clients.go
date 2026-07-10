@@ -2,23 +2,25 @@ package importer
 
 // clients.go rebuilds a pre-CDPS closed client (Permintaan #3 path 2).
 //
-// createClientTx does the whole CLI/platforms/allocation/SVC/TRX/INST creation
-// inside ONE caller-owned transaction (atomic birth of the record). Payment
-// REPLAY is deliberately a SEPARATE post-commit phase (replayPayments): the
-// official money paths — module5_finance.Verify / AttachContract — each manage
-// their own transaction (they lock the TRX row FOR UPDATE, drive the payment
-// state machine, append the verification log and fire the routing gate). They
-// cannot enrol in an outer transaction, and they must see committed rows. So the
-// atomicity guarantee is moved EARLIER: validateClientRow (incl. validatePayments)
-// proves the whole plan — schedule sums, per-installment amounts, over-verify and
-// the [Lunas] contract gate — BEFORE the creation transaction commits. A row that
-// would fail replay is rejected before a single INSERT; once created, replay is
-// guaranteed to succeed. Any residual unexpected replay error is reported per row
-// with the IDs already issued (report contract).
+// landClientTx does the WHOLE record — CLI/platforms/allocation/SVC/TRX/INST
+// creation, the optional contract attach, and the replay of every already-
+// verified payment — inside ONE caller-owned transaction. Replay runs through
+// the official money path via the finance InTx variants
+// (AttachContractInTx / VerifyInTx), which drive the payment state machine,
+// append the verification log and fire the routing gate on the SAME tx rather
+// than self-committing. So the whole row is atomic: Apply commits it once (full
+// rollback, nothing landed, on any error), and DryRun replays it under a
+// savepoint and rolls back (zero DB mutation while exercising the real gates).
+// validateClientRow (incl. validatePayments) still proves the plan up front so a
+// business-rule failure is caught before any write, but atomicity no longer
+// depends on that: a failure at any phase rolls the entire row back.
 
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/meagrup/agencyapp/backend/internal/core/audit"
@@ -27,6 +29,12 @@ import (
 	"github.com/meagrup/agencyapp/backend/internal/core/permission"
 	"github.com/meagrup/agencyapp/backend/internal/module5_finance"
 )
+
+// msgEmployeeNotRegistered is a NEW go-live (W1-19) engineering-enforcement BI
+// string: the import contract may name a salesperson employee_id that never
+// synced from HRIS; such a row is rejected rather than landing an orphan FK.
+// Flagged for docs/DECISIONS.md (no PRD-verbatim string exists for this rule).
+const msgEmployeeNotRegistered = "[karyawan tidak terdaftar: %s]"
 
 // clientIDs are the entities minted for one imported client.
 type clientIDs struct {
@@ -69,6 +77,18 @@ func (s *Service) createClientTx(ctx context.Context, tx *sql.Tx, actor permissi
 	ids.Client, ids.Transaction = cliID, trxID
 
 	pic := row.closingParties().ResolvedPIC() // solo -> primary (OD-1)
+
+	// Every referenced salesperson must exist in the HRIS-synced employees table
+	// (SalesPIC, the resolved Commission & Payment PIC, and each allocation
+	// member) — a historical row naming an unknown employee_id is rejected before
+	// any INSERT. Runs under both dry-run and apply.
+	want := []string{row.SalesPIC, pic}
+	for _, a := range row.AlokasiSales {
+		want = append(want, a.SalespersonID)
+	}
+	if err := requireEmployees(ctx, tx, want); err != nil {
+		return ids, err
+	}
 
 	// Client first (TRX FK -> clients). clients.transaction_id has no FK, so the
 	// forward reference to the not-yet-inserted TRX id is safe.
@@ -186,16 +206,31 @@ func (s *Service) createClientTx(ctx context.Context, tx *sql.Tx, actor permissi
 	return ids, nil
 }
 
-// replayPayments re-plays each already-verified payment through the OFFICIAL
-// verification path so payment status, the verification log and the routing gate
-// all fire authentically. Contract (if any) is attached BEFORE replay so the
-// closing payment clears the [Lunas] gate. Amounts/mappings were pre-validated,
-// so this cannot fail on a business rule.
-func (s *Service) replayPayments(ctx context.Context, actor permission.Actor, row ClientRow, ids clientIDs) error {
+// landClientTx creates the client record AND replays its verified payments in
+// ONE caller-owned transaction. On any error the caller rolls back utuh —
+// nothing lands. Used by both Apply (single commit) and DryRun (savepoint
+// rollback), so dry-run exercises the identical money path with zero mutation.
+func (s *Service) landClientTx(ctx context.Context, tx *sql.Tx, actor permission.Actor, row ClientRow, index int) (clientIDs, error) {
+	ids, err := s.createClientTx(ctx, tx, actor, row, index)
+	if err != nil {
+		return ids, err
+	}
+	if err := s.replayPaymentsTx(ctx, tx, actor, row, ids); err != nil {
+		return ids, err
+	}
+	return ids, nil
+}
+
+// replayPaymentsTx re-plays each already-verified payment through the OFFICIAL
+// verification path (finance InTx variants) on the caller's tx, so payment
+// status, the verification log and the routing gate all fire authentically
+// WITHOUT self-committing. Contract (if any) is attached BEFORE replay so the
+// closing payment clears the [Lunas] gate.
+func (s *Service) replayPaymentsTx(ctx context.Context, tx *sql.Tx, actor permission.Actor, row ClientRow, ids clientIDs) error {
 	fin := s.finance()
 
 	if row.LinkKontrak != "" {
-		if err := fin.AttachContract(ctx, actor, ids.Transaction, row.LinkKontrak); err != nil {
+		if err := fin.AttachContractInTx(ctx, tx, actor, ids.Transaction, row.LinkKontrak); err != nil {
 			return err
 		}
 	}
@@ -203,10 +238,59 @@ func (s *Service) replayPayments(ctx context.Context, actor permission.Actor, ro
 	for i, p := range row.PembayaranTerverifikasi {
 		req := module5_finance.VerifyRequest{Amount: p.Amount, ReceivedDate: p.Tanggal}
 		if hasSchedule(row.SkemaPembayaran) {
-			req.InstallmentID = ids.Installments[i] // sequential mapping (validated)
+			req.InstallmentID = ids.Installments[i] // positional mapping payment i <-> termin i (validated)
 		}
-		if _, err := fin.Verify(ctx, actor, ids.Transaction, req); err != nil {
+		if err := fin.VerifyInTx(ctx, tx, actor, ids.Transaction, req); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// requireEmployees fails with the go-live BI string [karyawan tidak terdaftar:
+// <id>] if any referenced salesperson is not in the HRIS-synced employees table.
+// One query; blanks are ignored; the first missing id (in sorted order) is
+// reported deterministically.
+func requireEmployees(ctx context.Context, tx *sql.Tx, ids []string) error {
+	want := map[string]bool{}
+	for _, id := range ids {
+		if strings.TrimSpace(id) != "" {
+			want[id] = true
+		}
+	}
+	if len(want) == 0 {
+		return nil
+	}
+	list := make([]string, 0, len(want))
+	placeholders := make([]string, 0, len(want))
+	args := make([]any, 0, len(want))
+	for id := range want {
+		list = append(list, id)
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+	sort.Strings(list)
+
+	rows, err := tx.QueryContext(ctx,
+		`SELECT employee_id FROM employees WHERE employee_id IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	found := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		found[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range list {
+		if !found[id] {
+			return fmt.Errorf(msgEmployeeNotRegistered, id)
 		}
 	}
 	return nil
