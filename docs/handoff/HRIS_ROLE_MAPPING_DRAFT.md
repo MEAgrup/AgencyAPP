@@ -4,6 +4,33 @@
 
 ---
 
+## 0. ADDENDUM — Validasi terhadap data riil (2026-07-11)
+
+Sheet HRIS asli sudah diterima (Google Sheet "Data Karyawan", 186 karyawan, **termasuk kolom EMAIL**) dan `hrisconvert --pairs` sudah dijalankan: **123 pasangan `DEPARTMENT,JABATAN` unik**, agregat lengkap di `docs/handoff/DEPARTMENT_JABATAN_PAIRS.csv` (tanpa PII). Gate kualitas data lolos: 0 NIK duplikat, 1 warning NIK 9 digit (`260210626`), 1 email `#N/A` (NIK 2309010304). Hasil pembandingan tabel §3 vs data riil:
+
+**Nama departemen: draft 100% akurat** — 16 departemen riil = 16 baris §3, tidak ada yang baru/hantu. Tapi isi jabatan riil mengubah beberapa asumsi:
+
+| Item §3 | Hasil validasi data riil |
+|---|---|
+| ADVERTISER → Ads | **✅ Terkonfirmasi kuat** — 7 orang, semua jabatan varian advertiser (ad-ops M8). |
+| MCN → KOL | **✅ Terkonfirmasi kuat** — 51 orang, didominasi CREATOR MANAGER (11), KOL CAMPAIGN/AKUISISI/SPECIALIST, INTERN KOL/MCN. |
+| AFFILIATE | **➡ Condong KOL** — hanya 1 orang ("AFFILIATE & BRAND SUPPORT"); fungsi affiliate lain justru hidup di dalam MCN (MENTOR AFFILIATE ×2, KOL & AFFILIATE SPECIALIST ×2, dll). |
+| BUSINESS DEVELOPMENT → Sales *(tentatif)* | **❌ TERBANTAH** — 7 orang, jabatan riil = CONTENT CREATOR (PERSONAL BRANDING) ×2, MARKETING STRATEGIST, PUBLIC RELATION, SEO CONTENT WRITER, SOCIAL MEDIA OFFICER, BD INTERN. Ini tim marketing/PR internal, bukan alur M0 lead→closing. Jangan seed → butuh keputusan (O25). |
+| TIKTOK GO | **⚠ Skala tak terduga: 21 orang** (dept terbesar ke-3) — LEADER TIKTOK GO, BUSINESS GROWTH & CAMPAIGN LEAD, BD & CM REGIONAL (Jakarta/Yogyakarta), CM TOP CREATOR, INTERN KOL ×5, dll. Bukan pola "vendor live-stream + AM" M10 — butuh keputusan OD eksplisit (O25). |
+| DATA & BUSINESS INTELLIGENCE | 4 orang, semua Data Analyst (1 senior, 1 mid, 2 intern) — asumsi draft (read-only/tanpa akun) tetap valid, keputusan akses tetap manusia. |
+| CREATIVE - EKSTERNAL | 6 orang, murni peran produksi (GRAPHIC DESIGNER ×3, VIDEOGRAPHER ×2, PROJECT LEAD - CONTENT STRATEGIST) — pertanyaan tersisa hanya: butuh login CDPS atau freelance tanpa akun? |
+| GROWTH & BUSINESS CONSULTATION | 2 orang, keduanya BUSINESS CONSULTANT — data tidak cukup menjawab; tetap butuh manusia. |
+| **OD** | **🚨 TABRAKAN ISTILAH (temuan kritis, O24)** — 2 karyawan dept OD adalah *Organization Development* (NIK 2501140493 SENIOR ORG DEV; NIK 2607060683 JR ORG DEV), fungsi HR/people-development. **BUKAN** otomatis kandidat layered role OD read-all CDPS seperti asumsi §2. Layered OD/Director harus ditetapkan per-orang oleh manajemen, bukan dari departemen ini. |
+
+**Kandidat `level=lead` eksplisit dari jabatan riil (14 orang):** SALES: 2101180004 (HEAD OF SALES JASA), 2508010558 (CRO MENTOR TIKTOK). ACCOUNT: 2305100275 (HEAD OF ACCOUNT), 2310020314 (LEADER CRO). CREATIVE: 2412230480 (LEADER VIDEOGRAPHER). CREATIVE-EKSTERNAL: 2410010436 (PROJECT LEAD). MCN: 2307310296 (SUPERVISOR MCN), 2601120599 (LEADER CELEBRITY & INFLUENCER CREATOR), 2504080534 + 260210626 (MENTOR AFFILIATE). TIKTOK GO: 2509010568 (LEADER TIKTOK GO), 2508260566 (BUSINESS GROWTH & CAMPAIGN LEAD). HRGA: 2409230432 (SUPERVISOR HR). SKILSKUL: 2201280064 (SPV SKILSKUL).
+**Lubang lead (O26):** Ads dan Finance tidak punya satu pun jabatan lead-pattern; "CREATOR MANAGER" (11 org, MCN) dan "ACCOUNT MANAGER" (2 org, Account) kemungkinan besar IC = `staff`, bukan lead — konfirmasi.
+
+**Status per departemen setelah validasi:** siap seed begitu lead dikonfirmasi: SALES, ACCOUNT, CREATIVE, ADVERTISER→Ads, MCN→KOL, FINANCE AND ACCOUNTING→Finance (114 karyawan). Usul tanpa akses (tinggal konfirmasi): IT (25), HRGA (8), SKILSKUL (3). Butuh keputusan (O24/O25): BUSINESS DEVELOPMENT, TIKTOK GO, DATA & BI, GROWTH & BUSINESS CONSULTATION, CREATIVE - EKSTERNAL, AFFILIATE, OD.
+
+Open item terkait: **O24** (tabrakan istilah OD), **O25** (7 dept belum terpetakan), **O26** (lead per divisi) di `docs/DECISIONS.md`.
+
+---
+
 ## 1. Cara pakai dokumen ini
 
 Tabel §3 adalah usulan pemetaan `role_mappings` (`divisi`, `jabatan` → `division`, `level`) sesuai model role CDPS di `PERMISSIONS.md` dan `backend/internal/core/permission/permission.go` + `backend/internal/admin/roles.go`. **Tidak ada baris yang di-`INSERT` ke `role_mappings` dari draft ini** — ini bahan diskusi untuk OD/Nerissa memvalidasi sebelum tim dev menjalankan `admin.UpsertRoleMapping` (pola yang sama seperti seed Alpha Digital di `backend/internal/seed/seed.go`).
@@ -86,8 +113,8 @@ Ringkasan (N baris masuk / N di-emit / N warning / N pasangan DEPARTMENT|JABATAN
 
 ## 6. Yang masih ditunggu
 
-- Sheet asli (`hris_karyawan.csv`/`.xlsx`) di-commit ke `backend/testdata/import_samples/` atau konektor Google Drive diaktifkan (lihat `docs/handoff/WAVE1_EXTERNAL_REQUESTS.md` §"⚠ Kendala akses").
-- Jawaban OD/Nerissa untuk setiap **[KONFIRMASI]** di §3 (terutama: AFFILIATE, GROWTH & BUSINESS CONSULTATION, TIKTOK GO, DATA & BUSINESS INTELLIGENCE, BUSINESS DEVELOPMENT, CREATIVE - EKSTERNAL).
+- ~~Sheet asli (`hris_karyawan.csv`/`.xlsx`) di-commit ke `backend/testdata/import_samples/` atau konektor Google Drive diaktifkan~~ **✅ selesai 2026-07-11 — sheet terbaca via konektor Google Drive, `--pairs` sudah dijalankan (lihat §0).**
+- Jawaban OD/Nerissa untuk setiap **[KONFIRMASI]** di §3 yang belum terjawab data (lihat §0; item resmi: O24/O25/O26 di `DECISIONS.md`).
 - Daftar `jabatan` riil per divisi yang sudah bermodul (Sales/Account/Creative/Ads/KOL/Finance), untuk melengkapi heuristik lead/staff dengan tabel eksplisit seperti `roleMappings` di `seed.go`.
 - Daftar employee_id kandidat layered role **OD** dan **Director** (bukan by-departemen — by-orang, sama pola `directors` di `seed.go`).
 

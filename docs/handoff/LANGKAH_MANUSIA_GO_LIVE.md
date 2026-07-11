@@ -138,6 +138,20 @@ Serahkan CSV yang sudah terisi kembali ke tim dev. Akan diinput via admin MSL at
 
 ## 4. DAFTAR NIK → EMAIL KARYAWAN (HR)
 
+> **✅ SELESAI (2026-07-11).** HR/Nerissa menyerahkan sheet HRIS lengkap **dengan kolom EMAIL**
+> (Google Sheet "Data Karyawan", 186 karyawan: No, NIK, NIK KTP, JOIN DATE, NAMA LENGKAP,
+> DEPARTMENT, JABATAN, EMAIL). Pipeline `hrisconvert --emails` sudah dijalankan dry-run dan
+> **lolos gate kualitas data** (186/186 baris, 0 email kosong). Sisa tindak lanjut HR:
+> 1. **1 karyawan tanpa email valid:** TINA JULYANA (NIK 2309010304), kolom email berisi `#N/A`
+>    — tidak bisa login sampai email resmi tersedia.
+> 2. **1 NIK 9 digit:** DELLIQ HASTARIQ ATFHAL (`260210626`, seharusnya 10 digit) — verifikasi
+>    NIK yang benar.
+> 3. **Kolom NIK KTP rusak di 5 baris** (kosong 1; notasi ilmiah Excel `3,27E+15` 3 baris:
+>    NIK 2404160366, 2601270617, 2509230573; 17 digit 1 baris: NIK 2510020578) — tidak dipakai
+>    CDPS, tapi sebaiknya diperbaiki di sheet sumber.
+>
+> Bagian di bawah dipertahankan sebagai konteks historis.
+
 ### Apa ini?
 Sheet karyawan HRIS **tidak ada kolom email**. CDPS butuh email untuk login. HR perlu menyediakan mapping.
 
@@ -201,7 +215,7 @@ Keputusan organisasi — **30 menit** jika Nerissa/OD sudah punya gambaran.
 | Prioritas | Item | Pemblokir | Estimasi |
 |---|---|---|---|
 | **1 (PARALEL)** | Sales-map (§2) | Blokir import lead & klien | 30 menit |
-| **1 (PARALEL)** | NIK→email (§4) | Blokir login CDPS | 1-2 jam |
+| ~~1 (PARALEL)~~ | ~~NIK→email (§4)~~ **✅ selesai 2026-07-11** (sisa: 1 email `#N/A`, lihat §4) | ~~Blokir login CDPS~~ | — |
 | **1 (PARALEL)** | Role mapping (§5) | Blokir sync karyawan | 30 menit |
 | **2** | Form pelengkap (§1) | Butuh sales-map selesai dulu untuk kolom `sales_pic_nik` | 2-3 hari |
 | **3** | MSL validasi (§3) | Tidak memblokir import, tapi blokir kalkulasi komisi | 1 hari |

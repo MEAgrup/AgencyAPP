@@ -130,3 +130,44 @@ func TestRun_MissingInputPathExitsWithUsageError(t *testing.T) {
 		t.Fatalf("expected missing-input message, got: %s", stderr.String())
 	}
 }
+
+func TestRun_FlagsAfterPositionalPathAreHonored(t *testing.T) {
+	// The documented invocation is `hrisconvert <original.csv> --emails ... -o ...`
+	// (path first). Standard flag parsing stops at the first positional, so
+	// without re-parsing, --emails and -o would be dropped silently — emitting
+	// login-blocking empty emails to stdout with exit code 0.
+	in := writeTemp(t, "raw.csv", rawFixture)
+	emailsCSV := writeTemp(t, "emails.csv", "nik,email\n1000000001,satu@mea.co.id\n1000000002,dua@mea.co.id\n")
+	outPath := filepath.Join(t.TempDir(), "out.csv")
+	var stdout, stderr strings.Builder
+	code := run([]string{in, "-emails", emailsCSV, "-o", outPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code=%d want 0; stderr=%s", code, stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Fatalf("expected nothing on stdout when -o is set after the path, got: %s", stdout.String())
+	}
+	body, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("-o after the path was not honored: %v", err)
+	}
+	if !strings.Contains(string(body), "1000000001,Contoh Satu,satu@mea.co.id,SALES,Sales Executive,true") {
+		t.Fatalf("-emails after the path was not honored, got: %s", body)
+	}
+	if strings.Contains(stderr.String(), "NO email") {
+		t.Fatalf("should not warn about missing emails once all are mapped: %s", stderr.String())
+	}
+}
+
+func TestRun_ExtraPositionalArgumentIsRejected(t *testing.T) {
+	in := writeTemp(t, "raw.csv", rawFixture)
+	other := writeTemp(t, "other.csv", rawFixture)
+	var stdout, stderr strings.Builder
+	code := run([]string{in, other}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("exit code=%d want 2; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "unexpected extra argument") {
+		t.Fatalf("expected extra-argument error, got: %s", stderr.String())
+	}
+}

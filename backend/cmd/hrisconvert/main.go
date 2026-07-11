@@ -48,15 +48,32 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	inPath := *in
-	if inPath == "" {
-		if fs.NArg() > 0 {
-			inPath = fs.Arg(0)
-		} else {
-			fmt.Fprintln(stderr, "hrisconvert: missing input CSV path")
+	// Standard flag parsing stops at the first positional argument, but the
+	// documented invocation is `hrisconvert <original.csv> --emails ... -o ...`
+	// — so keep parsing past the path. Flags placed after it must be honored,
+	// never dropped silently (a dropped --emails would emit 186 login-blocking
+	// empty emails with exit code 0).
+	var positional string
+	for fs.NArg() > 0 {
+		if positional != "" {
+			fmt.Fprintf(stderr, "hrisconvert: unexpected extra argument %q\n", fs.Arg(0))
 			fs.Usage()
 			return 2
 		}
+		positional = fs.Arg(0)
+		if err := fs.Parse(fs.Args()[1:]); err != nil {
+			return 2
+		}
+	}
+
+	inPath := *in
+	if inPath == "" {
+		inPath = positional
+	}
+	if inPath == "" {
+		fmt.Fprintln(stderr, "hrisconvert: missing input CSV path")
+		fs.Usage()
+		return 2
 	}
 
 	f, err := os.Open(inPath)
