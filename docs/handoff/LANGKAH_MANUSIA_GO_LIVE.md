@@ -200,16 +200,16 @@ Jika HR sudah punya data di sistem lain: **1-2 jam** (export + format). Jika har
 
 ## 5. VALIDASI ROLE MAPPING (OD/Nerissa)
 
-> **✅ 6 ITEM DIJAWAB (2026-07-11, Nerissa):** CREATIVE - EKSTERNAL = freelance/vendor tanpa
-> akun; ADVERTISER = Ads; **MCN = keluar dari CDPS** (sister company); AFFILIATE = gabung KOL;
-> BUSINESS DEVELOPMENT = di luar modul (kecuali 1 orang marketing pembuat leads awal);
-> GROWTH & BUSINESS CONSULTATION = bagian Account. Log resmi: `DECISIONS.md`; tabel status:
-> addendum §0 `HRIS_ROLE_MAPPING_DRAFT.md`.
-> **Masih ditunggu:** (a) TIKTOK GO (21 org); (b) DATA & BI (4 org); (c) NIK + divisi
-> "1 orang BD" tsb; (d) konfirmasi IT/HRGA/SKILSKUL tanpa akses; (e) daftar NIK pemegang
-> layered role OD & Director (O24 — dept "OD" HRIS = Organization Development, bukan otomatis
-> layered OD); (f) penetapan lead per divisi (O26: lead Ads? lead Finance? CREATOR MANAGER =
-> staff?).
+> **✅ SELESAI — MAPPING TUNTAS (2026-07-11, Nerissa, 2 batch):** CREATIVE - EKSTERNAL =
+> vendor tanpa akun; ADVERTISER = Ads; **MCN & TIKTOK GO = keluar dari CDPS**; AFFILIATE =
+> KOL; BD = di luar modul kecuali **Niken (2504240539) → Sales/staff**; GROWTH = Account;
+> **DATA & BI = layered role `viewer`** (read-only lintas divisi, 4 NIK); lead Ads & Finance =
+> posisi dibuat, orang menyusul (auto-mapping saat jabatan lead muncul); CREATOR MANAGER =
+> keluar sistem; ACCOUNT MANAGER = Account/staff. Log: `DECISIONS.md`; config final:
+> `ROLE_MAPPING_FINAL.csv` + `LAYERED_ROLES.csv`; tool: `backend/cmd/seedroles`.
+> **Satu-satunya yang masih ditunggu: daftar NIK pemegang layered role OD & Director**
+> (O24 — dept "OD" HRIS = Organization Development, bukan otomatis layered OD) + **NIK
+> Director untuk `--actor` import/seed**.
 
 ### Apa ini?
 File `docs/handoff/HRIS_ROLE_MAPPING_DRAFT.md` berisi usulan pemetaan 16 departemen HRIS → divisi CDPS. Ada **6 item [KONFIRMASI]** yang butuh jawaban:

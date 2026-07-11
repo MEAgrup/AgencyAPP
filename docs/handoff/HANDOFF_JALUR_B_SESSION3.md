@@ -57,7 +57,7 @@ Semua dari `LANGKAH_MANUSIA_GO_LIVE.md`, status per 2026-07-11:
 | Item | Pemilik | Status |
 |---|---|---|
 | §4 NIK→email | HR | **✅ selesai** (sisa 1 `#N/A`, lihat atas) |
-| §5 Validasi role mapping | OD/Nerissa | **🟡 6 item dijawab 2026-07-11** (lihat `DECISIONS.md`); sisa: TIKTOK GO, DATA & BI, NIK "1 orang BD", IT/HRGA/SKILSKUL, layered OD/Director (O24), lead per divisi (O26) |
+| §5 Validasi role mapping | OD/Nerissa | **✅ TUNTAS 2026-07-11** (2 batch; O25+O26 resolved — lihat `DECISIONS.md`); config: `ROLE_MAPPING_FINAL.csv` + `LAYERED_ROLES.csv`, tool `cmd/seedroles`; sisa hanya O24: NIK layered OD & Director |
 | §2 Sales-map | Sales Head + HR | **✅ selesai 2026-07-11** — tanpa nickname kecuali `Cena,2101180004`; file digenerate dari data karyawan: `docs/handoff/sales_map.csv` (187 baris); nama tak-ter-resolve akan muncul di dry-run |
 | §1 Form pelengkap 239 klien aktif | CRO + Finance | ⏳ dikirim menyusul (konfirmasi Nerissa 2026-07-11) |
 | §3 Validasi MSL | Sales Head | **🟡 basis harga ditetapkan** ("Kalkulator Service Jasa", rekonsiliasi: `MSL_REKONSILIASI.md`); sisa: commission_rule per layanan + harga layanan ledger tanpa padanan kalkulator |
@@ -65,9 +65,11 @@ Semua dari `LANGKAH_MANUSIA_GO_LIVE.md`, status per 2026-07-11:
 
 ## Sesi berikutnya
 
-1. Begitu jawaban O24–O26 masuk: tulis seed script `role_mappings` + layered roles
-   (pola `admin.UpsertRoleMapping` / `admin.SetLayeredRole`, JANGAN timpa `seed.go`),
-   lalu sync karyawan via CSV fallback (`internal/hris/sync.go`).
+1. ~~Begitu jawaban O24–O26 masuk: tulis seed script~~ **✅ selesai 2026-07-11:**
+   `backend/cmd/seedroles` (dry-run tanpa DB / apply) + layered role `viewer` baru +
+   `ROLE_MAPPING_FINAL.csv`/`LAYERED_ROLES.csv`. Sisa untuk apply riil: **NIK Director
+   (`--actor`)** + jawaban **O24** (NIK layered OD/Director) + DB termigrasi, lalu
+   sync karyawan via CSV fallback (`internal/hris/sync.go`).
 2. Begitu form pelengkap + sales-map masuk: jalankan urutan import §A
    `HANDOFF_JALUR_B_SESSION2.md` (leads → clients → dormant; dry-run dulu).
    **Catatan CLI:** sejak fix sesi ini urutan flag bebas, tapi konvensi aman tetap
