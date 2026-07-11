@@ -67,7 +67,7 @@ func defaultMachines() map[string]*Machine {
 		{
 			name:     MProspectAttempt,
 			initial:  "Pending Validation",
-			terminal: []string{"Not Qualified", "Closed-Success", "Closed-Lost", "Blocked"},
+			terminal: []string{"Not Qualified", "Closed-Success", "Closed-Lost", "Blocked", "[Closed - Kalah Kompetisi]"},
 			edges: []edge{
 				{from: "Pending Validation", to: "New Lead"},
 				{from: "New Lead", to: "Contacted"},
@@ -78,16 +78,29 @@ func defaultMachines() map[string]*Machine {
 				{from: "Negotiation - Pending Approval", to: "Negotiation - Approved", requireLead: true},
 				{from: "Negotiation - Pending Approval", to: "Negotiation - Revision Required", requireLead: true},
 				{from: "Negotiation - Pending Approval", to: "Negotiation - Rejected", requireLead: true},
-				{from: "Negotiation - Revision Required", to: "Negotiation - Approved", requireLead: true},
+				// DECISIONS O18 (stream A): "accept counter-offer" is the SALESPERSON's
+				// action (M0 §5 line 122 "system syncs values"), not the superior's —
+				// so this edge is NOT lead-restricted.
+				{from: "Negotiation - Revision Required", to: "Negotiation - Approved"},
 				{from: "Negotiation - Revision Required", to: "Negotiation - Pending Approval"},
-				// DECISIONS O16: a rejected proposal may be resubmitted (new version)
-				// or the attempt closed as lost.
+				// DECISIONS O16 (stream B) == O21 (stream A): a rejected proposal may be
+				// resubmitted by the salesperson (new version) or the attempt closed as lost.
 				{from: "Negotiation - Rejected", to: "Negotiation - Pending Approval"},
 				{from: "Negotiation - Rejected", to: "Closed-Lost"},
 				{from: "Negotiation - Approved", to: "Closed-Success"},
 				{from: "Negotiation - Approved", to: "Closed-Lost"},
 				{from: "Negotiation - Auto Approved", to: "Closed-Success"},
 				{from: "Negotiation - Auto Approved", to: "Closed-Lost"},
+				// Pool-competition auto-loss (M1 §6 rule 5 / STATE_MACHINES §1): every
+				// open pursuit state may be closed as [Closed - Kalah Kompetisi] when a
+				// competitor wins the lead. Driven only by win resolution (system actor).
+				{from: "New Lead", to: "[Closed - Kalah Kompetisi]"},
+				{from: "Contacted", to: "[Closed - Kalah Kompetisi]"},
+				{from: "Qualified", to: "[Closed - Kalah Kompetisi]"},
+				{from: "Negotiation - Pending Approval", to: "[Closed - Kalah Kompetisi]"},
+				{from: "Negotiation - Revision Required", to: "[Closed - Kalah Kompetisi]"},
+				{from: "Negotiation - Approved", to: "[Closed - Kalah Kompetisi]"},
+				{from: "Negotiation - Auto Approved", to: "[Closed - Kalah Kompetisi]"},
 			},
 		},
 		// §2 Lead record (M1). Only the representable transitions.
