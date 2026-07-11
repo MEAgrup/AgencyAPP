@@ -87,11 +87,115 @@ func TestParseDailyLeadsFilterB(t *testing.T) {
 		BeforeSince:     1, // fajar lama (2025)
 		BadDate:         1, // gina tanpa tanggal
 		EmptyPhone:      1, // hani tanpa hp
-		SalesUnresolved: 1, // Tono not in map
+		SalesUnresolved: 1, // Tono not in map, no NameIndex fallback configured
 		Emitted:         3,
+		Unresolved:      []UnresolvedSalesReport{{Name: "Tono", Count: 1}},
 	}
-	if stats != want {
+	if !statsEqual(stats, want) {
 		t.Fatalf("stats:\n got %+v\nwant %+v", stats, want)
+	}
+}
+
+// statsEqual compares LeadSkipStats including the Unresolved slice (plain !=
+// no longer works once the struct carries a slice field).
+func statsEqual(a, b LeadSkipStats) bool {
+	if a.Malformed != b.Malformed || a.FilteredOut != b.FilteredOut || a.BeforeSince != b.BeforeSince ||
+		a.BadDate != b.BadDate || a.EmptyPhone != b.EmptyPhone || a.SalesUnresolved != b.SalesUnresolved ||
+		a.Emitted != b.Emitted {
+		return false
+	}
+	if len(a.Unresolved) != len(b.Unresolved) {
+		return false
+	}
+	for i := range a.Unresolved {
+		if a.Unresolved[i] != b.Unresolved[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestParseDailyLeadsNameIndexFallback exercises the full-name fallback
+// (DECISIONS 2026-07-11) end-to-end: "Tono" (unmapped in SalesMap) resolves via
+// NameIndex once an employees full-name index is supplied, case/space
+// differences and all; an ambiguous name still lands unresolved but is flagged
+// in the report instead of silently disappearing.
+func TestParseDailyLeadsNameIndexFallback(t *testing.T) {
+	idx := NewEmployeeNameIndex([]EmployeeRef{
+		{EmployeeID: "EMP-TONO", Nama: "  tono   "}, // normalizes to "tono", matches sheet's "Tono"
+	})
+	rows, stats, err := ParseDailyLeads(strings.NewReader(dailyLeadsFixture), LeadParseOptions{
+		Since:     day(2026, 1, 10),
+		SalesMap:  map[string]string{"Andi": "EMP-ANDI"},
+		NameIndex: idx,
+	})
+	if err != nil {
+		t.Fatalf("ParseDailyLeads: %v", err)
+	}
+	if rows[2].SalesPemegang != "EMP-TONO" || rows[2].StatusTerakhir != "diproses" {
+		t.Fatalf("row2 must resolve via NameIndex fallback: %+v", rows[2])
+	}
+	if stats.SalesUnresolved != 0 {
+		t.Fatalf("no row should be unresolved once NameIndex covers Tono: %+v", stats)
+	}
+	if len(stats.Unresolved) != 0 {
+		t.Fatalf("Unresolved report must be empty: %+v", stats.Unresolved)
+	}
+}
+
+// TestParseDailyLeadsAmbiguousNameReported: an ambiguous employees name (shared
+// by two employees) must NOT auto-resolve, and the distinct-unresolved report
+// must flag it so the Sales Head can add a sales_map.csv override — the spec's
+// "never silently drop this information" requirement.
+func TestParseDailyLeadsAmbiguousNameReported(t *testing.T) {
+	idx := NewEmployeeNameIndex([]EmployeeRef{
+		{EmployeeID: "EMP-T1", Nama: "Tono"},
+		{EmployeeID: "EMP-T2", Nama: "Tono"},
+	})
+	rows, stats, err := ParseDailyLeads(strings.NewReader(dailyLeadsFixture), LeadParseOptions{
+		Since:     day(2026, 1, 10),
+		SalesMap:  map[string]string{"Andi": "EMP-ANDI"},
+		NameIndex: idx,
+	})
+	if err != nil {
+		t.Fatalf("ParseDailyLeads: %v", err)
+	}
+	if rows[2].SalesPemegang != "" || rows[2].StatusTerakhir != "pool" {
+		t.Fatalf("ambiguous name must not auto-resolve: %+v", rows[2])
+	}
+	if stats.SalesUnresolved != 1 {
+		t.Fatalf("SalesUnresolved: %d", stats.SalesUnresolved)
+	}
+	if len(stats.Unresolved) != 1 || stats.Unresolved[0].Name != "Tono" || !stats.Unresolved[0].Ambiguous {
+		t.Fatalf("Unresolved report must flag Tono as ambiguous: %+v", stats.Unresolved)
+	}
+}
+
+// TestParseDailyLeadsSalesMapEmptyIDShortCircuits: a sales_map.csv row mapping
+// a name to an EMPTY employee_id (deliberate no-PIC source, e.g. a bot) must
+// short-circuit — no PIC, but also NOT counted/reported as unresolved, and it
+// must not fall through to the NameIndex fallback even if that name happens to
+// also exist in employees.
+func TestParseDailyLeadsSalesMapEmptyIDShortCircuits(t *testing.T) {
+	idx := NewEmployeeNameIndex([]EmployeeRef{
+		{EmployeeID: "EMP-TONO", Nama: "Tono"}, // would otherwise resolve via fallback
+	})
+	rows, stats, err := ParseDailyLeads(strings.NewReader(dailyLeadsFixture), LeadParseOptions{
+		Since:     day(2026, 1, 10),
+		SalesMap:  map[string]string{"Andi": "EMP-ANDI", "Tono": ""}, // deliberate no-PIC override
+		NameIndex: idx,
+	})
+	if err != nil {
+		t.Fatalf("ParseDailyLeads: %v", err)
+	}
+	if rows[2].SalesPemegang != "" || rows[2].StatusTerakhir != "pool" {
+		t.Fatalf("empty-NIK override must leave the row without a PIC: %+v", rows[2])
+	}
+	if stats.SalesUnresolved != 0 {
+		t.Fatalf("deliberate no-PIC override must NOT count as unresolved: %d", stats.SalesUnresolved)
+	}
+	if len(stats.Unresolved) != 0 {
+		t.Fatalf("deliberate no-PIC override must NOT appear in the report: %+v", stats.Unresolved)
 	}
 }
 

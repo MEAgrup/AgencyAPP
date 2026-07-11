@@ -14,7 +14,16 @@
 //
 // Format kolom isian form: alokasi_sales "NIK:50|NIK:50" (Σ=100), jadwal_termin
 // & pembayaran_terverifikasi "amount@YYYY-MM-DD|..." , konfirmasi_aktif Y/N.
-// --sales-map: CSV dua kolom "nickname,employee_id" (nama panggilan sheet → NIK).
+//
+// Resolusi Nama Sales (DECISIONS 2026-07-11, "TIDAK ada sistem nickname"): sheet
+// sumber menulis NAMA LENGKAP sales (satu-satunya nickname: "Cena", Sales Head).
+// leads-dryrun/leads-apply otomatis me-resolusi nama lengkap → employee_id dari
+// tabel employees (case-insensitive, spasi dirapikan); nama yang dimiliki >1
+// karyawan TIDAK diresolusi otomatis (ambigu). --sales-map kini murni file
+// override PENGECUALIAN, dua kolom "nama_sheet,employee_id", contoh minimal:
+// "Cena,<NIK Sales Head>". Baris dengan employee_id kosong berarti sengaja
+// tanpa PIC (mis. bot "Cekat AI") dan tidak dihitung/ditampilkan sebagai
+// unresolved. --sales-map tetap sepenuhnya opsional.
 //
 // DB: env CDPS_DSN (skema harus sudah termigrasi; jalankan `migrate up` dulu).
 // Dry-run memegang lock id_sequences selama batch — jalankan saat maintenance
@@ -48,7 +57,7 @@ func main() {
 	actorID := fs.String("actor", "", "employee_id pelaksana (wajib Director)")
 	file := fs.String("file", "", "CSV Daily Leads (leads-*)")
 	since := fs.String("since", "", "batas bawah tanggal lead YYYY-MM-DD (default: 6 bulan sebelum hari ini)")
-	salesMap := fs.String("sales-map", "", "CSV nickname,employee_id untuk resolusi Nama Sales")
+	salesMap := fs.String("sales-map", "", "CSV nama_sheet,employee_id — override pengecualian (opsional; contoh: Cena,<NIK Sales Head>); resolusi utama otomatis dari nama lengkap di tabel employees")
 	dbJasa := fs.String("db-jasa", "", "CSV ledger db_jasa (gen-form / dormant-*)")
 	contacts := fs.String("contacts", "", "CSV Sheet72 untuk pengayaan kontak (gen-form)")
 	runDate := fs.String("run-date", "", "tanggal acuan klasifikasi aktif/dormant YYYY-MM-DD (default: hari ini)")
@@ -112,13 +121,22 @@ func main() {
 	case "leads-dryrun", "leads-apply":
 		f := mustOpen(*file)
 		defer f.Close()
-		opt := importer.LeadParseOptions{Since: leadSince(*since), SalesMap: loadSalesMap(*salesMap)}
+		nameIdx, err := importer.LoadEmployeeNameIndex(ctx, d)
+		if err != nil {
+			log.Fatalf("muat employees untuk resolusi Nama Sales: %v", err)
+		}
+		opt := importer.LeadParseOptions{
+			Since:     leadSince(*since),
+			SalesMap:  loadSalesMap(*salesMap),
+			NameIndex: nameIdx,
+		}
 		rows, stats, err := importer.ParseDailyLeads(f, opt)
 		if err != nil {
 			log.Fatalf("parse: %v", err)
 		}
-		fmt.Printf("parser: %d lead lolos filter B (sejak %s); skip: %d di luar filter, %d sebelum batas, %d tanggal rusak, %d tanpa HP, %d malformed; %d nickname sales tak ter-resolusi\n",
+		fmt.Printf("parser: %d lead lolos filter B (sejak %s); skip: %d di luar filter, %d sebelum batas, %d tanggal rusak, %d tanpa HP, %d malformed; %d nama sales tak ter-resolusi\n",
 			stats.Emitted, opt.Since.Format("2006-01-02"), stats.FilteredOut, stats.BeforeSince, stats.BadDate, stats.EmptyPhone, stats.Malformed, stats.SalesUnresolved)
+		printUnresolvedSales(stats.Unresolved)
 		var rep importer.Report
 		if cmd == "leads-apply" {
 			rep, err = svc.Apply(ctx, actor, rows, nil)
@@ -247,11 +265,32 @@ func loadSalesMap(path string) map[string]string {
 	}
 	m := map[string]string{}
 	for _, r := range recs {
-		if len(r) >= 2 && strings.TrimSpace(r[0]) != "" && !strings.EqualFold(strings.TrimSpace(r[0]), "nickname") {
-			m[strings.TrimSpace(r[0])] = strings.TrimSpace(r[1])
+		h := strings.TrimSpace(r[0])
+		if len(r) >= 2 && h != "" && !strings.EqualFold(h, "nickname") && !strings.EqualFold(h, "nama_sheet") {
+			m[h] = strings.TrimSpace(r[1])
 		}
 	}
 	return m
+}
+
+// printUnresolvedSales prints the DISTINCT sales names ParseDailyLeads could
+// not resolve (neither --sales-map nor the automatic full-name fallback),
+// each with its row count and an [AMBIGU] marker when the name matches more
+// than one employee — so the Sales Head sees exactly which names to add to
+// sales_map.csv instead of only a bare counter (spec point 3: never silently
+// drop this information).
+func printUnresolvedSales(unresolved []importer.UnresolvedSalesReport) {
+	if len(unresolved) == 0 {
+		return
+	}
+	fmt.Println("nama sales tak ter-resolusi (lengkapi sales_map.csv):")
+	for _, u := range unresolved {
+		marker := ""
+		if u.Ambiguous {
+			marker = " [AMBIGU: >1 karyawan bernama sama]"
+		}
+		fmt.Printf("  %q — %d baris%s\n", u.Name, u.Count, marker)
+	}
 }
 
 // printReport prints the reconciliation counts plus every non-clean row (BI

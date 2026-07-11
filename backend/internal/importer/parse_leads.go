@@ -25,23 +25,35 @@ type LeadParseOptions struct {
 	// defaults it to 6 months before the run date; a zero value disables the
 	// date bound (used by pure tests).
 	Since time.Time
-	// SalesMap resolves a sheet sales nickname (e.g. "Cena") to an employee_id.
-	// A nickname absent from the map leaves SalesPemegang empty (counted in
-	// LeadSkipStats.SalesUnresolved) and the lead lands as [Pool] rather than
-	// [diproses].
+	// SalesMap is the sales_map.csv EXCEPTION override (DECISIONS 2026-07-11):
+	// an explicit "raw sheet name -> employee_id" entry. Highest precedence —
+	// checked BEFORE the automatic full-name fallback. An entry mapping to an
+	// EMPTY employee_id is a deliberate no-PIC marker (e.g. a bot source like
+	// "Cekat AI"): it short-circuits resolution for that name (no PIC, NOT
+	// counted as unresolved, never falls through to NameIndex).
 	SalesMap map[string]string
+	// NameIndex is the automatic fallback: normalized full-name -> employee_id,
+	// built from the live `employees` table (LoadEmployeeNameIndex). Used only
+	// for names absent from SalesMap. A nil index disables the fallback (pure
+	// unit tests that only exercise SalesMap).
+	NameIndex *EmployeeNameIndex
 }
 
 // LeadSkipStats is the per-reason tally of rows the parser did NOT emit, plus
-// the (non-skip) count of rows whose sales nickname did not resolve.
+// the (non-skip) count of rows whose sales name did not resolve.
 type LeadSkipStats struct {
 	Malformed       int // no name AND no phone
 	FilteredOut     int // failed filter B (not Qualify / Hot / Warm)
 	BeforeSince     int // dated before Since
 	BadDate         int // empty / unparseable Tanggal
 	EmptyPhone      int // passed the filter but phone empty (cannot dedup)
-	SalesUnresolved int // nickname present but not in SalesMap (row still emitted)
+	SalesUnresolved int // name present but not resolved by SalesMap nor NameIndex (row still emitted)
 	Emitted         int // rows returned (== len(rows))
+
+	// Unresolved lists the DISTINCT raw sales names that did not resolve (with
+	// per-name row counts and an ambiguous flag), so the operator sees exactly
+	// which names to add to sales_map.csv instead of only a bare counter.
+	Unresolved []UnresolvedSalesReport
 }
 
 // leadCols holds the resolved 0-based column indices for the sheet.
@@ -65,6 +77,7 @@ func ParseDailyLeads(r io.Reader, opt LeadParseOptions) (rows []LeadRow, skipped
 	if err != nil {
 		return nil, skipped, err
 	}
+	unresolved := newUnresolvedSalesTracker()
 
 	for _, rec := range records[hdrIdx+1:] {
 		get := func(i int) string {
@@ -103,13 +116,16 @@ func ParseDailyLeads(r io.Reader, opt LeadParseOptions) (rows []LeadRow, skipped
 			continue
 		}
 
-		salesNick := get(cols.sales)
+		salesName := get(cols.sales)
 		salesID := ""
-		if salesNick != "" {
-			if id, found := opt.SalesMap[salesNick]; found && strings.TrimSpace(id) != "" {
-				salesID = strings.TrimSpace(id)
+		if salesName != "" {
+			if id, found, shortCircuit := resolveSalesName(salesName, opt); shortCircuit {
+				salesID = id // explicit map entry: resolved (id != "") or deliberate no-PIC (id == "")
+			} else if found {
+				salesID = id
 			} else {
 				skipped.SalesUnresolved++
+				unresolved.add(salesName, opt.NameIndex.Ambiguous(salesName))
 			}
 		}
 		status := "pool"
@@ -128,7 +144,30 @@ func ParseDailyLeads(r io.Reader, opt LeadParseOptions) (rows []LeadRow, skipped
 		})
 	}
 	skipped.Emitted = len(rows)
+	skipped.Unresolved = unresolved.report()
 	return rows, skipped, nil
+}
+
+// resolveSalesName runs the precedence order for one row's raw sales name
+// (DECISIONS 2026-07-11): explicit sales_map.csv entry first (including its
+// empty-employee_id short-circuit for a deliberate no-PIC source), then the
+// automatic full-name fallback against NameIndex.
+//
+// Return shape: id is the resolved employee_id (possibly "" for a deliberate
+// no-PIC map entry); shortCircuit is true iff an explicit SalesMap entry
+// matched (caller must NOT fall through to the unresolved counter/report in
+// that case, even when id == ""); found is true iff the NameIndex fallback
+// produced a unique match (only consulted when shortCircuit is false).
+func resolveSalesName(rawName string, opt LeadParseOptions) (id string, found bool, shortCircuit bool) {
+	if mapped, ok := opt.SalesMap[rawName]; ok {
+		return strings.TrimSpace(mapped), false, true
+	}
+	if opt.NameIndex != nil {
+		if resolvedID, ok := opt.NameIndex.Resolve(rawName); ok {
+			return resolvedID, true, false
+		}
+	}
+	return "", false, false
 }
 
 // leadNote combines the free-text Note with compact provenance markers so the
