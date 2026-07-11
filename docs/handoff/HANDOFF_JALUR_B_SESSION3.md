@@ -57,10 +57,10 @@ Semua dari `LANGKAH_MANUSIA_GO_LIVE.md`, status per 2026-07-11:
 | Item | Pemilik | Status |
 |---|---|---|
 | §4 NIK→email | HR | **✅ selesai** (sisa 1 `#N/A`, lihat atas) |
-| §5 Validasi role mapping — kini konkret: jawab **O24/O25/O26** | OD/Nerissa | ⏳ diperbarui dgn data riil, tinggal jawaban |
-| §2 Sales-map nama panggilan→NIK (Cena, Esal, …) | Sales Head + HR | ⏳ belum |
-| §1 Form pelengkap 239 klien aktif | CRO + Finance | ⏳ belum |
-| §3 Validasi MSL (180 layanan: standard_price + commission_rule) | Sales Head | ⏳ belum |
+| §5 Validasi role mapping | OD/Nerissa | **🟡 6 item dijawab 2026-07-11** (lihat `DECISIONS.md`); sisa: TIKTOK GO, DATA & BI, NIK "1 orang BD", IT/HRGA/SKILSKUL, layered OD/Director (O24), lead per divisi (O26) |
+| §2 Sales-map | Sales Head + HR | **✅ selesai 2026-07-11** — tanpa nickname kecuali `Cena,2101180004`; file digenerate dari data karyawan: `docs/handoff/sales_map.csv` (187 baris); nama tak-ter-resolve akan muncul di dry-run |
+| §1 Form pelengkap 239 klien aktif | CRO + Finance | ⏳ dikirim menyusul (konfirmasi Nerissa 2026-07-11) |
+| §3 Validasi MSL | Sales Head | **🟡 basis harga ditetapkan** ("Kalkulator Service Jasa", rekonsiliasi: `MSL_REKONSILIASI.md`); sisa: commission_rule per layanan + harga layanan ledger tanpa padanan kalkulator |
 | NIK Director untuk `--actor` import | Nerissa | ⏳ belum |
 
 ## Sesi berikutnya

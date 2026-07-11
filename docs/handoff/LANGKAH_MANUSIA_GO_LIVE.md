@@ -65,6 +65,18 @@ Baris yang ditolak akan dilaporkan dengan nomor baris + alasan — perbaiki lalu
 
 ## 2. SALES-MAP: Nama Panggilan → NIK (Sales Head + HR)
 
+> **✅ DISEDERHANAKAN (2026-07-11, klarifikasi Nerissa).** Sales TIDAK memakai nickname —
+> semua tercatat dengan **nama lengkap** sesuai HRIS, kecuali **Sales Head** yang memakai
+> nickname **"Cena"** (= CUCU NURHAYATI, NIK `2101180004`, satu-satunya HEAD OF SALES JASA).
+> `sales_map.csv` **sudah digenerate** dari data karyawan (187 baris: `Cena,2101180004` +
+> 186 nama lengkap→NIK): `docs/handoff/sales_map.csv` — importer me-resolve hanya via map ini
+> (lookup exact-match, case-sensitive), jadi seluruh nama dimasukkan sekaligus.
+> Dry-run import tetap melaporkan setiap nama yang tidak ter-resolve —
+> kalau di data lama masih muncul sisa nickname historis (mis. "Esal"/"Waba-JKT" yang pernah
+> terlihat di sampel), tinggal tambahkan barisnya saat itu. Log: `DECISIONS.md` 2026-07-11.
+>
+> Bagian di bawah dipertahankan sebagai konteks historis.
+
 ### Apa ini?
 Di spreadsheet lama, nama sales ditulis sebagai nama panggilan (Cena, Esal, Waba-JKT, dll). CDPS butuh NIK resmi. Butuh tabel konversi.
 
@@ -102,6 +114,14 @@ Daftar nama terbatas (~15-20 orang). **30 menit** jika Sales Head langsung tahu.
 ---
 
 ## 3. VALIDASI MSL — Master Service List (Sales Head)
+
+> **📌 UPDATE (2026-07-11, Nerissa):** basis harga resmi = Google Sheet **"Kalkulator Service
+> Jasa"** (`1vUbJDcbuqmqrcEMoTTbiYbGil0zTp8Of_jH6070m644`) — "kadang klien minta negosiasi
+> harga, tapi basicnya dari sini" (harga nego per deal tetap lewat approval negosiasi, sesuai
+> keputusan M0 OD-2). Rekonsiliasi kalkulator vs 180 layanan ledger:
+> `docs/handoff/MSL_REKONSILIASI.md`. **Yang masih dibutuhkan dari Sales Head:**
+> `usulan_commission_rule` per layanan (tidak ada di kalkulator) + konfirmasi harga untuk
+> layanan ledger yang tidak punya padanan di kalkulator.
 
 ### Apa ini?
 File `docs/handoff/MSL_DRAFT_KOMPILASI.csv` berisi 180 layanan yang dikompilasi dari 1.517 deal di ledger lama. Sistem sudah mengelompokkan dan menghitung statistik harga, tapi **dua kolom paling penting SENGAJA KOSONG**:
@@ -180,6 +200,17 @@ Jika HR sudah punya data di sistem lain: **1-2 jam** (export + format). Jika har
 
 ## 5. VALIDASI ROLE MAPPING (OD/Nerissa)
 
+> **✅ 6 ITEM DIJAWAB (2026-07-11, Nerissa):** CREATIVE - EKSTERNAL = freelance/vendor tanpa
+> akun; ADVERTISER = Ads; **MCN = keluar dari CDPS** (sister company); AFFILIATE = gabung KOL;
+> BUSINESS DEVELOPMENT = di luar modul (kecuali 1 orang marketing pembuat leads awal);
+> GROWTH & BUSINESS CONSULTATION = bagian Account. Log resmi: `DECISIONS.md`; tabel status:
+> addendum §0 `HRIS_ROLE_MAPPING_DRAFT.md`.
+> **Masih ditunggu:** (a) TIKTOK GO (21 org); (b) DATA & BI (4 org); (c) NIK + divisi
+> "1 orang BD" tsb; (d) konfirmasi IT/HRGA/SKILSKUL tanpa akses; (e) daftar NIK pemegang
+> layered role OD & Director (O24 — dept "OD" HRIS = Organization Development, bukan otomatis
+> layered OD); (f) penetapan lead per divisi (O26: lead Ads? lead Finance? CREATOR MANAGER =
+> staff?).
+
 ### Apa ini?
 File `docs/handoff/HRIS_ROLE_MAPPING_DRAFT.md` berisi usulan pemetaan 16 departemen HRIS → divisi CDPS. Ada **6 item [KONFIRMASI]** yang butuh jawaban:
 
@@ -214,7 +245,7 @@ Keputusan organisasi — **30 menit** jika Nerissa/OD sudah punya gambaran.
 
 | Prioritas | Item | Pemblokir | Estimasi |
 |---|---|---|---|
-| **1 (PARALEL)** | Sales-map (§2) | Blokir import lead & klien | 30 menit |
+| **1 (PARALEL)** | Sales-map (§2) — **disederhanakan 2026-07-11**: hanya `Cena,2101180004`; sisanya nama lengkap (auto) | Blokir import lead & klien | ~selesai (finalisasi saat dry-run) |
 | ~~1 (PARALEL)~~ | ~~NIK→email (§4)~~ **✅ selesai 2026-07-11** (sisa: 1 email `#N/A`, lihat §4) | ~~Blokir login CDPS~~ | — |
 | **1 (PARALEL)** | Role mapping (§5) | Blokir sync karyawan | 30 menit |
 | **2** | Form pelengkap (§1) | Butuh sales-map selesai dulu untuk kolom `sales_pic_nik` | 2-3 hari |

@@ -10,22 +10,30 @@ Sheet HRIS asli sudah diterima (Google Sheet "Data Karyawan", 186 karyawan, **te
 
 **Nama departemen: draft 100% akurat** — 16 departemen riil = 16 baris §3, tidak ada yang baru/hantu. Tapi isi jabatan riil mengubah beberapa asumsi:
 
-| Item §3 | Hasil validasi data riil |
-|---|---|
-| ADVERTISER → Ads | **✅ Terkonfirmasi kuat** — 7 orang, semua jabatan varian advertiser (ad-ops M8). |
-| MCN → KOL | **✅ Terkonfirmasi kuat** — 51 orang, didominasi CREATOR MANAGER (11), KOL CAMPAIGN/AKUISISI/SPECIALIST, INTERN KOL/MCN. |
-| AFFILIATE | **➡ Condong KOL** — hanya 1 orang ("AFFILIATE & BRAND SUPPORT"); fungsi affiliate lain justru hidup di dalam MCN (MENTOR AFFILIATE ×2, KOL & AFFILIATE SPECIALIST ×2, dll). |
-| BUSINESS DEVELOPMENT → Sales *(tentatif)* | **❌ TERBANTAH** — 7 orang, jabatan riil = CONTENT CREATOR (PERSONAL BRANDING) ×2, MARKETING STRATEGIST, PUBLIC RELATION, SEO CONTENT WRITER, SOCIAL MEDIA OFFICER, BD INTERN. Ini tim marketing/PR internal, bukan alur M0 lead→closing. Jangan seed → butuh keputusan (O25). |
-| TIKTOK GO | **⚠ Skala tak terduga: 21 orang** (dept terbesar ke-3) — LEADER TIKTOK GO, BUSINESS GROWTH & CAMPAIGN LEAD, BD & CM REGIONAL (Jakarta/Yogyakarta), CM TOP CREATOR, INTERN KOL ×5, dll. Bukan pola "vendor live-stream + AM" M10 — butuh keputusan OD eksplisit (O25). |
-| DATA & BUSINESS INTELLIGENCE | 4 orang, semua Data Analyst (1 senior, 1 mid, 2 intern) — asumsi draft (read-only/tanpa akun) tetap valid, keputusan akses tetap manusia. |
-| CREATIVE - EKSTERNAL | 6 orang, murni peran produksi (GRAPHIC DESIGNER ×3, VIDEOGRAPHER ×2, PROJECT LEAD - CONTENT STRATEGIST) — pertanyaan tersisa hanya: butuh login CDPS atau freelance tanpa akun? |
-| GROWTH & BUSINESS CONSULTATION | 2 orang, keduanya BUSINESS CONSULTANT — data tidak cukup menjawab; tetap butuh manusia. |
+> **UPDATE 2026-07-11 — JAWABAN NERISSA MASUK** untuk 6 item (baris ⚖ di bawah; log resmi:
+> `DECISIONS.md` baris "Role-mapping 6 jawaban Nerissa"). Masih open: TIKTOK GO, DATA & BI,
+> identitas "1 orang BD", layered OD/Director (O24), level lead per divisi (O26).
+
+| Item §3 | Hasil validasi data riil | ⚖ Keputusan Nerissa (2026-07-11) |
+|---|---|---|
+| ADVERTISER → Ads | **✅ Terkonfirmasi kuat** — 7 orang, semua jabatan varian advertiser (ad-ops M8). | **✅ Ads.** |
+| MCN → KOL | **✅ Terkonfirmasi kuat** — 51 orang, didominasi CREATOR MANAGER (11), KOL CAMPAIGN/AKUISISI/SPECIALIST, INTERN KOL/MCN. | **⛔ KELUAR dari CDPS** — divisi lain di sister company, tanpa akun. (Mengoreksi usulan draft.) |
+| AFFILIATE | **➡ Condong KOL** — hanya 1 orang ("AFFILIATE & BRAND SUPPORT"); fungsi affiliate lain justru hidup di dalam MCN (MENTOR AFFILIATE ×2, KOL & AFFILIATE SPECIALIST ×2, dll). | **✅ Gabung KOL.** Konsekuensi: divisi KOL internal = 1 orang (NIK 2503100008) — lihat pertanyaan M9 di O25. |
+| BUSINESS DEVELOPMENT → Sales *(tentatif)* | **❌ TERBANTAH** — 7 orang, jabatan riil = CONTENT CREATOR (PERSONAL BRANDING) ×2, MARKETING STRATEGIST, PUBLIC RELATION, SEO CONTENT WRITER, SOCIAL MEDIA OFFICER, BD INTERN. Ini tim marketing/PR internal, bukan alur M0 lead→closing. | **⛔ Di luar modul CDPS**, KECUALI 1 orang bagian marketing pembuat leads awal — **NIK + divisi tujuannya belum disebut** (O25c). |
+| TIKTOK GO | **⚠ Skala tak terduga: 21 orang** (dept terbesar ke-3) — LEADER TIKTOK GO, BUSINESS GROWTH & CAMPAIGN LEAD, BD & CM REGIONAL (Jakarta/Yogyakarta), CM TOP CREATOR, INTERN KOL ×5, dll. Bukan pola "vendor live-stream + AM" M10. | ⏳ **Belum dijawab** (O25a). |
+| DATA & BUSINESS INTELLIGENCE | 4 orang, semua Data Analyst (1 senior, 1 mid, 2 intern) — asumsi draft (read-only/tanpa akun) tetap valid. | ⏳ **Belum dijawab** (O25b). |
+| CREATIVE - EKSTERNAL | 6 orang, murni peran produksi (GRAPHIC DESIGNER ×3, VIDEOGRAPHER ×2, PROJECT LEAD - CONTENT STRATEGIST). | **⛔ Freelance/vendor tanpa akun CDPS.** |
+| GROWTH & BUSINESS CONSULTATION | 2 orang, keduanya BUSINESS CONSULTANT — data tidak cukup menjawab. | **✅ Bagian dari Account.** |
 | **OD** | **🚨 TABRAKAN ISTILAH (temuan kritis, O24)** — 2 karyawan dept OD adalah *Organization Development* (NIK 2501140493 SENIOR ORG DEV; NIK 2607060683 JR ORG DEV), fungsi HR/people-development. **BUKAN** otomatis kandidat layered role OD read-all CDPS seperti asumsi §2. Layered OD/Director harus ditetapkan per-orang oleh manajemen, bukan dari departemen ini. |
 
 **Kandidat `level=lead` eksplisit dari jabatan riil (14 orang):** SALES: 2101180004 (HEAD OF SALES JASA), 2508010558 (CRO MENTOR TIKTOK). ACCOUNT: 2305100275 (HEAD OF ACCOUNT), 2310020314 (LEADER CRO). CREATIVE: 2412230480 (LEADER VIDEOGRAPHER). CREATIVE-EKSTERNAL: 2410010436 (PROJECT LEAD). MCN: 2307310296 (SUPERVISOR MCN), 2601120599 (LEADER CELEBRITY & INFLUENCER CREATOR), 2504080534 + 260210626 (MENTOR AFFILIATE). TIKTOK GO: 2509010568 (LEADER TIKTOK GO), 2508260566 (BUSINESS GROWTH & CAMPAIGN LEAD). HRGA: 2409230432 (SUPERVISOR HR). SKILSKUL: 2201280064 (SPV SKILSKUL).
 **Lubang lead (O26):** Ads dan Finance tidak punya satu pun jabatan lead-pattern; "CREATOR MANAGER" (11 org, MCN) dan "ACCOUNT MANAGER" (2 org, Account) kemungkinan besar IC = `staff`, bukan lead — konfirmasi.
 
-**Status per departemen setelah validasi:** siap seed begitu lead dikonfirmasi: SALES, ACCOUNT, CREATIVE, ADVERTISER→Ads, MCN→KOL, FINANCE AND ACCOUNTING→Finance (114 karyawan). Usul tanpa akses (tinggal konfirmasi): IT (25), HRGA (8), SKILSKUL (3). Butuh keputusan (O24/O25): BUSINESS DEVELOPMENT, TIKTOK GO, DATA & BI, GROWTH & BUSINESS CONSULTATION, CREATIVE - EKSTERNAL, AFFILIATE, OD.
+**Status per departemen setelah keputusan 2026-07-11:**
+- **Dapat akun CDPS (66 karyawan):** SALES 16 → Sales; ACCOUNT 20 + GROWTH & BUSINESS CONSULTATION 2 → Account; CREATIVE 10 → Creative; ADVERTISER 7 → Ads; AFFILIATE 1 → KOL; FINANCE AND ACCOUNTING 3 → Finance; (+ mungkin 1 orang BD, O25c; + 2 OD menunggu O24).
+- **Tanpa akun (keputusan):** MCN 51 (sister company), CREATIVE - EKSTERNAL 6 (freelance/vendor), BUSINESS DEVELOPMENT 6–7 (di luar modul).
+- **Tanpa akun (usul, tinggal konfirmasi):** IT 25, HRGA 8, SKILSKUL 3.
+- **Masih menunggu keputusan:** TIKTOK GO 21 (O25a), DATA & BI 4 (O25b), OD 2 (O24).
 
 Open item terkait: **O24** (tabrakan istilah OD), **O25** (7 dept belum terpetakan), **O26** (lead per divisi) di `docs/DECISIONS.md`.
 
