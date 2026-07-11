@@ -63,50 +63,53 @@ Baris yang ditolak akan dilaporkan dengan nomor baris + alasan — perbaiki lalu
 
 ---
 
-## 2. SALES-MAP: Nama Panggilan → NIK (Sales Head + HR)
+## 2. SALES-MAP — DISEDERHANAKAN (revisi 2026-07-11)
 
-### Apa ini?
-Di spreadsheet lama, nama sales ditulis sebagai nama panggilan (Cena, Esal, Waba-JKT, dll). CDPS butuh NIK resmi. Butuh tabel konversi.
+> **✅ Keputusan Nerissa 2026-07-11:** tidak ada sistem nickname. Di spreadsheet, semua sales
+> ditulis dengan **nama lengkap** — satu-satunya pengecualian adalah **Sales Head yang memakai
+> nickname "Cena"**.
 
-### Format yang dibutuhkan
+### Konsekuensi
 
-File CSV sederhana, 2 kolom:
+Sistem akan me-resolusi nama sales **otomatis** dengan mencocokkan nama lengkap di spreadsheet
+terhadap nama karyawan di data HRIS (tidak case-sensitive, spasi dirapikan). Tabel konversi manual
+~20 baris **tidak diperlukan lagi**.
+
+File `sales_map.csv` tetap ada tapi hanya untuk **pengecualian**, minimal 1 baris:
 
 ```
 nickname,employee_id
-Cena,260210001
-Esal,260210002
-Waba-JKT,260210003
-Cekat AI,
+Cena,<NIK Sales Head>
 ```
 
-- **Kolom 1** (`nickname`): nama persis seperti muncul di spreadsheet (case-sensitive).
-- **Kolom 2** (`employee_id`): NIK dari data HRIS. Jika nickname = bot/bukan karyawan (mis. "Cekat AI"), kosongkan — lead yang ter-assign ke nama ini akan tetap diimpor tanpa sales PIC.
+Tambahkan baris lain hanya jika laporan dry-run import menampilkan nama yang tidak ter-resolusi
+otomatis (mis. ejaan beda dengan HRIS, bot seperti "Cekat AI" → kosongkan NIK-nya, atau dua
+karyawan bernama sama persis — sistem tidak menebak dan meminta ditegaskan lewat file ini).
 
-### Daftar nickname yang ditemukan di data
+### Yang masih dibutuhkan dari manusia
 
-Dari 18 lead + 239 klien aktif, nickname yang muncul antara lain:
-- Leads: nama sales di kolom `BANT oleh` di Daily Leads
-- Klien: kolom `Nama Sales` di db_jasa
-
-**Sales Head** paling tahu siapa-siapa ini. Minta HR cross-check NIK.
-
-### Cara serah
-
-Simpan sebagai `sales_map.csv`, serahkan ke tim dev. Akan dipakai sebagai argumen `--sales-map sales_map.csv` saat import.
+- **NIK Sales Head (Cena)** — 1 menit.
+- Setelah dry-run pertama: cek daftar "nama tidak ter-resolusi" (kalau ada), lengkapi di `sales_map.csv`.
 
 ### Estimasi waktu
 
-Daftar nama terbatas (~15-20 orang). **30 menit** jika Sales Head langsung tahu.
+**~5 menit** (turun dari 30 menit).
 
 ---
 
 ## 3. VALIDASI MSL — Master Service List (Sales Head)
 
+> **✅ Update 2026-07-11 (Nerissa):** basis harga standar = **spreadsheet pricelist resmi**
+> (Google Sheets, sudah terbaca sistem). Harga deal di ledger yang berbeda adalah hasil negosiasi
+> per-klien — itu tetap sah sebagai harga deal, tapi `standard_price` diambil dari pricelist.
+> Tim dev akan **mem-prefill** `usulan_standard_price` dari pricelist; tugas Sales Head berubah
+> dari "mengisi dari nol" menjadi **memeriksa hasil pencocokan** (lihat laporan rekonsiliasi yang
+> akan disiapkan tim dev di `docs/handoff/`).
+
 ### Apa ini?
-File `docs/handoff/MSL_DRAFT_KOMPILASI.csv` berisi 180 layanan yang dikompilasi dari 1.517 deal di ledger lama. Sistem sudah mengelompokkan dan menghitung statistik harga, tapi **dua kolom paling penting SENGAJA KOSONG**:
-- `usulan_standard_price` — harga standar resmi per layanan
-- `usulan_commission_rule` — aturan komisi per layanan
+File `docs/handoff/MSL_DRAFT_KOMPILASI.csv` berisi 180 layanan yang dikompilasi dari 1.517 deal di ledger lama. Sistem sudah mengelompokkan dan menghitung statistik harga. Dua kolom kunci:
+- `usulan_standard_price` — harga standar resmi per layanan (**di-prefill dari pricelist di mana cocok; sisanya diisi Sales Head**)
+- `usulan_commission_rule` — aturan komisi per layanan (**tetap diisi Sales Head** — pricelist hanya menyebut komisi untuk sebagian kecil layanan, mis. Store Management "+ komisi 5%", KOL "10% ratecard")
 
 ### Langkah per baris
 
@@ -164,49 +167,41 @@ Jika HR sudah punya data di sistem lain: **1-2 jam** (export + format). Jika har
 
 ---
 
-## 5. VALIDASI ROLE MAPPING (OD/Nerissa)
+## 5. VALIDASI ROLE MAPPING (OD/Nerissa) — ✅ 6 [KONFIRMASI] SELESAI (2026-07-11)
 
-### Apa ini?
-File `docs/handoff/HRIS_ROLE_MAPPING_DRAFT.md` berisi usulan pemetaan 16 departemen HRIS → divisi CDPS. Ada **6 item [KONFIRMASI]** yang butuh jawaban:
+Jawaban Nerissa sudah diterapkan ke `docs/handoff/HRIS_ROLE_MAPPING_DRAFT.md` §0:
 
-1. **CREATIVE - EKSTERNAL**: apakah ini freelance/vendor tanpa akun CDPS, atau PIC internal yang butuh login?
-2. **ADVERTISER**: apakah ini tim yang di CDPS disebut "Ads"?
-3. **MCN**: apakah sama dengan divisi "KOL" di CDPS?
-4. **AFFILIATE**: gabung ke KOL, gabung ke Ads, atau divisi baru?
-5. **BUSINESS DEVELOPMENT**: apakah kerja di alur M0 (lead→closing) = Sales, atau di luar modul?
-6. **GROWTH & BUSINESS CONSULTATION**: dekat Account (konsultasi klien existing), atau di luar CDPS?
+1. **CREATIVE - EKSTERNAL** → freelance/vendor **tanpa akun CDPS** (tidak disync)
+2. **ADVERTISER** → tim **Ads** ✓
+3. **MCN** → **keluar dari CDPS** (divisi sister company, tidak disync)
+4. **AFFILIATE** → **gabung ke KOL**
+5. **BUSINESS DEVELOPMENT** → **di luar modul** (sync tanpa akses); 1 orang BD = marketing pembuat leads awal → kandidat akses M2 (Wave 3), per-orang
+6. **GROWTH & BUSINESS CONSULTATION** → **bagian dari Account**
 
-Plus keputusan untuk: **TIKTOK GO**, **DATA & BUSINESS INTELLIGENCE**, **IT**, **HRGA**, **SKILSKUL** — apakah butuh akses CDPS atau tidak.
+### Yang MASIH dibutuhkan dari Nerissa/OD
 
-### Cara jawab
+- Keputusan untuk: **TIKTOK GO**, **DATA & BUSINESS INTELLIGENCE** (belum dijawab), dan konfirmasi akhir **IT / HRGA / SKILSKUL** (usulan saat ini: tanpa akses CDPS).
+- Daftar **employee_id** kandidat layered role **OD** (read-only seluruh sistem).
+- Daftar **employee_id** kandidat layered role **Director** (akses penuh).
+- Nama/NIK **1 orang BD** yang bagian marketing (untuk akses M2 nanti).
 
-Buka file tersebut, untuk setiap **[KONFIRMASI]**: tulis jawaban di sebelahnya atau kirim ke tim dev dalam format apa pun (chat/email OK). Contoh:
-- "AFFILIATE → gabung ke KOL"
-- "CREATIVE - EKSTERNAL → tanpa akun CDPS (vendor)"
-- "BD → tetap di Sales, mereka memang closing"
+### Estimasi sisa
 
-### Tambahan yang dibutuhkan
-
-- Daftar **employee_id** kandidat layered role **OD** (siapa saja yang berhak read-only seluruh sistem)
-- Daftar **employee_id** kandidat layered role **Director** (akses penuh)
-
-### Estimasi waktu
-
-Keputusan organisasi — **30 menit** jika Nerissa/OD sudah punya gambaran.
+**~10 menit.**
 
 ---
 
 ## Urutan yang disarankan
 
-| Prioritas | Item | Pemblokir | Estimasi |
-|---|---|---|---|
-| **1 (PARALEL)** | Sales-map (§2) | Blokir import lead & klien | 30 menit |
-| **1 (PARALEL)** | NIK→email (§4) | Blokir login CDPS | 1-2 jam |
-| **1 (PARALEL)** | Role mapping (§5) | Blokir sync karyawan | 30 menit |
-| **2** | Form pelengkap (§1) | Butuh sales-map selesai dulu untuk kolom `sales_pic_nik` | 2-3 hari |
-| **3** | MSL validasi (§3) | Tidak memblokir import, tapi blokir kalkulasi komisi | 1 hari |
+| Prioritas | Item | Status (2026-07-11) | Pemblokir | Estimasi sisa |
+|---|---|---|---|---|
+| **1 (PARALEL)** | Sales-map (§2) | ✅ Disederhanakan — hanya butuh NIK Cena + cek dry-run | Blokir import lead & klien | ~5 menit |
+| **1 (PARALEL)** | NIK→email (§4) | ⏳ Menyusul dari HR | Blokir login CDPS | 1-2 jam |
+| **1 (PARALEL)** | Role mapping (§5) | ✅ 6 [KONFIRMASI] selesai; sisa TikTok Go, Data & BI, daftar OD/Director | Blokir sync karyawan | ~10 menit |
+| **2** | Form pelengkap (§1) | ⏳ Dikirim menyusul (CRO + Finance) | Butuh NIK sales untuk kolom `sales_pic_nik` | 2-3 hari |
+| **3** | MSL validasi (§3) | 🔄 Pricelist diterima — dev mem-prefill, Sales Head tinggal review | Tidak memblokir import, tapi blokir kalkulasi komisi | ~0,5 hari review |
 
-Item prioritas 1 bisa dikerjakan **bersamaan** oleh orang yang berbeda. Form pelengkap (§1) adalah yang paling berat — mulai secepat mungkin setelah sales-map tersedia.
+Item prioritas 1 bisa dikerjakan **bersamaan** oleh orang yang berbeda. Form pelengkap (§1) adalah yang paling berat — mulai secepat mungkin.
 
 ---
 

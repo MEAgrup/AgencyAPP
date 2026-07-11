@@ -1,6 +1,23 @@
-# CDPS — Draft Role-Mapping HRIS → CDPS (dari data karyawan riil)
+# CDPS — Role-Mapping HRIS → CDPS (dari data karyawan riil)
 
-> **DRAFT — butuh validasi, jangan di-seed sebelum disetujui.** Disusun dari kolom `DEPARTMENT`/`JABATAN` riil yang dilaporkan ada di sheet karyawan HRIS (lihat `docs/handoff/WAVE1_EXTERNAL_REQUESTS.md` §"Jawaban diterima (2026-07-10)"), **bukan** dari file sheet itu sendiri (belum di-commit ke `backend/testdata/import_samples/hris_karyawan.csv` saat draft ini ditulis). Begitu file asli tersedia, jalankan `hrisconvert --pairs` di atasnya untuk mendapat daftar pasangan `DEPARTMENT,JABATAN` **riil dengan hitungan kemunculan** dan bandingkan dengan tabel di bawah — beberapa baris di sini kemungkinan perlu direvisi begitu variasi ejaan/singkatan jabatan yang sesungguhnya terlihat.
+> **UPDATE 2026-07-11 — 6 butir [KONFIRMASI] SUDAH DIJAWAB OD (Nerissa).** Hasil validasi dirangkum di §0 di bawah dan sudah diterapkan ke tabel §3. Yang masih terbuka: TIKTOK GO, DATA & BUSINESS INTELLIGENCE, konfirmasi akhir IT/HRGA/SKILSKUL, dan daftar employee_id OD/Director. Baris yang sudah tervalidasi **boleh di-seed** (lihat `docs/DECISIONS.md` 2026-07-11).
+
+---
+
+## 0. Hasil validasi OD (Nerissa, 2026-07-11)
+
+| DEPARTMENT | Keputusan | Konsekuensi teknis |
+|---|---|---|
+| CREATIVE - EKSTERNAL | Freelance/vendor **tanpa akun CDPS** | Jangan disync sebagai user aktif — dikecualikan dari emit `hrisconvert` (exclusion list). |
+| ADVERTISER | Benar = tim Ads (M8) | Map ke division **Ads**, level per heuristik jabatan. |
+| MCN | **Keluar dari CDPS** — divisi lain di sister company | Dikecualikan dari sync sepenuhnya (exclusion list). |
+| AFFILIATE | **Gabung ke KOL** | Map ke division **KOL**, level per heuristik jabatan. |
+| BUSINESS DEVELOPMENT | **Di luar modul CDPS.** Catatan: 1 orang di BD adalah bagian marketing yang membuat leads di awal funnel | Tanpa baris `role_mappings` (sync tanpa akses). Orang marketing tsb = kandidat akses M2 Marketing (Wave 3) — assignment per-orang menyusul, bukan per-departemen. |
+| GROWTH & BUSINESS CONSULTATION | **Bagian dari Account** | Map ke division **Account**, level per heuristik jabatan. |
+
+Keputusan terkait dari sesi yang sama: **tidak ada sistem nickname sales** — di data sumber semua sales ditulis dengan nama lengkap, satu-satunya pengecualian adalah Sales Head yang memakai nickname **"Cena"**. Konsekuensi untuk import & sales-map: lihat `LANGKAH_MANUSIA_GO_LIVE.md` §2 (revisi 2026-07-11).
+
+> **DRAFT sebagian —** baris yang belum tervalidasi di §3 tetap jangan di-seed sebelum disetujui. Disusun dari kolom `DEPARTMENT`/`JABATAN` riil yang dilaporkan ada di sheet karyawan HRIS (lihat `docs/handoff/WAVE1_EXTERNAL_REQUESTS.md` §"Jawaban diterima (2026-07-10)"), **bukan** dari file sheet itu sendiri (belum di-commit ke `backend/testdata/import_samples/hris_karyawan.csv` saat draft ini ditulis). Begitu file asli tersedia, jalankan `hrisconvert --pairs` di atasnya untuk mendapat daftar pasangan `DEPARTMENT,JABATAN` **riil dengan hitungan kemunculan** dan bandingkan dengan tabel di bawah — beberapa baris di sini kemungkinan perlu direvisi begitu variasi ejaan/singkatan jabatan yang sesungguhnya terlihat.
 
 ---
 
@@ -37,12 +54,12 @@ Divisi CDPS yang sudah punya modul & sudah dipakai di kode (`backend/internal/se
 | SALES | Sales | staff/lead sesuai jabatan | Match langsung ke modul M0 Sales. |
 | ACCOUNT | Account | staff/lead sesuai jabatan | Match langsung ke modul M6 Account. |
 | CREATIVE | Creative | staff/lead sesuai jabatan | Match langsung ke modul M7 Creative. |
-| CREATIVE - EKSTERNAL | Creative *(tentatif)* | staff (kecuali jabatan lead-pattern) | **[KONFIRMASI]** Apakah "eksternal" berarti freelance/vendor yang **tidak** perlu akun CDPS sama sekali (mirip vendor Live Stream di M10, yang eksplisit *tanpa akses* per PRD)? Kalau mereka tetap PIC internal untuk Asset/Brief di CDPS, map ke Creative staff; kalau murni eksternal tanpa login, jangan disync sebagai user aktif. |
-| ADVERTISER | Ads | staff/lead sesuai jabatan | Nama departemen ≠ nama divisi CDPS ("Ads") — **[KONFIRMASI]** penamaan ini yang dimaksud tim Ads (M8) dan bukan istilah lain (mis. akun iklan klien). |
-| MCN | KOL | staff/lead sesuai jabatan | Multi-Channel-Network erat dengan pengelolaan KOL/influencer (M9). **[KONFIRMASI]** apakah MCN memang setara KOL divisi CDPS atau unit terpisah (mis. hubungan platform, bukan eksekusi brief KOL). |
-| AFFILIATE | *(belum dipetakan)* | — | **[KONFIRMASI]** Affiliate marketing bisa dekat dengan KOL (kerja sama afiliasi/influencer) atau Ads (performance marketing) — tidak ada modul CDPS khusus "Affiliate". Butuh arahan OD: gabung ke KOL, gabung ke Ads, atau divisi baru. |
-| BUSINESS DEVELOPMENT | Sales *(tentatif)* | staff/lead sesuai jabatan | **[KONFIRMASI]** BD sering pre-sales/partnership — perlu dipastikan apakah stafnya benar-benar bekerja dalam alur M0 (lead → closing) atau di luar cakupan modul saat ini (mis. kemitraan, bukan closing klien). |
-| GROWTH & BUSINESS CONSULTATION | *(belum dipetakan)* | — | **[KONFIRMASI]** Tidak ada modul CDPS yang jelas mencakup ini. Perlu tahu ruang lingkup kerja tim ini (konsultasi ke klien existing → mungkin dekat Account; growth internal → mungkin di luar CDPS sepenuhnya) sebelum diusulkan sebagai divisi. |
+| CREATIVE - EKSTERNAL | **tidak disync (tanpa akun CDPS)** | — | ✅ **VALIDATED 2026-07-11:** freelance/vendor tanpa akun CDPS (pola vendor Live Stream M10). Masuk exclusion list `hrisconvert` — tidak di-emit sebagai user aktif. |
+| ADVERTISER | **Ads** | staff/lead sesuai jabatan | ✅ **VALIDATED 2026-07-11:** benar tim Ads (M8). |
+| MCN | **keluar dari CDPS (exclusion)** | — | ✅ **VALIDATED 2026-07-11:** divisi lain di sister company — dikeluarkan dari CDPS sepenuhnya, tidak disync. |
+| AFFILIATE | **KOL** | staff/lead sesuai jabatan | ✅ **VALIDATED 2026-07-11:** gabung ke KOL (M9). |
+| BUSINESS DEVELOPMENT | **tidak di-mapping (di luar modul)** | — | ✅ **VALIDATED 2026-07-11:** di luar cakupan modul CDPS — sync tanpa role (tanpa akses). Catatan: 1 orang BD adalah bagian marketing pembuat leads awal → kandidat akses M2 Marketing (Wave 3), assignment per-orang menyusul. |
+| GROWTH & BUSINESS CONSULTATION | **Account** | staff/lead sesuai jabatan | ✅ **VALIDATED 2026-07-11:** bagian dari Account (M6). |
 | TIKTOK GO | *(belum dipetakan)* | — | **[KONFIRMASI]** M10 Live Stream (PRD §6.1) sengaja **tidak** punya role staf eksekusi internal — live stream sepenuhnya dikerjakan vendor sister-company, dan **AM (Account) yang memegang request + rekonsiliasi**, bukan staf divisi tersendiri. Kalau tim "TikTok Go" ini adalah tim internal yang mengelola akun TikTok Shop klien secara langsung (bukan AM Account biasa), ini kemungkinan pekerjaan **di luar cakupan modul CDPS saat ini** — perlu keputusan OD, bukan tebakan mapping. |
 | FINANCE AND ACCOUNTING | Finance | staff/lead sesuai jabatan | Match langsung ke modul M5 Finance. |
 | DATA & BUSINESS INTELLIGENCE | *(belum dipetakan)* | — | **[KONFIRMASI]** Tidak ada modul CDPS untuk tim data/BI sebagai *user role* — rollup (ROAS/Health Score/dsb.) di CDPS dihitung otomatis dari log, bukan diinput tim ini. Kemungkinan kandidat layered **OD** (read-only lintas divisi untuk kebutuhan reporting) daripada divisi eksekusi — perlu konfirmasi apakah tim ini butuh akses CDPS sama sekali atau konsumsi data lewat jalur lain. |
@@ -86,9 +103,10 @@ Ringkasan (N baris masuk / N di-emit / N warning / N pasangan DEPARTMENT|JABATAN
 
 ## 6. Yang masih ditunggu
 
-- Sheet asli (`hris_karyawan.csv`/`.xlsx`) di-commit ke `backend/testdata/import_samples/` atau konektor Google Drive diaktifkan (lihat `docs/handoff/WAVE1_EXTERNAL_REQUESTS.md` §"⚠ Kendala akses").
-- Jawaban OD/Nerissa untuk setiap **[KONFIRMASI]** di §3 (terutama: AFFILIATE, GROWTH & BUSINESS CONSULTATION, TIKTOK GO, DATA & BUSINESS INTELLIGENCE, BUSINESS DEVELOPMENT, CREATIVE - EKSTERNAL).
-- Daftar `jabatan` riil per divisi yang sudah bermodul (Sales/Account/Creative/Ads/KOL/Finance), untuk melengkapi heuristik lead/staff dengan tabel eksplisit seperti `roleMappings` di `seed.go`.
+- Sheet asli (`hris_karyawan.csv`/`.xlsx`) di-commit ke `backend/testdata/import_samples/` atau dibagikan ke konektor Google Drive (konektor kini AKTIF — pricelist MSL sudah terbaca 2026-07-11).
+- ~~Jawaban 6 [KONFIRMASI]~~ ✅ **selesai 2026-07-11** (lihat §0). Masih terbuka: **TIKTOK GO** dan **DATA & BUSINESS INTELLIGENCE**, plus konfirmasi akhir IT/HRGA/SKILSKUL (default saat ini: tanpa akses).
+- Daftar `jabatan` riil per divisi yang sudah bermodul (Sales/Account/Creative/Ads/KOL/Finance), untuk melengkapi heuristik lead/staff dengan tabel eksplisit seperti `roleMappings` di `seed.go` — didapat dari `hrisconvert --pairs` begitu sheet asli terbaca.
 - Daftar employee_id kandidat layered role **OD** dan **Director** (bukan by-departemen — by-orang, sama pola `directors` di `seed.go`).
+- Identitas 1 orang BD (marketing pembuat leads) untuk assignment akses M2 nanti.
 
-**Jangan seed tabel `role_mappings` dari draft ini sebelum baris di §3 divalidasi OD/Nerissa.**
+**Baris §3 yang bertanda ✅ VALIDATED boleh di-seed; baris lain tetap menunggu keputusan.**
