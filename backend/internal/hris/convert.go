@@ -55,6 +55,55 @@ type ConvertResult struct {
 	RowsIn   int // data rows scanned (header/merged-header/blank artifact rows excluded)
 }
 
+// ExcludedRow is one accepted row that was held back from the emitted
+// EmployeeSource CSV because its DEPARTMENT matched --exclude-dept (e.g. MCN,
+// a sister-company division, or CREATIVE - EKSTERNAL freelance/vendor rows —
+// see docs/handoff/HRIS_ROLE_MAPPING_DRAFT.md §0). Per house convention there
+// is no silent drop: every excluded row is counted and reported in the CLI
+// summary, it is simply not written to the employee CSV.
+type ExcludedRow struct {
+	Row        OriginalRow
+	Department string // the matched --exclude-dept entry, as given on the CLI (for the report)
+}
+
+// NormalizeDept trims and uppercases a department string for
+// case-insensitive, whitespace-insensitive exact-match comparison (used for
+// both --exclude-dept and the role-mapping department policy file).
+func NormalizeDept(s string) string {
+	return strings.ToUpper(strings.TrimSpace(s))
+}
+
+// SplitExcludeDepts parses the --exclude-dept flag value: a comma-separated
+// list of DEPARTMENT names, matched after trim + case-insensitive exact match.
+// Empty entries (e.g. a trailing comma) are ignored.
+func SplitExcludeDepts(flagValue string) map[string]bool {
+	out := map[string]bool{}
+	for _, part := range strings.Split(flagValue, ",") {
+		norm := NormalizeDept(part)
+		if norm != "" {
+			out[norm] = true
+		}
+	}
+	return out
+}
+
+// PartitionExcluded splits rows into those to emit and those excluded by
+// department (per excludeDepts, built by SplitExcludeDepts). Order is
+// preserved within each output slice.
+func PartitionExcluded(rows []OriginalRow, excludeDepts map[string]bool) (kept []OriginalRow, excluded []ExcludedRow) {
+	if len(excludeDepts) == 0 {
+		return rows, nil
+	}
+	for _, row := range rows {
+		if excludeDepts[NormalizeDept(row.Department)] {
+			excluded = append(excluded, ExcludedRow{Row: row, Department: row.Department})
+			continue
+		}
+		kept = append(kept, row)
+	}
+	return kept, excluded
+}
+
 // requiredColumns are matched case-insensitively, trimmed, against the header
 // row. "No" (row number) and "JOIN DATE" are tolerated but never required —
 // JOIN DATE is read only to keep column alignment; its value (including

@@ -1,0 +1,17 @@
+department,policy,division
+SALES,map,Sales
+ACCOUNT,map,Account
+CREATIVE,map,Creative
+ADVERTISER,map,Ads
+AFFILIATE,map,KOL
+GROWTH & BUSINESS CONSULTATION,map,Account
+FINANCE AND ACCOUNTING,map,Finance
+MCN,exclude,
+CREATIVE - EKSTERNAL,exclude,
+BUSINESS DEVELOPMENT,no-access,
+IT,no-access,
+HRGA,no-access,
+SKILSKUL,no-access,
+TIKTOK GO,no-access,
+DATA & BUSINESS INTELLIGENCE,no-access,
+OD,no-access,

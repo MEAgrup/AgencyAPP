@@ -39,7 +39,7 @@ func TestRun_ConvertToStdout(t *testing.T) {
 	if stdout.String() != want {
 		t.Fatalf("stdout=\n%s\nwant:\n%s", stdout.String(), want)
 	}
-	if !strings.Contains(stderr.String(), "2 rows in, 2 emitted, 0 warning(s), 2 distinct") {
+	if !strings.Contains(stderr.String(), "2 rows in, 2 emitted, 0 excluded by --exclude-dept, 0 warning(s), 2 distinct") {
 		t.Fatalf("summary missing/unexpected in stderr: %s", stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "2 of 2 employees have NO email") {
@@ -117,6 +117,75 @@ func TestRun_DataQualityGateBlocksOutputAndExitsNonzero(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "line 2") || !strings.Contains(stderr.String(), "line 3") {
 		t.Fatalf("expected both offending lines reported, got: %s", stderr.String())
+	}
+}
+
+const excludeFixture = `No,NIK,JOIN DATE,NAMA LENGKAP,DEPARTMENT,JABATAN
+1,1000000001,18-Jan-2021,Contoh Satu,SALES,Sales Executive
+2,1000000002,24-Mei-2021,Contoh Dua, mcn ,Staff MCN
+3,1000000003,03-Mar-2022,Contoh Tiga,Creative - Eksternal,Freelancer
+4,1000000004,05-Jun-2022,Contoh Empat,ACCOUNT,Account Manager
+`
+
+func TestRun_ExcludeDeptFiltersRowsAndReportsInSummary(t *testing.T) {
+	in := writeTemp(t, "raw.csv", excludeFixture)
+	var stdout, stderr strings.Builder
+	code := run([]string{"-in", in, "--exclude-dept", "MCN,CREATIVE - EKSTERNAL"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code=%d want 0; stderr=%s", code, stderr.String())
+	}
+	want := "employee_id,nama,email,divisi,jabatan,status_aktif\n" +
+		"1000000001,Contoh Satu,,SALES,Sales Executive,true\n" +
+		"1000000004,Contoh Empat,,ACCOUNT,Account Manager,true\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout=\n%s\nwant:\n%s", stdout.String(), want)
+	}
+	if strings.Contains(stdout.String(), "1000000002") || strings.Contains(stdout.String(), "1000000003") {
+		t.Fatalf("excluded rows must not appear in emitted CSV, got: %s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "4 rows in, 2 emitted, 2 excluded by --exclude-dept") {
+		t.Fatalf("expected exclusion counts in summary, got: %s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `1 row(s) excluded for DEPARTMENT="mcn"`) {
+		t.Fatalf("expected per-department exclusion count for mcn, got: %s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `1 row(s) excluded for DEPARTMENT="Creative - Eksternal"`) {
+		t.Fatalf("expected per-department exclusion count for Creative - Eksternal, got: %s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "line 3:") || !strings.Contains(stderr.String(), "line 4:") {
+		t.Fatalf("expected excluded rows reported by line number, got: %s", stderr.String())
+	}
+}
+
+func TestRun_ExcludeDeptDoesNotAffectPairsMode(t *testing.T) {
+	in := writeTemp(t, "raw.csv", excludeFixture)
+	var stdout, stderr strings.Builder
+	code := run([]string{"-in", in, "--exclude-dept", "MCN,CREATIVE - EKSTERNAL", "-pairs"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code=%d want 0; stderr=%s", code, stderr.String())
+	}
+	// --pairs must still show excluded departments — it's a discovery aid for
+	// building the exclude list, so it must not hide what was excluded.
+	if !strings.Contains(stdout.String(), "mcn") && !strings.Contains(stdout.String(), "MCN") {
+		t.Fatalf("expected excluded department still visible in --pairs output, got: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Creative - Eksternal") {
+		t.Fatalf("expected excluded department still visible in --pairs output, got: %s", stdout.String())
+	}
+}
+
+func TestRun_NoExcludeDeptFlagEmitsEverything(t *testing.T) {
+	in := writeTemp(t, "raw.csv", excludeFixture)
+	var stdout, stderr strings.Builder
+	code := run([]string{in}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code=%d want 0; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "1000000002") || !strings.Contains(stdout.String(), "1000000003") {
+		t.Fatalf("without --exclude-dept every row must be emitted, got: %s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "0 excluded by --exclude-dept") {
+		t.Fatalf("expected 0 excluded in summary when flag is unset, got: %s", stderr.String())
 	}
 }
 

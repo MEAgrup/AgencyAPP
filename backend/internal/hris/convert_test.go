@@ -197,6 +197,56 @@ func TestParseNIKEmailMap_MergeIntoEmployeeCSV(t *testing.T) {
 	}
 }
 
+func TestSplitExcludeDepts_TrimAndCaseInsensitive(t *testing.T) {
+	got := hris.SplitExcludeDepts(" mcn , Creative - Eksternal ,,")
+	if len(got) != 2 {
+		t.Fatalf("len(got)=%d want 2: %+v", len(got), got)
+	}
+	if !got["MCN"] || !got["CREATIVE - EKSTERNAL"] {
+		t.Fatalf("expected normalized keys MCN and CREATIVE - EKSTERNAL, got %+v", got)
+	}
+}
+
+func TestSplitExcludeDepts_Empty(t *testing.T) {
+	if got := hris.SplitExcludeDepts(""); len(got) != 0 {
+		t.Fatalf("expected empty map for empty flag value, got %+v", got)
+	}
+}
+
+func TestPartitionExcluded_FiltersCaseInsensitiveTrimmed(t *testing.T) {
+	rows := []hris.OriginalRow{
+		{Line: 2, NIK: "1", NamaLengkap: "Satu", Department: "SALES", Jabatan: "Sales Executive"},
+		{Line: 3, NIK: "2", NamaLengkap: "Dua", Department: " mcn ", Jabatan: "Staff MCN"},
+		{Line: 4, NIK: "3", NamaLengkap: "Tiga", Department: "Creative - Eksternal", Jabatan: "Freelancer"},
+		{Line: 5, NIK: "4", NamaLengkap: "Empat", Department: "ACCOUNT", Jabatan: "Account Manager"},
+	}
+	excludeDepts := hris.SplitExcludeDepts("MCN,CREATIVE - EKSTERNAL")
+	kept, excluded := hris.PartitionExcluded(rows, excludeDepts)
+	if len(kept) != 2 {
+		t.Fatalf("len(kept)=%d want 2: %+v", len(kept), kept)
+	}
+	if kept[0].NIK != "1" || kept[1].NIK != "4" {
+		t.Fatalf("kept order/content unexpected: %+v", kept)
+	}
+	if len(excluded) != 2 {
+		t.Fatalf("len(excluded)=%d want 2: %+v", len(excluded), excluded)
+	}
+	if excluded[0].Row.NIK != "2" || excluded[1].Row.NIK != "3" {
+		t.Fatalf("excluded order/content unexpected: %+v", excluded)
+	}
+}
+
+func TestPartitionExcluded_NoExclusionsReturnsAllAsKept(t *testing.T) {
+	rows := []hris.OriginalRow{
+		{NIK: "1", Department: "SALES"},
+		{NIK: "2", Department: "MCN"},
+	}
+	kept, excluded := hris.PartitionExcluded(rows, nil)
+	if len(kept) != 2 || len(excluded) != 0 {
+		t.Fatalf("with no exclude depts, expected all rows kept; kept=%d excluded=%d", len(kept), len(excluded))
+	}
+}
+
 func TestWritePairsCSV(t *testing.T) {
 	pairs := []hris.DeptJabatanPair{
 		{Department: "ACCOUNT", Jabatan: "Account Manager", Count: 3},
