@@ -2,6 +2,32 @@
 
 > Update this file at the end of every build session: what landed, what's next, what's blocked. Read it FIRST when resuming work. Complements (never replaces) `docs/DECISIONS.md`.
 
+## 2026-07-11 (sesi lanjutan) — Wave 1 Fase 3 landed (W1-07/08 Negosiasi)
+
+**Branch:** `claude/handoff-process-continuation-69uk1f` (rebased di atas `claude/cdps-sprint-0-handoff-c48u62` @ `aeb4680`) · **`go test ./...` hijau penuh** (MariaDB lokal).
+
+### Ticket status delta
+
+| Ticket | Status | Where |
+|---|---|---|
+| W1-07 Negotiation — non-nego path (M0 §5) | ✅ | `module0_sales/negotiation.go` `SubmitNoNegotiation` — standard terms only, custom term → `ErrCustomTermRequiresNegotiation` (AC "forces switch"), status `Negotiation - Auto Approved`, versi 1 `standard` langsung approved; migrasi 0043–0046 |
+| W1-08 Negotiation — full flow + approval (M0 §5) | ✅ | `SubmitNegotiation` (submit & resubmit, versi berjalan), `ApproveNegotiation` / `CounterNegotiation` (notes wajib) / `RejectNegotiation` (notes wajib) / `AcceptCounterOffer` ("system syncs values" = pin `approved_version` ke versi counter), `GetNegotiation`; history 3 tabel append-only + trigger; notifikasi katalog O15 via `WireNegotiationNotifications` |
+
+### Kontrak untuk W1-09 (Closing) — Fase 4 berikutnya
+- **Baca hasil negosiasi:** `sales.GetNegotiation(...)` → `Negotiation.Approved()` = versi ter-approve: `TotalValue` = *final approved transaction value* (M0 §6 rule 6), `Services` = jasa final (nama/harga/komisi/terms ter-pin per versi MSL). `nil` selama belum approved — closing hanya legal dari `Approved`/`Auto Approved` (engine yang menegakkan).
+- **Tetap wajib** (kontrak lama, belum berubah): panggil `leads.Service.ResolveWin(ctx, tx, resolver, ...)` DI DALAM transaksi closing setelah attempt pemenang `Closed-Success`; `resolver` = `*sales.Attempts`.
+- **Migrasi:** 0043–0046 terpakai (negotiations, versions, version_services, decisions); range M0 sisa **0047–0049** untuk W1-09.
+- **Bootstrap notifikasi:** panggil `sales.WireNegotiationNotifications(center)` sekali di app bootstrap setelah `notify.NewCenter(DefaultCatalog())` — belum ada main wiring produksi (menyusul saat HTTP layer).
+
+### Keputusan & open baru
+- **DECISIONS.md 2026-07-11 (W1-07/08)**: baris dev-level lengkap (skema header+history, baseline pin MSL, re-evaluasi komisi vs harga proposal, % nego = rule percent, non-nego sentinel tanpa BI string, payment terms bebas ≤255, accept = pin versi counter, set jasa nego tak dibatasi 5, resolver notifikasi + COLLATE fix).
+- **O21 (baru):** M0 §5 prose bilang setelah Reject salesperson boleh "submit a fresh proposal", tapi SM §1 tidak punya edge `Rejected → Pending Approval` (O11: keluar Rejected hanya `Closed-Lost`). Berjalan ikut mesin — resubmit setelah Reject diblokir.
+- **O18 (masih open):** siapa yang boleh accept counter-offer. Encoding berjalan tetap `lead_spv`-only (edge mesin); `AcceptCounterOffer` mendelegasikan penuh ke engine, jadi resolusi O18 = perubahan 1 baris di `machines.go` + flip 1 assert di `negotiation_test.go` (`TestNegotiation_CounterThenAccept`).
+
+### Langkah berikutnya
+1. **Fase 4 — W1-09 Closing** (M0 §6): alokasi Σ=100%, ≤5 sales, Commission & Payment PIC, generate `CLI-`/`TRX-`/`SVC-` atomik (`ids.Generator` satu tx), panggil `ResolveWin`, Payment Intent → antrian M5. Baca PRD M0 §6 + M4 v2 §2–3 + M5 §2 penuh dulu.
+2. Fase 5 — M4 (W1-10…13), Fase 6 — M5 (W1-14…18), Fase 7 — QC + seed end-to-end + retarget PR.
+
 ## 2026-07-11 — Wave 1 Fase 1–2 landed (W1-01/02/05 + W1-03/04/06)
 
 **Branch:** `claude/cdps-sprint-0-handoff-c48u62` · **Base:** `claude/platform-dev-continue-c3vtde` (stacked di atas PR #3) · **PR:** #4 (draft) · **Commit terakhir:** `de0ea64` · **`go test ./...` hijau penuh** (MariaDB lokal: `service mariadb start` dulu — test DB-bound skip diam-diam bila DB mati).
