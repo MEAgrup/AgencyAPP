@@ -29,7 +29,7 @@ func LookupActiveEmployee(ctx context.Context, d *sql.DB, employeeID string) err
 }
 
 // ResolveActor builds the full Actor (employee + role) for an employee id,
-// applying role_mappings and layered OD/Director roles.
+// applying role_mappings and layered OD/Director/Viewer roles.
 func ResolveActor(ctx context.Context, d *sql.DB, employeeID string) (permission.Actor, error) {
 	var a permission.Actor
 	a.EmployeeID = employeeID
@@ -77,6 +77,8 @@ func ResolveActor(ctx context.Context, d *sql.DB, employeeID string) (permission
 			a.Role.OD = true
 		case "director":
 			a.Role.Director = true
+		case "viewer":
+			a.Role.Viewer = true
 		}
 	}
 	return a, rows.Err()

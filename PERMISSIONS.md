@@ -1,16 +1,18 @@
 # CDPS — Consolidated Permission Matrix
 
 > Compiled from Phase 0 §4 + every module's Roles table. Phase 0 prevails on conflict. This file drives the permission test suite (CLAUDE.md DoD #2). Universal pattern: **Staff = own data; Lead/SPV = division-wide; OD = read-only everywhere + manages OKR; Director = full view + manage employees.** OD/Director are layered roles on a normal employee account.
+>
+> **Viewer** is a third layered role (added 2026-07-11 for the Data & Business Intelligence team, per Nerissa's decision — "buatkan akses khusus supaya bisa view dan membantu team lain"): read-only everywhere, same read reach as OD (own data + division-wide + cross-division/all clients), but **without OD's OKR authority** and without any lead/write/admin authority. It is assigned per person via the same layered-role mechanism as OD/Director, never bundled with them.
 
 ## Global
-| Capability | Staff | Lead/SPV (own div) | OD | Director |
-|---|---|---|---|---|
-| View own records/tasks | ✅ | ✅ | ✅ (read-all) | ✅ |
-| View division-wide | ❌ | ✅ | ✅ read-only | ✅ |
-| View cross-division / all clients | ❌ | ❌ (see notes) | ✅ read-only | ✅ |
-| Edit auto-computed fields | ❌ nobody — system only | ❌ | ❌ | ❌ |
-| Manage OKR | ❌ | ❌ | ✅ | ✅ |
-| Manage employees / role mapping | ❌ | ❌ | ❌ | ✅ (+ system admin) |
+| Capability | Staff | Lead/SPV (own div) | OD | Viewer | Director |
+|---|---|---|---|---|---|
+| View own records/tasks | ✅ | ✅ | ✅ (read-all) | ✅ (read-all) | ✅ |
+| View division-wide | ❌ | ✅ | ✅ read-only | ✅ read-only | ✅ |
+| View cross-division / all clients | ❌ | ❌ (see notes) | ✅ read-only | ✅ read-only | ✅ |
+| Edit auto-computed fields | ❌ nobody — system only | ❌ | ❌ | ❌ | ❌ |
+| Manage OKR | ❌ | ❌ | ✅ | ❌ | ✅ |
+| Manage employees / role mapping | ❌ | ❌ | ❌ | ❌ | ✅ (+ system admin) |
 
 ## Per-module specifics (exceptions & named rights)
 | Module | Rule |
@@ -30,4 +32,4 @@
 | M15 Portals | Client contacts: strict allow-list only (Service Progress relabeled, embedded reports, Health band, complaint form). **Block-approval queue: SPV/Lead.** Management Dashboard: Director/OD/management, read-only. |
 
 ## Test-suite note
-For every endpoint, generate cases: (allow) the named role, (deny) one role below it, (deny) cross-division same-level, (allow-read-only) OD, (allow) Director. Layered-role case: one fixture employee who is Staff+OD must get write access from Staff scope and read access from OD scope, never write from OD.
+For every endpoint, generate cases: (allow) the named role, (deny) one role below it, (deny) cross-division same-level, (allow-read-only) OD, (allow) Director. Layered-role case: one fixture employee who is Staff+OD must get write access from Staff scope and read access from OD scope, never write from OD. Same shape applies to Viewer (Staff+Viewer writes from Staff scope only, reads everywhere from Viewer scope); anywhere a check is gated on the OD flag specifically (e.g. OKR management), Viewer must be denied — Viewer is not OD.

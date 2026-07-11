@@ -15,7 +15,7 @@ import (
 var ErrBadLevel = errors.New("level harus 'staff' atau 'lead'")
 
 // ErrBadRole is returned for an invalid layered role.
-var ErrBadRole = errors.New("role harus 'od' atau 'director'")
+var ErrBadRole = errors.New("role harus 'od', 'director', atau 'viewer'")
 
 // RoleMapping is a HRIS divisi+jabatan -> CDPS division+level rule.
 type RoleMapping struct {
@@ -78,7 +78,7 @@ func DeleteRoleMapping(ctx context.Context, d *sql.DB, actor permission.Actor, i
 	return nil
 }
 
-// LayeredRole is an OD/Director assignment on an employee.
+// LayeredRole is an OD/Director/Viewer assignment on an employee.
 type LayeredRole struct {
 	ID         int64     `json:"id"`
 	EmployeeID string    `json:"employee_id"`
@@ -106,9 +106,11 @@ func ListLayeredRoles(ctx context.Context, d *sql.DB) ([]LayeredRole, error) {
 	return out, rows.Err()
 }
 
-// SetLayeredRole enables/disables a layered OD/Director role for an employee.
+// SetLayeredRole enables/disables a layered OD/Director/Viewer role for an
+// employee. Viewer mirrors OD's read-everywhere reach but carries none of
+// OD's OKR authority and is never treated as OD by downstream checks.
 func SetLayeredRole(ctx context.Context, d *sql.DB, actor permission.Actor, employeeID, role string, enabled bool) error {
-	if role != "od" && role != "director" {
+	if role != "od" && role != "director" && role != "viewer" {
 		return ErrBadRole
 	}
 	en := 0

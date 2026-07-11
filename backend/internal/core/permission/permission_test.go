@@ -10,9 +10,12 @@ func TestRoleMatrix(t *testing.T) {
 	staff := permission.Actor{EmployeeID: "S", Role: permission.Role{Division: "Creative", Level: "staff"}}
 	lead := permission.Actor{EmployeeID: "L", Role: permission.Role{Division: "Creative", Level: "lead"}}
 	od := permission.Actor{EmployeeID: "O", Role: permission.Role{OD: true}}
+	viewer := permission.Actor{EmployeeID: "V", Role: permission.Role{Viewer: true}}
 	director := permission.Actor{EmployeeID: "D", Role: permission.Role{Director: true}}
 	// Layered case: one employee is Creative Staff AND OD.
 	staffOD := permission.Actor{EmployeeID: "SO", Role: permission.Role{Division: "Creative", Level: "staff", OD: true}}
+	// Layered case: one employee is Creative Staff AND Viewer.
+	staffViewer := permission.Actor{EmployeeID: "SV", Role: permission.Role{Division: "Creative", Level: "staff", Viewer: true}}
 
 	cases := []struct {
 		name                           string
@@ -23,8 +26,10 @@ func TestRoleMatrix(t *testing.T) {
 		{"staff", staff, true, false, false, false, false, false},
 		{"lead", lead, true, false, false, true, true, false},
 		{"od", od, false, false, true, false, true, true},
+		{"viewer", viewer, false, false, true, false, true, true},
 		{"director", director, true, true, true, true, true, true},
 		{"staff+od", staffOD, true, false, true, false, true, true},
+		{"staff+viewer", staffViewer, true, false, true, false, true, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -63,5 +68,39 @@ func TestLayeredOD_NeverWritesFromODScope(t *testing.T) {
 	}
 	if staffOD.IsLead("Creative") {
 		t.Fatal("Staff+OD is not a lead")
+	}
+}
+
+// Viewer mirrors OD's read reach (division + all) but is a distinct flag: it
+// must never write, never carry lead authority, never manage admin, and must
+// not be mistaken for OD by anything gated on the OD flag specifically (e.g.
+// a future OD-only OKR check).
+func TestLayeredViewer_ReadOnlyAndNotOD(t *testing.T) {
+	pureViewer := permission.Actor{EmployeeID: "V", Role: permission.Role{Viewer: true}}
+	if pureViewer.CanWrite() {
+		t.Fatal("pure Viewer must be read-only (CanWrite=false)")
+	}
+	if pureViewer.CanManageAdmin() {
+		t.Fatal("Viewer must not manage admin")
+	}
+	if pureViewer.IsLead("Creative") {
+		t.Fatal("Viewer is not a lead")
+	}
+	if !pureViewer.CanReadAll() {
+		t.Fatal("Viewer must have cross-division read access")
+	}
+	if !pureViewer.CanReadDivision("Creative") {
+		t.Fatal("Viewer must read every division")
+	}
+	if pureViewer.Role.OD {
+		t.Fatal("Viewer must not be flagged as OD")
+	}
+
+	staffViewer := permission.Actor{EmployeeID: "SV", Role: permission.Role{Division: "Creative", Level: "staff", Viewer: true}}
+	if !staffViewer.CanWrite() {
+		t.Fatal("Staff+Viewer must write from staff scope")
+	}
+	if staffViewer.IsLead("Creative") {
+		t.Fatal("Staff+Viewer is not a lead")
 	}
 }

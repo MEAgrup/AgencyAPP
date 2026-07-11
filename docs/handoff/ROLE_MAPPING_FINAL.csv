@@ -1,0 +1,18 @@
+department,jabatan,division,level
+SALES,*,Sales,auto
+ACCOUNT,*,Account,auto
+GROWTH & BUSINESS CONSULTATION,*,Account,auto
+CREATIVE,*,Creative,auto
+ADVERTISER,*,Ads,auto
+AFFILIATE,*,KOL,auto
+FINANCE AND ACCOUNTING,*,Finance,auto
+BUSINESS DEVELOPMENT,MARKETING STRATEGIST,Sales,staff
+BUSINESS DEVELOPMENT,*,-,-
+MCN,*,-,-
+TIKTOK GO,*,-,-
+CREATIVE - EKSTERNAL,*,-,-
+IT,*,-,-
+HRGA,*,-,-
+SKILSKUL,*,-,-
+OD,*,-,-
+DATA & BUSINESS INTELLIGENCE,*,-,-

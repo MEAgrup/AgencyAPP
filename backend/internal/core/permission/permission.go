@@ -5,9 +5,12 @@
 //   - Staff        = own data only
 //   - Lead/SPV     = division-wide (own division)
 //   - OD           = read-only everywhere + manages OKR (NEVER writes)
+//   - Viewer       = read-only everywhere, same read reach as OD, but NOT OD
+//     (no OKR authority, no lead authority, cannot manage admin)
 //   - Director     = full view + manage employees / role mappings / layered roles
 //
-// OD and Director are layered roles on top of a normal employee account.
+// OD, Viewer and Director are layered roles on top of a normal employee
+// account.
 package permission
 
 // Level is the division seniority level from role_mappings.
@@ -20,7 +23,8 @@ const (
 type Role struct {
 	Division string // CDPS division from role mapping (may be "" if unmapped)
 	Level    string // staff | lead
-	OD       bool   // layered read-only-everywhere role
+	OD       bool   // layered read-only-everywhere role; also manages OKR
+	Viewer   bool   // layered read-only-everywhere role; NOT OD, no OKR/lead authority
 	Director bool   // layered full-access role
 }
 
@@ -65,7 +69,7 @@ func (a Actor) CanManageAdmin() bool {
 
 // CanReadDivision reports read access to a division's data.
 func (a Actor) CanReadDivision(division string) bool {
-	if a.Role.Director || a.Role.OD {
+	if a.Role.Director || a.Role.OD || a.Role.Viewer {
 		return true
 	}
 	if a.Role.Level == LevelLead && a.Role.Division == division {
@@ -74,7 +78,7 @@ func (a Actor) CanReadDivision(division string) bool {
 	return false
 }
 
-// CanReadAll reports cross-division read access (OD / Director).
+// CanReadAll reports cross-division read access (OD / Viewer / Director).
 func (a Actor) CanReadAll() bool {
-	return a.Role.Director || a.Role.OD
+	return a.Role.Director || a.Role.OD || a.Role.Viewer
 }
