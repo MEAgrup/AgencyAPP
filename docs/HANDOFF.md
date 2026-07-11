@@ -2,6 +2,39 @@
 
 > Update this file at the end of every build session: what landed, what's next, what's blocked. Read it FIRST when resuming work. Complements (never replaces) `docs/DECISIONS.md`.
 
+## 2026-07-11 — Wave 1 Fase 1–2 landed (W1-01/02/05 + W1-03/04/06)
+
+**Branch:** `claude/cdps-sprint-0-handoff-c48u62` · **Base:** `claude/platform-dev-continue-c3vtde` (stacked di atas PR #3) · **PR:** #4 (draft) · **Commit terakhir:** `de0ea64` · **`go test ./...` hijau penuh** (MariaDB lokal: `service mariadb start` dulu — test DB-bound skip diam-diam bila DB mati).
+
+### Ticket status (docs/backlog/WAVE1 BACKLOG.md)
+
+| Ticket | Status | Where |
+|---|---|---|
+| W1-01 LEAD registry + pintu registrasi Sales | ✅ | `internal/module1_leads` — dedup engine (`dedup.go` decision table §5), normalisasi telepon, reopen, manual-review M1-OA-4; migrasi 0030–0031 |
+| W1-02 Bulk import Marketing (CSV) + campaign gate stub | ✅ | `import.go` + `campaign_stub` (migrasi 0031); laporan per-baris byte-exact |
+| W1-05 Attempt lifecycle (PRSP-) | ✅ | `internal/module0_sales` — semua edge §1 via engine; `UpdateStatus`/`QualifyFromForm`/`SystemTransition` |
+| W1-03 Pool claim + win resolution (M1 §6) | ✅ | `module1_leads/claim.go` (`ClaimPoolLead`, `ResolveWin`) + `module0_sales/competition.go` (`OpenAttempts`, `CloseKalah`) lewat seam `CompetitionResolver`; migrasi 0032; AC dua-klaiman end-to-end di `claim_test.go` |
+| W1-04 Taksonomi NQ Reason + junk breakdown | ✅ | `module0_sales/status.go` (7 pilihan tertutup M1-OA-8, `[Lainnya ...]` wajib detail) + `module1_leads/junk.go` |
+| W1-06 Qualified Lead Form (M0 §4.3) | ✅ | `module0_sales/qualified.go` + `commission.go`; migrasi 0041–0042; contoh Alpha Digital `Rp. 21.900.000,00` direproduksi di test; version-pinning MSL + recompute test |
+| W1-07…W1-18 | ⬜ | belum mulai (lihat "Langkah berikutnya") |
+
+### Kontrak antar-tiket yang SUDAH disiapkan (jangan bangun ulang)
+- **W1-09 (Closing) wajib memanggil** `leads.Service.ResolveWin(ctx, tx, resolver, leadID, winningProspectID, winnerEmployeeID, now)` DI DALAM transaksi closing yang sama, SETELAH attempt pemenang bertransisi `Closed-Success`. `resolver` = `*sales.Attempts` (structural match, tanpa import silang).
+- **W1-07/08 (Negosiasi) membaca baseline** dari `sales.GetQualifiedForm` (jasa terpilih + harga/komisi versi ter-pin) dan **re-evaluasi komisi** dengan `sales.EvaluateCommissionRule` yang sama terhadap harga proposal. Transisi negosiasi sudah ter-encode di mesin §1 (Pending Approval/Approved/Revision/Rejected, role `lead_spv` untuk keputusan superior).
+- **Uang:** selalu sen IDR integer (`ParseDecimalCents`/`CentsToDecimal`) atau literal DECIMAL(18,2); render `FormatIDR` (`Rp. X.XXX.XXX,00`, Dash `—` bila pending). Jangan float.
+- Rule komisi seed masih `pending_master_list` ⇒ komisi NULL + flag pending — TIDAK pernah dihitung/ditebak (Build Plan R3).
+
+### Keputusan & pertanyaan terbuka baru
+- **DECISIONS.md 2026-07-11**: baris dev-level W1-03/04/06 (klaim ganda staf sama ditolak; re-claim = reopen; ResolveWin dalam-tx; format simpan `[Lainnya ...] <teks>`; submit form = transisi satu transaksi; grammar rule komisi v1).
+- **O20 (baru):** backlog W1-03 menyebut "+ notification" tapi katalog O15 tak punya slug `m1.*` untuk Kalah Kompetisi — berjalan tanpa publish, menunggu keputusan Yohan.
+- **O18 (masih open, kena W1-08):** edge "accept revision" di mesin = `lead_spv`-only vs prosa M0 §5 (salesperson yang accept). Encoding berjalan ikut mesin.
+
+### Langkah berikutnya (urutan fase orkestrasi)
+1. **Fase 3 — W1-07+08 Negosiasi** (M0 §5): tabel negosiasi versioned (proposal per jasa: harga/komisi/termin + notes), non-nego validasi standard-terms → `Auto Approved`, approval superior (Approve/Counter wajib notes/Reject), sinkron nilai saat accept counter. Rentang migrasi M0 = 0040–0049 (0043+ bebas).
+2. **Fase 4 — W1-09 Closing**: alokasi Σ=100%, ≤5 sales, Commission & Payment PIC, generate `CLI-`/`TRX-`/`SVC-` atomik (`ids.Generator` dalam satu tx), panggil `ResolveWin`, tulis Payment Intent → antrian M5.
+3. **Fase 5 — M4** (W1-10…13), **Fase 6 — M5** (W1-14…18), **Fase 7 — QC + seed end-to-end + retarget PR**.
+4. Setiap fase: baca PRD modul penuh + `DATA_MODEL.md` + `STATE_MACHINES.md`; DoD per CLAUDE.md (BI byte-exact, permission per role, immutability, recompute-from-log, fixture Alpha Digital).
+
 ## 2026-07-10 — Sprint 0 (Foundation) implemented
 
 **Branch:** `claude/platform-dev-continue-c3vtde` · **Base:** `main` (docs-only)
