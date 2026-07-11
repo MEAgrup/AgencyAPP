@@ -2,6 +2,30 @@
 
 > Update this file at the end of every build session: what landed, what's next, what's blocked. Read it FIRST when resuming work. Complements (never replaces) `docs/DECISIONS.md`.
 
+## 2026-07-11 (sesi lanjutan #2) — Wave 1 Fase 4 landed (W1-09 Closing)
+
+**Branch:** `claude/handoff-process-continuation-69uk1f` · **PR #5** · **`go test ./...` hijau penuh** (MariaDB lokal); migrasi 0001–0049 up→down→up bersih.
+
+### Ticket status delta
+
+| Ticket | Status | Where |
+|---|---|---|
+| W1-09 Closing Form (M0 §6) | ✅ | `module0_sales/closing.go` (`Closing`, `NewClosing(attempts, win)`, `SubmitClosing`, `GetClient`); migrasi `0047_clients`(+`sales_allocations`), `0048_client_services`, `0049_transactions`(+`installments`); string BI `[total termin tidak sama dengan nilai transaksi]` di `msg` |
+
+Closing melahirkan Client (`CLI-`), Transaction (`TRX-`), Service(s) (`SVC-`), dan (Termin/Bayar di Belakang) Installment(s) (`INST-`) atomik dalam satu `engine.InTx`; transisi attempt pemenang → `Closed-Success`; memanggil win-resolution (M1 §6 rule 5) untuk menutup kompetitor pool `[Closed - Kalah Kompetisi]`.
+
+### Koreksi arsitektur penting (vs kontrak handoff sebelumnya)
+Kontrak lama menulis "W1-09 memanggil `leads.Service.ResolveWin(...)`". Implementasi final **TIDAK meng-import `module1_leads` dari `module0_sales`** (itu memicu import cycle karena `claim_test.go` package `leads` sudah meng-import `module0_sales`). Sebagai gantinya, `SubmitClosing` menerima **`WinResolverFunc`** (callback tanpa tipe leads); lapisan wiring/test mengikatnya ke `leads.Service.ResolveWin` dengan `*sales.Attempts` sebagai resolver. Ini justru memenuhi "tanpa import silang" lebih tepat. Detail di DECISIONS.md baris W1-09.
+
+### Kontrak untuk fase berikutnya
+- **M4 (Fase 5, W1-10…13)** dan **M5 (Fase 6, W1-14…18)** membangun DI ATAS tabel kelahiran ini: `clients`, `sales_allocations`, `client_services`, `transactions`, `installments` sudah ada (skema minimal). Tambah kolom/behavior via migrasi baru — jangan buat ulang tabelnya. `transactions.payment_status` & `installments.status` sudah lahir di initial state dan siap dipakai Store adapter statemachine M5 (label byte-exact sudah cocok dengan `machines.go`).
+- **Wiring produksi belum ada** (belum ada HTTP/app layer): `Closing` perlu di-construct dengan `WinResolverFunc` yang mengikat `leads.Service.ResolveWin`. Contoh binding ada di `closing_test.go newClosingEnv`.
+- **Catatan penting untuk M4/M5 stream paralel (PR #2, Akun B):** Akun B sudah membangun M4/M5 di branch terpisah dengan skema tabelnya sendiri. Fase 5–6 di branch ini kemungkinan besar **rekonsiliasi/merge** dengan hasil Akun B, bukan bangun dari nol — cek `WAVE1_PARALLEL_PLAN.md` di branch Akun B sebelum mulai.
+
+### Open baru/relevan
+- **O18** (siapa accept counter-offer) & **O21** (resubmit setelah Reject) masih open (dari Fase 3).
+- Tidak ada open baru dari W1-09; semua ambiguitas M0 §6 (string BI closing, batas visibilitas Account) di-encode konservatif dan dicatat di baris DECISIONS W1-09.
+
 ## 2026-07-11 (sesi lanjutan) — Wave 1 Fase 3 landed (W1-07/08 Negosiasi)
 
 **Branch:** `claude/handoff-process-continuation-69uk1f` (rebased di atas `claude/cdps-sprint-0-handoff-c48u62` @ `aeb4680`) · **`go test ./...` hijau penuh** (MariaDB lokal).

@@ -10,4 +10,9 @@ const (
 	TransisiTidakDiizinkan = "[transisi status tidak diizinkan]"
 	// HRIS unreachable at login (docs/HRIS API CONTRACT.md §3).
 	HRISTidakDapatDihubungi = "[sistem HRIS tidak dapat dihubungi, coba beberapa saat lagi]"
+	// Termin installment schedule does not sum to the transaction's agreed
+	// total value (docs/prd/HRIS Module5 Admin Finance.md §4 flow rule 1:
+	// "must sum to agreed total — system validates with ..."). W1-09 Closing
+	// enforces this at submission for the Termin payment scheme.
+	TotalTerminTidakSama = "[total termin tidak sama dengan nilai transaksi]"
 )
