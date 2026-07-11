@@ -24,6 +24,36 @@ var allowedContactActionTypes = map[string]bool{
 	"visit":   true,
 }
 
+// NotQualifiedReasons is the closed list of M1-OA-8 Not-Qualified reason taxonomy.
+// Byte-exact from the PRD. The special value "[Lainnya ...]" allows a free-text
+// reason to be appended (stored as "[Lainnya ...] <text>").
+var NotQualifiedReasons = map[string]bool{
+	"[Bukan seller]":               true,
+	"[Tidak ada budget]":           true,
+	"[Kontak salah/tidak valid]":   true,
+	"[Tidak ada respon]":           true,
+	"[Sudah jadi klien]":           true,
+	"[Spam/duplikat]":              true,
+	"[Lainnya ...]":                true, // Free-text fallback
+}
+
+// isValidNotQualifiedReason checks if a reason matches the closed list or is
+// a "[Lainnya ...]" with appended text. The format for "other" is:
+// "[Lainnya ...] <free-text>", e.g. "[Lainnya ...] Tidak punya uang tapi ada budget".
+func isValidNotQualifiedReason(reason string) bool {
+	if NotQualifiedReasons[reason] {
+		return reason != "[Lainnya ...]" // Bare "[Lainnya ...]" without detail is invalid
+	}
+	// Check if it's "[Lainnya ...] <text>" format
+	const prefix = "[Lainnya ...] "
+	if len(reason) > len(prefix) && reason[:len(prefix)] == prefix {
+		// Must have at least one character after the prefix
+		text := reason[len(prefix):]
+		return len(text) > 0
+	}
+	return false
+}
+
 // UpdateStatusInput is the payload for UpdateStatus.
 type UpdateStatusInput struct {
 	To statemachine.Status
@@ -31,9 +61,11 @@ type UpdateStatusInput struct {
 	// §4 rule 1): one of call/chat/meeting/visit. Ignored for every other
 	// target status.
 	ActionType string
-	// NotQualifiedReason is optional, stored verbatim when To ==
-	// statemachine.ProspectNotQualified. Taxonomy enforcement (closed list,
-	// M1-OA-8) is ticket W1-04's scope, not this one's.
+	// NotQualifiedReason is mandatory when To == statemachine.ProspectNotQualified
+	// (M1 §9.3, M1-OA-8) and must match the closed taxonomy: one of the exact
+	// bracketed reasons or "[Lainnya ...] <detail>". Ignored for every other
+	// target status. Missing/invalid when To == Not Qualified -> validation
+	// failure with no side effects.
 	NotQualifiedReason string
 }
 
@@ -53,8 +85,11 @@ type UpdateStatusInput struct {
 //     (queryable) and as its own immutable audit row (auditable) -- but only
 //     AFTER the engine's own transition succeeds, so a from-state that isn't
 //     actually New Lead still blocks with zero side effects.
-//   - To == Not Qualified with a NotQualifiedReason stores it (best-effort;
-//     no taxonomy check here).
+//   - To == Not Qualified requires a valid NotQualifiedReason (M1-OA-8
+//     taxonomy: one of the six bracketed reasons or "[Lainnya ...] <detail>");
+//     missing/invalid -> the default BI mandatory-field message, no side
+//     effects (W1-04). On success, the reason is stored after the engine
+//     transition succeeds, so invalid taxonomy still results in zero effects.
 //   - Any attempt currently `Blocked` has no outgoing edge in the machine, so
 //     every UpdateStatus call against it is rejected by the engine itself
 //     (M0 §4 rule 2: "Blocked attempts cannot be updated or followed up").
@@ -72,6 +107,12 @@ func (s *Attempts) UpdateStatus(ctx context.Context, conn *sql.DB, actor authz.I
 		return validationErr()
 	}
 	if in.To == statemachine.ProspectContacted && !allowedContactActionTypes[in.ActionType] {
+		return validationErr()
+	}
+	// M1-OA-8: Not Qualified requires a valid reason from the closed taxonomy
+	// (W1-04). Invalid/missing reason blocks with mandatory-field message,
+	// zero side effects (no transition, no audit).
+	if in.To == statemachine.ProspectNotQualified && !isValidNotQualifiedReason(in.NotQualifiedReason) {
 		return validationErr()
 	}
 
