@@ -1,0 +1,14 @@
+DROP TRIGGER IF EXISTS notifications_no_delete;
+DROP TRIGGER IF EXISTS audit_log_no_delete;
+DROP TRIGGER IF EXISTS audit_log_no_update;
+DROP TABLE IF EXISTS demo_task_block_requests;
+DROP TABLE IF EXISTS demo_tasks;
+DROP TABLE IF EXISTS notifications;
+DROP TABLE IF EXISTS master_service_versions;
+DROP TABLE IF EXISTS master_services;
+DROP TABLE IF EXISTS employee_layered_roles;
+DROP TABLE IF EXISTS role_mappings;
+DROP TABLE IF EXISTS audit_log;
+DROP TABLE IF EXISTS id_sequences;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS employees;
