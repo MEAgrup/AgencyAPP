@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/meagrup/agencyapp/backend/internal/core/audit"
@@ -24,34 +25,73 @@ var allowedContactActionTypes = map[string]bool{
 	"visit":   true,
 }
 
-// NotQualifiedReasons is the closed list of M1-OA-8 Not-Qualified reason taxonomy.
-// Byte-exact from the PRD. The special value "[Lainnya ...]" allows a free-text
-// reason to be appended (stored as "[Lainnya ...] <text>").
-var NotQualifiedReasons = map[string]bool{
-	"[Bukan seller]":               true,
-	"[Tidak ada budget]":           true,
-	"[Kontak salah/tidak valid]":   true,
-	"[Tidak ada respon]":           true,
-	"[Sudah jadi klien]":           true,
-	"[Spam/duplikat]":              true,
-	"[Lainnya ...]":                true, // Free-text fallback
+// Not-Qualified Reason taxonomy (M1-OA-8, W1-04). The closed list is
+// byte-exact from the PRD: six fixed reasons plus the confirmed-essential
+// `[Lainnya ...]` free-text fallback. On the fallback the free text is
+// MANDATORY and is stored appended to the label -- "[Lainnya ...] <teks>" --
+// in the single not_qualified_reason VARCHAR(255) column (no new migration).
+const (
+	NQReasonBukanSeller     = "[Bukan seller]"
+	NQReasonTidakAdaBudget  = "[Tidak ada budget]"
+	NQReasonKontakSalah     = "[Kontak salah/tidak valid]"
+	NQReasonTidakAdaRespon  = "[Tidak ada respon]"
+	NQReasonSudahJadiKlien  = "[Sudah jadi klien]"
+	NQReasonSpamDuplikat    = "[Spam/duplikat]"
+	NQReasonLainnya         = "[Lainnya ...]" // requires NotQualifiedReasonDetail
+	nqReasonStoredMaxLength = 255             // prospect_attempts.not_qualified_reason VARCHAR(255)
+)
+
+// NotQualifiedReasons is the closed M1-OA-8 list in PRD order, exported so
+// API/frontend layers render exactly this multiple-choice set and never
+// invent labels.
+var NotQualifiedReasons = []string{
+	NQReasonBukanSeller,
+	NQReasonTidakAdaBudget,
+	NQReasonKontakSalah,
+	NQReasonTidakAdaRespon,
+	NQReasonSudahJadiKlien,
+	NQReasonSpamDuplikat,
+	NQReasonLainnya,
 }
 
-// isValidNotQualifiedReason checks if a reason matches the closed list or is
-// a "[Lainnya ...]" with appended text. The format for "other" is:
-// "[Lainnya ...] <free-text>", e.g. "[Lainnya ...] Tidak punya uang tapi ada budget".
-func isValidNotQualifiedReason(reason string) bool {
-	if NotQualifiedReasons[reason] {
-		return reason != "[Lainnya ...]" // Bare "[Lainnya ...]" without detail is invalid
+var notQualifiedReasonSet = func() map[string]bool {
+	m := make(map[string]bool, len(NotQualifiedReasons))
+	for _, r := range NotQualifiedReasons {
+		m[r] = true
 	}
-	// Check if it's "[Lainnya ...] <text>" format
-	const prefix = "[Lainnya ...] "
-	if len(reason) > len(prefix) && reason[:len(prefix)] == prefix {
-		// Must have at least one character after the prefix
-		text := reason[len(prefix):]
-		return len(text) > 0
+	return m
+}()
+
+// notQualifiedReasonValue validates the (reason, detail) pair against the
+// M1-OA-8 taxonomy and returns the value to store:
+//   - reason must be EXACTLY one of NotQualifiedReasons (byte-exact);
+//   - reason == NQReasonLainnya additionally requires a non-blank detail;
+//     the stored value is "[Lainnya ...] <detail>";
+//   - every other reason must carry NO detail (closed choices are stored
+//     verbatim; free text exists only for the fallback);
+//   - the stored value must fit the VARCHAR(255) column.
+//
+// ok == false means the pair fails mandatory-field validation.
+func notQualifiedReasonValue(reason, detail string) (stored string, ok bool) {
+	if !notQualifiedReasonSet[reason] {
+		return "", false
 	}
-	return false
+	trimmed := strings.TrimSpace(detail)
+	if reason == NQReasonLainnya {
+		if trimmed == "" {
+			return "", false
+		}
+		stored = NQReasonLainnya + " " + trimmed
+	} else {
+		if trimmed != "" {
+			return "", false
+		}
+		stored = reason
+	}
+	if len(stored) > nqReasonStoredMaxLength {
+		return "", false
+	}
+	return stored, true
 }
 
 // UpdateStatusInput is the payload for UpdateStatus.
@@ -62,11 +102,16 @@ type UpdateStatusInput struct {
 	// target status.
 	ActionType string
 	// NotQualifiedReason is mandatory when To == statemachine.ProspectNotQualified
-	// (M1 §9.3, M1-OA-8) and must match the closed taxonomy: one of the exact
-	// bracketed reasons or "[Lainnya ...] <detail>". Ignored for every other
-	// target status. Missing/invalid when To == Not Qualified -> validation
-	// failure with no side effects.
+	// (M1 §9.3 "Mandatory when status -> Not Qualified", M1-OA-8) and must be
+	// EXACTLY one of NotQualifiedReasons. For any other target status it must
+	// be empty. Missing/invalid -> mandatory-field validation failure with
+	// zero side effects (no transition, no writes, no audit).
 	NotQualifiedReason string
+	// NotQualifiedReasonDetail is the free text for the `[Lainnya ...]`
+	// fallback: MANDATORY (non-blank) when NotQualifiedReason ==
+	// NQReasonLainnya, and must be empty otherwise. Stored combined as
+	// "[Lainnya ...] <detail>" in the not_qualified_reason column.
+	NotQualifiedReasonDetail string
 }
 
 // UpdateStatus is the public status-update API (M0 §4 rules) for a Prospect
@@ -85,11 +130,14 @@ type UpdateStatusInput struct {
 //     (queryable) and as its own immutable audit row (auditable) -- but only
 //     AFTER the engine's own transition succeeds, so a from-state that isn't
 //     actually New Lead still blocks with zero side effects.
-//   - To == Not Qualified requires a valid NotQualifiedReason (M1-OA-8
-//     taxonomy: one of the six bracketed reasons or "[Lainnya ...] <detail>");
-//     missing/invalid -> the default BI mandatory-field message, no side
-//     effects (W1-04). On success, the reason is stored after the engine
-//     transition succeeds, so invalid taxonomy still results in zero effects.
+//   - To == Not Qualified requires a valid NotQualifiedReason from the closed
+//     M1-OA-8 taxonomy (plus mandatory NotQualifiedReasonDetail for the
+//     `[Lainnya ...]` fallback); missing/off-list -> the default BI
+//     mandatory-field message, no side effects (W1-04). For every OTHER
+//     target status the reason/detail must be empty. On success the stored
+//     reason is written (row + its own immutable audit entry) only AFTER the
+//     engine's transition succeeds, so a blocked from-state still yields
+//     zero side effects.
 //   - Any attempt currently `Blocked` has no outgoing edge in the machine, so
 //     every UpdateStatus call against it is rejected by the engine itself
 //     (M0 §4 rule 2: "Blocked attempts cannot be updated or followed up").
@@ -109,10 +157,17 @@ func (s *Attempts) UpdateStatus(ctx context.Context, conn *sql.DB, actor authz.I
 	if in.To == statemachine.ProspectContacted && !allowedContactActionTypes[in.ActionType] {
 		return validationErr()
 	}
-	// M1-OA-8: Not Qualified requires a valid reason from the closed taxonomy
-	// (W1-04). Invalid/missing reason blocks with mandatory-field message,
-	// zero side effects (no transition, no audit).
-	if in.To == statemachine.ProspectNotQualified && !isValidNotQualifiedReason(in.NotQualifiedReason) {
+	// M1-OA-8 taxonomy gate (W1-04): To == Not Qualified requires a valid
+	// (reason, detail) pair; any other target must carry neither. Failure is
+	// the default BI mandatory-field message with zero side effects.
+	var nqStored string
+	if in.To == statemachine.ProspectNotQualified {
+		v, ok := notQualifiedReasonValue(in.NotQualifiedReason, in.NotQualifiedReasonDetail)
+		if !ok {
+			return validationErr()
+		}
+		nqStored = v
+	} else if in.NotQualifiedReason != "" || strings.TrimSpace(in.NotQualifiedReasonDetail) != "" {
 		return validationErr()
 	}
 
@@ -160,13 +215,23 @@ func (s *Attempts) UpdateStatus(ctx context.Context, conn *sql.DB, actor authz.I
 				return fmt.Errorf("sales: audit contact action: %w", err)
 			}
 		case statemachine.ProspectNotQualified:
-			if in.NotQualifiedReason != "" {
-				if _, err := tx.ExecContext(ctx,
-					`UPDATE prospect_attempts SET not_qualified_reason = ? WHERE prospect_id = ?`,
-					in.NotQualifiedReason, prospectID,
-				); err != nil {
-					return fmt.Errorf("sales: record not-qualified reason: %w", err)
-				}
+			// nqStored is guaranteed non-empty here (validated pre-engine).
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE prospect_attempts SET not_qualified_reason = ? WHERE prospect_id = ?`,
+				nqStored, prospectID,
+			); err != nil {
+				return fmt.Errorf("sales: record not-qualified reason: %w", err)
+			}
+			after, _ := json.Marshal(map[string]any{"not_qualified_reason": nqStored})
+			if _, err := s.auditLg.Append(ctx, tx, audit.Entry{
+				EntityType: string(statemachine.EntityProspect),
+				EntityID:   prospectID,
+				Actor:      actor.EmployeeID,
+				Action:     "not_qualified_reason_recorded",
+				After:      after,
+				At:         time.Now().UTC(),
+			}); err != nil {
+				return fmt.Errorf("sales: audit not-qualified reason: %w", err)
 			}
 		}
 		return nil

@@ -94,7 +94,9 @@ func TestPermissions_SPVDivisionWide(t *testing.T) {
 	if _, err := s.GetAttempt(ctx, conn, adsLead, id); !errors.Is(err, authz.ErrDenied) {
 		t.Fatalf("ads lead GetAttempt: expected authz.ErrDenied, got %v", err)
 	}
-	if err := s.UpdateStatus(ctx, conn, adsLead, id, sales.UpdateStatusInput{To: statemachine.ProspectNotQualified}); !errors.Is(err, authz.ErrDenied) {
+	// A valid NQ reason is supplied so the stateless input gate passes and the
+	// failure is unambiguously the division check.
+	if err := s.UpdateStatus(ctx, conn, adsLead, id, sales.UpdateStatusInput{To: statemachine.ProspectNotQualified, NotQualifiedReason: sales.NQReasonBukanSeller}); !errors.Is(err, authz.ErrDenied) {
 		t.Fatalf("ads lead UpdateStatus: expected authz.ErrDenied, got %v", err)
 	}
 }

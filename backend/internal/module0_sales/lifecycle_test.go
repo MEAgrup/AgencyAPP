@@ -342,6 +342,8 @@ func TestAllowedTransitionSweepViaAPI(t *testing.T) {
 				err = s.QualifyFromForm(ctx, conn, spv, id)
 			case statemachine.ProspectContacted:
 				err = s.UpdateStatus(ctx, conn, spv, id, sales.UpdateStatusInput{To: tr.To, ActionType: "call"})
+			case statemachine.ProspectNotQualified:
+				err = s.UpdateStatus(ctx, conn, spv, id, sales.UpdateStatusInput{To: tr.To, NotQualifiedReason: sales.NQReasonBukanSeller})
 			default:
 				err = s.UpdateStatus(ctx, conn, spv, id, sales.UpdateStatusInput{To: tr.To})
 			}

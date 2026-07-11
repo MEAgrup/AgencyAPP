@@ -109,6 +109,7 @@ type Lead struct {
 	LastTouchCampaign      string // "" when absent
 	RecordStatus           RecordStatus
 	WinningAttempt         string // "" until win resolution (W1-03)
+	WinningSalespersonID   string // "" until win resolution; owner of the winning attempt (M1 §6 rule 5)
 	ScoutedOwnerEmployeeID string // "" for pool leads
 	ManualReviewFlag       bool
 	// PoolEnteredAt is when the record (re)entered [Pool]; zero when the lead

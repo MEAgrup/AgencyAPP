@@ -18,20 +18,20 @@ var ErrCampaignNotFound = errors.New("leads: campaign not found")
 
 const leadColumns = `lead_id, lead_name, phone_raw, phone_normalized, email, source,
 	origin_division, origin_campaign, last_touch_campaign, record_status,
-	winning_attempt, scouted_owner_employee_id, manual_review_flag, pool_entered_at`
+	winning_attempt, winning_salesperson_employee_id, scouted_owner_employee_id, manual_review_flag, pool_entered_at`
 
 func scanLead(row interface{ Scan(...any) error }) (*Lead, error) {
 	var (
-		l                                                       Lead
-		email, originCampaign, lastTouch, winning, scoutedOwner sql.NullString
-		manualReview                                            bool
-		status                                                  string
-		poolEnteredAt                                           sql.NullTime
+		l                                                                  Lead
+		email, originCampaign, lastTouch, winning, winnerEmp, scoutedOwner sql.NullString
+		manualReview                                                       bool
+		status                                                             string
+		poolEnteredAt                                                      sql.NullTime
 	)
 	if err := row.Scan(
 		&l.LeadID, &l.LeadName, &l.PhoneRaw, &l.PhoneNormalized, &email, &l.Source,
 		&l.OriginDivision, &originCampaign, &lastTouch, &status,
-		&winning, &scoutedOwner, &manualReview, &poolEnteredAt,
+		&winning, &winnerEmp, &scoutedOwner, &manualReview, &poolEnteredAt,
 	); err != nil {
 		return nil, err
 	}
@@ -40,6 +40,7 @@ func scanLead(row interface{ Scan(...any) error }) (*Lead, error) {
 	l.LastTouchCampaign = lastTouch.String
 	l.RecordStatus = RecordStatus(status)
 	l.WinningAttempt = winning.String
+	l.WinningSalespersonID = winnerEmp.String
 	l.ScoutedOwnerEmployeeID = scoutedOwner.String
 	l.ManualReviewFlag = manualReview
 	if poolEnteredAt.Valid {
@@ -62,6 +63,33 @@ func findByPhone(ctx context.Context, tx *sql.Tx, key string) (*Lead, error) {
 	return l, err
 }
 
+// getLeadForUpdate loads one lead by id with SELECT ... FOR UPDATE so
+// concurrent claims / win resolutions on the same lead serialise on the row
+// (M1 §9.4: win resolution must be atomic — no two winners). Must run inside
+// a transaction. Returns ErrLeadNotFound when absent.
+func getLeadForUpdate(ctx context.Context, tx *sql.Tx, leadID string) (*Lead, error) {
+	row := tx.QueryRowContext(ctx,
+		`SELECT `+leadColumns+` FROM leads WHERE lead_id = ? FOR UPDATE`, leadID)
+	l, err := scanLead(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrLeadNotFound
+	}
+	return l, err
+}
+
+// setWinner writes the win-resolution outcome on the Lead record in one
+// statement: winning attempt + winning salesperson (M1 §6 rule 5) + record
+// status won ([Closed - Success], §5 rule 4 row 4). Called ONLY by ResolveWin
+// inside its locked transaction; the audit row is the caller's responsibility.
+func setWinner(ctx context.Context, q db.Queryer, leadID, winningAttempt, winnerEmployeeID string, now time.Time) error {
+	_, err := q.ExecContext(ctx,
+		`UPDATE leads
+		    SET winning_attempt = ?, winning_salesperson_employee_id = ?, record_status = ?, updated_at = ?
+		  WHERE lead_id = ?`,
+		winningAttempt, winnerEmployeeID, string(StatusClient), now, leadID)
+	return err
+}
+
 // GetLead reads one lead by id (no lock). Returns ErrLeadNotFound when absent.
 func GetLead(ctx context.Context, q db.Queryer, leadID string) (*Lead, error) {
 	row := q.QueryRowContext(ctx, `SELECT `+leadColumns+` FROM leads WHERE lead_id = ?`, leadID)
@@ -82,10 +110,10 @@ func insertLead(ctx context.Context, q db.Queryer, l Lead, now time.Time) error 
 	}
 	_, err := q.ExecContext(ctx,
 		`INSERT INTO leads (`+leadColumns+`, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		l.LeadID, l.LeadName, l.PhoneRaw, l.PhoneNormalized, nullStr(l.Email), l.Source,
 		l.OriginDivision, nullStr(l.OriginCampaign), nullStr(l.LastTouchCampaign), string(l.RecordStatus),
-		nullStr(l.WinningAttempt), nullStr(l.ScoutedOwnerEmployeeID), l.ManualReviewFlag,
+		nullStr(l.WinningAttempt), nullStr(l.WinningSalespersonID), nullStr(l.ScoutedOwnerEmployeeID), l.ManualReviewFlag,
 		poolEntered, now, now,
 	)
 	if err != nil {
