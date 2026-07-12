@@ -9,6 +9,7 @@ import (
 	"github.com/meagrup/agencyapp/backend/internal/admin"
 	"github.com/meagrup/agencyapp/backend/internal/core/audit"
 	"github.com/meagrup/agencyapp/backend/internal/core/permission"
+	"github.com/meagrup/agencyapp/backend/internal/core/tz"
 )
 
 // NQ taxonomy (M1-OA-8): seven closed reasons; "[Lainnya ...]" requires free
@@ -94,7 +95,8 @@ func (s *Service) SubmitQualifiedForm(ctx context.Context, actor permission.Acto
 
 	// Resolve MSL versions (reads) before the write transaction; the pinned
 	// snapshot is what gets persisted, so it stays recomputable forever.
-	today := time.Now().UTC().Format("2006-01-02")
+	// O20: lookup effective MSL version on today's WIB date for calendar consistency.
+	today := time.Now().In(tz.Jakarta()).Format("2006-01-02")
 	type pinned struct {
 		id, name, price, rule string
 		versionNo             int

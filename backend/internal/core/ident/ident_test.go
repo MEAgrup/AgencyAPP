@@ -137,3 +137,76 @@ func pad(i int) string {
 	}
 	return string(b)
 }
+
+// TestNext_O20_YYYYMMBucketsWIB verifies O20 decision: YYYYMM component in IDs
+// uses Asia/Jakarta (WIB) calendar dates, not UTC.
+//
+// Test case: 2026-06-30T17:30:00Z = 2026-07-01T00:30:00+07:00 (WIB)
+// Expected: ID should have YYYYMM=202607 (July in WIB), not 202606 (June in UTC).
+func TestNext_O20_YYYYMMBucketsWIB(t *testing.T) {
+	d := testutil.DB(t)
+	testutil.Clean(t, d)
+	ctx := context.Background()
+
+	// A UTC moment that crosses month boundary in WIB
+	utcMoment := time.Date(2026, 6, 30, 17, 30, 0, 0, time.UTC)
+
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := ident.Next(ctx, tx, "TST", utcMoment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx.Commit()
+
+	// ID should have YYYYMM=202607 (July in WIB), not 202606 (June in UTC)
+	if !idFormat.MatchString(id) {
+		t.Fatalf("bad id format: %s", id)
+	}
+
+	// Extract the YYYYMM component (6 chars after prefix)
+	if id != "TST-202607-0001" {
+		t.Errorf("O20 month boundary: got %s, expected TST-202607-0001 (July WIB date)", id)
+	}
+}
+
+// TestNext_O20_DailyBucketWIB verifies that IDs bucket to WIB daily boundaries.
+//
+// Test case 1: 2026-07-11T18:30:00Z = 2026-07-12T01:30:00+07:00 (WIB) on next day
+// Both moments should produce the same YYYYMM (202607) because both are in July WIB.
+func TestNext_O20_SameDayBucketWIB(t *testing.T) {
+	d := testutil.DB(t)
+	testutil.Clean(t, d)
+	ctx := context.Background()
+
+	// Two UTC moments that are in the same WIB date (2026-07-12)
+	// 2026-07-11T18:30:00Z = 2026-07-12T01:30:00 WIB
+	utc1 := time.Date(2026, 7, 11, 18, 30, 0, 0, time.UTC)
+
+	// 2026-07-12T10:00:00Z = 2026-07-12T17:00:00 WIB (still the same day)
+	utc2 := time.Date(2026, 7, 12, 10, 0, 0, 0, time.UTC)
+
+	tx1, _ := d.BeginTx(ctx, nil)
+	id1, err := ident.Next(ctx, tx1, "TST", utc1)
+	tx1.Commit()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tx2, _ := d.BeginTx(ctx, nil)
+	id2, err := ident.Next(ctx, tx2, "TST", utc2)
+	tx2.Commit()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Both should have the same YYYYMM (202607)
+	if id1 != "TST-202607-0001" {
+		t.Errorf("id1: got %s, expected TST-202607-0001", id1)
+	}
+	if id2 != "TST-202607-0002" {
+		t.Errorf("id2: got %s, expected TST-202607-0002", id2)
+	}
+}

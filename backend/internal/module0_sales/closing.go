@@ -142,7 +142,8 @@ func (s *Service) Close(ctx context.Context, actor permission.Actor, attemptID s
 		return ClosingResult{}, err
 	}
 
-	now := time.Now().UTC()
+	// O20: use current time for ID generation; YYYYMM component buckets by WIB via ident.Next.
+	now := time.Now()
 	primary := in.Parties.PrimarySalespersonID
 	pic := in.Parties.ResolvedPIC()
 

@@ -25,6 +25,7 @@ import (
 	"github.com/meagrup/agencyapp/backend/internal/core/notification"
 	"github.com/meagrup/agencyapp/backend/internal/core/permission"
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
+	"github.com/meagrup/agencyapp/backend/internal/core/tz"
 )
 
 // systemActor drives the fire-once [Belum Jatuh Tempo] -> [Jatuh Tempo]
@@ -62,7 +63,8 @@ type ScanResult struct {
 // special-case filter.
 func (s *Service) ScanReminders(ctx context.Context, cat *notification.Catalog, now time.Time) (ScanResult, error) {
 	var res ScanResult
-	today := now.UTC().Truncate(24 * time.Hour)
+	// O20: bucket to WIB daily boundaries for calendar consistency.
+	today := tz.TodayWIB(now)
 
 	n, err := s.scanOverdue(ctx, cat, today)
 	if err != nil {
@@ -436,7 +438,8 @@ func (s *Service) Dashboard(ctx context.Context, cat *notification.Catalog, acto
 		return Dashboard{}, err
 	}
 
-	today := now.UTC().Truncate(24 * time.Hour)
+	// O20: bucket to WIB daily boundaries for calendar consistency.
+	today := tz.TodayWIB(now)
 	windowEnd := today.AddDate(0, 0, 3)
 
 	q := `SELECT i.id, i.installment_no, i.amount, i.due_date, i.status, i.transaction_id, c.id, c.toko
@@ -468,7 +471,11 @@ func (s *Service) Dashboard(ctx context.Context, cat *notification.Catalog, acto
 		r.DueDate = due
 		r.overdue = r.Status == InstJatuhTempo
 		if r.overdue {
-			days := int(today.Sub(due.UTC().Truncate(24*time.Hour)).Hours() / 24)
+			// O20: calculate days overdue using WIB calendar dates.
+			// due is midnight UTC (from database DATE column); convert to WIB for consistent date comparison.
+			dueInWIB := due.In(tz.Jakarta())
+			dueDateWIB := time.Date(dueInWIB.Year(), dueInWIB.Month(), dueInWIB.Day(), 0, 0, 0, 0, tz.Jakarta())
+			days := int(today.Sub(dueDateWIB).Hours() / 24)
 			if days < 0 {
 				days = 0
 			}

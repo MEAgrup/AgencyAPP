@@ -13,6 +13,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/meagrup/agencyapp/backend/internal/core/tz"
 )
 
 // Next allocates the next ID for prefix in the YYYYMM bucket of now, using the
@@ -29,8 +31,11 @@ import (
 // The LAST_INSERT_ID(expr) trick returns the freshly allocated number without a
 // separate SELECT, avoiding the shared→exclusive lock upgrade that deadlocks a
 // naive INSERT-IGNORE + SELECT ... FOR UPDATE approach.
+//
+// YYYYMM component buckets by Asia/Jakarta (WIB) date, per O20 decision.
 func Next(ctx context.Context, tx *sql.Tx, prefix string, now time.Time) (string, error) {
-	period := now.UTC().Format("200601")
+	// O20: bucket YYYYMM by WIB timezone for calendar consistency.
+	period := now.In(tz.Jakarta()).Format("200601")
 
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO id_sequences (prefix, period, next_n, created_by)
