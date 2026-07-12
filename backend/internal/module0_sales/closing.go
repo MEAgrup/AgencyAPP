@@ -142,8 +142,9 @@ func (s *Service) Close(ctx context.Context, actor permission.Actor, attemptID s
 		return ClosingResult{}, err
 	}
 
-	// O20: use current time for ID generation; YYYYMM component buckets by WIB via ident.Next.
-	now := time.Now()
+	// Timestamp persist tetap UTC (O20 hanya mengubah bucketing kalender;
+	// komponen YYYYMM di-WIB-kan di dalam ident.Next, input UTC tidak masalah).
+	now := time.Now().UTC()
 	primary := in.Parties.PrimarySalespersonID
 	pic := in.Parties.ResolvedPIC()
 
