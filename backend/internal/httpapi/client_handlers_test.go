@@ -25,6 +25,7 @@ func (clientAuth) Verify(_ context.Context, email, password string) (string, err
 		"andi@mea.co.id":  "EMP-ANDI",  // Sales staff (owns nothing here)
 		"dewi@mea.co.id":  "EMP-DEWI",  // Sales lead
 		"amel@mea.co.id":  "EMP-AMEL",  // Account staff
+		"bima@mea.co.id":  "EMP-BIMA",  // Account staff (AM kedua, target reassign)
 		"alia@mea.co.id":  "EMP-ALIA",  // Account lead
 		"cakra@mea.co.id": "EMP-CAKRA", // Creative staff (no M4 access)
 		"odi@mea.co.id":   "EMP-ODI",   // OD (layered)
@@ -50,6 +51,7 @@ func setupCF(t *testing.T) (*httptest.Server, func()) {
 	testutil.InsertEmployee(t, d, "EMP-ANDI", "Andi", "andi@mea.co.id", "Sales", "Sales Executive", true)
 	testutil.InsertEmployee(t, d, "EMP-DEWI", "Dewi", "dewi@mea.co.id", "Sales", "Sales Head", true)
 	testutil.InsertEmployee(t, d, "EMP-AMEL", "Amel", "amel@mea.co.id", "Account", "Account Manager", true)
+	testutil.InsertEmployee(t, d, "EMP-BIMA", "Bima", "bima@mea.co.id", "Account", "Account Manager", true)
 	testutil.InsertEmployee(t, d, "EMP-ALIA", "Alia", "alia@mea.co.id", "Account", "Account Lead", true)
 	testutil.InsertEmployee(t, d, "EMP-CAKRA", "Cakra", "cakra@mea.co.id", "Creative", "Creative Designer", true)
 	testutil.InsertEmployee(t, d, "EMP-ODI", "Odi", "odi@mea.co.id", "Management", "OD", true)
@@ -78,11 +80,22 @@ func seedCFClient(t *testing.T, id, salesPIC string, released bool) {
 	}
 }
 
+// assignCFAM sets a client's current AM pointer (migration 0020) so an Account
+// STAFF endpoint test can see it under M4 §6 Rule 3 assigned-granularity.
+func assignCFAM(t *testing.T, id, amID string) {
+	t.Helper()
+	if _, err := testutil.DB(t).ExecContext(context.Background(),
+		`UPDATE clients SET assigned_am_id = ? WHERE id = ?`, amID, id); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestClientEndpoints_Visibility(t *testing.T) {
 	srv, done := setupCF(t)
 	defer done()
 	seedCFClient(t, "CLI-PRE", "EMP-BUDI", false) // pre-verification
 	seedCFClient(t, "CLI-REL", "EMP-BUDI", true)  // released to Account
+	assignCFAM(t, "CLI-REL", "EMP-AMEL")          // owned by Account staff Amel
 
 	// Owner (Sales staff) sees own pre-verification client.
 	budi := login(t, srv, "budi@mea.co.id")
@@ -130,6 +143,7 @@ func TestClientEndpoints_LockMatrix(t *testing.T) {
 	srv, done := setupCF(t)
 	defer done()
 	seedCFClient(t, "CLI-REL", "EMP-BUDI", true)
+	assignCFAM(t, "CLI-REL", "EMP-AMEL") // owned by Account staff Amel
 
 	amel := login(t, srv, "amel@mea.co.id") // Account staff
 	alia := login(t, srv, "alia@mea.co.id") // Account lead

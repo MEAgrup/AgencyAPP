@@ -88,8 +88,12 @@ func TestEditAppliesAndAudits(t *testing.T) {
 	id := "CLI-202605-0021"
 	// Account only ever acts on a RELEASED client (M4 §6) — the row-lock probe
 	// now applies the same visibility(actor) gate as Get/List (FIX1), so the
-	// Account Lead / Account staff edits below need this client released.
-	if _, err := s.DB.ExecContext(ctx, `UPDATE clients SET released_to_account_at = NOW() WHERE id = ?`, id); err != nil {
+	// Account Lead / Account staff edits below need this client released. The
+	// Account STAFF edits also require the client be ASSIGNED to that staffer
+	// (M4 §6 Rule 3 assigned-granularity, W2-M6-C1); Account Lead sees all
+	// released clients regardless.
+	if _, err := s.DB.ExecContext(ctx,
+		`UPDATE clients SET released_to_account_at = NOW(), assigned_am_id = 'A1' WHERE id = ?`, id); err != nil {
 		t.Fatal(err)
 	}
 
@@ -194,6 +198,8 @@ func TestEditVisibilityGate(t *testing.T) {
 	ctx := context.Background()
 	insertClient(t, s, "CLI-UNREL", "EMP-BUDI", false)
 	insertClient(t, s, "CLI-REL", "EMP-BUDI", true)
+	// Account staff A1 owns CLI-REL (M4 §6 Rule 3 assigned-granularity, W2-M6-C1).
+	assignAM(t, s, "CLI-REL", "A1")
 
 	// (a) Account staff on a NON-released client: invisible -> ErrNotFound, the
 	// exact regression this fix closes (previously silently allowed).
@@ -201,9 +207,14 @@ func TestEditVisibilityGate(t *testing.T) {
 		t.Fatalf("account staff edit on unreleased client err = %v, want ErrNotFound", err)
 	}
 
-	// (b) The same actor, same field, on a RELEASED client still succeeds.
+	// (b) The same actor, same field, on a RELEASED client ASSIGNED to them
+	// still succeeds.
 	if _, err := s.Edit(ctx, accountStaff("A1"), "CLI-REL", map[string]string{FieldTargetGMV: "1000000"}); err != nil {
-		t.Fatalf("account staff edit on released client: %v", err)
+		t.Fatalf("account staff edit on released+assigned client: %v", err)
+	}
+	// (b') An Account staffer who is NOT the assigned AM cannot see/edit it.
+	if _, err := s.Edit(ctx, accountStaff("A-OTHER"), "CLI-REL", map[string]string{FieldTargetGMV: "1000000"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("non-assigned account staff edit err = %v, want ErrNotFound", err)
 	}
 
 	// (c) OD / Director see everything (visibility "1=1") — a non-released

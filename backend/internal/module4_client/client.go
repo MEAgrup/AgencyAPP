@@ -157,12 +157,16 @@ func (s *Service) List(ctx context.Context, actor permission.Actor) ([]Client, e
 //	OD / Director            -> all clients (OD read-only).
 //	Sales Lead               -> all clients (all sales clients).
 //	Sales Staff              -> own (sales_pic_id) OR a Sales-Allocation member.
-//	Account Staff / Lead     -> only clients released to Account (M5 §5 Rule 2).
+//	Account Lead             -> all clients released to Account (M5 §5 Rule 2).
+//	Account Staff (AM)       -> only released clients ASSIGNED to them (M6 §3).
 //	other divisions          -> no list access.
 //
-// Account-staff "assigned clients" granularity (M4 §6 Rule 3) is a Module 6
-// concern; until AM assignment exists, Account staff and lead alike see every
-// RELEASED client. Logged as a scope note in docs/DECISIONS.md (W1-10).
+// Account-staff "assigned clients" granularity (M4 §6 Rule 3) is now enforced:
+// an AM (Account staff) sees only the released clients whose current AM pointer
+// (clients.assigned_am_id, migration 0020) is them, while Account Lead/Head sees
+// every released client. This pays off the W1-10 deferral (docs/DECISIONS.md
+// 2026-07-10) once Module 6 AM assignment exists (W2-M6-C1). Pre-verification
+// clients stay invisible to all of Account (released_to_account_at IS NULL).
 func visibility(actor permission.Actor) (clause string, args []any, ok bool) {
 	if actor.Role.Director || actor.Role.OD {
 		return "1=1", nil, true
@@ -178,7 +182,14 @@ func visibility(actor permission.Actor) (clause string, args []any, ok bool) {
 	case AccountDivision:
 		// Pre-verification clients are invisible to Account until the routing
 		// gate stamps released_to_account_at (M5 §5 Rule 2; AC W1-13).
-		return "c.released_to_account_at IS NOT NULL", nil, true
+		if actor.Role.Level == permission.LevelLead {
+			// Account Lead/Head sees all released account clients (M4 §6 Rule 3).
+			return "c.released_to_account_at IS NOT NULL", nil, true
+		}
+		// Account Staff (AM) sees only released clients assigned to them
+		// (M4 §6 Rule 3, M6 §3 Rule 2 — one AM owns the whole relationship).
+		return "(c.released_to_account_at IS NOT NULL AND c.assigned_am_id = ?)",
+			[]any{actor.EmployeeID}, true
 	default:
 		return "", nil, false
 	}
