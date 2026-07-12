@@ -157,15 +157,15 @@ func defaultMachines() map[string]*Machine {
 		// §6 Service (M6). Void = SPV/Account Lead approval.
 		{
 			name:     MService,
-			initial:  "Intake",
+			initial:  "[Awaiting Onboarding]",
 			terminal: []string{"Done", "[Cancelled — Service Voided]"},
 			edges: []edge{
-				{from: "Intake", to: "[Strategy Approved]"},
-				{from: "Intake", to: "[Briefed]"}, // Direct services skip strategy
+				{from: "[Awaiting Onboarding]", to: "[Strategy Approved]"},
+				{from: "[Awaiting Onboarding]", to: "[Briefed]"}, // Direct services skip strategy
 				{from: "[Strategy Approved]", to: "[Briefed]"},
 				{from: "[Briefed]", to: "[In Execution]"},
 				{from: "[In Execution]", to: "Done"},
-				{from: "Intake", to: "[Cancelled — Service Voided]", requireLead: true},
+				{from: "[Awaiting Onboarding]", to: "[Cancelled — Service Voided]", requireLead: true},
 				{from: "[Strategy Approved]", to: "[Cancelled — Service Voided]", requireLead: true},
 				{from: "[Briefed]", to: "[Cancelled — Service Voided]", requireLead: true},
 				{from: "[In Execution]", to: "[Cancelled — Service Voided]", requireLead: true},

@@ -31,7 +31,7 @@ var paymentSchemeSet = map[string]bool{
 const (
 	trxStatusMenungguVerifikasi = "[Menunggu Verifikasi]"
 	instStatusBelumJatuhTempo   = "[Belum Jatuh Tempo]"
-	serviceStatusIntake         = "Intake"
+	serviceStatusIntake         = "[Awaiting Onboarding]"
 )
 
 // InstallmentInput is one Payment Schedule row (M0 §6 rule 8 / M5 §4).

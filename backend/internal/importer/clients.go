@@ -53,7 +53,7 @@ func (c clientIDs) all() []string {
 }
 
 // serviceInitialStatus is the MService machine's initial state (config.go).
-const serviceInitialStatus = "Intake"
+const serviceInitialStatus = "[Awaiting Onboarding]"
 
 // createClientTx mints and inserts CLI-/SVC-/TRX-/INST- inside tx. The row must
 // already have passed validateClientRow.
