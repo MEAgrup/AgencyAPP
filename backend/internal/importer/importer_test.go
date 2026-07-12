@@ -82,9 +82,9 @@ func TestDryRunDirtyFixtureLeavesDBUntouched(t *testing.T) {
 	ctx := context.Background()
 
 	leads := []LeadRow{
-		{NamaLead: "Alpha", NoTelepon: "0812-1111", Sumber: "form", StatusTerakhir: "diproses"}, // 0 valid
+		{NamaLead: "Alpha", NoTelepon: "0812-1111", Sumber: "form", StatusTerakhir: "diproses"},        // 0 valid
 		{NamaLead: "Alpha Dup", NoTelepon: "+62 812 1111", Sumber: "form", StatusTerakhir: "diproses"}, // 1 dup phone
-		{NamaLead: "", NoTelepon: "0812-2222", Sumber: "form", StatusTerakhir: "pool"},              // 2 missing name
+		{NamaLead: "", NoTelepon: "0812-2222", Sumber: "form", StatusTerakhir: "pool"},                 // 2 missing name
 	}
 
 	badAlloc := completeClient()

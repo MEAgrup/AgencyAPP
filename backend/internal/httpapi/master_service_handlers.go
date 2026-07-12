@@ -22,17 +22,18 @@ func (a *App) handleListMasterServices(w http.ResponseWriter, r *http.Request) {
 }
 
 type masterServiceBody struct {
-	Name           string `json:"name"`
-	StandardPrice  string `json:"standard_price"`
-	CommissionRule string `json:"commission_rule"`
-	Active         bool   `json:"active"`
-	EffectiveFrom  string `json:"effective_from"`
+	Name                 string `json:"name"`
+	StandardPrice        string `json:"standard_price"`
+	CommissionRule       string `json:"commission_rule"`
+	Active               bool   `json:"active"`
+	RequiresStrategyPlan bool   `json:"requires_strategy_plan"`
+	EffectiveFrom        string `json:"effective_from"`
 }
 
 func (b masterServiceBody) input() admin.ServiceInput {
 	return admin.ServiceInput{
 		Name: b.Name, StandardPrice: b.StandardPrice, CommissionRule: b.CommissionRule,
-		Active: b.Active, EffectiveFrom: b.EffectiveFrom,
+		Active: b.Active, RequiresStrategyPlan: b.RequiresStrategyPlan, EffectiveFrom: b.EffectiveFrom,
 	}
 }
 

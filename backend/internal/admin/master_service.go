@@ -34,36 +34,41 @@ func CanEditMasterServices(a permission.Actor) bool {
 
 // ServiceVersion is one immutable master-service version.
 type ServiceVersion struct {
-	ID             int64     `json:"id"`
-	ServiceID      string    `json:"service_id"`
-	VersionNo      int       `json:"version_no"`
-	Name           string    `json:"name"`
-	StandardPrice  string    `json:"standard_price"`
-	CommissionRule string    `json:"commission_rule"`
-	Active         bool      `json:"active"`
-	EffectiveFrom  string    `json:"effective_from"`
-	CreatedBy      string    `json:"created_by"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID                   int64     `json:"id"`
+	ServiceID            string    `json:"service_id"`
+	VersionNo            int       `json:"version_no"`
+	Name                 string    `json:"name"`
+	StandardPrice        string    `json:"standard_price"`
+	CommissionRule       string    `json:"commission_rule"`
+	Active               bool      `json:"active"`
+	RequiresStrategyPlan bool      `json:"requires_strategy_plan"`
+	EffectiveFrom        string    `json:"effective_from"`
+	CreatedBy            string    `json:"created_by"`
+	CreatedAt            time.Time `json:"created_at"`
 }
 
 // ServiceView is the effective view of a service at a date (id = service id).
 type ServiceView struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	StandardPrice  string `json:"standard_price"`
-	CommissionRule string `json:"commission_rule"`
-	Active         bool   `json:"active"`
-	VersionNo      int    `json:"version_no"`
-	EffectiveFrom  string `json:"effective_from"`
+	ID                   string `json:"id"`
+	Name                 string `json:"name"`
+	StandardPrice        string `json:"standard_price"`
+	CommissionRule       string `json:"commission_rule"`
+	Active               bool   `json:"active"`
+	RequiresStrategyPlan bool   `json:"requires_strategy_plan"`
+	VersionNo            int    `json:"version_no"`
+	EffectiveFrom        string `json:"effective_from"`
 }
 
-// ServiceInput carries create/update fields.
+// ServiceInput carries create/update fields. RequiresStrategyPlan is the M6 §2
+// "Requires Strategy Plan" catalog flag (Yes ⇒ Plan-gated, No ⇒ Direct);
+// optional and default false so an unspecified catalog entry stays Direct.
 type ServiceInput struct {
-	Name           string
-	StandardPrice  string
-	CommissionRule string
-	Active         bool
-	EffectiveFrom  string // YYYY-MM-DD
+	Name                 string
+	StandardPrice        string
+	CommissionRule       string
+	Active               bool
+	RequiresStrategyPlan bool
+	EffectiveFrom        string // YYYY-MM-DD
 }
 
 func (in ServiceInput) valid() bool {
@@ -152,11 +157,15 @@ func insertVersion(ctx context.Context, tx *sql.Tx, serviceID string, versionNo 
 	if in.Active {
 		active = 1
 	}
+	rsp := 0
+	if in.RequiresStrategyPlan {
+		rsp = 1
+	}
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO master_service_versions
-		   (service_id, version_no, name, standard_price, commission_rule, active, effective_from, created_by)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		serviceID, versionNo, in.Name, in.StandardPrice, in.CommissionRule, active, in.EffectiveFrom, actor)
+		   (service_id, version_no, name, standard_price, commission_rule, active, requires_strategy_plan, effective_from, created_by)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		serviceID, versionNo, in.Name, in.StandardPrice, in.CommissionRule, active, rsp, in.EffectiveFrom, actor)
 	return err
 }
 
@@ -172,11 +181,11 @@ func EffectiveAt(ctx context.Context, d *sql.DB, serviceID, date string) (Servic
 	v.ID = serviceID
 	var eff time.Time
 	err := d.QueryRowContext(ctx,
-		`SELECT name, standard_price, commission_rule, active, version_no, effective_from
+		`SELECT name, standard_price, commission_rule, active, requires_strategy_plan, version_no, effective_from
 		   FROM master_service_versions
 		  WHERE service_id = ? AND effective_from <= ?
 		  ORDER BY effective_from DESC, version_no DESC LIMIT 1`,
-		serviceID, date).Scan(&v.Name, &v.StandardPrice, &v.CommissionRule, &v.Active, &v.VersionNo, &eff)
+		serviceID, date).Scan(&v.Name, &v.StandardPrice, &v.CommissionRule, &v.Active, &v.RequiresStrategyPlan, &v.VersionNo, &eff)
 	if err == sql.ErrNoRows {
 		return v, ErrServiceNotFound
 	}
@@ -220,7 +229,7 @@ func ListEffectiveAt(ctx context.Context, d *sql.DB, date string) ([]ServiceView
 // ListVersions returns all versions for a service, newest first.
 func ListVersions(ctx context.Context, d *sql.DB, serviceID string) ([]ServiceVersion, error) {
 	rows, err := d.QueryContext(ctx,
-		`SELECT id, service_id, version_no, name, standard_price, commission_rule, active, effective_from, created_by, created_at
+		`SELECT id, service_id, version_no, name, standard_price, commission_rule, active, requires_strategy_plan, effective_from, created_by, created_at
 		   FROM master_service_versions WHERE service_id = ? ORDER BY version_no DESC`, serviceID)
 	if err != nil {
 		return nil, err
@@ -230,7 +239,7 @@ func ListVersions(ctx context.Context, d *sql.DB, serviceID string) ([]ServiceVe
 	for rows.Next() {
 		var v ServiceVersion
 		var eff time.Time
-		if err := rows.Scan(&v.ID, &v.ServiceID, &v.VersionNo, &v.Name, &v.StandardPrice, &v.CommissionRule, &v.Active, &eff, &v.CreatedBy, &v.CreatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.ServiceID, &v.VersionNo, &v.Name, &v.StandardPrice, &v.CommissionRule, &v.Active, &v.RequiresStrategyPlan, &eff, &v.CreatedBy, &v.CreatedAt); err != nil {
 			return nil, err
 		}
 		v.EffectiveFrom = eff.Format("2006-01-02")

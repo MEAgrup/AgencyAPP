@@ -166,22 +166,22 @@ type PaymentRow struct {
 
 // ClientRow is one active client already closed before CDPS.
 type ClientRow struct {
-	Toko                    string
-	NamaPIC                 string
-	Kota                    string
-	LinkToko                string
-	Kategori                string
-	Platforms               []PlatformRow
-	GMVBaselineBulanan      money.Money
-	TargetGMV               money.Money
-	MarketingBudget         *money.Money
-	SalesPIC                string
-	AlokasiSales            []AllocationRow
-	CommissionPaymentPIC    string
-	TanggalClosing          time.Time
-	Layanan                 []ServiceRow
-	NilaiTransaksiTotal     money.Money
-	SkemaPembayaran         string
+	Toko                 string
+	NamaPIC              string
+	Kota                 string
+	LinkToko             string
+	Kategori             string
+	Platforms            []PlatformRow
+	GMVBaselineBulanan   money.Money
+	TargetGMV            money.Money
+	MarketingBudget      *money.Money
+	SalesPIC             string
+	AlokasiSales         []AllocationRow
+	CommissionPaymentPIC string
+	TanggalClosing       time.Time
+	Layanan              []ServiceRow
+	NilaiTransaksiTotal  money.Money
+	SkemaPembayaran      string
 	// JadwalTermin and PembayaranTerverifikasi are POSITIONALLY mapped for
 	// scheduled schemes (Termin / Bayar di Belakang): PembayaranTerverifikasi[i]
 	// settles JadwalTermin[i] (validated to match its amount, in order). Payments

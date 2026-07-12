@@ -29,9 +29,9 @@ var paymentSchemeSet = map[string]bool{
 
 // Initial statuses birthed at closing (match M5 verbatim).
 const (
-	trxStatusMenungguVerifikasi = "[Menunggu Verifikasi]"
-	instStatusBelumJatuhTempo   = "[Belum Jatuh Tempo]"
-	serviceStatusAwaitingOnboarding         = "[Awaiting Onboarding]"
+	trxStatusMenungguVerifikasi     = "[Menunggu Verifikasi]"
+	instStatusBelumJatuhTempo       = "[Belum Jatuh Tempo]"
+	serviceStatusAwaitingOnboarding = "[Awaiting Onboarding]"
 )
 
 // InstallmentInput is one Payment Schedule row (M0 §6 rule 8 / M5 §4).
@@ -191,12 +191,15 @@ func (s *Service) Close(ctx context.Context, actor permission.Actor, attemptID s
 		if err != nil {
 			return ClosingResult{}, err
 		}
+		// M6 §2: the Service inherits the pinned MSL version's "Requires Strategy
+		// Plan" flag (read-only) — captured at closing so later catalog edits never
+		// change an in-flight Service's execution path.
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO services
-			   (id, client_id, master_service_id, master_version_no, name, standard_price, commission_rule, status, created_by)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			   (id, client_id, master_service_id, master_version_no, name, standard_price, commission_rule, status, requires_strategy_plan, created_by)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			svcID, clientID, l.masterServiceID, l.versionNo, l.name, l.proposedPrice, l.commissionRule,
-			serviceStatusAwaitingOnboarding, actor.EmployeeID); err != nil {
+			serviceStatusAwaitingOnboarding, boolToTiny(l.requiresStrategyPlan), actor.EmployeeID); err != nil {
 			return ClosingResult{}, err
 		}
 	}
@@ -313,6 +316,15 @@ func loadQualifiedForm(ctx context.Context, tx *sql.Tx, attemptID string) (quali
 type approvedLine struct {
 	masterServiceID, proposedPrice, commissionRule, name string
 	versionNo                                            int
+	requiresStrategyPlan                                 bool
+}
+
+// boolToTiny maps a Go bool to MySQL TINYINT(1).
+func boolToTiny(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // loadApprovedLines returns the latest proposal version's lines, enriched with
@@ -320,11 +332,14 @@ type approvedLine struct {
 func loadApprovedLines(ctx context.Context, tx *sql.Tx, attemptID string) ([]approvedLine, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT npl.master_service_id, npl.proposed_price, npl.commission_rule,
-		        COALESCE(qfs.name, ''), COALESCE(qfs.master_version_no, 0)
+		        COALESCE(qfs.name, ''), COALESCE(qfs.master_version_no, 0),
+		        COALESCE(msv.requires_strategy_plan, 0)
 		   FROM negotiation_proposal_lines npl
 		   JOIN negotiation_proposals np ON np.id = npl.proposal_id
 		   LEFT JOIN qualified_form_services qfs
 		          ON qfs.attempt_id = np.attempt_id AND qfs.master_service_id = npl.master_service_id
+		   LEFT JOIN master_service_versions msv
+		          ON msv.service_id = npl.master_service_id AND msv.version_no = qfs.master_version_no
 		  WHERE np.attempt_id = ?
 		    AND np.version_no = (SELECT MAX(version_no) FROM negotiation_proposals WHERE attempt_id = ?)
 		  ORDER BY npl.id`, attemptID, attemptID)
@@ -335,9 +350,11 @@ func loadApprovedLines(ctx context.Context, tx *sql.Tx, attemptID string) ([]app
 	var out []approvedLine
 	for rows.Next() {
 		var l approvedLine
-		if err := rows.Scan(&l.masterServiceID, &l.proposedPrice, &l.commissionRule, &l.name, &l.versionNo); err != nil {
+		var rsp int
+		if err := rows.Scan(&l.masterServiceID, &l.proposedPrice, &l.commissionRule, &l.name, &l.versionNo, &rsp); err != nil {
 			return nil, err
 		}
+		l.requiresStrategyPlan = rsp == 1
 		out = append(out, l)
 	}
 	return out, rows.Err()

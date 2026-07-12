@@ -71,25 +71,25 @@ type ServiceLine struct {
 
 // Client is the full canonical Client Record with its provenance.
 type Client struct {
-	ID                     string      `json:"id"`
-	LeadID                 string      `json:"lead_id,omitempty"`
-	WinningAttemptID       string      `json:"winning_attempt_id,omitempty"`
-	NamaPIC                string      `json:"nama_pic"`
-	Toko                   string      `json:"toko"`
-	Kota                   string      `json:"kota"`
-	LinkToko               string      `json:"link_toko"`
-	Kategori               string      `json:"kategori"`
-	GMVBaseline            money.Money `json:"-"`
-	TargetGMV              money.Money `json:"-"`
+	ID                     string       `json:"id"`
+	LeadID                 string       `json:"lead_id,omitempty"`
+	WinningAttemptID       string       `json:"winning_attempt_id,omitempty"`
+	NamaPIC                string       `json:"nama_pic"`
+	Toko                   string       `json:"toko"`
+	Kota                   string       `json:"kota"`
+	LinkToko               string       `json:"link_toko"`
+	Kategori               string       `json:"kategori"`
+	GMVBaseline            money.Money  `json:"-"`
+	TargetGMV              money.Money  `json:"-"`
 	MarketingBudget        *money.Money `json:"-"`
-	TotalSales             money.Money `json:"-"`
-	OriginCampaignID       string      `json:"origin_campaign_id,omitempty"`
-	SalesPICID             string      `json:"sales_pic_id"`
-	CommissionPaymentPICID string      `json:"commission_payment_pic_id"`
-	TransactionID          string      `json:"transaction_id,omitempty"`
-	PaymentIntent          string      `json:"payment_intent,omitempty"`
-	ReleasedToAccountAt    *time.Time  `json:"released_to_account_at,omitempty"`
-	CreatedAt              time.Time   `json:"created_at"`
+	TotalSales             money.Money  `json:"-"`
+	OriginCampaignID       string       `json:"origin_campaign_id,omitempty"`
+	SalesPICID             string       `json:"sales_pic_id"`
+	CommissionPaymentPICID string       `json:"commission_payment_pic_id"`
+	TransactionID          string       `json:"transaction_id,omitempty"`
+	PaymentIntent          string       `json:"payment_intent,omitempty"`
+	ReleasedToAccountAt    *time.Time   `json:"released_to_account_at,omitempty"`
+	CreatedAt              time.Time    `json:"created_at"`
 
 	Platforms   []Platform    `json:"platforms"`
 	Allocations []Allocation  `json:"sales_allocation"`
@@ -177,7 +177,7 @@ func visibility(actor permission.Actor) (clause string, args []any, ok bool) {
 			return "1=1", nil, true
 		}
 		return "(c.sales_pic_id = ? OR EXISTS (" +
-			"SELECT 1 FROM client_sales_allocations a WHERE a.client_id = c.id AND a.salesperson_id = ?))",
+				"SELECT 1 FROM client_sales_allocations a WHERE a.client_id = c.id AND a.salesperson_id = ?))",
 			[]any{actor.EmployeeID, actor.EmployeeID}, true
 	case AccountDivision:
 		// Pre-verification clients are invisible to Account until the routing

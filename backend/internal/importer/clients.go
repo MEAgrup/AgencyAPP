@@ -145,9 +145,13 @@ func (s *Service) createClientTx(ctx context.Context, tx *sql.Tx, actor permissi
 		if err != nil {
 			return ids, err
 		}
+		// Legacy import has no MSL linkage (O18), so the M6 §2 "Requires Strategy
+		// Plan" flag cannot be inherited from a catalog version — default 0 (Direct
+		// path). These clients are imported dormant/live for retention; if an
+		// imported service later needs a Plan, an AM/SPV sets it per M6-OA-1.
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO services (id, client_id, master_service_id, master_version_no, name, standard_price, commission_rule, status, created_by)
-			 VALUES (?, ?, '', 0, ?, ?, '', ?, ?)`,
+			`INSERT INTO services (id, client_id, master_service_id, master_version_no, name, standard_price, commission_rule, status, requires_strategy_plan, created_by)
+			 VALUES (?, ?, '', 0, ?, ?, '', ?, 0, ?)`,
 			svcID, cliID, svc.Nama, svc.HargaDeal.Decimal(), serviceInitialStatus, actor.EmployeeID); err != nil {
 			return ids, err
 		}

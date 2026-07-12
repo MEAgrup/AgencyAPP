@@ -53,6 +53,7 @@ const (
 	MTransactionPayment = "transaction_payment"
 	MInstallment        = "installment"
 	MService            = "service"
+	MStrategyPlan       = "strategy_plan"
 	MBriefTask          = "brief_task"
 	MCreatorBooking     = "creator_booking"
 	MCreatorPaymentReq  = "creator_payment_request"
@@ -169,6 +170,22 @@ func defaultMachines() map[string]*Machine {
 				{from: "[Strategy Approved]", to: "[Cancelled — Service Voided]", requireLead: true},
 				{from: "[Briefed]", to: "[Cancelled — Service Voided]", requireLead: true},
 				{from: "[In Execution]", to: "[Cancelled — Service Voided]", requireLead: true},
+			},
+		},
+		// §6a Strategy & Plan (M6 §4) — plan-gated services only. Submit is the
+		// owning AM's action (owner-scoped in code, not lead); approve / request-
+		// revision are SPV/Head Account (requireLead here, plus a division-specific
+		// Account-lead check in module6_account — mirrors the Void-Service gate).
+		// On approval the parent Service is also driven [Awaiting Onboarding] →
+		// [Strategy Approved] in the SAME transaction (see module6_account).
+		{
+			name:     MStrategyPlan,
+			initial:  "[Strategy Drafting]",
+			terminal: []string{"[Strategy Approved]"},
+			edges: []edge{
+				{from: "[Strategy Drafting]", to: "[Strategy Submitted for Approval]"},
+				{from: "[Strategy Submitted for Approval]", to: "[Strategy Approved]", requireLead: true},
+				{from: "[Strategy Submitted for Approval]", to: "[Strategy Drafting]", requireLead: true}, // revision loop
 			},
 		},
 		// §7 Brief (M6) — canonical Task machine (M12), used by demo_tasks.

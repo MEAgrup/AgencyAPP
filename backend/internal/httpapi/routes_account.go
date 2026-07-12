@@ -15,4 +15,13 @@ func (a *App) registerAccountRoutes(mux *http.ServeMux) {
 	// M6 §3 Rules 2–4 — manual AM assignment + reassignment (SPV/Head Account).
 	mux.HandleFunc("POST /api/v1/clients/{id}/assign-am", a.protect(a.handleAssignAM))
 	mux.HandleFunc("POST /api/v1/clients/{id}/reassign-am", a.protect(a.handleReassignAM))
+
+	// Cluster 2 (M6 §4 — Strategy & Plan, plan-gated path).
+	mux.HandleFunc("GET /api/v1/strategies", a.protect(a.handleListStrategies))
+	mux.HandleFunc("GET /api/v1/strategies/{id}", a.protect(a.handleGetStrategy))
+	mux.HandleFunc("POST /api/v1/services/{id}/strategy", a.protect(a.handleCreateStrategy))
+	mux.HandleFunc("PUT /api/v1/strategies/{id}", a.protect(a.handleUpdateStrategy))
+	mux.HandleFunc("POST /api/v1/strategies/{id}/submit", a.protect(a.handleSubmitStrategy))
+	mux.HandleFunc("POST /api/v1/strategies/{id}/approve", a.protect(a.handleApproveStrategy))
+	mux.HandleFunc("POST /api/v1/strategies/{id}/request-revision", a.protect(a.handleRequestStrategyRevision))
 }

@@ -31,6 +31,7 @@ import (
 
 	"github.com/meagrup/agencyapp/backend/internal/core/audit"
 	"github.com/meagrup/agencyapp/backend/internal/core/permission"
+	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
 )
 
 // AccountDivision is the CDPS division that owns intake & AM assignment.
@@ -64,10 +65,22 @@ var (
 	ErrReasonRequired = errors.New("[alasan reassignment wajib diisi]")
 )
 
-// Service is the M6 (Cluster 1) persistence surface. No state-machine engine:
-// assignment is a relationship, not a status transition.
+// Service is the M6 persistence surface. Cluster 1 (intake & AM assignment) uses
+// no state-machine engine (assignment is a relationship, not a status). Cluster 2
+// (Strategy & Plan, strategy.go) drives the STR- and Service machines, so it may
+// carry an Engine; when nil the strategy methods fall back to a fresh engine
+// (the config is stateless — see engine()).
 type Service struct {
-	DB *sql.DB
+	DB     *sql.DB
+	Engine *statemachine.Engine
+}
+
+// engine returns the configured engine, or a fresh canonical one if unset.
+func (s *Service) engine() *statemachine.Engine {
+	if s.Engine != nil {
+		return s.Engine
+	}
+	return statemachine.New()
 }
 
 // IntakeClient is one row of the Unassigned Intake Queue (§3 Rule 1) — the slim
