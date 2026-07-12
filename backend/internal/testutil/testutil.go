@@ -49,6 +49,7 @@ var dataTables = []string{
 	"payment_verifications",
 	"installments",
 	"transactions",
+	"complaints",
 	"briefs",
 	"strategy_plans",
 	"services",

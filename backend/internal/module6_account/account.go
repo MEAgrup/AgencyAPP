@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/meagrup/agencyapp/backend/internal/core/audit"
+	"github.com/meagrup/agencyapp/backend/internal/core/notification"
 	"github.com/meagrup/agencyapp/backend/internal/core/permission"
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
 )
@@ -73,6 +74,11 @@ var (
 type Service struct {
 	DB     *sql.DB
 	Engine *statemachine.Engine
+	// Catalog is the notification catalog. It is nil-guarded everywhere: when
+	// unset (most unit tests) emission is skipped; the wiring layer binds it so
+	// the cataloged events (EvComplaintLogged §8, EvRevisionCountFlag §7) fire in
+	// production. It is NOT extended here — the catalog stays FROZEN.
+	Catalog *notification.Catalog
 }
 
 // engine returns the configured engine, or a fresh canonical one if unset.

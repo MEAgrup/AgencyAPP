@@ -114,26 +114,31 @@ type BriefInput struct {
 
 // Brief is a Brief record (BRF-).
 type Brief struct {
-	ID                   string    `json:"id"`
-	ServiceID            string    `json:"service_id"`
-	StrategyID           string    `json:"strategy_id,omitempty"`
-	AssignedDivision     string    `json:"assigned_division"`
-	AssignedPIC          string    `json:"assigned_pic,omitempty"`
-	DeliverableType      string    `json:"deliverable_type"`
-	QuantityTarget       int       `json:"quantity_target"`
-	DueDate              string    `json:"due_date"`
-	Priority             string    `json:"priority"`
-	Recurring            bool      `json:"recurring"`
-	RecurringFrequency   string    `json:"recurring_frequency,omitempty"`
-	RecurringCount       int       `json:"recurring_count,omitempty"`
-	RecurringEndDate     string    `json:"recurring_end_date,omitempty"`
-	Instructions         string    `json:"instructions,omitempty"`
-	ReferenceAttachments string    `json:"reference_attachments,omitempty"`
-	Title                string    `json:"title"`
-	Status               string    `json:"status"`
-	RevisionCount        int       `json:"revision_count"`
-	CreatedBy            string    `json:"created_by"`
-	CreatedAt            time.Time `json:"created_at"`
+	ID                   string `json:"id"`
+	ServiceID            string `json:"service_id"`
+	StrategyID           string `json:"strategy_id,omitempty"`
+	AssignedDivision     string `json:"assigned_division"`
+	AssignedPIC          string `json:"assigned_pic,omitempty"`
+	DeliverableType      string `json:"deliverable_type"`
+	QuantityTarget       int    `json:"quantity_target"`
+	DueDate              string `json:"due_date"`
+	Priority             string `json:"priority"`
+	Recurring            bool   `json:"recurring"`
+	RecurringFrequency   string `json:"recurring_frequency,omitempty"`
+	RecurringCount       int    `json:"recurring_count,omitempty"`
+	RecurringEndDate     string `json:"recurring_end_date,omitempty"`
+	Instructions         string `json:"instructions,omitempty"`
+	ReferenceAttachments string `json:"reference_attachments,omitempty"`
+	Title                string `json:"title"`
+	Status               string `json:"status"`
+	RevisionCount        int    `json:"revision_count"`
+	// RevisionFlagged is the derived §7 Rule 4 / M6-OA-3 SPV-visibility signal
+	// (RevisionCount >= 3). Read-only, computed from the audit log alongside
+	// RevisionCount (set only where the count is derived, e.g. GetBrief); it
+	// never blocks work, only surfaces it.
+	RevisionFlagged bool      `json:"revision_flagged"`
+	CreatedBy       string    `json:"created_by"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // validate checks the M6 §9.4 mandatory fields BEFORE any id is minted. Title is
@@ -378,6 +383,7 @@ func (s *Service) GetBrief(ctx context.Context, actor permission.Actor, briefID 
 		return Brief{}, err
 	}
 	b.RevisionCount = deriveBriefRevisionCount(entries)
+	b.RevisionFlagged = b.RevisionCount >= briefRevisionFlagThreshold
 	return b, nil
 }
 

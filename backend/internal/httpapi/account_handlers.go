@@ -11,7 +11,7 @@ import (
 // accountSvc builds the Module 6 service (Cluster 1 intake & AM assignment +
 // Cluster 2 Strategy & Plan). The engine is used by the STR- / Service machines.
 func (a *App) accountSvc() *module6_account.Service {
-	return &module6_account.Service{DB: a.DB, Engine: a.Engine}
+	return &module6_account.Service{DB: a.DB, Engine: a.Engine, Catalog: a.Catalog}
 }
 
 func (a *App) handleAccountIntake(w http.ResponseWriter, r *http.Request) {
@@ -83,12 +83,17 @@ func writeAccountErr(w http.ResponseWriter, err error) {
 		errors.Is(err, module6_account.ErrStrategyForbidden),
 		errors.Is(err, module6_account.ErrBriefCreateForbidden),
 		errors.Is(err, module6_account.ErrBriefForbidden),
-		errors.Is(err, module6_account.ErrQueueForbidden):
+		errors.Is(err, module6_account.ErrQueueForbidden),
+		errors.Is(err, module6_account.ErrBriefReviewForbidden),
+		errors.Is(err, module6_account.ErrComplaintForbidden),
+		errors.Is(err, module6_account.ErrLogComplaintForbidden),
+		errors.Is(err, module6_account.ErrComplaintManageForbidden):
 		writeErr(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, module6_account.ErrNotFound),
 		errors.Is(err, module6_account.ErrServiceNotFound),
 		errors.Is(err, module6_account.ErrStrategyNotFound),
-		errors.Is(err, module6_account.ErrBriefNotFound):
+		errors.Is(err, module6_account.ErrBriefNotFound),
+		errors.Is(err, module6_account.ErrComplaintNotFound):
 		writeErr(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, module6_account.ErrAlreadyAssigned),
 		errors.Is(err, module6_account.ErrNotAssigned),
@@ -107,7 +112,10 @@ func writeAccountErr(w http.ResponseWriter, err error) {
 		errors.Is(err, module6_account.ErrInvalidDivision),
 		errors.Is(err, module6_account.ErrInvalidPriority),
 		errors.Is(err, module6_account.ErrBriefStrategyMismatch),
-		errors.Is(err, module6_account.ErrBriefStrategyNotAllowed):
+		errors.Is(err, module6_account.ErrBriefStrategyNotAllowed),
+		errors.Is(err, module6_account.ErrInvalidSeverity),
+		errors.Is(err, module6_account.ErrInvalidRelatedRef),
+		errors.Is(err, module6_account.ErrResolutionNotesRequired):
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 	default:
 		var be *statemachine.BlockedError
@@ -299,4 +307,129 @@ func (a *App) handleDivisionQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": list})
+}
+
+// ---- Cluster 4 (part A): Revision routing (M6 §7) — AM-side review edges ----
+
+func (a *App) handleReviewBrief(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	res, err := a.accountSvc().ReviewBrief(r.Context(), actor, r.PathValue("id"))
+	if err != nil {
+		writeAccountErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (a *App) handleApproveBrief(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	res, err := a.accountSvc().ApproveBrief(r.Context(), actor, r.PathValue("id"))
+	if err != nil {
+		writeAccountErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+type briefRevisionBody struct {
+	Feedback string `json:"feedback"`
+}
+
+func (a *App) handleRequestBriefRevision(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	var b briefRevisionBody
+	if err := decodeJSON(r, &b); err != nil {
+		writeErr(w, http.StatusBadRequest, "[format data tidak valid]")
+		return
+	}
+	res, err := a.accountSvc().RequestBriefRevision(r.Context(), actor, r.PathValue("id"), b.Feedback)
+	if err != nil {
+		writeAccountErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// ---- Cluster 4 (part B): Complaint door #2 (AM via WhatsApp, M6 §8) ----
+
+type complaintBody struct {
+	Description string `json:"description"`
+	Severity    string `json:"severity"`
+	RelatedRef  string `json:"related_ref"`
+}
+
+func (a *App) handleLogComplaint(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	var b complaintBody
+	if err := decodeJSON(r, &b); err != nil {
+		writeErr(w, http.StatusBadRequest, "[format data tidak valid]")
+		return
+	}
+	c, err := a.accountSvc().LogComplaint(r.Context(), actor, r.PathValue("id"), module6_account.ComplaintInput{
+		Description: b.Description, Severity: b.Severity, RelatedRef: b.RelatedRef,
+	})
+	if err != nil {
+		writeAccountErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+func (a *App) handleGetComplaint(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	c, err := a.accountSvc().GetComplaint(r.Context(), actor, r.PathValue("id"))
+	if err != nil {
+		writeAccountErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+func (a *App) handleListClientComplaints(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	list, err := a.accountSvc().ListClientComplaints(r.Context(), actor, r.PathValue("id"))
+	if err != nil {
+		writeAccountErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": list})
+}
+
+func (a *App) handleStartComplaint(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	res, err := a.accountSvc().StartComplaint(r.Context(), actor, r.PathValue("id"))
+	if err != nil {
+		writeAccountErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+type resolveComplaintBody struct {
+	Notes string `json:"notes"`
+}
+
+func (a *App) handleResolveComplaint(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	var b resolveComplaintBody
+	if err := decodeJSON(r, &b); err != nil {
+		writeErr(w, http.StatusBadRequest, "[format data tidak valid]")
+		return
+	}
+	res, err := a.accountSvc().ResolveComplaint(r.Context(), actor, r.PathValue("id"), b.Notes)
+	if err != nil {
+		writeAccountErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (a *App) handleCloseComplaint(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	res, err := a.accountSvc().CloseComplaint(r.Context(), actor, r.PathValue("id"))
+	if err != nil {
+		writeAccountErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
