@@ -24,4 +24,10 @@ func (a *App) registerAccountRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/strategies/{id}/submit", a.protect(a.handleSubmitStrategy))
 	mux.HandleFunc("POST /api/v1/strategies/{id}/approve", a.protect(a.handleApproveStrategy))
 	mux.HandleFunc("POST /api/v1/strategies/{id}/request-revision", a.protect(a.handleRequestStrategyRevision))
+
+	// Cluster 3 (M6 §5 — Service → Brief breakdown, §6 — dispatch).
+	mux.HandleFunc("POST /api/v1/services/{id}/briefs", a.protect(a.handleCreateBrief))
+	mux.HandleFunc("GET /api/v1/services/{id}/briefs", a.protect(a.handleListServiceBriefs))
+	mux.HandleFunc("GET /api/v1/briefs/{id}", a.protect(a.handleGetBrief))
+	mux.HandleFunc("GET /api/v1/divisions/{division}/brief-queue", a.protect(a.handleDivisionQueue))
 }

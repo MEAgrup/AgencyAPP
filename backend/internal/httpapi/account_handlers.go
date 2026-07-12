@@ -80,11 +80,15 @@ func writeAccountErr(w http.ResponseWriter, err error) {
 		errors.Is(err, module6_account.ErrAssignForbidden),
 		errors.Is(err, module6_account.ErrNotOwnerAM),
 		errors.Is(err, module6_account.ErrApproveForbidden),
-		errors.Is(err, module6_account.ErrStrategyForbidden):
+		errors.Is(err, module6_account.ErrStrategyForbidden),
+		errors.Is(err, module6_account.ErrBriefCreateForbidden),
+		errors.Is(err, module6_account.ErrBriefForbidden),
+		errors.Is(err, module6_account.ErrQueueForbidden):
 		writeErr(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, module6_account.ErrNotFound),
 		errors.Is(err, module6_account.ErrServiceNotFound),
-		errors.Is(err, module6_account.ErrStrategyNotFound):
+		errors.Is(err, module6_account.ErrStrategyNotFound),
+		errors.Is(err, module6_account.ErrBriefNotFound):
 		writeErr(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, module6_account.ErrAlreadyAssigned),
 		errors.Is(err, module6_account.ErrNotAssigned),
@@ -98,7 +102,12 @@ func writeAccountErr(w http.ResponseWriter, err error) {
 		errors.Is(err, module6_account.ErrRevisionNotesRequired),
 		errors.Is(err, module6_account.ErrInvalidDivisions),
 		errors.Is(err, module6_account.ErrIncomplete),
-		errors.Is(err, module6_account.ErrStrategyRequired):
+		errors.Is(err, module6_account.ErrStrategyRequired),
+		errors.Is(err, module6_account.ErrServiceNotBriefable),
+		errors.Is(err, module6_account.ErrInvalidDivision),
+		errors.Is(err, module6_account.ErrInvalidPriority),
+		errors.Is(err, module6_account.ErrBriefStrategyMismatch),
+		errors.Is(err, module6_account.ErrBriefStrategyNotAllowed):
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 	default:
 		var be *statemachine.BlockedError
@@ -214,4 +223,80 @@ func (a *App) handleRequestStrategyRevision(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": r.PathValue("id"), "status": module6_account.StrategyStatusDrafting})
+}
+
+// ---- Cluster 3: Service → Brief breakdown + dispatch (M6 §5/§6) ----
+
+type briefBody struct {
+	Title                string `json:"title"`
+	StrategyID           string `json:"strategy_id"`
+	AssignedDivision     string `json:"assigned_division"`
+	AssignedPIC          string `json:"assigned_pic"`
+	DeliverableType      string `json:"deliverable_type"`
+	QuantityTarget       int    `json:"quantity_target"`
+	DueDate              string `json:"due_date"`
+	Priority             string `json:"priority"`
+	Recurring            bool   `json:"recurring"`
+	RecurringFrequency   string `json:"recurring_frequency"`
+	RecurringCount       int    `json:"recurring_count"`
+	RecurringEndDate     string `json:"recurring_end_date"`
+	Instructions         string `json:"instructions"`
+	ReferenceAttachments string `json:"reference_attachments"`
+	IsAddendum           bool   `json:"is_addendum"`
+}
+
+func (b briefBody) input() module6_account.BriefInput {
+	return module6_account.BriefInput{
+		Title: b.Title, StrategyID: b.StrategyID, AssignedDivision: b.AssignedDivision,
+		AssignedPIC: b.AssignedPIC, DeliverableType: b.DeliverableType, QuantityTarget: b.QuantityTarget,
+		DueDate: b.DueDate, Priority: b.Priority, Recurring: b.Recurring,
+		RecurringFrequency: b.RecurringFrequency, RecurringCount: b.RecurringCount,
+		RecurringEndDate: b.RecurringEndDate, Instructions: b.Instructions,
+		ReferenceAttachments: b.ReferenceAttachments, IsAddendum: b.IsAddendum,
+	}
+}
+
+func (a *App) handleCreateBrief(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	var b briefBody
+	if err := decodeJSON(r, &b); err != nil {
+		writeErr(w, http.StatusBadRequest, "[format data tidak valid]")
+		return
+	}
+	brief, err := a.accountSvc().CreateBrief(r.Context(), actor, r.PathValue("id"), b.input())
+	if err != nil {
+		writeAccountErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, brief)
+}
+
+func (a *App) handleGetBrief(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	brief, err := a.accountSvc().GetBrief(r.Context(), actor, r.PathValue("id"))
+	if err != nil {
+		writeAccountErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, brief)
+}
+
+func (a *App) handleListServiceBriefs(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	list, err := a.accountSvc().ListServiceBriefs(r.Context(), actor, r.PathValue("id"))
+	if err != nil {
+		writeAccountErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": list})
+}
+
+func (a *App) handleDivisionQueue(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	list, err := a.accountSvc().ListDivisionQueue(r.Context(), actor, r.PathValue("division"))
+	if err != nil {
+		writeAccountErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": list})
 }
