@@ -31,7 +31,7 @@ var paymentSchemeSet = map[string]bool{
 const (
 	trxStatusMenungguVerifikasi = "[Menunggu Verifikasi]"
 	instStatusBelumJatuhTempo   = "[Belum Jatuh Tempo]"
-	serviceStatusIntake         = "[Awaiting Onboarding]"
+	serviceStatusAwaitingOnboarding         = "[Awaiting Onboarding]"
 )
 
 // InstallmentInput is one Payment Schedule row (M0 §6 rule 8 / M5 §4).
@@ -183,7 +183,7 @@ func (s *Service) Close(ctx context.Context, actor permission.Actor, attemptID s
 		}
 	}
 
-	// 4) Services (SVC- per line, born at Intake). MSL version + name from the
+	// 4) Services (SVC- per line, born at [Awaiting Onboarding]). MSL version + name from the
 	// pinned Qualified Form snapshot; agreed price + commission from the
 	// approved proposal line.
 	for _, l := range lines {
@@ -196,7 +196,7 @@ func (s *Service) Close(ctx context.Context, actor permission.Actor, attemptID s
 			   (id, client_id, master_service_id, master_version_no, name, standard_price, commission_rule, status, created_by)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			svcID, clientID, l.masterServiceID, l.versionNo, l.name, l.proposedPrice, l.commissionRule,
-			serviceStatusIntake, actor.EmployeeID); err != nil {
+			serviceStatusAwaitingOnboarding, actor.EmployeeID); err != nil {
 			return ClosingResult{}, err
 		}
 	}
