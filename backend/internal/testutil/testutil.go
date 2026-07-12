@@ -50,6 +50,7 @@ var dataTables = []string{
 	"installments",
 	"transactions",
 	"complaints",
+	"brief_block_requests",
 	"briefs",
 	"strategy_plans",
 	"services",
