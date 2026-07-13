@@ -60,6 +60,7 @@ const (
 	MLiveStreamSession  = "live_stream_session"
 	MComplaint          = "complaint"
 	MDependency         = "dependency"
+	MAdCampaign         = "ad_campaign"
 )
 
 func defaultMachines() map[string]*Machine {
@@ -273,6 +274,24 @@ func defaultMachines() map[string]*Machine {
 			initial:      "Pending",
 			autoComputed: true,
 			edges:        nil,
+		},
+		// §14 Ad Campaign (M8) — the ongoing paid-media record, born [Paused]
+		// (held, no real spend) and outliving its setup Brief. Exactly three
+		// statuses (§9.3). The [Paused]->[Active] Launch/Resume dependency (parent
+		// Brief + linked Assets [Approved], §12) is a CODE guard in module8_ads,
+		// not an engine rule — the engine cannot see those foreign statuses; the
+		// pause/resume edges themselves carry no requireLead (routine optimization
+		// needs no approval gate, §6 Rule 3).
+		{
+			name:     MAdCampaign,
+			initial:  "[Paused]",
+			terminal: []string{"[Ended]"},
+			edges: []edge{
+				{from: "[Paused]", to: "[Active]"}, // Launch / Resume
+				{from: "[Active]", to: "[Paused]"}, // Pause / held on revision
+				{from: "[Active]", to: "[Ended]"},
+				{from: "[Paused]", to: "[Ended]"},
+			},
 		},
 	}
 

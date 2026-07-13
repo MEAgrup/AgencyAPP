@@ -50,6 +50,13 @@ var dataTables = []string{
 	"installments",
 	"transactions",
 	"complaints",
+	// Wave 2 — Module 8 (Ads): children before parents (FK checks are disabled
+	// during truncation, so order is for readability only).
+	"metric_entry_assets",
+	"metric_entries",
+	"optimization_logs",
+	"ad_campaign_assets",
+	"ad_campaigns",
 	"asset_block_requests",
 	"assets",
 	"brief_block_requests",

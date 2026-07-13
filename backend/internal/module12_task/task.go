@@ -108,6 +108,18 @@ type AccountService interface {
 	OnBriefLeavesToDo(ctx context.Context, tx *sql.Tx, actor permission.Actor, serviceID string) error
 }
 
+// BriefSubmitGuard is an optional, division-scoped pre-[Submitted] check for a
+// Brief-as-task. It runs inside the submit transaction just before the engine
+// moves the Brief to [Submitted], so a failing guard blocks the transition and
+// changes nothing (house rule: validation server-side). It is the extension point
+// for division-specific submit rules the generic engine cannot know — today only
+// Ads uses it (M8 §4 Rule 3: a Brief cannot be submitted until its Ad Campaign(s)
+// are complete). The guard receives the Brief's target division and must no-op for
+// divisions it does not own. Injected one-way (M12 does not import M8); nil-safe.
+type BriefSubmitGuard interface {
+	ValidateBriefSubmit(ctx context.Context, tx *sql.Tx, briefID, division string) error
+}
+
 // Service is the M12 persistence surface.
 type Service struct {
 	DB     *sql.DB
@@ -115,6 +127,10 @@ type Service struct {
 	// Account fires the Service [Briefed] -> [In Execution] advance when a Brief
 	// leaves [To Do]. Required for StartTask; the other actions do not use it.
 	Account AccountService
+	// SubmitGuard, when set, runs a division-specific pre-[Submitted] check on a
+	// Brief-as-task (M8 wires the Ads campaign-completeness gate here). Nil => no
+	// extra gate; unaffected for Asset submits.
+	SubmitGuard BriefSubmitGuard
 	// Catalog is the FROZEN notification catalog (Phase 0 v2 §9). Nil-guarded: when
 	// unset, block-request emissions are skipped (most unit tests). M12 emits ONLY
 	// events already in the catalog (EvBlockRequestSubmitted / EvBlockRequestDecided);
@@ -279,6 +295,14 @@ func (s *Service) driveExecEdge(ctx context.Context, actor permission.Actor, src
 	// Pin the source state so each action means exactly one edge.
 	if r.status != requireFrom {
 		return statemachine.Result{}, &statemachine.BlockedError{Message: statemachine.DefaultBlockMessage}
+	}
+	// Division-specific pre-[Submitted] guard for a Brief-as-task (M8 §4 Rule 3:
+	// Ads blocks submit until the Ad Campaign is complete). No-op for Assets and
+	// for divisions the guard does not own; nil-safe.
+	if to == StatusSubmitted && src.table == "briefs" && s.SubmitGuard != nil {
+		if err := s.SubmitGuard.ValidateBriefSubmit(ctx, tx, id, r.division); err != nil {
+			return statemachine.Result{}, err
+		}
 	}
 	// Link gate: a link-requiring source (Asset) must carry an output link before
 	// [Submitted] (§4 Rule 3). Persist it in the same transaction as the move.
