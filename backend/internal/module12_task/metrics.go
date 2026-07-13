@@ -117,6 +117,31 @@ func computeMetrics(evs []transition, sla *float64) Metrics {
 	return m
 }
 
+// Transition is one canonical-Task status change (destination state + timestamp),
+// exported so an OFF-MACHINE source can feed a status-mapped history into the shared
+// metric core. It exists for M9's Creator Booking (BKG-), whose NATIVE machine (§8)
+// differs from the canonical Task machine, so it is NOT registered as a taskSource;
+// instead M9 maps its 8 native states onto the canonical labels (§11 mapping) and
+// reuses the exact turnaround/speed_score math here, without duplicating it.
+type Transition struct {
+	To string    // a canonical Status* label (StatusInProgress / StatusSubmitted / ...)
+	At time.Time // the transition timestamp
+}
+
+// ComputeMappedMetrics computes the canonical Task metrics (§5.1) from an already
+// status-mapped, chronologically ASCENDING transition list plus an optional SLA
+// Target (hours). It is the additive integration point for off-machine sources
+// (M9 Creator Booking, §11): the caller translates its native lifecycle into the
+// canonical labels and gets back the same turnaround_time / speed_score / N/A / "—"
+// treatment every Task uses. It does NOT change any existing M12 API.
+func ComputeMappedMetrics(evs []Transition, slaHours *float64) Metrics {
+	internal := make([]transition, len(evs))
+	for i, e := range evs {
+		internal[i] = transition{to: e.To, at: e.At}
+	}
+	return computeMetrics(internal, slaHours)
+}
+
 // applyRevisionSpeedScore fills revision_speed_score = revision_turnaround ÷
 // Revision SLA Target (M7-OA-3 / §9.3). Same house-convention rendering as Speed
 // Score: N/A when the revision SLA is unset or there has been no revision round;

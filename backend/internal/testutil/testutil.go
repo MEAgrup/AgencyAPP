@@ -57,6 +57,10 @@ var dataTables = []string{
 	"optimization_logs",
 	"ad_campaign_assets",
 	"ad_campaigns",
+	// Wave 2 — Module 9 (KOL): children before parents.
+	"creator_payment_requests",
+	"creator_lists",
+	"creator_bookings",
 	"asset_block_requests",
 	"assets",
 	"brief_block_requests",
