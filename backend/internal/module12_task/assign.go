@@ -26,6 +26,17 @@ func canManageTask(a permission.Actor, division string) bool {
 // the Brief's target division (mirrors module6_account.validateAMCandidate). A
 // Live Stream / vendor-dispatched Brief is not an execution Task and is rejected.
 func (s *Service) AssignPIC(ctx context.Context, actor permission.Actor, briefID, picID string) error {
+	return s.assignPIC(ctx, actor, sourceBrief, briefID, picID)
+}
+
+// AssignAssetPIC assigns the accountable Creative staff on an Asset (M7 §9.3
+// "Set by Team Leader or self-claimed" / §3 Rule 3 Team-Leader reassign). Same
+// gate as briefs: the Asset's (parent Brief's) division Lead/SPV or Director.
+func (s *Service) AssignAssetPIC(ctx context.Context, actor permission.Actor, assetID, picID string) error {
+	return s.assignPIC(ctx, actor, sourceAsset, assetID, picID)
+}
+
+func (s *Service) assignPIC(ctx context.Context, actor permission.Actor, src taskSource, id, picID string) error {
 	picID = trim(picID)
 	if picID == "" {
 		return ErrInvalidPIC
@@ -36,7 +47,7 @@ func (s *Service) AssignPIC(ctx context.Context, actor permission.Actor, briefID
 	}
 	defer tx.Rollback()
 
-	r, err := lockTask(ctx, tx, briefID)
+	r, err := lockTask(ctx, tx, src, id)
 	if err != nil {
 		return err
 	}
@@ -50,7 +61,7 @@ func (s *Service) AssignPIC(ctx context.Context, actor permission.Actor, briefID
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE briefs SET assigned_pic = ? WHERE id = ?`, picID, briefID); err != nil {
+		"UPDATE "+src.table+" SET assigned_pic = ? WHERE id = ?", picID, id); err != nil {
 		return err
 	}
 	prev := any(nil)
@@ -58,7 +69,7 @@ func (s *Service) AssignPIC(ctx context.Context, actor permission.Actor, briefID
 		prev = r.assignedPIC
 	}
 	if err := audit.Write(ctx, tx, audit.Record{
-		EntityType: "brief", EntityID: briefID, Actor: actor.EmployeeID, Action: "pic_assigned",
+		EntityType: src.entityType, EntityID: id, Actor: actor.EmployeeID, Action: "pic_assigned",
 		Before: map[string]any{"assigned_pic": prev},
 		After:  map[string]any{"assigned_pic": picID, "assigned_by": actor.EmployeeID},
 	}); err != nil {
@@ -73,6 +84,24 @@ func (s *Service) AssignPIC(ctx context.Context, actor permission.Actor, briefID
 // against. Must be > 0. Changes are audited (history immutable in the audit log);
 // it is never auto-defaulted or backfilled from the Brief level.
 func (s *Service) SetSLATarget(ctx context.Context, actor permission.Actor, briefID string, hours float64) error {
+	return s.setSLA(ctx, actor, sourceBrief, briefID, "sla_target_hours", "sla_target_set", hours)
+}
+
+// SetAssetSLA sets an Asset's Task-level SLA Target (§5.3) — the internal hours
+// yardstick Speed Score measures against. Target division Lead/SPV or Director.
+func (s *Service) SetAssetSLA(ctx context.Context, actor permission.Actor, assetID string, hours float64) error {
+	return s.setSLA(ctx, actor, sourceAsset, assetID, "sla_target_hours", "sla_target_set", hours)
+}
+
+// SetAssetRevisionSLA sets an Asset's Revision SLA Target (M7-OA-3 / §9.3) — the
+// separate, shorter target (default 24–48h) each revision round is measured
+// against, feeding revision_speed_score. Distinct from the original SLA Target;
+// same Lead/SPV/Director write gate. Set at breakdown time alongside the original.
+func (s *Service) SetAssetRevisionSLA(ctx context.Context, actor permission.Actor, assetID string, hours float64) error {
+	return s.setSLA(ctx, actor, sourceAsset, assetID, "revision_sla_target_hours", "revision_sla_target_set", hours)
+}
+
+func (s *Service) setSLA(ctx context.Context, actor permission.Actor, src taskSource, id, col, action string, hours float64) error {
 	if hours <= 0 {
 		return ErrInvalidSLA
 	}
@@ -82,7 +111,7 @@ func (s *Service) SetSLATarget(ctx context.Context, actor permission.Actor, brie
 	}
 	defer tx.Rollback()
 
-	r, err := lockTask(ctx, tx, briefID)
+	r, err := lockTask(ctx, tx, src, id)
 	if err != nil {
 		return err
 	}
@@ -94,11 +123,11 @@ func (s *Service) SetSLATarget(ctx context.Context, actor permission.Actor, brie
 	}
 	var prev sql.NullFloat64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT sla_target_hours FROM briefs WHERE id = ?`, briefID).Scan(&prev); err != nil {
+		"SELECT "+col+" FROM "+src.table+" WHERE id = ?", id).Scan(&prev); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE briefs SET sla_target_hours = ? WHERE id = ?`, hours, briefID); err != nil {
+		"UPDATE "+src.table+" SET "+col+" = ? WHERE id = ?", hours, id); err != nil {
 		return err
 	}
 	var prevVal any
@@ -106,9 +135,9 @@ func (s *Service) SetSLATarget(ctx context.Context, actor permission.Actor, brie
 		prevVal = prev.Float64
 	}
 	if err := audit.Write(ctx, tx, audit.Record{
-		EntityType: "brief", EntityID: briefID, Actor: actor.EmployeeID, Action: "sla_target_set",
-		Before: map[string]any{"sla_target_hours": prevVal},
-		After:  map[string]any{"sla_target_hours": hours},
+		EntityType: src.entityType, EntityID: id, Actor: actor.EmployeeID, Action: action,
+		Before: map[string]any{col: prevVal},
+		After:  map[string]any{col: hours},
 	}); err != nil {
 		return err
 	}

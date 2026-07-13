@@ -96,6 +96,9 @@ var (
 	ErrBlockRequestNotFound = errors.New("[permintaan block tidak ditemukan]")
 	// ErrBlockRequestClosed: the block request was already approved/rejected.
 	ErrBlockRequestClosed = errors.New("[permintaan block sudah diproses]")
+	// ErrOutputLinkRequired: an Asset cannot be submitted without an output link
+	// (M7 §4 Rule 3 — verbatim PRD string).
+	ErrOutputLinkRequired = errors.New("[link output wajib diisi sebelum submit]")
 )
 
 // AccountService is the one-way hook into module6_account: when a Brief first
@@ -129,28 +132,48 @@ func (s *Service) engine() *statemachine.Engine {
 	return statemachine.New()
 }
 
-// taskRow is the slim projection the execution/permission gates need.
+// taskRow is the slim projection the execution/permission gates need, uniform
+// across sources. For a Brief-as-task, parentBriefID is empty and serviceID is
+// the Brief's own Service (the [In Execution] hook target). For an Asset,
+// parentBriefID is the owning Brief (the roll-up target, M7 §2), division/ownerAM
+// are inherited from that Brief's row, and status is the Asset's own status.
 type taskRow struct {
-	briefID     string
-	serviceID   string
-	division    string
-	assignedPIC string
-	status      string
-	ownerAM     string
+	entityID      string
+	serviceID     string
+	parentBriefID string // "" for briefs; the parent Brief for assets
+	division      string
+	assignedPIC   string
+	status        string
+	ownerAM       string
 }
 
-// lockTask row-locks a Brief and returns the fields the gates need, joining to the
-// owning AM for the read predicate. A missing Brief is ErrTaskNotFound.
-func lockTask(ctx context.Context, tx *sql.Tx, briefID string) (taskRow, error) {
+// lockTask row-locks a Task row of the given source and returns the fields the
+// gates need, joining up to the owning AM for the read predicate. A missing row
+// is ErrTaskNotFound. The status column locked FOR UPDATE is always the Task's
+// own (assets.status for an Asset, briefs.status for a Brief).
+func lockTask(ctx context.Context, tx *sql.Tx, src taskSource, id string) (taskRow, error) {
 	var r taskRow
 	var pic, owner sql.NullString
-	err := tx.QueryRowContext(ctx,
-		`SELECT b.id, b.service_id, b.assigned_division, b.assigned_pic, b.status, c.assigned_am_id
-		   FROM briefs b
-		   JOIN services sv ON sv.id = b.service_id
-		   JOIN clients c ON c.id = sv.client_id
-		  WHERE b.id = ? FOR UPDATE`, briefID).
-		Scan(&r.briefID, &r.serviceID, &r.division, &pic, &r.status, &owner)
+	var err error
+	switch src.table {
+	case "assets":
+		err = tx.QueryRowContext(ctx,
+			`SELECT a.id, b.service_id, a.brief_id, b.assigned_division, a.assigned_pic, a.status, c.assigned_am_id
+			   FROM assets a
+			   JOIN briefs b ON b.id = a.brief_id
+			   JOIN services sv ON sv.id = b.service_id
+			   JOIN clients c ON c.id = sv.client_id
+			  WHERE a.id = ? FOR UPDATE`, id).
+			Scan(&r.entityID, &r.serviceID, &r.parentBriefID, &r.division, &pic, &r.status, &owner)
+	default: // briefs
+		err = tx.QueryRowContext(ctx,
+			`SELECT b.id, b.service_id, b.assigned_division, b.assigned_pic, b.status, c.assigned_am_id
+			   FROM briefs b
+			   JOIN services sv ON sv.id = b.service_id
+			   JOIN clients c ON c.id = sv.client_id
+			  WHERE b.id = ? FOR UPDATE`, id).
+			Scan(&r.entityID, &r.serviceID, &r.division, &pic, &r.status, &owner)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return taskRow{}, ErrTaskNotFound
 	}
@@ -183,39 +206,67 @@ func canExecute(a permission.Actor, r taskRow) bool {
 	return true
 }
 
-// StartTask drives [To Do] -> [In Progress] (§3 step 2, the moment the Turnaround
-// clock starts, §2 Rule 4). This is the ONLY transition that makes a Brief leave
-// [To Do], so it is where the parent Service advances to [In Execution] (M6 §5
-// Flow 3) — atomically, via the injected AccountService hook.
+// StartTask drives a Brief-as-task [To Do] -> [In Progress] (§3 step 2, the
+// moment the Turnaround clock starts, §2 Rule 4). This is the ONLY transition
+// that makes a Brief leave [To Do], so it is where the parent Service advances to
+// [In Execution] (M6 §5 Flow 3) — atomically, via the injected AccountService hook.
 func (s *Service) StartTask(ctx context.Context, actor permission.Actor, briefID string) (statemachine.Result, error) {
-	return s.driveExecEdge(ctx, actor, briefID, StatusToDo, StatusInProgress, true)
+	return s.driveExecEdge(ctx, actor, sourceBrief, briefID, StatusToDo, StatusInProgress, "")
 }
 
-// SubmitTask drives [In Progress] -> [Submitted] (§3 step 3). The PIC hands the
-// deliverable to the AM for review.
+// SubmitTask drives a Brief-as-task [In Progress] -> [Submitted] (§3 step 3).
 func (s *Service) SubmitTask(ctx context.Context, actor permission.Actor, briefID string) (statemachine.Result, error) {
-	return s.driveExecEdge(ctx, actor, briefID, StatusInProgress, StatusSubmitted, false)
+	return s.driveExecEdge(ctx, actor, sourceBrief, briefID, StatusInProgress, StatusSubmitted, "")
 }
 
-// ReworkTask drives [Revision Requested] -> [In Progress] (§3 step 5). The PIC
-// resumes the SAME cumulative timer (Rule 5 — revision rounds never reset it); the
-// Service is already [In Execution], so no hook fires.
+// ReworkTask drives a Brief-as-task [Revision Requested] -> [In Progress] (§3
+// step 5). The PIC resumes the SAME cumulative timer (Rule 5 — revision rounds
+// never reset it); the Service is already [In Execution], so no hook fires.
 func (s *Service) ReworkTask(ctx context.Context, actor permission.Actor, briefID string) (statemachine.Result, error) {
-	return s.driveExecEdge(ctx, actor, briefID, StatusRevisionReq, StatusInProgress, false)
+	return s.driveExecEdge(ctx, actor, sourceBrief, briefID, StatusRevisionReq, StatusInProgress, "")
 }
 
-// driveExecEdge is the shared, gated engine driver for the division-side edges.
-// requireFrom pins the expected source state so StartTask and ReworkTask stay
-// distinct even though both target [In Progress]; a wrong source is rejected with
-// the machine's block message (nothing changes). fireHook advances the Service.
-func (s *Service) driveExecEdge(ctx context.Context, actor permission.Actor, briefID, requireFrom, to string, fireHook bool) (statemachine.Result, error) {
+// StartAsset drives a Creative Asset [To Do] -> [In Progress] (M7 §4 Flow 1). The
+// Turnaround clock starts (§2 Rule 4). Because the parent Brief's status is a
+// roll-up of its Assets (M7 §2), starting the FIRST Asset makes the Brief leave
+// [To Do] via the roll-up, which in turn advances the Service to [In Execution].
+func (s *Service) StartAsset(ctx context.Context, actor permission.Actor, assetID string) (statemachine.Result, error) {
+	return s.driveExecEdge(ctx, actor, sourceAsset, assetID, StatusToDo, StatusInProgress, "")
+}
+
+// SubmitAsset drives a Creative Asset [In Progress] -> [Submitted] (M7 §4 Flow 2).
+// Submission requires a type-appropriate output link (§4 Rule 3) — the link is
+// written and the transition applied atomically; a blank link is rejected with
+// the PRD's ErrOutputLinkRequired before anything changes.
+func (s *Service) SubmitAsset(ctx context.Context, actor permission.Actor, assetID, outputLink string) (statemachine.Result, error) {
+	return s.driveExecEdge(ctx, actor, sourceAsset, assetID, StatusInProgress, StatusSubmitted, outputLink)
+}
+
+// ReworkAsset drives a Creative Asset [Revision Requested] -> [In Progress] (M7 §6
+// Flow 2, the PIC reworks). The cumulative Turnaround timer keeps running (Rule 5).
+func (s *Service) ReworkAsset(ctx context.Context, actor permission.Actor, assetID string) (statemachine.Result, error) {
+	return s.driveExecEdge(ctx, actor, sourceAsset, assetID, StatusRevisionReq, StatusInProgress, "")
+}
+
+// driveExecEdge is the shared, gated engine driver for the division-side edges of
+// ANY task source. requireFrom pins the expected current state so Start and Rework
+// stay distinct even though both target [In Progress]; a wrong source state is
+// rejected with the machine's block message (nothing changes). submitLink is the
+// output link to persist when this edge targets [Submitted] on a link-gated source
+// (Asset §4 Rule 3); it is ignored otherwise.
+//
+// After the Task's own status is written, effects propagate atomically:
+//   - a Brief-as-task leaving [To Do] advances its Service (OnBriefLeavesToDo);
+//   - an Asset transition recomputes its parent Brief's roll-up (M7 §2), which is
+//     itself what advances the Service when the Brief first leaves [To Do].
+func (s *Service) driveExecEdge(ctx context.Context, actor permission.Actor, src taskSource, id, requireFrom, to, submitLink string) (statemachine.Result, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return statemachine.Result{}, err
 	}
 	defer tx.Rollback()
 
-	r, err := lockTask(ctx, tx, briefID)
+	r, err := lockTask(ctx, tx, src, id)
 	if err != nil {
 		return statemachine.Result{}, err
 	}
@@ -229,23 +280,49 @@ func (s *Service) driveExecEdge(ctx context.Context, actor permission.Actor, bri
 	if r.status != requireFrom {
 		return statemachine.Result{}, &statemachine.BlockedError{Message: statemachine.DefaultBlockMessage}
 	}
+	// Link gate: a link-requiring source (Asset) must carry an output link before
+	// [Submitted] (§4 Rule 3). Persist it in the same transaction as the move.
+	if to == StatusSubmitted && src.submitLinkCol != "" {
+		if trim(submitLink) == "" {
+			return statemachine.Result{}, src.errLinkRequired
+		}
+		if _, err := tx.ExecContext(ctx,
+			"UPDATE "+src.table+" SET "+src.submitLinkCol+" = ? WHERE id = ?", trim(submitLink), id); err != nil {
+			return statemachine.Result{}, err
+		}
+	}
 	res, err := s.engine().Transition(ctx, tx, statemachine.Request{
-		Machine: statemachine.MBriefTask, EntityType: "brief", Table: "briefs",
-		EntityID: briefID, To: to, Actor: actor,
+		Machine: statemachine.MBriefTask, EntityType: src.entityType, Table: src.table,
+		EntityID: id, To: to, Actor: actor,
 	})
 	if err != nil {
 		return statemachine.Result{}, err
 	}
-	if fireHook {
-		if s.Account == nil {
-			return statemachine.Result{}, errors.New("module12_task: AccountService hook not wired")
-		}
-		if err := s.Account.OnBriefLeavesToDo(ctx, tx, actor, r.serviceID); err != nil {
-			return statemachine.Result{}, err
-		}
+	if err := s.propagate(ctx, tx, actor, src, r); err != nil {
+		return statemachine.Result{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return statemachine.Result{}, err
 	}
 	return res, nil
+}
+
+// propagate fires the parent-side effect of a Task transition, inside the same
+// transaction. Briefs advance their Service on leaving [To Do]; Assets recompute
+// their Brief's roll-up (which subsumes the Service advance for Creative Briefs).
+func (s *Service) propagate(ctx context.Context, tx *sql.Tx, actor permission.Actor, src taskSource, r taskRow) error {
+	switch src.table {
+	case "assets":
+		return s.RecomputeBriefRollup(ctx, tx, actor, r.parentBriefID)
+	default: // briefs
+		// Only the [To Do] departure advances the Service; every other brief edge
+		// leaves it alone (OnBriefLeavesToDo is idempotent / no-ops otherwise).
+		if r.status != StatusToDo {
+			return nil
+		}
+		if s.Account == nil {
+			return errors.New("module12_task: AccountService hook not wired")
+		}
+		return s.Account.OnBriefLeavesToDo(ctx, tx, actor, r.serviceID)
+	}
 }

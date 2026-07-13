@@ -52,6 +52,15 @@ type Metrics struct {
 	SpeedScorePct           *float64 `json:"speed_score_pct"`
 	SpeedScoreDisplay       string   `json:"speed_score_display"` // "112.50%" | "N/A" | "—"
 
+	// Revision SLA Target + revision_speed_score (M7-OA-3 / M12 §5.1 addition):
+	// the diagnostic parallel to Speed Score, measured against the SEPARATE, shorter
+	// revision SLA — shown alongside, NEVER blended into Speed Score. Nil/"N/A" when
+	// no revision SLA is set or there has been no revision round yet (e.g. always for
+	// a Brief-as-task, which carries no revision SLA).
+	RevisionSLATargetHours    *float64 `json:"revision_sla_target_hours"`
+	RevisionSpeedScorePct     *float64 `json:"revision_speed_score_pct"`
+	RevisionSpeedScoreDisplay string   `json:"revision_speed_score_display"` // "75.00%" | "N/A" | "—"
+
 	RevisionCount   int  `json:"revision_count"`
 	RevisionFlagged bool `json:"revision_flagged"` // §2 Rule 15: >=3
 
@@ -104,7 +113,17 @@ func computeMetrics(evs []transition, sla *float64) Metrics {
 	}
 
 	m.SpeedScorePct, m.SpeedScoreDisplay = speedScore(m.TurnaroundHours, sla)
+	m.RevisionSpeedScoreDisplay = "N/A" // default until a revision SLA is applied
 	return m
+}
+
+// applyRevisionSpeedScore fills revision_speed_score = revision_turnaround ÷
+// Revision SLA Target (M7-OA-3 / §9.3). Same house-convention rendering as Speed
+// Score: N/A when the revision SLA is unset or there has been no revision round;
+// "—" on a zero revision SLA (guarded defensively). Diagnostic only.
+func applyRevisionSpeedScore(m *Metrics, revisionSLA *float64) {
+	m.RevisionSLATargetHours = revisionSLA
+	m.RevisionSpeedScorePct, m.RevisionSpeedScoreDisplay = speedScore(m.RevisionTurnaroundHours, revisionSLA)
 }
 
 // blockedDuration sums every [Blocked] -> [In Progress] interval that begins within
@@ -202,20 +221,43 @@ func transitionTarget(action string) (string, bool) {
 	return rest[idx+2:], true
 }
 
-// TaskMetrics loads a Brief-as-Task and returns its recomputed-from-log metrics,
-// if the actor may view it. Read gate (§6/§9.1, mirrors module6_account.GetBrief):
-// OD/Director everywhere; Account lead (division-wide); the owning AM; and
-// staff/lead of the Brief's target division.
+// TaskMetrics loads a Brief-as-Task and returns its recomputed-from-log metrics.
 func (s *Service) TaskMetrics(ctx context.Context, actor permission.Actor, briefID string) (Metrics, error) {
+	return s.metricsFor(ctx, actor, sourceBrief, briefID)
+}
+
+// AssetMetrics loads a Creative Asset and returns its recomputed-from-log metrics
+// (M12 §5.1 + the Revision SLA / revision_speed_score of M7-OA-3). Same read gate.
+func (s *Service) AssetMetrics(ctx context.Context, actor permission.Actor, assetID string) (Metrics, error) {
+	return s.metricsFor(ctx, actor, sourceAsset, assetID)
+}
+
+// metricsFor returns a Task's metrics for any source, recomputed purely from the
+// immutable transition log (house rule 4), if the actor may view it. Read gate
+// (§6/§9.1, mirrors module6_account.GetBrief): OD/Director everywhere; Account
+// lead (division-wide); the owning AM; and staff/lead of the Task's division.
+func (s *Service) metricsFor(ctx context.Context, actor permission.Actor, src taskSource, id string) (Metrics, error) {
 	var division, status string
-	var pic, owner sql.NullString
-	var sla sql.NullFloat64
-	err := s.DB.QueryRowContext(ctx,
-		`SELECT b.assigned_division, b.status, b.assigned_pic, b.sla_target_hours, c.assigned_am_id
-		   FROM briefs b
-		   JOIN services sv ON sv.id = b.service_id
-		   JOIN clients c ON c.id = sv.client_id
-		  WHERE b.id = ?`, briefID).Scan(&division, &status, &pic, &sla, &owner)
+	var owner sql.NullString
+	var sla, revSLA sql.NullFloat64
+	var err error
+	switch src.table {
+	case "assets":
+		err = s.DB.QueryRowContext(ctx,
+			`SELECT b.assigned_division, a.status, a.sla_target_hours, a.revision_sla_target_hours, c.assigned_am_id
+			   FROM assets a
+			   JOIN briefs b ON b.id = a.brief_id
+			   JOIN services sv ON sv.id = b.service_id
+			   JOIN clients c ON c.id = sv.client_id
+			  WHERE a.id = ?`, id).Scan(&division, &status, &sla, &revSLA, &owner)
+	default: // briefs
+		err = s.DB.QueryRowContext(ctx,
+			`SELECT b.assigned_division, b.status, b.sla_target_hours, c.assigned_am_id
+			   FROM briefs b
+			   JOIN services sv ON sv.id = b.service_id
+			   JOIN clients c ON c.id = sv.client_id
+			  WHERE b.id = ?`, id).Scan(&division, &status, &sla, &owner)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return Metrics{}, ErrTaskNotFound
 	}
@@ -225,19 +267,24 @@ func (s *Service) TaskMetrics(ctx context.Context, actor permission.Actor, brief
 	if !canViewTask(actor, owner.String, division) {
 		return Metrics{}, ErrTaskViewForbidden
 	}
-	entries, err := audit.List(ctx, s.DB, audit.Filter{EntityType: "brief", EntityID: briefID})
+	entries, err := audit.List(ctx, s.DB, audit.Filter{EntityType: src.entityType, EntityID: id})
 	if err != nil {
 		return Metrics{}, err
 	}
-	var slaPtr *float64
-	if sla.Valid {
-		v := sla.Float64
-		slaPtr = &v
-	}
-	m := computeMetrics(parseTransitions(entries), slaPtr)
-	m.BriefID = briefID
+	m := computeMetrics(parseTransitions(entries), nullFloatPtr(sla))
+	applyRevisionSpeedScore(&m, nullFloatPtr(revSLA))
+	m.BriefID = id
 	m.Status = status
 	return m, nil
+}
+
+// nullFloatPtr converts a NULL-able float to *float64 (nil when NULL).
+func nullFloatPtr(v sql.NullFloat64) *float64 {
+	if !v.Valid {
+		return nil
+	}
+	f := v.Float64
+	return &f
 }
 
 // canViewTask is the §6/§9.1 read predicate (kept local; mirrors the equivalent
