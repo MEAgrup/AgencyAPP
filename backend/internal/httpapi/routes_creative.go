@@ -23,4 +23,8 @@ func (a *App) registerCreativeRoutes(mux *http.ServeMux) {
 
 	// Hours Logged (§5 Rule 2): the assigned PIC, the Creative lead, or Director.
 	mux.HandleFunc("POST /api/v1/assets/{id}/hours", a.protect(a.handleLogHours))
+
+	// Daily Output (§7): derived read-model feed for one PIC's WIB day. Read gate
+	// (W2-M7-C2): the PIC themselves, the Creative lead, OD, or Director.
+	mux.HandleFunc("GET /api/v1/daily-output/{picId}", a.protect(a.handleDailyOutput))
 }

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
 	"github.com/meagrup/agencyapp/backend/internal/module7_creative"
@@ -130,12 +131,35 @@ func (a *App) handleLogHours(w http.ResponseWriter, r *http.Request) {
 // writeCreativeErr maps M7 sentinels to HTTP status + their verbatim BI message,
 // following the account_handlers.go convention (forbidden->403, not-found->404,
 // domain-validation->422; statemachine BlockedError->422, RoleError->403).
+// handleDailyOutput serves the M7 §7 Daily Output feed: one PIC's auto-logged
+// output for one WIB calendar day (derived read-model, W2-M7-C2). Optional query
+// param date=YYYY-MM-DD; default = today.
+func (a *App) handleDailyOutput(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	day := time.Now()
+	if q := r.URL.Query().Get("date"); q != "" {
+		parsed, err := time.Parse("2006-01-02", q)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "[format data tidak valid]")
+			return
+		}
+		day = parsed
+	}
+	out, err := a.creativeSvc().DailyOutput(r.Context(), actor, r.PathValue("picId"), day)
+	if err != nil {
+		writeCreativeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func writeCreativeErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, module7_creative.ErrAssetForbidden),
 		errors.Is(err, module7_creative.ErrAssetCreateForbidden),
 		errors.Is(err, module7_creative.ErrReviewForbidden),
-		errors.Is(err, module7_creative.ErrHoursForbidden):
+		errors.Is(err, module7_creative.ErrHoursForbidden),
+		errors.Is(err, module7_creative.ErrDailyOutputForbidden):
 		writeErr(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, module7_creative.ErrBriefNotFound),
 		errors.Is(err, module7_creative.ErrAssetNotFound):

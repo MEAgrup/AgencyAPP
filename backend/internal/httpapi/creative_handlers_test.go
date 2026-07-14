@@ -1,6 +1,7 @@
 package httpapi_test
 
 import (
+	"net/http"
 	"testing"
 )
 
@@ -197,5 +198,77 @@ func TestCreativeAssetEndpoints(t *testing.T) {
 	}
 	if code, body := do(t, budi, "GET", a2+"/metrics", nil); code != 403 || body["message"] != "[anda tidak memiliki akses ke task ini]" {
 		t.Fatalf("foreign asset metrics: %d %v", code, body)
+	}
+}
+
+// TestDailyOutputEndpoint exercises the M7 §7 Daily Output HTTP surface
+// (GET /api/v1/daily-output/{picId}): the W2-M7-C2 read gate (PIC self, Creative
+// lead, OD, Director; other staff + AM denied), the date param validation, and the
+// derived feed content after real Asset transitions.
+func TestDailyOutputEndpoint(t *testing.T) {
+	srv, done := setupTC(t)
+	defer done()
+	seedTCBrief(t, "CLI-DO", "SVC-DO", "BRF-DO", "Creative", 1)
+
+	budi := login(t, srv, "budi@mea.co.id")   // Sales staff (foreign)
+	cakra := login(t, srv, "cakra@mea.co.id") // Creative staff (PIC)
+	cindy := login(t, srv, "cindy@mea.co.id") // Creative staff (non-PIC)
+	clara := login(t, srv, "clara@mea.co.id") // Creative lead
+	cdir := login(t, srv, "cdir@mea.co.id")   // Creative staff + LAYERED director
+	amel := login(t, srv, "amel@mea.co.id")   // owning AM
+	odi := login(t, srv, "odi@mea.co.id")     // OD (read-all)
+	yohan := login(t, srv, "yohan@mea.co.id") // Director
+
+	// Produce real output: cakra self-claims an Asset and starts it — that
+	// transition ([To Do] -> [In Progress]) is the auto-logged Daily Output row.
+	code, body := do(t, cakra, "POST", srv.URL+"/api/v1/briefs/BRF-DO/assets", map[string]any{"sequence_no": 1})
+	if code != 200 {
+		t.Fatalf("create asset: %d %v", code, body)
+	}
+	assetID := body["id"].(string)
+	if code, _ := do(t, cakra, "POST", srv.URL+"/api/v1/assets/"+assetID+"/start", nil); code != 200 {
+		t.Fatalf("start asset: want 200")
+	}
+
+	feed := srv.URL + "/api/v1/daily-output/EMP-CAKRA"
+
+	// Read gate: PIC self, Creative lead, OD, Director, layered staff+Director OK.
+	for name, tok := range map[string]*http.Client{"self": cakra, "lead": clara, "OD": odi, "director": yohan, "layered": cdir} {
+		if code, body := do(t, tok, "GET", feed, nil); code != 200 {
+			t.Fatalf("%s daily output: %d %v", name, code, body)
+		}
+	}
+	// Other Creative staff, owning AM, and a foreign division are denied.
+	for name, tok := range map[string]*http.Client{"other-staff": cindy, "AM": amel, "foreign": budi} {
+		if code, body := do(t, tok, "GET", feed, nil); code != 403 || body["message"] != "[anda tidak memiliki akses ke Daily Output ini]" {
+			t.Fatalf("%s daily output: %d %v want 403 verbatim", name, code, body)
+		}
+	}
+
+	// Feed content: today's WIB day holds the start transition, unlocked, 0 approved.
+	code, body = do(t, cakra, "GET", feed, nil)
+	if code != 200 {
+		t.Fatalf("feed: %d %v", code, body)
+	}
+	if int(body["total"].(float64)) < 1 || body["locked"].(bool) || int(body["approved_count"].(float64)) != 0 {
+		t.Fatalf("feed content: %v", body)
+	}
+	entries := body["entries"].([]any)
+	found := false
+	for _, e := range entries {
+		if e.(map[string]any)["asset_id"] == assetID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("feed entries missing %s: %v", assetID, entries)
+	}
+
+	// Past WIB day is locked and empty; malformed date -> 400.
+	if code, body = do(t, cakra, "GET", feed+"?date=2026-01-05", nil); code != 200 || !body["locked"].(bool) || int(body["total"].(float64)) != 0 {
+		t.Fatalf("past day: %d %v", code, body)
+	}
+	if code, body = do(t, cakra, "GET", feed+"?date=banana", nil); code != 400 || body["message"] != "[format data tidak valid]" {
+		t.Fatalf("bad date: %d %v", code, body)
 	}
 }

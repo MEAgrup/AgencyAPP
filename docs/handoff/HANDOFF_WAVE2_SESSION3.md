@@ -14,6 +14,7 @@ Branch kerja sesi ini `claude/fable-orchestrator-opus-haiku-vi68gu` ter-push pen
 | `dcf75bd` | **W2-API-2** (Opus): wiring M8+M9+M10 — 44 endpoint (total 72+); guard Launch M8 dua sisi; endpoint reopen; helper aditif read-only `module8_ads/read.go`; **wiring httpapi Wave 2 SELESAI** |
 | `45b96c8` | **W2-API-3** (Haiku): guard submit brief Ads aktif via `SubmitGuard` injection + test dua sisi (melunasi utang W2-API-2) |
 | `228e7b8` | **W2-M7-C2** (Opus): Daily Output auto-log + EOD lock (M7 §7) = **pure derived read-model** dari audit log, bucketing WIB, tanpa migrasi; 1 string BI baru |
+| (lihat log) | **W2-API-4** (orchestrator langsung — hasil worktree Haiku dibuang, base salah `2a75125`): endpoint `GET /api/v1/daily-output/{picId}` + test gate lengkap. ⚠ Pelajaran: cek `git log -1` worktree executor SEBELUM port hasil. |
 
 Migrasi terpakai tetap **0020–0028** (W2-M7-C2 sengaja tanpa tabel baru — lihat entri DECISIONS).
 
@@ -30,7 +31,7 @@ Migrasi terpakai tetap **0020–0028** (W2-M7-C2 sengaja tanpa tabel baru — li
 Nomor Open terakhir = **O29**.
 
 ## Pekerjaan berikutnya (urutan)
-1. **Sisa klaster deferred Wave 2** (cek entri DECISIONS per modul): wiring endpoint Daily Output M7 §7 (domain sudah ada, tinggal route+handler+permission test — kecil, cocok Haiku); M6-OA-1 override flag per-engagement; Attributed GMV write-back KOL via affiliate link (M9-OA-4, kolom siap); assign-PIC granular sub-tim Creative (M7 §3); handler bulk M1 & port test stream A (utang Wave 1, non-blocking). KPI rollup (M7 §8, M8 GMV Impact, Monthly KOL Report M9 §9) → sebagian besar M14 (Wave 3).
+1. **Sisa klaster deferred Wave 2** (cek entri DECISIONS per modul): M6-OA-1 override flag per-engagement; Attributed GMV write-back KOL via affiliate link (M9-OA-4, kolom siap); assign-PIC granular sub-tim Creative (M7 §3); handler bulk M1 & port test stream A (utang Wave 1, non-blocking). KPI rollup (M7 §8, M8 GMV Impact, Monthly KOL Report M9 §9) → sebagian besar M14 (Wave 3).
 2. **UAT Wave 2** = gate exit Wave 2 (runbook menyusul, pola W1-20). UAT W1-20 go-live tetap menunggu item manusia.
 3. **Wave 3** (build order): M2, M3, M11, M13, M14, M15 — Client Portal (M15) terakhir setelah security spec (O5).
 
