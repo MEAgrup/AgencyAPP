@@ -87,7 +87,8 @@ func writeAccountErr(w http.ResponseWriter, err error) {
 		errors.Is(err, module6_account.ErrBriefReviewForbidden),
 		errors.Is(err, module6_account.ErrComplaintForbidden),
 		errors.Is(err, module6_account.ErrLogComplaintForbidden),
-		errors.Is(err, module6_account.ErrComplaintManageForbidden):
+		errors.Is(err, module6_account.ErrComplaintManageForbidden),
+		errors.Is(err, module6_account.ErrOverrideForbidden):
 		writeErr(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, module6_account.ErrNotFound),
 		errors.Is(err, module6_account.ErrServiceNotFound),
@@ -115,7 +116,9 @@ func writeAccountErr(w http.ResponseWriter, err error) {
 		errors.Is(err, module6_account.ErrBriefStrategyNotAllowed),
 		errors.Is(err, module6_account.ErrInvalidSeverity),
 		errors.Is(err, module6_account.ErrInvalidRelatedRef),
-		errors.Is(err, module6_account.ErrResolutionNotesRequired):
+		errors.Is(err, module6_account.ErrResolutionNotesRequired),
+		errors.Is(err, module6_account.ErrOverrideReasonRequired),
+		errors.Is(err, module6_account.ErrOverrideNotAwaiting):
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 	default:
 		var be *statemachine.BlockedError
@@ -231,6 +234,29 @@ func (a *App) handleRequestStrategyRevision(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": r.PathValue("id"), "status": module6_account.StrategyStatusDrafting})
+}
+
+// strategyRequirementBody carries a per-engagement plan-flag override (M6-OA-1).
+type strategyRequirementBody struct {
+	RequiresStrategyPlan bool   `json:"requires_strategy_plan"`
+	Reason               string `json:"reason"`
+}
+
+// handleSetStrategyRequirement overrides a Service's "Requires Strategy Plan"
+// flag for this engagement (M6-OA-1). Owning AM / Account lead / Director.
+func (a *App) handleSetStrategyRequirement(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	var b strategyRequirementBody
+	if err := decodeJSON(r, &b); err != nil {
+		writeErr(w, http.StatusBadRequest, "[format data tidak valid]")
+		return
+	}
+	res, err := a.accountSvc().SetStrategyRequirement(r.Context(), actor, r.PathValue("id"), b.RequiresStrategyPlan, b.Reason)
+	if err != nil {
+		writeAccountErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // ---- Cluster 3: Service → Brief breakdown + dispatch (M6 §5/§6) ----

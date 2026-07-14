@@ -24,6 +24,8 @@ func (a *App) registerAccountRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/strategies/{id}/submit", a.protect(a.handleSubmitStrategy))
 	mux.HandleFunc("POST /api/v1/strategies/{id}/approve", a.protect(a.handleApproveStrategy))
 	mux.HandleFunc("POST /api/v1/strategies/{id}/request-revision", a.protect(a.handleRequestStrategyRevision))
+	// M6-OA-1 — per-engagement override of the Requires-Strategy-Plan flag.
+	mux.HandleFunc("POST /api/v1/services/{id}/strategy-requirement", a.protect(a.handleSetStrategyRequirement))
 
 	// Cluster 3 (M6 §5 — Service → Brief breakdown, §6 — dispatch).
 	mux.HandleFunc("POST /api/v1/services/{id}/briefs", a.protect(a.handleCreateBrief))

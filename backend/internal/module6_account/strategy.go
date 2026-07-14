@@ -81,6 +81,14 @@ var (
 	// ErrStrategyRequired: §6-approved guard string — a plan-gated Service must reach
 	// [Strategy Approved] before any Brief is created (used by GuardBriefCreation).
 	ErrStrategyRequired = errors.New("[layanan ini wajib memiliki Strategy & Plan yang disetujui sebelum dibuatkan Brief]")
+	// ErrOverrideForbidden: actor may not override this Service's plan-flag
+	// (M6-OA-1 — only the owning AM, Account lead/SPV, or Director).
+	ErrOverrideForbidden = errors.New("[anda tidak memiliki akses untuk mengubah kebutuhan Strategy & Plan layanan ini]")
+	// ErrOverrideReasonRequired: the override reason is mandatory (M6-OA-1 "logged reason").
+	ErrOverrideReasonRequired = errors.New("[alasan perubahan kebutuhan Strategy & Plan wajib diisi]")
+	// ErrOverrideNotAwaiting: the plan-flag may only be overridden before the
+	// execution path is taken, i.e. while the Service is [Awaiting Onboarding].
+	ErrOverrideNotAwaiting = errors.New("[kebutuhan Strategy & Plan hanya dapat diubah saat layanan berstatus Awaiting Onboarding]")
 )
 
 // StrategyInput carries the mandatory Strategy & Plan content fields (M6 §9.3).
@@ -195,12 +203,13 @@ func (s *Service) CreateStrategy(ctx context.Context, actor permission.Actor, se
 	defer tx.Rollback()
 
 	var status string
-	var requiresPlan int
+	var pin int
+	var override sql.NullInt64
 	var ownerAM sql.NullString
 	err = tx.QueryRowContext(ctx,
-		`SELECT sv.status, sv.requires_strategy_plan, c.assigned_am_id
+		`SELECT sv.status, sv.requires_strategy_plan, sv.requires_strategy_plan_override, c.assigned_am_id
 		   FROM services sv JOIN clients c ON c.id = sv.client_id
-		  WHERE sv.id = ? FOR UPDATE`, serviceID).Scan(&status, &requiresPlan, &ownerAM)
+		  WHERE sv.id = ? FOR UPDATE`, serviceID).Scan(&status, &pin, &override, &ownerAM)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Strategy{}, ErrServiceNotFound
 	}
@@ -212,7 +221,9 @@ func (s *Service) CreateStrategy(ctx context.Context, actor permission.Actor, se
 	if !actor.Role.Director && (!ownerAM.Valid || ownerAM.String != actor.EmployeeID) {
 		return Strategy{}, ErrNotOwnerAM
 	}
-	if requiresPlan != 1 {
+	// Effective plan-gate = the per-engagement override (M6-OA-1) if set, else the
+	// pinned MSL flag. A Direct Service overridden to require a plan is now plan-gated.
+	if !effectiveRequiresPlan(pin, override) {
 		return Strategy{}, ErrNotPlanGated
 	}
 	if status != serviceStatusAwaitingOnboarding {
@@ -482,19 +493,124 @@ func GuardBriefCreation(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, serviceID string) error {
 	var status string
-	var requiresPlan int
+	var pin int
+	var override sql.NullInt64
 	err := q.QueryRowContext(ctx,
-		`SELECT status, requires_strategy_plan FROM services WHERE id = ?`, serviceID).Scan(&status, &requiresPlan)
+		`SELECT status, requires_strategy_plan, requires_strategy_plan_override FROM services WHERE id = ?`,
+		serviceID).Scan(&status, &pin, &override)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrServiceNotFound
 	}
 	if err != nil {
 		return err
 	}
-	if requiresPlan == 1 && status == serviceStatusAwaitingOnboarding {
+	// Effective plan-gate honours the M6-OA-1 per-engagement override.
+	if effectiveRequiresPlan(pin, override) && status == serviceStatusAwaitingOnboarding {
 		return ErrStrategyRequired
 	}
 	return nil
+}
+
+// effectiveRequiresPlan resolves a Service's execution-path gate: the
+// per-engagement override (M6-OA-1) when set, otherwise the pinned MSL flag
+// (M6 §2). NULL override ⇒ follow the pin.
+func effectiveRequiresPlan(pin int, override sql.NullInt64) bool {
+	if override.Valid {
+		return override.Int64 == 1
+	}
+	return pin == 1
+}
+
+// StrategyRequirement reports the outcome of a per-engagement plan-flag override
+// (M6-OA-1). Both the effective value and the underlying pin are returned so the
+// caller can show whether/how the catalog default was overridden.
+type StrategyRequirement struct {
+	ServiceID            string `json:"service_id"`
+	RequiresStrategyPlan bool   `json:"requires_strategy_plan"`        // effective value after override
+	PinnedRequirement    bool   `json:"pinned_requires_strategy_plan"` // the immutable MSL pin
+	Overridden           bool   `json:"overridden"`                    // true once an explicit override is set
+	SetBy                string `json:"set_by"`
+	Reason               string `json:"reason"`
+}
+
+// SetStrategyRequirement overrides a Service's "Requires Strategy Plan" flag for
+// this engagement (M6-OA-1). The pinned MSL flag is never mutated; instead an
+// explicit per-Service override column supersedes it (COALESCE). Permitted for
+// the owning AM, the Account lead/SPV, or a Director (PRD: "An AM/SPV can
+// override … with a logged reason"). Only while the Service is still [Awaiting
+// Onboarding] — before the execution path is taken — and before any Strategy &
+// Plan exists (exempting a Service with a drafted Plan would orphan it). The
+// change is an audited field edit (before→after + reason), not a state machine.
+func (s *Service) SetStrategyRequirement(ctx context.Context, actor permission.Actor, serviceID string, requires bool, reason string) (StrategyRequirement, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return StrategyRequirement{}, ErrOverrideReasonRequired
+	}
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return StrategyRequirement{}, err
+	}
+	defer tx.Rollback()
+
+	var status string
+	var pin int
+	var override sql.NullInt64
+	var ownerAM sql.NullString
+	err = tx.QueryRowContext(ctx,
+		`SELECT sv.status, sv.requires_strategy_plan, sv.requires_strategy_plan_override, c.assigned_am_id
+		   FROM services sv JOIN clients c ON c.id = sv.client_id
+		  WHERE sv.id = ? FOR UPDATE`, serviceID).Scan(&status, &pin, &override, &ownerAM)
+	if errors.Is(err, sql.ErrNoRows) {
+		return StrategyRequirement{}, ErrServiceNotFound
+	}
+	if err != nil {
+		return StrategyRequirement{}, err
+	}
+	// PRD M6-OA-1: AM/SPV. Owning AM (this client's AM) OR Account lead/SPV OR
+	// Director (IsLead grants Directors lead authority everywhere). OD is read-only.
+	isOwnerAM := ownerAM.Valid && ownerAM.String == actor.EmployeeID
+	if !(actor.IsLead(AccountDivision) || isOwnerAM) {
+		return StrategyRequirement{}, ErrOverrideForbidden
+	}
+	if status != serviceStatusAwaitingOnboarding {
+		return StrategyRequirement{}, ErrOverrideNotAwaiting
+	}
+	// A Strategy already drafted means the plan-gated path is underway; exempting
+	// (or re-affirming) here would orphan it — reject with the 1:1 message.
+	var existing string
+	err = tx.QueryRowContext(ctx, `SELECT id FROM strategy_plans WHERE service_id = ?`, serviceID).Scan(&existing)
+	if err == nil {
+		return StrategyRequirement{}, ErrStrategyExists
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return StrategyRequirement{}, err
+	}
+
+	before := effectiveRequiresPlan(pin, override)
+	newVal := 0
+	if requires {
+		newVal = 1
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE services SET requires_strategy_plan_override = ? WHERE id = ?`, newVal, serviceID); err != nil {
+		return StrategyRequirement{}, err
+	}
+	if err := audit.Write(ctx, tx, audit.Record{
+		EntityType: "service", EntityID: serviceID, Actor: actor.EmployeeID,
+		Action: "strategy_requirement_override",
+		Before: map[string]any{"requires_strategy_plan": before},
+		After:  map[string]any{"requires_strategy_plan": requires, "set_by": actor.EmployeeID, "reason": reason},
+	}); err != nil {
+		return StrategyRequirement{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return StrategyRequirement{}, err
+	}
+	return StrategyRequirement{
+		ServiceID: serviceID, RequiresStrategyPlan: requires, PinnedRequirement: pin == 1,
+		Overridden: true, SetBy: actor.EmployeeID, Reason: reason,
+	}, nil
 }
 
 // ---- helpers ----------------------------------------------------------------

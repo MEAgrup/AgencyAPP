@@ -203,12 +203,13 @@ func (s *Service) CreateBrief(ctx context.Context, actor permission.Actor, servi
 	defer tx.Rollback()
 
 	var status string
-	var requiresPlan int
+	var pin int
+	var override sql.NullInt64
 	var ownerAM sql.NullString
 	err = tx.QueryRowContext(ctx,
-		`SELECT sv.status, sv.requires_strategy_plan, c.assigned_am_id
+		`SELECT sv.status, sv.requires_strategy_plan, sv.requires_strategy_plan_override, c.assigned_am_id
 		   FROM services sv JOIN clients c ON c.id = sv.client_id
-		  WHERE sv.id = ? FOR UPDATE`, serviceID).Scan(&status, &requiresPlan, &ownerAM)
+		  WHERE sv.id = ? FOR UPDATE`, serviceID).Scan(&status, &pin, &override, &ownerAM)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Brief{}, ErrServiceNotFound
 	}
@@ -233,8 +234,9 @@ func (s *Service) CreateBrief(ctx context.Context, actor permission.Actor, servi
 	}
 
 	// Strategy ID handling by path (§9.4 "Null if Direct-path"; §5 Rule 2 traces
-	// a plan-gated Brief back to the approved Plan).
-	strategyID, err := resolveBriefStrategy(ctx, tx, serviceID, requiresPlan == 1, strings.TrimSpace(in.StrategyID))
+	// a plan-gated Brief back to the approved Plan). The path follows the EFFECTIVE
+	// plan-gate (M6-OA-1 per-engagement override honoured, same as the guard above).
+	strategyID, err := resolveBriefStrategy(ctx, tx, serviceID, effectiveRequiresPlan(pin, override), strings.TrimSpace(in.StrategyID))
 	if err != nil {
 		return Brief{}, err
 	}
@@ -283,7 +285,7 @@ func (s *Service) CreateBrief(ctx context.Context, actor permission.Actor, servi
 
 	// §5 Rule 2 / M6-OA-5: a Brief added beyond the approved Plan outline is
 	// logged as a Plan addendum (immutable, no re-approval). Plan-gated only.
-	if requiresPlan == 1 && in.IsAddendum && strategyID.Valid {
+	if effectiveRequiresPlan(pin, override) && in.IsAddendum && strategyID.Valid {
 		if err := audit.Write(ctx, tx, audit.Record{
 			EntityType: "strategy_plan", EntityID: strategyID.String, Actor: actor.EmployeeID, Action: "plan_addendum",
 			After: map[string]any{"brief_id": id, "title": strings.TrimSpace(in.Title)},
