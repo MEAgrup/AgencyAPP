@@ -113,6 +113,10 @@ func (a *App) Router() http.Handler {
 	// Wave 2 — Module 6 (Account & Service), Cluster 1 (intake & AM assignment).
 	a.registerAccountRoutes(mux)
 
+	// Wave 2 — Module 12 (Task Execution) + Module 7 (Creative) HTTP surfaces.
+	a.registerTaskRoutes(mux)
+	a.registerCreativeRoutes(mux)
+
 	return mux
 }
 
