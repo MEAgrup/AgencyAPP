@@ -143,8 +143,11 @@ func TestTaskBriefEndpoints(t *testing.T) {
 
 	start := srv.URL + "/api/v1/tasks/BRF-AD"
 
+	var code int
+	var body map[string]any
+
 	// --- StartTask (claim model, pre-PIC): foreign divisions + OD denied; Ads staff OK.
-	if code, body := do(t, cakra, "POST", start+"/start", nil); code != 403 || body["message"] != "[anda tidak memiliki akses untuk mengerjakan task ini]" {
+	if code, body = do(t, cakra, "POST", start+"/start", nil); code != 403 || body["message"] != "[anda tidak memiliki akses untuk mengerjakan task ini]" {
 		t.Fatalf("creative start: %d %v", code, body)
 	}
 	if code, _ := do(t, budi, "POST", start+"/start", nil); code != 403 {
@@ -153,7 +156,7 @@ func TestTaskBriefEndpoints(t *testing.T) {
 	if code, _ := do(t, odi, "POST", start+"/start", nil); code != 403 {
 		t.Fatalf("OD start: %d want 403 (read-only)", code)
 	}
-	if code, body := do(t, adi, "POST", start+"/start", nil); code != 200 {
+	if code, body = do(t, adi, "POST", start+"/start", nil); code != 200 {
 		t.Fatalf("ads staff start: %d %v", code, body)
 	}
 	// The Brief left [To Do] -> parent Service advanced to [In Execution].
@@ -162,10 +165,10 @@ func TestTaskBriefEndpoints(t *testing.T) {
 	}
 
 	// --- AssignPIC (§5.3): staff/OD denied; invalid PIC 422; Ads lead assigns.
-	if code, body := do(t, adi, "POST", start+"/assign-pic", map[string]any{"pic_id": "EMP-ADI"}); code != 403 || body["message"] != "[anda tidak memiliki akses untuk menugaskan PIC atau menetapkan SLA task ini]" {
+	if code, body = do(t, adi, "POST", start+"/assign-pic", map[string]any{"pic_id": "EMP-ADI"}); code != 403 || body["message"] != "[anda tidak memiliki akses untuk menugaskan PIC atau menetapkan SLA task ini]" {
 		t.Fatalf("staff assign-pic: %d %v", code, body)
 	}
-	if code, body := do(t, adil, "POST", start+"/assign-pic", map[string]any{"pic_id": "EMP-BUDI"}); code != 422 || body["message"] != "[PIC tidak valid: harus staff divisi tujuan yang aktif]" {
+	if code, body = do(t, adil, "POST", start+"/assign-pic", map[string]any{"pic_id": "EMP-BUDI"}); code != 422 || body["message"] != "[PIC tidak valid: harus staff divisi tujuan yang aktif]" {
 		t.Fatalf("invalid pic: %d %v", code, body)
 	}
 	if code, _ := do(t, adil, "POST", start+"/assign-pic", map[string]any{"pic_id": "EMP-ADI"}); code != 200 {
@@ -173,7 +176,7 @@ func TestTaskBriefEndpoints(t *testing.T) {
 	}
 
 	// --- SetSLA (§5.3): 0 hours -> 422; lead sets a valid target.
-	if code, body := do(t, adil, "POST", start+"/sla", map[string]any{"hours": 0}); code != 422 || body["message"] != "[target SLA harus lebih dari 0 jam]" {
+	if code, body = do(t, adil, "POST", start+"/sla", map[string]any{"hours": 0}); code != 422 || body["message"] != "[target SLA harus lebih dari 0 jam]" {
 		t.Fatalf("zero sla: %d %v", code, body)
 	}
 	if code, _ := do(t, adil, "POST", start+"/sla", map[string]any{"hours": 48}); code != 200 {
@@ -181,15 +184,38 @@ func TestTaskBriefEndpoints(t *testing.T) {
 	}
 
 	// --- Post-PIC lock: another Ads staff (not the PIC) cannot drive; the PIC can.
-	if code, body := do(t, adi2, "POST", start+"/submit", nil); code != 403 || body["message"] != "[anda tidak memiliki akses untuk mengerjakan task ini]" {
+	if code, body = do(t, adi2, "POST", start+"/submit", nil); code != 403 || body["message"] != "[anda tidak memiliki akses untuk mengerjakan task ini]" {
 		t.Fatalf("non-PIC submit: %d %v", code, body)
 	}
+
+	// --- M8 Submit Guard (M12 §4 Rule 3): Brief Ads cannot be submitted until a
+	// campaign with linked creative assets exists. Test negative case first.
+	if code, body = do(t, adi, "POST", start+"/submit", nil); code != 422 || body["message"] != "[campaign belum lengkap, lengkapi platform/budget/aset kreatif sebelum submit]" {
+		t.Fatalf("submit without campaign: %d %v", code, body)
+	}
+
+	// Fulfill the guard: seed an [Approved] Creative Asset, create a campaign, and link it.
+	seedApprovedAssetTC(t, "SVC-AD", "AST-AD")
+	code, body = do(t, adi, "POST", srv.URL+"/api/v1/briefs/BRF-AD/campaigns", map[string]any{
+		"platform": "TikTok Shop Ads", "objective": "Conversion", "budget": "8000000",
+		"start_date": "2026-06-01", "end_date": "2026-06-30", "target_kpi": "ROAS >= 4x",
+	})
+	if code != 200 {
+		t.Fatalf("create campaign: %d %v", code, body)
+	}
+	adcID := body["id"].(string)
+	// Link the asset.
+	if code, _ = do(t, adi, "POST", srv.URL+"/api/v1/campaigns/"+adcID+"/assets", map[string]any{"asset_id": "AST-AD"}); code != 200 {
+		t.Fatalf("link asset: want 200")
+	}
+
+	// Now submit succeeds (guard satisfied).
 	if code, _ := do(t, adi, "POST", start+"/submit", nil); code != 200 {
 		t.Fatalf("PIC submit: want 200")
 	}
 
 	// --- Invalid transition: Rework needs [Revision Requested]; brief is [Submitted].
-	if code, body := do(t, adi, "POST", start+"/rework", nil); code != 422 || body["message"] != "[transisi status tidak diizinkan]" {
+	if code, body = do(t, adi, "POST", start+"/rework", nil); code != 422 || body["message"] != "[transisi status tidak diizinkan]" {
 		t.Fatalf("invalid rework: %d %v", code, body)
 	}
 
@@ -200,11 +226,11 @@ func TestTaskBriefEndpoints(t *testing.T) {
 	if code, _ := do(t, odi, "GET", start+"/metrics", nil); code != 200 {
 		t.Fatalf("OD metrics: want 200 (read-all)")
 	}
-	if code, body := do(t, cakra, "GET", start+"/metrics", nil); code != 403 || body["message"] != "[anda tidak memiliki akses ke task ini]" {
+	if code, body = do(t, cakra, "GET", start+"/metrics", nil); code != 403 || body["message"] != "[anda tidak memiliki akses ke task ini]" {
 		t.Fatalf("foreign metrics: %d %v", code, body)
 	}
 	// Not-found task.
-	if code, body := do(t, adi, "GET", srv.URL+"/api/v1/tasks/BRF-NONE/metrics", nil); code != 404 || body["message"] != "[task tidak ditemukan]" {
+	if code, body = do(t, adi, "GET", srv.URL+"/api/v1/tasks/BRF-NONE/metrics", nil); code != 404 || body["message"] != "[task tidak ditemukan]" {
 		t.Fatalf("missing task metrics: %d %v", code, body)
 	}
 
@@ -215,19 +241,19 @@ func TestTaskBriefEndpoints(t *testing.T) {
 		t.Fatalf("start BRF-AD2: want 200")
 	}
 	// Foreign division cannot request a block; empty reason -> 422.
-	if code, body := do(t, budi, "POST", b2+"/block-request", map[string]any{"reason": "x"}); code != 403 || body["message"] != "[anda tidak memiliki akses untuk mengajukan permintaan block task ini]" {
+	if code, body = do(t, budi, "POST", b2+"/block-request", map[string]any{"reason": "x"}); code != 403 || body["message"] != "[anda tidak memiliki akses untuk mengajukan permintaan block task ini]" {
 		t.Fatalf("foreign block-request: %d %v", code, body)
 	}
-	if code, body := do(t, adi, "POST", b2+"/block-request", map[string]any{"reason": ""}); code != 422 || body["message"] != "[alasan permintaan block wajib diisi]" {
+	if code, body = do(t, adi, "POST", b2+"/block-request", map[string]any{"reason": ""}); code != 422 || body["message"] != "[alasan permintaan block wajib diisi]" {
 		t.Fatalf("empty block reason: %d %v", code, body)
 	}
-	code, body := do(t, adi, "POST", b2+"/block-request", map[string]any{"reason": "menunggu aset klien"})
+	code, body = do(t, adi, "POST", b2+"/block-request", map[string]any{"reason": "menunggu aset klien"})
 	if code != 200 {
 		t.Fatalf("block-request: %d %v", code, body)
 	}
 	reqID := body["id"].(string)
 	// Staff cannot decide; lead approves -> engine drives [In Progress] -> [Blocked].
-	if code, body := do(t, adi, "POST", b2+"/block-requests/"+reqID+"/approve", nil); code != 403 || body["message"] != "[anda tidak memiliki akses untuk memutuskan permintaan block]" {
+	if code, body = do(t, adi, "POST", b2+"/block-requests/"+reqID+"/approve", nil); code != 403 || body["message"] != "[anda tidak memiliki akses untuk memutuskan permintaan block]" {
 		t.Fatalf("staff approve block: %d %v", code, body)
 	}
 	if code, _ := do(t, adil, "POST", b2+"/block-requests/"+reqID+"/approve", nil); code != 200 {

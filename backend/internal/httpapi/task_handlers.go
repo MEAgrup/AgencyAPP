@@ -6,20 +6,24 @@ import (
 
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
 	"github.com/meagrup/agencyapp/backend/internal/module12_task"
+	"github.com/meagrup/agencyapp/backend/internal/module8_ads"
 )
 
 // taskSvc builds the Module 12 (Task Execution) service. The Account hook fires
 // the parent Service [Briefed] -> [In Execution] advance when a Brief/Asset first
 // leaves [To Do] (M6 §5 Flow 3); the FROZEN catalog backs the §5.3a block-request
 // notifications (EvBlockRequestSubmitted / EvBlockRequestDecided) the domain emits
-// itself — handlers never emit. SubmitGuard stays nil (the Ads M8 gate is out of
-// scope for this cluster). *module6_account.Service satisfies AccountService.
+// itself — handlers never emit. SubmitGuard wires the M8 Ads campaign-completeness
+// gate (M8 §4 Rule 3): an Ads Brief cannot be submitted until a campaign with
+// linked creative assets exists. *module6_account.Service and *module8_ads.Service
+// satisfy the respective interfaces (AccountService, BriefSubmitGuard).
 func (a *App) taskSvc() *module12_task.Service {
 	return &module12_task.Service{
-		DB:      a.DB,
-		Engine:  a.Engine,
-		Catalog: a.Catalog,
-		Account: a.accountSvc(),
+		DB:          a.DB,
+		Engine:      a.Engine,
+		Catalog:     a.Catalog,
+		Account:     a.accountSvc(),
+		SubmitGuard: a.adsSvc(),
 	}
 }
 
@@ -308,7 +312,8 @@ func writeTaskErr(w http.ResponseWriter, err error) {
 		errors.Is(err, module12_task.ErrInvalidSLA),
 		errors.Is(err, module12_task.ErrBlockReasonRequired),
 		errors.Is(err, module12_task.ErrBlockRequestClosed),
-		errors.Is(err, module12_task.ErrOutputLinkRequired):
+		errors.Is(err, module12_task.ErrOutputLinkRequired),
+		errors.Is(err, module8_ads.ErrCampaignIncompleteForSubmit):
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 	default:
 		var be *statemachine.BlockedError
