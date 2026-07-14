@@ -126,6 +126,12 @@ var (
 	ErrReconNotesRequired = errors.New("[catatan rekonsiliasi wajib diisi]")
 	// ErrBadAmount: a money field could not be parsed (reused meaning from M8/M9).
 	ErrBadAmount = errors.New("[nilai uang tidak valid]")
+	// ErrBriefReopenForbidden: actor may not reopen this Brief (owning AM + Director
+	// only, DECISIONS O27 / W2-M10-C2 — reopen gate same as create/manage Session).
+	ErrBriefReopenForbidden = errors.New("[anda tidak memiliki akses untuk membuka kembali brief ini]")
+	// ErrBriefNotReopenable: the Brief's current status does not permit reopening
+	// (only [Approved] can be reopened, DECISIONS O27 / W2-M10-C2).
+	ErrBriefNotReopenable = errors.New("[brief tidak dapat dibuka kembali pada status ini]")
 )
 
 // Service is the M10 persistence surface. It owns the Live Stream Session entity end
