@@ -15,6 +15,11 @@ Branch kerja sesi ini `claude/fable-orchestrator-opus-haiku-vi68gu` ter-push pen
 | `45b96c8` | **W2-API-3** (Haiku): guard submit brief Ads aktif via `SubmitGuard` injection + test dua sisi (melunasi utang W2-API-2) |
 | `228e7b8` | **W2-M7-C2** (Opus): Daily Output auto-log + EOD lock (M7 §7) = **pure derived read-model** dari audit log, bucketing WIB, tanpa migrasi; 1 string BI baru |
 | (lihat log) | **W2-API-4** (orchestrator langsung — hasil worktree Haiku dibuang, base salah `2a75125`): endpoint `GET /api/v1/daily-output/{picId}` + test gate lengkap. ⚠ Pelajaran: cek `git log -1` worktree executor SEBELUM port hasil. |
+| `bd1c458` | docs: **O28 RESOLVED (a)** koreksi=transisi normal; **O29 RESOLVED (b)** dashboard + event tunggu pembukaan katalog Wave 3 — interview Nerissa |
+| `eefb900` | **W2-M6-C5** (Opus): M6-OA-1 override flag Strategy & Plan per-engagement — migrasi **0029**, efektif=COALESCE(override,pin), gate AM/SPV/Director (PRD §10 menang), window [Awaiting Onboarding]+belum ada Strategy, endpoint + 3 string BI |
+| `8757b95` | **W2-M9-C2** (Opus, worktree MANUAL): M9-OA-4 Attributed GMV write-back — overwrite-and-audit ke kolom 0027, gate [QC Passed], otoritas Coordinator/lead/Director tanpa AM, endpoint + 1 string BI, tanpa migrasi |
+
+**⚠ ATURAN WORKTREE (insiden terkonfirmasi 2×):** worktree bawaan tool Agent SELALU lahir dari snapshot container (`2a75125`), BUKAN HEAD branch. Executor paralel WAJIB pakai worktree manual orchestrator: `git worktree add --detach /home/user/AgencyAPP/.claude/worktrees/<nama> <HEAD>`, plus guard langkah-0 `git log -1` di prompt executor. Migrasi terpakai kini **0020–0029**.
 
 Migrasi terpakai tetap **0020–0028** (W2-M7-C2 sengaja tanpa tabel baru — lihat entri DECISIONS).
 
@@ -24,14 +29,13 @@ Migrasi terpakai tetap **0020–0028** (W2-M7-C2 sengaja tanpa tabel baru — li
 - Mapping `ErrBudgetApprovalRequired` → 403 (gate otoritas).
 - Item manusia Wave 1: per interview 2026-07-14 **belum ada yang siap** (nik_email.csv, sales_map.csv+MSL, form pelengkap 239 klien, NIK OD/Director, endpoint HRIS).
 
-## Open BARU untuk interview awal sesi berikut (tidak memblokir)
-1. **O28 — koreksi Daily Output pasca-lock** (M7 §7 Rule 3): model derived tidak punya surface koreksi. (a) koreksi = re-transisi biasa hari berikutnya [posisi sekarang, nol kode] vs (b) entitas override ber-approval lead [butuh spec field]. 
-2. **O29 — Hours Logged reminder (M7-OA-2)**: katalog notifikasi FROZEN tidak punya event-nya. Tambah event di pembukaan katalog berikutnya, atau cukup visual dashboard?
-3. Ulangi status **item manusia Wave 1** (memblokir UAT go-live W1-20).
-Nomor Open terakhir = **O29**.
+## Open untuk interview awal sesi berikut
+1. ~~O28~~ ✅ RESOLVED (a) — koreksi = transisi normal. ~~O29~~ ✅ RESOLVED (b) — dashboard; event `EvHoursLoggedReminder` masuk **daftar tunggu pembukaan katalog Wave 3**.
+2. Ulangi status **item manusia Wave 1** (memblokir UAT go-live W1-20): nik_email.csv, sales_map.csv+MSL, form pelengkap 239 klien, NIK OD/Director, endpoint HRIS.
+Nomor Open terakhir = **O29** (semua O s.d. O29 resolved kecuali O2/O4/O5/O6-akses/O7/O8/O9/O19/O21 — cek tabel).
 
 ## Pekerjaan berikutnya (urutan)
-1. **Sisa klaster deferred Wave 2** (cek entri DECISIONS per modul): M6-OA-1 override flag per-engagement; Attributed GMV write-back KOL via affiliate link (M9-OA-4, kolom siap); assign-PIC granular sub-tim Creative (M7 §3); handler bulk M1 & port test stream A (utang Wave 1, non-blocking). KPI rollup (M7 §8, M8 GMV Impact, Monthly KOL Report M9 §9) → sebagian besar M14 (Wave 3).
+1. **Sisa klaster deferred Wave 2**: ~~M6-OA-1~~ ✅ (`eefb900`); ~~M9-OA-4~~ ✅ (`8757b95`); assign-PIC granular sub-tim Creative (M7 §3); handler bulk M1 & port test stream A (utang Wave 1, non-blocking). KPI rollup (M7 §8, M8 GMV Impact, Monthly KOL Report M9 §9) → sebagian besar M14 (Wave 3).
 2. **UAT Wave 2** = gate exit Wave 2 (runbook menyusul, pola W1-20). UAT W1-20 go-live tetap menunggu item manusia.
 3. **Wave 3** (build order): M2, M3, M11, M13, M14, M15 — Client Portal (M15) terakhir setelah security spec (O5).
 
