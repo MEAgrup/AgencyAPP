@@ -134,6 +134,26 @@ func TestKOLBookingEndpoints(t *testing.T) {
 		t.Fatalf("foreign booking metrics: want 403")
 	}
 
+	// --- Attributed GMV write-back (§10.3 / M9-OA-4): Coordinator/Director record;
+	// foreign denied; negative rejected; the stored value reads back on GET booking.
+	gmv := booking + "/attributed-gmv"
+	if code, body := do(t, budi, "POST", gmv, map[string]any{"attributed_gmv": "5000000"}); code != 403 || body["message"] != "[anda tidak memiliki akses untuk mengerjakan booking ini]" {
+		t.Fatalf("foreign record GMV: %d %v", code, body)
+	}
+	if code, body := do(t, koko, "POST", gmv, map[string]any{"attributed_gmv": "-1"}); code != 422 || body["message"] != "[nilai uang tidak valid]" {
+		t.Fatalf("negative GMV: %d %v", code, body)
+	}
+	if code, body := do(t, koko, "POST", gmv, map[string]any{"attributed_gmv": "5000000"}); code != 200 || body["attributed_gmv_display"] != "Rp. 5.000.000,00" {
+		t.Fatalf("coordinator record GMV: %d %v", code, body)
+	}
+	// Director may overwrite (latest reading wins).
+	if code, _ := do(t, yohan, "POST", gmv, map[string]any{"attributed_gmv": "7500000"}); code != 200 {
+		t.Fatalf("director overwrite GMV: want 200")
+	}
+	if code, body := do(t, koko, "GET", booking, nil); code != 200 || body["attributed_gmv"].(float64) != 7500000 {
+		t.Fatalf("GET booking GMV read-back: %d %v", code, body)
+	}
+
 	// --- Creator Payment Request (§8): request side = Coordinator; Finance executes.
 	// Amount must equal the Agreed Rate; details mandatory.
 	if code, body := do(t, koko, "POST", booking+"/payment-request", map[string]any{"amount": "999", "payment_details": "BCA 123"}); code != 422 || body["message"] != "[jumlah pembayaran harus sama dengan Agreed Rate booking]" {

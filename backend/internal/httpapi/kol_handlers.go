@@ -272,6 +272,27 @@ func (a *App) handleLogBookingHours(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"id": r.PathValue("id"), "hours_logged": b.Hours})
 }
 
+// ---- Attributed GMV write-back (M9 §10.3 / M9-OA-4) ----
+
+type attributedGMVBody struct {
+	AttributedGMV string `json:"attributed_gmv"`
+}
+
+func (a *App) handleRecordAttributedGMV(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	var b attributedGMVBody
+	if err := decodeJSON(r, &b); err != nil {
+		writeErr(w, http.StatusBadRequest, "[format data tidak valid]")
+		return
+	}
+	val, disp, err := a.kolSvc().RecordAttributedGMV(r.Context(), actor, r.PathValue("id"), b.AttributedGMV)
+	if err != nil {
+		writeKOLErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": r.PathValue("id"), "attributed_gmv": val, "attributed_gmv_display": disp})
+}
+
 // ---- Creator Payment Request (M9 §8) ----
 
 type createPaymentRequestBody struct {
@@ -405,6 +426,7 @@ func writeKOLErr(w http.ResponseWriter, err error) {
 		errors.Is(err, module9_kol.ErrPaymentAlreadyRequested),
 		errors.Is(err, module9_kol.ErrCreatorListLinkRequired),
 		errors.Is(err, module9_kol.ErrRejectionReasonRequired),
+		errors.Is(err, module9_kol.ErrGMVBookingNotPassed),
 		errors.Is(err, module9_kol.ErrBadAmount):
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 	default:

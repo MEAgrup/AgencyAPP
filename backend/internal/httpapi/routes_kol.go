@@ -34,6 +34,10 @@ func (a *App) registerKOLRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/bookings/{id}/sla", a.protect(a.handleSetBookingSLA))
 	mux.HandleFunc("POST /api/v1/bookings/{id}/hours", a.protect(a.handleLogBookingHours))
 
+	// Attributed GMV write-back (§10.3 / M9-OA-4): manual per-Booking, [QC Passed]
+	// only; Coordinator/KOL lead/Director. Never estimated; NULL if no link.
+	mux.HandleFunc("POST /api/v1/bookings/{id}/attributed-gmv", a.protect(a.handleRecordAttributedGMV))
+
 	// Creator Payment Request (§8). Request side (create) = Coordinator/Director;
 	// executing side (receive/pay/reject) = Finance staff/lead or Director.
 	mux.HandleFunc("POST /api/v1/bookings/{id}/payment-request", a.protect(a.handleCreatePaymentRequest))

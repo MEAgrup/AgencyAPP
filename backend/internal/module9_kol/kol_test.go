@@ -593,6 +593,85 @@ func TestBookingMetrics_DroppedExcluded(t *testing.T) {
 	}
 }
 
+// ---- Attributed GMV write-back (§10.3 / M9-OA-4) ----
+
+func TestRecordAttributedGMV(t *testing.T) {
+	k := setup(t)
+	bkID, _, _ := stdBooking(t, k, "1", "EMP-PUTRI")
+	staff := kolStaff("EMP-PUTRI")
+	registerKOLLead(t, k, "EMP-KL")
+
+	// Not yet [QC Passed]: recording is gated.
+	if _, _, err := k.m9.RecordAttributedGMV(ctx, staff, bkID, "5000000"); !errors.Is(err, ErrGMVBookingNotPassed) {
+		t.Errorf("pre-pass GMV: want ErrGMVBookingNotPassed, got %v", err)
+	}
+
+	// Drive to [QC Passed].
+	drive(t, k, staff, bkID, "Book", "StartContent")
+	if _, err := k.m9.SubmitContent(ctx, staff, bkID, "https://tt/x"); err != nil {
+		t.Fatal(err)
+	}
+	drive(t, k, staff, bkID, "SendToQCReview", "PassQC")
+
+	// Permission: a non-Coordinator KOL staff, the AM, and OD cannot record.
+	registerKOLStaff(t, k, "EMP-OTHERK")
+	for _, a := range []permission.Actor{kolStaff("EMP-OTHERK"), accountStaff(amID), od("EMP-OD")} {
+		if _, _, err := k.m9.RecordAttributedGMV(ctx, a, bkID, "5000000"); !errors.Is(err, ErrExecForbidden) {
+			t.Errorf("%+v record GMV: want ErrExecForbidden, got %v", a.Role, err)
+		}
+	}
+
+	// Invalid money: negative and unparseable both rejected.
+	if _, _, err := k.m9.RecordAttributedGMV(ctx, staff, bkID, "-100"); !errors.Is(err, ErrBadAmount) {
+		t.Errorf("negative GMV: want ErrBadAmount, got %v", err)
+	}
+	if _, _, err := k.m9.RecordAttributedGMV(ctx, staff, bkID, "abc"); !errors.Is(err, ErrBadAmount) {
+		t.Errorf("unparseable GMV: want ErrBadAmount, got %v", err)
+	}
+
+	// Before any record: NULL (nil pointer), never 0.
+	b, err := k.m9.GetBooking(ctx, director("EMP-DIR"), bkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.AttributedGMV != nil {
+		t.Errorf("unset GMV: want nil (NULL), got %v", *b.AttributedGMV)
+	}
+
+	// Coordinator records; value stored + displayed.
+	val, disp, err := k.m9.RecordAttributedGMV(ctx, staff, bkID, "5000000")
+	if err != nil {
+		t.Fatalf("record GMV: %v", err)
+	}
+	if val != 5000000 || disp != "Rp. 5.000.000,00" {
+		t.Errorf("record GMV = %v / %q, want 5000000 / Rp. 5.000.000,00", val, disp)
+	}
+	b, _ = k.m9.GetBooking(ctx, director("EMP-DIR"), bkID)
+	if b.AttributedGMV == nil || *b.AttributedGMV != 5000000 {
+		t.Errorf("stored GMV = %v, want 5000000", b.AttributedGMV)
+	}
+
+	// Overwrite: latest reading wins (KOL lead may also record); 0 is a legit value
+	// distinct from NULL.
+	if _, _, err := k.m9.RecordAttributedGMV(ctx, kolLead("EMP-KL"), bkID, "0"); err != nil {
+		t.Fatalf("overwrite GMV to 0: %v", err)
+	}
+	b, _ = k.m9.GetBooking(ctx, director("EMP-DIR"), bkID)
+	if b.AttributedGMV == nil || *b.AttributedGMV != 0 {
+		t.Errorf("overwritten GMV = %v, want 0 (a recorded zero, not NULL)", b.AttributedGMV)
+	}
+
+	// Immutable history: both writes appended to the audit log (before->after).
+	var n int
+	if err := k.m9.DB.QueryRow(
+		`SELECT COUNT(*) FROM audit_log WHERE entity_id=? AND action='attributed_gmv_recorded'`, bkID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("attributed_gmv audit rows = %d, want 2", n)
+	}
+}
+
 // ---- immutability: Booking audit rows cannot be mutated (house rule 3) ----
 
 func TestBookingHistoryImmutable(t *testing.T) {

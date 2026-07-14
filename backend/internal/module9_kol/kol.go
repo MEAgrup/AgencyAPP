@@ -163,6 +163,13 @@ var (
 	ErrCreatorListLinkRequired = errors.New("[link Creator List wajib diisi]")
 	// ErrBadAmount: a money field could not be parsed (reused meaning from M8).
 	ErrBadAmount = errors.New("[nilai uang tidak valid]")
+	// ErrGMVBookingNotPassed: Attributed GMV (M9-OA-4) is a FEEDBACK signal on
+	// confirmed, delivered content — recordable only once the Booking is [QC Passed].
+	// PRD §10.3/§11 are silent on timing; [QC Passed] is chosen as the gate because it
+	// is the point the deliverable is confirmed live & accepted (mirroring the CPR §8
+	// Rule 2 gate) and it excludes [Dropped]/[Escalated]/unresolved bookings from ever
+	// carrying an attributed figure. Interpretation logged for orchestrator sign-off.
+	ErrGMVBookingNotPassed = errors.New("[GMV teratribusi hanya dapat dicatat setelah booking QC Passed]")
 )
 
 // AccountService is the one-way hook into module6_account: when the KOL Brief first
