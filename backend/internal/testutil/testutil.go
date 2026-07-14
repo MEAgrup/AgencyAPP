@@ -61,6 +61,8 @@ var dataTables = []string{
 	"creator_payment_requests",
 	"creator_lists",
 	"creator_bookings",
+	// Wave 2 — Module 10 (Live Stream): child of briefs.
+	"live_stream_sessions",
 	"asset_block_requests",
 	"assets",
 	"brief_block_requests",
