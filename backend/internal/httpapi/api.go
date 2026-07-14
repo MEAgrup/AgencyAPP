@@ -117,6 +117,11 @@ func (a *App) Router() http.Handler {
 	a.registerTaskRoutes(mux)
 	a.registerCreativeRoutes(mux)
 
+	// Wave 2 — Module 8 (Ads) + Module 9 (KOL) + Module 10 (Live Stream) HTTP surfaces.
+	a.registerAdsRoutes(mux)
+	a.registerKOLRoutes(mux)
+	a.registerLiveStreamRoutes(mux)
+
 	return mux
 }
 

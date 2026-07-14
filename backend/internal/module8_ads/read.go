@@ -93,6 +93,89 @@ func (s *Service) GetCampaign(ctx context.Context, actor permission.Actor, campa
 	return c, nil
 }
 
+// campaignViewGate authorizes a §9.1 read of the campaign identified by campaignID,
+// returning ErrCampaignNotFound / ErrCampaignViewForbidden. Additive read-only helper
+// (W2-API-2): shared by the append-only child-row list reads below so the HTTP layer
+// stays thin and the module boundary keeps ownership of the query.
+func (s *Service) campaignViewGate(ctx context.Context, actor permission.Actor, campaignID string) error {
+	var owner sql.NullString
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT cl.assigned_am_id FROM ad_campaigns c JOIN clients cl ON cl.id = c.client_id WHERE c.id = ?`,
+		campaignID).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrCampaignNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if !canViewCampaign(actor, owner.String) {
+		return ErrCampaignViewForbidden
+	}
+	return nil
+}
+
+// ListMetricEntries returns a campaign's Metric Entries (§5) in period order if the
+// actor may view the campaign (§9.1). Append-only child rows — no edit/delete path
+// exists. Additive read-only helper (W2-API-2 wiring support).
+func (s *Service) ListMetricEntries(ctx context.Context, actor permission.Actor, campaignID string) ([]MetricEntry, error) {
+	if err := s.campaignViewGate(ctx, actor, campaignID); err != nil {
+		return nil, err
+	}
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT id, campaign_id, period_start, period_end, spend, gmv, entry_method, entered_by, created_at
+		   FROM metric_entries WHERE campaign_id = ? ORDER BY period_start, id`, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []MetricEntry{}
+	for rows.Next() {
+		var m MetricEntry
+		var start, end time.Time
+		var spendStr, gmvStr string
+		if err := rows.Scan(&m.ID, &m.CampaignID, &start, &end, &spendStr, &gmvStr,
+			&m.EntryMethod, &m.EnteredBy, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		m.PeriodStart = start.Format("2006-01-02")
+		m.PeriodEnd = end.Format("2006-01-02")
+		if sp, e := money.Parse(spendStr); e == nil {
+			m.Spend = float64(sp) / 100
+		}
+		if gm, e := money.Parse(gmvStr); e == nil {
+			m.GMV = float64(gm) / 100
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// ListOptimizations returns a campaign's Optimization Log (§6) in id order if the actor
+// may view the campaign (§9.1). Append-only child rows — no edit/delete path exists.
+// Additive read-only helper (W2-API-2 wiring support).
+func (s *Service) ListOptimizations(ctx context.Context, actor permission.Actor, campaignID string) ([]Optimization, error) {
+	if err := s.campaignViewGate(ctx, actor, campaignID); err != nil {
+		return nil, err
+	}
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT id, campaign_id, change_type, before_value, after_value, reason, actor, created_at
+		   FROM optimization_logs WHERE campaign_id = ? ORDER BY id`, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Optimization{}
+	for rows.Next() {
+		var o Optimization
+		if err := rows.Scan(&o.ID, &o.CampaignID, &o.ChangeType, &o.BeforeValue, &o.AfterValue,
+			&o.Reason, &o.Actor, &o.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
 // fillDerived computes the §5 running metrics + §8 signals from immutable rows.
 func (s *Service) fillDerived(ctx context.Context, c *Campaign) error {
 	// Running totals + ROAS from Metric Entries (§5 Rule 2/3).

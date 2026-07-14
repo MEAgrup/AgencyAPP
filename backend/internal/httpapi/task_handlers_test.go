@@ -31,6 +31,11 @@ func (tcAuth) Verify(_ context.Context, email, password string) (string, error) 
 		"adi@mea.co.id":   "EMP-ADI",   // Ads staff (PIC)
 		"adi2@mea.co.id":  "EMP-ADI2",  // Ads staff (non-PIC)
 		"adil@mea.co.id":  "EMP-ADIL",  // Ads lead
+		"koko@mea.co.id":  "EMP-KOKO",  // KOL staff (Coordinator)
+		"kiki@mea.co.id":  "EMP-KIKI",  // KOL staff (non-Coordinator)
+		"kev@mea.co.id":   "EMP-KEV",   // KOL lead (Team Leader)
+		"fina@mea.co.id":  "EMP-FINA",  // Finance staff
+		"anin@mea.co.id":  "EMP-ANIN",  // Account staff = SECOND AM (non-owner)
 		"odi@mea.co.id":   "EMP-ODI",   // OD (layered, read-only)
 		"yohan@mea.co.id": "EMP-YOHAN", // Director (layered, full)
 	}
@@ -53,6 +58,9 @@ func setupTC(t *testing.T) (*httptest.Server, func()) {
 	testutil.InsertRoleMapping(t, d, "Account", "Account Lead", "Account", "lead")
 	testutil.InsertRoleMapping(t, d, "Ads", "Ads Executive", "Ads", "staff")
 	testutil.InsertRoleMapping(t, d, "Ads", "Ads Lead", "Ads", "lead")
+	testutil.InsertRoleMapping(t, d, "KOL", "KOL Coordinator", "KOL", "staff")
+	testutil.InsertRoleMapping(t, d, "KOL", "KOL Lead", "KOL", "lead")
+	testutil.InsertRoleMapping(t, d, "Finance", "Finance Staff", "Finance", "staff")
 
 	testutil.InsertEmployee(t, d, "EMP-BUDI", "Budi", "budi@mea.co.id", "Sales", "Sales Executive", true)
 	testutil.InsertEmployee(t, d, "EMP-CAKRA", "Cakra", "cakra@mea.co.id", "Creative", "Creative Designer", true)
@@ -64,6 +72,11 @@ func setupTC(t *testing.T) (*httptest.Server, func()) {
 	testutil.InsertEmployee(t, d, "EMP-ADI", "Adi", "adi@mea.co.id", "Ads", "Ads Executive", true)
 	testutil.InsertEmployee(t, d, "EMP-ADI2", "Adit", "adi2@mea.co.id", "Ads", "Ads Executive", true)
 	testutil.InsertEmployee(t, d, "EMP-ADIL", "Adil", "adil@mea.co.id", "Ads", "Ads Lead", true)
+	testutil.InsertEmployee(t, d, "EMP-KOKO", "Koko", "koko@mea.co.id", "KOL", "KOL Coordinator", true)
+	testutil.InsertEmployee(t, d, "EMP-KIKI", "Kiki", "kiki@mea.co.id", "KOL", "KOL Coordinator", true)
+	testutil.InsertEmployee(t, d, "EMP-KEV", "Kevin", "kev@mea.co.id", "KOL", "KOL Lead", true)
+	testutil.InsertEmployee(t, d, "EMP-FINA", "Fina", "fina@mea.co.id", "Finance", "Finance Staff", true)
+	testutil.InsertEmployee(t, d, "EMP-ANIN", "Anin", "anin@mea.co.id", "Account", "Account Manager", true)
 	testutil.InsertEmployee(t, d, "EMP-ODI", "Odi", "odi@mea.co.id", "Management", "OD", true)
 	testutil.InsertEmployee(t, d, "EMP-YOHAN", "Yohan", "yohan@mea.co.id", "Management", "Director", true)
 	testutil.InsertLayeredRole(t, d, "EMP-ODI", "od")
