@@ -1,6 +1,8 @@
 # CDPS — Draft Role-Mapping HRIS → CDPS (dari data karyawan riil)
 
-> **DRAFT — butuh validasi, jangan di-seed sebelum disetujui.** Disusun dari kolom `DEPARTMENT`/`JABATAN` riil yang dilaporkan ada di sheet karyawan HRIS (lihat `docs/handoff/WAVE1_EXTERNAL_REQUESTS.md` §"Jawaban diterima (2026-07-10)"), **bukan** dari file sheet itu sendiri (belum di-commit ke `backend/testdata/import_samples/hris_karyawan.csv` saat draft ini ditulis). Begitu file asli tersedia, jalankan `hrisconvert --pairs` di atasnya untuk mendapat daftar pasangan `DEPARTMENT,JABATAN` **riil dengan hitungan kemunculan** dan bandingkan dengan tabel di bawah — beberapa baris di sini kemungkinan perlu direvisi begitu variasi ejaan/singkatan jabatan yang sesungguhnya terlihat.
+> **DRAFT — butuh validasi, jangan di-seed sebelum disetujui.** Disusun dari kolom `DEPARTMENT`/`JABATAN` riil yang dilaporkan ada di sheet karyawan HRIS (lihat `docs/handoff/WAVE1_EXTERNAL_REQUESTS.md` §"Jawaban diterima (2026-07-10)"), **bukan** dari file sheet itu sendiri (belum di-commit ke `backend/testdata/import_samples/hris_karyawan.csv` saat draft ini ditulis).
+>
+> **UPDATE 2026-07-16: sheet asli SUDAH diterima & di-commit** ("Copy of Data Karyawan V2" via Nerissa — 77 karyawan, lengkap NIK+email). File: `backend/testdata/import_samples/hris_karyawan.csv`, `nik_email.csv`, `employees_from_hris.csv`, dan pasangan riil `hris_pairs.csv` (58 pasangan DEPARTMENT×JABATAN, dengan hitungan). Lihat §7 di bawah untuk perbandingan realita vs tabel §3. O21 (email login) resolved — lihat `DECISIONS.md`.
 
 ---
 
@@ -92,3 +94,33 @@ Ringkasan (N baris masuk / N di-emit / N warning / N pasangan DEPARTMENT|JABATAN
 - Daftar employee_id kandidat layered role **OD** dan **Director** (bukan by-departemen — by-orang, sama pola `directors` di `seed.go`).
 
 **Jangan seed tabel `role_mappings` dari draft ini sebelum baris di §3 divalidasi OD/Nerissa.**
+
+---
+
+## 7. Realita sheet asli vs tabel §3 (UPDATE 2026-07-16)
+
+Sumber: `backend/testdata/import_samples/hris_pairs.csv` (58 pasangan riil dari 77 karyawan).
+
+### 7.1 Departemen yang ADA di data riil (12)
+
+`SALES` (13 org), `ACCOUNT` (20), `CREATIVE` (10), `CREATIVE - EKSTERNAL` (6), `ADVERTISER` (7), `BUSINESS DEVELOPMENT` (5), `GROWTH & BUSINESS CONSULTATION` (1), `DATA & BUSINESS INTELLIGENCE` (4), `FINANCE AND ACCOUNTING` (3), `HRGA` (3), `OD` (2), `SKILSKUL` (3). Semuanya sudah punya baris di tabel §3 — tidak ada departemen baru di luar draft.
+
+### 7.2 Departemen di draft §3 yang TIDAK muncul di sheet riil
+
+`MCN`, `AFFILIATE`, `TIKTOK GO`, `IT` — nol karyawan di sheet ini. Butir **[KONFIRMASI]**-nya tidak menahan seed role-mapping untuk 77 karyawan yang ada (tetap dijawab kalau departemen itu muncul di sync berikutnya). Konsekuensi: **tidak ada satu pun karyawan yang ter-map ke divisi CDPS `KOL`** dari departemen — pekerjaan KOL riil justru duduk sebagai jabatan di ACCOUNT (lihat 7.3).
+
+### 7.3 Temuan per-jabatan yang MENGUBAH cara baca §3 (perlu jawaban OD/Nerissa)
+
+1. **Jabatan lintas-divisi di dalam ACCOUNT** — dept ACCOUNT memuat jabatan `ADVERTISER` (2), `ADVERTISER INTERN` (1), `KOL SPECIALIST` (2), `INTERN KOL` (2), `ADMIN MARKETPLACE` (2), `ADMIN A&S` (1): mapping per-DEPARTMENT saja akan memberi mereka division=Account, padahal fungsinya Ads/KOL (M8/M9). **[KONFIRMASI]** map by-jabatan (ADVERTISER→Ads, KOL→KOL) atau ikut departemen?
+2. **Jabatan non-sales di dalam SALES** — `CUSTOMER RELATION OFFICER` (1, Dini Mardiani) dan `CONTENT CREATOR` (1, Rizal Akda): CRO lazimnya fungsi Account. **[KONFIRMASI]**.
+3. **Kandidat `level = lead` dari heuristik §2** (7 org): HEAD OF SALES JASA (Cucu Nurhayati), HEAD OF ACCOUNT (Yulianti Handayani), SPV SKILSKUL (Siti Rohmah), SUPERVISOR HR (Okfa Rendi Wiratama), LEADER CUSTOMER RELATIONS OFFICER (Meryntan), LEADER VIDEOGRAPHER (Boy Ginting), PROJECT LEAD - CONTENT STRATEGIST (Alistya — CREATIVE - EKSTERNAL, lihat butir [KONFIRMASI] eksternal §3). Jabatan `ACCOUNT MANAGER` (2 org) dan semua `SENIOR *` TIDAK kena heuristik → staff; **[KONFIRMASI]** khusus Account Manager (M6 memakai istilah AM untuk PIC klien — bukan otomatis lead).
+4. **Kandidat layered role OD** (per §2, by-orang bukan by-departemen): Arsy Rizmandha (2501140493, SENIOR ORGANIZATION DEVELOPMENT), Wulan Dari Fitri Apandi (2607060683, JR ORGANIZATION DEVELOPMENT). Daftar **Director** masih kosong — sheet tidak memuat jabatan direksi; **[KONFIRMASI]** siapa employee_id Director riil (mis. akun Yohan/Nerissa) karena beberapa alur (importer `--actor`, approval) butuh Director.
+5. **Variasi ejaan yang identik secara fungsi** — `CUSTOMER RELATION OFFICER` vs `CUSTOMER RELATIONS OFFICER` (dan `MEDIOR` keduanya): dua string berbeda = dua baris role_mappings; samakan saat input supaya tidak ada jabatan lolos mapping karena beda satu huruf.
+6. **Jabatan "SENIOR FINANCE, ACCOUNTING & TAX" mengandung koma** — pastikan input role_mappings memakai string persis (sudah dikoreksi di CSV; asal-usul: kolom bergeser di export, lihat DECISIONS.md 2026-07-16).
+
+### 7.4 Status eksekusi §B handoff Jalur B
+
+- [x] `hrisconvert` jalan bersih: 77 in / 77 emitted / 0 warning / 0 email kosong.
+- [ ] Seed `role_mappings` — MENUNGGU jawaban §3 + §7.3 (jangan seed dulu).
+- [ ] Layered roles OD/Director — menunggu konfirmasi §7.3 butir 4.
+- [ ] Sync CSV via `internal/hris/sync.go` — setelah role_mappings di-seed.
