@@ -27,13 +27,18 @@ func TestNormalizePhone(t *testing.T) {
 	}
 }
 
+// TestDedupDecisionTable pins the collaborative dedup table (DECISIONS
+// 2026-07-10 "M1 DEDUP DIREDESAIN", revised 2026-07-16). Import (Marketing) keeps
+// the exclusive/block behavior; Sales single registration JOINs instead of
+// blocking when another salesperson is already working the lead.
 func TestDedupDecisionTable(t *testing.T) {
 	cases := []struct {
-		name    string
-		channel Channel
-		match   *ExistingLead
-		want    Outcome
-		wantMsg string
+		name     string
+		channel  Channel
+		match    *ExistingLead
+		want     Outcome
+		wantMsg  string
+		wantJoin string // expected JoinLeadID when want == OutcomeJoin
 	}{
 		{
 			name:    "no match — create (import)",
@@ -42,6 +47,13 @@ func TestDedupDecisionTable(t *testing.T) {
 			want:    OutcomeCreate,
 		},
 		{
+			name:    "no match — create (single-reg)",
+			channel: ChannelSingleReg,
+			match:   nil,
+			want:    OutcomeCreate,
+		},
+		// ---- Import channel: block behavior UNCHANGED ----
+		{
 			name:    "active scouted lead, import channel — block",
 			channel: ChannelImport,
 			match:   &ExistingLead{ID: "LEAD-1", RecordStatus: StatusActive, HasActiveScoutedAttempt: true, ActiveOwnerName: "Andi"},
@@ -49,43 +61,71 @@ func TestDedupDecisionTable(t *testing.T) {
 			wantMsg: "[lead sedang diproses oleh sales lain (Andi)]",
 		},
 		{
-			name:    "active scouted lead, single-reg channel — block (different wording)",
-			channel: ChannelSingleReg,
-			match:   &ExistingLead{ID: "LEAD-1", RecordStatus: StatusActive, HasActiveScoutedAttempt: true, ActiveOwnerName: "Andi"},
-			want:    OutcomeBlock,
-			wantMsg: "[tidak bisa ditambahkan, lead sedang diproses oleh sales lain (Andi)]",
-		},
-		{
-			name:    "active lead without known owner keeps (nama) placeholder",
+			name:    "active lead without known owner keeps (nama) placeholder (import)",
 			channel: ChannelImport,
 			match:   &ExistingLead{ID: "LEAD-1", RecordStatus: StatusActive, HasActiveScoutedAttempt: true},
 			want:    OutcomeBlock,
 			wantMsg: MsgActiveOtherSalesImport,
 		},
 		{
-			name:    "existing pool lead — block duplicate",
+			name:    "existing pool lead — block duplicate (import)",
 			channel: ChannelImport,
 			match:   &ExistingLead{ID: "LEAD-2", RecordStatus: StatusPool},
 			want:    OutcomeBlock,
 			wantMsg: MsgDuplicatePool,
 		},
 		{
-			name:    "already a client — block",
+			name:    "already a client — block (import)",
 			channel: ChannelImport,
 			match:   &ExistingLead{ID: "LEAD-3", RecordStatus: StatusClosedWin},
 			want:    OutcomeBlock,
 			wantMsg: MsgAlreadyClient,
 		},
 		{
-			name:    "rejected lead — reopen to pool",
+			name:    "rejected lead — reopen to pool (import)",
 			channel: ChannelImport,
 			match:   &ExistingLead{ID: "LEAD-4", RecordStatus: StatusRejected},
 			want:    OutcomeReopen,
 		},
+		// ---- Sales single registration: COLLABORATIVE ----
 		{
-			name:    "not-qualified lead — reopen to pool",
+			name:     "active lead owned by other sales — JOIN, not block (single-reg)",
+			channel:  ChannelSingleReg,
+			match:    &ExistingLead{ID: "LEAD-1", RecordStatus: StatusActive, HasActiveScoutedAttempt: true, ActiveOwnerName: "Andi"},
+			want:     OutcomeJoin,
+			wantJoin: "LEAD-1",
+		},
+		{
+			name:     "existing pool lead, no active attempt — JOIN (≈ claim, single-reg)",
+			channel:  ChannelSingleReg,
+			match:    &ExistingLead{ID: "LEAD-2", RecordStatus: StatusPool},
+			want:     OutcomeJoin,
+			wantJoin: "LEAD-2",
+		},
+		{
+			name:     "in-process active record, no active attempt — JOIN (single-reg)",
+			channel:  ChannelSingleReg,
+			match:    &ExistingLead{ID: "LEAD-6", RecordStatus: StatusActive},
+			want:     OutcomeJoin,
+			wantJoin: "LEAD-6",
+		},
+		{
+			name:    "already a client — STILL block (single-reg)",
+			channel: ChannelSingleReg,
+			match:   &ExistingLead{ID: "LEAD-3", RecordStatus: StatusClosedWin},
+			want:    OutcomeBlock,
+			wantMsg: MsgAlreadyClient,
+		},
+		{
+			name:    "not-qualified lead — reopen to pool (single-reg)",
 			channel: ChannelSingleReg,
 			match:   &ExistingLead{ID: "LEAD-5", RecordStatus: StatusNotQualified},
+			want:    OutcomeReopen,
+		},
+		{
+			name:    "rejected lead — reopen to pool (single-reg)",
+			channel: ChannelSingleReg,
+			match:   &ExistingLead{ID: "LEAD-7", RecordStatus: StatusRejected},
 			want:    OutcomeReopen,
 		},
 	}
@@ -101,6 +141,11 @@ func TestDedupDecisionTable(t *testing.T) {
 			if c.want == OutcomeReopen && d.ReopenLeadID != c.match.ID {
 				t.Errorf("ReopenLeadID = %q, want %q", d.ReopenLeadID, c.match.ID)
 			}
+			if c.want == OutcomeJoin && d.JoinLeadID != c.wantJoin {
+				t.Errorf("JoinLeadID = %q, want %q", d.JoinLeadID, c.wantJoin)
+			}
+			// Only a block carries a BI message; Join's informational message is
+			// built in persistence from the actual other-owner list.
 			if c.want != OutcomeBlock && d.Message != "" {
 				t.Errorf("non-block decision carried message %q", d.Message)
 			}

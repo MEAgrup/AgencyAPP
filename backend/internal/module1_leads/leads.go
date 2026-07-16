@@ -8,10 +8,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/meagrup/agencyapp/backend/internal/core/audit"
 	"github.com/meagrup/agencyapp/backend/internal/core/ident"
+	"github.com/meagrup/agencyapp/backend/internal/core/notification"
 	"github.com/meagrup/agencyapp/backend/internal/core/permission"
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
 )
@@ -48,8 +50,9 @@ func (e *ErrBlocked) Error() string { return e.Message }
 
 // Service is the M1 persistence surface.
 type Service struct {
-	DB     *sql.DB
-	Engine *statemachine.Engine
+	DB      *sql.DB
+	Engine  *statemachine.Engine
+	Catalog *notification.Catalog // may be nil (notifications become no-ops)
 }
 
 // Lead is a lead record row (subset).
@@ -81,24 +84,37 @@ func (in RegisterInput) valid() bool {
 	return in.LeadName != "" && in.PhoneNumber != "" && in.Source != ""
 }
 
-// Register is Sales single registration of a scouted lead (M1 §4). It runs the
-// dedup door and either creates a fresh active LEAD + PRSP, reopens a terminal
-// record and attaches an attempt, or blocks with the verbatim BI message.
-func (s *Service) Register(ctx context.Context, actor permission.Actor, in RegisterInput) (Lead, Attempt, error) {
+// JoinNotice is the informational (non-error) result of a collaborative Join:
+// the sales registration attached a new attempt to a lead already worked by
+// other salespeople (DECISIONS 2026-07-10). Message carries the BI text shown to
+// the registrant; NotifiedOwners are the other active owners that were notified.
+// It is nil for a fresh create or a reopen (no collaboration).
+type JoinNotice struct {
+	Message        string   `json:"message"`
+	NotifiedOwners []string `json:"notified_owners"`
+}
+
+// Register is Sales single registration of a lead (M1 §4). It runs the dedup
+// door (collaborative for this channel, DECISIONS 2026-07-10) and either creates
+// a fresh active LEAD + PRSP, reopens a terminal record and attaches an attempt,
+// JOINs an existing in-process lead (attaching this registrant's attempt +
+// notifying the other owners), or blocks (only when the lead is already a
+// client). A non-nil *JoinNotice is returned only for the Join outcome.
+func (s *Service) Register(ctx context.Context, actor permission.Actor, in RegisterInput) (Lead, Attempt, *JoinNotice, error) {
 	if !in.valid() {
-		return Lead{}, Attempt{}, ErrIncomplete
+		return Lead{}, Attempt{}, nil, ErrIncomplete
 	}
 	phoneNorm := NormalizePhone(in.PhoneNumber)
 
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return Lead{}, Attempt{}, err
+		return Lead{}, Attempt{}, nil, err
 	}
 	defer tx.Rollback()
 
 	match, err := s.matchByPhone(ctx, tx, phoneNorm)
 	if err != nil {
-		return Lead{}, Attempt{}, err
+		return Lead{}, Attempt{}, nil, err
 	}
 	decision := Decide(ChannelSingleReg, match)
 
@@ -112,55 +128,145 @@ func (s *Service) Register(ctx context.Context, actor permission.Actor, in Regis
 			})
 			_ = tx.Commit()
 		}
-		return Lead{}, Attempt{}, &ErrBlocked{Message: decision.Message}
+		return Lead{}, Attempt{}, nil, &ErrBlocked{Message: decision.Message}
+
+	case OutcomeJoin:
+		return s.registerJoin(ctx, tx, actor, match, decision.JoinLeadID)
 
 	case OutcomeReopen:
 		// Terminal -> [Pool] -> active, then attach this salesperson's attempt.
 		if err := s.transition(ctx, tx, decision.ReopenLeadID, RecordPool, actor); err != nil {
-			return Lead{}, Attempt{}, err
+			return Lead{}, Attempt{}, nil, err
 		}
 		if err := s.transition(ctx, tx, decision.ReopenLeadID, RecordActive, actor); err != nil {
-			return Lead{}, Attempt{}, err
+			return Lead{}, Attempt{}, nil, err
 		}
 		att, err := s.insertAttempt(ctx, tx, decision.ReopenLeadID, actor)
 		if err != nil {
-			return Lead{}, Attempt{}, err
+			return Lead{}, Attempt{}, nil, err
 		}
 		lead, err := s.loadLead(ctx, tx, decision.ReopenLeadID)
 		if err != nil {
-			return Lead{}, Attempt{}, err
+			return Lead{}, Attempt{}, nil, err
 		}
 		if err := tx.Commit(); err != nil {
-			return Lead{}, Attempt{}, err
+			return Lead{}, Attempt{}, nil, err
 		}
-		return lead, att, nil
+		return lead, att, nil, nil
 
 	default: // OutcomeCreate
 		leadID, err := ident.Next(ctx, tx, "LEAD", time.Now())
 		if err != nil {
-			return Lead{}, Attempt{}, err
+			return Lead{}, Attempt{}, nil, err
 		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO leads (id, lead_name, phone_number, phone_norm, email, source, origin_division, record_status, created_by)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			leadID, in.LeadName, in.PhoneNumber, phoneNorm, nullString(in.Email), in.Source, SalesDivision, RecordActive, actor.EmployeeID); err != nil {
-			return Lead{}, Attempt{}, err
+			return Lead{}, Attempt{}, nil, err
 		}
 		if err := audit.Write(ctx, tx, audit.Record{
 			EntityType: "lead", EntityID: leadID, Actor: actor.EmployeeID,
 			Action: "create", After: map[string]any{"record_status": RecordActive, "source": in.Source},
 		}); err != nil {
-			return Lead{}, Attempt{}, err
+			return Lead{}, Attempt{}, nil, err
 		}
 		att, err := s.insertAttempt(ctx, tx, leadID, actor)
 		if err != nil {
-			return Lead{}, Attempt{}, err
+			return Lead{}, Attempt{}, nil, err
 		}
 		if err := tx.Commit(); err != nil {
-			return Lead{}, Attempt{}, err
+			return Lead{}, Attempt{}, nil, err
 		}
-		return Lead{ID: leadID, LeadName: in.LeadName, PhoneNumber: in.PhoneNumber, Source: in.Source, RecordStatus: RecordActive}, att, nil
+		return Lead{ID: leadID, LeadName: in.LeadName, PhoneNumber: in.PhoneNumber, Source: in.Source, RecordStatus: RecordActive}, att, nil, nil
 	}
+}
+
+// registerJoin attaches this registrant's attempt to an existing in-process lead
+// (collaborative dedup, DECISIONS 2026-07-10), notifies the OTHER active owners,
+// and audits the join. The record status is left untouched (no reopen, no new
+// lead): multiple active attempts coexist on the one Lead record, exactly as a
+// competitive Pool claim (M1 §6). The same-salesperson guard (a registrant who
+// already has an open attempt on this lead) rejects with ErrAlreadyPursuing,
+// consistent with ClaimFromPool.
+func (s *Service) registerJoin(ctx context.Context, tx *sql.Tx, actor permission.Actor, match *ExistingLead, leadID string) (Lead, Attempt, *JoinNotice, error) {
+	for _, o := range match.ActiveOwners {
+		if o.EmployeeID == actor.EmployeeID {
+			return Lead{}, Attempt{}, nil, ErrAlreadyPursuing
+		}
+	}
+	others := otherOwners(match.ActiveOwners, actor.EmployeeID)
+
+	att, err := s.insertAttempt(ctx, tx, leadID, actor)
+	if err != nil {
+		return Lead{}, Attempt{}, nil, err
+	}
+	if err := audit.Write(ctx, tx, audit.Record{
+		EntityType: "lead", EntityID: leadID, Actor: actor.EmployeeID,
+		Action: "dedup_join",
+		Before: map[string]any{"active_owners": ownerIDs(match.ActiveOwners)},
+		After: map[string]any{
+			"channel": "single_reg", "attempt_id": att.ID, "notified_owners": ownerIDs(others),
+		},
+	}); err != nil {
+		return Lead{}, Attempt{}, nil, err
+	}
+	// Notify every OTHER active owner that the lead is also being worked (derived
+	// from the audit event above, per the notification convention).
+	if s.Catalog != nil && len(others) > 0 {
+		if _, err := s.Catalog.Emit(ctx, tx, notification.Emission{
+			Event: notification.EvLeadAlsoPursued, EntityType: "lead", EntityID: leadID,
+			Actor: actor.EmployeeID, ExplicitRecipients: ownerIDs(others),
+		}); err != nil {
+			return Lead{}, Attempt{}, nil, err
+		}
+	}
+	lead, err := s.loadLead(ctx, tx, leadID)
+	if err != nil {
+		return Lead{}, Attempt{}, nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Lead{}, Attempt{}, nil, err
+	}
+	return lead, att, joinNotice(others), nil
+}
+
+// otherOwners returns the active owners other than the registrant.
+func otherOwners(owners []ActiveOwner, exclude string) []ActiveOwner {
+	out := make([]ActiveOwner, 0, len(owners))
+	for _, o := range owners {
+		if o.EmployeeID != exclude {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+func ownerIDs(owners []ActiveOwner) []string {
+	out := make([]string, 0, len(owners))
+	for _, o := range owners {
+		out = append(out, o.EmployeeID)
+	}
+	return out
+}
+
+func ownerNames(owners []ActiveOwner) []string {
+	out := make([]string, 0, len(owners))
+	for _, o := range owners {
+		out = append(out, o.Name)
+	}
+	return out
+}
+
+// joinNotice builds the informational Join result. When there are other owners
+// the BI message interpolates their (comma-separated) names; with none it is a
+// silent join (pure Pool claim) carrying an empty message.
+func joinNotice(others []ActiveOwner) *JoinNotice {
+	n := &JoinNotice{NotifiedOwners: ownerIDs(others)}
+	if len(others) > 0 {
+		n.Message = interpolateOwner(MsgAlsoWorkedByOthers, strings.Join(ownerNames(others), ", "))
+	}
+	return n
 }
 
 // insertAttempt mints a PRSP owned by actor at New Lead (post-validation).
@@ -210,26 +316,38 @@ func (s *Service) matchByPhone(ctx context.Context, tx *sql.Tx, phoneNorm string
 	if err != nil {
 		return nil, err
 	}
-	// Any in-process (non-terminal) attempt marks the lead as being worked.
+	// Every in-process (non-terminal) attempt marks the lead as being worked and
+	// contributes an ActiveOwner (for the collaborative Join message + notify).
+	// LEFT JOIN (DECISIONS O19, resolved 2026-07-16): an attempt owned by an
+	// employee not yet synced from HRIS must NOT vanish from dedup — the owner
+	// name falls back to owner_employee_id when the employees row is absent.
 	rows, err := tx.QueryContext(ctx,
-		`SELECT e.nama, pa.status
+		`SELECT pa.owner_employee_id, e.nama, pa.status
 		   FROM prospect_attempts pa
-		   JOIN employees e ON e.employee_id = pa.owner_employee_id
+		   LEFT JOIN employees e ON e.employee_id = pa.owner_employee_id
 		  WHERE pa.lead_id = ?`, m.ID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var name, status string
-		if err := rows.Scan(&name, &status); err != nil {
+		var ownerID, status string
+		var name sql.NullString
+		if err := rows.Scan(&ownerID, &name, &status); err != nil {
 			return nil, err
 		}
-		if !terminalAttemptStatuses[status] {
-			m.HasActiveScoutedAttempt = true
-			m.ActiveOwnerName = name
-			break
+		if terminalAttemptStatuses[status] {
+			continue
 		}
+		display := ownerID
+		if name.Valid && name.String != "" {
+			display = name.String
+		}
+		if !m.HasActiveScoutedAttempt {
+			m.HasActiveScoutedAttempt = true
+			m.ActiveOwnerName = display
+		}
+		m.ActiveOwners = append(m.ActiveOwners, ActiveOwner{EmployeeID: ownerID, Name: display})
 	}
 	return &m, rows.Err()
 }

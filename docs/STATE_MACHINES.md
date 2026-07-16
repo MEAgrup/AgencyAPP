@@ -10,9 +10,25 @@
 
 ## 2. Lead record (M1)
 `[Pool]` (Marketing-imported, claimable) / active (scouted-owned) / `[Rejected]` / `[Not Qualified]` / `[Blocked - Duplikat]` (intake event).
-- Duplicate of active external lead ⇒ reject row: `[lead sudah ada & sedang diproses, tidak diimport]` (attempt logged, not counted).
 - Duplicate of Rejected/Not Qualified ⇒ reopen to `[Pool]`.
 - Import gate: parent Campaign must be `[Active]`, else `[campaign belum/tidak aktif, lead tidak bisa diimport]`.
+
+### Dedup decision table (M1 §5) — COLLABORATIVE, revised 2026-07-16 (DECISIONS 2026-07-10 "M1 DEDUP DIREDESAIN")
+
+Sales single registration and Marketing import now diverge. Registration is collaborative (register a phone another sales works ⇒ **Join**, not block); import keeps the exclusive/block behavior. `matchByPhone` joins `employees` via **LEFT JOIN** (O19) so an attempt owned by an employee not yet synced from HRIS is still detected (owner name falls back to `owner_employee_id`); the importer mirror is byte-identical.
+
+| Existing record state | Marketing **Import** | Sales **Single Registration** |
+|---|---|---|
+| No match | Create `LEAD-` `[Pool]` | Create `LEAD-` active + `PRSP-` |
+| Active attempt owned by another sales | **Block** — `[lead sedang diproses oleh sales lain (nama)]` | **Join** — attach registrant's `PRSP-` to the existing lead; notify the other active owner(s); info `[lead juga sedang dikerjakan sales lain (nama)]` |
+| `[Pool]` (already in DB, no active attempt) | **Block duplikat** — `[lead sudah ada & sedang diproses, tidak diimport]` | **Join** (≈ Pool self-claim, §6) — attach `PRSP-`, no info message (no other owner) |
+| `[Rejected]` / `[Not Qualified]` (all attempts terminal) | **Reopen** to `[Pool]` | **Reopen** to `[Pool]`, attach `PRSP-` |
+| `[Closed-Success]` (already a client) | **Block** — `[lead sudah menjadi klien]` | **Block** — `[lead sudah menjadi klien]` |
+
+- **Join guard:** a registrant who already holds an *open* attempt on the lead is rejected (`ErrAlreadyPursuing`, no BI string — consistent with `ClaimFromPool`); no second attempt is created.
+- A Join never reopens or changes `record_status` and never mints a duplicate `LEAD-`; multiple active `PRSP-` attempts coexist on one Lead record (identical to a competitive Pool claim, §6). Win resolution (§1) still closes the losers as `[Closed - Kalah Kompetisi]`.
+- Every dedup decision (create / join / reopen / block) is audit-logged on the lead (`dedup_join` for the collaborative join). The Join notification (`m1.lead.also_pursued`, Phase 0 §9 catalog, 14th event) goes to the other active owners, never the registrant.
+- **Legacy:** `[tidak bisa ditambahkan, lead sedang diproses oleh sales lain (nama)]` (old single-reg block string, DECISIONS O11) is no longer emitted — registration joins instead of blocking.
 
 ## 3. Campaign `CMP-` (M3)
 | From | To | Effect |

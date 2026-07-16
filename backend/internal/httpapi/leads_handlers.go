@@ -9,9 +9,11 @@ import (
 	"github.com/meagrup/agencyapp/backend/internal/module1_leads"
 )
 
-// leadsSvc builds the Module 1 service over the app's shared deps.
+// leadsSvc builds the Module 1 service over the app's shared deps. The
+// notification catalog is bound so a collaborative Join notifies the other
+// active owners (DECISIONS 2026-07-10).
 func (a *App) leadsSvc() *module1_leads.Service {
-	return &module1_leads.Service{DB: a.DB, Engine: a.Engine}
+	return &module1_leads.Service{DB: a.DB, Engine: a.Engine, Catalog: a.Catalog}
 }
 
 // writeDomainErr maps M0/M1 domain errors to HTTP status + verbatim BI message.
@@ -45,12 +47,21 @@ func (a *App) handleRegisterLead(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, module0_sales.IncompleteMessage)
 		return
 	}
-	lead, att, err := a.leadsSvc().Register(r.Context(), actor, in)
+	lead, att, notice, err := a.leadsSvc().Register(r.Context(), actor, in)
 	if err != nil {
 		a.writeDomainErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"lead": lead, "attempt": att})
+	resp := map[string]any{"lead": lead, "attempt": att}
+	// Collaborative Join (DECISIONS 2026-07-10): success, but the lead is also
+	// worked by other salespeople — surface the informational BI message (not an
+	// error) alongside the created attempt.
+	if notice != nil {
+		resp["joined"] = true
+		resp["message"] = notice.Message
+		resp["notified_owners"] = notice.NotifiedOwners
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (a *App) handleClaimLead(w http.ResponseWriter, r *http.Request) {
