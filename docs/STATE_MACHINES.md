@@ -4,7 +4,7 @@
 
 ## 1. Prospect attempt (M0/M1)
 `Pending Validation` → `New Lead` → `Contacted` → { `Qualified` | `Not Qualified` } ; `Qualified` → Negotiation states → { `Closed-Success` | `Closed-Lost` }
-- Intake collision ⇒ `Blocked` (no updates possible). Pool competitors on win ⇒ `[Closed - Kalah Kompetisi]` (auto).
+- Kolisi intake import ⇒ baris ditolak (tanpa attempt). Registrasi Sales atas lead yang sudah dipegang sales lain ⇒ attempt baru `New Lead` dilampirkan pada lead existing (kolaboratif — DECISIONS 2026-07-10 & 2026-07-16); status `Blocked` tetap ada di mesin (no updates possible). Pool competitors on win ⇒ `[Closed - Kalah Kompetisi]` (auto) — berlaku untuk semua attempt non-terminal, termasuk kolaborator.
 - `Qualified` only via successful Qualified Form submit; exit without submit ⇒ stays `Contacted`.
 - Negotiation states: `Negotiation - Pending Approval` → { `Negotiation - Approved` | `Negotiation - Revision Required` | `Negotiation - Rejected` }; Revision Required → (accept ⇒ Approved) | (resubmit ⇒ Pending Approval, new version); `Negotiation - Rejected` → (resubmit ⇒ Pending Approval, new version) | `Closed-Lost` (DECISIONS O16); No-nego path ⇒ `Negotiation - Auto Approved`. Closing only from Approved/Auto Approved.
 
@@ -12,6 +12,7 @@
 `[Pool]` (Marketing-imported, claimable) / active (scouted-owned) / `[Rejected]` / `[Not Qualified]` / `[Blocked - Duplikat]` (intake event).
 - Duplicate of active external lead ⇒ reject row: `[lead sudah ada & sedang diproses, tidak diimport]` (attempt logged, not counted).
 - Duplicate of Rejected/Not Qualified ⇒ reopen to `[Pool]`.
+- Registrasi tunggal Sales duplikat lead aktif ⇒ JOIN kolaboratif, bukan blokir: attempt dilampirkan, record_status tetap; info `[lead juga sedang dikerjakan sales lain (nama)]`; re-registrasi pemegang sama ⇒ blokir `[lead ini sudah anda pegang & masih diproses]` (DECISIONS 2026-07-16).
 - Import gate: parent Campaign must be `[Active]`, else `[campaign belum/tidak aktif, lead tidak bisa diimport]`.
 
 ## 3. Campaign `CMP-` (M3)

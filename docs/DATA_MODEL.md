@@ -29,6 +29,8 @@
 | Performance Score | `PERF-` | User | M14 | Monthly batch, immutable |
 | Master Service List entry | (versioned config) | — | Phase 0 v2 §10 | Sales Head/SPV manages; deals reference the version at closing date |
 
+*`PRSP-` / Prospect attempt: Multi-attempt aktif per lead (model kolaboratif, DECISIONS 2026-07-16): beberapa sales boleh memegang attempt non-terminal pada satu lead; event notifikasi `m1.lead.collab_joined` saat sales baru bergabung.
+
 *`SVC-` prefix: Service IDs are generated at closing per M0 §6; exact prefix string not spelled in the PRDs — confirm prefix label at ticketing (registry pattern implies `SVC-YYYYMM-NNNN`). Log in DECISIONS.md once fixed.
 
 **"Task" is NOT an entity.** It's a role played by AST / BKG / BRF-as-task (Ads). Module 12 adds computed fields (`turnaround_time`, `revision_turnaround`, `speed_score`, `revision_count`) onto those rows, derived from transition history — never stored as independently mutable values.
