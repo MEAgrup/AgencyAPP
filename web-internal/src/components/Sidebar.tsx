@@ -15,6 +15,7 @@ const MAIN_LINKS: NavItem[] = [
   { href: '/demo-tasks', label: 'Demo Tasks' },
   { href: '/notifications', label: 'Notifikasi' },
   { href: '/master-services', label: 'Master Service List' },
+  { href: '/sales/kalkulator', label: 'Kalkulator Penawaran' },
   // Wave 1 — stream B (M4/M5)
   { href: '/clients', label: 'Klien' },
   { href: '/finance', label: 'Finance' },
