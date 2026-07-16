@@ -9,10 +9,11 @@ import (
 	"github.com/meagrup/agencyapp/backend/internal/testutil"
 )
 
-func TestCatalog_AllThirteenEventsRegistered(t *testing.T) {
+func TestCatalog_AllEventsRegistered(t *testing.T) {
 	c := notification.NewCatalog()
-	if got := len(c.Events()); got != 13 {
-		t.Fatalf("catalog has %d events, want 13", got)
+	// 13 base events (Phase 0 v2 §9) + the M1 v2 collaborative-dedup event (D4).
+	if got := len(c.Events()); got != 14 {
+		t.Fatalf("catalog has %d events, want 14", got)
 	}
 }
 

@@ -47,39 +47,14 @@ func (s *Service) ClaimFromPool(ctx context.Context, actor permission.Actor, lea
 		return Attempt{}, err
 	}
 
-	// Guard: the same salesperson may not double-open on one lead.
-	var openCount int
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM prospect_attempts WHERE lead_id = ? AND owner_employee_id = ?`,
-		leadID, actor.EmployeeID).Scan(&openCount); err != nil {
+	// Guard: the same salesperson may not double-open on one lead (shared with the
+	// collaborative-join guard — one implementation of M1-OA-1).
+	open, err := s.actorHasOpenAttempt(ctx, tx, leadID, actor.EmployeeID)
+	if err != nil {
 		return Attempt{}, err
 	}
-	if openCount > 0 {
-		// Re-check that at least one is non-terminal.
-		var openNonTerminal int
-		rows, err := tx.QueryContext(ctx,
-			`SELECT status FROM prospect_attempts WHERE lead_id = ? AND owner_employee_id = ?`,
-			leadID, actor.EmployeeID)
-		if err != nil {
-			return Attempt{}, err
-		}
-		for rows.Next() {
-			var st string
-			if err := rows.Scan(&st); err != nil {
-				rows.Close()
-				return Attempt{}, err
-			}
-			if !terminalAttemptStatuses[st] {
-				openNonTerminal++
-			}
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return Attempt{}, err
-		}
-		if openNonTerminal > 0 {
-			return Attempt{}, ErrAlreadyPursuing
-		}
+	if open {
+		return Attempt{}, ErrAlreadyPursuing
 	}
 
 	att, err := s.insertAttempt(ctx, tx, leadID, actor)

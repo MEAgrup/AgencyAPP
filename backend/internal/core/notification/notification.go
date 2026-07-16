@@ -22,7 +22,8 @@ type DB interface {
 // EventType identifies a cataloged event.
 type EventType string
 
-// The 13 cataloged events (Phase 0 v2 §9).
+// The cataloged events (Phase 0 v2 §9 — 13 base events + the M1 v2
+// collaborative-dedup event, D4).
 const (
 	EvNegotiationPendingApproval EventType = "m0.negotiation.pending_approval" // -> Sales Head/SPV
 	EvNegotiationDecision        EventType = "m0.negotiation.decision"         // -> Salesperson
@@ -37,6 +38,10 @@ const (
 	EvRevisionCountFlag          EventType = "m12.revision_count.flag"         // -> Team Leader/SPV
 	EvClientBandDrop             EventType = "m13.client.band_drop"            // -> SPV
 	EvPerformancePublished       EventType = "m14.performance.published"       // -> Each staff
+
+	// M1 v2 collaborative dedup (D4): a second salesperson joined a lead already
+	// worked by others -> the existing non-terminal attempt owners are notified.
+	EvCollabJoined EventType = "m1.lead.collab_joined" // -> existing attempt owners
 )
 
 // Emission is one notification-generating occurrence.
@@ -82,6 +87,7 @@ func NewCatalog() *Catalog {
 	c.entries[EvRevisionCountFlag] = entry{"Revision Count >= 3 (Quality flag)", leadsOfDivision}
 	c.entries[EvClientBandDrop] = entry{"Client band drop", leadsOfDivision}
 	c.entries[EvPerformancePublished] = entry{"Monthly Performance Score published", explicit}
+	c.entries[EvCollabJoined] = entry{"Lead dikerjakan lebih dari satu sales", explicit}
 
 	return c
 }

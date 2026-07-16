@@ -9,9 +9,10 @@ import (
 	"github.com/meagrup/agencyapp/backend/internal/module1_leads"
 )
 
-// leadsSvc builds the Module 1 service over the app's shared deps.
+// leadsSvc builds the Module 1 service over the app's shared deps. Catalog is
+// wired so the collaborative-join event (D4) is emitted inside Register's tx.
 func (a *App) leadsSvc() *module1_leads.Service {
-	return &module1_leads.Service{DB: a.DB, Engine: a.Engine}
+	return &module1_leads.Service{DB: a.DB, Engine: a.Engine, Catalog: a.Catalog}
 }
 
 // writeDomainErr maps M0/M1 domain errors to HTTP status + verbatim BI message.
@@ -45,12 +46,18 @@ func (a *App) handleRegisterLead(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, module0_sales.IncompleteMessage)
 		return
 	}
-	lead, att, err := a.leadsSvc().Register(r.Context(), actor, in)
+	res, err := a.leadsSvc().RegisterWithResult(r.Context(), actor, in)
 	if err != nil {
 		a.writeDomainErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"lead": lead, "attempt": att})
+	out := map[string]any{"lead": res.Lead, "attempt": res.Attempt}
+	// On a collaborative join, surface the non-blocking BI info (D5/D7); still 201.
+	// A solo join (no live collaborator) carries no info.
+	if res.Info != "" {
+		out["info"] = res.Info
+	}
+	writeJSON(w, http.StatusCreated, out)
 }
 
 func (a *App) handleClaimLead(w http.ResponseWriter, r *http.Request) {

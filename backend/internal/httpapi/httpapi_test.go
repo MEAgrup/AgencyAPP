@@ -209,6 +209,41 @@ func TestDemoFlow_FullDemoPath(t *testing.T) {
 	}
 }
 
+// TestRegisterLead_CollaborativeJoin drives the M1 v2 door over HTTP: a second
+// salesperson registering the same phone gets 201 with a non-blocking "info"
+// string (the collaborative join), not a block.
+func TestRegisterLead_CollaborativeJoin(t *testing.T) {
+	srv, done := setup(t)
+	defer done()
+	dewi := login(t, srv, "dewi@mea.co.id") // existing owner
+	budi := login(t, srv, "budi@mea.co.id") // joins
+
+	code, body := do(t, dewi, "POST", srv.URL+"/api/v1/leads", map[string]string{
+		"LeadName": "Kollab Co", "PhoneNumber": "0812-5555", "Source": "Scouting",
+	})
+	if code != 201 {
+		t.Fatalf("dewi register: %d %v", code, body)
+	}
+	if _, ok := body["info"]; ok {
+		t.Errorf("fresh create should carry no info: %v", body)
+	}
+
+	code, body = do(t, budi, "POST", srv.URL+"/api/v1/leads", map[string]string{
+		"LeadName": "Kollab Co Dup", "PhoneNumber": "+62 812 5555", "Source": "Scouting",
+	})
+	if code != 201 {
+		t.Fatalf("budi join: %d %v", code, body)
+	}
+	if body["info"] != "[lead juga sedang dikerjakan sales lain (Dewi)]" {
+		t.Errorf("join info = %v", body["info"])
+	}
+	// Dewi is notified of the collaboration.
+	code, nb := do(t, dewi, "GET", srv.URL+"/api/v1/notifications?unread=1", nil)
+	if code != 200 || int(nb["unread_count"].(float64)) < 1 {
+		t.Fatalf("dewi should have a collab notification: %d %v", code, nb)
+	}
+}
+
 func TestPermissions_MasterServiceAndAdmin(t *testing.T) {
 	srv, done := setup(t)
 	defer done()
