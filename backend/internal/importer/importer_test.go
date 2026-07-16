@@ -486,7 +486,14 @@ func TestApplyClientEmployeeNotRegistered(t *testing.T) {
 // live matchByPhone INNER JOINs employees, dropping that attempt, so the lead
 // reopens. The importer mirror must do the same (reopen), NOT block on a
 // phantom active attempt.
-func TestImportLeadReopenWhenAttemptOwnerNotEmployee(t *testing.T) {
+// TestImportLeadDetectsUnsyncedOwnerAttempt_O19: an attempt owned by an employee
+// absent from employees is STILL detected on import (LEFT JOIN mirror, O19
+// resolved 2026-07-16) — the row is blocked as a duplicate of an in-process lead
+// (owner name falls back to the employee id) rather than being lost and the
+// terminal record silently reopened. The importer channel keeps its block
+// behavior (the collaborative-Join redesign is single-registration only); this
+// test pins the O19 correction on the import side.
+func TestImportLeadDetectsUnsyncedOwnerAttempt_O19(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
 
@@ -504,30 +511,34 @@ func TestImportLeadReopenWhenAttemptOwnerNotEmployee(t *testing.T) {
 
 	row := LeadRow{NamaLead: "Ghosty", NoTelepon: "0813 7777", Sumber: "form", StatusTerakhir: "diproses"}
 
-	// Dry-run: reopen surfaces as RowValid, not RowDuplikat.
+	// Dry-run: the unsynced-owner attempt is detected → blocked as duplicate, with
+	// the owner name falling back to the employee id.
 	rep, err := s.DryRun(ctx, director, []LeadRow{row}, nil)
 	if err != nil {
 		t.Fatalf("DryRun: %v", err)
 	}
-	if rep.Rows[0].Status != RowValid {
-		t.Fatalf("dry-run status = %q msg %q, want valid (reopen — attempt dropped by INNER JOIN)",
+	if rep.Rows[0].Status != RowDuplikat {
+		t.Fatalf("dry-run status = %q msg %q, want duplikat (attempt detected via LEFT JOIN)",
 			rep.Rows[0].Status, rep.Rows[0].Message)
 	}
+	if rep.Rows[0].Message != "[lead sedang diproses oleh sales lain (EMP-GHOST)]" {
+		t.Errorf("dry-run message = %q, want fallback to EMP-GHOST", rep.Rows[0].Message)
+	}
 
-	// Apply: LEAD-GHOST reopens to [Pool].
+	// Apply: LEAD-GHOST is NOT reopened — it stays [Rejected] (blocked, no change).
 	rep, err = s.Apply(ctx, director, []LeadRow{row}, nil)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	if rep.Applied != 1 {
-		t.Fatalf("applied = %d, want 1 (rows=%+v)", rep.Applied, rep.Rows)
+	if rep.Applied != 0 || rep.Duplikat != 1 {
+		t.Fatalf("applied = %d duplikat = %d, want 0 and 1 (rows=%+v)", rep.Applied, rep.Duplikat, rep.Rows)
 	}
 	var status string
 	if err := s.DB.QueryRowContext(ctx, `SELECT record_status FROM leads WHERE id = 'LEAD-GHOST'`).Scan(&status); err != nil {
 		t.Fatal(err)
 	}
-	if status != module1_leads.StatusPool {
-		t.Errorf("status = %q, want %q (reopened, not blocked)", status, module1_leads.StatusPool)
+	if status != "[Rejected]" {
+		t.Errorf("status = %q, want [Rejected] (blocked, not reopened)", status)
 	}
 }
 

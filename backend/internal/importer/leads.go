@@ -5,10 +5,13 @@ package importer
 // NORMALIZATION; only the phone-match SELECT is replicated here because
 // module1_leads.matchByPhone (and its terminal-attempt set) are unexported and
 // that package must not be edited (flagged for the orchestrator, DECISIONS O19).
-// The match query INNER JOINs employees — byte-identical to live matchByPhone —
-// so an attempt owned by an employee_id not present in employees is DROPPED by
-// the join exactly as live Register would drop it, keeping import dry-run/apply
-// outcomes aligned with what a live registration produces.
+// The match query LEFT JOINs employees — byte-identical to live matchByPhone
+// (O19 resolved 2026-07-16) — so an attempt owned by an employee_id not present
+// in employees is STILL detected (owner name falls back to owner_employee_id),
+// keeping import dry-run/apply outcomes aligned with what a live registration
+// produces. NOTE: import uses ChannelImport, whose block behavior is unchanged
+// by the collaborative-dedup redesign; only Decide's single-registration channel
+// joins. Mirror this SELECT whenever live matchByPhone changes.
 
 import (
 	"context"
@@ -63,24 +66,30 @@ func (s *Service) matchLead(ctx context.Context, q rowQuerier, phoneNorm string)
 		return nil, err
 	}
 	rows, err := q.QueryContext(ctx,
-		`SELECT e.nama, pa.status
+		`SELECT pa.owner_employee_id, e.nama, pa.status
 		   FROM prospect_attempts pa
-		   JOIN employees e ON e.employee_id = pa.owner_employee_id
+		   LEFT JOIN employees e ON e.employee_id = pa.owner_employee_id
 		  WHERE pa.lead_id = ?`, m.ID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var name, status string
-		if err := rows.Scan(&name, &status); err != nil {
+		var ownerID, status string
+		var name sql.NullString
+		if err := rows.Scan(&ownerID, &name, &status); err != nil {
 			return nil, err
 		}
-		if !terminalAttempt[status] {
-			m.HasActiveScoutedAttempt = true
-			m.ActiveOwnerName = name
-			break
+		if terminalAttempt[status] {
+			continue
 		}
+		display := ownerID
+		if name.Valid && name.String != "" {
+			display = name.String
+		}
+		m.HasActiveScoutedAttempt = true
+		m.ActiveOwnerName = display
+		break
 	}
 	return &m, rows.Err()
 }
