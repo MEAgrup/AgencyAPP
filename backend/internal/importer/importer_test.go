@@ -481,12 +481,15 @@ func TestApplyClientEmployeeNotRegistered(t *testing.T) {
 	}
 }
 
-// ── FIX 2: dedup mirror is byte-identical to live (INNER JOIN employees) ──────
-// A [Rejected] lead whose ONLY attempt is owned by an employee not in employees:
-// live matchByPhone INNER JOINs employees, dropping that attempt, so the lead
-// reopens. The importer mirror must do the same (reopen), NOT block on a
-// phantom active attempt.
-func TestImportLeadReopenWhenAttemptOwnerNotEmployee(t *testing.T) {
+// ── O19: importer now calls the live MatchByPhone (LEFT JOIN employees) ──────
+// A [Rejected] lead whose ONLY attempt is owned by an employee_id absent from
+// employees: MatchByPhone's LEFT JOIN + COALESCE still counts that attempt as
+// active (O19 resolved 2026-07-16, docs/DECISIONS.md — dedup must not hinge on
+// HRIS sync timing), so the duplicate import row is BLOCKED, not reopened. The
+// owner name is empty (no employees row), so the "(nama)" placeholder in the BI
+// message is left untouched. This replaces the old expectation from the
+// removed INNER-JOIN mirror, which used to drop the attempt and reopen instead.
+func TestImportLeadBlockedWhenAttemptOwnerNotEmployee(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
 
@@ -503,31 +506,32 @@ func TestImportLeadReopenWhenAttemptOwnerNotEmployee(t *testing.T) {
 	}
 
 	row := LeadRow{NamaLead: "Ghosty", NoTelepon: "0813 7777", Sumber: "form", StatusTerakhir: "diproses"}
+	wantMsg := "[lead sedang diproses oleh sales lain (nama)]"
 
-	// Dry-run: reopen surfaces as RowValid, not RowDuplikat.
+	// Dry-run: blocked surfaces as RowDuplikat with the placeholder message intact.
 	rep, err := s.DryRun(ctx, director, []LeadRow{row}, nil)
 	if err != nil {
 		t.Fatalf("DryRun: %v", err)
 	}
-	if rep.Rows[0].Status != RowValid {
-		t.Fatalf("dry-run status = %q msg %q, want valid (reopen — attempt dropped by INNER JOIN)",
-			rep.Rows[0].Status, rep.Rows[0].Message)
+	if rep.Rows[0].Status != RowDuplikat || rep.Rows[0].Message != wantMsg {
+		t.Fatalf("dry-run row = %+v, want status %q msg %q (blocked — attempt still active under LEFT JOIN)",
+			rep.Rows[0], RowDuplikat, wantMsg)
 	}
 
-	// Apply: LEAD-GHOST reopens to [Pool].
+	// Apply: LEAD-GHOST is left untouched (blocked writes provenance only).
 	rep, err = s.Apply(ctx, director, []LeadRow{row}, nil)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	if rep.Applied != 1 {
-		t.Fatalf("applied = %d, want 1 (rows=%+v)", rep.Applied, rep.Rows)
+	if rep.Duplikat != 1 || rep.Rows[0].Message != wantMsg {
+		t.Fatalf("apply row = %+v, want duplikat/%q (rows=%+v)", rep.Rows[0], wantMsg, rep.Rows)
 	}
 	var status string
 	if err := s.DB.QueryRowContext(ctx, `SELECT record_status FROM leads WHERE id = 'LEAD-GHOST'`).Scan(&status); err != nil {
 		t.Fatal(err)
 	}
-	if status != module1_leads.StatusPool {
-		t.Errorf("status = %q, want %q (reopened, not blocked)", status, module1_leads.StatusPool)
+	if status != "[Rejected]" {
+		t.Errorf("status = %q, want %q (blocked, not reopened)", status, "[Rejected]")
 	}
 }
 

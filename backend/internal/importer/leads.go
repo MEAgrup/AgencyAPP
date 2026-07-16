@@ -2,13 +2,15 @@ package importer
 
 // leads.go lands existing leads through the Module 1 dedup engine (Permintaan #3
 // path 1). It reuses the exported dedup DECISION (module1_leads.Decide) and phone
-// NORMALIZATION; only the phone-match SELECT is replicated here because
-// module1_leads.matchByPhone (and its terminal-attempt set) are unexported and
-// that package must not be edited (flagged for the orchestrator, DECISIONS O19).
-// The match query INNER JOINs employees — byte-identical to live matchByPhone —
-// so an attempt owned by an employee_id not present in employees is DROPPED by
-// the join exactly as live Register would drop it, keeping import dry-run/apply
-// outcomes aligned with what a live registration produces.
+// NORMALIZATION. The phone-match SELECT itself is no longer mirrored here: M1 v2
+// exported module1_leads.MatchByPhone (+ IsTerminalAttempt) precisely so this
+// package could call the live match instead of duplicating it (O19 resolved
+// 2026-07-16, docs/DECISIONS.md — "importer mengikuti"). MatchByPhone's owner
+// query is a LEFT JOIN employees (+ COALESCE on the name): an attempt owned by an
+// employee_id not present in employees STILL counts as active, so import
+// dry-run/apply outcomes can shift slightly versus the old INNER-JOIN mirror for
+// that edge case — that shift is intentional (dedup must not hinge on HRIS sync
+// timing), not a regression.
 
 import (
 	"context"
@@ -22,67 +24,11 @@ import (
 	"github.com/meagrup/agencyapp/backend/internal/module1_leads"
 )
 
-// terminalAttempt mirrors module1_leads.terminalAttemptStatuses (unexported): an
-// attempt in any of these does NOT mark the lead as being actively worked.
-var terminalAttempt = map[string]bool{
-	"Not Qualified":              true,
-	"Closed-Success":             true,
-	"Closed-Lost":                true,
-	"Blocked":                    true,
-	"[Closed - Kalah Kompetisi]": true,
-}
-
 // leadAction is the applied dedup outcome for one row.
 type leadAction struct {
 	Action  string // "create" | "reopen" | "block"
 	LeadID  string // created or reopened id
 	Message string // BI block message (Action == "block")
-}
-
-// rowQuerier is satisfied by *sql.Tx (read side of the match).
-type rowQuerier interface {
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}
-
-// matchLead finds the most-recent lead on the normalized phone and whether it is
-// actively worked (for the owner-name interpolation), mirroring the M1 dedup
-// match. Returns nil when nothing matches.
-func (s *Service) matchLead(ctx context.Context, q rowQuerier, phoneNorm string) (*module1_leads.ExistingLead, error) {
-	if phoneNorm == "" {
-		return nil, nil
-	}
-	var m module1_leads.ExistingLead
-	err := q.QueryRowContext(ctx,
-		`SELECT id, record_status FROM leads WHERE phone_norm = ? ORDER BY created_at DESC, id DESC LIMIT 1`,
-		phoneNorm).Scan(&m.ID, &m.RecordStatus)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	rows, err := q.QueryContext(ctx,
-		`SELECT e.nama, pa.status
-		   FROM prospect_attempts pa
-		   JOIN employees e ON e.employee_id = pa.owner_employee_id
-		  WHERE pa.lead_id = ?`, m.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var name, status string
-		if err := rows.Scan(&name, &status); err != nil {
-			return nil, err
-		}
-		if !terminalAttempt[status] {
-			m.HasActiveScoutedAttempt = true
-			m.ActiveOwnerName = name
-			break
-		}
-	}
-	return &m, rows.Err()
 }
 
 // applyLeadTx runs the dedup door for one lead inside tx and performs the write
@@ -91,7 +37,10 @@ func (s *Service) matchLead(ctx context.Context, q rowQuerier, phoneNorm string)
 // the transaction lifecycle. Row must already have passed validateLeadRow.
 func (s *Service) applyLeadTx(ctx context.Context, tx *sql.Tx, actor permission.Actor, row LeadRow, index int) (leadAction, error) {
 	phoneNorm := module1_leads.NormalizePhone(row.NoTelepon)
-	match, err := s.matchLead(ctx, tx, phoneNorm)
+	// actor.EmployeeID is threaded through only because MatchByPhone's signature
+	// needs it (ActorHasActiveAttempt); ChannelImport's decision table never reads
+	// that field — import has no notion of "the actor already holds an attempt".
+	match, err := module1_leads.MatchByPhone(ctx, tx, phoneNorm, actor.EmployeeID)
 	if err != nil {
 		return leadAction{}, err
 	}
