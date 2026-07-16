@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push -u origin claude/*)",
+      "Bash(git fetch origin *)",
+      "Bash(git pull origin *)",
+      "Bash(go build *)",
+      "Bash(go vet *)",
+      "Bash(go test *)",
+      "Bash(cd backend && go build *)",
+      "Bash(cd backend && go vet *)",
+      "Bash(cd backend && go test *)",
+      "Bash(cd /home/user/AgencyAPP/backend && go build *)",
+      "Bash(cd /home/user/AgencyAPP/backend && go vet *)",
+      "Bash(cd /home/user/AgencyAPP/backend && go test *)",
+      "Bash(npm run build*)",
+      "Bash(npm run lint*)",
+      "Bash(cd web-internal && npm run build*)",
+      "Bash(cd web-internal && npm run lint*)",
+      "Bash(cd /home/user/AgencyAPP/web-internal && npm run build*)",
+      "Bash(cd /home/user/AgencyAPP/web-internal && npm run lint*)"
+    ]
+  }
+}
