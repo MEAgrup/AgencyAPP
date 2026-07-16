@@ -3,6 +3,8 @@
 > Konteks lengkap untuk sesi build berikutnya. Baca ini + `HANDOFF_JALUR_B_SESSION2.md`
 > (masih berlaku untuk bagian import data manusia) sebelum mulai.
 
+> **Update 2026-07-16 (sesi lanjutan):** PR #7 merged; O19/O20/O25a resolved; M1 v2 dedup kolaboratif terimplementasi; smoke UAT fixture lolos (`W1-20_UAT_PREP_2026-07-16.md`). Sisa blocking manusia: O24 (komisi 32 layanan), O25b/c, O21 (NIK→email), file import W1-19.
+
 ## Status saat handoff
 
 **Branch:** `claude/fable-orchestrator-setup-uh30eo` — 6 commit, CI hijau semua, **PR #7 (draft)** menunggu review: https://github.com/MEAgrup/AgencyAPP/pull/7
@@ -25,20 +27,20 @@ Sumber MSL aktif ditetapkan: Google Sheet **"Kalkulator Service Jasa"** tab "Kal
 
 ## Menunggu manusia (urutan go-live MSL)
 
-1. **Sales Head** isi `commission_rule` riil per 32 layanan + konfirmasi anomali (worksheet `MSL_KALKULATOR_VALIDASI.md`). Anomali terpenting: **Nano KOL batas minimal 10×Rp5jt** (tagihan minimum Rp50jt+PPN — diduga salah isi), basis "komisi 5%" Store Management, enforcement budget min GMV Max Rp8,5jt.
+1. **Sales Head** isi `commission_rule` riil per 32 layanan + konfirmasi anomali (worksheet `MSL_KALKULATOR_VALIDASI.md`). Anomali terpenting: **Nano KOL batas minimal — ✅ FIXED ke 1** (O25a resolved 2026-07-16), basis "komisi 5%" Store Management (O25b open), enforcement budget min GMV Max Rp8,5jt (O25c open).
 2. Tim dev update CSV / input via admin, lalu:
    ```bash
    go run ./cmd/mslseed --actor <NIK_SALES_HEAD_ATAU_DIRECTOR>          # dry-run, periksa rencana
    go run ./cmd/mslseed --actor <NIK> --apply
    ```
-3. Item lama masih terbuka: **O21** (NIK→email untuk login — blocking login riil), **O20** (UTC vs WIB — putuskan sebelum UAT W1-20), file-file import data manusia (lihat `LANGKAH_MANUSIA_GO_LIVE.md`).
+3. Item lama masih terbuka: **O21** (NIK→email untuk login — blocking login riil), **O20** ✅ (UTC vs WIB — RESOLVED ke Asia/Jakarta WIB 2026-07-16, sumber tunggal `core/tz`), file-file import data manusia (lihat `LANGKAH_MANUSIA_GO_LIVE.md`).
 
 ## Pekerjaan sesi berikutnya (urutan saran)
 
-1. **Review & merge PR #7** (sesi ini masih memantau PR: subscription aktif + check-in terjadwal; kalau sesi ini mati, pantau manual).
+1. ✅ **Review & merge PR #7** (SELESAI — PR #7 termerge ke main 2026-07-16).
 2. Begitu data manusia masuk → jalankan **import W1-19** (urutan lengkap di `HANDOFF_JALUR_B_SESSION2.md` §A) + **sync HRIS** (§B).
 3. **W1-20 UAT** end-to-end (runbook: `W1-20_UAT_RUNBOOK.md`) — sekarang bisa memakai kalkulator untuk Estimasi Nilai di Qualified Form.
-4. Handoff Akun A yang belum dikerjakan: **redesign M1 dedup jadi kolaboratif** (DECISIONS 2026-07-10 "M1 DEDUP DIREDESAIN") + pertanyaan O19 (JOIN drop attempt karyawan belum sinkron).
+4. ✅ **Redesign M1 dedup jadi kolaboratif** (SELESAI 2026-07-16 — dedup kolaboratif terimplementasi per DECISIONS 2026-07-16, STATE_MACHINES.md §2 direvisi, runbook langkah 3 diupdate) + **O19 RESOLVED** (LEFT JOIN memastikan attempt unsynced-owner tidak hilang).
 5. Setelah exit criteria Wave 1 lolos UAT → **Wave 2** (M6, **M12 early**, M7, M8, M9, M10) sesuai Build Plan §4.
 
 ### Ide lanjutan MSL (belum diputuskan — jangan kerjakan tanpa keputusan)
