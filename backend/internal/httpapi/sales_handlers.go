@@ -19,6 +19,26 @@ func (a *App) salesSvc() *module0_sales.Service {
 	}
 }
 
+// handleQuotePreview computes a read-only Estimasi Nilai + komisi quote for a
+// service selection (MSL v2 calculator) without persisting anything. Available
+// to any logged-in internal user, like the qualified-form endpoints. Enforces
+// the 1..5 service cap with the verbatim BI message.
+func (a *App) handleQuotePreview(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Services []module0_sales.ServiceSelection `json:"services"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, module0_sales.IncompleteMessage)
+		return
+	}
+	q, err := a.salesSvc().PreviewQuote(r.Context(), body.Services)
+	if err != nil {
+		a.writeDomainErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, q)
+}
+
 func (a *App) handleMarkContacted(w http.ResponseWriter, r *http.Request) {
 	actor, _ := actorFrom(r.Context())
 	if err := a.salesSvc().MarkContacted(r.Context(), actor, r.PathValue("id")); err != nil {

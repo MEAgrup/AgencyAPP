@@ -92,6 +92,36 @@ func TestPercentOf(t *testing.T) {
 	}
 }
 
+func TestMul(t *testing.T) {
+	rp := func(s string) Money { m, _ := Parse(s); return m }
+	cases := []struct {
+		base Money
+		n    int64
+		want Money
+	}{
+		{rp("150000.00"), 5, rp("750000.00")},
+		{rp("50000.00"), 10, rp("500000.00")},
+		{rp("10000.00"), 300, rp("3000000.00")},
+		{rp("1000000.00"), 0, 0},
+	}
+	for _, c := range cases {
+		got, err := Mul(c.base, c.n)
+		if err != nil {
+			t.Fatalf("Mul(%s, %d): %v", c.base.Format(), c.n, err)
+		}
+		if got != c.want {
+			t.Errorf("Mul(%s, %d) = %s, want %s", c.base.Format(), c.n, got.Format(), c.want.Format())
+		}
+	}
+}
+
+func TestMulOverflow(t *testing.T) {
+	base, _ := Parse("9999999999999.99")
+	if _, err := Mul(base, 1000000000); err == nil {
+		t.Error("Mul with overflowing product should return an error")
+	}
+}
+
 func TestPercentOfOverflow(t *testing.T) {
 	// An absurd percentage whose result cannot fit int64 minor units must error,
 	// not silently wrap to a negative amount.

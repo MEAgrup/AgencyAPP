@@ -72,6 +72,35 @@ erDiagram
 | SLA Target | per Task (AST/BKG/BRF-as-task) | Set individually at breakdown by Lead/SPV; missing ⇒ Speed Score = N/A, never backfilled |
 | Component Weights Used | CHR, PERF | Stored per snapshot (post-redistribution) — weights vary month to month |
 
+## 3a. Master Service List v2 Schema (2026-07-16)
+
+Sumber seed kanonik: `backend/seed/msl_kalkulator.csv` (32 layanan dari sheet "Kalkulator Service Jasa"), validasi di `docs/handoff/MSL_KALKULATOR_VALIDASI.md`. Lihat DECISIONS 2026-07-16 untuk konteks keputusan.
+
+**Master Service Version Fields (tambahan):**
+
+| Field | Type | Rule |
+|---|---|---|
+| category | string | Kategori layanan (opsional, untuk grouping di admin) |
+| unit | string | Satuan harga (mis. "per produk", "per 1K view", "per session (3 jam)", "Paket") |
+| min_qty | decimal | Batas minimal kuantitas untuk pricing_mode tertentu |
+| pricing_mode | enum | `flat` (qty×harga), `min_floor` (max(qty,min)×harga), `batch_ceiling` (ceil(qty/min)×min×harga), `passthrough` (nominal diinput langsung) |
+| apply_ppn | bool | PPN 11% ditambahkan (round half-up) bila true |
+| frequency | enum | `Monthly`, `One-time`, `Campaign` |
+| price_note | string | Catatan tambahan (mis. komisi khusus, syarat khusus) |
+| description | string | Deskripsi layanan |
+
+**Qualified Form Services Fields (tambahan):**
+
+| Field | Type | Rule |
+|---|---|---|
+| quantity | decimal | Jumlah unit yang dipilih (required untuk pricing calculation) |
+| input_amount | decimal | Nominal langsung (hanya jika `pricing_mode=passthrough`; null untuk mode lain) |
+| unit | string | Satuan (copy dari MSL version, untuk audit) |
+| min_qty | decimal | Batas minimal (copy dari MSL version, untuk audit) |
+| pricing_mode | enum | Mode penetapan harga (copy dari MSL version) |
+| apply_ppn | bool | Flag PPN (copy dari MSL version) |
+| subtotal | decimal | Nilai baris terhitung: `flat`=qty×harga; `min_floor`=max(qty,min)×harga; `batch_ceiling`=ceil(qty/min)×min×harga; `passthrough`=input_amount; +PPN 11% jika `apply_ppn`. **Pinned (immutable), recomputable dari parameter.** Estimasi Nilai M0 = Σ subtotal baris. |
+
 ## 4. Computation registry (all read-only, recompute-from-log)
 
 - **M0:** Estimasi Nilai Transaksi, Perhitungan Komisi (from Master Service List version at date), allocation math.

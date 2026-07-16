@@ -67,11 +67,26 @@ export interface LayeredRole {
   enabled: boolean;
 }
 
+// MSL v2 calculator pricing modes (DECISIONS 2026-07-16 / docs/handoff/MSL_KALKULATOR_VALIDASI.md).
+export const PRICING_MODES = ['flat', 'min_floor', 'batch_ceiling', 'passthrough'] as const;
+export type PricingMode = (typeof PRICING_MODES)[number];
+
+// Frequency enum as stored/returned by the backend ("" = tidak ditentukan).
+export const FREQUENCIES = ['', 'Monthly', 'One-time', 'Campaign'] as const;
+
 export interface MasterService {
   id: string;
   name: string;
   standard_price: string;
   commission_rule: string;
+  category: string;
+  unit: string;
+  min_qty: string;
+  pricing_mode: string;
+  apply_ppn: boolean;
+  frequency: string;
+  price_note: string;
+  description: string;
   active: boolean;
   version_no: number;
   effective_from: string;

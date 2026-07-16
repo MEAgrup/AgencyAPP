@@ -2,17 +2,34 @@
 
 import { Fragment, useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api, errorMessage } from '@/lib/api';
-import type { MasterService } from '@/lib/types';
+import { FREQUENCIES, PRICING_MODES, type MasterService } from '@/lib/types';
 import { formatIDR } from '@/lib/money';
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// "Batas Minimal" is stored as a DECIMAL string ("5.00") but is always a whole
+// quantity (see backend parseWholeQty) — display it as a plain integer.
+function formatQty(value: string | undefined): string {
+  if (!value) return '—';
+  const n = Number(value);
+  if (Number.isNaN(n) || n <= 0) return '—';
+  return String(Math.trunc(n));
+}
+
 interface FormState {
   name: string;
   standard_price: string;
   commission_rule: string;
+  category: string;
+  unit: string;
+  min_qty: string;
+  pricing_mode: string;
+  apply_ppn: boolean;
+  frequency: string;
+  price_note: string;
+  description: string;
   active: boolean;
   effective_from: string;
 }
@@ -21,6 +38,14 @@ const EMPTY_FORM: FormState = {
   name: '',
   standard_price: '',
   commission_rule: '',
+  category: '',
+  unit: '',
+  min_qty: '',
+  pricing_mode: 'flat',
+  apply_ppn: false,
+  frequency: '',
+  price_note: '',
+  description: '',
   active: true,
   effective_from: todayISO(),
 };
@@ -72,12 +97,23 @@ export default function MasterServicesPage() {
       name: service.name,
       standard_price: String(service.standard_price),
       commission_rule: service.commission_rule,
+      category: service.category,
+      unit: service.unit,
+      min_qty: service.min_qty,
+      pricing_mode: service.pricing_mode || 'flat',
+      apply_ppn: service.apply_ppn,
+      frequency: service.frequency,
+      price_note: service.price_note,
+      description: service.description,
       active: service.active,
       effective_from: todayISO(),
     });
     setFormError(null);
     setShowForm(true);
   }
+
+  const isPassthrough = form.pricing_mode === 'passthrough';
+  const needsMinQty = form.pricing_mode === 'min_floor' || form.pricing_mode === 'batch_ceiling';
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -86,8 +122,16 @@ export default function MasterServicesPage() {
     // Backend expects standard_price as a decimal string and requires effective_from.
     const payload = {
       name: form.name,
-      standard_price: form.standard_price,
+      standard_price: isPassthrough ? '0' : form.standard_price,
       commission_rule: form.commission_rule,
+      category: form.category,
+      unit: form.unit,
+      min_qty: needsMinQty ? form.min_qty : '',
+      pricing_mode: form.pricing_mode,
+      apply_ppn: form.apply_ppn,
+      frequency: form.frequency,
+      price_note: form.price_note,
+      description: form.description,
       active: form.active,
       effective_from: form.effective_from,
     };
@@ -174,10 +218,68 @@ export default function MasterServicesPage() {
                   id="standard_price"
                   type="number"
                   min="0"
-                  required
-                  value={form.standard_price}
+                  required={!isPassthrough}
+                  disabled={isPassthrough}
+                  value={isPassthrough ? '0' : form.standard_price}
                   onChange={(e) => setForm((f) => ({ ...f, standard_price: e.target.value }))}
                 />
+              </div>
+            </div>
+            <div className="formRow">
+              <div className="field">
+                <label htmlFor="category">Kategori</label>
+                <input
+                  id="category"
+                  value={form.category}
+                  onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="unit">Satuan</label>
+                <input
+                  id="unit"
+                  value={form.unit}
+                  onChange={(e) => setForm((f) => ({ ...f, unit: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="formRow">
+              <div className="field">
+                <label htmlFor="pricing_mode">Mode</label>
+                <select
+                  id="pricing_mode"
+                  value={form.pricing_mode}
+                  onChange={(e) => setForm((f) => ({ ...f, pricing_mode: e.target.value }))}
+                >
+                  {PRICING_MODES.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
+              {needsMinQty && (
+                <div className="field">
+                  <label htmlFor="min_qty">Batas Minimal</label>
+                  <input
+                    id="min_qty"
+                    type="number"
+                    min="1"
+                    required
+                    value={form.min_qty}
+                    onChange={(e) => setForm((f) => ({ ...f, min_qty: e.target.value }))}
+                  />
+                </div>
+              )}
+              <div className="field">
+                <label htmlFor="frequency">Frekuensi</label>
+                <select
+                  id="frequency"
+                  value={form.frequency}
+                  onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value }))}
+                >
+                  {FREQUENCIES.map((f) => (
+                    <option key={f} value={f}>{f === '' ? '—' : f}</option>
+                  ))}
+                </select>
               </div>
             </div>
             <div className="field">
@@ -199,6 +301,31 @@ export default function MasterServicesPage() {
                 onChange={(e) => setForm((f) => ({ ...f, commission_rule: e.target.value }))}
               />
             </div>
+            <div className="field">
+              <label htmlFor="price_note">Catatan Harga</label>
+              <input
+                id="price_note"
+                value={form.price_note}
+                onChange={(e) => setForm((f) => ({ ...f, price_note: e.target.value }))}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="description">Deskripsi</label>
+              <textarea
+                id="description"
+                rows={3}
+                value={form.description}
+                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+              />
+            </div>
+            <label className="row" style={{ gap: 6, fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={form.apply_ppn}
+                onChange={(e) => setForm((f) => ({ ...f, apply_ppn: e.target.checked }))}
+              />
+              PPN
+            </label>
             <label className="row" style={{ gap: 6, fontSize: 13 }}>
               <input
                 type="checkbox"
@@ -231,8 +358,14 @@ export default function MasterServicesPage() {
               <thead>
                 <tr>
                   <th>Nama</th>
+                  <th>Kategori</th>
+                  <th>Satuan</th>
+                  <th>Batas Minimal</th>
                   <th>Harga Standar</th>
                   <th>Aturan Komisi</th>
+                  <th>Mode</th>
+                  <th>PPN</th>
+                  <th>Frekuensi</th>
                   <th>Aktif</th>
                   <th>Versi</th>
                   <th>Berlaku Sejak</th>
@@ -244,8 +377,14 @@ export default function MasterServicesPage() {
                   <Fragment key={s.id}>
                     <tr>
                       <td>{s.name}</td>
+                      <td>{s.category || '—'}</td>
+                      <td>{s.unit || '—'}</td>
+                      <td>{formatQty(s.min_qty)}</td>
                       <td>{formatIDR(s.standard_price)}</td>
                       <td>{s.commission_rule}</td>
+                      <td>{s.pricing_mode || 'flat'}</td>
+                      <td>{s.apply_ppn ? 'Ya' : 'Tidak'}</td>
+                      <td>{s.frequency || '—'}</td>
                       <td>
                         <span className={`badge badge-${s.active ? 'green' : 'darkgray'}`}>
                           {s.active ? 'Aktif' : 'Nonaktif'}
@@ -266,7 +405,7 @@ export default function MasterServicesPage() {
                     </tr>
                     {expandedId === s.id && (
                       <tr>
-                        <td colSpan={7} style={{ background: 'var(--color-bg)' }}>
+                        <td colSpan={12} style={{ background: 'var(--color-bg)' }}>
                           {versionsLoadingId === s.id && <p className="muted">Memuat riwayat versi...</p>}
                           {versionsError && <div className="alert alertError">{versionsError}</div>}
                           {versionsByService[s.id] && versionsByService[s.id].length > 0 && (
@@ -274,8 +413,14 @@ export default function MasterServicesPage() {
                               <thead>
                                 <tr>
                                   <th>Versi</th>
+                                  <th>Kategori</th>
+                                  <th>Satuan</th>
+                                  <th>Batas Minimal</th>
                                   <th>Harga Standar</th>
                                   <th>Aturan Komisi</th>
+                                  <th>Mode</th>
+                                  <th>PPN</th>
+                                  <th>Frekuensi</th>
                                   <th>Aktif</th>
                                   <th>Berlaku Sejak</th>
                                 </tr>
@@ -284,8 +429,14 @@ export default function MasterServicesPage() {
                                 {versionsByService[s.id].map((v) => (
                                   <tr key={v.version_no}>
                                     <td>{v.version_no}</td>
+                                    <td>{v.category || '—'}</td>
+                                    <td>{v.unit || '—'}</td>
+                                    <td>{formatQty(v.min_qty)}</td>
                                     <td>{formatIDR(v.standard_price)}</td>
                                     <td>{v.commission_rule}</td>
+                                    <td>{v.pricing_mode || 'flat'}</td>
+                                    <td>{v.apply_ppn ? 'Ya' : 'Tidak'}</td>
+                                    <td>{v.frequency || '—'}</td>
                                     <td>{v.active ? 'Aktif' : 'Nonaktif'}</td>
                                     <td>{v.effective_from}</td>
                                   </tr>

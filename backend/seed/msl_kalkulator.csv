@@ -1,0 +1,82 @@
+service_key,name,category,unit,min_qty,unit_price,pricing_mode,apply_ppn,frequency,price_note,commission_rule,effective_from,active,description,source_row
+store-management-paket,Store Management (Paket),Store Management,Paket,,6000000,flat,0,Monthly,+ komisi 5% (basis belum dikonfirmasi — lihat worksheet validasi),0% of standard price,2026-07-16,true,"1. Store Management: Mengelola promo toko (voucher, diskon, bundling)
+Monitoring performa produk (produk terlaris, produk yang stagnan)
+Cek dan Setting campaign undangan
+Desain dan Upload Banner Tiap bulan maks 2 desain perbulan
+Setting auto chat dan template auto chat
+Penjadwalan dan setting broadcast 
+Penjadwalan promo tanggal kembar dan paydaysale
+Setting voucher Toko dan produk ( sesuai dangn produk / SKU yang di iklankan)
+Setting Flash sale toko
+Optimasi campaign Affiliate
+2. Growth Strategic: Membuat roadmap pertumbuhan penjualan
+Menentukan strategi campaign (Harbolnas, Flash Sale, Payday, dll)
+Menentukan produk hero (produk utama untuk didorong)
+Membuat strategi pricing dan positioning
+Identifikasi peluang scale (produk baru, bundling, upselling)
+Membuat strategi funnel (traffic → conversion → repeat order)
+3. Account Manager: PIC (Person In Charge / penanggung jawab utama) 
+Penghubung komunikasi  antar klien dengan tim MEA
+4. Insight & Analytic: Analisa traffic toko
+Analisa conversion rate (persentase pengunjung jadi pembeli)
+Analisa performa produk
+Analisa customer behavior
+Membuat report performa mingguan/bulanan
+Memberikan insight: apa yang berhasil dan apa yang perlu diperbaiki
+5. Ads Management: Setup iklan (Shopee Ads / TikTok Ads/ Meta Ads/ Google Ads)
+Riset keyword dan audience
+Mengatur budget iklan
+Optimasi performa iklan
+Scaling iklan yang profitable
+ROAS improvement",5
+ads-awareness-consideration,Awareness & Consideration Ads Spending,Ads Spending,per 1K view,300,10000,min_floor,1,Monthly,,0% of standard price,2026-07-16,true,Minimal Rp. 3.000.000 belum termasuk PPN untuk 300ribu view,13
+gmv-max,GMV Max,Ads Spending,,,0,passthrough,1,Monthly,,0% of standard price,2026-07-16,true,"Budget iklan minimum per campaign (persku) perbulan Rp. 8,5 juta exclude ppn . untuk iklan yang sudah berjalan dengan budget di atas 8,5 juta percampaign persku, budget tidak boleh diturunkan.",14
+foto-katalog-4-output,Product Catalog Photos – 4 Outputs,Asset Produk,per produk,1,150000,batch_ceiling,0,One-time,,0% of standard price,2026-07-16,true,"Foto Katalog : per produk terdiri dari 1 foto utama dan 3 produk pendukung. dengan background polos. (include model internal, tidak pilih model)",17
+foto-katalog-1-output,Product Catalog Photo – 1 Output,Asset Produk,per foto,1,40000,batch_ceiling,0,,,0% of standard price,2026-07-16,true,"Foto Katalog : per produk terdiri dari 1 foto utama dengan background polos. (include model internal, tidak pilih model)",18
+foto-tematik-4-output,Thematic Product Photos – 4 Outputs,Asset Produk,per produk,1,250000,batch_ceiling,0,One-time,,0% of standard price,2026-07-16,true,"Foto tematik : per produk terdiri dari 1 foto utama dan 3 produk pendukung. dengan background dan properti bertema. (include model internal, tidak pilih model)",19
+sku-video,SKU Video,Asset Produk,per produk,1,150000,batch_ceiling,0,One-time,,0% of standard price,2026-07-16,true,Video penjelasan produk untuk di upload di SKU,20
+sku-design,SKU Design,Asset Produk,per SKU,1,100000,batch_ceiling,0,,,0% of standard price,2026-07-16,true,Desain gambar sku terdiri dari 5 slide (1 gambar utama dan 4 gambar pendukung).,21
+model-add-on-asset-produk,Model (Add On) — Asset Produk,Asset Produk,,,0,passthrough,0,,,0% of standard price,2026-07-16,true,"Untuk model di luar inhouse MEA , Biaya add on tergantung rate card model",22
+banner-obs-design,Banner / OBS Design,Asset Produk,Per 5 slide,,250000,flat,0,,,0% of standard price,2026-07-16,true,Desain banner atau obs per 5 gambar,23
+short-video-ugc-ad-content,Short Video (UGC Style) / Ad Content,Konten Organik,per video,5,150000,min_floor,0,Monthly,,0% of standard price,2026-07-16,true,"konten di akun seller dengan konsep UGC Stlye atau konten iklan GMV Max, disarankan 150-300 video perbulan",26
+short-video-premium,Short Video (Premium),Konten Organik,per video,5,250000,min_floor,0,Monthly,,0% of standard price,2026-07-16,true,"konten awareness, durasi hingga 40 detik - 60 detik, disarankan 60 konten perbulan",27
+carousel-content,Carousel Content,Konten Organik,per set (5 konten),5,150000,min_floor,0,Monthly,,0% of standard price,2026-07-16,true,"desain feed carousel , per konten 4 slide , aset foto disediakan oleh klien atau bisa add on foto katalog",28
+single-image-content,Single Image Content,Konten Organik,,5,50000,min_floor,0,,,0% of standard price,2026-07-16,true,"desain feed single image , per konten 1 slide , aset foto disediakan oleh klien atau bisa add on foto katalog",29
+model-add-on-konten-organik,Model (Add On) — Konten Organik,Konten Organik,,,0,passthrough,0,,,0% of standard price,2026-07-16,true,"untuk model di luar inhouse MEA , Biaya add on tergantung rate card model",30
+special-spot-konten-organik,Special Spot — Konten Organik,Konten Organik,,,0,passthrough,0,,,0% of standard price,2026-07-16,true,"sesuai rate card booking spot (di hotel, cafe, tempat wisata)",31
+nano-kol,Nano KOL (1K–10K followers),KOL & Influencer,per KOL,10,5000000,min_floor,1,Campaign,,0% of standard price,2026-07-16,true,"Rate Card & Ketentuan Kerja Sama
+Fee manajemen sebesar 10% dari total ad spend.
+Dikenakan biaya komitmen sebesar Rp5.000.000 di awal kerja sama.
+Apabila terdapat kelebihan dari biaya komitmen, maka selisih akan dikembalikan. Sebaliknya, apabila terdapat kekurangan, maka akan ditagihkan sesuai selisih yang ada.
+Wajib memberikan sample produk.",34
+micro-kol,Micro KOL (10K–50K followers),KOL & Influencer,per KOL,1,5000000,min_floor,1,Campaign,,0% of standard price,2026-07-16,true,"Rate Card & Ketentuan Kerja Sama
+Fee manajemen sebesar 10% dari total ad spend.
+Dikenakan biaya komitmen sebesar Rp5.000.000 di awal kerja sama.
+Apabila terdapat kelebihan dari biaya komitmen, maka selisih akan dikembalikan. Sebaliknya, apabila terdapat kekurangan, maka akan ditagihkan sesuai selisih yang ada.
+Wajib memberikan sample produk.",35
+macro-mega-kol,Macro & Mega KOL (50K–500K followers),KOL & Influencer,per KOL,1,10000000,min_floor,1,Campaign,,0% of standard price,2026-07-16,true,"Rate Card & Ketentuan Kerja Sama
+Fee manajemen sebesar 10% dari total ad spend.
+Dikenakan biaya komitmen sebesar Rp10.000.000 di awal kerja sama.
+Apabila terdapat kelebihan dari biaya komitmen, maka selisih akan dikembalikan. Sebaliknya, apabila terdapat kekurangan, maka akan ditagihkan sesuai selisih yang ada.
+Wajib memberikan sample produk.",36
+massive-video-production,Massive Video Production (sample required),Affiliator,per 1 video,50,50000,min_floor,0,One-time,,0% of standard price,2026-07-16,true,"Affiliate level 1-3 tanpa kurasi, niche random,  wajib memberikan sample produk, tidak untuk dijual satuan",39
+total-awareness,Total Awareness,Affiliator,per 10K view,10,100000,min_floor,1,,,0% of standard price,2026-07-16,true,budget iklan khusus video view untuk massive video affiliator,40
+live-streaming-education-selling,Live Streaming (education & selling),Live & Content Service,per session (3 jam),10,350000,min_floor,0,Monthly,,0% of standard price,2026-07-16,true,"live streaming toko , 1 sesi 3 jam dijam kerja",45
+educational-videos,Educational Videos,Live & Content Service,per video,5,250000,min_floor,0,Monthly,,0% of standard price,2026-07-16,true,video edukasi dengan durasi hingga 60 detik,46
+special-talent,Special Talent,Live & Content Service,,,0,passthrough,0,,,0% of standard price,2026-07-16,true,"untuk talent di luar inhouse MEA , Biaya add on tergantung rate card model",47
+live-with-tc-kol-celebrities,Live with TC / KOL / Celebrities (10% Rate Card),Live & Content Service,,,10000000,flat,0,,10% rate card — fee manajemen 10% dari ad spend (lihat description),0% of standard price,2026-07-16,true,"Rate Card & Ketentuan Kerja Sama
+Fee manajemen sebesar 10% dari total ad spend.
+Dikenakan biaya komitmen sebesar Rp10.000.000 di awal kerja sama.
+Apabila terdapat kelebihan dari biaya komitmen, maka selisih akan dikembalikan. Sebaliknya, apabila terdapat kekurangan, maka akan ditagihkan sesuai selisih yang ada.
+Wajib memberikan sample produk.",48
+video-with-tc-kol-celebrities,Video with TC / KOL / Celebrities (10% Rate Card),Live & Content Service,,,10000000,flat,0,,10% rate card — fee manajemen 10% dari ad spend (lihat description),0% of standard price,2026-07-16,true,"""Rate Card & Ketentuan Kerja Sama
+Fee manajemen sebesar 10% dari total ad spend.
+Dikenakan biaya komitmen sebesar Rp10.000.000 di awal kerja sama.
+Apabila terdapat kelebihan dari biaya komitmen, maka selisih akan dikembalikan. Sebaliknya, apabila terdapat kekurangan, maka akan ditagihkan sesuai selisih yang ada.""
+Wajib memberikan sample produk.",49
+special-spot-live-content,Special Spot — Live & Content,Live & Content Service,,,700000,flat,0,,,0% of standard price,2026-07-16,true,"sesuai rate card booking spot (di hotel, cafe, tempat wisata)",50
+night-weekend-sessions,Night & Weekend Sessions,Live & Content Service,per session (3 jam),,150000,flat,0,,,0% of standard price,2026-07-16,true,"add on jadwal malam atau weekend 150rb per 3 sesi , untuk malam di weekend 300rb per 3 sesi",51
+customer-review-management,Customer Review Management,Social Proof,per bulan,,500000,flat,0,Monthly,,0% of standard price,2026-07-16,true,balas komentar review dari pembeli,54
+video-review,Video Review,Social Proof,per video,5,20000,min_floor,0,,,0% of standard price,2026-07-16,true,video produk untuk review produk di ulasan,55
+shopee-rating-optimization,Shopee Rating Optimization,Social Proof,per checkout,50,15000,min_floor,0,,,0% of standard price,2026-07-16,true,hanya biaya jasa belum termasuk dana belanja,56
+tiktok-rating-optimization,TikTok Rating Optimization,Social Proof,per checkout,50,17000,min_floor,0,,,0% of standard price,2026-07-16,true,hanya biaya jasa belum termasuk dana belanja,57

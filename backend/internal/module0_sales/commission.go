@@ -99,17 +99,26 @@ func (r CommissionRule) Compute(standardPrice money.Money) (money.Money, error) 
 func (r CommissionRule) String() string { return r.raw }
 
 // ServiceLine is one selected service resolved against the Master Service List
-// version effective at the reference date (name/price/rule come from
-// admin.EffectiveAt at the persistence layer).
+// version effective at the reference date (name/price/rule/calculator params
+// come from admin.EffectiveAt at the persistence layer). StandardPrice is the
+// UNIT price; the deal value of the line is the computed subtotal (pricing.go).
 type ServiceLine struct {
 	ServiceID     string
+	VersionNo     int
 	Name          string
-	StandardPrice money.Money
+	StandardPrice money.Money // unit price
+	Unit          string
+	Mode          string // pricing_mode; "" == flat
+	Quantity      int64  // 0 == 1
+	MinQty        int64
+	InputAmount   money.Money // passthrough only
+	ApplyPPN      bool
 	Rule          CommissionRule
 }
 
-// NewServiceLine builds a ServiceLine from raw master-version fields
-// (standard_price and commission_rule as stored in master_service_versions).
+// NewServiceLine builds a flat, quantity-1 ServiceLine from raw master-version
+// fields (standard_price and commission_rule as stored in
+// master_service_versions). Calculator lines are built via LineFromView.
 func NewServiceLine(serviceID, name, standardPrice, commissionRule string) (ServiceLine, error) {
 	price, err := money.Parse(standardPrice)
 	if err != nil {
@@ -122,14 +131,40 @@ func NewServiceLine(serviceID, name, standardPrice, commissionRule string) (Serv
 	return ServiceLine{ServiceID: serviceID, Name: name, StandardPrice: price, Rule: rule}, nil
 }
 
+// params returns the resolved calculator inputs, applying the flat/qty-1
+// defaults for a zero-value line (keeps legacy flat callers unchanged).
+func (l ServiceLine) params() PriceParams {
+	mode := l.Mode
+	if mode == "" {
+		mode = PricingFlat
+	}
+	qty := l.Quantity
+	if qty == 0 {
+		qty = 1
+	}
+	return PriceParams{
+		Mode: mode, UnitPrice: l.StandardPrice, Quantity: qty,
+		MinQty: l.MinQty, InputAmount: l.InputAmount, ApplyPPN: l.ApplyPPN,
+	}
+}
+
+// Subtotal is the line deal value from the calculator (pricing.go).
+func (l ServiceLine) Subtotal() (money.Money, error) {
+	return ComputeSubtotal(l.params())
+}
+
 // LineQuote is the computed money view for one service line.
 type LineQuote struct {
 	ServiceID        string      `json:"service_id"`
 	Name             string      `json:"name"`
+	Quantity         int64       `json:"quantity"`
+	Unit             string      `json:"unit"`
 	StandardPrice    money.Money `json:"-"`
 	Komisi           money.Money `json:"-"`
+	Subtotal         money.Money `json:"-"`
 	StandardPriceIDR string      `json:"standard_price_idr"`
 	KomisiIDR        string      `json:"komisi_idr"`
+	SubtotalIDR      string      `json:"subtotal_idr"`
 }
 
 // Quote is the read-only money summary for a Qualified/Closing selection.
@@ -152,19 +187,30 @@ func BuildQuote(lines []ServiceLine) (Quote, error) {
 	}
 	q := Quote{Lines: make([]LineQuote, 0, len(lines))}
 	for _, l := range lines {
-		komisi, err := l.Rule.Compute(l.StandardPrice)
+		p := l.params()
+		subtotal, err := ComputeSubtotal(p)
 		if err != nil {
 			return Quote{}, err
 		}
-		q.EstimasiNilai += l.StandardPrice
+		// Percentage commission now computes on the line subtotal (deal value);
+		// flat rules are unaffected (CLAUDE.md #4 / DECISIONS 2026-07-16).
+		komisi, err := l.Rule.Compute(subtotal)
+		if err != nil {
+			return Quote{}, err
+		}
+		q.EstimasiNilai += subtotal
 		q.TotalKomisi += komisi
 		q.Lines = append(q.Lines, LineQuote{
 			ServiceID:        l.ServiceID,
 			Name:             l.Name,
+			Quantity:         p.Quantity,
+			Unit:             l.Unit,
 			StandardPrice:    l.StandardPrice,
 			Komisi:           komisi,
+			Subtotal:         subtotal,
 			StandardPriceIDR: l.StandardPrice.Format(),
 			KomisiIDR:        komisi.Format(),
+			SubtotalIDR:      subtotal.Format(),
 		})
 	}
 	q.EstimasiNilaiIDR = q.EstimasiNilai.Format()

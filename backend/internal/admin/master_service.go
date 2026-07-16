@@ -10,8 +10,24 @@ import (
 
 	"github.com/meagrup/agencyapp/backend/internal/core/audit"
 	"github.com/meagrup/agencyapp/backend/internal/core/ident"
+	"github.com/meagrup/agencyapp/backend/internal/core/money"
 	"github.com/meagrup/agencyapp/backend/internal/core/permission"
 )
+
+// Pricing modes for the MSL v2 calculator (mirror module0_sales; kept as local
+// literals so admin never imports module0_sales — that would form a cycle).
+const (
+	pricingFlat         = "flat"
+	pricingMinFloor     = "min_floor"
+	pricingBatchCeiling = "batch_ceiling"
+	pricingPassthrough  = "passthrough"
+)
+
+var pricingModes = map[string]bool{
+	pricingFlat: true, pricingMinFloor: true, pricingBatchCeiling: true, pricingPassthrough: true,
+}
+
+var frequencies = map[string]bool{"Monthly": true, "One-time": true, "Campaign": true}
 
 // MasterServiceDeniedMessage is the exact BI message for unauthorized edits.
 const MasterServiceDeniedMessage = "[anda tidak memiliki akses untuk mengubah master service list]"
@@ -40,6 +56,14 @@ type ServiceVersion struct {
 	Name           string    `json:"name"`
 	StandardPrice  string    `json:"standard_price"`
 	CommissionRule string    `json:"commission_rule"`
+	Category       string    `json:"category"`
+	Unit           string    `json:"unit"`
+	MinQty         string    `json:"min_qty"`
+	PricingMode    string    `json:"pricing_mode"`
+	ApplyPPN       bool      `json:"apply_ppn"`
+	Frequency      string    `json:"frequency"`
+	PriceNote      string    `json:"price_note"`
+	Description    string    `json:"description"`
 	Active         bool      `json:"active"`
 	EffectiveFrom  string    `json:"effective_from"`
 	CreatedBy      string    `json:"created_by"`
@@ -52,6 +76,14 @@ type ServiceView struct {
 	Name           string `json:"name"`
 	StandardPrice  string `json:"standard_price"`
 	CommissionRule string `json:"commission_rule"`
+	Category       string `json:"category"`
+	Unit           string `json:"unit"`
+	MinQty         string `json:"min_qty"`
+	PricingMode    string `json:"pricing_mode"`
+	ApplyPPN       bool   `json:"apply_ppn"`
+	Frequency      string `json:"frequency"`
+	PriceNote      string `json:"price_note"`
+	Description    string `json:"description"`
 	Active         bool   `json:"active"`
 	VersionNo      int    `json:"version_no"`
 	EffectiveFrom  string `json:"effective_from"`
@@ -62,12 +94,68 @@ type ServiceInput struct {
 	Name           string
 	StandardPrice  string
 	CommissionRule string
+	Category       string
+	Unit           string
+	MinQty         string
+	PricingMode    string
+	ApplyPPN       bool
+	Frequency      string
+	PriceNote      string
+	Description    string
 	Active         bool
 	EffectiveFrom  string // YYYY-MM-DD
 }
 
-func (in ServiceInput) valid() bool {
-	return in.Name != "" && in.StandardPrice != "" && in.CommissionRule != "" && in.EffectiveFrom != ""
+// normalize validates the MSL v2 calculator fields, applying the flat default
+// and normalizing passthrough's unit price to "0". Invalid input returns
+// ErrIncomplete (the house default BI string — no new strings invented).
+func (in *ServiceInput) normalize() error {
+	if in.Name == "" || in.CommissionRule == "" || in.EffectiveFrom == "" {
+		return ErrIncomplete
+	}
+	if in.PricingMode == "" {
+		in.PricingMode = pricingFlat
+	}
+	if !pricingModes[in.PricingMode] {
+		return ErrIncomplete
+	}
+	if in.Frequency != "" && !frequencies[in.Frequency] {
+		return ErrIncomplete
+	}
+
+	if in.PricingMode == pricingPassthrough {
+		// Unit price is ignored for passthrough; normalize "" / "0" to "0".
+		if in.StandardPrice == "" {
+			in.StandardPrice = "0"
+		}
+		if p, err := money.Parse(in.StandardPrice); err != nil || p < 0 {
+			return ErrIncomplete
+		}
+	} else {
+		p, err := money.Parse(in.StandardPrice)
+		if err != nil || p <= 0 {
+			return ErrIncomplete
+		}
+	}
+
+	if in.PricingMode == pricingMinFloor || in.PricingMode == pricingBatchCeiling {
+		norm, ok := wholePositive(in.MinQty)
+		if !ok {
+			return ErrIncomplete
+		}
+		in.MinQty = norm
+	}
+	return nil
+}
+
+// wholePositive validates that s is a whole positive integer (DECIMAL string),
+// returning it normalized to a DECIMAL(15,2) representation.
+func wholePositive(s string) (string, bool) {
+	m, err := money.Parse(s)
+	if err != nil || m <= 0 || int64(m)%100 != 0 {
+		return "", false
+	}
+	return m.Decimal(), true
 }
 
 // CreateService creates a new master service with version 1 (+ audit).
@@ -75,8 +163,8 @@ func CreateService(ctx context.Context, d *sql.DB, actor permission.Actor, in Se
 	if !CanEditMasterServices(actor) {
 		return "", ErrMasterServiceDenied
 	}
-	if !in.valid() {
-		return "", ErrIncomplete
+	if err := in.normalize(); err != nil {
+		return "", err
 	}
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
@@ -98,7 +186,7 @@ func CreateService(ctx context.Context, d *sql.DB, actor permission.Actor, in Se
 	}
 	if err := audit.Write(ctx, tx, audit.Record{
 		EntityType: "master_service", EntityID: id, Actor: actor.EmployeeID,
-		Action: "create", After: map[string]any{"version_no": 1, "name": in.Name, "standard_price": in.StandardPrice},
+		Action: "create", After: map[string]any{"version_no": 1, "name": in.Name, "standard_price": in.StandardPrice, "pricing_mode": in.PricingMode},
 	}); err != nil {
 		return "", err
 	}
@@ -114,8 +202,8 @@ func UpdateService(ctx context.Context, d *sql.DB, actor permission.Actor, servi
 	if !CanEditMasterServices(actor) {
 		return 0, ErrMasterServiceDenied
 	}
-	if !in.valid() {
-		return 0, ErrIncomplete
+	if err := in.normalize(); err != nil {
+		return 0, err
 	}
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
@@ -137,7 +225,7 @@ func UpdateService(ctx context.Context, d *sql.DB, actor permission.Actor, servi
 	}
 	if err := audit.Write(ctx, tx, audit.Record{
 		EntityType: "master_service", EntityID: serviceID, Actor: actor.EmployeeID,
-		Action: "new_version", After: map[string]any{"version_no": next, "name": in.Name, "standard_price": in.StandardPrice},
+		Action: "new_version", After: map[string]any{"version_no": next, "name": in.Name, "standard_price": in.StandardPrice, "pricing_mode": in.PricingMode},
 	}); err != nil {
 		return 0, err
 	}
@@ -152,12 +240,29 @@ func insertVersion(ctx context.Context, tx *sql.Tx, serviceID string, versionNo 
 	if in.Active {
 		active = 1
 	}
+	ppn := 0
+	if in.ApplyPPN {
+		ppn = 1
+	}
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO master_service_versions
-		   (service_id, version_no, name, standard_price, commission_rule, active, effective_from, created_by)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		serviceID, versionNo, in.Name, in.StandardPrice, in.CommissionRule, active, in.EffectiveFrom, actor)
+		   (service_id, version_no, name, standard_price, commission_rule, category, unit,
+		    min_qty, pricing_mode, apply_ppn, frequency, price_note, description,
+		    active, effective_from, created_by)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		serviceID, versionNo, in.Name, in.StandardPrice, in.CommissionRule,
+		nullText(in.Category), nullText(in.Unit), nullText(in.MinQty), in.PricingMode, ppn,
+		nullText(in.Frequency), nullText(in.PriceNote), nullText(in.Description),
+		active, in.EffectiveFrom, actor)
 	return err
+}
+
+// nullText stores empty optional strings as SQL NULL.
+func nullText(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 // Sentinel errors.
@@ -171,18 +276,24 @@ func EffectiveAt(ctx context.Context, d *sql.DB, serviceID, date string) (Servic
 	var v ServiceView
 	v.ID = serviceID
 	var eff time.Time
+	var category, unit, minQty, frequency, priceNote, description sql.NullString
 	err := d.QueryRowContext(ctx,
-		`SELECT name, standard_price, commission_rule, active, version_no, effective_from
+		`SELECT name, standard_price, commission_rule, category, unit, min_qty,
+		        pricing_mode, apply_ppn, frequency, price_note, description,
+		        active, version_no, effective_from
 		   FROM master_service_versions
 		  WHERE service_id = ? AND effective_from <= ?
 		  ORDER BY effective_from DESC, version_no DESC LIMIT 1`,
-		serviceID, date).Scan(&v.Name, &v.StandardPrice, &v.CommissionRule, &v.Active, &v.VersionNo, &eff)
+		serviceID, date).Scan(&v.Name, &v.StandardPrice, &v.CommissionRule, &category, &unit, &minQty,
+		&v.PricingMode, &v.ApplyPPN, &frequency, &priceNote, &description, &v.Active, &v.VersionNo, &eff)
 	if err == sql.ErrNoRows {
 		return v, ErrServiceNotFound
 	}
 	if err != nil {
 		return v, err
 	}
+	v.Category, v.Unit, v.MinQty = category.String, unit.String, minQty.String
+	v.Frequency, v.PriceNote, v.Description = frequency.String, priceNote.String, description.String
 	v.EffectiveFrom = eff.Format("2006-01-02")
 	return v, nil
 }
@@ -220,7 +331,9 @@ func ListEffectiveAt(ctx context.Context, d *sql.DB, date string) ([]ServiceView
 // ListVersions returns all versions for a service, newest first.
 func ListVersions(ctx context.Context, d *sql.DB, serviceID string) ([]ServiceVersion, error) {
 	rows, err := d.QueryContext(ctx,
-		`SELECT id, service_id, version_no, name, standard_price, commission_rule, active, effective_from, created_by, created_at
+		`SELECT id, service_id, version_no, name, standard_price, commission_rule,
+		        category, unit, min_qty, pricing_mode, apply_ppn, frequency, price_note, description,
+		        active, effective_from, created_by, created_at
 		   FROM master_service_versions WHERE service_id = ? ORDER BY version_no DESC`, serviceID)
 	if err != nil {
 		return nil, err
@@ -230,9 +343,14 @@ func ListVersions(ctx context.Context, d *sql.DB, serviceID string) ([]ServiceVe
 	for rows.Next() {
 		var v ServiceVersion
 		var eff time.Time
-		if err := rows.Scan(&v.ID, &v.ServiceID, &v.VersionNo, &v.Name, &v.StandardPrice, &v.CommissionRule, &v.Active, &eff, &v.CreatedBy, &v.CreatedAt); err != nil {
+		var category, unit, minQty, frequency, priceNote, description sql.NullString
+		if err := rows.Scan(&v.ID, &v.ServiceID, &v.VersionNo, &v.Name, &v.StandardPrice, &v.CommissionRule,
+			&category, &unit, &minQty, &v.PricingMode, &v.ApplyPPN, &frequency, &priceNote, &description,
+			&v.Active, &eff, &v.CreatedBy, &v.CreatedAt); err != nil {
 			return nil, err
 		}
+		v.Category, v.Unit, v.MinQty = category.String, unit.String, minQty.String
+		v.Frequency, v.PriceNote, v.Description = frequency.String, priceNote.String, description.String
 		v.EffectiveFrom = eff.Format("2006-01-02")
 		out = append(out, v)
 	}
