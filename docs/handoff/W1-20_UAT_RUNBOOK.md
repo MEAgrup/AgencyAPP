@@ -7,7 +7,7 @@
 2. **Dev** — login tiap peran (Sales Staff, Sales Head, Finance Staff, Finance Head, Account Staff, Account Lead, OD, Director) berhasil; OD terbukti read-only.
 
 ## B. Akuisisi → Closing (stream A: M1 + M0)
-3. **Sales Staff** — registrasi lead deal UAT. ✔ `LEAD-YYYYMM-NNNN` terbit hanya setelah field wajib lengkap; registrasi ulang nomor sama ⇒ ditolak dengan pesan collision persis (DECISIONS O11).
+3. **Sales Staff** — registrasi lead deal UAT. ✔ `LEAD-YYYYMM-NNNN` terbit hanya setelah field wajib lengkap. Dedup kolaboratif (M1 v2, DECISIONS 2026-07-16): registrasi ulang nomor sama oleh **sales yang sama** ⇒ 409 `[anda sudah memproses lead ini]`; oleh **sales lain** ⇒ TIDAK ditolak — 201 join dengan info `[lead juga sedang dikerjakan sales lain (nama)]`, `PRSP-` kedua terlampir ke lead yang sama, dan sales pertama menerima notifikasi in-app `m1.lead.also_pursued`; **import Marketing** nomor sama ⇒ tetap ditolak dengan pesan collision persis (DECISIONS O11).
 4. **Sales Staff** — attempt berjalan `New Lead → Contacted`. ✔ transisi di luar tabel diblokir `[transisi status tidak diizinkan]`.
 5. **Sales Staff** — submit Qualified Form (identitas, platform, GMV baseline 3 bulan, target, budget, layanan ≤5). ✔ Estimasi Nilai + Komisi terhitung otomatis dari versi MSL pada tanggal itu; **Sales Head spot-check komisi manual vs MSL** (AC W1-20); field terkunci pasca-submit ⇒ edit ditolak `[field ini terkunci, tidak bisa diubah]`.
 6. **Sales Staff + Sales Head** — negosiasi (custom term bila ada di deal riil) ⇒ approval SPV; ✔ proposal versioned & immutable, notifikasi approval masuk.

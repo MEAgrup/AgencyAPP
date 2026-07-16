@@ -30,6 +30,11 @@ func (a *App) writeDomainErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, module0_sales.ErrNotFound),
 		errors.Is(err, module1_leads.ErrLeadNotFound):
 		writeErr(w, http.StatusNotFound, "[data tidak ditemukan]")
+	case errors.Is(err, module1_leads.ErrAlreadyPursuing):
+		// Same-salesperson guard: with collaborative dedup, Register (not just
+		// ClaimFromPool) reaches this on a re-registration of a lead the actor
+		// already works — a user-facing conflict, never an internal error.
+		writeErr(w, http.StatusConflict, module1_leads.MsgAlreadyPursuing)
 	default:
 		msg := err.Error()
 		if len(msg) > 0 && msg[0] == '[' {

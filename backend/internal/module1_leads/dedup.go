@@ -31,6 +31,12 @@ const (
 	// owners' names, comma-separated when there is more than one. New string per
 	// the W1-09 precedent (new BI strings are authorized explicitly).
 	MsgAlsoWorkedByOthers = "[lead juga sedang dikerjakan sales lain (nama)]"
+	// MsgAlreadyPursuing — the registrant already holds an open attempt on this
+	// lead (same-salesperson guard, consistent with ClaimFromPool). Surfaced as a
+	// 409, never a 500. New string per the W1-09 precedent, logged in DECISIONS
+	// 2026-07-16: the PRD leaves this case without a message (the Pool view hides
+	// already-claimed leads), but single registration reaches it directly.
+	MsgAlreadyPursuing = "[anda sudah memproses lead ini]"
 )
 
 // Channel is the intake door (affects the active-lead message wording).
