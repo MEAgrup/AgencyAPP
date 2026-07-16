@@ -41,11 +41,41 @@ kolaborator TIDAK membawa info/notifikasi (revisi atas draft eksekutor).
 | Eksekusi import riil (dry-run → apply, urutan di HANDOFF_JALUR_B_SESSION2 §A) | Setelah data di atas masuk |
 | W1-20 UAT + exit review Wave 1 (gate Wave 2) | Pilot Sales+Finance + Nerissa |
 
+## Klaster 2 (sesi yang sama, lanjutan): Sales Workspace v1
+
+4. **Read layer M0/M1** (`bd251c8`): GET `/api/v1/leads?view=pool|mine|all&q=`,
+   `/leads/{id}` (+attempts), `/my/attempts`, `/attempts/{id}` (qualified form +
+   versi negosiasi, uang mentah + `*_idr`). Visibilitas per PERMISSIONS.md;
+   stale Pool >24 jam (M1-OA-7) diturunkan dari audit_log (tanpa kolom baru);
+   penolakan baca = string existing `[anda tidak memiliki akses ke data ini]`.
+   **Deviasi interim dicatat di DECISIONS.md**: Marketing dapat read-only
+   `all`+`pool` TANPA scoping campaign-ownership sampai M2 ada — tinjau ulang
+   saat M2 dibangun.
+5. **UI Leads web-internal** (`ce08043`): `/leads` (tab Pool default + badge
+   STALE + Klaim; Milik Saya; Semua auto-tersembunyi saat 403), form registrasi
+   dengan banner info join kolaboratif verbatim, `/leads/[id]` (attempts, badge
+   Pemenang), item sidebar. Build+lint hijau. Halaman AKSI attempt (qualified
+   form, negosiasi, closing) SENGAJA belum — klaster berikutnya.
+6. **UAT runbook** (`2fcdb60`): langkah 3 diperbarui (blokir hanya untuk
+   pemegang sama) + skenario 3b join kolaboratif; migrasi 0001–0013.
+
 ## Untuk sesi berikutnya
 
 - Jika data manusia sudah masuk → jalankan urutan import §A handoff Jalur B
   (angka referensi dry-run boleh bergeser kecil karena LEFT JOIN, lihat atas).
-- Jika belum → kandidat kerja tanpa input manusia berikutnya: UI leads di
-  `web-internal` (belum ada halaman M0/M1 — backend-first sampai kini), atau
-  persiapan Wave 2 HANYA setelah exit criteria Wave 1 lolos (Build Plan §4 —
+- Klaster kerja berikutnya tanpa input manusia: **UI aksi attempt** di
+  web-internal — halaman attempt (dari read layer `/attempts/{id}` yang sudah
+  ada): tombol Contacted, form Not Qualified (taxonomy M1-OA-8), Qualified Form
+  (layanan ≤5 + estimasi dari MSL), alur negosiasi (submit/decision/accept/
+  resubmit), Closing Form (≤5 sales, Σ=100%, Commission & Payment PIC).
+  Endpoint POST-nya SUDAH ada semua (routes_leads_sales.go) — murni frontend.
+- Persiapan Wave 2 HANYA setelah exit criteria Wave 1 lolos (Build Plan §4 —
   jangan lompat gate).
+
+## Lingkungan container (kalau sesi baru di container baru)
+
+- MariaDB perlu diinstal + start (`apt-get install mariadb-server`,
+  `service mariadb start`), buat DB `cdps_test` + user `cdps`/`cdps_dev`.
+- Test backend WAJIB `go test -p 1 -count=1 ./...` (tanpa -p 1 = gagal palsu
+  karena paket berbagi satu DB test).
+- Frontend: `npm ci` dulu di web-internal/ (node_modules tidak ter-commit).
