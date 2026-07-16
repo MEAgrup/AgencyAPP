@@ -24,6 +24,9 @@ func (a *App) writeDomainErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusForbidden, re.Message)
 	case err.Error() == statemachine.RoleDeniedMessage:
 		writeErr(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, module1_leads.ErrLeadForbidden),
+		errors.Is(err, module0_sales.ErrReadDenied):
+		writeErr(w, http.StatusForbidden, err.Error())
 	case errors.As(err, &be):
 		writeErr(w, http.StatusConflict, be.Message)
 	case errors.Is(err, module0_sales.ErrNotFound),
