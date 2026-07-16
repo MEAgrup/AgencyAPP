@@ -13,6 +13,19 @@ const EXACT_MAP: Record<string, BadgeTone> = {
   '[Blocked]': 'red',
   '[Revision Requested]': 'purple',
   '[Cancelled — Service Voided]': 'darkgray',
+  // M0 prospect attempt / M1 lead record statuses (docs/STATE_MACHINES.md §1-2).
+  '[Pool]': 'blue',
+  'active': 'green',
+  'New Lead': 'gray',
+  'Contacted': 'blue',
+  'Qualified': 'green',
+  'Not Qualified': 'red',
+  '[Not Qualified]': 'red',
+  '[Rejected]': 'red',
+  '[Blocked - Duplikat]': 'red',
+  'Closed-Success': 'green',
+  'Closed-Lost': 'darkgray',
+  '[Closed - Kalah Kompetisi]': 'darkgray',
 };
 
 export function badgeTone(status: string): BadgeTone {
