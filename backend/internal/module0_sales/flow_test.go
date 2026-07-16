@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/meagrup/agencyapp/backend/internal/admin"
+	"github.com/meagrup/agencyapp/backend/internal/core/money"
 	"github.com/meagrup/agencyapp/backend/internal/core/notification"
 	"github.com/meagrup/agencyapp/backend/internal/core/permission"
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
@@ -85,6 +86,74 @@ func TestQualified_PermissionMatrix(t *testing.T) {
 	if err := f.sales.SetNotQualified(ctx, salesActor("SL", permission.LevelLead), att.ID,
 		[]string{module0_sales.NQTidakRespon}, ""); err != nil {
 		t.Fatalf("lead SetNotQualified: %v", err)
+	}
+}
+
+// TestQualified_CalculatorPinAndRecompute: a min_floor MSL service submitted
+// with a quantity pins all calculator params + subtotal into
+// qualified_form_services, and recomputing the subtotal from those pinned
+// columns reproduces the stored value exactly (CLAUDE.md #4).
+func TestQualified_CalculatorPinAndRecompute(t *testing.T) {
+	d := testutil.DB(t)
+	testutil.Clean(t, d)
+	ctx := context.Background()
+	engine := statemachine.New()
+	cat := notification.NewCatalog()
+	leads := &module1_leads.Service{DB: d, Engine: engine}
+	sales := &module0_sales.Service{DB: d, Engine: engine, Catalog: cat, Win: leads.ResolveWin}
+	lead := salesActor("SL", permission.LevelLead)
+	owner := salesActor("SS-1", permission.LevelStaff)
+
+	// min_floor: unit 150.000, floor 5. qty 7 -> 7 × 150.000 = 1.050.000.
+	msvc, err := admin.CreateService(ctx, d, lead, admin.ServiceInput{
+		Name: "Konten", StandardPrice: "150000", CommissionRule: "10% of standard price",
+		PricingMode: "min_floor", MinQty: "5", Unit: "per produk", Active: true, EffectiveFrom: "2026-01-01",
+	})
+	if err != nil {
+		t.Fatalf("CreateService: %v", err)
+	}
+
+	_, att, err := leads.Register(ctx, owner, module1_leads.RegisterInput{LeadName: "Co", PhoneNumber: "0899", Source: "Referral"})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := sales.MarkContacted(ctx, owner, att.ID); err != nil {
+		t.Fatalf("MarkContacted: %v", err)
+	}
+	form := module0_sales.QualifiedForm{
+		NamaPIC: "P", Toko: "T", Kota: "K", LinkToko: "L", Kategori: "C", Platform: "Shopee",
+		GMVBaseline: "1000000", TargetGMV: "2000000",
+		Services: []module0_sales.ServiceSelection{{MasterServiceID: msvc, Quantity: 7}},
+	}
+	if err := sales.SubmitQualifiedForm(ctx, owner, att.ID, form); err != nil {
+		t.Fatalf("SubmitQualifiedForm: %v", err)
+	}
+
+	var mode, unitPrice, subtotal, minQty string
+	var qty float64
+	var applyPPN int
+	var inputAmount sql.NullString
+	if err := d.QueryRowContext(ctx,
+		`SELECT pricing_mode, standard_price, quantity, min_qty, apply_ppn, input_amount, subtotal
+		   FROM qualified_form_services WHERE attempt_id = ?`, att.ID).
+		Scan(&mode, &unitPrice, &qty, &minQty, &applyPPN, &inputAmount, &subtotal); err != nil {
+		t.Fatalf("read pinned: %v", err)
+	}
+	if subtotal != "1050000.00" {
+		t.Fatalf("pinned subtotal = %q, want 1050000.00", subtotal)
+	}
+
+	// Recompute from the pinned columns only.
+	up, _ := money.Parse(unitPrice)
+	mq, _ := money.Parse(minQty)
+	recomputed, err := module0_sales.ComputeSubtotal(module0_sales.PriceParams{
+		Mode: mode, UnitPrice: up, Quantity: int64(qty), MinQty: int64(mq) / 100, ApplyPPN: applyPPN == 1,
+	})
+	if err != nil {
+		t.Fatalf("recompute: %v", err)
+	}
+	if recomputed.Decimal() != subtotal {
+		t.Fatalf("recomputed %q != pinned %q", recomputed.Decimal(), subtotal)
 	}
 }
 

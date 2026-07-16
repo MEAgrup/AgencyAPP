@@ -8,6 +8,7 @@ import (
 
 	"github.com/meagrup/agencyapp/backend/internal/admin"
 	"github.com/meagrup/agencyapp/backend/internal/core/audit"
+	"github.com/meagrup/agencyapp/backend/internal/core/money"
 	"github.com/meagrup/agencyapp/backend/internal/core/permission"
 )
 
@@ -29,8 +30,82 @@ var nqClosedReasons = map[string]bool{
 }
 
 // ServiceSelection is one service chosen on the Qualified Form (by master id).
+// Quantity feeds the MSL v2 calculator (omitted / 0 defaults to 1); Amount is
+// the passthrough rupiah value entered by sales (passthrough mode only).
 type ServiceSelection struct {
 	MasterServiceID string `json:"master_service_id"`
+	Quantity        int64  `json:"quantity"`
+	Amount          string `json:"amount"`
+}
+
+// LineFromView resolves an MSL v2 effective version plus the sales-entered
+// quantity / passthrough amount into a ServiceLine (name, unit price, commission
+// rule and calculator params pinned from the version). Passthrough requires a
+// parseable amount > 0; non-passthrough ignores the amount.
+func LineFromView(v admin.ServiceView, quantity int64, amount string) (ServiceLine, error) {
+	price, err := money.Parse(v.StandardPrice)
+	if err != nil {
+		return ServiceLine{}, err
+	}
+	rule, err := ParseCommissionRule(v.CommissionRule)
+	if err != nil {
+		return ServiceLine{}, err
+	}
+	mode := v.PricingMode
+	if mode == "" {
+		mode = PricingFlat
+	}
+	line := ServiceLine{
+		ServiceID: v.ID, VersionNo: v.VersionNo, Name: v.Name, StandardPrice: price,
+		Unit: v.Unit, Mode: mode, Quantity: quantity, ApplyPPN: v.ApplyPPN, Rule: rule,
+	}
+	switch mode {
+	case PricingMinFloor, PricingBatchCeiling:
+		mq, ok := parseWholeQty(v.MinQty)
+		if !ok {
+			return ServiceLine{}, ErrIncomplete
+		}
+		line.MinQty = mq
+	case PricingPassthrough:
+		amt, err := money.Parse(amount)
+		if err != nil || amt <= 0 {
+			return ServiceLine{}, ErrIncomplete
+		}
+		line.InputAmount = amt
+	}
+	return line, nil
+}
+
+// resolveLines resolves each selection against the MSL version effective today.
+func (s *Service) resolveLines(ctx context.Context, selections []ServiceSelection) ([]ServiceLine, error) {
+	today := time.Now().UTC().Format("2006-01-02")
+	lines := make([]ServiceLine, 0, len(selections))
+	for _, sel := range selections {
+		if strings.TrimSpace(sel.MasterServiceID) == "" {
+			return nil, ErrIncomplete
+		}
+		v, err := admin.EffectiveAt(ctx, s.DB, sel.MasterServiceID, today)
+		if err != nil {
+			return nil, fmt.Errorf("resolve master service %s: %w", sel.MasterServiceID, err)
+		}
+		line, err := LineFromView(v, sel.Quantity, sel.Amount)
+		if err != nil {
+			return nil, err
+		}
+		lines = append(lines, line)
+	}
+	return lines, nil
+}
+
+// PreviewQuote computes a read-only quote (Estimasi Nilai + komisi) for a set of
+// selections against the MSL version effective today, without persisting. The
+// 1..MaxServices cap is enforced by BuildQuote with the verbatim BI message.
+func (s *Service) PreviewQuote(ctx context.Context, selections []ServiceSelection) (Quote, error) {
+	lines, err := s.resolveLines(ctx, selections)
+	if err != nil {
+		return Quote{}, err
+	}
+	return BuildQuote(lines)
 }
 
 // QualifiedForm captures the client draft (M0 §4) plus selected services. The
@@ -93,26 +168,23 @@ func (s *Service) SubmitQualifiedForm(ctx context.Context, actor permission.Acto
 	}
 
 	// Resolve MSL versions (reads) before the write transaction; the pinned
-	// snapshot is what gets persisted, so it stays recomputable forever.
-	today := time.Now().UTC().Format("2006-01-02")
-	type pinned struct {
-		id, name, price, rule string
-		versionNo             int
+	// snapshot (params + computed subtotal) is what gets persisted, so each line
+	// stays recomputable forever.
+	lines, err := s.resolveLines(ctx, form.Services)
+	if err != nil {
+		return err
 	}
-	pins := make([]pinned, 0, len(form.Services))
-	for _, sel := range form.Services {
-		if strings.TrimSpace(sel.MasterServiceID) == "" {
-			return ErrIncomplete
-		}
-		v, err := admin.EffectiveAt(ctx, s.DB, sel.MasterServiceID, today)
+	type pinned struct {
+		line     ServiceLine
+		subtotal money.Money
+	}
+	pins := make([]pinned, 0, len(lines))
+	for _, l := range lines {
+		subtotal, err := l.Subtotal()
 		if err != nil {
-			return fmt.Errorf("resolve master service %s: %w", sel.MasterServiceID, err)
-		}
-		// Validate the commission rule parses (never persist a bad rule).
-		if _, err := ParseCommissionRule(v.CommissionRule); err != nil {
 			return err
 		}
-		pins = append(pins, pinned{v.ID, v.Name, v.StandardPrice, v.CommissionRule, v.VersionNo})
+		pins = append(pins, pinned{l, subtotal})
 	}
 
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -140,11 +212,15 @@ func (s *Service) SubmitQualifiedForm(ctx context.Context, actor permission.Acto
 		return err
 	}
 	for _, p := range pins {
+		l := p.line
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO qualified_form_services
-			   (attempt_id, master_service_id, master_version_no, name, standard_price, commission_rule, created_by)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			attemptID, p.id, p.versionNo, p.name, p.price, p.rule, actor.EmployeeID); err != nil {
+			   (attempt_id, master_service_id, master_version_no, name, standard_price, commission_rule,
+			    quantity, input_amount, unit, min_qty, pricing_mode, apply_ppn, subtotal, created_by)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			attemptID, l.ServiceID, l.VersionNo, l.Name, l.StandardPrice.Decimal(), l.Rule.String(),
+			l.params().Quantity, inputAmountValue(l), nullString(l.Unit), minQtyValue(l.MinQty),
+			l.Mode, tinyBool(l.ApplyPPN), p.subtotal.Decimal(), actor.EmployeeID); err != nil {
 			return err
 		}
 	}
@@ -220,4 +296,27 @@ func nullDecimal(s string) any {
 		return nil
 	}
 	return s
+}
+
+// inputAmountValue stores the passthrough amount, NULL for other modes.
+func inputAmountValue(l ServiceLine) any {
+	if l.Mode == PricingPassthrough {
+		return l.InputAmount.Decimal()
+	}
+	return nil
+}
+
+// minQtyValue stores a positive min_qty, NULL when the mode has no floor/batch.
+func minQtyValue(minQty int64) any {
+	if minQty <= 0 {
+		return nil
+	}
+	return fmt.Sprintf("%d", minQty)
+}
+
+func tinyBool(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

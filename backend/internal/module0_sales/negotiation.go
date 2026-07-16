@@ -183,8 +183,11 @@ func (s *Service) AcceptCounter(ctx context.Context, actor permission.Actor, att
 // standardLines builds proposal lines from the Qualified Form snapshot (no-nego
 // path takes standard price + commission verbatim).
 func (s *Service) standardLines(ctx context.Context, tx *sql.Tx, attemptID string) ([]ProposalLine, error) {
+	// The no-nego "standard" proposed price is the line's deal value = the pinned
+	// calculator subtotal (qty × price with the mode/PPN applied), not the unit
+	// standard price (MSL v2, DECISIONS 2026-07-16).
 	rows, err := tx.QueryContext(ctx,
-		`SELECT master_service_id, standard_price, commission_rule
+		`SELECT master_service_id, subtotal, commission_rule
 		   FROM qualified_form_services WHERE attempt_id = ? ORDER BY id`, attemptID)
 	if err != nil {
 		return nil, err

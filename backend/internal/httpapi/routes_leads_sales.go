@@ -14,6 +14,9 @@ func (a *App) registerLeadsSalesRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/leads", a.protect(a.handleRegisterLead))
 	mux.HandleFunc("POST /api/v1/leads/{id}/claim", a.protect(a.handleClaimLead))
 
+	// M0 — quote preview (MSL v2 calculator; no persistence).
+	mux.HandleFunc("POST /api/v1/sales/quote-preview", a.protect(a.handleQuotePreview))
+
 	// M0 — attempt lifecycle (W1-05..09).
 	mux.HandleFunc("POST /api/v1/attempts/{id}/contacted", a.protect(a.handleMarkContacted))
 	mux.HandleFunc("POST /api/v1/attempts/{id}/qualify", a.protect(a.handleQualify))

@@ -141,6 +141,18 @@ func PercentOf(base Money, pctNumerator int64, pctScale int) (Money, error) {
 	return Money(minor.Int64()), nil
 }
 
+// Mul returns m multiplied by the whole factor n, guarding against int64
+// overflow: a product that cannot be represented in Money (minor units) returns
+// ErrBadAmount rather than silently wrapping. Used by the pricing calculator for
+// quantity × unit price.
+func Mul(m Money, n int64) (Money, error) {
+	prod := new(big.Int).Mul(big.NewInt(int64(m)), big.NewInt(n))
+	if !prod.IsInt64() {
+		return 0, fmt.Errorf("%w: product out of range", ErrBadAmount)
+	}
+	return Money(prod.Int64()), nil
+}
+
 func pow10(n int) *big.Int {
 	r := big.NewInt(1)
 	ten := big.NewInt(10)
