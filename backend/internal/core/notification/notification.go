@@ -1,6 +1,7 @@
 // Package notification implements the in-app notification center (S0-10).
 //
-// The event catalog is Phase 0 v2 §9 (13 events). Notifications are derived
+// The event catalog is Phase 0 v2 §9 (13 events) + M1 collaborative-dedup
+// (14th, DECISIONS 2026-07-10 "M1 DEDUP DIREDESAIN"). Notifications are derived
 // from audit/transition events, are per-user read/unread, and are NEVER
 // deletable — there is no delete code path here and none in the migrations
 // (a BEFORE DELETE trigger backs this at the storage layer).
@@ -22,7 +23,7 @@ type DB interface {
 // EventType identifies a cataloged event.
 type EventType string
 
-// The 13 cataloged events (Phase 0 v2 §9).
+// The 14 cataloged events (Phase 0 v2 §9 + M1 collaborative dedup).
 const (
 	EvNegotiationPendingApproval EventType = "m0.negotiation.pending_approval" // -> Sales Head/SPV
 	EvNegotiationDecision        EventType = "m0.negotiation.decision"         // -> Salesperson
@@ -37,6 +38,11 @@ const (
 	EvRevisionCountFlag          EventType = "m12.revision_count.flag"         // -> Team Leader/SPV
 	EvClientBandDrop             EventType = "m13.client.band_drop"            // -> SPV
 	EvPerformancePublished       EventType = "m14.performance.published"       // -> Each staff
+	// EvLeadAlsoPursued fires on a collaborative Sales single-registration Join
+	// (DECISIONS 2026-07-10): a salesperson registered a lead already being
+	// worked. Recipients = the OTHER active attempt owners (explicit), never the
+	// registrant.
+	EvLeadAlsoPursued EventType = "m1.lead.also_pursued" // -> other active attempt owners
 )
 
 // Emission is one notification-generating occurrence.
@@ -64,7 +70,7 @@ type Catalog struct {
 	entries map[EventType]entry
 }
 
-// NewCatalog returns the catalog with all 13 events registered.
+// NewCatalog returns the catalog with all 14 events registered.
 func NewCatalog() *Catalog {
 	c := &Catalog{entries: map[EventType]entry{}}
 
@@ -82,6 +88,7 @@ func NewCatalog() *Catalog {
 	c.entries[EvRevisionCountFlag] = entry{"Revision Count >= 3 (Quality flag)", leadsOfDivision}
 	c.entries[EvClientBandDrop] = entry{"Client band drop", leadsOfDivision}
 	c.entries[EvPerformancePublished] = entry{"Monthly Performance Score published", explicit}
+	c.entries[EvLeadAlsoPursued] = entry{"Lead also being pursued by another salesperson", explicit}
 
 	return c
 }
