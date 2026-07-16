@@ -13,6 +13,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/meagrup/agencyapp/backend/internal/core/tz"
 )
 
 // Next allocates the next ID for prefix in the YYYYMM bucket of now, using the
@@ -30,7 +32,10 @@ import (
 // separate SELECT, avoiding the shared→exclusive lock upgrade that deadlocks a
 // naive INSERT-IGNORE + SELECT ... FOR UPDATE approach.
 func Next(ctx context.Context, tx *sql.Tx, prefix string, now time.Time) (string, error) {
-	period := now.UTC().Format("200601")
+	// Business-month bucket in WIB (Asia/Jakarta), not UTC — DECISIONS O20.
+	// This is the single conversion point for every PREFIX-YYYYMM-NNNN caller,
+	// so callers may pass any instant (time.Now(), a stored created_at, …).
+	period := tz.Period(now)
 
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO id_sequences (prefix, period, next_n, created_by)

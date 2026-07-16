@@ -143,6 +143,40 @@ func TestScanReminders_OverdueWorkedExample(t *testing.T) {
 	}
 }
 
+// ── WIB boundary (DECISIONS O20): an instant late on 20 Jun UTC is already
+// 21 Jun in WIB, so bucketing must count 4 days overdue, not 3. Under the old
+// UTC bucketing this instant read as 20 Jun → 3 days (off by one).
+func TestDashboard_OverdueBucketsInWIB(t *testing.T) {
+	s := newSvc(t)
+	cat := notification.NewCatalog()
+	seedFinanceLead(t, s, "EMP-FINHEAD")
+	seedClientWithCommissionPIC(t, s, "CLI-TZ", "EMP-BUDI", "EMP-BUDI")
+	seedTrx(t, s, "TRX-TZ", "CLI-TZ", SchemeTermin, "15000000.00", "")
+	insertInstallment(t, s, "INST-TZ", "TRX-TZ", 2, "15000000.00", day(2026, 6, 17))
+
+	// 2026-06-20T18:30:00Z == 2026-06-21 01:30 WIB → business date 21 Jun.
+	now := time.Date(2026, 6, 20, 18, 30, 0, 0, time.UTC)
+	dash, err := s.Dashboard(context.Background(), cat, financeStaff, now)
+	if err != nil {
+		t.Fatalf("Dashboard: %v", err)
+	}
+	var row *ReminderRow
+	for i := range dash.Reminders {
+		if dash.Reminders[i].InstallmentID == "INST-TZ" {
+			row = &dash.Reminders[i]
+		}
+	}
+	if row == nil {
+		t.Fatalf("INST-TZ missing from dashboard reminders: %+v", dash.Reminders)
+	}
+	if row.DaysOverdue != 4 {
+		t.Errorf("days_overdue = %d, want 4 (WIB business date 21 Jun - due 17 Jun)", row.DaysOverdue)
+	}
+	if row.Label != "[jatuh tempo 4 hari, segera tindak lanjuti]" {
+		t.Errorf("label = %q, want 4-day WIB label", row.Label)
+	}
+}
+
 // ── H-3 upcoming reminder, fire-once ──────────────────────────────────────
 func TestScanReminders_H3FiresOnce(t *testing.T) {
 	s := newSvc(t)

@@ -33,6 +33,7 @@ import (
 
 	"github.com/meagrup/agencyapp/backend/internal/auth"
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
+	"github.com/meagrup/agencyapp/backend/internal/core/tz"
 	"github.com/meagrup/agencyapp/backend/internal/db"
 	"github.com/meagrup/agencyapp/backend/internal/importer"
 )
@@ -212,7 +213,7 @@ func mustParseLedger(path string) []importer.LedgerClient {
 
 func parseRunDate(s string) time.Time {
 	if s == "" {
-		return time.Now()
+		return tz.BusinessDate(time.Now()) // "hari ini" in WIB (DECISIONS O20)
 	}
 	t, err := time.Parse("2006-01-02", s)
 	if err != nil {
@@ -224,7 +225,7 @@ func parseRunDate(s string) time.Time {
 // leadSince resolves --since; default = 6 bulan sebelum hari ini (O22 filter B).
 func leadSince(s string) time.Time {
 	if s == "" {
-		return time.Now().AddDate(0, -6, 0)
+		return tz.BusinessDate(time.Now()).AddDate(0, -6, 0) // 6-bulan window in WIB (DECISIONS O20)
 	}
 	t, err := time.Parse("2006-01-02", s)
 	if err != nil {
