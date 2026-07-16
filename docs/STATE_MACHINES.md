@@ -10,9 +10,11 @@
 
 ## 2. Lead record (M1)
 `[Pool]` (Marketing-imported, claimable) / active (scouted-owned) / `[Rejected]` / `[Not Qualified]` / `[Blocked - Duplikat]` (intake event).
-- Duplicate of active external lead ⇒ reject row: `[lead sudah ada & sedang diproses, tidak diimport]` (attempt logged, not counted).
+- Duplicate of active external lead ⇒ reject row: `[lead sudah ada & sedang diproses, tidak diimport]` (attempt logged, not counted). *(Intake collision ⇒ Blocked, applies to import door only per M1 §3 rule 5)*
 - Duplicate of Rejected/Not Qualified ⇒ reopen to `[Pool]`.
 - Import gate: parent Campaign must be `[Active]`, else `[campaign belum/tidak aktif, lead tidak bisa diimport]`.
+- Registrasi tunggal Sales atas lead yang sedang dikerjakan sales lain ⇒ JOIN (attempt baru pada LEAD yang sama; notifikasi `m1.lead.collaborative_attempt` ke pemilik attempt lain; pesan inline `[lead juga sedang dikerjakan sales lain]`) — M1 v2, DECISIONS 2026-07-16.
+- Registrasi tunggal atas lead yang sudah Anda kerjakan sendiri ⇒ blokir `[lead sudah ada di daftar prospek Anda]`; atas `[Closed-Success]` ⇒ blokir `[lead sudah menjadi klien]`.
 
 ## 3. Campaign `CMP-` (M3)
 | From | To | Effect |
