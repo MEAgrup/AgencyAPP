@@ -3,11 +3,12 @@
 > Prasyarat & data: lihat `WAVE1_EXTERNAL_REQUESTS.md` Permintaan #1–#4. Jalankan di staging setelah PR foundation + PR Akun A (M0/M1) + PR stream B ter-merge. Setiap langkah mencantumkan **aktor**, **aksi**, dan **hasil yang diverifikasi** (status persis, pesan BI persis, audit). Kegagalan di langkah mana pun = no-go, catat di DECISIONS.md.
 
 ## A. Persiapan
-1. **Dev** — migrasi 0001–0012 up bersih; sync HRIS riil jalan; role mapping terisi dari daftar divisi/jabatan riil; MSL riil terinput (versioned).
+1. **Dev** — migrasi 0001–0013 up bersih; sync HRIS riil jalan; role mapping terisi dari daftar divisi/jabatan riil; MSL riil terinput (versioned).
 2. **Dev** — login tiap peran (Sales Staff, Sales Head, Finance Staff, Finance Head, Account Staff, Account Lead, OD, Director) berhasil; OD terbukti read-only.
 
 ## B. Akuisisi → Closing (stream A: M1 + M0)
-3. **Sales Staff** — registrasi lead deal UAT. ✔ `LEAD-YYYYMM-NNNN` terbit hanya setelah field wajib lengkap; registrasi ulang nomor sama ⇒ ditolak dengan pesan collision persis (DECISIONS O11).
+3. **Sales Staff** — registrasi lead deal UAT. ✔ `LEAD-YYYYMM-NNNN` terbit hanya setelah field wajib lengkap; registrasi ulang nomor yang sama oleh salesperson yang SAMA ⇒ ditolak `[lead ini sudah anda pegang & masih diproses]` (M1 v2, DECISIONS 2026-07-16).
+3b. **Sales Staff kedua** — registrasi nomor yang sama dari akun sales lain. ✔ TIDAK ditolak (dedup kolaboratif M1 v2, DECISIONS 2026-07-16): attempt paralel `PRSP-` terbit pada lead yang sama (1 lead, 2 attempt); respons membawa info `[lead juga sedang dikerjakan sales lain (nama)]`; sales pertama menerima notifikasi `m1.lead.collab_joined`; audit `collab_joined` tercatat pada lead. Saat deal ditutup di langkah 7, attempt kolaborator yang kalah auto `[Closed - Kalah Kompetisi]`.
 4. **Sales Staff** — attempt berjalan `New Lead → Contacted`. ✔ transisi di luar tabel diblokir `[transisi status tidak diizinkan]`.
 5. **Sales Staff** — submit Qualified Form (identitas, platform, GMV baseline 3 bulan, target, budget, layanan ≤5). ✔ Estimasi Nilai + Komisi terhitung otomatis dari versi MSL pada tanggal itu; **Sales Head spot-check komisi manual vs MSL** (AC W1-20); field terkunci pasca-submit ⇒ edit ditolak `[field ini terkunci, tidak bisa diubah]`.
 6. **Sales Staff + Sales Head** — negosiasi (custom term bila ada di deal riil) ⇒ approval SPV; ✔ proposal versioned & immutable, notifikasi approval masuk.
