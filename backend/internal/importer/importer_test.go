@@ -82,9 +82,9 @@ func TestDryRunDirtyFixtureLeavesDBUntouched(t *testing.T) {
 	ctx := context.Background()
 
 	leads := []LeadRow{
-		{NamaLead: "Alpha", NoTelepon: "0812-1111", Sumber: "form", StatusTerakhir: "diproses"}, // 0 valid
+		{NamaLead: "Alpha", NoTelepon: "0812-1111", Sumber: "form", StatusTerakhir: "diproses"},        // 0 valid
 		{NamaLead: "Alpha Dup", NoTelepon: "+62 812 1111", Sumber: "form", StatusTerakhir: "diproses"}, // 1 dup phone
-		{NamaLead: "", NoTelepon: "0812-2222", Sumber: "form", StatusTerakhir: "pool"},              // 2 missing name
+		{NamaLead: "", NoTelepon: "0812-2222", Sumber: "form", StatusTerakhir: "pool"},                 // 2 missing name
 	}
 
 	badAlloc := completeClient()
@@ -481,12 +481,14 @@ func TestApplyClientEmployeeNotRegistered(t *testing.T) {
 	}
 }
 
-// ── FIX 2: dedup mirror is byte-identical to live (INNER JOIN employees) ──────
-// A [Rejected] lead whose ONLY attempt is owned by an employee not in employees:
-// live matchByPhone INNER JOINs employees, dropping that attempt, so the lead
-// reopens. The importer mirror must do the same (reopen), NOT block on a
-// phantom active attempt.
-func TestImportLeadReopenWhenAttemptOwnerNotEmployee(t *testing.T) {
+// ── O19: import dedup shares the official LEFT JOIN match query ─────────────
+// A [Rejected] lead whose ONLY attempt is owned by an employee not in
+// employees: the shared module1_leads.MatchByPhone LEFT JOINs employees, so
+// that attempt is VISIBLE to dedup (owner name falls back to the raw employee
+// id) exactly as it is to live Register (O19 RESOLVED 2026-07-16 — the old
+// importer mirror's INNER JOIN drop was a defect, not intended behavior). A
+// visible open attempt means the import row BLOCKS, it does not reopen.
+func TestImportLeadBlocksWhenAttemptOwnerNotEmployee(t *testing.T) {
 	s := newSvc(t)
 	ctx := context.Background()
 
@@ -503,31 +505,38 @@ func TestImportLeadReopenWhenAttemptOwnerNotEmployee(t *testing.T) {
 	}
 
 	row := LeadRow{NamaLead: "Ghosty", NoTelepon: "0813 7777", Sumber: "form", StatusTerakhir: "diproses"}
+	wantMsg := "[lead sedang diproses oleh sales lain (EMP-GHOST)]"
 
-	// Dry-run: reopen surfaces as RowValid, not RowDuplikat.
+	// Dry-run: blocked, not reopened — the not-yet-synced owner is visible.
 	rep, err := s.DryRun(ctx, director, []LeadRow{row}, nil)
 	if err != nil {
 		t.Fatalf("DryRun: %v", err)
 	}
-	if rep.Rows[0].Status != RowValid {
-		t.Fatalf("dry-run status = %q msg %q, want valid (reopen — attempt dropped by INNER JOIN)",
+	if rep.Rows[0].Status != RowDuplikat {
+		t.Fatalf("dry-run status = %q msg %q, want duplikat (attempt visible via LEFT JOIN)",
 			rep.Rows[0].Status, rep.Rows[0].Message)
 	}
+	if rep.Rows[0].Message != wantMsg {
+		t.Errorf("dry-run message = %q, want %q", rep.Rows[0].Message, wantMsg)
+	}
 
-	// Apply: LEAD-GHOST reopens to [Pool].
+	// Apply: LEAD-GHOST stays [Rejected] — blocked, nothing changes.
 	rep, err = s.Apply(ctx, director, []LeadRow{row}, nil)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	if rep.Applied != 1 {
-		t.Fatalf("applied = %d, want 1 (rows=%+v)", rep.Applied, rep.Rows)
+	if rep.Duplikat != 1 || rep.Applied != 0 {
+		t.Fatalf("reconciliation applied%d dup%d, want 0/1 (rows=%+v)", rep.Applied, rep.Duplikat, rep.Rows)
 	}
 	var status string
 	if err := s.DB.QueryRowContext(ctx, `SELECT record_status FROM leads WHERE id = 'LEAD-GHOST'`).Scan(&status); err != nil {
 		t.Fatal(err)
 	}
-	if status != module1_leads.StatusPool {
-		t.Errorf("status = %q, want %q (reopened, not blocked)", status, module1_leads.StatusPool)
+	if status != "[Rejected]" {
+		t.Errorf("status = %q, want [Rejected] (blocked, not reopened)", status)
+	}
+	if countAudit(t, s, "lead", "import:lead_blocked") != 1 {
+		t.Errorf("import:lead_blocked audit rows = %d, want 1", countAudit(t, s, "lead", "import:lead_blocked"))
 	}
 }
 

@@ -28,81 +28,136 @@ func TestNormalizePhone(t *testing.T) {
 }
 
 func TestDedupDecisionTable(t *testing.T) {
+	const actor = "EMP-ME"
+	andi := OpenAttempt{OwnerID: "EMP-ANDI", OwnerName: "Andi"}
+	me := OpenAttempt{OwnerID: actor, OwnerName: "Me"}
+
 	cases := []struct {
-		name    string
-		channel Channel
-		match   *ExistingLead
-		want    Outcome
-		wantMsg string
+		name       string
+		channel    Channel
+		match      *ExistingLead
+		want       Outcome
+		wantMsg    string
+		wantJoinID string
+		wantOthers []OpenAttempt
+		wantReopen string
 	}{
+		// ---- ChannelImport: UNCHANGED from M1 v1 ----
 		{
-			name:    "no match — create (import)",
+			name:    "import — no match — create",
 			channel: ChannelImport,
 			match:   nil,
 			want:    OutcomeCreate,
 		},
 		{
-			name:    "active scouted lead, import channel — block",
+			name:    "import — active-other-sales block w/ name interpolation",
 			channel: ChannelImport,
-			match:   &ExistingLead{ID: "LEAD-1", RecordStatus: StatusActive, HasActiveScoutedAttempt: true, ActiveOwnerName: "Andi"},
+			match:   &ExistingLead{ID: "LEAD-1", RecordStatus: StatusActive, OpenAttempts: []OpenAttempt{andi}},
 			want:    OutcomeBlock,
 			wantMsg: "[lead sedang diproses oleh sales lain (Andi)]",
 		},
 		{
-			name:    "active scouted lead, single-reg channel — block (different wording)",
-			channel: ChannelSingleReg,
-			match:   &ExistingLead{ID: "LEAD-1", RecordStatus: StatusActive, HasActiveScoutedAttempt: true, ActiveOwnerName: "Andi"},
-			want:    OutcomeBlock,
-			wantMsg: "[tidak bisa ditambahkan, lead sedang diproses oleh sales lain (Andi)]",
-		},
-		{
-			name:    "active lead without known owner keeps (nama) placeholder",
+			name:    "import — active lead without known owner keeps (nama) placeholder",
 			channel: ChannelImport,
-			match:   &ExistingLead{ID: "LEAD-1", RecordStatus: StatusActive, HasActiveScoutedAttempt: true},
+			match:   &ExistingLead{ID: "LEAD-1", RecordStatus: StatusActive},
 			want:    OutcomeBlock,
 			wantMsg: MsgActiveOtherSalesImport,
 		},
 		{
-			name:    "existing pool lead — block duplicate",
+			name:    "import — existing pool lead — block duplicate",
 			channel: ChannelImport,
 			match:   &ExistingLead{ID: "LEAD-2", RecordStatus: StatusPool},
 			want:    OutcomeBlock,
 			wantMsg: MsgDuplicatePool,
 		},
 		{
-			name:    "already a client — block",
+			name:    "import — already a client — block",
 			channel: ChannelImport,
 			match:   &ExistingLead{ID: "LEAD-3", RecordStatus: StatusClosedWin},
 			want:    OutcomeBlock,
 			wantMsg: MsgAlreadyClient,
 		},
 		{
-			name:    "rejected lead — reopen to pool",
-			channel: ChannelImport,
-			match:   &ExistingLead{ID: "LEAD-4", RecordStatus: StatusRejected},
-			want:    OutcomeReopen,
+			name:       "import — rejected lead — reopen to pool",
+			channel:    ChannelImport,
+			match:      &ExistingLead{ID: "LEAD-4", RecordStatus: StatusRejected},
+			want:       OutcomeReopen,
+			wantReopen: "LEAD-4",
+		},
+
+		// ---- ChannelSingleReg: M1 v2 collaborative ----
+		{
+			name:    "single-reg — no match — create",
+			channel: ChannelSingleReg,
+			match:   nil,
+			want:    OutcomeCreate,
 		},
 		{
-			name:    "not-qualified lead — reopen to pool",
+			name:       "single-reg — others working it — JOIN + notice",
+			channel:    ChannelSingleReg,
+			match:      &ExistingLead{ID: "LEAD-6", RecordStatus: StatusActive, OpenAttempts: []OpenAttempt{andi}},
+			want:       OutcomeJoin,
+			wantMsg:    MsgCollabJoin,
+			wantJoinID: "LEAD-6",
+			wantOthers: []OpenAttempt{andi},
+		},
+		{
+			name:    "single-reg — actor already owns an open attempt — block",
 			channel: ChannelSingleReg,
-			match:   &ExistingLead{ID: "LEAD-5", RecordStatus: StatusNotQualified},
-			want:    OutcomeReopen,
+			match:   &ExistingLead{ID: "LEAD-7", RecordStatus: StatusActive, OpenAttempts: []OpenAttempt{me, andi}},
+			want:    OutcomeBlock,
+			wantMsg: MsgAlreadyOwnAttempt,
+		},
+		{
+			name:    "single-reg — already a client — block (takes precedence)",
+			channel: ChannelSingleReg,
+			match:   &ExistingLead{ID: "LEAD-8", RecordStatus: StatusClosedWin, OpenAttempts: []OpenAttempt{andi}},
+			want:    OutcomeBlock,
+			wantMsg: MsgAlreadyClient,
+		},
+		{
+			name:       "single-reg — not-qualified lead — reopen to pool",
+			channel:    ChannelSingleReg,
+			match:      &ExistingLead{ID: "LEAD-9", RecordStatus: StatusNotQualified},
+			want:       OutcomeReopen,
+			wantReopen: "LEAD-9",
+		},
+		{
+			name:       "single-reg — pool w/ zero open attempts — silent join (no others)",
+			channel:    ChannelSingleReg,
+			match:      &ExistingLead{ID: "LEAD-10", RecordStatus: StatusPool},
+			want:       OutcomeJoin,
+			wantJoinID: "LEAD-10",
+			wantOthers: nil,
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			d := Decide(c.channel, c.match)
+			d := Decide(c.channel, c.match, actor)
 			if d.Outcome != c.want {
 				t.Fatalf("Outcome = %v, want %v", d.Outcome, c.want)
 			}
 			if c.wantMsg != "" && d.Message != c.wantMsg {
 				t.Errorf("Message = %q, want %q", d.Message, c.wantMsg)
 			}
-			if c.want == OutcomeReopen && d.ReopenLeadID != c.match.ID {
-				t.Errorf("ReopenLeadID = %q, want %q", d.ReopenLeadID, c.match.ID)
+			if c.want == OutcomeReopen && d.ReopenLeadID != c.wantReopen {
+				t.Errorf("ReopenLeadID = %q, want %q", d.ReopenLeadID, c.wantReopen)
 			}
-			if c.want != OutcomeBlock && d.Message != "" {
-				t.Errorf("non-block decision carried message %q", d.Message)
+			if c.want == OutcomeJoin {
+				if d.JoinLeadID != c.wantJoinID {
+					t.Errorf("JoinLeadID = %q, want %q", d.JoinLeadID, c.wantJoinID)
+				}
+				if len(d.OtherOwners) != len(c.wantOthers) {
+					t.Fatalf("OtherOwners = %+v, want %+v", d.OtherOwners, c.wantOthers)
+				}
+				for i := range c.wantOthers {
+					if d.OtherOwners[i] != c.wantOthers[i] {
+						t.Errorf("OtherOwners[%d] = %+v, want %+v", i, d.OtherOwners[i], c.wantOthers[i])
+					}
+				}
+			}
+			if c.want != OutcomeBlock && c.want != OutcomeJoin && d.Message != "" {
+				t.Errorf("non-block/non-join decision carried message %q", d.Message)
 			}
 		})
 	}

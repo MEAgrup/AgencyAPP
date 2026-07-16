@@ -11,7 +11,7 @@ import (
 
 // leadsSvc builds the Module 1 service over the app's shared deps.
 func (a *App) leadsSvc() *module1_leads.Service {
-	return &module1_leads.Service{DB: a.DB, Engine: a.Engine}
+	return &module1_leads.Service{DB: a.DB, Engine: a.Engine, Catalog: a.Catalog}
 }
 
 // writeDomainErr maps M0/M1 domain errors to HTTP status + verbatim BI message.
@@ -45,12 +45,16 @@ func (a *App) handleRegisterLead(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, module0_sales.IncompleteMessage)
 		return
 	}
-	lead, att, err := a.leadsSvc().Register(r.Context(), actor, in)
+	lead, att, join, err := a.leadsSvc().Register(r.Context(), actor, in)
 	if err != nil {
 		a.writeDomainErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"lead": lead, "attempt": att})
+	resp := map[string]any{"lead": lead, "attempt": att}
+	if join != nil {
+		resp["collab"] = join
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (a *App) handleClaimLead(w http.ResponseWriter, r *http.Request) {

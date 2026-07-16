@@ -61,7 +61,7 @@ func TestCrossFlow_MoneyPath(t *testing.T) {
 	}
 
 	// --- M1 registration ---
-	lead, att1, err := leads.Register(ctx, salesStaff, module1_leads.RegisterInput{
+	lead, att1, _, err := leads.Register(ctx, salesStaff, module1_leads.RegisterInput{
 		LeadName: "Alpha Digital", PhoneNumber: "0811111111", Source: "Referral",
 	})
 	if err != nil {

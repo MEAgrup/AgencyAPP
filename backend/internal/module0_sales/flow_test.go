@@ -46,7 +46,7 @@ func setup(t *testing.T) fixture {
 func (f fixture) qualifiedAttempt(t *testing.T, owner permission.Actor, phone string) string {
 	t.Helper()
 	ctx := context.Background()
-	_, att, err := f.leads.Register(ctx, owner, module1_leads.RegisterInput{LeadName: "Co", PhoneNumber: phone, Source: "Referral"})
+	_, att, _, err := f.leads.Register(ctx, owner, module1_leads.RegisterInput{LeadName: "Co", PhoneNumber: phone, Source: "Referral"})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestQualified_PermissionMatrix(t *testing.T) {
 	owner := salesActor("SS-1", permission.LevelStaff)
 	other := salesActor("SS-2", permission.LevelStaff)
 
-	_, att, err := f.leads.Register(ctx, owner, module1_leads.RegisterInput{LeadName: "Co", PhoneNumber: "0812", Source: "Referral"})
+	_, att, _, err := f.leads.Register(ctx, owner, module1_leads.RegisterInput{LeadName: "Co", PhoneNumber: "0812", Source: "Referral"})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestQualified_CalculatorPinAndRecompute(t *testing.T) {
 		t.Fatalf("CreateService: %v", err)
 	}
 
-	_, att, err := leads.Register(ctx, owner, module1_leads.RegisterInput{LeadName: "Co", PhoneNumber: "0899", Source: "Referral"})
+	_, att, _, err := leads.Register(ctx, owner, module1_leads.RegisterInput{LeadName: "Co", PhoneNumber: "0899", Source: "Referral"})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}

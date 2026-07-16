@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/meagrup/agencyapp/backend/internal/core/notification"
 	"github.com/meagrup/agencyapp/backend/internal/core/permission"
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
 	"github.com/meagrup/agencyapp/backend/internal/module1_leads"
@@ -19,7 +20,7 @@ func svc(t *testing.T) *module1_leads.Service {
 	t.Helper()
 	d := testutil.DB(t)
 	testutil.Clean(t, d)
-	return &module1_leads.Service{DB: d, Engine: statemachine.New()}
+	return &module1_leads.Service{DB: d, Engine: statemachine.New(), Catalog: notification.NewCatalog()}
 }
 
 // TestClaim_PermissionAndContest: only Sales may claim; a second salesperson
@@ -29,7 +30,7 @@ func TestClaim_PermissionAndContest(t *testing.T) {
 	ctx := context.Background()
 	owner := salesStaff("SS-1")
 
-	lead, _, err := s.Register(ctx, owner, module1_leads.RegisterInput{LeadName: "Co", PhoneNumber: "0812", Source: "Referral"})
+	lead, _, _, err := s.Register(ctx, owner, module1_leads.RegisterInput{LeadName: "Co", PhoneNumber: "0812", Source: "Referral"})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -55,7 +56,7 @@ func TestResolveWin_ClosesCompetitorsAndIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	owner := salesStaff("SS-1")
 
-	lead, att1, err := s.Register(ctx, owner, module1_leads.RegisterInput{LeadName: "Co", PhoneNumber: "0812", Source: "Referral"})
+	lead, att1, _, err := s.Register(ctx, owner, module1_leads.RegisterInput{LeadName: "Co", PhoneNumber: "0812", Source: "Referral"})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
