@@ -101,3 +101,29 @@ Untuk setiap baris `backend/seed/msl_kalkulator.csv` (atau revisi yang dikirim b
 - Output data: `backend/seed/msl_kalkulator.csv`
 - Sumber mentah: Google Sheets "Kalkulator Service Jasa", tab "Kalkulator 1" (export `kalkulator_service.xlsx`, 2026-07-16).
 - Dokumen terkait: `docs/handoff/MSL_DRAFT_KOMPILASI.md` / `.csv` (180 layanan ledger historis); `docs/DECISIONS.md` O3, O14, O18 (di luar cakupan perubahan agent ini — hanya dirujuk).
+
+## Cara seed ke sistem (tim dev)
+
+CLI `backend/cmd/mslseed` memuat `backend/seed/msl_kalkulator.csv` ke Master Service List lewat `internal/admin` (`CreateService`/`UpdateService` saja — jadi setiap tulis tetap tervalidasi, teraudit, dan terversi persis seperti lewat admin UI). Idempotent berdasarkan **nama layanan**: baris yang belum ada akan dibuat, baris yang sudah ada tapi ada field berubah akan naik versi, baris yang identik dilewati.
+
+**WAJIB dry-run dulu** (konvensi importer CDPS — lihat `backend/cmd/import`). Skema harus sudah termigrasi (`go run ./cmd/migrate up`) dan `--actor` wajib employee yang lolos `admin.CanEditMasterServices` (Sales Head/SPV Sales, atau Director — staff Sales biasa akan ditolak dengan pesan `[anda tidak memiliki akses untuk mengubah master service list]`).
+
+```bash
+cd backend
+
+# 1) Dry-run — tidak menulis apa pun, cuma menampilkan rencana (create / versi baru / dilewati)
+go run ./cmd/mslseed --actor <employee_id>
+
+# (opsional) pakai CSV revisi Sales Head, bukan file default:
+go run ./cmd/mslseed --actor <employee_id> --csv path/ke/revisi.csv
+
+# 2) Setelah rencana dicek dan sesuai harapan, baru apply
+go run ./cmd/mslseed --actor <employee_id> --apply
+```
+
+Contoh `<employee_id>`: `EMP-0006` (Dewi Anggraini, Sales Head) atau `EMP-0008`/`EMP-0009`/`EMP-0010` (Director, lihat `backend/internal/seed/seed.go`).
+
+Catatan:
+- Setiap baris CSV divalidasi dulu (enum `pricing_mode`, `min_qty` wajib ada hanya untuk `min_floor`/`batch_ceiling`, `unit_price > 0` untuk mode non-`passthrough`, `commission_rule` harus lolos grammar DECISIONS O14, `effective_from` format `YYYY-MM-DD`) — **sebelum** menyentuh DB sama sekali. Satu baris tidak valid akan menggagalkan seluruh run (dry-run maupun apply) dengan exit code bukan 0, baris mana yang salah selalu disebutkan di output.
+- Menjalankan ulang `--apply` dengan CSV yang sama itu aman (semua baris "sama, dilewati") — tidak akan membuat duplikat layanan atau versi kosong.
+- Ingat anomali #7 di atas: `commission_rule` di seed ini masih placeholder `"0% of standard price"` sampai Sales Head mengisi aturan komisi final; re-run `mslseed --apply` setelah CSV direvisi akan otomatis menaikkan versi baris yang berubah.
