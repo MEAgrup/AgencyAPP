@@ -122,6 +122,9 @@ func (a *App) Router() http.Handler {
 	a.registerKOLRoutes(mux)
 	a.registerLiveStreamRoutes(mux)
 
+	// Wave 3 — Module 3 (Campaign), Cluster 1: the acquisition Campaign (CMP-).
+	a.registerCampaignRoutes(mux)
+
 	return mux
 }
 

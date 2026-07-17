@@ -72,6 +72,9 @@ var dataTables = []string{
 	"client_sales_allocations",
 	"client_platforms",
 	"clients",
+	// Wave 3 — Module 3 (Campaign): the acquisition Campaign (CMP-). No child rows
+	// in Cluster 1; owner/created_by are plain employee ids (no FK).
+	"campaigns",
 	"negotiation_proposal_lines",
 	"negotiation_proposals",
 	"prospect_attempt_nq_reasons",
