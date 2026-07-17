@@ -125,6 +125,9 @@ func (a *App) Router() http.Handler {
 	// Wave 3 — Module 3 (Campaign), Cluster 1: the acquisition Campaign (CMP-).
 	a.registerCampaignRoutes(mux)
 
+	// Wave 3 — Module 2 (Marketing), Cluster 1: the 1:1 Performance Record + Auto-Metrics.
+	a.registerMarketingRoutes(mux)
+
 	return mux
 }
 
