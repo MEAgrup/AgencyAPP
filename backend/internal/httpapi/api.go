@@ -60,6 +60,15 @@ func (a *App) onTransition(ev statemachine.Event) error {
 			})
 			return err
 		}
+	case statemachine.MBriefTask:
+		// M11 §5.5: when a Source Brief reaches its terminal ([Approved]) every
+		// Dependency it sources turns Satisfied — fire EvDependencySatisfied once per
+		// Dependency to the Target Brief's PIC. Covers BOTH the AM approval (module6)
+		// and the Creative/KOL roll-up (module12) paths, since both drive [Approved]
+		// through this engine. Runs in the transition's transaction (atomic).
+		if ev.To == "[Approved]" {
+			return a.boardSvc().OnBriefReachedTerminal(ev.Ctx, ev.Tx, ev.Actor, ev.EntityID)
+		}
 	}
 	return nil
 }
@@ -127,6 +136,9 @@ func (a *App) Router() http.Handler {
 
 	// Wave 3 — Module 2 (Marketing), Cluster 1: the 1:1 Performance Record + Auto-Metrics.
 	a.registerMarketingRoutes(mux)
+
+	// Wave 3 — Module 11 (PM/Kanban): cross-Brief Dependencies + Client Board + My Tasks.
+	a.registerBoardRoutes(mux)
 
 	return mux
 }

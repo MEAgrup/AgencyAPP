@@ -85,6 +85,15 @@ func (s *Service) driveReviewEdge(ctx context.Context, actor permission.Actor, b
 	if _, _, err := lockBriefOwner(ctx, tx, actor, briefID); err != nil {
 		return statemachine.Result{}, err
 	}
+	// M11 Blocking-Dependency gate (§2 Rule 7 / §6.3): a Brief's FINAL transition
+	// ([In Review] -> [Approved]) is held while any Blocking Dependency's Source is
+	// not yet terminal. The guard runs in this tx and its BlockedError aborts the
+	// approval unchanged. No-op for every non-approval edge and when unset.
+	if to == BriefStatusApproved && s.ApproveGuard != nil {
+		if err := s.ApproveGuard.ValidateBriefApproval(ctx, tx, briefID); err != nil {
+			return statemachine.Result{}, err
+		}
+	}
 	res, err := s.engine().Transition(ctx, tx, statemachine.Request{
 		Machine: statemachine.MBriefTask, EntityType: "brief", Table: "briefs",
 		EntityID: briefID, To: to, Actor: actor,

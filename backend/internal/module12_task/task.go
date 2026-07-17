@@ -120,6 +120,17 @@ type BriefSubmitGuard interface {
 	ValidateBriefSubmit(ctx context.Context, tx *sql.Tx, briefID, division string) error
 }
 
+// BriefApproveGuard is an optional pre-[Approved] check on a Brief's FINAL
+// transition — the Module 11 cross-Brief Blocking Dependency gate (M11 §2 Rule 7 /
+// §6.3). It runs inside the roll-up transaction just before an Asset roll-up would
+// drive its Brief to [Approved]; a returned *statemachine.BlockedError DEFERS the
+// roll-up (the Brief stays [In Review], the Asset transition still commits — the PIC
+// keeps working, only the final gate waits, §2 Rule 7). Injected one-way (M12 does
+// not import M11); nil-safe. *module11_board.Service satisfies it.
+type BriefApproveGuard interface {
+	ValidateBriefApproval(ctx context.Context, tx *sql.Tx, briefID string) error
+}
+
 // Service is the M12 persistence surface.
 type Service struct {
 	DB     *sql.DB
@@ -131,6 +142,11 @@ type Service struct {
 	// Brief-as-task (M8 wires the Ads campaign-completeness gate here). Nil => no
 	// extra gate; unaffected for Asset submits.
 	SubmitGuard BriefSubmitGuard
+	// ApproveGuard, when set, is the M11 Blocking-Dependency gate run before an Asset
+	// roll-up drives its Brief to [Approved] (M11 §2 Rule 7). A BlockedError from it
+	// DEFERS the roll-up (Brief stays [In Review]); the triggering Asset move still
+	// commits. Nil => no gate. *module11_board.Service satisfies it.
+	ApproveGuard BriefApproveGuard
 	// Catalog is the FROZEN notification catalog (Phase 0 v2 §9). Nil-guarded: when
 	// unset, block-request emissions are skipped (most unit tests). M12 emits ONLY
 	// events already in the catalog (EvBlockRequestSubmitted / EvBlockRequestDecided);

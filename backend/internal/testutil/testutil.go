@@ -72,6 +72,8 @@ var dataTables = []string{
 	"client_sales_allocations",
 	"client_platforms",
 	"clients",
+	// Wave 3 — Module 11 (PM/Kanban): cross-Brief dependencies (no hard FK).
+	"dependencies",
 	// Wave 3 — Module 2 (Marketing): the 1:1 performance record (budget). Truncated
 	// before campaigns for readability (FK checks are disabled during truncation).
 	"marketing_performance_records",
