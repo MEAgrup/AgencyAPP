@@ -18,3 +18,11 @@ Icon
 
 # Logs
 *.log
+
+# Go build artifacts (binaries built ad-hoc at backend root: go build ./cmd/<name>)
+/backend/cdps
+/backend/import
+/backend/hrisconvert
+/backend/mslseed
+/backend/rolemapseed
+/backend/backend

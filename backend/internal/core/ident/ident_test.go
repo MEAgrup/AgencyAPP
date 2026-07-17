@@ -45,6 +45,31 @@ func TestNext_FormatAndSequence(t *testing.T) {
 	}
 }
 
+// The month bucket is WIB, not UTC (DECISIONS O20). An instant late in a UTC
+// day can already be the next calendar month in WIB (+7): 2026-06-30T17:30:00Z
+// == 2026-07-01 00:30 WIB, so the period is 202607, not 202606.
+func TestNext_MonthBucketIsWIB(t *testing.T) {
+	d := testutil.DB(t)
+	testutil.Clean(t, d)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 30, 17, 30, 0, 0, time.UTC)
+
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := ident.Next(ctx, tx, "TST", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if id != "TST-202607-0001" {
+		t.Fatalf("month bucket not WIB: got %s want TST-202607-0001", id)
+	}
+}
+
 func TestNext_FailedValidationConsumesNoSequence(t *testing.T) {
 	d := testutil.DB(t)
 	testutil.Clean(t, d)

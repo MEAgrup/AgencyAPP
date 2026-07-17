@@ -9,10 +9,10 @@ import (
 	"github.com/meagrup/agencyapp/backend/internal/testutil"
 )
 
-func TestCatalog_AllThirteenEventsRegistered(t *testing.T) {
+func TestCatalog_AllFourteenEventsRegistered(t *testing.T) {
 	c := notification.NewCatalog()
-	if got := len(c.Events()); got != 13 {
-		t.Fatalf("catalog has %d events, want 13", got)
+	if got := len(c.Events()); got != 14 {
+		t.Fatalf("catalog has %d events, want 14", got)
 	}
 }
 

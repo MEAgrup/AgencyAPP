@@ -104,9 +104,10 @@ Daftar nama terbatas (~15-20 orang). **30 menit** jika Sales Head langsung tahu.
 ## 3. VALIDASI MSL — Master Service List (Sales Head)
 
 ### Apa ini?
-File `docs/handoff/MSL_DRAFT_KOMPILASI.csv` berisi 180 layanan yang dikompilasi dari 1.517 deal di ledger lama. Sistem sudah mengelompokkan dan menghitung statistik harga, tapi **dua kolom paling penting SENGAJA KOSONG**:
+File `docs/handoff/MSL_DRAFT_KOMPILASI.csv` berisi 180 layanan yang dikompilasi dari 1.517 deal di ledger lama. Sistem sudah mengelompokkan dan menghitung statistik harga, tapi **satu kolom paling penting SENGAJA KOSONG**:
 - `usulan_standard_price` — harga standar resmi per layanan
-- `usulan_commission_rule` — aturan komisi per layanan
+
+> ✅ **STATUS: Kolom `usulan_commission_rule` tidak lagi diperlukan (2026-07-17).** Keputusan Yohan (O24 RESOLVED) — komisi riil salesperson tidak perlu dibuat; `commission_rule = 0% of standard price` eksplisit berlaku untuk semua layanan. Abaikan kolom ini; langsung isi dan validasi `usulan_standard_price`.
 
 ### Langkah per baris
 
@@ -116,11 +117,7 @@ Untuk **setiap baris** (180 baris, tapi 10 layanan teratas = 63% deal — priori
 
 2. **Isi `usulan_standard_price`**: angka desimal IDR, **tanpa "Rp" dan tanpa titik ribuan**. Contoh: `2950000` (bukan `Rp2.950.000`). Kolom `harga_min`/`median`/`modus`/`max` adalah referensi sebaran harga deal riil (sudah campur negosiasi) — jangan ambil mentah-mentah.
 
-3. **Isi `usulan_commission_rule`**: HANYA salah satu dari 2 format:
-   - `"X% of standard price"` — contoh: `10% of standard price`
-   - `"flat Rp X"` — contoh: `flat Rp 500000`
-   
-   Tidak ada format lain yang diterima sistem. Kalau ada aturan tiered/khusus, catat di catatan dan diskusikan — perubahan komisi per kuartal ditangani lewat versioning (tanggal berlaku), bukan formula rumit.
+3. **Kolom `usulan_commission_rule` — ABAIKAN.** Per DECISIONS.md O24 (2026-07-17), komisi riil salesperson tidak perlu dibuat; `commission_rule = 0% of standard price` berlaku otomatis untuk semua layanan.
 
 4. **Tandai apakah layanan masih dijual** (aktif) — akan diisi di sistem.
 
@@ -137,6 +134,8 @@ Serahkan CSV yang sudah terisi kembali ke tim dev. Akan diinput via admin MSL at
 ---
 
 ## 4. DAFTAR NIK → EMAIL KARYAWAN (HR)
+
+> ✅ **STATUS: Diterima 2026-07-17** — File `nik_email.csv` (39 email) sudah tersedia di `backend/testdata/import_samples/`. Lihat DECISIONS.md O21 untuk detail. Langkah ini sudah selesai.
 
 ### Apa ini?
 Sheet karyawan HRIS **tidak ada kolom email**. CDPS butuh email untuk login. HR perlu menyediakan mapping.

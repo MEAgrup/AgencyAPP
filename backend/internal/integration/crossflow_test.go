@@ -34,7 +34,7 @@ func TestCrossFlow_MoneyPath(t *testing.T) {
 
 	engine := statemachine.New()
 	catalog := notification.NewCatalog()
-	leads := &module1_leads.Service{DB: d, Engine: engine}
+	leads := &module1_leads.Service{DB: d, Engine: engine, Catalog: catalog}
 	sales := &module0_sales.Service{DB: d, Engine: engine, Catalog: catalog, Win: leads.ResolveWin}
 	finance := &module5_finance.Service{DB: d, Engine: engine}
 	clients := &module4_client.Service{DB: d, Engine: engine}
@@ -61,7 +61,7 @@ func TestCrossFlow_MoneyPath(t *testing.T) {
 	}
 
 	// --- M1 registration ---
-	lead, att1, err := leads.Register(ctx, salesStaff, module1_leads.RegisterInput{
+	lead, att1, _, err := leads.Register(ctx, salesStaff, module1_leads.RegisterInput{
 		LeadName: "Alpha Digital", PhoneNumber: "0811111111", Source: "Referral",
 	})
 	if err != nil {

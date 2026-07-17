@@ -38,7 +38,7 @@ Sumber MSL aktif ditetapkan: Google Sheet **"Kalkulator Service Jasa"** tab "Kal
 1. **Review & merge PR #7** (sesi ini masih memantau PR: subscription aktif + check-in terjadwal; kalau sesi ini mati, pantau manual).
 2. Begitu data manusia masuk → jalankan **import W1-19** (urutan lengkap di `HANDOFF_JALUR_B_SESSION2.md` §A) + **sync HRIS** (§B).
 3. **W1-20 UAT** end-to-end (runbook: `W1-20_UAT_RUNBOOK.md`) — sekarang bisa memakai kalkulator untuk Estimasi Nilai di Qualified Form.
-4. Handoff Akun A yang belum dikerjakan: **redesign M1 dedup jadi kolaboratif** (DECISIONS 2026-07-10 "M1 DEDUP DIREDESAIN") + pertanyaan O19 (JOIN drop attempt karyawan belum sinkron).
+4. Handoff Akun A yang belum dikerjakan: **redesign M1 dedup jadi kolaboratif** (DECISIONS 2026-07-10 "M1 DEDUP DIREDESAIN") + pertanyaan O19 (JOIN drop attempt karyawan belum sinkron). ✅ **Selesai 2026-07-17** — implementasi M1 dedup v2 + O19 RESOLVED (docs: DECISIONS.md 2026-07-17 2 baris Decided; mirror importer dihapus, live LEFT JOIN).
 5. Setelah exit criteria Wave 1 lolos UAT → **Wave 2** (M6, **M12 early**, M7, M8, M9, M10) sesuai Build Plan §4.
 
 ### Ide lanjutan MSL (belum diputuskan — jangan kerjakan tanpa keputusan)

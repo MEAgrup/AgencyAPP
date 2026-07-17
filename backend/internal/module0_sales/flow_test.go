@@ -32,7 +32,7 @@ func setup(t *testing.T) fixture {
 	testutil.Clean(t, d)
 	engine := statemachine.New()
 	cat := notification.NewCatalog()
-	leads := &module1_leads.Service{DB: d, Engine: engine}
+	leads := &module1_leads.Service{DB: d, Engine: engine, Catalog: cat}
 	sales := &module0_sales.Service{DB: d, Engine: engine, Catalog: cat, Win: leads.ResolveWin}
 	msvc, err := admin.CreateService(context.Background(), d, salesActor("SL", permission.LevelLead), admin.ServiceInput{
 		Name: "Ads", StandardPrice: "5000000", CommissionRule: "10% of standard price", Active: true, EffectiveFrom: "2026-01-01",
@@ -46,7 +46,7 @@ func setup(t *testing.T) fixture {
 func (f fixture) qualifiedAttempt(t *testing.T, owner permission.Actor, phone string) string {
 	t.Helper()
 	ctx := context.Background()
-	_, att, err := f.leads.Register(ctx, owner, module1_leads.RegisterInput{LeadName: "Co", PhoneNumber: phone, Source: "Referral"})
+	_, att, _, err := f.leads.Register(ctx, owner, module1_leads.RegisterInput{LeadName: "Co", PhoneNumber: phone, Source: "Referral"})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestQualified_PermissionMatrix(t *testing.T) {
 	owner := salesActor("SS-1", permission.LevelStaff)
 	other := salesActor("SS-2", permission.LevelStaff)
 
-	_, att, err := f.leads.Register(ctx, owner, module1_leads.RegisterInput{LeadName: "Co", PhoneNumber: "0812", Source: "Referral"})
+	_, att, _, err := f.leads.Register(ctx, owner, module1_leads.RegisterInput{LeadName: "Co", PhoneNumber: "0812", Source: "Referral"})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestQualified_CalculatorPinAndRecompute(t *testing.T) {
 	ctx := context.Background()
 	engine := statemachine.New()
 	cat := notification.NewCatalog()
-	leads := &module1_leads.Service{DB: d, Engine: engine}
+	leads := &module1_leads.Service{DB: d, Engine: engine, Catalog: cat}
 	sales := &module0_sales.Service{DB: d, Engine: engine, Catalog: cat, Win: leads.ResolveWin}
 	lead := salesActor("SL", permission.LevelLead)
 	owner := salesActor("SS-1", permission.LevelStaff)
@@ -113,7 +113,7 @@ func TestQualified_CalculatorPinAndRecompute(t *testing.T) {
 		t.Fatalf("CreateService: %v", err)
 	}
 
-	_, att, err := leads.Register(ctx, owner, module1_leads.RegisterInput{LeadName: "Co", PhoneNumber: "0899", Source: "Referral"})
+	_, att, _, err := leads.Register(ctx, owner, module1_leads.RegisterInput{LeadName: "Co", PhoneNumber: "0899", Source: "Referral"})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}

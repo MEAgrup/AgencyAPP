@@ -10,6 +10,7 @@ import (
 	"github.com/meagrup/agencyapp/backend/internal/core/audit"
 	"github.com/meagrup/agencyapp/backend/internal/core/money"
 	"github.com/meagrup/agencyapp/backend/internal/core/permission"
+	"github.com/meagrup/agencyapp/backend/internal/core/tz"
 )
 
 // NQ taxonomy (M1-OA-8): seven closed reasons; "[Lainnya ...]" requires free
@@ -78,7 +79,7 @@ func LineFromView(v admin.ServiceView, quantity int64, amount string) (ServiceLi
 
 // resolveLines resolves each selection against the MSL version effective today.
 func (s *Service) resolveLines(ctx context.Context, selections []ServiceSelection) ([]ServiceLine, error) {
-	today := time.Now().UTC().Format("2006-01-02")
+	today := tz.DateString(time.Now()) // MSL "effective today" in WIB (DECISIONS O20)
 	lines := make([]ServiceLine, 0, len(selections))
 	for _, sel := range selections {
 		if strings.TrimSpace(sel.MasterServiceID) == "" {
