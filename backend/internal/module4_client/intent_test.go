@@ -110,10 +110,10 @@ func TestSetPaymentIntent_AuthorityMatrix(t *testing.T) {
 	seedClientWithTrx(t, s, "CLI-AUTH", "TRX-AUTH", "EMP-BUDI")
 
 	denied := []permission.Actor{
-		salesStaff("EMP-ANDI"),         // other salesperson
-		salesLead("EMP-DEWI"),          // sales lead, not this client's PIC
-		accountStaff("EMP-AMEL"),       // Account
-		odActor("EMP-ODI"),             // OD (read-only)
+		salesStaff("EMP-ANDI"),   // other salesperson
+		salesLead("EMP-DEWI"),    // sales lead, not this client's PIC
+		accountStaff("EMP-AMEL"), // Account
+		odActor("EMP-ODI"),       // OD (read-only)
 		{EmployeeID: "EMP-FIN", Role: permission.Role{Division: "Finance", Level: permission.LevelStaff}},
 	}
 	for _, actor := range denied {

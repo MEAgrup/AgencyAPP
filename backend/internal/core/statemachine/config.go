@@ -53,12 +53,14 @@ const (
 	MTransactionPayment = "transaction_payment"
 	MInstallment        = "installment"
 	MService            = "service"
+	MStrategyPlan       = "strategy_plan"
 	MBriefTask          = "brief_task"
 	MCreatorBooking     = "creator_booking"
 	MCreatorPaymentReq  = "creator_payment_request"
 	MLiveStreamSession  = "live_stream_session"
 	MComplaint          = "complaint"
 	MDependency         = "dependency"
+	MAdCampaign         = "ad_campaign"
 )
 
 func defaultMachines() map[string]*Machine {
@@ -157,18 +159,34 @@ func defaultMachines() map[string]*Machine {
 		// §6 Service (M6). Void = SPV/Account Lead approval.
 		{
 			name:     MService,
-			initial:  "Intake",
+			initial:  "[Awaiting Onboarding]",
 			terminal: []string{"Done", "[Cancelled — Service Voided]"},
 			edges: []edge{
-				{from: "Intake", to: "[Strategy Approved]"},
-				{from: "Intake", to: "[Briefed]"}, // Direct services skip strategy
+				{from: "[Awaiting Onboarding]", to: "[Strategy Approved]"},
+				{from: "[Awaiting Onboarding]", to: "[Briefed]"}, // Direct services skip strategy
 				{from: "[Strategy Approved]", to: "[Briefed]"},
 				{from: "[Briefed]", to: "[In Execution]"},
 				{from: "[In Execution]", to: "Done"},
-				{from: "Intake", to: "[Cancelled — Service Voided]", requireLead: true},
+				{from: "[Awaiting Onboarding]", to: "[Cancelled — Service Voided]", requireLead: true},
 				{from: "[Strategy Approved]", to: "[Cancelled — Service Voided]", requireLead: true},
 				{from: "[Briefed]", to: "[Cancelled — Service Voided]", requireLead: true},
 				{from: "[In Execution]", to: "[Cancelled — Service Voided]", requireLead: true},
+			},
+		},
+		// §6a Strategy & Plan (M6 §4) — plan-gated services only. Submit is the
+		// owning AM's action (owner-scoped in code, not lead); approve / request-
+		// revision are SPV/Head Account (requireLead here, plus a division-specific
+		// Account-lead check in module6_account — mirrors the Void-Service gate).
+		// On approval the parent Service is also driven [Awaiting Onboarding] →
+		// [Strategy Approved] in the SAME transaction (see module6_account).
+		{
+			name:     MStrategyPlan,
+			initial:  "[Strategy Drafting]",
+			terminal: []string{"[Strategy Approved]"},
+			edges: []edge{
+				{from: "[Strategy Drafting]", to: "[Strategy Submitted for Approval]"},
+				{from: "[Strategy Submitted for Approval]", to: "[Strategy Approved]", requireLead: true},
+				{from: "[Strategy Submitted for Approval]", to: "[Strategy Drafting]", requireLead: true}, // revision loop
 			},
 		},
 		// §7 Brief (M6) — canonical Task machine (M12), used by demo_tasks.
@@ -256,6 +274,24 @@ func defaultMachines() map[string]*Machine {
 			initial:      "Pending",
 			autoComputed: true,
 			edges:        nil,
+		},
+		// §14 Ad Campaign (M8) — the ongoing paid-media record, born [Paused]
+		// (held, no real spend) and outliving its setup Brief. Exactly three
+		// statuses (§9.3). The [Paused]->[Active] Launch/Resume dependency (parent
+		// Brief + linked Assets [Approved], §12) is a CODE guard in module8_ads,
+		// not an engine rule — the engine cannot see those foreign statuses; the
+		// pause/resume edges themselves carry no requireLead (routine optimization
+		// needs no approval gate, §6 Rule 3).
+		{
+			name:     MAdCampaign,
+			initial:  "[Paused]",
+			terminal: []string{"[Ended]"},
+			edges: []edge{
+				{from: "[Paused]", to: "[Active]"}, // Launch / Resume
+				{from: "[Active]", to: "[Paused]"}, // Pause / held on revision
+				{from: "[Active]", to: "[Ended]"},
+				{from: "[Paused]", to: "[Ended]"},
+			},
 		},
 	}
 

@@ -19,6 +19,7 @@ import (
 	"github.com/meagrup/agencyapp/backend/internal/module1_leads"
 	"github.com/meagrup/agencyapp/backend/internal/module4_client"
 	"github.com/meagrup/agencyapp/backend/internal/module5_finance"
+	"github.com/meagrup/agencyapp/backend/internal/module6_account"
 	"github.com/meagrup/agencyapp/backend/internal/testutil"
 )
 
@@ -38,12 +39,17 @@ func TestCrossFlow_MoneyPath(t *testing.T) {
 	sales := &module0_sales.Service{DB: d, Engine: engine, Catalog: catalog, Win: leads.ResolveWin}
 	finance := &module5_finance.Service{DB: d, Engine: engine}
 	clients := &module4_client.Service{DB: d, Engine: engine}
+	account := &module6_account.Service{DB: d}
 
 	salesLead := actor("SL-1", "Sales", permission.LevelLead)
 	salesStaff := actor("SS-1", "Sales", permission.LevelStaff)
 	salesStaff2 := actor("SS-2", "Sales", permission.LevelStaff)
 	financeStaff := actor("FS-1", "Finance", permission.LevelStaff)
+	accountLead := actor("AL-1", "Account", permission.LevelLead)
 	accountStaff := actor("AS-1", "Account", permission.LevelStaff)
+	// M6 AM assignment validates the assignee is an active Account staff.
+	testutil.InsertEmployee(t, d, "AS-1", "Sinta", "sinta@mea.id", "Account", "Account Manager", true)
+	testutil.InsertRoleMapping(t, d, "Account", "Account Manager", "Account", "staff")
 
 	// --- MSL entry (commission source, W1-06) ---
 	msvcID, err := admin.CreateService(ctx, d, salesLead, admin.ServiceInput{
@@ -181,9 +187,29 @@ func TestCrossFlow_MoneyPath(t *testing.T) {
 		t.Fatal("routing gate did not release client to Account")
 	}
 
-	// --- M4: Account now sees the client; lock matrix applies ---
+	// --- M6 §3: intake queue + manual AM assignment (W2-M6-C1) ---
+	// Released-but-unassigned: the AM cannot see the client yet, but Account
+	// Lead can (M4 §6 Rule 3 assigned-granularity).
+	if _, err := clients.Get(ctx, accountStaff, res.ClientID); err == nil {
+		t.Fatal("Account Staff must not see a released client before assignment")
+	}
+	if _, err := clients.Get(ctx, accountLead, res.ClientID); err != nil {
+		t.Fatalf("Account Lead must see released client: %v", err)
+	}
+	q, err := account.IntakeQueue(ctx, accountLead)
+	if err != nil {
+		t.Fatalf("IntakeQueue: %v", err)
+	}
+	if len(q) != 1 || q[0].ClientID != res.ClientID {
+		t.Fatalf("intake queue = %+v, want the released client", q)
+	}
+	if _, err := account.AssignAM(ctx, accountLead, res.ClientID, "AS-1"); err != nil {
+		t.Fatalf("AssignAM: %v", err)
+	}
+
+	// --- M4: the assigned AM now sees the client; lock matrix applies ---
 	if _, err := clients.Get(ctx, accountStaff, res.ClientID); err != nil {
-		t.Fatalf("Account must see released client: %v", err)
+		t.Fatalf("assigned AM must see their client: %v", err)
 	}
 	if !module4_client.CanEdit(salesLead, module4_client.FieldSalesPIC) {
 		t.Fatal("Sales Lead may reassign Sales PIC")

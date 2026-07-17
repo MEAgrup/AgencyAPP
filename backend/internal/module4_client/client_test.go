@@ -156,6 +156,16 @@ func insertClient(t *testing.T, s *Service, id, salesPIC string, released bool, 
 	}
 }
 
+// assignAM sets a client's current AM pointer (migration 0020) directly, so the
+// visibility tests need not pull in Module 6's assignment service.
+func assignAM(t *testing.T, s *Service, clientID, amID string) {
+	t.Helper()
+	if _, err := s.DB.ExecContext(context.Background(),
+		`UPDATE clients SET assigned_am_id = ? WHERE id = ?`, amID, clientID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func canSee(t *testing.T, s *Service, actor permission.Actor, id string) bool {
 	t.Helper()
 	_, err := s.Get(context.Background(), actor, id)
@@ -192,13 +202,23 @@ func TestVisibilityMatrix(t *testing.T) {
 	if canSee(t, s, salesStaff("EMP-CITRA"), "CLI-A") {
 		t.Errorf("non-member sales staff must not see CLI-A")
 	}
-	// Account cannot see a pre-verification client, can see a released one.
+	// Account Staff (AM) sees neither pre-verification nor UNASSIGNED released
+	// clients (M4 §6 Rule 3 assigned-granularity, paid off by W2-M6-C1).
 	if canSee(t, s, accountStaff("EMP-AM"), "CLI-A") {
 		t.Errorf("Account must NOT see pre-verification client")
 	}
-	if !canSee(t, s, accountStaff("EMP-AM"), "CLI-C") {
-		t.Errorf("Account should see released client")
+	if canSee(t, s, accountStaff("EMP-AM"), "CLI-C") {
+		t.Errorf("Account Staff must NOT see a released client not assigned to them")
 	}
+	// Assign CLI-C to EMP-AM: now the assigned AM sees it, a different AM does not.
+	assignAM(t, s, "CLI-C", "EMP-AM")
+	if !canSee(t, s, accountStaff("EMP-AM"), "CLI-C") {
+		t.Errorf("assigned AM should see their client")
+	}
+	if canSee(t, s, accountStaff("EMP-OTHERAM"), "CLI-C") {
+		t.Errorf("a non-assigned AM must NOT see another AM's client")
+	}
+	// Account Lead sees every released client regardless of assignment.
 	if !canSee(t, s, accountLead("EMP-ALEAD"), "CLI-C") {
 		t.Errorf("Account Lead should see released client")
 	}
@@ -221,6 +241,7 @@ func TestListRespectsVisibility(t *testing.T) {
 	s := newService(t)
 	insertClient(t, s, "CLI-A", "EMP-BUDI", false, "EMP-BUDI")
 	insertClient(t, s, "CLI-C", "EMP-OTHER", true, "EMP-OTHER")
+	assignAM(t, s, "CLI-C", "EMP-AM")
 
 	// Sales staff Budi lists only his own.
 	got, err := s.List(context.Background(), salesStaff("EMP-BUDI"))
@@ -230,13 +251,29 @@ func TestListRespectsVisibility(t *testing.T) {
 	if len(got) != 1 || got[0].ID != "CLI-A" {
 		t.Errorf("Budi list = %v, want [CLI-A]", ids(got))
 	}
-	// Account staff lists only released ones.
+	// Account staff lists only released clients ASSIGNED to them.
 	got, err = s.List(context.Background(), accountStaff("EMP-AM"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 1 || got[0].ID != "CLI-C" {
-		t.Errorf("Account list = %v, want [CLI-C]", ids(got))
+		t.Errorf("assigned AM list = %v, want [CLI-C]", ids(got))
+	}
+	// A different AM (nothing assigned) lists nothing.
+	got, err = s.List(context.Background(), accountStaff("EMP-OTHERAM"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("unassigned AM list = %v, want []", ids(got))
+	}
+	// Account Lead lists all released ones regardless of assignment.
+	got, err = s.List(context.Background(), accountLead("EMP-ALEAD"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "CLI-C" {
+		t.Errorf("Account Lead list = %v, want [CLI-C]", ids(got))
 	}
 	// Director lists all.
 	got, _ = s.List(context.Background(), directorActor("EMP-DIR"))

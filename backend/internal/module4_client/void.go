@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
+	"github.com/meagrup/agencyapp/backend/internal/core/audit"
 	"github.com/meagrup/agencyapp/backend/internal/core/permission"
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
 )
@@ -15,6 +16,14 @@ const StatusServiceVoided = "[Cancelled — Service Voided]"
 // BriefApproved is the one brief status the void cascade leaves untouched
 // (M4-OA-5): already-Approved work is delivered and never cancelled.
 const BriefApproved = "[Approved]"
+
+// BriefVendorDispatched is the OFF-MACHINE marker of Live Stream briefs
+// (module6_account.BriefStatusVendorDispatched — duplicated locally to keep the
+// module dependency direction; STATE_MACHINES §7: LS briefs skip the task
+// machine). The void cascade cancels these via a direct audited UPDATE instead
+// of the engine (keputusan Nerissa 2026-07-12), otherwise a voided service that
+// carries an LS brief would abort the whole void with a BlockedError.
+const BriefVendorDispatched = "[Dispatched to Vendor]"
 
 // ErrVoidForbidden: the actor may not void a service (M4-OA-5 approval gate).
 var ErrVoidForbidden = errors.New(statemachine.RoleDeniedMessage)
@@ -88,19 +97,20 @@ func (s *Service) VoidService(ctx context.Context, actor permission.Actor, servi
 	// Collect child briefs to cancel (not Approved, not already voided). Read
 	// them fully before issuing the per-brief transitions.
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id FROM briefs WHERE service_id = ? AND status NOT IN (?, ?) ORDER BY id`,
+		`SELECT id, status FROM briefs WHERE service_id = ? AND status NOT IN (?, ?) ORDER BY id`,
 		serviceID, BriefApproved, StatusServiceVoided)
 	if err != nil {
 		return VoidResult{}, err
 	}
-	var toCancel []string
+	type briefRow struct{ id, status string }
+	var toCancel []briefRow
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var b briefRow
+		if err := rows.Scan(&b.id, &b.status); err != nil {
 			rows.Close()
 			return VoidResult{}, err
 		}
-		toCancel = append(toCancel, id)
+		toCancel = append(toCancel, b)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -109,18 +119,36 @@ func (s *Service) VoidService(ctx context.Context, actor permission.Actor, servi
 	rows.Close()
 
 	res := VoidResult{ServiceID: serviceID, VoidedBriefs: []string{}, SkippedApproved: []string{}}
-	for _, id := range toCancel {
+	for _, b := range toCancel {
+		if b.status == BriefVendorDispatched {
+			// Live Stream brief: off-machine (STATE_MACHINES §7), so the engine
+			// cannot drive it — cancel with a direct UPDATE plus an immutable
+			// audit row (keputusan Nerissa 2026-07-12, cascade never aborts).
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE briefs SET status = ? WHERE id = ?`, StatusServiceVoided, b.id); err != nil {
+				return VoidResult{}, err
+			}
+			if err := audit.Write(ctx, tx, audit.Record{
+				EntityType: "brief", EntityID: b.id, Actor: actor.EmployeeID, Action: "void_cascade_offmachine",
+				Before: map[string]any{"status": BriefVendorDispatched},
+				After:  map[string]any{"status": StatusServiceVoided, "service_id": serviceID},
+			}); err != nil {
+				return VoidResult{}, err
+			}
+			res.VoidedBriefs = append(res.VoidedBriefs, b.id)
+			continue
+		}
 		if _, err := s.Engine.Transition(ctx, tx, statemachine.Request{
 			Machine:    statemachine.MBriefTask,
 			EntityType: "brief",
 			Table:      "briefs",
-			EntityID:   id,
+			EntityID:   b.id,
 			To:         StatusServiceVoided,
 			Actor:      actor,
 		}); err != nil {
 			return VoidResult{}, err
 		}
-		res.VoidedBriefs = append(res.VoidedBriefs, id)
+		res.VoidedBriefs = append(res.VoidedBriefs, b.id)
 	}
 
 	// Record which Approved briefs were deliberately preserved (reporting only).

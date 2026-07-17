@@ -23,7 +23,7 @@ func TestMigrateUpDown(t *testing.T) {
 	}
 
 	// Core tables exist after up.
-	for _, tbl := range []string{"employees", "audit_log", "id_sequences", "notifications", "master_service_versions", "demo_tasks"} {
+	for _, tbl := range []string{"employees", "audit_log", "id_sequences", "notifications", "master_service_versions", "demo_tasks", "assets", "asset_block_requests"} {
 		var name string
 		if err := d.QueryRow(`SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=?`, tbl).Scan(&name); err != nil {
 			t.Fatalf("expected table %s after up: %v", tbl, err)

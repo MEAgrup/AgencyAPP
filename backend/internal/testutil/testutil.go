@@ -49,7 +49,25 @@ var dataTables = []string{
 	"payment_verifications",
 	"installments",
 	"transactions",
+	"complaints",
+	// Wave 2 — Module 8 (Ads): children before parents (FK checks are disabled
+	// during truncation, so order is for readability only).
+	"metric_entry_assets",
+	"metric_entries",
+	"optimization_logs",
+	"ad_campaign_assets",
+	"ad_campaigns",
+	// Wave 2 — Module 9 (KOL): children before parents.
+	"creator_payment_requests",
+	"creator_lists",
+	"creator_bookings",
+	// Wave 2 — Module 10 (Live Stream): child of briefs.
+	"live_stream_sessions",
+	"asset_block_requests",
+	"assets",
+	"brief_block_requests",
 	"briefs",
+	"strategy_plans",
 	"services",
 	"client_sales_allocations",
 	"client_platforms",
