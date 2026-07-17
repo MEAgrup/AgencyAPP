@@ -12,6 +12,7 @@ import "net/http"
 func (a *App) registerLeadsSalesRoutes(mux *http.ServeMux) {
 	// M1 — Leads registry (W1-01 registration, W1-03 pool claim).
 	mux.HandleFunc("POST /api/v1/leads", a.protect(a.handleRegisterLead))
+	mux.HandleFunc("POST /api/v1/leads/bulk", a.protect(a.handleBulkImportLeads))
 	mux.HandleFunc("POST /api/v1/leads/{id}/claim", a.protect(a.handleClaimLead))
 
 	// M0 — quote preview (MSL v2 calculator; no persistence).

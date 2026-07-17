@@ -59,6 +59,34 @@ func (a *App) handleRegisterLead(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, body)
 }
 
+// handleBulkImportLeads is the Marketing bulk-import door (M1 §3): a JSON body
+// of many registration rows processed with import-door semantics (duplicates
+// blocked per-row, incomplete rows rejected, ids minted only for valid rows).
+// The response carries the per-row report, the §3 Flow-7 summary line, and the
+// rejection list. The write gate lives in the service (Marketing/Director only).
+func (a *App) handleBulkImportLeads(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	var in struct {
+		Rows []module1_leads.BulkRow `json:"rows"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, module0_sales.IncompleteMessage)
+		return
+	}
+	report, err := a.leadsSvc().BulkImport(r.Context(), actor, in.Rows)
+	if err != nil {
+		a.writeDomainErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"imported":   report.Imported,
+		"rejected":   report.Rejected,
+		"summary":    report.Summary(),
+		"rows":       report.Rows,
+		"rejections": report.Rejections(),
+	})
+}
+
 func (a *App) handleClaimLead(w http.ResponseWriter, r *http.Request) {
 	actor, _ := actorFrom(r.Context())
 	att, err := a.leadsSvc().ClaimFromPool(r.Context(), actor, r.PathValue("id"))

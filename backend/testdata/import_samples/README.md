@@ -34,14 +34,15 @@ lihat DECISIONS 2026-07-17):
 
 | File | Isi |
 |---|---|
-| `employees_uat.csv` | = `employees_cdps.csv` (33 riil) + **2 baris fixture Director UAT** (`UATDIR0001/0002`, email `uat.director*@cdps.local`) — fixture O26; ganti dengan baris riil Yohan & Nerissa begitu NIK+email masuk |
+| `employees_uat.csv` | = `employees_cdps.csv` (33 riil) + **2 fixture Director** (`UATDIR0001/0002` — O26; ganti baris riil Yohan & Nerissa begitu NIK+email masuk) + **2 fixture Finance** (`UATFIN0001/0002` — O33) + **5 fixture Wave 2** (`UATKOL0001/0002`, `UATCRE0001`, `UATADS0001`, `UATLSS0001` — O34) = **42 baris** |
 | `layered_roles_uat.csv` | = `seed/layered_roles_riil.csv` + `UATDIR0001,director` + `UATDIR0002,director` |
+| `role_mappings_uat.csv` | = `seed/role_mappings_riil.csv` (23) + mapping fixture Finance O33 (2) + mapping fixture Wave 2 O34 (5) = **30 mapping** — pakai via `--role-csv` |
 
 Urutan boot UAT (semua dari `backend/`):
 1. `go run ./cmd/migrate up`
 2. `CDPS_SEED_CSV=testdata/import_samples/employees_uat.csv MOCKHRIS_ADDR=:8081 go run ./cmd/mockhris`
-3. `CDPS_SEED_CSV=testdata/import_samples/employees_uat.csv HRIS_BASE_URL=http://127.0.0.1:8081 go run ./cmd/cdps` (auto-migrate + auto-sync 35)
-4. `go run ./cmd/rolemapseed --layered-csv testdata/import_samples/layered_roles_uat.csv` (dry-run) → `--apply`
+3. `CDPS_SEED_CSV=testdata/import_samples/employees_uat.csv HRIS_BASE_URL=http://127.0.0.1:8081 go run ./cmd/cdps` (auto-migrate + auto-sync 42)
+4. `go run ./cmd/rolemapseed --role-csv testdata/import_samples/role_mappings_uat.csv --layered-csv testdata/import_samples/layered_roles_uat.csv` (dry-run) → `--apply`
 5. `go run ./cmd/mslseed --actor 2101180004` (dry-run) → `--apply` (aktor = Head of Sales riil)
 
 Kredensial UAT: semua karyawan login dengan email riil + password bersama `rahasia123`
