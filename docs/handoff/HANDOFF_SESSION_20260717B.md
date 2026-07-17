@@ -71,3 +71,19 @@ plus baru: **jangan `pkill -f <pola>` yang cocok dengan command line shell sendi
 Setup container = HANDOFF_WAVE2_SESSION3 §Setup (apt mariadb-server; DB `cdps`/`cdps_test`/
 `cdps_test2`; user `cdps`/`cdps_dev`; `log_bin_trust_function_creators=1`). Test WAJIB `-p 1`.
 DB dev container ini berisi hasil smoke UAT (35 employees, 23+3 role/layered, 32 MSL) — ephemeral.
+
+---
+
+## UPDATE sesi yang sama (lanjutan): UAT teknis W1-20 SELESAI — PASS 32/32
+
+Runbook `W1-20_UAT_RUNBOOK.md` langkah 1–17 dieksekusi via API dengan aktor riil +
+fixture. **Laporan: `docs/handoff/W1-20_UAT_REPORT_20260717.md`** (bukti per langkah,
+aktor, temuan). Skrip repeatable: `backend/uat/w120_walk.py`.
+
+Temuan penting → **Open O33 (BARU)**: roster HR riil TIDAK punya divisi Finance —
+flow M5 tanpa aktor riil di produksi; UAT pakai fixture `UATFIN0001/0002` +
+`role_mappings_uat.csv`. Butuh keputusan Yohan sebelum go-live M5.
+
+Yang tersisa dari W1-20 = manusia: langkah 18 go/no-go (Nerissa/Yohan + head dev,
+bahan = laporan UAT) + spot-check komisi manual Sales Head. Setelah go →
+lanjut **UAT Wave 2** (runbook belum ditulis; pola sama, modul M6/M12/M7–M10).

@@ -34,3 +34,5 @@ employee_id,nama,email,divisi,jabatan,status_aktif
 2412090425,SYIFA NUR ALYA PUTRI,syifanuralya@gmail.com,ACCOUNT,CUSTOMER RELATIONS OFFICER,true
 UATDIR0001,UAT DIRECTOR SATU (FIXTURE — ganti dgn baris riil Yohan saat O26),uat.director1@cdps.local,DIREKSI,DIRECTOR,true
 UATDIR0002,UAT DIRECTOR DUA (FIXTURE — ganti dgn baris riil Nerissa saat O26),uat.director2@cdps.local,DIREKSI,DIRECTOR,true
+UATFIN0001,UAT FINANCE STAFF (FIXTURE — lihat Open O33 aktor Finance riil),uat.finance1@cdps.local,FINANCE,FINANCE STAFF,true
+UATFIN0002,UAT FINANCE HEAD (FIXTURE — lihat Open O33 aktor Finance riil),uat.finance2@cdps.local,FINANCE,HEAD OF FINANCE,true
