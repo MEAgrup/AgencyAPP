@@ -67,13 +67,14 @@ func (a *App) handleRegisterLead(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleBulkImportLeads(w http.ResponseWriter, r *http.Request) {
 	actor, _ := actorFrom(r.Context())
 	var in struct {
-		Rows []module1_leads.BulkRow `json:"rows"`
+		CampaignID string                  `json:"campaign_id"`
+		Rows       []module1_leads.BulkRow `json:"rows"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		writeErr(w, http.StatusBadRequest, module0_sales.IncompleteMessage)
 		return
 	}
-	report, err := a.leadsSvc().BulkImport(r.Context(), actor, in.Rows)
+	report, err := a.leadsSvc().BulkImport(r.Context(), actor, in.CampaignID, in.Rows)
 	if err != nil {
 		a.writeDomainErr(w, err)
 		return

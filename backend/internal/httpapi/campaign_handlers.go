@@ -69,6 +69,19 @@ func (a *App) handleGetMarketingCampaign(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, c)
 }
 
+// handleMarketingCampaignRollup returns the Campaign's read-only funnel rollup
+// (M3 §4 Rule 4 / §6.3): leads generated, real leads (>= Qualified), clients won,
+// and total value won. Visibility follows the §5 read gate (reused from Get).
+func (a *App) handleMarketingCampaignRollup(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	roll, err := a.campaignSvc().Rollup(r.Context(), actor, r.PathValue("id"))
+	if err != nil {
+		writeCampaignErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, roll)
+}
+
 // ---- Lifecycle (M3 §3) ----
 
 type transitionMktCampaignBody struct {

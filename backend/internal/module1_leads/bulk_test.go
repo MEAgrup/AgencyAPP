@@ -57,7 +57,7 @@ func TestBulkImport_RowLevel(t *testing.T) {
 	}
 	leadsBefore := countLeads(t, s)
 
-	report, err := s.BulkImport(ctx, mktActor("EMP-LIA", permission.LevelStaff), []BulkRow{
+	report, err := s.BulkImport(ctx, mktActor("EMP-LIA", permission.LevelStaff), "", []BulkRow{
 		{LeadName: "Toko Satu", PhoneNumber: "0812 111 0001", Source: "Leads - Iklan"},
 		{LeadName: "Toko Dua", PhoneNumber: "0812 111 0002", Source: "Leads - Iklan"},
 		{LeadName: "Unicorn Digital", PhoneNumber: "+62813-2222-3333", Source: "Leads - Iklan"}, // dup of active scouted
@@ -148,7 +148,7 @@ func TestBulkImport_ReopenTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report, err := s.BulkImport(ctx, mktActor("EMP-LIA", permission.LevelStaff), []BulkRow{
+	report, err := s.BulkImport(ctx, mktActor("EMP-LIA", permission.LevelStaff), "", []BulkRow{
 		{LeadName: "Toko Lama", PhoneNumber: "+62812 555 0001", Source: "Leads - Iklan"},
 	})
 	if err != nil {
@@ -194,7 +194,7 @@ func TestBulkImport_PoolDuplicateBlocked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report, err := s.BulkImport(ctx, mktActor("EMP-LIA", permission.LevelStaff), []BulkRow{
+	report, err := s.BulkImport(ctx, mktActor("EMP-LIA", permission.LevelStaff), "", []BulkRow{
 		{LeadName: "Toko Pool", PhoneNumber: "0812-777-0001", Source: "Leads - Iklan"},
 	})
 	if err != nil {
@@ -225,7 +225,7 @@ func TestBulkImport_ClientBlocked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report, err := s.BulkImport(ctx, mktActor("EMP-LIA", permission.LevelStaff), []BulkRow{
+	report, err := s.BulkImport(ctx, mktActor("EMP-LIA", permission.LevelStaff), "", []BulkRow{
 		{LeadName: "Sudah Klien", PhoneNumber: "0812 999 0001", Source: "Leads - Iklan"},
 	})
 	if err != nil {
@@ -249,7 +249,7 @@ func TestBulkImport_Permissions(t *testing.T) {
 		dirActor("EMP-DIR"),
 	}
 	for _, a := range allowed {
-		if _, err := s.BulkImport(ctx, a, nil); err != nil {
+		if _, err := s.BulkImport(ctx, a, "", nil); err != nil {
 			t.Fatalf("actor %+v must be allowed, got %v", a.Role, err)
 		}
 	}
@@ -259,7 +259,7 @@ func TestBulkImport_Permissions(t *testing.T) {
 		{EmployeeID: "EMP-OD", Role: permission.Role{OD: true}}, // pure OD, read-only
 	}
 	for _, a := range denied {
-		_, err := s.BulkImport(ctx, a, []BulkRow{{LeadName: "X", PhoneNumber: "0812", Source: "Leads - Iklan"}})
+		_, err := s.BulkImport(ctx, a, "", []BulkRow{{LeadName: "X", PhoneNumber: "0812", Source: "Leads - Iklan"}})
 		var blocked *ErrBlocked
 		if !errors.As(err, &blocked) {
 			t.Fatalf("actor %+v must be denied *ErrBlocked, got %v", a.Role, err)

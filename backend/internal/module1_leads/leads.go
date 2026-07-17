@@ -88,6 +88,12 @@ type RegisterInput struct {
 	PhoneNumber string
 	Email       string
 	Source      string
+	// CampaignID optionally links the intake to a Campaign (CMP-, M3). When set,
+	// the campaign gate (O13 auto-activate/block) runs, Source is auto-derived
+	// from the Campaign Channel (overriding Source above), and origin/last-touch
+	// linkage is written (campaign_link.go). Empty = no campaign (Source used
+	// as-is, origin/last-touch left NULL).
+	CampaignID string
 }
 
 func (in RegisterInput) valid() bool {
@@ -115,6 +121,18 @@ func (s *Service) Register(ctx context.Context, actor permission.Actor, in Regis
 	}
 	defer tx.Rollback()
 
+	// Campaign gate + Source auto-set (M3 §2 / O13). Runs BEFORE any lead write so
+	// a missing/closed Campaign rejects the registration cleanly; on success it
+	// returns the Channel-derived Source (which WINS over in.Source).
+	source := in.Source
+	if in.CampaignID != "" {
+		derived, err := s.resolveCampaignForIntake(ctx, tx, in.CampaignID, actor)
+		if err != nil {
+			return Lead{}, Attempt{}, "", err
+		}
+		source = derived
+	}
+
 	match, err := MatchByPhone(ctx, tx, phoneNorm)
 	if err != nil {
 		return Lead{}, Attempt{}, "", err
@@ -129,6 +147,13 @@ func (s *Service) Register(ctx context.Context, actor permission.Actor, in Regis
 				EntityType: "lead", EntityID: match.ID, Actor: actor.EmployeeID,
 				Action: "dedup_blocked", After: map[string]any{"channel": "single_reg", "message": decision.Message},
 			})
+			// M1 §5: a block-as-Pool-duplicate under a Campaign still records the
+			// newer Campaign as Last-Touch (non-destructive; origin untouched).
+			if in.CampaignID != "" && decision.Message == MsgDuplicatePool {
+				if err := s.updateLastTouch(ctx, tx, match.ID, in.CampaignID, actor); err != nil {
+					return Lead{}, Attempt{}, "", err
+				}
+			}
 			_ = tx.Commit()
 		}
 		return Lead{}, Attempt{}, "", &ErrBlocked{Message: decision.Message}
@@ -139,6 +164,10 @@ func (s *Service) Register(ctx context.Context, actor permission.Actor, in Regis
 			return Lead{}, Attempt{}, "", err
 		}
 		if err := s.transition(ctx, tx, decision.ReopenLeadID, RecordActive, actor); err != nil {
+			return Lead{}, Attempt{}, "", err
+		}
+		// M1 §5: a campaign-scoped reopen touches the existing lead -> last-touch.
+		if err := s.updateLastTouch(ctx, tx, decision.ReopenLeadID, in.CampaignID, actor); err != nil {
 			return Lead{}, Attempt{}, "", err
 		}
 		att, err := s.insertAttempt(ctx, tx, decision.ReopenLeadID, actor)
@@ -167,6 +196,10 @@ func (s *Service) Register(ctx context.Context, actor permission.Actor, in Regis
 			Action: "dedup_join",
 			After:  map[string]any{"channel": "single_reg", "attempt_id": att.ID, "co_owners": decision.CoOwners},
 		}); err != nil {
+			return Lead{}, Attempt{}, "", err
+		}
+		// M1 §5: a campaign-scoped co-pursuit touches the existing lead -> last-touch.
+		if err := s.updateLastTouch(ctx, tx, decision.JoinLeadID, in.CampaignID, actor); err != nil {
 			return Lead{}, Attempt{}, "", err
 		}
 		notice := ""
@@ -201,15 +234,18 @@ func (s *Service) Register(ctx context.Context, actor permission.Actor, in Regis
 		if err != nil {
 			return Lead{}, Attempt{}, "", err
 		}
+		// A NEW lead born under a Campaign gets origin = last-touch = that Campaign
+		// (origin is IMMUTABLE hereafter); both NULL when no campaign (M1 §5 / §9.3).
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO leads (id, lead_name, phone_number, phone_norm, email, source, origin_division, record_status, created_by)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			leadID, in.LeadName, in.PhoneNumber, phoneNorm, nullString(in.Email), in.Source, SalesDivision, RecordActive, actor.EmployeeID); err != nil {
+			`INSERT INTO leads (id, lead_name, phone_number, phone_norm, email, source, origin_division, origin_campaign_id, last_touch_campaign_id, record_status, created_by)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			leadID, in.LeadName, in.PhoneNumber, phoneNorm, nullString(in.Email), source, SalesDivision,
+			campaignArg(in.CampaignID), campaignArg(in.CampaignID), RecordActive, actor.EmployeeID); err != nil {
 			return Lead{}, Attempt{}, "", err
 		}
 		if err := audit.Write(ctx, tx, audit.Record{
 			EntityType: "lead", EntityID: leadID, Actor: actor.EmployeeID,
-			Action: "create", After: map[string]any{"record_status": RecordActive, "source": in.Source},
+			Action: "create", After: map[string]any{"record_status": RecordActive, "source": source, "origin_campaign_id": campaignArg(in.CampaignID)},
 		}); err != nil {
 			return Lead{}, Attempt{}, "", err
 		}
@@ -220,7 +256,7 @@ func (s *Service) Register(ctx context.Context, actor permission.Actor, in Regis
 		if err := tx.Commit(); err != nil {
 			return Lead{}, Attempt{}, "", err
 		}
-		return Lead{ID: leadID, LeadName: in.LeadName, PhoneNumber: in.PhoneNumber, Source: in.Source, RecordStatus: RecordActive}, att, "", nil
+		return Lead{ID: leadID, LeadName: in.LeadName, PhoneNumber: in.PhoneNumber, Source: source, RecordStatus: RecordActive}, att, "", nil
 	}
 }
 

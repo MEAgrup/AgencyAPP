@@ -15,6 +15,7 @@ func (a *App) registerCampaignRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/marketing/campaigns", a.protect(a.handleCreateMarketingCampaign))
 	mux.HandleFunc("GET /api/v1/marketing/campaigns", a.protect(a.handleListMarketingCampaigns))
 	mux.HandleFunc("GET /api/v1/marketing/campaigns/{id}", a.protect(a.handleGetMarketingCampaign))
+	mux.HandleFunc("GET /api/v1/marketing/campaigns/{id}/rollup", a.protect(a.handleMarketingCampaignRollup))
 	mux.HandleFunc("POST /api/v1/marketing/campaigns/{id}/transition", a.protect(a.handleTransitionMarketingCampaign))
 	mux.HandleFunc("POST /api/v1/marketing/campaigns/{id}/reassign", a.protect(a.handleReassignMarketingCampaign))
 }
