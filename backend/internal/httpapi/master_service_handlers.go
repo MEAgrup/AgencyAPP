@@ -23,19 +23,20 @@ func (a *App) handleListMasterServices(w http.ResponseWriter, r *http.Request) {
 }
 
 type masterServiceBody struct {
-	Name           string `json:"name"`
-	StandardPrice  string `json:"standard_price"`
-	CommissionRule string `json:"commission_rule"`
-	Category       string `json:"category"`
-	Unit           string `json:"unit"`
-	MinQty         string `json:"min_qty"`
-	PricingMode    string `json:"pricing_mode"`
-	ApplyPPN       bool   `json:"apply_ppn"`
-	Frequency      string `json:"frequency"`
-	PriceNote      string `json:"price_note"`
-	Description    string `json:"description"`
-	Active         bool   `json:"active"`
-	EffectiveFrom  string `json:"effective_from"`
+	Name                 string `json:"name"`
+	StandardPrice        string `json:"standard_price"`
+	CommissionRule       string `json:"commission_rule"`
+	Category             string `json:"category"`
+	Unit                 string `json:"unit"`
+	MinQty               string `json:"min_qty"`
+	PricingMode          string `json:"pricing_mode"`
+	ApplyPPN             bool   `json:"apply_ppn"`
+	Frequency            string `json:"frequency"`
+	PriceNote            string `json:"price_note"`
+	Description          string `json:"description"`
+	Active               bool   `json:"active"`
+	RequiresStrategyPlan bool   `json:"requires_strategy_plan"`
+	EffectiveFrom        string `json:"effective_from"`
 }
 
 func (b masterServiceBody) input() admin.ServiceInput {
@@ -43,7 +44,7 @@ func (b masterServiceBody) input() admin.ServiceInput {
 		Name: b.Name, StandardPrice: b.StandardPrice, CommissionRule: b.CommissionRule,
 		Category: b.Category, Unit: b.Unit, MinQty: b.MinQty, PricingMode: b.PricingMode,
 		ApplyPPN: b.ApplyPPN, Frequency: b.Frequency, PriceNote: b.PriceNote, Description: b.Description,
-		Active: b.Active, EffectiveFrom: b.EffectiveFrom,
+		Active: b.Active, RequiresStrategyPlan: b.RequiresStrategyPlan, EffectiveFrom: b.EffectiveFrom,
 	}
 }
 

@@ -26,3 +26,6 @@ Icon
 /backend/mslseed
 /backend/rolemapseed
 /backend/backend
+
+# Claude Code agent worktrees (ephemeral, never commit)
+.claude/worktrees/

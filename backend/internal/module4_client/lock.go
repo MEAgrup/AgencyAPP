@@ -28,23 +28,23 @@ var (
 // Client Record field names — the identifiers used by the lock matrix and the
 // PATCH request. These mirror docs/prd M4 §4 row-for-row.
 const (
-	FieldClientID       = "client_id"
-	FieldNamaPIC        = "nama_pic"
-	FieldToko           = "toko"
-	FieldKota           = "kota"
-	FieldLinkToko       = "link_toko"
-	FieldKategori       = "kategori"
-	FieldPlatformList   = "platform_list"
-	FieldServiceSet     = "service_set"
-	FieldGMVBaseline    = "gmv_baseline"
-	FieldTargetGMV      = "target_gmv"
+	FieldClientID        = "client_id"
+	FieldNamaPIC         = "nama_pic"
+	FieldToko            = "toko"
+	FieldKota            = "kota"
+	FieldLinkToko        = "link_toko"
+	FieldKategori        = "kategori"
+	FieldPlatformList    = "platform_list"
+	FieldServiceSet      = "service_set"
+	FieldGMVBaseline     = "gmv_baseline"
+	FieldTargetGMV       = "target_gmv"
 	FieldMarketingBudget = "marketing_budget"
-	FieldTotalSales     = "total_sales"
-	FieldOriginCampaign = "origin_campaign_id"
-	FieldSalesPIC       = "sales_pic_id"
-	FieldCommissionPIC  = "commission_payment_pic_id"
+	FieldTotalSales      = "total_sales"
+	FieldOriginCampaign  = "origin_campaign_id"
+	FieldSalesPIC        = "sales_pic_id"
+	FieldCommissionPIC   = "commission_payment_pic_id"
 	FieldSalesAllocation = "sales_allocation"
-	FieldTransactionID  = "transaction_id"
+	FieldTransactionID   = "transaction_id"
 )
 
 // editPolicy names WHO may correct a field. Keeping the authorisation as a small

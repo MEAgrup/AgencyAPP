@@ -35,7 +35,20 @@ All else blocked: `[transisi status tidak diizinkan]`.
 `[Belum Jatuh Tempo]` → `[Jatuh Tempo]` (due date passed unverified) → `[Terverifikasi]`; or `[Belum Jatuh Tempo]` → `[Terverifikasi]` directly. Transaction = `[Lunas]` only when ALL installments `[Terverifikasi]`.
 
 ## 6. Service (M6)
-`(intake)` → `[Strategy Approved]` (plan-gated only; Direct services skip) → `[Briefed]` (first Brief created) → `[In Execution]` (any Brief leaves `[To Do]`) → done state per Brief rollup. Void Service (M4-OA-5): SPV/Account Lead approval; cascades child Briefs not yet `[Approved]` → `[Cancelled — Service Voided]`.
+`[Awaiting Onboarding]` → `[Strategy Approved]` (plan-gated only; Direct services skip) → `[Briefed]` (first Brief created) → `[In Execution]` (any Brief leaves `[To Do]`) → done state per Brief rollup. Void Service (M4-OA-5): SPV/Account Lead approval; cascades child Briefs not yet `[Approved]` → `[Cancelled — Service Voided]`.
+- **Per-Service flag `Requires Strategy Plan`** (§2): inherited read-only from the Service Catalog (MSL) at closing and pinned on the Service row. `Yes` ⇒ Plan-gated, `No` ⇒ Direct.
+- **Direct-breakdown guard (data-dependent, enforced in `module6_account`, NOT the config engine):** the edge `[Awaiting Onboarding]` → `[Briefed]` is the **Direct path only**. A Plan-gated Service (flag = `Yes`) may reach `[Briefed]` **only after** `[Strategy Approved]`; taking the direct edge while still `[Awaiting Onboarding]` is rejected with `[layanan ini wajib memiliki Strategy & Plan yang disetujui sebelum dibuatkan Brief]`. The config engine cannot see the per-row flag, so this gate is a code guard the Brief-creation cluster must call before driving that edge.
+
+## 6a. Strategy & Plan `STR-` (M6 §4) — plan-gated services only
+`[Strategy Drafting]` → `[Strategy Submitted for Approval]` → `[Strategy Approved]` (terminal)
+| From | To | Who | Effect |
+|---|---|---|---|
+| `[Strategy Drafting]` | `[Strategy Submitted for Approval]` | owning AM (owner action, not lead) | AM submits the Plan for approval |
+| `[Strategy Submitted for Approval]` | `[Strategy Approved]` | SPV/Head Account only (requireLead) | On approval the parent Service also transitions `[Awaiting Onboarding]` → `[Strategy Approved]` (§6) in the same transaction; `Approved By` recorded |
+| `[Strategy Submitted for Approval]` | `[Strategy Drafting]` | SPV/Head Account only (requireLead) | Revision requested; `Revision Notes` mandatory; Revision Count +1 (derived from the audit log, never a stored tally) |
+- One Strategy per Service (1:1, §4 Rule 1). Direct-path Services have **no** STR record (§4 Rule 6).
+- Only `[Strategy Approved]` unlocks Brief creation for that Service (§4 Rule 5).
+- The approval gate is division-specific (Account lead / Director), stricter than the engine's division-agnostic `requireLead`; the code checks it before the transition (mirrors the Void-Service gate).
 
 ## 7. Brief `BRF-` (M6) — also the canonical Task machine (M12) applied to AST / BKG / BRF-as-task
 `[To Do]` → `[In Progress]` → `[Submitted]` → `[In Review]` → `[Approved]` (terminal)
@@ -55,6 +68,7 @@ All else blocked: `[transisi status tidak diizinkan]`.
 ## 10. Live Stream Session `LSS-` (M10)
 `[Requested]` → `[Confirmed by Vendor]` → `[Completed]` (result fields + Vendor Report Link mandatory) → { `[Reconciled]` (terminal) | `[Discrepancy Flagged]` (notes mandatory; SPV notified real-time; non-blocking → may later move to `[Reconciled]`) }.
 - Brief closes to `[Approved]` when its Sessions reach `[Reconciled]`.
+- **Reopen (O27 resolved 2026-07-14, choice b):** an `[Approved]` Live Stream Brief may be **reopened** back to `[Dispatched to Vendor]` to add Sessions for the running recurring period (M10-OA-4 weekly cadence). Like the close, this is an **off-machine audited action** (`ls_brief_reopened` — the LS Brief never joined the §7 machine), allowed only from `[Approved]`, only for a Live-Stream-division Brief, never for a voided Brief; actor gate = owning AM or Director (same §6.1 write gate as Sessions). After reopen, the existing roll-up re-closes the Brief once ALL Sessions (old + new) are `[Reconciled]`.
 
 ## 11. Complaint `CPL-` (M6)
 `[Open]` → `[In Progress]` → `[Resolved]` → `[Closed]` (AM confirms client satisfaction — distinct from Resolved). Source ∈ {Sales, WhatsApp (AM-logged), Client Portal}.
@@ -64,3 +78,19 @@ Status auto-computed, no manual transitions: `Pending` (source not started) → 
 
 ## 13. No-status entities
 `CHR-` and `PERF-` snapshots: created immutable by monthly batch, never transition. Notification records: unread → read only.
+
+## 14. Ad Campaign `ADC-` (M8) — the ongoing paid-media record, separate from the setup Brief
+The Ad Campaign is a **living** record that **outlives** its setup Brief (M8 §2): the Brief (a Brief-as-task on the §7 machine) closes once setup is approved, but the `ADC-` keeps running and accumulating metrics/optimizations underneath it. Lifecycle (M8 §2 / §9.3 — exactly three statuses, no others):
+`[Paused]` (born held — created while the parent Brief is `[In Progress]`, **not launched with real spend** yet, §4 Rule 4) `↔` `[Active]` → `[Ended]` (terminal).
+
+| From | To | Who | Effect |
+|---|---|---|---|
+| `[Paused]` | `[Active]` | Advertiser (Ads staff/lead) / Director | **Launch / Resume.** Real spend begins (§4 Flow 2). Gated in code (not the engine): the parent Brief must be `[Approved]` **and** every currently-linked Creative Asset must be `[Approved]` (the built-in implicit dependency, §12 — hardcoded, never user-declared). |
+| `[Active]` | `[Paused]` | Advertiser / Director | **Pause** — optimization/held (e.g. while the setup Brief is in `[Revision Requested]`). No approval gate (routine optimization, §6 Rule 3). |
+| `[Active]` | `[Ended]` | Advertiser / Director | End date reached, budget exhausted, or manually stopped (§2). Terminal. |
+| `[Paused]` | `[Ended]` | Advertiser / Director | A held campaign may be ended without ever launching. Terminal. |
+
+- Born `[Paused]` (engine `initial`), **not** via the engine — creation is a birth-status INSERT (same precedent as Brief/Asset/Strategy birth statuses); every later move goes through the engine (house rule 2).
+- The `[Paused]↔[Active]` edges are **not** `requireLead` at the engine level — the Advertiser optimizes freely (§6 Rule 3). The Launch dependency (Brief + Assets `[Approved]`) is a **code guard** on the `[Paused]→[Active]` edge (mirrors the Void-Service / Direct-breakdown code guards), because the engine cannot see the parent Brief's or linked Assets' statuses.
+- Metric Entries (`MTR-`) and Optimization Log entries (`OPT-`) are **append-only child rows** (M8 §5/§6), not state machines: they carry no status and never transition. Total Spend / Total GMV / ROAS and each Asset's Attributed GMV are **derived** from these immutable rows (house rules 3/4), never stored as mutable running columns.
+- **Recurring strategy cycles (M8-OA-6):** a new setup `BRF-` is created each cycle, but the **same `ADC-` continues uninterrupted** — the campaign is never restarted; only the Brief above it is new.

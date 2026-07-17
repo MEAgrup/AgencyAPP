@@ -26,3 +26,26 @@ Catatan:
 - Kalau satu spreadsheet punya banyak tab dan ragu tab mana yang relevan, export semua tab.
 - Data ini berisi PII (nama, telepon) — folder ini untuk kebutuhan migrasi go-live;
   jangan dipakai sebagai fixture test permanen tanpa anonimisasi.
+
+## UAT login gate (mock HRIS berisi data riil) — 2026-07-17
+
+File tambahan untuk UAT W1-20/Wave 2 (keputusan: mock HRIS + roster riil = gate login UAT;
+lihat DECISIONS 2026-07-17):
+
+| File | Isi |
+|---|---|
+| `employees_uat.csv` | = `employees_cdps.csv` (33 riil) + **2 baris fixture Director UAT** (`UATDIR0001/0002`, email `uat.director*@cdps.local`) — fixture O26; ganti dengan baris riil Yohan & Nerissa begitu NIK+email masuk |
+| `layered_roles_uat.csv` | = `seed/layered_roles_riil.csv` + `UATDIR0001,director` + `UATDIR0002,director` |
+
+Urutan boot UAT (semua dari `backend/`):
+1. `go run ./cmd/migrate up`
+2. `CDPS_SEED_CSV=testdata/import_samples/employees_uat.csv MOCKHRIS_ADDR=:8081 go run ./cmd/mockhris`
+3. `CDPS_SEED_CSV=testdata/import_samples/employees_uat.csv HRIS_BASE_URL=http://127.0.0.1:8081 go run ./cmd/cdps` (auto-migrate + auto-sync 35)
+4. `go run ./cmd/rolemapseed --layered-csv testdata/import_samples/layered_roles_uat.csv` (dry-run) → `--apply`
+5. `go run ./cmd/mslseed --actor 2101180004` (dry-run) → `--apply` (aktor = Head of Sales riil)
+
+Kredensial UAT: semua karyawan login dengan email riil + password bersama `rahasia123`
+(default parser bila kolom ke-7 `password` tidak ada). Password per-orang bisa diberikan
+TANPA perubahan kode dengan menambah kolom ke-7 di `employees_uat.csv`. UAT-only —
+produksi memakai endpoint HRIS asli (CDPS tidak menyimpan password).
+Case email TERUJI dua arah (uppercase tersimpan ↔ input lowercase, dan sebaliknya).

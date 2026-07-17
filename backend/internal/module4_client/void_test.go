@@ -59,6 +59,7 @@ func TestVoidServiceCascade(t *testing.T) {
 		"BRF-2": "[In Progress]",
 		"BRF-3": BriefApproved, // must be left intact
 		"BRF-4": "[Submitted]",
+		"BRF-5": BriefVendorDispatched, // Live Stream (off-machine) — cancelled via direct audited UPDATE
 	})
 
 	res, err := s.VoidService(ctx, accountLead("A2"), "SVC-V")
@@ -68,8 +69,8 @@ func TestVoidServiceCascade(t *testing.T) {
 	if serviceStatus(t, s, "SVC-V") != StatusServiceVoided {
 		t.Errorf("service not voided: %q", serviceStatus(t, s, "SVC-V"))
 	}
-	// Non-approved briefs cancelled; approved untouched.
-	for _, id := range []string{"BRF-1", "BRF-2", "BRF-4"} {
+	// Non-approved briefs cancelled (incl. off-machine LS brief); approved untouched.
+	for _, id := range []string{"BRF-1", "BRF-2", "BRF-4", "BRF-5"} {
 		if got := briefStatus(t, s, id); got != StatusServiceVoided {
 			t.Errorf("%s = %q, want voided", id, got)
 		}
@@ -77,7 +78,7 @@ func TestVoidServiceCascade(t *testing.T) {
 	if got := briefStatus(t, s, "BRF-3"); got != BriefApproved {
 		t.Errorf("approved brief was touched: %q", got)
 	}
-	if len(res.VoidedBriefs) != 3 || len(res.SkippedApproved) != 1 || res.SkippedApproved[0] != "BRF-3" {
+	if len(res.VoidedBriefs) != 4 || len(res.SkippedApproved) != 1 || res.SkippedApproved[0] != "BRF-3" {
 		t.Errorf("result = %+v", res)
 	}
 
@@ -85,7 +86,7 @@ func TestVoidServiceCascade(t *testing.T) {
 	if len(auditFor(t, s, "service", "SVC-V")) == 0 {
 		t.Errorf("missing service void audit")
 	}
-	for _, id := range []string{"BRF-1", "BRF-2", "BRF-4"} {
+	for _, id := range []string{"BRF-1", "BRF-2", "BRF-4", "BRF-5"} {
 		if len(auditFor(t, s, "brief", id)) == 0 {
 			t.Errorf("missing brief cancel audit for %s", id)
 		}
@@ -97,8 +98,8 @@ func TestVoidServiceCascade(t *testing.T) {
 	// Nothing was deleted — all 4 brief rows persist.
 	var n int
 	s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM briefs WHERE service_id = 'SVC-V'`).Scan(&n)
-	if n != 4 {
-		t.Errorf("brief count = %d, want 4 (void never deletes)", n)
+	if n != 5 {
+		t.Errorf("brief count = %d, want 5 (void never deletes)", n)
 	}
 
 	// Voided service is terminal: re-void is blocked with the BI message.

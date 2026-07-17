@@ -71,25 +71,25 @@ type ServiceLine struct {
 
 // Client is the full canonical Client Record with its provenance.
 type Client struct {
-	ID                     string      `json:"id"`
-	LeadID                 string      `json:"lead_id,omitempty"`
-	WinningAttemptID       string      `json:"winning_attempt_id,omitempty"`
-	NamaPIC                string      `json:"nama_pic"`
-	Toko                   string      `json:"toko"`
-	Kota                   string      `json:"kota"`
-	LinkToko               string      `json:"link_toko"`
-	Kategori               string      `json:"kategori"`
-	GMVBaseline            money.Money `json:"-"`
-	TargetGMV              money.Money `json:"-"`
+	ID                     string       `json:"id"`
+	LeadID                 string       `json:"lead_id,omitempty"`
+	WinningAttemptID       string       `json:"winning_attempt_id,omitempty"`
+	NamaPIC                string       `json:"nama_pic"`
+	Toko                   string       `json:"toko"`
+	Kota                   string       `json:"kota"`
+	LinkToko               string       `json:"link_toko"`
+	Kategori               string       `json:"kategori"`
+	GMVBaseline            money.Money  `json:"-"`
+	TargetGMV              money.Money  `json:"-"`
 	MarketingBudget        *money.Money `json:"-"`
-	TotalSales             money.Money `json:"-"`
-	OriginCampaignID       string      `json:"origin_campaign_id,omitempty"`
-	SalesPICID             string      `json:"sales_pic_id"`
-	CommissionPaymentPICID string      `json:"commission_payment_pic_id"`
-	TransactionID          string      `json:"transaction_id,omitempty"`
-	PaymentIntent          string      `json:"payment_intent,omitempty"`
-	ReleasedToAccountAt    *time.Time  `json:"released_to_account_at,omitempty"`
-	CreatedAt              time.Time   `json:"created_at"`
+	TotalSales             money.Money  `json:"-"`
+	OriginCampaignID       string       `json:"origin_campaign_id,omitempty"`
+	SalesPICID             string       `json:"sales_pic_id"`
+	CommissionPaymentPICID string       `json:"commission_payment_pic_id"`
+	TransactionID          string       `json:"transaction_id,omitempty"`
+	PaymentIntent          string       `json:"payment_intent,omitempty"`
+	ReleasedToAccountAt    *time.Time   `json:"released_to_account_at,omitempty"`
+	CreatedAt              time.Time    `json:"created_at"`
 
 	Platforms   []Platform    `json:"platforms"`
 	Allocations []Allocation  `json:"sales_allocation"`
@@ -157,12 +157,16 @@ func (s *Service) List(ctx context.Context, actor permission.Actor) ([]Client, e
 //	OD / Director            -> all clients (OD read-only).
 //	Sales Lead               -> all clients (all sales clients).
 //	Sales Staff              -> own (sales_pic_id) OR a Sales-Allocation member.
-//	Account Staff / Lead     -> only clients released to Account (M5 §5 Rule 2).
+//	Account Lead             -> all clients released to Account (M5 §5 Rule 2).
+//	Account Staff (AM)       -> only released clients ASSIGNED to them (M6 §3).
 //	other divisions          -> no list access.
 //
-// Account-staff "assigned clients" granularity (M4 §6 Rule 3) is a Module 6
-// concern; until AM assignment exists, Account staff and lead alike see every
-// RELEASED client. Logged as a scope note in docs/DECISIONS.md (W1-10).
+// Account-staff "assigned clients" granularity (M4 §6 Rule 3) is now enforced:
+// an AM (Account staff) sees only the released clients whose current AM pointer
+// (clients.assigned_am_id, migration 0020) is them, while Account Lead/Head sees
+// every released client. This pays off the W1-10 deferral (docs/DECISIONS.md
+// 2026-07-10) once Module 6 AM assignment exists (W2-M6-C1). Pre-verification
+// clients stay invisible to all of Account (released_to_account_at IS NULL).
 func visibility(actor permission.Actor) (clause string, args []any, ok bool) {
 	if actor.Role.Director || actor.Role.OD {
 		return "1=1", nil, true
@@ -173,12 +177,19 @@ func visibility(actor permission.Actor) (clause string, args []any, ok bool) {
 			return "1=1", nil, true
 		}
 		return "(c.sales_pic_id = ? OR EXISTS (" +
-			"SELECT 1 FROM client_sales_allocations a WHERE a.client_id = c.id AND a.salesperson_id = ?))",
+				"SELECT 1 FROM client_sales_allocations a WHERE a.client_id = c.id AND a.salesperson_id = ?))",
 			[]any{actor.EmployeeID, actor.EmployeeID}, true
 	case AccountDivision:
 		// Pre-verification clients are invisible to Account until the routing
 		// gate stamps released_to_account_at (M5 §5 Rule 2; AC W1-13).
-		return "c.released_to_account_at IS NOT NULL", nil, true
+		if actor.Role.Level == permission.LevelLead {
+			// Account Lead/Head sees all released account clients (M4 §6 Rule 3).
+			return "c.released_to_account_at IS NOT NULL", nil, true
+		}
+		// Account Staff (AM) sees only released clients assigned to them
+		// (M4 §6 Rule 3, M6 §3 Rule 2 — one AM owns the whole relationship).
+		return "(c.released_to_account_at IS NOT NULL AND c.assigned_am_id = ?)",
+			[]any{actor.EmployeeID}, true
 	default:
 		return "", nil, false
 	}
