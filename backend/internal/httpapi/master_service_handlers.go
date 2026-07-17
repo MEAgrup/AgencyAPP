@@ -6,12 +6,13 @@ import (
 	"time"
 
 	"github.com/meagrup/agencyapp/backend/internal/admin"
+	"github.com/meagrup/agencyapp/backend/internal/core/tz"
 )
 
 func (a *App) handleListMasterServices(w http.ResponseWriter, r *http.Request) {
 	date := r.URL.Query().Get("effective_at")
 	if date == "" {
-		date = time.Now().Format("2006-01-02")
+		date = tz.DateString(time.Now()) // MSL "effective today" in WIB (DECISIONS O20)
 	}
 	rows, err := admin.ListEffectiveAt(r.Context(), a.DB, date)
 	if err != nil {

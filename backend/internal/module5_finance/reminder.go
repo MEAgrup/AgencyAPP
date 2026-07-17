@@ -25,6 +25,7 @@ import (
 	"github.com/meagrup/agencyapp/backend/internal/core/notification"
 	"github.com/meagrup/agencyapp/backend/internal/core/permission"
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
+	"github.com/meagrup/agencyapp/backend/internal/core/tz"
 )
 
 // systemActor drives the fire-once [Belum Jatuh Tempo] -> [Jatuh Tempo]
@@ -62,7 +63,10 @@ type ScanResult struct {
 // special-case filter.
 func (s *Service) ScanReminders(ctx context.Context, cat *notification.Catalog, now time.Time) (ScanResult, error) {
 	var res ScanResult
-	today := now.UTC().Truncate(24 * time.Hour)
+	// Calendar "today" is bucketed in WIB, not UTC (DECISIONS O20): due-date
+	// comparisons and the H-3 window are civil-date operations. Absolute
+	// timestamps written by the sweeps (NOW()) are untouched.
+	today := tz.Date(now)
 
 	n, err := s.scanOverdue(ctx, cat, today)
 	if err != nil {
@@ -436,7 +440,7 @@ func (s *Service) Dashboard(ctx context.Context, cat *notification.Catalog, acto
 		return Dashboard{}, err
 	}
 
-	today := now.UTC().Truncate(24 * time.Hour)
+	today := tz.Date(now) // WIB calendar day (DECISIONS O20)
 	windowEnd := today.AddDate(0, 0, 3)
 
 	q := `SELECT i.id, i.installment_no, i.amount, i.due_date, i.status, i.transaction_id, c.id, c.toko
@@ -468,7 +472,7 @@ func (s *Service) Dashboard(ctx context.Context, cat *notification.Catalog, acto
 		r.DueDate = due
 		r.overdue = r.Status == InstJatuhTempo
 		if r.overdue {
-			days := int(today.Sub(due.UTC().Truncate(24*time.Hour)).Hours() / 24)
+			days := tz.DaysBetween(due, now)
 			if days < 0 {
 				days = 0
 			}

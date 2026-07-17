@@ -143,6 +143,67 @@ func TestScanReminders_OverdueWorkedExample(t *testing.T) {
 	}
 }
 
+// ── O20: calendar "today" is bucketed in WIB, not UTC ─────────────────────
+// The same instant is a different calendar day in WIB (+7). An installment due
+// 16 Jun with now = 2026-06-16T18:00:00Z (== 2026-06-17 01:00 WIB) is overdue
+// under WIB (today = 17 Jun) but would NOT be under UTC (today = 16 Jun). This
+// locks the bucketing to WIB.
+func TestScanReminders_TodayBucketIsWIB(t *testing.T) {
+	s := newSvc(t)
+	cat := notification.NewCatalog()
+	seedFinanceLead(t, s, "EMP-FINHEAD")
+	seedClientWithCommissionPIC(t, s, "CLI-WIB", "EMP-BUDI", "EMP-BUDI")
+	seedTrx(t, s, "TRX-WIB", "CLI-WIB", SchemeTermin, "15000000.00", "")
+	insertInstallment(t, s, "INST-WIB", "TRX-WIB", 1, "15000000.00", day(2026, 6, 16))
+
+	// 2026-06-16T18:00:00Z -> 2026-06-17 01:00 WIB.
+	now := time.Date(2026, 6, 16, 18, 0, 0, 0, time.UTC)
+	res, err := s.ScanReminders(context.Background(), cat, now)
+	if err != nil {
+		t.Fatalf("ScanReminders: %v", err)
+	}
+	if res.OverdueFlagged != 1 {
+		t.Fatalf("OverdueFlagged = %d, want 1 (WIB today should be 17 Jun)", res.OverdueFlagged)
+	}
+	status, jatuhTempo := installmentStatus(t, s, "INST-WIB")
+	if status != InstJatuhTempo || !jatuhTempo {
+		t.Fatalf("status=%q jatuh_tempo=%v, want [Jatuh Tempo]/true", status, jatuhTempo)
+	}
+}
+
+// ── O20: days-overdue count uses WIB calendar days ────────────────────────
+// Due 16 Jun, now = 2026-06-20T18:00:00Z (== 2026-06-21 01:00 WIB) -> 5 days
+// overdue in WIB, whereas the pre-O20 UTC math produced 4.
+func TestDashboard_DaysOverdueIsWIB(t *testing.T) {
+	s := newSvc(t)
+	cat := notification.NewCatalog()
+	seedFinanceLead(t, s, "EMP-FINHEAD")
+	seedClientWithCommissionPIC(t, s, "CLI-WD", "EMP-BUDI", "EMP-BUDI")
+	seedTrx(t, s, "TRX-WD", "CLI-WD", SchemeTermin, "15000000.00", "")
+	insertInstallment(t, s, "INST-WD", "TRX-WD", 1, "15000000.00", day(2026, 6, 16))
+
+	now := time.Date(2026, 6, 20, 18, 0, 0, 0, time.UTC) // 2026-06-21 01:00 WIB
+	dash, err := s.Dashboard(context.Background(), cat, financeStaff, now)
+	if err != nil {
+		t.Fatalf("Dashboard: %v", err)
+	}
+	var row *ReminderRow
+	for i := range dash.Reminders {
+		if dash.Reminders[i].InstallmentID == "INST-WD" {
+			row = &dash.Reminders[i]
+		}
+	}
+	if row == nil {
+		t.Fatalf("INST-WD missing from dashboard: %+v", dash.Reminders)
+	}
+	if row.DaysOverdue != 5 {
+		t.Errorf("days_overdue = %d, want 5 (WIB)", row.DaysOverdue)
+	}
+	if row.Label != "[jatuh tempo 5 hari, segera tindak lanjuti]" {
+		t.Errorf("label = %q, want [jatuh tempo 5 hari, segera tindak lanjuti]", row.Label)
+	}
+}
+
 // ── H-3 upcoming reminder, fire-once ──────────────────────────────────────
 func TestScanReminders_H3FiresOnce(t *testing.T) {
 	s := newSvc(t)
