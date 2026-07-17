@@ -74,6 +74,9 @@ var dataTables = []string{
 	"clients",
 	// Wave 3 — Module 11 (PM/Kanban): cross-Brief dependencies (no hard FK).
 	"dependencies",
+	// Wave 3 — Module 13 (Client Health): monthly CHR- snapshots (child of clients).
+	// TRUNCATE does not fire the immutability triggers, so cleanup is safe.
+	"client_health_snapshots",
 	// Wave 3 — Module 2 (Marketing): the 1:1 performance record (budget). Truncated
 	// before campaigns for readability (FK checks are disabled during truncation).
 	"marketing_performance_records",

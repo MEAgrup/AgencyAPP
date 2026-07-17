@@ -140,6 +140,10 @@ func (a *App) Router() http.Handler {
 	// Wave 3 — Module 11 (PM/Kanban): cross-Brief Dependencies + Client Board + My Tasks.
 	a.registerBoardRoutes(mux)
 
+	// Wave 3 — Module 13 (Client Health Report): monthly CHR- snapshots + trend +
+	// live preview + ROAS toggle.
+	a.registerHealthRoutes(mux)
+
 	return mux
 }
 
