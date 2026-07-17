@@ -9,9 +9,11 @@ import (
 	"github.com/meagrup/agencyapp/backend/internal/module1_leads"
 )
 
-// leadsSvc builds the Module 1 service over the app's shared deps.
+// leadsSvc builds the Module 1 service over the app's shared deps. The
+// notification Catalog is injected so a co-pursuit registration (dedup v2) can
+// emit the co_pursuit event inside its transaction.
 func (a *App) leadsSvc() *module1_leads.Service {
-	return &module1_leads.Service{DB: a.DB, Engine: a.Engine}
+	return &module1_leads.Service{DB: a.DB, Engine: a.Engine, Catalog: a.Catalog}
 }
 
 // writeDomainErr maps M0/M1 domain errors to HTTP status + verbatim BI message.
@@ -45,12 +47,16 @@ func (a *App) handleRegisterLead(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, module0_sales.IncompleteMessage)
 		return
 	}
-	lead, att, err := a.leadsSvc().Register(r.Context(), actor, in)
+	lead, att, notice, err := a.leadsSvc().Register(r.Context(), actor, in)
 	if err != nil {
 		a.writeDomainErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"lead": lead, "attempt": att})
+	body := map[string]any{"lead": lead, "attempt": att}
+	if notice != "" {
+		body["notice"] = notice
+	}
+	writeJSON(w, http.StatusCreated, body)
 }
 
 func (a *App) handleClaimLead(w http.ResponseWriter, r *http.Request) {
