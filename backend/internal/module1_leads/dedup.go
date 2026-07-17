@@ -66,32 +66,13 @@ type ExistingLead struct {
 	ID           string
 	RecordStatus string
 	OpenAttempts []OpenAttempt // ALL salespeople holding an open attempt (v2)
-
-	// Deprecated: legacy single-owner dedup fields. Still populated by the
-	// un-migrated importer mirror (DECISIONS O19); Decide honours them so the
-	// import door keeps its exact pre-v2 behaviour until the importer moves to
-	// MatchByPhone. Remove once no caller sets them.
-	HasActiveScoutedAttempt bool
-	ActiveOwnerName         string
-}
-
-// openAttempts returns the effective open-attempt set, falling back to the
-// legacy single-owner fields when OpenAttempts is empty (un-migrated importer).
-func (m *ExistingLead) openAttempts() []OpenAttempt {
-	if len(m.OpenAttempts) > 0 {
-		return m.OpenAttempts
-	}
-	if m.HasActiveScoutedAttempt {
-		return []OpenAttempt{{OwnerName: m.ActiveOwnerName}}
-	}
-	return nil
 }
 
 // firstOwnerName is the owner name used to interpolate "(nama)" in the import
 // block message.
 func (m *ExistingLead) firstOwnerName() string {
-	if oa := m.openAttempts(); len(oa) > 0 {
-		return oa[0].OwnerName
+	if len(m.OpenAttempts) > 0 {
+		return m.OpenAttempts[0].OwnerName
 	}
 	return ""
 }
@@ -101,7 +82,7 @@ func (m *ExistingLead) actorHoldsOpenAttempt(actor string) bool {
 	if actor == "" {
 		return false
 	}
-	for _, a := range m.openAttempts() {
+	for _, a := range m.OpenAttempts {
 		if a.OwnerEmployeeID == actor {
 			return true
 		}
@@ -113,7 +94,7 @@ func (m *ExistingLead) actorHoldsOpenAttempt(actor string) bool {
 // (the co-pursuit notification recipients).
 func (m *ExistingLead) otherOwners(actor string) []string {
 	var out []string
-	for _, a := range m.openAttempts() {
+	for _, a := range m.OpenAttempts {
 		if a.OwnerEmployeeID != "" && a.OwnerEmployeeID != actor {
 			out = append(out, a.OwnerEmployeeID)
 		}
@@ -142,17 +123,13 @@ type Decision struct {
 
 // Decide runs the registration-door decision table (M1 §5 Rule 4, v2).
 //
-// actorEmployeeID identifies the registering salesperson; it is variadic so the
-// import door — which does not distinguish the actor (any holder blocks) — can
-// keep calling Decide(channel, match). Single registration passes the actor so
-// it can tell "my own open attempt" (block) from "another sales" (join).
-func Decide(channel Channel, match *ExistingLead, actorEmployeeID ...string) Decision {
+// actorEmployeeID identifies the registering salesperson. Single registration
+// passes the actor so it can tell "my own open attempt" (block) from "another
+// sales" (join); the import door does not distinguish the actor (any holder
+// blocks) and always passes "" (M1-OA-6).
+func Decide(channel Channel, match *ExistingLead, actor string) Decision {
 	if match == nil {
 		return Decision{Outcome: OutcomeCreate}
-	}
-	actor := ""
-	if len(actorEmployeeID) > 0 {
-		actor = actorEmployeeID[0]
 	}
 
 	// A won lead is already a client — blocks on every door.
@@ -161,7 +138,7 @@ func Decide(channel Channel, match *ExistingLead, actorEmployeeID ...string) Dec
 	}
 
 	// Someone is actively working this lead.
-	if len(match.openAttempts()) > 0 {
+	if len(match.OpenAttempts) > 0 {
 		if channel == ChannelSingleReg {
 			// The actor may not open a second attempt on a lead they hold.
 			if match.actorHoldsOpenAttempt(actor) {

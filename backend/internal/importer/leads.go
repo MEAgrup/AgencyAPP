@@ -1,14 +1,17 @@
 package importer
 
 // leads.go lands existing leads through the Module 1 dedup engine (Permintaan #3
-// path 1). It reuses the exported dedup DECISION (module1_leads.Decide) and phone
-// NORMALIZATION; only the phone-match SELECT is replicated here because
-// module1_leads.matchByPhone (and its terminal-attempt set) are unexported and
-// that package must not be edited (flagged for the orchestrator, DECISIONS O19).
-// The match query INNER JOINs employees — byte-identical to live matchByPhone —
-// so an attempt owned by an employee_id not present in employees is DROPPED by
-// the join exactly as live Register would drop it, keeping import dry-run/apply
-// outcomes aligned with what a live registration produces.
+// path 1). It reuses the exported dedup engine directly — module1_leads.MatchByPhone
+// for the phone match and module1_leads.Decide for the decision table — instead of
+// mirroring them; the former mirror (a local matchLead + a local terminal-attempt
+// set) was removed once module1_leads exported MatchByPhone/IsTerminalAttemptStatus
+// (DECISIONS.md 2026-07-17, O19 RESOLVED). The import door does not distinguish an
+// acting salesperson: Decide is always called with an empty actor id, so any open
+// attempt on the matched lead — held by anyone — blocks it (M1-OA-6); the dedup v2
+// collaborative JOIN outcome (module1_leads dedup.go) applies only to
+// ChannelSingleReg, so import behaviour is unchanged. MatchByPhone LEFT JOINs
+// employees (O19 resolution): an attempt owned by an employee not yet synced from
+// HRIS is now counted for dedup instead of being silently dropped.
 
 import (
 	"context"
@@ -22,67 +25,11 @@ import (
 	"github.com/meagrup/agencyapp/backend/internal/module1_leads"
 )
 
-// terminalAttempt mirrors module1_leads.terminalAttemptStatuses (unexported): an
-// attempt in any of these does NOT mark the lead as being actively worked.
-var terminalAttempt = map[string]bool{
-	"Not Qualified":              true,
-	"Closed-Success":             true,
-	"Closed-Lost":                true,
-	"Blocked":                    true,
-	"[Closed - Kalah Kompetisi]": true,
-}
-
 // leadAction is the applied dedup outcome for one row.
 type leadAction struct {
 	Action  string // "create" | "reopen" | "block"
 	LeadID  string // created or reopened id
 	Message string // BI block message (Action == "block")
-}
-
-// rowQuerier is satisfied by *sql.Tx (read side of the match).
-type rowQuerier interface {
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}
-
-// matchLead finds the most-recent lead on the normalized phone and whether it is
-// actively worked (for the owner-name interpolation), mirroring the M1 dedup
-// match. Returns nil when nothing matches.
-func (s *Service) matchLead(ctx context.Context, q rowQuerier, phoneNorm string) (*module1_leads.ExistingLead, error) {
-	if phoneNorm == "" {
-		return nil, nil
-	}
-	var m module1_leads.ExistingLead
-	err := q.QueryRowContext(ctx,
-		`SELECT id, record_status FROM leads WHERE phone_norm = ? ORDER BY created_at DESC, id DESC LIMIT 1`,
-		phoneNorm).Scan(&m.ID, &m.RecordStatus)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	rows, err := q.QueryContext(ctx,
-		`SELECT e.nama, pa.status
-		   FROM prospect_attempts pa
-		   JOIN employees e ON e.employee_id = pa.owner_employee_id
-		  WHERE pa.lead_id = ?`, m.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var name, status string
-		if err := rows.Scan(&name, &status); err != nil {
-			return nil, err
-		}
-		if !terminalAttempt[status] {
-			m.HasActiveScoutedAttempt = true
-			m.ActiveOwnerName = name
-			break
-		}
-	}
-	return &m, rows.Err()
 }
 
 // applyLeadTx runs the dedup door for one lead inside tx and performs the write
@@ -91,11 +38,13 @@ func (s *Service) matchLead(ctx context.Context, q rowQuerier, phoneNorm string)
 // the transaction lifecycle. Row must already have passed validateLeadRow.
 func (s *Service) applyLeadTx(ctx context.Context, tx *sql.Tx, actor permission.Actor, row LeadRow, index int) (leadAction, error) {
 	phoneNorm := module1_leads.NormalizePhone(row.NoTelepon)
-	match, err := s.matchLead(ctx, tx, phoneNorm)
+	match, err := module1_leads.MatchByPhone(ctx, tx, phoneNorm)
 	if err != nil {
 		return leadAction{}, err
 	}
-	dec := module1_leads.Decide(module1_leads.ChannelImport, match)
+	// Import never distinguishes the actor: pass "" so Decide's import branch
+	// blocks on ANY open attempt regardless of who holds it (M1-OA-6).
+	dec := module1_leads.Decide(module1_leads.ChannelImport, match, "")
 
 	switch dec.Outcome {
 	case module1_leads.OutcomeBlock:

@@ -157,17 +157,3 @@ func TestDedupDecisionTable(t *testing.T) {
 		})
 	}
 }
-
-// TestDecideImportLegacyFields confirms the un-migrated importer mirror (which
-// sets the deprecated single-owner fields instead of OpenAttempts) still blocks
-// exactly as before — the import door is behaviourally unchanged (O19).
-func TestDecideImportLegacyFields(t *testing.T) {
-	m := &ExistingLead{ID: "LEAD-L", RecordStatus: StatusActive, HasActiveScoutedAttempt: true, ActiveOwnerName: "Andi"}
-	d := Decide(ChannelImport, m) // importer calls without an actor
-	if d.Outcome != OutcomeBlock {
-		t.Fatalf("Outcome = %v, want block", d.Outcome)
-	}
-	if d.Message != "[lead sedang diproses oleh sales lain (Andi)]" {
-		t.Errorf("Message = %q", d.Message)
-	}
-}
