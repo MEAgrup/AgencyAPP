@@ -111,16 +111,20 @@ Sumber: `backend/testdata/import_samples/hris_pairs.csv` (58 pasangan riil dari 
 
 ### 7.3 Temuan per-jabatan yang MENGUBAH cara baca §3 (perlu jawaban OD/Nerissa)
 
-1. **Jabatan lintas-divisi di dalam ACCOUNT** — dept ACCOUNT memuat jabatan `ADVERTISER` (2), `ADVERTISER INTERN` (1), `KOL SPECIALIST` (2), `INTERN KOL` (2), `ADMIN MARKETPLACE` (2), `ADMIN A&S` (1): mapping per-DEPARTMENT saja akan memberi mereka division=Account, padahal fungsinya Ads/KOL (M8/M9). **[KONFIRMASI]** map by-jabatan (ADVERTISER→Ads, KOL→KOL) atau ikut departemen?
-2. **Jabatan non-sales di dalam SALES** — `CUSTOMER RELATION OFFICER` (1, Dini Mardiani) dan `CONTENT CREATOR` (1, Rizal Akda): CRO lazimnya fungsi Account. **[KONFIRMASI]**.
-3. **Kandidat `level = lead` dari heuristik §2** (7 org): HEAD OF SALES JASA (Cucu Nurhayati), HEAD OF ACCOUNT (Yulianti Handayani), SPV SKILSKUL (Siti Rohmah), SUPERVISOR HR (Okfa Rendi Wiratama), LEADER CUSTOMER RELATIONS OFFICER (Meryntan), LEADER VIDEOGRAPHER (Boy Ginting), PROJECT LEAD - CONTENT STRATEGIST (Alistya — CREATIVE - EKSTERNAL, lihat butir [KONFIRMASI] eksternal §3). Jabatan `ACCOUNT MANAGER` (2 org) dan semua `SENIOR *` TIDAK kena heuristik → staff; **[KONFIRMASI]** khusus Account Manager (M6 memakai istilah AM untuk PIC klien — bukan otomatis lead).
-4. **Kandidat layered role OD** (per §2, by-orang bukan by-departemen): Arsy Rizmandha (2501140493, SENIOR ORGANIZATION DEVELOPMENT), Wulan Dari Fitri Apandi (2607060683, JR ORGANIZATION DEVELOPMENT). Daftar **Director** masih kosong — sheet tidak memuat jabatan direksi; **[KONFIRMASI]** siapa employee_id Director riil (mis. akun Yohan/Nerissa) karena beberapa alur (importer `--actor`, approval) butuh Director.
+1. **Jabatan lintas-divisi di dalam ACCOUNT** — dept ACCOUNT memuat jabatan `ADVERTISER` (2), `ADVERTISER INTERN` (1), `KOL SPECIALIST` (2), `INTERN KOL` (2), `ADMIN MARKETPLACE` (2), `ADMIN A&S` (1): mapping per-DEPARTMENT saja akan memberi mereka division=Account, padahal fungsinya Ads/KOL (M8/M9). **✅ DIJAWAB Nerissa 2026-07-17: map SESUAI JABATAN** — fungsi-fungsi ini memang duduk di bawah divisi Account secara organisasi, tapi division CDPS ikut fungsi: `ADVERTISER*`→Ads, `KOL SPECIALIST`/`INTERN KOL`→KOL; jabatan Account lain (CRO/ADMIN/AM/HEAD) tetap Account. (Lihat DECISIONS 2026-07-17.)
+2. **Jabatan non-sales di dalam SALES** — `CUSTOMER RELATION OFFICER` (1, Dini Mardiani) dan `CONTENT CREATOR` (1, Rizal Akda): CRO lazimnya fungsi Account. **[KONFIRMASI — masih open, O28(a)]** ikut prinsip "sesuai jabatan" (CRO→Account, CC→Creative) atau tetap Sales?
+3. **Kandidat `level = lead` dari heuristik §2** (7 org): HEAD OF SALES JASA (Cucu Nurhayati), HEAD OF ACCOUNT (Yulianti Handayani), SPV SKILSKUL (Siti Rohmah), SUPERVISOR HR (Okfa Rendi Wiratama), LEADER CUSTOMER RELATIONS OFFICER (Meryntan), LEADER VIDEOGRAPHER (Boy Ginting), PROJECT LEAD - CONTENT STRATEGIST (Alistya — CREATIVE - EKSTERNAL, lihat butir [KONFIRMASI] eksternal §3). **✅ DIJAWAB Nerissa 2026-07-17: 7 kandidat lead DIKONFIRMASI; `ACCOUNT MANAGER` = staff (bukan lead).**
+4. **Kandidat layered role OD** (per §2, by-orang bukan by-departemen): Arsy Rizmandha (2501140493, SENIOR ORGANIZATION DEVELOPMENT), Wulan Dari Fitri Apandi (2607060683, JR ORGANIZATION DEVELOPMENT) — **konfirmasi OD masih open, O28(d)**. **✅ Director DIJAWAB Nerissa 2026-07-17: Yohan dan Nerissa** — keduanya tidak ada di sheet 77 karyawan, butuh NIK+email untuk employee record sebelum layered role bisa di-set (Open **O27**).
 5. **Variasi ejaan yang identik secara fungsi** — `CUSTOMER RELATION OFFICER` vs `CUSTOMER RELATIONS OFFICER` (dan `MEDIOR` keduanya): dua string berbeda = dua baris role_mappings; samakan saat input supaya tidak ada jabatan lolos mapping karena beda satu huruf.
 6. **Jabatan "SENIOR FINANCE, ACCOUNTING & TAX" mengandung koma** — pastikan input role_mappings memakai string persis (sudah dikoreksi di CSV; asal-usul: kolom bergeser di export, lihat DECISIONS.md 2026-07-16).
 
 ### 7.4 Status eksekusi §B handoff Jalur B
 
 - [x] `hrisconvert` jalan bersih: 77 in / 77 emitted / 0 warning / 0 email kosong.
-- [ ] Seed `role_mappings` — MENUNGGU jawaban §3 + §7.3 (jangan seed dulu).
-- [ ] Layered roles OD/Director — menunggu konfirmasi §7.3 butir 4.
+- [ ] Seed `role_mappings` — jawaban inti sudah masuk (§7.3 butir 1 & 3, DECISIONS 2026-07-17); pairs yang tercakup keputusan boleh di-seed, sisanya menunggu **O28** (SALES/CRO+CC, BD, GROWTH, DATA&BI, HRGA, SKILSKUL, CREATIVE-EKSTERNAL).
+- [ ] Layered role **Director** = Yohan & Nerissa — menunggu **O27** (NIK+email, tidak ada di sheet). Layered **OD** (Arsy, Wulan) menunggu O28(d).
 - [ ] Sync CSV via `internal/hris/sync.go` — setelah role_mappings di-seed.
+
+### 7.5 Departemen ter-exclude (jawaban Nerissa 2026-07-17)
+
+`MCN`, `AFFILIATE`, `TIKTOK GO`, `IT` **sudah di-exclude dari struktur organisasi** — baris [KONFIRMASI]-nya di §3 obsolete; tidak perlu dijawab dan tidak menahan seed. Kalau departemen tsb muncul lagi di sync HRIS mendatang, perlakukan sebagai departemen baru (keputusan baru), bukan memakai baris §3 lama.
