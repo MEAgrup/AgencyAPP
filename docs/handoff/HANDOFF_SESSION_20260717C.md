@@ -43,14 +43,17 @@ LULUS. Dicatat di DECISIONS (entri GO 2026-07-17) + tindak lanjut merge/retarget
 | **Langkah 49 W2: go/no-go gate exit Wave 2** — bahan = `W2_UAT_REPORT_20260717.md` | Nerissa/Yohan + head dev | **Wave 3 tidak boleh mulai sebelum ini GO** (Build Plan §4) |
 | **O34** aktor produksi KOL (seluruh divisi!) / lead Creative / SPV Ads / staf LS | Yohan (+HR) | produksi M7-lead/M8-SPV/M9; UAT jalan dengan fixture |
 | O33 aktor Finance produksi | Yohan | produksi M5 |
+| **O35** model sub-tim Creative Video/Graphic (3 keputusan: representasi + peta Asset-Type→sub-tim + gate) | Nerissa/Yohan (+HR) | assign-PIC granular M7 §3 (non-blocking gate exit W2) |
 | O26 NIK+email Yohan & Nerissa — diberikan TERAKHIR (arahan tetap) | HR/Yohan | produksi saja |
 | File import W1-19 ke drop-zone + form pelengkap + `db_jasa.csv` | CRO/Finance/Sales | import riil |
 | Spot-check komisi manual (W1-20 AC langkah 5, non-blocking, komisi Rp0 sah O24) | Sales Head | — |
 
 ## Pekerjaan sesi berikutnya (urutan saran)
 
-1. **Sisa klaster deferred Wave 2** (HANDOFF_WAVE2_SESSION3): assign-PIC granular sub-tim
-   Creative (M7 §3); handler bulk M1 + port test stream A (utang Wave 1, non-blocking).
+1. ~~Assign-PIC granular sub-tim Creative (M7 §3)~~ → **STOP, jadi Open O35** (executor
+   W2-M7-C3 menemukan blocker struktural: model peran tanpa dimensi sub-tim, PRD tanpa
+   peta Asset-Type→sub-tim, roster tanpa TL — butuh keputusan Nerissa/Yohan dulu).
+   Handler bulk M1 + port test stream A (utang Wave 1) dikerjakan sesi ini — lihat UPDATE.
 2. Begitu file W1-19 masuk → import (dry-run dulu; lock `id_sequences`).
 3. Setelah go/no-go langkah 49 GO → **Wave 3** (M2, M3, M11, M13, M14, M15 — Client
    Portal terakhir, setelah security spec O5). Pembukaan katalog notifikasi Wave 3:
