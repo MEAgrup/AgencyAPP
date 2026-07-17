@@ -112,19 +112,41 @@ Sumber: `backend/testdata/import_samples/hris_pairs.csv` (58 pasangan riil dari 
 ### 7.3 Temuan per-jabatan yang MENGUBAH cara baca §3 (perlu jawaban OD/Nerissa)
 
 1. **Jabatan lintas-divisi di dalam ACCOUNT** — dept ACCOUNT memuat jabatan `ADVERTISER` (2), `ADVERTISER INTERN` (1), `KOL SPECIALIST` (2), `INTERN KOL` (2), `ADMIN MARKETPLACE` (2), `ADMIN A&S` (1): mapping per-DEPARTMENT saja akan memberi mereka division=Account, padahal fungsinya Ads/KOL (M8/M9). **✅ DIJAWAB Nerissa 2026-07-17: map SESUAI JABATAN** — fungsi-fungsi ini memang duduk di bawah divisi Account secara organisasi, tapi division CDPS ikut fungsi: `ADVERTISER*`→Ads, `KOL SPECIALIST`/`INTERN KOL`→KOL; jabatan Account lain (CRO/ADMIN/AM/HEAD) tetap Account. (Lihat DECISIONS 2026-07-17.)
-2. **Jabatan non-sales di dalam SALES** — `CUSTOMER RELATION OFFICER` (1, Dini Mardiani) dan `CONTENT CREATOR` (1, Rizal Akda): CRO lazimnya fungsi Account. **[KONFIRMASI — masih open, O28(a)]** ikut prinsip "sesuai jabatan" (CRO→Account, CC→Creative) atau tetap Sales?
+2. **Jabatan non-sales di dalam SALES** — `CUSTOMER RELATION OFFICER` (1, Dini Mardiani) dan `CONTENT CREATOR` (1, Rizal Akda): CRO lazimnya fungsi Account. **✅ DIJAWAB Nerissa 2026-07-17 (O28a): "semua sales" — seluruh jabatan dept SALES tetap division Sales.**
 3. **Kandidat `level = lead` dari heuristik §2** (7 org): HEAD OF SALES JASA (Cucu Nurhayati), HEAD OF ACCOUNT (Yulianti Handayani), SPV SKILSKUL (Siti Rohmah), SUPERVISOR HR (Okfa Rendi Wiratama), LEADER CUSTOMER RELATIONS OFFICER (Meryntan), LEADER VIDEOGRAPHER (Boy Ginting), PROJECT LEAD - CONTENT STRATEGIST (Alistya — CREATIVE - EKSTERNAL, lihat butir [KONFIRMASI] eksternal §3). **✅ DIJAWAB Nerissa 2026-07-17: 7 kandidat lead DIKONFIRMASI; `ACCOUNT MANAGER` = staff (bukan lead).**
-4. **Kandidat layered role OD** (per §2, by-orang bukan by-departemen): Arsy Rizmandha (2501140493, SENIOR ORGANIZATION DEVELOPMENT), Wulan Dari Fitri Apandi (2607060683, JR ORGANIZATION DEVELOPMENT) — **konfirmasi OD masih open, O28(d)**. **✅ Director DIJAWAB Nerissa 2026-07-17: Yohan dan Nerissa** — keduanya tidak ada di sheet 77 karyawan, butuh NIK+email untuk employee record sebelum layered role bisa di-set (Open **O27**).
+4. **Kandidat layered role OD** (per §2, by-orang bukan by-departemen): Arsy Rizmandha (2501140493, SENIOR ORGANIZATION DEVELOPMENT), Wulan Dari Fitri Apandi (2607060683, JR ORGANIZATION DEVELOPMENT) — **✅ OD DIKONFIRMASI Nerissa 2026-07-17 (O28d)**. **✅ Director DIJAWAB Nerissa 2026-07-17: Yohan dan Nerissa** — keduanya tidak ada di sheet 77 karyawan, butuh NIK+email untuk employee record sebelum layered role bisa di-set (Open **O27**).
 5. **Variasi ejaan yang identik secara fungsi** — `CUSTOMER RELATION OFFICER` vs `CUSTOMER RELATIONS OFFICER` (dan `MEDIOR` keduanya): dua string berbeda = dua baris role_mappings; samakan saat input supaya tidak ada jabatan lolos mapping karena beda satu huruf.
 6. **Jabatan "SENIOR FINANCE, ACCOUNTING & TAX" mengandung koma** — pastikan input role_mappings memakai string persis (sudah dikoreksi di CSV; asal-usul: kolom bergeser di export, lihat DECISIONS.md 2026-07-16).
 
 ### 7.4 Status eksekusi §B handoff Jalur B
 
 - [x] `hrisconvert` jalan bersih: 77 in / 77 emitted / 0 warning / 0 email kosong.
-- [ ] Seed `role_mappings` — jawaban inti sudah masuk (§7.3 butir 1 & 3, DECISIONS 2026-07-17); pairs yang tercakup keputusan boleh di-seed, sisanya menunggu **O28** (SALES/CRO+CC, BD, GROWTH, DATA&BI, HRGA, SKILSKUL, CREATIVE-EKSTERNAL).
-- [ ] Layered role **Director** = Yohan & Nerissa — menunggu **O27** (NIK+email, tidak ada di sheet). Layered **OD** (Arsy, Wulan) menunggu O28(d).
-- [ ] Sync CSV via `internal/hris/sync.go` — setelah role_mappings di-seed.
+- [x] Seluruh jawaban role-mapping masuk (DECISIONS 2026-07-17: jawaban §7.3 + O28 resolved) → **tabel mapping FINAL: `backend/seed/role_mappings_riil.csv`** (38 pasangan, lihat §8).
+- [ ] Seed `role_mappings` dari CSV final via `admin.UpsertRoleMapping` (script/CLI apply + DB — sesi build berikutnya).
+- [ ] Layered role **OD**: Arsy (2501140493) & Wulan (2607060683) — apply bersama seed. **Director** = Yohan & Nerissa — menunggu **O27** (NIK+email, tidak ada di sheet).
+- [ ] Sync CSV via `internal/hris/sync.go` — **filter 6 NIK CREATIVE - EKSTERNAL** (lihat §8) sebelum sync.
 
 ### 7.5 Departemen ter-exclude (jawaban Nerissa 2026-07-17)
 
 `MCN`, `AFFILIATE`, `TIKTOK GO`, `IT` **sudah di-exclude dari struktur organisasi** — baris [KONFIRMASI]-nya di §3 obsolete; tidak perlu dijawab dan tidak menahan seed. Kalau departemen tsb muncul lagi di sync HRIS mendatang, perlakukan sebagai departemen baru (keputusan baru), bukan memakai baris §3 lama.
+
+---
+
+## 8. MAPPING FINAL (keputusan Nerissa 2026-07-16/17 — siap seed)
+
+File kanonik: **`backend/seed/role_mappings_riil.csv`** (38 pasangan `divisi,jabatan` verbatim HRIS → `division,level` kanonik `permission.go`). Ringkasan aturan:
+
+| DEPARTMENT (HRIS) | Perlakuan |
+|---|---|
+| SALES | Semua jabatan → **Sales**; lead: HEAD OF SALES JASA. |
+| ACCOUNT | Sesuai jabatan: `ADVERTISER*` → **Ads**; `KOL SPECIALIST`/`INTERN KOL` → **KOL**; sisanya → **Account** (lead: HEAD OF ACCOUNT, LEADER CUSTOMER RELATIONS OFFICER; ACCOUNT MANAGER = staff). |
+| ADVERTISER | Semua → **Ads** (staff). |
+| CREATIVE | Semua → **Creative**; lead: LEADER VIDEOGRAPHER. |
+| FINANCE AND ACCOUNTING | Semua → **Finance** (staff). |
+| CREATIVE - EKSTERNAL | **Tanpa login** — TIDAK di-seed dan **difilter dari sync**: NIK 2408160415, 2408160416, 2409180362, 2410010436, 2411180457, 2412020466. |
+| BUSINESS DEVELOPMENT | Bagian marketing — **tanpa akses v1** (di luar 6 divisi delivery). |
+| GROWTH & BUSINESS CONSULTATION, DATA & BUSINESS INTELLIGENCE, HRGA, SKILSKUL | **Tanpa akses CDPS.** |
+| OD (departemen) | Tanpa baris mapping; **layered role OD** per orang: Arsy Rizmandha (2501140493), Wulan Dari Fitri Apandi (2607060683) via `admin.SetLayeredRole(..., "od", true)`. |
+| Director | **Yohan & Nerissa** — layered role per `employee_id`, menunggu **O27** (NIK+email; tidak ada di sheet 77). |
+
+Catatan eksekusi: karyawan dept tanpa-akses tetap boleh ada di tabel `employees` hasil sync (tanpa role mapping ⇒ `Role.Division` kosong ⇒ tidak bisa menulis/baca divisi mana pun), KECUALI CREATIVE - EKSTERNAL yang difilter dari sync sesuai keputusan (e). Kalau mau lebih ketat (exclude semua dept tanpa-akses dari sync), putuskan eksplisit dulu — default mengikuti keputusan yang ada.
