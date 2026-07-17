@@ -1,7 +1,9 @@
 // Package notification implements the in-app notification center (S0-10).
 //
-// The event catalog is Phase 0 v2 §9 (14 events; the 13 Phase 0 events plus the
-// M1 dedup-v2 co-pursuit event). Notifications are derived
+// The event catalog is Phase 0 v2 §9 (15 events; the 13 Phase 0 events, the
+// M1 dedup-v2 co-pursuit event, and the Wave-3-catalog-opening Hours Logged
+// reminder — DECISIONS O29 / "GO — W2 langkah 49" 2026-07-17, W3-CAT-1).
+// Notifications are derived
 // from audit/transition events, are per-user read/unread, and are NEVER
 // deletable — there is no delete code path here and none in the migrations
 // (a BEFORE DELETE trigger backs this at the storage layer).
@@ -23,7 +25,8 @@ type DB interface {
 // EventType identifies a cataloged event.
 type EventType string
 
-// The 14 cataloged events (Phase 0 v2 §9 + M1 dedup-v2 co-pursuit).
+// The 15 cataloged events (Phase 0 v2 §9 + M1 dedup-v2 co-pursuit + the Wave-3
+// catalog opening, W3-CAT-1).
 const (
 	EvNegotiationPendingApproval EventType = "m0.negotiation.pending_approval" // -> Sales Head/SPV
 	EvNegotiationDecision        EventType = "m0.negotiation.decision"         // -> Salesperson
@@ -39,6 +42,10 @@ const (
 	EvClientBandDrop             EventType = "m13.client.band_drop"            // -> SPV
 	EvPerformancePublished       EventType = "m14.performance.published"       // -> Each staff
 	EvLeadCoPursuit              EventType = "m1.lead.co_pursuit"              // -> co-pursuit owners + registrant
+	// EvHoursLoggedReminder (M7-OA-2, DECISIONS O29 / W3-CAT-1): end-of-day
+	// nudge for an Asset's assigned PIC who has not logged Hours today (WIB).
+	// -> the Asset's assigned PIC (explicit; non-punitive, supplementary only).
+	EvHoursLoggedReminder EventType = "m7.hours_logged.reminder"
 )
 
 // Emission is one notification-generating occurrence.
@@ -66,7 +73,7 @@ type Catalog struct {
 	entries map[EventType]entry
 }
 
-// NewCatalog returns the catalog with all 14 events registered.
+// NewCatalog returns the catalog with all 15 events registered.
 func NewCatalog() *Catalog {
 	c := &Catalog{entries: map[EventType]entry{}}
 
@@ -85,6 +92,7 @@ func NewCatalog() *Catalog {
 	c.entries[EvClientBandDrop] = entry{"Client band drop", leadsOfDivision}
 	c.entries[EvPerformancePublished] = entry{"Monthly Performance Score published", explicit}
 	c.entries[EvLeadCoPursuit] = entry{"Lead dikerjakan lebih dari satu sales", explicit}
+	c.entries[EvHoursLoggedReminder] = entry{"Hours Logged end-of-day reminder", explicit}
 
 	return c
 }

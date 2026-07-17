@@ -27,4 +27,9 @@ func (a *App) registerCreativeRoutes(mux *http.ServeMux) {
 	// Daily Output (§7): derived read-model feed for one PIC's WIB day. Read gate
 	// (W2-M7-C2): the PIC themselves, the Creative lead, OD, or Director.
 	mux.HandleFunc("GET /api/v1/daily-output/{picId}", a.protect(a.handleDailyOutput))
+
+	// Hours Logged end-of-day reminder scan (M7-OA-2, DECISIONS O29/W3-CAT-1):
+	// mirrors the M5 §6 reminder scan endpoint (routes_client_finance.go).
+	// Creative division (any level) or Director only.
+	mux.HandleFunc("POST /api/v1/assets/reminders/scan", a.protect(a.handleScanHoursReminders))
 }
