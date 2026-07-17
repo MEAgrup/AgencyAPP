@@ -157,8 +157,9 @@ dieksekusi fixture, bukan aktor riil — bawa ke catatan go/no-go.
     `EvBlockRequestSubmitted` (katalog existing). **Lead/Director**
     `.../block-requests/{reqId}/approve` ⇒ `[Blocked]` + `EvBlockRequestDecided`; **staf**
     memutuskan ⇒ `[anda tidak memiliki akses untuk memutuskan permintaan block]`;
-    request sudah diproses ⇒ `[permintaan block sudah diproses]`. **PIC/lead** `resume`
-    ⇒ `[Blocked]` → `[In Progress]` (interval Blocked dikecualikan dari turnaround).
+    request sudah diproses ⇒ `[permintaan block sudah diproses]`. **Lead/Director** `resume`
+    ⇒ `[Blocked]` → `[In Progress]` (STATE_MACHINES §7: pause/resume = SPV/Lead-only;
+    interval Blocked dikecualikan dari turnaround).
 24. **Any read** — `GET /api/v1/tasks/{id}/metrics`. ✔ Speed Score = turnaround ÷ SLA
     (uncapped, §5.1); SLA absen ⇒ `"N/A"`; div-by-zero ⇒ `"—"` (konvensi #7); bucketing
     periode WIB (O20). Worked example Alpha Digital 54÷48 = 112.5% tereproduksi.
