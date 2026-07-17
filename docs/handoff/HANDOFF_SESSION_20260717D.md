@@ -1,4 +1,4 @@
-# Handoff — Sesi 2026-07-17 D (GO gate exit Wave 2 + pembukaan Wave 3: M3, M2, katalog)
+# Handoff — Sesi 2026-07-17 D (GO gate exit Wave 2 + Wave 3: M3, M2, katalog, M11)
 
 > Lanjutan `HANDOFF_SESSION_20260717C.md`. Dokumen lama tetap berlaku:
 > `HANDOFF_WAVE2_SESSION3.md` (setup container + aturan worktree), `WAVE3_PLAN.md`
@@ -8,7 +8,7 @@
 
 **Branch:** `claude/wave2-uat-gate-exit-asstfa` (dari main tip `8a3fd26`, PR #8–#10
 sudah merged). Semua kerja sesi ini ter-push ke branch itu; PR BELUM dibuka.
-Suite penuh fresh terakhir: **30 paket hijau, 0 skip** (`-p 1`, cdps_test).
+Suite penuh fresh terakhir: **31 paket hijau, 0 skip** (`-p 1`, cdps_test).
 
 ## Keputusan manusia sesi ini
 
@@ -38,20 +38,27 @@ Suite penuh fresh terakhir: **30 paket hijau, 0 skip** (`-p 1`, cdps_test).
    Collected-ROAS (basis Amount Verified M5), CPL/CPRL/Quality, junk breakdown,
    div-zero `—`; dashboard split. Online/Offline SEKALI di campaigns. 1 string baru.
 
-Detail tiap keputusan: entri DECISIONS 2026-07-17 (6 entri baru sesi ini).
+7. **W3-M11-C1 Unified Board** — `module11_board`: Dependency `DEP-` Brief↔Brief
+   (Blocking/Informational; validasi same-client / no-dup / no-cycle BFS), status
+   derived, **gate blocking pada transisi final Brief → `[Approved]`** (Resolved §6.3
+   menang atas contoh §12; dua hook nil-guarded: M6 approve = tolak pesan template,
+   M12 rollup = defer diam Rule 7), emisi `EvDependencySatisfied` fire-once via
+   engine hook, My Tasks + Client Board universal columns §5.2. Migrasi 0034.
+   8 string BI baru disetujui. **Deferral tercatat**: emisi utk source brief LS
+   (close off-machine §10) belum ter-cover — edge non-blocking.
+
+Detail tiap keputusan: entri DECISIONS 2026-07-17 (7 entri baru sesi ini).
 
 ## Pekerjaan sesi berikutnya (urutan WAVE3_PLAN)
 
-1. **W3-M11-C1 Unified Board** — Dependency entity (same-client, no-dup-active-pair,
-   cek siklus; status derived Pending/Blocking/Satisfied), gate blocking transisi final
-   Target + emisi `EvDependencySatisfied` (event SUDAH terdaftar), universal-column
-   read-model, My Tasks. Ingat: implicit dependency Asset→Launch M8 sudah hardcoded.
-2. **W3-M13-C1 Client Health** — snapshot bulanan WIB, redistribusi bobot (CSAT N/A),
-   ROAS toggle, band + `EvClientBandDrop`.
-3. **W3-M14-C1 Team Performance** — KPI profile per role, Client-Outcome Modifier,
+1. **W3-M13-C1 Client Health** — snapshot bulanan WIB, redistribusi bobot (CSAT N/A),
+   ROAS toggle, band + `EvClientBandDrop` (event sudah terdaftar).
+2. **W3-M14-C1 Team Performance** — KPI profile per role, Client-Outcome Modifier,
    snapshot, `EvPerformancePublished`. O9 (target riil) → configurable + placeholder.
-4. **W3-M15-C1 Team Portal**; **M15-C2 Client Portal TERAKHIR — DIBLOKIR O4+O5.**
-5. Begitu file W1-19 masuk → import (dry-run dulu; lock `id_sequences`).
+3. **W3-M15-C1 Team Portal**; **M15-C2 Client Portal TERAKHIR — DIBLOKIR O4+O5.**
+4. Begitu file W1-19 masuk → import (dry-run dulu; lock `id_sequences`).
+5. Opsional/nanti: emisi EvDependencySatisfied utk source LS off-machine (deferral
+   M11 di atas); pertimbangkan buka PR branch ini utk review manusia.
 
 ## Menunggu manusia (tidak berubah kecuali #1 selesai)
 
@@ -72,7 +79,7 @@ Fable orchestrator/QC/revisi; executor Opus (fitur) / Sonnet (klaster kecil).
 Worktree manual utk paralel (`git worktree add --detach`) + `CDPS_TEST_DSN` ke
 `cdps_test2` **WAJIB dengan `?parseTime=true&multiStatements=true`** (tanpa itu
 migrasi gagal → semua test SKIP diam-diam!). Test WAJIB `-p 1`; satu suite per DB.
-Migrasi terakhir: **0033**. MariaDB bisa mati diam-diam (cek `service mariadb status`
+Migrasi terakhir: **0034**. MariaDB bisa mati diam-diam (cek `service mariadb status`
 bila ada SKIP "connection refused"). JANGAN `pkill -f` pola yang cocok shell sendiri
 (kill by PID). Executor mati kena session limit → relaunch prompt sama setelah reset
 (terbukti lagi sesi ini, W3-M2-C1). Setup container baru = HANDOFF_WAVE2_SESSION3 §Setup.
