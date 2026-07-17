@@ -13,6 +13,8 @@ Alur setelah divalidasi:
 2. Tim dev menjalankan `hrisconvert` (`backend/cmd/hrisconvert`) di atas sheet asli untuk menghasilkan CSV fallback `EmployeeSource` (`employee_id,nama,email,divisi,jabatan,status_aktif`) — lihat §5.
 3. Baris tabel yang sudah disetujui di-input sebagai `role_mappings` (mis. lewat admin UI role-mapping atau seed script khusus data riil), **bukan** dengan menimpa `backend/internal/seed/seed.go` (itu tetap seed contoh Alpha Digital).
 
+**UPDATE 2026-07-17 — Data HRIS riil + email sudah tersedia.** Artefak (4 file) telah di-drop ke `backend/testdata/import_samples/`: (1) `hris_karyawan.csv` (format asli, 39 karyawan); (2) `nik_email.csv` (39 email); (3) `employees_from_hris.csv` (EmployeeSource hasil hrisconvert, 39/39 email terisi); (4) `hris_department_jabatan_pairs.csv` (28 pasangan DEPARTMENT,JABATAN riil dengan hitungan). Konversi bersih via `hrisconvert --emails`; smoke sync lolos: `synced=39 deactivated=0 flagged=0`. **Yang masih ditunggu:** jawaban [KONFIRMASI] §3 untuk 5 departemen yang benar-benar muncul di roster 39 ini — CREATIVE - EKSTERNAL (5 orang), ADVERTISER (5), BUSINESS DEVELOPMENT (2), SKILSKUL (1), HRGA (1); SALES (10)/ACCOUNT (10)/CREATIVE (5) mapping-nya sudah jelas — + daftar employee_id kandidat layered role OD/Director. (Departemen §3 lain — MCN, AFFILIATE, GROWTH & BUSINESS CONSULTATION, TIKTOK GO, FINANCE AND ACCOUNTING, DATA & BUSINESS INTELLIGENCE, IT, OD — tidak ada di batch 39 ini; [KONFIRMASI]-nya baru relevan bila muncul di batch berikutnya.)
+
 ---
 
 ## 2. Model role CDPS (ringkasan, sumber: `PERMISSIONS.md` + `permission.go`)
