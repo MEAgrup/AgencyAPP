@@ -15,6 +15,22 @@ Alur setelah divalidasi:
 
 **UPDATE 2026-07-17 — Data HRIS riil + email sudah tersedia.** Artefak (4 file) telah di-drop ke `backend/testdata/import_samples/`: (1) `hris_karyawan.csv` (format asli, 39 karyawan); (2) `nik_email.csv` (39 email); (3) `employees_from_hris.csv` (EmployeeSource hasil hrisconvert, 39/39 email terisi); (4) `hris_department_jabatan_pairs.csv` (28 pasangan DEPARTMENT,JABATAN riil dengan hitungan). Konversi bersih via `hrisconvert --emails`; smoke sync lolos: `synced=39 deactivated=0 flagged=0`. **Yang masih ditunggu:** jawaban [KONFIRMASI] §3 untuk 5 departemen yang benar-benar muncul di roster 39 ini — CREATIVE - EKSTERNAL (5 orang), ADVERTISER (5), BUSINESS DEVELOPMENT (2), SKILSKUL (1), HRGA (1); SALES (10)/ACCOUNT (10)/CREATIVE (5) mapping-nya sudah jelas — + daftar employee_id kandidat layered role OD/Director. (Departemen §3 lain — MCN, AFFILIATE, GROWTH & BUSINESS CONSULTATION, TIKTOK GO, FINANCE AND ACCOUNTING, DATA & BUSINESS INTELLIGENCE, IT, OD — tidak ada di batch 39 ini; [KONFIRMASI]-nya baru relevan bila muncul di batch berikutnya.)
 
+**UPDATE 2026-07-17 (2) — [KONFIRMASI] DIJAWAB (Yohan).** Jawaban Yohan (chat 2026-07-17): "Creative external: keluar; Advertiser: divisi ads; Bisdev: marketing; Skilskul: keluar; Hrga: bagian od; Director: yohan & nerissa; O20: WIB." Ringkasan per departemen batch 39:
+- **SALES (10 orang)** → `Sales` (6 jabatan: HEAD OF SALES JASA=lead, 5 jabatan lain=staff). ✅ Sudah jelas di data.
+- **ACCOUNT (10 orang)** → `Account` (7 jabatan: 2 lead, 5 staff). ✅ Sudah jelas.
+- **CREATIVE (5 orang)** → `Creative` (4 jabatan staff). ✅ Sudah jelas.
+- **ADVERTISER (5 orang)** → `Ads` (divisi CDPS existing, modul M8; 4 jabatan staff). ✅ Dijawab.
+- **BUSINESS DEVELOPMENT (2 orang)** → `Marketing` (nilai divisi BARU sebagai data — modul M2 Marketing dibangun Wave 3; sampai itu akses staf Marketing minimal; 2 jabatan staff). ✅ Dijawab.
+- **CREATIVE - EKSTERNAL (5 orang, 3 jabatan)** → **TIDAK di-mapping, tanpa akses CDPS, TIDAK di-sync** (preseden vendor eksternal M10). ✅ Dijawab.
+- **SKILSKUL (1 orang)** → **TIDAK di-mapping, tanpa akses CDPS** (unit terpisah, tidak masuk cakupan CDPS). ✅ Dijawab.
+- **HRGA (1 orang, OKFA RENDI WIRATAMA NIK 2409230432)** → **layered role OD** via `SetLayeredRole` (bukan baris role_mappings biasa; HR adalah sumber data, bukan konsumen CDPS untuk transaksi, tetapi OD perlu read-all untuk oversight). ✅ Dijawab.
+
+**Seeding 23 mapping + OD:**
+- CSV kanonik: `backend/seed/role_mappings_riil.csv` (23 baris inti), `backend/seed/layered_roles_riil.csv` (OD OKFA).
+- CLI: `backend/cmd/rolemapseed` (dry-run default, `--apply`), aktor SYSTEM bootstrap.
+- Sumber sync go-live: `backend/testdata/import_samples/employees_cdps.csv` (33 baris = 39 roster − 5 CREATIVE-EKSTERNAL − 1 SKILSKUL).
+- **Directors Yohan & Nerissa**: belum ada di roster 39 → TIDAK bisa di-seed sekarang (lihat Open O26 — butuh NIK+email keduanya dari HR sebelum produksi go-live; dev/UAT pakai fixture).
+
 ---
 
 ## 2. Model role CDPS (ringkasan, sumber: `PERMISSIONS.md` + `permission.go`)
