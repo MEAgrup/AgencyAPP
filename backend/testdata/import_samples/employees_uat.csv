@@ -36,3 +36,8 @@ UATDIR0001,UAT DIRECTOR SATU (FIXTURE — ganti dgn baris riil Yohan saat O26),u
 UATDIR0002,UAT DIRECTOR DUA (FIXTURE — ganti dgn baris riil Nerissa saat O26),uat.director2@cdps.local,DIREKSI,DIRECTOR,true
 UATFIN0001,UAT FINANCE STAFF (FIXTURE — lihat Open O33 aktor Finance riil),uat.finance1@cdps.local,FINANCE,FINANCE STAFF,true
 UATFIN0002,UAT FINANCE HEAD (FIXTURE — lihat Open O33 aktor Finance riil),uat.finance2@cdps.local,FINANCE,HEAD OF FINANCE,true
+UATKOL0001,UAT KOL STAFF (FIXTURE — lihat Open O34 aktor KOL riil),uat.kol1@cdps.local,KOL,KOL STAFF,true
+UATKOL0002,UAT KOL LEAD (FIXTURE — lihat Open O34 aktor KOL riil),uat.kol2@cdps.local,KOL,HEAD OF KOL,true
+UATCRE0001,UAT CREATIVE LEAD (FIXTURE — lihat Open O34 lead Creative riil),uat.creative1@cdps.local,CREATIVE,HEAD OF CREATIVE,true
+UATADS0001,UAT ADS LEAD (FIXTURE — lihat Open O34 SPV Ads riil),uat.ads1@cdps.local,ADVERTISER,HEAD OF ADVERTISER,true
+UATLSS0001,UAT LIVE STREAM STAFF (FIXTURE — lihat Open O34 staf Live Stream riil),uat.livestream1@cdps.local,LIVE STREAM,LIVE STREAM STAFF,true
