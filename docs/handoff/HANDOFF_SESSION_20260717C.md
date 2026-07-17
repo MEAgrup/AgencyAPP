@@ -53,7 +53,11 @@ LULUS. Dicatat di DECISIONS (entri GO 2026-07-17) + tindak lanjut merge/retarget
 1. ~~Assign-PIC granular sub-tim Creative (M7 §3)~~ → **STOP, jadi Open O35** (executor
    W2-M7-C3 menemukan blocker struktural: model peran tanpa dimensi sub-tim, PRD tanpa
    peta Asset-Type→sub-tim, roster tanpa TL — butuh keputusan Nerissa/Yohan dulu).
-   Handler bulk M1 + port test stream A (utang Wave 1) dikerjakan sesi ini — lihat UPDATE.
+   ~~Handler bulk M1 + port test stream A~~ ✅ **DILUNASI sesi ini** (entri Decided
+   2026-07-17): `POST /api/v1/leads/bulk` (pintu import per-baris, dedup live, gate
+   Marketing/Director) + port test stream A (`bulk_test.go`, `register_block_test.go`);
+   suite 28 paket hijau. Gap residual sengaja tersisa (unit granular negotiation/
+   qualified M0 — perilaku teruji parsial; campaign linkage bulk → M3 Wave 3).
 2. Begitu file W1-19 masuk → import (dry-run dulu; lock `id_sequences`).
 3. Setelah go/no-go langkah 49 GO → **Wave 3** (M2, M3, M11, M13, M14, M15 — Client
    Portal terakhir, setelah security spec O5). Pembukaan katalog notifikasi Wave 3:
