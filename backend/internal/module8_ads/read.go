@@ -199,7 +199,7 @@ func (s *Service) fillDerived(ctx context.Context, c *Campaign) error {
 	}
 
 	// §8 Rule 4 / M8-OA-5: trailing consecutive under-target periods (ROAS target).
-	if target, ok := parseROASTarget(c.TargetKPI); ok {
+	if target, ok := ParseROASTarget(c.TargetKPI); ok {
 		c.UnderperformingStreak = trailingUnderTarget(perEntryROAS, target)
 		c.EscalationFlagged = c.UnderperformingStreak >= 2
 	}
@@ -266,10 +266,12 @@ func trailingUnderTarget(series []float64, target float64) int {
 	return n
 }
 
-// parseROASTarget extracts a numeric ROAS target from a Target KPI string like
+// ParseROASTarget extracts a numeric ROAS target from a Target KPI string like
 // "ROAS ≥ 4x" or "ROAS 4". Returns ok=false when the target is not ROAS-typed or
-// carries no number — no false escalation for GMV/Spend-cap targets.
-func parseROASTarget(target string) (float64, bool) {
+// carries no number — no false escalation for GMV/Spend-cap targets. Exported
+// for module13_health's ROAS Attainment (M13 Rule 5) — one parser, no mirror
+// (O19 precedent).
+func ParseROASTarget(target string) (float64, bool) {
 	low := strings.ToLower(target)
 	if !strings.Contains(low, "roas") {
 		return 0, false

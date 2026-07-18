@@ -19,11 +19,12 @@ import (
 // satisfy the respective interfaces (AccountService, BriefSubmitGuard).
 func (a *App) taskSvc() *module12_task.Service {
 	return &module12_task.Service{
-		DB:          a.DB,
-		Engine:      a.Engine,
-		Catalog:     a.Catalog,
-		Account:     a.accountSvc(),
-		SubmitGuard: a.adsSvc(),
+		DB:           a.DB,
+		Engine:       a.Engine,
+		Catalog:      a.Catalog,
+		Account:      a.accountSvc(),
+		SubmitGuard:  a.adsSvc(),
+		ApproveGuard: a.boardSvc(),
 	}
 }
 

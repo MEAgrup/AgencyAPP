@@ -88,6 +88,21 @@ func (s *Service) RecomputeBriefRollup(ctx context.Context, tx *sql.Tx, actor pe
 	for cur < tgt {
 		from := rollupChain[cur]
 		to := rollupChain[cur+1]
+		// M11 Blocking-Dependency gate on the FINAL edge (-> [Approved]): while a
+		// Blocking Dependency's Source is not terminal the roll-up is DEFERRED here —
+		// the Brief stays [In Review], the triggering Asset move still commits (§2
+		// Rule 7). Only a BlockedError defers; any other error propagates. It resolves
+		// naturally on the next Asset event, or via the AM's explicit ApproveBrief
+		// once the Source is terminal (DECISIONS W3-M11-C1).
+		if to == StatusApproved && s.ApproveGuard != nil {
+			if err := s.ApproveGuard.ValidateBriefApproval(ctx, tx, briefID); err != nil {
+				var be *statemachine.BlockedError
+				if errors.As(err, &be) {
+					return nil
+				}
+				return err
+			}
+		}
 		if _, err := s.engine().Transition(ctx, tx, statemachine.Request{
 			Machine: statemachine.MBriefTask, EntityType: "brief", Table: "briefs",
 			EntityID: briefID, To: to, Actor: actor,

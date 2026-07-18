@@ -79,6 +79,19 @@ type Service struct {
 	// the cataloged events (EvComplaintLogged §8, EvRevisionCountFlag §7) fire in
 	// production. It is NOT extended here — the catalog stays FROZEN.
 	Catalog *notification.Catalog
+	// ApproveGuard, when set, is the Module 11 Blocking-Dependency gate (M11 §2
+	// Rule 7 / §6.3): it runs inside the approval transaction just before a Brief is
+	// driven [In Review] -> [Approved], and a non-nil error blocks the transition
+	// (nothing changes). Injected one-way (M6 does not import M11); nil => no gate.
+	// *module11_board.Service satisfies it. Same precedent as M12's BriefSubmitGuard.
+	ApproveGuard BriefApproveGuard
+}
+
+// BriefApproveGuard is an optional pre-[Approved] check on a Brief's FINAL
+// transition. It is the extension point for the Module 11 cross-Brief Blocking
+// Dependency gate the generic engine cannot know. Injected one-way; nil-safe.
+type BriefApproveGuard interface {
+	ValidateBriefApproval(ctx context.Context, tx *sql.Tx, briefID string) error
 }
 
 // engine returns the configured engine, or a fresh canonical one if unset.

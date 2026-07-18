@@ -60,6 +60,15 @@ func (a *App) onTransition(ev statemachine.Event) error {
 			})
 			return err
 		}
+	case statemachine.MBriefTask:
+		// M11 §5.5: when a Source Brief reaches its terminal ([Approved]) every
+		// Dependency it sources turns Satisfied — fire EvDependencySatisfied once per
+		// Dependency to the Target Brief's PIC. Covers BOTH the AM approval (module6)
+		// and the Creative/KOL roll-up (module12) paths, since both drive [Approved]
+		// through this engine. Runs in the transition's transaction (atomic).
+		if ev.To == "[Approved]" {
+			return a.boardSvc().OnBriefReachedTerminal(ev.Ctx, ev.Tx, ev.Actor, ev.EntityID)
+		}
 	}
 	return nil
 }
@@ -121,6 +130,27 @@ func (a *App) Router() http.Handler {
 	a.registerAdsRoutes(mux)
 	a.registerKOLRoutes(mux)
 	a.registerLiveStreamRoutes(mux)
+
+	// Wave 3 — Module 3 (Campaign), Cluster 1: the acquisition Campaign (CMP-).
+	a.registerCampaignRoutes(mux)
+
+	// Wave 3 — Module 2 (Marketing), Cluster 1: the 1:1 Performance Record + Auto-Metrics.
+	a.registerMarketingRoutes(mux)
+
+	// Wave 3 — Module 11 (PM/Kanban): cross-Brief Dependencies + Client Board + My Tasks.
+	a.registerBoardRoutes(mux)
+
+	// Wave 3 — Module 13 (Client Health Report): monthly CHR- snapshots + trend +
+	// live preview + ROAS toggle.
+	a.registerHealthRoutes(mux)
+
+	// Wave 3 — Module 14 (Team Performance): monthly PERF- snapshots + trend +
+	// team rollup + admin KPI-Profile config.
+	a.registerPerfRoutes(mux)
+
+	// Wave 3 — Module 15 (Team Portal, INTERNAL): staff landing + SPV/Lead variant +
+	// Director/OD Management Dashboard. Pure read-model over M11/M12/M13/M14.
+	a.registerPortalRoutes(mux)
 
 	return mux
 }

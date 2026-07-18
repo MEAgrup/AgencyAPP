@@ -72,6 +72,23 @@ var dataTables = []string{
 	"client_sales_allocations",
 	"client_platforms",
 	"clients",
+	// Wave 3 — Module 11 (PM/Kanban): cross-Brief dependencies (no hard FK).
+	"dependencies",
+	// Wave 3 — Module 13 (Client Health): monthly CHR- snapshots (child of clients).
+	// TRUNCATE does not fire the immutability triggers, so cleanup is safe.
+	"client_health_snapshots",
+	// Wave 3 — Module 14 (Team Performance): monthly PERF- snapshots (child of
+	// employees). TRUNCATE bypasses the immutability triggers. The KPI config tables
+	// (perf_kpi_weights / perf_period_targets) are DELIBERATELY not truncated — they
+	// carry the migration-seeded §2 Rule 2 weights + placeholder targets the compute
+	// path reads.
+	"performance_snapshots",
+	// Wave 3 — Module 2 (Marketing): the 1:1 performance record (budget). Truncated
+	// before campaigns for readability (FK checks are disabled during truncation).
+	"marketing_performance_records",
+	// Wave 3 — Module 3 (Campaign): the acquisition Campaign (CMP-). No child rows
+	// in Cluster 1; owner/created_by are plain employee ids (no FK).
+	"campaigns",
 	"negotiation_proposal_lines",
 	"negotiation_proposals",
 	"prospect_attempt_nq_reasons",

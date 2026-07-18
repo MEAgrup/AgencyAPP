@@ -44,12 +44,6 @@ type BulkRow struct {
 	Source      string `json:"source"`
 }
 
-// mandatoryOK gates the §9.3 mandatory fields (Lead Name, Phone, Source) before
-// any id is minted (§3 Flow steps 2/4).
-func (r BulkRow) mandatoryOK() bool {
-	return r.LeadName != "" && r.PhoneNumber != "" && r.Source != ""
-}
-
 // BulkRowResult is the per-row verdict feeding the §3 rule 6 rejection list.
 type BulkRowResult struct {
 	// RowNumber is 1-based over the input rows.
@@ -99,17 +93,19 @@ func CanBulkImport(actor permission.Actor) bool {
 	return actor.Role.Director || actor.Role.Division == MarketingDivision
 }
 
-// BulkImport runs the Marketing bulk-import door for rows (M1 §3). The whole
-// request is refused with the canonical role-denied message when the actor may
-// not import; otherwise every row is processed independently and the report
+// BulkImport runs the Marketing bulk-import door for rows (M1 §3). campaignID is
+// the OPTIONAL origin Campaign selected for the whole file (M1 §3 Flow 1); empty
+// means no campaign (Source taken from each row, origin/last-touch left NULL). The
+// whole request is refused with the canonical role-denied message when the actor
+// may not import; otherwise every row is processed independently and the report
 // reconciles (Imported + Rejected == len(Rows)).
-func (s *Service) BulkImport(ctx context.Context, actor permission.Actor, rows []BulkRow) (*BulkReport, error) {
+func (s *Service) BulkImport(ctx context.Context, actor permission.Actor, campaignID string, rows []BulkRow) (*BulkReport, error) {
 	if !CanBulkImport(actor) {
 		return nil, &ErrBlocked{Message: statemachine.RoleDeniedMessage}
 	}
 	report := &BulkReport{Rows: make([]BulkRowResult, 0, len(rows))}
 	for i, row := range rows {
-		res := s.importOneBulkRow(ctx, actor, i+1, row)
+		res := s.importOneBulkRow(ctx, actor, i+1, row, campaignID)
 		if res.Imported {
 			report.Imported++
 		} else {
@@ -123,11 +119,12 @@ func (s *Service) BulkImport(ctx context.Context, actor permission.Actor, rows [
 // importOneBulkRow processes one row in its own transaction so a row-level
 // failure rejects only that row (§3 rule 5). The row must carry the mandatory
 // fields; the dedup verdict comes from the live engine.
-func (s *Service) importOneBulkRow(ctx context.Context, actor permission.Actor, rowNum int, row BulkRow) BulkRowResult {
+func (s *Service) importOneBulkRow(ctx context.Context, actor permission.Actor, rowNum int, row BulkRow, campaignID string) BulkRowResult {
 	res := BulkRowResult{RowNumber: rowNum, LeadName: row.LeadName, Phone: row.PhoneNumber}
 
-	// Mandatory-field validation BEFORE any id issue (§3 Flow steps 2/4).
-	if !row.mandatoryOK() {
+	// Mandatory-field validation BEFORE any id issue (§3 Flow steps 2/4). When a
+	// campaign supplies the Source (below), the row need not carry one itself.
+	if row.LeadName == "" || row.PhoneNumber == "" || (row.Source == "" && campaignID == "") {
 		res.Reason = MsgRowIncomplete
 		return res
 	}
@@ -143,6 +140,23 @@ func (s *Service) importOneBulkRow(ctx context.Context, actor permission.Actor, 
 		return res
 	}
 	defer tx.Rollback()
+
+	// Campaign gate + Source auto-set (M3 §2 / O13). Runs BEFORE any lead write:
+	// a missing/closed Campaign rejects the row; Draft/Paused auto-activates; the
+	// Channel-derived Source WINS over the row's Source.
+	source := row.Source
+	if campaignID != "" {
+		derived, err := s.resolveCampaignForIntake(ctx, tx, campaignID, actor)
+		if err != nil {
+			if be, ok := err.(*ErrBlocked); ok {
+				res.Reason = be.Message
+			} else {
+				res.Reason = MsgRowIncomplete
+			}
+			return res
+		}
+		source = derived
+	}
 
 	match, err := MatchByPhone(ctx, tx, phoneNorm)
 	if err != nil {
@@ -161,18 +175,20 @@ func (s *Service) importOneBulkRow(ctx context.Context, actor permission.Actor, 
 			res.Reason = MsgRowIncomplete
 			return res
 		}
+		// A NEW lead born under a Campaign gets origin = last-touch = that Campaign
+		// (origin IMMUTABLE hereafter); both NULL when no campaign (M1 §5 / §9.3).
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO leads (id, lead_name, phone_number, phone_norm, email, source, origin_division, record_status, created_by)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			leadID, row.LeadName, row.PhoneNumber, phoneNorm, nullString(row.Email), row.Source,
-			MarketingDivision, RecordPool, actor.EmployeeID); err != nil {
+			`INSERT INTO leads (id, lead_name, phone_number, phone_norm, email, source, origin_division, origin_campaign_id, last_touch_campaign_id, record_status, created_by)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			leadID, row.LeadName, row.PhoneNumber, phoneNorm, nullString(row.Email), source,
+			MarketingDivision, campaignArg(campaignID), campaignArg(campaignID), RecordPool, actor.EmployeeID); err != nil {
 			res.Reason = MsgRowIncomplete
 			return res
 		}
 		if err := audit.Write(ctx, tx, audit.Record{
 			EntityType: "lead", EntityID: leadID, Actor: actor.EmployeeID,
 			Action: "create",
-			After:  map[string]any{"record_status": RecordPool, "source": row.Source, "channel": "bulk_import"},
+			After:  map[string]any{"record_status": RecordPool, "source": source, "channel": "bulk_import", "origin_campaign_id": campaignArg(campaignID)},
 		}); err != nil {
 			res.Reason = MsgRowIncomplete
 			return res
@@ -203,8 +219,14 @@ func (s *Service) importOneBulkRow(ctx context.Context, actor permission.Actor, 
 		if err := audit.Write(ctx, tx, audit.Record{
 			EntityType: "lead", EntityID: dec.ReopenLeadID, Actor: actor.EmployeeID,
 			Action: "dedup_reopen",
-			After:  map[string]any{"channel": "bulk_import", "source": row.Source},
+			After:  map[string]any{"channel": "bulk_import", "source": source},
 		}); err != nil {
+			res.Reason = MsgRowIncomplete
+			return res
+		}
+		// M1 §5: a campaign-scoped reopen touches the existing lead -> last-touch
+		// (origin left untouched — this lead was not born under this Campaign).
+		if err := s.updateLastTouch(ctx, tx, dec.ReopenLeadID, campaignID, actor); err != nil {
 			res.Reason = MsgRowIncomplete
 			return res
 		}
@@ -228,6 +250,14 @@ func (s *Service) importOneBulkRow(ctx context.Context, actor permission.Actor, 
 			}); err != nil {
 				res.Reason = MsgRowIncomplete
 				return res
+			}
+			// M1 §5: a block-as-Pool-duplicate under a Campaign still records the
+			// newer Campaign as Last-Touch (non-destructive; origin untouched).
+			if campaignID != "" && dec.Message == MsgDuplicatePool {
+				if err := s.updateLastTouch(ctx, tx, match.ID, campaignID, actor); err != nil {
+					res.Reason = MsgRowIncomplete
+					return res
+				}
 			}
 			if err := tx.Commit(); err != nil {
 				res.Reason = MsgRowIncomplete

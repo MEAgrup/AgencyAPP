@@ -112,9 +112,11 @@ type Service struct {
 	// Tasks recomputes the parent Brief's roll-up after an Asset review edge. Only
 	// the review methods (review.go) use it; nil-guarded there.
 	Tasks Rollup
-	// Catalog is the FROZEN notification catalog. Nil-guarded: the only event M7
-	// emits is the ALREADY-CATALOGED EvRevisionCountFlag, on an Asset crossing 3
-	// revisions (§6 Rule 4) — a per-Asset flag, distinct from M6's per-Brief one.
+	// Catalog is the notification catalog. Nil-guarded. M7 emits two cataloged
+	// events: EvRevisionCountFlag, on an Asset crossing 3 revisions (§6 Rule 4,
+	// review.go) — a per-Asset flag, distinct from M6's per-Brief one — and
+	// EvHoursLoggedReminder, the Wave-3-catalog-opening end-of-day Hours Logged
+	// nudge (M7-OA-2, DECISIONS O29/W3-CAT-1, reminder.go).
 	Catalog *notification.Catalog
 }
 

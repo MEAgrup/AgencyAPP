@@ -11,7 +11,7 @@ import (
 // accountSvc builds the Module 6 service (Cluster 1 intake & AM assignment +
 // Cluster 2 Strategy & Plan). The engine is used by the STR- / Service machines.
 func (a *App) accountSvc() *module6_account.Service {
-	return &module6_account.Service{DB: a.DB, Engine: a.Engine, Catalog: a.Catalog}
+	return &module6_account.Service{DB: a.DB, Engine: a.Engine, Catalog: a.Catalog, ApproveGuard: a.boardSvc()}
 }
 
 func (a *App) handleAccountIntake(w http.ResponseWriter, r *http.Request) {

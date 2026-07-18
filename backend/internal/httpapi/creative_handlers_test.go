@@ -201,6 +201,62 @@ func TestCreativeAssetEndpoints(t *testing.T) {
 	}
 }
 
+// TestScanHoursReminderEndpoint exercises the Hours Logged reminder scan
+// endpoint (M7-OA-2, DECISIONS O29/W3-CAT-1): gate mirrors M5's reminder scan
+// (TestReminderDashboardAndScan_HTTP) — Creative division (any level) or
+// Director only; a foreign division and OD (read-only) are denied.
+func TestScanHoursReminderEndpoint(t *testing.T) {
+	srv, done := setupTC(t)
+	defer done()
+	seedTCBrief(t, "CLI-HR", "SVC-HR", "BRF-HR", "Creative", 1)
+
+	budi := login(t, srv, "budi@mea.co.id")   // Sales staff (foreign division)
+	cakra := login(t, srv, "cakra@mea.co.id") // Creative staff
+	odi := login(t, srv, "odi@mea.co.id")     // OD (read-only)
+	yohan := login(t, srv, "yohan@mea.co.id") // Director
+
+	// Creative staff self-claims an Asset and starts it, so the scan has a real
+	// active-unlogged candidate to fire against.
+	code, body := do(t, cakra, "POST", srv.URL+"/api/v1/briefs/BRF-HR/assets", map[string]any{"sequence_no": 1})
+	if code != 200 {
+		t.Fatalf("create asset: %d %v", code, body)
+	}
+	assetID := body["id"].(string)
+	if code, _ := do(t, cakra, "POST", srv.URL+"/api/v1/assets/"+assetID+"/start", nil); code != 200 {
+		t.Fatalf("start asset: want 200")
+	}
+
+	scan := srv.URL + "/api/v1/assets/reminders/scan"
+
+	// Foreign division and OD (read-only) are denied.
+	if code, body := do(t, budi, "POST", scan, nil); code != 403 || body["message"] != "[anda tidak memiliki akses untuk menjalankan pemindaian pengingat Hours Logged]" {
+		t.Fatalf("sales scan: %d %v", code, body)
+	}
+	if code, _ := do(t, odi, "POST", scan, nil); code != 403 {
+		t.Fatalf("OD scan: want 403, got %d", code)
+	}
+
+	// Creative staff triggers the scan: the just-created active/unlogged Asset
+	// fires exactly one reminder.
+	code, body = do(t, cakra, "POST", scan, nil)
+	if code != 200 {
+		t.Fatalf("creative staff scan: %d %v", code, body)
+	}
+	if int(body["reminders_sent"].(float64)) != 1 {
+		t.Fatalf("reminders_sent = %v, want 1", body["reminders_sent"])
+	}
+
+	// Director may also trigger it; the same Asset was already reminded today
+	// (WIB), so a same-day rescan sends none.
+	code, body = do(t, yohan, "POST", scan, nil)
+	if code != 200 {
+		t.Fatalf("director scan: %d %v", code, body)
+	}
+	if int(body["reminders_sent"].(float64)) != 0 {
+		t.Fatalf("same-day rescan reminders_sent = %v, want 0 (dedup)", body["reminders_sent"])
+	}
+}
+
 // TestDailyOutputEndpoint exercises the M7 §7 Daily Output HTTP surface
 // (GET /api/v1/daily-output/{picId}): the W2-M7-C2 read gate (PIC self, Creative
 // lead, OD, Director; other staff + AM denied), the date param validation, and the

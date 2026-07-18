@@ -128,6 +128,21 @@ func (a *App) handleLogHours(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"id": r.PathValue("id"), "hours_logged": b.Hours})
 }
 
+// ---- Hours Logged reminder scan (M7-OA-2, DECISIONS O29/W3-CAT-1) ----
+
+// handleScanHoursReminders serves the on-demand Hours Logged reminder sweep
+// (mirrors handleScanReminders, intent_reminder_handlers.go). Creative
+// division (any level) or Director only.
+func (a *App) handleScanHoursReminders(w http.ResponseWriter, r *http.Request) {
+	actor, _ := actorFrom(r.Context())
+	res, err := a.creativeSvc().RunHoursReminderScan(r.Context(), actor, time.Now())
+	if err != nil {
+		writeCreativeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 // writeCreativeErr maps M7 sentinels to HTTP status + their verbatim BI message,
 // following the account_handlers.go convention (forbidden->403, not-found->404,
 // domain-validation->422; statemachine BlockedError->422, RoleError->403).
@@ -159,7 +174,8 @@ func writeCreativeErr(w http.ResponseWriter, err error) {
 		errors.Is(err, module7_creative.ErrAssetCreateForbidden),
 		errors.Is(err, module7_creative.ErrReviewForbidden),
 		errors.Is(err, module7_creative.ErrHoursForbidden),
-		errors.Is(err, module7_creative.ErrDailyOutputForbidden):
+		errors.Is(err, module7_creative.ErrDailyOutputForbidden),
+		errors.Is(err, module7_creative.ErrHoursReminderScanForbidden):
 		writeErr(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, module7_creative.ErrBriefNotFound),
 		errors.Is(err, module7_creative.ErrAssetNotFound):
