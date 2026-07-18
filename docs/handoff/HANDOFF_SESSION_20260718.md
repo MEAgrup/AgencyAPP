@@ -41,9 +41,9 @@ Detail interpretasi tiap klaster: entri DECISIONS 2026-07-17 (M13) & 2026-07-18
 
 ## Pekerjaan berikutnya
 
-1. **W3-M15-C2 Client Portal — DIBLOKIR O4+O5** (security spec + cek embeddability,
-   head dev). JANGAN mulai sebelum keduanya masuk. Ini satu-satunya klaster kode
-   Wave 3 yang tersisa.
+1. **W3-M15-C2 Client Portal — DITUNDA (Decided 2026-07-18): sementara TIDAK
+   dibuat.** Kode Wave 3 dinyatakan selesai. Bila kelak dihidupkan kembali, O4+O5
+   tetap prasyarat wajib sebelum mulai.
 2. Begitu file W1-19 masuk → import riil (dry-run dulu; lock `id_sequences`).
 3. Deferral non-blocking tercatat (kerjakan bila ada slot): emisi
    `EvDependencySatisfied` source brief LS off-machine (M11); KOL Booking/LS Session
@@ -57,7 +57,7 @@ Detail interpretasi tiap klaster: entri DECISIONS 2026-07-17 (M13) & 2026-07-18
 
 | Apa | Siapa | Blocking |
 |---|---|---|
-| **O5 security spec Client Portal** + **O4 cek embeddability** | head dev | **M15-C2 (klaster kode terakhir W3)** |
+| ~~O5 security spec + O4 embeddability~~ → **M15-C2 DITUNDA (Decided 2026-07-18)**; O4/O5 hanya bila portal dihidupkan lagi | head dev | tidak |
 | O34 aktor produksi KOL/lead Creative/SPV Ads/staf LS | Yohan (+HR) | produksi M7–M9 |
 | O35 model sub-tim Creative (3 keputusan) | Nerissa/Yohan (+HR) | klaster M7 terakhir |
 | O33 aktor Finance produksi | Yohan | produksi M5 |
