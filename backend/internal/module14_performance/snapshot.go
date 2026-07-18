@@ -278,6 +278,73 @@ func (s *Service) GetSnapshot(ctx context.Context, actor permission.Actor, staff
 	return snap, nil
 }
 
+// PreviewCurrent computes the CURRENT, not-yet-closed WIB month's Performance Score
+// for a staff member READ-ONLY (Team Portal / M15 Rule 9 "running Performance Score
+// with a breakdown"). It parallels module13_health.Preview: NEVER persisted, never on
+// the trend, and — unlike fireSnapshot — it NEVER emits EvPerformancePublished (no
+// Catalog.Emit on this path). It reuses the same computeFor gatherers as the batch
+// sweep (no duplicated KPI logic, O19), so the running breakdown is identical to what
+// the month-end snapshot will hold. Visibility gated (Rule 7). ErrNotFound when the
+// staff has no scored KPI-Profile role (Sales/Finance/Marketing, or a lead — decision
+// points 1 & 6) or is not visible to the actor.
+func (s *Service) PreviewCurrent(ctx context.Context, actor permission.Actor, staffID string, now time.Time) (Snapshot, error) {
+	if !canScope(actor) {
+		return Snapshot{}, ErrForbidden
+	}
+	roleType, ok, err := s.staffRoleType(ctx, staffID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if !ok {
+		return Snapshot{}, ErrNotFound
+	}
+	if !canView(actor, staffID, roleType) {
+		return Snapshot{}, ErrNotFound
+	}
+	per := monthPeriod(now)
+	c, err := s.computeFor(ctx, s.DB, staffID, roleType, per)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	snap := Snapshot{
+		StaffID:            staffID,
+		RoleType:           roleType,
+		PeriodStart:        per.startDate,
+		PeriodEnd:          per.endDate,
+		ProfileScore:       c.profile,
+		Modifier:           c.modifier,
+		FinalScore:         c.final,
+		ScoreDisplay:       scoreDisplay(c.final),
+		Components:         c.components,
+		TargetsPlaceholder: c.placeholder,
+		Preview:            true,
+	}
+	if snap.Components == nil {
+		snap.Components = []Component{}
+	}
+	return snap, nil
+}
+
+// staffRoleType resolves a staff member's Module 14 role type from role_mappings
+// (the same mapping the batch sweep uses). ok=false when the employee has no active
+// role mapping or maps to a division/level without a KPI Profile.
+func (s *Service) staffRoleType(ctx context.Context, staffID string) (string, bool, error) {
+	var division, level string
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT rm.division, rm.level
+		   FROM employees e
+		   JOIN role_mappings rm ON rm.divisi = e.divisi AND rm.jabatan = e.jabatan
+		  WHERE e.employee_id = ?`, staffID).Scan(&division, &level)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	rt, ok := roleTypeFor(division, level)
+	return rt, ok, nil
+}
+
 // Trend returns every stored snapshot for a staff member, oldest first. Visibility
 // gated (Rule 7).
 func (s *Service) Trend(ctx context.Context, actor permission.Actor, staffID string) ([]Snapshot, error) {

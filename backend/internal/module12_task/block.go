@@ -204,6 +204,85 @@ func (s *Service) decideBlockRequest(ctx context.Context, actor permission.Actor
 	return tx.Commit()
 }
 
+// PendingBlockRequest is one open block request surfaced in the SPV/Lead approval
+// queue (M15 Rule 10 / §6.2). It spans BOTH task sources (Brief and Asset) and
+// carries the routing context (division, client) a lead needs to triage without
+// opening each task. It is a READ-MODEL only — approving/rejecting still runs through
+// ApproveBlockRequest / RejectBlockRequest (this list duplicates no decision logic).
+type PendingBlockRequest struct {
+	ID          string    `json:"id"`
+	Source      string    `json:"source"` // "brief" | "asset"
+	EntityID    string    `json:"entity_id"`
+	Division    string    `json:"division"`
+	ClientID    string    `json:"client_id"`
+	Reason      string    `json:"reason"`
+	RequestedBy string    `json:"requested_by"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// PendingBlockRequests returns every pending block request the actor may ACTION as
+// SPV/Lead (M15 Rule 10 block-approval queue). Scope mirrors the decide gate
+// (decideBlockRequest: actor.IsLead(task.division)): a division lead sees only their
+// own division's pending requests, a Director sees all, and any other actor sees an
+// empty queue (the /portal/team endpoint already gates entry to leads/Director).
+// Both sources are unioned (Brief block requests + Asset block requests, §5.3a).
+// Read-only; nothing is emitted.
+func (s *Service) PendingBlockRequests(ctx context.Context, actor permission.Actor) ([]PendingBlockRequest, error) {
+	out := []PendingBlockRequest{}
+	// Brief-as-task pending requests.
+	briefRows, err := s.DB.QueryContext(ctx,
+		`SELECT r.id, r.`+sourceBrief.blockFKCol+`, b.assigned_division, sv.client_id, r.reason, r.requested_by, r.created_at
+		   FROM `+sourceBrief.blockTable+` r
+		   JOIN briefs b ON b.id = r.`+sourceBrief.blockFKCol+`
+		   JOIN services sv ON sv.id = b.service_id
+		  WHERE r.status = 'pending'
+		  ORDER BY r.created_at ASC, r.id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	briefReqs, err := scanPendingBlockRows(briefRows, sourceBrief.entityType)
+	if err != nil {
+		return nil, err
+	}
+	// Asset pending requests.
+	assetRows, err := s.DB.QueryContext(ctx,
+		`SELECT r.id, r.`+sourceAsset.blockFKCol+`, b.assigned_division, sv.client_id, r.reason, r.requested_by, r.created_at
+		   FROM `+sourceAsset.blockTable+` r
+		   JOIN assets a ON a.id = r.`+sourceAsset.blockFKCol+`
+		   JOIN briefs b ON b.id = a.brief_id
+		   JOIN services sv ON sv.id = b.service_id
+		  WHERE r.status = 'pending'
+		  ORDER BY r.created_at ASC, r.id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	assetReqs, err := scanPendingBlockRows(assetRows, sourceAsset.entityType)
+	if err != nil {
+		return nil, err
+	}
+	for _, req := range append(briefReqs, assetReqs...) {
+		if actor.IsLead(req.Division) { // Director => IsLead true for every division
+			out = append(out, req)
+		}
+	}
+	return out, nil
+}
+
+// scanPendingBlockRows reads pending block-request rows for one source.
+func scanPendingBlockRows(rows *sql.Rows, source string) ([]PendingBlockRequest, error) {
+	defer rows.Close()
+	var out []PendingBlockRequest
+	for rows.Next() {
+		var r PendingBlockRequest
+		if err := rows.Scan(&r.ID, &r.EntityID, &r.Division, &r.ClientID, &r.Reason, &r.RequestedBy, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		r.Source = source
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // ResumeTask drives a Brief-as-task [Blocked] -> [In Progress] (§3 step 6),
 // resuming the clock. SPV/Lead-only (the engine edge is requireLead); Director
 // allowed. Blocked time is excluded from Turnaround (Rule 7).

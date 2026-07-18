@@ -148,6 +148,10 @@ func (a *App) Router() http.Handler {
 	// team rollup + admin KPI-Profile config.
 	a.registerPerfRoutes(mux)
 
+	// Wave 3 — Module 15 (Team Portal, INTERNAL): staff landing + SPV/Lead variant +
+	// Director/OD Management Dashboard. Pure read-model over M11/M12/M13/M14.
+	a.registerPortalRoutes(mux)
+
 	return mux
 }
 
