@@ -83,6 +83,18 @@ func (s *Service) BookingMetrics(ctx context.Context, actor permission.Actor, bo
 	return computeBookingMetrics(bookingID, status, createdAt, nullFloatPtr(sla), evs), nil
 }
 
+// ComputeBookingMetricsFromLog is the exported, gate-free entry to the pure Booking
+// metric core (§7 / §11): it parses a Booking's immutable audit log into the native
+// transition list and returns the same recomputed metrics BookingMetrics serves —
+// Speed Score, Sourcing/Delivery turnaround, Revision Count, ApprovedPeriodWIB.
+// Module 14 (Team Performance) calls this to fold KOL Speed Score / Creator Count
+// into its per-staff rollup WITHOUT re-implementing the §11 mapping (O19 precedent:
+// export the live helper, never mirror it). It does NO permission check — the caller
+// (a monthly batch or an already-gated read) owns visibility.
+func ComputeBookingMetricsFromLog(bookingID, status string, createdAt time.Time, sla *float64, entries []audit.Entry) BookingMetrics {
+	return computeBookingMetrics(bookingID, status, createdAt, sla, parseBkgTransitions(entries))
+}
+
 // computeBookingMetrics is the pure core (unit-testable with controlled timestamps).
 // `evs` MUST be chronologically ascending; `createdAt` is the birth ([Sourcing])
 // timestamp used both as the Sourcing-Turnaround start and as the injected first

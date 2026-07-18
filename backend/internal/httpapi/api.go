@@ -144,6 +144,10 @@ func (a *App) Router() http.Handler {
 	// live preview + ROAS toggle.
 	a.registerHealthRoutes(mux)
 
+	// Wave 3 — Module 14 (Team Performance): monthly PERF- snapshots + trend +
+	// team rollup + admin KPI-Profile config.
+	a.registerPerfRoutes(mux)
+
 	return mux
 }
 

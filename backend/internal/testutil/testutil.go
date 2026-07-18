@@ -77,6 +77,12 @@ var dataTables = []string{
 	// Wave 3 — Module 13 (Client Health): monthly CHR- snapshots (child of clients).
 	// TRUNCATE does not fire the immutability triggers, so cleanup is safe.
 	"client_health_snapshots",
+	// Wave 3 — Module 14 (Team Performance): monthly PERF- snapshots (child of
+	// employees). TRUNCATE bypasses the immutability triggers. The KPI config tables
+	// (perf_kpi_weights / perf_period_targets) are DELIBERATELY not truncated — they
+	// carry the migration-seeded §2 Rule 2 weights + placeholder targets the compute
+	// path reads.
+	"performance_snapshots",
 	// Wave 3 — Module 2 (Marketing): the 1:1 performance record (budget). Truncated
 	// before campaigns for readability (FK checks are disabled during truncation).
 	"marketing_performance_records",
