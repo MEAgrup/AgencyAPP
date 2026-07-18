@@ -6,7 +6,8 @@
 ## Status saat handoff
 
 **Branch:** `claude/wave2-uat-gate-exit-asstfa`, tip `d4bac5d` — ter-push penuh,
-working tree bersih, PR BELUM dibuka. Suite penuh fresh terakhir: **34 paket
+working tree bersih. **PR #11 → main DIBUKA 2026-07-18** (seluruh Wave 3 + gap test M0;
+review manusia menunggu). Suite penuh fresh terakhir: **34 paket
 hijau, 0 FAIL, 0 skip** (`-p 1`, cdps_test, durasi paket DB diverifikasi — lihat
 ⚠ insiden di bawah). Migrasi terakhir: **0036**. Katalog notifikasi: FROZEN, 15
 event (nol penambahan sesi ini).
@@ -64,7 +65,7 @@ Detail interpretasi tiap klaster: entri DECISIONS 2026-07-17 (M13) & 2026-07-18
 | O26 NIK+email Yohan & Nerissa (diberikan TERAKHIR) | HR/Yohan | produksi saja |
 | O9 target periode M14 (kini configurable + placeholder ditandai) | SPV Ads + OD | tidak |
 | File import W1-19 + form pelengkap + `db_jasa.csv` | CRO/Finance/Sales | import riil |
-| Buka PR branch `claude/wave2-uat-gate-exit-asstfa`? | Nerissa/Yohan | tidak |
+| ~~Buka PR~~ ✅ **PR #11 dibuka 2026-07-18** — tinggal review & merge | Nerissa/Yohan | tidak |
 
 ## Pola kerja & environment
 
