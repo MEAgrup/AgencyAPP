@@ -1,9 +1,13 @@
 // Package testutil provides DB-backed test helpers. Tests skip cleanly when the
-// test database is unreachable, but run normally when it is up.
+// test database is unreachable, but run normally when it is up. In CI (env CI
+// set) an unreachable database FAILS the test instead of skipping, so a suite
+// can never go green without actually exercising the DB packages.
 package testutil
 
 import (
+	"context"
 	"database/sql"
+	"os"
 	"sync"
 	"testing"
 
@@ -34,6 +38,9 @@ func DB(t *testing.T) *sql.DB {
 		migrated = true
 	})
 	if openErr != nil || !migrated {
+		if os.Getenv("CI") != "" {
+			t.Fatalf("test DB unavailable in CI — refusing silent skip: %v", openErr)
+		}
 		t.Skipf("test DB unavailable: %v", openErr)
 	}
 	return shared
@@ -111,15 +118,26 @@ var dataTables = []string{
 // not fire the append-only DELETE triggers, so it is safe here.
 func Clean(t *testing.T, d *sql.DB) {
 	t.Helper()
-	if _, err := d.Exec("SET FOREIGN_KEY_CHECKS=0"); err != nil {
+	// SET FOREIGN_KEY_CHECKS is a per-connection variable: it must execute on
+	// the SAME connection as every TRUNCATE, so pin one connection from the
+	// pool for the whole sequence. Issuing these through d.Exec lets the pool
+	// hand the TRUNCATEs a different connection with FK checks still on
+	// (observed as a flaky Error 1701 on parent tables in CI).
+	ctx := context.Background()
+	conn, err := d.Conn(ctx)
+	if err != nil {
+		t.Fatalf("acquire cleanup conn: %v", err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "SET FOREIGN_KEY_CHECKS=0"); err != nil {
 		t.Fatalf("disable fk checks: %v", err)
 	}
 	for _, tbl := range dataTables {
-		if _, err := d.Exec("TRUNCATE TABLE " + tbl); err != nil {
+		if _, err := conn.ExecContext(ctx, "TRUNCATE TABLE "+tbl); err != nil {
 			t.Fatalf("truncate %s: %v", tbl, err)
 		}
 	}
-	if _, err := d.Exec("SET FOREIGN_KEY_CHECKS=1"); err != nil {
+	if _, err := conn.ExecContext(ctx, "SET FOREIGN_KEY_CHECKS=1"); err != nil {
 		t.Fatalf("enable fk checks: %v", err)
 	}
 }
