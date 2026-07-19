@@ -353,9 +353,10 @@ function parseBulkText(text: string): BulkRow[] {
     .map((line) => {
       const parts = line.split(',').map((p) => p.trim());
       const [lead_name = '', phone_number = '', email = '', source = ''] = parts;
-      const row: BulkRow = { lead_name, phone_number };
+      // source may be sent empty — only valid when a Campaign ID is set; the
+      // server is the sole authority and rejects that row per-row otherwise.
+      const row: BulkRow = { lead_name, phone_number, source };
       if (email) row.email = email;
-      if (source) row.source = source;
       return row;
     });
 }
@@ -481,9 +482,12 @@ function ImportTab() {
     setSingleError(null);
     setSingleReport(null);
     setSingleSubmitting(true);
-    const row: BulkRow = { lead_name: singleName.trim(), phone_number: singlePhone.trim() };
+    const row: BulkRow = {
+      lead_name: singleName.trim(),
+      phone_number: singlePhone.trim(),
+      source: singleSource,
+    };
     if (singleEmail.trim()) row.email = singleEmail.trim();
-    if (singleSource) row.source = singleSource;
     try {
       const res = await bulkImportLeads(singleCampaign.trim() || undefined, [row]);
       setSingleReport(res);
