@@ -51,13 +51,25 @@ spasi) — diperbaiki di skrip, bukan di produk.
 transition, gate budget ≠ gate transisi, prefix `/marketing/campaigns`, metrik
 verbatim) terverifikasi hidup di browser.
 
-## Utang terbuka (tidak disentuh sesi ini — butuh keputusan)
+## Utang — DILUNASI di sesi yang sama (lanjutan, acc pemilik produk)
 
-1. `DIVISIONS` lowercase legacy Wave 1 di `lib/types.ts` dipakai form
-   `/admin/role-mappings` — backend menyimpan verbatim dan SEMUA gate permission
-   membandingkan case-sensitive terhadap konstanta kapital (`"Marketing"`,
-   `"Live Stream"` — dengan spasi). Mapping tulisan admin via form ⇒ karyawan
-   kehilangan seluruh permission divisinya secara diam-diam. Lihat analisis di
-   sesi 2026-07-19 (chat) + handoff 20260719 §Utang.
-2. Opsional: prop `tone` di `StatusBadge` utk gantikan 3 render inline
-   `badge badge-{tone}` milik marketing (butir 6 handoff 20260719B).
+Kedua utang di bawah DIBAYAR setelah laporan ini ditulis (entri DECISIONS
+2026-07-19; commit `4c9328a` backend, `653731d` StatusBadge, + commit FE types):
+
+1. `DIVISIONS` lowercase legacy Wave 1 (`lib/types.ts`, form `/admin/role-mappings`)
+   — akar: backend menyimpan verbatim dan SEMUA gate permission membandingkan
+   case-sensitive terhadap konstanta kapital (`"Marketing"`, `"Live Stream"`
+   ber-spasi) ⇒ mapping tulisan admin membuat karyawan kehilangan seluruh
+   permission divisi diam-diam. Fix dua lapis: `permission.NormalizeDivision`
+   + `ErrBadDivision` di `UpsertRoleMapping` (menutup form/CSV/rolemapseed
+   sekaligus; uji live: POST `marketing`→tersimpan `Marketing`, `live stream`→
+   `Live Stream`, `growth`→422 `[division harus salah satu dari: ...]`) +
+   `DIVISIONS` FE diganti 8 nilai kanonik kapital. Bonus temuan eksekutor:
+   `listDivisionQueue` (`lib/tasks.ts`) interpolasi path tanpa
+   `encodeURIComponent` — satu-satunya outlier vs sibling-nya; diperbaiki
+   (uji live `GET /divisions/Live%20Stream/brief-queue` → 200).
+2. Prop opsional `tone` di `StatusBadge` — 3 render inline badge campaign
+   (list/detail/dashboard) kini lewat komponen bersama; pemakai lama tak berubah.
+
+Regresi pasca-fix: `m2m3_smoke.js` diulang → **19/19 PASS**; lint 0/0; build hijau;
+test backend `internal/admin` + `core/permission` hijau (DB riil, bukan skip).

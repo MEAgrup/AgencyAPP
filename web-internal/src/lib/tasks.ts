@@ -216,7 +216,7 @@ export function getAsset(id: string): Promise<Asset> {
 // GET /divisions/{division}/brief-queue — Brief-level queue for a division (no
 // status filter server-side; filter in the page).
 export function listDivisionQueue(division: string): Promise<{ data: Brief[] }> {
-  return api.get<{ data: Brief[] }>(`/divisions/${division}/brief-queue`);
+  return api.get<{ data: Brief[] }>(`/divisions/${encodeURIComponent(division)}/brief-queue`);
 }
 
 // GET /briefs/{id}/assets — the Asset breakdown of a Creative Brief (sequence_no ASC).

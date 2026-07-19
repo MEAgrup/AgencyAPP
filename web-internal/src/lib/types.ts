@@ -121,15 +121,18 @@ export interface DemoTaskDetail {
   audit: AuditEntry[];
 }
 
+// Canonical CDPS division values (backend constants + DB contents). Capitalised
+// exactly as the backend normalizes/validates them on POST /admin/role-mappings
+// — note 'KOL' is full-caps and 'Live Stream' has a space (not 'Livestream').
 export const DIVISIONS = [
-  'marketing',
-  'sales',
-  'finance',
-  'account',
-  'creative',
-  'ads',
-  'kol',
-  'livestream',
+  'Marketing',
+  'Sales',
+  'Finance',
+  'Account',
+  'Creative',
+  'Ads',
+  'KOL',
+  'Live Stream',
 ] as const;
 
 export const LEVELS = ['staff', 'lead'] as const;
