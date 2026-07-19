@@ -3,6 +3,7 @@
 package testutil
 
 import (
+	"context"
 	"database/sql"
 	"sync"
 	"testing"
@@ -109,17 +110,27 @@ var dataTables = []string{
 
 // Clean truncates all data tables to give a test a fresh slate. TRUNCATE does
 // not fire the append-only DELETE triggers, so it is safe here.
+// SET FOREIGN_KEY_CHECKS is session-scoped, while *sql.DB is a pool — the SET
+// and the TRUNCATEs must run on ONE pinned connection or a TRUNCATE can land
+// on a fresh connection with FK checks still ON (intermittent Error 1701 on
+// parent tables like master_services).
 func Clean(t *testing.T, d *sql.DB) {
 	t.Helper()
-	if _, err := d.Exec("SET FOREIGN_KEY_CHECKS=0"); err != nil {
+	ctx := context.Background()
+	conn, err := d.Conn(ctx)
+	if err != nil {
+		t.Fatalf("clean: pin connection: %v", err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "SET FOREIGN_KEY_CHECKS=0"); err != nil {
 		t.Fatalf("disable fk checks: %v", err)
 	}
 	for _, tbl := range dataTables {
-		if _, err := d.Exec("TRUNCATE TABLE " + tbl); err != nil {
+		if _, err := conn.ExecContext(ctx, "TRUNCATE TABLE "+tbl); err != nil {
 			t.Fatalf("truncate %s: %v", tbl, err)
 		}
 	}
-	if _, err := d.Exec("SET FOREIGN_KEY_CHECKS=1"); err != nil {
+	if _, err := conn.ExecContext(ctx, "SET FOREIGN_KEY_CHECKS=1"); err != nil {
 		t.Fatalf("enable fk checks: %v", err)
 	}
 }
