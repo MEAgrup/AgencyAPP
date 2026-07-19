@@ -4,14 +4,27 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { errorMessage } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import { listKolBriefQueue, type Brief } from '@/lib/kol';
 import StatusBadge from '@/components/StatusBadge';
 
 export default function KolWorkspacePage() {
   const router = useRouter();
+  const { role } = useAuth();
+
+  // Cermin gate ListDivisionQueue (module6 brief.go: CanReadAll / Account lead /
+  // anggota divisi KOL). Role lain (mis. Finance yang membuka Payment Request via
+  // "Buka Langsung") tidak boleh menembak GET brief-queue yang pasti 403.
+  const canSeeQueue = Boolean(
+    role &&
+      (role.od ||
+        role.director ||
+        role.division.toLowerCase() === 'kol' ||
+        (role.level === 'lead' && role.division.toLowerCase() === 'account')),
+  );
 
   const [briefs, setBriefs] = useState<Brief[] | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(canSeeQueue);
   const [error, setError] = useState<string | null>(null);
 
   // Buka langsung by id — M9 tidak punya endpoint agregat lintas-Brief untuk
@@ -21,6 +34,7 @@ export default function KolWorkspacePage() {
   const [paymentJump, setPaymentJump] = useState('');
 
   const load = useCallback(async () => {
+    if (!canSeeQueue) return;
     setLoading(true);
     setError(null);
     try {
@@ -31,7 +45,7 @@ export default function KolWorkspacePage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canSeeQueue]);
 
   useEffect(() => {
     load();
@@ -104,6 +118,13 @@ export default function KolWorkspacePage() {
         <div className="cardHeader">
           <h2>Antrean Brief Divisi KOL</h2>
         </div>
+        {!canSeeQueue && (
+          <div className="alert alertInfo" role="status">
+            Antrean Brief divisi KOL hanya dapat dibuka oleh anggota divisi KOL, Account
+            Lead/SPV, OD, atau Direktur. Gunakan &quot;Buka Langsung&quot; di atas untuk membuka
+            Booking / Payment Request berdasarkan ID.
+          </div>
+        )}
         {loading && <p className="muted">Memuat...</p>}
         {error && <div className="alert alertError" role="alert">{error}</div>}
         {!loading && !error && briefs && briefs.length === 0 && (
