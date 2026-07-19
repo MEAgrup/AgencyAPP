@@ -42,7 +42,12 @@ func main() {
 	catalog := notification.NewCatalog()
 	app := httpapi.New(d, engine, catalog, authn, src)
 
+	// Railway (and most PaaS) inject the port to listen on via PORT. An explicit
+	// CDPS_ADDR still wins for local/dev overrides.
 	addr := envOr("CDPS_ADDR", ":8080")
+	if port := os.Getenv("PORT"); port != "" && os.Getenv("CDPS_ADDR") == "" {
+		addr = ":" + port
+	}
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           app.Router(),

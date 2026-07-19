@@ -1,0 +1,16 @@
+# Build context is backend/. Keep the image lean and reproducible.
+*.log
+.env
+.env.local
+*.local
+.DS_Store
+.idea/
+.vscode/
+
+# Ad-hoc binaries built at the backend root (see .gitignore).
+cdps
+import
+hrisconvert
+mslseed
+rolemapseed
+backend
