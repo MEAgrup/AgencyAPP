@@ -2,8 +2,8 @@
 // (Campaign) endpoints. Shapes mirror backend/internal/module3_campaign/read.go,
 // backend/internal/module2_marketing/metrics.go + backend/internal/httpapi/
 // {campaign_handlers.go,marketing_handlers.go,routes_*.go} EXACTLY (json tags read
-// from source) — never invented. Reconciled against fe_briefs/m2m3 (the single
-// endpoint source).
+// from source) — never invented. The backend source files above are the single
+// endpoint contract; re-verify there on any drift.
 //
 // Money contract (house rule #4/#7):
 //  - REQUEST money fields (budget) are STRING decimals ("5000000") — backend parses.
