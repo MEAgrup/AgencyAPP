@@ -16,6 +16,60 @@ const (
 	LevelLead  = "lead"
 )
 
+// CanonicalDivisions is the authoritative set of CDPS division names, in a
+// stable order. These MUST match the constants the module permission gates
+// compare against (e.g. module3_campaign.MarketingDivision = "Marketing",
+// module10_livestream.LiveStreamDivision = "Live Stream") and the real seeded
+// role_mappings — those comparisons are case-sensitive and space-sensitive, so
+// any stored value that differs by case/spacing silently strips a division's
+// permissions. Every division value written to role_mappings must be one of
+// these exact strings.
+var CanonicalDivisions = []string{
+	"Marketing",
+	"Sales",
+	"Finance",
+	"Account",
+	"Creative",
+	"Ads",
+	"KOL",
+	"Live Stream",
+}
+
+// divisionByKey maps a normalized key (lowercased, spaces and hyphens removed)
+// to its canonical division string, so FE input like "marketing", "livestream",
+// "live stream", "LIVE STREAM" or "kol" all resolve to the exact gate constant.
+var divisionByKey = func() map[string]string {
+	m := make(map[string]string, len(CanonicalDivisions))
+	for _, d := range CanonicalDivisions {
+		m[divisionKey(d)] = d
+	}
+	return m
+}()
+
+// divisionKey normalizes a division string for case/space-insensitive matching:
+// lowercase, then drop spaces and hyphens.
+func divisionKey(s string) string {
+	var b []rune
+	for _, r := range s {
+		if r == ' ' || r == '-' {
+			continue
+		}
+		if r >= 'A' && r <= 'Z' {
+			r += 'a' - 'A'
+		}
+		b = append(b, r)
+	}
+	return string(b)
+}
+
+// NormalizeDivision maps an arbitrary division string to its canonical CDPS
+// form, matching case-insensitively and ignoring spaces/hyphens. It returns the
+// canonical value and true on success, or ("", false) for an unknown division.
+func NormalizeDivision(s string) (string, bool) {
+	c, ok := divisionByKey[divisionKey(s)]
+	return c, ok
+}
+
 // Role is the resolved CDPS role for an authenticated employee.
 type Role struct {
 	Division string // CDPS division from role mapping (may be "" if unmapped)

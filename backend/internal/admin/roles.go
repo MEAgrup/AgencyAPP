@@ -17,6 +17,10 @@ var ErrBadLevel = errors.New("level harus 'staff' atau 'lead'")
 // ErrBadRole is returned for an invalid layered role.
 var ErrBadRole = errors.New("role harus 'od' atau 'director'")
 
+// ErrBadDivision is returned when the mapping's CDPS division is not one of the
+// canonical values the permission gates compare against.
+var ErrBadDivision = errors.New("division harus salah satu dari: Marketing, Sales, Finance, Account, Creative, Ads, KOL, Live Stream")
+
 // RoleMapping is a HRIS divisi+jabatan -> CDPS division+level rule.
 type RoleMapping struct {
 	ID        int64     `json:"id"`
@@ -51,18 +55,25 @@ func UpsertRoleMapping(ctx context.Context, d *sql.DB, actor permission.Actor, m
 	if m.Level != permission.LevelStaff && m.Level != permission.LevelLead {
 		return 0, ErrBadLevel
 	}
+	// Canonicalize the CDPS division: the FE form may submit lowercase/spaced
+	// variants ("marketing", "livestream"), but the permission gates compare
+	// against exact constants. Store only the canonical value or reject.
+	division, ok := permission.NormalizeDivision(m.Division)
+	if !ok {
+		return 0, ErrBadDivision
+	}
 	res, err := d.ExecContext(ctx,
 		`INSERT INTO role_mappings (divisi, jabatan, division, level, created_by)
 		 VALUES (?, ?, ?, ?, ?)
 		 ON DUPLICATE KEY UPDATE division=VALUES(division), level=VALUES(level)`,
-		m.Divisi, m.Jabatan, m.Division, m.Level, actor.EmployeeID)
+		m.Divisi, m.Jabatan, division, m.Level, actor.EmployeeID)
 	if err != nil {
 		return 0, err
 	}
 	id, _ := res.LastInsertId()
 	_ = audit.Write(ctx, d, audit.Record{
 		EntityType: "role_mapping", EntityID: m.Divisi + "/" + m.Jabatan, Actor: actor.EmployeeID,
-		Action: "upsert", After: map[string]any{"division": m.Division, "level": m.Level},
+		Action: "upsert", After: map[string]any{"division": division, "level": m.Level},
 	})
 	return id, nil
 }
