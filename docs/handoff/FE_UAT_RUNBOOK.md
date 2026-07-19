@@ -44,6 +44,19 @@ Dari tiap halaman list, klik entri pertama ke halaman detail.
 | B10 | OD layered | `/account`, `/tasks`, `/creative`, `/ads`, `/kol`, `/livestream`, `/board`, `/health`, `/performance` + semua detail | semua terbaca (CanReadAll); semua tombol aksi disembunyikan/disabled (read-only) |
 | B11 | Director | `/tasks/block-requests` | tanpa divisi terpilih: prompt "Pilih divisi terlebih dahulu" (portal/team butuh divisi); setelah pilih divisi → antrian tampil |
 
+## B2. Akuisisi (M0/M1/M2/M3) + Portal (M15-C1) — ditambah 2026-07-19 pasca-merge PR #17/#20
+
+| # | Aktor | Rute → detail | Verifikasi kunci |
+|---|---|---|---|
+| B12 | Sales staff (`saffiramarwah@gmail.com`) | `/sales` → detail attempt PRSP-…, `/leads` (Pool), `/portal` | list attempt = milik sendiri saja; Pool bisa klaim |
+| B13 | Sales head (`c.nurhayati14@gmail.com`) | `/sales` (semua attempt divisi), `/leads` (Pool+Database), `/portal/team` | scope lead division-wide; `/portal/team` = info di-luar-cakupan M14 (Sales bukan divisi ber-skor) |
+| B14 | Marketing lead (`UATMKT0001`) | `/marketing` → detail CMP-…, `/marketing/performance`, `/leads` (tab Import) | 404 probe performance record = by design (halaman menampilkan form create, bukan error); tab Import hanya Marketing/Director |
+| B15 | Staf ber-KPI (mis. Creative `2111040039`) | `/portal` | Task Terbuka urut SLA-risk (server), skor berjalan preview, trend |
+| B16 | Staf tanpa KPI (Finance `UATFIN0001`) | `/portal` | info "tanpa KPI Profile M14", bukan error |
+| B17 | Lead divisi ber-skor (`UATCRE0001`) | `/portal/team` | rollup divisi sendiri + klien + antrian block (read-only, aksi tetap di M12) |
+| B18 | Director | `/portal/team` | prompt pilih divisi (TANPA tembakan 403); pilih divisi → rollup termuat |
+| B19 | Director/OD | `/portal/management` | semua klien × band/skor/trend/komponen penarik; klien tanpa snapshot tetap tampil (`—`); role lain = info alert |
+
 ## C. Write-path via UI (sampel per engine)
 
 | # | Aktor | Aksi | Verifikasi |
@@ -53,6 +66,7 @@ Dari tiap halaman list, klik entri pertama ke halaman detail.
 | C3 | Director | `/performance` → "Jalankan Pemindaian" | alert sukses "Pemindaian selesai: N snapshot…" |
 | C4 | Ads staff PIC (KENNY) | `/ads/ADC-…` → isi Metric Entry (periode, Spend, GMV) → submit | "Metric entry berhasil dicatat."; rollup Metrik (Spend/GMV/ROAS 🔒 read-only) ter-refresh. Catatan: backend M8 §5 Flow 1 TANPA gate status — entry pada `[Ended]` sah |
 | C5 | (negatif) siapa pun | submit form wajib yang dikosongkan (mis. Metric Entry tanpa Spend) | browser/server menolak; bila server: pesan BI persis `[...]` dirender verbatim di alert |
+| C6 | Marketing lead | `/leads` tab Import → isi Nama+Telepon → submit | lead LD-… baru terlihat; submit tanpa Nama tertahan (required/BI) |
 
 ## D. Kriteria lulus
 
