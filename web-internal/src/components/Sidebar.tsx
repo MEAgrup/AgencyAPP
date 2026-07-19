@@ -48,6 +48,12 @@ const VISIBILITY_LINKS: NavItem[] = [
   { href: '/performance', label: 'Team Performance' },
 ];
 
+// Wave 3 — M15-C1 Team Portal (internal). Item Tim & Manajemen digate per role
+// di render (cermin gate portal.go; server tetap otoritas akhir).
+const PORTAL_ME_LINK: NavItem = { href: '/portal', label: 'Portal Saya' };
+const PORTAL_TEAM_LINK: NavItem = { href: '/portal/team', label: 'Portal Tim' };
+const PORTAL_MGMT_LINK: NavItem = { href: '/portal/management', label: 'Manajemen' };
+
 const ADMIN_LINKS: NavItem[] = [
   { href: '/admin/employees', label: 'Karyawan' },
   { href: '/admin/role-mappings', label: 'Role Mapping' },
@@ -100,6 +106,20 @@ export default function Sidebar({ role }: { role: Role | null }) {
         ))}
         <div className={styles.navSection}>Visibilitas</div>
         {VISIBILITY_LINKS.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={`${styles.navLink} ${isActive(pathname, item.href) ? styles.navLinkActive : ''}`}
+          >
+            {item.label}
+          </Link>
+        ))}
+        <div className={styles.navSection}>Portal</div>
+        {[
+          PORTAL_ME_LINK,
+          ...(role?.director || role?.level === 'lead' ? [PORTAL_TEAM_LINK] : []),
+          ...(role?.director || role?.od ? [PORTAL_MGMT_LINK] : []),
+        ].map((item) => (
           <Link
             key={item.href}
             href={item.href}

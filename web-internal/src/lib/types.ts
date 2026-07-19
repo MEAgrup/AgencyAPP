@@ -121,15 +121,21 @@ export interface DemoTaskDetail {
   audit: AuditEntry[];
 }
 
+// Nilai divisi KANONIK role-mapping — persis konstanta backend
+// (module0/2/6/7/8/9/10/12: "Marketing"/"Sales"/"Finance"/"Account"/"Creative"/
+// "Ads"/"KOL"/"Live Stream") dan seed/batch riil (seed/role_mappings_riil.csv).
+// Backend TIDAK memvalidasi kanon pada POST /admin/role-mappings, jadi form ini
+// satu-satunya penjaga: nilai lowercase legacy Wave 1 menghasilkan mapping yang
+// tidak pernah match gate divisi mana pun (DECISIONS 2026-07-19).
 export const DIVISIONS = [
-  'marketing',
-  'sales',
-  'finance',
-  'account',
-  'creative',
-  'ads',
-  'kol',
-  'livestream',
+  'Marketing',
+  'Sales',
+  'Finance',
+  'Account',
+  'Creative',
+  'Ads',
+  'KOL',
+  'Live Stream',
 ] as const;
 
 export const LEVELS = ['staff', 'lead'] as const;
