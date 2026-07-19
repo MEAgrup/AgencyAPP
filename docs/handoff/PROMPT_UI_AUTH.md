@@ -34,10 +34,10 @@ Backend sedang dibangun paralel (migrasi DB, auth handlers, permission gate) di 
 
 **Format error:** semua error response:  
 ```json
-{"error": "[pesan bahasa Indonesia]"}
+{"message": "[pesan bahasa Indonesia]"}
 ```
 
-Gunakan field `.error` (bukan `.message`), bukan `.data` atau `.details`.
+Gunakan field `.message` (helper `writeErr` backend existing) — bukan `.error`, `.data`, atau `.details`.
 
 ### 2.1. Login
 
@@ -73,7 +73,7 @@ Gunakan field `.error` (bukan `.message`), bukan `.data` atau `.details`.
 
 **Error responses:**
 
-| Status | Error Message (di `.error`) |
+| Status | Error Message (di `.message`) |
 |--------|-----|
 | **400** | `[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]` |
 | **401** | `[email atau password salah]` (email tidak terdaftar, nonaktif, atau password salah) |
@@ -91,6 +91,8 @@ Gunakan field `.error` (bukan `.message`), bukan `.data` atau `.details`.
 ### 2.2. Get Current User
 
 **`GET /api/v1/auth/me`**
+
+> Catatan: `GET /api/v1/me` (path lama yang mungkin sudah dipakai FE existing) tetap hidup sebagai alias — respons sama persis, ikut mengembalikan `must_change_password`, dan sama-sama exempt dari gate force-change. Pakai `/api/v1/auth/me` untuk kode baru.
 
 **Response 200 OK:**  
 Bentuk identik dengan login (#2.1) — `{employee, role, must_change_password}`
@@ -267,7 +269,7 @@ Bentuk identik dengan login (#2.1) — `{employee, role, must_change_password}`
 **Pekerjaan:**
 
 1. **Tangani status error 401 & 423:**
-   - Saat login gagal, extract `.error` dari respons, tampilkan persis tanpa parafrase
+   - Saat login gagal, extract `.message` dari respons, tampilkan persis tanpa parafrase
    - Handle `[akun belum diaktifkan...]` (401) → tampilkan pesan, disarankan hubungi admin
    - Handle `[akun terkunci...]` (423) → tampilkan pesan, timer atau "coba lagi nanti"
 
@@ -280,7 +282,7 @@ Bentuk identik dengan login (#2.1) — `{employee, role, must_change_password}`
 
 3. **Error lain:**
    - 400: tampilkan `[data tidak lengkap...]`
-   - Fallback: gunakan `.error` dari respons atau fallback message
+   - Fallback: gunakan `.message` dari respons atau fallback message
 
 **Contoh pola (existing sudah ada, tinggal extend):**
 ```typescript
@@ -355,7 +357,7 @@ if (!must_change_password) {
 2. **Handler global 403:**
    - Interceptor di API client (di `lib/api.ts`):
      ```typescript
-     if (res.status === 403 && body?.error?.includes('[wajib mengganti password')) {
+     if (res.status === 403 && body?.message?.includes('[wajib mengganti password')) {
        // Redirect ke /change-password
        window.location.href = '/change-password';
      }
@@ -445,7 +447,7 @@ if (!must_change_password) {
   const data = await api.get<ResponseType>('/endpoint');
   const data = await api.post<ResponseType>('/endpoint', payload);
   ```
-- **Error:** `.error` field dalam response body, extracted & thrown sebagai `.message` di ApiError
+- **Error:** field `.message` dalam response body, extracted & thrown sebagai `.message` di ApiError
 - **Render:** `errorMessage(err)` utility untuk safe extraction
 
 ### Auth Context
