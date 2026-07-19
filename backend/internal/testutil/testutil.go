@@ -1,10 +1,13 @@
 // Package testutil provides DB-backed test helpers. Tests skip cleanly when the
-// test database is unreachable, but run normally when it is up.
+// test database is unreachable, but run normally when it is up. In CI (env CI
+// set) an unreachable database FAILS the test instead of skipping, so a suite
+// can never go green without actually exercising the DB packages.
 package testutil
 
 import (
 	"context"
 	"database/sql"
+	"os"
 	"sync"
 	"testing"
 
@@ -35,6 +38,9 @@ func DB(t *testing.T) *sql.DB {
 		migrated = true
 	})
 	if openErr != nil || !migrated {
+		if os.Getenv("CI") != "" {
+			t.Fatalf("test DB unavailable in CI — refusing silent skip: %v", openErr)
+		}
 		t.Skipf("test DB unavailable: %v", openErr)
 	}
 	return shared
