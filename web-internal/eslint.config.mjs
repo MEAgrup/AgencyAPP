@@ -24,6 +24,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // uat/ = skrip smoke Playwright standalone (CommonJS, dijalankan `node`
+    // langsung dengan playwright dipasang ad-hoc) — bukan bagian app Next.
+    "uat/**",
   ]),
 ]);
 
