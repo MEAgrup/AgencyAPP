@@ -2,7 +2,7 @@
 
 **Date:** 9 July 2026 · **Owner:** Nerissa (COO) · **Dev:** internal team (head 10+ yrs)
 **Scale basis:** >100 employees, >500 clients · **Stack:** Golang + React/Next + MySQL (same as existing HRIS)
-**Architecture (confirmed):** CDPS is a **standalone application**, integrated with the existing HRIS via the thin contract in Phase 0 v2 §8 (employee sync + auth). Not built inside the HRIS codebase.
+**Architecture (confirmed):** CDPS is a **standalone application**, integrated with the existing HRIS via the thin contract in Phase 0 v2 §8 (employee sync only — auth is local to CDPS, see `docs/DECISIONS.md` 2026-07-19). Not built inside the HRIS codebase.
 
 ---
 
@@ -46,7 +46,7 @@
    - **Permission layer** — Phase 0 Role Matrix + role-mapping table from HRIS sync.
    - **In-app notification center** — event catalog per Phase 0 v2 §9.
    - **Derived-field recompute** — event-driven (on transition/entity change) for rollups; cron only for monthly snapshots (M13/M14) and reminder schedules.
-4. **HRIS side-work (parallel, small):** `GET /employees` + auth/token endpoint. This is the only external blocker for Sprint 0 — schedule it with the HRIS maintainer first.
+4. **HRIS side-work (parallel, small):** `GET /employees` only — no auth/token endpoint (CDPS auth is local). This is the only external blocker for Sprint 0 — schedule it with the HRIS maintainer first.
 
 ---
 
@@ -55,12 +55,12 @@
 **Goal:** a running skeleton where a synced HRIS employee can log in, has a mapped CDPS role, and every core engine works on a dummy entity.
 
 1. Repo, CI/CD, environments (dev/staging/prod), seed script with the Alpha Digital worked-example data (Phase 0 OA-14) as permanent test fixtures.
-2. HRIS integration: employee sync + auth + role-mapping admin UI + deactivation propagation (Phase 0 v2 §8).
+2. HRIS integration: employee sync + role-mapping admin UI + deactivation propagation (Phase 0 v2 §8); local auth (login, change-password, admin password reset) built in CDPS.
 3. Core engines (§2.3 above), each with unit tests: illegal-transition blocking, history immutability, permission denial, ID-after-validation.
 4. Master Service List admin (Phase 0 v2 §10) — needed before Module 0 can compute anything.
 5. Notification center shell + event registration API.
 
-**Exit criteria:** login via HRIS credentials works; deactivating a test employee in HRIS kills CDPS access; a dummy entity demonstrates blocked transitions with BI messages and a complete audit trail.
+**Exit criteria:** login via local CDPS credentials works; deactivating a test employee in HRIS kills CDPS access; a dummy entity demonstrates blocked transitions with BI messages and a complete audit trail.
 
 ---
 
@@ -111,7 +111,7 @@ Lead → close → payment gate. Everything downstream depends on this.
 
 | # | Risk / dependency | Mitigation |
 |---|---|---|
-| R1 | **HRIS endpoints not ready** → Sprint 0 blocked | Schedule the 2 endpoints with the HRIS maintainer **this week**; they're small (read-only employees + token). Fallback: temporary CSV employee import behind the same sync interface, swapped later without touching consumers. |
+| R1 | **HRIS endpoint not ready** → Sprint 0 blocked | Schedule the endpoint with the HRIS maintainer **this week**; it's small (read-only employees). Fallback: temporary CSV employee import behind the same sync interface, swapped later without touching consumers. |
 | R2 | `mea-client-reporting` not embeddable | Check before Wave 3 starts (one afternoon). Fallback: Module 15 renders a link-out for v1 — the PRD's embed decision degrades gracefully. |
 | R3 | Master Service List data quality (prices/commission rules) | Sales Head compiles & validates the list during Sprint 0 — it's a data task, not a dev task; commission correctness in Wave 1 UAT depends on it. |
 | R4 | Spreadsheet data migration messier than expected | Write the migration spec during Wave 1 (owner: 1 dev + 1 ops PIC per division); everything imports through M1's dedup engine — never direct DB inserts. |
@@ -135,7 +135,7 @@ Durations are deliberately **not** attached to waves yet, because they depend on
 
 ## 8. Immediate next steps (this week)
 
-1. **Nerissa → HRIS maintainer:** request the 2 endpoints (Phase 0 v2 §8) — this is the critical path.
+1. **Nerissa → HRIS maintainer:** request the endpoint (Phase 0 v2 §8) — this is the critical path.
 2. **Nerissa → head dev:** hand over this package (manifest §1); ask for (a) validation of the modular-monolith recommendation, (b) dev headcount for CDPS → converts §7 sizing into a dated timeline.
 3. **Sales Head:** start compiling the Master Service List (name, standard price, commission rule) — deadline: end of Sprint 0.
 4. **Head dev:** ticket Phase 0 + Module 0 first (System Requirements → data-model tickets; Rules → validation tickets; Flow → UI/workflow tickets).
