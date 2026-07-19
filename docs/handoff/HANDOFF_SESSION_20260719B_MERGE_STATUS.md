@@ -4,6 +4,13 @@
 > frontend Wave 2 + dashboard Wave 3**: smoke test manual FE↔BE hidup dieksekusi,
 > 5 fix diterapkan, **PR #15 → PR #14 → main semuanya MERGED**. Dokumen ini =
 > status pasca-merge + apa yang tersisa sampai go-live.
+>
+> **UPDATE 2026-07-19 (revisi 2, pasca-verifikasi lintas-sesi):** dua track FE
+> paralel ternyata sudah jalan di sesi lain — **FE M2+M3 sudah MERGED ke main**
+> (PR #17, main `3ab9693`) dan **FE M0+M1 selesai dibangun** di branch
+> `claude/fe-m0-m1-sales-leads-vnpgxd` (= `jazm79` + merge ke atas main terbaru +
+> verifikasi; **belum ada PR-nya — itu tindakan pertama chat berikutnya**).
+> Tabel status & progress di bawah sudah direvisi mengikuti kenyataan ini.
 
 ## Yang selesai sesi ini
 
@@ -47,29 +54,44 @@
 | **M11 Board** | `/board` + my-tasks | ✅ (Wave 3) |
 | **M13 Health** | `/health` + [clientId] | ✅ |
 | **M14 Performance** | `/performance` + [id]/config | ✅ |
-| **M0 Sales workspace** | — | ❌ **belum ada FE** (pipeline/closing) |
-| **M1 Leads workspace** | — | ❌ **belum ada FE** (intake/qualify) |
-| **M2 Marketing workspace** | — | ❌ **belum ada FE** |
-| **M3 Campaign workspace** | — | ❌ **belum ada FE** |
-| **M15 Client Portal** | `web-client-portal/` | ❌ **kosong (0 file)** — app terpisah, tunggu security spec O5 |
+| **M0 Sales workspace** | `/sales` + `[id]` | 🟡 **selesai di `vnpgxd`, belum PR/merge** |
+| **M1 Leads workspace** | `/leads` + `[id]` | 🟡 **selesai di `vnpgxd`, belum PR/merge** |
+| **M2 Marketing workspace** | `/marketing` + performance | ✅ **merged PR #17** (main `3ab9693`) |
+| **M3 Campaign workspace** | `/marketing/[id]` detail campaign | ✅ **merged PR #17** |
+| **M15-C1 Team Portal (internal)** | — (`/portal/me`, `/portal/management` belum ada halaman; `/portal/team` baru dipakai `tasks/block-requests`) | ❌ **belum ada FE** — backend sudah UAT PASS, TIDAK menunggu O5 |
+| **M15-C2 Client Portal** | `web-client-portal/` | ❌ **kosong (0 file)** — app terpisah, tunggu security spec O5 |
 
-Catatan: backend M0–M3 **sudah selesai + UAT PASS** (Wave 1 & Wave 3). Yang kurang
-murni lapisan FE-nya.
+Catatan: backend M0–M3 **sudah selesai + UAT PASS** (Wave 1 & Wave 3).
+⚠ Branch `vnpgxd` **bukan FE-only**: menambah **read surface backend M0/M1**
+(5 file: `module0_sales/reads.go`, `module1_leads/reads.go`,
+`httpapi/leads_sales_read_handlers(+_test).go`, `routes_leads_sales.go`) — pola
+aditif read-only preseden `module8_ads/read.go`; klaim "full suite hijau" perlu
+diverifikasi ulang saat review PR. Konflik Sidebar seksi **Akuisisi** (kedua track
+menambahnya) sudah ter-resolve di merge `vnpgxd` (berisi `/sales`, `/leads`,
+`/marketing`, `/marketing/performance`).
 
-## Pekerjaan berikutnya (urutan disarankan)
+## Pekerjaan berikutnya (urutan disarankan — revisi 2)
 
-1. **FE M0 Sales + M1 Leads workspace** (Wave 1 modules, money path sudah ada FE-nya
-   tapi sales pipeline & leads intake belum). Ini layar harian tim Sales — nilai
-   operasional tertinggi. Pola: recon `backend/internal/httpapi` verbatim →
-   `src/lib/<area>.ts` typed 1:1 → halaman `'use client'` pola Wave 1/2 →
-   lint+build+smoke.
-2. **FE M2 Marketing + M3 Campaign workspace** (backend Wave 3 sudah ada). Fixture
-   Marketing-lead `UATMKT0001` sudah ada di roster UAT.
-3. **Bereskan utang `DIVISIONS` lowercase legacy Wave 1** di form `admin/role-mappings`
-   (`lib/types.ts` — admin bisa menulis mapping divisi lowercase sementara seed/batch
-   riil kapital). Kecil tapi menyentuh file bersama; layak 1 PR sendiri + entri
-   DECISIONS atau normalisasi backend.
-4. **M15 Client Portal** (TERAKHIR): butuh security spec **O5** dulu (realm auth
+1. **Buka PR dari `claude/fe-m0-m1-sales-leads-vnpgxd` → main, review, merge.**
+   Perhatian review: 5 file backend read API (bukan FE-only) — DoD backend berlaku
+   (permission tests per role, gofmt/vet, suite fresh). PR belum dibuka karena
+   sesi pembuatnya berhenti sebelum klik Create PR.
+2. **Smoke test FE↔BE hidup untuk M0/M1 + M2/M3** (keduanya masuk TANPA smoke,
+   pola sama seperti PR #14 dulu): perluas `FE_UAT_RUNBOOK.md` bagian aktor
+   Sales/Leads/Marketing, jalankan pola Playwright yang sama. Aktor: Sales staff
+   `saffiramarwah` / Head `c.nurhayati14`, Marketing lead `UATMKT0001`.
+3. **Rapikan PR #13 (CI testutil)**: fix `Clean` satu-koneksi TERNYATA SUDAH di
+   main (via `2327b50`, ikut PR #14) — nilai unik tersisa = fail-loud anti
+   silent-skip (`CI` env → Fatal; belum ada di main, terverifikasi grep) + cherry
+   -pick docs `02415f1`. Rebase ke main + buang duplikat, baru merge.
+4. **PR #18 Railway deploy backend** (draft, sesi lain): review terpisah —
+   menyentuh `db.go` DSN & `main.go` PORT; pastikan default lokal tetap jalan.
+5. **FE M15-C1 Team Portal internal** (`/portal/me` landing staf, `/portal/management`
+   Director/OD): backend sudah UAT PASS, TIDAK menunggu O5 — kecil (2–3 halaman).
+6. **Bereskan utang `DIVISIONS` lowercase legacy Wave 1** di form `admin/role-mappings`
+   (`lib/types.ts`). Kecil tapi file bersama; 1 PR sendiri + entri DECISIONS
+   atau normalisasi backend.
+7. **M15-C2 Client Portal** (TERAKHIR): butuh security spec **O5** dulu (realm auth
    terpisah, allow-list data layer — bukan internal view yang di-trim). Backend
    M15-C2 juga masih ditunda. Jangan mulai sebelum O5 diputus.
 
@@ -90,11 +112,12 @@ demo & UAT, tidak untuk produksi).
 | Lapisan | Progress | Catatan |
 |---|---|---|
 | Backend (engine + M0–M14) | ~95% | Semua wave built + UAT PASS; sisa M15-C2 portal (ditunda O5) |
-| Frontend web-internal | ~70% | M4–M14 ✅; M0/M1/M2/M3 workspace ❌ |
-| Client Portal (M15 BE+FE) | ~5% | Ditunda, tunggu security spec O5 |
+| Frontend web-internal | ~88% | M2–M14 ✅ merged; M0/M1 🟡 tinggal PR+merge; sisa M15-C1 portal FE + smoke M0–M3 + utang kecil |
+| Client Portal (M15-C2 BE+FE) | ~5% | Ditunda, tunggu security spec O5 |
+| Deploy/infra | mulai | PR #18 Railway (draft, belum teruji build Docker) |
 | Prep data/integrasi go-live | tersendat | 5 item manusia di atas |
-| **Rata-rata tertimbang → live penuh (incl. portal)** | **± 72%** | |
-| **→ go-live internal (web-internal only, portal excluded)** | **± 82%** | gated oleh 5 item manusia, bukan kode |
+| **Rata-rata tertimbang → live penuh (incl. portal)** | **± 77%** | |
+| **→ go-live internal (web-internal only, portal excluded)** | **± 87%** | gated oleh 5 item manusia + deploy, bukan kode aplikasi |
 
 ## Setup ulang container (ephemeral — smoke test / UAT)
 
