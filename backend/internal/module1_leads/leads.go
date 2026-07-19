@@ -82,18 +82,20 @@ type Attempt struct {
 	Status string `json:"status"`
 }
 
-// RegisterInput carries the Sales single-registration fields.
+// RegisterInput carries the Sales single-registration fields. json tags are
+// snake_case like every other CDPS endpoint body (the tagless original made
+// the wire format accidentally PascalCase — fixed saat smoke FE M0/M1).
 type RegisterInput struct {
-	LeadName    string
-	PhoneNumber string
-	Email       string
-	Source      string
+	LeadName    string `json:"lead_name"`
+	PhoneNumber string `json:"phone_number"`
+	Email       string `json:"email"`
+	Source      string `json:"source"`
 	// CampaignID optionally links the intake to a Campaign (CMP-, M3). When set,
 	// the campaign gate (O13 auto-activate/block) runs, Source is auto-derived
 	// from the Campaign Channel (overriding Source above), and origin/last-touch
 	// linkage is written (campaign_link.go). Empty = no campaign (Source used
 	// as-is, origin/last-touch left NULL).
-	CampaignID string
+	CampaignID string `json:"campaign_id"`
 }
 
 func (in RegisterInput) valid() bool {
