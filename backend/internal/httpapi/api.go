@@ -152,6 +152,13 @@ func (a *App) Router() http.Handler {
 	// Director/OD Management Dashboard. Pure read-model over M11/M12/M13/M14.
 	a.registerPortalRoutes(mux)
 
+	// Liveness probe for the deploy platform (Railway healthcheck). Unauthenticated,
+	// no DB access — reports only that the process is serving.
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+
 	return mux
 }
 
