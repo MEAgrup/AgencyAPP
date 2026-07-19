@@ -4,6 +4,7 @@ import { use, useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { ApiError, errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import StatusBadge from '@/components/StatusBadge';
 import {
   CAMPAIGN_TRANSITIONS,
   campaignBadgeTone,
@@ -226,7 +227,7 @@ export default function MarketingCampaignDetailPage({ params }: { params: Promis
           <h1>{campaign.id}</h1>
           <p className="muted">{campaign.name}</p>
         </div>
-        <span className={`badge badge-${campaignBadgeTone(campaign.status)}`}>{campaign.status}</span>
+        <StatusBadge status={campaign.status} tone={campaignBadgeTone(campaign.status)} />
       </div>
 
       {/* Info campaign */}

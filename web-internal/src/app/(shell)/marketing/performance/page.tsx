@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import StatusBadge from '@/components/StatusBadge';
 import {
   listCampaigns,
   performanceDashboard,
@@ -130,11 +131,10 @@ export default function PerformanceMarketingPage() {
                     <td>{row.campaign?.owner_employee_id || '—'}</td>
                     <td>
                       {row.campaign ? (
-                        <span
-                          className={`badge badge-${campaignBadgeTone(row.campaign.status)}`}
-                        >
-                          {row.campaign.status}
-                        </span>
+                        <StatusBadge
+                          status={row.campaign.status}
+                          tone={campaignBadgeTone(row.campaign.status)}
+                        />
                       ) : (
                         '—'
                       )}

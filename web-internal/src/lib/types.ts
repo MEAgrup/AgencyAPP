@@ -121,15 +121,23 @@ export interface DemoTaskDetail {
   audit: AuditEntry[];
 }
 
+// CDPS canonical division labels — VERBATIM as the permission engine + role-map
+// seeds store them (testdata/import_samples/role_mappings_uat.csv col 3): capitalized,
+// "KOL" all-caps, "Live Stream" with a space. This is the value written into
+// role_mappings.division by the admin form, which the HRIS sync then assigns as an
+// employee's Role.Division; the delivery modules gate on the exact capitalized string
+// (e.g. module6_account/strategy.go, module12_task/task.go), so a lowercase value here
+// would create mappings that never match. (Legacy Wave 1 lowercase list corrected —
+// see DECISIONS 2026-07-19.)
 export const DIVISIONS = [
-  'marketing',
-  'sales',
-  'finance',
-  'account',
-  'creative',
-  'ads',
-  'kol',
-  'livestream',
+  'Sales',
+  'Marketing',
+  'Account',
+  'Creative',
+  'Ads',
+  'KOL',
+  'Live Stream',
+  'Finance',
 ] as const;
 
 export const LEVELS = ['staff', 'lead'] as const;
