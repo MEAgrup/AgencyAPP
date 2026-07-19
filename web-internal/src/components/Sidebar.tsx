@@ -23,8 +23,10 @@ const MAIN_LINKS: NavItem[] = [
   // end Wave 1 — stream B (M4/M5)
 ];
 
-// Wave 3 — akuisisi (M2, M3)
+// Akuisisi — Wave 1 stream A (M0 Sales + M1 Leads) + Wave 3 (M2, M3)
 const ACQUISITION_LINKS: NavItem[] = [
+  { href: '/sales', label: 'Sales Workspace' },
+  { href: '/leads', label: 'Leads' },
   { href: '/marketing', label: 'Campaign Marketing' },
   { href: '/marketing/performance', label: 'Performa Marketing' },
 ];

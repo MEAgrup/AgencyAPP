@@ -15,11 +15,23 @@ func (a *App) registerLeadsSalesRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/leads/bulk", a.protect(a.handleBulkImportLeads))
 	mux.HandleFunc("POST /api/v1/leads/{id}/claim", a.protect(a.handleClaimLead))
 
+	// M1 — Leads read model (Pool board, Database list, lead detail). The literal
+	// "/leads/pool" is registered alongside "/leads/{id}"; Go 1.22 ServeMux gives
+	// the literal precedence over the wildcard, so "pool" never resolves as an id.
+	mux.HandleFunc("GET /api/v1/leads", a.protect(a.handleListLeads))
+	mux.HandleFunc("GET /api/v1/leads/pool", a.protect(a.handleListPool))
+	mux.HandleFunc("GET /api/v1/leads/{id}", a.protect(a.handleGetLead))
+
 	// M0 — quote preview (MSL v2 calculator; no persistence).
 	mux.HandleFunc("POST /api/v1/sales/quote-preview", a.protect(a.handleQuotePreview))
 
+	// M0 — attempt read model (scoped list + detail).
+	mux.HandleFunc("GET /api/v1/attempts", a.protect(a.handleListAttempts))
+	mux.HandleFunc("GET /api/v1/attempts/{id}", a.protect(a.handleGetAttempt))
+
 	// M0 — attempt lifecycle (W1-05..09).
 	mux.HandleFunc("POST /api/v1/attempts/{id}/contacted", a.protect(a.handleMarkContacted))
+	mux.HandleFunc("POST /api/v1/attempts/{id}/lost", a.protect(a.handleMarkLost))
 	mux.HandleFunc("POST /api/v1/attempts/{id}/qualify", a.protect(a.handleQualify))
 	mux.HandleFunc("POST /api/v1/attempts/{id}/not-qualified", a.protect(a.handleNotQualified))
 	mux.HandleFunc("POST /api/v1/attempts/{id}/negotiation", a.protect(a.handleSubmitNegotiation))
