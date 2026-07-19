@@ -74,12 +74,38 @@ If you already created a service that is failing, just fix it:
 | backend      | `HRIS_BASE_URL`       | optional | HRIS service base URL (auth + employee sync).                  |
 | backend      | `HRIS_SERVICE_TOKEN`  | optional | When set, employees sync over HTTP instead of CSV.             |
 | backend      | `CDPS_MIGRATIONS_DIR` | preset   | Set to `/app/migrations` in the image; leave as-is.           |
+| backend      | `CDPS_DEMO_MODE`      | optional | `1` = demo/QA mode (see below). Leave unset for real use.      |
 | web-internal | `BACKEND_URL`         | yes      | Backend URL the frontend proxies `/api/v1/*` to.              |
 | web-internal | `PORT`                | auto     | Injected by Railway; `next start` binds it.                    |
 
 > The backend boots and passes its healthcheck even before HRIS is configured
 > (the initial employee sync is best-effort and non-fatal). Configure `HRIS_*`
-> when the HRIS integration is ready — employee data is never baked into the image.
+> when the HRIS integration is ready — real employee data is never baked into the image.
+
+## QA / Demo mode (`CDPS_DEMO_MODE=1`)
+
+Login normally forwards credentials to the HRIS (`POST /api/v1/auth/verify`) and
+only allows synced, active employees — so a fresh Railway deploy with no HRIS
+cannot be logged into. Demo mode makes the deployment self-contained for QA:
+
+- authenticates against the **bundled fixture accounts** (no external HRIS), and
+- loads the **Alpha Digital sample data** (employees, role mappings, Director
+  roles, master services, a demo task) on boot — idempotent.
+
+**Enable:** on the backend service, set `CDPS_DEMO_MODE=1` and redeploy. Then log
+in at the frontend with any fixture account; all use password `rahasia123`:
+
+| Email               | Role                     |
+| ------------------- | ------------------------ |
+| `yohan@mea.co.id`   | Director (full access)   |
+| `nerissa@mea.co.id` / `hans@mea.co.id` | Director |
+| `dewi@mea.co.id`    | Sales Head (division lead)|
+| `budi@mea.co.id`    | Sales Executive (staff)  |
+| `sinta@mea.co.id`   | Account Manager (staff)  |
+
+> ⚠️ The fixture passwords are public. **Never enable `CDPS_DEMO_MODE` against
+> real data.** For real use, leave it unset and configure `HRIS_BASE_URL` +
+> `HRIS_SERVICE_TOKEN` instead.
 
 ## Redeploys
 
