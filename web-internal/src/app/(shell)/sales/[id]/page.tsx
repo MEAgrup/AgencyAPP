@@ -1180,20 +1180,26 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
         </section>
       )}
 
+      {/* Hasil closing dirender di luar section ber-gate status: setelah sukses
+          status jadi Closed-Success dan section Closing Form unmount — pesan +
+          link Client Record harus tetap terlihat. */}
+      {closeResult && (
+        <section className="card">
+          <div className="alert alertSuccess" role="status">
+            Closing berhasil. Client ID: {closeResult.client_id} · Transaction ID: {closeResult.transaction_id}.{' '}
+            <Link href={`/clients/${closeResult.client_id}`}>Buka Client Record</Link>
+          </div>
+        </section>
+      )}
+
       {/* Negotiation - Approved / Auto Approved → Closing Form */}
-      {showLostAtClosing && canAct && (
+      {showLostAtClosing && canAct && !closeResult && (
         <section className="card">
           <div className="cardHeader">
             <h2>Closing Form</h2>
           </div>
 
-          {closeResult ? (
-            <div className="alert alertSuccess" role="status">
-              Closing berhasil. Client ID: {closeResult.client_id} · Transaction ID: {closeResult.transaction_id}.{' '}
-              <Link href={`/clients/${closeResult.client_id}`}>Buka Client Record</Link>
-            </div>
-          ) : (
-            <form className="form" onSubmit={handleClose}>
+          <form className="form" onSubmit={handleClose}>
               {closeError && <div className="alert alertError" role="alert">{closeError}</div>}
 
               {/* Proposal versi terakhir + total (tampilan; nilai resmi tetap server) */}
@@ -1367,8 +1373,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                   {pending === 'lost' ? 'Memproses...' : 'Tandai Closed-Lost'}
                 </button>
               </div>
-            </form>
-          )}
+          </form>
         </section>
       )}
 

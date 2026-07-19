@@ -55,17 +55,17 @@ step("2b", "MSL riil terbaca (32 layanan versi 1, komisi 0%)",
      f"n={len(msl['data'])}, contoh={S['id']} {S['name']} harga={S['standard_price']} rule={S['commission_rule']}")
 
 # ---- 3. registrasi lead ----
-st, b = call(sales, "POST", "/leads", {"LeadName": "UAT W1-20 Toko Deal", "PhoneNumber": PHONE, "Source": "Scouting", "Email": "uatdeal@example.com"})
+st, b = call(sales, "POST", "/leads", {"lead_name": "UAT W1-20 Toko Deal", "phone_number": PHONE, "source": "Scouting", "email": "uatdeal@example.com"})
 lead_id = b.get("lead", {}).get("ID") or b.get("lead", {}).get("id")
 att_id  = b.get("attempt", {}).get("ID") or b.get("attempt", {}).get("id")
 step(3, "registrasi lead -> LEAD-/PRSP- terbit", st == 201 and lead_id and att_id, f"{st} lead={lead_id} attempt={att_id}")
 
 # registrasi field wajib kosong ditolak
-st, b2 = call(sales, "POST", "/leads", {"LeadName": "", "PhoneNumber": "", "Source": ""})
+st, b2 = call(sales, "POST", "/leads", {"lead_name": "", "phone_number": "", "source": ""})
 step("3b", "registrasi tanpa field wajib ditolak BI default", st == 400 and "data tidak lengkap" in b2.get("message", ""), f"{st} {b2.get('message')}")
 
 # dedup: registrasi ulang nomor sama oleh sales yang sama = block
-st, b3 = call(sales, "POST", "/leads", {"LeadName": "UAT W1-20 Toko Deal", "PhoneNumber": PHONE, "Source": "Scouting"})
+st, b3 = call(sales, "POST", "/leads", {"lead_name": "UAT W1-20 Toko Deal", "phone_number": PHONE, "source": "Scouting"})
 step("3c", "re-registrasi nomor sama (sales sama) diblok pesan dedup", st != 201 and "prospek aktif" in b3.get("message", ""), f"{st} {b3.get('message')}")
 
 # ---- 4. contacted + transisi ilegal ----
