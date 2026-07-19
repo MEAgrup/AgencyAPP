@@ -10,6 +10,16 @@
 - Commit kunci: `6e6ad3d` lib FE → `cafc6ea`/`027ebe3` backend read + rute → `0e85345` /leads
   → `ed73421` /sales → `86c8519`/`51c6e1c` revisi QC Fable.
 
+> **Update sesi merge 2026-07-19 (branch `claude/fe-m0-m1-sales-leads-vnpgxd`):** seluruh
+> pekerjaan branch ini di-merge ke atas `main` terbaru (yang sudah berisi FE M2/M3, PR #17).
+> Satu konflik: `Sidebar.tsx` — seksi Akuisisi digabung jadi 4 link (Sales Workspace, Leads,
+> Campaign Marketing, Performa Marketing). Verifikasi ulang pasca-merge (pola eksekutor
+> Opus/Sonnet/Haiku + QC Fable): `go vet`/`go build` bersih, full suite `go test -p 1 ./...`
+> hijau 41 package 0 FAIL, `npm run lint` 0 error, `npm run build` sukses 50 rute (7 rute
+> akuisisi lengkap), nol marker konflik / duplikasi rute / TODO. Catatan environment: MySQL
+> harus dipasang dari nol di container baru (apt install mysql-server, start mysqld_safe,
+> `SET GLOBAL log_bin_trust_function_creators=1`, buat db `cdps_test` + user `cdps`).
+
 ## Yang dibangun
 
 ### Backend (gap yang ditemukan recon: M0/M1 hanya punya endpoint POST — tidak ada read API
