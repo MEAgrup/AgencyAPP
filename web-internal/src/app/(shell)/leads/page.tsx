@@ -24,6 +24,11 @@ const RECORD_STATUSES = ['[Pool]', 'active', '[Rejected]', '[Not Qualified]', '[
 
 type TabKey = 'pool' | 'database' | 'import';
 
+function formatDate(value: string | null | undefined) {
+  if (!value) return '—';
+  return new Date(value).toLocaleDateString('id-ID');
+}
+
 const TAB_LABELS: Record<TabKey, string> = {
   pool: 'Pool',
   database: 'Database',
@@ -192,7 +197,7 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
                   <td>{r.phone_number}</td>
                   <td>{r.source}</td>
                   <td>{r.origin_campaign_id || '—'}</td>
-                  <td>{r.created_at}</td>
+                  <td>{formatDate(r.created_at)}</td>
                   <td>{r.stale ? <span className="badge badge-amber">STALE</span> : '—'}</td>
                   <td>{r.open_attempt_count > 0 ? `${r.open_attempt_count} sales mengerjakan` : '—'}</td>
                   <td>
@@ -327,7 +332,7 @@ function DatabaseTab() {
                   </td>
                   <td>{r.open_attempt_count}</td>
                   <td>{r.winning_attempt_id || '—'}</td>
-                  <td>{r.created_at}</td>
+                  <td>{formatDate(r.created_at)}</td>
                 </tr>
               ))}
             </tbody>

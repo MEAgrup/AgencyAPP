@@ -482,7 +482,8 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
     () => closingLines.reduce((sum, l) => sum + (Number(l.price) || 0), 0),
     [closingLines],
   );
-  const sumPersen = allocRows.reduce((s, r) => s + (Number(r.persen) || 0), 0);
+  // Dibulatkan 2 desimal agar tampilan Σ bebas artefak float (33.33+33.33+33.34).
+  const sumPersen = Math.round(allocRows.reduce((s, r) => s + (Number(r.persen) || 0), 0) * 100) / 100;
 
   function addAllocRow() {
     setAllocRows((rows) => (rows.length >= 5 ? rows : [...rows, { salesperson_id: '', persen: '' }]));
