@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import {
   SEVERITIES,
   createComplaint,
+  isAccountStaff,
   isReadOnlyOD,
   listComplaints,
   type Complaint,
@@ -16,6 +17,10 @@ import StatusBadge from '@/components/StatusBadge';
 export default function ComplaintsWorkspacePage() {
   const { role } = useAuth();
   const readOnly = isReadOnlyOD(role);
+  // Only the client's AM (Account staff) or Director may log a complaint
+  // (complaint.go:146-149, ErrLogComplaintForbidden) — brief §4: the log form
+  // is hidden for every other role. Per-client ownership stays server-checked.
+  const canLog = !readOnly && (isAccountStaff(role) || !!role?.director);
 
   const [clientIdInput, setClientIdInput] = useState('');
   const [activeClientId, setActiveClientId] = useState<string | null>(null);
@@ -155,7 +160,7 @@ export default function ComplaintsWorkspacePage() {
         </section>
       )}
 
-      {activeClientId && !readOnly && (
+      {activeClientId && canLog && (
         <section className="card">
           <div className="cardHeader">
             <h2>Catat Komplain Baru</h2>

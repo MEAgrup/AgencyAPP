@@ -142,18 +142,20 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const entity = source === 'asset' ? asset : brief;
   const status = entity?.status ?? '';
   const assignedPic = entity?.assigned_pic ?? '';
-  const revisionCount = entity?.revision_count ?? 0;
   const revisionFlagged = entity?.revision_flagged ?? false;
   const taskDivision =
     source === 'asset' ? parentBrief?.assigned_division ?? '' : brief?.assigned_division ?? '';
-  const isDispatched = status === DISPATCHED_STATUS || taskDivision === 'livestream';
+  // 'Live Stream' verbatim from backend (module10_livestream/livestream.go LiveStreamDivision).
+  const isDispatched = status === DISPATCHED_STATUS || taskDivision === 'Live Stream';
 
   // ---- Role gating (UX only — backend is final authority) ----
   const isDirector = Boolean(role?.director);
   const isODonly = Boolean(role?.od) && !isDirector;
   const isLeadOfDivision = role?.level === 'lead' && role?.division === taskDivision;
   const inDivision = role?.division === taskDivision;
-  const isAM = role?.division === 'account';
+  // 'Account' verbatim from backend (module12_task/task.go AccountDivision). Server-side
+  // canRequestBlock (block.go) narrows further to the OWNING AM — any over-show here 403s.
+  const isAM = role?.division === 'Account';
 
   // Execution edges (start/submit/rework): pra-PIC staff/lead divisi; pasca-PIC
   // PIC/lead/Director. Server re-checks PIC ownership — UI only hides obvious no-ops.

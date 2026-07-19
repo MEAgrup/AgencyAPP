@@ -231,7 +231,9 @@ export function isODOnly(role: Role | null): boolean {
 }
 
 export function isKolDivision(role: Role | null): boolean {
-  return !!role && role.division === 'kol';
+  // GET /me returns Role.Division verbatim from the role mapping ("KOL") —
+  // compare against the exact backend label, not a lowercased slug.
+  return !!role && role.division === 'KOL';
 }
 
 /** KOL Team Leader — the only staff-side role allowed to escalate/drop/manage. */
@@ -244,7 +246,7 @@ export function isKolStaff(role: Role | null): boolean {
 }
 
 export function isAccountRole(role: Role | null): boolean {
-  return !!role && role.division === 'account';
+  return !!role && role.division === 'Account';
 }
 
 /** SPV/Head Account — Account lead, one of the Drop tie-breaker roles. */
@@ -253,12 +255,13 @@ export function isAccountLead(role: Role | null): boolean {
 }
 
 export function isFinanceRole(role: Role | null): boolean {
-  return !!role && role.division === 'finance';
+  return !!role && role.division === 'Finance';
 }
 
 /** canCreateBooking (booking.go:156): Director, or KOL division staff/lead. */
 export function canCreateBooking(role: Role | null): boolean {
-  return isDirector(role) || isKolDivision(role);
+  // OD layered di atas karyawan divisi KOL tetap read-only (Phase 0 §4).
+  return !isODOnly(role) && (isDirector(role) || isKolDivision(role));
 }
 
 /**
@@ -317,14 +320,15 @@ export function canContinueEscalation(role: Role | null, employeeId: string | un
 
 /** canFinance (payment.go:196): Finance division (any level) or Director. Gates receive/pay/reject. */
 export function canFinanceAction(role: Role | null): boolean {
-  return isDirector(role) || isFinanceRole(role);
+  // OD layered di atas karyawan Finance tetap read-only (Phase 0 §4).
+  return !isODOnly(role) && (isDirector(role) || isFinanceRole(role));
 }
 
 /** canManageCreatorList (creator_list.go:156): Director, owning AM, or staff/lead KOL of the Brief.
  * Same "no ownership id on the wire" gap as canContinueEscalation — Account is shown the
  * control generically, backend is final authority. */
 export function canManageCreatorList(role: Role | null): boolean {
-  return isDirector(role) || isKolDivision(role) || isAccountRole(role);
+  return !isODOnly(role) && (isDirector(role) || isKolDivision(role) || isAccountRole(role));
 }
 
 // ---------------------------------------------------------------------------
@@ -520,7 +524,9 @@ export function getBrief(id: string): Promise<Brief> {
 }
 
 export function listKolBriefQueue(): Promise<{ data: Brief[] }> {
-  return api.get<{ data: Brief[] }>('/divisions/kol/brief-queue');
+  // Division path param is validated case-sensitively by the backend against
+  // allowedDivisions (strategy.go:51) — must be the canonical label "KOL".
+  return api.get<{ data: Brief[] }>('/divisions/KOL/brief-queue');
 }
 
 // PATCH is not exposed by lib/api.ts (only get/post/put/delete). M9 has no

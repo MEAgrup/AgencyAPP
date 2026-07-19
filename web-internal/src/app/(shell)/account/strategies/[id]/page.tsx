@@ -11,6 +11,8 @@ import {
   approveStrategy,
   canApproveStrategy,
   getStrategy,
+  isAccountStaff,
+  isReadOnlyOD,
   requestStrategyRevision,
   submitStrategy,
   updateStrategy,
@@ -22,6 +24,12 @@ export default function StrategyDetailPage({ params }: { params: Promise<{ id: s
   const { id } = use(params);
   const { role } = useAuth();
   const canApprove = canApproveStrategy(role);
+  // Draft edit/submit belongs to the owner AM (Account staff) or Director
+  // (strategy.go:290-296, 327-329). Owner can't be checked client-side (the
+  // Strategy response carries no owner field), but OD must never see write
+  // controls and non-Account divisions get a guaranteed 403 — hide for both.
+  // Server remains the final authority (CLAUDE.md #6).
+  const canDraft = !isReadOnlyOD(role) && (isAccountStaff(role) || !!role?.director);
 
   const [strategy, setStrategy] = useState<Strategy | null>(null);
   const [loading, setLoading] = useState(true);
@@ -242,7 +250,7 @@ export default function StrategyDetailPage({ params }: { params: Promise<{ id: s
         </section>
       )}
 
-      {isDrafting && (
+      {canDraft && isDrafting && (
         <section className="card">
           <div className="cardHeader">
             <h2>Ubah Draft</h2>
@@ -296,7 +304,7 @@ export default function StrategyDetailPage({ params }: { params: Promise<{ id: s
         </section>
       )}
 
-      {isDrafting && (
+      {canDraft && isDrafting && (
         <section className="card">
           <div className="cardHeader">
             <h2>Ajukan Persetujuan</h2>

@@ -41,12 +41,19 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
   const { id } = use(params);
   const { role } = useAuth();
 
+  // Backend sends division capitalized ("Ads"/"Account", module8_ads AdsDivision) —
+  // compare case-insensitively. UX-only gate; backend re-checks on every write.
   const canManage = Boolean(
-    role && ((role.division === 'ads' && (role.level === 'staff' || role.level === 'lead')) || role.director),
+    role &&
+      ((role.division.toLowerCase() === 'ads' && (role.level === 'staff' || role.level === 'lead')) ||
+        role.director),
   );
-  // Optimization may also be logged by the owning AM (m8 brief §1.11); backend is
-  // the final authority, so we show the form to Account too and let it 403 if not owner.
-  const canLogOptimization = canManage || Boolean(role && role.division === 'account');
+  // Optimization may also be logged by the owning AM (m8 brief §1.11). The campaign
+  // payload carries no assigned-AM field to narrow this client-side, so the form is
+  // shown to Account division with an explicit owning-AM note (see Optimization Log
+  // section); backend remains the final authority and 403s non-owners.
+  const isAccountDivision = Boolean(role && role.division.toLowerCase() === 'account');
+  const canLogOptimization = canManage || isAccountDivision;
 
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [loading, setLoading] = useState(true);
@@ -577,6 +584,12 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
 
         {canLogOptimization && !isEnded && (
           <form className="form" onSubmit={handleOptimization}>
+            {isAccountDivision && !canManage && (
+              <p className="muted" style={{ fontSize: 13 }}>
+                Hanya AM pemilik klien kampanye ini yang dapat mencatat optimasi &mdash; permintaan dari
+                akun Account lain akan ditolak server.
+              </p>
+            )}
             {optError && <div className="alert alertError" role="alert">{optError}</div>}
             {optMessage && <div className="alert alertSuccess" role="status">{optMessage}</div>}
             {budgetNeedsSignoff && (

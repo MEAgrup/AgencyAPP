@@ -215,11 +215,11 @@ export const COMPLAINT_RESOLVED = '[Resolved]';
 // ---------------------------------------------------------------------------
 
 export function isAccountLead(role: Role | null): boolean {
-  return !!role && role.division === 'account' && role.level === 'lead';
+  return !!role && role.division.toLowerCase() === 'account' && role.level === 'lead';
 }
 
 export function isAccountStaff(role: Role | null): boolean {
-  return !!role && role.division === 'account' && role.level === 'staff';
+  return !!role && role.division.toLowerCase() === 'account' && role.level === 'staff';
 }
 
 /** SPV/Head Account (lead) or Director may assign/reassign. OD is read-only. */

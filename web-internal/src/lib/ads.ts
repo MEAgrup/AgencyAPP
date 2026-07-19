@@ -20,7 +20,7 @@
 // campaigns and open them by id. CTR/CVR are accepted on POST metric but never
 // returned by any M8 read (gotcha #9), so no CTR/CVR read-back exists here.
 
-import { api, ApiError } from '@/lib/api';
+import { api } from '@/lib/api';
 import type { BadgeTone } from '@/lib/status';
 
 // ---------------------------------------------------------------------------
@@ -247,9 +247,11 @@ export function getBrief(id: string): Promise<AdsBrief> {
   return api.get<AdsBrief>(`/briefs/${id}`);
 }
 
-// GET /divisions/ads/brief-queue → {data: Brief[]} — verified M6/M12 read
+// GET /divisions/Ads/brief-queue → {data: Brief[]} — verified M6/M12 read
 // (lib/tasks.ts listDivisionQueue). Source of Ads Briefs for the /ads landing,
-// since M8 exposes no list-campaigns endpoint.
+// since M8 exposes no list-campaigns endpoint. NOTE: the division path segment is
+// validated CASE-SENSITIVELY server-side against {"Creative","Ads","KOL","Live Stream"}
+// (module6_account isAllowedDivision) — it must be "Ads", not "ads".
 export function listAdsBriefQueue(): Promise<{ data: AdsBrief[] }> {
-  return api.get<{ data: AdsBrief[] }>(`/divisions/ads/brief-queue`);
+  return api.get<{ data: AdsBrief[] }>(`/divisions/${encodeURIComponent('Ads')}/brief-queue`);
 }

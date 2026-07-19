@@ -10,6 +10,8 @@ import {
   STRATEGY_APPROVED,
   createBrief,
   createStrategy,
+  isAccountLead,
+  isAccountStaff,
   isReadOnlyOD,
   listServiceBriefs,
   listStrategies,
@@ -23,6 +25,12 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   const { id } = use(params);
   const { role } = useAuth();
   const readOnly = isReadOnlyOD(role);
+  // Write forms (create Strategy/Brief, requirement override) belong to the
+  // Account division (owner AM/lead) or Director — strategy.go:220-223,
+  // brief.go:219-222. Execution-division staff/leads see this hub read-only;
+  // owner-AM check stays server-side (final authority, CLAUDE.md #6).
+  const canWrite =
+    !readOnly && (isAccountStaff(role) || isAccountLead(role) || !!role?.director);
 
   const [briefs, setBriefs] = useState<Brief[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -150,7 +158,9 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
     try {
       const res = await createBrief(id, {
         title: bTitle,
-        strategy_id: planGated ? (approvedStrategy?.id ?? strategy?.id ?? '') : '',
+        // Plan-gated: locked to the APPROVED Strategy only (brief gotcha #6,
+        // ErrBriefStrategyMismatch) — never fall back to a non-approved draft.
+        strategy_id: planGated ? (approvedStrategy?.id ?? '') : '',
         assigned_division: bDivision,
         assigned_pic: bPic || undefined,
         deliverable_type: bDeliverable,
@@ -222,7 +232,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         )}
       </section>
 
-      {!strategy && !readOnly && (
+      {!strategy && canWrite && (
         <section className="card">
           <div className="cardHeader">
             <h2>Buat Strategy &amp; Plan</h2>
@@ -274,7 +284,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         </section>
       )}
 
-      {!strategy && !readOnly && (
+      {!strategy && canWrite && (
         <section className="card">
           <div className="cardHeader">
             <h2>Override Kebutuhan Strategy &amp; Plan</h2>
@@ -302,7 +312,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         </section>
       )}
 
-      {!readOnly && (
+      {canWrite && (
         <section className="card">
           <div className="cardHeader">
             <h2>Buat Brief</h2>
@@ -320,7 +330,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
                 <input
                   id="b-strategy"
                   readOnly
-                  value={approvedStrategy?.id ?? strategy?.id ?? ''}
+                  value={approvedStrategy?.id ?? ''}
                 />
                 {!approvedStrategy && (
                   <span className="muted" style={{ fontSize: 12 }}>
@@ -404,7 +414,11 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
               </label>
             )}
             <div>
-              <button type="submit" className="btn btnPrimary" disabled={bSubmitting}>
+              <button
+                type="submit"
+                className="btn btnPrimary"
+                disabled={bSubmitting || (planGated && !approvedStrategy)}
+              >
                 {bSubmitting ? 'Membuat...' : 'Buat Brief'}
               </button>
             </div>

@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import StatusBadge from '@/components/StatusBadge';
 import {
   BRIEF_VOIDED_STATUS,
+  canManageLiveStream,
   confidenceBadgeTone,
   confirmSession,
   flagDiscrepancy,
@@ -28,12 +29,10 @@ export default function LiveStreamSessionDetailPage({ params }: { params: Promis
   const { id } = use(params);
   const { role } = useAuth();
 
-  // canManageSession (m10 brief §1.1/gotcha #8): owning AM OR Director. FE can
-  // only approximate "owning AM" by division+level — the backend re-checks the
-  // exact clients.assigned_am_id match on every write, this is UX-only.
-  const canManage = Boolean(
-    role && (role.director || (role.division === 'account' && role.level === 'staff')),
-  );
+  // canManageSession (m10 brief §1.1/gotcha #8): owning AM OR Director — see
+  // canManageLiveStream in lib/livestream.ts. UX-only; backend re-checks the
+  // exact clients.assigned_am_id match on every write.
+  const canManage = canManageLiveStream(role);
 
   const [session, setSession] = useState<Session | null>(null);
   const [brief, setBrief] = useState<LiveStreamBrief | null>(null);

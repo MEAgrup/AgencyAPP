@@ -13,7 +13,8 @@ export default function MyTasksPage() {
   // Only OD/Director, or Account lead/SPV, may pass `employee=` for someone
   // else server-side (brief §1 GET /my-tasks, board.go:322-329) — this is
   // UX-only gating, the backend 403s regardless if a staff user forces it.
-  const canViewOthers = Boolean(role && (role.od || role.director || (role.division === 'account' && role.level === 'lead')));
+  // division dari /me mengikuti casing role-mapping backend ('Account') — bandingkan case-insensitive.
+  const canViewOthers = Boolean(role && (role.od || role.director || (role.division.toLowerCase() === 'account' && role.level === 'lead')));
 
   const [employeeInput, setEmployeeInput] = useState('');
   const [appliedEmployee, setAppliedEmployee] = useState<string>('');

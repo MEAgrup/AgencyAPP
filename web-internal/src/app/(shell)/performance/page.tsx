@@ -6,8 +6,6 @@ import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import {
   DIVISIONS,
-  ROLE_TYPES,
-  divisionOfRole,
   formatPeriodLabel,
   getTeamRollup,
   normalizeM14Division,
@@ -19,9 +17,12 @@ export default function PerformancePage() {
   const { role, employee } = useAuth();
   const isDirector = role?.director;
   const isOD = role?.od;
-  const isLead = role?.level === 'lead';
   const canScan = isDirector;
   const canViewMultipleDivisions = isDirector || isOD;
+  // canViewTeam backend (snapshot.go:464-469): hanya Lead/SPV/OD/Director — staff murni
+  // tidak boleh memanggil team rollup; tampilkan tautan skor sendiri saja.
+  const isLeadLevel = role?.level === 'lead' || role?.level === 'spv';
+  const isStaffOnly = !!role && !isDirector && !isOD && !isLeadLevel;
 
   // Determine which divisions to display
   // Note: role.division is lowercase from HRIS ('creative', 'ads', 'kol', 'account')
@@ -48,7 +49,7 @@ export default function PerformancePage() {
   const [scanMessage, setScanMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!selectedDivision) return;
+    if (!selectedDivision || isStaffOnly) return;
     setLoading(true);
     setError(null);
     try {
@@ -59,7 +60,7 @@ export default function PerformancePage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedDivision, selectedPeriod]);
+  }, [selectedDivision, selectedPeriod, isStaffOnly]);
 
   useEffect(() => {
     load();
@@ -82,12 +83,31 @@ export default function PerformancePage() {
     }
   }
 
-  const periodDisplay = selectedPeriod
-    ? formatPeriodLabel(selectedPeriod)
-    : 'Periode Terbaru';
-
   const emptyOrNotAvailable = !rollup || rollup.members.length === 0;
   const showPlaceholder = rollup && rollup.period === '';
+
+  if (isStaffOnly) {
+    return (
+      <div className="stack">
+        <div>
+          <h1>Team Performance</h1>
+          <p className="muted">Snapshot skor KPI bulanan per karyawan (M14).</p>
+        </div>
+        <section className="card">
+          <p className="muted">
+            Role Anda hanya dapat melihat skor performa sendiri; ringkasan tim khusus Lead/SPV, OD, dan Director.
+          </p>
+          {employee ? (
+            <Link href={`/performance/${employee.employee_id}`} className="btn btnPrimary btnSm">
+              Lihat Skor Saya ({employee.employee_id})
+            </Link>
+          ) : (
+            <p className="muted">Data karyawan tidak tersedia.</p>
+          )}
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="stack">

@@ -23,7 +23,17 @@ export default function BlockRequestsPage() {
   // SPV/Lead default to their own division; Director may switch across divisions.
   const isDirector = Boolean(role?.director);
   const isLead = role?.level === 'lead';
+  // Mirrors the backend gate (portal.go actor.IsLead, Director bypass) — UX only,
+  // the server remains the final authority.
+  const canView = isDirector || isLead;
   const [division, setDivision] = useState<string>(role?.division ?? '');
+
+  // Backend division values (DIVISIONS) plus the viewer's own division (e.g. an
+  // Account lead) so the controlled select always contains its current value.
+  const divisionOptions: string[] =
+    division && !(DIVISIONS as readonly string[]).includes(division)
+      ? [division, ...DIVISIONS]
+      : [...DIVISIONS];
 
   const [queue, setQueue] = useState<PendingBlockRequest[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -35,6 +45,12 @@ export default function BlockRequestsPage() {
   const [decisionMessage, setDecisionMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    if (!canView) {
+      // Halaman khusus SPV/Lead/Director — jangan menembak GET /portal/team yang
+      // pasti 403 untuk role lain (gate portal.go actor.IsLead).
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     setQueue(null);
@@ -46,7 +62,7 @@ export default function BlockRequestsPage() {
     } finally {
       setLoading(false);
     }
-  }, [division]);
+  }, [division, canView]);
 
   useEffect(() => {
     load();
@@ -72,6 +88,24 @@ export default function BlockRequestsPage() {
     }
   }
 
+  if (!canView) {
+    return (
+      <div className="stack">
+        <div>
+          <h1>Antrian Block-Request</h1>
+          <p className="muted">
+            Permintaan block yang menunggu keputusan SPV/Lead (M12) &mdash; sumber:{' '}
+            <code>GET /portal/team</code>.
+          </p>
+        </div>
+        <div className="alert alertInfo" role="status">
+          Halaman ini khusus SPV/Lead divisi dan Direktur. Akun Anda tidak memiliki akses ke
+          antrian block-request.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="stack">
       <div>
@@ -94,7 +128,7 @@ export default function BlockRequestsPage() {
               disabled={!isDirector && isLead}
             >
               {!division && <option value="">Pilih divisi...</option>}
-              {DIVISIONS.map((d) => (
+              {divisionOptions.map((d) => (
                 <option key={d} value={d}>{d}</option>
               ))}
             </select>

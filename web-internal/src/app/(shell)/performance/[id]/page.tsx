@@ -3,7 +3,6 @@
 import { use, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
-import { useAuth } from '@/lib/auth-context';
 import {
   COMPONENT_LABELS,
   formatPeriodLabel,
@@ -19,7 +18,6 @@ function formatScore(value: number | null | undefined): string {
 
 export default function PerformanceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { role } = useAuth();
 
   // Main snapshot
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);

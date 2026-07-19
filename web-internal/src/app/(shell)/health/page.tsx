@@ -12,9 +12,10 @@ export default function HealthPage() {
   const [scanError, setScanError] = useState<string | null>(null);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
 
-  // Visibility: role must be Account staff/lead or Director. OD is read-only (no scan).
-  const isAccount = role && (role.level === 'staff' || role.level === 'lead');
-  const canScan = (isAccount || role?.director) && !role?.od;
+  // canRunScan backend (service.go:76-81): Director menang dulu, lalu Account staff/lead.
+  // OD layered hanya memblokir jalur non-Director; division dari /me berkapital 'Account'.
+  const isAccount = role && role.division === 'Account' && (role.level === 'staff' || role.level === 'lead');
+  const canScan = role?.director || (isAccount && !role?.od);
 
   async function handleScan() {
     if (!window.confirm('Jalankan pemindaian skor kesehatan klien untuk bulan tertutup terakhir?')) {

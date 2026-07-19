@@ -44,9 +44,10 @@ export default function ClientHealthDetailPage({ params }: { params: Promise<{ c
   const [roasToggleSubmitting, setROASToggleSubmitting] = useState(false);
   const [roasToggleError, setROASToggleError] = useState<string | null>(null);
 
-  // Permission checks
-  const isAccount = role && (role.level === 'staff' || role.level === 'lead');
-  const canToggleROAS = (isAccount || role?.director) && !role?.od;
+  // canToggleROAS backend: Director menang dulu, lalu Account staff/lead; OD layered
+  // hanya memblokir jalur non-Director. Division dari /me berkapital 'Account'.
+  const isAccount = role && role.division === 'Account' && (role.level === 'staff' || role.level === 'lead');
+  const canToggleROAS = role?.director || (isAccount && !role?.od);
 
   // Load main snapshot
   const loadSnapshot = useCallback(async () => {
@@ -68,7 +69,7 @@ export default function ClientHealthDetailPage({ params }: { params: Promise<{ c
     try {
       const res = await getPreview(clientId);
       setPreview(res);
-    } catch (err) {
+    } catch {
       // Preview errors are silent, just don't show it
       setPreview(null);
     } finally {
@@ -82,7 +83,7 @@ export default function ClientHealthDetailPage({ params }: { params: Promise<{ c
     try {
       const res = await getTrend(clientId);
       setTrend(res.data);
-    } catch (err) {
+    } catch {
       // Trend errors are silent
       setTrend([]);
     } finally {
@@ -96,7 +97,7 @@ export default function ClientHealthDetailPage({ params }: { params: Promise<{ c
     try {
       const res = await getROASToggle(clientId);
       setROASToggleState(res);
-    } catch (err) {
+    } catch {
       // Silent error
       setROASToggleState(null);
     } finally {
@@ -148,15 +149,6 @@ export default function ClientHealthDetailPage({ params }: { params: Promise<{ c
 
   if (loading) return <div className="pageLoading">Memuat...</div>;
 
-  if (loadError || !snapshot) {
-    return (
-      <div className="stack">
-        <Link href="/health" className="muted">&larr; Kembali ke Health</Link>
-        <div className="alert alertError" role="alert">{loadError ?? 'Data tidak ditemukan.'}</div>
-      </div>
-    );
-  }
-
   // Determine active snapshot (preview or selected)
   const activeSnapshot = showPreview && preview ? preview : snapshot;
 
@@ -172,6 +164,32 @@ export default function ClientHealthDetailPage({ params }: { params: Promise<{ c
           <p className="muted">{clientId}</p>
         </div>
       </div>
+
+      {/* Snapshot gagal dimuat (mis. klien belum punya snapshot) — error inline saja;
+          section Preview/Trend/Toggle ROAS tetap dirender dari endpoint masing-masing. */}
+      {(loadError || !snapshot) && (
+        <section className="card">
+          <div className="alert alertError" role="alert">{loadError ?? 'Data tidak ditemukan.'}</div>
+          {trend.length > 0 && (
+            <div className="field" style={{ marginTop: '12px', marginBottom: '0' }}>
+              <label htmlFor="period-select-fallback">Pilih Periode Lain:</label>
+              <select
+                id="period-select-fallback"
+                value={selectedPeriod}
+                onChange={(e) => setSelectedPeriod(e.target.value)}
+                style={{ maxWidth: '200px' }}
+              >
+                <option value="">Terbaru</option>
+                {trend.map((s) => (
+                  <option key={s.id} value={`${s.period_start.replace(/-/g, '').slice(0, 6)}`}>
+                    {formatDate(s.period_start)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Score & Band Header */}
       {activeSnapshot && (

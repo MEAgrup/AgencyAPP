@@ -10,6 +10,8 @@ import {
   COMPLAINT_RESOLVED,
   closeComplaint,
   getComplaint,
+  isAccountLead,
+  isAccountStaff,
   isReadOnlyOD,
   resolveComplaint,
   startComplaint,
@@ -27,6 +29,11 @@ export default function ComplaintDetailPage({ params }: { params: Promise<{ id: 
   const { id } = use(params);
   const { role } = useAuth();
   const readOnly = isReadOnlyOD(role);
+  // Complaint transitions belong to the owner AM / Account lead / Director
+  // (complaint.go, ErrComplaintManageForbidden). Execution-division readers
+  // (via related_ref Brief) see this page read-only. Server stays final.
+  const canManage =
+    !readOnly && (isAccountStaff(role) || isAccountLead(role) || !!role?.director);
 
   const [complaint, setComplaint] = useState<Complaint | null>(null);
   const [loading, setLoading] = useState(true);
@@ -172,7 +179,7 @@ export default function ComplaintDetailPage({ params }: { params: Promise<{ id: 
         </div>
       </section>
 
-      {!readOnly && (isOpen || isInProgress || isResolved) && (
+      {canManage && (isOpen || isInProgress || isResolved) && (
         <section className="card">
           <div className="cardHeader">
             <h2>Aksi</h2>

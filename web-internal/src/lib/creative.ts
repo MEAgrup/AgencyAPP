@@ -204,7 +204,9 @@ export function isODOnly(role: Role | null): boolean {
 }
 
 export function isCreativeDivision(role: Role | null): boolean {
-  return !!role && role.division === 'creative';
+  // Backend sends Role.Division verbatim from role_mappings — canonical value is
+  // capitalized "Creative" (module7_creative/asset.go:42), case-sensitive.
+  return !!role && role.division === 'Creative';
 }
 
 export function isCreativeLead(role: Role | null): boolean {
@@ -216,7 +218,8 @@ export function isCreativeStaff(role: Role | null): boolean {
 }
 
 export function isAccountRole(role: Role | null): boolean {
-  return !!role && role.division === 'account';
+  // Canonical backend value is "Account" (module6_account/account.go:39), case-sensitive.
+  return !!role && role.division === 'Account';
 }
 
 // ---------------------------------------------------------------------------
@@ -420,7 +423,9 @@ export function getAssetMetrics(id: string): Promise<Metrics> {
 // ---------------------------------------------------------------------------
 
 export function listCreativeBriefQueue(): Promise<{ data: Brief[] }> {
-  return api.get<{ data: Brief[] }>('/divisions/creative/brief-queue');
+  // Division segment must match backend allowedDivisions verbatim (case-sensitive
+  // "Creative" — module6_account/strategy.go:51 / module7_creative/asset.go:42).
+  return api.get<{ data: Brief[] }>('/divisions/Creative/brief-queue');
 }
 
 // PATCH is not exposed by lib/api.ts (only get/post/put/delete). M7 has no PATCH

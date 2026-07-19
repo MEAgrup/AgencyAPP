@@ -16,6 +16,7 @@ import {
   getAssetAudit,
   getAssetMetrics,
   getBrief,
+  isAccountRole,
   isCreativeDivision,
   isCreativeLead,
   isDirector,
@@ -169,7 +170,7 @@ export default function CreativeAssetDetailPage({ params }: { params: Promise<{ 
   const odOnly = isODOnly(role);
   const leadCreative = isCreativeLead(role);
   const inCreativeDivision = isCreativeDivision(role);
-  const isAM = !!role && role.division === 'account';
+  const isAM = isAccountRole(role);
   const isSelfPic = !!employee && !!assignedPic && employee.employee_id === assignedPic;
 
   // Execution (start/submit/rework): staff/lead Creative, atau PIC yang sudah di-assign, atau Director.
@@ -635,7 +636,7 @@ export default function CreativeAssetDetailPage({ params }: { params: Promise<{ 
                 <input
                   id="hours-input"
                   type="number"
-                  min="0"
+                  min="0.25"
                   step="0.25"
                   required
                   value={hoursInput}
@@ -711,7 +712,7 @@ export default function CreativeAssetDetailPage({ params }: { params: Promise<{ 
                 <input
                   id="sla-input"
                   type="number"
-                  min="0"
+                  min="0.5"
                   step="0.5"
                   required
                   value={slaInput}
@@ -733,7 +734,7 @@ export default function CreativeAssetDetailPage({ params }: { params: Promise<{ 
                 <input
                   id="rev-sla-input"
                   type="number"
-                  min="0"
+                  min="0.5"
                   step="0.5"
                   required
                   value={revSlaInput}

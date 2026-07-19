@@ -17,9 +17,12 @@ export default function AdsWorkspacePage() {
   const router = useRouter();
 
   // canManageCampaign (m8 brief §9.1): Ads staff/lead OR Director. UX-only gate —
-  // the backend re-checks on every write.
+  // the backend re-checks on every write. Backend sends division as "Ads"
+  // (capitalized, module8_ads AdsDivision) — compare case-insensitively.
   const canManage = Boolean(
-    role && ((role.division === 'ads' && (role.level === 'staff' || role.level === 'lead')) || role.director),
+    role &&
+      ((role.division.toLowerCase() === 'ads' && (role.level === 'staff' || role.level === 'lead')) ||
+        role.director),
   );
 
   const [briefs, setBriefs] = useState<AdsBrief[] | null>(null);

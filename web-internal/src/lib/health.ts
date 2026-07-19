@@ -4,7 +4,8 @@
 // server-side (score, band, weights, component metrics); frontend renders
 // read-only from JSON, never recalculates.
 
-import { api, ApiError } from '@/lib/api';
+import { api } from '@/lib/api';
+import type { Role } from '@/lib/types';
 
 export interface Component {
   name: string; // 'gmv_growth', 'roas_attainment', etc. — stable keys for logic
@@ -72,6 +73,18 @@ export const BAND_VALUES = ['Healthy', 'Watch', 'At Risk'] as const;
 
 export function getComponentLabel(name: string): string {
   return COMPONENT_LABELS[name] || name;
+}
+
+// UX gating for M13 write actions (run scan / ROAS toggle). Mirrors backend
+// canRunScan/canToggleROAS (backend/internal/module13_health/service.go:76-95)
+// short-circuit order exactly: Director always allowed (even when layered with
+// OD, CLAUDE.md #6); otherwise Account division (staff/lead) without an OD
+// layer. UX-only — the server remains the authority on permissions.
+export function canManageHealth(role: Role | null): boolean {
+  if (!role) return false;
+  if (role.director) return true;
+  if (role.od) return false;
+  return role.division === 'Account' && (role.level === 'staff' || role.level === 'lead');
 }
 
 export function getTriggerScan(): Promise<ScanResult> {

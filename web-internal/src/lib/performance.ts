@@ -107,7 +107,7 @@ export interface ScanResult {
 // === API Functions ===
 
 /**
- * GET /api/v1/performance/snapshots/scan (POST endpoint, diaktifkan Director)
+ * POST /api/v1/performance/snapshots/scan (POST endpoint, diaktifkan Director)
  * Trigger monthly batch snapshot calculation untuk semua role-scored staff di semua divisi.
  * Idempotent — re-run tidak membuat duplikat.
  */

@@ -10,6 +10,7 @@ import {
   BRIEF_DISPATCHED_STATUS,
   BRIEF_VOIDED_STATUS,
   PLATFORM_OPTIONS,
+  canManageLiveStream,
   confidenceBadgeTone,
   createSession,
   getBrief,
@@ -29,12 +30,10 @@ export default function LiveStreamBriefDetailPage({ params }: { params: Promise<
   const { id } = use(params);
   const { role } = useAuth();
 
-  // canManageSession (m10 brief §1.1/gotcha #8): owning AM OR Director. FE can
-  // only approximate "owning AM" by division+level — the backend re-checks the
-  // exact clients.assigned_am_id match on every write, this is UX-only.
-  const canManage = Boolean(
-    role && (role.director || (role.division === 'account' && role.level === 'staff')),
-  );
+  // canManageSession (m10 brief §1.1/gotcha #8): owning AM OR Director — see
+  // canManageLiveStream in lib/livestream.ts. UX-only; backend re-checks the
+  // exact clients.assigned_am_id match on every write.
+  const canManage = canManageLiveStream(role);
 
   const [brief, setBrief] = useState<LiveStreamBrief | null>(null);
   const [sessions, setSessions] = useState<Session[] | null>(null);

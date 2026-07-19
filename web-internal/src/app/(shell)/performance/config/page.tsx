@@ -7,7 +7,6 @@ import { useAuth } from '@/lib/auth-context';
 import {
   COMPONENT_LABELS,
   ROLE_TYPES,
-  formatPeriodLabel,
   getTargetsConfig,
   getWeightsConfig,
   updateTargetsConfig,
@@ -72,24 +71,12 @@ export default function PerformanceConfigPage() {
     }
   }, []);
 
+  // GET weights/targets terbuka untuk semua role CDPS; hanya PUT yang Director-only —
+  // semua role boleh melihat tabel, tombol/form ubah hanya dirender untuk Director.
   useEffect(() => {
-    if (!isDirector) return;
     loadWeights();
     loadTargets();
-  }, [isDirector, loadWeights, loadTargets]);
-
-  if (!isDirector) {
-    return (
-      <div className="stack">
-        <Link href="/performance" className="muted">
-          &larr; Kembali ke Team Performance
-        </Link>
-        <div className="alert alertError" role="alert">
-          Hanya Director yang dapat mengubah konfigurasi KPI performa.
-        </div>
-      </div>
-    );
-  }
+  }, [loadWeights, loadTargets]);
 
   function startEditWeights(roleType: string) {
     const roleWeights = weights?.filter((w) => w.role_type === roleType) || [];
@@ -114,7 +101,8 @@ export default function PerformanceConfigPage() {
     }, 0);
 
     if (Math.abs(total - 100) > 1e-6) {
-      setWeightsUpdateError(`[total bobot KPI harus berjumlah 100 (saat ini: ${total.toFixed(2)})]`);
+      // Pesan BI verbatim backend (perf.go ErrWeightsNotHundred); info total = teks UI biasa.
+      setWeightsUpdateError(`[total bobot KPI harus berjumlah 100] — total saat ini: ${total.toFixed(2)}`);
       return;
     }
 
@@ -235,13 +223,15 @@ export default function PerformanceConfigPage() {
                           </tbody>
                         </table>
                       </div>
-                      <button
-                        className="btn btnSecondary btnSm"
-                        onClick={() => startEditWeights(roleType)}
-                        style={{ marginTop: '12px' }}
-                      >
-                        Ubah Bobot
-                      </button>
+                      {isDirector && (
+                        <button
+                          className="btn btnSecondary btnSm"
+                          onClick={() => startEditWeights(roleType)}
+                          style={{ marginTop: '12px' }}
+                        >
+                          Ubah Bobot
+                        </button>
+                      )}
                     </>
                   ) : (
                     <form onSubmit={handleSaveWeights} className="form">
@@ -335,17 +325,9 @@ export default function PerformanceConfigPage() {
                       <td>{target.role_type}</td>
                       <td>{COMPONENT_LABELS[target.component] || target.component}</td>
                       <td>
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            value={editTargetPeriod}
-                            onChange={(e) => setEditTargetPeriod(e.target.value)}
-                            placeholder="YYYY-MM-DD atau kosong"
-                            style={{ width: '120px' }}
-                          />
-                        ) : (
-                          target.period_start || 'Semua Periode'
-                        )}
+                        {/* PUT targets = UPSERT keyed (role_type, component, period_start) —
+                            periode dikunci saat mengubah baris agar tidak membuat baris baru. */}
+                        {target.period_start || 'Semua Periode'}
                       </td>
                       <td style={{ textAlign: 'right' }}>
                         {isEditing ? (
@@ -378,12 +360,16 @@ export default function PerformanceConfigPage() {
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         {!isEditing ? (
-                          <button
-                            className="btn btnGhost btnSm"
-                            onClick={() => startEditTarget(target)}
-                          >
-                            Ubah
-                          </button>
+                          isDirector ? (
+                            <button
+                              className="btn btnGhost btnSm"
+                              onClick={() => startEditTarget(target)}
+                            >
+                              Ubah
+                            </button>
+                          ) : (
+                            '—'
+                          )
                         ) : (
                           <button
                             className="btn btnGhost btnSm"

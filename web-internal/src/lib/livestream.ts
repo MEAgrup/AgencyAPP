@@ -40,6 +40,7 @@
 
 import { api } from '@/lib/api';
 import type { BadgeTone } from '@/lib/status';
+import type { Role } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
 // Entity shapes
@@ -235,5 +236,24 @@ export function getBrief(id: string): Promise<LiveStreamBrief> {
 // file header note). Sole source of Live Stream Briefs for the /livestream
 // landing, since M10 exposes no list-Brief endpoint of its own.
 export function listLiveStreamBriefQueue(): Promise<{ data: LiveStreamBrief[] }> {
-  return api.get<{ data: LiveStreamBrief[] }>(`/divisions/livestream/brief-queue`);
+  // Division path param is exact-match against the M6 §4 vocabulary
+  // ("Creative" | "Ads" | "KOL" | "Live Stream" — module6_account/brief.go
+  // isAllowedDivision), NOT a slug: must be the capitalized "Live Stream"
+  // with the space URL-encoded (same pattern as lib/account.ts listDivisionQueue).
+  return api.get<{ data: LiveStreamBrief[] }>(
+    `/divisions/${encodeURIComponent('Live Stream')}/brief-queue`,
+  );
+}
+
+// canManageSession FE approximation (m10 brief §1.1 / gotcha #8): backend
+// canManageSession (module10_livestream/livestream.go) allows the client's
+// owning AM (clients.assigned_am_id) OR Director — it does NOT check
+// division/level. FE can only approximate "owning AM" as "any Account-division
+// employee" (any level — an AM with level 'lead' still qualifies server-side);
+// the backend re-checks the exact assigned_am_id match on every write, so this
+// is UX-only gating. Role.Division from /me is the raw role-mapping string
+// ("Account", capitalized — auth_handlers.go returns it unnormalized), hence
+// the case-insensitive compare.
+export function canManageLiveStream(role: Role | null): boolean {
+  return Boolean(role && (role.director || role.division.toLowerCase() === 'account'));
 }

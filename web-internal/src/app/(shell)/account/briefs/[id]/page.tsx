@@ -9,6 +9,8 @@ import {
   BRIEF_SUBMITTED,
   approveBrief,
   getBrief,
+  isAccountLead,
+  isAccountStaff,
   isReadOnlyOD,
   requestBriefRevision,
   reviewBrief,
@@ -107,6 +109,12 @@ export default function BriefDetailPage({ params }: { params: Promise<{ id: stri
 
   const canReview = brief.status === BRIEF_SUBMITTED;
   const canDecide = brief.status === BRIEF_IN_REVIEW;
+  // AM-review actions belong to the owner AM/Director (brief.go review guard,
+  // ErrBriefReviewForbidden). Execution-division staff/leads (Creative/Ads/KOL)
+  // legitimately read this page via canSeeBrief but must see it read-only —
+  // hide the action section outside the Account division. Server stays final.
+  const isAMReviewer =
+    !readOnly && (isAccountStaff(role) || isAccountLead(role) || !!role?.director);
 
   return (
     <div className="stack">
@@ -201,7 +209,7 @@ export default function BriefDetailPage({ params }: { params: Promise<{ id: stri
         </div>
       </section>
 
-      {!readOnly && (canReview || canDecide) && (
+      {isAMReviewer && (canReview || canDecide) && (
         <section className="card">
           <div className="cardHeader">
             <h2>Review Brief (AM)</h2>
