@@ -1,18 +1,19 @@
 # CDPS backend — Railway deploy image.
-# Multi-stage: build the cdps API server, then ship a slim runtime that also
-# carries the SQL migrations (the server auto-migrates on boot).
+# Build context is the backend/ directory (set the Railway service's
+# Root Directory to "backend"). Multi-stage: build the cdps API server, then
+# ship a slim runtime that also carries the SQL migrations (the server
+# auto-migrates on boot).
 
 # ---- build stage ----
 FROM golang:1.24-alpine AS build
 WORKDIR /src
 
 # Module files first for a cached dependency layer.
-COPY backend/go.mod backend/go.sum ./backend/
-WORKDIR /src/backend
+COPY go.mod go.sum ./
 RUN go mod download
 
 # Source.
-COPY backend/ ./
+COPY . ./
 
 # Static binary so it runs on the slim runtime image.
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/cdps ./cmd/cdps
@@ -24,7 +25,7 @@ WORKDIR /app
 
 COPY --from=build /out/cdps /app/cdps
 # Migrations are read at runtime; CDPS_MIGRATIONS_DIR points the server at them.
-COPY --from=build /src/backend/migrations /app/migrations
+COPY --from=build /src/migrations /app/migrations
 
 ENV CDPS_MIGRATIONS_DIR=/app/migrations
 USER cdps
