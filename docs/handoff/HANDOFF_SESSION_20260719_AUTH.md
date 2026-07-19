@@ -31,8 +31,8 @@ Rencana lama "login via HRIS `POST /auth/verify`" DIBATALKAN. HRIS kini **sumber
 
 1. **UI internal (paralel, akun lain):** prompt siap pakai di `docs/handoff/PROMPT_UI_AUTH.md` — kontrak API final, string BI verbatim, halaman login/force-change/ganti-password/panel admin, interceptor 403. Branch FE sendiri; jangan sentuh backend.
 2. **Provisioning riil saat go-live:** sync karyawan (CSV/HRIS) → `cmd/setpass` untuk Director pertama → Director/Lead provision sisanya via panel admin (atau endpoint langsung sebelum UI jadi).
-3. **Rekomendasi QC belum dieksekusi (kecil, opsional):** endpoint `change-password` belum ikut lockout counter — pemegang sesi curian bisa brute-force old_password tanpa terkunci. Pertimbangkan menerapkan `registerFailure` yang sama di `ChangePassword`.
-4. **UAT:** tambahkan jalur auth ke runbook UAT berikutnya (login temp, force-change, reset admin, lockout, karyawan dinonaktifkan HRIS → sesi mati).
+3. ✅ **SUDAH DIEKSEKUSI (sesi lanjutan 2026-07-19, branch `claude/backend-auth-cdps-complete-m46ock`):** `ChangePassword` kini memanggil `registerFailure` yang sama dengan login saat `old_password` salah; counter shared, 423 setelah gagal ke-5, reset admin memulihkan — lihat entri baru `docs/DECISIONS.md` 2026-07-19 dan `docs/handoff/AUTH_UAT_RUNBOOK.md` skenario H. ~~Rekomendasi QC belum dieksekusi (kecil, opsional): endpoint `change-password` belum ikut lockout counter — pemegang sesi curian bisa brute-force old_password tanpa terkunci. Pertimbangkan menerapkan `registerFailure` yang sama di `ChangePassword`.~~
+4. ✅ **SUDAH DIEKSEKUSI (sesi lanjutan 2026-07-19, branch `claude/backend-auth-cdps-complete-m46ock`):** runbook UAT jalur auth tersedia di `docs/handoff/AUTH_UAT_RUNBOOK.md` (skenario A-K: bootstrap setpass, login temp, force-change, reset admin, lockout login & change-password, karyawan dinonaktifkan HRIS → sesi mati, audit + panel admin). ~~UAT: tambahkan jalur auth ke runbook UAT berikutnya (login temp, force-change, reset admin, lockout, karyawan dinonaktifkan HRIS → sesi mati).~~
 
 ## 5. Catatan environment build (container sesi ini)
 

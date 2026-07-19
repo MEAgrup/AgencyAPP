@@ -141,6 +141,7 @@ Bentuk identik dengan login (#2.1) — `{employee, role, must_change_password}`
 | **400** | `[password maksimal 72 karakter]` (new_password > 72 byte) |
 | **401** | `[password lama tidak sesuai]` (old_password salah) |
 | **401** | (tidak authenticated) |
+| **423** | `[akun terkunci sementara karena percobaan gagal berulang, coba lagi dalam 15 menit]` (lockout — lihat catatan di bawah) |
 
 **Behavior server-side:**
 - Hash password baru (bcrypt)
@@ -149,6 +150,12 @@ Bentuk identik dengan login (#2.1) — `{employee, role, must_change_password}`
 - Reset `failed_attempts=0, locked_until=NULL`
 - **REVOKE SEMUA sesi karyawan itu KECUALI sesi sekarang** (force re-login device lain)
 - Audit: `action=password_changed_self`
+
+**Lockout (BARU — counter shared dengan login):**
+- `failed_attempts` di endpoint ini memakai **kolom yang sama** dengan `POST /auth/login`. `old_password` salah menaikkan counter itu (sama seperti password salah di login).
+- Gagal ke-5 berturut-turut (lintas login DAN change-password, dihitung gabungan) memasang lock 15 menit — respons gagal ke-5 tetap **401** `[password lama tidak sesuai]`, lock terpasang setelahnya.
+- Selama terkunci, endpoint ini menolak **423** dengan pesan di atas — **sekalipun `old_password` yang dikirim benar**. Login juga ditolak 423 di window yang sama (satu lock per akun, bukan per endpoint).
+- **FE:** perlakukan 423 di halaman ganti password SAMA seperti 423 di halaman login (§3.1 butir 1) — tampilkan pesan persis, sarankan tunggu/hubungi admin. Tidak ada field baru di response body (masih `{"message": "[...]"}"`), tidak ada state baru selain menampilkan pesan 423.
 
 **Catatan:**
 - Endpoint ini TIDAK diblokir gate force-change (biar bisa diakses saat `must_change_password=true`)
@@ -321,6 +328,7 @@ if (session.must_change_password) {
    - POST `/auth/change-password` dengan `old_password, new_password`
    - Handle 401 `[password lama tidak sesuai]` → tampilkan di form (field old_password focus)
    - Handle 400 `[password minimal...]` atau `[...maksimal...]` → tampilkan
+   - Handle 423 `[akun terkunci sementara...]` (BARU — lockout kini juga berlaku di endpoint ini, counter shared dengan login) → tampilkan pesan persis, sama perlakuannya dengan 423 di halaman login (disable form/beri info "coba lagi nanti", bukan focus ke field tertentu)
    - Sukses 204:
      - Tampilkan confirmation/toast: "Password berhasil diubah. Mengalihkan..."
      - Call `GET /me` untuk update auth state (verify `must_change_password=0`)
