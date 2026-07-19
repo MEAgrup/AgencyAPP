@@ -21,8 +21,10 @@ yang perlu diubah.
   `cmd/cdps` (:8080, initial sync 43/43) + rolemapseed UAT (31 mapping, 3 layered)
   + mslseed (32 MSL) — boot order `import_samples/README.md` §UAT.
 - Data alur dasar: `w2_walk.py` PASS 50/0, `w3_walk.py` PASS 38/0 (SKIP 4 justified).
-- Branch berjalan berisi cherry-pick `781eab0` (json tag `RegisterInput` — tanpa
-  ini jalur import/registrasi M0/M1 yang dipakai smoke ini gagal di main).
+- Branch berjalan berisi cherry-pick `781eab0`. Yang dipakai smoke ini dari
+  commit itu: hasil closing persisten di `/sales/[id]` (asersi S3d). Jalur import
+  di sini memakai pintu bulk (sudah ber-json-tag sejak awal), jadi tidak
+  bergantung pada fix `RegisterInput`.
 - FE: `web-internal` `npm run dev` (Next 16.2.10, rewrite `/api/v1` → :8080).
 
 ## Cakupan (aktor riil per fixture UAT)
