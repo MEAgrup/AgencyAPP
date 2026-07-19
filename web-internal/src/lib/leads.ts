@@ -101,7 +101,7 @@ export interface LeadRow {
   id: string;
   lead_name: string;
   phone_number: string;
-  email: string;
+  email: string | null;
   source: string;
   origin_division: string;
   origin_campaign_id: string | null;

@@ -230,7 +230,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
           name: l.name,
           proposed_price: l.proposed_price,
           commission_rule: l.commission_rule,
-          payment_terms: l.payment_terms,
+          payment_terms: l.payment_terms ?? '',
         })),
       );
     }

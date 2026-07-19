@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	neturl "net/url"
 	"testing"
 
 	"github.com/meagrup/agencyapp/backend/internal/auth"
@@ -206,7 +207,7 @@ func TestListAttempts_ScopeAndFilter(t *testing.T) {
 	}
 
 	// Status filter (scoped to ss1's own New Lead attempts).
-	_, body = do(t, ss1, "GET", url+"?status=New Lead", nil)
+	_, body = do(t, ss1, "GET", url+"?"+neturl.Values{"status": {"New Lead"}}.Encode(), nil)
 	byID = rowsByID(t, body)
 	if _, ok := byID["PRSP-A1"]; !ok {
 		t.Errorf("status filter missing PRSP-A1")
@@ -392,7 +393,7 @@ func TestLeadsList_ScopeAndDetail(t *testing.T) {
 	}
 
 	// Filters.
-	_, body = do(t, ml, "GET", url+"?status=[Pool]", nil)
+	_, body = do(t, ml, "GET", url+"?"+neturl.Values{"status": {"[Pool]"}}.Encode(), nil)
 	byID = rowsByID(t, body)
 	if _, ok := byID["LEAD-POOL"]; !ok {
 		t.Errorf("status filter missing LEAD-POOL")
@@ -400,7 +401,7 @@ func TestLeadsList_ScopeAndDetail(t *testing.T) {
 	if _, ok := byID["LEAD-A"]; ok {
 		t.Errorf("status filter should exclude active LEAD-A")
 	}
-	_, body = do(t, ml, "GET", url+"?q=Nego", nil)
+	_, body = do(t, ml, "GET", url+"?"+neturl.Values{"q": {"Nego"}}.Encode(), nil)
 	byID = rowsByID(t, body)
 	if _, ok := byID["LEAD-NEG"]; !ok || len(byID) != 1 {
 		t.Errorf("q filter wrong: %v", byID)

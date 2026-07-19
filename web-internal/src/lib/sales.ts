@@ -70,11 +70,11 @@ export interface QualifiedFormServiceRow {
   master_service_id: string;
   master_version_no: number;
   name: string;
-  quantity: number;
-  unit: string;
+  quantity: string; // DECIMAL dikirim string oleh backend (reads.go QFServiceView)
+  unit: string | null;
   pricing_mode: string;
   standard_price: string;
-  input_amount: string;
+  input_amount: string | null;
   subtotal: string;
   commission_rule: string;
 }
@@ -87,10 +87,10 @@ export interface QualifiedFormSnapshot {
   link_toko: string;
   kategori: string;
   platform: string;
-  store_link: string;
+  store_link: string | null;
   gmv_baseline: string;
   target_gmv: string;
-  marketing_budget: string;
+  marketing_budget: string | null;
   services: QualifiedFormServiceRow[];
 }
 
@@ -100,7 +100,7 @@ export interface ProposalLineRow {
   name: string;
   proposed_price: string;
   commission_rule: string;
-  payment_terms: string;
+  payment_terms: string | null;
 }
 
 // One versioned negotiation_proposals row + its lines (version_no ASC).
@@ -109,7 +109,7 @@ export interface NegotiationProposalRow {
   version_no: number;
   proposed_by: string;
   proposed_by_nama: string;
-  decision_note: string;
+  decision_note: string | null;
   created_at: string;
   lines: ProposalLineRow[];
 }
@@ -130,7 +130,7 @@ export interface AttemptDetail {
     id: string;
     lead_name: string;
     phone_number: string;
-    email: string;
+    email: string | null;
     source: string;
     record_status: string;
     origin_campaign_id: string | null;
