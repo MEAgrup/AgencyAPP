@@ -1,10 +1,8 @@
 package httpapi_test
 
 import (
-	"context"
 	"testing"
 
-	"github.com/meagrup/agencyapp/backend/internal/auth"
 	"github.com/meagrup/agencyapp/backend/internal/core/notification"
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
 	"github.com/meagrup/agencyapp/backend/internal/httpapi"
@@ -12,27 +10,6 @@ import (
 
 	"github.com/meagrup/agencyapp/backend/internal/testutil"
 )
-
-// cmpAuth maps the Module 3 (Campaign) fixture emails (password "rahasia123") to ids.
-type cmpAuth struct{}
-
-func (cmpAuth) Verify(_ context.Context, email, password string) (string, error) {
-	if password != "rahasia123" {
-		return "", auth.ErrInvalidCredentials
-	}
-	m := map[string]string{
-		"lia@mea.co.id":   "EMP-LIA",   // Marketing staff (owner)
-		"dina@mea.co.id":  "EMP-DINA",  // Marketing staff (reassign target)
-		"maya@mea.co.id":  "EMP-MHEAD", // Marketing head (lead)
-		"sam@mea.co.id":   "EMP-SAL",   // Sales staff (foreign)
-		"odi@mea.co.id":   "EMP-ODI",   // OD (read-only)
-		"yohan@mea.co.id": "EMP-YOHAN", // Director
-	}
-	if id, ok := m[email]; ok {
-		return id, nil
-	}
-	return "", auth.ErrInvalidCredentials
-}
 
 func setupCMP(t *testing.T) (*httptest.Server, func()) {
 	t.Helper()
@@ -50,7 +27,8 @@ func setupCMP(t *testing.T) (*httptest.Server, func()) {
 	testutil.InsertLayeredRole(t, d, "EMP-ODI", "od")
 	testutil.InsertLayeredRole(t, d, "EMP-YOHAN", "director")
 
-	app := httpapi.New(d, statemachine.New(), notification.NewCatalog(), cmpAuth{}, nil)
+	testutil.SeedCredentials(t, d, "rahasia123")
+	app := httpapi.New(d, statemachine.New(), notification.NewCatalog(), nil)
 	srv := httptest.NewServer(app.Router())
 	return srv, srv.Close
 }

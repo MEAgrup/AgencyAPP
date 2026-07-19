@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/meagrup/agencyapp/backend/internal/db"
 )
 
@@ -110,6 +112,7 @@ var dataTables = []string{
 	"role_mappings",
 	"audit_log",
 	"id_sequences",
+	"employee_credentials",
 	"sessions",
 	"employees",
 }
@@ -168,6 +171,49 @@ func InsertRoleMapping(t *testing.T, d *sql.DB, divisi, jabatan, division, level
 		divisi, jabatan, division, level)
 	if err != nil {
 		t.Fatalf("insert role mapping: %v", err)
+	}
+}
+
+// SeedCredentials provisions an active (must_change_password = 0) local password
+// for EVERY employee currently in the table, so the existing login helpers keep
+// working after the switch to CDPS-local auth. The password is hashed once.
+func SeedCredentials(t *testing.T, d *sql.DB, password string) {
+	t.Helper()
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash seed password: %v", err)
+	}
+	_, err = d.Exec(
+		`INSERT INTO employee_credentials (employee_id, password_hash, must_change_password, created_by)
+		 SELECT employee_id, ?, 0, 'TEST' FROM employees
+		 ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), must_change_password = 0,
+		                         failed_attempts = 0, locked_until = NULL`,
+		string(hash))
+	if err != nil {
+		t.Fatalf("seed credentials: %v", err)
+	}
+}
+
+// SeedCredential provisions a single employee's credential with an explicit
+// must_change_password flag (for gate / provisioning tests).
+func SeedCredential(t *testing.T, d *sql.DB, employeeID, password string, mustChange bool) {
+	t.Helper()
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	mc := 0
+	if mustChange {
+		mc = 1
+	}
+	_, err = d.Exec(
+		`INSERT INTO employee_credentials (employee_id, password_hash, must_change_password, created_by)
+		 VALUES (?, ?, ?, 'TEST')
+		 ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), must_change_password = VALUES(must_change_password),
+		                         failed_attempts = 0, locked_until = NULL`,
+		employeeID, string(hash), mc)
+	if err != nil {
+		t.Fatalf("seed credential: %v", err)
 	}
 }
 

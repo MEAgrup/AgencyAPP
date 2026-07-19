@@ -7,35 +7,11 @@ import (
 	neturl "net/url"
 	"testing"
 
-	"github.com/meagrup/agencyapp/backend/internal/auth"
 	"github.com/meagrup/agencyapp/backend/internal/core/notification"
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
 	"github.com/meagrup/agencyapp/backend/internal/httpapi"
 	"github.com/meagrup/agencyapp/backend/internal/testutil"
 )
-
-// lsAuth maps the leads/sales read-model fixture emails (password "rahasia123").
-type lsAuth struct{}
-
-func (lsAuth) Verify(_ context.Context, email, password string) (string, error) {
-	if password != "rahasia123" {
-		return "", auth.ErrInvalidCredentials
-	}
-	m := map[string]string{
-		"ss1@mea.co.id":   "EMP-SS1", // Sales staff (owner of most attempts)
-		"ss2@mea.co.id":   "EMP-SS2", // Sales staff (other owner)
-		"sl@mea.co.id":    "EMP-SL",  // Sales lead
-		"ms@mea.co.id":    "EMP-MS",  // Marketing staff
-		"ml@mea.co.id":    "EMP-ML",  // Marketing lead
-		"cr@mea.co.id":    "EMP-CR",  // Creative staff (foreign division)
-		"odi@mea.co.id":   "EMP-ODI", // OD (read-only)
-		"yohan@mea.co.id": "EMP-DIR", // Director
-	}
-	if id, ok := m[email]; ok {
-		return id, nil
-	}
-	return "", auth.ErrInvalidCredentials
-}
 
 // setupLS wires the server + directly seeds a controlled leads/attempts fixture
 // (statuses set at INSERT so the read model and the /lost engine edge can be
@@ -119,7 +95,8 @@ func setupLS(t *testing.T) (*httptest.Server, func()) {
 	attempt("PRSP-P2", "LEAD-POOL", "EMP-SS1", "New Lead")
 	lead("LEAD-POOL-STALE", "Toko Stale", "0811000007", "[Pool]", "", "TEST", "(NOW() - INTERVAL 3 DAY)")
 
-	app := httpapi.New(d, statemachine.New(), notification.NewCatalog(), lsAuth{}, nil)
+	testutil.SeedCredentials(t, d, "rahasia123")
+	app := httpapi.New(d, statemachine.New(), notification.NewCatalog(), nil)
 	srv := httptest.NewServer(app.Router())
 	return srv, srv.Close
 }
