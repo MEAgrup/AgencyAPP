@@ -28,9 +28,14 @@ export default function PerformancePage() {
   // Note: role.division is lowercase from HRIS ('creative', 'ads', 'kol', 'account')
   // but M14 API expects uppercase, so normalize
   const userDivision = role?.division ? normalizeM14Division(role.division) : '';
+  // Cakupan M14 = 4 role type (Creative/Ads/KOL/AM). Divisi lain (Marketing, Sales,
+  // Finance, Live Stream, HR) tidak punya konfigurasi KPI — endpoint teams/staff
+  // pasti 404 [data tidak ditemukan], jadi jangan ditembak.
+  const inM14Scope = (DIVISIONS as readonly string[]).includes(userDivision);
   const displayDivisions = useMemo(
-    () => (canViewMultipleDivisions ? [...DIVISIONS] : userDivision ? [userDivision] : []),
-    [canViewMultipleDivisions, userDivision]
+    () =>
+      canViewMultipleDivisions ? [...DIVISIONS] : inM14Scope && userDivision ? [userDivision] : [],
+    [canViewMultipleDivisions, inM14Scope, userDivision]
   );
 
   // Period & division selection
@@ -85,6 +90,24 @@ export default function PerformancePage() {
 
   const emptyOrNotAvailable = !rollup || rollup.members.length === 0;
   const showPlaceholder = rollup && rollup.period === '';
+
+  if (!canViewMultipleDivisions && !inM14Scope) {
+    return (
+      <div className="stack">
+        <div>
+          <h1>Team Performance</h1>
+          <p className="muted">Snapshot skor KPI bulanan per karyawan (M14).</p>
+        </div>
+        <section className="card">
+          <div className="alert alertInfo" role="status">
+            Skor KPI M14 mencakup role type Creative, Ads, KOL, dan AM (Account). Divisi Anda
+            ({role?.division || '—'}) berada di luar cakupan tersebut sehingga tidak memiliki
+            skor performa di modul ini.
+          </div>
+        </section>
+      </div>
+    );
+  }
 
   if (isStaffOnly) {
     return (

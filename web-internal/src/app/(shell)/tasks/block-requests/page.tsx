@@ -45,9 +45,11 @@ export default function BlockRequestsPage() {
   const [decisionMessage, setDecisionMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!canView) {
+    if (!canView || !division) {
       // Halaman khusus SPV/Lead/Director — jangan menembak GET /portal/team yang
-      // pasti 403 untuk role lain (gate portal.go actor.IsLead).
+      // pasti 403 untuk role lain (gate portal.go actor.IsLead). Direktur tanpa
+      // divisi bawaan juga wajib memilih divisi dulu (portal.go: division kosong
+      // = 403, tidak ada agregat lintas divisi).
       setLoading(false);
       return;
     }
@@ -142,6 +144,11 @@ export default function BlockRequestsPage() {
       </section>
 
       <section className="card">
+        {!division && !loading && (
+          <div className="alert alertInfo" role="status">
+            Pilih divisi terlebih dahulu untuk melihat antrian block-request.
+          </div>
+        )}
         {loading && <p className="muted">Memuat...</p>}
         {error && <div className="alert alertError" role="alert">{error}</div>}
         {decisionError && <div className="alert alertError" role="alert">{decisionError}</div>}

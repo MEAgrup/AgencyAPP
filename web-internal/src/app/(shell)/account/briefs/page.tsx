@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import {
   KANBAN_COLUMNS,
   KANBAN_DIVISIONS,
@@ -12,27 +13,43 @@ import {
 import StatusBadge from '@/components/StatusBadge';
 
 export default function BriefBoardPage() {
-  const [division, setDivision] = useState<string>(KANBAN_DIVISIONS[0]);
+  const { role } = useAuth();
+
+  // Cermin gate ListDivisionQueue (module6 brief.go: CanReadAll / Account lead /
+  // anggota divisi ybs.) — UX only, server tetap otoritas akhir. AM staff murni
+  // TIDAK boleh membuka queue divisi mana pun (keputusan interview 2026-07-12).
+  const canReadAll = Boolean(role?.od || role?.director);
+  const isAccountLead = role?.level === 'lead' && role?.division.toLowerCase() === 'account';
+  const allowedDivisions = (KANBAN_DIVISIONS as readonly string[]).filter(
+    (d) => canReadAll || isAccountLead || role?.division.toLowerCase() === d.toLowerCase(),
+  );
+
+  const [division, setDivision] = useState<string>('');
+  const effectiveDivision = division || allowedDivisions[0] || '';
+
   const [briefs, setBriefs] = useState<Brief[] | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(allowedDivisions.length > 0);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    if (!effectiveDivision) return;
+    let cancelled = false;
     setLoading(true);
     setError(null);
-    try {
-      const res = await listDivisionQueue(division);
-      setBriefs(res.data);
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [division]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+    listDivisionQueue(effectiveDivision)
+      .then((res) => {
+        if (!cancelled) setBriefs(res.data);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(errorMessage(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveDivision]);
 
   // Ordered columns: the known kanban statuses first, then any extra status that
   // actually appears in the queue (so nothing gets hidden).
@@ -55,11 +72,11 @@ export default function BriefBoardPage() {
           <p className="muted">Antrean Brief per divisi (M6 §7). Aksi review ada di detail Brief.</p>
         </div>
         <div className="row" style={{ gap: 8 }}>
-          {KANBAN_DIVISIONS.map((d) => (
+          {allowedDivisions.map((d) => (
             <button
               key={d}
               type="button"
-              className={`btn btnSm ${division === d ? 'btnPrimary' : 'btnSecondary'}`}
+              className={`btn btnSm ${effectiveDivision === d ? 'btnPrimary' : 'btnSecondary'}`}
               onClick={() => setDivision(d)}
             >
               {d}
@@ -69,10 +86,17 @@ export default function BriefBoardPage() {
       </div>
 
       <section className="card">
+        {allowedDivisions.length === 0 && (
+          <div className="alert alertInfo" role="status">
+            Papan Brief menampilkan antrean divisi eksekutor dan hanya dapat dibuka oleh
+            anggota divisi tersebut, Account Lead/SPV, OD, atau Direktur. Role Anda tidak
+            memiliki akses ke antrean divisi mana pun.
+          </div>
+        )}
         {loading && <p className="muted">Memuat...</p>}
         {error && <div className="alert alertError" role="alert">{error}</div>}
         {!loading && !error && briefs && briefs.length === 0 && (
-          <div className="emptyState">Tidak ada Brief di antrean divisi {division}.</div>
+          <div className="emptyState">Tidak ada Brief di antrean divisi {effectiveDivision}.</div>
         )}
         {!loading && !error && briefs && briefs.length > 0 && (
           <div className="table-wrap" style={{ display: 'flex', gap: 12, padding: 12, alignItems: 'flex-start' }}>

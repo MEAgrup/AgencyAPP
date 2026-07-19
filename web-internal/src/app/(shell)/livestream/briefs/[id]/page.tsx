@@ -35,8 +35,17 @@ export default function LiveStreamBriefDetailPage({ params }: { params: Promise<
   // exact clients.assigned_am_id match on every write.
   const canManage = canManageLiveStream(role);
 
+  // canSeeSession (§6.1, module10 livestream.go): OD/Director, Account lead/SPV,
+  // dan AM pemilik. Staf divisi eksekusi & role lain TIDAK punya visibilitas
+  // Session — jangan menembak GET sessions yang pasti 403. Aproksimasi FE utk
+  // "AM pemilik" = anggota divisi Account (server re-check assigned_am_id).
+  const canSeeSessions = Boolean(
+    role && (role.od || role.director || role.division.toLowerCase() === 'account'),
+  );
+
   const [brief, setBrief] = useState<LiveStreamBrief | null>(null);
   const [sessions, setSessions] = useState<Session[] | null>(null);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -57,16 +66,27 @@ export default function LiveStreamBriefDetailPage({ params }: { params: Promise<
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
+    setSessionsError(null);
     try {
-      const [briefRes, sessionsRes] = await Promise.all([getBrief(id), listBriefSessions(id)]);
+      // Brief dan Session dimuat terpisah: kegagalan baca Session (403 utk
+      // non-AM/lead/OD/Director) tidak boleh menenggelamkan tampilan Brief.
+      const briefRes = await getBrief(id);
       setBrief(briefRes);
-      setSessions(sessionsRes.data);
+      if (canSeeSessions) {
+        try {
+          const sessionsRes = await listBriefSessions(id);
+          setSessions(sessionsRes.data);
+        } catch (err) {
+          setSessions(null);
+          setSessionsError(errorMessage(err));
+        }
+      }
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, canSeeSessions]);
 
   useEffect(() => {
     load();
@@ -193,6 +213,13 @@ export default function LiveStreamBriefDetailPage({ params }: { params: Promise<
         <div className="cardHeader">
           <h2>Session</h2>
         </div>
+        {!canSeeSessions && (
+          <div className="alert alertInfo" role="status">
+            Daftar Session hanya terlihat oleh AM pemilik, Account Lead/SPV, OD, dan Direktur
+            (M10 §6.1). Role Anda tidak memiliki visibilitas Session.
+          </div>
+        )}
+        {sessionsError && <div className="alert alertError" role="alert">{sessionsError}</div>}
         {sessions && sessions.length === 0 && (
           <div className="emptyState">Belum ada Session untuk Brief ini.</div>
         )}
