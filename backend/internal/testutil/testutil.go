@@ -116,17 +116,16 @@ var dataTables = []string{
 
 // Clean truncates all data tables to give a test a fresh slate. TRUNCATE does
 // not fire the append-only DELETE triggers, so it is safe here.
+// SET FOREIGN_KEY_CHECKS is session-scoped, while *sql.DB is a pool — the SET
+// and the TRUNCATEs must run on ONE pinned connection or a TRUNCATE can land
+// on a fresh connection with FK checks still ON (intermittent Error 1701 on
+// parent tables like master_services).
 func Clean(t *testing.T, d *sql.DB) {
 	t.Helper()
-	// SET FOREIGN_KEY_CHECKS is a per-connection variable: it must execute on
-	// the SAME connection as every TRUNCATE, so pin one connection from the
-	// pool for the whole sequence. Issuing these through d.Exec lets the pool
-	// hand the TRUNCATEs a different connection with FK checks still on
-	// (observed as a flaky Error 1701 on parent tables in CI).
 	ctx := context.Background()
 	conn, err := d.Conn(ctx)
 	if err != nil {
-		t.Fatalf("acquire cleanup conn: %v", err)
+		t.Fatalf("clean: pin connection: %v", err)
 	}
 	defer conn.Close()
 	if _, err := conn.ExecContext(ctx, "SET FOREIGN_KEY_CHECKS=0"); err != nil {
