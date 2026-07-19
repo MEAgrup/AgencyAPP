@@ -1,5 +1,5 @@
-import { badgeTone } from '@/lib/status';
+import { badgeTone, type BadgeTone } from '@/lib/status';
 
-export default function StatusBadge({ status }: { status: string }) {
-  return <span className={`badge badge-${badgeTone(status)}`}>{status}</span>;
+export default function StatusBadge({ status, tone }: { status: string; tone?: BadgeTone }) {
+  return <span className={`badge badge-${tone ?? badgeTone(status)}`}>{status}</span>;
 }

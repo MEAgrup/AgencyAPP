@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import StatusBadge from '@/components/StatusBadge';
 import {
   CHANNEL_SUGGESTIONS,
   campaignBadgeTone,
@@ -218,7 +219,7 @@ export default function MarketingWorkspacePage() {
                       <td>{c.end_date ?? '—'}</td>
                       <td>{c.owner_employee_id}</td>
                       <td>
-                        <span className={`badge badge-${campaignBadgeTone(c.status)}`}>{c.status}</span>
+                        <StatusBadge status={c.status} tone={campaignBadgeTone(c.status)} />
                       </td>
                     </tr>
                   ))}
