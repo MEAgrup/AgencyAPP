@@ -165,6 +165,30 @@ func TestAuthHTTP_ChangePasswordAndForceChangeGate(t *testing.T) {
 	}
 }
 
+func TestAuthHTTP_ChangePasswordLockout(t *testing.T) {
+	srv, done := setupAuthSrv(t)
+	defer done()
+
+	// staff logs in (correct password), then brute-forces the old password.
+	c := login(t, srv, "staff@mea.co.id")
+
+	// Five failed change-password attempts (wrong old_password) lock the account.
+	for i := 0; i < 5; i++ {
+		code, body := do(t, c, "POST", srv.URL+"/api/v1/auth/change-password",
+			map[string]string{"old_password": "salah", "new_password": "BrandNew!234"})
+		if code != 401 || body["message"] != "[password lama tidak sesuai]" {
+			t.Fatalf("change failure %d: %d %v", i+1, code, body)
+		}
+	}
+
+	// Now locked: even the correct old password is rejected with 423 + exact message.
+	code, body := do(t, c, "POST", srv.URL+"/api/v1/auth/change-password",
+		map[string]string{"old_password": "rahasia123", "new_password": "BrandNew!234"})
+	if code != 423 || body["message"] != "[akun terkunci sementara karena percobaan gagal berulang, coba lagi dalam 15 menit]" {
+		t.Fatalf("change while locked: %d %v", code, body)
+	}
+}
+
 func TestAuthHTTP_CredentialsScoping(t *testing.T) {
 	srv, done := setupAuthSrv(t)
 	defer done()

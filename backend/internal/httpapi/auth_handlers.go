@@ -118,6 +118,8 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err == nil:
 		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, auth.ErrLocked):
+		writeErr(w, http.StatusLocked, "[akun terkunci sementara karena percobaan gagal berulang, coba lagi dalam 15 menit]")
 	case errors.Is(err, auth.ErrOldPasswordMismatch):
 		writeErr(w, http.StatusUnauthorized, "[password lama tidak sesuai]")
 	case errors.Is(err, auth.ErrWeakPassword):

@@ -134,17 +134,35 @@ func registerFailure(ctx context.Context, d *sql.DB, empID string, prev int) err
 
 // ChangePassword lets a logged-in employee change their own password. It clears
 // the force-change gate, revokes every OTHER session, and audits the change.
+//
+// The failed-attempt lockout is shared with VerifyLocal: the lock is checked
+// BEFORE the hash (a correct old password is still rejected while locked), and
+// an old-password mismatch increments the SAME counter, so a stolen session
+// cannot brute-force the old password without tripping the lock. The success
+// path clears the counter and any lock.
 func ChangePassword(ctx context.Context, d *sql.DB, empID, keepToken, oldPassword, newPassword string) error {
-	var hash string
+	var (
+		hash           string
+		failedAttempts int
+		lockedUntil    sql.NullTime
+	)
 	err := d.QueryRowContext(ctx,
-		`SELECT password_hash FROM employee_credentials WHERE employee_id = ?`, empID).Scan(&hash)
+		`SELECT password_hash, failed_attempts, locked_until FROM employee_credentials WHERE employee_id = ?`, empID).
+		Scan(&hash, &failedAttempts, &lockedUntil)
 	if err == sql.ErrNoRows {
 		return ErrNotProvisioned
 	}
 	if err != nil {
 		return err
 	}
+	// Locked window: reject before verifying the hash.
+	if lockedUntil.Valid && lockedUntil.Time.After(time.Now()) {
+		return ErrLocked
+	}
 	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(oldPassword)) != nil {
+		if err := registerFailure(ctx, d, empID, failedAttempts); err != nil {
+			return err
+		}
 		return ErrOldPasswordMismatch
 	}
 	if err := validatePassword(newPassword); err != nil {

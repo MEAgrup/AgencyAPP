@@ -188,6 +188,65 @@ func TestChangePassword_Flow(t *testing.T) {
 	}
 }
 
+func TestChangePassword_SharedLockoutWithLogin(t *testing.T) {
+	d := baseFixture(t)
+	ctx := context.Background()
+	seedProvisioned(t, d, "EMP-SALES", "TempPass!234")
+
+	// Two failed logins raise the shared counter to 2.
+	for i := 0; i < 2; i++ {
+		if _, _, err := auth.VerifyLocal(ctx, d, "sari@mea.co.id", "bad-pass-x"); !errors.Is(err, auth.ErrInvalidCredentials) {
+			t.Fatalf("login failure %d: %v", i+1, err)
+		}
+	}
+	// Three failed ChangePassword attempts (wrong old_password) push it to 5 => locked.
+	for i := 0; i < 3; i++ {
+		if err := auth.ChangePassword(ctx, d, "EMP-SALES", "", "wrong-old-pw", "BrandNew!234"); !errors.Is(err, auth.ErrOldPasswordMismatch) {
+			t.Fatalf("change failure %d: %v", i+1, err)
+		}
+	}
+
+	// ChangePassword with the CORRECT old password is now rejected while locked.
+	if err := auth.ChangePassword(ctx, d, "EMP-SALES", "", "TempPass!234", "BrandNew!234"); !errors.Is(err, auth.ErrLocked) {
+		t.Fatalf("change while locked (correct old): %v", err)
+	}
+	// VerifyLocal with the CORRECT password is likewise locked (shared, both directions).
+	if _, _, err := auth.VerifyLocal(ctx, d, "sari@mea.co.id", "TempPass!234"); !errors.Is(err, auth.ErrLocked) {
+		t.Fatalf("login while locked (correct pw): %v", err)
+	}
+
+	// account_locked audit row exists.
+	entries, err := loadCredAudit(t, d, "EMP-SALES")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasAction(entries, "account_locked") {
+		t.Fatalf("expected account_locked audit, got %v", actions(entries))
+	}
+
+	// Simulate lock expiry, then a correct ChangePassword succeeds and clears state.
+	if _, err := d.Exec(`UPDATE employee_credentials SET locked_until = ? WHERE employee_id='EMP-SALES'`,
+		time.Now().Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := auth.ChangePassword(ctx, d, "EMP-SALES", "", "TempPass!234", "BrandNew!234"); err != nil {
+		t.Fatalf("change after expiry: %v", err)
+	}
+	var attempts int
+	var locked sql.NullTime
+	if err := d.QueryRow(`SELECT failed_attempts, locked_until FROM employee_credentials WHERE employee_id='EMP-SALES'`).
+		Scan(&attempts, &locked); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 0 || locked.Valid {
+		t.Fatalf("post-change state attempts=%d locked=%v want attempts=0 locked=NULL", attempts, locked)
+	}
+	// New password verifies (force-change cleared).
+	if _, _, err := auth.VerifyLocal(ctx, d, "sari@mea.co.id", "BrandNew!234"); err != nil {
+		t.Fatalf("verify new password: %v", err)
+	}
+}
+
 func TestSetPassword_Authorization(t *testing.T) {
 	d := baseFixture(t)
 	ctx := context.Background()
