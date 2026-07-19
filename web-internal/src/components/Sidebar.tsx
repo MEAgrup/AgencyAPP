@@ -23,6 +23,12 @@ const MAIN_LINKS: NavItem[] = [
   // end Wave 1 — stream B (M4/M5)
 ];
 
+// Wave 1 — stream A (M0 Sales + M1 Leads)
+const ACQUISITION_LINKS: NavItem[] = [
+  { href: '/sales', label: 'Sales Workspace' },
+  { href: '/leads', label: 'Leads' },
+];
+
 // Wave 2 — workspace operasional (M6, M12, M7, M8, M9, M10)
 const DELIVERY_LINKS: NavItem[] = [
   { href: '/account', label: 'Account & Service' },
@@ -62,6 +68,16 @@ export default function Sidebar({ role }: { role: Role | null }) {
       </div>
       <nav className={styles.nav}>
         {MAIN_LINKS.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={`${styles.navLink} ${isActive(pathname, item.href) ? styles.navLinkActive : ''}`}
+          >
+            {item.label}
+          </Link>
+        ))}
+        <div className={styles.navSection}>Akuisisi</div>
+        {ACQUISITION_LINKS.map((item) => (
           <Link
             key={item.href}
             href={item.href}
