@@ -48,7 +48,7 @@ Digenerate dari roster V2 (65 karyawan) memakai konvensi importer repo:
 | `backend/testdata/import_samples/employees_cdps.csv` | 65 karyawan (`employee_id`=NIK, nama, email di-trim, `divisi`/`jabatan` = DEPARTMENT/JABATAN mentah HRIS, `status_aktif=true`). Sudah lolos `hris.ParseEmployeeCSV` (65 baris, semua field terisi, ID unik, email tak ada yang duplikat/kosong). |
 | `backend/testdata/import_samples/nik_email.csv` | Peta `nik,email` (65). |
 | `backend/seed/role_mappings_riil.csv` | 43 mapping `(divisi,jabatan) → (division,level)` — dibaca `cmd/rolemapseed`. |
-| `backend/seed/layered_roles_riil.csv` | 6 layered role: `director` untuk Yohan (`200000001`) & Nerissa (`200000002`); `od` untuk OKFA (`2409230432`, HRGA), ARSY (`2501140493`), GHIFARI (`2507250557`), WULAN (`2607060683`). |
+| `backend/seed/layered_roles_riil.csv` | 7 layered role: `director` untuk Yohan (`200000001`) & Nerissa (`200000002`); `od` untuk OKFA (`2409230432`, HRGA), ARSY (`2501140493`), GHIFARI (`2507250557`), WULAN (`2607060683`); `od` untuk DATA ANALYST INTERN (`2602190629`) — konfirmasi PO 2026-07-20. |
 
 Prinsip mapping = **least-privilege**: bila ragu → `staff` / tanpa mapping,
 tidak pernah `lead`/`od`/`director` (permission house rule #6). Semua asumsi
@@ -74,7 +74,7 @@ CDPS_DSN="$PROD" CDPS_SEED_CSV="testdata/import_samples/employees_cdps.csv" \
 
 # 3) Role mapping + layered role — WAJIB dry-run dulu, review, baru apply
 CDPS_DSN="$PROD" go run ./cmd/rolemapseed            # dry-run
-CDPS_DSN="$PROD" go run ./cmd/rolemapseed --apply    # tulis 43 mapping + 6 layered
+CDPS_DSN="$PROD" go run ./cmd/rolemapseed --apply    # tulis 43 mapping + 7 layered
 
 # 4) Bootstrap password Director pertama (Yohan) — chicken-and-egg break
 CDPS_DSN="$PROD" go run ./cmd/setpass 200000001 "<password-temporer-min-8-char>"
@@ -90,6 +90,8 @@ password karyawan lain lewat panel admin kredensial
 (`POST /api/v1/auth/admin/set-password`) atau `setpass` per NIK.
 
 ## 5. Keputusan yang perlu konfirmasi product owner (sebelum §4 langkah 3 apply)
+
+> **UPDATE 2026-07-20 — SEMUA butir DIKONFIRMASI product owner** (lihat `docs/DECISIONS.md` Decided 2026-07-20). Dua revisi diterapkan ke artefak: butir 4 — `SENIOR FINANCE, ACCOUNTING & TAX` → **Finance/lead**; butir 5 — DATA ANALYST INTERN `2602190629` → layered **`od`**. Butir lain tetap seperti tertulis. O26 tertutup.
 
 Roster V2 menambah 26 pasangan DEPARTMENT/JABATAN baru di luar batch-1
 (DECISIONS 2026-07-17). Yang tegas mengikuti preseden sudah dipetakan; yang
