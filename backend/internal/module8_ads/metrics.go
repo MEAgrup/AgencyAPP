@@ -62,11 +62,19 @@ func (s *Service) LogMetricEntry(ctx context.Context, actor permission.Actor, ca
 	}
 	defer tx.Rollback()
 
-	if _, err := lockCampaign(ctx, tx, campaignID); err != nil {
+	r, err := lockCampaign(ctx, tx, campaignID)
+	if err != nil {
 		return MetricEntry{}, err
 	}
 	if !canManageCampaign(actor) {
 		return MetricEntry{}, ErrCampaignManageForbidden
+	}
+	// COO decision 2026-07-20 (DECISIONS.md): a campaign in the terminal [Ended]
+	// status no longer accepts Metric Entries. Gated server-side after the row lock
+	// (mirrors the O13 import gate), so a raced End cannot slip an entry in. Only
+	// [Ended] is blocked — [Paused] still accepts entries for running/late periods.
+	if r.status == StatusEnded {
+		return MetricEntry{}, ErrCampaignEnded
 	}
 	method := strings.TrimSpace(in.EntryMethod)
 	if strings.TrimSpace(in.PeriodStart) == "" || strings.TrimSpace(in.PeriodEnd) == "" ||
