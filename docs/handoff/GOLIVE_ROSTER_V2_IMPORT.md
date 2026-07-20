@@ -60,6 +60,19 @@ Jalankan dari **checkout repo** (bukan dari container Railway — CLI & file see
 tidak ada di image) dengan `CDPS_DSN` = URL MySQL publik Railway. Urutan wajib
 (employees dulu; seed layered memvalidasi `employee_id` ada di `employees`).
 
+> **GLADI BERSIH 2026-07-20 — seluruh runbook ini PASS end-to-end** di MySQL 8
+> lokal (migrate 26 migrasi → sync 65/65 → rolemapseed 43+7 idempoten → setpass
+> → login Yohan 200 + `must_change_password:true`, lowercase OK, password salah
+> `[email atau password salah]`, change-password 204).
+>
+> **PERINGATAN:** JANGAN pernah menjalankan `go run ./cmd/cdps` dari checkout
+> dengan `CDPS_DSN` produksi TANPA `CDPS_SEED_CSV` — default sumber sync =
+> `testdata/employees.csv` (fixture dev, `cmd/cdps/main.go:37`) dan boot
+> melakukan **full sync** yang men-*deactivate* semua karyawan di luar sumber
+> (65 baris roster ter-clobber fixture). Selalu sertakan
+> `CDPS_SEED_CSV=testdata/import_samples/employees_cdps.csv`. (Container
+> Railway aman: file fixture tidak ada di image → sync gagal non-fatal.)
+
 ```bash
 cd backend
 PROD="mysql://user:pass@host:port/dbname"   # dari Railway MySQL (MYSQL_URL/DATABASE_URL)
