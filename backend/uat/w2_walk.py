@@ -113,7 +113,7 @@ total = q.get("estimasi_nilai_idr") or ""
 tot = decimal.Decimal(total.replace("Rp. ","").replace(".","").replace(",",".")) if total else decimal.Decimal(0)
 
 PHONE = "0812W2" + UQ
-st, b = call(sales, "POST", "/leads", {"LeadName": f"UAT W2 Deal {UQ}", "PhoneNumber": PHONE, "Source": "Scouting", "Email": f"uatw2{UQ}@example.com"})
+st, b = call(sales, "POST", "/leads", {"lead_name": f"UAT W2 Deal {UQ}", "phone_number": PHONE, "source": "Scouting", "email": f"uatw2{UQ}@example.com"})
 lead_id = (b.get("lead") or {}).get("ID") or (b.get("lead") or {}).get("id")
 att_id  = (b.get("attempt") or {}).get("ID") or (b.get("attempt") or {}).get("id")
 assert att_id, f"lead gagal: {st} {b}"
