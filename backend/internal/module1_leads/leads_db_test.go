@@ -2,6 +2,7 @@ package module1_leads
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -58,6 +59,42 @@ func TestRegisterIncomplete(t *testing.T) {
 	_, _, _, err := s.Register(context.Background(), salesActor("EMP-BUDI"), RegisterInput{LeadName: "X"})
 	if !errors.Is(err, ErrIncomplete) {
 		t.Fatalf("err = %v, want ErrIncomplete", err)
+	}
+}
+
+// TestRegisterInputDecodesSnakeCase locks the wire contract: the frontend posts
+// snake_case keys (lead_name/phone_number/source/campaign_id). Without json tags
+// the decoder produced an all-empty struct, so a fully-filled form still tripped
+// the mandatory-field gate. Decoding here must populate every field.
+func TestRegisterInputDecodesSnakeCase(t *testing.T) {
+	body := `{"lead_name":"Alpha Digital","phone_number":"08111111","email":"a@mea.co.id","source":"Scouting","campaign_id":"CMP-1"}`
+	var in RegisterInput
+	if err := json.Unmarshal([]byte(body), &in); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if in.LeadName != "Alpha Digital" || in.PhoneNumber != "08111111" ||
+		in.Email != "a@mea.co.id" || in.Source != "Scouting" || in.CampaignID != "CMP-1" {
+		t.Fatalf("decoded = %+v, snake_case body did not map onto every field", in)
+	}
+	if !in.valid() {
+		t.Fatal("fully-filled snake_case body must pass the mandatory-field gate")
+	}
+}
+
+// TestRegisterSourceOptional: only Lead Name + Phone Number are mandatory. A
+// registration with an empty Source must still succeed (house requirement —
+// Source is defaulted/derived, not user-mandatory).
+func TestRegisterSourceOptional(t *testing.T) {
+	s := newService(t)
+	testutil.InsertEmployee(t, s.DB, "EMP-BUDI", "Budi", "budi@mea.co.id", "Sales", "Sales Executive", true)
+	lead, att, _, err := s.Register(context.Background(), salesActor("EMP-BUDI"), RegisterInput{
+		LeadName: "Tanpa Source", PhoneNumber: "0812-0000",
+	})
+	if err != nil {
+		t.Fatalf("Register without Source: %v", err)
+	}
+	if lead.ID == "" || att.ID == "" {
+		t.Fatalf("register without Source must mint LEAD/PRSP: lead=%q attempt=%q", lead.ID, att.ID)
 	}
 }
 

@@ -82,22 +82,32 @@ type Attempt struct {
 	Status string `json:"status"`
 }
 
-// RegisterInput carries the Sales single-registration fields.
+// RegisterInput carries the Sales single-registration fields. The json tags are
+// the wire contract shared with the frontend (fe_m0m1_contract.md): snake_case,
+// matching web-internal/src/lib/leads.ts RegisterLeadInput. WITHOUT these tags,
+// Go's decoder matches struct-field names case-insensitively but does NOT strip
+// underscores, so a snake_case body (lead_name/phone_number/source) silently
+// decoded to an all-empty struct and tripped the mandatory-field gate even when
+// every field was filled.
 type RegisterInput struct {
-	LeadName    string
-	PhoneNumber string
-	Email       string
-	Source      string
+	LeadName    string `json:"lead_name"`
+	PhoneNumber string `json:"phone_number"`
+	Email       string `json:"email"`
+	Source      string `json:"source"`
 	// CampaignID optionally links the intake to a Campaign (CMP-, M3). When set,
 	// the campaign gate (O13 auto-activate/block) runs, Source is auto-derived
 	// from the Campaign Channel (overriding Source above), and origin/last-touch
 	// linkage is written (campaign_link.go). Empty = no campaign (Source used
 	// as-is, origin/last-touch left NULL).
-	CampaignID string
+	CampaignID string `json:"campaign_id"`
 }
 
+// valid is the single-registration mandatory-field gate. Only Lead Name and
+// Phone Number are required to register a lead; Source is optional (the intake
+// UI defaults it, and a campaign-scoped registration derives it from the
+// Campaign Channel anyway).
 func (in RegisterInput) valid() bool {
-	return in.LeadName != "" && in.PhoneNumber != "" && in.Source != ""
+	return in.LeadName != "" && in.PhoneNumber != ""
 }
 
 // Register is Sales single registration of a scouted lead (M1 §4, dedup v2). It
