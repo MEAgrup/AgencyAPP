@@ -38,8 +38,13 @@ func notInTerminal() (string, []any) {
 	return "NOT IN (" + strings.Join(ph, ",") + ")", args
 }
 
-// forbidden is the canonical 403 error (BI verbatim, mapped by writeDomainErr).
-func forbidden() error { return &statemachine.RoleError{Message: statemachine.RoleDeniedMessage} }
+// readDeniedMessage is the canonical generic data-access denial string
+// (DECISIONS 2026-07-17 W3-M3-C1: reuse, no module-specific wording) — the
+// transition-specific RoleDeniedMessage stays reserved for write transitions.
+const readDeniedMessage = "[anda tidak memiliki akses ke data ini]"
+
+// forbidden is the canonical 403 error for reads (BI verbatim, mapped by writeDomainErr).
+func forbidden() error { return &statemachine.RoleError{Message: readDeniedMessage} }
 
 // PoolRow is one Sales Pool board row (contract §3).
 type PoolRow struct {

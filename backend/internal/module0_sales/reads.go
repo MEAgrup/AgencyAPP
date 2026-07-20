@@ -112,8 +112,13 @@ type AttemptDetail struct {
 	AllowedTransitions []string           `json:"allowed_transitions"`
 }
 
-// forbidden is the canonical 403 error (BI verbatim, mapped by writeDomainErr).
-func forbidden() error { return &statemachine.RoleError{Message: statemachine.RoleDeniedMessage} }
+// readDeniedMessage is the canonical generic data-access denial string
+// (DECISIONS 2026-07-17 W3-M3-C1: reuse, no module-specific wording) — the
+// transition-specific RoleDeniedMessage stays reserved for write transitions.
+const readDeniedMessage = "[anda tidak memiliki akses ke data ini]"
+
+// forbidden is the canonical 403 error for reads (BI verbatim, mapped by writeDomainErr).
+func forbidden() error { return &statemachine.RoleError{Message: readDeniedMessage} }
 
 // canListAttempts reports whether actor may hit the attempt list at all and, if
 // so, whether the view is unscoped (all) or narrowed to the actor's own rows.

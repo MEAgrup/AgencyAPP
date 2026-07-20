@@ -22,6 +22,9 @@ export default function SalesWorkspacePage() {
   const canRegister = Boolean(role && ((role.division === 'Sales' && !odOnly) || role.director));
   // Kolom owner hanya untuk Lead/OD/Director (Sales staff hanya melihat miliknya — server scope).
   const showOwner = Boolean(role && (role.level === 'lead' || role.od || role.director));
+  // Cermin gate server GET /attempts (module0 reads): divisi Sales, OD, Director.
+  // Role lain tidak menembak endpoint yang pasti 403.
+  const canSeeAttempts = Boolean(role && (role.division === 'Sales' || role.od || role.director));
 
   const [attempts, setAttempts] = useState<AttemptRow[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -53,8 +56,8 @@ export default function SalesWorkspacePage() {
   }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (canSeeAttempts) load();
+  }, [canSeeAttempts, load]);
 
   async function handleRegister(e: FormEvent) {
     e.preventDefault();
@@ -98,6 +101,14 @@ export default function SalesWorkspacePage() {
           <Link href="/leads">Leads (Pool)</Link>.
         </p>
       </div>
+
+      {role && !canSeeAttempts && (
+        <div className="alert alertInfo" role="status">
+          Role Anda tidak memiliki akses ke daftar Prospect attempt (khusus divisi Sales, OD, dan
+          Direktur). Untuk memasukkan lead baru, gunakan pintu Import Marketing di{' '}
+          <Link href="/leads">Leads</Link>.
+        </div>
+      )}
 
       {canRegister && (
         <section className="card">
@@ -152,6 +163,7 @@ export default function SalesWorkspacePage() {
         </section>
       )}
 
+      {canSeeAttempts && (
       <section className="card">
         <div className="cardHeader">
           <h2>Prospect Attempt</h2>
@@ -205,6 +217,7 @@ export default function SalesWorkspacePage() {
           </div>
         )}
       </section>
+      )}
     </div>
   );
 }
