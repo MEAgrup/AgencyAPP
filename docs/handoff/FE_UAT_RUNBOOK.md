@@ -60,3 +60,42 @@ Dari tiap halaman list, klik entri pertama ke halaman detail.
 2. Setiap pesan BI dirender **verbatim** dalam `[...]` — tidak diparafrasa FE.
 3. Field computed (ROAS, skor, IDR `Rp. X.XXX.XXX,00`, `—` untuk div-0/null) hanya tampil, tidak pernah bisa diedit.
 4. `npm run lint` 0 error 0 warning; `npm run build` hijau.
+
+---
+
+## Tambahan 2026-07-20 — E. Workspace M0 Sales + M1 Leads
+
+Prasyarat sama (§boot UAT) + data alur `python3 backend/uat/w120_walk.py`
+(32 langkah harus PASS; payload register kini snake_case). Laporan eksekusi:
+`FE_SMOKE_REPORT_20260720_M0M1.md`.
+
+### E1. Read-path per role
+
+| # | Aktor | Rute → verifikasi kunci |
+|---|---|---|
+| E1a | Sales staff (`saffiramarwah@gmail.com`) | `/sales`: hanya attempt sendiri, TANPA kolom Owner, form Registrasi ADA; `/sales/[PRSP]` render; `/leads`: hanya tab Pool; `/leads/[LEAD]` (pemegang attempt) render |
+| E1b | Sales lead (`c.nurhayati14@gmail.com`) | `/sales`: semua attempt + kolom Owner; `/leads`: Pool + Database (klik entri → detail) |
+| E1c | Marketing staff (`arivlokananta@gmail.com`) | `/leads`: Database (scope own) + Import, TANPA Pool; `/sales`: **info alert** "tidak memiliki akses ke daftar Prospect attempt" TANPA tembakan 403 |
+| E1d | Marketing lead (fixture) | `/leads`: Database (semua) + Import |
+| E1e | OD layered | `/sales`: list + Owner, TANPA form Registrasi; `/sales/[id]`: NOL tombol aksi; `/leads`: Pool+Database TANPA Import, TANPA tombol Claim |
+| E1f | Director | `/sales` penuh + registrasi; `/leads`: ketiga tab |
+| E1g | Finance (negatif) | `/leads`: "Tidak ada tampilan untuk role Anda" tanpa 4xx; `/sales`: info alert; `/sales/[id]` URL langsung: alert `[anda tidak memiliki akses ke data ini]`, halaman tidak crash |
+
+### E2. Write-path via UI (alur hidup lintas role)
+
+1. Marketing: Import satu baris → summary `[1 lead berhasil diimport, …]`; Bulk
+   3 baris (1 cacat) → Imported 2 / Rejected 1 + Daftar Penolakan
+   `[data tidak lengkap, baris tidak diimport]`.
+2. Sales staff: Klaim dari Pool → `Berhasil klaim — Prospect PRSP-… dibuat.` →
+   Contacted (audit bertambah) → Qualified Form (platform ≥1, kategori, MSL
+   picker ≤5) → Negosiasi "Negotiation Required" → status Pending Approval.
+   (Catatan: "No Negotiation Required" = Auto Approved, lewati review.)
+3. Sales lead: Keputusan Negosiasi → Approve + note wajib → Approved.
+4. Sales staff: Closing Form — primary terkunci, Σ alokasi live = 100%, skema
+   `[Bayar Penuh (Lunas)]` → banner `Closing berhasil. Client ID: … ·
+   Transaction ID: …` + link Buka Client Record.
+5. Negatif: registrasi kosong (bypass `noValidate`) → `[data tidak lengkap,
+   silahkan lengkapi semua pertanyaan wajib!]`; registrasi ulang telepon yang
+   masih punya attempt aktif → `[anda sudah memiliki prospek aktif untuk lead
+   ini]`.
+6. OD buka PRSP hasil closing: read-only murni, render bersih.

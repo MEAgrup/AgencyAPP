@@ -1181,18 +1181,22 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
       )}
 
       {/* Negotiation - Approved / Auto Approved → Closing Form */}
+      {/* Banner sukses closing di luar gate status: setelah close, status sudah
+          Closed-Success sehingga seksi form di bawah hilang — banner harus tetap tampil. */}
+      {closeResult && (
+        <div className="alert alertSuccess" role="status">
+          Closing berhasil. Client ID: {closeResult.client_id} · Transaction ID: {closeResult.transaction_id}.{' '}
+          <Link href={`/clients/${closeResult.client_id}`}>Buka Client Record</Link>
+        </div>
+      )}
+
       {showLostAtClosing && canAct && (
         <section className="card">
           <div className="cardHeader">
             <h2>Closing Form</h2>
           </div>
 
-          {closeResult ? (
-            <div className="alert alertSuccess" role="status">
-              Closing berhasil. Client ID: {closeResult.client_id} · Transaction ID: {closeResult.transaction_id}.{' '}
-              <Link href={`/clients/${closeResult.client_id}`}>Buka Client Record</Link>
-            </div>
-          ) : (
+          {!closeResult && (
             <form className="form" onSubmit={handleClose}>
               {closeError && <div className="alert alertError" role="alert">{closeError}</div>}
 

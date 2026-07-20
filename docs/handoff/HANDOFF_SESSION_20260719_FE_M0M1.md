@@ -80,7 +80,9 @@ ulang `cdps_test` sebelum test. Sudah diterapkan di container ini.
 
 ## Utang / belum dikerjakan
 
-- Smoke test manual FE↔BE hidup utk M0/M1 (pola runbook `FE_UAT_RUNBOOK.md`) — belum.
+- ~~Smoke test manual FE↔BE hidup utk M0/M1~~ ✅ **selesai 2026-07-20** — read
+  21/21 + write 11/11, 4 fix (gate /sales, pesan 403 read, tag json
+  `RegisterInput`, banner closing); lihat `FE_SMOKE_REPORT_20260720_M0M1.md`.
 - `platform` Qualified Form disimpan satu string join ", " (kolom tunggal backend);
   per-platform sub-data M4-OA-2 tetap terbuka sebagai utang backend lama.
 - Kategori Bisnis = input teks (PRD bilang multiple choice tanpa enumerasi — tidak

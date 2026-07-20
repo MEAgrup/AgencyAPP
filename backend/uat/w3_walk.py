@@ -423,7 +423,7 @@ step(19, "create Dependency DEP- (status derived); negatif field-wajib/tipe/enti
 
 # langkah 20 — constraint graf + otoritas
 # cross-client: butuh brief di client lain -> bangun CLIENT_ALT minimal (1 Direct brief)
-st, ba = call(sales, "POST", "/leads", {"LeadName":f"W3 Alt {UQ}","PhoneNumber":"08136"+UQ,"Source":"Scouting","Email":f"alt{UQ}@ex.com"})
+st, ba = call(sales, "POST", "/leads", {"lead_name":f"W3 Alt {UQ}","phone_number":"08136"+UQ,"source":"Scouting","email":f"alt{UQ}@ex.com"})
 ATT_ALT = (ba.get("attempt") or {}).get("ID") or (ba.get("attempt") or {}).get("id")
 CLIENT_ALT, _, _ = drive_to_close(ATT_ALT, UQ+"A")
 call(alead, "POST", f"/clients/{CLIENT_ALT}/assign-am", {"am_id": SYIFA_ID})
