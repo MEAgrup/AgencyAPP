@@ -77,11 +77,12 @@ func TestParseLayeredRoleCSV_RealSeedFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse real seed csv: %v", err)
 	}
-	// Go-live roster V2 (docs/handoff/GOLIVE_ROSTER_V2_IMPORT.md): 6 layered
-	// roles — od for OKFA (HRGA) + 3 OD-dept staff, director for Yohan & Nerissa
+	// Go-live roster V2 (docs/handoff/GOLIVE_ROSTER_V2_IMPORT.md), revised per PO
+	// confirmation: 7 layered roles — od for OKFA (HRGA) + 4 OD-dept staff
+	// (incl. 2602190629, DATA ANALYST INTERN), director for Yohan & Nerissa
 	// (resolving Open O26). Every row must validate.
-	if len(rows) != 6 {
-		t.Fatalf("got %d rows, want 6 (4 od + 2 director)", len(rows))
+	if len(rows) != 7 {
+		t.Fatalf("got %d rows, want 7 (5 od + 2 director)", len(rows))
 	}
 	got := map[string]string{}
 	for _, r := range rows {
@@ -96,6 +97,7 @@ func TestParseLayeredRoleCSV_RealSeedFile(t *testing.T) {
 		"2501140493": "od",       // ARSY (OD)
 		"2507250557": "od",       // GHIFARI (OD)
 		"2607060683": "od",       // WULAN (OD)
+		"2602190629": "od",       // ZAHRIN NOOR APRILIA (DATA ANALYST INTERN)
 		"200000001":  "director", // Yohan
 		"200000002":  "director", // Nerissa
 	}

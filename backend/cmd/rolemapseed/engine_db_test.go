@@ -41,17 +41,17 @@ func TestExecute_RealSeedCSVs_ApplyThenIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse layered csv: %v", err)
 	}
-	if len(layeredRows) != 6 {
-		t.Fatalf("got %d layered role rows, want 6", len(layeredRows))
+	if len(layeredRows) != 7 {
+		t.Fatalf("got %d layered role rows, want 7", len(layeredRows))
 	}
 
-	// Run 1 (apply): 43 mapped, 6 layered.
+	// Run 1 (apply): 43 mapped, 7 layered.
 	rep, err := Execute(ctx, d, systemDirector, roleRows, layeredRows, true, discard(t))
 	if err != nil {
 		t.Fatalf("run 1 (apply): %v", err)
 	}
-	if rep.RoleMappings != 43 || rep.LayeredRoles != 6 || rep.Errors != 0 {
-		t.Fatalf("run 1 report=%+v want RoleMappings=43 LayeredRoles=6 Errors=0", rep)
+	if rep.RoleMappings != 43 || rep.LayeredRoles != 7 || rep.Errors != 0 {
+		t.Fatalf("run 1 report=%+v want RoleMappings=43 LayeredRoles=7 Errors=0", rep)
 	}
 
 	var mappingCount int
@@ -74,8 +74,8 @@ func TestExecute_RealSeedCSVs_ApplyThenIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run 2 (idempotent apply): %v", err)
 	}
-	if rep2.RoleMappings != 43 || rep2.LayeredRoles != 6 || rep2.Errors != 0 {
-		t.Fatalf("run 2 report=%+v want RoleMappings=43 LayeredRoles=6 Errors=0", rep2)
+	if rep2.RoleMappings != 43 || rep2.LayeredRoles != 7 || rep2.Errors != 0 {
+		t.Fatalf("run 2 report=%+v want RoleMappings=43 LayeredRoles=7 Errors=0", rep2)
 	}
 	if err := d.QueryRow(`SELECT COUNT(*) FROM role_mappings`).Scan(&mappingCount); err != nil {
 		t.Fatal(err)
@@ -87,8 +87,8 @@ func TestExecute_RealSeedCSVs_ApplyThenIdempotent(t *testing.T) {
 	if err := d.QueryRow(`SELECT COUNT(*) FROM employee_layered_roles`).Scan(&layeredCount); err != nil {
 		t.Fatal(err)
 	}
-	if layeredCount != 6 {
-		t.Fatalf("employee_layered_roles=%d want 6 (no duplicates)", layeredCount)
+	if layeredCount != 7 {
+		t.Fatalf("employee_layered_roles=%d want 7 (no duplicates)", layeredCount)
 	}
 }
 
@@ -115,8 +115,8 @@ func TestExecute_DryRunDoesNotWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dry-run: %v", err)
 	}
-	if rep.RoleMappings != 43 || rep.LayeredRoles != 6 {
-		t.Fatalf("dry-run report=%+v want RoleMappings=43 LayeredRoles=6 (planned, not written)", rep)
+	if rep.RoleMappings != 43 || rep.LayeredRoles != 7 {
+		t.Fatalf("dry-run report=%+v want RoleMappings=43 LayeredRoles=7 (planned, not written)", rep)
 	}
 
 	var mappingCount, layeredCount int
@@ -192,10 +192,11 @@ func TestExecute_InvalidLevelAbortsBeforeAnyWrite(t *testing.T) {
 	}
 }
 
-// insertLayeredEmployees seeds the six employees referenced by the real
-// layered_roles_riil.csv (go-live roster V2), so the FK/existence precondition
-// on employee_layered_roles is satisfied before Execute runs — mirrors the
-// production ordering (employees synced before rolemapseed).
+// insertLayeredEmployees seeds the seven employees referenced by the real
+// layered_roles_riil.csv (go-live roster V2, revised per PO confirmation), so
+// the FK/existence precondition on employee_layered_roles is satisfied before
+// Execute runs — mirrors the production ordering (employees synced before
+// rolemapseed).
 func insertLayeredEmployees(t *testing.T, d *sql.DB) {
 	t.Helper()
 	emps := []struct{ id, nama, email, divisi, jabatan string }{
@@ -203,6 +204,7 @@ func insertLayeredEmployees(t *testing.T, d *sql.DB) {
 		{"2501140493", "ARSY RIZMANDHA", "arsyrzmndh@gmail.com", "OD", "SENIOR ORGANIZATION DEVELOPMENT"},
 		{"2507250557", "GHIFARI HAMZAH", "ghifari99hamzah@gmail.com", "OD", "SENIOR DATA ANALYST"},
 		{"2607060683", "WULAN DARI FITRI APANDI", "wulandarifitriapandi@gmail.com", "OD", "JR ORGANIZATION DEVELOPMENT"},
+		{"2602190629", "ZAHRIN NOOR APRILIA", "zahrinnooraprilia661@gmail.com", "DATA & BUSINESS INTELLIGENCE", "DATA ANALYST INTERN"},
 		{"200000001", "Yohan", "yohanagustian@meagency.co.id", "DIRECTOR", "DIRECTOR"},
 		{"200000002", "Nerissa", "nerissa.arv@meagency.co.id", "DIRECTOR", "DIRECTOR"},
 	}
