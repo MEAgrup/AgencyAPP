@@ -13,6 +13,7 @@
 #   - 29 Alpha ~74,56 (vektor terkunci health_test.go; data walk real-time beda).
 #   - 34 angka Kenny 86.4/+2/88.4 (vektor terkunci profile_test/snapshot_db_test; June real beda).
 import json, sys, time, decimal, urllib.parse, urllib.request, urllib.error, http.cookiejar
+from uat_creds import provision_uat_credentials  # UAT/dev-only: provisioning kredensial bersama
 
 BASE = "http://127.0.0.1:8080/api/v1"
 UQ = str(int(time.time()) % 100000000)
@@ -52,6 +53,9 @@ def skip(no, desc, reason):
 
 def msg(b): return (b or {}).get("message", "")
 def qenc(s): return urllib.parse.quote(s, safe="")
+
+# ---- UAT/dev-only: provisioning kredensial bersama sebelum login aktor mana pun ----
+provision_uat_credentials()
 
 # ============================================================================
 # LANGKAH 2 — login lintas peran Wave 3 + negatif auth
