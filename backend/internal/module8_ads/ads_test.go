@@ -343,6 +343,69 @@ func TestLifecycle(t *testing.T) {
 	}
 }
 
+// TestMetricEntry_EndedGate locks in the COO decision (2026-07-20): a Metric Entry
+// is accepted while the campaign is [Active] or [Paused] (running / late-recorded
+// periods) but BLOCKED once it reaches the terminal [Ended] status, with the exact
+// authorised BI string.
+func TestMetricEntry_EndedGate(t *testing.T) {
+	k := setup(t)
+	b, svc, _ := newAdsBrief(t, k, "1")
+	adv := adsStaff("EMP-KENNY")
+	am := accountStaff(amID)
+	startAdsBrief(t, k, b, adv)
+	c, _ := k.m8.CreateCampaign(ctx, adv, b, validInput())
+	insertApprovedAsset(t, k, svc, "AST-1")
+	if err := k.m8.LinkAsset(ctx, adv, c.ID, "AST-1"); err != nil {
+		t.Fatal(err)
+	}
+	// Drive the Brief to [Approved] via the normal path so the campaign can launch.
+	if _, err := k.m12.SubmitTask(ctx, adv, b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := k.m6.ReviewBrief(ctx, am, b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := k.m6.ApproveBrief(ctx, am, b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := k.m8.LaunchCampaign(ctx, adv, c.ID); err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+
+	entry := MetricInput{PeriodStart: "2026-06-01", PeriodEnd: "2026-06-07", Spend: "1000000", GMV: "4000000", EntryMethod: "Manual"}
+
+	// [Active] accepts an entry.
+	if _, err := k.m8.LogMetricEntry(ctx, adv, c.ID, entry); err != nil {
+		t.Fatalf("metric entry on [Active]: %v", err)
+	}
+	// [Paused] STILL accepts an entry (only [Ended] is gated).
+	if _, err := k.m8.PauseCampaign(ctx, adv, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if campaignStatus(t, k, c.ID) != StatusPaused {
+		t.Fatalf("want [Paused] before entry")
+	}
+	if _, err := k.m8.LogMetricEntry(ctx, adv, c.ID, entry); err != nil {
+		t.Fatalf("metric entry on [Paused] must be allowed: %v", err)
+	}
+	// Resume -> End; [Ended] blocks the entry with the exact BI string.
+	if _, err := k.m8.ResumeCampaign(ctx, adv, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := k.m8.EndCampaign(ctx, adv, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if campaignStatus(t, k, c.ID) != StatusEnded {
+		t.Fatalf("want [Ended] before gated entry")
+	}
+	if _, err := k.m8.LogMetricEntry(ctx, adv, c.ID, entry); !errors.Is(err, ErrCampaignEnded) {
+		t.Errorf("metric entry on [Ended]: want ErrCampaignEnded, got %v", err)
+	}
+	if ErrCampaignEnded.Error() != "[ad campaign sudah berakhir, metric entry tidak bisa dicatat]" {
+		t.Errorf("BI string drift: %q", ErrCampaignEnded.Error())
+	}
+}
+
 func TestLaunch_RequiresLinkedApprovedAsset(t *testing.T) {
 	k := setup(t)
 	b, _, _ := newAdsBrief(t, k, "1")

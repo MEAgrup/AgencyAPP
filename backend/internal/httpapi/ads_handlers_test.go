@@ -215,4 +215,11 @@ func TestAdsCampaignEndpoints(t *testing.T) {
 	if code, body := do(t, adi, "POST", campaign+"/pause", nil); code != 422 || body["message"] != "[transisi status tidak diizinkan]" {
 		t.Fatalf("pause from ended: %d %v", code, body)
 	}
+	// COO decision 2026-07-20: a Metric Entry against an [Ended] campaign is blocked
+	// server-side -> 422 with the authorised BI string.
+	if code, body := do(t, adi, "POST", metrics, map[string]any{
+		"period_start": "2026-06-08", "period_end": "2026-06-14", "spend": "1000000", "gmv": "4000000", "entry_method": "Manual",
+	}); code != 422 || body["message"] != "[ad campaign sudah berakhir, metric entry tidak bisa dicatat]" {
+		t.Fatalf("metric entry on ended: %d %v", code, body)
+	}
 }

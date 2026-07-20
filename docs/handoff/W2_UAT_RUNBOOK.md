@@ -216,8 +216,13 @@ dieksekusi fixture, bukan aktor riil — bawa ke catatan go/no-go.
     `[Approved]` + SEMUA aset tertaut `[Approved]` ⇒ Launch OK ⇒ `[Active]`.
 34. **Ads staf (KENNY)** — `pause` (`[Active]` → `[Paused]`), `end` (`[Active]`/`[Paused]`
     → `[Ended]`, terminal). Negatif: transisi di luar 3-status ⇒ `[transisi status tidak
-    diizinkan]` (§14, config.go:287–293).
-35. **Ads staf (KENNY)** — `POST /api/v1/campaigns/{id}/metrics` (append-only). Negatif:
+    diizinkan]` (§14, config.go:287–293). **Revisi 2026-07-20 (gate M8, DECISIONS):**
+    metric entry pada kampanye `[Ended]` kini DITOLAK **422** `[ad campaign sudah
+    berakhir, metric entry tidak bisa dicatat]` — karena itu langkah 35 (entri metrik)
+    DIEKSEKUSI SEBELUM `end` langkah ini, dan langkah ini menambah satu assertion
+    negatif: POST metrics pasca-`end` ⇒ 422 string tsb.
+35. **Ads staf (KENNY)** — `POST /api/v1/campaigns/{id}/metrics` (append-only; dieksekusi
+    saat kampanye masih `[Active]` — lihat catatan langkah 34). Negatif:
     spend/GMV negatif ⇒ `[nilai spend dan GMV tidak boleh negatif]`; metode input invalid
     ⇒ `[metode input tidak valid]`. ✔ Total Spend/GMV/ROAS **derived** (Σ metric_entries;
     div-by-zero ⇒ `—`); Attributed GMV per-aset = Σ (entry.gmv ÷ jumlah aset snapshot),

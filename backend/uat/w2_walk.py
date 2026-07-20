@@ -9,6 +9,7 @@
 # Aktor: roster riil + fixture O26/O33/O34 (lihat runbook). Password semua rahasia123.
 # Tidak mengubah kode produk; hanya file ini yang baru.
 import json, sys, time, decimal, urllib.parse, urllib.request, http.cookiejar
+from uat_creds import provision_uat_credentials  # UAT/dev-only: provisioning kredensial bersama
 
 BASE = "http://127.0.0.1:8080/api/v1"
 UQ = str(int(time.time()) % 10000000)     # suffix unik agar rerun tak tabrakan dedup
@@ -45,6 +46,9 @@ def step(no, desc, ok, evidence):
 def msg(b): return (b or {}).get("message", "")
 
 def qenc(s): return urllib.parse.quote(s, safe="")
+
+# ---- UAT/dev-only: provisioning kredensial bersama sebelum login aktor mana pun ----
+provision_uat_credentials()
 
 # ============================================================================
 # LANGKAH 2 — login lintas peran Wave 2 + negatif auth
@@ -506,13 +510,9 @@ launch_ok = st==200 and b.get("To")=="[Active]"
 step(33, "Launch gate: (a) brief belum disetujui ditolak; setelah brief+aset Approved -> [Active]. Sisi (b) aset-tertaut-belum-Approved = guard defensif ads.go:141 tak terjangkau via API (link wajib Approved & Approved terminal)",
      launch_a and launch_ok, f"guardA={launch_a} launch={launch_ok}")
 
-st, b = call(ads, "POST", f"/campaigns/{ADC}/pause"); c_pause = st==200 and b.get("To")=="[Paused]"
-st, b = call(ads, "POST", f"/campaigns/{ADC}/end");   c_end = st==200 and b.get("To")=="[Ended]"
-st, b = call(ads, "POST", f"/campaigns/{ADC}/launch") # dari [Ended] -> ilegal
-c_illegal = st in (400,422) and "transisi status tidak diizinkan" in msg(b)
-step(34, "pause [Active]->[Paused], end ->[Ended]; transisi di luar 3-status ditolak [transisi status tidak diizinkan]",
-     c_pause and c_end and c_illegal, f"pause={c_pause} end={c_end} illegal={c_illegal}")
-
+# Langkah 35 DIEKSEKUSI SEBELUM langkah 34 (revisi 2026-07-20, gate M8 DECISIONS:
+# metric entry pada [Ended] kini ditolak 422 — entri metrik harus dicatat saat
+# kampanye masih [Active]; langkah 34 lalu menambah assertion gate tsb).
 st, b = call(ads, "POST", f"/campaigns/{ADC}/metrics", {"period_start":"2026-07-20","period_end":"2026-07-27","spend":"-1","gmv":"100","entry_method":"Manual"})
 m_neg = st in (400,422) and "nilai spend dan GMV tidak boleh negatif" in msg(b)
 st, b = call(ads, "POST", f"/campaigns/{ADC}/metrics", {"period_start":"2026-07-20","period_end":"2026-07-27","spend":"1000000","gmv":"4000000","entry_method":"BukanMetode"})
@@ -522,8 +522,18 @@ m_ok = st==200
 st, cc = call(ads, "GET", f"/campaigns/{ADC}")
 roas = cc.get("roas_display"); tot_spend = cc.get("total_spend"); tot_gmv = cc.get("total_gmv")
 roas_ok = tot_spend and abs((tot_gmv/tot_spend) - (cc.get("roas") or 0)) < 1e-6
-step(35, "Metric Entry append-only; spend/GMV negatif & metode invalid ditolak; ROAS derived (GMV/Spend)",
+step(35, "Metric Entry append-only (saat [Active]); spend/GMV negatif & metode invalid ditolak; ROAS derived (GMV/Spend)",
      m_ok and m_neg and m_badmethod and roas_ok, f"ok={m_ok} neg={m_neg} badMethod={m_badmethod} spend={tot_spend} gmv={tot_gmv} roas={roas}")
+
+st, b = call(ads, "POST", f"/campaigns/{ADC}/pause"); c_pause = st==200 and b.get("To")=="[Paused]"
+st, b = call(ads, "POST", f"/campaigns/{ADC}/end");   c_end = st==200 and b.get("To")=="[Ended]"
+st, b = call(ads, "POST", f"/campaigns/{ADC}/launch") # dari [Ended] -> ilegal
+c_illegal = st in (400,422) and "transisi status tidak diizinkan" in msg(b)
+# Gate M8 2026-07-20 (DECISIONS): metric entry pada [Ended] ditolak 422 string persis.
+st, b = call(ads, "POST", f"/campaigns/{ADC}/metrics", {"period_start":"2026-07-28","period_end":"2026-08-03","spend":"1000000","gmv":"4000000","entry_method":"Manual"})
+c_ended_gate = st==422 and msg(b) == "[ad campaign sudah berakhir, metric entry tidak bisa dicatat]"
+step(34, "pause [Active]->[Paused], end ->[Ended]; transisi di luar 3-status ditolak [transisi status tidak diizinkan]; metric entry pada [Ended] ditolak 422 [ad campaign sudah berakhir, metric entry tidak bisa dicatat] (gate 2026-07-20)",
+     c_pause and c_end and c_illegal and c_ended_gate, f"pause={c_pause} end={c_end} illegal={c_illegal} endedGate={c_ended_gate}")
 
 # langkah 36 — optimisasi budget >50% oleh Advertiser polos vs owning AM / SPV Ads
 st, b = call(ads, "POST", f"/campaigns/{ADC}/optimizations", {"change_type":"Budget","before_value":"5000000","after_value":"9000000","reason":"scale up"})
