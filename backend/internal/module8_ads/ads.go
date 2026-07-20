@@ -145,6 +145,13 @@ var (
 	ErrNegativeAmount = errors.New("[nilai spend dan GMV tidak boleh negatif]")
 	// ErrInvalidPeriod: a Metric Entry's period end precedes its start (§9.4).
 	ErrInvalidPeriod = errors.New("[periode metrik tidak valid]")
+	// ErrCampaignEnded: a Metric Entry cannot be logged against a campaign in the
+	// terminal [Ended] status (COO decision 2026-07-20 — DECISIONS.md; previously
+	// accepted). A [Paused] campaign STILL accepts entries (running/late-recorded
+	// periods) — only [Ended] is blocked. NEW string, styled after the O13 import
+	// gate ("[campaign belum/tidak aktif, lead tidak bisa diimport]") — authorised
+	// in DECISIONS.md.
+	ErrCampaignEnded = errors.New("[ad campaign sudah berakhir, metric entry tidak bisa dicatat]")
 	// ErrInvalidChangeType: Change Type is not one of the §9.5 choices.
 	ErrInvalidChangeType = errors.New("[jenis perubahan tidak valid]")
 	// ErrBudgetApprovalRequired: a single budget adjustment >50% needs AM/SPV Ads

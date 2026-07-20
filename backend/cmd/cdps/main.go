@@ -8,13 +8,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/meagrup/agencyapp/backend/internal/auth"
 	"github.com/meagrup/agencyapp/backend/internal/core/notification"
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
 	"github.com/meagrup/agencyapp/backend/internal/db"
 	"github.com/meagrup/agencyapp/backend/internal/hris"
 	"github.com/meagrup/agencyapp/backend/internal/httpapi"
-	"github.com/meagrup/agencyapp/backend/internal/seed"
 )
 
 func main() {
@@ -29,41 +27,19 @@ func main() {
 		log.Fatalf("migrate up: %v", err)
 	}
 
-	var authn auth.Authenticator
-	var src hris.EmployeeSource
+	// HRIS is a data source ONLY now (employee sync). Login is CDPS-local.
+	hrisURL := envOr("HRIS_BASE_URL", "http://127.0.0.1:8081")
 
-	demoMode := os.Getenv("CDPS_DEMO_MODE") == "1"
-	if demoMode {
-		// Demo/QA mode: no real HRIS available. Authenticate against the bundled
-		// fixture accounts and load the Alpha Digital sample data on boot, so a
-		// deployed instance is immediately clickable end-to-end. The fixture
-		// passwords are public — NEVER enable this against real data.
-		csvPath := envOr("CDPS_SEED_CSV", "/app/demo/employees.csv")
-		ca, err := newCSVAuthenticator(csvPath)
-		if err != nil {
-			log.Fatalf("demo auth from %s: %v", csvPath, err)
-		}
-		authn = ca
-		src = hris.NewCSVSource(csvPath)
-		log.Printf("DEMO MODE enabled: auth + employees from %s", csvPath)
-		if err := seed.Run(context.Background(), d, csvPath); err != nil {
-			log.Printf("demo seed failed (non-fatal): %v", err)
-		} else {
-			log.Printf("demo seed applied (Alpha Digital fixture)")
-		}
+	var src hris.EmployeeSource
+	if token := os.Getenv("HRIS_SERVICE_TOKEN"); token != "" || os.Getenv("HRIS_HTTP_SYNC") == "1" {
+		src = hris.NewHTTPSource(hrisURL, token)
 	} else {
-		hrisURL := envOr("HRIS_BASE_URL", "http://127.0.0.1:8081")
-		authn = auth.NewHRISAuthenticator(hrisURL)
-		if token := os.Getenv("HRIS_SERVICE_TOKEN"); token != "" || os.Getenv("HRIS_HTTP_SYNC") == "1" {
-			src = hris.NewHTTPSource(hrisURL, token)
-		} else {
-			src = hris.NewCSVSource(envOr("CDPS_SEED_CSV", "testdata/employees.csv"))
-		}
+		src = hris.NewCSVSource(envOr("CDPS_SEED_CSV", "testdata/employees.csv"))
 	}
 
 	engine := statemachine.New()
 	catalog := notification.NewCatalog()
-	app := httpapi.New(d, engine, catalog, authn, src)
+	app := httpapi.New(d, engine, catalog, src)
 
 	// Railway (and most PaaS) inject the port to listen on via PORT. An explicit
 	// CDPS_ADDR still wins for local/dev overrides.
@@ -76,7 +52,7 @@ func main() {
 		Handler:           app.Router(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	log.Printf("cdps API listening on %s (demo=%v)", addr, demoMode)
+	log.Printf("cdps API listening on %s (HRIS=%s)", addr, hrisURL)
 
 	// Background full sync on boot (best-effort) so sessions/roles are fresh.
 	go func() {

@@ -5,45 +5,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/meagrup/agencyapp/backend/internal/auth"
 	"github.com/meagrup/agencyapp/backend/internal/core/notification"
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
 	"github.com/meagrup/agencyapp/backend/internal/httpapi"
 	"github.com/meagrup/agencyapp/backend/internal/testutil"
 )
-
-// tcAuth maps fixture emails (password "rahasia123") to employee ids for the
-// Module 12 (Task Execution) + Module 7 (Creative) HTTP tests.
-type tcAuth struct{}
-
-func (tcAuth) Verify(_ context.Context, email, password string) (string, error) {
-	if password != "rahasia123" {
-		return "", auth.ErrInvalidCredentials
-	}
-	m := map[string]string{
-		"budi@mea.co.id":  "EMP-BUDI",  // Sales staff (owns client; foreign division)
-		"cakra@mea.co.id": "EMP-CAKRA", // Creative staff (PIC)
-		"cindy@mea.co.id": "EMP-CINDY", // Creative staff (non-PIC)
-		"clara@mea.co.id": "EMP-CLARA", // Creative lead
-		"cdir@mea.co.id":  "EMP-CDIR",  // Creative staff + LAYERED director
-		"amel@mea.co.id":  "EMP-AMEL",  // Account staff = owning AM
-		"alia@mea.co.id":  "EMP-ALIA",  // Account lead (division-wide read)
-		"adi@mea.co.id":   "EMP-ADI",   // Ads staff (PIC)
-		"adi2@mea.co.id":  "EMP-ADI2",  // Ads staff (non-PIC)
-		"adil@mea.co.id":  "EMP-ADIL",  // Ads lead
-		"koko@mea.co.id":  "EMP-KOKO",  // KOL staff (Coordinator)
-		"kiki@mea.co.id":  "EMP-KIKI",  // KOL staff (non-Coordinator)
-		"kev@mea.co.id":   "EMP-KEV",   // KOL lead (Team Leader)
-		"fina@mea.co.id":  "EMP-FINA",  // Finance staff
-		"anin@mea.co.id":  "EMP-ANIN",  // Account staff = SECOND AM (non-owner)
-		"odi@mea.co.id":   "EMP-ODI",   // OD (layered, read-only)
-		"yohan@mea.co.id": "EMP-YOHAN", // Director (layered, full)
-	}
-	if id, ok := m[email]; ok {
-		return id, nil
-	}
-	return "", auth.ErrInvalidCredentials
-}
 
 // setupTC builds an app + seeds the role mappings and employees the M12/M7
 // endpoint tests share.
@@ -84,7 +50,8 @@ func setupTC(t *testing.T) (*httptest.Server, func()) {
 	// One-account-two-roles layered case: a Creative STAFF who is ALSO Director.
 	testutil.InsertLayeredRole(t, d, "EMP-CDIR", "director")
 
-	app := httpapi.New(d, statemachine.New(), notification.NewCatalog(), tcAuth{}, nil)
+	testutil.SeedCredentials(t, d, "rahasia123")
+	app := httpapi.New(d, statemachine.New(), notification.NewCatalog(), nil)
 	srv := httptest.NewServer(app.Router())
 	return srv, srv.Close
 }

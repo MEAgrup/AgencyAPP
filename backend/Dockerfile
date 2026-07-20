@@ -26,10 +26,6 @@ WORKDIR /app
 COPY --from=build /out/cdps /app/cdps
 # Migrations are read at runtime; CDPS_MIGRATIONS_DIR points the server at them.
 COPY --from=build /src/migrations /app/migrations
-# Fixture accounts + sample data for demo/QA mode (CDPS_DEMO_MODE=1). Unused when
-# a real HRIS is configured; the passwords are public, so keep demo mode off in
-# any real production environment.
-COPY --from=build /src/testdata/employees.csv /app/demo/employees.csv
 
 ENV CDPS_MIGRATIONS_DIR=/app/migrations
 USER cdps

@@ -21,18 +21,16 @@ type App struct {
 	DB         *sql.DB
 	Engine     *statemachine.Engine
 	Catalog    *notification.Catalog
-	Auth       auth.Authenticator
 	Demo       *demo.Service
 	HRISSource hris.EmployeeSource
 }
 
 // New builds an App and wires the notification emitter as the engine hook.
-func New(d *sql.DB, engine *statemachine.Engine, catalog *notification.Catalog, authn auth.Authenticator, src hris.EmployeeSource) *App {
+func New(d *sql.DB, engine *statemachine.Engine, catalog *notification.Catalog, src hris.EmployeeSource) *App {
 	a := &App{
 		DB:         d,
 		Engine:     engine,
 		Catalog:    catalog,
-		Auth:       authn,
 		HRISSource: src,
 		Demo:       &demo.Service{DB: d, Engine: engine, Catalog: catalog},
 	}
@@ -77,10 +75,15 @@ func (a *App) onTransition(ev statemachine.Event) error {
 func (a *App) Router() http.Handler {
 	mux := http.NewServeMux()
 
-	// Auth
+	// Auth. me/logout/change-password stay reachable under the force-change gate;
+	// every other protected route is blocked until the password is changed.
 	mux.HandleFunc("POST /api/v1/auth/login", a.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", a.protect(a.handleLogout))
-	mux.HandleFunc("GET /api/v1/me", a.protect(a.handleMe))
+	mux.HandleFunc("GET /api/v1/auth/me", a.protect(a.handleMe))
+	mux.HandleFunc("GET /api/v1/me", a.protect(a.handleMe)) // legacy alias
+	mux.HandleFunc("POST /api/v1/auth/change-password", a.protect(a.handleChangePassword))
+	mux.HandleFunc("POST /api/v1/auth/admin/set-password", a.protect(a.handleAdminSetPassword))
+	mux.HandleFunc("GET /api/v1/auth/admin/credentials", a.protect(a.handleAdminCredentials))
 
 	// Notifications
 	mux.HandleFunc("GET /api/v1/notifications", a.protect(a.handleListNotifications))
@@ -166,7 +169,10 @@ func (a *App) Router() http.Handler {
 
 type ctxKey int
 
-const actorKey ctxKey = 1
+const (
+	actorKey      ctxKey = 1
+	mustChangeKey ctxKey = 2
+)
 
 func withActor(ctx context.Context, a permission.Actor) context.Context {
 	return context.WithValue(ctx, actorKey, a)
@@ -177,7 +183,27 @@ func actorFrom(ctx context.Context) (permission.Actor, bool) {
 	return a, ok
 }
 
+func withMustChange(ctx context.Context, v bool) context.Context {
+	return context.WithValue(ctx, mustChangeKey, v)
+}
+
+func mustChangeFrom(ctx context.Context) (bool, bool) {
+	v, ok := ctx.Value(mustChangeKey).(bool)
+	return v, ok
+}
+
+// forceChangeExempt lists the protected routes still reachable while a forced
+// password change is pending (house-style server-side gate, SPEC §7).
+var forceChangeExempt = map[string]bool{
+	"/api/v1/auth/me":              true,
+	"/api/v1/me":                   true,
+	"/api/v1/auth/logout":          true,
+	"/api/v1/auth/change-password": true,
+}
+
 // protect resolves the session cookie into an Actor, returning 401 if absent.
+// When the employee has a pending forced password change, every protected route
+// except the force-change-exempt set returns 403.
 func (a *App) protect(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		c, err := r.Cookie(auth.CookieName)
@@ -195,7 +221,17 @@ func (a *App) protect(next http.HandlerFunc) http.HandlerFunc {
 			writeErr(w, http.StatusUnauthorized, "[sesi tidak valid, silahkan login kembali]")
 			return
 		}
-		next(w, r.WithContext(withActor(r.Context(), actor)))
+		mustChange, err := auth.MustChangePassword(r.Context(), a.DB, empID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "[terjadi kesalahan sistem]")
+			return
+		}
+		if mustChange && !forceChangeExempt[r.URL.Path] {
+			writeErr(w, http.StatusForbidden, "[wajib mengganti password terlebih dahulu]")
+			return
+		}
+		ctx := withMustChange(withActor(r.Context(), actor), mustChange)
+		next(w, r.WithContext(ctx))
 	}
 }
 

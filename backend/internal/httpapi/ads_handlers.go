@@ -234,6 +234,7 @@ func writeAdsErr(w http.ResponseWriter, err error) {
 		errors.Is(err, module8_ads.ErrInvalidEntryMethod),
 		errors.Is(err, module8_ads.ErrNegativeAmount),
 		errors.Is(err, module8_ads.ErrInvalidPeriod),
+		errors.Is(err, module8_ads.ErrCampaignEnded),
 		errors.Is(err, module8_ads.ErrInvalidChangeType),
 		errors.Is(err, module8_ads.ErrCampaignIncompleteForSubmit),
 		errors.Is(err, module8_ads.ErrBadAmount):

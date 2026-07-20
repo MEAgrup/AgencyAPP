@@ -2,6 +2,7 @@
 # W1-20 UAT walk — satu deal end-to-end via API, aktor roster riil + fixture UAT.
 # Setiap langkah mencetak PASS/FAIL + bukti (status persis / pesan BI persis).
 import json, sys, urllib.request, http.cookiejar
+from uat_creds import provision_uat_credentials  # UAT/dev-only: provisioning kredensial bersama
 
 BASE = "http://127.0.0.1:8080/api/v1"
 import time
@@ -31,6 +32,9 @@ def login(email, pw="rahasia123"):
 def step(no, desc, ok, evidence):
     results.append((no, desc, ok, evidence))
     print(f"{'PASS' if ok else 'FAIL'}  [{no}] {desc} :: {evidence}")
+
+# ---- UAT/dev-only: provisioning kredensial bersama sebelum login aktor mana pun ----
+provision_uat_credentials()
 
 # ---- aktor ----
 sales, me_sales   = login("saffiramarwah@gmail.com")      # Sales staff (riil, email uppercase di roster)

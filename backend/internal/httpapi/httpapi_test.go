@@ -2,7 +2,6 @@ package httpapi_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,33 +9,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/meagrup/agencyapp/backend/internal/auth"
 	"github.com/meagrup/agencyapp/backend/internal/core/notification"
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
 	"github.com/meagrup/agencyapp/backend/internal/httpapi"
 	"github.com/meagrup/agencyapp/backend/internal/testutil"
 )
-
-// fakeAuth maps fixture emails to employee ids; a sentinel email is unreachable.
-type fakeAuth struct{}
-
-func (fakeAuth) Verify(_ context.Context, email, password string) (string, error) {
-	if email == "down@mea.co.id" {
-		return "", auth.ErrUnreachable
-	}
-	if password != "rahasia123" {
-		return "", auth.ErrInvalidCredentials
-	}
-	switch email {
-	case "budi@mea.co.id":
-		return "EMP-0001", nil
-	case "dewi@mea.co.id":
-		return "EMP-0006", nil
-	case "yohan@mea.co.id":
-		return "EMP-0008", nil
-	}
-	return "", auth.ErrInvalidCredentials
-}
 
 func setup(t *testing.T) (*httptest.Server, func()) {
 	d := testutil.DB(t)
@@ -47,8 +24,9 @@ func setup(t *testing.T) (*httptest.Server, func()) {
 	testutil.InsertEmployee(t, d, "EMP-0006", "Dewi", "dewi@mea.co.id", "Sales", "Sales Head", true)
 	testutil.InsertEmployee(t, d, "EMP-0008", "Yohan", "yohan@mea.co.id", "Management", "Director", true)
 	testutil.InsertLayeredRole(t, d, "EMP-0008", "director")
+	testutil.SeedCredentials(t, d, "rahasia123")
 
-	app := httpapi.New(d, statemachine.New(), notification.NewCatalog(), fakeAuth{}, nil)
+	app := httpapi.New(d, statemachine.New(), notification.NewCatalog(), nil)
 	srv := httptest.NewServer(app.Router())
 	return srv, srv.Close
 }
@@ -95,13 +73,13 @@ func login(t *testing.T, srv *httptest.Server, email string) *http.Client {
 	return c
 }
 
-func TestAuth_LoginMeUnreachableUnknown(t *testing.T) {
+func TestAuth_LoginMeWrongUnknown(t *testing.T) {
 	srv, done := setup(t)
 	defer done()
 
-	// Valid login.
+	// Valid login + /api/v1/auth/me carries role + must_change_password.
 	c := login(t, srv, "budi@mea.co.id")
-	code, body := do(t, c, "GET", srv.URL+"/api/v1/me", nil)
+	code, body := do(t, c, "GET", srv.URL+"/api/v1/auth/me", nil)
 	if code != 200 {
 		t.Fatalf("me: %d", code)
 	}
@@ -109,14 +87,23 @@ func TestAuth_LoginMeUnreachableUnknown(t *testing.T) {
 	if role["division"] != "Sales" || role["level"] != "staff" {
 		t.Fatalf("unexpected role: %v", role)
 	}
-
-	// HRIS unreachable => 503 with EXACT message.
-	code, body = do(t, client(t), "POST", srv.URL+"/api/v1/auth/login", map[string]string{"email": "down@mea.co.id", "password": "rahasia123"})
-	if code != 503 || body["message"] != auth.HRISUnreachableMessage {
-		t.Fatalf("unreachable: %d %v", code, body)
+	if body["must_change_password"] != false {
+		t.Fatalf("must_change_password=%v want false", body["must_change_password"])
 	}
 
-	// Unknown employee (valid pw but not in DB) => 401.
+	// Empty field => 400 with EXACT message.
+	code, body = do(t, client(t), "POST", srv.URL+"/api/v1/auth/login", map[string]string{"email": "budi@mea.co.id"})
+	if code != 400 || body["message"] != "[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]" {
+		t.Fatalf("empty field: %d %v", code, body)
+	}
+
+	// Wrong password => 401 EXACT message.
+	code, body = do(t, client(t), "POST", srv.URL+"/api/v1/auth/login", map[string]string{"email": "budi@mea.co.id", "password": "salah-sekali"})
+	if code != 401 || body["message"] != "[email atau password salah]" {
+		t.Fatalf("wrong pw: %d %v", code, body)
+	}
+
+	// Unknown employee => 401.
 	code, _ = do(t, client(t), "POST", srv.URL+"/api/v1/auth/login", map[string]string{"email": "ghost@mea.co.id", "password": "rahasia123"})
 	if code != 401 {
 		t.Fatalf("unknown login code=%d want 401", code)

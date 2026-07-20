@@ -1,13 +1,13 @@
 # CLAUDE.md — CDPS (Client Delivery & Performance System), MEA Agency
 
 ## What this project is
-Standalone internal system covering MEA Agency's full client lifecycle: lead intake → sales closing → payment gate → delivery execution (Creative/Ads/KOL/Live-Stream-vendor) → client health scoring → team performance → client/team portals. It is NOT an HRIS — MEA's HRIS (employee/attendance/leave) is a separate existing system we integrate with (read-only employee sync + auth). See `docs/prd/CDPS_Build_Plan.md` for waves and `docs/prd/` for the 18 PRD documents.
+Standalone internal system covering MEA Agency's full client lifecycle: lead intake → sales closing → payment gate → delivery execution (Creative/Ads/KOL/Live-Stream-vendor) → client health scoring → team performance → client/team portals. It is NOT an HRIS — MEA's HRIS (employee/attendance/leave) is a separate existing system we integrate with (read-only employee sync only; CDPS auth is local — see `docs/DECISIONS.md` 2026-07-19). See `docs/prd/CDPS_Build_Plan.md` for waves and `docs/prd/` for the 18 PRD documents.
 
 ## Stack & architecture (decided — do not change without a logged decision)
 - **Backend:** Go, modular monolith. One service, module boundaries = Go packages mirroring PRD modules (`module0_sales`, `module1_leads`, … `module15_portal`) on top of shared core engines in `internal/core/`.
 - **Frontend:** React/Next. Two apps: `web-internal` (workspaces/boards/dashboards) and `web-client-portal` (external, **separate auth realm**, strict allow-list data layer — never a permission-trimmed internal view).
 - **DB:** MySQL, single schema. Migrations via a proper migration tool; never hand-edit schema.
-- **Integration:** existing HRIS provides `GET /employees` + auth token endpoint. CDPS keeps a role-mapping table (HRIS jabatan/divisi → CDPS role). Employee deactivated in HRIS ⇒ CDPS access revoked on next sync.
+- **Integration:** existing HRIS provides `GET /employees` only (employee data sync — no auth endpoint). CDPS keeps a role-mapping table (HRIS jabatan/divisi → CDPS role). Auth (password login, change-password, admin password reset) is local to CDPS. Employee deactivated in HRIS ⇒ CDPS access revoked on next sync.
 
 ## Non-negotiable house conventions (Phase 0 — enforced in code review)
 1. **IDs:** `PREFIX-YYYYMM-NNNN`, generated ONLY after mandatory-field validation passes. Immutable, never reused. Prefix registry: `docs/DATA_MODEL.md`.
