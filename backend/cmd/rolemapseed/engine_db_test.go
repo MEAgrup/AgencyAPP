@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"strings"
 	"testing"
@@ -19,10 +20,10 @@ func TestExecute_RealSeedCSVs_ApplyThenIdempotent(t *testing.T) {
 	testutil.Clean(t, d)
 	ctx := context.Background()
 
-	// The layered-role row (OD OKFA, 2409230432) needs a matching employees
-	// row first — FK on employee_layered_roles, same as production ordering
-	// (employees_cdps.csv sync happens before rolemapseed in the smoke run).
-	testutil.InsertEmployee(t, d, "2409230432", "OKFA RENDI WIRATAMA", "orendy9@gmail.com", "HRGA", "SUPERVISOR HR", true)
+	// Every layered-role employee needs a matching employees row first — FK on
+	// employee_layered_roles, same as production ordering (employees_cdps.csv
+	// sync happens before rolemapseed in the smoke run).
+	insertLayeredEmployees(t, d)
 
 	roleF := openFile(t, FindRoleMappingsCSV())
 	defer roleF.Close()
@@ -30,8 +31,8 @@ func TestExecute_RealSeedCSVs_ApplyThenIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse role csv: %v", err)
 	}
-	if len(roleRows) != 23 {
-		t.Fatalf("got %d role mapping rows, want 23", len(roleRows))
+	if len(roleRows) != 43 {
+		t.Fatalf("got %d role mapping rows, want 43", len(roleRows))
 	}
 
 	layeredF := openFile(t, FindLayeredRolesCSV())
@@ -40,25 +41,25 @@ func TestExecute_RealSeedCSVs_ApplyThenIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse layered csv: %v", err)
 	}
-	if len(layeredRows) != 1 {
-		t.Fatalf("got %d layered role rows, want 1", len(layeredRows))
+	if len(layeredRows) != 6 {
+		t.Fatalf("got %d layered role rows, want 6", len(layeredRows))
 	}
 
-	// Run 1 (apply): 23 mapped, 1 layered.
+	// Run 1 (apply): 43 mapped, 6 layered.
 	rep, err := Execute(ctx, d, systemDirector, roleRows, layeredRows, true, discard(t))
 	if err != nil {
 		t.Fatalf("run 1 (apply): %v", err)
 	}
-	if rep.RoleMappings != 23 || rep.LayeredRoles != 1 || rep.Errors != 0 {
-		t.Fatalf("run 1 report=%+v want RoleMappings=23 LayeredRoles=1 Errors=0", rep)
+	if rep.RoleMappings != 43 || rep.LayeredRoles != 6 || rep.Errors != 0 {
+		t.Fatalf("run 1 report=%+v want RoleMappings=43 LayeredRoles=6 Errors=0", rep)
 	}
 
 	var mappingCount int
 	if err := d.QueryRow(`SELECT COUNT(*) FROM role_mappings`).Scan(&mappingCount); err != nil {
 		t.Fatal(err)
 	}
-	if mappingCount != 23 {
-		t.Fatalf("role_mappings=%d want 23", mappingCount)
+	if mappingCount != 43 {
+		t.Fatalf("role_mappings=%d want 43", mappingCount)
 	}
 	var enabled bool
 	if err := d.QueryRow(`SELECT enabled FROM employee_layered_roles WHERE employee_id = ? AND role = 'od'`, "2409230432").Scan(&enabled); err != nil {
@@ -73,21 +74,21 @@ func TestExecute_RealSeedCSVs_ApplyThenIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run 2 (idempotent apply): %v", err)
 	}
-	if rep2.RoleMappings != 23 || rep2.LayeredRoles != 1 || rep2.Errors != 0 {
-		t.Fatalf("run 2 report=%+v want RoleMappings=23 LayeredRoles=1 Errors=0", rep2)
+	if rep2.RoleMappings != 43 || rep2.LayeredRoles != 6 || rep2.Errors != 0 {
+		t.Fatalf("run 2 report=%+v want RoleMappings=43 LayeredRoles=6 Errors=0", rep2)
 	}
 	if err := d.QueryRow(`SELECT COUNT(*) FROM role_mappings`).Scan(&mappingCount); err != nil {
 		t.Fatal(err)
 	}
-	if mappingCount != 23 {
-		t.Fatalf("role_mappings=%d want 23 (no duplicates)", mappingCount)
+	if mappingCount != 43 {
+		t.Fatalf("role_mappings=%d want 43 (no duplicates)", mappingCount)
 	}
 	var layeredCount int
 	if err := d.QueryRow(`SELECT COUNT(*) FROM employee_layered_roles`).Scan(&layeredCount); err != nil {
 		t.Fatal(err)
 	}
-	if layeredCount != 1 {
-		t.Fatalf("employee_layered_roles=%d want 1 (no duplicates)", layeredCount)
+	if layeredCount != 6 {
+		t.Fatalf("employee_layered_roles=%d want 6 (no duplicates)", layeredCount)
 	}
 }
 
@@ -95,7 +96,7 @@ func TestExecute_DryRunDoesNotWrite(t *testing.T) {
 	d := testutil.DB(t)
 	testutil.Clean(t, d)
 	ctx := context.Background()
-	testutil.InsertEmployee(t, d, "2409230432", "OKFA RENDI WIRATAMA", "orendy9@gmail.com", "HRGA", "SUPERVISOR HR", true)
+	insertLayeredEmployees(t, d)
 
 	roleF := openFile(t, FindRoleMappingsCSV())
 	defer roleF.Close()
@@ -114,8 +115,8 @@ func TestExecute_DryRunDoesNotWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dry-run: %v", err)
 	}
-	if rep.RoleMappings != 23 || rep.LayeredRoles != 1 {
-		t.Fatalf("dry-run report=%+v want RoleMappings=23 LayeredRoles=1 (planned, not written)", rep)
+	if rep.RoleMappings != 43 || rep.LayeredRoles != 6 {
+		t.Fatalf("dry-run report=%+v want RoleMappings=43 LayeredRoles=6 (planned, not written)", rep)
 	}
 
 	var mappingCount, layeredCount int
@@ -188,6 +189,25 @@ func TestExecute_InvalidLevelAbortsBeforeAnyWrite(t *testing.T) {
 	}
 	if mappingCount != 0 {
 		t.Fatalf("role_mappings=%d want 0 — one bad row must abort the whole batch before any write", mappingCount)
+	}
+}
+
+// insertLayeredEmployees seeds the six employees referenced by the real
+// layered_roles_riil.csv (go-live roster V2), so the FK/existence precondition
+// on employee_layered_roles is satisfied before Execute runs — mirrors the
+// production ordering (employees synced before rolemapseed).
+func insertLayeredEmployees(t *testing.T, d *sql.DB) {
+	t.Helper()
+	emps := []struct{ id, nama, email, divisi, jabatan string }{
+		{"2409230432", "OKFA RENDI WIRATAMA", "orendy9@gmail.com", "HRGA", "SUPERVISOR HR"},
+		{"2501140493", "ARSY RIZMANDHA", "arsyrzmndh@gmail.com", "OD", "SENIOR ORGANIZATION DEVELOPMENT"},
+		{"2507250557", "GHIFARI HAMZAH", "ghifari99hamzah@gmail.com", "OD", "SENIOR DATA ANALYST"},
+		{"2607060683", "WULAN DARI FITRI APANDI", "wulandarifitriapandi@gmail.com", "OD", "JR ORGANIZATION DEVELOPMENT"},
+		{"200000001", "Yohan", "yohanagustian@meagency.co.id", "DIRECTOR", "DIRECTOR"},
+		{"200000002", "Nerissa", "nerissa.arv@meagency.co.id", "DIRECTOR", "DIRECTOR"},
+	}
+	for _, e := range emps {
+		testutil.InsertEmployee(t, d, e.id, e.nama, e.email, e.divisi, e.jabatan, true)
 	}
 }
 

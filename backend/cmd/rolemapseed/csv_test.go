@@ -11,9 +11,10 @@ import (
 )
 
 func TestParseRoleMappingCSV_RealSeedFile(t *testing.T) {
-	// The real seed file must always parse cleanly: 23 rows, no error, and
-	// every row must validate (the real file is the contract — DECISIONS.md 2026-07-17
-	// §B: 23 mapping rows).
+	// The real seed file must always parse cleanly: 43 rows, no error, and every
+	// row must validate (the real file is the contract — go-live roster V2,
+	// docs/handoff/GOLIVE_ROSTER_V2_IMPORT.md: 43 mapping rows, superseding the
+	// 23-row batch-1 of DECISIONS.md 2026-07-17).
 	f, err := os.Open(FindRoleMappingsCSV())
 	if err != nil {
 		t.Fatalf("open real seed csv: %v", err)
@@ -23,8 +24,8 @@ func TestParseRoleMappingCSV_RealSeedFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse real seed csv: %v", err)
 	}
-	if len(rows) != 23 {
-		t.Fatalf("got %d rows, want 23", len(rows))
+	if len(rows) != 43 {
+		t.Fatalf("got %d rows, want 43", len(rows))
 	}
 	for _, r := range rows {
 		if _, err := r.ToRoleMapping(); err != nil {
@@ -76,15 +77,32 @@ func TestParseLayeredRoleCSV_RealSeedFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse real seed csv: %v", err)
 	}
-	if len(rows) != 1 {
-		t.Fatalf("got %d rows, want 1 (OD OKFA only — Director Yohan/Nerissa pending Open O26)", len(rows))
+	// Go-live roster V2 (docs/handoff/GOLIVE_ROSTER_V2_IMPORT.md): 6 layered
+	// roles — od for OKFA (HRGA) + 3 OD-dept staff, director for Yohan & Nerissa
+	// (resolving Open O26). Every row must validate.
+	if len(rows) != 6 {
+		t.Fatalf("got %d rows, want 6 (4 od + 2 director)", len(rows))
 	}
-	employeeID, role, err := rows[0].Validate()
-	if err != nil {
-		t.Fatalf("row 1 failed validation: %v", err)
+	got := map[string]string{}
+	for _, r := range rows {
+		employeeID, role, err := r.Validate()
+		if err != nil {
+			t.Fatalf("row %d failed validation: %v", r.Line, err)
+		}
+		got[employeeID] = role
 	}
-	if employeeID != "2409230432" || role != "od" {
-		t.Fatalf("got employee_id=%q role=%q, want 2409230432/od", employeeID, role)
+	want := map[string]string{
+		"2409230432": "od",       // OKFA (HRGA SUPERVISOR HR)
+		"2501140493": "od",       // ARSY (OD)
+		"2507250557": "od",       // GHIFARI (OD)
+		"2607060683": "od",       // WULAN (OD)
+		"200000001":  "director", // Yohan
+		"200000002":  "director", // Nerissa
+	}
+	for id, role := range want {
+		if got[id] != role {
+			t.Fatalf("employee %s: got role=%q, want %q", id, got[id], role)
+		}
 	}
 }
 
