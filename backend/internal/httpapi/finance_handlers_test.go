@@ -5,37 +5,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/meagrup/agencyapp/backend/internal/auth"
 	"github.com/meagrup/agencyapp/backend/internal/core/notification"
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
 	"github.com/meagrup/agencyapp/backend/internal/httpapi"
 	"github.com/meagrup/agencyapp/backend/internal/testutil"
 )
-
-// financeAuth maps fixture emails (password "rahasia123") to employee ids for the
-// Module 5 endpoint tests. Includes Finance roles the M4 fixture lacks.
-type financeAuth struct{}
-
-func (financeAuth) Verify(_ context.Context, email, password string) (string, error) {
-	if password != "rahasia123" {
-		return "", auth.ErrInvalidCredentials
-	}
-	m := map[string]string{
-		"fin@mea.co.id":     "EMP-FIN",     // Finance staff
-		"finhead@mea.co.id": "EMP-FINHEAD", // Finance lead
-		"budi@mea.co.id":    "EMP-BUDI",    // Sales staff (owns the client)
-		"andi@mea.co.id":    "EMP-ANDI",    // Sales staff (non-owner)
-		"dewi@mea.co.id":    "EMP-DEWI",    // Sales lead
-		"amel@mea.co.id":    "EMP-AMEL",    // Account staff
-		"cakra@mea.co.id":   "EMP-CAKRA",   // Creative staff (no access)
-		"odi@mea.co.id":     "EMP-ODI",     // OD (layered)
-		"yohan@mea.co.id":   "EMP-YOHAN",   // Director (layered)
-	}
-	if id, ok := m[email]; ok {
-		return id, nil
-	}
-	return "", auth.ErrInvalidCredentials
-}
 
 func setupFin(t *testing.T) (*httptest.Server, func()) {
 	d := testutil.DB(t)
@@ -58,7 +32,8 @@ func setupFin(t *testing.T) (*httptest.Server, func()) {
 	testutil.InsertLayeredRole(t, d, "EMP-ODI", "od")
 	testutil.InsertLayeredRole(t, d, "EMP-YOHAN", "director")
 
-	app := httpapi.New(d, statemachine.New(), notification.NewCatalog(), financeAuth{}, nil)
+	testutil.SeedCredentials(t, d, "rahasia123")
+	app := httpapi.New(d, statemachine.New(), notification.NewCatalog(), nil)
 	srv := httptest.NewServer(app.Router())
 	return srv, srv.Close
 }

@@ -5,37 +5,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/meagrup/agencyapp/backend/internal/auth"
 	"github.com/meagrup/agencyapp/backend/internal/core/notification"
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
 	"github.com/meagrup/agencyapp/backend/internal/httpapi"
 	"github.com/meagrup/agencyapp/backend/internal/testutil"
 )
-
-// clientAuth maps fixture emails (password "rahasia123") to employee ids for the
-// Module 4 / Module 5 (build stream B) endpoint tests.
-type clientAuth struct{}
-
-func (clientAuth) Verify(_ context.Context, email, password string) (string, error) {
-	if password != "rahasia123" {
-		return "", auth.ErrInvalidCredentials
-	}
-	m := map[string]string{
-		"budi@mea.co.id":  "EMP-BUDI",  // Sales staff (owns clients)
-		"andi@mea.co.id":  "EMP-ANDI",  // Sales staff (owns nothing here)
-		"dewi@mea.co.id":  "EMP-DEWI",  // Sales lead
-		"amel@mea.co.id":  "EMP-AMEL",  // Account staff
-		"bima@mea.co.id":  "EMP-BIMA",  // Account staff (AM kedua, target reassign)
-		"alia@mea.co.id":  "EMP-ALIA",  // Account lead
-		"cakra@mea.co.id": "EMP-CAKRA", // Creative staff (no M4 access)
-		"odi@mea.co.id":   "EMP-ODI",   // OD (layered)
-		"yohan@mea.co.id": "EMP-YOHAN", // Director (layered)
-	}
-	if id, ok := m[email]; ok {
-		return id, nil
-	}
-	return "", auth.ErrInvalidCredentials
-}
 
 // setupCF builds an app on build-stream-B's auth fixtures and seeds the role
 // mappings + employees the M4/M5 endpoint tests share.
@@ -59,7 +33,8 @@ func setupCF(t *testing.T) (*httptest.Server, func()) {
 	testutil.InsertLayeredRole(t, d, "EMP-ODI", "od")
 	testutil.InsertLayeredRole(t, d, "EMP-YOHAN", "director")
 
-	app := httpapi.New(d, statemachine.New(), notification.NewCatalog(), clientAuth{}, nil)
+	testutil.SeedCredentials(t, d, "rahasia123")
+	app := httpapi.New(d, statemachine.New(), notification.NewCatalog(), nil)
 	srv := httptest.NewServer(app.Router())
 	return srv, srv.Close
 }

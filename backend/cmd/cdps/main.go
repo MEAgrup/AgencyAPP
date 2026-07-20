@@ -8,7 +8,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/meagrup/agencyapp/backend/internal/auth"
 	"github.com/meagrup/agencyapp/backend/internal/core/notification"
 	"github.com/meagrup/agencyapp/backend/internal/core/statemachine"
 	"github.com/meagrup/agencyapp/backend/internal/db"
@@ -28,8 +27,8 @@ func main() {
 		log.Fatalf("migrate up: %v", err)
 	}
 
+	// HRIS is a data source ONLY now (employee sync). Login is CDPS-local.
 	hrisURL := envOr("HRIS_BASE_URL", "http://127.0.0.1:8081")
-	authn := auth.NewHRISAuthenticator(hrisURL)
 
 	var src hris.EmployeeSource
 	if token := os.Getenv("HRIS_SERVICE_TOKEN"); token != "" || os.Getenv("HRIS_HTTP_SYNC") == "1" {
@@ -40,7 +39,7 @@ func main() {
 
 	engine := statemachine.New()
 	catalog := notification.NewCatalog()
-	app := httpapi.New(d, engine, catalog, authn, src)
+	app := httpapi.New(d, engine, catalog, src)
 
 	// Railway (and most PaaS) inject the port to listen on via PORT. An explicit
 	// CDPS_ADDR still wins for local/dev overrides.

@@ -1,6 +1,7 @@
-// Command mockhris is a dev-only stand-in for the existing HRIS. It implements
-// the two contract endpoints (docs/HRIS_API_CONTRACT.md) from the seed CSV so
-// local login and sync work end-to-end. All fixture passwords are rahasia123.
+// Command mockhris is a dev-only stand-in for the existing HRIS. It serves the
+// employee-sync endpoint (GET /api/v1/employees) from the seed CSV. As of the
+// 2026-07-19 auth decision the HRIS is a data source only — authentication is
+// owned by CDPS (local bcrypt passwords), so no auth/verify endpoint exists.
 package main
 
 import (
@@ -9,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/meagrup/agencyapp/backend/internal/hris"
 	"github.com/meagrup/agencyapp/backend/internal/seed"
@@ -33,11 +33,6 @@ func main() {
 	f.Close()
 	if err != nil {
 		log.Fatalf("parse csv: %v", err)
-	}
-
-	byEmail := map[string]hris.CSVRecord{}
-	for _, r := range records {
-		byEmail[strings.ToLower(r.Employee.Email)] = r
 	}
 
 	mux := http.NewServeMux()
@@ -66,23 +61,6 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"data": emps[start:end], "page": page, "page_size": pageSize, "total": len(emps),
 		})
-	})
-
-	mux.HandleFunc("POST /api/v1/auth/verify", func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			Email    string `json:"email"`
-			Password string `json:"password"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"valid": false, "reason": "bad_request"})
-			return
-		}
-		rec, ok := byEmail[strings.ToLower(strings.TrimSpace(body.Email))]
-		if !ok || rec.Password != body.Password {
-			writeJSON(w, http.StatusUnauthorized, map[string]any{"valid": false, "reason": "invalid_credentials"})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"valid": true, "employee_id": rec.Employee.EmployeeID})
 	})
 
 	log.Printf("mockhris listening on %s (%d employees from %s)", addr, len(records), csvPath)

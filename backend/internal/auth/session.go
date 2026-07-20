@@ -50,6 +50,22 @@ func RevokeSession(ctx context.Context, d *sql.DB, token string) error {
 	return err
 }
 
+// RevokeAllSessions revokes every active session of an employee (idempotent).
+func RevokeAllSessions(ctx context.Context, d *sql.DB, employeeID string) error {
+	_, err := d.ExecContext(ctx,
+		`UPDATE sessions SET revoked_at = NOW() WHERE employee_id = ? AND revoked_at IS NULL`, employeeID)
+	return err
+}
+
+// RevokeOtherSessions revokes every active session of an employee EXCEPT the
+// given token (used after a self password change to keep the current session).
+func RevokeOtherSessions(ctx context.Context, d *sql.DB, employeeID, keepToken string) error {
+	_, err := d.ExecContext(ctx,
+		`UPDATE sessions SET revoked_at = NOW() WHERE employee_id = ? AND token <> ? AND revoked_at IS NULL`,
+		employeeID, keepToken)
+	return err
+}
+
 // ResolveSession returns the employee id for a valid session token: not expired,
 // not revoked, and bound to an ACTIVE employee. Otherwise ErrNoSession.
 func ResolveSession(ctx context.Context, d *sql.DB, token string) (string, error) {
