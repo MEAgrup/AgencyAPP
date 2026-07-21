@@ -1,0 +1,43 @@
+# Fly.io deploy config for the CDPS Go backend.
+#
+# This file lives in backend/, so run `flyctl deploy` from that directory (the
+# GitHub Actions workflow does exactly that). Fly builds backend/Dockerfile —
+# the same multi-stage image Railway uses — so nothing about the app changes.
+#
+# NOTE: `app` must be globally unique across Fly. If "cdps-backend" is taken,
+# rename it here to match the app you created in the Fly dashboard.
+app = "cdps-backend"
+primary_region = "sin"  # Singapore — closest Fly region to Indonesia. Switch to
+                         # "syd" to co-locate with the Supabase (ap-southeast-2) DB.
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # The server binds $PORT (falls back to :8080); keep this aligned with
+  # http_service.internal_port below.
+  PORT = "8080"
+  # Migrations are bundled into the image and applied on boot (see Dockerfile).
+  CDPS_MIGRATIONS_DIR = "/app/migrations"
+
+# Runtime secrets (DATABASE_URL / CDPS_DSN, etc.) are NOT stored here — set them
+# once in the Fly dashboard (Secrets) or via `flyctl secrets set`. They are
+# encrypted and injected as env vars at boot; never commit them.
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"    # scale to zero when idle (keeps cost near $0)
+  auto_start_machines = true     # wake on first request
+  min_machines_running = 0       # set to 1 if you want it always warm (no cold start)
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "10s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

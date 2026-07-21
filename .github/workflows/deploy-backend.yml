@@ -1,0 +1,44 @@
+name: Deploy backend (Fly.io)
+
+# Deploys the CDPS Go backend to Fly.io.
+#
+# Control model: Claude Code drives this from the session — it can trigger a
+# run (workflow_dispatch) and read the resulting logs via the GitHub tools, so
+# the whole deploy-observe-fix loop happens without a terminal.
+#
+# One-time human setup (browser only):
+#   1. Create the app in the Fly dashboard (name must match `app` in
+#      backend/fly.toml) — or run `flyctl launch --no-deploy` once.
+#   2. Add a deploy token as the `FLY_API_TOKEN` repository secret
+#      (GitHub → Settings → Secrets and variables → Actions).
+#   3. Set runtime secrets (DATABASE_URL / CDPS_DSN) in the Fly dashboard.
+#
+# After that, deploys are automatic on push to main (see the `push` trigger
+# below) and can also be triggered on demand.
+
+on:
+  workflow_dispatch:
+  # Enable push-to-deploy once the one-time setup above is done: uncomment the
+  # block below and the backend redeploys on every merge to main.
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - 'backend/**'
+  #     - '.github/workflows/deploy-backend.yml'
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: fly deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy to Fly.io
+        working-directory: backend
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
