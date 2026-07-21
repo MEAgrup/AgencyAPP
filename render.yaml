@@ -1,0 +1,34 @@
+# Render Blueprint for the CDPS Go backend.
+#
+# Render builds backend/Dockerfile (the same image Railway used) — the app
+# itself is unchanged. Setup is 100% browser, no terminal:
+#
+#   1. render.com → New → Blueprint → pick this repo. Render reads this file
+#      and creates the service below.
+#   2. In the service, set the DATABASE_URL secret (Environment tab).
+#   3. Done. Every push to the connected branch auto-deploys (autoDeploy: true).
+#
+# Control model: Claude Code drives deploys by pushing commits (push =
+# auto-deploy). An optional manual "Deploy Hook" URL can also be created in the
+# dashboard to trigger a deploy without a push.
+
+services:
+  - type: web
+    name: cdps-backend
+    runtime: docker
+    repo: https://github.com/MEAgrup/AgencyAPP
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    region: singapore          # closest Render region to Indonesia
+    plan: free                 # bump to "starter" for an always-on instance (no cold start)
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      # The server binds $PORT (Render injects it automatically); these are the
+      # remaining runtime settings.
+      - key: CDPS_MIGRATIONS_DIR
+        value: /app/migrations
+      # DB connection — set the value in the Render dashboard (kept secret,
+      # never committed). Accepts a mysql:// URL; the app normalizes it.
+      - key: DATABASE_URL
+        sync: false
