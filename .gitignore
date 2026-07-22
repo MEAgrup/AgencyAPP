@@ -27,6 +27,14 @@ Icon
 /backend/rolemapseed
 /backend/backend
 
+# Node / TypeScript (new stack: apps/api, packages/*) — lockfiles ARE tracked
+node_modules/
+apps/*/node_modules/
+packages/*/node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+
 # Claude Code agent worktrees (ephemeral, never commit)
 .claude/worktrees/
 __pycache__/
