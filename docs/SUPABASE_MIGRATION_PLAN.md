@@ -105,29 +105,28 @@ flowchart TB
 - **Prinsip:** BUKAN "semua logic di database". DB memberi jaminan yang tak bisa dilanggar; API
   memberi perilaku & pesan BI yang persis sesuai PRD.
 
-### 2.3 Usulan layout monorepo
+### 2.3 Layout monorepo (final per keputusan OQ-7, 2026-07-22: API TERPISAH)
 ```
 AgencyAPP/
-  backend/            # Go — DIBEKUKAN, read-only, dipensiun saat cutover
-  web-internal/       # Next.js internal — diperluas jadi API + UI (Vercel)
-    src/app/api/      #   route handlers per modul (module0 … module15)
-  web-client-portal/  # Next.js portal — realm auth terpisah (Wave 3)
-  packages/           # BARU — kode bersama kedua app
+  backend/            # Go — DIBEKUKAN, read-only, dipensiun saat cutover (arsip, OQ-8)
+  web-internal/       # Next.js internal — UI saja; nanti repoint ke apps/api
+  web-client-portal/  # Next.js portal — realm auth terpisah (Wave 3, ditunda O4/O5)
+  apps/
+    api/              # BARU — Next.js API-only app (route handlers per modul
+                      #   module0 … module15), deploy Vercel terpisah
+  packages/           # BARU — kode bersama apps/api + kedua web app
     core/             #   port TS core engines: statemachine, ident, money,
                       #     audit, notification, permission, tz, importer
     db/               #   klien Postgres (postgres.js/drizzle) + generated types
   supabase/
     migrations/       # SQL Postgres (port 37 file lama + migrasi native baru)
-    functions/        # Edge Functions (cron: snapshot, reminder, hris-sync)
+    functions/        # Edge Functions (cron: snapshot, reminder)
     seed.sql          # fixture Alpha Digital (paritas dgn seed Go)
   docs/               # SUMBER KEBENARAN — tetap; tambah DECISIONS entri migrasi
 ```
 Detail lengkap (koneksi pooler, env vars, preview deployment + Supabase branching) di
-Lampiran Teknis §E. Keputusan terbuka: apakah API baru menumpang di dalam `web-internal`
-(satu app Vercel, lebih sederhana) atau app terpisah `apps/api-vercel` (pemisahan tegas).
-Rekomendasi awal: **perluas `web-internal`** untuk mengurangi permukaan deploy; pisah nanti
-hanya jika terbukti perlu (mirror prinsip "modular monolith, split later" dari Build Plan §2).
-→ Open Question OQ-7.
+Lampiran Teknis §E. **OQ-7 RESOLVED 2026-07-22: pemilik memilih app API TERPISAH** (`apps/api`)
+— bukan menumpang `web-internal`; pemisahan tegas UI vs API.
 
 ---
 
@@ -175,9 +174,11 @@ menolak UPDATE/DELETE `audit_log`; seluruh unit-test core hijau; seed jalan end-
 ### Fase 1 — Auth + HRIS sync + Master Service List — **M**
 **Scope:** Supabase Auth (GoTrue), employee sync + role-mapping, Master Service List admin (Phase 0 §10).
 **Deliverables:**
-- Migrasi auth lokal → Supabase Auth; custom claims (role/division/employee_id, layered OD/Director).
-- HRIS sync (Edge Function: `GET /employees`; fallback CSV per DECISIONS 2026-07-10) → tabel
-  `employees` + `role_mappings` (jabatan/divisi → role CDPS); deaktivasi HRIS → cabut akses next sync.
+- Migrasi auth lokal → Supabase Auth; custom claims (role/division/employee_id, layered OD/Director);
+  kredensial existing di-import langsung (hash bcrypt → GoTrue, keputusan OQ-3) + smoke-test login.
+- Sumber data karyawan = **import CSV/spreadsheet admin-triggered** (keputusan OQ-4 2026-07-22:
+  endpoint HRIS tidak dipakai lagi) → tabel `employees` + `role_mappings` (jabatan/divisi → role
+  CDPS); deaktivasi karyawan diberlakukan saat re-import/aksi admin → ban user di GoTrue.
 - MSL admin (versioned, dikelola Head of Sales; `effective_from`; deal kunci versi pada tanggal closing).
 - RLS policy baseline diaktifkan pada tabel employees/MSL.
 **Exit criteria:** Login via Supabase Auth berhasil; role ter-map dari HRIS; deaktivasi karyawan
@@ -292,26 +293,33 @@ paritas string BI + transisi ilegal terverifikasi, (c) runbook rollback ke Go/My
 
 ---
 
-## 7. Asumsi & Open Questions (butuh konfirmasi Yohan/Nerissa)
+## 7. Asumsi & Open Questions — ✅ DIKONFIRMASI PEMILIK 2026-07-22 (lihat DECISIONS ronde 2)
 
-**Asumsi orchestrator (tulis eksplisit, perlu konfirmasi):**
-- **A1 — Status data:** data dianggap masih **UAT/seed**, jadi migrasi data = re-run importer/seed di
-  Postgres. Jalur cadangan (ETL/pgloader satu-kali) disiapkan bila ternyata sudah ada data riil.
-- **A2 — Distribusi logic:** logic bisnis inti di Next.js API routes (TS) + Postgres trigger/constraint
-  untuk immutability & guard; RLS = baseline permission. BUKAN "semua logic di database".
-- **A3 — Urutan migrasi modul** mengikuti build order lama (Sprint 0 engines → Wave 1 money path → dst).
+**Asumsi — SEMUA DIKONFIRMASI:**
+- **A1 — Status data: CONFIRM** — data masih **UAT/seed**; migrasi data = re-run importer/seed di
+  Postgres. Jalur cadangan pgloader tetap terdokumentasi (Lampiran §F.2) tapi tidak diperlukan.
+- **A2 — Distribusi logic: CONFIRM** — logic bisnis inti di Next.js API routes (TS) + Postgres
+  trigger/constraint untuk immutability & guard; RLS = baseline permission.
+- **A3 — Urutan migrasi modul: OK** — mengikuti build order lama.
 
-**Open Questions:**
-- **OQ-1 (PIC keputusan):** siapa pemilik keputusan final tiap gate migrasi? Usulan: **Nerissa (COO)**
-  untuk keputusan produk/PRD, **Yohan (head dev / sesi build)** untuk gate engineering — mirror pola
-  DECISIONS yang ada.
-- **OQ-2:** apakah data produksi sudah riil atau masih UAT? (menentukan Opsi A vs B di §5). 
-- **OQ-3:** kompatibilitas hash password auth lokal Go → GoTrue: import langsung atau forced reset?
-- **OQ-4:** endpoint HRIS `GET /employees` — target kesiapan? tetap fallback CSV di Fase 1?
-- **OQ-5:** `mea-client-reporting` embeddable di stack baru (untuk M15)? (warisan risiko R2 Build Plan).
-- **OQ-6:** target biaya/tier Supabase & Vercel (pengaruh cold-start, connection pooling, Realtime quota).
-- **OQ-7:** layout API — perluas `web-internal` (satu app) vs `apps/api-vercel` terpisah? (§2.3).
-- **OQ-8:** apakah Go benar-benar boleh mati permanen setelah cutover, atau simpan read-only sebagai arsip?
+**Open Questions — jawaban pemilik (2026-07-22):**
+- **OQ-1 — RESOLVED:** PIC keputusan gate migrasi = **Yohan & Nerissa** (berdua).
+- **OQ-2 — RESOLVED:** data masih **UAT** → cutover Opsi A (§5): re-seed/import ulang, risiko data ~nol.
+- **OQ-3 — RESOLVED:** **import langsung** hash bcrypt ke GoTrue (bukan forced reset). Catatan
+  engineering: jalur ini menyentuh `auth.users` langsung via SQL (di luar admin API standar) —
+  wajib smoke-test login semua role di staging sebelum dinyatakan selesai (Lampiran §C.2 poin 1 & 4).
+- **OQ-4 — RESOLVED:** endpoint HRIS `GET /employees` **TIDAK dipakai lagi** di stack baru. Sumber
+  data karyawan = **import CSV/spreadsheet** (jalur fallback yang sudah ada preseden menjadi jalur
+  utama, admin-triggered). Deaktivasi karyawan diberlakukan saat re-import/aksi admin, bukan sync
+  endpoint. `docs/HRIS_API_CONTRACT.md` tidak diimplementasikan di stack baru.
+- **OQ-5 — MASIH OPEN (pemilik minta penjelasan; tidak blocking):** pertanyaannya: aplikasi
+  reporting eksternal `mea-client-reporting` yang sudah ada — apakah dashboard-nya bisa ditanam
+  (embed/iframe) di dalam Client Portal M15 nanti, atau portal harus membangun tampilan reporting
+  sendiri. Karena Client Portal DITUNDA (O4/O5), jawaban baru dibutuhkan bila portal dihidupkan.
+- **OQ-6 — RESOLVED:** tidak ada target biaya khusus Supabase/Vercel.
+- **OQ-7 — RESOLVED:** app API **TERPISAH** (`apps/api`), bukan menumpang `web-internal` (§2.3).
+- **OQ-8 — RESOLVED:** Go+MySQL **boleh disimpan sebagai arsip read-only** pasca-cutover (tidak
+  wajib dihapus permanen).
 
 ---
 
