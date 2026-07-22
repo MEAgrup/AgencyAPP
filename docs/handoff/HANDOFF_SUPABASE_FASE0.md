@@ -51,13 +51,27 @@
 
 ## 4. Status apply migrasi ke `CDPS SG` (UPDATE DI SINI SEBELUM TUTUP SESI)
 
-- Eksekutor apply sedang berjalan saat handoff ditulis: apply 28 migrasi berurutan via MCP
-  `apply_migration` → lalu smoke test (`ident_next` 2×, `wib_period`, UPDATE/DELETE `audit_log`
-  harus gagal, hitung tabel `information_schema` = 49) → `get_advisors` security+performance.
-- **[STATUS AKHIR DIISI SETELAH EKSEKUTOR SELESAI — lihat bagian 7 riwayat commit]**
+- **STATUS AKHIR (sesi dihentikan atas perintah pemilik, 2026-07-22):** eksekutor apply DIHENTIKAN
+  setelah **19 dari 28 migrasi sukses ter-apply** ke `CDPS SG` (`egddxfcnrtecheiykhlf`), berurutan
+  mulai `pg_foundation` s/d `20260101000029_strategy_requirement_override`. **TIDAK ada yang gagal**
+  — semua 19 sukses; sisanya belum sempat dijalankan.
+- **9 file BELUM ter-apply** (lanjutkan PERSIS urutan ini via `mcp__Supabase__apply_migration`,
+  name = slug tanpa timestamp, query = isi file utuh):
+  1. `20260101000030_campaigns.sql`
+  2. `20260101000031_hours_reminder.sql`
+  3. `20260101000032_campaign_linkage.sql`
+  4. `20260101000033_marketing_performance_records.sql`
+  5. `20260101000034_dependencies.sql`
+  6. `20260101000035_client_health.sql`
+  7. `20260101000036_team_performance.sql`
+  8. `20260101000037_local_auth.sql`
+  9. `20260102000001_ident_next.sql`
+- Setelah itu jalankan yang belum sempat: smoke test (`SELECT ident_next('CLI', now())` 2× →
+  `CLI-YYYYMM-0001/0002`; `wib_period(now())`; UPDATE/DELETE `audit_log` HARUS error
+  forbid_mutation; `SELECT count(*) FROM information_schema.tables WHERE table_schema='public'`
+  target 49) + `get_advisors` security & performance.
 - Verifikasi cepat di sesi baru: `mcp__Supabase__list_migrations` project `egddxfcnrtecheiykhlf`
-  harus menunjukkan 28 entri; kalau kurang, lanjutkan apply dari file yang gagal (urutan file =
-  urutan nama di `supabase/migrations/`).
+  → saat handoff = 19 entri; target akhir = 28.
 
 ## 5. Langkah berikutnya (urutan disarankan — sisa Fase 0 lalu Fase 1)
 
