@@ -1,0 +1,95 @@
+name: CI (Supabase stack)
+
+# Fase 0 CI for the new TypeScript/Supabase lineage (packages/*, apps/*,
+# supabase/migrations). The Go + MySQL stack is frozen and keeps its own
+# workflow (ci.yml) — this file never touches backend/ or web-internal/.
+#
+# Scope today:
+#   - core: @cdps/core vitest + strict typecheck (money, tz engines)
+#   - db:   apply all supabase/migrations to Postgres 17 + invariant checks
+#           (ident gap-free, append-only immutability)
+#
+# When Fase 1 adds RLS/auth, the db job should graduate to `supabase start` +
+# pgTAP via `supabase test db`, and gain the Alpha Digital e2e suite (Tech
+# Appendix §G).
+
+on:
+  push:
+    paths:
+      - 'packages/**'
+      - 'apps/**'
+      - 'supabase/**'
+      - '.github/workflows/ci-supabase.yml'
+  pull_request:
+    paths:
+      - 'packages/**'
+      - 'apps/**'
+      - 'supabase/**'
+      - '.github/workflows/ci-supabase.yml'
+
+jobs:
+  core:
+    name: core (vitest + typecheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: packages/core/package-lock.json
+      - name: Install deps
+        working-directory: packages/core
+        run: npm ci
+      - name: Typecheck (strict)
+        working-directory: packages/core
+        run: npm run typecheck
+      - name: Unit tests
+        working-directory: packages/core
+        run: npm test
+
+  db:
+    name: db (migrations + invariants)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cdps
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: cdps
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install psql client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -yqq postgresql-client
+      - name: Apply migrations (in order)
+        run: |
+          set -euo pipefail
+          for f in $(ls supabase/migrations/*.sql | sort); do
+            echo "-> applying $(basename "$f")"
+            psql -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+      - name: Verify table count (expect 49)
+        run: |
+          set -euo pipefail
+          n=$(psql -tAc "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
+          echo "public base tables: $n"
+          test "$n" -eq 49
+      - name: Invariant — ID generator (gap-free, WIB period)
+        run: psql -v ON_ERROR_STOP=1 -q -f supabase/tests/ident_checks.sql
+      - name: Invariant — append-only history (immutability)
+        run: psql -v ON_ERROR_STOP=1 -q -f supabase/tests/immutability_checks.sql
