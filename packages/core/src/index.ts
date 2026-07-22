@@ -5,9 +5,9 @@
  * - money: Commission, allocation (Σ=100%), installment rollup, ROAS math ✅
  * - tz: WIB (UTC+7, no DST) calendar-date bucketing ✅
  * - permission: Role matrix predicates (staff/lead/SPV/OD/Director/layered) ✅
- * - bi: Bahasa Indonesia validation/block message catalog (pending)
+ * - bi: house-wide Bahasa Indonesia core messages + [...] invariant helpers ✅
+ * - ident: prefix registry + ID format/parse + nextId wrapper (SQL ident_next) ✅
  * - statemachine: Entity lifecycle transitions (SQL sm_transition + TS wrapper, pending)
- * - ident: ID generation PREFIX-YYYYMM-NNNN (SQL ident_next + TS wrapper, pending)
  * - audit: Append-only immutable audit log (pending)
  * - notification: In-app event notifications derived from audit log (pending)
  *
@@ -24,3 +24,5 @@
 export * as money from './money.js';
 export * as tz from './tz.js';
 export * as permission from './permission.js';
+export * as bi from './bi.js';
+export * as ident from './ident.js';
