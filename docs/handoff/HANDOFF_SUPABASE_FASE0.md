@@ -51,32 +51,35 @@
 
 ## 4. Status apply migrasi ke `CDPS SG` (UPDATE DI SINI SEBELUM TUTUP SESI)
 
-- **STATUS AKHIR (sesi dihentikan atas perintah pemilik, 2026-07-22):** eksekutor apply DIHENTIKAN
-  setelah **19 dari 28 migrasi sukses ter-apply** ke `CDPS SG` (`egddxfcnrtecheiykhlf`), berurutan
-  mulai `pg_foundation` s/d `20260101000029_strategy_requirement_override`. **TIDAK ada yang gagal**
-  — semua 19 sukses; sisanya belum sempat dijalankan.
-- **9 file BELUM ter-apply** (lanjutkan PERSIS urutan ini via `mcp__Supabase__apply_migration`,
-  name = slug tanpa timestamp, query = isi file utuh):
-  1. `20260101000030_campaigns.sql`
-  2. `20260101000031_hours_reminder.sql`
-  3. `20260101000032_campaign_linkage.sql`
-  4. `20260101000033_marketing_performance_records.sql`
-  5. `20260101000034_dependencies.sql`
-  6. `20260101000035_client_health.sql`
-  7. `20260101000036_team_performance.sql`
-  8. `20260101000037_local_auth.sql`
-  9. `20260102000001_ident_next.sql`
-- Setelah itu jalankan yang belum sempat: smoke test (`SELECT ident_next('CLI', now())` 2× →
-  `CLI-YYYYMM-0001/0002`; `wib_period(now())`; UPDATE/DELETE `audit_log` HARUS error
-  forbid_mutation; `SELECT count(*) FROM information_schema.tables WHERE table_schema='public'`
-  target 49) + `get_advisors` security & performance.
+- ✅ **SELESAI (2026-07-22, diselesaikan orchestrator):** **SEMUA 28 migrasi sukses ter-apply**
+  ke `CDPS SG` (`egddxfcnrtecheiykhlf`) tanpa satu pun error (19 pertama oleh eksekutor, 9 sisanya
+  oleh orchestrator setelah eksekutor dihentikan sementara atas perintah pemilik).
+- ✅ **Smoke test LULUS semua:**
+  - `ident_next('CLI', now())` 2× → `CLI-202607-0001` lalu `CLI-202607-0002` (format & increment
+    benar; periode WIB `202607`). Catatan: dua ID uji ini terkonsumsi di `id_sequences` dev —
+    wajar, akan hilang saat `db reset`/re-seed.
+  - `wib_period(now())` → `202607` ✓.
+  - Immutability `audit_log`: UPDATE → error `P0001 audit_log is append-only/immutable: UPDATE
+    forbidden`; DELETE → error serupa (`DELETE forbidden`). Keduanya terbukti via `forbid_mutation()`.
+    Satu baris smoke (`entity_id='SMOKE-1'`) tertinggal permanen di `audit_log` dev — by design
+    (append-only), hilang saat re-seed.
+  - Jumlah tabel `public` = **49** — persis sesuai target inventaris.
+- ✅ **Advisors (hasil sesuai ekspektasi Fase 0):**
+  - Security: 49× ERROR `rls_disabled_in_public` + 1× `sensitive_columns_exposed`
+    (`sessions.token`) — **EXPECTED**: RLS memang baru datang di Fase 1 (Lampiran §D). PENTING
+    untuk Fase 1: aktifkan RLS di SEMUA tabel + pertimbangkan keluarkan tabel internal murni
+    (`sessions`, `id_sequences`, `employee_credentials`) dari expose PostgREST. 5× WARN
+    `function_search_path_mutable` (set_updated_at, forbid_mutation, wib_date, wib_period,
+    ident_next) — perbaiki di migrasi berikutnya dengan `SET search_path = ''` per fungsi.
+  - Performance: hanya INFO (3 FK tanpa index penutup: `client_platforms`,
+    `negotiation_proposal_lines`, `payment_verifications`; "unused index" wajar di DB kosong;
+    saran alokasi koneksi Auth persentase) — tidak ada blocker.
 - Verifikasi cepat di sesi baru: `mcp__Supabase__list_migrations` project `egddxfcnrtecheiykhlf`
-  → saat handoff = 19 entri; target akhir = 28.
+  = 28 entri.
 
 ## 5. Langkah berikutnya (urutan disarankan — sisa Fase 0 lalu Fase 1)
 
-1. **Selesaikan/verifikasi apply 28 migrasi** di `CDPS SG` (lihat §4) + advisors bersih dari error
-   fatal (peringatan "RLS disabled" itu EXPECTED di Fase 0 — RLS datang di Fase 1).
+1. ~~Apply 28 migrasi + smoke test + advisors~~ ✅ SELESAI (lihat §4).
 2. **Port core engines ke TypeScript** di `packages/core` (urutan disarankan: `money` + `tz`
    (murni, mudah), `bi-messages.ts` (konstanta string BI — kumpulkan dari DECISIONS + kode Go),
    `permission` (predikat murni), `statemachine` (baca `config.go` Go + `docs/STATE_MACHINES.md`),
