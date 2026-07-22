@@ -1,0 +1,10 @@
+{
+  "name": "@cdps/core",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "private": true,
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,21 @@
+-- Port dari backend/migrations/0029_strategy_requirement_override.up.sql (MySQL) — konversi per docs/SUPABASE_MIGRATION_TECH_APPENDIX.md §A
+--
+-- CDPS Wave 2 — Module 6 (Account & Service), deferred cluster M6-OA-1:
+-- per-engagement override of the "Requires Strategy Plan" flag.
+--
+-- M6 §10 M6-OA-1 (Plan-flag override, ✅ Confirmed): "An AM/SPV can override the
+-- catalog's `Requires Strategy Plan` flag per-engagement, with a logged reason."
+--
+-- Design: the pinned flag `requires_strategy_plan` (0021) stays the immutable
+-- catalog snapshot captured at closing (M6 §2 "inherits this flag, read-only").
+-- The override is a SEPARATE nullable column on the Service row:
+--   NULL  = no override, the Service follows its pinned MSL flag (the default,
+--           so every existing Service is untouched — additive, no back-fill);
+--   0 / 1 = an explicit per-engagement decision that supersedes the pin.
+-- Effective requirement = COALESCE(requires_strategy_plan_override,
+--                                  requires_strategy_plan).
+-- The "logged reason" lives in the immutable audit_log (before→after, actor,
+-- reason) — mirroring the reassignment-reason precedent (0020 / M6 §3), not a
+-- stored column — so history is append-only (house rule 3).
+ALTER TABLE services
+    ADD COLUMN requires_strategy_plan_override boolean NULL DEFAULT NULL;
