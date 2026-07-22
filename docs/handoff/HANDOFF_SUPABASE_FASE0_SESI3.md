@@ -13,7 +13,11 @@ Fase 0 punya 6 langkah (handoff sebelumnya §5). Status:
 2. 🔄 **Port core engines ke TypeScript** — SESI INI: **5 dari ~8 engine murni selesai**
    (money, tz, permission, bi, ident). Sisa engine bergantung DB/SQL (statemachine, audit,
    notification) — lihat §3.
-3. ⬜ Setup CI (GitHub Actions): supabase start + migrasi + pgTAP + vitest.
+3. ✅ Setup CI (GitHub Actions) — **PR #30** (`.github/workflows/ci-supabase.yml`): job `core`
+   (npm ci + `tsc --noEmit` + vitest `@cdps/core`) + job `db` (`postgres:17` → apply 28 migrasi →
+   assert 49 tabel → invariant checks `supabase/tests/ident_checks.sql` + `immutability_checks.sql`).
+   Catatan: Fase 0 pakai plain-SQL psql assertions (migrasi masih murni Postgres); graduasi ke
+   `supabase start` + pgTAP + e2e Alpha Digital saat Fase 1 (RLS/auth) — lihat `supabase/tests/README.md`.
 4. ⬜ Seed fixture Alpha Digital → `supabase/seed.sql`.
 5. ⬜ Fase 1: Supabase Auth (import bcrypt), importer CSV karyawan, MSL admin, RLS baseline.
 6. ⬜ Vercel project untuk `apps/api`.
