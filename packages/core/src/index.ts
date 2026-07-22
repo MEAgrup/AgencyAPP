@@ -1,25 +1,26 @@
 /**
  * @cdps/core — Shared core engines for CDPS (ported from Go internal/core/)
  *
- * This package exports the following engines (to be ported):
- * - statemachine: Entity lifecycle transitions with server-side validation
- * - ident: ID generation (PREFIX-YYYYMM-NNNN format, immutable, no reuse)
- * - money: Commission, allocation (Σ=100%), installment rollup, ROAS calculations
- * - audit: Append-only immutable audit log (actor, action, before→after, timestamp)
- * - notification: In-app event notifications derived from audit log
- * - permission: Role matrix enforcement (staff/lead/SPV/OD/Director/layered)
- * - tz: Timezone utilities for client-local vs server timestamps
- * - importer: Bulk import with dry-run SAVEPOINT + atomic apply
+ * This package exports the following engines (ported incrementally per phase):
+ * - money: Commission, allocation (Σ=100%), installment rollup, ROAS math ✅
+ * - tz: WIB (UTC+7, no DST) calendar-date bucketing ✅
+ * - permission: Role matrix predicates (staff/lead/SPV/OD/Director/layered) ✅
+ * - bi: Bahasa Indonesia validation/block message catalog (pending)
+ * - statemachine: Entity lifecycle transitions (SQL sm_transition + TS wrapper, pending)
+ * - ident: ID generation PREFIX-YYYYMM-NNNN (SQL ident_next + TS wrapper, pending)
+ * - audit: Append-only immutable audit log (pending)
+ * - notification: In-app event notifications derived from audit log (pending)
  *
  * All implementations must maintain house-rule compliance (CLAUDE.md §Non-negotiable):
- * - State machines server-side enforced + exact Bahasa Indonesia [...]messages
+ * - State machines server-side enforced + exact Bahasa Indonesia [...] messages
  * - ID generation only after mandatory validation passes
  * - Derived fields computed (never user-typed) and always recomputable from audit log
  * - Permission checks per role with tests for all levels including layered OD/Director
  * - Money math: round-half-up, div-by-zero → "—", IDR format Rp. X.XXX.XXX,00
  *
- * Reference: SUPABASE_MIGRATION_PLAN.md §3 (pemetaan house rules)
+ * Reference: SUPABASE_MIGRATION_PLAN.md §3 + TECH_APPENDIX §B (pemetaan engine).
  */
 
-// Placeholder exports — implementations follow per phase
-export {};
+export * as money from './money.js';
+export * as tz from './tz.js';
+export * as permission from './permission.js';
