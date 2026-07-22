@@ -1,25 +1,35 @@
 /**
- * @cdps/core — Shared core engines for CDPS (ported from Go internal/core/)
+ * @cdps/core — Shared core engines for CDPS (ported from Go internal/core/).
  *
- * This package exports the following engines (to be ported):
- * - statemachine: Entity lifecycle transitions with server-side validation
- * - ident: ID generation (PREFIX-YYYYMM-NNNN format, immutable, no reuse)
- * - money: Commission, allocation (Σ=100%), installment rollup, ROAS calculations
- * - audit: Append-only immutable audit log (actor, action, before→after, timestamp)
- * - notification: In-app event notifications derived from audit log
- * - permission: Role matrix enforcement (staff/lead/SPV/OD/Director/layered)
- * - tz: Timezone utilities for client-local vs server timestamps
- * - importer: Bulk import with dry-run SAVEPOINT + atomic apply
+ * Ported to TypeScript in Fase 0 sesi 2 (see docs/handoff/HANDOFF_SUPABASE_FASE0.md
+ * §5.2 and SUPABASE_MIGRATION_TECH_APPENDIX §B). The mapping principle (§B): pure
+ * computation/format/validation lives here as TypeScript; anything that must be
+ * atomic with a single row/transaction (ID allocation, status transition write,
+ * immutability, updated_at) is a Postgres function/trigger (supabase/migrations/)
+ * that this layer's decisions feed into.
  *
- * All implementations must maintain house-rule compliance (CLAUDE.md §Non-negotiable):
- * - State machines server-side enforced + exact Bahasa Indonesia [...]messages
- * - ID generation only after mandatory validation passes
- * - Derived fields computed (never user-typed) and always recomputable from audit log
- * - Permission checks per role with tests for all levels including layered OD/Director
- * - Money math: round-half-up, div-by-zero → "—", IDR format Rp. X.XXX.XXX,00
+ * Engines:
+ * - money        — IDR minor-unit math + "Rp. X.XXX.XXX,00" format (pure)
+ * - tz           — WIB (+07:00, no DST) calendar-day/month bucketing (pure)
+ * - permission   — role matrix predicates (pure; RLS re-checks them in SQL)
+ * - biMessages   — single source of Bahasa Indonesia [...] messages
+ * - statemachine — declarative machine config + allow/block/role decision (pure);
+ *                  the atomic write is the SQL sm_transition function
+ * - notification — frozen 15-event catalog + recipient-selection semantics (pure);
+ *                  resolvers + INSERT are SQL, atomic with the triggering change
+ * - ident        — PREFIX-YYYYMM-NNNN format/parse (pure); allocation is SQL ident_next
+ * - audit        — append-only entry builder + no-secret guard (pure); INSERT via db
  *
- * Reference: SUPABASE_MIGRATION_PLAN.md §3 (pemetaan house rules)
+ * House-rule compliance (CLAUDE.md §Non-negotiable) is preserved by construction:
+ * status is only ever set through the transition path, IDs only after validation,
+ * derived fields are computed and recomputable, BI messages come from one module.
  */
 
-// Placeholder exports — implementations follow per phase
-export {};
+export * as money from "./money.js";
+export * as tz from "./tz.js";
+export * as permission from "./permission.js";
+export * as biMessages from "./bi-messages.js";
+export * as statemachine from "./statemachine/index.js";
+export * as ident from "./ident.js";
+export * as audit from "./audit.js";
+export * as notification from "./notification/catalog.js";
