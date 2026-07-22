@@ -56,11 +56,41 @@ Tooling `packages/core`: `package.json` (vitest+typescript, script `test`/`typec
   (JSON before/after tidak boleh memuat hash) dengan guard kode + test, bukan hanya
   review manusia.
 
+## 2b. §5.3 CI + pgTAP — SELESAI (sesi ini, lanjutan)
+
+Ditambahkan setelah port engine:
+
+- `.github/workflows/supabase-newstack.yml` — CI stack baru, **terpisah** dari `ci.yml`
+  (Go+MySQL beku, tidak disentuh). Dua job:
+  - `core-engines`: `npm ci` + `npm run typecheck` + `npm test` (vitest) di `packages/core`.
+  - `db-parity`: `supabase/setup-cli` → `supabase start` (apply 28 migrasi ke Postgres
+    lokal fresh) → `supabase test db` (pgTAP) → `supabase stop`.
+- `supabase/config.toml` — config lokal/CI. **Semua service non-DB dimatikan** (auth,
+  api, realtime, studio, storage, inbucket, analytics, edge_runtime) supaya
+  `supabase start` cepat & andal utk job pgTAP; `[db].major_version = 17` (match remote).
+  Fase 1 akan menyalakan `[auth]`/`[api]` saat vitest-vs-stack utk RLS.
+- `supabase/tests/` — 2 file pgTAP:
+  - `foundation_wib_ident_test.sql` (8 test): `wib_period`/`wib_date` fixed-offset +7h
+    (O20), `ident_next` format + increment + WIB month boundary + **rollback-safety**
+    (savepoint → nomor di-reissue, gap-free).
+  - `immutability_test.sql` (8 test): `forbid_mutation` trigger memblok UPDATE+DELETE di
+    `audit_log`, DELETE di `notifications` (+ UPDATE `read_at` mark-read DIIZINKAN), dan
+    UPDATE+DELETE di `client_health_snapshots`/`performance_snapshots`. Tiap kasus
+    men-seed baris nyata (BEFORE trigger hanya fire jika ada baris yang match).
+
+**Verifikasi lokal (bukan hanya review):** dijalankan terhadap PostgreSQL 16 ephemeral
+(initdb) — 28/28 migrasi apply bersih (49 tabel), lalu `pg_prove` kedua file pgTAP →
+**16/16 test LULUS** di DB fresh. vitest `packages/core` tetap **74/74**, `tsc` bersih.
+
+Catatan: pgTAP `sm_transition` (transisi ilegal terblok di level DB) BELUM ditambahkan
+karena fungsi SQL `sm_transition` sendiri baru dibuat di Fase 1 (§B.2) — pgTAP-nya
+menyusul bersama fungsi itu. Yang ada sekarang menguji semua objek DB yang SUDAH ada
+dari migrasi sesi 1.
+
 ## 3. Langkah berikutnya (sisa §5, urutan disarankan)
 
-1. **§5.3 Setup CI** (GitHub Actions, Lampiran §G): `supabase start` + `db reset`
-   (apply 28 migrasi) + pgTAP (immutability, `ident_next`, `sm_transition`) + `vitest run`
-   di `packages/core`. Job juga `tsc --noEmit`. Ini yang mengunci paritas dua-sisi.
+1. ~~**§5.3 Setup CI** + pgTAP~~ ✅ SELESAI (lihat §2b). Sisa pgTAP `sm_transition` +
+   vitest-vs-Postgres menyusul bersama fungsi SQL Fase 1.
 2. **§5.4 Seed fixture Alpha Digital** → `supabase/seed.sql` + kasus uji vitest
    (Speed Score 112.5%, Health Score ≈74.56 → Watch) sebagai kriteria lulus port.
 3. **`packages/db`** — wiring `postgres.js` (`prepare:false` utk pooler 6543) + Drizzle
@@ -89,4 +119,5 @@ Tooling `packages/core`: `package.json` (vitest+typescript, script `test`/`typec
 
 ## 5. Commit sesi ini (branch `claude/supabase-fase0-sesi2-handoff-fpz613`)
 
-- (sesi ini) `feat(fase0): port core engines Go → TypeScript di packages/core + vitest`
+- `feat(fase0): port core engines Go → TypeScript di packages/core + vitest`
+- (sesi ini) `ci(fase0): CI stack baru (vitest core-engines) + pgTAP paritas DB (foundation + immutability)`

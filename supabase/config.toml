@@ -1,0 +1,46 @@
+# Supabase local/CI config for the CDPS migration stack (Fase 0).
+#
+# Fase 0 CI only needs Postgres + the migrations + pgTAP (`supabase test db`), so
+# every non-DB service is disabled here to keep `supabase start` fast and reliable.
+# Fase 1 will re-enable [auth] (GoTrue) and [api] (PostgREST) when vitest runs
+# against a real stack for RLS/function contract tests (SUPABASE_MIGRATION_TECH_APPENDIX §G).
+#
+# Region/prod project ("CDPS SG", ref egddxfcnrtecheiykhlf, ap-southeast-1) is
+# managed via the dashboard, not this file — this is the LOCAL config only.
+
+project_id = "cdps"
+
+[db]
+port = 54322
+shadow_port = 54320
+# Match the remote project (Supabase Postgres 17, per HANDOFF_SUPABASE_FASE0 §2).
+major_version = 17
+
+[db.pooler]
+enabled = false
+
+# --- Non-DB services: off for the Fase 0 pgTAP job (Fase 1 flips auth/api on). ---
+
+[api]
+enabled = false
+
+[auth]
+enabled = false
+
+[realtime]
+enabled = false
+
+[studio]
+enabled = false
+
+[storage]
+enabled = false
+
+[inbucket]
+enabled = false
+
+[analytics]
+enabled = false
+
+[edge_runtime]
+enabled = false

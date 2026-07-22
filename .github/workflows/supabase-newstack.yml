@@ -1,0 +1,53 @@
+# CI for the new (Supabase/Vercel) stack — runs alongside the frozen Go+MySQL CI
+# in ci.yml, which is untouched. Two-sided parity per SUPABASE_MIGRATION_TECH_APPENDIX §G:
+#   - core-engines: vitest + tsc for the pure TypeScript engines (packages/core)
+#   - db-parity:    pgTAP against a real Postgres with all 28 migrations applied,
+#                   proving the DB-side halves (ident_next, wib_*, immutability
+#                   triggers) that vitest cannot cover.
+name: New stack (Supabase migration)
+
+on:
+  push:
+    paths:
+      - "packages/**"
+      - "supabase/**"
+      - ".github/workflows/supabase-newstack.yml"
+  pull_request:
+    paths:
+      - "packages/**"
+      - "supabase/**"
+      - ".github/workflows/supabase-newstack.yml"
+
+jobs:
+  core-engines:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: packages/core/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  db-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      # `supabase start` applies supabase/migrations to a fresh local Postgres.
+      # Only the DB service starts (all others disabled in supabase/config.toml).
+      - name: Start local Supabase (applies migrations)
+        run: supabase start
+      - name: pgTAP — foundation functions + immutability triggers
+        run: supabase test db
+      - name: Stop
+        if: always()
+        run: supabase stop
