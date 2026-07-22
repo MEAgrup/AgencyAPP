@@ -157,9 +157,12 @@ adalah **kontrak** — port TS harus mereproduksinya, bukan menafsir ulang.
 **Scope:** Setup project Supabase (dev/staging/prod), konversi skema MySQL→Postgres, port 7 core
 engine ke TS, CI/CD Vercel, harness test.
 **Deliverables:**
-- Project Supabase baru **`CDPS`** + **`CDPS Staging`** — organisasi Supabase MEA sudah aktif dan
-  sudah memakai pola satu-project-per-sistem + staging (MSDPS, MCN MEA; region `ap-southeast-2`,
-  Postgres 17); CDPS mengikuti pola yang sama. Vercel project terhubung repo.
+- Project Supabase baru — **DIBUAT 2026-07-22: `CDPS SG`** (ref `egddxfcnrtecheiykhlf`), region
+  **`ap-southeast-1` Singapore per arahan pemilik** (menyimpang dari pola org lama yang di Sydney
+  `ap-southeast-2` — MSDPS/MCN MEA), Postgres 17. Catatan operasional: project `CDPS` pertama
+  (ref `klrmguatvzbmujihzacl`, Sydney, salah region) harus DIHAPUS manual dari dashboard oleh
+  pemilik (API tidak menyediakan delete; pause ditolak untuk paid tier). Project staging menyusul.
+  Vercel project terhubung repo.
 - Konversi skema: 26 migrasi MySQL (0001–0037) → migrasi Postgres di `supabase/migrations/`
   (AUTO_INCREMENT→IDENTITY, `DATETIME(6)`→`timestamptz`, `TINYINT(1)`→boolean, JSON→jsonb; catatan:
   skema as-built TIDAK memakai ENUM — detail per konstruksi di Lampiran Teknis §A).
