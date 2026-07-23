@@ -3,7 +3,7 @@
 > Lanjutan dari `HANDOFF_SUPABASE_FASE0_SESI3.md` (Fase 0 tuntas).
 > Baca bersama `docs/SUPABASE_MIGRATION_TECH_APPENDIX.md` §C (auth) + §D (RLS),
 > `PERMISSIONS.md`, `docs/DECISIONS.md` (2 entri 2026-07-23).
-> Branch: `claude/fase-1-rls-auth-tog477` · PR **#32** (draft, → `main`).
+> Branch: `claude/fase1-sesi4-handoff-1x8v1i` · PR **#33** (langkah 1–4, → `main`; superset & pengganti PR #32).
 > Project Supabase target: **CDPS SG** = `egddxfcnrtecheiykhlf` (region ap-southeast-1).
 
 ---
@@ -221,6 +221,7 @@ Ketiganya **tidak bisa dieksekusi agent** (butuh Dashboard/staging/data riil):
   `create`/`list`/`get`/`transition`/`submitBlockRequest`/`approveBlockRequest`. Gate wajib +
   BI `[...]` SEBELUM `ident_next` (ID hanya lahir pasca-validasi); status HANYA lewat `sm_transition`.
 - Handler: `POST/GET /api/v1/demo-tasks`, `GET .../{id}`, `POST .../{id}/transition`,
+  `POST .../{id}/block-request` (submit), `POST .../{id}/block-requests/{reqId}/approve`,
   `POST /api/v1/admin/employee-import` (Director-only, memakai importer langkah 3).
 - `apps/api/src/lib/`:
   - `auth.ts` — verifikasi **JWT HS256 sendiri** (`node:crypto`, tanpa dep baru): tolak `alg≠HS256`
@@ -236,6 +237,10 @@ Ketiganya **tidak bisa dieksekusi agent** (butuh Dashboard/staging/data riil):
 ### CI
 - `db-and-migrations`: +step `@cdps/domain` (typecheck+test, `DATABASE_URL` sama, setelah `@cdps/db`).
 - Job baru **`api`**: `npm ci && typecheck && test` (lib unit — tanpa DB, tanpa Next-build).
+  **Penting:** karena `apps/api` resolve `@cdps/*` ke SOURCE, job ini `npm ci` dulu di
+  `packages/db` + `packages/domain` supaya bare-import `postgres`/`bcryptjs` di sumbernya
+  ter-resolve saat `tsc`/vitest mengikuti alias (kalau tidak → TS2307). Ini konsekuensi
+  "belum ada workspace root" — lihat catatan di bawah.
 
 ### Catatan untuk yang melanjutkan
 - Importer siap untuk **gate manusia §5 #2** (import data riil): panggil endpoint
