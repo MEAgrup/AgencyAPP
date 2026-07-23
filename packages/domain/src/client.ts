@@ -229,6 +229,133 @@ export async function updateClient(sql: Sql, actor: Actor, clientId: string, pat
   });
 }
 
+// ---------------------------------------------------------------------------
+// Platform List (M4 §3/§4) — the client's platforms are a Qualified-captured list
+// correctable post-close by Account Lead / OD / Director (same §4 cell as the
+// profile fields). Each platform is a client_platforms row (born at closing with
+// the primary platform); this is add / correct / deactivate over that list.
+// ---------------------------------------------------------------------------
+
+const RE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** A new platform on the client's Platform List. */
+export interface PlatformInput {
+  platform: string;
+  storeLink?: string;
+  managedSince?: string; // YYYY-MM-DD
+}
+
+/** A correction to one platform (any subset; `active:false` deactivates it). */
+export interface PlatformPatch {
+  storeLink?: string;
+  managedSince?: string; // YYYY-MM-DD
+  active?: boolean;
+}
+
+function validDateOpt(s: string | undefined): void {
+  if (s !== undefined && s.trim() !== '' && !RE_DATE.test(s.trim())) {
+    throw new IncompleteError();
+  }
+}
+
+/**
+ * addPlatform appends a platform to a client's Platform List (M4 §3/§4). Account
+ * Lead / OD / Director only. `platform` is mandatory; the row is born active and
+ * the add is audited. Returns the new platform row id.
+ */
+export async function addPlatform(sql: Sql, actor: Actor, clientId: string, input: PlatformInput): Promise<number> {
+  if (!canEditProfile(actor)) {
+    throw new ForbiddenError();
+  }
+  const platform = (input.platform ?? '').trim();
+  if (platform === '') {
+    throw new IncompleteError();
+  }
+  validDateOpt(input.managedSince);
+
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const exists = await tx<{ id: string }[]>`select id from clients where id = ${clientId} for update`;
+    if (exists.length === 0) {
+      throw new NotFoundError();
+    }
+    const rows = await tx<{ id: string }[]>`
+      insert into client_platforms (client_id, platform, store_link, managed_since, active, created_by)
+      values (${clientId}, ${platform}, ${nullTrim(input.storeLink)}, ${nullTrim(input.managedSince)}, true, ${actor.employeeId})
+      returning id`;
+    // A bigint IDENTITY comes back from postgres.js as a string; the API wants a number.
+    const id = Number(rows[0].id);
+    await ex.audit.insertAudit({
+      entityType: 'client', entityId: clientId, actorEmployeeId: actor.employeeId,
+      action: 'platform_added', beforeJson: null,
+      afterJson: { platform_id: id, platform, store_link: nullTrim(input.storeLink) }, createdBy: actor.employeeId,
+    });
+    return id;
+  });
+}
+
+/**
+ * updatePlatform corrects one platform on a client's list (M4 §4): store link,
+ * managed-since, or the active flag (deactivation = removal from the list, never
+ * a delete). Account Lead / OD / Director only; at least one field; audited
+ * before→after. The platform must belong to the client.
+ */
+export async function updatePlatform(
+  sql: Sql,
+  actor: Actor,
+  clientId: string,
+  platformId: number,
+  patch: PlatformPatch,
+): Promise<void> {
+  if (!canEditProfile(actor)) {
+    throw new ForbiddenError();
+  }
+  const setsLink = patch.storeLink !== undefined;
+  const setsSince = patch.managedSince !== undefined;
+  const setsActive = patch.active !== undefined;
+  if (!setsLink && !setsSince && !setsActive) {
+    throw new IncompleteError();
+  }
+  validDateOpt(patch.managedSince);
+
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const rows = await tx<{ store_link: string | null; managed_since: Date | null; active: boolean }[]>`
+      select store_link, managed_since, active
+      from client_platforms where id = ${platformId} and client_id = ${clientId} for update`;
+    if (rows.length === 0) {
+      throw new NotFoundError('platform not found');
+    }
+    const before = rows[0];
+
+    if (setsLink) {
+      await tx`update client_platforms set store_link = ${nullTrim(patch.storeLink)} where id = ${platformId}`;
+    }
+    if (setsSince) {
+      await tx`update client_platforms set managed_since = ${nullTrim(patch.managedSince)} where id = ${platformId}`;
+    }
+    if (setsActive) {
+      await tx`update client_platforms set active = ${patch.active as boolean} where id = ${platformId}`;
+    }
+    await ex.audit.insertAudit({
+      entityType: 'client', entityId: clientId, actorEmployeeId: actor.employeeId,
+      action: 'platform_updated', beforeJson: { platform_id: platformId, ...before },
+      afterJson: {
+        platform_id: platformId,
+        ...(setsLink ? { store_link: nullTrim(patch.storeLink) } : {}),
+        ...(setsSince ? { managed_since: nullTrim(patch.managedSince) } : {}),
+        ...(setsActive ? { active: patch.active } : {}),
+      },
+      createdBy: actor.employeeId,
+    });
+  });
+}
+
+/** nullTrim stores an empty/absent optional string as SQL NULL. */
+function nullTrim(s: string | undefined): string | null {
+  return s && s.trim() !== '' ? s.trim() : null;
+}
+
 /** editableFields lists the lock-matrix-editable field keys (for the API/UI). */
 export function editableFields(): string[] {
   return Object.keys(FIELDS);

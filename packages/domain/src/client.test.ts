@@ -13,6 +13,7 @@ import { permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import { leads, sales } from './index.js';
 import {
+  addPlatform,
   canEditAccountRevisable,
   canEditBaseline,
   canEditProfile,
@@ -26,6 +27,7 @@ import {
   type Actor,
   type ClientPatch,
   updateClient,
+  updatePlatform,
 } from './client.js';
 
 const budi = (): Actor => ({
@@ -104,6 +106,22 @@ describe('updateClient gate (no DB)', () => {
   it('rejects a bad value (empty string / unparseable money)', async () => {
     await expect(updateClient(noSql, accountLead(), 'CLI-x', { toko: '  ' })).rejects.toBeInstanceOf(IncompleteError);
     await expect(updateClient(noSql, accountStaff(), 'CLI-x', { targetGmv: 'abc' })).rejects.toBeInstanceOf(IncompleteError);
+  });
+});
+
+describe('platform gate (no DB)', () => {
+  const noSql = null as unknown as Sql;
+
+  it('addPlatform: profile authority + mandatory platform + valid date', async () => {
+    await expect(addPlatform(noSql, budi(), 'CLI-x', { platform: 'Shopee' })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(addPlatform(noSql, accountLead(), 'CLI-x', { platform: '  ' })).rejects.toBeInstanceOf(IncompleteError);
+    await expect(addPlatform(noSql, accountLead(), 'CLI-x', { platform: 'Shopee', managedSince: '01-2026' }))
+      .rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  it('updatePlatform: profile authority + at least one field', async () => {
+    await expect(updatePlatform(noSql, budi(), 'CLI-x', 1, { active: false })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(updatePlatform(noSql, accountLead(), 'CLI-x', 1, {})).rejects.toBeInstanceOf(IncompleteError);
   });
 });
 
@@ -220,6 +238,60 @@ describeDb('updateClient (lock matrix, M4 §4)', () => {
 
   it('404s on an unknown client', async () => {
     await expect(updateClient(sql, accountLead(), 'CLI-000000-0000', { toko: 'X' }))
+      .rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describeDb('Platform List (M4 §3/§4)', () => {
+  const primaryPlatformId = async (clientId: string): Promise<number> =>
+    Number((await sql<{ id: string }[]>`select id from client_platforms where client_id = ${clientId} order by id limit 1`)[0].id);
+
+  it('Account Lead adds a platform (born active), logged; appears on the record', async () => {
+    const id = await closedClient();
+    const pid = await addPlatform(sql, accountLead(), id, { platform: 'TikTok Shop', storeLink: 'https://tokopedia/x', managedSince: '2026-05-01' });
+    expect(pid).toBeGreaterThan(0);
+
+    const rows = await sql<{ platform: string; active: boolean }[]>`
+      select platform, active from client_platforms where client_id = ${id} order by id`;
+    expect(rows.map((r) => r.platform)).toEqual(['Shopee', 'TikTok Shop']);
+    expect(rows[1].active).toBe(true);
+
+    const audit = await sql<{ n: number }[]>`
+      select count(*)::int as n from audit_log where entity_id = ${id} and action = 'platform_added'`;
+    expect(audit[0].n).toBe(1);
+  });
+
+  it('a Sales staff cannot add a platform', async () => {
+    const id = await closedClient();
+    await expect(addPlatform(sql, budi(), id, { platform: 'Lazada' })).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('OD deactivates a platform (removal from the list, not a delete), logged', async () => {
+    const id = await closedClient();
+    const pid = await primaryPlatformId(id);
+    await updatePlatform(sql, od(), id, pid, { active: false });
+
+    const row = await sql<{ active: boolean }[]>`select active from client_platforms where id = ${pid}`;
+    expect(row[0].active).toBe(false); // row still exists
+
+    const audit = await sql<{ before_json: { active: boolean }; after_json: { active: boolean } }[]>`
+      select before_json, after_json from audit_log
+      where entity_id = ${id} and action = 'platform_updated' order by id desc limit 1`;
+    expect(audit[0].before_json.active).toBe(true);
+    expect(audit[0].after_json.active).toBe(false);
+  });
+
+  it('corrects a store link', async () => {
+    const id = await closedClient();
+    const pid = await primaryPlatformId(id);
+    await updatePlatform(sql, accountLead(), id, pid, { storeLink: 'https://shopee/alpha-baru' });
+    const row = await sql<{ store_link: string | null }[]>`select store_link from client_platforms where id = ${pid}`;
+    expect(row[0].store_link).toBe('https://shopee/alpha-baru');
+  });
+
+  it('404s updating a platform that does not belong to the client', async () => {
+    const id = await closedClient();
+    await expect(updatePlatform(sql, accountLead(), id, 99999999, { active: false }))
       .rejects.toBeInstanceOf(NotFoundError);
   });
 });
