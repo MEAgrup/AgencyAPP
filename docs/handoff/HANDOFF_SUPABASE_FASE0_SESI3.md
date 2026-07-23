@@ -14,17 +14,25 @@ Fase 0 punya 6 langkah (handoff sebelumnya §5). Status:
    ident, statemachine, audit, notification (`packages/core`, 98 test) + `packages/db`
    (klien postgres.js + executor konkret, 4 unit test + 5 integration skip-guarded). Bagian
    atomik (ident_next, sm_transition, notify_emit) ada di migrasi `…_statemachine.sql`.
-3. ⬜ Setup CI (GitHub Actions): supabase start + migrasi + pgTAP + vitest.
+3. 🔄 Setup CI (GitHub Actions) — SESI INI tambah 2 job di `.github/workflows/ci.yml`:
+   `core-engines` (vitest+typecheck `packages/core`) & `db-and-migrations` (apply SEMUA
+   migrasi ke PG17 service + verify seed 14/15 + integration `packages/db`). Sisa: pgTAP
+   khusus bila diinginkan.
 4. ⬜ Seed fixture Alpha Digital → `supabase/seed.sql`.
 5. ⬜ Fase 1: Supabase Auth (import bcrypt), importer CSV karyawan, MSL admin, RLS baseline.
 6. ⬜ Vercel project untuk `apps/api`.
 
 PR sesi ini: **#31** (`claude/supabase-fase0-sesi3-continue-xko1b4` → `main`).
 
-> ⚠️ **Migrasi `20260102000002_statemachine.sql` BELUM di-apply ke Supabase** (apply remote
-> ditolak/di-skip sesi ini). File migrasi = deliverable; pemilik/CI meng-apply saat siap
-> (`mcp__Supabase__apply_migration` project `egddxfcnrtecheiykhlf`, atau `supabase db push`).
-> Setelah apply: jalankan smoke `sm_transition`/`notify_emit` + `get_advisors`.
+> ℹ️ **Migrasi `20260102000002_statemachine.sql` TERVALIDASI end-to-end di Postgres lokal**
+> (bukan remote — apply ke project Supabase remote sengaja TIDAK dijalankan atas keputusan
+> pemilik sesi ini). Bukti: SEMUA 29 migrasi apply bersih di PG segar; smoke `sm_transition`
+> (valid/blocked/role_denied/not_found/no_actor/auto_computed) + `notify_emit`
+> (explicit/notify_actor/leadsOfDivision/unknown) + immutability trigger + `ident_next` WIB
+> semua benar; `packages/db` integration suite (9 test) HIJAU terhadap DB itu. Kini **di-gate
+> CI** (job `db-and-migrations` apply semua migrasi + jalankan integration tiap push).
+> Apply ke remote saat pemilik siap: `supabase db push` (DIRECT_URL) atau
+> `mcp__Supabase__apply_migration` project `egddxfcnrtecheiykhlf`, lalu `get_advisors`.
 
 ## 2. Yang dikerjakan SESI INI (branch di atas)
 
@@ -108,12 +116,13 @@ cd packages/db   && npm install && npm test && npm run typecheck   # 4 pass + 5 
 
 ## 5. Langkah berikutnya (urutan disarankan)
 
-0. **Apply migrasi `…_statemachine.sql`** ke project Supabase (belum di-apply, lihat peringatan §1),
-   lalu smoke `sm_transition`/`notify_emit` + `get_advisors`. Idealnya sekaligus jalankan
-   `integration.test.ts` `packages/db` dengan `DATABASE_URL` menunjuk DB termigrasi.
+0. **Apply migrasi `…_statemachine.sql` ke project Supabase remote** saat pemilik siap
+   (`supabase db push` / MCP `apply_migration` project `egddxfcnrtecheiykhlf`), lalu
+   `get_advisors`. Migrasi sudah tervalidasi lokal + di-gate CI (lihat §1) — apply remote
+   tinggal eksekusi.
 1. **Seed fixture Alpha Digital** → `supabase/seed.sql` (paritas `backend/seed` + `internal/seed`).
-2. **CI** (§G appendix): job vitest `packages/core` + `packages/db`; job `supabase start` + apply
-   migrasi + `integration.test.ts` + pgTAP (immutability, ident gap-free, sm_transition matrix).
+2. **CI lanjutan** (opsional): tambah pgTAP (immutability, ident gap-free, sm_transition matrix)
+   di atas job `db-and-migrations` yang sudah ada.
 3. **Fase 1**: Supabase Auth (import bcrypt per OQ-3), importer CSV karyawan (OQ-4), MSL admin,
    RLS baseline (§D) — aktifkan RLS SEMUA tabel + custom claims `app_metadata` (predikat
    `permission.ts` di-mirror di RLS, §B.4).

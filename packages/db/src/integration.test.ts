@@ -108,8 +108,15 @@ d('audit immutability', () => {
         entityType: 'demo_task', entityId: id, actorEmployeeId: 'EMP-1',
         action: 'create', beforeJson: null, afterJson: null, createdBy: 'EMP-1',
       });
-      await expect(tx`update audit_log set action = 'x' where entity_id = ${id}`).rejects.toThrow(/append-only/);
-      await expect(tx`delete from audit_log where entity_id = ${id}`).rejects.toThrow(/append-only/);
+      // Each expected failure is wrapped in a SAVEPOINT: a trigger error aborts
+      // the current (sub)transaction, so without savepoints the second statement
+      // would fail with "transaction is aborted" instead of the trigger message.
+      await expect(tx.savepoint((sp) => sp`update audit_log set action = 'x' where entity_id = ${id}`)).rejects.toThrow(
+        /append-only/,
+      );
+      await expect(tx.savepoint((sp) => sp`delete from audit_log where entity_id = ${id}`)).rejects.toThrow(
+        /append-only/,
+      );
       return null;
     });
   });
