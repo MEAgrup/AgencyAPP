@@ -19,14 +19,22 @@ Go `*_test.go` files) so the two stacks never diverge during the strangler migra
 - **ident** (`ident.ts`) — prefix registry (`PREFIXES`, single TS source) +
   pure `format`/`parse`/`isValid` ID helpers + `nextId` wrapper over the atomic
   SQL `ident_next`. Sequence allocation stays in Postgres (gap-free/rollback-safe). 13 tests.
+- **statemachine** (`statemachine.ts`) — `transition` wrapper over the SQL
+  `sm_transition` (14 machines seeded in migration `…_statemachine.sql`). Derives the
+  role booleans from a `permission.Actor` exactly as Go; returns the structured
+  `{ok,code,message}` result. Enforcement (lock/edge/role/UPDATE/audit) is in SQL. 5 tests.
+- **audit** (`audit.ts`) — append-only `write` (NoActorError guard) over an executor;
+  immutability enforced by the `forbid_mutation` triggers. `hasSecretKey` helper for the
+  "no password/hash in payload" rule. 6 tests.
+- **notification** (`notification.ts`) — the 15 FROZEN events (`EVENTS`/`CATALOG`) +
+  `emit` wrapper over the SQL `notify_emit`. 8 tests.
 
-## Pending (need DB / SQL side)
+## Companion SQL
 
-- **statemachine** — SQL `sm_transition` + `sm_machines`/`sm_edges` (new migration, port
-  `config.go` 14 machines) + thin TS wrapper.
-- **audit** — append-only writer (trigger `forbid_mutation` already in migration) + TS insert
-  helper + "no password in payload" test.
-- **notification** — 15 FROZEN events + recipient resolvers (SQL, emitted inside `sm_transition`).
+The atomic/concurrency-sensitive parts live in Postgres, called by the wrappers above:
+`ident_next` (migration `…_ident_next.sql`), `sm_transition` + `notify_emit` +
+`sm_machines`/`sm_edges`/`notif_events` seed (migration `…_statemachine.sql`). Concrete
+executors that call them are in `@cdps/db`.
 
 ## Run tests
 
