@@ -12,4 +12,11 @@ export default defineConfig({
       '@cdps/db': fileURLToPath(new URL('../db/src/index.ts', import.meta.url)),
     },
   },
+  test: {
+    // The integration suites each open a postgres.js pool against ONE shared DB;
+    // running every file in parallel multiplies the pools and storms the server's
+    // connection slots. These DB tests are I/O-light, so serialize files (unit
+    // tests within a file still run together) — reliable over marginally faster.
+    fileParallelism: false,
+  },
 });

@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { demo } from '@cdps/domain';
+import { demo, leads, msl, sales } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -45,14 +45,34 @@ export function errorJson(message: string, status: number): Response {
  * validation). Unknown errors become an opaque 500 (never leak internals).
  */
 export function mapError(err: unknown): Response {
-  if (err instanceof demo.IncompleteError) {
+  if (
+    err instanceof demo.IncompleteError ||
+    err instanceof leads.IncompleteError ||
+    err instanceof sales.IncompleteError ||
+    err instanceof sales.TooManyServicesError ||
+    err instanceof msl.IncompleteError
+  ) {
     return errorJson(err.message, 400); // exact BI [...] message
   }
-  if (err instanceof demo.NotFoundError) {
+  if (
+    err instanceof demo.NotFoundError ||
+    err instanceof leads.NotFoundError ||
+    err instanceof sales.NotFoundError ||
+    err instanceof msl.ServiceNotFoundError
+  ) {
     return errorJson(err.message, 404);
   }
-  if (err instanceof demo.ForbiddenError) {
+  if (
+    err instanceof demo.ForbiddenError ||
+    err instanceof sales.ForbiddenError ||
+    err instanceof msl.ForbiddenError
+  ) {
     return errorJson(err.message, 403);
+  }
+  if (err instanceof leads.BlockedError) {
+    // A dedup block is a lifecycle conflict (matches Go's 409 on ErrBlocked),
+    // carrying the verbatim BI [...] message.
+    return errorJson(err.message, 409);
   }
   if (err instanceof UnauthorizedError) {
     return errorJson(err.message, 401);
