@@ -597,8 +597,11 @@ export async function commissionAchievement(sql: Queryable, transactionId: strin
   const verified = await sumVerified(sql, trx.id);
 
   // Total deal commission = Σ over services of rule(applied to its agreed price).
+  // A voided Service (M4-OA-5) is excluded — no commission accrues for work that
+  // will not be delivered (the Transaction total itself stays immutable).
   const svcRows = await sql<{ standard_price: string; commission_rule: string }[]>`
-    select standard_price, commission_rule from services where client_id = ${trx.clientId}`;
+    select standard_price, commission_rule from services
+    where client_id = ${trx.clientId} and status <> '[Cancelled — Service Voided]'`;
   let totalCommission = 0n;
   for (const s of svcRows) {
     totalCommission += computeCommission(parseCommissionRule(s.commission_rule), money.parse(s.standard_price));

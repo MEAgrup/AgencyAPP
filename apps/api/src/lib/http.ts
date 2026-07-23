@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { demo, finance, leads, msl, sales } from '@cdps/domain';
+import { client, demo, finance, leads, msl, sales } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -56,7 +56,8 @@ export function mapError(err: unknown): Response {
     err instanceof msl.IncompleteError ||
     err instanceof finance.IncompleteError ||
     err instanceof finance.OverVerificationError ||
-    err instanceof finance.ScheduleTotalError
+    err instanceof finance.ScheduleTotalError ||
+    err instanceof client.IncompleteError
   ) {
     return errorJson(err.message, 400); // exact BI [...] message (or internal sentinel)
   }
@@ -65,7 +66,8 @@ export function mapError(err: unknown): Response {
     err instanceof leads.NotFoundError ||
     err instanceof sales.NotFoundError ||
     err instanceof msl.ServiceNotFoundError ||
-    err instanceof finance.NotFoundError
+    err instanceof finance.NotFoundError ||
+    err instanceof client.NotFoundError
   ) {
     return errorJson(err.message, 404);
   }
@@ -73,7 +75,8 @@ export function mapError(err: unknown): Response {
     err instanceof demo.ForbiddenError ||
     err instanceof sales.ForbiddenError ||
     err instanceof msl.ForbiddenError ||
-    err instanceof finance.ForbiddenError
+    err instanceof finance.ForbiddenError ||
+    err instanceof client.ForbiddenError
   ) {
     return errorJson(err.message, 403);
   }
@@ -82,7 +85,8 @@ export function mapError(err: unknown): Response {
     err instanceof sales.NotClosableError ||
     err instanceof leads.AlreadyResolvedError ||
     err instanceof finance.ContractRequiredError ||
-    err instanceof finance.SchemeLockedError
+    err instanceof finance.SchemeLockedError ||
+    err instanceof client.LockedFieldError
   ) {
     // Lifecycle conflicts: a dedup block, an un-closable attempt, a lead whose
     // win was already resolved, or a full-verification blocked on a missing

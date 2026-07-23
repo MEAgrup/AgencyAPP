@@ -14,6 +14,8 @@
  *   versions, plus the canonical MSL read (effectiveAt) consumed by `sales`.
  * - finance: M5 Admin & Finance — payment verification + routing gate + the
  *   derived Amount Verified / commission-achievement read-models (M0 §5 / M5).
+ * - client: M4 Client Record — the §4 lock matrix (server-side edit gate over the
+ *   born Client Record) + the shared Client Record read.
  *
  * An @cdps/api route handler is a thin shell: resolve the actor from the JWT
  * app_metadata claim, validate inputs, then call one of these functions.
@@ -25,3 +27,4 @@ export * as leads from './leads.js';
 export * as sales from './sales.js';
 export * as msl from './msl.js';
 export * as finance from './finance.js';
+export * as client from './client.js';
