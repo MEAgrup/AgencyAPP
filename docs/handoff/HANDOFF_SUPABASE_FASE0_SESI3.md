@@ -24,15 +24,14 @@ Fase 0 punya 6 langkah (handoff sebelumnya §5). Status:
 
 PR sesi ini: **#31** (`claude/supabase-fase0-sesi3-continue-xko1b4` → `main`).
 
-> ℹ️ **Migrasi `20260102000002_statemachine.sql` TERVALIDASI end-to-end di Postgres lokal**
-> (bukan remote — apply ke project Supabase remote sengaja TIDAK dijalankan atas keputusan
-> pemilik sesi ini). Bukti: SEMUA 29 migrasi apply bersih di PG segar; smoke `sm_transition`
-> (valid/blocked/role_denied/not_found/no_actor/auto_computed) + `notify_emit`
-> (explicit/notify_actor/leadsOfDivision/unknown) + immutability trigger + `ident_next` WIB
-> semua benar; `packages/db` integration suite (9 test) HIJAU terhadap DB itu. Kini **di-gate
-> CI** (job `db-and-migrations` apply semua migrasi + jalankan integration tiap push).
-> Apply ke remote saat pemilik siap: `supabase db push` (DIRECT_URL) atau
-> `mcp__Supabase__apply_migration` project `egddxfcnrtecheiykhlf`, lalu `get_advisors`.
+> ✅ **Migrasi `20260102000002_statemachine.sql` SUDAH DI-APPLY ke remote `CDPS SG`
+> (`egddxfcnrtecheiykhlf`) — 2026-07-23, version `20260723055732`.** `list_migrations` = 29 entri.
+> Smoke remote (dalam `BEGIN…ROLLBACK`, tanpa residu): seed 14 machine/94 edge/20 terminal/15
+> event; `sm_transition` valid/blocked/not_found/auto_computed benar; `notify_emit` dedup+exclude
+> actor benar; `ident_next` WIB `TST-202607-0001`. **Advisors:** 4 tabel baru dapat ERROR
+> `rls_disabled_in_public` (EXPECTED Fase 0, RLS di Fase 1); fungsi baru `sm_transition`/
+> `notify_emit`/`mark_notification_read` **tidak** menambah warning `function_search_path_mutable`
+> (SET search_path bekerja). Juga tervalidasi lokal end-to-end + di-gate CI (`db-and-migrations`).
 
 ## 2. Yang dikerjakan SESI INI (branch di atas)
 
