@@ -23,13 +23,28 @@
 
 ## ⚠️ Pra-cek WAJIB sebelum menjadwalkan pilot (blocker potensial)
 
-1. **Wiring auth frontend.** `web-internal` mem-proxy `/api/v1/*` ke `BACKEND_URL`, tetapi
-   **belum ditemukan integrasi Supabase/GoTrue login di `web-internal/src`** (tak ada
-   `NEXT_PUBLIC_SUPABASE_*` / klien Supabase). Konfirmasikan ke **frontend agent** bahwa
-   web-internal: (a) punya layar login yang memanggil GoTrue, dan (b) meneruskan
-   `Authorization: Bearer <access_token>` ke apps/api via proxy. **Jika belum → UI-UAT
-   terblok**; sementara itu money-path bisa diuji di lapisan API (lihat §6 opsi B) atau
-   pakai dry-run otomatis (`WAVE1_EXIT_UAT_REPORT_AUTOMATED_20260723.md`).
+1. **🔴 BLOCKER auth kontrak frontend↔API (login belum nyambung end-to-end).**
+   Verifikasi kode saat ini:
+   - `web-internal` (login page + `lib/auth-context` + `lib/api`, `API_BASE=/api/v1`)
+     login dengan `POST /api/v1/auth/login {email,password}`, cek sesi `GET /api/v1/me`,
+     keluar `POST /api/v1/auth/logout` — pola **sesi lokal** (bukan klien GoTrue).
+   - `apps/api` **TIDAK punya** route `/auth/login`, `/auth/logout`, atau `/me` (cek
+     route tree). Yang ada: verifikasi **bearer JWT GoTrue** (`lib/auth.ts verifyJwtHS256`
+     / `requireActor`) pada endpoint domain — tak ada endpoint yang MENERBITKAN token,
+     dan frontend tak pernah memanggil GoTrue untuk mendapat token.
+
+   ⇒ Kedua sisi tak bertemu: **login UI tak akan berfungsi** walau staging & pilot seed
+   siap. Perlu keputusan + implementasi (pilih SATU):
+   - **(A)** Tambah di `apps/api`: `POST /api/v1/auth/login` (validasi `employee_credentials`
+     bcrypt → mint sesi/JWT), `/auth/logout`, `GET /api/v1/me` → cocok dengan frontend
+     yang ada. (Auth lokal CDPS, sejalan `20260101000037_local_auth.sql`.), **atau**
+   - **(B)** Rewire `web-internal` ke Supabase GoTrue client (login → `access_token`),
+     kirim `Authorization: Bearer` ke apps/api yang sudah memverifikasinya.
+
+   Sampai (A)/(B) selesai, **UI-UAT terblok**; money-path tetap bisa diuji di lapisan API
+   dengan token GoTrue (§6 opsi B, jalur B) atau via dry-run otomatis
+   (`WAVE1_EXIT_UAT_REPORT_AUTOMATED_20260723.md`). Ini kerja integrasi (frontend/api),
+   bukan sekadar deploy — angkat ke pemilik/head dev sebelum menjadwalkan pilot.
 2. **CI Actions runner** (isu terpisah): runner GitHub Actions org belum ter-provision
    (semua job "failure" ~1 dtk, runner_id 0). Tak memblok deploy manual, tapi perbaiki di
    Settings→Actions / billing agar CI hijau untuk kerja Wave 2.
