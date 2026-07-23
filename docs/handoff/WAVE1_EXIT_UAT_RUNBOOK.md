@@ -27,6 +27,14 @@ Setiap string dalam `[...]` di kolom itu adalah **teks BI verbatim** yang harus 
 
 **Format uang** di semua tampilan Amount Verified / Outstanding: `Rp. X.XXX.XXX,00`. Pembagian-nol → `—`.
 
+> **Dry-run otomatis (pra-syarat sanity, bukan pengganti gate manusia):** money-path
+> ini punya harness end-to-end yang mengeksekusi seluruh langkah B–D di lapisan domain
+> terhadap Postgres ber-migrasi — `packages/domain/src/wave1_uat.e2e.test.ts`. Jalankan
+> pada **DB segar/terdedikasi** (notifikasi & audit append-only): `UAT=1 DATABASE_URL=<db>
+> npm run uat:wave1`. Hasil terakhir: **30/30 PASS** (`WAVE1_EXIT_UAT_REPORT_AUTOMATED_20260723.md`).
+> Yang TIDAK dicakup harness (wajib gate manusia): visibility RLS §6, login per-peran,
+> sync HRIS/MSL riil, spot-check komisi manual, notifikasi di UI, keputusan go/no-go.
+
 ---
 
 ## A. Persiapan lingkungan (Dev)
