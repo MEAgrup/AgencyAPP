@@ -56,6 +56,24 @@ jobs:
             echo "web-internal/ not present yet — frontend agent owns it. Skipping."
           fi
 
+  # @cdps/api — the API route handlers (Fase 1 langkah 4). Typecheck the whole app
+  # (route handlers + libs against the @cdps/* source) and run the framework-free
+  # lib unit tests (JWT verification, error mapping). No DB / no Next build here —
+  # the domain logic the handlers call is gated by db-and-migrations.
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: '@cdps/api — typecheck + lib tests'
+        working-directory: apps/api
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+
   # New Supabase/TypeScript stack (Fase 0 migration). Pure engines + wrappers.
   core-engines:
     runs-on: ubuntu-latest
@@ -138,6 +156,15 @@ jobs:
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/auth_claims_checks.sql
       - name: '@cdps/db — test (incl. integration) + typecheck'
         working-directory: packages/db
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: '@cdps/domain — test (incl. integration) + typecheck'
+        # Runs after @cdps/db so its node_modules (postgres) is present for the
+        # source-aliased @cdps/db import. Exercises the employee importer and the
+        # demo-task service end-to-end against the migrated Postgres above.
+        working-directory: packages/domain
         run: |
           npm ci
           npm run typecheck

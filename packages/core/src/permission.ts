@@ -101,3 +101,52 @@ export function canReadDivision(a: Actor, division: string): boolean {
 export function canReadAll(a: Actor): boolean {
   return a.role.director || a.role.od;
 }
+
+/**
+ * The `app_metadata` claim shape injected into the JWT by the GoTrue
+ * `custom_access_token_hook` (see migration 20260102000004 §2 `employee_claims`).
+ * These five keys are the ONLY authorization inputs the API trusts — they are
+ * produced fresh, server-side, from `employees`/`role_mappings`/
+ * `employee_layered_roles` on every token issue.
+ */
+export interface AppMetadataClaims {
+  employee_id: string;
+  division?: string;
+  level?: string;
+  od?: boolean;
+  director?: boolean;
+}
+
+/**
+ * actorFromClaims rebuilds an Actor from the JWT `app_metadata` claim. It is the
+ * API-side twin of Go's `auth.ResolveActor` and the SQL `employee_claims`
+ * function: the same five fields, mapped identically. All three MUST stay in
+ * lock-step (see HANDOFF_FASE1_SESI4 §7) — this is the only one exercised at
+ * request time, so it is deliberately a pure, unit-tested function.
+ *
+ * It throws when `employee_id` is absent/empty: a token with no resolved CDPS
+ * employee is unauthenticated for our purposes (the hook injects nothing, so
+ * every RLS predicate already denies — the handler must reject up front too).
+ * Unknown role strings map to empty scope (never elevated), mirroring the SQL
+ * `coalesce(..., '')` and Go's `NullString` handling.
+ */
+export function actorFromClaims(claims: unknown): Actor {
+  const m = (claims ?? {}) as Record<string, unknown>;
+  const employeeId = typeof m.employee_id === 'string' ? m.employee_id : '';
+  if (employeeId === '') {
+    throw new Error('permission: app_metadata.employee_id missing — unresolved CDPS actor');
+  }
+  const division = typeof m.division === 'string' ? m.division : '';
+  const rawLevel = typeof m.level === 'string' ? m.level : '';
+  // Only the two known levels carry authority; anything else is empty scope.
+  const level = rawLevel === LevelLead || rawLevel === LevelStaff ? rawLevel : '';
+  return {
+    employeeId,
+    role: {
+      division,
+      level,
+      od: m.od === true,
+      director: m.director === true,
+    },
+  };
+}
