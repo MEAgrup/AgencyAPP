@@ -9,25 +9,28 @@
  *   pipeline. Ids namespaced `ZZ-`; afterEach deletes what it made.
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { permission } from '@cdps/core';
+import { money, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
-import { leads, sales } from './index.js';
+import { finance, leads, sales } from './index.js';
 import {
   addPlatform,
   canEditAccountRevisable,
   canEditBaseline,
   canEditProfile,
   canReassignPic,
+  canVoidService,
   editableFields,
   ForbiddenError,
   IncompleteError,
   isEditableField,
+  listClients,
   LockedFieldError,
   NotFoundError,
   type Actor,
   type ClientPatch,
   updateClient,
   updatePlatform,
+  voidService,
 } from './client.js';
 
 const budi = (): Actor => ({
@@ -73,6 +76,12 @@ describe('lock-matrix predicates', () => {
     expect(canReassignPic(director())).toBe(true);
     expect(canReassignPic(budi())).toBe(false);
     expect(canReassignPic(accountLead())).toBe(false);
+  });
+  it('Void Service: SPV/Account Lead / Director only', () => {
+    expect(canVoidService(accountLead())).toBe(true);
+    expect(canVoidService(director())).toBe(true);
+    expect(canVoidService(accountStaff())).toBe(false);
+    expect(canVoidService(budi())).toBe(false);
   });
 });
 
@@ -123,6 +132,12 @@ describe('platform gate (no DB)', () => {
     await expect(updatePlatform(noSql, budi(), 'CLI-x', 1, { active: false })).rejects.toBeInstanceOf(ForbiddenError);
     await expect(updatePlatform(noSql, accountLead(), 'CLI-x', 1, {})).rejects.toBeInstanceOf(IncompleteError);
   });
+
+  it('voidService: Account-Lead authority + mandatory reason', async () => {
+    await expect(voidService(noSql, budi(), 'SVC-x', 'salah input')).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(voidService(noSql, accountStaff(), 'SVC-x', 'salah input')).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(voidService(noSql, accountLead(), 'SVC-x', '  ')).rejects.toBeInstanceOf(IncompleteError);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -169,6 +184,7 @@ afterAll(async () => {
 
 afterEach(async () => {
   if (!sql) return;
+  await sql`delete from briefs where created_by like 'ZZ-%'`;
   await sql`delete from installments where created_by like 'ZZ-%'`;
   await sql`delete from transactions where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
@@ -293,5 +309,81 @@ describeDb('Platform List (M4 §3/§4)', () => {
     const id = await closedClient();
     await expect(updatePlatform(sql, accountLead(), id, 99999999, { active: false }))
       .rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describeDb('voidService (M4-OA-5)', () => {
+  const serviceOf = async (clientId: string): Promise<string> =>
+    (await sql<{ id: string }[]>`select id from services where client_id = ${clientId} limit 1`)[0].id;
+  const transactionOf = async (clientId: string): Promise<string> =>
+    (await sql<{ id: string }[]>`select id from transactions where client_id = ${clientId} limit 1`)[0].id;
+
+  /** Seed a Brief on a service at `status` (stub table, brief_task machine). */
+  async function seedBrief(serviceId: string, status: string, n: number): Promise<string> {
+    const id = `BRF-ZZ-${seq++}-${n}`;
+    await sql`insert into briefs (id, service_id, title, status, created_by) values (${id}, ${serviceId}, ${'Brief ' + n}, ${status}, 'ZZ-ADMIN')`;
+    return id;
+  }
+
+  it('voids a Service and cascade-cancels child Briefs not yet [Approved]', async () => {
+    const clientId = await closedClient();
+    const svc = await serviceOf(clientId);
+    const todo = await seedBrief(svc, '[To Do]', 1);
+    const done = await seedBrief(svc, '[Approved]', 2);
+
+    const res = await voidService(sql, accountLead(), svc, 'salah input layanan');
+    expect(res.voidedBriefs).toEqual([todo]);
+
+    const svcRow = await sql<{ status: string }[]>`select status from services where id = ${svc}`;
+    expect(svcRow[0].status).toBe('[Cancelled — Service Voided]');
+    const todoRow = await sql<{ status: string }[]>`select status from briefs where id = ${todo}`;
+    expect(todoRow[0].status).toBe('[Cancelled — Service Voided]');
+    const doneRow = await sql<{ status: string }[]>`select status from briefs where id = ${done}`;
+    expect(doneRow[0].status).toBe('[Approved]'); // Approved brief untouched
+
+    const audit = await sql<{ n: number }[]>`
+      select count(*)::int as n from audit_log where entity_id = ${svc} and action = 'service_voided'`;
+    expect(audit[0].n).toBe(1);
+  });
+
+  it('a voided Service is excluded from commission achievement (still-immutable total)', async () => {
+    const clientId = await closedClient();
+    const trx = await transactionOf(clientId);
+    const svc = await serviceOf(clientId);
+
+    const before = await finance.commissionAchievement(sql, trx);
+    expect(money.parse(before.totalDealCommission)).toBe(money.parse('900000')); // 10% of 9.000.000
+
+    await voidService(sql, accountLead(), svc, 'salah input');
+    const after = await finance.commissionAchievement(sql, trx);
+    expect(money.parse(after.totalDealCommission)).toBe(0n); // voided service excluded
+
+    // The Transaction total stays immutable.
+    const t = await sql<{ total_agreed_value: string }[]>`select total_agreed_value from transactions where id = ${trx}`;
+    expect(money.parse(t[0].total_agreed_value)).toBe(money.parse('9000000'));
+  });
+
+  it('cannot re-void an already-voided Service, and rejects non-Account-Lead', async () => {
+    const clientId = await closedClient();
+    const svc = await serviceOf(clientId);
+    await expect(voidService(sql, budi(), svc, 'x')).rejects.toBeInstanceOf(ForbiddenError);
+    await voidService(sql, accountLead(), svc, 'x');
+    await expect(voidService(sql, accountLead(), svc, 'lagi')).rejects.toBeInstanceOf(LockedFieldError);
+  });
+
+  it('404s on an unknown service', async () => {
+    await expect(voidService(sql, accountLead(), 'SVC-000000-0000', 'x')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describeDb('listClients (M4 §6)', () => {
+  it('returns the client roster newest-first with sales PIC', async () => {
+    const clientId = await closedClient();
+    const rows = await listClients(sql);
+    const mine = rows.find((r) => r.id === clientId);
+    expect(mine).toBeDefined();
+    expect(mine!.toko).toBe('Alpha Digital');
+    expect(mine!.salesPicId).toBe('ZZ-BUDI');
+    expect(mine!.paymentIntent).toBe(sales.PAYMENT_SCHEME_LUNAS);
   });
 });

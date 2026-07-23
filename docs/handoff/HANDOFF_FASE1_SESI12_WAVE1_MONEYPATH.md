@@ -53,17 +53,23 @@ Modul baru `packages/domain/src/finance.ts`:
   `GET /transactions/{id}/payment` `/commission`, `GET /reminders`, `POST /reminders/scan`.
 - Verifikasi: core 112 (+6 proRata), db 9, domain 122 (finance 31), api 29.
 
-### PR #39 — M4 Client Record: lock matrix (§4) + Platform List
+### PR #39 — M4 Client Record LENGKAP (§2–§6 + OA-1..6)
 Modul baru `packages/domain/src/client.ts`:
-- **`updateClient`** — satu-satunya jalur tulis ke Client Record pasca-closing; cek matriks §4 tiap
-  field SEBELUM tulis (atomik), audit `client_field_edited` before→after. Editable: profil→Account Lead/
-  OD/Director; gmv_baseline→OD/Director; target_gmv/marketing_budget→Account/Director; PIC→Sales Lead/
-  Director. Field sistem/immutable → `LockedFieldError`.
-- **Platform List** (§4, klien punya Platform List): `addPlatform` / `updatePlatform` (Account Lead/OD/
-  Director; add + koreksi store_link/managed_since + deactivate `active`), audited.
-- **API:** `PATCH /clients/{id}`, `POST /clients/{id}/platforms`, `PATCH /clients/{id}/platforms/{pid}`.
-- 2 string BI baru: `[anda tidak memiliki akses untuk mengubah field ini]`, `[field ini terkunci dan tidak dapat diubah]`.
-- Verifikasi: core 112, db 9, domain (lock matrix 16 + platform tests), api 29. (angka final di deskripsi PR)
+- **`updateClient`** (lock matrix §4) — satu-satunya jalur tulis ke Client Record pasca-closing; cek
+  matriks §4 tiap field SEBELUM tulis (atomik), audit `client_field_edited` before→after. Editable:
+  profil→Account Lead/OD/Director; gmv_baseline→OD/Director; target_gmv/marketing_budget→Account/Director;
+  PIC→Sales Lead/Director. Field sistem/immutable → `LockedFieldError`.
+- **Platform List** (§3/§4): `addPlatform` / `updatePlatform` (Account Lead/OD/Director; add + koreksi
+  store_link/managed_since + deactivate `active`), audited.
+- **`voidService`** (M4-OA-5) — SPV/Account Lead/Director, alasan wajib; Service `→[Cancelled — Service
+  Voided]` + **cascade** child Briefs bukan-`[Approved]`. **Efek komisi (KEPUTUSAN PEMILIK, interview):**
+  total transaksi tetap immutable, tapi `finance.commissionAchievement` MENGECUALIKAN service voided.
+- **`listClients`** (§6) — roster RLS-scoped (own/alokasi/divisi/OD/Director), newest-first.
+- **§5 payment-intent handoff** — NOL kode baru (sudah ditutup `sales.close`; perubahan scheme = M5 `changeScheme`).
+- **API:** `PATCH /clients/{id}`, `POST /clients/{id}/platforms`, `PATCH /clients/{id}/platforms/{pid}`,
+  `POST /services/{id}/void`, `GET /clients`.
+- 2 string BI baru (lock matrix): `[anda tidak memiliki akses untuk mengubah field ini]`, `[field ini terkunci dan tidak dapat diubah]`.
+- Verifikasi: core 112, db 9, **domain 170** (client 30 + finance 31 hijau dgn filter void), api 29.
 
 > **Cara jalankan integration test lokal:** butuh Postgres 16 (`initdb`/`pg_ctl` sebagai user `postgres`,
 > BUKAN root — root ditolak), `createdb cdps`, apply `supabase/migrations/*.sql` berurut → 53 tabel, lalu
@@ -74,16 +80,20 @@ Modul baru `packages/domain/src/client.ts`:
 
 ## Langkah kode berikutnya (urut) — TASK TERDEKAT
 
-Wave 1 money-path M0/M1/M5 tuntas; M4 tinggal sisa non-money-path:
+**Wave 1 money-path (M0/M1/M4/M5) TUNTAS secara kode** (PR #37/#38/#39). Tersisa gate manusia:
 
-1. **M4 sisa** (setelah PR #39): **Void Service + cascade** (M4-OA-5 — butuh mesin Brief, jadi Wave 2),
-   **payment-intent handoff tulis** (§5 — Sales set/ubah Payment Intent; jalur closing sudah menaruh
-   transaksi di antrean Finance, jadi ini tipis), **visibility read model** (§6 own-vs-all — via RLS).
-2. **Gate exit Wave 1 (UAT)** — Build Plan §4: satu deal riil end-to-end (register→qualified→negotiated
+1. **Gate exit Wave 1 (UAT)** — Build Plan §4: satu deal riil end-to-end (register→qualified→negotiated
    →closed→IDs→Termin→Finance verify→routing ke Account; komisi dicek silang vs MSL). Pola runbook:
    `docs/handoff/W1-20_UAT_RUNBOOK.md`. **Gerbang manusia** (pilot Sales+Finance) — agent tak bisa eksekusi.
-3. Setelah exit Wave 1 → **Wave 2** (M6 Account & Service, **M12 early**, M7–M10). JANGAN mulai tiket
-   Wave 2 sebelum kriteria exit Wave 1 lolos (Build Plan §4 / R5).
+   (Prasyarat: merge #37→#38→#39 ke `main` dulu.)
+2. Setelah exit Wave 1 → **Wave 2** (M6 Account & Service, **M12 early**, M7–M10). JANGAN mulai tiket
+   Wave 2 sebelum kriteria exit Wave 1 lolos (Build Plan §4 / R5). Catatan: sebagian skema/mesin Wave 2
+   sudah ada (briefs stub 0010, mesin brief_task/strategy_plan/dst di 0002-statemachine, `assigned_am_id`
+   0020) — M6 tinggal mengisi logika di atasnya.
+
+> **M4 catatan interview 2026-07-23:** efek finansial Void Service = "exclude dari komisi" (pilihan
+> pemilik) — total transaksi immutable, `commissionAchievement` kecualikan service voided. Bila kelak
+> pemilik mau rekonsiliasi uang atas service voided, itu keputusan/kluster baru (kemungkinan via M5).
 
 ## Peringatan (tetap berlaku)
 

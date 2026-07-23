@@ -31,7 +31,7 @@
  * Reference: backend/internal/module4_client/{edit,locks,reads}.go.
  */
 
-import { bi, money, permission } from '@cdps/core';
+import { bi, money, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 
 /** Authenticated employee + resolved role (from @cdps/core permission). */
@@ -69,10 +69,14 @@ export class NotFoundError extends Error {
   }
 }
 
-/** The actor's role may not edit the requested field (verbatim BI, → 403). */
+/**
+ * The actor's role may not perform the requested edit/action (verbatim BI, →
+ * 403). Defaults to the field-edit message; the Void-Service path passes the
+ * generic transition-denied message instead (it is a state transition).
+ */
 export class ForbiddenError extends Error {
-  constructor() {
-    super(MSG_FIELD_ROLE_DENIED);
+  constructor(message = MSG_FIELD_ROLE_DENIED) {
+    super(message);
     this.name = 'ClientForbiddenError';
   }
 }
@@ -364,6 +368,136 @@ export function editableFields(): string[] {
 /** isEditableField reports whether a field key is editable via the lock matrix. */
 export function isEditableField(key: string): boolean {
   return Object.prototype.hasOwnProperty.call(FIELDS, key);
+}
+
+// ---------------------------------------------------------------------------
+// Void Service + cascade (M4-OA-5 / STATE_MACHINES §6). A Sales-input error on
+// the Service List is corrected NOT by a silent edit but by voiding the Service
+// (SPV/Account Lead approval, logged) — which cascade-cancels its child Briefs
+// that are not yet [Approved]. The Transaction Total Agreed Value stays immutable
+// (house rule); the voided Service is excluded from commission achievement
+// (finance.commissionAchievement) so no commission accrues for undelivered work.
+// ---------------------------------------------------------------------------
+
+/** Terminal Service statuses (a voided/done Service cannot be re-voided). */
+export const SERVICE_VOIDED = '[Cancelled — Service Voided]';
+export const SERVICE_DONE = 'Done';
+/** A Brief already [Approved] is NOT cascade-cancelled (STATE_MACHINES §6). */
+export const BRIEF_APPROVED = '[Approved]';
+
+/** canVoidService: SPV/Account Lead or Director (M4-OA-5). */
+export function canVoidService(actor: Actor): boolean {
+  return actor.role.director ||
+    (actor.role.division === ACCOUNT_DIVISION && actor.role.level === permission.LevelLead);
+}
+
+/** The result of a void: the service + the child briefs that were cancelled. */
+export interface VoidResult {
+  serviceId: string;
+  voidedBriefs: string[];
+}
+
+/**
+ * voidService voids a Service (M4-OA-5) and cascade-cancels its child Briefs that
+ * are not yet [Approved]. SPV/Account Lead or Director only, reason mandatory,
+ * fully audited. The Service and each affected Brief move to [Cancelled — Service
+ * Voided] through the engine (the division-specific Account-Lead gate is a code
+ * guard here, stricter than the engine's division-agnostic requireLead). An
+ * already voided/Done Service cannot be re-voided (LockedFieldError).
+ */
+export async function voidService(sql: Sql, actor: Actor, serviceId: string, reason: string): Promise<VoidResult> {
+  if (!canVoidService(actor)) {
+    throw new ForbiddenError(bi.TRANSITION_ROLE_DENIED);
+  }
+  const why = (reason ?? '').trim();
+  if (why === '') {
+    throw new IncompleteError();
+  }
+
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const svc = await tx<{ id: string; status: string; client_id: string }[]>`
+      select id, status, client_id from services where id = ${serviceId} for update`;
+    if (svc.length === 0) {
+      throw new NotFoundError('service not found');
+    }
+    if (svc[0].status === SERVICE_VOIDED || svc[0].status === SERVICE_DONE) {
+      throw new LockedFieldError(); // already terminal — nothing to void
+    }
+
+    const sres = await statemachine.transition(ex.sm, {
+      machine: 'service', entityType: 'service', table: 'services', entityId: serviceId, to: SERVICE_VOIDED, actor,
+    });
+    if (!sres.ok) {
+      throw new LockedFieldError();
+    }
+
+    // Cascade: child Briefs not yet [Approved] (nor already voided) → cancelled.
+    const briefs = await tx<{ id: string; status: string }[]>`
+      select id, status from briefs where service_id = ${serviceId} for update`;
+    const voidedBriefs: string[] = [];
+    for (const b of briefs) {
+      if (b.status === BRIEF_APPROVED || b.status === SERVICE_VOIDED) {
+        continue;
+      }
+      const bres = await statemachine.transition(ex.sm, {
+        machine: 'brief_task', entityType: 'brief', table: 'briefs', entityId: b.id, to: SERVICE_VOIDED, actor,
+      });
+      if (!bres.ok) {
+        throw new Error(`void cascade ${b.id} -> ${SERVICE_VOIDED} failed: ${bres.message}`);
+      }
+      voidedBriefs.push(b.id);
+    }
+
+    await ex.audit.insertAudit({
+      entityType: 'service', entityId: serviceId, actorEmployeeId: actor.employeeId,
+      action: 'service_voided', beforeJson: { status: svc[0].status },
+      afterJson: { status: SERVICE_VOIDED, reason: why, voided_briefs: voidedBriefs }, createdBy: actor.employeeId,
+    });
+    return { serviceId, voidedBriefs };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Visibility read (M4 §6). Row scope is enforced by RLS (own / allocation /
+// division / OD / Director), as with the other reads — the domain shapes rows.
+// ---------------------------------------------------------------------------
+
+/** One row in the client roster (M4 §6). */
+export interface ClientListRow {
+  id: string;
+  toko: string;
+  namaPic: string;
+  kota: string;
+  kategori: string;
+  salesPicId: string;
+  salesPicNama: string;
+  assignedAmId: string | null;
+  paymentIntent: string | null;
+  releasedToAccountAt: Date | null;
+  createdAt: Date;
+}
+
+/** listClients returns the client roster (RLS-scoped per §6), newest first. */
+export async function listClients(sql: Queryable): Promise<ClientListRow[]> {
+  const rows = await sql<
+    {
+      id: string; toko: string; nama_pic: string; kota: string; kategori: string;
+      sales_pic_id: string; sales_pic_nama: string; assigned_am_id: string | null;
+      payment_intent: string | null; released_to_account_at: Date | null; created_at: Date;
+    }[]
+  >`
+    select c.id, c.toko, c.nama_pic, c.kota, c.kategori, c.sales_pic_id,
+           coalesce(e.nama, c.sales_pic_id) as sales_pic_nama, c.assigned_am_id,
+           c.payment_intent, c.released_to_account_at, c.created_at
+    from clients c
+    left join employees e on e.employee_id = c.sales_pic_id
+    order by c.created_at desc, c.id desc`;
+  return rows.map((r) => ({
+    id: r.id, toko: r.toko, namaPic: r.nama_pic, kota: r.kota, kategori: r.kategori,
+    salesPicId: r.sales_pic_id, salesPicNama: r.sales_pic_nama, assignedAmId: r.assigned_am_id,
+    paymentIntent: r.payment_intent, releasedToAccountAt: r.released_to_account_at, createdAt: r.created_at,
+  }));
 }
 
 // Re-export a shared read (M4 basic Client Record) from the sales read model, so
