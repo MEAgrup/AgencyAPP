@@ -28,7 +28,7 @@
  * backend/internal/admin/master_service.go (EffectiveAt / ServiceView).
  */
 
-import { bi, money, permission, statemachine, tz } from '@cdps/core';
+import { bi, money, notification, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { effectiveAt, type ServiceView } from './msl.js';
 
@@ -41,11 +41,18 @@ export const ATTEMPT_MACHINE = 'prospect_attempt';
 /** The CDPS division that owns prospect attempts (M0 §9.1). */
 export const SALES_DIVISION = 'Sales';
 
-/** Prospect-attempt statuses used by this slice (verbatim). */
+/** Prospect-attempt statuses (verbatim; the machine governs the legal moves). */
 export const STATUS_NEW_LEAD = 'New Lead';
 export const STATUS_CONTACTED = 'Contacted';
 export const STATUS_QUALIFIED = 'Qualified';
 export const STATUS_NOT_QUALIFIED = 'Not Qualified';
+export const STATUS_NEG_PENDING = 'Negotiation - Pending Approval';
+export const STATUS_NEG_AUTO_APPROVE = 'Negotiation - Auto Approved';
+export const STATUS_NEG_APPROVED = 'Negotiation - Approved';
+export const STATUS_NEG_REVISION = 'Negotiation - Revision Required';
+export const STATUS_NEG_REJECTED = 'Negotiation - Rejected';
+export const STATUS_CLOSED_SUCCESS = 'Closed-Success';
+export const STATUS_CLOSED_LOST = 'Closed-Lost';
 
 /** Qualified Lead Form service cap (M0 §4.3). */
 export const MAX_SERVICES = 5;
@@ -86,6 +93,18 @@ export class ForbiddenError extends Error {
   constructor(message = bi.TRANSITION_ROLE_DENIED) {
     super(message);
     this.name = 'SalesForbiddenError';
+  }
+}
+
+/**
+ * A No-Negotiation submission carried a custom term (it must use the negotiation
+ * path). The PRD gives no BI prompt for this — an internal sentinel (stream A
+ * W1-07/08); the API maps it to 400.
+ */
+export class CustomTermRequiresNegotiationError extends Error {
+  constructor() {
+    super('module0_sales: custom terms require the negotiation path');
+    this.name = 'CustomTermRequiresNegotiationError';
   }
 }
 
@@ -643,6 +662,260 @@ export async function setNotQualified(
         values (${attemptId}, ${r}, ${actor.employeeId})`;
     }
     return attemptTransition(executors(tx).sm, attemptId, STATUS_NOT_QUALIFIED, actor);
+  });
+}
+
+// ===========================================================================
+// Negotiation (M0 §5) — versioned proposals + superior approval.
+// ===========================================================================
+
+/** Superior's decision on a Pending Approval attempt (M0 §5). */
+export const DECISION_APPROVE = 'approve';
+export const DECISION_REVISE = 'revise';
+export const DECISION_REJECT = 'reject';
+
+/** One negotiated service line (custom price / commission / payment terms). */
+export interface ProposalLine {
+  masterServiceId: string;
+  proposedPrice: string;
+  commissionRule: string;
+  paymentTerms?: string;
+}
+
+/**
+ * submitNegotiation opens the negotiation from a Qualified attempt. `noNego=true`
+ * takes the standard terms (the Qualified Form snapshot's pinned subtotals)
+ * straight to Negotiation - Auto Approved (bypasses the superior). Otherwise the
+ * custom lines are versioned (NEG-) and routed to the superior as Negotiation -
+ * Pending Approval, firing the pending-approval notification. Owner / Sales Lead
+ * / Director only.
+ */
+export async function submitNegotiation(
+  sql: Sql,
+  actor: Actor,
+  attemptId: string,
+  lines: ProposalLine[],
+  noNego: boolean,
+  now: Date = new Date(),
+): Promise<statemachine.TransitionResult> {
+  if (noNego && lines.length > 0) {
+    throw new CustomTermRequiresNegotiationError();
+  }
+  if (!noNego && lines.length === 0) {
+    throw new IncompleteError();
+  }
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const a = await loadAttempt(tx, attemptId, true);
+    if (!canWriteAttempt(actor, a.ownerId)) {
+      throw new ForbiddenError();
+    }
+    const to = noNego ? STATUS_NEG_AUTO_APPROVE : STATUS_NEG_PENDING;
+    // Transition first: an invalid edge (attempt not Qualified) rejects cleanly
+    // with nothing written; a valid one lets the proposal write commit atomically.
+    const result = await attemptTransition(ex.sm, attemptId, to, actor);
+    if (!result.ok) {
+      return result;
+    }
+    const proposalLines = noNego ? await standardLines(tx, attemptId) : lines;
+    await writeProposal(tx, ex, actor, attemptId, proposalLines, now);
+    if (!noNego) {
+      await emitPendingApproval(ex.notify, actor, attemptId);
+    }
+    return result;
+  });
+}
+
+/**
+ * resubmitNegotiation sends a fresh proposal version after a Revision Required or
+ * a Reject (M0 §5 — salesperson action). Both routes go back to Negotiation -
+ * Pending Approval. Owner / Sales Lead / Director only.
+ */
+export async function resubmitNegotiation(
+  sql: Sql,
+  actor: Actor,
+  attemptId: string,
+  lines: ProposalLine[],
+  now: Date = new Date(),
+): Promise<statemachine.TransitionResult> {
+  if (lines.length === 0) {
+    throw new IncompleteError();
+  }
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const a = await loadAttempt(tx, attemptId, true);
+    if (!canWriteAttempt(actor, a.ownerId)) {
+      throw new ForbiddenError();
+    }
+    const result = await attemptTransition(ex.sm, attemptId, STATUS_NEG_PENDING, actor);
+    if (!result.ok) {
+      return result;
+    }
+    await writeProposal(tx, ex, actor, attemptId, lines, now);
+    await emitPendingApproval(ex.notify, actor, attemptId);
+    return result;
+  });
+}
+
+/**
+ * decideNegotiation is the superior's decision on a Pending Approval attempt. The
+ * prospect_attempt machine enforces Lead/Director-only on these edges; the
+ * decision note is recorded on the latest un-noted proposal version and an event
+ * fires to the salesperson. Revise/Reject require a mandatory note (M0 §5).
+ */
+export async function decideNegotiation(
+  sql: Sql,
+  actor: Actor,
+  attemptId: string,
+  decision: string,
+  note = '',
+): Promise<statemachine.TransitionResult> {
+  let to: string;
+  switch (decision) {
+    case DECISION_APPROVE:
+      to = STATUS_NEG_APPROVED;
+      break;
+    case DECISION_REVISE:
+      to = STATUS_NEG_REVISION;
+      break;
+    case DECISION_REJECT:
+      to = STATUS_NEG_REJECTED;
+      break;
+    default:
+      throw new IncompleteError();
+  }
+  if ((decision === DECISION_REVISE || decision === DECISION_REJECT) && note.trim() === '') {
+    throw new IncompleteError();
+  }
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const a = await loadAttempt(tx, attemptId, true);
+    // The engine returns role_denied for a non-superior; nothing is written then.
+    const result = await attemptTransition(ex.sm, attemptId, to, actor);
+    if (!result.ok) {
+      return result;
+    }
+    await tx`
+      update negotiation_proposals set decision_note = ${note}
+      where id = (
+        select id from negotiation_proposals
+        where attempt_id = ${attemptId} and decision_note is null
+        order by version_no desc limit 1
+      )`;
+    await emitDecision(ex.notify, actor, attemptId, a.ownerId);
+    return result;
+  });
+}
+
+/**
+ * acceptCounter is the salesperson accepting the superior's counter-offer (M0 §5
+ * — "system syncs values"): Negotiation - Revision Required → Negotiation -
+ * Approved. Owner-driven (DECISIONS O18).
+ */
+export async function acceptCounter(
+  sql: Sql,
+  actor: Actor,
+  attemptId: string,
+): Promise<statemachine.TransitionResult> {
+  return withTransaction(sql, async (tx) => {
+    const a = await loadAttempt(tx, attemptId, true);
+    if (!canWriteAttempt(actor, a.ownerId)) {
+      throw new ForbiddenError();
+    }
+    return attemptTransition(executors(tx).sm, attemptId, STATUS_NEG_APPROVED, actor);
+  });
+}
+
+/**
+ * standardLines builds proposal lines from the Qualified Form snapshot (the
+ * no-nego path takes the pinned deal value = calculator subtotal, not the unit
+ * standard price — MSL v2, DECISIONS 2026-07-16).
+ */
+async function standardLines(tx: Queryable, attemptId: string): Promise<ProposalLine[]> {
+  const rows = await tx<{ master_service_id: string; subtotal: string; commission_rule: string }[]>`
+    select master_service_id, subtotal, commission_rule
+    from qualified_form_services where attempt_id = ${attemptId} order by id`;
+  if (rows.length === 0) {
+    throw new IncompleteError();
+  }
+  return rows.map((r) => ({
+    masterServiceId: r.master_service_id, proposedPrice: r.subtotal, commissionRule: r.commission_rule,
+  }));
+}
+
+/**
+ * writeProposal appends a new immutable proposal version + its lines. Each line's
+ * proposed price and commission_rule are validated (money math is never guessed);
+ * the 1..MAX_SERVICES cap holds here too.
+ */
+async function writeProposal(
+  tx: Queryable,
+  ex: ReturnType<typeof executors>,
+  actor: Actor,
+  attemptId: string,
+  lines: ProposalLine[],
+  now: Date,
+): Promise<void> {
+  if (lines.length === 0 || lines.length > MAX_SERVICES) {
+    throw new IncompleteError();
+  }
+  const verRows = await tx<{ max: number | null }[]>`
+    select max(version_no) as max from negotiation_proposals where attempt_id = ${attemptId}`;
+  const version = Number(verRows[0]?.max ?? 0) + 1;
+
+  const proposalId = await ex.ident.identNext('NEG', now);
+  await tx`
+    insert into negotiation_proposals (id, attempt_id, version_no, proposed_by, created_by)
+    values (${proposalId}, ${attemptId}, ${version}, ${actor.employeeId}, ${actor.employeeId})`;
+
+  for (const l of lines) {
+    if ((l.masterServiceId ?? '') === '' || (l.proposedPrice ?? '') === '' || (l.commissionRule ?? '') === '') {
+      throw new IncompleteError();
+    }
+    // Validate the proposed price and commission rule before persisting.
+    try {
+      money.parse(l.proposedPrice);
+    } catch {
+      throw new IncompleteError();
+    }
+    parseCommissionRule(l.commissionRule); // throws BadCommissionRuleError on a bad shape
+    await tx`
+      insert into negotiation_proposal_lines
+        (proposal_id, master_service_id, proposed_price, commission_rule, payment_terms, created_by)
+      values (${proposalId}, ${l.masterServiceId}, ${l.proposedPrice}, ${l.commissionRule},
+              ${nullString(l.paymentTerms)}, ${actor.employeeId})`;
+  }
+  await ex.audit.insertAudit({
+    entityType: 'prospect_attempt', entityId: attemptId, actorEmployeeId: actor.employeeId,
+    action: 'negotiation_version', beforeJson: null,
+    afterJson: { proposal_id: proposalId, version_no: version, lines: lines.length }, createdBy: actor.employeeId,
+  });
+}
+
+/** emitPendingApproval notifies the Sales division leads (resolver leadsOfDivision). */
+async function emitPendingApproval(
+  notify: notification.NotifyExecutor,
+  actor: Actor,
+  attemptId: string,
+): Promise<void> {
+  await notification.emit(notify, {
+    event: notification.EVENTS.NegotiationPendingApproval,
+    entityType: 'prospect_attempt', entityId: attemptId, actor: actor.employeeId,
+    division: SALES_DIVISION, deepLink: `/attempts/${attemptId}`,
+  });
+}
+
+/** emitDecision notifies the attempt owner (salesperson) of the superior's call. */
+async function emitDecision(
+  notify: notification.NotifyExecutor,
+  actor: Actor,
+  attemptId: string,
+  ownerId: string,
+): Promise<void> {
+  await notification.emit(notify, {
+    event: notification.EVENTS.NegotiationDecision,
+    entityType: 'prospect_attempt', entityId: attemptId, actor: actor.employeeId,
+    explicitRecipients: [ownerId], deepLink: `/attempts/${attemptId}`,
   });
 }
 

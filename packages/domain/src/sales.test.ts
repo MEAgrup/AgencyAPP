@@ -12,9 +12,15 @@ import { money, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import { leads } from './index.js';
 import {
+  acceptCounter,
   buildQuote,
   computeSubtotal,
   type Actor,
+  CustomTermRequiresNegotiationError,
+  DECISION_APPROVE,
+  DECISION_REJECT,
+  DECISION_REVISE,
+  decideNegotiation,
   ForbiddenError,
   IncompleteError,
   markContacted,
@@ -26,8 +32,11 @@ import {
   PRICING_FLAT,
   PRICING_MIN_FLOOR,
   PRICING_PASSTHROUGH,
+  type ProposalLine,
+  resubmitNegotiation,
   type ServiceLine,
   setNotQualified,
+  submitNegotiation,
   submitQualifiedForm,
   TooManyServicesError,
 } from './sales.js';
@@ -41,6 +50,10 @@ const budi = (): Actor => ({
 const andi = (): Actor => ({
   employeeId: 'ZZ-ANDI', divisi: 'Sales',
   role: permission.makeRole({ division: 'Sales', level: 'staff' }),
+});
+const salesLead = (): Actor => ({
+  employeeId: 'ZZ-SLEAD', divisi: 'Sales',
+  role: permission.makeRole({ division: 'Sales', level: 'lead' }),
 });
 
 // ---------------------------------------------------------------------------
@@ -140,6 +153,29 @@ describe('buildQuote', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Unit: negotiation input gates (no DB).
+// ---------------------------------------------------------------------------
+describe('negotiation gates (no DB)', () => {
+  const noSql = null as unknown as Sql;
+
+  it('submitNegotiation rejects no-nego carrying custom lines', async () => {
+    const lines: ProposalLine[] = [{ masterServiceId: 'SVC-1', proposedPrice: '1', commissionRule: 'flat Rp 1' }];
+    await expect(submitNegotiation(noSql, budi(), 'PRSP-x', lines, true))
+      .rejects.toBeInstanceOf(CustomTermRequiresNegotiationError);
+  });
+
+  it('submitNegotiation rejects a custom submission with no lines', async () => {
+    await expect(submitNegotiation(noSql, budi(), 'PRSP-x', [], false)).rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  it('decideNegotiation rejects an unknown decision and a note-less revise/reject', async () => {
+    await expect(decideNegotiation(noSql, salesLead(), 'PRSP-x', 'maybe')).rejects.toBeInstanceOf(IncompleteError);
+    await expect(decideNegotiation(noSql, salesLead(), 'PRSP-x', DECISION_REVISE, '')).rejects.toBeInstanceOf(IncompleteError);
+    await expect(decideNegotiation(noSql, salesLead(), 'PRSP-x', DECISION_REJECT, '  ')).rejects.toBeInstanceOf(IncompleteError);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Integration (real Postgres).
 // ---------------------------------------------------------------------------
 const URL = process.env.DATABASE_URL;
@@ -170,12 +206,25 @@ async function contactedAttempt(actor: Actor): Promise<string> {
   return attempt.id;
 }
 
+/** Reach a Qualified attempt for `actor` with one seeded flat service. */
+async function qualifiedAttempt(actor: Actor, svc: string): Promise<string> {
+  const attemptId = await contactedAttempt(actor);
+  await submitQualifiedForm(sql, actor, attemptId, {
+    namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta', linkToko: 'https://shopee/alpha',
+    kategori: 'Fashion', platform: 'Shopee', gmvBaseline: '50000000', targetGmv: '80000000',
+    services: [{ masterServiceId: svc, quantity: 1 }],
+  });
+  return attemptId;
+}
+
 afterAll(async () => {
   if (sql) await sql.end();
 });
 
 afterEach(async () => {
   if (!sql) return;
+  await sql`delete from negotiation_proposal_lines where created_by like 'ZZ-%'`;
+  await sql`delete from negotiation_proposals where created_by like 'ZZ-%'`;
   await sql`delete from qualified_form_services where created_by like 'ZZ-%'`;
   await sql`delete from qualified_forms where created_by like 'ZZ-%'`;
   await sql`delete from prospect_attempt_nq_reasons where created_by like 'ZZ-%'`;
@@ -288,5 +337,90 @@ describeDb('setNotQualified', () => {
     expect(res.ok).toBe(true);
     const reasons = await sql<{ reason: string }[]>`select reason from prospect_attempt_nq_reasons where attempt_id = ${attemptId}`;
     expect(reasons[0].reason).toBe('[Lainnya ...] pindah kota');
+  });
+});
+
+describeDb('negotiation', () => {
+  const status = async (attemptId: string): Promise<string> =>
+    (await sql<{ status: string }[]>`select status from prospect_attempts where id = ${attemptId}`)[0].status;
+
+  it('no-negotiation takes standard terms to Auto Approved (proposal from qualified subtotal)', async () => {
+    const svc = await seedService('SVC-ZZ-NONEGO');
+    const attemptId = await qualifiedAttempt(budi(), svc);
+    const res = await submitNegotiation(sql, budi(), attemptId, [], true);
+    expect(res.ok).toBe(true);
+    expect(await status(attemptId)).toBe('Negotiation - Auto Approved');
+
+    const prop = await sql<{ id: string; version_no: number }[]>`
+      select id, version_no from negotiation_proposals where attempt_id = ${attemptId}`;
+    expect(prop[0].version_no).toBe(1);
+    const line = await sql<{ proposed_price: string }[]>`
+      select proposed_price from negotiation_proposal_lines where proposal_id = ${prop[0].id}`;
+    // Standard proposed price = the pinned deal value (Rp. 9.000.000,00).
+    expect(money.parse(line[0].proposed_price)).toBe(money.parse('9000000'));
+  });
+
+  it('custom negotiation routes to Pending Approval, then a superior approves', async () => {
+    const svc = await seedService('SVC-ZZ-NEGO');
+    const attemptId = await qualifiedAttempt(budi(), svc);
+    const lines: ProposalLine[] = [{ masterServiceId: svc, proposedPrice: '8000000', commissionRule: '10% of standard price', paymentTerms: 'Termin 3x' }];
+    const submitted = await submitNegotiation(sql, budi(), attemptId, lines, false);
+    expect(submitted.ok).toBe(true);
+    expect(await status(attemptId)).toBe('Negotiation - Pending Approval');
+
+    const decided = await decideNegotiation(sql, salesLead(), attemptId, DECISION_APPROVE);
+    expect(decided.ok).toBe(true);
+    expect(await status(attemptId)).toBe('Negotiation - Approved');
+
+    // The owner (Budi) was notified of the decision (explicit recipient).
+    const notif = await sql<{ n: number }[]>`
+      select count(*)::int as n from notifications
+      where recipient_employee_id = 'ZZ-BUDI' and entity_id = ${attemptId}
+        and event_type = 'm0.negotiation.decision'`;
+    expect(notif[0].n).toBe(1);
+  });
+
+  it('a non-superior cannot decide (role_denied, nothing written)', async () => {
+    const svc = await seedService('SVC-ZZ-NEGODENY');
+    const attemptId = await qualifiedAttempt(budi(), svc);
+    await submitNegotiation(sql, budi(), attemptId, [
+      { masterServiceId: svc, proposedPrice: '8000000', commissionRule: '10% of standard price' },
+    ], false);
+    const denied = await decideNegotiation(sql, budi(), attemptId, DECISION_APPROVE);
+    expect(denied.ok).toBe(false);
+    if (!denied.ok) expect(denied.code).toBe('role_denied');
+    expect(await status(attemptId)).toBe('Negotiation - Pending Approval');
+  });
+
+  it('revise → salesperson resubmits a new version → Pending Approval again', async () => {
+    const svc = await seedService('SVC-ZZ-REVISE');
+    const attemptId = await qualifiedAttempt(budi(), svc);
+    await submitNegotiation(sql, budi(), attemptId, [
+      { masterServiceId: svc, proposedPrice: '8000000', commissionRule: '10% of standard price' },
+    ], false);
+    const revised = await decideNegotiation(sql, salesLead(), attemptId, DECISION_REVISE, 'harga terlalu rendah');
+    expect(revised.ok).toBe(true);
+    expect(await status(attemptId)).toBe('Negotiation - Revision Required');
+
+    const resub = await resubmitNegotiation(sql, budi(), attemptId, [
+      { masterServiceId: svc, proposedPrice: '8500000', commissionRule: '10% of standard price' },
+    ]);
+    expect(resub.ok).toBe(true);
+    expect(await status(attemptId)).toBe('Negotiation - Pending Approval');
+    const versions = await sql<{ n: number }[]>`
+      select count(*)::int as n from negotiation_proposals where attempt_id = ${attemptId}`;
+    expect(versions[0].n).toBe(2);
+  });
+
+  it('revise → salesperson accepts the counter → Approved', async () => {
+    const svc = await seedService('SVC-ZZ-ACCEPT');
+    const attemptId = await qualifiedAttempt(budi(), svc);
+    await submitNegotiation(sql, budi(), attemptId, [
+      { masterServiceId: svc, proposedPrice: '8000000', commissionRule: '10% of standard price' },
+    ], false);
+    await decideNegotiation(sql, salesLead(), attemptId, DECISION_REVISE, 'counter: 8.5jt');
+    const accepted = await acceptCounter(sql, budi(), attemptId);
+    expect(accepted.ok).toBe(true);
+    expect(await status(attemptId)).toBe('Negotiation - Approved');
   });
 });

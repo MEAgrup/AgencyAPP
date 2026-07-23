@@ -50,9 +50,10 @@ export function mapError(err: unknown): Response {
     err instanceof leads.IncompleteError ||
     err instanceof sales.IncompleteError ||
     err instanceof sales.TooManyServicesError ||
+    err instanceof sales.CustomTermRequiresNegotiationError ||
     err instanceof msl.IncompleteError
   ) {
-    return errorJson(err.message, 400); // exact BI [...] message
+    return errorJson(err.message, 400); // exact BI [...] message (or internal sentinel)
   }
   if (
     err instanceof demo.NotFoundError ||
