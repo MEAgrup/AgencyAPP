@@ -55,3 +55,125 @@ jobs:
           else
             echo "web-internal/ not present yet — frontend agent owns it. Skipping."
           fi
+
+  # @cdps/api — the API route handlers (Fase 1 langkah 4). Typecheck the whole app
+  # (route handlers + libs against the @cdps/* source) and run the framework-free
+  # lib unit tests (JWT verification, error mapping). No DB / no Next build here —
+  # the domain logic the handlers call is gated by db-and-migrations.
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install source-aliased sibling packages (@cdps/db, @cdps/domain)
+        # apps/api resolves @cdps/* to package SOURCE (tsconfig paths + vitest
+        # alias). tsc/vitest then follow those sources' bare imports (postgres in
+        # @cdps/db, bcryptjs in @cdps/domain), which resolve from each package's
+        # own node_modules — so they must be installed here too.
+        run: |
+          (cd packages/db && npm ci)
+          (cd packages/domain && npm ci)
+      - name: '@cdps/api — typecheck + lib tests'
+        working-directory: apps/api
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+
+  # New Supabase/TypeScript stack (Fase 0 migration). Pure engines + wrappers.
+  core-engines:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: '@cdps/core — test + typecheck'
+        working-directory: packages/core
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+
+  # @cdps/db executor wiring + end-to-end integration against a migrated Postgres.
+  # Applies EVERY supabase/migrations file in order to a fresh PG17, then runs the
+  # integration suite (sm_transition / ident_next / notify_emit / audit immutability)
+  # inside rolled-back transactions. This is the migration's self-apply gate.
+  db-and-migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cdps
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      PGPASSWORD: postgres
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/cdps"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply all migrations in order
+        run: |
+          for f in $(ls supabase/migrations/*.sql | sort); do
+            echo "applying $(basename "$f")"
+            psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+      - name: Verify migration seed counts (14 machines, 15 events)
+        run: |
+          psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
+            "do \$\$ begin
+               if (select count(*) from sm_machines) <> 14 then raise exception 'expected 14 machines'; end if;
+               if (select count(*) from notif_events) <> 15 then raise exception 'expected 15 events'; end if;
+             end \$\$;"
+      - name: Alpha Digital seed fixture — apply twice (idempotency) + verify
+        run: |
+          psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/seed.sql
+          psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/seed.sql
+          psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
+            "do \$\$ begin
+               if (select count(*) from employees) <> 10 then raise exception 'expected 10 employees'; end if;
+               if (select count(*) from role_mappings) <> 12 then raise exception 'expected 12 role_mappings'; end if;
+               if (select count(*) from master_services) <> 3 then raise exception 'expected 3 master_services (seed not idempotent?)'; end if;
+               if (select count(*) from demo_tasks) <> 1 then raise exception 'expected 1 demo_task (seed not idempotent?)'; end if;
+             end \$\$;"
+      - name: Verify table count (expect 53)
+        run: |
+          n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
+            "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
+          echo "public base tables: $n"
+          test "$n" -eq 53
+      - name: Invariant — ID generator (gap-free, WIB period)
+        run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/ident_checks.sql
+      - name: Invariant — append-only history (immutability)
+        run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/immutability_checks.sql
+      - name: Invariant — Row Level Security (permission predicate parity)
+        run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/rls_checks.sql
+      - name: Invariant — Supabase Auth custom claims (ResolveActor parity)
+        run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/auth_claims_checks.sql
+      - name: '@cdps/db — test (incl. integration) + typecheck'
+        working-directory: packages/db
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: '@cdps/domain — test (incl. integration) + typecheck'
+        # Runs after @cdps/db so its node_modules (postgres) is present for the
+        # source-aliased @cdps/db import. Exercises the employee importer and the
+        # demo-task service end-to-end against the migrated Postgres above.
+        working-directory: packages/domain
+        run: |
+          npm ci
+          npm run typecheck
+          npm test

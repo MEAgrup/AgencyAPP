@@ -1,34 +1,108 @@
-# HANDOFF — Migrasi Supabase, Fase 0 SESI 3 (2026-07-22)
+# HANDOFF — Migrasi Supabase, Fase 0 SESI 3 (2026-07-22 → 23)
 
 > Lanjutan dari `HANDOFF_SUPABASE_FASE0.md` (skema TUNTAS, 28 migrasi applied).
 > Baca bersama `docs/SUPABASE_MIGRATION_PLAN.md`, `docs/SUPABASE_MIGRATION_TECH_APPENDIX.md`
-> (§B port core engines), dan `docs/DECISIONS.md` 2026-07-22.
-> Branch kerja: `claude/supabase-fase0-sesi3-continue-xko1b4`.
+> (§B port core engines, §C auth, §D RLS), dan `docs/DECISIONS.md` 2026-07-22.
+> Branch kerja: `claude/supabase-fase0-sesi3-continue-xko1b4`. PR terbuka: **#31**.
+
+## ⭐ MULAI DI SINI (sesi berikutnya) — Fase 0 TUNTAS, lanjut Fase 1
+
+**Status:** Fase 0 selesai. `packages/core` 98 test hijau; `packages/db` 4 unit + 5 integration
+(hijau terhadap PG termigrasi); migrasi `statemachine` **SUDAH di-apply ke Supabase remote
+`CDPS SG` (`egddxfcnrtecheiykhlf`)** (29 migrasi total) + smoke lulus; `supabase/seed.sql`
+(Alpha Digital) idempoten + CI-gated. Semua ter-commit & push (commit teratas `3610e9e`).
+
+**Verifikasi cepat:**
+```
+cd packages/core && npm ci && npm test && npm run typecheck   # 98 pass, tsc 0
+cd packages/db   && npm ci && npm test && npm run typecheck   # 4 pass (+5 integration bila DATABASE_URL)
+```
+
+> **UPDATE SESI 4 (2026-07-23):** langkah 1 (RLS baseline) **& langkah 2 (Supabase
+> Auth) SELESAI (kode)** — migrasi `20260102000003_rls_baseline.sql` (53 tabel RLS,
+> 44 policy mirror `permission.ts`) + `20260102000004_supabase_auth.sql` (kolom
+> `employees.auth_user_id`/`must_change_password`, `custom_access_token_hook`,
+> `employee_claims` mirror ResolveActor, `sync_employee_claims`+trigger,
+> `import_employee_credentials` bcrypt langsung, `set_employee_banned`) di-apply ke
+> remote `CDPS SG`; advisor bersih (9 INFO internal default-deny + 3 WARN benign
+> `jwt_owns_*`). Test CI baru: `rls_checks.sql` + `auth_claims_checks.sql` (job
+> `db-and-migrations`; `ci-supabase.yml` stale dihapus). Verifikasi e2e import →
+> `auth.users`/`auth.identities` di remote terbukti cocok versi GoTrue (rollback).
+>
+> **⚠ GATE MANUSIA sebelum Fase 1 "selesai" (DECISIONS O36 — TIDAK bisa dieksekusi
+> agent):** (i) **Aktifkan hook**: Dashboard `Auth > Hooks (Beta)` → pilih
+> `custom_access_token_hook` (atau `config.toml [auth.hook.custom_access_token]`).
+> **Tanpa ini JWT tak berisi `app_metadata` → RLS default-deny SEMUA** — wajib
+> pertama. (ii) Jalankan `select import_employee_credentials();` (service-role) atas
+> data karyawan riil (CSV) setelah verifikasi versi GoTrue project. (iii)
+> **Smoke-test login SEMUA role di staging** (staff/lead/OD/Director) — cek klaim
+> `app_metadata` + baris RLS yang terlihat.
+>
+> **Lanjut kode = langkah 3 (importer CSV karyawan) → 4 (`apps/api` handlers).**
+
+**Kerjakan berikutnya = FASE 1** (urut, acuan Lampiran §C auth + §D RLS + PLAN §Fase 1):
+1. ✅ **RLS baseline** — `ALTER TABLE … ENABLE ROW LEVEL SECURITY` di SEMUA tabel `public`
+   (advisor `rls_disabled_in_public` menandai semuanya, EXPECTED). Policy turunkan dari
+   predikat `packages/core/src/permission.ts` yang SAMA (dibaca dari klaim JWT
+   `auth.jwt()->'app_metadata'`), mirror `isLead/canWrite/canReadDivision/canReadAll` (§B.4/§D).
+   Keluarkan tabel internal murni dari expose PostgREST / tambah policy ketat: `sessions`
+   (kolom `token` — advisor `sensitive_columns_exposed`), `id_sequences`, `employee_credentials`,
+   `sm_*`, `notif_events`. `REVOKE UPDATE,DELETE` di `audit_log`/`notifications`/snapshot dari
+   `authenticated,anon` (defense-in-depth, §B.3).
+2. ✅ **Supabase Auth (GoTrue)** — import bcrypt kredensial existing LANGSUNG ke `auth.users`
+   (OQ-3, bukan reset paksa; verifikasi versi GoTrue project). Custom claims division/level/
+   od/director via **Access Token Hook** dari `resolveActor` (§C.3). Wajib smoke-test login
+   semua role di staging sebelum Fase 1 ditandai selesai.
+3. **Importer CSV karyawan** (OQ-4, HRIS `GET /employees` TIDAK dipakai) — replay via jalur
+   domain, bukan raw INSERT (§F.1).
+4. **`apps/api` route handlers** — pakai `@cdps/db` `withTransaction` + `executors(tx)` supaya
+   ident/sm_transition/notify/audit satu transaksi; validasi field wajib + pesan BI `[...]` di
+   handler SEBELUM panggil fungsi SQL.
+5. **Retrofit opsional**: `SET search_path` ke 5 fungsi lama (advisor WARN, non-blocking).
+
+**Peringatan yang MUDAH terlewat:** offset WIB satu sumber (`WIB_OFFSET_HOURS=7` TS == `+ interval
+'7 hours'` SQL); katalog notifikasi FROZEN 15 event; string BI `[...]` persis; transisi HANYA lewat
+`sm_transition`; predikat permission DUA implementasi (TS + RLS) tak boleh divergen; JANGAN buat root
+workspace `package.json` yang menyentuh `web-internal` tanpa keputusan; seed remote dev BELUM
+dijalankan (opsional, via `supabase db reset`).
 
 ## 1. Konteks: di mana kita berada di rencana
 
 Fase 0 punya 6 langkah (handoff sebelumnya §5). Status:
 
 1. ✅ Apply 28 migrasi + smoke test + advisors — SELESAI (sesi lalu).
-2. 🔄 **Port core engines ke TypeScript** — SESI INI: **5 dari ~8 engine murni selesai**
-   (money, tz, permission, bi, ident). Sisa engine bergantung DB/SQL (statemachine, audit,
-   notification) — lihat §3.
-3. ✅ Setup CI (GitHub Actions) — **PR #30** (`.github/workflows/ci-supabase.yml`): job `core`
-   (npm ci + `tsc --noEmit` + vitest `@cdps/core`) + job `db` (`postgres:17` → apply 28 migrasi →
-   assert 49 tabel → invariant checks `supabase/tests/ident_checks.sql` + `immutability_checks.sql`).
-   Catatan: Fase 0 pakai plain-SQL psql assertions (migrasi masih murni Postgres); graduasi ke
-   `supabase start` + pgTAP + e2e Alpha Digital saat Fase 1 (RLS/auth) — lihat `supabase/tests/README.md`.
-4. ⬜ Seed fixture Alpha Digital → `supabase/seed.sql`.
+2. ✅ **Port SEMUA core engine ke TypeScript** — SELESAI SESI INI: money, tz, permission, bi,
+   ident, statemachine, audit, notification (`packages/core`, 98 test) + `packages/db`
+   (klien postgres.js + executor konkret, 4 unit test + 5 integration skip-guarded). Bagian
+   atomik (ident_next, sm_transition, notify_emit) ada di migrasi `…_statemachine.sql`.
+3. 🔄 Setup CI (GitHub Actions) — SESI INI tambah 2 job di `.github/workflows/ci.yml`:
+   `core-engines` (vitest+typecheck `packages/core`) & `db-and-migrations` (apply SEMUA
+   migrasi ke PG17 service + verify seed 14/15 + integration `packages/db`). Sisa: pgTAP
+   khusus bila diinginkan.
+4. ✅ Seed fixture Alpha Digital → `supabase/seed.sql` — SELESAI SESI INI (port `seed.go`):
+   10 karyawan, 12 role mapping, 3 layered Director, 3 master service (via `ident_next`),
+   1 demo task Budi (`DEMO-…-0001`, `[To Do]`) + audit `create`. Idempoten (upsert/guarded),
+   tervalidasi apply-2× lokal, di-gate CI. **Belum di-seed ke remote** (data dev — pemilik
+   putuskan; jalan otomatis di `supabase db reset`/branch preview).
 5. ⬜ Fase 1: Supabase Auth (import bcrypt), importer CSV karyawan, MSL admin, RLS baseline.
 6. ⬜ Vercel project untuk `apps/api`.
 
 PR sesi ini: **#31** (`claude/supabase-fase0-sesi3-continue-xko1b4` → `main`).
 
+> ✅ **Migrasi `20260102000002_statemachine.sql` SUDAH DI-APPLY ke remote `CDPS SG`
+> (`egddxfcnrtecheiykhlf`) — 2026-07-23, version `20260723055732`.** `list_migrations` = 29 entri.
+> Smoke remote (dalam `BEGIN…ROLLBACK`, tanpa residu): seed 14 machine/94 edge/20 terminal/15
+> event; `sm_transition` valid/blocked/not_found/auto_computed benar; `notify_emit` dedup+exclude
+> actor benar; `ident_next` WIB `TST-202607-0001`. **Advisors:** 4 tabel baru dapat ERROR
+> `rls_disabled_in_public` (EXPECTED Fase 0, RLS di Fase 1); fungsi baru `sm_transition`/
+> `notify_emit`/`mark_notification_read` **tidak** menambah warning `function_search_path_mutable`
+> (SET search_path bekerja). Juga tervalidasi lokal end-to-end + di-gate CI (`db-and-migrations`).
+
 ## 2. Yang dikerjakan SESI INI (branch di atas)
 
-Port **semua** core engine **murni** (tanpa DB, tanpa concurrency hazard) ke `packages/core` —
-5 engine: money, tz, permission, bi, ident — masing-masing 1:1 dari Go + test vitest yang
-mirror `*_test.go` Go. **79 test hijau, `tsc --noEmit` bersih.**
+Port **SEMUA 8 core engine** ke stack baru (1:1 dari Go + test vitest). `packages/core`:
+**98 test hijau, tsc bersih**; `packages/db`: 4 unit + 5 integration skip-guarded, tsc bersih.
+Bagian atomik/concurrency (alokasi ID, transisi, emit) ada di fungsi SQL; TS = wrapper + murni.
 
 - `packages/core/src/money.ts` (+ `money.test.ts`, 40 test) — port `money.go`.
   Minor units sebagai **`bigint`** (bukan `number`) — mem-port sifat "tidak pernah float"
@@ -52,7 +126,25 @@ mirror `*_test.go` Go. **79 test hijau, `tsc --noEmit` bersih.**
   wrapper `nextId(exec, prefix, at)` yang panggil fungsi SQL `ident_next` (alokasi gap-free/
   rollback-safe TETAP di Postgres, TIDAK direimplementasi di TS). `periodOf` re-export tz WIB.
   `TST`/`DEMO` sengaja TIDAK diregistrasi (scaffolding test Go saja).
-- `packages/core/src/index.ts` — barrel `export * as money/tz/permission/bi/ident`.
+- `packages/core/src/statemachine.ts` (+ test, 5 test) — wrapper `transition(exec, req)` atas
+  fungsi SQL `sm_transition`. Derive dua boolean role dari `permission.Actor` PERSIS spt Go
+  (requireLead lolos untuk Director ATAU siapa pun level lead; cek divisi-spesifik ada di layer
+  modul). Return terstruktur `{ok,code,message}` (bukan exception) → handler map ke HTTP.
+- `packages/core/src/audit.ts` (+ test, 6 test) — `write(exec, record)` append-only dengan guard
+  `NoActorError` (port `ErrNoActor`); immutability ditegakkan trigger `forbid_mutation`. Helper
+  `hasSecretKey` = alat uji/lint aturan "password/hash tak pernah masuk payload" (§B.3).
+- `packages/core/src/notification.ts` (+ test, 8 test) — 15 event FROZEN (`EVENTS`/`CATALOG`,
+  nilai string persis Go) + wrapper `emit(exec, emission)` atas fungsi SQL `notify_emit`.
+- **`supabase/migrations/20260102000002_statemachine.sql`** — tabel `sm_machines`/`sm_edges`/
+  `sm_terminal_states` + seed **14 machine** (transkripsi 1:1 `config.go`) + fungsi `sm_transition`;
+  tabel `notif_events` + seed **15 event** + fungsi `notify_emit` + `mark_notification_read`.
+  Fungsi diberi `SET search_path = public` (menjawab advisor `function_search_path_mutable`).
+- **`packages/db`** — klien postgres.js (`createClient` pooler 6543 `prepare:false`,
+  `withTransaction`) + executor konkret (`identExecutor`/`smExecutor`/`auditExecutor`/
+  `notifyExecutor`, atau `executors(sql)`). `executors.test.ts` (fake sql, 4 test) +
+  `integration.test.ts` (5 test, **skip kecuali `DATABASE_URL` di-set**, jalan dalam tx yang
+  di-rollback). `@cdps/core` di-resolve via alias vitest + tsconfig `paths` (tanpa root workspace).
+- `packages/core/src/index.ts` — barrel `export * as money/tz/permission/bi/ident/statemachine/audit/notification`.
 - Tooling: `packages/core/package.json` tambah vitest + script `test`/`test:watch`/`typecheck`;
   `tsconfig.json` target dinaikkan `ES2017` → `ES2020` (butuh literal `bigint`).
   `package-lock.json` di-commit (reproducible); `node_modules` diignore.
@@ -62,45 +154,46 @@ mirror `*_test.go` Go. **79 test hijau, `tsc --noEmit` bersih.**
   **TIDAK membuat** root workspace `package.json` (keputusan sesi lalu — jangan sentuh
   `web-internal` tanpa keputusan). `packages/core` di-`npm install` mandiri.
 
-## 3. Engine yang sudah vs belum
+## 3. Keputusan implementasi penting (baca sebelum ubah)
 
-Appendix §B membagi engine jadi dua: **murni komputasi** (→ library TS, mudah unit-test) vs
-**butuh atomik/transaksi DB** (→ fungsi/trigger Postgres). Sesi ini menyelesaikan **semua yang
-murni** (money, tz, permission, bi, ident — 79 test). Sisa 3 engine bergantung pada sisi SQL +
-wrapper TS yang butuh koneksi DB untuk dites end-to-end — digarap bareng CI/DB integrasi:
+Detail lengkap di `docs/DECISIONS.md` 2026-07-22 (entri "Fase 0 — port core engines statemachine
+& notification"). Ringkas:
 
-- ✅ **ident** — fungsi `ident_next` SUDAH di migrasi `20260102000001_ident_next.sql`; wrapper TS
-  `nextId` + registry + format helper SUDAH di `ident.ts`. Sisa (nanti): implementasi konkret
-  `IdentExecutor` di `packages/db` (postgres.js, panggil di dalam transaksi entity — BUKAN
-  supabase-js REST) + test integrasi.
-- ⬜ **statemachine** — appendix §B.2 sarankan tabel `sm_machines`/`sm_edges` + satu fungsi
-  `sm_transition` (return `jsonb` terstruktur, bukan exception). **Belum ada di migrasi** — perlu
-  migrasi baru (seed dari `docs/STATE_MACHINES.md` + `backend/internal/core/statemachine/config.go`,
-  14 machine). Role-gating (`requireLead`) dievaluasi DI DALAM fungsi SQL. `bi.TRANSITION_NOT_ALLOWED`
-  = default `block_message`; `bi.TRANSITION_ROLE_DENIED` = pesan role-gate.
-- ⬜ **audit** — trigger `forbid_mutation` SUDAH di migrasi foundation. Sisa: helper insert TS tipis
-  (`Write()`) + test unit yang menegaskan `password_hash` tak pernah masuk payload before/after.
-- ⬜ **notification** — 15 event FROZEN (verifikasi di `backend/internal/core/notification/notification.go`);
-  resolver recipient jadi fungsi SQL dipanggil dari `sm_transition` (satu transaksi).
+- **`sm_transition` return `jsonb` `{ok,code,message}`, BUKAN exception** (§B.2). Kode:
+  `no_actor|unknown_machine|auto_computed|not_found|blocked|role_denied`. Wrapper TS memetakan.
+- **Not-found via `v_from IS NULL`, BUKAN `IF NOT FOUND`** — `EXECUTE...INTO` tidak set `FOUND`;
+  valid karena kolom status entity selalu `NOT NULL`.
+- **`notify_emit`: `leadsOfDivision` == `explicitOrLeads`** (set recipient identik setelah dedup).
+- **Emisi notifikasi TIDAK di dalam `sm_transition`** — Go memetakan event→transisi di wiring,
+  bukan properti machine; jadi handler panggil `notify_emit` di transaksi yang sama (paritas Go).
+- **Offset WIB satu sumber** — `WIB_OFFSET_HOURS=7` (TS) HARUS identik `+ interval '7 hours'` (SQL).
+- **`money.ts` core = aritmetika (bigint)**; `web-internal/money.ts` hanya display. Dedup butuh
+  root workspace → tunda sampai ada keputusan.
 
 ## 4. Cara verifikasi cepat di sesi baru
 
 ```
-cd packages/core && npm install && npm test && npm run typecheck
+cd packages/core && npm install && npm test && npm run typecheck   # 98 pass, tsc 0
+cd packages/db   && npm install && npm test && npm run typecheck   # 4 pass + 5 skip, tsc 0
+# integrasi penuh (butuh DB termigrasi): DATABASE_URL=postgres://... npm test  (di packages/db)
 ```
-Harus: **79 test pass** (money 40, tz 6, permission 7, bi 13, ident 13), tsc exit 0.
 
 ## 5. Langkah berikutnya (urutan disarankan)
 
-1. **Migrasi `sm_machines`/`sm_edges` + fungsi `sm_transition`** (port `config.go` 14 machine)
-   + pgTAP test transisi valid/invalid + `require_lead`. Lalu wrapper TS di `statemachine.ts`
-   (pakai konstanta `bi.*`). Ini blocker terbesar berikutnya.
-2. **`packages/db`**: implementasi klien postgres.js (pooler 6543, `prepare:false`) +
-   `IdentExecutor` konkret + generate types. Lalu test integrasi `nextId` (gap-free, rollback-safe,
-   WIB bucket) terhadap DB dev/lokal.
-3. **audit `Write()` helper** + test "no password in payload".
-4. **notification** resolver SQL + katalog 15 event TS.
-5. **CI** (§G appendix): job vitest `packages/core` + job `supabase start` + apply migrasi + pgTAP.
+0. **Apply migrasi `…_statemachine.sql` ke project Supabase remote** saat pemilik siap
+   (`supabase db push` / MCP `apply_migration` project `egddxfcnrtecheiykhlf`), lalu
+   `get_advisors`. Migrasi sudah tervalidasi lokal + di-gate CI (lihat §1) — apply remote
+   tinggal eksekusi.
+1. ~~Seed fixture Alpha Digital~~ ✅ SELESAI (`supabase/seed.sql`, lihat §1 item 4).
+2. **CI lanjutan** (opsional): tambah pgTAP (immutability, ident gap-free, sm_transition matrix)
+   di atas job `db-and-migrations` yang sudah ada. (Opsional: seed remote dev via `supabase db reset`.)
+3. **Fase 1**: Supabase Auth (import bcrypt per OQ-3), importer CSV karyawan (OQ-4), MSL admin,
+   RLS baseline (§D) — aktifkan RLS SEMUA tabel + custom claims `app_metadata` (predikat
+   `permission.ts` di-mirror di RLS, §B.4).
+4. **Vercel** project `apps/api` (env dari `.env.example`; wiring route handler pakai
+   `@cdps/db` `withTransaction` + `executors` → ident/sm/notify/audit satu transaksi).
+5. Optional hardening: retrofit `SET search_path` ke 5 fungsi lama (`set_updated_at`,
+   `forbid_mutation`, `wib_date`, `wib_period`, `ident_next`) — advisor WARN, non-blocking.
 
 ## 6. Peringatan penting (tetap berlaku)
 

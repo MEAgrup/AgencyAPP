@@ -7,9 +7,9 @@
  * - permission: Role matrix predicates (staff/lead/SPV/OD/Director/layered) ✅
  * - bi: house-wide Bahasa Indonesia core messages + [...] invariant helpers ✅
  * - ident: prefix registry + ID format/parse + nextId wrapper (SQL ident_next) ✅
- * - statemachine: Entity lifecycle transitions (SQL sm_transition + TS wrapper, pending)
- * - audit: Append-only immutable audit log (pending)
- * - notification: In-app event notifications derived from audit log (pending)
+ * - statemachine: lifecycle transitions wrapper (SQL sm_transition) ✅
+ * - audit: append-only immutable audit writer + no-secret guard ✅
+ * - notification: 15 FROZEN events catalog + emit wrapper (SQL notify_emit) ✅
  *
  * All implementations must maintain house-rule compliance (CLAUDE.md §Non-negotiable):
  * - State machines server-side enforced + exact Bahasa Indonesia [...] messages
@@ -26,3 +26,6 @@ export * as tz from './tz.js';
 export * as permission from './permission.js';
 export * as bi from './bi.js';
 export * as ident from './ident.js';
+export * as statemachine from './statemachine.js';
+export * as audit from './audit.js';
+export * as notification from './notification.js';

@@ -1,5 +1,5 @@
 {
-  "name": "@cdps/db",
+  "name": "@cdps/domain",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,11 +10,13 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^26.1.1",
     "typescript": "^5",
     "vitest": "^3"
   },
   "dependencies": {
+    "bcryptjs": "^2.4.3",
     "postgres": "^3.4.5"
   }
 }

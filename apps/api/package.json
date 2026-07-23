@@ -6,10 +6,17 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@cdps/core": "file:../../packages/core",
+    "@cdps/db": "file:../../packages/db",
+    "@cdps/domain": "file:../../packages/domain",
+    "bcryptjs": "^2.4.3",
     "next": "16.2.10",
+    "postgres": "^3.4.5",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
@@ -19,6 +26,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3"
   }
 }
