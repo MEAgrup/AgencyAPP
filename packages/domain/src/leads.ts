@@ -555,3 +555,80 @@ async function loadLead(tx: Queryable, id: string): Promise<Lead> {
   }
   return toLead(rows[0]);
 }
+
+// ---------------------------------------------------------------------------
+// Win resolution (M1 §6 rule 5) — fired from M0 Closing inside the closing tx.
+// ---------------------------------------------------------------------------
+
+/** Auto pool-competition loss status. */
+export const ATTEMPT_CLOSED_KALAH = '[Closed - Kalah Kompetisi]';
+
+/** A lead's win was already resolved (a second resolution is rejected). */
+export class AlreadyResolvedError extends Error {
+  constructor() {
+    super('lead win already resolved');
+    this.name = 'LeadAlreadyResolvedError';
+  }
+}
+
+/**
+ * SYSTEM_ACTOR drives the auto competition-loss transitions. Director authority
+ * lets it pass any role gate; the audit row records SYSTEM as the actor.
+ */
+const SYSTEM_ACTOR: Actor = { employeeId: 'SYSTEM', role: permission.makeRole({ director: true }) };
+
+/**
+ * resolveWin records the winning attempt on a lead and closes every OTHER open
+ * attempt as [Closed - Kalah Kompetisi] (M1 §6 rule 5). It MUST run inside the
+ * caller's transaction (the M0 Closing tx) so the win is atomic with the
+ * winner's Closed-Success transition — there is never more than one winner. The
+ * lead row is locked FOR UPDATE; a lead already resolved throws AlreadyResolvedError.
+ */
+export async function resolveWin(
+  tx: Queryable,
+  leadId: string,
+  winningAttemptId: string,
+  winnerEmployeeId: string,
+): Promise<void> {
+  const leadRows = await tx<{ winning_attempt_id: string | null }[]>`
+    select winning_attempt_id from leads where id = ${leadId} for update`;
+  if (leadRows.length === 0) {
+    throw new IncompleteError();
+  }
+  if (leadRows[0].winning_attempt_id) {
+    throw new AlreadyResolvedError();
+  }
+  await tx`update leads set winning_attempt_id = ${winningAttemptId} where id = ${leadId}`;
+
+  const others = await tx<{ id: string; status: string }[]>`
+    select id, status from prospect_attempts where lead_id = ${leadId} and id <> ${winningAttemptId}`;
+  const ex = executors(tx);
+  const losers: string[] = [];
+  for (const o of others) {
+    if (isTerminalAttemptStatus(o.status)) {
+      continue;
+    }
+    const res = await statemachine.transition(ex.sm, {
+      machine: 'prospect_attempt',
+      entityType: 'prospect_attempt',
+      table: 'prospect_attempts',
+      entityId: o.id,
+      to: ATTEMPT_CLOSED_KALAH,
+      actor: SYSTEM_ACTOR,
+    });
+    if (!res.ok) {
+      throw new Error(`win-resolution ${o.id} -> ${ATTEMPT_CLOSED_KALAH} failed: ${res.message}`);
+    }
+    losers.push(o.id);
+  }
+
+  await ex.audit.insertAudit({
+    entityType: 'lead', entityId: leadId, actorEmployeeId: 'SYSTEM',
+    action: 'win_resolved', beforeJson: null,
+    afterJson: {
+      winning_attempt_id: winningAttemptId, winner: winnerEmployeeId, losers,
+      note: '[lead dimenangkan oleh sales lain (nama)]',
+    },
+    createdBy: 'SYSTEM',
+  });
+}
