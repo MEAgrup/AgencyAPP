@@ -10,6 +10,7 @@ a failed `ASSERT`/`RAISE` fails the job.
 | `ident_checks.sql` | #1 IDs `PREFIX-YYYYMM-NNNN` | `ident_next` is gap-free per `(prefix, WIB period)`; `wib_period` buckets in WIB (incl. month rollover) |
 | `immutability_checks.sql` | #3 immutable history | `forbid_mutation()` blocks UPDATE/DELETE on `audit_log`; blocks DELETE on `notifications` while allowing the `read_at` mark; snapshot guards installed |
 | `rls_checks.sql` | #6 permissions | RLS policies enforce the `permission.ts` predicate at the row level: owner/division/OD/Director read scope, default-deny on empty claims, and internal tables locked to `authenticated` |
+| `auth_claims_checks.sql` | #6 permissions | The Access Token Hook resolver (`employee_claims` / `custom_access_token_hook`) produces `app_metadata` claims identical to Go `ResolveActor` — the source RLS reads; guards against auth↔RLS drift |
 
 ## Why plain SQL and not pgTAP (yet)
 
@@ -34,4 +35,5 @@ RLS.
 psql -v ON_ERROR_STOP=1 -f supabase/tests/ident_checks.sql
 psql -v ON_ERROR_STOP=1 -f supabase/tests/immutability_checks.sql
 psql -v ON_ERROR_STOP=1 -f supabase/tests/rls_checks.sql
+psql -v ON_ERROR_STOP=1 -f supabase/tests/auth_claims_checks.sql   # needs the seed applied first
 ```

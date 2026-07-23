@@ -134,6 +134,8 @@ jobs:
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/immutability_checks.sql
       - name: Invariant — Row Level Security (permission predicate parity)
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/rls_checks.sql
+      - name: Invariant — Supabase Auth custom claims (ResolveActor parity)
+        run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/auth_claims_checks.sql
       - name: '@cdps/db — test (incl. integration) + typecheck'
         working-directory: packages/db
         run: |

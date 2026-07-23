@@ -18,13 +18,27 @@ cd packages/core && npm ci && npm test && npm run typecheck   # 98 pass, tsc 0
 cd packages/db   && npm ci && npm test && npm run typecheck   # 4 pass (+5 integration bila DATABASE_URL)
 ```
 
-> **UPDATE SESI 4 (2026-07-23):** langkah 1 (RLS baseline) **SELESAI** — migrasi
-> `20260102000003_rls_baseline.sql` (53 tabel RLS, 44 policy mirror `permission.ts`,
-> internal default-deny, engine-func EXECUTE dikunci) di-apply ke remote `CDPS SG`;
-> advisor `rls_disabled` CRITICAL beres (sisa: 9 INFO internal + 3 WARN benign
-> `jwt_owns_*`, terdokumentasi di DECISIONS 2026-07-23). Test `supabase/tests/
-> rls_checks.sql` di-gate CI (`ci.yml` job `db-and-migrations`; `ci-supabase.yml`
-> stale dihapus). **Lanjut dari langkah 2 (Supabase Auth).**
+> **UPDATE SESI 4 (2026-07-23):** langkah 1 (RLS baseline) **& langkah 2 (Supabase
+> Auth) SELESAI (kode)** — migrasi `20260102000003_rls_baseline.sql` (53 tabel RLS,
+> 44 policy mirror `permission.ts`) + `20260102000004_supabase_auth.sql` (kolom
+> `employees.auth_user_id`/`must_change_password`, `custom_access_token_hook`,
+> `employee_claims` mirror ResolveActor, `sync_employee_claims`+trigger,
+> `import_employee_credentials` bcrypt langsung, `set_employee_banned`) di-apply ke
+> remote `CDPS SG`; advisor bersih (9 INFO internal default-deny + 3 WARN benign
+> `jwt_owns_*`). Test CI baru: `rls_checks.sql` + `auth_claims_checks.sql` (job
+> `db-and-migrations`; `ci-supabase.yml` stale dihapus). Verifikasi e2e import →
+> `auth.users`/`auth.identities` di remote terbukti cocok versi GoTrue (rollback).
+>
+> **⚠ GATE MANUSIA sebelum Fase 1 "selesai" (DECISIONS O36 — TIDAK bisa dieksekusi
+> agent):** (i) **Aktifkan hook**: Dashboard `Auth > Hooks (Beta)` → pilih
+> `custom_access_token_hook` (atau `config.toml [auth.hook.custom_access_token]`).
+> **Tanpa ini JWT tak berisi `app_metadata` → RLS default-deny SEMUA** — wajib
+> pertama. (ii) Jalankan `select import_employee_credentials();` (service-role) atas
+> data karyawan riil (CSV) setelah verifikasi versi GoTrue project. (iii)
+> **Smoke-test login SEMUA role di staging** (staff/lead/OD/Director) — cek klaim
+> `app_metadata` + baris RLS yang terlihat.
+>
+> **Lanjut kode = langkah 3 (importer CSV karyawan) → 4 (`apps/api` handlers).**
 
 **Kerjakan berikutnya = FASE 1** (urut, acuan Lampiran §C auth + §D RLS + PLAN §Fase 1):
 1. ✅ **RLS baseline** — `ALTER TABLE … ENABLE ROW LEVEL SECURITY` di SEMUA tabel `public`
@@ -35,7 +49,7 @@ cd packages/db   && npm ci && npm test && npm run typecheck   # 4 pass (+5 integ
    (kolom `token` — advisor `sensitive_columns_exposed`), `id_sequences`, `employee_credentials`,
    `sm_*`, `notif_events`. `REVOKE UPDATE,DELETE` di `audit_log`/`notifications`/snapshot dari
    `authenticated,anon` (defense-in-depth, §B.3).
-2. **Supabase Auth (GoTrue)** — import bcrypt kredensial existing LANGSUNG ke `auth.users`
+2. ✅ **Supabase Auth (GoTrue)** — import bcrypt kredensial existing LANGSUNG ke `auth.users`
    (OQ-3, bukan reset paksa; verifikasi versi GoTrue project). Custom claims division/level/
    od/director via **Access Token Hook** dari `resolveActor` (§C.3). Wajib smoke-test login
    semua role di staging sebelum Fase 1 ditandai selesai.
