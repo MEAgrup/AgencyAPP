@@ -6,8 +6,8 @@
  */
 import { ident as identCore } from '@cdps/core';
 import { describe, expect, it } from 'vitest';
-import type { Queryable } from './client.js';
-import { auditExecutor, identExecutor, notifyExecutor, smExecutor } from './executors.js';
+import type { Queryable } from './client';
+import { auditExecutor, identExecutor, notifyExecutor, smExecutor } from './executors';
 
 interface Captured {
   text: string;

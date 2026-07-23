@@ -11,9 +11,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@cdps/core": "file:../../packages/core",
-    "@cdps/db": "file:../../packages/db",
-    "@cdps/domain": "file:../../packages/domain",
+    "@cdps/core": "*",
+    "@cdps/db": "*",
+    "@cdps/domain": "*",
     "bcryptjs": "^2.4.3",
     "next": "16.2.10",
     "postgres": "^3.4.5",

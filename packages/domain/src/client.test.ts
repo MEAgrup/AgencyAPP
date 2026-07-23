@@ -11,7 +11,7 @@
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { money, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
-import { finance, leads, sales } from './index.js';
+import { finance, leads, sales } from './index';
 import {
   addPlatform,
   canEditAccountRevisable,
@@ -31,7 +31,7 @@ import {
   updateClient,
   updatePlatform,
   voidService,
-} from './client.js';
+} from './client';
 
 const budi = (): Actor => ({
   employeeId: 'ZZ-BUDI', divisi: 'Sales', role: permission.makeRole({ division: 'Sales', level: 'staff' }),

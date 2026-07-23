@@ -9,7 +9,7 @@ import {
   canWrite,
   isLead,
   makeRole,
-} from './permission.js';
+} from './permission';
 
 const actor = (employeeId: string, role: Parameters<typeof makeRole>[0]): Actor => ({
   employeeId,

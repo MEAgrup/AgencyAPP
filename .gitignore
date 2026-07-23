@@ -35,6 +35,10 @@ dist/
 *.tsbuildinfo
 coverage/
 
+# Next.js build output & generated types (apps/api)
+.next/
+next-env.d.ts
+
 # Claude Code agent worktrees (ephemeral, never commit)
 .claude/worktrees/
 __pycache__/

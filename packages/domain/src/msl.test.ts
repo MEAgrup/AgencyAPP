@@ -21,7 +21,7 @@ import {
   MSG_MASTER_SERVICE_DENIED,
   ServiceNotFoundError,
   updateService,
-} from './msl.js';
+} from './msl';
 
 const salesLead = (): Actor => ({
   employeeId: 'ZZ-SLEAD', role: permission.makeRole({ division: 'Sales', level: 'lead' }),

@@ -5,7 +5,7 @@ import {
   NoActorError,
   hasSecretKey,
   write,
-} from './audit.js';
+} from './audit';
 
 function fakeExec(): { exec: AuditExecutor; rows: AuditRow[] } {
   const rows: AuditRow[] = [];

@@ -9,8 +9,8 @@ import {
   bearerToken,
   requireActor,
   verifyJwtHS256,
-} from './auth.js';
-import { UnauthorizedError } from './http.js';
+} from './auth';
+import { UnauthorizedError } from './http';
 
 const SECRET = 'test-jwt-secret-please-change';
 

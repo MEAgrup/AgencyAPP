@@ -5,7 +5,7 @@ import {
   TRANSITION_ROLE_DENIED,
   bracket,
   isBracketed,
-} from './bi.js';
+} from './bi';
 
 describe('house-wide BI constants (exact strings)', () => {
   it('INCOMPLETE_DATA matches CLAUDE.md #5 default verbatim', () => {

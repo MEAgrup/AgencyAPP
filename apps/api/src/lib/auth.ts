@@ -14,7 +14,7 @@
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { permission } from '@cdps/core';
-import { UnauthorizedError } from './http.js';
+import { UnauthorizedError } from './http';
 
 type Actor = permission.Actor;
 
