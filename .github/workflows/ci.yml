@@ -122,6 +122,18 @@ jobs:
                if (select count(*) from master_services) <> 3 then raise exception 'expected 3 master_services (seed not idempotent?)'; end if;
                if (select count(*) from demo_tasks) <> 1 then raise exception 'expected 1 demo_task (seed not idempotent?)'; end if;
              end \$\$;"
+      - name: Verify table count (expect 53)
+        run: |
+          n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
+            "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
+          echo "public base tables: $n"
+          test "$n" -eq 53
+      - name: Invariant — ID generator (gap-free, WIB period)
+        run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/ident_checks.sql
+      - name: Invariant — append-only history (immutability)
+        run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/immutability_checks.sql
+      - name: Invariant — Row Level Security (permission predicate parity)
+        run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/rls_checks.sql
       - name: '@cdps/db — test (incl. integration) + typecheck'
         working-directory: packages/db
         run: |

@@ -18,8 +18,16 @@ cd packages/core && npm ci && npm test && npm run typecheck   # 98 pass, tsc 0
 cd packages/db   && npm ci && npm test && npm run typecheck   # 4 pass (+5 integration bila DATABASE_URL)
 ```
 
+> **UPDATE SESI 4 (2026-07-23):** langkah 1 (RLS baseline) **SELESAI** — migrasi
+> `20260102000003_rls_baseline.sql` (53 tabel RLS, 44 policy mirror `permission.ts`,
+> internal default-deny, engine-func EXECUTE dikunci) di-apply ke remote `CDPS SG`;
+> advisor `rls_disabled` CRITICAL beres (sisa: 9 INFO internal + 3 WARN benign
+> `jwt_owns_*`, terdokumentasi di DECISIONS 2026-07-23). Test `supabase/tests/
+> rls_checks.sql` di-gate CI (`ci.yml` job `db-and-migrations`; `ci-supabase.yml`
+> stale dihapus). **Lanjut dari langkah 2 (Supabase Auth).**
+
 **Kerjakan berikutnya = FASE 1** (urut, acuan Lampiran §C auth + §D RLS + PLAN §Fase 1):
-1. **RLS baseline** — `ALTER TABLE … ENABLE ROW LEVEL SECURITY` di SEMUA tabel `public`
+1. ✅ **RLS baseline** — `ALTER TABLE … ENABLE ROW LEVEL SECURITY` di SEMUA tabel `public`
    (advisor `rls_disabled_in_public` menandai semuanya, EXPECTED). Policy turunkan dari
    predikat `packages/core/src/permission.ts` yang SAMA (dibaca dari klaim JWT
    `auth.jwt()->'app_metadata'`), mirror `isLead/canWrite/canReadDivision/canReadAll` (§B.4/§D).
