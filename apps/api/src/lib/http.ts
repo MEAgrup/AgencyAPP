@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { demo, leads } from '@cdps/domain';
+import { demo, leads, sales } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -45,13 +45,22 @@ export function errorJson(message: string, status: number): Response {
  * validation). Unknown errors become an opaque 500 (never leak internals).
  */
 export function mapError(err: unknown): Response {
-  if (err instanceof demo.IncompleteError || err instanceof leads.IncompleteError) {
+  if (
+    err instanceof demo.IncompleteError ||
+    err instanceof leads.IncompleteError ||
+    err instanceof sales.IncompleteError ||
+    err instanceof sales.TooManyServicesError
+  ) {
     return errorJson(err.message, 400); // exact BI [...] message
   }
-  if (err instanceof demo.NotFoundError || err instanceof leads.NotFoundError) {
+  if (
+    err instanceof demo.NotFoundError ||
+    err instanceof leads.NotFoundError ||
+    err instanceof sales.NotFoundError
+  ) {
     return errorJson(err.message, 404);
   }
-  if (err instanceof demo.ForbiddenError) {
+  if (err instanceof demo.ForbiddenError || err instanceof sales.ForbiddenError) {
     return errorJson(err.message, 403);
   }
   if (err instanceof leads.BlockedError) {

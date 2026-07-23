@@ -8,6 +8,8 @@
  *   composes ident/sm_transition/notify/audit in one transaction. Fase 1 langkah 4.
  * - leads: M1 registration door (+ M0 §3) — the money-path entry point, minting
  *   the central LEAD record and the salesperson's PRSP attempt with dedup v2.
+ * - sales: M0 Qualified stage — Contacted progression, the MSL v2 pricing
+ *   calculator + commission quote, and the Qualified Lead Form submit.
  *
  * An @cdps/api route handler is a thin shell: resolve the actor from the JWT
  * app_metadata claim, validate inputs, then call one of these functions.
@@ -16,3 +18,4 @@
 export * as employees from './employees.js';
 export * as demo from './demo.js';
 export * as leads from './leads.js';
+export * as sales from './sales.js';
