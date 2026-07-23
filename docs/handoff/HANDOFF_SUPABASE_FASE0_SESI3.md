@@ -18,7 +18,11 @@ Fase 0 punya 6 langkah (handoff sebelumnya §5). Status:
    `core-engines` (vitest+typecheck `packages/core`) & `db-and-migrations` (apply SEMUA
    migrasi ke PG17 service + verify seed 14/15 + integration `packages/db`). Sisa: pgTAP
    khusus bila diinginkan.
-4. ⬜ Seed fixture Alpha Digital → `supabase/seed.sql`.
+4. ✅ Seed fixture Alpha Digital → `supabase/seed.sql` — SELESAI SESI INI (port `seed.go`):
+   10 karyawan, 12 role mapping, 3 layered Director, 3 master service (via `ident_next`),
+   1 demo task Budi (`DEMO-…-0001`, `[To Do]`) + audit `create`. Idempoten (upsert/guarded),
+   tervalidasi apply-2× lokal, di-gate CI. **Belum di-seed ke remote** (data dev — pemilik
+   putuskan; jalan otomatis di `supabase db reset`/branch preview).
 5. ⬜ Fase 1: Supabase Auth (import bcrypt), importer CSV karyawan, MSL admin, RLS baseline.
 6. ⬜ Vercel project untuk `apps/api`.
 
@@ -119,9 +123,9 @@ cd packages/db   && npm install && npm test && npm run typecheck   # 4 pass + 5 
    (`supabase db push` / MCP `apply_migration` project `egddxfcnrtecheiykhlf`), lalu
    `get_advisors`. Migrasi sudah tervalidasi lokal + di-gate CI (lihat §1) — apply remote
    tinggal eksekusi.
-1. **Seed fixture Alpha Digital** → `supabase/seed.sql` (paritas `backend/seed` + `internal/seed`).
+1. ~~Seed fixture Alpha Digital~~ ✅ SELESAI (`supabase/seed.sql`, lihat §1 item 4).
 2. **CI lanjutan** (opsional): tambah pgTAP (immutability, ident gap-free, sm_transition matrix)
-   di atas job `db-and-migrations` yang sudah ada.
+   di atas job `db-and-migrations` yang sudah ada. (Opsional: seed remote dev via `supabase db reset`.)
 3. **Fase 1**: Supabase Auth (import bcrypt per OQ-3), importer CSV karyawan (OQ-4), MSL admin,
    RLS baseline (§D) — aktifkan RLS SEMUA tabel + custom claims `app_metadata` (predikat
    `permission.ts` di-mirror di RLS, §B.4).

@@ -104,12 +104,23 @@ jobs:
             echo "applying $(basename "$f")"
             psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f "$f"
           done
-      - name: Verify seed counts (14 machines, 15 events)
+      - name: Verify migration seed counts (14 machines, 15 events)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
                if (select count(*) from sm_machines) <> 14 then raise exception 'expected 14 machines'; end if;
                if (select count(*) from notif_events) <> 15 then raise exception 'expected 15 events'; end if;
+             end \$\$;"
+      - name: Alpha Digital seed fixture — apply twice (idempotency) + verify
+        run: |
+          psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/seed.sql
+          psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/seed.sql
+          psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
+            "do \$\$ begin
+               if (select count(*) from employees) <> 10 then raise exception 'expected 10 employees'; end if;
+               if (select count(*) from role_mappings) <> 12 then raise exception 'expected 12 role_mappings'; end if;
+               if (select count(*) from master_services) <> 3 then raise exception 'expected 3 master_services (seed not idempotent?)'; end if;
+               if (select count(*) from demo_tasks) <> 1 then raise exception 'expected 1 demo_task (seed not idempotent?)'; end if;
              end \$\$;"
       - name: '@cdps/db — test (incl. integration) + typecheck'
         working-directory: packages/db
