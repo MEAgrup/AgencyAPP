@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { client, demo, finance, leads, msl, sales } from '@cdps/domain';
+import { auth, client, demo, finance, leads, msl, sales } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -26,17 +26,21 @@ export class BadRequestError extends Error {
   }
 }
 
-/** JSON response helper. */
-export function json(body: unknown, status = 200): Response {
+/** JSON response helper. Optional `headers` (e.g. Set-Cookie) merge over the content-type. */
+export function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...headers },
   });
 }
 
-/** An error body always shaped `{ error: <message> }`. */
+/**
+ * An error body carries the verbatim message under BOTH `error` and `message`:
+ * `error` is the API's historical key; `message` is what the web-internal client
+ * reads (`lib/api.ts`) to render the exact BI `[...]` string. Same value in both.
+ */
 export function errorJson(message: string, status: number): Response {
-  return json({ error: message }, status);
+  return json({ error: message, message }, status);
 }
 
 /**
@@ -92,6 +96,15 @@ export function mapError(err: unknown): Response {
     // win was already resolved, or a full-verification blocked on a missing
     // contract. 409 with the verbatim message where BI applies.
     return errorJson(err.message, 409);
+  }
+  if (
+    err instanceof auth.InvalidCredentialsError ||
+    err instanceof auth.NotProvisionedError
+  ) {
+    return errorJson(err.message, 401); // verbatim BI login error
+  }
+  if (err instanceof auth.LockedError) {
+    return errorJson(err.message, 423); // account locked (verbatim BI)
   }
   if (err instanceof UnauthorizedError) {
     return errorJson(err.message, 401);

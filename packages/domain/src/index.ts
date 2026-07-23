@@ -21,6 +21,7 @@
  * app_metadata claim, validate inputs, then call one of these functions.
  */
 
+export * as auth from './auth.js';
 export * as employees from './employees.js';
 export * as demo from './demo.js';
 export * as leads from './leads.js';

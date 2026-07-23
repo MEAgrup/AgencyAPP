@@ -18,6 +18,11 @@ import { UnauthorizedError } from './http.js';
 
 type Actor = permission.Actor;
 
+/** The CDPS session cookie (local login) — an HS256 JWT with the same app_metadata claims a GoTrue token carries. */
+export const SESSION_COOKIE = 'cdps_session';
+/** Session lifetime (mirror Go auth.SessionTTL = 12h). */
+export const SESSION_TTL_SECONDS = 12 * 60 * 60;
+
 /** Decoded JWT payload we care about (extra claims are ignored). */
 interface JwtPayload {
   app_metadata?: unknown;
@@ -105,12 +110,74 @@ export function bearerToken(req: Request): string {
   return value.trim();
 }
 
+/** Reads the CDPS session cookie value from the request, or null. */
+export function sessionCookie(req: Request): string | null {
+  const raw = req.headers.get('cookie') ?? '';
+  for (const part of raw.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() === SESSION_COOKIE) {
+      return part.slice(eq + 1).trim();
+    }
+  }
+  return null;
+}
+
 /**
- * requireActor is the handler entry point: pull the bearer token, verify it, and
- * resolve the Actor. Throws UnauthorizedError (→ 401) when anything is missing
- * or invalid.
+ * requestToken sources the CDPS token from EITHER the Authorization bearer header
+ * (programmatic / GoTrue) OR the `cdps_session` cookie (browser login). Both are
+ * the same HS256/app_metadata format, so downstream resolution is identical.
+ */
+function requestToken(req: Request): string {
+  const header = req.headers.get('authorization') ?? '';
+  const [scheme, value] = header.split(' ');
+  if (scheme?.toLowerCase() === 'bearer' && value) {
+    return value.trim();
+  }
+  const cookie = sessionCookie(req);
+  if (cookie) {
+    return cookie;
+  }
+  throw new UnauthorizedError('missing session');
+}
+
+/**
+ * requireActor is the handler entry point: pull the token (bearer or session
+ * cookie), verify it, and resolve the Actor. Throws UnauthorizedError (→ 401)
+ * when anything is missing or invalid.
  */
 export function requireActor(req: Request): Actor {
   const secret = process.env.SUPABASE_JWT_SECRET ?? '';
-  return actorFromToken(bearerToken(req), secret);
+  return actorFromToken(requestToken(req), secret);
+}
+
+/** base64url without padding. */
+function base64url(buf: Buffer): string {
+  return buf.toString('base64url');
+}
+
+/**
+ * signJwtHS256 mints a compact HS256 JWS with the given payload — the local-login
+ * counterpart to verifyJwtHS256. Used by /auth/login to issue the session token.
+ */
+export function signJwtHS256(payload: Record<string, unknown>, secret: string): string {
+  if (!secret) {
+    throw new Error('server auth secret not configured');
+  }
+  const header = base64url(Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })));
+  const body = base64url(Buffer.from(JSON.stringify(payload)));
+  const sig = base64url(createHmac('sha256', secret).update(`${header}.${body}`).digest());
+  return `${header}.${body}.${sig}`;
+}
+
+/** Build the Set-Cookie header for a fresh session (Secure only in production). */
+export function buildSessionCookie(token: string): string {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`;
+}
+
+/** Build the Set-Cookie header that clears the session (logout). */
+export function clearSessionCookie(): string {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
 }

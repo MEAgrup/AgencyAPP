@@ -1,0 +1,5 @@
+# Next.js build output & generated types (never committed).
+/.next/
+/out/
+next-env.d.ts
+*.tsbuildinfo

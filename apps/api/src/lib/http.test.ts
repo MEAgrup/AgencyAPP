@@ -23,8 +23,10 @@ describe('json / errorJson', () => {
     expect(await res.json()).toEqual({ a: 1 });
   });
 
-  it('shapes an error body as { error }', async () => {
-    expect(await errorJson('nope', 400).json()).toEqual({ error: 'nope' });
+  it('shapes an error body with the message under both { error } and { message }', async () => {
+    // `message` mirrors `error` so the web-internal client (reads body.message)
+    // renders the verbatim BI string.
+    expect(await errorJson('nope', 400).json()).toEqual({ error: 'nope', message: 'nope' });
   });
 });
 
@@ -32,7 +34,7 @@ describe('mapError', () => {
   it('maps IncompleteError to 400 with the exact BI message', async () => {
     const res = mapError(new demo.IncompleteError());
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: bi.INCOMPLETE_DATA });
+    expect(await res.json()).toEqual({ error: bi.INCOMPLETE_DATA, message: bi.INCOMPLETE_DATA });
   });
 
   it('maps NotFoundError to 404', () => {
@@ -54,7 +56,7 @@ describe('mapError', () => {
   it('maps an unknown error to an opaque 500', async () => {
     const res = mapError(new Error('secret internals'));
     expect(res.status).toBe(500);
-    expect(await res.json()).toEqual({ error: 'internal server error' });
+    expect(await res.json()).toEqual({ error: 'internal server error', message: 'internal server error' });
   });
 });
 
@@ -82,7 +84,7 @@ describe('transitionResponse', () => {
   it('renders role_denied as 403 with the BI message', async () => {
     const res = transitionResponse({ ok: false, code: 'role_denied', message: bi.TRANSITION_ROLE_DENIED });
     expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({ error: bi.TRANSITION_ROLE_DENIED });
+    expect(await res.json()).toEqual({ error: bi.TRANSITION_ROLE_DENIED, message: bi.TRANSITION_ROLE_DENIED });
   });
 
   it('renders a blocked transition as 409', () => {

@@ -3,11 +3,16 @@
  * are minted here with node:crypto so the whole HS256 path is exercised.
  */
 import { createHmac } from 'node:crypto';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   actorFromToken,
   bearerToken,
+  buildSessionCookie,
+  clearSessionCookie,
   requireActor,
+  sessionCookie,
+  signJwtHS256,
+  SESSION_COOKIE,
   verifyJwtHS256,
 } from './auth.js';
 import { UnauthorizedError } from './http.js';
@@ -113,5 +118,62 @@ describe('requireActor', () => {
     process.env.SUPABASE_JWT_SECRET = SECRET;
     const req = new Request('http://x/', { headers: { authorization: `Bearer ${sign(staffClaims)}` } });
     expect(requireActor(req).employeeId).toBe('EMP-1');
+  });
+
+  it('resolves the actor from the cdps_session cookie (browser login)', () => {
+    process.env.SUPABASE_JWT_SECRET = SECRET;
+    const req = new Request('http://x/', { headers: { cookie: `foo=bar; ${SESSION_COOKIE}=${sign(staffClaims)}` } });
+    expect(requireActor(req).employeeId).toBe('EMP-1');
+  });
+
+  it('throws when neither a bearer token nor a session cookie is present', () => {
+    process.env.SUPABASE_JWT_SECRET = SECRET;
+    expect(() => requireActor(new Request('http://x/'))).toThrow(/missing session/);
+  });
+});
+
+describe('signJwtHS256', () => {
+  it('mints a token that verifyJwtHS256 accepts (round-trip)', () => {
+    const token = signJwtHS256(staffClaims, SECRET);
+    const payload = verifyJwtHS256(token, SECRET);
+    expect((payload.app_metadata as { employee_id: string }).employee_id).toBe('EMP-1');
+    // A round-tripped token resolves to the same Actor as a hand-signed one.
+    expect(actorFromToken(token, SECRET).employeeId).toBe('EMP-1');
+  });
+
+  it('rejects signing with an empty secret', () => {
+    expect(() => signJwtHS256(staffClaims, '')).toThrow(/secret/);
+  });
+});
+
+describe('sessionCookie', () => {
+  it('extracts the cdps_session value among other cookies', () => {
+    const req = new Request('http://x/', { headers: { cookie: `a=1; ${SESSION_COOKIE}=tok.en.val; b=2` } });
+    expect(sessionCookie(req)).toBe('tok.en.val');
+  });
+
+  it('returns null when the cookie is absent', () => {
+    expect(sessionCookie(new Request('http://x/', { headers: { cookie: 'a=1' } }))).toBeNull();
+    expect(sessionCookie(new Request('http://x/'))).toBeNull();
+  });
+});
+
+describe('session cookie headers', () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it('build sets HttpOnly/SameSite/Max-Age; clear expires it', () => {
+    const set = buildSessionCookie('abc');
+    expect(set).toContain(`${SESSION_COOKIE}=abc`);
+    expect(set).toMatch(/HttpOnly/);
+    expect(set).toMatch(/SameSite=Lax/);
+    expect(set).toMatch(/Max-Age=43200/);
+    expect(clearSessionCookie()).toMatch(/Max-Age=0/);
+  });
+
+  it('adds Secure only in production', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    expect(buildSessionCookie('abc')).not.toMatch(/Secure/);
+    vi.stubEnv('NODE_ENV', 'production');
+    expect(buildSessionCookie('abc')).toMatch(/Secure/);
   });
 });
