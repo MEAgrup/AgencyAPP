@@ -24,8 +24,12 @@ import {
   DECISION_REVISE,
   decideNegotiation,
   ForbiddenError,
+  getAttempt,
+  getClient,
   IncompleteError,
+  listAttempts,
   markContacted,
+  NotFoundError,
   MSG_MAX_SERVICES,
   NotClosableError,
   parseCommissionRule,
@@ -582,5 +586,69 @@ describeDb('closing', () => {
       select winning_attempt_id from leads where id = ${budiReg.lead.id}`;
     expect(lead[0].winning_attempt_id).toBe(budiReg.attempt.id);
     void res;
+  });
+});
+
+describeDb('read models', () => {
+  it('listAttempts returns attempts newest-first with lead + owner', async () => {
+    const svc = await seedService('SVC-ZZ-LIST');
+    const attemptId = await qualifiedAttempt(budi(), svc);
+    const rows = await listAttempts(sql);
+    const mine = rows.find((r) => r.id === attemptId);
+    expect(mine).toBeDefined();
+    expect(mine!.ownerEmployeeId).toBe('ZZ-BUDI');
+    expect(mine!.leadName).toBe('Alpha Digital');
+    expect(mine!.status).toBe('Qualified');
+  });
+
+  it('getAttempt surfaces the Qualified draft and the latest proposal quote', async () => {
+    const svc = await seedService('SVC-ZZ-DETAIL');
+    const attemptId = await qualifiedAttempt(budi(), svc);
+    // Submit a negotiation proposal (a counter-price) → a v1 proposal to surface.
+    await submitNegotiation(sql, budi(), attemptId, [
+      { masterServiceId: svc, proposedPrice: '8000000', commissionRule: '10% of standard price' },
+    ], false);
+
+    const detail = await getAttempt(sql, attemptId);
+    expect(detail.qualified?.toko).toBe('Alpha Digital');
+    expect(detail.latestProposal).not.toBeNull();
+    expect(detail.latestProposal!.versionNo).toBe(1);
+    expect(detail.latestProposal!.lines).toHaveLength(1);
+    expect(money.parse(detail.latestProposal!.total)).toBe(money.parse('8000000'));
+  });
+
+  it('getAttempt 404s on an unknown attempt', async () => {
+    await expect(getAttempt(sql, 'PRSP-000000-0000')).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('getClient assembles the Client Record (platforms, allocation, services, transaction)', async () => {
+    const svc = await seedService('SVC-ZZ-CLIENT');
+    const attemptId = await autoApprovedAttempt(budi(), svc);
+    const res = await close(sql, budi(), attemptId, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_TERMIN,
+      installments: [{ amount: '9000000', dueDate: '2026-08-01' }],
+    });
+
+    const client = await getClient(sql, res.clientId);
+    expect(client.toko).toBe('Alpha Digital');
+    expect(client.salesPicId).toBe('ZZ-BUDI');
+    expect(client.platforms).toHaveLength(1);
+    expect(client.platforms[0].platform).toBe('Shopee');
+    expect(client.allocations).toEqual([
+      expect.objectContaining({ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }),
+    ]);
+    expect(client.services).toHaveLength(1);
+    expect(client.services[0].status).toBe('[Awaiting Onboarding]');
+    expect(client.transaction).not.toBeNull();
+    expect(client.transaction!.id).toBe(res.transactionId);
+    expect(client.transaction!.paymentStatus).toBe('[Menunggu Verifikasi]');
+    expect(money.parse(client.transaction!.totalAgreedValue)).toBe(money.parse('9000000'));
+    expect(client.transaction!.installments).toHaveLength(1);
+    expect(client.transaction!.installments[0].status).toBe('[Belum Jatuh Tempo]');
+  });
+
+  it('getClient 404s on an unknown client', async () => {
+    await expect(getClient(sql, 'CLI-000000-0000')).rejects.toBeInstanceOf(NotFoundError);
   });
 });

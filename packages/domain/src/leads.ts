@@ -431,6 +431,119 @@ async function reopen(
 }
 
 // ---------------------------------------------------------------------------
+// Pool claim (M1 §6) — Sales self-claims a [Pool] lead, spawning a competing
+// attempt. The same pool lead may be claimed by several salespeople by design
+// (M1-OA-1); whoever closes wins (resolveWin, §6 rule 5).
+// ---------------------------------------------------------------------------
+
+/** Claim outcomes: attach directly, reopen a terminal record first, or block. */
+export type ClaimOutcome = 'claim' | 'reclaim' | 'block';
+
+/** Result of the pure claim decision. */
+export interface ClaimDecision {
+  outcome: ClaimOutcome;
+  /** verbatim BI `[...]` when blocked ("" otherwise). */
+  message: string;
+}
+
+/**
+ * decideClaim runs the Pool-claim decision (M1 §6) against an already-matched
+ * lead record:
+ *   - a won lead is already a client → block (MSG_ALREADY_CLIENT);
+ *   - a lead the actor already holds an open attempt on cannot be double-claimed
+ *     → block (MSG_ALREADY_OWN_ATTEMPT);
+ *   - a `[Pool]` lead is claimed directly;
+ *   - a `[Rejected]`/`[Not Qualified]` lead is re-claimed by first reopening it
+ *     to `[Pool]` (§6 rule 7 / reference rule 9);
+ *   - anything else is a scouted-exclusive record the Pool flow may not touch
+ *     → block (`[lead sedang diproses oleh sales lain (nama)]`, competition is
+ *     pool-only — §2, M1-OA-1).
+ */
+export function decideClaim(match: ExistingLead, actor: string): ClaimDecision {
+  if (match.recordStatus === STATUS_CLOSED_WIN) {
+    return { outcome: 'block', message: MSG_ALREADY_CLIENT };
+  }
+  if (actorHoldsOpenAttempt(match, actor)) {
+    return { outcome: 'block', message: MSG_ALREADY_OWN_ATTEMPT };
+  }
+  switch (match.recordStatus) {
+    case STATUS_POOL:
+      return { outcome: 'claim', message: '' };
+    case STATUS_REJECTED:
+    case STATUS_NOT_QUALIFIED:
+      return { outcome: 'reclaim', message: '' };
+    default:
+      // active / scouted-exclusive (or any other record status): not claimable.
+      return { outcome: 'block', message: interpolateOwner(MSG_ACTIVE_OTHER_SALES_IMPORT, ownerName(match)) };
+  }
+}
+
+/** claim result: the (now-Pool) lead + the claimant's new attempt. */
+export interface ClaimResult {
+  lead: Lead;
+  attempt: Attempt;
+}
+
+/**
+ * claim is Sales self-claim of a `[Pool]` lead (M1 §6). It locks the lead record
+ * FOR UPDATE (so two racing claimants serialize), decides via decideClaim, and
+ * either attaches a fresh PRSP attempt (New Lead) to the pool lead, re-claims a
+ * terminal record by reopening it to `[Pool]` first, or blocks with the verbatim
+ * BI message (BlockedError). The claim is logged on the lead record (§6 rule 4);
+ * a block still COMMITS its audit row before the error surfaces (as register).
+ *
+ * Multiple salespeople may hold competing attempts on the same pool lead by
+ * design (M1-OA-1); the winner is resolved at closing (resolveWin, §6 rule 5).
+ */
+export async function claim(sql: Sql, actor: Actor, leadId: string): Promise<ClaimResult> {
+  const now = new Date();
+
+  // Discriminated result so a block can COMMIT its audit yet still surface an
+  // error to the caller (a throw inside the tx would roll the audit back).
+  type Committed =
+    | { kind: 'blocked'; message: string }
+    | { kind: 'ok'; result: ClaimResult };
+
+  const committed = await withTransaction(sql, async (tx): Promise<Committed> => {
+    const ex = executors(tx);
+    const match = await matchByLeadId(tx, leadId); // locks the lead row FOR UPDATE
+    if (match === null) {
+      throw new NotFoundError();
+    }
+    const decision = decideClaim(match, actor.employeeId);
+
+    if (decision.outcome === 'block') {
+      await ex.audit.insertAudit({
+        entityType: 'lead', entityId: leadId, actorEmployeeId: actor.employeeId,
+        action: 'claim_blocked', beforeJson: null,
+        afterJson: { message: decision.message }, createdBy: actor.employeeId,
+      });
+      return { kind: 'blocked', message: decision.message };
+    }
+
+    if (decision.outcome === 'reclaim') {
+      // Terminal -> [Pool]: the pool lead becomes claimable again (§6 rule 7).
+      await reopen(ex.sm, leadId, RECORD_POOL, actor);
+    }
+
+    const attempt = await insertAttempt(tx, ex, leadId, actor, now);
+    await ex.audit.insertAudit({
+      entityType: 'lead', entityId: leadId, actorEmployeeId: actor.employeeId,
+      action: 'claim', beforeJson: null,
+      afterJson: { attempt_id: attempt.id, reclaimed: decision.outcome === 'reclaim' },
+      createdBy: actor.employeeId,
+    });
+    const lead = await loadLead(tx, leadId);
+    return { kind: 'ok', result: { lead, attempt } };
+  });
+
+  if (committed.kind === 'blocked') {
+    throw new BlockedError(committed.message);
+  }
+  return committed.result;
+}
+
+// ---------------------------------------------------------------------------
 // Reads. Scope is enforced by RLS (as with the demo vertical); these shape the
 // row for the API and are safe over a service-role or user-scoped handle.
 // ---------------------------------------------------------------------------
@@ -531,6 +644,34 @@ export async function matchByPhone(q: Queryable, phoneNorm: string): Promise<Exi
   }
   const m: ExistingLead = { id: leadRows[0].id, recordStatus: leadRows[0].record_status, openAttempts: [] };
   const attemptRows = await q<{ owner_employee_id: string; owner_name: string; status: string }[]>`
+    select pa.owner_employee_id,
+           coalesce(e.nama, pa.owner_employee_id) as owner_name,
+           pa.status
+    from prospect_attempts pa
+    left join employees e on e.employee_id = pa.owner_employee_id
+    where pa.lead_id = ${m.id}`;
+  for (const a of attemptRows) {
+    if (!isTerminalAttemptStatus(a.status)) {
+      m.openAttempts.push({ ownerEmployeeId: a.owner_employee_id, ownerName: a.owner_name });
+    }
+  }
+  return m;
+}
+
+/**
+ * matchByLeadId returns a specific lead (locked FOR UPDATE) with its OPEN
+ * (non-terminal) attempts, or null when the id is unknown. It mirrors
+ * matchByPhone's shape so the pure claim decision can run over it; the row lock
+ * serializes racing claimants on the same pool lead.
+ */
+async function matchByLeadId(tx: Queryable, leadId: string): Promise<ExistingLead | null> {
+  const leadRows = await tx<{ id: string; record_status: string }[]>`
+    select id, record_status from leads where id = ${leadId} for update`;
+  if (leadRows.length === 0) {
+    return null;
+  }
+  const m: ExistingLead = { id: leadRows[0].id, recordStatus: leadRows[0].record_status, openAttempts: [] };
+  const attemptRows = await tx<{ owner_employee_id: string; owner_name: string; status: string }[]>`
     select pa.owner_employee_id,
            coalesce(e.nama, pa.owner_employee_id) as owner_name,
            pa.status

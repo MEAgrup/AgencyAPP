@@ -17,7 +17,9 @@ import {
   BlockedError,
   CHANNEL_IMPORT,
   CHANNEL_SINGLE_REG,
+  claim,
   decide,
+  decideClaim,
   type ExistingLead,
   get,
   IncompleteError,
@@ -26,6 +28,7 @@ import {
   MSG_ALREADY_OWN_ATTEMPT,
   MSG_DUPLICATE_POOL,
   MSG_LEAD_CO_WORKED,
+  NotFoundError,
   normalizePhone,
   register,
 } from './leads.js';
@@ -116,6 +119,57 @@ describe('decide', () => {
     const d = decide(CHANNEL_SINGLE_REG, m, 'ZZ-BUDI');
     expect(d.outcome).toBe('join');
     expect(d.coOwners).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unit: pure pool-claim decision table (M1 §6).
+// ---------------------------------------------------------------------------
+describe('decideClaim', () => {
+  const pool = (owners: string[] = []): ExistingLead => ({
+    id: 'LEAD-x', recordStatus: '[Pool]',
+    openAttempts: owners.map((o) => ({ ownerEmployeeId: o, ownerName: o })),
+  });
+
+  it('a [Pool] lead with no held attempt -> claim', () => {
+    expect(decideClaim(pool(), 'ZZ-BUDI').outcome).toBe('claim');
+  });
+
+  it('a [Pool] lead another sales already contests -> still claim (competition by design)', () => {
+    // openAttempts only ever holds NON-terminal attempts (matchByLeadId filters
+    // terminal ones out), so a competing open attempt by another sales is fine.
+    const d = decideClaim(pool(['ZZ-ANDI']), 'ZZ-BUDI');
+    expect(d.outcome).toBe('claim');
+  });
+
+  it('the same sales cannot double-claim a lead they already hold open -> block', () => {
+    const d = decideClaim(pool(['ZZ-BUDI']), 'ZZ-BUDI');
+    expect(d.outcome).toBe('block');
+    expect(d.message).toBe(MSG_ALREADY_OWN_ATTEMPT);
+  });
+
+  it('a won lead is already a client -> block', () => {
+    const m: ExistingLead = { id: 'LEAD-x', recordStatus: '[Closed-Success]', openAttempts: [] };
+    const d = decideClaim(m, 'ZZ-BUDI');
+    expect(d.outcome).toBe('block');
+    expect(d.message).toBe(MSG_ALREADY_CLIENT);
+  });
+
+  it('a [Rejected] / [Not Qualified] lead -> reclaim (reopen to [Pool] first)', () => {
+    for (const rs of ['[Rejected]', '[Not Qualified]']) {
+      const m: ExistingLead = { id: 'LEAD-x', recordStatus: rs, openAttempts: [] };
+      expect(decideClaim(m, 'ZZ-BUDI').outcome).toBe('reclaim');
+    }
+  });
+
+  it('a scouted-exclusive (active) lead is not claimable via the Pool flow -> block', () => {
+    const m: ExistingLead = {
+      id: 'LEAD-x', recordStatus: 'active',
+      openAttempts: [{ ownerEmployeeId: 'ZZ-ANDI', ownerName: 'Andi' }],
+    };
+    const d = decideClaim(m, 'ZZ-BUDI');
+    expect(d.outcome).toBe('block');
+    expect(d.message).toContain('(Andi)');
   });
 });
 
@@ -233,6 +287,79 @@ describeDb('register — dedup v2', () => {
       select count(*)::int as n from audit_log where action = 'dedup_blocked'
         and entity_id in (select id from leads where phone_norm = ${normalizePhone(phone)})`;
     expect(blocked[0].n).toBe(2);
+  });
+});
+
+describeDb('claim — pool (M1 §6)', () => {
+  /** Seed a marketing-style [Pool] lead with no open attempt, return its id. */
+  async function seedPoolLead(): Promise<string> {
+    const first = await register(sql, budi(), { leadName: 'Sini Store', phoneNumber: uniquePhone() });
+    // Terminate Budi's registration attempt and flip the record to [Pool] so it
+    // looks like a Marketing pool lead nobody is actively holding.
+    await sql`update prospect_attempts set status = 'Not Qualified' where id = ${first.attempt.id}`;
+    await sql`update leads set record_status = '[Pool]' where id = ${first.lead.id}`;
+    return first.lead.id;
+  }
+
+  it('claims a [Pool] lead: new PRSP at New Lead, claim audited on the lead', async () => {
+    const leadId = await seedPoolLead();
+    const res = await claim(sql, andi(), leadId);
+
+    expect(res.lead.recordStatus).toBe('[Pool]');
+    expect(res.attempt.id).toMatch(/^PRSP-\d{6}-\d{4}$/);
+    expect(res.attempt.status).toBe('New Lead');
+    expect(res.attempt.owner).toBe('ZZ-ANDI');
+
+    const audited = await sql<{ n: number }[]>`
+      select count(*)::int as n from audit_log where entity_id = ${leadId} and action = 'claim'`;
+    expect(audited[0].n).toBe(1);
+  });
+
+  it('two salespeople may contest the same [Pool] lead (by design)', async () => {
+    const leadId = await seedPoolLead();
+    const a = await claim(sql, andi(), leadId);
+    const b = await claim(sql, budi(), leadId); // Budi's original attempt is terminal → allowed
+    expect(b.attempt.id).not.toBe(a.attempt.id);
+
+    const detail = await get(sql, leadId);
+    const open = detail.attempts.filter((x) => x.status === 'New Lead').map((x) => x.ownerEmployeeId).sort();
+    expect(open).toEqual(['ZZ-ANDI', 'ZZ-BUDI']);
+  });
+
+  it('the same sales cannot double-claim a lead they already hold', async () => {
+    const leadId = await seedPoolLead();
+    await claim(sql, andi(), leadId);
+    await expect(claim(sql, andi(), leadId)).rejects.toThrow(MSG_ALREADY_OWN_ATTEMPT);
+    await expect(claim(sql, andi(), leadId)).rejects.toBeInstanceOf(BlockedError);
+  });
+
+  it('re-claims a [Rejected] lead by reopening it to [Pool] first', async () => {
+    const first = await register(sql, budi(), { leadName: 'Lulu Lala', phoneNumber: uniquePhone() });
+    await sql`update prospect_attempts set status = 'Not Qualified' where id = ${first.attempt.id}`;
+    await sql`update leads set record_status = '[Rejected]' where id = ${first.lead.id}`;
+
+    const res = await claim(sql, andi(), first.lead.id);
+    expect(res.lead.recordStatus).toBe('[Pool]');
+
+    const trans = await sql<{ n: number }[]>`
+      select count(*)::int as n from audit_log
+      where entity_id = ${first.lead.id} and action like 'transition:%'`;
+    expect(trans[0].n).toBe(1); // [Rejected] -> [Pool]
+  });
+
+  it('a won lead blocks the claim (already a client)', async () => {
+    const leadId = await seedPoolLead();
+    await sql`update leads set record_status = '[Closed-Success]' where id = ${leadId}`;
+    await expect(claim(sql, andi(), leadId)).rejects.toThrow(MSG_ALREADY_CLIENT);
+  });
+
+  it('a scouted active lead is not claimable via the Pool flow', async () => {
+    const first = await register(sql, budi(), { leadName: 'ABC Media', phoneNumber: uniquePhone() });
+    await expect(claim(sql, andi(), first.lead.id)).rejects.toBeInstanceOf(BlockedError);
+  });
+
+  it('an unknown lead 404s (NotFoundError)', async () => {
+    await expect(claim(sql, andi(), 'LEAD-000000-0000')).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 
