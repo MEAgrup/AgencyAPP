@@ -12,6 +12,8 @@
  *   calculator + commission quote, and the Qualified Lead Form submit.
  * - msl: Master Service List admin (S0-09) — Sales-owned catalog with immutable
  *   versions, plus the canonical MSL read (effectiveAt) consumed by `sales`.
+ * - finance: M5 Admin & Finance — payment verification + routing gate + the
+ *   derived Amount Verified / commission-achievement read-models (M0 §5 / M5).
  *
  * An @cdps/api route handler is a thin shell: resolve the actor from the JWT
  * app_metadata claim, validate inputs, then call one of these functions.
@@ -22,3 +24,4 @@ export * as demo from './demo.js';
 export * as leads from './leads.js';
 export * as sales from './sales.js';
 export * as msl from './msl.js';
+export * as finance from './finance.js';
