@@ -1,9 +1,48 @@
-# HANDOFF — Migrasi Supabase, Fase 0 SESI 3 (2026-07-22)
+# HANDOFF — Migrasi Supabase, Fase 0 SESI 3 (2026-07-22 → 23)
 
 > Lanjutan dari `HANDOFF_SUPABASE_FASE0.md` (skema TUNTAS, 28 migrasi applied).
 > Baca bersama `docs/SUPABASE_MIGRATION_PLAN.md`, `docs/SUPABASE_MIGRATION_TECH_APPENDIX.md`
-> (§B port core engines), dan `docs/DECISIONS.md` 2026-07-22.
-> Branch kerja: `claude/supabase-fase0-sesi3-continue-xko1b4`.
+> (§B port core engines, §C auth, §D RLS), dan `docs/DECISIONS.md` 2026-07-22.
+> Branch kerja: `claude/supabase-fase0-sesi3-continue-xko1b4`. PR terbuka: **#31**.
+
+## ⭐ MULAI DI SINI (sesi berikutnya) — Fase 0 TUNTAS, lanjut Fase 1
+
+**Status:** Fase 0 selesai. `packages/core` 98 test hijau; `packages/db` 4 unit + 5 integration
+(hijau terhadap PG termigrasi); migrasi `statemachine` **SUDAH di-apply ke Supabase remote
+`CDPS SG` (`egddxfcnrtecheiykhlf`)** (29 migrasi total) + smoke lulus; `supabase/seed.sql`
+(Alpha Digital) idempoten + CI-gated. Semua ter-commit & push (commit teratas `3610e9e`).
+
+**Verifikasi cepat:**
+```
+cd packages/core && npm ci && npm test && npm run typecheck   # 98 pass, tsc 0
+cd packages/db   && npm ci && npm test && npm run typecheck   # 4 pass (+5 integration bila DATABASE_URL)
+```
+
+**Kerjakan berikutnya = FASE 1** (urut, acuan Lampiran §C auth + §D RLS + PLAN §Fase 1):
+1. **RLS baseline** — `ALTER TABLE … ENABLE ROW LEVEL SECURITY` di SEMUA tabel `public`
+   (advisor `rls_disabled_in_public` menandai semuanya, EXPECTED). Policy turunkan dari
+   predikat `packages/core/src/permission.ts` yang SAMA (dibaca dari klaim JWT
+   `auth.jwt()->'app_metadata'`), mirror `isLead/canWrite/canReadDivision/canReadAll` (§B.4/§D).
+   Keluarkan tabel internal murni dari expose PostgREST / tambah policy ketat: `sessions`
+   (kolom `token` — advisor `sensitive_columns_exposed`), `id_sequences`, `employee_credentials`,
+   `sm_*`, `notif_events`. `REVOKE UPDATE,DELETE` di `audit_log`/`notifications`/snapshot dari
+   `authenticated,anon` (defense-in-depth, §B.3).
+2. **Supabase Auth (GoTrue)** — import bcrypt kredensial existing LANGSUNG ke `auth.users`
+   (OQ-3, bukan reset paksa; verifikasi versi GoTrue project). Custom claims division/level/
+   od/director via **Access Token Hook** dari `resolveActor` (§C.3). Wajib smoke-test login
+   semua role di staging sebelum Fase 1 ditandai selesai.
+3. **Importer CSV karyawan** (OQ-4, HRIS `GET /employees` TIDAK dipakai) — replay via jalur
+   domain, bukan raw INSERT (§F.1).
+4. **`apps/api` route handlers** — pakai `@cdps/db` `withTransaction` + `executors(tx)` supaya
+   ident/sm_transition/notify/audit satu transaksi; validasi field wajib + pesan BI `[...]` di
+   handler SEBELUM panggil fungsi SQL.
+5. **Retrofit opsional**: `SET search_path` ke 5 fungsi lama (advisor WARN, non-blocking).
+
+**Peringatan yang MUDAH terlewat:** offset WIB satu sumber (`WIB_OFFSET_HOURS=7` TS == `+ interval
+'7 hours'` SQL); katalog notifikasi FROZEN 15 event; string BI `[...]` persis; transisi HANYA lewat
+`sm_transition`; predikat permission DUA implementasi (TS + RLS) tak boleh divergen; JANGAN buat root
+workspace `package.json` yang menyentuh `web-internal` tanpa keputusan; seed remote dev BELUM
+dijalankan (opsional, via `supabase db reset`).
 
 ## 1. Konteks: di mana kita berada di rencana
 
