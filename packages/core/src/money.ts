@@ -154,6 +154,33 @@ export function mul(m: Money, n: bigint): Money {
   return prod;
 }
 
+/**
+ * proRata returns `amount * numerator / denominator`, rounded half-up to a whole
+ * rupiah (the result is always an exact multiple of 100 minor units, like
+ * percentOf). All arithmetic is exact via bigint — used to recognize commission
+ * achievement on the actually-verified fraction of a deal (M0 §5 / M5 Amount
+ * Verified) and to split it by allocation basis points. `numerator`/`amount`
+ * must be ≥ 0 and `denominator` > 0; a result out of int64 range throws.
+ */
+export function proRata(amount: Money, numerator: bigint, denominator: bigint): Money {
+  if (denominator <= 0n) {
+    throw new BadAmountError('proRata denominator must be positive');
+  }
+  if (amount < 0n || numerator < 0n) {
+    throw new BadAmountError('proRata operands must be non-negative');
+  }
+  // rupiah = round_half_up( amount_minor * numerator / (denominator * 100) ).
+  // half-up for non-negatives: floor((2*num + den) / (2*den)).
+  const num = amount * numerator;
+  const den = denominator * 100n;
+  const rupiah = (2n * num + den) / (2n * den);
+  const minor = rupiah * 100n;
+  if (!fitsInt64(minor)) {
+    throw new BadAmountError('proRata result out of range');
+  }
+  return minor;
+}
+
 function pow10(n: number): bigint {
   let r = 1n;
   for (let i = 0; i < n; i++) {

@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { demo, leads, msl, sales } from '@cdps/domain';
+import { demo, finance, leads, msl, sales } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -53,7 +53,10 @@ export function mapError(err: unknown): Response {
     err instanceof sales.CustomTermRequiresNegotiationError ||
     err instanceof sales.AllocationTotalError ||
     err instanceof sales.TooManySalespeopleError ||
-    err instanceof msl.IncompleteError
+    err instanceof msl.IncompleteError ||
+    err instanceof finance.IncompleteError ||
+    err instanceof finance.OverVerificationError ||
+    err instanceof finance.ScheduleTotalError
   ) {
     return errorJson(err.message, 400); // exact BI [...] message (or internal sentinel)
   }
@@ -61,24 +64,29 @@ export function mapError(err: unknown): Response {
     err instanceof demo.NotFoundError ||
     err instanceof leads.NotFoundError ||
     err instanceof sales.NotFoundError ||
-    err instanceof msl.ServiceNotFoundError
+    err instanceof msl.ServiceNotFoundError ||
+    err instanceof finance.NotFoundError
   ) {
     return errorJson(err.message, 404);
   }
   if (
     err instanceof demo.ForbiddenError ||
     err instanceof sales.ForbiddenError ||
-    err instanceof msl.ForbiddenError
+    err instanceof msl.ForbiddenError ||
+    err instanceof finance.ForbiddenError
   ) {
     return errorJson(err.message, 403);
   }
   if (
     err instanceof leads.BlockedError ||
     err instanceof sales.NotClosableError ||
-    err instanceof leads.AlreadyResolvedError
+    err instanceof leads.AlreadyResolvedError ||
+    err instanceof finance.ContractRequiredError ||
+    err instanceof finance.SchemeLockedError
   ) {
-    // Lifecycle conflicts: a dedup block, an un-closable attempt, or a lead whose
-    // win was already resolved. 409 with the verbatim message where BI applies.
+    // Lifecycle conflicts: a dedup block, an un-closable attempt, a lead whose
+    // win was already resolved, or a full-verification blocked on a missing
+    // contract. 409 with the verbatim message where BI applies.
     return errorJson(err.message, 409);
   }
   if (err instanceof UnauthorizedError) {

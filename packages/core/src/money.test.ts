@@ -1,6 +1,6 @@
 // Ported 1:1 from backend/internal/core/money/money_test.go.
 import { describe, expect, it } from 'vitest';
-import { BadAmountError, decimal, format, mul, parse, percentOf, type Money } from './money.js';
+import { BadAmountError, decimal, format, mul, parse, percentOf, proRata, type Money } from './money.js';
 
 const rp = (s: string): Money => parse(s);
 
@@ -72,6 +72,27 @@ describe('mul', () => {
   ];
   it.each(cases)('mul($base, $n)', (c) => {
     expect(mul(c.base, c.n)).toBe(c.want);
+  });
+});
+
+describe('proRata', () => {
+  const cases: Array<{ name: string; amount: Money; num: bigint; den: bigint; want: Money }> = [
+    // Full fraction attributes the whole amount, exactly (num == den).
+    { name: 'full fraction is exact', amount: rp('2190000.00'), num: 45000000n, den: 45000000n, want: rp('2190000.00') },
+    // 1/3 of 45.000.000 verified -> a third of the commission, half-up whole rupiah.
+    { name: 'one third of 2.190.000', amount: rp('2190000.00'), num: 15000000n, den: 45000000n, want: rp('730000.00') },
+    // Allocation split: 60% of 730.000 = 438.000.
+    { name: '60% allocation share', amount: rp('730000.00'), num: 6000n, den: 10000n, want: rp('438000.00') },
+    // Half-up to whole rupiah: 1/3 of 1.000.000 = 333333.33 -> 333333.
+    { name: 'rounds half-up to rupiah', amount: rp('1000000.00'), num: 1n, den: 3n, want: rp('333333.00') },
+    { name: 'zero numerator -> zero', amount: rp('2190000.00'), num: 0n, den: 45000000n, want: 0n },
+  ];
+  it.each(cases)('$name', (c) => {
+    expect(proRata(c.amount, c.num, c.den)).toBe(c.want);
+  });
+
+  it('rejects a non-positive denominator', () => {
+    expect(() => proRata(rp('100.00'), 1n, 0n)).toThrow(BadAmountError);
   });
 });
 
