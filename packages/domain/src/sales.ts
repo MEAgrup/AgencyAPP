@@ -1328,6 +1328,321 @@ function minQtyValue(minQty: bigint): string | null {
   return minQty > 0n ? minQty.toString() : null;
 }
 
+// ---------------------------------------------------------------------------
+// Read models (M0/M1 §7, M4). Row scope is enforced by RLS (as leads.list /
+// leads.get); these shape rows for the API over a service-role or user-scoped
+// handle. Ports Go's module0_sales/reads.go + module1_leads/reads.go.
+// ---------------------------------------------------------------------------
+
+/** One prospect attempt in the list view (M0/M1 §7). */
+export interface AttemptListRow {
+  id: string;
+  leadId: string;
+  leadName: string;
+  ownerEmployeeId: string;
+  ownerNama: string;
+  status: string;
+  claimedAt: Date;
+  createdAt: Date;
+}
+
+interface AttemptRow {
+  id: string; lead_id: string; lead_name: string; owner_employee_id: string;
+  owner_nama: string; status: string; claimed_at: Date; created_at: Date;
+}
+
+function toAttemptRow(r: AttemptRow): AttemptListRow {
+  return {
+    id: r.id, leadId: r.lead_id, leadName: r.lead_name, ownerEmployeeId: r.owner_employee_id,
+    ownerNama: r.owner_nama, status: r.status, claimedAt: r.claimed_at, createdAt: r.created_at,
+  };
+}
+
+/** listAttempts returns prospect attempts (RLS-scoped), newest first. */
+export async function listAttempts(sql: Queryable): Promise<AttemptListRow[]> {
+  const rows = await sql<AttemptRow[]>`
+    select pa.id, pa.lead_id, l.lead_name, pa.owner_employee_id,
+           coalesce(e.nama, pa.owner_employee_id) as owner_nama,
+           pa.status, pa.claimed_at, pa.created_at
+    from prospect_attempts pa
+    join leads l on l.id = pa.lead_id
+    left join employees e on e.employee_id = pa.owner_employee_id
+    order by pa.created_at desc, pa.id desc`;
+  return rows.map(toAttemptRow);
+}
+
+/** The locked Qualified draft carried on an attempt (M0 §4). */
+export interface AttemptQualified {
+  namaPic: string;
+  toko: string;
+  kota: string;
+  linkToko: string;
+  kategori: string;
+  platform: string;
+  storeLink: string | null;
+  gmvBaseline: string;
+  targetGmv: string;
+  marketingBudget: string | null;
+}
+
+/** One line of the latest negotiation proposal (the current quote). */
+export interface AttemptProposalLine {
+  masterServiceId: string;
+  name: string;
+  proposedPrice: string;
+  commissionRule: string;
+  paymentTerms: string | null;
+}
+
+/** The latest (highest-version) proposal on an attempt — the working quote. */
+export interface AttemptProposal {
+  versionNo: number;
+  proposedBy: string;
+  decisionNote: string | null;
+  lines: AttemptProposalLine[];
+  /** Σ proposed_price of the lines, as an IDR decimal string. */
+  total: string;
+}
+
+/** Attempt detail: the negotiation/quote view (M0 §5/§7). */
+export interface AttemptDetail extends AttemptListRow {
+  qualified: AttemptQualified | null;
+  latestProposal: AttemptProposal | null;
+}
+
+/**
+ * getAttempt returns one attempt with its Qualified draft and the latest
+ * negotiation proposal (the working quote). Throws NotFoundError when absent.
+ */
+export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDetail> {
+  const rows = await sql<AttemptRow[]>`
+    select pa.id, pa.lead_id, l.lead_name, pa.owner_employee_id,
+           coalesce(e.nama, pa.owner_employee_id) as owner_nama,
+           pa.status, pa.claimed_at, pa.created_at
+    from prospect_attempts pa
+    join leads l on l.id = pa.lead_id
+    left join employees e on e.employee_id = pa.owner_employee_id
+    where pa.id = ${id}`;
+  if (rows.length === 0) {
+    throw new NotFoundError();
+  }
+
+  const qfRows = await sql<QualifiedFormRow[]>`
+    select nama_pic, toko, kota, link_toko, kategori, platform, store_link,
+           gmv_baseline, target_gmv, marketing_budget
+    from qualified_forms where attempt_id = ${id}`;
+  const qualified: AttemptQualified | null = qfRows.length === 0 ? null : {
+    namaPic: qfRows[0].nama_pic, toko: qfRows[0].toko, kota: qfRows[0].kota,
+    linkToko: qfRows[0].link_toko, kategori: qfRows[0].kategori, platform: qfRows[0].platform,
+    storeLink: qfRows[0].store_link, gmvBaseline: qfRows[0].gmv_baseline,
+    targetGmv: qfRows[0].target_gmv, marketingBudget: qfRows[0].marketing_budget,
+  };
+
+  const propRows = await sql<
+    { id: string; version_no: number; proposed_by: string; decision_note: string | null }[]
+  >`
+    select id, version_no, proposed_by, decision_note
+    from negotiation_proposals where attempt_id = ${id}
+    order by version_no desc limit 1`;
+  let latestProposal: AttemptProposal | null = null;
+  if (propRows.length > 0) {
+    const p = propRows[0];
+    const lineRows = await sql<
+      { master_service_id: string; name: string; proposed_price: string; commission_rule: string; payment_terms: string | null }[]
+    >`
+      select npl.master_service_id, coalesce(qfs.name, '') as name,
+             npl.proposed_price, npl.commission_rule, npl.payment_terms
+      from negotiation_proposal_lines npl
+      left join qualified_form_services qfs
+             on qfs.attempt_id = ${id} and qfs.master_service_id = npl.master_service_id
+      where npl.proposal_id = ${p.id}
+      order by npl.id`;
+    let total = 0n;
+    for (const l of lineRows) {
+      total += money.parse(l.proposed_price);
+    }
+    latestProposal = {
+      versionNo: p.version_no, proposedBy: p.proposed_by, decisionNote: p.decision_note,
+      lines: lineRows.map((l) => ({
+        masterServiceId: l.master_service_id, name: l.name, proposedPrice: l.proposed_price,
+        commissionRule: l.commission_rule, paymentTerms: l.payment_terms,
+      })),
+      total: money.decimal(total),
+    };
+  }
+
+  return { ...toAttemptRow(rows[0]), qualified, latestProposal };
+}
+
+/** One platform snapshot on a Client Record (M4). */
+export interface ClientPlatformRow {
+  platform: string;
+  storeLink: string | null;
+  managedSince: Date | null;
+  active: boolean;
+}
+
+/** One salesperson's read-only achievement share (Σ = 10000 bp). */
+export interface ClientAllocationRow {
+  salespersonId: string;
+  salespersonNama: string;
+  basisPoints: number;
+}
+
+/** One closed Service line on a Client Record. */
+export interface ClientServiceRow {
+  id: string;
+  name: string;
+  standardPrice: string;
+  commissionRule: string;
+  status: string;
+  requiresStrategyPlan: boolean;
+}
+
+/** One installment on the client's transaction. */
+export interface ClientInstallmentRow {
+  id: string;
+  installmentNo: number;
+  amount: string;
+  dueDate: Date | null;
+  status: string;
+  jatuhTempo: boolean;
+}
+
+/** The client's payment Transaction (TRX-) + its schedule. */
+export interface ClientTransaction {
+  id: string;
+  paymentIntentScheme: string;
+  totalAgreedValue: string;
+  paymentStatus: string;
+  bermasalah: boolean;
+  releasedToAccountAt: Date | null;
+  installments: ClientInstallmentRow[];
+}
+
+/** Client Record detail (M4 basic): the client + platforms + allocations +
+ *  services + the payment transaction. */
+export interface ClientDetail {
+  id: string;
+  leadId: string | null;
+  winningAttemptId: string | null;
+  namaPic: string;
+  toko: string;
+  kota: string;
+  linkToko: string;
+  kategori: string;
+  gmvBaseline: string;
+  targetGmv: string;
+  marketingBudget: string | null;
+  originCampaignId: string | null;
+  salesPicId: string;
+  salesPicNama: string;
+  commissionPaymentPicId: string;
+  paymentIntent: string | null;
+  releasedToAccountAt: Date | null;
+  createdAt: Date;
+  platforms: ClientPlatformRow[];
+  allocations: ClientAllocationRow[];
+  services: ClientServiceRow[];
+  transaction: ClientTransaction | null;
+}
+
+/**
+ * getClient returns one Client Record with its platforms, sales allocation
+ * snapshot, closed Services, and payment Transaction (+ installments) — the M4
+ * Client Record basic view. Throws NotFoundError when absent.
+ */
+export async function getClient(sql: Queryable, id: string): Promise<ClientDetail> {
+  const rows = await sql<
+    {
+      id: string; lead_id: string | null; winning_attempt_id: string | null;
+      nama_pic: string; toko: string; kota: string; link_toko: string; kategori: string;
+      gmv_baseline: string; target_gmv: string; marketing_budget: string | null;
+      origin_campaign_id: string | null; sales_pic_id: string; sales_pic_nama: string;
+      commission_payment_pic_id: string; payment_intent: string | null;
+      released_to_account_at: Date | null; created_at: Date;
+    }[]
+  >`
+    select c.id, c.lead_id, c.winning_attempt_id, c.nama_pic, c.toko, c.kota, c.link_toko,
+           c.kategori, c.gmv_baseline, c.target_gmv, c.marketing_budget, c.origin_campaign_id,
+           c.sales_pic_id, coalesce(e.nama, c.sales_pic_id) as sales_pic_nama,
+           c.commission_payment_pic_id, c.payment_intent, c.released_to_account_at, c.created_at
+    from clients c
+    left join employees e on e.employee_id = c.sales_pic_id
+    where c.id = ${id}`;
+  if (rows.length === 0) {
+    throw new NotFoundError();
+  }
+  const c = rows[0];
+
+  const platRows = await sql<
+    { platform: string; store_link: string | null; managed_since: Date | null; active: boolean }[]
+  >`
+    select platform, store_link, managed_since, active
+    from client_platforms where client_id = ${id} order by id`;
+
+  const allocRows = await sql<
+    { salesperson_id: string; salesperson_nama: string; basis_points: number }[]
+  >`
+    select csa.salesperson_id, coalesce(e.nama, csa.salesperson_id) as salesperson_nama,
+           csa.basis_points
+    from client_sales_allocations csa
+    left join employees e on e.employee_id = csa.salesperson_id
+    where csa.client_id = ${id} order by csa.id`;
+
+  const svcRows = await sql<
+    { id: string; name: string; standard_price: string; commission_rule: string; status: string; requires_strategy_plan: boolean }[]
+  >`
+    select id, name, standard_price, commission_rule, status, requires_strategy_plan
+    from services where client_id = ${id} order by id`;
+
+  const trxRows = await sql<
+    {
+      id: string; payment_intent_scheme: string; total_agreed_value: string; payment_status: string;
+      bermasalah: boolean; released_to_account_at: Date | null;
+    }[]
+  >`
+    select id, payment_intent_scheme, total_agreed_value, payment_status, bermasalah, released_to_account_at
+    from transactions where client_id = ${id} order by created_at desc, id desc limit 1`;
+  let transaction: ClientTransaction | null = null;
+  if (trxRows.length > 0) {
+    const t = trxRows[0];
+    const instRows = await sql<
+      { id: string; installment_no: number; amount: string; due_date: Date | null; status: string; jatuh_tempo: boolean }[]
+    >`
+      select id, installment_no, amount, due_date, status, jatuh_tempo
+      from installments where transaction_id = ${t.id} order by installment_no`;
+    transaction = {
+      id: t.id, paymentIntentScheme: t.payment_intent_scheme, totalAgreedValue: t.total_agreed_value,
+      paymentStatus: t.payment_status, bermasalah: t.bermasalah, releasedToAccountAt: t.released_to_account_at,
+      installments: instRows.map((i) => ({
+        id: i.id, installmentNo: i.installment_no, amount: i.amount, dueDate: i.due_date,
+        status: i.status, jatuhTempo: i.jatuh_tempo,
+      })),
+    };
+  }
+
+  return {
+    id: c.id, leadId: c.lead_id, winningAttemptId: c.winning_attempt_id, namaPic: c.nama_pic,
+    toko: c.toko, kota: c.kota, linkToko: c.link_toko, kategori: c.kategori,
+    gmvBaseline: c.gmv_baseline, targetGmv: c.target_gmv, marketingBudget: c.marketing_budget,
+    originCampaignId: c.origin_campaign_id, salesPicId: c.sales_pic_id, salesPicNama: c.sales_pic_nama,
+    commissionPaymentPicId: c.commission_payment_pic_id, paymentIntent: c.payment_intent,
+    releasedToAccountAt: c.released_to_account_at, createdAt: c.created_at,
+    platforms: platRows.map((p) => ({
+      platform: p.platform, storeLink: p.store_link, managedSince: p.managed_since, active: p.active,
+    })),
+    allocations: allocRows.map((a) => ({
+      salespersonId: a.salesperson_id, salespersonNama: a.salesperson_nama, basisPoints: a.basis_points,
+    })),
+    services: svcRows.map((s) => ({
+      id: s.id, name: s.name, standardPrice: s.standard_price, commissionRule: s.commission_rule,
+      status: s.status, requiresStrategyPlan: s.requires_strategy_plan,
+    })),
+    transaction,
+  };
+}
+
 // Re-export narrowing helpers so handlers can classify a rejection.
 export const isBlocked = statemachine.isBlocked;
 export const isRoleDenied = statemachine.isRoleDenied;
