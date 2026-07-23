@@ -51,6 +51,8 @@ export function mapError(err: unknown): Response {
     err instanceof sales.IncompleteError ||
     err instanceof sales.TooManyServicesError ||
     err instanceof sales.CustomTermRequiresNegotiationError ||
+    err instanceof sales.AllocationTotalError ||
+    err instanceof sales.TooManySalespeopleError ||
     err instanceof msl.IncompleteError
   ) {
     return errorJson(err.message, 400); // exact BI [...] message (or internal sentinel)
@@ -70,9 +72,13 @@ export function mapError(err: unknown): Response {
   ) {
     return errorJson(err.message, 403);
   }
-  if (err instanceof leads.BlockedError) {
-    // A dedup block is a lifecycle conflict (matches Go's 409 on ErrBlocked),
-    // carrying the verbatim BI [...] message.
+  if (
+    err instanceof leads.BlockedError ||
+    err instanceof sales.NotClosableError ||
+    err instanceof leads.AlreadyResolvedError
+  ) {
+    // Lifecycle conflicts: a dedup block, an un-closable attempt, or a lead whose
+    // win was already resolved. 409 with the verbatim message where BI applies.
     return errorJson(err.message, 409);
   }
   if (err instanceof UnauthorizedError) {

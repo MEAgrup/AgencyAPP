@@ -13,7 +13,9 @@ import { createClient, type Sql } from '@cdps/db';
 import { leads } from './index.js';
 import {
   acceptCounter,
+  AllocationTotalError,
   buildQuote,
+  close,
   computeSubtotal,
   type Actor,
   CustomTermRequiresNegotiationError,
@@ -25,7 +27,10 @@ import {
   IncompleteError,
   markContacted,
   MSG_MAX_SERVICES,
+  NotClosableError,
   parseCommissionRule,
+  PAYMENT_SCHEME_LUNAS,
+  PAYMENT_SCHEME_TERMIN,
   previewQuote,
   type PriceParams,
   PRICING_BATCH_CEILING,
@@ -38,7 +43,9 @@ import {
   setNotQualified,
   submitNegotiation,
   submitQualifiedForm,
+  TooManySalespeopleError,
   TooManyServicesError,
+  validateParties,
 } from './sales.js';
 
 const rp = (s: string): money.Money => money.parse(s);
@@ -176,6 +183,44 @@ describe('negotiation gates (no DB)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Unit: closing allocation rules (pure).
+// ---------------------------------------------------------------------------
+describe('validateParties (allocation Σ=100%)', () => {
+  it('accepts a solo Primary at 100% and a split summing to 100%', () => {
+    expect(() => validateParties({ primarySalespersonId: 'A', allocations: [{ salespersonId: 'A', basisPoints: 10000 }] })).not.toThrow();
+    expect(() => validateParties({
+      primarySalespersonId: 'A',
+      allocations: [{ salespersonId: 'A', basisPoints: 6000 }, { salespersonId: 'B', basisPoints: 4000 }],
+      commissionPaymentPicId: 'B',
+    })).not.toThrow();
+  });
+
+  it('rejects a split that does not sum to 100% (verbatim BI)', () => {
+    expect(() => validateParties({
+      primarySalespersonId: 'A',
+      allocations: [{ salespersonId: 'A', basisPoints: 6000 }, { salespersonId: 'B', basisPoints: 3000 }],
+      commissionPaymentPicId: 'B',
+    })).toThrow(AllocationTotalError);
+  });
+
+  it('rejects > 5 salespeople (verbatim BI)', () => {
+    const allocations = Array.from({ length: 6 }, (_, i) => ({ salespersonId: `S${i}`, basisPoints: 1000 }));
+    allocations[0].basisPoints = 5000; // make it sum to 10000 so the count rule is what trips
+    expect(() => validateParties({ primarySalespersonId: 'S0', allocations, commissionPaymentPicId: 'S1' }))
+      .toThrow(TooManySalespeopleError);
+  });
+
+  it('requires the Primary to hold a share and a PIC when >1 salesperson', () => {
+    expect(() => validateParties({ primarySalespersonId: 'A', allocations: [{ salespersonId: 'B', basisPoints: 10000 }] }))
+      .toThrow(IncompleteError);
+    expect(() => validateParties({
+      primarySalespersonId: 'A',
+      allocations: [{ salespersonId: 'A', basisPoints: 5000 }, { salespersonId: 'B', basisPoints: 5000 }],
+    })).toThrow(IncompleteError); // PIC missing
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Integration (real Postgres).
 // ---------------------------------------------------------------------------
 const URL = process.env.DATABASE_URL;
@@ -217,12 +262,25 @@ async function qualifiedAttempt(actor: Actor, svc: string): Promise<string> {
   return attemptId;
 }
 
+/** Reach a Negotiation - Auto Approved attempt (no-negotiation path). */
+async function autoApprovedAttempt(actor: Actor, svc: string): Promise<string> {
+  const attemptId = await qualifiedAttempt(actor, svc);
+  await submitNegotiation(sql, actor, attemptId, [], true);
+  return attemptId;
+}
+
 afterAll(async () => {
   if (sql) await sql.end();
 });
 
 afterEach(async () => {
   if (!sql) return;
+  await sql`delete from installments where created_by like 'ZZ-%'`;
+  await sql`delete from transactions where created_by like 'ZZ-%'`;
+  await sql`delete from services where created_by like 'ZZ-%'`;
+  await sql`delete from client_platforms where created_by like 'ZZ-%'`;
+  await sql`delete from client_sales_allocations where created_by like 'ZZ-%'`;
+  await sql`delete from clients where created_by like 'ZZ-%'`;
   await sql`delete from negotiation_proposal_lines where created_by like 'ZZ-%'`;
   await sql`delete from negotiation_proposals where created_by like 'ZZ-%'`;
   await sql`delete from qualified_form_services where created_by like 'ZZ-%'`;
@@ -422,5 +480,107 @@ describeDb('negotiation', () => {
     const accepted = await acceptCounter(sql, budi(), attemptId);
     expect(accepted.ok).toBe(true);
     expect(await status(attemptId)).toBe('Negotiation - Approved');
+  });
+});
+
+describeDb('closing', () => {
+  const status = async (attemptId: string): Promise<string> =>
+    (await sql<{ status: string }[]>`select status from prospect_attempts where id = ${attemptId}`)[0].status;
+
+  it('solo Lunas closing births CLI/TRX/SVC, allocation, and Closed-Success', async () => {
+    const svc = await seedService('SVC-ZZ-CLOSE');
+    const attemptId = await autoApprovedAttempt(budi(), svc);
+    const res = await close(sql, budi(), attemptId, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+    expect(res.clientId).toMatch(/^CLI-\d{6}-\d{4}$/);
+    expect(res.transactionId).toMatch(/^TRX-\d{6}-\d{4}$/);
+    expect(await status(attemptId)).toBe('Closed-Success');
+
+    const trx = await sql<{ total_agreed_value: string; payment_intent_scheme: string; payment_status: string }[]>`
+      select total_agreed_value, payment_intent_scheme, payment_status from transactions where id = ${res.transactionId}`;
+    expect(money.parse(trx[0].total_agreed_value)).toBe(money.parse('9000000'));
+    expect(trx[0].payment_intent_scheme).toBe(PAYMENT_SCHEME_LUNAS);
+    expect(trx[0].payment_status).toBe('[Menunggu Verifikasi]');
+
+    const client = await sql<{ transaction_id: string; sales_pic_id: string; commission_payment_pic_id: string }[]>`
+      select transaction_id, sales_pic_id, commission_payment_pic_id from clients where id = ${res.clientId}`;
+    expect(client[0].transaction_id).toBe(res.transactionId);
+    expect(client[0].sales_pic_id).toBe('ZZ-BUDI');
+    expect(client[0].commission_payment_pic_id).toBe('ZZ-BUDI'); // solo → PIC defaults to Primary
+
+    const svcRows = await sql<{ status: string }[]>`select status from services where client_id = ${res.clientId}`;
+    expect(svcRows).toHaveLength(1);
+    expect(svcRows[0].status).toBe('[Awaiting Onboarding]');
+
+    const alloc = await sql<{ basis_points: number }[]>`
+      select basis_points from client_sales_allocations where client_id = ${res.clientId}`;
+    expect(alloc[0].basis_points).toBe(10000);
+
+    const closeAudit = await sql<{ n: number }[]>`
+      select count(*)::int as n from audit_log where entity_id = ${res.clientId} and action = 'closing'`;
+    expect(closeAudit[0].n).toBe(1);
+  });
+
+  it('Termin closing materializes installments that must sum to the total', async () => {
+    const svc = await seedService('SVC-ZZ-TERMIN');
+    // Reject a schedule that does not sum to the total (9.000.000).
+    const badAttempt = await autoApprovedAttempt(budi(), svc);
+    await expect(close(sql, budi(), badAttempt, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_TERMIN,
+      installments: [{ amount: '4000000', dueDate: '2026-08-01' }, { amount: '4000000', dueDate: '2026-09-01' }],
+    })).rejects.toBeInstanceOf(IncompleteError);
+
+    const attemptId = await autoApprovedAttempt(budi(), svc);
+    const res = await close(sql, budi(), attemptId, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_TERMIN,
+      installments: [{ amount: '4000000', dueDate: '2026-08-01' }, { amount: '5000000', dueDate: '2026-09-01' }],
+    });
+    const inst = await sql<{ installment_no: number; status: string; amount: string }[]>`
+      select installment_no, status, amount from installments where transaction_id = ${res.transactionId} order by installment_no`;
+    expect(inst).toHaveLength(2);
+    expect(inst[0].status).toBe('[Belum Jatuh Tempo]');
+    expect(inst.map((i) => Number(money.parse(i.amount)))).toEqual([400000000, 500000000]);
+  });
+
+  it('only an Approved/Auto-Approved attempt can close', async () => {
+    const svc = await seedService('SVC-ZZ-NOTCLOSE');
+    const attemptId = await qualifiedAttempt(budi(), svc); // still Qualified, not approved
+    await expect(close(sql, budi(), attemptId, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    })).rejects.toBeInstanceOf(NotClosableError);
+  });
+
+  it('closing a contested pool lead auto-loses the competitor (M1 §6)', async () => {
+    const svc = await seedService('SVC-ZZ-WIN');
+    // Budi registers; Andi co-pursues the same phone (a second open attempt).
+    const phone = uniquePhone();
+    const budiReg = await leads.register(sql, budi(), { leadName: 'Contested Co', phoneNumber: phone });
+    const andiReg = await leads.register(sql, andi(), { leadName: 'Contested Co', phoneNumber: phone });
+    expect(andiReg.lead.id).toBe(budiReg.lead.id);
+
+    // Budi drives his attempt to Auto Approved and closes.
+    await markContacted(sql, budi(), budiReg.attempt.id);
+    await submitQualifiedForm(sql, budi(), budiReg.attempt.id, {
+      namaPic: 'PIC', toko: 'Contested Co', kota: 'JKT', linkToko: 'https://x', kategori: 'x', platform: 'Shopee',
+      gmvBaseline: '1000000', targetGmv: '2000000', services: [{ masterServiceId: svc, quantity: 1 }],
+    });
+    await submitNegotiation(sql, budi(), budiReg.attempt.id, [], true);
+    const res = await close(sql, budi(), budiReg.attempt.id, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+
+    expect(await status(budiReg.attempt.id)).toBe('Closed-Success');
+    // Andi's competing attempt is auto-closed as Kalah Kompetisi.
+    expect(await status(andiReg.attempt.id)).toBe('[Closed - Kalah Kompetisi]');
+    const lead = await sql<{ winning_attempt_id: string }[]>`
+      select winning_attempt_id from leads where id = ${budiReg.lead.id}`;
+    expect(lead[0].winning_attempt_id).toBe(budiReg.attempt.id);
+    void res;
   });
 });

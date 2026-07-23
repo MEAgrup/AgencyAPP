@@ -31,6 +31,7 @@
 import { bi, money, notification, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { effectiveAt, type ServiceView } from './msl.js';
+import { resolveWin } from './leads.js';
 
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;
@@ -105,6 +106,30 @@ export class CustomTermRequiresNegotiationError extends Error {
   constructor() {
     super('module0_sales: custom terms require the negotiation path');
     this.name = 'CustomTermRequiresNegotiationError';
+  }
+}
+
+/** Sales allocation shares do not sum to exactly 100% (verbatim BI, → 400). */
+export class AllocationTotalError extends Error {
+  constructor() {
+    super('[total alokasi sales harus 100%]');
+    this.name = 'AllocationTotalError';
+  }
+}
+
+/** More than 5 salespeople on a closing (verbatim BI, → 400). */
+export class TooManySalespeopleError extends Error {
+  constructor() {
+    super('[maksimal 5 salesperson per closing!]');
+    this.name = 'TooManySalespeopleError';
+  }
+}
+
+/** The attempt is not in an Approved/Auto-Approved state, so it cannot close (→ 409). */
+export class NotClosableError extends Error {
+  constructor() {
+    super(bi.TRANSITION_NOT_ALLOWED);
+    this.name = 'NotClosableError';
   }
 }
 
@@ -438,6 +463,7 @@ interface AttemptInfo {
   ownerId: string;
   status: string;
   originDivision: string;
+  originCampaignId: string | null;
 }
 
 /**
@@ -459,24 +485,27 @@ export function canWriteAttempt(actor: Actor, ownerId: string): boolean {
 
 /** loadAttempt reads an attempt joined to its lead (FOR UPDATE inside a tx). */
 async function loadAttempt(tx: Queryable, attemptId: string, forUpdate: boolean): Promise<AttemptInfo> {
+  type Row = {
+    id: string; lead_id: string; owner_employee_id: string; status: string;
+    origin_division: string; origin_campaign_id: string | null;
+  };
   const rows = forUpdate
-    ? await tx<
-        { id: string; lead_id: string; owner_employee_id: string; status: string; origin_division: string }[]
-      >`
-        select pa.id, pa.lead_id, pa.owner_employee_id, pa.status, l.origin_division
+    ? await tx<Row[]>`
+        select pa.id, pa.lead_id, pa.owner_employee_id, pa.status, l.origin_division, l.origin_campaign_id
         from prospect_attempts pa join leads l on l.id = pa.lead_id
         where pa.id = ${attemptId} for update`
-    : await tx<
-        { id: string; lead_id: string; owner_employee_id: string; status: string; origin_division: string }[]
-      >`
-        select pa.id, pa.lead_id, pa.owner_employee_id, pa.status, l.origin_division
+    : await tx<Row[]>`
+        select pa.id, pa.lead_id, pa.owner_employee_id, pa.status, l.origin_division, l.origin_campaign_id
         from prospect_attempts pa join leads l on l.id = pa.lead_id
         where pa.id = ${attemptId}`;
   if (rows.length === 0) {
     throw new NotFoundError();
   }
   const r = rows[0];
-  return { id: r.id, leadId: r.lead_id, ownerId: r.owner_employee_id, status: r.status, originDivision: r.origin_division };
+  return {
+    id: r.id, leadId: r.lead_id, ownerId: r.owner_employee_id, status: r.status,
+    originDivision: r.origin_division, originCampaignId: r.origin_campaign_id,
+  };
 }
 
 /** transition drives the prospect_attempt machine within tx (only status path). */
@@ -919,6 +948,359 @@ async function emitDecision(
   });
 }
 
+// ===========================================================================
+// Closing (M0 §6) — births Client / Transaction / Services / Installments.
+// ===========================================================================
+
+/** Payment schemes (M0 §6 rule 5) — VERBATIM, shared with M4/M5. */
+export const PAYMENT_SCHEME_LUNAS = '[Bayar Penuh (Lunas)]';
+export const PAYMENT_SCHEME_SEBAGIAN = '[Bayar Sebagian]';
+export const PAYMENT_SCHEME_TERMIN = '[Termin]';
+export const PAYMENT_SCHEME_DI_BELAKANG = '[Bayar di Belakang]';
+const PAYMENT_SCHEMES = new Set<string>([
+  PAYMENT_SCHEME_LUNAS, PAYMENT_SCHEME_SEBAGIAN, PAYMENT_SCHEME_TERMIN, PAYMENT_SCHEME_DI_BELAKANG,
+]);
+
+/** Initial statuses birthed at closing (match the seeded machines verbatim). */
+const TRX_STATUS_MENUNGGU = '[Menunggu Verifikasi]';
+const INST_STATUS_BELUM_JATUH_TEMPO = '[Belum Jatuh Tempo]';
+const SERVICE_STATUS_AWAITING_ONBOARDING = '[Awaiting Onboarding]';
+
+/** 100% expressed in integer basis points (exact Σ check — no float). */
+export const FULL_ALLOCATION_BP = 10000;
+/** Closing Form salesperson cap (M0 §6 rule 3). */
+export const MAX_SALESPEOPLE = 5;
+
+/** One salesperson's share of a closing (100% == 10000 bp). */
+export interface Allocation {
+  salespersonId: string;
+  basisPoints: number;
+}
+
+/** The salespeople side of a Closing Form submission. */
+export interface ClosingParties {
+  primarySalespersonId: string;
+  allocations: Allocation[];
+  commissionPaymentPicId?: string;
+}
+
+/** One Payment Schedule row (M0 §6 rule 8 / M5 §4). */
+export interface InstallmentInput {
+  amount: string;
+  dueDate: string; // YYYY-MM-DD
+}
+
+/** The Closing Form payload (M0 §6). Value + services come from the approved proposal. */
+export interface ClosingInput {
+  parties: ClosingParties;
+  paymentScheme: string;
+  installments?: InstallmentInput[];
+  managedSince?: string; // optional YYYY-MM-DD
+}
+
+/** The ids birthed by a successful closing. */
+export interface ClosingResult {
+  clientId: string;
+  transactionId: string;
+}
+
+/**
+ * validateParties enforces the full allocation rule set (M0 §6): Primary is
+ * mandatory and must hold a share; ≤5 salespeople; positive shares summing to
+ * EXACTLY 100% (basis points); the Commission & Payment PIC is mandatory when >1
+ * salesperson and must be a member.
+ */
+export function validateParties(c: ClosingParties): void {
+  const primary = (c.primarySalespersonId ?? '').trim();
+  if (primary === '' || c.allocations.length === 0) {
+    throw new IncompleteError();
+  }
+  if (c.allocations.length > MAX_SALESPEOPLE) {
+    throw new TooManySalespeopleError();
+  }
+  const seen = new Set<string>();
+  let primaryIncluded = false;
+  let sum = 0;
+  for (const a of c.allocations) {
+    const id = (a.salespersonId ?? '').trim();
+    if (id === '' || !Number.isInteger(a.basisPoints) || a.basisPoints <= 0) {
+      throw new IncompleteError();
+    }
+    if (seen.has(id)) {
+      throw new IncompleteError(); // a salesperson may appear at most once
+    }
+    seen.add(id);
+    if (id === primary) {
+      primaryIncluded = true;
+    }
+    sum += a.basisPoints;
+  }
+  if (!primaryIncluded) {
+    throw new IncompleteError();
+  }
+  if (sum !== FULL_ALLOCATION_BP) {
+    throw new AllocationTotalError();
+  }
+  if (c.allocations.length > 1) {
+    const pic = (c.commissionPaymentPicId ?? '').trim();
+    if (pic === '' || !seen.has(pic)) {
+      throw new IncompleteError();
+    }
+  }
+}
+
+/** resolvePIC returns the Commission & Payment PIC, defaulting to Primary when solo. */
+function resolvePIC(c: ClosingParties): string {
+  if (c.allocations.length === 1 || (c.commissionPaymentPicId ?? '').trim() === '') {
+    return c.primarySalespersonId;
+  }
+  return c.commissionPaymentPicId as string;
+}
+
+/** validateShape enforces the payment-scheme ↔ schedule shape (M0 §6 rule 5). */
+function validateShape(input: ClosingInput): void {
+  validateParties(input.parties);
+  if (!PAYMENT_SCHEMES.has(input.paymentScheme)) {
+    throw new IncompleteError();
+  }
+  const installments = input.installments ?? [];
+  switch (input.paymentScheme) {
+    case PAYMENT_SCHEME_TERMIN:
+      if (installments.length === 0) {
+        throw new IncompleteError();
+      }
+      break;
+    case PAYMENT_SCHEME_DI_BELAKANG:
+      if (installments.length !== 1) {
+        throw new IncompleteError();
+      }
+      break;
+    default: // Lunas / Sebagian carry no schedule
+      if (installments.length !== 0) {
+        throw new IncompleteError();
+      }
+  }
+  for (const inst of installments) {
+    let amt: money.Money;
+    try {
+      amt = money.parse(inst.amount);
+    } catch {
+      throw new IncompleteError();
+    }
+    if (amt <= 0n || (inst.dueDate ?? '').trim() === '') {
+      throw new IncompleteError();
+    }
+  }
+}
+
+/** approvedLine is one line of the latest proposal, enriched from the Qualified snapshot. */
+interface ApprovedLine {
+  masterServiceId: string;
+  proposedPrice: string;
+  commissionRule: string;
+  name: string;
+  versionNo: number;
+  requiresStrategyPlan: boolean;
+}
+
+interface QualifiedFormRow {
+  nama_pic: string;
+  toko: string;
+  kota: string;
+  link_toko: string;
+  kategori: string;
+  platform: string;
+  store_link: string | null;
+  gmv_baseline: string;
+  target_gmv: string;
+  marketing_budget: string | null;
+}
+
+/**
+ * close births the Client Record + Transaction + Services + Installments from a
+ * Negotiation-Approved / Auto-Approved attempt, in ONE transaction. It splits
+ * achievement across 1..5 salespeople (Σ = 10000 bp), fixes the payment scheme,
+ * transitions the attempt to Closed-Success, and fires M1 §6 win resolution for
+ * any pool competitors — all atomically. Owner / Sales Lead / Director only.
+ */
+export async function close(
+  sql: Sql,
+  actor: Actor,
+  attemptId: string,
+  input: ClosingInput,
+  now: Date = new Date(),
+): Promise<ClosingResult> {
+  validateShape(input);
+
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const a = await loadAttempt(tx, attemptId, true);
+    if (!canWriteAttempt(actor, a.ownerId)) {
+      throw new ForbiddenError();
+    }
+    // M0 §6 rule 1: only Approved / Auto Approved may close.
+    if (a.status !== STATUS_NEG_APPROVED && a.status !== STATUS_NEG_AUTO_APPROVE) {
+      throw new NotClosableError();
+    }
+
+    const qf = await loadQualifiedForm(tx, attemptId);
+    const lines = await loadApprovedLines(tx, attemptId);
+    if (lines.length === 0) {
+      throw new IncompleteError();
+    }
+
+    // Total agreed value = Σ proposed_price (cents-exact).
+    let total = 0n;
+    for (const l of lines) {
+      total += money.parse(l.proposedPrice);
+    }
+    validateScheduleTotal(input, total);
+
+    const primary = input.parties.primarySalespersonId;
+    const pic = resolvePIC(input.parties);
+
+    // 1) Client Record (CLI-), inheriting the locked Qualified data.
+    const clientId = await ex.ident.identNext('CLI', now);
+    await tx`
+      insert into clients
+        (id, lead_id, winning_attempt_id, nama_pic, toko, kota, link_toko, kategori,
+         gmv_baseline, target_gmv, marketing_budget, origin_campaign_id,
+         sales_pic_id, commission_payment_pic_id, created_by)
+      values
+        (${clientId}, ${a.leadId}, ${attemptId}, ${qf.nama_pic}, ${qf.toko}, ${qf.kota}, ${qf.link_toko},
+         ${qf.kategori}, ${qf.gmv_baseline}, ${qf.target_gmv}, ${qf.marketing_budget}, ${a.originCampaignId},
+         ${primary}, ${pic}, ${actor.employeeId})`;
+
+    // 2) Primary platform snapshot.
+    await tx`
+      insert into client_platforms (client_id, platform, store_link, managed_since, created_by)
+      values (${clientId}, ${qf.platform}, ${qf.store_link}, ${nullDate(input.managedSince)}, ${actor.employeeId})`;
+
+    // 3) Sales allocation (Σ = 100% = 10000 bp, read-only snapshot).
+    for (const al of input.parties.allocations) {
+      await tx`
+        insert into client_sales_allocations (client_id, salesperson_id, basis_points, created_by)
+        values (${clientId}, ${al.salespersonId}, ${al.basisPoints}, ${actor.employeeId})`;
+    }
+
+    // 4) Services (SVC- per line, born [Awaiting Onboarding]); inherit the pinned
+    //    MSL version's "Requires Strategy Plan" flag (M6 §2).
+    for (const l of lines) {
+      const svcId = await ex.ident.identNext('SVC', now);
+      await tx`
+        insert into services
+          (id, client_id, master_service_id, master_version_no, name, standard_price, commission_rule,
+           status, requires_strategy_plan, created_by)
+        values
+          (${svcId}, ${clientId}, ${l.masterServiceId}, ${l.versionNo}, ${l.name}, ${l.proposedPrice},
+           ${l.commissionRule}, ${SERVICE_STATUS_AWAITING_ONBOARDING}, ${l.requiresStrategyPlan}, ${actor.employeeId})`;
+    }
+
+    // 5) Transaction (TRX-) born awaiting Finance verification.
+    const trxId = await ex.ident.identNext('TRX', now);
+    await tx`
+      insert into transactions
+        (id, client_id, payment_intent_scheme, total_agreed_value, payment_status, created_by)
+      values
+        (${trxId}, ${clientId}, ${input.paymentScheme}, ${money.decimal(total)}, ${TRX_STATUS_MENUNGGU}, ${actor.employeeId})`;
+    await tx`update clients set transaction_id = ${trxId}, payment_intent = ${input.paymentScheme} where id = ${clientId}`;
+
+    // 6) Installments (INST-) for scheduled schemes.
+    const installments = input.installments ?? [];
+    for (let i = 0; i < installments.length; i++) {
+      const instId = await ex.ident.identNext('INST', now);
+      await tx`
+        insert into installments
+          (id, transaction_id, installment_no, amount, due_date, status, created_by)
+        values
+          (${instId}, ${trxId}, ${i + 1}, ${money.decimal(money.parse(installments[i].amount))},
+           ${installments[i].dueDate}, ${INST_STATUS_BELUM_JATUH_TEMPO}, ${actor.employeeId})`;
+    }
+
+    // 7) Transition the attempt to Closed-Success (engine, audited).
+    const result = await attemptTransition(ex.sm, attemptId, STATUS_CLOSED_SUCCESS, actor);
+    if (!result.ok) {
+      // Should not happen (status pre-checked) — surface as a lifecycle conflict.
+      throw new NotClosableError();
+    }
+
+    // 8) Win resolution for pool competitors (M1 §6 rule 5), inside this tx.
+    await resolveWin(tx, a.leadId, attemptId, primary);
+
+    await ex.audit.insertAudit({
+      entityType: 'client', entityId: clientId, actorEmployeeId: actor.employeeId,
+      action: 'closing', beforeJson: null,
+      afterJson: {
+        transaction_id: trxId, attempt_id: attemptId,
+        total_agreed_value: money.decimal(total), payment_scheme: input.paymentScheme,
+      },
+      createdBy: actor.employeeId,
+    });
+
+    return { clientId, transactionId: trxId };
+  });
+}
+
+/**
+ * validateScheduleTotal enforces that scheduled installments sum exactly to the
+ * transaction total for Termin / Bayar di Belakang (M5 §4).
+ */
+function validateScheduleTotal(input: ClosingInput, total: money.Money): void {
+  if (input.paymentScheme !== PAYMENT_SCHEME_TERMIN && input.paymentScheme !== PAYMENT_SCHEME_DI_BELAKANG) {
+    return;
+  }
+  let sum = 0n;
+  for (const inst of input.installments ?? []) {
+    sum += money.parse(inst.amount);
+  }
+  if (sum !== total) {
+    throw new IncompleteError();
+  }
+}
+
+/** loadQualifiedForm reads the locked client draft (throws IncompleteError if absent). */
+async function loadQualifiedForm(tx: Queryable, attemptId: string): Promise<QualifiedFormRow> {
+  const rows = await tx<QualifiedFormRow[]>`
+    select nama_pic, toko, kota, link_toko, kategori, platform, store_link,
+           gmv_baseline, target_gmv, marketing_budget
+    from qualified_forms where attempt_id = ${attemptId}`;
+  if (rows.length === 0) {
+    throw new IncompleteError();
+  }
+  return rows[0];
+}
+
+/**
+ * loadApprovedLines returns the latest proposal version's lines, enriched with
+ * the pinned MSL version_no + name + requires_strategy_plan from the Qualified
+ * Form snapshot.
+ */
+async function loadApprovedLines(tx: Queryable, attemptId: string): Promise<ApprovedLine[]> {
+  const rows = await tx<
+    {
+      master_service_id: string; proposed_price: string; commission_rule: string;
+      name: string; master_version_no: number; requires_strategy_plan: boolean;
+    }[]
+  >`
+    select npl.master_service_id, npl.proposed_price, npl.commission_rule,
+           coalesce(qfs.name, '') as name,
+           coalesce(qfs.master_version_no, 0) as master_version_no,
+           coalesce(msv.requires_strategy_plan, false) as requires_strategy_plan
+    from negotiation_proposal_lines npl
+    join negotiation_proposals np on np.id = npl.proposal_id
+    left join qualified_form_services qfs
+           on qfs.attempt_id = np.attempt_id and qfs.master_service_id = npl.master_service_id
+    left join master_service_versions msv
+           on msv.service_id = npl.master_service_id and msv.version_no = qfs.master_version_no
+    where np.attempt_id = ${attemptId}
+      and np.version_no = (select max(version_no) from negotiation_proposals where attempt_id = ${attemptId})
+    order by npl.id`;
+  return rows.map((r) => ({
+    masterServiceId: r.master_service_id, proposedPrice: r.proposed_price, commissionRule: r.commission_rule,
+    name: r.name, versionNo: r.master_version_no, requiresStrategyPlan: r.requires_strategy_plan,
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Storage null helpers.
 // ---------------------------------------------------------------------------
@@ -928,6 +1310,11 @@ function nullString(s: string | undefined): string | null {
 }
 
 function nullDecimal(s: string | undefined): string | null {
+  return s && s.trim() !== '' ? s : null;
+}
+
+/** nullDate stores an empty optional date string as SQL NULL. */
+function nullDate(s: string | undefined): string | null {
   return s && s.trim() !== '' ? s : null;
 }
 
