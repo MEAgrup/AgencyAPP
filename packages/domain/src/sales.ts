@@ -30,6 +30,7 @@
 
 import { bi, money, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
+import { effectiveAt, type ServiceView } from './msl.js';
 
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;
@@ -334,61 +335,9 @@ export function buildQuote(lines: ServiceLine[]): Quote {
 }
 
 // ===========================================================================
-// Master Service List read (admin.EffectiveAt / ServiceView).
+// Qualified Lead Form — service selection resolved against the MSL (msl.ts owns
+// the read + ServiceView; this layer turns a version into a priced ServiceLine).
 // ===========================================================================
-
-/** The MSL version effective at a reference date (pricing-relevant subset). */
-export interface ServiceView {
-  id: string;
-  name: string;
-  standardPrice: string;
-  commissionRule: string;
-  unit: string;
-  minQty: string;
-  pricingMode: string;
-  applyPPN: boolean;
-  active: boolean;
-  versionNo: number;
-  effectiveFrom: string;
-}
-
-/** Thrown when no MSL version is effective at the date for a service id. */
-export class ServiceNotFoundError extends Error {
-  constructor(serviceId: string) {
-    super(`master service not found: ${serviceId}`);
-    this.name = 'ServiceNotFoundError';
-  }
-}
-
-/**
- * effectiveAt returns the MSL version effective on `date` (YYYY-MM-DD, WIB) for a
- * service — the latest version with effective_from ≤ date. Throws
- * ServiceNotFoundError when none applies.
- */
-export async function effectiveAt(sql: Queryable, serviceId: string, date: string): Promise<ServiceView> {
-  const rows = await sql<
-    {
-      name: string; standard_price: string; commission_rule: string;
-      unit: string | null; min_qty: string | null; pricing_mode: string;
-      apply_ppn: boolean; active: boolean; version_no: number; effective_from: Date;
-    }[]
-  >`
-    select name, standard_price, commission_rule, unit, min_qty, pricing_mode,
-           apply_ppn, active, version_no, effective_from
-    from master_service_versions
-    where service_id = ${serviceId} and effective_from <= ${date}
-    order by effective_from desc, version_no desc limit 1`;
-  if (rows.length === 0) {
-    throw new ServiceNotFoundError(serviceId);
-  }
-  const r = rows[0];
-  return {
-    id: serviceId, name: r.name, standardPrice: r.standard_price, commissionRule: r.commission_rule,
-    unit: r.unit ?? '', minQty: r.min_qty ?? '', pricingMode: r.pricing_mode, applyPPN: r.apply_ppn,
-    active: r.active, versionNo: r.version_no,
-    effectiveFrom: r.effective_from instanceof Date ? r.effective_from.toISOString().slice(0, 10) : String(r.effective_from),
-  };
-}
 
 /**
  * lineFromView resolves an MSL version + the sales-entered quantity / passthrough

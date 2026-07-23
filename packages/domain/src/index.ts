@@ -10,6 +10,8 @@
  *   the central LEAD record and the salesperson's PRSP attempt with dedup v2.
  * - sales: M0 Qualified stage — Contacted progression, the MSL v2 pricing
  *   calculator + commission quote, and the Qualified Lead Form submit.
+ * - msl: Master Service List admin (S0-09) — Sales-owned catalog with immutable
+ *   versions, plus the canonical MSL read (effectiveAt) consumed by `sales`.
  *
  * An @cdps/api route handler is a thin shell: resolve the actor from the JWT
  * app_metadata claim, validate inputs, then call one of these functions.
@@ -19,3 +21,4 @@ export * as employees from './employees.js';
 export * as demo from './demo.js';
 export * as leads from './leads.js';
 export * as sales from './sales.js';
+export * as msl from './msl.js';
