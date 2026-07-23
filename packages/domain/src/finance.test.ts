@@ -14,14 +14,24 @@ import { createClient, type Sql } from '@cdps/db';
 import { leads, sales } from './index.js';
 import {
   attachContract,
+  canManageScheme,
   canVerifyPayment,
+  canVoteBermasalah,
+  changeScheme,
   commissionAchievement,
   ContractRequiredError,
+  flagBermasalah,
   ForbiddenError,
   getPaymentStatus,
   IncompleteError,
   NotFoundError,
+  overdueLabel,
   OverVerificationError,
+  reminderDashboard,
+  resolveBermasalah,
+  ScheduleTotalError,
+  scanReminders,
+  SchemeLockedError,
   type Actor,
   verifyPayment,
 } from './finance.js';
@@ -37,6 +47,10 @@ const financeLead = (): Actor => ({
 const director = (): Actor => ({
   employeeId: 'ZZ-DIR', divisi: 'Management',
   role: permission.makeRole({ director: true }),
+});
+const accountLead = (): Actor => ({
+  employeeId: 'ZZ-ACCLEAD', divisi: 'Account',
+  role: permission.makeRole({ division: 'Account', level: 'lead' }),
 });
 const budi = (): Actor => ({
   employeeId: 'ZZ-BUDI', divisi: 'Sales',
@@ -57,6 +71,29 @@ describe('canVerifyPayment', () => {
     expect(canVerifyPayment(budi())).toBe(false);
     const od: Actor = { employeeId: 'ZZ-OD', divisi: 'Management', role: permission.makeRole({ od: true }) };
     expect(canVerifyPayment(od)).toBe(false);
+  });
+});
+
+describe('canManageScheme / canVoteBermasalah', () => {
+  it('scheme change needs SPV/Head Finance or Director (not staff)', () => {
+    expect(canManageScheme(financeLead())).toBe(true);
+    expect(canManageScheme(director())).toBe(true);
+    expect(canManageScheme(financeStaff())).toBe(false);
+    expect(canManageScheme(budi())).toBe(false);
+  });
+
+  it('bermasalah vote needs SPV Finance / SPV Account / Director', () => {
+    expect(canVoteBermasalah(financeLead())).toBe(true);
+    expect(canVoteBermasalah(accountLead())).toBe(true);
+    expect(canVoteBermasalah(director())).toBe(true);
+    expect(canVoteBermasalah(financeStaff())).toBe(false); // staff, not SPV
+    expect(canVoteBermasalah(budi())).toBe(false);
+  });
+});
+
+describe('overdueLabel', () => {
+  it('renders the §6 flow-2 BI prompt with the day count', () => {
+    expect(overdueLabel(3)).toBe('[jatuh tempo 3 hari, segera tindak lanjuti]');
   });
 });
 
@@ -139,6 +176,7 @@ afterAll(async () => {
 
 afterEach(async () => {
   if (!sql) return;
+  await sql`delete from transaction_issue_approvals where created_by like 'ZZ-%'`;
   await sql`delete from payment_verifications where created_by like 'ZZ-%'`;
   await sql`delete from installments where created_by like 'ZZ-%'`;
   await sql`delete from transactions where created_by like 'ZZ-%'`;
@@ -283,5 +321,169 @@ describeDb('read models', () => {
 
   it('getPaymentStatus 404s on an unknown transaction', async () => {
     await expect(getPaymentStatus(sql, 'TRX-000000-0000')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describeDb('scanReminders + reminderDashboard (M5 §6 / §7)', () => {
+  const notifCount = async (recipient: string, event: string): Promise<number> =>
+    (await sql<{ n: number }[]>`
+      select count(*)::int as n from notifications
+      where recipient_employee_id = ${recipient} and event_type = ${event}`)[0].n;
+
+  it('marks overdue installments [Jatuh Tempo], notifies once, and is idempotent', async () => {
+    const { transactionId, installmentIds } = await closedDeal(sales.PAYMENT_SCHEME_TERMIN, [
+      { amount: '3000000', dueDate: '2026-06-01' },
+      { amount: '3000000', dueDate: '2026-06-02' },
+      { amount: '3000000', dueDate: '2026-09-01' },
+    ]);
+    const scanAt = new Date('2026-06-15T03:00:00Z');
+    const s1 = await scanReminders(sql, scanAt);
+    expect(s1.markedOverdue).toBe(2);
+    expect(s1.overdueNotified).toBe(2);
+
+    const inst = await sql<{ status: string; jatuh_tempo: boolean }[]>`
+      select status, jatuh_tempo from installments where id = ${installmentIds[0]}`;
+    expect(inst[0].status).toBe('[Jatuh Tempo]');
+    expect(inst[0].jatuh_tempo).toBe(true);
+    expect(await notifCount('ZZ-BUDI', 'm0m5.installment.due')).toBe(2); // Sales PIC notified
+
+    // Re-running the scan is a no-op (fire-once + already transitioned).
+    const s2 = await scanReminders(sql, scanAt);
+    expect(s2.markedOverdue).toBe(0);
+    expect(s2.overdueNotified).toBe(0);
+    expect(await notifCount('ZZ-BUDI', 'm0m5.installment.due')).toBe(2);
+    void transactionId;
+  });
+
+  it('fires an upcoming (H-3) reminder once, without changing status', async () => {
+    const { installmentIds } = await closedDeal(sales.PAYMENT_SCHEME_TERMIN, [
+      { amount: '9000000', dueDate: '2026-06-17' },
+    ]);
+    const s = await scanReminders(sql, new Date('2026-06-15T03:00:00Z'));
+    expect(s.upcomingNotified).toBe(1);
+    expect(s.markedOverdue).toBe(0);
+    const inst = await sql<{ status: string }[]>`select status from installments where id = ${installmentIds[0]}`;
+    expect(inst[0].status).toBe('[Belum Jatuh Tempo]'); // upcoming, not overdue
+  });
+
+  it('raises the soft 7-day contract flag once and notifies Finance', async () => {
+    const { transactionId, installmentIds } = await closedDeal(sales.PAYMENT_SCHEME_TERMIN, [
+      { amount: '3000000', dueDate: '2026-09-01' },
+      { amount: '6000000', dueDate: '2026-10-01' },
+    ]);
+    // First verification routes to Account; back-date the release so it is > 7 days old.
+    await verifyPayment(sql, financeStaff(), { transactionId, installmentId: installmentIds[0], amount: '3000000', receivedDate: '2026-06-15' });
+    await sql`update transactions set released_to_account_at = '2026-06-01' where id = ${transactionId}`;
+
+    const s = await scanReminders(sql, new Date('2026-06-15T03:00:00Z'));
+    expect(s.contractFlagged).toBe(1);
+    const trx = await sql<{ contract_overdue_flagged_at: Date | null }[]>`
+      select contract_overdue_flagged_at from transactions where id = ${transactionId}`;
+    expect(trx[0].contract_overdue_flagged_at).not.toBeNull();
+
+    const again = await scanReminders(sql, new Date('2026-06-16T03:00:00Z'));
+    expect(again.contractFlagged).toBe(0); // fire-once
+  });
+
+  it('reminderDashboard lists overdue-first with a day label + open-ended remainders', async () => {
+    await closedDeal(sales.PAYMENT_SCHEME_TERMIN, [
+      { amount: '3000000', dueDate: '2026-06-01' },
+      { amount: '3000000', dueDate: '2026-06-10' },
+      { amount: '3000000', dueDate: '2026-12-01' },
+    ]);
+    const dash = await reminderDashboard(sql, new Date('2026-06-15T03:00:00Z'));
+    const mine = dash.overdue.filter((r) => r.toko === 'Alpha Digital');
+    expect(mine.length).toBe(2);
+    expect(mine[0].daysOverdue).toBeGreaterThanOrEqual(mine[1].daysOverdue); // most overdue first
+    expect(mine[0].label).toContain('segera tindak lanjuti');
+
+    // A Bayar Sebagian remainder shows on the no-due list, not the overdue list.
+    const partial = await closedDeal(sales.PAYMENT_SCHEME_SEBAGIAN);
+    await verifyPayment(sql, financeStaff(), { transactionId: partial.transactionId, amount: '4000000', receivedDate: '2026-06-15' });
+    const dash2 = await reminderDashboard(sql, new Date('2026-06-15T03:00:00Z'));
+    const open = dash2.outstandingNoDueDate.find((r) => r.transactionId === partial.transactionId);
+    expect(open).toBeDefined();
+    expect(money.parse(open!.amountOutstanding)).toBe(money.parse('5000000'));
+  });
+});
+
+describeDb('[Bermasalah] flag + joint resolution (M5-OA-5)', () => {
+  async function flaggedLunas(): Promise<string> {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    await attachContract(sql, financeStaff(), transactionId, 'https://drive/c.pdf');
+    await verifyPayment(sql, financeStaff(), { transactionId, amount: '9000000', receivedDate: '2026-06-03' });
+    await flagBermasalah(sql, financeStaff(), transactionId, 'pembayaran di-reverse bank');
+    return transactionId;
+  }
+
+  it('requires a reason and Finance authority to flag', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    await expect(flagBermasalah(sql, financeStaff(), transactionId, '  ')).rejects.toBeInstanceOf(IncompleteError);
+    await expect(flagBermasalah(sql, budi(), transactionId, 'x')).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('resolves only when BOTH SPV divisions approve', async () => {
+    const transactionId = await flaggedLunas();
+    await expect(resolveBermasalah(sql, financeStaff(), transactionId, 'approve')).rejects.toBeInstanceOf(ForbiddenError);
+
+    const r1 = await resolveBermasalah(sql, financeLead(), transactionId, 'approve');
+    expect(r1.resolved).toBe(false);
+    const r2 = await resolveBermasalah(sql, accountLead(), transactionId, 'approve');
+    expect(r2.resolved).toBe(true);
+
+    const trx = await sql<{ bermasalah: boolean }[]>`select bermasalah from transactions where id = ${transactionId}`;
+    expect(trx[0].bermasalah).toBe(false);
+  });
+
+  it('a Director approval resolves unilaterally', async () => {
+    const transactionId = await flaggedLunas();
+    const r = await resolveBermasalah(sql, director(), transactionId, 'approve');
+    expect(r.resolved).toBe(true);
+  });
+
+  it('rejects a vote on a transaction that is not flagged', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    await expect(resolveBermasalah(sql, financeLead(), transactionId, 'approve')).rejects.toBeInstanceOf(IncompleteError);
+  });
+});
+
+describeDb('changeScheme (M5-OA-6)', () => {
+  it('switches Lunas → Termin with a schedule (SPV Finance), replacing installments', async () => {
+    const { transactionId, clientId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    await changeScheme(sql, financeLead(), transactionId, sales.PAYMENT_SCHEME_TERMIN, 'klien minta cicilan', [
+      { amount: '3000000', dueDate: '2026-08-01' },
+      { amount: '3000000', dueDate: '2026-09-01' },
+      { amount: '3000000', dueDate: '2026-10-01' },
+    ]);
+    const trx = await sql<{ payment_intent_scheme: string }[]>`select payment_intent_scheme from transactions where id = ${transactionId}`;
+    expect(trx[0].payment_intent_scheme).toBe('[Termin]');
+    const insts = await sql<{ n: number }[]>`select count(*)::int as n from installments where transaction_id = ${transactionId}`;
+    expect(insts[0].n).toBe(3);
+    const client = await sql<{ payment_intent: string }[]>`select payment_intent from clients where id = ${clientId}`;
+    expect(client[0].payment_intent).toBe('[Termin]');
+  });
+
+  it('rejects a schedule that does not sum to the agreed total', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    await expect(changeScheme(sql, financeLead(), transactionId, sales.PAYMENT_SCHEME_TERMIN, 'x', [
+      { amount: '3000000', dueDate: '2026-08-01' },
+      { amount: '3000000', dueDate: '2026-09-01' },
+    ])).rejects.toBeInstanceOf(ScheduleTotalError);
+  });
+
+  it('requires SPV/Head Finance (staff denied)', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    await expect(changeScheme(sql, financeStaff(), transactionId, sales.PAYMENT_SCHEME_LUNAS, 'x'))
+      .rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('is locked once a payment has been verified', async () => {
+    const { transactionId, installmentIds } = await closedDeal(sales.PAYMENT_SCHEME_TERMIN, [
+      { amount: '4500000', dueDate: '2026-08-01' },
+      { amount: '4500000', dueDate: '2026-09-01' },
+    ]);
+    await verifyPayment(sql, financeStaff(), { transactionId, installmentId: installmentIds[0], amount: '4500000', receivedDate: '2026-08-01' });
+    await expect(changeScheme(sql, financeLead(), transactionId, sales.PAYMENT_SCHEME_LUNAS, 'x'))
+      .rejects.toBeInstanceOf(SchemeLockedError);
   });
 });

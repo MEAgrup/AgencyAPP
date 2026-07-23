@@ -55,7 +55,8 @@ export function mapError(err: unknown): Response {
     err instanceof sales.TooManySalespeopleError ||
     err instanceof msl.IncompleteError ||
     err instanceof finance.IncompleteError ||
-    err instanceof finance.OverVerificationError
+    err instanceof finance.OverVerificationError ||
+    err instanceof finance.ScheduleTotalError
   ) {
     return errorJson(err.message, 400); // exact BI [...] message (or internal sentinel)
   }
@@ -80,7 +81,8 @@ export function mapError(err: unknown): Response {
     err instanceof leads.BlockedError ||
     err instanceof sales.NotClosableError ||
     err instanceof leads.AlreadyResolvedError ||
-    err instanceof finance.ContractRequiredError
+    err instanceof finance.ContractRequiredError ||
+    err instanceof finance.SchemeLockedError
   ) {
     // Lifecycle conflicts: a dedup block, an un-closable attempt, a lead whose
     // win was already resolved, or a full-verification blocked on a missing
