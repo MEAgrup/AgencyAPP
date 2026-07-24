@@ -8,8 +8,8 @@
  * Run: DATABASE_URL=postgres://... npm test  (in packages/db)
  */
 import { afterAll, describe, expect, it } from 'vitest';
-import { createClient, type Sql, type TransactionSql } from './client.js';
-import { executors } from './executors.js';
+import { createClient, type Sql, type TransactionSql } from './client';
+import { executors } from './executors';
 
 const URL = process.env.DATABASE_URL;
 const d = describe.skipIf(!URL);

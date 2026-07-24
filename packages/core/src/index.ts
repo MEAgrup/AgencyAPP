@@ -21,11 +21,11 @@
  * Reference: SUPABASE_MIGRATION_PLAN.md §3 + TECH_APPENDIX §B (pemetaan engine).
  */
 
-export * as money from './money.js';
-export * as tz from './tz.js';
-export * as permission from './permission.js';
-export * as bi from './bi.js';
-export * as ident from './ident.js';
-export * as statemachine from './statemachine.js';
-export * as audit from './audit.js';
-export * as notification from './notification.js';
+export * as money from './money';
+export * as tz from './tz';
+export * as permission from './permission';
+export * as bi from './bi';
+export * as ident from './ident';
+export * as statemachine from './statemachine';
+export * as audit from './audit';
+export * as notification from './notification';

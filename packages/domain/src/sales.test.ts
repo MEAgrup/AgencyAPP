@@ -10,7 +10,7 @@
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { money, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
-import { leads } from './index.js';
+import { leads } from './index';
 import {
   acceptCounter,
   AllocationTotalError,
@@ -50,7 +50,7 @@ import {
   TooManySalespeopleError,
   TooManyServicesError,
   validateParties,
-} from './sales.js';
+} from './sales';
 
 const rp = (s: string): money.Money => money.parse(s);
 

@@ -14,7 +14,7 @@
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { permission } from '@cdps/core';
-import { UnauthorizedError } from './http.js';
+import { UnauthorizedError } from './http';
 
 type Actor = permission.Actor;
 
@@ -106,11 +106,61 @@ export function bearerToken(req: Request): string {
 }
 
 /**
- * requireActor is the handler entry point: pull the bearer token, verify it, and
- * resolve the Actor. Throws UnauthorizedError (→ 401) when anything is missing
- * or invalid.
+ * Name of the httpOnly cookie holding the GoTrue access token. The auth BFF
+ * (/api/v1/auth/login) sets it; web-internal sends it back automatically with
+ * `credentials: 'include'`, so browser pages never handle the token directly.
+ */
+export const SESSION_COOKIE = 'cdps_access_token';
+
+/** Reads a named cookie from the request's Cookie header, or null. */
+export function cookieValue(req: Request, name: string): string | null {
+  const header = req.headers.get('cookie');
+  if (!header) return null;
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() === name) {
+      return decodeURIComponent(part.slice(eq + 1).trim());
+    }
+  }
+  return null;
+}
+
+/**
+ * tokenFromRequest resolves the access token from either the Authorization
+ * bearer header (API/service callers) or the session cookie (browser). Throws
+ * UnauthorizedError when neither is present.
+ */
+export function tokenFromRequest(req: Request): string {
+  const header = req.headers.get('authorization') ?? '';
+  const [scheme, value] = header.split(' ');
+  if (scheme?.toLowerCase() === 'bearer' && value) {
+    return value.trim();
+  }
+  const cookie = cookieValue(req, SESSION_COOKIE);
+  if (cookie) return cookie;
+  throw new UnauthorizedError('[sesi tidak valid, silahkan login kembali]');
+}
+
+/**
+ * requireActor is the handler entry point: resolve the access token (bearer OR
+ * session cookie), verify it, and resolve the Actor. Throws UnauthorizedError
+ * (→ 401) when anything is missing or invalid.
  */
 export function requireActor(req: Request): Actor {
   const secret = process.env.SUPABASE_JWT_SECRET ?? '';
-  return actorFromToken(bearerToken(req), secret);
+  return actorFromToken(tokenFromRequest(req), secret);
+}
+
+/** Serializes the Set-Cookie header that stores the session token (httpOnly,
+ *  SameSite=Lax, Secure in production). `maxAgeSec` mirrors the token TTL. */
+export function sessionCookie(token: string, maxAgeSec: number): string {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${secure}`;
+}
+
+/** Serializes the Set-Cookie header that clears the session token (logout). */
+export function clearedSessionCookie(): string {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
 }

@@ -19,7 +19,7 @@ import {
   provisionCredentials,
   syncEmployees,
   type Employee,
-} from './employees.js';
+} from './employees';
 
 describe('parseEmployeeCsv', () => {
   it('parses the canonical 6-column format with a header', () => {

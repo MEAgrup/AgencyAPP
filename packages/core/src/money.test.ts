@@ -1,6 +1,6 @@
 // Ported 1:1 from backend/internal/core/money/money_test.go.
 import { describe, expect, it } from 'vitest';
-import { BadAmountError, decimal, format, mul, parse, percentOf, proRata, type Money } from './money.js';
+import { BadAmountError, decimal, format, mul, parse, percentOf, proRata, type Money } from './money';
 
 const rp = (s: string): Money => parse(s);
 

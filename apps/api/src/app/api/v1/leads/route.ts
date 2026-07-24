@@ -14,11 +14,17 @@ import { leads } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
+import { attemptStubToWire, leadRowToWire, leadStubToWire } from '@/lib/wire';
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
-    const rows = await leads.list(db());
-    return json({ leads: rows });
+    // web-internal passes optional ?status=<record_status>&q=<name/phone>.
+    const params = new URL(request.url).searchParams;
+    const rows = await leads.leadsDatabase(db(), {
+      status: params.get('status') ?? undefined,
+      q: params.get('q') ?? undefined,
+    });
+    return json({ data: rows.map(leadRowToWire) });
   });
 }
 
@@ -37,7 +43,11 @@ export async function POST(request: Request): Promise<Response> {
       email: body.email,
       source: body.source,
     });
-    const payload: { lead: typeof lead; attempt: typeof attempt; notice?: string } = { lead, attempt };
+    const payload: {
+      lead: ReturnType<typeof leadStubToWire>;
+      attempt: ReturnType<typeof attemptStubToWire>;
+      notice?: string;
+    } = { lead: leadStubToWire(lead), attempt: attemptStubToWire(attempt) };
     if (notice !== '') {
       payload.notice = notice;
     }

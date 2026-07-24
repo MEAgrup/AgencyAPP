@@ -1,6 +1,6 @@
 // Ported 1:1 from backend/internal/core/tz/tz_test.go.
 import { describe, expect, it } from 'vitest';
-import { WIB_OFFSET_HOURS, dateString, daysBetween, period } from './tz.js';
+import { WIB_OFFSET_HOURS, dateString, daysBetween, period } from './tz';
 
 // Helper: build a UTC instant the way the Go tests do (time.Date(..., time.UTC)).
 const utc = (y: number, mo: number, d: number, h = 0, mi = 0): Date =>

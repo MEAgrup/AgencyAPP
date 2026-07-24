@@ -9,7 +9,7 @@
  */
 
 import type { audit, ident, notification, statemachine } from '@cdps/core';
-import type { Queryable } from './client.js';
+import type { Queryable } from './client';
 
 /** ident_next(prefix, at) — atomic gap-free ID allocation. */
 export function identExecutor(sql: Queryable): ident.IdentExecutor {

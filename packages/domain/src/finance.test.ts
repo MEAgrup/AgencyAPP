@@ -11,7 +11,7 @@
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { money, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
-import { leads, sales } from './index.js';
+import { leads, sales } from './index';
 import {
   attachContract,
   canManageScheme,
@@ -34,7 +34,7 @@ import {
   SchemeLockedError,
   type Actor,
   verifyPayment,
-} from './finance.js';
+} from './finance';
 
 const financeStaff = (): Actor => ({
   employeeId: 'ZZ-FIN', divisi: 'Finance',

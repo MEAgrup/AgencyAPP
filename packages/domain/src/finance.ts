@@ -32,7 +32,7 @@
 
 import { bi, money, notification, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
-import { computeCommission, parseCommissionRule } from './sales.js';
+import { computeCommission, parseCommissionRule } from './sales';
 
 /** Authenticated employee + resolved role (from @cdps/core permission). */
 export type Actor = permission.Actor;

@@ -13,7 +13,7 @@ import {
   mapError,
   readJson,
   transitionResponse,
-} from './http.js';
+} from './http';
 
 describe('json / errorJson', () => {
   it('serializes a body with the JSON content type', async () => {

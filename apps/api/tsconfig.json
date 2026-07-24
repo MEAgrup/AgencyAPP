@@ -19,10 +19,7 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"],
-      "@cdps/core": ["../../packages/core/src"],
-      "@cdps/db": ["../../packages/db/src"],
-      "@cdps/domain": ["../../packages/domain/src"]
+      "@/*": ["./src/*"]
     }
   },
   "include": [

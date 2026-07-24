@@ -2,8 +2,10 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   // The @cdps/* packages are shipped as TypeScript source (no build step yet —
-  // see packages/db/vitest.config.ts rationale). Have Next transpile them from
-  // source like a normal monorepo workspace dependency.
+  // see packages/db/vitest.config.ts rationale). They are linked as npm
+  // workspaces (repo-root package.json `workspaces`), so Next resolves them via
+  // node_modules; `transpilePackages` has Next compile their TS source like a
+  // normal monorepo workspace dependency.
   transpilePackages: ["@cdps/core", "@cdps/db", "@cdps/domain"],
 };
 

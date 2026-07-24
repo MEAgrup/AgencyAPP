@@ -1,7 +1,8 @@
 // Small typed fetch wrapper for the CDPS API.
-// Every backend error body is {"message": "[...bahasa indonesia...]"} — we
-// normalize any failure into an ApiError carrying that exact string so pages
-// can render it verbatim.
+// The apps/api backend returns error bodies shaped {"error": "[...bahasa
+// indonesia...]"} (the legacy Go backend used {"message": ...}); we accept
+// either key and normalize any failure into an ApiError carrying that exact
+// string so pages can render the BI [...] message verbatim.
 
 const API_BASE = '/api/v1';
 
@@ -16,6 +17,16 @@ export class ApiError extends Error {
 }
 
 const FALLBACK_MESSAGE = '[Terjadi kesalahan, silahkan coba lagi.]';
+
+// The backend puts the verbatim BI [...] string under `error` (apps/api) or
+// `message` (legacy Go backend). Return whichever string is present.
+function errorBody(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null;
+  const b = body as { error?: unknown; message?: unknown };
+  if (typeof b.error === 'string') return b.error;
+  if (typeof b.message === 'string') return b.message;
+  return null;
+}
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let res: Response;
@@ -47,10 +58,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   if (!res.ok) {
-    const message =
-      body && typeof body === 'object' && 'message' in body && typeof (body as { message?: unknown }).message === 'string'
-        ? (body as { message: string }).message
-        : FALLBACK_MESSAGE;
+    const message = errorBody(body) ?? FALLBACK_MESSAGE;
     throw new ApiError(message, res.status);
   }
 
