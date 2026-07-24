@@ -34,7 +34,7 @@
  * Reference: backend/internal/module6_account/{account,strategy}.go.
  */
 
-import { bi, permission, statemachine } from '@cdps/core';
+import { bi, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 
 /** Authenticated employee + resolved role (from @cdps/core permission). */
@@ -926,4 +926,831 @@ function transitionError(res: statemachine.TransitionResult & { ok: false }): Er
     return new ForbiddenError(res.message);
   }
   return new ConflictError(res.message);
+}
+
+// ===========================================================================
+// Cluster 3 — Service → Brief breakdown (§5) and dispatch (§6).
+// Ported from backend/internal/module6_account/brief.go.
+// ===========================================================================
+
+/** Brief lifecycle + Service target states (STATE_MACHINES §6/§7). */
+export const BRIEF_STATUS_TODO = '[To Do]';
+/** Off-machine marker for a Live Stream Brief (§6 Rule 2) — tracked in M10, not the Kanban. */
+export const BRIEF_STATUS_VENDOR_DISPATCHED = '[Dispatched to Vendor]';
+export const BRIEF_STATUS_SUBMITTED = '[Submitted]';
+export const BRIEF_STATUS_IN_REVIEW = '[In Review]';
+export const BRIEF_STATUS_APPROVED = '[Approved]';
+export const BRIEF_STATUS_REVISION_REQ = '[Revision Requested]';
+
+const SERVICE_STATUS_BRIEFED = '[Briefed]';
+const SERVICE_STATUS_IN_EXECUTION = '[In Execution]';
+
+/** The outsourced-vendor division (§6 Rule 2). */
+export const DIVISION_LIVE_STREAM = 'Live Stream';
+/** §7 Rule 4 / M6-OA-3: a Brief crossing 3 revisions is surfaced for SPV visibility. */
+const BRIEF_REVISION_FLAG_THRESHOLD = 3;
+
+const MACHINE_BRIEF_TASK = 'brief_task';
+
+const ALLOWED_PRIORITIES = new Set(['Low', 'Medium', 'High']);
+
+// --- Verbatim BI messages (M6 §5/§6/§7). Each mirrors a Go sentinel 1:1. ---
+
+export const MSG_BRIEF_NOT_FOUND = '[brief tidak ditemukan]';
+export const MSG_BRIEF_FORBIDDEN = '[anda tidak memiliki akses ke brief ini]';
+export const MSG_BRIEF_CREATE_FORBIDDEN =
+  '[hanya Account Manager pemilik klien yang dapat membuat Brief untuk layanan ini]';
+export const MSG_SERVICE_NOT_BRIEFABLE = '[brief tidak dapat dibuat untuk layanan pada status ini]';
+export const MSG_INVALID_DIVISION = '[divisi tujuan tidak valid]';
+export const MSG_INVALID_PRIORITY = '[prioritas tidak valid]';
+export const MSG_BRIEF_STRATEGY_MISMATCH =
+  '[Strategy ID brief harus menunjuk Strategy & Plan yang disetujui untuk layanan ini]';
+export const MSG_BRIEF_STRATEGY_NOT_ALLOWED = '[layanan Direct tidak boleh memiliki Strategy ID pada brief]';
+export const MSG_QUEUE_FORBIDDEN = '[anda tidak memiliki akses ke antrean brief divisi ini]';
+export const MSG_BRIEF_REVIEW_FORBIDDEN =
+  '[hanya Account Manager pemilik klien yang dapat mereview Brief layanan ini]';
+
+// --- Types ---
+
+/** The M6 §9.4 Brief fields (mandatory: title, division, deliverableType, quantityTarget, dueDate, priority). */
+export interface BriefInput {
+  title: string;
+  strategyId?: string;
+  assignedDivision: string;
+  assignedPic?: string;
+  deliverableType: string;
+  quantityTarget: number;
+  dueDate: string; // YYYY-MM-DD
+  priority: string;
+  recurring?: boolean;
+  recurringFrequency?: string;
+  recurringCount?: number;
+  recurringEndDate?: string; // YYYY-MM-DD
+  instructions?: string;
+  referenceAttachments?: string;
+  isAddendum?: boolean;
+}
+
+/** A Brief record (BRF-). */
+export interface Brief {
+  id: string;
+  serviceId: string;
+  strategyId: string;
+  assignedDivision: string;
+  assignedPic: string;
+  deliverableType: string;
+  quantityTarget: number;
+  dueDate: string;
+  priority: string;
+  recurring: boolean;
+  recurringFrequency: string;
+  recurringCount: number;
+  recurringEndDate: string;
+  instructions: string;
+  referenceAttachments: string;
+  title: string;
+  status: string;
+  revisionCount: number;
+  /** Derived §7 Rule 4 / M6-OA-3 flag (revisionCount >= 3), set where the count is derived. */
+  revisionFlagged: boolean;
+  createdBy: string;
+  createdAt: Date;
+}
+
+// --- Input validation ---
+
+/** validateBrief checks the §9.4 mandatory fields BEFORE any id is minted. */
+function validateBrief(input: BriefInput): void {
+  const title = (input.title ?? '').trim();
+  const deliverable = (input.deliverableType ?? '').trim();
+  const due = (input.dueDate ?? '').trim();
+  const division = (input.assignedDivision ?? '').trim();
+  const priority = (input.priority ?? '').trim();
+  if (title === '' || deliverable === '' || due === '' || (input.quantityTarget ?? 0) <= 0 || division === '') {
+    throw new ValidationError(bi.INCOMPLETE_DATA);
+  }
+  if (!ALLOWED_DIVISIONS.includes(division as (typeof ALLOWED_DIVISIONS)[number])) {
+    throw new ValidationError(MSG_INVALID_DIVISION);
+  }
+  if (priority === '') {
+    throw new ValidationError(bi.INCOMPLETE_DATA);
+  }
+  if (!ALLOWED_PRIORITIES.has(priority)) {
+    throw new ValidationError(MSG_INVALID_PRIORITY);
+  }
+  if (!RE_DATE.test(due) || Number.isNaN(Date.parse(`${due}T00:00:00Z`))) {
+    throw new ValidationError(bi.INCOMPLETE_DATA);
+  }
+  // Recurring toggle: when on, its sub-fields become mandatory (§9.4).
+  if (input.recurring) {
+    const freq = (input.recurringFrequency ?? '').trim();
+    const end = (input.recurringEndDate ?? '').trim();
+    if (freq === '' || (input.recurringCount ?? 0) <= 0 || end === '') {
+      throw new ValidationError(bi.INCOMPLETE_DATA);
+    }
+    if (!RE_DATE.test(end) || Number.isNaN(Date.parse(`${end}T00:00:00Z`))) {
+      throw new ValidationError(bi.INCOMPLETE_DATA);
+    }
+  }
+}
+
+/** orNull stores an empty/absent optional string as SQL NULL. */
+function orNull(s: string | undefined): string | null {
+  return s && s.trim() !== '' ? s.trim() : null;
+}
+
+/**
+ * createBrief breaks a Service down into one Brief for a target division (§5).
+ * Owning AM (or Director) only; the Strategy gate is enforced by guardBriefCreation.
+ * The first Brief advances the Service to [Briefed] in the same transaction. A
+ * Live Stream Brief is born off-machine ([Dispatched to Vendor], §6 Rule 2).
+ */
+export async function createBrief(sql: Sql, actor: Actor, serviceId: string, input: BriefInput): Promise<Brief> {
+  validateBrief(input);
+  const now = new Date();
+
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const rows = await tx<
+      { status: string; requires_strategy_plan: boolean; requires_strategy_plan_override: boolean | null; assigned_am_id: string | null }[]
+    >`
+      select sv.status, sv.requires_strategy_plan, sv.requires_strategy_plan_override, c.assigned_am_id
+        from services sv join clients c on c.id = sv.client_id
+       where sv.id = ${serviceId} for update`;
+    if (rows.length === 0) {
+      throw new NotFoundError(MSG_SERVICE_NOT_FOUND);
+    }
+    const svc = rows[0];
+    if (!actor.role.director && svc.assigned_am_id !== actor.employeeId) {
+      throw new ForbiddenError(MSG_BRIEF_CREATE_FORBIDDEN);
+    }
+    // Briefable only on the live path; terminal Services (Done / Voided) reject.
+    if (
+      svc.status !== SERVICE_STATUS_AWAITING_ONBOARDING && svc.status !== SERVICE_STATUS_STRATEGY_APPROVED &&
+      svc.status !== SERVICE_STATUS_BRIEFED && svc.status !== SERVICE_STATUS_IN_EXECUTION
+    ) {
+      throw new ConflictError(MSG_SERVICE_NOT_BRIEFABLE);
+    }
+    // §5 Rule 5 gate: plan-gated + still [Awaiting Onboarding] is rejected.
+    await guardBriefCreation(tx, serviceId);
+
+    const planGated = effectiveRequiresPlan(svc.requires_strategy_plan, svc.requires_strategy_plan_override);
+    const strategyId = await resolveBriefStrategy(tx, serviceId, planGated, (input.strategyId ?? '').trim());
+
+    const id = await ex.ident.identNext('BRF', now);
+    const birth = input.assignedDivision === DIVISION_LIVE_STREAM ? BRIEF_STATUS_VENDOR_DISPATCHED : BRIEF_STATUS_TODO;
+    const recurring = input.recurring === true;
+    const recCount = recurring && (input.recurringCount ?? 0) > 0 ? input.recurringCount! : null;
+
+    await tx`
+      insert into briefs
+        (id, service_id, strategy_id, assigned_division, assigned_pic, deliverable_type,
+         quantity_target, due_date, priority, recurring, recurring_frequency, recurring_count,
+         recurring_end_date, instructions, reference_attachments, title, status, created_by)
+      values (${id}, ${serviceId}, ${strategyId}, ${input.assignedDivision}, ${orNull(input.assignedPic)},
+        ${input.deliverableType}, ${input.quantityTarget}, ${input.dueDate.trim()}, ${input.priority}, ${recurring},
+        ${orNull(input.recurringFrequency)}, ${recCount}, ${orNull(input.recurringEndDate)},
+        ${orNull(input.instructions)}, ${orNull(input.referenceAttachments)}, ${input.title.trim()}, ${birth},
+        ${actor.employeeId})`;
+    await ex.audit.insertAudit({
+      entityType: 'brief', entityId: id, actorEmployeeId: actor.employeeId, action: 'create',
+      beforeJson: null, afterJson: { status: birth, service_id: serviceId, assigned_division: input.assignedDivision },
+      createdBy: actor.employeeId,
+    });
+
+    // §5 Flow 2: the FIRST Brief advances the Service to [Briefed].
+    if (svc.status === SERVICE_STATUS_AWAITING_ONBOARDING || svc.status === SERVICE_STATUS_STRATEGY_APPROVED) {
+      const res = await statemachine.transition(ex.sm, {
+        machine: MACHINE_SERVICE, entityType: 'service', table: 'services',
+        entityId: serviceId, to: SERVICE_STATUS_BRIEFED, actor,
+      });
+      if (!res.ok) {
+        throw transitionError(res);
+      }
+    }
+    // §5 Rule 2 / M6-OA-5: a Brief beyond the approved outline is logged as a Plan addendum.
+    if (planGated && input.isAddendum && strategyId !== null) {
+      await ex.audit.insertAudit({
+        entityType: 'strategy_plan', entityId: strategyId, actorEmployeeId: actor.employeeId, action: 'plan_addendum',
+        beforeJson: null, afterJson: { brief_id: id, title: input.title.trim() }, createdBy: actor.employeeId,
+      });
+    }
+
+    return {
+      id, serviceId, strategyId: strategyId ?? '', assignedDivision: input.assignedDivision,
+      assignedPic: (input.assignedPic ?? '').trim(), deliverableType: input.deliverableType,
+      quantityTarget: input.quantityTarget, dueDate: input.dueDate.trim(), priority: input.priority,
+      recurring, recurringFrequency: (input.recurringFrequency ?? '').trim(), recurringCount: recCount ?? 0,
+      recurringEndDate: (input.recurringEndDate ?? '').trim(), instructions: (input.instructions ?? '').trim(),
+      referenceAttachments: (input.referenceAttachments ?? '').trim(), title: input.title.trim(), status: birth,
+      revisionCount: 0, revisionFlagged: false, createdBy: actor.employeeId, createdAt: now,
+    };
+  });
+}
+
+/**
+ * resolveBriefStrategy returns the strategy_id to store for a new Brief. Direct
+ * Service → NULL (a supplied id is rejected); plan-gated Service → must equal the
+ * Service's approved Strategy id (§5 Rule 2).
+ */
+async function resolveBriefStrategy(
+  tx: Queryable,
+  serviceId: string,
+  planGated: boolean,
+  inStrategyId: string,
+): Promise<string | null> {
+  if (!planGated) {
+    if (inStrategyId !== '') {
+      throw new ValidationError(MSG_BRIEF_STRATEGY_NOT_ALLOWED);
+    }
+    return null;
+  }
+  const rows = await tx<{ id: string; status: string }[]>`
+    select id, status from strategy_plans where service_id = ${serviceId}`;
+  if (rows.length === 0) {
+    throw new ConflictError(MSG_STRATEGY_REQUIRED); // unreachable past the guard, defensive
+  }
+  if (rows[0].status !== STRATEGY_STATUS_APPROVED || inStrategyId !== rows[0].id) {
+    throw new ValidationError(MSG_BRIEF_STRATEGY_MISMATCH);
+  }
+  return rows[0].id;
+}
+
+/**
+ * onBriefLeavesToDo advances the parent Service [Briefed] → [In Execution] when
+ * one of its Briefs leaves [To Do] (§5 Flow 3). The M12 Task machine calls this
+ * inside its own transaction after moving a Brief out of [To Do]; idempotent (a
+ * Service already [In Execution] is a no-op) and defensively no-ops otherwise.
+ */
+export async function onBriefLeavesToDo(tx: Queryable, actor: Actor, serviceId: string): Promise<void> {
+  const rows = await tx<{ status: string }[]>`select status from services where id = ${serviceId} for update`;
+  if (rows.length === 0) {
+    throw new NotFoundError(MSG_SERVICE_NOT_FOUND);
+  }
+  if (rows[0].status !== SERVICE_STATUS_BRIEFED) {
+    return; // already [In Execution], or not yet briefed — nothing to do
+  }
+  const ex = executors(tx);
+  const res = await statemachine.transition(ex.sm, {
+    machine: MACHINE_SERVICE, entityType: 'service', table: 'services',
+    entityId: serviceId, to: SERVICE_STATUS_IN_EXECUTION, actor,
+  });
+  if (!res.ok) {
+    throw transitionError(res);
+  }
+}
+
+// --- Brief reads ---
+
+/**
+ * getBrief returns one Brief with its derived revision count + flag, if the actor
+ * may see it (§6/§9.1): OD/Director everywhere; Account lead (division-wide); the
+ * owning AM; and staff/lead of the Brief's target division.
+ */
+export async function getBrief(sql: Queryable, actor: Actor, briefId: string): Promise<Brief> {
+  const { brief, ownerAm } = await loadBrief(sql, briefId);
+  if (!canSeeBrief(actor, ownerAm, brief.assignedDivision)) {
+    throw new ForbiddenError(MSG_BRIEF_FORBIDDEN);
+  }
+  brief.revisionCount = await deriveBriefRevisionCount(sql, briefId);
+  brief.revisionFlagged = brief.revisionCount >= BRIEF_REVISION_FLAG_THRESHOLD;
+  return brief;
+}
+
+/** canSeeBrief is the shared §6/§9.1 read predicate. */
+export function canSeeBrief(actor: Actor, ownerAm: string | null, division: string): boolean {
+  if (permission.canReadAll(actor)) {
+    return true; // OD / Director
+  }
+  if (permission.canReadDivision(actor, ACCOUNT_DIVISION)) {
+    return true; // Account lead (division-wide)
+  }
+  if (actor.employeeId === ownerAm) {
+    return true; // owning AM
+  }
+  return (
+    actor.role.division === division &&
+    (actor.role.level === permission.LevelStaff || actor.role.level === permission.LevelLead)
+  );
+}
+
+/**
+ * listDivisionQueue returns the Brief queue for a target division (§6 Rule 1),
+ * oldest first. Readable by staff/lead of that division, Account lead (monitor
+ * dispatch, decision Nerissa 2026-07-12), and OD/Director.
+ */
+export async function listDivisionQueue(sql: Queryable, actor: Actor, division: string): Promise<Brief[]> {
+  if (!ALLOWED_DIVISIONS.includes(division as (typeof ALLOWED_DIVISIONS)[number])) {
+    throw new ValidationError(MSG_INVALID_DIVISION);
+  }
+  const allowed =
+    permission.canReadAll(actor) ||
+    permission.isLead(actor, ACCOUNT_DIVISION) ||
+    (actor.role.division === division &&
+      (actor.role.level === permission.LevelStaff || actor.role.level === permission.LevelLead));
+  if (!allowed) {
+    throw new ForbiddenError(MSG_QUEUE_FORBIDDEN);
+  }
+  const rows = await sql<BriefRow[]>`
+    select ${briefCols(sql)} from briefs b where b.assigned_division = ${division} order by b.id asc`;
+  return rows.map(rowToBrief);
+}
+
+/**
+ * listServiceBriefs returns all Briefs of a Service (§5 fan-out), readable by the
+ * owning AM, Account lead, and OD/Director. Division staff use listDivisionQueue.
+ */
+export async function listServiceBriefs(sql: Queryable, actor: Actor, serviceId: string): Promise<Brief[]> {
+  const owner = await sql<{ assigned_am_id: string | null }[]>`
+    select c.assigned_am_id from services sv join clients c on c.id = sv.client_id where sv.id = ${serviceId}`;
+  if (owner.length === 0) {
+    throw new NotFoundError(MSG_SERVICE_NOT_FOUND);
+  }
+  if (!(permission.canReadDivision(actor, ACCOUNT_DIVISION) || owner[0].assigned_am_id === actor.employeeId)) {
+    throw new ForbiddenError(MSG_BRIEF_FORBIDDEN);
+  }
+  const rows = await sql<BriefRow[]>`
+    select ${briefCols(sql)} from briefs b where b.service_id = ${serviceId} order by b.id asc`;
+  return rows.map(rowToBrief);
+}
+
+// ===========================================================================
+// Cluster 4 part A — Revision routing / AM-side review edges (§7).
+// Ported from backend/internal/module6_account/brief_review.go.
+// ===========================================================================
+
+/**
+ * reviewBrief pulls a [Submitted] Brief into [In Review] (§6 Rule 1). Owning AM
+ * (or Director). A wrong-state or Live Stream Brief is rejected by the engine.
+ */
+export async function reviewBrief(sql: Sql, actor: Actor, briefId: string): Promise<statemachine.TransitionResult> {
+  return driveReviewEdge(sql, actor, briefId, BRIEF_STATUS_IN_REVIEW);
+}
+
+/**
+ * approveBrief approves a Brief under review ([In Review] → [Approved], §6 Flow
+ * 3). Owning AM (or Director). (The M11 Blocking-Dependency approval gate is
+ * DEFERRED until M11 is ported — nil-safe, same as the Go default.)
+ */
+export async function approveBrief(sql: Sql, actor: Actor, briefId: string): Promise<statemachine.TransitionResult> {
+  return driveReviewEdge(sql, actor, briefId, BRIEF_STATUS_APPROVED);
+}
+
+/** Shared owner-gated engine driver for the two no-notes AM review edges. */
+async function driveReviewEdge(
+  sql: Sql,
+  actor: Actor,
+  briefId: string,
+  to: string,
+): Promise<statemachine.TransitionResult> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    await lockBriefOwner(tx, actor, briefId);
+    return statemachine.transition(ex.sm, {
+      machine: MACHINE_BRIEF_TASK, entityType: 'brief', table: 'briefs', entityId: briefId, to, actor,
+    });
+  });
+}
+
+/**
+ * requestBriefRevision sends a Brief under review back to the division with
+ * mandatory written feedback ([In Review] → [Revision Requested], §7). Owning AM
+ * (or Director). The counter derives from the audit log; on the exact 3rd
+ * revision the SPV-visibility flag fires (§7 Rule 4 / M6-OA-3).
+ */
+export async function requestBriefRevision(
+  sql: Sql,
+  actor: Actor,
+  briefId: string,
+  feedback: string,
+): Promise<statemachine.TransitionResult> {
+  const why = (feedback ?? '').trim();
+  if (why === '') {
+    throw new ValidationError(MSG_REVISION_NOTES_REQUIRED); // §7 Rule 2
+  }
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const { division } = await lockBriefOwner(tx, actor, briefId);
+    const res = await statemachine.transition(ex.sm, {
+      machine: MACHINE_BRIEF_TASK, entityType: 'brief', table: 'briefs',
+      entityId: briefId, to: BRIEF_STATUS_REVISION_REQ, actor,
+    });
+    if (!res.ok) {
+      return res;
+    }
+    // §7 Rule 2: the mandatory feedback recorded immutably in the audit log.
+    await ex.audit.insertAudit({
+      entityType: 'brief', entityId: briefId, actorEmployeeId: actor.employeeId, action: 'revision_feedback',
+      beforeJson: null, afterJson: { feedback: why }, createdBy: actor.employeeId,
+    });
+    // §7 Rule 4 / M6-OA-3: fire the SPV-visibility flag on the exact crossing (once).
+    const count = await deriveBriefRevisionCount(tx, briefId);
+    if (count === BRIEF_REVISION_FLAG_THRESHOLD) {
+      await notification.emit(ex.notify, {
+        event: notification.EVENTS.RevisionCountFlag, entityType: 'brief', entityId: briefId,
+        actor: actor.employeeId, division,
+      });
+    }
+    return res;
+  });
+}
+
+/**
+ * lockBriefOwner row-locks a Brief and returns its (assigned_division, owner AM),
+ * enforcing the §6 Rule 3 review gate: owning AM or Director only.
+ */
+async function lockBriefOwner(
+  tx: Queryable,
+  actor: Actor,
+  briefId: string,
+): Promise<{ division: string; ownerAm: string | null }> {
+  const rows = await tx<{ assigned_division: string; assigned_am_id: string | null }[]>`
+    select b.assigned_division, c.assigned_am_id
+      from briefs b
+      join services sv on sv.id = b.service_id
+      join clients c on c.id = sv.client_id
+     where b.id = ${briefId} for update`;
+  if (rows.length === 0) {
+    throw new NotFoundError(MSG_BRIEF_NOT_FOUND);
+  }
+  if (!actor.role.director && rows[0].assigned_am_id !== actor.employeeId) {
+    throw new ForbiddenError(MSG_BRIEF_REVIEW_FORBIDDEN);
+  }
+  return { division: rows[0].assigned_division, ownerAm: rows[0].assigned_am_id };
+}
+
+// --- Brief helpers ---
+
+interface BriefRow {
+  id: string;
+  service_id: string;
+  strategy_id: string | null;
+  assigned_division: string;
+  assigned_pic: string | null;
+  deliverable_type: string;
+  quantity_target: number;
+  due_date: string | Date;
+  priority: string;
+  recurring: boolean;
+  recurring_frequency: string | null;
+  recurring_count: number | null;
+  recurring_end_date: string | Date | null;
+  instructions: string | null;
+  reference_attachments: string | null;
+  title: string;
+  status: string;
+  created_by: string;
+  created_at: Date;
+  assigned_am_id?: string | null;
+}
+
+/** briefCols is the shared Brief column list (nested sql fragment). */
+function briefCols(sql: Queryable) {
+  return sql`b.id, b.service_id, b.strategy_id, b.assigned_division, b.assigned_pic, b.deliverable_type,
+    b.quantity_target, b.due_date, b.priority, b.recurring, b.recurring_frequency, b.recurring_count,
+    b.recurring_end_date, b.instructions, b.reference_attachments, b.title, b.status, b.created_by, b.created_at`;
+}
+
+function rowToBrief(r: BriefRow): Brief {
+  return {
+    id: r.id, serviceId: r.service_id, strategyId: r.strategy_id ?? '', assignedDivision: r.assigned_division,
+    assignedPic: r.assigned_pic ?? '', deliverableType: r.deliverable_type, quantityTarget: r.quantity_target,
+    dueDate: dateStr(r.due_date), priority: r.priority, recurring: r.recurring,
+    recurringFrequency: r.recurring_frequency ?? '', recurringCount: r.recurring_count ?? 0,
+    recurringEndDate: r.recurring_end_date === null ? '' : dateStr(r.recurring_end_date),
+    instructions: r.instructions ?? '', referenceAttachments: r.reference_attachments ?? '', title: r.title,
+    status: r.status, revisionCount: 0, revisionFlagged: false, createdBy: r.created_by, createdAt: r.created_at,
+  };
+}
+
+/** loadBrief reads one Brief (no lock) plus the owning AM, for the read path. */
+async function loadBrief(sql: Queryable, briefId: string): Promise<{ brief: Brief; ownerAm: string | null }> {
+  const rows = await sql<BriefRow[]>`
+    select ${briefCols(sql)}, c.assigned_am_id
+      from briefs b
+      join services sv on sv.id = b.service_id
+      join clients c on c.id = sv.client_id
+     where b.id = ${briefId}`;
+  if (rows.length === 0) {
+    throw new NotFoundError(MSG_BRIEF_NOT_FOUND);
+  }
+  return { brief: rowToBrief(rows[0]), ownerAm: rows[0].assigned_am_id ?? null };
+}
+
+/**
+ * deriveBriefRevisionCount counts [In Review] → [Revision Requested] transitions
+ * in the immutable audit log (§6 Rule 4 — derived, never stored).
+ */
+async function deriveBriefRevisionCount(sql: Queryable, briefId: string): Promise<number> {
+  const action = `transition:${BRIEF_STATUS_IN_REVIEW}->${BRIEF_STATUS_REVISION_REQ}`;
+  const rows = await sql<{ n: string }[]>`
+    select count(*) as n from audit_log
+     where entity_type = 'brief' and entity_id = ${briefId} and action = ${action}`;
+  return Number(rows[0].n);
+}
+
+// ===========================================================================
+// Cluster 4 part B — Complaint door #2 (§8), the AM-via-WhatsApp channel.
+// Ported from backend/internal/module6_account/complaint.go.
+// ===========================================================================
+
+/** Complaint Source values (§9.5). Only door #2 is wired here. */
+export const COMPLAINT_SOURCE_WHATSAPP = 'WhatsApp (AM-logged)';
+
+/** Complaint lifecycle states (STATE_MACHINES §11). */
+export const COMPLAINT_STATUS_OPEN = '[Open]';
+export const COMPLAINT_STATUS_IN_PROGRESS = '[In Progress]';
+export const COMPLAINT_STATUS_RESOLVED = '[Resolved]';
+export const COMPLAINT_STATUS_CLOSED = '[Closed]';
+
+const MACHINE_COMPLAINT = 'complaint';
+const ALLOWED_SEVERITIES = new Set(['Low', 'Medium', 'High']);
+
+// --- Verbatim BI messages (M6 §8/§9.5). ---
+
+export const MSG_COMPLAINT_NOT_FOUND = '[komplain tidak ditemukan]';
+export const MSG_COMPLAINT_FORBIDDEN = '[anda tidak memiliki akses ke komplain ini]';
+export const MSG_LOG_COMPLAINT_FORBIDDEN =
+  '[hanya Account Manager pemilik klien yang dapat mencatat komplain untuk klien ini]';
+export const MSG_COMPLAINT_MANAGE_FORBIDDEN = '[anda tidak memiliki akses untuk mengelola komplain ini]';
+export const MSG_INVALID_SEVERITY = '[tingkat keparahan tidak valid]';
+export const MSG_INVALID_RELATED_REF = '[referensi layanan atau brief tidak valid]';
+export const MSG_RESOLUTION_NOTES_REQUIRED = '[catatan penyelesaian wajib diisi]';
+
+// --- Types ---
+
+/** The §9.5 caller-supplied Complaint fields (mandatory: description, severity). */
+export interface ComplaintInput {
+  description: string;
+  severity: string;
+  relatedRef?: string;
+}
+
+/** A Complaint record (CPL-). */
+export interface Complaint {
+  id: string;
+  clientId: string;
+  relatedRef: string;
+  source: string;
+  description: string;
+  severity: string;
+  status: string;
+  assignedTo: string;
+  resolutionNotes: string;
+  createdBy: string;
+  createdAt: Date;
+}
+
+/** canManageComplaint is the §8 Rule 4 / §9.1 write gate: owning AM, Account lead/SPV or Director. */
+export function canManageComplaint(actor: Actor, ownerAm: string | null): boolean {
+  return permission.isLead(actor, ACCOUNT_DIVISION) || actor.employeeId === ownerAm;
+}
+
+/** canSeeComplaint is the §8 Rule 4 read predicate. */
+export function canSeeComplaint(actor: Actor, ownerAm: string | null, relatedBriefDivision: string): boolean {
+  if (permission.canReadAll(actor)) {
+    return true; // OD / Director
+  }
+  if (permission.canReadDivision(actor, ACCOUNT_DIVISION)) {
+    return true; // Account lead (division-wide)
+  }
+  if (actor.employeeId === ownerAm) {
+    return true; // owning AM
+  }
+  return (
+    relatedBriefDivision !== '' && actor.role.division === relatedBriefDivision &&
+    (actor.role.level === permission.LevelStaff || actor.role.level === permission.LevelLead)
+  );
+}
+
+function validateComplaint(input: ComplaintInput): void {
+  if ((input.description ?? '').trim() === '' || (input.severity ?? '').trim() === '') {
+    throw new ValidationError(bi.INCOMPLETE_DATA);
+  }
+  if (!ALLOWED_SEVERITIES.has(input.severity)) {
+    throw new ValidationError(MSG_INVALID_SEVERITY);
+  }
+}
+
+/**
+ * logComplaint records a WhatsApp complaint against a released client (door #2,
+ * §8). Owning AM (or Director) only; Source fixed to WhatsApp (AM-logged); CPL-
+ * id minted after validation; assigned_to defaults to the owning AM; birth
+ * status [Open]. Fires EvComplaintLogged → AM + SPV Account.
+ */
+export async function logComplaint(sql: Sql, actor: Actor, clientId: string, input: ComplaintInput): Promise<Complaint> {
+  validateComplaint(input);
+  const now = new Date();
+
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const rows = await tx<{ released_to_account_at: Date | null; assigned_am_id: string | null }[]>`
+      select released_to_account_at, assigned_am_id from clients where id = ${clientId} for update`;
+    if (rows.length === 0 || rows[0].released_to_account_at === null) {
+      throw new NotFoundError(MSG_NOT_FOUND); // missing or pre-release → invisible (M5 §5 Rule 2)
+    }
+    const ownerAm = rows[0].assigned_am_id;
+    if (!actor.role.director && ownerAm !== actor.employeeId) {
+      throw new ForbiddenError(MSG_LOG_COMPLAINT_FORBIDDEN);
+    }
+    const relatedRef = (input.relatedRef ?? '').trim();
+    if (relatedRef !== '') {
+      await validateRelatedRef(tx, clientId, relatedRef);
+    }
+
+    const id = await ex.ident.identNext('CPL', now);
+    await tx`
+      insert into complaints
+        (id, client_id, related_ref, source, description, severity, status, assigned_to, created_by)
+      values (${id}, ${clientId}, ${orNull(relatedRef)}, ${COMPLAINT_SOURCE_WHATSAPP}, ${input.description.trim()},
+        ${input.severity}, ${COMPLAINT_STATUS_OPEN}, ${ownerAm}, ${actor.employeeId})`;
+    await ex.audit.insertAudit({
+      entityType: 'complaint', entityId: id, actorEmployeeId: actor.employeeId, action: 'create',
+      beforeJson: null,
+      afterJson: { status: COMPLAINT_STATUS_OPEN, client_id: clientId, severity: input.severity, source: COMPLAINT_SOURCE_WHATSAPP },
+      createdBy: actor.employeeId,
+    });
+    // EvComplaintLogged (FROZEN catalog) → AM + SPV Account (explicitOrLeads).
+    await notification.emit(ex.notify, {
+      event: notification.EVENTS.ComplaintLogged, entityType: 'complaint', entityId: id,
+      actor: actor.employeeId, division: ACCOUNT_DIVISION,
+      explicitRecipients: ownerAm ? [ownerAm] : [],
+    });
+
+    return {
+      id, clientId, relatedRef, source: COMPLAINT_SOURCE_WHATSAPP, description: input.description.trim(),
+      severity: input.severity, status: COMPLAINT_STATUS_OPEN, assignedTo: ownerAm ?? '', resolutionNotes: '',
+      createdBy: actor.employeeId, createdAt: now,
+    };
+  });
+}
+
+/** startComplaint moves a Complaint [Open] → [In Progress] (§8 Rule 5). */
+export async function startComplaint(sql: Sql, actor: Actor, complaintId: string): Promise<statemachine.TransitionResult> {
+  return transitionComplaint(sql, actor, complaintId, COMPLAINT_STATUS_IN_PROGRESS, '', false);
+}
+
+/**
+ * resolveComplaint moves a Complaint [In Progress] → [Resolved] (§8 Rule 5).
+ * Resolution notes mandatory (§9.5).
+ */
+export async function resolveComplaint(
+  sql: Sql,
+  actor: Actor,
+  complaintId: string,
+  notes: string,
+): Promise<statemachine.TransitionResult> {
+  const why = (notes ?? '').trim();
+  if (why === '') {
+    throw new ValidationError(MSG_RESOLUTION_NOTES_REQUIRED);
+  }
+  return transitionComplaint(sql, actor, complaintId, COMPLAINT_STATUS_RESOLVED, why, true);
+}
+
+/** closeComplaint moves a Complaint [Resolved] → [Closed] (§8 Rule 5). */
+export async function closeComplaint(sql: Sql, actor: Actor, complaintId: string): Promise<statemachine.TransitionResult> {
+  return transitionComplaint(sql, actor, complaintId, COMPLAINT_STATUS_CLOSED, '', false);
+}
+
+/** Shared owner/lead-gated engine driver for the CPL- status moves. */
+async function transitionComplaint(
+  sql: Sql,
+  actor: Actor,
+  complaintId: string,
+  to: string,
+  notes: string,
+  storeNotes: boolean,
+): Promise<statemachine.TransitionResult> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const ownerAm = await lockComplaintOwner(tx, complaintId);
+    if (!canManageComplaint(actor, ownerAm)) {
+      throw new ForbiddenError(MSG_COMPLAINT_MANAGE_FORBIDDEN);
+    }
+    const res = await statemachine.transition(ex.sm, {
+      machine: MACHINE_COMPLAINT, entityType: 'complaint', table: 'complaints', entityId: complaintId, to, actor,
+    });
+    if (!res.ok) {
+      return res;
+    }
+    if (storeNotes) {
+      await tx`update complaints set resolution_notes = ${notes} where id = ${complaintId}`;
+      await ex.audit.insertAudit({
+        entityType: 'complaint', entityId: complaintId, actorEmployeeId: actor.employeeId, action: 'resolution_notes',
+        beforeJson: null, afterJson: { resolution_notes: notes }, createdBy: actor.employeeId,
+      });
+    }
+    return res;
+  });
+}
+
+/**
+ * getComplaint returns one Complaint if the actor may see it (§8 Rule 4 / §9.1):
+ * OD/Director everywhere; Account lead; the owning AM; and — when tied to a Brief
+ * — that Brief's division staff/lead (read-only context).
+ */
+export async function getComplaint(sql: Queryable, actor: Actor, complaintId: string): Promise<Complaint> {
+  const { complaint, ownerAm, relatedBriefDivision } = await loadComplaint(sql, complaintId);
+  if (!canSeeComplaint(actor, ownerAm, relatedBriefDivision)) {
+    throw new ForbiddenError(MSG_COMPLAINT_FORBIDDEN);
+  }
+  return complaint;
+}
+
+/**
+ * listClientComplaints returns a client's complaints (visibility follows the
+ * client, §8 Rule 3): owning AM, Account lead, OD and Director.
+ */
+export async function listClientComplaints(sql: Queryable, actor: Actor, clientId: string): Promise<Complaint[]> {
+  const rows = await sql<{ released_to_account_at: Date | null; assigned_am_id: string | null }[]>`
+    select released_to_account_at, assigned_am_id from clients where id = ${clientId}`;
+  if (rows.length === 0 || rows[0].released_to_account_at === null) {
+    throw new NotFoundError(MSG_NOT_FOUND);
+  }
+  if (!(permission.canReadDivision(actor, ACCOUNT_DIVISION) || rows[0].assigned_am_id === actor.employeeId)) {
+    throw new ForbiddenError(MSG_COMPLAINT_FORBIDDEN);
+  }
+  const list = await sql<ComplaintRow[]>`
+    select ${complaintCols(sql)} from complaints c where c.client_id = ${clientId} order by c.id desc`;
+  return list.map(rowToComplaint);
+}
+
+// --- Complaint helpers ---
+
+interface ComplaintRow {
+  id: string;
+  client_id: string;
+  related_ref: string | null;
+  source: string;
+  description: string;
+  severity: string;
+  status: string;
+  assigned_to: string | null;
+  resolution_notes: string | null;
+  created_by: string;
+  created_at: Date;
+}
+
+function complaintCols(sql: Queryable) {
+  return sql`c.id, c.client_id, c.related_ref, c.source, c.description, c.severity, c.status,
+    c.assigned_to, c.resolution_notes, c.created_by, c.created_at`;
+}
+
+function rowToComplaint(r: ComplaintRow): Complaint {
+  return {
+    id: r.id, clientId: r.client_id, relatedRef: r.related_ref ?? '', source: r.source,
+    description: r.description, severity: r.severity, status: r.status, assignedTo: r.assigned_to ?? '',
+    resolutionNotes: r.resolution_notes ?? '', createdBy: r.created_by, createdAt: r.created_at,
+  };
+}
+
+/**
+ * validateRelatedRef checks the optional Related Service/Brief points at a
+ * Service OR a Brief of this client (§8 Rule 3).
+ */
+async function validateRelatedRef(tx: Queryable, clientId: string, ref: string): Promise<void> {
+  const svc = await tx<{ one: number }[]>`select 1 as one from services where id = ${ref} and client_id = ${clientId}`;
+  if (svc.length > 0) {
+    return;
+  }
+  const brf = await tx<{ one: number }[]>`
+    select 1 as one from briefs b join services sv on sv.id = b.service_id
+     where b.id = ${ref} and sv.client_id = ${clientId}`;
+  if (brf.length === 0) {
+    throw new ValidationError(MSG_INVALID_RELATED_REF);
+  }
+}
+
+/** lockComplaintOwner row-locks a Complaint and returns its owning AM. */
+async function lockComplaintOwner(tx: Queryable, complaintId: string): Promise<string | null> {
+  const rows = await tx<{ assigned_am_id: string | null }[]>`
+    select c.assigned_am_id from complaints cp join clients c on c.id = cp.client_id
+     where cp.id = ${complaintId} for update`;
+  if (rows.length === 0) {
+    throw new NotFoundError(MSG_COMPLAINT_NOT_FOUND);
+  }
+  return rows[0].assigned_am_id;
+}
+
+/**
+ * loadComplaint reads a Complaint plus the owning AM and, when the related ref is
+ * a Brief, that Brief's division (for the §8 Rule 4 read predicate).
+ */
+async function loadComplaint(
+  sql: Queryable,
+  complaintId: string,
+): Promise<{ complaint: Complaint; ownerAm: string | null; relatedBriefDivision: string }> {
+  const rows = await sql<(ComplaintRow & { owner_am: string | null; brief_division: string | null })[]>`
+    select ${complaintCols(sql)}, cl.assigned_am_id as owner_am, b.assigned_division as brief_division
+      from complaints c
+      join clients cl on cl.id = c.client_id
+      left join briefs b on b.id = c.related_ref
+     where c.id = ${complaintId}`;
+  if (rows.length === 0) {
+    throw new NotFoundError(MSG_COMPLAINT_NOT_FOUND);
+  }
+  return {
+    complaint: rowToComplaint(rows[0]), ownerAm: rows[0].owner_am ?? null,
+    relatedBriefDivision: rows[0].brief_division ?? '',
+  };
 }

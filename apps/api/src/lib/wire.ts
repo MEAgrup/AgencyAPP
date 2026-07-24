@@ -292,6 +292,138 @@ export function toStrategyInput(b: {
   };
 }
 
+// --- M6 Account & Service, Cluster 3 (Briefs) ---
+
+/** module6_account.Brief — a Brief record (path-dependent + recurring fields omitempty). */
+export interface BriefWire {
+  id: string;
+  service_id: string;
+  strategy_id?: string;
+  assigned_division: string;
+  assigned_pic?: string;
+  deliverable_type: string;
+  quantity_target: number;
+  due_date: string;
+  priority: string;
+  recurring: boolean;
+  recurring_frequency?: string;
+  recurring_count?: number;
+  recurring_end_date?: string;
+  instructions?: string;
+  reference_attachments?: string;
+  title: string;
+  status: string;
+  revision_count: number;
+  revision_flagged: boolean;
+  created_by: string;
+  created_at: string;
+}
+
+export function briefToWire(b: account.Brief): BriefWire {
+  return {
+    id: b.id,
+    service_id: b.serviceId,
+    ...(b.strategyId ? { strategy_id: b.strategyId } : {}),
+    assigned_division: b.assignedDivision,
+    ...(b.assignedPic ? { assigned_pic: b.assignedPic } : {}),
+    deliverable_type: b.deliverableType,
+    quantity_target: b.quantityTarget,
+    due_date: b.dueDate,
+    priority: b.priority,
+    recurring: b.recurring,
+    ...(b.recurringFrequency ? { recurring_frequency: b.recurringFrequency } : {}),
+    ...(b.recurringCount ? { recurring_count: b.recurringCount } : {}),
+    ...(b.recurringEndDate ? { recurring_end_date: b.recurringEndDate } : {}),
+    ...(b.instructions ? { instructions: b.instructions } : {}),
+    ...(b.referenceAttachments ? { reference_attachments: b.referenceAttachments } : {}),
+    title: b.title,
+    status: b.status,
+    revision_count: b.revisionCount,
+    revision_flagged: b.revisionFlagged,
+    created_by: b.createdBy,
+    created_at: b.createdAt.toISOString(),
+  };
+}
+
+/** Request body → BriefInput (snake_case wire → camelCase domain). */
+export function toBriefInput(b: {
+  title?: string;
+  strategy_id?: string;
+  assigned_division?: string;
+  assigned_pic?: string;
+  deliverable_type?: string;
+  quantity_target?: number;
+  due_date?: string;
+  priority?: string;
+  recurring?: boolean;
+  recurring_frequency?: string;
+  recurring_count?: number;
+  recurring_end_date?: string;
+  instructions?: string;
+  reference_attachments?: string;
+  is_addendum?: boolean;
+}): account.BriefInput {
+  return {
+    title: b.title ?? '',
+    strategyId: b.strategy_id ?? '',
+    assignedDivision: b.assigned_division ?? '',
+    assignedPic: b.assigned_pic ?? '',
+    deliverableType: b.deliverable_type ?? '',
+    quantityTarget: b.quantity_target ?? 0,
+    dueDate: b.due_date ?? '',
+    priority: b.priority ?? '',
+    recurring: b.recurring === true,
+    recurringFrequency: b.recurring_frequency ?? '',
+    recurringCount: b.recurring_count ?? 0,
+    recurringEndDate: b.recurring_end_date ?? '',
+    instructions: b.instructions ?? '',
+    referenceAttachments: b.reference_attachments ?? '',
+    isAddendum: b.is_addendum === true,
+  };
+}
+
+// --- M6 Account & Service, Cluster 4b (Complaints) ---
+
+/** module6_account.Complaint — a Complaint record (related_ref/assigned_to/resolution_notes omitempty). */
+export interface ComplaintWire {
+  id: string;
+  client_id: string;
+  related_ref?: string;
+  source: string;
+  description: string;
+  severity: string;
+  status: string;
+  assigned_to?: string;
+  resolution_notes?: string;
+  created_by: string;
+  created_at: string;
+}
+
+export function complaintToWire(c: account.Complaint): ComplaintWire {
+  return {
+    id: c.id,
+    client_id: c.clientId,
+    ...(c.relatedRef ? { related_ref: c.relatedRef } : {}),
+    source: c.source,
+    description: c.description,
+    severity: c.severity,
+    status: c.status,
+    ...(c.assignedTo ? { assigned_to: c.assignedTo } : {}),
+    ...(c.resolutionNotes ? { resolution_notes: c.resolutionNotes } : {}),
+    created_by: c.createdBy,
+    created_at: c.createdAt.toISOString(),
+  };
+}
+
+/** Request body → ComplaintInput (snake_case wire → camelCase domain). */
+export function toComplaintInput(b: { description?: string; severity?: string; related_ref?: string }): account.ComplaintInput {
+  return {
+    description: b.description ?? '',
+    severity: b.severity ?? '',
+    relatedRef: b.related_ref ?? '',
+  };
+}
+
 export function leadDetailToWire(d: leads.LeadDetailView): LeadDetailWire {
   const l = d.lead;
   return {

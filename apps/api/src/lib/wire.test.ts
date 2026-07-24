@@ -8,6 +8,8 @@ import {
   amWorkloadToWire,
   assignmentToWire,
   attemptStubToWire,
+  briefToWire,
+  complaintToWire,
   intakeClientToWire,
   leadDetailToWire,
   leadRowToWire,
@@ -16,6 +18,8 @@ import {
   poolRowToWire,
   strategyRequirementToWire,
   strategyToWire,
+  toBriefInput,
+  toComplaintInput,
   toStrategyInput,
 } from './wire';
 
@@ -215,6 +219,65 @@ describe('M6 account wire mappers', () => {
     expect(toStrategyInput({ objective: 'o', target_kpi: 'k', divisions_involved: ['Ads'] })).toEqual({
       objective: 'o', targetKpi: 'k', divisionsInvolved: ['Ads'],
       plannedBriefOutline: '', timelineStart: '', timelineEnd: '',
+    });
+  });
+
+  it('briefToWire maps a Brief; omits empty path-dependent + recurring fields', () => {
+    const b: account.Brief = {
+      id: 'BRF-202607-0001', serviceId: 'SVC-1', strategyId: '', assignedDivision: 'Creative',
+      assignedPic: '', deliverableType: 'Video', quantityTarget: 12, dueDate: '2026-08-15', priority: 'High',
+      recurring: false, recurringFrequency: '', recurringCount: 0, recurringEndDate: '', instructions: '',
+      referenceAttachments: '', title: 'Promo', status: '[To Do]', revisionCount: 0, revisionFlagged: false,
+      createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    };
+    expect(briefToWire(b)).toEqual({
+      id: 'BRF-202607-0001', service_id: 'SVC-1', assigned_division: 'Creative', deliverable_type: 'Video',
+      quantity_target: 12, due_date: '2026-08-15', priority: 'High', recurring: false, title: 'Promo',
+      status: '[To Do]', revision_count: 0, revision_flagged: false, created_by: 'EMP-SINTA',
+      created_at: '2026-07-01T00:00:00.000Z',
+    });
+  });
+
+  it('briefToWire includes strategy_id + recurring block when set', () => {
+    const b: account.Brief = {
+      id: 'BRF-1', serviceId: 'SVC-1', strategyId: 'STR-1', assignedDivision: 'Ads', assignedPic: 'EMP-A',
+      deliverableType: 'Campaign', quantityTarget: 2, dueDate: '2026-08-15', priority: 'Medium',
+      recurring: true, recurringFrequency: 'Weekly', recurringCount: 4, recurringEndDate: '2026-09-15',
+      instructions: 'brief detail', referenceAttachments: 'link', title: 'Ads Q3', status: '[Approved]',
+      revisionCount: 3, revisionFlagged: true, createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    };
+    const w = briefToWire(b);
+    expect(w.strategy_id).toBe('STR-1');
+    expect(w.assigned_pic).toBe('EMP-A');
+    expect(w.recurring_frequency).toBe('Weekly');
+    expect(w.recurring_count).toBe(4);
+    expect(w.recurring_end_date).toBe('2026-09-15');
+    expect(w.revision_flagged).toBe(true);
+  });
+
+  it('toBriefInput maps snake_case body → camelCase BriefInput (defaults)', () => {
+    expect(toBriefInput({ title: 'T', assigned_division: 'Creative', deliverable_type: 'Video', quantity_target: 5, due_date: '2026-08-15', priority: 'High' })).toEqual({
+      title: 'T', strategyId: '', assignedDivision: 'Creative', assignedPic: '', deliverableType: 'Video',
+      quantityTarget: 5, dueDate: '2026-08-15', priority: 'High', recurring: false, recurringFrequency: '',
+      recurringCount: 0, recurringEndDate: '', instructions: '', referenceAttachments: '', isAddendum: false,
+    });
+  });
+
+  it('complaintToWire maps a Complaint; omits empty related_ref/assigned_to/resolution_notes', () => {
+    const c: account.Complaint = {
+      id: 'CPL-202607-0001', clientId: 'CLI-1', relatedRef: '', source: 'WhatsApp (AM-logged)',
+      description: 'telat', severity: 'High', status: '[Open]', assignedTo: '', resolutionNotes: '',
+      createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    };
+    expect(complaintToWire(c)).toEqual({
+      id: 'CPL-202607-0001', client_id: 'CLI-1', source: 'WhatsApp (AM-logged)', description: 'telat',
+      severity: 'High', status: '[Open]', created_by: 'EMP-SINTA', created_at: '2026-07-01T00:00:00.000Z',
+    });
+  });
+
+  it('toComplaintInput maps snake_case body → camelCase ComplaintInput', () => {
+    expect(toComplaintInput({ description: 'd', severity: 'Low', related_ref: 'SVC-1' })).toEqual({
+      description: 'd', severity: 'Low', relatedRef: 'SVC-1',
     });
   });
 });
