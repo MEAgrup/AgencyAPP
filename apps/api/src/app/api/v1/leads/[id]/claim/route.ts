@@ -12,12 +12,13 @@ import { leads } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { handle, json } from '@/lib/http';
+import { attemptStubToWire, leadStubToWire } from '@/lib/wire';
 
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   return handle(async () => {
     const actor = requireActor(request);
     const { id } = await ctx.params;
     const { lead, attempt } = await leads.claim(db(), actor, id);
-    return json({ lead, attempt }, 201);
+    return json({ lead: leadStubToWire(lead), attempt: attemptStubToWire(attempt) }, 201);
   });
 }

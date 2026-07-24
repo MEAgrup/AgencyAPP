@@ -5,11 +5,12 @@
 import { leads } from '@cdps/domain';
 import { db } from '@/lib/db';
 import { handle, json } from '@/lib/http';
+import { leadDetailToWire } from '@/lib/wire';
 
 export async function GET(_request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   return handle(async () => {
     const { id } = await ctx.params;
-    const lead = await leads.get(db(), id);
-    return json({ lead });
+    const detail = await leads.leadDetailView(db(), id);
+    return json(leadDetailToWire(detail));
   });
 }

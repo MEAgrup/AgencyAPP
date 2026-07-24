@@ -625,6 +625,171 @@ export async function get(sql: Queryable, id: string): Promise<LeadDetail> {
   };
 }
 
+// ---------------------------------------------------------------------------
+// FE read models (contract HANDOFF_SESSION_20260719_FE_M0M1 §3/§4/§5): the Sales
+// Pool board, the Leads Database, and lead detail — ported from Go
+// module1_leads/reads.go. camelCase here; the API route maps to the snake_case
+// wire shape web-internal expects. Row scope stays the RLS/service-role concern
+// (as leads.list / leads.get); these do NOT re-implement the permission matrix.
+// `actorEmployeeId` is used only to mark the caller's own rows (my_open_attempt).
+// ---------------------------------------------------------------------------
+
+/** The terminal attempt statuses as an array, for the "open attempt" filter
+ *  (`status <> all(...)`), single-sourced from TERMINAL_ATTEMPT_STATUSES. */
+const OPEN_ATTEMPT_TERMINAL: string[] = [...TERMINAL_ATTEMPT_STATUSES];
+
+/** One Sales Pool board row (contract §3). */
+export interface PoolBoardRow {
+  id: string;
+  leadName: string;
+  phoneNumber: string;
+  source: string;
+  originCampaignId: string | null;
+  createdAt: Date;
+  stale: boolean;
+  openAttemptCount: number;
+  myOpenAttempt: boolean;
+}
+
+/**
+ * poolBoard returns every `[Pool]` lead with its contest counts and the M1-OA-7
+ * stale flag (unclaimed > 24h). Multiple salespeople compete on one pool lead
+ * by design (M1-OA-1); `myOpenAttempt` marks rows the caller already holds.
+ */
+export async function poolBoard(sql: Queryable, actorEmployeeId: string): Promise<PoolBoardRow[]> {
+  const rows = await sql<{
+    id: string; lead_name: string; phone_number: string; source: string;
+    origin_campaign_id: string | null; created_at: Date;
+    stale: boolean; open_attempt_count: string; my_open_attempt: boolean;
+  }[]>`
+    select l.id, l.lead_name, l.phone_number, l.source, l.origin_campaign_id, l.created_at,
+           (l.created_at < now() - interval '24 hours') as stale,
+           (select count(*) from prospect_attempts pa
+             where pa.lead_id = l.id and pa.status <> all(${OPEN_ATTEMPT_TERMINAL})) as open_attempt_count,
+           exists(select 1 from prospect_attempts pa2
+             where pa2.lead_id = l.id and pa2.owner_employee_id = ${actorEmployeeId}
+               and pa2.status <> all(${OPEN_ATTEMPT_TERMINAL})) as my_open_attempt
+    from leads l
+    where l.record_status = ${RECORD_POOL}
+    order by l.created_at desc, l.id desc`;
+  return rows.map((r) => ({
+    id: r.id, leadName: r.lead_name, phoneNumber: r.phone_number, source: r.source,
+    originCampaignId: r.origin_campaign_id, createdAt: r.created_at,
+    stale: r.stale, openAttemptCount: Number(r.open_attempt_count), myOpenAttempt: r.my_open_attempt,
+  }));
+}
+
+/** One Leads Database row (contract §4). */
+export interface LeadsDbRow {
+  id: string;
+  leadName: string;
+  phoneNumber: string;
+  email: string | null;
+  source: string;
+  originDivision: string;
+  originCampaignId: string | null;
+  lastTouchCampaignId: string | null;
+  recordStatus: string;
+  winningAttemptId: string | null;
+  createdAt: Date;
+  openAttemptCount: number;
+}
+
+/**
+ * leadsDatabase returns leads newest-first, optionally filtered by an exact
+ * record_status and a name/phone substring. Filters are parameter no-ops when
+ * empty (`'' = ''` short-circuits), so there is no dynamic SQL to inject into.
+ */
+export async function leadsDatabase(
+  sql: Queryable,
+  filter: { status?: string; q?: string } = {},
+): Promise<LeadsDbRow[]> {
+  const status = filter.status?.trim() ?? '';
+  const q = filter.q?.trim() ?? '';
+  const like = `%${q}%`;
+  const rows = await sql<{
+    id: string; lead_name: string; phone_number: string; email: string | null;
+    source: string; origin_division: string; origin_campaign_id: string | null;
+    last_touch_campaign_id: string | null; record_status: string;
+    winning_attempt_id: string | null; created_at: Date; open_attempt_count: string;
+  }[]>`
+    select l.id, l.lead_name, l.phone_number, l.email, l.source, l.origin_division,
+           l.origin_campaign_id, l.last_touch_campaign_id, l.record_status, l.winning_attempt_id, l.created_at,
+           (select count(*) from prospect_attempts pa
+             where pa.lead_id = l.id and pa.status <> all(${OPEN_ATTEMPT_TERMINAL})) as open_attempt_count
+    from leads l
+    where (${status} = '' or l.record_status = ${status})
+      and (${q} = '' or l.lead_name ilike ${like} or l.phone_number ilike ${like})
+    order by l.created_at desc, l.id desc`;
+  return rows.map((r) => ({
+    id: r.id, leadName: r.lead_name, phoneNumber: r.phone_number, email: r.email,
+    source: r.source, originDivision: r.origin_division, originCampaignId: r.origin_campaign_id,
+    lastTouchCampaignId: r.last_touch_campaign_id, recordStatus: r.record_status,
+    winningAttemptId: r.winning_attempt_id, createdAt: r.created_at,
+    openAttemptCount: Number(r.open_attempt_count),
+  }));
+}
+
+/** The lead block of the detail view (contract §5) — LeadsDbRow minus the rollup. */
+export interface LeadCoreView {
+  id: string;
+  leadName: string;
+  phoneNumber: string;
+  email: string | null;
+  source: string;
+  originDivision: string;
+  originCampaignId: string | null;
+  lastTouchCampaignId: string | null;
+  recordStatus: string;
+  winningAttemptId: string | null;
+  createdAt: Date;
+}
+
+/** Lead detail: the record plus its attempt contest (oldest first). */
+export interface LeadDetailView {
+  lead: LeadCoreView;
+  attempts: LeadAttemptRow[];
+}
+
+/** leadDetailView returns a lead + its attempt contest (NotFoundError if absent). */
+export async function leadDetailView(sql: Queryable, id: string): Promise<LeadDetailView> {
+  const rows = await sql<{
+    id: string; lead_name: string; phone_number: string; email: string | null;
+    source: string; origin_division: string; origin_campaign_id: string | null;
+    last_touch_campaign_id: string | null; record_status: string;
+    winning_attempt_id: string | null; created_at: Date;
+  }[]>`
+    select id, lead_name, phone_number, email, source, origin_division,
+           origin_campaign_id, last_touch_campaign_id, record_status, winning_attempt_id, created_at
+    from leads where id = ${id}`;
+  if (rows.length === 0) {
+    throw new NotFoundError();
+  }
+  const r = rows[0];
+  const attempts = await sql<
+    { id: string; owner_employee_id: string; owner_nama: string; status: string; claimed_at: Date }[]
+  >`
+    select pa.id, pa.owner_employee_id,
+           coalesce(e.nama, pa.owner_employee_id) as owner_nama,
+           pa.status, pa.claimed_at
+    from prospect_attempts pa
+    left join employees e on e.employee_id = pa.owner_employee_id
+    where pa.lead_id = ${id}
+    order by pa.created_at, pa.id`;
+  return {
+    lead: {
+      id: r.id, leadName: r.lead_name, phoneNumber: r.phone_number, email: r.email,
+      source: r.source, originDivision: r.origin_division, originCampaignId: r.origin_campaign_id,
+      lastTouchCampaignId: r.last_touch_campaign_id, recordStatus: r.record_status,
+      winningAttemptId: r.winning_attempt_id, createdAt: r.created_at,
+    },
+    attempts: attempts.map((a) => ({
+      id: a.id, ownerEmployeeId: a.owner_employee_id, ownerNama: a.owner_nama,
+      status: a.status, claimedAt: a.claimed_at,
+    })),
+  };
+}
+
 /**
  * matchByPhone returns the most-recent lead matching phoneNorm (or null), with
  * every OPEN (non-terminal) attempt on it. employees is LEFT JOINed and the owner
