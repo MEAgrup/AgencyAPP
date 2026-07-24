@@ -22,7 +22,7 @@ import {
   list,
   submitBlockRequest,
   transition,
-} from './demo.js';
+} from './demo';
 
 const staff = (): Actor => ({
   employeeId: 'ZZ-STAFF', divisi: 'Sales',

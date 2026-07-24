@@ -17,7 +17,7 @@
  * after validation, exactly like Go's `ident.Next`.
  */
 
-import { period as wibPeriod } from './tz.js';
+import { period as wibPeriod } from './tz';
 
 /** A registered ID prefix and what it identifies. Source: docs/DATA_MODEL.md §1. */
 export interface PrefixInfo {

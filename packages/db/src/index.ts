@@ -12,5 +12,5 @@
  * Reference: SUPABASE_MIGRATION_TECH_APPENDIX §E.2 (pooler) + §B (engines).
  */
 
-export * from './client.js';
-export * from './executors.js';
+export * from './client';
+export * from './executors';

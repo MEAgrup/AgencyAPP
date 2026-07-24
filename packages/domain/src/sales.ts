@@ -30,8 +30,8 @@
 
 import { bi, money, notification, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
-import { effectiveAt, type ServiceView } from './msl.js';
-import { resolveWin } from './leads.js';
+import { effectiveAt, type ServiceView } from './msl';
+import { resolveWin } from './leads';
 
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;

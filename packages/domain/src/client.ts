@@ -502,5 +502,5 @@ export async function listClients(sql: Queryable): Promise<ClientListRow[]> {
 
 // Re-export a shared read (M4 basic Client Record) from the sales read model, so
 // M4 callers have one import surface. The detail shape lives in `sales.getClient`.
-export { getClient } from './sales.js';
-export type { ClientDetail } from './sales.js';
+export { getClient } from './sales';
+export type { ClientDetail } from './sales';

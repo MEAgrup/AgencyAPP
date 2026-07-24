@@ -10,7 +10,7 @@ import { createClient, type Sql } from '@cdps/db';
 import {
   authenticate, loadClaims, loadIdentity, mustChangePassword,
   InvalidCredentialsError, NotProvisionedError, LockedError, MAX_FAILED_ATTEMPTS,
-} from './auth.js';
+} from './auth';
 
 const URL = process.env.DATABASE_URL;
 const describeDb = describe.skipIf(!URL);

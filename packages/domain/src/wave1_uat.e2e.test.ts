@@ -18,24 +18,24 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { money, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
-import { leads } from './index.js';
+import { leads } from './index';
 import {
   close, getClient, markContacted, previewQuote, submitNegotiation, submitQualifiedForm,
   decideNegotiation, DECISION_APPROVE, PAYMENT_SCHEME_TERMIN, validateParties, AllocationTotalError,
   type Actor,
-} from './sales.js';
+} from './sales';
 import {
   verifyPayment, attachContract, getPaymentStatus, commissionAchievement, scanReminders,
   reminderDashboard, changeScheme,
   OverVerificationError, ContractRequiredError, ScheduleTotalError, SchemeLockedError,
   PAYMENT_SEBAGIAN, PAYMENT_LUNAS, INST_JATUH_TEMPO, INST_TERVERIFIKASI,
   MSG_OVER_VERIFICATION, MSG_CONTRACT_REQUIRED, MSG_SCHEDULE_TOTAL,
-} from './finance.js';
+} from './finance';
 import {
   updateClient, addPlatform, updatePlatform, voidService,
   ForbiddenError as ClientForbidden, LockedFieldError, SERVICE_VOIDED,
   MSG_FIELD_ROLE_DENIED, MSG_FIELD_LOCKED,
-} from './client.js';
+} from './client';
 
 const URL = process.env.DATABASE_URL;
 const RUN = !!URL && process.env.UAT === '1';

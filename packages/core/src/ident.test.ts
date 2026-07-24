@@ -8,7 +8,7 @@ import {
   nextId,
   parse,
   periodOf,
-} from './ident.js';
+} from './ident';
 
 const utc = (y: number, mo: number, d: number, h = 0, mi = 0): Date =>
   new Date(Date.UTC(y, mo - 1, d, h, mi, 0, 0));

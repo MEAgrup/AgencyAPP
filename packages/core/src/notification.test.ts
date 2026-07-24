@@ -7,7 +7,7 @@ import {
   emit,
   events,
   isEventType,
-} from './notification.js';
+} from './notification';
 
 describe('frozen catalog', () => {
   it('has exactly 15 events', () => {

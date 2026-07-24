@@ -16,7 +16,7 @@
  * without string-matching Postgres errors.
  */
 
-import { LevelLead, type Actor } from './permission.js';
+import { LevelLead, type Actor } from './permission';
 
 /** Failure codes returned by `sm_transition` (mirror the SQL `code` field). */
 export type TransitionCode =

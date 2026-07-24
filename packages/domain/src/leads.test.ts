@@ -31,7 +31,7 @@ import {
   NotFoundError,
   normalizePhone,
   register,
-} from './leads.js';
+} from './leads';
 
 const budi = (): Actor => ({
   employeeId: 'ZZ-BUDI', divisi: 'Sales',

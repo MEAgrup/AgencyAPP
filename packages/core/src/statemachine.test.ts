@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { makeRole, type Actor } from './permission.js';
+import { makeRole, type Actor } from './permission';
 import {
   type SmExecutor,
   type SmTransitionArgs,
@@ -7,7 +7,7 @@ import {
   isBlocked,
   isRoleDenied,
   transition,
-} from './statemachine.js';
+} from './statemachine';
 
 const actor = (id: string, role: Parameters<typeof makeRole>[0]): Actor => ({
   employeeId: id,
