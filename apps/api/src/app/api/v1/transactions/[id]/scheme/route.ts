@@ -11,7 +11,7 @@ import { db } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
 
 interface Body {
-  payment_scheme?: string;
+  payment_intent_scheme?: string;
   reason?: string;
   installments?: { amount?: string; due_date?: string }[];
 }
@@ -22,9 +22,9 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     const { id } = await ctx.params;
     const b = await readJson<Body>(request);
     await finance.changeScheme(
-      db(), actor, id, b.payment_scheme ?? '', b.reason ?? '',
+      db(), actor, id, b.payment_intent_scheme ?? '', b.reason ?? '',
       (b.installments ?? []).map((i) => ({ amount: i.amount ?? '', dueDate: i.due_date ?? '' })),
     );
-    return json({ ok: true });
+    return json({ status: 'ok' });
   });
 }
