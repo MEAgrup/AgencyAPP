@@ -127,9 +127,12 @@ Account), KOL, Finance, OD, Director. Pastikan tiap peran melihat scope yang ben
 (Staff = data sendiri; Lead = se-divisi; OD = read-only semua; Director = penuh).
 Password awal semua akun: `MeaCdps2026!`.
 
-> ⚠️ O37 (baca `docs/O37_RLS_DECISION_BRIEF.md`): read route saat ini via service-role
-> (RLS ter-bypass) → over-permissive. UAT internal terkendali boleh; jangan buka ke
-> full multi-role / portal eksternal sebelum O37 diputus.
+> ✅ O37 (RESOLVED 2026-07-24, `docs/O37_RLS_DECISION_BRIEF.md`): read user-facing
+> kini lewat `readAs` → **RLS men-scope per peran** (bukan lagi service-role bypass).
+> Dashboard finance-wide (reminders/queue) = system read + gate Finance lead/OD/Director.
+> **Prasyarat deploy:** role di `DATABASE_URL` harus bisa `SET ROLE authenticated`
+> (role pooler Supabase memenuhi). Verifikasi smoke-login: staff hanya lihat data
+> sendiri, lead se-divisi, OD/Director lintas-divisi.
 
 > ⚠️ O38 (forced password change): 58 akun berbagi password default `MeaCdps2026!` dan
 > BELUM ada endpoint/flow ganti-password (`must_change_password` tidak ditegakkan). Untuk

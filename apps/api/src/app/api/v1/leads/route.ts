@@ -12,18 +12,21 @@
  */
 import { leads } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { db, readAs } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
 import { attemptStubToWire, leadRowToWire, leadStubToWire } from '@/lib/wire';
 
 export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
+    const actor = await requireActor(request);
     // web-internal passes optional ?status=<record_status>&q=<name/phone>.
     const params = new URL(request.url).searchParams;
-    const rows = await leads.leadsDatabase(db(), {
-      status: params.get('status') ?? undefined,
-      q: params.get('q') ?? undefined,
-    });
+    const rows = await readAs(actor, (tx) =>
+      leads.leadsDatabase(tx, {
+        status: params.get('status') ?? undefined,
+        q: params.get('q') ?? undefined,
+      }),
+    );
     return json({ data: rows.map(leadRowToWire) });
   });
 }

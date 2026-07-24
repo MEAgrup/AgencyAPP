@@ -5,13 +5,15 @@
  * handleGetCommissionAchievement. NotFound → 404.
  */
 import { finance } from '@cdps/domain';
-import { db } from '@/lib/db';
+import { requireActor } from '@/lib/auth';
+import { readAs } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 
-export async function GET(_request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
+export async function GET(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   return handle(async () => {
+    const actor = await requireActor(request);
     const { id } = await ctx.params;
-    const commission = await finance.commissionAchievement(db(), id);
+    const commission = await readAs(actor, (tx) => finance.commissionAchievement(tx, id));
     return json({ commission });
   });
 }

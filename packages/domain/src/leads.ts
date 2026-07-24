@@ -607,10 +607,9 @@ export async function get(sql: Queryable, id: string): Promise<LeadDetail> {
     { id: string; owner_employee_id: string; owner_nama: string; status: string; claimed_at: Date }[]
   >`
     select pa.id, pa.owner_employee_id,
-           coalesce(e.nama, pa.owner_employee_id) as owner_nama,
+           public.employee_display_name(pa.owner_employee_id) as owner_nama,
            pa.status, pa.claimed_at
     from prospect_attempts pa
-    left join employees e on e.employee_id = pa.owner_employee_id
     where pa.lead_id = ${id}
     order by pa.created_at, pa.id`;
   return {
@@ -770,10 +769,9 @@ export async function leadDetailView(sql: Queryable, id: string): Promise<LeadDe
     { id: string; owner_employee_id: string; owner_nama: string; status: string; claimed_at: Date }[]
   >`
     select pa.id, pa.owner_employee_id,
-           coalesce(e.nama, pa.owner_employee_id) as owner_nama,
+           public.employee_display_name(pa.owner_employee_id) as owner_nama,
            pa.status, pa.claimed_at
     from prospect_attempts pa
-    left join employees e on e.employee_id = pa.owner_employee_id
     where pa.lead_id = ${id}
     order by pa.created_at, pa.id`;
   return {
@@ -810,10 +808,9 @@ export async function matchByPhone(q: Queryable, phoneNorm: string): Promise<Exi
   const m: ExistingLead = { id: leadRows[0].id, recordStatus: leadRows[0].record_status, openAttempts: [] };
   const attemptRows = await q<{ owner_employee_id: string; owner_name: string; status: string }[]>`
     select pa.owner_employee_id,
-           coalesce(e.nama, pa.owner_employee_id) as owner_name,
+           public.employee_display_name(pa.owner_employee_id) as owner_name,
            pa.status
     from prospect_attempts pa
-    left join employees e on e.employee_id = pa.owner_employee_id
     where pa.lead_id = ${m.id}`;
   for (const a of attemptRows) {
     if (!isTerminalAttemptStatus(a.status)) {
@@ -838,10 +835,9 @@ async function matchByLeadId(tx: Queryable, leadId: string): Promise<ExistingLea
   const m: ExistingLead = { id: leadRows[0].id, recordStatus: leadRows[0].record_status, openAttempts: [] };
   const attemptRows = await tx<{ owner_employee_id: string; owner_name: string; status: string }[]>`
     select pa.owner_employee_id,
-           coalesce(e.nama, pa.owner_employee_id) as owner_name,
+           public.employee_display_name(pa.owner_employee_id) as owner_name,
            pa.status
     from prospect_attempts pa
-    left join employees e on e.employee_id = pa.owner_employee_id
     where pa.lead_id = ${m.id}`;
   for (const a of attemptRows) {
     if (!isTerminalAttemptStatus(a.status)) {

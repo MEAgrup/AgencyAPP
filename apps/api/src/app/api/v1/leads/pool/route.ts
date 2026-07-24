@@ -7,14 +7,14 @@
  */
 import { leads } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { readAs } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 import { poolRowToWire } from '@/lib/wire';
 
 export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
     const actor = await requireActor(request);
-    const rows = await leads.poolBoard(db(), actor.employeeId);
+    const rows = await readAs(actor, (tx) => leads.poolBoard(tx, actor.employeeId));
     return json({ data: rows.map(poolRowToWire) });
   });
 }

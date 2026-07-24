@@ -488,10 +488,9 @@ export async function listClients(sql: Queryable): Promise<ClientListRow[]> {
     }[]
   >`
     select c.id, c.toko, c.nama_pic, c.kota, c.kategori, c.sales_pic_id,
-           coalesce(e.nama, c.sales_pic_id) as sales_pic_nama, c.assigned_am_id,
+           public.employee_display_name(c.sales_pic_id) as sales_pic_nama, c.assigned_am_id,
            c.payment_intent, c.released_to_account_at, c.created_at
     from clients c
-    left join employees e on e.employee_id = c.sales_pic_id
     order by c.created_at desc, c.id desc`;
   return rows.map((r) => ({
     id: r.id, toko: r.toko, namaPic: r.nama_pic, kota: r.kota, kategori: r.kategori,

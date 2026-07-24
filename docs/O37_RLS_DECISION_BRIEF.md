@@ -1,8 +1,15 @@
 # O37 — Read-path authorization: RLS vs service-role (decision brief)
 
-> Status: **OPEN** — recommendation below, decision owned by Yohan/Nerissa + arsitek.
-> Companion to the `O37` row in `docs/DECISIONS.md`. Nothing here is implemented;
-> this brief exists so the choice can be made quickly and correctly.
+> Status: **RESOLVED / IMPLEMENTED 2026-07-24** — option (a)+(c) below was built
+> (user directive "selesaikan 37"). Reads: `apps/api/src/lib/db.ts` `readAs(actor,…)`
+> (SET LOCAL ROLE authenticated + inject `request.jwt.claims`); all user-facing GETs
+> converted; finance-wide dashboards use the named `readAsSystem` path gated by
+> `canReadDivision('Finance')`; owner/PIC names resolve via
+> `employee_display_name()` SECURITY DEFINER (migration `20260102000006`). Verified
+> on CDPS SG (staff→own, Director/OD→all) + `apps/api` `readAs` integration test +
+> `rls_checks.sql`. Deploy note: the `DATABASE_URL` role must be able to
+> `SET ROLE authenticated` (Supabase pooler role can). The rest of this brief is
+> the original decision record.
 
 ## 1. The problem (what O37 flagged)
 

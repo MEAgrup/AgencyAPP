@@ -7,13 +7,20 @@
  * `reminders` array (overdue-first, then upcoming, preserving domain order).
  */
 import { finance } from '@cdps/domain';
-import { db } from '@/lib/db';
+import { permission } from '@cdps/core';
+import { requireActor } from '@/lib/auth';
+import { readAsSystem } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 import { outstandingRowToWire, reminderRowToWire } from '@/lib/wire';
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
-    const dashboard = await finance.reminderDashboard(db());
+    // Finance-wide operational view (cross-client) — a named system read (O37).
+    const actor = await requireActor(request);
+    if (!permission.canReadDivision(actor, 'Finance')) {
+      return json({ error: 'forbidden: Finance lead / OD / Director only' }, 403);
+    }
+    const dashboard = await readAsSystem((sql) => finance.reminderDashboard(sql));
     return json({
       reminders: [...dashboard.overdue, ...dashboard.upcoming].map(reminderRowToWire),
       outstanding_no_due_date: dashboard.outstandingNoDueDate.map(outstandingRowToWire),

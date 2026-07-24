@@ -4,15 +4,17 @@
  * Response: { data: AttemptRow[] } (FE sales.ts listAttempts).
  */
 import { sales } from '@cdps/domain';
-import { db } from '@/lib/db';
+import { requireActor } from '@/lib/auth';
+import { readAs } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 import { attemptRowToWire } from '@/lib/wire';
 
 export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
+    const actor = await requireActor(request);
     const url = new URL(request.url);
     const status = url.searchParams.get('status') ?? '';
-    const attempts = await sales.listAttempts(db(), status ? { status } : undefined);
+    const attempts = await readAs(actor, (tx) => sales.listAttempts(tx, status ? { status } : undefined));
     return json({ data: attempts.map(attemptRowToWire) });
   });
 }
