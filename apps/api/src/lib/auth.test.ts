@@ -7,7 +7,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   actorFromToken,
   bearerToken,
+  clearedSessionCookie,
+  cookieValue,
   requireActor,
+  SESSION_COOKIE,
+  sessionCookie,
+  tokenFromRequest,
   verifyJwtHS256,
 } from './auth';
 import { UnauthorizedError } from './http';
@@ -103,15 +108,78 @@ describe('bearerToken', () => {
   });
 });
 
+describe('cookieValue', () => {
+  it('reads a named cookie from the Cookie header', () => {
+    const req = new Request('http://x/', { headers: { cookie: `a=1; ${SESSION_COOKIE}=tok.en.val; b=2` } });
+    expect(cookieValue(req, SESSION_COOKIE)).toBe('tok.en.val');
+  });
+
+  it('url-decodes the value', () => {
+    const req = new Request('http://x/', { headers: { cookie: `${SESSION_COOKIE}=a%20b` } });
+    expect(cookieValue(req, SESSION_COOKIE)).toBe('a b');
+  });
+
+  it('returns null when the cookie / header is absent', () => {
+    expect(cookieValue(new Request('http://x/'), SESSION_COOKIE)).toBeNull();
+    const req = new Request('http://x/', { headers: { cookie: 'other=1' } });
+    expect(cookieValue(req, SESSION_COOKIE)).toBeNull();
+  });
+});
+
+describe('tokenFromRequest', () => {
+  it('prefers the Authorization bearer header', () => {
+    const req = new Request('http://x/', {
+      headers: { authorization: 'Bearer header.tok', cookie: `${SESSION_COOKIE}=cookie.tok` },
+    });
+    expect(tokenFromRequest(req)).toBe('header.tok');
+  });
+
+  it('falls back to the session cookie', () => {
+    const req = new Request('http://x/', { headers: { cookie: `${SESSION_COOKIE}=cookie.tok` } });
+    expect(tokenFromRequest(req)).toBe('cookie.tok');
+  });
+
+  it('throws the BI session string when neither is present', () => {
+    expect(() => tokenFromRequest(new Request('http://x/'))).toThrow(/\[sesi tidak valid/);
+  });
+});
+
+describe('sessionCookie / clearedSessionCookie', () => {
+  it('serializes an httpOnly, SameSite=Lax cookie with the token and Max-Age', () => {
+    const c = sessionCookie('a.b.c', 3600);
+    expect(c).toContain(`${SESSION_COOKIE}=a.b.c`);
+    expect(c).toContain('HttpOnly');
+    expect(c).toContain('SameSite=Lax');
+    expect(c).toContain('Max-Age=3600');
+  });
+
+  it('clears the cookie with Max-Age=0', () => {
+    const c = clearedSessionCookie();
+    expect(c).toContain(`${SESSION_COOKIE}=;`);
+    expect(c).toContain('Max-Age=0');
+  });
+});
+
 describe('requireActor', () => {
   const prev = process.env.SUPABASE_JWT_SECRET;
   afterEach(() => {
     process.env.SUPABASE_JWT_SECRET = prev;
   });
 
-  it('reads the secret from the environment and resolves the actor', () => {
+  it('reads the secret from the environment and resolves the actor (bearer)', () => {
     process.env.SUPABASE_JWT_SECRET = SECRET;
     const req = new Request('http://x/', { headers: { authorization: `Bearer ${sign(staffClaims)}` } });
     expect(requireActor(req).employeeId).toBe('EMP-1');
+  });
+
+  it('resolves the actor from the session cookie', () => {
+    process.env.SUPABASE_JWT_SECRET = SECRET;
+    const req = new Request('http://x/', { headers: { cookie: `${SESSION_COOKIE}=${sign(staffClaims)}` } });
+    expect(requireActor(req).employeeId).toBe('EMP-1');
+  });
+
+  it('throws when no token is present at all', () => {
+    process.env.SUPABASE_JWT_SECRET = SECRET;
+    expect(() => requireActor(new Request('http://x/'))).toThrow(UnauthorizedError);
   });
 });
