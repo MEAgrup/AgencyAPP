@@ -14,7 +14,7 @@ export async function POST(
   ctx: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = await requireActor(request);
     const { id } = await ctx.params;
     const body = await readJson<{ reason?: string }>(request);
     const req = await demo.submitBlockRequest(db(), actor, id, body.reason ?? '');

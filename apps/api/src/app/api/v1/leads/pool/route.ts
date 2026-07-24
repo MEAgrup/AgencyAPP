@@ -13,7 +13,7 @@ import { poolRowToWire } from '@/lib/wire';
 
 export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = await requireActor(request);
     const rows = await leads.poolBoard(db(), actor.employeeId);
     return json({ data: rows.map(poolRowToWire) });
   });

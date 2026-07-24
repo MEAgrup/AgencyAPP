@@ -20,7 +20,7 @@ export async function GET(): Promise<Response> {
 
 export async function POST(request: Request): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = await requireActor(request);
     const body = await readJson<{ title?: string; description?: string }>(request);
     const task = await demo.create(db(), actor, {
       title: body.title ?? '',

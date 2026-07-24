@@ -27,7 +27,7 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
 
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = await requireActor(request);
     const { id } = await ctx.params;
     const b = await readJson<{ reason?: string; note?: string }>(request);
     await finance.flagBermasalah(db(), actor, id, b.reason ?? b.note ?? '');

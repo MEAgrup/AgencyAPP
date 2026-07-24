@@ -21,7 +21,7 @@ export async function PATCH(
   ctx: { params: Promise<{ id: string; pid: string }> },
 ): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = await requireActor(request);
     const { id, pid } = await ctx.params;
     const platformId = Number(pid);
     if (!Number.isInteger(platformId)) {

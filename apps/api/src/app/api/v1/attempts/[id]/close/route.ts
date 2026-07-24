@@ -27,7 +27,7 @@ interface Body {
 
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = await requireActor(request);
     const { id } = await ctx.params;
     const b = await readJson<Body>(request);
     const result = await sales.close(db(), actor, id, {

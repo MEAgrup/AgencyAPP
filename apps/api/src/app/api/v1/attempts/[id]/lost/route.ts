@@ -13,7 +13,7 @@ import { handle, json } from '@/lib/http';
 
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = await requireActor(request);
     const { id } = await ctx.params;
     const result = await sales.markLost(db(), actor, id);
     if (!result.ok) {

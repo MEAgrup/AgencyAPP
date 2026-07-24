@@ -13,7 +13,7 @@ import { quoteToWire } from '@/lib/wire';
 
 export async function POST(request: Request): Promise<Response> {
   return handle(async () => {
-    requireActor(request);
+    await requireActor(request);
     const body = await readJson<{
       services?: { master_service_id?: string; quantity?: number; amount?: string }[];
     }>(request);

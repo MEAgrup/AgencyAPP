@@ -9,14 +9,25 @@
 
 ## Kredensial yang dibutuhkan (dan yang TIDAK)
 
-Kode hanya membaca 4 env var — **tidak ada `SERVICE_ROLE_KEY`**:
+Kode membaca **3 env var** — **tidak ada `SERVICE_ROLE_KEY`, dan `SUPABASE_JWT_SECRET`
+tidak lagi wajib** (lihat catatan JWT di bawah):
 
 | Env | Sumber di Supabase | Dipakai oleh |
 |-----|--------------------|--------------|
-| `DATABASE_URL` | Settings → Database → Connection string (pooler 6543, role privileged/`postgres`) | apps/api (akses DB langsung) |
-| `NEXT_PUBLIC_SUPABASE_URL` | Settings → API → Project URL | web-internal (login) |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Settings → API → `anon` public key | web-internal (login) |
-| `SUPABASE_JWT_SECRET` | Settings → API → JWT Settings → JWT Secret | apps/api (verifikasi JWT HS256) |
+| `DATABASE_URL` | Settings → Database → **Connection string** (Transaction pooler, port 6543) | apps/api (akses DB langsung) |
+| `NEXT_PUBLIC_SUPABASE_URL` | Settings → API → Project URL | apps/api (BFF login + JWKS), web-internal |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Settings → API → `anon` public key | apps/api (BFF login) |
+| `SUPABASE_JWT_SECRET` *(opsional)* | Settings → API → JWT Keys → **Legacy JWT Secret** | apps/api — HANYA jika project masih memakai signing key HS256 lama |
+
+### Catatan JWT — signing key asymmetric (ES256)
+Project baru (CDPS SG dibuat 2026-07-22) menandatangani access token dengan
+**asymmetric signing key (ES256)** — `kid`-nya berupa UUID (mis. `57812f50-…`),
+bukan legacy shared secret. `apps/api` memverifikasi token via **JWKS**
+(`${NEXT_PUBLIC_SUPABASE_URL}/auth/v1/.well-known/jwks.json`, `lib/jwks.ts`), jadi
+**tidak butuh `SUPABASE_JWT_SECRET`**. Kode tetap menerima HS256 (backward-compat):
+jika suatu saat project di-roll ke Legacy HS256, set `SUPABASE_JWT_SECRET` dan token
+HS256 pun tervalidasi tanpa perubahan kode. ⚠️ Deploy `apps/api` **harus punya egress
+ke `*.supabase.co`** agar bisa mengambil JWKS.
 
 - "service-role" di kode = **Postgres role** koneksi `DATABASE_URL` (untuk tulis via
   RPC SECURITY DEFINER), **bukan** service_role API key.

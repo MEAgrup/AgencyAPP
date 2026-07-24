@@ -27,7 +27,7 @@ function toLines(rows: LineBody[] | undefined): sales.ProposalLine[] {
 
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = await requireActor(request);
     const { id } = await ctx.params;
     const body = await readJson<{ no_negotiation?: boolean; lines?: LineBody[] }>(request);
     const result = await sales.submitNegotiation(db(), actor, id, toLines(body.lines), body.no_negotiation === true);

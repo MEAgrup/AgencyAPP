@@ -166,20 +166,20 @@ describe('requireActor', () => {
     process.env.SUPABASE_JWT_SECRET = prev;
   });
 
-  it('reads the secret from the environment and resolves the actor (bearer)', () => {
+  it('reads the secret from the environment and resolves the actor (bearer)', async () => {
     process.env.SUPABASE_JWT_SECRET = SECRET;
     const req = new Request('http://x/', { headers: { authorization: `Bearer ${sign(staffClaims)}` } });
-    expect(requireActor(req).employeeId).toBe('EMP-1');
+    expect((await requireActor(req)).employeeId).toBe('EMP-1');
   });
 
-  it('resolves the actor from the session cookie', () => {
+  it('resolves the actor from the session cookie', async () => {
     process.env.SUPABASE_JWT_SECRET = SECRET;
     const req = new Request('http://x/', { headers: { cookie: `${SESSION_COOKIE}=${sign(staffClaims)}` } });
-    expect(requireActor(req).employeeId).toBe('EMP-1');
+    expect((await requireActor(req)).employeeId).toBe('EMP-1');
   });
 
-  it('throws when no token is present at all', () => {
+  it('throws when no token is present at all', async () => {
     process.env.SUPABASE_JWT_SECRET = SECRET;
-    expect(() => requireActor(new Request('http://x/'))).toThrow(UnauthorizedError);
+    await expect(requireActor(new Request('http://x/'))).rejects.toThrow(UnauthorizedError);
   });
 });

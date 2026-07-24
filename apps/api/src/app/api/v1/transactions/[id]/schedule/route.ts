@@ -17,7 +17,7 @@ import { installmentToWire } from '@/lib/wire';
 
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = await requireActor(request);
     const { id } = await ctx.params;
     const b = await readJson<{ items?: { amount?: string; due_date?: string }[] }>(request);
     const items = (b.items ?? []).map((item) => ({

@@ -18,7 +18,7 @@ import { BadRequestError, handle, json, readJson } from '@/lib/http';
 
 export async function POST(request: Request): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = await requireActor(request);
     if (!permission.canManageAdmin(actor)) {
       // 403 — authenticated but not a Director.
       return json({ error: 'forbidden: Director role required' }, 403);

@@ -13,7 +13,7 @@ import { notificationRowToWire } from '@/lib/wire';
 
 export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = await requireActor(request);
     const unreadOnly = new URL(request.url).searchParams.get('unread') === '1';
     const inbox = await notifications.list(db(), actor, unreadOnly);
     return json({ data: inbox.rows.map(notificationRowToWire), unread_count: inbox.unreadCount });

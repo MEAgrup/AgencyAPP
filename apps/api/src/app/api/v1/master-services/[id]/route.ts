@@ -27,7 +27,7 @@ interface ServiceBody {
 
 export async function PUT(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = await requireActor(request);
     const { id } = await ctx.params;
     const b = await readJson<ServiceBody>(request);
     const versionNo = await msl.updateService(db(), actor, id, {

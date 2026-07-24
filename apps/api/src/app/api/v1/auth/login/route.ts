@@ -9,7 +9,7 @@
  * incomplete BI string.
  */
 import { auth } from '@cdps/domain';
-import { actorFromToken, sessionCookie } from '@/lib/auth';
+import { actorFromAccessToken, sessionCookie } from '@/lib/auth';
 import { passwordGrant } from '@/lib/gotrue';
 import { db } from '@/lib/db';
 import { BadRequestError, handle, json, readJson, UnauthorizedError } from '@/lib/http';
@@ -24,8 +24,7 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const session = await passwordGrant(email, password);
-    const secret = process.env.SUPABASE_JWT_SECRET ?? '';
-    const actor = actorFromToken(session.access_token, secret);
+    const actor = await actorFromAccessToken(session.access_token);
 
     let me;
     try {

@@ -30,7 +30,7 @@ export async function GET(request: Request): Promise<Response> {
 
 export async function POST(request: Request): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = await requireActor(request);
     const body = await readJson<{
       lead_name?: string;
       phone_number?: string;

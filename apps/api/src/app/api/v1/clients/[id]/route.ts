@@ -26,7 +26,7 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
 
 export async function PATCH(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = await requireActor(request);
     const { id } = await ctx.params;
     const b = await readJson<{
       nama_pic?: string;

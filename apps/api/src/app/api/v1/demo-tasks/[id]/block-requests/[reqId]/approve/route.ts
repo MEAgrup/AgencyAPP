@@ -15,7 +15,7 @@ export async function POST(
   ctx: { params: Promise<{ id: string; reqId: string }> },
 ): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = await requireActor(request);
     const { id, reqId } = await ctx.params;
     const result = await demo.approveBlockRequest(db(), actor, id, reqId);
     return transitionResponse(result);

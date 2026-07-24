@@ -10,7 +10,7 @@ import { handle, json, readJson, transitionResponse } from '@/lib/http';
 
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = await requireActor(request);
     const { id } = await ctx.params;
     const body = await readJson<{ reasons?: string[]; lainnya_text?: string }>(request);
     const result = await sales.setNotQualified(db(), actor, id, body.reasons ?? [], body.lainnya_text ?? '');

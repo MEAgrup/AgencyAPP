@@ -11,7 +11,7 @@ import { handle, json } from '@/lib/http';
 
 export async function POST(request: Request): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = await requireActor(request);
     if (!finance.canManageScheme(actor)) {
       throw new finance.ForbiddenError(); // 403 via the shared error mapper
     }

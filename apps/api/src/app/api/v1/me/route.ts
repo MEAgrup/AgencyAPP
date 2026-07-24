@@ -13,7 +13,7 @@ import { handle, json, UnauthorizedError } from '@/lib/http';
 
 export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = await requireActor(request);
     try {
       const me = await auth.getMe(db(), actor);
       return json(me);
