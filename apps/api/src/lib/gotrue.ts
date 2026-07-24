@@ -71,6 +71,37 @@ export async function passwordGrant(
 }
 
 /**
+ * updatePassword sets the signed-in user's password via GoTrue's
+ * `PUT /auth/v1/user`, authenticated with their access token. GoTrue re-hashes
+ * and persists it to auth.users.encrypted_password. A 4xx (weak password,
+ * expired/invalid token) surfaces as UnauthorizedError with a BI string; other
+ * failures throw → 500. Used by the /auth/change-password BFF route (O38).
+ */
+export async function updatePassword(
+  accessToken: string,
+  newPassword: string,
+  fetchImpl?: FetchLike,
+): Promise<void> {
+  const { url, anonKey, fetchImpl: fi } = config(fetchImpl);
+  const doFetch = fi ?? fetch;
+  const res = await doFetch(`${url}/auth/v1/user`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: anonKey,
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ password: newPassword }),
+  });
+  if (res.status >= 400 && res.status < 500) {
+    throw new UnauthorizedError('[gagal mengubah kata sandi, silahkan coba lagi]');
+  }
+  if (!res.ok) {
+    throw new Error(`GoTrue update-password failed: ${res.status}`);
+  }
+}
+
+/**
  * signOut revokes a GoTrue session server-side (best-effort). A failure here
  * never blocks logout — the cookie is cleared regardless by the caller.
  */

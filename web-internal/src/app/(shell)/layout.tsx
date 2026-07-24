@@ -12,8 +12,12 @@ export default function ShellLayout({ children }: { children: React.ReactNode })
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && !employee) {
+    if (loading) return;
+    if (!employee) {
       router.replace('/login');
+    } else if (employee.must_change_password) {
+      // O38: forced first-login change — no workspace page until it's done.
+      router.replace('/change-password');
     }
   }, [loading, employee, router]);
 
@@ -21,7 +25,7 @@ export default function ShellLayout({ children }: { children: React.ReactNode })
     return <div className="pageLoading">Memuat...</div>;
   }
 
-  if (!employee) {
+  if (!employee || employee.must_change_password) {
     // Redirect effect above will kick in; render nothing meanwhile.
     return null;
   }

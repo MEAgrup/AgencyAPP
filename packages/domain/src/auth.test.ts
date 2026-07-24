@@ -60,6 +60,7 @@ describeDb('getMe (integration)', () => {
       email: 'zz-me-1@mea.co.id',
       divisi: 'Sales',
       jabatan: 'Sales Executive',
+      must_change_password: false,
     });
     expect(me.role).toEqual({ division: 'Sales', level: 'lead', od: false, director: false });
   });

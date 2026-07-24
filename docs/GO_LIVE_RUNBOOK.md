@@ -134,10 +134,10 @@ Password awal semua akun: `MeaCdps2026!`.
 > (role pooler Supabase memenuhi). Verifikasi smoke-login: staff hanya lihat data
 > sendiri, lead se-divisi, OD/Director lintas-divisi.
 
-> ⚠️ O38 (forced password change): 58 akun berbagi password default `MeaCdps2026!` dan
-> BELUM ada endpoint/flow ganti-password (`must_change_password` tidak ditegakkan). Untuk
-> UAT terkendali boleh; sebelum rollout riil, putuskan mekanisme (rekomendasi: GoTrue
-> `PUT /auth/v1/user` + clear flag) lalu implementasi first-login change-password.
+> ✅ O38 (RESOLVED 2026-07-24): forced first-login change aktif. 58 akun tetap lahir
+> dgn `must_change_password=true` + default `MeaCdps2026!`; saat login pertama FE
+> memaksa `/change-password` (GoTrue `PUT /auth/v1/user` + clear gate). Smoke-login:
+> pastikan login pertama mengarah ke ganti-sandi dan sesudahnya masuk workspace.
 
 ---
 

@@ -17,7 +17,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!loading && employee) {
-      router.replace('/');
+      router.replace(employee.must_change_password ? '/change-password' : '/');
     }
   }, [loading, employee, router]);
 
@@ -28,7 +28,7 @@ export default function LoginPage() {
     try {
       const session = await api.post<MeResponse>('/auth/login', { email, password });
       setSession(session);
-      router.replace('/');
+      router.replace(session.employee.must_change_password ? '/change-password' : '/');
     } catch (err) {
       setError(errorMessage(err));
     } finally {

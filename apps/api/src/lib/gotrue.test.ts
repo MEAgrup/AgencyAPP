@@ -4,7 +4,7 @@
  * request shape (endpoint, apikey header).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { passwordGrant, signOut } from './gotrue';
+import { passwordGrant, signOut, updatePassword } from './gotrue';
 import { UnauthorizedError } from './http';
 
 const prevUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -52,6 +52,33 @@ describe('passwordGrant', () => {
   it('throws a server error when Supabase is unconfigured', async () => {
     delete process.env.NEXT_PUBLIC_SUPABASE_URL;
     await expect(passwordGrant('a@b.c', 'pw', vi.fn())).rejects.toThrow(/not configured/);
+  });
+});
+
+describe('updatePassword', () => {
+  it('PUTs /auth/v1/user with the bearer token and the new password', async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('https://proj.supabase.co/auth/v1/user');
+      expect(init?.method).toBe('PUT');
+      const headers = init?.headers as Record<string, string>;
+      expect(headers.apikey).toBe('anon-key');
+      expect(headers.Authorization).toBe('Bearer tok.en.jwt');
+      expect(JSON.parse(init?.body as string)).toEqual({ password: 'new-secret-9' });
+      return jsonResponse({ id: 'u1' });
+    });
+    await expect(updatePassword('tok.en.jwt', 'new-secret-9', fetchImpl)).resolves.toBeUndefined();
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it('maps a 4xx (weak password / bad token) to UnauthorizedError with a BI string', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ error: 'weak_password' }, 422));
+    await expect(updatePassword('tok', 'x', fetchImpl)).rejects.toThrow(UnauthorizedError);
+    await expect(updatePassword('tok', 'x', fetchImpl)).rejects.toThrow('[gagal mengubah kata sandi');
+  });
+
+  it('maps a 5xx to a generic error (→ 500)', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ error: 'server' }, 500));
+    await expect(updatePassword('tok', 'new-secret-9', fetchImpl)).rejects.toThrow(/update-password failed: 500/);
   });
 });
 

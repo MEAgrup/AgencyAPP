@@ -7,6 +7,9 @@ export interface Employee {
   email: string;
   divisi: string;
   jabatan: string;
+  /** Forced first-login password change gate (O38). When true, the shell routes
+   *  the session to /change-password before any workspace page. */
+  must_change_password: boolean;
 }
 
 export interface Role {

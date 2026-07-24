@@ -26,6 +26,9 @@ export interface MeEmployee {
   email: string;
   divisi: string;
   jabatan: string;
+  /** Forced first-login password change gate (O38). When true, web-internal
+   *  routes the session to /change-password before any workspace page. */
+  must_change_password: boolean;
 }
 
 /** The /me payload: profile + the JWT-resolved role. */
@@ -52,7 +55,7 @@ export class NotFoundError extends Error {
  */
 export async function getMe(sql: Queryable, actor: Actor): Promise<Me> {
   const rows = await sql<MeEmployee[]>`
-    select employee_id, nama, email, divisi, jabatan
+    select employee_id, nama, email, divisi, jabatan, must_change_password
     from employees
     where employee_id = ${actor.employeeId} and status_aktif = true`;
   if (rows.length === 0) {
