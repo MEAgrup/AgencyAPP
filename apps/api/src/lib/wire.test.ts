@@ -3,9 +3,12 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { leads, msl } from '@cdps/domain';
+import type { account, leads, msl } from '@cdps/domain';
 import {
+  amWorkloadToWire,
+  assignmentToWire,
   attemptStubToWire,
+  intakeClientToWire,
   leadDetailToWire,
   leadRowToWire,
   leadStubToWire,
@@ -120,5 +123,49 @@ describe('leads wire mappers', () => {
     expect(wire.attempts).toEqual([
       { id: 'PRSP-1', owner_employee_id: 'EMP-1', owner_nama: 'Budi', status: 'New Lead', claimed_at: '2026-07-02T00:00:00.000Z' },
     ]);
+  });
+});
+
+describe('M6 account wire mappers', () => {
+  it('intakeClientToWire maps IntakeClient (ISO released_to_account_at)', () => {
+    const c: account.IntakeClient = {
+      clientId: 'CLI-202607-0001', namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta',
+      kategori: 'Fashion', serviceCount: 2, releasedToAccountAt: new Date('2026-07-01T00:00:00.000Z'),
+    };
+    expect(intakeClientToWire(c)).toEqual({
+      client_id: 'CLI-202607-0001', nama_pic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta',
+      kategori: 'Fashion', service_count: 2, released_to_account_at: '2026-07-01T00:00:00.000Z',
+    });
+  });
+
+  it('intakeClientToWire renders a null release timestamp as null', () => {
+    const c: account.IntakeClient = {
+      clientId: 'CLI-1', namaPic: 'P', toko: 'T', kota: 'K', kategori: 'F',
+      serviceCount: 0, releasedToAccountAt: null,
+    };
+    expect(intakeClientToWire(c).released_to_account_at).toBeNull();
+  });
+
+  it('amWorkloadToWire maps AMWorkload', () => {
+    const w: account.AMWorkload = { amEmployeeId: 'EMP-SINTA', activeClientCount: 3 };
+    expect(amWorkloadToWire(w)).toEqual({ am_employee_id: 'EMP-SINTA', active_client_count: 3 });
+  });
+
+  it('assignmentToWire omits previous_am/reason on an assign', () => {
+    const a: account.Assignment = { clientId: 'CLI-1', assignedAm: 'EMP-SINTA', assignedBy: 'EMP-ALEAD' };
+    expect(assignmentToWire(a)).toEqual({
+      client_id: 'CLI-1', assigned_am: 'EMP-SINTA', assigned_by: 'EMP-ALEAD',
+    });
+  });
+
+  it('assignmentToWire includes previous_am + reason on a reassign', () => {
+    const a: account.Assignment = {
+      clientId: 'CLI-1', previousAm: 'EMP-SINTA', assignedAm: 'EMP-RANI', assignedBy: 'EMP-ALEAD',
+      reason: 'Sinta cuti panjang',
+    };
+    expect(assignmentToWire(a)).toEqual({
+      client_id: 'CLI-1', previous_am: 'EMP-SINTA', assigned_am: 'EMP-RANI', assigned_by: 'EMP-ALEAD',
+      reason: 'Sinta cuti panjang',
+    });
   });
 });

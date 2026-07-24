@@ -16,6 +16,9 @@
  *   derived Amount Verified / commission-achievement read-models (M0 §5 / M5).
  * - client: M4 Client Record — the §4 lock matrix (server-side edit gate over the
  *   born Client Record) + the shared Client Record read.
+ * - account: M6 Account & Service — Cluster 1 (client intake & AM assignment):
+ *   the Unassigned Intake Queue, manual AM assign/reassign, and the AM-workload
+ *   read model.
  *
  * An @cdps/api route handler is a thin shell: resolve the actor from the JWT
  * app_metadata claim, validate inputs, then call one of these functions.
@@ -29,3 +32,4 @@ export * as sales from './sales';
 export * as msl from './msl';
 export * as finance from './finance';
 export * as client from './client';
+export * as account from './account';

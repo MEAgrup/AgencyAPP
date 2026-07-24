@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import type { leads, msl } from '@cdps/domain';
+import type { account, leads, msl } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -157,6 +157,60 @@ export interface LeadDetailWire {
     status: string;
     claimed_at: string;
   }[];
+}
+
+// --- M6 Account & Service, Cluster 1 (intake & AM assignment) ---
+
+/** module6_account.IntakeClient — one Unassigned Intake Queue row (§3 Rule 1). */
+export interface IntakeClientWire {
+  client_id: string;
+  nama_pic: string;
+  toko: string;
+  kota: string;
+  kategori: string;
+  service_count: number;
+  released_to_account_at: string | null;
+}
+
+export function intakeClientToWire(c: account.IntakeClient): IntakeClientWire {
+  return {
+    client_id: c.clientId,
+    nama_pic: c.namaPic,
+    toko: c.toko,
+    kota: c.kota,
+    kategori: c.kategori,
+    service_count: c.serviceCount,
+    released_to_account_at: c.releasedToAccountAt ? c.releasedToAccountAt.toISOString() : null,
+  };
+}
+
+/** module6_account.AMWorkload — one AM's active-client count (§3 Rule 5). */
+export interface AMWorkloadWire {
+  am_employee_id: string;
+  active_client_count: number;
+}
+
+export function amWorkloadToWire(w: account.AMWorkload): AMWorkloadWire {
+  return { am_employee_id: w.amEmployeeId, active_client_count: w.activeClientCount };
+}
+
+/** module6_account.Assignment — the outcome of an assign / reassign action. */
+export interface AssignmentWire {
+  client_id: string;
+  previous_am?: string;
+  assigned_am: string;
+  assigned_by: string;
+  reason?: string;
+}
+
+export function assignmentToWire(a: account.Assignment): AssignmentWire {
+  return {
+    client_id: a.clientId,
+    ...(a.previousAm ? { previous_am: a.previousAm } : {}),
+    assigned_am: a.assignedAm,
+    assigned_by: a.assignedBy,
+    ...(a.reason ? { reason: a.reason } : {}),
+  };
 }
 
 export function leadDetailToWire(d: leads.LeadDetailView): LeadDetailWire {

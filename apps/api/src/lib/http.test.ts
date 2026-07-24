@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { bi } from '@cdps/core';
-import { demo } from '@cdps/domain';
+import { account, demo } from '@cdps/domain';
 import {
   BadRequestError,
   UnauthorizedError,
@@ -55,6 +55,16 @@ describe('mapError', () => {
     const res = mapError(new Error('secret internals'));
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ error: 'internal server error' });
+  });
+
+  it('maps M6 account errors to their canonical status (verbatim BI)', async () => {
+    const validation = mapError(new account.ValidationError(account.MSG_INVALID_AM));
+    expect(validation.status).toBe(400);
+    expect(await validation.json()).toEqual({ error: account.MSG_INVALID_AM });
+
+    expect(mapError(new account.ForbiddenError(account.MSG_ASSIGN_FORBIDDEN)).status).toBe(403);
+    expect(mapError(new account.NotFoundError()).status).toBe(404);
+    expect(mapError(new account.ConflictError(account.MSG_ALREADY_ASSIGNED)).status).toBe(409);
   });
 });
 
