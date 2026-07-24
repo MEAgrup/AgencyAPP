@@ -11,8 +11,9 @@
 - ✅ **Dry-run UAT otomatis 30/30** (harness eksekutabel) — money-path end-to-end lolos di lapisan domain.
 - ✅ **Runbook exit UAT + template laporan** (implementation-accurate).
 - ✅ **Runbook deploy staging + pilot seed** (8 akun login pilot) — tervalidasi lokal.
-- ✅ **Auth login lokal (opsi A) diimplementasi** di `apps/api` — `/auth/login`, `/auth/logout`, `/me` + cookie session; menyatukan kontrak frontend↔API. Type + unit + integration hijau (domain 178 · api 37).
-- 🔴 **BLOKER PRA-ADA ditemukan → TUGAS BERIKUTNYA:** `apps/api` gagal `next build` (turbopack, 45 error) — tak resolve import relatif `.js` maupun `@cdps/*`. App belum bisa jalan di Next ⇒ deploy staging + UI-UAT terblok sampai ini beres. CI tak menangkap (hanya typecheck+vitest).
+- ✅ **Auth login lokal (opsi A) diimplementasi & diuji end-to-end** di `apps/api` — `/auth/login`, `/auth/logout`, `/me` + cookie session; menyatukan kontrak frontend↔API. Type + unit + integration hijau (domain 178 · api 37).
+- ✅ **`next build` apps/api DIPERBAIKI (webpack).** Impor extensionless + `next build --webpack`. `npm run build && npm run start` melayani `/api/v1/*`; smoke-test HTTP auth nyata LOLOS (login→cookie→/me→/reminders 200→wrong-pass BI→logout; Director `director:true`). CI kini punya gate `next build`.
+- ⏭️ **Sisa (butuh Anda):** konfirmasi web-internal (frontend agent) + deploy staging (butuh secret cloud Anda) → gate UAT manusia → go/no-go → Wave 2.
 
 ---
 
@@ -66,22 +67,16 @@ PR branch→`main` = **PR #40** (lihat GitHub). PR #37/#38/#39 sudah merged.
 
 ---
 
-## 4. 🔴 TUGAS BERIKUTNYA (urut) — mulai di sini
+## 4. TUGAS BERIKUTNYA (urut) — mulai di sini
 
-1. **PERBAIKI `next build` apps/api (turbopack resolver) — BLOKER deploy.**
-   - Gejala: `cd apps/api && npm run build` → 45 error `Module not found`: `./http.js` (import relatif ber-`.js`) + `@cdps/core`/`@cdps/db`/`@cdps/domain` (paket workspace). `npm run dev` sama.
-   - Akar: turbopack tak me-resolve (a) specifier `.js` ke file `.ts`, dan (b) alias `@cdps/*` (tsconfig `paths` → `../../packages/*/src`, tanpa index eksplisit). `transpilePackages` saja tak cukup.
-   - Kandidat fix (`apps/api/next.config.ts`): tambah `turbopack.resolveAlias` untuk `@cdps/core|db|domain` → `../../packages/*/src/index.ts`, dan atur resolusi ekstensi/`.js`→`.ts`. Jika `.js`↔`.ts` tak bisa via config, opsi: (i) buat `package.json#exports`/симlink di tiap `packages/*`, atau (ii) seragamkan impor jadi extensionless (besar, dozens file) — **pilih config dulu**.
-   - **DoD:** `npm run build` sukses + `npm run start` melayani `/api/v1/*`; smoke-test HTTP login (lihat §5) hijau. Tambah job `next build` ke CI agar tak regres.
-   - Catatan: kode auth sudah benar (type+unit+integration hijau); ini murni resolver build.
+- ✅ **SELESAI:** fix `next build` (webpack + impor extensionless) + smoke-test HTTP auth end-to-end (§5). Build blocker turbopack sudah beres; CI kini punya gate `next build`.
 
-2. **Smoke-test HTTP auth end-to-end** (setelah #1): jalankan apps/api, seed pilot, `curl` login→me→endpoint terproteksi→logout. Lihat §5.
+1. **Wiring frontend** (frontend agent — butuh konfirmasi): `web-internal` login page sudah memanggil `/api/v1/auth/login` + `/me` + `/auth/logout` dgn `credentials:'include'`, dan backend sudah kirim string BI di `body.message`. Yang perlu dicek: (a) `web-internal` build (turbopack? bila gagal, samakan solusi webpack), (b) proxy `BACKEND_URL` meneruskan cookie `cdps_session` bolak-balik, (c) render error BI dari `body.message`.
+2. **Deploy staging** (`WAVE1_STAGING_DEPLOY_RUNBOOK.md`) — **butuh secret cloud Anda** (Supabase project + Railway). Build apps/api = `next build --webpack`. Aktifkan Access Token Hook. Seed pilot.
+3. **Gate UAT manusia** (`WAVE1_EXIT_UAT_RUNBOOK.md`) → catat di `WAVE1_EXIT_UAT_REPORT_TEMPLATE.md` → go/no-go di `docs/DECISIONS.md`.
+4. **Baru** setelah exit Wave 1 lolos → **Wave 2** (M6, M12 early, M7–M10). JANGAN mulai sebelum exit (Build Plan §4 / R5).
 
-3. **Wiring frontend** (frontend agent): pastikan `web-internal` login page → `/api/v1/auth/login`, kirim cookie (`credentials:'include'` sudah ada), render string BI dari `body.message` (sudah didukung backend). Konfirmasi proxy `BACKEND_URL` meneruskan cookie.
-
-4. **Deploy staging + jalankan gate UAT manusia** (`WAVE1_STAGING_DEPLOY_RUNBOOK.md` + `WAVE1_EXIT_UAT_RUNBOOK.md`) → catat hasil di `WAVE1_EXIT_UAT_REPORT_TEMPLATE.md` → keputusan go/no-go di `docs/DECISIONS.md`.
-
-5. **Baru** setelah exit Wave 1 lolos → **Wave 2** (M6 Account & Service, M12 early, M7–M10). JANGAN mulai sebelum exit (Build Plan §4 / R5).
+> **Catatan build (penting):** `apps/api` HARUS di-build dgn **webpack** (`next build --webpack`, sudah di package.json) — Turbopack tak resolve paket TS-source `file:` @cdps/*. Semua impor relatif kini **extensionless** (moduleResolution `bundler`). Jangan kembalikan `.js` pada impor relatif.
 
 ---
 

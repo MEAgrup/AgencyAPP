@@ -81,6 +81,14 @@ jobs:
           npm ci
           npm run typecheck
           npm test
+      - name: '@cdps/api — next build (catches module-resolution regressions)'
+        working-directory: apps/api
+        # No DB / no secrets needed at build time (route handlers are dynamic). This
+        # gate exists because typecheck+vitest alone missed that the app did not build
+        # under Next — see fix(build) 2026-07-24.
+        env:
+          SUPABASE_JWT_SECRET: build-time-placeholder-not-used
+        run: npm run build
 
   # New Supabase/TypeScript stack (Fase 0 migration). Pure engines + wrappers.
   core-engines:

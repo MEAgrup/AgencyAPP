@@ -21,9 +21,16 @@
 
 ---
 
-## ⚠️ Pra-cek WAJIB sebelum menjadwalkan pilot (blocker potensial)
+## ✅ Update 2026-07-24 — dua blocker sudah BERES
 
-1. **🔴 BLOCKER auth kontrak frontend↔API (login belum nyambung end-to-end).**
+- **Auth login end-to-end (opsi A) DIIMPLEMENTASI & diuji.** `/api/v1/auth/login` + `/me` + `/auth/logout` + cookie `cdps_session` di apps/api. Smoke-test HTTP nyata lolos: login Finance→cookie→`/me`→`GET /reminders` 200→password salah `[email atau password salah]`→logout; Director resolve `director:true`. (§ historis di bawah dipertahankan sebagai konteks.)
+- **`next build` apps/api BERES (webpack).** Impor relatif dibuat extensionless + build pakai `next build --webpack`. `npm run build && npm run start` melayani `/api/v1/*`. CI kini punya gate `next build`.
+
+⇒ Jalur UI-UAT **tidak lagi terblok** oleh auth/build. Sisa = deploy staging (butuh secret Anda) + konfirmasi proxy web-internal meneruskan cookie (§4).
+
+## ⚠️ Konteks historis — blocker yang sudah diselesaikan
+
+1. ~~**🔴 BLOCKER auth kontrak frontend↔API (login belum nyambung end-to-end).**~~ **RESOLVED (opsi A).**
    Verifikasi kode saat ini:
    - `web-internal` (login page + `lib/auth-context` + `lib/api`, `API_BASE=/api/v1`)
      login dengan `POST /api/v1/auth/login {email,password}`, cek sesi `GET /api/v1/me`,
@@ -102,7 +109,7 @@ Dari Supabase project (Settings → Database / API / Auth):
    Resep build acuan = job `api` di `.github/workflows/ci.yml` (install `packages/db` +
    `packages/domain`, lalu `apps/api`). Untuk Railpack, set:
    - Install: `(cd packages/db && npm ci) && (cd packages/domain && npm ci) && (cd apps/api && npm ci)`
-   - Build: `cd apps/api && npm run build`
+   - Build: `cd apps/api && npm run build`  ← memakai **webpack** (`next build --webpack`, sudah di package.json). **Turbopack TIDAK dipakai** (tak resolve paket TS-source `file:` @cdps/*).
    - Start: `cd apps/api && npm run start` (Next default port `$PORT`)
 3. **Env:** `DATABASE_URL` (pooler 6543), `DIRECT_URL`, `SUPABASE_JWT_SECRET`, `NODE_ENV=production`.
 4. **Verifikasi:** service up; simpan URL publiknya untuk `BACKEND_URL`.
