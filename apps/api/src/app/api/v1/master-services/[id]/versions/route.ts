@@ -5,11 +5,12 @@
 import { msl } from '@cdps/domain';
 import { db } from '@/lib/db';
 import { handle, json } from '@/lib/http';
+import { masterServiceToWire } from '@/lib/wire';
 
 export async function GET(_request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   return handle(async () => {
     const { id } = await ctx.params;
     const versions = await msl.listVersions(db(), id);
-    return json({ versions });
+    return json({ data: versions.map(masterServiceToWire) });
   });
 }
