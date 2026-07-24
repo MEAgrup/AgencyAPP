@@ -1339,6 +1339,8 @@ export interface AttemptListRow {
   id: string;
   leadId: string;
   leadName: string;
+  phoneNumber: string;
+  source: string;
   ownerEmployeeId: string;
   ownerNama: string;
   status: string;
@@ -1347,26 +1349,29 @@ export interface AttemptListRow {
 }
 
 interface AttemptRow {
-  id: string; lead_id: string; lead_name: string; owner_employee_id: string;
-  owner_nama: string; status: string; claimed_at: Date; created_at: Date;
+  id: string; lead_id: string; lead_name: string; phone_number: string; source: string;
+  owner_employee_id: string; owner_nama: string; status: string; claimed_at: Date; created_at: Date;
 }
 
 function toAttemptRow(r: AttemptRow): AttemptListRow {
   return {
-    id: r.id, leadId: r.lead_id, leadName: r.lead_name, ownerEmployeeId: r.owner_employee_id,
+    id: r.id, leadId: r.lead_id, leadName: r.lead_name, phoneNumber: r.phone_number,
+    source: r.source, ownerEmployeeId: r.owner_employee_id,
     ownerNama: r.owner_nama, status: r.status, claimedAt: r.claimed_at, createdAt: r.created_at,
   };
 }
 
 /** listAttempts returns prospect attempts (RLS-scoped), newest first. */
-export async function listAttempts(sql: Queryable): Promise<AttemptListRow[]> {
+export async function listAttempts(sql: Queryable, filter?: { status?: string }): Promise<AttemptListRow[]> {
+  const status = filter?.status ?? '';
   const rows = await sql<AttemptRow[]>`
-    select pa.id, pa.lead_id, l.lead_name, pa.owner_employee_id,
+    select pa.id, pa.lead_id, l.lead_name, l.phone_number, l.source, pa.owner_employee_id,
            coalesce(e.nama, pa.owner_employee_id) as owner_nama,
            pa.status, pa.claimed_at, pa.created_at
     from prospect_attempts pa
     join leads l on l.id = pa.lead_id
     left join employees e on e.employee_id = pa.owner_employee_id
+    where (${status} = '' or pa.status = ${status})
     order by pa.created_at desc, pa.id desc`;
   return rows.map(toAttemptRow);
 }
@@ -1416,7 +1421,7 @@ export interface AttemptDetail extends AttemptListRow {
  */
 export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDetail> {
   const rows = await sql<AttemptRow[]>`
-    select pa.id, pa.lead_id, l.lead_name, pa.owner_employee_id,
+    select pa.id, pa.lead_id, l.lead_name, l.phone_number, l.source, pa.owner_employee_id,
            coalesce(e.nama, pa.owner_employee_id) as owner_nama,
            pa.status, pa.claimed_at, pa.created_at
     from prospect_attempts pa
@@ -1474,6 +1479,212 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
   return { ...toAttemptRow(rows[0]), qualified, latestProposal };
 }
 
+// ---------------------------------------------------------------------------
+// Full attempt detail (FE contract: attempt + lead + all proposals + nq reasons).
+// ---------------------------------------------------------------------------
+
+/** One qualified-form service line (read view). */
+export interface QFServiceView {
+  masterServiceId: string;
+  masterVersionNo: number;
+  name: string;
+  quantity: string;
+  unit: string | null;
+  pricingMode: string;
+  standardPrice: string;
+  inputAmount: string | null;
+  subtotal: string;
+  commissionRule: string;
+}
+
+/** Qualified form with its service lines (read view). */
+export interface QualifiedFormView {
+  namaPic: string;
+  toko: string;
+  kota: string;
+  linkToko: string;
+  kategori: string;
+  platform: string;
+  storeLink: string | null;
+  gmvBaseline: string;
+  targetGmv: string;
+  marketingBudget: string | null;
+  services: QFServiceView[];
+}
+
+/** All fields from the lead row relevant to the attempt detail view. */
+export interface AttemptLeadView {
+  id: string;
+  leadName: string;
+  phoneNumber: string;
+  email: string | null;
+  source: string;
+  recordStatus: string;
+  originCampaignId: string | null;
+  lastTouchCampaignId: string | null;
+  winningAttemptId: string | null;
+}
+
+/** One versioned negotiation proposal with its lines. */
+export interface ProposalView {
+  id: string;
+  versionNo: number;
+  proposedBy: string;
+  proposedByNama: string;
+  decisionNote: string | null;
+  createdAt: Date;
+  lines: AttemptProposalLine[];
+}
+
+/** Full attempt detail view for the FE (attempt + lead + qualified form + proposals + NQ). */
+export interface AttemptFullDetail {
+  attempt: AttemptListRow;
+  lead: AttemptLeadView;
+  qualifiedForm: QualifiedFormView | null;
+  proposals: ProposalView[];
+  nqReasons: string[];
+}
+
+/**
+ * getAttemptFullDetail returns one attempt with its lead, qualified form (with
+ * service lines), all negotiation proposals (oldest first), and NQ reasons.
+ * Throws NotFoundError when absent.
+ */
+export async function getAttemptFullDetail(sql: Queryable, id: string): Promise<AttemptFullDetail> {
+  const rows = await sql<(AttemptRow & {
+    lead_email: string | null; lead_source: string; lead_phone: string;
+    lead_record_status: string; lead_origin_campaign_id: string | null;
+    lead_last_touch_campaign_id: string | null; lead_winning_attempt_id: string | null;
+  })[]>`
+    select pa.id, pa.lead_id, l.lead_name, l.phone_number, l.source, pa.owner_employee_id,
+           coalesce(e.nama, pa.owner_employee_id) as owner_nama,
+           pa.status, pa.claimed_at, pa.created_at,
+           l.email as lead_email, l.source as lead_source, l.phone_number as lead_phone,
+           l.record_status as lead_record_status, l.origin_campaign_id as lead_origin_campaign_id,
+           l.last_touch_campaign_id as lead_last_touch_campaign_id,
+           l.winning_attempt_id as lead_winning_attempt_id
+    from prospect_attempts pa
+    join leads l on l.id = pa.lead_id
+    left join employees e on e.employee_id = pa.owner_employee_id
+    where pa.id = ${id}`;
+  if (rows.length === 0) throw new NotFoundError();
+  const r = rows[0];
+
+  const lead: AttemptLeadView = {
+    id: r.lead_id, leadName: r.lead_name, phoneNumber: r.lead_phone,
+    email: r.lead_email, source: r.lead_source, recordStatus: r.lead_record_status,
+    originCampaignId: r.lead_origin_campaign_id, lastTouchCampaignId: r.lead_last_touch_campaign_id,
+    winningAttemptId: r.lead_winning_attempt_id,
+  };
+
+  // Qualified form + service lines
+  const qfRows = await sql<{
+    nama_pic: string; toko: string; kota: string; link_toko: string; kategori: string;
+    platform: string; store_link: string | null; gmv_baseline: string; target_gmv: string;
+    marketing_budget: string | null;
+  }[]>`
+    select nama_pic, toko, kota, link_toko, kategori, platform, store_link,
+           gmv_baseline, target_gmv, marketing_budget
+    from qualified_forms where attempt_id = ${id}`;
+
+  let qualifiedForm: QualifiedFormView | null = null;
+  if (qfRows.length > 0) {
+    const q = qfRows[0];
+    const svcRows = await sql<{
+      master_service_id: string; master_version_no: number; name: string; quantity: string;
+      unit: string | null; pricing_mode: string; standard_price: string;
+      input_amount: string | null; subtotal: string; commission_rule: string;
+    }[]>`
+      select qfs.master_service_id, qfs.master_version_no,
+             coalesce(mv.name, qfs.master_service_id) as name,
+             qfs.quantity::text, mv.unit, mv.pricing_mode, mv.standard_price,
+             qfs.input_amount::text, qfs.subtotal, mv.commission_rule
+      from qualified_form_services qfs
+      left join master_service_versions mv
+             on mv.master_service_id = qfs.master_service_id and mv.version_no = qfs.master_version_no
+      where qfs.attempt_id = ${id}
+      order by qfs.id`;
+    qualifiedForm = {
+      namaPic: q.nama_pic, toko: q.toko, kota: q.kota, linkToko: q.link_toko,
+      kategori: q.kategori, platform: q.platform, storeLink: q.store_link,
+      gmvBaseline: q.gmv_baseline, targetGmv: q.target_gmv, marketingBudget: q.marketing_budget,
+      services: svcRows.map((s) => ({
+        masterServiceId: s.master_service_id, masterVersionNo: s.master_version_no,
+        name: s.name, quantity: s.quantity, unit: s.unit, pricingMode: s.pricing_mode,
+        standardPrice: s.standard_price, inputAmount: s.input_amount,
+        subtotal: s.subtotal, commissionRule: s.commission_rule,
+      })),
+    };
+  }
+
+  // All proposals (oldest first)
+  const propRows = await sql<{
+    id: string; version_no: number; proposed_by: string; proposed_by_nama: string;
+    decision_note: string | null; created_at: Date;
+  }[]>`
+    select np.id, np.version_no, np.proposed_by,
+           coalesce(e.nama, np.proposed_by) as proposed_by_nama,
+           np.decision_note, np.created_at
+    from negotiation_proposals np
+    left join employees e on e.employee_id = np.proposed_by
+    where np.attempt_id = ${id}
+    order by np.version_no`;
+
+  const proposals: ProposalView[] = [];
+  for (const p of propRows) {
+    const lineRows = await sql<{
+      master_service_id: string; name: string; proposed_price: string;
+      commission_rule: string; payment_terms: string | null;
+    }[]>`
+      select npl.master_service_id, coalesce(qfs.name, '') as name,
+             npl.proposed_price, npl.commission_rule, npl.payment_terms
+      from negotiation_proposal_lines npl
+      left join qualified_form_services qfs
+             on qfs.attempt_id = ${id} and qfs.master_service_id = npl.master_service_id
+      where npl.proposal_id = ${p.id}
+      order by npl.id`;
+    proposals.push({
+      id: p.id, versionNo: p.version_no, proposedBy: p.proposed_by,
+      proposedByNama: p.proposed_by_nama, decisionNote: p.decision_note, createdAt: p.created_at,
+      lines: lineRows.map((l) => ({
+        masterServiceId: l.master_service_id, name: l.name, proposedPrice: l.proposed_price,
+        commissionRule: l.commission_rule, paymentTerms: l.payment_terms,
+      })),
+    });
+  }
+
+  // Not-Qualified reasons
+  const nqRows = await sql<{ reason: string }[]>`
+    select reason from prospect_attempt_nq_reasons where attempt_id = ${id} order by id`;
+
+  return {
+    attempt: toAttemptRow(r),
+    lead,
+    qualifiedForm,
+    proposals,
+    nqReasons: nqRows.map((n) => n.reason),
+  };
+}
+
+/**
+ * markLost transitions a prospect attempt to Closed-Lost via the state machine.
+ * The owner or their division lead may mark it lost; Director may always.
+ * M0 §6 — any open attempt that fails to close becomes Closed-Lost.
+ */
+export async function markLost(
+  sql: Sql,
+  actor: Actor,
+  attemptId: string,
+): Promise<statemachine.TransitionResult> {
+  const rows = await sql<{ owner_employee_id: string }[]>`
+    select owner_employee_id from prospect_attempts where id = ${attemptId}`;
+  if (rows.length === 0) throw new NotFoundError();
+  if (!canWriteAttempt(actor, rows[0].owner_employee_id)) throw new ForbiddenError('[akses ditolak]');
+  return withTransaction(sql, async (tx) => {
+    return attemptTransition(executors(tx).sm, attemptId, STATUS_CLOSED_LOST, actor);
+  });
+}
+
 /** One platform snapshot on a Client Record (M4). */
 export interface ClientPlatformRow {
   platform: string;
@@ -1492,6 +1703,7 @@ export interface ClientAllocationRow {
 /** One closed Service line on a Client Record. */
 export interface ClientServiceRow {
   id: string;
+  masterServiceId: string;
   name: string;
   standardPrice: string;
   commissionRule: string;
@@ -1591,9 +1803,9 @@ export async function getClient(sql: Queryable, id: string): Promise<ClientDetai
     where csa.client_id = ${id} order by csa.id`;
 
   const svcRows = await sql<
-    { id: string; name: string; standard_price: string; commission_rule: string; status: string; requires_strategy_plan: boolean }[]
+    { id: string; master_service_id: string; name: string; standard_price: string; commission_rule: string; status: string; requires_strategy_plan: boolean }[]
   >`
-    select id, name, standard_price, commission_rule, status, requires_strategy_plan
+    select id, master_service_id, name, standard_price, commission_rule, status, requires_strategy_plan
     from services where client_id = ${id} order by id`;
 
   const trxRows = await sql<
@@ -1636,7 +1848,8 @@ export async function getClient(sql: Queryable, id: string): Promise<ClientDetai
       salespersonId: a.salesperson_id, salespersonNama: a.salesperson_nama, basisPoints: a.basis_points,
     })),
     services: svcRows.map((s) => ({
-      id: s.id, name: s.name, standardPrice: s.standard_price, commissionRule: s.commission_rule,
+      id: s.id, masterServiceId: s.master_service_id, name: s.name,
+      standardPrice: s.standard_price, commissionRule: s.commission_rule,
       status: s.status, requiresStrategyPlan: s.requires_strategy_plan,
     })),
     transaction,

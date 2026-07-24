@@ -4,6 +4,7 @@
  * optionally satisfying one Installment. On the first verification the Client
  * Record releases to Account (§5). Ports Go's handleVerifyPayment.
  *
+ * Response: { transaction: Transaction } (FE finance.ts verify → Transaction).
  * mapError: Incomplete / OverVerification → 400, Forbidden → 403,
  * NotFound → 404, ContractRequired → 409.
  */
@@ -11,6 +12,7 @@ import { finance } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
+import { transactionToWire } from '@/lib/wire';
 
 interface Body {
   installment_id?: string;
@@ -24,13 +26,14 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     const actor = requireActor(request);
     const { id } = await ctx.params;
     const b = await readJson<Body>(request);
-    const result = await finance.verifyPayment(db(), actor, {
+    await finance.verifyPayment(db(), actor, {
       transactionId: id,
       installmentId: b.installment_id,
       amount: b.amount ?? '',
       receivedDate: b.received_date ?? '',
       proofOfPayment: b.proof_of_payment,
     });
-    return json(result, 201);
+    const view = await finance.getPaymentStatus(db(), id);
+    return json({ transaction: transactionToWire(view) }, 201);
   });
 }

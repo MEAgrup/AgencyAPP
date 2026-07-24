@@ -6,10 +6,11 @@
 import { client } from '@cdps/domain';
 import { db } from '@/lib/db';
 import { handle, json } from '@/lib/http';
+import { clientListRowToWire } from '@/lib/wire';
 
 export async function GET(): Promise<Response> {
   return handle(async () => {
     const clients = await client.listClients(db());
-    return json({ clients });
+    return json({ data: clients.map(clientListRowToWire) });
   });
 }

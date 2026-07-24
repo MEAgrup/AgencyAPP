@@ -9,6 +9,7 @@ import { sales } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
+import { quoteToWire } from '@/lib/wire';
 
 export async function POST(request: Request): Promise<Response> {
   return handle(async () => {
@@ -22,6 +23,6 @@ export async function POST(request: Request): Promise<Response> {
       amount: s.amount,
     }));
     const quote = await sales.previewQuote(db(), selections);
-    return json({ quote });
+    return json(quoteToWire(quote));
   });
 }

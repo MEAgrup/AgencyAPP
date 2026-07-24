@@ -502,20 +502,26 @@ export interface InstallmentRow {
   jatuhTempo: boolean;
   verifiedDate: Date | null;
   verifiedBy: string | null;
+  proofOfPayment: string | null;
 }
 
-/** Payment status + derived Amount Verified / Outstanding + the full trail. */
-export interface PaymentStatusView {
-  transactionId: string;
+/** Transaction read-model shared by getPaymentStatus and getFinanceQueue. */
+export interface TransactionView {
+  id: string;
   clientId: string;
   scheme: string;
   paymentStatus: string;
   totalAgreedValue: string;
   amountVerified: string;
   amountOutstanding: string;
+  bermasalah: boolean;
   contractAttachment: string | null;
   releasedToAccountAt: Date | null;
   installments: InstallmentRow[];
+}
+
+/** Payment status + derived Amount Verified / Outstanding + the full trail. */
+export interface PaymentStatusView extends TransactionView {
   verifications: VerificationRow[];
 }
 
@@ -525,17 +531,30 @@ export interface PaymentStatusView {
  * the installment schedule and verification trail. Throws NotFoundError if absent.
  */
 export async function getPaymentStatus(sql: Queryable, transactionId: string): Promise<PaymentStatusView> {
-  const trx = await loadTransaction(sql, transactionId, false);
-  const verified = await sumVerified(sql, trx.id);
+  type TrxRow = {
+    id: string; client_id: string; payment_intent_scheme: string; total_agreed_value: string;
+    payment_status: string; contract_attachment: string | null; released_to_account_at: Date | null;
+    bermasalah: boolean;
+  };
+  const trxRows = await sql<TrxRow[]>`
+    select id, client_id, payment_intent_scheme, total_agreed_value, payment_status,
+           contract_attachment, released_to_account_at, bermasalah
+    from transactions where id = ${transactionId}`;
+  if (trxRows.length === 0) throw new NotFoundError();
+  const r = trxRows[0];
+  const totalAgreed = money.parse(r.total_agreed_value);
+  const verified = await sumVerified(sql, r.id);
 
   const instRows = await sql<
     {
       id: string; installment_no: number; amount: string; due_date: Date | null; status: string;
       jatuh_tempo: boolean; verified_date: Date | null; verified_by: string | null;
+      proof_of_payment: string | null;
     }[]
   >`
-    select id, installment_no, amount, due_date, status, jatuh_tempo, verified_date, verified_by
-    from installments where transaction_id = ${trx.id} order by installment_no`;
+    select id, installment_no, amount, due_date, status, jatuh_tempo, verified_date, verified_by,
+           proof_of_payment
+    from installments where transaction_id = ${r.id} order by installment_no`;
 
   const verRows = await sql<
     {
@@ -544,22 +563,181 @@ export async function getPaymentStatus(sql: Queryable, transactionId: string): P
     }[]
   >`
     select installment_id, amount, received_date, proof_of_payment, verified_by, created_at
-    from payment_verifications where transaction_id = ${trx.id} order by created_at, id`;
+    from payment_verifications where transaction_id = ${r.id} order by created_at, id`;
 
   return {
-    transactionId: trx.id, clientId: trx.clientId, scheme: trx.scheme, paymentStatus: trx.paymentStatus,
-    totalAgreedValue: money.decimal(trx.totalAgreed), amountVerified: money.decimal(verified),
-    amountOutstanding: money.decimal(trx.totalAgreed - verified),
-    contractAttachment: trx.contractAttachment, releasedToAccountAt: trx.releasedToAccountAt,
+    id: r.id, clientId: r.client_id, scheme: r.payment_intent_scheme,
+    paymentStatus: r.payment_status, totalAgreedValue: money.decimal(totalAgreed),
+    amountVerified: money.decimal(verified), amountOutstanding: money.decimal(totalAgreed - verified),
+    bermasalah: r.bermasalah,
+    contractAttachment: r.contract_attachment, releasedToAccountAt: r.released_to_account_at,
     installments: instRows.map((i) => ({
       id: i.id, installmentNo: i.installment_no, amount: i.amount, dueDate: i.due_date, status: i.status,
       jatuhTempo: i.jatuh_tempo, verifiedDate: i.verified_date, verifiedBy: i.verified_by,
+      proofOfPayment: i.proof_of_payment,
     })),
     verifications: verRows.map((v) => ({
       installmentId: v.installment_id, amount: v.amount, receivedDate: v.received_date,
       proofOfPayment: v.proof_of_payment, verifiedBy: v.verified_by, createdAt: v.created_at,
     })),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Finance queue (M5 §3) — all transactions awaiting first verification.
+// ---------------------------------------------------------------------------
+
+/**
+ * getFinanceQueue returns all Transactions in [Menunggu Verifikasi] (the Finance
+ * verification queue) with their installment schedules. Amount Verified is 0 and
+ * Amount Outstanding equals the agreed total for all queue entries (no payments
+ * received yet by definition of the first status).
+ */
+export async function getFinanceQueue(sql: Queryable): Promise<TransactionView[]> {
+  type Row = {
+    id: string; client_id: string; payment_intent_scheme: string; total_agreed_value: string;
+    payment_status: string; contract_attachment: string | null; released_to_account_at: Date | null;
+    bermasalah: boolean;
+    inst_id: string | null; installment_no: number | null; inst_amount: string | null;
+    due_date: Date | null; inst_status: string | null; jatuh_tempo: boolean | null;
+    verified_date: Date | null; verified_by: string | null; proof_of_payment: string | null;
+  };
+  const rows = await sql<Row[]>`
+    select t.id, t.client_id, t.payment_intent_scheme, t.total_agreed_value, t.payment_status,
+           t.contract_attachment, t.released_to_account_at, t.bermasalah,
+           i.id as inst_id, i.installment_no, i.amount as inst_amount, i.due_date,
+           i.status as inst_status, i.jatuh_tempo, i.verified_date, i.verified_by, i.proof_of_payment
+    from transactions t
+    left join installments i on i.transaction_id = t.id
+    where t.payment_status = ${PAYMENT_MENUNGGU}
+    order by t.id, i.installment_no`;
+
+  const map = new Map<string, TransactionView>();
+  for (const r of rows) {
+    if (!map.has(r.id)) {
+      const totalAgreed = money.parse(r.total_agreed_value);
+      map.set(r.id, {
+        id: r.id, clientId: r.client_id, scheme: r.payment_intent_scheme,
+        paymentStatus: r.payment_status, totalAgreedValue: money.decimal(totalAgreed),
+        amountVerified: '0', amountOutstanding: money.decimal(totalAgreed),
+        bermasalah: r.bermasalah, contractAttachment: r.contract_attachment,
+        releasedToAccountAt: r.released_to_account_at, installments: [],
+      });
+    }
+    if (r.inst_id !== null) {
+      map.get(r.id)!.installments.push({
+        id: r.inst_id, installmentNo: r.installment_no!, amount: r.inst_amount!,
+        dueDate: r.due_date, status: r.inst_status!, jatuhTempo: r.jatuh_tempo ?? false,
+        verifiedDate: r.verified_date, verifiedBy: r.verified_by, proofOfPayment: r.proof_of_payment,
+      });
+    }
+  }
+  return [...map.values()];
+}
+
+// ---------------------------------------------------------------------------
+// Bermasalah status view (M5-OA-5) — for GET /transactions/{id}/bermasalah.
+// ---------------------------------------------------------------------------
+
+/** One vote in a [Bermasalah] resolution cycle. */
+export interface BermasalahVoteView {
+  division: string;
+  decision: string;
+  note: string | null;
+  actor: string;
+  createdAt: Date;
+}
+
+/** Current [Bermasalah] flag + all votes cast (append-only). */
+export interface BermasalahStatusView {
+  transactionId: string;
+  flagged: boolean;
+  votes: BermasalahVoteView[];
+}
+
+/**
+ * getBermasalahStatus returns the current [Bermasalah] flag and the full vote
+ * history (all cycles, append-only). Throws NotFoundError if the transaction is
+ * absent.
+ */
+export async function getBermasalahStatus(sql: Queryable, transactionId: string): Promise<BermasalahStatusView> {
+  const trxRows = await sql<{ bermasalah: boolean }[]>`
+    select bermasalah from transactions where id = ${transactionId}`;
+  if (trxRows.length === 0) throw new NotFoundError();
+
+  const voteRows = await sql<{
+    division: string; decision: string; note: string | null; created_by: string; created_at: Date;
+  }[]>`
+    select division, decision, note, created_by, created_at
+    from transaction_issue_approvals
+    where transaction_id = ${transactionId}
+    order by created_at, id`;
+
+  return {
+    transactionId,
+    flagged: trxRows[0].bermasalah,
+    votes: voteRows.map((v) => ({
+      division: v.division, decision: v.decision, note: v.note,
+      actor: v.created_by, createdAt: v.created_at,
+    })),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Schedule creation (M5 §4) — Finance staff creates/replaces installment list.
+// ---------------------------------------------------------------------------
+
+/**
+ * setSchedule creates or replaces the installment schedule for a Termin or Bayar
+ * di Belakang transaction that has not yet received any payment. Finance staff or
+ * Director permission. The new items must sum to the agreed total. Pre-verification
+ * only — SchemeLockedError if money has come in. Returns the new installments.
+ */
+export async function setSchedule(
+  sql: Sql,
+  actor: Actor,
+  transactionId: string,
+  items: ScheduleInput[],
+  now: Date = new Date(),
+): Promise<InstallmentRow[]> {
+  if (!canVerifyPayment(actor)) throw new ForbiddenError();
+
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const trx = await loadTransaction(tx, transactionId, true);
+
+    const verified = await sumVerified(tx, trx.id);
+    if (verified > 0n) throw new SchemeLockedError();
+
+    const scheduled = SCHEDULED_SCHEMES.has(trx.scheme);
+    if (!scheduled) throw new IncompleteError();
+
+    validateSchedule(trx.scheme, scheduled, items, trx.totalAgreed);
+
+    await tx`delete from installments where transaction_id = ${trx.id}`;
+    const result: InstallmentRow[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const instId = await ex.ident.identNext('INST', now);
+      const amt = money.decimal(money.parse(items[i].amount));
+      await tx`
+        insert into installments (id, transaction_id, installment_no, amount, due_date, status, created_by)
+        values (${instId}, ${trx.id}, ${i + 1}, ${amt}, ${items[i].dueDate}, ${INST_BELUM},
+                ${actor.employeeId})`;
+      result.push({
+        id: instId, installmentNo: i + 1, amount: amt,
+        dueDate: new Date(items[i].dueDate), status: INST_BELUM,
+        jatuhTempo: false, verifiedDate: null, verifiedBy: null, proofOfPayment: null,
+      });
+    }
+
+    await ex.audit.insertAudit({
+      entityType: 'transaction', entityId: trx.id, actorEmployeeId: actor.employeeId,
+      action: 'schedule_set', beforeJson: null,
+      afterJson: { installments: items.length }, createdBy: actor.employeeId,
+    });
+
+    return result;
+  });
 }
 
 /** One salesperson's recognized commission share. */
