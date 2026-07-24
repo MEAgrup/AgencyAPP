@@ -113,17 +113,28 @@ via skrip generator sesi ini (`scratchpad/generate_sql.mjs`) atau minta Claude C
 
 ## Langkah 4 — Set environment variables
 
-Set 4 var pada Langkah "Kredensial" di deploy **apps/api** dan **web-internal**.
+Set var Langkah "Kredensial" pada deploy **apps/api** dan **web-internal**:
+- **apps/api**: `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+  (`SUPABASE_JWT_SECRET` hanya bila project di-roll ke Legacy HS256 — lihat catatan JWT).
+- **web-internal**: `BACKEND_URL` = URL deploy apps/api (web-internal me-rewrite
+  `/api/v1/*` → `BACKEND_URL`, `web-internal/next.config.ts`). Tanpa ini, default
+  dev `http://127.0.0.1:3001` → login gagal di produksi.
 
 ## Langkah 5 — Smoke-login per peran
 
 Login minimal: Sales staff, Sales lead (Head of Sales Jasa), Account lead (Head of
 Account), KOL, Finance, OD, Director. Pastikan tiap peran melihat scope yang benar
 (Staff = data sendiri; Lead = se-divisi; OD = read-only semua; Director = penuh).
+Password awal semua akun: `MeaCdps2026!`.
 
 > ⚠️ O37 (baca `docs/O37_RLS_DECISION_BRIEF.md`): read route saat ini via service-role
 > (RLS ter-bypass) → over-permissive. UAT internal terkendali boleh; jangan buka ke
 > full multi-role / portal eksternal sebelum O37 diputus.
+
+> ⚠️ O38 (forced password change): 58 akun berbagi password default `MeaCdps2026!` dan
+> BELUM ada endpoint/flow ganti-password (`must_change_password` tidak ditegakkan). Untuk
+> UAT terkendali boleh; sebelum rollout riil, putuskan mekanisme (rekomendasi: GoTrue
+> `PUT /auth/v1/user` + clear flag) lalu implementasi first-login change-password.
 
 ---
 
