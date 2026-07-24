@@ -67,20 +67,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install source-aliased sibling packages (@cdps/db, @cdps/domain)
-        # apps/api resolves @cdps/* to package SOURCE (tsconfig paths + vitest
-        # alias). tsc/vitest then follow those sources' bare imports (postgres in
-        # @cdps/db, bcryptjs in @cdps/domain), which resolve from each package's
-        # own node_modules — so they must be installed here too.
-        run: |
-          (cd packages/db && npm ci)
-          (cd packages/domain && npm ci)
+      - name: Install workspace (root)
+        # apps/api + packages/* are one npm workspace (repo-root package.json).
+        # A single root `npm ci` installs & symlinks every @cdps/* package and
+        # hoists their deps (postgres, bcryptjs), so per-package installs are gone.
+        run: npm ci
       - name: '@cdps/api — typecheck + lib tests'
-        working-directory: apps/api
         run: |
-          npm ci
-          npm run typecheck
-          npm test
+          npm run typecheck -w @cdps/api
+          npm test -w @cdps/api
 
   # New Supabase/TypeScript stack (Fase 0 migration). Pure engines + wrappers.
   core-engines:
@@ -90,12 +85,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install workspace (root)
+        run: npm ci
       - name: '@cdps/core — test + typecheck'
-        working-directory: packages/core
         run: |
-          npm ci
-          npm run typecheck
-          npm test
+          npm run typecheck -w @cdps/core
+          npm test -w @cdps/core
 
   # @cdps/db executor wiring + end-to-end integration against a migrated Postgres.
   # Applies EVERY supabase/migrations file in order to a fresh PG17, then runs the
@@ -124,6 +119,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install workspace (root)
+        run: npm ci
       - name: Apply all migrations in order
         run: |
           for f in $(ls supabase/migrations/*.sql | sort); do
@@ -163,17 +160,12 @@ jobs:
       - name: Invariant — Supabase Auth custom claims (ResolveActor parity)
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/auth_claims_checks.sql
       - name: '@cdps/db — test (incl. integration) + typecheck'
-        working-directory: packages/db
         run: |
-          npm ci
-          npm run typecheck
-          npm test
+          npm run typecheck -w @cdps/db
+          npm test -w @cdps/db
       - name: '@cdps/domain — test (incl. integration) + typecheck'
-        # Runs after @cdps/db so its node_modules (postgres) is present for the
-        # source-aliased @cdps/db import. Exercises the employee importer and the
-        # demo-task service end-to-end against the migrated Postgres above.
-        working-directory: packages/domain
+        # Exercises the employee importer, demo-task service, M5 finance, M1 lead
+        # read models, etc. end-to-end against the migrated Postgres above.
         run: |
-          npm ci
-          npm run typecheck
-          npm test
+          npm run typecheck -w @cdps/domain
+          npm test -w @cdps/domain
