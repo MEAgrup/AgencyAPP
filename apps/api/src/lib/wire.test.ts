@@ -3,13 +3,14 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { leads, msl } from '@cdps/domain';
+import type { leads, msl, notifications } from '@cdps/domain';
 import {
   attemptStubToWire,
   leadDetailToWire,
   leadRowToWire,
   leadStubToWire,
   masterServiceToWire,
+  notificationRowToWire,
   poolRowToWire,
 } from './wire';
 
@@ -120,5 +121,38 @@ describe('leads wire mappers', () => {
     expect(wire.attempts).toEqual([
       { id: 'PRSP-1', owner_employee_id: 'EMP-1', owner_nama: 'Budi', status: 'New Lead', claimed_at: '2026-07-02T00:00:00.000Z' },
     ]);
+  });
+});
+
+describe('notificationRowToWire', () => {
+  it('maps NotificationRow → snake_case NotificationItem (actor + ISO dates + null read_at)', () => {
+    const row: notifications.NotificationRow = {
+      id: '42',
+      eventType: 'm0m5.installment.due',
+      entityType: 'installment',
+      entityId: 'INST-1',
+      deepLink: '/transactions/TRX-1',
+      actor: 'SYSTEM',
+      createdAt: new Date('2026-07-01T03:04:05.000Z'),
+      readAt: null,
+    };
+    expect(notificationRowToWire(row)).toEqual({
+      id: '42',
+      event_type: 'm0m5.installment.due',
+      entity_type: 'installment',
+      entity_id: 'INST-1',
+      deep_link: '/transactions/TRX-1',
+      actor: 'SYSTEM',
+      created_at: '2026-07-01T03:04:05.000Z',
+      read_at: null,
+    });
+  });
+
+  it('serializes a set read_at as an ISO string', () => {
+    const row: notifications.NotificationRow = {
+      id: '7', eventType: 'e', entityType: 't', entityId: 'X', deepLink: '/x', actor: 'A',
+      createdAt: new Date('2026-07-01T00:00:00.000Z'), readAt: new Date('2026-07-02T00:00:00.000Z'),
+    };
+    expect(notificationRowToWire(row).read_at).toBe('2026-07-02T00:00:00.000Z');
   });
 });

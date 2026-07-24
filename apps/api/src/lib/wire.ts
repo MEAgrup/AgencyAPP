@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import type { client, finance, leads, msl, sales } from '@cdps/domain';
+import type { client, finance, leads, msl, notifications, sales } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -570,5 +570,31 @@ export function quoteToWire(q: sales.Quote): QuoteWire {
     })),
     estimasi_nilai_idr: q.estimasiNilaiIdr,
     total_komisi_idr: q.totalKomisiIdr,
+  };
+}
+
+// --- Notifications (house convention #8) — web-internal NotificationItem. ---
+
+export interface NotificationItemWire {
+  id: string;
+  event_type: string;
+  entity_type: string;
+  entity_id: string;
+  deep_link: string;
+  actor: string;
+  created_at: string;
+  read_at: string | null;
+}
+
+export function notificationRowToWire(n: notifications.NotificationRow): NotificationItemWire {
+  return {
+    id: n.id,
+    event_type: n.eventType,
+    entity_type: n.entityType,
+    entity_id: n.entityId,
+    deep_link: n.deepLink,
+    actor: n.actor,
+    created_at: n.createdAt.toISOString(),
+    read_at: n.readAt ? n.readAt.toISOString() : null,
   };
 }
