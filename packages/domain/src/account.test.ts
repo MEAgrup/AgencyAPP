@@ -13,17 +13,30 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import {
+  approveStrategy,
   assignAM,
+  canApproveStrategy,
   canManageAssignment,
   canReadIntake,
   ConflictError,
+  createStrategy,
   ForbiddenError,
+  getStrategy,
+  guardBriefCreation,
   intakeQueue,
+  listStrategies,
   NotFoundError,
   reassignAM,
+  requestRevision,
+  setStrategyRequirement,
+  STRATEGY_STATUS_APPROVED,
+  STRATEGY_STATUS_DRAFTING,
+  submitStrategy,
+  updateDraft,
   ValidationError,
   workload,
   type Actor,
+  type StrategyInput,
 } from './account';
 
 const accountLead = (): Actor => ({
@@ -70,6 +83,16 @@ describe('pre-DB input gates', () => {
   });
   it('reassignAM rejects an empty reason', async () => {
     await expect(reassignAM(anySql, accountLead(), 'CLI-X', 'ZZ-AM', '  ')).rejects.toBeInstanceOf(ValidationError);
+  });
+});
+
+describe('strategy predicates (§4 Rule 4)', () => {
+  it('canApproveStrategy: Account Lead / Director only', () => {
+    expect(canApproveStrategy(accountLead())).toBe(true);
+    expect(canApproveStrategy(director())).toBe(true);
+    expect(canApproveStrategy(accountStaff())).toBe(false); // owner AM cannot approve their own plan
+    expect(canApproveStrategy(od())).toBe(false);
+    expect(canApproveStrategy(salesLead())).toBe(false);
   });
 });
 
@@ -124,10 +147,51 @@ afterAll(async () => {
 
 afterEach(async () => {
   if (!sql) return;
+  await sql`delete from strategy_plans where created_by like 'ZZ-%'`;
+  await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
   await sql`delete from employees where created_by like 'ZZ-%'`;
   await sql`delete from role_mappings where created_by like 'ZZ-%'`;
 });
+
+// --- Cluster 2 fixtures ---
+
+let svcSeq = 0;
+const nextSvcId = (): string => `SVC-ZZ-${Date.now() % 100000}-${svcSeq++}`;
+
+/** Points a client's assigned_am_id directly (bypasses assignAM to keep tests terse). */
+async function setAM(clientId: string, amId: string): Promise<void> {
+  await sql`update clients set assigned_am_id = ${amId} where id = ${clientId}`;
+}
+
+/** Births a service row with a controllable plan-gate flag + status. */
+async function insertService(svcId: string, clientId: string, requiresPlan: boolean, status: string): Promise<void> {
+  await sql`
+    insert into services (id, client_id, master_service_id, master_version_no, name,
+      standard_price, commission_rule, status, requires_strategy_plan, created_by)
+    values (${svcId}, ${clientId}, 'MSV-X', 1, 'TikTok Shop Full Management', '10000000.00', 'rule',
+      ${status}, ${requiresPlan}, 'ZZ-TEST')`;
+}
+
+/** released client + owner AM + plan-gated awaiting service. Returns the ids. */
+async function planGatedFixture(): Promise<{ clientId: string; svcId: string; amId: string }> {
+  const clientId = nextClientId();
+  const svcId = nextSvcId();
+  const amId = 'ZZ-SINTA';
+  await insertClient(clientId, true);
+  await setAM(clientId, amId);
+  await insertService(svcId, clientId, true, '[Awaiting Onboarding]');
+  return { clientId, svcId, amId };
+}
+
+const goodInput = (): StrategyInput => ({
+  objective: 'grow GMV 30% in 60 days', targetKpi: 'GMV +30%',
+  divisionsInvolved: ['Creative', 'Ads'], plannedBriefOutline: '12 videos, 2 campaigns',
+  timelineStart: '2026-07-01', timelineEnd: '2026-08-30',
+});
+
+const svcStatus = async (svcId: string): Promise<string> =>
+  (await sql<{ status: string }[]>`select status from services where id = ${svcId}`)[0].status;
 
 describeDb('assignAM (§3 Rules 2–4)', () => {
   it('assigns a released, unassigned client; writes the pointer + one audit row', async () => {
@@ -284,5 +348,239 @@ describeDb('assignment history is immutable', () => {
       select id from audit_log where entity_id = ${id} and action = 'am_assigned' limit 1`;
     await expect(sql`update audit_log set action = 'tampered' where id = ${auditId}`).rejects.toBeTruthy();
     await expect(sql`delete from audit_log where id = ${auditId}`).rejects.toBeTruthy();
+  });
+});
+
+// ===========================================================================
+// Cluster 2 — Strategy & Plan (§2 / §4).
+// ===========================================================================
+
+/** Drafts a strategy owned by amID for svcID. */
+async function createDrafted(svcId: string, amId = 'ZZ-SINTA') {
+  return createStrategy(sql, accountStaff(amId), svcId, goodInput());
+}
+/** Drafts + submits a strategy (→ [Strategy Submitted for Approval]). */
+async function createSubmitted(svcId: string, amId = 'ZZ-SINTA') {
+  const st = await createDrafted(svcId, amId);
+  await submitStrategy(sql, accountStaff(amId), st.id);
+  return st;
+}
+
+describeDb('createStrategy (§4 Rules 1, 6)', () => {
+  it('drafts a plan-gated service; divisions canonicalized; one create audit row', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    const st = await createDrafted(svcId, amId);
+    expect(st.status).toBe(STRATEGY_STATUS_DRAFTING);
+    expect(st.serviceId).toBe(svcId);
+    expect(st.divisionsInvolved).toEqual(['Creative', 'Ads']);
+    expect(st.id).toMatch(/^STR-\d{6}-\d{4}$/);
+    const actions = (await sql<{ action: string }[]>`
+      select action from audit_log where entity_type='strategy_plan' and entity_id=${st.id}`).map((r) => r.action);
+    expect(actions).toEqual(['create']);
+  });
+
+  it('only the owning AM (or Director) may draft (§4 Rule 1)', async () => {
+    const { clientId } = await planGatedFixture();
+    const allow: Actor[] = [accountStaff('ZZ-SINTA'), director()];
+    for (const actor of allow) {
+      const svc = nextSvcId();
+      await insertService(svc, clientId, true, '[Awaiting Onboarding]');
+      await expect(createStrategy(sql, actor, svc, goodInput())).resolves.toBeTruthy();
+    }
+    const deny: Actor[] = [accountStaff('ZZ-OTHER'), accountLead(), salesLead(), od()];
+    for (const actor of deny) {
+      const svc = nextSvcId();
+      await insertService(svc, clientId, true, '[Awaiting Onboarding]');
+      await expect(createStrategy(sql, actor, svc, goodInput())).rejects.toBeInstanceOf(ForbiddenError);
+    }
+  });
+
+  it('guards: direct service, non-awaiting service, missing service', async () => {
+    const { clientId } = await planGatedFixture();
+    const direct = nextSvcId();
+    await insertService(direct, clientId, false, '[Awaiting Onboarding]');
+    await expect(createStrategy(sql, accountStaff('ZZ-SINTA'), direct, goodInput())).rejects.toBeInstanceOf(ConflictError);
+    const late = nextSvcId();
+    await insertService(late, clientId, true, '[Strategy Approved]');
+    await expect(createStrategy(sql, accountStaff('ZZ-SINTA'), late, goodInput())).rejects.toBeInstanceOf(ConflictError);
+    await expect(createStrategy(sql, accountStaff('ZZ-SINTA'), 'SVC-GHOST-0', goodInput())).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('is 1:1 — a second create is a conflict', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    await createDrafted(svcId, amId);
+    await expect(createStrategy(sql, accountStaff(amId), svcId, goodInput())).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it('rejects invalid input and mints no STR- id', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    const missing = { ...goodInput(), objective: '  ' };
+    await expect(createStrategy(sql, accountStaff(amId), svcId, missing)).rejects.toBeInstanceOf(ValidationError);
+    const badDiv = { ...goodInput(), divisionsInvolved: ['Creative', 'Finance'] };
+    await expect(createStrategy(sql, accountStaff(amId), svcId, badDiv)).rejects.toBeInstanceOf(ValidationError);
+    const reversed = { ...goodInput(), timelineStart: '2026-08-30', timelineEnd: '2026-07-01' };
+    await expect(createStrategy(sql, accountStaff(amId), svcId, reversed)).rejects.toBeInstanceOf(ValidationError);
+    const n = await sql<{ n: string }[]>`select count(*) as n from strategy_plans where service_id = ${svcId}`;
+    expect(Number(n[0].n)).toBe(0);
+  });
+});
+
+describeDb('updateDraft + submit (§4 Rule 3)', () => {
+  it('owner edits in draft; non-owner denied; edit after submit is a conflict', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    const st = await createDrafted(svcId, amId);
+    await expect(updateDraft(sql, accountStaff('ZZ-OTHER'), st.id, goodInput())).rejects.toBeInstanceOf(ForbiddenError);
+    await updateDraft(sql, accountStaff(amId), st.id, { ...goodInput(), objective: 'revised objective' });
+    expect((await getStrategy(sql, accountStaff(amId), st.id)).objective).toBe('revised objective');
+    await submitStrategy(sql, accountStaff(amId), st.id);
+    await expect(updateDraft(sql, accountStaff(amId), st.id, goodInput())).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it('submit is owner-only and returns an ok transition result', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    const st = await createDrafted(svcId, amId);
+    await expect(submitStrategy(sql, accountStaff('ZZ-OTHER'), st.id)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(submitStrategy(sql, accountLead(), st.id)).rejects.toBeInstanceOf(ForbiddenError);
+    const res = await submitStrategy(sql, accountStaff(amId), st.id);
+    expect(res.ok).toBe(true);
+  });
+});
+
+describeDb('approveStrategy (§4 Rule 4 double transition)', () => {
+  it('approval flips STR + parent Service to Approved in one tx, records approvedBy', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    const st = await createSubmitted(svcId, amId);
+    await approveStrategy(sql, accountLead(), st.id);
+    const got = await getStrategy(sql, accountLead(), st.id);
+    expect(got.status).toBe(STRATEGY_STATUS_APPROVED);
+    expect(got.approvedBy).toBe('ZZ-ALEAD');
+    expect(await svcStatus(svcId)).toBe('[Strategy Approved]');
+  });
+
+  it('only Account Lead / Director may approve', async () => {
+    const { clientId } = await planGatedFixture();
+    const allow: Actor[] = [accountLead(), director()];
+    const deny: Actor[] = [accountStaff('ZZ-SINTA'), salesLead(), od()];
+    for (const actor of allow) {
+      const svc = nextSvcId();
+      await insertService(svc, clientId, true, '[Awaiting Onboarding]');
+      const st = await createSubmitted(svc);
+      await expect(approveStrategy(sql, actor, st.id)).resolves.toBeUndefined();
+    }
+    for (const actor of deny) {
+      const svc = nextSvcId();
+      await insertService(svc, clientId, true, '[Awaiting Onboarding]');
+      const st = await createSubmitted(svc);
+      await expect(approveStrategy(sql, actor, st.id)).rejects.toBeInstanceOf(ForbiddenError);
+    }
+  });
+
+  it('approving a still-drafting plan is blocked and moves nothing', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    const st = await createDrafted(svcId, amId); // still Drafting
+    await expect(approveStrategy(sql, accountLead(), st.id)).rejects.toBeInstanceOf(ConflictError);
+    expect(await svcStatus(svcId)).toBe('[Awaiting Onboarding]');
+  });
+});
+
+describeDb('requestRevision (§4 Rule 4) — derived revision count', () => {
+  it('notes mandatory, AM denied, lead sends back to Drafting; count derives from the log', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    const st = await createSubmitted(svcId, amId);
+    await expect(requestRevision(sql, accountLead(), st.id, '  ')).rejects.toBeInstanceOf(ValidationError);
+    await expect(requestRevision(sql, accountStaff(amId), st.id, 'fix KPI')).rejects.toBeInstanceOf(ForbiddenError);
+    await requestRevision(sql, accountLead(), st.id, 'target KPI kurang spesifik');
+    let got = await getStrategy(sql, accountLead(), st.id);
+    expect(got.status).toBe(STRATEGY_STATUS_DRAFTING);
+    expect(got.revisionNotes).toBe('target KPI kurang spesifik');
+    expect(got.revisionCount).toBe(1);
+    // Resubmit + revise again → count derives to 2.
+    await submitStrategy(sql, accountStaff(amId), st.id);
+    await requestRevision(sql, accountLead(), st.id, 'sekali lagi');
+    got = await getStrategy(sql, accountLead(), st.id);
+    expect(got.revisionCount).toBe(2);
+  });
+});
+
+describeDb('strategy visibility (§3) + immutable history', () => {
+  it('get: owner/lead/OD/director allowed, other AM forbidden', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    const st = await createDrafted(svcId, amId);
+    for (const a of [accountStaff(amId), accountLead(), od(), director()]) {
+      await expect(getStrategy(sql, a, st.id)).resolves.toBeTruthy();
+    }
+    await expect(getStrategy(sql, accountStaff('ZZ-OTHER'), st.id)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('list: lead sees all, owner AM sees own, other AM sees none, sales forbidden', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    await createDrafted(svcId, amId);
+    expect((await listStrategies(sql, accountLead())).length).toBeGreaterThanOrEqual(1);
+    const ownerList = await listStrategies(sql, accountStaff(amId));
+    expect(ownerList.every((s) => s.serviceId === svcId || s.status)).toBe(true);
+    expect(ownerList.length).toBe(1);
+    expect((await listStrategies(sql, accountStaff('ZZ-OTHER'))).length).toBe(0);
+    await expect(listStrategies(sql, salesLead())).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('the create audit row cannot be updated or deleted', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    const st = await createDrafted(svcId, amId);
+    const [{ id: auditId }] = await sql<{ id: string }[]>`
+      select id from audit_log where entity_id = ${st.id} and action = 'create' limit 1`;
+    await expect(sql`update audit_log set action='tampered' where id = ${auditId}`).rejects.toBeTruthy();
+    await expect(sql`delete from audit_log where id = ${auditId}`).rejects.toBeTruthy();
+  });
+});
+
+describeDb('guardBriefCreation (§6) + setStrategyRequirement (M6-OA-1)', () => {
+  it('gates Brief creation by effective plan flag + service status', async () => {
+    const { clientId } = await planGatedFixture();
+    const gated = nextSvcId();
+    await insertService(gated, clientId, true, '[Awaiting Onboarding]');
+    await expect(guardBriefCreation(sql, gated)).rejects.toBeInstanceOf(ConflictError);
+    const ok = nextSvcId();
+    await insertService(ok, clientId, true, '[Strategy Approved]');
+    await expect(guardBriefCreation(sql, ok)).resolves.toBeUndefined();
+    const direct = nextSvcId();
+    await insertService(direct, clientId, false, '[Awaiting Onboarding]');
+    await expect(guardBriefCreation(sql, direct)).resolves.toBeUndefined();
+    await expect(guardBriefCreation(sql, 'SVC-GHOST-0')).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('override flips a Direct service to plan-gated (reason logged); then a plan can be drafted', async () => {
+    const { clientId } = await planGatedFixture();
+    const svc = nextSvcId();
+    await insertService(svc, clientId, false, '[Awaiting Onboarding]'); // Direct by pin
+    await expect(setStrategyRequirement(sql, accountStaff('ZZ-SINTA'), svc, true, '  ')).rejects.toBeInstanceOf(ValidationError);
+    const req = await setStrategyRequirement(sql, accountStaff('ZZ-SINTA'), svc, true, 'butuh strategi khusus');
+    expect(req.requiresStrategyPlan).toBe(true);
+    expect(req.pinnedRequirement).toBe(false);
+    expect(req.overridden).toBe(true);
+    // Now guard blocks (effective plan-gated) and a plan can be drafted.
+    await expect(guardBriefCreation(sql, svc)).rejects.toBeInstanceOf(ConflictError);
+    await expect(createStrategy(sql, accountStaff('ZZ-SINTA'), svc, goodInput())).resolves.toBeTruthy();
+    // Audit before→after captured.
+    const a = await sql<{ before_json: { requires_strategy_plan: boolean }; after_json: { reason: string } }[]>`
+      select before_json, after_json from audit_log
+      where entity_id = ${svc} and action = 'strategy_requirement_override' order by id desc limit 1`;
+    expect(a[0].before_json.requires_strategy_plan).toBe(false);
+    expect(a[0].after_json.reason).toBe('butuh strategi khusus');
+  });
+
+  it('override is owner-AM/lead/director only, awaiting-only, and rejected once a plan exists', async () => {
+    const { clientId } = await planGatedFixture();
+    const svc = nextSvcId();
+    await insertService(svc, clientId, false, '[Awaiting Onboarding]');
+    await expect(setStrategyRequirement(sql, accountStaff('ZZ-OTHER'), svc, true, 'x')).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(setStrategyRequirement(sql, od(), svc, true, 'x')).rejects.toBeInstanceOf(ForbiddenError);
+    // Lead may; then a plan exists → further override rejected.
+    await setStrategyRequirement(sql, accountLead(), svc, true, 'butuh strategi');
+    await createStrategy(sql, accountStaff('ZZ-SINTA'), svc, goodInput());
+    await expect(setStrategyRequirement(sql, accountLead(), svc, false, 'batal')).rejects.toBeInstanceOf(ConflictError);
+    // Non-awaiting service → conflict.
+    const late = nextSvcId();
+    await insertService(late, clientId, false, '[Strategy Approved]');
+    await expect(setStrategyRequirement(sql, accountLead(), late, true, 'x')).rejects.toBeInstanceOf(ConflictError);
   });
 });

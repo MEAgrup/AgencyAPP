@@ -14,6 +14,9 @@ import {
   leadStubToWire,
   masterServiceToWire,
   poolRowToWire,
+  strategyRequirementToWire,
+  strategyToWire,
+  toStrategyInput,
 } from './wire';
 
 describe('masterServiceToWire', () => {
@@ -166,6 +169,52 @@ describe('M6 account wire mappers', () => {
     expect(assignmentToWire(a)).toEqual({
       client_id: 'CLI-1', previous_am: 'EMP-SINTA', assigned_am: 'EMP-RANI', assigned_by: 'EMP-ALEAD',
       reason: 'Sinta cuti panjang',
+    });
+  });
+
+  it('strategyToWire maps a Strategy; omits empty approved_by/revision_notes', () => {
+    const s: account.Strategy = {
+      id: 'STR-202607-0001', serviceId: 'SVC-1', objective: 'grow', targetKpi: 'GMV +30%',
+      divisionsInvolved: ['Creative', 'Ads'], plannedBriefOutline: '12 videos', timelineStart: '2026-07-01',
+      timelineEnd: '2026-08-30', status: '[Strategy Drafting]', approvedBy: '', revisionNotes: '',
+      revisionCount: 0, createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    };
+    expect(strategyToWire(s)).toEqual({
+      id: 'STR-202607-0001', service_id: 'SVC-1', objective: 'grow', target_kpi: 'GMV +30%',
+      divisions_involved: ['Creative', 'Ads'], planned_brief_outline: '12 videos', timeline_start: '2026-07-01',
+      timeline_end: '2026-08-30', status: '[Strategy Drafting]', revision_count: 0, created_by: 'EMP-SINTA',
+      created_at: '2026-07-01T00:00:00.000Z',
+    });
+  });
+
+  it('strategyToWire includes approved_by/revision_notes when set', () => {
+    const s: account.Strategy = {
+      id: 'STR-1', serviceId: 'SVC-1', objective: 'o', targetKpi: 'k', divisionsInvolved: [],
+      plannedBriefOutline: 'p', timelineStart: '2026-07-01', timelineEnd: '2026-07-02',
+      status: '[Strategy Approved]', approvedBy: 'EMP-ALEAD', revisionNotes: 'fix kpi', revisionCount: 1,
+      createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    };
+    const w = strategyToWire(s);
+    expect(w.approved_by).toBe('EMP-ALEAD');
+    expect(w.revision_notes).toBe('fix kpi');
+    expect(w.revision_count).toBe(1);
+  });
+
+  it('strategyRequirementToWire maps the M6-OA-1 override outcome', () => {
+    const r: account.StrategyRequirement = {
+      serviceId: 'SVC-1', requiresStrategyPlan: true, pinnedRequirement: false,
+      overridden: true, setBy: 'EMP-SINTA', reason: 'butuh strategi',
+    };
+    expect(strategyRequirementToWire(r)).toEqual({
+      service_id: 'SVC-1', requires_strategy_plan: true, pinned_requires_strategy_plan: false,
+      overridden: true, set_by: 'EMP-SINTA', reason: 'butuh strategi',
+    });
+  });
+
+  it('toStrategyInput maps snake_case body → camelCase StrategyInput (defaults)', () => {
+    expect(toStrategyInput({ objective: 'o', target_kpi: 'k', divisions_involved: ['Ads'] })).toEqual({
+      objective: 'o', targetKpi: 'k', divisionsInvolved: ['Ads'],
+      plannedBriefOutline: '', timelineStart: '', timelineEnd: '',
     });
   });
 });

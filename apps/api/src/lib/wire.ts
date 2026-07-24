@@ -213,6 +213,85 @@ export function assignmentToWire(a: account.Assignment): AssignmentWire {
   };
 }
 
+// --- M6 Account & Service, Cluster 2 (Strategy & Plan) ---
+
+/** module6_account.Strategy — a Strategy & Plan record (approved_by/revision_notes omitempty). */
+export interface StrategyWire {
+  id: string;
+  service_id: string;
+  objective: string;
+  target_kpi: string;
+  divisions_involved: string[];
+  planned_brief_outline: string;
+  timeline_start: string;
+  timeline_end: string;
+  status: string;
+  approved_by?: string;
+  revision_notes?: string;
+  revision_count: number;
+  created_by: string;
+  created_at: string;
+}
+
+export function strategyToWire(s: account.Strategy): StrategyWire {
+  return {
+    id: s.id,
+    service_id: s.serviceId,
+    objective: s.objective,
+    target_kpi: s.targetKpi,
+    divisions_involved: s.divisionsInvolved,
+    planned_brief_outline: s.plannedBriefOutline,
+    timeline_start: s.timelineStart,
+    timeline_end: s.timelineEnd,
+    status: s.status,
+    ...(s.approvedBy ? { approved_by: s.approvedBy } : {}),
+    ...(s.revisionNotes ? { revision_notes: s.revisionNotes } : {}),
+    revision_count: s.revisionCount,
+    created_by: s.createdBy,
+    created_at: s.createdAt.toISOString(),
+  };
+}
+
+/** module6_account.StrategyRequirement — the M6-OA-1 override outcome. */
+export interface StrategyRequirementWire {
+  service_id: string;
+  requires_strategy_plan: boolean;
+  pinned_requires_strategy_plan: boolean;
+  overridden: boolean;
+  set_by: string;
+  reason: string;
+}
+
+export function strategyRequirementToWire(r: account.StrategyRequirement): StrategyRequirementWire {
+  return {
+    service_id: r.serviceId,
+    requires_strategy_plan: r.requiresStrategyPlan,
+    pinned_requires_strategy_plan: r.pinnedRequirement,
+    overridden: r.overridden,
+    set_by: r.setBy,
+    reason: r.reason,
+  };
+}
+
+/** Request body → StrategyInput (snake_case wire → camelCase domain). */
+export function toStrategyInput(b: {
+  objective?: string;
+  target_kpi?: string;
+  divisions_involved?: string[];
+  planned_brief_outline?: string;
+  timeline_start?: string;
+  timeline_end?: string;
+}): account.StrategyInput {
+  return {
+    objective: b.objective ?? '',
+    targetKpi: b.target_kpi ?? '',
+    divisionsInvolved: b.divisions_involved ?? [],
+    plannedBriefOutline: b.planned_brief_outline ?? '',
+    timelineStart: b.timeline_start ?? '',
+    timelineEnd: b.timeline_end ?? '',
+  };
+}
+
 export function leadDetailToWire(d: leads.LeadDetailView): LeadDetailWire {
   const l = d.lead;
   return {
