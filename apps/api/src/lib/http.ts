@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { account, client, demo, finance, leads, msl, sales } from '@cdps/domain';
+import { account, client, demo, finance, leads, msl, sales, task } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -58,7 +58,8 @@ export function mapError(err: unknown): Response {
     err instanceof finance.OverVerificationError ||
     err instanceof finance.ScheduleTotalError ||
     err instanceof client.IncompleteError ||
-    err instanceof account.ValidationError
+    err instanceof account.ValidationError ||
+    err instanceof task.ValidationError
   ) {
     return errorJson(err.message, 400); // exact BI [...] message (or internal sentinel)
   }
@@ -69,7 +70,8 @@ export function mapError(err: unknown): Response {
     err instanceof msl.ServiceNotFoundError ||
     err instanceof finance.NotFoundError ||
     err instanceof client.NotFoundError ||
-    err instanceof account.NotFoundError
+    err instanceof account.NotFoundError ||
+    err instanceof task.NotFoundError
   ) {
     return errorJson(err.message, 404);
   }
@@ -79,7 +81,8 @@ export function mapError(err: unknown): Response {
     err instanceof msl.ForbiddenError ||
     err instanceof finance.ForbiddenError ||
     err instanceof client.ForbiddenError ||
-    err instanceof account.ForbiddenError
+    err instanceof account.ForbiddenError ||
+    err instanceof task.ForbiddenError
   ) {
     return errorJson(err.message, 403);
   }
@@ -90,7 +93,8 @@ export function mapError(err: unknown): Response {
     err instanceof finance.ContractRequiredError ||
     err instanceof finance.SchemeLockedError ||
     err instanceof client.LockedFieldError ||
-    err instanceof account.ConflictError
+    err instanceof account.ConflictError ||
+    err instanceof task.ConflictError
   ) {
     // Lifecycle conflicts: a dedup block, an un-closable attempt, a lead whose
     // win was already resolved, or a full-verification blocked on a missing

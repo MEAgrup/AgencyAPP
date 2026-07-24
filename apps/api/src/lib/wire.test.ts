@@ -3,11 +3,12 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { account, leads, msl } from '@cdps/domain';
+import type { account, leads, msl, task } from '@cdps/domain';
 import {
   amWorkloadToWire,
   assignmentToWire,
   attemptStubToWire,
+  blockRequestToWire,
   briefToWire,
   complaintToWire,
   intakeClientToWire,
@@ -15,6 +16,8 @@ import {
   leadRowToWire,
   leadStubToWire,
   masterServiceToWire,
+  metricsToWire,
+  pendingBlockRequestToWire,
   poolRowToWire,
   strategyRequirementToWire,
   strategyToWire,
@@ -278,6 +281,44 @@ describe('M6 account wire mappers', () => {
   it('toComplaintInput maps snake_case body → camelCase ComplaintInput', () => {
     expect(toComplaintInput({ description: 'd', severity: 'Low', related_ref: 'SVC-1' })).toEqual({
       description: 'd', severity: 'Low', relatedRef: 'SVC-1',
+    });
+  });
+});
+
+describe('M12 task wire mappers', () => {
+  it('metricsToWire maps Metrics; revision-SLA fields are N/A for a Brief-as-task', () => {
+    const m: task.Metrics = {
+      briefId: 'BRF-1', status: '[Approved]', slaTargetHours: 24, turnaroundHours: 12,
+      revisionTurnaroundHours: null, speedScorePct: 50, speedScoreDisplay: '50.00%', revisionCount: 1,
+      revisionFlagged: false, approvedAt: new Date('2026-07-01T00:00:00.000Z'), approvedPeriodWib: '2026-07',
+    };
+    expect(metricsToWire(m)).toEqual({
+      brief_id: 'BRF-1', status: '[Approved]', sla_target_hours: 24, turnaround_hours: 12,
+      revision_turnaround_hours: null, speed_score_pct: 50, speed_score_display: '50.00%',
+      revision_sla_target_hours: null, revision_speed_score_pct: null, revision_speed_score_display: 'N/A',
+      revision_count: 1, revision_flagged: false, approved_at: '2026-07-01T00:00:00.000Z', approved_period_wib: '2026-07',
+    });
+  });
+
+  it('blockRequestToWire maps a BlockRequest (nullable resolve fields)', () => {
+    const b: task.BlockRequest = {
+      id: 'BBR-1', entityId: 'BRF-1', reason: 'wait', status: 'pending', requestedBy: 'ZZ-C',
+      resolvedBy: null, resolvedAt: null, createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    };
+    expect(blockRequestToWire(b)).toEqual({
+      id: 'BBR-1', entity_id: 'BRF-1', reason: 'wait', status: 'pending', requested_by: 'ZZ-C',
+      resolved_by: null, resolved_at: null, created_at: '2026-07-01T00:00:00.000Z',
+    });
+  });
+
+  it('pendingBlockRequestToWire maps a PendingBlockRequest', () => {
+    const b: task.PendingBlockRequest = {
+      id: 'BBR-1', source: 'brief', entityId: 'BRF-1', division: 'Creative', clientId: 'CLI-1',
+      reason: 'wait', requestedBy: 'ZZ-C', createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    };
+    expect(pendingBlockRequestToWire(b)).toEqual({
+      id: 'BBR-1', source: 'brief', entity_id: 'BRF-1', division: 'Creative', client_id: 'CLI-1',
+      reason: 'wait', requested_by: 'ZZ-C', created_at: '2026-07-01T00:00:00.000Z',
     });
   });
 });

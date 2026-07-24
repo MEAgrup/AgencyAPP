@@ -1,0 +1,334 @@
+/**
+ * Tests for M12 Task Execution (task.ts).
+ *
+ * - Unit: the pure computeMetrics core (turnaround with blocked intervals
+ *   excluded, uncapped speed score, N/A / "—" rendering, revision count + flag,
+ *   revision turnaround) with controlled timestamps; plus the §2/§5.3 predicates.
+ * - Integration (skipped unless DATABASE_URL is set): the division-side exec
+ *   edges (+ Service [In Execution] advance), PIC/SLA assignment, the block
+ *   request queue with its notifications, and taskMetrics recompute-from-log.
+ */
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { permission } from '@cdps/core';
+import { createClient, type Sql } from '@cdps/db';
+import {
+  approveBlockRequest,
+  assignPic,
+  canExecute,
+  canManageTask,
+  canRequestBlock,
+  canViewTask,
+  computeMetrics,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  pendingBlockRequests,
+  rejectBlockRequest,
+  resumeTask,
+  reworkTask,
+  setSlaTarget,
+  startTask,
+  submitBlockRequest,
+  submitTask,
+  taskMetrics,
+  ValidationError,
+  type Actor,
+  type Transition,
+} from './task';
+
+const creativeStaff = (id = 'ZZ-C'): Actor => ({
+  employeeId: id, divisi: 'Creative', role: permission.makeRole({ division: 'Creative', level: 'staff' }),
+});
+const creativeLead = (id = 'ZZ-CLEAD'): Actor => ({
+  employeeId: id, divisi: 'Creative', role: permission.makeRole({ division: 'Creative', level: 'lead' }),
+});
+const adsStaff = (id = 'ZZ-A'): Actor => ({
+  employeeId: id, divisi: 'Ads', role: permission.makeRole({ division: 'Ads', level: 'staff' }),
+});
+const accountLead = (): Actor => ({
+  employeeId: 'ZZ-ALEAD', divisi: 'Account', role: permission.makeRole({ division: 'Account', level: 'lead' }),
+});
+const am = (id = 'ZZ-SINTA'): Actor => ({
+  employeeId: id, divisi: 'Account', role: permission.makeRole({ division: 'Account', level: 'staff' }),
+});
+const od = (): Actor => ({ employeeId: 'ZZ-OD', divisi: 'Management', role: permission.makeRole({ od: true }) });
+const director = (): Actor => ({ employeeId: 'ZZ-DIR', divisi: 'Management', role: permission.makeRole({ director: true }) });
+
+// ---------------------------------------------------------------------------
+// Unit: pure computeMetrics (§5.1) with controlled timestamps.
+// ---------------------------------------------------------------------------
+const t = (h: number): Date => new Date(Date.UTC(2026, 6, 1, h, 0, 0));
+const ev = (to: string, h: number): Transition => ({ to, at: t(h) });
+
+describe('computeMetrics (§5.1/§5.2)', () => {
+  it('turnaround = first In Progress → first Approved, blocked intervals excluded', () => {
+    const m = computeMetrics(
+      [ev('[In Progress]', 0), ev('[Blocked]', 2), ev('[In Progress]', 5), ev('[Submitted]', 6), ev('[In Review]', 7), ev('[Approved]', 8)],
+      10,
+    );
+    // Span 0→8 = 8h; minus the 2→5 blocked interval (3h) = 5h.
+    expect(m.turnaroundHours).toBe(5);
+    expect(m.speedScorePct).toBe(50); // 5 / 10 * 100
+    expect(m.speedScoreDisplay).toBe('50.00%');
+    expect(m.approvedPeriodWib).toBe('2026-07');
+  });
+
+  it('speed score is uncapped (Rule 12) and can exceed 100%', () => {
+    const m = computeMetrics([ev('[In Progress]', 0), ev('[Approved]', 30)], 10);
+    expect(m.speedScorePct).toBe(300);
+    expect(m.speedScoreDisplay).toBe('300.00%');
+  });
+
+  it('renders N/A before approval or with no SLA, and "—" on a zero SLA', () => {
+    expect(computeMetrics([ev('[In Progress]', 0)], 10).speedScoreDisplay).toBe('N/A'); // not approved
+    expect(computeMetrics([ev('[In Progress]', 0), ev('[Approved]', 5)], null).speedScoreDisplay).toBe('N/A'); // no SLA
+    expect(computeMetrics([ev('[In Progress]', 0), ev('[Approved]', 5)], 0).speedScoreDisplay).toBe('—'); // div-by-zero
+  });
+
+  it('counts revisions, flags at ≥3, and measures the latest revision turnaround', () => {
+    const m = computeMetrics(
+      [
+        ev('[In Progress]', 0), ev('[Submitted]', 2), ev('[In Review]', 3), ev('[Revision Requested]', 4),
+        ev('[In Progress]', 5), ev('[Submitted]', 8), ev('[In Review]', 9), ev('[Revision Requested]', 10),
+        ev('[In Progress]', 11), ev('[Submitted]', 14), ev('[In Review]', 15), ev('[Revision Requested]', 16),
+      ],
+      10,
+    );
+    expect(m.revisionCount).toBe(3);
+    expect(m.revisionFlagged).toBe(true);
+    expect(m.turnaroundHours).toBeNull(); // never approved
+  });
+
+  it('revision turnaround = latest Revision Requested → next Submitted', () => {
+    const m = computeMetrics([ev('[Revision Requested]', 4), ev('[Submitted]', 9)], 10);
+    expect(m.revisionTurnaroundHours).toBe(5);
+  });
+});
+
+describe('task predicates', () => {
+  const row = { division: 'Creative', assignedPic: '', ownerAm: 'ZZ-SINTA' };
+  it('canExecute: division staff/lead (or the assigned PIC); AM + other divisions denied', () => {
+    expect(canExecute(creativeStaff(), row)).toBe(true); // unassigned → any division staff
+    expect(canExecute(director(), row)).toBe(true);
+    expect(canExecute(adsStaff(), row)).toBe(false);
+    expect(canExecute(am(), row)).toBe(false);
+    // Assigned to a specific PIC → only that PIC or the division lead.
+    const assigned = { division: 'Creative', assignedPic: 'ZZ-C', ownerAm: 'ZZ-SINTA' };
+    expect(canExecute(creativeStaff('ZZ-C'), assigned)).toBe(true);
+    expect(canExecute(creativeStaff('ZZ-OTHER'), assigned)).toBe(false);
+    expect(canExecute(creativeLead(), assigned)).toBe(true);
+  });
+  it('canManageTask: division lead / Director only', () => {
+    expect(canManageTask(creativeLead(), 'Creative')).toBe(true);
+    expect(canManageTask(director(), 'Creative')).toBe(true);
+    expect(canManageTask(creativeStaff(), 'Creative')).toBe(false);
+  });
+  it('canRequestBlock: division staff/lead, owning AM, or Director', () => {
+    expect(canRequestBlock(creativeStaff(), row)).toBe(true);
+    expect(canRequestBlock(am(), row)).toBe(true); // owning AM
+    expect(canRequestBlock(adsStaff(), row)).toBe(false);
+  });
+  it('canViewTask: OD/Director/Account-lead/owner-AM/target-division', () => {
+    expect(canViewTask(od(), 'ZZ-SINTA', 'Creative')).toBe(true);
+    expect(canViewTask(accountLead(), 'ZZ-SINTA', 'Creative')).toBe(true);
+    expect(canViewTask(am(), 'ZZ-SINTA', 'Creative')).toBe(true);
+    expect(canViewTask(creativeStaff(), 'ZZ-SINTA', 'Creative')).toBe(true);
+    expect(canViewTask(adsStaff(), 'ZZ-SINTA', 'Creative')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Integration (real Postgres).
+// ---------------------------------------------------------------------------
+const URL = process.env.DATABASE_URL;
+const describeDb = describe.skipIf(!URL);
+
+let sql: Sql;
+if (URL) {
+  sql = createClient(URL);
+}
+
+let seq = 0;
+const uid = (p: string): string => `${p}-ZZ-${Date.now() % 100000}-${seq++}`;
+
+async function insertClient(id: string, amId: string): Promise<void> {
+  await sql`
+    insert into clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
+      total_sales, sales_pic_id, commission_payment_pic_id, released_to_account_at, assigned_am_id, created_by)
+    values (${id}, 'PIC', ${id}, 'Bandung', 'link', 'Fashion', '10000000.00', '20000000.00', '0.00',
+      'ZZ-BUDI', 'ZZ-BUDI', now(), ${amId}, 'ZZ-TEST')`;
+}
+async function insertService(id: string, clientId: string, status: string): Promise<void> {
+  await sql`
+    insert into services (id, client_id, master_service_id, master_version_no, name,
+      standard_price, commission_rule, status, requires_strategy_plan, created_by)
+    values (${id}, ${clientId}, 'MSV-X', 1, 'Svc', '10000000.00', 'rule', ${status}, false, 'ZZ-TEST')`;
+}
+async function insertBrief(id: string, svcId: string, division: string, status: string, pic: string | null): Promise<void> {
+  await sql`
+    insert into briefs (id, service_id, title, status, assigned_division, assigned_pic, deliverable_type,
+      quantity_target, priority, recurring, created_by)
+    values (${id}, ${svcId}, 'Brief', ${status}, ${division}, ${pic}, 'Video', 1, 'High', false, 'ZZ-TEST')`;
+}
+async function registerStaff(id: string, division: string, level: string): Promise<void> {
+  const jab = `ZZ-${division}-${level}`;
+  await sql`
+    insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+    values (${id}, ${id}, ${id + '@mea.id'}, ${division}, ${jab}, true, 'ZZ-TEST') on conflict (employee_id) do nothing`;
+  await sql`
+    insert into role_mappings (divisi, jabatan, division, level, created_by)
+    values (${division}, ${jab}, ${division}, ${level}, 'ZZ-TEST') on conflict (divisi, jabatan) do nothing`;
+}
+
+/** A released client + [Briefed] service + a [To Do] Creative brief. Returns ids. */
+async function briefFixture(status = '[To Do]', pic: string | null = null): Promise<{ briefId: string; svcId: string }> {
+  const clientId = uid('CLI');
+  const svcId = uid('SVC');
+  const briefId = uid('BRF');
+  await insertClient(clientId, 'ZZ-SINTA');
+  await insertService(svcId, clientId, '[Briefed]');
+  await insertBrief(briefId, svcId, 'Creative', status, pic);
+  return { briefId, svcId };
+}
+
+const briefStatus = async (id: string): Promise<string> =>
+  (await sql<{ status: string }[]>`select status from briefs where id = ${id}`)[0].status;
+const svcStatus = async (id: string): Promise<string> =>
+  (await sql<{ status: string }[]>`select status from services where id = ${id}`)[0].status;
+const notifCount = async (recipient: string, event: string, entityId: string): Promise<number> =>
+  Number((await sql<{ n: string }[]>`
+    select count(*) as n from notifications
+    where recipient_employee_id = ${recipient} and event_type = ${event} and entity_id = ${entityId}`)[0].n);
+
+afterAll(async () => {
+  if (sql) await sql.end();
+});
+afterEach(async () => {
+  if (!sql) return;
+  // notifications + audit_log are append-only; never cleaned (assertions scope by entity id).
+  await sql`delete from brief_block_requests where created_by like 'ZZ-%'`;
+  await sql`delete from briefs where created_by like 'ZZ-%'`;
+  await sql`delete from services where created_by like 'ZZ-%'`;
+  await sql`delete from clients where created_by like 'ZZ-%'`;
+  await sql`delete from employees where created_by like 'ZZ-%'`;
+  await sql`delete from role_mappings where created_by like 'ZZ-%'`;
+});
+
+describeDb('execution edges (§3)', () => {
+  it('startTask [To Do]→[In Progress] advances the parent Service to [In Execution]', async () => {
+    const { briefId, svcId } = await briefFixture();
+    expect((await startTask(sql, creativeStaff(), briefId)).ok).toBe(true);
+    expect(await briefStatus(briefId)).toBe('[In Progress]');
+    expect(await svcStatus(svcId)).toBe('[In Execution]');
+  });
+
+  it('submit + rework cycle stays on the same brief', async () => {
+    const { briefId } = await briefFixture();
+    await startTask(sql, creativeStaff(), briefId);
+    expect((await submitTask(sql, creativeStaff(), briefId)).ok).toBe(true);
+    expect(await briefStatus(briefId)).toBe('[Submitted]');
+    // Drive to Revision Requested via the AM review edges is M6; here set it directly is not allowed —
+    // instead verify rework from a Revision-Requested fixture.
+    const rr = await briefFixture('[Revision Requested]');
+    expect((await reworkTask(sql, creativeStaff(), rr.briefId)).ok).toBe(true);
+    expect(await briefStatus(rr.briefId)).toBe('[In Progress]');
+  });
+
+  it('§2 Rule 1 exec gate: division staff/Director allowed; AM + other divisions denied', async () => {
+    for (const actor of [creativeStaff(), director()]) {
+      const { briefId } = await briefFixture();
+      await expect(startTask(sql, actor, briefId)).resolves.toBeTruthy();
+    }
+    for (const actor of [am(), adsStaff(), accountLead()]) {
+      const { briefId } = await briefFixture();
+      await expect(startTask(sql, actor, briefId)).rejects.toBeInstanceOf(ForbiddenError);
+    }
+  });
+
+  it('a wrong source state is a conflict; a vendor-dispatched brief is not a task', async () => {
+    const { briefId } = await briefFixture('[In Progress]');
+    await expect(startTask(sql, creativeStaff(), briefId)).rejects.toBeInstanceOf(ConflictError); // not [To Do]
+    const ls = await briefFixture('[Dispatched to Vendor]');
+    await expect(startTask(sql, creativeStaff(), ls.briefId)).rejects.toBeInstanceOf(ConflictError);
+    await expect(startTask(sql, creativeStaff(), 'BRF-GHOST-0')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describeDb('assign PIC + set SLA (§5.3)', () => {
+  it('the division lead assigns an active division-staff PIC (audited); bad PIC rejected', async () => {
+    const { briefId } = await briefFixture();
+    await registerStaff('ZZ-C', 'Creative', 'staff');
+    await expect(assignPic(sql, creativeStaff(), briefId, 'ZZ-C')).rejects.toBeInstanceOf(ForbiddenError); // staff cannot assign
+    await assignPic(sql, creativeLead(), briefId, 'ZZ-C');
+    expect((await sql<{ assigned_pic: string }[]>`select assigned_pic from briefs where id=${briefId}`)[0].assigned_pic).toBe('ZZ-C');
+    // An Ads staff is not a valid Creative PIC.
+    await registerStaff('ZZ-A', 'Ads', 'staff');
+    await expect(assignPic(sql, creativeLead(), briefId, 'ZZ-A')).rejects.toBeInstanceOf(ValidationError);
+    await expect(assignPic(sql, creativeLead(), briefId, '  ')).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('the division lead sets a positive SLA target (audited); non-positive rejected', async () => {
+    const { briefId } = await briefFixture();
+    await expect(setSlaTarget(sql, creativeLead(), briefId, 0)).rejects.toBeInstanceOf(ValidationError);
+    await setSlaTarget(sql, creativeLead(), briefId, 48);
+    expect(Number((await sql<{ sla_target_hours: string }[]>`select sla_target_hours from briefs where id=${briefId}`)[0].sla_target_hours)).toBe(48);
+    await expect(setSlaTarget(sql, creativeStaff(), briefId, 24)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+});
+
+describeDb('block workflow (§5.3a)', () => {
+  it('staff requests, lead approves → [Blocked], resume → [In Progress]; requester notified', async () => {
+    const { briefId } = await briefFixture();
+    await registerStaff('ZZ-CLEAD', 'Creative', 'lead'); // a recipient for the submitted event
+    await startTask(sql, creativeStaff(), briefId); // [In Progress]
+    const req = await submitBlockRequest(sql, creativeStaff(), briefId, 'menunggu aset klien');
+    expect(req.status).toBe('pending');
+    expect(await notifCount('ZZ-CLEAD', 'm12.block_request.submitted', briefId)).toBe(1);
+    // A staff member cannot decide a request.
+    await expect(approveBlockRequest(sql, creativeStaff(), briefId, req.id)).rejects.toBeInstanceOf(ForbiddenError);
+    await approveBlockRequest(sql, creativeLead(), briefId, req.id);
+    expect(await briefStatus(briefId)).toBe('[Blocked]');
+    expect(await notifCount('ZZ-C', 'm12.block_request.decided', briefId)).toBe(1); // requester notified
+    // A resolved request cannot be decided again.
+    await expect(approveBlockRequest(sql, creativeLead(), briefId, req.id)).rejects.toBeInstanceOf(ConflictError);
+    // Resume back to [In Progress].
+    expect((await resumeTask(sql, creativeLead(), briefId)).ok).toBe(true);
+    expect(await briefStatus(briefId)).toBe('[In Progress]');
+  });
+
+  it('reject closes the request without moving the task; reason mandatory', async () => {
+    const { briefId } = await briefFixture();
+    await startTask(sql, creativeStaff(), briefId);
+    await expect(submitBlockRequest(sql, creativeStaff(), briefId, '  ')).rejects.toBeInstanceOf(ValidationError);
+    const req = await submitBlockRequest(sql, creativeStaff(), briefId, 'alasan');
+    await rejectBlockRequest(sql, creativeLead(), briefId, req.id);
+    expect(await briefStatus(briefId)).toBe('[In Progress]'); // unchanged
+    await expect(approveBlockRequest(sql, creativeLead(), briefId, 'BBR-GHOST-0')).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('pendingBlockRequests: a division lead sees own-division pending, others see none', async () => {
+    const { briefId } = await briefFixture();
+    await startTask(sql, creativeStaff(), briefId);
+    await submitBlockRequest(sql, creativeStaff(), briefId, 'x');
+    expect((await pendingBlockRequests(sql, creativeLead())).some((r) => r.entityId === briefId)).toBe(true);
+    expect((await pendingBlockRequests(sql, adsStaff())).some((r) => r.entityId === briefId)).toBe(false);
+    expect((await pendingBlockRequests(sql, director())).some((r) => r.entityId === briefId)).toBe(true);
+  });
+});
+
+describeDb('taskMetrics (recompute-from-log)', () => {
+  it('reflects status + SLA, N/A until approved, and the read gate', async () => {
+    const { briefId } = await briefFixture();
+    await setSlaTarget(sql, creativeLead(), briefId, 24);
+    await startTask(sql, creativeStaff(), briefId);
+    const m = await taskMetrics(sql, creativeStaff(), briefId);
+    expect(m.status).toBe('[In Progress]');
+    expect(m.slaTargetHours).toBe(24);
+    expect(m.turnaroundHours).toBeNull(); // not approved yet
+    expect(m.speedScoreDisplay).toBe('N/A');
+    expect(m.revisionCount).toBe(0);
+    // Read gate: an unrelated Ads staff cannot view a Creative task.
+    await expect(taskMetrics(sql, adsStaff(), briefId)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(taskMetrics(sql, creativeStaff(), 'BRF-GHOST-0')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});

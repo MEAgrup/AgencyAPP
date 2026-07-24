@@ -19,6 +19,10 @@
  * - account: M6 Account & Service — client intake & AM assignment (§3), Strategy
  *   & Plan (§4, the plan-gated path), Brief breakdown/dispatch/review (§5–§7),
  *   and Complaint door #2 (§8).
+ * - task: M12 Task Execution — the division-side brief_task edges (start/submit/
+ *   rework/block/resume), PIC + SLA assignment, the block-request queue, and the
+ *   recompute-from-log Task metrics (turnaround / speed score). Brief-as-task
+ *   source; Asset/Booking sources plug in with M7/M9.
  *
  * An @cdps/api route handler is a thin shell: resolve the actor from the JWT
  * app_metadata claim, validate inputs, then call one of these functions.
@@ -33,3 +37,4 @@ export * as msl from './msl';
 export * as finance from './finance';
 export * as client from './client';
 export * as account from './account';
+export * as task from './task';

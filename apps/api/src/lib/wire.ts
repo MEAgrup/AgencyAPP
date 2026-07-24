@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import type { account, leads, msl } from '@cdps/domain';
+import type { account, leads, msl, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -447,5 +447,96 @@ export function leadDetailToWire(d: leads.LeadDetailView): LeadDetailWire {
       status: a.status,
       claimed_at: a.claimedAt.toISOString(),
     })),
+  };
+}
+
+// --- M12 Task Execution ---
+
+/** module12_task.Metrics — the recompute-from-log Task metrics (§5.1). The
+ *  asset-only revision-SLA fields are always null / "N/A" for a Brief-as-task. */
+export interface MetricsWire {
+  brief_id: string;
+  status: string;
+  sla_target_hours: number | null;
+  turnaround_hours: number | null;
+  revision_turnaround_hours: number | null;
+  speed_score_pct: number | null;
+  speed_score_display: string;
+  revision_sla_target_hours: number | null;
+  revision_speed_score_pct: number | null;
+  revision_speed_score_display: string;
+  revision_count: number;
+  revision_flagged: boolean;
+  approved_at: string | null;
+  approved_period_wib: string;
+}
+
+export function metricsToWire(m: task.Metrics): MetricsWire {
+  return {
+    brief_id: m.briefId,
+    status: m.status,
+    sla_target_hours: m.slaTargetHours,
+    turnaround_hours: m.turnaroundHours,
+    revision_turnaround_hours: m.revisionTurnaroundHours,
+    speed_score_pct: m.speedScorePct,
+    speed_score_display: m.speedScoreDisplay,
+    // Brief-as-task carries no revision SLA (M7-OA-3 asset field) — always N/A.
+    revision_sla_target_hours: null,
+    revision_speed_score_pct: null,
+    revision_speed_score_display: 'N/A',
+    revision_count: m.revisionCount,
+    revision_flagged: m.revisionFlagged,
+    approved_at: m.approvedAt ? m.approvedAt.toISOString() : null,
+    approved_period_wib: m.approvedPeriodWib,
+  };
+}
+
+/** module12_task.BlockRequest — returned by the block-request POST edge. */
+export interface BlockRequestWire {
+  id: string;
+  entity_id: string;
+  reason: string;
+  status: string;
+  requested_by: string;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  created_at: string;
+}
+
+export function blockRequestToWire(b: task.BlockRequest): BlockRequestWire {
+  return {
+    id: b.id,
+    entity_id: b.entityId,
+    reason: b.reason,
+    status: b.status,
+    requested_by: b.requestedBy,
+    resolved_by: b.resolvedBy,
+    resolved_at: b.resolvedAt ? b.resolvedAt.toISOString() : null,
+    created_at: b.createdAt.toISOString(),
+  };
+}
+
+/** module12_task.PendingBlockRequest — one open request in the SPV/Lead queue. */
+export interface PendingBlockRequestWire {
+  id: string;
+  source: string;
+  entity_id: string;
+  division: string;
+  client_id: string;
+  reason: string;
+  requested_by: string;
+  created_at: string;
+}
+
+export function pendingBlockRequestToWire(b: task.PendingBlockRequest): PendingBlockRequestWire {
+  return {
+    id: b.id,
+    source: b.source,
+    entity_id: b.entityId,
+    division: b.division,
+    client_id: b.clientId,
+    reason: b.reason,
+    requested_by: b.requestedBy,
+    created_at: b.createdAt.toISOString(),
   };
 }
