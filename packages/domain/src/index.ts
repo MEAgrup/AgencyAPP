@@ -36,6 +36,9 @@
  *   Brief↔Booking roll-up, the Creator Payment Request (Finance-executed), the
  *   compiled Creator List, Attributed GMV, and §11-mapped Speed Score via
  *   task.computeMetrics.
+ * - livestream: M10 Live Stream — the Live Stream Session (LSS-) vendor tracker:
+ *   AM-owned request/result lifecycle over an off-machine [Dispatched to Vendor]
+ *   Brief, requested-vs-actual reconciliation, and the off-machine Brief roll-up.
  *
  * An @cdps/api route handler is a thin shell: resolve the actor from the JWT
  * app_metadata claim, validate inputs, then call one of these functions.
@@ -54,3 +57,4 @@ export * as task from './task';
 export * as creative from './creative';
 export * as ads from './ads';
 export * as kol from './kol';
+export * as livestream from './livestream';

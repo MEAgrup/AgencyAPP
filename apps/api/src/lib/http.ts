@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { account, ads, client, creative, demo, finance, kol, leads, msl, sales, task } from '@cdps/domain';
+import { account, ads, client, creative, demo, finance, kol, leads, livestream, msl, sales, task } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -62,7 +62,9 @@ export function mapError(err: unknown): Response {
     err instanceof task.ValidationError ||
     err instanceof creative.ValidationError ||
     err instanceof ads.ValidationError ||
-    err instanceof kol.ValidationError
+    err instanceof kol.ValidationError ||
+    err instanceof livestream.IncompleteError ||
+    err instanceof livestream.ValidationError
   ) {
     return errorJson(err.message, 400); // exact BI [...] message (or internal sentinel)
   }
@@ -77,7 +79,8 @@ export function mapError(err: unknown): Response {
     err instanceof task.NotFoundError ||
     err instanceof creative.NotFoundError ||
     err instanceof ads.NotFoundError ||
-    err instanceof kol.NotFoundError
+    err instanceof kol.NotFoundError ||
+    err instanceof livestream.NotFoundError
   ) {
     return errorJson(err.message, 404);
   }
@@ -91,7 +94,8 @@ export function mapError(err: unknown): Response {
     err instanceof task.ForbiddenError ||
     err instanceof creative.ForbiddenError ||
     err instanceof ads.ForbiddenError ||
-    err instanceof kol.ForbiddenError
+    err instanceof kol.ForbiddenError ||
+    err instanceof livestream.ForbiddenError
   ) {
     return errorJson(err.message, 403);
   }
@@ -106,7 +110,8 @@ export function mapError(err: unknown): Response {
     err instanceof task.ConflictError ||
     err instanceof creative.ConflictError ||
     err instanceof ads.ConflictError ||
-    err instanceof kol.ConflictError
+    err instanceof kol.ConflictError ||
+    err instanceof livestream.ConflictError
   ) {
     // Lifecycle conflicts: a dedup block, an un-closable attempt, a lead whose
     // win was already resolved, or a full-verification blocked on a missing
