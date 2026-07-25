@@ -13,6 +13,7 @@ import { livestream } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
+import { sessionToWire } from '@/lib/wire';
 
 interface Body {
   platform?: string;
@@ -34,7 +35,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       productsTalent: b.products_talent,
       specialInstructions: b.special_instructions,
     });
-    return json(session, 201);
+    return json(sessionToWire(session), 201);
   });
 }
 
@@ -43,6 +44,6 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
     const actor = requireActor(request);
     const { id } = await ctx.params;
     const data = await livestream.listBriefSessions(db(), actor, id);
-    return json({ data });
+    return json({ data: data.map(sessionToWire) });
   });
 }
