@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { bi } from '@cdps/core';
-import { demo } from '@cdps/domain';
+import { account, ads, creative, demo, kol, task } from '@cdps/domain';
 import {
   BadRequestError,
   UnauthorizedError,
@@ -55,6 +55,52 @@ describe('mapError', () => {
     const res = mapError(new Error('secret internals'));
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ error: 'internal server error' });
+  });
+
+  it('maps M6 account errors to their canonical status (verbatim BI)', async () => {
+    const validation = mapError(new account.ValidationError(account.MSG_INVALID_AM));
+    expect(validation.status).toBe(400);
+    expect(await validation.json()).toEqual({ error: account.MSG_INVALID_AM });
+
+    expect(mapError(new account.ForbiddenError(account.MSG_ASSIGN_FORBIDDEN)).status).toBe(403);
+    expect(mapError(new account.NotFoundError()).status).toBe(404);
+    expect(mapError(new account.ConflictError(account.MSG_ALREADY_ASSIGNED)).status).toBe(409);
+  });
+
+  it('maps M12 task errors to their canonical status (verbatim BI)', async () => {
+    const v = mapError(new task.ValidationError(task.MSG_INVALID_SLA));
+    expect(v.status).toBe(400);
+    expect(await v.json()).toEqual({ error: task.MSG_INVALID_SLA });
+    expect(mapError(new task.ForbiddenError(task.MSG_EXEC_FORBIDDEN)).status).toBe(403);
+    expect(mapError(new task.NotFoundError()).status).toBe(404);
+    expect(mapError(new task.ConflictError(task.MSG_NOT_A_TASK)).status).toBe(409);
+  });
+
+  it('maps M7 creative errors to their canonical status (verbatim BI)', async () => {
+    const v = mapError(new creative.ValidationError(creative.MSG_INVALID_SEQUENCE));
+    expect(v.status).toBe(400);
+    expect(await v.json()).toEqual({ error: creative.MSG_INVALID_SEQUENCE });
+    expect(mapError(new creative.ForbiddenError(creative.MSG_REVIEW_FORBIDDEN)).status).toBe(403);
+    expect(mapError(new creative.NotFoundError()).status).toBe(404);
+    expect(mapError(new creative.ConflictError(creative.MSG_DUPLICATE_SEQUENCE)).status).toBe(409);
+  });
+
+  it('maps M8 ads errors to their canonical status (verbatim BI)', async () => {
+    const v = mapError(new ads.ValidationError(ads.MSG_INVALID_PLATFORM));
+    expect(v.status).toBe(400);
+    expect(await v.json()).toEqual({ error: ads.MSG_INVALID_PLATFORM });
+    expect(mapError(new ads.ForbiddenError(ads.MSG_BUDGET_APPROVAL_REQUIRED)).status).toBe(403);
+    expect(mapError(new ads.NotFoundError()).status).toBe(404);
+    expect(mapError(new ads.ConflictError(ads.MSG_CAMPAIGN_ENDED)).status).toBe(409);
+  });
+
+  it('maps M9 kol errors to their canonical status (verbatim BI)', async () => {
+    const v = mapError(new kol.ValidationError(kol.MSG_INVALID_SOURCE_POOL));
+    expect(v.status).toBe(400);
+    expect(await v.json()).toEqual({ error: kol.MSG_INVALID_SOURCE_POOL });
+    expect(mapError(new kol.ForbiddenError(kol.MSG_FINANCE_FORBIDDEN)).status).toBe(403);
+    expect(mapError(new kol.NotFoundError()).status).toBe(404);
+    expect(mapError(new kol.ConflictError(kol.MSG_REVISION_CAP_REACHED)).status).toBe(409);
   });
 });
 
