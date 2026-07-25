@@ -197,6 +197,7 @@ afterEach(async () => {
   await sql`delete from leads where created_by like 'ZZ-%'`;
   await sql`delete from master_service_versions where created_by like 'ZZ-%'`;
   await sql`delete from master_services where created_by like 'ZZ-%'`;
+  await sql`delete from role_mappings where created_by like 'ZZ-%'`;
   await sql`delete from employees where employee_id like 'ZZ-%'`;
 });
 
@@ -335,10 +336,16 @@ describeDb('lifecycle: confirm → results → reconcile (M10 §4)', () => {
 
 describeDb('discrepancy branch (M10 §4 Rule 3 / M10-OA-3)', () => {
   it('flags with mandatory notes, notifies the SPV-Account lead, then still reconciles', async () => {
-    // Seed an active Account lead so notify_emit resolves a recipient.
+    // Seed an active Account lead so notify_emit resolves a recipient. The
+    // `leadsOfDivision` resolver joins employees→role_mappings, so the mapping
+    // (divisi,jabatan)→(division,level='lead') must exist too (mirrors kol.test).
     await sql`
       insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
-      values ('ZZ-ALEAD', 'Account Lead', 'zz-alead@example.com', 'Account', 'Account Lead', true, 'ZZ-ADMIN')`;
+      values ('ZZ-ALEAD', 'Account Lead', 'zz-alead@example.com', 'Account', 'ZZ-ACC-LEAD', true, 'ZZ-ADMIN')`;
+    await sql`
+      insert into role_mappings (divisi, jabatan, division, level, created_by)
+      values ('Account', 'ZZ-ACC-LEAD', 'Account', 'lead', 'ZZ-ADMIN')
+      on conflict (divisi, jabatan) do nothing`;
 
     const brief = await dispatchedBrief();
     const id = await completedSession(brief);
