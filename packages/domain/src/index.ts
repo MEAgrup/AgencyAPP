@@ -20,9 +20,12 @@
  *   & Plan (§4, the plan-gated path), Brief breakdown/dispatch/review (§5–§7),
  *   and Complaint door #2 (§8).
  * - task: M12 Task Execution — the division-side brief_task edges (start/submit/
- *   rework/block/resume), PIC + SLA assignment, the block-request queue, and the
- *   recompute-from-log Task metrics (turnaround / speed score). Brief-as-task
- *   source; Asset/Booking sources plug in with M7/M9.
+ *   rework/block/resume), PIC + SLA assignment, the block-request queue, the
+ *   recompute-from-log Task metrics (turnaround / speed score), and the Brief→Asset
+ *   roll-up. Serves the Brief-as-task and Creative Asset sources (Booking with M9).
+ * - creative: M7 Creative — the Asset (AST-) entity: incremental Brief breakdown,
+ *   the AM-side per-Asset review edges (§4 Flow 3 / §6), Hours Logged (§5), and the
+ *   Asset reads. Execution edges + roll-up live in `task`.
  *
  * An @cdps/api route handler is a thin shell: resolve the actor from the JWT
  * app_metadata claim, validate inputs, then call one of these functions.
@@ -38,3 +41,4 @@ export * as finance from './finance';
 export * as client from './client';
 export * as account from './account';
 export * as task from './task';
+export * as creative from './creative';

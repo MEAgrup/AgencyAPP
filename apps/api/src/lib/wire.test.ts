@@ -3,9 +3,10 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { account, leads, msl, task } from '@cdps/domain';
+import type { account, creative, leads, msl, task } from '@cdps/domain';
 import {
   amWorkloadToWire,
+  assetToWire,
   assignmentToWire,
   attemptStubToWire,
   blockRequestToWire,
@@ -21,6 +22,7 @@ import {
   poolRowToWire,
   strategyRequirementToWire,
   strategyToWire,
+  toAssetInput,
   toBriefInput,
   toComplaintInput,
   toStrategyInput,
@@ -289,7 +291,8 @@ describe('M12 task wire mappers', () => {
   it('metricsToWire maps Metrics; revision-SLA fields are N/A for a Brief-as-task', () => {
     const m: task.Metrics = {
       briefId: 'BRF-1', status: '[Approved]', slaTargetHours: 24, turnaroundHours: 12,
-      revisionTurnaroundHours: null, speedScorePct: 50, speedScoreDisplay: '50.00%', revisionCount: 1,
+      revisionTurnaroundHours: null, speedScorePct: 50, speedScoreDisplay: '50.00%',
+      revisionSlaTargetHours: null, revisionSpeedScorePct: null, revisionSpeedScoreDisplay: 'N/A', revisionCount: 1,
       revisionFlagged: false, approvedAt: new Date('2026-07-01T00:00:00.000Z'), approvedPeriodWib: '2026-07',
     };
     expect(metricsToWire(m)).toEqual({
@@ -320,5 +323,41 @@ describe('M12 task wire mappers', () => {
       id: 'BBR-1', source: 'brief', entity_id: 'BRF-1', division: 'Creative', client_id: 'CLI-1',
       reason: 'wait', requested_by: 'ZZ-C', created_at: '2026-07-01T00:00:00.000Z',
     });
+  });
+});
+
+describe('M7 creative wire mappers', () => {
+  it('assetToWire maps an Asset; omits absent PIC/link and null numeric fields', () => {
+    const a: creative.Asset = {
+      id: 'AST-202607-0001', briefId: 'BRF-1', assetType: 'Product Video', sequenceNo: 1, assignedPic: '',
+      outputLink: '', status: '[To Do]', slaTargetHours: null, revisionSlaHours: null, hoursLogged: null,
+      attributedGmv: null, revisionCount: 0, revisionFlagged: false, createdBy: 'ZZ-C',
+      createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    };
+    expect(assetToWire(a)).toEqual({
+      id: 'AST-202607-0001', brief_id: 'BRF-1', asset_type: 'Product Video', sequence_no: 1, status: '[To Do]',
+      revision_count: 0, revision_flagged: false, created_by: 'ZZ-C', created_at: '2026-07-01T00:00:00.000Z',
+    });
+  });
+
+  it('assetToWire includes PIC, link, and numeric fields when set', () => {
+    const a: creative.Asset = {
+      id: 'AST-1', briefId: 'BRF-1', assetType: 'Video', sequenceNo: 2, assignedPic: 'ZZ-C',
+      outputLink: 'https://drive/x', status: '[Approved]', slaTargetHours: 24, revisionSlaHours: 8,
+      hoursLogged: 4.5, attributedGmv: 1000000, revisionCount: 2, revisionFlagged: false, createdBy: 'ZZ-C',
+      createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    };
+    const w = assetToWire(a);
+    expect(w.assigned_pic).toBe('ZZ-C');
+    expect(w.output_link).toBe('https://drive/x');
+    expect(w.sla_target_hours).toBe(24);
+    expect(w.revision_sla_target_hours).toBe(8);
+    expect(w.hours_logged).toBe(4.5);
+    expect(w.attributed_gmv).toBe(1000000);
+  });
+
+  it('toAssetInput maps snake_case body → camelCase AssetInput (defaults)', () => {
+    expect(toAssetInput({ sequence_no: 3 })).toEqual({ sequenceNo: 3, assignedPic: '' });
+    expect(toAssetInput({ sequence_no: 1, assigned_pic: 'ZZ-C' })).toEqual({ sequenceNo: 1, assignedPic: 'ZZ-C' });
   });
 });

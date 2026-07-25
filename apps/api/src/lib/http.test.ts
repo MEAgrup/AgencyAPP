@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { bi } from '@cdps/core';
-import { account, demo, task } from '@cdps/domain';
+import { account, creative, demo, task } from '@cdps/domain';
 import {
   BadRequestError,
   UnauthorizedError,
@@ -74,6 +74,15 @@ describe('mapError', () => {
     expect(mapError(new task.ForbiddenError(task.MSG_EXEC_FORBIDDEN)).status).toBe(403);
     expect(mapError(new task.NotFoundError()).status).toBe(404);
     expect(mapError(new task.ConflictError(task.MSG_NOT_A_TASK)).status).toBe(409);
+  });
+
+  it('maps M7 creative errors to their canonical status (verbatim BI)', async () => {
+    const v = mapError(new creative.ValidationError(creative.MSG_INVALID_SEQUENCE));
+    expect(v.status).toBe(400);
+    expect(await v.json()).toEqual({ error: creative.MSG_INVALID_SEQUENCE });
+    expect(mapError(new creative.ForbiddenError(creative.MSG_REVIEW_FORBIDDEN)).status).toBe(403);
+    expect(mapError(new creative.NotFoundError()).status).toBe(404);
+    expect(mapError(new creative.ConflictError(creative.MSG_DUPLICATE_SEQUENCE)).status).toBe(409);
   });
 });
 

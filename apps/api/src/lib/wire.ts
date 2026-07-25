@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import type { account, leads, msl, task } from '@cdps/domain';
+import type { account, creative, leads, msl, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -480,10 +480,10 @@ export function metricsToWire(m: task.Metrics): MetricsWire {
     revision_turnaround_hours: m.revisionTurnaroundHours,
     speed_score_pct: m.speedScorePct,
     speed_score_display: m.speedScoreDisplay,
-    // Brief-as-task carries no revision SLA (M7-OA-3 asset field) — always N/A.
-    revision_sla_target_hours: null,
-    revision_speed_score_pct: null,
-    revision_speed_score_display: 'N/A',
+    // Populated for a Creative Asset (M7-OA-3); always null / "N/A" for a Brief-as-task.
+    revision_sla_target_hours: m.revisionSlaTargetHours,
+    revision_speed_score_pct: m.revisionSpeedScorePct,
+    revision_speed_score_display: m.revisionSpeedScoreDisplay,
     revision_count: m.revisionCount,
     revision_flagged: m.revisionFlagged,
     approved_at: m.approvedAt ? m.approvedAt.toISOString() : null,
@@ -539,4 +539,50 @@ export function pendingBlockRequestToWire(b: task.PendingBlockRequest): PendingB
     requested_by: b.requestedBy,
     created_at: b.createdAt.toISOString(),
   };
+}
+
+// --- M7 Creative (Asset) ---
+
+/** module7_creative.Asset — one Asset record (nullable numeric fields omitempty). */
+export interface AssetWire {
+  id: string;
+  brief_id: string;
+  asset_type: string;
+  sequence_no: number;
+  assigned_pic?: string;
+  output_link?: string;
+  status: string;
+  sla_target_hours?: number;
+  revision_sla_target_hours?: number;
+  hours_logged?: number;
+  attributed_gmv?: number;
+  revision_count: number;
+  revision_flagged: boolean;
+  created_by: string;
+  created_at: string;
+}
+
+export function assetToWire(a: creative.Asset): AssetWire {
+  return {
+    id: a.id,
+    brief_id: a.briefId,
+    asset_type: a.assetType,
+    sequence_no: a.sequenceNo,
+    ...(a.assignedPic ? { assigned_pic: a.assignedPic } : {}),
+    ...(a.outputLink ? { output_link: a.outputLink } : {}),
+    status: a.status,
+    ...(a.slaTargetHours !== null ? { sla_target_hours: a.slaTargetHours } : {}),
+    ...(a.revisionSlaHours !== null ? { revision_sla_target_hours: a.revisionSlaHours } : {}),
+    ...(a.hoursLogged !== null ? { hours_logged: a.hoursLogged } : {}),
+    ...(a.attributedGmv !== null ? { attributed_gmv: a.attributedGmv } : {}),
+    revision_count: a.revisionCount,
+    revision_flagged: a.revisionFlagged,
+    created_by: a.createdBy,
+    created_at: a.createdAt.toISOString(),
+  };
+}
+
+/** Request body → AssetInput (snake_case wire → camelCase domain). */
+export function toAssetInput(b: { sequence_no?: number; assigned_pic?: string }): creative.AssetInput {
+  return { sequenceNo: b.sequence_no ?? 0, assignedPic: b.assigned_pic ?? '' };
 }

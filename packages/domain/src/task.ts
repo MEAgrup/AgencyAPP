@@ -2,12 +2,13 @@
  * Task Execution domain service (M12). Ported from Go's
  * `internal/module12_task/*`.
  *
- * "Task" is a ROLE, not an entity (DATA_MODEL §1): today the Brief itself plays
- * it for single-unit divisions (Ads / BRF-as-task, M12 §5.3b). M7's Creative
- * Asset (AST-) and M9's Creator Booking (BKG-) become additional task sources
- * when those modules are ported — they plug their rows into this SAME engine
- * (the canonical brief_task machine, STATE_MACHINES §7). This port wires the
- * Brief-as-task source; the Asset/Booking sources are deferred with M7/M9.
+ * "Task" is a ROLE, not an entity (DATA_MODEL §1): the Brief itself plays it for
+ * single-unit divisions (Ads / BRF-as-task, M12 §5.3b), and M7's Creative Asset
+ * (AST-) plugs into this SAME engine as a second task source (the canonical
+ * brief_task machine, STATE_MACHINES §7 — an Asset is not a different lifecycle,
+ * only a different row it is stored on). M9's Creator Booking becomes a third
+ * source when M9 is ported. Storage/shape differences are captured in a
+ * `TaskSource`; the lifecycle, gates, block queue and metric math are shared.
  *
  * Module 12 owns the DIVISION-side execution edges of the brief_task machine that
  * M6 deliberately left undriven (W2-M6-C4 deferral):
@@ -46,6 +47,8 @@ export const DIVISION_LIVE_STREAM = 'Live Stream';
 export const STATUS_TODO = '[To Do]';
 export const STATUS_IN_PROGRESS = '[In Progress]';
 export const STATUS_SUBMITTED = '[Submitted]';
+export const STATUS_IN_REVIEW = '[In Review]';
+export const STATUS_APPROVED = '[Approved]';
 export const STATUS_REVISION_REQ = '[Revision Requested]';
 export const STATUS_BLOCKED = '[Blocked]';
 export const STATUS_VENDOR_DISPATCHED = '[Dispatched to Vendor]';
@@ -70,6 +73,35 @@ export const MSG_BLOCK_DECIDE_FORBIDDEN = '[anda tidak memiliki akses untuk memu
 export const MSG_BLOCK_REASON_REQUIRED = '[alasan permintaan block wajib diisi]';
 export const MSG_BLOCK_REQUEST_NOT_FOUND = '[permintaan block tidak ditemukan]';
 export const MSG_BLOCK_REQUEST_CLOSED = '[permintaan block sudah diproses]';
+/** An Asset cannot be submitted without an output link (M7 §4 Rule 3, verbatim PRD). */
+export const MSG_OUTPUT_LINK_REQUIRED = '[link output wajib diisi sebelum submit]';
+
+// ---------------------------------------------------------------------------
+// Task sources (§ source.go). One registered canonical-Task row type each; only
+// storage/shape differs, the lifecycle + gates + metrics are shared.
+// ---------------------------------------------------------------------------
+
+/** A registered canonical-Task row type (Brief-as-task or Creative Asset). */
+export interface TaskSource {
+  entityType: 'brief' | 'asset';
+  table: 'briefs' | 'assets';
+  /** A column that MUST be non-empty before the row may enter [Submitted] (Asset output link, §4 Rule 3). */
+  submitLinkCol?: string;
+  /** Block-request queue backing this source. */
+  blockTable: string;
+  blockFkCol: string;
+  blockIdPrefix: string;
+}
+
+/** The Brief-as-task source (Ads / single-unit). Parent = Service. */
+export const SOURCE_BRIEF: TaskSource = {
+  entityType: 'brief', table: 'briefs', blockTable: 'brief_block_requests', blockFkCol: 'brief_id', blockIdPrefix: 'BBR',
+};
+/** The Creative Asset source (M7). Parent = Brief (roll-up, M7 §2); submit requires an output link. */
+export const SOURCE_ASSET: TaskSource = {
+  entityType: 'asset', table: 'assets', submitLinkCol: 'output_link',
+  blockTable: 'asset_block_requests', blockFkCol: 'asset_id', blockIdPrefix: 'ABR',
+};
 
 // --- Errors (task-scoped; mapped in apps/api http.ts). ---
 
@@ -107,7 +139,9 @@ export class ConflictError extends Error {
 // ---------------------------------------------------------------------------
 
 interface TaskRow {
+  entityId: string;
   serviceId: string;
+  parentBriefId: string; // "" for a Brief-as-task; the parent Brief for an Asset
   division: string;
   assignedPic: string;
   status: string;
@@ -177,8 +211,33 @@ export function canViewTask(actor: Actor, ownerAm: string, division: string): bo
 // Row locking.
 // ---------------------------------------------------------------------------
 
-/** lockTask row-locks a Brief-as-task and returns the fields the gates need. */
-async function lockTask(tx: Queryable, briefId: string): Promise<TaskRow> {
+/**
+ * lockTask row-locks a Task row of the given source and returns the fields the
+ * gates need. For a Brief-as-task parentBriefId is "" and serviceId is the
+ * Brief's own Service; for an Asset parentBriefId is the owning Brief (roll-up
+ * target), division/ownerAM are inherited from that Brief, and status is the
+ * Asset's own. A missing row is NotFoundError.
+ */
+async function lockTask(tx: Queryable, src: TaskSource, id: string): Promise<TaskRow> {
+  if (src.table === 'assets') {
+    const rows = await tx<
+      { service_id: string; brief_id: string; assigned_division: string; assigned_pic: string | null; status: string; assigned_am_id: string | null }[]
+    >`
+      select b.service_id, a.brief_id, b.assigned_division, a.assigned_pic, a.status, c.assigned_am_id
+        from assets a
+        join briefs b on b.id = a.brief_id
+        join services sv on sv.id = b.service_id
+        join clients c on c.id = sv.client_id
+       where a.id = ${id} for update`;
+    if (rows.length === 0) {
+      throw new NotFoundError();
+    }
+    const r = rows[0];
+    return {
+      entityId: id, serviceId: r.service_id, parentBriefId: r.brief_id, division: r.assigned_division,
+      assignedPic: r.assigned_pic ?? '', status: r.status, ownerAm: r.assigned_am_id ?? '',
+    };
+  }
   const rows = await tx<
     { service_id: string; assigned_division: string; assigned_pic: string | null; status: string; assigned_am_id: string | null }[]
   >`
@@ -186,14 +245,14 @@ async function lockTask(tx: Queryable, briefId: string): Promise<TaskRow> {
       from briefs b
       join services sv on sv.id = b.service_id
       join clients c on c.id = sv.client_id
-     where b.id = ${briefId} for update`;
+     where b.id = ${id} for update`;
   if (rows.length === 0) {
     throw new NotFoundError();
   }
   const r = rows[0];
   return {
-    serviceId: r.service_id, division: r.assigned_division, assignedPic: r.assigned_pic ?? '',
-    status: r.status, ownerAm: r.assigned_am_id ?? '',
+    entityId: id, serviceId: r.service_id, parentBriefId: '', division: r.assigned_division,
+    assignedPic: r.assigned_pic ?? '', status: r.status, ownerAm: r.assigned_am_id ?? '',
   };
 }
 
@@ -216,12 +275,12 @@ function transitionError(res: statemachine.TransitionResult & { ok: false }): Er
  * (M6 §5 Flow 3) atomically here.
  */
 export function startTask(sql: Sql, actor: Actor, briefId: string): Promise<statemachine.TransitionResult> {
-  return driveExecEdge(sql, actor, briefId, STATUS_TODO, STATUS_IN_PROGRESS);
+  return driveExecEdge(sql, actor, SOURCE_BRIEF, briefId, STATUS_TODO, STATUS_IN_PROGRESS, '');
 }
 
 /** submitTask drives a Brief-as-task [In Progress] → [Submitted] (§3 step 3). */
 export function submitTask(sql: Sql, actor: Actor, briefId: string): Promise<statemachine.TransitionResult> {
-  return driveExecEdge(sql, actor, briefId, STATUS_IN_PROGRESS, STATUS_SUBMITTED);
+  return driveExecEdge(sql, actor, SOURCE_BRIEF, briefId, STATUS_IN_PROGRESS, STATUS_SUBMITTED, '');
 }
 
 /**
@@ -230,26 +289,49 @@ export function submitTask(sql: Sql, actor: Actor, briefId: string): Promise<sta
  * never reset it); the Service is already [In Execution], so no hook fires.
  */
 export function reworkTask(sql: Sql, actor: Actor, briefId: string): Promise<statemachine.TransitionResult> {
-  return driveExecEdge(sql, actor, briefId, STATUS_REVISION_REQ, STATUS_IN_PROGRESS);
+  return driveExecEdge(sql, actor, SOURCE_BRIEF, briefId, STATUS_REVISION_REQ, STATUS_IN_PROGRESS, '');
+}
+
+/** startAsset drives a Creative Asset [To Do] → [In Progress] (M7 §4 Flow 1). */
+export function startAsset(sql: Sql, actor: Actor, assetId: string): Promise<statemachine.TransitionResult> {
+  return driveExecEdge(sql, actor, SOURCE_ASSET, assetId, STATUS_TODO, STATUS_IN_PROGRESS, '');
 }
 
 /**
- * driveExecEdge is the shared, gated engine driver for the division-side edges.
- * requireFrom pins the expected current state so Start and Rework stay distinct
- * even though both target [In Progress]; a wrong source state is rejected (nothing
- * changes). A Brief leaving [To Do] advances its Service via account.onBriefLeavesToDo.
- * (The M8 Ads pre-[Submitted] submit guard is deferred until M8 is ported — nil-safe.)
+ * submitAsset drives a Creative Asset [In Progress] → [Submitted] (M7 §4 Flow 2).
+ * Submission requires an output link (§4 Rule 3) — written atomically with the move.
+ */
+export function submitAsset(sql: Sql, actor: Actor, assetId: string, outputLink: string): Promise<statemachine.TransitionResult> {
+  return driveExecEdge(sql, actor, SOURCE_ASSET, assetId, STATUS_IN_PROGRESS, STATUS_SUBMITTED, outputLink);
+}
+
+/** reworkAsset drives a Creative Asset [Revision Requested] → [In Progress] (M7 §6 Flow 2). */
+export function reworkAsset(sql: Sql, actor: Actor, assetId: string): Promise<statemachine.TransitionResult> {
+  return driveExecEdge(sql, actor, SOURCE_ASSET, assetId, STATUS_REVISION_REQ, STATUS_IN_PROGRESS, '');
+}
+
+/**
+ * driveExecEdge is the shared, gated engine driver for the division-side edges of
+ * any source. requireFrom pins the expected current state so Start and Rework stay
+ * distinct even though both target [In Progress]; a wrong source state is rejected
+ * (nothing changes). submitLink is persisted when a link-gated source (Asset)
+ * enters [Submitted] (§4 Rule 3). After the move, effects propagate atomically: a
+ * Brief-as-task leaving [To Do] advances its Service; an Asset transition recomputes
+ * its parent Brief's roll-up (which itself advances the Service). (The M8 Ads
+ * pre-[Submitted] submit guard is deferred until M8 is ported — nil-safe.)
  */
 async function driveExecEdge(
   sql: Sql,
   actor: Actor,
-  briefId: string,
+  src: TaskSource,
+  id: string,
   requireFrom: string,
   to: string,
+  submitLink: string,
 ): Promise<statemachine.TransitionResult> {
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
-    const r = await lockTask(tx, briefId);
+    const r = await lockTask(tx, src, id);
     if (r.status === STATUS_VENDOR_DISPATCHED) {
       throw new ConflictError(MSG_NOT_A_TASK);
     }
@@ -259,18 +341,39 @@ async function driveExecEdge(
     if (r.status !== requireFrom) {
       throw new ConflictError(bi.TRANSITION_NOT_ALLOWED); // pin the source state
     }
+    // Link gate: a link-requiring source (Asset) must carry an output link before
+    // [Submitted] (§4 Rule 3). Persist it in the same transaction as the move.
+    if (to === STATUS_SUBMITTED && src.submitLinkCol) {
+      const link = (submitLink ?? '').trim();
+      if (link === '') {
+        throw new ValidationError(MSG_OUTPUT_LINK_REQUIRED);
+      }
+      await tx`update ${tx(src.table)} set ${tx(src.submitLinkCol)} = ${link} where id = ${id}`;
+    }
     const res = await statemachine.transition(ex.sm, {
-      machine: MACHINE_BRIEF_TASK, entityType: 'brief', table: 'briefs', entityId: briefId, to, actor,
+      machine: MACHINE_BRIEF_TASK, entityType: src.entityType, table: src.table, entityId: id, to, actor,
     });
     if (!res.ok) {
       throw transitionError(res);
     }
-    // §5 Flow 3: only the [To Do] departure advances the Service (idempotent).
-    if (r.status === STATUS_TODO) {
-      await onBriefLeavesToDo(tx, actor, r.serviceId);
-    }
+    await propagate(tx, actor, src, r);
     return res;
   });
+}
+
+/**
+ * propagate fires the parent-side effect of a Task transition, in the same
+ * transaction. A Brief-as-task advances its Service on leaving [To Do]; an Asset
+ * recomputes its parent Brief's roll-up (which subsumes the Service advance).
+ */
+async function propagate(tx: Queryable, actor: Actor, src: TaskSource, r: TaskRow): Promise<void> {
+  if (src.table === 'assets') {
+    await recomputeBriefRollup(tx, actor, r.parentBriefId);
+    return;
+  }
+  if (r.status === STATUS_TODO) {
+    await onBriefLeavesToDo(tx, actor, r.serviceId); // §5 Flow 3 (idempotent)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -283,14 +386,23 @@ async function driveExecEdge(
  * the Brief's target division. A Live Stream / vendor-dispatched Brief is not an
  * execution Task and is rejected.
  */
-export async function assignPic(sql: Sql, actor: Actor, briefId: string, picId: string): Promise<void> {
+export function assignPic(sql: Sql, actor: Actor, briefId: string, picId: string): Promise<void> {
+  return assign(sql, actor, SOURCE_BRIEF, briefId, picId);
+}
+
+/** assignAssetPic assigns the accountable Creative staff on an Asset (M7 §9.3 / §3 Rule 3). */
+export function assignAssetPic(sql: Sql, actor: Actor, assetId: string, picId: string): Promise<void> {
+  return assign(sql, actor, SOURCE_ASSET, assetId, picId);
+}
+
+async function assign(sql: Sql, actor: Actor, src: TaskSource, id: string, picId: string): Promise<void> {
   const pic = (picId ?? '').trim();
   if (pic === '') {
     throw new ValidationError(MSG_INVALID_PIC);
   }
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
-    const r = await lockTask(tx, briefId);
+    const r = await lockTask(tx, src, id);
     if (r.status === STATUS_VENDOR_DISPATCHED || r.division === DIVISION_LIVE_STREAM) {
       throw new ConflictError(MSG_NOT_A_TASK);
     }
@@ -298,9 +410,9 @@ export async function assignPic(sql: Sql, actor: Actor, briefId: string, picId: 
       throw new ForbiddenError(MSG_ASSIGN_FORBIDDEN);
     }
     await validatePicForDivision(tx, pic, r.division);
-    await tx`update briefs set assigned_pic = ${pic} where id = ${briefId}`;
+    await tx`update ${tx(src.table)} set assigned_pic = ${pic} where id = ${id}`;
     await ex.audit.insertAudit({
-      entityType: 'brief', entityId: briefId, actorEmployeeId: actor.employeeId, action: 'pic_assigned',
+      entityType: src.entityType, entityId: id, actorEmployeeId: actor.employeeId, action: 'pic_assigned',
       beforeJson: { assigned_pic: r.assignedPic || null },
       afterJson: { assigned_pic: pic, assigned_by: actor.employeeId }, createdBy: actor.employeeId,
     });
@@ -313,26 +425,51 @@ export async function assignPic(sql: Sql, actor: Actor, briefId: string, picId: 
  * due_date (client-facing DATE); this is the internal yardstick Speed Score
  * measures against. Never auto-defaulted or backfilled; changes are audited.
  */
-export async function setSlaTarget(sql: Sql, actor: Actor, briefId: string, hours: number): Promise<void> {
+export function setSlaTarget(sql: Sql, actor: Actor, briefId: string, hours: number): Promise<void> {
+  return setSla(sql, actor, SOURCE_BRIEF, briefId, 'sla_target_hours', 'sla_target_set', hours);
+}
+
+/** setAssetSla sets an Asset's SLA Target in hours (§5.3). Target division Lead/SPV or Director. */
+export function setAssetSla(sql: Sql, actor: Actor, assetId: string, hours: number): Promise<void> {
+  return setSla(sql, actor, SOURCE_ASSET, assetId, 'sla_target_hours', 'sla_target_set', hours);
+}
+
+/**
+ * setAssetRevisionSla sets an Asset's Revision SLA Target (M7-OA-3 / §9.3) — the
+ * separate, shorter target each revision round is measured against, feeding
+ * revision_speed_score. Distinct from the original SLA; same write gate.
+ */
+export function setAssetRevisionSla(sql: Sql, actor: Actor, assetId: string, hours: number): Promise<void> {
+  return setSla(sql, actor, SOURCE_ASSET, assetId, 'revision_sla_target_hours', 'revision_sla_target_set', hours);
+}
+
+async function setSla(
+  sql: Sql,
+  actor: Actor,
+  src: TaskSource,
+  id: string,
+  col: string,
+  action: string,
+  hours: number,
+): Promise<void> {
   if (!(hours > 0)) {
     throw new ValidationError(MSG_INVALID_SLA);
   }
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
-    const r = await lockTask(tx, briefId);
+    const r = await lockTask(tx, src, id);
     if (r.status === STATUS_VENDOR_DISPATCHED || r.division === DIVISION_LIVE_STREAM) {
       throw new ConflictError(MSG_NOT_A_TASK);
     }
     if (!canManageTask(actor, r.division)) {
       throw new ForbiddenError(MSG_ASSIGN_FORBIDDEN);
     }
-    const prev = await tx<{ sla_target_hours: string | null }[]>`
-      select sla_target_hours from briefs where id = ${briefId}`;
-    const before = prev[0].sla_target_hours === null ? null : Number(prev[0].sla_target_hours);
-    await tx`update briefs set sla_target_hours = ${hours} where id = ${briefId}`;
+    const prev = await tx<Record<string, string | null>[]>`select ${tx(col)} as v from ${tx(src.table)} where id = ${id}`;
+    const before = prev[0].v === null ? null : Number(prev[0].v);
+    await tx`update ${tx(src.table)} set ${tx(col)} = ${hours} where id = ${id}`;
     await ex.audit.insertAudit({
-      entityType: 'brief', entityId: briefId, actorEmployeeId: actor.employeeId, action: 'sla_target_set',
-      beforeJson: { sla_target_hours: before }, afterJson: { sla_target_hours: hours }, createdBy: actor.employeeId,
+      entityType: src.entityType, entityId: id, actorEmployeeId: actor.employeeId, action,
+      beforeJson: { [col]: before }, afterJson: { [col]: hours }, createdBy: actor.employeeId,
     });
   });
 }
@@ -379,7 +516,16 @@ export interface BlockRequest {
  * Staff / the AM may request; only SPV/Lead may action it. Does NOT change the
  * Task status. Division leads are notified (EvBlockRequestSubmitted).
  */
-export async function submitBlockRequest(sql: Sql, actor: Actor, briefId: string, reason: string): Promise<BlockRequest> {
+export function submitBlockRequest(sql: Sql, actor: Actor, briefId: string, reason: string): Promise<BlockRequest> {
+  return submitBlockReq(sql, actor, SOURCE_BRIEF, briefId, reason);
+}
+
+/** submitAssetBlockRequest files a pending block request on a Creative Asset (§5.3a). */
+export function submitAssetBlockRequest(sql: Sql, actor: Actor, assetId: string, reason: string): Promise<BlockRequest> {
+  return submitBlockReq(sql, actor, SOURCE_ASSET, assetId, reason);
+}
+
+async function submitBlockReq(sql: Sql, actor: Actor, src: TaskSource, id: string, reason: string): Promise<BlockRequest> {
   const why = (reason ?? '').trim();
   if (why === '') {
     throw new ValidationError(MSG_BLOCK_REASON_REQUIRED);
@@ -387,26 +533,26 @@ export async function submitBlockRequest(sql: Sql, actor: Actor, briefId: string
   const now = new Date();
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
-    const r = await lockTask(tx, briefId);
+    const r = await lockTask(tx, src, id);
     if (r.status === STATUS_VENDOR_DISPATCHED) {
       throw new ConflictError(MSG_NOT_A_TASK);
     }
     if (!canRequestBlock(actor, r)) {
       throw new ForbiddenError(MSG_BLOCK_REQUEST_FORBIDDEN);
     }
-    const reqId = await ex.ident.identNext('BBR', now);
+    const reqId = await ex.ident.identNext(src.blockIdPrefix, now);
     await tx`
-      insert into brief_block_requests (id, brief_id, reason, status, requested_by, created_by)
-      values (${reqId}, ${briefId}, ${why}, 'pending', ${actor.employeeId}, ${actor.employeeId})`;
+      insert into ${tx(src.blockTable)} (id, ${tx(src.blockFkCol)}, reason, status, requested_by, created_by)
+      values (${reqId}, ${id}, ${why}, 'pending', ${actor.employeeId}, ${actor.employeeId})`;
     await ex.audit.insertAudit({
-      entityType: 'brief', entityId: briefId, actorEmployeeId: actor.employeeId, action: 'block_request_submitted',
+      entityType: src.entityType, entityId: id, actorEmployeeId: actor.employeeId, action: 'block_request_submitted',
       beforeJson: null, afterJson: { request_id: reqId, reason: why }, createdBy: actor.employeeId,
     });
     await notification.emit(ex.notify, {
-      event: notification.EVENTS.BlockRequestSubmitted, entityType: 'brief', entityId: briefId,
+      event: notification.EVENTS.BlockRequestSubmitted, entityType: src.entityType, entityId: id,
       actor: actor.employeeId, division: r.division,
     });
-    return { id: reqId, entityId: briefId, reason: why, status: 'pending', requestedBy: actor.employeeId, resolvedBy: null, resolvedAt: null, createdAt: now };
+    return { id: reqId, entityId: id, reason: why, status: 'pending', requestedBy: actor.employeeId, resolvedBy: null, resolvedAt: null, createdAt: now };
   });
 }
 
@@ -416,24 +562,34 @@ export async function submitBlockRequest(sql: Sql, actor: Actor, briefId: string
  * entry (Rule 7). The requester is notified (EvBlockRequestDecided).
  */
 export function approveBlockRequest(sql: Sql, actor: Actor, briefId: string, reqId: string): Promise<void> {
-  return decideBlockRequest(sql, actor, briefId, reqId, true);
+  return decideBlockRequest(sql, actor, SOURCE_BRIEF, briefId, reqId, true);
 }
 
 /** rejectBlockRequest rejects a pending request without touching the Task status. */
 export function rejectBlockRequest(sql: Sql, actor: Actor, briefId: string, reqId: string): Promise<void> {
-  return decideBlockRequest(sql, actor, briefId, reqId, false);
+  return decideBlockRequest(sql, actor, SOURCE_BRIEF, briefId, reqId, false);
 }
 
-async function decideBlockRequest(sql: Sql, actor: Actor, briefId: string, reqId: string, approve: boolean): Promise<void> {
+/** approveAssetBlockRequest approves a pending Asset request, driving it into [Blocked] + roll-up. */
+export function approveAssetBlockRequest(sql: Sql, actor: Actor, assetId: string, reqId: string): Promise<void> {
+  return decideBlockRequest(sql, actor, SOURCE_ASSET, assetId, reqId, true);
+}
+
+/** rejectAssetBlockRequest rejects a pending Asset request without touching its status. */
+export function rejectAssetBlockRequest(sql: Sql, actor: Actor, assetId: string, reqId: string): Promise<void> {
+  return decideBlockRequest(sql, actor, SOURCE_ASSET, assetId, reqId, false);
+}
+
+async function decideBlockRequest(sql: Sql, actor: Actor, src: TaskSource, id: string, reqId: string, approve: boolean): Promise<void> {
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
-    const r = await lockTask(tx, briefId);
+    const r = await lockTask(tx, src, id);
     if (!permission.isLead(actor, r.division)) {
       throw new ForbiddenError(MSG_BLOCK_DECIDE_FORBIDDEN);
     }
     const reqRows = await tx<{ status: string; requested_by: string }[]>`
-      select status, requested_by from brief_block_requests
-       where id = ${reqId} and brief_id = ${briefId} for update`;
+      select status, requested_by from ${tx(src.blockTable)}
+       where id = ${reqId} and ${tx(src.blockFkCol)} = ${id} for update`;
     if (reqRows.length === 0) {
       throw new NotFoundError(MSG_BLOCK_REQUEST_NOT_FOUND);
     }
@@ -443,21 +599,24 @@ async function decideBlockRequest(sql: Sql, actor: Actor, briefId: string, reqId
     const newStatus = approve ? 'approved' : 'rejected';
     if (approve) {
       const res = await statemachine.transition(ex.sm, {
-        machine: MACHINE_BRIEF_TASK, entityType: 'brief', table: 'briefs', entityId: briefId, to: STATUS_BLOCKED, actor,
+        machine: MACHINE_BRIEF_TASK, entityType: src.entityType, table: src.table, entityId: id, to: STATUS_BLOCKED, actor,
       });
       if (!res.ok) {
         throw transitionError(res);
       }
+      if (src.table === 'assets') {
+        await recomputeBriefRollup(tx, actor, r.parentBriefId); // Asset → [Blocked] recomputes the Brief roll-up
+      }
     }
     await tx`
-      update brief_block_requests set status = ${newStatus}, resolved_by = ${actor.employeeId}, resolved_at = now()
+      update ${tx(src.blockTable)} set status = ${newStatus}, resolved_by = ${actor.employeeId}, resolved_at = now()
        where id = ${reqId}`;
     await ex.audit.insertAudit({
-      entityType: 'brief', entityId: briefId, actorEmployeeId: actor.employeeId, action: `block_request_${newStatus}`,
+      entityType: src.entityType, entityId: id, actorEmployeeId: actor.employeeId, action: `block_request_${newStatus}`,
       beforeJson: null, afterJson: { request_id: reqId }, createdBy: actor.employeeId,
     });
     await notification.emit(ex.notify, {
-      event: notification.EVENTS.BlockRequestDecided, entityType: 'brief', entityId: briefId,
+      event: notification.EVENTS.BlockRequestDecided, entityType: src.entityType, entityId: id,
       actor: actor.employeeId, explicitRecipients: [reqRows[0].requested_by],
     });
   });
@@ -468,18 +627,30 @@ async function decideBlockRequest(sql: Sql, actor: Actor, briefId: string, reqId
  * resuming the clock. SPV/Lead-only (Director allowed). Blocked time is excluded
  * from Turnaround (Rule 7).
  */
-export async function resumeTask(sql: Sql, actor: Actor, briefId: string): Promise<statemachine.TransitionResult> {
+export function resumeTask(sql: Sql, actor: Actor, briefId: string): Promise<statemachine.TransitionResult> {
+  return resume(sql, actor, SOURCE_BRIEF, briefId);
+}
+
+/** resumeAsset drives a Creative Asset [Blocked] → [In Progress] and recomputes the Brief roll-up. */
+export function resumeAsset(sql: Sql, actor: Actor, assetId: string): Promise<statemachine.TransitionResult> {
+  return resume(sql, actor, SOURCE_ASSET, assetId);
+}
+
+async function resume(sql: Sql, actor: Actor, src: TaskSource, id: string): Promise<statemachine.TransitionResult> {
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
-    const r = await lockTask(tx, briefId);
+    const r = await lockTask(tx, src, id);
     if (!permission.isLead(actor, r.division)) {
       throw new ForbiddenError(MSG_BLOCK_DECIDE_FORBIDDEN);
     }
     const res = await statemachine.transition(ex.sm, {
-      machine: MACHINE_BRIEF_TASK, entityType: 'brief', table: 'briefs', entityId: briefId, to: STATUS_IN_PROGRESS, actor,
+      machine: MACHINE_BRIEF_TASK, entityType: src.entityType, table: src.table, entityId: id, to: STATUS_IN_PROGRESS, actor,
     });
     if (!res.ok) {
       throw transitionError(res);
+    }
+    if (src.table === 'assets') {
+      await recomputeBriefRollup(tx, actor, r.parentBriefId);
     }
     return res;
   });
@@ -504,21 +675,118 @@ export interface PendingBlockRequest {
  * union is deferred with M7.)
  */
 export async function pendingBlockRequests(sql: Queryable, actor: Actor): Promise<PendingBlockRequest[]> {
-  const rows = await sql<
-    { id: string; brief_id: string; assigned_division: string; client_id: string; reason: string; requested_by: string; created_at: Date }[]
+  const briefRows = await sql<
+    { id: string; entity_id: string; division: string; client_id: string; reason: string; requested_by: string; created_at: Date }[]
   >`
-    select r.id, r.brief_id, b.assigned_division, sv.client_id, r.reason, r.requested_by, r.created_at
+    select r.id, r.brief_id as entity_id, b.assigned_division as division, sv.client_id, r.reason, r.requested_by, r.created_at
       from brief_block_requests r
       join briefs b on b.id = r.brief_id
       join services sv on sv.id = b.service_id
      where r.status = 'pending'
      order by r.created_at asc, r.id asc`;
+  const assetRows = await sql<
+    { id: string; entity_id: string; division: string; client_id: string; reason: string; requested_by: string; created_at: Date }[]
+  >`
+    select r.id, r.asset_id as entity_id, b.assigned_division as division, sv.client_id, r.reason, r.requested_by, r.created_at
+      from asset_block_requests r
+      join assets a on a.id = r.asset_id
+      join briefs b on b.id = a.brief_id
+      join services sv on sv.id = b.service_id
+     where r.status = 'pending'
+     order by r.created_at asc, r.id asc`;
+  const rows = [
+    ...briefRows.map((r) => ({ ...r, source: 'brief' })),
+    ...assetRows.map((r) => ({ ...r, source: 'asset' })),
+  ];
   return rows
-    .filter((r) => permission.isLead(actor, r.assigned_division))
+    .filter((r) => permission.isLead(actor, r.division))
     .map((r) => ({
-      id: r.id, source: 'brief', entityId: r.brief_id, division: r.assigned_division, clientId: r.client_id,
+      id: r.id, source: r.source, entityId: r.entity_id, division: r.division, clientId: r.client_id,
       reason: r.reason, requestedBy: r.requested_by, createdAt: r.created_at,
     }));
+}
+
+// ---------------------------------------------------------------------------
+// Brief → Asset roll-up (M7 §2). A Creative Brief's status is a roll-up of its
+// child Assets, recomputed forward-only through the engine after every Asset move.
+// ---------------------------------------------------------------------------
+
+/** The forward brief_task path the roll-up walks (Brief-level revision is per-Asset, so excluded). */
+const ROLLUP_CHAIN = [STATUS_TODO, STATUS_IN_PROGRESS, STATUS_SUBMITTED, STATUS_IN_REVIEW, STATUS_APPROVED];
+
+function chainRank(status: string): number {
+  return ROLLUP_CHAIN.indexOf(status);
+}
+
+/**
+ * recomputeBriefRollup recomputes a Brief's roll-up status from its Assets and
+ * drives it FORWARD through the engine, inside the caller's transaction (M7 §2).
+ * Called after every Asset transition (exec edges here, review edges in creative.ts).
+ * Idempotent and forward-only; when the Brief first leaves [To Do] the parent
+ * Service advances to [In Execution]. Defensive no-ops on a Brief with no Assets,
+ * an off-machine Brief, or one already terminal / off the chain. (The M11
+ * Blocking-Dependency gate on the final [Approved] edge is deferred until M11.)
+ */
+export async function recomputeBriefRollup(tx: Queryable, actor: Actor, briefId: string): Promise<void> {
+  if (briefId === '') {
+    return;
+  }
+  const rows = await tx<{ status: string; assigned_division: string; service_id: string; quantity_target: number }[]>`
+    select status, assigned_division, service_id, quantity_target from briefs where id = ${briefId} for update`;
+  if (rows.length === 0) {
+    throw new NotFoundError();
+  }
+  const { status, service_id, quantity_target } = rows[0];
+  let cur = chainRank(status);
+  if (cur < 0) {
+    return; // off the roll-up chain (e.g. [Dispatched to Vendor])
+  }
+  const statuses = (await tx<{ status: string }[]>`select status from assets where brief_id = ${briefId}`).map((a) => a.status);
+  if (statuses.length === 0) {
+    return; // no Assets yet
+  }
+  const tgt = chainRank(rollupTarget(statuses, quantity_target));
+  const ex = executors(tx);
+  while (cur < tgt) {
+    const from = ROLLUP_CHAIN[cur];
+    const to = ROLLUP_CHAIN[cur + 1];
+    const res = await statemachine.transition(ex.sm, {
+      machine: MACHINE_BRIEF_TASK, entityType: 'brief', table: 'briefs', entityId: briefId, to, actor,
+    });
+    if (!res.ok) {
+      throw transitionError(res);
+    }
+    if (from === STATUS_TODO) {
+      await onBriefLeavesToDo(tx, actor, service_id); // §5 Flow 3
+    }
+    cur++;
+  }
+}
+
+/** rollupTarget maps the child Asset statuses (+ expected count) to the Brief's target status (M7 §2). */
+function rollupTarget(statuses: string[], expected: number): string {
+  const created = statuses.length;
+  let anyStarted = false;
+  let allApproved = true;
+  let allExactlySubmitted = true;
+  let anyWorking = false;
+  for (const st of statuses) {
+    if (st !== STATUS_TODO) anyStarted = true;
+    if (st !== STATUS_APPROVED) allApproved = false;
+    if (st !== STATUS_SUBMITTED) allExactlySubmitted = false;
+    if (st === STATUS_TODO || st === STATUS_IN_PROGRESS || st === STATUS_BLOCKED) anyWorking = true;
+  }
+  const allExist = expected > 0 && created >= expected;
+  if (allExist && allApproved) {
+    return STATUS_APPROVED;
+  }
+  if (allExist && !anyWorking) {
+    return allExactlySubmitted ? STATUS_SUBMITTED : STATUS_IN_REVIEW;
+  }
+  if (anyStarted) {
+    return STATUS_IN_PROGRESS;
+  }
+  return STATUS_TODO;
 }
 
 // ---------------------------------------------------------------------------
@@ -534,6 +802,12 @@ export interface Metrics {
   revisionTurnaroundHours: number | null;
   speedScorePct: number | null;
   speedScoreDisplay: string; // "112.50%" | "N/A" | "—"
+  // Revision SLA / revision speed score (M7-OA-3): the diagnostic parallel measured
+  // against the SEPARATE, shorter revision SLA. Null / "N/A" for a Brief-as-task
+  // (no revision SLA) or before any revision round.
+  revisionSlaTargetHours: number | null;
+  revisionSpeedScorePct: number | null;
+  revisionSpeedScoreDisplay: string;
   revisionCount: number;
   revisionFlagged: boolean;
   approvedAt: Date | null;
@@ -555,7 +829,11 @@ const MS_PER_HOUR = 3_600_000;
  * interval (Rule 7). Speed Score = turnaround ÷ SLA, uncapped (Rule 12); null SLA
  * → "N/A", zero SLA → "—" (house convention 7).
  */
-export function computeMetrics(evs: Transition[], sla: number | null): Omit<Metrics, 'briefId' | 'status'> {
+export function computeMetrics(
+  evs: Transition[],
+  sla: number | null,
+  revisionSla: number | null = null,
+): Omit<Metrics, 'briefId' | 'status'> {
   let firstInProg: Date | null = null;
   let firstApproved: Date | null = null;
   let revisionCount = 0;
@@ -579,8 +857,12 @@ export function computeMetrics(evs: Transition[], sla: number | null): Omit<Metr
   }
   const revisionTurnaroundHours = revisionTurnaround(evs);
   const [speedScorePct, speedScoreDisplay] = speedScore(turnaroundHours, sla);
+  // Revision speed score = revision turnaround ÷ revision SLA (M7-OA-3). Null revision
+  // SLA (always for a Brief-as-task) → "N/A"; a zero revision SLA → "—".
+  const [revisionSpeedScorePct, revisionSpeedScoreDisplay] = speedScore(revisionTurnaroundHours, revisionSla);
   return {
     slaTargetHours: sla, turnaroundHours, revisionTurnaroundHours, speedScorePct, speedScoreDisplay,
+    revisionSlaTargetHours: revisionSla, revisionSpeedScorePct, revisionSpeedScoreDisplay,
     revisionCount, revisionFlagged: revisionCount >= REVISION_FLAG_THRESHOLD, approvedAt, approvedPeriodWib,
   };
 }
@@ -653,25 +935,65 @@ function transitionTarget(action: string): string | null {
  * from the immutable transition log (house rule 4), if the actor may view it
  * (§6/§9.1 read gate).
  */
-export async function taskMetrics(sql: Queryable, actor: Actor, briefId: string): Promise<Metrics> {
-  const rows = await sql<
-    { assigned_division: string; status: string; sla_target_hours: string | null; assigned_am_id: string | null }[]
-  >`
-    select b.assigned_division, b.status, b.sla_target_hours, c.assigned_am_id
-      from briefs b
-      join services sv on sv.id = b.service_id
-      join clients c on c.id = sv.client_id
-     where b.id = ${briefId}`;
-  if (rows.length === 0) {
-    throw new NotFoundError();
+export function taskMetrics(sql: Queryable, actor: Actor, briefId: string): Promise<Metrics> {
+  return metricsFor(sql, actor, SOURCE_BRIEF, briefId);
+}
+
+/**
+ * assetMetrics returns a Creative Asset's metrics (§5.1 + the Revision SLA /
+ * revision_speed_score of M7-OA-3), recomputed purely from the log. Same read gate.
+ */
+export function assetMetrics(sql: Queryable, actor: Actor, assetId: string): Promise<Metrics> {
+  return metricsFor(sql, actor, SOURCE_ASSET, assetId);
+}
+
+async function metricsFor(sql: Queryable, actor: Actor, src: TaskSource, id: string): Promise<Metrics> {
+  let division: string;
+  let status: string;
+  let sla: number | null;
+  let revisionSla: number | null = null;
+  let ownerAm: string;
+  if (src.table === 'assets') {
+    const rows = await sql<
+      { assigned_division: string; status: string; sla_target_hours: string | null; revision_sla_target_hours: string | null; assigned_am_id: string | null }[]
+    >`
+      select b.assigned_division, a.status, a.sla_target_hours, a.revision_sla_target_hours, c.assigned_am_id
+        from assets a
+        join briefs b on b.id = a.brief_id
+        join services sv on sv.id = b.service_id
+        join clients c on c.id = sv.client_id
+       where a.id = ${id}`;
+    if (rows.length === 0) {
+      throw new NotFoundError();
+    }
+    division = rows[0].assigned_division;
+    status = rows[0].status;
+    sla = rows[0].sla_target_hours === null ? null : Number(rows[0].sla_target_hours);
+    revisionSla = rows[0].revision_sla_target_hours === null ? null : Number(rows[0].revision_sla_target_hours);
+    ownerAm = rows[0].assigned_am_id ?? '';
+  } else {
+    const rows = await sql<
+      { assigned_division: string; status: string; sla_target_hours: string | null; assigned_am_id: string | null }[]
+    >`
+      select b.assigned_division, b.status, b.sla_target_hours, c.assigned_am_id
+        from briefs b
+        join services sv on sv.id = b.service_id
+        join clients c on c.id = sv.client_id
+       where b.id = ${id}`;
+    if (rows.length === 0) {
+      throw new NotFoundError();
+    }
+    division = rows[0].assigned_division;
+    status = rows[0].status;
+    sla = rows[0].sla_target_hours === null ? null : Number(rows[0].sla_target_hours);
+    ownerAm = rows[0].assigned_am_id ?? '';
   }
-  const { assigned_division, status, sla_target_hours, assigned_am_id } = rows[0];
-  if (!canViewTask(actor, assigned_am_id ?? '', assigned_division)) {
+  if (!canViewTask(actor, ownerAm, division)) {
     throw new ForbiddenError(MSG_TASK_VIEW_FORBIDDEN);
   }
   const entries = await sql<{ action: string; created_at: Date }[]>`
     select action, created_at from audit_log
-     where entity_type = 'brief' and entity_id = ${briefId} order by id asc`;
+     where entity_type = ${src.entityType} and entity_id = ${id} order by id asc`;
   const evs: Transition[] = [];
   for (const e of entries) {
     const to = transitionTarget(e.action);
@@ -679,7 +1001,6 @@ export async function taskMetrics(sql: Queryable, actor: Actor, briefId: string)
       evs.push({ to, at: e.created_at });
     }
   }
-  const sla = sla_target_hours === null ? null : Number(sla_target_hours);
-  const m = computeMetrics(evs, sla);
-  return { briefId, status, ...m };
+  const m = computeMetrics(evs, sla, revisionSla);
+  return { briefId: id, status, ...m };
 }
