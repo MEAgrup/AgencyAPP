@@ -24,7 +24,7 @@
  * Reference: backend/internal/module7_creative/{asset,review,hours,asset_read}.go.
  */
 
-import { bi, notification, permission, statemachine } from '@cdps/core';
+import { bi, notification, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { recomputeBriefRollup } from './task';
 
@@ -39,6 +39,8 @@ const STATUS_TODO = '[To Do]';
 const STATUS_IN_REVIEW = '[In Review]';
 const STATUS_APPROVED = '[Approved]';
 const STATUS_REVISION_REQ = '[Revision Requested]';
+/** Paused on an external dependency (M11/M12) — excluded from the Hours reminder sweep. */
+const STATUS_BLOCKED = '[Blocked]';
 const SERVICE_VOIDED = '[Cancelled — Service Voided]';
 
 const MACHINE_BRIEF_TASK = 'brief_task';
@@ -60,6 +62,10 @@ export const MSG_REVIEW_FORBIDDEN = '[hanya Account Manager pemilik klien yang d
 export const MSG_REVISION_FEEDBACK_REQUIRED = '[feedback revisi wajib diisi]';
 export const MSG_HOURS_FORBIDDEN = '[anda tidak memiliki akses untuk mencatat Hours Logged aset ini]';
 export const MSG_INVALID_HOURS = '[jumlah Hours Logged harus lebih dari 0]';
+/** Daily Output read gate (§9.1): PIC / Creative lead / OD / Director only. */
+export const MSG_DAILY_OUTPUT_FORBIDDEN = '[anda tidak memiliki akses ke Daily Output ini]';
+/** Hours Logged reminder scan gate (§9.1): Creative division (any level) / Director. */
+export const MSG_HOURS_REMINDER_SCAN_FORBIDDEN = '[anda tidak memiliki akses untuk menjalankan pemindaian pengingat Hours Logged]';
 
 // --- Errors (creative-scoped; mapped in apps/api http.ts). ---
 
@@ -453,4 +459,285 @@ async function deriveAssetRevisionCount(sql: Queryable, assetId: string): Promis
   const rows = await sql<{ n: string }[]>`
     select count(*) as n from audit_log where entity_type = 'asset' and entity_id = ${assetId} and action = ${action}`;
   return Number(rows[0].n);
+}
+
+// ---------------------------------------------------------------------------
+// Daily Output (M7 §7) — auto-logged, no double entry.
+//
+// PRD §7 Rule 1: "Every Asset status transition auto-creates a Daily Output
+// record for the PIC — no separate manual sheet, no double entry." Every Asset
+// transition ALREADY appends an immutable `transition:[X]->[Y]` audit row (actor
+// + timestamp). So Daily Output is NOT a typed-in table and NOT a nightly
+// snapshot — it is a PURE DERIVED read-model over that immutable log (house rule
+// #4: computed, read-only, always recomputable). Nothing is written here.
+//
+// Interpretations (mirrors the Go port, logged DECISIONS W2-M7-C2):
+//   - Attribution ("for the PIC"): each entry is attributed to the Asset's
+//     CURRENT Assigned PIC (§8 Rule 2 confirms — the Output Quantity KPI counts
+//     [Approved] Assets per PIC even though the AM drives the approval). A
+//     transition on an unassigned Asset belongs to no PIC and surfaces once claimed.
+//   - Output Unit Type (§7 Rule 2 / §9.4): the Asset Type (the reliable per-row
+//     "what output unit this is" signal); sub-team role granularity stays deferred.
+//   - End-of-day lock (§7 Rule 3, "locks at 23:59 local" = WIB, O20): a DERIVED
+//     boolean, true once the current WIB date has moved past the entry's WIB day.
+//     Past days are immutable BY CONSTRUCTION (append-only log — no edit path).
+//   - Output ID (§9.4, "auto-generated per transition"): the audit row's own id.
+// ---------------------------------------------------------------------------
+
+/** Milliseconds in one day — WIB has no DST, so +DAY_MS from a WIB midnight lands the next. */
+const DAY_MS = 24 * 3600 * 1000;
+
+/** One auto-logged Daily Output record (§9.4), derived from one Asset-transition audit row. */
+export interface OutputEntry {
+  outputId: number; // audit row id — one auto id per transition (§9.4)
+  pic: string; // Asset's current Assigned PIC (§7 Rule 1)
+  outputUnitType: string; // = Asset Type (§7 Rule 2 / §9.4)
+  assetId: string;
+  briefId: string;
+  clientId: string;
+  transition: string; // destination status, e.g. "[Approved]"
+  timestamp: Date; // transition timestamp (absolute, UTC storage)
+  dateWib: string; // WIB calendar-day bucket "YYYY-MM-DD" (O20)
+  locked: boolean; // §7 Rule 3: the WIB day has ended
+}
+
+/** One PIC's auto-logged output for one WIB calendar day (the §7 Flow 2 dashboard view). */
+export interface DailyOutputDay {
+  pic: string;
+  dateWib: string;
+  locked: boolean;
+  total: number; // all transition outputs that day
+  approved: number; // [Approved] outputs — the Output Quantity KPI feed (§8 Rule 2)
+  entries: OutputEntry[];
+}
+
+/**
+ * dailyOutput returns one PIC's auto-logged Daily Output for the WIB calendar day
+ * containing `day` (M7 §7). Recomputed entirely from the immutable audit log; it
+ * writes nothing. Read gate (§9.1): the PIC themselves, the Creative Team Leader
+ * (division-wide), OD, or Director — deliberately narrower than the client-facing
+ * Asset read gate (Account / owning AM are NOT Daily-Output viewers). `now` is the
+ * clock for the end-of-day lock (injectable for deterministic tests).
+ */
+export async function dailyOutput(
+  sql: Queryable,
+  actor: Actor,
+  pic: string,
+  day: Date = new Date(),
+  now: Date = new Date(),
+): Promise<DailyOutputDay> {
+  const p = (pic ?? '').trim();
+  if (p === '') {
+    throw new ValidationError(bi.INCOMPLETE_DATA);
+  }
+  if (!canSeeDailyOutput(actor, p)) {
+    throw new ForbiddenError(MSG_DAILY_OUTPUT_FORBIDDEN);
+  }
+
+  // Bucket the target day to WIB (O20). The UTC window for WIB day D is
+  // [D 00:00 WIB, D+1 00:00 WIB) — so a transition at 01:30 WIB (the previous UTC
+  // date) still lands in day D, the 00:00–07:00 WIB edge the bucketing must get right.
+  const dayMid = tz.date(day);
+  const nextMid = new Date(dayMid.getTime() + DAY_MS);
+  const dateWib = tz.dateString(day);
+  const locked = dayLocked(dayMid, now);
+
+  const rows = await sql<
+    { id: string; action: string; created_at: Date; asset_id: string; brief_id: string; asset_type: string; client_id: string }[]
+  >`
+    select al.id, al.action, al.created_at, a.id as asset_id, a.brief_id, a.asset_type, sv.client_id
+      from audit_log al
+      join assets a on a.id = al.entity_id
+      join briefs b on b.id = a.brief_id
+      join services sv on sv.id = b.service_id
+     where al.entity_type = 'asset'
+       and al.action like 'transition:%'
+       and a.assigned_pic = ${p}
+       and al.created_at >= ${dayMid} and al.created_at < ${nextMid}
+     order by al.created_at asc, al.id asc`;
+
+  const out: DailyOutputDay = { pic: p, dateWib, locked, total: 0, approved: 0, entries: [] };
+  for (const r of rows) {
+    const to = transitionTo(r.action);
+    if (to === null) {
+      continue;
+    }
+    out.entries.push({
+      outputId: Number(r.id), pic: p, outputUnitType: r.asset_type,
+      assetId: r.asset_id, briefId: r.brief_id, clientId: r.client_id,
+      transition: to, timestamp: r.created_at, dateWib, locked,
+    });
+    out.total++;
+    if (to === STATUS_APPROVED) {
+      out.approved++;
+    }
+  }
+  return out;
+}
+
+/**
+ * canSeeDailyOutput is the §9.1 Daily-Output read gate: the PIC themselves, the
+ * Creative Team Leader (division-wide), OD, or Director. Narrower than canSeeAsset
+ * — Daily Output is a Creative-internal production feed, not client-facing.
+ */
+export function canSeeDailyOutput(actor: Actor, pic: string): boolean {
+  if (permission.canReadAll(actor)) {
+    return true; // OD / Director
+  }
+  if (permission.isLead(actor, CREATIVE_DIVISION)) {
+    return true; // Creative Team Leader
+  }
+  return actor.employeeId === pic; // own
+}
+
+/**
+ * dayLocked reports whether the WIB day whose midnight is dayMid has ended
+ * relative to now (§7 Rule 3): locked once the current WIB date is past that day.
+ * Today's day is still open; future days are not locked.
+ */
+function dayLocked(dayMid: Date, now: Date): boolean {
+  return tz.date(now).getTime() > dayMid.getTime();
+}
+
+/** transitionTo extracts the destination state from a "transition:A->B" audit action. */
+function transitionTo(action: string): string | null {
+  const prefix = 'transition:';
+  if (!action.startsWith(prefix)) {
+    return null;
+  }
+  const rest = action.slice(prefix.length);
+  const idx = rest.indexOf('->');
+  if (idx < 0) {
+    return null;
+  }
+  return rest.slice(idx + 2);
+}
+
+// ---------------------------------------------------------------------------
+// Hours Logged end-of-day reminder (M7 §5 Rule 2 / M7-OA-2, DECISIONS O29 /
+// W3-CAT-1 — the one event the catalog freeze opened for). Hours Logged stays
+// optional and non-punitive — this sweep only nudges completion, never blocks or
+// scores. Pattern mirrored field-for-field from finance.scanReminders (M5 §6): a
+// sweep safe on every dashboard load AND a nightly cron, each candidate re-checked
+// and fire-once-guarded inside its own row-locked transaction so concurrent scans
+// never double-emit.
+//
+// "Active" (per the cluster brief): the Asset has an assigned PIC AND its status
+// is neither terminal ([Approved]) nor [Blocked] (paused on an external dependency
+// — no work happening to log hours against). Every other status counts as active.
+//
+// "Logged today": Hours Logged (logHours) is a single overwrite-and-audit figure,
+// not a per-day table — so "logged today" is read like Daily Output, from the
+// immutable log: at least one `hours_logged` audit row inside the target WIB day.
+//
+// Dedup: assets.hours_reminder_sent_at (migration 0031) stores the last reminder's
+// timestamp. A candidate is skipped only while that timestamp's WIB day is still
+// today's; once the WIB day moves on, the guard reopens — a PIC who still hasn't
+// logged gets reminded again the next day, but never twice within one WIB day.
+// ---------------------------------------------------------------------------
+
+/** The synthetic actor id the automated sweep records (never a recipient — notifyActor false). */
+const HOURS_REMINDER_SYSTEM_ACTOR = 'SYSTEM';
+
+/** Active for the reminder sweep: not terminal ([Approved]), not paused ([Blocked]). */
+function isHoursReminderActiveStatus(status: string): boolean {
+  return status !== STATUS_APPROVED && status !== STATUS_BLOCKED;
+}
+
+/** What one scanHoursReminders pass fired. */
+export interface ScanHoursReminderResult {
+  remindersSent: number;
+}
+
+/**
+ * scanHoursReminders finds every active Asset (assigned PIC, non-terminal,
+ * non-blocked) whose PIC has not logged Hours on it for the WIB calendar day
+ * containing `now`, and emits HoursLoggedReminder to that PIC — at most once per
+ * (Asset, WIB day). Safe on every dashboard load and on a nightly cron. Each
+ * candidate is re-checked and fired inside its own row-locked transaction.
+ */
+export async function scanHoursReminders(sql: Sql, now: Date = new Date()): Promise<ScanHoursReminderResult> {
+  const today = tz.date(now);
+  const res: ScanHoursReminderResult = { remindersSent: 0 };
+
+  const candidates = await sql<{ id: string }[]>`
+    select id from assets
+     where assigned_pic is not null and assigned_pic <> ''
+       and status not in (${STATUS_APPROVED}, ${STATUS_BLOCKED})`;
+  for (const { id } of candidates) {
+    if (await fireHoursReminder(sql, id, now, today)) {
+      res.remindersSent++;
+    }
+  }
+  return res;
+}
+
+/**
+ * fireHoursReminder re-checks and fires one Asset's reminder inside a row-locked
+ * transaction (finance fireOverdue precedent). It stamps hours_reminder_sent_at
+ * with the scan's own `now` (not SQL now()) so the fire-once day comparison stays
+ * consistent with the clock the scan was run against (deterministic under tests).
+ * Returns true iff a reminder was emitted.
+ */
+async function fireHoursReminder(sql: Sql, assetId: string, now: Date, today: Date): Promise<boolean> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const rows = await tx<{ status: string; assigned_pic: string | null; hours_reminder_sent_at: Date | null }[]>`
+      select status, assigned_pic, hours_reminder_sent_at from assets where id = ${assetId} for update`;
+    if (rows.length === 0) {
+      return false; // raced away (no asset delete path exists, so this is defensive)
+    }
+    const r = rows[0];
+    if (!isHoursReminderActiveStatus(r.status) || !r.assigned_pic) {
+      return false; // moved to approved/blocked or unassigned since candidates were listed
+    }
+    if (r.hours_reminder_sent_at !== null && tz.date(r.hours_reminder_sent_at).getTime() >= today.getTime()) {
+      return false; // already reminded for this WIB day (or a later one)
+    }
+    if (await hoursLoggedOnDay(tx, assetId, today)) {
+      return false; // PIC already logged Hours today — nothing to nudge
+    }
+
+    await notification.emit(ex.notify, {
+      event: notification.EVENTS.HoursLoggedReminder,
+      entityType: 'asset', entityId: assetId, actor: HOURS_REMINDER_SYSTEM_ACTOR,
+      explicitRecipients: [r.assigned_pic], notifyActor: false,
+    });
+    await tx`update assets set hours_reminder_sent_at = ${now} where id = ${assetId}`;
+    return true;
+  });
+}
+
+/**
+ * hoursLoggedOnDay reports whether the PIC logged Hours (logHours' audit action
+ * "hours_logged") on this Asset within the WIB calendar day containing `day` — the
+ * same UTC window as dailyOutput (O20): [day 00:00 WIB, day+1 00:00 WIB).
+ */
+async function hoursLoggedOnDay(tx: Queryable, assetId: string, day: Date): Promise<boolean> {
+  const dayMid = tz.date(day);
+  const nextMid = new Date(dayMid.getTime() + DAY_MS);
+  const rows = await tx<{ n: string }[]>`
+    select count(*) as n from audit_log
+     where entity_type = 'asset' and entity_id = ${assetId} and action = 'hours_logged'
+       and created_at >= ${dayMid} and created_at < ${nextMid}`;
+  return Number(rows[0].n) > 0;
+}
+
+/** canRunHoursReminderScan: Creative (any level) or Director may trigger the scan on demand. */
+export function canRunHoursReminderScan(actor: Actor): boolean {
+  if (actor.role.director) {
+    return true;
+  }
+  return actor.role.division === CREATIVE_DIVISION;
+}
+
+/**
+ * runHoursReminderScan is the authorised entry point for the scan endpoint: it
+ * applies the §9.1 gate (Creative division / Director) then runs the sweep.
+ */
+export async function runHoursReminderScan(sql: Sql, actor: Actor, now: Date = new Date()): Promise<ScanHoursReminderResult> {
+  if (!canRunHoursReminderScan(actor)) {
+    throw new ForbiddenError(MSG_HOURS_REMINDER_SCAN_FORBIDDEN);
+  }
+  return scanHoursReminders(sql, now);
 }

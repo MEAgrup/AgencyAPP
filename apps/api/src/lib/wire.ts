@@ -820,3 +820,52 @@ export function toBookingInput(b: {
     agreedRate: b.agreed_rate ?? '', assignedCoordinator: b.assigned_coordinator ?? '',
   };
 }
+
+// ---------------------------------------------------------------------------
+// M7 Daily Output (§7) + Hours Logged reminder scan (M7-OA-2).
+// ---------------------------------------------------------------------------
+
+/** module7_creative.OutputEntry — one auto-logged Daily Output record (§9.4). */
+export interface OutputEntryWire {
+  output_id: number;
+  pic: string;
+  output_unit_type: string;
+  asset_id: string;
+  brief_id: string;
+  client_id: string;
+  transition: string;
+  timestamp: string;
+  date_wib: string;
+  locked: boolean;
+}
+
+/** module7_creative.DailyOutputDay — one PIC's WIB-day auto-logged output feed (§7). */
+export interface DailyOutputDayWire {
+  pic: string;
+  date_wib: string;
+  locked: boolean;
+  total: number;
+  approved_count: number;
+  entries: OutputEntryWire[];
+}
+
+/** Maps the camelCase DailyOutputDay to the snake_case wire shape (Go §9.4 JSON). */
+export function dailyOutputToWire(d: creative.DailyOutputDay): DailyOutputDayWire {
+  return {
+    pic: d.pic, date_wib: d.dateWib, locked: d.locked, total: d.total, approved_count: d.approved,
+    entries: d.entries.map((e) => ({
+      output_id: e.outputId, pic: e.pic, output_unit_type: e.outputUnitType, asset_id: e.assetId,
+      brief_id: e.briefId, client_id: e.clientId, transition: e.transition,
+      timestamp: e.timestamp.toISOString(), date_wib: e.dateWib, locked: e.locked,
+    })),
+  };
+}
+
+/** module7_creative.ScanHoursReminderResult — the reminder sweep tally. */
+export interface ScanHoursReminderResultWire {
+  reminders_sent: number;
+}
+
+export function scanHoursReminderResultToWire(r: creative.ScanHoursReminderResult): ScanHoursReminderResultWire {
+  return { reminders_sent: r.remindersSent };
+}
