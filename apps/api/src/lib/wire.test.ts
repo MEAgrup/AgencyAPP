@@ -3,7 +3,7 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { account, ads, creative, leads, msl, task } from '@cdps/domain';
+import type { account, ads, creative, kol, leads, msl, task } from '@cdps/domain';
 import {
   amWorkloadToWire,
   assetToWire,
@@ -16,7 +16,9 @@ import {
   leadDetailToWire,
   leadRowToWire,
   leadStubToWire,
+  bookingToWire,
   campaignToWire,
+  creatorListToWire,
   masterServiceToWire,
   metricEntryToWire,
   metricsToWire,
@@ -399,5 +401,34 @@ describe('M8 ads wire mappers', () => {
     };
     expect(optimizationToWire(o).change_type).toBe('Budget');
     expect(optimizationToWire(o).before_value).toBe('8000000');
+  });
+});
+
+describe('M9 kol wire mappers', () => {
+  it('bookingToWire maps a Booking; omits absent optionals + null numerics', () => {
+    const b: kol.Booking = {
+      id: 'BKG-202607-0001', briefId: 'BRF-1', creatorName: 'Creator A', creatorHandle: '', platform: 'TikTok',
+      niche: '', sourcePool: 'MCN MEA Roster', poolReference: '', agreedRate: 1500000,
+      agreedRateDisplay: 'Rp. 1.500.000,00', status: '[Sourcing]', contentLink: '', qcNotes: '',
+      slaTargetHours: null, hoursLogged: null, assignedCoordinator: 'ZZ-COORD', attributedGmv: null,
+      revisionCount: 0, paymentStatus: '', createdBy: 'ZZ-COORD', createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    };
+    const w = bookingToWire(b);
+    expect(w.agreed_rate_display).toBe('Rp. 1.500.000,00');
+    expect(w.assigned_coordinator).toBe('ZZ-COORD');
+    expect(w).not.toHaveProperty('sla_target_hours');
+    expect(w).not.toHaveProperty('content_link');
+    expect(w.payment_status).toBe('');
+  });
+
+  it('creatorListToWire maps the compiled list (nullable last_compiled)', () => {
+    const c: kol.CreatorList = {
+      briefId: 'BRF-1', creatorListLink: 'https://drive/x', includedBookings: ['BKG-1'],
+      lastCompiled: new Date('2026-07-01T00:00:00.000Z'), eligibleBookings: ['BKG-1'],
+    };
+    expect(creatorListToWire(c)).toEqual({
+      brief_id: 'BRF-1', creator_list_link: 'https://drive/x', included_bookings: ['BKG-1'],
+      last_compiled: '2026-07-01T00:00:00.000Z', eligible_bookings: ['BKG-1'],
+    });
   });
 });

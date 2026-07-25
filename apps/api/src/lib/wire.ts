@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import type { account, ads, creative, leads, msl, task } from '@cdps/domain';
+import type { account, ads, creative, kol, leads, msl, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -695,5 +695,128 @@ export function toOptimizationInput(b: {
   return {
     changeType: b.change_type ?? '', beforeValue: b.before_value ?? '', afterValue: b.after_value ?? '',
     reason: b.reason ?? '', oldAssetId: b.old_asset_id ?? '', newAssetId: b.new_asset_id ?? '',
+  };
+}
+
+// --- M9 KOL ---
+
+/** module9_kol.Booking — a Creator Booking with its derived fields. */
+export interface BookingWire {
+  id: string;
+  brief_id: string;
+  creator_name: string;
+  creator_handle?: string;
+  platform: string;
+  niche?: string;
+  source_pool: string;
+  pool_reference?: string;
+  agreed_rate: number;
+  agreed_rate_display: string;
+  status: string;
+  content_link?: string;
+  qc_notes?: string;
+  sla_target_hours?: number;
+  hours_logged?: number;
+  assigned_coordinator?: string;
+  attributed_gmv?: number;
+  revision_count: number;
+  payment_status: string;
+  created_by: string;
+  created_at: string;
+}
+
+export function bookingToWire(b: kol.Booking): BookingWire {
+  return {
+    id: b.id, brief_id: b.briefId, creator_name: b.creatorName,
+    ...(b.creatorHandle ? { creator_handle: b.creatorHandle } : {}),
+    platform: b.platform, ...(b.niche ? { niche: b.niche } : {}), source_pool: b.sourcePool,
+    ...(b.poolReference ? { pool_reference: b.poolReference } : {}),
+    agreed_rate: b.agreedRate, agreed_rate_display: b.agreedRateDisplay, status: b.status,
+    ...(b.contentLink ? { content_link: b.contentLink } : {}), ...(b.qcNotes ? { qc_notes: b.qcNotes } : {}),
+    ...(b.slaTargetHours !== null ? { sla_target_hours: b.slaTargetHours } : {}),
+    ...(b.hoursLogged !== null ? { hours_logged: b.hoursLogged } : {}),
+    ...(b.assignedCoordinator ? { assigned_coordinator: b.assignedCoordinator } : {}),
+    ...(b.attributedGmv !== null ? { attributed_gmv: b.attributedGmv } : {}),
+    revision_count: b.revisionCount, payment_status: b.paymentStatus, created_by: b.createdBy,
+    created_at: b.createdAt.toISOString(),
+  };
+}
+
+/** module9_kol.PaymentRequest — one Creator Payment Request. */
+export interface PaymentRequestWire {
+  id: string;
+  booking_id: string;
+  amount: number;
+  amount_display: string;
+  payment_details: string;
+  status: string;
+  rejection_reason?: string;
+  requested_by: string;
+  paid_by?: string;
+  created_by: string;
+  created_at: string;
+}
+
+export function paymentRequestToWire(p: kol.PaymentRequest): PaymentRequestWire {
+  return {
+    id: p.id, booking_id: p.bookingId, amount: p.amount, amount_display: p.amountDisplay,
+    payment_details: p.paymentDetails, status: p.status,
+    ...(p.rejectionReason ? { rejection_reason: p.rejectionReason } : {}),
+    requested_by: p.requestedBy, ...(p.paidBy ? { paid_by: p.paidBy } : {}),
+    created_by: p.createdBy, created_at: p.createdAt.toISOString(),
+  };
+}
+
+/** module9_kol.BookingMetrics — the §7/§11 recompute-from-log Booking metrics. */
+export interface BookingMetricsWire {
+  booking_id: string;
+  status: string;
+  sla_target_hours: number | null;
+  sourcing_turnaround_hours: number | null;
+  delivery_turnaround_hours: number | null;
+  overall_turnaround_hours: number | null;
+  speed_score_pct: number | null;
+  speed_score_display: string;
+  revision_count: number;
+  excluded_from_speed_score: boolean;
+  approved_period_wib: string;
+}
+
+export function bookingMetricsToWire(m: kol.BookingMetrics): BookingMetricsWire {
+  return {
+    booking_id: m.bookingId, status: m.status, sla_target_hours: m.slaTargetHours,
+    sourcing_turnaround_hours: m.sourcingTurnaroundHours, delivery_turnaround_hours: m.deliveryTurnaroundHours,
+    overall_turnaround_hours: m.overallTurnaroundHours, speed_score_pct: m.speedScorePct,
+    speed_score_display: m.speedScoreDisplay, revision_count: m.revisionCount,
+    excluded_from_speed_score: m.excludedFromSpeedScore, approved_period_wib: m.approvedPeriodWib,
+  };
+}
+
+/** module9_kol.CreatorList — the Brief-level compiled Creator List. */
+export interface CreatorListWire {
+  brief_id: string;
+  creator_list_link?: string;
+  included_bookings: string[];
+  last_compiled: string | null;
+  eligible_bookings: string[];
+}
+
+export function creatorListToWire(c: kol.CreatorList): CreatorListWire {
+  return {
+    brief_id: c.briefId, ...(c.creatorListLink ? { creator_list_link: c.creatorListLink } : {}),
+    included_bookings: c.includedBookings, last_compiled: c.lastCompiled ? c.lastCompiled.toISOString() : null,
+    eligible_bookings: c.eligibleBookings,
+  };
+}
+
+/** Request body → BookingInput. */
+export function toBookingInput(b: {
+  creator_name?: string; creator_handle?: string; platform?: string; niche?: string;
+  source_pool?: string; pool_reference?: string; agreed_rate?: string; assigned_coordinator?: string;
+}): kol.BookingInput {
+  return {
+    creatorName: b.creator_name ?? '', creatorHandle: b.creator_handle ?? '', platform: b.platform ?? '',
+    niche: b.niche ?? '', sourcePool: b.source_pool ?? '', poolReference: b.pool_reference ?? '',
+    agreedRate: b.agreed_rate ?? '', assignedCoordinator: b.assigned_coordinator ?? '',
   };
 }

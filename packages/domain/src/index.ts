@@ -31,6 +31,11 @@
  *   Log (+ budget sign-off / creative swap), periodic Metric Entries with derived
  *   Total Spend / GMV / ROAS + Attributed-GMV feedback to Creative, and the setup
  *   Brief submit guard (§4 Rule 3) that `task` calls.
+ * - kol: M9 KOL — the Creator Booking (BKG-): creation, the native 8-state
+ *   lifecycle incl. KOL-side QC + escalate/drop, coordinator/SLA/hours, the
+ *   Brief↔Booking roll-up, the Creator Payment Request (Finance-executed), the
+ *   compiled Creator List, Attributed GMV, and §11-mapped Speed Score via
+ *   task.computeMetrics.
  *
  * An @cdps/api route handler is a thin shell: resolve the actor from the JWT
  * app_metadata claim, validate inputs, then call one of these functions.
@@ -48,3 +53,4 @@ export * as account from './account';
 export * as task from './task';
 export * as creative from './creative';
 export * as ads from './ads';
+export * as kol from './kol';

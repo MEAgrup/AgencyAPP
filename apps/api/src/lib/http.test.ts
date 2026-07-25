@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { bi } from '@cdps/core';
-import { account, ads, creative, demo, task } from '@cdps/domain';
+import { account, ads, creative, demo, kol, task } from '@cdps/domain';
 import {
   BadRequestError,
   UnauthorizedError,
@@ -92,6 +92,15 @@ describe('mapError', () => {
     expect(mapError(new ads.ForbiddenError(ads.MSG_BUDGET_APPROVAL_REQUIRED)).status).toBe(403);
     expect(mapError(new ads.NotFoundError()).status).toBe(404);
     expect(mapError(new ads.ConflictError(ads.MSG_CAMPAIGN_ENDED)).status).toBe(409);
+  });
+
+  it('maps M9 kol errors to their canonical status (verbatim BI)', async () => {
+    const v = mapError(new kol.ValidationError(kol.MSG_INVALID_SOURCE_POOL));
+    expect(v.status).toBe(400);
+    expect(await v.json()).toEqual({ error: kol.MSG_INVALID_SOURCE_POOL });
+    expect(mapError(new kol.ForbiddenError(kol.MSG_FINANCE_FORBIDDEN)).status).toBe(403);
+    expect(mapError(new kol.NotFoundError()).status).toBe(404);
+    expect(mapError(new kol.ConflictError(kol.MSG_REVISION_CAP_REACHED)).status).toBe(409);
   });
 });
 
