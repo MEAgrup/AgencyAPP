@@ -36,6 +36,7 @@
 
 import { bi, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
+import { onBriefReachedTerminal, validateBriefApproval } from './dependency';
 
 /** Authenticated employee + resolved role (from @cdps/core permission). */
 export type Actor = permission.Actor;
@@ -1289,8 +1290,11 @@ export async function reviewBrief(sql: Sql, actor: Actor, briefId: string): Prom
 
 /**
  * approveBrief approves a Brief under review ([In Review] → [Approved], §6 Flow
- * 3). Owning AM (or Director). (The M11 Blocking-Dependency approval gate is
- * DEFERRED until M11 is ported — nil-safe, same as the Go default.)
+ * 3). Owning AM (or Director). The M11 Blocking-Dependency gate runs first: while
+ * an active Blocking Dependency's Source is not terminal the approval is blocked
+ * (dependency.BlockedError, nothing changes, M11 §2 Rule 7 / §6.3). On success the
+ * DependencySatisfied emission hook fires in the same transaction for every
+ * Dependency this Brief sources (M11 §5.5).
  */
 export async function approveBrief(sql: Sql, actor: Actor, briefId: string): Promise<statemachine.TransitionResult> {
   return driveReviewEdge(sql, actor, briefId, BRIEF_STATUS_APPROVED);
@@ -1306,9 +1310,20 @@ async function driveReviewEdge(
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
     await lockBriefOwner(tx, actor, briefId);
-    return statemachine.transition(ex.sm, {
+    // M11 §6.3 Blocking-gate: block the final [In Review] → [Approved] transition
+    // while any Blocking Dependency's Source Brief is not yet terminal.
+    if (to === BRIEF_STATUS_APPROVED) {
+      await validateBriefApproval(tx, briefId);
+    }
+    const res = await statemachine.transition(ex.sm, {
       machine: MACHINE_BRIEF_TASK, entityType: 'brief', table: 'briefs', entityId: briefId, to, actor,
     });
+    // M11 §5.5 emission: once the Brief reaches [Approved], every Dependency it
+    // sources turns Satisfied → notify each Target Brief's PIC (fire-once).
+    if (res.ok && to === BRIEF_STATUS_APPROVED) {
+      await onBriefReachedTerminal(tx, actor, briefId);
+    }
+    return res;
   });
 }
 

@@ -3,7 +3,7 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { account, ads, creative, kol, leads, msl, task } from '@cdps/domain';
+import type { account, ads, creative, dependency, kol, leads, msl, task } from '@cdps/domain';
 import {
   amWorkloadToWire,
   assetToWire,
@@ -11,7 +11,9 @@ import {
   attemptStubToWire,
   blockRequestToWire,
   briefToWire,
+  cardToWire,
   complaintToWire,
+  dependencyToWire,
   intakeClientToWire,
   leadDetailToWire,
   leadRowToWire,
@@ -430,5 +432,44 @@ describe('M9 kol wire mappers', () => {
       brief_id: 'BRF-1', creator_list_link: 'https://drive/x', included_bookings: ['BKG-1'],
       last_compiled: '2026-07-01T00:00:00.000Z', eligible_bookings: ['BKG-1'],
     });
+  });
+});
+
+describe('M11 dependency wire mappers', () => {
+  it('dependencyToWire maps a Dependency; omits an empty note', () => {
+    const d: dependency.Dependency = {
+      id: 'DEP-202607-0001', sourceType: 'brief', sourceId: 'BRF-1', targetType: 'brief', targetId: 'BRF-2',
+      type: 'Blocking', note: '', clientId: 'CLI-1', status: 'Pending', createdBy: 'ZZ-DIR',
+      createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    };
+    const w = dependencyToWire(d);
+    expect(w).toEqual({
+      id: 'DEP-202607-0001', source_type: 'brief', source_id: 'BRF-1', target_type: 'brief', target_id: 'BRF-2',
+      type: 'Blocking', client_id: 'CLI-1', status: 'Pending', created_by: 'ZZ-DIR',
+      created_at: '2026-07-01T00:00:00.000Z',
+    });
+    expect(w).not.toHaveProperty('note');
+    expect(dependencyToWire({ ...d, note: 'catatan' }).note).toBe('catatan');
+  });
+
+  it('cardToWire maps a Card; omits absent optionals (pic/due_date/dependency_badge/created_at)', () => {
+    const c: dependency.Card = {
+      id: 'BRF-1', type: 'brief', division: 'Ads', clientId: 'CLI-1', briefId: 'BRF-1', pic: '',
+      nativeStatus: '[In Progress]', universalColumn: 'In Progress', dueDate: '', overdue: false,
+      dependencyBadge: '', createdAt: null,
+    };
+    const w = cardToWire(c);
+    expect(w).toEqual({
+      id: 'BRF-1', type: 'brief', division: 'Ads', client_id: 'CLI-1', brief_id: 'BRF-1',
+      native_status: '[In Progress]', universal_column: 'In Progress', overdue: false,
+    });
+    const full = cardToWire({
+      ...c, pic: 'ZZ-PIC', dueDate: '2026-08-30', overdue: true, dependencyBadge: 'Menunggu Dependency',
+      createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    });
+    expect(full.pic).toBe('ZZ-PIC');
+    expect(full.due_date).toBe('2026-08-30');
+    expect(full.dependency_badge).toBe('Menunggu Dependency');
+    expect(full.created_at).toBe('2026-07-01T00:00:00.000Z');
   });
 });

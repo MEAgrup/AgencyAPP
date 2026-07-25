@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import type { account, ads, creative, kol, leads, msl, task } from '@cdps/domain';
+import type { account, ads, creative, dependency, kol, leads, msl, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -818,5 +818,71 @@ export function toBookingInput(b: {
     creatorName: b.creator_name ?? '', creatorHandle: b.creator_handle ?? '', platform: b.platform ?? '',
     niche: b.niche ?? '', sourcePool: b.source_pool ?? '', poolReference: b.pool_reference ?? '',
     agreedRate: b.agreed_rate ?? '', assignedCoordinator: b.assigned_coordinator ?? '',
+  };
+}
+
+// --- M11 PM/Kanban (dependency): mirror the Go module11_board JSON tags ---
+
+/** module11_board.Dependency — a DEP- row with its derived status (note omitempty). */
+export interface DependencyWire {
+  id: string;
+  source_type: string;
+  source_id: string;
+  target_type: string;
+  target_id: string;
+  type: string;
+  note?: string;
+  client_id: string;
+  status: string;
+  created_by: string;
+  created_at: string;
+}
+
+export function dependencyToWire(d: dependency.Dependency): DependencyWire {
+  return {
+    id: d.id,
+    source_type: d.sourceType,
+    source_id: d.sourceId,
+    target_type: d.targetType,
+    target_id: d.targetId,
+    type: d.type,
+    ...(d.note ? { note: d.note } : {}),
+    client_id: d.clientId,
+    status: d.status,
+    created_by: d.createdBy,
+    created_at: d.createdAt.toISOString(),
+  };
+}
+
+/** module11_board.Card — one Client Board / My Tasks work unit (pic/due_date/dependency_badge/created_at omitempty). */
+export interface CardWire {
+  id: string;
+  type: string;
+  division: string;
+  client_id: string;
+  brief_id: string;
+  pic?: string;
+  native_status: string;
+  universal_column: string;
+  due_date?: string;
+  overdue: boolean;
+  dependency_badge?: string;
+  created_at?: string;
+}
+
+export function cardToWire(c: dependency.Card): CardWire {
+  return {
+    id: c.id,
+    type: c.type,
+    division: c.division,
+    client_id: c.clientId,
+    brief_id: c.briefId,
+    ...(c.pic ? { pic: c.pic } : {}),
+    native_status: c.nativeStatus,
+    universal_column: c.universalColumn,
+    ...(c.dueDate ? { due_date: c.dueDate } : {}),
+    overdue: c.overdue,
+    ...(c.dependencyBadge ? { dependency_badge: c.dependencyBadge } : {}),
+    ...(c.createdAt ? { created_at: c.createdAt.toISOString() } : {}),
   };
 }

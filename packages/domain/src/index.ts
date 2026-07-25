@@ -36,6 +36,10 @@
  *   Brief↔Booking roll-up, the Creator Payment Request (Finance-executed), the
  *   compiled Creator List, Attributed GMV, and §11-mapped Speed Score via
  *   task.computeMetrics.
+ * - dependency: M11 PM/Kanban — the cross-Brief Dependency (DEP-) with its derived
+ *   Pending/Blocking/Satisfied status, the Blocking-gate guard + DependencySatisfied
+ *   emission wired into account/task Brief-approval, and the two computed read-models
+ *   (Client Board + My Tasks, Universal Columns). Owns no machine.
  *
  * An @cdps/api route handler is a thin shell: resolve the actor from the JWT
  * app_metadata claim, validate inputs, then call one of these functions.
@@ -54,3 +58,4 @@ export * as task from './task';
 export * as creative from './creative';
 export * as ads from './ads';
 export * as kol from './kol';
+export * as dependency from './dependency';

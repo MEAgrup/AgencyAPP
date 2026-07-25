@@ -37,6 +37,7 @@ import { bi, notification, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { onBriefLeavesToDo } from './account';
 import { validateBriefSubmit } from './ads';
+import { BlockedError, onBriefReachedTerminal, validateBriefApproval } from './dependency';
 
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;
@@ -730,8 +731,11 @@ function chainRank(status: string): number {
  * Called after every Asset transition (exec edges here, review edges in creative.ts).
  * Idempotent and forward-only; when the Brief first leaves [To Do] the parent
  * Service advances to [In Execution]. Defensive no-ops on a Brief with no Assets,
- * an off-machine Brief, or one already terminal / off the chain. (The M11
- * Blocking-Dependency gate on the final [Approved] edge is deferred until M11.)
+ * an off-machine Brief, or one already terminal / off the chain. The M11
+ * Blocking-Dependency gate runs on the final [In Review] → [Approved] edge: while a
+ * Blocking Dependency's Source is not terminal the roll-up is blocked
+ * (dependency.BlockedError, whole tx rolls back); reaching [Approved] fires the
+ * DependencySatisfied emission for every Dependency this Brief sources (M11 §6.3/§5.5).
  */
 export async function recomputeBriefRollup(tx: Queryable, actor: Actor, briefId: string): Promise<void> {
   if (briefId === '') {
@@ -756,6 +760,22 @@ export async function recomputeBriefRollup(tx: Queryable, actor: Actor, briefId:
   while (cur < tgt) {
     const from = ROLLUP_CHAIN[cur];
     const to = ROLLUP_CHAIN[cur + 1];
+    // M11 Blocking-Dependency gate on the FINAL edge (→ [Approved]): while a Blocking
+    // Dependency's Source is not terminal the roll-up is DEFERRED here — the Brief
+    // stays [In Review] and the triggering Asset move still commits (§2 Rule 7). Only
+    // a BlockedError defers (silent stop); any other error propagates. It resolves on
+    // the next Asset event, or via the AM's explicit approveBrief once the Source is
+    // terminal (DECISIONS W3-M11-C1). Mirrors module12_task/rollup.go.
+    if (to === STATUS_APPROVED) {
+      try {
+        await validateBriefApproval(tx, briefId);
+      } catch (e) {
+        if (e instanceof BlockedError) {
+          return; // defer silently; the triggering Asset transition still commits
+        }
+        throw e;
+      }
+    }
     const res = await statemachine.transition(ex.sm, {
       machine: MACHINE_BRIEF_TASK, entityType: 'brief', table: 'briefs', entityId: briefId, to, actor,
     });
@@ -764,6 +784,11 @@ export async function recomputeBriefRollup(tx: Queryable, actor: Actor, briefId:
     }
     if (from === STATUS_TODO) {
       await onBriefLeavesToDo(tx, actor, service_id); // §5 Flow 3
+    }
+    // M11 §5.5 emission: the Brief just reached [Approved] → notify each dependent
+    // Target Brief's PIC (fire-once), atomically in this transaction.
+    if (to === STATUS_APPROVED) {
+      await onBriefReachedTerminal(tx, actor, briefId);
     }
     cur++;
   }
