@@ -3,7 +3,7 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { account, ads, creative, kol, leads, msl, task } from '@cdps/domain';
+import type { account, ads, campaign, creative, kol, leads, msl, task } from '@cdps/domain';
 import {
   amWorkloadToWire,
   assetToWire,
@@ -11,8 +11,10 @@ import {
   attemptStubToWire,
   blockRequestToWire,
   briefToWire,
+  campaignRollupToWire,
   complaintToWire,
   intakeClientToWire,
+  marketingCampaignToWire,
   leadDetailToWire,
   leadRowToWire,
   leadStubToWire,
@@ -429,6 +431,33 @@ describe('M9 kol wire mappers', () => {
     expect(creatorListToWire(c)).toEqual({
       brief_id: 'BRF-1', creator_list_link: 'https://drive/x', included_bookings: ['BKG-1'],
       last_compiled: '2026-07-01T00:00:00.000Z', eligible_bookings: ['BKG-1'],
+    });
+  });
+});
+
+describe('M3 campaign wire mappers', () => {
+  it('marketingCampaignToWire maps a Campaign (owner→owner_employee_id, nullable end_date)', () => {
+    const c: campaign.Campaign = {
+      id: 'CMP-202603-0001', name: 'Promo', channel: 'TikTok Ads', online: true, offline: false,
+      startDate: '2026-03-02', endDate: null, owner: 'EMP-LIA', status: 'Draft',
+      createdBy: 'EMP-LIA', createdAt: new Date('2026-03-01T00:00:00.000Z'),
+    };
+    expect(marketingCampaignToWire(c)).toEqual({
+      id: 'CMP-202603-0001', name: 'Promo', channel: 'TikTok Ads', online: true, offline: false,
+      start_date: '2026-03-02', end_date: null, owner_employee_id: 'EMP-LIA', status: 'Draft',
+      created_by: 'EMP-LIA', created_at: '2026-03-01T00:00:00.000Z',
+    });
+    expect(marketingCampaignToWire({ ...c, endDate: '2026-03-31' }).end_date).toBe('2026-03-31');
+  });
+
+  it('campaignRollupToWire maps the derived funnel', () => {
+    const r: campaign.Rollup = {
+      campaignId: 'CMP-1', leadsGenerated: 3, realLeads: 1, clientsWon: 2,
+      totalValueWon: '26900000.00', totalValueWonIdr: 'Rp. 26.900.000,00',
+    };
+    expect(campaignRollupToWire(r)).toEqual({
+      campaign_id: 'CMP-1', leads_generated: 3, real_leads: 1, clients_won: 2,
+      total_value_won: '26900000.00', total_value_won_idr: 'Rp. 26.900.000,00',
     });
   });
 });
