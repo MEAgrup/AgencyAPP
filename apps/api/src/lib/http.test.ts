@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { bi } from '@cdps/core';
-import { account, creative, demo, task } from '@cdps/domain';
+import { account, ads, creative, demo, task } from '@cdps/domain';
 import {
   BadRequestError,
   UnauthorizedError,
@@ -83,6 +83,15 @@ describe('mapError', () => {
     expect(mapError(new creative.ForbiddenError(creative.MSG_REVIEW_FORBIDDEN)).status).toBe(403);
     expect(mapError(new creative.NotFoundError()).status).toBe(404);
     expect(mapError(new creative.ConflictError(creative.MSG_DUPLICATE_SEQUENCE)).status).toBe(409);
+  });
+
+  it('maps M8 ads errors to their canonical status (verbatim BI)', async () => {
+    const v = mapError(new ads.ValidationError(ads.MSG_INVALID_PLATFORM));
+    expect(v.status).toBe(400);
+    expect(await v.json()).toEqual({ error: ads.MSG_INVALID_PLATFORM });
+    expect(mapError(new ads.ForbiddenError(ads.MSG_BUDGET_APPROVAL_REQUIRED)).status).toBe(403);
+    expect(mapError(new ads.NotFoundError()).status).toBe(404);
+    expect(mapError(new ads.ConflictError(ads.MSG_CAMPAIGN_ENDED)).status).toBe(409);
   });
 });
 

@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { account, client, creative, demo, finance, leads, msl, sales, task } from '@cdps/domain';
+import { account, ads, client, creative, demo, finance, leads, msl, sales, task } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -60,7 +60,8 @@ export function mapError(err: unknown): Response {
     err instanceof client.IncompleteError ||
     err instanceof account.ValidationError ||
     err instanceof task.ValidationError ||
-    err instanceof creative.ValidationError
+    err instanceof creative.ValidationError ||
+    err instanceof ads.ValidationError
   ) {
     return errorJson(err.message, 400); // exact BI [...] message (or internal sentinel)
   }
@@ -73,7 +74,8 @@ export function mapError(err: unknown): Response {
     err instanceof client.NotFoundError ||
     err instanceof account.NotFoundError ||
     err instanceof task.NotFoundError ||
-    err instanceof creative.NotFoundError
+    err instanceof creative.NotFoundError ||
+    err instanceof ads.NotFoundError
   ) {
     return errorJson(err.message, 404);
   }
@@ -85,7 +87,8 @@ export function mapError(err: unknown): Response {
     err instanceof client.ForbiddenError ||
     err instanceof account.ForbiddenError ||
     err instanceof task.ForbiddenError ||
-    err instanceof creative.ForbiddenError
+    err instanceof creative.ForbiddenError ||
+    err instanceof ads.ForbiddenError
   ) {
     return errorJson(err.message, 403);
   }
@@ -98,7 +101,8 @@ export function mapError(err: unknown): Response {
     err instanceof client.LockedFieldError ||
     err instanceof account.ConflictError ||
     err instanceof task.ConflictError ||
-    err instanceof creative.ConflictError
+    err instanceof creative.ConflictError ||
+    err instanceof ads.ConflictError
   ) {
     // Lifecycle conflicts: a dedup block, an un-closable attempt, a lead whose
     // win was already resolved, or a full-verification blocked on a missing

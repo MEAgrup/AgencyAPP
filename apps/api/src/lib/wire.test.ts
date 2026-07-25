@@ -3,7 +3,7 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { account, creative, leads, msl, task } from '@cdps/domain';
+import type { account, ads, creative, leads, msl, task } from '@cdps/domain';
 import {
   amWorkloadToWire,
   assetToWire,
@@ -16,8 +16,11 @@ import {
   leadDetailToWire,
   leadRowToWire,
   leadStubToWire,
+  campaignToWire,
   masterServiceToWire,
+  metricEntryToWire,
   metricsToWire,
+  optimizationToWire,
   pendingBlockRequestToWire,
   poolRowToWire,
   strategyRequirementToWire,
@@ -359,5 +362,42 @@ describe('M7 creative wire mappers', () => {
   it('toAssetInput maps snake_case body → camelCase AssetInput (defaults)', () => {
     expect(toAssetInput({ sequence_no: 3 })).toEqual({ sequenceNo: 3, assignedPic: '' });
     expect(toAssetInput({ sequence_no: 1, assigned_pic: 'ZZ-C' })).toEqual({ sequenceNo: 1, assignedPic: 'ZZ-C' });
+  });
+});
+
+describe('M8 ads wire mappers', () => {
+  it('campaignToWire maps a Campaign with its derived metrics', () => {
+    const c: ads.Campaign = {
+      id: 'ADC-202607-0001', briefId: 'BRF-1', clientId: 'CLI-1', platform: 'Shopee Ads', objective: 'Sales',
+      budget: 8000000, budgetDisplay: 'Rp. 8.000.000,00', startDate: '2026-07-01', endDate: '2026-08-31',
+      targetKpi: 'ROAS ≥ 4x', status: '[Active]', totalSpend: 1000000, totalSpendDisplay: 'Rp. 1.000.000,00',
+      totalGmv: 4000000, totalGmvDisplay: 'Rp. 4.000.000,00', roas: 4, roasDisplay: '4x', linkedAssetIds: ['AST-1'],
+      metricEntryCount: 1, optimizationCount: 0, underperformingStreak: 0, escalationFlagged: false,
+      createdBy: 'ZZ-ADV', createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    };
+    const w = campaignToWire(c);
+    expect(w.budget_display).toBe('Rp. 8.000.000,00');
+    expect(w.roas).toBe(4);
+    expect(w.roas_display).toBe('4x');
+    expect(w.linked_asset_ids).toEqual(['AST-1']);
+    expect(w.escalation_flagged).toBe(false);
+    expect(w.created_at).toBe('2026-07-01T00:00:00.000Z');
+  });
+
+  it('metricEntryToWire + optimizationToWire map their records', () => {
+    const m: ads.MetricEntry = {
+      id: 'MTR-1', campaignId: 'ADC-1', periodStart: '2026-07-01', periodEnd: '2026-07-07', spend: 1000000,
+      gmv: 4000000, entryMethod: 'Manual', enteredBy: 'ZZ-ADV', createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    };
+    expect(metricEntryToWire(m)).toEqual({
+      id: 'MTR-1', campaign_id: 'ADC-1', period_start: '2026-07-01', period_end: '2026-07-07', spend: 1000000,
+      gmv: 4000000, entry_method: 'Manual', entered_by: 'ZZ-ADV', created_at: '2026-07-01T00:00:00.000Z',
+    });
+    const o: ads.Optimization = {
+      id: 'OPT-1', campaignId: 'ADC-1', changeType: 'Budget', beforeValue: '8000000', afterValue: '9000000',
+      reason: 'scale', actor: 'ZZ-ADV', createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    };
+    expect(optimizationToWire(o).change_type).toBe('Budget');
+    expect(optimizationToWire(o).before_value).toBe('8000000');
   });
 });

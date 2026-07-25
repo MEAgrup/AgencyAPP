@@ -26,6 +26,11 @@
  * - creative: M7 Creative — the Asset (AST-) entity: incremental Brief breakdown,
  *   the AM-side per-Asset review edges (§4 Flow 3 / §6), Hours Logged (§5), and the
  *   Asset reads. Execution edges + roll-up live in `task`.
+ * - ads: M8 Ads — the Ad Campaign (ADC-): creation, the [Paused]/[Active]/[Ended]
+ *   lifecycle with the launch dependency, Creative-Asset linkage, the Optimization
+ *   Log (+ budget sign-off / creative swap), periodic Metric Entries with derived
+ *   Total Spend / GMV / ROAS + Attributed-GMV feedback to Creative, and the setup
+ *   Brief submit guard (§4 Rule 3) that `task` calls.
  *
  * An @cdps/api route handler is a thin shell: resolve the actor from the JWT
  * app_metadata claim, validate inputs, then call one of these functions.
@@ -42,3 +47,4 @@ export * as client from './client';
 export * as account from './account';
 export * as task from './task';
 export * as creative from './creative';
+export * as ads from './ads';

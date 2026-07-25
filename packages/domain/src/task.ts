@@ -36,6 +36,7 @@
 import { bi, notification, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { onBriefLeavesToDo } from './account';
+import { validateBriefSubmit } from './ads';
 
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;
@@ -340,6 +341,11 @@ async function driveExecEdge(
     }
     if (r.status !== requireFrom) {
       throw new ConflictError(bi.TRANSITION_NOT_ALLOWED); // pin the source state
+    }
+    // §4 Rule 3 (M8): an Ads Brief-as-task cannot submit until its Ad Campaign is
+    // complete (≥1 linked Creative Asset). No-op for non-Ads divisions and Assets.
+    if (to === STATUS_SUBMITTED && src.table === 'briefs') {
+      await validateBriefSubmit(tx, id, r.division);
     }
     // Link gate: a link-requiring source (Asset) must carry an output link before
     // [Submitted] (§4 Rule 3). Persist it in the same transaction as the move.

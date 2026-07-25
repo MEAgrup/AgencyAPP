@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import type { account, creative, leads, msl, task } from '@cdps/domain';
+import type { account, ads, creative, leads, msl, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -585,4 +585,115 @@ export function assetToWire(a: creative.Asset): AssetWire {
 /** Request body → AssetInput (snake_case wire → camelCase domain). */
 export function toAssetInput(b: { sequence_no?: number; assigned_pic?: string }): creative.AssetInput {
   return { sequenceNo: b.sequence_no ?? 0, assignedPic: b.assigned_pic ?? '' };
+}
+
+// --- M8 Ads ---
+
+/** module8_ads.Campaign — an Ad Campaign with its derived §5 performance view. */
+export interface CampaignWire {
+  id: string;
+  brief_id: string;
+  client_id: string;
+  platform: string;
+  objective: string;
+  budget: number;
+  budget_display: string;
+  start_date: string;
+  end_date: string;
+  target_kpi: string;
+  status: string;
+  total_spend: number;
+  total_spend_display: string;
+  total_gmv: number;
+  total_gmv_display: string;
+  roas: number | null;
+  roas_display: string;
+  linked_asset_ids: string[];
+  metric_entry_count: number;
+  optimization_count: number;
+  underperforming_streak: number;
+  escalation_flagged: boolean;
+  created_by: string;
+  created_at: string;
+}
+
+export function campaignToWire(c: ads.Campaign): CampaignWire {
+  return {
+    id: c.id, brief_id: c.briefId, client_id: c.clientId, platform: c.platform, objective: c.objective,
+    budget: c.budget, budget_display: c.budgetDisplay, start_date: c.startDate, end_date: c.endDate,
+    target_kpi: c.targetKpi, status: c.status, total_spend: c.totalSpend, total_spend_display: c.totalSpendDisplay,
+    total_gmv: c.totalGmv, total_gmv_display: c.totalGmvDisplay, roas: c.roas, roas_display: c.roasDisplay,
+    linked_asset_ids: c.linkedAssetIds, metric_entry_count: c.metricEntryCount, optimization_count: c.optimizationCount,
+    underperforming_streak: c.underperformingStreak, escalation_flagged: c.escalationFlagged,
+    created_by: c.createdBy, created_at: c.createdAt.toISOString(),
+  };
+}
+
+/** module8_ads.MetricEntry — one recorded §9.4 Metric Entry. */
+export interface MetricEntryWire {
+  id: string;
+  campaign_id: string;
+  period_start: string;
+  period_end: string;
+  spend: number;
+  gmv: number;
+  entry_method: string;
+  entered_by: string;
+  created_at: string;
+}
+
+export function metricEntryToWire(m: ads.MetricEntry): MetricEntryWire {
+  return {
+    id: m.id, campaign_id: m.campaignId, period_start: m.periodStart, period_end: m.periodEnd,
+    spend: m.spend, gmv: m.gmv, entry_method: m.entryMethod, entered_by: m.enteredBy, created_at: m.createdAt.toISOString(),
+  };
+}
+
+/** module8_ads.Optimization — one recorded OPT- Optimization Log entry. */
+export interface OptimizationWire {
+  id: string;
+  campaign_id: string;
+  change_type: string;
+  before_value: string;
+  after_value: string;
+  reason: string;
+  actor: string;
+  created_at: string;
+}
+
+export function optimizationToWire(o: ads.Optimization): OptimizationWire {
+  return {
+    id: o.id, campaign_id: o.campaignId, change_type: o.changeType, before_value: o.beforeValue,
+    after_value: o.afterValue, reason: o.reason, actor: o.actor, created_at: o.createdAt.toISOString(),
+  };
+}
+
+/** Request body → CampaignInput. */
+export function toCampaignInput(b: {
+  platform?: string; objective?: string; budget?: string; start_date?: string; end_date?: string; target_kpi?: string;
+}): ads.CampaignInput {
+  return {
+    platform: b.platform ?? '', objective: b.objective ?? '', budget: b.budget ?? '',
+    startDate: b.start_date ?? '', endDate: b.end_date ?? '', targetKpi: b.target_kpi ?? '',
+  };
+}
+
+/** Request body → MetricInput. */
+export function toMetricInput(b: {
+  period_start?: string; period_end?: string; spend?: string; gmv?: string; ctr?: number | null; cvr?: number | null; entry_method?: string;
+}): ads.MetricInput {
+  return {
+    periodStart: b.period_start ?? '', periodEnd: b.period_end ?? '', spend: b.spend ?? '', gmv: b.gmv ?? '',
+    ctr: b.ctr ?? null, cvr: b.cvr ?? null, entryMethod: b.entry_method ?? '',
+  };
+}
+
+/** Request body → OptimizationInput. */
+export function toOptimizationInput(b: {
+  change_type?: string; before_value?: string; after_value?: string; reason?: string; old_asset_id?: string; new_asset_id?: string;
+}): ads.OptimizationInput {
+  return {
+    changeType: b.change_type ?? '', beforeValue: b.before_value ?? '', afterValue: b.after_value ?? '',
+    reason: b.reason ?? '', oldAssetId: b.old_asset_id ?? '', newAssetId: b.new_asset_id ?? '',
+  };
 }
