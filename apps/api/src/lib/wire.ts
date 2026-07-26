@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import type { account, ads, creative, kol, leads, msl, task } from '@cdps/domain';
+import type { account, ads, campaign, creative, kol, leads, msl, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -818,5 +818,59 @@ export function toBookingInput(b: {
     creatorName: b.creator_name ?? '', creatorHandle: b.creator_handle ?? '', platform: b.platform ?? '',
     niche: b.niche ?? '', sourcePool: b.source_pool ?? '', poolReference: b.pool_reference ?? '',
     agreedRate: b.agreed_rate ?? '', assignedCoordinator: b.assigned_coordinator ?? '',
+  };
+}
+
+// --- M3 Campaign (acquisition CMP-): mirror the Go module3_campaign JSON tags ---
+
+/** module3_campaign.Campaign — the acquisition Campaign (CMP-) record (end_date nullable). */
+export interface MarketingCampaignWire {
+  id: string;
+  name: string;
+  channel: string;
+  online: boolean;
+  offline: boolean;
+  start_date: string;
+  end_date: string | null;
+  owner_employee_id: string;
+  status: string;
+  created_by: string;
+  created_at: string;
+}
+
+export function marketingCampaignToWire(c: campaign.Campaign): MarketingCampaignWire {
+  return {
+    id: c.id,
+    name: c.name,
+    channel: c.channel,
+    online: c.online,
+    offline: c.offline,
+    start_date: c.startDate,
+    end_date: c.endDate,
+    owner_employee_id: c.owner,
+    status: c.status,
+    created_by: c.createdBy,
+    created_at: c.createdAt.toISOString(),
+  };
+}
+
+/** module3_campaign.Rollup — the Campaign's read-only linkage funnel (M3 §4 Rule 4). */
+export interface CampaignRollupWire {
+  campaign_id: string;
+  leads_generated: number;
+  real_leads: number;
+  clients_won: number;
+  total_value_won: string;
+  total_value_won_idr: string;
+}
+
+export function campaignRollupToWire(r: campaign.Rollup): CampaignRollupWire {
+  return {
+    campaign_id: r.campaignId,
+    leads_generated: r.leadsGenerated,
+    real_leads: r.realLeads,
+    clients_won: r.clientsWon,
+    total_value_won: r.totalValueWon,
+    total_value_won_idr: r.totalValueWonIdr,
   };
 }

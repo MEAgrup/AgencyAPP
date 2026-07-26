@@ -36,7 +36,12 @@
  *   Brief↔Booking roll-up, the Creator Payment Request (Finance-executed), the
  *   compiled Creator List, Attributed GMV, and §11-mapped Speed Score via
  *   task.computeMetrics.
+ * - campaign: M3 Campaign — the acquisition Campaign (CMP-): create (born Draft),
+ *   the Draft→Active⇄Paused→Closed→Archived machine (Closed stamps end_date),
+ *   ownership reassign (Marketing lead/Director), §5-scoped Get/List, and the
+ *   read-only linkage rollups (leads/real-leads/clients-won/total-value-won).
  *
+
  * An @cdps/api route handler is a thin shell: resolve the actor from the JWT
  * app_metadata claim, validate inputs, then call one of these functions.
  */
@@ -54,3 +59,4 @@ export * as task from './task';
 export * as creative from './creative';
 export * as ads from './ads';
 export * as kol from './kol';
+export * as campaign from './campaign';
