@@ -3,7 +3,7 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { account, ads, creative, kol, leads, livestream, msl, task } from '@cdps/domain';
+import type { account, ads, campaign, creative, kol, leads, livestream, marketing, msl, task } from '@cdps/domain';
 import {
   amWorkloadToWire,
   assetToWire,
@@ -11,8 +11,12 @@ import {
   attemptStubToWire,
   blockRequestToWire,
   briefToWire,
+  campaignRollupToWire,
   complaintToWire,
   intakeClientToWire,
+  marketingCampaignToWire,
+  marketingMetricsToWire,
+  performanceRecordToWire,
   leadDetailToWire,
   leadRowToWire,
   leadStubToWire,
@@ -498,5 +502,64 @@ describe('sessionToWire', () => {
 
   it('keeps orders_generated: 0 (a real zero is not "unset")', () => {
     expect(sessionToWire({ ...base, ordersGenerated: 0 }).orders_generated).toBe(0);
+  });
+});
+
+describe('M3 campaign wire mappers', () => {
+  it('marketingCampaignToWire maps a Campaign (owner→owner_employee_id, nullable end_date)', () => {
+    const c: campaign.Campaign = {
+      id: 'CMP-202603-0001', name: 'Promo', channel: 'TikTok Ads', online: true, offline: false,
+      startDate: '2026-03-02', endDate: null, owner: 'EMP-LIA', status: 'Draft',
+      createdBy: 'EMP-LIA', createdAt: new Date('2026-03-01T00:00:00.000Z'),
+    };
+    expect(marketingCampaignToWire(c)).toEqual({
+      id: 'CMP-202603-0001', name: 'Promo', channel: 'TikTok Ads', online: true, offline: false,
+      start_date: '2026-03-02', end_date: null, owner_employee_id: 'EMP-LIA', status: 'Draft',
+      created_by: 'EMP-LIA', created_at: '2026-03-01T00:00:00.000Z',
+    });
+    expect(marketingCampaignToWire({ ...c, endDate: '2026-03-31' }).end_date).toBe('2026-03-31');
+  });
+
+  it('campaignRollupToWire maps the derived funnel', () => {
+    const r: campaign.Rollup = {
+      campaignId: 'CMP-1', leadsGenerated: 3, realLeads: 1, clientsWon: 2,
+      totalValueWon: '26900000.00', totalValueWonIdr: 'Rp. 26.900.000,00',
+    };
+    expect(campaignRollupToWire(r)).toEqual({
+      campaign_id: 'CMP-1', leads_generated: 3, real_leads: 1, clients_won: 2,
+      total_value_won: '26900000.00', total_value_won_idr: 'Rp. 26.900.000,00',
+    });
+  });
+});
+
+describe('M2 marketing wire mappers', () => {
+  it('performanceRecordToWire maps the record', () => {
+    const r: marketing.Record = {
+      campaignId: 'CMP-1', budget: '5000000.00', budgetIdr: 'Rp. 5.000.000,00',
+      online: true, offline: false, createdBy: 'EMP-LIA',
+    };
+    expect(performanceRecordToWire(r)).toEqual({
+      campaign_id: 'CMP-1', budget: '5000000.00', budget_idr: 'Rp. 5.000.000,00',
+      online: true, offline: false, created_by: 'EMP-LIA',
+    });
+  });
+
+  it('marketingMetricsToWire maps every metric field incl. junk breakdown', () => {
+    const m: marketing.Metrics = {
+      campaignId: 'CMP-1', online: true, offline: false, budget: '5000000.00', budgetIdr: 'Rp. 5.000.000,00',
+      leadByDashboard: 46, leadRealBySales: 12, leadQualityRate: '26%',
+      attributedSales: 'Rp. 21.900.000,00', attributedSalesDecimal: '21900000.00',
+      costPerLead: 'Rp. 108.695,00', costPerRealLead: 'Rp. 416.666,00', roas: '4.38',
+      collectedSales: 'Rp. 4.000.000,00', collectedSalesDecimal: '4000000.00', collectedRoas: '0.80',
+      junkBreakdown: [{ reason: '[Bukan seller]', count: 2 }],
+    };
+    expect(marketingMetricsToWire(m)).toEqual({
+      campaign_id: 'CMP-1', online: true, offline: false, budget: '5000000.00', budget_idr: 'Rp. 5.000.000,00',
+      lead_by_dashboard: 46, lead_real_by_sales: 12, lead_quality_rate: '26%',
+      attributed_sales: 'Rp. 21.900.000,00', attributed_sales_decimal: '21900000.00',
+      cost_per_lead: 'Rp. 108.695,00', cost_per_real_lead: 'Rp. 416.666,00', roas: '4.38',
+      collected_sales: 'Rp. 4.000.000,00', collected_sales_decimal: '4000000.00', collected_roas: '0.80',
+      junk_breakdown: [{ reason: '[Bukan seller]', count: 2 }],
+    });
   });
 });

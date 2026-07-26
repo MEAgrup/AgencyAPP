@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import type { account, ads, creative, kol, leads, livestream, msl, task } from '@cdps/domain';
+import type { account, ads, campaign, creative, kol, leads, livestream, marketing, msl, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -882,4 +882,124 @@ export function sessionToWire(s: livestream.Session): SessionWire {
   if (s.vendorReportLink) w.vendor_report_link = s.vendorReportLink;
   if (s.reconciliationNotes) w.reconciliation_notes = s.reconciliationNotes;
   return w;
+}
+
+// --- M3 Campaign (acquisition CMP-): mirror the Go module3_campaign JSON tags ---
+
+/** module3_campaign.Campaign — the acquisition Campaign (CMP-) record (end_date nullable). */
+export interface MarketingCampaignWire {
+  id: string;
+  name: string;
+  channel: string;
+  online: boolean;
+  offline: boolean;
+  start_date: string;
+  end_date: string | null;
+  owner_employee_id: string;
+  status: string;
+  created_by: string;
+  created_at: string;
+}
+
+export function marketingCampaignToWire(c: campaign.Campaign): MarketingCampaignWire {
+  return {
+    id: c.id,
+    name: c.name,
+    channel: c.channel,
+    online: c.online,
+    offline: c.offline,
+    start_date: c.startDate,
+    end_date: c.endDate,
+    owner_employee_id: c.owner,
+    status: c.status,
+    created_by: c.createdBy,
+    created_at: c.createdAt.toISOString(),
+  };
+}
+
+/** module3_campaign.Rollup — the Campaign's read-only linkage funnel (M3 §4 Rule 4). */
+export interface CampaignRollupWire {
+  campaign_id: string;
+  leads_generated: number;
+  real_leads: number;
+  clients_won: number;
+  total_value_won: string;
+  total_value_won_idr: string;
+}
+
+export function campaignRollupToWire(r: campaign.Rollup): CampaignRollupWire {
+  return {
+    campaign_id: r.campaignId,
+    leads_generated: r.leadsGenerated,
+    real_leads: r.realLeads,
+    clients_won: r.clientsWon,
+    total_value_won: r.totalValueWon,
+    total_value_won_idr: r.totalValueWonIdr,
+  };
+}
+
+// --- M2 Marketing (performance record + auto-metrics): mirror the Go module2 JSON tags ---
+
+/** module2_marketing.Record — the stored performance record (budget + 1:1 Online/Offline). */
+export interface PerformanceRecordWire {
+  campaign_id: string;
+  budget: string;
+  budget_idr: string;
+  online: boolean;
+  offline: boolean;
+  created_by: string;
+}
+
+export function performanceRecordToWire(r: marketing.Record): PerformanceRecordWire {
+  return {
+    campaign_id: r.campaignId,
+    budget: r.budget,
+    budget_idr: r.budgetIdr,
+    online: r.online,
+    offline: r.offline,
+    created_by: r.createdBy,
+  };
+}
+
+/** module2_marketing.Metrics — the read-only Auto-Metrics view (M2 §4). */
+export interface MarketingMetricsWire {
+  campaign_id: string;
+  online: boolean;
+  offline: boolean;
+  budget: string;
+  budget_idr: string;
+  lead_by_dashboard: number;
+  lead_real_by_sales: number;
+  lead_quality_rate: string;
+  attributed_sales: string;
+  attributed_sales_decimal: string;
+  cost_per_lead: string;
+  cost_per_real_lead: string;
+  roas: string;
+  collected_sales: string;
+  collected_sales_decimal: string;
+  collected_roas: string;
+  junk_breakdown: { reason: string; count: number }[];
+}
+
+export function marketingMetricsToWire(m: marketing.Metrics): MarketingMetricsWire {
+  return {
+    campaign_id: m.campaignId,
+    online: m.online,
+    offline: m.offline,
+    budget: m.budget,
+    budget_idr: m.budgetIdr,
+    lead_by_dashboard: m.leadByDashboard,
+    lead_real_by_sales: m.leadRealBySales,
+    lead_quality_rate: m.leadQualityRate,
+    attributed_sales: m.attributedSales,
+    attributed_sales_decimal: m.attributedSalesDecimal,
+    cost_per_lead: m.costPerLead,
+    cost_per_real_lead: m.costPerRealLead,
+    roas: m.roas,
+    collected_sales: m.collectedSales,
+    collected_sales_decimal: m.collectedSalesDecimal,
+    collected_roas: m.collectedRoas,
+    junk_breakdown: m.junkBreakdown.map((j) => ({ reason: j.reason, count: j.count })),
+  };
 }
