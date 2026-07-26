@@ -3,7 +3,7 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { account, ads, campaign, creative, kol, leads, marketing, msl, task } from '@cdps/domain';
+import type { account, ads, campaign, creative, kol, leads, livestream, marketing, msl, task } from '@cdps/domain';
 import {
   amWorkloadToWire,
   assetToWire,
@@ -29,6 +29,7 @@ import {
   optimizationToWire,
   pendingBlockRequestToWire,
   poolRowToWire,
+  sessionToWire,
   strategyRequirementToWire,
   strategyToWire,
   toAssetInput,
@@ -434,6 +435,73 @@ describe('M9 kol wire mappers', () => {
       brief_id: 'BRF-1', creator_list_link: 'https://drive/x', included_bookings: ['BKG-1'],
       last_compiled: '2026-07-01T00:00:00.000Z', eligible_bookings: ['BKG-1'],
     });
+  });
+});
+
+describe('sessionToWire', () => {
+  const base: livestream.Session = {
+    id: 'LSS-202608-0001',
+    briefId: 'BRF-202608-0001',
+    platform: 'TikTok Shop Live',
+    requestedDatetime: new Date('2026-08-01T15:00:00.000Z'),
+    targetDurationHours: 2,
+    productsTalent: '',
+    specialInstructions: '',
+    status: '[Requested]',
+    actualDatetime: null,
+    actualDurationHours: null,
+    viewersPeak: null,
+    viewersAvg: null,
+    ordersGenerated: null,
+    gmv: null,
+    gmvDisplay: '',
+    vendorReportLink: '',
+    reconciliationNotes: '',
+    dataConfidenceTier: 'Vendor-Reported',
+    createdBy: 'ZZ-AM',
+    createdAt: new Date('2026-07-25T00:00:00.000Z'),
+  };
+
+  it('maps a fresh [Requested] session, omitting every unset result field', () => {
+    expect(sessionToWire(base)).toEqual({
+      id: 'LSS-202608-0001',
+      brief_id: 'BRF-202608-0001',
+      platform: 'TikTok Shop Live',
+      requested_datetime: '2026-08-01T15:00:00.000Z',
+      target_duration_hours: 2,
+      status: '[Requested]',
+      data_confidence_tier: 'Vendor-Reported',
+      created_by: 'ZZ-AM',
+      created_at: '2026-07-25T00:00:00.000Z',
+    });
+  });
+
+  it('maps a [Completed] session: gmv as a raw number + pre-formatted gmv_display', () => {
+    const wire = sessionToWire({
+      ...base,
+      status: '[Completed]',
+      productsTalent: 'Skincare',
+      actualDatetime: new Date('2026-08-01T15:05:00.000Z'),
+      actualDurationHours: 2.5,
+      viewersPeak: 1200,
+      ordersGenerated: 150,
+      gmv: '5000000.00',
+      gmvDisplay: 'Rp. 5.000.000,00',
+      vendorReportLink: 'https://vendor/report/1',
+    });
+    expect(wire.gmv).toBe(5000000); // raw rupiah number for calc/sort
+    expect(wire.gmv_display).toBe('Rp. 5.000.000,00'); // never reformatted in FE
+    expect(wire.actual_datetime).toBe('2026-08-01T15:05:00.000Z');
+    expect(wire.actual_duration_hours).toBe(2.5);
+    expect(wire.viewers_peak).toBe(1200);
+    expect(wire).not.toHaveProperty('viewers_avg'); // still unset → omitted
+    expect(wire.orders_generated).toBe(150);
+    expect(wire.products_talent).toBe('Skincare');
+    expect(wire.vendor_report_link).toBe('https://vendor/report/1');
+  });
+
+  it('keeps orders_generated: 0 (a real zero is not "unset")', () => {
+    expect(sessionToWire({ ...base, ordersGenerated: 0 }).orders_generated).toBe(0);
   });
 });
 

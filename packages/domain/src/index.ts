@@ -36,6 +36,9 @@
  *   Brief↔Booking roll-up, the Creator Payment Request (Finance-executed), the
  *   compiled Creator List, Attributed GMV, and §11-mapped Speed Score via
  *   task.computeMetrics.
+ * - livestream: M10 Live Stream — the Live Stream Session (LSS-) vendor tracker:
+ *   AM-owned request/result lifecycle over an off-machine [Dispatched to Vendor]
+ *   Brief, requested-vs-actual reconciliation, and the off-machine Brief roll-up.
  * - campaign: M3 Campaign — the acquisition Campaign (CMP-): create (born Draft),
  *   the Draft→Active⇄Paused→Closed→Archived machine (Closed stamps end_date),
  *   ownership reassign (Marketing lead/Director), §5-scoped Get/List, and the
@@ -63,5 +66,6 @@ export * as task from './task';
 export * as creative from './creative';
 export * as ads from './ads';
 export * as kol from './kol';
+export * as livestream from './livestream';
 export * as campaign from './campaign';
 export * as marketing from './marketing';

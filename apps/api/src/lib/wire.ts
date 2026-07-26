@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import type { account, ads, campaign, creative, kol, leads, marketing, msl, task } from '@cdps/domain';
+import type { account, ads, campaign, creative, kol, leads, livestream, marketing, msl, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -819,6 +819,69 @@ export function toBookingInput(b: {
     niche: b.niche ?? '', sourcePool: b.source_pool ?? '', poolReference: b.pool_reference ?? '',
     agreedRate: b.agreed_rate ?? '', assignedCoordinator: b.assigned_coordinator ?? '',
   };
+}
+
+// --- M10 Live Stream (contract mirrors backend/internal/module10_livestream
+//     Session json tags + web-internal/src/lib/livestream.ts Session) ---
+
+/**
+ * module10_livestream.Session as web-internal's `Session` expects it. Result-only
+ * fields are `omitempty` in the Go source and simply ABSENT from JSON until they
+ * are set (the FE treats missing the same as empty — never coerced to 0/false),
+ * so the mapper omits them while null/empty. Money follows the M10 contract: `gmv`
+ * is the raw rupiah NUMBER (calc/sort only) and `gmv_display` is the pre-formatted
+ * "Rp. X.XXX.XXX,00" — the FE never reformats `gmv` (house rule #7).
+ */
+export interface SessionWire {
+  id: string;
+  brief_id: string;
+  platform: string;
+  requested_datetime: string;
+  target_duration_hours: number;
+  products_talent?: string;
+  special_instructions?: string;
+  status: string;
+  actual_datetime?: string;
+  actual_duration_hours?: number;
+  viewers_peak?: number;
+  viewers_avg?: number;
+  orders_generated?: number;
+  gmv?: number;
+  gmv_display?: string;
+  vendor_report_link?: string;
+  reconciliation_notes?: string;
+  data_confidence_tier: string;
+  created_by: string;
+  created_at: string;
+}
+
+/** Maps a domain Session (camelCase) to the snake_case Session wire shape. */
+export function sessionToWire(s: livestream.Session): SessionWire {
+  const w: SessionWire = {
+    id: s.id,
+    brief_id: s.briefId,
+    platform: s.platform,
+    requested_datetime: s.requestedDatetime.toISOString(),
+    target_duration_hours: s.targetDurationHours,
+    status: s.status,
+    data_confidence_tier: s.dataConfidenceTier,
+    created_by: s.createdBy,
+    created_at: s.createdAt.toISOString(),
+  };
+  // Optional request fields (omitempty: absent while empty).
+  if (s.productsTalent) w.products_talent = s.productsTalent;
+  if (s.specialInstructions) w.special_instructions = s.specialInstructions;
+  // Result-only fields (omitempty: absent until [Completed] / [Discrepancy Flagged]).
+  if (s.actualDatetime) w.actual_datetime = s.actualDatetime.toISOString();
+  if (s.actualDurationHours !== null) w.actual_duration_hours = s.actualDurationHours;
+  if (s.viewersPeak !== null) w.viewers_peak = s.viewersPeak;
+  if (s.viewersAvg !== null) w.viewers_avg = s.viewersAvg;
+  if (s.ordersGenerated !== null) w.orders_generated = s.ordersGenerated;
+  if (s.gmv !== null) w.gmv = Number(s.gmv); // raw rupiah number for calc/sort only
+  if (s.gmvDisplay) w.gmv_display = s.gmvDisplay;
+  if (s.vendorReportLink) w.vendor_report_link = s.vendorReportLink;
+  if (s.reconciliationNotes) w.reconciliation_notes = s.reconciliationNotes;
+  return w;
 }
 
 // --- M3 Campaign (acquisition CMP-): mirror the Go module3_campaign JSON tags ---
