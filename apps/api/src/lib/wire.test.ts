@@ -3,7 +3,7 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { account, ads, creative, kol, leads, msl, task } from '@cdps/domain';
+import type { account, ads, creative, health, kol, leads, msl, task } from '@cdps/domain';
 import {
   amWorkloadToWire,
   assetToWire,
@@ -31,6 +31,9 @@ import {
   toBriefInput,
   toComplaintInput,
   toStrategyInput,
+  healthSnapshotToWire,
+  roasToggleToWire,
+  healthScanResultToWire,
 } from './wire';
 
 describe('masterServiceToWire', () => {
@@ -429,6 +432,40 @@ describe('M9 kol wire mappers', () => {
     expect(creatorListToWire(c)).toEqual({
       brief_id: 'BRF-1', creator_list_link: 'https://drive/x', included_bookings: ['BKG-1'],
       last_compiled: '2026-07-01T00:00:00.000Z', eligible_bookings: ['BKG-1'],
+    });
+  });
+});
+
+describe('M13 health wire mappers', () => {
+  it('healthSnapshotToWire maps a snapshot; omits computed_at/by on a preview; component excluded_reason omitempty', () => {
+    const snap: health.Snapshot = {
+      id: 'CHR-202606-0001', clientId: 'CLI-1', periodStart: '2026-06-01', periodEnd: '2026-06-30',
+      finalHealthScore: 74.56, scoreDisplay: '74.56', band: 'Watch', roasToggleState: true,
+      components: [
+        { name: 'gmv_growth', included: true, raw: 40, capped: 40, baseWeight: 25, effectiveWeight: 27.78 },
+        { name: 'satisfaction', included: false, raw: null, capped: null, baseWeight: 10, effectiveWeight: 0, excludedReason: 'placeholder' },
+      ],
+      computedAt: new Date('2026-07-01T00:00:00.000Z'), computedBy: 'system', preview: false,
+    };
+    const w = healthSnapshotToWire(snap);
+    expect(w.final_health_score).toBe(74.56);
+    expect(w.roas_toggle_state).toBe(true);
+    expect(w.components[0]).toEqual({ name: 'gmv_growth', included: true, raw: 40, capped: 40, base_weight: 25, effective_weight: 27.78 });
+    expect(w.components[1].excluded_reason).toBe('placeholder');
+    expect(w.computed_at).toBe('2026-07-01T00:00:00.000Z');
+
+    const preview = healthSnapshotToWire({ ...snap, id: '', computedAt: null, computedBy: '', preview: true });
+    expect(preview).not.toHaveProperty('computed_at');
+    expect(preview).not.toHaveProperty('computed_by');
+    expect(preview.preview).toBe(true);
+  });
+
+  it('roasToggleToWire + healthScanResultToWire map their fields', () => {
+    expect(roasToggleToWire({ clientId: 'CLI-1', override: false, hasAds: true, hasActive: false, effective: false })).toEqual({
+      client_id: 'CLI-1', override: false, has_ads: true, has_active: false, effective: false,
+    });
+    expect(healthScanResultToWire({ period: '202606', snapshotsMade: 3, bandDropsFlagged: 1 })).toEqual({
+      period: '202606', snapshots_made: 3, band_drops_flagged: 1,
     });
   });
 });
