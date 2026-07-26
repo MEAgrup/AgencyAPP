@@ -36,6 +36,11 @@
  *   Brief↔Booking roll-up, the Creator Payment Request (Finance-executed), the
  *   compiled Creator List, Attributed GMV, and §11-mapped Speed Score via
  *   task.computeMetrics.
+ * - health: M13 Client Health — the monthly immutable Health Report Snapshot
+ *   (CHR-): the pure 7-component weighted score with missing-component
+ *   redistribution + banding, the WIB month batch sweep, the live current-month
+ *   preview, the trend read, the band-drop emission (EvClientBandDrop), and the
+ *   per-Client ROAS Inclusion Toggle. Pure aggregation over M4/M5/M6/M8/M12.
  *
  * An @cdps/api route handler is a thin shell: resolve the actor from the JWT
  * app_metadata claim, validate inputs, then call one of these functions.
@@ -54,3 +59,4 @@ export * as task from './task';
 export * as creative from './creative';
 export * as ads from './ads';
 export * as kol from './kol';
+export * as health from './health';

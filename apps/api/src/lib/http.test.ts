@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { bi } from '@cdps/core';
-import { account, ads, creative, demo, kol, task } from '@cdps/domain';
+import { account, ads, creative, demo, health, kol, task } from '@cdps/domain';
 import {
   BadRequestError,
   UnauthorizedError,
@@ -101,6 +101,16 @@ describe('mapError', () => {
     expect(mapError(new kol.ForbiddenError(kol.MSG_FINANCE_FORBIDDEN)).status).toBe(403);
     expect(mapError(new kol.NotFoundError()).status).toBe(404);
     expect(mapError(new kol.ConflictError(kol.MSG_REVISION_CAP_REACHED)).status).toBe(409);
+  });
+
+  it('maps M13 health errors to their canonical status (verbatim BI)', async () => {
+    const nf = mapError(new health.NotFoundError());
+    expect(nf.status).toBe(404);
+    expect(await nf.json()).toEqual({ error: health.MSG_NOT_FOUND });
+    expect(mapError(new health.ForbiddenError()).status).toBe(403);
+    const scan = mapError(new health.ScanForbiddenError());
+    expect(scan.status).toBe(403);
+    expect(await scan.json()).toEqual({ error: health.MSG_SCAN_FORBIDDEN });
   });
 });
 
