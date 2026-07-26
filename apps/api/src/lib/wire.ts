@@ -946,3 +946,153 @@ export interface HealthScanResultWire {
 export function healthScanResultToWire(r: health.ScanResult): HealthScanResultWire {
   return { period: r.period, snapshots_made: r.snapshotsMade, band_drops_flagged: r.bandDropsFlagged };
 }
+
+
+// --- M14 Team Performance (mirrors Go's module14_performance JSON structs) ---
+
+/** module14_performance.Component wire shape (snake_case, per §5.5 full breakdown). */
+export interface PerfComponentWire {
+  name: string;
+  included: boolean;
+  diagnostic: boolean;
+  raw: number | null;
+  capped: number | null;
+  base_weight: number;
+  effective_weight: number;
+  excluded_reason: string;
+}
+
+function perfComponentToWire(c: performance.Component): PerfComponentWire {
+  return {
+    name: c.name,
+    included: c.included,
+    diagnostic: c.diagnostic,
+    raw: c.raw,
+    capped: c.capped,
+    base_weight: c.baseWeight,
+    effective_weight: c.effectiveWeight,
+    excluded_reason: c.excludedReason,
+  };
+}
+
+/** module14_performance.Modifier wire shape (§5.3 Client-Outcome Modifier). */
+export interface PerfModifierWire {
+  present: boolean;
+  value: number;
+  source_component: string;
+  source_clients: string[];
+  raw_average: number | null;
+}
+
+function perfModifierToWire(m: performance.Modifier): PerfModifierWire {
+  return {
+    present: m.present,
+    value: m.value,
+    source_component: m.sourceComponent,
+    source_clients: m.sourceClients,
+    raw_average: m.rawAverage,
+  };
+}
+
+/** module14_performance.Snapshot wire shape (the full breakdown is mandatory, §2 Rule 8). */
+export interface PerfSnapshotWire {
+  id: string;
+  staff_id: string;
+  role_type: string;
+  period_start: string;
+  period_end: string;
+  profile_score: number | null;
+  modifier: PerfModifierWire;
+  final_score: number | null;
+  score_display: string;
+  components: PerfComponentWire[];
+  targets_placeholder: boolean;
+  computed_at: string | null;
+  computed_by: string;
+  preview: boolean;
+}
+
+export function perfSnapshotToWire(s: performance.Snapshot): PerfSnapshotWire {
+  return {
+    id: s.id,
+    staff_id: s.staffId,
+    role_type: s.roleType,
+    period_start: s.periodStart,
+    period_end: s.periodEnd,
+    profile_score: s.profileScore,
+    modifier: perfModifierToWire(s.modifier),
+    final_score: s.finalScore,
+    score_display: s.scoreDisplay,
+    components: s.components.map(perfComponentToWire),
+    targets_placeholder: s.targetsPlaceholder,
+    computed_at: s.computedAt ? s.computedAt.toISOString() : null,
+    computed_by: s.computedBy,
+    preview: s.preview,
+  };
+}
+
+/** module14_performance.TeamRollup wire shape (§2 Rule 5 simple average, derived on read). */
+export interface PerfTeamRollupWire {
+  division: string;
+  period: string;
+  members: { staff_id: string; role_type: string; final_score: number | null; score_display: string }[];
+  team_average: number | null;
+  average_display: string;
+}
+
+export function perfTeamRollupToWire(r: performance.TeamRollup): PerfTeamRollupWire {
+  return {
+    division: r.division,
+    period: r.period,
+    members: r.members.map((m) => ({
+      staff_id: m.staffId,
+      role_type: m.roleType,
+      final_score: m.finalScore,
+      score_display: m.scoreDisplay,
+    })),
+    team_average: r.teamAverage,
+    average_display: r.averageDisplay,
+  };
+}
+
+/** module14_performance.KPIWeight wire shape (admin KPI-config surface). */
+export interface PerfWeightWire {
+  role_type: string;
+  component: string;
+  weight: number;
+  updated_at: string;
+  updated_by: string;
+}
+
+export function perfWeightToWire(w: performance.KPIWeight): PerfWeightWire {
+  return {
+    role_type: w.roleType,
+    component: w.component,
+    weight: w.weight,
+    updated_at: w.updatedAt.toISOString(),
+    updated_by: w.updatedBy,
+  };
+}
+
+/** module14_performance.PeriodTarget wire shape (OA-2 / O9 normalisation targets). */
+export interface PerfTargetWire {
+  role_type: string;
+  component: string;
+  period_start: string;
+  target_value: number;
+  is_placeholder: boolean;
+  updated_at: string;
+  updated_by: string;
+}
+
+export function perfTargetToWire(t: performance.PeriodTarget): PerfTargetWire {
+  return {
+    role_type: t.roleType,
+    component: t.component,
+    period_start: t.periodStart,
+    target_value: t.targetValue,
+    is_placeholder: t.isPlaceholder,
+    updated_at: t.updatedAt.toISOString(),
+    updated_by: t.updatedBy,
+  };
+}

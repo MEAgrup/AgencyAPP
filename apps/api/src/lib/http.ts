@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { account, ads, board, client, creative, demo, finance, health, kol, leads, msl, sales, task } from '@cdps/domain';
+import { account, ads, board, client, creative, demo, finance, health, kol, leads, msl, performance, sales, task } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -63,7 +63,8 @@ export function mapError(err: unknown): Response {
     err instanceof creative.ValidationError ||
     err instanceof ads.ValidationError ||
     err instanceof kol.ValidationError ||
-    err instanceof board.ValidationError
+    err instanceof board.ValidationError ||
+    err instanceof performance.ValidationError
   ) {
     return errorJson(err.message, 400); // exact BI [...] message (or internal sentinel)
   }
@@ -80,7 +81,8 @@ export function mapError(err: unknown): Response {
     err instanceof ads.NotFoundError ||
     err instanceof kol.NotFoundError ||
     err instanceof board.NotFoundError ||
-    err instanceof health.NotFoundError
+    err instanceof health.NotFoundError ||
+    err instanceof performance.NotFoundError
   ) {
     return errorJson(err.message, 404);
   }
@@ -96,7 +98,8 @@ export function mapError(err: unknown): Response {
     err instanceof ads.ForbiddenError ||
     err instanceof kol.ForbiddenError ||
     err instanceof board.ForbiddenError ||
-    err instanceof health.ForbiddenError
+    err instanceof health.ForbiddenError ||
+    err instanceof performance.ForbiddenError
   ) {
     return errorJson(err.message, 403);
   }

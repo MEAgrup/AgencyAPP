@@ -56,3 +56,4 @@ export * as ads from './ads';
 export * as kol from './kol';
 export * as board from './board';
 export * as health from './health';
+export * as performance from './performance';
