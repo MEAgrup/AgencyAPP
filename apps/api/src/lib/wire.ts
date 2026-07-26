@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import type { account, ads, board, creative, health, kol, leads, msl, task } from '@cdps/domain';
+import type { account, ads, board, creative, health, kol, leads, msl, performance, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
