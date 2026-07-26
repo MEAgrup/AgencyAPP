@@ -36,6 +36,12 @@
  *   Brief↔Booking roll-up, the Creator Payment Request (Finance-executed), the
  *   compiled Creator List, Attributed GMV, and §11-mapped Speed Score via
  *   task.computeMetrics.
+ * - performance: M14 Team Performance — the per-staff, per-role, per-month weighted
+ *   0..100 Performance Score (PERF-): the pure KPI-Profile scoring core with
+ *   missing-component redistribution, the per-role KPI gatherers (M7/M8/M9/M12), the
+ *   cross-division Client-Outcome Modifier from M13 CHR- snapshots, the monthly
+ *   immutable snapshot sweep (EvPerformancePublished), team rollup, running preview,
+ *   and the admin-configurable KPI weights + period targets (O9).
  *
  * An @cdps/api route handler is a thin shell: resolve the actor from the JWT
  * app_metadata claim, validate inputs, then call one of these functions.
@@ -54,3 +60,4 @@ export * as task from './task';
 export * as creative from './creative';
 export * as ads from './ads';
 export * as kol from './kol';
+export * as performance from './performance';

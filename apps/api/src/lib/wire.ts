@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import type { account, ads, creative, kol, leads, msl, task } from '@cdps/domain';
+import type { account, ads, creative, kol, leads, msl, performance, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -818,5 +818,160 @@ export function toBookingInput(b: {
     creatorName: b.creator_name ?? '', creatorHandle: b.creator_handle ?? '', platform: b.platform ?? '',
     niche: b.niche ?? '', sourcePool: b.source_pool ?? '', poolReference: b.pool_reference ?? '',
     agreedRate: b.agreed_rate ?? '', assignedCoordinator: b.assigned_coordinator ?? '',
+  };
+}
+
+// --- M14 Team Performance: mirror the Go module14_performance JSON tags ---
+
+/** module14_performance.Component — one scored/excluded/diagnostic component. */
+export interface PerfComponentWire {
+  name: string;
+  included: boolean;
+  diagnostic?: boolean;
+  raw: number | null;
+  capped: number | null;
+  base_weight: number;
+  effective_weight: number;
+  excluded_reason?: string;
+}
+
+function perfComponentToWire(c: performance.Component): PerfComponentWire {
+  return {
+    name: c.name,
+    included: c.included,
+    ...(c.diagnostic ? { diagnostic: true } : {}),
+    raw: c.raw,
+    capped: c.capped,
+    base_weight: c.baseWeight,
+    effective_weight: c.effectiveWeight,
+    ...(c.excludedReason ? { excluded_reason: c.excludedReason } : {}),
+  };
+}
+
+/** module14_performance.Modifier — the Client-Outcome Modifier (Rule 3 / §5.3). */
+export interface PerfModifierWire {
+  present: boolean;
+  value: number;
+  source_component: string;
+  source_clients: string[];
+  raw_average: number | null;
+}
+
+function perfModifierToWire(m: performance.Modifier): PerfModifierWire {
+  return {
+    present: m.present,
+    value: m.value,
+    source_component: m.sourceComponent,
+    source_clients: m.sourceClients,
+    raw_average: m.rawAverage,
+  };
+}
+
+/** module14_performance.Snapshot — a stored snapshot or a live preview (computed_at/by omitempty). */
+export interface PerfSnapshotWire {
+  id: string;
+  staff_id: string;
+  role_type: string;
+  period_start: string;
+  period_end: string;
+  profile_score: number | null;
+  modifier: PerfModifierWire;
+  final_score: number | null;
+  score_display: string;
+  components: PerfComponentWire[];
+  targets_placeholder: boolean;
+  computed_at?: string;
+  computed_by?: string;
+  preview: boolean;
+}
+
+export function perfSnapshotToWire(s: performance.Snapshot): PerfSnapshotWire {
+  return {
+    id: s.id,
+    staff_id: s.staffId,
+    role_type: s.roleType,
+    period_start: s.periodStart,
+    period_end: s.periodEnd,
+    profile_score: s.profileScore,
+    modifier: perfModifierToWire(s.modifier),
+    final_score: s.finalScore,
+    score_display: s.scoreDisplay,
+    components: s.components.map(perfComponentToWire),
+    targets_placeholder: s.targetsPlaceholder,
+    ...(s.computedAt ? { computed_at: s.computedAt.toISOString() } : {}),
+    ...(s.computedBy ? { computed_by: s.computedBy } : {}),
+    preview: s.preview,
+  };
+}
+
+/** module14_performance.ScanResult — one snapshot-sweep tally. */
+export interface PerfScanResultWire {
+  period: string;
+  snapshots_made: number;
+}
+
+export function perfScanResultToWire(r: performance.ScanResult): PerfScanResultWire {
+  return { period: r.period, snapshots_made: r.snapshotsMade };
+}
+
+/** module14_performance.TeamRollup — the simple-average team view (OA-8). */
+export interface PerfTeamRowWire {
+  staff_id: string;
+  role_type: string;
+  final_score: number | null;
+  score_display: string;
+}
+
+export interface PerfTeamRollupWire {
+  division: string;
+  period: string;
+  members: PerfTeamRowWire[];
+  team_average: number | null;
+  average_display: string;
+}
+
+export function perfTeamRollupToWire(t: performance.TeamRollup): PerfTeamRollupWire {
+  return {
+    division: t.division,
+    period: t.period,
+    members: t.members.map((m) => ({ staff_id: m.staffId, role_type: m.roleType, final_score: m.finalScore, score_display: m.scoreDisplay })),
+    team_average: t.teamAverage,
+    average_display: t.averageDisplay,
+  };
+}
+
+/** module14_performance.KPIWeight — one KPI Profile weight row. */
+export interface PerfWeightWire {
+  role_type: string;
+  component: string;
+  weight: number;
+  updated_at: string;
+  updated_by: string;
+}
+
+export function perfWeightToWire(w: performance.KpiWeight): PerfWeightWire {
+  return { role_type: w.roleType, component: w.component, weight: w.weight, updated_at: w.updatedAt.toISOString(), updated_by: w.updatedBy };
+}
+
+/** module14_performance.PeriodTarget — one normalisation target row (O9). */
+export interface PerfTargetWire {
+  role_type: string;
+  component: string;
+  period_start: string;
+  target_value: number;
+  is_placeholder: boolean;
+  updated_at: string;
+  updated_by: string;
+}
+
+export function perfTargetToWire(t: performance.PeriodTarget): PerfTargetWire {
+  return {
+    role_type: t.roleType,
+    component: t.component,
+    period_start: t.periodStart,
+    target_value: t.targetValue,
+    is_placeholder: t.isPlaceholder,
+    updated_at: t.updatedAt.toISOString(),
+    updated_by: t.updatedBy,
   };
 }
