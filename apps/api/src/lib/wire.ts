@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import type { account, ads, creative, kol, leads, msl, task , health } from '@cdps/domain';
+import type { account, ads, board, campaign, creative, health, kol, leads, livestream, marketing, msl, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -892,4 +892,289 @@ export interface HealthScanResultWire {
 
 export function healthScanResultToWire(r: health.ScanResult): HealthScanResultWire {
   return { period: r.period, snapshots_made: r.snapshotsMade, band_drops_flagged: r.bandDropsFlagged };
+}
+
+// ---------------------------------------------------------------------------
+// M11 Board — Dependency (DEP-) + Client Board / My Tasks cards.
+// ---------------------------------------------------------------------------
+
+/** module11_board.Dependency — a DEP- row + its DERIVED status. */
+export interface DependencyWire {
+  id: string;
+  source_type: string;
+  source_id: string;
+  target_type: string;
+  target_id: string;
+  type: string;
+  note?: string;
+  client_id: string;
+  status: string;
+  created_by: string;
+  created_at: string;
+}
+
+export function dependencyToWire(d: board.Dependency): DependencyWire {
+  return {
+    id: d.id, source_type: d.sourceType, source_id: d.sourceId, target_type: d.targetType,
+    target_id: d.targetId, type: d.type, ...(d.note ? { note: d.note } : {}), client_id: d.clientId,
+    status: d.status, created_by: d.createdBy, created_at: d.createdAt.toISOString(),
+  };
+}
+
+/** module11_board.Card — one work unit on the Client Board / My Tasks. */
+export interface CardWire {
+  id: string;
+  type: string;
+  division: string;
+  client_id: string;
+  brief_id: string;
+  pic?: string;
+  native_status: string;
+  universal_column: string;
+  due_date?: string;
+  overdue: boolean;
+  dependency_badge?: string;
+  created_at?: string;
+}
+
+export function cardToWire(c: board.Card): CardWire {
+  return {
+    id: c.id, type: c.type, division: c.division, client_id: c.clientId, brief_id: c.briefId,
+    ...(c.pic ? { pic: c.pic } : {}), native_status: c.nativeStatus, universal_column: c.universalColumn,
+    ...(c.dueDate ? { due_date: c.dueDate } : {}), overdue: c.overdue,
+    ...(c.dependencyBadge ? { dependency_badge: c.dependencyBadge } : {}),
+    ...(c.createdAt ? { created_at: c.createdAt.toISOString() } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// M7 Daily Output (§7) + Hours Logged reminder scan (M7-OA-2).
+// ---------------------------------------------------------------------------
+
+/** module7_creative.OutputEntry — one auto-logged Daily Output record (§9.4). */
+export interface OutputEntryWire {
+  output_id: number;
+  pic: string;
+  output_unit_type: string;
+  asset_id: string;
+  brief_id: string;
+  client_id: string;
+  transition: string;
+  timestamp: string;
+  date_wib: string;
+  locked: boolean;
+}
+
+/** module7_creative.DailyOutputDay — one PIC's WIB-day auto-logged output feed (§7). */
+export interface DailyOutputDayWire {
+  pic: string;
+  date_wib: string;
+  locked: boolean;
+  total: number;
+  approved_count: number;
+  entries: OutputEntryWire[];
+}
+
+/** Maps the camelCase DailyOutputDay to the snake_case wire shape (Go §9.4 JSON). */
+export function dailyOutputToWire(d: creative.DailyOutputDay): DailyOutputDayWire {
+  return {
+    pic: d.pic, date_wib: d.dateWib, locked: d.locked, total: d.total, approved_count: d.approved,
+    entries: d.entries.map((e) => ({
+      output_id: e.outputId, pic: e.pic, output_unit_type: e.outputUnitType, asset_id: e.assetId,
+      brief_id: e.briefId, client_id: e.clientId, transition: e.transition,
+      timestamp: e.timestamp.toISOString(), date_wib: e.dateWib, locked: e.locked,
+    })),
+  };
+}
+
+/** module7_creative.ScanHoursReminderResult — the reminder sweep tally. */
+export interface ScanHoursReminderResultWire {
+  reminders_sent: number;
+}
+
+export function scanHoursReminderResultToWire(r: creative.ScanHoursReminderResult): ScanHoursReminderResultWire {
+  return { reminders_sent: r.remindersSent };
+}
+
+// --- M10 Live Stream (contract mirrors backend/internal/module10_livestream
+//     Session json tags + web-internal/src/lib/livestream.ts Session) ---
+
+/**
+ * module10_livestream.Session as web-internal's `Session` expects it. Result-only
+ * fields are `omitempty` in the Go source and simply ABSENT from JSON until they
+ * are set (the FE treats missing the same as empty — never coerced to 0/false),
+ * so the mapper omits them while null/empty. Money follows the M10 contract: `gmv`
+ * is the raw rupiah NUMBER (calc/sort only) and `gmv_display` is the pre-formatted
+ * "Rp. X.XXX.XXX,00" — the FE never reformats `gmv` (house rule #7).
+ */
+export interface SessionWire {
+  id: string;
+  brief_id: string;
+  platform: string;
+  requested_datetime: string;
+  target_duration_hours: number;
+  products_talent?: string;
+  special_instructions?: string;
+  status: string;
+  actual_datetime?: string;
+  actual_duration_hours?: number;
+  viewers_peak?: number;
+  viewers_avg?: number;
+  orders_generated?: number;
+  gmv?: number;
+  gmv_display?: string;
+  vendor_report_link?: string;
+  reconciliation_notes?: string;
+  data_confidence_tier: string;
+  created_by: string;
+  created_at: string;
+}
+
+/** Maps a domain Session (camelCase) to the snake_case Session wire shape. */
+export function sessionToWire(s: livestream.Session): SessionWire {
+  const w: SessionWire = {
+    id: s.id,
+    brief_id: s.briefId,
+    platform: s.platform,
+    requested_datetime: s.requestedDatetime.toISOString(),
+    target_duration_hours: s.targetDurationHours,
+    status: s.status,
+    data_confidence_tier: s.dataConfidenceTier,
+    created_by: s.createdBy,
+    created_at: s.createdAt.toISOString(),
+  };
+  // Optional request fields (omitempty: absent while empty).
+  if (s.productsTalent) w.products_talent = s.productsTalent;
+  if (s.specialInstructions) w.special_instructions = s.specialInstructions;
+  // Result-only fields (omitempty: absent until [Completed] / [Discrepancy Flagged]).
+  if (s.actualDatetime) w.actual_datetime = s.actualDatetime.toISOString();
+  if (s.actualDurationHours !== null) w.actual_duration_hours = s.actualDurationHours;
+  if (s.viewersPeak !== null) w.viewers_peak = s.viewersPeak;
+  if (s.viewersAvg !== null) w.viewers_avg = s.viewersAvg;
+  if (s.ordersGenerated !== null) w.orders_generated = s.ordersGenerated;
+  if (s.gmv !== null) w.gmv = Number(s.gmv); // raw rupiah number for calc/sort only
+  if (s.gmvDisplay) w.gmv_display = s.gmvDisplay;
+  if (s.vendorReportLink) w.vendor_report_link = s.vendorReportLink;
+  if (s.reconciliationNotes) w.reconciliation_notes = s.reconciliationNotes;
+  return w;
+}
+
+// --- M3 Campaign (acquisition CMP-): mirror the Go module3_campaign JSON tags ---
+
+/** module3_campaign.Campaign — the acquisition Campaign (CMP-) record (end_date nullable). */
+export interface MarketingCampaignWire {
+  id: string;
+  name: string;
+  channel: string;
+  online: boolean;
+  offline: boolean;
+  start_date: string;
+  end_date: string | null;
+  owner_employee_id: string;
+  status: string;
+  created_by: string;
+  created_at: string;
+}
+
+export function marketingCampaignToWire(c: campaign.Campaign): MarketingCampaignWire {
+  return {
+    id: c.id,
+    name: c.name,
+    channel: c.channel,
+    online: c.online,
+    offline: c.offline,
+    start_date: c.startDate,
+    end_date: c.endDate,
+    owner_employee_id: c.owner,
+    status: c.status,
+    created_by: c.createdBy,
+    created_at: c.createdAt.toISOString(),
+  };
+}
+
+/** module3_campaign.Rollup — the Campaign's read-only linkage funnel (M3 §4 Rule 4). */
+export interface CampaignRollupWire {
+  campaign_id: string;
+  leads_generated: number;
+  real_leads: number;
+  clients_won: number;
+  total_value_won: string;
+  total_value_won_idr: string;
+}
+
+export function campaignRollupToWire(r: campaign.Rollup): CampaignRollupWire {
+  return {
+    campaign_id: r.campaignId,
+    leads_generated: r.leadsGenerated,
+    real_leads: r.realLeads,
+    clients_won: r.clientsWon,
+    total_value_won: r.totalValueWon,
+    total_value_won_idr: r.totalValueWonIdr,
+  };
+}
+
+// --- M2 Marketing (performance record + auto-metrics): mirror the Go module2 JSON tags ---
+
+/** module2_marketing.Record — the stored performance record (budget + 1:1 Online/Offline). */
+export interface PerformanceRecordWire {
+  campaign_id: string;
+  budget: string;
+  budget_idr: string;
+  online: boolean;
+  offline: boolean;
+  created_by: string;
+}
+
+export function performanceRecordToWire(r: marketing.Record): PerformanceRecordWire {
+  return {
+    campaign_id: r.campaignId,
+    budget: r.budget,
+    budget_idr: r.budgetIdr,
+    online: r.online,
+    offline: r.offline,
+    created_by: r.createdBy,
+  };
+}
+
+/** module2_marketing.Metrics — the read-only Auto-Metrics view (M2 §4). */
+export interface MarketingMetricsWire {
+  campaign_id: string;
+  online: boolean;
+  offline: boolean;
+  budget: string;
+  budget_idr: string;
+  lead_by_dashboard: number;
+  lead_real_by_sales: number;
+  lead_quality_rate: string;
+  attributed_sales: string;
+  attributed_sales_decimal: string;
+  cost_per_lead: string;
+  cost_per_real_lead: string;
+  roas: string;
+  collected_sales: string;
+  collected_sales_decimal: string;
+  collected_roas: string;
+  junk_breakdown: { reason: string; count: number }[];
+}
+
+export function marketingMetricsToWire(m: marketing.Metrics): MarketingMetricsWire {
+  return {
+    campaign_id: m.campaignId,
+    online: m.online,
+    offline: m.offline,
+    budget: m.budget,
+    budget_idr: m.budgetIdr,
+    lead_by_dashboard: m.leadByDashboard,
+    lead_real_by_sales: m.leadRealBySales,
+    lead_quality_rate: m.leadQualityRate,
+    attributed_sales: m.attributedSales,
+    attributed_sales_decimal: m.attributedSalesDecimal,
+    cost_per_lead: m.costPerLead,
+    cost_per_real_lead: m.costPerRealLead,
+    roas: m.roas,
+    collected_sales: m.collectedSales,
+    collected_sales_decimal: m.collectedSalesDecimal,
+    collected_roas: m.collectedRoas,
+    junk_breakdown: m.junkBreakdown.map((j) => ({ reason: j.reason, count: j.count })),
+  };
 }

@@ -16,9 +16,12 @@ import {
   approveAsset,
   canCreateAsset,
   canLogHours,
+  canRunHoursReminderScan,
   canSeeAsset,
+  canSeeDailyOutput,
   ConflictError,
   createAsset,
+  dailyOutput,
   ForbiddenError,
   getAsset,
   listBriefAssets,
@@ -26,6 +29,8 @@ import {
   NotFoundError,
   requestAssetRevision,
   reviewAsset,
+  runHoursReminderScan,
+  scanHoursReminders,
   ValidationError,
   type Actor,
 } from './creative';
@@ -76,6 +81,22 @@ describe('creative predicates', () => {
     expect(canLogHours(creativeLead(), 'Creative', 'ZZ-C')).toBe(true);
     expect(canLogHours(director(), 'Creative', 'ZZ-C')).toBe(true);
     expect(canLogHours(creativeStaff('ZZ-OTHER'), 'Creative', 'ZZ-C')).toBe(false);
+  });
+  it('canSeeDailyOutput (§9.1): PIC self, Creative lead, OD, Director; not a foreign staff/AM', () => {
+    expect(canSeeDailyOutput(creativeStaff('ZZ-RIAN'), 'ZZ-RIAN')).toBe(true); // own
+    expect(canSeeDailyOutput(creativeLead(), 'ZZ-RIAN')).toBe(true); // Creative Team Leader
+    expect(canSeeDailyOutput(od(), 'ZZ-RIAN')).toBe(true);
+    expect(canSeeDailyOutput(director(), 'ZZ-RIAN')).toBe(true);
+    expect(canSeeDailyOutput(creativeStaff('ZZ-OTHER'), 'ZZ-RIAN')).toBe(false); // foreign Creative staff
+    expect(canSeeDailyOutput(am(), 'ZZ-RIAN')).toBe(false); // owning AM is not a Daily-Output viewer
+    expect(canSeeDailyOutput(accountLead(), 'ZZ-RIAN')).toBe(false);
+  });
+  it('canRunHoursReminderScan: Creative (any level) or Director; not other divisions', () => {
+    expect(canRunHoursReminderScan(creativeStaff())).toBe(true);
+    expect(canRunHoursReminderScan(creativeLead())).toBe(true);
+    expect(canRunHoursReminderScan(director())).toBe(true);
+    expect(canRunHoursReminderScan(adsStaff())).toBe(false);
+    expect(canRunHoursReminderScan(am())).toBe(false);
   });
 });
 
@@ -304,5 +325,211 @@ describeDb('Asset block workflow', () => {
     const req = await submitAssetBlockRequest(sql, staff, a.id, 'menunggu brief tambahan');
     await approveAssetBlockRequest(sql, creativeLead(), a.id, req.id);
     expect(await assetStatus(a.id)).toBe('[Blocked]');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M7 §7 Daily Output — a pure derived read-model over the immutable audit log.
+// ---------------------------------------------------------------------------
+
+const utc = (y: number, mo: number, d: number, h = 0, mi = 0): Date => new Date(Date.UTC(y, mo - 1, d, h, mi, 0));
+
+/** seedAssetTransition appends one immutable transition audit row (the exact shape sm_transition writes). */
+async function seedAssetTransition(assetId: string, from: string, to: string, at: Date): Promise<void> {
+  await sql`
+    insert into audit_log (entity_type, entity_id, actor_employee_id, action, created_at, created_by)
+    values ('asset', ${assetId}, 'ZZ-ACTOR', ${`transition:${from}->${to}`}, ${at}, 'ZZ-ACTOR')`;
+}
+
+describeDb('Daily Output (M7 §7) — derived from the immutable log', () => {
+  it('recomputes from the transition log: attributed to the PIC, unit = Asset Type, next-day excluded, stable', async () => {
+    const { briefId } = await creativeBrief(1);
+    await registerStaff('ZZ-RIAN', 'Creative', 'staff');
+    const a = await createAsset(sql, creativeStaff('ZZ-RIAN'), briefId, { sequenceNo: 1 });
+    // A full production day for Rian — all land on WIB 2026-06-06.
+    await seedAssetTransition(a.id, '[To Do]', '[In Progress]', utc(2026, 6, 6, 3)); // 10:00 WIB
+    await seedAssetTransition(a.id, '[In Progress]', '[Submitted]', utc(2026, 6, 6, 6)); // 13:00 WIB
+    await seedAssetTransition(a.id, '[Submitted]', '[In Review]', utc(2026, 6, 6, 7)); // 14:00 WIB
+    await seedAssetTransition(a.id, '[In Review]', '[Approved]', utc(2026, 6, 6, 8)); // 15:00 WIB
+    // A transition on the NEXT WIB day must not leak into this bucket.
+    await seedAssetTransition(a.id, '[Approved]', '[In Progress]', utc(2026, 6, 7, 3));
+
+    const day = utc(2026, 6, 6, 3);
+    const got = await dailyOutput(sql, creativeStaff('ZZ-RIAN'), 'ZZ-RIAN', day);
+    expect(got.dateWib).toBe('2026-06-06');
+    expect(got.total).toBe(4); // next-day transition excluded
+    expect(got.approved).toBe(1);
+    for (const e of got.entries) {
+      expect(e.pic).toBe('ZZ-RIAN');
+      expect(e.outputUnitType).toBe('Product Video'); // inherited Asset Type
+      expect(e.assetId).toBe(a.id);
+      expect(e.briefId).toBe(briefId);
+    }
+    // Recompute is stable (house rule #4).
+    const again = await dailyOutput(sql, creativeStaff('ZZ-RIAN'), 'ZZ-RIAN', day);
+    expect(again.total).toBe(got.total);
+    expect(again.approved).toBe(got.approved);
+  });
+
+  it('WIB bucketing: a 00:00–07:00 WIB transition (previous UTC date) buckets into the WIB day, not the UTC day', async () => {
+    const { briefId } = await creativeBrief(1);
+    await registerStaff('ZZ-RIAN', 'Creative', 'staff');
+    const a = await createAsset(sql, creativeStaff('ZZ-RIAN'), briefId, { sequenceNo: 1 });
+    // 2026-06-05 18:30 UTC == 2026-06-06 01:30 WIB → belongs to WIB day 2026-06-06.
+    await seedAssetTransition(a.id, '[To Do]', '[In Progress]', utc(2026, 6, 5, 18, 30));
+
+    const wib = await dailyOutput(sql, director(), 'ZZ-RIAN', utc(2026, 6, 6, 5)); // 12:00 WIB 06-06
+    expect(wib.dateWib).toBe('2026-06-06');
+    expect(wib.total).toBe(1);
+    // The same transition must NOT appear under the UTC calendar date 2026-06-05.
+    const utcDay = await dailyOutput(sql, director(), 'ZZ-RIAN', utc(2026, 6, 5, 12)); // 19:00 WIB 06-05
+    expect(utcDay.total).toBe(0);
+  });
+
+  it('end-of-day lock: today open, past WIB day locked once the current WIB date moves on', async () => {
+    const { briefId } = await creativeBrief(1);
+    await registerStaff('ZZ-RIAN', 'Creative', 'staff');
+    const a = await createAsset(sql, creativeStaff('ZZ-RIAN'), briefId, { sequenceNo: 1 });
+    const day = utc(2026, 6, 6, 3);
+    await seedAssetTransition(a.id, '[To Do]', '[In Progress]', day);
+
+    // "Now" still on the same WIB day → open.
+    const open = await dailyOutput(sql, creativeStaff('ZZ-RIAN'), 'ZZ-RIAN', day, utc(2026, 6, 6, 15)); // 22:00 WIB same day
+    expect(open.locked).toBe(false);
+    expect(open.entries[0].locked).toBe(false);
+    // "Now" advanced past WIB midnight into the next day → locked.
+    const locked = await dailyOutput(sql, creativeStaff('ZZ-RIAN'), 'ZZ-RIAN', day, utc(2026, 6, 6, 18)); // 01:00 WIB 06-07
+    expect(locked.locked).toBe(true);
+    expect(locked.entries[0].locked).toBe(true);
+  });
+
+  it('§9.1 read gate + blank pic; and computing the feed writes nothing (immutable by construction)', async () => {
+    const { briefId } = await creativeBrief(1);
+    await registerStaff('ZZ-RIAN', 'Creative', 'staff');
+    const a = await createAsset(sql, creativeStaff('ZZ-RIAN'), briefId, { sequenceNo: 1 });
+    const day = utc(2026, 6, 6, 3);
+    await seedAssetTransition(a.id, '[To Do]', '[In Progress]', day);
+
+    // Allowed: PIC (own), Creative lead, OD, Director.
+    for (const act of [creativeStaff('ZZ-RIAN'), creativeLead(), od(), director()]) {
+      await expect(dailyOutput(sql, act, 'ZZ-RIAN', day)).resolves.toBeDefined();
+    }
+    // Denied: a foreign Creative staff, the owning AM, an Account lead, another division.
+    for (const act of [creativeStaff('ZZ-OTHER'), am(), accountLead(), adsStaff()]) {
+      await expect(dailyOutput(sql, act, 'ZZ-RIAN', day)).rejects.toBeInstanceOf(ForbiddenError);
+    }
+    // Blank PIC → incomplete (400).
+    await expect(dailyOutput(sql, director(), '  ', day)).rejects.toBeInstanceOf(ValidationError);
+
+    // No mutation path: the derived read touches no row.
+    const countRows = async (t: string): Promise<number> =>
+      Number((await sql<{ n: string }[]>`select count(*)::int as n from ${sql(t)}`)[0].n);
+    const [auditBefore, assetsBefore] = [await countRows('audit_log'), await countRows('assets')];
+    await dailyOutput(sql, director(), 'ZZ-RIAN', day);
+    expect(await countRows('audit_log')).toBe(auditBefore);
+    expect(await countRows('assets')).toBe(assetsBefore);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M7 Hours Logged reminder sweep (M7-OA-2 / O29) — fire-once per (Asset, WIB day).
+// ---------------------------------------------------------------------------
+
+/** Count HoursLoggedReminder notifications delivered to a recipient for an entity. */
+const reminderNotifCount = async (recipient: string, entityId: string): Promise<number> =>
+  Number(
+    (
+      await sql<{ n: string }[]>`
+        select count(*)::int as n from notifications
+        where recipient_employee_id = ${recipient} and event_type = 'm7.hours_logged.reminder' and entity_id = ${entityId}`
+    )[0].n,
+  );
+
+/** seedHoursLogged appends one immutable "hours_logged" audit row (the shape logHours writes). */
+async function seedHoursLogged(assetId: string, actorId: string, at: Date): Promise<void> {
+  await sql`
+    insert into audit_log (entity_type, entity_id, actor_employee_id, action, created_at, created_by)
+    values ('asset', ${assetId}, ${actorId}, 'hours_logged', ${at}, ${actorId})`;
+}
+
+describeDb('Hours Logged reminder sweep (M7-OA-2 / O29)', () => {
+  it('emits once to the PIC of an active, unlogged Asset', async () => {
+    const { briefId } = await creativeBrief(1);
+    await registerStaff('ZZ-RIAN', 'Creative', 'staff');
+    const a = await createAsset(sql, creativeStaff('ZZ-RIAN'), briefId, { sequenceNo: 1 });
+    await startAsset(sql, creativeStaff('ZZ-RIAN'), a.id); // [In Progress]
+
+    const res = await scanHoursReminders(sql, utc(2026, 6, 6, 10)); // 17:00 WIB
+    expect(res.remindersSent).toBe(1);
+    expect(await reminderNotifCount('ZZ-RIAN', a.id)).toBe(1);
+  });
+
+  it('skips an Asset whose PIC already logged Hours today (WIB), incl. the 00:00–07:00 WIB edge', async () => {
+    const { briefId } = await creativeBrief(1);
+    await registerStaff('ZZ-RIAN', 'Creative', 'staff');
+    const a = await createAsset(sql, creativeStaff('ZZ-RIAN'), briefId, { sequenceNo: 1 });
+    await startAsset(sql, creativeStaff('ZZ-RIAN'), a.id);
+    // 2026-06-05 18:30 UTC == 2026-06-06 01:30 WIB → "today" for a later scan on WIB 06-06.
+    await seedHoursLogged(a.id, 'ZZ-RIAN', utc(2026, 6, 5, 18, 30));
+
+    const res = await scanHoursReminders(sql, utc(2026, 6, 6, 5)); // 12:00 WIB 06-06
+    expect(res.remindersSent).toBe(0);
+    expect(await reminderNotifCount('ZZ-RIAN', a.id)).toBe(0);
+  });
+
+  it('dedups within a WIB day, then fires again the next WIB day (repeats daily, unlike M5 one-time)', async () => {
+    const { briefId } = await creativeBrief(1);
+    await registerStaff('ZZ-RIAN', 'Creative', 'staff');
+    const a = await createAsset(sql, creativeStaff('ZZ-RIAN'), briefId, { sequenceNo: 1 });
+    await startAsset(sql, creativeStaff('ZZ-RIAN'), a.id);
+
+    expect((await scanHoursReminders(sql, utc(2026, 6, 6, 3))).remindersSent).toBe(1); // 10:00 WIB
+    expect((await scanHoursReminders(sql, utc(2026, 6, 6, 12))).remindersSent).toBe(0); // 19:00 WIB same day — dedup
+    expect(await reminderNotifCount('ZZ-RIAN', a.id)).toBe(1);
+    // Next WIB day, still unlogged → fires again.
+    expect((await scanHoursReminders(sql, utc(2026, 6, 7, 3))).remindersSent).toBe(1);
+    expect(await reminderNotifCount('ZZ-RIAN', a.id)).toBe(2);
+  });
+
+  it('skips terminal ([Approved]), [Blocked], and unassigned Assets', async () => {
+    await registerStaff('ZZ-CLEAD', 'Creative', 'lead');
+    await registerStaff('ZZ-APP', 'Creative', 'staff');
+    await registerStaff('ZZ-BLK', 'Creative', 'staff');
+    const lead = creativeLead('ZZ-CLEAD');
+
+    // Approved (terminal): full happy path to [Approved].
+    const bApp = await creativeBrief(1);
+    const app = creativeStaff('ZZ-APP');
+    const aApp = await createAsset(sql, app, bApp.briefId, { sequenceNo: 1 });
+    await startAsset(sql, app, aApp.id);
+    await submitAsset(sql, app, aApp.id, 'https://drive/x');
+    await reviewAsset(sql, am(), aApp.id);
+    await approveAsset(sql, am(), aApp.id);
+    expect(await assetStatus(aApp.id)).toBe('[Approved]');
+
+    // Blocked: submit + approve a block request.
+    const bBlk = await creativeBrief(1);
+    const blk = creativeStaff('ZZ-BLK');
+    const aBlk = await createAsset(sql, blk, bBlk.briefId, { sequenceNo: 1 });
+    await startAsset(sql, blk, aBlk.id);
+    const req = await submitAssetBlockRequest(sql, blk, aBlk.id, 'menunggu klien');
+    await approveAssetBlockRequest(sql, lead, aBlk.id, req.id);
+    expect(await assetStatus(aBlk.id)).toBe('[Blocked]');
+
+    // Unassigned: the lead creates without a PIC.
+    const bUn = await creativeBrief(1);
+    const aUn = await createAsset(sql, lead, bUn.briefId, { sequenceNo: 1 });
+    expect(aUn.assignedPic).toBe('');
+
+    const res = await scanHoursReminders(sql, utc(2026, 6, 6, 3));
+    expect(res.remindersSent).toBe(0);
+    expect(await reminderNotifCount('ZZ-APP', aApp.id)).toBe(0);
+    expect(await reminderNotifCount('ZZ-BLK', aBlk.id)).toBe(0);
+  });
+
+  it('runHoursReminderScan gates non-Creative/non-Director callers', async () => {
+    await expect(runHoursReminderScan(sql, am())).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(runHoursReminderScan(sql, adsStaff())).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(runHoursReminderScan(sql, creativeStaff())).resolves.toBeDefined();
   });
 });
