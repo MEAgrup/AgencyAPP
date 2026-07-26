@@ -1,6 +1,35 @@
 # 🔖 Handoff — CDPS Go→TypeScript port: **M14 + M15 done → the Go→TS port is COMPLETE**
 
-_Last updated: 2026-07-26 (session that ported M14 Team Performance + M15 Team Portal)._
+_Last updated: 2026-07-26 (session that ported M14 + M15, **then merged the entire Wave-3 chain to `main`**)._
+
+---
+
+## ✅ UPDATE 2026-07-26 (reconciliation session) — Wave-3 fully MERGED
+
+The whole Wave-3 port chain is now **merged to `main`** and the duplicate PRs are reconciled. `main` typechecks clean (`packages/domain` + `apps/api`).
+
+| Merged PR | Module | Duplicate closed |
+|-----------|--------|------------------|
+| #46 | M3 Campaign | — |
+| #47 | M2 Marketing (base retargeted → `main`) | — |
+| #43 | M10 Live Stream | — |
+| #44 | M7 Daily Output + reminder | — |
+| #50 | M11 Board | #45 (closed) |
+| #51 | M13 Client Health | #48 (closed) |
+| #53 | M14 Team Performance | #49 (closed) |
+| #52 | M15 Team Portal (diff reduced to M15-only after deps landed) | — |
+
+**Conflict method used:** each branch was brought up to date by merging `main` in and resolving the
+shared-registry append regions (`packages/domain/src/index.ts`, `apps/api/src/lib/{http,wire}.ts`) as
+unions — re-stitching the `||` seams in `http.ts` and rebuilding the trailing mapper blocks in
+`wire.ts` (ours + main's appended block + unioned import). Merged as merge-commits (no force-push).
+
+**What genuinely remains** (see §6): M15-C2 external Client Portal (blocked, net-new), and
+**frontend deploy** — `web-internal` (at repo root, outside the npm workspace) already has pages +
+`src/lib` clients for every module incl. Wave-3; it proxies `/api/v1/*` → `BACKEND_URL` (apps/api).
+DB schema is live on Supabase **CDPS SG** (`egddxfcnrtecheiykhlf`, 35 migrations through M14). Vercel
+team **MEA** has 0 projects yet. Recommended pre-deploy step: FE↔API contract smoke on the 5 Wave-3
+modules (their FE pages predate this merge).
 
 ---
 
