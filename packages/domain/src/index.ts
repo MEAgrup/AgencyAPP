@@ -40,6 +40,10 @@
  *   the Draft→Active⇄Paused→Closed→Archived machine (Closed stamps end_date),
  *   ownership reassign (Marketing lead/Director), §5-scoped Get/List, and the
  *   read-only linkage rollups (leads/real-leads/clients-won/total-value-won).
+ * - marketing: M2 Marketing — the Marketing Performance Record (1:1 Campaign, budget
+ *   input) + the read-only Auto-Metrics Engine (Lead-by-Dashboard/Real/Quality,
+ *   Attributed Sales last-touch, CPL/CPRL/ROAS, Collected-ROAS, junk breakdown) and
+ *   the Lead/Staff dashboard split. Reuses `campaign` for the §5 gate + Online/Offline.
  *
 
  * An @cdps/api route handler is a thin shell: resolve the actor from the JWT
@@ -60,3 +64,4 @@ export * as creative from './creative';
 export * as ads from './ads';
 export * as kol from './kol';
 export * as campaign from './campaign';
+export * as marketing from './marketing';
