@@ -30,7 +30,11 @@
   `9380628`) DI BAWAH commit M2. Rantai stack keseluruhan (semua open, belum ke `origin/main`
   yang masih `ab8a3ee`): PR #42(Wave2) → #43(M10) → #44(M7-daily) → M11 → **M3 → M2**.
   **Urutan merge WAJIB:** M3 sebelum M2. Bila `origin/main` sudah maju, rebase M3 dulu lalu M2.
-- **PR:** belum dibuka (tidak diminta).
+- **PR (dibuka sesi ini):** **#47** `port-m2-marketing → claude/port-m3-campaign` (STACKED —
+  base = branch M3, bukan main, supaya diff M2-only bersih). Sibling PR seri port ini:
+  **#45** M11 → main, **#46** M3 → main, plus #43 (M10) & #44 (M7-daily) dari sesi sebelumnya.
+  **Urutan merge WAJIB:** #43/#44/#45/#46 (semua base main = `806a91c`) boleh paralel; lalu
+  **#46 (M3) sebelum #47 (M2)** — setelah #46 merge, **retarget #47 base ke `main`**.
 - **Verifikasi (DB FRESH — CI-equivalent):** `@cdps/domain` **318/318 hijau** (termasuk M2
   16 test + M3 15 test; bahkan finance scanReminders LULUS di DB benar-benar fresh),
   `@cdps/api` **84/84 hijau** (wire+http+auth), typecheck `@cdps/domain` + `@cdps/api` bersih.
