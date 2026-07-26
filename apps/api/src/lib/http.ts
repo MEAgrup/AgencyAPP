@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { account, ads, board, campaign, client, creative, demo, finance, health, kol, leads, livestream, marketing, msl, sales, task } from '@cdps/domain';
+import { account, ads, board, campaign, client, creative, demo, finance, health, kol, leads, livestream, marketing, msl, performance, sales, task } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -63,6 +63,7 @@ export function mapError(err: unknown): Response {
     err instanceof creative.ValidationError ||
     err instanceof ads.ValidationError ||
     err instanceof kol.ValidationError ||
+    err instanceof performance.ValidationError ||
     err instanceof board.ValidationError ||
     err instanceof livestream.IncompleteError ||
     err instanceof livestream.ValidationError ||
@@ -83,6 +84,7 @@ export function mapError(err: unknown): Response {
     err instanceof creative.NotFoundError ||
     err instanceof ads.NotFoundError ||
     err instanceof kol.NotFoundError ||
+    err instanceof performance.NotFoundError ||
     err instanceof health.NotFoundError ||
     err instanceof board.NotFoundError ||
     err instanceof livestream.NotFoundError ||
@@ -102,6 +104,7 @@ export function mapError(err: unknown): Response {
     err instanceof creative.ForbiddenError ||
     err instanceof ads.ForbiddenError ||
     err instanceof kol.ForbiddenError ||
+    err instanceof performance.ForbiddenError ||
     err instanceof health.ForbiddenError ||
     err instanceof board.ForbiddenError ||
     err instanceof livestream.ForbiddenError ||

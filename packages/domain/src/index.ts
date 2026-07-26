@@ -66,6 +66,7 @@ export * as task from './task';
 export * as creative from './creative';
 export * as ads from './ads';
 export * as kol from './kol';
+export * as performance from './performance';
 export * as health from './health';
 export * as board from './board';
 export * as livestream from './livestream';
