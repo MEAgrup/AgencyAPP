@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import type { account, ads, creative, kol, leads, msl, task } from '@cdps/domain';
+import type { account, ads, creative, kol, leads, msl, task , health } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -819,4 +819,77 @@ export function toBookingInput(b: {
     niche: b.niche ?? '', sourcePool: b.source_pool ?? '', poolReference: b.pool_reference ?? '',
     agreedRate: b.agreed_rate ?? '', assignedCoordinator: b.assigned_coordinator ?? '',
   };
+}
+
+// ---------------------------------------------------------------------------
+// M13 Client Health — Snapshot / Component / ROAS toggle / scan result.
+// ---------------------------------------------------------------------------
+
+export interface HealthComponentWire {
+  name: string;
+  included: boolean;
+  raw: number | null;
+  capped: number | null;
+  base_weight: number;
+  effective_weight: number;
+  excluded_reason?: string;
+}
+
+function healthComponentToWire(c: health.Component): HealthComponentWire {
+  return {
+    name: c.name, included: c.included, raw: c.raw, capped: c.capped,
+    base_weight: c.baseWeight, effective_weight: c.effectiveWeight,
+    ...(c.excludedReason ? { excluded_reason: c.excludedReason } : {}),
+  };
+}
+
+/** module13_health.Snapshot — a stored CHR- snapshot or a live preview. */
+export interface HealthSnapshotWire {
+  id: string;
+  client_id: string;
+  period_start: string;
+  period_end: string;
+  final_health_score: number | null;
+  score_display: string;
+  band: string;
+  roas_toggle_state: boolean;
+  components: HealthComponentWire[];
+  computed_at?: string;
+  computed_by?: string;
+  preview: boolean;
+}
+
+export function healthSnapshotToWire(s: health.Snapshot): HealthSnapshotWire {
+  return {
+    id: s.id, client_id: s.clientId, period_start: s.periodStart, period_end: s.periodEnd,
+    final_health_score: s.finalHealthScore, score_display: s.scoreDisplay, band: s.band,
+    roas_toggle_state: s.roasToggleState, components: s.components.map(healthComponentToWire),
+    ...(s.computedAt ? { computed_at: s.computedAt.toISOString() } : {}),
+    ...(s.computedBy ? { computed_by: s.computedBy } : {}),
+    preview: s.preview,
+  };
+}
+
+/** module13_health.ROASToggle. */
+export interface RoasToggleWire {
+  client_id: string;
+  override: boolean | null;
+  has_ads: boolean;
+  has_active: boolean;
+  effective: boolean;
+}
+
+export function roasToggleToWire(t: health.RoasToggle): RoasToggleWire {
+  return { client_id: t.clientId, override: t.override, has_ads: t.hasAds, has_active: t.hasActive, effective: t.effective };
+}
+
+/** module13_health.ScanResult. */
+export interface HealthScanResultWire {
+  period: string;
+  snapshots_made: number;
+  band_drops_flagged: number;
+}
+
+export function healthScanResultToWire(r: health.ScanResult): HealthScanResultWire {
+  return { period: r.period, snapshots_made: r.snapshotsMade, band_drops_flagged: r.bandDropsFlagged };
 }
