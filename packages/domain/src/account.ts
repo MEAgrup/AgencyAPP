@@ -36,6 +36,7 @@
 
 import { bi, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
+import { onBriefReachedTerminal, validateBriefApproval } from './board';
 
 /** Authenticated employee + resolved role (from @cdps/core permission). */
 export type Actor = permission.Actor;
@@ -1306,9 +1307,19 @@ async function driveReviewEdge(
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
     await lockBriefOwner(tx, actor, briefId);
-    return statemachine.transition(ex.sm, {
+    // M11 §6.3: a Blocking Dependency locks the Target Brief's final [Approved] edge
+    // until its Source is terminal (throws a board ConflictError; nothing changes).
+    if (to === BRIEF_STATUS_APPROVED) {
+      await validateBriefApproval(tx, briefId);
+    }
+    const res = await statemachine.transition(ex.sm, {
       machine: MACHINE_BRIEF_TASK, entityType: 'brief', table: 'briefs', entityId: briefId, to, actor,
     });
+    // M11 §5.5: on reaching terminal, fire EvDependencySatisfied once per sourced Dependency.
+    if (res.ok && to === BRIEF_STATUS_APPROVED) {
+      await onBriefReachedTerminal(tx, actor, briefId);
+    }
+    return res;
   });
 }
 

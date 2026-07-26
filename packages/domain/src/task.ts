@@ -37,6 +37,7 @@ import { bi, notification, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { onBriefLeavesToDo } from './account';
 import { validateBriefSubmit } from './ads';
+import { onBriefReachedTerminal, validateBriefApproval } from './board';
 
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;
@@ -756,6 +757,11 @@ export async function recomputeBriefRollup(tx: Queryable, actor: Actor, briefId:
   while (cur < tgt) {
     const from = ROLLUP_CHAIN[cur];
     const to = ROLLUP_CHAIN[cur + 1];
+    // M11 §6.3 Blocking gate on the final [Approved] edge (throws if a Blocking
+    // Dependency's Source is not yet terminal — aborts the whole roll-up tx).
+    if (to === STATUS_APPROVED) {
+      await validateBriefApproval(tx, briefId);
+    }
     const res = await statemachine.transition(ex.sm, {
       machine: MACHINE_BRIEF_TASK, entityType: 'brief', table: 'briefs', entityId: briefId, to, actor,
     });
@@ -764,6 +770,10 @@ export async function recomputeBriefRollup(tx: Queryable, actor: Actor, briefId:
     }
     if (from === STATUS_TODO) {
       await onBriefLeavesToDo(tx, actor, service_id); // §5 Flow 3
+    }
+    // M11 §5.5: on reaching terminal, fire EvDependencySatisfied once per sourced Dependency.
+    if (to === STATUS_APPROVED) {
+      await onBriefReachedTerminal(tx, actor, briefId);
     }
     cur++;
   }
