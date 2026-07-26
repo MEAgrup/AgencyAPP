@@ -54,3 +54,4 @@ export * as task from './task';
 export * as creative from './creative';
 export * as ads from './ads';
 export * as kol from './kol';
+export * as performance from './performance';
