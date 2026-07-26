@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import type { account, ads, campaign, creative, kol, leads, msl, task } from '@cdps/domain';
+import type { account, ads, campaign, creative, kol, leads, marketing, msl, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -872,5 +872,71 @@ export function campaignRollupToWire(r: campaign.Rollup): CampaignRollupWire {
     clients_won: r.clientsWon,
     total_value_won: r.totalValueWon,
     total_value_won_idr: r.totalValueWonIdr,
+  };
+}
+
+// --- M2 Marketing (performance record + auto-metrics): mirror the Go module2 JSON tags ---
+
+/** module2_marketing.Record — the stored performance record (budget + 1:1 Online/Offline). */
+export interface PerformanceRecordWire {
+  campaign_id: string;
+  budget: string;
+  budget_idr: string;
+  online: boolean;
+  offline: boolean;
+  created_by: string;
+}
+
+export function performanceRecordToWire(r: marketing.Record): PerformanceRecordWire {
+  return {
+    campaign_id: r.campaignId,
+    budget: r.budget,
+    budget_idr: r.budgetIdr,
+    online: r.online,
+    offline: r.offline,
+    created_by: r.createdBy,
+  };
+}
+
+/** module2_marketing.Metrics — the read-only Auto-Metrics view (M2 §4). */
+export interface MarketingMetricsWire {
+  campaign_id: string;
+  online: boolean;
+  offline: boolean;
+  budget: string;
+  budget_idr: string;
+  lead_by_dashboard: number;
+  lead_real_by_sales: number;
+  lead_quality_rate: string;
+  attributed_sales: string;
+  attributed_sales_decimal: string;
+  cost_per_lead: string;
+  cost_per_real_lead: string;
+  roas: string;
+  collected_sales: string;
+  collected_sales_decimal: string;
+  collected_roas: string;
+  junk_breakdown: { reason: string; count: number }[];
+}
+
+export function marketingMetricsToWire(m: marketing.Metrics): MarketingMetricsWire {
+  return {
+    campaign_id: m.campaignId,
+    online: m.online,
+    offline: m.offline,
+    budget: m.budget,
+    budget_idr: m.budgetIdr,
+    lead_by_dashboard: m.leadByDashboard,
+    lead_real_by_sales: m.leadRealBySales,
+    lead_quality_rate: m.leadQualityRate,
+    attributed_sales: m.attributedSales,
+    attributed_sales_decimal: m.attributedSalesDecimal,
+    cost_per_lead: m.costPerLead,
+    cost_per_real_lead: m.costPerRealLead,
+    roas: m.roas,
+    collected_sales: m.collectedSales,
+    collected_sales_decimal: m.collectedSalesDecimal,
+    collected_roas: m.collectedRoas,
+    junk_breakdown: m.junkBreakdown.map((j) => ({ reason: j.reason, count: j.count })),
   };
 }
