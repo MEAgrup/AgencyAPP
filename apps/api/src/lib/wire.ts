@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import type { account, ads, board, campaign, creative, health, kol, leads, livestream, marketing, msl, performance, task } from '@cdps/domain';
+import type { account, ads, board, campaign, creative, health, kol, leads, livestream, marketing, msl, performance, portal, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -1325,5 +1325,86 @@ export function marketingMetricsToWire(m: marketing.Metrics): MarketingMetricsWi
     collected_sales_decimal: m.collectedSalesDecimal,
     collected_roas: m.collectedRoas,
     junk_breakdown: m.junkBreakdown.map((j) => ({ reason: j.reason, count: j.count })),
+  };
+}
+
+// --- M15 Team Portal (aggregates M11/M12/M13/M14; mirrors module15_portal structs) ---
+
+/** module15_portal.StaffLanding — own open tasks (SLA-risk first) + running score + trend. */
+export interface StaffLandingWire {
+  employee_id: string;
+  open_tasks: CardWire[];
+  running_score: PerfSnapshotWire | null;
+  trend: PerfSnapshotWire[];
+}
+
+export function staffLandingToWire(l: portal.StaffLanding): StaffLandingWire {
+  return {
+    employee_id: l.employeeId,
+    open_tasks: l.openTasks.map(cardToWire),
+    running_score: l.runningScore === null ? null : perfSnapshotToWire(l.runningScore),
+    trend: l.trend.map(perfSnapshotToWire),
+  };
+}
+
+/** module15_portal.ClientShortcut — a Client-Board drill-through reference (Rule 10). */
+export interface ClientShortcutWire {
+  client_id: string;
+  client_name: string;
+  assigned_am: string;
+  board_ref: string;
+}
+
+/** module15_portal.TeamPortal — division rollup + client shortcuts + block-approval queue. */
+export interface TeamPortalWire {
+  division: string;
+  performance_rollup: PerfTeamRollupWire;
+  client_shortcuts: ClientShortcutWire[];
+  block_queue: PendingBlockRequestWire[];
+}
+
+export function teamPortalToWire(t: portal.TeamPortal): TeamPortalWire {
+  return {
+    division: t.division,
+    performance_rollup: perfTeamRollupToWire(t.rollup),
+    client_shortcuts: t.clients.map((c) => ({
+      client_id: c.clientId, client_name: c.clientName, assigned_am: c.assignedAm, board_ref: c.boardRef,
+    })),
+    block_queue: t.blockQueue.map(pendingBlockRequestToWire),
+  };
+}
+
+/** module15_portal.MgmtRow — one Client's latest health band + trend + dragging component. */
+export interface MgmtRowWire {
+  client_id: string;
+  client_name: string;
+  assigned_am: string;
+  snapshot_id: string;
+  period: string;
+  score_display: string;
+  band: string;
+  trend_direction: string;
+  dragging_component: string;
+  dragging_capped: number | null;
+}
+
+/** module15_portal.ManagementDashboard — the portfolio-wide health scan (Rule 11). */
+export interface ManagementDashboardWire {
+  filter_band: string;
+  filter_am: string;
+  sort: string;
+  rows: MgmtRowWire[];
+}
+
+export function managementDashboardToWire(d: portal.ManagementDashboard): ManagementDashboardWire {
+  return {
+    filter_band: d.filterBand,
+    filter_am: d.filterAm,
+    sort: d.sort,
+    rows: d.rows.map((r) => ({
+      client_id: r.clientId, client_name: r.clientName, assigned_am: r.assignedAm,
+      snapshot_id: r.snapshotId, period: r.period, score_display: r.scoreDisplay, band: r.band,
+      trend_direction: r.trendDirection, dragging_component: r.draggingComponent, dragging_capped: r.draggingCapped,
+    })),
   };
 }

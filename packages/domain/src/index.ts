@@ -72,3 +72,4 @@ export * as board from './board';
 export * as livestream from './livestream';
 export * as campaign from './campaign';
 export * as marketing from './marketing';
+export * as portal from './portal';

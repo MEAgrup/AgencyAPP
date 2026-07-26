@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { account, ads, board, campaign, client, creative, demo, finance, health, kol, leads, livestream, marketing, msl, performance, sales, task } from '@cdps/domain';
+import { account, ads, board, campaign, client, creative, demo, finance, health, kol, leads, livestream, marketing, msl, performance, portal, sales, task } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -109,7 +109,8 @@ export function mapError(err: unknown): Response {
     err instanceof board.ForbiddenError ||
     err instanceof livestream.ForbiddenError ||
     err instanceof campaign.ForbiddenError ||
-    err instanceof marketing.ForbiddenError
+    err instanceof marketing.ForbiddenError ||
+    err instanceof portal.ForbiddenError
   ) {
     return errorJson(err.message, 403);
   }
