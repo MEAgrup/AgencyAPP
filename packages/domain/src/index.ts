@@ -55,3 +55,4 @@ export * as creative from './creative';
 export * as ads from './ads';
 export * as kol from './kol';
 export * as board from './board';
+export * as health from './health';

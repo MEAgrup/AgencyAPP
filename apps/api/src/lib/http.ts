@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { account, ads, board, client, creative, demo, finance, kol, leads, msl, sales, task } from '@cdps/domain';
+import { account, ads, board, client, creative, demo, finance, health, kol, leads, msl, sales, task } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -79,7 +79,8 @@ export function mapError(err: unknown): Response {
     err instanceof creative.NotFoundError ||
     err instanceof ads.NotFoundError ||
     err instanceof kol.NotFoundError ||
-    err instanceof board.NotFoundError
+    err instanceof board.NotFoundError ||
+    err instanceof health.NotFoundError
   ) {
     return errorJson(err.message, 404);
   }
@@ -94,7 +95,8 @@ export function mapError(err: unknown): Response {
     err instanceof creative.ForbiddenError ||
     err instanceof ads.ForbiddenError ||
     err instanceof kol.ForbiddenError ||
-    err instanceof board.ForbiddenError
+    err instanceof board.ForbiddenError ||
+    err instanceof health.ForbiddenError
   ) {
     return errorJson(err.message, 403);
   }
