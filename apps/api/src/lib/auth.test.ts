@@ -2,8 +2,8 @@
  * Unit tests for token verification + actor resolution (no Next, no DB). Tokens
  * are minted here with node:crypto so the whole HS256 path is exercised.
  */
-import { createHmac } from 'node:crypto';
-import { afterEach, describe, expect, it } from 'vitest';
+import { createHmac, generateKeyPairSync, sign as cryptoSign, type KeyObject } from 'node:crypto';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   actorFromToken,
   bearerToken,
@@ -13,6 +13,8 @@ import {
   SESSION_COOKIE,
   sessionCookie,
   tokenFromRequest,
+  verifyJwt,
+  verifyJwtES256,
   verifyJwtHS256,
 } from './auth';
 import { UnauthorizedError } from './http';
@@ -89,6 +91,63 @@ describe('actorFromToken', () => {
   it('rejects a valid token that carries no employee claim', () => {
     const t = sign({ app_metadata: {}, exp: Math.floor(Date.now() / 1000) + 60 });
     expect(() => actorFromToken(t, SECRET)).toThrow(/no CDPS employee/);
+  });
+});
+
+describe('verifyJwtES256 / verifyJwt (asymmetric ES256)', () => {
+  // A throwaway P-256 keypair stands in for the project's GoTrue signing key.
+  const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+
+  // Sign a compact JWS with ES256 — raw r||s (IEEE P1363), exactly like GoTrue.
+  function signES256(
+    payload: Record<string, unknown>,
+    key: KeyObject = privateKey,
+    header: Record<string, unknown> = { alg: 'ES256', typ: 'JWT', kid: 'test-key' },
+  ): string {
+    const h = b64url(JSON.stringify(header));
+    const p = b64url(JSON.stringify(payload));
+    const sig = cryptoSign('sha256', Buffer.from(`${h}.${p}`), { key, dsaEncoding: 'ieee-p1363' });
+    return `${h}.${p}.${b64url(sig)}`;
+  }
+
+  const prev = process.env.SUPABASE_JWT_PUBLIC_JWK;
+  beforeEach(() => {
+    process.env.SUPABASE_JWT_PUBLIC_JWK = JSON.stringify(publicKey.export({ format: 'jwk' }));
+  });
+  afterEach(() => {
+    if (prev === undefined) delete process.env.SUPABASE_JWT_PUBLIC_JWK;
+    else process.env.SUPABASE_JWT_PUBLIC_JWK = prev;
+  });
+
+  it('accepts a well-formed ES256 token against the JWKS public key', () => {
+    const payload = verifyJwtES256(signES256(staffClaims));
+    expect((payload.app_metadata as { employee_id: string }).employee_id).toBe('EMP-1');
+  });
+
+  it('routes ES256 tokens through verifyJwt and resolves the actor', () => {
+    // secret is irrelevant for ES256 — the asymmetric key path is taken.
+    const actor = actorFromToken(signES256(staffClaims), 'unused-secret');
+    expect(actor.employeeId).toBe('EMP-1');
+  });
+
+  it('rejects an ES256 token signed by a different key', () => {
+    const attacker = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey;
+    expect(() => verifyJwtES256(signES256(staffClaims, attacker))).toThrow(/signature/);
+  });
+
+  it('rejects an expired ES256 token', () => {
+    const expired = { ...staffClaims, exp: Math.floor(Date.now() / 1000) - 10 };
+    expect(() => verifyJwtES256(signES256(expired))).toThrow(/expired/);
+  });
+
+  it('throws when no ES256 public key is configured', () => {
+    delete process.env.SUPABASE_JWT_PUBLIC_JWK;
+    expect(() => verifyJwtES256(signES256(staffClaims))).toThrow(/ES256 public key not configured/);
+  });
+
+  it('still rejects an alg:none token via verifyJwt (no downgrade)', () => {
+    const none = sign(staffClaims, SECRET, { alg: 'none', typ: 'JWT' });
+    expect(() => verifyJwt(none, SECRET)).toThrow(/unsupported token alg/);
   });
 });
 
