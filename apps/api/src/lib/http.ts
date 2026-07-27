@@ -141,6 +141,9 @@ export function mapError(err: unknown): Response {
   if (err instanceof BadRequestError) {
     return errorJson(err.message, 400);
   }
+  // Unmapped throw → 500. Log the real error server-side (never in the client
+  // body) so production 500s are diagnosable in the platform logs.
+  console.error('[api] unhandled error →500:', err);
   return errorJson('internal server error', 500);
 }
 
