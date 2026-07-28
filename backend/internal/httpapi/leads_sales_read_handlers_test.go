@@ -95,6 +95,12 @@ func setupLS(t *testing.T) (*httptest.Server, func()) {
 	attempt("PRSP-P2", "LEAD-POOL", "EMP-SS1", "New Lead")
 	lead("LEAD-POOL-STALE", "Toko Stale", "0811000007", "[Pool]", "", "TEST", "(NOW() - INTERVAL 3 DAY)")
 
+	// Sales-registered leads for the created_by (registrant) scope: LEAD-SS1REG
+	// was registered by ss1 (no surviving attempt), LEAD-SS2REG by ss2. A Sales
+	// staff sees only the ones they themselves registered.
+	lead("LEAD-SS1REG", "Toko SS1", "0811000008", "active", "", "EMP-SS1", "NOW()")
+	lead("LEAD-SS2REG", "Toko SS2", "0811000009", "active", "", "EMP-SS2", "NOW()")
+
 	testutil.SeedCredentials(t, d, "rahasia123")
 	app := httpapi.New(d, statemachine.New(), notification.NewCatalog(), nil)
 	srv := httptest.NewServer(app.Router())
@@ -361,10 +367,30 @@ func TestLeadsList_ScopeAndDetail(t *testing.T) {
 		}
 	}
 
-	// Sales staff + foreign division denied on the Database list.
-	if code, _ := do(t, ss1, "GET", url, nil); code != 403 {
-		t.Errorf("sales staff leads: %d want 403", code)
+	// Sales staff: sees only OWN leads (registered by them OR holding an
+	// attempt), never leads registered/worked by other sales (M1 §9).
+	code, body = do(t, ss1, "GET", url, nil)
+	if code != 200 {
+		t.Fatalf("sales staff leads: %d %v want 200", code, body)
 	}
+	byID = rowsByID(t, body)
+	for _, own := range []string{"LEAD-A", "LEAD-NEG", "LEAD-L1", "LEAD-L2", "LEAD-POOL", "LEAD-SS1REG"} {
+		if _, ok := byID[own]; !ok {
+			t.Errorf("sales staff missing own lead %s", own)
+		}
+	}
+	for _, other := range []string{"LEAD-B", "LEAD-SS2REG"} {
+		if _, ok := byID[other]; ok {
+			t.Errorf("sales staff should not see other's lead %s", other)
+		}
+	}
+	// First registrant surfaced on the row (created_by + resolved name).
+	if byID["LEAD-SS1REG"]["created_by"] != "EMP-SS1" || byID["LEAD-SS1REG"]["created_by_nama"] != "Sam Satu" {
+		t.Errorf("LEAD-SS1REG registrant wrong: %v / %v",
+			byID["LEAD-SS1REG"]["created_by"], byID["LEAD-SS1REG"]["created_by_nama"])
+	}
+
+	// Foreign division still denied on the Database list.
 	if code, _ := do(t, cr, "GET", url, nil); code != 403 {
 		t.Errorf("creative leads: %d want 403", code)
 	}
@@ -400,9 +426,20 @@ func TestLeadsList_ScopeAndDetail(t *testing.T) {
 	if len(atts) != 1 || atts[0].(map[string]any)["owner_nama"] != "Sam Satu" {
 		t.Errorf("lead detail attempts wrong: %v", body["attempts"])
 	}
-	// Sales staff without an attempt on the lead is denied.
+	// Sales staff may read a lead they registered even with no surviving attempt.
+	code, body = do(t, ss1, "GET", srv.URL+"/api/v1/leads/LEAD-SS1REG", nil)
+	if code != 200 {
+		t.Fatalf("ss1 own-registered lead detail: %d want 200", code)
+	}
+	if lead, _ := body["lead"].(map[string]any); lead["created_by"] != "EMP-SS1" || lead["created_by_nama"] != "Sam Satu" {
+		t.Errorf("LEAD-SS1REG detail registrant wrong: %v", body["lead"])
+	}
+	// Sales staff without an attempt or registration on the lead is denied.
 	if code, _ := do(t, ss1, "GET", srv.URL+"/api/v1/leads/LEAD-B", nil); code != 403 {
 		t.Errorf("ss1 lead-without-attempt detail: %d want 403", code)
+	}
+	if code, _ := do(t, ss1, "GET", srv.URL+"/api/v1/leads/LEAD-SS2REG", nil); code != 403 {
+		t.Errorf("ss1 other-sales-registered lead detail: %d want 403", code)
 	}
 	if code, b := do(t, sl, "GET", srv.URL+"/api/v1/leads/LEAD-NONE", nil); code != 404 || b["message"] != "[data tidak ditemukan]" {
 		t.Errorf("missing lead: %d %v", code, b)

@@ -42,15 +42,16 @@ export default function LeadsPage() {
   // (fe_m0m1_contract.md) — JANGAN lowercase.
   const isSales = role?.division === 'Sales';
   const isMarketing = role?.division === 'Marketing';
-  const isSalesLead = Boolean(isSales && role?.level === 'lead');
   const isOD = Boolean(role?.od);
   const isDirector = Boolean(role?.director);
   const odOnly = isOD && !isDirector;
 
   // Pool — Sales division (semua level), OD, Director.
   const canSeePool = isSales || isOD || isDirector;
-  // Database — Marketing (staff/lead), Sales lead, OD, Director. TIDAK Sales staff.
-  const canSeeDatabase = isMarketing || isSalesLead || isOD || isDirector;
+  // Database — Marketing (staff/lead), Sales (semua level), OD, Director. Sales
+  // staff kini melihat Database yang di-scope server ke lead miliknya sendiri
+  // (yang ia daftarkan / ia pegang attempt-nya), bukan lead sales lain (M1 §9).
+  const canSeeDatabase = isMarketing || isSales || isOD || isDirector;
   // Import — Marketing division non-odOnly, atau Director.
   const canSeeImport = (isMarketing && !odOnly) || isDirector;
   // Claim — Sales division non-odOnly, atau Director.
@@ -312,6 +313,7 @@ function DatabaseTab() {
                 <th>Status</th>
                 <th>Kontes</th>
                 <th>Pemenang</th>
+                <th>Didaftarkan oleh</th>
                 <th>Dibuat</th>
               </tr>
             </thead>
@@ -332,6 +334,7 @@ function DatabaseTab() {
                   </td>
                   <td>{r.open_attempt_count}</td>
                   <td>{r.winning_attempt_id || '—'}</td>
+                  <td>{r.created_by_nama || r.created_by || '—'}</td>
                   <td>{formatDate(r.created_at)}</td>
                 </tr>
               ))}

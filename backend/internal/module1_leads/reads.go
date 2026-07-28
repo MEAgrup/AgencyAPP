@@ -67,7 +67,12 @@ type LeadRow struct {
 	RecordStatus        string    `json:"record_status"`
 	WinningAttemptID    *string   `json:"winning_attempt_id"`
 	CreatedAt           time.Time `json:"created_at"`
-	OpenAttemptCount    int       `json:"open_attempt_count"`
+	// CreatedBy is the employee who FIRST registered/imported this lead (the
+	// original registrant; immutable). CreatedByNama resolves that id to a name
+	// (falls back to the raw id when the employee is not yet synced from HRIS).
+	CreatedBy        string `json:"created_by"`
+	CreatedByNama    string `json:"created_by_nama"`
+	OpenAttemptCount int    `json:"open_attempt_count"`
 }
 
 // LeadCore is the lead block of the detail view (LeadRow without the rollup).
@@ -83,6 +88,9 @@ type LeadCore struct {
 	RecordStatus        string    `json:"record_status"`
 	WinningAttemptID    *string   `json:"winning_attempt_id"`
 	CreatedAt           time.Time `json:"created_at"`
+	// First registrant of the lead (see LeadRow.CreatedBy).
+	CreatedBy     string `json:"created_by"`
+	CreatedByNama string `json:"created_by_nama"`
 }
 
 // LeadAttemptRow is one attempt in the lead contest (contract §5).
@@ -105,24 +113,37 @@ func canReadPool(actor permission.Actor) bool {
 	return actor.Role.Director || actor.Role.OD || actor.Role.Division == SalesDivision
 }
 
+// Lead read scopes: which slice of the Leads Database an actor may see.
+const (
+	scopeAll            = "all"             // Marketing lead / Sales lead / OD / Director
+	scopeMarketingStaff = "marketing_staff" // own leads: created_by OR owned-campaign origin
+	scopeSalesStaff     = "sales_staff"     // own leads: registered by OR holding an attempt
+)
+
 // leadListScope reports whether actor may hit the Leads Database and, if so,
-// whether the view is narrowed to a Marketing staff's own leads (created_by or
-// owned-campaign origin). Marketing lead / Sales lead / OD / Director see all;
-// Sales staff and other divisions are denied.
-func leadListScope(actor permission.Actor) (marketingStaffScope bool, ok bool) {
+// which scope narrows the view. Marketing lead / Sales lead / OD / Director see
+// all. Marketing staff see their own leads (created_by or owned-campaign
+// origin). Sales staff see their own leads — the ones they registered
+// (created_by) or hold a Prospect attempt on — never leads registered by other
+// sales (M1 §9: Sales Staff "sees own attempts only"). Other divisions are
+// denied.
+func leadListScope(actor permission.Actor) (scope string, ok bool) {
 	if actor.Role.Director || actor.Role.OD {
-		return false, true
+		return scopeAll, true
 	}
-	if actor.Role.Division == MarketingDivision {
+	switch actor.Role.Division {
+	case MarketingDivision:
 		if actor.Role.Level == permission.LevelLead {
-			return false, true
+			return scopeAll, true
 		}
-		return true, true // Marketing staff: own leads only
+		return scopeMarketingStaff, true
+	case SalesDivision:
+		if actor.Role.Level == permission.LevelLead {
+			return scopeAll, true
+		}
+		return scopeSalesStaff, true
 	}
-	if actor.Role.Division == SalesDivision && actor.Role.Level == permission.LevelLead {
-		return false, true
-	}
-	return false, false
+	return "", false
 }
 
 // ListPool returns the Sales Pool board (contract §3).
@@ -167,21 +188,28 @@ func (s *Service) ListPool(ctx context.Context, actor permission.Actor) ([]PoolR
 // ListLeads returns the scoped Leads Database (contract §4). q filters on
 // lead_name/phone (LIKE); statusFilter is an exact record_status.
 func (s *Service) ListLeads(ctx context.Context, actor permission.Actor, statusFilter, search string) ([]LeadRow, error) {
-	marketingStaffScope, ok := leadListScope(actor)
+	scope, ok := leadListScope(actor)
 	if !ok {
 		return nil, forbidden()
 	}
 	notIn, termArgs := notInTerminal()
 	q := `SELECT l.id, l.lead_name, l.phone_number, l.email, l.source, l.origin_division,
 	             l.origin_campaign_id, l.last_touch_campaign_id, l.record_status, l.winning_attempt_id, l.created_at,
+	             l.created_by, COALESCE(ce.nama, l.created_by),
 	             (SELECT COUNT(*) FROM prospect_attempts pa
 	               WHERE pa.lead_id = l.id AND pa.status ` + notIn + `) AS open_attempt_count
 	        FROM leads l
+	        LEFT JOIN employees ce ON ce.employee_id = l.created_by
 	       WHERE 1 = 1`
 	args := make([]any, 0)
 	args = append(args, termArgs...)
-	if marketingStaffScope {
+	switch scope {
+	case scopeMarketingStaff:
 		q += ` AND (l.created_by = ? OR l.origin_campaign_id IN (SELECT id FROM campaigns WHERE owner_employee_id = ?))`
+		args = append(args, actor.EmployeeID, actor.EmployeeID)
+	case scopeSalesStaff:
+		q += ` AND (l.created_by = ? OR EXISTS(SELECT 1 FROM prospect_attempts pa2
+		             WHERE pa2.lead_id = l.id AND pa2.owner_employee_id = ?))`
 		args = append(args, actor.EmployeeID, actor.EmployeeID)
 	}
 	if statusFilter != "" {
@@ -204,7 +232,7 @@ func (s *Service) ListLeads(ctx context.Context, actor permission.Actor, statusF
 		var r LeadRow
 		if err := rows.Scan(&r.ID, &r.LeadName, &r.PhoneNumber, nsScan(&r.Email), &r.Source, &r.OriginDivision,
 			nsScan(&r.OriginCampaignID), nsScan(&r.LastTouchCampaignID), &r.RecordStatus,
-			nsScan(&r.WinningAttemptID), &r.CreatedAt, &r.OpenAttemptCount); err != nil {
+			nsScan(&r.WinningAttemptID), &r.CreatedAt, &r.CreatedBy, &r.CreatedByNama, &r.OpenAttemptCount); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -217,16 +245,16 @@ func (s *Service) ListLeads(ctx context.Context, actor permission.Actor, statusF
 // attempt on it. ErrLeadNotFound when missing; 403 when out of scope.
 func (s *Service) GetLead(ctx context.Context, actor permission.Actor, leadID string) (LeadDetail, error) {
 	var d LeadDetail
-	var createdBy string
-	var originCampaign sql.NullString
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT id, lead_name, phone_number, email, source, origin_division,
-		        origin_campaign_id, last_touch_campaign_id, record_status, winning_attempt_id,
-		        created_at, created_by, origin_campaign_id
-		   FROM leads WHERE id = ?`, leadID).
+		`SELECT l.id, l.lead_name, l.phone_number, l.email, l.source, l.origin_division,
+		        l.origin_campaign_id, l.last_touch_campaign_id, l.record_status, l.winning_attempt_id,
+		        l.created_at, l.created_by, COALESCE(ce.nama, l.created_by)
+		   FROM leads l
+		   LEFT JOIN employees ce ON ce.employee_id = l.created_by
+		  WHERE l.id = ?`, leadID).
 		Scan(&d.Lead.ID, &d.Lead.LeadName, &d.Lead.PhoneNumber, nsScan(&d.Lead.Email), &d.Lead.Source,
 			&d.Lead.OriginDivision, nsScan(&d.Lead.OriginCampaignID), nsScan(&d.Lead.LastTouchCampaignID),
-			&d.Lead.RecordStatus, nsScan(&d.Lead.WinningAttemptID), &d.Lead.CreatedAt, &createdBy, &originCampaign)
+			&d.Lead.RecordStatus, nsScan(&d.Lead.WinningAttemptID), &d.Lead.CreatedAt, &d.Lead.CreatedBy, &d.Lead.CreatedByNama)
 	if err == sql.ErrNoRows {
 		return LeadDetail{}, ErrLeadNotFound
 	}
@@ -234,7 +262,11 @@ func (s *Service) GetLead(ctx context.Context, actor permission.Actor, leadID st
 		return LeadDetail{}, err
 	}
 
-	ok, err := s.canReadLead(ctx, actor, leadID, createdBy, originCampaign)
+	var originCampaign sql.NullString
+	if d.Lead.OriginCampaignID != nil {
+		originCampaign = sql.NullString{String: *d.Lead.OriginCampaignID, Valid: true}
+	}
+	ok, err := s.canReadLead(ctx, actor, leadID, d.Lead.CreatedBy, originCampaign)
 	if err != nil {
 		return LeadDetail{}, err
 	}
@@ -264,23 +296,31 @@ func (s *Service) GetLead(ctx context.Context, actor permission.Actor, leadID st
 
 // canReadLead resolves the §5 detail read scope for one lead.
 func (s *Service) canReadLead(ctx context.Context, actor permission.Actor, leadID, createdBy string, originCampaign sql.NullString) (bool, error) {
-	marketingStaffScope, ok := leadListScope(actor)
+	scope, ok := leadListScope(actor)
 	if ok {
-		if !marketingStaffScope {
+		switch scope {
+		case scopeAll:
 			return true, nil // Marketing lead / Sales lead / OD / Director
-		}
-		// Marketing staff: own lead (created_by) or an owned-campaign origin.
-		if createdBy == actor.EmployeeID {
-			return true, nil
-		}
-		if originCampaign.Valid {
-			var owner string
-			err := s.DB.QueryRowContext(ctx,
-				`SELECT owner_employee_id FROM campaigns WHERE id = ?`, originCampaign.String).Scan(&owner)
-			if err != nil && err != sql.ErrNoRows {
-				return false, err
+		case scopeMarketingStaff:
+			// Marketing staff: own lead (created_by) or an owned-campaign origin.
+			if createdBy == actor.EmployeeID {
+				return true, nil
 			}
-			if err == nil && owner == actor.EmployeeID {
+			if originCampaign.Valid {
+				var owner string
+				err := s.DB.QueryRowContext(ctx,
+					`SELECT owner_employee_id FROM campaigns WHERE id = ?`, originCampaign.String).Scan(&owner)
+				if err != nil && err != sql.ErrNoRows {
+					return false, err
+				}
+				if err == nil && owner == actor.EmployeeID {
+					return true, nil
+				}
+			}
+		case scopeSalesStaff:
+			// Sales staff: a lead they registered (created_by); an attempt they
+			// hold is covered by the Sales-division check below.
+			if createdBy == actor.EmployeeID {
 				return true, nil
 			}
 		}

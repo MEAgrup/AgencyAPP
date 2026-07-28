@@ -109,6 +109,9 @@ export interface LeadRow {
   record_status: string;
   winning_attempt_id: string | null;
   created_at: string;
+  // First registrant of the lead (immutable): employee id + resolved name.
+  created_by: string;
+  created_by_nama: string;
   open_attempt_count: number;
 }
 

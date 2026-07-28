@@ -163,6 +163,12 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
           </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>
+              Didaftarkan oleh
+            </div>
+            <div>{lead.created_by_nama || lead.created_by || '—'}</div>
+          </div>
+          <div>
+            <div className="muted" style={{ fontSize: 12 }}>
               Dibuat
             </div>
             <div>{formatDateTime(lead.created_at)}</div>
