@@ -107,6 +107,8 @@ menjadikannya nilai final. Pembaca lama bisa salah simpul bahwa seed masih diblo
 
 | Gate | Hasil |
 |---|---|
+| **CI PR #61** | **hijau 5/5** — `db-and-migrations` · `backend` · `api` · `core-engines` · `web-internal` |
+| **Vercel** | **Ready 2/2** (`agency-app-api`, `web-internal-mea`) |
 | `typecheck --workspaces` | bersih (4 workspace) |
 | `@cdps/core` · `db` · `domain` · `api` | **112** · **9** · **422** · **173** (api naik dari 104: **+69 test baru**) |
 | Test baru `scripts/mslseed/*` | **69** (16 csv · 30 validate · 23 engine, 6 di antaranya DB-backed) |
