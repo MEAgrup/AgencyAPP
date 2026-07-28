@@ -1,9 +1,8 @@
 # HANDOFF — Cutover Sesi 2 (deviasi 404 dikonfirmasi + C-02 selesai)
 
-> ⚠️ **C-03 SUDAH DIJALANKAN** sesudah dokumen ini ditulis → **NO-GO, 1 blocker**.
-> Baca `docs/handoff/CUTOVER_UAT_REPORT_20260728.md` dan **O38** di `docs/DECISIONS.md`
-> **sebelum** merge PR #59 atau deploy migrasi ke `CDPS SG` — migrasi C-01 terbukti
-> **gagal apply** ke skema live.
+> ⚠️ **SUPERSEDED oleh `HANDOFF_CUTOVER_SESI3.md`.** C-03 sudah dijalankan sesudah
+> dokumen ini ditulis (blocker O38 ditemukan **dan sudah ditutup** di sesi yang sama).
+> Mulai dari dokumen sesi 3, bukan yang ini.
 
 > **Dokumen standalone.** Lanjutkan chat berikutnya dari file ini.
 > Tanggal: 2026-07-28. Sesi: eksekusi build plan cutover, lanjutan sesi 1.
