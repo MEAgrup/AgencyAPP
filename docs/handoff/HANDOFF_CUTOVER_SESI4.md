@@ -181,16 +181,33 @@ Baris Nano KOL itu sekaligus memperlihatkan **anomali O25 (a)** apa adanya: qty 
 
 ## 4. TIKET BERIKUTNYA — sisa C-04
 
-### 4.1 Seed MSL — SUDAH SELESAI, sisa QA UI saja
-Apply ke live sudah dijalankan (§3.1). **Yang belum diverifikasi: sisi UI.** Buka di deployment:
+### 4.1 Seed MSL — SUDAH SELESAI. QA UI: separuh lolos, sisanya terhalang PR #60 belum merge
 
-- `/master-services` → harus tampil **32 layanan**, semua `version_no` 1
-- `/sales/kalkulator` → coba hitung satu penawaran (mis. Nano KOL qty 3 → harus Rp55.500.000 karena
-  min_floor 10 + PPN; GMV Max passthrough 8,5jt → Rp9.435.000)
+QA di preview PR #61 (2026-07-28):
 
-Kalau kalkulator error 500, itu **bukan** soal seed — periksa dulu apakah perbaikan C03-F2
-(`quoteToWire` di `/api/v1/sales/quote-preview`) sudah ter-deploy; perbaikan itu ada di PR #60 yang
-**belum di-merge**, jadi deployment `main` masih memuat bug bigint-nya.
+- ✅ **`/master-services` + `/sales/kalkulator` menampilkan 32 layanan** dengan satuan, batas
+  minimal, dan harga yang persis dari seed.
+- ❌ **Panel "Ringkasan" → `internal server error`.** **BUKAN cacat seed dan BUKAN cacat branch ini.**
+
+**Akar masalah (sudah diverifikasi, jangan didiagnosa ulang):** `web-internal/next.config.ts:9–13`
+memproksi `/api/v1/*` ke `BACKEND_URL`; bila env itu tidak di-set khusus untuk environment Preview,
+build production jatuh ke fallback **`https://agency-app-api.vercel.app`** — API **produksi** yang
+dibangun dari `main`. `main` belum punya perbaikan **C03-F2** (`quoteToWire`), yang hidup di **PR #60
+yang belum di-merge**. Jadi UI preview memanggil API lama yang masih 500 karena bigint.
+
+Buktinya: route yang sama di branch ini dijalankan lewat **HTTP sungguhan** (`next start` lokal,
+DB lokal berisi 32 layanan hasil seed yang sama) → **HTTP 200**, `Nano KOL qty 3 = Rp. 55.500.000,00`,
+`GMV Max 8,5jt = Rp. 9.435.000,00`.
+
+**Yang menutup ini: merge #59 → #60.** Begitu `main` men-deploy `quoteToWire`, kalkulator hidup di
+semua environment. Alternatif sementara kalau perlu QA sebelum merge: set `BACKEND_URL` untuk
+environment **Preview** di project Vercel `web-internal-mea` ke URL preview `agency-app-api` milik PR
+yang sama — tapi URL preview berubah tiap branch, jadi ini tambalan sekali pakai, bukan perbaikan.
+
+**Kalau MSL perlu direvisi nanti** (mis. koreksi anomali O25 Nano KOL): ubah
+`supabase/seed/msl_kalkulator.csv`, lalu jalankan ulang `--apply`. Baris yang berubah naik versi
+otomatis, versi lama tetap utuh sehingga deal yang sudah mengunci versi lama tetap bisa direkomputasi.
+Jangan pernah UPDATE baris MSL langsung di SQL.
 
 **Kalau MSL perlu direvisi nanti** (mis. koreksi anomali O25 Nano KOL): ubah
 `supabase/seed/msl_kalkulator.csv`, lalu jalankan ulang `--apply`. Baris yang berubah naik versi
