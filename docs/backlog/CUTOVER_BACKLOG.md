@@ -26,6 +26,7 @@
 
 | # | Tiket | Prioritas | Estimasi | Blocking cutover? |
 |---|---|---|---|---|
+| **C-00** | **CI mati — runner tidak teralokasi (billing/kuota Actions)** | 🔴 P0 prasyarat | manusia, ~menit | **YA** |
 | **C-01** | O37 — otorisasi read (RLS ter-bypass) | 🔴 P0 keamanan | 2–4 hari | **YA** |
 | **C-02** | Endpoint `notifications` di `apps/api` | 🟠 P1 | 0,5–1 hari | **YA** (FE rusak) |
 | **C-03** | UAT paritas end-to-end di stack baru | 🟠 P1 | 2–3 hari | **YA** |
@@ -33,10 +34,34 @@
 | **C-05** | Retire Go: arsip `backend/`, bersihkan CI & config Railway | 🟡 P2 | 0,5 hari | tidak (sesudahnya) |
 | **C-06** | `web-client-portal` (M15-C2) | ⚪ ditunda | — | **TIDAK** (by design) |
 
-**Urutan wajib:** C-01 → C-02 → C-03 → C-04 → (gate go/no-go manusia) → C-05.
+**Urutan wajib:** **C-00** → C-01 → C-02 → C-03 → C-04 → (gate go/no-go manusia) → C-05.
 C-06 di luar jalur cutover.
 
 **Total realistis: ~1,5–2 minggu kerja Claude** + gate keputusan manusia (Yohan & Nerissa, OQ-1).
+
+---
+
+## C-00 — CI mati: runner tidak teralokasi 🔴 (PRASYARAT, tindakan manusia)
+
+**Temuan 2026-07-28:** **seluruh** run CI repo gagal — bukan hanya di branch ini, tetapi juga di **`main`** (mis. run `30278802079` = "Merge PR #57", run `30263081875` = "Merge PR #56") dan branch lain, setidaknya sejak 2026-07-27.
+
+**Bukti diagnosis:**
+- Semua job (`backend`, `api`, `core-engines`, `db-and-migrations`, `web-internal`) `conclusion: failure` **2–4 detik** setelah dibuat.
+- Log tidak tersedia (HTTP 404) — tak ada eksekusi yang pernah terjadi.
+- Job detail: **`runner_id: 0`, `runner_name: ""`** ⇒ **runner tidak pernah dialokasikan**.
+
+**Kesimpulan:** ini **bukan** kegagalan test/kode. Repo `MEAgrup/AgencyAPP` privat ⇒ menit Actions ditagih; pola ini khas **kuota/spending limit GitHub Actions habis** (atau isu pembayaran/policy) di level organisasi.
+
+**Dampak (penting):**
+1. Merge terakhir ke `main` (**PR #55, #56, #57**) masuk **tanpa verifikasi CI**. Perlakukan `main` sebagai *belum tervalidasi* sampai CI hijau kembali.
+2. **C-03 dan C-05 bergantung pada gate CI** (`db-and-migrations` menjalankan invariant `ident`/`immutability`/`rls`/`auth_claims`). Tanpa CI, gate go/no-go kehilangan bukti otomatisnya.
+
+**Tindakan (HANYA bisa manusia — Claude tak punya akses billing):**
+1. GitHub → Organization `MEAgrup` → **Settings → Billing** → cek kuota Actions / spending limit; naikkan limit atau perbarui metode pembayaran.
+2. Setelah pulih: **re-run** CI di `main` (`b8347ff`) untuk memvalidasi kembali PR #55–#57 yang lolos tanpa CI.
+3. Bila ternyata bukan billing, cek Organization → Settings → **Actions → General** (policy runner/actions yang diizinkan).
+
+**DoD:** satu run CI di `main` selesai dengan runner ter-assign (`runner_name` terisi) dan seluruh job hijau.
 
 ---
 
@@ -148,6 +173,7 @@ Masih hanya `README.md`. Ditunda resmi (DECISIONS 2026-07-18) menunggu security 
 ## 2. Gate & exit criteria
 
 **Gate go/no-go cutover (PIC: Yohan & Nerissa — OQ-1):**
+- [ ] C-00 selesai — CI hijau kembali di `main`; PR #55–#57 tervalidasi ulang.
 - [ ] C-01 selesai, O37 tertutup di DECISIONS.
 - [ ] C-02 selesai, badge & halaman notifikasi hidup.
 - [ ] C-03 report FAIL = 0, SKIP beralasan.
