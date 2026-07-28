@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { account, ads, board, campaign, client, creative, demo, finance, health, kol, leads, livestream, marketing, msl, performance, portal, sales, task } from '@cdps/domain';
+import { account, ads, board, campaign, client, creative, demo, finance, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -68,7 +68,8 @@ export function mapError(err: unknown): Response {
     err instanceof livestream.IncompleteError ||
     err instanceof livestream.ValidationError ||
     err instanceof campaign.ValidationError ||
-    err instanceof marketing.ValidationError
+    err instanceof marketing.ValidationError ||
+    err instanceof notification.ValidationError
   ) {
     return errorJson(err.message, 400); // exact BI [...] message (or internal sentinel)
   }

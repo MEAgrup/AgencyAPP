@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import type { account, ads, board, campaign, creative, health, kol, leads, livestream, marketing, msl, performance, portal, task } from '@cdps/domain';
+import type { account, ads, board, campaign, creative, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -1406,5 +1406,92 @@ export function managementDashboardToWire(d: portal.ManagementDashboard): Manage
       snapshot_id: r.snapshotId, period: r.period, score_display: r.scoreDisplay, band: r.band,
       trend_direction: r.trendDirection, dragging_component: r.draggingComponent, dragging_capped: r.draggingCapped,
     })),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Notification inbox (Phase 0 v2 §9) — C-02.
+// ---------------------------------------------------------------------------
+
+/** core/notification.Notification as web-internal's `NotificationItem` expects it. */
+export interface NotificationWire {
+  id: string;
+  event_type: string;
+  entity_type: string;
+  entity_id: string;
+  deep_link: string;
+  actor: string;
+  created_at: string;
+  read_at: string | null;
+}
+
+/** GET /notifications body — web-internal's `NotificationsResponse`. */
+export interface NotificationsResponseWire {
+  data: NotificationWire[];
+  unread_count: number;
+}
+
+export function notificationToWire(n: notification.Notification): NotificationWire {
+  return {
+    id: n.id,
+    event_type: n.eventType,
+    entity_type: n.entityType,
+    entity_id: n.entityId,
+    deep_link: n.deepLink,
+    actor: n.actor,
+    created_at: n.createdAt.toISOString(),
+    read_at: n.readAt ? n.readAt.toISOString() : null,
+  };
+}
+
+/** Wraps the inbox in the `{ data, unread_count }` envelope Go and the FE use. */
+export function inboxToWire(i: notification.Inbox): NotificationsResponseWire {
+  return { data: i.items.map(notificationToWire), unread_count: i.unreadCount };
+}
+
+// ---------------------------------------------------------------------------
+// M0 quote preview (MSL v2 calculator) — C-03 finding.
+// ---------------------------------------------------------------------------
+
+/** module0_sales.LineQuote — one priced service line as web-internal expects it. */
+export interface LineQuoteWire {
+  service_id: string;
+  name: string;
+  quantity: number;
+  unit: string;
+  standard_price_idr: string;
+  komisi_idr: string;
+  subtotal_idr: string;
+}
+
+/** module0_sales.Quote — web-internal's `Quote` (lib/sales.ts). */
+export interface QuoteWire {
+  lines: LineQuoteWire[];
+  estimasi_nilai_idr: string;
+  total_komisi_idr: string;
+}
+
+/**
+ * Maps the domain Quote to the wire shape.
+ *
+ * The raw `estimasiNilai` / `totalKomisi` are `money.Money` = **bigint**, which
+ * JSON.stringify cannot serialize (it throws TypeError). Go marks the very same
+ * fields `json:"-"`; this mapper is that contract. Only the pre-formatted IDR
+ * strings cross the boundary — which is also house rule #4: the client never
+ * sees a raw money scalar it could re-derive differently.
+ */
+export function quoteToWire(q: sales.Quote): QuoteWire {
+  return {
+    lines: q.lines.map((l) => ({
+      service_id: l.serviceId,
+      name: l.name,
+      quantity: l.quantity,
+      unit: l.unit,
+      standard_price_idr: l.standardPriceIdr,
+      komisi_idr: l.komisiIdr,
+      subtotal_idr: l.subtotalIdr,
+    })),
+    estimasi_nilai_idr: q.estimasiNilaiIdr,
+    total_komisi_idr: q.totalKomisiIdr,
   };
 }

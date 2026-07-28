@@ -3,7 +3,7 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { account, ads, campaign, creative, kol, leads, livestream, marketing, msl, task } from '@cdps/domain';
+import type { account, ads, campaign, creative, kol, leads, livestream, marketing, msl, notification, sales, task } from '@cdps/domain';
 import {
   amWorkloadToWire,
   assetToWire,
@@ -23,12 +23,15 @@ import {
   bookingToWire,
   campaignToWire,
   creatorListToWire,
+  inboxToWire,
   masterServiceToWire,
   metricEntryToWire,
   metricsToWire,
+  notificationToWire,
   optimizationToWire,
   pendingBlockRequestToWire,
   poolRowToWire,
+  quoteToWire,
   sessionToWire,
   strategyRequirementToWire,
   strategyToWire,
@@ -561,5 +564,98 @@ describe('M2 marketing wire mappers', () => {
       collected_sales: 'Rp. 4.000.000,00', collected_sales_decimal: '4000000.00', collected_roas: '0.80',
       junk_breakdown: [{ reason: '[Bukan seller]', count: 2 }],
     });
+  });
+});
+
+describe('notification wire mappers (C-02)', () => {
+  const read: notification.Notification = {
+    id: '9007199254740993', // beyond Number.MAX_SAFE_INTEGER — must stay a string
+    eventType: 'm0.negotiation.decision',
+    entityType: 'attempt',
+    entityId: 'PRSP-202607-0001',
+    deepLink: '/attempts/PRSP-202607-0001',
+    actor: 'EMP-SPV',
+    createdAt: new Date('2026-07-28T03:00:00.000Z'),
+    readAt: new Date('2026-07-28T04:30:00.000Z'),
+  };
+
+  it('notificationToWire maps every field, ids as strings and dates as ISO', () => {
+    expect(notificationToWire(read)).toEqual({
+      id: '9007199254740993',
+      event_type: 'm0.negotiation.decision',
+      entity_type: 'attempt',
+      entity_id: 'PRSP-202607-0001',
+      deep_link: '/attempts/PRSP-202607-0001',
+      actor: 'EMP-SPV',
+      created_at: '2026-07-28T03:00:00.000Z',
+      read_at: '2026-07-28T04:30:00.000Z',
+    });
+  });
+
+  it('an unread row carries read_at: null, not an omitted key', () => {
+    const wire = notificationToWire({ ...read, readAt: null });
+    expect(wire.read_at).toBeNull();
+    expect('read_at' in wire).toBe(true);
+  });
+
+  it('inboxToWire builds the { data, unread_count } envelope the FE expects', () => {
+    expect(inboxToWire({ items: [read], unreadCount: 3 })).toEqual({
+      data: [notificationToWire(read)],
+      unread_count: 3,
+    });
+    expect(inboxToWire({ items: [], unreadCount: 0 })).toEqual({ data: [], unread_count: 0 });
+  });
+});
+
+describe('M0 quote preview wire mapper (C-03 finding)', () => {
+  const quote: sales.Quote = {
+    lines: [
+      {
+        serviceId: 'MSV-202607-0001',
+        name: 'Shopee Ads Management',
+        quantity: 2,
+        unit: 'bulan',
+        standardPriceIdr: 'Rp. 3.500.000,00',
+        komisiIdr: 'Rp. 350.000,00',
+        subtotalIdr: 'Rp. 7.000.000,00',
+      },
+    ],
+    // bigint — JSON.stringify throws on these; the mapper must drop them.
+    estimasiNilai: 7_000_000n,
+    totalKomisi: 350_000n,
+    estimasiNilaiIdr: 'Rp. 7.000.000,00',
+    totalKomisiIdr: 'Rp. 350.000,00',
+  };
+
+  it('maps to the snake_case shape web-internal declares', () => {
+    expect(quoteToWire(quote)).toEqual({
+      lines: [
+        {
+          service_id: 'MSV-202607-0001',
+          name: 'Shopee Ads Management',
+          quantity: 2,
+          unit: 'bulan',
+          standard_price_idr: 'Rp. 3.500.000,00',
+          komisi_idr: 'Rp. 350.000,00',
+          subtotal_idr: 'Rp. 7.000.000,00',
+        },
+      ],
+      estimasi_nilai_idr: 'Rp. 7.000.000,00',
+      total_komisi_idr: 'Rp. 350.000,00',
+    });
+  });
+
+  it('is JSON-serializable — the raw domain Quote is NOT (the actual bug)', () => {
+    // Guards the regression: returning the domain object produced a 500
+    // "Do not know how to serialize a BigInt" on every successful quote.
+    expect(() => JSON.stringify(quote)).toThrow(TypeError);
+    expect(() => JSON.stringify(quoteToWire(quote))).not.toThrow();
+  });
+
+  it('exposes no raw money scalar (house rule #4 — Go marks them json:"-")', () => {
+    const wire = quoteToWire(quote) as unknown as Record<string, unknown>;
+    expect('estimasiNilai' in wire).toBe(false);
+    expect('totalKomisi' in wire).toBe(false);
+    expect(JSON.stringify(wire)).not.toMatch(/7000000|350000(?!,)/);
   });
 });

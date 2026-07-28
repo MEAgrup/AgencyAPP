@@ -1,5 +1,9 @@
 # HANDOFF — Cutover Sesi 1 (C-00 + C-01/O37 selesai)
 
+> ⚠️ **SUPERSEDED oleh `HANDOFF_CUTOVER_SESI2.md`** (2026-07-28). Sesi 2 menutup
+> kedua butir §3 di bawah — deviasi 404 **dikonfirmasi dipertahankan** — dan
+> menyelesaikan C-02. Mulai dari dokumen sesi 2, bukan yang ini.
+
 > **Dokumen standalone.** Lanjutkan chat berikutnya dari file ini.
 > Tanggal: 2026-07-28. Sesi: eksekusi build plan cutover.
 
