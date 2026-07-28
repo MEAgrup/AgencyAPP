@@ -49,8 +49,9 @@ C-06 di luar jalur cutover.
 > `api`, `core-engines`, `web-internal`, dan **`db-and-migrations`** (seluruh invariant
 > lolos: ident gap-free/WIB, append-only immutability, paritas predikat RLS, paritas
 > custom claims Supabase Auth, idempotensi seed, verifikasi jumlah tabel).
-> **Tindak lanjut dijalankan:** re-run CI di `main` (`b8347ff`) untuk memvalidasi ulang
-> PR #55–#57 yang sempat masuk tanpa CI — periksa hasilnya sebelum lanjut ke C-03/C-05.
+> **Tindak lanjut SELESAI:** re-run CI di `main` (`b8347ff`, run `30278802079` attempt 2)
+> → **`conclusion: success`**, kelima job hijau. **PR #55–#57 kini tervalidasi CI** —
+> `main` tidak lagi berstatus "belum tervalidasi".
 >
 > Catatan untuk C-03: gate CI `db-and-migrations` mengharapkan **53 tabel** dan lolos,
 > sedangkan `list_tables` di remote `CDPS SG` melaporkan lebih banyak. Bandingkan
@@ -190,7 +191,7 @@ Masih hanya `README.md`. Ditunda resmi (DECISIONS 2026-07-18) menunggu security 
 ## 2. Gate & exit criteria
 
 **Gate go/no-go cutover (PIC: Yohan & Nerissa — OQ-1):**
-- [x] **C-00 selesai** — CI hijau kembali (run `30328573444`); re-run `main` untuk PR #55–#57 sudah dipicu, **cek hasilnya**.
+- [x] **C-00 selesai** — CI hijau kembali (run `30328573444`); `main` re-run hijau (run `30278802079`), PR #55–#57 tervalidasi.
 - [ ] C-01 selesai, O37 tertutup di DECISIONS.
 - [ ] C-02 selesai, badge & halaman notifikasi hidup.
 - [ ] C-03 report FAIL = 0, SKIP beralasan.
