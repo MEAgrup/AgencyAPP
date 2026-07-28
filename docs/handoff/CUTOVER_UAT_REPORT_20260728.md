@@ -6,20 +6,31 @@
 
 ---
 
-## 0. VERDICT — **NO-GO** (1 blocker)
+## 0. VERDICT — **FAIL = 0**, tersisa 3 SKIP yang butuh akses deployment
+
+> **Revisi 2026-07-28 (sore).** Verdict awal report ini **NO-GO** karena blocker
+> **C03-F1** (drift skema repo↔live). Pemilik memutuskan **O38 opsi (A)** dan
+> blocker itu **sudah ditutup di sesi yang sama** — lihat §2. Riwayat temuannya
+> sengaja dipertahankan utuh di bawah; yang berubah hanya statusnya.
 
 | | |
 |---|---|
-| **PASS** | 76 |
-| **FAIL** | **1** (blocker, §2 — C03-F1) |
-| **SKIP** | 3 (§4 — semua beralasan, 2 di antaranya terhalang environment) |
+| **PASS** | 77 |
+| **FAIL** | **0** |
+| **SKIP** | 3 (§4 — semua beralasan; ketiganya terhalang akses ke deployment) |
 
-DoD C-03 mensyaratkan **FAIL = 0**. Satu blocker tersisa dan **tidak bisa
-diselesaikan dari sesi ini** karena menyentuh project Supabase live. Gate go/no-go
-manusia **belum boleh** dibuka.
+DoD C-03 mensyaratkan **FAIL = 0** → **terpenuhi**. Namun **gate go/no-go belum
+boleh dibuka sepenuhnya**: ketiga SKIP semuanya berakar pada satu hal yang sama —
+walk belum pernah dijalankan terhadap **deployment Vercel** dengan kredensial
+per-role, karena network policy sesi ini memblokir `*.vercel.app`. Yang sudah
+terbukti: **kode dan skema**. Yang belum: **konfigurasi deployment** (env Vercel,
+kunci JWT ES256 produksi, perilaku pooler Supabase).
 
-Satu defect lain (**C03-F2**, jalur uang) ditemukan dan **sudah diperbaiki + di-test**
-dalam sesi ini.
+**Rekomendasi:** perlakukan C-03 sebagai **lolos bersyarat** — tutup ketiga SKIP
+dari mesin yang boleh keluar internet (§7), baru buka gate C-04.
+
+Dua defect ditemukan sesi ini dan **keduanya sudah diperbaiki + di-test**:
+**C03-F1** (drift skema, §2) dan **C03-F2** (jalur uang, §3).
 
 ---
 
@@ -33,17 +44,24 @@ dalam sesi ini.
 | Engine + domain + API (DB fresh) | vitest | core **112** · db **9** · domain **422** · api **104** |
 | Invariant SQL | `supabase/tests/*.sql` | ident · immutability · rls · auth_claims → **PASS** |
 | Build | `next build` | `apps/api` hijau · `web-internal` hijau (60 route) |
-| **Drift skema repo ↔ `CDPS SG`** | Supabase MCP + diff lokal | **FAIL — lihat §2** |
+| **Drift skema repo ↔ `CDPS SG`** | Supabase MCP + diff lokal | semula **FAIL**, kini **PASS** sesudah O38 opsi A — §2 |
 
 Walk W1/W2/W3 dijalankan terhadap **API lokal** (build produksi `next start` +
-Postgres 16 dengan 32 migrasi repo + seed), **bukan** terhadap Vercel — lihat
-SKIP-1 di §4.
+Postgres 16 + seed), **bukan** terhadap Vercel — lihat SKIP-1 di §4. Seluruh angka
+di tabel ini **dijalankan ulang** setelah perbaikan O38, jadi berlaku untuk skema
+yang kini identik dengan `CDPS SG` (36 migrasi), bukan skema repo yang lama.
 
 ---
 
 ## 2. FAIL
 
-### C03-F1 — 🔴 BLOCKER: repo migrasi ≠ skema project live; migrasi C-01 **gagal apply**
+### C03-F1 — ✅ **DITUTUP** (semula 🔴 BLOCKER): repo migrasi ≠ skema project live
+
+> **Status: RESOLVED 2026-07-28** lewat **O38 opsi (A) — repo mengikuti live**.
+> Uraian temuan di bawah dipertahankan apa adanya sebagai catatan; ringkasan
+> perbaikan + bukti paritas ada di akhir sub-bab ini.
+
+**Temuan asli (blocker): migrasi C-01 gagal apply ke live**
 
 **Temuan.** `docs/backlog/CUTOVER_BACKLOG.md` §C-00 mencatat "jumlah tabel remote
 dilaporkan lebih banyak dari gate CI 53 — cocokkan saat C-03". Hasil pencocokan:
@@ -117,18 +135,55 @@ muncul lagi**.
 jadi migrasi lolos dan CI hijau — sementara produksi akan patah. CI tidak pernah
 melihat skema live.
 
-**Rekomendasi (butuh keputusan pemilik — lihat §5, O38).** Dua opsi:
+---
 
-- **(A) Repo mengikuti live (disarankan).** Back-port keempat migrasi live ke
-  `supabase/migrations/` dengan urutan yang benar, lalu ubah `…0005` menjadi
-  sadar-schema (`private.jwt_owns_lead`, dan `jwt_owns_lead_campaign` dibuat di
-  `private` + di-`REVOKE` dari `anon`/`authenticated`). Hasil: repo = live,
-  hardening keamanan dipertahankan, CI memvalidasi skema yang sebenarnya.
-- **(B) Live mengikuti repo.** Kembalikan keempat fungsi ke `public`. **Tidak
-  disarankan** — membatalkan remediasi advisor yang sudah disetujui dan
-  menghidupkan lagi 4 WARN lint 0029.
+#### ✅ Perbaikan yang dijalankan (O38 opsi A — repo mengikuti live)
 
-Apa pun pilihannya, C-03 **tidak bisa PASS** sampai repo dan live satu definisi.
+Pemilik memilih **(A)**. Yang dikerjakan:
+
+1. **4 migrasi live-only di-back-port VERBATIM** ke `supabase/migrations/`, dengan
+   urutan yang mereproduksi urutan live — isinya **tidak dirapikan sedikit pun**,
+   karena repo harus mereproduksi produksi, bukan tafsirannya:
+   `…0005_fk_covering_indexes` · `…0006_employee_display_name` ·
+   `…0007_change_password` · `…0008_harden_secdef_helpers_to_private_schema`.
+2. **Migrasi C-01 dinomori ulang `…0005` → `…0009`** (belum pernah ter-apply di mana
+   pun, jadi rename aman) **dan dibuat sadar-schema**: policy `leads_select` memanggil
+   `private.jwt_owns_lead`, dan helper baru `jwt_owns_lead_campaign` dibuat di
+   **`private`** (bukan `public`) + `REVOKE` dari `anon` — supaya tidak menghidupkan
+   kembali lint 0029 yang baru saja ditutup.
+3. **`rls_harden_execute_surface` sengaja TIDAK di-back-port.** Migrasi live itu
+   sendiri menyatakan isinya sudah digabung ke repo; diverifikasi memang identik
+   dengan `20260102000003_rls_baseline.sql` §9. Beda pengemasan, bukan beda isi.
+
+**Bukti paritas — rebuild dari nol, 36 migrasi repo, dibandingkan dengan `CDPS SG`:**
+
+| Objek | Repo (sesudah) | Live | |
+|---|---|---|---|
+| Tabel · kolom | 53 · 526 | 53 · 526 | ✅ |
+| Fungsi `public` | 23 | 23 | ✅ |
+| Policy · trigger | 44 · 24 | 44 · 24 | ✅ |
+| **Index** | **122** | **122** | ✅ (semula 119) |
+| Fungsi `private` | 5 | 4 | ✅ delta = **`jwt_owns_lead_campaign` saja** |
+
+Delta satu fungsi itu **persis** perubahan C-01 yang memang belum di-deploy — bukan
+drift. Dan yang paling penting: **migrasi yang tadinya gagal kini apply BERSIH (36/36)**,
+menghasilkan policy `leads_select` ber-arm lima yang menunjuk `private.*`:
+
+```
+(jwt_can_read_all() OR created_by = jwt_employee_id()
+ OR (jwt_is_lead() AND origin_division = jwt_division())
+ OR private.jwt_owns_lead(id) OR private.jwt_owns_lead_campaign(id))
+```
+
+**Regresi dicek ulang terhadap skema baru:** invariant ident·immutability·**rls**·auth_claims
+**PASS** (termasuk `rls_checks` §10–13 milik C-01), core 112 · db 9 · domain 422 · api 104,
+house-rules walk **21/21**, kontrak Wave-3 **34/34**, typecheck & `next build` bersih.
+
+**Catatan sisa (bukan blocker, di luar scope O38):** penomoran versi migrasi di repo
+(`202601…`) berbeda dari yang tercatat di riwayat migrasi remote (`202607…`). Sudah
+begitu sejak awal; deploy selama ini lewat `apply_migration`. **Perlu diselaraskan
+sebelum ada yang menjalankan `supabase db push` ke `CDPS SG`**, karena versi yang tak
+cocok akan membuat CLI mencoba meng-apply ulang semuanya.
 
 ---
 
@@ -209,11 +264,17 @@ sendiri saat dijalankan terhadap deployment (SKIP-1).
 
 ## 5. Temuan untuk log keputusan
 
-**O38 (BARU, blocking) — sumber kebenaran skema: repo atau project live?**
-Lihat §2. Butuh keputusan pemilik antara opsi (A) dan (B). Sampai diputuskan,
-**jangan merge PR #59** ke `main` dan jangan deploy migrasi ke `CDPS SG`.
+**O38 — ✅ RESOLVED: opsi (A), repo mengikuti live.** Lihat §2 untuk eksekusi dan
+bukti paritasnya. Hambatan merge PR #59 dari sisi skema **sudah hilang** — migrasi
+kini apply bersih ke skema yang sama dengan produksi.
+**Satu syarat tersisa sebelum `supabase db push`:** penomoran versi migrasi repo
+(`202601…`) belum selaras dengan riwayat remote (`202607…`) — di luar scope O38,
+tapi jangan dijalankan sebelum diselaraskan.
 
-**O39 (BARU, non-blocking) — pintu registrasi lead tidak ber-gate role.**
+**O39 — ✅ RESOLVED: dibiarkan, paritas Go dipertahankan.** Pemilik memutuskan tidak
+menambah gate role; menambahkannya justru mengubah perilaku sistem lama di tengah
+cutover. Penyimpangan terhadap `CLAUDE.md` §6 diterima sebagai utang terdokumentasi.
+Uraian temuan:
 `POST /api/v1/leads` bisa dipanggil aktor mana pun yang terautentikasi, termasuk
 **OD** (yang menurut `CLAUDE.md` §6 read-only) dan divisi non-Sales. Diverifikasi
 di walk: OD berhasil membuat lead (201).
@@ -281,9 +342,13 @@ psql -h 127.0.0.1 -p 5433 -U postgres -d cdps_live -v ON_ERROR_STOP=1 \
 
 ## 8. Langkah berikutnya
 
-1. **Pemilik memutuskan O38** (repo ikut live, atau live ikut repo). **Blocking.**
-2. Eksekusi keputusan itu → repo dan `CDPS SG` satu definisi → CI memvalidasi
-   skema yang sebenarnya.
-3. Jalankan ulang walk §7 dengan `BASE=<vercel>` dari mesin yang boleh keluar
-   internet + kredensial per-role → menutup SKIP-1, SKIP-2, SKIP-3.
-4. Perbarui report ini menjadi **FAIL = 0** → baru buka gate go/no-go manusia (C-04).
+1. ~~Pemilik memutuskan O38~~ ✅ **selesai** — opsi (A), dieksekusi & terverifikasi (§2).
+2. ~~Repo dan `CDPS SG` satu definisi~~ ✅ **selesai** — CI `db-and-migrations` kini
+   membangun skema yang sama dengan produksi, jadi gate itu akhirnya bermakna.
+3. **Jalankan ulang walk §7 dengan `BASE=<url vercel>`** dari mesin yang boleh keluar
+   internet + kredensial per-role → menutup **SKIP-1, SKIP-2, SKIP-3** sekaligus.
+   Ini satu-satunya pekerjaan verifikasi yang tersisa untuk C-03.
+4. **Selaraskan penomoran versi migrasi repo ↔ riwayat remote** sebelum ada yang
+   menjalankan `supabase db push` ke `CDPS SG` (§5). Non-blocking untuk C-03,
+   blocking untuk cara-deploy berbasis CLI.
+5. Setelah (3): report jadi **FAIL = 0 tanpa SKIP** → buka gate go/no-go manusia (C-04).

@@ -29,12 +29,12 @@
 | **C-00** | ~~CI mati — runner tidak teralokasi~~ ✅ **SELESAI 2026-07-28** | — | — | — |
 | **C-01** | ~~O37 — otorisasi read (RLS ter-bypass)~~ ✅ **SELESAI 2026-07-28** | — | — | — |
 | **C-02** | ~~Endpoint `notifications` di `apps/api`~~ ✅ **SELESAI 2026-07-28** | — | — | — |
-| **C-03** | UAT paritas end-to-end ⚠️ **dijalankan 2026-07-28 — NO-GO**, 1 blocker (O38) | 🔴 P0 | sisa: keputusan O38 + walk dari Vercel | **YA** |
+| **C-03** | UAT paritas end-to-end ⚠️ **dijalankan 2026-07-28 — FAIL 0, lolos bersyarat** | 🟠 P1 | sisa: walk dari deployment Vercel (3 SKIP) | **YA** |
 | **C-04** | Cutover data + aktor produksi | 🟠 P1 | 2–4 hari | **YA** |
 | **C-05** | Retire Go: arsip `backend/`, bersihkan CI & config Railway | 🟡 P2 | 0,5 hari | tidak (sesudahnya) |
 | **C-06** | `web-client-portal` (M15-C2) | ⚪ ditunda | — | **TIDAK** (by design) |
 
-**Urutan wajib:** ~~C-00~~ ✅ → ~~C-01~~ ✅ → ~~C-02~~ ✅ → **C-03 ⚠️ NO-GO (blocker O38)** → C-04 → (gate go/no-go manusia) → C-05.
+**Urutan wajib:** ~~C-00~~ ✅ → ~~C-01~~ ✅ → ~~C-02~~ ✅ → **C-03 ⚠️ lolos bersyarat (3 SKIP)** → C-04 → (gate go/no-go manusia) → C-05.
 C-06 di luar jalur cutover.
 
 **Total realistis: ~1,5–2 minggu kerja Claude** + gate keputusan manusia (Yohan & Nerissa, OQ-1).
@@ -202,19 +202,31 @@ kontrak API-nya, bukan render badge-nya. Masukkan ke walk C-03.
 
 ---
 
-## C-03 — UAT paritas end-to-end di stack baru ⚠️ DIJALANKAN 2026-07-28 — **NO-GO (1 blocker)**
+## C-03 — UAT paritas end-to-end ⚠️ DIJALANKAN 2026-07-28 — **FAIL = 0, lolos BERSYARAT**
 
 > **Report: `docs/handoff/CUTOVER_UAT_REPORT_20260728.md`.**
-> **PASS 76 · FAIL 1 · SKIP 3.** DoD mensyaratkan FAIL = 0 ⇒ gate go/no-go **belum boleh dibuka**.
+> **PASS 77 · FAIL 0 · SKIP 3.** DoD FAIL = 0 **terpenuhi**, tetapi ketiga SKIP berakar
+> pada satu hal yang sama: walk belum pernah dijalankan terhadap **deployment Vercel**
+> (network policy sesi memblokir `*.vercel.app`; kredensial per-role tak tersedia).
+> Yang terbukti = **kode + skema**; yang belum = **konfigurasi deployment**.
+> ⇒ perlakukan sebagai **lolos bersyarat**; tutup SKIP dulu sebelum gate C-04.
 >
-> **🔴 C03-F1 (blocker, → O38): repo migrasi ≠ skema project live.** Jumlah & nama tabel ternyata
+> **✅ C03-F1 (semula blocker, → O38 opsi A — DITUTUP): repo migrasi ≠ skema project live.** Jumlah & nama tabel ternyata
 > **cocok 53/53** (catatan C-00 terjawab), tetapi **4 migrasi hanya ada di live** dan tak pernah
 > ditulis ke repo — termasuk `harden_secdef_helpers_to_private_schema` yang memindahkan
 > `jwt_owns_{client,lead,transaction}` dari `public` ke schema `private`. Akibatnya migrasi C-01
 > `20260102000005` (menulis `jwt_owns_lead(id)` tanpa kualifikasi schema) **GAGAL apply ke live** —
 > terbukti empiris: `ERROR: function jwt_owns_lead(character varying) does not exist`. CI hijau
-> karena gate `db-and-migrations` membangun dari repo saja. **Jangan merge PR #59 / deploy migrasi
-> sampai O38 diputuskan.**
+> karena gate `db-and-migrations` membangun dari repo saja.
+> **Perbaikan (O38 opsi A):** 4 migrasi live-only di-back-port **verbatim** (`…0005_fk_covering_indexes`,
+> `…0006_employee_display_name`, `…0007_change_password`, `…0008_harden_secdef_helpers_to_private_schema`),
+> dan migrasi C-01 dinomori ulang `…0005`→`…0009` + dibuat sadar-schema (`private.jwt_owns_lead`;
+> helper baru dibuat di `private` supaya lint 0029 tidak hidup lagi).
+> **Bukti:** rebuild 36 migrasi **apply bersih**; tabel 53 · kolom 526 · fungsi `public` 23 · policy 44 ·
+> trigger 24 · **index 122** semuanya cocok dengan `CDPS SG`; schema `private` 5 vs 4 dengan delta
+> **persis** `jwt_owns_lead_campaign` (= perubahan C-01 yang memang belum di-deploy).
+> **Sisa (non-blocking):** penomoran versi migrasi repo (`202601…`) belum selaras dengan riwayat remote
+> (`202607…`) — selaraskan sebelum ada yang menjalankan `supabase db push`.
 >
 > **🟠 C03-F2 — DITEMUKAN & SUDAH DIPERBAIKI:** `POST /sales/quote-preview` **selalu 500**
 > (`Do not know how to serialize a BigInt`) — kalkulator harga & komisi salesperson rusak total.
@@ -250,9 +262,10 @@ kontrak API-nya, bukan render badge-nya. Masukkan ke walk C-03.
 
 </details>
 
-**Untuk menutup C-03:** (1) pemilik memutuskan **O38**; (2) eksekusi keputusan itu sampai repo = live;
-(3) jalankan ulang walk dari deployment Vercel dgn kredensial per-role (menutup ketiga SKIP);
-(4) report jadi FAIL = 0 → baru buka gate go/no-go (C-04).
+**Untuk menutup C-03:** (1) ~~keputusan O38~~ ✅ (2) ~~repo = live~~ ✅ —
+tersisa **(3) jalankan ulang walk dari deployment Vercel dengan kredensial per-role**
+(`BASE=<url> node apps/api/scripts/cutover-houserules-walk.mjs`, + wave3 & auth smoke).
+Itu menutup ketiga SKIP sekaligus → report jadi FAIL = 0 tanpa SKIP → baru buka gate C-04.
 
 ---
 
