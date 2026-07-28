@@ -113,7 +113,7 @@ Tidak ada yang bisa didorong maju oleh developer/Claude sendiri. Urut dari yang 
 FINAL untuk semua 32 layanan; komisi Rp0 adalah hasil sah.
 
 ### 3.2 Sisa C-04 yang bersifat pekerjaan
-0. 🔴 **BARU (sesi 6) — port 8 endpoint yang hilang di `apps/api` (O41).** Ini **kerusakan produksi**,
+0. 🔴 **BARU (sesi 6) — port 7 endpoint yang masih hilang di `apps/api` (O41).** Ini **kerusakan produksi**,
    bukan utang rapi: `next.config.ts` memproksi ke `agency-app-api` (TS) dan Go sudah "archived
    read-only", jadi halaman `/finance` + detail transaksi **404 sekarang**, `Closed-Lost` M0 tidak
    bisa dicatat, dan impor massal lead Marketing tidak ada. Diukur dengan mendiff route Go (194) vs
@@ -122,7 +122,15 @@ FINAL untuk semua 32 layanan; komisi Rp0 adalah hasil sah.
    `apps/api/src/lib/route-parity.test.ts` (`KNOWN_GAPS`) yang gagal kalau ada gap baru **dan**
    kalau ada entri yang ternyata sudah dilayani. Mulai dari `payment-intent` → `finance/queue` →
    `transactions/{id}` (urutan hulu-ke-hilir; `schedule` sia-sia tanpa `payment-intent`).
-   Sudah ditutup sesi 6: route reminder M5 yang salah path (`/reminders` → `/finance/reminders`).
+   Sudah ditutup sesi 6: route reminder M5 yang salah path (`/reminders` → `/finance/reminders`)
+   dan **`POST /attempts/{id}/lost`** (edge Closed-Lost M0 — tanpa itu attempt gagal tak bisa
+   mencapai status terminal, jadi leadnya terkunci permanen ke satu sales dan pool tak pernah bebas).
+   **Cara menjalankan test DB-backed di sandbox** (sesi 6 sudah membuktikannya, jangan cari-cari lagi):
+   `pg_ctlcluster 16 main start` → `DROP/CREATE DATABASE cdps` → apply 36 migrasi berurutan →
+   `supabase/seed.sql` → `DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/cdps" npx vitest run`
+   di `packages/domain`. Hasilnya **426 hijau**, bukan 285 skip. Catatan: notifikasi tak bisa dihapus
+   (house rule #8), jadi assertion yang menghitung notifikasi **wajib** di-scope ke `entity_id` milik
+   test itu — kalau tidak, run kedua di DB yang sama gagal palsu (sudah diperbaiki di `finance.test.ts`).
 1. **Migrasi 0009 ke live** — §1 di atas. Paling mendesak dari sisi data.
 2. **Import lead historis (O22)** — Pilihan B: `Qualify` ATAU prospek `Hot/Warm`, 6 bulan terakhir.
    Aturan sudah tertulis di DECISIONS 2026-07-10; sumber datanya belum masuk.

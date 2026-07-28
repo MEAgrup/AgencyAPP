@@ -205,8 +205,6 @@ const KNOWN_GAPS = new Set([
   'GET /transactions/{}/bermasalah', // Go handleGetBermasalah (POST half exists)
   // M4/M5 — payment intent (scheme + total) is set from the client record.
   'POST /clients/{}/payment-intent', // Go handleSetPaymentIntent
-  // M0 — the Closed-Lost edge cannot be recorded at all.
-  'POST /attempts/{}/lost', //          Go handleCloseLost
   // M1 — Marketing bulk lead import.
   'POST /leads/bulk', //                Go handleBulkLeads
   // Cross-module audit trail reader (used by the Creative asset history panel).

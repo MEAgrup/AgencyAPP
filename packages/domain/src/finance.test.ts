@@ -325,10 +325,19 @@ describeDb('read models', () => {
 });
 
 describeDb('scanReminders + reminderDashboard (M5 §6 / §7)', () => {
-  const notifCount = async (recipient: string, event: string): Promise<number> =>
+  /**
+   * Counts notifications for one recipient+event, scoped to the entities THIS
+   * test created. Notifications can never be deleted (house rule #8), so
+   * afterEach cannot clean them and an unscoped count keeps growing every time
+   * the suite is re-run against the same database — the same reason audit
+   * assertions must be pinned to their own entity_id. CI provisions a fresh DB
+   * per run and never saw it; a local re-run failed with "expected 5 to be 2".
+   */
+  const notifCount = async (recipient: string, event: string, entityIds: string[]): Promise<number> =>
     (await sql<{ n: number }[]>`
       select count(*)::int as n from notifications
-      where recipient_employee_id = ${recipient} and event_type = ${event}`)[0].n;
+      where recipient_employee_id = ${recipient} and event_type = ${event}
+        and entity_id = any(${entityIds})`)[0].n;
 
   it('marks overdue installments [Jatuh Tempo], notifies once, and is idempotent', async () => {
     const { transactionId, installmentIds } = await closedDeal(sales.PAYMENT_SCHEME_TERMIN, [
@@ -345,13 +354,13 @@ describeDb('scanReminders + reminderDashboard (M5 §6 / §7)', () => {
       select status, jatuh_tempo from installments where id = ${installmentIds[0]}`;
     expect(inst[0].status).toBe('[Jatuh Tempo]');
     expect(inst[0].jatuh_tempo).toBe(true);
-    expect(await notifCount('ZZ-BUDI', 'm0m5.installment.due')).toBe(2); // Sales PIC notified
+    expect(await notifCount('ZZ-BUDI', 'm0m5.installment.due', installmentIds)).toBe(2); // Sales PIC notified
 
     // Re-running the scan is a no-op (fire-once + already transitioned).
     const s2 = await scanReminders(sql, scanAt);
     expect(s2.markedOverdue).toBe(0);
     expect(s2.overdueNotified).toBe(0);
-    expect(await notifCount('ZZ-BUDI', 'm0m5.installment.due')).toBe(2);
+    expect(await notifCount('ZZ-BUDI', 'm0m5.installment.due', installmentIds)).toBe(2);
     void transactionId;
   });
 
