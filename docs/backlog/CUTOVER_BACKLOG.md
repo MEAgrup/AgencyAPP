@@ -275,14 +275,14 @@ Itu menutup ketiga SKIP sekaligus → report jadi FAIL = 0 tanpa SKIP → baru b
 1. Konfirmasi ulang ke pemilik: apakah data di Railway/MySQL sekarang **riil** atau masih UAT? (Asumsi tercatat: UAT.) Bila ternyata riil ⇒ butuh rencana ekspor-impor per-entitas mengikuti rantai FK `LEAD → ATTEMPT → CLIENT → SERVICE → TRX → INST`; jangan improvisasi, catat keputusan dulu.
 2. Import karyawan riil via route yang sudah ada: `POST /api/v1/admin/employee-import` (Director-only, satu transaksi: sync `employees` → provision credentials → link GoTrue). Sumber = **CSV/spreadsheet admin** (OQ-4: endpoint HRIS tidak dipakai lagi).
 3. Import lead historis sesuai **O22** (Pilihan B: `Qualify` ATAU prospek `Hot/Warm`, 6 bulan terakhir) — sumber & aturan sudah tertulis di DECISIONS 2026-07-10.
-4. Master Service List (`master_services`/`master_service_versions` masih **0 baris**) — wajib terisi sebelum closing bisa jalan. Bahan: `docs/handoff/MSL_DRAFT_KOMPILASI.csv` + `MSL_KALKULATOR_VALIDASI.md`.
+4. Master Service List — **alat seed SELESAI (2026-07-28), tinggal dijalankan ke live.** Seed kanonik = **`supabase/seed/msl_kalkulator.csv` (32 layanan rate card aktif)**, BUKAN `MSL_DRAFT_KOMPILASI.csv` (180 baris itu harga deal historis untuk impor W1-19, dan masih menunggu Sales Head — lihat Decided 2026-07-28). CLI: `npm run msl:seed -w @cdps/api -- --actor <NIK> [--apply]`, dry-run default, idempoten, menulis lewat `msl.createService`/`updateService` sehingga tervalidasi + terversi + teraudit. Terverifikasi end-to-end di Postgres lokal termigrasi (32 dibuat → rerun 32 dilewati; quote M0 terhitung benar di keempat `pricing_mode`). **✅ SUDAH DI-APPLY KE LIVE `CDPS SG` 2026-07-28** oleh Yohan, aktor NIK `2101180004`: dry-run `dibuat=32` (nol tulis) → apply `dibuat=32 error=0` → rerun `dilewati=32` (idempotensi terbukti). `master_services` **32 baris**, bukan 0 lagi. Sisa: QA UI `/master-services` + `/sales/kalkulator` di deployment. Runbook: `docs/handoff/MSL_KALKULATOR_VALIDASI.md` §"Cara seed ke sistem"; detail apply: `HANDOFF_CUTOVER_SESI4.md` §3.1.
 
 **Aktor produksi (keputusan manusia — masih terbuka):**
 - **O34** butir (a)–(e) — aktor Wave 2 + lead Marketing/BD (kini masih fixture UAT).
 - **O33** — aktor Finance. **O26** — NIK + email Director. **O35** — sub-tim Creative M7 §3 (butuh 3 keputusan berurutan; gate lead-divisi existing tetap berlaku sementara).
 - **O9** — target periode M14 (non-blocking, `is_placeholder`).
 
-**DoD:** tak ada fixture UAT tersisa di jalur produksi; login riil semua role lolos; MSL terisi & ber-versi.
+**DoD:** tak ada fixture UAT tersisa di jalur produksi; login riil semua role lolos; ~~MSL terisi & ber-versi~~ ✅ **terpenuhi 2026-07-28** (32 layanan ber-versi di `CDPS SG`).
 
 ---
 

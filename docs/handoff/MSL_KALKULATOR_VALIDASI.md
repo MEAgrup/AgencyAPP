@@ -89,7 +89,7 @@ Bila Sales Head menemukan nama layanan yang muncul di kedua daftar (mis. "GMV Ma
 Untuk setiap baris `backend/seed/msl_kalkulator.csv` (atau revisi yang dikirim balik dalam format CSV yang sama):
 
 1. **Konfirmasi anomali di atas** (khususnya #1 Nano KOL dan #2 basis komisi Store Management) — jawaban ini menentukan apakah `unit_price`/`min_qty` di baris tersebut perlu direvisi sebelum seed dipakai produksi.
-2. **Isi `commission_rule`** per baris, memakai grammar yang sudah dikunci di **DECISIONS O14**: hanya dua bentuk — `"<N>% of standard price"` atau `"flat Rp <N>"`. Nilai saat ini (`"0% of standard price"`) adalah placeholder interim, bukan usulan.
+2. ~~**Isi `commission_rule`** per baris~~ — **TIDAK PERLU LAGI.** **O24 RESOLVED 2026-07-17:** keputusan Yohan menetapkan `commission_rule = "0% of standard price"` sebagai nilai **final** (bukan placeholder interim) untuk seluruh 32 layanan; komisi Rp0 adalah hasil yang sah. Grammar **DECISIONS O14** (`"<N>% of standard price"` / `"flat Rp <N>"`) tetap berlaku bila suatu saat nilainya diubah — perubahannya lewat **versi MSL baru**, tanpa perubahan kode.
 3. **Tinjau `price_note`** pada baris 5 (Store Management) dan baris 48/49 (Live/Video with TC-KOL-Celebrities) — putuskan apakah catatan ini cukup atau perlu didefinisikan sebagai field terpisah/aturan sistem (mis. basis komisi 5%, formula fee manajemen 10% dari ad spend).
 4. **Tandai `active`** bila ada layanan di antara 32 ini yang sebenarnya sudah tidak dijual lagi (kolom saat ini semua `true`).
 5. Serahkan kembali revisi via:
@@ -98,32 +98,48 @@ Untuk setiap baris `backend/seed/msl_kalkulator.csv` (atau revisi yang dikirim b
 
 ## File terkait
 
-- Output data: `backend/seed/msl_kalkulator.csv`
+- Output data: `supabase/seed/msl_kalkulator.csv` (**kanonik untuk stack Supabase/TS**; salinan byte-identik dari `backend/seed/msl_kalkulator.csv`, yang ikut mati saat Go di-retire di C-05 — sebuah test menjaga keduanya tidak melenceng selama keduanya masih ada)
 - Sumber mentah: Google Sheets "Kalkulator Service Jasa", tab "Kalkulator 1" (export `kalkulator_service.xlsx`, 2026-07-16).
 - Dokumen terkait: `docs/handoff/MSL_DRAFT_KOMPILASI.md` / `.csv` (180 layanan ledger historis); `docs/DECISIONS.md` O3, O14, O18 (di luar cakupan perubahan agent ini — hanya dirujuk).
 
 ## Cara seed ke sistem (tim dev)
 
-CLI `backend/cmd/mslseed` memuat `backend/seed/msl_kalkulator.csv` ke Master Service List lewat `internal/admin` (`CreateService`/`UpdateService` saja — jadi setiap tulis tetap tervalidasi, teraudit, dan terversi persis seperti lewat admin UI). Idempotent berdasarkan **nama layanan**: baris yang belum ada akan dibuat, baris yang sudah ada tapi ada field berubah akan naik versi, baris yang identik dilewati.
+> **Stack Supabase/TypeScript** — ini jalur yang dipakai sekarang (C-04). Jalur Go lama ada di
+> bagian berikutnya sebagai catatan sejarah; `backend/` beku dan tidak dipakai lagi untuk seed.
 
-**WAJIB dry-run dulu** (konvensi importer CDPS — lihat `backend/cmd/import`). Skema harus sudah termigrasi (`go run ./cmd/migrate up`) dan `--actor` wajib employee yang lolos `admin.CanEditMasterServices` (Sales Head/SPV Sales, atau Director — staff Sales biasa akan ditolak dengan pesan `[anda tidak memiliki akses untuk mengubah master service list]`).
+CLI `apps/api/scripts/mslseed.ts` memuat `supabase/seed/msl_kalkulator.csv` ke Master Service List lewat `@cdps/domain` `msl.createService`/`msl.updateService` **saja** — jadi setiap tulis tetap tervalidasi, teraudit, dan terversi persis seperti lewat admin UI `/master-services`; CLI ini tidak punya jalur istimewa sendiri. Idempotent berdasarkan **nama layanan** pada `effective_from` baris itu: belum ada → dibuat; sudah ada tapi ada field berubah → **versi baru** (bukan mutasi); identik → dilewati.
+
+**WAJIB dry-run dulu** (konvensi importer CDPS). Skema harus sudah termigrasi (`supabase/migrations/*` sudah ter-apply) dan `--actor` wajib employee yang lolos `msl.canEditMasterServices` (Sales Head/SPV Sales = `division=Sales` + `level=lead`, atau Director berlapis — staff Sales biasa ditolak dengan pesan `[anda tidak memiliki akses untuk mengubah master service list]`).
+
+```bash
+export DATABASE_URL='postgres://...'   # pooler Supabase (6543) atau Postgres lokal
+
+# 1) Dry-run — tidak menulis apa pun, hanya menampilkan rencana (create / versi baru / dilewati)
+npm run msl:seed -w @cdps/api -- --actor <employee_id>
+
+# (opsional) pakai CSV revisi Sales Head, bukan file default:
+npm run msl:seed -w @cdps/api -- --actor <employee_id> --csv path/ke/revisi.csv
+
+# 2) Setelah rencana dicek dan sesuai harapan, baru apply
+npm run msl:seed -w @cdps/api -- --actor <employee_id> --apply
+```
+
+Contoh `<employee_id>`: di **live** pakai NIK Sales Head / Director dari roster riil (68 karyawan);
+di DB seed lokal pakai `EMP-0006` (Dewi Anggraini, Sales Head) atau `EMP-0008`/`EMP-0009`/`EMP-0010` (Director) — lihat `supabase/seed.sql`.
+Aktor di-resolve lewat fungsi SQL `employee_claims()`, resolver yang **sama** dengan Access Token Hook & RLS, sehingga CLI tidak bisa memberi dirinya role yang tidak dimiliki di jalur JWT.
+
+Catatan:
+- Setiap baris CSV divalidasi dulu (enum `pricing_mode`, `min_qty` wajib ada hanya untuk `min_floor`/`batch_ceiling` dan wajib kosong untuk mode lain, `unit_price > 0` untuk mode non-`passthrough`, `commission_rule` harus lolos grammar DECISIONS O14, `effective_from` harus tanggal kalender `YYYY-MM-DD` yang benar-benar ada) — **sebelum** menyentuh DB sama sekali. Satu baris tidak valid menggagalkan seluruh run (dry-run maupun apply) dengan exit code bukan 0; nomor baris + `service_key` selalu disebut di output.
+- Menjalankan ulang `--apply` dengan CSV yang sama itu aman (semua baris "sama, dilewati") — tidak membuat duplikat layanan atau versi kosong.
+- Bila `commission_rule` atau harga suatu saat direvisi (mis. koreksi anomali #1 Nano KOL), cukup ubah CSV lalu `--apply` lagi: baris yang berubah naik versi otomatis, versi lama tetap utuh sehingga deal lama tetap bisa direkomputasi.
+
+<details>
+<summary>Jalur Go lama (historis — jangan dipakai; <code>backend/</code> beku sampai retire di C-05)</summary>
 
 ```bash
 cd backend
-
-# 1) Dry-run — tidak menulis apa pun, cuma menampilkan rencana (create / versi baru / dilewati)
-go run ./cmd/mslseed --actor <employee_id>
-
-# (opsional) pakai CSV revisi Sales Head, bukan file default:
-go run ./cmd/mslseed --actor <employee_id> --csv path/ke/revisi.csv
-
-# 2) Setelah rencana dicek dan sesuai harapan, baru apply
-go run ./cmd/mslseed --actor <employee_id> --apply
+go run ./cmd/mslseed --actor <employee_id>            # dry-run
+go run ./cmd/mslseed --actor <employee_id> --apply    # apply
 ```
-
-Contoh `<employee_id>`: `EMP-0006` (Dewi Anggraini, Sales Head) atau `EMP-0008`/`EMP-0009`/`EMP-0010` (Director, lihat `backend/internal/seed/seed.go`).
-
-Catatan:
-- Setiap baris CSV divalidasi dulu (enum `pricing_mode`, `min_qty` wajib ada hanya untuk `min_floor`/`batch_ceiling`, `unit_price > 0` untuk mode non-`passthrough`, `commission_rule` harus lolos grammar DECISIONS O14, `effective_from` format `YYYY-MM-DD`) — **sebelum** menyentuh DB sama sekali. Satu baris tidak valid akan menggagalkan seluruh run (dry-run maupun apply) dengan exit code bukan 0, baris mana yang salah selalu disebutkan di output.
-- Menjalankan ulang `--apply` dengan CSV yang sama itu aman (semua baris "sama, dilewati") — tidak akan membuat duplikat layanan atau versi kosong.
-- Ingat anomali #7 di atas: `commission_rule` di seed ini masih placeholder `"0% of standard price"` sampai Sales Head mengisi aturan komisi final; re-run `mslseed --apply` setelah CSV direvisi akan otomatis menaikkan versi baris yang berubah.
+CLI TS di atas adalah port 1:1 dari CLI ini (rencana, pesan, dan aturan idempotensi sama).
+</details>
