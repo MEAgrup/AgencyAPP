@@ -3,7 +3,7 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { account, ads, campaign, creative, kol, leads, livestream, marketing, msl, notification, task } from '@cdps/domain';
+import type { account, ads, campaign, creative, kol, leads, livestream, marketing, msl, notification, sales, task } from '@cdps/domain';
 import {
   amWorkloadToWire,
   assetToWire,
@@ -31,6 +31,7 @@ import {
   optimizationToWire,
   pendingBlockRequestToWire,
   poolRowToWire,
+  quoteToWire,
   sessionToWire,
   strategyRequirementToWire,
   strategyToWire,
@@ -603,5 +604,58 @@ describe('notification wire mappers (C-02)', () => {
       unread_count: 3,
     });
     expect(inboxToWire({ items: [], unreadCount: 0 })).toEqual({ data: [], unread_count: 0 });
+  });
+});
+
+describe('M0 quote preview wire mapper (C-03 finding)', () => {
+  const quote: sales.Quote = {
+    lines: [
+      {
+        serviceId: 'MSV-202607-0001',
+        name: 'Shopee Ads Management',
+        quantity: 2,
+        unit: 'bulan',
+        standardPriceIdr: 'Rp. 3.500.000,00',
+        komisiIdr: 'Rp. 350.000,00',
+        subtotalIdr: 'Rp. 7.000.000,00',
+      },
+    ],
+    // bigint — JSON.stringify throws on these; the mapper must drop them.
+    estimasiNilai: 7_000_000n,
+    totalKomisi: 350_000n,
+    estimasiNilaiIdr: 'Rp. 7.000.000,00',
+    totalKomisiIdr: 'Rp. 350.000,00',
+  };
+
+  it('maps to the snake_case shape web-internal declares', () => {
+    expect(quoteToWire(quote)).toEqual({
+      lines: [
+        {
+          service_id: 'MSV-202607-0001',
+          name: 'Shopee Ads Management',
+          quantity: 2,
+          unit: 'bulan',
+          standard_price_idr: 'Rp. 3.500.000,00',
+          komisi_idr: 'Rp. 350.000,00',
+          subtotal_idr: 'Rp. 7.000.000,00',
+        },
+      ],
+      estimasi_nilai_idr: 'Rp. 7.000.000,00',
+      total_komisi_idr: 'Rp. 350.000,00',
+    });
+  });
+
+  it('is JSON-serializable — the raw domain Quote is NOT (the actual bug)', () => {
+    // Guards the regression: returning the domain object produced a 500
+    // "Do not know how to serialize a BigInt" on every successful quote.
+    expect(() => JSON.stringify(quote)).toThrow(TypeError);
+    expect(() => JSON.stringify(quoteToWire(quote))).not.toThrow();
+  });
+
+  it('exposes no raw money scalar (house rule #4 — Go marks them json:"-")', () => {
+    const wire = quoteToWire(quote) as unknown as Record<string, unknown>;
+    expect('estimasiNilai' in wire).toBe(false);
+    expect('totalKomisi' in wire).toBe(false);
+    expect(JSON.stringify(wire)).not.toMatch(/7000000|350000(?!,)/);
   });
 });

@@ -29,12 +29,12 @@
 | **C-00** | ~~CI mati — runner tidak teralokasi~~ ✅ **SELESAI 2026-07-28** | — | — | — |
 | **C-01** | ~~O37 — otorisasi read (RLS ter-bypass)~~ ✅ **SELESAI 2026-07-28** | — | — | — |
 | **C-02** | ~~Endpoint `notifications` di `apps/api`~~ ✅ **SELESAI 2026-07-28** | — | — | — |
-| **C-03** | UAT paritas end-to-end di stack baru | 🟠 P1 | 2–3 hari | **YA** |
+| **C-03** | UAT paritas end-to-end ⚠️ **dijalankan 2026-07-28 — NO-GO**, 1 blocker (O38) | 🔴 P0 | sisa: keputusan O38 + walk dari Vercel | **YA** |
 | **C-04** | Cutover data + aktor produksi | 🟠 P1 | 2–4 hari | **YA** |
 | **C-05** | Retire Go: arsip `backend/`, bersihkan CI & config Railway | 🟡 P2 | 0,5 hari | tidak (sesudahnya) |
 | **C-06** | `web-client-portal` (M15-C2) | ⚪ ditunda | — | **TIDAK** (by design) |
 
-**Urutan wajib:** ~~C-00~~ ✅ → ~~C-01~~ ✅ → ~~C-02~~ ✅ → **C-03** → C-04 → (gate go/no-go manusia) → C-05.
+**Urutan wajib:** ~~C-00~~ ✅ → ~~C-01~~ ✅ → ~~C-02~~ ✅ → **C-03 ⚠️ NO-GO (blocker O38)** → C-04 → (gate go/no-go manusia) → C-05.
 C-06 di luar jalur cutover.
 
 **Total realistis: ~1,5–2 minggu kerja Claude** + gate keputusan manusia (Yohan & Nerissa, OQ-1).
@@ -202,7 +202,36 @@ kontrak API-nya, bukan render badge-nya. Masukkan ke walk C-03.
 
 ---
 
-## C-03 — UAT paritas end-to-end di stack baru 🟠
+## C-03 — UAT paritas end-to-end di stack baru ⚠️ DIJALANKAN 2026-07-28 — **NO-GO (1 blocker)**
+
+> **Report: `docs/handoff/CUTOVER_UAT_REPORT_20260728.md`.**
+> **PASS 76 · FAIL 1 · SKIP 3.** DoD mensyaratkan FAIL = 0 ⇒ gate go/no-go **belum boleh dibuka**.
+>
+> **🔴 C03-F1 (blocker, → O38): repo migrasi ≠ skema project live.** Jumlah & nama tabel ternyata
+> **cocok 53/53** (catatan C-00 terjawab), tetapi **4 migrasi hanya ada di live** dan tak pernah
+> ditulis ke repo — termasuk `harden_secdef_helpers_to_private_schema` yang memindahkan
+> `jwt_owns_{client,lead,transaction}` dari `public` ke schema `private`. Akibatnya migrasi C-01
+> `20260102000005` (menulis `jwt_owns_lead(id)` tanpa kualifikasi schema) **GAGAL apply ke live** —
+> terbukti empiris: `ERROR: function jwt_owns_lead(character varying) does not exist`. CI hijau
+> karena gate `db-and-migrations` membangun dari repo saja. **Jangan merge PR #59 / deploy migrasi
+> sampai O38 diputuskan.**
+>
+> **🟠 C03-F2 — DITEMUKAN & SUDAH DIPERBAIKI:** `POST /sales/quote-preview` **selalu 500**
+> (`Do not know how to serialize a BigInt`) — kalkulator harga & komisi salesperson rusak total.
+> Route mengembalikan objek domain mentah: bigint tak bisa di-serialize, amplop `{quote}` bukan
+> top-level, dan camelCase bukan snake_case. Diperbaiki dengan `quoteToWire` (memulihkan `json:"-"`
+> milik Go + house rule #4). 3 test regresi ditambahkan.
+>
+> **Hasil hijau:** house rules **21/21** (skrip baru `apps/api/scripts/cutover-houserules-walk.mjs`),
+> kontrak Wave-3 **34/34 wired**, auth **12/13** (1 = artefak seed), core 112 · db 9 · domain 422 ·
+> api 104 (DB fresh), invariant ident/immutability/rls/auth_claims **PASS**, tabel 53, build hijau.
+>
+> **SKIP:** walk terhadap **Vercel tidak bisa dijalankan** — network policy sesi menolak
+> `*.vercel.app` (`403 to CONNECT`) dan kredensial per-role tidak tersedia; walk dieksekusi
+> terhadap build produksi yang sama secara lokal. QA badge FE ter-deploy juga tertunda.
+> Detail & cara menutupnya di §4 report.
+
+<details><summary>Uraian tiket asli (arsip)</summary>
 
 **Tujuan:** membuktikan stack TS/Supabase berperilaku **sama** dengan Go yang sudah lolos UAT W1/W2/W3 — sebelum Go dimatikan.
 
@@ -218,6 +247,12 @@ kontrak API-nya, bukan render badge-nya. Masukkan ke walk C-03.
 4. **Cek drift skema:** bandingkan jumlah tabel remote `CDPS SG` vs gate CI `db-and-migrations` ("expect 53") — bila beda, telusuri migrasi yang belum ter-apply / objek manual. Jangan diamkan.
 
 **DoD:** report tersimpan, FAIL = 0, tiap SKIP beralasan tertulis. Ini bahan **gate go/no-go manusia**.
+
+</details>
+
+**Untuk menutup C-03:** (1) pemilik memutuskan **O38**; (2) eksekusi keputusan itu sampai repo = live;
+(3) jalankan ulang walk dari deployment Vercel dgn kredensial per-role (menutup ketiga SKIP);
+(4) report jadi FAIL = 0 → baru buka gate go/no-go (C-04).
 
 ---
 
