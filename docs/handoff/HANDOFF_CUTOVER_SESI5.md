@@ -182,14 +182,19 @@ Masalahnya: **isinya mengubah `backend/` (Go)** — yang sudah **beku** dan akan
 bagian itu sia-sia atau bahkan melanggar aturan main #1. Tapi bagian `web-internal`-nya (gating menu
 sidebar per divisi) **masih relevan** dan kemungkinan besar belum ada padanannya di stack baru.
 
-**Rekomendasi:** jangan merge apa adanya. Pilih satu:
-1. **Port ulang** hanya bagian `web-internal` (+ padanan gate-nya di `packages/domain`/`apps/api`
-   bila perlu) sebagai PR baru dari `main` terbaru, lalu tutup #58.
-2. Tutup #58 sebagai obsolete kalau perilakunya sudah terwakili oleh C-01 (`leadListScope` +
-   RLS) — **verifikasi dulu**, jangan diasumsikan.
+**Sudah diverifikasi di `main` (2026-07-28):** `web-internal/src/components/Sidebar.tsx` **belum**
+punya gating per divisi. Yang ada hanya `showAdmin` (director/od) dan dua link portal
+(`role.level === 'lead'` / director / od) — **bukan** penyembunyian menu Ads/KOL/Creative/Finance/dst
+dari Sales staff yang jadi inti #58. Jadi perilaku itu **masih hilang** di stack baru.
 
-Cek dulu apakah gating sidebar per divisi sudah ada di `web-internal` versi `main` sekarang; kalau
-sudah, opsi 2. Kalau belum, opsi 1.
+**Rekomendasi (opsi 1):** buka PR baru dari `main` terbaru yang mem-port **hanya bagian
+`web-internal`** dari #58 — tabel gate per item nav, simetris untuk semua divisi, dengan OD/Director
+tetap melihat semua dan header seksi otomatis tersembunyi bila kosong. Abaikan bagian `backend/`-nya
+(Go beku; padanan server-side-nya sudah ada lewat C-01 `leadListScope` + RLS). Lalu **tutup #58**
+dengan komentar yang menyebut PR penggantinya.
+
+Catatan saat mem-port: sidebar hanya menyembunyikan, **server tetap otoritas akhir** — jangan sampai
+gate UI dipakai sebagai pengganti gate endpoint.
 
 ---
 
