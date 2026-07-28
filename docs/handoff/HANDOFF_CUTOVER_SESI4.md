@@ -181,13 +181,18 @@ Baris Nano KOL itu sekaligus memperlihatkan **anomali O25 (a)** apa adanya: qty 
 
 ## 4. TIKET BERIKUTNYA — sisa C-04
 
-### 4.1 Seed MSL — SUDAH SELESAI. QA UI: separuh lolos, sisanya terhalang PR #60 belum merge
+### 4.1 Seed MSL — SELESAI, QA UI LULUS di produksi ✅
 
-QA di preview PR #61 (2026-07-28):
+> **Lanjutan sesi ini ada di `HANDOFF_CUTOVER_SESI5.md`** — #59/#60/#61 semuanya ter-merge ke `main`.
 
-- ✅ **`/master-services` + `/sales/kalkulator` menampilkan 32 layanan** dengan satuan, batas
-  minimal, dan harga yang persis dari seed.
-- ❌ **Panel "Ringkasan" → `internal server error`.** **BUKAN cacat seed dan BUKAN cacat branch ini.**
+QA final (setelah #60 ter-merge dan `main` ter-deploy):
+
+- ✅ `/master-services` → **32 layanan** tampil.
+- ✅ `/sales/kalkulator` → **200**, `Estimasi Nilai Rp. 71.330.000,00`, `Total Komisi Rp. 0,00`
+  (Rp0 = nilai sah per O24).
+
+Sebelum #60 masuk, panel "Ringkasan" sempat `internal server error` — **BUKAN cacat seed dan BUKAN
+cacat branch ini.** Riwayatnya disimpan di sini supaya tidak didiagnosa ulang:
 
 **Akar masalah (sudah diverifikasi, jangan didiagnosa ulang):** `web-internal/next.config.ts:9–13`
 memproksi `/api/v1/*` ke `BACKEND_URL`; bila env itu tidak di-set khusus untuk environment Preview,
@@ -199,10 +204,11 @@ Buktinya: route yang sama di branch ini dijalankan lewat **HTTP sungguhan** (`ne
 DB lokal berisi 32 layanan hasil seed yang sama) → **HTTP 200**, `Nano KOL qty 3 = Rp. 55.500.000,00`,
 `GMV Max 8,5jt = Rp. 9.435.000,00`.
 
-**Yang menutup ini: merge #59 → #60.** Begitu `main` men-deploy `quoteToWire`, kalkulator hidup di
-semua environment. Alternatif sementara kalau perlu QA sebelum merge: set `BACKEND_URL` untuk
-environment **Preview** di project Vercel `web-internal-mea` ke URL preview `agency-app-api` milik PR
-yang sama — tapi URL preview berubah tiap branch, jadi ini tambalan sekali pakai, bukan perbaikan.
+**Yang menutup ini: merge #59 → #60 — SUDAH DILAKUKAN** (`b47e273`, `1bb1b52`), dan kalkulator
+terbukti 200 di produksi sesudahnya. Catatan sisa: `BACKEND_URL` tetap tidak di-set untuk environment
+**Preview** di project Vercel `web-internal-mea`, jadi preview FE **selalu** memanggil API produksi —
+artinya preview tidak pernah menguji API dari branch yang sama. Kalau mau QA FE↔API per-PR sungguhan,
+set env itu per-environment (dicatat sebagai utang di `HANDOFF_CUTOVER_SESI5.md` §7 butir 6).
 
 **Kalau MSL perlu direvisi nanti** (mis. koreksi anomali O25 Nano KOL): ubah
 `supabase/seed/msl_kalkulator.csv`, lalu jalankan ulang `--apply`. Baris yang berubah naik versi
