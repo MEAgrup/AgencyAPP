@@ -7,9 +7,9 @@
 
 ## 0. JAWABAN SINGKAT — apa yang berubah sesi ini?
 
-C-04 butir data #4 (**Master Service List 0 baris**) sekarang punya **alatnya** dan alat itu
-**sudah terbukti jalan end-to-end**. Yang belum: menjalankannya ke project live `CDPS SG`,
-karena itu butuh `DATABASE_URL` produksi — pagar yang sama dengan 3 SKIP C-03.
+C-04 butir data #4 (**Master Service List 0 baris**) **SELESAI** — alatnya dibuat, diverifikasi, lalu
+**benar-benar dijalankan ke project live `CDPS SG`**. `master_services` sekarang **32 baris ber-versi**,
+bukan 0. Closing tidak lagi terhalang MSL kosong.
 
 | Lapisan | Status |
 |---|---|
@@ -17,7 +17,7 @@ karena itu butuh `DATABASE_URL` produksi — pagar yang sama dengan 3 SKIP C-03.
 | Skema DB repo = live `CDPS SG` | ✅ selesai (O38, sesi 3) |
 | Verifikasi paritas (C-03) | ✅ FAIL = 0, **3 SKIP** masih butuh akses deployment |
 | **C-04 · seed MSL — alat + verifikasi** | ✅ **SELESAI sesi ini** |
-| **C-04 · seed MSL — apply ke `CDPS SG`** | ❌ belum (butuh `DATABASE_URL` produksi + NIK Sales Head riil) |
+| **C-04 · seed MSL — apply ke `CDPS SG`** | ✅ **SELESAI sesi ini** — 32 dibuat, rerun 32 dilewati (lihat §3.1) |
 | C-04 · import lead historis (O22) | ❌ belum |
 | C-04 · aktor produksi (O34/O33/O26/O35) | ❌ belum — **memblokir pada keputusan manusia** |
 | Retire Go (C-05) | ❌ belum (memang sesudah cutover) |
@@ -121,8 +121,39 @@ menjadikannya nilai final. Pembaca lama bisa salah simpul bahwa seed masih diblo
 | **Ubah harga → rerun** | `versi_baru=1`, v1 **tetap utuh** (append, bukan mutasi) |
 | **Gate role** | staff Sales → pesan BI verbatim, **nol tulis**; Director → lolos |
 
+### 3.1 Apply ke live `CDPS SG` — SUDAH DIJALANKAN (2026-07-28)
+
+Dijalankan Yohan dari Mac-nya (sandbox sesi ini tidak bisa menyentuh `CDPS SG`: `*.vercel.app`
+dijawab `CONNECT tunnel failed 403` oleh proxy, dan egress TCP 6543 ditutup — dinding yang sama
+dengan 3 SKIP C-03). `DATABASE_URL` diambil dari env var Vercel project `agency-app-api`, jadi
+string yang dipakai identik dengan yang dipakai API produksi.
+
+| Tahap | Hasil |
+|---|---|
+| dry-run | `dibuat=32 versi_baru=0 dilewati=0 error=0` — nol tulis |
+| apply | `dibuat=32 versi_baru=0 dilewati=0 error=0` |
+| rerun apply (uji idempotensi) | `dibuat=0 versi_baru=0 dilewati=32 error=0` |
+
+Aktor: NIK **`2101180004`**. Fakta bahwa dry-run sampai mencetak rencana **membuktikan** NIK itu lolos
+`msl.canEditMasterServices` — gate izin dievaluasi paling awal, sebelum satu baris pun divalidasi,
+jadi aktor tanpa hak berhenti dengan `[anda tidak memiliki akses untuk mengubah master service list]`
+tanpa pernah melihat rencana. `created_by` + 32 baris audit tercatat permanen atas NIK ini.
+
+`dibuat=32` (bukan sebagian "dilewati") juga mengonfirmasi ulang bahwa `master_services` memang
+benar-benar 0 baris sebelum ini, sesuai temuan sesi 3.
+
+**Pelajaran operasional (kalau mengulang ini untuk import berikutnya):** tiga percobaan pertama gagal
+bukan karena kode, tapi karena cara menjalankan — (1) `npm run -w` dijalankan dari `~`, bukan dari
+root repo; (2) blok multi-baris di-paste sekaligus sehingga perintah `read -s` menelan baris
+BERIKUTNYA sebagai nilai; (3) clipboard tertimpa saat menyalin perintah `$(pbpaste)` dari chat,
+sehingga yang ter-export justru perintah itu sendiri. Pola yang akhirnya jalan: copy nilai dari
+Vercel, lalu panggil `export DATABASE_URL="$(pbpaste)"` **dari history (panah atas)** — jangan
+menyalin apa pun setelah menyalin nilainya. Verifikasi tanpa membocorkan isi: cek `${#DATABASE_URL}`
++ 13 karakter pertama saja.
+
 ### Jalur uang benar-benar hidup di atas MSL hasil seed
-Kuotasi M0 dihitung dari data yang baru di-seed, keempat `pricing_mode` kena:
+Diuji di **DB lokal termigrasi** (bukan di live — ini bagian verifikasi alat, bukan verifikasi
+produksi). Kuotasi M0 dihitung dari data hasil seed; keempat `pricing_mode` kena:
 
 ```
 Store Management (Paket)      qty=1  → Rp. 6.000.000,00    (flat)
@@ -150,23 +181,21 @@ Baris Nano KOL itu sekaligus memperlihatkan **anomali O25 (a)** apa adanya: qty 
 
 ## 4. TIKET BERIKUTNYA — sisa C-04
 
-### 4.1 Yang bisa dikerjakan tanpa keputusan manusia
-**Jalankan seed MSL ke `CDPS SG`.** Satu-satunya prasyarat teknis: `DATABASE_URL` pooler produksi +
-NIK Sales Head/Director dari roster riil (68 karyawan sudah ada di live).
+### 4.1 Seed MSL — SUDAH SELESAI, sisa QA UI saja
+Apply ke live sudah dijalankan (§3.1). **Yang belum diverifikasi: sisi UI.** Buka di deployment:
 
-```bash
-export DATABASE_URL='postgres://...@...pooler.supabase.com:6543/postgres'
-npm run msl:seed -w @cdps/api -- --actor <NIK_SALES_HEAD>            # dry-run: harap "akan dibuat" 32
-npm run msl:seed -w @cdps/api -- --actor <NIK_SALES_HEAD> --apply    # apply
-npm run msl:seed -w @cdps/api -- --actor <NIK_SALES_HEAD> --apply    # rerun: harap "dilewati=32"
-```
+- `/master-services` → harus tampil **32 layanan**, semua `version_no` 1
+- `/sales/kalkulator` → coba hitung satu penawaran (mis. Nano KOL qty 3 → harus Rp55.500.000 karena
+  min_floor 10 + PPN; GMV Max passthrough 8,5jt → Rp9.435.000)
 
-Verifikasi sesudahnya: `master_services` = 32, `master_service_versions` = 32 (semua `version_no` 1),
-32 baris `audit_log` `master_service`/`create`, lalu buka `/master-services` di FE dan coba
-`/sales/kalkulator`. Catat hasilnya di `CUTOVER_UAT_REPORT_20260728.md`.
+Kalau kalkulator error 500, itu **bukan** soal seed — periksa dulu apakah perbaikan C03-F2
+(`quoteToWire` di `/api/v1/sales/quote-preview`) sudah ter-deploy; perbaikan itu ada di PR #60 yang
+**belum di-merge**, jadi deployment `main` masih memuat bug bigint-nya.
 
-> **Aktor:** pakai NIK **Sales Head riil**, bukan `EMP-0006` (itu fixture lokal). `created_by` baris
-> MSL akan tercatat permanen di audit — jangan tinggalkan jejak fixture di jalur produksi (DoD C-04).
+**Kalau MSL perlu direvisi nanti** (mis. koreksi anomali O25 Nano KOL): ubah
+`supabase/seed/msl_kalkulator.csv`, lalu jalankan ulang `--apply`. Baris yang berubah naik versi
+otomatis, versi lama tetap utuh sehingga deal yang sudah mengunci versi lama tetap bisa direkomputasi.
+Jangan pernah UPDATE baris MSL langsung di SQL.
 
 ### 4.2 Yang masih memblokir pada keputusan manusia
 Tidak berubah dari sesi 3 — **O34** (aktor Wave 2 + lead Marketing/BD), **O33** (roster HR riil tanpa
@@ -181,8 +210,8 @@ enforcement budget GMV Max), **O9** (target periode M14, non-blocking).
   keluar internet (network policy sesi ini menolak `*.vercel.app`).
 - **Konfirmasi ke pemilik:** data Railway/MySQL riil atau UAT? (asumsi tercatat: UAT / OQ-2 A1.)
 
-**DoD C-04 (tidak berubah):** tak ada fixture UAT tersisa di jalur produksi; login riil semua role
-lolos; MSL terisi & ber-versi.
+**DoD C-04:** tak ada fixture UAT tersisa di jalur produksi; login riil semua role lolos;
+~~MSL terisi & ber-versi~~ ✅ **terpenuhi** (32 layanan ber-versi di `CDPS SG`, aktor NIK riil).
 
 ---
 
