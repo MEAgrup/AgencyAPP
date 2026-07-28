@@ -47,6 +47,9 @@
  *   input) + the read-only Auto-Metrics Engine (Lead-by-Dashboard/Real/Quality,
  *   Attributed Sales last-touch, CPL/CPRL/ROAS, Collected-ROAS, junk breakdown) and
  *   the Lead/Staff dashboard split. Reuses `campaign` for the §5 gate + Online/Offline.
+ * - notification: the in-app inbox (Phase 0 v2 §9) — the READ + mark-as-read side of
+ *   the FROZEN 15-event catalog. Emission stays in @cdps/core `emit()`/`notify_emit`;
+ *   there is no delete path here, by house rule §8.
  *
 
  * An @cdps/api route handler is a thin shell: resolve the actor from the JWT
@@ -73,3 +76,4 @@ export * as livestream from './livestream';
 export * as campaign from './campaign';
 export * as marketing from './marketing';
 export * as portal from './portal';
+export * as notification from './notification';

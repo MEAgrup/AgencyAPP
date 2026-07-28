@@ -3,7 +3,7 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { account, ads, campaign, creative, kol, leads, livestream, marketing, msl, task } from '@cdps/domain';
+import type { account, ads, campaign, creative, kol, leads, livestream, marketing, msl, notification, task } from '@cdps/domain';
 import {
   amWorkloadToWire,
   assetToWire,
@@ -23,9 +23,11 @@ import {
   bookingToWire,
   campaignToWire,
   creatorListToWire,
+  inboxToWire,
   masterServiceToWire,
   metricEntryToWire,
   metricsToWire,
+  notificationToWire,
   optimizationToWire,
   pendingBlockRequestToWire,
   poolRowToWire,
@@ -561,5 +563,45 @@ describe('M2 marketing wire mappers', () => {
       collected_sales: 'Rp. 4.000.000,00', collected_sales_decimal: '4000000.00', collected_roas: '0.80',
       junk_breakdown: [{ reason: '[Bukan seller]', count: 2 }],
     });
+  });
+});
+
+describe('notification wire mappers (C-02)', () => {
+  const read: notification.Notification = {
+    id: '9007199254740993', // beyond Number.MAX_SAFE_INTEGER — must stay a string
+    eventType: 'm0.negotiation.decision',
+    entityType: 'attempt',
+    entityId: 'PRSP-202607-0001',
+    deepLink: '/attempts/PRSP-202607-0001',
+    actor: 'EMP-SPV',
+    createdAt: new Date('2026-07-28T03:00:00.000Z'),
+    readAt: new Date('2026-07-28T04:30:00.000Z'),
+  };
+
+  it('notificationToWire maps every field, ids as strings and dates as ISO', () => {
+    expect(notificationToWire(read)).toEqual({
+      id: '9007199254740993',
+      event_type: 'm0.negotiation.decision',
+      entity_type: 'attempt',
+      entity_id: 'PRSP-202607-0001',
+      deep_link: '/attempts/PRSP-202607-0001',
+      actor: 'EMP-SPV',
+      created_at: '2026-07-28T03:00:00.000Z',
+      read_at: '2026-07-28T04:30:00.000Z',
+    });
+  });
+
+  it('an unread row carries read_at: null, not an omitted key', () => {
+    const wire = notificationToWire({ ...read, readAt: null });
+    expect(wire.read_at).toBeNull();
+    expect('read_at' in wire).toBe(true);
+  });
+
+  it('inboxToWire builds the { data, unread_count } envelope the FE expects', () => {
+    expect(inboxToWire({ items: [read], unreadCount: 3 })).toEqual({
+      data: [notificationToWire(read)],
+      unread_count: 3,
+    });
+    expect(inboxToWire({ items: [], unreadCount: 0 })).toEqual({ data: [], unread_count: 0 });
   });
 });

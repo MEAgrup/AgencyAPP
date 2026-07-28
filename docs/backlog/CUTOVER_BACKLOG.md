@@ -10,7 +10,7 @@
 ## 0. Kondisi as-is (terverifikasi 2026-07-28)
 
 **Sudah jalan:**
-- `apps/api` — **159 route** TypeScript (Next.js), cakupan M0–M15 kecuali catatan §C-02.
+- `apps/api` — **161 route** TypeScript (Next.js), cakupan M0–M15 penuh (2 route `notifications` ditambahkan C-02, 2026-07-28).
 - `packages/core` (7 engine: statemachine, money, ident, audit, permission, bi, notification, tz) + `packages/domain` (20 modul) — ber-test.
 - Supabase **`CDPS SG`** (`egddxfcnrtecheiykhlf`, ap-southeast-1, PG17) — 5x tabel RLS-enabled, engine state machine sbg data (`sm_machines` 14, `sm_edges` 94, `sm_terminal_states` 20, `notif_events` 15), GoTrue + `custom_access_token_hook`.
 - **Vercel live**: project `agency-app-api` (= `apps/api`) & `web-internal-mea` (= `web-internal`). QA manual FE sudah bisa dilakukan (login + baca data ⇒ hook aktif & kredensial ter-import).
@@ -28,13 +28,13 @@
 |---|---|---|---|---|
 | **C-00** | ~~CI mati — runner tidak teralokasi~~ ✅ **SELESAI 2026-07-28** | — | — | — |
 | **C-01** | ~~O37 — otorisasi read (RLS ter-bypass)~~ ✅ **SELESAI 2026-07-28** | — | — | — |
-| **C-02** | Endpoint `notifications` di `apps/api` | 🟠 P1 | 0,5–1 hari | **YA** (FE rusak) |
+| **C-02** | ~~Endpoint `notifications` di `apps/api`~~ ✅ **SELESAI 2026-07-28** | — | — | — |
 | **C-03** | UAT paritas end-to-end di stack baru | 🟠 P1 | 2–3 hari | **YA** |
 | **C-04** | Cutover data + aktor produksi | 🟠 P1 | 2–4 hari | **YA** |
 | **C-05** | Retire Go: arsip `backend/`, bersihkan CI & config Railway | 🟡 P2 | 0,5 hari | tidak (sesudahnya) |
 | **C-06** | `web-client-portal` (M15-C2) | ⚪ ditunda | — | **TIDAK** (by design) |
 
-**Urutan wajib:** ~~C-00~~ ✅ → ~~C-01~~ ✅ → C-02 → C-03 → C-04 → (gate go/no-go manusia) → C-05.
+**Urutan wajib:** ~~C-00~~ ✅ → ~~C-01~~ ✅ → ~~C-02~~ ✅ → **C-03** → C-04 → (gate go/no-go manusia) → C-05.
 C-06 di luar jalur cutover.
 
 **Total realistis: ~1,5–2 minggu kerja Claude** + gate keputusan manusia (Yohan & Nerissa, OQ-1).
@@ -133,7 +133,49 @@ C-06 di luar jalur cutover.
 
 ---
 
-## C-02 — Endpoint `notifications` di `apps/api` 🟠
+## C-02 — Endpoint `notifications` di `apps/api` ✅ SELESAI (2026-07-28)
+
+> **RESOLVED.** Dua route baru + satu modul domain; **NOL migrasi**, **NOL event baru**
+> (katalog tetap **15 FROZEN**), **NOL string BI baru** (`[id tidak valid]` di-port
+> verbatim dari Go `handleMarkRead`).
+>
+> - **`packages/domain/src/notification.ts`** (baru): `list(sql, actor, unreadOnly)`,
+>   `unreadCount(sql, actor)`, `inbox(...)` = komposisi keduanya (dipakai route supaya
+>   `data` + `unread_count` datang dari SATU transaksi/snapshot), `markRead(sql, actor, id)`,
+>   `parseId(raw)`. Semua query membawa predikat `recipient_employee_id = actor.employeeId`.
+> - **`GET /api/v1/notifications`** (+ `?unread=1`) — lewat `readAsActor` (pola C-01), jadi
+>   policy `notifications_select` benar-benar berjalan. `?unread=1` menyaring **daftar saja**;
+>   `unread_count` tetap TOTAL karena badge header menampilkan angka yang sama di kedua tab.
+> - **`POST /api/v1/notifications/{id}/read`** — verb & path identik Go. Lewat `db()` +
+>   RPC `mark_notification_read` (satu-satunya jalur UPDATE). **Tidak ada** route DELETE.
+> - `notificationToWire` + `inboxToWire` di `apps/api/src/lib/wire.ts`; `id` tetap **string**
+>   (kolom `bigint`, postgres.js kembalikan int8 sebagai string = tipe FE `NotificationItem.id`).
+>
+> **Keputusan kecil ter-log:** modul ini **sengaja** mengulang predikat kepemilikan di SQL
+> meski C-01 memutuskan visibilitas baris = urusan RLS. Alasan: `notifications_select` adalah
+> satu kesamaan tunggal (`recipient = jwt_employee_id()`) yang merupakan *definisi* kepemilikan,
+> bukan kebijakan multi-arm seperti `leads_select` yang bisa divergen — dan jalur tulis
+> (`markRead`) berjalan sebagai service-role tanpa policy sama sekali, jadi predikatnya wajib
+> eksplisit di sana. Sesuai instruksi §C-02 butir 1 backlog ini.
+>
+> **Mark-read = idempoten & senyap (paritas Go):** id tak dikenal, milik orang lain, atau sudah
+> dibaca → 0 baris berubah, tetap `200 {"status":"ok"}`. 404/403 di sini justru membocorkan
+> apakah id notifikasi orang lain ada.
+>
+> **Bukti (lokal, PG16 fresh + 53 migrasi + seed):** `@cdps/domain` **422** (+11 `notification.test.ts`:
+> own-only, urutan newest-first, idempotensi mark-read tanpa geser timestamp, no-op lintas-penerima,
+> DELETE ditolak trigger, `?unread=1` menyaring list tapi tidak count, plus 3 test lewat `withClaims`
+> — penerima lain **0** baris, **Director pun 0** baris karena notifikasi bukan data oversight).
+> `@cdps/api` **101** (+3 wire), `@cdps/core` 112, `@cdps/db` 9. Typecheck 4 workspace bersih;
+> `next build` hijau (dua route terdaftar); invariant ident/immutability/rls/auth_claims **PASS**;
+> tabel tetap **53**.
+>
+> **Smoke e2e nyata** (API `next start` → PG lokal, token HS256): tanpa auth **401** di kedua route;
+> penerima A hanya melihat 2 barisnya & B hanya 1; mark-read → `unread_count` 2→1; mark ulang tak
+> mengubah apa pun; **B menandai notifikasi A → unread A tetap 1**; `/notifications/abc/read` →
+> **400 `[id tidak valid]`**.
+
+<details><summary>Uraian tiket asli (arsip)</summary>
 
 **Masalah:** engine notifikasi sudah di-port (`packages/core/src/notification.ts`: `CATALOG` 15 event FROZEN, `emit()` → RPC `notify_emit`) dan tabel `notifications` + `notif_events` sudah ada, **tetapi tidak ada route `notifications` di `apps/api`** (terverifikasi: nol file). FE sudah memanggilnya:
 - `web-internal/src/lib/use-unread-count.ts` → `GET /notifications?unread=1`, membaca `res.unread_count` (polling 30 dtk, badge header).
@@ -152,6 +194,11 @@ Referensi perilaku (frozen, jangan didesain ulang): `backend/internal/httpapi/no
 4. **Immutability:** hanya `read_at` yang boleh berubah; tak ada path DELETE (house rule §8 — notifikasi tak pernah bisa dihapus).
 
 **DoD:** unit test (milik-sendiri saja, mark-read idempoten, tak ada DELETE), badge FE hidup saat QA, nol event katalog baru.
+
+</details>
+
+**Sisa untuk C-03:** QA badge di FE ter-deploy (Vercel) belum dijalankan — smoke di atas membuktikan
+kontrak API-nya, bukan render badge-nya. Masukkan ke walk C-03.
 
 ---
 
