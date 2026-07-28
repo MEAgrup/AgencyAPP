@@ -7,7 +7,7 @@
  */
 import { performance } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { readAsActor } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 import { perfSnapshotToWire } from '@/lib/wire';
 
@@ -16,7 +16,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
     const actor = requireActor(request);
     const { id } = await ctx.params;
     const period = new URL(request.url).searchParams.get('period') ?? '';
-    const snap = await performance.getSnapshot(db(), actor, id, period);
+    const snap = await readAsActor(actor, (sql) => performance.getSnapshot(sql, actor, id, period));
     return json(perfSnapshotToWire(snap));
   });
 }

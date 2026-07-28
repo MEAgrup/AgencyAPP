@@ -5,7 +5,7 @@
  */
 import { ads } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { readAsActor } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 import { campaignToWire } from '@/lib/wire';
 
@@ -13,7 +13,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   return handle(async () => {
     const actor = requireActor(request);
     const { id } = await ctx.params;
-    const c = await ads.getCampaign(db(), actor, id);
+    const c = await readAsActor(actor, (sql) => ads.getCampaign(sql, actor, id));
     return json(campaignToWire(c));
   });
 }

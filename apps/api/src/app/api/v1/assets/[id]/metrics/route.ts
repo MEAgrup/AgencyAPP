@@ -5,7 +5,7 @@
  */
 import { task } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { readAsActor } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 import { metricsToWire } from '@/lib/wire';
 
@@ -13,7 +13,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   return handle(async () => {
     const actor = requireActor(request);
     const { id } = await ctx.params;
-    const m = await task.assetMetrics(db(), actor, id);
+    const m = await readAsActor(actor, (sql) => task.assetMetrics(sql, actor, id));
     return json(metricsToWire(m));
   });
 }

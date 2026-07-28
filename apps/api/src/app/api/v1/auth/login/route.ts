@@ -11,7 +11,7 @@
 import { auth } from '@cdps/domain';
 import { actorFromToken, sessionCookie } from '@/lib/auth';
 import { passwordGrant } from '@/lib/gotrue';
-import { db } from '@/lib/db';
+import { readAsActor } from '@/lib/db';
 import { BadRequestError, handle, json, readJson, UnauthorizedError } from '@/lib/http';
 
 export async function POST(request: Request): Promise<Response> {
@@ -29,7 +29,9 @@ export async function POST(request: Request): Promise<Response> {
 
     let me;
     try {
-      me = await auth.getMe(db(), actor);
+      // Same scoped read as GET /me: the token is already verified, so the
+      // profile lookup runs under RLS (self-read) rather than as service role.
+      me = await readAsActor(actor, (sql) => auth.getMe(sql, actor));
     } catch (err) {
       if (err instanceof auth.NotFoundError) {
         throw new UnauthorizedError('[sesi tidak valid, silahkan login kembali]');

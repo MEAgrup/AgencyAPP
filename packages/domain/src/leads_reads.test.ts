@@ -9,8 +9,10 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { createClient, type Sql } from '@cdps/db';
 import { permission } from '@cdps/core';
 import {
+  canReadPool,
   claim,
   leadDetailView,
+  leadListScope,
   leadsDatabase,
   NotFoundError,
   poolBoard,
@@ -123,5 +125,58 @@ describeDb('leadDetailView', () => {
 
   it('throws NotFoundError for an unknown lead', async () => {
     await expect(leadDetailView(sql, 'LEAD-000000-0000')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+/**
+ * O37 endpoint gates (pure — no DB). These decide whether an actor may reach the
+ * Pool board / Leads Database at all; ROW visibility for those who may is the
+ * leads_select RLS policy's job (supabase/tests/rls_checks.sql §10-13).
+ * Ported from Go `module1_leads/reads.go`.
+ */
+describe('read-scope gates (O37)', () => {
+  const role = (division: string, level: string, extra: Partial<permission.Role> = {}): Actor => ({
+    employeeId: 'ZZ-GATE',
+    role: permission.makeRole({ division, level, ...extra }),
+  });
+
+  describe('canReadPool', () => {
+    it('admits Sales at any level', () => {
+      expect(canReadPool(role('Sales', 'staff'))).toBe(true);
+      expect(canReadPool(role('Sales', 'lead'))).toBe(true);
+    });
+
+    it('admits the read-everywhere layered roles', () => {
+      expect(canReadPool(role('', '', { od: true }))).toBe(true);
+      expect(canReadPool(role('', '', { director: true }))).toBe(true);
+    });
+
+    it('refuses every other division — including a Marketing lead', () => {
+      expect(canReadPool(role('Marketing', 'lead'))).toBe(false);
+      expect(canReadPool(role('Creative', 'staff'))).toBe(false);
+      expect(canReadPool(role('', ''))).toBe(false);
+    });
+  });
+
+  describe('leadListScope', () => {
+    it('gives Director and OD the unnarrowed list', () => {
+      expect(leadListScope(role('', '', { director: true }))).toEqual({ marketingStaffScope: false });
+      expect(leadListScope(role('', '', { od: true }))).toEqual({ marketingStaffScope: false });
+    });
+
+    it('narrows Marketing staff to their own leads, but not a Marketing lead', () => {
+      expect(leadListScope(role('Marketing', 'staff'))).toEqual({ marketingStaffScope: true });
+      expect(leadListScope(role('Marketing', 'lead'))).toEqual({ marketingStaffScope: false });
+    });
+
+    it('admits a Sales lead but denies Sales staff (Pool is their door, not this list)', () => {
+      expect(leadListScope(role('Sales', 'lead'))).toEqual({ marketingStaffScope: false });
+      expect(leadListScope(role('Sales', 'staff'))).toBeNull();
+    });
+
+    it('denies an unrelated or unmapped division', () => {
+      expect(leadListScope(role('Creative', 'lead'))).toBeNull();
+      expect(leadListScope(role('', ''))).toBeNull();
+    });
   });
 });

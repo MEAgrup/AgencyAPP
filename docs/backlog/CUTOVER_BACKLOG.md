@@ -27,14 +27,14 @@
 | # | Tiket | Prioritas | Estimasi | Blocking cutover? |
 |---|---|---|---|---|
 | **C-00** | ~~CI mati — runner tidak teralokasi~~ ✅ **SELESAI 2026-07-28** | — | — | — |
-| **C-01** | O37 — otorisasi read (RLS ter-bypass) | 🔴 P0 keamanan | 2–4 hari | **YA** |
+| **C-01** | ~~O37 — otorisasi read (RLS ter-bypass)~~ ✅ **SELESAI 2026-07-28** | — | — | — |
 | **C-02** | Endpoint `notifications` di `apps/api` | 🟠 P1 | 0,5–1 hari | **YA** (FE rusak) |
 | **C-03** | UAT paritas end-to-end di stack baru | 🟠 P1 | 2–3 hari | **YA** |
 | **C-04** | Cutover data + aktor produksi | 🟠 P1 | 2–4 hari | **YA** |
 | **C-05** | Retire Go: arsip `backend/`, bersihkan CI & config Railway | 🟡 P2 | 0,5 hari | tidak (sesudahnya) |
 | **C-06** | `web-client-portal` (M15-C2) | ⚪ ditunda | — | **TIDAK** (by design) |
 
-**Urutan wajib:** ~~C-00~~ ✅ → C-01 → C-02 → C-03 → C-04 → (gate go/no-go manusia) → C-05.
+**Urutan wajib:** ~~C-00~~ ✅ → ~~C-01~~ ✅ → C-02 → C-03 → C-04 → (gate go/no-go manusia) → C-05.
 C-06 di luar jalur cutover.
 
 **Total realistis: ~1,5–2 minggu kerja Claude** + gate keputusan manusia (Yohan & Nerissa, OQ-1).
@@ -83,7 +83,28 @@ C-06 di luar jalur cutover.
 
 ---
 
-## C-01 — O37: otorisasi jalur baca (RLS ter-bypass) 🔴
+## C-01 — O37: otorisasi jalur baca ✅ SELESAI (2026-07-28)
+
+> **RESOLVED — opsi (c) dipilih & dieksekusi.** Detail lengkap di `docs/DECISIONS.md`
+> (entri Decided 2026-07-28). Ringkas:
+> - `withClaims` (@cdps/db) + `readAsActor`/`actorClaims` (apps/api) → **61 handler GET**
+>   kini membaca sebagai role `authenticated` dgn klaim pemanggil, jadi RLS BERLAKU.
+>   Tulis tak berubah (service-role + RPC SECURITY DEFINER).
+> - Gate app-layer hanya untuk aturan endpoint: `canReadPool`/`leadListScope`
+>   (port 1:1 dari Go) + `leads.ForbiddenError` → 403 ber-pesan BI.
+> - Migrasi **20260102000005** menambah arm `jwt_owns_lead_campaign` supaya RLS =
+>   predikat Go `canReadLead` (tanpa itu Marketing staff kehilangan lead campaign sendiri).
+> - **Temuan tambahan yang ikut ditutup:** 13 handler GET pembawa data (a.l. `/clients`,
+>   `/reminders`, `/transactions/{id}/commission`, `/leads`) ternyata **tanpa autentikasi
+>   sama sekali** — semua kini di-gate `requireActor`.
+> - **Deviasi tercatat:** penolakan baca SATU lead kini 404 (row ter-filter RLS), bukan 403
+>   seperti Go. Endpoint LIST tetap 403.
+> - **Bukti:** `rls_checks.sql` §10-13 (gagal bila policy dikembalikan ke baseline);
+>   `reads_rls.test.ts` 5 test; demo PG16: lintas-scope service-role **1** baris vs
+>   `authenticated` **0** baris. Seluruh suite + invariant hijau, tabel tetap 53.
+
+<details><summary>Uraian masalah asli (arsip)</summary>
+
 
 **Masalah (akar, terverifikasi):** `apps/api/src/lib/db.ts` membuat satu koneksi proses-wide dari `DATABASE_URL` sebagai **role privileged/service** → **RLS tidak berlaku di semua route baca**. Write relatif aman (lewat RPC `SECURITY DEFINER`: `ident_next`, `sm_transition`, `notify_emit`, …), tapi **read tidak ter-scope** oleh RLS maupun gate app-layer. Akibat: user terautentikasi mana pun bisa membaca data di luar scope perannya (Pool board, Leads DB, finance, dst.). Celah **lintas-modul**, bukan spesifik satu modul.
 
@@ -105,6 +126,8 @@ C-06 di luar jalur cutover.
 4. Test permission per role **termasuk OD/Director berlapis** (DoD `CLAUDE.md`): staff = data sendiri, lead/SPV = divisi, OD = read-only semua, Director = penuh.
 5. Perbarui/`extend` `supabase/tests/rls_checks.sql` bila policy berubah.
 6. Catat keputusan di `docs/DECISIONS.md` (tutup O37).
+
+</details>
 
 **DoD:** ada test yang **gagal sebelum fix & lulus sesudahnya** untuk minimal 3 kasus lintas-scope (mis. Sales staff A tidak bisa membaca lead milik staff B; Marketing staff tidak melihat Pool penuh; OD tidak bisa menulis). CI hijau. O37 tertutup di DECISIONS.
 
@@ -192,7 +215,7 @@ Masih hanya `README.md`. Ditunda resmi (DECISIONS 2026-07-18) menunggu security 
 
 **Gate go/no-go cutover (PIC: Yohan & Nerissa — OQ-1):**
 - [x] **C-00 selesai** — CI hijau kembali (run `30328573444`); `main` re-run hijau (run `30278802079`), PR #55–#57 tervalidasi.
-- [ ] C-01 selesai, O37 tertutup di DECISIONS.
+- [x] **C-01 selesai** — O37 tertutup di DECISIONS (opsi c).
 - [ ] C-02 selesai, badge & halaman notifikasi hidup.
 - [ ] C-03 report FAIL = 0, SKIP beralasan.
 - [ ] C-04 data + aktor produksi siap, tak ada fixture.

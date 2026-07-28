@@ -10,14 +10,14 @@
  */
 import { performance } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { db, readAsActor } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
 import { perfWeightToWire } from '@/lib/wire';
 
 export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
     const actor = requireActor(request);
-    const list = await performance.listWeights(db(), actor);
+    const list = await readAsActor(actor, (sql) => performance.listWeights(sql, actor));
     return json({ data: list.map(perfWeightToWire) });
   });
 }

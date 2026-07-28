@@ -6,14 +6,14 @@
  */
 import { account } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { readAsActor } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 import { intakeClientToWire } from '@/lib/wire';
 
 export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
     const actor = requireActor(request);
-    const rows = await account.intakeQueue(db(), actor);
+    const rows = await readAsActor(actor, (sql) => account.intakeQueue(sql, actor));
     return json({ data: rows.map(intakeClientToWire) });
   });
 }

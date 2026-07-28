@@ -1,7 +1,7 @@
 /** /api/v1/briefs/{id}/creator-list — the compiled Creator List (M9 §6). */
 import { kol } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { db, readAsActor } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
 import { creatorListToWire } from '@/lib/wire';
 
@@ -17,6 +17,6 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   return handle(async () => {
     const actor = requireActor(request);
     const { id } = await ctx.params;
-    return json(creatorListToWire(await kol.getCreatorList(db(), actor, id)));
+    return json(creatorListToWire(await readAsActor(actor, (sql) => kol.getCreatorList(sql, actor, id))));
   });
 }

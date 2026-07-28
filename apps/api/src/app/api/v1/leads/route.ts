@@ -12,18 +12,26 @@
  */
 import { leads } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { db, readAsActor } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
 import { attemptStubToWire, leadRowToWire, leadStubToWire } from '@/lib/wire';
 
 export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
+    const actor = requireActor(request);
+    // Endpoint gate (O37, ported from Go `leadListScope`): Sales staff and any
+    // unrelated division get the verbatim BI refusal instead of an empty list.
+    // Which ROWS the permitted actors see is then decided by the leads_select
+    // RLS policy, because the query runs through readAsActor.
+    if (!leads.leadListScope(actor)) {
+      throw new leads.ForbiddenError();
+    }
     // web-internal passes optional ?status=<record_status>&q=<name/phone>.
     const params = new URL(request.url).searchParams;
-    const rows = await leads.leadsDatabase(db(), {
+    const rows = await readAsActor(actor, (sql) => leads.leadsDatabase(sql, {
       status: params.get('status') ?? undefined,
       q: params.get('q') ?? undefined,
-    });
+    }));
     return json({ data: rows.map(leadRowToWire) });
   });
 }

@@ -3,14 +3,16 @@
  * for one master service. Ports Go's handleMasterServiceVersions.
  */
 import { msl } from '@cdps/domain';
-import { db } from '@/lib/db';
+import { requireActor } from '@/lib/auth';
+import { readAsActor } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 import { masterServiceToWire } from '@/lib/wire';
 
-export async function GET(_request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
+export async function GET(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   return handle(async () => {
+    const actor = requireActor(request);
     const { id } = await ctx.params;
-    const versions = await msl.listVersions(db(), id);
+    const versions = await readAsActor(actor, (sql) => msl.listVersions(sql, id));
     return json({ data: versions.map(masterServiceToWire) });
   });
 }

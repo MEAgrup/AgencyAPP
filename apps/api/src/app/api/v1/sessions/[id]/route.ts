@@ -5,7 +5,7 @@
  */
 import { livestream } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { readAsActor } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 import { sessionToWire } from '@/lib/wire';
 
@@ -13,7 +13,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   return handle(async () => {
     const actor = requireActor(request);
     const { id } = await ctx.params;
-    const session = await livestream.getSession(db(), actor, id);
+    const session = await readAsActor(actor, (sql) => livestream.getSession(sql, actor, id));
     return json(sessionToWire(session));
   });
 }

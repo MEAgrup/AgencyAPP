@@ -5,14 +5,14 @@
  */
 import { portal } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { readAsActor } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 import { staffLandingToWire } from '@/lib/wire';
 
 export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
     const actor = requireActor(request);
-    const land = await portal.staffLanding(db(), actor, new Date());
+    const land = await readAsActor(actor, (sql) => portal.staffLanding(sql, actor, new Date()));
     return json(staffLandingToWire(land));
   });
 }

@@ -8,7 +8,7 @@
  */
 import { board } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { db, readAsActor } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
 import { dependencyToWire } from '@/lib/wire';
 
@@ -31,7 +31,7 @@ export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
     const actor = requireActor(request);
     const q = new URL(request.url).searchParams;
-    const deps = await board.listDependencies(db(), actor, q.get('source') ?? '', q.get('target') ?? '');
+    const deps = await readAsActor(actor, (sql) => board.listDependencies(sql, actor, q.get('source') ?? '', q.get('target') ?? ''));
     return json({ data: deps.map(dependencyToWire) });
   });
 }

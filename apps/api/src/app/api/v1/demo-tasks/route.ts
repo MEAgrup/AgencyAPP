@@ -8,12 +8,13 @@
  */
 import { demo } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { db, readAsActor } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
-    const tasks = await demo.list(db());
+    const actor = requireActor(request);
+    const tasks = await readAsActor(actor, (sql) => demo.list(sql));
     return json({ tasks });
   });
 }

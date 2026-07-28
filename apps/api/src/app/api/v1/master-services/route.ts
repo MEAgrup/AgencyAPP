@@ -9,7 +9,7 @@
 import { msl } from '@cdps/domain';
 import { tz } from '@cdps/core';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { db, readAsActor } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
 import { masterServiceToWire } from '@/lib/wire';
 
@@ -51,12 +51,13 @@ function toInput(b: ServiceBody): msl.ServiceInput {
 
 export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
+    const actor = requireActor(request);
     // web-internal passes ?effective_at=YYYY-MM-DD (defaults to today) so the
     // Sales calculator can preview the MSL as of any date; fall back to today
     // when absent/malformed.
     const at = new URL(request.url).searchParams.get('effective_at');
     const date = at && /^\d{4}-\d{2}-\d{2}$/.test(at) ? at : tz.dateString(new Date());
-    const services = await msl.listEffectiveAt(db(), date);
+    const services = await readAsActor(actor, (sql) => msl.listEffectiveAt(sql, date));
     return json({ data: services.map(masterServiceToWire) });
   });
 }

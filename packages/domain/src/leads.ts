@@ -31,6 +31,9 @@
 
 import { bi, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
+// Single source of truth for the CDPS division label (Go keeps a module-local
+// copy in module1_leads/bulk.go; here one exported constant serves both).
+import { MARKETING_DIVISION } from './campaign';
 
 /** Authenticated employee + resolved role (from @cdps/core permission). */
 export type Actor = permission.Actor;
@@ -89,6 +92,21 @@ export class BlockedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'LeadBlockedError';
+  }
+}
+
+/**
+ * Read denied by the role matrix — maps to HTTP 403.
+ *
+ * Carries `bi.TRANSITION_ROLE_DENIED` verbatim because that is the exact string
+ * the Go original returns for a denied read (`module1_leads/reads.go` →
+ * `forbidden()` → `statemachine.RoleDeniedMessage`). The port keeps it
+ * bit-for-bit rather than inventing a read-specific message (CLAUDE.md §5).
+ */
+export class ForbiddenError extends Error {
+  constructor(message = bi.TRANSITION_ROLE_DENIED) {
+    super(message);
+    this.name = 'LeadForbiddenError';
   }
 }
 
@@ -637,6 +655,59 @@ export async function get(sql: Queryable, id: string): Promise<LeadDetail> {
 /** The terminal attempt statuses as an array, for the "open attempt" filter
  *  (`status <> all(...)`), single-sourced from TERMINAL_ATTEMPT_STATUSES. */
 const OPEN_ATTEMPT_TERMINAL: string[] = [...TERMINAL_ATTEMPT_STATUSES];
+
+// ---------------------------------------------------------------------------
+// Read-scope gates (DECISIONS O37, opsi (c) — app-layer half).
+//
+// Ported 1:1 from `backend/internal/module1_leads/reads.go` (canReadPool /
+// leadListScope / canReadLead). RLS filters ROWS; these gates decide whether the
+// caller may reach the endpoint at all, so a wrong-division actor gets a 403
+// with the exact BI message instead of a silently empty list — the behaviour the
+// Go build shipped and W1/W3 UAT signed off on.
+// ---------------------------------------------------------------------------
+
+/**
+ * canReadPool — the Sales Pool board is visible to Sales (any level), plus the
+ * read-everywhere layered roles. Mirrors Go `canReadPool`.
+ */
+export function canReadPool(actor: permission.Actor): boolean {
+  return actor.role.director || actor.role.od || actor.role.division === SALES_DIVISION;
+}
+
+/** Resolved list scope for the Leads Database (Go `leadListScope`). */
+export interface LeadListScope {
+  /** Marketing staff see only leads they own (created / own-campaign origin). */
+  marketingStaffScope: boolean;
+}
+
+/**
+ * leadListScope resolves how much of the Leads Database an actor may list, or
+ * null when the actor has no access at all. Mirrors Go `leadListScope`:
+ * Director/OD and Marketing-lead and Sales-lead see everything; Marketing staff
+ * are narrowed to their own leads; everyone else is denied.
+ */
+export function leadListScope(actor: permission.Actor): LeadListScope | null {
+  if (actor.role.director || actor.role.od) {
+    return { marketingStaffScope: false };
+  }
+  if (actor.role.division === MARKETING_DIVISION) {
+    if (actor.role.level === permission.LevelLead) {
+      return { marketingStaffScope: false };
+    }
+    return { marketingStaffScope: true };
+  }
+  if (actor.role.division === SALES_DIVISION && actor.role.level === permission.LevelLead) {
+    return { marketingStaffScope: false };
+  }
+  return null;
+}
+
+// Go's third gate, `canReadLead`, is ROW-level (own lead / own-campaign origin /
+// holds an attempt). It is intentionally NOT re-implemented here: row visibility
+// is the `leads_select` RLS policy's job, and a second copy in TS could only
+// diverge from it (CLAUDE.md — the two sides must never disagree). Migration
+// 20260102000005 adds the own-campaign-origin arm that the baseline policy was
+// missing, so RLS now matches Go's predicate exactly.
 
 /** One Sales Pool board row (contract §3). */
 export interface PoolBoardRow {

@@ -9,7 +9,7 @@
  */
 import { creative } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { readAsActor } from '@/lib/db';
 import { BadRequestError, handle, json } from '@/lib/http';
 import { dailyOutputToWire } from '@/lib/wire';
 
@@ -33,7 +33,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ picId: stri
       day = parsed;
     }
 
-    const out = await creative.dailyOutput(db(), actor, picId, day);
+    const out = await readAsActor(actor, (sql) => creative.dailyOutput(sql, actor, picId, day));
     return json(dailyOutputToWire(out));
   });
 }
