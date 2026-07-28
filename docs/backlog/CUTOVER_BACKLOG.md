@@ -26,7 +26,7 @@
 
 | # | Tiket | Prioritas | Estimasi | Blocking cutover? |
 |---|---|---|---|---|
-| **C-00** | **CI mati — runner tidak teralokasi (billing/kuota Actions)** | 🔴 P0 prasyarat | manusia, ~menit | **YA** |
+| **C-00** | ~~CI mati — runner tidak teralokasi~~ ✅ **SELESAI 2026-07-28** | — | — | — |
 | **C-01** | O37 — otorisasi read (RLS ter-bypass) | 🔴 P0 keamanan | 2–4 hari | **YA** |
 | **C-02** | Endpoint `notifications` di `apps/api` | 🟠 P1 | 0,5–1 hari | **YA** (FE rusak) |
 | **C-03** | UAT paritas end-to-end di stack baru | 🟠 P1 | 2–3 hari | **YA** |
@@ -34,14 +34,29 @@
 | **C-05** | Retire Go: arsip `backend/`, bersihkan CI & config Railway | 🟡 P2 | 0,5 hari | tidak (sesudahnya) |
 | **C-06** | `web-client-portal` (M15-C2) | ⚪ ditunda | — | **TIDAK** (by design) |
 
-**Urutan wajib:** **C-00** → C-01 → C-02 → C-03 → C-04 → (gate go/no-go manusia) → C-05.
+**Urutan wajib:** ~~C-00~~ ✅ → C-01 → C-02 → C-03 → C-04 → (gate go/no-go manusia) → C-05.
 C-06 di luar jalur cutover.
 
 **Total realistis: ~1,5–2 minggu kerja Claude** + gate keputusan manusia (Yohan & Nerissa, OQ-1).
 
 ---
 
-## C-00 — CI mati: runner tidak teralokasi 🔴 (PRASYARAT, tindakan manusia)
+## C-00 — CI mati: runner tidak teralokasi ✅ SELESAI (2026-07-28)
+
+> **RESOLVED.** Pemilik meng-upgrade akun/billing GitHub → runner kembali dialokasikan.
+> **Bukti:** run `30328573444` attempt 2 — `runner_id: 1000001482` (sebelumnya `0`),
+> **kelima job hijau**: `backend` (Go: `go vet` + `go test` 4m19s + migrate up/down smoke),
+> `api`, `core-engines`, `web-internal`, dan **`db-and-migrations`** (seluruh invariant
+> lolos: ident gap-free/WIB, append-only immutability, paritas predikat RLS, paritas
+> custom claims Supabase Auth, idempotensi seed, verifikasi jumlah tabel).
+> **Tindak lanjut dijalankan:** re-run CI di `main` (`b8347ff`) untuk memvalidasi ulang
+> PR #55–#57 yang sempat masuk tanpa CI — periksa hasilnya sebelum lanjut ke C-03/C-05.
+>
+> Catatan untuk C-03: gate CI `db-and-migrations` mengharapkan **53 tabel** dan lolos,
+> sedangkan `list_tables` di remote `CDPS SG` melaporkan lebih banyak. Bandingkan
+> keduanya saat C-03 untuk memastikan tak ada objek manual/drift di remote.
+
+<details><summary>Detail temuan asli (arsip)</summary>
 
 **Temuan 2026-07-28:** **seluruh** run CI repo gagal — bukan hanya di branch ini, tetapi juga di **`main`** (mis. run `30278802079` = "Merge PR #57", run `30263081875` = "Merge PR #56") dan branch lain, setidaknya sejak 2026-07-27.
 
@@ -62,6 +77,8 @@ C-06 di luar jalur cutover.
 3. Bila ternyata bukan billing, cek Organization → Settings → **Actions → General** (policy runner/actions yang diizinkan).
 
 **DoD:** satu run CI di `main` selesai dengan runner ter-assign (`runner_name` terisi) dan seluruh job hijau.
+
+</details>
 
 ---
 
@@ -173,7 +190,7 @@ Masih hanya `README.md`. Ditunda resmi (DECISIONS 2026-07-18) menunggu security 
 ## 2. Gate & exit criteria
 
 **Gate go/no-go cutover (PIC: Yohan & Nerissa — OQ-1):**
-- [ ] C-00 selesai — CI hijau kembali di `main`; PR #55–#57 tervalidasi ulang.
+- [x] **C-00 selesai** — CI hijau kembali (run `30328573444`); re-run `main` untuk PR #55–#57 sudah dipicu, **cek hasilnya**.
 - [ ] C-01 selesai, O37 tertutup di DECISIONS.
 - [ ] C-02 selesai, badge & halaman notifikasi hidup.
 - [ ] C-03 report FAIL = 0, SKIP beralasan.
