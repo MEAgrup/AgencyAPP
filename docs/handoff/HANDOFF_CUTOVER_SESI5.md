@@ -172,7 +172,31 @@ memandu.
 
 ---
 
-## 5. ⚠️ PR #58 — butuh keputusan, JANGAN di-merge tanpa itu
+## 5. ⚠️ PR #58 — SUDAH DITINDAKLANJUTI (port sidebar selesai; #58 sendiri masih terbuka)
+
+> **UPDATE 2026-07-28 (sesi 6).** Rekomendasi opsi 1 di bawah **sudah dijalankan**: bagian
+> `web-internal` #58 di-port ke `main` lewat branch `claude/handoff-sesi-5-inmsq9`
+> (lihat entri Decided 2026-07-28 "Gating menu sidebar per divisi" di `docs/DECISIONS.md`).
+>
+> - Tabel gate pindah ke modul murni **`web-internal/src/lib/nav.ts`** (`visibleNav(role)`);
+>   `Sidebar.tsx` nol logika izin. **26 test per-role** di `nav.test.ts`.
+> - **`web-internal` sebelumnya tidak punya test runner sama sekali** — ditambah `vitest`
+>   + script `test`/`typecheck` + step CI di job `web-internal`. Ini yang membuat DoD
+>   "permission tests per role" akhirnya bisa dipenuhi di FE.
+> - **Dua koreksi terhadap tabel #58** (jangan port verbatim kalau ada yang mengulang):
+>   `/creative` & `/ads` di #58 terlalu KETAT (menyembunyikan dari Account lead yang
+>   `listDivisionQueue` memang izinkan), `/kol` & `/livestream` terlalu LONGGAR (Account
+>   semua level, padahal lead saja).
+> - **Bagian `backend/` #58 diabaikan** (Go beku) dan bagian "Sales staff lihat lead sendiri"
+>   **tidak** di-port — itu perubahan perilaku yang kini jadi **O40** (butuh keputusan
+>   Sales Head/pemilik). Kolom "Didaftarkan oleh" ikut ke tiket O40 yang sama.
+> - **#58 sengaja TIDAK ditutup oleh sesi ini** — penutupan PR orang lain diserahkan ke
+>   pemilik. Sudah dikomentari di #58 dengan penunjuk ke PR pengganti.
+> - **Temuan sampingan yang lebih berat: O41** — 5 endpoint M5 Finance yang dipanggil FE
+>   tidak ada / salah prefix di `apps/api` (`/finance/queue`, `GET /transactions/{id}`,
+>   `POST /transactions/{id}/schedule`, `/finance/reminders[/scan]`). Jalur uang. Baca O41.
+
+### Konteks asli (arsip)
 
 **#58** (`claude/sales-staff-access-leads-bdmk5e`, sudah ready, bukan draft): "Sales staff lihat lead
 sendiri + sembunyikan menu lintas-divisi". Dibuat sesi lain, base `main` yang **sudah basi**

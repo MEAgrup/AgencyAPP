@@ -55,6 +55,13 @@ jobs:
           else
             echo "web-internal/ not present yet — frontend agent owns it. Skipping."
           fi
+      # Framework-free unit tests (sidebar permission gates per role). Runs after
+      # the build so a broken build is still the first failure reported.
+      - name: Test web-internal
+        run: |
+          if [ -f web-internal/package.json ]; then
+            cd web-internal && npm test
+          fi
 
   # @cdps/api — the API route handlers (Fase 1 langkah 4). Typecheck the whole app
   # (route handlers + libs against the @cdps/* source) and run the framework-free
