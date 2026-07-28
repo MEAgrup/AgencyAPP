@@ -1,5 +1,5 @@
 /**
- * GET /api/v1/reminders — M5 §6 payment reminder dashboard: overdue-first
+ * GET /api/v1/finance/reminders — M5 §6 payment reminder dashboard: overdue-first
  * installments, upcoming ones within the horizon, and the open-ended
  * "Outstanding, No Due Date" list. Pure derived read. Ports Go's
  * handleReminderDashboard.

@@ -113,7 +113,17 @@ Tidak ada yang bisa didorong maju oleh developer/Claude sendiri. Urut dari yang 
 FINAL untuk semua 32 layanan; komisi Rp0 adalah hasil sah.
 
 ### 3.2 Sisa C-04 yang bersifat pekerjaan
-1. **Migrasi 0009 ke live** — §1 di atas. Paling mendesak.
+0. 🔴 **BARU (sesi 6) — port 8 endpoint yang hilang di `apps/api` (O41).** Ini **kerusakan produksi**,
+   bukan utang rapi: `next.config.ts` memproksi ke `agency-app-api` (TS) dan Go sudah "archived
+   read-only", jadi halaman `/finance` + detail transaksi **404 sekarang**, `Closed-Lost` M0 tidak
+   bisa dicatat, dan impor massal lead Marketing tidak ada. Diukur dengan mendiff route Go (194) vs
+   TS (178) vs panggilan FE, tiap kandidat diverifikasi satu per satu. Daftar lengkap + urutan
+   dampak + nama handler Go pendampingnya ada di **O41**; buku besarnya dijaga test
+   `apps/api/src/lib/route-parity.test.ts` (`KNOWN_GAPS`) yang gagal kalau ada gap baru **dan**
+   kalau ada entri yang ternyata sudah dilayani. Mulai dari `payment-intent` → `finance/queue` →
+   `transactions/{id}` (urutan hulu-ke-hilir; `schedule` sia-sia tanpa `payment-intent`).
+   Sudah ditutup sesi 6: route reminder M5 yang salah path (`/reminders` → `/finance/reminders`).
+1. **Migrasi 0009 ke live** — §1 di atas. Paling mendesak dari sisi data.
 2. **Import lead historis (O22)** — Pilihan B: `Qualify` ATAU prospek `Hot/Warm`, 6 bulan terakhir.
    Aturan sudah tertulis di DECISIONS 2026-07-10; sumber datanya belum masuk.
 3. **3 SKIP C-03** — perintah lengkap di `HANDOFF_CUTOVER_SESI3.md` §5. Butuh mesin yang boleh
