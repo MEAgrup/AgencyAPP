@@ -51,3 +51,37 @@ export function createClient(connectionString: string, opts: CreateClientOptions
 export async function withTransaction<T>(sql: Sql, fn: (tx: TransactionSql) => Promise<T>): Promise<T> {
   return sql.begin(fn) as Promise<T>;
 }
+
+/**
+ * The non-privileged DB role the read path assumes. It is not BYPASSRLS and
+ * holds only SELECT on the domain tables (migration 20260102000003 §4), so the
+ * RLS policies — not the connection — decide which rows come back.
+ */
+export const READ_ROLE = 'authenticated';
+
+/**
+ * withClaims runs `fn` in a transaction where RLS is ENFORCED for the given JWT
+ * claim envelope (DECISIONS O37).
+ *
+ * `claimsJson` is the serialized `{"app_metadata":{…}}` object the policies read
+ * through `auth.jwt()`; the caller owns its shape (apps/api builds it from the
+ * verified token — see `actorClaims`). Claims are published before the role is
+ * dropped, so the session is never non-privileged-but-unidentified while `fn`
+ * could run.
+ *
+ * Both settings are transaction-local, so COMMIT/ROLLBACK restores the
+ * privileged role and clears the identity — mandatory on the transaction-mode
+ * pooler, where the server connection is handed to another session afterwards.
+ */
+export async function withClaims<T>(
+  sql: Sql,
+  claimsJson: string,
+  fn: (tx: TransactionSql) => Promise<T>,
+): Promise<T> {
+  return withTransaction(sql, async (tx) => {
+    await tx`SELECT set_config('request.jwt.claims', ${claimsJson}, true)`;
+    // Role name is a fixed constant — SET ROLE takes no bind parameters.
+    await tx.unsafe(`SET LOCAL ROLE ${READ_ROLE}`);
+    return fn(tx);
+  });
+}

@@ -9,7 +9,7 @@
  */
 import { account } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { db, readAsActor } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
 import { strategyToWire, toStrategyInput } from '@/lib/wire';
 
@@ -17,7 +17,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   return handle(async () => {
     const actor = requireActor(request);
     const { id } = await ctx.params;
-    const st = await account.getStrategy(db(), actor, id);
+    const st = await readAsActor(actor, (sql) => account.getStrategy(sql, actor, id));
     return json(strategyToWire(st));
   });
 }

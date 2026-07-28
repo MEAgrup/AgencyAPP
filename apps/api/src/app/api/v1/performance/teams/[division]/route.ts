@@ -6,7 +6,7 @@
  */
 import { performance } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { readAsActor } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 import { perfTeamRollupToWire } from '@/lib/wire';
 
@@ -15,7 +15,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ division: s
     const actor = requireActor(request);
     const { division } = await ctx.params;
     const period = new URL(request.url).searchParams.get('period') ?? '';
-    const roll = await performance.teamRollup(db(), actor, division, period);
+    const roll = await readAsActor(actor, (sql) => performance.teamRollup(sql, actor, division, period));
     return json(perfTeamRollupToWire(roll));
   });
 }

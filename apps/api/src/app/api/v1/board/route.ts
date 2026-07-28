@@ -6,7 +6,7 @@
  */
 import { board } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { readAsActor } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 import { cardToWire } from '@/lib/wire';
 
@@ -14,7 +14,7 @@ export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
     const actor = requireActor(request);
     const client = new URL(request.url).searchParams.get('client') ?? '';
-    const cards = await board.clientBoard(db(), actor, client);
+    const cards = await readAsActor(actor, (sql) => board.clientBoard(sql, actor, client));
     return json({ data: cards.map(cardToWire) });
   });
 }

@@ -5,7 +5,7 @@
  */
 import { account } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { readAsActor } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 import { briefToWire } from '@/lib/wire';
 
@@ -13,7 +13,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ division: s
   return handle(async () => {
     const actor = requireActor(request);
     const { division } = await ctx.params;
-    const rows = await account.listDivisionQueue(db(), actor, decodeURIComponent(division));
+    const rows = await readAsActor(actor, (sql) => account.listDivisionQueue(sql, actor, decodeURIComponent(division)));
     return json({ data: rows.map(briefToWire) });
   });
 }

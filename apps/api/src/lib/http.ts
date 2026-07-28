@@ -95,6 +95,7 @@ export function mapError(err: unknown): Response {
   }
   if (
     err instanceof demo.ForbiddenError ||
+    err instanceof leads.ForbiddenError ||
     err instanceof sales.ForbiddenError ||
     err instanceof msl.ForbiddenError ||
     err instanceof finance.ForbiddenError ||

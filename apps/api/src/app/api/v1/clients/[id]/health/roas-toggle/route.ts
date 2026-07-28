@@ -8,7 +8,7 @@
  */
 import { health } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { db, readAsActor } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
 import { roasToggleToWire } from '@/lib/wire';
 
@@ -16,7 +16,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   return handle(async () => {
     const actor = requireActor(request);
     const { id } = await ctx.params;
-    const tg = await health.getRoasToggle(db(), actor, id);
+    const tg = await readAsActor(actor, (sql) => health.getRoasToggle(sql, actor, id));
     return json(roasToggleToWire(tg));
   });
 }

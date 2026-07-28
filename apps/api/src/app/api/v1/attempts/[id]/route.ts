@@ -4,13 +4,15 @@
  * NotFoundError → 404 (shared error mapper).
  */
 import { sales } from '@cdps/domain';
-import { db } from '@/lib/db';
+import { requireActor } from '@/lib/auth';
+import { readAsActor } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 
-export async function GET(_request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
+export async function GET(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   return handle(async () => {
+    const actor = requireActor(request);
     const { id } = await ctx.params;
-    const attempt = await sales.getAttempt(db(), id);
+    const attempt = await readAsActor(actor, (sql) => sales.getAttempt(sql, id));
     return json({ attempt });
   });
 }

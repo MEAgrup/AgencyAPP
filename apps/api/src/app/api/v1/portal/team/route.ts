@@ -6,7 +6,7 @@
  */
 import { portal } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { readAsActor } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 import { teamPortalToWire } from '@/lib/wire';
 
@@ -14,7 +14,7 @@ export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
     const actor = requireActor(request);
     const params = new URL(request.url).searchParams;
-    const team = await portal.teamPortal(db(), actor, params.get('division') ?? '', params.get('period') ?? '');
+    const team = await readAsActor(actor, (sql) => portal.teamPortal(sql, actor, params.get('division') ?? '', params.get('period') ?? ''));
     return json(teamPortalToWire(team));
   });
 }

@@ -3,12 +3,14 @@
  * Ports Go's handleListAttempts. Row scope is the RLS safety net, as GET /leads.
  */
 import { sales } from '@cdps/domain';
-import { db } from '@/lib/db';
+import { requireActor } from '@/lib/auth';
+import { readAsActor } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
-    const attempts = await sales.listAttempts(db());
+    const actor = requireActor(request);
+    const attempts = await readAsActor(actor, (sql) => sales.listAttempts(sql));
     return json({ attempts });
   });
 }

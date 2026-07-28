@@ -8,7 +8,7 @@
  */
 import { ads } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { db, readAsActor } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
 import { optimizationToWire, toOptimizationInput } from '@/lib/wire';
 
@@ -26,7 +26,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   return handle(async () => {
     const actor = requireActor(request);
     const { id } = await ctx.params;
-    const rows = await ads.listOptimizations(db(), actor, id);
+    const rows = await readAsActor(actor, (sql) => ads.listOptimizations(sql, actor, id));
     return json({ data: rows.map(optimizationToWire) });
   });
 }

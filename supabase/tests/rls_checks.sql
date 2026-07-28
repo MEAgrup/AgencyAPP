@@ -106,6 +106,64 @@ BEGIN
   END LOOP;
 END $$;
 
+-- ---------------------------------------------------------------------------
+-- 10-13. O37 — `leads` read scope. These are the cases the API read path got
+--        wrong before O37: it queried as the service role, so RLS never ran and
+--        ANY authenticated caller could read every lead. `readAsActor`
+--        (apps/api/src/lib/db.ts) now reproduces exactly the role switch + claim
+--        injection used here, so these assertions cover the real request path.
+-- ---------------------------------------------------------------------------
+RESET ROLE;
+
+-- Fixture (as superuser): a Marketing-origin lead created by EMP-RLS-MKT1 whose
+-- origin campaign is owned by a DIFFERENT marketing staffer, EMP-RLS-MKT2.
+INSERT INTO campaigns (id, name, channel, start_date, owner_employee_id, status, created_by)
+VALUES ('CMP-RLS-0001', 'rls fixture campaign', 'TikTok Ads', current_date, 'EMP-RLS-MKT2', 'Active', 'EMP-RLS-MKT2');
+INSERT INTO leads (id, lead_name, phone_number, phone_norm, source, origin_division,
+                   origin_campaign_id, record_status, created_by)
+VALUES ('LEAD-RLS-0001', 'rls fixture lead', '0811000111', '62811000111', 'Leads - Iklan',
+        'Marketing', 'CMP-RLS-0001', 'active', 'EMP-RLS-MKT1');
+INSERT INTO prospect_attempts (id, lead_id, owner_employee_id, status, created_by)
+VALUES ('PRSP-RLS-0001', 'LEAD-RLS-0001', 'EMP-RLS-SLS1', 'New Lead', 'EMP-RLS-SLS1');
+
+SET LOCAL ROLE authenticated;
+
+-- 10. An unrelated staff member (different division, no attempt, not creator)
+--     must NOT see the lead. This is the core O37 leak.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-NOBODY","division":"Creative","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM leads WHERE id='LEAD-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS leads: unrelated staff must not see the lead (O37)'; END IF;
+END $$;
+
+-- 11. A Sales staffer who does NOT hold an attempt sees nothing either — being
+--     in Sales is not by itself a licence to read every lead.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLS9","division":"Sales","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM leads WHERE id='LEAD-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS leads: sales staff without an attempt must not see the lead'; END IF;
+END $$;
+
+-- 12. The Sales staffer holding the attempt DOES see it (co-pursuit, M1-OA-1).
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLS1","division":"Sales","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM leads WHERE id='LEAD-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS leads: attempt holder must see the lead'; END IF;
+END $$;
+
+-- 13. Marketing staff who own the ORIGIN CAMPAIGN see the lead even though they
+--     did not create it — the arm added by 20260102000005 for parity with Go
+--     `canReadLead`. Without that migration this check fails.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-MKT2","division":"Marketing","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM leads WHERE id='LEAD-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS leads: own-campaign origin must be readable (Go canReadLead parity)'; END IF;
+END $$;
+
 RESET ROLE;
 ROLLBACK;
 

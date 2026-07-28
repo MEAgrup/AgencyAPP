@@ -6,7 +6,7 @@
  */
 import { portal } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { readAsActor } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 import { managementDashboardToWire } from '@/lib/wire';
 
@@ -14,7 +14,7 @@ export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
     const actor = requireActor(request);
     const params = new URL(request.url).searchParams;
-    const dash = await portal.managementDashboard(db(), actor, params.get('band') ?? '', params.get('am') ?? '', params.get('sort') ?? '');
+    const dash = await readAsActor(actor, (sql) => portal.managementDashboard(sql, actor, params.get('band') ?? '', params.get('am') ?? '', params.get('sort') ?? ''));
     return json(managementDashboardToWire(dash));
   });
 }

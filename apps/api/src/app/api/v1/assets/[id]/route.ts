@@ -5,7 +5,7 @@
  */
 import { creative } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { readAsActor } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 import { assetToWire } from '@/lib/wire';
 
@@ -13,7 +13,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   return handle(async () => {
     const actor = requireActor(request);
     const { id } = await ctx.params;
-    const asset = await creative.getAsset(db(), actor, id);
+    const asset = await readAsActor(actor, (sql) => creative.getAsset(sql, actor, id));
     return json(assetToWire(asset));
   });
 }

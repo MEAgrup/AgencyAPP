@@ -5,7 +5,7 @@
  */
 import { health } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { readAsActor } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 import { healthSnapshotToWire } from '@/lib/wire';
 
@@ -13,7 +13,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   return handle(async () => {
     const actor = requireActor(request);
     const { id } = await ctx.params;
-    const list = await health.trend(db(), actor, id);
+    const list = await readAsActor(actor, (sql) => health.trend(sql, actor, id));
     return json({ data: list.map(healthSnapshotToWire) });
   });
 }

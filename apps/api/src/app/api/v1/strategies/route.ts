@@ -5,14 +5,14 @@
  */
 import { account } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { readAsActor } from '@/lib/db';
 import { handle, json } from '@/lib/http';
 import { strategyToWire } from '@/lib/wire';
 
 export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
     const actor = requireActor(request);
-    const rows = await account.listStrategies(db(), actor);
+    const rows = await readAsActor(actor, (sql) => account.listStrategies(sql, actor));
     return json({ data: rows.map(strategyToWire) });
   });
 }
