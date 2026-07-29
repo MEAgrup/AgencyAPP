@@ -205,3 +205,46 @@ export function listLeads(params?: { status?: string; q?: string }): Promise<{ d
 export function getLead(id: string): Promise<LeadDetail> {
   return api.get<LeadDetail>(`/leads/${id}`);
 }
+
+// ---- Hapus lead (AJUKAN → ACC Head) ----
+
+// POST /leads/{id}/delete-requests — `reason` wajib. Server yang berwenang
+// menolak (alasan kosong ⇒ [data tidak lengkap...]), tapi form tetap
+// `required` supaya pengguna tidak menunggu round-trip untuk tahu.
+export function requestLeadDelete(leadId: string, reason: string): Promise<DeleteRequest> {
+  return api.post<DeleteRequest>(`/leads/${leadId}/delete-requests`, { reason });
+}
+
+// GET /leads/{id}/delete-requests — SEMUA status (pending + yang sudah
+// diputuskan), untuk panel di halaman detail.
+export function listLeadDeleteRequests(leadId: string): Promise<{ data: DeleteRequestQueueRow[] }> {
+  return api.get<{ data: DeleteRequestQueueRow[] }>(`/leads/${leadId}/delete-requests`);
+}
+
+// GET /leads/delete-requests[?status=] — antrian ACC Head. Tanpa argumen =
+// hanya `pending` (default server, himpunan yang bisa ditindak); `status: ''`
+// mengirim `?status=` kosong yang di server berarti "semua".
+export function listDeleteRequests(params?: { status?: string }): Promise<{ data: DeleteRequestQueueRow[] }> {
+  const qs = params?.status === undefined ? '' : `?status=${encodeURIComponent(params.status)}`;
+  return api.get<{ data: DeleteRequestQueueRow[] }>(`/leads/delete-requests${qs}`);
+}
+
+// POST /leads/delete-requests/{reqId}/approve — ACC Head. `transition` adalah
+// verdict sm_transition; kalau `ok: false` lead TIDAK bergerak dan request
+// tetap pending (server membalas 409/403 dengan pesan engine).
+export function approveLeadDelete(
+  reqId: string,
+  note?: string,
+): Promise<{ request: DeleteRequest; transition?: { ok: boolean; message: string } }> {
+  return api.post<{ request: DeleteRequest; transition?: { ok: boolean; message: string } }>(
+    `/leads/delete-requests/${reqId}/approve`,
+    { note: note ?? '' },
+  );
+}
+
+// POST /leads/delete-requests/{reqId}/reject — Head menolak; lead dibiarkan utuh.
+export function rejectLeadDelete(reqId: string, note?: string): Promise<{ request: DeleteRequest }> {
+  return api.post<{ request: DeleteRequest }>(`/leads/delete-requests/${reqId}/reject`, {
+    note: note ?? '',
+  });
+}

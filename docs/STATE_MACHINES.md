@@ -14,6 +14,31 @@
 - Duplicate of Rejected/Not Qualified ⇒ reopen to `[Pool]`.
 - Import gate: parent Campaign must be `[Active]`, else `[campaign belum/tidak aktif, lead tidak bisa diimport]`.
 
+**`[Deleted]` — terminal (DEVIASI PRD, keputusan pemilik 2026-07-29, lihat `DECISIONS.md`).**
+M1 tidak punya pintu hapus; ini ditambahkan atas permintaan pemilik. Tidak ada
+`DELETE FROM leads` — "hapus" = transisi ke state terminal, jadi `audit_log` dan anak
+`PRSP-`-nya tetap utuh (aturan rumah #3).
+
+| From | To | Effect |
+|---|---|---|
+| active | `[Deleted]` | `require_lead` — ACC Head divisi asal lead (Director di mana saja) |
+| `[Pool]` | `[Deleted]` | idem |
+| `[Rejected]` | `[Deleted]` | idem |
+| `[Not Qualified]` | `[Deleted]` | idem |
+
+- Gate ada di **SQL**: keempat edge ber-`require_lead = true`, jadi `sm_transition` sendiri
+  menolak staff dengan `[anda tidak memiliki akses untuk melakukan transisi ini]` —
+  panggilan langsung via service-role tidak bisa memutari ACC.
+- Dua pintu: sales **mengajukan** (`LDR-`, alasan wajib) → Head **ACC/tolak**. Satu antrian
+  pending per lead, dijamin indeks `uq_ldr_one_pending`.
+- **`[Closed-Success]` sengaja TIDAK diberi edge** ke `[Deleted]`: sudah klien, punya turunan
+  uang (`CLI`/`TRX`/`INST`) ⇒ `[lead sudah menjadi klien, tidak bisa dihapus]`.
+- **Tidak ada edge KELUAR** dari `[Deleted]`, termasuk untuk Director. Kalau hapus harus bisa
+  dibatalkan, itu desain **restore** yang berbeda dan butuh keputusan tersendiri.
+- Konsekuensi baca: `matchByPhone` **mengecualikan** baris terhapus (state terminal ⇒ intake
+  tak punya langkah legal), `decideClaim` **memblokir** (`[lead sudah dihapus]`),
+  `leadsDatabase` menyembunyikannya kecuali diminta `status='[Deleted]'` eksplisit.
+
 ## 3. Campaign `CMP-` (M3)
 | From | To | Effect |
 |---|---|---|

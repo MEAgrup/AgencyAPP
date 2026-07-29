@@ -1,9 +1,20 @@
 'use client';
 
-import { use, useCallback, useEffect, useState } from 'react';
+import { use, useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { api, errorMessage } from '@/lib/api';
-import { getLead, type LeadDetail, type LeadAttemptRow } from '@/lib/leads';
+import { useAuth } from '@/lib/auth-context';
+import {
+  DELETED_RECORD_STATUS,
+  approveLeadDelete,
+  getLead,
+  listLeadDeleteRequests,
+  rejectLeadDelete,
+  requestLeadDelete,
+  type DeleteRequestQueueRow,
+  type LeadDetail,
+  type LeadAttemptRow,
+} from '@/lib/leads';
 import StatusBadge from '@/components/StatusBadge';
 import { extractStatusLabel, summarizeJson } from '@/lib/audit';
 
@@ -19,6 +30,12 @@ function formatDateTime(value: string | null | undefined) {
   if (!value) return '—';
   return new Date(value).toLocaleString('id-ID');
 }
+
+const DELETE_STATUS_LABELS: Record<string, string> = {
+  pending: 'Menunggu ACC Head',
+  approved: 'Disetujui',
+  rejected: 'Ditolak',
+};
 
 export default function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -207,6 +224,18 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
         )}
       </section>
 
+      {/* Hapus lead — AJUKAN (sales) → ACC (Head) */}
+      <DeletePanel
+        leadId={lead.id}
+        recordStatus={lead.record_status}
+        winningAttemptId={lead.winning_attempt_id}
+        originDivision={lead.origin_division}
+        onDecided={() => {
+          load();
+          loadAudit();
+        }}
+      />
+
       {/* Histori Audit */}
       <section className="card">
         <div className="cardHeader">
@@ -243,5 +272,261 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
         )}
       </section>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Hapus lead ber-ACC Head (keputusan pemilik 2026-07-29, docs/DECISIONS.md).
+//
+// Dua pintu: sales MENGAJUKAN dengan alasan wajib, Head meng-ACC. Tidak ada
+// tombol "Hapus" yang langsung menghapus — dan tidak ada baris yang dibuang;
+// ACC mendorong lead ke state terminal `[Deleted]` lewat sm_transition.
+//
+// Gate-nya milik SERVER. Panel ini menyembunyikan aksi yang sudah pasti mustahil
+// (klien / sudah terhapus / bukan Head divisi asal), tapi TIDAK mencoba
+// mereplikasi `canRequestDelete` — koneksi "pembuat lead" tidak ada di kontrak
+// GET /leads/{id}, jadi form pengajuan ditampilkan optimistis dan penolakan
+// dirender verbatim dari server. Menebak di sini hanya menghasilkan dua sumber
+// kebenaran yang bisa berbeda.
+// ---------------------------------------------------------------------------
+
+function DeletePanel({
+  leadId,
+  recordStatus,
+  winningAttemptId,
+  originDivision,
+  onDecided,
+}: {
+  leadId: string;
+  recordStatus: string;
+  winningAttemptId: string | null;
+  originDivision: string;
+  onDecided: () => void;
+}) {
+  const { role } = useAuth();
+
+  const isDirector = Boolean(role?.director);
+  // Cermin permission.isLead(actor, originDivision) — Head divisi ASAL lead;
+  // Director di mana saja. Sales Head TIDAK bisa meng-ACC lead ber-origin
+  // Marketing, jadi divisinya dibandingkan, bukan cuma level-nya.
+  const isHead = isDirector || (role?.level === 'lead' && role?.division === originDivision);
+  // Cermin permission.canWrite — Director selalu; sisanya butuh scope divisi,
+  // jadi OD murni (tanpa divisi) tidak bisa menulis. Tidak ditambah cek `od`
+  // terpisah: OD berlapis di atas akun berdivisi memang menulis dari scope itu.
+  const canWrite = isDirector || (role?.division ?? '') !== '';
+
+  // Cermin decideDeleteRequest untuk dua kasus yang SUDAH terbaca dari kontrak
+  // detail; sisanya (pending ganda) datang dari daftar request di bawah.
+  const isClient = recordStatus === '[Closed-Success]' || (winningAttemptId ?? '') !== '';
+  const isDeleted = recordStatus === DELETED_RECORD_STATUS;
+
+  const [requests, setRequests] = useState<DeleteRequestQueueRow[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const [note, setNote] = useState('');
+  const [decidingId, setDecidingId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const res = await listLeadDeleteRequests(leadId);
+      setRequests(res.data);
+    } catch (err) {
+      setLoadError(errorMessage(err));
+    }
+  }, [leadId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const pending = requests?.find((r) => r.status === 'pending') ?? null;
+
+  async function handleRequest(e: FormEvent) {
+    e.preventDefault();
+    setFormError(null);
+    setNotice(null);
+    setSubmitting(true);
+    try {
+      await requestLeadDelete(leadId, reason);
+      setReason('');
+      setNotice('Permintaan hapus diajukan — menunggu ACC Head.');
+      await load();
+    } catch (err) {
+      setFormError(errorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDecide(reqId: string, approve: boolean) {
+    setFormError(null);
+    setNotice(null);
+    setDecidingId(reqId);
+    try {
+      if (approve) {
+        await approveLeadDelete(reqId, note);
+        setNotice('Permintaan disetujui — lead dipindahkan ke [Deleted].');
+      } else {
+        await rejectLeadDelete(reqId, note);
+        setNotice('Permintaan ditolak — lead dibiarkan utuh.');
+      }
+      setNote('');
+      await load();
+      // Status lead & audit-nya berubah pada ACC, jadi muat ulang induknya.
+      onDecided();
+    } catch (err) {
+      setFormError(errorMessage(err));
+    } finally {
+      setDecidingId(null);
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="cardHeader">
+        <h2>Hapus Lead</h2>
+      </div>
+      <p className="muted" style={{ fontSize: 13 }}>
+        Hapus wajib di-ACC Head divisi asal lead ({originDivision || '—'}). Baris lead tidak pernah
+        dibuang &mdash; ACC memindahkannya ke status terminal <code>[Deleted]</code> dan seluruh
+        riwayat serta prospect attempt-nya tetap utuh.
+      </p>
+
+      {loadError && <div className="alert alertError" role="alert">{loadError}</div>}
+      {formError && <div className="alert alertError" role="alert">{formError}</div>}
+      {notice && <div className="alert alertSuccess" role="status">{notice}</div>}
+
+      {isClient && (
+        <div className="alert alertInfo" role="status">
+          [lead sudah menjadi klien, tidak bisa dihapus]
+        </div>
+      )}
+      {isDeleted && (
+        <div className="alert alertInfo" role="status">
+          [lead sudah dihapus]
+        </div>
+      )}
+
+      {/* Panel ACC Head — hanya saat ada yang bisa ditindak. */}
+      {pending && isHead && !isDeleted && (
+        <div className="stack" style={{ marginTop: 12 }}>
+          <h3 style={{ margin: 0 }}>Perlu keputusan Anda</h3>
+          <p>
+            <strong>{pending.requested_by_nama}</strong> mengajukan hapus pada{' '}
+            {formatDateTime(pending.created_at)}.
+          </p>
+          <p>
+            Alasan: <em>{pending.reason}</em>
+          </p>
+          <div className="field">
+            <label htmlFor="delete-note">Catatan Keputusan (opsional)</label>
+            <input id="delete-note" value={note} onChange={(e) => setNote(e.target.value)} />
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <button
+              type="button"
+              className="btn btnPrimary btnSm"
+              disabled={decidingId !== null}
+              onClick={() => handleDecide(pending.id, true)}
+            >
+              {decidingId === pending.id ? 'Memproses...' : 'Setujui Hapus'}
+            </button>
+            <button
+              type="button"
+              className="btn btnSecondary btnSm"
+              disabled={decidingId !== null}
+              onClick={() => handleDecide(pending.id, false)}
+            >
+              Tolak
+            </button>
+          </div>
+        </div>
+      )}
+
+      {pending && !isHead && (
+        <div className="alert alertInfo" role="status">
+          Permintaan hapus sedang menunggu ACC Head divisi {pending.origin_division}.
+        </div>
+      )}
+
+      {/* Form AJUKAN — tidak ada pending, lead masih bisa dihapus, aktor bisa menulis. */}
+      {!pending && !isClient && !isDeleted && canWrite && (
+        <form className="form" onSubmit={handleRequest} style={{ marginTop: 12 }}>
+          <div className="field">
+            <label htmlFor="delete-reason">Alasan Hapus (wajib)</label>
+            <input
+              id="delete-reason"
+              required
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="mis. lead uji coba, duplikat salah input"
+            />
+          </div>
+          <div>
+            <button type="submit" className="btn btnSecondary btnSm" disabled={submitting}>
+              {submitting ? 'Memproses...' : 'Ajukan Hapus'}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Riwayat permintaan — termasuk yang sudah diputuskan. */}
+      {requests && requests.length > 0 && (
+        <div className="table-wrap" style={{ marginTop: 16 }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Alasan</th>
+                <th>Status</th>
+                <th>Diajukan</th>
+                <th>Diputuskan</th>
+                <th>Catatan</th>
+              </tr>
+            </thead>
+            <tbody>
+              {requests.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.id}</td>
+                  <td>{r.reason}</td>
+                  <td>{DELETE_STATUS_LABELS[r.status] ?? r.status}</td>
+                  <td>
+                    {r.requested_by_nama}
+                    <br />
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      {formatDateTime(r.created_at)}
+                    </span>
+                  </td>
+                  <td>
+                    {r.resolved_at ? (
+                      <>
+                        {r.resolved_by_nama || '—'}
+                        <br />
+                        <span className="muted" style={{ fontSize: 12 }}>
+                          {formatDateTime(r.resolved_at)}
+                        </span>
+                      </>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  <td>{r.decision_note || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {requests && requests.length === 0 && !canWrite && (
+        <div className="emptyState">Belum ada permintaan hapus.</div>
+      )}
+    </section>
   );
 }
