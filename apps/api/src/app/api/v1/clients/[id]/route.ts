@@ -2,8 +2,9 @@
  * /api/v1/clients/{id} — the Client Record (M4).
  *
  * GET: one Client Record (M4 basic) — the client plus its platforms,
- * sales-allocation snapshot, closed Services, and payment Transaction
- * (+ installments). Ports Go's handleGetClient.
+ * sales-allocation snapshot and closed Services, rendered through
+ * `clientDetailToWire` (Go's `clientView` contract: snake_case keys, IDR-formatted
+ * money). Ports Go's handleGetClient.
  *
  * PATCH: a lock-matrix-checked edit (M4 §4) — only fields the actor's role may
  * edit are applied, each logged before→after; a locked/system field is rejected.
@@ -14,13 +15,14 @@ import { client, sales } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
 import { db, readAsActor } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
+import { clientDetailToWire } from '@/lib/wire';
 
 export async function GET(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   return handle(async () => {
     const actor = requireActor(request);
     const { id } = await ctx.params;
     const record = await readAsActor(actor, (sql) => sales.getClient(sql, id));
-    return json({ client: record });
+    return json({ client: clientDetailToWire(record) });
   });
 }
 

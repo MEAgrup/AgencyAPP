@@ -1,9 +1,28 @@
 # RUNBOOK — apply migrasi RLS `0009` → `0010` ke `CDPS SG`
 
+> # ✅ SUDAH DIJALANKAN 2026-07-29 — JANGAN DIJALANKAN ULANG
+>
+> Keduanya ter-apply setelah **#62 merge** (`2c82f89`), urutan 0009 → 0010 ditaati. Tercatat di live
+> sebagai `20260729031525_rls_leads_campaign_scope` + `20260729032805_rls_finance_staff_queue_scope`
+> (live kini **38** migrasi). Hasil verifikasi & batasnya: `HANDOFF_CUTOVER_SESI6.md` §1 dan entri
+> Decided 2026-07-29 di `docs/DECISIONS.md`.
+>
+> **Dua penyimpangan dari runbook ini, sengaja:**
+> 1. Dipakai **MCP `apply_migration`**, bukan `psql -f` seperti tertulis di §3 — `psql -f` tidak
+>    menulis baris ke `supabase_migrations.schema_migrations`, jadi live akan kembali punya schema
+>    tanpa jejak. Itu penyakit yang sedang dibereskan, bukan yang mau ditambah.
+> 2. **Probe §4.2 tidak bisa dijalankan** — live kosong secara operasional (`transactions` 0,
+>    `clients` 0, `campaigns` 0). Diganti probe klaim `authenticated` ber-kontrol atas 3 baris
+>    `leads` yang ada. Verifikasi berbasis TRX nyata masih **utang**, ditagih pada TRX pertama.
+>
+> Dokumen ini disimpan sebagai catatan eksekusi + rujukan bila perlu rollback (§5).
+
 > Dibuat 2026-07-29. Untuk dijalankan **manusia dari mesin yang punya akses** (pola sama dengan
 > seed MSL sesi 4 yang dijalankan Yohan dari Mac-nya).
 >
 > **Kenapa bukan Claude yang menjalankan:** sandbox sesi ini tidak bisa mencapai `CDPS SG`.
+> **CATATAN 2026-07-29:** premis ini **tidak lagi berlaku** — sesi berikutnya punya **Supabase MCP**
+> dengan akses ke `CDPS SG`, jadi apply/verifikasi bisa dilakukan langsung dari dalam sesi.
 > Diverifikasi ulang 2026-07-29 01:49Z, tiga penghalang independen:
 > 1. Gateway proxy **menolak CONNECT** ke `supabase.com:443` dan `*.vercel.app:443` (403,
 >    tercatat sendiri di `$HTTPS_PROXY/__agentproxy/status` → `recentRelayFailures`);

@@ -18,14 +18,22 @@ import {
   canEditBaseline,
   canEditProfile,
   canReassignPic,
+  canSetPaymentIntent,
   canVoidService,
   editableFields,
   ForbiddenError,
   IncompleteError,
+  INTENT_DI_BELAKANG,
+  INTENT_LUNAS,
+  INTENT_SEBAGIAN,
+  INTENT_TERMIN,
+  IntentLockedError,
   isEditableField,
   listClients,
   LockedFieldError,
+  MSG_INTENT_LOCKED,
   NotFoundError,
+  setPaymentIntent,
   type Actor,
   type ClientPatch,
   updateClient,
@@ -141,6 +149,38 @@ describe('platform gate (no DB)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Unit: payment-intent handoff authority + option validation (M4 §5).
+// ---------------------------------------------------------------------------
+describe('payment-intent authority (§5 Flow 1)', () => {
+  it('the client PIC (identity) or a Director — never another salesperson', () => {
+    expect(canSetPaymentIntent(budi(), 'ZZ-BUDI')).toBe(true);
+    expect(canSetPaymentIntent(director(), 'ZZ-BUDI')).toBe(true);
+    // Another Sales staff, and a Sales LEAD who is not this client's PIC: denied.
+    // §5 Flow 1 names "the Sales PIC", and §4 treats Sales PIC / Sales Lead as
+    // separate authorities — so this is identity, not level (W1-13).
+    expect(canSetPaymentIntent(budi(), 'ZZ-OTHER')).toBe(false);
+    expect(canSetPaymentIntent(salesLead(), 'ZZ-BUDI')).toBe(false);
+    // Other divisions, and read-only OD, are denied even for their "own" id.
+    expect(canSetPaymentIntent(accountStaff(), 'ZZ-AM')).toBe(false);
+    expect(canSetPaymentIntent(accountLead(), 'ZZ-ALEAD')).toBe(false);
+    expect(canSetPaymentIntent(od(), 'ZZ-OD')).toBe(false);
+  });
+
+  it('rejects a scheme outside the four §5 Rule 2 options before touching the DB', async () => {
+    const noSql = null as unknown as Sql;
+    for (const bad of ['', '  ', 'Termin', '[Bayar Sebulan Sekali]', '[Lunas]']) {
+      await expect(setPaymentIntent(noSql, budi(), 'CLI-x', bad)).rejects.toBeInstanceOf(IncompleteError);
+    }
+  });
+
+  it('the four options are exactly the M5 scheme strings (no drift between modules)', () => {
+    expect([INTENT_LUNAS, INTENT_SEBAGIAN, INTENT_TERMIN, INTENT_DI_BELAKANG]).toEqual([
+      finance.SCHEME_LUNAS, finance.SCHEME_SEBAGIAN, finance.SCHEME_TERMIN, finance.SCHEME_DI_BELAKANG,
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Integration (real Postgres).
 // ---------------------------------------------------------------------------
 const URL = process.env.DATABASE_URL;
@@ -185,6 +225,9 @@ afterAll(async () => {
 afterEach(async () => {
   if (!sql) return;
   await sql`delete from briefs where created_by like 'ZZ-%'`;
+  // Verifications reference both transactions and installments — clear them first
+  // or the deletes below trip the FKs.
+  await sql`delete from payment_verifications where created_by like 'ZZ-%'`;
   await sql`delete from installments where created_by like 'ZZ-%'`;
   await sql`delete from transactions where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
@@ -385,5 +428,112 @@ describeDb('listClients (M4 §6)', () => {
     expect(mine!.toko).toBe('Alpha Digital');
     expect(mine!.salesPicId).toBe('ZZ-BUDI');
     expect(mine!.paymentIntent).toBe(sales.PAYMENT_SCHEME_LUNAS);
+  });
+});
+
+describeDb('setPaymentIntent — the M4 §5 handoff', () => {
+  /** The client's stamped intent + its transaction's scheme, read straight from the rows. */
+  const stamped = async (clientId: string): Promise<{ intent: string | null; scheme: string; trxId: string }> => {
+    const c = await sql<{ payment_intent: string | null; transaction_id: string }[]>`
+      select payment_intent, transaction_id from clients where id = ${clientId}`;
+    const t = await sql<{ payment_intent_scheme: string }[]>`
+      select payment_intent_scheme from transactions where id = ${c[0].transaction_id}`;
+    return { intent: c[0].payment_intent, scheme: t[0].payment_intent_scheme, trxId: c[0].transaction_id };
+  };
+
+  it('stamps all four §5 Rule 2 options onto BOTH the client and its transaction', async () => {
+    for (const intent of [INTENT_LUNAS, INTENT_SEBAGIAN, INTENT_TERMIN, INTENT_DI_BELAKANG]) {
+      const id = await closedClient();
+      await setPaymentIntent(sql, budi(), id, intent);
+      const s = await stamped(id);
+      expect(s.intent).toBe(intent);
+      expect(s.scheme).toBe(intent); // one declaration, two rows — never allowed to diverge
+    }
+  });
+
+  it('appends a before→after audit row on the client AND on the transaction', async () => {
+    const id = await closedClient();
+    const before = (await stamped(id)).intent; // born [Bayar Penuh (Lunas)] from closing
+    await setPaymentIntent(sql, budi(), id, INTENT_TERMIN);
+    const { trxId } = await stamped(id);
+
+    const cAudit = await sql<{ before_json: { payment_intent: string }; after_json: { payment_intent: string } }[]>`
+      select before_json, after_json from audit_log
+      where entity_type = 'client' and entity_id = ${id} and action = 'payment_intent:set'
+      order by id desc limit 1`;
+    expect(cAudit).toHaveLength(1);
+    expect(cAudit[0].before_json.payment_intent).toBe(before);
+    expect(cAudit[0].after_json.payment_intent).toBe(INTENT_TERMIN);
+
+    const tAudit = await sql<{ before_json: { payment_intent_scheme: string }; after_json: { payment_intent_scheme: string } }[]>`
+      select before_json, after_json from audit_log
+      where entity_type = 'transaction' and entity_id = ${trxId} and action = 'payment_intent_scheme:set'
+      order by id desc limit 1`;
+    expect(tAudit).toHaveLength(1);
+    expect(tAudit[0].before_json.payment_intent_scheme).toBe(before);
+    expect(tAudit[0].after_json.payment_intent_scheme).toBe(INTENT_TERMIN);
+  });
+
+  it('only the client PIC or a Director may set it; a denied attempt changes nothing', async () => {
+    const id = await closedClient(); // PIC = ZZ-BUDI
+    const born = (await stamped(id)).intent;
+    const other = (): Actor => ({
+      employeeId: 'ZZ-OTHERSALES', divisi: 'Sales', role: permission.makeRole({ division: 'Sales', level: 'staff' }),
+    });
+    for (const denied of [other(), salesLead(), accountStaff(), accountLead(), od()]) {
+      await expect(setPaymentIntent(sql, denied, id, INTENT_TERMIN)).rejects.toBeInstanceOf(ForbiddenError);
+    }
+    expect((await stamped(id)).intent).toBe(born); // untouched
+
+    await setPaymentIntent(sql, director(), id, INTENT_TERMIN); // Director may
+    expect((await stamped(id)).intent).toBe(INTENT_TERMIN);
+  });
+
+  it('is locked once Finance has recorded a verification — points at Finance, verbatim BI', async () => {
+    const id = await closedClient();
+    const { trxId } = await stamped(id);
+    await sql`
+      insert into payment_verifications (transaction_id, amount, received_date, verified_by, created_by)
+      values (${trxId}, '5000000.00', '2026-06-01', 'ZZ-FIN', 'ZZ-FIN')`;
+
+    await expect(setPaymentIntent(sql, budi(), id, INTENT_TERMIN)).rejects.toBeInstanceOf(IntentLockedError);
+    await expect(setPaymentIntent(sql, budi(), id, INTENT_TERMIN)).rejects.toThrow(MSG_INTENT_LOCKED);
+    // Not even a Director may reopen it — the scheme is Finance's now (M5-OA-6).
+    await expect(setPaymentIntent(sql, director(), id, INTENT_TERMIN)).rejects.toBeInstanceOf(IntentLockedError);
+  });
+
+  it('is locked once the Transaction has left [Menunggu Verifikasi], even with zero verifications', async () => {
+    const id = await closedClient();
+    const { trxId } = await stamped(id);
+    await sql`update transactions set payment_status = ${finance.PAYMENT_LUNAS} where id = ${trxId}`;
+    const n = await sql<{ n: string }[]>`
+      select count(*)::text as n from payment_verifications where transaction_id = ${trxId}`;
+    expect(n[0].n).toBe('0'); // the status alone locks it — defensive, per the Go oracle
+
+    await expect(setPaymentIntent(sql, budi(), id, INTENT_TERMIN)).rejects.toBeInstanceOf(IntentLockedError);
+  });
+
+  it('does NOT confirm money nor release the client to Account (§5 Rule 3/4)', async () => {
+    const id = await closedClient();
+    await setPaymentIntent(sql, budi(), id, INTENT_TERMIN);
+
+    const c = await sql<{ released_to_account_at: Date | null; transaction_id: string }[]>`
+      select released_to_account_at, transaction_id from clients where id = ${id}`;
+    expect(c[0].released_to_account_at).toBeNull();
+
+    const t = await sql<{ payment_status: string; released_to_account_at: Date | null }[]>`
+      select payment_status, released_to_account_at from transactions where id = ${c[0].transaction_id}`;
+    expect(t[0].payment_status).toBe(finance.PAYMENT_MENUNGGU); // still Finance's to verify
+    expect(t[0].released_to_account_at).toBeNull();
+
+    // And no installments were invented — Termin schedules are M5's job.
+    const inst = await sql<{ n: string }[]>`
+      select count(*)::text as n from installments where transaction_id = ${c[0].transaction_id}`;
+    expect(inst[0].n).toBe('0');
+  });
+
+  it('404s on an unknown client', async () => {
+    await expect(setPaymentIntent(sql, budi(), 'CLI-000000-0000', INTENT_TERMIN))
+      .rejects.toBeInstanceOf(NotFoundError);
   });
 });

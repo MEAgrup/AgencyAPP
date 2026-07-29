@@ -123,6 +123,7 @@ export function mapError(err: unknown): Response {
     err instanceof finance.ContractRequiredError ||
     err instanceof finance.SchemeLockedError ||
     err instanceof client.LockedFieldError ||
+    err instanceof client.IntentLockedError ||
     err instanceof account.ConflictError ||
     err instanceof task.ConflictError ||
     err instanceof creative.ConflictError ||

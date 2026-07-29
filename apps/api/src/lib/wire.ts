@@ -5,7 +5,8 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import type { account, ads, board, campaign, creative, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
+import { money } from '@cdps/core';
+import type { account, ads, board, campaign, client, creative, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -1493,5 +1494,160 @@ export function quoteToWire(q: sales.Quote): QuoteWire {
     })),
     estimasi_nilai_idr: q.estimasiNilaiIdr,
     total_komisi_idr: q.totalKomisiIdr,
+  };
+}
+
+// --- M4 Client Record detail (Go clientView / serviceViews) ---
+
+/** module4_client.ServiceLine — web-internal's `ServiceLine` (lib/clients.ts). */
+export interface ServiceLineWire {
+  id: string;
+  master_service_id: string;
+  name: string;
+  standard_price: string;
+  status: string;
+}
+
+/** client_platforms row — web-internal's `Platform` (lib/clients.ts). */
+export interface PlatformWire {
+  platform: string;
+  store_link?: string;
+  managed_since: string | null;
+  active: boolean;
+}
+
+/** client_sales_allocations row — web-internal's `Allocation` (lib/clients.ts). */
+export interface AllocationWire {
+  salesperson_id: string;
+  basis_points: number;
+}
+
+/** module4_client.Client as web-internal's `Client` type expects it. */
+export interface ClientDetailWire {
+  id: string;
+  nama_pic: string;
+  toko: string;
+  kota: string;
+  kategori: string;
+  link_toko: string;
+  gmv_baseline: string;
+  target_gmv: string;
+  total_sales: string;
+  marketing_budget: string | null;
+  origin_campaign_id: string;
+  sales_pic_id: string;
+  commission_payment_pic_id: string;
+  transaction_id: string;
+  payment_intent: string;
+  released_to_account_at: string | null;
+  platforms: PlatformWire[];
+  sales_allocation: AllocationWire[];
+  services: ServiceLineWire[];
+}
+
+/**
+ * idr formats a raw DB decimal ("9000000.00") as the house IDR string
+ * ("Rp. 9.000.000,00").
+ *
+ * Formatting happens HERE rather than in the domain because `sales.getClient` is
+ * a read model straight over `numeric(15,2)` columns, and Go formats the very
+ * same fields at the same boundary (`clientView` calls `money.Format()`). House
+ * rule #4 still holds either way: only the formatted string crosses the wire, so
+ * the client can never re-derive a money value differently than the server did.
+ */
+function idr(decimal: string): string {
+  return money.format(money.parse(decimal));
+}
+
+/**
+ * Maps the domain ClientDetail (camelCase, raw decimals, Date objects) to the
+ * snake_case wire shape web-internal reads — a 1:1 port of Go's `clientView`.
+ *
+ * Fields Go renders as `""`/omitted for a NULL column are normalized to `''`
+ * here (`origin_campaign_id`, `transaction_id`, `payment_intent`) so the FE never
+ * has to distinguish null from absent; `marketing_budget` stays nullable because
+ * Go's `moneyPtr` returns JSON null for it.
+ *
+ * `sales_pic_nama`, `lead_id`, `winning_attempt_id`, `created_at` and the nested
+ * `transaction` are deliberately NOT emitted: Go's clientView has no such keys,
+ * and the FE `Client` type does not declare them. The installment schedule
+ * reaches the FE through the M5 transaction endpoints instead.
+ */
+export function clientDetailToWire(c: sales.ClientDetail): ClientDetailWire {
+  return {
+    id: c.id,
+    nama_pic: c.namaPic,
+    toko: c.toko,
+    kota: c.kota,
+    kategori: c.kategori,
+    link_toko: c.linkToko,
+    gmv_baseline: idr(c.gmvBaseline),
+    target_gmv: idr(c.targetGmv),
+    total_sales: idr(c.totalSales),
+    marketing_budget: c.marketingBudget === null ? null : idr(c.marketingBudget),
+    origin_campaign_id: c.originCampaignId ?? '',
+    sales_pic_id: c.salesPicId,
+    commission_payment_pic_id: c.commissionPaymentPicId,
+    transaction_id: c.transactionId ?? '',
+    payment_intent: c.paymentIntent ?? '',
+    released_to_account_at: c.releasedToAccountAt ? c.releasedToAccountAt.toISOString() : null,
+    platforms: c.platforms.map((p) => ({
+      platform: p.platform,
+      store_link: p.storeLink ?? undefined,
+      managed_since: p.managedSince ? p.managedSince.toISOString() : null,
+      active: p.active,
+    })),
+    sales_allocation: c.allocations.map((a) => ({
+      salesperson_id: a.salespersonId,
+      basis_points: a.basisPoints,
+    })),
+    services: c.services.map((s) => ({
+      id: s.id,
+      master_service_id: s.masterServiceId,
+      name: s.name,
+      standard_price: idr(s.standardPrice),
+      status: s.status,
+    })),
+  };
+}
+
+/**
+ * One row of the client roster — web-internal's clients list page reads
+ * `id, toko, kota, kategori, sales_pic_id, payment_intent, released_to_account_at`.
+ *
+ * NARROWER than Go's `handleListClients`, which renders a full `clientView` per
+ * row. The domain read (`client.listClients`) is deliberately a narrow projection,
+ * and widening it to full detail would mean an N+1 over platforms/allocations/
+ * services for a list nobody reads those from. Every field the FE actually
+ * consumes is present; the extra Go keys are not. Logged as an open question
+ * (DECISIONS O43) rather than silently settled either way.
+ */
+export interface ClientListRowWire {
+  id: string;
+  toko: string;
+  nama_pic: string;
+  kota: string;
+  kategori: string;
+  sales_pic_id: string;
+  sales_pic_nama: string;
+  assigned_am_id: string | null;
+  payment_intent: string;
+  released_to_account_at: string | null;
+  created_at: string;
+}
+
+export function clientListRowToWire(r: client.ClientListRow): ClientListRowWire {
+  return {
+    id: r.id,
+    toko: r.toko,
+    nama_pic: r.namaPic,
+    kota: r.kota,
+    kategori: r.kategori,
+    sales_pic_id: r.salesPicId,
+    sales_pic_nama: r.salesPicNama,
+    assigned_am_id: r.assignedAmId,
+    payment_intent: r.paymentIntent ?? '',
+    released_to_account_at: r.releasedToAccountAt ? r.releasedToAccountAt.toISOString() : null,
+    created_at: r.createdAt.toISOString(),
   };
 }

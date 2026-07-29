@@ -1,6 +1,11 @@
-# HANDOFF — Cutover Sesi 6 (O41 ditemukan & 3 gap ditutup · gating sidebar #58 di-port · 2 migrasi RLS menunggu apply)
+# HANDOFF — Cutover Sesi 6 (O41 ditemukan & 3 gap ditutup · gating sidebar #58 di-port · 2 migrasi RLS SUDAH di-apply)
 
-> **Dokumen standalone.** Mulai chat berikutnya dari file ini.
+> # ⛔ SUDAH DIGANTI — mulai dari `HANDOFF_CUTOVER_SESI7.md`
+>
+> Dokumen ini **arsip**. Penerusnya `docs/handoff/HANDOFF_CUTOVER_SESI7.md` sudah memuat semua yang
+> masih berlaku di sini, plus O41 #1 yang selesai, kelas bug bentuk respons (**O43**), dan audit
+> roster **O42**. Jangan pakai §0 di bawah sebagai posisi branch — sudah bergerak.
+>
 > Tanggal: 2026-07-29. Pendahulu: `HANDOFF_CUTOVER_SESI5.md`.
 
 ---
@@ -9,43 +14,63 @@
 
 | Item | Nilai |
 |---|---|
-| **Branch kerja** | **`claude/handoff-sesi-5-inmsq9`** ← semua pekerjaan sesi 6 ada di sini (nama branch memang menyebut "sesi-5"; itu branch yang dipatok untuk sesi 6) |
-| **PR** | **#62** — https://github.com/MEAgrup/AgencyAPP/pull/62 · **draft** · `mergeable_state: clean` · **CI 11/11 HIJAU** |
-| **Base** | `main` @ `3d3896a` |
-| **Commit di branch (5, terbaru dulu)** | `d1d4043` runbook apply RLS · `8c39933` migrasi RLS 0010 · `6cddf11` port `attempts/{id}/lost` · `2dbc5fd` route reminder M5 + test paritas · `7e3bb83` gating sidebar |
+| **Branch kerja** | ~~`claude/handoff-sesi-5-inmsq9`~~ → **sudah merge**. Sesi 2026-07-29 lanjut di **`claude/handoff-sesi-6-cutover-ysut7c`** |
+| **PR** | ~~#62~~ **✅ MERGED 2026-07-29** (`2c82f89`, merge commit, CI 11/11 hijau) — https://github.com/MEAgrup/AgencyAPP/pull/62 |
+| **Base** | `main` @ **`2c82f89`** (sebelumnya `3d3896a`) |
+| **Commit di branch (7, terbaru dulu)** | `95a99e5` port `clients/{id}/payment-intent` + 2 fix bentuk respons M4 (O41 #1 · O43) · `3818d4a` audit roster O42 · `f5d93c8` catat apply 0009+0010 · `d1d4043` runbook apply RLS · `8c39933` migrasi RLS 0010 · `6cddf11` port `attempts/{id}/lost` · `2dbc5fd` route reminder M5 + test paritas · `7e3bb83` gating sidebar |
 | **Semua ter-push?** | ✅ ya — tidak ada commit/berkas tertinggal |
-| **PR lain yang terbuka** | **#58** — sudah dikomentari dengan penunjuk ke #62, **sengaja tidak ditutup** (keputusan pemilik) |
+| **PR lain yang terbuka** | ~~#58~~ **✅ DITUTUP 2026-07-29** (keputusan pemilik) — bagian sidebar sudah masuk lewat #62; scope Sales staff + kolom "Didaftarkan oleh" pindah ke **issue #64** (O40, dieksekusi **setelah** gate C-04) |
 
 ```bash
-git fetch origin claude/handoff-sesi-5-inmsq9
-git checkout claude/handoff-sesi-5-inmsq9 && git pull origin claude/handoff-sesi-5-inmsq9
-npm ci                                    # node_modules TIDAK ada di clone baru
-cd web-internal && npm ci && cd ..        # web-internal punya lockfile sendiri
+git fetch origin main
+git checkout main && git pull origin main   # sudah memuat keempat cluster sesi 6
+npm ci                                     # node_modules TIDAK ada di clone baru
+cd web-internal && npm ci && cd ..          # web-internal punya lockfile sendiri
 ```
 
 > **PR #62 membawa EMPAT cluster** (gating sidebar FE · route reminder M5 + test paritas · port
-> `attempts/{id}/lost` · migrasi RLS 0010). Itu menyimpang dari konvensi "PR kecil per cluster"
-> `CLAUDE.md`, dan terjadi karena branch sesi ini dipatok. **Tanya pemilik apakah mau dipecah**
-> sebelum merge. Keempatnya berdiri sendiri dan tidak saling bergantung.
+> `attempts/{id}/lost` · migrasi RLS 0010) — menyimpang dari konvensi "PR kecil per cluster"
+> `CLAUDE.md` karena branch sesi itu dipatok. **Sudah ditanyakan: pemilik memilih merge apa adanya**
+> (2026-07-29), dengan merge commit supaya keempat commit per-cluster tetap terbaca di riwayat dan
+> bisa di-revert satu-satu. Memecah jadi 4 PR dinilai tidak menghasilkan temuan baru — keempatnya
+> sudah hijau dan tidak saling bergantung — sementara menahan merge menahan apply migrasi 0010.
 
 ---
 
-## 1. 🔴 TINDAKAN PALING MENDESAK — 2 migrasi RLS menunggu apply ke `CDPS SG`
+## 1. ✅ SELESAI — 2 migrasi RLS sudah di-apply ke `CDPS SG` (2026-07-29)
 
-**Runbook lengkap sudah ada: `docs/handoff/RUNBOOK_APPLY_RLS_0009_0010.md`.** Jangan menulis ulang.
+**Dieksekusi sesi 2026-07-29 sesuai `docs/handoff/RUNBOOK_APPLY_RLS_0009_0010.md`.** Urutan wajib
+ditaati: **#62 di-merge dulu** (`2c82f89`) → apply **0009** → apply **0010**.
 
-| Migrasi | Ada di | Status live | Akibat kalau belum di-apply |
-|---|---|---|---|
-| `20260102000009_rls_leads_campaign_scope` | **`main`** (sejak #59-#61) | ❌ belum | Marketing staff kehilangan lead dari campaign miliknya sendiri (regresi fungsional) |
-| `20260102000010_rls_finance_staff_queue_scope` | **hanya branch #62** | ❌ belum | Finance **staff** tidak bisa membaca transaksi ⇒ `GET /finance/queue` akan mengembalikan **antrean kosong tanpa error** begitu di-port; dan sekarang Finance staff bisa **mem-verifikasi pembayaran yang tidak bisa ia baca** (tulis lewat RPC SECURITY DEFINER tidak ter-RLS) |
+| Migrasi | Versi tercatat di live | Status |
+|---|---|---|
+| `20260102000009_rls_leads_campaign_scope` | `20260729031525_rls_leads_campaign_scope` | ✅ ter-apply |
+| `20260102000010_rls_finance_staff_queue_scope` | `20260729032805_rls_finance_staff_queue_scope` | ✅ ter-apply |
 
-**Urutan wajib:** merge **#62** dulu → `git checkout main && git pull` → apply **0009** → apply **0010**.
-Kalau `0010` di-apply sebelum #62 merge, live jadi lebih maju daripada `main` — persis drift yang
-menciptakan **O38** dan menghabiskan satu sesi penuh. `0009` sendiri boleh di-apply kapan saja
-karena sudah ada di `main`.
+Live kini **38 migrasi**. Di-apply lewat MCP `apply_migration` (bukan `psql -f` seperti tertulis di
+runbook) supaya **tercatat** di `supabase_migrations.schema_migrations` — `psql -f` tidak menulis
+baris ledger dan akan mengembalikan live ke keadaan "schema tanpa jejak" yang justru sedang dibereskan.
 
-Pemilik **sudah memberi ack** untuk apply (sesi 6). Yang belum: eksekusinya, karena butuh mesin
-ber-akses (lihat §4).
+**Verifikasi:** jumlah policy tetap **44**, tabel tetap **53**, `private.jwt_owns_lead_campaign` ada,
+`leads_select` ber-5 arm, ketiga policy M5 kini `jwt_division() = 'Finance'` tanpa `jwt_is_lead()`.
+Probe klaim `authenticated` dengan kontrol: Director **3** · pembuat 2 lead **2** · Marketing staff
+tanpa kepemilikan **0** — sekaligus membuktikan arm baru **dievaluasi tanpa error** (mode gagal yang
+menggagalkan percobaan sebelumnya: `function jwt_owns_lead(...) does not exist`, akar O38).
+
+> ⚠️ **BATAS VERIFIKASI — jangan dibaca sebagai "terbukti dengan data nyata".** Live masih kosong
+> secara operasional: `transactions` **0**, `clients` **0**, `campaigns` **0**, `leads` **3** (semua
+> buatan akun QA, `origin_campaign_id` NULL). Jadi probe §4.2 runbook (antrean Finance dengan TRX
+> nyata) **tidak bisa dijalankan**, dan arm own-campaign 0009 belum pernah kena baris nyata. Keduanya
+> terbukti di PG16 lokal + `rls_checks.sql` §14-17 di CI. **Konfirmasi ulang pada TRX pertama yang masuk.**
+>
+> 🔴 **Diperkeras 2026-07-29 — lihat §3.4:** untuk arm own-campaign `0009` batasnya lebih keras dari
+> "belum ada baris nyata" — **aktornya belum bisa ada** (nol mapping `Marketing` di live). Jangan
+> tandai arm itu terverifikasi di produksi sampai O42 diputus.
+
+**Kabar baik yang mengubah asumsi lama:** premis O41 *"blast radius nol karena O33 belum ada aktor
+Finance"* **tidak benar** — live punya **3 karyawan Finance riil aktif** ber-akun login, semuanya
+ter-mapping `Finance`. Jadi 0010 memperbaiki pengguna nyata, bukan menunggu aktor. **O33 kini SELESAI**
+(ENDANG PUJI ASTUTI → `Finance`/`lead`); lihat Decided 2026-07-29 di `docs/DECISIONS.md`.
 
 ---
 
@@ -89,28 +114,68 @@ Detail + bukti di entri Decided 2026-07-28 `docs/DECISIONS.md`, dijaga `rls_chec
 (termasuk assertion bahwa Account staff bukan-AM **tetap 0** — pelebaran Finance tidak melebar ke
 divisi lain). Lihat §1 untuk status apply.
 
-### 2.5 Verifikasi
-`@cdps/domain` **426 hijau terhadap Postgres NYATA** (bukan 285 skip) · `apps/api` **177** ·
-`web-internal` **26** · `core` **112** · `db` **9** · keempat invariant SQL PASS · typecheck seluruh
-workspace bersih · **CI PR #62 11/11 hijau**.
+### 2.5 Cluster 5 — `POST /clients/{id}/payment-intent` + 🔴 kelas bug BENTUK respons (O41 #1 · O43)
+**Ditambahkan 2026-07-29, commit `95a99e5`.**
+
+- **Domain `client.setPaymentIntent`** (port `module4_client/intent.go`): satu deklarasi Sales,
+  dua baris ter-stamp dalam SATU transaksi DB (`clients.payment_intent` +
+  `transactions.payment_intent_scheme`, M5 §8.3), masing-masing dengan audit before→after sendiri.
+  Keduanya di-lock `FOR UPDATE` sebelum pengecekan.
+- **Otoritas = IDENTITAS, bukan level:** hanya `sales_pic_id` klien itu atau Director. **Sales Lead
+  yang bukan PIC klien itu DITOLAK** — keputusan W1-13 yang sudah tercatat, jangan "perbaiki".
+- **Terkunci → 409** begitu ada verifikasi Finance APA PUN atau TRX keluar `[Menunggu Verifikasi]`;
+  `MSG_INTENT_LOCKED` di-port byte-per-byte (string sudah disetujui 2026-07-10, bukan string baru).
+- Nol notifikasi (katalog FROZEN, deferral W1-13) · nol migrasi · nol installment dibuat di sini.
+
+**🔴 Temuan yang lebih penting dari endpoint-nya — baca sebelum tiket O41 berikutnya:**
+`route-parity.test.ts` mendiff **keberadaan path**, **bukan bentuk badan respons**. Jadi endpoint bisa
+ADA, membalas **200**, dan halamannya tetap kosong — tanpa error apa pun di CI atau di log. Dua
+endpoint M4 memang begitu sampai commit ini:
+
+| Endpoint | Yang salah | Akibat di produksi |
+|---|---|---|
+| `GET /clients/{id}` | mengembalikan objek domain **camelCase mentah** padahal tipe `Client` FE snake_case; `total_sales` + `transaction_id` bahkan **tidak ada** di read model | SETIAP field di halaman Client Record membaca `undefined` |
+| `GET /clients` | membalas `{ clients: … }`, FE membaca `res.data` | `setClients(undefined)` → daftar klien kosong |
+
+Keduanya **kelas yang sama dengan C03-F2** (house rule #8). Sudah diperbaiki di commit ini lewat
+`clientDetailToWire` + `clientListRowToWire` (mirror `clientView`/`serviceViews` Go; uang di-format
+IDR **di boundary**, persis tempat `money.Format()` Go memformatnya). Yang **masih terbuka** di
+**O43**: (a) `clientListRowToWire` sengaja lebih **sempit** dari `handleListClients` Go — perlu
+konfirmasi pemilik; (b) **60+ route GET lain belum pernah diaudit** terhadap tipe FE-nya, jadi jumlah
+sebenarnya tidak diketahui dan harus diasumsikan >0; (c) belum ada test yang mendiff bentuk respons.
+
+### 2.6 Verifikasi
+Per `95a99e5` (terakhir dijalankan 2026-07-29): `@cdps/domain` **436 hijau terhadap Postgres NYATA**
+(bukan 285 skip; +10 dari cluster 5) · `apps/api` **186** (+9) · `web-internal` **26** · `core` **112** ·
+`db` **9** · keempat invariant SQL PASS · typecheck seluruh workspace bersih.
+Angka saat PR #62 di-merge: domain 426 · api 177 · **CI 11/11 hijau**.
+
+> ⚠️ **`npm ci` HARUS dijalankan dari root repo.** Menjalankannya dari dalam `packages/*` atau
+> `apps/*` menghasilkan pohon ter-prune (mis. tanpa `next`) sehingga `npm run typecheck -w @cdps/api`
+> gagal dengan `Cannot find module 'next'` — itu artefak instalasi, **bukan** regresi kode.
 
 ---
 
 ## 3. TIKET BERIKUTNYA
 
-### 3.1 Sisa O41 — 7 endpoint, semuanya butuh fungsi domain baru
+### 3.1 Sisa O41 — 6 endpoint, semuanya butuh fungsi domain baru
 Buku besarnya di `apps/api/src/lib/route-parity.test.ts` (`KNOWN_GAPS`) + baris O41 `DECISIONS.md`.
 Urutan hulu-ke-hilir:
 
 | # | Endpoint | Catatan |
 |---|---|---|
-| 1 | `POST /clients/{id}/payment-intent` | scheme + total; **hulu** dari `schedule` |
+| ~~1~~ | ~~`POST /clients/{id}/payment-intent`~~ | ✅ **SELESAI 2026-07-29** (`95a99e5`). Catatan handoff lama *"scheme + total"* **salah** — endpoint ini hanya menerima `payment_intent`; tidak ada `total` di body Go maupun FE. Lihat §2.5 |
 | 2 | `GET /finance/queue` | Go `Service.Queue`; gate endpoint Finance/OD/Director. **BACA §3.2 DULU** |
 | 3 | `GET /transactions/{id}` | Go `LoadTransaction`. **`trxVisibility` JANGAN di-port** — visibilitas baris = RLS (O37); penolakan muncul sebagai **404**, deviasi yang sudah disetujui |
 | 4 | `POST /transactions/{id}/schedule` | Go `CreateSchedule`: lock baris, guard idempotensi ada-installment/ada-verifikasi, Σ termin = total, mint `INST-` |
 | 5 | `GET /transactions/{id}/bermasalah` | file route-nya ADA tapi hanya meng-ekspor POST |
 | 6 | `POST /leads/bulk` | impor massal lead Marketing (bersinggungan O22) |
 | 7 | `GET /audit` | jejak audit lintas-modul (panel riwayat aset Creative) |
+
+> ⚠️ **Untuk keenam sisanya: cek bentuk respons, bukan cuma keberadaan route.** Lihat **O43** /
+> §2.5 — `route-parity.test.ts` mendiff **path**, bukan badan JSON, jadi endpoint bisa ADA, membalas
+> 200, dan halamannya tetap kosong. Dua endpoint M4 memang begitu sampai hari ini. Setiap objek
+> domain WAJIB lewat wire mapper, dan `web-internal/src/lib/*.ts` adalah kontrak kuncinya.
 
 House rule yang mengikat: baca WAJIB `requireActor` + `readAsActor` (#5); setiap objek domain lewat
 **wire mapper** (#8 — penyebab C03-F2: bigint mentah ⇒ 500 yang mematikan kalkulator di produksi).
@@ -125,29 +190,72 @@ migrasi.
 ### 3.3 Menunggu keputusan manusia (tidak bisa didorong developer)
 | # | Isi | Butuh dari |
 |---|---|---|
-| **O33** | Roster HR riil **tidak punya divisi Finance** ⇒ seluruh flow M5 belum punya aktor, **dan tidak ada yang bisa mem-QA halaman Finance** — itu yang menjelaskan kenapa lubang O41 lolos C-03. Paling serius. | Pemilik |
-| **O40** | Sales staff vs Leads Database: M1 §9.1 "sees own attempts only" vs `leadListScope` yang menolak Sales staff sepenuhnya. Bagian #58 yang sengaja TIDAK diputus. Kolom "Didaftarkan oleh" (`created_by`) ikut tiket ini. | Pemilik / Sales Head |
+| ~~**O33**~~ | ✅ **SELESAI 2026-07-29.** Premisnya ternyata kedaluwarsa: live **sudah** punya divisi `FINANCE AND ACCOUNTING` — 3 karyawan riil aktif ber-akun login, ketiga jabatannya ter-mapping ke `Finance`. Yang kurang hanya level `lead`, dan pemilik menetapkan `SENIOR FINANCE, ACCOUNTING & TAX` (ENDANG PUJI ASTUTI) → `Finance`/`lead`. **M5 kini punya aktor produksi + QA.** | — |
+| ~~**O40**~~ | ✅ **DIPUTUS 2026-07-29 — arah (b), eksekusi DITUNDA sampai setelah gate C-04.** Database memang harus tampil untuk Sales staff ter-scope ke lead miliknya, tapi itu perubahan perilaku di tengah cutover (preseden O39). Pekerjaannya + kolom "Didaftarkan oleh" ada di **issue #64**; PR #58 ditutup. | — |
+| **O42** 🆕 | **Tidak ada jalur admin `role_mappings` di stack baru**, padahal tabel itu sumber kebenaran SELURUH permission (`employee_claims()` menurunkan division/level darinya). Mengubah peran = SQL langsung ke produksi. Plus tiga sumber mapping yang saling menyimpang: live **38** baris · `backend/seed/role_mappings_riil.csv` **23** (nol Finance) · `supabase/seed.sql` **12** (fixture dev). **🔴 DIPERLUAS 2026-07-29 — baca §3.4**, temuan aslinya meremehkan masalah: **divisi `Marketing` tidak ada di produksi**, dan itu mematikan M3 reassign-owner sepenuhnya. | Pemilik / HR / OD |
+| **O43** 🆕 | **Paritas BENTUK respons tidak pernah diuji.** Dua endpoint M4 mengembalikan JSON yang FE tak bisa baca (200, tapi halaman kosong) — sudah diperbaiki di `95a99e5`, lihat §2.5. Yang butuh keputusan: apakah baris roster klien harus membawa `clientView` PENUH seperti Go (paritas) atau proyeksi sempit seperti sekarang (hemat N+1). Sisanya kerja developer: audit 60+ route GET lain + bikin test paritas-bentuk. | Pemilik (arah); developer (audit + test) |
 | **O34 · O26 · O35 · O25 · O9** | Aktor Wave 2, NIK/email Director, sub-tim Creative, anomali kalkulator, target M14 | lihat `HANDOFF_CUTOVER_SESI5.md` §3.1 |
 
 **O24 sudah RESOLVED — jangan dibuka lagi.** Komisi Rp0 adalah nilai sah.
 
-### 3.4 Sisa pekerjaan lain
+### 3.4 🔴 O42 diperluas — divisi `Marketing` tidak punya wujud di produksi (audit roster 2026-07-29)
+
+Lanjutan investigasi O42. **Bukan** temuan yang bisa ditutup developer — tapi mengubah apa yang boleh
+diklaim "selesai" tentang M1/M3 dan tentang migrasi `0009` yang baru di-apply.
+
+`role_mappings` live hanya pernah menghasilkan **6** division: `Account · Ads · Creative · Finance ·
+KOL · Sales`. **`Marketing` tidak ada sama sekali** ⇒ tidak satu pun dari **68** karyawan aktif bisa
+resolve ke `division='Marketing'`, dan re-sync HRIS tidak akan mengubahnya sampai ada baris mapping.
+
+| Yang mati di produksi | Bukti di kode |
+|---|---|
+| **Reassign owner Campaign (M3 §5 Rule 1 / M3-OA-6) — untuk aktor APA PUN** | `campaign.validateOwnerCandidate` wajib kandidat `Marketing`/`staff` aktif. Director lolos `canReassign` (`permission.isLead` meloloskan director) lalu **tertahan di validasi kandidat** ⇒ `NotFoundError`. Tidak ada aktor yang bisa lewat. |
+| Campaign hanya bisa lahir **self-owned di tangan Director** | `campaign.canCreate` = Director ∪ Marketing staff/lead; suku kedua kosong di live. |
+| Leads Database: arm Marketing-lead **dan** Marketing-staff | `leads.leadListScope` ⇒ tinggal Director/OD/Sales-lead. Bersinggungan **O40**. |
+| Arm own-campaign migrasi **`0009`** (baru di-apply sesi 6) | Butuh aktor Marketing-staff **DAN** campaign; `campaigns` = **0** dan aktornya tak bisa ada. |
+
+> ⚠️ Baris terakhir **memperkeras** peringatan "batas verifikasi" di §1: bukan sekadar *"live belum
+> punya baris nyata untuk diuji"*, tapi **aktornya belum bisa ada**. Jangan tandai 0009 terverifikasi
+> di produksi sampai O42 diputus.
+
+**Kabar baik / koreksi arah-sebaliknya:** divergensi CSV **tidak punya korban hari ini**. Dari 68
+karyawan aktif, **61** resolve lewat mapping dan **7** tidak — ketujuhnya **tepat** ketujuh pemegang
+`employee_layered_roles` (3 OD riil, 2 Director riil, QA Director, QA OD), jadi `division=''` mereka
+memang perilaku yang dikehendaki (mirror Go: *absent mapping = pure Director/OD*). **Nol** mapping
+yatim, **nol** karyawan tanpa peran. Baris CSV `BUSINESS DEVELOPMENT`→Marketing yang hilang dari live
+**tidak menelantarkan siapa pun** — divisi `BUSINESS DEVELOPMENT` pun tidak ada di roster live. Jadi
+kalimat sesi 6 *"divisi Marketing kini tanpa mapping di produksi"* menyesatkan dua kali: bukan
+regresi CSV, dan lebih parah dari yang tersirat.
+
+**Pertanyaan (4) untuk pemilik**, di atas tiga pertanyaan O42 yang sudah ada: apakah MEA memang belum
+punya divisi Marketing (⇒ M1/M3 de-facto dijalankan Sales/Account, PRD perlu dibaca ulang), atau
+divisi itu **ada** di HRIS dengan nama lain yang belum dipetakan? Jawabannya menentukan apakah O42
+selesai dengan **satu baris mapping** atau dengan **revisi scope M1/M3**.
+
+### 3.5 Sisa pekerjaan lain
 Impor lead historis (O22) · 3 SKIP C-03 (`HANDOFF_CUTOVER_SESI3.md` §5) · konfirmasi data
 Railway/MySQL riil atau UAT. Sesudah C-04 → C-05 (retire Go).
 
 ---
 
-## 4. Batasan sandbox (diverifikasi ULANG 2026-07-29 01:49Z — jangan diuji ulang)
+## 4. Batasan sandbox — ⚠️ SUDAH BERUBAH per 2026-07-29
 
-Sesi Claude **tidak bisa** menyentuh `CDPS SG` maupun deployment Vercel. Tiga penghalang independen:
+> **Jangan pakai tabel di bawah sebagai alasan menolak menyentuh live.** Sesi 2026-07-29 punya
+> **Supabase MCP dengan akses ke `CDPS SG`** dan memakainya untuk apply + verifikasi kedua migrasi
+> RLS serta mengeksekusi keputusan O33. **Periksa dulu tool yang tersedia** sebelum menyimpulkan
+> live tak terjangkau — batasan ini per-sesi, bukan sifat permanen environment.
+
+Yang **masih** berlaku (sesi 2026-07-29): deployment Vercel tetap tak bisa disentuh, dan **tidak ada
+klien HTTP ke `agency-app-api`** — jadi konfirmasi endpoint lewat HTTP nyata (utang O41) masih belum
+bisa dilakukan dari dalam sesi. Yang **tidak lagi** berlaku: baris "tidak ada Supabase MCP".
+
+Kondisi sesi 6 (arsip, diverifikasi 2026-07-29 01:49Z — konteks kenapa runbook §3 ditulis untuk manusia):
 
 | Penghalang | Bukti |
 |---|---|
-| Gateway proxy menolak CONNECT | `$HTTPS_PROXY/__agentproxy/status` → `recentRelayFailures` mencatat sendiri `403 to CONNECT` untuk `supabase.com:443` dan `agency-app-api.vercel.app:443`; `selective: false` ⇒ kebijakan jaringan environment, tidak bisa dinyalakan dari dalam |
+| Gateway proxy menolak CONNECT | `$HTTPS_PROXY/__agentproxy/status` → `recentRelayFailures` mencatat sendiri `403 to CONNECT` untuk `supabase.com:443` dan `agency-app-api.vercel.app:443`; `selective: false` ⇒ kebijakan jaringan environment |
 | Tidak ada kredensial | nol `DATABASE_URL`/`SUPABASE_*` di env sesi |
-| Tidak ada Supabase MCP | tidak tersedia di sesi ini |
-
-⇒ **semua apply ke live dijalankan manusia.** Claude menyiapkan alat + runbook + verifikasi lokal.
+| ~~Tidak ada Supabase MCP~~ | **tidak lagi benar** — tersedia sejak sesi 2026-07-29 |
 
 ### 4.1 ✅ Cara menjalankan test DB-backed di sandbox (BARU sesi 6 — ini mengubah banyak hal)
 Sebelumnya test domain di-skip (138 lolos / 285 skip). Dengan resep ini: **426 lolos**.
