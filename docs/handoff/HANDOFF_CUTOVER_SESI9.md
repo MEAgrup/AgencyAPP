@@ -239,6 +239,19 @@ kelihatan user**, bukan utang rapi:
    (Di sesi 8 **kedua** kembaran `backend` tersangkut >15 menit pada diff **docs-only**; #67 tetap
    di-merge karena semua gate bermakna — `api`, `core-engines`, `db-and-migrations`, `web-internal`,
    Vercel — hijau dan nol berkas Go tersentuh.)
+9. 🔴 **CI SEDANG SAKIT — runner tidak teralokasi (C-00 KAMBUH). Cek ini SEBELUM percaya CI merah.**
+   Pada `550916a` (2026-07-29 ~12:05 UTC, diff **docs-only satu berkas**) **kelima** job gagal dalam
+   **2–12 detik**, lalu `rerun_failed_jobs` gagal lagi dalam **2–3 detik**. Tandanya khas dan mudah
+   dibedakan dari kegagalan test:
+   - `runner_id: 0` dan `runner_name: ""` pada job (`actions_get` → `get_workflow_job`)
+   - **nol log** — unduh log balas **HTTP 404**, karena tidak ada apa pun yang pernah berjalan
+   - durasi **detik**, bukan menit; **semua** job serentak, termasuk yang tak tersentuh diff
+
+   Ini **bukan** regresi kode. Kalau pola ini muncul: **jangan** kejar "perbaikan" di kode, dan
+   jangan tafsirkan sebagai gate merah — tunggu kapasitas runner pulih lalu re-run. Preseden:
+   **C-00** (`CUTOVER_BACKLOG.md`) adalah tiket dengan sebab yang sama dan sudah pernah pulih sendiri.
+   ⚠️ **Dampak untuk sesi ini:** kalau CI masih begini, Task A/B/C tidak akan punya gate hijau —
+   angkat ke pemilik lebih dulu, jangan paksakan merge berantai di atas CI yang tidak memberi sinyal.
 
 ## 7. Cara menjalankan test DB-backed di sandbox
 
