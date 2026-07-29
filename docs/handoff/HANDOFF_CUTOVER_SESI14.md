@@ -89,6 +89,24 @@ men-destrukturisasi `{task, allowed_transitions, audit}` lalu langsung membaca
 SAMA yang divalidasi `sm_transition`, jadi tombol yang dirender dan edge yang
 diterima tidak bisa berpisah. Read-only by construction seperti `audit.ts`.
 
+> ### ⚠️ `order by … collate "C"` di `engine.ts` LOAD-BEARING — jangan dilepas
+> CI menangkap ini, lokal tidak. **Postgres CI diinisialisasi dengan `en_US.utf8`;
+> Postgres sandbox lokal `C`.** Collation glibc `en_US` mengabaikan tanda baca,
+> jadi `order by to_state` biasa menaruh `[Closed - Kalah Kompetisi]` **di depan**
+> `Qualified`, sementara `C` (dan Go, dan `Array.sort()` JS) menaruhnya **di
+> belakang**. Tanpa collation dipatok, **urutan tombol di badan respons bergantung
+> locale cluster DB** — dan Go mengurutkan byte-wise (`sort.Strings`), jadi
+> `collate "C"` sekaligus memulihkan paritas persis.
+>
+> Direproduksi lokal tanpa menunggu CI: `order by to_state collate "en-US-x-icu"`
+> lawan `collate "C"` pada DB yang sama memberi dua urutan berbeda. Dikunci test
+> *"puts a bracketed status LAST regardless of the cluster locale"*.
+>
+> **Pelajaran yang lebih umum:** perbedaan locale Postgres lokal↔CI bisa mengubah
+> urutan hasil di endpoint MANA PUN yang mengurutkan kolom teks ber-`[...]` — dan
+> seluruh status CDPS ber-`[...]`. Kalau menambah read model yang mengurutkan
+> status, patok collation-nya.
+
 **Pemetaan tally scan diambil dari SEMANTIK Go, bukan kemiripan nama:**
 `overdue_flagged` ← `markedOverdue` (Go menghitung TRANSISI ke [Jatuh Tempo]),
 bukan `overdueNotified`. `overdueNotified` sengaja tidak menyeberang — Go tidak

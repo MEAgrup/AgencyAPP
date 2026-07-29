@@ -24,11 +24,29 @@ afterAll(async () => {
 });
 
 describeDb('allowedTransitions', () => {
-  it('returns the states reachable in one step, sorted', async () => {
+  it('returns the states reachable in one step, in BYTE order like Go', async () => {
     const from = await allowedTransitions(sql, 'prospect_attempt', 'Contacted');
     expect(from.length).toBeGreaterThan(0);
-    expect([...from].sort()).toEqual(from); // Go sorts too — stable button order
+    // JS sorts by UTF-16 code unit, which for these ASCII statuses IS byte order —
+    // the same order Go's `sort.Strings` produced, and what `collate "C"` pins.
+    expect([...from].sort()).toEqual(from);
     expect(new Set(from).size).toBe(from.length); // no duplicate edges
+  });
+
+  it('puts a bracketed status LAST regardless of the cluster locale', async () => {
+    // The regression that caught this: CI's Postgres 17 is initialized with
+    // `en_US.utf8`, whose glibc collation deprioritizes punctuation and sorts
+    // `[Closed - Kalah Kompetisi]` FIRST; a `C`-collated cluster sorts it LAST.
+    // Unpinned, the button order in the API response depended on which locale the
+    // database happened to be created with.
+    const from = await allowedTransitions(sql, 'prospect_attempt', 'Contacted');
+    const bracketed = from.filter((s) => s.startsWith('['));
+    expect(bracketed.length).toBeGreaterThan(0);
+    for (const b of bracketed) {
+      const plain = from.filter((s) => !s.startsWith('['));
+      // Every unbracketed status comes before every bracketed one, byte order.
+      expect(plain.every((p) => from.indexOf(p) < from.indexOf(b))).toBe(true);
+    }
   });
 
   it('agrees with sm_edges — the same table sm_transition validates against', async () => {
@@ -39,7 +57,7 @@ describeDb('allowedTransitions', () => {
       const expected = await sql<{ to_state: string }[]>`
         select to_state from sm_edges
         where machine = ${r.machine} and from_state = ${r.from_state}
-        order by to_state`;
+        order by to_state collate "C"`;
       expect(await allowedTransitions(sql, r.machine, r.from_state))
         .toEqual(expected.map((e) => e.to_state));
     }

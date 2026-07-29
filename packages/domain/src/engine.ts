@@ -17,10 +17,18 @@ import { type Queryable } from '@cdps/db';
 
 /**
  * allowedTransitions returns the states reachable in one step from `from` on
- * `machine`, sorted (Go sorts the map keys, so the client's button order is
- * stable across calls). Returns [] for an unknown machine or a terminal state —
+ * `machine`, sorted. Returns [] for an unknown machine or a terminal state —
  * never null, because the client iterates the array to decide which action
  * buttons to render at all.
+ *
+ * `collate "C"` is load-bearing, not decoration. Go sorted these with
+ * `sort.Strings` (byte order), and CDPS statuses are bracketed —
+ * `[Closed - Kalah Kompetisi]` vs `Qualified`. A glibc locale like `en_US.utf8`
+ * deprioritizes punctuation and puts the bracketed status FIRST, while `C` (and
+ * Go, and JS) put it LAST. Without pinning the collation, the button order in the
+ * response would depend on the locale the database cluster happened to be
+ * initialized with — CI's Postgres 17 (`en_US.utf8`) and a local Postgres really
+ * do disagree, which is how this was found. Byte order also matches Go exactly.
  *
  * NOTE this answers "is the EDGE legal", not "may THIS actor take it": the
  * `require_lead` gate is enforced by `sm_transition` at write time. Go's
@@ -35,6 +43,6 @@ export async function allowedTransitions(
   const rows = await sql<{ to_state: string }[]>`
     select to_state from sm_edges
     where machine = ${machine} and from_state = ${from}
-    order by to_state`;
+    order by to_state collate "C"`;
   return rows.map((r) => r.to_state);
 }
