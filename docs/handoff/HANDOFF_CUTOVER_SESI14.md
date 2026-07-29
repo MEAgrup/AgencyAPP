@@ -104,8 +104,13 @@ diterima tidak bisa berpisah. Read-only by construction seperti `audit.ts`.
 >
 > **Pelajaran yang lebih umum:** perbedaan locale Postgres lokal↔CI bisa mengubah
 > urutan hasil di endpoint MANA PUN yang mengurutkan kolom teks ber-`[...]` — dan
-> seluruh status CDPS ber-`[...]`. Kalau menambah read model yang mengurutkan
-> status, patok collation-nya.
+> seluruh status CDPS ber-`[...]`.
+>
+> **Sudah disisir, bukan cuma dikhawatirkan:** seluruh `packages/domain/src/**`
+> digrep untuk `order by` pada kolom status/state. `engine.ts` **satu-satunya**
+> instans; tiga sisanya (`kol.ts` ×2, `finance.ts`) mengurutkan `id`, yang bebas
+> locale. Jadi jebakan ini nol sisa hari ini — tapi kalau menambah read model yang
+> mengurutkan kolom status, patok collation-nya.
 
 **Pemetaan tally scan diambil dari SEMANTIK Go, bukan kemiripan nama:**
 `overdue_flagged` ← `markedOverdue` (Go menghitung TRANSISI ke [Jatuh Tempo]),
