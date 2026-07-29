@@ -9,24 +9,33 @@
 | | |
 |---|---|
 | **Branch** | `claude/cdps-sg-cutover-sesi13-2kmgy4` |
-| **HEAD** | `c1585d8` — sudah dipush, working tree **bersih** |
-| **Isi branch** | **7 commit** di atas `main@7bbd5e1`: 4 dari SESI13 (`38fed0c`→`16b2504`) + 3 baru (`a4fc289`→`e48e3fd`→`c1585d8`) |
-| **PR** | **#75** → `main` |
+| **Isi branch** | **6 commit + 1 merge** di atas `main@a37e432`: `e48e3fd` (Fase 2) → `c1585d8` (pensiun Go + Fase 3) → `f6ae287` (handoff) → `98bfa3f` (fix collation) → `df250d4` (handoff) → merge `main` |
+| **PR** | **#76** → `main` (draft) |
 | **Live `CDPS SG`** | **40 migrasi · 54 tabel · 17 event** (tidak bergerak sesi ini — nol perubahan skema) |
 
-> ⚠️ **Branch berpindah nama.** SESI13 bekerja di
-> `claude/cdps-sg-cutover-migrasi-azzlwr`; sesi ini melanjutkannya di
-> `claude/cdps-sg-cutover-sesi13-2kmgy4` (branch yang ditugaskan), yang di-reset ke
-> `16b2504` lalu dilanjutkan. PR #75 tetap PR yang sama — **head-nya sekarang branch
-> baru ini**. Jangan menghidupkan kembali branch lama.
+> ⚠️ **Branch berpindah nama, DAN #75 sudah di-merge.** SESI13 bekerja di
+> `claude/cdps-sg-cutover-migrasi-azzlwr` (PR #75); sesi ini ditugaskan ke
+> `claude/cdps-sg-cutover-sesi13-2kmgy4`, di-reset ke `16b2504` lalu dilanjutkan.
+> **Pemilik me-merge #75 pukul 17:46 UTC** (`main@a37e432`), jadi keempat commit
+> SESI13 kini ada di `main` — bukan lagi bagian dari branch ini. PR sesi ini adalah
+> **#76**, isinya hanya pekerjaan baru. `main` sudah di-merge ke branch ini, jadi CI
+> menguji keadaan pasca-merge yang sebenarnya, bukan tebakan.
+>
+> Jangan menghidupkan kembali branch lama, dan jangan menumpuk commit di atas
+> riwayat yang sudah ter-merge.
 
 **Angka acuan (Postgres 16 lokal, DB dibangun ulang dari nol dengan 40 migrasi):**
-`@cdps/domain` **565** (+1 skip) · `apps/api` **246** · `@cdps/core` **113** ·
+`@cdps/domain` **566** (+1 skip) · `apps/api` **246** · `@cdps/core` **113** ·
 `@cdps/db` **9** · `web-internal` **26** · 7 gate seed **PASS** · keempat invariant
 SQL **PASS** · `route-parity` **5/5 dengan `KNOWN_GAPS` KOSONG** · typecheck bersih
 semua workspace · eslint `web-internal` bersih · `go vet ./...` bersih.
 
-> Beda dari SESI13: domain **552 → 565** (+13), apps/api **211 → 246** (+35).
+> Beda dari SESI13: domain **552 → 566** (+14), apps/api **211 → 246** (+35).
+
+> ⚠️ **Postgres sandbox bisa mati di tengah sesi.** Kalau tiba-tiba banyak test
+> DB-touching gagal serentak (`@cdps/db` integration, `mslseed/engine`), cek
+> `pg_isready` **sebelum** menduga regresi kode — itu terjadi sekali sesi ini, dan
+> semuanya hijau lagi setelah restart + `db:rebuild`.
 
 **Setup sandbox yang dibutuhkan** (tidak persisten antar sesi):
 ```bash
@@ -38,21 +47,36 @@ DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/cdps" npm test --works
 
 ---
 
-## 1. Job `backend` di CI SEBELUMNYA MERAH — sudah hijau (`a4fc289`)
+## 1. Job `backend` yang merah — SUDAH DIPERBAIKI DI #75 SENDIRI, bukan di sini
 
-SESI13 memindahkan 3 CSV organisasi riil ke `supabase/seed/` dan menyatakan "nol
-test Go membacanya, jadi job `backend` tetap hijau". **Itu tidak benar** —
-`cmd/rolemapseed` punya 6 test yang membacanya lewat `FindRoleMappingsCSV()`, dan
-keenamnya gagal di PR #75.
+**Koreksi terhadap versi awal handoff ini.** Saya sempat menulis bahwa SESI13
+melaporkan job `backend` hijau padahal merah, lalu memperbaikinya sendiri lewat
+finder (`a4fc289`). Bagian pertama benar untuk sesaat, bagian kedua sudah tidak
+berlaku:
 
-Ini bukan kerusakan kosmetik: Fase 2 adalah satu-satunya pekerjaan yang benar-benar
-membaca handler Go untuk membandingkan bentuk respons, jadi **Go harus hijau dulu**.
-Diperbaiki di finder-nya (menaiki direktori, cek `supabase/seed/` lebih dulu lalu
-`seed/` lama), bukan di test-nya — datanya masih di repo, hanya pindah lokasi
-kanonik.
+- SESI13 **menemukan dan memperbaiki sendiri** kerusakan itu sebelum #75 di-merge,
+  di commit **`5453f69`** — dengan pendekatan berbeda: menyalin kedua CSV **kembali**
+  ke `backend/seed/` sebagai duplikat byte-identik (md5 diverifikasi), bukan mengubah
+  finder. CI final #75 di `faea775` hijau seluruhnya, termasuk `backend`.
+- Saya membaca check-run pada `16b2504` (commit sebelum perbaikan itu), jadi kesimpulan
+  "dilaporkan hijau padahal merah" itu **melihat snapshot yang sudah kedaluwarsa**.
+  SESI13 juga sudah mencatat sebab kesalahan verifikasinya sendiri di
+  `supabase/seed/README.md`: grep nama berkas literal di `*_test.go` mengembalikan nol
+  karena test membukanya lewat helper, dan `go vet` yang lolos tidak membuktikan apa pun.
 
-> **Pelajaran untuk sesi berikutnya:** jangan pernah menyatakan sebuah job CI hijau
-> tanpa membaca lognya. `mcp__github__get_job_logs` dengan `failed_only` murah.
+**Perubahan finder saya sudah DICABUT** (`paths.go` kini identik dengan `main`).
+Alasannya aturan rumah yang saya sendiri tulis ke `CLAUDE.md` sesi ini: `backend/**`
+read-only, dan satu-satunya perubahan yang wajar adalah menjaga job `backend` hijau.
+Job itu sudah hijau tanpa saya, dan `paths.go` toh ikut terhapus di Fase 5 — jadi
+perubahan saya tinggal mekanisme kedua tanpa manfaat tahan-lama, plus membuat
+`supabase/seed/README.md` (yang menjelaskan mekanisme duplikat) jadi tidak akurat.
+Mekanisme yang berlaku: **duplikat byte-identik di kedua tempat sampai Fase 5**.
+
+> **Pelajaran yang tetap berlaku, dan justru menggigit saya sendiri:** jangan menilai
+> status CI dari check-run sebuah commit yang bukan HEAD. Snapshot lama terlihat
+> identik dengan kerusakan yang masih hidup. Baca check-run **HEAD**, dan kalau
+> menuduh sesi sebelumnya salah lapor, periksa dulu apakah ia sudah memperbaikinya
+> sendiri di commit berikutnya.
 
 ## 2. Go DITINGGALKAN secara resmi — `CLAUDE.md` §Stack (`c1585d8`)
 
