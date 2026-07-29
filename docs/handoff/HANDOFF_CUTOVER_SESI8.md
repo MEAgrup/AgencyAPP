@@ -5,54 +5,46 @@
 
 ## 0. Posisi persis
 
+> ✅ **PR #66 sudah DI-MERGE** (2026-07-29, `main` @ `df85181`). Seluruh kerja sesi 7→8 sudah ada di
+> `main` — **tidak ada apa pun yang menunggu di branch.**
+
 | | |
 |---|---|
-| **Branch kerja** | **`claude/handoff-cutover-sesi-6-x4i8tw`** |
-| **Commit SUBSTANTIF terakhir** | **`08bb9c3`** — commit docs boleh menyusul di atasnya (termasuk yang menulis baris ini), jadi ambil hash head yang sebenarnya dari `git log`, bukan dari dokumen ini |
-| **PR** | **#66** — https://github.com/MEAgrup/AgencyAPP/pull/66 · masih **draft**, nol review comment |
-| **Base** | `main` @ **`446f6502`** (hasil merge PR #65) |
-| **PR lain yang terbuka** | **tidak ada** — #66 satu-satunya |
-| **PR yang sudah selesai** | #65 **ter-merge**; #63 **ditutup** (premisnya kedaluwarsa — lihat komentar di PR-nya) |
-| **Live** | Supabase `CDPS SG` (`egddxfcnrtecheiykhlf`, `ap-southeast-1`) — **38 migrasi ter-apply**, `master_services` 32 baris, `role_mappings` 38 baris |
+| **Mulai dari** | **`main` @ `df85181`** — bukan dari branch mana pun |
+| **PR #66** | **ter-merge**, bukan draft lagi. **Jangan** menumpuk commit baru di atas riwayat yang sudah ter-merge |
+| **PR terbuka** | **tidak ada** |
+| **PR yang sudah selesai** | #66 **ter-merge** · #65 **ter-merge** · #63 **ditutup** (premisnya kedaluwarsa) |
+| **Live** | Supabase `CDPS SG` (`egddxfcnrtecheiykhlf`, `ap-southeast-1`) — **38 migrasi ter-apply**, `master_services` 32 baris, `role_mappings` 38 baris. ⚠️ Migrasi ke-**39** (`…0011`) **belum** ter-apply — lihat §2.1 |
 
-### 0.1 Tidak ada pekerjaan tertinggal (diverifikasi saat menulis dokumen ini)
+### 0.1 Cara memulai sesi berikutnya
 
-```
-belum ter-commit : 0
-belum ter-push   : 0
-stash            : 0
-PR terbuka       : hanya #66
-```
-
-**Empat commit di branch** (terbaru dulu), semuanya sudah ter-push:
-
-| Commit | Isi |
-|---|---|
-| `08bb9c3` | **feat(auth): O44(c) A+B1** — ganti password sendiri + reset via admin (GoTrue) · migrasi `…0011` · handoff ini |
-| `24f932c` | **feat(admin): O44(a)(b)** — paritas rekursif + port 6 route admin (buka jalan O42) |
-| `93614fd` | docs — jawaban O42 (B), O43(a) diputus, temuan O44 |
-| `0c77530` | docs — jawaban O42(4), koreksi framing O43(a) |
+Branch lama (`claude/handoff-cutover-sesi-6-x4i8tw`) isinya sudah ter-merge seluruhnya, jadi
+**restart dari `main`** dengan nama branch yang sama:
 
 ```bash
 git fetch origin main
-git checkout claude/handoff-cutover-sesi-6-x4i8tw
-git pull origin claude/handoff-cutover-sesi-6-x4i8tw
+git checkout -B claude/handoff-cutover-sesi-6-x4i8tw origin/main
 npm ci                                # ⚠️ WAJIB dari ROOT repo — lihat §3.6
 cd web-internal && npm ci && cd ..    # web-internal punya lockfile sendiri
 ```
 
-### 0.2 Status CI di `08bb9c3`
+PR baru yang dibuka dari branch itu adalah **PR baru** — bukan #66 yang sudah selesai.
 
-**10/11 hijau** saat dokumen ini ditulis: `api` ×2 · `core-engines` ×2 · `web-internal` ×2 ·
-**`db-and-migrations` ×2** · `backend` ×1 (5m28s) · Vercel. Satu kembaran `backend` masih
-`in_progress` — pola §0/§3 (dua run per commit), dan **diff ini nol berkas Go**, jadi bukan dari
-perubahan di sini.
+### 0.2 Apa yang sudah masuk `main` lewat #66
 
-Yang penting: **kedua** job `db-and-migrations` lulus ⇒ migrasi baru `…0011` terbukti **apply dari
-nol** di CI, bersama 470 test domain, keempat invariant SQL, dan gate seed.
+| Commit | Isi |
+|---|---|
+| `08bb9c3` | **feat(auth): O44(c) A+B1** — ganti password sendiri + reset via admin (GoTrue) · migrasi `…0011` |
+| `24f932c` | **feat(admin): O44(a)(b)** — paritas rekursif + port 6 route admin (buka jalan O42) |
+| `93614fd` · `0c77530` · `da974a8` | docs — jawaban O42 (B), O43(a) diputus, temuan O44, dokumen ini |
 
-> **Status CI hidup selalu dari PR-nya**, bukan dari angka di dokumen ini — angka apa pun di sini
-> kedaluwarsa begitu commit berikutnya mendarat.
+### 0.3 Status CI saat di-merge
+
+**11/11 hijau** di head `da974a8`: `api` ×2 · `core-engines` ×2 · `web-internal` ×2 ·
+`db-and-migrations` ×2 · `backend` ×2 (5m22s & 5m29s) · Vercel. Nol review comment.
+
+Yang penting: **kedua** job `db-and-migrations` lulus ⇒ migrasi `…0011` terbukti **apply dari nol**
+di CI, bersama 470 test domain, keempat invariant SQL, dan gate seed.
 
 ⚠️ **Sandbox tidak bisa menjangkau live.** Nol kredensial di env, dan gateway menolak CONNECT ke
 `supabase.co` (**403**). Setiap langkah yang menyentuh `CDPS SG` harus dijalankan pemilik atau dari
@@ -164,17 +156,12 @@ konfirmasi data Railway riil atau UAT · backup MySQL + rencana rollback → gat
 (buang job CI Go, arsipkan `backend/` **dengan tag** — Go adalah oracle paritas satu-satunya,
 matikan Railway).
 
-### 2.8 Kalau PR #66 sudah di-merge sebelum sesi berikutnya
+### 2.8 Aturan branch (berlaku terus)
 
-Perlakukan pekerjaan lanjutan sebagai perubahan **baru**: PR yang sudah merge tidak bisa dipakai lagi.
-Mulai ulang branch dari `main` terbaru dengan **nama branch yang sama**, lalu buka PR baru:
-
-```bash
-git fetch origin main
-git checkout -B claude/handoff-cutover-sesi-6-x4i8tw origin/main
-```
-
-Kalau branch masih memuat commit yang **belum** ter-merge, jangan dibuang — rebase ke base baru.
+Sekali sebuah PR ter-merge, PR itu **selesai** — jangan menumpuk commit baru di atas riwayat yang
+sudah ter-merge, dan jangan membuka ulang PR-nya. Restart branch dari `main` (§0.1), lalu buka PR
+**baru**. Kalau branch masih memuat commit yang **belum** ter-merge, rebase ke base baru — jangan
+dibuang.
 
 ## 3. Aturan rumah yang paling sering menggigit
 
