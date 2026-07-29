@@ -4,10 +4,38 @@
 Standalone internal system covering MEA Agency's full client lifecycle: lead intake → sales closing → payment gate → delivery execution (Creative/Ads/KOL/Live-Stream-vendor) → client health scoring → team performance → client/team portals. It is NOT an HRIS — MEA's HRIS (employee/attendance/leave) is a separate existing system we integrate with (read-only employee sync only; CDPS auth is local — see `docs/DECISIONS.md` 2026-07-19). See `docs/prd/CDPS_Build_Plan.md` for waves and `docs/prd/` for the 18 PRD documents.
 
 ## Stack & architecture (decided — do not change without a logged decision)
-- **Backend:** Go, modular monolith. One service, module boundaries = Go packages mirroring PRD modules (`module0_sales`, `module1_leads`, … `module15_portal`) on top of shared core engines in `internal/core/`.
+
+> ### ⛔ GO + MYSQL SUDAH DIPENSIUNKAN — JANGAN BANGUN DI SANA
+> Stack CDPS bermigrasi ke **TypeScript + Supabase/Postgres** (keputusan
+> `docs/DECISIONS.md` 2026-07-29, "Pensiun Go"). `backend/` masih ada di repo untuk
+> **satu alasan saja**: ia adalah oracle paritas selama porting (O43). Ia **bukan**
+> stack produksi, tidak di-deploy, dan MySQL sudah tidak dipakai.
+>
+> **Kalau ticket Anda bukan "bandingkan perilaku TS dengan Go", jangan sentuh
+> `backend/`.** Menambah fitur di Go berarti menulis kode yang akan dihapus di
+> C-05, dan lebih buruk: menciptakan versi kedua dari aturan bisnis yang sama.
+
+- **Backend:** **TypeScript**, modular monolith. `apps/api` (Next.js route handlers,
+  lapisan tipis) di atas `packages/domain` (satu modul per modul PRD: `sales`,
+  `leads`, … `portal`) di atas `packages/core` (engine bersama: ident, statemachine,
+  money, permission, audit, notification, bi, tz) dan `packages/db`.
+  Route handler = shell: resolve actor dari klaim JWT → validasi → panggil domain.
 - **Frontend:** React/Next. Two apps: `web-internal` (workspaces/boards/dashboards) and `web-client-portal` (external, **separate auth realm**, strict allow-list data layer — never a permission-trimmed internal view).
-- **DB:** MySQL, single schema. Migrations via a proper migration tool; never hand-edit schema.
-- **Integration:** existing HRIS provides `GET /employees` only (employee data sync — no auth endpoint). CDPS keeps a role-mapping table (HRIS jabatan/divisi → CDPS role). Auth (password login, change-password, admin password reset) is local to CDPS. Employee deactivated in HRIS ⇒ CDPS access revoked on next sync.
+- **DB:** **Supabase/Postgres**, single schema (`public`), proyek live `CDPS SG`.
+  Migrasi HANYA lewat `supabase/migrations/**` + `supabase db push` / `apply_migration`
+  — **jangan pernah** `psql -f` (itulah yang melahirkan drift O38), dan jangan
+  hand-edit schema. DB lokal dibangun ulang HANYA lewat `scripts/db-rebuild.sh`.
+- **Penegakan aturan ada di DB, bukan cuma di TS:** transisi status ditulis
+  eksklusif oleh fungsi SQL `sm_transition` (row lock + validasi edge + gate role +
+  baris audit immutable, satu transaksi), RLS memikul row-scope, dan riwayat
+  dilindungi trigger. Kode TS adalah pembungkus atas kontrak itu — jangan
+  reimplementasi engine-nya di TS.
+- **Batas camelCase↔snake_case:** domain berbicara camelCase; badan respons wire
+  snake_case. Penerjemahnya `apps/api/src/lib/wire.ts` (`*ToWire`) dan itu
+  **satu-satunya** tempatnya. Route yang mengirim objek domain mentah adalah bug
+  kelas O43: halamannya blank walau route-nya menjawab 200. Kunci yang HILANG lebih
+  berbahaya daripada null — kirim `null` eksplisit, jangan `omitempty`.
+- **Integration:** existing HRIS provides `GET /employees` only (employee data sync — no auth endpoint). CDPS keeps a role-mapping table (HRIS jabatan/divisi → CDPS role). Auth is local to CDPS (password login, change-password, admin password reset) atas Supabase GoTrue. Employee deactivated in HRIS ⇒ CDPS access revoked on next sync.
 
 ## Non-negotiable house conventions (Phase 0 — enforced in code review)
 1. **IDs:** `PREFIX-YYYYMM-NNNN`, generated ONLY after mandatory-field validation passes. Immutable, never reused. Prefix registry: `docs/DATA_MODEL.md`.
@@ -25,6 +53,7 @@ Standalone internal system covering MEA Agency's full client lifecycle: lead int
 - `docs/STATE_MACHINES.md` — consolidated transition tables (source for the transition-engine config).
 - `docs/DECISIONS.md` — decision log. Any deviation from the PRD requires an entry (date, decision, reason, approved by).
 - `docs/backlog/` — ticket breakdowns per wave (start with `SPRINT0_BACKLOG.md`).
+- `docs/backlog/CUTOVER_BACKLOG.md` — cutover Go/MySQL → TS/Supabase. `docs/handoff/HANDOFF_CUTOVER_SESI*.md` adalah rantai handoff-nya; **baca yang bernomor tertinggi lebih dulu** untuk tahu posisi sebenarnya.
 
 ## Build order (do not jump ahead)
 Sprint 0 (core engines + HRIS integration + Master Service List admin) → Wave 1: M0, M1, M4, M5 (money path) → Wave 2: M6, **M12 early**, M7, M8, M9, M10 → Wave 3: M2, M3, M11, M13, M14, M15 (Client Portal last, after security spec). No Wave-N+1 tickets before Wave-N exit criteria pass (Build Plan §4).
@@ -43,3 +72,5 @@ Sprint 0 (core engines + HRIS integration + Master Service List admin) → Wave 
 - Never invent fields, statuses, or transitions not in the PRD. Never rename BI labels.
 - Tests first for state machines and money math (commission, allocation Σ=100%, installment rollup, ROAS).
 - If an external dependency is unavailable (HRIS endpoint not ready), implement behind the sync interface with a CSV-import fallback — never hardcode employee data.
+- `backend/**` adalah **referensi read-only**. Boleh dibaca sebagai oracle paritas; jangan tambah fitur, jangan perbaiki bug produk di sana. Satu-satunya perubahan yang wajar adalah menjaga job `backend` tetap hijau sampai C-05 mencabutnya.
+- Sebelum menambah endpoint: cek `apps/api/src/lib/route-parity.test.ts`. Setiap path yang dipanggil `web-internal` wajib dilayani `apps/api`. `KNOWN_GAPS` di sana harus tetap **kosong** — menambah satu baris berarti mengakui satu halaman tidak berfungsi, dan itu butuh entri `DECISIONS.md`.
