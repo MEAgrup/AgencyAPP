@@ -6,7 +6,7 @@
  * other way inline in each route (`toInput`).
  */
 import { money } from '@cdps/core';
-import type { account, admin, ads, board, campaign, client, creative, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
+import type { account, admin, ads, auth, board, campaign, client, creative, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -1728,5 +1728,37 @@ export function layeredRoleToWire(r: admin.LayeredRole): LayeredRoleWire {
     role: r.role,
     enabled: r.enabled,
     created_at: r.createdAt.toISOString(),
+  };
+}
+
+/** `auth.CredentialInfo` as the admin credential-status table expects it. */
+export interface CredentialInfoWire {
+  employee_id: string;
+  nama: string;
+  email: string;
+  divisi: string;
+  jabatan: string;
+  has_password: boolean;
+  must_change_password: boolean;
+  locked_until: string | null;
+  password_changed_at: string | null;
+}
+
+/**
+ * auth.CredentialInfo → wire. Carries NO hash and no password field: the audit
+ * and wire layers must never surface credential material
+ * (SUPABASE_MIGRATION_TECH_APPENDIX §B.3), only its status.
+ */
+export function credentialInfoToWire(c: auth.CredentialInfo): CredentialInfoWire {
+  return {
+    employee_id: c.employeeId,
+    nama: c.nama,
+    email: c.email,
+    divisi: c.divisi,
+    jabatan: c.jabatan,
+    has_password: c.hasPassword,
+    must_change_password: c.mustChangePassword,
+    locked_until: c.lockedUntil ? c.lockedUntil.toISOString() : null,
+    password_changed_at: c.passwordChangedAt ? c.passwordChangedAt.toISOString() : null,
   };
 }

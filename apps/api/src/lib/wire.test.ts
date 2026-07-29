@@ -3,7 +3,7 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { account, admin, ads, campaign, client, creative, kol, leads, livestream, marketing, msl, notification, sales, task } from '@cdps/domain';
+import type { account, admin, ads, auth, campaign, client, creative, kol, leads, livestream, marketing, msl, notification, sales, task } from '@cdps/domain';
 import {
   adminEmployeeToWire,
   amWorkloadToWire,
@@ -27,6 +27,7 @@ import {
   inboxToWire,
   clientDetailToWire,
   clientListRowToWire,
+  credentialInfoToWire,
   layeredRoleToWire,
   roleMappingToWire,
   masterServiceToWire,
@@ -903,5 +904,45 @@ describe('layeredRoleToWire', () => {
       created_at: '2026-07-29T02:00:00.000Z',
     });
     expect(typeof wire.id).toBe('string');
+  });
+});
+
+describe('credentialInfoToWire', () => {
+  const c: auth.CredentialInfo = {
+    employeeId: '2504240539',
+    nama: 'NIKEN SEPTA ARISANDHY',
+    email: 'arisandhyyy@gmail.com',
+    divisi: 'BUSINESS DEVELOPMENT',
+    jabatan: 'MARKETING STRATEGIST',
+    hasPassword: true,
+    mustChangePassword: true,
+    lockedUntil: null,
+    passwordChangedAt: new Date('2026-07-29T02:00:00Z'),
+  };
+
+  it('emits status only — never a hash or password field', () => {
+    const wire = credentialInfoToWire(c) as unknown as Record<string, unknown>;
+    expect(wire).toEqual({
+      employee_id: '2504240539',
+      nama: 'NIKEN SEPTA ARISANDHY',
+      email: 'arisandhyyy@gmail.com',
+      divisi: 'BUSINESS DEVELOPMENT',
+      jabatan: 'MARKETING STRATEGIST',
+      has_password: true,
+      must_change_password: true,
+      locked_until: null,
+      password_changed_at: '2026-07-29T02:00:00.000Z',
+    });
+    // Credential material must never reach the wire.
+    for (const key of Object.keys(wire)) {
+      expect(key).not.toMatch(/pass(word)?_?hash|secret|token/i);
+    }
+    expect(JSON.stringify(wire)).not.toMatch(/\$2[aby]\$/);
+  });
+
+  it('a never-changed / never-locked credential renders nulls, not fake dates', () => {
+    const wire = credentialInfoToWire({ ...c, passwordChangedAt: null, lockedUntil: null });
+    expect(wire.password_changed_at).toBeNull();
+    expect(wire.locked_until).toBeNull();
   });
 });

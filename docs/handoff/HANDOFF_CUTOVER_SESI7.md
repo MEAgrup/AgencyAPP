@@ -1,5 +1,11 @@
 # HANDOFF — Cutover Sesi 7 (O41 #1 selesai · kelas bug BENTUK respons ditemukan · O42 diperluas)
 
+> 🗄️ **ARSIP — jangan mulai dari dokumen ini.** Titik masuk berikutnya adalah
+> **`HANDOFF_CUTOVER_SESI8.md`**. Sesi 7→8 sudah menyelesaikan O44(a)(b)(c-A/B1) dan O43(a),
+> jadi §0/§3/§4 di bawah tidak lagi mencerminkan posisi branch maupun daftar tugas.
+> Yang masih berguna di sini: latar temuan O42/O43/O44 dan catatan jebakan §5.
+
+
 > **Dokumen standalone. Mulai chat berikutnya dari file ini** — tidak perlu membaca pendahulunya.
 > Tanggal: 2026-07-29. Pendahulu: `HANDOFF_CUTOVER_SESI6.md`.
 

@@ -79,6 +79,22 @@ export default function LoginPage() {
           <button type="submit" className="btn btnPrimary" disabled={submitting}>
             {submitting ? 'Memproses...' : 'Masuk'}
           </button>
+          {/*
+            Recovery is admin-driven for now (O44(c) B1): reset-by-email needs an
+            SMTP provider on the Supabase project, which is an open infra
+            decision. Rather than link to a page that cannot work, state the
+            procedure that does — a Director/OD sets a temporary password and the
+            next login forces a change.
+          */}
+          <details className="muted" style={{ marginTop: 12 }}>
+            <summary>Lupa password?</summary>
+            <p style={{ marginTop: 8 }}>
+              Hubungi Director atau Org Development untuk meminta <strong>password
+              sementara</strong>. Setelah dibuatkan, login dengan password sementara
+              itu lalu Anda akan diminta menggantinya di menu <strong>Ganti
+              Password</strong>.
+            </p>
+          </details>
         </form>
       </div>
     </div>

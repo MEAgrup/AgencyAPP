@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, errorMessage } from '@/lib/api';
-import type { AdminEmployee, EmployeeImportResult } from '@/lib/types';
+import type { AdminEmployee, CredentialInfo, EmployeeImportResult } from '@/lib/types';
 
 export default function AdminEmployeesPage() {
   const [employees, setEmployees] = useState<AdminEmployee[] | null>(null);
@@ -14,6 +14,14 @@ export default function AdminEmployeesPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<EmployeeImportResult | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+
+  // B1 recovery path: credential status + temp-password reset.
+  const [creds, setCreds] = useState<CredentialInfo[] | null>(null);
+  const [credError, setCredError] = useState<string | null>(null);
+  const [resetTarget, setResetTarget] = useState('');
+  const [tempPassword, setTempPassword] = useState('');
+  const [resetting, setResetting] = useState(false);
+  const [resetMsg, setResetMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -28,9 +36,45 @@ export default function AdminEmployeesPage() {
     }
   }, []);
 
+  // Credential status is a separate gate from the directory (Director OR division
+  // Lead), so a 403 here must not blank the employee table — keep the errors apart.
+  const loadCreds = useCallback(async () => {
+    setCredError(null);
+    try {
+      const res = await api.get<{ data: CredentialInfo[] }>('/auth/admin/credentials');
+      setCreds(res.data);
+    } catch (err) {
+      setCredError(errorMessage(err));
+    }
+  }, []);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadCreds();
+  }, [load, loadCreds]);
+
+  async function handleReset() {
+    setResetMsg(null);
+    setCredError(null);
+    setResetting(true);
+    try {
+      await api.post('/auth/admin/set-password', {
+        employee_id: resetTarget,
+        temp_password: tempPassword,
+      });
+      setResetMsg(
+        `Password sementara untuk ${resetTarget} berhasil disetel. ` +
+          'Sampaikan lewat kanal pribadi; karyawan wajib menggantinya saat login.',
+      );
+      setResetTarget('');
+      setTempPassword('');
+      await loadCreds();
+    } catch (err) {
+      setCredError(errorMessage(err));
+    } finally {
+      setResetting(false);
+    }
+  }
 
   /**
    * Imports employees from a pasted CSV. The employee source is an admin upload,
@@ -104,6 +148,91 @@ export default function AdminEmployeesPage() {
           Kredensial dibuat: {syncResult.provisioned} &middot; Tertaut GoTrue: {syncResult.linked}
         </div>
       )}
+
+      <section className="card stack">
+        <div>
+          <h2>Reset password (password sementara)</h2>
+          <p className="muted">
+            Jalur pemulihan untuk karyawan yang lupa password. Director dapat
+            mereset siapa pun; Lead divisi hanya karyawan di divisinya sendiri.
+            Setelah direset, sesi lama karyawan itu dimatikan dan ia{' '}
+            <strong>wajib mengganti password saat login berikutnya</strong>.
+          </p>
+        </div>
+        {credError && <div className="alert alertError">{credError}</div>}
+        {resetMsg && <div className="alert alertSuccess">{resetMsg}</div>}
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <select
+            className="input"
+            value={resetTarget}
+            onChange={(e) => setResetTarget(e.target.value)}
+          >
+            <option value="">— pilih karyawan —</option>
+            {(creds ?? []).map((c) => (
+              <option key={c.employee_id} value={c.employee_id}>
+                {c.employee_id} — {c.nama}
+              </option>
+            ))}
+          </select>
+          <input
+            className="input"
+            type="text"
+            autoComplete="off"
+            placeholder="password sementara (min. 8 karakter)"
+            value={tempPassword}
+            onChange={(e) => setTempPassword(e.target.value)}
+          />
+          <button
+            type="button"
+            className="btn btnPrimary"
+            disabled={resetting || resetTarget === '' || tempPassword === ''}
+            onClick={handleReset}
+          >
+            {resetting ? 'Menyetel...' : 'Setel Password Sementara'}
+          </button>
+        </div>
+
+        {creds && creds.length > 0 && (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Nama</th>
+                  <th>Punya Password</th>
+                  <th>Wajib Ganti</th>
+                  <th>Terakhir Ganti</th>
+                </tr>
+              </thead>
+              <tbody>
+                {creds.map((c) => (
+                  <tr key={c.employee_id}>
+                    <td>{c.employee_id}</td>
+                    <td>{c.nama}</td>
+                    <td>
+                      <span className={`badge badge-${c.has_password ? 'green' : 'red'}`}>
+                        {c.has_password ? 'Ya' : 'Belum'}
+                      </span>
+                    </td>
+                    <td>
+                      {c.must_change_password ? (
+                        <span className="badge badge-orange">Wajib ganti</span>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
+                    <td>
+                      {c.password_changed_at
+                        ? new Date(c.password_changed_at).toLocaleDateString('id-ID')
+                        : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <section className="card">
         {loading && <p className="muted">Memuat...</p>}
