@@ -23,7 +23,13 @@ import { describe, expect, it } from 'vitest';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const API_V1 = join(REPO_ROOT, 'apps/api/src/app/api/v1');
-const FE_LIB = join(REPO_ROOT, 'web-internal/src/lib');
+/**
+ * The WHOLE frontend source tree, not just its data layer. Scanning only
+ * `src/lib` was O44: `readdirSync` there is flat AND blind to `src/app/**`, so
+ * the 25 `api.*` calls that page components make directly were never compared
+ * against the served routes — which hid six dead admin endpoints.
+ */
+const FE_SRC = join(REPO_ROOT, 'web-internal/src');
 
 /** HTTP methods a Next route handler may export. */
 const METHODS = ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'] as const;
@@ -138,11 +144,8 @@ function normalisePath(raw: string): string {
 function feCalls(): { call: string; file: string }[] {
   const out: { call: string; file: string }[] = [];
   const callRe = /\bapi\.(get|post|patch|put|del|delete)\s*(?:<[\s\S]*?>)?\s*\(\s*/g;
-  for (const entry of readdirSync(FE_LIB)) {
-    if (!entry.endsWith('.ts') || entry.endsWith('.test.ts')) {
-      continue;
-    }
-    const src = readFileSync(join(FE_LIB, entry), 'utf8');
+  for (const file of walkFe(FE_SRC)) {
+    const src = readFileSync(file, 'utf8');
     for (const m of src.matchAll(callRe)) {
       const lit = readLiteral(src, m.index + m[0].length);
       if (!lit || lit.raw.startsWith('${')) {
@@ -151,9 +154,29 @@ function feCalls(): { call: string; file: string }[] {
       const method = m[1].toUpperCase() === 'DEL' ? 'DELETE' : m[1].toUpperCase();
       out.push({
         call: `${method} ${normalisePath(lit.raw)}`,
-        file: `web-internal/src/lib/${entry}`,
+        file: file.slice(REPO_ROOT.length),
       });
     }
+  }
+  return out;
+}
+
+/**
+ * Every non-test `.ts`/`.tsx` under the frontend source tree. `.tsx` matters as
+ * much as `.ts` here: page components are where the untracked calls hid (O44).
+ */
+function walkFe(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      out.push(...walkFe(full));
+      continue;
+    }
+    if (!/\.tsx?$/.test(entry) || /\.test\.tsx?$/.test(entry)) {
+      continue;
+    }
+    out.push(full);
   }
   return out;
 }

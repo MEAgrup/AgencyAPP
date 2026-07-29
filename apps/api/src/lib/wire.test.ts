@@ -3,8 +3,9 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { account, ads, campaign, client, creative, kol, leads, livestream, marketing, msl, notification, sales, task } from '@cdps/domain';
+import type { account, admin, ads, campaign, client, creative, kol, leads, livestream, marketing, msl, notification, sales, task } from '@cdps/domain';
 import {
+  adminEmployeeToWire,
   amWorkloadToWire,
   assetToWire,
   assignmentToWire,
@@ -26,6 +27,8 @@ import {
   inboxToWire,
   clientDetailToWire,
   clientListRowToWire,
+  layeredRoleToWire,
+  roleMappingToWire,
   masterServiceToWire,
   metricEntryToWire,
   metricsToWire,
@@ -809,5 +812,96 @@ describe('M4 clientListRowToWire (the roster page read res.data)', () => {
 
   it('a client with no intent yet renders as an empty string, not null', () => {
     expect(clientListRowToWire({ ...row, paymentIntent: null }).payment_intent).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Admin plane (O44) — the shapes the two previously-dead admin pages read.
+// ---------------------------------------------------------------------------
+
+describe('adminEmployeeToWire', () => {
+  const row: admin.EmployeeRow = {
+    employeeId: '2504240539',
+    nama: 'NIKEN SEPTA ARISANDHY',
+    email: 'arisandhyyy@gmail.com',
+    divisi: 'BUSINESS DEVELOPMENT',
+    jabatan: 'MARKETING STRATEGIST',
+    statusAktif: true,
+    flagged: false,
+    syncedAt: new Date('2026-07-29T02:00:00Z'),
+  };
+
+  it('emits snake_case with the date as an ISO string', () => {
+    expect(adminEmployeeToWire(row)).toEqual({
+      employee_id: '2504240539',
+      nama: 'NIKEN SEPTA ARISANDHY',
+      email: 'arisandhyyy@gmail.com',
+      divisi: 'BUSINESS DEVELOPMENT',
+      jabatan: 'MARKETING STRATEGIST',
+      status_aktif: true,
+      flagged: false,
+      synced_at: '2026-07-29T02:00:00.000Z',
+    });
+  });
+
+  it('covers every field the Karyawan page renders', () => {
+    // O43's lesson: a MISSING key is what blanks a page, so assert presence of
+    // exactly what the table body reads.
+    const wire = adminEmployeeToWire(row) as unknown as Record<string, unknown>;
+    for (const key of ['employee_id', 'nama', 'email', 'divisi', 'jabatan', 'status_aktif', 'flagged']) {
+      expect(wire).toHaveProperty(key);
+    }
+  });
+
+  it('a never-synced employee renders synced_at as null, not a bogus date', () => {
+    expect(adminEmployeeToWire({ ...row, syncedAt: null }).synced_at).toBeNull();
+  });
+});
+
+describe('roleMappingToWire', () => {
+  const m: admin.RoleMapping = {
+    id: '31',
+    divisi: 'BUSINESS DEVELOPMENT',
+    jabatan: 'MARKETING STRATEGIST',
+    division: 'Marketing',
+    level: 'staff',
+    createdAt: new Date('2026-07-29T02:00:00Z'),
+  };
+
+  it('keeps id a STRING — it is a bigint (the C03-F2 class of bug)', () => {
+    const wire = roleMappingToWire(m);
+    expect(wire.id).toBe('31');
+    expect(typeof wire.id).toBe('string');
+  });
+
+  it('emits every field the role-mappings page renders', () => {
+    expect(roleMappingToWire(m)).toEqual({
+      id: '31',
+      divisi: 'BUSINESS DEVELOPMENT',
+      jabatan: 'MARKETING STRATEGIST',
+      division: 'Marketing',
+      level: 'staff',
+      created_at: '2026-07-29T02:00:00.000Z',
+    });
+  });
+});
+
+describe('layeredRoleToWire', () => {
+  it('emits snake_case with a string id', () => {
+    const wire = layeredRoleToWire({
+      id: '7',
+      employeeId: '2409200431',
+      role: 'od',
+      enabled: true,
+      createdAt: new Date('2026-07-29T02:00:00Z'),
+    });
+    expect(wire).toEqual({
+      id: '7',
+      employee_id: '2409200431',
+      role: 'od',
+      enabled: true,
+      created_at: '2026-07-29T02:00:00.000Z',
+    });
+    expect(typeof wire.id).toBe('string');
   });
 });

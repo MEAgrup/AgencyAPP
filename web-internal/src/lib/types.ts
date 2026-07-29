@@ -50,7 +50,20 @@ export interface AdminEmployee {
 export interface EmployeeSyncResult {
   synced: number;
   deactivated: number;
+  reactivated: number;
   flagged: number;
+}
+
+/**
+ * Result of POST /admin/employee-import. The employee source is an admin CSV
+ * upload, NOT an HRIS pull (DECISIONS OQ-4 — the HRIS endpoint was dropped), so
+ * this replaces the old `/admin/employee-sync` shape.
+ */
+export interface EmployeeImportResult {
+  source: string;
+  sync: EmployeeSyncResult;
+  provisioned: number;
+  linked: number;
 }
 
 export interface RoleMapping {

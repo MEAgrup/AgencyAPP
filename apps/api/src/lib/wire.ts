@@ -6,7 +6,7 @@
  * other way inline in each route (`toInput`).
  */
 import { money } from '@cdps/core';
-import type { account, ads, board, campaign, client, creative, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
+import type { account, admin, ads, board, campaign, client, creative, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -1648,6 +1648,85 @@ export function clientListRowToWire(r: client.ClientListRow): ClientListRowWire 
     assigned_am_id: r.assignedAmId,
     payment_intent: r.paymentIntent ?? '',
     released_to_account_at: r.releasedToAccountAt ? r.releasedToAccountAt.toISOString() : null,
+    created_at: r.createdAt.toISOString(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Admin plane (employees / role mappings / layered roles) — O44.
+// ---------------------------------------------------------------------------
+
+/**
+ * `admin.EmployeeRow` as web-internal's `AdminEmployee` expects it.
+ *
+ * `synced_at` is emitted even though `AdminEmployee` does not declare it: Go's
+ * `EmployeeRow` carries it and the field is genuinely useful for "is this
+ * directory stale?" — the very question behind O42. Extra keys are inert for the
+ * FE, a MISSING key is what breaks a page (O43).
+ */
+export interface AdminEmployeeWire {
+  employee_id: string;
+  nama: string;
+  email: string;
+  divisi: string;
+  jabatan: string;
+  status_aktif: boolean;
+  flagged: boolean;
+  synced_at: string | null;
+}
+
+/** admin.EmployeeRow → wire (snake_case; dates as ISO strings). */
+export function adminEmployeeToWire(e: admin.EmployeeRow): AdminEmployeeWire {
+  return {
+    employee_id: e.employeeId,
+    nama: e.nama,
+    email: e.email,
+    divisi: e.divisi,
+    jabatan: e.jabatan,
+    status_aktif: e.statusAktif,
+    flagged: e.flagged,
+    synced_at: e.syncedAt ? e.syncedAt.toISOString() : null,
+  };
+}
+
+/** `admin.RoleMapping` as web-internal's `RoleMapping` expects it (`id` string). */
+export interface RoleMappingWire {
+  id: string;
+  divisi: string;
+  jabatan: string;
+  division: string;
+  level: string;
+  created_at: string;
+}
+
+/** admin.RoleMapping → wire. `id` stays a string — it is a bigint (C03-F2). */
+export function roleMappingToWire(m: admin.RoleMapping): RoleMappingWire {
+  return {
+    id: m.id,
+    divisi: m.divisi,
+    jabatan: m.jabatan,
+    division: m.division,
+    level: m.level,
+    created_at: m.createdAt.toISOString(),
+  };
+}
+
+/** `admin.LayeredRole` as web-internal's `LayeredRole` expects it. */
+export interface LayeredRoleWire {
+  id: string;
+  employee_id: string;
+  role: string;
+  enabled: boolean;
+  created_at: string;
+}
+
+/** admin.LayeredRole → wire. */
+export function layeredRoleToWire(r: admin.LayeredRole): LayeredRoleWire {
+  return {
+    id: r.id,
+    employee_id: r.employeeId,
+    role: r.role,
+    enabled: r.enabled,
     created_at: r.createdAt.toISOString(),
   };
 }

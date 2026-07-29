@@ -175,7 +175,7 @@ menolak `supabase.com`):
 
 ```sql
 -- (1) Apakah NIKEN benar-benar ada di CDPS live, aktif, dan bisa login?
-SELECT employee_id, nama, divisi, jabatan, is_active,
+SELECT employee_id, nama, divisi, jabatan, status_aktif,
        (auth_user_id IS NOT NULL) AS bisa_login
 FROM public.employees
 WHERE employee_id = '2504240539';
@@ -186,10 +186,13 @@ SELECT e.divisi, e.jabatan, count(*) AS karyawan_aktif
 FROM public.employees e
 LEFT JOIN public.role_mappings m
        ON m.divisi = e.divisi AND m.jabatan = e.jabatan
-WHERE e.is_active AND m.id IS NULL
+WHERE e.status_aktif AND m.id IS NULL
 GROUP BY 1, 2
 ORDER BY 1, 2;
 ```
+
+> ⚠️ Kolomnya **`status_aktif`**, bukan `is_active` (`20260101000001_init.sql:14`). Versi pertama
+> kueri ini memakai `is_active` dan akan gagal dengan `column does not exist` — dikoreksi 2026-07-29.
 
 ### ✅ Jawaban pemilik 2026-07-29 — (B): NIKEN belum ter-sync
 
@@ -260,7 +263,38 @@ Sisanya kerja **developer**, bukan keputusan:
   `web-internal/src/lib/*.ts`, seperti `route-parity.test.ts` men-diff path. Satu-satunya cara kelas
   ini berhenti lolos CI.
 
-### 3.4 🆕🔴 O44 — `route-parity.test.ts` buta terhadap panggilan API dari halaman
+### 3.4 O44 — ✅ (a) & (b) SELESAI 2026-07-29 · (c) masih butuh pemilik
+
+> ✅ **(a)** `feCalls()` kini rekursif atas seluruh `web-internal/src` (`.ts` **dan** `.tsx`).
+> ✅ **(b)** 6 route admin diport ⇒ `/admin/employees` + `/admin/role-mappings` **hidup**.
+> ⏳ **(c)** 3 route auth — **keputusan pemilik**: diport, atau Supabase Auth client-side? Saat ini
+> nol pemakaian `updateUser`/`resetPasswordForEmail` di FE ⇒ **ganti-password tidak tersedia**.
+>
+> Yang diport: `GET /admin/employees` · `GET|POST /admin/role-mappings` ·
+> `DELETE /admin/role-mappings/{id}` · `GET|POST /admin/layered-roles`. Modul domain baru
+> `packages/domain/src/admin.ts` (mirror `backend/internal/admin/roles.go`), 3 wire mapper, error
+> terdaftar 422/403.
+>
+> **`POST /admin/employee-sync` sengaja TIDAK diport** (OQ-4: pull HRIS ditinggalkan). Yang
+> diperbaiki **FE**-nya — halaman Karyawan kini mengunggah CSV ke `POST /admin/employee-import`.
+>
+> **Jalur baca yang menyimpang dari house rule, dengan alasan:** `role_mappings` +
+> `employee_layered_roles` default-deny by design (`rls_baseline` §5, SELECT dicabut dari
+> `authenticated`) ⇒ `readAsActor` akan mengembalikan **nol baris**, jadi keduanya dibaca lewat
+> client privileged dengan gate Director/OD di app layer, mirror Go. `employees` tetap lewat
+> `readAsActor` (punya `employees_select`).
+>
+> **Verifikasi:** domain **451** (+15) · api **192** (+6) · web-internal 26 · core 112 · db 9 ·
+> 4 invariant SQL **PASS** · typecheck bersih · seed utuh (10/12).
+>
+> ⚠️ **Jebakan test — jangan diulang.** Assertion audit lulus sendirian lalu **gagal di suite
+> penuh**: `audit_log` append-only (`forbid_mutation` memblokir DELETE) ⇒ `afterEach` tak bisa
+> membersihkannya dan baris menumpuk antar-run. Diperbaiki dengan **watermark `max(id)`** sebelum
+> aksi, bukan dengan melemahkan assertion.
+
+Latar temuan aslinya:
+
+### 3.4.1 🔴 O44 — `route-parity.test.ts` buta terhadap panggilan API dari halaman
 
 **Lubangnya.** `feCalls()` (`route-parity.test.ts:138-145`) melakukan `readdirSync(FE_LIB)` dengan
 `FE_LIB = web-internal/src/lib` — **tidak rekursif**, **tidak menyentuh `src/app/**`**. Ada **25

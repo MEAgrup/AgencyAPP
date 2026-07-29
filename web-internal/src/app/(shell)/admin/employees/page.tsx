@@ -2,15 +2,17 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, errorMessage } from '@/lib/api';
-import type { AdminEmployee, EmployeeSyncResult } from '@/lib/types';
+import type { AdminEmployee, EmployeeImportResult } from '@/lib/types';
 
 export default function AdminEmployeesPage() {
   const [employees, setEmployees] = useState<AdminEmployee[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [csv, setCsv] = useState('');
+  const [full, setFull] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState<EmployeeSyncResult | null>(null);
+  const [syncResult, setSyncResult] = useState<EmployeeImportResult | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -30,13 +32,25 @@ export default function AdminEmployeesPage() {
     load();
   }, [load]);
 
-  async function handleSync() {
+  /**
+   * Imports employees from a pasted CSV. The employee source is an admin upload,
+   * NOT an HRIS pull (DECISIONS OQ-4 dropped the HRIS endpoint) — this page used
+   * to POST `/admin/employee-sync`, which no endpoint ever served on this stack.
+   */
+  async function handleImport() {
+    if (csv.trim() === '') {
+      setSyncError('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
+      return;
+    }
     setSyncing(true);
     setSyncError(null);
     setSyncResult(null);
     try {
-      const res = await api.post<EmployeeSyncResult>('/admin/employee-sync');
-      setSyncResult(res);
+      const res = await api.post<{ result: EmployeeImportResult }>('/admin/employee-import', {
+        csv,
+        full,
+      });
+      setSyncResult(res.result);
       await load();
     } catch (err) {
       setSyncError(errorMessage(err));
@@ -47,20 +61,47 @@ export default function AdminEmployeesPage() {
 
   return (
     <div className="stack">
-      <div className="row" style={{ justifyContent: 'space-between' }}>
-        <div>
-          <h1>Karyawan</h1>
-          <p className="muted">Data karyawan hasil sinkronisasi HRIS.</p>
-        </div>
-        <button type="button" className="btn btnPrimary" disabled={syncing} onClick={handleSync}>
-          {syncing ? 'Menyinkronkan...' : 'Sync Sekarang'}
-        </button>
+      <div>
+        <h1>Karyawan</h1>
+        <p className="muted">Data karyawan hasil impor CSV admin.</p>
       </div>
+
+      <section className="card stack">
+        <div>
+          <h2>Impor karyawan</h2>
+          <p className="muted">
+            Tempel CSV karyawan (kolom: employee_id, nama, email, divisi, jabatan, status_aktif).
+            Impor bersifat idempoten — menjalankannya ulang dengan data sama tidak menduplikasi.
+          </p>
+        </div>
+        <textarea
+          className="input"
+          rows={6}
+          value={csv}
+          onChange={(e) => setCsv(e.target.value)}
+          placeholder="employee_id,nama,email,divisi,jabatan,status_aktif"
+        />
+        <label className="row" style={{ gap: 8 }}>
+          <input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} />
+          <span>
+            Impor penuh — karyawan yang ada di CDPS tapi tidak ada di CSV akan{' '}
+            <strong>ditandai untuk review</strong> (tidak pernah dihapus).
+          </span>
+        </label>
+        <div className="row">
+          <button type="button" className="btn btnPrimary" disabled={syncing} onClick={handleImport}>
+            {syncing ? 'Mengimpor...' : 'Impor CSV'}
+          </button>
+        </div>
+      </section>
 
       {syncError && <div className="alert alertError">{syncError}</div>}
       {syncResult && (
         <div className="alert alertSuccess">
-          Sinkron: {syncResult.synced} &middot; Dinonaktifkan: {syncResult.deactivated} &middot; Ditandai: {syncResult.flagged}
+          Sumber: {syncResult.source} &middot; Sinkron: {syncResult.sync.synced} &middot;
+          Dinonaktifkan: {syncResult.sync.deactivated} &middot; Diaktifkan kembali:{' '}
+          {syncResult.sync.reactivated} &middot; Ditandai: {syncResult.sync.flagged} &middot;
+          Kredensial dibuat: {syncResult.provisioned} &middot; Tertaut GoTrue: {syncResult.linked}
         </div>
       )}
 
