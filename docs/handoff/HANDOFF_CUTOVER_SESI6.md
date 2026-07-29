@@ -1,4 +1,4 @@
-# HANDOFF — Cutover Sesi 6 (O41 ditemukan & 3 gap ditutup · gating sidebar #58 di-port · 2 migrasi RLS menunggu apply)
+# HANDOFF — Cutover Sesi 6 (O41 ditemukan & 3 gap ditutup · gating sidebar #58 di-port · 2 migrasi RLS SUDAH di-apply)
 
 > **Dokumen standalone.** Mulai chat berikutnya dari file ini.
 > Tanggal: 2026-07-29. Pendahulu: `HANDOFF_CUTOVER_SESI5.md`.
@@ -9,43 +9,59 @@
 
 | Item | Nilai |
 |---|---|
-| **Branch kerja** | **`claude/handoff-sesi-5-inmsq9`** ← semua pekerjaan sesi 6 ada di sini (nama branch memang menyebut "sesi-5"; itu branch yang dipatok untuk sesi 6) |
-| **PR** | **#62** — https://github.com/MEAgrup/AgencyAPP/pull/62 · **draft** · `mergeable_state: clean` · **CI 11/11 HIJAU** |
-| **Base** | `main` @ `3d3896a` |
+| **Branch kerja** | ~~`claude/handoff-sesi-5-inmsq9`~~ → **sudah merge**. Sesi 2026-07-29 lanjut di **`claude/handoff-sesi-6-cutover-ysut7c`** |
+| **PR** | ~~#62~~ **✅ MERGED 2026-07-29** (`2c82f89`, merge commit, CI 11/11 hijau) — https://github.com/MEAgrup/AgencyAPP/pull/62 |
+| **Base** | `main` @ **`2c82f89`** (sebelumnya `3d3896a`) |
 | **Commit di branch (5, terbaru dulu)** | `d1d4043` runbook apply RLS · `8c39933` migrasi RLS 0010 · `6cddf11` port `attempts/{id}/lost` · `2dbc5fd` route reminder M5 + test paritas · `7e3bb83` gating sidebar |
 | **Semua ter-push?** | ✅ ya — tidak ada commit/berkas tertinggal |
-| **PR lain yang terbuka** | **#58** — sudah dikomentari dengan penunjuk ke #62, **sengaja tidak ditutup** (keputusan pemilik) |
+| **PR lain yang terbuka** | ~~#58~~ **✅ DITUTUP 2026-07-29** (keputusan pemilik) — bagian sidebar sudah masuk lewat #62; scope Sales staff + kolom "Didaftarkan oleh" pindah ke **issue #64** (O40, dieksekusi **setelah** gate C-04) |
 
 ```bash
-git fetch origin claude/handoff-sesi-5-inmsq9
-git checkout claude/handoff-sesi-5-inmsq9 && git pull origin claude/handoff-sesi-5-inmsq9
-npm ci                                    # node_modules TIDAK ada di clone baru
-cd web-internal && npm ci && cd ..        # web-internal punya lockfile sendiri
+git fetch origin main
+git checkout main && git pull origin main   # sudah memuat keempat cluster sesi 6
+npm ci                                     # node_modules TIDAK ada di clone baru
+cd web-internal && npm ci && cd ..          # web-internal punya lockfile sendiri
 ```
 
 > **PR #62 membawa EMPAT cluster** (gating sidebar FE · route reminder M5 + test paritas · port
-> `attempts/{id}/lost` · migrasi RLS 0010). Itu menyimpang dari konvensi "PR kecil per cluster"
-> `CLAUDE.md`, dan terjadi karena branch sesi ini dipatok. **Tanya pemilik apakah mau dipecah**
-> sebelum merge. Keempatnya berdiri sendiri dan tidak saling bergantung.
+> `attempts/{id}/lost` · migrasi RLS 0010) — menyimpang dari konvensi "PR kecil per cluster"
+> `CLAUDE.md` karena branch sesi itu dipatok. **Sudah ditanyakan: pemilik memilih merge apa adanya**
+> (2026-07-29), dengan merge commit supaya keempat commit per-cluster tetap terbaca di riwayat dan
+> bisa di-revert satu-satu. Memecah jadi 4 PR dinilai tidak menghasilkan temuan baru — keempatnya
+> sudah hijau dan tidak saling bergantung — sementara menahan merge menahan apply migrasi 0010.
 
 ---
 
-## 1. 🔴 TINDAKAN PALING MENDESAK — 2 migrasi RLS menunggu apply ke `CDPS SG`
+## 1. ✅ SELESAI — 2 migrasi RLS sudah di-apply ke `CDPS SG` (2026-07-29)
 
-**Runbook lengkap sudah ada: `docs/handoff/RUNBOOK_APPLY_RLS_0009_0010.md`.** Jangan menulis ulang.
+**Dieksekusi sesi 2026-07-29 sesuai `docs/handoff/RUNBOOK_APPLY_RLS_0009_0010.md`.** Urutan wajib
+ditaati: **#62 di-merge dulu** (`2c82f89`) → apply **0009** → apply **0010**.
 
-| Migrasi | Ada di | Status live | Akibat kalau belum di-apply |
-|---|---|---|---|
-| `20260102000009_rls_leads_campaign_scope` | **`main`** (sejak #59-#61) | ❌ belum | Marketing staff kehilangan lead dari campaign miliknya sendiri (regresi fungsional) |
-| `20260102000010_rls_finance_staff_queue_scope` | **hanya branch #62** | ❌ belum | Finance **staff** tidak bisa membaca transaksi ⇒ `GET /finance/queue` akan mengembalikan **antrean kosong tanpa error** begitu di-port; dan sekarang Finance staff bisa **mem-verifikasi pembayaran yang tidak bisa ia baca** (tulis lewat RPC SECURITY DEFINER tidak ter-RLS) |
+| Migrasi | Versi tercatat di live | Status |
+|---|---|---|
+| `20260102000009_rls_leads_campaign_scope` | `20260729031525_rls_leads_campaign_scope` | ✅ ter-apply |
+| `20260102000010_rls_finance_staff_queue_scope` | `20260729032805_rls_finance_staff_queue_scope` | ✅ ter-apply |
 
-**Urutan wajib:** merge **#62** dulu → `git checkout main && git pull` → apply **0009** → apply **0010**.
-Kalau `0010` di-apply sebelum #62 merge, live jadi lebih maju daripada `main` — persis drift yang
-menciptakan **O38** dan menghabiskan satu sesi penuh. `0009` sendiri boleh di-apply kapan saja
-karena sudah ada di `main`.
+Live kini **38 migrasi**. Di-apply lewat MCP `apply_migration` (bukan `psql -f` seperti tertulis di
+runbook) supaya **tercatat** di `supabase_migrations.schema_migrations` — `psql -f` tidak menulis
+baris ledger dan akan mengembalikan live ke keadaan "schema tanpa jejak" yang justru sedang dibereskan.
 
-Pemilik **sudah memberi ack** untuk apply (sesi 6). Yang belum: eksekusinya, karena butuh mesin
-ber-akses (lihat §4).
+**Verifikasi:** jumlah policy tetap **44**, tabel tetap **53**, `private.jwt_owns_lead_campaign` ada,
+`leads_select` ber-5 arm, ketiga policy M5 kini `jwt_division() = 'Finance'` tanpa `jwt_is_lead()`.
+Probe klaim `authenticated` dengan kontrol: Director **3** · pembuat 2 lead **2** · Marketing staff
+tanpa kepemilikan **0** — sekaligus membuktikan arm baru **dievaluasi tanpa error** (mode gagal yang
+menggagalkan percobaan sebelumnya: `function jwt_owns_lead(...) does not exist`, akar O38).
+
+> ⚠️ **BATAS VERIFIKASI — jangan dibaca sebagai "terbukti dengan data nyata".** Live masih kosong
+> secara operasional: `transactions` **0**, `clients` **0**, `campaigns` **0**, `leads` **3** (semua
+> buatan akun QA, `origin_campaign_id` NULL). Jadi probe §4.2 runbook (antrean Finance dengan TRX
+> nyata) **tidak bisa dijalankan**, dan arm own-campaign 0009 belum pernah kena baris nyata. Keduanya
+> terbukti di PG16 lokal + `rls_checks.sql` §14-17 di CI. **Konfirmasi ulang pada TRX pertama yang masuk.**
+
+**Kabar baik yang mengubah asumsi lama:** premis O41 *"blast radius nol karena O33 belum ada aktor
+Finance"* **tidak benar** — live punya **3 karyawan Finance riil aktif** ber-akun login, semuanya
+ter-mapping `Finance`. Jadi 0010 memperbaiki pengguna nyata, bukan menunggu aktor. **O33 kini SELESAI**
+(ENDANG PUJI ASTUTI → `Finance`/`lead`); lihat Decided 2026-07-29 di `docs/DECISIONS.md`.
 
 ---
 
@@ -125,8 +141,9 @@ migrasi.
 ### 3.3 Menunggu keputusan manusia (tidak bisa didorong developer)
 | # | Isi | Butuh dari |
 |---|---|---|
-| **O33** | Roster HR riil **tidak punya divisi Finance** ⇒ seluruh flow M5 belum punya aktor, **dan tidak ada yang bisa mem-QA halaman Finance** — itu yang menjelaskan kenapa lubang O41 lolos C-03. Paling serius. | Pemilik |
-| **O40** | Sales staff vs Leads Database: M1 §9.1 "sees own attempts only" vs `leadListScope` yang menolak Sales staff sepenuhnya. Bagian #58 yang sengaja TIDAK diputus. Kolom "Didaftarkan oleh" (`created_by`) ikut tiket ini. | Pemilik / Sales Head |
+| ~~**O33**~~ | ✅ **SELESAI 2026-07-29.** Premisnya ternyata kedaluwarsa: live **sudah** punya divisi `FINANCE AND ACCOUNTING` — 3 karyawan riil aktif ber-akun login, ketiga jabatannya ter-mapping ke `Finance`. Yang kurang hanya level `lead`, dan pemilik menetapkan `SENIOR FINANCE, ACCOUNTING & TAX` (ENDANG PUJI ASTUTI) → `Finance`/`lead`. **M5 kini punya aktor produksi + QA.** | — |
+| ~~**O40**~~ | ✅ **DIPUTUS 2026-07-29 — arah (b), eksekusi DITUNDA sampai setelah gate C-04.** Database memang harus tampil untuk Sales staff ter-scope ke lead miliknya, tapi itu perubahan perilaku di tengah cutover (preseden O39). Pekerjaannya + kolom "Didaftarkan oleh" ada di **issue #64**; PR #58 ditutup. | — |
+| **O42** 🆕 | **Tidak ada jalur admin `role_mappings` di stack baru**, padahal tabel itu sumber kebenaran SELURUH permission (`employee_claims()` menurunkan division/level darinya). Mengubah peran = SQL langsung ke produksi. Plus tiga sumber mapping yang saling menyimpang: live **38** baris · `backend/seed/role_mappings_riil.csv` **23** (nol Finance, tapi punya `BUSINESS DEVELOPMENT`→Marketing yang **tidak ada** di live ⇒ divisi Marketing kini tanpa mapping di produksi) · `supabase/seed.sql` **12** (fixture dev). | Pemilik / HR / OD |
 | **O34 · O26 · O35 · O25 · O9** | Aktor Wave 2, NIK/email Director, sub-tim Creative, anomali kalkulator, target M14 | lihat `HANDOFF_CUTOVER_SESI5.md` §3.1 |
 
 **O24 sudah RESOLVED — jangan dibuka lagi.** Komisi Rp0 adalah nilai sah.
@@ -137,17 +154,24 @@ Railway/MySQL riil atau UAT. Sesudah C-04 → C-05 (retire Go).
 
 ---
 
-## 4. Batasan sandbox (diverifikasi ULANG 2026-07-29 01:49Z — jangan diuji ulang)
+## 4. Batasan sandbox — ⚠️ SUDAH BERUBAH per 2026-07-29
 
-Sesi Claude **tidak bisa** menyentuh `CDPS SG` maupun deployment Vercel. Tiga penghalang independen:
+> **Jangan pakai tabel di bawah sebagai alasan menolak menyentuh live.** Sesi 2026-07-29 punya
+> **Supabase MCP dengan akses ke `CDPS SG`** dan memakainya untuk apply + verifikasi kedua migrasi
+> RLS serta mengeksekusi keputusan O33. **Periksa dulu tool yang tersedia** sebelum menyimpulkan
+> live tak terjangkau — batasan ini per-sesi, bukan sifat permanen environment.
+
+Yang **masih** berlaku (sesi 2026-07-29): deployment Vercel tetap tak bisa disentuh, dan **tidak ada
+klien HTTP ke `agency-app-api`** — jadi konfirmasi endpoint lewat HTTP nyata (utang O41) masih belum
+bisa dilakukan dari dalam sesi. Yang **tidak lagi** berlaku: baris "tidak ada Supabase MCP".
+
+Kondisi sesi 6 (arsip, diverifikasi 2026-07-29 01:49Z — konteks kenapa runbook §3 ditulis untuk manusia):
 
 | Penghalang | Bukti |
 |---|---|
-| Gateway proxy menolak CONNECT | `$HTTPS_PROXY/__agentproxy/status` → `recentRelayFailures` mencatat sendiri `403 to CONNECT` untuk `supabase.com:443` dan `agency-app-api.vercel.app:443`; `selective: false` ⇒ kebijakan jaringan environment, tidak bisa dinyalakan dari dalam |
+| Gateway proxy menolak CONNECT | `$HTTPS_PROXY/__agentproxy/status` → `recentRelayFailures` mencatat sendiri `403 to CONNECT` untuk `supabase.com:443` dan `agency-app-api.vercel.app:443`; `selective: false` ⇒ kebijakan jaringan environment |
 | Tidak ada kredensial | nol `DATABASE_URL`/`SUPABASE_*` di env sesi |
-| Tidak ada Supabase MCP | tidak tersedia di sesi ini |
-
-⇒ **semua apply ke live dijalankan manusia.** Claude menyiapkan alat + runbook + verifikasi lokal.
+| ~~Tidak ada Supabase MCP~~ | **tidak lagi benar** — tersedia sejak sesi 2026-07-29 |
 
 ### 4.1 ✅ Cara menjalankan test DB-backed di sandbox (BARU sesi 6 — ini mengubah banyak hal)
 Sebelumnya test domain di-skip (138 lolos / 285 skip). Dengan resep ini: **426 lolos**.
