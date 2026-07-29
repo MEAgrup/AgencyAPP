@@ -108,22 +108,67 @@ sana adalah jebakan nyata).
 > `schema_migrations.statements` untuk membuktikan paritas, **diff komentar itu diharapkan** —
 > bandingkan DDL-nya, bukan byte-nya.
 
-### 2.3 Sisa yang bukan blocker
+### 2.3 Baris live-only DITUTUP — riwayat repo kini 1:1 dengan live (40 = 40)
 
-Live punya satu baris tanpa padanan berkas repo: **`20260723064826_rls_harden_execute_surface`**.
-O38 butir 3 memutuskan tidak mem-back-port-nya (isinya identik `rls_baseline` §9 — beda
-pengemasan, bukan beda isi), dan keputusan itu **tidak dibalik** di sini. `db push` hanya
-mendorong versi lokal yang belum ada di remote, jadi baris remote-only ini tidak
-menghalanginya. Kalau versi CLI yang dipakai tetap mempersoalkannya:
-`supabase migration repair --status reverted 20260723064826` — bookkeeping saja, nol SQL
-dijalankan.
+Semula ini sisa terakhir: live 40 baris riwayat, repo 39 berkas. Ditutup dengan **back-port
+riwayat** `20260723064826_rls_harden_execute_surface`, statements diambil **verbatim** dari
+`schema_migrations.statements` live (satu suntingan: referensi versi di komentarnya).
 
-### 2.4 ⚠️ Untuk siapa pun yang punya DB lokal
+**O38 butir 3 dipersempit, bukan dibalik.** Alasannya (isinya sudah termuat `rls_baseline` §9)
+tetap berlaku untuk *isi*, tapi tidak menjawab *penomoran* — yang O38 sendiri catat di luar
+scope-nya. Header berkasnya menyatakan gamblang bahwa ia back-port riwayat, bukan perubahan
+skema.
 
-Riwayat migrasi lokal Anda masih memuat versi lama, jadi 39 berkas yang di-rename akan
-terlihat "belum pernah di-apply". **Bangun ulang dari nol** (`DROP DATABASE` → terapkan 39
-berkas urut), jangan apply selektif. CI melakukan hal yang sama tiap run, jadi ini satu
-perintah, bukan migrasi data.
+Arah alternatif `supabase migration repair --status reverted` **ditolak**: ia menulis ke
+bookkeeping produksi dan **menghapus jejak** bahwa hardening itu pernah jalan — bertentangan
+dengan aturan rumah #3, demi keuntungan nol. Back-port berkas tidak menyentuh produksi.
+
+**Dibuktikan no-op, bukan diasumsikan.** DB dibangun dari nol dua kali (39 lalu 40 berkas),
+empat snapshot dibandingkan: ACL + `proconfig` seluruh fungsi `public`+`private`, 536 kolom,
+49 policy termasuk ekspresi `qual`/`with_check`, ACL 54 tabel — **identik byte-per-byte.**
+Wajar: semua statements-nya REVOKE/GRANT/`ALTER FUNCTION … SET search_path`, penetapan keadaan
+akhir, bukan delta.
+
+> ⚠️ **Posisi versinya tidak boleh digeser.** `20260723064826` harus jalan SESUDAH
+> `20260723064438_rls_baseline` (yang membuat `public.jwt_owns_*`) dan SEBELUM
+> `20260727072443` (yang memindahkannya ke `private`). Dinomori ulang ke belakang migrasi itu,
+> ia **gagal** — `public.jwt_owns_lead(text)` sudah tidak ada di sana.
+
+### 2.4 DB lokal: `scripts/db-rebuild.sh` — satu perintah, bukan paragraf
+
+Riwayat migrasi lokal siapa pun masih memuat versi lama, jadi berkas yang di-rename terlihat
+"belum pernah di-apply". **Apply selektif tidak bisa menambalnya**: nama berkas berubah, isi
+skemanya tidak, jadi migrasi yang "hilang" gagal dengan *already exists* alih-alih mengisi
+kekurangan. Satu-satunya jalur benar adalah bangun ulang — dan itu kini berskrip:
+
+```bash
+scripts/db-rebuild.sh              # dry-run: laporkan rencana, nol tulis
+scripts/db-rebuild.sh --yes        # drop → 40 migrasi → seed 2× → 7 gate → 4 invariant
+npm run db:rebuild -- --yes
+```
+
+Mencerminkan job `db-and-migrations` CI (CI tetap otoritasnya). Dua mode koneksi
+(`DATABASE_URL`, atau `su postgres` untuk pola sandbox SESI9 §7 — termasuk papercut staging
+`chmod 644` yang selama ini manual). Dua pengaman, karena skrip ini **menghapus basis data**:
+ia menyebut riwayat basi `202601…` **sebelum** drop, dan **menolak jalan** bila `DB_NAME`
+eksplisit tidak cocok dengan basis di `DATABASE_URL` (satu env var basi cukup untuk menghapus
+basis yang salah). Keduanya diuji: mode `su` dan mode URL jalan penuh, guard mismatch memang
+menolak.
+
+### 2.5 Temuan sampingan yang layak Anda tahu — O45 (dampak NOL, tapi mengoreksi satu klaim)
+
+Saat memverifikasi back-port, `service_role` ternyata punya EXECUTE pada `private.jwt_owns_*`
+di live tapi tidak di build lokal — padahal SQL-nya identik. Bukan drift: `pg_default_acl`
+live memberi EXECUTE ke **`anon, authenticated, service_role`** untuk setiap fungsi baru di
+`public`, jadi fungsi **lahir** dengan grant itu dan hanya hilang bila migrasi eksplisit
+me-REVOKE. Postgres bare tidak punya default itu.
+
+Konsekuensinya bukan soal satu grant, tapi soal cakupan gate: **`rls_checks.sql` tidak akan
+pernah gagal karena REVOKE yang lupa ditulis.** CI bisa hijau sementara produksi terbuka.
+Dampak terukur hari ini **nol** — 11 fungsi `public` bisa dipanggil `anon` dan **nol** di
+antaranya `SECURITY DEFINER`, jadi RLS tetap berlaku; advisor juga bersih. Dicatat sebagai
+**O45** (Open) karena yang perlu diputuskan adalah cakupan gate, bukan tambalan. Yang jangan
+dilakukan: memakai invariant lokal hijau sebagai bukti permukaan EXECUTE produksi aman.
 
 ---
 
@@ -132,13 +177,12 @@ perintah, bukan migrasi data.
 `@cdps/domain` **513** (+1 skip) · `apps/api` **211** · `@cdps/core` **113** · `@cdps/db` **9** ·
 `web-internal` **26** · keempat invariant SQL (`ident`·`immutability`·`rls`·`auth_claims`)
 **PASS** · gate seed (10 employees / 12 role_mappings / 14 machines / **17** event) **PASS** ·
-**39** berkas migrasi → **54** tabel · typecheck bersih di semua workspace + `web-internal` ·
+**40** berkas migrasi → **54** tabel · typecheck bersih di semua workspace + `web-internal` ·
 eslint `web-internal` bersih.
 
 > **Identik SESI11 di setiap angka.** Itu memang intinya: sesi ini nol perubahan perilaku —
 > satu apply ke live dan satu rename massal, dan angka yang tidak bergerak adalah buktinya.
-> Perhatikan bahwa **repo 39 berkas** sementara **live 40 baris riwayat**; selisihnya adalah
-> §2.3, bukan drift.
+> Repo **40 berkas** = live **40 baris riwayat** — §2.3 menutup selisih yang tadinya ada.
 
 ## 4. Yang BELUM — untuk sesi berikutnya
 

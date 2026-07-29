@@ -104,7 +104,7 @@ cocok** dengan versi yang tercatat di `supabase_migrations.schema_migrations` mi
 memberi versi **timestamp saat apply** dan mengabaikan nama berkas repo. Selama tidak ada yang
 menjalankan `supabase db push` hal itu tidak menggigit — tapi begitu dijalankan, CLI melihat
 39 versi lokal yang tak dikenal remote dan mencoba **meng-apply ulang semuanya** di atas skema
-yang sudah terisi.
+yang sudah terisi. (39 berkas saat itu; kini 40 — lihat back-port di bawah.)
 
 Ditutup dengan arah yang sama seperti O38 opsi (A): **repo mengikuti live.** 39 berkas
 di-rename ke versi remote, dipetakan **1:1 berdasarkan nama migrasi** (bukan urutan, bukan
@@ -143,6 +143,7 @@ supabase/migrations/*.sql | sort)` di CI tetap menerapkan urutan yang sama.
 | `20260102000001` | `20260722060601` | `ident_next` |
 | `20260102000002` | `20260723055732` | `statemachine` |
 | `20260102000003` | `20260723064438` | `rls_baseline` |
+| _(tidak ada)_ | `20260723064826` | `rls_harden_execute_surface` — back-port riwayat, lihat di bawah |
 | `20260102000004` | `20260723071013` | `supabase_auth` |
 | `20260102000005` | `20260724132631` | `fk_covering_indexes` |
 | `20260102000006` | `20260724134427` | `employee_display_name` |
@@ -153,18 +154,45 @@ supabase/migrations/*.sql | sort)` di CI tetap menerapkan urutan yang sama.
 | `20260102000011` | `20260729104209` | `admin_set_password` |
 | `20260102000012` | `20260729162101` | `lead_delete_request` |
 
-**Satu baris live tanpa padanan berkas: `20260723064826_rls_harden_execute_surface`.** O38
-butir 3 memutuskan **tidak** mem-back-port-nya karena isinya sudah tergabung di
-`20260723064438_rls_baseline.sql` §9 (beda pengemasan, bukan beda isi) — keputusan itu tidak
-dibalik di sini. `db push` hanya mendorong versi lokal yang belum ada di remote, jadi baris
-remote-only ini **tidak** menghalanginya. Kalau versi CLI yang dipakai tetap
-mempersoalkannya, perbaikannya `supabase migration repair --status reverted 20260723064826` —
-menyentuh tabel bookkeeping saja, nol SQL dijalankan atau di-revert.
+**Baris live-only `20260723064826_rls_harden_execute_surface` — DITUTUP dengan back-port
+riwayat (2026-07-29).** Semula ini satu-satunya sisa: live punya 40 baris riwayat, repo 39
+berkas. `db push` sendiri hanya mendorong versi lokal yang belum ada di remote, jadi baris
+remote-only tidak memblokirnya — tapi beberapa versi CLI mempersoalkan versi remote yang tidak
+punya berkas lokal, dan selisih itu tidak ada gunanya dipertahankan. Repo kini punya
+berkasnya, jadi **repo 40 berkas = live 40 baris, 1:1 penuh.**
 
-**Konsekuensi untuk DB lokal yang sudah ada.** Riwayat migrasi lokal siapa pun masih memuat
-versi lama, jadi berkas yang di-rename akan terlihat "belum pernah di-apply". Bangun ulang
-dari nol (`DROP DATABASE` → terapkan 39 berkas urut) — bukan mencoba apply selektif; itu satu
-perintah dan CI melakukan hal yang sama tiap run.
+O38 butir 3 (yang memutuskan *tidak* mem-back-port) **dipersempit, bukan dibalik**: alasannya
+tetap berlaku untuk *isi* — statements-nya memang sudah termuat di `rls_baseline` §9 — tetapi
+alasan itu tidak menjawab *penomoran*, yang O38 sendiri catat sebagai di luar scope-nya.
+Berkasnya diberi header yang menyatakan dengan gamblang bahwa ia back-port riwayat, bukan
+perubahan skema baru.
+
+Arah alternatifnya (`supabase migration repair --status reverted 20260723064826`) **tidak**
+dipilih: ia menulis ke bookkeeping produksi dan **menghapus jejak** bahwa hardening itu pernah
+dijalankan — bertentangan dengan aturan rumah #3 (riwayat immutable), demi keuntungan nol.
+
+**Dibuktikan no-op, bukan diasumsikan.** DB dibangun dari nol dua kali — 39 berkas lalu 40 —
+dan empat snapshot dibandingkan: ACL + `proconfig` semua fungsi (`public` & `private`),
+seluruh 536 kolom, 49 policy (termasuk ekspresi `qual`/`with_check`), dan ACL 54 tabel.
+Keempatnya **identik byte-per-byte**. Itu memang yang diharapkan: seluruh statements-nya
+REVOKE/GRANT/`ALTER FUNCTION … SET search_path`, yang menetapkan keadaan akhir, bukan delta.
+
+**Konsekuensi untuk DB lokal yang sudah ada — sudah ada skripnya.** Riwayat migrasi lokal
+siapa pun masih memuat versi lama, jadi berkas yang di-rename akan terlihat "belum pernah
+di-apply", dan **apply selektif tidak bisa menambalnya** (nama berkas berubah, isi skemanya
+tidak ⇒ yang "hilang" akan gagal dengan *already exists*, bukan mengisi kekurangan). Jalur
+yang benar hanya satu, bangun ulang dari nol, dan kini satu perintah:
+
+```bash
+scripts/db-rebuild.sh              # dry-run — laporkan rencana, nol tulis
+scripts/db-rebuild.sh --yes        # drop → 40 migrasi → seed 2× → gate → 4 invariant
+npm run db:rebuild -- --yes        # sama, lewat npm
+```
+
+Skrip itu mencerminkan job `db-and-migrations` di CI (CI tetap otoritasnya), mendeteksi
+riwayat basi `202601…` dan menyebutkannya sebelum drop, serta menolak jalan bila `DB_NAME`
+tidak cocok dengan basis di `DATABASE_URL` — karena satu env var basi cukup untuk menghapus
+basis yang salah.
 
 **Divergensi komentar yang disengaja.** Referensi silang antar-migrasi (mis. *"lihat
 20260102000003"*) ikut diperbarui ke versi baru, jadi komentar berkas repo kini berbeda tipis
