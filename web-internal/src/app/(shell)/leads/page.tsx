@@ -6,33 +6,55 @@ import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import StatusBadge from '@/components/StatusBadge';
 import {
+  DELETED_RECORD_STATUS,
   SOURCES,
+  approveLeadDelete,
   claimLead,
+  listDeleteRequests,
   listLeads,
   listPool,
   bulkImportLeads,
+  rejectLeadDelete,
+  requestLeadDelete,
   type BulkReport,
   type BulkRow,
   type BulkRowResult,
+  type DeleteRequestQueueRow,
   type LeadRow,
   type PoolRow,
 } from '@/lib/leads';
 
 // Record Status taxonomy verbatim (M1 §2 table) — 'Semua' is a client-only
 // filter option (empty query param), not a server status.
-const RECORD_STATUSES = ['[Pool]', 'active', '[Rejected]', '[Not Qualified]', '[Closed-Success]'];
+// `[Deleted]` (owner decision 2026-07-29) is listed LAST and deliberately: the
+// server hides deleted rows from the unfiltered Database list, so asking for
+// them explicitly is the only way a Head can review what was deleted.
+const RECORD_STATUSES = [
+  '[Pool]',
+  'active',
+  '[Rejected]',
+  '[Not Qualified]',
+  '[Closed-Success]',
+  DELETED_RECORD_STATUS,
+];
 
-type TabKey = 'pool' | 'database' | 'import';
+type TabKey = 'pool' | 'database' | 'import' | 'deleteQueue';
 
 function formatDate(value: string | null | undefined) {
   if (!value) return '—';
   return new Date(value).toLocaleDateString('id-ID');
 }
 
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return '—';
+  return new Date(value).toLocaleString('id-ID');
+}
+
 const TAB_LABELS: Record<TabKey, string> = {
   pool: 'Pool',
   database: 'Database',
   import: 'Import',
+  deleteQueue: 'Permintaan Hapus',
 };
 
 export default function LeadsPage() {
@@ -55,14 +77,27 @@ export default function LeadsPage() {
   const canSeeImport = (isMarketing && !odOnly) || isDirector;
   // Claim — Sales division non-odOnly, atau Director.
   const canClaim = (isSales && !odOnly) || isDirector;
+  // Permintaan Hapus — antrian ACC, jadi audiensnya yang bisa meng-ACC: Head
+  // divisi apa pun (Sales maupun Marketing), plus OD/Director yang read-all.
+  // Staff tidak diberi tab ini; status pengajuannya sendiri terbaca di halaman
+  // detail lead-nya. Endpoint-nya sendiri tidak ber-gate — aktor tanpa hak
+  // hanya menerima antrian kosong (kebijakan RLS lead_delete_requests_select).
+  const canSeeDeleteQueue = Boolean(role?.level === 'lead') || isOD || isDirector;
+  // Cermin permission.isLead: Director di mana saja, atau level 'lead'. Divisi
+  // asal lead-nya dicek PER BARIS oleh server — daftar antrian bisa memuat lead
+  // divisi lain untuk OD/Director, jadi tombolnya ada tapi server yang memutus.
+  // Sengaja TIDAK menambah `!odOnly`: approveDelete tidak memanggil canWrite,
+  // dan OD berlapis di atas akun Lead memang boleh meng-ACC dari scope divisinya.
+  const canDecideDelete = isDirector || role?.level === 'lead';
 
   const visibleTabs = useMemo(() => {
     const tabs: TabKey[] = [];
     if (canSeePool) tabs.push('pool');
     if (canSeeDatabase) tabs.push('database');
     if (canSeeImport) tabs.push('import');
+    if (canSeeDeleteQueue) tabs.push('deleteQueue');
     return tabs;
-  }, [canSeePool, canSeeDatabase, canSeeImport]);
+  }, [canSeePool, canSeeDatabase, canSeeImport, canSeeDeleteQueue]);
 
   const [activeTab, setActiveTab] = useState<TabKey | null>(null);
 
@@ -104,8 +139,15 @@ export default function LeadsPage() {
       )}
 
       {activeTab === 'pool' && <PoolTab canClaim={canClaim} />}
-      {activeTab === 'database' && <DatabaseTab />}
+      {/* canRequestDelete mencerminkan permission.canWrite: Director selalu, sisanya
+          butuh scope divisi (OD murni tanpa divisi tidak bisa menulis). */}
+      {activeTab === 'database' && (
+        <DatabaseTab canRequestDelete={isDirector || (role?.division ?? '') !== ''} />
+      )}
       {activeTab === 'import' && <ImportTab />}
+      {activeTab === 'deleteQueue' && (
+        <DeleteQueueTab canDecide={canDecideDelete} division={role?.division ?? ''} isDirector={isDirector} />
+      )}
     </div>
   );
 }
@@ -230,10 +272,18 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
 // Database tab
 // ---------------------------------------------------------------------------
 
-function DatabaseTab() {
+function DatabaseTab({ canRequestDelete }: { canRequestDelete: boolean }) {
   const [rows, setRows] = useState<LeadRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Pengajuan hapus inline: alasan WAJIB, jadi tombol per baris tidak bisa
+  // langsung mengirim — ia membuka satu baris input di bawah lead-nya.
+  const [openFor, setOpenFor] = useState<string | null>(null);
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteNotice, setDeleteNotice] = useState<string | null>(null);
 
   const [qInput, setQInput] = useState('');
   const [statusInput, setStatusInput] = useState('');
@@ -261,6 +311,23 @@ function DatabaseTab() {
     e.preventDefault();
     setAppliedQ(qInput.trim());
     setAppliedStatus(statusInput);
+  }
+
+  async function submitDeleteRequest(e: FormEvent, leadId: string) {
+    e.preventDefault();
+    setDeleteError(null);
+    setDeleteNotice(null);
+    setSubmitting(true);
+    try {
+      await requestLeadDelete(leadId, reason);
+      setDeleteNotice(`Permintaan hapus ${leadId} diajukan — menunggu ACC Head.`);
+      setOpenFor(null);
+      setReason('');
+    } catch (err) {
+      setDeleteError(errorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -292,6 +359,8 @@ function DatabaseTab() {
         </div>
       </form>
 
+      {deleteError && <div className="alert alertError" role="alert">{deleteError}</div>}
+      {deleteNotice && <div className="alert alertSuccess" role="status">{deleteNotice}</div>}
       {loading && <p className="muted">Memuat...</p>}
       {error && <div className="alert alertError" role="alert">{error}</div>}
       {!loading && !error && rows && rows.length === 0 && (
@@ -313,26 +382,299 @@ function DatabaseTab() {
                 <th>Kontes</th>
                 <th>Pemenang</th>
                 <th>Dibuat</th>
+                {canRequestDelete && <th></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.flatMap((r) => {
+                // Cermin decideDeleteRequest: klien (atau sudah ada pemenang)
+                // dan baris yang sudah terhapus tidak bisa diajukan oleh siapa
+                // pun, jadi tombolnya tidak ditawarkan. Sisa gate-nya milik
+                // server.
+                const deletable =
+                  r.record_status !== '[Closed-Success]' &&
+                  (r.winning_attempt_id ?? '') === '' &&
+                  r.record_status !== DELETED_RECORD_STATUS;
+                return [
+                  <tr key={r.id}>
+                    <td>
+                      <Link href={`/leads/${r.id}`}>{r.id}</Link>
+                    </td>
+                    <td>{r.lead_name}</td>
+                    <td>{r.phone_number}</td>
+                    <td>{r.email || '—'}</td>
+                    <td>{r.source}</td>
+                    <td>{r.origin_division}</td>
+                    <td>{r.origin_campaign_id || '—'}</td>
+                    <td>
+                      <StatusBadge status={r.record_status} />
+                    </td>
+                    <td>{r.open_attempt_count}</td>
+                    <td>{r.winning_attempt_id || '—'}</td>
+                    <td>{formatDate(r.created_at)}</td>
+                    {canRequestDelete && (
+                      <td>
+                        {deletable && (
+                          <button
+                            type="button"
+                            className="btn btnSecondary btnSm"
+                            onClick={() => {
+                              setDeleteError(null);
+                              setDeleteNotice(null);
+                              setReason('');
+                              setOpenFor(openFor === r.id ? null : r.id);
+                            }}
+                          >
+                            {openFor === r.id ? 'Batal' : 'Ajukan Hapus'}
+                          </button>
+                        )}
+                      </td>
+                    )}
+                  </tr>,
+                  ...(canRequestDelete && openFor === r.id
+                    ? [
+                        <tr key={`${r.id}-delete-form`}>
+                          <td colSpan={12}>
+                            <form
+                              className="formRow"
+                              onSubmit={(e) => submitDeleteRequest(e, r.id)}
+                            >
+                              <div className="field" style={{ flex: 1 }}>
+                                <label htmlFor={`reason-${r.id}`}>
+                                  Alasan hapus {r.id} (wajib)
+                                </label>
+                                <input
+                                  id={`reason-${r.id}`}
+                                  required
+                                  value={reason}
+                                  onChange={(e) => setReason(e.target.value)}
+                                  placeholder="mis. lead uji coba, duplikat salah input"
+                                />
+                              </div>
+                              <div className="field" style={{ justifyContent: 'flex-end' }}>
+                                <label>&nbsp;</label>
+                                <button
+                                  type="submit"
+                                  className="btn btnPrimary btnSm"
+                                  disabled={submitting}
+                                >
+                                  {submitting ? 'Memproses...' : 'Kirim Pengajuan'}
+                                </button>
+                              </div>
+                            </form>
+                          </td>
+                        </tr>,
+                      ]
+                    : []),
+                ];
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Permintaan Hapus tab — antrian ACC Head (keputusan pemilik 2026-07-29).
+//
+// Baris yang tampil ditentukan kebijakan RLS `lead_delete_requests_select`, bukan
+// oleh filter di sini: Head melihat divisi asal lead-nya, OD/Director melihat
+// semua. Antrian kosong adalah jawaban jujur untuk aktor tanpa hak ACC.
+// ---------------------------------------------------------------------------
+
+const DELETE_STATUS_LABELS: Record<string, string> = {
+  pending: 'Menunggu ACC',
+  approved: 'Disetujui',
+  rejected: 'Ditolak',
+};
+
+function DeleteQueueTab({
+  canDecide,
+  division,
+  isDirector,
+}: {
+  canDecide: boolean;
+  division: string;
+  isDirector: boolean;
+}) {
+  const [rows, setRows] = useState<DeleteRequestQueueRow[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  // 'pending' = default server (yang bisa ditindak); '' = semua, untuk melihat
+  // yang sudah diputuskan.
+  const [statusFilter, setStatusFilter] = useState('pending');
+
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [decidingId, setDecidingId] = useState<string | null>(null);
+  const [decideError, setDecideError] = useState<string | null>(null);
+  const [decideNotice, setDecideNotice] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await listDeleteRequests({ status: statusFilter });
+      setRows(res.data);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [statusFilter]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function decide(row: DeleteRequestQueueRow, approve: boolean) {
+    setDecideError(null);
+    setDecideNotice(null);
+    setDecidingId(row.id);
+    const note = notes[row.id] ?? '';
+    try {
+      if (approve) {
+        await approveLeadDelete(row.id, note);
+        setDecideNotice(`${row.lead_id} disetujui — dipindahkan ke ${DELETED_RECORD_STATUS}.`);
+      } else {
+        await rejectLeadDelete(row.id, note);
+        setDecideNotice(`Permintaan hapus ${row.lead_id} ditolak — lead dibiarkan utuh.`);
+      }
+      setNotes((prev) => ({ ...prev, [row.id]: '' }));
+      await load();
+    } catch (err) {
+      setDecideError(errorMessage(err));
+    } finally {
+      setDecidingId(null);
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="cardHeader">
+        <h2>Permintaan Hapus</h2>
+      </div>
+      <p className="muted" style={{ fontSize: 13 }}>
+        Hapus lead wajib di-ACC Head divisi <strong>asal</strong> lead
+        {isDirector ? ' (Director bisa di semua divisi)' : division ? ` — untuk Anda: ${division}` : ''}.
+        ACC memindahkan lead ke <code>{DELETED_RECORD_STATUS}</code>; barisnya tidak pernah dibuang.
+      </p>
+
+      <form className="formRow" onSubmit={(e) => e.preventDefault()}>
+        <div className="field">
+          <label htmlFor="ldr-status">Status Permintaan</label>
+          <select id="ldr-status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <option value="pending">Menunggu ACC</option>
+            <option value="approved">Disetujui</option>
+            <option value="rejected">Ditolak</option>
+            <option value="">Semua</option>
+          </select>
+        </div>
+      </form>
+
+      {decideError && <div className="alert alertError" role="alert">{decideError}</div>}
+      {decideNotice && <div className="alert alertSuccess" role="status">{decideNotice}</div>}
+      {loading && <p className="muted">Memuat...</p>}
+      {error && <div className="alert alertError" role="alert">{error}</div>}
+      {!loading && !error && rows && rows.length === 0 && (
+        <div className="emptyState">Tidak ada permintaan hapus.</div>
+      )}
+      {!loading && !error && rows && rows.length > 0 && (
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Lead</th>
+                <th>Origin Divisi</th>
+                <th>Status Lead</th>
+                <th>Alasan</th>
+                <th>Pengaju</th>
+                <th>Status</th>
+                <th>Diputuskan</th>
+                {canDecide && <th>Keputusan</th>}
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id}>
+                  <td>{r.id}</td>
                   <td>
-                    <Link href={`/leads/${r.id}`}>{r.id}</Link>
+                    <Link href={`/leads/${r.lead_id}`}>{r.lead_id}</Link>
+                    <br />
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      {r.lead_name} &middot; {r.phone_number}
+                    </span>
                   </td>
-                  <td>{r.lead_name}</td>
-                  <td>{r.phone_number}</td>
-                  <td>{r.email || '—'}</td>
-                  <td>{r.source}</td>
                   <td>{r.origin_division}</td>
-                  <td>{r.origin_campaign_id || '—'}</td>
                   <td>
                     <StatusBadge status={r.record_status} />
                   </td>
-                  <td>{r.open_attempt_count}</td>
-                  <td>{r.winning_attempt_id || '—'}</td>
-                  <td>{formatDate(r.created_at)}</td>
+                  <td>{r.reason}</td>
+                  <td>
+                    {r.requested_by_nama}
+                    <br />
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      {formatDateTime(r.created_at)}
+                    </span>
+                  </td>
+                  <td>{DELETE_STATUS_LABELS[r.status] ?? r.status}</td>
+                  <td>
+                    {r.resolved_at ? (
+                      <>
+                        {r.resolved_by_nama || '—'}
+                        <br />
+                        <span className="muted" style={{ fontSize: 12 }}>
+                          {formatDateTime(r.resolved_at)}
+                        </span>
+                        {r.decision_note && (
+                          <>
+                            <br />
+                            <span className="muted" style={{ fontSize: 12 }}>
+                              &ldquo;{r.decision_note}&rdquo;
+                            </span>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  {canDecide && (
+                    <td>
+                      {r.status === 'pending' ? (
+                        <div className="stack" style={{ gap: 6 }}>
+                          <input
+                            aria-label={`Catatan keputusan ${r.id}`}
+                            placeholder="Catatan (opsional)"
+                            value={notes[r.id] ?? ''}
+                            onChange={(e) => setNotes((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                          />
+                          <div className="row" style={{ gap: 6 }}>
+                            <button
+                              type="button"
+                              className="btn btnPrimary btnSm"
+                              disabled={decidingId !== null}
+                              onClick={() => decide(r, true)}
+                            >
+                              {decidingId === r.id ? 'Memproses...' : 'Setujui'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btnSecondary btnSm"
+                              disabled={decidingId !== null}
+                              onClick={() => decide(r, false)}
+                            >
+                              Tolak
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

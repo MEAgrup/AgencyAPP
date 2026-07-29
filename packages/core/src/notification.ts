@@ -34,6 +34,11 @@ export const EVENTS = {
   PerformancePublished: 'm14.performance.published', // -> Each staff
   LeadCoPursuit: 'm1.lead.co_pursuit', // -> co-pursuit owners + registrant
   HoursLoggedReminder: 'm7.hours_logged.reminder', // -> Asset's assigned PIC
+  // Lead-delete approval (owner decision 2026-07-29, DECISIONS.md). The two
+  // entries below are the ONLY additions past the Go catalog: the ACC flow
+  // cannot function if the Head is never told a request is waiting.
+  LeadDeleteRequested: 'm1.lead.delete_requested', // -> Head of the lead's origin division
+  LeadDeleteDecided: 'm1.lead.delete_decided', // -> Requester
 } as const;
 
 /** A cataloged event type. */
@@ -46,8 +51,13 @@ export interface CatalogEntry {
 }
 
 /**
- * The frozen catalog — event → {description, resolver}. Must stay identical to
- * the `notif_events` seed in the migration and to Go's NewCatalog.
+ * The catalog — event → {description, resolver}. Must stay identical to the
+ * `notif_events` seed in the migrations.
+ *
+ * The first 15 entries are FROZEN (Phase 0 v2 §9) and identical to Go's
+ * NewCatalog. The two `m1.lead.delete_*` entries are a logged deviation
+ * (DECISIONS.md 2026-07-29, seeded in 20260102000012_lead_delete_request.sql):
+ * they postdate the Go build, which is being decommissioned in this cutover.
  */
 export const CATALOG: Record<EventType, CatalogEntry> = {
   [EVENTS.NegotiationPendingApproval]: { description: 'Negotiation Pending Approval submitted', resolver: 'leadsOfDivision' },
@@ -65,6 +75,8 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
   [EVENTS.PerformancePublished]: { description: 'Monthly Performance Score published', resolver: 'explicit' },
   [EVENTS.LeadCoPursuit]: { description: 'Lead dikerjakan lebih dari satu sales', resolver: 'explicit' },
   [EVENTS.HoursLoggedReminder]: { description: 'Hours Logged end-of-day reminder', resolver: 'explicit' },
+  [EVENTS.LeadDeleteRequested]: { description: 'Permintaan hapus lead diajukan', resolver: 'leadsOfDivision' },
+  [EVENTS.LeadDeleteDecided]: { description: 'Permintaan hapus lead di-ACC/tolak', resolver: 'explicit' },
 };
 
 /** All registered event types (introspection / tests). */

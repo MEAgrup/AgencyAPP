@@ -13,6 +13,11 @@ const EXACT_MAP: Record<string, BadgeTone> = {
   '[Blocked]': 'red',
   '[Revision Requested]': 'purple',
   '[Cancelled — Service Voided]': 'darkgray',
+  // Lead yang dihapus lewat ACC Head (M1, keputusan pemilik 2026-07-29).
+  // Perlu entri eksplisit: substring 'delete' tidak ada di heuristik bawah,
+  // jadi tanpa baris ini `[Deleted]` jatuh ke 'gray' dan terlihat seperti
+  // `[To Do]` — state terminal harus terbaca sebagai terminal.
+  '[Deleted]': 'darkgray',
 };
 
 export function badgeTone(status: string): BadgeTone {
