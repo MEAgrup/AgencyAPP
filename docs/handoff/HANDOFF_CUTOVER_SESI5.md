@@ -37,6 +37,15 @@ satu arm: **Marketing staff tidak bisa membaca lead yang berasal dari campaign m
 lebih ketat daripada sistem Go yang sudah lolos UAT W1/W3. Bukan lubang keamanan, tapi **regresi
 fungsional yang terasa oleh pengguna Marketing**.
 
+> **UPDATE sesi 6: sekarang ADA DUA migrasi RLS yang menunggu window deploy.** Selain 0009 di
+> bawah, `20260102000010_rls_finance_staff_queue_scope.sql` memulihkan paritas RLS M5 — policy
+> baseline hanya memberi baca transaksi ke Finance **lead**, padahal Go `trxVisibility` + M5 §8.1
+> memberi Finance **staff** juga (mereka pemilik antrean verifikasi). Efeknya hari ini: Finance staff
+> bisa **mem-verifikasi pembayaran yang tidak bisa ia baca**; dan begitu `GET /finance/queue`
+> di-port, antreannya akan **kosong tanpa error**. Apply **berurutan 0009 → 0010**, lalu verifikasi
+> dengan probe SQL di komentar kepala tiap migrasi. Blast radius hari ini nol (O33 — belum ada aktor
+> Finance). Detail + bukti empiris: entri Decided 2026-07-28 di `docs/DECISIONS.md`.
+
 **Cara menutup** (butuh akses deployment; sandbox Claude tidak bisa menyentuh `CDPS SG` — lihat §4):
 
 1. **Verifikasi dulu** apakah benar belum ter-apply:
