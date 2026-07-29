@@ -40,7 +40,7 @@ export type Actor = permission.Actor;
 /** The CDPS division that owns Payment Status writes (seed.sql role_mappings). */
 export const FINANCE_DIVISION = 'Finance';
 
-/** transaction_payment machine (seeded in 20260102000002_statemachine.sql). */
+/** transaction_payment machine (seeded in 20260723055732_statemachine.sql). */
 export const TRANSACTION_MACHINE = 'transaction_payment';
 /** installment machine. */
 export const INSTALLMENT_MACHINE = 'installment';
@@ -502,6 +502,13 @@ export interface InstallmentRow {
   jatuhTempo: boolean;
   verifiedDate: Date | null;
   verifiedBy: string | null;
+  /**
+   * Proof-of-payment link recorded at verification. Present because the wire
+   * shape web-internal consumes carries `proof_of_payment` (Go instViews) — it
+   * was missing here, so every installment the FE rendered had an undefined
+   * proof column.
+   */
+  proofOfPayment: string | null;
 }
 
 /** Payment status + derived Amount Verified / Outstanding + the full trail. */
@@ -528,13 +535,9 @@ export async function getPaymentStatus(sql: Queryable, transactionId: string): P
   const trx = await loadTransaction(sql, transactionId, false);
   const verified = await sumVerified(sql, trx.id);
 
-  const instRows = await sql<
-    {
-      id: string; installment_no: number; amount: string; due_date: Date | null; status: string;
-      jatuh_tempo: boolean; verified_date: Date | null; verified_by: string | null;
-    }[]
-  >`
-    select id, installment_no, amount, due_date, status, jatuh_tempo, verified_date, verified_by
+  const instRows = await sql<InstallmentDbRow[]>`
+    select id, installment_no, amount, due_date, status, jatuh_tempo, verified_date, verified_by,
+           proof_of_payment
     from installments where transaction_id = ${trx.id} order by installment_no`;
 
   const verRows = await sql<
@@ -551,10 +554,7 @@ export async function getPaymentStatus(sql: Queryable, transactionId: string): P
     totalAgreedValue: money.decimal(trx.totalAgreed), amountVerified: money.decimal(verified),
     amountOutstanding: money.decimal(trx.totalAgreed - verified),
     contractAttachment: trx.contractAttachment, releasedToAccountAt: trx.releasedToAccountAt,
-    installments: instRows.map((i) => ({
-      id: i.id, installmentNo: i.installment_no, amount: i.amount, dueDate: i.due_date, status: i.status,
-      jatuhTempo: i.jatuh_tempo, verifiedDate: i.verified_date, verifiedBy: i.verified_by,
-    })),
+    installments: instRows.map(toInstallmentRow),
     verifications: verRows.map((v) => ({
       installmentId: v.installment_id, amount: v.amount, receivedDate: v.received_date,
       proofOfPayment: v.proof_of_payment, verifiedBy: v.verified_by, createdAt: v.created_at,
@@ -911,7 +911,10 @@ export async function resolveBermasalah(
       throw new IncompleteError(); // nothing to resolve — not currently flagged
     }
     const flaggedAt = rows[0].bermasalah_flagged_at;
-    const division = actor.role.director ? 'Management' : actor.role.division;
+    // 'Director' (not the actor's real division, and not 'Management') — the
+    // literal bermasalahStatus keys directorVote on, matching Go. See
+    // DIRECTOR_VOTE_DIVISION for why this changed.
+    const division = actor.role.director ? DIRECTOR_VOTE_DIVISION : actor.role.division;
 
     await tx`
       insert into transaction_issue_approvals (transaction_id, division, decision, note, created_by)
@@ -1046,6 +1049,402 @@ function validateSchedule(scheme: string, scheduled: boolean, schedule: Schedule
   if (sum !== total) {
     throw new ScheduleTotalError();
   }
+}
+
+// ---------------------------------------------------------------------------
+// M5 §8.1 read models: the finance queue + the Transaction aggregate (O41).
+//
+// VISIBILITY IS ENFORCED TWICE, ON PURPOSE. RLS (`transactions_select`) is the
+// outer net; the predicate below is the app-layer port of Go's `trxVisibility`,
+// per the O37 decision ("RLS fondasi + gate app-layer endpoint"). Two arms of
+// Go's rule are NOT expressible in the current policy, which is why the
+// app-layer copy exists rather than leaning on RLS alone:
+//
+//   - Account may read a Transaction only AFTER release (M5 §5 Rule 2);
+//     `transactions_select` has no such arm, so an assigned AM would otherwise
+//     see pre-verification money.
+//   - a bare role gate must 403, not silently return an empty list — RLS alone
+//     turns "not allowed" into "nothing here", which reads as a data bug.
+//
+// One divergence is deliberately NOT papered over here: Go let a **Sales Lead**
+// see every sales client's transaction, while `transactions_select` grants only
+// per-person ownership. That makes the TS stack NARROWER than Go, never wider.
+// Loosening it is an RLS change with a security blast radius, so it is logged as
+// an open question instead of being decided inside a read model.
+// ---------------------------------------------------------------------------
+
+/** The Sales division (owns the pre-verification side of a Transaction). */
+export const SALES_DIVISION = 'Sales';
+
+/**
+ * canReadFinanceQueue gates GET /finance/queue (M5 §8.1): Finance at any level,
+ * OD, or Director. Everyone else gets 403 — the queue is Finance's worklist, not
+ * a general report.
+ */
+export function canReadFinanceQueue(actor: Actor): boolean {
+  return actor.role.director || actor.role.od || actor.role.division === FINANCE_DIVISION;
+}
+
+/**
+ * canReadTransaction is the role half of Go's `trxVisibility`: which divisions
+ * have Module 5 read access at all. The ROW half (which transactions of that
+ * division) is applied per query — see accountReleasedOnly.
+ */
+export function canReadTransaction(actor: Actor): boolean {
+  if (actor.role.director || actor.role.od) {
+    return true;
+  }
+  const d = actor.role.division;
+  return d === FINANCE_DIVISION || d === SALES_DIVISION || d === ACCOUNT_DIVISION;
+}
+
+/**
+ * Account sees Payment Status only once the Client Record has been released to
+ * them (M5 §5 Rule 2) — pre-verification transactions stay invisible even for
+ * the assigned AM. Director/OD/Finance/Sales are unaffected.
+ */
+function accountReleasedOnly(actor: Actor): boolean {
+  return !actor.role.director && !actor.role.od && actor.role.division === ACCOUNT_DIVISION;
+}
+
+/** The Transaction aggregate M5 read endpoints return (Go TransactionRecord). */
+export interface TransactionAggregate {
+  id: string;
+  clientId: string;
+  scheme: string;
+  totalAgreedValue: string;
+  amountVerified: string;
+  amountOutstanding: string;
+  paymentStatus: string;
+  bermasalah: boolean;
+  contractAttachment: string | null;
+  releasedToAccountAt: Date | null;
+  installments: InstallmentRow[];
+}
+
+/** Raw transactions row shared by the queue and single-transaction reads. */
+interface TransactionDbRow {
+  id: string;
+  client_id: string;
+  payment_intent_scheme: string;
+  total_agreed_value: string;
+  payment_status: string;
+  bermasalah: boolean;
+  contract_attachment: string | null;
+  released_to_account_at: Date | null;
+}
+
+/** Raw installments row (column list kept identical across every read). */
+interface InstallmentDbRow {
+  id: string;
+  installment_no: number;
+  amount: string;
+  due_date: Date | null;
+  status: string;
+  jatuh_tempo: boolean;
+  verified_date: Date | null;
+  verified_by: string | null;
+  proof_of_payment: string | null;
+}
+
+function toInstallmentRow(i: InstallmentDbRow): InstallmentRow {
+  return {
+    id: i.id, installmentNo: i.installment_no, amount: i.amount, dueDate: i.due_date,
+    status: i.status, jatuhTempo: i.jatuh_tempo, verifiedDate: i.verified_date,
+    verifiedBy: i.verified_by, proofOfPayment: i.proof_of_payment,
+  };
+}
+
+/**
+ * hydrateAggregate derives Amount Verified / Outstanding from the immutable
+ * verification log (house rule #4 — never stored) and attaches the schedule.
+ * One query pair per transaction; the queue is small by construction (it holds
+ * only [Menunggu Verifikasi] rows).
+ */
+async function hydrateAggregate(sql: Queryable, r: TransactionDbRow): Promise<TransactionAggregate> {
+  const total = money.parse(r.total_agreed_value);
+  const verified = await sumVerified(sql, r.id);
+  const instRows = await sql<InstallmentDbRow[]>`
+    select id, installment_no, amount, due_date, status, jatuh_tempo, verified_date, verified_by,
+           proof_of_payment
+    from installments where transaction_id = ${r.id} order by installment_no`;
+  return {
+    id: r.id,
+    clientId: r.client_id,
+    scheme: r.payment_intent_scheme,
+    totalAgreedValue: money.decimal(total),
+    amountVerified: money.decimal(verified),
+    amountOutstanding: money.decimal(total - verified),
+    paymentStatus: r.payment_status,
+    bermasalah: r.bermasalah,
+    contractAttachment: r.contract_attachment,
+    releasedToAccountAt: r.released_to_account_at,
+    installments: instRows.map(toInstallmentRow),
+  };
+}
+
+/**
+ * financeQueue lists every Transaction still awaiting verification
+ * ([Menunggu Verifikasi]), oldest id first — Finance's worklist (M5 §8.1).
+ * Ports Go `Service.Queue`. Forbidden for anyone outside Finance/OD/Director.
+ */
+export async function financeQueue(sql: Queryable, actor: Actor): Promise<TransactionAggregate[]> {
+  if (!canReadFinanceQueue(actor)) {
+    throw new ForbiddenError();
+  }
+  const rows = await sql<TransactionDbRow[]>`
+    select id, client_id, payment_intent_scheme, total_agreed_value, payment_status,
+           bermasalah, contract_attachment, released_to_account_at
+    from transactions where payment_status = ${PAYMENT_MENUNGGU} order by id`;
+  const out: TransactionAggregate[] = [];
+  for (const r of rows) {
+    out.push(await hydrateAggregate(sql, r));
+  }
+  return out;
+}
+
+/**
+ * loadTransactionAggregate returns one Transaction with its derived amounts and
+ * schedule, subject to M5 visibility. Ports Go `Service.LoadTransaction`: a role
+ * with no Module 5 access at all → ForbiddenError; a transaction the actor may
+ * not see → NotFoundError (never "forbidden", which would leak its existence).
+ */
+export async function loadTransactionAggregate(
+  sql: Queryable,
+  actor: Actor,
+  transactionId: string,
+): Promise<TransactionAggregate> {
+  if (!canReadTransaction(actor)) {
+    throw new ForbiddenError();
+  }
+  const releasedOnly = accountReleasedOnly(actor);
+  const rows = await sql<TransactionDbRow[]>`
+    select id, client_id, payment_intent_scheme, total_agreed_value, payment_status,
+           bermasalah, contract_attachment, released_to_account_at
+    from transactions
+    where id = ${transactionId}
+      and (${!releasedOnly} or released_to_account_at is not null)`;
+  if (rows.length === 0) {
+    throw new NotFoundError();
+  }
+  return hydrateAggregate(sql, rows[0]);
+}
+
+// ---------------------------------------------------------------------------
+// Installment schedule creation (M5 §4 / M5 §8.4) — O41.
+// ---------------------------------------------------------------------------
+
+/** A scheme carries no schedule ([Bayar Penuh] / [Bayar Sebagian]) → 409. */
+export const MSG_SCHEME_NO_SCHEDULE = '[skema pembayaran ini tidak memakai termin]';
+export class SchemeNoScheduleError extends Error {
+  constructor() {
+    super(MSG_SCHEME_NO_SCHEDULE);
+    this.name = 'SchemeNoScheduleError';
+  }
+}
+
+/** A schedule already exists (or money already came in) → 409, never silent. */
+export const MSG_SCHEDULE_EXISTS = '[jadwal termin sudah dibuat untuk transaksi ini]';
+export class ScheduleExistsError extends Error {
+  constructor() {
+    super(MSG_SCHEDULE_EXISTS);
+    this.name = 'ScheduleExistsError';
+  }
+}
+
+/**
+ * canCreateSchedule ports Go `canManageIntent`: Director and Finance always;
+ * Sales at lead level, or the client's own sales PIC, or a member of its Sales
+ * Allocation. NOTE this is deliberately NOT `client.canSetPaymentIntent` — that
+ * one is the M4 §5 handoff authority and excludes Sales Lead.
+ */
+export function canCreateSchedule(actor: Actor, salesPicId: string, allocationMember: boolean): boolean {
+  if (actor.role.director) {
+    return true;
+  }
+  switch (actor.role.division) {
+    case FINANCE_DIVISION:
+      return true;
+    case SALES_DIVISION:
+      return actor.role.level === permission.LevelLead ||
+        actor.employeeId === salesPicId ||
+        allocationMember;
+    default:
+      return false;
+  }
+}
+
+/**
+ * createSchedule mints the Installment schedule for a scheduled Transaction
+ * (M5 §4). Ports Go `Service.CreateSchedule`:
+ *
+ *   - only [Termin] / [Bayar di Belakang] carry a schedule (SchemeNoSchedule);
+ *     [Bayar di Belakang] is exactly one installment (M5 §4 Rule 4).
+ *   - amounts must sum EXACTLY to the agreed total (ScheduleTotalError) and
+ *     every item needs a positive amount + due date (M5 §8.4).
+ *   - it is NOT an upsert: an existing schedule or ANY existing verification
+ *     makes it fail (ScheduleExistsError) rather than silently replacing rows
+ *     that money is already reconciled against. Re-scheduling mid-flight is
+ *     `changeScheme`'s job, and that one is pre-verification only.
+ *
+ * Each INST- id is minted only after validation passes (house rule #1), and
+ * rows are inserted at the machine's initial state [Belum Jatuh Tempo]; later
+ * moves go through the engine (house rule #2).
+ */
+export async function createSchedule(
+  sql: Sql,
+  actor: Actor,
+  transactionId: string,
+  items: ScheduleInput[],
+  now: Date = new Date(),
+): Promise<InstallmentRow[]> {
+  if (items.length === 0) {
+    throw new IncompleteError();
+  }
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const rows = await tx<
+      { id: string; payment_intent_scheme: string; total_agreed_value: string; client_id: string; sales_pic_id: string | null }[]
+    >`
+      select t.id, t.payment_intent_scheme, t.total_agreed_value, t.client_id, c.sales_pic_id
+      from transactions t join clients c on c.id = t.client_id
+      where t.id = ${transactionId} for update`;
+    if (rows.length === 0) {
+      throw new NotFoundError();
+    }
+    const trx = rows[0];
+
+    const memberRows = await tx<{ one: number }[]>`
+      select 1 as one from client_sales_allocations
+      where client_id = ${trx.client_id} and salesperson_id = ${actor.employeeId} limit 1`;
+    if (!canCreateSchedule(actor, trx.sales_pic_id ?? '', memberRows.length > 0)) {
+      throw new ForbiddenError();
+    }
+
+    if (!SCHEDULED_SCHEMES.has(trx.payment_intent_scheme)) {
+      throw new SchemeNoScheduleError();
+    }
+
+    // Idempotency guard BEFORE minting ids: an existing schedule or any verified
+    // money means this is a re-schedule, which this endpoint must refuse.
+    const existing = await tx<{ inst: string; ver: string }[]>`
+      select (select count(*) from installments where transaction_id = ${trx.id})::text as inst,
+             (select count(*) from payment_verifications where transaction_id = ${trx.id})::text as ver`;
+    if (existing[0].inst !== '0' || existing[0].ver !== '0') {
+      throw new ScheduleExistsError();
+    }
+
+    const total = money.parse(trx.total_agreed_value);
+    validateSchedule(trx.payment_intent_scheme, true, items, total);
+
+    const created: InstallmentRow[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const instId = await ex.ident.identNext('INST', now);
+      const inserted = await tx<InstallmentDbRow[]>`
+        insert into installments (id, transaction_id, installment_no, amount, due_date, status, created_by)
+        values (${instId}, ${trx.id}, ${i + 1}, ${money.decimal(money.parse(items[i].amount))},
+                ${items[i].dueDate}, ${INST_BELUM}, ${actor.employeeId})
+        returning id, installment_no, amount, due_date, status, jatuh_tempo, verified_date,
+                  verified_by, proof_of_payment`;
+      created.push(toInstallmentRow(inserted[0]));
+    }
+
+    await ex.audit.insertAudit({
+      entityType: 'transaction', entityId: trx.id, actorEmployeeId: actor.employeeId,
+      action: 'schedule_created', beforeJson: null,
+      afterJson: { installments: created.length, scheme: trx.payment_intent_scheme },
+      createdBy: actor.employeeId,
+    });
+    return created;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// [Bermasalah] status read (M5-OA-5) — O41.
+// ---------------------------------------------------------------------------
+
+/** One recorded vote in the current [Bermasalah] cycle. */
+export interface BermasalahVoteRow {
+  division: string;
+  decision: string;
+  note: string;
+  actor: string;
+  createdAt: Date;
+}
+
+/** The dispute flag plus the current cycle's votes and escalation state. */
+export interface BermasalahStatusView {
+  transactionId: string;
+  flagged: boolean;
+  financeVote: string;
+  accountVote: string;
+  directorVote: string;
+  escalated: boolean;
+  votes: BermasalahVoteRow[];
+}
+
+/**
+ * The division literal a Director's vote is stored under. Go writes "Director"
+ * (a pseudo-division, not the actor's real one) and its reader keys on that.
+ * `resolveBermasalah` used to write 'Management' instead, so a Director ruling
+ * could never populate directorVote — which silently kept `escalated` true after
+ * a Director had already ruled against. Aligned to Go; safe to change because
+ * `transaction_issue_approvals` was empty in every environment at the time
+ * (verified on CDPS SG), so no rows needed migrating.
+ */
+export const DIRECTOR_VOTE_DIVISION = 'Director';
+
+/** Pre-alignment rows stored a Director's vote as 'Management' — still counted. */
+const DIRECTOR_VOTE_LEGACY = 'Management';
+
+/**
+ * bermasalahStatus reports the flag, the votes cast in the CURRENT cycle only
+ * (a re-flag starts a fresh cycle — votes before `bermasalah_flagged_at` are
+ * history, not standing opinions), and whether the case is escalated: both SPV
+ * divisions voted, they disagree, and no Director has ruled. Visibility follows
+ * Transaction visibility, so it 404s exactly where the transaction read does.
+ * Ports Go `Service.GetBermasalahStatus`.
+ */
+export async function bermasalahStatus(
+  sql: Queryable,
+  actor: Actor,
+  transactionId: string,
+): Promise<BermasalahStatusView> {
+  const trx = await loadTransactionAggregate(sql, actor, transactionId);
+
+  const flaggedRows = await sql<{ bermasalah_flagged_at: Date | null }[]>`
+    select bermasalah_flagged_at from transactions where id = ${trx.id}`;
+  const flaggedAt = flaggedRows[0]?.bermasalah_flagged_at ?? null;
+
+  const voteRows = await sql<
+    { division: string; decision: string; note: string | null; created_by: string; created_at: Date }[]
+  >`
+    select division, decision, note, created_by, created_at
+    from transaction_issue_approvals
+    where transaction_id = ${trx.id}
+      and (${flaggedAt === null} or created_at >= ${flaggedAt ?? new Date(0)})
+    order by id`;
+
+  const view: BermasalahStatusView = {
+    transactionId: trx.id, flagged: trx.bermasalah,
+    financeVote: '', accountVote: '', directorVote: '', escalated: false, votes: [],
+  };
+  for (const v of voteRows) {
+    view.votes.push({
+      division: v.division, decision: v.decision, note: v.note ?? '',
+      actor: v.created_by, createdAt: v.created_at,
+    });
+    if (v.division === FINANCE_DIVISION) {
+      view.financeVote = v.decision;
+    } else if (v.division === ACCOUNT_DIVISION) {
+      view.accountVote = v.decision;
+    } else if (v.division === DIRECTOR_VOTE_DIVISION || v.division === DIRECTOR_VOTE_LEGACY) {
+      view.directorVote = v.decision;
+    }
+  }
+  view.escalated = view.flagged && view.directorVote === '' &&
+    view.financeVote !== '' && view.accountVote !== '' && view.financeVote !== view.accountVote;
+  return view;
 }
 
 // ---------------------------------------------------------------------------

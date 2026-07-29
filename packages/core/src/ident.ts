@@ -3,7 +3,7 @@
  *
  * Ported from backend/internal/core/ident. The **atomic, gap-free, rollback-safe
  * allocation** lives in the Postgres function `ident_next(prefix, at)`
- * (migration 20260102000001_ident_next.sql) — NOT reimplemented in TypeScript,
+ * (migration 20260722060601_ident_next.sql) — NOT reimplemented in TypeScript,
  * because reproducing the row-lock/no-double-alloc guarantee outside a single DB
  * transaction is impossible to do safely (SUPABASE_MIGRATION_TECH_APPENDIX §B.1).
  *

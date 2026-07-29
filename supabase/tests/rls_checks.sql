@@ -1,6 +1,6 @@
 -- Fase-1 DB invariant check: Row Level Security (plain psql; run with -v ON_ERROR_STOP=1).
 --
--- Verifies that the RLS policies in 20260102000003_rls_baseline.sql enforce the
+-- Verifies that the RLS policies in 20260723064438_rls_baseline.sql enforce the
 -- SAME predicate as packages/core/src/permission.ts (the two implementations must
 -- never diverge — Tech Appendix §B.4/§D). Exercised by switching to the real
 -- `authenticated` Postgres role and injecting JWT claims via the GUC that the
@@ -155,7 +155,7 @@ DO $$ BEGIN
 END $$;
 
 -- 13. Marketing staff who own the ORIGIN CAMPAIGN see the lead even though they
---     did not create it — the arm added by 20260102000005 for parity with Go
+--     did not create it — the arm added by 20260724132631 for parity with Go
 --     `canReadLead`. Without that migration this check fails.
 SELECT set_config('request.jwt.claims',
   '{"app_metadata":{"employee_id":"EMP-RLS-MKT2","division":"Marketing","level":"staff"}}', true);
@@ -175,7 +175,7 @@ RESET ROLE;
 --        policy, porting the read path to `readAsActor` hands Finance staff an
 --        EMPTY queue with no error — and a Finance staffer could verify a
 --        payment they cannot read (writes go through SECURITY DEFINER RPCs).
---        20260102000010 restores parity; without it, check 15 fails.
+--        20260729032805 restores parity; without it, check 15 fails.
 -- ---------------------------------------------------------------------------
 
 -- Fixture (as superuser): one client + a transaction awaiting verification,

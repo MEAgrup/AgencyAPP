@@ -23,7 +23,7 @@
  * step rolls back the sync and provisioning too.
  *
  * Reference: backend/internal/hris/{source,sync}.go, backend/internal/auth/local.go
- * (SetPassword), supabase/migrations/20260102000004_supabase_auth.sql.
+ * (SetPassword), supabase/migrations/20260723071013_supabase_auth.sql.
  */
 
 import bcrypt from 'bcryptjs';

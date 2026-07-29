@@ -1,6 +1,6 @@
 -- Penambahan native Postgres (bukan port skema) — konversi per docs/SUPABASE_MIGRATION_TECH_APPENDIX.md §B.1
 -- Ditulis SETELAH semua migrasi port (timestamp 20260102...) karena bergantung pada
--- tabel id_sequences (port 20260101000001_init) dan fungsi wib_period (20260101000000_pg_foundation).
+-- tabel id_sequences (port 20260722053824_init) dan fungsi wib_period (20260722052710_pg_foundation).
 
 -- ident_next — generator house-ID PREFIX-YYYYMM-NNNN.
 --

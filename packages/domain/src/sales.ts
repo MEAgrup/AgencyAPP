@@ -36,7 +36,7 @@ import { resolveWin } from './leads';
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;
 
-/** prospect_attempt machine (seeded in 20260102000002_statemachine.sql). */
+/** prospect_attempt machine (seeded in 20260723055732_statemachine.sql). */
 export const ATTEMPT_MACHINE = 'prospect_attempt';
 
 /** The CDPS division that owns prospect attempts (M0 §9.1). */
@@ -550,7 +550,7 @@ export async function markContacted(
  * Which source states may reach it is the engine's call, not this function's:
  * `sm_edges` allows it from `Negotiation - Rejected` / `- Approved` /
  * `- Auto Approved` and blocks everything else with the default BI message
- * (migration 20260102000002 §1). Mirrors Go `Service.MarkLost`.
+ * (migration 20260723055732 §1). Mirrors Go `Service.MarkLost`.
  *
  * `Closed-Lost` is a TERMINAL attempt status, so recording it is what releases
  * the lead: M1's dedup treats a non-terminal attempt as "sedang diproses oleh

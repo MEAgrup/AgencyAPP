@@ -1,6 +1,6 @@
 -- Penambahan native Postgres (bukan port skema) — konversi per docs/SUPABASE_MIGRATION_TECH_APPENDIX.md §B.2 (statemachine) + §B.6 (notification).
 -- Ditulis SETELAH semua migrasi port (timestamp 20260102...) karena bergantung pada
--- tabel audit_log / notifications / employees / role_mappings (port 20260101000001_init).
+-- tabel audit_log / notifications / employees / role_mappings (port 20260722053824_init).
 --
 -- Meng-engine-kan house rule CLAUDE.md #2/#3/#8:
 --   - transisi status HANYA lewat sm_transition (satu-satunya jalur tulis kolom status);

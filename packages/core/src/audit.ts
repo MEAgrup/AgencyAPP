@@ -3,7 +3,7 @@
  *
  * Ported from backend/internal/core/audit. Immutability is enforced at the
  * storage layer by the `forbid_mutation()` BEFORE UPDATE/DELETE triggers on
- * `audit_log` (migration 20260101000001_init) — there is deliberately NO update
+ * `audit_log` (migration 20260722053824_init) — there is deliberately NO update
  * or delete code path here, exactly like the Go package.
  *
  * `write` builds the payload and delegates the INSERT to an executor (the same

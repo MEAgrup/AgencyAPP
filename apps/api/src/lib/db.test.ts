@@ -5,7 +5,7 @@
  * policies: every policy reads `auth.jwt() -> 'app_metadata' ->> '<key>'`, so a
  * wrong key or a stringified boolean silently turns into "no claim" and RLS
  * default-denies (or, worse for `od`/`director`, fails the `::boolean` cast).
- * These lock the envelope's shape to migration 20260102000004 /
+ * These lock the envelope's shape to migration 20260723071013 /
  * `permission.actorFromClaims`.
  */
 import { describe, expect, it } from 'vitest';

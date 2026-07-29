@@ -2,8 +2,8 @@
 -- BACK-PORT (C-03 / DECISIONS O38 opsi A) — verbatim dari project live `CDPS SG`,
 -- versi remote `20260724134427_employee_display_name`.
 --
--- Sebelumnya hanya ada di live. Lihat catatan di 20260102000005 untuk konteks.
--- CATATAN: fungsi ini DIPINDAH ke schema `private` oleh migrasi 20260102000008.
+-- Sebelumnya hanya ada di live. Lihat catatan di 20260724132631 untuk konteks.
+-- CATATAN: fungsi ini DIPINDAH ke schema `private` oleh migrasi 20260727072443.
 -- Ia dibuat di `public` di sini supaya urutan repo mereproduksi urutan live
 -- (buat dulu di public, baru relokasi) — jangan digabung/dipersingkat.
 -- ============================================================================

@@ -127,6 +127,8 @@ export function mapError(err: unknown): Response {
     err instanceof leads.AlreadyResolvedError ||
     err instanceof finance.ContractRequiredError ||
     err instanceof finance.SchemeLockedError ||
+    err instanceof finance.SchemeNoScheduleError ||
+    err instanceof finance.ScheduleExistsError ||
     err instanceof client.LockedFieldError ||
     err instanceof client.IntentLockedError ||
     err instanceof account.ConflictError ||

@@ -9,6 +9,7 @@
   "scripts": {
     "build": "npm run build -w @cdps/api",
     "test": "npm run test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:rebuild": "scripts/db-rebuild.sh"
   }
 }

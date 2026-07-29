@@ -13,7 +13,7 @@
  *   - In-app only, derived from the audit-log-adjacent event stream.
  *   - **Never deletable.** There is no delete function and no route; the table
  *     also carries a BEFORE DELETE trigger (`notifications_no_delete`) and
- *     `authenticated` has UPDATE/DELETE revoked (20260102000003 §6).
+ *     `authenticated` has UPDATE/DELETE revoked (20260723064438 §6).
  *   - The ONLY mutation is mark-as-read, and it goes through the
  *     `mark_notification_read` RPC — the single UPDATE path, idempotent by
  *     construction (`AND read_at IS NULL`).
@@ -171,7 +171,7 @@ export function parseId(raw: string): string {
  * caller whether another employee's notification id exists.
  *
  * Goes through the `mark_notification_read(p_id, p_recipient)` RPC, the single
- * UPDATE path onto `notifications` (migration 20260102000002). The recipient is
+ * UPDATE path onto `notifications` (migration 20260723055732). The recipient is
  * always the ACTOR: it is never taken from the request.
  */
 export async function markRead(sql: Queryable, actor: Actor, id: string): Promise<void> {

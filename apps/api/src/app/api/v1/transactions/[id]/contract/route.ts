@@ -15,6 +15,6 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     const { id } = await ctx.params;
     const b = await readJson<{ contract_attachment?: string }>(request);
     await finance.attachContract(db(), actor, id, b.contract_attachment ?? '');
-    return json({ ok: true });
+    return json({ status: 'ok' });
   });
 }

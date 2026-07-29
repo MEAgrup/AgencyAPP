@@ -220,17 +220,13 @@ function servedBy(feCall: string, route: string): boolean {
  * of the Go→TS port (DECISIONS O41). Each line is a broken page; the list must
  * only ever shrink.
  */
-const KNOWN_GAPS = new Set([
-  // M5 money path — /finance and the transaction detail cannot load.
-  'GET /finance/queue', //             Go handleFinanceQueue   → needs finance.queue()
-  'GET /transactions/{}', //           Go handleGetTransaction → needs finance.loadTransaction()
-  'POST /transactions/{}/schedule', // Go handleCreateSchedule → needs finance.createSchedule()
-  'GET /transactions/{}/bermasalah', // Go handleGetBermasalah (POST half exists)
-  // M1 — Marketing bulk lead import.
-  'POST /leads/bulk', //                Go handleBulkLeads
-  // Cross-module audit trail reader (used by the Creative asset history panel).
-  'GET /audit', //                      Go handleAudit
-]);
+/**
+ * EMPTY as of 2026-07-29 — all six O41 gaps are served. Kept (rather than deleted
+ * along with its assertions) because the "every entry is still genuinely missing"
+ * test below is what stops a future gap from being parked here silently: adding a
+ * line means admitting a page does not work, and needs a DECISIONS entry.
+ */
+const KNOWN_GAPS = new Set<string>([]);
 
 describe('FE↔API route parity', () => {
   const routes = apiRoutes();

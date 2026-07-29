@@ -104,7 +104,7 @@ export function canReadAll(a: Actor): boolean {
 
 /**
  * The `app_metadata` claim shape injected into the JWT by the GoTrue
- * `custom_access_token_hook` (see migration 20260102000004 §2 `employee_claims`).
+ * `custom_access_token_hook` (see migration 20260723071013 §2 `employee_claims`).
  * These five keys are the ONLY authorization inputs the API trusts — they are
  * produced fresh, server-side, from `employees`/`role_mappings`/
  * `employee_layered_roles` on every token issue.

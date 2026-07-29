@@ -38,7 +38,7 @@ import { MARKETING_DIVISION } from './campaign';
 /** Authenticated employee + resolved role (from @cdps/core permission). */
 export type Actor = permission.Actor;
 
-/** lead_record machine (seeded in 20260102000002_statemachine.sql). */
+/** lead_record machine (seeded in 20260723055732_statemachine.sql). */
 export const LEAD_MACHINE = 'lead_record';
 
 /** Lead record birth status (active) and the Pool waypoint on the reopen path. */
@@ -48,7 +48,7 @@ export const RECORD_POOL = '[Pool]';
 /**
  * Terminal record status for a lead deleted with Head approval (owner decision
  * 2026-07-29 — `docs/DECISIONS.md`; edges seeded in
- * 20260102000012_lead_delete_request.sql). There is NO `delete from leads`
+ * 20260729162101_lead_delete_request.sql). There is NO `delete from leads`
  * anywhere: house rule #3 makes history immutable, and a real row delete would
  * orphan the lead's audit trail and break the prospect_attempts FK. "Deleted"
  * is a state the lead is driven INTO, through the engine, by a Head.
@@ -745,7 +745,7 @@ export function leadListScope(actor: permission.Actor): LeadListScope | null {
 // holds an attempt). It is intentionally NOT re-implemented here: row visibility
 // is the `leads_select` RLS policy's job, and a second copy in TS could only
 // diverge from it (CLAUDE.md — the two sides must never disagree). Migration
-// 20260102000005 adds the own-campaign-origin arm that the baseline policy was
+// 20260724132631 adds the own-campaign-origin arm that the baseline policy was
 // missing, so RLS now matches Go's predicate exactly.
 
 /** One Sales Pool board row (contract §3). */
@@ -1449,4 +1449,331 @@ export async function deleteRequestQueue(
     originDivision: r.origin_division, requestedByNama: r.requested_by_nama,
     resolvedByNama: r.resolved_by_nama ?? '',
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Marketing bulk import (M1 §3) — O41. Ported from Go module1_leads/bulk.go +
+// campaign_link.go (resolveCampaignForIntake / deriveSource / updateLastTouch).
+//
+// Import-door semantics differ from single registration in three ways that must
+// NOT be "unified" with register():
+//   1. ONE TRANSACTION PER ROW (§3 rule 5) — a bad row rejects itself and leaves
+//      every other row committed. Wrapping the file in one transaction would make
+//      a single duplicate roll back a whole import.
+//   2. NO ATTEMPT IS SPAWNED. Imported leads land in [Pool] with no owner; the
+//      Marketing door hands leads to Sales, it does not prospect them.
+//   3. decide() is called with an EMPTY actor id on CHANNEL_IMPORT, so any open
+//      attempt blocks the row regardless of who holds it, and the import never
+//      joins as a co-pursuit (M1-OA-6 — dedup v2 join is single-reg only).
+// ---------------------------------------------------------------------------
+
+/** A row rejected for missing mandatory fields (verbatim BI, per row). */
+export const MSG_ROW_INCOMPLETE = '[data tidak lengkap, baris tidak diimport]';
+
+/** Import gate: the Campaign cannot accept leads (Closed/Archived) — §3 Rule 5. */
+export const MSG_CAMPAIGN_NOT_ACTIVE = '[campaign belum/tidak aktif, lead tidak bisa diimport]';
+
+/** Import gate: the selected Campaign does not exist (reuses the generic string). */
+export const MSG_CAMPAIGN_NOT_FOUND = '[data tidak ditemukan]';
+
+/** Campaign statuses, mirrored verbatim from M3 (the engine stores them unbracketed). */
+const CAMPAIGN_DRAFT = 'Draft';
+const CAMPAIGN_ACTIVE = 'Active';
+const CAMPAIGN_PAUSED = 'Paused';
+
+/**
+ * Known Campaign Channel → M1 Source. M3-OA-2 keeps this taxonomy free-text and
+ * INCREMENTAL, so only the PRD-confirmed entry lives here and anything unmapped
+ * falls through as the Channel string verbatim (leads.source is a free varchar).
+ */
+const CHANNEL_TO_SOURCE = new Map<string, string>([['TikTok Ads', 'Leads - Iklan']]);
+
+/** deriveSource maps a Campaign Channel to a Source, else returns it verbatim. */
+export function deriveSource(channel: string): string {
+  return CHANNEL_TO_SOURCE.get(channel) ?? channel;
+}
+
+/** One row of a bulk import request. */
+export interface BulkRow {
+  leadName: string;
+  phoneNumber: string;
+  email?: string;
+  source?: string;
+}
+
+/** Per-row verdict (Go BulkRowResult). */
+export interface BulkRowResult {
+  rowNumber: number;
+  leadName: string;
+  phoneNumber: string;
+  imported: boolean;
+  reopened: boolean;
+  leadId: string;
+  /** verbatim BI rejection reason; '' for imported rows. */
+  reason: string;
+}
+
+/** The §3 Flow-7 report: counts, summary line, all rows, and the rejects. */
+export interface BulkReport {
+  imported: number;
+  rejected: number;
+  summary: string;
+  rows: BulkRowResult[];
+  rejections: BulkRowResult[];
+}
+
+/**
+ * canBulkImport gates the Marketing bulk-import door (M1 §9.1: Marketing
+ * staff/lead import leads; Director full). A pure-OD account is read-only and
+ * therefore denied even though it can see everything.
+ */
+export function canBulkImport(actor: Actor): boolean {
+  return actor.role.director || actor.role.division === MARKETING_DIVISION;
+}
+
+/** Renders the byte-exact §3 Flow step 7 summary line. */
+export function bulkSummary(imported: number, rejected: number): string {
+  return `[${imported} lead berhasil diimport, ${rejected} ditolak (duplikat/data tidak lengkap)]`;
+}
+
+/**
+ * bulkImport runs the Marketing import door over `rows` (M1 §3). `campaignId` is
+ * the OPTIONAL origin Campaign for the whole file: when set, the Campaign gate
+ * runs per row (missing → reject, Draft/Paused → auto-activate through the
+ * engine per O13, Closed/Archived → reject) and the Channel-derived Source WINS
+ * over whatever the row carried.
+ *
+ * The whole request is refused (ForbiddenError) when the actor may not import;
+ * otherwise every row is processed independently and the report reconciles:
+ * imported + rejected === rows.length.
+ */
+export async function bulkImport(
+  sql: Sql,
+  actor: Actor,
+  campaignId: string,
+  rows: BulkRow[],
+  now: Date = new Date(),
+): Promise<BulkReport> {
+  if (!canBulkImport(actor)) {
+    throw new ForbiddenError();
+  }
+  const results: BulkRowResult[] = [];
+  let imported = 0;
+  let rejected = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const res = await importOneRow(sql, actor, i + 1, rows[i], campaignId, now);
+    if (res.imported) {
+      imported++;
+    } else {
+      rejected++;
+    }
+    results.push(res);
+  }
+  return {
+    imported,
+    rejected,
+    summary: bulkSummary(imported, rejected),
+    rows: results,
+    rejections: results.filter((r) => !r.imported),
+  };
+}
+
+/**
+ * importOneRow processes a single row in its OWN transaction. It never throws for
+ * a row-level problem — it returns the verdict, so one bad row cannot abort the
+ * file. Infrastructure failures are caught for the same reason and reported as
+ * the row-incomplete BI message, matching Go, which likewise degrades a failed
+ * row rather than failing the request.
+ */
+async function importOneRow(
+  sql: Sql,
+  actor: Actor,
+  rowNumber: number,
+  row: BulkRow,
+  campaignId: string,
+  now: Date,
+): Promise<BulkRowResult> {
+  const leadName = (row.leadName ?? '').trim();
+  const phoneNumber = (row.phoneNumber ?? '').trim();
+  const rowSource = (row.source ?? '').trim();
+  const email = (row.email ?? '').trim();
+  const base: BulkRowResult = {
+    rowNumber, leadName, phoneNumber, imported: false, reopened: false, leadId: '', reason: '',
+  };
+
+  // Mandatory fields BEFORE any id is minted (§3 Flow 2/4, house rule #1). A
+  // campaign supplies the Source, so a row needs its own only when there is none.
+  if (leadName === '' || phoneNumber === '' || (rowSource === '' && campaignId === '')) {
+    return { ...base, reason: MSG_ROW_INCOMPLETE };
+  }
+  const phoneNorm = normalizePhone(phoneNumber);
+  if (phoneNorm === '') {
+    return { ...base, reason: MSG_ROW_INCOMPLETE };
+  }
+
+  try {
+    return await withTransaction(sql, async (tx): Promise<BulkRowResult> => {
+      const ex = executors(tx);
+
+      // Campaign gate + Source derivation runs FIRST: a rejected campaign must
+      // not leave a lead behind.
+      let source = rowSource;
+      if (campaignId !== '') {
+        const gate = await resolveCampaignForIntake(tx, ex, campaignId, actor);
+        if (gate.blocked !== '') {
+          return { ...base, reason: gate.blocked };
+        }
+        source = gate.source;
+      }
+
+      const match = await matchByPhone(tx, phoneNorm);
+      // Empty actor id on purpose — see the section header (M1-OA-6).
+      const decision = decide(CHANNEL_IMPORT, match, '');
+      const campaignArg = campaignId === '' ? null : campaignId;
+
+      switch (decision.outcome) {
+        case 'reopen': {
+          // Terminal -> [Pool] only; the Marketing door spawns no attempt.
+          const moved = await statemachine.transition(ex.sm, {
+            machine: LEAD_MACHINE, entityType: 'lead', table: 'leads',
+            statusColumn: 'record_status', entityId: decision.reopenLeadId,
+            to: RECORD_POOL, actor,
+          });
+          if (!moved.ok) {
+            return { ...base, reason: MSG_ROW_INCOMPLETE };
+          }
+          await ex.audit.insertAudit({
+            entityType: 'lead', entityId: decision.reopenLeadId, actorEmployeeId: actor.employeeId,
+            action: 'dedup_reopen', beforeJson: null,
+            afterJson: { channel: 'bulk_import', source }, createdBy: actor.employeeId,
+          });
+          // M1 §5: a campaign-scoped reopen TOUCHES an existing lead, so it moves
+          // last-touch only — origin stays whatever it was born under.
+          await updateLastTouch(tx, ex, decision.reopenLeadId, campaignId, actor);
+          return { ...base, imported: true, reopened: true, leadId: decision.reopenLeadId };
+        }
+
+        case 'block': {
+          // Attribution attempt is LOGGED on the existing record but never
+          // counted (M1-OA-6); the existing record itself is not mutated.
+          if (match !== null) {
+            await ex.audit.insertAudit({
+              entityType: 'lead', entityId: match.id, actorEmployeeId: actor.employeeId,
+              action: 'dedup_blocked', beforeJson: null,
+              afterJson: { channel: 'bulk_import', row_index: rowNumber, message: decision.message },
+              createdBy: actor.employeeId,
+            });
+          }
+          return { ...base, reason: decision.message };
+        }
+
+        default: {
+          // Create: a lead born under a Campaign gets origin = last-touch = that
+          // Campaign (origin immutable hereafter); both NULL without one.
+          const leadId = await ex.ident.identNext('LEAD', now);
+          await tx`
+            insert into leads
+              (id, lead_name, phone_number, phone_norm, email, source, origin_division,
+               origin_campaign_id, last_touch_campaign_id, record_status, created_by)
+            values
+              (${leadId}, ${leadName}, ${phoneNumber}, ${phoneNorm}, ${email === '' ? null : email},
+               ${source}, ${MARKETING_DIVISION}, ${campaignArg}, ${campaignArg}, ${RECORD_POOL},
+               ${actor.employeeId})`;
+          await ex.audit.insertAudit({
+            entityType: 'lead', entityId: leadId, actorEmployeeId: actor.employeeId,
+            action: 'create', beforeJson: null,
+            afterJson: {
+              record_status: RECORD_POOL, source, channel: 'bulk_import',
+              origin_campaign_id: campaignArg,
+            },
+            createdBy: actor.employeeId,
+          });
+          return { ...base, imported: true, leadId };
+        }
+      }
+    });
+  } catch {
+    return { ...base, reason: MSG_ROW_INCOMPLETE };
+  }
+}
+
+/** Outcome of the campaign import gate: either a blocking BI message or a Source. */
+interface CampaignGate {
+  /** verbatim BI `[...]` when the row must be rejected; '' when the gate passed. */
+  blocked: string;
+  source: string;
+}
+
+/**
+ * resolveCampaignForIntake enforces the O13 import gate and returns the
+ * Channel-derived Source. The Campaign row is locked FOR UPDATE so two
+ * concurrent imports cannot race the auto-activation.
+ *
+ *   Active          → proceed.
+ *   Draft / Paused  → auto-activate to Active THROUGH THE ENGINE (the only path
+ *                     that writes status) plus a distinct `campaign_auto_activated`
+ *                     audit row naming the importer as actor.
+ *   Closed/Archived → blocked: the campaign machine has no edge back to Active.
+ *   missing         → blocked (not-found).
+ */
+async function resolveCampaignForIntake(
+  tx: Queryable,
+  ex: ReturnType<typeof executors>,
+  campaignId: string,
+  actor: Actor,
+): Promise<CampaignGate> {
+  const rows = await tx<{ channel: string; status: string }[]>`
+    select channel, status from campaigns where id = ${campaignId} for update`;
+  if (rows.length === 0) {
+    return { blocked: MSG_CAMPAIGN_NOT_FOUND, source: '' };
+  }
+  const { channel, status } = rows[0];
+
+  if (status === CAMPAIGN_DRAFT || status === CAMPAIGN_PAUSED) {
+    const moved = await statemachine.transition(ex.sm, {
+      machine: 'campaign', entityType: 'campaign', table: 'campaigns',
+      entityId: campaignId, to: CAMPAIGN_ACTIVE, actor,
+    });
+    if (!moved.ok) {
+      return { blocked: MSG_CAMPAIGN_NOT_ACTIVE, source: '' };
+    }
+    await ex.audit.insertAudit({
+      entityType: 'campaign', entityId: campaignId, actorEmployeeId: actor.employeeId,
+      action: 'campaign_auto_activated', beforeJson: { status },
+      afterJson: { status: CAMPAIGN_ACTIVE, trigger: 'lead_intake' }, createdBy: actor.employeeId,
+    });
+  } else if (status !== CAMPAIGN_ACTIVE) {
+    return { blocked: MSG_CAMPAIGN_NOT_ACTIVE, source: '' };
+  }
+  return { blocked: '', source: deriveSource(channel) };
+}
+
+/**
+ * updateLastTouch records that `campaignId` touched an EXISTING lead (M1 §5 /
+ * §9.3) when it differs from the value on file, and audits the change. It NEVER
+ * touches origin_campaign_id — that is the immutable first-touch record. No-op
+ * when there is no campaign or it is already the current last-touch (idempotent).
+ */
+async function updateLastTouch(
+  tx: Queryable,
+  ex: ReturnType<typeof executors>,
+  leadId: string,
+  campaignId: string,
+  actor: Actor,
+): Promise<void> {
+  if (campaignId === '') {
+    return;
+  }
+  const rows = await tx<{ last_touch_campaign_id: string | null }[]>`
+    select last_touch_campaign_id from leads where id = ${leadId}`;
+  const current = rows[0]?.last_touch_campaign_id ?? null;
+  if (current === campaignId) {
+    return;
+  }
+  await tx`update leads set last_touch_campaign_id = ${campaignId} where id = ${leadId}`;
+  await ex.audit.insertAudit({
+    entityType: 'lead', entityId: leadId, actorEmployeeId: actor.employeeId,
+    action: 'last_touch_updated', beforeJson: { last_touch_campaign_id: current },
+    afterJson: { last_touch_campaign_id: campaignId }, createdBy: actor.employeeId,
+  });
 }

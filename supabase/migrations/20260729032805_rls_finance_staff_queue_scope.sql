@@ -3,7 +3,7 @@
 -- antrean verifikasi, bukan hanya Finance lead.
 --
 -- Temuan (2026-07-28, saat menyiapkan port `GET /finance/queue`): tiga policy
--- baseline (20260102000003) memberi baca ke Finance hanya lewat arm
+-- baseline (20260723064438) memberi baca ke Finance hanya lewat arm
 -- `jwt_is_lead() AND jwt_division() = 'Finance'` — **lead saja**:
 --
 --     transactions_select, installments_select, payment_verifications_select
@@ -35,13 +35,13 @@
 --     Finance lead  (level='lead')   -> 1 baris
 --     Director (kontrol)             -> 1 baris
 --
--- Sifat perubahan: sama dengan 20260102000009 — hanya MEMPERLUAS baca supaya
+-- Sifat perubahan: sama dengan 20260729031525 — hanya MEMPERLUAS baca supaya
 -- RLS = predikat sistem lama yang sudah lolos UAT W1/W3, bukan menambah akses di
 -- luar PRD. Policy tulis tidak disentuh (tetap default-deny; tulis lewat RPC).
 -- Tidak ada helper baru, jadi tidak ada permukaan RPC baru (advisor lint 0029
 -- tidak tersentuh); arm-nya memakai `jwt_division()` yang sudah ada.
 --
--- CATATAN DEPLOY: per handoff cutover sesi 5 §1, 20260102000009 **belum**
+-- CATATAN DEPLOY: per handoff cutover sesi 5 §1, 20260729031525 **belum**
 -- di-apply ke `CDPS SG`. Setelah migrasi ini ada dua migrasi RLS yang menunggu
 -- window deploy — apply keduanya berurutan (0009 lalu 0010), dan verifikasi
 -- dengan probe di komentar atas.

@@ -3,7 +3,7 @@
  *
  * CDPS auth itself is owned by Supabase GoTrue (password login issues the JWT;
  * our custom_access_token_hook injects the five CDPS claims — see
- * supabase/migrations/20260102000004_supabase_auth.sql). The @cdps/api route
+ * supabase/migrations/20260723071013_supabase_auth.sql). The @cdps/api route
  * layer verifies that JWT and resolves an `Actor` from its claims
  * (`permission.actorFromClaims`). This module adds the one piece the token does
  * NOT carry: the human-facing employee profile (nama / email / divisi /

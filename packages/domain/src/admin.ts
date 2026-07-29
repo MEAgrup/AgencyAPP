@@ -11,7 +11,7 @@
  * against prod (**O42**).
  *
  * `role_mappings` is the permission root: `employee_claims()`
- * (`20260102000004_supabase_auth.sql` §2) derives `division`/`level` from
+ * (`20260723071013_supabase_auth.sql` §2) derives `division`/`level` from
  * `role_mappings(divisi, jabatan)`, and a trigger re-syncs `auth.users`
  * app-metadata on every change. So a write here re-issues claims for everyone
  * holding that divisi+jabatan — the blast radius is the mapping, not one person.
@@ -19,7 +19,7 @@
  * ## Read path: deliberately NOT `readAsActor` for two of the three tables
  *
  * `role_mappings` and `employee_layered_roles` are in the "pure internal" group
- * of `20260102000003_rls_baseline.sql` §5: RLS on, **no policy** (default-deny),
+ * of `20260723064438_rls_baseline.sql` §5: RLS on, **no policy** (default-deny),
  * and `SELECT` revoked from `authenticated`. They are reachable only by
  * SECURITY DEFINER functions and `service_role` — by design, because they carry
  * the authorization rules themselves. Reading them through `readAsActor` would

@@ -156,7 +156,7 @@ jobs:
                if (select count(*) from master_services) <> 3 then raise exception 'expected 3 master_services (seed not idempotent?)'; end if;
                if (select count(*) from demo_tasks) <> 1 then raise exception 'expected 1 demo_task (seed not idempotent?)'; end if;
              end \$\$;"
-      # 54 = 53 + lead_delete_requests (20260102000012, DECISIONS 2026-07-29).
+      # 54 = 53 + lead_delete_requests (20260729162101, DECISIONS 2026-07-29).
       - name: Verify table count (expect 54)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \

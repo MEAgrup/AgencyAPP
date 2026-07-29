@@ -6,7 +6,7 @@
  * other way inline in each route (`toInput`).
  */
 import { money } from '@cdps/core';
-import type { account, admin, ads, auth, board, campaign, client, creative, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
+import type { account, admin, ads, audit, auth, board, campaign, client, creative, finance, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -1809,5 +1809,251 @@ export function credentialInfoToWire(c: auth.CredentialInfo): CredentialInfoWire
     must_change_password: c.mustChangePassword,
     locked_until: c.lockedUntil ? c.lockedUntil.toISOString() : null,
     password_changed_at: c.passwordChangedAt ? c.passwordChangedAt.toISOString() : null,
+  };
+}
+
+// --- M5 Admin & Finance (Go trxView / instViews / reminderViews /
+//     outstandingViews / BermasalahStatus) ---
+//
+// This whole section was MISSING: `finance` was the only domain module with no
+// wire mappers at all, so every M5 route either shipped camelCase straight to a
+// snake_case client or invented an ad-hoc `{ok:true}`. That is the O43 defect
+// class, and in M5 it covered the entire money path — see the route diffs in the
+// handoff. Shapes below mirror web-internal/src/lib/finance.ts exactly.
+//
+// One deliberate difference from Go: Go tags these fields `omitempty`, so a null
+// due date DROPS the key. Here a null is emitted explicitly, because the FE types
+// declare `string | null` and a MISSING key is what blanks a page (O43's lesson).
+// Never "simplify" these back to omitting.
+
+/** module5_finance.InstallmentRow as web-internal's `Installment` expects it. */
+export interface InstallmentWire {
+  id: string;
+  installment_no: number;
+  amount: string;
+  due_date: string | null;
+  status: string;
+  jatuh_tempo: boolean;
+  verified_date: string | null;
+  verified_by: string;
+  proof_of_payment: string;
+}
+
+/** Maps a domain InstallmentRow to the wire shape. */
+export function installmentToWire(i: finance.InstallmentRow): InstallmentWire {
+  return {
+    id: i.id,
+    installment_no: i.installmentNo,
+    amount: i.amount,
+    due_date: i.dueDate ? i.dueDate.toISOString() : null,
+    status: i.status,
+    jatuh_tempo: i.jatuhTempo,
+    verified_date: i.verifiedDate ? i.verifiedDate.toISOString() : null,
+    verified_by: i.verifiedBy ?? '',
+    proof_of_payment: i.proofOfPayment ?? '',
+  };
+}
+
+/** module5_finance.TransactionRecord as web-internal's `Transaction` expects it. */
+export interface TransactionWire {
+  id: string;
+  client_id: string;
+  payment_intent_scheme: string;
+  total_agreed_value: string;
+  amount_verified: string;
+  amount_outstanding: string;
+  payment_status: string;
+  bermasalah: boolean;
+  contract_attachment: string;
+  released_to_account_at: string | null;
+  installments: InstallmentWire[];
+}
+
+/** Maps the domain Transaction aggregate to the wire shape (Go trxView). */
+export function transactionToWire(t: finance.TransactionAggregate): TransactionWire {
+  return {
+    id: t.id,
+    client_id: t.clientId,
+    payment_intent_scheme: t.scheme,
+    total_agreed_value: t.totalAgreedValue,
+    amount_verified: t.amountVerified,
+    amount_outstanding: t.amountOutstanding,
+    payment_status: t.paymentStatus,
+    bermasalah: t.bermasalah,
+    contract_attachment: t.contractAttachment ?? '',
+    released_to_account_at: t.releasedToAccountAt ? t.releasedToAccountAt.toISOString() : null,
+    installments: t.installments.map(installmentToWire),
+  };
+}
+
+/** One [Bermasalah] vote as web-internal's `BermasalahVote` expects it. */
+export interface BermasalahVoteWire {
+  division: string;
+  decision: string;
+  note: string;
+  actor: string;
+  created_at: string;
+}
+
+/** BermasalahStatus as web-internal expects it. */
+export interface BermasalahStatusWire {
+  transaction_id: string;
+  flagged: boolean;
+  finance_vote: string;
+  account_vote: string;
+  director_vote: string;
+  escalated: boolean;
+  votes: BermasalahVoteWire[];
+}
+
+/** Maps the domain [Bermasalah] status view to the wire shape. */
+export function bermasalahStatusToWire(s: finance.BermasalahStatusView): BermasalahStatusWire {
+  return {
+    transaction_id: s.transactionId,
+    flagged: s.flagged,
+    finance_vote: s.financeVote,
+    account_vote: s.accountVote,
+    director_vote: s.directorVote,
+    escalated: s.escalated,
+    votes: s.votes.map((v) => ({
+      division: v.division,
+      decision: v.decision,
+      note: v.note,
+      actor: v.actor,
+      created_at: v.createdAt.toISOString(),
+    })),
+  };
+}
+
+/** One reminder row as web-internal's `ReminderRow` expects it. */
+export interface ReminderRowWire {
+  client_id: string;
+  toko: string;
+  transaction_id: string;
+  installment_id: string;
+  installment_no: number;
+  amount: string;
+  due_date: string;
+  status: string;
+  days_overdue: number;
+  label: string;
+}
+
+/** One outstanding-no-due-date row as web-internal's `OutstandingRow` expects it. */
+export interface OutstandingRowWire {
+  client_id: string;
+  toko: string;
+  transaction_id: string;
+  amount_outstanding: string;
+}
+
+/** The reminder dashboard as web-internal's `RemindersResponse` expects it. */
+export interface RemindersWire {
+  reminders: ReminderRowWire[];
+  outstanding_no_due_date: OutstandingRowWire[];
+}
+
+/**
+ * Maps the reminder dashboard. The domain splits overdue/upcoming; Go's wire
+ * shape is ONE `reminders` list, overdue first (most-overdue leading) then
+ * upcoming — so they are concatenated in that order here, not exposed as two
+ * keys. The route used to hand the FE the raw camelCase
+ * `{overdue, upcoming, outstandingNoDueDate}`, which matched none of the three
+ * keys the reminders page reads.
+ */
+export function remindersToWire(d: finance.ReminderDashboard): RemindersWire {
+  const row = (r: finance.ReminderRow): ReminderRowWire => ({
+    client_id: r.clientId,
+    toko: r.toko,
+    transaction_id: r.transactionId,
+    installment_id: r.installmentId,
+    installment_no: r.installmentNo,
+    amount: r.amount,
+    due_date: r.dueDate ? r.dueDate.toISOString() : '',
+    status: r.status,
+    days_overdue: r.daysOverdue,
+    label: r.label,
+  });
+  return {
+    reminders: [...d.overdue, ...d.upcoming].map(row),
+    outstanding_no_due_date: d.outstandingNoDueDate.map((o) => ({
+      client_id: o.clientId,
+      toko: o.toko,
+      transaction_id: o.transactionId,
+      amount_outstanding: o.amountOutstanding,
+    })),
+  };
+}
+
+// --- Cross-module audit trail (Go audit.Entry) ---
+
+/** One audit entry as web-internal's `AuditEntry` (lib/types.ts) expects it. */
+export interface AuditEntryWire {
+  entity_type: string;
+  entity_id: string;
+  actor_employee_id: string;
+  action: string;
+  before_json: unknown;
+  after_json: unknown;
+  created_at: string;
+}
+
+/** Maps a domain AuditEntry to the wire shape. */
+export function auditEntryToWire(e: audit.AuditEntry): AuditEntryWire {
+  return {
+    entity_type: e.entityType,
+    entity_id: e.entityId,
+    actor_employee_id: e.actorEmployeeId,
+    action: e.action,
+    before_json: e.beforeJson,
+    after_json: e.afterJson,
+    created_at: e.createdAt.toISOString(),
+  };
+}
+
+// --- M1 Marketing bulk import (Go BulkReport / BulkRowResult) ---
+
+/** Per-row verdict as web-internal's `BulkRowResult` expects it. */
+export interface BulkRowResultWire {
+  row_number: number;
+  lead_name: string;
+  phone_number: string;
+  imported: boolean;
+  reopened: boolean;
+  lead_id: string;
+  reason: string;
+}
+
+/** The bulk-import report as web-internal's `BulkReport` expects it. */
+export interface BulkReportWire {
+  imported: number;
+  rejected: number;
+  summary: string;
+  rows: BulkRowResultWire[];
+  rejections: BulkRowResultWire[];
+}
+
+/**
+ * Maps the bulk-import report. `summary` and `rejections` are part of the body
+ * (Go computes them in the handler from BulkReport methods), not client-derived —
+ * the FE renders the summary line verbatim and offers `rejections` as the
+ * downloadable reject list (M1 §3 Flow 7).
+ */
+export function bulkReportToWire(r: leads.BulkReport): BulkReportWire {
+  const row = (v: leads.BulkRowResult): BulkRowResultWire => ({
+    row_number: v.rowNumber,
+    lead_name: v.leadName,
+    phone_number: v.phoneNumber,
+    imported: v.imported,
+    reopened: v.reopened,
+    lead_id: v.leadId,
+    reason: v.reason,
+  });
+  return {
+    imported: r.imported,
+    rejected: r.rejected,
+    summary: r.summary,
+    rows: r.rows.map(row),
+    rejections: r.rejections.map(row),
   };
 }

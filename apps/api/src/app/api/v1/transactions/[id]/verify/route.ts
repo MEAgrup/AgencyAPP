@@ -6,11 +6,18 @@
  *
  * mapError: Incomplete / OverVerification → 400, Forbidden → 403,
  * NotFound → 404, ContractRequired → 409.
+ *
+ * Responds with the re-read Transaction aggregate under `transaction`, at 200 —
+ * both to match Go (handleVerifyPayment) and because that is what web-internal
+ * reads (`verify()` in lib/finance.ts is typed `{transaction: Transaction}`). It
+ * used to answer 201 with the raw camelCase VerifyResult, which carried neither
+ * the key nor the installment rows the page re-renders from (O43 class).
  */
 import { finance } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { db, readAsActor } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
+import { transactionToWire } from '@/lib/wire';
 
 interface Body {
   installment_id?: string;
@@ -24,13 +31,16 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     const actor = requireActor(request);
     const { id } = await ctx.params;
     const b = await readJson<Body>(request);
-    const result = await finance.verifyPayment(db(), actor, {
+    await finance.verifyPayment(db(), actor, {
       transactionId: id,
       installmentId: b.installment_id,
       amount: b.amount ?? '',
       receivedDate: b.received_date ?? '',
       proofOfPayment: b.proof_of_payment,
     });
-    return json(result, 201);
+    // Re-read as the actor so the response reflects post-verification state
+    // (payment_status, derived amounts, installment statuses) in one round trip.
+    const trx = await readAsActor(actor, (sql) => finance.loadTransactionAggregate(sql, actor, id));
+    return json({ transaction: transactionToWire(trx) });
   });
 }

@@ -2,7 +2,7 @@
 -- BACK-PORT (C-03 / DECISIONS O38 opsi A) — verbatim dari project live `CDPS SG`,
 -- versi remote `20260724161750_change_password`.
 --
--- Sebelumnya hanya ada di live. Lihat catatan di 20260102000005 untuk konteks.
+-- Sebelumnya hanya ada di live. Lihat catatan di 20260724132631 untuk konteks.
 -- CATATAN PEMBACAAN: komentar bawaan di bawah menyebut "(O38)". Itu penomoran
 -- lama dari sesi yang menulis migrasi ini langsung ke live; ia BUKAN O38
 -- (drift skema repo↔live) di `docs/DECISIONS.md`. Komentar dibiarkan apa adanya

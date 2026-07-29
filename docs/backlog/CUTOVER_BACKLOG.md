@@ -92,7 +92,7 @@ C-06 di luar jalur cutover.
 >   Tulis tak berubah (service-role + RPC SECURITY DEFINER).
 > - Gate app-layer hanya untuk aturan endpoint: `canReadPool`/`leadListScope`
 >   (port 1:1 dari Go) + `leads.ForbiddenError` → 403 ber-pesan BI.
-> - Migrasi **20260102000005** menambah arm `jwt_owns_lead_campaign` supaya RLS =
+> - Migrasi **20260724132631** menambah arm `jwt_owns_lead_campaign` supaya RLS =
 >   predikat Go `canReadLead` (tanpa itu Marketing staff kehilangan lead campaign sendiri).
 > - **Temuan tambahan yang ikut ditutup:** 13 handler GET pembawa data (a.l. `/clients`,
 >   `/reminders`, `/transactions/{id}/commission`, `/leads`) ternyata **tanpa autentikasi
@@ -215,7 +215,7 @@ kontrak API-nya, bukan render badge-nya. Masukkan ke walk C-03.
 > **cocok 53/53** (catatan C-00 terjawab), tetapi **4 migrasi hanya ada di live** dan tak pernah
 > ditulis ke repo — termasuk `harden_secdef_helpers_to_private_schema` yang memindahkan
 > `jwt_owns_{client,lead,transaction}` dari `public` ke schema `private`. Akibatnya migrasi C-01
-> `20260102000005` (menulis `jwt_owns_lead(id)` tanpa kualifikasi schema) **GAGAL apply ke live** —
+> `20260724132631` (menulis `jwt_owns_lead(id)` tanpa kualifikasi schema) **GAGAL apply ke live** —
 > terbukti empiris: `ERROR: function jwt_owns_lead(character varying) does not exist`. CI hijau
 > karena gate `db-and-migrations` membangun dari repo saja.
 > **Perbaikan (O38 opsi A):** 4 migrasi live-only di-back-port **verbatim** (`…0005_fk_covering_indexes`,
