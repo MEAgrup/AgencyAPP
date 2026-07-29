@@ -12,10 +12,13 @@
 | | |
 |---|---|
 | **Branch kerja** | **`claude/migrasi-cdps-sg-cutover-behnjc`** |
-| **Kondisi branch** | **bersih, identik `main`** — di-restart dari `origin/main` sesudah #67 merge. Commit handoff ini duduk di atasnya |
-| **`main`** | **`c0e65f1`** (hasil merge PR #67) |
-| **PR terbuka** | **tidak ada** |
-| **PR selesai** | #67 ✅ merge · #66 ✅ merge · #65 ✅ merge · #63 ditutup (premis kedaluwarsa) |
+| **Kondisi branch** | **bersih, identik `main`** (`0 0` ahead/behind) — di-restart dari `origin/main` sesudah #69 merge |
+| **`main`** | **`2fbb403`** (hasil merge PR #69, yang membawa dokumen ini) |
+| **PR terbuka** | **tidak ada** — diverifikasi kosong |
+| **PR selesai** | #69 ✅ merge · #67 ✅ merge · #66 ✅ merge · #65 ✅ merge · #68 **ditutup** (premis kedaluwarsa — masih mengklaim `…0011` belum ter-apply & `role_mappings` 38; alasan lengkap di komentar penutupnya) · #63 ditutup |
+
+> **Ambil hash head yang sebenarnya dari `git log`, bukan dari tabel ini.** Angka apa pun di dokumen
+> ini kedaluwarsa begitu commit berikutnya mendarat — termasuk commit yang memperbaiki baris ini.
 | **Live** | Supabase `CDPS SG` (`egddxfcnrtecheiykhlf`, `ap-southeast-1`) — **39 migrasi**, 53 tabel, `master_services` **32**, `role_mappings` **39**, `employees`/`employee_credentials`/`auth.users`/`auth.identities` **69/69/69/69** |
 | **Drift live↔repo** | ✅ **TERTUTUP.** `main` kini memuat `…0011`; live tidak lagi di depan repo |
 
@@ -236,6 +239,19 @@ kelihatan user**, bukan utang rapi:
    (Di sesi 8 **kedua** kembaran `backend` tersangkut >15 menit pada diff **docs-only**; #67 tetap
    di-merge karena semua gate bermakna — `api`, `core-engines`, `db-and-migrations`, `web-internal`,
    Vercel — hijau dan nol berkas Go tersentuh.)
+9. 🔴 **CI SEDANG SAKIT — runner tidak teralokasi (C-00 KAMBUH). Cek ini SEBELUM percaya CI merah.**
+   Pada `550916a` (2026-07-29 ~12:05 UTC, diff **docs-only satu berkas**) **kelima** job gagal dalam
+   **2–12 detik**, lalu `rerun_failed_jobs` gagal lagi dalam **2–3 detik**. Tandanya khas dan mudah
+   dibedakan dari kegagalan test:
+   - `runner_id: 0` dan `runner_name: ""` pada job (`actions_get` → `get_workflow_job`)
+   - **nol log** — unduh log balas **HTTP 404**, karena tidak ada apa pun yang pernah berjalan
+   - durasi **detik**, bukan menit; **semua** job serentak, termasuk yang tak tersentuh diff
+
+   Ini **bukan** regresi kode. Kalau pola ini muncul: **jangan** kejar "perbaikan" di kode, dan
+   jangan tafsirkan sebagai gate merah — tunggu kapasitas runner pulih lalu re-run. Preseden:
+   **C-00** (`CUTOVER_BACKLOG.md`) adalah tiket dengan sebab yang sama dan sudah pernah pulih sendiri.
+   ⚠️ **Dampak untuk sesi ini:** kalau CI masih begini, Task A/B/C tidak akan punya gate hijau —
+   angkat ke pemilik lebih dulu, jangan paksakan merge berantai di atas CI yang tidak memberi sinyal.
 
 ## 7. Cara menjalankan test DB-backed di sandbox
 
