@@ -191,17 +191,43 @@ GROUP BY 1, 2
 ORDER BY 1, 2;
 ```
 
-Hasil (2) juga langsung menguji ulang klaim "7 tanpa mapping": kalau yang keluar **bukan** tepat
-ketujuh pemegang `employee_layered_roles`, maka (A) yang benar dan audit `3818d4a` perlu dikoreksi.
-Setelah itu baru bentuk `INSERT`-nya (grain divisi×jabatan, `division='Marketing'`, `level='staff'`
-untuk STRATEGIST; `level='lead'` hanya bila ada jabatan kepala BD yang aktif — Marketing **lead**
-masih kosong, dan itu yang dibutuhkan arm Marketing-lead `leads.leadListScope`).
+### ✅ Jawaban pemilik 2026-07-29 — (B): NIKEN belum ter-sync
 
-**Pertanyaan (1)(2)(3) tetap terbuka** dan masih memblokir hal yang sama (onboarding, ubah jabatan,
-M3 reassign-owner di produksi, verifikasi arm own-campaign `0009`).
+Kedua SQL di atas **tidak perlu dijalankan lagi untuk memilih (A)/(B)** — pemilik mengonfirmasi **(B)**.
+Konsekuensinya:
 
-### 3.2 🆕 O43 — paritas BENTUK respons
-Latar: §2.2. Yang butuh keputusan **pemilik**:
+- Audit roster `3818d4a` **tetap benar**; angka **68 aktif / 61 resolve / 7 sengaja tanpa mapping**
+  **tetap berlaku**. Tidak ada yang perlu dikoreksi di sana.
+- **`INSERT` mapping sendirian tidak menyelesaikan apa pun.** Barisnya jadi yatim dan **M3-OA-6 tetap
+  mati**, karena `validateOwnerCandidate` mewajibkan kandidat **aktif**.
+- **Urutan wajib: impor/sync karyawan DULU → mapping KEMUDIAN.** Bukan sebaliknya.
+- SQL (2) tetap berguna **setelah** impor, untuk menyusun daftar baris mapping yang benar-benar perlu
+  dibuat (grain divisi×jabatan; `division='Marketing'`, `level='staff'` untuk STRATEGIST). Marketing
+  **`lead`** tetap kosong sampai ada jabatan kepala BD aktif — itu yang dibutuhkan arm Marketing-lead
+  `leads.leadListScope`.
+
+> 🔴 **Penyebab akar O42 ternyata bukan keputusan yang belum diambil, tapi port yang belum
+> dikerjakan — lihat O44 §3.4.** Halaman admin `admin/employees` (111 baris) **dan**
+> `admin/role-mappings` (254 baris) **sudah ada** dan sudah ter-link di sidebar (`nav.ts:193-195`,
+> gate `director || od`), tapi **6 route yang keduanya panggil tidak dilayani `apps/api`**. Jadi
+> pertanyaan **(1)** dan **(2)** sebagian besar **sudah terjawab oleh kode yang ada**: pemiliknya
+> **Director/OD**, UI-nya **sudah dibangun**, modelnya **admin CDPS** (bukan derive-dari-sheet).
+> "SQL langsung ke produksi" bukan pilihan desain — itu **konsekuensi halaman mati**.
+
+**Yang masih butuh pemilik: hanya pertanyaan (3)** — rekonsiliasi **38** (live) vs **23** (CSV) vs
+**12** (`seed.sql`), mana sumber kebenarannya.
+
+### 3.2 O43 — paritas BENTUK respons · **(a) ✅ DIPUTUS 2026-07-29**
+Latar: §2.2.
+
+> ✅ **(a) diputus pemilik: proyeksi sempit DIPERTAHANKAN** (rekomendasi dijalankan). **Nol perubahan
+> kode** — `clientListRowToWire` tetap seperti sekarang. Alasan yang menentukan: **PRD tidak
+> mengadili pertanyaan ini** (M4 §6 hanya mengatur baris, bukan kolom), jadi `clientView` Go **bukan
+> spec** dan tidak ada oracle yang dilanggar; dan "paritas penuh" justru akan **menghapus**
+> `sales_pic_nama` yang dirender roster. Rinciannya di bawah — dibiarkan sebagai catatan sejarah
+> supaya keputusan ini tidak dibuka ulang tanpa konteks.
+
+Yang **dulu** butuh keputusan pemilik:
 
 - **(a)** `clientListRowToWire` sengaja **lebih sempit** dari `handleListClients` Go, yang merender
   `clientView` **PENUH** per baris. Memperlebarnya berarti **N+1** query platforms/allocations/
@@ -233,6 +259,52 @@ Sisanya kerja **developer**, bukan keputusan:
 - **(c)** Bikin **test paritas-bentuk otomatis**: diff kunci wire mapper terhadap `interface` di
   `web-internal/src/lib/*.ts`, seperti `route-parity.test.ts` men-diff path. Satu-satunya cara kelas
   ini berhenti lolos CI.
+
+### 3.4 🆕🔴 O44 — `route-parity.test.ts` buta terhadap panggilan API dari halaman
+
+**Lubangnya.** `feCalls()` (`route-parity.test.ts:138-145`) melakukan `readdirSync(FE_LIB)` dengan
+`FE_LIB = web-internal/src/lib` — **tidak rekursif**, **tidak menyentuh `src/app/**`**. Ada **25
+panggilan `api.*` di 11 berkas halaman** yang tak pernah masuk hitungan paritas. Jadi `KNOWN_GAPS`
+**bukan** buku besar yang lengkap: ia hanya melacak panggilan yang lewat `src/lib`.
+
+**Yang tersembunyi di baliknya — 6 route dipanggil halaman, tidak dilayani `apps/api`:**
+
+| Route | Pemanggil |
+|---|---|
+| `GET /admin/role-mappings` · `POST /admin/role-mappings` · `DELETE /admin/role-mappings/{}` | `admin/role-mappings/page.tsx` (254 baris) |
+| `GET /admin/employees` · `POST /admin/employee-sync` · `POST /admin/layered-roles` | `admin/employees/page.tsx` (111 baris) + halaman role-mappings |
+
+⇒ **dua halaman admin mati total di produksi**, keduanya ter-link di sidebar (`nav.ts:193-195`, gate
+`director || od`). **Ini penyebab akar O42.**
+
+**Audit route penuh Go↔TS (2026-07-29).** 194 route Go terdaftar vs **182** method TS ⇒ **16 gap
+fungsional**:
+
+| Kelompok | Jml | Isi |
+|---|---|---|
+| `KNOWN_GAPS` (sudah terlacak) | 6 | §4.1 |
+| Admin, dipanggil halaman, **tak terlacak** | 6 | tabel di atas |
+| Admin, tidak dipanggil FE | 1 | `GET /admin/layered-roles` |
+| Auth | 3 | `POST /auth/change-password` · `POST /auth/admin/set-password` · `GET /auth/admin/credentials` |
+
+**Dua yang TERLIHAT gap tapi bukan:** `GET /auth/me` → di-rename **`GET /me`** (paritas fungsional ✓);
+`POST /admin/employee-sync` → digantikan **`POST /admin/employee-import`** per **OQ-4** — **tapi FE
+masih memanggil nama Go yang lama**, jadi tetap harus diperbaiki (alias route ATAU perbaiki FE).
+
+> ⚠️ **Jebakan metodologis — jangan ulangi.** Deteksi method HARUS mencakup `export const POST =
+> handler`, bukan hanya `export async function POST`. Pola pertama dipakai mis.
+> `marketing/campaigns/[id]/performance/budget/route.ts:16-17`, dan sempat menghasilkan **2 false
+> positive** di audit ini sebelum dikoreksi.
+
+**Kerja yang dibutuhkan:** **(a)** buat `feCalls()` rekursif atas **seluruh** `web-internal/src` —
+tanpa ini setiap halaman baru yang memanggil API langsung otomatis luput lagi; **(b)** port 6 route
+admin; **(c)** keputusan pemilik soal 3 route auth — diport, atau digantikan Supabase Auth
+client-side? Saat ini **tidak ada** pemakaian `updateUser`/`resetPasswordForEmail` di
+`web-internal/src`, jadi **belum ada penggantinya**: ganti-password de-facto **tidak tersedia** bagi
+pengguna.
+
+**Memblokir C-04** — dua halaman yang justru dibutuhkan untuk menyiapkan aktor produksi (impor
+karyawan, atur role-mapping) tidak berfungsi.
 
 ### 3.3 Sisa yang lain
 | # | Isi |
