@@ -18,33 +18,29 @@
  *   [BYPASS=<vercel-protection-bypass-token>] \
  *   node apps/api/scripts/wave3-contract-smoke.mjs
  */
-import { createHmac } from 'node:crypto';
+import { resolveActors, smokeHeaders } from './lib/actors.mjs';
 
 const BASE = (process.env.BASE ?? 'http://127.0.0.1:3111').replace(/\/$/, '');
 const SECRET = process.env.SUPABASE_JWT_SECRET ?? '';
 const BYPASS = process.env.BYPASS ?? '';
 if (!SECRET) throw new Error('SUPABASE_JWT_SECRET must be set for the smoke test');
 
-const b64url = (buf) => Buffer.from(buf).toString('base64url');
-function sign(header, payload, secret) {
-  const h = b64url(JSON.stringify(header));
-  const p = b64url(JSON.stringify(payload));
-  const sig = createHmac('sha256', secret).update(`${h}.${p}`).digest('base64url');
-  return `${h}.${p}.${sig}`;
-}
-
-const now = Math.floor(Date.now() / 1000);
 // Director so permission gates never mask a wired route as 403 (still PASS if
-// they did, but cleaner signal this way).
-const claims = { employee_id: 'EMP-202607-0001', division: 'Account', level: 'lead', od: false, director: true };
-const token = sign({ alg: 'HS256', typ: 'JWT' }, { app_metadata: claims, exp: now + 3600 }, SECRET);
+// they did, but cleaner signal this way). The id is resolved from the target
+// environment rather than hardcoded — see lib/actors.mjs.
+const { actors, notes } = await resolveActors({ base: BASE, secret: SECRET, bypass: BYPASS, slots: ['director'] });
+const director = actors.director;
+const token = director.token;
+console.log(`BASE=${BASE}`);
+for (const n of notes) console.log(`  note: ${n}`);
+console.log(`  aktor: ${director.employeeId} (${director.division}/${director.level} +director) [${director.source}]\n`);
 
 // Plausible-format ids (routing ignores id shape; kept realistic for logs).
 const CMP = 'CMP-202607-0001';
 const BRF = 'BRF-202607-0001';
 const LSS = 'LSS-202607-0001';
 const CLI = 'CLI-202607-0001';
-const EMP = 'EMP-202607-0001';
+const EMP = director.employeeId;
 const DIV = encodeURIComponent('Live Stream');
 const PDIV = 'Creative';
 
@@ -91,9 +87,7 @@ const endpoints = [
 ];
 
 function headers() {
-  const h = { 'content-type': 'application/json', authorization: `Bearer ${token}` };
-  if (BYPASS) h['x-vercel-protection-bypass'] = BYPASS;
-  return h;
+  return smokeHeaders(token, BYPASS);
 }
 
 // A route is "wired" unless it's a Next routing-404 or a 405.

@@ -29,7 +29,7 @@
 | **C-00** | ~~CI mati — runner tidak teralokasi~~ ✅ **SELESAI 2026-07-28** | — | — | — |
 | **C-01** | ~~O37 — otorisasi read (RLS ter-bypass)~~ ✅ **SELESAI 2026-07-28** | — | — | — |
 | **C-02** | ~~Endpoint `notifications` di `apps/api`~~ ✅ **SELESAI 2026-07-28** | — | — | — |
-| **C-03** | UAT paritas end-to-end ⚠️ **dijalankan 2026-07-28 — FAIL 0, lolos bersyarat** | 🟠 P1 | sisa: walk dari deployment Vercel (3 SKIP) | **YA** |
+| **C-03** | UAT paritas end-to-end ⚠️ **dijalankan 2026-07-28 — FAIL 0, lolos bersyarat** | 🟠 P1 | sisa: **eksekusi** walk dari deployment Vercel (3 SKIP) — skrip siap 2026-07-29, runbook `CUTOVER_C03_DEPLOYMENT_RUNBOOK.md` | **YA** |
 | **C-04** | Cutover data + aktor produksi | 🟠 P1 | 2–4 hari | **YA** |
 | **C-05** | Retire Go: arsip `backend/`, bersihkan CI & config Railway | 🟡 P2 | 0,5 hari | tidak (sesudahnya) |
 | **C-06** | `web-client-portal` (M15-C2) | ⚪ ditunda | — | **TIDAK** (by design) |
@@ -262,10 +262,28 @@ kontrak API-nya, bukan render badge-nya. Masukkan ke walk C-03.
 
 </details>
 
-**Untuk menutup C-03:** (1) ~~keputusan O38~~ ✅ (2) ~~repo = live~~ ✅ —
-tersisa **(3) jalankan ulang walk dari deployment Vercel dengan kredensial per-role**
-(`BASE=<url> node apps/api/scripts/cutover-houserules-walk.mjs`, + wave3 & auth smoke).
-Itu menutup ketiga SKIP sekaligus → report jadi FAIL = 0 tanpa SKIP → baru buka gate C-04.
+**Untuk menutup C-03:** (1) ~~keputusan O38~~ ✅ (2) ~~repo = live~~ ✅
+(3) ~~skrip siap dijalankan terhadap deployment~~ ✅ **2026-07-29** —
+tersisa **(4) eksekusi dari mesin ber-akses + 1 QA UI manual.**
+
+> 🔴 **Sebelum 2026-07-29 langkah (4) TIDAK BISA berhasil, dan itu tidak terlihat dari report.**
+> `cutover-houserules-walk` menyematkan id **seed** (`EMP-0001`…`EMP-0009`) di source; tak satupun
+> ada di live (69 karyawan). Registrasi lead-nya menulis `sales_pemegang` ⇒ terhadap deployment
+> walk gagal di **foreign key**, bukan di house rule — "21/21 dari Vercel" mustahil. Itu **cacat
+> kembaran SKIP-3** (`auth-smoke` menyematkan `EMP-202607-0001`, kebalikannya), satu kelas:
+> identitas aktor adalah konstanta source, bukan sesuatu yang diresolusi dari environment yang
+> diuji. **Sudah diperbaiki:** `apps/api/scripts/lib/actors.mjs` (env override → discovery
+> `/admin/employees` ⋈ `/admin/role-mappings` → fallback seed; 17 unit test), `BYPASS` Vercel
+> diterima ketiga skrip. **Efek samping:** slot `sales_lead` selama ini dideklarasikan lalu tak
+> dipakai ⇒ tingkat **`lead` (scope divisi)** belum pernah diuji walau C-03 mengklaim mencakup
+> Role Matrix; ceknya ditambahkan ⇒ **target walk 21 → 22**. Keputusan: `docs/DECISIONS.md`
+> 2026-07-29. **Bukti lokal:** auth-smoke **13/13** (SKIP-3 hilang bahkan di sandbox) · walk
+> **22/22** · wave3 **34/34** · `@cdps/api` **211** test · typecheck bersih.
+
+**Cara menjalankan langkah (4): `docs/handoff/CUTOVER_C03_DEPLOYMENT_RUNBOOK.md`**
+(env yang dibutuhkan, cara membaca blok `aktor terpakai`, jejak `ZZC03` yang ditinggalkan walk,
+checklist QA UI, DoD). Itu menutup ketiga SKIP sekaligus → report jadi FAIL = 0 tanpa SKIP →
+baru buka gate C-04.
 
 ---
 
@@ -312,7 +330,7 @@ Masih hanya `README.md`. Ditunda resmi (DECISIONS 2026-07-18) menunggu security 
 - [x] **C-00 selesai** — CI hijau kembali (run `30328573444`); `main` re-run hijau (run `30278802079`), PR #55–#57 tervalidasi.
 - [x] **C-01 selesai** — O37 tertutup di DECISIONS (opsi c).
 - [x] **C-02 selesai** — badge & halaman notifikasi hidup (2026-07-28; §C-02 di atas sudah RESOLVED, kotak ini sebelumnya tertinggal tidak tercentang).
-- [~] **C-03 — FAIL = 0 tercapai, lolos BERSYARAT:** sisa **3 SKIP** yang butuh walk dari deployment Vercel (bukan sandbox). Belum boleh dihitung penuh.
+- [~] **C-03 — FAIL = 0 tercapai, lolos BERSYARAT:** sisa **3 SKIP** yang butuh walk dari deployment Vercel (bukan sandbox). Belum boleh dihitung penuh. **Skrip-nya sudah SIAP untuk deployment sejak 2026-07-29** (identitas aktor diresolusi dari environment, bukan hardcode — sebelumnya walk *mustahil* lolos di live; lihat §C-03) ⇒ sisanya murni eksekusi: **`docs/handoff/CUTOVER_C03_DEPLOYMENT_RUNBOOK.md`**.
 - [~] **C-04 — SEBAGIAN.** ✅ MSL 32 layanan ber-versi di live (2026-07-28) · ✅ karyawan riil: **69** di `employees`/`employee_credentials`/`auth.users`/`auth.identities` (69/69/69/69) · ✅ **O42 dieksekusi 2026-07-29** — divisi `Marketing` hidup, `role_mappings` **39**. ❌ **O22** impor lead historis · ❌ keputusan aktor **O34/O26/O35/O9** · ❌ konfirmasi data Railway riil-atau-UAT · ⚠️ `Marketing`/`lead` kosong (struktur organisasi, keputusan sadar).
 - [ ] Backup MySQL Railway terakhir tersimpan.
 - [ ] Rencana rollback disepakati (Railway tetap hidup N hari pasca-cutover sebelum dimatikan).

@@ -20,33 +20,41 @@
  * Read-mostly: it registers throwaway leads (prefix name "ZZC03") and never
  * touches money rows it did not create.
  *
+ * Actors are RESOLVED from whatever `BASE` points at, never hardcoded — see the
+ * docstring of `lib/actors.mjs`. This walk used to name the seed roster
+ * (`EMP-0001` … `EMP-0009`) in source, so against the deployment (69 real
+ * employees, none of them `EMP-0001`) the lead registration would have failed
+ * on `sales_pemegang`'s foreign key rather than on any house rule — the same
+ * class of defect as SKIP-3, in the opposite direction.
+ *
  * Usage:
  *   BASE=http://127.0.0.1:3111 SUPABASE_JWT_SECRET=... \
  *   [PGURL="postgres://..."] node apps/api/scripts/cutover-houserules-walk.mjs
+ *
+ *   BASE=https://<deployment> SUPABASE_JWT_SECRET=… [BYPASS=…] \
+ *   [SMOKE_ACTOR_SALES_STAFF=EMP-…] … node apps/api/scripts/cutover-houserules-walk.mjs
  */
-import { createHmac } from 'node:crypto';
+import { resolveActors, describeActors, smokeHeaders } from './lib/actors.mjs';
 
 const BASE = (process.env.BASE ?? 'http://127.0.0.1:3111').replace(/\/$/, '');
 const SECRET = process.env.SUPABASE_JWT_SECRET ?? '';
+const BYPASS = process.env.BYPASS ?? '';
 if (!SECRET) throw new Error('SUPABASE_JWT_SECRET must be set');
 
-const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
-function token({ employeeId, division = '', level = '', od = false, director = false }) {
-  const h = b64({ alg: 'HS256', typ: 'JWT' });
-  const p = b64({
-    exp: Math.floor(Date.now() / 1000) + 3600,
-    app_metadata: { employee_id: employeeId, division, level, od, director },
-  });
-  return `${h}.${p}.${createHmac('sha256', SECRET).update(`${h}.${p}`).digest('base64url')}`;
-}
+// Slots mirror the Role Matrix (CLAUDE.md §6); ids come from the environment.
+const { actors, notes } = await resolveActors({ base: BASE, secret: SECRET, bypass: BYPASS });
+console.log(`BASE=${BASE}`);
+for (const n of notes) console.log(`  note: ${n}`);
+console.log('aktor terpakai:');
+for (const line of describeActors(actors)) console.log(line);
+console.log('');
 
-// Actors mirror the seed roster + the Role Matrix (CLAUDE.md §6).
-const SALES_STAFF = token({ employeeId: 'EMP-0001', division: 'Sales', level: 'staff' });
-const SALES_LEAD = token({ employeeId: 'EMP-0006', division: 'Sales', level: 'lead' });
-const ACCOUNT_STAFF = token({ employeeId: 'EMP-0002', division: 'Account', level: 'staff' });
-const FINANCE_STAFF = token({ employeeId: 'EMP-0007', division: 'Finance', level: 'staff' });
-const DIRECTOR = token({ employeeId: 'EMP-0008', division: 'Management', level: 'lead', director: true });
-const OD = token({ employeeId: 'EMP-0009', division: 'Management', level: 'lead', od: true });
+const SALES_STAFF = actors.sales_staff.token;
+const SALES_LEAD = actors.sales_lead.token;
+const ACCOUNT_STAFF = actors.account_staff.token;
+const FINANCE_STAFF = actors.finance_staff.token;
+const DIRECTOR = actors.director.token;
+const OD = actors.od.token;
 
 const results = [];
 function check(rule, name, ok, detail) {
@@ -54,8 +62,7 @@ function check(rule, name, ok, detail) {
 }
 
 async function call(method, path, { as, body } = {}) {
-  const headers = { 'content-type': 'application/json' };
-  if (as) headers.authorization = `Bearer ${as}`;
+  const headers = smokeHeaders(as, BYPASS);
   const res = await fetch(BASE + path, {
     method,
     headers,
@@ -196,6 +203,13 @@ check('R4', 'audit_log & notifications tanpa jalur UPDATE/DELETE (lihat invarian
   const other = await call('GET', `/api/v1/leads/${leadId}`, { as: FINANCE_STAFF });
   check('O37', 'aktor lintas-scope TIDAK bisa membaca lead itu (404 — deviasi disetujui)',
     other.status === 404, `${other.status} ${other.json?.error}`);
+  // The Role Matrix's `lead` tier was the one row this walk never exercised
+  // (the actor was declared and then unused): Lead/SPV = division-wide, so the
+  // Sales lead must see a lead a Sales staff registered — the same RLS clause
+  // `jwt_is_lead() AND origin_division = jwt_division()` grants.
+  const divisionWide = await call('GET', `/api/v1/leads/${leadId}`, { as: SALES_LEAD });
+  check('PERM', 'Sales lead membaca lead milik staff di divisinya (scope divisi)',
+    divisionWide.status === 200, `${divisionWide.status} ${divisionWide.json?.error ?? ''}`);
 }
 {
   // PARITY NOTE, not a cutover regression: neither Go's handleRegisterLead nor
