@@ -413,10 +413,19 @@ export function canVoidService(actor: Actor): boolean {
     (actor.role.division === ACCOUNT_DIVISION && actor.role.level === permission.LevelLead);
 }
 
-/** The result of a void: the service + the child briefs that were cancelled. */
+/**
+ * The result of a void: the service, the child briefs that were cancelled, and
+ * the ones deliberately LEFT ALONE because they are already [Approved].
+ *
+ * `skippedApprovedBriefs` is not bookkeeping — it is the answer to "what did this
+ * void NOT undo", which is the one thing the person who just voided a Service
+ * needs to see. Go reports it (`skipped_approved_briefs`) and the client renders
+ * it; omitting it made the list render as `undefined`.
+ */
 export interface VoidResult {
   serviceId: string;
   voidedBriefs: string[];
+  skippedApprovedBriefs: string[];
 }
 
 /**
@@ -458,9 +467,16 @@ export async function voidService(sql: Sql, actor: Actor, serviceId: string, rea
     const briefs = await tx<{ id: string; status: string }[]>`
       select id, status from briefs where service_id = ${serviceId} for update`;
     const voidedBriefs: string[] = [];
+    const skippedApprovedBriefs: string[] = [];
     for (const b of briefs) {
-      if (b.status === BRIEF_APPROVED || b.status === SERVICE_VOIDED) {
+      if (b.status === BRIEF_APPROVED) {
+        // Approved work is not undone by voiding the Service — it is reported back
+        // so the actor can see what survived (Go's SkippedApproved).
+        skippedApprovedBriefs.push(b.id);
         continue;
+      }
+      if (b.status === SERVICE_VOIDED) {
+        continue; // already cancelled by an earlier pass
       }
       const bres = await statemachine.transition(ex.sm, {
         machine: 'brief_task', entityType: 'brief', table: 'briefs', entityId: b.id, to: SERVICE_VOIDED, actor,
@@ -474,9 +490,13 @@ export async function voidService(sql: Sql, actor: Actor, serviceId: string, rea
     await ex.audit.insertAudit({
       entityType: 'service', entityId: serviceId, actorEmployeeId: actor.employeeId,
       action: 'service_voided', beforeJson: { status: svc[0].status },
-      afterJson: { status: SERVICE_VOIDED, reason: why, voided_briefs: voidedBriefs }, createdBy: actor.employeeId,
+      afterJson: {
+        status: SERVICE_VOIDED, reason: why, voided_briefs: voidedBriefs,
+        skipped_approved_briefs: skippedApprovedBriefs,
+      },
+      createdBy: actor.employeeId,
     });
-    return { serviceId, voidedBriefs };
+    return { serviceId, voidedBriefs, skippedApprovedBriefs };
   });
 }
 

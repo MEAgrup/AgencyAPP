@@ -1,4 +1,9 @@
-/** POST /api/v1/bookings/{id}/sla — set the Booking's SLA / Hours Logged (M9 §3/§7). */
+/**
+ * POST /api/v1/bookings/{id}/sla — set the Booking's SLA target (M9 §3/§7).
+ * The echoed key is `sla_target_hours`, as Go's handler sends it and the client's
+ * `SLAResult` declares it — echoing the request's own `hours` key instead left
+ * the refreshed SLA cell reading `undefined`.
+ */
 import { kol } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
 import { db } from '@/lib/db';
@@ -10,6 +15,6 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     const { id } = await ctx.params;
     const b = await readJson<{ hours?: number }>(request);
     await kol.setSlaTarget(db(), actor, id, b.hours ?? 0);
-    return json({ id, hours: b.hours ?? 0 });
+    return json({ id, sla_target_hours: b.hours ?? 0 });
   });
 }

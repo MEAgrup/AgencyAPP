@@ -8,6 +8,7 @@ import { finance } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { handle, json } from '@/lib/http';
+import { financeScanResultToWire } from '@/lib/wire';
 
 export async function POST(request: Request): Promise<Response> {
   return handle(async () => {
@@ -16,6 +17,8 @@ export async function POST(request: Request): Promise<Response> {
       throw new finance.ForbiddenError(); // 403 via the shared error mapper
     }
     const summary = await finance.scanReminders(db());
-    return json({ summary });
+    // The tally IS the body — Go sends it unwrapped, and the client reads the
+    // three counters at the top level.
+    return json(financeScanResultToWire(summary));
   });
 }

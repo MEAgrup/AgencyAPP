@@ -376,6 +376,9 @@ describeDb('voidService (M4-OA-5)', () => {
 
     const res = await voidService(sql, accountLead(), svc, 'salah input layanan');
     expect(res.voidedBriefs).toEqual([todo]);
+    // The [Approved] brief is REPORTED, not silently dropped: "what did this void
+    // not undo" is what the actor needs to see afterwards (Go's SkippedApproved).
+    expect(res.skippedApprovedBriefs).toEqual([done]);
 
     const svcRow = await sql<{ status: string }[]>`select status from services where id = ${svc}`;
     expect(svcRow[0].status).toBe('[Cancelled — Service Voided]');
@@ -387,6 +390,14 @@ describeDb('voidService (M4-OA-5)', () => {
     const audit = await sql<{ n: number }[]>`
       select count(*)::int as n from audit_log where entity_id = ${svc} and action = 'service_voided'`;
     expect(audit[0].n).toBe(1);
+
+    // Both lists are recorded in the immutable trail, so the report is
+    // reconstructible from the log alone (house rule #3/#4).
+    const [row] = await sql<{ after_json: { voided_briefs: string[]; skipped_approved_briefs: string[] } }[]>`
+      select after_json from audit_log
+      where entity_id = ${svc} and action = 'service_voided'`;
+    expect(row.after_json.voided_briefs).toEqual([todo]);
+    expect(row.after_json.skipped_approved_briefs).toEqual([done]);
   });
 
   it('a voided Service is excluded from commission achievement (still-immutable total)', async () => {
