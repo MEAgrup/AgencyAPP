@@ -25,6 +25,6 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       db(), actor, id, b.payment_scheme ?? '', b.reason ?? '',
       (b.installments ?? []).map((i) => ({ amount: i.amount ?? '', dueDate: i.due_date ?? '' })),
     );
-    return json({ ok: true });
+    return json({ status: 'ok' });
   });
 }
