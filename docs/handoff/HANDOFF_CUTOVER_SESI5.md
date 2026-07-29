@@ -1,5 +1,12 @@
 # HANDOFF — Cutover Sesi 5 (C-04 butir MSL ✅ · #59/#60/#61 ter-merge · sisa: 1 migrasi + keputusan aktor)
 
+> ## ⛔ SUDAH DIGANTI — mulai dari `HANDOFF_CUTOVER_SESI6.md`
+> Sesi 6 sudah berjalan di atas dokumen ini. Titik masuk yang benar sekarang:
+> **`docs/handoff/HANDOFF_CUTOVER_SESI6.md`** (branch `claude/handoff-sesi-5-inmsq9`, PR **#62**).
+> Perubahan penting sejak dokumen ini ditulis: §1 sekarang **dua** migrasi RLS yang menunggu apply
+> (0009 **dan** 0010 yang baru), dan §5 (PR #58) sudah ditindaklanjuti. File ini tetap berguna
+> sebagai arsip konteks C-04.
+
 > **Dokumen standalone.** Mulai chat berikutnya dari file ini.
 > Tanggal: 2026-07-28. Pendahulu: `HANDOFF_CUTOVER_SESI3.md` → `HANDOFF_CUTOVER_SESI4.md`.
 
