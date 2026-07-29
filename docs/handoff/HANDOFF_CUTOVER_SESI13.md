@@ -9,8 +9,8 @@
 | | |
 |---|---|
 | **Branch** | `claude/cdps-sg-cutover-migrasi-azzlwr` |
-| **HEAD** | `5453f69` — sudah dipush, working tree **bersih**, nol pekerjaan tertinggal di disk |
-| **Isi branch** | **5 commit** di atas `main@7bbd5e1`: `38fed0c` → `628bb4b` → `f25f329` → `16b2504` → `5453f69` |
+| **HEAD** | tip `claude/cdps-sg-cutover-migrasi-azzlwr` — commit **kode** terakhir `5453f69`, di atasnya hanya commit docs handoff ini. Sudah dipush, working tree **bersih**, nol pekerjaan tertinggal di disk |
+| **Isi branch** | **6 commit** di atas `main@7bbd5e1`: `38fed0c` → `628bb4b` → `f25f329` → `16b2504` → `5453f69` → (docs handoff) |
 | **Live `CDPS SG`** | **40 migrasi · 54 tabel · 17 event** (tidak bergerak sesi ini — nol perubahan skema) |
 | **Repo migrasi** | **40 berkas**, cocok 1:1 dengan riwayat live |
 
