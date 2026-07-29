@@ -10,7 +10,7 @@
 | Item | Nilai |
 |---|---|
 | **Branch kerja** | **`claude/handoff-sesi-6-cutover-ysut7c`** ← lanjutkan di sini, atau buat branch baru dari `main` **sesudah** PR di bawah ter-merge |
-| **PR** | **#65** — https://github.com/MEAgrup/AgencyAPP/pull/65 · **CI 11/11 hijau**, `mergeable_state: clean`, nol review comment ⇒ **menunggu merge pemilik** |
+| **PR** | **#65** — https://github.com/MEAgrup/AgencyAPP/pull/65 · `mergeable_state: **clean**`, nol review comment ⇒ **menunggu merge pemilik**. Status CI: lihat §0.1 |
 | **Base** | `main` @ **`2c82f89`** |
 | **Commit SUBSTANTIF di branch** (terbaru dulu; `git log` untuk daftar persisnya — ada commit docs kecil menyusul) | `7236849` docs handoff sesi 7 (dokumen ini) · `b047507` docs handoff sesi 6 · `95a99e5` **port `clients/{id}/payment-intent` + 2 fix bentuk respons M4** · `3818d4a` audit roster O42 · `f5d93c8` catat apply 0009+0010 ke live |
 | **Semua ter-push?** | ✅ ya — working tree bersih, nol commit/berkas tertinggal |
@@ -22,6 +22,23 @@ git checkout claude/handoff-sesi-6-cutover-ysut7c && git pull origin claude/hand
 npm ci                        # ⚠️ WAJIB dari ROOT repo — lihat §5.1
 cd web-internal && npm ci && cd ..   # web-internal punya lockfile sendiri
 ```
+
+### 0.1 ⚠️ CI terpicu DUA kali per commit — jangan salah baca "1 job merah/tersangkut"
+
+`.github/workflows/ci.yml` jalan untuk **`push` DAN `pull_request`**, jadi PR menampilkan
+**11 check = 2 × 5 job** (`api` · `db-and-migrations` · `web-internal` · `backend` · `core-engines`)
+**+ 1** `Vercel Preview Comments`. Kedua run memakai commit dan definisi job yang **identik**.
+
+**Konsekuensi praktis:** kalau satu job tersangkut `in_progress` atau gagal sementara **pasangannya di
+run kembar hijau**, itu **flakiness runner, bukan kode** — commit dan job-nya sama persis. **Cek
+pasangannya dulu** sebelum mendiagnosa kode atau push "perbaikan".
+
+Terjadi di commit `249bc85` (docs-only, markdown saja — mustahil menyentuh job Go): `backend` di run
+`pull_request` **success 4m47s**, `backend` di run `push` masih `in_progress` >14 menit. Seluruh **5
+job set `pull_request` hijau** di commit itu; head sebelumnya (`dc9da1c`) hijau **11/11** penuh.
+
+> **Status CI hidup selalu dari PR-nya**, bukan dari angka di dokumen ini — angka apa pun yang ditulis
+> di sini langsung kedaluwarsa begitu commit berikutnya mendarat (termasuk commit yang menulisnya).
 
 ---
 
@@ -224,7 +241,8 @@ dulu, kalau tidak dapat `Permission denied` dari scratchpad.
    **sebelum** keduanya atau FK-nya trip.
 5. `npm run lint -w @cdps/api` gagal juga di tree bersih (`apps/api` tanpa `eslint.config.*`) —
    pre-existing, di luar CI.
-6. Job CI `backend` 5–6 menit, `db-and-migrations` ~1,5 menit — bukan hang.
+6. Job CI `backend` 5–6 menit, `db-and-migrations` ~1,5 menit — bukan hang. Kalau `backend` lewat
+   ~10 menit, bandingkan dengan pasangannya di run kembar (**§0.1**) sebelum menuduh kode.
 7. **`send_later`/`CronCreate` tidak bisa diandalkan lintas sesi** — session-only dan hanya fire saat
    REPL idle.
 
