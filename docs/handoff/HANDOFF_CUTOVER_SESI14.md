@@ -1,0 +1,162 @@
+# HANDOFF — Cutover Sesi 14 (pensiun Go dicatat · Fase 2 · Fase 3)
+
+> **Pendahulu:** `HANDOFF_CUTOVER_SESI13.md`. Yang masih berlaku tidak diulang —
+> terutama SESI9 §6 (aturan rumah yang menggigit) dan SESI12 §2.4
+> (`scripts/db-rebuild.sh`, satu-satunya jalur yang benar untuk DB lokal).
+
+## 0. Posisi persis — SALIN INI KE SESI BERIKUTNYA
+
+| | |
+|---|---|
+| **Branch** | `claude/cdps-sg-cutover-sesi13-2kmgy4` |
+| **HEAD** | `c1585d8` — sudah dipush, working tree **bersih** |
+| **Isi branch** | **7 commit** di atas `main@7bbd5e1`: 4 dari SESI13 (`38fed0c`→`16b2504`) + 3 baru (`a4fc289`→`e48e3fd`→`c1585d8`) |
+| **PR** | **#75** → `main` |
+| **Live `CDPS SG`** | **40 migrasi · 54 tabel · 17 event** (tidak bergerak sesi ini — nol perubahan skema) |
+
+> ⚠️ **Branch berpindah nama.** SESI13 bekerja di
+> `claude/cdps-sg-cutover-migrasi-azzlwr`; sesi ini melanjutkannya di
+> `claude/cdps-sg-cutover-sesi13-2kmgy4` (branch yang ditugaskan), yang di-reset ke
+> `16b2504` lalu dilanjutkan. PR #75 tetap PR yang sama — **head-nya sekarang branch
+> baru ini**. Jangan menghidupkan kembali branch lama.
+
+**Angka acuan (Postgres 16 lokal, DB dibangun ulang dari nol dengan 40 migrasi):**
+`@cdps/domain` **565** (+1 skip) · `apps/api` **246** · `@cdps/core` **113** ·
+`@cdps/db` **9** · `web-internal` **26** · 7 gate seed **PASS** · keempat invariant
+SQL **PASS** · `route-parity` **5/5 dengan `KNOWN_GAPS` KOSONG** · typecheck bersih
+semua workspace · eslint `web-internal` bersih · `go vet ./...` bersih.
+
+> Beda dari SESI13: domain **552 → 565** (+13), apps/api **211 → 246** (+35).
+
+**Setup sandbox yang dibutuhkan** (tidak persisten antar sesi):
+```bash
+service postgresql start
+su postgres -c "psql -c \"alter user postgres with password 'postgres'\""   # untuk koneksi TCP
+npm ci && npm run db:rebuild -- --yes
+DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/cdps" npm test --workspaces --if-present
+```
+
+---
+
+## 1. Job `backend` di CI SEBELUMNYA MERAH — sudah hijau (`a4fc289`)
+
+SESI13 memindahkan 3 CSV organisasi riil ke `supabase/seed/` dan menyatakan "nol
+test Go membacanya, jadi job `backend` tetap hijau". **Itu tidak benar** —
+`cmd/rolemapseed` punya 6 test yang membacanya lewat `FindRoleMappingsCSV()`, dan
+keenamnya gagal di PR #75.
+
+Ini bukan kerusakan kosmetik: Fase 2 adalah satu-satunya pekerjaan yang benar-benar
+membaca handler Go untuk membandingkan bentuk respons, jadi **Go harus hijau dulu**.
+Diperbaiki di finder-nya (menaiki direktori, cek `supabase/seed/` lebih dulu lalu
+`seed/` lama), bukan di test-nya — datanya masih di repo, hanya pindah lokasi
+kanonik.
+
+> **Pelajaran untuk sesi berikutnya:** jangan pernah menyatakan sebuah job CI hijau
+> tanpa membaca lognya. `mcp__github__get_job_logs` dengan `failed_only` murah.
+
+## 2. Go DITINGGALKAN secara resmi — `CLAUDE.md` §Stack (`c1585d8`)
+
+Rekomendasi SESI13 §5 ("makin mendesak") dieksekusi. `CLAUDE.md` sebelumnya masih
+menyatakan Go + MySQL, jadi sesi Claude baru mana pun akan membangun di Go.
+
+Sekarang §Stack menyatakan TypeScript + Supabase/Postgres dengan blokade eksplisit
+di atasnya, plus tiga hal yang sebelumnya hanya hidup di handoff: penegakan ada di
+DB (`sm_transition` + RLS + trigger), batas camelCase↔snake_case tunggal di
+`wire.ts`, dan `supabase db push`/`apply_migration` sebagai satu-satunya jalur
+migrasi. §Working style: `backend/**` read-only, `KNOWN_GAPS` wajib kosong.
+
+Tiga entri `DECISIONS.md` baru (Pensiun Go · O43 Fase 2 · Fase 3).
+
+## 3. Fase 2 — O43 (`e48e3fd`)
+
+9 endpoint salah bentuk. **Semuanya route yang ADA dan menjawab 200** — itulah
+kenapa `route-parity` 5/5 hijau sementara halamannya blank.
+
+| Endpoint | Yang salah |
+|---|---|
+| `GET /attempts` | `{attempts}` camelCase lawan `{data:[...]}`; kehilangan `phone_number`+`source`; filter `?status=` diabaikan total |
+| `GET /attempts/{id}` | dibungkus `{attempt:…}` (Go top-level) **dan** detailnya tidak lengkap: nol blok `lead`, nol `nq_reasons`, nol `allowed_transitions`, `qualified_form` tanpa `services[]`, hanya proposal terakhir bukan riwayat |
+| `POST /bookings/{id}/sla` · `/hours` | meng-echo kunci REQUEST (`hours`); Go mengirim `sla_target_hours`/`hours_logged` |
+| `POST /finance/reminders/scan` | dibungkus `{summary}`; 4 counter camelCase lawan 3 kunci wire |
+| `POST /services/{id}/void` | objek domain mentah ⇒ 3 kunci `undefined`, dan `skippedApprovedBriefs` **tidak ada di domain** |
+| `GET /demo-tasks` · `/{id}` · `POST` | `{tasks}`/`{task}` lawan `{data:[...]}` dan envelope 3-kunci |
+
+`demo-tasks/{id}` satu-satunya yang **CRASH** bukan blank: halaman
+men-destrukturisasi `{task, allowed_transitions, audit}` lalu langsung membaca
+`allowed_transitions.length` ⇒ TypeError.
+
+**Modul baru `domain/engine.ts`** — `allowedTransitions` atas `sm_edges`, tabel yang
+SAMA yang divalidasi `sm_transition`, jadi tombol yang dirender dan edge yang
+diterima tidak bisa berpisah. Read-only by construction seperti `audit.ts`.
+
+**Pemetaan tally scan diambil dari SEMANTIK Go, bukan kemiripan nama:**
+`overdue_flagged` ← `markedOverdue` (Go menghitung TRANSISI ke [Jatuh Tempo]),
+bukan `overdueNotified`. `overdueNotified` sengaja tidak menyeberang — Go tidak
+punya counter itu.
+
+### Residu Fase 2 yang SENGAJA dibiarkan
+
+`GET /transactions/{id}/commission` dan `/payment` tetap mengirim read model
+camelCase mentah. Keduanya mengaku mem-port handler Go yang **tidak ada**, dan
+`web-internal` tidak memanggil keduanya dari mana pun. Tanpa oracle DAN tanpa
+konsumen, menamai kunci wire = mengarang kontrak. Komentar palsunya dikoreksi dan
+keduanya ditandai di dalam kode.
+
+> **Yang belum disisir:** paritas **field-by-field** untuk ~54 converter yang SUDAH
+> ada. Sesi ini menutup kelas "endpoint tanpa converter" (metode SESI13 §3) secara
+> menyeluruh, bukan kelas "converter ada tapi satu field-nya salah". Kalau mau
+> lanjut, itu pekerjaan berikutnya — dan ia masih butuh Go.
+
+## 4. Fase 3 — keempat CLI diputuskan (`c1585d8`)
+
+| CLI | Keputusan |
+|---|---|
+| `rolemapseed` | **DIPORT** → `apps/api/scripts/rolemapseed.ts` (preseden `mslseed.ts`). Diuji end-to-end di DB lokal: dry-run → apply (12→35) → rerun idempoten → gate NIK tak dikenal membatalkan tanpa menulis. 16 test parser. |
+| `setpass` | **TIDAK diport** → `RUNBOOK_BOOTSTRAP_DEPLOYMENT_BARU.md` (5 langkah). Seluruh SQL-nya **diverifikasi end-to-end** di transaksi yang di-rollback, bukan ditulis dari ingatan. |
+| `hrisconvert` | **TIDAK diport, tapi GATE-nya dipindah** ke `parseEmployeeCsv`: NIK duplikat & field wajib kosong sekarang menolak berkas UTUH. Gate itu sebelumnya **hilang** di jalur produksi — `syncEmployees` upsert per `employee_id`, jadi NIK duplikat = "baris terakhir menang". |
+| `import` | **TETAP TERBUKA → O47** (baru). Tidak diputuskan sendiri. |
+
+**O47 butuh keputusan Anda.** Jalur lead sudah tertutup (`POST /leads/bulk` hidup ⇒
+sisanya adapter CSV kecil). Yang belum ada padanannya: `gen-form`,
+`clients-dryrun/apply`, `dormant-*` — ketiganya memintas engine M0 Closing, jadi
+mem-port-nya = membangun jalur tulis privileged KEDUA ke
+`clients`/`transactions`/`installments`. Pertanyaannya: (a) riwayat klien pra-CDPS
+harus masuk CDPS, atau cukup arsip spreadsheet? (b) kalau masuk — lead saja (kecil)
+atau klien+ledger juga (besar)? **Memblokir C-05**, karena sesudah `backend/`
+diarsipkan spesifikasi ketiga alur itu hanya ada di kode yang sudah dihapus.
+
+---
+
+## 5. Lanjut dari sini
+
+### Fase 4 — gate manusia (BUKAN pekerjaan code)
+| Gate | Status |
+|---|---|
+| C-03 — 3 SKIP dari deployment Vercel | ⛔ butuh mesin ber-akses; skrip **sudah siap** (`CUTOVER_C03_DEPLOYMENT_RUNBOOK.md`) |
+| C-04 — O22 · O34 · O26 · O35 | ⛔ butuh data + keputusan pemilik |
+| Backup MySQL Railway terakhir | ⛔ butuh akses Railway |
+| Rencana rollback disepakati | ⛔ keputusan pemilik |
+| **O46** — 3 arm visibility RLS lebih sempit dari Go | ⛔ keputusan pemilik |
+| **O47** — impor historis (§4) | ⛔ keputusan pemilik, **memblokir C-05** |
+| PII `backend/testdata/import_samples/` | ⛔ arsip / hapus / anonimkan — keputusan pemilik |
+
+Nol dari tujuh ini bisa saya tutup: semuanya butuh akses atau otoritas yang tidak
+saya punya. Melaporkannya "selesai" akan jadi laporan palsu.
+
+### Fase 5 — pencabutan mekanis (C-05, hanya SETELAH gate GO **dan** O47)
+Job `backend` di CI · `Makefile` (100% Go, 11 target) · tag lalu arsipkan
+`backend/` · config mati (`railway.json` ×2, `Dockerfile`,
+`docs/DEPLOY_RAILWAY.md`) · entri DECISIONS · ~20 komentar provenance
+`backend/internal/...`.
+
+> `CLAUDE.md` §Stack **sudah** dikoreksi sesi ini, jadi ia bukan lagi bagian C-05.
+
+### Kalau mau melanjutkan pekerjaan code sekarang
+Urutan yang saya sarankan:
+1. **Paritas field-by-field 54 converter lama** (§3 catatan) — masih butuh Go, jadi
+   nilainya turun ke nol begitu C-05 jalan.
+2. **`apps/api` tidak punya eslint config** — `npm run lint -w @cdps/api` selalu
+   gagal (`ESLint couldn't find an eslint.config.js`). Pre-existing, bukan dari sesi
+   ini, tapi berarti ~250 berkas TS tidak pernah di-lint.
+3. Adapter CSV/dry-run di atas `POST /leads/bulk` — **hanya jika** O47 dijawab
+   "lead saja".
