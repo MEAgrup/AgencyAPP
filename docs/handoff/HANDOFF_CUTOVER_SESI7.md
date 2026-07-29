@@ -10,9 +10,9 @@
 | Item | Nilai |
 |---|---|
 | **Branch kerja** | **`claude/handoff-sesi-6-cutover-ysut7c`** ← lanjutkan di sini, atau buat branch baru dari `main` **sesudah** PR di bawah ter-merge |
-| **PR** | **#65** — https://github.com/MEAgrup/AgencyAPP/pull/65 (dibuka 2026-07-29, isi 4 commit di bawah) |
+| **PR** | **#65** — https://github.com/MEAgrup/AgencyAPP/pull/65 (dibuka 2026-07-29, isi 5 commit di bawah) |
 | **Base** | `main` @ **`2c82f89`** |
-| **Commit di branch (4, terbaru dulu)** | `b047507` docs handoff sesi 6 · `95a99e5` **port `clients/{id}/payment-intent` + 2 fix bentuk respons M4** · `3818d4a` audit roster O42 · `f5d93c8` catat apply 0009+0010 ke live |
+| **Commit di branch (5, terbaru dulu)** | `7236849` docs handoff sesi 7 (dokumen ini) · `b047507` docs handoff sesi 6 · `95a99e5` **port `clients/{id}/payment-intent` + 2 fix bentuk respons M4** · `3818d4a` audit roster O42 · `f5d93c8` catat apply 0009+0010 ke live |
 | **Semua ter-push?** | ✅ ya — working tree bersih, nol commit/berkas tertinggal |
 | **PR lain yang terbuka** | ⚠️ **#63 KEDALUWARSA — minta pemilik menutupnya**, lihat §6 |
 
