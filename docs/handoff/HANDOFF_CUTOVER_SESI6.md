@@ -57,6 +57,10 @@ menggagalkan percobaan sebelumnya: `function jwt_owns_lead(...) does not exist`,
 > buatan akun QA, `origin_campaign_id` NULL). Jadi probe §4.2 runbook (antrean Finance dengan TRX
 > nyata) **tidak bisa dijalankan**, dan arm own-campaign 0009 belum pernah kena baris nyata. Keduanya
 > terbukti di PG16 lokal + `rls_checks.sql` §14-17 di CI. **Konfirmasi ulang pada TRX pertama yang masuk.**
+>
+> 🔴 **Diperkeras 2026-07-29 — lihat §3.4:** untuk arm own-campaign `0009` batasnya lebih keras dari
+> "belum ada baris nyata" — **aktornya belum bisa ada** (nol mapping `Marketing` di live). Jangan
+> tandai arm itu terverifikasi di produksi sampai O42 diputus.
 
 **Kabar baik yang mengubah asumsi lama:** premis O41 *"blast radius nol karena O33 belum ada aktor
 Finance"* **tidak benar** — live punya **3 karyawan Finance riil aktif** ber-akun login, semuanya
@@ -143,12 +147,46 @@ migrasi.
 |---|---|---|
 | ~~**O33**~~ | ✅ **SELESAI 2026-07-29.** Premisnya ternyata kedaluwarsa: live **sudah** punya divisi `FINANCE AND ACCOUNTING` — 3 karyawan riil aktif ber-akun login, ketiga jabatannya ter-mapping ke `Finance`. Yang kurang hanya level `lead`, dan pemilik menetapkan `SENIOR FINANCE, ACCOUNTING & TAX` (ENDANG PUJI ASTUTI) → `Finance`/`lead`. **M5 kini punya aktor produksi + QA.** | — |
 | ~~**O40**~~ | ✅ **DIPUTUS 2026-07-29 — arah (b), eksekusi DITUNDA sampai setelah gate C-04.** Database memang harus tampil untuk Sales staff ter-scope ke lead miliknya, tapi itu perubahan perilaku di tengah cutover (preseden O39). Pekerjaannya + kolom "Didaftarkan oleh" ada di **issue #64**; PR #58 ditutup. | — |
-| **O42** 🆕 | **Tidak ada jalur admin `role_mappings` di stack baru**, padahal tabel itu sumber kebenaran SELURUH permission (`employee_claims()` menurunkan division/level darinya). Mengubah peran = SQL langsung ke produksi. Plus tiga sumber mapping yang saling menyimpang: live **38** baris · `backend/seed/role_mappings_riil.csv` **23** (nol Finance, tapi punya `BUSINESS DEVELOPMENT`→Marketing yang **tidak ada** di live ⇒ divisi Marketing kini tanpa mapping di produksi) · `supabase/seed.sql` **12** (fixture dev). | Pemilik / HR / OD |
+| **O42** 🆕 | **Tidak ada jalur admin `role_mappings` di stack baru**, padahal tabel itu sumber kebenaran SELURUH permission (`employee_claims()` menurunkan division/level darinya). Mengubah peran = SQL langsung ke produksi. Plus tiga sumber mapping yang saling menyimpang: live **38** baris · `backend/seed/role_mappings_riil.csv` **23** (nol Finance) · `supabase/seed.sql` **12** (fixture dev). **🔴 DIPERLUAS 2026-07-29 — baca §3.4**, temuan aslinya meremehkan masalah: **divisi `Marketing` tidak ada di produksi**, dan itu mematikan M3 reassign-owner sepenuhnya. | Pemilik / HR / OD |
 | **O34 · O26 · O35 · O25 · O9** | Aktor Wave 2, NIK/email Director, sub-tim Creative, anomali kalkulator, target M14 | lihat `HANDOFF_CUTOVER_SESI5.md` §3.1 |
 
 **O24 sudah RESOLVED — jangan dibuka lagi.** Komisi Rp0 adalah nilai sah.
 
-### 3.4 Sisa pekerjaan lain
+### 3.4 🔴 O42 diperluas — divisi `Marketing` tidak punya wujud di produksi (audit roster 2026-07-29)
+
+Lanjutan investigasi O42. **Bukan** temuan yang bisa ditutup developer — tapi mengubah apa yang boleh
+diklaim "selesai" tentang M1/M3 dan tentang migrasi `0009` yang baru di-apply.
+
+`role_mappings` live hanya pernah menghasilkan **6** division: `Account · Ads · Creative · Finance ·
+KOL · Sales`. **`Marketing` tidak ada sama sekali** ⇒ tidak satu pun dari **68** karyawan aktif bisa
+resolve ke `division='Marketing'`, dan re-sync HRIS tidak akan mengubahnya sampai ada baris mapping.
+
+| Yang mati di produksi | Bukti di kode |
+|---|---|
+| **Reassign owner Campaign (M3 §5 Rule 1 / M3-OA-6) — untuk aktor APA PUN** | `campaign.validateOwnerCandidate` wajib kandidat `Marketing`/`staff` aktif. Director lolos `canReassign` (`permission.isLead` meloloskan director) lalu **tertahan di validasi kandidat** ⇒ `NotFoundError`. Tidak ada aktor yang bisa lewat. |
+| Campaign hanya bisa lahir **self-owned di tangan Director** | `campaign.canCreate` = Director ∪ Marketing staff/lead; suku kedua kosong di live. |
+| Leads Database: arm Marketing-lead **dan** Marketing-staff | `leads.leadListScope` ⇒ tinggal Director/OD/Sales-lead. Bersinggungan **O40**. |
+| Arm own-campaign migrasi **`0009`** (baru di-apply sesi 6) | Butuh aktor Marketing-staff **DAN** campaign; `campaigns` = **0** dan aktornya tak bisa ada. |
+
+> ⚠️ Baris terakhir **memperkeras** peringatan "batas verifikasi" di §1: bukan sekadar *"live belum
+> punya baris nyata untuk diuji"*, tapi **aktornya belum bisa ada**. Jangan tandai 0009 terverifikasi
+> di produksi sampai O42 diputus.
+
+**Kabar baik / koreksi arah-sebaliknya:** divergensi CSV **tidak punya korban hari ini**. Dari 68
+karyawan aktif, **61** resolve lewat mapping dan **7** tidak — ketujuhnya **tepat** ketujuh pemegang
+`employee_layered_roles` (3 OD riil, 2 Director riil, QA Director, QA OD), jadi `division=''` mereka
+memang perilaku yang dikehendaki (mirror Go: *absent mapping = pure Director/OD*). **Nol** mapping
+yatim, **nol** karyawan tanpa peran. Baris CSV `BUSINESS DEVELOPMENT`→Marketing yang hilang dari live
+**tidak menelantarkan siapa pun** — divisi `BUSINESS DEVELOPMENT` pun tidak ada di roster live. Jadi
+kalimat sesi 6 *"divisi Marketing kini tanpa mapping di produksi"* menyesatkan dua kali: bukan
+regresi CSV, dan lebih parah dari yang tersirat.
+
+**Pertanyaan (4) untuk pemilik**, di atas tiga pertanyaan O42 yang sudah ada: apakah MEA memang belum
+punya divisi Marketing (⇒ M1/M3 de-facto dijalankan Sales/Account, PRD perlu dibaca ulang), atau
+divisi itu **ada** di HRIS dengan nama lain yang belum dipetakan? Jawabannya menentukan apakah O42
+selesai dengan **satu baris mapping** atau dengan **revisi scope M1/M3**.
+
+### 3.5 Sisa pekerjaan lain
 Impor lead historis (O22) · 3 SKIP C-03 (`HANDOFF_CUTOVER_SESI3.md` §5) · konfirmasi data
 Railway/MySQL riil atau UAT. Sesudah C-04 → C-05 (retire Go).
 
