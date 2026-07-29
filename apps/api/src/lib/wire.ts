@@ -451,6 +451,55 @@ export function leadDetailToWire(d: leads.LeadDetailView): LeadDetailWire {
   };
 }
 
+/** A lead delete request as raised (POST) — no lead join yet. */
+export interface DeleteRequestWire {
+  id: string;
+  lead_id: string;
+  reason: string;
+  status: string;
+  decision_note: string;
+  requested_by: string;
+  resolved_by: string;
+  resolved_at: string | null;
+  created_at: string;
+}
+
+export function deleteRequestToWire(r: leads.DeleteRequest): DeleteRequestWire {
+  return {
+    id: r.id,
+    lead_id: r.leadId,
+    reason: r.reason,
+    status: r.status,
+    decision_note: r.decisionNote,
+    requested_by: r.requestedBy,
+    resolved_by: r.resolvedBy,
+    resolved_at: r.resolvedAt ? r.resolvedAt.toISOString() : null,
+    created_at: r.createdAt.toISOString(),
+  };
+}
+
+/** One row of the Head's delete-ACC queue — the request joined to its lead. */
+export interface DeleteRequestQueueRowWire extends DeleteRequestWire {
+  lead_name: string;
+  phone_number: string;
+  record_status: string;
+  origin_division: string;
+  requested_by_nama: string;
+  resolved_by_nama: string;
+}
+
+export function deleteRequestQueueRowToWire(r: leads.DeleteRequestQueueRow): DeleteRequestQueueRowWire {
+  return {
+    ...deleteRequestToWire(r),
+    lead_name: r.leadName,
+    phone_number: r.phoneNumber,
+    record_status: r.recordStatus,
+    origin_division: r.originDivision,
+    requested_by_nama: r.requestedByNama,
+    resolved_by_nama: r.resolvedByNama,
+  };
+}
+
 // --- M12 Task Execution ---
 
 /** module12_task.Metrics — the recompute-from-log Task metrics (§5.1). The

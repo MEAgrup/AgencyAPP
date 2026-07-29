@@ -127,6 +127,39 @@ export interface LeadDetail {
   attempts: LeadAttemptRow[];
 }
 
+// ---------------------------------------------------------------------------
+// Hapus lead dengan ACC Head (keputusan pemilik 2026-07-29, docs/DECISIONS.md).
+//
+// Tidak ada endpoint DELETE: baris lead tidak pernah dibuang (aturan rumah #3,
+// riwayat immutable). Sales MENGAJUKAN, Head meng-ACC, dan ACC itulah yang
+// memindahkan lead ke record_status terminal '[Deleted]'.
+// ---------------------------------------------------------------------------
+
+export const DELETED_RECORD_STATUS = '[Deleted]';
+
+// leads.DeleteRequest — hasil POST /leads/{id}/delete-requests.
+export interface DeleteRequest {
+  id: string;
+  lead_id: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected';
+  decision_note: string;
+  requested_by: string;
+  resolved_by: string;
+  resolved_at: string | null;
+  created_at: string;
+}
+
+// leads.DeleteRequestQueueRow — baris antrian ACC (request + join lead & nama).
+export interface DeleteRequestQueueRow extends DeleteRequest {
+  lead_name: string;
+  phone_number: string;
+  record_status: string;
+  origin_division: string;
+  requested_by_nama: string;
+  resolved_by_nama: string;
+}
+
 // ---- Constants (verbatim source taxonomy — do not rename) ----
 
 // module1_leads — registration/bulk-import Source options (M1 §9.3).

@@ -10,12 +10,15 @@ import {
 } from './notification';
 
 describe('frozen catalog', () => {
-  it('has exactly 15 events', () => {
-    expect(events()).toHaveLength(15);
+  it('has exactly 17 events — 15 frozen + the 2 logged lead-delete additions', () => {
+    expect(events()).toHaveLength(17);
   });
 
   it('matches the Go EventType string values verbatim', () => {
-    const want = [
+    // The 15 frozen entries. Anything added past these is a DECISIONS.md-logged
+    // deviation and must be asserted separately (below), so a silent drift back
+    // into this list cannot happen unnoticed.
+    const frozen = [
       'm0.negotiation.pending_approval',
       'm0.negotiation.decision',
       'm0m5.installment.due',
@@ -32,7 +35,20 @@ describe('frozen catalog', () => {
       'm1.lead.co_pursuit',
       'm7.hours_logged.reminder',
     ];
-    expect(new Set(events())).toEqual(new Set(want));
+    for (const e of frozen) {
+      expect(events()).toContain(e);
+    }
+  });
+
+  it('carries exactly the two logged lead-delete additions and nothing else', () => {
+    // Owner decision 2026-07-29: lead delete requires Head ACC, so the Head has
+    // to be notified. Pinned here so a third un-logged event fails the build.
+    const added = ['m1.lead.delete_requested', 'm1.lead.delete_decided'];
+    expect(EVENTS.LeadDeleteRequested).toBe('m1.lead.delete_requested');
+    expect(EVENTS.LeadDeleteDecided).toBe('m1.lead.delete_decided');
+    expect(CATALOG[EVENTS.LeadDeleteRequested].resolver).toBe('leadsOfDivision');
+    expect(CATALOG[EVENTS.LeadDeleteDecided].resolver).toBe('explicit');
+    expect(events().filter((e) => e.startsWith('m1.lead.delete'))).toEqual(added);
   });
 
   it('every event carries a description and a valid resolver', () => {

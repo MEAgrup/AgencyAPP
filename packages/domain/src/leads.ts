@@ -45,6 +45,16 @@ export const LEAD_MACHINE = 'lead_record';
 export const RECORD_ACTIVE = 'active';
 export const RECORD_POOL = '[Pool]';
 
+/**
+ * Terminal record status for a lead deleted with Head approval (owner decision
+ * 2026-07-29 — `docs/DECISIONS.md`; edges seeded in
+ * 20260102000012_lead_delete_request.sql). There is NO `delete from leads`
+ * anywhere: house rule #3 makes history immutable, and a real row delete would
+ * orphan the lead's audit trail and break the prospect_attempts FK. "Deleted"
+ * is a state the lead is driven INTO, through the engine, by a Head.
+ */
+export const RECORD_DELETED = '[Deleted]';
+
 /** Prospect attempt birth status (post-validation; PRSP id minted here). */
 export const ATTEMPT_NEW_LEAD = 'New Lead';
 
@@ -66,6 +76,19 @@ export const MSG_ALREADY_OWN_ATTEMPT = '[anda sudah memiliki prospek aktif untuk
 export const MSG_ACTIVE_OTHER_SALES_IMPORT = '[lead sedang diproses oleh sales lain (nama)]';
 /** NON-error notice returned on a co-pursuit join when others already pursue the lead. */
 export const MSG_LEAD_CO_WORKED = '[lead juga sedang dikerjakan sales lain]';
+
+// Delete-with-Head-ACC messages. NOT from the PRD (M1 has no delete door) — new
+// strings introduced by the owner decision of 2026-07-29 and logged verbatim in
+// docs/DECISIONS.md so they are as fixed as the PRD ones from here on.
+
+/** The lead is already deleted — every door refuses it. */
+export const MSG_LEAD_DELETED = '[lead sudah dihapus]';
+/** A pending request already awaits the Head; a second one is refused. */
+export const MSG_DELETE_ALREADY_PENDING = '[permintaan hapus untuk lead ini sudah diajukan]';
+/** A won lead has money descendants (CLI/TRX/INST) — never deletable. */
+export const MSG_DELETE_CLIENT_BLOCKED = '[lead sudah menjadi klien, tidak bisa dihapus]';
+/** The request was already approved/rejected; a second decision is refused. */
+export const MSG_DELETE_ALREADY_RESOLVED = '[permintaan hapus sudah diputuskan]';
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -144,6 +167,7 @@ const STATUS_POOL = '[Pool]';
 const STATUS_REJECTED = '[Rejected]';
 const STATUS_NOT_QUALIFIED = '[Not Qualified]';
 const STATUS_CLOSED_WIN = '[Closed-Success]';
+const STATUS_DELETED = RECORD_DELETED;
 
 /** Terminal attempt statuses — an attempt in one no longer marks a lead worked. */
 const TERMINAL_ATTEMPT_STATUSES = new Set<string>([
@@ -218,6 +242,15 @@ export function decide(channel: Channel, match: ExistingLead | null, actor: stri
   // A won lead is already a client — blocks on every door.
   if (match.recordStatus === STATUS_CLOSED_WIN) {
     return { ...base, outcome: 'block', message: MSG_ALREADY_CLIENT };
+  }
+
+  // A deleted record is invisible to dedup: a Head deleted it, so the phone is
+  // free again and a fresh intake mints a NEW lead rather than resurrecting the
+  // deleted one ([Deleted] is terminal — there is no edge back out of it).
+  // matchByPhone already filters these out; this arm keeps the pure table
+  // correct for any caller that matched a row some other way.
+  if (match.recordStatus === STATUS_DELETED) {
+    return base; // outcome 'create'
   }
 
   // Someone is actively working this lead.
@@ -470,6 +503,7 @@ export interface ClaimDecision {
  *   - a won lead is already a client → block (MSG_ALREADY_CLIENT);
  *   - a lead the actor already holds an open attempt on cannot be double-claimed
  *     → block (MSG_ALREADY_OWN_ATTEMPT);
+ *   - a Head-deleted lead is not claimable → block (MSG_LEAD_DELETED);
  *   - a `[Pool]` lead is claimed directly;
  *   - a `[Rejected]`/`[Not Qualified]` lead is re-claimed by first reopening it
  *     to `[Pool]` (§6 rule 7 / reference rule 9);
@@ -480,6 +514,11 @@ export interface ClaimDecision {
 export function decideClaim(match: ExistingLead, actor: string): ClaimDecision {
   if (match.recordStatus === STATUS_CLOSED_WIN) {
     return { outcome: 'block', message: MSG_ALREADY_CLIENT };
+  }
+  // A Head-deleted lead is off the board: unlike the intake door (which mints a
+  // fresh lead), the Pool flow targets THIS id, so there is nothing to claim.
+  if (match.recordStatus === STATUS_DELETED) {
+    return { outcome: 'block', message: MSG_LEAD_DELETED };
   }
   if (actorHoldsOpenAttempt(match, actor)) {
     return { outcome: 'block', message: MSG_ALREADY_OWN_ATTEMPT };
@@ -770,6 +809,11 @@ export interface LeadsDbRow {
  * leadsDatabase returns leads newest-first, optionally filtered by an exact
  * record_status and a name/phone substring. Filters are parameter no-ops when
  * empty (`'' = ''` short-circuits), so there is no dynamic SQL to inject into.
+ *
+ * Head-deleted leads are hidden from the unfiltered list — that is what "delete"
+ * has to mean to the people using the board — but remain reachable by asking for
+ * `status='[Deleted]'` explicitly, and by id, because the row and its audit trail
+ * are never destroyed (house rule #3).
  */
 export async function leadsDatabase(
   sql: Queryable,
@@ -790,6 +834,7 @@ export async function leadsDatabase(
              where pa.lead_id = l.id and pa.status <> all(${OPEN_ATTEMPT_TERMINAL})) as open_attempt_count
     from leads l
     where (${status} = '' or l.record_status = ${status})
+      and (${status} = ${RECORD_DELETED} or l.record_status <> ${RECORD_DELETED})
       and (${q} = '' or l.lead_name ilike ${like} or l.phone_number ilike ${like})
     order by l.created_at desc, l.id desc`;
   return rows.map((r) => ({
@@ -866,6 +911,11 @@ export async function leadDetailView(sql: Queryable, id: string): Promise<LeadDe
  * every OPEN (non-terminal) attempt on it. employees is LEFT JOINed and the owner
  * name COALESCEd to the raw id, so an attempt owned by an unsynced employee is
  * still counted for dedup (O19).
+ *
+ * Head-deleted records are excluded, not just deprioritised: `[Deleted]` has no
+ * outgoing edge, so had the newest match been a deleted row the intake would
+ * have had no legal move. Skipping it lets an older live record still match, and
+ * a phone whose ONLY record was deleted reads as brand new.
  */
 export async function matchByPhone(q: Queryable, phoneNorm: string): Promise<ExistingLead | null> {
   if (phoneNorm === '') {
@@ -873,7 +923,7 @@ export async function matchByPhone(q: Queryable, phoneNorm: string): Promise<Exi
   }
   const leadRows = await q<{ id: string; record_status: string }[]>`
     select id, record_status from leads
-    where phone_norm = ${phoneNorm}
+    where phone_norm = ${phoneNorm} and record_status <> ${RECORD_DELETED}
     order by created_at desc, id desc limit 1`;
   if (leadRows.length === 0) {
     return null;
@@ -1008,4 +1058,395 @@ export async function resolveWin(
     },
     createdBy: 'SYSTEM',
   });
+}
+
+// ---------------------------------------------------------------------------
+// Lead delete, gated on Head approval (owner decision 2026-07-29, logged in
+// docs/DECISIONS.md — M1 has no delete door of its own).
+//
+// Two doors, never one: a salesperson AJUKAN (requests), a Head ACC (approves).
+// Nothing is destroyed at either step. Approval drives the lead_record machine
+// into the terminal `[Deleted]` state through sm_transition, whose edges are
+// `require_lead = true`, so the Head gate is enforced by the SQL function itself
+// and not only by the TypeScript check below — a direct service-role call cannot
+// route around it.
+//
+// Shape mirrors the demo vertical's staff-submits / SPV-approves flow
+// (demo.submitBlockRequest / approveBlockRequest) so there is one pattern to
+// learn, not two.
+// ---------------------------------------------------------------------------
+
+/** `lead_delete_requests.status` — the request row's own lifecycle, not a machine. */
+export const DELETE_PENDING = 'pending';
+export const DELETE_APPROVED = 'approved';
+export const DELETE_REJECTED = 'rejected';
+
+/** Whether a delete request may be raised at all. */
+export type DeleteRequestOutcome = 'request' | 'block';
+
+/** Result of the pure delete-request decision. */
+export interface DeleteRequestDecision {
+  outcome: DeleteRequestOutcome;
+  /** verbatim BI `[...]` when blocked ("" otherwise). */
+  message: string;
+}
+
+/**
+ * decideDeleteRequest is the pure gate on raising a delete request:
+ *   - `[Closed-Success]` (or any lead with a resolved win) is a CLIENT and has
+ *     money descendants — never deletable (MSG_DELETE_CLIENT_BLOCKED);
+ *   - an already-deleted record cannot be deleted twice (MSG_LEAD_DELETED);
+ *   - one pending request per lead — the second is refused
+ *     (MSG_DELETE_ALREADY_PENDING), matching the `uq_ldr_one_pending` index that
+ *     enforces the same thing under a race;
+ *   - anything else may be requested, and waits for a Head.
+ */
+export function decideDeleteRequest(
+  lead: { recordStatus: string; winningAttemptId?: string | null },
+  hasPending: boolean,
+): DeleteRequestDecision {
+  if (lead.recordStatus === STATUS_CLOSED_WIN || (lead.winningAttemptId ?? '') !== '') {
+    return { outcome: 'block', message: MSG_DELETE_CLIENT_BLOCKED };
+  }
+  if (lead.recordStatus === STATUS_DELETED) {
+    return { outcome: 'block', message: MSG_LEAD_DELETED };
+  }
+  if (hasPending) {
+    return { outcome: 'block', message: MSG_DELETE_ALREADY_PENDING };
+  }
+  return { outcome: 'request', message: '' };
+}
+
+/** One delete-request row. */
+export interface DeleteRequest {
+  id: string;
+  leadId: string;
+  reason: string;
+  status: string;
+  decisionNote: string;
+  requestedBy: string;
+  resolvedBy: string;
+  resolvedAt: Date | null;
+  createdAt: Date;
+}
+
+interface DeleteRequestRow {
+  id: string;
+  lead_id: string;
+  reason: string;
+  status: string;
+  decision_note: string | null;
+  requested_by: string;
+  resolved_by: string | null;
+  resolved_at: Date | null;
+  created_at: Date;
+}
+
+function toDeleteRequest(r: DeleteRequestRow): DeleteRequest {
+  return {
+    id: r.id, leadId: r.lead_id, reason: r.reason, status: r.status,
+    decisionNote: r.decision_note ?? '', requestedBy: r.requested_by,
+    resolvedBy: r.resolved_by ?? '', resolvedAt: r.resolved_at, createdAt: r.created_at,
+  };
+}
+
+/**
+ * canRequestDelete — who may raise the request.
+ *
+ * Read-only OD accounts never write (permission.canWrite). Beyond that the actor
+ * must be connected to the lead the same way `jwt_owns_lead` / the `leads_select`
+ * policy defines connection: they created it, they hold an attempt on it, or they
+ * are the Head of its origin division (Director everywhere). Writes go through
+ * the service-role handle, which bypasses RLS, so this gate is the only thing
+ * standing between an unrelated employee and someone else's lead.
+ */
+export function canRequestDelete(
+  actor: permission.Actor,
+  lead: { createdBy: string; originDivision: string },
+  holdsAttempt: boolean,
+): boolean {
+  if (!permission.canWrite(actor)) {
+    return false;
+  }
+  if (actor.role.director) {
+    return true;
+  }
+  if (lead.createdBy === actor.employeeId || holdsAttempt) {
+    return true;
+  }
+  return permission.isLead(actor, lead.originDivision);
+}
+
+/**
+ * requestDelete raises a pending delete request on a lead (AJUKAN).
+ *
+ * Validates the mandatory reason FIRST — the LDR- id is minted only after the
+ * gate passes (house rule #1) — then locks the lead, runs the pure decision,
+ * inserts the request, audits it on the LEAD, and notifies the Heads of the
+ * lead's origin division so the ACC queue is not something anyone has to poll.
+ * No status changes here: the lead stays exactly where it was until a Head acts.
+ */
+export async function requestDelete(
+  sql: Sql,
+  actor: Actor,
+  leadId: string,
+  reason: string,
+): Promise<DeleteRequest> {
+  if ((reason ?? '').trim() === '') {
+    throw new IncompleteError();
+  }
+  const trimmed = reason.trim();
+  const now = new Date();
+
+  // As register/claim: a block must COMMIT its audit row yet still surface an
+  // error, so the refusal is carried out of the transaction rather than thrown
+  // inside it (a throw would roll the audit back).
+  type Committed =
+    | { kind: 'blocked'; message: string }
+    | { kind: 'ok'; request: DeleteRequest };
+
+  const committed = await withTransaction(sql, async (tx): Promise<Committed> => {
+    const ex = executors(tx);
+    const leadRows = await tx<{
+      record_status: string; winning_attempt_id: string | null;
+      created_by: string; origin_division: string;
+    }[]>`
+      select record_status, winning_attempt_id, created_by, origin_division
+      from leads where id = ${leadId} for update`;
+    if (leadRows.length === 0) {
+      throw new NotFoundError();
+    }
+    const lead = leadRows[0];
+
+    const attemptRows = await tx<{ n: string }[]>`
+      select count(*) as n from prospect_attempts
+      where lead_id = ${leadId} and owner_employee_id = ${actor.employeeId}`;
+    const holdsAttempt = Number(attemptRows[0].n) > 0;
+    if (!canRequestDelete(actor, { createdBy: lead.created_by, originDivision: lead.origin_division }, holdsAttempt)) {
+      throw new ForbiddenError();
+    }
+
+    const pendingRows = await tx<{ n: string }[]>`
+      select count(*) as n from lead_delete_requests
+      where lead_id = ${leadId} and status = ${DELETE_PENDING}`;
+    const decision = decideDeleteRequest(
+      { recordStatus: lead.record_status, winningAttemptId: lead.winning_attempt_id },
+      Number(pendingRows[0].n) > 0,
+    );
+    if (decision.outcome === 'block') {
+      await ex.audit.insertAudit({
+        entityType: 'lead', entityId: leadId, actorEmployeeId: actor.employeeId,
+        action: 'delete_request_blocked', beforeJson: null,
+        afterJson: { message: decision.message, reason: trimmed },
+        createdBy: actor.employeeId,
+      });
+      return { kind: 'blocked', message: decision.message };
+    }
+
+    const reqId = await ex.ident.identNext('LDR', now);
+    await tx`
+      insert into lead_delete_requests (id, lead_id, reason, status, requested_by, created_by)
+      values (${reqId}, ${leadId}, ${trimmed}, ${DELETE_PENDING}, ${actor.employeeId}, ${actor.employeeId})`;
+    await ex.audit.insertAudit({
+      entityType: 'lead', entityId: leadId, actorEmployeeId: actor.employeeId,
+      action: 'delete_requested', beforeJson: null,
+      afterJson: { request_id: reqId, reason: trimmed }, createdBy: actor.employeeId,
+    });
+    await notification.emit(ex.notify, {
+      event: notification.EVENTS.LeadDeleteRequested,
+      entityType: 'lead', entityId: leadId, actor: actor.employeeId,
+      division: lead.origin_division, deepLink: `/leads/${leadId}`,
+    });
+    return {
+      kind: 'ok',
+      request: {
+        id: reqId, leadId, reason: trimmed, status: DELETE_PENDING, decisionNote: '',
+        requestedBy: actor.employeeId, resolvedBy: '', resolvedAt: null, createdAt: now,
+      },
+    };
+  });
+
+  if (committed.kind === 'blocked') {
+    throw new BlockedError(committed.message);
+  }
+  return committed.request;
+}
+
+/** approveDelete / rejectDelete return the request row plus the engine verdict. */
+export interface DeleteDecisionResult {
+  request: DeleteRequest;
+  /** present only on approve — the [Deleted] transition's result. */
+  transition?: statemachine.TransitionResult;
+}
+
+/**
+ * Locks a pending request together with its lead, and refuses anything already
+ * decided. Shared by approve and reject so the two cannot drift apart on which
+ * requests they consider actionable.
+ */
+async function lockPendingRequest(
+  tx: Queryable,
+  reqId: string,
+): Promise<{ row: DeleteRequestRow; originDivision: string; recordStatus: string }> {
+  const rows = await tx<DeleteRequestRow[]>`
+    select id, lead_id, reason, status, decision_note,
+           requested_by, resolved_by, resolved_at, created_at
+    from lead_delete_requests where id = ${reqId} for update`;
+  if (rows.length === 0) {
+    throw new NotFoundError('lead delete request not found');
+  }
+  if (rows[0].status !== DELETE_PENDING) {
+    throw new BlockedError(MSG_DELETE_ALREADY_RESOLVED);
+  }
+  const leadRows = await tx<{ origin_division: string; record_status: string }[]>`
+    select origin_division, record_status from leads where id = ${rows[0].lead_id} for update`;
+  if (leadRows.length === 0) {
+    throw new NotFoundError();
+  }
+  return { row: rows[0], originDivision: leadRows[0].origin_division, recordStatus: leadRows[0].record_status };
+}
+
+/**
+ * approveDelete is the Head's ACC (M1 delete door, step 2).
+ *
+ * Requires Head authority over the lead's ORIGIN division (Director everywhere);
+ * a Sales Head cannot approve a Marketing-origin lead. It then drives the lead to
+ * `[Deleted]` via sm_transition — the one path that writes a status column, and
+ * the second, SQL-side enforcement of the same Head gate — marks the request
+ * approved, audits it, and notifies the requester.
+ *
+ * A rejected transition (e.g. someone won the lead in the meantime) returns
+ * without committing, so the request stays pending rather than being silently
+ * consumed against a lead that never moved.
+ */
+export async function approveDelete(
+  sql: Sql,
+  actor: Actor,
+  reqId: string,
+  note = '',
+): Promise<DeleteDecisionResult> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const { row, originDivision } = await lockPendingRequest(tx, reqId);
+    if (!permission.isLead(actor, originDivision)) {
+      throw new ForbiddenError();
+    }
+
+    const transition = await statemachine.transition(ex.sm, {
+      machine: LEAD_MACHINE,
+      entityType: 'lead',
+      table: 'leads',
+      statusColumn: 'record_status',
+      entityId: row.lead_id,
+      to: RECORD_DELETED,
+      actor,
+    });
+    if (!transition.ok) {
+      // Surface the engine's verbatim message; the request is left pending.
+      return { request: toDeleteRequest(row), transition };
+    }
+
+    const updated = await tx<DeleteRequestRow[]>`
+      update lead_delete_requests
+         set status = ${DELETE_APPROVED}, resolved_by = ${actor.employeeId},
+             resolved_at = now(), decision_note = ${note.trim() === '' ? null : note.trim()}
+       where id = ${reqId}
+      returning id, lead_id, reason, status, decision_note,
+                requested_by, resolved_by, resolved_at, created_at`;
+    await ex.audit.insertAudit({
+      entityType: 'lead', entityId: row.lead_id, actorEmployeeId: actor.employeeId,
+      action: 'delete_request_approved', beforeJson: null,
+      afterJson: { request_id: reqId, note: note.trim() }, createdBy: actor.employeeId,
+    });
+    await notification.emit(ex.notify, {
+      event: notification.EVENTS.LeadDeleteDecided,
+      entityType: 'lead', entityId: row.lead_id, actor: actor.employeeId,
+      explicitRecipients: [row.requested_by], deepLink: `/leads/${row.lead_id}`,
+    });
+    return { request: toDeleteRequest(updated[0]), transition };
+  });
+}
+
+/**
+ * rejectDelete is the Head refusing the request (M1 delete door, step 2b). Same
+ * Head gate as approveDelete; the lead is left untouched, and the requester is
+ * notified through the same event so both verdicts reach them the same way.
+ */
+export async function rejectDelete(
+  sql: Sql,
+  actor: Actor,
+  reqId: string,
+  note = '',
+): Promise<DeleteDecisionResult> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const { row, originDivision } = await lockPendingRequest(tx, reqId);
+    if (!permission.isLead(actor, originDivision)) {
+      throw new ForbiddenError();
+    }
+    const updated = await tx<DeleteRequestRow[]>`
+      update lead_delete_requests
+         set status = ${DELETE_REJECTED}, resolved_by = ${actor.employeeId},
+             resolved_at = now(), decision_note = ${note.trim() === '' ? null : note.trim()}
+       where id = ${reqId}
+      returning id, lead_id, reason, status, decision_note,
+                requested_by, resolved_by, resolved_at, created_at`;
+    await ex.audit.insertAudit({
+      entityType: 'lead', entityId: row.lead_id, actorEmployeeId: actor.employeeId,
+      action: 'delete_request_rejected', beforeJson: null,
+      afterJson: { request_id: reqId, note: note.trim() }, createdBy: actor.employeeId,
+    });
+    await notification.emit(ex.notify, {
+      event: notification.EVENTS.LeadDeleteDecided,
+      entityType: 'lead', entityId: row.lead_id, actor: actor.employeeId,
+      explicitRecipients: [row.requested_by], deepLink: `/leads/${row.lead_id}`,
+    });
+    return { request: toDeleteRequest(updated[0]) };
+  });
+}
+
+/** One row of the Head's ACC queue — the request plus who/what it is about. */
+export interface DeleteRequestQueueRow extends DeleteRequest {
+  leadName: string;
+  phoneNumber: string;
+  recordStatus: string;
+  originDivision: string;
+  requestedByNama: string;
+  resolvedByNama: string;
+}
+
+/**
+ * deleteRequestQueue lists delete requests (default: only pending), newest
+ * first, joined to the lead and to employee names. Row scope is the
+ * `lead_delete_requests_select` policy's job when read through readAsActor —
+ * this only shapes the projection (as poolBoard / leadsDatabase).
+ */
+export async function deleteRequestQueue(
+  sql: Queryable,
+  filter: { status?: string; leadId?: string } = {},
+): Promise<DeleteRequestQueueRow[]> {
+  const status = filter.status?.trim() ?? DELETE_PENDING;
+  const leadId = filter.leadId?.trim() ?? '';
+  const rows = await sql<(DeleteRequestRow & {
+    lead_name: string; phone_number: string; record_status: string;
+    origin_division: string; requested_by_nama: string; resolved_by_nama: string | null;
+  })[]>`
+    select r.id, r.lead_id, r.reason, r.status, r.decision_note,
+           r.requested_by, r.resolved_by, r.resolved_at, r.created_at,
+           l.lead_name, l.phone_number, l.record_status, l.origin_division,
+           coalesce(req.nama, r.requested_by) as requested_by_nama,
+           coalesce(res.nama, r.resolved_by)  as resolved_by_nama
+    from lead_delete_requests r
+    join leads l on l.id = r.lead_id
+    left join employees req on req.employee_id = r.requested_by
+    left join employees res on res.employee_id = r.resolved_by
+    where (${status} = '' or r.status = ${status})
+      and (${leadId} = '' or r.lead_id = ${leadId})
+    order by r.created_at desc, r.id desc`;
+  return rows.map((r) => ({
+    ...toDeleteRequest(r),
+    leadName: r.lead_name, phoneNumber: r.phone_number, recordStatus: r.record_status,
+    originDivision: r.origin_division, requestedByNama: r.requested_by_nama,
+    resolvedByNama: r.resolved_by_nama ?? '',
+  }));
 }
