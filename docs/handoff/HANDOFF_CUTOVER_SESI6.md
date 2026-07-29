@@ -12,7 +12,7 @@
 | **Branch kerja** | ~~`claude/handoff-sesi-5-inmsq9`~~ → **sudah merge**. Sesi 2026-07-29 lanjut di **`claude/handoff-sesi-6-cutover-ysut7c`** |
 | **PR** | ~~#62~~ **✅ MERGED 2026-07-29** (`2c82f89`, merge commit, CI 11/11 hijau) — https://github.com/MEAgrup/AgencyAPP/pull/62 |
 | **Base** | `main` @ **`2c82f89`** (sebelumnya `3d3896a`) |
-| **Commit di branch (5, terbaru dulu)** | `d1d4043` runbook apply RLS · `8c39933` migrasi RLS 0010 · `6cddf11` port `attempts/{id}/lost` · `2dbc5fd` route reminder M5 + test paritas · `7e3bb83` gating sidebar |
+| **Commit di branch (7, terbaru dulu)** | `95a99e5` port `clients/{id}/payment-intent` + 2 fix bentuk respons M4 (O41 #1 · O43) · `3818d4a` audit roster O42 · `f5d93c8` catat apply 0009+0010 · `d1d4043` runbook apply RLS · `8c39933` migrasi RLS 0010 · `6cddf11` port `attempts/{id}/lost` · `2dbc5fd` route reminder M5 + test paritas · `7e3bb83` gating sidebar |
 | **Semua ter-push?** | ✅ ya — tidak ada commit/berkas tertinggal |
 | **PR lain yang terbuka** | ~~#58~~ **✅ DITUTUP 2026-07-29** (keputusan pemilik) — bagian sidebar sudah masuk lewat #62; scope Sales staff + kolom "Didaftarkan oleh" pindah ke **issue #64** (O40, dieksekusi **setelah** gate C-04) |
 
@@ -109,28 +109,68 @@ Detail + bukti di entri Decided 2026-07-28 `docs/DECISIONS.md`, dijaga `rls_chec
 (termasuk assertion bahwa Account staff bukan-AM **tetap 0** — pelebaran Finance tidak melebar ke
 divisi lain). Lihat §1 untuk status apply.
 
-### 2.5 Verifikasi
-`@cdps/domain` **426 hijau terhadap Postgres NYATA** (bukan 285 skip) · `apps/api` **177** ·
-`web-internal` **26** · `core` **112** · `db` **9** · keempat invariant SQL PASS · typecheck seluruh
-workspace bersih · **CI PR #62 11/11 hijau**.
+### 2.5 Cluster 5 — `POST /clients/{id}/payment-intent` + 🔴 kelas bug BENTUK respons (O41 #1 · O43)
+**Ditambahkan 2026-07-29, commit `95a99e5`.**
+
+- **Domain `client.setPaymentIntent`** (port `module4_client/intent.go`): satu deklarasi Sales,
+  dua baris ter-stamp dalam SATU transaksi DB (`clients.payment_intent` +
+  `transactions.payment_intent_scheme`, M5 §8.3), masing-masing dengan audit before→after sendiri.
+  Keduanya di-lock `FOR UPDATE` sebelum pengecekan.
+- **Otoritas = IDENTITAS, bukan level:** hanya `sales_pic_id` klien itu atau Director. **Sales Lead
+  yang bukan PIC klien itu DITOLAK** — keputusan W1-13 yang sudah tercatat, jangan "perbaiki".
+- **Terkunci → 409** begitu ada verifikasi Finance APA PUN atau TRX keluar `[Menunggu Verifikasi]`;
+  `MSG_INTENT_LOCKED` di-port byte-per-byte (string sudah disetujui 2026-07-10, bukan string baru).
+- Nol notifikasi (katalog FROZEN, deferral W1-13) · nol migrasi · nol installment dibuat di sini.
+
+**🔴 Temuan yang lebih penting dari endpoint-nya — baca sebelum tiket O41 berikutnya:**
+`route-parity.test.ts` mendiff **keberadaan path**, **bukan bentuk badan respons**. Jadi endpoint bisa
+ADA, membalas **200**, dan halamannya tetap kosong — tanpa error apa pun di CI atau di log. Dua
+endpoint M4 memang begitu sampai commit ini:
+
+| Endpoint | Yang salah | Akibat di produksi |
+|---|---|---|
+| `GET /clients/{id}` | mengembalikan objek domain **camelCase mentah** padahal tipe `Client` FE snake_case; `total_sales` + `transaction_id` bahkan **tidak ada** di read model | SETIAP field di halaman Client Record membaca `undefined` |
+| `GET /clients` | membalas `{ clients: … }`, FE membaca `res.data` | `setClients(undefined)` → daftar klien kosong |
+
+Keduanya **kelas yang sama dengan C03-F2** (house rule #8). Sudah diperbaiki di commit ini lewat
+`clientDetailToWire` + `clientListRowToWire` (mirror `clientView`/`serviceViews` Go; uang di-format
+IDR **di boundary**, persis tempat `money.Format()` Go memformatnya). Yang **masih terbuka** di
+**O43**: (a) `clientListRowToWire` sengaja lebih **sempit** dari `handleListClients` Go — perlu
+konfirmasi pemilik; (b) **60+ route GET lain belum pernah diaudit** terhadap tipe FE-nya, jadi jumlah
+sebenarnya tidak diketahui dan harus diasumsikan >0; (c) belum ada test yang mendiff bentuk respons.
+
+### 2.6 Verifikasi
+Per `95a99e5` (terakhir dijalankan 2026-07-29): `@cdps/domain` **436 hijau terhadap Postgres NYATA**
+(bukan 285 skip; +10 dari cluster 5) · `apps/api` **186** (+9) · `web-internal` **26** · `core` **112** ·
+`db` **9** · keempat invariant SQL PASS · typecheck seluruh workspace bersih.
+Angka saat PR #62 di-merge: domain 426 · api 177 · **CI 11/11 hijau**.
+
+> ⚠️ **`npm ci` HARUS dijalankan dari root repo.** Menjalankannya dari dalam `packages/*` atau
+> `apps/*` menghasilkan pohon ter-prune (mis. tanpa `next`) sehingga `npm run typecheck -w @cdps/api`
+> gagal dengan `Cannot find module 'next'` — itu artefak instalasi, **bukan** regresi kode.
 
 ---
 
 ## 3. TIKET BERIKUTNYA
 
-### 3.1 Sisa O41 — 7 endpoint, semuanya butuh fungsi domain baru
+### 3.1 Sisa O41 — 6 endpoint, semuanya butuh fungsi domain baru
 Buku besarnya di `apps/api/src/lib/route-parity.test.ts` (`KNOWN_GAPS`) + baris O41 `DECISIONS.md`.
 Urutan hulu-ke-hilir:
 
 | # | Endpoint | Catatan |
 |---|---|---|
-| 1 | `POST /clients/{id}/payment-intent` | scheme + total; **hulu** dari `schedule` |
+| ~~1~~ | ~~`POST /clients/{id}/payment-intent`~~ | ✅ **SELESAI 2026-07-29** (`95a99e5`). Catatan handoff lama *"scheme + total"* **salah** — endpoint ini hanya menerima `payment_intent`; tidak ada `total` di body Go maupun FE. Lihat §2.5 |
 | 2 | `GET /finance/queue` | Go `Service.Queue`; gate endpoint Finance/OD/Director. **BACA §3.2 DULU** |
 | 3 | `GET /transactions/{id}` | Go `LoadTransaction`. **`trxVisibility` JANGAN di-port** — visibilitas baris = RLS (O37); penolakan muncul sebagai **404**, deviasi yang sudah disetujui |
 | 4 | `POST /transactions/{id}/schedule` | Go `CreateSchedule`: lock baris, guard idempotensi ada-installment/ada-verifikasi, Σ termin = total, mint `INST-` |
 | 5 | `GET /transactions/{id}/bermasalah` | file route-nya ADA tapi hanya meng-ekspor POST |
 | 6 | `POST /leads/bulk` | impor massal lead Marketing (bersinggungan O22) |
 | 7 | `GET /audit` | jejak audit lintas-modul (panel riwayat aset Creative) |
+
+> ⚠️ **Untuk keenam sisanya: cek bentuk respons, bukan cuma keberadaan route.** Lihat **O43** /
+> §2.5 — `route-parity.test.ts` mendiff **path**, bukan badan JSON, jadi endpoint bisa ADA, membalas
+> 200, dan halamannya tetap kosong. Dua endpoint M4 memang begitu sampai hari ini. Setiap objek
+> domain WAJIB lewat wire mapper, dan `web-internal/src/lib/*.ts` adalah kontrak kuncinya.
 
 House rule yang mengikat: baca WAJIB `requireActor` + `readAsActor` (#5); setiap objek domain lewat
 **wire mapper** (#8 — penyebab C03-F2: bigint mentah ⇒ 500 yang mematikan kalkulator di produksi).
@@ -148,6 +188,7 @@ migrasi.
 | ~~**O33**~~ | ✅ **SELESAI 2026-07-29.** Premisnya ternyata kedaluwarsa: live **sudah** punya divisi `FINANCE AND ACCOUNTING` — 3 karyawan riil aktif ber-akun login, ketiga jabatannya ter-mapping ke `Finance`. Yang kurang hanya level `lead`, dan pemilik menetapkan `SENIOR FINANCE, ACCOUNTING & TAX` (ENDANG PUJI ASTUTI) → `Finance`/`lead`. **M5 kini punya aktor produksi + QA.** | — |
 | ~~**O40**~~ | ✅ **DIPUTUS 2026-07-29 — arah (b), eksekusi DITUNDA sampai setelah gate C-04.** Database memang harus tampil untuk Sales staff ter-scope ke lead miliknya, tapi itu perubahan perilaku di tengah cutover (preseden O39). Pekerjaannya + kolom "Didaftarkan oleh" ada di **issue #64**; PR #58 ditutup. | — |
 | **O42** 🆕 | **Tidak ada jalur admin `role_mappings` di stack baru**, padahal tabel itu sumber kebenaran SELURUH permission (`employee_claims()` menurunkan division/level darinya). Mengubah peran = SQL langsung ke produksi. Plus tiga sumber mapping yang saling menyimpang: live **38** baris · `backend/seed/role_mappings_riil.csv` **23** (nol Finance) · `supabase/seed.sql` **12** (fixture dev). **🔴 DIPERLUAS 2026-07-29 — baca §3.4**, temuan aslinya meremehkan masalah: **divisi `Marketing` tidak ada di produksi**, dan itu mematikan M3 reassign-owner sepenuhnya. | Pemilik / HR / OD |
+| **O43** 🆕 | **Paritas BENTUK respons tidak pernah diuji.** Dua endpoint M4 mengembalikan JSON yang FE tak bisa baca (200, tapi halaman kosong) — sudah diperbaiki di `95a99e5`, lihat §2.5. Yang butuh keputusan: apakah baris roster klien harus membawa `clientView` PENUH seperti Go (paritas) atau proyeksi sempit seperti sekarang (hemat N+1). Sisanya kerja developer: audit 60+ route GET lain + bikin test paritas-bentuk. | Pemilik (arah); developer (audit + test) |
 | **O34 · O26 · O35 · O25 · O9** | Aktor Wave 2, NIK/email Director, sub-tim Creative, anomali kalkulator, target M14 | lihat `HANDOFF_CUTOVER_SESI5.md` §3.1 |
 
 **O24 sudah RESOLVED — jangan dibuka lagi.** Komisi Rp0 adalah nilai sah.
