@@ -9,8 +9,8 @@
 | | |
 |---|---|
 | **Branch** | `claude/cdps-sg-cutover-migrasi-azzlwr` |
-| **HEAD** | `f25f329` — sudah dipush, working tree **bersih**, nol pekerjaan tertinggal di disk |
-| **Isi branch** | **3 commit** di atas `main@7bbd5e1`: `38fed0c` → `628bb4b` → `f25f329` |
+| **HEAD** | tip `claude/cdps-sg-cutover-migrasi-azzlwr` — commit **kode** terakhir `5453f69`, di atasnya hanya commit docs handoff ini. Sudah dipush, working tree **bersih**, nol pekerjaan tertinggal di disk |
+| **Isi branch** | **6 commit** di atas `main@7bbd5e1`: `38fed0c` → `628bb4b` → `f25f329` → `16b2504` → `5453f69` → (docs handoff) |
 | **Live `CDPS SG`** | **40 migrasi · 54 tabel · 17 event** (tidak bergerak sesi ini — nol perubahan skema) |
 | **Repo migrasi** | **40 berkas**, cocok 1:1 dengan riwayat live |
 
@@ -33,10 +33,23 @@ Peta pensiun Go punya 6 fase (§4). **Fase 0 dan Fase 1 selesai penuh.**
 Mudah terlewat dan mahal kalau terlewat: opsi *"tag rilis lalu hapus `backend/`"* di
 `CUTOVER_BACKLOG.md` §C-05 butir 2 akan **ikut menghapus data organisasi riil**.
 
-Dipindah ke `supabase/seed/` (+ `README.md` provenance): `role_mappings_riil.csv` (23 mapping
+**Disalin** ke `supabase/seed/` (+ `README.md` provenance): `role_mappings_riil.csv` (23 mapping
 HRIS riil) · `layered_roles_riil.csv` · `hris_department_jabatan_pairs.csv` (28 pasangan).
-Nol test Go membacanya, jadi job `backend` tetap hijau; `cmd/rolemapseed` kehilangan path
-default-nya — disengaja, dan override env-nya didokumentasikan di README.
+
+> ⚠️ **Disalin, bukan dipindah — dan itu koreksi yang harganya satu CI merah.** Percobaan
+> pertama memakai `git mv`, dan job `backend` gagal: **5 test `cmd/rolemapseed`** membuka kedua
+> CSV riil lewat helper `FindRoleMappingsCSV()` / `FindLayeredRolesCSV()`, jadi nama berkasnya
+> **tidak pernah muncul sebagai string** di berkas test — grep atas nama berkas di `*_test.go`
+> mengembalikan nol dan pemindahan terlihat aman. `go vet` yang lolos juga tidak membuktikan
+> apa pun: **vet tidak menjalankan test.** Sampai job `backend` dicabut di Fase 5, ketiga
+> berkas harus **ada di kedua tempat**, byte-identik (md5 diverifikasi) — persis seperti
+> `msl_kalkulator.csv` sejak C-04. Kalau Anda menyentuh area ini lagi: satu-satunya cara aman
+> memastikan sebuah berkas data tak dirujuk Go adalah mengaudit **helper pencari berkas**
+> (`grep 'func Find'` di `backend/cmd/`), bukan nama berkasnya.
+
+`hris_department_jabatan_pairs.csv` tetap hanya di `supabase/seed/` — diaudit dengan cara di
+atas: satu-satunya literal path `testdata/` di test Go adalah `testdata/employees.csv`, dan
+hanya ada dua famili helper (`mslseed.FindSeedCSV` + `rolemapseed.Find*CSV`).
 
 > ⚠️ **Yang SENGAJA tidak dipindah:** `backend/testdata/import_samples/` memuat **PII**
 > (roster HR, `nik_email.csv`). Menyebarkan PII ke folder yang dibaca tooling seed bukan
