@@ -14,26 +14,19 @@
 
 ---
 
-## 0. ⚠️ URUTAN YANG BENAR — baca dulu sebelum apply
+## 0. URUTAN — sudah tidak ada yang perlu ditunggu
 
-**`20260102000010` belum ada di `main`** — file itu hidup di branch `claude/handoff-sesi-5-inmsq9`
-(PR **#62**). Kalau di-apply ke live **sebelum** PR-nya merge, live jadi **lebih maju daripada
-`main`** — persis pola drift yang dulu menciptakan blocker **O38** dan menghabiskan satu sesi penuh
-untuk dibereskan.
-
-**Urutan yang disarankan:**
+> **UPDATE 2026-07-29 03:21Z: PR #62 SUDAH DI-MERGE** (`main` @ `2c82f89`). **Kedua migrasi kini ada
+> di `main`**, jadi peringatan drift yang tadinya di sini (jangan apply `0010` sebelum #62 merge,
+> pelajaran **O38**) **sudah tidak berlaku**. Repo dan target apply sudah sejajar.
 
 | # | Langkah | Kenapa |
 |---|---|---|
-| 1 | **Merge PR #62 ke `main`** | supaya `0010` ada di `main` sebelum menyentuh live (aturan main #9) |
-| 2 | `git checkout main && git pull` | apply **dari file repo apa adanya**, jangan SQL ad-hoc |
-| 3 | Apply **`0009`** | urutan wajib: `0010` tidak bergantung ke `0009`, tapi keduanya menyentuh policy dan riwayatnya harus urut |
-| 4 | Apply **`0010`** | |
-| 5 | Verifikasi (§3) | |
-
-**`0009` sendiri boleh di-apply lebih dulu kapan saja** — file itu **sudah ada di `main`** sejak
-merge #59/#60/#61. Kalau mau menutup regresi Marketing (§1 handoff sesi 5) tanpa menunggu #62,
-jalankan langkah 3 saja, lalu ulangi runbook ini untuk `0010` setelah #62 merge.
+| 1 | `git checkout main && git pull` | apply **dari file repo apa adanya**, jangan SQL ad-hoc (aturan main #9) |
+| 2 | Apply **`0009`** | riwayat migrasi harus urut |
+| 3 | Apply **`0010`** | |
+| 4 | Verifikasi (§4) | |
+| 5 | Kabari repo (§6) | supaya sesi berikutnya tidak perlu menerka status live |
 
 ---
 

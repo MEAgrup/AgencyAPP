@@ -9,24 +9,20 @@
 
 | Item | Nilai |
 |---|---|
-| **Branch kerja** | **`claude/handoff-sesi-5-inmsq9`** ← semua pekerjaan sesi 6 ada di sini (nama branch memang menyebut "sesi-5"; itu branch yang dipatok untuk sesi 6) |
-| **PR** | **#62** — https://github.com/MEAgrup/AgencyAPP/pull/62 · **draft** · `mergeable_state: clean` · **CI 11/11 HIJAU** |
-| **Base** | `main` @ `3d3896a` |
-| **Commit di branch (5, terbaru dulu)** | `d1d4043` runbook apply RLS · `8c39933` migrasi RLS 0010 · `6cddf11` port `attempts/{id}/lost` · `2dbc5fd` route reminder M5 + test paritas · `7e3bb83` gating sidebar |
-| **Semua ter-push?** | ✅ ya — tidak ada commit/berkas tertinggal |
-| **PR lain yang terbuka** | **#58** — sudah dikomentari dengan penunjuk ke #62, **sengaja tidak ditutup** (keputusan pemilik) |
+| **Lokasi kerja** | **`main`** @ `2c82f89` — **PR #62 SUDAH DI-MERGE** (2026-07-29 03:21Z oleh pemilik, CI 11/11 hijau). Tidak ada PR jalur ini yang menggantung. |
+| **Buat branch baru dari `main`** | Jangan lanjut di `claude/handoff-sesi-5-inmsq9` untuk pekerjaan #62 — riwayatnya sudah habis (ter-merge) |
+| **Isi merge #62** | 4 cluster: gating sidebar (port #58) · route reminder M5 + test paritas FE↔API · `POST /attempts/{id}/lost` · **migrasi RLS `0010`** |
+| **PR lain yang terbuka** | **#58** — sudah dikomentari dengan penunjuk ke #62, **sengaja tidak ditutup** (keputusan pemilik). Isinya sudah tidak relevan; tinggal ditutup. |
 
 ```bash
-git fetch origin claude/handoff-sesi-5-inmsq9
-git checkout claude/handoff-sesi-5-inmsq9 && git pull origin claude/handoff-sesi-5-inmsq9
+git fetch origin main && git checkout main && git pull origin main
 npm ci                                    # node_modules TIDAK ada di clone baru
 cd web-internal && npm ci && cd ..        # web-internal punya lockfile sendiri
 ```
 
-> **PR #62 membawa EMPAT cluster** (gating sidebar FE · route reminder M5 + test paritas · port
-> `attempts/{id}/lost` · migrasi RLS 0010). Itu menyimpang dari konvensi "PR kecil per cluster"
-> `CLAUDE.md`, dan terjadi karena branch sesi ini dipatok. **Tanya pemilik apakah mau dipecah**
-> sebelum merge. Keempatnya berdiri sendiri dan tidak saling bergantung.
+> **Konsekuensi merge yang paling penting: `20260102000010` SEKARANG SUDAH ADA DI `main`.**
+> Artinya penghalang urutan di §1 **hilang** — apply `0009` → `0010` ke live sekarang boleh langsung
+> dijalankan dari `main`, tidak perlu menunggu merge apa pun lagi.
 
 ---
 
@@ -36,16 +32,17 @@ cd web-internal && npm ci && cd ..        # web-internal punya lockfile sendiri
 
 | Migrasi | Ada di | Status live | Akibat kalau belum di-apply |
 |---|---|---|---|
-| `20260102000009_rls_leads_campaign_scope` | **`main`** (sejak #59-#61) | ❌ belum | Marketing staff kehilangan lead dari campaign miliknya sendiri (regresi fungsional) |
-| `20260102000010_rls_finance_staff_queue_scope` | **hanya branch #62** | ❌ belum | Finance **staff** tidak bisa membaca transaksi ⇒ `GET /finance/queue` akan mengembalikan **antrean kosong tanpa error** begitu di-port; dan sekarang Finance staff bisa **mem-verifikasi pembayaran yang tidak bisa ia baca** (tulis lewat RPC SECURITY DEFINER tidak ter-RLS) |
+| `20260102000009_rls_leads_campaign_scope` | ✅ **`main`** (sejak #59-#61) | ❌ belum | Marketing staff kehilangan lead dari campaign miliknya sendiri (regresi fungsional) |
+| `20260102000010_rls_finance_staff_queue_scope` | ✅ **`main`** (sejak merge #62) | ❌ belum | Finance **staff** tidak bisa membaca transaksi ⇒ `GET /finance/queue` akan mengembalikan **antrean kosong tanpa error** begitu di-port; dan sekarang Finance staff bisa **mem-verifikasi pembayaran yang tidak bisa ia baca** (tulis lewat RPC SECURITY DEFINER tidak ter-RLS) |
 
-**Urutan wajib:** merge **#62** dulu → `git checkout main && git pull` → apply **0009** → apply **0010**.
-Kalau `0010` di-apply sebelum #62 merge, live jadi lebih maju daripada `main` — persis drift yang
-menciptakan **O38** dan menghabiskan satu sesi penuh. `0009` sendiri boleh di-apply kapan saja
-karena sudah ada di `main`.
+**Keduanya sudah ada di `main`, jadi tidak ada lagi yang perlu ditunggu.** Urutannya tetap
+**0009 → 0010** (riwayat migrasi harus urut), dijalankan dari `main` yang sudah di-pull.
 
-Pemilik **sudah memberi ack** untuk apply (sesi 6). Yang belum: eksekusinya, karena butuh mesin
-ber-akses (lihat §4).
+Pemilik **sudah memberi ack** untuk apply (sesi 6) dan **sudah me-merge #62**. Yang belum:
+eksekusi apply-nya, karena butuh mesin ber-akses (lihat §4) — sandbox Claude tidak bisa.
+
+> Peringatan drift yang dulu ada di sini (jangan apply sebelum merge, pelajaran O38) **sudah tidak
+> berlaku** — #62 ter-merge 2026-07-29 03:21Z, jadi repo dan target apply sudah sejajar.
 
 ---
 
