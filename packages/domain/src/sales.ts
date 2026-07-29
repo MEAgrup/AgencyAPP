@@ -1519,6 +1519,8 @@ export interface ClientAllocationRow {
 /** One closed Service line on a Client Record. */
 export interface ClientServiceRow {
   id: string;
+  /** The Master Service List entry this line was priced from (MSL-). */
+  masterServiceId: string;
   name: string;
   standardPrice: string;
   commissionRule: string;
@@ -1566,6 +1568,10 @@ export interface ClientDetail {
   salesPicNama: string;
   commissionPaymentPicId: string;
   paymentIntent: string | null;
+  /** Σ of the closed Service prices, system-computed at closing (raw decimal). */
+  totalSales: string;
+  /** The linked payment Transaction's ID as stored on the client row (M4 §2). */
+  transactionId: string | null;
   releasedToAccountAt: Date | null;
   createdAt: Date;
   platforms: ClientPlatformRow[];
@@ -1587,13 +1593,15 @@ export async function getClient(sql: Queryable, id: string): Promise<ClientDetai
       gmv_baseline: string; target_gmv: string; marketing_budget: string | null;
       origin_campaign_id: string | null; sales_pic_id: string; sales_pic_nama: string;
       commission_payment_pic_id: string; payment_intent: string | null;
+      total_sales: string; transaction_id: string | null;
       released_to_account_at: Date | null; created_at: Date;
     }[]
   >`
     select c.id, c.lead_id, c.winning_attempt_id, c.nama_pic, c.toko, c.kota, c.link_toko,
            c.kategori, c.gmv_baseline, c.target_gmv, c.marketing_budget, c.origin_campaign_id,
            c.sales_pic_id, coalesce(e.nama, c.sales_pic_id) as sales_pic_nama,
-           c.commission_payment_pic_id, c.payment_intent, c.released_to_account_at, c.created_at
+           c.commission_payment_pic_id, c.payment_intent, c.total_sales, c.transaction_id,
+           c.released_to_account_at, c.created_at
     from clients c
     left join employees e on e.employee_id = c.sales_pic_id
     where c.id = ${id}`;
@@ -1618,9 +1626,9 @@ export async function getClient(sql: Queryable, id: string): Promise<ClientDetai
     where csa.client_id = ${id} order by csa.id`;
 
   const svcRows = await sql<
-    { id: string; name: string; standard_price: string; commission_rule: string; status: string; requires_strategy_plan: boolean }[]
+    { id: string; master_service_id: string; name: string; standard_price: string; commission_rule: string; status: string; requires_strategy_plan: boolean }[]
   >`
-    select id, name, standard_price, commission_rule, status, requires_strategy_plan
+    select id, master_service_id, name, standard_price, commission_rule, status, requires_strategy_plan
     from services where client_id = ${id} order by id`;
 
   const trxRows = await sql<
@@ -1655,6 +1663,7 @@ export async function getClient(sql: Queryable, id: string): Promise<ClientDetai
     gmvBaseline: c.gmv_baseline, targetGmv: c.target_gmv, marketingBudget: c.marketing_budget,
     originCampaignId: c.origin_campaign_id, salesPicId: c.sales_pic_id, salesPicNama: c.sales_pic_nama,
     commissionPaymentPicId: c.commission_payment_pic_id, paymentIntent: c.payment_intent,
+    totalSales: c.total_sales, transactionId: c.transaction_id,
     releasedToAccountAt: c.released_to_account_at, createdAt: c.created_at,
     platforms: platRows.map((p) => ({
       platform: p.platform, storeLink: p.store_link, managedSince: p.managed_since, active: p.active,
@@ -1663,7 +1672,8 @@ export async function getClient(sql: Queryable, id: string): Promise<ClientDetai
       salespersonId: a.salesperson_id, salespersonNama: a.salesperson_nama, basisPoints: a.basis_points,
     })),
     services: svcRows.map((s) => ({
-      id: s.id, name: s.name, standardPrice: s.standard_price, commissionRule: s.commission_rule,
+      id: s.id, masterServiceId: s.master_service_id, name: s.name,
+      standardPrice: s.standard_price, commissionRule: s.commission_rule,
       status: s.status, requiresStrategyPlan: s.requires_strategy_plan,
     })),
     transaction,

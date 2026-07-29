@@ -23,16 +23,15 @@
  * with the verbatim BI message); every permitted edit appends an audit row; money
  * fields go through @cdps/core money; permission predicates mirror the §4 matrix.
  *
- * Deferred to their own clusters: Platform List editing (child table), Void
- * Service + cascade (M4-OA-5, needs the Wave-2 Brief machine), the payment-intent
- * handoff write (§5 — Sales sets Payment Intent; the M5 verify path already reads
- * it), and the visibility read model (§6 — RLS-enforced).
+ * Also here now: the payment-intent handoff write (§5 — see setPaymentIntent) and
+ * the §6 visibility read model (row scope enforced by RLS).
  *
- * Reference: backend/internal/module4_client/{edit,locks,reads}.go.
+ * Reference: backend/internal/module4_client/{edit,locks,reads,intent}.go.
  */
 
 import { bi, money, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
+import * as finance from './finance';
 
 /** Authenticated employee + resolved role (from @cdps/core permission). */
 export type Actor = permission.Actor;
@@ -48,6 +47,16 @@ export const ACCOUNT_DIVISION = 'Account';
 export const MSG_FIELD_ROLE_DENIED = '[anda tidak memiliki akses untuk mengubah field ini]';
 /** The field is immutable / system-computed and cannot be edited here (§4). */
 export const MSG_FIELD_LOCKED = '[field ini terkunci dan tidak dapat diubah]';
+/**
+ * The payment-intent handoff is past Sales' control — the scheme now belongs to
+ * Finance (M5 §8.3). NOT a PRD-verbatim string: the PRD states the rule but no
+ * message. Ported byte-for-byte from Go `module4_client.MsgIntentLocked`, which
+ * was approved under the W1-09/W1-14 engineering-authored-BI precedent and is
+ * logged in `docs/DECISIONS.md` (Decided 2026-07-10, W1-13) — so this is a port
+ * of an approved string, not a new one.
+ */
+export const MSG_INTENT_LOCKED =
+  '[transaksi sudah diverifikasi, perubahan skema pembayaran selanjutnya melalui Finance]';
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -86,6 +95,19 @@ export class LockedFieldError extends Error {
   constructor() {
     super(MSG_FIELD_LOCKED);
     this.name = 'LockedFieldError';
+  }
+}
+
+/**
+ * The payment-intent handoff has already passed out of Sales' control — Finance
+ * recorded a verification, or the Transaction left `[Menunggu Verifikasi]`
+ * (verbatim BI, → 409). Distinct from LockedFieldError: this one points the
+ * caller at `finance.changeScheme` (M5-OA-6) rather than saying "immutable".
+ */
+export class IntentLockedError extends Error {
+  constructor() {
+    super(MSG_INTENT_LOCKED);
+    this.name = 'IntentLockedError';
   }
 }
 
@@ -455,6 +477,143 @@ export async function voidService(sql: Sql, actor: Actor, serviceId: string, rea
       afterJson: { status: SERVICE_VOIDED, reason: why, voided_briefs: voidedBriefs }, createdBy: actor.employeeId,
     });
     return { serviceId, voidedBriefs };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Payment-intent handoff (M4 §5) — Sales → Admin & Finance.
+//
+// The Sales PIC's single client-level declaration that routes the Client Record
+// into Finance's queue. A bridge, not a duplicate of M5: the scheme is stamped on
+// BOTH `clients.payment_intent` (M4's own field) and the linked
+// `transactions.payment_intent_scheme` (M5 §8.3 — "Set by Sales (Module 4 §5);
+// changeable by Finance with logged reason") in ONE DB transaction, each with its
+// own before→after audit row (house rule #3).
+//
+// Setting the intent does NOT confirm money received (§5 Rule 3) and does NOT
+// release the client to Account — it only records which scheme Finance should
+// expect to verify against. The Transaction is already in Finance's queue from
+// the moment closing created it at `[Menunggu Verifikasi]` (M5 §3 Rule 1), so no
+// routing write is needed here.
+//
+// No notification fires: M4 §5 Flow 2 says "system … notifies Finance", but the
+// FROZEN notification catalog has no matching event and cannot be extended
+// unilaterally. The deferral is the logged W1-13 decision (same precedent as
+// W1-16's released-to-Account deferral) — nothing is functionally lost because
+// the Transaction is already visible to Finance.
+//
+// Installment schedules for Termin / Bayar di Belakang are built through M5's
+// `finance.createSchedule`; this module never creates installments.
+//
+// Port of backend/internal/module4_client/intent.go.
+// ---------------------------------------------------------------------------
+
+/**
+ * Payment Intent options — verbatim M4 §5 Rule 2 (`[Bayar Penuh (Lunas)]` is the
+ * UI default; the other three are equally valid). These alias the M5 scheme
+ * constants — the exact same stored string seen from two modules — rather than
+ * re-typing them, so the two can never silently drift (mirrors how Go aliases
+ * `module5_finance.Scheme*`).
+ */
+export const INTENT_LUNAS = finance.SCHEME_LUNAS;
+export const INTENT_SEBAGIAN = finance.SCHEME_SEBAGIAN;
+export const INTENT_TERMIN = finance.SCHEME_TERMIN;
+export const INTENT_DI_BELAKANG = finance.SCHEME_DI_BELAKANG;
+
+const VALID_INTENTS = new Set<string>([INTENT_LUNAS, INTENT_SEBAGIAN, INTENT_TERMIN, INTENT_DI_BELAKANG]);
+
+/**
+ * §5 Flow 1 authority: the client's Primary Sales PIC (identity match) or a
+ * Director. Deliberately NOT level-gated — a Sales Lead who is not this client's
+ * PIC is denied exactly like any other non-owning salesperson, because §5 Flow 1
+ * names "the Sales PIC" specifically and the §4 lock matrix treats "Sales PIC"
+ * and "Sales Lead" as separate authorities. Members of the Sales Allocation are
+ * likewise denied (they get read access, not the handoff). Decided 2026-07-10
+ * (W1-13) in `docs/DECISIONS.md`.
+ */
+export function canSetPaymentIntent(actor: Actor, salesPicId: string): boolean {
+  if (actor.role.director) {
+    return true;
+  }
+  return actor.role.division === SALES_DIVISION && actor.employeeId === salesPicId;
+}
+
+/**
+ * setPaymentIntent performs the M4 §5 handoff: the Primary Sales PIC (or a
+ * Director) declares the payment scheme on the Client Record and its linked
+ * Transaction.
+ *
+ * Blocked (IntentLockedError → 409) once Finance has recorded ANY verification or
+ * the Transaction has moved off `[Menunggu Verifikasi]`: from that point the
+ * scheme is Finance's, and `finance.changeScheme` (M5-OA-6) is the only path.
+ * This module refuses rather than duplicating that logic.
+ *
+ * Both rows are locked FOR UPDATE before the checks so a concurrent Finance
+ * verification cannot slip between the read and the write.
+ */
+export async function setPaymentIntent(
+  sql: Sql,
+  actor: Actor,
+  clientId: string,
+  intent: string,
+): Promise<void> {
+  if (!VALID_INTENTS.has(intent)) {
+    throw new IncompleteError();
+  }
+
+  await withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const rows = await tx<{ sales_pic_id: string | null; transaction_id: string | null; payment_intent: string | null }[]>`
+      select sales_pic_id, transaction_id, payment_intent
+        from clients where id = ${clientId} for update`;
+    if (rows.length === 0) {
+      throw new NotFoundError();
+    }
+    const { sales_pic_id: salesPicId, transaction_id: transactionId, payment_intent: beforeIntent } = rows[0];
+
+    if (!canSetPaymentIntent(actor, salesPicId ?? '')) {
+      throw new ForbiddenError(bi.TRANSITION_ROLE_DENIED);
+    }
+    if (transactionId === null || transactionId === '') {
+      // Every client is born with a linked Transaction at closing (M4 §2), so
+      // this guards a malformed/legacy row — not a reachable user path.
+      throw new NotFoundError('client has no linked transaction');
+    }
+
+    const trxRows = await tx<{ payment_status: string; payment_intent_scheme: string }[]>`
+      select payment_status, payment_intent_scheme
+        from transactions where id = ${transactionId} for update`;
+    if (trxRows.length === 0) {
+      throw new NotFoundError('transaction not found');
+    }
+    const { payment_status: trxStatus, payment_intent_scheme: beforeScheme } = trxRows[0];
+    if (trxStatus !== finance.PAYMENT_MENUNGGU) {
+      throw new IntentLockedError();
+    }
+
+    const ver = await tx<{ n: string }[]>`
+      select count(*)::text as n from payment_verifications where transaction_id = ${transactionId}`;
+    if (ver[0].n !== '0') {
+      throw new IntentLockedError();
+    }
+
+    await tx`update clients set payment_intent = ${intent} where id = ${clientId}`;
+    await tx`update transactions set payment_intent_scheme = ${intent} where id = ${transactionId}`;
+
+    await ex.audit.insertAudit({
+      entityType: 'client', entityId: clientId, actorEmployeeId: actor.employeeId,
+      action: 'payment_intent:set',
+      beforeJson: { payment_intent: beforeIntent ?? '' },
+      afterJson: { payment_intent: intent },
+      createdBy: actor.employeeId,
+    });
+    await ex.audit.insertAudit({
+      entityType: 'transaction', entityId: transactionId, actorEmployeeId: actor.employeeId,
+      action: 'payment_intent_scheme:set',
+      beforeJson: { payment_intent_scheme: beforeScheme },
+      afterJson: { payment_intent_scheme: intent },
+      createdBy: actor.employeeId,
+    });
   });
 }
 

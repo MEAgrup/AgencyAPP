@@ -3,7 +3,7 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { account, ads, campaign, creative, kol, leads, livestream, marketing, msl, notification, sales, task } from '@cdps/domain';
+import type { account, ads, campaign, client, creative, kol, leads, livestream, marketing, msl, notification, sales, task } from '@cdps/domain';
 import {
   amWorkloadToWire,
   assetToWire,
@@ -24,6 +24,8 @@ import {
   campaignToWire,
   creatorListToWire,
   inboxToWire,
+  clientDetailToWire,
+  clientListRowToWire,
   masterServiceToWire,
   metricEntryToWire,
   metricsToWire,
@@ -657,5 +659,155 @@ describe('M0 quote preview wire mapper (C-03 finding)', () => {
     expect('estimasiNilai' in wire).toBe(false);
     expect('totalKomisi' in wire).toBe(false);
     expect(JSON.stringify(wire)).not.toMatch(/7000000|350000(?!,)/);
+  });
+});
+
+describe('M4 clientDetailToWire (O41 #1 — the Client Record contract)', () => {
+  const detail: sales.ClientDetail = {
+    id: 'CLI-202607-0001',
+    leadId: 'LEAD-202607-0001',
+    winningAttemptId: 'ATT-202607-0001',
+    namaPic: 'Ibu Alpha',
+    toko: 'Alpha Digital',
+    kota: 'Jakarta',
+    linkToko: 'https://shopee/alpha',
+    kategori: 'Fashion',
+    gmvBaseline: '50000000.00',
+    targetGmv: '80000000.00',
+    marketingBudget: '15000000.00',
+    totalSales: '9000000.00',
+    transactionId: 'TRX-202607-0001',
+    originCampaignId: null,
+    salesPicId: 'EMP-BUDI',
+    salesPicNama: 'Budi',
+    commissionPaymentPicId: 'EMP-BUDI',
+    paymentIntent: '[Termin]',
+    releasedToAccountAt: null,
+    createdAt: new Date('2026-07-01T03:00:00.000Z'),
+    platforms: [
+      { platform: 'Shopee', storeLink: 'https://shopee/alpha', managedSince: new Date('2026-05-01T00:00:00.000Z'), active: true },
+      { platform: 'TikTok Shop', storeLink: null, managedSince: null, active: false },
+    ],
+    allocations: [{ salespersonId: 'EMP-BUDI', salespersonNama: 'Budi', basisPoints: 10000 }],
+    services: [{
+      id: 'SVC-202607-0001', masterServiceId: 'MSV-202607-0001', name: 'Shopee Ads Management',
+      standardPrice: '9000000.00', commissionRule: '10% of standard price', status: 'Ongoing',
+      requiresStrategyPlan: true,
+    }],
+    transaction: null,
+  };
+
+  it('maps to the snake_case shape web-internal declares, money as IDR strings', () => {
+    expect(clientDetailToWire(detail)).toEqual({
+      id: 'CLI-202607-0001',
+      nama_pic: 'Ibu Alpha',
+      toko: 'Alpha Digital',
+      kota: 'Jakarta',
+      kategori: 'Fashion',
+      link_toko: 'https://shopee/alpha',
+      gmv_baseline: 'Rp. 50.000.000,00',
+      target_gmv: 'Rp. 80.000.000,00',
+      total_sales: 'Rp. 9.000.000,00',
+      marketing_budget: 'Rp. 15.000.000,00',
+      origin_campaign_id: '',
+      sales_pic_id: 'EMP-BUDI',
+      commission_payment_pic_id: 'EMP-BUDI',
+      transaction_id: 'TRX-202607-0001',
+      payment_intent: '[Termin]',
+      released_to_account_at: null,
+      platforms: [
+        { platform: 'Shopee', store_link: 'https://shopee/alpha', managed_since: '2026-05-01T00:00:00.000Z', active: true },
+        { platform: 'TikTok Shop', store_link: undefined, managed_since: null, active: false },
+      ],
+      sales_allocation: [{ salesperson_id: 'EMP-BUDI', basis_points: 10000 }],
+      services: [{
+        id: 'SVC-202607-0001', master_service_id: 'MSV-202607-0001', name: 'Shopee Ads Management',
+        standard_price: 'Rp. 9.000.000,00', status: 'Ongoing',
+      }],
+    });
+  });
+
+  it('emits every key the FE `Client` type declares — the actual O41 #1 defect', () => {
+    // Returning the raw domain object gave the FE camelCase keys, so every field
+    // on the Client Record page read `undefined`. Assert the contract by name.
+    const wire = clientDetailToWire(detail) as unknown as Record<string, unknown>;
+    for (const key of [
+      'id', 'nama_pic', 'toko', 'kota', 'link_toko', 'kategori', 'gmv_baseline', 'target_gmv',
+      'total_sales', 'marketing_budget', 'origin_campaign_id', 'sales_pic_id',
+      'commission_payment_pic_id', 'transaction_id', 'payment_intent', 'released_to_account_at',
+      'platforms', 'sales_allocation', 'services',
+    ]) {
+      expect(wire).toHaveProperty(key);
+    }
+    // …and none of the camelCase originals leak through.
+    for (const leaked of ['namaPic', 'linkToko', 'gmvBaseline', 'targetGmv', 'totalSales', 'transactionId', 'paymentIntent']) {
+      expect(leaked in wire).toBe(false);
+    }
+  });
+
+  it('drops the keys Go clientView does not have (no lead/attempt/PIC-name leak)', () => {
+    const wire = clientDetailToWire(detail) as unknown as Record<string, unknown>;
+    for (const absent of ['lead_id', 'winning_attempt_id', 'sales_pic_nama', 'created_at', 'transaction']) {
+      expect(absent in wire).toBe(false);
+    }
+  });
+
+  it('nullable money stays null; a null origin campaign / intent becomes an empty string', () => {
+    const wire = clientDetailToWire({
+      ...detail, marketingBudget: null, paymentIntent: null, transactionId: null, releasedToAccountAt: new Date('2026-07-05T09:30:00.000Z'),
+    });
+    expect(wire.marketing_budget).toBeNull();
+    expect(wire.payment_intent).toBe('');
+    expect(wire.transaction_id).toBe('');
+    expect(wire.released_to_account_at).toBe('2026-07-05T09:30:00.000Z');
+  });
+
+  it('renders zero money as Rp. 0,00 rather than throwing or emitting a bare 0', () => {
+    const wire = clientDetailToWire({ ...detail, totalSales: '0.00', gmvBaseline: '0' });
+    expect(wire.total_sales).toBe('Rp. 0,00');
+    expect(wire.gmv_baseline).toBe('Rp. 0,00');
+  });
+});
+
+describe('M4 clientListRowToWire (the roster page read res.data)', () => {
+  const row: client.ClientListRow = {
+    id: 'CLI-202607-0001',
+    toko: 'Alpha Digital',
+    namaPic: 'Ibu Alpha',
+    kota: 'Jakarta',
+    kategori: 'Fashion',
+    salesPicId: 'EMP-BUDI',
+    salesPicNama: 'Budi',
+    assignedAmId: null,
+    paymentIntent: '[Termin]',
+    releasedToAccountAt: null,
+    createdAt: new Date('2026-07-01T03:00:00.000Z'),
+  };
+
+  it('maps to snake_case', () => {
+    expect(clientListRowToWire(row)).toEqual({
+      id: 'CLI-202607-0001',
+      toko: 'Alpha Digital',
+      nama_pic: 'Ibu Alpha',
+      kota: 'Jakarta',
+      kategori: 'Fashion',
+      sales_pic_id: 'EMP-BUDI',
+      sales_pic_nama: 'Budi',
+      assigned_am_id: null,
+      payment_intent: '[Termin]',
+      released_to_account_at: null,
+      created_at: '2026-07-01T03:00:00.000Z',
+    });
+  });
+
+  it('covers every field the roster page renders', () => {
+    const wire = clientListRowToWire(row) as unknown as Record<string, unknown>;
+    for (const key of ['id', 'toko', 'kota', 'kategori', 'sales_pic_id', 'payment_intent', 'released_to_account_at']) {
+      expect(wire).toHaveProperty(key);
+    }
+  });
+
+  it('a client with no intent yet renders as an empty string, not null', () => {
+    expect(clientListRowToWire({ ...row, paymentIntent: null }).payment_intent).toBe('');
   });
 });

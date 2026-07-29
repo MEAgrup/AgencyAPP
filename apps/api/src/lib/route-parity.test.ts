@@ -203,8 +203,6 @@ const KNOWN_GAPS = new Set([
   'GET /transactions/{}', //           Go handleGetTransaction → needs finance.loadTransaction()
   'POST /transactions/{}/schedule', // Go handleCreateSchedule → needs finance.createSchedule()
   'GET /transactions/{}/bermasalah', // Go handleGetBermasalah (POST half exists)
-  // M4/M5 — payment intent (scheme + total) is set from the client record.
-  'POST /clients/{}/payment-intent', // Go handleSetPaymentIntent
   // M1 — Marketing bulk lead import.
   'POST /leads/bulk', //                Go handleBulkLeads
   // Cross-module audit trail reader (used by the Creative asset history panel).
@@ -238,6 +236,12 @@ describe('FE↔API route parity', () => {
     // ledger cannot drift into fiction.
     const stale = [...KNOWN_GAPS].filter((gap) => isServed(gap));
     expect(stale, `already served — delete from KNOWN_GAPS: ${stale.join(', ')}`).toEqual([]);
+  });
+
+  it('serves the M4 §5 payment-intent handoff (O41 #1)', () => {
+    // Positive assertion, not just absence from KNOWN_GAPS: proves the route file
+    // is actually discovered on the path web-internal's setPaymentIntent() posts to.
+    expect(routes).toContain('POST /clients/{}/payment-intent');
   });
 
   it('serves the M5 reminder dashboard on the path the FE actually calls', () => {
