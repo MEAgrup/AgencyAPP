@@ -234,24 +234,31 @@ kelihatan user**, bukan utang rapi:
 7. **Otoritas password = GoTrue**, bukan `employee_credentials`. Port verbatim dari Go = bug senyap.
    `apps/api` **tidak punya** `SUPABASE_SERVICE_ROLE_KEY` ⇒ jalur tulis admin lewat RPC SECURITY DEFINER.
 8. **`ci.yml` terpicu DUA KALI per commit** (`push` + `pull_request`) ⇒ 11 check = 2×5 job + Vercel.
-   Job `backend` normalnya **~6 menit**; kalau satu tersangkut sementara kembarannya hijau, itu
-   flakiness runner — **cek pasangannya dulu** sebelum mendorong "perbaikan".
-   (Di sesi 8 **kedua** kembaran `backend` tersangkut >15 menit pada diff **docs-only**; #67 tetap
-   di-merge karena semua gate bermakna — `api`, `core-engines`, `db-and-migrations`, `web-internal`,
-   Vercel — hijau dan nol berkas Go tersentuh.)
-9. 🔴 **CI SEDANG SAKIT — runner tidak teralokasi (C-00 KAMBUH). Cek ini SEBELUM percaya CI merah.**
-   Pada `550916a` (2026-07-29 ~12:05 UTC, diff **docs-only satu berkas**) **kelima** job gagal dalam
-   **2–12 detik**, lalu `rerun_failed_jobs` gagal lagi dalam **2–3 detik**. Tandanya khas dan mudah
-   dibedakan dari kegagalan test:
-   - `runner_id: 0` dan `runner_name: ""` pada job (`actions_get` → `get_workflow_job`)
-   - **nol log** — unduh log balas **HTTP 404**, karena tidak ada apa pun yang pernah berjalan
-   - durasi **detik**, bukan menit; **semua** job serentak, termasuk yang tak tersentuh diff
+   Job `backend` normalnya **~6 menit**. Kalau ia tersangkut lama, **jangan langsung sebut flakiness
+   runner** — cek **kuota menit** dulu (aturan #9). Di sesi 8 kedua kembaran `backend` tersangkut
+   >15 menit pada diff **docs-only**, dan sebab sebenarnya **bukan** flakiness melainkan kuota yang
+   hampir/sudah habis; begitu kuota dipulihkan, `backend` lulus di **keempat** run yang di-re-run.
+9. 🟡 **CI merah/menggantung serentak? CEK KUOTA MENIT GITHUB ACTIONS DULU — bukan kode, bukan
+   flakiness.** Terjadi 2026-07-29 ~12:02–12:18 UTC dan **sudah dipulihkan pemilik** (menit repo
+   habis lalu ditambah). Simpan **tanda pengenalnya**, karena inilah cara membedakannya dari
+   kegagalan test dalam <1 menit:
 
-   Ini **bukan** regresi kode. Kalau pola ini muncul: **jangan** kejar "perbaikan" di kode, dan
-   jangan tafsirkan sebagai gate merah — tunggu kapasitas runner pulih lalu re-run. Preseden:
-   **C-00** (`CUTOVER_BACKLOG.md`) adalah tiket dengan sebab yang sama dan sudah pernah pulih sendiri.
-   ⚠️ **Dampak untuk sesi ini:** kalau CI masih begini, Task A/B/C tidak akan punya gate hijau —
-   angkat ke pemilik lebih dulu, jangan paksakan merge berantai di atas CI yang tidak memberi sinyal.
+   | Tanda | Kuota habis | Kegagalan test asli |
+   |---|---|---|
+   | `runner_name` pada job | **kosong**, `runner_id: 0` | terisi (`GitHub Actions 10000019xx`) |
+   | Unduh log job | **HTTP 404** — nol log, tak ada yang pernah jalan | ada log dengan pesan gagal |
+   | Durasi | **2–12 detik** | puluhan detik–menit |
+   | Sebaran | **SEMUA** job serentak, termasuk yang tak tersentuh diff | terbatas pada job yang relevan |
+   | Checker eksternal (Vercel) | tetap **hijau** ⇒ bukan masalah repo/commit | ikut merah kalau build rusak |
+
+   **Cara cek:** `actions_get` → `get_workflow_job` lalu lihat `runner_name`/`runner_id`.
+   **Cara pulih:** kuota ditambah (aksi **pemilik**, bukan kode) → `rerun_workflow_run`.
+   **Preseden:** tiket **C-00** (`CUTOVER_BACKLOG.md`) punya gejala identik.
+
+   > **Bukti pemulihan (2026-07-29):** empat run di-re-run sesudah kuota ditambah — `main` @ `f8407d1`,
+   > branch @ `f8407d1`, PR-run @ `4bdd490`, dan `main` @ `2fbb403` (merge #69) — **20/20 job hijau**,
+   > `runner_name` terisi di semuanya. Ini sekaligus **memvalidasi retroaktif** `f8407d1`/`4bdd490`,
+   > satu-satunya commit yang sempat di-merge **tanpa** gate CI (#70) justru karena outage ini.
 
 ## 7. Cara menjalankan test DB-backed di sandbox
 
