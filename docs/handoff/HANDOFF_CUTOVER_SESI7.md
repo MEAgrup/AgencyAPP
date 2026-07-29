@@ -146,9 +146,59 @@ tidak ada di roster.
 2. `role_mappings` di-manage lewat admin CDPS, atau di-derive dari sheet HR tiap sync?
 3. Rekonsiliasi **38** (live) vs **23** (`backend/seed/role_mappings_riil.csv`) vs **12**
    (`supabase/seed.sql`) — mana sumber kebenarannya?
-4. 🆕 Apakah MEA memang **belum punya** divisi Marketing (⇒ M1/M3 de-facto dijalankan Sales/Account,
-   PRD perlu dibaca ulang), atau divisi itu **ada** di HRIS dengan **nama lain** yang belum dipetakan?
-   → menentukan apakah O42 selesai dengan **satu baris mapping** atau dengan **revisi scope M1/M3**.
+4. ~~🆕 Apakah MEA memang **belum punya** divisi Marketing, atau divisi itu **ada** di HRIS dengan
+   **nama lain** yang belum dipetakan?~~ ✅ **DIJAWAB 2026-07-29 → ada, namanya `BUSINESS
+   DEVELOPMENT`.**
+
+**Jawaban (4) & apa yang berubah karenanya.** Pemilik mengonfirmasi divisi Marketing **ada** di HRIS
+di bawah nama `BUSINESS DEVELOPMENT`, dengan bukti employee `2504240539` (NIKEN SEPTA ARISANDHY,
+24-Apr-2025, jabatan `MARKETING STRATEGIST`). Jadi **O42 selesai dengan baris mapping, BUKAN revisi
+scope M1/M3** — arah PRD tidak berubah, M1/M3 tetap milik Marketing. Baris CSV
+`BUSINESS DEVELOPMENT`→`Marketing` (`role_mappings_riil.csv` 12–13) ternyata **benar secara
+pemetaan**, cuma tidak lengkap.
+
+Yang **belum** bisa ditutup — dan tidak bisa diverifikasi dari sandbox (nol kredensial live, gateway
+menolak `supabase.com`):
+
+- **`MARKETING STRATEGIST` tidak ada di satu pun dari tiga sumber mapping.** Karena grain-nya
+  **divisi×jabatan** (`uq_role_mapping`), satu baris **tidak** mengangkat jabatan lain. Yang
+  dibutuhkan = daftar jabatan aktif **lengkap** di bawah `BUSINESS DEVELOPMENT`, bukan satu baris.
+- 🔴 **Kontradiksi dengan audit roster `3818d4a`**, yang menyatakan *"divisi `BUSINESS DEVELOPMENT`
+  juga tidak ada di roster live"*. Tepat satu dari dua ini benar:
+  **(A)** klaim roster itu salah ⇒ angka **61 resolve / 7 tanpa mapping** perlu dihitung ulang; atau
+  **(B)** NIKEN belum ter-sync ke `public.employees` (atau `is_active=false` / `auth_user_id` kosong)
+  ⇒ menambah mapping **tidak** melahirkan aktor Marketing dan **M3-OA-6 tetap mati**, karena
+  `validateOwnerCandidate` mewajibkan kandidat **aktif**.
+
+> ⚠️ **Jangan `INSERT` mapping sebelum (A)/(B) dipisahkan.** Kalau (B) yang benar, barisnya jadi
+> yatim dan O42 **terlihat** selesai padahal M3 masih mati. Dua SELECT read-only ini memisahkannya:
+
+```sql
+-- (1) Apakah NIKEN benar-benar ada di CDPS live, aktif, dan bisa login?
+SELECT employee_id, nama, divisi, jabatan, is_active,
+       (auth_user_id IS NOT NULL) AS bisa_login
+FROM public.employees
+WHERE employee_id = '2504240539';
+
+-- (2) Semua pasangan divisi×jabatan AKTIF yang belum punya mapping
+--     (ini daftar baris yang sebenarnya perlu dibuat — bukan cuma MARKETING STRATEGIST)
+SELECT e.divisi, e.jabatan, count(*) AS karyawan_aktif
+FROM public.employees e
+LEFT JOIN public.role_mappings m
+       ON m.divisi = e.divisi AND m.jabatan = e.jabatan
+WHERE e.is_active AND m.id IS NULL
+GROUP BY 1, 2
+ORDER BY 1, 2;
+```
+
+Hasil (2) juga langsung menguji ulang klaim "7 tanpa mapping": kalau yang keluar **bukan** tepat
+ketujuh pemegang `employee_layered_roles`, maka (A) yang benar dan audit `3818d4a` perlu dikoreksi.
+Setelah itu baru bentuk `INSERT`-nya (grain divisi×jabatan, `division='Marketing'`, `level='staff'`
+untuk STRATEGIST; `level='lead'` hanya bila ada jabatan kepala BD yang aktif — Marketing **lead**
+masih kosong, dan itu yang dibutuhkan arm Marketing-lead `leads.leadListScope`).
+
+**Pertanyaan (1)(2)(3) tetap terbuka** dan masih memblokir hal yang sama (onboarding, ubah jabatan,
+M3 reassign-owner di produksi, verifikasi arm own-campaign `0009`).
 
 ### 3.2 🆕 O43 — paritas BENTUK respons
 Latar: §2.2. Yang butuh keputusan **pemilik**:
@@ -158,6 +208,24 @@ Latar: §2.2. Yang butuh keputusan **pemilik**:
   services untuk kolom yang halaman roster tidak pernah baca. Dipilih proyeksi sempit yang menutup
   **100%** field yang FE benar-benar render. **Deviasi dari oracle Go ini perlu di-ack** — atau
   paritas penuh yang dimaui.
+
+  **Dua koreksi atas framing di atas (diverifikasi 2026-07-29, baca kodenya langsung):**
+
+  1. **"Lebih sempit" tidak akurat — ini proyeksi yang BERBEDA, bukan subset.** Diff sebenarnya
+     (`clientView` Go `client_handlers.go:19` vs `clientListRowToWire` `wire.ts:1639`):
+     **8 field sama** (`id · toko · nama_pic · kota · kategori · sales_pic_id · payment_intent ·
+     released_to_account_at`); **11 hanya di Go** (`link_toko · gmv_baseline · target_gmv ·
+     total_sales · marketing_budget · origin_campaign_id · commission_payment_pic_id ·
+     transaction_id · platforms · sales_allocation · services`); dan **3 hanya di TS** —
+     `sales_pic_nama`, `assigned_am_id`, `created_at` — yang **`clientView` Go tidak punya sama
+     sekali**. Jadi "paritas penuh" bukan sekadar menambah kolom: ia juga menuntut keputusan soal
+     3 field yang justru dipakai roster (nama PIC ditampilkan, bukan UUID-nya).
+  2. **PRD tidak mengadili pertanyaan ini.** **M4 §6 hanya mengatur BARIS** (siapa melihat klien
+     mana — own / allocation / division / OD / Director), dan **tidak menyebut daftar kolom roster
+     sama sekali**; §7.2 hanya mencantumkan *"Visibility (own clients vs all)"*. Karena house rule
+     "PRD yang menang" hanya berlaku bila PRD berbicara, `clientView` Go di sini **bukan spec** —
+     ia satu implementasi. Maka (a) **bukan** pelanggaran spec, melainkan **pilihan rekayasa
+     murni**, dan bobot keputusannya turun: yang ditanyakan cuma *biaya query vs paritas simetris*.
 
 Sisanya kerja **developer**, bukan keputusan:
 - **(b)** **60+ route GET lain belum pernah diaudit** terhadap tipe FE-nya. Dua ditemukan hanya karena
