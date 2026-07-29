@@ -12,10 +12,13 @@
 | | |
 |---|---|
 | **Branch kerja** | **`claude/migrasi-cdps-sg-cutover-behnjc`** |
-| **Kondisi branch** | **bersih, identik `main`** — di-restart dari `origin/main` sesudah #67 merge. Commit handoff ini duduk di atasnya |
-| **`main`** | **`c0e65f1`** (hasil merge PR #67) |
-| **PR terbuka** | **tidak ada** |
-| **PR selesai** | #67 ✅ merge · #66 ✅ merge · #65 ✅ merge · #63 ditutup (premis kedaluwarsa) |
+| **Kondisi branch** | **bersih, identik `main`** (`0 0` ahead/behind) — di-restart dari `origin/main` sesudah #69 merge |
+| **`main`** | **`2fbb403`** (hasil merge PR #69, yang membawa dokumen ini) |
+| **PR terbuka** | **tidak ada** — diverifikasi kosong |
+| **PR selesai** | #69 ✅ merge · #67 ✅ merge · #66 ✅ merge · #65 ✅ merge · #68 **ditutup** (premis kedaluwarsa — masih mengklaim `…0011` belum ter-apply & `role_mappings` 38; alasan lengkap di komentar penutupnya) · #63 ditutup |
+
+> **Ambil hash head yang sebenarnya dari `git log`, bukan dari tabel ini.** Angka apa pun di dokumen
+> ini kedaluwarsa begitu commit berikutnya mendarat — termasuk commit yang memperbaiki baris ini.
 | **Live** | Supabase `CDPS SG` (`egddxfcnrtecheiykhlf`, `ap-southeast-1`) — **39 migrasi**, 53 tabel, `master_services` **32**, `role_mappings` **39**, `employees`/`employee_credentials`/`auth.users`/`auth.identities` **69/69/69/69** |
 | **Drift live↔repo** | ✅ **TERTUTUP.** `main` kini memuat `…0011`; live tidak lagi di depan repo |
 
