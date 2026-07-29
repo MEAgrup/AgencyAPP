@@ -1,6 +1,6 @@
 package main
 
-// CSV parsing for the two role-mapping-riil seed files (backend/seed/):
+// CSV parsing for the two role-mapping-riil seed files (supabase/seed/):
 // role_mappings_riil.csv (divisi,jabatan,division,level — 23 real HRIS rows,
 // DECISIONS.md 2026-07-17 batch-1) and layered_roles_riil.csv (employee_id,role).
 // Neither file carries a header row (decision: header/comments not required —

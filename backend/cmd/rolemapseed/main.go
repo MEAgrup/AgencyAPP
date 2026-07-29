@@ -1,6 +1,6 @@
 // Command rolemapseed loads the two role-mapping-riil canonical seed files
-// (backend/seed/role_mappings_riil.csv — 23 real HRIS divisi/jabatan -> CDPS
-// division/level mappings, and backend/seed/layered_roles_riil.csv — OD/
+// (supabase/seed/role_mappings_riil.csv — 23 real HRIS divisi/jabatan -> CDPS
+// division/level mappings, and supabase/seed/layered_roles_riil.csv — OD/
 // Director layered roles; see docs/DECISIONS.md entri 2026-07-17 "Role mapping riil batch-1") into role_mappings
 // and employee_layered_roles via internal/admin — UpsertRoleMapping /
 // SetLayeredRole only, so every write is validated and audited exactly as it
@@ -55,8 +55,8 @@ func main() {
 func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("rolemapseed", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	roleCSVPath := fs.String("role-csv", FindRoleMappingsCSV(), "path CSV role mapping riil (default: backend/seed/role_mappings_riil.csv)")
-	layeredCSVPath := fs.String("layered-csv", FindLayeredRolesCSV(), "path CSV layered role riil (default: backend/seed/layered_roles_riil.csv)")
+	roleCSVPath := fs.String("role-csv", FindRoleMappingsCSV(), "path CSV role mapping riil (default: supabase/seed/role_mappings_riil.csv)")
+	layeredCSVPath := fs.String("layered-csv", FindLayeredRolesCSV(), "path CSV layered role riil (default: supabase/seed/layered_roles_riil.csv)")
 	apply := fs.Bool("apply", false, "tulis ke DB (default: dry-run, WAJIB dry-run dulu)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: rolemapseed [--role-csv path] [--layered-csv path] [--apply]")
