@@ -1,6 +1,11 @@
 # HANDOFF — Cutover Sesi 6 (O41 ditemukan & 3 gap ditutup · gating sidebar #58 di-port · 2 migrasi RLS SUDAH di-apply)
 
-> **Dokumen standalone.** Mulai chat berikutnya dari file ini.
+> # ⛔ SUDAH DIGANTI — mulai dari `HANDOFF_CUTOVER_SESI7.md`
+>
+> Dokumen ini **arsip**. Penerusnya `docs/handoff/HANDOFF_CUTOVER_SESI7.md` sudah memuat semua yang
+> masih berlaku di sini, plus O41 #1 yang selesai, kelas bug bentuk respons (**O43**), dan audit
+> roster **O42**. Jangan pakai §0 di bawah sebagai posisi branch — sudah bergerak.
+>
 > Tanggal: 2026-07-29. Pendahulu: `HANDOFF_CUTOVER_SESI5.md`.
 
 ---
