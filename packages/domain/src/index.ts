@@ -58,6 +58,7 @@
 
 export * as auth from './auth';
 export * as employees from './employees';
+export * as admin from './admin';
 export * as demo from './demo';
 export * as leads from './leads';
 export * as sales from './sales';

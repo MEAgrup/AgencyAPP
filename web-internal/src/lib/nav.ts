@@ -106,6 +106,9 @@ const MAIN_LINKS: NavItem[] = [
   // (Phase 0 §9 — notifications are per-recipient) / MSL read is open to any
   // authenticated actor (only editing is gated: msl.canEditMasterServices).
   { href: '/', label: 'Dashboard' },
+  // Ungated on purpose: every authenticated employee must be able to reach their
+  // own password change — including one whose account is under a forced change.
+  { href: '/akun/password', label: 'Ganti Password' },
   { href: '/demo-tasks', label: 'Demo Tasks' },
   { href: '/notifications', label: 'Notifikasi' },
   { href: '/master-services', label: 'Master Service List' },

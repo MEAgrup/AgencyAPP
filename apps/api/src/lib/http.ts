@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { account, ads, board, campaign, client, creative, demo, finance, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
+import { account, admin, ads, auth, board, campaign, client, creative, demo, finance, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -69,7 +69,9 @@ export function mapError(err: unknown): Response {
     err instanceof livestream.ValidationError ||
     err instanceof campaign.ValidationError ||
     err instanceof marketing.ValidationError ||
-    err instanceof notification.ValidationError
+    err instanceof notification.ValidationError ||
+    err instanceof admin.ValidationError ||
+    err instanceof auth.PasswordPolicyError
   ) {
     return errorJson(err.message, 400); // exact BI [...] message (or internal sentinel)
   }
@@ -90,7 +92,8 @@ export function mapError(err: unknown): Response {
     err instanceof board.NotFoundError ||
     err instanceof livestream.NotFoundError ||
     err instanceof campaign.NotFoundError ||
-    err instanceof marketing.NotFoundError
+    err instanceof marketing.NotFoundError ||
+    err instanceof auth.EmployeeNotFoundError
   ) {
     return errorJson(err.message, 404);
   }
@@ -112,7 +115,9 @@ export function mapError(err: unknown): Response {
     err instanceof livestream.ForbiddenError ||
     err instanceof campaign.ForbiddenError ||
     err instanceof marketing.ForbiddenError ||
-    err instanceof portal.ForbiddenError
+    err instanceof portal.ForbiddenError ||
+    err instanceof admin.ForbiddenError ||
+    err instanceof auth.ForbiddenError
   ) {
     return errorJson(err.message, 403);
   }
@@ -138,7 +143,9 @@ export function mapError(err: unknown): Response {
     // contract. 409 with the verbatim message where BI applies.
     return errorJson(err.message, 409);
   }
-  if (err instanceof UnauthorizedError) {
+  if (err instanceof UnauthorizedError || err instanceof auth.OldPasswordError) {
+    // OldPasswordError is 401 like Go's handleChangePassword: the request was
+    // well-formed, the CURRENT password just did not match.
     return errorJson(err.message, 401);
   }
   if (err instanceof BadRequestError) {

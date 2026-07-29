@@ -50,7 +50,33 @@ export interface AdminEmployee {
 export interface EmployeeSyncResult {
   synced: number;
   deactivated: number;
+  reactivated: number;
   flagged: number;
+}
+
+/** One row of GET /auth/admin/credentials — credential STATUS, never material. */
+export interface CredentialInfo {
+  employee_id: string;
+  nama: string;
+  email: string;
+  divisi: string;
+  jabatan: string;
+  has_password: boolean;
+  must_change_password: boolean;
+  locked_until: string | null;
+  password_changed_at: string | null;
+}
+
+/**
+ * Result of POST /admin/employee-import. The employee source is an admin CSV
+ * upload, NOT an HRIS pull (DECISIONS OQ-4 — the HRIS endpoint was dropped), so
+ * this replaces the old `/admin/employee-sync` shape.
+ */
+export interface EmployeeImportResult {
+  source: string;
+  sync: EmployeeSyncResult;
+  provisioned: number;
+  linked: number;
 }
 
 export interface RoleMapping {

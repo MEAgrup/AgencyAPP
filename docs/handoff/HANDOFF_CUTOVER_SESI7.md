@@ -1,5 +1,11 @@
 # HANDOFF — Cutover Sesi 7 (O41 #1 selesai · kelas bug BENTUK respons ditemukan · O42 diperluas)
 
+> 🗄️ **ARSIP — jangan mulai dari dokumen ini.** Titik masuk berikutnya adalah
+> **`HANDOFF_CUTOVER_SESI8.md`**. Sesi 7→8 sudah menyelesaikan O44(a)(b)(c-A/B1) dan O43(a),
+> jadi §0/§3/§4 di bawah tidak lagi mencerminkan posisi branch maupun daftar tugas.
+> Yang masih berguna di sini: latar temuan O42/O43/O44 dan catatan jebakan §5.
+
+
 > **Dokumen standalone. Mulai chat berikutnya dari file ini** — tidak perlu membaca pendahulunya.
 > Tanggal: 2026-07-29. Pendahulu: `HANDOFF_CUTOVER_SESI6.md`.
 
@@ -146,12 +152,91 @@ tidak ada di roster.
 2. `role_mappings` di-manage lewat admin CDPS, atau di-derive dari sheet HR tiap sync?
 3. Rekonsiliasi **38** (live) vs **23** (`backend/seed/role_mappings_riil.csv`) vs **12**
    (`supabase/seed.sql`) — mana sumber kebenarannya?
-4. 🆕 Apakah MEA memang **belum punya** divisi Marketing (⇒ M1/M3 de-facto dijalankan Sales/Account,
-   PRD perlu dibaca ulang), atau divisi itu **ada** di HRIS dengan **nama lain** yang belum dipetakan?
-   → menentukan apakah O42 selesai dengan **satu baris mapping** atau dengan **revisi scope M1/M3**.
+4. ~~🆕 Apakah MEA memang **belum punya** divisi Marketing, atau divisi itu **ada** di HRIS dengan
+   **nama lain** yang belum dipetakan?~~ ✅ **DIJAWAB 2026-07-29 → ada, namanya `BUSINESS
+   DEVELOPMENT`.**
 
-### 3.2 🆕 O43 — paritas BENTUK respons
-Latar: §2.2. Yang butuh keputusan **pemilik**:
+**Jawaban (4) & apa yang berubah karenanya.** Pemilik mengonfirmasi divisi Marketing **ada** di HRIS
+di bawah nama `BUSINESS DEVELOPMENT`, dengan bukti employee `2504240539` (NIKEN SEPTA ARISANDHY,
+24-Apr-2025, jabatan `MARKETING STRATEGIST`). Jadi **O42 selesai dengan baris mapping, BUKAN revisi
+scope M1/M3** — arah PRD tidak berubah, M1/M3 tetap milik Marketing. Baris CSV
+`BUSINESS DEVELOPMENT`→`Marketing` (`role_mappings_riil.csv` 12–13) ternyata **benar secara
+pemetaan**, cuma tidak lengkap.
+
+Yang **belum** bisa ditutup — dan tidak bisa diverifikasi dari sandbox (nol kredensial live, gateway
+menolak `supabase.com`):
+
+- **`MARKETING STRATEGIST` tidak ada di satu pun dari tiga sumber mapping.** Karena grain-nya
+  **divisi×jabatan** (`uq_role_mapping`), satu baris **tidak** mengangkat jabatan lain. Yang
+  dibutuhkan = daftar jabatan aktif **lengkap** di bawah `BUSINESS DEVELOPMENT`, bukan satu baris.
+- 🔴 **Kontradiksi dengan audit roster `3818d4a`**, yang menyatakan *"divisi `BUSINESS DEVELOPMENT`
+  juga tidak ada di roster live"*. Tepat satu dari dua ini benar:
+  **(A)** klaim roster itu salah ⇒ angka **61 resolve / 7 tanpa mapping** perlu dihitung ulang; atau
+  **(B)** NIKEN belum ter-sync ke `public.employees` (atau `is_active=false` / `auth_user_id` kosong)
+  ⇒ menambah mapping **tidak** melahirkan aktor Marketing dan **M3-OA-6 tetap mati**, karena
+  `validateOwnerCandidate` mewajibkan kandidat **aktif**.
+
+> ⚠️ **Jangan `INSERT` mapping sebelum (A)/(B) dipisahkan.** Kalau (B) yang benar, barisnya jadi
+> yatim dan O42 **terlihat** selesai padahal M3 masih mati. Dua SELECT read-only ini memisahkannya:
+
+```sql
+-- (1) Apakah NIKEN benar-benar ada di CDPS live, aktif, dan bisa login?
+SELECT employee_id, nama, divisi, jabatan, status_aktif,
+       (auth_user_id IS NOT NULL) AS bisa_login
+FROM public.employees
+WHERE employee_id = '2504240539';
+
+-- (2) Semua pasangan divisi×jabatan AKTIF yang belum punya mapping
+--     (ini daftar baris yang sebenarnya perlu dibuat — bukan cuma MARKETING STRATEGIST)
+SELECT e.divisi, e.jabatan, count(*) AS karyawan_aktif
+FROM public.employees e
+LEFT JOIN public.role_mappings m
+       ON m.divisi = e.divisi AND m.jabatan = e.jabatan
+WHERE e.status_aktif AND m.id IS NULL
+GROUP BY 1, 2
+ORDER BY 1, 2;
+```
+
+> ⚠️ Kolomnya **`status_aktif`**, bukan `is_active` (`20260101000001_init.sql:14`). Versi pertama
+> kueri ini memakai `is_active` dan akan gagal dengan `column does not exist` — dikoreksi 2026-07-29.
+
+### ✅ Jawaban pemilik 2026-07-29 — (B): NIKEN belum ter-sync
+
+Kedua SQL di atas **tidak perlu dijalankan lagi untuk memilih (A)/(B)** — pemilik mengonfirmasi **(B)**.
+Konsekuensinya:
+
+- Audit roster `3818d4a` **tetap benar**; angka **68 aktif / 61 resolve / 7 sengaja tanpa mapping**
+  **tetap berlaku**. Tidak ada yang perlu dikoreksi di sana.
+- **`INSERT` mapping sendirian tidak menyelesaikan apa pun.** Barisnya jadi yatim dan **M3-OA-6 tetap
+  mati**, karena `validateOwnerCandidate` mewajibkan kandidat **aktif**.
+- **Urutan wajib: impor/sync karyawan DULU → mapping KEMUDIAN.** Bukan sebaliknya.
+- SQL (2) tetap berguna **setelah** impor, untuk menyusun daftar baris mapping yang benar-benar perlu
+  dibuat (grain divisi×jabatan; `division='Marketing'`, `level='staff'` untuk STRATEGIST). Marketing
+  **`lead`** tetap kosong sampai ada jabatan kepala BD aktif — itu yang dibutuhkan arm Marketing-lead
+  `leads.leadListScope`.
+
+> 🔴 **Penyebab akar O42 ternyata bukan keputusan yang belum diambil, tapi port yang belum
+> dikerjakan — lihat O44 §3.4.** Halaman admin `admin/employees` (111 baris) **dan**
+> `admin/role-mappings` (254 baris) **sudah ada** dan sudah ter-link di sidebar (`nav.ts:193-195`,
+> gate `director || od`), tapi **6 route yang keduanya panggil tidak dilayani `apps/api`**. Jadi
+> pertanyaan **(1)** dan **(2)** sebagian besar **sudah terjawab oleh kode yang ada**: pemiliknya
+> **Director/OD**, UI-nya **sudah dibangun**, modelnya **admin CDPS** (bukan derive-dari-sheet).
+> "SQL langsung ke produksi" bukan pilihan desain — itu **konsekuensi halaman mati**.
+
+**Yang masih butuh pemilik: hanya pertanyaan (3)** — rekonsiliasi **38** (live) vs **23** (CSV) vs
+**12** (`seed.sql`), mana sumber kebenarannya.
+
+### 3.2 O43 — paritas BENTUK respons · **(a) ✅ DIPUTUS 2026-07-29**
+Latar: §2.2.
+
+> ✅ **(a) diputus pemilik: proyeksi sempit DIPERTAHANKAN** (rekomendasi dijalankan). **Nol perubahan
+> kode** — `clientListRowToWire` tetap seperti sekarang. Alasan yang menentukan: **PRD tidak
+> mengadili pertanyaan ini** (M4 §6 hanya mengatur baris, bukan kolom), jadi `clientView` Go **bukan
+> spec** dan tidak ada oracle yang dilanggar; dan "paritas penuh" justru akan **menghapus**
+> `sales_pic_nama` yang dirender roster. Rinciannya di bawah — dibiarkan sebagai catatan sejarah
+> supaya keputusan ini tidak dibuka ulang tanpa konteks.
+
+Yang **dulu** butuh keputusan pemilik:
 
 - **(a)** `clientListRowToWire` sengaja **lebih sempit** dari `handleListClients` Go, yang merender
   `clientView` **PENUH** per baris. Memperlebarnya berarti **N+1** query platforms/allocations/
@@ -159,12 +244,107 @@ Latar: §2.2. Yang butuh keputusan **pemilik**:
   **100%** field yang FE benar-benar render. **Deviasi dari oracle Go ini perlu di-ack** — atau
   paritas penuh yang dimaui.
 
+  **Dua koreksi atas framing di atas (diverifikasi 2026-07-29, baca kodenya langsung):**
+
+  1. **"Lebih sempit" tidak akurat — ini proyeksi yang BERBEDA, bukan subset.** Diff sebenarnya
+     (`clientView` Go `client_handlers.go:19` vs `clientListRowToWire` `wire.ts:1639`):
+     **8 field sama** (`id · toko · nama_pic · kota · kategori · sales_pic_id · payment_intent ·
+     released_to_account_at`); **11 hanya di Go** (`link_toko · gmv_baseline · target_gmv ·
+     total_sales · marketing_budget · origin_campaign_id · commission_payment_pic_id ·
+     transaction_id · platforms · sales_allocation · services`); dan **3 hanya di TS** —
+     `sales_pic_nama`, `assigned_am_id`, `created_at` — yang **`clientView` Go tidak punya sama
+     sekali**. Jadi "paritas penuh" bukan sekadar menambah kolom: ia juga menuntut keputusan soal
+     3 field yang justru dipakai roster (nama PIC ditampilkan, bukan UUID-nya).
+  2. **PRD tidak mengadili pertanyaan ini.** **M4 §6 hanya mengatur BARIS** (siapa melihat klien
+     mana — own / allocation / division / OD / Director), dan **tidak menyebut daftar kolom roster
+     sama sekali**; §7.2 hanya mencantumkan *"Visibility (own clients vs all)"*. Karena house rule
+     "PRD yang menang" hanya berlaku bila PRD berbicara, `clientView` Go di sini **bukan spec** —
+     ia satu implementasi. Maka (a) **bukan** pelanggaran spec, melainkan **pilihan rekayasa
+     murni**, dan bobot keputusannya turun: yang ditanyakan cuma *biaya query vs paritas simetris*.
+
 Sisanya kerja **developer**, bukan keputusan:
 - **(b)** **60+ route GET lain belum pernah diaudit** terhadap tipe FE-nya. Dua ditemukan hanya karena
   tiket ini menyentuh M4 ⇒ jumlah sebenarnya **tidak diketahui, asumsikan >0**.
 - **(c)** Bikin **test paritas-bentuk otomatis**: diff kunci wire mapper terhadap `interface` di
   `web-internal/src/lib/*.ts`, seperti `route-parity.test.ts` men-diff path. Satu-satunya cara kelas
   ini berhenti lolos CI.
+
+### 3.4 O44 — ✅ (a) & (b) SELESAI 2026-07-29 · (c) masih butuh pemilik
+
+> ✅ **(a)** `feCalls()` kini rekursif atas seluruh `web-internal/src` (`.ts` **dan** `.tsx`).
+> ✅ **(b)** 6 route admin diport ⇒ `/admin/employees` + `/admin/role-mappings` **hidup**.
+> ⏳ **(c)** 3 route auth — **keputusan pemilik**: diport, atau Supabase Auth client-side? Saat ini
+> nol pemakaian `updateUser`/`resetPasswordForEmail` di FE ⇒ **ganti-password tidak tersedia**.
+>
+> Yang diport: `GET /admin/employees` · `GET|POST /admin/role-mappings` ·
+> `DELETE /admin/role-mappings/{id}` · `GET|POST /admin/layered-roles`. Modul domain baru
+> `packages/domain/src/admin.ts` (mirror `backend/internal/admin/roles.go`), 3 wire mapper, error
+> terdaftar 422/403.
+>
+> **`POST /admin/employee-sync` sengaja TIDAK diport** (OQ-4: pull HRIS ditinggalkan). Yang
+> diperbaiki **FE**-nya — halaman Karyawan kini mengunggah CSV ke `POST /admin/employee-import`.
+>
+> **Jalur baca yang menyimpang dari house rule, dengan alasan:** `role_mappings` +
+> `employee_layered_roles` default-deny by design (`rls_baseline` §5, SELECT dicabut dari
+> `authenticated`) ⇒ `readAsActor` akan mengembalikan **nol baris**, jadi keduanya dibaca lewat
+> client privileged dengan gate Director/OD di app layer, mirror Go. `employees` tetap lewat
+> `readAsActor` (punya `employees_select`).
+>
+> **Verifikasi:** domain **451** (+15) · api **192** (+6) · web-internal 26 · core 112 · db 9 ·
+> 4 invariant SQL **PASS** · typecheck bersih · seed utuh (10/12).
+>
+> ⚠️ **Jebakan test — jangan diulang.** Assertion audit lulus sendirian lalu **gagal di suite
+> penuh**: `audit_log` append-only (`forbid_mutation` memblokir DELETE) ⇒ `afterEach` tak bisa
+> membersihkannya dan baris menumpuk antar-run. Diperbaiki dengan **watermark `max(id)`** sebelum
+> aksi, bukan dengan melemahkan assertion.
+
+Latar temuan aslinya:
+
+### 3.4.1 🔴 O44 — `route-parity.test.ts` buta terhadap panggilan API dari halaman
+
+**Lubangnya.** `feCalls()` (`route-parity.test.ts:138-145`) melakukan `readdirSync(FE_LIB)` dengan
+`FE_LIB = web-internal/src/lib` — **tidak rekursif**, **tidak menyentuh `src/app/**`**. Ada **25
+panggilan `api.*` di 11 berkas halaman** yang tak pernah masuk hitungan paritas. Jadi `KNOWN_GAPS`
+**bukan** buku besar yang lengkap: ia hanya melacak panggilan yang lewat `src/lib`.
+
+**Yang tersembunyi di baliknya — 6 route dipanggil halaman, tidak dilayani `apps/api`:**
+
+| Route | Pemanggil |
+|---|---|
+| `GET /admin/role-mappings` · `POST /admin/role-mappings` · `DELETE /admin/role-mappings/{}` | `admin/role-mappings/page.tsx` (254 baris) |
+| `GET /admin/employees` · `POST /admin/employee-sync` · `POST /admin/layered-roles` | `admin/employees/page.tsx` (111 baris) + halaman role-mappings |
+
+⇒ **dua halaman admin mati total di produksi**, keduanya ter-link di sidebar (`nav.ts:193-195`, gate
+`director || od`). **Ini penyebab akar O42.**
+
+**Audit route penuh Go↔TS (2026-07-29).** 194 route Go terdaftar vs **182** method TS ⇒ **16 gap
+fungsional**:
+
+| Kelompok | Jml | Isi |
+|---|---|---|
+| `KNOWN_GAPS` (sudah terlacak) | 6 | §4.1 |
+| Admin, dipanggil halaman, **tak terlacak** | 6 | tabel di atas |
+| Admin, tidak dipanggil FE | 1 | `GET /admin/layered-roles` |
+| Auth | 3 | `POST /auth/change-password` · `POST /auth/admin/set-password` · `GET /auth/admin/credentials` |
+
+**Dua yang TERLIHAT gap tapi bukan:** `GET /auth/me` → di-rename **`GET /me`** (paritas fungsional ✓);
+`POST /admin/employee-sync` → digantikan **`POST /admin/employee-import`** per **OQ-4** — **tapi FE
+masih memanggil nama Go yang lama**, jadi tetap harus diperbaiki (alias route ATAU perbaiki FE).
+
+> ⚠️ **Jebakan metodologis — jangan ulangi.** Deteksi method HARUS mencakup `export const POST =
+> handler`, bukan hanya `export async function POST`. Pola pertama dipakai mis.
+> `marketing/campaigns/[id]/performance/budget/route.ts:16-17`, dan sempat menghasilkan **2 false
+> positive** di audit ini sebelum dikoreksi.
+
+**Kerja yang dibutuhkan:** **(a)** buat `feCalls()` rekursif atas **seluruh** `web-internal/src` —
+tanpa ini setiap halaman baru yang memanggil API langsung otomatis luput lagi; **(b)** port 6 route
+admin; **(c)** keputusan pemilik soal 3 route auth — diport, atau digantikan Supabase Auth
+client-side? Saat ini **tidak ada** pemakaian `updateUser`/`resetPasswordForEmail` di
+`web-internal/src`, jadi **belum ada penggantinya**: ganti-password de-facto **tidak tersedia** bagi
+pengguna.
+
+**Memblokir C-04** — dua halaman yang justru dibutuhkan untuk menyiapkan aktor produksi (impor
+karyawan, atur role-mapping) tidak berfungsi.
 
 ### 3.3 Sisa yang lain
 | # | Isi |
