@@ -1,7 +1,12 @@
-# HANDOFF — Cutover Sesi 8
+# HANDOFF — Cutover Sesi 8 · 📦 ARSIP
 
-> Titik masuk **standalone**. Dokumen sesi 7 (`HANDOFF_CUTOVER_SESI7.md`) masih berguna sebagai
-> latar temuan, tapi posisi branch/PR-nya sudah bergerak — **mulai dari dokumen ini.**
+> ⚠️ **DOKUMEN INI ARSIP. Titik masuk sekarang: [`HANDOFF_CUTOVER_SESI9.md`](HANDOFF_CUTOVER_SESI9.md).**
+>
+> Posisi branch/PR di sini sudah **kedaluwarsa**: PR #66 **dan** #67 sudah merge, `main` = `c0e65f1`,
+> dan drift live-di-depan-`main` (§2.1) sudah **tertutup**. O42 (§2.2) sudah **dieksekusi ke live**.
+> Yang masih berguna dari dokumen ini: latar temuan O44 dan detail arsitektural auth/GoTrue.
+>
+> Dokumen sesi 7 (`HANDOFF_CUTOVER_SESI7.md`) juga arsip.
 
 ## 0. Posisi persis
 
