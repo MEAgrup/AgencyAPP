@@ -165,6 +165,65 @@ DO $$ BEGIN
 END $$;
 
 RESET ROLE;
+
+-- ---------------------------------------------------------------------------
+-- 14-17. O41 — M5 verification-queue read scope. The baseline policies gave
+--        Finance read access only through `jwt_is_lead() AND jwt_division() =
+--        'Finance'`, i.e. LEAD ONLY, while Go `trxVisibility` grants Finance
+--        "(staff/lead) -> all (they own the queue)" and `canVerifyPayment`
+--        (M5 §8.1) lets Finance STAFF set Payment Status. Under the lead-only
+--        policy, porting the read path to `readAsActor` hands Finance staff an
+--        EMPTY queue with no error — and a Finance staffer could verify a
+--        payment they cannot read (writes go through SECURITY DEFINER RPCs).
+--        20260102000010 restores parity; without it, check 15 fails.
+-- ---------------------------------------------------------------------------
+
+-- Fixture (as superuser): one client + a transaction awaiting verification,
+-- created by Sales, on a client no Finance actor owns.
+INSERT INTO clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline,
+                     target_gmv, sales_pic_id, commission_payment_pic_id, created_by)
+VALUES ('CLI-RLS-0001', 'rls fixture pic', 'Toko RLS', 'Jakarta', 'https://shopee/rls', 'Fashion',
+        1000000, 2000000, 'EMP-RLS-SLS1', 'EMP-RLS-SLS1', 'EMP-RLS-SLS1');
+INSERT INTO transactions (id, client_id, payment_intent_scheme, total_agreed_value, payment_status, created_by)
+VALUES ('TRX-RLS-0001', 'CLI-RLS-0001', 'Termin', 9000000, '[Menunggu Verifikasi]', 'EMP-RLS-SLS1');
+
+SET LOCAL ROLE authenticated;
+
+-- 14. A foreign-division staffer must not see the transaction at all.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-NOBODY","division":"Creative","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM transactions WHERE id='TRX-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS transactions: foreign division must not see the transaction'; END IF;
+END $$;
+
+-- 15. Finance STAFF sees it — they are the verification queue's primary user
+--     (Go trxVisibility: Finance staff/lead -> all). Fails without …0010.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-FIN1","division":"Finance","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM transactions WHERE id='TRX-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS transactions: Finance STAFF must see the queue (Go trxVisibility parity, O41)'; END IF;
+END $$;
+
+-- 16. Finance lead keeps its access (the arm that already existed).
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-FINLEAD","division":"Finance","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM transactions WHERE id='TRX-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS transactions: Finance lead must see the queue'; END IF;
+END $$;
+
+-- 17. Widening Finance must not widen anyone else: an Account staffer who is not
+--     the assigned AM of this client still sees nothing.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-AM9","division":"Account","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM transactions WHERE id='TRX-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS transactions: non-owning Account staff must not see the transaction'; END IF;
+END $$;
+
+RESET ROLE;
 ROLLBACK;
 
 \echo 'rls_checks: PASS'

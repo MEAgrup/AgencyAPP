@@ -543,6 +543,33 @@ export async function markContacted(
   });
 }
 
+/**
+ * markLost drives an attempt to `Closed-Lost` (M0 §5). Owner (or Sales
+ * Lead/Director) only, exactly as `markContacted`.
+ *
+ * Which source states may reach it is the engine's call, not this function's:
+ * `sm_edges` allows it from `Negotiation - Rejected` / `- Approved` /
+ * `- Auto Approved` and blocks everything else with the default BI message
+ * (migration 20260102000002 §1). Mirrors Go `Service.MarkLost`.
+ *
+ * `Closed-Lost` is a TERMINAL attempt status, so recording it is what releases
+ * the lead: M1's dedup treats a non-terminal attempt as "sedang diproses oleh
+ * sales lain", and `open_attempt_count` counts only non-terminal ones.
+ */
+export async function markLost(
+  sql: Sql,
+  actor: Actor,
+  attemptId: string,
+): Promise<statemachine.TransitionResult> {
+  return withTransaction(sql, async (tx) => {
+    const a = await loadAttempt(tx, attemptId, true);
+    if (!canWriteAttempt(actor, a.ownerId)) {
+      throw new ForbiddenError();
+    }
+    return attemptTransition(executors(tx).sm, attemptId, STATUS_CLOSED_LOST, actor);
+  });
+}
+
 /** The Qualified Lead Form client draft + selected services (M0 §4). */
 export interface QualifiedForm {
   namaPic: string;

@@ -1,5 +1,12 @@
 # HANDOFF — Cutover Sesi 5 (C-04 butir MSL ✅ · #59/#60/#61 ter-merge · sisa: 1 migrasi + keputusan aktor)
 
+> ## ⛔ SUDAH DIGANTI — mulai dari `HANDOFF_CUTOVER_SESI6.md`
+> Sesi 6 sudah berjalan di atas dokumen ini. Titik masuk yang benar sekarang:
+> **`docs/handoff/HANDOFF_CUTOVER_SESI6.md`** (branch `claude/handoff-sesi-5-inmsq9`, PR **#62**).
+> Perubahan penting sejak dokumen ini ditulis: §1 sekarang **dua** migrasi RLS yang menunggu apply
+> (0009 **dan** 0010 yang baru), dan §5 (PR #58) sudah ditindaklanjuti. File ini tetap berguna
+> sebagai arsip konteks C-04.
+
 > **Dokumen standalone.** Mulai chat berikutnya dari file ini.
 > Tanggal: 2026-07-28. Pendahulu: `HANDOFF_CUTOVER_SESI3.md` → `HANDOFF_CUTOVER_SESI4.md`.
 
@@ -36,6 +43,15 @@ tapi policy pendampingnya belum ada di live. Selama itu belum di-apply, `leads_s
 satu arm: **Marketing staff tidak bisa membaca lead yang berasal dari campaign miliknya sendiri** —
 lebih ketat daripada sistem Go yang sudah lolos UAT W1/W3. Bukan lubang keamanan, tapi **regresi
 fungsional yang terasa oleh pengguna Marketing**.
+
+> **UPDATE sesi 6: sekarang ADA DUA migrasi RLS yang menunggu window deploy.** Selain 0009 di
+> bawah, `20260102000010_rls_finance_staff_queue_scope.sql` memulihkan paritas RLS M5 — policy
+> baseline hanya memberi baca transaksi ke Finance **lead**, padahal Go `trxVisibility` + M5 §8.1
+> memberi Finance **staff** juga (mereka pemilik antrean verifikasi). Efeknya hari ini: Finance staff
+> bisa **mem-verifikasi pembayaran yang tidak bisa ia baca**; dan begitu `GET /finance/queue`
+> di-port, antreannya akan **kosong tanpa error**. Apply **berurutan 0009 → 0010**, lalu verifikasi
+> dengan probe SQL di komentar kepala tiap migrasi. Blast radius hari ini nol (O33 — belum ada aktor
+> Finance). Detail + bukti empiris: entri Decided 2026-07-28 di `docs/DECISIONS.md`.
 
 **Cara menutup** (butuh akses deployment; sandbox Claude tidak bisa menyentuh `CDPS SG` — lihat §4):
 
@@ -113,7 +129,25 @@ Tidak ada yang bisa didorong maju oleh developer/Claude sendiri. Urut dari yang 
 FINAL untuk semua 32 layanan; komisi Rp0 adalah hasil sah.
 
 ### 3.2 Sisa C-04 yang bersifat pekerjaan
-1. **Migrasi 0009 ke live** — §1 di atas. Paling mendesak.
+0. 🔴 **BARU (sesi 6) — port 7 endpoint yang masih hilang di `apps/api` (O41).** Ini **kerusakan produksi**,
+   bukan utang rapi: `next.config.ts` memproksi ke `agency-app-api` (TS) dan Go sudah "archived
+   read-only", jadi halaman `/finance` + detail transaksi **404 sekarang**, `Closed-Lost` M0 tidak
+   bisa dicatat, dan impor massal lead Marketing tidak ada. Diukur dengan mendiff route Go (194) vs
+   TS (178) vs panggilan FE, tiap kandidat diverifikasi satu per satu. Daftar lengkap + urutan
+   dampak + nama handler Go pendampingnya ada di **O41**; buku besarnya dijaga test
+   `apps/api/src/lib/route-parity.test.ts` (`KNOWN_GAPS`) yang gagal kalau ada gap baru **dan**
+   kalau ada entri yang ternyata sudah dilayani. Mulai dari `payment-intent` → `finance/queue` →
+   `transactions/{id}` (urutan hulu-ke-hilir; `schedule` sia-sia tanpa `payment-intent`).
+   Sudah ditutup sesi 6: route reminder M5 yang salah path (`/reminders` → `/finance/reminders`)
+   dan **`POST /attempts/{id}/lost`** (edge Closed-Lost M0 — tanpa itu attempt gagal tak bisa
+   mencapai status terminal, jadi leadnya terkunci permanen ke satu sales dan pool tak pernah bebas).
+   **Cara menjalankan test DB-backed di sandbox** (sesi 6 sudah membuktikannya, jangan cari-cari lagi):
+   `pg_ctlcluster 16 main start` → `DROP/CREATE DATABASE cdps` → apply 36 migrasi berurutan →
+   `supabase/seed.sql` → `DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/cdps" npx vitest run`
+   di `packages/domain`. Hasilnya **426 hijau**, bukan 285 skip. Catatan: notifikasi tak bisa dihapus
+   (house rule #8), jadi assertion yang menghitung notifikasi **wajib** di-scope ke `entity_id` milik
+   test itu — kalau tidak, run kedua di DB yang sama gagal palsu (sudah diperbaiki di `finance.test.ts`).
+1. **Migrasi 0009 ke live** — §1 di atas. Paling mendesak dari sisi data.
 2. **Import lead historis (O22)** — Pilihan B: `Qualify` ATAU prospek `Hot/Warm`, 6 bulan terakhir.
    Aturan sudah tertulis di DECISIONS 2026-07-10; sumber datanya belum masuk.
 3. **3 SKIP C-03** — perintah lengkap di `HANDOFF_CUTOVER_SESI3.md` §5. Butuh mesin yang boleh
@@ -172,7 +206,31 @@ memandu.
 
 ---
 
-## 5. ⚠️ PR #58 — butuh keputusan, JANGAN di-merge tanpa itu
+## 5. ⚠️ PR #58 — SUDAH DITINDAKLANJUTI (port sidebar selesai; #58 sendiri masih terbuka)
+
+> **UPDATE 2026-07-28 (sesi 6).** Rekomendasi opsi 1 di bawah **sudah dijalankan**: bagian
+> `web-internal` #58 di-port ke `main` lewat branch `claude/handoff-sesi-5-inmsq9`
+> (lihat entri Decided 2026-07-28 "Gating menu sidebar per divisi" di `docs/DECISIONS.md`).
+>
+> - Tabel gate pindah ke modul murni **`web-internal/src/lib/nav.ts`** (`visibleNav(role)`);
+>   `Sidebar.tsx` nol logika izin. **26 test per-role** di `nav.test.ts`.
+> - **`web-internal` sebelumnya tidak punya test runner sama sekali** — ditambah `vitest`
+>   + script `test`/`typecheck` + step CI di job `web-internal`. Ini yang membuat DoD
+>   "permission tests per role" akhirnya bisa dipenuhi di FE.
+> - **Dua koreksi terhadap tabel #58** (jangan port verbatim kalau ada yang mengulang):
+>   `/creative` & `/ads` di #58 terlalu KETAT (menyembunyikan dari Account lead yang
+>   `listDivisionQueue` memang izinkan), `/kol` & `/livestream` terlalu LONGGAR (Account
+>   semua level, padahal lead saja).
+> - **Bagian `backend/` #58 diabaikan** (Go beku) dan bagian "Sales staff lihat lead sendiri"
+>   **tidak** di-port — itu perubahan perilaku yang kini jadi **O40** (butuh keputusan
+>   Sales Head/pemilik). Kolom "Didaftarkan oleh" ikut ke tiket O40 yang sama.
+> - **#58 sengaja TIDAK ditutup oleh sesi ini** — penutupan PR orang lain diserahkan ke
+>   pemilik. Sudah dikomentari di #58 dengan penunjuk ke PR pengganti.
+> - **Temuan sampingan yang lebih berat: O41** — 5 endpoint M5 Finance yang dipanggil FE
+>   tidak ada / salah prefix di `apps/api` (`/finance/queue`, `GET /transactions/{id}`,
+>   `POST /transactions/{id}/schedule`, `/finance/reminders[/scan]`). Jalur uang. Baca O41.
+
+### Konteks asli (arsip)
 
 **#58** (`claude/sales-staff-access-leads-bdmk5e`, sudah ready, bukan draft): "Sales staff lihat lead
 sendiri + sembunyikan menu lintas-divisi". Dibuat sesi lain, base `main` yang **sudah basi**

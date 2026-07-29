@@ -29,6 +29,7 @@ import {
   IncompleteError,
   listAttempts,
   markContacted,
+  markLost,
   NotFoundError,
   MSG_MAX_SERVICES,
   NotClosableError,
@@ -319,6 +320,65 @@ describeDb('markContacted', () => {
   it('denies a non-owner staff (ForbiddenError)', async () => {
     const { attempt } = await leads.register(sql, budi(), { leadName: 'ABC', phoneNumber: uniquePhone() });
     await expect(markContacted(sql, andi(), attempt.id)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+});
+
+describeDb('markLost', () => {
+  it('drives Negotiation - Auto Approved -> Closed-Lost for the owner', async () => {
+    const svc = await seedService('SVC-ZZ-LOST');
+    const attemptId = await autoApprovedAttempt(budi(), svc);
+    const res = await markLost(sql, budi(), attemptId);
+    expect(res.ok).toBe(true);
+    const row = await sql<{ status: string }[]>`select status from prospect_attempts where id = ${attemptId}`;
+    expect(row[0].status).toBe('Closed-Lost');
+  });
+
+  it('denies a non-owner staff (ForbiddenError)', async () => {
+    const svc = await seedService('SVC-ZZ-LOST-DENY');
+    const attemptId = await autoApprovedAttempt(budi(), svc);
+    await expect(markLost(sql, andi(), attemptId)).rejects.toBeInstanceOf(ForbiddenError);
+    // A denied write must not have moved the attempt.
+    const row = await sql<{ status: string }[]>`select status from prospect_attempts where id = ${attemptId}`;
+    expect(row[0].status).toBe('Negotiation - Auto Approved');
+  });
+
+  it('blocks an edge the machine does not allow (Contacted) with a BI message, leaving status put', async () => {
+    // sm_edges has no Contacted -> Closed-Lost edge; the engine must refuse it
+    // rather than this function deciding which sources are legal.
+    const attemptId = await contactedAttempt(budi());
+    const res = await markLost(sql, budi(), attemptId);
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.message).toMatch(/^\[.*\]$/); // verbatim BI, bracketed
+    }
+    const row = await sql<{ status: string }[]>`select status from prospect_attempts where id = ${attemptId}`;
+    expect(row[0].status).toBe('Contacted');
+  });
+
+  it('releases the lead: Closed-Lost is terminal, so dedup stops reporting an open attempt', async () => {
+    // This is the operational point of the edge. While the attempt is
+    // non-terminal, M1 dedup reports it as "sedang diproses oleh sales lain" and
+    // no one else can register/claim the lead — so without this transition the
+    // lead stays locked to one salesperson forever.
+    const svc = await seedService('SVC-ZZ-LOST-REL');
+    const phone = uniquePhone();
+    const { attempt } = await leads.register(sql, budi(), { leadName: 'Alpha Lock', phoneNumber: phone });
+    await markContacted(sql, budi(), attempt.id);
+    await submitQualifiedForm(sql, budi(), attempt.id, {
+      namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta', linkToko: 'https://shopee/alpha',
+      kategori: 'Fashion', platform: 'Shopee', gmvBaseline: '50000000', targetGmv: '80000000',
+      services: [{ masterServiceId: svc, quantity: 1 }],
+    });
+    await submitNegotiation(sql, budi(), attempt.id, [], true);
+
+    const norm = leads.normalizePhone(phone);
+    const locked = await leads.matchByPhone(sql, norm);
+    expect(locked?.openAttempts.map((a) => a.ownerEmployeeId)).toEqual([budi().employeeId]);
+
+    expect((await markLost(sql, budi(), attempt.id)).ok).toBe(true);
+
+    const released = await leads.matchByPhone(sql, norm);
+    expect(released?.openAttempts).toEqual([]);
   });
 });
 

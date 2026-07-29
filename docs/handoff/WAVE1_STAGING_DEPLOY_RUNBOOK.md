@@ -153,7 +153,7 @@ curl -s "$NEXT_PUBLIC_SUPABASE_URL/auth/v1/token?grant_type=password" \
   -H "apikey: $NEXT_PUBLIC_SUPABASE_ANON_KEY" -H 'content-type: application/json' \
   -d '{"email":"fajar@mea.co.id","password":"'"$PILOT_PW"'"}' | jq -r .access_token
 # pakai token ke apps/api
-curl -s "$BACKEND_URL/api/v1/reminders" -H "Authorization: Bearer <access_token>"
+curl -s "$BACKEND_URL/api/v1/finance/reminders" -H "Authorization: Bearer <access_token>"
 ```
 Klaim di JWT harus berisi `app_metadata` CDPS (bukti hook §2.3 aktif). Jika `app_metadata`
 kosong → hook belum dipilih di Dashboard.

@@ -1,5 +1,5 @@
 /**
- * POST /api/v1/reminders/scan — M5 §6 / §7 Rule 3: run the reminder scan
+ * POST /api/v1/finance/reminders/scan — M5 §6 / §7 Rule 3: run the reminder scan
  * (installment overdue transitions + fire-once due / contract notifications).
  * A batch job normally run on a schedule; here it is exposed as an
  * SPV/Head-Finance- or Director-triggered action. Ports Go's ScanReminders.
