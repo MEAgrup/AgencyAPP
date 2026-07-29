@@ -23,7 +23,7 @@ import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 /** Authenticated employee + resolved role (from @cdps/core permission). */
 export type Actor = permission.Actor;
 
-/** brief_task machine (seeded in 20260102000002_statemachine.sql). */
+/** brief_task machine (seeded in 20260723055732_statemachine.sql). */
 export const DEMO_MACHINE = 'brief_task';
 /** brief_task initial state. */
 export const DEMO_INITIAL_STATUS = '[To Do]';

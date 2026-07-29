@@ -44,7 +44,7 @@
    siap. Perlu keputusan + implementasi (pilih SATU):
    - **(A)** Tambah di `apps/api`: `POST /api/v1/auth/login` (validasi `employee_credentials`
      bcrypt → mint sesi/JWT), `/auth/logout`, `GET /api/v1/me` → cocok dengan frontend
-     yang ada. (Auth lokal CDPS, sejalan `20260101000037_local_auth.sql`.), **atau**
+     yang ada. (Auth lokal CDPS, sejalan `20260722060454_local_auth.sql`.), **atau**
    - **(B)** Rewire `web-internal` ke Supabase GoTrue client (login → `access_token`),
      kirim `Authorization: Bearer` ke apps/api yang sudah memverifikasinya.
 
@@ -171,5 +171,5 @@ di `WAVE1_EXIT_UAT_REPORT_TEMPLATE.md`; keputusan go/no-go Wave 2 → `docs/DECI
 - **Jangan** pakai project produksi untuk UAT; staging = throwaway.
 
 ## Referensi
-- Auth internals: `supabase/migrations/20260102000004_supabase_auth.sql` (hook, `import_employee_credentials`, `set_employee_banned`), `docs/handoff/AUTH_UAT_RUNBOOK.md`.
+- Auth internals: `supabase/migrations/20260723071013_supabase_auth.sql` (hook, `import_employee_credentials`, `set_employee_banned`), `docs/handoff/AUTH_UAT_RUNBOOK.md`.
 - Pilot seed: `supabase/uat/pilot_seed.sql`. UAT skenario: `WAVE1_EXIT_UAT_RUNBOOK.md`. Dry-run: `WAVE1_EXIT_UAT_REPORT_AUTOMATED_20260723.md`.

@@ -35,7 +35,7 @@
 -- ---------------------------------------------------------------------------
 -- 0. Portabilitas: role `supabase_auth_admin` (pemilik eksekusi hook di GoTrue)
 --    ada di Supabase; buat shim bila absen (CI/lokal). Role lain + schema auth +
---    auth.jwt() sudah dibuat migrasi RLS (20260102000003) yang jalan lebih dulu.
+--    auth.jwt() sudah dibuat migrasi RLS (20260723064438) yang jalan lebih dulu.
 -- ---------------------------------------------------------------------------
 DO $$
 BEGIN

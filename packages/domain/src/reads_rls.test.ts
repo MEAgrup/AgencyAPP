@@ -5,7 +5,7 @@
  * is BYPASSRLS: it proves the SQL is right but says nothing about what a logged
  * -in employee may see. That gap is exactly how O37 survived — `apps/api` read
  * through the same privileged connection, so the policies in
- * 20260102000003_rls_baseline.sql never ran and any authenticated caller could
+ * 20260723064438_rls_baseline.sql never ran and any authenticated caller could
  * read every lead, client and transaction.
  *
  * These tests run the read models through `withClaims` — the identical role

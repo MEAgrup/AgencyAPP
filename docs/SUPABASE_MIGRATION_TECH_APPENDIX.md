@@ -89,10 +89,89 @@ Alasan:
 ### A.6 Strategi penomoran ulang migrasi via `supabase/migrations`
 
 - Supabase CLI menuntut file migrasi bernama `<timestamp>_<slug>.sql` (format `YYYYMMDDHHMMSS`), berbeda dari konvensi Go-migrate `000N_slug.up.sql`/`.down.sql` yang dipakai backend lama.
-- **Rekomendasi:** satu migrasi Postgres BARU per migrasi MySQL lama, **urut dan diberi timestamp sintetis berurutan** yang meniru urutan asli (mis. migrasi `0001_init` → `20260101000001_init.sql`, `0002_wave1_money_path` → `20260101000002_wave1_money_path.sql`, dst, hingga `0037_local_auth` → `20260101000037_local_auth.sql`) — supaya sejarah 37 file lama tetap terbaca 1:1 di `git log`/review, dan setiap migrasi tetap membawa komentar asli (banyak keputusan produk didokumentasikan sebagai komentar SQL panjang, JANGAN dihapus saat port — itu bagian dari `docs/DECISIONS.md`/PRD trail).
+- **Rekomendasi:** satu migrasi Postgres BARU per migrasi MySQL lama, **urut dan diberi timestamp sintetis berurutan** yang meniru urutan asli (mis. migrasi `0001_init` → `20260722053824_init.sql`, `0002_wave1_money_path` → `20260722053923_wave1_money_path.sql`, dst, hingga `0037_local_auth` → `20260722060454_local_auth.sql`) — supaya sejarah 37 file lama tetap terbaca 1:1 di `git log`/review, dan setiap migrasi tetap membawa komentar asli (banyak keputusan produk didokumentasikan sebagai komentar SQL panjang, JANGAN dihapus saat port — itu bagian dari `docs/DECISIONS.md`/PRD trail).
 - **JANGAN** menggabungkan (squash) 37 file jadi satu migrasi besar — histori per-cluster (Sprint 0, Wave 1 money path, Wave 2 M6/M12/M7-M10, Wave 3 M2/M3/M13/M14) adalah dokumentasi build-order yang bernilai (CLAUDE.md "Build order — do not jump ahead"); mempertahankan 1:1 memudahkan audit "migrasi mana yang mengimplementasikan modul mana".
-- Migrasi *tambahan* untuk hal yang baru dibutuhkan stack Postgres (fungsi `set_updated_at()`, fungsi `ident_next()`, RLS policy per tabel, trigger immutability versi Postgres) ditulis sebagai file-file BARU **setelah** timestamp `20260101000037...` — bukan disisipkan ke tengah 37 file port, supaya jelas mana "port skema lama" vs mana "penambahan native Postgres/Supabase".
+- Migrasi *tambahan* untuk hal yang baru dibutuhkan stack Postgres (fungsi `set_updated_at()`, fungsi `ident_next()`, RLS policy per tabel, trigger immutability versi Postgres) ditulis sebagai file-file BARU **setelah** timestamp `20260722060454...` — bukan disisipkan ke tengah 37 file port, supaya jelas mana "port skema lama" vs mana "penambahan native Postgres/Supabase".
 - Down-migration: `.down.sql` lama (asumsi ada, tidak diminta dibaca tapi konsisten pola go-migrate) → Supabase CLI modern tidak selalu memakai pasangan up/down secara default (branching + `supabase db diff` biasa dipakai), tapi kalau tim ingin mempertahankan reversibilitas eksplisit, simpan sebagai kombinasi migrasi maju yang idempotent + backup sebelum `db reset`, bukan bergantung file down manual.
+
+---
+
+### A.7 Penyelarasan versi repo ↔ riwayat remote (dieksekusi 2026-07-29)
+
+Sampai 2026-07-29 penomoran di `supabase/migrations/` (`20260101…`/`20260102…`) **tidak pernah
+cocok** dengan versi yang tercatat di `supabase_migrations.schema_migrations` milik `CDPS SG`
+(`202607…`). Sebabnya historis: deploy selalu per-migrasi lewat `apply_migration`, yang
+memberi versi **timestamp saat apply** dan mengabaikan nama berkas repo. Selama tidak ada yang
+menjalankan `supabase db push` hal itu tidak menggigit — tapi begitu dijalankan, CLI melihat
+39 versi lokal yang tak dikenal remote dan mencoba **meng-apply ulang semuanya** di atas skema
+yang sudah terisi.
+
+Ditutup dengan arah yang sama seperti O38 opsi (A): **repo mengikuti live.** 39 berkas
+di-rename ke versi remote, dipetakan **1:1 berdasarkan nama migrasi** (bukan urutan, bukan
+tebakan) — 39/39 cocok. Urutan lexicographic lestari, jadi `for f in $(ls
+supabase/migrations/*.sql | sort)` di CI tetap menerapkan urutan yang sama.
+
+| Lama (repo) | Baru (= versi live) | Nama |
+|---|---|---|
+| `20260101000000` | `20260722052710` | `pg_foundation` |
+| `20260101000001` | `20260722053824` | `init` |
+| `20260101000002` | `20260722053923` | `wave1_money_path` |
+| `20260101000006` | `20260722055205` | `qualified_forms` |
+| `20260101000010` | `20260722055221` | `briefs_stub` |
+| `20260101000011` | `20260722055237` | `payment_verifications` |
+| `20260101000012` | `20260722055255` | `reminders_bermasalah` |
+| `20260101000013` | `20260722055312` | `client_dormant` |
+| `20260101000014` | `20260722055336` | `msl_calculator` |
+| `20260101000020` | `20260722055400` | `account_am_assignment` |
+| `20260101000021` | `20260722055421` | `strategy_plan` |
+| `20260101000022` | `20260722055450` | `briefs_full` |
+| `20260101000023` | `20260722055518` | `complaints` |
+| `20260101000024` | `20260722055539` | `task_execution` |
+| `20260101000025` | `20260722055609` | `assets` |
+| `20260101000026` | `20260722055644` | `ad_campaigns` |
+| `20260101000027` | `20260722055735` | `kol` |
+| `20260101000028` | `20260722055759` | `live_stream_sessions` |
+| `20260101000029` | `20260722055815` | `strategy_requirement_override` |
+| `20260101000030` | `20260722055948` | `campaigns` |
+| `20260101000031` | `20260722060046` | `hours_reminder` |
+| `20260101000032` | `20260722060059` | `campaign_linkage` |
+| `20260101000033` | `20260722060116` | `marketing_performance_records` |
+| `20260101000034` | `20260722060132` | `dependencies` |
+| `20260101000035` | `20260722060217` | `client_health` |
+| `20260101000036` | `20260722060429` | `team_performance` |
+| `20260101000037` | `20260722060454` | `local_auth` |
+| `20260102000001` | `20260722060601` | `ident_next` |
+| `20260102000002` | `20260723055732` | `statemachine` |
+| `20260102000003` | `20260723064438` | `rls_baseline` |
+| `20260102000004` | `20260723071013` | `supabase_auth` |
+| `20260102000005` | `20260724132631` | `fk_covering_indexes` |
+| `20260102000006` | `20260724134427` | `employee_display_name` |
+| `20260102000007` | `20260724161750` | `change_password` |
+| `20260102000008` | `20260727072443` | `harden_secdef_helpers_to_private_schema` |
+| `20260102000009` | `20260729031525` | `rls_leads_campaign_scope` |
+| `20260102000010` | `20260729032805` | `rls_finance_staff_queue_scope` |
+| `20260102000011` | `20260729104209` | `admin_set_password` |
+| `20260102000012` | `20260729162101` | `lead_delete_request` |
+
+**Satu baris live tanpa padanan berkas: `20260723064826_rls_harden_execute_surface`.** O38
+butir 3 memutuskan **tidak** mem-back-port-nya karena isinya sudah tergabung di
+`20260723064438_rls_baseline.sql` §9 (beda pengemasan, bukan beda isi) — keputusan itu tidak
+dibalik di sini. `db push` hanya mendorong versi lokal yang belum ada di remote, jadi baris
+remote-only ini **tidak** menghalanginya. Kalau versi CLI yang dipakai tetap
+mempersoalkannya, perbaikannya `supabase migration repair --status reverted 20260723064826` —
+menyentuh tabel bookkeeping saja, nol SQL dijalankan atau di-revert.
+
+**Konsekuensi untuk DB lokal yang sudah ada.** Riwayat migrasi lokal siapa pun masih memuat
+versi lama, jadi berkas yang di-rename akan terlihat "belum pernah di-apply". Bangun ulang
+dari nol (`DROP DATABASE` → terapkan 39 berkas urut) — bukan mencoba apply selektif; itu satu
+perintah dan CI melakukan hal yang sama tiap run.
+
+**Divergensi komentar yang disengaja.** Referensi silang antar-migrasi (mis. *"lihat
+20260102000003"*) ikut diperbarui ke versi baru, jadi komentar berkas repo kini berbeda tipis
+dari blob `statements` yang tersimpan di remote untuk migrasi yang sudah ter-apply. Nol
+dampak skema; yang dijaga adalah pointer di komentar tidak menggantung. Yang **tidak**
+ditulis ulang: `docs/handoff/**` dan entri lama `docs/DECISIONS.md` — keduanya catatan
+bertanggal, dan tabel di atas adalah penerjemahnya.
 
 ---
 

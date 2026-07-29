@@ -14,7 +14,7 @@
  *   readAsActor(actor, …) — the READ path. Runs inside a transaction that
  *                           switches to the non-privileged `authenticated` role
  *                           and publishes the caller's CDPS claims, so every RLS
- *                           policy in 20260102000003_rls_baseline.sql actually
+ *                           policy in 20260723064438_rls_baseline.sql actually
  *                           applies. Before O37 the read path used db() and RLS
  *                           never engaged — any authenticated user could read
  *                           across scopes.
@@ -45,7 +45,7 @@ export function db(): Sql {
  * actorClaims rebuilds the JWT claim envelope the RLS policies read, i.e.
  * `auth.jwt() -> 'app_metadata' ->> '<key>'`.
  *
- * The five keys mirror `public.employee_claims()` (migration 20260102000004)
+ * The five keys mirror `public.employee_claims()` (migration 20260723071013)
  * and `permission.actorFromClaims` exactly — the Actor was itself parsed from a
  * verified token's app_metadata, so this is a faithful round-trip, not a new
  * source of truth. Booleans are emitted as real JSON booleans because

@@ -3,7 +3,7 @@
 -- Verifies that the Access Token Hook resolver (`employee_claims` +
 -- `custom_access_token_hook`) produces app_metadata claims IDENTICAL to
 -- backend/internal/auth/actor.go `ResolveActor` — the source that RLS
--- (20260102000003) reads via `auth.jwt()->'app_metadata'`. If this drifts, RLS
+-- (20260723064438) reads via `auth.jwt()->'app_metadata'`. If this drifts, RLS
 -- silently mis-scopes every request, so it is gated in CI.
 --
 -- Depends on the Alpha Digital seed (applied before this script in CI):

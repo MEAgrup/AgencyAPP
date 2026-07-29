@@ -40,7 +40,7 @@ export type Actor = permission.Actor;
 /** The CDPS division that owns Payment Status writes (seed.sql role_mappings). */
 export const FINANCE_DIVISION = 'Finance';
 
-/** transaction_payment machine (seeded in 20260102000002_statemachine.sql). */
+/** transaction_payment machine (seeded in 20260723055732_statemachine.sql). */
 export const TRANSACTION_MACHINE = 'transaction_payment';
 /** installment machine. */
 export const INSTALLMENT_MACHINE = 'installment';

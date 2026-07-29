@@ -7,7 +7,7 @@
 -- `public`. Akibatnya migrasi C-01 (`…_rls_leads_campaign_scope`) gagal apply ke
 -- live dengan `ERROR: function jwt_owns_lead(character varying) does not exist`.
 -- Dengan back-port ini, repo dan live memakai definisi yang sama, dan migrasi
--- C-01 (kini 20260102000009) sudah disesuaikan memakai `private.*`.
+-- C-01 (kini 20260729031525) sudah disesuaikan memakai `private.*`.
 --
 -- Latar remediasi advisor: `docs/handoff/SUPABASE_SECURITY_HARDENING_20260727.md`.
 -- URUTAN PENTING: harus berjalan SETELAH rls_baseline (…0003) yang membuat

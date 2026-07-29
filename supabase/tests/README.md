@@ -16,7 +16,7 @@ a failed `ASSERT`/`RAISE` fails the job.
 
 These assertions run against a stock Postgres 17 container and avoid coupling CI
 to a `config.toml` / Supabase CLI version. RLS is exercised without the full
-Supabase stack via a **portability shim** in `20260102000003_rls_baseline.sql`:
+Supabase stack via a **portability shim** in `20260723064438_rls_baseline.sql`:
 on a plain Postgres it creates the `anon`/`authenticated`/`service_role` roles
 and a compatible `auth.jwt()` (reading `request.jwt.claims`) only if absent, so
 `rls_checks.sql` can `SET ROLE authenticated` + inject claims and see the exact

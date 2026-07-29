@@ -54,7 +54,7 @@ export async function withTransaction<T>(sql: Sql, fn: (tx: TransactionSql) => P
 
 /**
  * The non-privileged DB role the read path assumes. It is not BYPASSRLS and
- * holds only SELECT on the domain tables (migration 20260102000003 §4), so the
+ * holds only SELECT on the domain tables (migration 20260723064438 §4), so the
  * RLS policies — not the connection — decide which rows come back.
  */
 export const READ_ROLE = 'authenticated';

@@ -15,7 +15,7 @@
 --   #8 notifikasi dari audit log ⇒ dua event baru di katalog (lihat §3).
 --
 -- Pola dua-langkah (ajukan → ACC) menyalin verticalnya yang sudah ada:
--- demo_task_block_requests (20260101000001_init) + demo.submitBlockRequest /
+-- demo_task_block_requests (20260722053824_init) + demo.submitBlockRequest /
 -- approveBlockRequest. Nama kolom dibuat identik supaya satu pola dibaca sekali.
 
 -- ---------------------------------------------------------------------------
@@ -79,7 +79,7 @@ INSERT INTO notif_events (event_type, description, resolver) VALUES
     ('m1.lead.delete_decided',   'Permintaan hapus lead di-ACC/tolak', 'explicit');
 
 -- ---------------------------------------------------------------------------
--- 4. RLS — tabel dibuat SETELAH 20260102000003_rls_baseline, jadi loop grant di
+-- 4. RLS — tabel dibuat SETELAH 20260723064438_rls_baseline, jadi loop grant di
 --    sana tidak menyentuhnya. Ulangi eksplisit: anon dicabut total,
 --    authenticated hanya SELECT (difilter policy), tulis lewat RPC/service-role.
 -- ---------------------------------------------------------------------------

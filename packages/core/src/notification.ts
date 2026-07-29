@@ -1,6 +1,6 @@
 /**
  * In-app notification center — TypeScript catalog + wrapper over the SQL
- * function `notify_emit` (migration 20260102000002_statemachine.sql).
+ * function `notify_emit` (migration 20260723055732_statemachine.sql).
  *
  * Ported from backend/internal/core/notification. The event catalog is FROZEN
  * (Phase 0 v2 §9 = 15 events: the 13 Phase 0 events + M1 dedup-v2 co-pursuit +
@@ -56,7 +56,7 @@ export interface CatalogEntry {
  *
  * The first 15 entries are FROZEN (Phase 0 v2 §9) and identical to Go's
  * NewCatalog. The two `m1.lead.delete_*` entries are a logged deviation
- * (DECISIONS.md 2026-07-29, seeded in 20260102000012_lead_delete_request.sql):
+ * (DECISIONS.md 2026-07-29, seeded in 20260729162101_lead_delete_request.sql):
  * they postdate the Go build, which is being decommissioned in this cutover.
  */
 export const CATALOG: Record<EventType, CatalogEntry> = {

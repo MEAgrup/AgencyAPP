@@ -58,7 +58,7 @@ export const LIVE_STREAM_DIVISION = 'Live Stream';
 /** The client-owning division; its lead has division-wide read + vendor follow-up. */
 export const ACCOUNT_DIVISION = 'Account';
 
-/** live_stream_session machine (seeded in 20260102000002_statemachine.sql). */
+/** live_stream_session machine (seeded in 20260723055732_statemachine.sql). */
 export const LIVE_STREAM_MACHINE = 'live_stream_session';
 
 // ---------------------------------------------------------------------------

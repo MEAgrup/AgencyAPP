@@ -38,7 +38,7 @@ import { MARKETING_DIVISION } from './campaign';
 /** Authenticated employee + resolved role (from @cdps/core permission). */
 export type Actor = permission.Actor;
 
-/** lead_record machine (seeded in 20260102000002_statemachine.sql). */
+/** lead_record machine (seeded in 20260723055732_statemachine.sql). */
 export const LEAD_MACHINE = 'lead_record';
 
 /** Lead record birth status (active) and the Pool waypoint on the reopen path. */
@@ -48,7 +48,7 @@ export const RECORD_POOL = '[Pool]';
 /**
  * Terminal record status for a lead deleted with Head approval (owner decision
  * 2026-07-29 — `docs/DECISIONS.md`; edges seeded in
- * 20260102000012_lead_delete_request.sql). There is NO `delete from leads`
+ * 20260729162101_lead_delete_request.sql). There is NO `delete from leads`
  * anywhere: house rule #3 makes history immutable, and a real row delete would
  * orphan the lead's audit trail and break the prospect_attempts FK. "Deleted"
  * is a state the lead is driven INTO, through the engine, by a Head.
@@ -745,7 +745,7 @@ export function leadListScope(actor: permission.Actor): LeadListScope | null {
 // holds an attempt). It is intentionally NOT re-implemented here: row visibility
 // is the `leads_select` RLS policy's job, and a second copy in TS could only
 // diverge from it (CLAUDE.md — the two sides must never disagree). Migration
-// 20260102000005 adds the own-campaign-origin arm that the baseline policy was
+// 20260724132631 adds the own-campaign-origin arm that the baseline policy was
 // missing, so RLS now matches Go's predicate exactly.
 
 /** One Sales Pool board row (contract §3). */

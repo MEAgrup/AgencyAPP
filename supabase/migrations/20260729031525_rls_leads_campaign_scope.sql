@@ -1,7 +1,7 @@
 -- ============================================================================
 -- O37 (opsi (c)) — paritas `leads_select` dengan Go `canReadLead`.
 --
--- Temuan: policy baseline (20260102000003) memberi baca lead lewat empat arm —
+-- Temuan: policy baseline (20260723064438) memberi baca lead lewat empat arm —
 -- can_read_all / created_by sendiri / lead se-divisi / pemegang attempt
 -- (jwt_owns_lead). Go `module1_leads/reads.go` punya SATU arm lagi yang belum
 -- terwakili: **Marketing staff boleh membaca lead yang berasal dari campaign
@@ -23,7 +23,7 @@
 -- di `public` dan menulis `jwt_owns_lead(id)` TANPA kualifikasi schema. Itu benar
 -- terhadap repo saat itu, tetapi SALAH terhadap produksi: migrasi live
 -- `harden_secdef_helpers_to_private_schema` (kini di-back-port sebagai
--- 20260102000008) sudah memindahkan `jwt_owns_*` ke schema `private`. Apply-nya
+-- 20260727072443) sudah memindahkan `jwt_owns_*` ke schema `private`. Apply-nya
 -- ke `CDPS SG` gagal dengan:
 --
 --     ERROR: function jwt_owns_lead(character varying) does not exist

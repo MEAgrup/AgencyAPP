@@ -7,7 +7,7 @@
  * (ES256, verified against `SUPABASE_JWT_PUBLIC_JWK` — the project JWKS). Both
  * are accepted so the API survives a Supabase JWT-signing-key migration. Its
  * `app_metadata` is populated by our
- * `custom_access_token_hook` (migration 20260102000004) with the five CDPS
+ * `custom_access_token_hook` (migration 20260723071013) with the five CDPS
  * claims. We re-derive the Actor from those claims via `permission.actorFromClaims`
  * — the SAME mapping the SQL `employee_claims` and Go `ResolveActor` use, so the
  * three never diverge (HANDOFF_FASE1_SESI4 §7). This module only checks the

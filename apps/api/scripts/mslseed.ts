@@ -93,7 +93,7 @@ function parseArgs(argv: string[]): Options | null {
 /**
  * resolveActor builds the Actor for an employee_id using the SAME resolver the
  * Access Token Hook and RLS use — the SQL `employee_claims(employee_id)` function
- * (migration 20260102000004, itself a mirror of Go's `auth.ResolveActor`) piped
+ * (migration 20260723071013, itself a mirror of Go's `auth.ResolveActor`) piped
  * through `permission.actorFromClaims`. Re-deriving the role in TypeScript here
  * would be a fourth copy of the mapping, free to drift; this way the CLI cannot
  * grant itself a role the JWT path would not.
