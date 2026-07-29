@@ -3,10 +3,15 @@
 > Prasyarat: **O44(b) sudah ter-merge** (6 route admin diport). Sebelum itu kedua halaman admin
 > mati dan satu-satunya jalur adalah SQL manual.
 >
-> Status: **langkah §2–§5 belum dijalankan ke `CDPS SG`.** Sandbox tidak punya kredensial live dan
-> gateway menolak CONNECT ke `supabase.co` (403), jadi eksekusi butuh mesin ber-akses. **Rantainya
-> sudah diverifikasi ujung-ke-ujung di Postgres lokal termigrasi** dengan data NIKEN yang riil —
-> 11/11 PASS, lihat §6.
+> Status: ✅ **SELESAI DIEKSEKUSI ke `CDPS SG` 2026-07-29** — §2 (impor NIKEN) dan §3 (baris mapping
+> `BUSINESS DEVELOPMENT`×`MARKETING STRATEGIST` → `Marketing`/`staff`) sudah ter-apply, §4 diverifikasi
+> lulus di live. Hasil persisnya di **§7**; entri `DECISIONS` 2026-07-29 memuat rekonsiliasi lengkap.
+> Runbook ini kini **catatan sejarah + prosedur untuk pemetaan divisi berikutnya**, bukan pekerjaan
+> tertunda. Rantainya lebih dulu diverifikasi ujung-ke-ujung di Postgres lokal termigrasi dengan data
+> NIKEN riil — 11/11 PASS, §6.
+>
+> **Masih terbuka (tidak diblokir oleh apa pun di sini):** `Marketing`/`lead` kosong (§3) dan
+> O42 pertanyaan (3) rekonsiliasi `role_mappings` (§5).
 
 ## 0. Kenapa urutannya tidak boleh dibalik
 
@@ -142,3 +147,36 @@ PASS  6. >=1 active Marketing/staff actor exists (0009 arm testable)
 Yang dibuktikan bukan hanya "berhasil", tapi juga **batasnya**: `canReassign` tetap `false` untuk
 staff, jadi menghidupkan Marketing/staff **tidak** diam-diam memberi wewenang reassign — itu tetap
 milik lead/Director, persis seperti M3 §6.1.
+
+## 7. Hasil eksekusi live (`CDPS SG`, 2026-07-29)
+
+Dua tulis, urutan §0 dipatuhi. Nol SQL ad-hoc: impor lewat `employees.importEmployees` (jalur kode
+yang sama dengan UI), mapping lewat baris `role_mappings` sesuai tabel §3.
+
+| Langkah | Hasil di live |
+|---|---|
+| §2 impor | `2504240539` NIKEN SEPTA ARISANDHY · `BUSINESS DEVELOPMENT` / `MARKETING STRATEGIST` · `status_aktif=true` · `auth_user_id` terisi · `must_change_password=true` · audit `employee_credential/password_set_admin` (`audit_log id=42`) |
+| §3 mapping | `role_mappings id=40` — `BUSINESS DEVELOPMENT`×`MARKETING STRATEGIST` → `Marketing`/`staff` (**persis** tabel §3) |
+| §4a claims | `{"division":"Marketing","level":"staff","od":false,"director":false}` ✅ |
+| §4b predikat owner | `status_aktif=true` + `division='Marketing'` + `level='staff'` ⇒ M3-OA-6 menerima ✅ |
+| §4c aktor arm `0009` | `marketing_staff_aktif` **0 → 1** ⇒ arm own-campaign akhirnya **bisa** diuji ✅ |
+
+**Rekonsiliasi (tidak ada efek samping):** `employees`/`employee_credentials`/`auth.users`/
+`auth.identities` = **69/69/69/69** (bergerak bersama ⇒ nol karyawan tanpa jalur login) ·
+`role_mappings` 38 → **39** · `flagged_for_review` **0** ("Impor penuh" **tidak** dicentang — kalau
+tercentang, 68 karyawan lain akan tertandai) · `auth.refresh_tokens` tetap **2** (sesi hidup utuh) ·
+`master_services` **32** · 53 tabel · 39 migrasi.
+
+**Klaim audit `3818d4a` diuji ulang seperti diminta §1 — BERTAHAN:** `aktif_tanpa_mapping` tetap **7**,
+dan **7/7** memang pemegang `employee_layered_roles` (3 Director + 4 OD), NIKEN sudah tidak termasuk.
+Jadi tidak ada koreksi audit yang perlu ditulis.
+
+### Yang masih belum tertutup sesudah eksekusi
+
+- **`Marketing`/`lead` = 0.** Reassign owner Campaign di produksi **tetap hanya Director**; arm
+  Marketing-lead `leads.leadListScope` tetap mati. Konsekuensi struktur organisasi, dicatat sebagai
+  keputusan sadar di `DECISIONS` — bukan bug, dan jabatan tidak dikarang untuk mengisinya.
+- **Arm `0009` baru *bisa* diuji, belum *teruji*** — masih butuh satu campaign nyata (§5).
+- **Orang eksekutor ads** — tetap pertanyaan pemilik, tapi **tidak terhalang**: grain mapping
+  divisi×**jabatan**, jadi baris `MARKETING STRATEGIST` di atas tidak mengangkat jabatan lain di bawah
+  `BUSINESS DEVELOPMENT`. Ia bisa dipetakan ke `Ads` tanpa menyentuh baris ini.

@@ -13,7 +13,7 @@
 | **Base** | `main` @ **`446f6502`** (hasil merge PR #65) |
 | **PR lain yang terbuka** | **tidak ada** — #66 satu-satunya |
 | **PR yang sudah selesai** | #65 **ter-merge**; #63 **ditutup** (premisnya kedaluwarsa — lihat komentar di PR-nya) |
-| **Live** | Supabase `CDPS SG` (`egddxfcnrtecheiykhlf`, `ap-southeast-1`) — **39 migrasi ter-apply** (`…0011` masuk 2026-07-29, §2.1), `master_services` 32 baris, `role_mappings` 38 baris. ⚠️ **live di depan `main`** sampai #66 merge |
+| **Live** | Supabase `CDPS SG` (`egddxfcnrtecheiykhlf`, `ap-southeast-1`) — **39 migrasi ter-apply** (`…0011` masuk 2026-07-29, §2.1), `master_services` 32 baris, `role_mappings` **39** baris (O42 dieksekusi, §2.2), `employees`/`employee_credentials`/`auth.users`/`auth.identities` **69** semuanya. ⚠️ **live di depan `main`** sampai #66 merge |
 
 ### 0.1 Tidak ada pekerjaan tertinggal (diverifikasi saat menulis dokumen ini)
 
@@ -138,20 +138,33 @@ helper SECDEF ke `private`. Yang dipindahkan 0008 hanyalah helper **predikat RLS
 > CI sudah membuktikan ia apply dari nol (kedua job `db-and-migrations` hijau di `08bb9c3`).
 > **Penutup drift: merge #66.** Sampai itu terjadi, jangan anggap `main` menggambarkan live.
 
-### 2.2 🔴 Eksekusi O42 ke live — `docs/handoff/RUNBOOK_O42_MARKETING_ACTOR.md`
-Urutan **wajib**: **impor karyawan DULU → mapping KEMUDIAN** (dibalik = baris yatim, M3-OA-6 tetap
-mati karena `validateOwnerCandidate` butuh kandidat aktif).
+### 2.2 ✅ Eksekusi O42 ke live — **SELESAI 2026-07-29**
+Runbook `docs/handoff/RUNBOOK_O42_MARKETING_ACTOR.md` §2–§4 dijalankan ke `CDPS SG`; hasil persisnya
+di **runbook §7**. Urutan wajib **impor DULU → mapping KEMUDIAN** dipatuhi.
 
-Rantainya sudah dibuktikan ujung-ke-ujung di Postgres lokal dengan data NIKEN riil (**11/11 PASS**),
-jadi tidak ada kejutan yang diharapkan. **Masih ditunggu dari pemilik:** baris HRIS (`divisi` +
-`jabatan` **persis**) untuk **orang eksekutor ads**. Kalau divisinya `BUSINESS DEVELOPMENT`, ia
-mestinya dipetakan ke **`Ads`**, **BUKAN** `Marketing` — kalau salah, ia jadi kandidat owner Campaign
-(M3-OA-6) yang bukan wewenangnya.
+| | |
+|---|---|
+| Impor | `2504240539` NIKEN SEPTA ARISANDHY · `BUSINESS DEVELOPMENT`/`MARKETING STRATEGIST` · lewat `employees.importEmployees` (bukan INSERT manual) ⇒ `employees` + `employee_credentials` + link GoTrue dalam satu transaksi · audit `audit_log id=42` |
+| Mapping | `role_mappings id=40` → `Marketing`/`staff`, **persis** tabel runbook §3 |
+| Verifikasi | `employee_claims` = `{division: Marketing, level: staff}` ✅ · `marketing_staff_aktif` **0 → 1** ⇒ arm `0009` **bisa** diuji · 69/69/69/69 employees·credentials·auth.users·auth.identities · `flagged` **0** · `refresh_tokens` tetap **2** |
+
+**Klaim audit `3818d4a` bertahan:** `aktif_tanpa_mapping` tetap **7**, **7/7** pemegang layered role
+(3 Director + 4 OD). Tidak ada koreksi audit yang perlu ditulis.
 
 > **Marketing `lead` tetap kosong** selama belum ada jabatan kepala BD/Marketing yang aktif ⇒
 > reassign owner Campaign di produksi **tetap hanya Director**, dan arm Marketing-lead
-> `leads.leadListScope` tetap mati. Itu konsekuensi struktur organisasi, bukan bug — sebaiknya
-> ditandai keputusan sadar.
+> `leads.leadListScope` tetap mati. Konsekuensi struktur organisasi, bukan bug — sudah ditandai
+> **keputusan sadar** di `DECISIONS` 2026-07-29.
+
+**Pertanyaan `orang eksekutor ads` TIDAK lagi memblokir.** Grain mapping divisi×**jabatan**
+(`uq_role_mapping`), jadi baris `MARKETING STRATEGIST` di atas **tidak** mengangkat jabatan lain di
+bawah `BUSINESS DEVELOPMENT` — eksekutor ads berjabatan lain tetap bisa dipetakan ke **`Ads`** tanpa
+menyentuh baris ini. Peringatan versi sebelumnya menyasar **orang itu**, bukan NIKEN (yang jabatannya
+memang Marketing).
+
+**Sisa yang belum teruji:** arm `0009` baru *bisa* diuji, belum *teruji* — butuh satu campaign nyata,
+lalu QA di UI sebagai Director (reassign owner Campaign harus memunculkan kandidat Marketing/staff,
+bukan `NotFoundError`).
 
 ### 2.3 O44(c) B2 — lupa password self-service
 Menunggu **provider email** (Resend/SES/dll) + domain pengirim. SMTP bawaan Supabase dibatasi rate
@@ -256,7 +269,8 @@ done
 |---|---|---|
 | **O44(c) B2** | provider email/SMTP untuk lupa-password self-service | Tidak — B1 sudah jadi jalur pemulihan |
 | **O42(3)** | sumber kebenaran `role_mappings` 38 vs 23 vs 12 | Tidak, tapi ada risiko `seed.sql` menulis ke live |
-| **O42 data** | baris HRIS (divisi+jabatan persis) untuk orang eksekutor ads | **Ya** — menentukan baris mapping |
+| **O42 data** | baris HRIS (divisi+jabatan persis) untuk orang eksekutor ads → `Ads` atau `Marketing` | **Tidak lagi** — O42 sudah dieksekusi (§2.2); grain divisi×jabatan bikin keputusan ini berdiri sendiri |
+| **Marketing `lead`** | tidak ada jabatan kepala BD/Marketing aktif ⇒ `lead` kosong; konfirmasi dibiarkan kosong atau tunjuk jabatan | Tidak — Director tetap bisa reassign owner Campaign |
 | ~~**Apply `…0011`**~~ | ~~ke `CDPS SG`~~ | ✅ **SELESAI** 2026-07-29 (§2.1) — B1 hidup di produksi. Sisa: **merge #66** untuk menutup drift live-di-depan-`main` |
 | **O34 · O26 · O35 · O9** | aktor Wave 2 · NIK/email Director · sub-tim Creative · target M14 | → `HANDOFF_CUTOVER_SESI5.md` §3.1 |
 
