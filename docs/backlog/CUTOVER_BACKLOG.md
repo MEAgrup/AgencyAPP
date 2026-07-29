@@ -311,11 +311,14 @@ Masih hanya `README.md`. Ditunda resmi (DECISIONS 2026-07-18) menunggu security 
 **Gate go/no-go cutover (PIC: Yohan & Nerissa — OQ-1):**
 - [x] **C-00 selesai** — CI hijau kembali (run `30328573444`); `main` re-run hijau (run `30278802079`), PR #55–#57 tervalidasi.
 - [x] **C-01 selesai** — O37 tertutup di DECISIONS (opsi c).
-- [ ] C-02 selesai, badge & halaman notifikasi hidup.
-- [ ] C-03 report FAIL = 0, SKIP beralasan.
-- [ ] C-04 data + aktor produksi siap, tak ada fixture.
+- [x] **C-02 selesai** — badge & halaman notifikasi hidup (2026-07-28; §C-02 di atas sudah RESOLVED, kotak ini sebelumnya tertinggal tidak tercentang).
+- [~] **C-03 — FAIL = 0 tercapai, lolos BERSYARAT:** sisa **3 SKIP** yang butuh walk dari deployment Vercel (bukan sandbox). Belum boleh dihitung penuh.
+- [~] **C-04 — SEBAGIAN.** ✅ MSL 32 layanan ber-versi di live (2026-07-28) · ✅ karyawan riil: **69** di `employees`/`employee_credentials`/`auth.users`/`auth.identities` (69/69/69/69) · ✅ **O42 dieksekusi 2026-07-29** — divisi `Marketing` hidup, `role_mappings` **39**. ❌ **O22** impor lead historis · ❌ keputusan aktor **O34/O26/O35/O9** · ❌ konfirmasi data Railway riil-atau-UAT · ⚠️ `Marketing`/`lead` kosong (struktur organisasi, keputusan sadar).
 - [ ] Backup MySQL Railway terakhir tersimpan.
 - [ ] Rencana rollback disepakati (Railway tetap hidup N hari pasca-cutover sebelum dimatikan).
+
+> Legenda: `[x]` selesai · `[~]` sebagian/bersyarat · `[ ]` belum. **C-05 (retire Go) 0% dan memang
+> belum boleh dimulai** — ia menunggu GO. Go masih berjalan di CI sebagai **oracle paritas satu-satunya**.
 
 **Sesudah GO:** eksekusi C-05.
 
