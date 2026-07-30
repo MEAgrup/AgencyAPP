@@ -148,16 +148,19 @@ export function leadRowToWire(r: leads.LeadsDbRow): LeadRowWire {
   };
 }
 
+/** One row of the lead's attempt contest — web-internal's `LeadAttemptRow`. */
+export interface LeadAttemptWire {
+  id: string;
+  owner_employee_id: string;
+  owner_nama: string;
+  status: string;
+  claimed_at: string;
+}
+
 /** Lead detail (web-internal LeadDetail): lead core + attempt contest. */
 export interface LeadDetailWire {
   lead: Omit<LeadRowWire, 'open_attempt_count'>;
-  attempts: {
-    id: string;
-    owner_employee_id: string;
-    owner_nama: string;
-    status: string;
-    claimed_at: string;
-  }[];
+  attempts: LeadAttemptWire[];
 }
 
 // --- M6 Account & Service, Cluster 1 (intake & AM assignment) ---
@@ -955,10 +958,18 @@ export function perfSnapshotToWire(s: performance.Snapshot): PerfSnapshotWire {
 }
 
 /** module14_performance.TeamRollup wire shape (§2 Rule 5 simple average, derived on read). */
+/** One member row of a division rollup — web-internal's `TeamMember`. */
+export interface PerfTeamMemberWire {
+  staff_id: string;
+  role_type: string;
+  final_score: number | null;
+  score_display: string;
+}
+
 export interface PerfTeamRollupWire {
   division: string;
   period: string;
-  members: { staff_id: string; role_type: string; final_score: number | null; score_display: string }[];
+  members: PerfTeamMemberWire[];
   team_average: number | null;
   average_display: string;
 }
@@ -1335,6 +1346,12 @@ export function performanceRecordToWire(r: marketing.Record): PerformanceRecordW
   };
 }
 
+/** One junk-reason tally of the Auto-Metrics view — web-internal's `JunkReason`. */
+export interface JunkReasonWire {
+  reason: string;
+  count: number;
+}
+
 /** module2_marketing.Metrics — the read-only Auto-Metrics view (M2 §4). */
 export interface MarketingMetricsWire {
   campaign_id: string;
@@ -1353,7 +1370,7 @@ export interface MarketingMetricsWire {
   collected_sales: string;
   collected_sales_decimal: string;
   collected_roas: string;
-  junk_breakdown: { reason: string; count: number }[];
+  junk_breakdown: JunkReasonWire[];
 }
 
 export function marketingMetricsToWire(m: marketing.Metrics): MarketingMetricsWire {
@@ -1606,6 +1623,15 @@ export interface QualifiedFormWire {
   services: QualifiedFormServiceWire[];
 }
 
+/** One line of a negotiation proposal — web-internal's `ProposalLineRow`. */
+export interface ProposalLineWire {
+  master_service_id: string;
+  name: string;
+  proposed_price: string;
+  commission_rule: string;
+  payment_terms: string | null;
+}
+
 /** One negotiation proposal + its lines — web-internal's `NegotiationProposalRow`. */
 export interface ProposalWire {
   id: string;
@@ -1614,37 +1640,43 @@ export interface ProposalWire {
   proposed_by_nama: string;
   decision_note: string | null;
   created_at: string;
-  lines: {
-    master_service_id: string;
-    name: string;
-    proposed_price: string;
-    commission_rule: string;
-    payment_terms: string | null;
-  }[];
+  lines: ProposalLineWire[];
+}
+
+/** The attempt block of GET /attempts/{id} — web-internal's `AttemptDetailAttempt`. */
+export interface AttemptDetailAttemptWire {
+  id: string;
+  lead_id: string;
+  owner_employee_id: string;
+  owner_nama: string;
+  status: string;
+  claimed_at: string;
+  created_at: string;
+}
+
+/**
+ * The lead block of GET /attempts/{id} — web-internal's `AttemptDetailLead`.
+ *
+ * Deliberately NARROWER than `LeadRowWire`: this is the lead as the closing page
+ * reads it, so it carries no `origin_division` / `open_attempt_count`. Extending
+ * `LeadRowWire` here would emit columns no consumer declares.
+ */
+export interface AttemptDetailLeadWire {
+  id: string;
+  lead_name: string;
+  phone_number: string;
+  email: string | null;
+  source: string;
+  record_status: string;
+  origin_campaign_id: string | null;
+  last_touch_campaign_id: string | null;
+  winning_attempt_id: string | null;
 }
 
 /** GET /attempts/{id} — web-internal's `AttemptDetail` (lib/sales.ts). */
 export interface AttemptDetailWire {
-  attempt: {
-    id: string;
-    lead_id: string;
-    owner_employee_id: string;
-    owner_nama: string;
-    status: string;
-    claimed_at: string;
-    created_at: string;
-  };
-  lead: {
-    id: string;
-    lead_name: string;
-    phone_number: string;
-    email: string | null;
-    source: string;
-    record_status: string;
-    origin_campaign_id: string | null;
-    last_touch_campaign_id: string | null;
-    winning_attempt_id: string | null;
-  };
+  attempt: AttemptDetailAttemptWire;
+  lead: AttemptDetailLeadWire;
   qualified_form: QualifiedFormWire | null;
   proposals: ProposalWire[];
   nq_reasons: string[];

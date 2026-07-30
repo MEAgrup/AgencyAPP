@@ -83,6 +83,13 @@ jobs:
         run: |
           npm run typecheck -w @cdps/api
           npm test -w @cdps/api
+      # Lint was never run on this workspace: `eslint.config.mjs` only landed with
+      # #79, and before it eslint exited non-zero with "couldn't find a config" —
+      # so 210 TS files (every route handler + wire.ts) were unlinted. Warnings
+      # are fatal here on purpose: the one pre-existing warning is fixed (T2b),
+      # so the gate starts from zero and cannot silently accumulate.
+      - name: '@cdps/api — lint'
+        run: npm run lint -w @cdps/api -- --max-warnings 0
 
   # New Supabase/TypeScript stack (Fase 0 migration). Pure engines + wrappers.
   core-engines:

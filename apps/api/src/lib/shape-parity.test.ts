@@ -39,6 +39,9 @@ const FE_LIB = join(REPO_ROOT, 'web-internal/src/lib');
 /** One parsed `export interface` — its own keys plus whatever it extends. */
 interface Parsed {
   keys: string[];
+  /** key → the type text it is declared with, e.g. `LeadAttemptWire[]`. Drives
+   *  the nested descent: a key whose type names an interface is followed. */
+  types: Map<string, string>;
   extends: string;
   /** Raw body, kept so the nested-inline blind spot can be asserted, not assumed. */
   body: string;
@@ -61,48 +64,95 @@ function parseInterfaces(source: string): Map<string, Parsed> {
     // made the camelCase assertion below VACUOUS — a leaked `totalHarga` simply
     // never matched, so it was never extracted, so nothing could flag it. Caught
     // by injecting exactly that key and watching the suite stay green.
-    const keys = [...m[3].matchAll(/^ {2}([A-Za-z_][A-Za-z_0-9]*)\??:/gm)].map((k) => k[1]);
-    out.set(m[1], { keys, extends: (m[2] ?? '').trim(), body: m[3] });
+    const declared = [...m[3].matchAll(/^ {2}([A-Za-z_][A-Za-z_0-9]*)\??:\s*(.*?)\s*$/gm)];
+    const types = new Map<string, string>();
+    // Strip the trailing `//` note before the `;`, or a type reads as
+    // `Component[]; // array of 7 items` and resolves to nothing — a nested
+    // reference silently not followed, which is the exact failure this file is
+    // supposed to make impossible.
+    for (const d of declared) types.set(d[1], d[2].replace(/\/\/.*$/, '').replace(/;\s*$/, '').trim());
+    out.set(m[1], { keys: declared.map((d) => d[1]), types, extends: (m[2] ?? '').trim(), body: m[3] });
   }
   return out;
 }
 
-/**
- * Interfaces whose shape includes an INLINE nested object literal, e.g.
- * `attempts: { id: string; … }[]`. Extraction is top-level-only (2-space
- * indent), so those inner keys are NOT compared by this test — stated here
- * rather than left for a reader to infer from green CI.
- *
- * Three today. Extracting a named interface for each would bring them under the
- * guard; that is a `wire.ts` refactor, and refactoring shared converter blocks
- * while a parallel session edits the same file is how merge conflicts are made.
- * Left as a follow-up, deliberately.
- */
-const NESTED_INLINE_UNCHECKED = ['LeadDetailWire', 'ProposalWire', 'AttemptDetailWire'];
+/** A key's type resolved to the interface it names, with any `Omit<>` applied. */
+interface Ref {
+  name: string;
+  dropped: Set<string>;
+}
 
 /**
- * Flatten an interface to the key set it actually declares, following `extends`.
- * `Omit<X, 'a' | 'b'>` is resolved rather than skipped because `LeadDetailWire`
- * is built out of one (`Omit<LeadRowWire, 'open_attempt_count'>`) — treating it
- * as opaque would silently exempt the biggest lead payload from this test.
+ * The interface a key's type refers to, or `null` for scalars/inline objects.
+ *
+ * Unwraps exactly the four wrappers the two data layers actually use — nullable
+ * union, array, `Omit<>`, and the bare name. Anything else (`unknown`, string
+ * literal unions, an inline `{`) yields `null`, and the pairing test below turns
+ * a one-sided `null` into a failure rather than a silent stop.
  */
-function flatten(all: Map<string, Parsed>, name: string, seen = new Set<string>()): string[] {
+function refOf(type: string): Ref | null {
+  const t = type
+    .split('|')
+    .map((s) => s.trim())
+    .filter((s) => s !== 'null' && s !== 'undefined')
+    .join('|')
+    .replace(/\[\]$/, '')
+    .trim();
+  const omit = /^Omit<(\w+),\s*(.+)>$/.exec(t);
+  if (omit) {
+    return {
+      name: omit[1],
+      dropped: new Set(omit[2].split('|').map((s) => s.trim().replace(/['"]/g, ''))),
+    };
+  }
+  return /^\w+$/.test(t) ? { name: t, dropped: new Set() } : null;
+}
+
+/**
+ * Interfaces whose shape includes an INLINE nested object literal, e.g.
+ * `attempts: { id: string; … }[]`. Key extraction is top-level-only (2-space
+ * indent), so an inline block's inner keys are invisible to this test.
+ *
+ * **Now empty, and that is the point.** It used to hold three wire interfaces
+ * (`LeadDetailWire`, `ProposalWire`, `AttemptDetailWire`) plus — unstated, on the
+ * FE side — `AttemptDetail` and `DemoTaskDetail`. Every inline block became a
+ * named interface, so all of them are compared. Like `route-parity`'s
+ * `KNOWN_GAPS`, this list may only ever SHRINK: it is at zero, so a new entry
+ * means re-opening a blind spot that is already closed, and needs a
+ * `DECISIONS.md` line rather than a line here.
+ */
+const NESTED_INLINE_UNCHECKED: string[] = [];
+
+/**
+ * Flatten an interface to the `key → type` map it actually declares, following
+ * `extends`. `Omit<X, 'a' | 'b'>` is resolved rather than skipped because
+ * `LeadDetailWire` is built out of one (`Omit<LeadRowWire, 'open_attempt_count'>`)
+ * — treating it as opaque would silently exempt the biggest lead payload.
+ */
+function flattenTypes(
+  all: Map<string, Parsed>,
+  name: string,
+  seen = new Set<string>(),
+): Map<string, string> {
+  const out = new Map<string, string>();
   const node = all.get(name);
-  if (!node || seen.has(name)) return [];
+  if (!node || seen.has(name)) return out;
   seen.add(name);
-  const inherited: string[] = [];
   for (const raw of node.extends.split(/[,&]/)) {
     const part = raw.trim();
     if (part === '') continue;
-    const omit = /^Omit<(\w+),\s*(.+)>$/.exec(part);
-    if (omit) {
-      const dropped = new Set(omit[2].split('|').map((s) => s.trim().replace(/['"]/g, '')));
-      inherited.push(...flatten(all, omit[1], seen).filter((k) => !dropped.has(k)));
-    } else if (/^\w+$/.test(part)) {
-      inherited.push(...flatten(all, part, seen));
+    const ref = refOf(part);
+    if (!ref) continue;
+    for (const [k, t] of flattenTypes(all, ref.name, seen)) {
+      if (!ref.dropped.has(k)) out.set(k, t);
     }
   }
-  return [...inherited, ...node.keys];
+  for (const [k, t] of node.types) out.set(k, t);
+  return out;
+}
+
+function flatten(all: Map<string, Parsed>, name: string): string[] {
+  return [...flattenTypes(all, name).keys()];
 }
 
 const wire = parseInterfaces(readFileSync(WIRE_TS, 'utf8'));
@@ -120,25 +170,158 @@ const wire = parseInterfaces(readFileSync(WIRE_TS, 'utf8'));
  * 3-key CLIENT-SIDE type derived from the audit trail (camelCase, never sent by
  * any route).
  */
-const fe = new Map<string, Parsed>();
-for (const file of [
+const FE_FILES = [
   'account.ts', 'ads.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'kol.ts', 'leads.ts', 'livestream.ts', 'marketing.ts',
   'performance.ts', 'portal.ts', 'sales.ts', 'tasks.ts', 'types.ts',
-]) {
+];
+
+const fe = new Map<string, Parsed>();
+for (const file of FE_FILES) {
   for (const [name, parsed] of parseInterfaces(readFileSync(join(FE_LIB, file), 'utf8'))) {
     fe.set(`${file}::${name}`, parsed);
   }
 }
 
 /** `extends` inside the FE tree is same-file, so qualify before recursing. */
-function flattenFe(qualified: string): string[] {
-  const [file] = qualified.split('::');
+function feScope(file: string): Map<string, Parsed> {
   const scoped = new Map<string, Parsed>();
   for (const [key, parsed] of fe) {
     if (key.startsWith(`${file}::`)) scoped.set(key.slice(file.length + 2), parsed);
   }
-  return flatten(scoped, qualified.slice(file.length + 2));
+  return scoped;
+}
+
+function flattenTypesFe(qualified: string): Map<string, string> {
+  const [file] = qualified.split('::');
+  return flattenTypes(feScope(file), qualified.slice(file.length + 2));
+}
+
+function flattenFe(qualified: string): string[] {
+  return [...flattenTypesFe(qualified).keys()];
+}
+
+/**
+ * `file.ts` → (imported type name → the lib file it comes from).
+ *
+ * `portal.ts` is the reason this exists: it is a pure read-model that reuses
+ * `Card` from `board.ts`, `Snapshot` from `performance.ts` and
+ * `PendingBlockRequest` from `tasks.ts` — and all three of those names ALSO exist
+ * in other lib files. The import statement is the file's own answer to "which
+ * one", so it is read instead of guessed.
+ */
+const feImports = new Map<string, Map<string, string>>();
+for (const file of FE_FILES) {
+  const source = readFileSync(join(FE_LIB, file), 'utf8');
+  const map = new Map<string, string>();
+  const re = /import\s+type\s*\{([^}]+)\}\s*from\s*'@\/lib\/(\w[\w-]*)'/g;
+  for (let m = re.exec(source); m !== null; m = re.exec(source)) {
+    for (const raw of m[1].split(',')) {
+      const name = raw.trim().split(/\s+as\s+/)[0].trim();
+      if (name !== '') map.set(name, `${m[2]}.ts`);
+    }
+  }
+  feImports.set(file, map);
+}
+
+/**
+ * Qualify a bare FE type name seen inside `file`: same file, then its imports.
+ *
+ * Returns `'AMBIGUOUS'` instead of guessing when a bare name exists in several
+ * files and the referring file neither declares nor imports it — guessing is
+ * exactly the mistake the file-qualified registry exists to prevent
+ * (`PendingBlockRequest`).
+ */
+function qualifyFe(file: string, name: string): string | 'AMBIGUOUS' | null {
+  if (fe.has(`${file}::${name}`)) return `${file}::${name}`;
+  const imported = feImports.get(file)?.get(name);
+  if (imported !== undefined && fe.has(`${imported}::${name}`)) return `${imported}::${name}`;
+  const elsewhere = [...fe.keys()].filter((k) => k.endsWith(`::${name}`));
+  if (elsewhere.length === 1) return elsewhere[0];
+  return elsewhere.length > 1 ? 'AMBIGUOUS' : null;
+}
+
+/**
+ * One wire↔FE shape to compare: the two interfaces plus the keys an enclosing
+ * `Omit<>` removed on either side.
+ */
+interface Pair {
+  wire: string;
+  fe: string;
+  /** How this pair was reached — the registry, or `Parent.key` that referenced it. */
+  via: string;
+  wireDropped: Set<string>;
+  feDropped: Set<string>;
+}
+
+/** Reason a nested reference could not be followed on both sides at once. */
+interface Unfollowed {
+  where: string;
+  detail: string;
+}
+
+/**
+ * Walk the registry pairs AND every nested reference reachable from them.
+ *
+ * This is what makes the guard depth-independent. Comparing only the registry's
+ * top-level pairs left whole payload blocks unchecked — and not hypothetically:
+ * `DemoTaskDetail.task` reads `description`, which the list type `DemoTask` does
+ * not declare, so `description` sat in `ALLOWED_EXTRA` and deleting it from the
+ * wire would have kept CI green while blanking the detail page.
+ *
+ * A reference is followed only when BOTH sides resolve to a named interface. The
+ * one-sided cases are collected as `unfollowed` and asserted to be empty, so the
+ * descent can never stop quietly.
+ */
+function walkPairs(): { pairs: Pair[]; unfollowed: Unfollowed[] } {
+  const pairs: Pair[] = [];
+  const unfollowed: Unfollowed[] = [];
+  const seen = new Set<string>();
+  const queue: Pair[] = Object.entries(WIRE_TO_FE).map(([w, f]) => ({
+    wire: w,
+    fe: f,
+    via: 'WIRE_TO_FE',
+    wireDropped: new Set<string>(),
+    feDropped: new Set<string>(),
+  }));
+
+  for (let pair = queue.shift(); pair !== undefined; pair = queue.shift()) {
+    const id = `${pair.wire}|${pair.fe}`;
+    if (seen.has(id) || !fe.has(pair.fe)) continue;
+    seen.add(id);
+    pairs.push(pair);
+
+    const wireTypes = flattenTypes(wire, pair.wire);
+    const feTypes = flattenTypesFe(pair.fe);
+    const [file] = pair.fe.split('::');
+    for (const [key, wireType] of wireTypes) {
+      if (pair.wireDropped.has(key) || pair.feDropped.has(key)) continue;
+      const feType = feTypes.get(key);
+      if (feType === undefined) continue; // key mismatch — reported by the diff tests
+      const wireRef = refOf(wireType);
+      const feRef = refOf(feType);
+      const wireNested = wireRef !== null && wire.has(wireRef.name);
+      const feQualified = feRef === null ? null : qualifyFe(file, feRef.name);
+      const feNested = feQualified !== null && feQualified !== 'AMBIGUOUS';
+      const where = `${pair.wire}.${key}`;
+      if (feQualified === 'AMBIGUOUS') {
+        unfollowed.push({ where, detail: `FE type '${feRef?.name}' exists in several lib files — qualify it` });
+      } else if (wireNested && !feNested) {
+        unfollowed.push({ where, detail: `wire nests '${wireRef?.name}' but FE declares '${feType}' (inline object? extract a named interface)` });
+      } else if (!wireNested && feNested) {
+        unfollowed.push({ where, detail: `FE nests '${feQualified}' but wire declares '${wireType}' (inline object? extract a named interface)` });
+      } else if (wireNested && feNested && wireRef !== null && feQualified !== null) {
+        queue.push({
+          wire: wireRef.name,
+          fe: feQualified,
+          via: where,
+          wireDropped: wireRef.dropped,
+          feDropped: feRef?.dropped ?? new Set<string>(),
+        });
+      }
+    }
+  }
+  return { pairs, unfollowed };
 }
 
 /**
@@ -157,13 +340,17 @@ const WIRE_TO_FE: Record<string, string> = {
   QualifiedFormServiceWire: 'sales.ts::QualifiedFormServiceRow',
   QualifiedFormWire: 'sales.ts::QualifiedFormSnapshot',
   ProposalWire: 'sales.ts::NegotiationProposalRow',
+  ProposalLineWire: 'sales.ts::ProposalLineRow',
   AttemptDetailWire: 'sales.ts::AttemptDetail',
+  AttemptDetailAttemptWire: 'sales.ts::AttemptDetailAttempt',
+  AttemptDetailLeadWire: 'sales.ts::AttemptDetailLead',
   // M1 leads
   LeadStubWire: 'leads.ts::LeadStub',
   AttemptStubWire: 'leads.ts::AttemptStub',
   PoolRowWire: 'leads.ts::PoolRow',
   LeadRowWire: 'leads.ts::LeadRow',
   LeadDetailWire: 'leads.ts::LeadDetail',
+  LeadAttemptWire: 'leads.ts::LeadAttemptRow',
   DeleteRequestWire: 'leads.ts::DeleteRequest',
   DeleteRequestQueueRowWire: 'leads.ts::DeleteRequestQueueRow',
   BulkRowResultWire: 'leads.ts::BulkRowResult',
@@ -171,6 +358,7 @@ const WIRE_TO_FE: Record<string, string> = {
   // M2 marketing / M3 campaign
   PerformanceRecordWire: 'marketing.ts::Record',
   MarketingMetricsWire: 'marketing.ts::Metrics',
+  JunkReasonWire: 'marketing.ts::JunkReason',
   MarketingCampaignWire: 'marketing.ts::Campaign',
   CampaignRollupWire: 'marketing.ts::Rollup',
   // M4 client record
@@ -230,6 +418,7 @@ const WIRE_TO_FE: Record<string, string> = {
   PerfModifierWire: 'performance.ts::PerformanceModifier',
   PerfSnapshotWire: 'performance.ts::Snapshot',
   PerfTeamRollupWire: 'performance.ts::TeamRollup',
+  PerfTeamMemberWire: 'performance.ts::TeamMember',
   PerfWeightWire: 'performance.ts::KPIWeight',
   PerfTargetWire: 'performance.ts::PeriodTarget',
   // M15 team portal
@@ -307,6 +496,8 @@ const APPROVED_DIVERGENCE: Record<string, { keys: string[]; decision: string }> 
   },
 };
 
+const { pairs, unfollowed } = walkPairs();
+
 describe('FE↔API response-shape parity (O43 c)', () => {
   it('finds both sides (guards against the extraction silently breaking)', () => {
     // Without this, every assertion below passes vacuously the day the regex
@@ -335,14 +526,28 @@ describe('FE↔API response-shape parity (O43 c)', () => {
     expect(dangling, `registry points at missing FE types:\n${dangling.join('\n')}`).toEqual([]);
   });
 
+  it('reaches the nested blocks too — every reference is followed on both sides', () => {
+    // The descent is only as good as its ability to say "I stopped here". A
+    // one-sided reference (named on one side, inline object or ambiguous on the
+    // other) means a whole block goes uncompared while CI stays green.
+    const lines = unfollowed.map((u) => `${u.where}: ${u.detail}`);
+    expect(lines, `nested references the guard could not follow:\n${lines.join('\n')}`).toEqual([]);
+    // And it really descends: pairs found by recursion, not just the registry.
+    const nested = pairs.filter((p) => p.via !== 'WIRE_TO_FE');
+    expect(nested.length).toBeGreaterThan(0);
+    expect(pairs.map((p) => `${p.wire}|${p.fe}`)).toContain('DemoTaskWire|types.ts::DemoTaskDetailTask');
+  });
+
   it('emits every key the FE declares, except the documented divergences', () => {
     const broken: string[] = [];
-    for (const [wireName, feName] of Object.entries(WIRE_TO_FE)) {
-      const emitted = new Set(flatten(wire, wireName));
-      const exempt = new Set(APPROVED_DIVERGENCE[wireName]?.keys ?? []);
-      const missing = flattenFe(feName).filter((k) => !emitted.has(k) && !exempt.has(k));
+    for (const pair of pairs) {
+      const emitted = new Set(flatten(wire, pair.wire));
+      const exempt = new Set(APPROVED_DIVERGENCE[pair.wire]?.keys ?? []);
+      const missing = flattenFe(pair.fe).filter(
+        (k) => !emitted.has(k) && !exempt.has(k) && !pair.feDropped.has(k) && !pair.wireDropped.has(k),
+      );
       if (missing.length > 0) {
-        broken.push(`${wireName} (serves ${feName}) never emits: ${missing.join(', ')}`);
+        broken.push(`${pair.wire} (serves ${pair.fe}, via ${pair.via}) never emits: ${missing.join(', ')}`);
       }
     }
     // Each line is a page reading `undefined` for a field it renders — the
@@ -352,12 +557,14 @@ describe('FE↔API response-shape parity (O43 c)', () => {
 
   it('emits no key outside the FE contract unless allow-listed', () => {
     const undeclared: string[] = [];
-    for (const [wireName, feName] of Object.entries(WIRE_TO_FE)) {
-      const declared = new Set(flattenFe(feName));
-      const allowed = new Set(ALLOWED_EXTRA[wireName] ?? []);
-      const extra = flatten(wire, wireName).filter((k) => !declared.has(k) && !allowed.has(k));
+    for (const pair of pairs) {
+      const declared = new Set(flattenFe(pair.fe));
+      const allowed = new Set(ALLOWED_EXTRA[pair.wire] ?? []);
+      const extra = flatten(wire, pair.wire).filter(
+        (k) => !declared.has(k) && !allowed.has(k) && !pair.wireDropped.has(k),
+      );
       if (extra.length > 0) {
-        undeclared.push(`${wireName}: ${extra.join(', ')}`);
+        undeclared.push(`${pair.wire} (serves ${pair.fe}): ${extra.join(', ')}`);
       }
     }
     expect(
@@ -399,11 +606,39 @@ describe('FE↔API response-shape parity (O43 c)', () => {
     expect(camel, `camelCase keys crossing the wire:\n${camel.join('\n')}`).toEqual([]);
   });
 
-  it('states its own blind spot — the inline-nested list stays accurate', () => {
+  it('has no inline-nested blind spot left — on EITHER side of the boundary', () => {
     // A limit nobody can see is worse than no limit: green CI would read as full
-    // coverage. So the list is asserted against the file, not just written down.
-    const found = [...wire].filter(([, p]) => /^ {4}\w+\??:/m.test(p.body)).map(([name]) => name);
+    // coverage. So the list is asserted against the files, not just written down.
+    // It is now empty, which is a stronger statement than "accurate": every
+    // nested block on both sides is a named interface, so all of it is compared.
+    const inline = (source: Map<string, Parsed>, label: string) =>
+      [...source]
+        .filter(([, p]) => /^ {4}[A-Za-z_]\w*\??:/m.test(p.body))
+        .map(([name]) => `${label}${name}`);
+    const reachableFe = new Set(pairs.map((p) => p.fe));
+    const found = [
+      ...inline(wire, ''),
+      // FE side, limited to types this guard actually pairs against: an inline
+      // block there is the same blind spot seen from the other end, and it was
+      // never even stated before (`AttemptDetail`, `DemoTaskDetail`).
+      ...inline(new Map([...fe].filter(([k]) => reachableFe.has(k))), 'FE '),
+    ];
     expect(found.sort()).toEqual([...NESTED_INLINE_UNCHECKED].sort());
+  });
+
+  it('locks the four blocks that used to be inline (positive assertions)', () => {
+    // Absence from a diff is not evidence when the diff never looked. These are
+    // the inner keys that were invisible until the blocks were named.
+    expect(flatten(wire, 'LeadAttemptWire')).toContain('owner_nama');
+    expect(flatten(wire, 'ProposalLineWire')).toContain('payment_terms');
+    expect(flatten(wire, 'AttemptDetailAttemptWire')).toContain('owner_employee_id');
+    expect(flatten(wire, 'AttemptDetailLeadWire')).toContain('winning_attempt_id');
+    // The narrow lead block must stay narrow — it is not `LeadRowWire`.
+    expect(flatten(wire, 'AttemptDetailLeadWire')).not.toContain('origin_division');
+    // The detail surface reads `description`; the list type does not declare it.
+    expect(flatten(wire, 'DemoTaskWire')).toContain('description');
+    expect(flattenFe('types.ts::DemoTaskDetailTask')).toContain('description');
+    expect(flattenFe('types.ts::DemoTask')).not.toContain('description');
   });
 
   it('keeps the M5 money path exactly as the FE reads it (O41 regression)', () => {

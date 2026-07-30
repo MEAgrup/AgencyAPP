@@ -33,7 +33,6 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
-import { msl } from '@cdps/domain';
 import { parseCsv } from './mslseed/csv';
 import { execute } from './mslseed/engine';
 
