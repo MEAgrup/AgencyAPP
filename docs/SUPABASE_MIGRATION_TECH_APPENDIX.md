@@ -154,6 +154,22 @@ supabase/migrations/*.sql | sort)` di CI tetap menerapkan urutan yang sama.
 | `20260102000011` | `20260729104209` | `admin_set_password` |
 | `20260102000012` | `20260729162101` | `lead_delete_request` |
 
+> ⚠️ **JANGAN pakai tabel ini untuk menerjemahkan komentar/dokumen yang ditulis SEBELUM
+> 2026-07-28 (O38).** Tabel di atas memetakan **berkas**, dan untuk itu ia benar. Tapi O38
+> sendiri sudah pernah menomori ulang rentang `0005`–`0009`: sebelum O38, **`…0005` adalah
+> C-01 `rls_leads_campaign_scope`** (yang O38 pindahkan ke `…0009`), sementara `…0005`
+> *sesudah* O38 adalah `fk_covering_indexes` — migrasi yang sama sekali lain (3 covering
+> index FK, nol policy). Jadi rujukan pra-O38 ke `…0005` harus diterjemahkan ke
+> **`20260729031525`**, bukan `20260724132631`.
+>
+> Ini bukan bahaya hipotetis: penyelarasan 2026-07-29 mengganti rujukan versi lewat
+> substitusi nomor, dan **dua rujukan pra-O38 karenanya menunjuk migrasi yang salah** —
+> `packages/domain/src/leads.ts` dan `supabase/tests/rls_checks.sql` check 13, keduanya
+> membicarakan arm *own-campaign-origin* pada `leads_select` (dibuat oleh
+> `20260729031525`, lihat baris 22 & 44 berkas itu) tapi tertulis `20260724132631`.
+> Diperbaiki 2026-07-30. **Untuk penyelarasan berikutnya: petakan per makna, jangan per
+> nomor** — periksa isi migrasi tujuan benar-benar membuat hal yang dibicarakan komentar.
+
 **Baris live-only `20260723064826_rls_harden_execute_surface` — DITUTUP dengan back-port
 riwayat (2026-07-29).** Semula ini satu-satunya sisa: live punya 40 baris riwayat, repo 39
 berkas. `db push` sendiri hanya mendorong versi lokal yang belum ada di remote, jadi baris

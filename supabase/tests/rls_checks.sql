@@ -155,7 +155,7 @@ DO $$ BEGIN
 END $$;
 
 -- 13. Marketing staff who own the ORIGIN CAMPAIGN see the lead even though they
---     did not create it — the arm added by 20260724132631 for parity with Go
+--     did not create it — the arm added by 20260729031525 for parity with Go
 --     `canReadLead`. Without that migration this check fails.
 SELECT set_config('request.jwt.claims',
   '{"app_metadata":{"employee_id":"EMP-RLS-MKT2","division":"Marketing","level":"staff"}}', true);
