@@ -224,6 +224,93 @@ DO $$ BEGIN
 END $$;
 
 RESET ROLE;
+
+-- ---------------------------------------------------------------------------
+-- 18-23. O46 — arm "Lead/SPV = division-wide" (PRD Role Matrix §6), ditambahkan
+--        20260730073000. Dua policy sebelumnya lebih SEMPIT dari Go DAN dari PRD:
+--        `transactions_select` tak punya arm Sales-Lead (Go `trxVisibility` memberi
+--        Sales Lead seluruh transaksi klien sales-nya), dan `audit_log_select`
+--        tak punya arm lead sama sekali sehingga seorang lead tidak bisa membaca
+--        jejak audit divisinya sendiri.
+--
+--        Berbeda dari check 1-17, blok ini butuh baris `employees` NYATA: kedua
+--        helper baru (`private.jwt_same_division`,
+--        `private.jwt_division_owns_client`) me-resolve divisi karyawan LAIN, dan
+--        divisi itu tidak ada di JWT si pembaca. Tanpa fixture ini kedua arm akan
+--        selalu false — hijau karena hampa, bukan karena benar.
+-- ---------------------------------------------------------------------------
+
+-- Fixture (superuser): karyawan riil untuk resolusi divisi. EMP-RLS-SLS1 adalah
+-- sales_pic klien CLI-RLS-0001 yang dibuat blok 14-17 di atas.
+INSERT INTO employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by) VALUES
+  ('EMP-RLS-SLS1',    'rls sales staff',   'rls.sls1@example.test',    'Sales',    'Sales Jasa',    true, 'SYSTEM'),
+  ('EMP-RLS-SLSLEAD', 'rls sales lead',    'rls.slslead@example.test', 'Sales',    'Head of Sales', true, 'SYSTEM'),
+  ('EMP-RLS-CRELEAD', 'rls creative lead', 'rls.crelead@example.test', 'Creative', 'Lead Creative', true, 'SYSTEM');
+
+-- Jejak audit milik EMP-RLS-SLS1 (divisi Sales) — objek uji arm audit.
+INSERT INTO audit_log (entity_type, entity_id, actor_employee_id, action, created_by)
+VALUES ('transaction', 'TRX-RLS-0001', 'EMP-RLS-SLS1', 'transition:->[Menunggu Verifikasi]', 'EMP-RLS-SLS1');
+
+SET LOCAL ROLE authenticated;
+
+-- 18. O46 (a) — Sales LEAD melihat transaksi klien yang PIC-nya sedivisi
+--     dengannya, walau ia sendiri bukan PIC mana pun. GAGAL tanpa …073000.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLSLEAD","division":"Sales","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM transactions WHERE id='TRX-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS transactions: Sales LEAD must see division transactions (O46 a, PRD Role Matrix)'; END IF;
+END $$;
+
+-- 19. Arm lead TIDAK boleh melebar ke divisi lain: lead Creative tetap nol.
+--     Ini yang membedakan "division-wide" dari "lead-wide".
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRELEAD","division":"Creative","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM transactions WHERE id='TRX-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS transactions: foreign-division lead must NOT see the transaction (O46 a)'; END IF;
+END $$;
+
+-- 20. Arm lead TIDAK boleh melebar ke staff sedivisi yang bukan PIC. Kalau check
+--     ini merah, `jwt_is_lead()` hilang dari arm dan seluruh divisi ikut terbuka.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLS9","division":"Sales","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM transactions WHERE id='TRX-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS transactions: same-division STAFF who is not PIC must NOT see it (O46 a guard)'; END IF;
+END $$;
+
+-- 21. O46 (b) — Sales LEAD membaca entri audit yang ditulis anggota divisinya.
+--     GAGAL tanpa …073000.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLSLEAD","division":"Sales","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM audit_log WHERE entity_id='TRX-RLS-0001' AND actor_employee_id='EMP-RLS-SLS1') <> 1
+  THEN RAISE EXCEPTION 'RLS audit_log: Sales LEAD must read division audit trail (O46 b, PRD Role Matrix)'; END IF;
+END $$;
+
+-- 22. Arm audit TIDAK boleh melebar lintas divisi: lead Creative tetap nol.
+--     Tabel audit adalah yang paling mahal kalau melebar, jadi ia diuji dua arah.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRELEAD","division":"Creative","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM audit_log WHERE entity_id='TRX-RLS-0001' AND actor_employee_id='EMP-RLS-SLS1') <> 0
+  THEN RAISE EXCEPTION 'RLS audit_log: foreign-division lead must NOT read the trail (O46 b)'; END IF;
+END $$;
+
+-- 23. Batas yang DINYATAKAN (bukan cacat): staff sedivisi tetap TIDAK membaca
+--     entri audit orang lain — "Staff = own data only" (PRD §6). Panel riwayat
+--     Asset Creative karenanya tetap parsial bagi staff, dan itu perilaku PRD.
+--     Kalau check ini merah, seseorang memperluas audit ke seluruh divisi tanpa
+--     entri DECISIONS.md.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLS9","division":"Sales","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM audit_log WHERE entity_id='TRX-RLS-0001' AND actor_employee_id='EMP-RLS-SLS1') <> 0
+  THEN RAISE EXCEPTION 'RLS audit_log: same-division STAFF must NOT read other actors entries (PRD staff=own-only)'; END IF;
+END $$;
+
+RESET ROLE;
 ROLLBACK;
 
 \echo 'rls_checks: PASS'
