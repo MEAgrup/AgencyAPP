@@ -23,6 +23,18 @@
 > - **Lead/SPV = division-wide**, resolved from the **entry actor's** division. Added by migration
 >   `20260730091540`; before it, a lead could not read their own division's trail at all.
 >
+> 🔴 **This row is not yet true in production — the arm shipped DEAD.** `20260730091540` compared
+> `employees.divisi` (an **HRIS department**, `SALES`) against `jwt_division()` (a **CDPS division**,
+> `Sales`) — two vocabularies bridged by `role_mappings` — so `EXISTS(...)` was always false and both
+> lead arms never fired. A read-only probe of live found it; the local tests did **not**, because
+> their fixture used the CDPS spelling and so matched by coincidence. Fixed by
+> `20260730100000_fix_o46_division_resolution.sql`, which resolves both sides through
+> `public.employee_claims()` — the same function that populates the JWT claims, so the two sides
+> cannot diverge again. **That fix is green locally but NOT YET APPLIED to live.** Until it is, treat
+> "Lead/SPV = division-wide" on this row as **aspirational for `audit_log` and `transactions` too**,
+> exactly like the O48 note below. The direction was always narrower, so **no leak** — the feature
+> was simply off.
+>
 > Enforced in the DB (`audit_log_select`), locked by `supabase/tests/rls_checks.sql` checks 21–23 —
 > including a guard check that goes **red** if anyone widens staff beyond own-entries without a
 > `DECISIONS.md` row. `audit_log` is append-only (trigger `audit_log_no_delete`); there is no write
