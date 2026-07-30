@@ -28,7 +28,7 @@ Alur setelah divalidasi:
 **Seeding 23 mapping + OD:**
 - CSV kanonik: `supabase/seed/role_mappings_riil.csv` (23 baris inti), `supabase/seed/layered_roles_riil.csv` (OD OKFA).
 - CLI: `backend/cmd/rolemapseed` (dry-run default, `--apply`), aktor SYSTEM bootstrap.
-- Sumber sync go-live: `backend/testdata/import_samples/employees_cdps.csv` (33 baris = 39 roster − 5 CREATIVE-EKSTERNAL − 1 SKILSKUL).
+- Sumber sync go-live: ~~`backend/testdata/import_samples/employees_cdps.csv` (33 baris = 39 roster − 5 CREATIVE-EKSTERNAL − 1 SKILSKUL)~~ — **berkas itu DIHAPUS 2026-07-30** (retensi PII, keputusan pemilik; `docs/DECISIONS.md`). Sudah tidak dibutuhkan: live `CDPS SG` memuat **69 karyawan** ter-seed dan `role_mappings` **39**. Sync/koreksi karyawan berikutnya lewat import CSV admin-triggered (OQ-4) dengan berkas yang disediakan HR saat itu.
 - **Directors Yohan & Nerissa**: belum ada di roster 39 → TIDAK bisa di-seed sekarang (lihat Open O26 — butuh NIK+email keduanya dari HR sebelum produksi go-live; dev/UAT pakai fixture).
 
 ---
