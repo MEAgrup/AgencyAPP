@@ -134,15 +134,22 @@ export interface AuditEntry {
   created_at: string;
 }
 
+// Blok `task` dari GET /demo-tasks/{id}. Berbeda dari `DemoTask` baris daftar:
+// halaman detail juga membaca `description`. Dinamai (bukan objek inline) supaya
+// gate paritas bentuk bisa membandingkan kunci di dalamnya — sebelum ini
+// `description` hanya terdaftar sebagai "kunci ekstra" terhadap `DemoTask`,
+// sehingga menghapusnya dari wire TIDAK akan memerahkan gate mana pun.
+export interface DemoTaskDetailTask {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+  created_by: string;
+  created_at: string;
+}
+
 export interface DemoTaskDetail {
-  task: {
-    id: string;
-    title: string;
-    description: string;
-    status: string;
-    created_by: string;
-    created_at: string;
-  };
+  task: DemoTaskDetailTask;
   allowed_transitions: string[];
   audit: AuditEntry[];
 }

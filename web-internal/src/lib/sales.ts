@@ -114,29 +114,40 @@ export interface NegotiationProposalRow {
   lines: ProposalLineRow[];
 }
 
+// Blok `attempt` dari GET /attempts/{id}.
+export interface AttemptDetailAttempt {
+  id: string;
+  lead_id: string;
+  owner_employee_id: string;
+  owner_nama: string;
+  status: string;
+  claimed_at: string;
+  created_at: string;
+}
+
+// Blok `lead` dari GET /attempts/{id}. Sengaja LEBIH SEMPIT dari `LeadRow`:
+// halaman closing tidak membaca origin_division / open_attempt_count.
+export interface AttemptDetailLead {
+  id: string;
+  lead_name: string;
+  phone_number: string;
+  email: string | null;
+  source: string;
+  record_status: string;
+  origin_campaign_id: string | null;
+  last_touch_campaign_id: string | null;
+  winning_attempt_id: string | null;
+}
+
 // GET /attempts/{id} response — attempt + lead + qualified form snapshot +
 // negotiation history + not-qualified reasons + the engine's legal next moves.
+//
+// Blok bersarang dinamai (bukan objek inline) supaya gate paritas bentuk
+// `apps/api/src/lib/shape-parity.test.ts` bisa membandingkan kunci DALAMNYA —
+// objek inline tidak terbaca ekstraktornya, jadi dulu tidak pernah dibandingkan.
 export interface AttemptDetail {
-  attempt: {
-    id: string;
-    lead_id: string;
-    owner_employee_id: string;
-    owner_nama: string;
-    status: string;
-    claimed_at: string;
-    created_at: string;
-  };
-  lead: {
-    id: string;
-    lead_name: string;
-    phone_number: string;
-    email: string | null;
-    source: string;
-    record_status: string;
-    origin_campaign_id: string | null;
-    last_touch_campaign_id: string | null;
-    winning_attempt_id: string | null;
-  };
+  attempt: AttemptDetailAttempt;
+  lead: AttemptDetailLead;
   qualified_form: QualifiedFormSnapshot | null;
   proposals: NegotiationProposalRow[];
   nq_reasons: string[];
