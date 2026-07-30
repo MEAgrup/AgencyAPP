@@ -91,8 +91,12 @@ Empat konsekuensi yang mengikat:
    Diterima sadar: mem-port ketiganya = **jalur tulis privileged kedua** ke
    `clients`/`transactions`/`installments` yang **memintas engine M0 Closing** — melanggar house
    rule #2 demi data yang sifatnya arsip.
-4. O22 (2026-07-10, Pilihan B) menjadi **moot** untuk jalur historis — ia memutuskan APA yang
-   diimpor oleh tooling yang sekarang ditinggalkan.
+4. **O22 GUGUR, dan ini mengubah gate C-04.** O22 (2026-07-10, Pilihan B: lead Qualify + Hot/Warm
+   6 bulan terakhir) memutuskan **APA** yang diimpor oleh tooling yang sekarang ditinggalkan.
+   `CUTOVER_BACKLOG.md` §C-04 mencantumkan *"❌ O22 impor lead historis"* sebagai butir yang belum
+   selesai — butir itu sekarang **keluar dari daftar**, bukan tetap merah. CDPS produksi mulai dari
+   data bersih **by decision**. Ini konsekuensi turunan yang mudah terlewat: menjawab O47 memindahkan
+   satu kriteria keluar dari gate C-04, bukan hanya membuka C-05.
 
 > 🔴 **Pengaman C-05 yang jangan dilewat.** Backlog §C-05 butir 2 (*"jangan hapus tanpa tag"*)
 > sekarang **lebih penting, bukan kurang**: sejak O47 diputus "tinggalkan", tag rilis terakhir
