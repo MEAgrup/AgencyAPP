@@ -745,7 +745,7 @@ export function leadListScope(actor: permission.Actor): LeadListScope | null {
 // holds an attempt). It is intentionally NOT re-implemented here: row visibility
 // is the `leads_select` RLS policy's job, and a second copy in TS could only
 // diverge from it (CLAUDE.md — the two sides must never disagree). Migration
-// 20260724132631 adds the own-campaign-origin arm that the baseline policy was
+// 20260729031525 adds the own-campaign-origin arm that the baseline policy was
 // missing, so RLS now matches Go's predicate exactly.
 
 /** One Sales Pool board row (contract §3). */
