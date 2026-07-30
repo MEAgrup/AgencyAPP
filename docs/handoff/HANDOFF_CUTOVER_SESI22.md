@@ -1,5 +1,26 @@
 # HANDOFF — Cutover Sesi 22 (semua kerja engineering ter-commit & ter-push · satu apply menunggu persetujuan)
 
+> ## 🔴 DIGANTIKAN OLEH `HANDOFF_CUTOVER_SESI23.md` — JANGAN SALIN §0 DARI SINI
+>
+> **§0 dan §2 butir 1–2 berkas ini SALAH, dan sudah salah PADA SAAT DITULIS.** Keduanya menyatakan
+> `20260730100000` "menunggu persetujuan apply" dan `Repo vs live: 42 repo vs 41 live`. Kenyataannya
+> perbaikan itu sudah tercatat di live **12:04:33 UTC** — **78 menit sebelum** commit yang menulis
+> berkas ini (`21230e0`, 13:22:11 UTC). Live sudah **42**, bukan 41, dan namanya `20260730120433`,
+> bukan `20260730100000`.
+>
+> **Kenapa ini penting sebagai pelajaran, bukan cuma sebagai koreksi:** seluruh sesi 22 dihabiskan
+> untuk memperbaiki dokumen yang melaporkan keadaan lebih sehat daripada kenyataan — lalu ia
+> melakukan **persis kesalahan yang sama**, dalam arah sebaliknya, karena ia memverifikasi ulang
+> **angka test lokal** tapi **tidak pernah menanyai live** sekali pun. Membangun ulang DB lokal
+> membuktikan repo konsisten dengan dirinya sendiri; ia **tidak bisa** memberi tahu apa yang ada di
+> `CDPS SG`. Satu-satunya sumber untuk baris "Repo vs live" adalah `list_migrations` terhadap live.
+>
+> **Aturan yang lahir dari ini: baris apa pun tentang keadaan LIVE wajib dibaca dari live pada sesi
+> yang menulisnya.** Jangan pernah mewarisinya dari handoff sebelumnya — handoff adalah klaim, bukan
+> pengukuran. Sesi 23 menjalankan aturan itu dan menemukan selisihnya dalam dua panggilan.
+>
+> Yang di bawah ini tetap sahih: §1.2 (pelajaran proses) dan §3 (daftar jangan-dikerjakan).
+
 > **Pendahulu:** `HANDOFF_CUTOVER_SESI21.md`. §0-nya **sudah dikoreksi** di sesi ini — versi yang
 > Anda baca sekarang akurat; jangan pakai salinan §0 dari catatan/chat lama, ia memuat
 > `repo↔live 41 = 41` dan `apps/api 301` yang keduanya **salah**.
