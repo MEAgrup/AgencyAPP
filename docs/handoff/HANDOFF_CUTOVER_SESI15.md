@@ -11,7 +11,7 @@
 |---|---|
 | **Branch** | `claude/cdps-sg-cutover-migrasi-azzlwr` |
 | **HEAD** | 1 commit di atas `main@a37e432` |
-| **PR** | dibuka dari branch ini → `main` |
+| **PR** | **#77** → `main` |
 | **Perubahan** | **komentar + dokumentasi saja. Nol DDL, nol logika, nol migrasi baru.** |
 | **Live `CDPS SG`** | **40 migrasi · 54 tabel · 17 event** — tidak disentuh sesi ini |
 
