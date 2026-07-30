@@ -75,6 +75,69 @@ describe('parseEmployeeCsv', () => {
   it('returns [] for empty input', () => {
     expect(parseEmployeeCsv('')).toEqual([]);
   });
+
+  // --- data-quality gate (ported from Go's hris.Convert with cmd/hrisconvert) ---
+
+  it('rejects a duplicate employee_id and names EVERY line carrying it', () => {
+    const csv = [
+      'employee_id,nama,email,divisi,jabatan,status_aktif',
+      'EMP-1,Budi,budi@mea.co.id,Sales,Exec,1',
+      'EMP-2,Siti,siti@mea.co.id,Creative,Designer,1',
+      'EMP-1,Bambang,bambang@mea.co.id,Ads,Specialist,1',
+    ].join('\n');
+    // syncEmployees upserts by employee_id, so accepting this would silently mean
+    // "last row wins" — Budi's division quietly replaced by Bambang's.
+    expect(() => parseEmployeeCsv(csv)).toThrow(/EMP-1 duplikat di baris 2, 4/);
+  });
+
+  it('rejects a blank employee_id, nama, divisi or jabatan', () => {
+    const head = 'employee_id,nama,email,divisi,jabatan,status_aktif';
+    // A blank NIK would upsert a row keyed on '' — worse than a duplicate.
+    expect(() => parseEmployeeCsv(`${head}\n,Budi,b@x.id,Sales,Exec,1`))
+      .toThrow(/baris 2: employee_id kosong/);
+    expect(() => parseEmployeeCsv(`${head}\nEMP-1,,b@x.id,Sales,Exec,1`))
+      .toThrow(/baris 2: nama kosong/);
+    expect(() => parseEmployeeCsv(`${head}\nEMP-1,Budi,b@x.id,,Exec,1`))
+      .toThrow(/baris 2: divisi kosong/);
+    expect(() => parseEmployeeCsv(`${head}\nEMP-1,Budi,b@x.id,Sales,,1`))
+      .toThrow(/baris 2: jabatan kosong/);
+  });
+
+  it('reports every problem in one pass, not just the first', () => {
+    const csv = [
+      'employee_id,nama,email,divisi,jabatan,status_aktif',
+      'EMP-1,,b@x.id,Sales,Exec,1',
+      'EMP-2,Siti,s@x.id,,Designer,1',
+    ].join('\n');
+    // A roster is fixed in one editing pass; failing on the first row only would
+    // make cleaning a 69-row file a 69-round game.
+    expect(() => parseEmployeeCsv(csv)).toThrow(/2 masalah kualitas data/);
+    expect(() => parseEmployeeCsv(csv)).toThrow(/baris 2: nama kosong/);
+    expect(() => parseEmployeeCsv(csv)).toThrow(/baris 3: divisi kosong/);
+  });
+
+  it('rejects the file WHOLE — no partial roster is returned', () => {
+    const csv = [
+      'employee_id,nama,email,divisi,jabatan,status_aktif',
+      'EMP-1,Budi,budi@mea.co.id,Sales,Exec,1',
+      'EMP-2,,siti@mea.co.id,Creative,Designer,1',
+    ].join('\n');
+    // Landing only the good rows is worse than landing none: a full-mode sync
+    // would then flag the rejected rows as if HR had off-boarded them.
+    expect(() => parseEmployeeCsv(csv)).toThrow();
+  });
+
+  it('still PERMITS a blank email — that employee simply cannot log in yet', () => {
+    const csv = 'employee_id,nama,email,divisi,jabatan,status_aktif\nEMP-1,Budi,,Sales,Exec,1';
+    // Go warned but emitted; a missing email is real and common in the HR roster,
+    // and it is not a reason to reject everyone else with them.
+    expect(parseEmployeeCsv(csv)[0].email).toBe('');
+  });
+
+  it('ignores a trailing blank line rather than calling it a blank row', () => {
+    const csv = 'employee_id,nama,email,divisi,jabatan,status_aktif\nEMP-1,Budi,b@x.id,Sales,Exec,1\n';
+    expect(parseEmployeeCsv(csv)).toHaveLength(1);
+  });
 });
 
 describe('CsvEmployeeSource', () => {

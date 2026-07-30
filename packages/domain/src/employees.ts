@@ -72,6 +72,24 @@ export const BCRYPT_COST = 10;
  *   employee_id,nama,email,divisi,jabatan,status_aktif[,password]
  * status_aktif is truthy for "1"/"true"/"yes"/"y"/"t" (case-insensitive).
  * A password column is optional; blank => DEFAULT_TEMP_PASSWORD at provision time.
+ *
+ * DATA-QUALITY GATE (ported from Go's `hris.Convert`, which retired with
+ * `cmd/hrisconvert` — see DECISIONS 2026-07-29 "Fase 3"). A dirty file is
+ * rejected WHOLE, before a single row is returned; nothing is dropped silently:
+ *
+ *   - a blank `employee_id`, `nama`, `divisi` or `jabatan` is fatal;
+ *   - a DUPLICATE `employee_id` is fatal, and EVERY line carrying it is named,
+ *     not just the second one.
+ *
+ * Both had to move here rather than stay in a converter. `syncEmployees` upserts
+ * by `employee_id`, so a duplicate NIK silently means "last row wins" — one
+ * employee's department quietly overwritten by another's, with no error anywhere.
+ * A blank NIK is worse: it would upsert a row keyed on ''. The admin UI pastes
+ * this CSV straight in, so this parser IS the gate on the production path.
+ *
+ * A blank `email` stays permitted (it is what Go permitted too, with a warning):
+ * CDPS logs in by email, so such an employee simply cannot log in yet — real,
+ * common, and not a reason to reject the whole roster.
  */
 export function parseEmployeeCsv(text: string): Employee[] {
   const rows = tokenizeCsv(text);
@@ -81,7 +99,12 @@ export function parseEmployeeCsv(text: string): Employee[] {
   // Drop the header row.
   const body = rows.slice(1);
   const out: Employee[] = [];
-  for (const row of body) {
+  const problems: string[] = [];
+  /** employee_id -> every 1-based file line that carried it. */
+  const seen = new Map<string, number[]>();
+
+  for (const [i, row] of body.entries()) {
+    const line = i + 2; // +1 for the dropped header, +1 for 1-based counting
     // A trailing blank line tokenizes to a single empty field — skip it.
     if (row.length === 1 && row[0].trim() === '') {
       continue;
@@ -90,7 +113,7 @@ export function parseEmployeeCsv(text: string): Employee[] {
       throw new Error(`hris csv: expected >=6 columns, got ${row.length}`);
     }
     const password = row.length >= 7 ? row[6].trim() : '';
-    out.push({
+    const emp: Employee = {
       employeeId: row[0].trim(),
       nama: row[1].trim(),
       email: row[2].trim(),
@@ -98,7 +121,32 @@ export function parseEmployeeCsv(text: string): Employee[] {
       jabatan: row[4].trim(),
       statusAktif: parseBool(row[5]),
       password: password === '' ? undefined : password,
-    });
+    };
+
+    for (const [field, value] of [
+      ['employee_id', emp.employeeId], ['nama', emp.nama],
+      ['divisi', emp.divisi], ['jabatan', emp.jabatan],
+    ] as const) {
+      if (value === '') {
+        problems.push(`baris ${line}: ${field} kosong`);
+      }
+    }
+    if (emp.employeeId !== '') {
+      seen.set(emp.employeeId, [...(seen.get(emp.employeeId) ?? []), line]);
+    }
+    out.push(emp);
+  }
+
+  for (const [id, lines] of seen) {
+    if (lines.length > 1) {
+      problems.push(`employee_id ${id} duplikat di baris ${lines.join(', ')}`);
+    }
+  }
+  if (problems.length > 0) {
+    // Reject the whole file: a partial import of a roster is harder to reason
+    // about than no import, and `syncEmployees` full-mode would then flag the
+    // rows that never made it as if HR had off-boarded them.
+    throw new Error(`hris csv: ${problems.length} masalah kualitas data — ${problems.join('; ')}`);
   }
   return out;
 }

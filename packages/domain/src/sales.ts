@@ -32,6 +32,7 @@ import { bi, money, notification, permission, statemachine, tz } from '@cdps/cor
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { effectiveAt, type ServiceView } from './msl';
 import { resolveWin } from './leads';
+import { allowedTransitions } from './engine';
 
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;
@@ -1361,11 +1362,13 @@ function minQtyValue(minQty: bigint): string | null {
 // handle. Ports Go's module0_sales/reads.go + module1_leads/reads.go.
 // ---------------------------------------------------------------------------
 
-/** One prospect attempt in the list view (M0/M1 §7). */
+/** One prospect attempt in the list view (M0/M1 §7). Mirrors Go's AttemptRow. */
 export interface AttemptListRow {
   id: string;
   leadId: string;
   leadName: string;
+  phoneNumber: string;
+  source: string;
   ownerEmployeeId: string;
   ownerNama: string;
   status: string;
@@ -1374,31 +1377,85 @@ export interface AttemptListRow {
 }
 
 interface AttemptRow {
-  id: string; lead_id: string; lead_name: string; owner_employee_id: string;
-  owner_nama: string; status: string; claimed_at: Date; created_at: Date;
+  id: string; lead_id: string; lead_name: string; phone_number: string; source: string;
+  owner_employee_id: string; owner_nama: string; status: string;
+  claimed_at: Date; created_at: Date;
 }
 
 function toAttemptRow(r: AttemptRow): AttemptListRow {
   return {
-    id: r.id, leadId: r.lead_id, leadName: r.lead_name, ownerEmployeeId: r.owner_employee_id,
+    id: r.id, leadId: r.lead_id, leadName: r.lead_name, phoneNumber: r.phone_number,
+    source: r.source, ownerEmployeeId: r.owner_employee_id,
     ownerNama: r.owner_nama, status: r.status, claimedAt: r.claimed_at, createdAt: r.created_at,
   };
 }
 
-/** listAttempts returns prospect attempts (RLS-scoped), newest first. */
-export async function listAttempts(sql: Queryable): Promise<AttemptListRow[]> {
+/**
+ * listAttempts returns prospect attempts (RLS-scoped), newest first, optionally
+ * narrowed to one status. Ports Go's ListAttempts: Go narrows rows to the actor
+ * in SQL (`canListAttempts`), here that scoping is RLS's job — the status filter
+ * is not, and it is the one the client's status tabs depend on.
+ */
+export async function listAttempts(
+  sql: Queryable,
+  filter: { status?: string } = {},
+): Promise<AttemptListRow[]> {
+  const status = filter.status?.trim() ?? '';
   const rows = await sql<AttemptRow[]>`
-    select pa.id, pa.lead_id, l.lead_name, pa.owner_employee_id,
+    select pa.id, pa.lead_id, l.lead_name, l.phone_number, l.source, pa.owner_employee_id,
            coalesce(e.nama, pa.owner_employee_id) as owner_nama,
            pa.status, pa.claimed_at, pa.created_at
     from prospect_attempts pa
     join leads l on l.id = pa.lead_id
     left join employees e on e.employee_id = pa.owner_employee_id
+    where (${status} = '' or pa.status = ${status})
     order by pa.created_at desc, pa.id desc`;
   return rows.map(toAttemptRow);
 }
 
-/** The locked Qualified draft carried on an attempt (M0 §4). */
+/** The attempt block of the detail view — Go's AttemptCore. */
+export interface AttemptCoreView {
+  id: string;
+  leadId: string;
+  ownerEmployeeId: string;
+  ownerNama: string;
+  status: string;
+  claimedAt: Date;
+  createdAt: Date;
+}
+
+/** The lead block of the attempt detail view — Go's LeadCore. */
+export interface AttemptLeadView {
+  id: string;
+  leadName: string;
+  phoneNumber: string;
+  email: string | null;
+  source: string;
+  recordStatus: string;
+  originCampaignId: string | null;
+  lastTouchCampaignId: string | null;
+  winningAttemptId: string | null;
+}
+
+/**
+ * One persisted Qualified-form service line (qualified_form_services joined with
+ * its pricing snapshot) — Go's QFServiceView. The DECIMAL columns stay strings:
+ * money never round-trips through a JS number (house rule #4/#7).
+ */
+export interface QualifiedFormServiceView {
+  masterServiceId: string;
+  masterVersionNo: number;
+  name: string;
+  quantity: string;
+  unit: string | null;
+  pricingMode: string;
+  standardPrice: string;
+  inputAmount: string | null;
+  subtotal: string;
+  commissionRule: string;
+}
+
+/** The locked Qualified draft carried on an attempt (M0 §4) — Go's QualifiedFormView. */
 export interface AttemptQualified {
   namaPic: string;
   toko: string;
@@ -1410,9 +1467,10 @@ export interface AttemptQualified {
   gmvBaseline: string;
   targetGmv: string;
   marketingBudget: string | null;
+  services: QualifiedFormServiceView[];
 }
 
-/** One line of the latest negotiation proposal (the current quote). */
+/** One line of a negotiation proposal — Go's ProposalLineView. */
 export interface AttemptProposalLine {
   masterServiceId: string;
   name: string;
@@ -1421,62 +1479,126 @@ export interface AttemptProposalLine {
   paymentTerms: string | null;
 }
 
-/** The latest (highest-version) proposal on an attempt — the working quote. */
+/** One versioned negotiation proposal with its lines — Go's ProposalView. */
 export interface AttemptProposal {
+  id: string;
   versionNo: number;
   proposedBy: string;
+  proposedByNama: string;
   decisionNote: string | null;
+  createdAt: Date;
   lines: AttemptProposalLine[];
-  /** Σ proposed_price of the lines, as an IDR decimal string. */
-  total: string;
-}
-
-/** Attempt detail: the negotiation/quote view (M0 §5/§7). */
-export interface AttemptDetail extends AttemptListRow {
-  qualified: AttemptQualified | null;
-  latestProposal: AttemptProposal | null;
 }
 
 /**
- * getAttempt returns one attempt with its Qualified draft and the latest
- * negotiation proposal (the working quote). Throws NotFoundError when absent.
+ * Attempt detail: the negotiation/quote view (M0 §5/§7) — Go's AttemptDetail.
+ *
+ * The whole proposal HISTORY is returned (version_no ASC), not just the latest:
+ * the negotiation panel renders every round, and a single "current quote" cannot
+ * show that a price was revised. `allowedTransitions` is what the client uses to
+ * decide which action buttons exist at all — an empty list renders a dead page,
+ * so it is derived from the engine's own edge table, never hardcoded.
+ */
+export interface AttemptDetail {
+  attempt: AttemptCoreView;
+  lead: AttemptLeadView;
+  qualifiedForm: AttemptQualified | null;
+  proposals: AttemptProposal[];
+  nqReasons: string[];
+  allowedTransitions: string[];
+}
+
+/**
+ * getAttempt returns the full attempt detail (M0 §5/§7): the attempt, its lead,
+ * the persisted Qualified-form snapshot with its service lines, the whole
+ * negotiation history, the not-qualified reasons, and the engine's legal next
+ * moves. Throws NotFoundError when absent. Ports Go's Service.GetAttempt.
  */
 export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDetail> {
-  const rows = await sql<AttemptRow[]>`
-    select pa.id, pa.lead_id, l.lead_name, pa.owner_employee_id,
+  const rows = await sql<{
+    id: string; lead_id: string; owner_employee_id: string; owner_nama: string;
+    status: string; claimed_at: Date; created_at: Date;
+  }[]>`
+    select pa.id, pa.lead_id, pa.owner_employee_id,
            coalesce(e.nama, pa.owner_employee_id) as owner_nama,
            pa.status, pa.claimed_at, pa.created_at
     from prospect_attempts pa
-    join leads l on l.id = pa.lead_id
     left join employees e on e.employee_id = pa.owner_employee_id
     where pa.id = ${id}`;
   if (rows.length === 0) {
     throw new NotFoundError();
   }
+  const a = rows[0];
+  const attempt: AttemptCoreView = {
+    id: a.id, leadId: a.lead_id, ownerEmployeeId: a.owner_employee_id,
+    ownerNama: a.owner_nama, status: a.status, claimedAt: a.claimed_at, createdAt: a.created_at,
+  };
+
+  const leadRows = await sql<{
+    id: string; lead_name: string; phone_number: string; email: string | null; source: string;
+    record_status: string; origin_campaign_id: string | null;
+    last_touch_campaign_id: string | null; winning_attempt_id: string | null;
+  }[]>`
+    select id, lead_name, phone_number, email, source, record_status,
+           origin_campaign_id, last_touch_campaign_id, winning_attempt_id
+    from leads where id = ${attempt.leadId}`;
+  if (leadRows.length === 0) {
+    // Go returns the raw sql.ErrNoRows here; the FK makes this unreachable, but a
+    // 404 beats leaking a driver error if the row is ever hidden by RLS.
+    throw new NotFoundError();
+  }
+  const l = leadRows[0];
+  const lead: AttemptLeadView = {
+    id: l.id, leadName: l.lead_name, phoneNumber: l.phone_number, email: l.email,
+    source: l.source, recordStatus: l.record_status, originCampaignId: l.origin_campaign_id,
+    lastTouchCampaignId: l.last_touch_campaign_id, winningAttemptId: l.winning_attempt_id,
+  };
 
   const qfRows = await sql<QualifiedFormRow[]>`
     select nama_pic, toko, kota, link_toko, kategori, platform, store_link,
            gmv_baseline, target_gmv, marketing_budget
     from qualified_forms where attempt_id = ${id}`;
-  const qualified: AttemptQualified | null = qfRows.length === 0 ? null : {
-    namaPic: qfRows[0].nama_pic, toko: qfRows[0].toko, kota: qfRows[0].kota,
-    linkToko: qfRows[0].link_toko, kategori: qfRows[0].kategori, platform: qfRows[0].platform,
-    storeLink: qfRows[0].store_link, gmvBaseline: qfRows[0].gmv_baseline,
-    targetGmv: qfRows[0].target_gmv, marketingBudget: qfRows[0].marketing_budget,
-  };
+  let qualifiedForm: AttemptQualified | null = null;
+  if (qfRows.length > 0) {
+    const svcRows = await sql<{
+      master_service_id: string; master_version_no: number; name: string; quantity: string;
+      unit: string | null; pricing_mode: string; standard_price: string;
+      input_amount: string | null; subtotal: string; commission_rule: string;
+    }[]>`
+      select master_service_id, master_version_no, name, quantity, unit, pricing_mode,
+             standard_price, input_amount, subtotal, commission_rule
+      from qualified_form_services where attempt_id = ${id} order by id`;
+    qualifiedForm = {
+      namaPic: qfRows[0].nama_pic, toko: qfRows[0].toko, kota: qfRows[0].kota,
+      linkToko: qfRows[0].link_toko, kategori: qfRows[0].kategori, platform: qfRows[0].platform,
+      storeLink: qfRows[0].store_link, gmvBaseline: qfRows[0].gmv_baseline,
+      targetGmv: qfRows[0].target_gmv, marketingBudget: qfRows[0].marketing_budget,
+      services: svcRows.map((s) => ({
+        masterServiceId: s.master_service_id, masterVersionNo: s.master_version_no,
+        name: s.name, quantity: s.quantity, unit: s.unit, pricingMode: s.pricing_mode,
+        standardPrice: s.standard_price, inputAmount: s.input_amount, subtotal: s.subtotal,
+        commissionRule: s.commission_rule,
+      })),
+    };
+  }
 
-  const propRows = await sql<
-    { id: string; version_no: number; proposed_by: string; decision_note: string | null }[]
-  >`
-    select id, version_no, proposed_by, decision_note
-    from negotiation_proposals where attempt_id = ${id}
-    order by version_no desc limit 1`;
-  let latestProposal: AttemptProposal | null = null;
-  if (propRows.length > 0) {
-    const p = propRows[0];
-    const lineRows = await sql<
-      { master_service_id: string; name: string; proposed_price: string; commission_rule: string; payment_terms: string | null }[]
-    >`
+  const propRows = await sql<{
+    id: string; version_no: number; proposed_by: string; proposed_by_nama: string;
+    decision_note: string | null; created_at: Date;
+  }[]>`
+    select np.id, np.version_no, np.proposed_by,
+           coalesce(e.nama, np.proposed_by) as proposed_by_nama,
+           np.decision_note, np.created_at
+    from negotiation_proposals np
+    left join employees e on e.employee_id = np.proposed_by
+    where np.attempt_id = ${id}
+    order by np.version_no asc`;
+  const proposals: AttemptProposal[] = [];
+  for (const p of propRows) {
+    const lineRows = await sql<{
+      master_service_id: string; name: string; proposed_price: string;
+      commission_rule: string; payment_terms: string | null;
+    }[]>`
       select npl.master_service_id, coalesce(qfs.name, '') as name,
              npl.proposed_price, npl.commission_rule, npl.payment_terms
       from negotiation_proposal_lines npl
@@ -1484,21 +1606,27 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
              on qfs.attempt_id = ${id} and qfs.master_service_id = npl.master_service_id
       where npl.proposal_id = ${p.id}
       order by npl.id`;
-    let total = 0n;
-    for (const l of lineRows) {
-      total += money.parse(l.proposed_price);
-    }
-    latestProposal = {
-      versionNo: p.version_no, proposedBy: p.proposed_by, decisionNote: p.decision_note,
-      lines: lineRows.map((l) => ({
-        masterServiceId: l.master_service_id, name: l.name, proposedPrice: l.proposed_price,
-        commissionRule: l.commission_rule, paymentTerms: l.payment_terms,
+    proposals.push({
+      id: p.id, versionNo: p.version_no, proposedBy: p.proposed_by,
+      proposedByNama: p.proposed_by_nama, decisionNote: p.decision_note, createdAt: p.created_at,
+      lines: lineRows.map((ln) => ({
+        masterServiceId: ln.master_service_id, name: ln.name, proposedPrice: ln.proposed_price,
+        commissionRule: ln.commission_rule, paymentTerms: ln.payment_terms,
       })),
-      total: money.decimal(total),
-    };
+    });
   }
 
-  return { ...toAttemptRow(rows[0]), qualified, latestProposal };
+  const nqRows = await sql<{ reason: string }[]>`
+    select reason from prospect_attempt_nq_reasons where attempt_id = ${id} order by id`;
+
+  return {
+    attempt,
+    lead,
+    qualifiedForm,
+    proposals,
+    nqReasons: nqRows.map((r) => r.reason),
+    allowedTransitions: await allowedTransitions(sql, ATTEMPT_MACHINE, attempt.status),
+  };
 }
 
 /** One platform snapshot on a Client Record (M4). */

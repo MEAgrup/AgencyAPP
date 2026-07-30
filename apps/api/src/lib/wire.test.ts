@@ -3,9 +3,15 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { account, admin, ads, auth, campaign, client, creative, kol, leads, livestream, marketing, msl, notification, sales, task } from '@cdps/domain';
+import type { account, admin, ads, audit, auth, campaign, client, creative, demo, finance, kol, leads, livestream, marketing, msl, notification, sales, task } from '@cdps/domain';
 import {
   adminEmployeeToWire,
+  attemptDetailToWire,
+  attemptRowToWire,
+  demoTaskDetailToWire,
+  demoTaskToWire,
+  financeScanResultToWire,
+  voidResultToWire,
   amWorkloadToWire,
   assetToWire,
   assignmentToWire,
@@ -944,5 +950,318 @@ describe('credentialInfoToWire', () => {
     const wire = credentialInfoToWire({ ...c, passwordChangedAt: null, lockedUntil: null });
     expect(wire.password_changed_at).toBeNull();
     expect(wire.locked_until).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// O43 Fase 2 — the response shapes a route can serve while still blanking the
+// page. Each block below locks a mismatch that WAS live, not a hypothetical.
+// ---------------------------------------------------------------------------
+
+describe('M0 attemptRowToWire (the Attempts table read res.data)', () => {
+  const row: sales.AttemptListRow = {
+    id: 'PRSP-202607-0001',
+    leadId: 'LEAD-202607-0001',
+    leadName: 'Alpha Digital',
+    phoneNumber: '081200000001',
+    source: 'Instagram Ads',
+    ownerEmployeeId: '2409230432',
+    ownerNama: 'BUDI SANTOSO',
+    status: 'Qualified',
+    claimedAt: new Date('2026-07-20T03:00:00Z'),
+    createdAt: new Date('2026-07-19T02:00:00Z'),
+  };
+
+  it('maps every AttemptRow field to its snake_case wire key', () => {
+    expect(attemptRowToWire(row)).toEqual({
+      id: 'PRSP-202607-0001',
+      lead_id: 'LEAD-202607-0001',
+      lead_name: 'Alpha Digital',
+      phone_number: '081200000001',
+      source: 'Instagram Ads',
+      owner_employee_id: '2409230432',
+      owner_nama: 'BUDI SANTOSO',
+      status: 'Qualified',
+      claimed_at: '2026-07-20T03:00:00.000Z',
+      created_at: '2026-07-19T02:00:00.000Z',
+    });
+  });
+
+  it('carries phone_number and source — the two columns the port dropped', () => {
+    const wire = attemptRowToWire(row);
+    // The list rendered blank cells for both before the read model selected them.
+    expect(wire.phone_number).toBe('081200000001');
+    expect(wire.source).toBe('Instagram Ads');
+  });
+
+  it('emits no camelCase key', () => {
+    for (const key of Object.keys(attemptRowToWire(row))) {
+      expect(key).not.toMatch(/[A-Z]/);
+    }
+  });
+});
+
+describe('M0 attemptDetailToWire (O43 — the detail page reads 6 top-level keys)', () => {
+  const detail: sales.AttemptDetail = {
+    attempt: {
+      id: 'PRSP-202607-0001',
+      leadId: 'LEAD-202607-0001',
+      ownerEmployeeId: '2409230432',
+      ownerNama: 'BUDI SANTOSO',
+      status: 'Negotiation',
+      claimedAt: new Date('2026-07-20T03:00:00Z'),
+      createdAt: new Date('2026-07-19T02:00:00Z'),
+    },
+    lead: {
+      id: 'LEAD-202607-0001',
+      leadName: 'Alpha Digital',
+      phoneNumber: '081200000001',
+      email: null,
+      source: 'Instagram Ads',
+      recordStatus: '[Prospect]',
+      originCampaignId: 'CMP-202607-0001',
+      lastTouchCampaignId: null,
+      winningAttemptId: null,
+    },
+    qualifiedForm: {
+      namaPic: 'Ibu Alpha',
+      toko: 'Alpha Digital',
+      kota: 'Jakarta',
+      linkToko: 'https://shopee.co.id/alpha',
+      kategori: 'Fashion',
+      platform: 'Shopee',
+      storeLink: null,
+      gmvBaseline: '50000000',
+      targetGmv: '80000000',
+      marketingBudget: null,
+      services: [{
+        masterServiceId: 'MSL-202607-0001',
+        masterVersionNo: 2,
+        name: 'Meta Ads Management',
+        quantity: '1',
+        unit: 'bulan',
+        pricingMode: 'flat',
+        standardPrice: '9000000',
+        inputAmount: null,
+        subtotal: '9000000',
+        commissionRule: '10% of standard price',
+      }],
+    },
+    proposals: [{
+      id: 'NEG-202607-0001',
+      versionNo: 1,
+      proposedBy: '2409230432',
+      proposedByNama: 'BUDI SANTOSO',
+      decisionNote: 'harga terlalu rendah',
+      createdAt: new Date('2026-07-21T04:00:00Z'),
+      lines: [{
+        masterServiceId: 'MSL-202607-0001',
+        name: 'Meta Ads Management',
+        proposedPrice: '8000000',
+        commissionRule: '10% of standard price',
+        paymentTerms: null,
+      }],
+    }],
+    nqReasons: [],
+    allowedTransitions: ['Closed-Lost', 'Negotiation - Approved'],
+  };
+
+  it('puts the detail at the TOP LEVEL, not under an `attempt` wrapper', () => {
+    const wire = attemptDetailToWire(detail);
+    // The route used to answer `{attempt: <whole detail>}`, so the page read
+    // `data.attempt.id` and got the detail object instead of the attempt id.
+    expect(wire.attempt.id).toBe('PRSP-202607-0001');
+    expect(Object.keys(wire).sort()).toEqual([
+      'allowed_transitions', 'attempt', 'lead', 'nq_reasons', 'proposals', 'qualified_form',
+    ]);
+  });
+
+  it('maps the lead block — absent from the first port, so the header was empty', () => {
+    expect(attemptDetailToWire(detail).lead).toEqual({
+      id: 'LEAD-202607-0001',
+      lead_name: 'Alpha Digital',
+      phone_number: '081200000001',
+      email: null,
+      source: 'Instagram Ads',
+      record_status: '[Prospect]',
+      origin_campaign_id: 'CMP-202607-0001',
+      last_touch_campaign_id: null,
+      winning_attempt_id: null,
+    });
+  });
+
+  it('maps the qualified form WITH its service lines', () => {
+    const q = attemptDetailToWire(detail).qualified_form!;
+    expect(q.nama_pic).toBe('Ibu Alpha');
+    // The pricing table renders from these; the port had no services array.
+    expect(q.services).toHaveLength(1);
+    expect(q.services[0]).toEqual({
+      master_service_id: 'MSL-202607-0001',
+      master_version_no: 2,
+      name: 'Meta Ads Management',
+      quantity: '1',
+      unit: 'bulan',
+      pricing_mode: 'flat',
+      standard_price: '9000000',
+      input_amount: null,
+      subtotal: '9000000',
+      commission_rule: '10% of standard price',
+    });
+  });
+
+  it('maps the proposal history with its lines', () => {
+    const [p] = attemptDetailToWire(detail).proposals;
+    expect(p).toEqual({
+      id: 'NEG-202607-0001',
+      version_no: 1,
+      proposed_by: '2409230432',
+      proposed_by_nama: 'BUDI SANTOSO',
+      decision_note: 'harga terlalu rendah',
+      created_at: '2026-07-21T04:00:00.000Z',
+      lines: [{
+        master_service_id: 'MSL-202607-0001',
+        name: 'Meta Ads Management',
+        proposed_price: '8000000',
+        commission_rule: '10% of standard price',
+        payment_terms: null,
+      }],
+    });
+  });
+
+  it('sends an EXPLICIT null qualified_form, never a missing key', () => {
+    const wire = attemptDetailToWire({ ...detail, qualifiedForm: null });
+    expect(wire.qualified_form).toBeNull();
+    // A missing key is what blanks the page — the whole point of O43.
+    expect('qualified_form' in wire).toBe(true);
+    expect(JSON.parse(JSON.stringify(wire))).toHaveProperty('qualified_form', null);
+  });
+
+  it('keeps the three list keys as arrays when empty, never null', () => {
+    const wire = attemptDetailToWire({
+      ...detail, proposals: [], nqReasons: [], allowedTransitions: [],
+    });
+    // The page maps over all three unguarded; null would throw, not render empty.
+    expect(wire.proposals).toEqual([]);
+    expect(wire.nq_reasons).toEqual([]);
+    expect(wire.allowed_transitions).toEqual([]);
+  });
+
+  it('emits no camelCase key anywhere in the tree', () => {
+    const json = JSON.stringify(attemptDetailToWire(detail));
+    for (const key of JSON.stringify(Object.keys(JSON.parse(json))).match(/"[^"]+"/g) ?? []) {
+      expect(key).not.toMatch(/[A-Z]/);
+    }
+    // Nested keys too: the qualified form and proposal lines are where the raw
+    // camelCase used to leak through.
+    expect(json).not.toMatch(/"(masterServiceId|proposedPrice|namaPic|versionNo)"/);
+  });
+});
+
+describe('M5 financeScanResultToWire (the reminder-scan tally)', () => {
+  const summary: finance.ScanSummary = {
+    markedOverdue: 3,
+    overdueNotified: 2,
+    upcomingNotified: 5,
+    contractFlagged: 1,
+  };
+
+  it('maps the three counters Go sends, at the top level', () => {
+    expect(financeScanResultToWire(summary)).toEqual({
+      overdue_flagged: 3,
+      h3_reminders_sent: 5,
+      contract_flags_raised: 1,
+    });
+  });
+
+  it('reports overdue_flagged as transitions, not notifications', () => {
+    // Go's OverdueFlagged counts installments actually moved to [Jatuh Tempo]
+    // (`fireOverdue` returns true only then) = markedOverdue here. Reading
+    // overdueNotified instead would under-report a re-scan, where rows are
+    // flagged but already notified.
+    expect(financeScanResultToWire(summary).overdue_flagged).toBe(3);
+    expect(financeScanResultToWire({ ...summary, overdueNotified: 0 }).overdue_flagged).toBe(3);
+  });
+
+  it('adds no fourth key for the domain-only overdueNotified counter', () => {
+    // Go has no such field; inventing one would be a field the PRD never defined.
+    expect(Object.keys(financeScanResultToWire(summary))).toHaveLength(3);
+  });
+});
+
+describe('M4 voidResultToWire (the void cascade report)', () => {
+  const res: client.VoidResult = {
+    serviceId: 'SVC-202607-0001',
+    voidedBriefs: ['BRF-202607-0001', 'BRF-202607-0002'],
+    skippedApprovedBriefs: ['BRF-202607-0003'],
+  };
+
+  it('maps all three keys to snake_case', () => {
+    expect(voidResultToWire(res)).toEqual({
+      service_id: 'SVC-202607-0001',
+      voided_briefs: ['BRF-202607-0001', 'BRF-202607-0002'],
+      skipped_approved_briefs: ['BRF-202607-0003'],
+    });
+  });
+
+  it('reports the [Approved] briefs the void LEFT STANDING', () => {
+    // "What did this void not undo" is the one thing the actor needs afterwards;
+    // the route used to send the raw camelCase object, so it read `undefined`.
+    expect(voidResultToWire(res).skipped_approved_briefs).toEqual(['BRF-202607-0003']);
+  });
+
+  it('keeps both lists as arrays when nothing matched', () => {
+    const wire = voidResultToWire({ ...res, voidedBriefs: [], skippedApprovedBriefs: [] });
+    expect(wire.voided_briefs).toEqual([]);
+    expect(wire.skipped_approved_briefs).toEqual([]);
+  });
+});
+
+describe('demo task wire mappers (S0-12 reference vertical)', () => {
+  const task: demo.Task = {
+    id: 'DEMO-202607-0001',
+    title: 'Contoh task',
+    description: 'Deskripsi',
+    division: 'Creative',
+    status: '[In Progress]',
+    createdBy: '2409230432',
+    createdAt: new Date('2026-07-19T02:00:00Z'),
+  };
+  const trail: audit.AuditEntry[] = [{
+    entityType: 'demo_task',
+    entityId: 'DEMO-202607-0001',
+    actorEmployeeId: '2409230432',
+    action: 'status_changed',
+    beforeJson: { status: '[To Do]' },
+    afterJson: { status: '[In Progress]' },
+    createdAt: new Date('2026-07-19T03:00:00Z'),
+  }];
+
+  it('maps the task to snake_case', () => {
+    expect(demoTaskToWire(task)).toEqual({
+      id: 'DEMO-202607-0001',
+      title: 'Contoh task',
+      description: 'Deskripsi',
+      division: 'Creative',
+      status: '[In Progress]',
+      created_by: '2409230432',
+      created_at: '2026-07-19T02:00:00.000Z',
+    });
+  });
+
+  it('sends all THREE detail keys the page destructures', () => {
+    const wire = demoTaskDetailToWire(task, ['[Submitted]'], trail);
+    // The page does `const {task, allowed_transitions, audit} = detail` and then
+    // reads `allowed_transitions.length` — a `{task}`-only body threw a
+    // TypeError, so the page crashed rather than merely rendering empty.
+    expect(Object.keys(wire).sort()).toEqual(['allowed_transitions', 'audit', 'task']);
+    expect(wire.allowed_transitions).toEqual(['[Submitted]']);
+    expect(wire.audit).toHaveLength(1);
+    expect(wire.audit[0].actor_employee_id).toBe('2409230432');
+  });
+
+  it('keeps allowed_transitions and audit as arrays on a terminal task', () => {
+    const wire = demoTaskDetailToWire(task, [], []);
+    expect(wire.allowed_transitions).toEqual([]);
+    expect(wire.audit).toEqual([]);
   });
 });

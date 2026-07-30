@@ -10,6 +10,7 @@ import { client } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { handle, json, readJson } from '@/lib/http';
+import { voidResultToWire } from '@/lib/wire';
 
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   return handle(async () => {
@@ -17,6 +18,6 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     const { id } = await ctx.params;
     const b = await readJson<{ reason?: string }>(request);
     const result = await client.voidService(db(), actor, id, b.reason ?? '');
-    return json(result);
+    return json(voidResultToWire(result));
   });
 }

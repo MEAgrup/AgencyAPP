@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "msl:seed": "tsx scripts/mslseed.ts",
+    "rolemap:seed": "tsx scripts/rolemapseed.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
