@@ -120,7 +120,7 @@ M3-OA-6) dan pastikan kandidat Marketing/staff kini muncul, bukan `NotFoundError
 ## 5. Yang TIDAK ditutup oleh runbook ini
 
 - **O42 pertanyaan (3)** — rekonsiliasi `role_mappings` **38** (live) vs **23**
-  (`backend/seed/role_mappings_riil.csv`) vs **12** (`supabase/seed.sql`): mana sumber kebenaran.
+  (`supabase/seed/role_mappings_riil.csv`) vs **12** (`supabase/seed.sql`): mana sumber kebenaran.
   Masih keputusan pemilik.
 - **Marketing `lead`** — lihat peringatan §3.
 - Arm `0009` baru **bisa diuji**, belum **teruji**: masih butuh satu campaign nyata.

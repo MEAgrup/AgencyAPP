@@ -26,7 +26,7 @@ Alur setelah divalidasi:
 - **HRGA (1 orang, OKFA RENDI WIRATAMA NIK 2409230432)** → **layered role OD** via `SetLayeredRole` (bukan baris role_mappings biasa; HR adalah sumber data, bukan konsumen CDPS untuk transaksi, tetapi OD perlu read-all untuk oversight). ✅ Dijawab.
 
 **Seeding 23 mapping + OD:**
-- CSV kanonik: `backend/seed/role_mappings_riil.csv` (23 baris inti), `backend/seed/layered_roles_riil.csv` (OD OKFA).
+- CSV kanonik: `supabase/seed/role_mappings_riil.csv` (23 baris inti), `supabase/seed/layered_roles_riil.csv` (OD OKFA).
 - CLI: `backend/cmd/rolemapseed` (dry-run default, `--apply`), aktor SYSTEM bootstrap.
 - Sumber sync go-live: `backend/testdata/import_samples/employees_cdps.csv` (33 baris = 39 roster − 5 CREATIVE-EKSTERNAL − 1 SKILSKUL).
 - **Directors Yohan & Nerissa**: belum ada di roster 39 → TIDAK bisa di-seed sekarang (lihat Open O26 — butuh NIK+email keduanya dari HR sebelum produksi go-live; dev/UAT pakai fixture).
