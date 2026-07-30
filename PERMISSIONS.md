@@ -13,7 +13,7 @@
 | Manage employees / role mapping | ❌ | ❌ | ❌ | ✅ (+ system admin) |
 | Read audit trail | ✅ **own entries only** | ✅ own division (by entry's actor) | ✅ read-all | ✅ read-all |
 
-> ### Audit trail scope — O46 RESOLVED 2026-07-30 (`docs/DECISIONS.md`)
+> ### Audit trail scope — O46 decided, fixed, applied, and VERIFIED live 2026-07-30 (`docs/DECISIONS.md`)
 > `audit_log` visibility follows the universal pattern literally, and the two edges matter:
 > - **Staff = own entries only.** Scope is the entry's **actor**, not the entity it describes.
 >   Consequence, stated deliberately rather than discovered later: an entity's history panel
@@ -21,7 +21,24 @@
 >   not their lead's approval. That is PRD behaviour, not a defect. Making it whole is a PRD
 >   change plus its own ticket, not an RLS patch.
 > - **Lead/SPV = division-wide**, resolved from the **entry actor's** division. Added by migration
->   `20260730073000`; before it, a lead could not read their own division's trail at all.
+>   `20260730091540` and made to actually fire by `20260730120433`; before them, a lead could not
+>   read their own division's trail at all.
+>
+> ✅ **This row IS true in production, and that was proven by probe rather than assumed.**
+> `20260730091540` shipped **dead**: it compared `employees.divisi` (an **HRIS department**, `SALES`)
+> against `jwt_division()` (a **CDPS division**, `Sales`) — two vocabularies bridged by
+> `role_mappings` — so `EXISTS(...)` was always false and both lead arms never fired. A read-only
+> probe of live found it; the local tests did **not**, because their fixture used the CDPS spelling
+> and so matched by coincidence. `20260730120433_fix_o46_division_resolution.sql` resolves both sides
+> through `public.employee_claims()` — the same function that populates the JWT claims, so the two
+> sides cannot diverge again. It was **applied to live `CDPS SG` 2026-07-30 12:04 UTC** and the
+> post-apply probe (8 scenarios, both controls green) confirms the arm now fires: Sales lead
+> `2101180004` reads **36** division rows where own-only would be **32**, cross-division Creative lead
+> still reads **0**, and Sales **staff** still reads **0**.
+>
+> The `jwt_division() <> ''` guard in that migration is **load-bearing, not defensive tidiness**:
+> **7** live employees currently resolve to an empty division, so without it any empty-division lead
+> would match all of them. Probed: empty-division lead reads **0**.
 >
 > Enforced in the DB (`audit_log_select`), locked by `supabase/tests/rls_checks.sql` checks 21–23 —
 > including a guard check that goes **red** if anyone widens staff beyond own-entries without a
@@ -31,9 +48,22 @@
 > ⚠️ **Known narrower-than-spec elsewhere: `O48`.** A survey of every `SELECT` policy found **36 of
 > 45** carry no lead/division arm at all — including `assets_select` and `employees_select`, where a
 > Lead/SPV cannot see their own division's rows. Direction is always **narrower**, so there is no
-> leak; but until O48 is decided, "Lead/SPV = division-wide" above is **enforced for
-> `transactions`/`audit_log` and aspirational for the rest.** Do not read this table as fully
+> leak; but until O48 is decided, "Lead/SPV = division-wide" above carries an arm **only on
+> `transactions`/`audit_log`, and is aspirational for the rest.** Do not read this table as fully
 > enforced house-wide.
+>
+> **36 of 45 is the correct figure again as of `20260730120433` being live.** Between
+> `20260730091540` and that fix it was briefly **45 of 45**: the arm existed in both policies' text
+> but resolved division through the wrong vocabulary, so it never fired. That interval is worth
+> keeping on the page because of what it exposed — **the O48 survey counts policy TEXT, not whether
+> the arm actually fires.** A future survey that recounts text alone will make the same mistake; the
+> only thing that distinguished 36 from 45 was a probe against live data.
+>
+> ⚠️ **One caveat on the evidence, stated rather than left implicit:** the probe exercised the
+> `audit_log` arm against real rows. `transactions` is **empty in live (0 rows)**, so its arm is
+> verified only by the shared helper (`private.jwt_division_owns_client`, same
+> `employee_claims()` resolution, unit-covered by `rls_checks`) and **not** by live data. Re-probe it
+> once transactions exist.
 
 ## Per-module specifics (exceptions & named rights)
 | Module | Rule |

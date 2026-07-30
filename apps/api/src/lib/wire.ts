@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import { money } from '@cdps/core';
+import { money, tz } from '@cdps/core';
 import type { account, admin, ads, audit, auth, board, campaign, client, creative, demo, finance, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
@@ -1859,7 +1859,7 @@ export function clientDetailToWire(c: sales.ClientDetail): ClientDetailWire {
     platforms: c.platforms.map((p) => ({
       platform: p.platform,
       store_link: p.storeLink ?? undefined,
-      managed_since: p.managedSince ? p.managedSince.toISOString() : null,
+      managed_since: p.managedSince ? tz.dateString(p.managedSince) : null,
       active: p.active,
     })),
     sales_allocation: c.allocations.map((a) => ({
@@ -2061,10 +2061,14 @@ export function installmentToWire(i: finance.InstallmentRow): InstallmentWire {
     id: i.id,
     installment_no: i.installmentNo,
     amount: i.amount,
-    due_date: i.dueDate ? i.dueDate.toISOString() : null,
+    // Both are `date` columns (`installments.due_date`, `.verified_date`) and the
+    // FE declares them `// YYYY-MM-DD` (account.ts). See remindersToWire for why
+    // toISOString() is wrong here. `null` stays explicit — a MISSING key blanks
+    // the page, `null` does not (O43 house stance).
+    due_date: i.dueDate ? tz.dateString(i.dueDate) : null,
     status: i.status,
     jatuh_tempo: i.jatuhTempo,
-    verified_date: i.verifiedDate ? i.verifiedDate.toISOString() : null,
+    verified_date: i.verifiedDate ? tz.dateString(i.verifiedDate) : null,
     verified_by: i.verifiedBy ?? '',
     proof_of_payment: i.proofOfPayment ?? '',
   };
@@ -2185,7 +2189,12 @@ export function remindersToWire(d: finance.ReminderDashboard): RemindersWire {
     installment_id: r.installmentId,
     installment_no: r.installmentNo,
     amount: r.amount,
-    due_date: r.dueDate ? r.dueDate.toISOString() : '',
+    // WIB calendar date, matching Go's Format("2006-01-02") and the FE contract
+    // (`// YYYY-MM-DD`). NOT toISOString(): `installments.due_date` is a `date`
+    // column, and RFC3339 renders as "2026-07-30T00:00:00.000Z" on a page that
+    // prints the value raw. `tz.daysBetween(due_date, today)` drives daysOverdue,
+    // so the date shown must be the same calendar date the overdue count used.
+    due_date: r.dueDate ? tz.dateString(r.dueDate) : '',
     status: r.status,
     days_overdue: r.daysOverdue,
     label: r.label,
