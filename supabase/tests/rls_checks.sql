@@ -240,12 +240,34 @@ RESET ROLE;
 --        selalu false — hijau karena hampa, bukan karena benar.
 -- ---------------------------------------------------------------------------
 
--- Fixture (superuser): karyawan riil untuk resolusi divisi. EMP-RLS-SLS1 adalah
--- sales_pic klien CLI-RLS-0001 yang dibuat blok 14-17 di atas.
+-- Fixture (superuser): karyawan riil untuk resolusi divisi.
+--
+-- 🔴 BENTUKNYA PENTING, DAN PERNAH SALAH. `employees.divisi` menyimpan
+-- **departemen HRIS** (`SALES`, huruf besar), BUKAN divisi CDPS (`Sales`).
+-- Jembatannya `role_mappings`, dan fungsi kanonik yang menyeberanginya adalah
+-- `public.employee_claims()` — fungsi yang sama yang mengisi klaim JWT.
+--
+-- Versi pertama fixture ini memakai `divisi='Sales'` (bentuk CDPS). Itu
+-- meng-encode asumsi penulisnya, mencocokkan `jwt_division()` secara KEBETULAN,
+-- dan membuat keenam check 18-23 hijau **sementara arm-nya mati di produksi**.
+-- Probe terhadap live yang menemukannya, bukan test ini. Pelajaran yang harus
+-- dibawa: fixture yang meng-encode asumsi penulis tentang bentuk data produksi
+-- BUKAN bukti — kalau predikatnya bergantung pada bentuk data riil, fixture-nya
+-- wajib memakai bentuk riil itu.
+--
+-- EMP-RLS-SLS1 adalah sales_pic klien CLI-RLS-0001 yang dibuat blok 14-17.
 INSERT INTO employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by) VALUES
-  ('EMP-RLS-SLS1',    'rls sales staff',   'rls.sls1@example.test',    'Sales',    'Sales Jasa',    true, 'SYSTEM'),
-  ('EMP-RLS-SLSLEAD', 'rls sales lead',    'rls.slslead@example.test', 'Sales',    'Head of Sales', true, 'SYSTEM'),
-  ('EMP-RLS-CRELEAD', 'rls creative lead', 'rls.crelead@example.test', 'Creative', 'Lead Creative', true, 'SYSTEM');
+  ('EMP-RLS-SLS1',    'rls sales staff',   'rls.sls1@example.test',    'SALES',    'SALES JASA',       true, 'SYSTEM'),
+  ('EMP-RLS-SLSLEAD', 'rls sales lead',    'rls.slslead@example.test', 'SALES',    'HEAD OF SALES RLS', true, 'SYSTEM'),
+  ('EMP-RLS-CRELEAD', 'rls creative lead', 'rls.crelead@example.test', 'CREATIVE', 'LEAD CREATIVE RLS', true, 'SYSTEM');
+
+-- Jembatan HRIS -> CDPS. Tanpa baris ini `employee_claims()` mengembalikan
+-- division '' dan seluruh check 18-23 gagal — yaitu tepat perilaku yang benar,
+-- karena karyawan tanpa role mapping memang tidak punya divisi CDPS.
+INSERT INTO role_mappings (divisi, jabatan, division, level, created_by) VALUES
+  ('SALES',    'SALES JASA',        'Sales',    'staff', 'SYSTEM'),
+  ('SALES',    'HEAD OF SALES RLS', 'Sales',    'lead',  'SYSTEM'),
+  ('CREATIVE', 'LEAD CREATIVE RLS', 'Creative', 'lead',  'SYSTEM');
 
 -- Jejak audit milik EMP-RLS-SLS1 (divisi Sales) — objek uji arm audit.
 INSERT INTO audit_log (entity_type, entity_id, actor_employee_id, action, created_by)

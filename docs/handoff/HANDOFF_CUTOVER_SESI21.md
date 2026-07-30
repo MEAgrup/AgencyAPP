@@ -63,7 +63,42 @@ benar karena `091540` > `20260729162101`.
 > limit 1`) lalu ganti nama berkas repo supaya cocok. Jangan asumsikan nama berkas Anda yang
 > dipakai.
 
-### 1.2 Yang BELUM diverifikasi — dan hanya Anda yang bisa
+### 1.2 🔴 Probe DIJALANKAN, dan arm O46 ternyata MATI di produksi
+
+Probe read-only terhadap live (klaim JWT asli disuntik, `set local role authenticated`, `ROLLBACK`)
+menemukan bahwa **kedua arm O46 tidak pernah menyala**:
+
+| # | Skenario | Harapan | Hasil |
+|---|---|---|---|
+| 1 | audit: Sales **LEAD** baca entri divisinya | > 0 | 🔴 **0** |
+| 2 | `private.jwt_same_division('2110040032')` dari Sales lead | true | 🔴 **false** |
+| 4 | audit: Creative lead baca entri divisi Sales | 0 | ✅ 0 |
+| 5 | audit: Sales **staff** baca entri orang lain | 0 | ✅ 0 |
+| 7 | **kontrol** — Director baca semua | 40 | ✅ **40** |
+| 8 | **kontrol negatif** — klaim kosong | 0 | ✅ **0** |
+
+Baris 7 & 8 membuktikan harness-nya benar, jadi 1 & 2 adalah cacat nyata, bukan probe yang salah.
+
+**Akarnya:** `employees.divisi` menyimpan **departemen HRIS** (`SALES`), `jwt_division()`
+mengembalikan **divisi CDPS** (`Sales`). Helper membandingkannya langsung ⇒ selalu false.
+Arahnya aman (lebih sempit, nol kebocoran) tapi fiturnya mati.
+
+**Diperbaiki** oleh `20260730100000_fix_o46_division_resolution.sql` — kedua helper kini memakai
+`public.employee_claims()`, fungsi kanonik yang **mengisi klaim JWT**, sehingga kedua sisi
+perbandingan berasal dari satu sumber dan tidak bisa menyimpang lagi. **Belum di-apply ke live.**
+
+> ### 🔴 Kenapa test lokal hijau padahal produksi mati — bawa ini terus
+> Fixture `rls_checks` 18–23 memakai `divisi='Sales'` (bentuk **CDPS**), bukan `'SALES'` (bentuk
+> **HRIS**). Ia meng-encode asumsi penulisnya, cocok secara **kebetulan**, dan keenam check lolos —
+> padahal test itu sudah divalidasi 3 mutasi. **Mutasi hanya membuktikan test menjaga perilaku yang
+> ia ASUMSIKAN, bukan bahwa asumsinya cocok dengan produksi.**
+>
+> Fixture sudah diperbaiki ke bentuk HRIS + 3 baris `role_mappings`, dan divalidasi **dua arah**:
+> fixture betul + helper lama ⇒ `rls_checks` **MERAH**; + helper baru ⇒ **HIJAU**.
+>
+> **Aturan: fixture yang meng-encode asumsi penulis tentang bentuk data produksi bukan bukti.**
+
+### 1.3 Yang masih BELUM diverifikasi — dan hanya Anda yang bisa
 
 Policy sudah benar di DB. Yang **belum** diuji: apakah klaim JWT aktor riil benar-benar membawa
 `level=lead` + `division` yang tepat sehingga arm-nya menyala. **Policy benar + klaim salah
