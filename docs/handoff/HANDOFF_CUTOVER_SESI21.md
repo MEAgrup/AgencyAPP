@@ -1,4 +1,4 @@
-# HANDOFF — Cutover Sesi 21 (migrasi O46 SUDAH di live · repo↔live cocok 1:1 lagi)
+# HANDOFF — Cutover Sesi 21 (migrasi O46 SUDAH di live · tapi arm-nya MATI, perbaikannya menunggu apply)
 
 > **Pendahulu:** `HANDOFF_CUTOVER_SESI20.md` — §1-nya sudah **dieksekusi**, jangan dijalankan lagi.
 > Yang masih berlaku tidak diulang: SESI9 §6 (aturan rumah), SESI12 §2.4 (`npm run db:rebuild`),
@@ -9,15 +9,23 @@
 | | |
 |---|---|
 | **`main`** | **`efd59aa`** = Merge PR #81. Rantai: #75 → #77 → #76 → #79 → #78 → #80 → **#81** |
-| **Branch aktif** | `claude/go-retirement-progress-eq0855` — di-reset dari `main@efd59aa`, memuat **rename migrasi + docs** (PR menyusul) |
-| **PR terbuka** | satu, untuk branch di atas. Sebelum itu **nol** |
-| **Live `CDPS SG`** | ✅ **41 migrasi · 54 tabel · 17 event** — migrasi O46 **sudah di-apply 2026-07-30** |
-| **Repo vs live** | ✅ **COCOK 1:1** — 41 = 41, dan nama berkas = versi live untuk **semua** migrasi |
+| **Branch aktif** | `claude/go-retirement-progress-eq0855` — di-reset dari `main@efd59aa`, **3 commit**: rename migrasi + docs · O49 (a) · **perbaikan O46 (`d31a7f9`)** |
+| **PR terbuka** | satu — **#82**, untuk branch di atas, **CI hijau 11/11** pada `d31a7f9`. Sebelum itu **nol** |
+| **Live `CDPS SG`** | ✅ **41 migrasi · 54 tabel · 17 event** — migrasi O46 **sudah di-apply 2026-07-30**, tapi **arm-nya MATI** (§1.2) |
+| **Repo vs live** | 🟠 **42 repo vs 41 live** — SENGAJA. Selisihnya **satu** berkas: `20260730100000_fix_o46_division_resolution.sql`, menunggu persetujuan apply (§1.2). Untuk **41 migrasi yang sudah di live**, nama berkas = versi live **1:1** |
 
-**Angka acuan** (Postgres 16 lokal, DB dibangun ulang dari nol, **41/41** migrasi bersih):
-`apps/api` **301** · `@cdps/domain` **566** (+1 skip) · `@cdps/core` **113** · `@cdps/db` **9** ·
+**Angka acuan** (Postgres 16 lokal, DB dibangun ulang dari nol, **42/42** migrasi bersih — diverifikasi
+ulang 2026-07-30 sesudah commit perbaikan O46, bukan disalin dari sesi sebelumnya):
+`apps/api` **307** · `@cdps/domain` **566** (+1 skip) · `@cdps/core` **113** · `@cdps/db` **9** ·
 `web-internal` **26** · 7 gate seed **PASS** · 4 invariant SQL **PASS** (`rls_checks` **23 check**) ·
-`route-parity` **5/5 `KNOWN_GAPS` KOSONG** · `NESTED_INLINE_UNCHECKED` **KOSONG**.
+`route-parity` **5/5 `KNOWN_GAPS` KOSONG** · `NESTED_INLINE_UNCHECKED` **KOSONG** ·
+`RFC3339_PENDING_DECISION` = **1 entri** (`managed_since`, §3).
+
+> **Kenapa baris "Repo vs live" tidak lagi ✅:** versi pertama berkas ini menulis "COCOK 1:1 — 41 = 41",
+> lalu commit perbaikan O46 menambah migrasi ke-42 di repo **tanpa** memperbarui tabel ini. Selisih
+> repo↔live adalah satu-satunya angka yang mendeteksi drift kelas **O38**, jadi tabel yang
+> melaporkannya hijau padahal selisihnya 1 justru mematikan alat deteksinya. Selisih yang **disengaja
+> dan dinyatakan** aman; selisih yang **dilaporkan nol** tidak.
 
 ---
 
@@ -114,7 +122,8 @@ periksa `trg_sync_claims_mapping` (preseden verifikasi O33 2026-07-29), bukan po
 
 | # | Butir | Siapa |
 |---|---|---|
-| 1 | **Probe lead riil** (§1.2) — konfirmasi arm O46 menyala di produksi | **pemilik** |
+| 0 | 🔴 **Apply `20260730100000_fix_o46_division_resolution.sql` ke live** — **prasyarat butir 1**, dan urutannya bukan selera: sampai ini di-apply, arm O46 di produksi **terbukti mati**, jadi probe lead riil dijamin kosong dan tidak membuktikan apa pun. Sesudah apply, **baca versi yang benar-benar tercatat** lalu ganti nama berkasnya (§1.1) | persetujuan **pemilik** → eksekusi Claude |
+| 1 | **Probe lead riil** (§1.2) — konfirmasi arm O46 menyala di produksi. **Jalankan sesudah butir 0**, kalau tidak hasilnya tidak bisa ditafsirkan: kosong akan berarti "arm mati" dan "klaim salah" sekaligus | **pemilik** |
 | 2 | **C-03 — 3 SKIP** 🔴 *jalur kritis* — `CUTOVER_C03_DEPLOYMENT_RUNBOOK.md` dari mesin ber-akses `*.vercel.app`. Sekarang waktunya tepat: live sudah memuat keadaan yang akan rilis | **pemilik** |
 | 3 | **A4** — 12 mapping ambigu + lead Ads/Marketing/KOL + O35 + O9 → `O34_O26_O35_WORKSHEET_ROSTER_V2.md` | **pemilik** |
 | ~~4~~ | ✅ **O49 (a) SELESAI** — 3 field diperbaiki ke `tz.dateString()`, kerja commit hilang `46e2a6d` dipulihkan, dikunci `wire.datecolumns.test.ts` (+6 test, `apps/api` 301→**307**) + gate anti-tumbuh-kembali, divalidasi 2 mutasi. **Sisa: butir (b) `managed_since`** — butuh 1 keputusan head dev, §3 | **pemilik/head dev** |
