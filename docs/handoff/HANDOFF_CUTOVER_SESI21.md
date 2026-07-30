@@ -11,13 +11,13 @@
 | **`main`** | **`efd59aa`** = Merge PR #81. Rantai: #75 → #77 → #76 → #79 → #78 → #80 → **#81** |
 | **Branch aktif** | `claude/go-retirement-progress-eq0855` — di-reset dari `main@efd59aa`. Isinya, per **kerja** bukan per hitungan commit: rename migrasi (§1.1) · O49 (a) (§2 butir 4) · **perbaikan O46 `20260730100000`** (§1.2) · koreksi dokumen yang melaporkan keadaan usang (§0 berkas ini + `PERMISSIONS.md`) |
 | **PR terbuka** | satu — **#82**, untuk branch di atas. Sebelum itu **nol** |
+| **Live `CDPS SG`** | ✅ **41 migrasi · 54 tabel · 17 event** — migrasi O46 **sudah di-apply 2026-07-30**, tapi **arm-nya MATI** (§1.2) |
+| **Repo vs live** | 🟠 **42 repo vs 41 live** — SENGAJA. Selisihnya **satu** berkas: `20260730100000_fix_o46_division_resolution.sql`, menunggu persetujuan apply (§1.2). Untuk **41 migrasi yang sudah di live**, nama berkas = versi live **1:1** |
 
 > **Jumlah commit & status CI SENGAJA tidak dicatat di tabel ini.** Keduanya berubah setiap kali
 > berkas ini sendiri diperbarui, jadi angka apa pun yang ditulis di sini basi pada commit yang
 > menuliskannya — versi sebelumnya memang begitu ("3 commit · CI hijau 11/11 pada `d31a7f9`", basi
 > seketika). Baca `git log --oneline main..HEAD` dan check run PR untuk keduanya.
-| **Live `CDPS SG`** | ✅ **41 migrasi · 54 tabel · 17 event** — migrasi O46 **sudah di-apply 2026-07-30**, tapi **arm-nya MATI** (§1.2) |
-| **Repo vs live** | 🟠 **42 repo vs 41 live** — SENGAJA. Selisihnya **satu** berkas: `20260730100000_fix_o46_division_resolution.sql`, menunggu persetujuan apply (§1.2). Untuk **41 migrasi yang sudah di live**, nama berkas = versi live **1:1** |
 
 **Angka acuan** (Postgres 16 lokal, DB dibangun ulang dari nol, **42/42** migrasi bersih — diverifikasi
 ulang 2026-07-30 sesudah commit perbaikan O46, bukan disalin dari sesi sebelumnya):
