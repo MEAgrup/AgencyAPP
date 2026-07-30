@@ -8,10 +8,20 @@
 
 | | |
 |---|---|
+| **Repo** | `MEAgrup/AgencyAPP` |
 | **Branch** | `claude/cdps-sg-cutover-sesi13-2kmgy4` |
-| **Isi branch** | **6 commit + 1 merge** di atas `main@a37e432`: `e48e3fd` (Fase 2) → `c1585d8` (pensiun Go + Fase 3) → `f6ae287` (handoff) → `98bfa3f` (fix collation) → `df250d4` (handoff) → merge `main` |
-| **PR** | **#76** → `main` (draft) |
+| **HEAD** | **`9675dcd`** — sudah dipush, working tree **bersih**, nol pekerjaan tertinggal di disk |
+| **Base** | `main@a37e432` (yaitu **sesudah** #75 di-merge) |
+| **Isi branch** | **8 commit** (termasuk 1 merge): `e48e3fd` Fase 2 → `c1585d8` pensiun Go + Fase 3 → `f6ae287` handoff → `98bfa3f` fix collation → `df250d4` handoff → `e4530fe` merge `main` → `9675dcd` cabut perubahan finder + koreksi handoff |
+| **PR** | **#76** → `main`, **masih draft**, CI **5/5 hijau**, `mergeable_state=clean`, nol review comment |
 | **Live `CDPS SG`** | **40 migrasi · 54 tabel · 17 event** (tidak bergerak sesi ini — nol perubahan skema) |
+
+**Cara melanjutkan (branch sudah ada di remote, jangan buat baru):**
+```bash
+git fetch origin claude/cdps-sg-cutover-sesi13-2kmgy4
+git checkout claude/cdps-sg-cutover-sesi13-2kmgy4    # atau: git reset --hard origin/<branch>
+git log --oneline -1                                  # harus 9675dcd
+```
 
 > ⚠️ **Branch berpindah nama, DAN #75 sudah di-merge.** SESI13 bekerja di
 > `claude/cdps-sg-cutover-migrasi-azzlwr` (PR #75); sesi ini ditugaskan ke
@@ -198,12 +208,51 @@ Job `backend` di CI · `Makefile` (100% Go, 11 target) · tag lalu arsipkan
 
 > `CLAUDE.md` §Stack **sudah** dikoreksi sesi ini, jadi ia bukan lagi bagian C-05.
 
-### Kalau mau melanjutkan pekerjaan code sekarang
-Urutan yang saya sarankan:
-1. **Paritas field-by-field 54 converter lama** (§3 catatan) — masih butuh Go, jadi
-   nilainya turun ke nol begitu C-05 jalan.
-2. **`apps/api` tidak punya eslint config** — `npm run lint -w @cdps/api` selalu
-   gagal (`ESLint couldn't find an eslint.config.js`). Pre-existing, bukan dari sesi
-   ini, tapi berarti ~250 berkas TS tidak pernah di-lint.
-3. Adapter CSV/dry-run di atas `POST /leads/bulk` — **hanya jika** O47 dijawab
-   "lead saja".
+### TASK BERIKUTNYA — ambil dari atas, urutannya sengaja
+
+Nol dari ini memblokir apa pun; semuanya bisa dikerjakan tanpa menunggu jawaban
+pemilik. Urutannya disusun dari **yang nilainya hilang kalau ditunda**.
+
+#### T1 · Paritas field-by-field ~54 converter `wire.ts` lama 🔴 MENDESAK
+**Kenapa nomor satu:** ini satu-satunya pekerjaan yang **butuh `backend/` masih ada**.
+Begitu C-05 mengarsipkan Go, oracle-nya hilang dan pekerjaan ini tidak bisa dikerjakan
+lagi — nilainya jatuh ke nol, bukan berkurang.
+
+Sesi 14 menutup kelas *"endpoint tanpa converter"* secara menyeluruh. Yang **belum**
+disisir adalah kelas *"converter ADA tapi satu field-nya salah/hilang"* — dan
+`clientDetailToWire` (O41 #1) membuktikan kelas itu nyata.
+
+Metodenya, per converter:
+1. Ambil tipe FE yang dilayaninya (`web-internal/src/lib/*.ts` atau `lib/types.ts`).
+2. Ambil struct Go padanannya + json tag-nya (`backend/internal/module*/`).
+3. Diff **ketiganya**. Yang dicari: field FE yang tidak pernah diisi converter, nama
+   snake_case yang beda, `Date` yang lupa `.toISOString()`, dan **kunci nullable yang
+   hilang alih-alih dikirim `null`** (pelajaran O43 — kunci HILANG mengeblank halaman,
+   `null` tidak).
+4. Test di `wire.test.ts` pakai pola yang sudah ada di sana: `toEqual` objek penuh +
+   assertion "nol kunci camelCase".
+
+Mulai dari modul yang halamannya paling ramai dipakai: `board` (`cardToWire`),
+`task`/`creative` (`assetToWire`, `briefToWire`, `metricsToWire`), `portal`
+(`staffLandingToWire`, `teamPortalToWire`, `managementDashboardToWire`).
+
+#### T2 · `apps/api` tidak punya eslint config
+`npm run lint -w @cdps/api` **selalu** gagal: `ESLint couldn't find an
+eslint.config.js`. Pre-existing (bukan dari sesi 14), tapi artinya **~250 berkas TS
+tidak pernah di-lint sama sekali** — termasuk seluruh route handler dan `wire.ts`.
+`web-internal` punya config dan bersih; contoh polanya ada di sana. Perlu diputuskan
+apakah job `api` di CI ikut memanggil lint setelah config-nya ada (kalau ya, siapkan
+diri untuk gelombang temuan pertama).
+
+#### T3 · Adapter CSV/dry-run di atas `POST /leads/bulk`
+**Hanya kalau O47 dijawab "lead saja".** Kecil: `/leads/bulk` sudah hidup dan sudah
+diuji, jadi yang tersisa cuma parsing CSV + mode dry-run, pola `mslseed.ts` /
+`rolemapseed.ts` sudah jadi cetakannya. Jangan mulai sebelum O47 dijawab — kalau
+jawabannya "klien+ledger juga", desainnya berbeda.
+
+### Yang JANGAN dikerjakan
+- **Jangan sentuh `backend/**`** kecuali menjaga job `backend` hijau. Sesi 14 sempat
+  melanggar ini (mengubah `findSeedFile`) lalu mencabutnya sendiri — lihat §1.
+- **Jangan mulai C-05** (Fase 5) sebelum gate GO **dan** O47 dijawab.
+- **Jangan menambah baris ke `KNOWN_GAPS`** di `route-parity.test.ts`. Ia harus tetap
+  kosong; satu baris = satu halaman tidak berfungsi, dan itu butuh entri DECISIONS.
