@@ -4,103 +4,169 @@
 > produksi**. Claude tidak bisa menjalankannya: gateway sandbox menolak CONNECT ke `*.vercel.app` dan
 > sesi ini nol kredensial live (`HANDOFF_CUTOVER_SESI9.md` §0.2).
 >
-> **Runbook tekniknya sudah ada dan masih akurat: `CUTOVER_C03_DEPLOYMENT_RUNBOOK.md`.** Berkas ini
-> **tidak menggantikannya** — ia hanya menyatakan *apa yang berubah sejak runbook itu ditulis
-> (2026-07-29)* supaya Anda tidak menjalankan langkah dengan asumsi basi.
+> **Runbook tekniknya tetap `CUTOVER_C03_DEPLOYMENT_RUNBOOK.md` dan masih akurat.** Berkas ini tidak
+> menggantikannya — ia menyatakan *apa yang berubah sejak runbook itu ditulis (2026-07-29)* dan
+> **posisi repo/live per 2026-07-30**, supaya tidak ada langkah dijalankan dengan asumsi basi.
 
-## 0. Yang berubah sejak runbook ditulis — baca sebelum eksekusi
+## 0. Posisi persis — SALIN INI KE SESI BERIKUTNYA
 
-| Hal | Saat runbook ditulis (2026-07-29) | **Sekarang (2026-07-30)** |
+| | |
+|---|---|
+| **Branch kerja** | **`claude/go-retirement-progress-eq0855`** — lanjutkan di sini, jangan buka branch baru |
+| **Keadaan branch** | **3 commit di atas `main`, sudah ter-push, BELUM ada PR.** Working tree bersih |
+| **`main`** | **`a38e241`** = Merge PR #82 |
+| **PR** | **tidak ada yang terbuka.** PR #82 sudah **merged**. Tiga commit terbaru belum di-PR-kan — buka PR baru bila ingin di-merge |
+| **Live `CDPS SG`** | **44 migrasi · 54 tabel · 17 event**. Tiga apply terakhir hari ini: `20260730120433` (fix O46) · `20260730153627` (O48 Grup C+D) · `20260730154210` (layered role `lead`) |
+| **Repo vs live** | ✅ **44 = 44**, nama berkas = versi live **1:1** |
+
+**Angka acuan** (Postgres 16 lokal, DB dibangun ulang dari nol, **44/44** bersih):
+`apps/api` **311** · `@cdps/domain` **566** (+1 skip) · `@cdps/core` **113** · `@cdps/db` **9** ·
+`web-internal` **26** · 7 gate seed **PASS** · 4 invariant SQL **PASS**
+(`rls_checks` **32 check** · `auth_claims_checks` **4 check**) · `route-parity` **5/5**,
+`KNOWN_GAPS` KOSONG · `NESTED_INLINE_UNCHECKED` KOSONG · `RFC3339_PENDING_DECISION` KOSONG.
+
+> ⚠️ **Baris "Live" dan "Repo vs live" WAJIB dibaca ulang dari live** (`list_migrations`), bukan
+> disalin dari tabel ini. Aturan itu lahir dari SESI22, yang menerbitkan "menunggu apply" **78 menit
+> sesudah** apply-nya terjadi karena ia memverifikasi angka lokal tapi tidak pernah menanyai live.
+
+## 1. Yang berubah sejak runbook ditulis (2026-07-29)
+
+| Hal | Saat runbook ditulis | **Sekarang** |
 |---|---|---|
-| `main` | `efd59aa` | **`a38e241`** (merge PR #82) |
-| Live `CDPS SG` | 40 migrasi | **42 migrasi** — O46 di-apply **dan terbukti menyala** |
-| Repo vs live | — | ✅ **42 = 42**, nama berkas = versi live 1:1 |
-| `apps/api` test | 301 | **310** |
-| Ledger | `RFC3339_PENDING_DECISION` 1 entri | ✅ **ketiganya KOSONG** |
+| `main` | `efd59aa` | **`a38e241`** |
+| Live | 40 migrasi | **44** — O46 diperbaiki **dan terbukti menyala**; O48 Grup C+D; layered `lead` |
+| `apps/api` test | 301 | **311** |
+| Ledger | 1 entri `RFC3339_PENDING_DECISION` | ✅ **ketiganya kosong** |
+| Pemegang lead | Ads/KOL/Marketing **nol** | ✅ **setiap divisi punya lead** |
 
-**Artinya deployment yang akan Anda uji memuat keadaan yang benar-benar akan rilis** — ini justru
-waktu yang tepat, karena sebelum #82 arm RLS O46 masih mati di produksi.
+**Deployment yang akan Anda uji memuat keadaan yang benar-benar akan rilis.** Sebelum #82 arm RLS
+O46 masih mati di produksi; sekarang tidak.
 
-⚠️ **`git pull` dulu.** Runbook §3 menulis `git checkout main && git pull origin main`; itu tetap
-benar, tapi kalau Anda sudah punya clone lama, pastikan ia sampai ke **`a38e241`** — bukan `efd59aa`.
-
-## 1. Yang harus dijalankan
-
-Ikuti **`CUTOVER_C03_DEPLOYMENT_RUNBOOK.md`** apa adanya. Ringkasnya:
+## 2. Langkah eksekusi
 
 ```bash
-git checkout main && git pull origin main    # harus sampai a38e241
-npm ci                                       # ⚠️ WAJIB dari ROOT repo (aturan rumah #6)
+# 1. Ambil kode
+git checkout main && git pull origin main        # harus sampai a38e241
+#    (opsional) untuk menguji 3 commit terbaru:
+#    git checkout claude/go-retirement-progress-eq0855 && git pull
 
-export BASE=https://<url-agency-app-api>     # BUKAN localhost
-export SUPABASE_JWT_SECRET='<secret produksi>'   # salin dari env Vercel, JANGAN ditebak
-export BYPASS='<token bypass>'               # kosongkan bila deployment tidak ter-proteksi
+npm ci                                           # ⚠️ WAJIB dari ROOT repo (aturan rumah #6)
 
-node apps/api/scripts/cutover-houserules-walk.mjs   # target 22/22  → menutup SKIP-1
+# 2. Siapkan env — JANGAN ditebak, salin dari Vercel
+export BASE=https://<url-agency-app-api>         # BUKAN localhost
+export SUPABASE_JWT_SECRET='<secret produksi>'
+export BYPASS='<token bypass>'                   # kosongkan bila deployment tidak ter-proteksi
+
+# 3. Tiga skrip
+node apps/api/scripts/cutover-houserules-walk.mjs   # target 22/22  -> menutup SKIP-1
 node apps/api/scripts/wave3-contract-smoke.mjs      # target 34/34
-node apps/api/scripts/auth-smoke.mjs                # target 13/13  → menutup SKIP-3
+node apps/api/scripts/auth-smoke.mjs                # target 13/13  -> menutup SKIP-3
 ```
 
-Lalu **QA manual** (runbook §4) untuk **SKIP-2**: badge notifikasi di FE ter-deploy — jumlah unread
-muncul, klik → tandai terbaca, jumlah turun, refresh tetap konsisten.
+**4. QA manual (runbook §4) — menutup SKIP-2:** badge notifikasi di FE ter-deploy. Jumlah unread
+muncul → klik → tandai terbaca → jumlah turun → refresh tetap konsisten.
 
-### ⚠️ Jebakan yang paling mahal, diulang di sini karena ia menghasilkan FAIL PALSU di semua baris
+**5. Tulis report baru** `docs/handoff/CUTOVER_UAT_REPORT_<tanggal>.md`. DoD: **FAIL = 0 TANPA SKIP**.
+
+### ⚠️ Jebakan yang menghasilkan FAIL PALSU di SEMUA baris
 
 Kalau deployment ber-proteksi dan **`BYPASS` tidak diisi**, Vercel menjawab **setiap** path dengan
-halaman challenge. Itu terbaca seperti routing-404 dan akan dilaporkan sebagai *path drift* —
-seluruh baris FAIL padahal aplikasinya sehat. Isi `BYPASS`, atau matikan proteksi sementara.
+halaman challenge. Itu terbaca seperti routing-404 dan dilaporkan sebagai *path drift* — seluruh
+baris FAIL padahal aplikasinya sehat. Isi `BYPASS`, atau matikan proteksi sementara.
 
-## 2. Satu verifikasi TAMBAHAN yang layak dijalankan sekali (baru, tidak ada di runbook)
+## 3. Satu probe TAMBAHAN yang belum ada di runbook
 
-Sesi ini membuktikan arm RLS O46 menyala **di lapisan DB** (probe 8 skenario, `DECISIONS.md`
-2026-07-30). Yang **belum** pernah dilihat: apakah ia menyala **lewat aplikasi ter-deploy** — yaitu
-apakah JWT yang benar-benar dikeluarkan login membawa `level=lead` sampai ke policy.
+Arm RLS O46 sudah terbukti menyala **di lapisan DB** (probe 8 skenario). Yang belum pernah dilihat:
+apakah ia menyala **lewat aplikasi ter-deploy** — yaitu apakah JWT dari login sungguhan membawa
+`level=lead` sampai ke policy.
 
-**Cara termurah:** minta **Head of Sales `2101180004`** login ke FE ter-deploy dan buka halaman
+**Termurah:** minta **Head of Sales `2101180004`** login ke FE ter-deploy dan buka halaman
 riwayat/audit.
 
 | Hasil | Artinya |
 |---|---|
-| melihat **> 32** entri (harusnya **36**) | ✅ arm menyala end-to-end |
-| melihat **tepat 32** | 🔴 arm tidak menyala di jalur aplikasi — periksa **`trg_sync_claims_mapping`**, **bukan** policy-nya (policy sudah terbukti benar) |
-| melihat **0** | 🔴 masalah auth/route, bukan RLS |
+| **36** entri (own-only = 32) | ✅ arm menyala end-to-end |
+| tepat **32** | 🔴 arm tidak menyala di jalur aplikasi — periksa **`trg_sync_claims_mapping`**, **bukan** policy (policy sudah terbukti benar) |
+| **0** | 🔴 masalah auth/route, bukan RLS |
 
-Angka 32 vs 36 itu bukan hiasan: `2101180004` menulis **32** entri sendiri sementara divisi Sales
-punya **36**, jadi kedua angka itu membedakan *"arm menyala"* dari *"arm mati"* tanpa ambiguitas.
-**Jangan pakai Head of Account `2305100275`** — divisi Account punya **0** entri audit, jadi hasilnya
-`0` baik arm menyala maupun mati; ia tidak membedakan apa pun. (SESI21/SESI22 sempat
-menyarankannya — itu saran yang sudah dicabut.)
+**JANGAN pakai Head of Account `2305100275`** — divisi Account punya **0** entri audit, jadi hasilnya
+`0` baik arm menyala maupun mati; ia tidak membedakan apa pun. (SESI21/SESI22 menyarankannya; saran
+itu sudah dicabut.)
 
-## 3. Kalau ada yang FAIL
+**Bonus, kalau sempat:** minta **Ads lead `2307100292`** membuka halaman config KPI
+(`/performance/config/weights`). Sebelum `20260730153627` halaman itu **kosong** untuk semua orang
+selain Director/OD; sekarang harus terisi (**15** baris di live).
+
+## 4. Kalau ada yang FAIL
 
 - **Jangan** perbaiki dengan mengubah policy RLS. Semua policy yang tersentuh C-03 sudah diverifikasi
-  di lapisan DB sesi ini; kegagalan di sini hampir pasti **auth/klaim/route**, bukan policy.
-- Hasilnya ditulis ke **report baru** `docs/handoff/CUTOVER_UAT_REPORT_<tanggal>.md`.
-  DoD-nya: **FAIL = 0 TANPA SKIP** (runbook §6).
-- Kirimkan output ketiga skrip apa adanya. Claude bisa mendiagnosis dari situ tanpa akses Vercel.
+  di lapisan DB; kegagalan di sini hampir pasti **auth/klaim/route**.
+- Kirimkan output ketiga skrip apa adanya — Claude bisa mendiagnosis dari situ tanpa akses Vercel.
 
-## 4. Sesudah C-03 hijau — urutan sisa pekerjaan
+---
 
-| # | Butir | Catatan |
+## 5. 🔴 O50 — BACA SEBELUM GO (bukan blocker C-03, tapi blocker gate GO)
+
+**10 akun ber-pola `99000000xx` ada di live**, semuanya `status_aktif=true` dan **semuanya bisa
+login** — satu per peran, termasuk **1 Director** (`9900000001`) dan **2 lead divisi**
+(`9900000003` Sales, `9900000005` Account). Bentuknya fixture UAT, dan DoD **C-04** mensyaratkan
+**nol fixture UAT di jalur produksi**.
+
+Claude **tidak menyentuhnya** — menghapus akun produksi butuh persetujuan eksplisit. Minimal
+sementara: **`status_aktif=false`** supaya sinkronisasi mencabut aksesnya.
+
+**Efek samping yang mengecoh:** mereka mencemari setiap hitungan headcount. "69 karyawan" yang
+dipakai memutuskan A4/O48 sebenarnya **59 riil + 10 fixture**.
+
+## 6. Sisa pekerjaan sesudah C-03
+
+| # | Butir | Siapa |
 |---|---|---|
-| 1 | **A4 roster** — `O34_O26_O35_WORKSHEET_ROSTER_V2.md` §3.1–§3.6 | Daftar pertanyaan **tertutup**; §5 memuat verifikasi live-nya |
-| 2 | **O48** — `O48_ANALISIS_KEPUTUSAN.md` | **Sesudah A4**, dan alasannya mengikat (di bawah) |
-| 3 | Backup MySQL Railway + OQ-2 · rencana rollback | |
-| 4 | Gate GO → **C-05** (cabut `backend/`) | |
+| 1 | **O50** — konfirmasi asal-usul 10 akun `99000000xx` + izin nonaktifkan/hapus | **pemilik** |
+| 2 | **7 karyawan tak terpetakan** — §7 di bawah. **Hanya 5 yang riil** (2 sisanya fixture O50) | **pemilik** |
+| 3 | **O48 Grup A/B/E** — `O48_ANALISIS_KEPUTUSAN.md`. Grup C+D sudah selesai & live | **pemilik + head dev** → Claude |
+| 4 | Backup MySQL Railway + OQ-2 · rencana rollback | **pemilik** |
+| 5 | Gate GO → **C-05** (cabut `backend/`) | **pemilik** → Claude |
+| 6 | Probe ulang `transactions`, `performance_snapshots`, `*_block_requests` begitu ada data riil (ketiganya **kosong** di live, jadi arm-nya belum terbukti oleh data) | Claude, saat datanya ada |
 
-> **Kenapa A4 mendahului O48, dan ini bukan selera:** diukur di live hari ini, **Ads (11 karyawan),
-> KOL (5), dan Marketing (1) punya NOL pemegang `level=lead`**, plus **7 karyawan tidak terpetakan** —
-> total **24 dari 69**. Menyapu arm divisi ke 32 policy sebelum itu dijawab menghasilkan migrasi yang
-> **tidak bisa dibuktikan bekerja** di tiga divisi tersebut: policy-nya benar, pemegangnya nol,
-> hasilnya terlihat selesai. Itu persis kelas kesalahan O46.
+## 7. Daftar 7 karyawan tak terpetakan — dan hanya 5 yang riil
 
-**Dua hal yang tetap terbuka dan sengaja tidak ditutup diam-diam:**
+`employee_claims(...)->>'division' = ''` ⇒ tidak punya divisi CDPS ⇒ **tidak dapat scope divisi apa
+pun**. Arahnya aman (lebih sempit), tapi arm O46/O48 tidak menyala untuk mereka.
 
-- **`transactions` KOSONG di live (0 baris)** — arm-nya bersandar pada helper bersama + `rls_checks`,
-  belum terbukti oleh data riil. Probe ulang begitu ada transaksi.
-- **`formatDate` di `clients/[id]/page.tsx`** memakai `toLocaleString`, bukan `toLocaleDateString`,
-  jadi kolom tanggal merender jam `07.00.00`. Salah sebelum maupun sesudah O49 (b) dan **bukan**
-  disebabkan olehnya — butuh tiket FE sendiri.
+| # | `employee_id` | dept HRIS | jabatan | Catatan |
+|---|---|---|---|---|
+| 1 | `200000001` | Director | Director | Layered **director** ⇒ sudah akses penuh. **Non-blocking** |
+| 2 | `200000002` | Director | Director | idem |
+| ~~3~~ | ~~`9900000001`~~ | ~~Director~~ | ~~Director~~ | 🔴 **fixture O50**, bukan karyawan riil |
+| 4 | `2501140493` | OD | SENIOR ORGANIZATION DEVELOPMENT | butuh divisi dasar + keputusan layered `od` |
+| 5 | `2507250557` | OD | SENIOR DATA ANALYST | idem |
+| 6 | `2607060683` | OD | JR ORGANIZATION DEVELOPMENT | idem |
+| ~~7~~ | ~~`9900000002`~~ | ~~OD~~ | ~~SENIOR ORGANIZATION DEVELOPMENT~~ | 🔴 **fixture O50** |
 
-**Titik masuk umum sesi berikutnya tetap `HANDOFF_CUTOVER_SESI23.md`** (nomor tertinggi dibaca
-pertama, aturan `CLAUDE.md`). Berkas ini khusus untuk orang yang menjalankan C-03.
+**Jadi yang butuh keputusan Anda: 5 orang, dan hanya 3 di antaranya mendesak.**
+
+- **`200000001` + `200000002` (Director) — tidak mendesak.** Layered `director` sudah memberi akses
+  penuh di setiap gate; mapping divisi dasarnya kosmetik. Worksheet §3.1: petakan ke divisi wajar
+  mana pun (mis. `Sales`/`lead`) — tidak berpengaruh.
+- **Tiga orang dept `OD` — mendesak.** `OD` adalah **layered role, bukan divisi**, jadi mereka tidak
+  punya divisi dasar dan saat ini **tidak melihat apa pun di luar data mereka sendiri**. Dua
+  keputusan: (a) divisi dasar masing-masing; (b) **siapa yang dapat layered `od`** (read-only
+  di mana-mana). Saat ini pemegang layered `od` hanya **`2409230432`** — bukan salah satu dari
+  ketiganya.
+
+> Perhatikan `2507250557` **SENIOR DATA ANALYST**: worksheet §2.2 juga mendaftar
+> `DATA & BUSINESS INTELLIGENCE / DATA ANALYST INTERN` sebagai dept tanpa padanan CDPS. Kalau ada
+> keputusan "analitik tidak dapat scope operasional", keduanya sebaiknya diputus bersama.
+
+**Cara mengeksekusi sesudah dijawab** — `O34_O26_O35_WORKSHEET_ROSTER_V2.md` §4: tambah baris ke
+`supabase/seed/role_mappings_riil.csv` (**tambah**, jangan regenerasi — live sudah 39 baris), lalu
+`npm run rolemap:seed -w @cdps/api -- --apply`. Untuk layered role: `layered_roles_riil.csv`
+(kini menerima `od`, `director`, **dan `lead`**).
+
+> **Kalau yang dibutuhkan adalah menjadikan SEORANG karyawan lead** — gunakan layered role `lead`,
+> **bukan** `role_mappings`. `role_mappings` berkunci `(divisi, jabatan)`, jadi menaikkan jabatan
+> akan menaikkan **semua** pemegang jabatan itu. Preseden + alasannya: `DECISIONS.md` 2026-07-30.
+
+**Titik masuk umum sesi berikutnya tetap `HANDOFF_CUTOVER_SESI23.md`.** Berkas ini khusus untuk yang
+menjalankan C-03.
