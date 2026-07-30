@@ -17,15 +17,15 @@
 | **`main`** | **`efd59aa`** = Merge PR #81. Rantai: #75 → #77 → #76 → #79 → #78 → #80 → **#81** |
 | **PR** | **#82**, **terbuka**, **belum di-merge**. Menunggu review/merge pemilik |
 | **CI** | Berkas ini memicu run baru — **baca check run PR #82**, jangan percaya baris mana pun di sini |
-| **Live `CDPS SG`** | **42 migrasi · 54 tabel · 17 event**. Migrasi terakhir `20260730120433_fix_o46_division_resolution`, tercatat **2026-07-30 12:04:33 UTC** |
-| **Repo vs live** | 🟠 **43 repo vs 42 live** — **SENGAJA**. Selisihnya **satu** berkas: `20260730160000_o48_grup_cd_lead_division_arms.sql` (O48 Grup C+D), menunggu persetujuan apply. Untuk **42 migrasi yang sudah di live**, nama berkas = versi live **1:1** |
+| **Live `CDPS SG`** | **44 migrasi · 54 tabel · 17 event**. Dua apply terakhir 2026-07-30: `20260730153627` (O48 Grup C+D) dan `20260730154210` (layered role `lead`) |
+| **Repo vs live** | ✅ **44 = 44, nama berkas = versi live 1:1** — kedua apply hari ini menggeser versi lagi (`160000`→`153627`, `170000`→`154210`); **empat dari empat apply terakhir menggeser versi ⇒ itu perilaku NORMAL `apply_migration`** |
 | **O46** | ✅ **MENYALA dan TERBUKTI** — probe 8 skenario, 2 kontrol hijau (§1.2). Ini menutup butir 1 **dan** 2 SESI22 |
 
-**Angka acuan** (Postgres 16 lokal, DB dibangun ulang dari nol, **43/43** migrasi bersih —
+**Angka acuan** (Postgres 16 lokal, DB dibangun ulang dari nol, **44/44** migrasi bersih —
 dijalankan di sesi ini):
-`apps/api` **310** · `@cdps/domain` **566** (+1 skip) · `@cdps/core` **113** · `@cdps/db` **9** ·
+`apps/api` **311** · `@cdps/domain` **566** (+1 skip) · `@cdps/core` **113** · `@cdps/db` **9** ·
 `web-internal` **26** · 7 gate seed **PASS** (54 tabel · 14 `sm_machines` · 17 `notif_events`) ·
-4 invariant SQL **PASS** (`rls_checks` **32 check** — 23 + 9 dari O48 Grup C/D) ·
+4 invariant SQL **PASS** (`rls_checks` **32 check** · `auth_claims_checks` **4 check**) ·
 `route-parity` **5/5 `KNOWN_GAPS` KOSONG** ·
 `NESTED_INLINE_UNCHECKED` **KOSONG** · `RFC3339_PENDING_DECISION` ✅ **KOSONG** (O49 (b) selesai —
 `managed_since` adalah penghuni terakhirnya, §1.4). **Ketiga ledger kini kosong.**
@@ -50,7 +50,7 @@ git log --oneline main..HEAD
 npm install                                          # deps tidak ada di container baru
 service postgresql start                             # Postgres 16 lokal
 su postgres -c "psql -c \"ALTER USER postgres WITH PASSWORD 'postgres';\""   # test pakai TCP, bukan peer
-npm run db:rebuild -- --yes                          # 42/42 migrasi
+npm run db:rebuild -- --yes                          # 44/44 migrasi
 DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/cdps" npm test --workspaces --if-present
 ```
 
@@ -58,9 +58,9 @@ DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/cdps" npm test --works
 
 ## 1. Yang dikerjakan sesi ini
 
-Nol perubahan perilaku produk. Satu **rename migrasi** (wajib, §1.1), satu **probe live read-only**
-(§1.2), dan koreksi dokumen yang mengikutinya. Live **tidak ditulis** sama sekali di sesi ini —
-apply-nya sudah terjadi sebelum sesi ini dimulai.
+Sesi ini punya **dua babak**. Babak pertama (§1.1–§1.4) nol perubahan perilaku: rename migrasi,
+probe live read-only, koreksi dokumen, O49 (b). Babak kedua (**§1.5**) **menulis ke live dua kali**
+atas persetujuan pemilik — O48 Grup C+D dan layered role `lead`.
 
 ### 1.1 🔴 Temuan: §0 SESI22 sudah SALAH pada saat ditulis — dan kenapa itu lolos
 
@@ -179,6 +179,42 @@ memakai `toLocaleString` (bukan `toLocaleDateString`), jadi ia merender jam **`0
 kolom tanggal. Salah sebelum maupun sesudah perubahan ini, dan **bukan** disebabkan olehnya.
 Perbaikannya perubahan rendering FE dengan tiketnya sendiri.
 
+### 1.5 Babak kedua — dua apply ke live (persetujuan pemilik)
+
+**(a) O48 Grup C+D — `20260730153627`.** 6 policy SELECT dapat arm lead/divisi. Yang paling penting
+Grup D: empat route M14 memakai `readAsActor` sehingga RLS berlaku, dan
+`GET /performance/teams/{division}` **merata-ratakan baris yang lolos RLS lalu merendernya sebagai
+rata-rata TIM** — angka salah yang terlihat benar. Grup C **dorman** (nol route membacanya lewat
+`readAsActor`); dikerjakan atas keputusan eksplisit pemilik, dan itu dicatat apa adanya.
+
+> **Jebakan yang nyaris terkirim:** subquery di dalam ekspresi policy dievaluasi sebagai role
+> **pemanggil**, jadi RLS tabel yang dirujuknya ikut berlaku. `assets_select` belum punya arm lead,
+> jadi `EXISTS (SELECT 1 FROM assets …)` inline akan **selalu false** untuk seorang lead. Ketiga
+> helper wajib `SECURITY DEFINER`. Dibuktikan mutasi: `DEFINER`→`INVOKER` ⇒ check 25 **merah**.
+
+Probe live sesudah apply: staf biasa membaca `perf_kpi_weights` **15** (dulu **0**); klaim kosong
+**0/0** (fail-closed). `performance_snapshots` dan `*_block_requests` **kosong di live**, jadi arm-nya
+**belum** terbukti oleh data riil — probe ulang saat datanya ada.
+
+**(b) Layered role `lead` — `20260730154210`.** Menutup **A4 §3.2**. `role_mappings` berkunci
+`(divisi, jabatan)` sehingga tidak bisa menjadikan SEORANG karyawan lead: `SENIOR ADVERTISER`
+dipegang **3 orang**, `KOL SPECIALIST` **3 orang**. Mengganti `employees.jabatan` juga bukan jalannya
+— ia disinkronkan read-only dari HRIS dan akan **mencabut kepemimpinannya secara senyap**.
+`employee_layered_roles` (CDPS-lokal, per-orang, sudah ber-trigger) adalah jalur yang benar.
+
+Terverifikasi: 3 yang ditunjuk `level=lead` **di fungsi maupun klaim JWT tersimpan**, **4 rekan
+sejabatan tetap `staff`**. Setiap divisi kini punya lead.
+
+> **🔴 Check-nya sendiri sempat cacat.** Versi pertama membungkus assertion terpentingnya dalam
+> `IF peer IS NOT NULL`; seed tidak punya dua karyawan sejabatan, jadi ia **di-skip** dan mutasi
+> "lead kolektif" **lolos hijau**. Hijau karena hampa — kelas cacat yang seluruh sesi ini bahas.
+> Diperbaiki: fixture disisipkan eksplisit oleh check-nya sendiri.
+
+**(c) 🔴 Temuan tak dicari: O50 — 10 akun `99000000xx` di live**, semuanya `status_aktif=true` dan
+**semuanya bisa login**, termasuk 1 **Director** dan 2 **lead divisi**. Berbentuk fixture UAT dan
+memblokir DoD C-04. Claude **tidak menyentuhnya**. Ia juga **mencemari setiap hitungan headcount** di
+dokumen ini: 69 = **59 riil + 10 fixture**.
+
 ---
 
 ## 2. Sisa pekerjaan
@@ -191,7 +227,7 @@ Perbaikannya perubahan rendering FE dengan tiketnya sendiri.
 | 1 | **Merge PR #82** | **pemilik** |
 | 2 | **C-03 — 3 SKIP** 🔴 *jalur kritis* — runbook `CUTOVER_C03_DEPLOYMENT_RUNBOOK.md`, **titik masuknya `HANDOFF_C03_MESIN_VERCEL.md`** (apa yang berubah sejak runbook ditulis + satu probe end-to-end baru). Dari mesin ber-akses `*.vercel.app` | **pemilik** |
 | 4 | **A4** — daftar pertanyaan **tertutup** `O34_O26_O35_WORKSHEET_ROSTER_V2.md` §3.1–§3.6; **§5 memuat verifikasi live**: Ads/KOL/Marketing **nol pemegang lead**, 24 dari 69 karyawan terdampak. **Mendahului O48** | **pemilik** |
-| 0 | 🔴 **Apply `20260730160000_o48_grup_cd_lead_division_arms.sql` ke live** — O48 Grup C+D sudah **diputus & ter-implementasi**, 32 check hijau, 4 mutasi merah di check yang tepat. Sesudah apply: **baca versi yang benar-benar tercatat** lalu ganti nama berkas repo (dua dari dua apply terakhir menggeser versi), lalu probe | persetujuan **pemilik** → eksekusi Claude |
+| 0 | 🔴 **O50 — 10 akun fixture `99000000xx` di LIVE, semuanya bisa login** (termasuk 1 Director + 2 lead divisi). Memblokir DoD C-04 *"nol fixture UAT di jalur produksi"* dan gate GO. Claude tidak menyentuhnya. Minimal: `status_aktif=false` | **pemilik** |
 | 5 | **O48 Grup A/B/E — masih TERBUKA** — `O48_ANALISIS_KEPUTUSAN.md`. Grup C+D sudah diputus (lihat butir 0). Sisanya: Grup A (7 policy keluarga Klien, satu helper terbukti) · Grup B (12 tabel primer per divisi) · Grup E (7). **Sesudah A4** | keputusan **pemilik + head dev**, eksekusi Claude |
 | 6 | **Backup MySQL Railway + OQ-2** · **rencana rollback** | **pemilik** |
 | 7 | **Gate GO** → **C-05** (cabut `backend/`) | **pemilik** → Claude |

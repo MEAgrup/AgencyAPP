@@ -88,13 +88,22 @@ describe('parseLayeredRoleCsv', () => {
   it('parses the real seed file', () => {
     const rows = parseLayeredRoleCsv(seed('layered_roles_riil.csv'));
     expect(rows.length).toBeGreaterThan(0);
-    expect(rows.every((r) => r.role === 'od' || r.role === 'director')).toBe(true);
+    expect(rows.every((r) => r.role === 'od' || r.role === 'director' || r.role === 'lead')).toBe(true);
     expect(rows.every((r) => r.employeeId !== '')).toBe(true);
   });
 
-  it('rejects a role outside od/director', () => {
+  it('rejects a role outside od/director/lead', () => {
     expect(() => parseLayeredRoleCsv('2409230432,admin'))
-      .toThrow(/role "admin" harus "od" atau "director"/);
+      .toThrow(/role "admin" harus "od", "director", atau "lead"/);
+  });
+
+  // `lead` ditambahkan 2026-07-30: role_mappings berkunci (divisi,jabatan), jadi
+  // ia tidak bisa menjadikan SEORANG karyawan lead tanpa menaikkan semua yang
+  // sejabatan. Layered role adalah jalur per-orangnya.
+  it('accepts the layered `lead` role', () => {
+    expect(parseLayeredRoleCsv('2307100292,lead')).toEqual([
+      { line: 1, employeeId: '2307100292', role: 'lead' },
+    ]);
   });
 
   it('rejects an empty employee_id', () => {

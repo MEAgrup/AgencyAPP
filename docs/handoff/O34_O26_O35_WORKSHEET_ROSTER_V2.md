@@ -182,3 +182,54 @@ from public.employees e group by 1 order by 1;
 > (`O48_ANALISIS_KEPUTUSAN.md`) sebelum Ads/KOL/Marketing punya pemegang lead menghasilkan migrasi
 > yang **tidak bisa dibuktikan bekerja** di tiga divisi itu — persis kelas kesalahan O46, di mana
 > policy yang benar terlihat selesai karena tidak ada yang bisa memicunya.
+
+---
+
+## 6. ✅ §3.2 DITUTUP 2026-07-30 — dan mekanismenya bukan `role_mappings`
+
+Pemilik menunjuk: **Ads `2307100292`** · **KOL `2602190630`** · **Marketing `2504240539`**.
+
+**`role_mappings` tidak bisa dipakai untuk ini.** Ia berkunci `UNIQUE (divisi, jabatan)` dan
+`employee_claims` menurunkan `level` HANYA dari sana, jadi level melekat pada **jabatan**, bukan
+orang. Diukur di live:
+
+| employee_id | jabatan | pemegang jabatan yang sama |
+|---|---|---|
+| `2307100292` | `SENIOR ADVERTISER` | **3** |
+| `2602190630` | `KOL SPECIALIST` | **3** |
+| `2504240539` | `MARKETING STRATEGIST` | 1 |
+
+Memetakan jabatannya ke `lead` akan menaikkan **3 orang** di Ads dan **3** di KOL — dua di antaranya
+bukan lead, dan itu tidak akan terlihat: mereka sekadar mulai melihat data se-divisi.
+
+**Mengganti `employees.jabatan` juga bukan jalannya:** `employees` disinkronkan **read-only dari
+HRIS**, jadi sinkronisasi berikutnya mengembalikan jabatannya dan **mencabut kepemimpinannya secara
+senyap**.
+
+**Jalur yang dipakai: layered role `lead`** (migrasi `20260730154210`) — CDPS-lokal (kebal sinkron
+HRIS), per-orang, dan sudah punya trigger perambatan klaim. Persis cara `od`/`director` bekerja.
+
+### Hasil terverifikasi di live
+
+| Divisi | Karyawan | Pemegang lead |
+|---|---|---|
+| Account | 15 | 3 |
+| Sales | 15 | 2 |
+| Creative | 11 | 1 |
+| Finance | 4 | 1 |
+| **Ads** | 11 | ✅ **1** |
+| **KOL** | 5 | ✅ **1** |
+| **Marketing** | 1 | ✅ **1** |
+| (tidak terpetakan) | 7 | 0 |
+
+**4 rekan sejabatan tetap `staff`** — nol kenaikan kolateral. Probe klaim **tersimpan** (bukan
+karangan) untuk `2307100292`: `division=Ads` · `jwt_is_lead()=true` · `jwt_same_division(rekan
+Ads)=true` · `jwt_same_division(Sales)=false`.
+
+> ⚠️ **Angka di tabel ini masih memuat 10 akun fixture `99000000xx`** — lihat **O50** di
+> `DECISIONS.md`. Headcount riil ≈ **59 + 10 fixture**, dan dua fixture (`9900000009`,
+> `9900000010`) ikut terhitung sebagai "rekan sejabatan" di verifikasi di atas.
+
+**Yang MASIH terbuka dari worksheet ini:** §2.2 (4 pasangan DEPARTMENT/JABATAN ambigu) · §3.1 divisi
+dasar Director · §3.3 konfirmasi staf Live-Stream nihil · §3.4 **O35** sub-tim Creative · §3.5
+`VIDEOGRAPHER FREELANCE` · §3.6 BD→Marketing · **7 karyawan tidak terpetakan**.
