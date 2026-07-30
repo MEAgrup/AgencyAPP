@@ -12,9 +12,10 @@
 ## 0. Ringkasan satu paragraf
 
 Peta pensiun Go punya **6 fase**. **Fase 0 & 1 selesai penuh dan sudah di `main`.**
-**Fase 2 praktis SELESAI:** kelas-1 (#76), kelas-2 **kedua paruhnya** — 29 converter
+**Fase 2 SELESAI:** kelas-1 (#76), kelas-2 **kedua paruhnya** — 29 converter
 commerce/portal (Paket B) + 25 converter delivery (Paket A), **nol cacat di keduanya**, dikunci
-44 test A + gate otomatis 84 converter B. **Fase 3 selesai sebagian** (3 dari 4 CLI; `cmd/import`
+44 test A + gate otomatis B; **blind spot nested-inline gate juga ditutup (sesi 17, §A4)** dan
+penutupannya menyingkap satu lubang nyata. **Fase 3 selesai sebagian** (3 dari 4 CLI; `cmd/import`
 menunggu O47).
 **Fase 4 (gate manusia) tidak bisa disentuh Claude sama sekali** — tujuh butir, semuanya butuh
 akses atau otoritas pemilik. **Fase 5 (pencabutan mekanis) 0% dan memang belum boleh dimulai** —
@@ -33,7 +34,7 @@ mesin ber-akses** + **empat keputusan pemilik** (O47, O46, O34/O26/O35, retensi 
 |---|---|---|---|
 | **Fase 0** | Data organisasi riil dikeluarkan dari `backend/` | 🟢 **SELESAI** — di `main` (#75) | **100%** |
 | **Fase 1** | O41 — 6 route hilang diport, `KNOWN_GAPS` kosong | 🟢 **SELESAI** — di `main` (#75) | **100%** |
-| **Fase 2** | O43 — paritas bentuk respons | 🟢 **praktis SELESAI.** kelas-1 tutup (#76); kelas-2 **seluruh 54 converter** diaudit — 29 commerce/portal (B, #78) + 25 delivery (A, #79), **nol cacat di keduanya**, dikunci 44 test + gate otomatis 84 converter. Sisa: **3 interface nested inline** (dinyatakan, di-assert) | **~95%** |
+| **Fase 2** | O43 — paritas bentuk respons | 🟢 **SELESAI.** kelas-1 tutup (#76); kelas-2 **seluruh 54 converter** diaudit — 29 commerce/portal (B, #78) + 25 delivery (A, #79), **nol cacat di keduanya**, dikunci 44 test + gate otomatis. **Blind spot nested-inline juga ditutup (sesi 17):** 6 blok inline dinamai, gate turun rekursif, `NESTED_INLINE_UNCHECKED` **kosong** — dan ia menyingkap **satu lubang nyata** (`DemoTaskDetail.task.description`, lihat §A4) | **100%** |
 | **Fase 3** | 4 CLI Go tanpa padanan | 🟡 3 dari 4 diputuskan & dieksekusi (#76, **di `main`**); `cmd/import` → **O47 terbuka** | **~75%** |
 | **Fase 4** | Gate manusia (7 butir) | 🔴 **nol butir ditutup Claude** — semuanya butuh pemilik. Sebagian C-04 sudah jalan (MSL 32 layanan, 69 karyawan, O42) | **~30%** |
 | **Fase 5** | Pencabutan mekanis (C-05) | 🔴 belum boleh dimulai. Hanya `CLAUDE.md` §Stack yang sudah dikoreksi lebih awal (PR #76) | **~10%** |
@@ -42,9 +43,9 @@ mesin ber-akses** + **empat keputusan pemilik** (O47, O46, O34/O26/O35, retensi 
 
 | Sisi | % | Sisa |
 |---|---|---|
-| **Engineering (Claude)** | **~95%** *(~80% → ~85% Paket B → ~95% Paket A)* | Sisanya **kecil atau terkunci**: 3 interface nested inline · **T2b** 1 warning eslint `mslseed.ts` · rekomendasi memanggil lint di job `api` CI · T3 adapter CSV (**terkunci O47**) · Fase 5 (**terkunci gate GO**) |
+| **Engineering (Claude)** | **~98%** *(~80% → ~85% Paket B → ~95% Paket A → ~98% sesi 17)* | Yang tersisa **seluruhnya terkunci, bukan kecil**: T3 adapter CSV (**terkunci O47**) · Fase 5 (**terkunci gate GO + O47**). Ditutup sesi 17: blind spot nested-inline · **T2b** · lint `@cdps/api` dipanggil di job CI dengan `--max-warnings 0` |
 | **Sisi pemilik (Yohan/Nerissa)** | **~35%** | C-03 eksekusi dari deployment · O47 · O46 · O34/O26/O35 · backup + rollback Railway · retensi PII |
-| **Gabungan pensiun Go** | **~78%** | jalur kritisnya **100% sisi pemilik** — §5 |
+| **Gabungan pensiun Go** | **~80%** | jalur kritisnya **100% sisi pemilik** — §5. Nol butir sisa bisa dimajukan Claude tanpa keputusan/akses pemilik |
 
 > ⚠️ **Koreksi terhadap angka lama.** PR #73 (handoff SESI12) menyatakan *"engineering ~95%"*.
 > Angka itu **terlalu optimistis, dan sudah terbukti begitu** — SESI13 menemukan seluruh lapisan
@@ -64,6 +65,10 @@ mesin ber-akses** + **empat keputusan pemilik** (O47, O46, O34/O26/O35, retensi 
 
 **Gabungan A+B** (PR #78 di atas `main@e5755ff`): `apps/api` **299** (290 + 9 gate). Domain/core/
 db/web-internal tidak bergerak. `npm run lint -w @cdps/api` **0 error, 1 warning** (T2b).
+
+**Sesi 17** (di atas #78): `apps/api` **301** (299 + 2 test gate rekursif) · domain **566** (+1 skip)
+· core **113** · db **9** · web-internal **26** · `npm run lint -w @cdps/api --max-warnings 0`
+**0 error 0 warning** (T2b beres, dan sekarang dipanggil job CI `api`).
 
 <sub>Angka lama, sebelum #76/#77 masuk (`main@a37e432`): domain 552 · `apps/api` 211.</sub>
 
@@ -214,6 +219,35 @@ Data riil sudah pindah, tapi tiga dokumen **operasional** masih menunjuk lokasi 
 Perbarui ke `supabase/seed/…`. **Handoff bertanggal & baris `DECISIONS.md` lama JANGAN ditulis
 ulang** — itu catatan historis. `supabase/seed/README.md` sudah benar (ia menjelaskan mekanisme
 duplikat byte-identik sampai Fase 5) — jangan diubah.
+
+### A4 · ✅ SELESAI (sesi 17) — blind spot nested-inline gate + T2b + lint di CI
+
+Ketiga sisa engineering non-terkunci yang didaftar SESI17 §3.2 (butir 1–3), ditutup sekaligus.
+
+**Butir 1 — blind spot nested-inline.** Gate O43 (c) hanya membandingkan kunci **level-atas** dan
+menyatakan blind spot-nya sebagai **3** interface. Angka itu terlalu optimistis **dua arah**:
+deteksinya memakai regex kunci ber-indentasi 4 spasi sehingga objek inline **satu baris** tak
+pernah terhitung (`PerfTeamRollupWire.members`, `MarketingMetricsWire.junk_breakdown`), dan sisi
+**FE tak pernah diperiksa** (`AttemptDetail`, `DemoTaskDetail`). Enam blok itu kini interface
+bernama di kedua sisi, dan gate **turun rekursif**: referensi diikuti hanya bila kedua sisi tipe
+bernama, kasus satu-sisi di-assert kosong, resolusi lintas-berkas dibaca dari `import type`.
+`NESTED_INLINE_UNCHECKED` sekarang **kosong** dan berlaku seperti `KNOWN_GAPS` — hanya boleh
+menyusut.
+
+> **Ini bukan kerapian — ada satu lubang nyata di baliknya.** `DemoTaskDetail.task` membaca
+> `description`, yang tipe daftar `DemoTask` tidak deklarasikan; jadi `description` duduk di
+> `ALLOWED_EXTRA`, dan **menghapusnya dari wire akan mengeblank halaman detail dengan CI tetap
+> hijau**. Dibuktikan alih-alih diklaim: mutasi itu disuntik ke `wire.ts` versi **lama**
+> (`25a383b`) dan gate lama **9/9 hijau**; pada gate baru **merah**. Total **5 mutasi** dijalankan
+> (kunci hilang di blok bersarang · camelCase di dalam blok bersarang · `description` dihapus ·
+> satu blok di-inline-kan lagi · referensi bersarang salah sasaran) — **kelimanya merah**.
+
+**Butir 2 (T2b).** Import `msl` yang tak terpakai di `apps/api/scripts/mslseed.ts` dibuang ⇒
+`npm run lint -w @cdps/api` **0 error 0 warning**.
+
+**Butir 3.** Job CI `api` kini memanggil `npm run lint -w @cdps/api -- --max-warnings 0`. Warning
+dibuat fatal **karena** T2b sudah beres: gate mulai dari nol, jadi ia tidak bisa mengumpulkan
+warning diam-diam. (Tanpa `--max-warnings 0` eslint keluar exit 0 pada warning ⇒ gate hampa.)
 
 ---
 
