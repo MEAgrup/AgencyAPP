@@ -17,16 +17,40 @@ Branch kamu: **`claude/wire-parity-delivery-a`**. Buat kalau belum ada. Jangan p
 3. Baca `docs/handoff/HANDOFF_CUTOVER_SESI13.md` (di `main`) dan `docs/handoff/HANDOFF_CUTOVER_SESI14.md` (**hidup di PR #76, belum ter-merge** — ambil dari branch `claude/cdps-sg-cutover-sesi13-2kmgy4`). SESI14 §5 T1 adalah asal-usul task kamu.
 4. **Cek `list_pull_requests` sebelum mulai, bukan hanya `git log`.** Ini bukan formalitas: sesi #77 memulai di atas `main` yang basi beberapa menit kemudian, lalu **mengerjakan ulang dari nol dua task yang sudah ter-merge**. Yang menyingkapnya adalah daftar PR terbuka, bukan git.
 
-## 1. Basis branch — PENTING, ada PR yang belum ter-merge
+## 1. Basis branch
 
-PR **#76** (`claude/cdps-sg-cutover-sesi13-2kmgy4`) memuat O43 Fase 2 dan **mengubah `apps/api/src/lib/wire.ts`** (menambah `attemptRowToWire`, `attemptDetailToWire`, `financeScanResultToWire`, `voidResultToWire`, `demoTaskToWire`, `demoTaskDetailToWire`) plus `packages/domain/src/{sales,client,employees}.ts`.
+**Branch dari `main` terbaru.** Per 2026-07-30 04:4x UTC, **#76 dan #77 sudah ter-merge**
+(`main@5944aa1`), jadi tidak ada lagi PR yang perlu ditumpuki — versi awal instruksi ini
+menyuruh bertumpuk di atas #76, dan itu **sudah tidak berlaku**.
 
-- Kalau **#76 sudah ter-merge** ke `main`: branch dari `main` terbaru.
-- Kalau **#76 belum ter-merge**: branch dari `origin/claude/cdps-sg-cutover-sesi13-2kmgy4` (HEAD #76), **bukan** dari `main`. PR kamu jadi PR bertumpuk (*stacked*) — tulis itu di body PR: "bertumpuk di atas #76, merge #76 dulu".
+Yang perlu kamu tahu tentang isi #76 karena ia menyentuh berkas yang sama denganmu: ia menambah
+6 converter ke `apps/api/src/lib/wire.ts` (`attemptRowToWire`, `attemptDetailToWire`,
+`financeScanResultToWire`, `voidResultToWire`, `demoTaskToWire`, `demoTaskDetailToWire`) plus
+`packages/domain/src/{sales,client,employees}.ts`. Semuanya sudah di `main`.
 
-Jangan mencampur: satu basis, jangan setengah dari `main` setengah dari #76.
+> **Tetap cek sendiri, jangan percaya paragraf ini.** `git fetch origin main` lalu
+> `list_pull_requests` — dokumen bertanggal menggambarkan kondisi saat ditulis, PR terbuka
+> menggambarkan kondisi *sekarang*. Kalau `main` sudah maju lagi, `main` yang menang, bukan
+> teks ini.
 
-Sesi paralel (Paket B) memakai basis yang **sama**.
+## 1b. Gate baru yang akan menilai kerjamu — baca sebelum mulai
+
+Sesi paralel (Paket B, PR #78) menambahkan **`apps/api/src/lib/shape-parity.test.ts`**: gate
+yang mendiff kunci **seluruh 84** `*Wire` terhadap `interface` FE yang dilayaninya — termasuk
+**25 converter milikmu**. Konsekuensi praktis untukmu, tiga hal:
+
+1. **Kalau kamu menambah converter baru, kamu WAJIB menambah entri di `WIRE_TO_FE`** (registry
+   di test itu) — kalau tidak, CI merah dengan *"unregistered wire interfaces"*. Itu memang
+   disengaja.
+2. **Kalau kamu memperbaiki cacat yang selama ini di-exempt**, hapus entri-nya dari
+   `ALLOWED_EXTRA` / `APPROVED_DIVERGENCE` — ada test *"ledger jujur"* yang merah kalau sebuah
+   entri jadi fiksi.
+3. **Gate itu membandingkan BENTUK, bukan NILAI.** Ia tidak akan menangkap
+   `reason: domain.note` (kunci benar, isi salah) — jadi ia **tidak menggantikan** task A1-mu,
+   ia hanya menutup separuh kelasnya. Diff-bertiga di §2 tetap pekerjaan yang harus dilakukan.
+
+Gate itu **tidak** memiliki blok converter-mu; ia hanya membacanya. Silakan edit converter Paket
+A seperti biasa.
 
 ## 2. Task A1 — paritas field-by-field 25 converter delivery 🔴 INI YANG UTAMA
 

@@ -1,8 +1,10 @@
 # PENSIUN GO — Status per 2026-07-30 & pembagian task 2 akun paralel
 
-> **Dokumen standalone.** Disusun 2026-07-30 di atas `main@a37e432`.
-> Sumber: `CUTOVER_BACKLOG.md` (gate C-00…C-06) + handoff cutover SESI13 (di `main`),
-> SESI14 (hidup di PR #76), SESI15 (hidup di PR #77).
+> **Dokumen standalone.** Disusun 2026-07-30 di atas `main@a37e432`; **diperbarui ~04:45 UTC**
+> sesudah #77 lalu #76 di-merge (`main@5944aa1`) dan sesudah Paket B dikerjakan (PR #78).
+> Baris yang diperbarui ditandai — sisanya tetap seperti saat disusun.
+> Sumber: `CUTOVER_BACKLOG.md` (gate C-00…C-06) + handoff cutover SESI13/14/15 (semua di `main`)
+> + SESI16B (PR #78).
 > Aturan rumah `CLAUDE.md` §Phase 0 tetap berlaku bit-for-bit. PRD menang atas kode.
 
 ---
@@ -10,7 +12,9 @@
 ## 0. Ringkasan satu paragraf
 
 Peta pensiun Go punya **6 fase**. **Fase 0 & 1 selesai penuh dan sudah di `main`.**
-**Fase 2 & 3 selesai sebagian dan masih menggantung di PR #76 (draft, CI 5/5 hijau).**
+**Fase 2 & 3 selesai sebagian dan sudah di `main`** (#76 ter-merge 2026-07-30); separuh kedua
+Fase 2 — kelas *"converter ada tapi field-nya salah"* — **separuhnya lagi ditutup Paket B**
+(gate otomatis, PR #78) dan separuh sisanya masih milik Paket A.
 **Fase 4 (gate manusia) tidak bisa disentuh Claude sama sekali** — tujuh butir, semuanya butuh
 akses atau otoritas pemilik. **Fase 5 (pencabutan mekanis) 0% dan memang belum boleh dimulai** —
 ia menunggu gate GO **dan** jawaban O47.
@@ -28,8 +32,8 @@ mesin ber-akses** + **empat keputusan pemilik** (O47, O46, O34/O26/O35, retensi 
 |---|---|---|---|
 | **Fase 0** | Data organisasi riil dikeluarkan dari `backend/` | 🟢 **SELESAI** — di `main` (#75) | **100%** |
 | **Fase 1** | O41 — 6 route hilang diport, `KNOWN_GAPS` kosong | 🟢 **SELESAI** — di `main` (#75) | **100%** |
-| **Fase 2** | O43 — paritas bentuk respons | 🟡 kelas *"endpoint tanpa converter"* tutup (PR #76, **belum merge**); kelas *"converter ada tapi field salah"* **belum disentuh** | **~50%** |
-| **Fase 3** | 4 CLI Go tanpa padanan | 🟡 3 dari 4 diputuskan & dieksekusi (PR #76, **belum merge**); `cmd/import` → **O47 terbuka** | **~75%** |
+| **Fase 2** | O43 — paritas bentuk respons | 🟡 kelas *"endpoint tanpa converter"* tutup (#76, **di `main`**); kelas *"converter ada tapi field salah"*: **29 converter commerce/portal diaudit — nol cacat** + **gate otomatis atas 84 converter** (#78); sisa **25 converter delivery** = Paket A | **~75%** |
+| **Fase 3** | 4 CLI Go tanpa padanan | 🟡 3 dari 4 diputuskan & dieksekusi (#76, **di `main`**); `cmd/import` → **O47 terbuka** | **~75%** |
 | **Fase 4** | Gate manusia (7 butir) | 🔴 **nol butir ditutup Claude** — semuanya butuh pemilik. Sebagian C-04 sudah jalan (MSL 32 layanan, 69 karyawan, O42) | **~30%** |
 | **Fase 5** | Pencabutan mekanis (C-05) | 🔴 belum boleh dimulai. Hanya `CLAUDE.md` §Stack yang sudah dikoreksi lebih awal (PR #76) | **~10%** |
 
@@ -37,7 +41,7 @@ mesin ber-akses** + **empat keputusan pemilik** (O47, O46, O34/O26/O35, retensi 
 
 | Sisi | % | Sisa |
 |---|---|---|
-| **Engineering (Claude)** | **~80%** | T1 paritas field-by-field ~54 converter · T2 eslint `apps/api` · T3 adapter CSV (terkunci O47) · Fase 5 (terkunci gate GO) |
+| **Engineering (Claude)** | **~85%** *(naik dari ~80% — Paket B selesai)* | T1 sisa **25 converter delivery** (Paket A; 29 milik B sudah diaudit) · 3 interface nested inline · T2 eslint `apps/api` · T3 adapter CSV (terkunci O47) · Fase 5 (terkunci gate GO) |
 | **Sisi pemilik (Yohan/Nerissa)** | **~35%** | C-03 eksekusi dari deployment · O47 · O46 · O34/O26/O35 · backup + rollback Railway · retensi PII |
 | **Gabungan pensiun Go** | **~70%** | — |
 
@@ -48,13 +52,16 @@ mesin ber-akses** + **empat keputusan pemilik** (O47, O46, O34/O26/O35, retensi 
 > sama (**~54 converter yang belum diaudit field-by-field**) masih terbuka, jadi engineering
 > jujurnya **~80%**, bukan 95%. Angka turun karena cakupan yang ditemukan, bukan karena regresi.
 
-### 1.3 Angka acuan test (di `main@a37e432`)
+### 1.3 Angka acuan test
 
-`@cdps/domain` **552** · `apps/api` **211** · `@cdps/core` **113** · `@cdps/db` **9** ·
-`web-internal` **26** · `route-parity` **5/5, `KNOWN_GAPS` KOSONG** · 4 invariant SQL **PASS** ·
-Live `CDPS SG` **40 migrasi · 54 tabel · 17 event**, repo cocok 1:1.
+**Di `main@5944aa1`** (sesudah #76+#77): `@cdps/domain` **566** (+1 skip) · `apps/api` **246** ·
+`@cdps/core` **113** · `@cdps/db` **9** · `web-internal` **26** · `route-parity` **5/5,
+`KNOWN_GAPS` KOSONG** · 4 invariant SQL **PASS** · Live `CDPS SG` **40 migrasi · 54 tabel ·
+17 event**, repo cocok 1:1.
 
-Kalau PR #76 di-merge: domain **566**, `apps/api` **246**.
+**Dengan PR #78 (Paket B):** `apps/api` **255** (+9 gate paritas bentuk). Sisanya tidak bergerak.
+
+<sub>Angka lama, sebelum #76/#77 masuk (`main@a37e432`): domain 552 · `apps/api` 211.</sub>
 
 ---
 
@@ -65,8 +72,9 @@ Kalau PR #76 di-merge: domain **566**, `apps/api` **246**.
 | **#73** | Handoff SESI12 (docs saja) | 🟢 terbuka, tapi **isinya sudah ada di `main`** — `HANDOFF_CUTOVER_SESI12.md` masuk lewat #75 (`38fed0c`) | **TUTUP** tanpa merge (redundan) |
 | **#74** | Fase 0 versi pertama: `git mv` data riil + `import_samples` keluar dari `backend/` | 🟢 draft, base `main@7bbd5e1` (basi) | **TUTUP** tanpa merge — **digantikan #75** yang memakai pendekatan berbeda (**salin**, bukan pindah, karena `git mv` membuat job `backend` merah). Dan #74 memindahkan `import_samples` yang **memuat PII** ke folder yang dibaca tooling seed — justru yang SESI13 sengaja tidak lakukan. Perubahan `paths.go`-nya juga sudah dicabut di #76 (`backend/**` read-only) |
 | **#75** | Fase 0 + Fase 1 (O41, 6 route, lapisan wire M5, bug vote Director) + apply migrasi + selaraskan penomoran | 🟣 **MERGED** → `main@a37e432` | — |
-| **#76** | Go ditinggalkan resmi (`CLAUDE.md` §Stack) + O43 Fase 2 (9 endpoint) + Fase 3 (4 CLI diputuskan) + `collate "C"` | 🟢 **draft, CI 5/5 hijau, `mergeable_state=clean`** | **REVIEW & MERGE dulu** — ini prasyarat kedua paket paralel di §3 |
-| **#77** | Dua rujukan versi migrasi menunjuk berkas salah (komentar + docs saja) | 🟢 terbuka, CI hijau (`backend` masih jalan saat dicek) | **MERGE** — nol DDL, nol logika, risiko nol |
+| **#76** | Go ditinggalkan resmi (`CLAUDE.md` §Stack) + O43 Fase 2 (9 endpoint) + Fase 3 (4 CLI diputuskan) + `collate "C"` | 🟣 **MERGED 2026-07-30** → `main@5944aa1` | — |
+| **#77** | Dua rujukan versi migrasi menunjuk berkas salah (komentar + docs saja) | 🟣 **MERGED 2026-07-30** → `cc667ff` | — |
+| **#78** | **Paket B**: gate paritas BENTUK respons atas 84 converter (O43 c) + dokumen ini + prompt Paket A | 🟢 draft | **REVIEW & MERGE** — tidak lagi bertumpuk (#76 sudah masuk) |
 
 ### 2.1 Tiga pelajaran dari #74–#77 yang harus dibawa ke sesi paralel
 
@@ -85,25 +93,39 @@ Kalau PR #76 di-merge: domain **566**, `apps/api` **246**.
 
 ## 3. Task paralel — 2 akun
 
-### 3.0 Prasyarat sebelum KEDUA akun mulai (urut, jangan dilompati)
+### 3.0 Prasyarat sebelum KEDUA akun mulai
 
-1. **Merge #76** (Fase 2 kelas-1 + Fase 3) — kalau tidak, kedua akun akan mengedit `wire.ts`
-   versi lama dan bertabrakan dengan #76 saat merge.
-2. **Merge #77** (komentar + docs).
-3. **Tutup #73 dan #74** tanpa merge (alasan di §2).
-4. Catat `main` yang baru (`git log --oneline -1`) → **kedua akun branch dari hash yang SAMA itu.**
+> **✅ DIPERBARUI 2026-07-30 ~04:45 UTC — dua dari empat prasyarat sudah dipenuhi pemilik.**
+> **#77 ter-merge** (`cc667ff`) lalu **#76 ter-merge** (`main@5944aa1`). Instruksi asli
+> ("bertumpuk di atas #76") **sudah tidak berlaku** — kedua akun sekarang **branch dari `main`
+> terbaru**.
 
-> Kalau #76 belum bisa di-merge, kedua akun **harus** branch dari
-> `claude/cdps-sg-cutover-sesi13-2kmgy4` (HEAD #76), bukan dari `main` — bukan dari keduanya
-> secara campuran. Satu basis, dua branch.
+| # | Prasyarat | Status |
+|---|---|---|
+| 1 | Merge **#76** (Fase 2 kelas-1 + Fase 3) | ✅ `main@5944aa1` |
+| 2 | Merge **#77** (komentar + docs) | ✅ `cc667ff` |
+| 3 | **Tutup #73 dan #74** tanpa merge (alasan §2) | ⛔ belum — keputusan pemilik |
+| 4 | Kedua akun branch dari **hash `main` yang SAMA** | ⛔ Paket A belum dijalankan |
+
+Butir 3 **tidak memblokir** Paket A/B — ia kebersihan daftar PR. Butir 4 masih berlaku: catat
+`git log --oneline origin/main -1` dan pakai hash itu untuk kedua akun. Satu basis, dua branch —
+jangan setengah dari `main` setengah dari branch lain.
+
+> **Paket B (PR #78) sudah dikerjakan** dan menambahkan gate `shape-parity.test.ts` yang menilai
+> converter **kedua** paket. Paket A wajib membaca §1b prompt-nya sebelum mulai.
 
 ### 3.1 Aturan main paralel (dilanggar = konflik merge yang mahal)
 
 1. **Satu berkas test per akun, JANGAN berbagi `wire.test.ts`.**
    Akun A → `apps/api/src/lib/wire.delivery.test.ts` (baru).
-   Akun B → `apps/api/src/lib/wire.commerce.test.ts` (baru).
    Pola assertion diambil dari `wire.test.ts` yang sudah ada (`toEqual` objek penuh + assertion
    "nol kunci camelCase"). **Nol edit pada `wire.test.ts` lama.**
+
+   > **Diperbarui:** Paket B **tidak** membuat `wire.commerce.test.ts` — auditnya nol cacat, jadi
+   > tidak ada perbaikan yang perlu dikunci per-converter; yang ia hasilkan adalah
+   > `shape-parity.test.ts`, gate atas **seluruh 84** converter. Jadi aturan ini sekarang hanya
+   > mengikat Akun A, dan `shape-parity.test.ts` bukan milik siapa pun — **tapi kalau A menambah
+   > converter, A wajib menambah entri `WIRE_TO_FE` di sana** (kalau tidak, CI merah).
 2. **`wire.ts` diedit KEDUA akun — hanya di dalam blok converter milik sendiri.**
    Terlarang: menyentuh helper bersama di bagian atas berkas, mengurutkan ulang fungsi,
    merapikan blok `import` di luar menambah satu baris di akhir. Butuh helper baru? Definisikan
