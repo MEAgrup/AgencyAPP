@@ -14,6 +14,9 @@
  *   versions, plus the canonical MSL read (effectiveAt) consumed by `sales`.
  * - audit: the cross-module audit-trail READ (GET /audit) the entity-history
  *   panels use. Read-only by construction; writes stay in @cdps/core audit.
+ * - engine: transition-engine introspection (`allowedTransitions`) over `sm_edges`
+ *   — what the detail views need to decide which action buttons exist. Read-only
+ *   by construction; enforcement stays in the SQL `sm_transition`.
  * - finance: M5 Admin & Finance — payment verification + routing gate + the
  *   derived Amount Verified / commission-achievement read-models (M0 §5 / M5).
  * - client: M4 Client Record — the §4 lock matrix (server-side edit gate over the
@@ -81,3 +84,4 @@ export * as marketing from './marketing';
 export * as portal from './portal';
 export * as notification from './notification';
 export * as audit from './audit';
+export * as engine from './engine';

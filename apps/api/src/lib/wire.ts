@@ -6,7 +6,7 @@
  * other way inline in each route (`toInput`).
  */
 import { money } from '@cdps/core';
-import type { account, admin, ads, audit, auth, board, campaign, client, creative, finance, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
+import type { account, admin, ads, audit, auth, board, campaign, client, creative, demo, finance, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -1546,6 +1546,190 @@ export function quoteToWire(q: sales.Quote): QuoteWire {
   };
 }
 
+// --- M0 attempt list + detail (Go module0_sales/reads.go) ---
+
+/** GET /attempts row — web-internal's `AttemptRow` (lib/sales.ts). */
+export interface AttemptRowWire {
+  id: string;
+  lead_id: string;
+  lead_name: string;
+  phone_number: string;
+  source: string;
+  owner_employee_id: string;
+  owner_nama: string;
+  status: string;
+  claimed_at: string;
+  created_at: string;
+}
+
+export function attemptRowToWire(r: sales.AttemptListRow): AttemptRowWire {
+  return {
+    id: r.id,
+    lead_id: r.leadId,
+    lead_name: r.leadName,
+    phone_number: r.phoneNumber,
+    source: r.source,
+    owner_employee_id: r.ownerEmployeeId,
+    owner_nama: r.ownerNama,
+    status: r.status,
+    claimed_at: r.claimedAt.toISOString(),
+    created_at: r.createdAt.toISOString(),
+  };
+}
+
+/** qualified_form_services line — web-internal's `QualifiedFormServiceRow`. */
+export interface QualifiedFormServiceWire {
+  master_service_id: string;
+  master_version_no: number;
+  name: string;
+  quantity: string;
+  unit: string | null;
+  pricing_mode: string;
+  standard_price: string;
+  input_amount: string | null;
+  subtotal: string;
+  commission_rule: string;
+}
+
+/** The persisted Qualified form snapshot — web-internal's `QualifiedFormSnapshot`. */
+export interface QualifiedFormWire {
+  nama_pic: string;
+  toko: string;
+  kota: string;
+  link_toko: string;
+  kategori: string;
+  platform: string;
+  store_link: string | null;
+  gmv_baseline: string;
+  target_gmv: string;
+  marketing_budget: string | null;
+  services: QualifiedFormServiceWire[];
+}
+
+/** One negotiation proposal + its lines — web-internal's `NegotiationProposalRow`. */
+export interface ProposalWire {
+  id: string;
+  version_no: number;
+  proposed_by: string;
+  proposed_by_nama: string;
+  decision_note: string | null;
+  created_at: string;
+  lines: {
+    master_service_id: string;
+    name: string;
+    proposed_price: string;
+    commission_rule: string;
+    payment_terms: string | null;
+  }[];
+}
+
+/** GET /attempts/{id} — web-internal's `AttemptDetail` (lib/sales.ts). */
+export interface AttemptDetailWire {
+  attempt: {
+    id: string;
+    lead_id: string;
+    owner_employee_id: string;
+    owner_nama: string;
+    status: string;
+    claimed_at: string;
+    created_at: string;
+  };
+  lead: {
+    id: string;
+    lead_name: string;
+    phone_number: string;
+    email: string | null;
+    source: string;
+    record_status: string;
+    origin_campaign_id: string | null;
+    last_touch_campaign_id: string | null;
+    winning_attempt_id: string | null;
+  };
+  qualified_form: QualifiedFormWire | null;
+  proposals: ProposalWire[];
+  nq_reasons: string[];
+  allowed_transitions: string[];
+}
+
+/**
+ * Maps the domain AttemptDetail to the wire shape — a 1:1 port of Go's
+ * `AttemptDetail` json tags.
+ *
+ * `qualified_form` is sent as an explicit `null` when there is no draft yet, not
+ * omitted: the FE type declares `QualifiedFormSnapshot | null` and a MISSING key
+ * is what blanks the page (the O43 lesson). Same reasoning for the three nullable
+ * campaign/email ids on the lead block.
+ *
+ * `proposals`, `nq_reasons` and `allowed_transitions` are always arrays, never
+ * null — Go initializes all three to `[]`, and the FE maps over them unguarded.
+ */
+export function attemptDetailToWire(d: sales.AttemptDetail): AttemptDetailWire {
+  const q = d.qualifiedForm;
+  return {
+    attempt: {
+      id: d.attempt.id,
+      lead_id: d.attempt.leadId,
+      owner_employee_id: d.attempt.ownerEmployeeId,
+      owner_nama: d.attempt.ownerNama,
+      status: d.attempt.status,
+      claimed_at: d.attempt.claimedAt.toISOString(),
+      created_at: d.attempt.createdAt.toISOString(),
+    },
+    lead: {
+      id: d.lead.id,
+      lead_name: d.lead.leadName,
+      phone_number: d.lead.phoneNumber,
+      email: d.lead.email,
+      source: d.lead.source,
+      record_status: d.lead.recordStatus,
+      origin_campaign_id: d.lead.originCampaignId,
+      last_touch_campaign_id: d.lead.lastTouchCampaignId,
+      winning_attempt_id: d.lead.winningAttemptId,
+    },
+    qualified_form: q === null ? null : {
+      nama_pic: q.namaPic,
+      toko: q.toko,
+      kota: q.kota,
+      link_toko: q.linkToko,
+      kategori: q.kategori,
+      platform: q.platform,
+      store_link: q.storeLink,
+      gmv_baseline: q.gmvBaseline,
+      target_gmv: q.targetGmv,
+      marketing_budget: q.marketingBudget,
+      services: q.services.map((s) => ({
+        master_service_id: s.masterServiceId,
+        master_version_no: s.masterVersionNo,
+        name: s.name,
+        quantity: s.quantity,
+        unit: s.unit,
+        pricing_mode: s.pricingMode,
+        standard_price: s.standardPrice,
+        input_amount: s.inputAmount,
+        subtotal: s.subtotal,
+        commission_rule: s.commissionRule,
+      })),
+    },
+    proposals: d.proposals.map((p) => ({
+      id: p.id,
+      version_no: p.versionNo,
+      proposed_by: p.proposedBy,
+      proposed_by_nama: p.proposedByNama,
+      decision_note: p.decisionNote,
+      created_at: p.createdAt.toISOString(),
+      lines: p.lines.map((l) => ({
+        master_service_id: l.masterServiceId,
+        name: l.name,
+        proposed_price: l.proposedPrice,
+        commission_rule: l.commissionRule,
+        payment_terms: l.paymentTerms,
+      })),
+    })),
+    nq_reasons: d.nqReasons,
+    allowed_transitions: d.allowedTransitions,
+  };
+}
+
 // --- M4 Client Record detail (Go clientView / serviceViews) ---
 
 /** module4_client.ServiceLine — web-internal's `ServiceLine` (lib/clients.ts). */
@@ -1982,6 +2166,109 @@ export function remindersToWire(d: finance.ReminderDashboard): RemindersWire {
       transaction_id: o.transactionId,
       amount_outstanding: o.amountOutstanding,
     })),
+  };
+}
+
+/** The reminder-scan tally as web-internal's finance `ScanResult` expects it. */
+export interface FinanceScanResultWire {
+  overdue_flagged: number;
+  h3_reminders_sent: number;
+  contract_flags_raised: number;
+}
+
+/**
+ * Maps the reminder-scan tally — a 1:1 port of Go's `ScanResult` json tags, and
+ * the three keys the finance page reads. Two things were wrong before: the route
+ * nested the tally under a `summary` key Go has no equivalent of, and the domain's
+ * four camelCase counters share no name with the wire's three.
+ *
+ * The domain's `overdueNotified` deliberately does NOT cross the wire: Go's
+ * `OverdueFlagged` counts installments actually TRANSITIONED to [Jatuh Tempo]
+ * (its `fireOverdue` returns true only then), which is `markedOverdue` here. Go
+ * has no separate notification counter, and inventing a fourth wire key would be
+ * a field the PRD never defined.
+ */
+export function financeScanResultToWire(s: finance.ScanSummary): FinanceScanResultWire {
+  return {
+    overdue_flagged: s.markedOverdue,
+    h3_reminders_sent: s.upcomingNotified,
+    contract_flags_raised: s.contractFlagged,
+  };
+}
+
+// --- M4 service void (Go module4_client.VoidResult) ---
+
+/** The void cascade result as web-internal's `VoidResult` (lib/clients.ts) expects it. */
+export interface VoidResultWire {
+  service_id: string;
+  voided_briefs: string[];
+  skipped_approved_briefs: string[];
+}
+
+/**
+ * Maps the void cascade result. The route used to hand the FE the raw camelCase
+ * domain object, so all three keys read `undefined` — including the list of
+ * [Approved] briefs the void deliberately left standing, which is the one thing
+ * the actor needs to see afterwards.
+ */
+export function voidResultToWire(v: client.VoidResult): VoidResultWire {
+  return {
+    service_id: v.serviceId,
+    voided_briefs: v.voidedBriefs,
+    skipped_approved_briefs: v.skippedApprovedBriefs,
+  };
+}
+
+// --- Sprint-0 demo task (Go internal/demo.Task) ---
+
+/** A demo task as web-internal's `DemoTask` / `DemoTaskDetail.task` expects it. */
+export interface DemoTaskWire {
+  id: string;
+  title: string;
+  description: string;
+  division: string;
+  status: string;
+  created_by: string;
+  created_at: string;
+}
+
+export function demoTaskToWire(t: demo.Task): DemoTaskWire {
+  return {
+    id: t.id,
+    title: t.title,
+    description: t.description,
+    division: t.division,
+    status: t.status,
+    created_by: t.createdBy,
+    created_at: t.createdAt.toISOString(),
+  };
+}
+
+/** GET /demo-tasks/{id} — web-internal's `DemoTaskDetail` (lib/types.ts). */
+export interface DemoTaskDetailWire {
+  task: DemoTaskWire;
+  allowed_transitions: string[];
+  audit: AuditEntryWire[];
+}
+
+/**
+ * Maps the demo-task detail — a 1:1 port of Go's handleGetDemoTask envelope.
+ *
+ * All three keys are mandatory, not decoration: the page destructures
+ * `{task, allowed_transitions, audit}` and immediately reads
+ * `allowed_transitions.length` and `findPendingBlockRequest(audit)`. Sending only
+ * `{task}` left both undefined, so the page threw a TypeError instead of merely
+ * rendering empty — the loudest failure mode in the whole O43 class.
+ */
+export function demoTaskDetailToWire(
+  task: demo.Task,
+  allowed: string[],
+  trail: audit.AuditEntry[],
+): DemoTaskDetailWire {
+  return {
+    task: demoTaskToWire(task),
+    allowed_transitions: allowed,
+    audit: trail.map(auditEntryToWire),
   };
 }
 

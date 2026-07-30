@@ -659,9 +659,32 @@ describeDb('read models', () => {
     expect(mine!.ownerEmployeeId).toBe('ZZ-BUDI');
     expect(mine!.leadName).toBe('Alpha Digital');
     expect(mine!.status).toBe('Qualified');
+    // phone_number/source come from the lead join — the list columns Go selects.
+    // They were missing from the port, so the Attempts table rendered blank cells.
+    // Compared against the lead row itself: a hardcoded expectation would still
+    // pass if the join silently returned the wrong lead.
+    const [lead] = await sql<{ phone_number: string; source: string }[]>`
+      select phone_number, source from leads where id = ${mine!.leadId}`;
+    expect(mine!.phoneNumber).toBe(lead.phone_number);
+    expect(mine!.phoneNumber).not.toBe('');
+    expect(mine!.source).toBe(lead.source);
   });
 
-  it('getAttempt surfaces the Qualified draft and the latest proposal quote', async () => {
+  it('listAttempts narrows to one status when asked', async () => {
+    const svc = await seedService('SVC-ZZ-FILTER');
+    const attemptId = await qualifiedAttempt(budi(), svc);
+    const qualified = await listAttempts(sql, { status: 'Qualified' });
+    expect(qualified.some((r) => r.id === attemptId)).toBe(true);
+    expect(qualified.every((r) => r.status === 'Qualified')).toBe(true);
+    // An unmatched filter must return nothing, not silently fall back to "all".
+    expect(await listAttempts(sql, { status: 'Closed-Lost' })).not.toContainEqual(
+      expect.objectContaining({ id: attemptId }),
+    );
+    // Absent/blank filter still means "no filter".
+    expect((await listAttempts(sql, {})).some((r) => r.id === attemptId)).toBe(true);
+  });
+
+  it('getAttempt assembles attempt + lead + qualified form + proposal history', async () => {
     const svc = await seedService('SVC-ZZ-DETAIL');
     const attemptId = await qualifiedAttempt(budi(), svc);
     // Submit a negotiation proposal (a counter-price) → a v1 proposal to surface.
@@ -670,11 +693,52 @@ describeDb('read models', () => {
     ], false);
 
     const detail = await getAttempt(sql, attemptId);
-    expect(detail.qualified?.toko).toBe('Alpha Digital');
-    expect(detail.latestProposal).not.toBeNull();
-    expect(detail.latestProposal!.versionNo).toBe(1);
-    expect(detail.latestProposal!.lines).toHaveLength(1);
-    expect(money.parse(detail.latestProposal!.total)).toBe(money.parse('8000000'));
+    expect(detail.attempt.id).toBe(attemptId);
+    expect(detail.attempt.ownerEmployeeId).toBe('ZZ-BUDI');
+    // The lead block: absent from the first port, so the detail header was empty.
+    expect(detail.lead.id).toBe(detail.attempt.leadId);
+    expect(detail.lead.leadName).toBe('Alpha Digital');
+    expect(detail.qualifiedForm?.toko).toBe('Alpha Digital');
+    // The form's service lines drive the pricing table — also absent before.
+    expect(detail.qualifiedForm!.services).toHaveLength(1);
+    expect(detail.qualifiedForm!.services[0].masterServiceId).toBe(svc);
+    // The whole history, not just the latest round.
+    expect(detail.proposals).toHaveLength(1);
+    expect(detail.proposals[0].versionNo).toBe(1);
+    expect(detail.proposals[0].proposedByNama).not.toBe('');
+    expect(detail.proposals[0].lines).toHaveLength(1);
+    expect(money.parse(detail.proposals[0].lines[0].proposedPrice)).toBe(money.parse('8000000'));
+    expect(detail.nqReasons).toEqual([]);
+    // Without this the client renders zero action buttons — a dead page.
+    expect(detail.allowedTransitions.length).toBeGreaterThan(0);
+  });
+
+  it('getAttempt returns the proposal history oldest-first across revisions', async () => {
+    const svc = await seedService('SVC-ZZ-HISTORY');
+    const attemptId = await qualifiedAttempt(budi(), svc);
+    await submitNegotiation(sql, budi(), attemptId, [
+      { masterServiceId: svc, proposedPrice: '8000000', commissionRule: '10% of standard price' },
+    ], false);
+    await decideNegotiation(sql, salesLead(), attemptId, DECISION_REVISE, 'harga terlalu rendah');
+    await resubmitNegotiation(sql, budi(), attemptId, [
+      { masterServiceId: svc, proposedPrice: '8500000', commissionRule: '10% of standard price' },
+    ]);
+
+    const detail = await getAttempt(sql, attemptId);
+    // A single "current quote" cannot show that a price was revised — the panel
+    // needs both rounds, in the order they happened.
+    expect(detail.proposals.map((p) => p.versionNo)).toEqual([1, 2]);
+    expect(detail.proposals[0].decisionNote).toBe('harga terlalu rendah');
+    expect(money.parse(detail.proposals[1].lines[0].proposedPrice)).toBe(money.parse('8500000'));
+  });
+
+  it('getAttempt sends an explicit null qualified form before the draft exists', async () => {
+    const attemptId = await contactedAttempt(budi());
+    const detail = await getAttempt(sql, attemptId);
+    // A MISSING key is what blanks the page; null is a value the client handles.
+    expect(detail.qualifiedForm).toBeNull();
+    expect(detail.proposals).toEqual([]);
+    expect(detail.nqReasons).toEqual([]);
   });
 
   it('getAttempt 404s on an unknown attempt', async () => {
