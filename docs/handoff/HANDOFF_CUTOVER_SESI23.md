@@ -18,14 +18,15 @@
 | **PR** | **#82**, **terbuka**, **belum di-merge**. Menunggu review/merge pemilik |
 | **CI** | Berkas ini memicu run baru — **baca check run PR #82**, jangan percaya baris mana pun di sini |
 | **Live `CDPS SG`** | **42 migrasi · 54 tabel · 17 event**. Migrasi terakhir `20260730120433_fix_o46_division_resolution`, tercatat **2026-07-30 12:04:33 UTC** |
-| **Repo vs live** | ✅ **42 = 42, nama berkas = versi live 1:1** — diverifikasi terhadap live **di sesi ini**, bukan diwarisi dari handoff (§1.1) |
+| **Repo vs live** | 🟠 **43 repo vs 42 live** — **SENGAJA**. Selisihnya **satu** berkas: `20260730160000_o48_grup_cd_lead_division_arms.sql` (O48 Grup C+D), menunggu persetujuan apply. Untuk **42 migrasi yang sudah di live**, nama berkas = versi live **1:1** |
 | **O46** | ✅ **MENYALA dan TERBUKTI** — probe 8 skenario, 2 kontrol hijau (§1.2). Ini menutup butir 1 **dan** 2 SESI22 |
 
-**Angka acuan** (Postgres 16 lokal, DB dibangun ulang dari nol, **42/42** migrasi bersih —
+**Angka acuan** (Postgres 16 lokal, DB dibangun ulang dari nol, **43/43** migrasi bersih —
 dijalankan di sesi ini):
 `apps/api` **310** · `@cdps/domain` **566** (+1 skip) · `@cdps/core` **113** · `@cdps/db` **9** ·
 `web-internal` **26** · 7 gate seed **PASS** (54 tabel · 14 `sm_machines` · 17 `notif_events`) ·
-4 invariant SQL **PASS** (`rls_checks` **23 check**) · `route-parity` **5/5 `KNOWN_GAPS` KOSONG** ·
+4 invariant SQL **PASS** (`rls_checks` **32 check** — 23 + 9 dari O48 Grup C/D) ·
+`route-parity` **5/5 `KNOWN_GAPS` KOSONG** ·
 `NESTED_INLINE_UNCHECKED` **KOSONG** · `RFC3339_PENDING_DECISION` ✅ **KOSONG** (O49 (b) selesai —
 `managed_since` adalah penghuni terakhirnya, §1.4). **Ketiga ledger kini kosong.**
 
@@ -190,7 +191,8 @@ Perbaikannya perubahan rendering FE dengan tiketnya sendiri.
 | 1 | **Merge PR #82** | **pemilik** |
 | 2 | **C-03 — 3 SKIP** 🔴 *jalur kritis* — runbook `CUTOVER_C03_DEPLOYMENT_RUNBOOK.md`, **titik masuknya `HANDOFF_C03_MESIN_VERCEL.md`** (apa yang berubah sejak runbook ditulis + satu probe end-to-end baru). Dari mesin ber-akses `*.vercel.app` | **pemilik** |
 | 4 | **A4** — daftar pertanyaan **tertutup** `O34_O26_O35_WORKSHEET_ROSTER_V2.md` §3.1–§3.6; **§5 memuat verifikasi live**: Ads/KOL/Marketing **nol pemegang lead**, 24 dari 69 karyawan terdampak. **Mendahului O48** | **pemilik** |
-| 5 | **O48** — **`O48_ANALISIS_KEPUTUSAN.md`**: angka terukur **35/45** (bukan 36), **32 kandidat nyata**, dikelompokkan A–E, **nol helper baru** (keduanya sudah live & terbukti). **Sesudah A4.** Rekomendasi: putuskan Grup C+D dulu | keputusan **pemilik + head dev**, eksekusi Claude |
+| 0 | 🔴 **Apply `20260730160000_o48_grup_cd_lead_division_arms.sql` ke live** — O48 Grup C+D sudah **diputus & ter-implementasi**, 32 check hijau, 4 mutasi merah di check yang tepat. Sesudah apply: **baca versi yang benar-benar tercatat** lalu ganti nama berkas repo (dua dari dua apply terakhir menggeser versi), lalu probe | persetujuan **pemilik** → eksekusi Claude |
+| 5 | **O48 Grup A/B/E — masih TERBUKA** — `O48_ANALISIS_KEPUTUSAN.md`. Grup C+D sudah diputus (lihat butir 0). Sisanya: Grup A (7 policy keluarga Klien, satu helper terbukti) · Grup B (12 tabel primer per divisi) · Grup E (7). **Sesudah A4** | keputusan **pemilik + head dev**, eksekusi Claude |
 | 6 | **Backup MySQL Railway + OQ-2** · **rencana rollback** | **pemilik** |
 | 7 | **Gate GO** → **C-05** (cabut `backend/`) | **pemilik** → Claude |
 | 8 | **Probe ulang `transactions`** begitu ada transaksi riil (§1.3) | Claude, saat datanya ada |

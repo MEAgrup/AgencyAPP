@@ -1,11 +1,15 @@
 # O48 — analisis untuk keputusan (BUKAN keputusan)
 
-> **Status: MENUNGGU KEPUTUSAN PEMILIK + HEAD DEV.** `docs/DECISIONS.md` menuliskan O48 dengan
-> kalimat *"**Jangan** dikerjakan tanpa entri Decided"*. Berkas ini **tidak** mengambil keputusan itu
-> dan **tidak** memuat migrasi. Isinya satu hal saja: mengubah "36 policy" yang kabur menjadi daftar
-> konkret, supaya keputusannya bisa diambil dalam satu duduk.
+> ## Status per 2026-07-30 — SEBAGIAN SUDAH DIPUTUS
 >
-> Disusun 2026-07-30, **sesudah** O46 terbukti menyala di produksi (`20260730120433`).
+> | Grup | Status |
+> |---|---|
+> | **C** (3 antrean block request) · **D** (3 M14 performance) | ✅ **DIPUTUS & TER-IMPLEMENTASI** — migrasi `20260730160000`, entri Decided ada di `docs/DECISIONS.md`. **BELUM di-apply ke live** (repo 43 vs live 42, selisih disengaja) |
+> | **A** (7 keluarga Klien) · **B** (12 tabel primer) · **E** (7 sisanya) | 🟠 **MASIH TERBUKA** — butuh keputusan pemilik + head dev |
+>
+> Analisis di bawah ditulis **sebelum** keputusan itu dan dibiarkan apa adanya sebagai dasar
+> keputusannya — kecuali dua koreksi yang ditandai di §3 (Grup C ternyata **dorman**, bukan bug
+> hidup; Grup D justru bug hidup). Disusun **sesudah** O46 terbukti menyala (`20260730120433`).
 
 ## 0. Ringkasan untuk yang memutuskan
 
@@ -101,17 +105,36 @@ Semuanya mem-filter lewat **satu kolom orang**, jadi semuanya bisa memakai
 | `negotiation_proposals` | `proposed_by` | Sales |
 | `live_stream_sessions` | `created_by` | M10 (vendor — mungkin sengaja) |
 
-### Grup C — antrean block request (3 policy) — ini gap FUNGSIONAL, bukan cuma visibilitas
+### Grup C — antrean block request (3 policy) — 🔴 KOREKSI: DORMAN, bukan gap fungsional
 
 `asset_block_requests` · `brief_block_requests` · `demo_task_block_requests`
 
-Ketiganya = `requested_by` / `resolved_by` / `created_by`. Tapi **M12 menetapkan transisi
-`[Blocked]` = SPV/Lead saja**, dan M15 menyebut *"Block-approval queue: SPV/Lead"*.
+> **Versi pertama bagian ini salah dan dibiarkan tercatat di sini, bukan dihapus.** Ia menulis:
+> *"orang yang WAJIB menyetujui tidak bisa MELIHAT antreannya … alur kerja yang tidak bisa dimulai"*,
+> dan menaruh Grup C sebagai prioritas tertinggi. Itu disimpulkan dari **teks policy** tanpa
+> memeriksa **jalur mana yang benar-benar mengeksekusinya** — persis kesalahan yang §1 memperingatkan
+> untuk survei O48 itu sendiri.
 
-> **Artinya orang yang WAJIB menyetujui tidak bisa MELIHAT antreannya** sampai ia sudah menjadi
-> `resolved_by` — yaitu sampai sesudah ia menyetujuinya. Ini bukan "data tidak terlihat", ini alur
-> kerja yang tidak bisa dimulai. Saya menyarankan grup ini dinilai **terpisah** dari sisa O48 dan
-> lebih tinggi prioritasnya.
+Yang sebenarnya, setelah kode diperiksa:
+
+| Bukti | Isi |
+|---|---|
+| Route approve/reject | Memakai **`db()`** — service role, **RLS DI-BYPASS**. Berfungsi hari ini; gate-nya di TS (`permission.isLead`) |
+| `pendingBlockRequests` (`task.ts:684`) | Ada + ber-test, tapi **nol route di `apps/api` memanggilnya** |
+| FE | Menurunkan status pending dari **heuristik audit-trail** (`creative.ts:306`), bukan dari tabel ini — dan `audit_log` sudah dapat arm lead dari O46 |
+
+Jadi ketiga policy ini **dorman**: ranjau untuk siapa pun yang mem-porting endpoint antrean, bukan
+kerusakan hari ini. Rekomendasi saya berubah jadi **tunda + ikat ke tiket porting**.
+
+**Pemilik memutuskan mengerjakannya sekarang** (2026-07-30), dan itu dieksekusi di
+`20260730160000`. Yang dibuktikan: arm-nya benar **di lapisan DB** (check 24–28). Yang **belum**
+dibuktikan: jalur aplikasinya — tertutup saat `pendingBlockRequests` di-porting.
+
+> **Catatan implementasi yang mahal kalau terlewat:** tabelnya tidak punya kolom divisi, dan
+> `EXISTS` inline **tidak bisa dipakai** — subquery di dalam policy ikut kena RLS, dan
+> `assets_select` belum punya arm lead (Grup B), jadi arm-nya akan selalu false. Ketiga helper wajib
+> `SECURITY DEFINER`. Dibuktikan dengan mutasi: `SECURITY DEFINER` → `INVOKER` membuat check 25
+> **merah**.
 
 ### Grup D — M14 Performance (3 policy) — DB lebih sempit daripada entri Decided
 
@@ -141,10 +164,11 @@ divisinya).
 
 ## 4. Yang perlu Anda putuskan — tiga pertanyaan, bukan satu
 
-1. **Sapu sekaligus atau bertahap?** Catatan asli membingkainya sebagai satu keputusan. Setelah
-   dipilah, ia sebenarnya tiga: **Grup C** (gap fungsional) dan **Grup D** (menegakkan keputusan yang
-   sudah tercatat) berdiri di atas dasar yang lebih kuat daripada Grup A/B — keduanya bisa diputus
-   **tanpa** memutuskan sisanya.
+1. ~~**Sapu sekaligus atau bertahap?**~~ ✅ **TERJAWAB 2026-07-30: bertahap.** Catatan asli
+   membingkainya sebagai satu keputusan; setelah dipilah ia sebenarnya beberapa. **Grup D**
+   (menegakkan entri Decided yang sudah ada) dan **Grup C** (dorman — §3, bukan gap fungsional
+   seperti dugaan awal saya) diputus dan dikerjakan di `20260730160000`. **Grup A/B/E belum**, dan
+   pertanyaan 2–3 di bawah masih menunggu jawaban.
 2. **Grup B `live_stream_sessions`** — M10 adalah vendor. Apakah ia memang sengaja tidak ber-divisi?
    Kalau ya, ia pindah ke daftar "jangan disapu" dan kandidatnya jadi 31.
 3. **Grup B `employees`** — memberi lead daftar anggota divisinya terdengar wajar, tapi
