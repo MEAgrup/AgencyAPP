@@ -11,7 +11,7 @@
 | **`main`** | **hasil merge PR #81** (memuat `548ad91`). Verifikasi: `git log --oneline -1 origin/main`. Rantai: #75 → #77 → #76 → #79 → #78 → #80 → **#81** |
 | **Branch aktif** | **TIDAK ADA.** `claude/go-retirement-progress-eq0855` sudah ter-merge lewat #81 ⇒ mulai sesi berikutnya dari `main`, branch baru |
 | **PR terbuka** | **NOL.** #73 & #74 ditutup tanpa merge (sesi 19); #78/#79/#80/#81 merged |
-| **Repo vs live** | 🔴 **BEDA — inilah pekerjaan utama sesi berikutnya.** Repo **41 migrasi**, live `CDPS SG` masih **40**. Migrasi `20260730073000` (O46) **belum di-apply** |
+| **Repo vs live** | 🔴 **BEDA — inilah pekerjaan utama sesi berikutnya.** Repo **41 migrasi**, live `CDPS SG` masih **40**. Migrasi `20260730091540` (O46) **belum di-apply** |
 | **Live `CDPS SG`** | **40 migrasi · 54 tabel · 17 event** — belum disentuh sesi 19 maupun 20 |
 
 **Angka acuan di `main` pasca-#81** (Postgres 16 lokal, DB dibangun ulang dari nol, **41/41** migrasi):
@@ -32,11 +32,27 @@ DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/cdps" npm test --works
 
 ---
 
-## 1. 🔴 PEKERJAAN UTAMA: apply migrasi O46 ke live `CDPS SG`
+## 1. ~~🔴 PEKERJAAN UTAMA: apply migrasi O46 ke live~~ → ✅ **SUDAH DIEKSEKUSI**
 
-`supabase/migrations/20260730073000_rls_o46_lead_division_arms.sql` sudah di `main`, sudah lolos CI,
-**belum di live.** Selama belum di-apply, lead divisi di produksi tetap tidak melihat data divisinya
-— policy-nya ada di repo, tidak ada di DB yang dipakai orang.
+> ### ✅ SELESAI 2026-07-30 — jangan jalankan lagi
+> Pemilik memberi persetujuan per-apply di sesi yang sama, dan migrasi **sudah di-apply ke live
+> `CDPS SG`**. Live kini **41 migrasi · 54 tabel · 17 event**. Runbook di bawah tetap disimpan
+> sebagai catatan cara mengerjakannya, **bukan** sebagai instruksi terbuka.
+>
+> **Posisi terkini ada di `HANDOFF_CUTOVER_SESI21.md`** — baca itu, bukan §0 di atas.
+>
+> 🔴 **Satu hal yang berubah dan mengubah runbook ini:** `apply_migration` **menetapkan versinya
+> sendiri dari waktu apply**, bukan dari nama berkas repo. Ia mencatat `20260730091540`, sedangkan
+> berkas repo bernama `…073000`. Repo ini menjaga invariant **nama berkas = versi live 1:1** (semua
+> 40 migrasi sebelumnya cocok persis), jadi berkasnya **diganti nama** ke
+> `20260730091540_rls_o46_lead_division_arms.sql` dan **7 rujukan** ikut diperbarui. Sesi berikutnya
+> yang meng-apply migrasi: **baca versi yang benar-benar tercatat, lalu ganti nama berkas repo
+> supaya cocok** — kalau tidak, `supabase db push` dari clone bersih akan mencoba meng-apply versi
+> yang tidak ada di ledger live, dan itu drift kelas O38.
+
+Teks asli tiket (arsip): `supabase/migrations/…_rls_o46_lead_division_arms.sql` sudah di `main`,
+sudah lolos CI, **belum di live** — selama belum di-apply, lead divisi di produksi tetap tidak
+melihat data divisinya.
 
 ### 1.1 Yang di-apply
 
@@ -59,7 +75,7 @@ menyempitkan ⇒ nol risiko kebocoran arah sebaliknya.
 mcp__Supabase__apply_migration
   project: CDPS SG
   name:    rls_o46_lead_division_arms
-  query:   <isi 20260730073000_rls_o46_lead_division_arms.sql apa adanya>
+  query:   <isi 20260730091540_rls_o46_lead_division_arms.sql apa adanya>
 ```
 
 > ⛔ **JANGAN `psql -f`.** Hanya `apply_migration` yang mencatat baris di

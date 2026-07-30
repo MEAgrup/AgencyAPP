@@ -227,7 +227,7 @@ RESET ROLE;
 
 -- ---------------------------------------------------------------------------
 -- 18-23. O46 — arm "Lead/SPV = division-wide" (PRD Role Matrix §6), ditambahkan
---        20260730073000. Dua policy sebelumnya lebih SEMPIT dari Go DAN dari PRD:
+--        20260730091540. Dua policy sebelumnya lebih SEMPIT dari Go DAN dari PRD:
 --        `transactions_select` tak punya arm Sales-Lead (Go `trxVisibility` memberi
 --        Sales Lead seluruh transaksi klien sales-nya), dan `audit_log_select`
 --        tak punya arm lead sama sekali sehingga seorang lead tidak bisa membaca

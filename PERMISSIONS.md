@@ -21,7 +21,7 @@
 >   not their lead's approval. That is PRD behaviour, not a defect. Making it whole is a PRD
 >   change plus its own ticket, not an RLS patch.
 > - **Lead/SPV = division-wide**, resolved from the **entry actor's** division. Added by migration
->   `20260730073000`; before it, a lead could not read their own division's trail at all.
+>   `20260730091540`; before it, a lead could not read their own division's trail at all.
 >
 > Enforced in the DB (`audit_log_select`), locked by `supabase/tests/rls_checks.sql` checks 21–23 —
 > including a guard check that goes **red** if anyone widens staff beyond own-entries without a
