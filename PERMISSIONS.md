@@ -11,6 +11,29 @@
 | Edit auto-computed fields | ❌ nobody — system only | ❌ | ❌ | ❌ |
 | Manage OKR | ❌ | ❌ | ✅ | ✅ |
 | Manage employees / role mapping | ❌ | ❌ | ❌ | ✅ (+ system admin) |
+| Read audit trail | ✅ **own entries only** | ✅ own division (by entry's actor) | ✅ read-all | ✅ read-all |
+
+> ### Audit trail scope — O46 RESOLVED 2026-07-30 (`docs/DECISIONS.md`)
+> `audit_log` visibility follows the universal pattern literally, and the two edges matter:
+> - **Staff = own entries only.** Scope is the entry's **actor**, not the entity it describes.
+>   Consequence, stated deliberately rather than discovered later: an entity's history panel
+>   (e.g. Creative Asset) is **partial** for a staff viewer — they see their own transitions,
+>   not their lead's approval. That is PRD behaviour, not a defect. Making it whole is a PRD
+>   change plus its own ticket, not an RLS patch.
+> - **Lead/SPV = division-wide**, resolved from the **entry actor's** division. Added by migration
+>   `20260730073000`; before it, a lead could not read their own division's trail at all.
+>
+> Enforced in the DB (`audit_log_select`), locked by `supabase/tests/rls_checks.sql` checks 21–23 —
+> including a guard check that goes **red** if anyone widens staff beyond own-entries without a
+> `DECISIONS.md` row. `audit_log` is append-only (trigger `audit_log_no_delete`); there is no write
+> policy and no mutation path (house rule #3).
+>
+> ⚠️ **Known narrower-than-spec elsewhere: `O48`.** A survey of every `SELECT` policy found **36 of
+> 45** carry no lead/division arm at all — including `assets_select` and `employees_select`, where a
+> Lead/SPV cannot see their own division's rows. Direction is always **narrower**, so there is no
+> leak; but until O48 is decided, "Lead/SPV = division-wide" above is **enforced for
+> `transactions`/`audit_log` and aspirational for the rest.** Do not read this table as fully
+> enforced house-wide.
 
 ## Per-module specifics (exceptions & named rights)
 | Module | Rule |

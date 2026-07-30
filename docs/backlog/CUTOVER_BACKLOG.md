@@ -292,7 +292,7 @@ baru buka gate C-04.
 **Data (Opsi A re-seed/import — sesuai DECISIONS OQ-2/A1):**
 1. Konfirmasi ulang ke pemilik: apakah data di Railway/MySQL sekarang **riil** atau masih UAT? (Asumsi tercatat: UAT.) Bila ternyata riil ⇒ butuh rencana ekspor-impor per-entitas mengikuti rantai FK `LEAD → ATTEMPT → CLIENT → SERVICE → TRX → INST`; jangan improvisasi, catat keputusan dulu.
 2. Import karyawan riil via route yang sudah ada: `POST /api/v1/admin/employee-import` (Director-only, satu transaksi: sync `employees` → provision credentials → link GoTrue). Sumber = **CSV/spreadsheet admin** (OQ-4: endpoint HRIS tidak dipakai lagi).
-3. Import lead historis sesuai **O22** (Pilihan B: `Qualify` ATAU prospek `Hot/Warm`, 6 bulan terakhir) — sumber & aturan sudah tertulis di DECISIONS 2026-07-10.
+3. ~~Import lead historis sesuai **O22** (Pilihan B: `Qualify` ATAU prospek `Hot/Warm`, 6 bulan terakhir)~~ — ❌ **GUGUR 2026-07-30 sebagai konsekuensi O47.** O22 memutuskan **APA** yang diimpor; O47 memutuskan tooling-nya **ditinggalkan** (riwayat pra-CDPS cukup arsip spreadsheet), jadi tidak ada lagi jalur yang mengeksekusinya dan tidak ada yang perlu dibangun. **Konsekuensi untuk gate C-04: butir ini keluar dari daftar ❌** — CDPS produksi mulai dari data bersih, by decision. `POST /leads/bulk` tetap hidup untuk impor **operasional** (bukan historis).
 4. Master Service List — **alat seed SELESAI (2026-07-28), tinggal dijalankan ke live.** Seed kanonik = **`supabase/seed/msl_kalkulator.csv` (32 layanan rate card aktif)**, BUKAN `MSL_DRAFT_KOMPILASI.csv` (180 baris itu harga deal historis untuk impor W1-19, dan masih menunggu Sales Head — lihat Decided 2026-07-28). CLI: `npm run msl:seed -w @cdps/api -- --actor <NIK> [--apply]`, dry-run default, idempoten, menulis lewat `msl.createService`/`updateService` sehingga tervalidasi + terversi + teraudit. Terverifikasi end-to-end di Postgres lokal termigrasi (32 dibuat → rerun 32 dilewati; quote M0 terhitung benar di keempat `pricing_mode`). **✅ SUDAH DI-APPLY KE LIVE `CDPS SG` 2026-07-28** oleh Yohan, aktor NIK `2101180004`: dry-run `dibuat=32` (nol tulis) → apply `dibuat=32 error=0` → rerun `dilewati=32` (idempotensi terbukti). `master_services` **32 baris**, bukan 0 lagi. Sisa: QA UI `/master-services` + `/sales/kalkulator` di deployment. Runbook: `docs/handoff/MSL_KALKULATOR_VALIDASI.md` §"Cara seed ke sistem"; detail apply: `HANDOFF_CUTOVER_SESI4.md` §3.1.
 
 **Aktor produksi (keputusan manusia — masih terbuka):**
@@ -308,8 +308,20 @@ baru buka gate C-04.
 
 Baru dikerjakan **setelah** gate go/no-go GO. Sesuai OQ-8: Go+MySQL **diarsip read-only**.
 
+> **✅ Dua prasyarat C-05 sudah ditutup pemilik 2026-07-30** (DECISIONS.md) — C-05 sekarang
+> menunggu **gate GO saja**:
+> - **O47 RESOLVED** — `cmd/import` **ditinggalkan**, tidak diport. Riwayat klien pra-CDPS cukup
+>   hidup di spreadsheet. Konsekuensi: **Fase 3 pensiun Go selesai 4/4** dan **T3 gugur**
+>   (`POST /leads/bulk` sendiri tetap hidup — jalur operasional, bukan historis).
+> - **Retensi PII RESOLVED** — `backend/testdata/import_samples/` (7 CSV + README) **sudah dihapus
+>   dari repo**, jadi butir 2 di bawah tidak lagi berisiko mengarsipkan roster HR riil.
+>   `go vet`/`go build`/`go test ./cmd/... ./internal/seed/...` diverifikasi **hijau** sesudahnya
+>   (`backend/testdata/employees.csv` yang tersisa adalah fixture sintetis yang dibaca `cmd/cdps`).
+>   ⚠️ **Sisa yang masih terbuka:** PII tetap ada di **histori git** — scrub butuh `git filter-repo`
+>   \+ re-clone terkoordinasi, keputusan & eksekusi pemilik.
+
 1. **CI:** hapus job `backend` (Go + service MySQL) dari `.github/workflows/ci.yml` — saat ini masih menjalankan `go vet`/`go test`/migrasi MySQL atas kode beku (buang waktu CI & bisa merah palsu). Sisakan job `api`, `core-engines`, `db-and-migrations`, `web-internal`.
-2. **Repo:** arsipkan `backend/` (opsi: pindah ke `archive/backend-go/` + README "read-only, referensi paritas", atau tag rilis terakhir lalu hapus). **Jangan hapus tanpa tag** — Go adalah oracle paritas satu-satunya.
+2. **Repo:** arsipkan `backend/` (opsi: pindah ke `archive/backend-go/` + README "read-only, referensi paritas", atau tag rilis terakhir lalu hapus). **Jangan hapus tanpa tag** — dan sejak O47 diputus *"tinggalkan"*, tag itu jadi **satu-satunya tempat** spesifikasi tiga alur klien `cmd/import` (`gen-form`, `clients-dryrun/apply`, `dormant-dryrun/apply`) masih bisa dibaca. Menghapus tanpa tag membuat keputusan O47 tak bisa dibatalkan. Catatan: Go **bukan lagi** oracle paritas satu-satunya untuk bentuk respons — `apps/api/src/lib/shape-parity.test.ts` ber-anchor tipe FE dan **selamat** dari pengarsipan ini (89 converter, `NESTED_INLINE_UNCHECKED` kosong).
 3. **Config mati:** `backend/railway.json`, `web-internal/railway.json`, `backend/Dockerfile`, `docs/DEPLOY_RAILWAY.md` → tandai deprecated/arsip.
 4. **Docs:** perbarui `CLAUDE.md` (§Stack: Go→TypeScript/Next di Vercel, MySQL→Supabase Postgres) + entri `DECISIONS.md` "cutover selesai, Go diarsip".
 5. **Infra:** matikan service Railway (**manual, Anda** — Claude tak punya akses Railway). Simpan backup DB MySQL terakhir sebelum dimatikan.
@@ -331,12 +343,14 @@ Masih hanya `README.md`. Ditunda resmi (DECISIONS 2026-07-18) menunggu security 
 - [x] **C-01 selesai** — O37 tertutup di DECISIONS (opsi c).
 - [x] **C-02 selesai** — badge & halaman notifikasi hidup (2026-07-28; §C-02 di atas sudah RESOLVED, kotak ini sebelumnya tertinggal tidak tercentang).
 - [~] **C-03 — FAIL = 0 tercapai, lolos BERSYARAT:** sisa **3 SKIP** yang butuh walk dari deployment Vercel (bukan sandbox). Belum boleh dihitung penuh. **Skrip-nya sudah SIAP untuk deployment sejak 2026-07-29** (identitas aktor diresolusi dari environment, bukan hardcode — sebelumnya walk *mustahil* lolos di live; lihat §C-03) ⇒ sisanya murni eksekusi: **`docs/handoff/CUTOVER_C03_DEPLOYMENT_RUNBOOK.md`**.
-- [~] **C-04 — SEBAGIAN.** ✅ MSL 32 layanan ber-versi di live (2026-07-28) · ✅ karyawan riil: **69** di `employees`/`employee_credentials`/`auth.users`/`auth.identities` (69/69/69/69) · ✅ **O42 dieksekusi 2026-07-29** — divisi `Marketing` hidup, `role_mappings` **39**. ❌ **O22** impor lead historis · ❌ keputusan aktor **O34/O26/O35/O9** · ❌ konfirmasi data Railway riil-atau-UAT · ⚠️ `Marketing`/`lead` kosong (struktur organisasi, keputusan sadar).
+- [~] **C-04 — SEBAGIAN.** ✅ MSL 32 layanan ber-versi di live (2026-07-28) · ✅ karyawan riil: **69** di `employees`/`employee_credentials`/`auth.users`/`auth.identities` (69/69/69/69) · ✅ **O42 dieksekusi 2026-07-29** — divisi `Marketing` hidup, `role_mappings` **39**. ~~❌ **O22** impor lead historis~~ → **GUGUR 2026-07-30** (konsekuensi O47: tooling ditinggalkan, produksi mulai dari data bersih) · ❌ keputusan aktor **O34/O26/O35/O9** · ❌ konfirmasi data Railway riil-atau-UAT · ⚠️ `Marketing`/`lead` kosong (struktur organisasi, keputusan sadar).
 - [ ] Backup MySQL Railway terakhir tersimpan.
 - [ ] Rencana rollback disepakati (Railway tetap hidup N hari pasca-cutover sebelum dimatikan).
 
-> Legenda: `[x]` selesai · `[~]` sebagian/bersyarat · `[ ]` belum. **C-05 (retire Go) 0% dan memang
-> belum boleh dimulai** — ia menunggu GO. Go masih berjalan di CI sebagai **oracle paritas satu-satunya**.
+> Legenda: `[x]` selesai · `[~]` sebagian/bersyarat · `[ ]` belum. **C-05 (retire Go) belum boleh
+> dimulai** — ia menunggu GO, dan **hanya** GO sejak O47 + retensi PII ditutup 2026-07-30.
+> Go masih berjalan di CI sebagai oracle paritas untuk **perilaku**; untuk **bentuk respons** ia
+> sudah tidak satu-satunya (`shape-parity.test.ts` ber-anchor tipe FE, selamat pasca-arsip).
 
 **Sesudah GO:** eksekusi C-05.
 

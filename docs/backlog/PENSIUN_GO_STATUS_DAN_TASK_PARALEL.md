@@ -1,28 +1,32 @@
 # PENSIUN GO — Status per 2026-07-30 & pembagian task 2 akun paralel
 
 > **Dokumen standalone.** Disusun 2026-07-30 di atas `main@a37e432`; **diperbarui terakhir
-> ~05:0x UTC** sesudah #77, #76, lalu **#79 (Paket A)** di-merge (`main@e5755ff`) dan sesudah
-> Paket B (PR #78) direkonsiliasi di atasnya. **Kedua paket paralel SELESAI.**
-> Sumber: `CUTOVER_BACKLOG.md` (gate C-00…C-06) + handoff SESI13/14/15/16A (semua di `main`)
-> + SESI16B & SESI17 (PR #78).
+> sesi 19** sesudah **#78 dan #80 di-merge** (`main@61f357b`) dan sesudah pemilik menjawab
+> **O47** + **retensi PII**. Semua paket paralel SELESAI dan **ada di `main`**.
+> Sumber: `CUTOVER_BACKLOG.md` (gate C-00…C-06) + handoff SESI13…SESI19 (semua di `main`).
 > Aturan rumah `CLAUDE.md` §Phase 0 tetap berlaku bit-for-bit. PRD menang atas kode.
+>
+> ### 🟢 Engineering pensiun Go SELESAI — nol butir tersisa di sisi Claude
+> Fase 0·1·2·3 **100%**. Yang tersisa hanya **Fase 5** (pencabutan mekanis C-05), dan ia
+> menunggu **satu** hal saja sekarang: **gate GO**. O47 sudah terjawab, jadi ia tidak lagi
+> ikut mengunci.
 
 ---
 
 ## 0. Ringkasan satu paragraf
 
-Peta pensiun Go punya **6 fase**. **Fase 0 & 1 selesai penuh dan sudah di `main`.**
-**Fase 2 SELESAI:** kelas-1 (#76), kelas-2 **kedua paruhnya** — 29 converter
-commerce/portal (Paket B) + 25 converter delivery (Paket A), **nol cacat di keduanya**, dikunci
-44 test A + gate otomatis B; **blind spot nested-inline gate juga ditutup (sesi 17, §A4)** dan
-penutupannya menyingkap satu lubang nyata. **Fase 3 selesai sebagian** (3 dari 4 CLI; `cmd/import`
-menunggu O47).
-**Fase 4 (gate manusia) tidak bisa disentuh Claude sama sekali** — tujuh butir, semuanya butuh
-akses atau otoritas pemilik. **Fase 5 (pencabutan mekanis) 0% dan memang belum boleh dimulai** —
-ia menunggu gate GO **dan** jawaban O47.
+Peta pensiun Go punya **6 fase**. **Fase 0, 1, 2, dan 3 selesai penuh dan semuanya di `main`.**
+Fase 2 ditutup oleh #76 (kelas-1) + #79/#78 (kelas-2, seluruh 54 converter, nol cacat di keduanya)
++ #80 (blind spot nested-inline, yang penutupannya menyingkap satu lubang nyata).
+**Fase 3 kini SELESAI 4/4:** tiga CLI diputuskan #76, dan `cmd/import` — yang terakhir — **DITINGGALKAN**
+atas keputusan pemilik 2026-07-30 (O47 RESOLVED).
+**Fase 4 (gate manusia) tidak bisa disentuh Claude sama sekali**, tapi kini **lima butir**, bukan
+tujuh: O47 dan retensi PII sudah dijawab pemilik di sesi 19. **Fase 5 (pencabutan mekanis) belum
+boleh dimulai** — ia sekarang menunggu **gate GO saja**, tidak lagi O47.
 
-Jalur kritis pensiun Go **bukan lagi engineering**: jalur kritisnya adalah **eksekusi C-03 dari
-mesin ber-akses** + **empat keputusan pemilik** (O47, O46, O34/O26/O35, retensi PII).
+Jalur kritis pensiun Go **bukan engineering**: jalur kritisnya adalah **eksekusi C-03 dari
+mesin ber-akses** + **tiga keputusan pemilik yang tersisa** (O46, O34/O26/O35/O9, backup+rollback
+Railway). **Nol butir sisa bisa dimajukan Claude tanpa akses atau otoritas pemilik.**
 
 ---
 
@@ -35,17 +39,17 @@ mesin ber-akses** + **empat keputusan pemilik** (O47, O46, O34/O26/O35, retensi 
 | **Fase 0** | Data organisasi riil dikeluarkan dari `backend/` | 🟢 **SELESAI** — di `main` (#75) | **100%** |
 | **Fase 1** | O41 — 6 route hilang diport, `KNOWN_GAPS` kosong | 🟢 **SELESAI** — di `main` (#75) | **100%** |
 | **Fase 2** | O43 — paritas bentuk respons | 🟢 **SELESAI.** kelas-1 tutup (#76); kelas-2 **seluruh 54 converter** diaudit — 29 commerce/portal (B, #78) + 25 delivery (A, #79), **nol cacat di keduanya**, dikunci 44 test + gate otomatis. **Blind spot nested-inline juga ditutup (sesi 17):** 6 blok inline dinamai, gate turun rekursif, `NESTED_INLINE_UNCHECKED` **kosong** — dan ia menyingkap **satu lubang nyata** (`DemoTaskDetail.task.description`, lihat §A4) | **100%** |
-| **Fase 3** | 4 CLI Go tanpa padanan | 🟡 3 dari 4 diputuskan & dieksekusi (#76, **di `main`**); `cmd/import` → **O47 terbuka** | **~75%** |
-| **Fase 4** | Gate manusia (7 butir) | 🔴 **nol butir ditutup Claude** — semuanya butuh pemilik. Sebagian C-04 sudah jalan (MSL 32 layanan, 69 karyawan, O42) | **~30%** |
-| **Fase 5** | Pencabutan mekanis (C-05) | 🔴 belum boleh dimulai. Hanya `CLAUDE.md` §Stack yang sudah dikoreksi lebih awal (PR #76) | **~10%** |
+| **Fase 3** | 4 CLI Go tanpa padanan | 🟢 **SELESAI 4/4.** Tiga diputuskan & dieksekusi (#76, di `main`); **`cmd/import` DITINGGALKAN** — O47 RESOLVED 2026-07-30 (riwayat klien pra-CDPS cukup arsip spreadsheet). Konsekuensi: **T3 gugur** (`POST /leads/bulk` sendiri tetap hidup — jalur operasional, bukan historis) | **100%** |
+| **Fase 4** | Gate manusia (**5 butir**, dari 7) | 🔴 **nol butir bisa ditutup Claude** — semuanya butuh akses/otoritas pemilik. **Dua ditutup sesi 19:** O47 + retensi PII. Sebagian C-04 sudah jalan (MSL 32 layanan, 69 karyawan, O42, `role_mappings` 39) | **~45%** |
+| **Fase 5** | Pencabutan mekanis (C-05) | 🔴 belum boleh dimulai — tapi kini terkunci **gate GO saja**, tidak lagi O47. Yang sudah dikerjakan lebih awal: `CLAUDE.md` §Stack (#76) + **PII dikeluarkan dari `backend/`** (sesi 19) ⇒ opsi "hapus `backend/`" tidak lagi terhalang retensi | **~15%** |
 
 ### 1.2 Dibagi per siapa yang bisa mengerjakan — ini yang berguna
 
 | Sisi | % | Sisa |
 |---|---|---|
-| **Engineering (Claude)** | **~98%** *(~80% → ~85% Paket B → ~95% Paket A → ~98% sesi 17)* | Yang tersisa **seluruhnya terkunci, bukan kecil**: T3 adapter CSV (**terkunci O47**) · Fase 5 (**terkunci gate GO + O47**). Ditutup sesi 17: blind spot nested-inline · **T2b** · lint `@cdps/api` dipanggil di job CI dengan `--max-warnings 0` |
-| **Sisi pemilik (Yohan/Nerissa)** | **~35%** | C-03 eksekusi dari deployment · O47 · O46 · O34/O26/O35 · backup + rollback Railway · retensi PII |
-| **Gabungan pensiun Go** | **~80%** | jalur kritisnya **100% sisi pemilik** — §5. Nol butir sisa bisa dimajukan Claude tanpa keputusan/akses pemilik |
+| **Engineering (Claude)** | **100%** *(~80% → ~85% Paket B → ~95% Paket A → ~98% sesi 17 → **100%** sesi 19)* | **Nol butir tersisa.** T3 **gugur** bersama O47, bukan tertunda. Fase 5 adalah pencabutan mekanis yang menunggu **gate GO** — bukan pekerjaan engineering yang belum selesai. Ditutup sesi 17: blind spot nested-inline · **T2b** · lint `@cdps/api` di job CI `--max-warnings 0` |
+| **Sisi pemilik (Yohan/Nerissa)** | **~55%** | C-03 eksekusi dari deployment · O46 · O34/O26/O35/O9 · backup MySQL + OQ-2 · rencana rollback. **Ditutup 2026-07-30: O47 · retensi PII** |
+| **Gabungan pensiun Go** | **~88%** | jalur kritisnya **100% sisi pemilik** — §5. Nol butir sisa bisa dimajukan Claude tanpa keputusan/akses pemilik |
 
 > ⚠️ **Koreksi terhadap angka lama.** PR #73 (handoff SESI12) menyatakan *"engineering ~95%"*.
 > Angka itu **terlalu optimistis, dan sudah terbukti begitu** — SESI13 menemukan seluruh lapisan
@@ -70,6 +74,16 @@ db/web-internal tidak bergerak. `npm run lint -w @cdps/api` **0 error, 1 warning
 · core **113** · db **9** · web-internal **26** · `npm run lint -w @cdps/api --max-warnings 0`
 **0 error 0 warning** (T2b beres, dan sekarang dipanggil job CI `api`).
 
+**Di `main@61f357b`** (sesudah **#78 lalu #80** di-merge — angka acuan yang berlaku sekarang,
+**diverifikasi ulang independen di sesi 19** dengan DB dibangun ulang dari nol, 40/40 migrasi):
+`apps/api` **301** · `@cdps/domain` **566** (+1 skip) · `@cdps/core` **113** · `@cdps/db` **9** ·
+`web-internal` **26** · 7 gate seed **PASS** (54 tabel · 14 `sm_machines` · 17 `notif_events`) ·
+4 invariant SQL **PASS** · `route-parity` **5/5, `KNOWN_GAPS` `[]` KOSONG** ·
+`NESTED_INLINE_UNCHECKED` **`[]` KOSONG** · typecheck bersih semua workspace ·
+lint `@cdps/api --max-warnings 0` **0/0** · `web-internal` `tsc --noEmit` + lint bersih.
+Sisi Go pasca-penghapusan PII: `go vet ./...` · `go build ./...` · `go test ./cmd/... ./internal/seed/...`
+**hijau** — job `backend` tetap hidup sampai C-05 mencabutnya.
+
 <sub>Angka lama, sebelum #76/#77 masuk (`main@a37e432`): domain 552 · `apps/api` 211.</sub>
 
 ---
@@ -83,7 +97,8 @@ db/web-internal tidak bergerak. `npm run lint -w @cdps/api` **0 error, 1 warning
 | **#75** | Fase 0 + Fase 1 (O41, 6 route, lapisan wire M5, bug vote Director) + apply migrasi + selaraskan penomoran | 🟣 **MERGED** → `main@a37e432` | — |
 | **#76** | Go ditinggalkan resmi (`CLAUDE.md` §Stack) + O43 Fase 2 (9 endpoint) + Fase 3 (4 CLI diputuskan) + `collate "C"` | 🟣 **MERGED 2026-07-30** → `main@5944aa1` | — |
 | **#77** | Dua rujukan versi migrasi menunjuk berkas salah (komentar + docs saja) | 🟣 **MERGED 2026-07-30** → `cc667ff` | — |
-| **#78** | **Paket B**: gate paritas BENTUK respons atas 84 converter (O43 c) + dokumen ini + prompt Paket A | 🟢 draft, direkonsiliasi di atas `main@e5755ff` | **REVIEW & MERGE** — satu-satunya PR paket yang belum masuk |
+| **#78** | **Paket B**: gate paritas BENTUK respons atas 84 converter (O43 c) + dokumen ini + prompt Paket A | 🟣 **MERGED 2026-07-30** → `main@d329730` | — |
+| **#80** | Blind spot nested-inline ditutup (3 ternyata 6, satu lubang nyata) + T2b + lint di job CI `api` | 🟣 **MERGED 2026-07-30** → `main@61f357b` | — |
 | **#79** | **Paket A**: 25 converter delivery diaudit (nol cacat) + 44 test pengunci + eslint config `apps/api` + 2 rujukan path | 🟣 **MERGED 2026-07-30** → `main@e5755ff` | — |
 
 ### 2.1 Tiga pelajaran dari #74–#77 yang harus dibawa ke sesi paralel
@@ -293,19 +308,30 @@ setiap `order by` pada kolom status/state harus dipatok `collate "C"`. Seluruh s
 ber-`[...]`, jadi jebakan ini hidup di endpoint mana pun yang mengurutkan kolom teks status.
 **Jangan lepas `collate "C"` dari `engine.ts` — ia load-bearing.**
 
-### B3 · Adapter CSV/dry-run di atas `POST /leads/bulk` (T3) — **TERKUNCI O47**
+### B3 · Adapter CSV/dry-run di atas `POST /leads/bulk` (T3) — ❌ **GUGUR 2026-07-30**
+
+**Jangan kerjakan.** O47 dijawab *"tinggalkan — cukup arsip spreadsheet"*, dan T3 ada semata untuk
+melayani impor **historis** lead. Tanpa impor historis, tidak ada yang perlu diadaptasi.
+
+`POST /leads/bulk` sendiri **TETAP hidup & teruji** (O41, lengkap dengan gate Campaign O13) — ia
+jalur impor **operasional**, bukan historis, dan tidak tergantung keputusan ini. Jangan mencabutnya.
+
+<details><summary>Teks tiket asli (arsip)</summary>
 
 **Jangan mulai sebelum pemilik menjawab O47.** Kalau jawabannya *"lead saja"*: kecil —
 `/leads/bulk` sudah hidup & teruji, sisanya parsing CSV + mode dry-run, cetakannya
 `mslseed.ts`/`rolemapseed.ts`. Kalau jawabannya *"klien + ledger juga"*: **desainnya berbeda** dan
 butuh tiket sendiri (ia jadi jalur tulis privileged kedua ke `clients`/`transactions`/`installments`).
 
+</details>
+
 ---
 
 ## 4. Yang TIDAK boleh dikerjakan kedua akun
 
 - **Fase 5 / C-05** (hapus job `backend`, arsipkan `backend/`, `Makefile`, config Railway) —
-  menunggu gate GO **dan** O47. Memulainya menghapus oracle paritas yang A1/B1 justru pakai.
+  menunggu **gate GO**. (O47 sudah tidak ikut mengunci sejak 2026-07-30, tapi gate GO masih.)
+  Memulainya lebih awal menghapus oracle paritas Go sebelum cutover terverifikasi.
 - **Menulis ke live `CDPS SG`** — dalam bentuk apa pun.
 - **Migrasi baru** — kedua paket nol perubahan skema.
 - **Menutup butir Fase 4** — nol dari tujuh butir itu bisa ditutup Claude. Melaporkannya selesai
@@ -315,19 +341,23 @@ butuh tiket sendiri (ia jadi jalur tulis privileged kedua ke `clients`/`transact
 
 ## 5. Yang hanya bisa Yohan/Nerissa kerjakan — ini jalur kritis pensiun Go
 
-Dua akun di §3 **tidak memindahkan satu pun** dari tujuh butir ini. Sesudah A+B selesai,
-engineering ≈ selesai dan **100% sisa pensiun Go ada di daftar ini.**
+Engineering **sudah selesai 100%**, jadi **seluruh sisa pensiun Go ada di daftar ini.** Dari tujuh
+butir asli, **dua sudah ditutup pemilik 2026-07-30** (O47 · retensi PII) — keduanya tetap
+ditampilkan di bawah supaya jelas apa yang sudah tidak perlu ditanyakan lagi.
 
 | # | Butir | Kenapa terkunci | Memblokir |
 |---|---|---|---|
 | 1 | **C-03 — 3 SKIP** | butuh mesin ber-akses `*.vercel.app` + kredensial per-role. Skrip **sudah siap** sejak 2026-07-29 → `docs/handoff/CUTOVER_C03_DEPLOYMENT_RUNBOOK.md`. Jangan disusun ulang, cuma dijalankan | **gate C-04** |
-| 2 | **O47** — `cmd/import` (~3.700 baris) port atau tinggalkan? (a) riwayat klien pra-CDPS masuk CDPS atau cukup arsip spreadsheet? (b) kalau masuk — lead saja, atau klien+ledger juga? | keputusan pemilik | **C-05** + task B3 |
+| ~~2~~ | ✅ **O47 — DITUTUP 2026-07-30.** `cmd/import` **ditinggalkan**; riwayat klien pra-CDPS cukup hidup di spreadsheet sebagai arsip reporting | — | ~~C-05 + T3~~ — **T3 gugur**, C-05 bebas dari butir ini |
 | 3 | **O46** — 3 arm visibility RLS lebih sempit dari Go (`transactions_select` tanpa arm Sales-Lead · `audit_log_select` staff hanya lihat entri sendiri · arm Account pasca-rilis) | melonggarkan RLS = keputusan keamanan. Arahnya **lebih sempit** ⇒ nol kebocoran, tapi ada data tak terlihat | klaim *"apps/api paritas Go"* |
 | 4 | **O34 · O26 · O35 · O9** | aktor produksi + sub-tim Creative | **DoD C-04** ("nol fixture") |
-| 5 | **Retensi PII** `backend/testdata/import_samples/` (roster HR, `nik_email.csv`) | arsip / hapus / anonimkan — keputusan pemilik data | **C-05** (opsi "hapus `backend/`") |
+| ~~5~~ | ✅ **Retensi PII — DITUTUP 2026-07-30.** `backend/testdata/import_samples/` (7 CSV + README) **dihapus** dari repo; job `backend` diverifikasi tetap hijau. **Sisa yang masih terbuka:** PII masih ada di **histori git** — scrub butuh `git filter-repo` + re-clone terkoordinasi, keputusan & eksekusi pemilik | — | ~~C-05 opsi "hapus `backend/`"~~ — bebas |
 | 6 | **Backup MySQL Railway terakhir** + **OQ-2** (`SELECT count(*)` per tabel: minimal `leads`, `clients`, `transactions`) | butuh akses Railway | **gate GO** |
 | 7 | **Rencana rollback disepakati** (Railway hidup N hari pasca-cutover) | keputusan pemilik | **gate GO** |
 
-**Urutan tercepat menuju Go mati:** butir 1 (eksekusi C-03) → butir 4 → gate GO → butir 6 & 7 →
-Fase 5. Butir 2 & 5 bisa dijawab kapan pun tapi **wajib sebelum** `backend/` diarsipkan; butir 3
-tidak memblokir cutover.
+**Urutan tercepat menuju Go mati:** butir 1 (eksekusi C-03) → butir 4 → **gate GO** → butir 6 & 7
+→ Fase 5 (C-05). Butir 3 tidak memblokir cutover — ia hanya memblokir klaim paritas.
+
+> **Yang berubah dari daftar sebelumnya:** butir 2 & 5 dulu berbunyi *"wajib sebelum `backend/`
+> diarsipkan"*. Keduanya kini terjawab, jadi **tidak ada lagi tenggat yang mendahului C-05** —
+> C-05 menunggu gate GO dan tidak ada yang lain.

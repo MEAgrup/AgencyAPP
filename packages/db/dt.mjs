@@ -1,0 +1,11 @@
+import pg from 'pg';
+const c = new pg.Client({ connectionString: 'postgres://postgres:postgres@127.0.0.1:5432/cdps' });
+await c.connect();
+const r = await c.query("select '2026-07-30'::date as d");
+const d = r.rows[0].d;
+console.log('TZ proses      :', process.env.TZ || '(unset, pakai default sistem)');
+console.log('typeof         :', typeof d, d instanceof Date ? '(Date)' : '');
+console.log('nilai mentah   :', String(d));
+console.log('toISOString()  :', d.toISOString(), '   <-- yang dikirim main');
+console.log('YYYY-MM-DD WIB :', new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jakarta'}).format(d), '   <-- yang FE harapkan');
+await c.end();

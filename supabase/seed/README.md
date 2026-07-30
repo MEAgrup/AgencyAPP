@@ -39,14 +39,28 @@ CDPS_LAYERED_ROLE_CSV=supabase/seed/layered_roles_riil.csv \
   go run ./cmd/rolemapseed …
 ```
 
-## ⚠️ Yang MASIH di `backend/` dan butuh keputusan pemilik sebelum dihapus
+## ✅ Roster PII era Go sudah DIHAPUS dari repo (2026-07-30)
 
-`backend/testdata/import_samples/` memuat **PII** — roster HR riil (`hris_karyawan.csv`),
-pemetaan `nik_email.csv`, dan `employees_from_hris.csv` — plus fixture `*_uat.csv` era Go.
-README di folder itu sendiri memperingatkan datanya berisi nama & telepon.
+`backend/testdata/import_samples/` — 7 CSV + README — **dihapus** atas keputusan pemilik
+(`docs/DECISIONS.md` 2026-07-30). Isinya PII riil: roster HR (`hris_karyawan.csv`: NIK, nama
+lengkap, tanggal join, department/jabatan), pemetaan `nik_email.csv`, `employees_from_hris.csv`
+/ `employees_cdps.csv` / `employees_uat.csv`, plus fixture `*_uat.csv` era Go.
 
-Ia **tidak** dipindahkan ke sini: menyebarkan PII ke folder yang dibaca tooling seed bukan
-perbaikan, dan retensi data pribadi adalah keputusan pemilik, bukan keputusan teknis. Yang
-dibutuhkan sebelum C-05 memilih opsi "hapus": putuskan apakah roster PII itu diarsipkan
-(bukan dihapus), dihapus, atau dianonimkan. Live sudah memuat 69 karyawan, jadi berkas-berkas
-itu **bukan** lagi satu-satunya salinan data karyawan — ia salinan *input impor* satu kali.
+Menghapusnya aman karena berkas-berkas itu adalah salinan **input impor satu kali**, bukan
+sumber kebenaran: live `CDPS SG` sudah memuat **69 karyawan** di
+`employees`/`employee_credentials`/`auth.users`/`auth.identities`, dan `role_mappings`
+(**39**) sudah ter-seed. Sinkronisasi karyawan berikutnya memakai import CSV admin-triggered
+(OQ-4, DECISIONS 2026-07-22) dengan berkas yang disediakan HR saat itu — bukan salinan beku
+di repo. Mapping riil yang masih dibutuhkan tetap ada di folder ini:
+`role_mappings_riil.csv` · `layered_roles_riil.csv` · `hris_department_jabatan_pairs.csv`
+(ketiganya **tanpa** nama/email; `layered_roles_riil.csv` hanya `employee_id,role`).
+
+> ⚠️ **Penghapusan ini tidak menghapus PII dari histori git.** Commit-commit lama masih
+> memuat isi berkasnya (`git show <commit>:backend/testdata/import_samples/…`). Membersihkan
+> histori butuh rewrite paksa (`git filter-repo`) + re-clone terkoordinasi seluruh
+> kontributor — keputusan & eksekusi pemilik, belum dilakukan. Kalau kebijakan retensi
+> menuntut PII benar-benar hilang dari repo, itu langkah terpisah yang masih terbuka.
+
+`backend/testdata/employees.csv` **sengaja ditinggalkan**: isinya fixture sintetis
+(`EMP-0001 Budi Santoso`, dst.), bukan PII, dan ia default yang dibaca `cmd/cdps` +
+`internal/seed` — menghapusnya akan mematikan job `backend` sebelum C-05 mencabutnya.
