@@ -12,18 +12,25 @@
 
 | | |
 |---|---|
-| **Branch kerja** | **`claude/go-retirement-progress-eq0855`** — lanjutkan di sini, jangan buka branch baru |
-| **Keadaan branch** | **3 commit di atas `main`, sudah ter-push, BELUM ada PR.** Working tree bersih |
-| **`main`** | **`a38e241`** = Merge PR #82 |
-| **PR** | **tidak ada yang terbuka.** PR #82 sudah **merged**. Tiga commit terbaru belum di-PR-kan — buka PR baru bila ingin di-merge |
-| **Live `CDPS SG`** | **44 migrasi · 54 tabel · 17 event**. Tiga apply terakhir hari ini: `20260730120433` (fix O46) · `20260730153627` (O48 Grup C+D) · `20260730154210` (layered role `lead`) |
-| **Repo vs live** | ✅ **44 = 44**, nama berkas = versi live **1:1** |
+| **Branch kerja** | **`claude/c03-vercel-director-access-7vmki0`** — bercabang dari `claude/go-retirement-progress-eq0855`, bukan dari `main` |
+| **Keadaan branch** | Working tree bersih. `git log --oneline main..HEAD` untuk isi & jumlah commit |
+| **`main`** | **`a38e241`** = Merge PR #82. ⚠️ **`main` cuma 42 migrasi** — 2 yang terbaru hanya ada di branch |
+| **PR** | **tidak ada yang terbuka.** PR #82 sudah **merged** |
+| **Live `CDPS SG`** | **44 migrasi · 54 tabel · 17 event**. Tiga apply terakhir 2026-07-30: `20260730120433` (fix O46) · `20260730153627` (O48 Grup C+D) · `20260730154210` (layered role `lead`) |
+| **Repo vs live** | ✅ **44 = 44**, nama berkas = versi live **1:1** — dibaca dari live 2026-07-30 |
+| **Layered `director`** | **5 riil + 1 fixture.** §7 sudah DIPUTUS & di-apply; nol migrasi baru (murni data) |
 
 **Angka acuan** (Postgres 16 lokal, DB dibangun ulang dari nol, **44/44** bersih):
-`apps/api` **311** · `@cdps/domain` **566** (+1 skip) · `@cdps/core` **113** · `@cdps/db` **9** ·
+`apps/api` **313** · `@cdps/domain` **567** (+1 skip) · `@cdps/core` **113** · `@cdps/db` **9** ·
 `web-internal` **26** · 7 gate seed **PASS** · 4 invariant SQL **PASS**
 (`rls_checks` **32 check** · `auth_claims_checks` **4 check**) · `route-parity` **5/5**,
-`KNOWN_GAPS` KOSONG · `NESTED_INLINE_UNCHECKED` KOSONG · `RFC3339_PENDING_DECISION` KOSONG.
+`KNOWN_GAPS` KOSONG · `NESTED_INLINE_UNCHECKED` KOSONG · `RFC3339_PENDING_DECISION` KOSONG ·
+typecheck & lint bersih.
+
+> ⚠️ **`npm test --workspaces` TIDAK menjalankan `web-internal`** — ia bukan anggota `workspaces`
+> (`package.json` hanya `apps/*` + `packages/*`). Jalankan terpisah:
+> `npx vitest run --root web-internal`. Mengandalkan `--workspaces` saja membuat 26 test itu
+> **terlihat hijau tanpa pernah dijalankan**.
 
 > ⚠️ **Baris "Live" dan "Repo vs live" WAJIB dibaca ulang dari live** (`list_migrations`), bukan
 > disalin dari tabel ini. Aturan itu lahir dari SESI22, yang menerbitkan "menunggu apply" **78 menit
@@ -74,6 +81,31 @@ Kalau deployment ber-proteksi dan **`BYPASS` tidak diisi**, Vercel menjawab **se
 halaman challenge. Itu terbaca seperti routing-404 dan dilaporkan sebagai *path drift* — seluruh
 baris FAIL padahal aplikasinya sehat. Isi `BYPASS`, atau matikan proteksi sementara.
 
+> ✅ **DIUKUR 2026-07-30 — alias produksi TIDAK ber-proteksi, jadi `BYPASS` boleh kosong.**
+> `GET https://agency-app-api.vercel.app/api/healthz` ⇒ **`200`** dengan badan
+> `{"status":"ok","service":"cdps-api"}` dan header `x-matched-path: /api/healthz` — respons aplikasi
+> sungguhan, **bukan** halaman challenge. Path yang tidak ada (`/api/health`, `/me`) menjawab 404
+> Next.js dengan `x-matched-path: /404`, jadi routing-nya hidup dan membedakan.
+> Berlaku untuk **alias produksi ini saja** — preview deployment bisa tetap ber-proteksi.
+
+### 📌 Koreksi: "`*.vercel.app` tidak terjangkau dari sesi Claude" tidak lagi utuh benar
+
+Setiap dokumen C-03 sebelumnya menyatakan blokirnya mutlak. Yang benar per 2026-07-30:
+
+| Jalur | Hasil |
+|---|---|
+| `curl` / `WebFetch` langsung dari sandbox | 🔴 tetap **403** (`gateway answered 403 to CONNECT`) — kebijakan jaringan environment, tidak berubah |
+| **MCP server Vercel**, saat tersambung | ✅ **tembus** — dari situlah `200` di atas diukur |
+
+**Tapi itu TIDAK membuat C-03 bisa dijalankan Claude,** dan alasannya kini berbeda — lebih sempit:
+
+1. `SUPABASE_JWT_SECRET` **nol di environment sesi**, jadi tidak ada JWT per-role yang bisa
+   ditandatangani. Ini blocker yang sebenarnya.
+2. Perkakas MCP-nya **GET-saja tanpa header kustom**; ketiga skrip butuh `Authorization` + POST.
+
+⇒ **Yang bisa dibuktikan dari sesi Claude cuma reachability dan status proteksi** (sudah, di atas).
+Sisanya tetap milik mesin ber-secret. Jangan tulis ulang §-ini menjadi "Claude bisa menjalankan C-03".
+
 ## 3. Satu probe TAMBAHAN yang belum ada di runbook
 
 Arm RLS O46 sudah terbukti menyala **di lapisan DB** (probe 8 skenario). Yang belum pernah dilihat:
@@ -123,46 +155,81 @@ dipakai memutuskan A4/O48 sebenarnya **59 riil + 10 fixture**.
 | # | Butir | Siapa |
 |---|---|---|
 | 1 | **O50** — konfirmasi asal-usul 10 akun `99000000xx` + izin nonaktifkan/hapus | **pemilik** |
-| 2 | **7 karyawan tak terpetakan** — §7 di bawah. **Hanya 5 yang riil** (2 sisanya fixture O50) | **pemilik** |
+| ~~2~~ | ✅ **5 karyawan tak terpetakan — DIPUTUS & di-apply** (§7): kelimanya layered `director`, diverifikasi dua lapis | selesai |
+| 2b | **Divisi dasar** untuk `2501140493`/`2507250557`/`2607060683` — masih `''`. Kosmetik selama `director` menyala, **penting saat dicabut** (§7) | **pemilik** |
 | 3 | **O48 Grup A/B/E** — `O48_ANALISIS_KEPUTUSAN.md`. Grup C+D sudah selesai & live | **pemilik + head dev** → Claude |
 | 4 | Backup MySQL Railway + OQ-2 · rencana rollback | **pemilik** |
 | 5 | Gate GO → **C-05** (cabut `backend/`) | **pemilik** → Claude |
 | 6 | Probe ulang `transactions`, `performance_snapshots`, `*_block_requests` begitu ada data riil (ketiganya **kosong** di live, jadi arm-nya belum terbukti oleh data) | Claude, saat datanya ada |
 
-## 7. Daftar 7 karyawan tak terpetakan — dan hanya 5 yang riil
+## 7. ✅ 5 karyawan tak terpetakan — DIPUTUS dan SUDAH DI-APPLY (2026-07-30)
 
-`employee_claims(...)->>'division' = ''` ⇒ tidak punya divisi CDPS ⇒ **tidak dapat scope divisi apa
-pun**. Arahnya aman (lebih sempit), tapi arm O46/O48 tidak menyala untuk mereka.
+**Keputusan pemilik: kelimanya layered `director`** — *"bisa view dan melakukan task di semua
+bagian"*. Sudah diterapkan ke live dan diverifikasi; **butir ini tertutup**, tidak perlu diputus lagi.
 
-| # | `employee_id` | dept HRIS | jabatan | Catatan |
+| # | `employee_id` | dept HRIS | jabatan | Hasil |
 |---|---|---|---|---|
-| 1 | `200000001` | Director | Director | Layered **director** ⇒ sudah akses penuh. **Non-blocking** |
+| 1 | `200000001` | Director | Director | `director` sejak 2026-07-24 ⇒ **nol perubahan** |
 | 2 | `200000002` | Director | Director | idem |
-| ~~3~~ | ~~`9900000001`~~ | ~~Director~~ | ~~Director~~ | 🔴 **fixture O50**, bukan karyawan riil |
-| 4 | `2501140493` | OD | SENIOR ORGANIZATION DEVELOPMENT | butuh divisi dasar + keputusan layered `od` |
-| 5 | `2507250557` | OD | SENIOR DATA ANALYST | idem |
-| 6 | `2607060683` | OD | JR ORGANIZATION DEVELOPMENT | idem |
-| ~~7~~ | ~~`9900000002`~~ | ~~OD~~ | ~~SENIOR ORGANIZATION DEVELOPMENT~~ | 🔴 **fixture O50** |
+| 3 | `2501140493` | OD | SENIOR ORGANIZATION DEVELOPMENT | ✅ `director` **ditambahkan** (`od` tetap menyala) |
+| 4 | `2507250557` | OD | SENIOR DATA ANALYST | idem |
+| 5 | `2607060683` | OD | JR ORGANIZATION DEVELOPMENT | idem |
+| ~~—~~ | ~~`9900000001`~~ / ~~`9900000002`~~ | ~~Director~~ / ~~OD~~ | — | 🔴 **fixture O50 — SENGAJA tidak disentuh** (§5) |
 
-**Jadi yang butuh keputusan Anda: 5 orang, dan hanya 3 di antaranya mendesak.**
+**Kenapa `director`, bukan `od`:** `od` adalah **read-only di mana-mana** (Role Matrix Phase 0 §4),
+jadi ia memenuhi "view" tapi **tidak** "melakukan task". `od` ketiganya dibiarkan menyala karena
+aditif — `director` sudah mencakupnya, dan penanda OD masih dipakai OKR (M13).
 
-- **`200000001` + `200000002` (Director) — tidak mendesak.** Layered `director` sudah memberi akses
-  penuh di setiap gate; mapping divisi dasarnya kosmetik. Worksheet §3.1: petakan ke divisi wajar
-  mana pun (mis. `Sales`/`lead`) — tidak berpengaruh.
-- **Tiga orang dept `OD` — mendesak.** `OD` adalah **layered role, bukan divisi**, jadi mereka tidak
-  punya divisi dasar dan saat ini **tidak melihat apa pun di luar data mereka sendiri**. Dua
-  keputusan: (a) divisi dasar masing-masing; (b) **siapa yang dapat layered `od`** (read-only
-  di mana-mana). Saat ini pemegang layered `od` hanya **`2409230432`** — bukan salah satu dari
-  ketiganya.
+**Kenapa dua fixture tidak ikut:** DoD C-04 mensyaratkan **nol fixture UAT di jalur produksi**.
+Memberi mereka `director` memperburuk O50, bukan menutupnya.
 
-> Perhatikan `2507250557` **SENIOR DATA ANALYST**: worksheet §2.2 juga mendaftar
-> `DATA & BUSINESS INTELLIGENCE / DATA ANALYST INTERN` sebagai dept tanpa padanan CDPS. Kalau ada
-> keputusan "analitik tidak dapat scope operasional", keduanya sebaiknya diputus bersama.
+**Cara apply-nya** (meniru persis `admin.setLayeredRole`): upsert `employee_layered_roles` + **satu
+baris `audit_log` ber-`before`/`after` per orang**, satu transaksi, `created_by='C03-OWNER-DECISION'`.
 
-**Cara mengeksekusi sesudah dijawab** — `O34_O26_O35_WORKSHEET_ROSTER_V2.md` §4: tambah baris ke
+**Diverifikasi SESUDAH apply, di DUA lapis** — dan lapis kedua itu wajib, bukan kelebihan:
+
+| Lapis | Cek | Hasil |
+|---|---|---|
+| Fungsi | `employee_claims(...)->>'director'` | ✅ `true` untuk kelimanya |
+| **Klaim tersimpan** | `auth.users.raw_app_meta_data->>'director'` | ✅ `true` untuk kelimanya |
+
+> Tanpa lapis kedua, grant yang klaimnya **tidak merambat** terbaca **persis sama** dengan grant yang
+> berhasil — itu kelas O46. `trg_sync_claims_layered` terbukti bekerja.
+
+### 🟠 Tiga hal yang MASIH terbuka sesudah keputusan ini
+
+1. **Pemegang sesi lama masih membawa klaim lama.** JWT diterbitkan **saat login**, jadi ketiganya
+   harus **logout → login ulang** sebelum akses barunya terasa. Kalau mereka lapor "belum berubah",
+   ini penyebab pertama yang diperiksa — bukan RLS.
+2. **`division` ketiganya tetap `''`.** Jadi `director` sekarang **satu-satunya** sumber akses
+   mereka: kalau kelak dicabut, mereka jatuh ke **nol scope**, bukan ke scope divisi. Pemetaan
+   divisi dasar (worksheet §3.1) masih terbuka — kini kosmetik, tapi jadi penting saat pencabutan.
+3. **`2507250557` SENIOR DATA ANALYST** — worksheet §2.2 juga mendaftar `DATA & BUSINESS
+   INTELLIGENCE / DATA ANALYST INTERN` tanpa padanan CDPS. Kalau kelak ada keputusan "analitik tidak
+   dapat scope operasional", keduanya diputus bersama.
+
+### 🔴 Dua cacat yang ditemukan saat mengerjakan ini — keduanya sudah diperbaiki di repo
+
+Keduanya membuat **jalur eksekusi yang dokumen ini sendiri anjurkan** tidak bisa dijalankan:
+
+| Cacat | Akibat |
+|---|---|
+| `LAYERED_ROLES` di `admin.ts` masih `{od, director}` walau migrasi `20260730154210` + CSV sudah memakai `lead` | `rolemapseed --apply` mem-parsing CSV bersih lalu **mati di `MSG_BAD_ROLE`** di baris `lead` — sesudah baris sebelumnya ter-commit. 3 grant `lead` di produksi **tidak bisa direproduksi dari seed** |
+| `layered_roles_riil.csv` memuat **`2409230432`** yang **tidak ada** di `employees` live | Guard fase-1 `engine.ts` (*"menunjuk karyawan yang tidak ada"*) **membatalkan seluruh run** ⇒ CSV yang diapalkan tidak bisa dijalankan apa adanya |
+
+Perbaikannya: `LAYERED_ROLES` + `MSG_BAD_ROLE` diperluas ke `lead` (dikunci **3 test**, divalidasi
+mutasi), baris hantu dicabut, dan **3 baris `od` yang ADA di live tapi HILANG dari CSV**
+ditambahkan supaya CSV idempoten lagi terhadap live.
+
+> ⚠️ **Koreksi versi sebelumnya berkas ini:** ia menyatakan *"pemegang layered `od` hanya
+> `2409230432`"*. **Salah** — itu dibaca dari CSV, bukan dari live. Live tidak pernah punya baris itu;
+> pemegang `od` justru ketiga orang OD di atas. Persis cacat yang §0 peringatkan: **angka tentang live
+> wajib dibaca dari live.**
+
+**Cara mengeksekusi sisa mapping divisi** — `O34_O26_O35_WORKSHEET_ROSTER_V2.md` §4: tambah baris ke
 `supabase/seed/role_mappings_riil.csv` (**tambah**, jangan regenerasi — live sudah 39 baris), lalu
 `npm run rolemap:seed -w @cdps/api -- --apply`. Untuk layered role: `layered_roles_riil.csv`
-(kini menerima `od`, `director`, **dan `lead`**).
+(menerima `od`, `director`, dan `lead` — kini di **kedua** gate, tidak cuma di parser).
 
 > **Kalau yang dibutuhkan adalah menjadikan SEORANG karyawan lead** — gunakan layered role `lead`,
 > **bukan** `role_mappings`. `role_mappings` berkunci `(divisi, jabatan)`, jadi menaikkan jabatan

@@ -55,8 +55,14 @@ export const MSG_ROLE_MAPPING_DENIED = '[hanya Director yang dapat mengelola rol
 export const MSG_LAYERED_ROLE_DENIED = '[hanya Director yang dapat mengelola layered role]';
 /** Go: admin.ErrBadLevel, wrapped in brackets by the handler. */
 export const MSG_BAD_LEVEL = "[level harus 'staff' atau 'lead']";
-/** Go: admin.ErrBadRole, wrapped in brackets by the handler. */
-export const MSG_BAD_ROLE = "[role harus 'od' atau 'director']";
+/**
+ * Go: admin.ErrBadRole, wrapped in brackets by the handler.
+ *
+ * `lead` joined the set on 2026-07-30 (migrasi `20260730154210_layered_lead_role`),
+ * so the message enumerates three roles. Go is retired (CLAUDE.md §Stack), so it
+ * is no longer the parity oracle for this string.
+ */
+export const MSG_BAD_ROLE = "[role harus 'od', 'director', atau 'lead']";
 /** House default mandatory-field gate (CLAUDE.md #5). */
 export const MSG_INCOMPLETE = '[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]';
 
@@ -287,8 +293,22 @@ export interface LayeredRole {
   createdAt: Date;
 }
 
-/** The only two layered roles (Go: admin.ErrBadRole guards this set). */
-const LAYERED_ROLES = new Set(['od', 'director']);
+/**
+ * The layered roles this gate accepts.
+ *
+ * `lead` was added by migrasi `20260730154210_layered_lead_role`: `employee_claims`
+ * already lets an enabled layered `lead` win over `role_mappings.level`, and
+ * `layered_roles_riil.csv` ships three such rows. Until this set matched, the DB
+ * honoured `lead` while the ONLY documented way to write it
+ * (`rolemapseed` → `setLayeredRole`) rejected it with `MSG_BAD_ROLE` — so the
+ * three live `lead` grants could not be reproduced from the seed at all.
+ *
+ * Exported so `apps/api/scripts/rolemapseed/csv.test.ts` can assert it equals
+ * `VALID_LAYERED_ROLES` there. The CSV parser accepting a role this gate rejects
+ * is silent until `--apply` runs against a real deployment, which is exactly how
+ * the `lead` gap shipped.
+ */
+export const LAYERED_ROLES = new Set(['od', 'director', 'lead']);
 
 /**
  * listLayeredRoles returns every layered-role assignment, ordered as Go does.
