@@ -1,10 +1,10 @@
 # PENSIUN GO — Status per 2026-07-30 & pembagian task 2 akun paralel
 
-> **Dokumen standalone.** Disusun 2026-07-30 di atas `main@a37e432`; **diperbarui ~04:45 UTC**
-> sesudah #77 lalu #76 di-merge (`main@5944aa1`) dan sesudah Paket B dikerjakan (PR #78).
-> Baris yang diperbarui ditandai — sisanya tetap seperti saat disusun.
-> Sumber: `CUTOVER_BACKLOG.md` (gate C-00…C-06) + handoff cutover SESI13/14/15 (semua di `main`)
-> + SESI16B (PR #78).
+> **Dokumen standalone.** Disusun 2026-07-30 di atas `main@a37e432`; **diperbarui terakhir
+> ~05:0x UTC** sesudah #77, #76, lalu **#79 (Paket A)** di-merge (`main@e5755ff`) dan sesudah
+> Paket B (PR #78) direkonsiliasi di atasnya. **Kedua paket paralel SELESAI.**
+> Sumber: `CUTOVER_BACKLOG.md` (gate C-00…C-06) + handoff SESI13/14/15/16A (semua di `main`)
+> + SESI16B & SESI17 (PR #78).
 > Aturan rumah `CLAUDE.md` §Phase 0 tetap berlaku bit-for-bit. PRD menang atas kode.
 
 ---
@@ -12,9 +12,10 @@
 ## 0. Ringkasan satu paragraf
 
 Peta pensiun Go punya **6 fase**. **Fase 0 & 1 selesai penuh dan sudah di `main`.**
-**Fase 2 & 3 selesai sebagian dan sudah di `main`** (#76 ter-merge 2026-07-30); separuh kedua
-Fase 2 — kelas *"converter ada tapi field-nya salah"* — **separuhnya lagi ditutup Paket B**
-(gate otomatis, PR #78) dan separuh sisanya masih milik Paket A.
+**Fase 2 praktis SELESAI:** kelas-1 (#76), kelas-2 **kedua paruhnya** — 29 converter
+commerce/portal (Paket B) + 25 converter delivery (Paket A), **nol cacat di keduanya**, dikunci
+44 test A + gate otomatis 84 converter B. **Fase 3 selesai sebagian** (3 dari 4 CLI; `cmd/import`
+menunggu O47).
 **Fase 4 (gate manusia) tidak bisa disentuh Claude sama sekali** — tujuh butir, semuanya butuh
 akses atau otoritas pemilik. **Fase 5 (pencabutan mekanis) 0% dan memang belum boleh dimulai** —
 ia menunggu gate GO **dan** jawaban O47.
@@ -32,7 +33,7 @@ mesin ber-akses** + **empat keputusan pemilik** (O47, O46, O34/O26/O35, retensi 
 |---|---|---|---|
 | **Fase 0** | Data organisasi riil dikeluarkan dari `backend/` | 🟢 **SELESAI** — di `main` (#75) | **100%** |
 | **Fase 1** | O41 — 6 route hilang diport, `KNOWN_GAPS` kosong | 🟢 **SELESAI** — di `main` (#75) | **100%** |
-| **Fase 2** | O43 — paritas bentuk respons | 🟡 kelas *"endpoint tanpa converter"* tutup (#76, **di `main`**); kelas *"converter ada tapi field salah"*: **29 converter commerce/portal diaudit — nol cacat** + **gate otomatis atas 84 converter** (#78); sisa **25 converter delivery** = Paket A | **~75%** |
+| **Fase 2** | O43 — paritas bentuk respons | 🟢 **praktis SELESAI.** kelas-1 tutup (#76); kelas-2 **seluruh 54 converter** diaudit — 29 commerce/portal (B, #78) + 25 delivery (A, #79), **nol cacat di keduanya**, dikunci 44 test + gate otomatis 84 converter. Sisa: **3 interface nested inline** (dinyatakan, di-assert) | **~95%** |
 | **Fase 3** | 4 CLI Go tanpa padanan | 🟡 3 dari 4 diputuskan & dieksekusi (#76, **di `main`**); `cmd/import` → **O47 terbuka** | **~75%** |
 | **Fase 4** | Gate manusia (7 butir) | 🔴 **nol butir ditutup Claude** — semuanya butuh pemilik. Sebagian C-04 sudah jalan (MSL 32 layanan, 69 karyawan, O42) | **~30%** |
 | **Fase 5** | Pencabutan mekanis (C-05) | 🔴 belum boleh dimulai. Hanya `CLAUDE.md` §Stack yang sudah dikoreksi lebih awal (PR #76) | **~10%** |
@@ -41,9 +42,9 @@ mesin ber-akses** + **empat keputusan pemilik** (O47, O46, O34/O26/O35, retensi 
 
 | Sisi | % | Sisa |
 |---|---|---|
-| **Engineering (Claude)** | **~85%** *(naik dari ~80% — Paket B selesai)* | T1 sisa **25 converter delivery** (Paket A; 29 milik B sudah diaudit) · 3 interface nested inline · T2 eslint `apps/api` · T3 adapter CSV (terkunci O47) · Fase 5 (terkunci gate GO) |
+| **Engineering (Claude)** | **~95%** *(~80% → ~85% Paket B → ~95% Paket A)* | Sisanya **kecil atau terkunci**: 3 interface nested inline · **T2b** 1 warning eslint `mslseed.ts` · rekomendasi memanggil lint di job `api` CI · T3 adapter CSV (**terkunci O47**) · Fase 5 (**terkunci gate GO**) |
 | **Sisi pemilik (Yohan/Nerissa)** | **~35%** | C-03 eksekusi dari deployment · O47 · O46 · O34/O26/O35 · backup + rollback Railway · retensi PII |
-| **Gabungan pensiun Go** | **~70%** | — |
+| **Gabungan pensiun Go** | **~78%** | jalur kritisnya **100% sisi pemilik** — §5 |
 
 > ⚠️ **Koreksi terhadap angka lama.** PR #73 (handoff SESI12) menyatakan *"engineering ~95%"*.
 > Angka itu **terlalu optimistis, dan sudah terbukti begitu** — SESI13 menemukan seluruh lapisan
@@ -59,13 +60,16 @@ mesin ber-akses** + **empat keputusan pemilik** (O47, O46, O34/O26/O35, retensi 
 `KNOWN_GAPS` KOSONG** · 4 invariant SQL **PASS** · Live `CDPS SG` **40 migrasi · 54 tabel ·
 17 event**, repo cocok 1:1.
 
-**Dengan PR #78 (Paket B):** `apps/api` **255** (+9 gate paritas bentuk). Sisanya tidak bergerak.
+**Di `main@e5755ff`** (sesudah #79/Paket A): `apps/api` **290** (+44 `wire.delivery.test.ts`).
+
+**Gabungan A+B** (PR #78 di atas `main@e5755ff`): `apps/api` **299** (290 + 9 gate). Domain/core/
+db/web-internal tidak bergerak. `npm run lint -w @cdps/api` **0 error, 1 warning** (T2b).
 
 <sub>Angka lama, sebelum #76/#77 masuk (`main@a37e432`): domain 552 · `apps/api` 211.</sub>
 
 ---
 
-## 2. Pekerjaan terakhir — PR #73 sampai #77
+## 2. Pekerjaan terakhir — PR #73 sampai #79
 
 | PR | Isi | Status | Rekomendasi |
 |---|---|---|---|
@@ -74,7 +78,8 @@ mesin ber-akses** + **empat keputusan pemilik** (O47, O46, O34/O26/O35, retensi 
 | **#75** | Fase 0 + Fase 1 (O41, 6 route, lapisan wire M5, bug vote Director) + apply migrasi + selaraskan penomoran | 🟣 **MERGED** → `main@a37e432` | — |
 | **#76** | Go ditinggalkan resmi (`CLAUDE.md` §Stack) + O43 Fase 2 (9 endpoint) + Fase 3 (4 CLI diputuskan) + `collate "C"` | 🟣 **MERGED 2026-07-30** → `main@5944aa1` | — |
 | **#77** | Dua rujukan versi migrasi menunjuk berkas salah (komentar + docs saja) | 🟣 **MERGED 2026-07-30** → `cc667ff` | — |
-| **#78** | **Paket B**: gate paritas BENTUK respons atas 84 converter (O43 c) + dokumen ini + prompt Paket A | 🟢 draft | **REVIEW & MERGE** — tidak lagi bertumpuk (#76 sudah masuk) |
+| **#78** | **Paket B**: gate paritas BENTUK respons atas 84 converter (O43 c) + dokumen ini + prompt Paket A | 🟢 draft, direkonsiliasi di atas `main@e5755ff` | **REVIEW & MERGE** — satu-satunya PR paket yang belum masuk |
+| **#79** | **Paket A**: 25 converter delivery diaudit (nol cacat) + 44 test pengunci + eslint config `apps/api` + 2 rujukan path | 🟣 **MERGED 2026-07-30** → `main@e5755ff` | — |
 
 ### 2.1 Tiga pelajaran dari #74–#77 yang harus dibawa ke sesi paralel
 
