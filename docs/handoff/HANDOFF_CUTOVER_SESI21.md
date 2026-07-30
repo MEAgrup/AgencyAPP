@@ -82,7 +82,7 @@ periksa `trg_sync_claims_mapping` (preseden verifikasi O33 2026-07-29), bukan po
 | 1 | **Probe lead riil** (§1.2) — konfirmasi arm O46 menyala di produksi | **pemilik** |
 | 2 | **C-03 — 3 SKIP** 🔴 *jalur kritis* — `CUTOVER_C03_DEPLOYMENT_RUNBOOK.md` dari mesin ber-akses `*.vercel.app`. Sekarang waktunya tepat: live sudah memuat keadaan yang akan rilis | **pemilik** |
 | 3 | **A4** — 12 mapping ambigu + lead Ads/Marketing/KOL + O35 + O9 → `O34_O26_O35_WORKSHEET_ROSTER_V2.md` | **pemilik** |
-| 4 | **O49** — 4 field kolom `date` dikirim RFC3339; 3 jelas, `managed_since` **ambigu** (Go tidak konsisten dengan dirinya sendiri) | Claude + 1 keputusan |
+| ~~4~~ | ✅ **O49 (a) SELESAI** — 3 field diperbaiki ke `tz.dateString()`, kerja commit hilang `46e2a6d` dipulihkan, dikunci `wire.datecolumns.test.ts` (+6 test, `apps/api` 301→**307**) + gate anti-tumbuh-kembali, divalidasi 2 mutasi. **Sisa: butir (b) `managed_since`** — butuh 1 keputusan head dev, §3 | **pemilik/head dev** |
 | 5 | **O48** — 36 dari 45 policy SELECT tanpa arm lead/divisi (`assets_select`, `employees_select` paling menggigit) | keputusan pemilik, eksekusi Claude |
 | 6 | **Backup MySQL Railway + OQ-2** · **rencana rollback** | **pemilik** |
 | 7 | **Gate GO** → **C-05** | **pemilik** → Claude |
@@ -91,7 +91,28 @@ periksa `trg_sync_claims_mapping` (preseden verifikasi O33 2026-07-29), bukan po
 dengan pemicu eksplisit, karena menghapus branch **tidak** melepas commit yang masih dirujuk PR
 lama; tanpa tiket GitHub Support, scrub separuh hanya memindahkan PII.
 
-### 2.1 Yang JANGAN dikerjakan
+## 3. Satu keputusan kecil yang menahan O49 butir (b)
+
+`clientDetailToWire.platforms[].managed_since` masih dikirim RFC3339, dan ia **satu-satunya** entri
+di ledger `RFC3339_PENDING_DECISION` (`wire.datecolumns.test.ts`). Tidak ditebak karena sumbernya
+saling bertentangan:
+
+| Sumber | Bentuk |
+|---|---|
+| `backend/internal/module0_sales/closing.go:50` | `string`, komentar **`// optional YYYY-MM-DD`** |
+| `backend/internal/module4_client/client.go:53` | `*time.Time` ⇒ **RFC3339** |
+| `web-internal/src/lib/sales.ts:208` | `managed_since?: string; // "YYYY-MM-DD"` |
+| `web-internal/src/lib/clients.ts:12` | `managed_since?: string \| null` — **tanpa anotasi** |
+| kolom DB `client_platforms.managed_since` | **`date`** |
+
+Kolom `date` + tiga dari empat sumber menunjuk `YYYY-MM-DD`, jadi rekomendasi saya
+**`tz.dateString()`** — sama seperti tiga field yang sudah diperbaiki. Tapi ia dikirim ke **dua**
+halaman berbeda (`clients` dan `sales`), jadi kalau salah satu halaman ternyata mem-parsing-nya
+sebagai timestamp, mengubahnya memecahkan halaman itu. Satu kalimat dari head dev cukup; sesudah itu
+eksekusinya satu baris + hapus entri ledger (test "ledger jujur" akan **memaksa** penghapusan itu —
+ia merah kalau ledger menyebut field yang sudah diperbaiki).
+
+### 3.1 Yang JANGAN dikerjakan
 
 Seluruh daftar SESI19 §3.1 dan SESI20 §3.1 masih berlaku. Tambahan dari sesi ini:
 
