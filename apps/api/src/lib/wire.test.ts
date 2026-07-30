@@ -726,7 +726,7 @@ describe('M4 clientDetailToWire (O41 #1 — the Client Record contract)', () => 
       payment_intent: '[Termin]',
       released_to_account_at: null,
       platforms: [
-        { platform: 'Shopee', store_link: 'https://shopee/alpha', managed_since: '2026-05-01T00:00:00.000Z', active: true },
+        { platform: 'Shopee', store_link: 'https://shopee/alpha', managed_since: '2026-05-01', active: true },
         { platform: 'TikTok Shop', store_link: undefined, managed_since: null, active: false },
       ],
       sales_allocation: [{ salesperson_id: 'EMP-BUDI', basis_points: 10000 }],

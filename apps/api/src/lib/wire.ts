@@ -1859,7 +1859,7 @@ export function clientDetailToWire(c: sales.ClientDetail): ClientDetailWire {
     platforms: c.platforms.map((p) => ({
       platform: p.platform,
       store_link: p.storeLink ?? undefined,
-      managed_since: p.managedSince ? p.managedSince.toISOString() : null,
+      managed_since: p.managedSince ? tz.dateString(p.managedSince) : null,
       active: p.active,
     })),
     sales_allocation: c.allocations.map((a) => ({

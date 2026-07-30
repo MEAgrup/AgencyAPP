@@ -23,10 +23,11 @@
 
 **Angka acuan** (Postgres 16 lokal, DB dibangun ulang dari nol, **42/42** migrasi bersih —
 dijalankan di sesi ini):
-`apps/api` **307** · `@cdps/domain` **566** (+1 skip) · `@cdps/core` **113** · `@cdps/db` **9** ·
+`apps/api` **310** · `@cdps/domain` **566** (+1 skip) · `@cdps/core` **113** · `@cdps/db` **9** ·
 `web-internal` **26** · 7 gate seed **PASS** (54 tabel · 14 `sm_machines` · 17 `notif_events`) ·
 4 invariant SQL **PASS** (`rls_checks` **23 check**) · `route-parity` **5/5 `KNOWN_GAPS` KOSONG** ·
-`NESTED_INLINE_UNCHECKED` **KOSONG** · `RFC3339_PENDING_DECISION` **1 entri** (`managed_since`).
+`NESTED_INLINE_UNCHECKED` **KOSONG** · `RFC3339_PENDING_DECISION` ✅ **KOSONG** (O49 (b) selesai —
+`managed_since` adalah penghuni terakhirnya, §1.4). **Ketiga ledger kini kosong.**
 
 > **Sha HEAD, jumlah commit, dan status CI SENGAJA tidak dipin** (alasan: SESI22 §1.2). Baca
 > sumbernya:
@@ -144,6 +145,39 @@ Klaim tersimpan **identik** dengan yang disuntikkan ⇒ policy **dan** klaim sam
 - **O48 kembali ke 36/45.** Angka 45/45 (SESI22 §1.1) benar **hanya selama** arm-nya mati. Yang tetap
   berlaku dari temuan itu: **survei O48 menghitung TEKS policy, bukan apakah arm-nya MENYALA.**
 
+### 1.4 ✅ O49 butir (b) `managed_since` — ditutup, dan cara menutupnya adalah poinnya
+
+Diputuskan **`tz.dateString()`** (`YYYY-MM-DD`), mengikuti tipe kolom
+(`client_platforms.managed_since` = `date`) dan 3 dari 4 sumber. Ledger
+`RFC3339_PENDING_DECISION` kini **kosong** — `managed_since` penghuni terakhirnya.
+
+**Yang menahannya dua sesi adalah RISIKO, bukan ambiguitas:** kalau salah satu dari dua halaman
+pemakainya mem-parsing nilainya sebagai timestamp, mengubah format memecahkan halaman itu. Itu
+diselesaikan dengan **pengukuran**, bukan keberanian:
+
+| Pemakai | Ternyata | Risiko |
+|---|---|---|
+| `sales/[id]/page.tsx` | form **TULIS** `<input type="date">` — **mengirim** `YYYY-MM-DD`, tidak pernah membaca wire | **nol** |
+| `clients/[id]/page.tsx` | satu-satunya **PEMBACA**: `new Date(v).toLocaleString('id-ID')` | **nol** — diukur |
+
+`new Date('2026-05-01')` (bentuk date-only = **UTC** per spec ECMAScript) menghasilkan instant
+**identik** dengan `new Date('2026-05-01T00:00:00.000Z')` ⇒ rendering **byte-identical**, diuji di TZ
+`Asia/Jakarta` dan `UTC`.
+
+> **Pelajaran:** dua sesi menahan ini sebagai *"butuh keputusan head dev"*. Yang sebenarnya
+> dibutuhkan adalah `node -e` dua baris. **Sebelum mengeskalasi sebuah keputusan, periksa apakah yang
+> menahannya sebetulnya fakta yang bisa diukur.**
+
+Dikunci **3 test baru** (`apps/api` 307 → **310**), termasuk satu yang mengunci **premis** kesetaraan
+instant itu sendiri — jadi kalau kelak formatter FE diganti ke tengah malam **lokal**, test-nya merah
+dan orangnya tahu halaman klien ikut bergeser. Divalidasi **2 mutasi**: balik ke `toISOString()` ⇒ 2
+merah (nilai + gate sumber); ledger tidak jujur ⇒ test *"ledger jujur"* merah.
+
+**🟠 Cacat FE terpisah yang SENGAJA tidak diperbaiki:** `formatDate` di `clients/[id]/page.tsx`
+memakai `toLocaleString` (bukan `toLocaleDateString`), jadi ia merender jam **`07.00.00`** untuk
+kolom tanggal. Salah sebelum maupun sesudah perubahan ini, dan **bukan** disebabkan olehnya.
+Perbaikannya perubahan rendering FE dengan tiketnya sendiri.
+
 ---
 
 ## 2. Sisa pekerjaan
@@ -152,9 +186,9 @@ Klaim tersimpan **identik** dengan yang disuntikkan ⇒ policy **dan** klaim sam
 |---|---|---|
 | ~~1~~ | ✅ **Apply perbaikan O46** — tercatat live `20260730120433` (§1.1) | selesai |
 | ~~2~~ | ✅ **Probe lead** — 8 skenario + klaim riil, O46 terbukti menyala (§1.2) | selesai |
+| ~~3~~ | ✅ **O49 butir (b) `managed_since`** — `tz.dateString()`, ledger `RFC3339_PENDING_DECISION` KOSONG (§1.4) | selesai |
 | 1 | **Merge PR #82** | **pemilik** |
 | 2 | **C-03 — 3 SKIP** 🔴 *jalur kritis* — `CUTOVER_C03_DEPLOYMENT_RUNBOOK.md`, dari mesin ber-akses `*.vercel.app` | **pemilik** |
-| 3 | **O49 butir (b) `managed_since`** — butuh **1 kalimat** head dev; eksekusinya satu baris + hapus entri ledger (test *"ledger jujur"* akan **memaksa** penghapusan itu). Rekomendasi: `tz.dateString()`. Detail SESI21 §3 | **head dev** → Claude |
 | 4 | **O48** — pakai angka **36/45** (§1.3), dan putuskan `assets_select` / `employees_select` | keputusan **pemilik**, eksekusi Claude |
 | 5 | **A4** — 12 mapping ambigu + lead Ads/Marketing/KOL + O35 + O9 → `O34_O26_O35_WORKSHEET_ROSTER_V2.md`. **Bersinggungan dengan 7 karyawan ber-divisi kosong** (§1.2) — selama tak ter-mapping, mereka tidak dapat scope divisi apa pun | **pemilik** |
 | 6 | **Backup MySQL Railway + OQ-2** · **rencana rollback** | **pemilik** |

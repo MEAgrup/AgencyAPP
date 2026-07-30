@@ -21,8 +21,8 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { finance } from '@cdps/domain';
-import { installmentToWire, remindersToWire } from './wire';
+import type { finance, sales } from '@cdps/domain';
+import { clientDetailToWire, installmentToWire, remindersToWire } from './wire';
 
 /**
  * Field wire yang di-backing kolom `date` dan HARUS dikirim `YYYY-MM-DD`.
@@ -39,14 +39,22 @@ const DATE_BACKED_WIRE_KEYS = ['due_date', 'verified_date', 'period_start', 'per
  * **Hanya boleh menyusut.** Menambah baris = mengakui satu halaman menampilkan
  * timestamp di kolom tanggal, dan itu butuh entri `DECISIONS.md`.
  *
- * `managed_since` ada di sini karena ia **belum diputuskan**, bukan karena ia
- * benar: Go tidak konsisten dengan dirinya sendiri — `module0_sales/closing.go:50`
- * memakai `string` ber-komentar `// optional YYYY-MM-DD`, sedangkan
- * `module4_client/client.go:53` memakai `*time.Time` (RFC3339). FE juga terbelah:
- * `sales.ts:208` beranotasi `"YYYY-MM-DD"`, `clients.ts:12` tanpa anotasi.
- * Menebak salah satu = mengarang kontrak (O49 butir b, menunggu head dev).
+ * **KOSONG sejak O49 butir (b) diputuskan 2026-07-30** — `managed_since` adalah
+ * penghuni terakhirnya dan kini memakai `tz.dateString()` seperti sepuluh field
+ * lainnya. Yang menahannya dulu: Go tidak konsisten dengan dirinya sendiri
+ * (`module0_sales/closing.go:50` `string` ber-komentar `// optional YYYY-MM-DD`
+ * vs `module4_client/client.go:53` `*time.Time`), dan mengubahnya berisiko
+ * memecahkan halaman yang mem-parsing nilainya sebagai timestamp.
+ *
+ * Risiko itu **diukur, bukan ditebak**, dan ternyata tidak ada: satu-satunya
+ * pembacanya `clients/[id]/page.tsx` memakai `new Date(v).toLocaleString('id-ID')`,
+ * dan `new Date('2026-05-01')` (bentuk date-only = UTC per spec) menghasilkan
+ * instant yang **identik** dengan `new Date('2026-05-01T00:00:00.000Z')` —
+ * rendering byte-identical, diuji di TZ `Asia/Jakarta` dan `UTC`. Pembaca kedua
+ * (`sales/[id]/page.tsx`) adalah form TULIS `<input type="date">`; ia mengirim
+ * `YYYY-MM-DD`, tidak pernah membaca nilai wire ini.
  */
-const RFC3339_PENDING_DECISION: readonly string[] = ['managed_since'];
+const RFC3339_PENDING_DECISION: readonly string[] = [];
 
 const WIRE_SRC = readFileSync(join(__dirname, 'wire.ts'), 'utf8');
 
@@ -117,6 +125,46 @@ describe('O49 — kolom `date` dikirim YYYY-MM-DD, bukan RFC3339', () => {
     // tz.dateString adalah fungsi yang sama yang dipakai jalur daysOverdue
     // (tz.daysBetween beroperasi pada tanggal kalender WIB).
     expect(wire.reminders[0].due_date).toBe('2026-07-30');
+  });
+
+  /**
+   * O49 butir (b) — `managed_since`, penghuni terakhir ledger, diputuskan
+   * 2026-07-30. Kolomnya `client_platforms.managed_since` bertipe `date`, jadi
+   * kontraknya sama dengan sepuluh field date-backed lainnya.
+   */
+  const platform = (managedSince: Date | null) => ({
+    id: 'CLI-202607-0001', leadId: null, winningAttemptId: null, namaPic: 'Ibu Alpha',
+    toko: 'Alpha Digital', kota: 'Jakarta', linkToko: null, kategori: 'Fashion',
+    gmvBaseline: '0.00', targetGmv: '0.00', marketingBudget: '0.00', totalSales: '0.00',
+    transactionId: null, originCampaignId: null, salesPicId: 'EMP-BUDI', salesPicNama: 'Budi',
+    commissionPaymentPicId: 'EMP-BUDI', paymentIntent: null, releasedToAccountAt: null,
+    createdAt: new Date('2026-07-01T03:00:00.000Z'),
+    platforms: [{ platform: 'Shopee', storeLink: null, managedSince, active: true }],
+    allocations: [], services: [], transaction: null,
+  } as unknown as sales.ClientDetail);
+
+  it('clientDetailToWire mengirim managed_since sebagai YYYY-MM-DD', () => {
+    const wire = clientDetailToWire(platform(new Date('2026-05-01T00:00:00.000Z')));
+    expect(wire.platforms[0].managed_since).toBe('2026-05-01');
+    expect(wire.platforms[0].managed_since).not.toMatch(/[TZ]/);
+  });
+
+  it('clientDetailToWire mengirim managed_since null EKSPLISIT, kuncinya tetap ada', () => {
+    const wire = clientDetailToWire(platform(null));
+    expect(wire.platforms[0].managed_since).toBeNull();
+    expect('managed_since' in wire.platforms[0]).toBe(true);
+  });
+
+  it('perubahan managed_since TIDAK menggeser rendering halaman klien', () => {
+    // Inilah risiko yang menahan butir (b) selama dua sesi, dan alasannya
+    // diselesaikan dengan pengukuran, bukan dengan keberanian: satu-satunya
+    // PEMBACA (`clients/[id]/page.tsx`) memakai `new Date(v).toLocaleString()`,
+    // dan bentuk date-only di-parse sebagai UTC per spec ECMAScript — instant
+    // yang sama persis dengan RFC3339 tengah malam UTC yang dikirim sebelumnya.
+    // Kalau seseorang kelak mengganti formatter-nya jadi tengah malam LOKAL,
+    // test ini merah dan ia tahu halaman klien ikut bergeser.
+    expect(new Date('2026-05-01').getTime())
+      .toBe(new Date('2026-05-01T00:00:00.000Z').getTime());
   });
 
   /**
