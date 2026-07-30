@@ -44,6 +44,8 @@ import {
   pendingBlockRequestToWire,
   poolRowToWire,
   quoteToWire,
+  remindersToWire,
+  installmentToWire,
   sessionToWire,
   strategyRequirementToWire,
   strategyToWire,
@@ -1154,6 +1156,100 @@ describe('M0 attemptDetailToWire (O43 — the detail page reads 6 top-level keys
     // Nested keys too: the qualified form and proposal lines are where the raw
     // camelCase used to leak through.
     expect(json).not.toMatch(/"(masterServiceId|proposedPrice|namaPic|versionNo)"/);
+  });
+});
+
+describe('M5 remindersToWire (due_date is a WIB DATE, not RFC3339)', () => {
+  const row = (over: Partial<finance.ReminderRow> = {}): finance.ReminderRow => ({
+    installmentId: 'INS-202607-0001',
+    transactionId: 'TRX-202607-0001',
+    clientId: 'CLI-202607-0001',
+    toko: 'Alpha Digital',
+    installmentNo: 1,
+    amount: '9000000.00',
+    dueDate: new Date('2026-07-30T00:00:00.000Z'),
+    daysOverdue: 0,
+    salesPicId: '2409230432',
+    status: '[Belum Bayar]',
+    label: '',
+    ...over,
+  });
+
+  const dash = (over: Partial<finance.ReminderDashboard> = {}): finance.ReminderDashboard => ({
+    overdue: [],
+    upcoming: [row()],
+    outstandingNoDueDate: [],
+    ...over,
+  });
+
+  it('maps a reminder row to the full Go reminderViews shape', () => {
+    expect(remindersToWire(dash()).reminders[0]).toEqual({
+      client_id: 'CLI-202607-0001',
+      toko: 'Alpha Digital',
+      transaction_id: 'TRX-202607-0001',
+      installment_id: 'INS-202607-0001',
+      installment_no: 1,
+      amount: '9000000.00',
+      due_date: '2026-07-30',
+      status: '[Belum Bayar]',
+      days_overdue: 0,
+      label: '',
+    });
+  });
+
+  it('truncates due_date to YYYY-MM-DD — the page renders it RAW', () => {
+    // finance/reminders/page.tsx renders {r.due_date} with no formatDate() in the
+    // way, so an RFC3339 string is printed verbatim into the table cell.
+    const { due_date } = remindersToWire(dash()).reminders[0];
+    expect(due_date).toBe('2026-07-30');
+    expect(due_date).not.toMatch(/T|Z/);
+    expect(due_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('buckets due_date in WIB, not UTC', () => {
+    // 2026-07-30T18:00Z is already 2026-07-31 in WIB (UTC+7). Truncating the UTC
+    // instant would report the reminder a day early; tz.dateString does not.
+    const wire = remindersToWire(dash({ upcoming: [row({ dueDate: new Date('2026-07-30T18:00:00.000Z') })] }));
+    expect(wire.reminders[0].due_date).toBe('2026-07-31');
+  });
+
+  it('concatenates overdue first (most overdue leading), then upcoming', () => {
+    const wire = remindersToWire(
+      dash({
+        overdue: [row({ installmentId: 'INS-202607-0009', daysOverdue: 5, label: '[jatuh tempo 5 hari, segera tindak lanjuti]' })],
+        upcoming: [row({ installmentId: 'INS-202607-0002' })],
+      }),
+    );
+    expect(wire.reminders.map((r) => r.installment_id)).toEqual(['INS-202607-0009', 'INS-202607-0002']);
+  });
+
+  it('keeps both list keys as arrays when empty, never null', () => {
+    // The page maps over both unguarded.
+    const wire = remindersToWire(dash({ upcoming: [] }));
+    expect(wire.reminders).toEqual([]);
+    expect(wire.outstanding_no_due_date).toEqual([]);
+  });
+
+  it('emits no camelCase key', () => {
+    const json = JSON.stringify(remindersToWire(dash()));
+    expect(json).not.toMatch(/"(clientId|transactionId|installmentId|installmentNo|dueDate|daysOverdue|outstandingNoDueDate)"/);
+  });
+
+  it('does NOT truncate InstallmentWire.due_date — that one stays RFC3339', () => {
+    // Go's instViews passes the *time.Time through unformatted and the
+    // transactions page wraps it in formatDate(). Same column, other contract.
+    const inst = installmentToWire({
+      id: 'INS-202607-0001',
+      installmentNo: 1,
+      amount: '9000000.00',
+      dueDate: new Date('2026-07-30T00:00:00.000Z'),
+      status: '[Belum Bayar]',
+      jatuhTempo: false,
+      verifiedDate: null,
+      verifiedBy: null,
+      proofOfPayment: null,
+    } as finance.InstallmentRow);
+    expect(inst.due_date).toBe('2026-07-30T00:00:00.000Z');
   });
 });
 

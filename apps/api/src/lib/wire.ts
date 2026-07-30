@@ -5,7 +5,7 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import { money } from '@cdps/core';
+import { money, tz } from '@cdps/core';
 import type { account, admin, ads, audit, auth, board, campaign, client, creative, demo, finance, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
@@ -2109,7 +2109,21 @@ export function bermasalahStatusToWire(s: finance.BermasalahStatusView): Bermasa
   };
 }
 
-/** One reminder row as web-internal's `ReminderRow` expects it. */
+/**
+ * One reminder row as web-internal's `ReminderRow` expects it.
+ *
+ * ⚠️ `due_date` is a WIB calendar DATE ("YYYY-MM-DD"), NOT RFC3339 — unlike every
+ * other date-ish key in this file. Go truncates it at the view boundary
+ * (`reminderViews`: `r.DueDate.Format("2006-01-02")`) and the reminders page
+ * renders it RAW (`{r.due_date}` — finance/reminders/page.tsx), with no
+ * `formatDate()` in the way. Sending `.toISOString()` here therefore printed
+ * `2026-07-30T00:00:00.000Z` in every row of the table.
+ *
+ * Contrast `InstallmentWire.due_date`, which IS full RFC3339: Go's `instViews`
+ * passes the `*time.Time` through unformatted, and that page wraps it in
+ * `formatDate()`. Same column name, two different wire contracts — do not
+ * "harmonise" them.
+ */
 export interface ReminderRowWire {
   client_id: string;
   toko: string;
@@ -2117,6 +2131,7 @@ export interface ReminderRowWire {
   installment_id: string;
   installment_no: number;
   amount: string;
+  /** WIB calendar date "YYYY-MM-DD" (Go `Format("2006-01-02")`), not RFC3339. */
   due_date: string;
   status: string;
   days_overdue: number;
@@ -2153,7 +2168,11 @@ export function remindersToWire(d: finance.ReminderDashboard): RemindersWire {
     installment_id: r.installmentId,
     installment_no: r.installmentNo,
     amount: r.amount,
-    due_date: r.dueDate ? r.dueDate.toISOString() : '',
+    // WIB calendar date, matching Go's Format("2006-01-02"). tz.dateString is the
+    // same bucketing the domain already applies to this very column
+    // (tz.daysBetween(r.due_date, today) drives daysOverdue), so the date shown
+    // and the day count can never disagree.
+    due_date: r.dueDate ? tz.dateString(r.dueDate) : '',
     status: r.status,
     days_overdue: r.daysOverdue,
     label: r.label,
