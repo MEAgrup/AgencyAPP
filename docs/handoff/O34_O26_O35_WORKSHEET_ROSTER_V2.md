@@ -139,3 +139,46 @@ roster lama gagal senyap.
 4. Verifikasi klaim JWT ikut merambat: `trg_sync_claims_mapping` (preseden verifikasi O33 2026-07-29).
 5. Cek DoD C-04 *"nol fixture UAT di jalur produksi"* — fixture `UAT*` era Go sudah tidak ada di repo,
    tapi **kalau live masih memuatnya**, itu yang harus dibersihkan.
+
+---
+
+## 5. Verifikasi terhadap LIVE — 2026-07-30 (ditambahkan sesudah O46 terbukti menyala)
+
+Worksheet di atas disusun dari **sheet HR**. Bagian ini mengukur akibatnya di **live `CDPS SG`**,
+karena sheet dan live bisa berbeda — dan pertanyaan §3.2 baru punya bobot kalau akibatnya terukur.
+
+| Divisi CDPS | Karyawan di live | Pemegang `level=lead` |
+|---|---|---|
+| Account | 15 | 3 |
+| Sales | 15 | 2 |
+| Creative | 11 | 1 |
+| Finance | 4 | 1 |
+| **Ads** | **11** | 🔴 **0** |
+| **KOL** | **5** | 🔴 **0** |
+| **Marketing** | **1** | 🔴 **0** |
+| **(tidak terpetakan)** | **7** | 🔴 **0** |
+| | **69** | **7** |
+
+```sql
+select coalesce(nullif(public.employee_claims(e.employee_id)->>'division',''),'(TIDAK TERPETAKAN)'),
+       count(*), count(*) filter (where public.employee_claims(e.employee_id)->>'level'='lead')
+from public.employees e group by 1 order by 1;
+```
+
+**Yang dikonfirmasi angka ini:**
+
+1. **§3.2 terbukti, dan skalanya 27 orang.** Ads (11) + KOL (5) + Marketing (1) = **17 karyawan** di
+   divisi tanpa satu pun pemegang lead, plus **7** yang tidak terpetakan sama sekali = **24 dari 69**.
+   Untuk mereka, arm *"Lead/SPV = division-wide"* yang dipasang O46 **ada di policy tapi nol
+   pemegang** — fitur yang tidak bisa diamati bekerja maupun rusak.
+2. **7 karyawan "tidak terpetakan" adalah orang yang sama** yang membuat guard `jwt_division() <> ''`
+   di `20260730120433` menjadi *load-bearing*. Selama §2.2 dan §3 belum dijawab, ketujuhnya tidak
+   mendapat scope divisi apa pun — arahnya aman (lebih sempit), tapi disebut di sini supaya tidak
+   ditemukan lagi sebagai kejutan.
+3. **`role_mappings` live = 39 baris, 5 di antaranya `level=lead`, 6 divisi.** Konsisten dengan §2
+   ("live lebih maju daripada CSV repo — tambahkan, jangan regenerasi").
+
+> **Konsekuensi urutan, dan ini mengikat:** **A4 mendahului O48.** Menyapu arm divisi ke 32 policy
+> (`O48_ANALISIS_KEPUTUSAN.md`) sebelum Ads/KOL/Marketing punya pemegang lead menghasilkan migrasi
+> yang **tidak bisa dibuktikan bekerja** di tiga divisi itu — persis kelas kesalahan O46, di mana
+> policy yang benar terlihat selesai karena tidak ada yang bisa memicunya.

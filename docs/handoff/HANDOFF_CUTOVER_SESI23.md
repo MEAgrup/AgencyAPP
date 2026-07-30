@@ -188,9 +188,9 @@ Perbaikannya perubahan rendering FE dengan tiketnya sendiri.
 | ~~2~~ | ✅ **Probe lead** — 8 skenario + klaim riil, O46 terbukti menyala (§1.2) | selesai |
 | ~~3~~ | ✅ **O49 butir (b) `managed_since`** — `tz.dateString()`, ledger `RFC3339_PENDING_DECISION` KOSONG (§1.4) | selesai |
 | 1 | **Merge PR #82** | **pemilik** |
-| 2 | **C-03 — 3 SKIP** 🔴 *jalur kritis* — `CUTOVER_C03_DEPLOYMENT_RUNBOOK.md`, dari mesin ber-akses `*.vercel.app` | **pemilik** |
-| 4 | **O48** — pakai angka **36/45** (§1.3), dan putuskan `assets_select` / `employees_select` | keputusan **pemilik**, eksekusi Claude |
-| 5 | **A4** — 12 mapping ambigu + lead Ads/Marketing/KOL + O35 + O9 → `O34_O26_O35_WORKSHEET_ROSTER_V2.md`. **Bersinggungan dengan 7 karyawan ber-divisi kosong** (§1.2) — selama tak ter-mapping, mereka tidak dapat scope divisi apa pun | **pemilik** |
+| 2 | **C-03 — 3 SKIP** 🔴 *jalur kritis* — runbook `CUTOVER_C03_DEPLOYMENT_RUNBOOK.md`, **titik masuknya `HANDOFF_C03_MESIN_VERCEL.md`** (apa yang berubah sejak runbook ditulis + satu probe end-to-end baru). Dari mesin ber-akses `*.vercel.app` | **pemilik** |
+| 4 | **A4** — daftar pertanyaan **tertutup** `O34_O26_O35_WORKSHEET_ROSTER_V2.md` §3.1–§3.6; **§5 memuat verifikasi live**: Ads/KOL/Marketing **nol pemegang lead**, 24 dari 69 karyawan terdampak. **Mendahului O48** | **pemilik** |
+| 5 | **O48** — **`O48_ANALISIS_KEPUTUSAN.md`**: angka terukur **35/45** (bukan 36), **32 kandidat nyata**, dikelompokkan A–E, **nol helper baru** (keduanya sudah live & terbukti). **Sesudah A4.** Rekomendasi: putuskan Grup C+D dulu | keputusan **pemilik + head dev**, eksekusi Claude |
 | 6 | **Backup MySQL Railway + OQ-2** · **rencana rollback** | **pemilik** |
 | 7 | **Gate GO** → **C-05** (cabut `backend/`) | **pemilik** → Claude |
 | 8 | **Probe ulang `transactions`** begitu ada transaksi riil (§1.3) | Claude, saat datanya ada |
