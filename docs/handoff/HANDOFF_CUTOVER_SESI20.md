@@ -135,8 +135,19 @@ jalur lain; hanya perubahan `wire.ts`-nya yang hilang.
 - `claude/go-retirement-progress-08ly3d` (#80) & `…-6r14e0` (#78): **0 commit di luar `main`** ✓
 - `claude/wire-parity-delivery-a-nbhiqg` (#79): **0 commit di luar `main`** ✓
 - `claude/migrate-backend-data-supabase-yno0v8` (#74) & `…-continue-kvnxno` (#73): ditutup sengaja ✓
-- Branch lain dengan commit "di luar `main`" semuanya **≥ 2026-07-28** dan berasal dari PR yang
-  di-**squash**-merge — histori branch-nya menyimpang, isinya ada di `main`. Diperiksa per berkas.
+- Branch lain dengan commit "di luar `main`" berasal dari PR yang di-**squash**-merge — histori
+  branch-nya menyimpang, isinya ada di `main`. **Diverifikasi satu per satu, bukan diasumsikan:**
+  - `claude/port-m13-health` → `packages/domain/src/health.ts` (885 baris) ada di `main`, dan
+    commit `cc0e376 "port M13 Client Health Report"` ada di histori `main` ✓
+  - `claude/port-m14-team-performance-pks0kq` → `packages/domain/src/performance.ts` (1636 baris)
+    ada, commit `b1044b2 "port M14 Team Performance"` ada di histori `main` ✓
+  - `claude/sales-staff-access-leads-bdmk5e` → subjeknya **tidak** ada di histori `main`, jadi
+    diperiksa lebih dalam. Verdict: **DIGANTIKAN, bukan hilang.** `main` menangani hal yang sama
+    dengan desain berbeda dan lebih baik — `Sidebar.tsx` merender `visibleNav(role)` dari
+    `@/lib/nav` (model navigasi ter-filter role, ter-test per role) alih-alih 168 baris logika
+    inline; sisi *"Sales staff see own leads"* ditutup RLS `20260729031525_rls_leads_campaign_scope`;
+    dan bagian `backend/**`-nya moot (read-only, dicabut di C-05) ✓
+  - Branch `handoff-*` → docs saja, isinya sudah di `main` lewat PR masing-masing ✓
 - Working tree bersih, nol PR terbuka.
 
 > **Pelajaran prosedural:** `git log --oneline origin/main..origin/<branch>` menemukan branch yang
