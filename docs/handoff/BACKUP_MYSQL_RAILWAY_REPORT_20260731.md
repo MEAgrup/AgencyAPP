@@ -139,41 +139,58 @@ masih tersisa.
 
 ## 6. Penyimpanan — **belum selesai**
 
-| Salinan | Lokasi | sha256 dicocokkan |
+**✅ SELESAI 2026-07-31 — dinyatakan pemilik.**
+
+| Butir | Status |
+|---|---|
+| Berkas diunduh & disimpan **di luar GitHub** | ✅ dinyatakan pemilik |
+| sha256 dicocokkan | ✅ dinyatakan pemilik — cocok dengan §5 |
+| Passphrase di password manager | ✅ dinyatakan pemilik |
+| Jumlah salinan | **1** — di bawah pelonggaran DoD yang disetujui (§6.1) |
+
+> **Batas yang dinyatakan, bukan ditutupi:** ketiga baris di atas adalah
+> **pernyataan pemilik**, bukan sesuatu yang bisa diverifikasi dari sesi Claude —
+> berkasnya ada di mesin pemilik. Itu memang bentuk yang benar untuk butir gate
+> semacam ini (§ DoD C-04 juga bekerja begitu), tapi ia dicatat sebagai atestasi,
+> bukan sebagai hasil pengukuran.
+
+### 6.1 Pelonggaran DoD penyimpanan — DISETUJUI pemilik 2026-07-31
+
+| DoD asli | Menjadi | Alasan |
 |---|---|---|
-| 1 | ⛔ belum — masih hanya artifact run `30607919027` (kedaluwarsa 30 hari) | |
-| 2 | ⛔ belum | |
+| **Dua** salinan di lokasi berbeda | **Satu** salinan di luar GitHub | Isi Railway terbukti **239 baris** artefak dev + seed migrasi, **nol entitas jalur uang**, dan pemilik menyatakan lead/attempt yang ada hanyalah percobaan (§4). Nilai yang dilindungi tidak sebanding dengan ritual 3-2-1 |
+| Passphrase **wajib** bisa diakses PIC kedua | Tidak wajib | Konsekuensi kehilangan passphrase = kehilangan arsip dev, bukan kehilangan data produksi |
 
-- Passphrase tersimpan di: `___` — bisa diakses PIC kedua: **belum dikonfirmasi**
+**Yang TIDAK dilonggarkan** — dan ini yang membuat pelonggaran di atas aman:
+verifikasi 4 lapis tetap syarat mutlak, sha256 tetap wajib dicocokkan, dan
+berkasnya tetap wajib keluar dari GitHub. Yang dipangkas hanya redundansi
+salinan, bukan bukti keutuhannya.
 
-**Unduh:** https://github.com/MEAgrup/AgencyAPP/actions/runs/30607919027 → artifact
-`railway-mysql-backup` (berisi `.sql.gz.enc` + `.manifest.md`). Cocokkan sha256 di §5.
+> Kalau kelak Railway ternyata memuat sesuatu yang lebih dari arsip dev,
+> pelonggaran ini **tidak berlaku surut** — ia dibenarkan oleh angka §2, dan
+> angka itu yang harus dibaca ulang lebih dulu.
 
-> **Butir 6 belum boleh dicentang.** Artifact kedaluwarsa **30 hari**; selama
-> berkasnya hanya hidup di GitHub, checklist yang tercentang tidak punya backup
-> di baliknya.
->
-> **Pelonggaran yang diusulkan** (isi Railway = 239 baris artefak dev, nol entitas
-> jalur uang, dan pemilik menyatakan datanya percobaan): cukup **satu** salinan di
-> luar GitHub, dan passphrase tidak wajib diakses PIC kedua. Butuh persetujuan
-> pemilik + entri `DECISIONS.md` — pelonggaran butir gate bukan keputusan Claude.
+## 6b. Sisa — diperbarui 2026-07-31 sesudah pemilik menutup butir 1–3
 
-## 6b. Yang MASIH menggantung — daftar tertutup per 2026-07-31
+**✅ BUTIR 6 GATE GO SELESAI.** Tiga butir yang memblokirnya sudah ditutup pemilik:
+berkas tersimpan di luar GitHub · sha256 cocok · passphrase di password manager ·
+pelonggaran DoD disetujui (§6.1).
 
-Sisi Claude **nol**. Enam butir, semuanya butuh akses atau otoritas pemilik:
+Yang tersisa **tidak memblokir butir 6** — ia kebersihan operasional:
 
-| # | Butir | Tenggat | Kenapa ia penting |
+| # | Butir | Kapan | Kenapa tetap dicatat |
 |---|---|---|---|
-| 1 | **Unduh artifact & simpan di luar GitHub** — run `30607919027` → `railway-mysql-backup` | **2026-08-30 05:54 UTC** artifact terhapus otomatis | Ini **satu-satunya** butir yang membuat butir 6 gate GO masih `[~]`. Lewat tanggal itu tanpa unduhan ⇒ backup hilang dan seluruh 5 run harus diulang |
-| 2 | **Pastikan `RAILWAY_BACKUP_PASSPHRASE` tersimpan di password manager** | sebelum butir 1 | Berkasnya terenkripsi. Tanpa passphrase ia **byte acak**, bukan backup — dan repository secret tidak bisa dibaca kembali oleh siapa pun, termasuk Anda |
-| 3 | **Setujui/tolak pelonggaran DoD penyimpanan** (§6: 1 salinan, passphrase tanpa PIC kedua) | sebelum butir 6 dicentang | Pelonggaran butir gate = keputusan pemilik, bukan Claude |
-| 4 | **Required reviewer di environment `railway-backup`** | sebelum run berikutnya | Gerbangnya **tidak menyala** di kelima run — GitHub membuat environment tanpa proteksi, menambahkan reviewer langkah tersendiri |
-| 5 | **Hapus 2 repository secret sesudah Railway dimatikan** (`RAILWAY_MYSQL_URL`, `RAILWAY_BACKUP_PASSPHRASE`) | saat C-05 | `RAILWAY_MYSQL_URL` adalah kredensial DB produksi yang tetap sah selama Railway hidup |
-| 6 | **Opsional: hapus log run `30607290620`** | kapan saja | Jendela diagnostik sempat mencetak host `*.proxy.rlwy.net` ke log repo **publik** sebelum penyamaran dipasang. Bukan kredensial (port/user/password tidak ikut) dan berumur pendek karena Railway akan mati — tapi ia tercatat di sini apa adanya |
+| 4 | **Required reviewer di environment `railway-backup`** | sebelum run berikutnya | Gerbangnya **tidak pernah menyala** di kelima run — GitHub membuat environment tanpa proteksi, menambahkan reviewer adalah langkah tersendiri. Selama kosong, siapa pun ber-akses tulis bisa memicu dump produksi tanpa persetujuan |
+| 5 | **Hapus 2 repository secret sesudah Railway dimatikan** (`RAILWAY_MYSQL_URL`, `RAILWAY_BACKUP_PASSPHRASE`) | saat C-05 | `RAILWAY_MYSQL_URL` adalah kredensial DB produksi yang tetap sah selama Railway hidup. ⚠️ **Hapus passphrase-nya BELAKANGAN** — dan hanya sesudah dipastikan ia ada di password manager, karena berkas backup-nya tidak bisa dibuka tanpa itu |
+| 6 | **Opsional: hapus log run `30607290620`** | kapan saja | Jendela diagnostik sempat mencetak host `*.proxy.rlwy.net` ke log repo **publik** sebelum penyamaran dipasang. Bukan kredensial (port/user/password tidak ikut) dan berumur pendek karena Railway akan mati — tapi ia tercatat apa adanya |
 
-> **Butir 7 gate GO (rencana rollback)** bukan bagian dari backup, tapi ia satu
-> keputusan yang sama singkatnya: draf N = 14 hari ada di
-> `RUNBOOK_BACKUP_MYSQL_RAILWAY.md` §7, tinggal disetujui atau diubah.
+> **Artifact `railway-mysql-backup` tetap boleh dibiarkan kedaluwarsa
+> 2026-08-30** — salinan yang berlaku sekarang ada di tangan pemilik, dan
+> artifact itu cuma saluran pengantar.
+>
+> **Butir 7 gate GO (rencana rollback)** kini **satu-satunya** butir gate yang
+> tersisa selain C-03 SKIP-2 dan aktor C-04. Draf N = 14 hari ada di
+> `RUNBOOK_BACKUP_MYSQL_RAILWAY.md` §7 — tinggal disetujui atau diubah.
 
 ## 7. Catatan operasional dari run ini
 

@@ -302,20 +302,21 @@ urutannya: **unduh & simpan dulu → baru matikan Railway.**
 
 ### 5.4 Checklist penyimpanan
 
-- [ ] `.enc` diunduh dan **sha256 cocok** (§5.0 langkah 4)
+> **✅ Untuk backup 2026-07-31 checklist ini sudah TERPENUHI** — lihat
+> `BACKUP_MYSQL_RAILWAY_REPORT_20260731.md` §6. Yang di bawah berlaku untuk
+> backup berikutnya, kalau kelak ada.
+
+- [ ] `.enc` diunduh dan **sha256 cocok** (§5.0 langkah 4) — **tidak dilonggarkan**
 - [ ] `manifest.md` disimpan **berdampingan** — di situ ada sha256, jumlah
       tabel/baris/trigger, dan perintah restore-nya
-- [ ] **Dua salinan di tempat berbeda** — mis. Google Drive perusahaan (folder
-      terbatas) **dan** satu drive lokal. Satu salinan di satu tempat bukan
-      backup; ia titik kegagalan tunggal yang kebetulan sedang bekerja
-- [ ] Passphrase ada di password manager dan **bisa diakses orang kedua**
-      (Yohan + Nerissa, sesuai OQ-1). Backup yang hanya bisa dibuka satu orang
-      punya satu titik kegagalan berupa manusia
-
-> **Dua butir terakhir sedang diusulkan untuk dilonggarkan** (satu salinan cukup,
-> passphrase tanpa PIC kedua) karena isi Railway terbukti 239 baris artefak dev
-> tanpa entitas jalur uang — lihat `BACKUP_MYSQL_RAILWAY_REPORT_20260731.md` §6.
-> Butuh persetujuan pemilik; sampai itu ada, checklist di atas yang berlaku.
+- [ ] Berkasnya **keluar dari GitHub** — artifact ber-retensi 30 hari bukan
+      tempat penyimpanan. **Tidak dilonggarkan**
+- [ ] **Satu** salinan cukup ~~dua salinan di tempat berbeda~~ — dilonggarkan
+      2026-07-31 (`DECISIONS.md`), berlaku **hanya** selama isi DB yang di-backup
+      terbukti bukan data produksi. Untuk DB berisi entitas jalur uang, aturan
+      dua salinan kembali berlaku
+- [ ] Passphrase ada di password manager ~~dan bisa diakses orang kedua~~ —
+      PIC kedua dilonggarkan 2026-07-31, dengan alasan yang sama
 
 > ⛔ **Jangan commit dump ke repo ini** — terenkripsi sekalipun. Repo publik,
 > dan histori git tidak bisa ditarik kembali (pelajaran O47b, SESI24 §1.4).
