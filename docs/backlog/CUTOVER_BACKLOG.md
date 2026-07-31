@@ -321,6 +321,14 @@ baru buka gate C-04.
 4. Master Service List — **alat seed SELESAI (2026-07-28), tinggal dijalankan ke live.** Seed kanonik = **`supabase/seed/msl_kalkulator.csv` (32 layanan rate card aktif)**, BUKAN `MSL_DRAFT_KOMPILASI.csv` (180 baris itu harga deal historis untuk impor W1-19, dan masih menunggu Sales Head — lihat Decided 2026-07-28). CLI: `npm run msl:seed -w @cdps/api -- --actor <NIK> [--apply]`, dry-run default, idempoten, menulis lewat `msl.createService`/`updateService` sehingga tervalidasi + terversi + teraudit. Terverifikasi end-to-end di Postgres lokal termigrasi (32 dibuat → rerun 32 dilewati; quote M0 terhitung benar di keempat `pricing_mode`). **✅ SUDAH DI-APPLY KE LIVE `CDPS SG` 2026-07-28** oleh Yohan, aktor NIK `2101180004`: dry-run `dibuat=32` (nol tulis) → apply `dibuat=32 error=0` → rerun `dilewati=32` (idempotensi terbukti). `master_services` **32 baris**, bukan 0 lagi. Sisa: QA UI `/master-services` + `/sales/kalkulator` di deployment. Runbook: `docs/handoff/MSL_KALKULATOR_VALIDASI.md` §"Cara seed ke sistem"; detail apply: `HANDOFF_CUTOVER_SESI4.md` §3.1.
 
 **Aktor produksi (keputusan manusia — masih terbuka):**
+- **O50 🟠 separuh tertutup 2026-07-31** — kesepuluh akun fixture `99000000xx` **dinonaktifkan +
+  di-ban GoTrue** (reversibel; `DECISIONS.md` 2026-07-31). Paparan login **tercabut**.
+  **Sisa keputusan:** hapus **8** akun ber-jejak-nol, atau biarkan kesepuluhnya nonaktif —
+  **`9900000001` & `9900000004` tidak boleh dihapus** (riwayat audit, aturan rumah #3).
+  ⚠️ **Pelajaran yang berlaku umum:** `UPDATE employees SET status_aktif=false` **TIDAK**
+  mencabut akses — GoTrue tetap menerbitkan token. Pakai **`set_employee_banned(nik, true)`**,
+  yang menulis `status_aktif` **dan** `auth.users.banned_until`.
+- **Headcount untuk keputusan apa pun kini 59 aktif**, bukan 69. Ini khususnya mengubah dasar **O35**.
 - **O34** butir (a)–(e) — aktor Wave 2 + lead Marketing/BD (kini masih fixture UAT).
 - **O33** — aktor Finance. **O26** — NIK + email Director. **O35** — sub-tim Creative M7 §3 (butuh 3 keputusan berurutan; gate lead-divisi existing tetap berlaku sementara).
 - **O9** — target periode M14 (non-blocking, `is_placeholder`).

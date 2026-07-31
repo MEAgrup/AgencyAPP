@@ -19,6 +19,7 @@
 | **Live `CDPS SG`** | **44 migrasi · 54 tabel · 17 `notif_events`** — dibaca dari live sesi ini |
 | **Repo vs live** | ✅ **44 = 44**, `main` juga 44 |
 | **C-03** | ✅ **SELESAI 2026-07-31** — run `30600363211`, **PASS 69 · FAIL 0** |
+| **Karyawan aktif** | **59** (turun dari 69 — 10 fixture O50 dinonaktifkan sesi ini, §1.5). **Pakai 59 untuk keputusan apa pun** |
 
 **Angka acuan** tidak berubah dari SESI24 (sesi ini **nol perubahan kode** — hanya dokumen):
 `apps/api` **313** · `@cdps/domain` **567** (+1 skip) · `@cdps/core` **113** · `@cdps/db` **9** ·
@@ -118,6 +119,38 @@ ketiga skrip **meresolusi aktor dari environment yang diuji**, bukan dari konsta
 > ⚠️ Artifact `c03-output` (id `8781965829`) **kedaluwarsa 2026-10-29**. Sesudah itu output
 > verbatim hanya ada di log run. Kalau bukti ini harus bertahan lebih lama, unduh sebelum itu.
 
+### 1.5 ✅ O50 langkah 1 — 10 akun fixture dinonaktifkan + di-ban GoTrue (reversibel)
+
+Izin pemilik: *"nonaktifkan 10 dulu"*. Dieksekusi satu transaksi lewat `set_employee_banned()`,
+**1 baris `audit_log` ber-`before`/`after` per akun** (`actor='O50-OWNER-DECISION'`).
+**Diverifikasi dua lapis:** tabel ⇒ `status_aktif=false` ×10 **DAN** GoTrue ⇒
+`banned_until='infinity'` ×10. **Headcount aktif kini 59** — angka riil.
+
+**Dua hal yang ditemukan saat mengerjakannya, dan keduanya mengubah bentuk O50:**
+
+1. **"Hapus 10" tidak bisa dijalankan apa adanya.** `9900000001` (1 lead + 2 audit) dan
+   `9900000004` (2 lead + 4 audit) sudah menulis riwayat ⇒ aturan rumah #3 melarang membuangnya.
+   Bentuk yang benar: **8 boleh dihapus, 2 wajib tombstone nonaktif.**
+2. **`status_aktif=false` saja KOSMETIK.** Ia hanya menghentikan `getMe`; GoTrue tetap
+   menerbitkan token. Pencabutan sesungguhnya ada di `set_employee_banned()` yang menulis
+   **keduanya**. Siapa pun yang kelak menonaktifkan akun lewat `UPDATE employees` langsung akan
+   mengira sudah mencabut akses padahal belum.
+
+**Cakupan role tidak putus** (diverifikasi): Sales 1 lead · Account 2 · Creative 1 · Finance 1;
+Ads/KOL/Marketing tetap dilayani 3 pemegang layered `lead` yang semuanya riil.
+
+**Membatalkannya:** `select set_employee_banned('<nik>', false);` — mengembalikan `status_aktif`
+dan mencabut ban. Sesi lama tetap harus login ulang.
+
+### 1.6 ✅ Draft rencana rollback ditulis
+
+`docs/handoff/RENCANA_ROLLBACK_CUTOVER.md`. Isi terpentingnya bukan prosedurnya, melainkan §0:
+**rollback sekarang hampir gratis** (`clients` 0 · `transactions` 0 — nol data bisnis yang hanya
+hidup di Supabase), **dan jendela itu tertutup pada transaksi riil pertama**, karena mundur
+sesudahnya menuntut importer mundur yang **sengaja tidak dibangun** (O47). Itu menjadikan gate GO
+bukan cuma *"apakah TS siap"* tapi juga *"apakah kita menerima jalan mundur tertutup"*.
+Dua bagian 🔶 TBD sampai backup MySQL (butir 4) ada.
+
 ---
 
 ## 2. Sisa pekerjaan
@@ -125,9 +158,10 @@ ketiga skrip **meresolusi aktor dari environment yang diuji**, bukan dari konsta
 | # | Butir | Siapa |
 |---|---|---|
 | 1 | **C-04** — gate berikutnya. Termasuk: bersih-bersih residu §1.2, QA UI (`/master-services`, `/sales/kalkulator`, **badge eks-SKIP-2**), aktor produksi | **pemilik** → Claude |
-| 2 | **O50** — 10 akun `99000000xx` masih aktif & bisa login. DoD C-04 mensyaratkan nol fixture di produksi. Sesudahnya: **ulang run C-03** (§1.3) | **pemilik** (izin nonaktifkan/hapus) |
-| 3 | **O35** (sub-tim Creative M7 §3) · **O9** (target M14) · **divisi dasar** 3 orang OD | **pemilik** |
-| 4 | **Backup MySQL Railway + OQ-2** · **rencana rollback** | **pemilik** |
+| 2 | ~~**O50** — 10 akun aktif & bisa login~~ 🟠 **separuh tertutup 2026-07-31, lihat §1.5.** Sisa: hapus 8 akun ber-jejak-nol atau biarkan nonaktif. Lalu **ulang run C-03** (§1.3) | **pemilik** (izin hapus permanen) |
+| 3 | **O35** (sub-tim Creative M7 §3) · **O9** (target M14) · **divisi dasar** 3 orang OD — **pakai headcount 59, bukan 69** (§1.5) | **pemilik** |
+| 4 | **Backup MySQL Railway + OQ-2** — **prasyarat rollback**, lihat `RENCANA_ROLLBACK_CUTOVER.md` §3.1 | **pemilik** |
+| 4b | ~~Rencana rollback~~ ✅ **draft ditulis 2026-07-31** — `docs/handoff/RENCANA_ROLLBACK_CUTOVER.md`. Naik jadi "bisa dijalankan" begitu butir 4 selesai | Claude |
 | 5 | **O48 Grup A/B/E** — Grup C+D sudah live | **pemilik + head dev** → Claude |
 | 6 | **Visibility repo** → privat, lalu tinjau ulang **O47b** | **pemilik** |
 | 7 | Gate GO → **C-05** (cabut `backend/`) | **pemilik** → Claude |
