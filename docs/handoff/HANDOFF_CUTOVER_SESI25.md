@@ -14,8 +14,8 @@
 |---|---|
 | **Branch kerja** | **`claude/baca-handoff-cutover-szsw80`** — di-restart dari `main` sesudah PR #85 merged |
 | **Keadaan branch** | Lihat `git log --oneline main..HEAD` dan `git status --short`. Jangan percaya sha di berkas ini |
-| **`main`** | **`df3dddb`** = Merge PR #85. Rantai: … → #82 → #84 → **#85** |
-| **PR** | #84 & #85 MERGED. Tidak ada PR terbuka saat berkas ini ditulis |
+| **`main` saat sesi ini MULAI** | `df3dddb` = Merge PR #85. Rantai: … → #82 → #84 → **#85** |
+| **PR sesi ini** | **#87** — C-03 ditutup + O50 selesai + draft rollback. **Di-merge di akhir sesi ⇒ `main` kini = Merge PR #87.** Verifikasi dengan `git log --oneline origin/main -1`, jangan percaya baris ini |
 | **Live `CDPS SG`** | **44 migrasi · 54 tabel · 17 `notif_events`** — dibaca dari live sesi ini |
 | **Repo vs live** | ✅ **44 = 44**, `main` juga 44 |
 | **C-03** | ✅ **SELESAI 2026-07-31** — run `30600363211`, **PASS 69 · FAIL 0** |
@@ -169,10 +169,25 @@ menjadi permanen** — `snapshots/scan` menyentuh seluruh karyawan aktif termasu
 nyata dari residu C-03 §5.2, dan alasan konkret untuk berpikir dua kali sebelum menjalankan smoke
 yang menulis ke produksi.
 
-🔴 **Yang tersisa untuk pemilik — keputusan redaksional, bukan teknis:** DoD C-04 *"nol fixture UAT
-di produksi"* **mustahil secara harfiah**. Usulan rumusan ulang: ***"nol fixture UAT yang aktif atau
-bisa login"*** — **sudah terpenuhi** (6 tombstone semuanya nonaktif + ban GoTrue, nol di headcount
-aktif 59). Tidak ada lagi pekerjaan O50 yang bisa dikerjakan siapa pun.
+### 1.8 ✅ DoD C-04 dirumuskan ulang & disetujui pemilik ⇒ O50 TERTUTUP PENUH
+
+*"Nol fixture UAT di produksi"* → ***"nol fixture UAT yang AKTIF atau BISA LOGIN di produksi"***.
+Rumusan lama mustahil secara harfiah (§1.7). **Yang dilonggarkan adalah keberadaan baris, BUKAN
+akses** — dan supaya tidak bisa diklaim tanpa bukti, DoD-nya diberi **tiga kueri pengukur** di
+`CUTOVER_BACKLOG.md` §C-04, ketiganya wajib nol dan **wajib dibaca dari live**:
+
+| Pengukur | Hasil 2026-07-31 |
+|---|---|
+| fixture ber-`status_aktif=true` | **0** |
+| fixture yang `banned_until` NULL / sudah lewat (masih bisa login) | **0** |
+| fixture yang masih resolve ke role lewat `role_mappings` | **0** |
+
+Ditambahkan butir anti-rembet supaya pelonggaran ini tidak dipakai membenarkan hal lain:
+*"nol data uji yang bisa disalahartikan sebagai data bisnis"* — residu C-03 tetap wajib
+dibersihkan sejauh yang diizinkan skema. `DECISIONS.md` 2026-07-31.
+
+**Risiko yang diterima sadar:** 6 baris fixture akan ikut terlihat di query `employees`
+selamanya. Filternya pola `99%`.
 
 ### 1.6 ✅ Draft rencana rollback ditulis
 
@@ -190,7 +205,7 @@ Dua bagian 🔶 TBD sampai backup MySQL (butir 4) ada.
 | # | Butir | Siapa |
 |---|---|---|
 | 1 | **C-04** — gate berikutnya. Termasuk: bersih-bersih residu §1.2, QA UI (`/master-services`, `/sales/kalkulator`, **badge eks-SKIP-2**), aktor produksi | **pemilik** → Claude |
-| 2 | ~~**O50** — 10 akun aktif & bisa login~~ ✅ **SELESAI 2026-07-31** (§1.5 + §1.7): 4 dihapus, 6 tombstone permanen, nol aktif, nol bisa login. **Sisa hanya keputusan redaksional: rumuskan ulang DoD C-04.** Lalu **ulang run C-03** (§1.3) | **pemilik** (rumusan DoD) |
+| 2 | ~~**O50**~~ ✅ **TERTUTUP PENUH 2026-07-31** (§1.5 · §1.7 · §1.8): 4 dihapus, 6 tombstone permanen, DoD C-04 dirumuskan ulang & disetujui, ketiga pengukur **0**. **Tidak ada sisa.** Tindak lanjut: **ulang run C-03 sekali** (§1.3) — slot `finance_staff` dulu `9900000007`, yang kini terhapus | Claude, sesudah pemilik approve run |
 | 3 | **O35** (sub-tim Creative M7 §3) · **O9** (target M14) · **divisi dasar** 3 orang OD — **pakai headcount 59, bukan 69** (§1.5) | **pemilik** |
 | 4 | **Backup MySQL Railway + OQ-2** — **prasyarat rollback**, lihat `RENCANA_ROLLBACK_CUTOVER.md` §3.1 | **pemilik** |
 | 4b | ~~Rencana rollback~~ ✅ **draft ditulis 2026-07-31** — `docs/handoff/RENCANA_ROLLBACK_CUTOVER.md`. Naik jadi "bisa dijalankan" begitu butir 4 selesai | Claude |

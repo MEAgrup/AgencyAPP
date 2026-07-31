@@ -327,10 +327,9 @@ baru buka gate C-04.
   `…01`/`…04` terkunci riwayat (lead + audit), `…06`/`…08`/`…09`/`…10` terkunci trigger
   immutability `performance_snapshots` (**DB menolak DELETE** — residu run C-03, lihat di bawah).
   **Nol fixture aktif · nol bisa login.**
-- 🔴 **DoD di bawah HARUS dirumuskan ulang — keputusan pemilik.** *"Nol fixture UAT di produksi"*
-  **mustahil secara harfiah**: menghapus 6 baris terakhir menuntut membongkar jaminan
-  immutability di produksi. Usulan: ***"nol fixture UAT yang aktif atau bisa login"*** — sudah
-  terpenuhi hari ini. `DECISIONS.md` 2026-07-31.
+- ✅ **DoD sudah dirumuskan ulang & disetujui pemilik 2026-07-31** — *"nol fixture UAT yang
+  **aktif atau bisa login**"*, lengkap dengan tiga kueri pengukur (lihat DoD di bawah).
+  **O50 tertutup penuh.** `DECISIONS.md` 2026-07-31.
 - ⚠️ **Pelajaran yang berlaku umum:** `UPDATE employees SET status_aktif=false` **TIDAK**
   mencabut akses — GoTrue tetap menerbitkan token. Pakai **`set_employee_banned(nik, true)`**,
   yang menulis `status_aktif` **dan** `auth.users.banned_until`.
@@ -363,7 +362,35 @@ baru buka gate C-04.
   2026-07-31 diresolusi ke fixture `9900000007`; begitu fixture hilang, discovery memilih Finance
   riil (3 orang aktif) — run ulang = konfirmasi terakhir sebelum gate GO, biayanya satu klik approval.
 
-**DoD:** ~~tak ada fixture UAT tersisa di jalur produksi~~ 🔴 **menunggu rumusan ulang pemilik** — versi harfiahnya mustahil (6 tombstone terkunci riwayat & immutability, `DECISIONS.md` 2026-07-31); usulan pengganti **"nol fixture UAT yang aktif atau bisa login"** sudah terpenuhi. Sisa residu C-03 di atas tetap wajib dibersihkan sejauh yang diizinkan skema; login riil semua role lolos; ~~MSL terisi & ber-versi~~ ✅ **terpenuhi 2026-07-28** (32 layanan ber-versi di `CDPS SG`).
+**DoD (dirumuskan ulang 2026-07-31, disetujui pemilik — `DECISIONS.md`):**
+
+1. ✅ **Nol fixture UAT yang AKTIF atau BISA LOGIN di jalur produksi.**
+   Menggantikan rumusan lama *"nol fixture UAT tersisa di jalur produksi"*, yang **mustahil
+   secara harfiah**: 6 baris terakhir terkunci — 2 oleh riwayat yang mereka tulis (aturan rumah
+   #3), 4 oleh trigger immutability `performance_snapshots`. Satu-satunya cara mencapai nol
+   harfiah adalah membongkar jaminan immutability di produksi, yang harganya jauh melebihi
+   nilai 6 baris nonaktif.
+   **Cara mengukurnya — tiga-tiganya harus nol, dan wajib dibaca dari live:**
+   ```sql
+   select count(*) from public.employees
+     where employee_id like '99%' and status_aktif;                    -- 0
+   select count(*) from public.employees e join auth.users u on u.id = e.auth_user_id
+     where e.employee_id like '99%'
+       and (u.banned_until is null or u.banned_until <= now());        -- 0
+   select count(*) from public.employees e join public.role_mappings rm
+     on upper(rm.divisi)=upper(e.divisi) and upper(rm.jabatan)=upper(e.jabatan)
+     where e.employee_id like '99%' and e.status_aktif;                -- 0
+   ```
+   **Status: TERPENUHI 2026-07-31** — 4 akun dihapus penuh, 6 tombstone semuanya
+   `status_aktif=false` + `banned_until='infinity'`, nol muncul di headcount aktif 59.
+   **Yang TIDAK ditoleransi rumusan baru ini:** fixture yang masih aktif, masih bisa login,
+   masih terhitung headcount, atau masih memegang layered role. Rumusan ini melonggarkan
+   **keberadaan baris**, bukan **akses**.
+2. **Nol data uji yang bisa disalahartikan sebagai data bisnis** — residu C-03 di atas
+   dibersihkan sejauh yang diizinkan skema, dan yang tidak bisa dihapus dicatat sebagai
+   dikenal (bukan didiamkan).
+3. **Login riil semua role lolos** di deployment.
+4. ~~MSL terisi & ber-versi~~ ✅ **terpenuhi 2026-07-28** (32 layanan ber-versi di `CDPS SG`).
 
 ---
 
