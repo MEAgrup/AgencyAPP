@@ -72,18 +72,32 @@ ia mengubah/menghapus, ini jadi skenario B untuk lapisan DB. **Tidak ada down mi
 
 ## 3. Skenario B — rollback cutover ke Go + MySQL
 
-### 3.1 Prasyarat yang BELUM ada
+### 3.1 Prasyarat — **#1 dan #2 SUDAH TERPENUHI** (diperbarui PR #86, 2026-07-31)
 
 | # | Prasyarat | Status |
 |---|---|---|
-| 1 | **Backup MySQL Railway** (butir #4) | 🔶 **belum ada** — tanpa ini §3.2 tidak bisa dijalankan |
-| 2 | **Verifikasi OQ-2**: `SELECT count(*)` per tabel MySQL, minimal `leads`, `clients`, `transactions` | 🔶 **belum ada** — OQ-2 *"terjawab untuk perencanaan, belum terverifikasi untuk dekomisi"* |
-| 3 | Konfirmasi **service Go di Railway masih hidup / masih bisa dihidupkan** | 🔶 belum diverifikasi sesi ini (Railway di luar jangkauan Claude) |
+| 1 | **Backup MySQL Railway** (butir #4) | ✅ **ADA & TERVERIFIKASI 4 LAPIS** — `cdps-mysql-railway-20260731T055157Z.sql.gz.enc`, sha256 `1b9ecffd…47cb3e`, tersimpan **di luar GitHub** oleh pemilik. Butir 6 gate GO `[x]`. Detail: `BACKUP_MYSQL_RAILWAY_REPORT_20260731.md` |
+| 2 | **Verifikasi OQ-2**: `SELECT count(*)` per tabel MySQL | ✅ **TERVERIFIKASI** — run `30604816629`: **50 tabel · 239 baris**, dan **rantai FK jalur uang NOL** (`clients` 0 · `transactions` 0 · `installments` 0 · `services` 0 · `qualified_forms` 0). Bukan 3 tabel yang diminta, melainkan **50** |
+| 3 | Konfirmasi **service Go di Railway masih hidup / masih bisa dihidupkan** | 🔶 belum diverifikasi — Railway di luar jangkauan Claude. **Tapi DB-nya terbukti hidup** (dump diambil darinya 2026-07-31 05:51 UTC) |
 | 4 | Kredensial pengguna di sistem lama masih berlaku | 🔶 belum diverifikasi |
 
 > Prasyarat #2 bukan formalitas. *"0 baris"* pada DB kosong **tidak bisa dibedakan** dari
 > *"0 baris karena querynya salah"* — kesalahan yang sudah pernah terjadi (O41). Hitungan itu
 > harus dilampirkan sebagai output, bukan diringkas jadi kalimat.
+>
+> **Cara batas itu ditutup:** skrip OQ-2 mencetak `DATABASE()`, **jumlah kolom per tabel**, dan
+> `COUNT(*)` sungguhan (bukan taksiran `information_schema.table_rows`) **berdampingan** — tabel
+> ber-23-kolom yang melaporkan 0 baris terbukti ada dan terbaca. Skrip **keluar exit 2** kalau
+> `leads`/`clients`/`transactions` tidak ditemukan, jadi "0 karena querynya salah" tidak bisa
+> lolos sebagai "0 karena kosong".
+
+> 🔴 **Yang WAJIB dibaca sebelum §3.2 langkah 3.** Backup itu **tidak bisa dipulihkan apa
+> adanya oleh `mysqldump` polos** — ketujuh trigger imutabilitas CDPS tersimpan dengan `;` di
+> ujung badannya, sehingga dump mentah memicu `ERROR 1064 … near ' */'` dan restore **mati di
+> tengah jalan**, sesudah sebagian tabel masuk. Berkas yang tersimpan **sudah diperbaiki** dan
+> restore-nya **sudah dibuktikan** ke MySQL 8.4 kosong (50 tabel · 239 baris · 7 trigger
+> identik). ⇒ **Pakai berkas yang tersimpan itu; jangan mengambil dump baru dengan `mysqldump`
+> biasa** kecuali lewat `scripts/railway-mysql-backup.sh` yang memuat perbaikannya.
 
 ### 3.2 Urutan eksekusi (setelah prasyarat lengkap)
 

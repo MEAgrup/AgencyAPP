@@ -1,0 +1,205 @@
+# ============================================================================
+# Backup MySQL Railway + OQ-2 — gate GO butir 6 (CUTOVER_BACKLOG §2).
+#
+# KENAPA WORKFLOW INI ADA
+#
+# Butir 6 tercatat "butuh akses Railway" dan karenanya menunggu seseorang
+# dengan laptop yang punya klien MySQL terpasang. C-03 sudah membuktikan premis
+# itu bisa dipatahkan (SESI24 §1.3): runner GitHub bisa menjangkau host publik
+# dan memegang secret. Yang sama berlaku di sini — Railway mengekspos MySQL
+# lewat TCP proxy publik, jadi satu-satunya yang benar-benar kurang adalah
+# kredensialnya, dan itu SATU repository secret.
+#
+# ----------------------------------------------------------------------------
+# DUA JOB, SENGAJA DIPISAH — batasnya BUKAN "menulis vs tidak"
+#
+#   oq2    — read-only, dan keluarannya hanya nama tabel + angka. Nol PII, jadi
+#            aman berjalan kapan pun dan aman diunggah sebagai artifact.
+#   backup — juga read-only terhadap Railway, tapi hasilnya adalah SELURUH ISI
+#            DB dalam satu berkas. Yang berbahaya bukan tulisnya, melainkan ke
+#            mana berkas itu pergi. Repo ini PUBLIK (SESI24 §1.4) dan artifact
+#            repo publik bisa diunduh siapa saja ⇒ enkripsi WAJIB, ditambah
+#            environment ber-reviewer dan konfirmasi eksplisit.
+#
+# ⚠️ ARTIFACT BUKAN TEMPAT PENYIMPANAN BACKUP. Ia kedaluwarsa (retensi di
+# bawah), dan backup pra-dekomisi harus hidup lebih lama dari itu. Artifact di
+# sini adalah SALURAN PENGANTAR: unduh, verifikasi sha256, simpan di tempat
+# yang Anda kendalikan. Langkah terakhir workflow mengulang peringatan ini.
+# ============================================================================
+
+name: Backup MySQL Railway (OQ-2 + dump)
+
+on:
+  # Perubahan pada skrip/workflow ini langsung diuji terhadap DB sungguhan lewat
+  # job read-only — supaya kerusakan ketahuan sekarang, bukan pada hari dekomisi.
+  push:
+    paths:
+      - '.github/workflows/railway-mysql-backup.yml'
+      - 'scripts/railway-mysql-oq2.sh'
+      - 'scripts/railway-mysql-backup.sh'
+      - 'scripts/lib/railway-mysql-common.sh'
+  workflow_dispatch:
+    inputs:
+      run_backup:
+        description: 'Ambil dump penuh? (hitungan OQ-2 selalu jalan)'
+        type: boolean
+        default: false
+      confirm_dump:
+        description: "Ketik YA — dump memuat SELURUH isi DB produksi; ia diunggah TERENKRIPSI sebagai artifact di repo PUBLIK"
+        required: false
+        default: ''
+
+jobs:
+  # --------------------------------------------------------------------------
+  # OQ-2 — hitungan baris. Read-only, nol PII di keluarannya.
+  # --------------------------------------------------------------------------
+  oq2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Secret terpasang?
+        id: gate
+        env:
+          RAILWAY_MYSQL_URL: ${{ secrets.RAILWAY_MYSQL_URL }}
+        run: |
+          if [ -z "$RAILWAY_MYSQL_URL" ]; then
+            echo "::notice::RAILWAY_MYSQL_URL belum dipasang — job dilewati tanpa gagal."
+            echo "Settings > Secrets and variables > Actions > New repository secret."
+            echo "Nilainya: Railway > proyek CDPS > service MySQL > Variables > MYSQL_PUBLIC_URL"
+            echo "(URL PUBLIK, host *.proxy.rlwy.net — BUKAN mysql.railway.internal)."
+            echo "ada=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "ada=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Klien MySQL 8 resmi, bukan mariadb-client: server Railway adalah MySQL 8
+      # dan default auth-nya caching_sha2_password.
+      - name: Pasang klien MySQL
+        if: steps.gate.outputs.ada == '1'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mysql-client
+          mysql --version
+
+      - name: OQ-2 — COUNT(*) per tabel (read-only)
+        if: steps.gate.outputs.ada == '1'
+        env:
+          RAILWAY_MYSQL_URL: ${{ secrets.RAILWAY_MYSQL_URL }}
+        run: ./scripts/railway-mysql-oq2.sh --out oq2-railway-mysql.md
+
+      - name: Unggah laporan OQ-2
+        if: always() && steps.gate.outputs.ada == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: oq2-report
+          path: oq2-railway-mysql.md
+          if-no-files-found: warn
+
+  # --------------------------------------------------------------------------
+  # BACKUP — dump penuh, terverifikasi 4 lapis, terenkripsi.
+  # --------------------------------------------------------------------------
+  backup:
+    needs: oq2
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_backup }}
+    runs-on: ubuntu-latest
+    # Pasang required reviewer di Settings > Environments > railway-backup.
+    # GitHub membuat environment ini otomatis pada run pertama TANPA proteksi —
+    # menambahkan reviewer adalah langkah tersendiri, sama seperti c03-production.
+    environment: railway-backup
+
+    # Target restore untuk verifikasi lapis 4. Sengaja MySQL 8 (bukan MariaDB):
+    # memulihkan dump MySQL 8 ke MariaDB bisa gagal pada collation dan itu akan
+    # terbaca sebagai backup rusak padahal yang salah cuma targetnya.
+    services:
+      verify:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: verify-only-not-a-secret
+          MYSQL_DATABASE: verify
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pverify-only-not-a-secret"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+
+    steps:
+      - name: Gerbang konfirmasi
+        run: |
+          if [ "${{ inputs.confirm_dump }}" != "YA" ]; then
+            echo "::error::confirm_dump harus persis 'YA'."
+            echo "Dump memuat SELURUH isi DB produksi. Ia diunggah terenkripsi ke artifact"
+            echo "run ini — dan repo ini PUBLIK, jadi artifact-nya bisa diunduh siapa saja."
+            exit 1
+          fi
+
+      - name: Secret terpasang?
+        env:
+          URL: ${{ secrets.RAILWAY_MYSQL_URL }}
+          PASS: ${{ secrets.RAILWAY_BACKUP_PASSPHRASE }}
+        run: |
+          [ -n "$URL" ]  || { echo "::error::RAILWAY_MYSQL_URL belum dipasang."; exit 1; }
+          [ -n "$PASS" ] || {
+            echo "::error::RAILWAY_BACKUP_PASSPHRASE belum dipasang."
+            echo "Buat passphrase acak panjang, SIMPAN DI PASSWORD MANAGER LEBIH DULU,"
+            echo "baru pasang sebagai repository secret. Dump terenkripsi yang"
+            echo "passphrase-nya hilang bukan backup — ia berkas acak."
+            exit 1
+          }
+
+      - uses: actions/checkout@v4
+
+      - name: Pasang klien MySQL
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mysql-client
+          mysql --version
+
+      - name: Dump + verifikasi 4 lapis + enkripsi
+        env:
+          RAILWAY_MYSQL_URL: ${{ secrets.RAILWAY_MYSQL_URL }}
+          RAILWAY_BACKUP_PASSPHRASE: ${{ secrets.RAILWAY_BACKUP_PASSPHRASE }}
+        run: |
+          mkdir -p backup-out
+          ./scripts/railway-mysql-backup.sh \
+            --outdir backup-out \
+            --verify-restore-into "mysql://root:verify-only-not-a-secret@127.0.0.1:3307/verify"
+
+      - name: Ringkasan
+        if: always()
+        run: |
+          {
+            echo "## Backup MySQL Railway"
+            echo
+            for f in backup-out/*.manifest.md; do [ -e "$f" ] && sed '1d' "$f"; done
+            echo
+            echo "### ⚠️ Artifact ini kedaluwarsa"
+            echo "Unduh, cocokkan \`sha256sum\`, lalu simpan di tempat yang Anda kendalikan."
+            echo "Selama berkas ini hanya hidup di sini, butir 6 gate GO **belum** selesai."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Unggah dump terenkripsi + manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: railway-mysql-backup
+          path: |
+            backup-out/*.enc
+            backup-out/*.manifest.md
+          retention-days: 30
+          if-no-files-found: error
+
+      # Lapis kedua. Pola unggah di atas sudah dibatasi ke *.enc, jadi dump polos
+      # tidak akan ikut terunggah — tapi kalau suatu saat ada yang menambahkan
+      # --no-encrypt, langkah ini membuat run MERAH alih-alih membiarkannya lewat
+      # sebagai "backup berhasil" yang isinya tidak pernah terenkripsi.
+      - name: Nol berkas polos yang lolos
+        if: always()
+        run: |
+          if ls backup-out/*.sql backup-out/*.sql.gz >/dev/null 2>&1; then
+            echo "::error::Ada dump TIDAK terenkripsi di backup-out — hapus artifact run ini sekarang."
+            exit 1
+          fi
+          echo "✅ hanya berkas terenkripsi + manifest yang ada."
