@@ -90,6 +90,41 @@ jobs:
             *) echo "::warning::Kode tak terduga ($code) — periksa manual sebelum menjalankan UAT." ;;
           esac
 
+      # ----------------------------------------------------------------------
+      # Validasi secret — READ-ONLY, nol tulis, dan sengaja ada DI SINI.
+      #
+      # `workflow_dispatch` baru tersedia setelah workflow ada di branch default,
+      # jadi tanpa langkah ini secret yang salah baru ketahuan SESUDAH merge.
+      # Ia hanya memanggil GET /admin/employees + /admin/role-mappings; tidak ada
+      # jalur tulis yang tersentuh, jadi aman berjalan pada setiap push.
+      #
+      # `actors.mjs` hanya mengimpor `node:crypto` ⇒ tidak perlu `npm ci`.
+      # Nilai secret tidak pernah dicetak; GitHub juga menyamarkannya di log.
+      # ----------------------------------------------------------------------
+      - uses: actions/checkout@v4
+      - name: Validasi SUPABASE_JWT_SECRET (read-only)
+        env:
+          SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}
+          BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
+        run: |
+          if [ -z "$SUPABASE_JWT_SECRET" ]; then
+            echo "::notice::Secret belum dipasang — dilewati. Probe jaringan di atas tetap sahih."
+            exit 0
+          fi
+          node -e "
+          import('./apps/api/scripts/lib/actors.mjs').then(async (m) => {
+            const r = await m.discoverRoster({
+              base: process.env.BASE, secret: process.env.SUPABASE_JWT_SECRET, bypass: process.env.BYPASS ?? '',
+            });
+            if (!r.ok) {
+              console.error('::error::SECRET SALAH atau roster tak terbaca — ' + r.note);
+              console.error('HTTP 401 => nilainya bukan yang dipakai deployment untuk memverifikasi.');
+              process.exit(1);
+            }
+            console.log('✅ SECRET BENAR — ' + r.roster.length + ' karyawan aktif, ' + r.mappingCount + ' role_mapping');
+            console.log('   layered director: ' + r.holders.director.size + ' · od: ' + r.holders.od.size);
+          });"
+
   # --------------------------------------------------------------------------
   # UAT — ketiga skrip C-03. Butuh secret; walk MENULIS ke produksi.
   # --------------------------------------------------------------------------
