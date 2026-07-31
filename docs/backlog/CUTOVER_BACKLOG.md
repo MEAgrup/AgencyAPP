@@ -350,17 +350,43 @@ baru buka gate C-04.
   belum-dibaca** di produksi (sebelumnya tabel `notifications` kosong) — itu justru bahan uji
   badge yang tidak akan ada lagi setelah dibersihkan.
 
-**Residu produksi dari run C-03 `30600363211` (2026-07-31) — wajib masuk daftar bersih-bersih:**
-- **3 lead + 3 `prospect_attempts`**: `LEAD-202607-0004` (`ZZC03 Alpha …`), `LEAD-202607-0005`
-  (`ZZC03 OD …`), dan **`LEAD-202607-0006` bernama `Smoke`** — yang terakhir **tanpa marker
-  `ZZC03`**, jadi prosedur "cari prefix `ZZC03`" di runbook **akan melewatkannya**.
-- **38 `performance_snapshots`** (`PERF-202606-0001`…`0038`, periode 2026-06, `computed_by='system'`)
-  \+ **38 notifikasi `m14.performance.published`** ke 38 karyawan riil — dihitung dari produksi
-  yang nol klien & nol transaksi, jadi angkanya benar secara mesin dan tak bermakna secara bisnis.
-- **7 baris `audit_log` TIDAK boleh dihapus** — aturan rumah #3 tanpa pengecualian untuk data uji.
-- ⚠️ **Setelah O50 dieksekusi, jalankan ulang workflow C-03 sekali.** Slot `finance_staff` run
-  2026-07-31 diresolusi ke fixture `9900000007`; begitu fixture hilang, discovery memilih Finance
-  riil (3 orang aktif) — run ulang = konfirmasi terakhir sebelum gate GO, biayanya satu klik approval.
+**Residu produksi dari run C-03 `30600363211` (2026-07-31) — status bersih-bersih:**
+
+Runbook: **`docs/handoff/RUNBOOK_BERSIH_RESIDU_UAT.md`** (menggantikan prosedur berbasis
+prefix `ZZC03`, yang terbukti melewatkan lead `Smoke`).
+
+- ✅ **LEAD & ATTEMPT DIBERSIHKAN 2026-07-31** — `leads` **6 → 0**, `prospect_attempts`
+  **6 → 0**, diverifikasi dari live. Yang dihapus **keenam-enamnya**, bukan hanya 3 residu run
+  ini: `…0004` (`ZZC03 Alpha …`), `…0005` (`ZZC03 OD …`), **`…0006` (`Smoke`, tanpa marker)**,
+  **plus** `…0001`–`…0003` (`test nama`/`prospek1`/`prospek2`, dibuat fixture `9900000001`/
+  `9900000004`) yang sudah tercatat masuk daftar ini di `DECISIONS.md` 2026-07-31 butir (b).
+  `audit_log` **tidak disentuh** (tetap 64) dan `id_sequences` **tidak di-rewind** (lead
+  berikutnya `LEAD-202607-0007`, bukan `0001` — aturan rumah #1).
+- 🔒 **38 `performance_snapshots`** (`PERF-202606-0001`…`0038`, periode 2026-06) **TIDAK BISA
+  DIHAPUS** — `performance_snapshots_no_delete`. Sudah diketahui sejak O50.
+- 🔒 **38 notifikasi `m14.performance.published`** **TIDAK BISA DIHAPUS** — **temuan baru
+  2026-07-31:** `notifications_no_delete` (aturan rumah #8, *"never deletable, only
+  read/unread"*). Dibuktikan empiris, bukan cuma dibaca dari DDL: `DELETE` ⇒
+  *"notifications is append-only/immutable: DELETE forbidden"*, ter-rollback utuh.
+  **Mitigasi yang diizinkan skema = tandai terbaca, bukan hapus** (tak ada trigger `no_update`
+  di tabel itu) — runbook §7. **Penerimanya 34 karyawan riil + 4 fixture nonaktif**, jadi 34
+  orang riil kini memegang badge berisi notifikasi sintetis. ⚠️ **Tandai terbaca hanya SETELAH
+  QA badge (eks-SKIP-2) selesai** — ke-38 baris ini satu-satunya bahan ujinya.
+- **Baris `audit_log` TIDAK boleh dihapus** — aturan rumah #3 tanpa pengecualian untuk data uji.
+  13 baris di antaranya kini menunjuk ke lead/attempt yang sudah dihapus; itu **benar**, riwayat
+  mencatat bahwa data uji itu pernah ada.
+- ⚠️ **Run ulang C-03 — DIPICU 2026-07-31, MENUNGGU APPROVAL.** Run **`30620591321`**
+  (`workflow_dispatch` di `3dfb5bb`, `run_uat=true`, `confirm_write=YA`). Job `probe`
+  ✅ **success** (deployment sehat, `SUPABASE_JWT_SECRET` benar, roster terbaca); job `uat`
+  **`waiting`** di gerbang `c03-production` — **satu klik approval pemilik**. Alasannya: slot
+  `finance_staff` run sebelumnya diresolusi ke fixture `9900000007` yang kini terhapus.
+- 🕐 **Biaya run ulang bergantung JAM — dan jendela murahnya hari ini saja.**
+  `snapshots/scan` idempoten **per periode**, menskor bulan WIB terakhir yang sudah tutup:
+  - approve **sebelum 2026-07-31 17:00 UTC** (= 2026-08-01 00:00 WIB) ⇒ periode **2026-06**,
+    seluruh 34 staf eligible sudah punya snapshot ⇒ **0 baris permanen baru**;
+  - approve **pada/sesudah** itu ⇒ periode **2026-07** ⇒ **34 snapshot + 34 notifikasi baru
+    yang permanen tidak bisa dihapus**, dan itu berlaku kapan pun sesudahnya (tidak membaik
+    dengan menunggu).
 
 **DoD (dirumuskan ulang 2026-07-31, disetujui pemilik — `DECISIONS.md`):**
 
@@ -389,6 +415,18 @@ baru buka gate C-04.
 2. **Nol data uji yang bisa disalahartikan sebagai data bisnis** — residu C-03 di atas
    dibersihkan sejauh yang diizinkan skema, dan yang tidak bisa dihapus dicatat sebagai
    dikenal (bukan didiamkan).
+   **Status 2026-07-31: TERPENUHI untuk yang bisa dihapus, sisanya tercatat.**
+   ```sql
+   select count(*) from public.leads;              -- 0 ✅ (dari 6)
+   select count(*) from public.prospect_attempts;  -- 0 ✅ (dari 6)
+   select count(*) from public.clients;            -- 0 ✅
+   select count(*) from public.transactions;       -- 0 ✅
+   ```
+   **Yang tidak bisa dihapus, dicatat sebagai dikenal:** 38 `performance_snapshots` + 38
+   notifikasi sintetis, keduanya dijaga trigger append-only. Untuk notifikasi masih ada
+   mitigasi (tandai terbaca — runbook §7); untuk snapshot tidak ada, dan itu diterima sadar.
+   ⚠️ **Butir ini akan terbuka lagi begitu run ulang `30620591321` di-approve** — walk-nya
+   menulis ~3 lead baru. Jalankan runbook sekali lagi sesudahnya; `leads` harus kembali 0.
 3. **Login riil semua role lolos** di deployment.
 4. ~~MSL terisi & ber-versi~~ ✅ **terpenuhi 2026-07-28** (32 layanan ber-versi di `CDPS SG`).
 
