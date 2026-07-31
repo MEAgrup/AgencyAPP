@@ -204,6 +204,23 @@ kontrak API-nya, bukan render badge-nya. Masukkan ke walk C-03.
 
 ## C-03 — UAT paritas end-to-end ⚠️ DIJALANKAN 2026-07-28 — **FAIL = 0, lolos BERSYARAT**
 
+> ### 🔄 PEMBARUAN 2026-07-31 — hambatannya HILANG, tinggal dijalankan
+>
+> Ketiga SKIP berakar pada satu premis: *"butuh mesin ber-akses `*.vercel.app` + secret produksi"*.
+> Premis itu menggabungkan **dua** hambatan jadi satu. Dipisah, hanya satu yang mengikat:
+> runner **GitHub Actions** menjangkau deployment dengan bebas, dan secret-nya diselesaikan
+> **repository secret** yang dipasang pemilik sekali.
+>
+> **`.github/workflows/c03-deployment-uat.yml`** menjalankan ketiganya. Terukur dari runner
+> 2026-07-31: `GET /api/healthz` ⇒ **200** · path tak dikenal ⇒ **404** (**tidak ber-proteksi**,
+> `BYPASS` tidak perlu) · secret **tervalidasi** (69 karyawan, 39 role_mapping).
+>
+> **Status:** run `30600363211` job `uat` **menunggu approval** environment `c03-production`.
+> Langkah lengkap: `HANDOFF_CUTOVER_SESI24.md` §2. **SKIP-2 (badge) tetap manual.**
+>
+> Tutorial jalur laptop (masih sahih sebagai alternatif):
+> `docs/handoff/TUTORIAL_C03_LANGKAH_DEMI_LANGKAH.md`.
+
 > **Report: `docs/handoff/CUTOVER_UAT_REPORT_20260728.md`.**
 > **PASS 77 · FAIL 0 · SKIP 3.** DoD FAIL = 0 **terpenuhi**, tetapi ketiga SKIP berakar
 > pada satu hal yang sama: walk belum pernah dijalankan terhadap **deployment Vercel**
@@ -342,7 +359,7 @@ Masih hanya `README.md`. Ditunda resmi (DECISIONS 2026-07-18) menunggu security 
 - [x] **C-00 selesai** — CI hijau kembali (run `30328573444`); `main` re-run hijau (run `30278802079`), PR #55–#57 tervalidasi.
 - [x] **C-01 selesai** — O37 tertutup di DECISIONS (opsi c).
 - [x] **C-02 selesai** — badge & halaman notifikasi hidup (2026-07-28; §C-02 di atas sudah RESOLVED, kotak ini sebelumnya tertinggal tidak tercentang).
-- [~] **C-03 — FAIL = 0 tercapai, lolos BERSYARAT:** sisa **3 SKIP** yang butuh walk dari deployment Vercel (bukan sandbox). Belum boleh dihitung penuh. **Skrip-nya sudah SIAP untuk deployment sejak 2026-07-29** (identitas aktor diresolusi dari environment, bukan hardcode — sebelumnya walk *mustahil* lolos di live; lihat §C-03) ⇒ sisanya murni eksekusi: **`docs/handoff/CUTOVER_C03_DEPLOYMENT_RUNBOOK.md`**.
+- [~] **C-03 — FAIL = 0 tercapai, lolos BERSYARAT:** sisa **3 SKIP** yang butuh walk dari deployment Vercel (bukan sandbox). Belum boleh dihitung penuh. **Skrip-nya sudah SIAP untuk deployment sejak 2026-07-29** (identitas aktor diresolusi dari environment, bukan hardcode — sebelumnya walk *mustahil* lolos di live; lihat §C-03) ⇒ sisanya murni eksekusi: **`docs/handoff/CUTOVER_C03_DEPLOYMENT_RUNBOOK.md`**. **2026-07-31: eksekusinya tidak lagi butuh laptop tertentu** — `.github/workflows/c03-deployment-uat.yml` menjalankannya dari GitHub Actions; run `30600363211` menunggu approval environment (`HANDOFF_CUTOVER_SESI24.md` §2). Tetap `[~]` sampai ketiga skrip hijau **terhadap deployment** dan SKIP-2 (badge, manual) tercentang.
 - [~] **C-04 — SEBAGIAN.** ✅ MSL 32 layanan ber-versi di live (2026-07-28) · ✅ karyawan riil: **69** di `employees`/`employee_credentials`/`auth.users`/`auth.identities` (69/69/69/69) · ✅ **O42 dieksekusi 2026-07-29** — divisi `Marketing` hidup, `role_mappings` **39**. ~~❌ **O22** impor lead historis~~ → **GUGUR 2026-07-30** (konsekuensi O47: tooling ditinggalkan, produksi mulai dari data bersih) · ❌ keputusan aktor **O34/O26/O35/O9** · ❌ konfirmasi data Railway riil-atau-UAT · ⚠️ `Marketing`/`lead` kosong (struktur organisasi, keputusan sadar).
 - [ ] Backup MySQL Railway terakhir tersimpan.
 - [ ] Rencana rollback disepakati (Railway tetap hidup N hari pasca-cutover sebelum dimatikan).
