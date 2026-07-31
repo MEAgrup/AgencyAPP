@@ -196,24 +196,126 @@ lapis yang bersangkutan **MERAH** — jadi hijaunya bukan hijau yang hampa.
 
 ---
 
-## 5. Menyimpan backup — di sinilah butir 6 benar-benar tertutup
+## 5. Mengunduh & menyimpan backup — di sinilah butir 6 benar-benar tertutup
 
 Artifact GitHub **kedaluwarsa dalam 30 hari** dan hidup di repo publik. Selama
 berkas itu hanya ada di sana, butir 6 **belum** selesai.
 
-1. Unduh artifact-nya
-2. Cocokkan checksum-nya dengan yang tertulis di manifest:
-   ```bash
-   sha256sum cdps-mysql-railway-*.sql.gz.enc
-   ```
-3. Simpan **dua salinan di tempat berbeda** — misalnya Google Drive perusahaan
-   (folder terbatas) **dan** satu drive lokal. Satu salinan di satu tempat bukan
-   backup; ia titik kegagalan tunggal yang kebetulan sedang bekerja
-4. Simpan **manifest**-nya berdampingan dengan dump — di situ ada sha256, jumlah
-   tabel/baris/trigger, dan perintah restore-nya
-5. Pastikan passphrase-nya ada di password manager, dan **bisa diakses orang
-   kedua** (Yohan + Nerissa, sesuai OQ-1). Backup yang hanya bisa dibuka satu
-   orang punya satu titik kegagalan berupa manusia
+### 5.0 Tutorial unduh — langkah demi langkah
+
+> **Backup yang sudah ada:** run **`30607919027`** · artifact
+> **`railway-mysql-backup`** · **kedaluwarsa `2026-08-30 05:54 UTC`**.
+
+**Langkah 1 — buka halaman run-nya**
+
+https://github.com/MEAgrup/AgencyAPP/actions/runs/30607919027
+
+(Atau lewat menu: repo → tab **Actions** → workflow *Backup MySQL Railway (OQ-2 +
+dump)* → pilih run yang **hijau** paling atas.)
+
+**Langkah 2 — gulir ke bawah sampai kotak `Artifacts`**
+
+Kotaknya ada di **paling bawah** halaman run, di bawah daftar job. Klik nama
+**`railway-mysql-backup`** → browser mengunduh **`railway-mysql-backup.zip`**
+(±15 KB).
+
+> Harus **login GitHub** dengan akun yang punya akses repo. Kalau kotak
+> `Artifacts` tidak muncul sama sekali, artifact-nya sudah kedaluwarsa — lihat §5.3.
+
+**Langkah 3 — ekstrak**
+
+Isinya **dua** berkas:
+
+| Berkas | Isi |
+|---|---|
+| `cdps-mysql-railway-20260731T055157Z.sql.gz.enc` | dump terenkripsi — **ini backup-nya** |
+| `cdps-mysql-railway-20260731T055157Z.manifest.md` | checksum + hitungan + cara restore |
+
+**Langkah 4 — cocokkan sha256 (jangan dilewati)**
+
+Ini yang membedakan "punya berkas" dari "punya berkas yang utuh". Hitung
+checksum berkas **`.enc`** (bukan `.zip`-nya):
+
+```bash
+# macOS / Linux
+shasum -a 256 cdps-mysql-railway-20260731T055157Z.sql.gz.enc
+```
+```powershell
+# Windows PowerShell
+Get-FileHash -Algorithm SHA256 .\cdps-mysql-railway-20260731T055157Z.sql.gz.enc
+```
+
+Harus **persis** sama dengan:
+
+```
+1b9ecffd6f0c4072cfde24b7dc25b49929480bec204c5dacd19e04a15647cb3e
+```
+
+Beda satu karakter ⇒ berkasnya rusak saat transfer. **Unduh ulang, jangan simpan.**
+
+**Langkah 5 — simpan**
+
+Taruh **`.enc` + `.manifest.md` berdampingan** di tempat yang Anda kendalikan
+(Google Drive perusahaan folder terbatas, dan/atau drive lokal). Simpan
+**terenkripsi apa adanya** — jangan didekripsi lalu diunggah dalam bentuk polos.
+
+**Langkah 6 — pastikan passphrase-nya ada di password manager**
+
+Isinya `RAILWAY_BACKUP_PASSPHRASE` yang Anda pasang sebagai repository secret.
+**GitHub tidak bisa menampilkannya kembali** — kepada siapa pun, termasuk Anda.
+Kalau ia hanya hidup di sana, berkas §5.0 ini adalah **byte acak**, bukan backup.
+
+### 5.1 Uji buka (opsional, ~1 menit — tapi ini yang membuktikan backup-nya hidup)
+
+```bash
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -md sha512 \
+  -in cdps-mysql-railway-20260731T055157Z.sql.gz.enc -out coba.sql.gz
+# openssl akan MEMINTA passphrase — mengetiknya di prompt lebih aman
+# daripada menaruhnya di perintah (perintah tersimpan di shell history)
+
+gunzip -c coba.sql.gz | head -20     # harus terbaca sebagai SQL
+rm coba.sql.gz                        # hapus lagi; simpan yang terenkripsi saja
+```
+
+Passphrase salah **gagal keras** dengan `bad decrypt` — ia tidak diam-diam
+menghasilkan berkas sampah. Jadi kalau perintah ini lolos, passphrase Anda benar.
+
+> **Windows:** `openssl` tidak ada bawaan. Pakai **Git Bash** (ikut terpasang
+> bersama Git for Windows) atau WSL — perintah di atas jalan apa adanya di sana.
+
+### 5.2 Restore penuh (kalau kelak benar-benar dibutuhkan)
+
+```bash
+gunzip coba.sql.gz
+mysql -h <host> -P <port> -u <user> -p <database> < coba.sql
+```
+
+Dump ini **sudah terbukti bisa dipulihkan** — lapis 4 memuatnya ulang ke MySQL
+8.4 kosong dan menghitung ulang seluruh 50 tabel. Dua perbaikan yang membuatnya
+mungkin ada di §4.2.
+
+### 5.3 Kalau artifact sudah terlanjur kedaluwarsa
+
+Jalankan ulang §2.2 — **selama Railway masih hidup**. Kalau Railway sudah
+dimatikan, backup itu **tidak bisa diambil ulang sama sekali**. Karena itu
+urutannya: **unduh & simpan dulu → baru matikan Railway.**
+
+### 5.4 Checklist penyimpanan
+
+- [ ] `.enc` diunduh dan **sha256 cocok** (§5.0 langkah 4)
+- [ ] `manifest.md` disimpan **berdampingan** — di situ ada sha256, jumlah
+      tabel/baris/trigger, dan perintah restore-nya
+- [ ] **Dua salinan di tempat berbeda** — mis. Google Drive perusahaan (folder
+      terbatas) **dan** satu drive lokal. Satu salinan di satu tempat bukan
+      backup; ia titik kegagalan tunggal yang kebetulan sedang bekerja
+- [ ] Passphrase ada di password manager dan **bisa diakses orang kedua**
+      (Yohan + Nerissa, sesuai OQ-1). Backup yang hanya bisa dibuka satu orang
+      punya satu titik kegagalan berupa manusia
+
+> **Dua butir terakhir sedang diusulkan untuk dilonggarkan** (satu salinan cukup,
+> passphrase tanpa PIC kedua) karena isi Railway terbukti 239 baris artefak dev
+> tanpa entitas jalur uang — lihat `BACKUP_MYSQL_RAILWAY_REPORT_20260731.md` §6.
+> Butuh persetujuan pemilik; sampai itu ada, checklist di atas yang berlaku.
 
 > ⛔ **Jangan commit dump ke repo ini** — terenkripsi sekalipun. Repo publik,
 > dan histori git tidak bisa ditarik kembali (pelajaran O47b, SESI24 §1.4).
