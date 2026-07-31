@@ -26,7 +26,7 @@
  *   - snapshot.go → the monthly batch, immutable per-staff snapshot, reads, rollup.
  */
 
-import { money, notification, permission, tz } from '@cdps/core';
+import { deeplink, money, notification, permission, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { computeMetrics, type Transition } from './task';
 import { computeBookingMetrics, BKG_QC_FAILED, BKG_ESCALATED } from './kol';
@@ -1388,6 +1388,7 @@ async function fireSnapshot(sql: Sql, staffID: string, roleType: string, per: Pe
     await notification.emit(ex.notify, {
       event: notification.EVENTS.PerformancePublished,
       entityType: 'performance_snapshot', entityId: id, actor: 'system', explicitRecipients: [staffID],
+      deepLink: deeplink.performanceSnapshot(id), // O51 — route is /performance/[id]
     });
     return true;
   });

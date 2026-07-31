@@ -30,7 +30,7 @@
  * transaction. board.ts imports none of those modules (one-way — no import cycle).
  */
 
-import { bi, notification, permission, tz } from '@cdps/core';
+import { bi, deeplink, notification, permission, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 
 /** Authenticated employee + resolved role. */
@@ -483,24 +483,29 @@ export async function onBriefReachedTerminal(tx: Queryable, actor: Actor, briefI
     if (d.dependency_type !== TYPE_BLOCKING) {
       continue; // Informational: no "unblocked" recipient (§2 Rule 5).
     }
-    const pic = await briefPIC(tx, d.target_id);
-    if (pic === '') {
+    const target = await briefPIC(tx, d.target_id);
+    if (target.pic === '') {
       continue; // no PIC assigned yet — nothing to notify.
     }
     await notification.emit(ex.notify, {
       event: notification.EVENTS.DependencySatisfied, entityType: 'dependency', entityId: d.id,
-      actor: actor.employeeId, explicitRecipients: [pic], notifyActor: false,
+      actor: actor.employeeId, explicitRecipients: [target.pic], notifyActor: false,
+      // O51: the recipient is the TARGET Brief's PIC (Phase 0 §9 catalog), so the
+      // link goes to the Brief they were waiting on — not to the `dependency` row,
+      // which has no page at all.
+      deepLink: deeplink.brief(d.target_id, target.division),
     });
   }
 }
 
-/** briefPIC returns a Brief's assigned PIC (empty if unassigned/missing). */
-async function briefPIC(tx: Queryable, briefId: string): Promise<string> {
-  const rows = await tx<{ assigned_pic: string | null }[]>`select assigned_pic from briefs where id = ${briefId}`;
+/** briefPIC returns a Brief's assigned PIC + division (PIC empty if unassigned/missing). */
+async function briefPIC(tx: Queryable, briefId: string): Promise<{ pic: string; division: string }> {
+  const rows = await tx<{ assigned_pic: string | null; assigned_division: string }[]>`
+    select assigned_pic, assigned_division from briefs where id = ${briefId}`;
   if (rows.length === 0) {
-    return '';
+    return { pic: '', division: '' };
   }
-  return rows[0].assigned_pic ?? '';
+  return { pic: rows[0].assigned_pic ?? '', division: rows[0].assigned_division };
 }
 
 // ---------------------------------------------------------------------------

@@ -29,7 +29,7 @@
  * Reference: backend/internal/module1_leads/{leads,dedup,normalize,reads}.go.
  */
 
-import { bi, notification, permission, statemachine } from '@cdps/core';
+import { bi, deeplink, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 // Single source of truth for the CDPS division label (Go keeps a module-local
 // copy in module1_leads/bulk.go; here one exported constant serves both).
@@ -399,7 +399,7 @@ export async function register(sql: Sql, actor: Actor, input: RegisterInput): Pr
             event: notification.EVENTS.LeadCoPursuit,
             entityType: 'lead', entityId: decision.joinLeadId, actor: actor.employeeId,
             explicitRecipients: decision.coOwners, notifyActor: true,
-            deepLink: `/leads/${decision.joinLeadId}`,
+            deepLink: deeplink.lead(decision.joinLeadId),
           });
           notice = MSG_LEAD_CO_WORKED;
         }
@@ -1255,7 +1255,7 @@ export async function requestDelete(
     await notification.emit(ex.notify, {
       event: notification.EVENTS.LeadDeleteRequested,
       entityType: 'lead', entityId: leadId, actor: actor.employeeId,
-      division: lead.origin_division, deepLink: `/leads/${leadId}`,
+      division: lead.origin_division, deepLink: deeplink.lead(leadId),
     });
     return {
       kind: 'ok',
@@ -1361,7 +1361,7 @@ export async function approveDelete(
     await notification.emit(ex.notify, {
       event: notification.EVENTS.LeadDeleteDecided,
       entityType: 'lead', entityId: row.lead_id, actor: actor.employeeId,
-      explicitRecipients: [row.requested_by], deepLink: `/leads/${row.lead_id}`,
+      explicitRecipients: [row.requested_by], deepLink: deeplink.lead(row.lead_id),
     });
     return { request: toDeleteRequest(updated[0]), transition };
   });
@@ -1399,7 +1399,7 @@ export async function rejectDelete(
     await notification.emit(ex.notify, {
       event: notification.EVENTS.LeadDeleteDecided,
       entityType: 'lead', entityId: row.lead_id, actor: actor.employeeId,
-      explicitRecipients: [row.requested_by], deepLink: `/leads/${row.lead_id}`,
+      explicitRecipients: [row.requested_by], deepLink: deeplink.lead(row.lead_id),
     });
     return { request: toDeleteRequest(updated[0]) };
   });

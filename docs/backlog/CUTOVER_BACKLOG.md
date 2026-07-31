@@ -358,10 +358,13 @@ baru buka gate C-04.
   badge yang tidak akan ada lagi setelah dibersihkan.
 
 **Tiga hal yang ditemukan saat menyusun runbook, dan mengubah cara QA ini dijalankan:**
-1. 🔴 **Deep link notifikasi menuju route yang tidak ada ⇒ klik kartu = 404.** Yang hidup di
-   produksi sekarang: `/performance_snapshot/PERF-202606-00xx` ×38, sedangkan route-nya
-   `/performance/[id]`. Audit statis: **hanya 2 dari 10 pola deep link punya route** (runbook §6.1).
-   Dicatat **O51** ⇒ QA-1 mencatatnya **KNOWN-FAIL**, bukan penahan.
+1. ✅ **Deep link notifikasi — DIPERBAIKI 2026-07-31 (O51).** Temuannya: **hanya 2 dari 10 pola
+   deep link punya route**, dan `/performance_snapshot/PERF-202606-00xx` hidup ×38 di produksi
+   (route-nya `/performance/[id]`). Perbaikan: modul `deeplink` + 16 call site + gate
+   `deeplink-parity.test.ts` (21 test, dibuktikan menggigit terhadap 3 bentuk regresi).
+   🟠 **Tetap KNOWN-FAIL di QA-1:** `deep_link` disimpan per baris, jadi 38 notifikasi yang sudah
+   ada tetap 404; menimpanya = menulis ulang notifikasi terkirim (aturan rumah #8), dan ke-38 itu
+   residu C-03 yang disposisinya ada di **O52**.
 2. **Badge akan menampilkan `1`, bukan `38`** — 38 notifikasi tersebar ke 38 penerima berbeda,
    1 per orang, dari 59 karyawan aktif. **21 akun tidak punya notifikasi sama sekali**, jadi QA
    wajib memilih akun dari daftar penerima dulu (kueri di runbook §2.2) — kalau tidak, "badge

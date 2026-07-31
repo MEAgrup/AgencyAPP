@@ -323,6 +323,20 @@ describeDb('band drop (Rule 12) + grace + div-zero', () => {
     // Re-run: no new snapshot ⇒ no new emission (fire-once by construction).
     await runSnapshotJob(sql, nowJul);
     expect(await drops()).toBe(1);
+
+    /**
+     * O51: the deep link must carry the CLIENT id, not the `CHR-` snapshot id.
+     * This is the one deep link the static parity gate cannot verify — both ids
+     * collapse to `/health/{}`, so `/health/CHR-202606-0001` looks correct to any
+     * path-shape check while rendering an empty page for a client that does not
+     * exist. Only a persisted-row assertion distinguishes them.
+     */
+    const rows = await sql<{ entity_id: string; deep_link: string }[]>`
+      select entity_id, deep_link from notifications
+       where recipient_employee_id = ${spv} and event_type = 'm13.client.band_drop'`;
+    expect(rows[0].deep_link).toBe(`/health/${cid}`);
+    expect(rows[0].entity_id).toMatch(/^CHR-/); // the notification still points AT the snapshot
+    expect(rows[0].deep_link).not.toContain('CHR-'); // ...but the LINK goes to the client page
   });
 
   it('grace period (Rule 8) excludes GMV in the first full month', async () => {

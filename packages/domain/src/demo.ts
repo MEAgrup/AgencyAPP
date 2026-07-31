@@ -17,7 +17,7 @@
  * Reference: backend/internal/demo/task.go.
  */
 
-import { bi, notification, permission, statemachine } from '@cdps/core';
+import { bi, deeplink, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 
 /** Authenticated employee + resolved role (from @cdps/core permission). */
@@ -196,7 +196,7 @@ export async function submitBlockRequest(
     await notification.emit(ex.notify, {
       event: notification.EVENTS.BlockRequestSubmitted,
       entityType: 'demo_task', entityId: taskId, actor: actor.employeeId,
-      division: task.division, deepLink: `/demo-tasks/${taskId}`,
+      division: task.division, deepLink: deeplink.demoTask(taskId),
     });
     return { id: reqId, taskId, reason, status: 'pending' as const };
   });
@@ -256,7 +256,7 @@ export async function approveBlockRequest(
     await notification.emit(ex.notify, {
       event: notification.EVENTS.BlockRequestDecided,
       entityType: 'demo_task', entityId: taskId, actor: actor.employeeId,
-      explicitRecipients: [rows[0].requested_by], deepLink: `/demo-tasks/${taskId}`,
+      explicitRecipients: [rows[0].requested_by], deepLink: deeplink.demoTask(taskId),
     });
     return result;
   });

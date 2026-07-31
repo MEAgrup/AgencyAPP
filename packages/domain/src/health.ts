@@ -13,7 +13,7 @@
  * Reference: backend/internal/module13_health/*.go.
  */
 
-import { money, notification, permission, tz } from '@cdps/core';
+import { deeplink, money, notification, permission, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { parseRoasTarget } from './ads';
 import { computeMetrics, type Transition } from './task';
@@ -703,6 +703,9 @@ async function fireSnapshot(sql: Sql, clientId: string, per: Period): Promise<{ 
       await notification.emit(ex.notify, {
         event: notification.EVENTS.ClientBandDrop, entityType: 'client_health_snapshot', entityId: id,
         actor: 'system', division: ACCOUNT_DIVISION, notifyActor: false,
+        // O51: the page is /health/[clientId] — it shows the client's snapshot
+        // history, so it needs the CLIENT id, not the CHR- snapshot id.
+        deepLink: deeplink.clientHealth(clientId),
       });
       dropped = true;
     }

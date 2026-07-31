@@ -1,7 +1,7 @@
 # RUNBOOK — QA UI C-04 (tiga butir yang menggantung di gate C-04)
 
-> **Status repo saat runbook ini ditulis (2026-07-31):** typecheck bersih · `@cdps/api` **313** ·
-> `@cdps/core` **113** · `@cdps/db` **9** · `@cdps/domain` **567** (+1 skip) · `web-internal` **26** ·
+> **Status repo (2026-07-31, sesudah perbaikan O51):** typecheck bersih · `@cdps/api` **334** ·
+> `@cdps/core` **130** · `@cdps/db` **9** · `@cdps/domain` **568** (+1 skip) · `web-internal` **26** ·
 > `apps/api build` **hijau** · `web-internal build` **hijau**. Tidak ada pekerjaan kode yang menahan
 > QA ini — yang tersisa memang butuh **mata di browser**.
 >
@@ -98,22 +98,26 @@ Login sebagai salah satu dari 38 penerima (§2.2).
 | 8 | Reload penuh (F5) | Badge tetap tidak ada; `/notifications` tetap menampilkan kartu itu sebagai sudah-dibaca (persisten, bukan state klien) | |
 | 9 | **Immutability** — cari cara menghapus/mengubah notifikasi dari UI | Tidak ada tombol hapus/edit sama sekali. Aturan rumah #8: notifikasi **tidak pernah bisa dihapus**, hanya read/unread | |
 
-### 3.1 🔴 Butir 10 sudah diketahui GAGAL sebelum QA dijalankan — konfirmasi saja, jangan kaget
+### 3.1 🟠 Butir 10 — kodenya SUDAH diperbaiki, tapi 38 baris lama tetap 404
 
-| # | Langkah | Yang akan terjadi | Yang seharusnya |
+| # | Langkah | Yang akan terjadi **pada 38 notifikasi yang ada sekarang** | ✅/❌ |
 |---|---|---|---|
-| 10 | Klik **badan kartu** (judul/baris meta), bukan tombol Tandai Dibaca | Navigasi ke **`/performance_snapshot/PERF-202606-00xx`** ⇒ **404** | `/performance/PERF-202606-00xx` (`/performance/[id]` ada dan hidup) |
+| 10 | Klik **badan kartu** (judul/baris meta), bukan tombol Tandai Dibaca | Navigasi ke **`/performance_snapshot/PERF-202606-00xx`** ⇒ **404**. **Ini KNOWN-FAIL, catat lalu lanjut** | |
 
-**Sebabnya sudah dilacak sampai akarnya**, jadi jangan dihabiskan waktu mendiagnosis ulang:
-`performance.ts:1389` memanggil `notification.emit` **tanpa** `deepLink`, dan fungsi SQL
-`notify_emit` mengisi defaultnya sebagai `'/' || entity_type || '/' || entity_id`
-(`supabase/migrations/20260723055732_statemachine.sql:177`). Untuk `entity_type='performance_snapshot'`
-hasilnya `/performance_snapshot/…`, sedangkan route Next-nya `/performance/[id]`.
+**O51 sudah diperbaiki di kode 2026-07-31** (`DECISIONS.md`): emitter-nya sekarang mengirim
+`/performance/<id>` lewat `deeplink.performanceSnapshot()`, dan gate
+`apps/api/src/lib/deeplink-parity.test.ts` menahan regresinya. **Tapi `deep_link` disimpan per
+baris saat notifikasi dibuat** — jadi perbaikan itu berlaku untuk notifikasi **baru**, bukan
+untuk 38 baris yang sudah ditulis run C-03. Ke-38 itu **tidak** ditimpa dengan sengaja:
+menimpanya berarti menulis ulang isi notifikasi yang sudah terkirim, sementara invariannya
+berbunyi *"satu-satunya mutasi adalah mark-as-read"* (aturan rumah #8) — dan ke-38 baris itu
+residu uji yang disposisinya ada di **O52**.
 
-**Dan ini tidak berdiri sendiri.** Audit seluruh 15 event katalog terhadap daftar route
-`web-internal` (lihat §6) menunjukkan **hanya 2 dari 10 pola deep link yang benar-benar punya
-route**. Karena itu butir 10 dicatat sebagai **FAIL yang dikenal** dengan tiket sendiri (**O51**,
-`DECISIONS.md`) — **bukan** sebagai penahan QA-1. Sembilan butir lainnya tetap harus lolos.
+⇒ **Butir 10 = KNOWN-FAIL yang diharapkan.** Sembilan butir lain di §3 tetap harus lolos.
+Kalau ingin melihat deep link yang **benar** bekerja di deployment, jalur termurah adalah
+notifikasi baru di luar `m14` (mis. `m12.block_request.submitted` dari `/demo-tasks`) — tapi itu
+**menulis ke produksi**, jadi jangan dilakukan tanpa alasan yang lebih kuat daripada rasa ingin
+tahu (§1).
 
 ---
 
@@ -239,11 +243,16 @@ padahal memang di luar jangkauan produksi.
 | **Riwayat versi > 1** MSL | nol baris `version_no > 1`; menulis versi ke-2 = keputusan harga (§4.1) | `scripts/mslseed/engine.test.ts` |
 | **`batch_ceiling` ≠ `flat`** | **kelima** layanan batch_ceiling ber-`min_qty = 1` ⇒ `ceil(q/1)×1 = q`, matematikanya identik dengan flat. **Mode ini tak bisa dibedakan lewat UI produksi** | `sales.test.ts` (fixture `min_qty` > 1) |
 | **Komisi ≠ 0** | ke-32 rule = `0%` (§5.2) | `sales.test.ts` |
-| **Deep link 8 event lain** | butuh entitas yang belum ada di produksi (0 klien · 0 transaksi · 0 lead) | belum — **O51** |
+| **Deep link 8 event lain** | butuh entitas yang belum ada di produksi (0 klien · 0 transaksi · 0 lead) | ✅ `deeplink-parity.test.ts` + `deeplink.test.ts` (**O51 diperbaiki 2026-07-31**) |
 
-### 6.1 Audit deep link katalog notifikasi (statis, dari kode — konteks O51)
+### 6.1 Audit deep link katalog notifikasi — kondisi SEBELUM perbaikan O51
 
-Hanya **2 dari 10** pola punya route. Ini yang membuat butir 10 di §3.1 bukan kecelakaan tunggal:
+Dipertahankan sebagai catatan sejarah: inilah yang ditemukan 2026-07-31, dan alasan butir 10
+§3.1 masih 404 untuk 38 baris lama. **Kolom "Status" adalah keadaan SEBELUM perbaikan** —
+kesepuluh pola sekarang sudah benar dan dijaga gate; yang tidak bisa diperbaiki retroaktif hanya
+baris yang sudah tertulis.
+
+Waktu itu hanya **2 dari 10** pola punya route:
 
 | Pola deep link yang dikirim | Sumber | Route `web-internal` | Status |
 |---|---|---|---|
@@ -256,12 +265,16 @@ Hanya **2 dari 10** pola punya route. Ini yang membuat butir 10 di §3.1 bukan k
 | `/asset/<id>` | `creative.ts` (default) | `/creative/assets/[id]` | ❌ |
 | `/client_health_snapshot/<id>` | `health.ts` (default) | `/health/[clientId]` (butuh **clientId**, bukan id snapshot) | ❌ |
 | `/live_stream_session/<id>` | `livestream.ts` (default) | `/livestream/sessions/[id]` | ❌ |
-| `/performance_snapshot/<id>` | `performance.ts` (default) | `/performance/[id]` | ❌ **hidup ×38 di produksi sekarang** |
-| `/dependency/<id>` | `board.ts` (default) | tidak ada padanan | ❌ |
+| `/performance_snapshot/<id>` | `performance.ts` (default) | `/performance/[id]` | ❌ **hidup ×38 di produksi — tetap 404 walau kode sudah diperbaiki** |
+| `/dependency/<id>` | `board.ts` (default) | tidak ada padanan | ❌ → kini ke **Brief target**, sesuai katalog (*"Target Brief PIC"*) |
 
 Pola: entity_type **snake_case tunggal** vs route **plural & bersarang di bawah divisi**. Default
 `notify_emit` tidak bisa menebak itu ⇒ perbaikannya adalah `deepLink` eksplisit di tiap emitter,
 bukan menambal fungsi SQL-nya.
+
+**Sudah dikerjakan 2026-07-31:** `packages/core/src/deeplink.ts` (satu builder per entitas) +
+16 call site di 9 modul domain + gate `deeplink-parity.test.ts`. **Dua sisa:** `/ads/briefs/[id]`
+belum ada (Brief Ads mengarah ke queue `/ads`), dan 38 baris lama di atas.
 
 ---
 

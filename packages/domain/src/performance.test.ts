@@ -348,6 +348,26 @@ describeDb('emission fire-once (Flow 6) + idempotency', () => {
     expect(await noteCount()).toBe(1);
     expect(await snapCount()).toBe(1);
   });
+
+  /**
+   * O51 regression, asserted on the PERSISTED row rather than on the builder.
+   * The emitter previously passed no `deepLink`, so `notify_emit` filled in
+   * `'/' || entity_type || '/' || entity_id` and 38 production notifications
+   * pointed at `/performance_snapshot/PERF-…`, a page that does not exist. The
+   * builder being right is necessary but not sufficient — what ships is whatever
+   * reaches this column.
+   */
+  it('persists a deep link to /performance/<id>, not /performance_snapshot/<id>', async () => {
+    const { kenny } = await kennyFixture();
+    await runSnapshotJob(sql, nowJul);
+
+    const rows = await sql<{ entity_id: string; deep_link: string }[]>`
+      select entity_id, deep_link from notifications
+       where recipient_employee_id = ${kenny} and event_type = 'm14.performance.published'`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].deep_link).toBe(`/performance/${rows[0].entity_id}`);
+    expect(rows[0].deep_link).not.toContain('performance_snapshot');
+  });
 });
 
 describeDb('storage immutability (house rule 3 / §5.4 triggers)', () => {

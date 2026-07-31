@@ -34,7 +34,7 @@
  * Reference: backend/internal/module6_account/{account,strategy}.go.
  */
 
-import { bi, notification, permission, statemachine } from '@cdps/core';
+import { bi, deeplink, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { onBriefReachedTerminal, validateBriefApproval } from './board';
 
@@ -1360,6 +1360,7 @@ export async function requestBriefRevision(
       await notification.emit(ex.notify, {
         event: notification.EVENTS.RevisionCountFlag, entityType: 'brief', entityId: briefId,
         actor: actor.employeeId, division,
+        deepLink: deeplink.brief(briefId, division), // O51 — Brief pages are per-division
       });
     }
     return res;
@@ -1586,6 +1587,7 @@ export async function logComplaint(sql: Sql, actor: Actor, clientId: string, inp
       event: notification.EVENTS.ComplaintLogged, entityType: 'complaint', entityId: id,
       actor: actor.employeeId, division: ACCOUNT_DIVISION,
       explicitRecipients: ownerAm ? [ownerAm] : [],
+      deepLink: deeplink.complaint(id), // O51
     });
 
     return {

@@ -10,6 +10,7 @@
  * - statemachine: lifecycle transitions wrapper (SQL sm_transition) ✅
  * - audit: append-only immutable audit writer + no-secret guard ✅
  * - notification: 15 FROZEN events catalog + emit wrapper (SQL notify_emit) ✅
+ * - deeplink: the one map from entity → `web-internal` page (Phase 0 §9.2, O51) ✅
  *
  * All implementations must maintain house-rule compliance (CLAUDE.md §Non-negotiable):
  * - State machines server-side enforced + exact Bahasa Indonesia [...] messages
@@ -29,3 +30,4 @@ export * as ident from './ident';
 export * as statemachine from './statemachine';
 export * as audit from './audit';
 export * as notification from './notification';
+export * as deeplink from './deeplink';

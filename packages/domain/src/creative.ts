@@ -24,7 +24,7 @@
  * Reference: backend/internal/module7_creative/{asset,review,hours,asset_read}.go.
  */
 
-import { bi, notification, permission, statemachine, tz } from '@cdps/core';
+import { bi, deeplink, notification, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { recomputeBriefRollup } from './task';
 
@@ -308,6 +308,7 @@ async function driveReviewEdge(sql: Sql, actor: Actor, assetId: string, to: stri
         await notification.emit(ex.notify, {
           event: notification.EVENTS.RevisionCountFlag, entityType: 'asset', entityId: assetId,
           actor: actor.employeeId, division,
+          deepLink: deeplink.asset(assetId), // O51
         });
       }
     }
@@ -702,6 +703,7 @@ async function fireHoursReminder(sql: Sql, assetId: string, now: Date, today: Da
       event: notification.EVENTS.HoursLoggedReminder,
       entityType: 'asset', entityId: assetId, actor: HOURS_REMINDER_SYSTEM_ACTOR,
       explicitRecipients: [r.assigned_pic], notifyActor: false,
+      deepLink: deeplink.asset(assetId), // O51
     });
     await tx`update assets set hours_reminder_sent_at = ${now} where id = ${assetId}`;
     return true;

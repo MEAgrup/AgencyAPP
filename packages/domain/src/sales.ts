@@ -28,7 +28,7 @@
  * backend/internal/admin/master_service.go (EffectiveAt / ServiceView).
  */
 
-import { bi, money, notification, permission, statemachine, tz } from '@cdps/core';
+import { bi, deeplink, money, notification, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { effectiveAt, type ServiceView } from './msl';
 import { resolveWin } from './leads';
@@ -958,7 +958,7 @@ async function emitPendingApproval(
   await notification.emit(notify, {
     event: notification.EVENTS.NegotiationPendingApproval,
     entityType: 'prospect_attempt', entityId: attemptId, actor: actor.employeeId,
-    division: SALES_DIVISION, deepLink: `/attempts/${attemptId}`,
+    division: SALES_DIVISION, deepLink: deeplink.attempt(attemptId), // O51 — route is /sales/[id]
   });
 }
 
@@ -972,7 +972,7 @@ async function emitDecision(
   await notification.emit(notify, {
     event: notification.EVENTS.NegotiationDecision,
     entityType: 'prospect_attempt', entityId: attemptId, actor: actor.employeeId,
-    explicitRecipients: [ownerId], deepLink: `/attempts/${attemptId}`,
+    explicitRecipients: [ownerId], deepLink: deeplink.attempt(attemptId), // O51
   });
 }
 

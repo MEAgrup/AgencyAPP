@@ -43,7 +43,7 @@
  * rollup,reopen,read}.go.
  */
 
-import { bi, money, notification, permission, statemachine, tz } from '@cdps/core';
+import { bi, deeplink, money, notification, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 
 /** Authenticated employee + resolved role (from @cdps/core permission). */
@@ -498,6 +498,7 @@ export async function flagDiscrepancy(sql: Sql, actor: Actor, id: string, notes:
         event: notification.EVENTS.SessionDiscrepancyFlagged,
         entityType: 'live_stream_session', entityId: id, actor: actor.employeeId,
         division: ACCOUNT_DIVISION, notifyActor: false,
+        deepLink: deeplink.liveStreamSession(id), // O51
       });
     },
   );

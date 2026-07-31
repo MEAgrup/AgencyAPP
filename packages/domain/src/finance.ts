@@ -30,7 +30,7 @@
  * Reference: backend/internal/module5_finance/{verify,contract,reads}.go.
  */
 
-import { bi, money, notification, permission, statemachine, tz } from '@cdps/core';
+import { bi, deeplink, money, notification, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { computeCommission, parseCommissionRule } from './sales';
 
@@ -689,7 +689,7 @@ export async function scanReminders(sql: Sql, now: Date = new Date()): Promise<S
           event: notification.EVENTS.InstallmentDue,
           entityType: 'installment', entityId: row.id, actor: 'SYSTEM',
           division: FINANCE_DIVISION, explicitRecipients: [row.sales_pic_id], notifyActor: false,
-          deepLink: `/transactions/${row.transaction_id}`,
+          deepLink: deeplink.transaction(row.transaction_id), // O51
         });
         await tx`update installments set overdue_notified_at = ${now} where id = ${row.id}`;
         summary.overdueNotified++;
@@ -712,7 +712,7 @@ export async function scanReminders(sql: Sql, now: Date = new Date()): Promise<S
         event: notification.EVENTS.InstallmentDue,
         entityType: 'installment', entityId: row.id, actor: 'SYSTEM',
         division: FINANCE_DIVISION, explicitRecipients: [row.sales_pic_id], notifyActor: false,
-        deepLink: `/transactions/${row.transaction_id}`,
+        deepLink: deeplink.transaction(row.transaction_id), // O51
       });
       await tx`update installments set reminder_h3_sent_at = ${now} where id = ${row.id}`;
       summary.upcomingNotified++;
@@ -730,7 +730,7 @@ export async function scanReminders(sql: Sql, now: Date = new Date()): Promise<S
       await notification.emit(ex.notify, {
         event: notification.EVENTS.ContractNotReceived,
         entityType: 'transaction', entityId: row.id, actor: 'SYSTEM',
-        division: FINANCE_DIVISION, notifyActor: false, deepLink: `/transactions/${row.id}`,
+        division: FINANCE_DIVISION, notifyActor: false, deepLink: deeplink.transaction(row.id), // O51
       });
       await tx`update transactions set contract_overdue_flagged_at = ${now} where id = ${row.id}`;
       summary.contractFlagged++;

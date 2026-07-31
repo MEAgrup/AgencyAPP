@@ -33,7 +33,7 @@
  * Reference: backend/internal/module12_task/{source,task,assign,block,metrics}.go.
  */
 
-import { bi, notification, permission, statemachine, tz } from '@cdps/core';
+import { bi, deeplink, notification, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { onBriefLeavesToDo } from './account';
 import { validateBriefSubmit } from './ads';
@@ -558,6 +558,7 @@ async function submitBlockReq(sql: Sql, actor: Actor, src: TaskSource, id: strin
     await notification.emit(ex.notify, {
       event: notification.EVENTS.BlockRequestSubmitted, entityType: src.entityType, entityId: id,
       actor: actor.employeeId, division: r.division,
+      deepLink: deeplink.task(src.entityType, id, r.division), // O51
     });
     return { id: reqId, entityId: id, reason: why, status: 'pending', requestedBy: actor.employeeId, resolvedBy: null, resolvedAt: null, createdAt: now };
   });
@@ -625,6 +626,7 @@ async function decideBlockRequest(sql: Sql, actor: Actor, src: TaskSource, id: s
     await notification.emit(ex.notify, {
       event: notification.EVENTS.BlockRequestDecided, entityType: src.entityType, entityId: id,
       actor: actor.employeeId, explicitRecipients: [reqRows[0].requested_by],
+      deepLink: deeplink.task(src.entityType, id, r.division), // O51
     });
   });
 }
