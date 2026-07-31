@@ -294,14 +294,23 @@ if [ -n "$RESTORE_URL" ]; then
   # (dan log Actions repo publik bukan tempatnya).
   if ! mysql --defaults-file="$RESTORE_CNF" "$RM_DB" <"$DUMP" 2>"$RM_TMPDIR/restore.err"; then
     sed 's/^/  /' "$RM_TMPDIR/restore.err" >&2
-    ln="$(sed -nE 's/.*[Aa]t line ([0-9]+).*/\1/p' "$RM_TMPDIR/restore.err" | head -1)"
+    # Pesan mysql memuat DUA "at line": nomor baris BERKAS lebih dulu, lalu
+    # nomor baris di dalam pernyataan itu sendiri —
+    #   ERROR 1064 … at line 257: … to use near ' */' at line 1
+    # `sed 's/.*at line ([0-9]+).*/\1/'` serakah ⇒ ia mengambil yang TERAKHIR (1),
+    # bukan yang pertama (257). Ambil kecocokan PERTAMA secara eksplisit.
+    ln="$(grep -oE 'at line [0-9]+' "$RM_TMPDIR/restore.err" | head -1 | grep -oE '[0-9]+')"
     if [ -n "$ln" ]; then
       a=$(( ln > 4 ? ln - 4 : 1 )); b=$(( ln + 2 ))
       echo "  --- isi dump baris $a–$b (baris data disensor) ---" >&2
       awk -v a="$a" -v b="$b" -v bad="$ln" 'NR>=a && NR<=b {
         mark = (NR == bad) ? " <<< DI SINI" : ""
         if ($0 ~ /^INSERT INTO/) { print "  " NR ": [INSERT " $3 " — isi disensor]" mark }
-        else { print "  " NR ": " substr($0, 1, 220) mark }
+        else {
+          line = substr($0, 1, 220)
+          gsub(/[A-Za-z0-9_.-]+\.(proxy\.rlwy\.net|railway\.internal)/, "<host-disamarkan>", line)
+          print "  " NR ": " line mark
+        }
       }' "$DUMP" >&2
     fi
     rm_die "Restore GAGAL — dump-nya tidak bisa dieksekusi. Ini justru temuan paling penting yang bisa dihasilkan skrip ini."
