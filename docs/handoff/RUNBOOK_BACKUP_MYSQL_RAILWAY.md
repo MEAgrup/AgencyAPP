@@ -152,12 +152,21 @@ mysql -e "CREATE DATABASE verify_restore"       # HARUS kosong; skrip menolak ya
 | **49 BASE TABLE** terbaca | schema CDPS memang ada di sana (49 tabel dari `backend/migrations/*.up.sql`) |
 | `leads`/`clients`/`transactions` muncul **dengan jumlah kolom** | ketiganya ada dan terbaca — jadi angka barisnya bisa dipercaya |
 | Total baris **0** | Railway memang kosong ⇒ dekomisi tidak menghilangkan entitas apa pun ⇒ OQ-2 naik dari "terjawab" jadi **terverifikasi** |
-| Total baris **bukan 0** | ⛔ **STOP.** Buka `CUTOVER_BACKLOG.md` §C-04 butir 1: entitas riil butuh rencana ekspor-impor mengikuti rantai FK `LEAD → ATTEMPT → CLIENT → SERVICE → TRX → INST`. Jangan improvisasi, catat keputusannya dulu |
+| Total baris **bukan 0** | Jangan langsung disimpulkan dua-duanya. Yang menentukan bukan totalnya, melainkan **tabel mana** — lihat di bawah |
 
-> Beberapa tabel **wajar** bukan-nol tanpa mengubah kesimpulan: `perf_kpi_weights`
-> dan `perf_period_targets` diisi oleh migrasi itu sendiri (bobot KPI & target
-> default), bukan oleh pemakaian. Yang menentukan adalah tabel entitas:
-> `leads`, `clients`, `transactions`, `installments`, `prospect_attempts`.
+**Total bukan-nol tidak otomatis berarti "ada data produksi".** Tiga golongan,
+dan hanya satu yang memblokir:
+
+| Golongan | Tabel | Artinya |
+|---|---|---|
+| **Seed migrasi** | `perf_kpi_weights`, `perf_period_targets`, `schema_migrations`, `id_sequences` | diisi oleh migrasi/runner, bukan oleh pemakaian. **Nol pengaruh** pada keputusan |
+| **Artefak pemakaian dev/UAT** | `employees`, `role_mappings`, `employee_*`, `sessions`, `audit_log`, `notifications` | jejak masa pengembangan. Sudah digantikan Supabase (yang berwenang). **Tidak memblokir** — tapi ikut hilang saat Railway mati, jadi ia alasan backup-nya diambil |
+| **Entitas jalur uang** 🔴 | `clients`, `transactions`, `installments`, `services`, `qualified_forms` | kalau **ini** bukan-nol ⇒ ⛔ **STOP.** `CUTOVER_BACKLOG.md` §C-04 butir 1: butuh rencana ekspor-impor mengikuti rantai FK `LEAD → ATTEMPT → CLIENT → SERVICE → TRX → INST`. Jangan improvisasi, catat keputusannya dulu |
+
+`leads` dan `prospect_attempts` duduk di antara golongan 2 dan 3: satu-dua baris
+hampir pasti rekaman uji, puluhan baris berarti orang benar-benar memakainya.
+**Kalau angkanya kecil, buka barisnya dan pastikan** — itu satu `SELECT`, dan ia
+memisahkan "rekaman uji" dari "prospek yang benar-benar hilang saat Railway mati".
 
 ### 4.2 Empat lapis verifikasi backup
 
