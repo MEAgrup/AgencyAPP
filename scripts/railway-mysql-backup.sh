@@ -45,6 +45,7 @@ ENCRYPT="auto"     # auto = wajib kalau passphrase ada, gagal kalau tidak
 KEEP_DEFINER=0
 DEGRADED=""
 DEFINER_NOTE=""
+STRAY_NOTE=""
 
 usage() {
   cat <<'EOF'
@@ -205,6 +206,38 @@ if [ "$KEEP_DEFINER" = "0" ] && [ "${DEFINERS:-0}" != "0" ]; then
   echo "   $DEFINER_NOTE"
 else
   DEFINER_NOTE="DEFINER dipertahankan ($DEFINERS objek) — restore butuh SUPER/SET USER"
+fi
+
+# ---------------------------------------------------------------------------
+# Titik koma nyasar sebelum penutup komentar trigger.
+#
+# Kalau badan trigger di server tersimpan BERAKHIR dengan ';', mysqldump
+# menuliskannya apa adanya di dalam komentar ber-versi:
+#
+#   /*!50003 CREATE*/ /*!50003 TRIGGER `x` … MESSAGE_TEXT = '…'; */;;
+#                                                             ↑ di sini
+#
+# dan MySQL **menolak memuat ulang dump buatannya sendiri**: ';' menutup
+# pernyataan, lalu ' */' jadi pecahan tanpa makna (ERROR 1064 … near ' */').
+# Ini sifat DB sumbernya, bukan sifat skrip ini — ketujuh trigger imutabilitas
+# CDPS di MySQL Railway kena semuanya.
+#
+# Ditemukan lewat lapis 4 pada 2026-07-31 (run 30607594670), sesudah jendela
+# diagnostik dipasang. Tanpa lapis 4, backup ini akan terlihat sehat sampai
+# hari ia dibutuhkan.
+#
+# Membuang ';' itu tidak mengubah arti trigger — ia pernyataan kosong.
+# ---------------------------------------------------------------------------
+STRAY="$(grep -cE '^/\*!50003 CREATE\*/.*TRIGGER.*; \*/;+$' "$DUMP" || true)"
+if [ "${STRAY:-0}" != "0" ]; then
+  sed -E 's@^(/\*!50003 CREATE\*/.*TRIGGER.*); (\*/;+)$@\1 \2@' "$DUMP" >"$DUMP.tmp" && mv "$DUMP.tmp" "$DUMP"
+  if grep -qE '^/\*!50003 CREATE\*/.*TRIGGER.*; \*/;+$' "$DUMP"; then
+    rm_die "Masih ada trigger ber-';' sebelum penutup komentar sesudah perbaikan — jangan pakai dump ini."
+  fi
+  STRAY_NOTE="$STRAY trigger diperbaiki: ';' nyasar sebelum '*/' dibuang (MySQL menolak memuat ulang bentuk aslinya)"
+  echo "   $STRAY_NOTE"
+else
+  STRAY_NOTE="nol trigger ber-';' nyasar"
 fi
 
 DUMP_BYTES="$(wc -c <"$DUMP" | tr -d ' ')"
@@ -389,6 +422,7 @@ FINAL_BYTES="$(wc -c <"$FINAL" | tr -d ' ')"
   echo "| Verifikasi trigger | $( [ "$DUMP_TRIGGERS" = "$SRC_TRIGGERS" ] && echo "✅ LOLOS" || echo "🔴 GAGAL" ) |"
   echo "| Restore sungguhan | $RESTORE_NOTE |"
   echo "| DEFINER | $DEFINER_NOTE |"
+  echo "| Trigger ';' nyasar | $STRAY_NOTE |"
   [ -n "$DEGRADED" ] && echo "| ⚠️ Catatan | $DEGRADED |"
   echo
   echo "## Cara memulihkan"
