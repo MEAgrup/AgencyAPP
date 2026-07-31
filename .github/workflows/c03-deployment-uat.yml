@@ -1,0 +1,167 @@
+# ============================================================================
+# C-03 — menjalankan UAT paritas terhadap deployment, DARI GitHub Actions.
+#
+# KENAPA WORKFLOW INI ADA
+#
+# Ketiga skrip C-03 tidak pernah bisa dijalankan dari sesi Claude karena dua
+# hal: gateway sandbox menolak CONNECT ke *.vercel.app, dan sesi tidak memegang
+# `SUPABASE_JWT_SECRET`. Runner GitHub Actions tidak punya batasan pertama, dan
+# batasan kedua diselesaikan oleh repository secret — yang dipasang pemilik
+# SEKALI dan tidak pernah dilihat siapa pun sesudahnya.
+#
+# Efeknya: C-03 berhenti menunggu "seseorang dengan laptop yang tepat".
+#
+# ----------------------------------------------------------------------------
+# DUA JOB, SENGAJA DIPISAH
+#
+#   probe  — nol secret, nol tulis. Membuktikan runner bisa menjangkau
+#            deployment dan apakah ia ber-proteksi. Aman dijalankan kapan pun.
+#   uat    — butuh secret, dan job walk-nya MENULIS ke DB yang ditunjuk BASE.
+#            workflow_dispatch saja, plus konfirmasi eksplisit.
+#
+# `uat` TIDAK PERNAH berjalan otomatis. Tidak ada trigger push/PR yang
+# menyentuhnya — production write tidak boleh dipicu oleh `git push`.
+# ============================================================================
+
+name: C-03 deployment UAT
+
+on:
+  # Probe ikut jalan saat berkas ini sendiri berubah, supaya perubahan padanya
+  # langsung terbukti — tapi lihat `if:` di job uat: hanya probe yang jalan.
+  push:
+    paths:
+      - '.github/workflows/c03-deployment-uat.yml'
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'URL deployment (tanpa / di akhir)'
+        required: true
+        default: 'https://agency-app-api.vercel.app'
+      run_uat:
+        description: 'Jalankan ketiga skrip UAT? (probe selalu jalan)'
+        type: boolean
+        default: false
+      confirm_write:
+        description: 'Ketik YA — walk MENULIS 2 lead ZZC03 + baris audit permanen ke DB yang ditunjuk BASE'
+        required: false
+        default: ''
+
+env:
+  BASE: ${{ github.event.inputs.base || 'https://agency-app-api.vercel.app' }}
+
+jobs:
+  # --------------------------------------------------------------------------
+  # PROBE — nol secret, nol tulis. Menjawab satu pertanyaan: apakah runner ini
+  # bisa bicara dengan deployment, dan apakah jawabannya aplikasi sungguhan?
+  # --------------------------------------------------------------------------
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Egress + kesehatan deployment
+        run: |
+          echo "BASE=$BASE"
+          code=$(curl -sS -o /tmp/health.txt -w '%{http_code}' --max-time 30 "$BASE/api/healthz" || echo 000)
+          echo "--- GET /api/healthz -> HTTP $code"
+          cat /tmp/health.txt; echo
+
+          if [ "$code" = "000" ]; then
+            echo "::error::Runner TIDAK bisa menjangkau $BASE (jaringan/DNS)."; exit 1
+          fi
+          if [ "$code" != "200" ]; then
+            echo "::error::/api/healthz menjawab $code, bukan 200."; exit 1
+          fi
+          if ! grep -q '"service":"cdps-api"' /tmp/health.txt; then
+            echo "::error::200 tapi badannya bukan cdps-api — kemungkinan halaman challenge Deployment Protection."
+            echo "Isi BYPASS (Vercel > Settings > Deployment Protection) atau matikan proteksi sementara."
+            exit 1
+          fi
+          echo "✅ Runner MENJANGKAU deployment, dan ia menjawab sebagai cdps-api."
+
+      # Membedakan "tidak ber-proteksi" dari "ber-proteksi": path yang tidak ada
+      # HARUS 404. Kalau ia malah 401/403, semua path dijawab challenge dan
+      # setiap baris UAT akan FAIL palsu sebagai "path drift".
+      - name: Status Deployment Protection
+        run: |
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "$BASE/api/path-yang-tidak-ada-c03" || echo 000)
+          echo "--- GET /api/path-yang-tidak-ada-c03 -> HTTP $code"
+          case "$code" in
+            404) echo "✅ TIDAK ber-proteksi — BYPASS tidak perlu diisi." ;;
+            401|403) echo "::warning::Deployment TER-PROTEKSI ($code). Tanpa BYPASS seluruh baris UAT akan FAIL palsu." ;;
+            *) echo "::warning::Kode tak terduga ($code) — periksa manual sebelum menjalankan UAT." ;;
+          esac
+
+  # --------------------------------------------------------------------------
+  # UAT — ketiga skrip C-03. Butuh secret; walk MENULIS ke produksi.
+  # --------------------------------------------------------------------------
+  uat:
+    needs: probe
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_uat }}
+    runs-on: ubuntu-latest
+    # Pasang required reviewer di Settings > Environments > c03-production supaya
+    # setiap run produksi butuh persetujuan manusia. GitHub membuat environment
+    # ini otomatis pada run pertama, TANPA proteksi — jadi menambahkan reviewer
+    # adalah langkah tersendiri, bukan sesuatu yang berkas ini bisa jamin.
+    environment: c03-production
+    env:
+      SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}
+      BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
+    steps:
+      - name: Gerbang konfirmasi tulis
+        run: |
+          if [ "${{ inputs.confirm_write }}" != "YA" ]; then
+            echo "::error::confirm_write harus persis 'YA'. Walk membuat 2 lead ZZC03 + baris audit_log"
+            echo "yang APPEND-ONLY (aturan rumah #3) — jejaknya permanen di DB yang ditunjuk BASE."
+            exit 1
+          fi
+
+      - name: Secret terpasang?
+        run: |
+          if [ -z "$SUPABASE_JWT_SECRET" ]; then
+            echo "::error::Repository secret SUPABASE_JWT_SECRET belum dipasang."
+            echo "Settings > Secrets and variables > Actions > New repository secret."
+            echo "Nilainya disalin dari Vercel > project agency-app-api > Settings > Environment Variables."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install workspace (root)
+        run: npm ci
+
+      # Dijalankan lebih dulu supaya secret yang salah gagal di SATU baris yang
+      # jelas, bukan sebagai 401 di setiap cek — yang terbaca seperti aplikasi
+      # rusak dan mengirim orang mencari bug yang tidak ada.
+      - name: Pra-cek — apakah secret-nya benar?
+        run: |
+          node -e "
+          import('./apps/api/scripts/lib/actors.mjs').then(async (m) => {
+            const r = await m.discoverRoster({
+              base: process.env.BASE, secret: process.env.SUPABASE_JWT_SECRET, bypass: process.env.BYPASS ?? '',
+            });
+            if (!r.ok) { console.error('::error::discovery GAGAL — ' + r.note); process.exit(1); }
+            console.log('✅ roster terbaca: ' + r.roster.length + ' karyawan aktif, ' + r.mappingCount + ' role_mapping');
+          });"
+
+      - name: 'walk house-rules (target 22/22 — menutup SKIP-1)'
+        run: node apps/api/scripts/cutover-houserules-walk.mjs 2>&1 | tee c03-walk.txt
+
+      - name: 'wave3 contract smoke (target 34/34)'
+        if: always()
+        run: node apps/api/scripts/wave3-contract-smoke.mjs 2>&1 | tee c03-wave3.txt
+
+      - name: 'auth smoke (target 13/13 — menutup SKIP-3)'
+        if: always()
+        run: node apps/api/scripts/auth-smoke.mjs 2>&1 | tee c03-auth.txt
+
+      # Diunggah apa pun hasilnya: output run yang GAGAL justru yang paling
+      # dibutuhkan untuk mendiagnosis, dan blok `aktor terpakai` di dalamnya
+      # adalah provenance yang wajib masuk report UAT.
+      - name: Unggah output ketiga skrip
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c03-output
+          path: c03-*.txt
+          if-no-files-found: warn
