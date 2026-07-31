@@ -13,8 +13,8 @@
 | Tanggal (UTC) | **2026-07-31 05:13** (OQ-2) · **05:24** (dump) |
 | Jalur | GitHub Actions — workflow `railway-mysql-backup.yml` |
 | Run OQ-2 | `30604816629` (job `oq2`, push) — laporan: artifact `oq2-report` |
-| Run dump | `30606686262` (job `backup`, `workflow_dispatch`, `confirm_dump=YA`) |
-| Commit skrip | `23cdd89` |
+| Run dump | **`30607919027`** (job `backup`, `workflow_dispatch`, `confirm_dump=YA`) — run hijau. Empat run sebelumnya gagal di lapis 4, lihat §5.1 |
+| Commit skrip | OQ-2 `23cdd89` · dump `bf524eb` (sesudah perbaikan §5.1) |
 | Server MySQL | **9.4.0** (Railway) |
 | Klien | mysql 8.0.46 (runner ubuntu-24.04) |
 | Endpoint | `<disamarkan>.proxy.rlwy.net:26954` · `DATABASE()` = `railway` · user `root` |
@@ -52,7 +52,7 @@
 | `sessions` | 7 | artefak dev/UAT |
 | `perf_period_targets` | 6 | **seed migrasi** |
 | `id_sequences` | 5 | runner ID |
-| `leads` · `prospect_attempts` | 1 · 1 | 🟠 lihat §4 — perlu satu konfirmasi pemilik |
+| `leads` · `prospect_attempts` | 1 · 1 | ✅ §4 — pemilik menyatakan keduanya percobaan |
 | `campaigns` · `demo_tasks` · `master_services` · `master_service_versions` · `employee_credentials` | 1 masing-masing | artefak dev/UAT |
 
 ### 2.3 Dua angka yang membuktikan Railway BUKAN sumber kebenaran
@@ -137,9 +137,7 @@ masih tersisa.
 > Perbaikan DEFINER tetap dipertahankan: ia menyelesaikan `ERROR 1227` yang nyata
 > pada restore oleh user tanpa `SUPER` — tapi ia bukan penyebab `ERROR 1064`.
 
-## 6. Penyimpanan — **belum selesai**
-
-**✅ SELESAI 2026-07-31 — dinyatakan pemilik.**
+## 6. Penyimpanan — ✅ **SELESAI 2026-07-31, dinyatakan pemilik**
 
 | Butir | Status |
 |---|---|
@@ -189,8 +187,9 @@ Yang tersisa **tidak memblokir butir 6** — ia kebersihan operasional:
 > artifact itu cuma saluran pengantar.
 >
 > **Butir 7 gate GO (rencana rollback)** kini **satu-satunya** butir gate yang
-> tersisa selain C-03 SKIP-2 dan aktor C-04. Draf N = 14 hari ada di
-> `RUNBOOK_BACKUP_MYSQL_RAILWAY.md` §7 — tinggal disetujui atau diubah.
+> tersisa. Dokumen resminya `RENCANA_ROLLBACK_CUTOVER.md` (PR #87) — **dua
+> prasyarat 🔶-nya (#1 backup, #2 OQ-2) ditutup oleh report ini**, dan §3.1-nya
+> sudah diperbarui. Sisa: satu angka N yang disepakati + prasyarat #3/#4.
 
 ## 7. Catatan operasional dari run ini
 

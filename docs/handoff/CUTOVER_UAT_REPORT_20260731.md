@@ -1,151 +1,268 @@
-# CUTOVER UAT REPORT — C-03 terhadap DEPLOYMENT (2026-07-31)
+# CUTOVER UAT REPORT — C-03 dijalankan terhadap **deployment produksi**
 
-> **Menutup SKIP-1 dan SKIP-3** dari `CUTOVER_UAT_REPORT_20260728.md`. Report
-> 20260728 **tidak disunting** — ia bukti historis dari sandbox; yang ini adalah
-> eksekusi terhadap **deployment Vercel sungguhan**.
+> Tanggal: **2026-07-31**. Tiket: `docs/backlog/CUTOVER_BACKLOG.md` §C-03.
+> Target uji: **`https://agency-app-api.vercel.app`** (Vercel) di atas Supabase **`CDPS SG`** — **bukan** lokal.
+> Eksekutor: GitHub Actions, workflow `.github/workflows/c03-deployment-uat.yml`.
 >
-> **FAIL = 0. Tidak ada SKIP di ketiga skrip.** Sisa C-03 tinggal **SKIP-2**
-> (badge notifikasi, manual di browser) — §4.
+> **Report `CUTOVER_UAT_REPORT_20260728.md` TIDAK disunting.** Ia bukti historis dari
+> *walk lokal* dengan 3 SKIP; berkas ini adalah eksekusi terhadap deployment yang
+> menutup dua di antaranya. Keduanya berdiri sendiri-sendiri.
 
-## 1. Provenance
+---
+
+## 0. VERDICT — **FAIL = 0**, dan SKIP-1 + SKIP-3 **tertutup di deployment**
 
 | | |
 |---|---|
-| Run | **`30600363211`** — job `probe` ✅ · job `uat` ✅ (`success`) |
-| Job `uat` | `91061496685` · disetujui environment `c03-production` 03:13 UTC · selesai 03:18 UTC |
-| Commit | **`437ac24`** (Merge PR #84) |
-| BASE | `https://agency-app-api.vercel.app` |
-| BYPASS | kosong — deployment tidak ber-proteksi (probe: path tak dikenal → 404) |
-| Roster terbaca | **69 karyawan aktif · 39 role_mapping** (identik di ketiga skrip) |
-| Dibaca oleh | Claude, dari **job log** run tersebut |
+| **PASS** | **69** (22 + 34 + 13) |
+| **FAIL** | **0** |
+| **SKIP** | **1** — hanya **SKIP-2** (badge notifikasi di FE ter-deploy), lihat §4 |
 
-> **Cara ini dibaca tanpa mengunduh artifact.** Artifact `c03-output` tidak bisa
-> diunduh dari sesi Claude (gateway menolak penyimpanan blob GitHub, 403), **tapi
-> job log bisa** — dan ketiga skrip mencetak seluruh hasilnya ke stdout. Artifact
-> tetap ada sebagai arsip (ID `8781965829`, kedaluwarsa **2026-10-29**).
+Target §2 handoff SESI24 — **22/22 · 34/34 · 13/13, FAIL = 0 tanpa SKIP** — **tercapai
+pada ketiga skrip**. Tidak ada satupun baris `SKIP` di output mereka.
 
-### 1.1 Aktor terpakai — dan kenapa NIK/nama TIDAK ditulis di sini
+**Yang berubah maknanya dibanding 2026-07-28.** Report itu membuktikan **kode + skema**;
+ketiga SKIP-nya berakar pada satu hal yang sama — walk belum pernah menyentuh deployment.
+Yang kini ikut terbukti adalah lapisan yang dulu kosong: **konfigurasi env Vercel, kunci
+JWT produksi, dan perilaku pooler Supabase**. Itulah isi C-03 yang sebenarnya, dan itulah
+sebabnya "lolos bersyarat" bisa dicabut.
 
-Skrip mencetak blok `aktor terpakai` lengkap dengan **NIK + nama** keenam orang.
-`HANDOFF_CUTOVER_SESI24.md` §1.4 melarang menambah NIK/PII baru ke berkas repo
-selama repo masih **publik**. Dua aturan itu bertabrakan, jadi diselesaikan
-begini: **peran, divisi, dan cara resolusinya dicatat** (itulah yang membuat run
-reproducible), **identitasnya tidak** — ia hidup di job log run `30600363211` dan
-di live, keduanya bisa dibuka kapan saja.
+**Sisa SKIP-2 tidak menahan C-03.** DoD C-03 berbunyi *"report tersimpan, FAIL = 0, tiap
+SKIP beralasan tertulis"* — ketiganya terpenuhi. SKIP-2 adalah **QA UI browser**, sekelas
+dengan QA UI `/master-services` + `/sales/kalkulator` yang memang sudah tercatat sebagai
+sisa **C-04**; ia dipindahkan ke sana, bukan dihapus. Lihat §4 dan `DECISIONS.md` 2026-07-31.
 
-| Slot | Divisi/role | Resolusi | NIK |
+🟠 **Dua temuan residu produksi — bukan FAIL, tapi jangan dilewat: §5.** Jejak tulis run ini
+**lebih besar** daripada yang diumumkan sebelum approval (bukan hanya "2 lead `ZZC03`").
+
+---
+
+## 1. Provenance — supaya run ini bisa dipertanggungjawabkan
+
+| | |
+|---|---|
+| **Run** | `30600363211` · attempt 1 · run number 4 · `workflow_dispatch` |
+| **Job `probe`** | `91061467877` — ✅ success (02:58:35 → 02:58:46 UTC) |
+| **Job `uat`** | `91061496685` — ✅ success (03:13:09 → 03:18:01 UTC) |
+| **Gerbang** | environment `c03-production`, required reviewer — **di-approve pemilik**; job tertahan `waiting` 02:58 → 03:13 UTC |
+| **`confirm_write`** | `YA` (gerbang input workflow, dicek sebelum langkah apa pun) |
+| **Commit yang diuji** | `437ac24a2510e98d20fee4ea602c315d1849f85c` (= Merge PR #84) |
+| **`BASE`** | `https://agency-app-api.vercel.app` |
+| **`BYPASS`** | **kosong** — deployment terbukti tidak ber-proteksi (`probe`: path tak dikenal → 404, bukan 401/403) |
+| **Artifact** | `c03-output` id `8781965829`, 3 berkas `.txt`, 2623 B, sha256 `3fb42ac2…63619b`, **kedaluwarsa 2026-10-29** |
+| **Node / runner** | node 22.23.1 · `npm ci` 404 paket · ubuntu-24.04 |
+
+Pra-cek discovery sebelum skrip pertama: **`69 karyawan aktif, 39 role_mapping`** — dibaca
+oleh runner dari deployment, jadi ia sekaligus membuktikan secret cocok **dan** deployment
+menunjuk DB yang benar.
+
+> ⚠️ **Artifact kedaluwarsa 2026-10-29.** Sesudah itu output verbatim ketiga skrip hanya
+> hidup di log run. Kalau bukti ini harus bertahan lebih lama dari itu, unduh dan simpan
+> di luar GitHub sebelum tanggal tersebut.
+
+---
+
+## 2. Blok `aktor terpakai` — **diredaksi sebagian, dan ini alasannya**
+
+`HANDOFF_CUTOVER_SESI24.md` §2 meminta blok `aktor terpakai` disalin utuh (provenance =
+syarat reproducible). §1.4 dokumen yang sama melarang **menambah NIK/PII baru ke berkas
+repo** selama repo masih publik. **Diperiksa hari ini lewat API: repo MASIH publik**
+(`"private": false`, `"visibility": "public"`, `allow_forking: true`). Larangan itu menang,
+jadi blok di bawah dibawa masuk **tanpa nama orang**, dan NIK yang belum pernah ada di repo
+diganti placeholder.
+
+**Yang tidak hilang:** blok verbatim — lengkap dengan NIK dan nama — ada di artifact
+`c03-output` dan di log run (§1). Dan aktor bukan konstanta yang perlu dihafal: ketiga skrip
+**meresolusinya dari environment yang diuji** (`/admin/employees` ⋈ `/admin/role-mappings`),
+jadi run ulang terhadap DB yang sama memilih orang yang sama tanpa membaca berkas ini.
+
+### 2.1 `cutover-houserules-walk` — 6 slot aktor
+
+| Slot | NIK | Jabatan HRIS | Cara resolusi |
 |---|---|---|---|
-| `sales_staff` | Sales / staff | `[role-match]` | `23…0294` |
-| `sales_lead` | Sales / lead | `[role-match]` | `21…0004` |
-| `account_staff` | Account / staff | `[role-match]` | `24…0431` |
-| `finance_staff` | Finance / staff | `[role-match]` | `99…0007` — ⚠️ **fixture QA**, lihat §5 |
-| `director` | Management / lead **+director** | `[layered:director]` | `20…0002` |
-| `od` | Management / lead **+od** | `[layered:od]` | `25…0493` |
+| `sales_staff` | `‹NIK-A›` | Sales / staff | `[role-match]` |
+| `sales_lead` | `2101180004` | Sales / lead | `[role-match]` |
+| `account_staff` | `2409200431` | Account / staff | `[role-match]` |
+| `finance_staff` | **`9900000007`** 🟠 | Finance / staff | `[role-match]` — **fixture O50**, lihat §5.3 |
+| `director` | `200000002` | Management / lead **+director** | `[layered:director]` |
+| `od` | `2501140493` | Management / lead **+od** | `[layered:od]` |
 
-Keenamnya **diresolusi dari environment**, bukan di-hardcode — itu perbaikan
-2026-07-29 yang membuat walk mungkin lolos di live sama sekali.
+> `‹NIK-A›` = satu-satunya NIK dalam run ini yang belum pernah muncul di repo. Lima sisanya
+> sudah ada di repo sebelum hari ini, jadi menuliskannya lagi tidak menambah paparan apa pun.
 
-## 2. Hasil — ketiganya hijau
+**Slot `od` = `2501140493` bukan kebetulan.** Ia salah satu dari tiga orang yang baru diberi
+layered `director` kemarin (C-03 §7). Ia lolos cek *"OD boleh membaca di semua divisi"* **dan**
+cek *"pintu registrasi lead tak ber-gate role"* dari deployment — artinya grant kemarin bukan
+sekadar baris tabel, ia **merambat ke JWT dan sampai ke aplikasi**.
 
-| Skrip | Target | Hasil | Menutup |
-|---|---|---|---|
-| `cutover-houserules-walk.mjs` | 22/22 | ✅ **22/22 checks passed** | **SKIP-1** |
-| `wave3-contract-smoke.mjs` | 34/34 | ✅ **34/34 endpoints wired** | — |
-| `auth-smoke.mjs` | 13/13 | ✅ **13/13 checks passed** | **SKIP-3** |
+### 2.2 `wave3-contract-smoke` — 1 aktor
 
-### 2.1 Walk aturan rumah — 22/22
+`200000002` (Management/lead **+director**) `[layered:director]`.
 
-Aktor: keenam slot §1.1. Yang terbukti **terhadap deployment**, bukan sandbox:
+### 2.3 `auth-smoke` — 1 aktor
 
-- **R1 ID** — `LEAD-202607-0004` dan `PRSP-202607-0004` cocok `PREFIX-YYYYMM-NNNN`
-- **R2 pesan BI** — lead tanpa field wajib → 400 `[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]` **verbatim**
-- **R3 state machine** — transisi ilegal `New Lead→Qualified` ditolak · transisi sah `New Lead→Contacted` 200 · pengulangan → 409 `[transisi status tidak diizinkan]`
-- **R4 imutabilitas** — `audit_log`/`notifications` tanpa jalur UPDATE/DELETE (diverifikasi terpisah oleh `supabase/tests/immutability_checks.sql`)
-- **R5 field turunan** — `total_sales` tidak bisa ditulis lewat PATCH klien
-- **R6 MSL + IDR** — **32 layanan** terbaca; quote-preview merender `Rp. 6.000.000,00 | Rp. 0,00 | Rp. 6.000.000,00`
-- **R7 div-by-zero** — rollup tim kosong → `"average_display":"—"`, bukan error
-- **PERM** — Account staff ditolak di Sales Pool (403 `[anda tidak memiliki akses untuk melakukan transisi ini]`) · Sales staff boleh baca · **Sales lead baca lead staff se-divisi (scope divisi)** · OD baca lintas divisi · Director akses penuh
-- **O37** — pemilik lead bisa baca; aktor lintas-scope **404** (deviasi yang disetujui, bukan 403)
-- **PARITY** — pintu registrasi lead tak ber-gate role, **sama seperti Go** (dinyatakan eksplisit sebagai bukan regresi)
-- **C-02 notifikasi** — tanpa auth → 401 · kontrak `{ data, unread_count }` terpenuhi · id malformed → 400 `[id tidak valid]`
+`‹NIK-A›` (Sales/staff) `[role-match]`.
 
-> Baris **`PERM Sales lead … (scope divisi)`** adalah cek yang ditambahkan
-> 2026-07-29 (target naik 21→22) karena tingkat `lead` belum pernah diuji walau
-> C-03 mengklaim mencakup Role Matrix. Ia **lulus terhadap deployment**.
+---
 
-### 2.2 Wave 3 contract smoke — 34/34
+## 3. Hasil per skrip
 
-Aktor: `director` (`[layered:director]`). Seluruh 34 endpoint M11/M13/M14 +
-Live-Stream + health + performance menjawab **respons domain**, bukan 404 routing:
-`marketing/campaigns` (9), `performance-dashboard`, `briefs`/`sessions` (9),
-`brief-queue`, `health` (6), `performance` (8).
+### 3.1 `cutover-houserules-walk.mjs` → **22/22 PASS** (menutup SKIP-1)
 
-Yang menjawab **200** (jalur hidup dengan data nyata): `GET marketing/campaigns` ·
-`performance-dashboard` · `divisions/Live Stream/brief-queue` ·
-`health/snapshots/scan` · `performance/snapshots/scan` · `staff/…/performance/trend` ·
-`performance/teams/Creative` · `config/weights` · `config/targets`.
-
-Sisanya 404/400 **domain response** — entitas contoh (`CMP-…0001`, `BRF-…0001`,
-`LSS-…0001`, `CLI-…0001`) memang belum ada di produksi. Itu yang diharapkan:
-yang diuji adalah route-nya terpasang dan lapisan domainnya menjawab.
-
-### 2.3 Auth smoke — 13/13
-
-Aktor: `sales_staff` (`[role-match]`). **Tujuh dari 13 adalah cek negatif** —
-yang membuktikan pintunya benar-benar terkunci, bukan cuma terbuka untuk yang benar:
-
-no token · garbage token · **wrong-secret signature** · expired · **alg:none
-(algorithm confusion)** · valid signature tanpa klaim `employee_id` · `GET /me`
-tanpa sesi → semuanya **401**. Lalu: token sah lolos (201) · `/me` dengan cookie
-sah (200) · login body kosong → 400 · logout 200 · **logout membersihkan cookie**
-(`Max-Age=0; HttpOnly; SameSite=Lax; Secure`).
-
-## 3. Jejak tulis yang ditinggalkan di produksi
-
-Walk **menulis** ke `CDPS SG` — disetujui pemilik lewat `confirm_write: YA`:
-
-- `LEAD-202607-0004` + `PRSP-202607-0004` (dan lead kedua dari cek PARITY)
-- Baris `audit_log` yang **append-only** (aturan rumah #3) ⇒ **permanen**
-- Satu transisi `New Lead→Contacted` pada prospek uji
-
-Ini disengaja dan tercatat. Proporsinya: sebelum run, live berisi 3 lead · 0
-client · 0 transaksi.
-
-## 4. Yang MASIH tersisa dari C-03 — SKIP-2
-
-**SKIP-2 (badge notifikasi) belum tertutup.** Ia butuh mata di browser (~3 menit)
-dan tidak bisa diotomatiskan tanpa menyimpan password user produksi sebagai
-secret. Ketiga cek C-02 di walk (§2.1) menguji **kontrak API**-nya, bukan
-**badge-nya di UI**.
-
-Karena itu `CUTOVER_BACKLOG.md` §2 C-03 tetap **`[~]`** — bukan karena ada yang
-gagal, tapi karena satu butir belum diperiksa. Setelah SKIP-2 dicentang, C-03
-boleh `[x]` dan **gate C-04 terbuka**.
-
-## 5. 🟠 Satu hal yang harus dibaca bersama DoD C-04
-
-Slot `finance_staff` diisi **`99…0007`** — akun **fixture QA** (`QA-SEED`, O50).
-Artinya jalur Finance di walk ini lulus **memakai aktor fixture**, bukan karyawan
-Finance sungguhan.
-
-Itu tidak membatalkan hasil C-03 (yang diuji adalah gate permission, dan gate-nya
-bekerja), **tapi ia bersinggungan langsung dengan DoD C-04**: *"tak ada fixture
-UAT tersisa di jalur produksi"*. Dua konsekuensi:
-
-1. **O50 belum selesai** — 10 akun `99000000xx` masih aktif & bisa login.
-2. Ketika O50 dieksekusi (fixture dinonaktifkan), **walk ini harus dijalankan
-   ulang** supaya slot `finance_staff` teresolusi ke karyawan Finance riil. Kalau
-   tidak, discovery akan gagal menemukan aktor Finance dan baris itu jadi SKIP —
-   persis kelas cacat yang C-03 ada untuk mencegahnya.
-
-## 6. Perbandingan dengan report 2026-07-28
-
-| | 20260728 (sandbox) | **20260731 (deployment)** |
+| # | Aturan rumah | Bukti dari deployment |
 |---|---|---|
-| Target | 22 · 34 · 13 | 22 · 34 · 13 |
-| FAIL | 0 | **0** |
-| SKIP | **3** (SKIP-1/2/3) | **1** (SKIP-2 saja) |
-| Dijalankan terhadap | Postgres lokal + sandbox | **deployment Vercel + `CDPS SG`** |
+| R1 | ID `PREFIX-YYYYMM-NNNN` | `LEAD-202607-0004` · `PRSP-202607-0004` |
+| R2 | Pesan BI verbatim | field wajib kosong → **400** `[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]` |
+| R3 | Transisi diblokir **server-side** | `New Lead→Qualified` ditolak · `New Lead→Contacted` **200** · diulang → **409** `[transisi status tidak diizinkan]` |
+| R4 | Riwayat append-only | didelegasikan ke `supabase/tests/immutability_checks.sql` (invariant SQL, bukan HTTP) |
+| R5 | Field turunan read-only | PATCH `total_sales` ditolak **400** BI |
+| R6 | IDR `Rp. X.XXX.XXX,00` | MSL **32 layanan** · quote-preview → `Rp. 6.000.000,00 \| Rp. 0,00 \| Rp. 6.000.000,00` |
+| R7 | Div-by-zero → `—` | rollup tim kosong → **200** `{"team_average":null,"average_display":"—"}` |
+| PERM | Role Matrix | Account staff → Pool **403** `[anda tidak memiliki akses untuk melakukan transisi ini]` · Sales staff **200** · **Sales lead baca lead staff se-divisi 200** · OD lintas-divisi **200** · Director **200** |
+| O37 | Jalur baca | pemilik **200** · lintas-scope **404** (deviasi disetujui, bukan 403) |
+| PARITY | Pintu registrasi lead | **201** tanpa gate role — **sama seperti Go**, O39 dipertahankan sadar |
+| C-02 | Notifikasi | tanpa auth **401** · `{data, unread_count}` · id malformed **400** `[id tidak valid]` |
 
-Yang berubah bukan hasilnya — melainkan **terhadap apa** ia dijalankan. Itulah
-seluruh alasan C-03 ditahan sebagai `[~]` sejak 2026-07-28.
+Cek `sales_lead` (scope divisi) adalah yang **naik dari 21 → 22** sejak 2026-07-29; ini
+kali pertama tingkat `lead` Role Matrix teruji terhadap deployment sungguhan.
+
+### 3.2 `wave3-contract-smoke.mjs` → **34/34 wired**
+
+Seluruh 34 endpoint Wave 3 (M2 marketing · M3 live-stream/brief · M10 health · M13/M14
+performance) menjawab dari domain, bukan dari 404 router. Yang **200**: list campaigns,
+performance-dashboard, brief-queue, kedua `snapshots/scan`, performance trend/teams,
+config weights + targets. Yang **404 domain response**: entitas contoh yang memang belum
+ada di produksi bersih. Yang **400 domain response**: body sengaja tak valid.
+
+Durasi 3m40s — terpanjang di run ini, karena `snapshots/scan` benar-benar menghitung (§5.2).
+
+### 3.3 `auth-smoke.mjs` → **13/13 PASS** (menutup SKIP-3)
+
+Tanpa token **401** · token sampah **401** · **tanda tangan salah-secret 401** · kedaluwarsa
+**401** · **`alg:none` confusion 401** · tanda tangan sah tanpa klaim `employee_id` **401** ·
+token sah → **201** · `GET /me` tanpa sesi **401**, dengan cookie sah **200** · login body
+kosong **400** · logout **200** + `Max-Age=0; HttpOnly; SameSite=Lax; Secure`.
+
+SKIP-3 di report 2026-07-28 adalah artefak seed (`EMP-202607-0001` tidak ada di seed lokal).
+Terhadap deployment ia **PASS sendiri**, persis seperti yang diprediksi — dan bukan karena
+skrip dilonggarkan, melainkan karena aktornya kini diresolusi dari environment.
+
+---
+
+## 4. SKIP
+
+**SKIP-2 — QA badge notifikasi di `web-internal` ter-deploy. MASIH TERBUKA.**
+Kontrak API-nya sudah terbukti dua kali (`{data, unread_count}`, 401 tanpa auth,
+`[id tidak valid]` 400) — yang belum pernah dilihat adalah **render badge-nya di browser**.
+Tidak bisa diotomatiskan tanpa menyimpan password user produksi sebagai secret, dan itu
+harga yang tidak sepadan untuk satu cek ~3 menit.
+
+**Ke mana ia pergi:** ke daftar **QA UI C-04**, berdampingan dengan `/master-services` dan
+`/sales/kalkulator` yang sudah lebih dulu di sana. Ia tidak menahan C-03 (§0), tetapi juga
+tidak boleh menguap.
+
+> 🔎 **Satu hal yang justru memudahkan sekarang:** run ini meninggalkan **38 notifikasi
+> belum-dibaca** di produksi (§5.2). Sebelumnya tabel `notifications` **kosong**, jadi
+> badge tidak punya apa pun untuk dirender. Sekarang ada — QA badge bisa dilakukan
+> **sebelum** residu §5.2 dibersihkan, dan sesudahnya jadi sulit lagi.
+
+SKIP-1 dan SKIP-3 dari report 2026-07-28: **✅ tertutup**, §3.1 dan §3.3.
+
+---
+
+## 5. 🟠 Residu produksi — dibaca dari live sesudah run
+
+Aturan rumah #3: riwayat **append-only**. Apa pun yang ditulis run ini **permanen** kecuali
+ada keputusan sadar untuk membersihkannya. Pemilik menyetujui tulis (`confirm_write: YA`),
+tetapi yang diumumkan sebelum approval hanya *"2 lead `ZZC03` + baris `audit_log`"`*.
+**Jejaknya lebih luas.** Diukur dari `CDPS SG` sesudah run:
+
+| Tabel | Sebelum | Sesudah | Delta |
+|---|---|---|---|
+| `leads` | 3 | **6** | **+3** |
+| `prospect_attempts` | 3 | **6** | +3 |
+| `audit_log` | 43 | **50** | +7 |
+| `performance_snapshots` | **0** | **38** | **+38** 🟠 |
+| `notifications` | **0** | **38** | **+38** 🟠 |
+| `clients` · `transactions` · `client_health_snapshots` | 0 | **0** | nol — tak tersentuh |
+
+### 5.1 Lead ketiga TIDAK ber-marker `ZZC03`
+
+| Lead | Nama | Pembuat | Skrip |
+|---|---|---|---|
+| `LEAD-202607-0004` | `ZZC03 Alpha 7620637` | `‹NIK-A›` | walk |
+| `LEAD-202607-0005` | `ZZC03 OD 7620637` | `2501140493` | walk (cek PARITY) |
+| `LEAD-202607-0006` | **`Smoke`** 🟠 | `‹NIK-A›` | **auth-smoke** |
+
+Runbook C-03 mengajarkan cara membersihkan jejak walk dengan **mencari prefix `ZZC03`**.
+Prosedur itu **akan melewatkan `LEAD-202607-0006`** — `auth-smoke` memakai konvensi penamaan
+sendiri (`Smoke`) untuk cek *"token sah → auth lolos (201)"*. Bukan cacat kode: skrip itu
+lahir sebagai smoke lokal, di mana residu tidak berarti apa-apa. Terhadap produksi ia berarti.
+
+**Konsekuensi untuk DoD C-04** (*"nol fixture UAT di produksi"*): daftar bersih-bersih harus
+menyebut **tiga** lead + tiga `prospect_attempts`, bukan dua. Baris `audit_log`-nya
+**tidak boleh** dihapus — aturan rumah #3 tidak punya pengecualian untuk data uji.
+
+### 5.2 `snapshots/scan` menghitung sungguhan: 38 snapshot + 38 notifikasi
+
+`POST /api/v1/performance/snapshots/scan` di §3.2 **bukan** panggilan kosong. Ia menghitung
+dan menyimpan **38 `performance_snapshots`** (`PERF-202606-0001`…`0038`, periode
+**2026-06-01 → 2026-06-30**, 38 staff berbeda, 4 `role_type`, `computed_by='system'`), lalu
+memancarkan **38 notifikasi `m14.performance.published`** — satu per staff.
+
+Dua hal yang perlu dinyatakan terang-terangan:
+
+1. **38 karyawan riil kini punya notifikasi belum-dibaca** tentang skor performa periode Juni
+   yang dihitung dari produksi yang **nol transaksi, nol klien**. Angkanya benar secara mesin
+   dan **tidak bermakna** secara bisnis. Kalau ada yang login sebelum ini dibersihkan, itulah
+   yang mereka lihat lebih dulu. (Sisi baiknya: ini yang membuat SKIP-2 bisa dikerjakan — §4.)
+2. **Handoff SESI24 §3 butir 8 sudah usang.** Ia mencatat `performance_snapshots` **0 baris**
+   sehingga arm RLS-nya belum terbukti oleh data. Kini ada **38 baris** — probe RLS itu bisa
+   dijalankan sekarang, tapi **atas data sintetis**, jadi hasilnya membuktikan policy, bukan
+   membuktikan perilaku terhadap data riil.
+
+`POST /health/snapshots/scan` juga **200**, tetapi menulis **nol** baris — benar, karena
+`clients` = 0. Perbedaan perilaku dua `scan` ini murni soal ada/tidaknya subjek.
+
+### 5.3 Slot Finance masih dilayani fixture O50 — dan itu membuat run ini rapuh
+
+`finance_staff` diresolusi ke **`9900000007`** ("QA Finance"), salah satu dari 10 akun
+fixture `99…` yang DoD C-04 wajibkan **nol** di produksi. Roster live: **69 aktif = 59 riil +
+10 fixture** (dibaca hari ini; Finance punya 4 aktif = **3 riil** + 1 fixture).
+
+Artinya: **begitu O50 dieksekusi, run ini tidak reproducible apa adanya** — discovery akan
+memilih Finance staff riil, atau gagal menemukan slot bila pemetaan role-nya belum ada.
+Bukan alasan menunda O50; alasan untuk **menjalankan ulang workflow sesudah O50** dan
+memperlakukan hasilnya sebagai konfirmasi akhir sebelum gate GO. Biayanya satu klik approval.
+
+---
+
+## 6. Keadaan `CDPS SG` — dibaca dari live 2026-07-31, bukan disalin
+
+| | |
+|---|---|
+| Migrasi | **44** (repo juga 44, cocok 1:1) |
+| Tabel `public` | **54** |
+| `notif_events` | **17** |
+| Karyawan aktif | **69** (59 riil + 10 fixture O50) |
+| `role_mappings` | **39** |
+| Layered role | `director` **6** · `od` **4** · `lead` **3** |
+| `master_services` | **32** |
+| Klien · transaksi | **0** · **0** |
+
+`director: 6 · od: 4` cocok dengan yang dibaca runner dari deployment (§1) — 5 director riil
++ 1 fixture, 3 od riil + 1 fixture. **Nol migrasi baru** dijalankan sesi ini.
+
+---
+
+## 7. Cara mengulang report ini
+
+Actions → **C-03 deployment UAT** → *Run workflow* → `confirm_write: YA` → approve
+environment `c03-production`. Ketiga skrip jalan berurutan, output ter-`tee` ke
+`c03-walk.txt` · `c03-wave3.txt` · `c03-auth.txt` dan terunggah sebagai artifact `c03-output`.
+
+Tidak ada langkah lokal. Tidak butuh laptop tertentu. Yang dibutuhkan manusia hanya
+**satu klik approval** — dan gerbang itu memang sengaja ada (§1).
+
+> Jalur alternatif dari mesin ber-secret masih sahih:
+> `docs/handoff/TUTORIAL_C03_LANGKAH_DEMI_LANGKAH.md` + `CUTOVER_C03_DEPLOYMENT_RUNBOOK.md`.

@@ -1,231 +1,234 @@
-# HANDOFF — Cutover Sesi 25 (butir 6 gate GO: perkakas backup MySQL Railway + OQ-2)
+# HANDOFF — Cutover Sesi 25 (C-03 SELESAI · gate berikutnya C-04)
 
-> **Pendahulu:** `HANDOFF_CUTOVER_SESI24.md`. Masih sahih **kecuali** §2
-> ("SATU HAL YANG MENGGANTUNG") — run C-03 yang di sana berstatus `waiting`
-> **sudah disetujui dan hijau**. Lihat §1.1.
+> **Pendahulu:** `HANDOFF_CUTOVER_SESI24.md`. Masih sahih **kecuali** §3 butir 8
+> (`performance_snapshots` "0 baris" — kini 38, lihat §1.2 di bawah).
 >
-> Masih berlaku dan tidak diulang: SESI9 §6 (aturan rumah) · SESI12 §2.4
-> (`npm run db:rebuild`) · SESI19–24 daftar "jangan dikerjakan" · SESI24 §1.4
-> (repo publik ⇒ **jangan tambah NIK/PII ke berkas repo**).
+> Masih berlaku dan tidak diulang: SESI9 §6 (aturan rumah) · SESI12 §2.4 (`npm run db:rebuild`) ·
+> SESI19–22 §3.1 (daftar "jangan dikerjakan") · SESI23 §1.1 (baris tentang live WAJIB dibaca
+> dari live) · SESI24 §1.4 (**jangan tambah NIK/PII baru ke repo** — repo masih publik, dicek
+> ulang hari ini lewat API).
 
 ## 0. Posisi persis — SALIN INI KE SESI BERIKUTNYA
 
 | | |
 |---|---|
-| **Branch kerja** | **`claude/backup-mysql-railway-9kf557`** |
-| **`main`** | **`df3dddb`** = Merge PR #85. Rantai: … → #84 → **#85** |
-| **PR** | nol PR terbuka saat sesi ini mulai |
-| **Live `CDPS SG`** | **tidak dibaca sesi ini, tidak disentuh sesi ini** — jangan salin angka dari handoff mana pun, baca dari live |
-| **Run C-03 `30600363211`** | **`success`** — `probe` ✅ + `uat` ✅ (disetujui 2026-07-31 03:13 UTC, selesai 03:18) |
+| **Branch kerja** | **`claude/baca-handoff-cutover-szsw80`** — di-restart dari `main` sesudah PR #85 merged |
+| **Keadaan branch** | Lihat `git log --oneline main..HEAD` dan `git status --short`. Jangan percaya sha di berkas ini |
+| **`main` saat sesi ini MULAI** | `df3dddb` = Merge PR #85. Rantai: … → #82 → #84 → **#85** |
+| **PR sesi ini** | **#87** — C-03 ditutup + O50 selesai + draft rollback. **Di-merge di akhir sesi ⇒ `main` kini = Merge PR #87.** Verifikasi dengan `git log --oneline origin/main -1`, jangan percaya baris ini |
+| **Live `CDPS SG`** | **44 migrasi · 54 tabel · 17 `notif_events`** — dibaca dari live sesi ini |
+| **Repo vs live** | ✅ **44 = 44**, `main` juga 44 |
+| **C-03** | ✅ **SELESAI 2026-07-31** — run `30600363211`, **PASS 69 · FAIL 0** |
+| **Karyawan aktif** | **59 aktif dari 65 baris** (sesi ini: 10 fixture dinonaktifkan §1.5, 4 di antaranya lalu dihapus §1.7). **Pakai 59 untuk keputusan apa pun** |
+| **Fixture tersisa** | **6 tombstone permanen** — nonaktif + ban GoTrue, **tidak bisa dihapus siapa pun** (§1.7) |
 
-**Nol perubahan pada:** live Supabase · migrasi · `backend/**` · `apps/**` ·
-`packages/**` · `web-internal/**`. Sesi ini menambah **skrip + workflow + docs**.
+**Angka acuan** tidak berubah dari SESI24 (sesi ini **nol perubahan kode** — hanya dokumen):
+`apps/api` **313** · `@cdps/domain` **567** (+1 skip) · `@cdps/core` **113** · `@cdps/db` **9** ·
+`web-internal` **26** · 7 gate seed PASS · 4 invariant SQL PASS · `route-parity` 5/5, ketiga
+ledger **KOSONG** · typecheck & lint bersih.
+
+> ⚠️ **`npm test --workspaces` TIDAK menjalankan `web-internal`** — ia bukan anggota
+> `workspaces`. Jalankan terpisah: `npx vitest run --root web-internal`.
+
+**Perintah untuk melanjutkan:**
+
+```bash
+git fetch origin main
+git checkout -B <branch-anda> origin/main
+npm install
+service postgresql start
+su postgres -c "psql -c \"ALTER USER postgres WITH PASSWORD 'postgres';\""
+npm run db:rebuild -- --yes                          # 44/44
+DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/cdps" npm test --workspaces --if-present
+npx vitest run --root web-internal                   # TERPISAH
+```
 
 ---
 
 ## 1. Yang dikerjakan sesi ini
 
-### 1.1 ✅ Run C-03 ternyata SUDAH HIJAU — SESI24 §2 tidak lagi menggantung
+### 1.1 ✅ C-03 DITUTUP — UAT dijalankan terhadap deployment produksi
 
-`30600363211` sekarang `conclusion: success`, kedua job hijau, dan ketiga langkah
-skrip **exit 0**:
+Pemilik meng-approve environment `c03-production`; job `uat` jalan 03:13→03:18 UTC.
 
-| Langkah | Status |
+| Skrip | Hasil |
 |---|---|
-| `walk house-rules` (SKIP-1) | ✅ |
-| `wave3 contract smoke` | ✅ |
-| `auth smoke` (SKIP-3) | ✅ |
+| `cutover-houserules-walk.mjs` | **22/22** — menutup **SKIP-1** |
+| `wave3-contract-smoke.mjs` | **34/34 wired** |
+| `auth-smoke.mjs` | **13/13** — menutup **SKIP-3** |
 
-**Apa yang boleh disimpulkan dari itu, tepatnya:** `cutover-houserules-walk.mjs`
-keluar 0 **hanya bila `pass === results.length`** ⇒ walk-nya **seluruh** cek
-lulus. `wave3-contract-smoke.mjs` dan `auth-smoke.mjs` keluar 0 bila `failed === 0`.
-Jadi **FAIL = 0 terbukti dari exit code**; angka persisnya (22/22 · 34/34 · 13/13)
-dan blok **`aktor terpakai`** ada di artifact `c03-output`, **yang tidak bisa
-diunduh dari sesi Claude** — gateway sandbox menolak CONNECT ke penyimpanan
-artifact GitHub (403), kelas hambatan yang sama seperti `*.vercel.app`.
+**PASS 69 · FAIL 0 · nol baris SKIP di output.** Report:
+**`docs/handoff/CUTOVER_UAT_REPORT_20260731.md`** (report `20260728` **tidak disunting** —
+ia bukti historis walk lokal). Backlog §C-03 → ✅ SELESAI. `DECISIONS.md` 2026-07-31.
 
-**Sisa C-03 karena itu tinggal satu langkah manusia + satu langkah Claude:**
-unduh artifact → tempel isinya di sesi berikutnya → Claude menulis
-`CUTOVER_UAT_REPORT_20260731.md` (salin blok `aktor terpakai` ketiga skrip —
-provenance = syarat reproducible) → centang `CUTOVER_BACKLOG.md` §2 C-03 `[~]`→`[x]`.
-**SKIP-2 (badge notifikasi) tetap manual, ~3 menit di browser.**
+**Yang baru terbukti hari ini**, dan tidak pernah terbukti sebelumnya: konfigurasi env Vercel,
+kunci JWT produksi, perilaku pooler Supabase. Itulah isi C-03 yang sebenarnya — report
+2026-07-28 hanya pernah membuktikan kode + skema.
 
-> Artifact kedaluwarsa **2026-10-29**. Sesudah itu buktinya hilang dan run harus
-> diulang — jangan ditunda sampai dekat tanggal itu.
+**Konfirmasi silang C-03 §7:** slot `od` walk diresolusi ke `2501140493` — salah satu dari tiga
+orang yang baru diberi layered `director` kemarin. Ia lolos cek OD lintas-divisi **dari
+deployment**, jadi grant kemarin merambat sampai ke aplikasi, bukan berhenti di tabel.
 
-### 1.2 ✅ Butir 6 gate GO — perkakas **dan** eksekusinya SELESAI
+**SKIP-2 (badge notifikasi) TETAP TERBUKA** dan **pindah ke daftar QA UI C-04**, berdampingan
+dengan `/master-services` + `/sales/kalkulator`. Ia tidak menahan DoD C-03 (*report tersimpan ·
+FAIL = 0 · tiap SKIP beralasan*), tapi jangan sampai menguap.
 
-> ## ✅ **BUTIR 6 GATE GO DITUTUP 2026-07-31** — `CUTOVER_BACKLOG.md` §2 `[x]`
->
-> OQ-2 **terverifikasi untuk dekomisi**, dump **terverifikasi 4 lapis**, dan
-> pemilik menyatakan berkasnya sudah **tersimpan di luar GitHub dengan sha256
-> cocok** + passphrase di password manager. **Pelonggaran DoD penyimpanan
-> disetujui** (1 salinan, tanpa PIC kedua) — `DECISIONS.md` 2026-07-31, report §6.1.
-> Verifikasi 4 lapis, sha256, dan syarat "keluar dari GitHub" **tidak** dilonggarkan.
->
-> Sisa yang **tidak memblokir**: required reviewer environment `railway-backup`
-> masih kosong · 2 repository secret dihapus saat C-05 (passphrase paling
-> belakangan) · opsional hapus log run `30607290620`. Report **§6b**.
->
-> | | |
-> |---|---|
-> | OQ-2 | run `30604816629` — 50 tabel · **239 baris** · jalur uang **NOL** |
-> | Dump | run `30607919027` — `cdps-mysql-railway-20260731T055157Z.sql.gz.enc` |
-> | sha256 | `1b9ecffd6f0c4072cfde24b7dc25b49929480bec204c5dacd19e04a15647cb3e` |
-> | Verifikasi | 4/4 lapis hijau · enkripsi round-trip diuji |
-> | `leads` 1 · `prospect_attempts` 1 | ✅ **ditutup pemilik** — percobaan, nol yang perlu dipindah |
+### 1.2 🟠 Residu produksi run ini LEBIH BESAR dari yang diumumkan sebelum approval
 
+Yang disetujui: *"2 lead `ZZC03` + baris `audit_log`"*. Yang benar-benar tertulis, diukur
+dari live sesudah run:
 
+| Tabel | Sebelum | Sesudah |
+|---|---|---|
+| `leads` · `prospect_attempts` | 3 · 3 | **6 · 6** |
+| `audit_log` | 43 | **50** |
+| `performance_snapshots` | **0** | **38** |
+| `notifications` | **0** | **38** |
+| `clients` · `transactions` | 0 · 0 | 0 · 0 (tak tersentuh) |
 
-Butir 6 selama ini tercatat *"butuh akses Railway"* ⇒ menunggu laptop dengan
-klien MySQL terpasang. Premis itu patah oleh alasan yang sama seperti C-03
-(SESI24 §1.3): Railway mengekspos MySQL lewat **TCP proxy publik**, jadi yang
-benar-benar kurang cuma kredensial — **satu repository secret**.
+Dua hal yang perlu diketahui sesi berikutnya:
 
-| Berkas | Isi |
+1. **Lead ketiga tidak ber-marker.** `LEAD-202607-0006` bernama **`Smoke`** (dari `auth-smoke`,
+   yang punya konvensi penamaan sendiri) ⇒ prosedur bersih-bersih *"cari prefix `ZZC03`"* di
+   runbook **akan melewatkannya**. Sudah masuk daftar C-04.
+2. **`POST /performance/snapshots/scan` menghitung sungguhan** — 38 snapshot periode 2026-06 +
+   **38 notifikasi `m14.performance.published` ke 38 karyawan riil**, dihitung dari produksi
+   nol-klien-nol-transaksi. Benar secara mesin, tak bermakna secara bisnis. **Ini membatalkan
+   premis SESI24 §3 butir 8** (`performance_snapshots` 0 baris): probe RLS-nya bisa dijalankan
+   sekarang, tapi atas data sintetis.
+   🔎 **Sisi baiknya:** ini satu-satunya jendela untuk mengerjakan **SKIP-2** — badge butuh
+   notifikasi belum-dibaca, dan sebelum hari ini tabelnya kosong. Kerjakan **sebelum** dibersihkan.
+
+`audit_log` **tidak boleh** dihapus saat bersih-bersih — aturan rumah #3 tanpa pengecualian
+untuk data uji.
+
+### 1.3 🟠 Slot Finance masih dilayani fixture O50 ⇒ run C-03 wajib diulang sesudah O50
+
+`finance_staff` diresolusi ke **`9900000007`**. Roster live: **69 aktif = 59 riil + 10 fixture**
+(Finance: 4 aktif = 3 riil + 1 fixture). Begitu O50 dieksekusi, discovery memilih Finance riil —
+artinya run 2026-07-31 tidak reproducible apa adanya. Bukan alasan menunda O50; alasan untuk
+**menjalankan ulang workflow sekali sesudahnya** sebagai konfirmasi terakhir sebelum gate GO.
+Biayanya satu klik approval.
+
+### 1.4 Redaksi PII di report
+
+Repo dicek ulang lewat API hari ini: **masih publik**. Blok `aktor terpakai` karena itu masuk
+report **tanpa nama orang**, dan satu NIK yang belum pernah ada di repo diganti `‹NIK-A›`.
+Blok verbatim tetap hidup di artifact `c03-output` + log run. Reproducibility tidak hilang:
+ketiga skrip **meresolusi aktor dari environment yang diuji**, bukan dari konstanta di berkas.
+
+> ⚠️ Artifact `c03-output` (id `8781965829`) **kedaluwarsa 2026-10-29**. Sesudah itu output
+> verbatim hanya ada di log run. Kalau bukti ini harus bertahan lebih lama, unduh sebelum itu.
+
+### 1.5 ✅ O50 langkah 1 — 10 akun fixture dinonaktifkan + di-ban GoTrue (reversibel)
+
+Izin pemilik: *"nonaktifkan 10 dulu"*. Dieksekusi satu transaksi lewat `set_employee_banned()`,
+**1 baris `audit_log` ber-`before`/`after` per akun** (`actor='O50-OWNER-DECISION'`).
+**Diverifikasi dua lapis:** tabel ⇒ `status_aktif=false` ×10 **DAN** GoTrue ⇒
+`banned_until='infinity'` ×10. **Headcount aktif kini 59** — angka riil.
+
+**Dua hal yang ditemukan saat mengerjakannya, dan keduanya mengubah bentuk O50:**
+
+1. **"Hapus 10" tidak bisa dijalankan apa adanya.** `9900000001` (1 lead + 2 audit) dan
+   `9900000004` (2 lead + 4 audit) sudah menulis riwayat ⇒ aturan rumah #3 melarang membuangnya.
+   Bentuk yang benar: **8 boleh dihapus, 2 wajib tombstone nonaktif.**
+2. **`status_aktif=false` saja KOSMETIK.** Ia hanya menghentikan `getMe`; GoTrue tetap
+   menerbitkan token. Pencabutan sesungguhnya ada di `set_employee_banned()` yang menulis
+   **keduanya**. Siapa pun yang kelak menonaktifkan akun lewat `UPDATE employees` langsung akan
+   mengira sudah mencabut akses padahal belum.
+
+**Cakupan role tidak putus** (diverifikasi): Sales 1 lead · Account 2 · Creative 1 · Finance 1;
+Ads/KOL/Marketing tetap dilayani 3 pemegang layered `lead` yang semuanya riil.
+
+**Membatalkannya:** `select set_employee_banned('<nik>', false);` — mengembalikan `status_aktif`
+dan mencabut ban. Sesi lama tetap harus login ulang.
+
+### 1.7 ✅ O50 langkah 2 — 4 akun dihapus, 6 sisanya PERMANEN tidak bisa dihapus
+
+Dihapus penuh (`employees` + `employee_credentials` + `employee_layered_roles` + `auth.users`,
+1 baris `audit_log` ber-`before_json` berisi seluruh baris): **`…02`, `…03`, `…05`, `…07`**.
+**Roster 69 → 65 · GoTrue 69 → 65 · layered 13 → 12 · aktif tetap 59.**
+
+**Enam tombstone permanen, dua sebab berbeda:**
+
+| Akun | Terkunci oleh |
 |---|---|
-| `scripts/lib/railway-mysql-common.sh` | urai URL (tahan '@' di password), option file 0600 (password tak pernah lewat argumen proses), hitungan baris |
-| `scripts/railway-mysql-oq2.sh` | OQ-2, read-only, keluaran Markdown |
-| `scripts/railway-mysql-backup.sh` | dump + verifikasi 4 lapis + enkripsi |
-| `.github/workflows/railway-mysql-backup.yml` | job `oq2` (read-only) + job `backup` (environment ber-reviewer) |
-| `docs/handoff/RUNBOOK_BACKUP_MYSQL_RAILWAY.md` | langkah pemilik, dua jalur (Actions / laptop), + **draf butir 7** |
-| `docs/handoff/BACKUP_MYSQL_RAILWAY_REPORT_TEMPLATE.md` | report yang diisi sesudah eksekusi |
+| `9900000001` · `9900000004` | riwayat: lead + baris `audit_log` (aturan rumah #3) |
+| `9900000006` · `…08` · `…09` · `…10` | **trigger `forbid_mutation()` di `performance_snapshots`** |
 
-**Dump tidak dianggap selesai pada `mysqldump`.** Empat lapis:
+🔴 **Koreksi penilaian saya sendiri beberapa jam sebelumnya.** Saya menyebut keempat akun terakhir
+"boleh dihapus" karena `performance_snapshots` saya baca sebagai field turunan yang recomputable
+(aturan rumah #4). **Salah.** Skema memperlakukannya sebagai **riwayat immutable** (#3), dan DB
+adalah otoritasnya. Percobaan hapus **ditolak DB dan ter-rollback utuh** —
+*"performance_snapshots is append-only/immutable: DELETE forbidden"*. **Penolakan itu dihormati,
+bukan disiasati:** satu-satunya cara menembusnya adalah menonaktifkan trigger immutability di
+produksi, yang berarti membongkar jaminan demi 4 baris fixture.
 
-1. **struktur** — `CREATE TABLE` di dump ⇄ `information_schema`
-2. **baris** — `--skip-extended-insert` ⇒ 1 baris = 1 `INSERT`; dihitung per
-   tabel lawan `COUNT(*)` yang diambil **sebelum** dump
-3. **trigger** — 7 trigger imutabilitas (aturan rumah #3) wajib ikut
-4. **restore sungguhan** (opsional) — dimuat ke MySQL kosong, dihitung ulang
+**Sebab-akibatnya perlu diingat:** run C-03 kemarin **mengubah 4 fixture yang tadinya bisa dihapus
+menjadi permanen** — `snapshots/scan` menyentuh seluruh karyawan aktif termasuk fixture. Ini biaya
+nyata dari residu C-03 §5.2, dan alasan konkret untuk berpikir dua kali sebelum menjalankan smoke
+yang menulis ke produksi.
 
-**Ketiga lapis pertama divalidasi mutasi**, bukan diklaim: menghapus satu
-`INSERT` ⇒ lapis 2 merah; mengganti nama satu `CREATE TABLE` ⇒ lapis 1 merah;
-menghapus satu `CREATE TRIGGER` ⇒ lapis 3 merah. Ketiganya exit **3**.
+### 1.8 ✅ DoD C-04 dirumuskan ulang & disetujui pemilik ⇒ O50 TERTUTUP PENUH
 
-Diuji end-to-end terhadap MySQL sungguhan (MariaDB 10.11 lokal, 49 tabel dari
-`backend/migrations/*.up.sql`, 7 trigger, 24 baris termasuk nilai ber-kutip,
-koma, dan newline): **4/4 lapis hijau**, enkripsi + round-trip dekripsi identik.
-Password uji sengaja `p@ss word#1` (percent-encoded) untuk menguji jalur urai
-yang paling mudah salah.
+*"Nol fixture UAT di produksi"* → ***"nol fixture UAT yang AKTIF atau BISA LOGIN di produksi"***.
+Rumusan lama mustahil secara harfiah (§1.7). **Yang dilonggarkan adalah keberadaan baris, BUKAN
+akses** — dan supaya tidak bisa diklaim tanpa bukti, DoD-nya diberi **tiga kueri pengukur** di
+`CUTOVER_BACKLOG.md` §C-04, ketiganya wajib nol dan **wajib dibaca dari live**:
 
-### 1.3 🔴 Lapis 4 langsung menemukan cacat nyata — dan itu alasan ia ada
+| Pengukur | Hasil 2026-07-31 |
+|---|---|
+| fixture ber-`status_aktif=true` | **0** |
+| fixture yang `banned_until` NULL / sudah lewat (masih bisa login) | **0** |
+| fixture yang masih resolve ke role lewat `role_mappings` | **0** |
 
-Restore **GAGAL** pada percobaan pertama:
+Ditambahkan butir anti-rembet supaya pelonggaran ini tidak dipakai membenarkan hal lain:
+*"nol data uji yang bisa disalahartikan sebagai data bisnis"* — residu C-03 tetap wajib
+dibersihkan sejauh yang diizinkan skema. `DECISIONS.md` 2026-07-31.
 
-```
-ERROR 1227 (42000) at line 200: Access denied; you need (at least one of)
-the SUPER, SET USER privilege(s) for this operation
-```
+**Risiko yang diterima sadar:** 6 baris fixture akan ikut terlihat di query `employees`
+selamanya. Filternya pola `99%`.
 
-`mysqldump` menempelkan `DEFINER=root@localhost` pada ketujuh trigger. Dipulihkan
-oleh user yang bukan `root`, MySQL menolak — **sesudah sebagian tabel sudah
-masuk**. Ini kelas kegagalan yang, tanpa lapis 4, baru ketahuan **pada hari
-backup-nya dibutuhkan**, dan pada hari itu tidak ada waktu untuk mendiagnosis.
+### 1.6 ✅ Draft rencana rollback ditulis
 
-Skrip sekarang melucuti `DEFINER` secara default (`--keep-definer` untuk
-fidelitas persis). Aman untuk CDPS: ketujuh trigger hanya `SIGNAL` menolak
-UPDATE/DELETE — identitas definer tidak memikul apa pun. Tercatat `DECISIONS.md`
-2026-07-31.
-
-### 1.4 Enkripsi wajib, dan alasannya bukan kebiasaan umum
-
-Repo ini **publik** (SESI24 §1.4). Artifact Actions pada repo publik bisa diunduh
-siapa saja — dump produksi polos di sana **kebocoran, bukan backup**. Karena itu:
-skrip berhenti tanpa `RAILWAY_BACKUP_PASSPHRASE` (kecuali `--no-encrypt`
-eksplisit), dekripsi diuji **sebelum** berkas polos dihapus, dan workflow punya
-langkah terpisah yang membuat run MERAH kalau ada berkas polos tersisa.
-
-Batas job di workflow karena itu **bukan** "menulis vs tidak" — terhadap Railway
-keduanya read-only. Yang membedakan: keluaran `oq2` adalah nama tabel + angka
-(nol PII), keluaran `backup` adalah seluruh isi DB.
+`docs/handoff/RENCANA_ROLLBACK_CUTOVER.md`. Isi terpentingnya bukan prosedurnya, melainkan §0:
+**rollback sekarang hampir gratis** (`clients` 0 · `transactions` 0 — nol data bisnis yang hanya
+hidup di Supabase), **dan jendela itu tertutup pada transaksi riil pertama**, karena mundur
+sesudahnya menuntut importer mundur yang **sengaja tidak dibangun** (O47). Itu menjadikan gate GO
+bukan cuma *"apakah TS siap"* tapi juga *"apakah kita menerima jalan mundur tertutup"*.
+Dua bagian 🔶 TBD sampai backup MySQL (butir 4) ada.
 
 ---
 
-## 2. Yang harus dilakukan pemilik — semuanya di runbook
-
-`docs/handoff/RUNBOOK_BACKUP_MYSQL_RAILWAY.md`. Ringkasnya:
-
-1. Railway → service MySQL → Variables → salin **`MYSQL_PUBLIC_URL`**
-   (⛔ **bukan** `MYSQL_URL` — host `*.railway.internal` tidak hidup di luar Railway)
-2. Buat passphrase acak, **simpan di password manager lebih dulu**
-3. Pasang 2 repository secret: `RAILWAY_MYSQL_URL`, `RAILWAY_BACKUP_PASSPHRASE`
-4. Settings → Environments → `railway-backup` → tambah **required reviewer**
-5. Actions → *Backup MySQL Railway* → Run (`run_backup=false`) → baca artifact `oq2-report`
-6. Run lagi (`run_backup=true`, `confirm_dump=YA`) → approve → unduh artifact
-7. **Simpan dump + manifest di DUA tempat di luar GitHub**, cocokkan sha256
-8. Isi report dari template → centang backlog → entri `DECISIONS.md`
-
-> Langkah 7 yang benar-benar menutup butir 6. Artifact kedaluwarsa **30 hari**;
-> selama berkasnya cuma ada di sana, butir 6 **belum** selesai.
-
-**Butir 7 (rencana rollback)** — draf usulan ada di runbook §7 (N = **14 hari**,
-lengkap dengan alasan kenapa N besar justru **menaikkan** biaya rollback: sesudah
-cutover data baru hanya masuk Supabase). Tinggal disetujui/diubah Yohan+Nerissa.
-
----
-
-## 3. Sisa pekerjaan
-
-> **⚠️ Diperbarui 2026-07-31 sore — §1.2/§2 sudah DIEKSEKUSI, bukan lagi "siap dijalankan".**
-> OQ-2 **terverifikasi** (run `30604816629`) dan dump **terverifikasi 4 lapis**
-> (run `30607919027`). Hasil + temuan lengkap: `BACKUP_MYSQL_RAILWAY_REPORT_20260731.md`.
-> **Yang tersisa dari butir 6 hanya penyimpanan** — berkasnya masih artifact
-> ber-retensi 30 hari.
->
-> **Untuk sesi berikutnya, satu hal teknis yang mengubah banyak:** artifact
-> GitHub memang tak bisa diunduh dari sesi Claude (403 ke penyimpanan blob),
-> **tapi job log BISA** lewat `get_job_logs`. Semua yang dicetak skrip ke stdout
-> terbaca dari sana — begitulah seluruh tabel OQ-2 dan baris 257 yang bermasalah
-> didapat. Konsekuensi langsung: **C-03 (butir 1) tidak lagi butuh pemilik
-> mengunduh apa pun.**
+## 2. Sisa pekerjaan
 
 | # | Butir | Siapa |
 |---|---|---|
-| 1 | **C-03** — ✅ **SELESAI dari sisi Claude.** Report `CUTOVER_UAT_REPORT_20260731.md` ditulis dari job log; SKIP-1 & SKIP-3 tertutup (22/22 · 34/34 · 13/13, FAIL=0). ❌ sisa: **SKIP-2** badge notifikasi, ~3 menit di browser | **pemilik** |
-| ~~2~~ | ✅ **Butir 6 — SELESAI 2026-07-31.** OQ-2 terverifikasi · dump terverifikasi 4 lapis · tersimpan di luar GitHub, sha256 cocok · pelonggaran DoD disetujui. Backlog `[x]` | — |
-| 3 | **Butir 7** — setujui/ubah draf rollback | **pemilik** |
-| 4 | **O50** — 10 akun `99000000xx` masih aktif; DoD C-04 mensyaratkan nol fixture di produksi | **pemilik** |
-| 5 | **O35** · **O9** · divisi dasar 3 orang OD (SESI24 §1.1) | **pemilik** |
-| 6 | **O48 Grup A/B/E** | **pemilik + head dev** → Claude |
-| 7 | **Visibility repo** → privat, lalu tinjau ulang **O47b** | **pemilik** |
-| 8 | Gate GO → **C-05** (cabut `backend/`) | **pemilik** → Claude |
+| 1 | **C-04** — gate berikutnya. Termasuk: bersih-bersih residu §1.2, QA UI (`/master-services`, `/sales/kalkulator`, **badge eks-SKIP-2**), aktor produksi | **pemilik** → Claude |
+| 2 | ~~**O50**~~ ✅ **TERTUTUP PENUH 2026-07-31** (§1.5 · §1.7 · §1.8): 4 dihapus, 6 tombstone permanen, DoD C-04 dirumuskan ulang & disetujui, ketiga pengukur **0**. **Tidak ada sisa.** Tindak lanjut: **ulang run C-03 sekali** (§1.3) — slot `finance_staff` dulu `9900000007`, yang kini terhapus | Claude, sesudah pemilik approve run |
+| 3 | **O35** (sub-tim Creative M7 §3) · **O9** (target M14) · **divisi dasar** 3 orang OD — **pakai headcount 59, bukan 69** (§1.5) | **pemilik** |
+| 4 | **Backup MySQL Railway + OQ-2** — **prasyarat rollback**, lihat `RENCANA_ROLLBACK_CUTOVER.md` §3.1 | **pemilik** |
+| 4b | ~~Rencana rollback~~ ✅ **draft ditulis 2026-07-31** — `docs/handoff/RENCANA_ROLLBACK_CUTOVER.md`. Naik jadi "bisa dijalankan" begitu butir 4 selesai | Claude |
+| 5 | **O48 Grup A/B/E** — Grup C+D sudah live | **pemilik + head dev** → Claude |
+| 6 | **Visibility repo** → privat, lalu tinjau ulang **O47b** | **pemilik** |
+| 7 | Gate GO → **C-05** (cabut `backend/`) | **pemilik** → Claude |
+| 8 | ~~Probe `performance_snapshots` saat datanya ada~~ — datanya ada (38), tapi **sintetis**. Probe `transactions` · `*_block_requests` masih menunggu data riil | Claude, saat datanya ada |
 
-> 🟠 **Satu benang yang menyambungkan butir 1 dan 4.** Walk C-03 mengisi slot
-> `finance_staff` dengan **fixture QA `99…0007`** (O50). Hasil C-03 tetap sah —
-> yang diuji gate permission, dan gate-nya bekerja — tapi begitu O50 dieksekusi
-> (fixture dinonaktifkan), **walk wajib dijalankan ulang**: discovery tidak akan
-> menemukan aktor Finance lagi dan baris itu jatuh jadi SKIP. Urutannya penting:
-> **O50 dulu, lalu walk ulang, baru C-04 ditutup.**
+**Progress pensiun Go: ~94%** (engineering sisi Claude **100%** sejak sesi 19; Fase 4 naik dari
+~70% ke ~80% karena C-03 tertutup — tetap **estimasi**, butir gate tidak punya satuan yang bisa
+dijumlah; Fase 5 ~15% terkunci gate GO).
 
-**Progress pensiun Go: ~93%.** Engineering sisi Claude tetap **100%** sejak sesi
-19; yang bergerak sesi ini adalah Fase 4 — C-03 hijau (tinggal pelaporan) dan
-butir 6 turun dari "butuh akses" jadi "tinggal dijalankan". Fase 4 tetap **bukan
-angka terukur**; butir gate tidak punya satuan yang bisa dijumlah.
+## 3. Yang JANGAN dikerjakan
 
-## 3.1 ✅ Tenggat keras itu sudah lewat dengan selamat
+Seluruh daftar SESI19–24 masih berlaku. Penegasan yang paling relevan sekarang:
 
-Sebelumnya §3.1 ini memperingatkan satu-satunya butir cutover yang **basi
-sendiri**: artifact `railway-mysql-backup` terhapus otomatis `2026-08-30`.
-**Sudah tidak berlaku** — pemilik mengunduh dan menyimpannya di luar GitHub pada
-2026-07-31, sha256 cocok. Artifact-nya sekarang boleh kedaluwarsa; ia cuma
-saluran pengantar.
-
-**Konsekuensi yang tersisa dari peringatan itu, dan masih berlaku:** Railway
-boleh dimatikan **kapan saja sekarang** dari sisi backup. Kalau kelak dibutuhkan
-dump baru, ia hanya bisa diambil **selama Railway masih hidup** — jadi urutan
-C-05 tetap: pastikan tidak ada yang perlu diambil lagi → baru matikan.
-
-## 4. Yang JANGAN dikerjakan
-
-Seluruh daftar SESI19–24 masih berlaku. Tambahan yang relevan sekarang:
-
-- **Jangan commit dump ke repo** — terenkripsi sekalipun. Repo publik, dan histori
-  git tidak bisa ditarik kembali (pelajaran O47b).
-- **Jangan pasang `RAILWAY_MYSQL_URL` sebagai variable** (Settings > Variables) —
-  ia **secret**; variable tercetak apa adanya di log.
-- **Jangan centang butir 6** sebelum berkasnya tersimpan di luar GitHub dan
-  sha256-nya dicocokkan. Artifact yang kedaluwarsa diam-diam meninggalkan
-  checklist yang tercentang tanpa backup di baliknya.
-- **Jangan jalankan `backup` dari trigger otomatis** — job itu `workflow_dispatch`
-  saja, dan gerbang approval-nya ada supaya dump produksi butuh klik manusia.
+- **Jangan apply ulang migrasi mana pun** — 44 di live, 44 di repo, cocok 1:1.
+- **Jangan salin baris "Live"/"Repo vs live" dari handoff mana pun** — baca dari live.
+- **Jangan sunting `CUTOVER_UAT_REPORT_20260728.md`** — bukti historis, berdiri sendiri.
+- **Jangan hapus baris `audit_log`** saat membersihkan residu C-03 (aturan rumah #3).
+- **Jangan tulis ulang entri `DECISIONS.md` lama** — append-only; koreksi = entri baru.
+- **Jangan tambah baris ke ketiga ledger** tanpa entri `DECISIONS.md`. Ketiganya hanya menyusut.
+- **Jangan bangun apa pun di `backend/`** — oracle paritas read-only sampai C-05.
+- **Jangan tambah NIK/PII baru ke repo** selama status publik belum berubah.
+- **Jangan setujui sendiri run `uat`** — gerbang `c03-production` ada justru supaya production
+  write butuh manusia.

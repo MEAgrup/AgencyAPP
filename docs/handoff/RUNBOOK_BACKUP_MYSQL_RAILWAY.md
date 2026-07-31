@@ -5,8 +5,9 @@
 > (`docs/DECISIONS.md` 2026-07-29 — *"terjawab untuk perencanaan, belum
 > terverifikasi untuk dekomisi"*).
 >
-> **Bukan** menutup: butir 7 (rencana rollback). Itu keputusan, bukan eksekusi —
-> draf usulannya ada di §7 supaya tinggal disetujui atau diubah.
+> **Bukan** menutup: butir 7 (rencana rollback) — dokumen resminya
+> `RENCANA_ROLLBACK_CUTOVER.md`. Backup + OQ-2 di sini **menutup dua prasyarat**
+> dokumen itu (§3.1 #1 dan #2).
 
 ---
 
@@ -340,7 +341,12 @@ Sesudah itu gate GO tinggal butir 7 (§7) — dan sesudah GO, C-05 boleh mencabu
 
 ---
 
-## 7. Butir 7 — draf rencana rollback (BUTUH PERSETUJUAN PEMILIK)
+## 7. Butir 7 — rencana rollback
+
+> ⚠️ **DIGANTIKAN.** Rencana rollback resmi kini `docs/handoff/RENCANA_ROLLBACK_CUTOVER.md`
+> (PR #87, ter-merge lebih dulu) — ia lebih lengkap: prasyarat, urutan eksekusi, dan
+> titik tak-bisa-kembali. **Pakai berkas itu.** Yang di bawah adalah draf awal dari
+> PR #86, disimpan sebagai catatan pertimbangan N, bukan sebagai rencana yang berlaku.
 
 Butir 7 berbunyi *"Railway tetap hidup N hari pasca-cutover sebelum dimatikan"*.
 Yang belum ada bukan dokumennya — melainkan **N** dan siapa yang menyatakan

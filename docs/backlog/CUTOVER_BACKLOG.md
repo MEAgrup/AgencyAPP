@@ -29,12 +29,12 @@
 | **C-00** | ~~CI mati — runner tidak teralokasi~~ ✅ **SELESAI 2026-07-28** | — | — | — |
 | **C-01** | ~~O37 — otorisasi read (RLS ter-bypass)~~ ✅ **SELESAI 2026-07-28** | — | — | — |
 | **C-02** | ~~Endpoint `notifications` di `apps/api`~~ ✅ **SELESAI 2026-07-28** | — | — | — |
-| **C-03** | UAT paritas end-to-end ⚠️ **dijalankan 2026-07-28 — FAIL 0, lolos bersyarat** | 🟠 P1 | sisa: **eksekusi** walk dari deployment Vercel (3 SKIP) — skrip siap 2026-07-29, runbook `CUTOVER_C03_DEPLOYMENT_RUNBOOK.md` | **YA** |
+| **C-03** | ~~UAT paritas end-to-end~~ ✅ **SELESAI 2026-07-31 — dijalankan terhadap deployment produksi, FAIL 0** | — | — | — |
 | **C-04** | Cutover data + aktor produksi | 🟠 P1 | 2–4 hari | **YA** |
 | **C-05** | Retire Go: arsip `backend/`, bersihkan CI & config Railway | 🟡 P2 | 0,5 hari | tidak (sesudahnya) |
 | **C-06** | `web-client-portal` (M15-C2) | ⚪ ditunda | — | **TIDAK** (by design) |
 
-**Urutan wajib:** ~~C-00~~ ✅ → ~~C-01~~ ✅ → ~~C-02~~ ✅ → **C-03 ⚠️ lolos bersyarat (3 SKIP)** → C-04 → (gate go/no-go manusia) → C-05.
+**Urutan wajib:** ~~C-00~~ ✅ → ~~C-01~~ ✅ → ~~C-02~~ ✅ → ~~C-03~~ ✅ → **C-04** → (gate go/no-go manusia) → C-05.
 C-06 di luar jalur cutover.
 
 **Total realistis: ~1,5–2 minggu kerja Claude** + gate keputusan manusia (Yohan & Nerissa, OQ-1).
@@ -202,21 +202,28 @@ kontrak API-nya, bukan render badge-nya. Masukkan ke walk C-03.
 
 ---
 
-## C-03 — UAT paritas end-to-end ⚠️ DIJALANKAN 2026-07-28 — **FAIL = 0, lolos BERSYARAT**
+## C-03 — UAT paritas end-to-end ✅ **SELESAI 2026-07-31 — dijalankan terhadap DEPLOYMENT, FAIL = 0**
 
-> ### 🔄 PEMBARUAN 2026-07-31 — hambatannya HILANG, tinggal dijalankan
+> ### ✅ DITUTUP 2026-07-31 — report `docs/handoff/CUTOVER_UAT_REPORT_20260731.md`
 >
-> Ketiga SKIP berakar pada satu premis: *"butuh mesin ber-akses `*.vercel.app` + secret produksi"*.
-> Premis itu menggabungkan **dua** hambatan jadi satu. Dipisah, hanya satu yang mengikat:
-> runner **GitHub Actions** menjangkau deployment dengan bebas, dan secret-nya diselesaikan
-> **repository secret** yang dipasang pemilik sekali.
+> Run **`30600363211`** (job `probe` `91061467877` · job `uat` `91061496685`), di-approve pemilik
+> di environment `c03-production`, `confirm_write: YA`, commit `437ac24`, `BASE=https://agency-app-api.vercel.app`.
+> **Hasil: 22/22 · 34/34 · 13/13 — PASS 69 · FAIL 0**, tanpa satupun baris SKIP di output skrip.
+> Artifact `c03-output` (id `8781965829`, **kedaluwarsa 2026-10-29**).
 >
-> **`.github/workflows/c03-deployment-uat.yml`** menjalankan ketiganya. Terukur dari runner
-> 2026-07-31: `GET /api/healthz` ⇒ **200** · path tak dikenal ⇒ **404** (**tidak ber-proteksi**,
-> `BYPASS` tidak perlu) · secret **tervalidasi** (69 karyawan, 39 role_mapping).
+> **Yang akhirnya terbukti** dan tidak pernah terbukti di report 2026-07-28: konfigurasi env
+> Vercel, kunci JWT produksi, dan perilaku pooler Supabase. **SKIP-1 ✅ · SKIP-3 ✅.**
 >
-> **Status:** run `30600363211` job `uat` **menunggu approval** environment `c03-production`.
-> Langkah lengkap: `HANDOFF_CUTOVER_SESI24.md` §2. **SKIP-2 (badge) tetap manual.**
+> **SKIP-2 (QA badge notifikasi di FE ter-deploy) PINDAH ke daftar QA UI C-04** — butuh mata di
+> browser, tidak bisa diotomatiskan tanpa menyimpan password user produksi sebagai secret.
+> Ia tidak menahan DoD C-03 (*report tersimpan · FAIL = 0 · tiap SKIP beralasan*).
+> Keputusan: `docs/DECISIONS.md` 2026-07-31.
+>
+> 🟠 **Residu produksi lebih besar dari yang diumumkan sebelum approval** — bukan *"2 lead
+> `ZZC03`"* melainkan **3 lead** (yang ketiga bernama `Smoke`, **tanpa marker `ZZC03`**, jadi
+> prosedur bersih-bersih berbasis prefix akan melewatkannya) + 3 `prospect_attempts` +
+> 7 baris `audit_log` + **38 `performance_snapshots`** + **38 notifikasi
+> `m14.performance.published`** ke 38 karyawan riil. Rincian & konsekuensinya: report §5.
 >
 > Tutorial jalur laptop (masih sahih sebagai alternatif):
 > `docs/handoff/TUTORIAL_C03_LANGKAH_DEMI_LANGKAH.md`.
@@ -280,8 +287,9 @@ kontrak API-nya, bukan render badge-nya. Masukkan ke walk C-03.
 </details>
 
 **Untuk menutup C-03:** (1) ~~keputusan O38~~ ✅ (2) ~~repo = live~~ ✅
-(3) ~~skrip siap dijalankan terhadap deployment~~ ✅ **2026-07-29** —
-tersisa **(4) eksekusi dari mesin ber-akses + 1 QA UI manual.**
+(3) ~~skrip siap dijalankan terhadap deployment~~ ✅ **2026-07-29**
+(4) ~~eksekusi dari mesin ber-akses~~ ✅ **2026-07-31 lewat GitHub Actions** —
+QA UI manual (SKIP-2) pindah ke C-04. **Keempatnya tertutup ⇒ C-03 SELESAI.**
 
 > 🔴 **Sebelum 2026-07-29 langkah (4) TIDAK BISA berhasil, dan itu tidak terlihat dari report.**
 > `cutover-houserules-walk` menyematkan id **seed** (`EMP-0001`…`EMP-0009`) di source; tak satupun
@@ -313,11 +321,76 @@ baru buka gate C-04.
 4. Master Service List — **alat seed SELESAI (2026-07-28), tinggal dijalankan ke live.** Seed kanonik = **`supabase/seed/msl_kalkulator.csv` (32 layanan rate card aktif)**, BUKAN `MSL_DRAFT_KOMPILASI.csv` (180 baris itu harga deal historis untuk impor W1-19, dan masih menunggu Sales Head — lihat Decided 2026-07-28). CLI: `npm run msl:seed -w @cdps/api -- --actor <NIK> [--apply]`, dry-run default, idempoten, menulis lewat `msl.createService`/`updateService` sehingga tervalidasi + terversi + teraudit. Terverifikasi end-to-end di Postgres lokal termigrasi (32 dibuat → rerun 32 dilewati; quote M0 terhitung benar di keempat `pricing_mode`). **✅ SUDAH DI-APPLY KE LIVE `CDPS SG` 2026-07-28** oleh Yohan, aktor NIK `2101180004`: dry-run `dibuat=32` (nol tulis) → apply `dibuat=32 error=0` → rerun `dilewati=32` (idempotensi terbukti). `master_services` **32 baris**, bukan 0 lagi. Sisa: QA UI `/master-services` + `/sales/kalkulator` di deployment. Runbook: `docs/handoff/MSL_KALKULATOR_VALIDASI.md` §"Cara seed ke sistem"; detail apply: `HANDOFF_CUTOVER_SESI4.md` §3.1.
 
 **Aktor produksi (keputusan manusia — masih terbuka):**
+- **O50 ✅ selesai sejauh yang mungkin 2026-07-31** — **4 akun dihapus penuh** (`…02`, `…03`,
+  `…05`, `…07`: `employees` + `employee_credentials` + `employee_layered_roles` + `auth.users`,
+  ber-`audit_log`). Roster **69 → 65**. **6 tombstone permanen**, semuanya nonaktif + ban GoTrue:
+  `…01`/`…04` terkunci riwayat (lead + audit), `…06`/`…08`/`…09`/`…10` terkunci trigger
+  immutability `performance_snapshots` (**DB menolak DELETE** — residu run C-03, lihat di bawah).
+  **Nol fixture aktif · nol bisa login.**
+- ✅ **DoD sudah dirumuskan ulang & disetujui pemilik 2026-07-31** — *"nol fixture UAT yang
+  **aktif atau bisa login**"*, lengkap dengan tiga kueri pengukur (lihat DoD di bawah).
+  **O50 tertutup penuh.** `DECISIONS.md` 2026-07-31.
+- ⚠️ **Pelajaran yang berlaku umum:** `UPDATE employees SET status_aktif=false` **TIDAK**
+  mencabut akses — GoTrue tetap menerbitkan token. Pakai **`set_employee_banned(nik, true)`**,
+  yang menulis `status_aktif` **dan** `auth.users.banned_until`.
+- ⚠️ **Sebab-akibat yang layak diingat sebelum menjalankan smoke ke produksi lagi:** run C-03
+  `POST /performance/snapshots/scan` menyentuh **seluruh** karyawan aktif termasuk fixture, dan
+  hasilnya **tidak bisa ditarik**. Ia mengubah 4 fixture yang tadinya bisa dihapus menjadi
+  permanen. Smoke yang menulis ke produksi punya biaya yang tidak selalu terlihat saat dijalankan.
+- **Headcount untuk keputusan apa pun kini 59 aktif**, bukan 69. Ini khususnya mengubah dasar **O35**.
 - **O34** butir (a)–(e) — aktor Wave 2 + lead Marketing/BD (kini masih fixture UAT).
 - **O33** — aktor Finance. **O26** — NIK + email Director. **O35** — sub-tim Creative M7 §3 (butuh 3 keputusan berurutan; gate lead-divisi existing tetap berlaku sementara).
 - **O9** — target periode M14 (non-blocking, `is_placeholder`).
 
-**DoD:** tak ada fixture UAT tersisa di jalur produksi; login riil semua role lolos; ~~MSL terisi & ber-versi~~ ✅ **terpenuhi 2026-07-28** (32 layanan ber-versi di `CDPS SG`).
+**QA UI di deployment (dikumpulkan di sini, jangan tercecer):**
+- `/master-services` + `/sales/kalkulator` — sisa dari seed MSL 2026-07-28.
+- **Badge notifikasi `web-internal`** — eks **SKIP-2** C-03, dipindah ke sini 2026-07-31.
+  Kontrak API-nya sudah terbukti dua kali; yang belum pernah dilihat adalah render badge-nya.
+  🔎 **Kerjakan SEBELUM membersihkan residu C-03:** run C-03 meninggalkan **38 notifikasi
+  belum-dibaca** di produksi (sebelumnya tabel `notifications` kosong) — itu justru bahan uji
+  badge yang tidak akan ada lagi setelah dibersihkan.
+
+**Residu produksi dari run C-03 `30600363211` (2026-07-31) — wajib masuk daftar bersih-bersih:**
+- **3 lead + 3 `prospect_attempts`**: `LEAD-202607-0004` (`ZZC03 Alpha …`), `LEAD-202607-0005`
+  (`ZZC03 OD …`), dan **`LEAD-202607-0006` bernama `Smoke`** — yang terakhir **tanpa marker
+  `ZZC03`**, jadi prosedur "cari prefix `ZZC03`" di runbook **akan melewatkannya**.
+- **38 `performance_snapshots`** (`PERF-202606-0001`…`0038`, periode 2026-06, `computed_by='system'`)
+  \+ **38 notifikasi `m14.performance.published`** ke 38 karyawan riil — dihitung dari produksi
+  yang nol klien & nol transaksi, jadi angkanya benar secara mesin dan tak bermakna secara bisnis.
+- **7 baris `audit_log` TIDAK boleh dihapus** — aturan rumah #3 tanpa pengecualian untuk data uji.
+- ⚠️ **Setelah O50 dieksekusi, jalankan ulang workflow C-03 sekali.** Slot `finance_staff` run
+  2026-07-31 diresolusi ke fixture `9900000007`; begitu fixture hilang, discovery memilih Finance
+  riil (3 orang aktif) — run ulang = konfirmasi terakhir sebelum gate GO, biayanya satu klik approval.
+
+**DoD (dirumuskan ulang 2026-07-31, disetujui pemilik — `DECISIONS.md`):**
+
+1. ✅ **Nol fixture UAT yang AKTIF atau BISA LOGIN di jalur produksi.**
+   Menggantikan rumusan lama *"nol fixture UAT tersisa di jalur produksi"*, yang **mustahil
+   secara harfiah**: 6 baris terakhir terkunci — 2 oleh riwayat yang mereka tulis (aturan rumah
+   #3), 4 oleh trigger immutability `performance_snapshots`. Satu-satunya cara mencapai nol
+   harfiah adalah membongkar jaminan immutability di produksi, yang harganya jauh melebihi
+   nilai 6 baris nonaktif.
+   **Cara mengukurnya — tiga-tiganya harus nol, dan wajib dibaca dari live:**
+   ```sql
+   select count(*) from public.employees
+     where employee_id like '99%' and status_aktif;                    -- 0
+   select count(*) from public.employees e join auth.users u on u.id = e.auth_user_id
+     where e.employee_id like '99%'
+       and (u.banned_until is null or u.banned_until <= now());        -- 0
+   select count(*) from public.employees e join public.role_mappings rm
+     on upper(rm.divisi)=upper(e.divisi) and upper(rm.jabatan)=upper(e.jabatan)
+     where e.employee_id like '99%' and e.status_aktif;                -- 0
+   ```
+   **Status: TERPENUHI 2026-07-31** — 4 akun dihapus penuh, 6 tombstone semuanya
+   `status_aktif=false` + `banned_until='infinity'`, nol muncul di headcount aktif 59.
+   **Yang TIDAK ditoleransi rumusan baru ini:** fixture yang masih aktif, masih bisa login,
+   masih terhitung headcount, atau masih memegang layered role. Rumusan ini melonggarkan
+   **keberadaan baris**, bukan **akses**.
+2. **Nol data uji yang bisa disalahartikan sebagai data bisnis** — residu C-03 di atas
+   dibersihkan sejauh yang diizinkan skema, dan yang tidak bisa dihapus dicatat sebagai
+   dikenal (bukan didiamkan).
+3. **Login riil semua role lolos** di deployment.
+4. ~~MSL terisi & ber-versi~~ ✅ **terpenuhi 2026-07-28** (32 layanan ber-versi di `CDPS SG`).
 
 ---
 
@@ -359,10 +432,10 @@ Masih hanya `README.md`. Ditunda resmi (DECISIONS 2026-07-18) menunggu security 
 - [x] **C-00 selesai** — CI hijau kembali (run `30328573444`); `main` re-run hijau (run `30278802079`), PR #55–#57 tervalidasi.
 - [x] **C-01 selesai** — O37 tertutup di DECISIONS (opsi c).
 - [x] **C-02 selesai** — badge & halaman notifikasi hidup (2026-07-28; §C-02 di atas sudah RESOLVED, kotak ini sebelumnya tertinggal tidak tercentang).
-- [~] **C-03 — FAIL = 0 tercapai, lolos BERSYARAT:** sisa **3 SKIP** yang butuh walk dari deployment Vercel (bukan sandbox). Belum boleh dihitung penuh. **Skrip-nya sudah SIAP untuk deployment sejak 2026-07-29** (identitas aktor diresolusi dari environment, bukan hardcode — sebelumnya walk *mustahil* lolos di live; lihat §C-03) ⇒ sisanya murni eksekusi: **`docs/handoff/CUTOVER_C03_DEPLOYMENT_RUNBOOK.md`**. **✅ 2026-07-31 DIEKSEKUSI TERHADAP DEPLOYMENT — run `30600363211` HIJAU:** walk **22/22** · wave3 **34/34** · auth **13/13**, **FAIL = 0**. **SKIP-1 dan SKIP-3 TERTUTUP.** Report: **`docs/handoff/CUTOVER_UAT_REPORT_20260731.md`** (provenance aktor + jejak tulis produksi + temuan §5). ⇒ Tetap `[~]` **hanya karena SKIP-2** (badge notifikasi — butuh mata di browser, ~3 menit, tidak bisa diotomatiskan tanpa menyimpan password produksi sebagai secret). **Nol pekerjaan engineering tersisa di C-03**; begitu SKIP-2 dicentang ia `[x]` dan gate C-04 terbuka. 🟠 Report §5: slot `finance_staff` walk terisi **fixture QA `99…0007`** — bersinggungan dengan DoD C-04 "nol fixture"; sesudah O50 dieksekusi, walk **wajib dijalankan ulang**.
+- [x] **C-03 SELESAI 2026-07-31 — dijalankan terhadap deployment produksi, FAIL = 0.** Run `30600363211` (job `uat`, di-approve pemilik di environment `c03-production`): walk aturan rumah **22/22** · wave3 contract smoke **34/34** · auth smoke **13/13** — **PASS 69 · FAIL 0**, nol SKIP di ketiga skrip. **SKIP-1 dan SKIP-3 TERTUTUP.** Report: `docs/handoff/CUTOVER_UAT_REPORT_20260731.md`. **SKIP-2 (badge notifikasi) DIPINDAHKAN ke C-04, bukan dihapus** — keputusan `DECISIONS.md` 2026-07-31 (PR #87): ia QA UI, bukan paritas, dan menahan seluruh C-03 karena satu cek browser 3 menit menyembunyikan bahwa paritasnya sudah tuntas. 🟠 **Konsekuensi yang harus dibaca bersama C-04:** slot `finance_staff` walk terisi fixture O50 `9900000007` (report §5.3) ⇒ sesudah fixture dinonaktifkan, **walk wajib dijalankan ulang** — kalau tidak, discovery tidak menemukan aktor Finance dan baris itu jatuh jadi SKIP.
 - [~] **C-04 — SEBAGIAN.** ✅ MSL 32 layanan ber-versi di live (2026-07-28) · ✅ karyawan riil: **69** di `employees`/`employee_credentials`/`auth.users`/`auth.identities` (69/69/69/69) · ✅ **O42 dieksekusi 2026-07-29** — divisi `Marketing` hidup, `role_mappings` **39**. ~~❌ **O22** impor lead historis~~ → **GUGUR 2026-07-30** (konsekuensi O47: tooling ditinggalkan, produksi mulai dari data bersih) · ❌ keputusan aktor **O34/O26/O35/O9** · ❌ konfirmasi data Railway riil-atau-UAT · ⚠️ `Marketing`/`lead` kosong (struktur organisasi, keputusan sadar).
 - [x] **Backup MySQL Railway terakhir tersimpan** + **OQ-2 terverifikasi untuk dekomisi** — **DITUTUP 2026-07-31.** Pemilik menyatakan berkasnya sudah diunduh, disimpan **di luar GitHub**, sha256 **cocok**, dan passphrase ada di password manager; **pelonggaran DoD penyimpanan disetujui** (1 salinan, tanpa PIC kedua — `DECISIONS.md` 2026-07-31 + report §6.1). Verifikasi 4 lapis, sha256, dan syarat "keluar dari GitHub" **tidak** ikut dilonggarkan. **✅ OQ-2 SELESAI 2026-07-31** (run `30604816629`): 50 tabel · 239 baris · **rantai FK jalur uang NOL** ⇒ C-04 butir 1 tidak aktif; batas DECISIONS 2026-07-29 tertutup. **✅ Dump diambil & terverifikasi 4 lapis** (run `30607919027`, sha256 `1b9ecffd…47cb3e`) — dan lapis 4 menyingkap bahwa `mysqldump` polos atas DB ini menghasilkan backup yang MySQL sendiri **tolak muat ulang** (7 trigger ber-`;` nyasar; lihat `BACKUP_MYSQL_RAILWAY_REPORT_20260731.md` §5.1). **❌ Sisa: berkasnya masih hanya artifact ber-retensi 30 hari** — butir ini baru boleh `[x]` sesudah tersimpan di luar GitHub dengan sha256 dicocokkan. Runbook: `docs/handoff/RUNBOOK_BACKUP_MYSQL_RAILWAY.md`. Sama seperti C-03, ia **tidak lagi butuh laptop dengan klien MySQL**: `.github/workflows/railway-mysql-backup.yml` menjalankannya dari GitHub Actions dengan dua repository secret. Dump diverifikasi 4 lapis (struktur · baris · 7 trigger imutabilitas · restore sungguhan) dan **wajib terenkripsi** — repo ini publik dan artifact-nya bisa diunduh siapa saja. Butir ini baru boleh dicentang setelah berkasnya tersimpan **di luar** GitHub (artifact kedaluwarsa 30 hari), sha256 cocok, dan report-nya di-commit.
-- [ ] Rencana rollback disepakati (Railway tetap hidup N hari pasca-cutover sebelum dimatikan). **Draf usulan siap ditinjau** — `RUNBOOK_BACKUP_MYSQL_RAILWAY.md` §7 (usulan N = 14 hari, dengan alasan kenapa N besar justru **menaikkan** biaya rollback). Yang kurang tinggal persetujuan Yohan+Nerissa (OQ-1).
+- [ ] **Rencana rollback disepakati** (Railway tetap hidup N hari pasca-cutover sebelum dimatikan). **Dokumen resmi: `docs/handoff/RENCANA_ROLLBACK_CUTOVER.md`** (PR #87) — kerangka lengkap; **dua prasyarat 🔶-nya (#1 backup, #2 OQ-2) sudah TERPENUHI 2026-07-31** lewat PR #86 dan diperbarui di §3.1. Sisa: prasyarat #3/#4 (Railway hidup? kredensial lama berlaku?) + **satu angka N yang disepakati Yohan+Nerissa**. Draf pertimbangan N = 14 hari ada di `RUNBOOK_BACKUP_MYSQL_RAILWAY.md` §7 (ditandai digantikan).
 
 > Legenda: `[x]` selesai · `[~]` sebagian/bersyarat · `[ ]` belum. **C-05 (retire Go) belum boleh
 > dimulai** — ia menunggu GO, dan **hanya** GO sejak O47 + retensi PII ditutup 2026-07-30.

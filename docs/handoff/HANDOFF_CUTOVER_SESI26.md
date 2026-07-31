@@ -1,8 +1,14 @@
 # HANDOFF — Cutover Sesi 26 (titik mulai berikutnya)
 
-> **Pendahulu:** `HANDOFF_CUTOVER_SESI25.md` — masih sahih seluruhnya.
-> Berkas ini adalah **titik mulai**, bukan pengulangan: ia mencatat posisi
-> sesudah PR #86 di-merge dan apa yang harus dikerjakan selanjutnya.
+> **Pendahulu: DUA berkas, keduanya wajib dibaca** — sesi 25 berjalan **paralel
+> di dua akun**, dan keduanya sudah ter-merge:
+> - `HANDOFF_CUTOVER_SESI25.md` (PR #87) — **C-03 ditutup · O50 selesai ·
+>   DoD C-04 dirumuskan ulang · rencana rollback**
+> - `HANDOFF_CUTOVER_SESI25B.md` (PR #86) — **butir 6 gate GO: backup MySQL
+>   Railway + OQ-2**
+>
+> Nol tumpang tindih kode. Kalau keduanya berbeda soal C-03, **SESI25 (PR #87)
+> yang berlaku**. Berkas ini adalah **titik mulai** yang menggabungkan keduanya.
 >
 > Masih berlaku dan tidak diulang: SESI9 §6 (aturan rumah) · SESI12 §2.4
 > (`npm run db:rebuild`) · SESI19–24 daftar "jangan dikerjakan" · SESI24 §1.4
@@ -13,9 +19,10 @@
 | | |
 |---|---|
 | **Branch kerja** | ⚠️ **BUAT BARU dari `main`.** Branch lama `claude/backup-mysql-railway-9kf557` **sudah ter-merge lewat PR #86** — jangan menumpuk commit di atasnya |
-| **`main`** | merge commit PR #86. Rantai: … → #84 → #85 → **#86** |
-| **PR** | **#86 MERGED.** Nol PR terbuka saat berkas ini ditulis |
-| **Live `CDPS SG`** | **TIDAK dibaca sesi 25** dan **tidak disentuh** — jangan salin angka dari handoff mana pun, **baca dari live** |
+| **`main`** | merge commit PR #86. Rantai: … → #84 → #85 → **#87** → **#86** |
+| **PR** | **#86 & #87 MERGED.** Nol PR terbuka saat berkas ini ditulis |
+| **Live `CDPS SG`** | **44 migrasi · 54 tabel · 17 event** per SESI25 — **tetap baca ulang dari live**, jangan percaya baris ini |
+| **Karyawan aktif** | **59 riil** (bukan 69 — 10 fixture O50 sudah dinonaktifkan; 4 dihapus, 6 tombstone permanen). **Pakai 59** |
 | **Railway MySQL** | masih **hidup**. Backup terakhir **sudah diambil & tersimpan di luar GitHub** (butir 6 `[x]`) |
 
 **Perintah untuk melanjutkan:**
@@ -41,33 +48,57 @@ npx vitest run --root web-internal      # TERPISAH — bukan anggota `workspaces
 
 ```
 [x] C-00   [x] C-01   [x] C-02
-[~] C-03 — sisa SKIP-2 saja (badge notifikasi, ~3 menit di browser)
-[~] C-04 — sisa O50 · O34/O26/O35/O9
+[x] C-03 — DITUTUP 2026-07-31 (PASS 69 · FAIL 0). SKIP-2 dipindah ke C-04
+[~] C-04 — sisa: SKIP-2 badge · O34/O26/O35/O9 · walk ulang (§1.2)
 [x] Backup MySQL Railway + OQ-2        ← ditutup 2026-07-31
-[ ] Rencana rollback (butir 7)         ← SATU-SATUNYA butir gate yang murni keputusan
+[ ] Rencana rollback (butir 7)         ← SATU-SATUNYA butir gate yang tersisa
 ```
+
+**O50 SELESAI sejauh yang mungkin** (PR #87): 4 akun fixture dihapus, **6 sisanya
+tidak bisa dihapus siapa pun** — dinonaktifkan + di-ban GoTrue sebagai tombstone
+permanen. DoD C-04 karena itu **dirumuskan ulang** dan disetujui pemilik:
+*"nol fixture UAT yang **AKTIF atau BISA LOGIN** di produksi"*.
 
 **Sesudah gate GO → C-05** (cabut `backend/`, arsipkan Go, matikan Railway).
 
-### 1.1 Butir 7 — tinggal satu angka
+### 1.1 Butir 7 — dokumennya ada, tinggal satu angka
 
-Draf lengkap: `RUNBOOK_BACKUP_MYSQL_RAILWAY.md` §7. Usulan **N = 14 hari**, dengan
-alasan yang perlu dibaca sebelum menyetujui: **sesudah cutover data baru hanya
-masuk Supabase**, jadi "rollback ke Railway" berarti kembali ke keadaan hari GO
-**plus** kehilangan apa pun sesudahnya. N besar **menaikkan** biaya rollback,
-bukan menurunkan.
+**Dokumen resmi: `RENCANA_ROLLBACK_CUTOVER.md`** (PR #87). **Dua prasyarat 🔶-nya
+sudah terpenuhi** oleh PR #86 dan §3.1-nya sudah diperbarui:
 
-Yang dibutuhkan: satu persetujuan Yohan+Nerissa (OQ-1), atau satu angka pengganti.
+| Prasyarat | Status |
+|---|---|
+| #1 backup MySQL Railway | ✅ ada, terverifikasi 4 lapis, tersimpan di luar GitHub |
+| #2 verifikasi OQ-2 | ✅ 50 tabel · 239 baris · jalur uang NOL |
+| #3 Railway masih hidup / bisa dihidupkan | 🔶 belum diverifikasi (DB-nya terbukti hidup 2026-07-31) |
+| #4 kredensial lama masih berlaku | 🔶 belum diverifikasi |
+
+Yang dibutuhkan untuk mencentang butir 7: **satu angka N yang disepakati
+Yohan+Nerissa** (OQ-1) + prasyarat #3/#4. Pertimbangan N ada di
+`RUNBOOK_BACKUP_MYSQL_RAILWAY.md` §7 (usulan 14 hari, ditandai digantikan):
+sesudah cutover data baru hanya masuk Supabase, jadi N besar **menaikkan** biaya
+rollback, bukan menurunkan.
+
+> 🔴 **Satu hal yang wajib dibaca sebelum rollback dieksekusi:** backup Railway
+> **tidak bisa dipulihkan oleh `mysqldump` polos** — 7 trigger imutabilitas
+> memicu `ERROR 1064` dan restore mati di tengah jalan. Berkas yang tersimpan
+> **sudah diperbaiki dan restore-nya sudah dibuktikan**. Pakai berkas itu; kalau
+> perlu dump baru, lewat `scripts/railway-mysql-backup.sh`, bukan `mysqldump`.
 
 ### 1.2 🔴 Urutan yang TIDAK boleh dibalik
 
-**O50 → walk C-03 dijalankan ulang → baru C-04 ditutup.**
+**Walk C-03 WAJIB dijalankan ulang sebelum C-04 ditutup — dan sekarang, bukan nanti.**
 
-Walk C-03 2026-07-31 mengisi slot `finance_staff` dengan **fixture QA** (O50).
-Hasilnya sah — yang diuji gate permission, dan gate-nya bekerja — tapi begitu
-fixture dinonaktifkan, discovery tidak akan menemukan aktor Finance lagi dan baris
-itu **jatuh jadi SKIP**. Menutup C-04 lebih dulu berarti menutupnya di atas walk
-yang sudah tidak berlaku. Detail: `CUTOVER_UAT_REPORT_20260731.md` §5.
+Walk 2026-07-31 mengisi slot `finance_staff` dengan fixture O50 `9900000007`.
+Hasil C-03 tetap sah — yang diuji gate permission, dan gate-nya bekerja. **Tapi
+O50 sudah dieksekusi sesudah walk itu** (PR #87): fixture-nya kini nonaktif + di-ban.
+⇒ Discovery tidak akan menemukan aktor Finance lagi, dan baris itu **jatuh jadi
+SKIP** pada run berikutnya. Menutup C-04 tanpa walk ulang berarti menutupnya di
+atas bukti yang sudah tidak berlaku.
+
+Cara menjalankannya: Actions → *C-03 deployment UAT* → `run_uat=true`,
+`confirm_write=YA` → approve environment `c03-production`. Hasilnya dibaca dari
+**job log** (§3). Detail masalahnya: `CUTOVER_UAT_REPORT_20260731.md` §5.3.
 
 ---
 
@@ -75,9 +106,9 @@ yang sudah tidak berlaku. Detail: `CUTOVER_UAT_REPORT_20260731.md` §5.
 
 | # | Butir | Siapa |
 |---|---|---|
-| 1 | **C-03 SKIP-2** — badge notifikasi, mata di browser ~3 menit ⇒ C-03 `[x]`, gate C-04 terbuka | **pemilik** |
-| 2 | **Butir 7** — setujui/ubah N rencana rollback (§1.1) | **pemilik** |
-| 3 | **O50** — 10 akun `99000000xx` masih aktif & bisa login; DoD C-04 mensyaratkan nol fixture. Efeknya: "69 karyawan" sebenarnya **59 riil + 10 fixture** | **pemilik** (izin) → Claude |
+| 1 | **SKIP-2** — badge notifikasi, mata di browser ~3 menit. Kini bagian **C-04**, bukan C-03 | **pemilik** |
+| 2 | **Butir 7** — setujui N rencana rollback + verifikasi prasyarat #3/#4 (§1.1) | **pemilik** |
+| ~~3~~ | ✅ **O50 SELESAI** (PR #87) — 4 dihapus, 6 tombstone permanen, DoD C-04 dirumuskan ulang | — |
 | 4 | **O34 · O26 · O35 · O9** + divisi dasar 3 orang OD (SESI24 §1.1) | **pemilik** |
 | 5 | **O48 Grup A/B/E** — Grup C+D sudah live | **pemilik + head dev** → Claude |
 | 6 | **Visibility repo → privat**, lalu tinjau ulang **O47b** (PII di histori git) | **pemilik** |
