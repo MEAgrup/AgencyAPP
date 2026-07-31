@@ -333,6 +333,151 @@ DO $$ BEGIN
 END $$;
 
 RESET ROLE;
+
+-- ---------------------------------------------------------------------------
+-- 24-32. O48 GRUP C + D — arm "Lead/SPV = division-wide" untuk 6 policy,
+--        ditambahkan 20260730160000. Keputusan pemilik 2026-07-30; analisis di
+--        `docs/handoff/O48_ANALISIS_KEPUTUSAN.md`.
+--
+--        Fixture di bawah memakai bentuk HRIS (`divisi='CREATIVE'`) + baris
+--        `role_mappings` penjembatan, bukan bentuk CDPS — aturan yang lahir dari
+--        O46: fixture yang meng-encode asumsi penulis tentang bentuk data
+--        produksi BUKAN bukti.
+-- ---------------------------------------------------------------------------
+
+-- Fixture (superuser). Rantai: client (blok 14) -> service -> brief -> asset.
+INSERT INTO employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by) VALUES
+  ('EMP-RLS-CRE1', 'rls creative staff', 'rls.cre1@example.test', 'CREATIVE', 'VIDEOGRAPHER RLS', true, 'SYSTEM');
+INSERT INTO role_mappings (divisi, jabatan, division, level, created_by) VALUES
+  ('CREATIVE', 'VIDEOGRAPHER RLS', 'Creative', 'staff', 'SYSTEM');
+
+INSERT INTO services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                      commission_rule, status, created_by)
+VALUES ('SVC-RLS-0001', 'CLI-RLS-0001', 'MSV-RLS-0001', 1, 'rls service', 9000000,
+        '10% of standard price', 'Ongoing', 'EMP-RLS-SLS1');
+
+-- Brief milik divisi CREATIVE. `assigned_division` inilah yang diresolusi helper.
+INSERT INTO briefs (id, service_id, title, status, assigned_division, created_by)
+VALUES ('BRF-RLS-0001', 'SVC-RLS-0001', 'rls brief', '[Draft]', 'Creative', 'EMP-RLS-CRE1');
+
+-- Asset: PIC dan pembuatnya STAF, BUKAN lead. Ini disengaja — check 25 bertumpu
+-- pada kenyataan bahwa lead Creative TIDAK bisa melihat baris `assets` ini.
+INSERT INTO assets (id, brief_id, asset_type, sequence_no, assigned_pic, status, created_by)
+VALUES ('AST-RLS-0001', 'BRF-RLS-0001', 'Video', 1, 'EMP-RLS-CRE1', '[To Do]', 'EMP-RLS-CRE1');
+
+INSERT INTO demo_tasks (id, title, division, status, created_at, created_by)
+VALUES ('DTK-RLS-C001', 'rls creative task', 'Creative', 'To Do', now(), 'EMP-RLS-CRE1');
+
+-- Tiga block request, semuanya diajukan STAF (bukan lead, bukan resolver).
+INSERT INTO brief_block_requests (id, brief_id, reason, requested_by, created_by)
+VALUES ('BBR-RLS-0001', 'BRF-RLS-0001', 'rls reason', 'EMP-RLS-CRE1', 'EMP-RLS-CRE1');
+INSERT INTO asset_block_requests (id, asset_id, reason, requested_by, created_by)
+VALUES ('ABR-RLS-0001', 'AST-RLS-0001', 'rls reason', 'EMP-RLS-CRE1', 'EMP-RLS-CRE1');
+INSERT INTO demo_task_block_requests (id, task_id, reason, requested_by, created_by)
+VALUES ('DBR-RLS-0001', 'DTK-RLS-C001', 'rls reason', 'EMP-RLS-CRE1', 'EMP-RLS-CRE1');
+
+-- Grup D: snapshot performa milik anggota divisi SALES + dua baris config.
+INSERT INTO performance_snapshots (id, staff_id, role_type, period_start, period_end,
+                                   profile_score, final_score, components_json, computed_by)
+VALUES ('PRF-RLS-0001', 'EMP-RLS-SLS1', 'AM', DATE '2026-07-01', DATE '2026-07-31',
+        86.4, 88.4, '{}'::jsonb, 'SYSTEM');
+INSERT INTO perf_kpi_weights (role_type, component, weight, updated_by)
+VALUES ('RLSROLE', 'rls_component', 100, 'SYSTEM');
+INSERT INTO perf_period_targets (role_type, component, period_start, target_value, updated_by)
+VALUES ('RLSROLE', 'rls_component', DATE '2026-07-01', 42, 'SYSTEM');
+
+SET LOCAL ROLE authenticated;
+
+-- 24. Grup C — lead Creative melihat block request BRIEF divisinya, walau ia
+--     bukan requester/resolver/pembuat. Nol tanpa 20260730160000.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRELEAD","division":"Creative","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM brief_block_requests WHERE id='BBR-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS brief_block_requests: Creative LEAD must see own-division queue (O48 Grup C)'; END IF;
+END $$;
+
+-- 25. 🔴 CHECK PEMBEDA — inilah yang membuktikan helper WAJIB SECURITY DEFINER.
+--     Lead Creative melihat block request ASSET-nya, PADAHAL ia tidak bisa
+--     melihat baris `assets` itu sendiri (`assets_select` belum punya arm lead —
+--     O48 Grup B, sengaja di luar cakupan). Kalau seseorang mengganti
+--     `private.jwt_division_owns_asset` dengan `EXISTS (SELECT 1 FROM assets …)`
+--     inline, subquery-nya ikut disaring RLS, hasilnya false, dan check ini
+--     MERAH — yaitu tepat kelas cacat O46 yang tertangkap sebelum di-apply.
+DO $$ BEGIN
+  IF (SELECT count(*) FROM assets WHERE id='AST-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS premis check 25 rusak: lead Creative TIDAK boleh melihat assets row (kalau ia bisa, check 25 kehilangan daya bedanya)'; END IF;
+  IF (SELECT count(*) FROM asset_block_requests WHERE id='ABR-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS asset_block_requests: Creative LEAD must see the queue even though assets row is invisible (O48 Grup C — helper must be SECURITY DEFINER)'; END IF;
+END $$;
+
+-- 26. Grup C — block request DEMO TASK divisinya.
+DO $$ BEGIN
+  IF (SELECT count(*) FROM demo_task_block_requests WHERE id='DBR-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS demo_task_block_requests: Creative LEAD must see own-division queue (O48 Grup C)'; END IF;
+END $$;
+
+-- 27. Grup C — arm TIDAK melebar lintas divisi: lead Sales nol di ketiganya.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLSLEAD","division":"Sales","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM brief_block_requests    WHERE id='BBR-RLS-0001') <> 0
+  OR (SELECT count(*) FROM asset_block_requests    WHERE id='ABR-RLS-0001') <> 0
+  OR (SELECT count(*) FROM demo_task_block_requests WHERE id='DBR-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS *_block_requests: foreign-division lead must see NOTHING (O48 Grup C)'; END IF;
+END $$;
+
+-- 28. Grup C — arm TIDAK melebar ke staff sedivisi. Kalau check ini merah,
+--     `jwt_is_lead()` hilang dari arm dan seluruh divisi ikut terbuka.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRE9","division":"Creative","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM brief_block_requests WHERE id='BBR-RLS-0001') <> 0
+  OR (SELECT count(*) FROM asset_block_requests WHERE id='ABR-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS *_block_requests: same-division STAFF must NOT see the queue (O48 Grup C guard)'; END IF;
+END $$;
+
+-- 29. Grup D — lead Sales melihat snapshot performa anggota divisinya (M14
+--     Rule 7 "Leader/SPV: team"). Nol tanpa 20260730160000, dan itulah sebabnya
+--     `teamRollup` merata-rata satu orang lalu menampilkannya sebagai rata-rata
+--     TIM — angka salah yang terlihat benar.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLSLEAD","division":"Sales","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM performance_snapshots WHERE id='PRF-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS performance_snapshots: Sales LEAD must see division member snapshot (O48 Grup D, M14 Rule 7)'; END IF;
+END $$;
+
+-- 30. Grup D — skor performa TIDAK bocor lintas divisi.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRELEAD","division":"Creative","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM performance_snapshots WHERE id='PRF-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS performance_snapshots: foreign-division lead must NOT see the snapshot (O48 Grup D)'; END IF;
+END $$;
+
+-- 31. Grup D — STAF biasa membaca tabel config KPI. Ini menegakkan entri Decided
+--     W3-M14-C1 ("BACA = semua aktor ber-scope") dan mencerminkan
+--     `performance.canScope()`. Nol tanpa 20260730160000 — dan nol di sini
+--     berarti halaman config tampil KOSONG bagi semua orang selain Director/OD.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRE9","division":"Creative","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM perf_kpi_weights   WHERE role_type='RLSROLE') <> 1
+  OR (SELECT count(*) FROM perf_period_targets WHERE role_type='RLSROLE') <> 1
+  THEN RAISE EXCEPTION 'RLS perf config: any scoped actor must READ weights/targets (O48 Grup D, Decided W3-M14-C1)'; END IF;
+END $$;
+
+-- 32. Grup D — pelebaran itu tetap FAIL-CLOSED: klaim kosong membaca NOL.
+--     Kontrol negatif; kalau merah, `canScope` diterjemahkan jadi `true`.
+SELECT set_config('request.jwt.claims', '{"app_metadata":{}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM perf_kpi_weights    WHERE role_type='RLSROLE') <> 0
+  OR (SELECT count(*) FROM perf_period_targets WHERE role_type='RLSROLE') <> 0
+  THEN RAISE EXCEPTION 'RLS perf config: empty claims must read NOTHING (O48 Grup D fail-closed)'; END IF;
+END $$;
+
+RESET ROLE;
 ROLLBACK;
 
 \echo 'rls_checks: PASS'

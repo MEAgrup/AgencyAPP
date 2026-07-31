@@ -285,12 +285,34 @@ describeDb('setLayeredRole', () => {
     expect(audit[1].after_json).toEqual({ role: 'od', enabled: false });
   });
 
-  it('rejects a role outside {od, director} and an empty employee id', async () => {
+  it('rejects a role outside {od, director, lead} and an empty employee id', async () => {
     await seedEmployee('ZZ-EMP2');
     await expect(setLayeredRole(sql, director(), 'ZZ-EMP2', 'superadmin', true))
       .rejects.toThrow(MSG_BAD_ROLE);
     await expect(setLayeredRole(sql, director(), '', 'od', true))
       .rejects.toThrow(MSG_INCOMPLETE);
+  });
+
+  /**
+   * `lead` became a layered role in migrasi `20260730154210_layered_lead_role`
+   * so that ONE employee can be lead without promoting everyone sharing their
+   * jabatan (`role_mappings` is keyed on `(divisi, jabatan)`). The DB honoured it
+   * from that day; this gate did not, so `rolemapseed --apply` — the only
+   * documented way to write layered roles — rejected the three `lead` rows the
+   * seed CSV already shipped. Locked here so the gate cannot drift back.
+   */
+  it('grants the layered `lead` role and lets employee_claims honour it', async () => {
+    await seedEmployee('ZZ-EMP4');
+    await setLayeredRole(sql, director(), 'ZZ-EMP4', 'lead', true);
+
+    const rows = (await listLayeredRoles(sql)).filter((r) => r.employeeId === 'ZZ-EMP4');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].role).toBe('lead');
+    expect(rows[0].enabled).toBe(true);
+
+    const [claims] = await sql<{ level: string }[]>`
+      select public.employee_claims('ZZ-EMP4')->>'level' as level`;
+    expect(claims.level).toBe('lead');
   });
 
   it('denies OD granting itself Director', async () => {
@@ -321,7 +343,12 @@ describe('BI messages are the exact ported strings', () => {
     expect(MSG_ROLE_MAPPING_DENIED).toBe('[hanya Director yang dapat mengelola role mapping]');
     expect(MSG_LAYERED_ROLE_DENIED).toBe('[hanya Director yang dapat mengelola layered role]');
     expect(MSG_BAD_LEVEL).toBe("[level harus 'staff' atau 'lead']");
-    expect(MSG_BAD_ROLE).toBe("[role harus 'od' atau 'director']");
+    // The ONE deliberate divergence from Go, logged in DECISIONS 2026-07-30:
+    // `lead` joined LAYERED_ROLES with migrasi `20260730154210`, so the Go
+    // wording now under-reports what the gate accepts. Go is retired
+    // (CLAUDE.md §Stack) and is no longer the parity oracle for this string.
+    // Every other message here is still byte-for-byte the ported one.
+    expect(MSG_BAD_ROLE).toBe("[role harus 'od', 'director', atau 'lead']");
     expect(MSG_INCOMPLETE).toBe('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
   });
 });

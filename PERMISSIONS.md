@@ -52,6 +52,19 @@
 > `transactions`/`audit_log`, and is aspirational for the rest.** Do not read this table as fully
 > enforced house-wide.
 >
+> 🟠 **Update 2026-07-30 — the survey number itself was off, and O48 is now partly decided.**
+> Re-measured against live: **35 of 45** carry no lead/division arm (not 36), **10** do (not 9), and
+> **3 of the 35 are deliberately not division-scoped** (`notifications` is personal by design;
+> `master_services`/`master_service_versions` are the public MSL catalog) — so the real candidate
+> count is **32**. Full classification: `docs/handoff/O48_ANALISIS_KEPUTUSAN.md`.
+>
+> **Grup C + D (6 policy) were decided and implemented** — migration `20260730160000`,
+> **not yet applied to live**. Grup D matters most: four M14 routes read through `readAsActor`, so
+> RLS actually bites, and `GET /performance/teams/{division}` was averaging only the rows that
+> survived RLS and rendering that as the **team** average — a wrong number that looks right, not an
+> empty page. Grup A/B/E remain **open**. Until `20260730160000` is live, the M14 rows in the table
+> above are aspirational.
+>
 > **36 of 45 is the correct figure again as of `20260730120433` being live.** Between
 > `20260730091540` and that fix it was briefly **45 of 45**: the arm existed in both policies' text
 > but resolved division through the wrong vocabulary, so it never fired. That interval is worth

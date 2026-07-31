@@ -8,8 +8,9 @@
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { admin } from '@cdps/domain';
 import { describe, expect, it } from 'vitest';
-import { parseLayeredRoleCsv, parseRoleMappingCsv } from './csv';
+import { VALID_LAYERED_ROLES, parseLayeredRoleCsv, parseRoleMappingCsv } from './csv';
 
 const seed = (name: string): string =>
   readFileSync(fileURLToPath(new URL(`../../../../supabase/seed/${name}`, import.meta.url)), 'utf8');
@@ -88,13 +89,22 @@ describe('parseLayeredRoleCsv', () => {
   it('parses the real seed file', () => {
     const rows = parseLayeredRoleCsv(seed('layered_roles_riil.csv'));
     expect(rows.length).toBeGreaterThan(0);
-    expect(rows.every((r) => r.role === 'od' || r.role === 'director')).toBe(true);
+    expect(rows.every((r) => r.role === 'od' || r.role === 'director' || r.role === 'lead')).toBe(true);
     expect(rows.every((r) => r.employeeId !== '')).toBe(true);
   });
 
-  it('rejects a role outside od/director', () => {
+  it('rejects a role outside od/director/lead', () => {
     expect(() => parseLayeredRoleCsv('2409230432,admin'))
-      .toThrow(/role "admin" harus "od" atau "director"/);
+      .toThrow(/role "admin" harus "od", "director", atau "lead"/);
+  });
+
+  // `lead` ditambahkan 2026-07-30: role_mappings berkunci (divisi,jabatan), jadi
+  // ia tidak bisa menjadikan SEORANG karyawan lead tanpa menaikkan semua yang
+  // sejabatan. Layered role adalah jalur per-orangnya.
+  it('accepts the layered `lead` role', () => {
+    expect(parseLayeredRoleCsv('2307100292,lead')).toEqual([
+      { line: 1, employeeId: '2307100292', role: 'lead' },
+    ]);
   });
 
   it('rejects an empty employee_id', () => {
@@ -110,5 +120,28 @@ describe('parseLayeredRoleCsv', () => {
     // OD and Director are layered roles on one account (CLAUDE.md §Permissions),
     // so this is legitimate and must not read as a duplicate.
     expect(parseLayeredRoleCsv('2409230432,od\n2409230432,director')).toHaveLength(2);
+  });
+});
+
+describe('VALID_LAYERED_ROLES vs the server-side gate', () => {
+  /**
+   * The parser is the FIRST gate and `admin.setLayeredRole` is the authoritative
+   * one. When they disagree the failure is invisible until `--apply` runs against
+   * a real deployment: the CSV parses clean, then every row of the extra role
+   * dies on `MSG_BAD_ROLE` mid-run — after earlier rows already committed.
+   *
+   * That is not hypothetical. `lead` was added here and to the seed CSV on
+   * 2026-07-30 but NOT to `LAYERED_ROLES`, so the three live `lead` grants were
+   * unreproducible from the seed until 2026-07-30 (C-03). This test is the reason
+   * the next role cannot repeat it.
+   */
+  it('accepts exactly the roles admin.setLayeredRole accepts', () => {
+    expect([...VALID_LAYERED_ROLES].sort()).toEqual([...admin.LAYERED_ROLES].sort());
+  });
+
+  it('every role in the real seed file passes the server-side gate', () => {
+    for (const row of parseLayeredRoleCsv(seed('layered_roles_riil.csv'))) {
+      expect(admin.LAYERED_ROLES.has(row.role)).toBe(true);
+    }
   });
 });
