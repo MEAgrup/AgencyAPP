@@ -343,6 +343,13 @@ baru buka gate C-04.
 - **O9** — target periode M14 (non-blocking, `is_placeholder`).
 
 **QA UI di deployment (dikumpulkan di sini, jangan tercecer):**
+
+> ✅ **Runbook siap 2026-07-31: `docs/handoff/QA_UI_C04_RUNBOOK.md`** — ketiga butir di bawah
+> dijabarkan jadi checklist ber-**angka harapan yang sudah dihitung** dari live + rumus
+> `sales.ts`/`money.ts` (bukan "cek apakah tampil benar"), plus daftar **apa yang TIDAK bisa
+> dibuktikan dari produksi** supaya tidak ada butir yang dicentang tanpa pernah diuji. Sisanya
+> murni eksekusi di browser.
+
 - `/master-services` + `/sales/kalkulator` — sisa dari seed MSL 2026-07-28.
 - **Badge notifikasi `web-internal`** — eks **SKIP-2** C-03, dipindah ke sini 2026-07-31.
   Kontrak API-nya sudah terbukti dua kali; yang belum pernah dilihat adalah render badge-nya.
@@ -350,10 +357,31 @@ baru buka gate C-04.
   belum-dibaca** di produksi (sebelumnya tabel `notifications` kosong) — itu justru bahan uji
   badge yang tidak akan ada lagi setelah dibersihkan.
 
+**Tiga hal yang ditemukan saat menyusun runbook, dan mengubah cara QA ini dijalankan:**
+1. 🔴 **Deep link notifikasi menuju route yang tidak ada ⇒ klik kartu = 404.** Yang hidup di
+   produksi sekarang: `/performance_snapshot/PERF-202606-00xx` ×38, sedangkan route-nya
+   `/performance/[id]`. Audit statis: **hanya 2 dari 10 pola deep link punya route** (runbook §6.1).
+   Dicatat **O51** ⇒ QA-1 mencatatnya **KNOWN-FAIL**, bukan penahan.
+2. **Badge akan menampilkan `1`, bukan `38`** — 38 notifikasi tersebar ke 38 penerima berbeda,
+   1 per orang, dari 59 karyawan aktif. **21 akun tidak punya notifikasi sama sekali**, jadi QA
+   wajib memilih akun dari daftar penerima dulu (kueri di runbook §2.2) — kalau tidak, "badge
+   tidak muncul" akan terbaca sebagai FAIL padahal benar.
+3. **Dua hal yang tidak akan pernah lolos diuji dari produksi hari ini, dan itu bukan bug:**
+   Total Komisi selalu `Rp. 0,00` (ke-32 layanan ber-rule `0% of standard price` — basis masih
+   menunggu Sales Head), dan **`batch_ceiling` tak bisa dibedakan dari `flat`** (kelima layanannya
+   ber-`min_qty=1` ⇒ `ceil(q/1)×1 = q`). Keduanya tertutup `sales.test.ts`.
+
 **Residu produksi dari run C-03 `30600363211` (2026-07-31) — wajib masuk daftar bersih-bersih:**
-- **3 lead + 3 `prospect_attempts`**: `LEAD-202607-0004` (`ZZC03 Alpha …`), `LEAD-202607-0005`
-  (`ZZC03 OD …`), dan **`LEAD-202607-0006` bernama `Smoke`** — yang terakhir **tanpa marker
-  `ZZC03`**, jadi prosedur "cari prefix `ZZC03`" di runbook **akan melewatkannya**.
+- ~~**3 lead + 3 `prospect_attempts`**: `LEAD-202607-0004` (`ZZC03 Alpha …`), `LEAD-202607-0005`
+  (`ZZC03 OD …`), dan **`LEAD-202607-0006` bernama `Smoke`**~~ — 🟠 **SUDAH TIDAK ADA DI LIVE
+  per 2026-07-31 (dibaca dari live, sesudah handoff SESI25 ditulis): `leads` 0 baris ·
+  `prospect_attempts` 0 baris.** Bukan cuma yang tiga itu — **keenamnya**, termasuk
+  `LEAD-202607-0001…0003` pra-run. `pg_stat_user_tables` mengonfirmasi penghapusan sungguhan
+  (`n_tup_del = 6` di kedua tabel), FK-nya `NO ACTION` sehingga **bukan** cascade dari penghapusan
+  4 fixture O50, dan **`audit_log` nol mencatatnya** (64 baris, `n_tup_del = 0`, tak satu pun
+  ber-`action='deleted'` untuk `lead`/`prospect_attempt`). ⇒ dihapus lewat **SQL langsung ke
+  produksi, di luar jalur domain**, tanpa jejak siapa/kapan. **Butir bersih-bersihnya selesai;
+  yang belum selesai adalah pertanyaan prosedurnya** — dicatat **O52**.
 - **38 `performance_snapshots`** (`PERF-202606-0001`…`0038`, periode 2026-06, `computed_by='system'`)
   \+ **38 notifikasi `m14.performance.published`** ke 38 karyawan riil — dihitung dari produksi
   yang nol klien & nol transaksi, jadi angkanya benar secara mesin dan tak bermakna secara bisnis.
