@@ -286,8 +286,26 @@ if [ -n "$RESTORE_URL" ]; then
    Pakai database kosong yang memang sekali-pakai."
   fi
 
-  mysql --defaults-file="$RESTORE_CNF" "$RM_DB" <"$DUMP" \
-    || rm_die "Restore GAGAL — dump-nya tidak bisa dieksekusi. Ini justru temuan paling penting yang bisa dihasilkan skrip ini."
+  # Kalau restore gagal, "ERROR … at line 257" saja tidak cukup: yang dibutuhkan
+  # adalah ISI baris 257. Tanpa itu diagnosisnya jadi tebak-tebakan, dan satu
+  # tebakan salah sudah memakan satu run penuh.
+  #
+  # Baris INSERT disensor — nomor baris dan nama tabelnya berguna, isinya data
+  # (dan log Actions repo publik bukan tempatnya).
+  if ! mysql --defaults-file="$RESTORE_CNF" "$RM_DB" <"$DUMP" 2>"$RM_TMPDIR/restore.err"; then
+    sed 's/^/  /' "$RM_TMPDIR/restore.err" >&2
+    ln="$(sed -nE 's/.*[Aa]t line ([0-9]+).*/\1/p' "$RM_TMPDIR/restore.err" | head -1)"
+    if [ -n "$ln" ]; then
+      a=$(( ln > 4 ? ln - 4 : 1 )); b=$(( ln + 2 ))
+      echo "  --- isi dump baris $a–$b (baris data disensor) ---" >&2
+      awk -v a="$a" -v b="$b" -v bad="$ln" 'NR>=a && NR<=b {
+        mark = (NR == bad) ? " <<< DI SINI" : ""
+        if ($0 ~ /^INSERT INTO/) { print "  " NR ": [INSERT " $3 " — isi disensor]" mark }
+        else { print "  " NR ": " substr($0, 1, 220) mark }
+      }' "$DUMP" >&2
+    fi
+    rm_die "Restore GAGAL — dump-nya tidak bisa dieksekusi. Ini justru temuan paling penting yang bisa dihasilkan skrip ini."
+  fi
 
   RM_CNF="$RESTORE_CNF"            # rm_row_counts memakai RM_CNF/RM_DB
   DST_ROWS="$RM_TMPDIR/dst_rows.tsv"
