@@ -77,21 +77,15 @@ sama: MSL riil (2026-07-28, NIK `2101180004`) tidak pernah menyentuh Railway.
   dimatikan, satu `SELECT count(*)` per tabel harus dilampirkan"* — **terpenuhi**,
   dan lebih dari yang diminta: 50 tabel, bukan 3.
 
-## 4. 🟠 Satu hal yang butuh mata pemilik
+## 4. ✅ `leads` = 1 · `prospect_attempts` = 1 — DITUTUP pemilik
 
-`leads` = **1** dan `prospect_attempts` = **1**.
+Pemilik menyatakan **2026-07-31**: *"database yang ada masih kosong dan belum
+digunakan, prospek yang ada hanya percobaan."*
 
-Satu baris hampir pasti rekaman uji, tapi "hampir pasti" bukan bukti, dan isinya
-tidak dibaca di sini (PII — repo publik). **Buka satu baris itu di Railway**
-sebelum service-nya dimatikan:
-
-```sql
-SELECT id, lead_name, source, record_status, created_at, created_by FROM leads;
-```
-
-- Rekaman uji ⇒ nol tindakan, catat saja di sini.
-- Prospek sungguhan ⇒ masukkan manual ke CDPS Supabase sebelum Railway mati.
-  Satu lead tidak butuh importer — cukup form.
+⇒ **Nol entitas yang perlu dipindahkan ke Supabase sebelum Railway dimatikan.**
+Ini menutup satu-satunya butir OQ-2 yang tersisa untuk mata manusia; keduanya
+tetap ikut ter-backup di §5, jadi keputusan ini bisa dibatalkan selama berkasnya
+masih ada.
 
 ## 5. Backup — ✅ terverifikasi 4 lapis
 
@@ -163,6 +157,23 @@ masih tersisa.
 > jalur uang, dan pemilik menyatakan datanya percobaan): cukup **satu** salinan di
 > luar GitHub, dan passphrase tidak wajib diakses PIC kedua. Butuh persetujuan
 > pemilik + entri `DECISIONS.md` — pelonggaran butir gate bukan keputusan Claude.
+
+## 6b. Yang MASIH menggantung — daftar tertutup per 2026-07-31
+
+Sisi Claude **nol**. Enam butir, semuanya butuh akses atau otoritas pemilik:
+
+| # | Butir | Tenggat | Kenapa ia penting |
+|---|---|---|---|
+| 1 | **Unduh artifact & simpan di luar GitHub** — run `30607919027` → `railway-mysql-backup` | **2026-08-30 05:54 UTC** artifact terhapus otomatis | Ini **satu-satunya** butir yang membuat butir 6 gate GO masih `[~]`. Lewat tanggal itu tanpa unduhan ⇒ backup hilang dan seluruh 5 run harus diulang |
+| 2 | **Pastikan `RAILWAY_BACKUP_PASSPHRASE` tersimpan di password manager** | sebelum butir 1 | Berkasnya terenkripsi. Tanpa passphrase ia **byte acak**, bukan backup — dan repository secret tidak bisa dibaca kembali oleh siapa pun, termasuk Anda |
+| 3 | **Setujui/tolak pelonggaran DoD penyimpanan** (§6: 1 salinan, passphrase tanpa PIC kedua) | sebelum butir 6 dicentang | Pelonggaran butir gate = keputusan pemilik, bukan Claude |
+| 4 | **Required reviewer di environment `railway-backup`** | sebelum run berikutnya | Gerbangnya **tidak menyala** di kelima run — GitHub membuat environment tanpa proteksi, menambahkan reviewer langkah tersendiri |
+| 5 | **Hapus 2 repository secret sesudah Railway dimatikan** (`RAILWAY_MYSQL_URL`, `RAILWAY_BACKUP_PASSPHRASE`) | saat C-05 | `RAILWAY_MYSQL_URL` adalah kredensial DB produksi yang tetap sah selama Railway hidup |
+| 6 | **Opsional: hapus log run `30607290620`** | kapan saja | Jendela diagnostik sempat mencetak host `*.proxy.rlwy.net` ke log repo **publik** sebelum penyamaran dipasang. Bukan kredensial (port/user/password tidak ikut) dan berumur pendek karena Railway akan mati — tapi ia tercatat di sini apa adanya |
+
+> **Butir 7 gate GO (rencana rollback)** bukan bagian dari backup, tapi ia satu
+> keputusan yang sama singkatnya: draf N = 14 hari ada di
+> `RUNBOOK_BACKUP_MYSQL_RAILWAY.md` §7, tinggal disetujui atau diubah.
 
 ## 7. Catatan operasional dari run ini
 

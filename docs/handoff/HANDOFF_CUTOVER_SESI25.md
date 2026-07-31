@@ -53,7 +53,23 @@ provenance = syarat reproducible) → centang `CUTOVER_BACKLOG.md` §2 C-03 `[~]
 > Artifact kedaluwarsa **2026-10-29**. Sesudah itu buktinya hilang dan run harus
 > diulang — jangan ditunda sampai dekat tanggal itu.
 
-### 1.2 ✅ Butir 6 gate GO: perkakasnya jadi, eksekusinya milik pemilik
+### 1.2 ✅ Butir 6 gate GO — perkakas **dan** eksekusinya SELESAI
+
+> **Status akhir sesi ini:** OQ-2 **terverifikasi untuk dekomisi** dan dump
+> **terverifikasi 4 lapis**. Yang tersisa dari butir 6 **hanya penyimpanan** —
+> berkasnya masih artifact yang **terhapus otomatis 2026-08-30 05:54 UTC**.
+> Daftar tertutup enam butir sisa (semuanya pemilik):
+> `BACKUP_MYSQL_RAILWAY_REPORT_20260731.md` **§6b**.
+>
+> | | |
+> |---|---|
+> | OQ-2 | run `30604816629` — 50 tabel · **239 baris** · jalur uang **NOL** |
+> | Dump | run `30607919027` — `cdps-mysql-railway-20260731T055157Z.sql.gz.enc` |
+> | sha256 | `1b9ecffd6f0c4072cfde24b7dc25b49929480bec204c5dacd19e04a15647cb3e` |
+> | Verifikasi | 4/4 lapis hijau · enkripsi round-trip diuji |
+> | `leads` 1 · `prospect_attempts` 1 | ✅ **ditutup pemilik** — percobaan, nol yang perlu dipindah |
+
+
 
 Butir 6 selama ini tercatat *"butuh akses Railway"* ⇒ menunggu laptop dengan
 klien MySQL terpasang. Premis itu patah oleh alasan yang sama seperti C-03
@@ -161,7 +177,7 @@ cutover data baru hanya masuk Supabase). Tinggal disetujui/diubah Yohan+Nerissa.
 | # | Butir | Siapa |
 |---|---|---|
 | 1 | **C-03** — ✅ **SELESAI dari sisi Claude.** Report `CUTOVER_UAT_REPORT_20260731.md` ditulis dari job log; SKIP-1 & SKIP-3 tertutup (22/22 · 34/34 · 13/13, FAIL=0). ❌ sisa: **SKIP-2** badge notifikasi, ~3 menit di browser | **pemilik** |
-| 2 | **Butir 6** — ✅ OQ-2 + dump SELESAI & terverifikasi. ❌ sisa: simpan berkasnya di luar GitHub + cocokkan sha256 (+ setujui pelonggaran DoD penyimpanan) | **pemilik** |
+| 2 | **Butir 6** — ✅ OQ-2 + dump SELESAI & terverifikasi 4 lapis. ❌ sisa: **6 butir §6b**, dipimpin *unduh artifact sebelum **2026-08-30***. Lewat tanggal itu, kelima run harus diulang | **pemilik** |
 | 3 | **Butir 7** — setujui/ubah draf rollback | **pemilik** |
 | 4 | **O50** — 10 akun `99000000xx` masih aktif; DoD C-04 mensyaratkan nol fixture di produksi | **pemilik** |
 | 5 | **O35** · **O9** · divisi dasar 3 orang OD (SESI24 §1.1) | **pemilik** |
@@ -180,6 +196,18 @@ cutover data baru hanya masuk Supabase). Tinggal disetujui/diubah Yohan+Nerissa.
 19; yang bergerak sesi ini adalah Fase 4 — C-03 hijau (tinggal pelaporan) dan
 butir 6 turun dari "butuh akses" jadi "tinggal dijalankan". Fase 4 tetap **bukan
 angka terukur**; butir gate tidak punya satuan yang bisa dijumlah.
+
+## 3.1 ⏳ Satu-satunya butir di seluruh cutover yang punya TENGGAT KERAS
+
+Semua sisa lain menunggu keputusan dan tidak basi. **Butir ini basi sendiri:**
+
+> **Artifact `railway-mysql-backup` (run `30607919027`) terhapus otomatis
+> `2026-08-30 05:54 UTC`.**
+
+Sesudah itu backup Railway lenyap dan harus diambil ulang — dan pengambilan ulang
+hanya mungkin **selama Railway masih hidup**. Kalau Railway sudah dimatikan lebih
+dulu, ia tidak bisa diambil ulang sama sekali. Urutan yang aman karena itu:
+**unduh & simpan dulu → baru matikan Railway.**
 
 ## 4. Yang JANGAN dikerjakan
 
