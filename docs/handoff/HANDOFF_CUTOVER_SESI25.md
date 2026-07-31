@@ -145,10 +145,23 @@ cutover data baru hanya masuk Supabase). Tinggal disetujui/diubah Yohan+Nerissa.
 
 ## 3. Sisa pekerjaan
 
+> **⚠️ Diperbarui 2026-07-31 sore — §1.2/§2 sudah DIEKSEKUSI, bukan lagi "siap dijalankan".**
+> OQ-2 **terverifikasi** (run `30604816629`) dan dump **terverifikasi 4 lapis**
+> (run `30607919027`). Hasil + temuan lengkap: `BACKUP_MYSQL_RAILWAY_REPORT_20260731.md`.
+> **Yang tersisa dari butir 6 hanya penyimpanan** — berkasnya masih artifact
+> ber-retensi 30 hari.
+>
+> **Untuk sesi berikutnya, satu hal teknis yang mengubah banyak:** artifact
+> GitHub memang tak bisa diunduh dari sesi Claude (403 ke penyimpanan blob),
+> **tapi job log BISA** lewat `get_job_logs`. Semua yang dicetak skrip ke stdout
+> terbaca dari sana — begitulah seluruh tabel OQ-2 dan baris 257 yang bermasalah
+> didapat. Konsekuensi langsung: **C-03 (butir 1) tidak lagi butuh pemilik
+> mengunduh apa pun.**
+
 | # | Butir | Siapa |
 |---|---|---|
-| 1 | **C-03** — unduh artifact `c03-output`, tempel ke sesi → report + centang backlog (§1.1) | **pemilik** → Claude |
-| 2 | **Butir 6** — jalankan runbook, simpan backup, isi report (§2) | **pemilik** → Claude |
+| 1 | **C-03** — hasil ketiga skrip bisa dibaca langsung dari job log run `30600363211` ⇒ report + centang backlog **tanpa** unduhan pemilik | **Claude** |
+| 2 | **Butir 6** — ✅ OQ-2 + dump SELESAI & terverifikasi. ❌ sisa: simpan berkasnya di luar GitHub + cocokkan sha256 (+ setujui pelonggaran DoD penyimpanan) | **pemilik** |
 | 3 | **Butir 7** — setujui/ubah draf rollback | **pemilik** |
 | 4 | **O50** — 10 akun `99000000xx` masih aktif; DoD C-04 mensyaratkan nol fixture di produksi | **pemilik** |
 | 5 | **O35** · **O9** · divisi dasar 3 orang OD (SESI24 §1.1) | **pemilik** |

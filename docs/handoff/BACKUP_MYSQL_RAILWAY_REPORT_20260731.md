@@ -93,31 +93,76 @@ SELECT id, lead_name, source, record_status, created_at, created_by FROM leads;
 - Prospek sungguhan ⇒ masukkan manual ke CDPS Supabase sebelum Railway mati.
   Satu lead tidak butuh importer — cukup form.
 
-## 5. Backup
+## 5. Backup — ✅ terverifikasi 4 lapis
 
 | | |
 |---|---|
-| Berkas | `cdps-mysql-railway-<stamp>.sql.gz.enc` |
-| SHA-256 | _(isi dari manifest run `30606686262`)_ |
-| Ukuran | _(isi)_ |
-| Enkripsi | aes-256-cbc · pbkdf2 600000 · sha512 · round-trip dekripsi diuji |
-| Lapis 1 struktur | _(isi)_ |
-| Lapis 2 baris | _(isi)_ |
-| Lapis 3 trigger | _(isi)_ |
-| Lapis 4 restore sungguhan | _(isi)_ |
+| Run | **`30607919027`** (job `backup`, commit `bf524eb`) — **success** |
+| Berkas | `cdps-mysql-railway-20260731T055157Z.sql.gz.enc` |
+| SHA-256 | `1b9ecffd6f0c4072cfde24b7dc25b49929480bec204c5dacd19e04a15647cb3e` |
+| Ukuran | dump `.sql` 104.200 byte → artifact zip 15.098 byte |
+| Artifact | ID `8784358689`, retensi **30 hari** |
+| Enkripsi | aes-256-cbc · pbkdf2 600000 · sha512 · **round-trip dekripsi diuji, identik** |
+| Lapis 1 struktur | ✅ **50/50** tabel, nol tabel asing |
+| Lapis 2 baris | ✅ **239/239** baris cocok di seluruh 50 tabel |
+| Lapis 3 trigger | ✅ **7/7** trigger imutabilitas ikut |
+| Lapis 4 restore sungguhan | ✅ **LOLOS** — 50 tabel · 239 baris · 7 trigger identik sesudah restore ke MySQL 8.4 kosong |
+| Perbaikan yang diterapkan ke dump | 7 × `DEFINER=` dilucuti · 7 × `;` nyasar sebelum `*/` dibuang (§5.1) |
+
+### 5.1 🔴 Temuan yang berlaku jauh melampaui Railway
+
+**`mysqldump` polos atas DB ini menghasilkan backup yang MySQL sendiri tolak
+muat ulang.** Empat run pertama gagal di baris 257 dengan `ERROR 1064 … near ' */'`:
+
+```
+/*!50003 CREATE*/  /*!50003 TRIGGER `audit_log_no_update` … MESSAGE_TEXT =
+'audit_log is append-only: UPDATE forbidden'; */;;
+                                            ↑ titik koma sebelum penutup
+```
+
+Badan ketujuh trigger imutabilitas (aturan rumah #3) tersimpan **berakhir dengan
+`;`**. `mysqldump` menuliskannya apa adanya di dalam komentar ber-versi; saat
+dimuat ulang `;` menutup pernyataan sehingga ` */` tersisa sebagai pecahan tanpa
+makna. Berkasnya lengkap dan konsisten — **hanya tidak bisa dieksekusi**.
+
+Dua konsekuensi:
+
+1. **Backup MySQL mana pun yang pernah diambil dari DB ini dengan `mysqldump`
+   polos tidak bisa dipulihkan** — dan itu baru ketahuan pada hari ia dibutuhkan.
+2. Ini persis alasan lapis 4 ada. Lapis 1–3 hijau di **kelima** run; hanya lapis
+   4 yang bisa membedakan "berkas lengkap" dari "berkas yang bisa dipakai".
+
+Perbaikan di skrip: `;` nyasar dibuang dari baris DDL trigger (ia pernyataan
+kosong — nol perubahan arti trigger), dijaga invariant yang menolak dump kalau
+masih tersisa.
+
+> **Jujur soal biayanya:** temuan ini butuh **5 run**. Dua di antaranya terbuang
+> pada hipotesis DEFINER yang salah, dan satu lagi pada bug di jendela diagnostik
+> sendiri (regex serakah mengambil "at line" terakhir alih-alih pertama — dan uji
+> lokalnya tidak bisa membedakan karena sabotasenya kebetulan di baris 1).
+> Perbaikan DEFINER tetap dipertahankan: ia menyelesaikan `ERROR 1227` yang nyata
+> pada restore oleh user tanpa `SUPER` — tapi ia bukan penyebab `ERROR 1064`.
 
 ## 6. Penyimpanan — **belum selesai**
 
 | Salinan | Lokasi | sha256 dicocokkan |
 |---|---|---|
-| 1 | ⛔ belum — masih hanya artifact run `30606686262` | |
+| 1 | ⛔ belum — masih hanya artifact run `30607919027` (kedaluwarsa 30 hari) | |
 | 2 | ⛔ belum | |
 
 - Passphrase tersimpan di: `___` — bisa diakses PIC kedua: **belum dikonfirmasi**
 
+**Unduh:** https://github.com/MEAgrup/AgencyAPP/actions/runs/30607919027 → artifact
+`railway-mysql-backup` (berisi `.sql.gz.enc` + `.manifest.md`). Cocokkan sha256 di §5.
+
 > **Butir 6 belum boleh dicentang.** Artifact kedaluwarsa **30 hari**; selama
 > berkasnya hanya hidup di GitHub, checklist yang tercentang tidak punya backup
 > di baliknya.
+>
+> **Pelonggaran yang diusulkan** (isi Railway = 239 baris artefak dev, nol entitas
+> jalur uang, dan pemilik menyatakan datanya percobaan): cukup **satu** salinan di
+> luar GitHub, dan passphrase tidak wajib diakses PIC kedua. Butuh persetujuan
+> pemilik + entri `DECISIONS.md` — pelonggaran butir gate bukan keputusan Claude.
 
 ## 7. Catatan operasional dari run ini
 
