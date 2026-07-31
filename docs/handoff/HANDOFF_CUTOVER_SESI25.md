@@ -160,7 +160,7 @@ cutover data baru hanya masuk Supabase). Tinggal disetujui/diubah Yohan+Nerissa.
 
 | # | Butir | Siapa |
 |---|---|---|
-| 1 | **C-03** — hasil ketiga skrip bisa dibaca langsung dari job log run `30600363211` ⇒ report + centang backlog **tanpa** unduhan pemilik | **Claude** |
+| 1 | **C-03** — ✅ **SELESAI dari sisi Claude.** Report `CUTOVER_UAT_REPORT_20260731.md` ditulis dari job log; SKIP-1 & SKIP-3 tertutup (22/22 · 34/34 · 13/13, FAIL=0). ❌ sisa: **SKIP-2** badge notifikasi, ~3 menit di browser | **pemilik** |
 | 2 | **Butir 6** — ✅ OQ-2 + dump SELESAI & terverifikasi. ❌ sisa: simpan berkasnya di luar GitHub + cocokkan sha256 (+ setujui pelonggaran DoD penyimpanan) | **pemilik** |
 | 3 | **Butir 7** — setujui/ubah draf rollback | **pemilik** |
 | 4 | **O50** — 10 akun `99000000xx` masih aktif; DoD C-04 mensyaratkan nol fixture di produksi | **pemilik** |
@@ -168,6 +168,13 @@ cutover data baru hanya masuk Supabase). Tinggal disetujui/diubah Yohan+Nerissa.
 | 6 | **O48 Grup A/B/E** | **pemilik + head dev** → Claude |
 | 7 | **Visibility repo** → privat, lalu tinjau ulang **O47b** | **pemilik** |
 | 8 | Gate GO → **C-05** (cabut `backend/`) | **pemilik** → Claude |
+
+> 🟠 **Satu benang yang menyambungkan butir 1 dan 4.** Walk C-03 mengisi slot
+> `finance_staff` dengan **fixture QA `99…0007`** (O50). Hasil C-03 tetap sah —
+> yang diuji gate permission, dan gate-nya bekerja — tapi begitu O50 dieksekusi
+> (fixture dinonaktifkan), **walk wajib dijalankan ulang**: discovery tidak akan
+> menemukan aktor Finance lagi dan baris itu jatuh jadi SKIP. Urutannya penting:
+> **O50 dulu, lalu walk ulang, baru C-04 ditutup.**
 
 **Progress pensiun Go: ~93%.** Engineering sisi Claude tetap **100%** sejak sesi
 19; yang bergerak sesi ini adalah Fase 4 — C-03 hijau (tinggal pelaporan) dan
