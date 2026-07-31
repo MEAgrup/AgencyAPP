@@ -182,7 +182,25 @@ fi
 # ---------------------------------------------------------------------------
 DEFINERS="$(grep -coE 'DEFINER=`[^`]+`@`[^`]+`' "$DUMP" || true)"
 if [ "$KEEP_DEFINER" = "0" ] && [ "${DEFINERS:-0}" != "0" ]; then
-  sed -E 's/DEFINER=`[^`]+`@`[^`]+`//g' "$DUMP" >"$DUMP.tmp" && mv "$DUMP.tmp" "$DUMP"
+  # DUA pola, dan urutannya penting.
+  #
+  # mysqldump membungkus definer dalam komentar ber-versi tersendiri:
+  #   /*!50003 CREATE*/ /*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER …
+  # Membuang hanya bagian `DEFINER=…` meninggalkan `/*!50017 */` — komentar
+  # ber-versi BERISI KOSONG. MySQL menolaknya (`ERROR 1064 … near ' */'`),
+  # sementara MariaDB memaafkannya — sehingga cacat ini lolos uji lokal dan baru
+  # jatuh di runner. Pola pertama karena itu membuang SELURUH komentarnya.
+  # Pola kedua mengurus definer yang berdiri sendiri (mis. CREATE VIEW).
+  sed -E -e 's@/\*![0-9]{5} DEFINER=[^*]*\*/@@g' \
+         -e 's/DEFINER=`[^`]+`@`[^`]+`//g' "$DUMP" >"$DUMP.tmp" && mv "$DUMP.tmp" "$DUMP"
+
+  # Invariant, bukan harapan: nol komentar ber-versi yang badannya kosong.
+  # Ia mengubah "restore meledak di baris 257" jadi kegagalan bernama di sini,
+  # sebelum dump-nya sempat disebut backup.
+  if grep -qE '/\*![0-9]{5}[[:space:]]*\*/' "$DUMP"; then
+    rm_die "Pelucutan DEFINER meninggalkan komentar ber-versi kosong (/*!NNNNN */).
+   MySQL akan menolak dump ini saat restore. Jangan pakai berkas ini sebagai backup."
+  fi
   DEFINER_NOTE="DEFINER dilucuti dari $DEFINERS objek supaya dump bisa dipulihkan tanpa privilege SUPER"
   echo "   $DEFINER_NOTE"
 else
