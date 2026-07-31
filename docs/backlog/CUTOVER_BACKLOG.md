@@ -321,13 +321,23 @@ baru buka gate C-04.
 4. Master Service List — **alat seed SELESAI (2026-07-28), tinggal dijalankan ke live.** Seed kanonik = **`supabase/seed/msl_kalkulator.csv` (32 layanan rate card aktif)**, BUKAN `MSL_DRAFT_KOMPILASI.csv` (180 baris itu harga deal historis untuk impor W1-19, dan masih menunggu Sales Head — lihat Decided 2026-07-28). CLI: `npm run msl:seed -w @cdps/api -- --actor <NIK> [--apply]`, dry-run default, idempoten, menulis lewat `msl.createService`/`updateService` sehingga tervalidasi + terversi + teraudit. Terverifikasi end-to-end di Postgres lokal termigrasi (32 dibuat → rerun 32 dilewati; quote M0 terhitung benar di keempat `pricing_mode`). **✅ SUDAH DI-APPLY KE LIVE `CDPS SG` 2026-07-28** oleh Yohan, aktor NIK `2101180004`: dry-run `dibuat=32` (nol tulis) → apply `dibuat=32 error=0` → rerun `dilewati=32` (idempotensi terbukti). `master_services` **32 baris**, bukan 0 lagi. Sisa: QA UI `/master-services` + `/sales/kalkulator` di deployment. Runbook: `docs/handoff/MSL_KALKULATOR_VALIDASI.md` §"Cara seed ke sistem"; detail apply: `HANDOFF_CUTOVER_SESI4.md` §3.1.
 
 **Aktor produksi (keputusan manusia — masih terbuka):**
-- **O50 🟠 separuh tertutup 2026-07-31** — kesepuluh akun fixture `99000000xx` **dinonaktifkan +
-  di-ban GoTrue** (reversibel; `DECISIONS.md` 2026-07-31). Paparan login **tercabut**.
-  **Sisa keputusan:** hapus **8** akun ber-jejak-nol, atau biarkan kesepuluhnya nonaktif —
-  **`9900000001` & `9900000004` tidak boleh dihapus** (riwayat audit, aturan rumah #3).
-  ⚠️ **Pelajaran yang berlaku umum:** `UPDATE employees SET status_aktif=false` **TIDAK**
+- **O50 ✅ selesai sejauh yang mungkin 2026-07-31** — **4 akun dihapus penuh** (`…02`, `…03`,
+  `…05`, `…07`: `employees` + `employee_credentials` + `employee_layered_roles` + `auth.users`,
+  ber-`audit_log`). Roster **69 → 65**. **6 tombstone permanen**, semuanya nonaktif + ban GoTrue:
+  `…01`/`…04` terkunci riwayat (lead + audit), `…06`/`…08`/`…09`/`…10` terkunci trigger
+  immutability `performance_snapshots` (**DB menolak DELETE** — residu run C-03, lihat di bawah).
+  **Nol fixture aktif · nol bisa login.**
+- 🔴 **DoD di bawah HARUS dirumuskan ulang — keputusan pemilik.** *"Nol fixture UAT di produksi"*
+  **mustahil secara harfiah**: menghapus 6 baris terakhir menuntut membongkar jaminan
+  immutability di produksi. Usulan: ***"nol fixture UAT yang aktif atau bisa login"*** — sudah
+  terpenuhi hari ini. `DECISIONS.md` 2026-07-31.
+- ⚠️ **Pelajaran yang berlaku umum:** `UPDATE employees SET status_aktif=false` **TIDAK**
   mencabut akses — GoTrue tetap menerbitkan token. Pakai **`set_employee_banned(nik, true)`**,
   yang menulis `status_aktif` **dan** `auth.users.banned_until`.
+- ⚠️ **Sebab-akibat yang layak diingat sebelum menjalankan smoke ke produksi lagi:** run C-03
+  `POST /performance/snapshots/scan` menyentuh **seluruh** karyawan aktif termasuk fixture, dan
+  hasilnya **tidak bisa ditarik**. Ia mengubah 4 fixture yang tadinya bisa dihapus menjadi
+  permanen. Smoke yang menulis ke produksi punya biaya yang tidak selalu terlihat saat dijalankan.
 - **Headcount untuk keputusan apa pun kini 59 aktif**, bukan 69. Ini khususnya mengubah dasar **O35**.
 - **O34** butir (a)–(e) — aktor Wave 2 + lead Marketing/BD (kini masih fixture UAT).
 - **O33** — aktor Finance. **O26** — NIK + email Director. **O35** — sub-tim Creative M7 §3 (butuh 3 keputusan berurutan; gate lead-divisi existing tetap berlaku sementara).
@@ -353,7 +363,7 @@ baru buka gate C-04.
   2026-07-31 diresolusi ke fixture `9900000007`; begitu fixture hilang, discovery memilih Finance
   riil (3 orang aktif) — run ulang = konfirmasi terakhir sebelum gate GO, biayanya satu klik approval.
 
-**DoD:** tak ada fixture UAT tersisa di jalur produksi (termasuk residu C-03 di atas); login riil semua role lolos; ~~MSL terisi & ber-versi~~ ✅ **terpenuhi 2026-07-28** (32 layanan ber-versi di `CDPS SG`).
+**DoD:** ~~tak ada fixture UAT tersisa di jalur produksi~~ 🔴 **menunggu rumusan ulang pemilik** — versi harfiahnya mustahil (6 tombstone terkunci riwayat & immutability, `DECISIONS.md` 2026-07-31); usulan pengganti **"nol fixture UAT yang aktif atau bisa login"** sudah terpenuhi. Sisa residu C-03 di atas tetap wajib dibersihkan sejauh yang diizinkan skema; login riil semua role lolos; ~~MSL terisi & ber-versi~~ ✅ **terpenuhi 2026-07-28** (32 layanan ber-versi di `CDPS SG`).
 
 ---
 

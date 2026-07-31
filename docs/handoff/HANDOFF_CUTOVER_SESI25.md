@@ -19,7 +19,8 @@
 | **Live `CDPS SG`** | **44 migrasi · 54 tabel · 17 `notif_events`** — dibaca dari live sesi ini |
 | **Repo vs live** | ✅ **44 = 44**, `main` juga 44 |
 | **C-03** | ✅ **SELESAI 2026-07-31** — run `30600363211`, **PASS 69 · FAIL 0** |
-| **Karyawan aktif** | **59** (turun dari 69 — 10 fixture O50 dinonaktifkan sesi ini, §1.5). **Pakai 59 untuk keputusan apa pun** |
+| **Karyawan aktif** | **59 aktif dari 65 baris** (sesi ini: 10 fixture dinonaktifkan §1.5, 4 di antaranya lalu dihapus §1.7). **Pakai 59 untuk keputusan apa pun** |
+| **Fixture tersisa** | **6 tombstone permanen** — nonaktif + ban GoTrue, **tidak bisa dihapus siapa pun** (§1.7) |
 
 **Angka acuan** tidak berubah dari SESI24 (sesi ini **nol perubahan kode** — hanya dokumen):
 `apps/api` **313** · `@cdps/domain` **567** (+1 skip) · `@cdps/core` **113** · `@cdps/db` **9** ·
@@ -142,6 +143,37 @@ Ads/KOL/Marketing tetap dilayani 3 pemegang layered `lead` yang semuanya riil.
 **Membatalkannya:** `select set_employee_banned('<nik>', false);` — mengembalikan `status_aktif`
 dan mencabut ban. Sesi lama tetap harus login ulang.
 
+### 1.7 ✅ O50 langkah 2 — 4 akun dihapus, 6 sisanya PERMANEN tidak bisa dihapus
+
+Dihapus penuh (`employees` + `employee_credentials` + `employee_layered_roles` + `auth.users`,
+1 baris `audit_log` ber-`before_json` berisi seluruh baris): **`…02`, `…03`, `…05`, `…07`**.
+**Roster 69 → 65 · GoTrue 69 → 65 · layered 13 → 12 · aktif tetap 59.**
+
+**Enam tombstone permanen, dua sebab berbeda:**
+
+| Akun | Terkunci oleh |
+|---|---|
+| `9900000001` · `9900000004` | riwayat: lead + baris `audit_log` (aturan rumah #3) |
+| `9900000006` · `…08` · `…09` · `…10` | **trigger `forbid_mutation()` di `performance_snapshots`** |
+
+🔴 **Koreksi penilaian saya sendiri beberapa jam sebelumnya.** Saya menyebut keempat akun terakhir
+"boleh dihapus" karena `performance_snapshots` saya baca sebagai field turunan yang recomputable
+(aturan rumah #4). **Salah.** Skema memperlakukannya sebagai **riwayat immutable** (#3), dan DB
+adalah otoritasnya. Percobaan hapus **ditolak DB dan ter-rollback utuh** —
+*"performance_snapshots is append-only/immutable: DELETE forbidden"*. **Penolakan itu dihormati,
+bukan disiasati:** satu-satunya cara menembusnya adalah menonaktifkan trigger immutability di
+produksi, yang berarti membongkar jaminan demi 4 baris fixture.
+
+**Sebab-akibatnya perlu diingat:** run C-03 kemarin **mengubah 4 fixture yang tadinya bisa dihapus
+menjadi permanen** — `snapshots/scan` menyentuh seluruh karyawan aktif termasuk fixture. Ini biaya
+nyata dari residu C-03 §5.2, dan alasan konkret untuk berpikir dua kali sebelum menjalankan smoke
+yang menulis ke produksi.
+
+🔴 **Yang tersisa untuk pemilik — keputusan redaksional, bukan teknis:** DoD C-04 *"nol fixture UAT
+di produksi"* **mustahil secara harfiah**. Usulan rumusan ulang: ***"nol fixture UAT yang aktif atau
+bisa login"*** — **sudah terpenuhi** (6 tombstone semuanya nonaktif + ban GoTrue, nol di headcount
+aktif 59). Tidak ada lagi pekerjaan O50 yang bisa dikerjakan siapa pun.
+
 ### 1.6 ✅ Draft rencana rollback ditulis
 
 `docs/handoff/RENCANA_ROLLBACK_CUTOVER.md`. Isi terpentingnya bukan prosedurnya, melainkan §0:
@@ -158,7 +190,7 @@ Dua bagian 🔶 TBD sampai backup MySQL (butir 4) ada.
 | # | Butir | Siapa |
 |---|---|---|
 | 1 | **C-04** — gate berikutnya. Termasuk: bersih-bersih residu §1.2, QA UI (`/master-services`, `/sales/kalkulator`, **badge eks-SKIP-2**), aktor produksi | **pemilik** → Claude |
-| 2 | ~~**O50** — 10 akun aktif & bisa login~~ 🟠 **separuh tertutup 2026-07-31, lihat §1.5.** Sisa: hapus 8 akun ber-jejak-nol atau biarkan nonaktif. Lalu **ulang run C-03** (§1.3) | **pemilik** (izin hapus permanen) |
+| 2 | ~~**O50** — 10 akun aktif & bisa login~~ ✅ **SELESAI 2026-07-31** (§1.5 + §1.7): 4 dihapus, 6 tombstone permanen, nol aktif, nol bisa login. **Sisa hanya keputusan redaksional: rumuskan ulang DoD C-04.** Lalu **ulang run C-03** (§1.3) | **pemilik** (rumusan DoD) |
 | 3 | **O35** (sub-tim Creative M7 §3) · **O9** (target M14) · **divisi dasar** 3 orang OD — **pakai headcount 59, bukan 69** (§1.5) | **pemilik** |
 | 4 | **Backup MySQL Railway + OQ-2** — **prasyarat rollback**, lihat `RENCANA_ROLLBACK_CUTOVER.md` §3.1 | **pemilik** |
 | 4b | ~~Rencana rollback~~ ✅ **draft ditulis 2026-07-31** — `docs/handoff/RENCANA_ROLLBACK_CUTOVER.md`. Naik jadi "bisa dijalankan" begitu butir 4 selesai | Claude |
