@@ -110,6 +110,34 @@ describeDb('createService', () => {
       pricingMode: 'min_floor', minQty: '2.5',
     })).rejects.toBeInstanceOf(IncompleteError);
   });
+
+  // Regression: a non-empty but unparseable commission_rule ("10%") used to
+  // persist here and then throw on EVERY later pricing read — the quote preview
+  // and Qualified Lead Form both answered 500 for the salesperson. The rule the
+  // calculator cannot parse must never reach the catalog (DECISIONS O14).
+  it('rejects a commission_rule outside the O14 grammar, minting no MSV id', async () => {
+    const before = await sql<{ n: number }[]>`select count(*)::int as n from master_services`;
+    for (const commissionRule of ['10%', '10 persen', 'flat 500000', 'konten']) {
+      await expect(createService(sql, salesLead(), {
+        name: 'Jasa Aturan Komisi Ngawur', standardPrice: '150000',
+        commissionRule, effectiveFrom: '2020-01-01', pricingMode: 'flat', active: true,
+      })).rejects.toBeInstanceOf(IncompleteError);
+    }
+    // House rule #1: the id is minted only after validation passes, so a
+    // rejected create leaves no orphan master_services row behind.
+    const after = await sql<{ n: number }[]>`select count(*)::int as n from master_services`;
+    expect(after[0].n).toBe(before[0].n);
+  });
+
+  it('accepts both documented shapes', async () => {
+    for (const commissionRule of ['0% of standard price', 'flat Rp 500.000']) {
+      const id = await createService(sql, salesLead(), {
+        name: `Jasa ${commissionRule}`, standardPrice: '150000',
+        commissionRule, effectiveFrom: '2020-01-01', pricingMode: 'flat', active: true,
+      });
+      expect((await effectiveAt(sql, id, TODAY)).commissionRule).toBe(commissionRule);
+    }
+  });
 });
 
 describeDb('updateService', () => {
@@ -140,6 +168,20 @@ describeDb('updateService', () => {
     await expect(updateService(sql, salesLead(), 'MSV-209901-9999', {
       name: 'x', standardPrice: '1000', commissionRule: 'flat Rp 100', effectiveFrom: '2020-01-01',
     })).rejects.toBeInstanceOf(ServiceNotFoundError);
+  });
+
+  // The gate has to hold on the edit door too — otherwise a valid v1 could be
+  // superseded by an unpriceable v2 and break the calculator from tomorrow on.
+  it('rejects a commission_rule outside the O14 grammar, appending no version', async () => {
+    const id = await createService(sql, salesLead(), {
+      name: 'Jasa B', standardPrice: '5000000', commissionRule: '10% of standard price',
+      effectiveFrom: '2020-01-01', active: true,
+    });
+    await expect(updateService(sql, salesLead(), id, {
+      name: 'Jasa B', standardPrice: '5000000', commissionRule: '10%',
+      effectiveFrom: '2020-06-01', active: true,
+    })).rejects.toBeInstanceOf(IncompleteError);
+    expect((await listVersions(sql, id)).map((v) => v.versionNo)).toEqual([1]);
   });
 });
 

@@ -1,9 +1,9 @@
 /**
  * Unit tests for the HTTP error-mapping + response helpers (no Next, no DB).
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { bi } from '@cdps/core';
-import { account, ads, creative, demo, kol, task } from '@cdps/domain';
+import { account, ads, creative, demo, kol, sales, task } from '@cdps/domain';
 import {
   BadRequestError,
   UnauthorizedError,
@@ -55,6 +55,25 @@ describe('mapError', () => {
     const res = mapError(new Error('secret internals'));
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ error: 'internal server error' });
+  });
+
+  // Regression: a master_service_versions row whose commission_rule predates the
+  // MSL write gate made quote-preview / qualify answer 500, so the Qualified Lead
+  // Form rendered a generic system error. It is bad DATA, not a broken server:
+  // answer 400 with the house BI default, and keep the sentinel text server-side.
+  it('maps BadCommissionRuleError to 400 with the house BI default, never the sentinel', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = mapError(new sales.BadCommissionRuleError('10%'));
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body).toEqual({ error: bi.INCOMPLETE_DATA });
+      expect(JSON.stringify(body)).not.toContain('module0_sales');
+      // The offending rule still reaches the platform log so ops can find the row.
+      expect(spy).toHaveBeenCalledWith(expect.stringContaining('commission_rule'), '10%');
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('maps M6 account errors to their canonical status (verbatim BI)', async () => {

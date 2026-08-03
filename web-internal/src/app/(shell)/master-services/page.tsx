@@ -297,9 +297,21 @@ export default function MasterServicesPage() {
               <input
                 id="commission_rule"
                 required
+                placeholder="0% of standard price"
+                aria-describedby="commission_rule_hint"
                 value={form.commission_rule}
                 onChange={(e) => setForm((f) => ({ ...f, commission_rule: e.target.value }))}
               />
+              {/*
+                Free text with no stated grammar is how "10%" got saved and then
+                broke every quote downstream. The server rejects anything outside
+                these two shapes (DECISIONS O14); say so before the trip to it.
+              */}
+              <p className="muted" id="commission_rule_hint" style={{ fontSize: 12 }}>
+                Hanya dua bentuk: <code>&lt;N&gt;% of standard price</code> (mis.{' '}
+                <code>0% of standard price</code>) atau <code>flat Rp &lt;N&gt;</code> (mis.{' '}
+                <code>flat Rp 500.000</code>).
+              </p>
             </div>
             <div className="field">
               <label htmlFor="price_note">Catatan Harga</label>

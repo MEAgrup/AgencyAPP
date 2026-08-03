@@ -23,6 +23,7 @@
 
 import { money, permission } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
+import { isValidCommissionRule } from './commission';
 
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;
@@ -233,6 +234,14 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
   const commissionRule = (inp.commissionRule ?? '').trim();
   const effectiveFrom = (inp.effectiveFrom ?? '').trim();
   if (name === '' || commissionRule === '' || effectiveFrom === '') {
+    throw new IncompleteError();
+  }
+  // The rule must be one the pricing calculator can actually parse (DECISIONS
+  // O14 — two shapes, nothing guessed). Non-empty is NOT enough: a rule like
+  // "10%" used to persist here and then throw on every downstream quote /
+  // Qualified Lead Form / closing, surfacing as an opaque 500 on a page the
+  // salesperson had no way to fix. The catalog door is where it belongs.
+  if (!isValidCommissionRule(commissionRule)) {
     throw new IncompleteError();
   }
   const pricingMode = (inp.pricingMode ?? '') === '' ? PRICING_FLAT : (inp.pricingMode as string);

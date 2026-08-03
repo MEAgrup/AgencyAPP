@@ -7,7 +7,7 @@
  * Framework-free (uses only the Web `Response`), so it is unit-testable without
  * Next.
  */
-import type { statemachine } from '@cdps/core';
+import { bi, type statemachine } from '@cdps/core';
 import { account, admin, ads, auth, board, campaign, client, creative, demo, finance, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
@@ -45,6 +45,18 @@ export function errorJson(message: string, status: number): Response {
  * validation). Unknown errors become an opaque 500 (never leak internals).
  */
 export function mapError(err: unknown): Response {
+  if (err instanceof sales.BadCommissionRuleError) {
+    // A `master_service_versions` row carries a commission_rule outside the two
+    // shapes of DECISIONS O14, so the calculator cannot price it. The MSL write
+    // gate (msl.normalizeInput) now rejects such a rule, so only rows written
+    // BEFORE that gate can land here — but when one does, every page that
+    // quotes it (quote preview, Qualified Lead Form, negotiation, closing) used
+    // to render an opaque 500. Answer with the house BI default instead, and
+    // log the offending rule so ops can find the row; the sentinel text itself
+    // is internal and never reaches the client (CLAUDE.md §5).
+    console.error('[api] malformed commission_rule in master_service_versions →400:', err.rule);
+    return errorJson(bi.INCOMPLETE_DATA, 400);
+  }
   if (
     err instanceof demo.IncompleteError ||
     err instanceof leads.IncompleteError ||
