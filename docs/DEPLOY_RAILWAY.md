@@ -1,94 +1,114 @@
-# Deploy CDPS on Railway
+# Railway — sedang didekomisi (jangan deploy apa pun ke sini)
 
-This is a **monorepo** — the Go backend lives in `backend/` and the Next.js
-internal app in `web-internal/`. On Railway that becomes **three services in one
-project**, each pointed at its own directory:
+> ## ⛔ DOKUMEN INI DULU BERISI PANDUAN SETUP. PANDUANNYA SUDAH DICABUT.
+>
+> Versi lama menyuruh membuat tiga service Railway (**backend Go**, **MySQL**,
+> **web-internal**) dan mengisi `BACKEND_URL` frontend dengan URL backend Go.
+> Mengikutinya hari ini berarti **membangun ulang stack yang sudah dipensiunkan**
+> — dan itu bukan hipotetis: topologi persis itu masih hidup di Railway sekarang,
+> dan itulah sebab kegagalan QA 2026-08-03 (lihat §3).
+>
+> Stack produksi CDPS adalah **TypeScript + Supabase di Vercel** (`CLAUDE.md`
+> §Stack, `DECISIONS.md` 2026-07-29 "Pensiun Go"). Railway **dimatikan** —
+> pekerjaannya adalah **C-05** di `docs/backlog/CUTOVER_BACKLOG.md`.
 
-| Railway service | Root Directory | Builds from        |
-| --------------- | -------------- | ------------------ |
-| **backend**     | `backend`      | `backend/Dockerfile` |
-| **web-internal**| `web-internal` | Railpack (Next.js) |
-| **MySQL**       | —              | Railway database   |
+---
 
-> Railway analyzes the **Root Directory** of each service. Because the repo root
-> has no `go.mod` or `package.json`, a service left at the repo root fails to
-> build ("Railpack could not detect a buildable app"). The fix is to set each
-> service's Root Directory as in the table above.
+## 1. Topologi yang berlaku
 
-## What is already wired up in the repo
+| Komponen | Di mana | Catatan |
+|---|---|---|
+| **API** (`apps/api`) | Vercel, project `agency-app-api` | `https://agency-app-api.vercel.app` |
+| **Frontend internal** (`web-internal`) | Vercel, project `web-internal-mea` | memproksi `/api/v1/*` → API di atas |
+| **Database** | Supabase, project **`CDPS SG`** | migrasi HANYA lewat `supabase/migrations/**` |
 
-- **`backend/Dockerfile`** — multi-stage build of the `cdps` server, bundling the
-  SQL migrations (the server auto-migrates on boot), running as a non-root user.
-- **`backend/railway.json`** — Dockerfile builder + `GET /healthz` healthcheck.
-- **Backend code** — binds Railway's `$PORT`; reads the DB from `CDPS_DSN` /
-  `DATABASE_URL` / `MYSQL_URL` and converts Railway's `mysql://…` URL to the Go
-  driver format automatically.
-- **`web-internal/railway.json`** — Railpack builder + `npm run start`.
-- **Frontend code** — `next.config.ts` proxies `/api/v1/*` to `BACKEND_URL`
-  (defaults to `http://127.0.0.1:8080` for local dev).
+`web-internal/next.config.ts` memproksi `/api/v1/*` ke `BACKEND_URL`; bila tak
+di-set, produksi jatuh ke `https://agency-app-api.vercel.app`. **Nilai yang
+menunjuk ke host Railway atau port `:8080` MENGGAGALKAN BUILD** —
+`web-internal/src/lib/backend-url.ts`, dengan pelarian `ALLOW_LEGACY_BACKEND_URL=1`
+untuk yang memang sengaja. Build yang gagal tidak menjatuhkan deployment yang
+sedang berjalan; ia hanya mencegah deployment rusak yang baru.
 
-## Setup on railway.app
+---
 
-### 1. Backend service
+## 2. Yang MASIH hidup di Railway (per 2026-08-03)
 
-If you already created a service that is failing, just fix it:
+| Service Railway | Isi | Nasib |
+|---|---|---|
+| `backend` | server Go (`backend/Dockerfile`) | mati bersama Railway |
+| `MySQL` | DB Go | mati; backup terverifikasi 4 lapis ada di tangan pemilik |
+| `web-internal` | frontend Next, domain `agencyapp-frontend-production.up.railway.app` | ⚠️ **ini yang dipakai orang** — §3 |
 
-1. Open the service → the **Set root directory** button (or **Settings → Source →
-   Root Directory**) → set it to **`backend`** → redeploy.
-2. **Add MySQL:** project **New → Database → Add MySQL**.
-3. Backend service → **Variables → New Variable**:
+**Data di dalamnya tidak berharga, dan itu terukur.** OQ-2 2026-07-31
+(`docs/handoff/BACKUP_MYSQL_RAILWAY_REPORT_20260731.md`): 50 tabel, **239 baris
+total**, seluruh rantai jalur uang `CLIENT → SERVICE → TRX → INST` **nol baris**.
+Sisanya seed migrasi + artefak masa pengembangan yang sudah digantikan Supabase
+(`employees` 65 di Railway vs 69 di Supabase; `master_services` **1** vs **32**).
+Beberapa lead/attempt QA bertambah sesudah tanggal itu — tetap data percobaan.
 
-   | Variable       | Value                  |
-   | -------------- | ---------------------- |
-   | `DATABASE_URL` | `${{MySQL.MYSQL_URL}}` |
+---
 
-   (Type the value with the `${{ … }}` reference picker; `MySQL` must match the
-   database service's name.)
-4. Deploy. Migrations run on boot; the deploy goes live once `/healthz` returns
-   `200`.
-5. **Settings → Networking → Generate Domain** for a public URL.
+## 3. ⚠️ Yang TIDAK terukur oleh OQ-2: siapa membuka apa
 
-### 2. Frontend service (web-internal)
+OQ-2 mengaudit **database**, bukan **browser**. Yang belum pernah tercatat di
+mana pun sampai 2026-08-03:
 
-1. Project **New → GitHub Repo → `MEAgrup/AgencyAPP`** (same repo, a second
-   service).
-2. That service → **Settings → Root Directory** → **`web-internal`**.
-3. **Variables → New Variable**:
+- Frontend yang tim benar-benar buka adalah **`agencyapp-frontend-production.up.railway.app`**,
+  dan `BACKEND_URL`-nya menunjuk ke **backend Go**. Semua yang diketik di sana
+  masuk ke **MySQL Railway**, bukan Supabase.
+- Stack TS/Supabase **belum dipakai siapa pun**: `auth.users` 65 akun, hanya
+  **2 yang pernah login**, login terakhir **2026-07-28** — keduanya probe UAT
+  C-03, bukan manusia bekerja.
 
-   | Variable      | Value                                   |
-   | ------------- | --------------------------------------- |
-   | `BACKEND_URL` | the backend's public URL, e.g. `https://backend-production-xxxx.up.railway.app` |
+**Konsekuensinya untuk hari switch-off:** risikonya bukan kehilangan data,
+melainkan tim kehilangan satu-satunya URL yang mereka pakai — dan pindah ke URL
+Vercel yang belum pernah dicoba siapa pun. Itu wajib diselesaikan **sebelum**
+Railway dimatikan, bukan sesudahnya.
 
-   (Or, to keep the API private, use Railway private networking:
-   `http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:8080` — internal traffic never
-   leaves the project.)
-4. Deploy, then **Settings → Networking → Generate Domain** for the app URL.
+---
 
-## Environment variables
+## 4. Checklist sebelum switch-off
 
-| Service      | Variable              | Required | Purpose                                                         |
-| ------------ | --------------------- | -------- | --------------------------------------------------------------- |
-| backend      | `DATABASE_URL`        | yes      | MySQL connection (Railway `mysql://…`), via reference variable. |
-| backend      | `PORT`                | auto     | Injected by Railway; the server binds it. Do not set manually.  |
-| backend      | `CDPS_DSN`            | optional | Overrides the DB connection (Go DSN or `mysql://` URL).         |
-| backend      | `HRIS_BASE_URL`       | optional | HRIS service base URL (auth + employee sync).                  |
-| backend      | `HRIS_SERVICE_TOKEN`  | optional | When set, employees sync over HTTP instead of CSV.             |
-| backend      | `CDPS_MIGRATIONS_DIR` | preset   | Set to `/app/migrations` in the image; leave as-is.           |
-| web-internal | `BACKEND_URL`         | yes      | Backend URL the frontend proxies `/api/v1/*` to.              |
-| web-internal | `PORT`                | auto     | Injected by Railway; `next start` binds it.                    |
+Urutannya penting. Butir 1–3 memindahkan orang; butir 4 baru mematikan mesin.
 
-> The backend boots and passes its healthcheck even before HRIS is configured
-> (the initial employee sync is best-effort and non-fatal). Configure `HRIS_*`
-> when the HRIS integration is ready — employee data is never baked into the image.
+1. **Verifikasi frontend Vercel bisa dipakai** — buka `web-internal-mea`, login
+   dengan akun karyawan sungguhan, jalankan satu alur penuh: register lead →
+   Contacted → Qualified Lead Form → submit. Ini pertama kalinya jalur itu
+   dipakai manusia di stack baru; jangan asumsikan hijau karena UAT hijau.
+2. **Umumkan URL barunya** dan pastikan bookmark/pintasan tim diganti. Kalau
+   domainnya mau tetap sama, pasang custom domain di Vercel **sebelum** Railway
+   mati, jangan sesudah.
+3. **Jangan salin data QA Railway ke Supabase.** Rantai jalur uangnya nol dan
+   pemilik sudah menyatakan lead/attempt yang ada hanya percobaan
+   (report OQ-2 §4). Yang perlu ada di Supabase — 32 layanan MSL, 65 karyawan,
+   role mapping — sudah ada di sana.
+4. **Matikan service Railway** (manual, pemilik — Claude tak punya akses), lalu
+   kerjakan sisa **C-05**: hapus job `backend` dari CI, arsipkan `backend/`
+   dengan tag, hapus secret `RAILWAY_MYSQL_URL` & `RAILWAY_BACKUP_PASSPHRASE`
+   (**passphrase paling belakangan** — tanpanya berkas backup tak bisa dibuka).
 
-## Redeploys
+### Interim, kalau frontend Railway perlu tetap hidup sebentar
 
-Every push to the deployed branch triggers new builds for the affected services.
-Backend migrations are applied idempotently on each boot, so schema changes ship
-with the code that needs them.
+Set `BACKEND_URL` service `web-internal` di Railway ke
+`https://agency-app-api.vercel.app`. Frontend Railway lalu membaca/menulis ke
+Supabase, dan service `backend` + `MySQL` bisa dimatikan lebih dulu tanpa
+menunggu orangnya pindah. Setelah itu URL Railway dan URL Vercel menampilkan
+data yang sama.
 
-## The client portal (`web-client-portal`)
+---
 
-Not deployable yet — it currently has no app code (a separate external auth realm
-per `CLAUDE.md`). When it exists, add a fourth service with Root Directory
-`web-client-portal`, following the same pattern as web-internal.
+## 5. Arsip — setup lama (JANGAN dijalankan)
+
+<details><summary>Panduan tiga-service Railway, disimpan untuk jejak sejarah</summary>
+
+Root Directory per service: `backend` (Dockerfile) · `web-internal` (Railpack) ·
+MySQL (database Railway). Backend membaca `DATABASE_URL` = `${{MySQL.MYSQL_URL}}`,
+mengauto-migrasi saat boot, healthcheck `GET /healthz`. Frontend mengisi
+`BACKEND_URL` dengan URL publik backend, atau
+`http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:8080` lewat private networking.
+
+**Kenapa jangan dijalankan lagi:** `backend/` beku read-only sampai C-05
+(`CLAUDE.md`), MySQL sudah tidak dipakai, dan `BACKEND_URL` semacam itu kini
+menggagalkan build `web-internal` secara sengaja (§1).
+
+</details>

@@ -410,9 +410,29 @@ Baru dikerjakan **setelah** gate go/no-go GO. Sesuai OQ-8: Go+MySQL **diarsip re
 >   ⚠️ **Sisa yang masih terbuka:** PII tetap ada di **histori git** — scrub butuh `git filter-repo`
 >   \+ re-clone terkoordinasi, keputusan & eksekusi pemilik.
 
+> 🔴 **PRASYARAT BARU (2026-08-03) — C-05 SEBELUMNYA MELEWATKAN INI.** Checklist di
+> bawah memperlakukan Railway sebagai **backend + MySQL saja**. Ternyata service
+> ketiga, **`web-internal`**, adalah frontend yang tim **benar-benar pakai**
+> (`agencyapp-frontend-production.up.railway.app`), dan `BACKEND_URL`-nya menunjuk
+> ke backend Go — jadi semua yang diketik di sana masuk ke MySQL Railway.
+> Sementara itu stack TS/Supabase **belum dipakai siapa pun**: 65 akun, **2 yang
+> pernah login**, terakhir 2026-07-28, keduanya probe UAT C-03.
+> **Mematikan Railway sesuai butir 5 di bawah, tanpa langkah ini, mencabut
+> satu-satunya URL yang dipakai tim.** Risikonya BUKAN kehilangan data (OQ-2:
+> jalur uang nol baris) melainkan kehilangan jalur kerja.
+> **Wajib SEBELUM butir 5:** (a) satu alur penuh register lead → Qualified Form
+> diverifikasi manusia di frontend Vercel `web-internal-mea`; (b) URL barunya
+> diumumkan / custom domain dipasang **sebelum** Railway mati; (c) data QA
+> Railway **tidak** disalin (pemilik sudah menyatakannya percobaan, OQ-2 §4).
+> Interim bila frontend Railway perlu hidup sebentar: `BACKEND_URL` service
+> `web-internal` → `https://agency-app-api.vercel.app`, lalu `backend`+`MySQL`
+> boleh mati lebih dulu. Detail: `docs/DEPLOY_RAILWAY.md` §3–§4.
+> Sudah dipasang penjaganya: `BACKEND_URL` ber-host Railway atau `:8080` kini
+> **menggagalkan build** `web-internal` (`src/lib/backend-url.ts`).
+
 1. **CI:** hapus job `backend` (Go + service MySQL) dari `.github/workflows/ci.yml` — saat ini masih menjalankan `go vet`/`go test`/migrasi MySQL atas kode beku (buang waktu CI & bisa merah palsu). Sisakan job `api`, `core-engines`, `db-and-migrations`, `web-internal`.
 2. **Repo:** arsipkan `backend/` (opsi: pindah ke `archive/backend-go/` + README "read-only, referensi paritas", atau tag rilis terakhir lalu hapus). **Jangan hapus tanpa tag** — dan sejak O47 diputus *"tinggalkan"*, tag itu jadi **satu-satunya tempat** spesifikasi tiga alur klien `cmd/import` (`gen-form`, `clients-dryrun/apply`, `dormant-dryrun/apply`) masih bisa dibaca. Menghapus tanpa tag membuat keputusan O47 tak bisa dibatalkan. Catatan: Go **bukan lagi** oracle paritas satu-satunya untuk bentuk respons — `apps/api/src/lib/shape-parity.test.ts` ber-anchor tipe FE dan **selamat** dari pengarsipan ini (89 converter, `NESTED_INLINE_UNCHECKED` kosong).
-3. **Config mati:** `backend/railway.json`, `web-internal/railway.json`, `backend/Dockerfile`, `docs/DEPLOY_RAILWAY.md` → tandai deprecated/arsip.
+3. **Config mati:** `backend/railway.json`, `web-internal/railway.json`, `backend/Dockerfile` → tandai deprecated/arsip. (`docs/DEPLOY_RAILWAY.md` **sudah** ditulis ulang 2026-08-03 jadi dokumen dekomisi + topologi Vercel yang berlaku; yang tersisa hanya ganti namanya kalau mau.) Ikut mati: `.github/workflows/railway-mysql-backup.yml` — job-nya melewati diri sendiri saat `RAILWAY_MYSQL_URL` kosong, jadi ia tidak akan merah setelah switch-off, tapi tetap harus dihapus bersama kedua secretnya.
 4. **Docs:** perbarui `CLAUDE.md` (§Stack: Go→TypeScript/Next di Vercel, MySQL→Supabase Postgres) + entri `DECISIONS.md` "cutover selesai, Go diarsip".
 5. **Infra:** matikan service Railway (**manual, Anda** — Claude tak punya akses Railway). Simpan backup DB MySQL terakhir sebelum dimatikan → `docs/handoff/RUNBOOK_BACKUP_MYSQL_RAILWAY.md` (skrip + workflow sudah ada; verifikasinya 4 lapis, bukan sekadar `mysqldump`).
 
