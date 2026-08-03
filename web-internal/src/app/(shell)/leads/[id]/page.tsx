@@ -2,11 +2,13 @@
 
 import { use, useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { api, errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import {
   DELETED_RECORD_STATUS,
   approveLeadDelete,
+  claimLead,
   getLead,
   listLeadDeleteRequests,
   rejectLeadDelete,
@@ -15,6 +17,7 @@ import {
   type LeadDetail,
   type LeadAttemptRow,
 } from '@/lib/leads';
+import { isTerminalAttempt, leadProgress, nextStepLabel } from '@/lib/lead-progress';
 import StatusBadge from '@/components/StatusBadge';
 import { extractStatusLabel, summarizeJson } from '@/lib/audit';
 
@@ -187,6 +190,17 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
         </div>
       </section>
 
+      {/* Lanjutkan proses penjualan — jalan keluar dari halaman lead */}
+      <SalesProcessPanel
+        leadId={lead.id}
+        recordStatus={lead.record_status}
+        attempts={attempts}
+        onClaimed={() => {
+          load();
+          loadAudit();
+        }}
+      />
+
       {/* Prospect Attempts (Kontes) */}
       <section className="card">
         <div className="cardHeader">
@@ -202,7 +216,9 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                   <th>ID</th>
                   <th>Owner</th>
                   <th>Status</th>
+                  <th>Langkah Berikutnya</th>
                   <th>Diklaim</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -215,7 +231,17 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                     <td>
                       <StatusBadge status={attempt.status} />
                     </td>
+                    <td>
+                      {isTerminalAttempt(attempt.status)
+                        ? 'Selesai'
+                        : (nextStepLabel(attempt.status) ?? '—')}
+                    </td>
                     <td>{formatDateTime(attempt.claimed_at)}</td>
+                    <td>
+                      <Link href={`/sales/${attempt.id}`} className="btn btnSecondary btnSm">
+                        Buka
+                      </Link>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -272,6 +298,125 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
         )}
       </section>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Proses Sales — jalan keluar dari halaman lead.
+//
+// Record lead TIDAK punya aksi lifecycle sendiri: menandai Contacted, mengisi
+// Qualified Lead Form (data toko), negosiasi, dan closing semuanya hidup di
+// prospect attempt (M0 §4–§6) di `/sales/{attemptId}`. Sebelum panel ini
+// halaman lead adalah jalan buntu — attempt-nya hanya tampil sebagai ID
+// telanjang di tabel kontes, tanpa satu kalimat pun yang bilang di sanalah
+// prosesnya dilanjutkan.
+//
+// Panel ini TIDAK mengulang aksinya di sini. Menempelkan tombol transisi kedua
+// pada halaman lead berarti dua permukaan untuk satu aturan yang sama; yang
+// dibutuhkan pengguna cuma satu pintu yang jelas menuju langkah berikutnya.
+// Gate-nya tetap milik server (`canWriteAttempt`, `decideClaim`, `sm_edges`) —
+// `lead-progress.ts` hanya memilih afordansi mana yang digambar, dan penolakan
+// server dirender verbatim.
+// ---------------------------------------------------------------------------
+
+function SalesProcessPanel({
+  leadId,
+  recordStatus,
+  attempts,
+  onClaimed,
+}: {
+  leadId: string;
+  recordStatus: string;
+  attempts: LeadAttemptRow[];
+  onClaimed: () => void;
+}) {
+  const router = useRouter();
+  const { employee, role } = useAuth();
+
+  const [claiming, setClaiming] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
+
+  const progress = leadProgress({
+    recordStatus,
+    attempts,
+    employeeId: employee?.employee_id ?? null,
+    role,
+  });
+
+  async function handleClaim() {
+    setClaimError(null);
+    setClaiming(true);
+    try {
+      const res = await claimLead(leadId);
+      // Klaim melahirkan attempt baru — bawa pengguna langsung ke tempat
+      // langkah berikutnya berada, bukan kembali ke halaman lead yang sama.
+      onClaimed();
+      router.push(`/sales/${res.attempt.id}`);
+    } catch (err) {
+      setClaimError(errorMessage(err));
+      setClaiming(false);
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="cardHeader">
+        <h2>Proses Sales</h2>
+      </div>
+      <p className="muted" style={{ fontSize: 13 }}>
+        Status penjualan bergerak di <strong>prospect attempt</strong>, bukan di record lead. Penandaan
+        Contacted, Qualified Lead Form (data toko), negosiasi, sampai closing semuanya ada di halaman
+        attempt.
+      </p>
+
+      {claimError && <div className="alert alertError" role="alert">{claimError}</div>}
+
+      {progress.attempt && (
+        <div className="stack" style={{ gap: 10, marginTop: 8 }}>
+          <div className="row" style={{ gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <StatusBadge status={progress.attempt.status} />
+            <span className="muted" style={{ fontSize: 13 }}>
+              {progress.attempt.id} &middot;{' '}
+              {progress.isMine ? 'attempt Anda' : `owner: ${progress.attempt.owner_nama}`}
+            </span>
+          </div>
+          <div>
+            Langkah berikutnya: <strong>{progress.nextStep ?? '—'}</strong>
+          </div>
+          <div>
+            <Link href={`/sales/${progress.attempt.id}`} className="btn btnPrimary">
+              {progress.canAct && progress.nextStep
+                ? `Lanjutkan: ${progress.nextStep}`
+                : 'Buka Prospect Attempt'}
+            </Link>
+          </div>
+          {!progress.canAct && (
+            <p className="muted" style={{ fontSize: 13 }}>
+              Attempt ini dikerjakan {progress.attempt.owner_nama}; Anda membukanya sebagai pembaca.
+            </p>
+          )}
+        </div>
+      )}
+
+      {progress.canClaim && (
+        <div className="stack" style={{ gap: 10, marginTop: progress.attempt ? 16 : 8 }}>
+          <p style={{ margin: 0 }}>
+            {progress.attempt
+              ? 'Lead ini masih di pool — Anda boleh mengajukan attempt sendiri (kontes; pemenang ditentukan saat closing).'
+              : 'Belum ada attempt aktif pada lead ini. Klaim untuk mulai memprosesnya.'}
+          </p>
+          <div>
+            <button type="button" className="btn btnPrimary" disabled={claiming} onClick={handleClaim}>
+              {claiming ? 'Memproses...' : 'Klaim Lead'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!progress.attempt && !progress.canClaim && (
+        <div className="emptyState">Tidak ada attempt aktif yang bisa dilanjutkan pada lead ini.</div>
+      )}
+    </section>
   );
 }
 
