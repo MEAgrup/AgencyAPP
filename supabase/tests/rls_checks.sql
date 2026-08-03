@@ -106,6 +106,30 @@ BEGIN
   END LOOP;
 END $$;
 
+-- 9b. …and yet the transition engine must still be INTROSPECTABLE by a logged-in
+--     caller. QA live 2026-08-03: `sales.getAttempt` (the attempt-detail page)
+--     read `sm_edges` directly under `readAsActor`, hit 42501 from check 9's very
+--     invariant, and the page rendered a bare "internal server error" (an
+--     unmapped Postgres error → 500). The fix keeps the TABLE denied above and
+--     exposes only the ANSWER through `private.sm_allowed_transitions`
+--     (SECURITY DEFINER, migration 20260803120000). Both halves are asserted
+--     here: the call must succeed AND return the real edges, because a function
+--     that silently returned {} would render an action-less page instead of an
+--     error — the harder failure to notice.
+DO $$
+DECLARE moves text[];
+BEGIN
+  moves := private.sm_allowed_transitions('prospect_attempt', 'New Lead');
+  IF NOT ('Contacted' = ANY (moves)) THEN
+    RAISE EXCEPTION 'sm_allowed_transitions must reach Contacted from New Lead as authenticated (got %)', moves;
+  END IF;
+  -- Unknown machine / terminal state → EMPTY array, never NULL: the client
+  -- iterates the result to decide which buttons exist at all.
+  IF private.sm_allowed_transitions('mesin_yang_tidak_ada', 'Apapun') <> '{}'::text[] THEN
+    RAISE EXCEPTION 'sm_allowed_transitions must return {} for an unknown machine';
+  END IF;
+END $$;
+
 -- ---------------------------------------------------------------------------
 -- 10-13. O37 — `leads` read scope. These are the cases the API read path got
 --        wrong before O37: it queried as the service role, so RLS never ran and
