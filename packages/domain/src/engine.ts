@@ -21,14 +21,28 @@ import { type Queryable } from '@cdps/db';
  * never null, because the client iterates the array to decide which action
  * buttons to render at all.
  *
- * `collate "C"` is load-bearing, not decoration. Go sorted these with
- * `sort.Strings` (byte order), and CDPS statuses are bracketed —
- * `[Closed - Kalah Kompetisi]` vs `Qualified`. A glibc locale like `en_US.utf8`
- * deprioritizes punctuation and puts the bracketed status FIRST, while `C` (and
- * Go, and JS) put it LAST. Without pinning the collation, the button order in the
+ * WHY A FUNCTION AND NOT `select … from sm_edges` (QA live 2026-08-03). This read
+ * used to query the table directly, which worked only as long as reads ran on a
+ * privileged connection. O37 moved every read onto `readAsActor`
+ * (`SET LOCAL ROLE authenticated`), and `sm_edges` is in the RLS baseline's
+ * "pure internal" group — SELECT revoked, no policy, an invariant codified in
+ * `supabase/tests/rls_checks.sql` §9. The direct query therefore raised
+ * `42501 permission denied for table sm_edges`, which `mapError` does not map:
+ * `GET /attempts/{id}` answered 500 and the attempt-detail page rendered a bare
+ * "internal server error". `private.sm_allowed_transitions`
+ * (20260803120000_rls_sm_edges_read_path.sql) is SECURITY DEFINER, so the table
+ * stays closed to `authenticated` while this read path gets exactly the answer it
+ * publishes as `allowed_transitions` — and nothing else about the machine.
+ *
+ * The `collate "C"` ordering moved INTO that function, so the byte order stays a
+ * property of the engine rather than of the caller. It is load-bearing, not
+ * decoration: Go sorted these with `sort.Strings` (byte order), and CDPS statuses
+ * are bracketed — `[Closed - Kalah Kompetisi]` vs `Qualified`. A glibc locale like
+ * `en_US.utf8` deprioritizes punctuation and puts the bracketed status FIRST,
+ * while `C` (and Go, and JS) put it LAST. Unpinned, the button order in the
  * response would depend on the locale the database cluster happened to be
  * initialized with — CI's Postgres 17 (`en_US.utf8`) and a local Postgres really
- * do disagree, which is how this was found. Byte order also matches Go exactly.
+ * do disagree, which is how this was found.
  *
  * NOTE this answers "is the EDGE legal", not "may THIS actor take it": the
  * `require_lead` gate is enforced by `sm_transition` at write time. Go's
@@ -40,9 +54,7 @@ export async function allowedTransitions(
   machine: string,
   from: string,
 ): Promise<string[]> {
-  const rows = await sql<{ to_state: string }[]>`
-    select to_state from sm_edges
-    where machine = ${machine} and from_state = ${from}
-    order by to_state collate "C"`;
-  return rows.map((r) => r.to_state);
+  const rows = await sql<{ states: string[] }[]>`
+    select private.sm_allowed_transitions(${machine}, ${from}) as states`;
+  return rows[0]?.states ?? [];
 }

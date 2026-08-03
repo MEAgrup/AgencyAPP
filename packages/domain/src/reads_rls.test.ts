@@ -23,6 +23,8 @@ import { createClient, withClaims, type Sql } from '@cdps/db';
 import { leadsDatabase, poolBoard } from './leads';
 import { listClients } from './client';
 import { reminderDashboard } from './finance';
+import { allowedTransitions } from './engine';
+import { getAttempt } from './sales';
 
 const URL = process.env.DATABASE_URL;
 const describeDb = describe.skipIf(!URL);
@@ -52,6 +54,7 @@ const claims = (o: {
 
 const LEAD_ID = 'LEAD-ZZR-0001';
 const CMP_ID = 'CMP-ZZR-0001';
+const PRSP_ID = 'PRSP-ZZR-0001';
 const OWNER = 'ZZR-OWNER';
 const OUTSIDER = 'ZZR-OUTSIDER';
 
@@ -66,10 +69,17 @@ async function seed(): Promise<void> {
     values (${LEAD_ID}, 'RLS Read Fixture', '0899000111', '62899000111', 'Leads - Iklan',
             'Marketing', ${CMP_ID}, '[Pool]', ${OWNER})
     on conflict (id) do nothing`;
+  // An attempt on that lead: `getAttempt` is the read model that tripped over
+  // `sm_edges` (2026-08-03), so the guard below needs a real row to read.
+  await sql`
+    insert into prospect_attempts (id, lead_id, owner_employee_id, status, claimed_at, created_by)
+    values (${PRSP_ID}, ${LEAD_ID}, ${OWNER}, 'New Lead', now(), ${OWNER})
+    on conflict (id) do nothing`;
 }
 
 afterAll(async () => {
   if (!sql) return;
+  await sql`delete from prospect_attempts where id = ${PRSP_ID}`;
   await sql`delete from leads where id = ${LEAD_ID}`;
   await sql`delete from campaigns where id = ${CMP_ID}`;
   await sql.end();
@@ -113,11 +123,39 @@ describeDb('read models under RLS (O37)', () => {
 
   it('runs the client and finance read models without hitting a locked table', async () => {
     // Regression guard for the privilege half of the change: `authenticated`
-    // is denied sessions / employee_credentials / id_sequences / sm_* entirely,
-    // so a read model touching one would raise insufficient_privilege here even
-    // though it passes as the BYPASSRLS owner elsewhere in the suite.
+    // is denied sessions / employee_credentials / id_sequences / sm_machines /
+    // sm_terminal_states / notif_events / role_mappings entirely, so a read model
+    // touching one would raise insufficient_privilege here even though it passes
+    // as the BYPASSRLS owner elsewhere in the suite.
     const c = claims({ employeeId: 'ZZR-DIR', director: true });
     await expect(withClaims(sql, c, (tx) => listClients(tx))).resolves.toBeDefined();
     await expect(withClaims(sql, c, (tx) => reminderDashboard(tx))).resolves.toBeDefined();
+  });
+
+  it('introspects the transition engine under RLS — the sm_edges 500 (QA 2026-08-03)', async () => {
+    // `sm_edges` sat in the baseline's "pure internal" group (SELECT revoked from
+    // `authenticated`) because its only reader used to be `sm_transition`, a
+    // SECURITY DEFINER. O37 moved every READ onto the `authenticated` role, and
+    // this call — the one the attempt-detail page needs to know which action
+    // buttons exist — started raising 42501 permission_denied, which `mapError`
+    // does not map: the page rendered a bare "internal server error".
+    // 20260803120000_rls_sm_edges_read_path.sql grants SELECT + a USING (true)
+    // policy. Both halves are asserted: a grant without the policy would return
+    // an EMPTY list here (a dead page with no buttons), not an error.
+    const moves = await withClaims(sql, claims({ employeeId: 'ZZR-DIR', director: true }), (tx) =>
+      allowedTransitions(tx, 'prospect_attempt', 'New Lead'),
+    );
+    expect(moves).toContain('Contacted');
+  });
+
+  it('reads the whole attempt detail under RLS — the exact route path that 500-ed', async () => {
+    await seed();
+    const detail = await withClaims(sql, claims({ employeeId: 'ZZR-DIR', director: true }), (tx) =>
+      getAttempt(tx, PRSP_ID),
+    );
+    expect(detail.attempt.id).toBe(PRSP_ID);
+    expect(detail.lead.id).toBe(LEAD_ID);
+    // The field the page reads to render its action buttons at all.
+    expect(detail.allowedTransitions.length).toBeGreaterThan(0);
   });
 });
