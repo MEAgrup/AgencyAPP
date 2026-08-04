@@ -23,7 +23,7 @@
  * `useAssignableEmployees`), so the same picker serves all nine call sites.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { employeeLabel, filterEmployees, groupByDivision } from '@/lib/employee-picker';
 import type { AssignableEmployee } from '@/lib/types';
 
@@ -54,6 +54,13 @@ interface Props {
    * employee needs importing or their HRIS jabatan needs a role mapping.
    */
   emptyHint?: string;
+  /**
+   * Always-visible note under the control. Used by the AM door to say which
+   * jabatan qualify (AM and CRO are the same function — owner 2026-08-04) and
+   * where to go when somebody expected is missing, since the answer is a role
+   * mapping and no picker can fix that by itself.
+   */
+  note?: ReactNode;
 }
 
 export default function EmployeePicker({
@@ -68,6 +75,7 @@ export default function EmployeePicker({
   id = 'employee-picker',
   hint,
   emptyHint,
+  note,
 }: Props) {
   const [query, setQuery] = useState('');
 
@@ -84,9 +92,35 @@ export default function EmployeePicker({
   const picked = value !== '' ? list.find((e) => e.employee_id === value) : undefined;
 
   const optionLabel = (e: AssignableEmployee): string => {
-    const note = hint?.(e) ?? '';
-    return note === '' ? employeeLabel(e) : `${employeeLabel(e)} · ${note}`;
+    const extra = hint?.(e) ?? '';
+    return extra === '' ? employeeLabel(e) : `${employeeLabel(e)} · ${extra}`;
   };
+
+  // Load failure = fall back to a manual Employee ID field rather than a dead
+  // form. This is the ONLY place a raw id is still typed, and it exists because a
+  // dropdown that cannot load must not become a wall: an unreachable directory
+  // (a deploy where the picker's migration is not applied yet, a transient 500)
+  // would otherwise block every assignment. The server validates either way.
+  if (error !== null) {
+    return (
+      <div className="field">
+        <label htmlFor={`${id}-manual`}>{label}</label>
+        <input
+          id={`${id}-manual`}
+          type="text"
+          required={required}
+          disabled={disabled}
+          placeholder="Employee ID (jalan darurat)"
+          value={value}
+          onChange={(e) => onChange(e.target.value.trim())}
+        />
+        <span className="muted" style={{ fontSize: 12 }} role="alert">
+          Daftar karyawan gagal dimuat: {error} &mdash; sementara masukkan Employee ID manual.
+        </span>
+        {note && <span className="muted" style={{ fontSize: 12 }}>{note}</span>}
+      </div>
+    );
+  }
 
   return (
     <div className="field">
@@ -131,19 +165,15 @@ export default function EmployeePicker({
             ))}
       </select>
 
-      {error && (
-        <span className="muted" style={{ fontSize: 12 }} role="alert">
-          Daftar karyawan gagal dimuat: {error}
-        </span>
-      )}
-      {!loading && !error && list.length === 0 && (
+      {note && <span className="muted" style={{ fontSize: 12 }}>{note}</span>}
+      {!loading && list.length === 0 && (
         <span className="muted" style={{ fontSize: 12 }}>
           {emptyHint ??
             'Belum ada karyawan aktif yang bisa ditugaskan. Impor karyawannya di Admin › Karyawan, ' +
               'lalu pastikan jabatan HRIS-nya sudah punya role mapping.'}
         </span>
       )}
-      {!loading && !error && list.length > 0 && query !== '' && shown.length === 0 && (
+      {!loading && list.length > 0 && query !== '' && shown.length === 0 && (
         <span className="muted" style={{ fontSize: 12 }}>
           Tidak ada karyawan yang cocok dengan &ldquo;{query}&rdquo;.
         </span>

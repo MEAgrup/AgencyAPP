@@ -201,6 +201,22 @@ export default function AccountWorkspacePage() {
     return `${row?.active_client_count ?? 0} klien aktif`;
   };
 
+  /**
+   * Shared by BOTH AM doors (assign + reassign), so the answer to "kenapa nama X
+   * tidak ada?" cannot drift between them. It names the real mechanism: the list
+   * is driven by `role_mappings`, and AM vs CRO is a jabatan label on the same
+   * CDPS role (owner 2026-08-04 — the two differ only in the client's service
+   * tier, which CDPS does not model as a role).
+   */
+  const amPickerNote = (
+    <>
+      Daftar = karyawan <strong>aktif</strong> yang jabatan HRIS-nya dipetakan ke{' '}
+      <strong>Account/staff</strong>. AM dan CRO fungsinya sama (yang berbeda hanya level layanan
+      kliennya), jadi keduanya muncul di sini. Ada nama yang belum muncul? Petakan jabatannya di{' '}
+      <Link href="/admin/role-mappings">Admin &rsaquo; Role Mapping</Link>.
+    </>
+  );
+
   return (
     <div className="stack">
       <div>
@@ -272,7 +288,7 @@ export default function AccountWorkspacePage() {
               </div>
               <EmployeePicker
                 id="assign-am"
-                label="Account Manager"
+                label="Account Manager / CRO"
                 required
                 employees={amCandidates}
                 loading={amLoading}
@@ -280,9 +296,11 @@ export default function AccountWorkspacePage() {
                 value={assignAmId}
                 onChange={setAssignAmId}
                 hint={(e) => workloadHint(e.employee_id)}
+                note={amPickerNote}
                 emptyHint={
-                  'Belum ada staff divisi Account yang aktif. Satu klien hanya bisa dipegang staff Account ' +
-                  'aktif — impor karyawannya di Admin › Karyawan, lalu petakan jabatannya ke Account/staff.'
+                  'Belum ada karyawan Account/staff yang aktif. Satu klien hanya bisa dipegang staff ' +
+                  'Account aktif — impor karyawannya di Admin › Karyawan, lalu petakan jabatan HRIS-nya ' +
+                  '(Account Manager, CRO, dst.) ke Account/staff di Admin › Role Mapping.'
                 }
               />
               <div className="row" style={{ gap: 8, marginTop: 8 }}>
@@ -419,7 +437,7 @@ export default function AccountWorkspacePage() {
               </div>
               <EmployeePicker
                 id="re-am"
-                label="AM Tujuan"
+                label="AM / CRO Tujuan"
                 required
                 employees={amCandidates}
                 loading={amLoading}
@@ -427,9 +445,11 @@ export default function AccountWorkspacePage() {
                 value={reAm}
                 onChange={setReAm}
                 hint={(e) => workloadHint(e.employee_id)}
+                note={amPickerNote}
                 emptyHint={
-                  'Belum ada staff divisi Account yang aktif untuk dijadikan AM tujuan. Impor karyawannya ' +
-                  'di Admin › Karyawan, lalu petakan jabatannya ke Account/staff.'
+                  'Belum ada karyawan Account/staff yang aktif untuk dijadikan AM tujuan. Impor ' +
+                  'karyawannya di Admin › Karyawan, lalu petakan jabatan HRIS-nya (Account Manager, ' +
+                  'CRO, dst.) ke Account/staff di Admin › Role Mapping.'
                 }
               />
             </div>
