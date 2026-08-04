@@ -38,6 +38,27 @@ export interface Campaign {
   created_at: string; // RFC3339
 }
 
+// One row of the lead-intake campaign picker (GET /marketing/campaigns/selectable).
+// Narrower than Campaign by design — the picker is readable by Sales, so it carries
+// no owner and NO money (budget/CPL/ROAS stay on the M2 surface). Every status
+// appears, verbatim, so the form can mark a Paused/Closed/Archived/Draft pick
+// instead of presenting it as live.
+//
+// The three counts are M2's own derived numbers (§4 r1/r2 + the M1 §8 mirror),
+// read-only: nothing types into them. They are here because this dropdown is the
+// only campaign surface Sales has — the salesperson picking a campaign is the one
+// whose choice fills these numbers.
+export interface SelectableCampaign {
+  id: string;
+  name: string;
+  channel: string;
+  status: string; // Draft | Active | Paused | Closed | Archived (NO brackets)
+  start_date: string; // "YYYY-MM-DD"
+  lead_by_dashboard: number; // leads whose Origin Campaign is this one
+  lead_real_by_sales: number; // of those, the ones that reached Qualified
+  lead_not_qualified: number; // of those, the ones driven to Not Qualified
+}
+
 // module3_campaign rollup funnel — read-only, derived from the lead/sales log.
 export interface Rollup {
   campaign_id: string;
@@ -166,6 +187,15 @@ export function createCampaign(input: CampaignInput): Promise<Campaign> {
 // GET /marketing/campaigns → {data: Campaign[]} (newest first).
 export function listCampaigns(): Promise<{ data: Campaign[] }> {
   return api.get<{ data: Campaign[] }>(`/marketing/campaigns`);
+}
+
+// GET /marketing/campaigns/selectable → {data: SelectableCampaign[]}: EVERY
+// campaign, ordered by "can it produce leads now" (Active, Paused → Closed,
+// Archived → Draft) then by name. Every intake door may call it
+// (Sales/Marketing/OD/Director); any other division gets 403 with the verbatim BI
+// message.
+export function listSelectableCampaigns(): Promise<{ data: SelectableCampaign[] }> {
+  return api.get<{ data: SelectableCampaign[] }>(`/marketing/campaigns/selectable`);
 }
 
 // GET /marketing/campaigns/{id} → Campaign (object directly).

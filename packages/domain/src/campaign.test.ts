@@ -11,17 +11,19 @@
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { money, permission } from '@cdps/core';
-import { createClient, type Sql } from '@cdps/db';
+import { createClient, withClaims, type Sql } from '@cdps/db';
 import {
   campaignRollup,
   canCreate,
   canManageCampaign,
+  canPickCampaign,
   canReassign,
   canViewCampaign,
   createCampaign,
   ForbiddenError,
   getCampaign,
   listCampaigns,
+  listSelectableCampaigns,
   MARKETING_DIVISION,
   NotFoundError,
   reassignCampaign,
@@ -69,6 +71,22 @@ describe('campaign authority predicates (§5/§6.1)', () => {
     expect(canReassign(director('D'))).toBe(true);
     expect(canReassign(mktStaff('OWNER'))).toBe(false);
     expect(canReassign(od('O'))).toBe(false);
+  });
+  it('canPickCampaign: both intake doors + oversight; unrelated divisions denied', () => {
+    // The one campaign read that is NOT owner-scoped: a salesperson owns no
+    // campaign but must still be able to attribute a lead (M1 §9.3).
+    expect(canPickCampaign(salesStaff('S'))).toBe(true);
+    expect(canPickCampaign(mktStaff('OWNER'))).toBe(true);
+    expect(canPickCampaign(mktLead('L'))).toBe(true);
+    expect(canPickCampaign(od('O'))).toBe(true); // read-only everywhere
+    expect(canPickCampaign(director('D'))).toBe(true);
+    // No lead-intake surface ⇒ no reason to enumerate campaigns.
+    const creative: Actor = { employeeId: 'C', role: permission.makeRole({ division: 'Creative', level: 'staff' }) };
+    const finance: Actor = { employeeId: 'F', role: permission.makeRole({ division: 'Finance', level: 'lead' }) };
+    expect(canPickCampaign(creative)).toBe(false);
+    expect(canPickCampaign(finance)).toBe(false);
+    // An unmapped employee (division "") is not an intake door either.
+    expect(canPickCampaign({ employeeId: 'U', role: permission.makeRole({}) })).toBe(false);
   });
   it('canViewCampaign: OD/Director/lead see all; owning staff sees own', () => {
     expect(canViewCampaign(od('O'), 'OWNER')).toBe(true);
@@ -225,6 +243,130 @@ describeDb('Get/List visibility (§5)', () => {
     await expect(listCampaigns(sql, salesStaff('ZZ-SAL'))).rejects.toThrow(ForbiddenError);
     await expect(getCampaign(sql, salesStaff('ZZ-SAL'), cLia.id)).rejects.toThrow(ForbiddenError);
     await expect(getCampaign(sql, lia, 'CMP-000000-9999')).rejects.toThrow(NotFoundError);
+  });
+});
+
+describeDb('listSelectableCampaigns — the lead-intake picker', () => {
+  /** Drives one campaign Draft→…→`to` through the engine (never a raw update). */
+  async function driveTo(actor: Actor, id: string, to: string): Promise<void> {
+    const path: Record<string, string[]> = {
+      [STATUS_ACTIVE]: [STATUS_ACTIVE],
+      [STATUS_PAUSED]: [STATUS_ACTIVE, STATUS_PAUSED],
+      [STATUS_CLOSED]: [STATUS_ACTIVE, STATUS_CLOSED],
+      [STATUS_ARCHIVED]: [STATUS_ACTIVE, STATUS_CLOSED, STATUS_ARCHIVED],
+    };
+    for (const step of path[to]) {
+      const res = await transitionCampaign(sql, actor, id, step);
+      expect(res.ok).toBe(true);
+    }
+  }
+
+  it('offers EVERY status, ordered by "can it produce leads now", then by name', async () => {
+    const lia = mktStaff('ZZ-LIA');
+    const draft = await createCampaign(sql, lia, { ...validInput(), name: 'ZZ Aaa Draft' });
+    const active = await createCampaign(sql, lia, { ...validInput(), name: 'ZZ Zzz Active' });
+    const paused = await createCampaign(sql, lia, { ...validInput(), name: 'ZZ Bbb Paused' });
+    const closed = await createCampaign(sql, lia, { ...validInput(), name: 'ZZ Ccc Closed' });
+    const archived = await createCampaign(sql, lia, { ...validInput(), name: 'ZZ Ddd Archived' });
+    await driveTo(lia, active.id, STATUS_ACTIVE);
+    await driveTo(lia, paused.id, STATUS_PAUSED);
+    await driveTo(lia, closed.id, STATUS_CLOSED);
+    await driveTo(lia, archived.id, STATUS_ARCHIVED);
+
+    const list = await listSelectableCampaigns(sql, salesStaff('ZZ-SAL'));
+    const mine = list.filter((c) => c.name.startsWith('ZZ '));
+    // ALL of them, whatever the status: a campaign missing from the picker cannot
+    // be attributed at all, so its M2 performance would stay permanently zero —
+    // indistinguishable from a campaign that truly failed (owner decision).
+    expect(mine.map((c) => c.id).sort()).toEqual(
+      [draft.id, active.id, paused.id, closed.id, archived.id].sort(),
+    );
+    // Ordering is the function's own, so the dropdown never depends on cluster
+    // collation or insertion order: live first, then finished, then not-yet-run.
+    expect(mine.map((c) => c.status)).toEqual([
+      STATUS_ACTIVE, STATUS_PAUSED, STATUS_CLOSED, STATUS_ARCHIVED, STATUS_DRAFT,
+    ]);
+    // Status travels verbatim so the form can mark a non-live pick.
+    expect(mine[0].id).toBe(active.id);
+    expect(mine[4].id).toBe(draft.id);
+  });
+
+  it('carries the picker projection only — funnel counts, but no owner and no money', async () => {
+    const lia = mktStaff('ZZ-LIA');
+    const c = await createCampaign(sql, lia, validInput());
+    await driveTo(lia, c.id, STATUS_ACTIVE);
+
+    const row = (await listSelectableCampaigns(sql, salesStaff('ZZ-SAL'))).find((x) => x.id === c.id);
+    expect(row).toBeDefined();
+    expect(Object.keys(row!).sort()).toEqual([
+      'channel', 'id', 'leadByDashboard', 'leadNotQualified', 'leadRealBySales',
+      'name', 'startDate', 'status',
+    ]);
+    expect(row!.name).toBe('Promo Skilskul Maret');
+    expect(row!.channel).toBe('TikTok Ads');
+    expect(row!.startDate).toBe('2026-03-02');
+    // Counts are numbers, not the strings postgres returns for bigint — a "0"
+    // would render as a string and break any arithmetic downstream.
+    expect(row!.leadByDashboard).toBe(0);
+    expect(typeof row!.leadRealBySales).toBe('number');
+  });
+
+  it('counts the funnel with the SAME numbers as the M3 rollup (no second definition)', async () => {
+    const lia = mktStaff('ZZ-LIA');
+    const c = await createCampaign(sql, lia, validInput());
+    await driveTo(lia, c.id, STATUS_ACTIVE);
+
+    // Three leads on this campaign: one reached Qualified, one was driven to Not
+    // Qualified, one was never worked.
+    await seedLead('LEAD-ZZP-0001', '0851000001', c.id);
+    await seedLead('LEAD-ZZP-0002', '0851000002', c.id);
+    await seedLead('LEAD-ZZP-0003', '0851000003', c.id);
+    await seedAttempt('PRSP-ZZP-0001', 'LEAD-ZZP-0001', true); // reached Qualified
+    await seedAttempt('PRSP-ZZP-0002', 'LEAD-ZZP-0002', false); // Contacted only
+    await sql`
+      insert into audit_log (entity_type, entity_id, actor_employee_id, action, created_by)
+      values ('prospect_attempt', 'PRSP-ZZP-0002', 'ZZ-SAL', 'transition:Contacted->Not Qualified', 'ZZ-SAL')`;
+
+    const row = (await listSelectableCampaigns(sql, salesStaff('ZZ-SAL'))).find((x) => x.id === c.id);
+    expect(row!.leadByDashboard).toBe(3);
+    expect(row!.leadRealBySales).toBe(1);
+    expect(row!.leadNotQualified).toBe(1);
+
+    // The picker's SQL and campaignRollup's SQL are two implementations of the
+    // same two M2 §4 definitions. Pin them to each other so neither can drift
+    // silently — that drift is what would make Sales and Marketing argue about
+    // whose number is right.
+    const rollup = await campaignRollup(sql, director('ZZ-DIR'), c.id);
+    expect(row!.leadByDashboard).toBe(rollup.leadsGenerated);
+    expect(row!.leadRealBySales).toBe(rollup.realLeads);
+  });
+
+  it('answers a Sales actor UNDER RLS, where the campaigns table itself is closed', async () => {
+    // The point of migration 20260804061500. Every other assertion here runs as
+    // the migration owner (BYPASSRLS) and would pass even with the picker reading
+    // `campaigns` directly — which is exactly how a Sales actor would get an
+    // empty dropdown in production (O37's shape).
+    const lia = mktStaff('ZZ-LIA');
+    const c = await createCampaign(sql, lia, validInput());
+    await driveTo(lia, c.id, STATUS_ACTIVE);
+
+    const claims = JSON.stringify({
+      app_metadata: { employee_id: 'ZZ-SAL', division: 'Sales', level: 'staff', od: false, director: false },
+    });
+    const seen = await withClaims(sql, claims, async (tx) => {
+      const direct = await tx<{ n: number }[]>`select count(*)::int as n from campaigns where id = ${c.id}`;
+      const picker = await listSelectableCampaigns(tx, salesStaff('ZZ-SAL'));
+      return { direct: direct[0].n, picker: picker.map((x) => x.id) };
+    });
+    expect(seen.direct).toBe(0); // owner-scoped policy still applies…
+    expect(seen.picker).toContain(c.id); // …and the picker still answers.
+  });
+
+  it('refuses a division with no lead-intake door (§ role matrix)', async () => {
+    const creative: Actor = {
+      employeeId: 'ZZ-CRE', role: permission.makeRole({ division: 'Creative', level: 'staff' }),
+    };
+    await expect(listSelectableCampaigns(sql, creative)).rejects.toThrow(ForbiddenError);
   });
 });
 

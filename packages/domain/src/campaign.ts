@@ -46,6 +46,15 @@ export type Actor = permission.Actor;
 export const MARKETING_DIVISION = 'Marketing';
 
 /**
+ * The Sales division label — needed by the intake-picker gate only
+ * (canPickCampaign). Declared locally rather than imported from `leads`, which
+ * already imports MARKETING_DIVISION from here: the house pattern is one local
+ * constant per module (client/finance/leads/msl/sales each carry their own), and
+ * a back-import would make the two modules mutually dependent for one string.
+ */
+export const SALES_DIVISION = 'Sales';
+
+/**
  * Campaign statuses — the `campaign` machine (STATE_MACHINES §3 / config.go
  * MCampaign). The engine stores these labels WITHOUT brackets (initial 'Draft',
  * terminal 'Archived'), so the module mirrors them verbatim.
@@ -133,6 +142,34 @@ export interface CampaignInput {
   startDate: string; // YYYY-MM-DD
 }
 
+/**
+ * One entry of the intake picker (see listSelectableCampaigns). Deliberately a
+ * NARROWER projection than Campaign: identity + the two things that disambiguate
+ * two similarly-named campaigns (channel, start date) + the status the UI must be
+ * able to flag + the DERIVED lead funnel — and nothing about ownership or money.
+ *
+ * The three counts are the M2 §4 / M1 §8 numbers verbatim, computed in
+ * `private.campaign_selectable()` (migration 20260804154000). They are here
+ * because the picker is the only campaign surface Sales has (owner decision
+ * 2026-08-04): the salesperson who chooses a campaign is the one whose choice
+ * fills these numbers, so they see the effect of that choice. Read-only by
+ * construction — nothing types into them (house rule 4 / M2 §3 rule 6).
+ */
+export interface SelectableCampaign {
+  id: string;
+  name: string;
+  channel: string;
+  /** Any campaign status, verbatim — the UI marks Paused/Closed/Archived/Draft. */
+  status: string;
+  startDate: string; // YYYY-MM-DD
+  /** Lead-by-Dashboard: leads whose Origin Campaign is this one (M2 §4 r1). */
+  leadByDashboard: number;
+  /** Lead-Real-by-Sales: of those, the ones that reached Qualified (M2 §4 r2). */
+  leadRealBySales: number;
+  /** Of those, the ones an attempt drove to Not Qualified (M1 §8 example, "18 ditandai"). */
+  leadNotQualified: number;
+}
+
 /** The Campaign's read-only funnel (M3 §4 Rule 4 / §6.3). */
 export interface Rollup {
   campaignId: string;
@@ -178,6 +215,28 @@ export function canManageCampaign(a: Actor, owner: string): boolean {
 /** §5 Rule 3 / M3-OA-6 reassign gate: ONLY a Marketing lead/head or a Director. */
 export function canReassign(a: Actor): boolean {
   return permission.isLead(a, MARKETING_DIVISION);
+}
+
+/**
+ * Intake-picker read gate — the ONE read that is deliberately not owner-scoped.
+ *
+ * A salesperson registering a lead must be able to say WHICH campaign it came
+ * from (Origin Campaign, M1 §9.3), and they own no campaign at all — so the §5
+ * gate above (which is right for the Marketing workspace) would hand every Sales
+ * actor an empty list. The two intake doors are Sales (M1 §4 single registration)
+ * and Marketing (M1 §3 import), plus the layered oversight roles that read
+ * everywhere; any other division has no lead-intake surface and no business
+ * enumerating campaigns.
+ *
+ * What this opens is a NAME LIST of Active/Paused campaigns
+ * (`SelectableCampaign`), not the Campaign record: no owner, no end date, no
+ * budget, no rollup. See migration 20260804061500 for the SQL half.
+ */
+export function canPickCampaign(a: Actor): boolean {
+  if (permission.canReadAll(a)) {
+    return true; // OD (read-only everywhere) + Director
+  }
+  return a.role.division === SALES_DIVISION || a.role.division === MARKETING_DIVISION;
 }
 
 /** §5 read gate: OD/Director (everywhere), Marketing lead/head (division-wide), owning staff. */
@@ -353,6 +412,52 @@ export async function listCampaigns(sql: Queryable, actor: Actor): Promise<Campa
 }
 
 /**
+ * listSelectableCampaigns returns EVERY campaign a lead may be attributed to —
+ * all statuses — each with its derived lead funnel. Ordered by "can it produce
+ * leads now" (Active, Paused → Closed, Archived → Draft), then by name.
+ *
+ * Not a variant of listCampaigns — a DIFFERENT question with a different scope:
+ *   - listCampaigns answers "which campaigns are MINE to manage" (§5 owner
+ *     scope, full Campaign record, Marketing-only);
+ *   - this answers "which campaigns can a lead be attributed to, and what have
+ *     they produced so far", which is by definition not owner-scoped (a
+ *     salesperson owns none).
+ *
+ * Why ALL statuses (owner decision 2026-08-04, deviation from §5 rule 4/§6.1
+ * logged in DECISIONS.md): every M2 performance number starts at the campaign a
+ * salesperson picks during lead registration. A campaign missing from that list
+ * is not merely "unpicked" — it is permanently zero, and a zero that means "the
+ * lead had nowhere to go" is indistinguishable from a campaign that truly failed.
+ * Draft is included for the same reason and is SAFE here precisely because this
+ * door never auto-activates a campaign (unlike leads.resolveCampaignForIntake):
+ * picking a Draft campaign attributes the lead without launching it.
+ *
+ * The rows come from `private.campaign_selectable()` (SECURITY DEFINER,
+ * migrations 20260804061500 + 20260804154000), so this works under `readAsActor`
+ * where the `campaigns` table itself stays owner-scoped. That indirection is the
+ * whole point: the picker gets its answer without widening the table's RLS.
+ */
+export async function listSelectableCampaigns(sql: Queryable, actor: Actor): Promise<SelectableCampaign[]> {
+  if (!canPickCampaign(actor)) {
+    throw new ForbiddenError(MSG_FORBIDDEN);
+  }
+  const rows = await sql<SelectableRow[]>`
+    select id, name, channel, status, start_date,
+           lead_by_dashboard, lead_real_by_sales, lead_not_qualified
+      from private.campaign_selectable()`;
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    channel: r.channel,
+    status: r.status,
+    startDate: dateStr(r.start_date),
+    leadByDashboard: Number(r.lead_by_dashboard),
+    leadRealBySales: Number(r.lead_real_by_sales),
+    leadNotQualified: Number(r.lead_not_qualified),
+  }));
+}
+
+/**
  * campaignRollup returns the derived funnel for a Campaign the actor may view (§5
  * read gate, reused from getCampaign). NotFoundError / ForbiddenError propagate.
  *   - leadsGenerated = COUNT leads whose origin campaign is this one.
@@ -410,6 +515,23 @@ interface CampaignRow {
   status: string;
   created_by: string;
   created_at: Date;
+}
+
+/**
+ * One row of `private.campaign_selectable()` (see listSelectableCampaigns). The
+ * counts arrive as postgres `bigint`, which node-postgres hands over as STRINGS —
+ * hence the `string | number` and the explicit Number() at the call site. Reading
+ * them as-is would put "12" on the wire where the FE renders a number.
+ */
+interface SelectableRow {
+  id: string;
+  name: string;
+  channel: string;
+  status: string;
+  start_date: string | Date;
+  lead_by_dashboard: string | number;
+  lead_real_by_sales: string | number;
+  lead_not_qualified: string | number;
 }
 
 /** selectCampaign is the shared Campaign column list (nested sql fragment). */

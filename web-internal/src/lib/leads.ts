@@ -35,12 +35,18 @@ export interface AttemptStub {
 }
 
 // Body for POST /leads — mirrors module1_leads.RegisterInput.
+//
+// campaign_id / outside_campaign are the Origin Campaign link (M1 §9.3). They are
+// mutually exclusive in practice: the form is ONE picker whose "di luar campaign"
+// option sends outside_campaign=true with no id. Sending an id wins — the server
+// treats an explicit pick as authoritative and ignores the flag.
 export interface RegisterLeadInput {
   lead_name: string;
   phone_number: string;
   email?: string;
   source: string;
   campaign_id?: string;
+  outside_campaign?: boolean;
 }
 
 // Response of POST /leads — notice is the co-pursuit BI message
@@ -175,6 +181,11 @@ export const SOURCES = [
   'Database',
   'Others',
 ] as const;
+
+// The Origin Campaign rules that drive the intake form — CAMPAIGN_REQUIRED_SOURCES,
+// campaignRequiredForSource, OUTSIDE_CAMPAIGN — live in `lib/campaign-picker.ts`,
+// which imports nothing at runtime and is therefore unit-testable (this module
+// pulls in lib/api, so vitest cannot load it without the Next path alias).
 
 // ---- Functions ----
 
