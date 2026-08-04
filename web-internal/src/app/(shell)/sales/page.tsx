@@ -6,6 +6,9 @@ import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { ATTEMPT_STATUSES, listAttempts, type AttemptRow } from '@/lib/sales';
 import { SOURCES, registerLead } from '@/lib/leads';
+import { OUTSIDE_CAMPAIGN, campaignRequiredForSource } from '@/lib/campaign-picker';
+import { listSelectableCampaigns, type SelectableCampaign } from '@/lib/marketing';
+import CampaignPicker from '@/components/CampaignPicker';
 import StatusBadge from '@/components/StatusBadge';
 
 function formatDate(value: string | null | undefined) {
@@ -33,11 +36,23 @@ export default function SalesWorkspacePage() {
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [source, setSource] = useState<string>(SOURCES[0]);
-  const [campaignId, setCampaignId] = useState('');
+  // '' | OUTSIDE_CAMPAIGN | a CMP- id — see CampaignPicker.
+  const [campaignChoice, setCampaignChoice] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [regError, setRegError] = useState<string | null>(null);
   const [regMessage, setRegMessage] = useState<string | null>(null);
   const [regNotice, setRegNotice] = useState<string | null>(null);
+
+  // Origin Campaign picker (M1 §9.3). Loaded once for the whole session of the
+  // page: the list is small, Active/Paused only, and re-fetching per keystroke
+  // would buy nothing (the search filters client-side).
+  const [campaigns, setCampaigns] = useState<SelectableCampaign[] | null>(null);
+  const [campaignsLoading, setCampaignsLoading] = useState(false);
+  const [campaignsError, setCampaignsError] = useState<string | null>(null);
+
+  // M1 §9.3: mandatory for the four Marketing-channel sources. The server is the
+  // authority and answers [data tidak lengkap...]; this only marks the field.
+  const campaignRequired = campaignRequiredForSource(source);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -56,6 +71,28 @@ export default function SalesWorkspacePage() {
     load();
   }, [load]);
 
+  // Only the registration form uses the picker, so only fetch it for actors that
+  // can register (an OD-only account never sees the form).
+  useEffect(() => {
+    if (!canRegister) return;
+    let live = true;
+    setCampaignsLoading(true);
+    setCampaignsError(null);
+    listSelectableCampaigns()
+      .then((res) => {
+        if (live) setCampaigns(res.data);
+      })
+      .catch((err) => {
+        if (live) setCampaignsError(errorMessage(err));
+      })
+      .finally(() => {
+        if (live) setCampaignsLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [canRegister]);
+
   async function handleRegister(e: FormEvent) {
     e.preventDefault();
     setRegError(null);
@@ -68,7 +105,12 @@ export default function SalesWorkspacePage() {
         phone_number: phone,
         email: email || undefined,
         source,
-        campaign_id: campaignId || undefined,
+        // The picker's sentinel never goes on the wire: "di luar campaign" is
+        // sent as the outside_campaign declaration, which is what lets the server
+        // tell it apart from a skipped field (M1 §9.3 gate).
+        campaign_id:
+          campaignChoice !== '' && campaignChoice !== OUTSIDE_CAMPAIGN ? campaignChoice : undefined,
+        outside_campaign: campaignChoice === OUTSIDE_CAMPAIGN ? true : undefined,
       });
       setRegMessage(`Lead terdaftar: ${res.lead.id} · attempt ${res.attempt.id}.`);
       if (res.notice) setRegNotice(res.notice);
@@ -76,7 +118,7 @@ export default function SalesWorkspacePage() {
       setPhone('');
       setEmail('');
       setSource(SOURCES[0]);
-      setCampaignId('');
+      setCampaignChoice('');
       await load();
     } catch (err) {
       setRegError(errorMessage(err));
@@ -139,10 +181,16 @@ export default function SalesWorkspacePage() {
                 </select>
               </div>
             </div>
-            <div className="field">
-              <label htmlFor="reg-campaign">Campaign ID (opsional)</label>
-              <input id="reg-campaign" value={campaignId} onChange={(e) => setCampaignId(e.target.value)} />
-            </div>
+            <CampaignPicker
+              id="reg-campaign"
+              campaigns={campaigns}
+              loading={campaignsLoading}
+              error={campaignsError}
+              value={campaignChoice}
+              onChange={setCampaignChoice}
+              required={campaignRequired}
+              disabled={submitting}
+            />
             <div>
               <button type="submit" className="btn btnPrimary" disabled={submitting}>
                 {submitting ? 'Memproses...' : 'Registrasi Lead'}

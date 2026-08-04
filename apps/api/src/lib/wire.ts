@@ -1286,6 +1286,33 @@ export interface MarketingCampaignWire {
   created_at: string;
 }
 
+/**
+ * One row of the lead-intake campaign picker — web-internal's
+ * `marketing.ts::SelectableCampaign`.
+ *
+ * Deliberately NOT MarketingCampaignWire: the picker is served to Sales, so it
+ * carries only what identifies a campaign in a dropdown. No `owner_employee_id`,
+ * no `created_by`, no `end_date`. `status` IS carried — it is what lets the UI
+ * mark a Paused pick instead of quietly presenting it as live.
+ */
+export interface SelectableCampaignWire {
+  id: string;
+  name: string;
+  channel: string;
+  status: string;
+  start_date: string;
+}
+
+export function selectableCampaignToWire(c: campaign.SelectableCampaign): SelectableCampaignWire {
+  return {
+    id: c.id,
+    name: c.name,
+    channel: c.channel,
+    status: c.status,
+    start_date: c.startDate,
+  };
+}
+
 export function marketingCampaignToWire(c: campaign.Campaign): MarketingCampaignWire {
   return {
     id: c.id,

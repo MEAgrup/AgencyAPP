@@ -44,12 +44,21 @@ export async function POST(request: Request): Promise<Response> {
       phone_number?: string;
       email?: string;
       source?: string;
+      campaign_id?: string;
+      outside_campaign?: boolean;
     }>(request);
+    // `campaign_id` / `outside_campaign` are the M1 §9.3 Origin Campaign link.
+    // The FE has sent `campaign_id` since the M0 workspace shipped and this shell
+    // dropped it on the floor — the O43 shape, silently: the route answered 201
+    // and the lead landed with no campaign, so M2/M3 attributed nothing. Passing
+    // them through is the fix; the mandatory-per-Source gate lives in the domain.
     const { lead, attempt, notice } = await leads.register(db(), actor, {
       leadName: body.lead_name ?? '',
       phoneNumber: body.phone_number ?? '',
       email: body.email,
       source: body.source,
+      campaignId: body.campaign_id,
+      outsideCampaign: body.outside_campaign,
     });
     const payload: {
       lead: ReturnType<typeof leadStubToWire>;

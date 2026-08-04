@@ -62,7 +62,7 @@ erDiagram
 
 | Field | Lives on | Rule |
 |---|---|---|
-| Origin Campaign | LEAD → CLI | Immutable first-touch; client lineage (M3 rollups) |
+| Origin Campaign | LEAD → CLI | Immutable first-touch; client lineage (M3 rollups). Written by **both** intake doors: Marketing import, and Sales single registration via the campaign picker (`GET /marketing/campaigns/selectable`). **Mandatory when Source ∈ {Leads - Iklan, Broadcast, Event, Kulwa}** (M1 §9.3) unless the salesperson declares the lead outside any campaign — that declaration lives in the audit log (`outside_campaign`), never as a placeholder id (DECISIONS 2026-08-04) |
 | Last-Touch Campaign | LEAD | Non-destructive separate field; marketing-spend credit (M2 Attributed Sales). May legitimately diverge from Origin — by design, not a bug |
 | GMV saat ini (baseline) | CLI | 3-month avg, frozen at closing; OD-only exceptional correction |
 | Total Sales (current) | CLI | Auto + AM manual entries at lower confidence tier; MEA-managed channels only |

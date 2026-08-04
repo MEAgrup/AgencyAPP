@@ -191,6 +191,59 @@ END $$;
 RESET ROLE;
 
 -- ---------------------------------------------------------------------------
+-- 13b. Picker campaign intake (M1 §9.3 Origin Campaign, migrasi 20260804061500).
+--      Sales HARUS bisa memilih campaign asal lead, padahal ia tidak memiliki
+--      campaign apa pun — sedangkan `campaigns_select` sengaja hanya membuka
+--      baris milik/ciptaan aktor. Kedua sisinya ditegakkan di sini: TABEL-nya
+--      tetap tertutup untuk Sales, TAPI `private.campaign_selectable()` menjawab.
+--      Kalau assertion pertama merah, row-scope M3 §5 sudah dilebarkan diam-diam;
+--      kalau yang kedua merah, dropdown registrasi lead tampil KOSONG di produksi
+--      dan field campaign kembali dilewati — persis bug yang diperbaiki.
+-- ---------------------------------------------------------------------------
+
+-- Fixture tambahan (superuser): campaign yang sudah Closed. Picker tidak boleh
+-- menawarkannya — campaign tutup tidak menerima lead baru.
+INSERT INTO campaigns (id, name, channel, start_date, owner_employee_id, status, created_by)
+VALUES ('CMP-RLS-0002', 'rls fixture closed campaign', 'IG', current_date, 'EMP-RLS-MKT2', 'Closed', 'EMP-RLS-MKT2');
+
+SET LOCAL ROLE authenticated;
+
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLS9","division":"Sales","level":"staff"}}', true);
+DO $$
+DECLARE ids text[];
+BEGIN
+  IF (SELECT count(*) FROM campaigns WHERE id IN ('CMP-RLS-0001','CMP-RLS-0002')) <> 0 THEN
+    RAISE EXCEPTION 'RLS campaigns: Sales staff must NOT read the campaigns table (M3 §5 owner scope)';
+  END IF;
+  SELECT coalesce(array_agg(id), '{}'::text[]) INTO ids
+    FROM private.campaign_selectable() WHERE id LIKE 'CMP-RLS-%';
+  IF NOT ('CMP-RLS-0001' = ANY (ids)) THEN
+    RAISE EXCEPTION 'campaign_selectable: an Active campaign must be pickable by Sales (got %)', ids;
+  END IF;
+  IF 'CMP-RLS-0002' = ANY (ids) THEN
+    RAISE EXCEPTION 'campaign_selectable: a Closed campaign must NOT be offered (got %)', ids;
+  END IF;
+END $$;
+
+-- Kontrol negatif: belum login tidak punya urusan dengan daftar campaign.
+RESET ROLE;
+SET LOCAL ROLE anon;
+DO $$
+DECLARE denied boolean := false;
+BEGIN
+  BEGIN
+    PERFORM * FROM private.campaign_selectable();
+  EXCEPTION WHEN insufficient_privilege THEN denied := true;
+  END;
+  IF NOT denied THEN
+    RAISE EXCEPTION 'campaign_selectable: EXECUTE must be denied to anon';
+  END IF;
+END $$;
+
+RESET ROLE;
+
+-- ---------------------------------------------------------------------------
 -- 14-17. O41 — M5 verification-queue read scope. The baseline policies gave
 --        Finance read access only through `jwt_is_lead() AND jwt_division() =
 --        'Finance'`, i.e. LEAD ONLY, while Go `trxVisibility` grants Finance

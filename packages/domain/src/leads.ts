@@ -297,6 +297,47 @@ export interface RegisterInput {
   phoneNumber: string;
   email?: string;
   source?: string;
+  /**
+   * Origin Campaign (CMP-) the lead is attributed to — the M1 §9.3 link, picked
+   * from `campaign.listSelectableCampaigns` at the intake door. Empty = none
+   * picked, which is only legal together with `outsideCampaign` for the sources
+   * listed in CAMPAIGN_REQUIRED_SOURCES.
+   */
+  campaignId?: string;
+  /**
+   * Explicit "this lead did not come from a Marketing campaign" declaration —
+   * the escape hatch for scouted/self-sourced leads (owner decision 2026-08-04).
+   * It is what distinguishes "outside any campaign" from "the salesperson
+   * skipped the field", which is the whole reason the campaign link was empty on
+   * nearly every Sales-registered lead before this.
+   */
+  outsideCampaign?: boolean;
+}
+
+/**
+ * Sources whose lead MUST carry an Origin Campaign (M1 §9.3: "mandatory when
+ * Source ∈ {Leads-Iklan, Broadcast, Event, Kulwa}"). Spelled with the canonical
+ * §9.3 Source-list values, not the PRD prose's abbreviation.
+ *
+ * A lead from one of these four cannot have appeared without a campaign behind
+ * it: they are Marketing's own channels, so an empty link there is missing data,
+ * not an absent campaign — and it silently zeroes that campaign's CPL/ROAS
+ * (M2 §5). `outsideCampaign` is the one way to satisfy the rule without a link.
+ */
+export const CAMPAIGN_REQUIRED_SOURCES: readonly string[] = [
+  'Leads - Iklan',
+  'Broadcast',
+  'Event',
+  'Kulwa',
+];
+
+/**
+ * campaignRequiredForSource reports whether M1 §9.3 makes Origin Campaign
+ * mandatory for `source`. Pure — the FE marks the field required with the same
+ * predicate, so the two halves cannot disagree about which sources they are.
+ */
+export function campaignRequiredForSource(source: string): boolean {
+  return CAMPAIGN_REQUIRED_SOURCES.includes((source ?? '').trim());
 }
 
 /** A lead record row (subset). */
@@ -339,6 +380,17 @@ function valid(input: RegisterInput): boolean {
  * Everything runs in one transaction so a rolled-back lead insert consumes no
  * LEAD/PRSP sequence number and writes no audit. A block still commits its
  * audit row (the blocked attempt is recorded) before the BlockedError surfaces.
+ *
+ * CAMPAIGN LINKAGE (added 2026-08-04). The wire has carried `campaign_id` since
+ * the M0 workspace shipped, and NOTHING read it: the route dropped the field and
+ * this function had no parameter for it, so every Sales-registered lead landed
+ * with `origin_campaign_id = NULL` — M2's Lead-by-Dashboard / CPL / ROAS counted
+ * zero for campaigns that had really produced the leads. The link is now stored
+ * on all three outcomes, with the same first-touch rule the import door uses:
+ *   - create → origin_campaign_id AND last_touch_campaign_id (first touch);
+ *   - reopen/join → last_touch only (origin is immutable, M1 §9.3).
+ * Unlike the import door this NEVER auto-activates a campaign: registration is
+ * not an import, and `requireSelectableCampaign` only reads.
  */
 export async function register(sql: Sql, actor: Actor, input: RegisterInput): Promise<RegisterResult> {
   if (!valid(input)) {
@@ -349,6 +401,17 @@ export async function register(sql: Sql, actor: Actor, input: RegisterInput): Pr
   const phoneNorm = normalizePhone(phoneNumber);
   const email = input.email?.trim() ?? '';
   const source = input.source?.trim() ?? '';
+  const campaignId = input.campaignId?.trim() ?? '';
+  // A picked campaign is authoritative: "outside any campaign" only describes a
+  // lead that carries no link, so the flag is dropped (not an error) when both
+  // arrive — the picker is one control and cannot produce that combination.
+  const outsideCampaign = campaignId === '' && input.outsideCampaign === true;
+  // M1 §9.3 conditional-mandatory gate. Runs with the other mandatory-field
+  // checks, BEFORE any id is minted, so a lead missing its campaign burns no
+  // LEAD/PRSP sequence number (house rule 1).
+  if (campaignId === '' && !outsideCampaign && campaignRequiredForSource(source)) {
+    throw new IncompleteError();
+  }
   const now = new Date();
 
   // Discriminated result so a block can COMMIT its audit yet still surface an
@@ -359,6 +422,11 @@ export async function register(sql: Sql, actor: Actor, input: RegisterInput): Pr
 
   const committed = await withTransaction(sql, async (tx): Promise<Committed> => {
     const ex = executors(tx);
+    // Campaign gate FIRST — before dedup, before any id. A rejected campaign
+    // throws, which rolls this transaction back having written nothing at all.
+    if (campaignId !== '') {
+      await requireSelectableCampaign(tx, campaignId);
+    }
     const match = await matchByPhone(tx, phoneNorm);
     const decision = decide(CHANNEL_SINGLE_REG, match, actor.employeeId);
 
@@ -379,6 +447,9 @@ export async function register(sql: Sql, actor: Actor, input: RegisterInput): Pr
         await reopen(ex.sm, decision.reopenLeadId, RECORD_POOL, actor);
         await reopen(ex.sm, decision.reopenLeadId, RECORD_ACTIVE, actor);
         const attempt = await insertAttempt(tx, ex, decision.reopenLeadId, actor, now);
+        // The campaign TOUCHED an existing record; its origin stays whatever it
+        // was (M1 §9.3 first-touch is immutable). Same call the import door makes.
+        await updateLastTouch(tx, ex, decision.reopenLeadId, campaignId, actor);
         const lead = await loadLead(tx, decision.reopenLeadId);
         return { kind: 'ok', result: { lead, attempt, notice: '' } };
       }
@@ -393,6 +464,9 @@ export async function register(sql: Sql, actor: Actor, input: RegisterInput): Pr
           afterJson: { channel: CHANNEL_SINGLE_REG, attempt_id: attempt.id, co_owners: decision.coOwners },
           createdBy: actor.employeeId,
         });
+        // A second salesperson pursuing the same lead from a campaign is a fresh
+        // touch on that lead — last-touch moves, origin does not (M1 §5 / §9.3).
+        await updateLastTouch(tx, ex, decision.joinLeadId, campaignId, actor);
         let notice = '';
         if (decision.coOwners.length > 0) {
           await notification.emit(ex.notify, {
@@ -410,16 +484,28 @@ export async function register(sql: Sql, actor: Actor, input: RegisterInput): Pr
       default: {
         // OutcomeCreate: mint a fresh active LEAD + the actor's attempt.
         const leadId = await ex.ident.identNext('LEAD', now);
+        // First touch: origin AND last-touch are the same campaign on birth
+        // (mirrors the import door); NULL when the lead is outside any campaign.
+        const campaignArg = campaignId === '' ? null : campaignId;
         await tx`
           insert into leads
-            (id, lead_name, phone_number, phone_norm, email, source, origin_division, record_status, created_by)
+            (id, lead_name, phone_number, phone_norm, email, source, origin_division,
+             origin_campaign_id, last_touch_campaign_id, record_status, created_by)
           values
             (${leadId}, ${leadName}, ${phoneNumber}, ${phoneNorm}, ${email === '' ? null : email},
-             ${source}, ${SALES_DIVISION}, ${RECORD_ACTIVE}, ${actor.employeeId})`;
+             ${source}, ${SALES_DIVISION}, ${campaignArg}, ${campaignArg}, ${RECORD_ACTIVE},
+             ${actor.employeeId})`;
         await ex.audit.insertAudit({
           entityType: 'lead', entityId: leadId, actorEmployeeId: actor.employeeId,
           action: 'create', beforeJson: null,
-          afterJson: { record_status: RECORD_ACTIVE, source }, createdBy: actor.employeeId,
+          // `outside_campaign` is logged even when false: when it is true it is
+          // the DECLARATION that satisfied the §9.3 mandatory gate, so why the
+          // link is empty has to be recoverable from the log (house rule 3).
+          afterJson: {
+            record_status: RECORD_ACTIVE, source,
+            origin_campaign_id: campaignArg, outside_campaign: outsideCampaign,
+          },
+          createdBy: actor.employeeId,
         });
         const attempt = await insertAttempt(tx, ex, leadId, actor, now);
         const lead: Lead = {
@@ -434,6 +520,35 @@ export async function register(sql: Sql, actor: Actor, input: RegisterInput): Pr
     throw new BlockedError(committed.message);
   }
   return committed.result;
+}
+
+/**
+ * requireSelectableCampaign re-checks server-side that `campaignId` is a campaign
+ * the intake door may attribute a lead to — the same {Active, Paused} set the
+ * picker offers (`campaign.listSelectableCampaigns` / migration 20260804061500).
+ *
+ * The check is NOT redundant with the dropdown: a campaign can be Closed between
+ * the moment the form loaded and the moment it is submitted, and the wire is
+ * reachable without the form at all. Read-only by design — where the IMPORT door
+ * auto-activates a Draft/Paused campaign (resolveCampaignForIntake), registration
+ * must have no lifecycle side effect: a salesperson picking a campaign is not a
+ * decision to launch it.
+ *
+ * Reuses the two frozen import-door messages rather than minting registration
+ * -specific wording (CLAUDE.md §5 — no invented BI strings): a missing campaign
+ * is `[data tidak ditemukan]` (404), one that cannot take leads is
+ * `[campaign belum/tidak aktif, lead tidak bisa diimport]` (409).
+ */
+async function requireSelectableCampaign(tx: Queryable, campaignId: string): Promise<void> {
+  const rows = await tx<{ status: string }[]>`
+    select status from campaigns where id = ${campaignId}`;
+  if (rows.length === 0) {
+    throw new NotFoundError(MSG_CAMPAIGN_NOT_FOUND);
+  }
+  const { status } = rows[0];
+  if (status !== CAMPAIGN_ACTIVE && status !== CAMPAIGN_PAUSED) {
+    throw new BlockedError(MSG_CAMPAIGN_NOT_ACTIVE);
+  }
 }
 
 /** insertAttempt mints a PRSP owned by actor at New Lead (post-validation). */
