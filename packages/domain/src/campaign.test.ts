@@ -261,7 +261,7 @@ describeDb('listSelectableCampaigns — the lead-intake picker', () => {
     }
   }
 
-  it('offers Active + Paused only, Active first, and hides Draft/Closed/Archived', async () => {
+  it('offers EVERY status, ordered by "can it produce leads now", then by name', async () => {
     const lia = mktStaff('ZZ-LIA');
     const draft = await createCampaign(sql, lia, { ...validInput(), name: 'ZZ Aaa Draft' });
     const active = await createCampaign(sql, lia, { ...validInput(), name: 'ZZ Zzz Active' });
@@ -274,35 +274,71 @@ describeDb('listSelectableCampaigns — the lead-intake picker', () => {
     await driveTo(lia, archived.id, STATUS_ARCHIVED);
 
     const list = await listSelectableCampaigns(sql, salesStaff('ZZ-SAL'));
-    const ids = list.map((c) => c.id);
-    expect(ids).toContain(active.id);
-    expect(ids).toContain(paused.id);
-    // A Draft campaign is deliberately absent: the import door auto-activates
-    // Draft, and Sales registration must carry no lifecycle side effect.
-    expect(ids).not.toContain(draft.id);
-    expect(ids).not.toContain(closed.id);
-    expect(ids).not.toContain(archived.id);
-
-    // Ordering is the function's own (Active first, then name) — the dropdown
-    // must not depend on cluster collation or on insertion order.
-    const mine = list.filter((c) => c.id === active.id || c.id === paused.id);
-    expect(mine.map((c) => c.id)).toEqual([active.id, paused.id]);
-    expect(mine[0].status).toBe(STATUS_ACTIVE);
-    // Status travels verbatim so the form can mark a Paused pick.
-    expect(mine[1].status).toBe(STATUS_PAUSED);
+    const mine = list.filter((c) => c.name.startsWith('ZZ '));
+    // ALL of them, whatever the status: a campaign missing from the picker cannot
+    // be attributed at all, so its M2 performance would stay permanently zero —
+    // indistinguishable from a campaign that truly failed (owner decision).
+    expect(mine.map((c) => c.id).sort()).toEqual(
+      [draft.id, active.id, paused.id, closed.id, archived.id].sort(),
+    );
+    // Ordering is the function's own, so the dropdown never depends on cluster
+    // collation or insertion order: live first, then finished, then not-yet-run.
+    expect(mine.map((c) => c.status)).toEqual([
+      STATUS_ACTIVE, STATUS_PAUSED, STATUS_CLOSED, STATUS_ARCHIVED, STATUS_DRAFT,
+    ]);
+    // Status travels verbatim so the form can mark a non-live pick.
+    expect(mine[0].id).toBe(active.id);
+    expect(mine[4].id).toBe(draft.id);
   });
 
-  it('carries the picker projection only — no owner, no end date', async () => {
+  it('carries the picker projection only — funnel counts, but no owner and no money', async () => {
     const lia = mktStaff('ZZ-LIA');
     const c = await createCampaign(sql, lia, validInput());
     await driveTo(lia, c.id, STATUS_ACTIVE);
 
     const row = (await listSelectableCampaigns(sql, salesStaff('ZZ-SAL'))).find((x) => x.id === c.id);
     expect(row).toBeDefined();
-    expect(Object.keys(row!).sort()).toEqual(['channel', 'id', 'name', 'startDate', 'status']);
+    expect(Object.keys(row!).sort()).toEqual([
+      'channel', 'id', 'leadByDashboard', 'leadNotQualified', 'leadRealBySales',
+      'name', 'startDate', 'status',
+    ]);
     expect(row!.name).toBe('Promo Skilskul Maret');
     expect(row!.channel).toBe('TikTok Ads');
     expect(row!.startDate).toBe('2026-03-02');
+    // Counts are numbers, not the strings postgres returns for bigint — a "0"
+    // would render as a string and break any arithmetic downstream.
+    expect(row!.leadByDashboard).toBe(0);
+    expect(typeof row!.leadRealBySales).toBe('number');
+  });
+
+  it('counts the funnel with the SAME numbers as the M3 rollup (no second definition)', async () => {
+    const lia = mktStaff('ZZ-LIA');
+    const c = await createCampaign(sql, lia, validInput());
+    await driveTo(lia, c.id, STATUS_ACTIVE);
+
+    // Three leads on this campaign: one reached Qualified, one was driven to Not
+    // Qualified, one was never worked.
+    await seedLead('LEAD-ZZP-0001', '0851000001', c.id);
+    await seedLead('LEAD-ZZP-0002', '0851000002', c.id);
+    await seedLead('LEAD-ZZP-0003', '0851000003', c.id);
+    await seedAttempt('PRSP-ZZP-0001', 'LEAD-ZZP-0001', true); // reached Qualified
+    await seedAttempt('PRSP-ZZP-0002', 'LEAD-ZZP-0002', false); // Contacted only
+    await sql`
+      insert into audit_log (entity_type, entity_id, actor_employee_id, action, created_by)
+      values ('prospect_attempt', 'PRSP-ZZP-0002', 'ZZ-SAL', 'transition:Contacted->Not Qualified', 'ZZ-SAL')`;
+
+    const row = (await listSelectableCampaigns(sql, salesStaff('ZZ-SAL'))).find((x) => x.id === c.id);
+    expect(row!.leadByDashboard).toBe(3);
+    expect(row!.leadRealBySales).toBe(1);
+    expect(row!.leadNotQualified).toBe(1);
+
+    // The picker's SQL and campaignRollup's SQL are two implementations of the
+    // same two M2 §4 definitions. Pin them to each other so neither can drift
+    // silently — that drift is what would make Sales and Marketing argue about
+    // whose number is right.
+    const rollup = await campaignRollup(sql, director('ZZ-DIR'), c.id);
+    expect(row!.leadByDashboard).toBe(rollup.leadsGenerated);
+    expect(row!.leadRealBySales).toBe(rollup.realLeads);
   });
 
   it('answers a Sales actor UNDER RLS, where the campaigns table itself is closed', async () => {

@@ -13,15 +13,28 @@
 import { describe, expect, it } from 'vitest';
 import type { SelectableCampaign } from './marketing';
 import {
+  CAMPAIGN_GROUPS,
   CAMPAIGN_REQUIRED_SOURCES,
   OUTSIDE_CAMPAIGN,
   campaignLabel,
   campaignRequiredForSource,
   filterCampaigns,
+  funnelSummary,
+  groupCampaigns,
+  qualityRateLabel,
 } from './campaign-picker';
 
-function cmp(id: string, name: string, channel: string, status = 'Active'): SelectableCampaign {
-  return { id, name, channel, status, start_date: '2026-08-01' };
+function cmp(
+  id: string,
+  name: string,
+  channel: string,
+  status = 'Active',
+  funnel: [number, number, number] = [0, 0, 0],
+): SelectableCampaign {
+  return {
+    id, name, channel, status, start_date: '2026-08-01',
+    lead_by_dashboard: funnel[0], lead_real_by_sales: funnel[1], lead_not_qualified: funnel[2],
+  };
 }
 
 const LIST: SelectableCampaign[] = [
@@ -61,13 +74,83 @@ describe('OUTSIDE_CAMPAIGN sentinel', () => {
 
 describe('campaignLabel', () => {
   it('reads name → channel → id, so the searchable words come first', () => {
+    // An Active campaign carries no status mark — it is the unremarkable case.
     expect(campaignLabel(LIST[0])).toBe('Promo Skilskul Agustus · TikTok Ads · CMP-202608-0001');
   });
 
-  it('marks a Paused campaign, without the BI bracket convention', () => {
-    const label = campaignLabel(LIST[1]);
-    expect(label.endsWith('· Paused')).toBe(true);
-    expect(label).not.toContain('[');
+  it('marks every non-Active status, without the BI bracket convention', () => {
+    for (const status of ['Paused', 'Closed', 'Archived', 'Draft']) {
+      const label = campaignLabel(cmp('CMP-1', 'X', 'IG', status));
+      expect(label.endsWith(`· ${status}`)).toBe(true);
+      expect(label).not.toContain('[');
+    }
+  });
+});
+
+describe('groupCampaigns', () => {
+  const full = [
+    cmp('CMP-A', 'A Active', 'IG', 'Active'),
+    cmp('CMP-P', 'B Paused', 'IG', 'Paused'),
+    cmp('CMP-C', 'C Closed', 'IG', 'Closed'),
+    cmp('CMP-R', 'D Archived', 'IG', 'Archived'),
+    cmp('CMP-D', 'E Draft', 'IG', 'Draft'),
+  ];
+
+  it('splits the five statuses into the three groups, in server order', () => {
+    expect(groupCampaigns(full)).toEqual([
+      { label: 'Sedang jalan', items: [full[0], full[1]] },
+      { label: 'Sudah selesai', items: [full[2], full[3]] },
+      { label: 'Belum jalan', items: [full[4]] },
+    ]);
+    expect(CAMPAIGN_GROUPS).toHaveLength(3);
+  });
+
+  it('drops empty groups instead of rendering a headed empty section', () => {
+    expect(groupCampaigns([full[0]]).map((g) => g.label)).toEqual(['Sedang jalan']);
+    expect(groupCampaigns([])).toEqual([]);
+  });
+
+  it('still shows a status the FE does not know — an unpickable campaign is the bug', () => {
+    // If M3 ever gains a status, the campaign must not silently disappear from
+    // the dropdown: an unattributable lead is exactly what this feature removes.
+    const odd = cmp('CMP-X', 'X Unknown', 'IG', 'SomethingNew');
+    const groups = groupCampaigns([full[0], odd]);
+    expect(groups.flatMap((g) => g.items.map((c) => c.id))).toContain('CMP-X');
+  });
+});
+
+describe('qualityRateLabel (M2 §4 r3 + house rule #7)', () => {
+  it('renders — for a zero divisor, never 0% and never an error', () => {
+    expect(qualityRateLabel(0, 0)).toBe('—');
+    expect(qualityRateLabel(5, 0)).toBe('—');
+  });
+
+  it('matches the PRD worked example: 12 of 46 → 26%', () => {
+    expect(qualityRateLabel(12, 46)).toBe('26%');
+  });
+
+  it('rounds half UP, like the server percentRound', () => {
+    // 1/8 = 12.5% → 13%, 3/8 = 37.5% → 38%. A round-half-even implementation
+    // would answer 12% and 38%, i.e. differ from Marketing's dashboard by a point.
+    expect(qualityRateLabel(1, 8)).toBe('13%');
+    expect(qualityRateLabel(3, 8)).toBe('38%');
+    expect(qualityRateLabel(1, 3)).toBe('33%');
+    expect(qualityRateLabel(2, 3)).toBe('67%');
+    expect(qualityRateLabel(46, 46)).toBe('100%');
+  });
+});
+
+describe('funnelSummary', () => {
+  it('names all three derived counts plus the rate, in PRD vocabulary', () => {
+    expect(funnelSummary(cmp('CMP-1', 'X', 'IG', 'Active', [46, 12, 18]))).toBe(
+      '46 lead masuk · 12 lead asli (≥ Qualified) · 18 not qualified · quality rate 26%',
+    );
+  });
+
+  it('reads honestly for a campaign nobody has worked yet', () => {
+    expect(funnelSummary(cmp('CMP-2', 'Y', 'IG'))).toBe(
+      '0 lead masuk · 0 lead asli (≥ Qualified) · 0 not qualified · quality rate —',
+    );
   });
 });
 

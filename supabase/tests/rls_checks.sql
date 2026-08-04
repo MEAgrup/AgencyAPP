@@ -201,28 +201,41 @@ RESET ROLE;
 --      dan field campaign kembali dilewati — persis bug yang diperbaiki.
 -- ---------------------------------------------------------------------------
 
--- Fixture tambahan (superuser): campaign yang sudah Closed. Picker tidak boleh
--- menawarkannya — campaign tutup tidak menerima lead baru.
+-- Fixture tambahan (superuser): campaign Closed dan Draft. Keduanya WAJIB ikut
+-- ditawarkan (arahan pemilik 2026-08-04): campaign yang tidak ada di dropdown
+-- tidak bisa diatribusikan sama sekali, jadi performanya permanen nol — dan nol
+-- itu tak bisa dibedakan dari campaign yang benar-benar gagal.
 INSERT INTO campaigns (id, name, channel, start_date, owner_employee_id, status, created_by)
-VALUES ('CMP-RLS-0002', 'rls fixture closed campaign', 'IG', current_date, 'EMP-RLS-MKT2', 'Closed', 'EMP-RLS-MKT2');
+VALUES ('CMP-RLS-0002', 'rls fixture closed campaign', 'IG', current_date, 'EMP-RLS-MKT2', 'Closed', 'EMP-RLS-MKT2'),
+       ('CMP-RLS-0003', 'rls fixture draft campaign', 'IG', current_date, 'EMP-RLS-MKT2', 'Draft', 'EMP-RLS-MKT2');
 
 SET LOCAL ROLE authenticated;
 
 SELECT set_config('request.jwt.claims',
   '{"app_metadata":{"employee_id":"EMP-RLS-SLS9","division":"Sales","level":"staff"}}', true);
 DO $$
-DECLARE ids text[];
+DECLARE ids text[]; funnel record;
 BEGIN
-  IF (SELECT count(*) FROM campaigns WHERE id IN ('CMP-RLS-0001','CMP-RLS-0002')) <> 0 THEN
+  IF (SELECT count(*) FROM campaigns WHERE id LIKE 'CMP-RLS-%') <> 0 THEN
     RAISE EXCEPTION 'RLS campaigns: Sales staff must NOT read the campaigns table (M3 §5 owner scope)';
   END IF;
   SELECT coalesce(array_agg(id), '{}'::text[]) INTO ids
     FROM private.campaign_selectable() WHERE id LIKE 'CMP-RLS-%';
-  IF NOT ('CMP-RLS-0001' = ANY (ids)) THEN
-    RAISE EXCEPTION 'campaign_selectable: an Active campaign must be pickable by Sales (got %)', ids;
+  IF NOT ('CMP-RLS-0001' = ANY (ids)          -- Active
+      AND 'CMP-RLS-0002' = ANY (ids)          -- Closed
+      AND 'CMP-RLS-0003' = ANY (ids)) THEN    -- Draft
+    RAISE EXCEPTION 'campaign_selectable: EVERY status must be pickable by Sales (got %)', ids;
   END IF;
-  IF 'CMP-RLS-0002' = ANY (ids) THEN
-    RAISE EXCEPTION 'campaign_selectable: a Closed campaign must NOT be offered (got %)', ids;
+
+  -- …dan funnel turunannya ikut terbaca. Fixture LEAD-RLS-0001 ber-Origin
+  -- CMP-RLS-0001 dan attempt-nya belum pernah mencapai Qualified, jadi angkanya
+  -- 1 lead masuk / 0 lead asli / 0 not qualified. Nol di ketiganya akan lolos
+  -- assertion yang cuma memeriksa "ada barisnya" — makanya dicek nilainya.
+  SELECT lead_by_dashboard, lead_real_by_sales, lead_not_qualified INTO funnel
+    FROM private.campaign_selectable() WHERE id = 'CMP-RLS-0001';
+  IF funnel.lead_by_dashboard <> 1 OR funnel.lead_real_by_sales <> 0 OR funnel.lead_not_qualified <> 0 THEN
+    RAISE EXCEPTION 'campaign_selectable: funnel must read 1/0/0 for the fixture (got %/%/%)',
+      funnel.lead_by_dashboard, funnel.lead_real_by_sales, funnel.lead_not_qualified;
   END IF;
 END $$;
 

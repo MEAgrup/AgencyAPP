@@ -38,11 +38,69 @@ export const OUTSIDE_CAMPAIGN = '__outside__';
 
 // One dropdown line: name first (what sales actually remembers), then the
 // channel and the CMP- id that disambiguate two similarly-named campaigns, then
-// a Paused mark. Statuses are stored unbracketed (M3), so no `[...]` here — the
-// square brackets are reserved for BI validation messages (house rule #5).
+// the status for anything not currently live. Statuses are stored unbracketed
+// (M3), so no `[...]` here — the square brackets are reserved for BI validation
+// messages (house rule #5).
 export function campaignLabel(c: SelectableCampaign): string {
-  const paused = c.status === 'Paused' ? ' · Paused' : '';
-  return `${c.name} · ${c.channel} · ${c.id}${paused}`;
+  const mark = c.status === 'Active' ? '' : ` · ${c.status}`;
+  return `${c.name} · ${c.channel} · ${c.id}${mark}`;
+}
+
+// The dropdown's three groups, in the order the server already sorts by. Grouping
+// exists so a Closed or Draft campaign is never mistaken for a live one at the
+// moment of picking — the whole list is offered (a lead from a campaign that is
+// missing from the list cannot be attributed at all), but not flattened into a
+// single undifferentiated column.
+export const CAMPAIGN_GROUPS = [
+  { label: 'Sedang jalan', statuses: ['Active', 'Paused'] },
+  { label: 'Sudah selesai', statuses: ['Closed', 'Archived'] },
+  { label: 'Belum jalan', statuses: ['Draft'] },
+] as const;
+
+export interface CampaignGroup {
+  label: string;
+  items: SelectableCampaign[];
+}
+
+// Splits an already-ordered list into the groups above, dropping empty ones and
+// PRESERVING the server's order within each. A status the FE does not know about
+// still reaches the user, under the last group, rather than vanishing from the
+// dropdown — an unpickable campaign is the failure mode this whole feature exists
+// to remove.
+export function groupCampaigns(list: SelectableCampaign[]): CampaignGroup[] {
+  const known = new Set<string>(CAMPAIGN_GROUPS.flatMap((g) => [...g.statuses]));
+  return CAMPAIGN_GROUPS.map((g, i) => ({
+    label: g.label,
+    items: list.filter(
+      (c) =>
+        (g.statuses as readonly string[]).includes(c.status) ||
+        (i === CAMPAIGN_GROUPS.length - 1 && !known.has(c.status)),
+    ),
+  })).filter((g) => g.items.length > 0);
+}
+
+// Lead-Quality Rate (M2 §4 r3) = real ÷ generated, and `—` when the divisor is
+// zero (house rule #7 — never an error, never "0%", which would read as a real
+// measurement of a campaign nobody has worked yet).
+//
+// Integer arithmetic mirroring `marketing.ts percentRound` (round-half-up on
+// num*100/den) EXACTLY rather than `Math.round(a/b*100)`, so the rate Sales reads
+// here can never differ by a percentage point from Marketing's dashboard.
+export function qualityRateLabel(real: number, generated: number): string {
+  if (generated <= 0) return '—';
+  return `${Math.floor((real * 100 + Math.floor(generated / 2)) / generated)}%`;
+}
+
+// The one-line funnel Sales reads under the picker: what this campaign has
+// produced so far. Every number is derived server-side from the attempt log —
+// this only formats them.
+export function funnelSummary(c: SelectableCampaign): string {
+  return (
+    `${c.lead_by_dashboard} lead masuk · ` +
+    `${c.lead_real_by_sales} lead asli (≥ Qualified) · ` +
+    `${c.lead_not_qualified} not qualified · ` +
+    `quality rate ${qualityRateLabel(c.lead_real_by_sales, c.lead_by_dashboard)}`
+  );
 }
 
 // Substring search over name + channel + id, ALL whitespace-separated tokens

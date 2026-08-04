@@ -523,31 +523,29 @@ export async function register(sql: Sql, actor: Actor, input: RegisterInput): Pr
 }
 
 /**
- * requireSelectableCampaign re-checks server-side that `campaignId` is a campaign
- * the intake door may attribute a lead to — the same {Active, Paused} set the
- * picker offers (`campaign.listSelectableCampaigns` / migration 20260804061500).
+ * requireSelectableCampaign re-checks server-side that `campaignId` names a
+ * campaign that EXISTS. That is the whole gate, and the narrowness is deliberate.
  *
- * The check is NOT redundant with the dropdown: a campaign can be Closed between
- * the moment the form loaded and the moment it is submitted, and the wire is
- * reachable without the form at all. Read-only by design — where the IMPORT door
- * auto-activates a Draft/Paused campaign (resolveCampaignForIntake), registration
- * must have no lifecycle side effect: a salesperson picking a campaign is not a
- * decision to launch it.
+ * Status is NOT gated here (owner decision 2026-08-04, logged in DECISIONS.md —
+ * a recorded deviation from M3 §5 rule 5, which restricts *import* to Active).
+ * Every M2 performance number starts at the campaign a salesperson picks during
+ * registration, so refusing a status here does not protect the data — it destroys
+ * it: the lead is registered anyway (Sales will not abandon a real lead over a
+ * campaign status) and lands with NO campaign at all, which reads as "this
+ * campaign produced nothing" rather than "this lead arrived late". A late lead on
+ * a Closed campaign is exactly the case M3-OA-4 already contemplates.
  *
- * Reuses the two frozen import-door messages rather than minting registration
- * -specific wording (CLAUDE.md §5 — no invented BI strings): a missing campaign
- * is `[data tidak ditemukan]` (404), one that cannot take leads is
- * `[campaign belum/tidak aktif, lead tidak bisa diimport]` (409).
+ * Registration still has NO lifecycle side effect: unlike the import door
+ * (resolveCampaignForIntake, which auto-activates Draft/Paused), this only reads.
+ * Picking a Draft campaign attributes the lead without launching the campaign.
+ *
+ * A missing campaign is still refused with the frozen `[data tidak ditemukan]`
+ * (404) — an id that names nothing is a bug or a stale form, not an attribution.
  */
 async function requireSelectableCampaign(tx: Queryable, campaignId: string): Promise<void> {
-  const rows = await tx<{ status: string }[]>`
-    select status from campaigns where id = ${campaignId}`;
+  const rows = await tx<{ id: string }[]>`select id from campaigns where id = ${campaignId}`;
   if (rows.length === 0) {
     throw new NotFoundError(MSG_CAMPAIGN_NOT_FOUND);
-  }
-  const { status } = rows[0];
-  if (status !== CAMPAIGN_ACTIVE && status !== CAMPAIGN_PAUSED) {
-    throw new BlockedError(MSG_CAMPAIGN_NOT_ACTIVE);
   }
 }
 

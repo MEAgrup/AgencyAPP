@@ -1291,9 +1291,14 @@ export interface MarketingCampaignWire {
  * `marketing.ts::SelectableCampaign`.
  *
  * Deliberately NOT MarketingCampaignWire: the picker is served to Sales, so it
- * carries only what identifies a campaign in a dropdown. No `owner_employee_id`,
- * no `created_by`, no `end_date`. `status` IS carried — it is what lets the UI
- * mark a Paused pick instead of quietly presenting it as live.
+ * carries only what identifies a campaign in a dropdown plus the derived lead
+ * funnel. No `owner_employee_id`, no `created_by`, no `end_date`, and no money —
+ * budget/CPL/CPRL/ROAS stay on the M2 surface. `status` IS carried: it is what
+ * lets the UI mark a Paused/Closed/Draft pick instead of presenting it as live.
+ *
+ * The three counts keep M2's own wire names (`lead_by_dashboard`,
+ * `lead_real_by_sales`) so the same number never travels under two spellings;
+ * `lead_not_qualified` is their mirror and has no M2 counterpart.
  */
 export interface SelectableCampaignWire {
   id: string;
@@ -1301,6 +1306,9 @@ export interface SelectableCampaignWire {
   channel: string;
   status: string;
   start_date: string;
+  lead_by_dashboard: number;
+  lead_real_by_sales: number;
+  lead_not_qualified: number;
 }
 
 export function selectableCampaignToWire(c: campaign.SelectableCampaign): SelectableCampaignWire {
@@ -1310,6 +1318,9 @@ export function selectableCampaignToWire(c: campaign.SelectableCampaign): Select
     channel: c.channel,
     status: c.status,
     start_date: c.startDate,
+    lead_by_dashboard: c.leadByDashboard,
+    lead_real_by_sales: c.leadRealBySales,
+    lead_not_qualified: c.leadNotQualified,
   };
 }
 

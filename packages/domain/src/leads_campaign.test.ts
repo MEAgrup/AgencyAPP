@@ -20,11 +20,9 @@ import { createClient, type Sql } from '@cdps/db';
 import { campaignRollup } from './campaign';
 import {
   type Actor,
-  BlockedError,
   CAMPAIGN_REQUIRED_SOURCES,
   campaignRequiredForSource,
   IncompleteError,
-  MSG_CAMPAIGN_NOT_ACTIVE,
   MSG_CAMPAIGN_NOT_FOUND,
   NotFoundError,
   register,
@@ -110,15 +108,19 @@ const uniquePhone = (): string => `0814${String(Date.now()).slice(-6)}${String(p
 const ACTIVE = 'CMP-ZZCP-0001';
 const PAUSED = 'CMP-ZZCP-0002';
 const CLOSED = 'CMP-ZZCP-0003';
+const DRAFT = 'CMP-ZZCP-0004';
+const ARCHIVED = 'CMP-ZZCP-0005';
 
-/** Seeds the three fixture campaigns (created_by ZZ- so afterEach reaps them). */
+/** Seeds one fixture campaign per status (created_by ZZ- so afterEach reaps them). */
 async function seedCampaigns(): Promise<void> {
   await sql`
     insert into campaigns (id, name, channel, is_online, start_date, owner_employee_id, status, created_by)
     values
       (${ACTIVE}, 'Promo Skilskul Agustus', 'TikTok Ads', true, current_date, 'ZZ-MKT', 'Active', 'ZZ-MKT'),
       (${PAUSED}, 'Broadcast Ramadan', 'Broadcast', true, current_date, 'ZZ-MKT', 'Paused', 'ZZ-MKT'),
-      (${CLOSED}, 'Event Expo Juni', 'Event', false, current_date, 'ZZ-MKT', 'Closed', 'ZZ-MKT')
+      (${CLOSED}, 'Event Expo Juni', 'Event', false, current_date, 'ZZ-MKT', 'Closed', 'ZZ-MKT'),
+      (${DRAFT}, 'Kulwa Belum Jalan', 'Kulwa', true, current_date, 'ZZ-MKT', 'Draft', 'ZZ-MKT'),
+      (${ARCHIVED}, 'Broadcast Tahun Lalu', 'Broadcast', true, current_date, 'ZZ-MKT', 'Archived', 'ZZ-MKT')
     on conflict (id) do nothing`;
 }
 
@@ -245,23 +247,29 @@ describeDb('register — campaign gate is re-checked server-side', () => {
     expect(await leadSeq()).toBe(seqBefore);
   });
 
-  it('409s a CLOSED campaign with the verbatim BI message and writes nothing', async () => {
+  it('accepts a CLOSED / ARCHIVED / DRAFT campaign — status is not a gate here', async () => {
     await seedCampaigns();
-    const phone = uniquePhone();
-    // The picker only offers Active/Paused, so this is the race: the campaign was
-    // closed between the form loading and the salesperson pressing submit.
-    await expect(
-      register(sql, budi(), {
-        leadName: 'Lead Tutup', phoneNumber: phone, source: 'Event', campaignId: CLOSED,
-      }),
-    ).rejects.toThrow(MSG_CAMPAIGN_NOT_ACTIVE);
-    await expect(
-      register(sql, budi(), { leadName: 'Lead Tutup', phoneNumber: phone, campaignId: CLOSED }),
-    ).rejects.toBeInstanceOf(BlockedError);
+    // Owner decision 2026-08-04: refusing a status does not protect the data, it
+    // destroys it. The lead gets registered either way (Sales will not drop a real
+    // lead over a campaign status) and would land with NO campaign — which reads
+    // as "this campaign produced nothing" instead of "this lead arrived late".
+    for (const [label, id] of [['Tutup', CLOSED], ['Arsip', ARCHIVED], ['Draf', DRAFT]] as const) {
+      const { lead } = await register(sql, budi(), {
+        leadName: `Lead ${label}`, phoneNumber: uniquePhone(), source: 'Event', campaignId: id,
+      });
+      expect((await linkOf(lead.id)).origin).toBe(id);
+    }
 
-    const rows = await sql<{ n: number }[]>`
-      select count(*)::int as n from leads where lead_name = 'Lead Tutup'`;
-    expect(rows[0].n).toBe(0);
+    // …and NONE of them moved: registration has no lifecycle side effect at all,
+    // unlike the import door (resolveCampaignForIntake auto-activates Draft/Paused).
+    const statuses = await sql<{ id: string; status: string }[]>`
+      select id, status from campaigns where id in (${CLOSED}, ${ARCHIVED}, ${DRAFT}) order by id`;
+    expect(statuses.map((r) => r.status)).toEqual(['Closed', 'Draft', 'Archived']);
+    const moved = await sql<{ n: number }[]>`
+      select count(*)::int as n from audit_log
+       where entity_id in (${CLOSED}, ${ARCHIVED}, ${DRAFT})
+         and (action = 'campaign_auto_activated' or action like 'transition:%')`;
+    expect(moved[0].n).toBe(0);
   });
 
   it('burns no id when the §9.3 gate rejects (validation before ident, house rule 1)', async () => {
