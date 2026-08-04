@@ -127,6 +127,35 @@ export class ScheduleTotalError extends Error {
 }
 
 /**
+ * A collection schedule was requested for a Transaction with nothing left to
+ * collect (Amount Outstanding = 0) → 409. New BI string: the PRD never described
+ * this surface (see scheduleOutstanding), and `[total termin tidak sama…]` would
+ * misname the problem — there is no shortfall at all, so no amount could pass.
+ */
+export const MSG_NO_OUTSTANDING = '[tidak ada kekurangan pembayaran pada transaksi ini]';
+export class NoOutstandingError extends Error {
+  constructor() {
+    super(MSG_NO_OUTSTANDING);
+    this.name = 'NoOutstandingError';
+  }
+}
+
+/**
+ * A collection schedule does not sum to Amount Outstanding (verbatim-style BI,
+ * → 400). Deliberately NOT MSG_SCHEDULE_TOTAL: that one compares against the
+ * agreed TOTAL, and telling Finance "total termin tidak sama dengan nilai
+ * transaksi" while they are scheduling only the REMAINDER sends them to fix the
+ * wrong number.
+ */
+export const MSG_OUTSTANDING_TOTAL = '[total jadwal penagihan tidak sama dengan kekurangan pembayaran]';
+export class OutstandingTotalError extends Error {
+  constructor() {
+    super(MSG_OUTSTANDING_TOTAL);
+    this.name = 'OutstandingTotalError';
+  }
+}
+
+/**
  * A scheme change was attempted after money already came in. Scheme change is a
  * pre-verification edit only (see changeScheme) — once a payment is verified the
  * schedule is locked. Reuses the verbatim engine BI (→ 409).
@@ -243,6 +272,14 @@ async function sumVerified(q: Queryable, transactionId: string): Promise<money.M
   return money.parse(rows[0].total ?? '0');
 }
 
+/** Σ verified against ONE installment — how much of its own amount is covered. */
+async function sumVerifiedForInstallment(q: Queryable, installmentId: string): Promise<money.Money> {
+  const rows = await q<{ total: string | null }[]>`
+    select coalesce(sum(amount), 0)::text as total
+    from payment_verifications where installment_id = ${installmentId}`;
+  return money.parse(rows[0].total ?? '0');
+}
+
 // ---------------------------------------------------------------------------
 // Payment verification (transactional).
 // ---------------------------------------------------------------------------
@@ -250,11 +287,21 @@ async function sumVerified(q: Queryable, transactionId: string): Promise<money.M
 /** One verification event (M5 §3). amount is a plain IDR string (e.g. "15000000"). */
 export interface VerifyInput {
   transactionId: string;
-  /** required for Termin / Bayar di Belakang; must be absent for Lunas / Sebagian. */
+  /** required while the Transaction has an OPEN installment; empty otherwise. */
   installmentId?: string;
   amount: string;
   receivedDate: string; // YYYY-MM-DD
   proofOfPayment?: string;
+  /**
+   * Optional contract link recorded in the SAME transaction as the verification
+   * (M5 §7 Rule 1). The contract is the hard gate before [Lunas] (§7 Rule 2), so
+   * Finance used to have to remember a second, separate action before the
+   * verification that settles a deal could be accepted at all — and the page
+   * offered no hint that the two were connected. Attaching it here makes "money
+   * in + paperwork in" one atomic step: if the verification rolls back, the
+   * contract link does not survive on its own.
+   */
+  contractAttachment?: string;
 }
 
 /** The outcome of a verification. */
@@ -299,12 +346,22 @@ export async function verifyPayment(
 
     const scheduled = SCHEDULED_SCHEMES.has(trx.scheme);
     const installmentId = (input.installmentId ?? '').trim();
-    // Scheme ↔ installment shape: scheduled schemes verify per-installment;
-    // Lunas / Bayar Sebagian verify the transaction directly.
-    if (scheduled && installmentId === '') {
+    // Installment shape is decided by what the Transaction ACTUALLY carries, not
+    // by its declared scheme: Finance may schedule the collection of a shortfall
+    // on a Lunas / Bayar Sebagian deal (scheduleOutstanding), and those rows have
+    // to be verifiable one by one like any other installment. A scheduled scheme
+    // still may not be verified before its schedule exists (§4 Rule 3).
+    const counts = await tx<{ total: number; open: number }[]>`
+      select count(*)::int as total,
+             count(*) filter (where status <> ${INST_TERVERIFIKASI})::int as open
+      from installments where transaction_id = ${trx.id}`;
+    if (scheduled && counts[0].total === 0) {
       throw new IncompleteError();
     }
-    if (!scheduled && installmentId !== '') {
+    if (counts[0].open > 0 && installmentId === '') {
+      throw new IncompleteError();
+    }
+    if (counts[0].open === 0 && installmentId !== '') {
       throw new IncompleteError();
     }
 
@@ -326,9 +383,30 @@ export async function verifyPayment(
       throw new OverVerificationError();
     }
 
+    // An installment is only settled once its OWN amount is covered (§8.4
+    // "Amount … must sum to Total Agreed Value"). A short payment against an
+    // installment used to mark it [Terverifikasi] in full, which silently erased
+    // the shortfall from the schedule and from the reminder dashboard.
+    const instVerified = inst ? await sumVerifiedForInstallment(tx, inst.id) : 0n;
+    const instSettled = inst !== null && instVerified + amount >= inst.amount;
+
+    // Contract link recorded in the same transaction, BEFORE the [Lunas] gate is
+    // evaluated — so one submit can carry both the paperwork and the payment that
+    // needs it.
+    const contractLink = nullString(input.contractAttachment);
+    if (contractLink !== null && contractLink !== trx.contractAttachment) {
+      await tx`update transactions set contract_attachment = ${contractLink} where id = ${trx.id}`;
+      await ex.audit.insertAudit({
+        entityType: 'transaction', entityId: trx.id, actorEmployeeId: actor.employeeId,
+        action: 'contract_attached', beforeJson: { contract_attachment: trx.contractAttachment },
+        afterJson: { contract_attachment: contractLink, via: 'verify' }, createdBy: actor.employeeId,
+      });
+      trx.contractAttachment = contractLink;
+    }
+
     // Target Payment Status. Scheduled schemes reach [Lunas] only when EVERY
     // installment is [Terverifikasi] (§4 Rule 3); Lunas / Sebagian are amount-based.
-    const target = await computeTarget(tx, trx, newTotal, inst, scheduled);
+    const target = await computeTarget(tx, trx, newTotal, instSettled ? inst : null, scheduled);
 
     // Contract gate (§7 Rule 2): no [Lunas] without a contract attached.
     if (target === PAYMENT_LUNAS && !trx.contractAttachment) {
@@ -343,8 +421,10 @@ export async function verifyPayment(
         (${trx.id}, ${inst ? inst.id : null}, ${money.decimal(amount)}, ${input.receivedDate},
          ${nullString(input.proofOfPayment)}, ${actor.employeeId}, ${actor.employeeId})`;
 
-    // 2) Installment → [Terverifikasi] (engine) + its verified fields.
-    if (inst) {
+    // 2) Installment → [Terverifikasi] (engine) + its verified fields, but ONLY
+    //    once its own amount is fully covered. A short payment leaves the row
+    //    open (and still overdue if it was) so the remainder keeps surfacing.
+    if (inst && instSettled) {
       const r = await instTransition(ex.sm, inst.id, INST_TERVERIFIKASI, actor);
       if (!r.ok) {
         throw new NotFoundError(`installment ${inst.id} -> [Terverifikasi] failed: ${r.message}`);
@@ -354,6 +434,11 @@ export async function verifyPayment(
         set verified_date = ${input.receivedDate}, verified_by = ${actor.employeeId},
             proof_of_payment = coalesce(${nullString(input.proofOfPayment)}, proof_of_payment),
             jatuh_tempo = false
+        where id = ${inst.id}`;
+    } else if (inst) {
+      await tx`
+        update installments
+        set proof_of_payment = coalesce(${nullString(input.proofOfPayment)}, proof_of_payment)
         where id = ${inst.id}`;
     }
 
@@ -383,6 +468,7 @@ export async function verifyPayment(
       action: 'payment_verified', beforeJson: null,
       afterJson: {
         amount: money.decimal(amount), installment_id: inst ? inst.id : null,
+        installment_settled: inst ? instSettled : null,
         amount_verified: money.decimal(newTotal), payment_status: target,
       },
       createdBy: actor.employeeId,
@@ -497,6 +583,13 @@ export interface InstallmentRow {
   id: string;
   installmentNo: number;
   amount: string;
+  /**
+   * Σ verified against THIS installment, derived from the verification log
+   * (house rule #4). Needed because a short payment no longer settles a row: the
+   * page has to be able to show "Rp 1jt of Rp 3jt received" instead of silently
+   * rendering an open installment that already has money against it.
+   */
+  amountVerified: string;
   dueDate: Date | null;
   status: string;
   jatuhTempo: boolean;
@@ -535,10 +628,7 @@ export async function getPaymentStatus(sql: Queryable, transactionId: string): P
   const trx = await loadTransaction(sql, transactionId, false);
   const verified = await sumVerified(sql, trx.id);
 
-  const instRows = await sql<InstallmentDbRow[]>`
-    select id, installment_no, amount, due_date, status, jatuh_tempo, verified_date, verified_by,
-           proof_of_payment
-    from installments where transaction_id = ${trx.id} order by installment_no`;
+  const instRows = await selectInstallments(sql, trx.id);
 
   const verRows = await sql<
     {
@@ -820,7 +910,10 @@ export async function reminderDashboard(sql: Queryable, now: Date = new Date()):
   }
   overdue.sort((a, b) => b.daysOverdue - a.daysOverdue); // most overdue first
 
-  // Outstanding, no-due-date: Bayar Sebagian with a payment in but not settled.
+  // Outstanding, no-due-date: Bayar Sebagian with a payment in but not settled —
+  // and no scheduled claim on the remainder yet. Once Finance dates the shortfall
+  // (scheduleOutstanding) the row belongs to the reminder lists above instead, so
+  // the same money is never chased from two places.
   const outRows = await sql<
     { id: string; client_id: string; toko: string; total_agreed_value: string; verified: string | null; sales_pic_id: string }[]
   >`
@@ -829,6 +922,9 @@ export async function reminderDashboard(sql: Queryable, now: Date = new Date()):
     from transactions t
     join clients c on c.id = t.client_id
     where t.payment_intent_scheme = ${SCHEME_SEBAGIAN} and t.payment_status = ${PAYMENT_SEBAGIAN}
+      and not exists (
+        select 1 from installments i
+        where i.transaction_id = t.id and i.status <> ${INST_TERVERIFIKASI})
     order by t.id`;
   const outstandingNoDueDate: OutstandingRow[] = outRows.map((r) => ({
     transactionId: r.id, clientId: r.client_id, toko: r.toko,
@@ -1139,6 +1235,7 @@ interface InstallmentDbRow {
   id: string;
   installment_no: number;
   amount: string;
+  amount_verified: string;
   due_date: Date | null;
   status: string;
   jatuh_tempo: boolean;
@@ -1149,10 +1246,25 @@ interface InstallmentDbRow {
 
 function toInstallmentRow(i: InstallmentDbRow): InstallmentRow {
   return {
-    id: i.id, installmentNo: i.installment_no, amount: i.amount, dueDate: i.due_date,
+    id: i.id, installmentNo: i.installment_no, amount: i.amount,
+    amountVerified: i.amount_verified, dueDate: i.due_date,
     status: i.status, jatuhTempo: i.jatuh_tempo, verifiedDate: i.verified_date,
     verifiedBy: i.verified_by, proofOfPayment: i.proof_of_payment,
   };
+}
+
+/**
+ * The one installment projection every M5 read uses. `amount_verified` is a
+ * correlated Σ over the verification log rather than a column, so it can never
+ * drift from the events (house rule #4).
+ */
+function selectInstallments(sql: Queryable, transactionId: string): Promise<InstallmentDbRow[]> {
+  return sql<InstallmentDbRow[]>`
+    select i.id, i.installment_no, i.amount, i.due_date, i.status, i.jatuh_tempo,
+           i.verified_date, i.verified_by, i.proof_of_payment,
+           (select coalesce(sum(pv.amount), 0)::text
+              from payment_verifications pv where pv.installment_id = i.id) as amount_verified
+    from installments i where i.transaction_id = ${transactionId} order by i.installment_no`;
 }
 
 /**
@@ -1164,10 +1276,7 @@ function toInstallmentRow(i: InstallmentDbRow): InstallmentRow {
 async function hydrateAggregate(sql: Queryable, r: TransactionDbRow): Promise<TransactionAggregate> {
   const total = money.parse(r.total_agreed_value);
   const verified = await sumVerified(sql, r.id);
-  const instRows = await sql<InstallmentDbRow[]>`
-    select id, installment_no, amount, due_date, status, jatuh_tempo, verified_date, verified_by,
-           proof_of_payment
-    from installments where transaction_id = ${r.id} order by installment_no`;
+  const instRows = await selectInstallments(sql, r.id);
   return {
     id: r.id,
     clientId: r.client_id,
@@ -1184,9 +1293,18 @@ async function hydrateAggregate(sql: Queryable, r: TransactionDbRow): Promise<Tr
 }
 
 /**
- * financeQueue lists every Transaction still awaiting verification
- * ([Menunggu Verifikasi]), oldest id first — Finance's worklist (M5 §8.1).
- * Ports Go `Service.Queue`. Forbidden for anyone outside Finance/OD/Director.
+ * financeQueue lists every Transaction with money still to collect — both
+ * [Menunggu Verifikasi] and [Terverifikasi - Sebagian] — awaiting-verification
+ * first, then oldest id first. Finance's worklist (M5 §8.1).
+ *
+ * It used to list [Menunggu Verifikasi] ONLY (Go `Service.Queue`), which meant
+ * the first partial verification made a Transaction vanish from the only page
+ * Finance has: the client had already routed to Account (§5 releases on the FIRST
+ * payment), so Finance lost the row exactly when the remaining balance became
+ * their job to chase. A Transaction leaves this queue when it is settled, not
+ * when it is touched — the queue's subject is Amount Outstanding, and §6 makes
+ * chasing the remainder Finance's work. [Lunas] is the only exit (it is the
+ * terminal state, §2), so the list still shrinks on its own.
  */
 export async function financeQueue(sql: Queryable, actor: Actor): Promise<TransactionAggregate[]> {
   if (!canReadFinanceQueue(actor)) {
@@ -1195,7 +1313,9 @@ export async function financeQueue(sql: Queryable, actor: Actor): Promise<Transa
   const rows = await sql<TransactionDbRow[]>`
     select id, client_id, payment_intent_scheme, total_agreed_value, payment_status,
            bermasalah, contract_attachment, released_to_account_at
-    from transactions where payment_status = ${PAYMENT_MENUNGGU} order by id`;
+    from transactions
+    where payment_status <> ${PAYMENT_LUNAS}
+    order by case when payment_status = ${PAYMENT_MENUNGGU} then 0 else 1 end, id`;
   const out: TransactionAggregate[] = [];
   for (const r of rows) {
     out.push(await hydrateAggregate(sql, r));
@@ -1344,8 +1464,8 @@ export async function createSchedule(
         insert into installments (id, transaction_id, installment_no, amount, due_date, status, created_by)
         values (${instId}, ${trx.id}, ${i + 1}, ${money.decimal(money.parse(items[i].amount))},
                 ${items[i].dueDate}, ${INST_BELUM}, ${actor.employeeId})
-        returning id, installment_no, amount, due_date, status, jatuh_tempo, verified_date,
-                  verified_by, proof_of_payment`;
+        returning id, installment_no, amount, '0.00'::text as amount_verified, due_date, status,
+                  jatuh_tempo, verified_date, verified_by, proof_of_payment`;
       created.push(toInstallmentRow(inserted[0]));
     }
 
@@ -1353,6 +1473,116 @@ export async function createSchedule(
       entityType: 'transaction', entityId: trx.id, actorEmployeeId: actor.employeeId,
       action: 'schedule_created', beforeJson: null,
       afterJson: { installments: created.length, scheme: trx.payment_intent_scheme },
+      createdBy: actor.employeeId,
+    });
+    return created;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Collection schedule for the shortfall (M5 §6 + deviation from M5-OA-2).
+// ---------------------------------------------------------------------------
+
+/**
+ * scheduleOutstanding schedules the collection of what a Transaction still owes:
+ * Finance enters the shortfall as one or more dated installments, which then
+ * surface on the reminder dashboard (§6) like any other due amount.
+ *
+ * DEVIATION FROM THE PRD, logged in DECISIONS.md (2026-08-04): M5-OA-2 declared a
+ * `Bayar Sebagian` remainder "genuinely open-ended — no automatic reminder, no due
+ * date; manual AM follow-up only", parked on the awareness-only "Outstanding, No
+ * Due Date" list. The owner asked for the opposite in QA: Finance must be able to
+ * *put a date on* a shortfall and have the system chase it. This does not weaken
+ * anything — the remainder keeps its no-due-date behavior until Finance chooses to
+ * schedule it, and the open-ended list still holds the ones they have not.
+ *
+ * Guards:
+ *   - Admin & Finance / Director only (same authority as verification, §8.1).
+ *   - nothing outstanding → NoOutstandingError; the schedule must sum EXACTLY to
+ *     Amount Outstanding → OutstandingTotalError.
+ *   - an OPEN installment already covers the remainder → ScheduleExistsError,
+ *     never a silent second schedule for money that is already tracked.
+ *
+ * The scheme is deliberately NOT rewritten: changing Payment Intent is
+ * `changeScheme`'s job and needs SPV/Head Finance (M5-OA-6). Scheduling a
+ * collection is a Finance follow-up on a fact, not a renegotiation of the deal.
+ */
+export async function scheduleOutstanding(
+  sql: Sql,
+  actor: Actor,
+  transactionId: string,
+  items: ScheduleInput[],
+  now: Date = new Date(),
+): Promise<InstallmentRow[]> {
+  if (!canVerifyPayment(actor)) {
+    throw new ForbiddenError();
+  }
+  if (items.length === 0) {
+    throw new IncompleteError();
+  }
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const trx = await loadTransaction(tx, transactionId, true);
+
+    const verified = await sumVerified(tx, trx.id);
+    const outstanding = trx.totalAgreed - verified;
+    if (outstanding <= 0n) {
+      throw new NoOutstandingError();
+    }
+
+    // Any still-open installment already carries a claim on the remainder;
+    // adding a second schedule would double-count it against the agreed total.
+    const open = await tx<{ n: number }[]>`
+      select count(*)::int as n from installments
+      where transaction_id = ${trx.id} and status <> ${INST_TERVERIFIKASI}`;
+    if (open[0].n > 0) {
+      throw new ScheduleExistsError();
+    }
+
+    // Validate BEFORE minting ids (house rule #1: no burnt INST- numbers).
+    let sum = 0n;
+    for (const it of items) {
+      let amt: money.Money;
+      try {
+        amt = money.parse(it.amount);
+      } catch {
+        throw new IncompleteError();
+      }
+      if (amt <= 0n || (it.dueDate ?? '').trim() === '') {
+        throw new IncompleteError();
+      }
+      sum += amt;
+    }
+    if (sum !== outstanding) {
+      throw new OutstandingTotalError();
+    }
+
+    // Numbering continues the existing schedule — verified installments keep
+    // their numbers, so #1 never means two different things on one Transaction.
+    const seq = await tx<{ next_no: number }[]>`
+      select coalesce(max(installment_no), 0)::int + 1 as next_no
+      from installments where transaction_id = ${trx.id}`;
+    const firstNo = seq[0].next_no;
+
+    const created: InstallmentRow[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const instId = await ex.ident.identNext('INST', now);
+      const inserted = await tx<InstallmentDbRow[]>`
+        insert into installments (id, transaction_id, installment_no, amount, due_date, status, created_by)
+        values (${instId}, ${trx.id}, ${firstNo + i}, ${money.decimal(money.parse(items[i].amount))},
+                ${items[i].dueDate}, ${INST_BELUM}, ${actor.employeeId})
+        returning id, installment_no, amount, '0.00'::text as amount_verified, due_date, status,
+                  jatuh_tempo, verified_date, verified_by, proof_of_payment`;
+      created.push(toInstallmentRow(inserted[0]));
+    }
+
+    await ex.audit.insertAudit({
+      entityType: 'transaction', entityId: trx.id, actorEmployeeId: actor.employeeId,
+      action: 'outstanding_schedule_created', beforeJson: null,
+      afterJson: {
+        installments: created.length, amount_outstanding: money.decimal(outstanding),
+        scheme: trx.scheme, from_installment_no: firstNo,
+      },
       createdBy: actor.employeeId,
     });
     return created;

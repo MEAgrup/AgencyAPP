@@ -218,6 +218,50 @@ describeDb('verifyPayment — Lunas', () => {
       .rejects.toBeInstanceOf(ContractRequiredError);
   });
 
+  it('accepts the contract link IN the verification, satisfying the [Lunas] gate', async () => {
+    // The finance page now carries the contract field inside the verification
+    // form, so the submit that trips the §7 Rule 2 gate is the one that can
+    // satisfy it — no separate action, one DB transaction.
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    const res = await verifyPayment(sql, financeStaff(), {
+      transactionId, amount: '9000000', receivedDate: '2026-06-03',
+      contractAttachment: 'https://drive/contract-inline.pdf',
+    });
+    expect(res.paymentStatus).toBe('[Lunas]');
+
+    const row = await sql<{ contract_attachment: string | null }[]>`
+      select contract_attachment from transactions where id = ${transactionId}`;
+    expect(row[0].contract_attachment).toBe('https://drive/contract-inline.pdf');
+    const audits = (await sql<{ action: string }[]>`
+      select action from audit_log where entity_type = 'transaction' and entity_id = ${transactionId}`)
+      .map((r) => r.action);
+    expect(audits).toContain('contract_attached'); // §7 Rule 4: every attach is logged
+  });
+
+  it('rolls the contract link back with the verification it came with', async () => {
+    // Atomicity is the reason this lives in the domain instead of two FE calls: an
+    // over-verification must not leave the paperwork behind as a side effect.
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    await expect(verifyPayment(sql, financeStaff(), {
+      transactionId, amount: '9000001', receivedDate: '2026-06-03',
+      contractAttachment: 'https://drive/should-not-persist.pdf',
+    })).rejects.toBeInstanceOf(OverVerificationError);
+
+    const row = await sql<{ contract_attachment: string | null }[]>`
+      select contract_attachment from transactions where id = ${transactionId}`;
+    expect(row[0].contract_attachment).toBeNull();
+  });
+
+  it('a partial payment leaves the transaction open with the shortfall derived', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_SEBAGIAN);
+    const res = await verifyPayment(sql, financeStaff(), {
+      transactionId, amount: '4000000', receivedDate: '2026-06-03',
+    });
+    expect(res.paymentStatus).toBe('[Terverifikasi - Sebagian]');
+    expect(money.parse(res.amountOutstanding)).toBe(money.parse('5000000'));
+    expect(res.releasedToAccount).toBe(true); // §5: first money in still routes
+  });
+
   it('blocks a verification exceeding the agreed total (§3 Rule 4)', async () => {
     const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
     await attachContract(sql, financeStaff(), transactionId, 'https://drive/c.pdf');
@@ -271,6 +315,65 @@ describeDb('verifyPayment — Termin', () => {
     const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_TERMIN, schedule);
     await expect(verifyPayment(sql, financeStaff(), { transactionId, amount: '3000000', receivedDate: '2026-06-15' }))
       .rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  /**
+   * A short payment against an installment used to mark it [Terverifikasi] in
+   * full: the row left the schedule and the reminder dashboard while its money was
+   * still missing, and only the transaction-level Amount Outstanding remembered.
+   * That is the same disappearing-shortfall defect as the finance queue one, one
+   * level down.
+   */
+  it('a short payment leaves its installment OPEN until the amount is covered', async () => {
+    const { transactionId, installmentIds } = await closedDeal(sales.PAYMENT_SCHEME_TERMIN, schedule);
+    const res = await verifyPayment(sql, financeStaff(), {
+      transactionId, installmentId: installmentIds[0], amount: '1000000', receivedDate: '2026-06-15',
+    });
+    expect(res.paymentStatus).toBe('[Terverifikasi - Sebagian]');
+    expect(money.parse(res.amountVerified)).toBe(money.parse('1000000'));
+
+    const inst = await sql<{ status: string; verified_date: Date | null; verified_by: string | null }[]>`
+      select status, verified_date, verified_by from installments where id = ${installmentIds[0]}`;
+    expect(inst[0].status).toBe('[Belum Jatuh Tempo]');
+    expect(inst[0].verified_date).toBeNull();
+    expect(inst[0].verified_by).toBeNull();
+
+    // Derived per-installment progress: Rp 1jt of Rp 3jt received.
+    const view = await getPaymentStatus(sql, transactionId);
+    expect(money.parse(view.installments[0].amountVerified)).toBe(money.parse('1000000'));
+
+    // The remainder of the SAME installment settles it.
+    await verifyPayment(sql, financeStaff(), {
+      transactionId, installmentId: installmentIds[0], amount: '2000000', receivedDate: '2026-06-20',
+    });
+    const settled = await sql<{ status: string; verified_by: string | null }[]>`
+      select status, verified_by from installments where id = ${installmentIds[0]}`;
+    expect(settled[0].status).toBe('[Terverifikasi]');
+    expect(settled[0].verified_by).toBe('ZZ-FIN');
+  });
+
+  it('keeps a short-paid overdue installment on the reminder dashboard', async () => {
+    const { transactionId, installmentIds } = await closedDeal(sales.PAYMENT_SCHEME_TERMIN, schedule);
+    await verifyPayment(sql, financeStaff(), {
+      transactionId, installmentId: installmentIds[0], amount: '1000000', receivedDate: '2026-06-15',
+    });
+    // Clock past installment 1's due date: it must still be chase-able.
+    const dash = await reminderDashboard(sql, new Date('2026-06-20T05:00:00.000Z'));
+    expect(dash.overdue.map((r) => r.installmentId)).toContain(installmentIds[0]);
+  });
+
+  it('a short payment does NOT let the transaction reach [Lunas]', async () => {
+    const { transactionId, installmentIds } = await closedDeal(sales.PAYMENT_SCHEME_TERMIN, schedule);
+    await attachContract(sql, financeLead(), transactionId, 'https://drive/c.pdf');
+    await verifyPayment(sql, financeStaff(), { transactionId, installmentId: installmentIds[0], amount: '3000000', receivedDate: '2026-06-15' });
+    await verifyPayment(sql, financeStaff(), { transactionId, installmentId: installmentIds[1], amount: '3000000', receivedDate: '2026-07-15' });
+    // Last installment short by Rp 1jt → still [Terverifikasi - Sebagian] (§4 Rule 3).
+    const r3 = await verifyPayment(sql, financeStaff(), { transactionId, installmentId: installmentIds[2], amount: '2000000', receivedDate: '2026-08-15' });
+    expect(r3.paymentStatus).toBe('[Terverifikasi - Sebagian]');
+    expect(money.parse(r3.amountOutstanding)).toBe(money.parse('1000000'));
+
+    const r4 = await verifyPayment(sql, financeStaff(), { transactionId, installmentId: installmentIds[2], amount: '1000000', receivedDate: '2026-08-20' });
+    expect(r4.paymentStatus).toBe('[Lunas]');
   });
 
   it('cannot re-verify an already-verified installment', async () => {

@@ -2085,6 +2085,7 @@ export interface InstallmentWire {
   id: string;
   installment_no: number;
   amount: string;
+  amount_verified: string;
   due_date: string | null;
   status: string;
   jatuh_tempo: boolean;
@@ -2098,7 +2099,12 @@ export function installmentToWire(i: finance.InstallmentRow): InstallmentWire {
   return {
     id: i.id,
     installment_no: i.installmentNo,
-    amount: i.amount,
+    // Money is formatted HERE, exactly like Go's `instViews`/`trxView` call
+    // `.Format()` — these fields crossed the wire as raw decimals ("9000000.00"),
+    // and the finance pages render them as-is, so every amount on Module 5 read
+    // "9000000.00" instead of the house "Rp. 9.000.000,00" (rule #7).
+    amount: idr(i.amount),
+    amount_verified: idr(i.amountVerified),
     // Both are `date` columns (`installments.due_date`, `.verified_date`) and the
     // FE declares them `// YYYY-MM-DD` (account.ts). See remindersToWire for why
     // toISOString() is wrong here. `null` stays explicit — a MISSING key blanks
@@ -2133,9 +2139,11 @@ export function transactionToWire(t: finance.TransactionAggregate): TransactionW
     id: t.id,
     client_id: t.clientId,
     payment_intent_scheme: t.scheme,
-    total_agreed_value: t.totalAgreedValue,
-    amount_verified: t.amountVerified,
-    amount_outstanding: t.amountOutstanding,
+    // Same as installmentToWire: Go's trxView formats all three with `.Format()`,
+    // and web-internal's `Transaction` documents them as pre-formatted IDR.
+    total_agreed_value: idr(t.totalAgreedValue),
+    amount_verified: idr(t.amountVerified),
+    amount_outstanding: idr(t.amountOutstanding),
     payment_status: t.paymentStatus,
     bermasalah: t.bermasalah,
     contract_attachment: t.contractAttachment ?? '',
@@ -2226,7 +2234,10 @@ export function remindersToWire(d: finance.ReminderDashboard): RemindersWire {
     transaction_id: r.transactionId,
     installment_id: r.installmentId,
     installment_no: r.installmentNo,
-    amount: r.amount,
+    // House IDR at the boundary, like Go's `reminderViews` (`.Format()`) — the
+    // reminders page prints this raw, so an unformatted decimal shows up as
+    // "15000000.00" next to a Bahasa Indonesia overdue label (rule #7).
+    amount: idr(r.amount),
     // WIB calendar date, matching Go's Format("2006-01-02") and the FE contract
     // (`// YYYY-MM-DD`). NOT toISOString(): `installments.due_date` is a `date`
     // column, and RFC3339 renders as "2026-07-30T00:00:00.000Z" on a page that
@@ -2243,7 +2254,7 @@ export function remindersToWire(d: finance.ReminderDashboard): RemindersWire {
       client_id: o.clientId,
       toko: o.toko,
       transaction_id: o.transactionId,
-      amount_outstanding: o.amountOutstanding,
+      amount_outstanding: idr(o.amountOutstanding), // Go outstandingViews: .Format()
     })),
   };
 }

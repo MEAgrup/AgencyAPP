@@ -10,6 +10,8 @@ export interface Installment {
   id: string;
   installment_no: number;
   amount: string;
+  /** Σ verified against this installment — a short payment leaves it open. */
+  amount_verified: string;
   due_date: string | null;
   status: string;
   jatuh_tempo: boolean;
@@ -107,11 +109,35 @@ export function createSchedule(id: string, items: ScheduleItemInput[]): Promise<
   return api.post<{ installments: Installment[] }>(`/transactions/${id}/schedule`, { items });
 }
 
+/**
+ * Schedules the collection of what the transaction still owes (M5 §6): the items
+ * must sum to Amount Outstanding, not to the agreed total — that is what
+ * `createSchedule` above is for.
+ */
+export function scheduleOutstanding(
+  id: string,
+  items: ScheduleItemInput[],
+): Promise<{ installments: Installment[] }> {
+  return api.post<{ installments: Installment[] }>(`/transactions/${id}/outstanding-schedule`, { items });
+}
+
 export interface VerifyInput {
   installment_id: string;
   amount: string;
   received_date: string;
   proof_of_payment: string;
+  /** Contract link saved together with the verification (M5 §7 Rule 1). */
+  contract_attachment: string;
+}
+
+/**
+ * Strips the house IDR formatting ("Rp. 9.000.000,00") back to a plain number
+ * string for prefilling a numeric input. Display always uses the server's string
+ * as-is; this only seeds a form field the server re-validates to the cent.
+ */
+export function idrToInput(formatted: string): string {
+  const digits = formatted.replace(/[^\d,]/g, '').split(',')[0];
+  return digits.replace(/\D/g, '');
 }
 
 export function verify(id: string, body: VerifyInput): Promise<{ transaction: Transaction }> {

@@ -32,14 +32,17 @@ export default function FinanceQueuePage() {
     <div className="stack">
       <div>
         <h1>Finance</h1>
-        <p className="muted">Antrean transaksi menunggu verifikasi (M5 §8.1).</p>
+        <p className="muted">
+          Antrean transaksi yang belum lunas (M5 §8.1) — menunggu verifikasi lebih dulu, lalu yang
+          sudah terverifikasi sebagian dan masih punya kekurangan pembayaran.
+        </p>
       </div>
 
       <section className="card">
         {loading && <p className="muted">Memuat...</p>}
         {error && <div className="alert alertError" role="alert">{error}</div>}
         {!loading && !error && trxs && trxs.length === 0 && (
-          <div className="emptyState">Tidak ada transaksi yang menunggu verifikasi.</div>
+          <div className="emptyState">Tidak ada transaksi yang belum lunas.</div>
         )}
         {!loading && !error && trxs && trxs.length > 0 && (
           <div className="table-wrap">
@@ -51,6 +54,8 @@ export default function FinanceQueuePage() {
                   <th>Status</th>
                   <th>Skema</th>
                   <th>Total</th>
+                  <th>Terverifikasi</th>
+                  <th>Kekurangan</th>
                 </tr>
               </thead>
               <tbody>
@@ -65,6 +70,8 @@ export default function FinanceQueuePage() {
                     <td><StatusBadge status={t.payment_status} /></td>
                     <td>{t.payment_intent_scheme || '—'}</td>
                     <td>{t.total_agreed_value}</td>
+                    <td>{t.amount_verified}</td>
+                    <td>{t.amount_outstanding}</td>
                   </tr>
                 ))}
               </tbody>
