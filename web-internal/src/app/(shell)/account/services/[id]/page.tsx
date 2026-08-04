@@ -4,6 +4,8 @@ import { use, useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { LEVEL_STAFF, useAssignableEmployees } from '@/lib/directory';
+import EmployeePicker from '@/components/EmployeePicker';
 import {
   BRIEF_DIVISIONS,
   PRIORITIES,
@@ -74,6 +76,15 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   const [bSubmitting, setBSubmitting] = useState(false);
   const [bError, setBError] = useState<string | null>(null);
   const [bMessage, setBMessage] = useState<string | null>(null);
+
+  // PIC candidates follow the Brief's TARGET DIVISION (§5 Rule 1: the PIC must be
+  // active staff of that division — `task.validatePicForDivision`). This is the
+  // AM's cross-division door: Creative, Ads, KOL, Live Stream.
+  const {
+    employees: picCandidates,
+    loading: picLoading,
+    error: picError,
+  } = useAssignableEmployees(bDivision, LEVEL_STAFF, canWrite);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -344,16 +355,32 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
             <div className="formRow">
               <div className="field">
                 <label htmlFor="b-division">Divisi Tujuan</label>
-                <select id="b-division" value={bDivision} onChange={(e) => setBDivision(e.target.value)}>
+                {/* Changing the target division INVALIDATES the chosen PIC: a
+                    Creative staffer is not a valid PIC for an Ads Brief (§5 Rule
+                    1), so it is cleared here rather than sent and rejected. */}
+                <select
+                  id="b-division"
+                  value={bDivision}
+                  onChange={(e) => {
+                    setBDivision(e.target.value);
+                    setBPic('');
+                  }}
+                >
                   {BRIEF_DIVISIONS.map((div) => (
                     <option key={div} value={div}>{div}</option>
                   ))}
                 </select>
               </div>
-              <div className="field">
-                <label htmlFor="b-pic">PIC (opsional, Employee ID)</label>
-                <input id="b-pic" value={bPic} onChange={(e) => setBPic(e.target.value)} />
-              </div>
+              <EmployeePicker
+                id="b-pic"
+                label={`PIC divisi ${bDivision}`}
+                employees={picCandidates}
+                loading={picLoading}
+                error={picError}
+                value={bPic}
+                onChange={setBPic}
+                emptyHint={`Belum ada staff aktif di divisi ${bDivision}. Brief tetap bisa dibuat tanpa PIC — SPV/Lead divisi tujuan yang menetapkannya nanti di papan Brief.`}
+              />
             </div>
             <div className="formRow">
               <div className="field">

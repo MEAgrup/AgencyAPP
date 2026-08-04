@@ -4,7 +4,10 @@ import { use, useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { LEVEL_STAFF, useAssignableEmployees } from '@/lib/directory';
+import EmployeePicker from '@/components/EmployeePicker';
 import {
+  CREATIVE_DIVISION,
   createAsset,
   getBrief,
   isCreativeDivision,
@@ -15,8 +18,6 @@ import {
   type Brief,
 } from '@/lib/creative';
 import StatusBadge from '@/components/StatusBadge';
-
-const CREATIVE_DIVISION_LABEL = 'Creative';
 
 export default function CreativeBriefDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -53,6 +54,16 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
     load();
   }, [load]);
 
+  const canCreateAsset = !isODOnly(role) && (isCreativeDivision(role) || isDirector(role));
+
+  // Asset PIC candidates = active Creative STAFF (`creative.validateCreativeStaff`).
+  // Declared above the loading early-return: hooks must run on every render.
+  const {
+    employees: picCandidates,
+    loading: picLoading,
+    error: picError,
+  } = useAssignableEmployees(CREATIVE_DIVISION, LEVEL_STAFF, canCreateAsset);
+
   async function handleCreateAsset(e: FormEvent) {
     e.preventDefault();
     setCreateError(null);
@@ -62,7 +73,7 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
       const seq = Number(sequenceNo);
       const asset = await createAsset(id, {
         sequence_no: seq,
-        assigned_pic: assignedPic.trim() || undefined,
+        assigned_pic: assignedPic || undefined,
       });
       setCreateMessage(`Asset ${asset.id} berhasil dibuat (urutan #${asset.sequence_no}).`);
       setSequenceNo('');
@@ -86,8 +97,7 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
     );
   }
 
-  const canCreateAsset = !isODOnly(role) && (isCreativeDivision(role) || isDirector(role));
-  const isOtherDivision = brief.assigned_division !== CREATIVE_DIVISION_LABEL;
+  const isOtherDivision = brief.assigned_division !== CREATIVE_DIVISION;
   const createdCount = assets?.length ?? 0;
 
   return (
@@ -227,15 +237,18 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
                   onChange={(e) => setSequenceNo(e.target.value)}
                 />
               </div>
-              <div className="field">
-                <label htmlFor="asset-pic">PIC (Employee ID, opsional)</label>
-                <input
-                  id="asset-pic"
-                  placeholder="Kosongkan untuk self-claim"
-                  value={assignedPic}
-                  onChange={(e) => setAssignedPic(e.target.value)}
-                />
-              </div>
+              {/* Left empty by a Creative staffer = self-claim (§4 Flow 1), which
+                  is why this stays optional and the hint says so. */}
+              <EmployeePicker
+                id="asset-pic"
+                label="PIC (kosongkan untuk self-claim)"
+                employees={picCandidates}
+                loading={picLoading}
+                error={picError}
+                value={assignedPic}
+                onChange={setAssignedPic}
+                emptyHint="Belum ada staff Creative aktif. Biarkan kosong — staff yang membuat Asset otomatis menjadi PIC-nya."
+              />
             </div>
             <div>
               <button type="submit" className="btn btnPrimary" disabled={createSubmitting}>

@@ -230,10 +230,17 @@ export function isODOnly(role: Role | null): boolean {
   return !!role?.od && !role?.director;
 }
 
+/**
+ * The CDPS division string, verbatim from `role_mappings` (domain
+ * `kol.KOL_DIVISION`). Exported because the Coordinator picker asks the server
+ * for this division by name — a typo there yields an empty dropdown, not an error.
+ */
+export const KOL_DIVISION = 'KOL';
+
 export function isKolDivision(role: Role | null): boolean {
   // GET /me returns Role.Division verbatim from the role mapping ("KOL") —
   // compare against the exact backend label, not a lowercased slug.
-  return !!role && role.division === 'KOL';
+  return !!role && role.division === KOL_DIVISION;
 }
 
 /** KOL Team Leader — the only staff-side role allowed to escalate/drop/manage. */

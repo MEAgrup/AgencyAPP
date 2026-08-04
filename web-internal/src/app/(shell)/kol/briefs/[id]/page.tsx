@@ -4,7 +4,10 @@ import { use, useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { LEVEL_STAFF, useAssignableEmployees } from '@/lib/directory';
+import EmployeePicker from '@/components/EmployeePicker';
 import {
+  KOL_DIVISION,
   SOURCE_POOL_OPTIONS,
   bookingBadgeTone,
   canCreateBooking,
@@ -19,10 +22,6 @@ import {
   type CreatorList,
 } from '@/lib/kol';
 import StatusBadge from '@/components/StatusBadge';
-
-// module9_kol.KOLDivision (kol.go:50) — the Brief.assigned_division label value,
-// distinct from the lowercase role.division used for employee/role gating.
-const KOL_DIVISION_LABEL = 'KOL';
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return '—';
@@ -55,6 +54,14 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
   const [poolReference, setPoolReference] = useState('');
   const [agreedRate, setAgreedRate] = useState('');
   const [assignedCoordinator, setAssignedCoordinator] = useState('');
+
+  // Coordinator candidates = active KOL STAFF (`kol.validateKolStaff`). Declared
+  // here, above the loading early-return, because hooks must run every render.
+  const {
+    employees: coordCandidates,
+    loading: coordLoading,
+    error: coordError,
+  } = useAssignableEmployees(KOL_DIVISION, LEVEL_STAFF, canCreateBooking(role));
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createMessage, setCreateMessage] = useState<string | null>(null);
@@ -103,7 +110,7 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
         source_pool: sourcePool,
         pool_reference: poolReference.trim() || undefined,
         agreed_rate: agreedRate,
-        assigned_coordinator: assignedCoordinator.trim() || undefined,
+        assigned_coordinator: assignedCoordinator || undefined,
       });
       setCreateMessage(`Booking ${booking.id} berhasil dibuat untuk ${booking.creator_name}.`);
       setCreatorName('');
@@ -151,7 +158,7 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
 
   const canCreate = canCreateBooking(role);
   const canManageCL = canManageCreatorList(role);
-  const isOtherDivision = brief.assigned_division !== KOL_DIVISION_LABEL;
+  const isOtherDivision = brief.assigned_division !== KOL_DIVISION;
 
   const eligibleSet = new Set(creatorList?.eligible_bookings ?? []);
   const includedSet = new Set(creatorList?.included_bookings ?? []);
@@ -330,15 +337,17 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
                   onChange={(e) => setAgreedRate(e.target.value)}
                 />
               </div>
-              <div className="field">
-                <label htmlFor="assigned-coordinator">Coordinator (Employee ID, opsional)</label>
-                <input
-                  id="assigned-coordinator"
-                  placeholder="Kosongkan untuk self-claim"
-                  value={assignedCoordinator}
-                  onChange={(e) => setAssignedCoordinator(e.target.value)}
-                />
-              </div>
+              {/* Left empty by a KOL staffer = self-claim, so this stays optional. */}
+              <EmployeePicker
+                id="assigned-coordinator"
+                label="Coordinator (kosongkan untuk self-claim)"
+                employees={coordCandidates}
+                loading={coordLoading}
+                error={coordError}
+                value={assignedCoordinator}
+                onChange={setAssignedCoordinator}
+                emptyHint="Belum ada staff KOL aktif. Biarkan kosong — staff yang membuat Booking menjadi Coordinator-nya."
+              />
             </div>
             <div>
               <button type="submit" className="btn btnPrimary" disabled={createSubmitting}>
