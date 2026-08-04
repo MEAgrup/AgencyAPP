@@ -5,7 +5,10 @@ import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { formatIDR } from '@/lib/money';
 import { useAuth } from '@/lib/auth-context';
+import { LEVEL_STAFF, useAssignableEmployees } from '@/lib/directory';
+import EmployeePicker from '@/components/EmployeePicker';
 import {
+  KOL_DIVISION,
   REVISION_CAP,
   assignCoordinator,
   bookBooking,
@@ -96,6 +99,16 @@ export default function KolBookingDetailPage({ params }: { params: Promise<{ id:
 
   // Assign / reassign Coordinator
   const [coordinatorId, setCoordinatorId] = useState('');
+
+  // Coordinator candidates = active KOL STAFF, i.e. what `kol.validateKolStaff`
+  // accepts (§3: one accountable Coordinator). Called here — before the loading
+  // early-return below — because hooks must run on every render; the gate is the
+  // same `canManageBooking(role)` the section is rendered under.
+  const {
+    employees: coordCandidates,
+    loading: coordLoading,
+    error: coordLoadError,
+  } = useAssignableEmployees(KOL_DIVISION, LEVEL_STAFF, canManageBooking(role) && !isODOnly(role));
   const [coordinatorReason, setCoordinatorReason] = useState('');
   const [coordSubmitting, setCoordSubmitting] = useState(false);
   const [coordError, setCoordError] = useState<string | null>(null);
@@ -268,8 +281,11 @@ export default function KolBookingDetailPage({ params }: { params: Promise<{ id:
     setCoordMessage(null);
     setCoordSubmitting(true);
     try {
-      const res = await assignCoordinator(id, coordinatorId.trim(), coordinatorReason.trim());
-      setCoordMessage(`Coordinator berhasil ditetapkan: ${res.assigned_coordinator}.`);
+      const res = await assignCoordinator(id, coordinatorId, coordinatorReason.trim());
+      const coord = coordCandidates?.find((e) => e.employee_id === res.assigned_coordinator);
+      setCoordMessage(
+        `Coordinator berhasil ditetapkan: ${coord ? `${coord.nama} (${res.assigned_coordinator})` : res.assigned_coordinator}.`,
+      );
       setCoordinatorReason('');
       await load();
     } catch (err) {
@@ -741,15 +757,17 @@ export default function KolBookingDetailPage({ params }: { params: Promise<{ id:
             {coordError && <div className="alert alertError" role="alert">{coordError}</div>}
             {coordMessage && <div className="alert alertSuccess" role="status">{coordMessage}</div>}
             <div className="formRow">
-              <div className="field">
-                <label htmlFor="coordinator-id">Coordinator (Employee ID)</label>
-                <input
-                  id="coordinator-id"
-                  required
-                  value={coordinatorId}
-                  onChange={(e) => setCoordinatorId(e.target.value)}
-                />
-              </div>
+              <EmployeePicker
+                id="coordinator-id"
+                label="Coordinator (staff KOL aktif)"
+                required
+                employees={coordCandidates}
+                loading={coordLoading}
+                error={coordLoadError}
+                value={coordinatorId}
+                onChange={setCoordinatorId}
+                emptyHint="Belum ada staff KOL aktif yang bisa dijadikan Coordinator."
+              />
               {booking.assigned_coordinator && (
                 <div className="field">
                   <label htmlFor="coordinator-reason">Alasan Reassignment</label>
@@ -763,7 +781,11 @@ export default function KolBookingDetailPage({ params }: { params: Promise<{ id:
               )}
             </div>
             <div>
-              <button type="submit" className="btn btnPrimary" disabled={coordSubmitting}>
+              <button
+                type="submit"
+                className="btn btnPrimary"
+                disabled={coordSubmitting || coordinatorId === ''}
+              >
                 {coordSubmitting ? 'Menyimpan...' : 'Simpan Coordinator'}
               </button>
             </div>

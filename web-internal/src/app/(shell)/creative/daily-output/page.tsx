@@ -4,7 +4,9 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { getDailyOutput, isCreativeLead, isDirector, type DailyOutputDay } from '@/lib/creative';
+import { CREATIVE_DIVISION, getDailyOutput, isCreativeLead, isDirector, type DailyOutputDay } from '@/lib/creative';
+import { LEVEL_STAFF, useAssignableEmployees } from '@/lib/directory';
+import EmployeePicker from '@/components/EmployeePicker';
 
 function todayWIB(): string {
   // WIB = UTC+7. Take the UTC "now", shift by 7 hours, then read the calendar date.
@@ -23,6 +25,14 @@ export default function DailyOutputPage() {
   const canQueryOthers = isCreativeLead(role) || !!role?.od || isDirector(role);
 
   const [picId, setPicId] = useState('');
+
+  // Whose day to read. Only the roles that may query SOMEONE ELSE get the list —
+  // a staff member sees their own id, locked, exactly as before.
+  const {
+    employees: picCandidates,
+    loading: picLoading,
+    error: picError,
+  } = useAssignableEmployees(CREATIVE_DIVISION, LEVEL_STAFF, canQueryOthers);
   const [date, setDate] = useState(todayWIB());
   const [day, setDay] = useState<DailyOutputDay | null>(null);
   const [loading, setLoading] = useState(true);
@@ -72,16 +82,24 @@ export default function DailyOutputPage() {
 
       <section className="card">
         <form className="formRow" onSubmit={handleFilter}>
-          <div className="field">
-            <label htmlFor="pic-id">PIC (Employee ID)</label>
-            <input
+          {canQueryOthers ? (
+            <EmployeePicker
               id="pic-id"
+              label="PIC"
+              required
+              employees={picCandidates}
+              loading={picLoading}
+              error={picError}
               value={picId}
-              onChange={(e) => setPicId(e.target.value)}
-              readOnly={!canQueryOthers}
-              disabled={!canQueryOthers}
+              onChange={setPicId}
+              emptyHint="Belum ada staff Creative aktif untuk dilihat output hariannya."
             />
-          </div>
+          ) : (
+            <div className="field">
+              <label htmlFor="pic-id">PIC</label>
+              <input id="pic-id" value={picId} readOnly disabled />
+            </div>
+          )}
           <div className="field">
             <label htmlFor="output-date">Tanggal (WIB)</label>
             <input id="output-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />

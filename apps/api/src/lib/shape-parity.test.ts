@@ -433,6 +433,7 @@ const WIRE_TO_FE: Record<string, string> = {
   NotificationWire: 'types.ts::NotificationItem',
   NotificationsResponseWire: 'types.ts::NotificationsResponse',
   AdminEmployeeWire: 'types.ts::AdminEmployee',
+  AssignableEmployeeWire: 'types.ts::AssignableEmployee',
   RoleMappingWire: 'types.ts::RoleMapping',
   LayeredRoleWire: 'types.ts::LayeredRole',
   CredentialInfoWire: 'types.ts::CredentialInfo',

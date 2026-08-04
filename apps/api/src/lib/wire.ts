@@ -6,7 +6,7 @@
  * other way inline in each route (`toInput`).
  */
 import { money, tz } from '@cdps/core';
-import type { account, admin, ads, audit, auth, board, campaign, client, creative, demo, finance, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
+import type { account, admin, ads, audit, auth, board, campaign, client, creative, demo, directory, finance, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -1989,6 +1989,36 @@ export function adminEmployeeToWire(e: admin.EmployeeRow): AdminEmployeeWire {
     status_aktif: e.statusAktif,
     flagged: e.flagged,
     synced_at: e.syncedAt ? e.syncedAt.toISOString() : null,
+  };
+}
+
+/**
+ * `directory.AssignableEmployee` as web-internal's `AssignableEmployee` expects
+ * it — the payload of every "who does this?" dropdown.
+ *
+ * NARROWER than `AdminEmployeeWire` on purpose: no `email`, no `flagged`, no
+ * `synced_at`. The admin roster is Director/OD; this one is read by every actor
+ * with a division scope, so it carries only what is needed to pick a person and
+ * what the assignment endpoints validate against (`division`/`level`).
+ */
+export interface AssignableEmployeeWire {
+  employee_id: string;
+  nama: string;
+  divisi: string;
+  jabatan: string;
+  division: string;
+  level: string;
+}
+
+/** directory.AssignableEmployee → wire (snake_case). */
+export function assignableEmployeeToWire(e: directory.AssignableEmployee): AssignableEmployeeWire {
+  return {
+    employee_id: e.employeeId,
+    nama: e.nama,
+    divisi: e.divisi,
+    jabatan: e.jabatan,
+    division: e.division,
+    level: e.level,
   };
 }
 

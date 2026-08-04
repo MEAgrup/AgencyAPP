@@ -5,7 +5,10 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { LEVEL_STAFF, useAssignableEmployees } from '@/lib/directory';
+import EmployeePicker from '@/components/EmployeePicker';
 import {
+  ACCOUNT_DIVISION,
   assignAM,
   canManageAssignment,
   canReadIntake,
@@ -48,10 +51,21 @@ export default function AccountWorkspacePage() {
   const [strategiesError, setStrategiesError] = useState<string | null>(null);
   const [strategyFilter, setStrategyFilter] = useState<'all' | 'inbox'>('all');
 
-  // Assign AM (inline, per-row)
+  // Assign AM (per-row → a panel with the AM picker; no more window.prompt)
+  const [assignTarget, setAssignTarget] = useState<IntakeClient | null>(null);
+  const [assignAmId, setAssignAmId] = useState('');
   const [assignPendingId, setAssignPendingId] = useState<string | null>(null);
   const [assignError, setAssignError] = useState<string | null>(null);
   const [assignMessage, setAssignMessage] = useState<string | null>(null);
+
+  // The AM directory — Account-division STAFF, exactly what `validateAMCandidate`
+  // accepts (§3 Rule 2). Fetched only for the roles that may assign, so a staff
+  // AM does not fire a request for a control they never see.
+  const {
+    employees: amCandidates,
+    loading: amLoading,
+    error: amError,
+  } = useAssignableEmployees(ACCOUNT_DIVISION, LEVEL_STAFF, canManage);
 
   // Reassign AM (form)
   const [reClient, setReClient] = useState('');
@@ -115,15 +129,28 @@ export default function AccountWorkspacePage() {
     loadStrategies();
   }, [loadIntake, loadWorkload, loadStrategies]);
 
-  async function handleAssign(clientId: string, toko: string) {
-    const amId = window.prompt(`Employee ID Account Manager untuk klien "${toko}":`);
-    if (!amId) return;
+  /** Opens the assign panel for one intake row (nothing is sent yet). */
+  function openAssign(client: IntakeClient) {
+    setAssignTarget(client);
+    setAssignAmId('');
+    setAssignError(null);
+    setAssignMessage(null);
+  }
+
+  async function handleAssign() {
+    if (!assignTarget || assignAmId === '') return;
+    const clientId = assignTarget.client_id;
     setAssignError(null);
     setAssignMessage(null);
     setAssignPendingId(clientId);
     try {
-      const res = await assignAM(clientId, amId.trim());
-      setAssignMessage(`AM ${res.assigned_am} ditugaskan untuk ${res.client_id}.`);
+      const res = await assignAM(clientId, assignAmId);
+      const am = amCandidates?.find((e) => e.employee_id === res.assigned_am);
+      setAssignMessage(
+        `AM ${am ? `${am.nama} (${res.assigned_am})` : res.assigned_am} ditugaskan untuk ${res.client_id}.`,
+      );
+      setAssignTarget(null);
+      setAssignAmId('');
       await loadIntake();
       await loadWorkload();
     } catch (err) {
@@ -139,7 +166,7 @@ export default function AccountWorkspacePage() {
     setReMessage(null);
     setReSubmitting(true);
     try {
-      const res = await reassignAM(reClient.trim(), reAm.trim(), reReason);
+      const res = await reassignAM(reClient.trim(), reAm, reReason);
       setReMessage(
         `AM klien ${res.client_id} diubah dari ${res.previous_am || '—'} ke ${res.assigned_am}.`,
       );
@@ -162,6 +189,17 @@ export default function AccountWorkspacePage() {
     strategies && strategyFilter === 'inbox'
       ? strategies.filter((s) => s.status === STRATEGY_SUBMITTED)
       : strategies;
+
+  /**
+   * Per-AM workload note inside the picker (§3 Rule 5): the count is a REFERENCE,
+   * not a hard cap, and it belongs next to the choice it informs — the table below
+   * only lists AMs who already own clients, so an AM with zero is invisible there
+   * and looks unavailable when they are in fact the freest person on the team.
+   */
+  const workloadHint = (employeeId: string): string => {
+    const row = workload?.find((w) => w.am_employee_id === employeeId);
+    return `${row?.active_client_count ?? 0} klien aktif`;
+  };
 
   return (
     <div className="stack">
@@ -222,6 +260,51 @@ export default function AccountWorkspacePage() {
           </div>
           {assignError && <div className="alert alertError" role="alert">{assignError}</div>}
           {assignMessage && <div className="alert alertSuccess" role="status">{assignMessage}</div>}
+
+          {/* The assign panel. Opened by the row's button, so the dropdown is
+              rendered once (not per row) and the client it applies to is named
+              in the heading — the old window.prompt named it in the prompt text. */}
+          {canManage && assignTarget && (
+            <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>
+                Tugaskan AM untuk {assignTarget.toko || assignTarget.client_id}
+                <span className="muted" style={{ fontWeight: 400 }}> &middot; {assignTarget.client_id}</span>
+              </div>
+              <EmployeePicker
+                id="assign-am"
+                label="Account Manager"
+                required
+                employees={amCandidates}
+                loading={amLoading}
+                error={amError}
+                value={assignAmId}
+                onChange={setAssignAmId}
+                hint={(e) => workloadHint(e.employee_id)}
+                emptyHint={
+                  'Belum ada staff divisi Account yang aktif. Satu klien hanya bisa dipegang staff Account ' +
+                  'aktif — impor karyawannya di Admin › Karyawan, lalu petakan jabatannya ke Account/staff.'
+                }
+              />
+              <div className="row" style={{ gap: 8, marginTop: 8 }}>
+                <button
+                  type="button"
+                  className="btn btnPrimary btnSm"
+                  disabled={assignAmId === '' || assignPendingId !== null}
+                  onClick={handleAssign}
+                >
+                  {assignPendingId === assignTarget.client_id ? 'Memproses...' : 'Tugaskan'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btnSecondary btnSm"
+                  disabled={assignPendingId !== null}
+                  onClick={() => setAssignTarget(null)}
+                >
+                  Batal
+                </button>
+              </div>
+            </div>
+          )}
           {intakeLoading && <p className="muted">Memuat...</p>}
           {intakeError && <div className="alert alertError" role="alert">{intakeError}</div>}
           {!intakeLoading && !intakeError && intake && intake.length === 0 && (
@@ -256,9 +339,9 @@ export default function AccountWorkspacePage() {
                             type="button"
                             className="btn btnPrimary btnSm"
                             disabled={assignPendingId !== null}
-                            onClick={() => handleAssign(c.client_id, c.toko)}
+                            onClick={() => openAssign(c)}
                           >
-                            {assignPendingId === c.client_id ? 'Memproses...' : 'Assign AM'}
+                            {assignTarget?.client_id === c.client_id ? 'Pilih AM di atas' : 'Assign AM'}
                           </button>
                         )}
                       </td>
@@ -294,12 +377,17 @@ export default function AccountWorkspacePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {workload.map((w) => (
-                    <tr key={w.am_employee_id}>
-                      <td>{w.am_employee_id}</td>
-                      <td>{w.active_client_count}</td>
-                    </tr>
-                  ))}
+                  {workload.map((w) => {
+                    // Name from the same directory the picker uses; the endpoint
+                    // returns ids only, and an id alone is not who anyone is.
+                    const am = amCandidates?.find((e) => e.employee_id === w.am_employee_id);
+                    return (
+                      <tr key={w.am_employee_id}>
+                        <td>{am ? `${am.nama} (${w.am_employee_id})` : w.am_employee_id}</td>
+                        <td>{w.active_client_count}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -329,17 +417,32 @@ export default function AccountWorkspacePage() {
                   onChange={(e) => setReClient(e.target.value)}
                 />
               </div>
-              <div className="field">
-                <label htmlFor="re-am">AM Tujuan (Employee ID)</label>
-                <input id="re-am" required value={reAm} onChange={(e) => setReAm(e.target.value)} />
-              </div>
+              <EmployeePicker
+                id="re-am"
+                label="AM Tujuan"
+                required
+                employees={amCandidates}
+                loading={amLoading}
+                error={amError}
+                value={reAm}
+                onChange={setReAm}
+                hint={(e) => workloadHint(e.employee_id)}
+                emptyHint={
+                  'Belum ada staff divisi Account yang aktif untuk dijadikan AM tujuan. Impor karyawannya ' +
+                  'di Admin › Karyawan, lalu petakan jabatannya ke Account/staff.'
+                }
+              />
             </div>
             <div className="field">
               <label htmlFor="re-reason">Alasan</label>
               <input id="re-reason" required value={reReason} onChange={(e) => setReReason(e.target.value)} />
             </div>
             <div>
-              <button type="submit" className="btn btnPrimary" disabled={reSubmitting}>
+              <button
+                type="submit"
+                className="btn btnPrimary"
+                disabled={reSubmitting || reAm === '' || reClient.trim() === ''}
+              >
                 {reSubmitting ? 'Memproses...' : 'Reassign AM'}
               </button>
             </div>

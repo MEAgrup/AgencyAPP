@@ -12,6 +12,10 @@
  *   calculator + commission quote, and the Qualified Lead Form submit.
  * - msl: Master Service List admin (S0-09) — Sales-owned catalog with immutable
  *   versions, plus the canonical MSL read (effectiveAt) consumed by `sales`.
+ * - directory: the assignable-employee READ behind every "who does this?" picker
+ *   (AM assignment, Brief/Task/Asset PIC, Booking Coordinator). Read-only, and
+ *   its predicate mirrors the assignment validators so what is offered is what is
+ *   accepted.
  * - audit: the cross-module audit-trail READ (GET /audit) the entity-history
  *   panels use. Read-only by construction; writes stay in @cdps/core audit.
  * - engine: transition-engine introspection (`allowedTransitions`) over `sm_edges`
@@ -64,6 +68,7 @@
 export * as auth from './auth';
 export * as employees from './employees';
 export * as admin from './admin';
+export * as directory from './directory';
 export * as demo from './demo';
 export * as leads from './leads';
 export * as sales from './sales';
