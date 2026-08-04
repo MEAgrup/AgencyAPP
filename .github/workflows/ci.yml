@@ -165,7 +165,7 @@ jobs:
                if (select count(*) from demo_tasks) <> 1 then raise exception 'expected 1 demo_task (seed not idempotent?)'; end if;
              end \$\$;"
       # 55 = 53 + lead_delete_requests (20260729162101, DECISIONS 2026-07-29)
-      #         + transaction_change_requests (20260804170000, DECISIONS 2026-08-04).
+      #         + transaction_change_requests (20260804190000, DECISIONS 2026-08-04).
       - name: Verify table count (expect 55)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \

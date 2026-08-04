@@ -203,10 +203,17 @@ export function isODOnly(role: Role | null): boolean {
   return !!role?.od && !role?.director;
 }
 
+/**
+ * The CDPS division string, verbatim from `role_mappings` (domain
+ * `creative.CREATIVE_DIVISION`). Exported because the PIC picker asks the server
+ * for this division by name — a typo there yields an empty dropdown, not an error.
+ */
+export const CREATIVE_DIVISION = 'Creative';
+
 export function isCreativeDivision(role: Role | null): boolean {
   // Backend sends Role.Division verbatim from role_mappings — canonical value is
   // capitalized "Creative" (module7_creative/asset.go:42), case-sensitive.
-  return !!role && role.division === 'Creative';
+  return !!role && role.division === CREATIVE_DIVISION;
 }
 
 export function isCreativeLead(role: Role | null): boolean {

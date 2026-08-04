@@ -214,6 +214,13 @@ export const COMPLAINT_RESOLVED = '[Resolved]';
 // Duplicated locally per house convention (do not add to shared lib/types.ts).
 // ---------------------------------------------------------------------------
 
+/**
+ * The CDPS division string, verbatim from `role_mappings` (domain
+ * `account.ACCOUNT_DIVISION`). Exported because the AM picker asks the server for
+ * this division BY NAME — a typo there yields an empty dropdown, not an error.
+ */
+export const ACCOUNT_DIVISION = 'Account';
+
 export function isAccountLead(role: Role | null): boolean {
   return !!role && role.division.toLowerCase() === 'account' && role.level === 'lead';
 }

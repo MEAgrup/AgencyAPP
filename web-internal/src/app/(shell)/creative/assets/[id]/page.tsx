@@ -5,12 +5,15 @@ import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { formatIDR } from '@/lib/money';
+import { LEVEL_STAFF, useAssignableEmployees } from '@/lib/directory';
+import EmployeePicker from '@/components/EmployeePicker';
 import {
   ASSET_IN_REVIEW,
   ASSET_SUBMITTED,
   approveAsset,
   approveAssetBlock,
   assignAssetPic,
+  CREATIVE_DIVISION,
   findPendingBlockRequest,
   getAsset,
   getAssetAudit,
@@ -187,6 +190,15 @@ export default function CreativeAssetDetailPage({ params }: { params: Promise<{ 
   // Kelola PIC/SLA: SPV/Lead Creative atau Director.
   const canManage = !odOnly && (director || leadCreative);
 
+  // PIC candidates = active Creative STAFF, i.e. exactly what
+  // `creative.validateCreativeStaff` accepts (§2 Rule 1). Fetched only for the
+  // role that may assign.
+  const {
+    employees: picCandidates,
+    loading: picLoading,
+    error: picLoadError,
+  } = useAssignableEmployees(CREATIVE_DIVISION, LEVEL_STAFF, canManage);
+
   async function runExec(fn: () => Promise<{ From: string; To: string }>, okLabel: string) {
     setExecError(null);
     setExecMessage(null);
@@ -318,8 +330,9 @@ export default function CreativeAssetDetailPage({ params }: { params: Promise<{ 
     setPicMessage(null);
     setPicSubmitting(true);
     try {
-      const res = await assignAssetPic(id, picInput.trim());
-      setPicMessage(`PIC ditetapkan: ${res.assigned_pic}`);
+      const res = await assignAssetPic(id, picInput);
+      const pic = picCandidates?.find((e) => e.employee_id === res.assigned_pic);
+      setPicMessage(`PIC ditetapkan: ${pic ? `${pic.nama} (${res.assigned_pic})` : res.assigned_pic}`);
       setPicInput('');
       await load();
     } catch (err) {
@@ -693,11 +706,22 @@ export default function CreativeAssetDetailPage({ params }: { params: Promise<{ 
             {picError && <div className="alert alertError" role="alert">{picError}</div>}
             {picMessage && <div className="alert alertSuccess" role="status">{picMessage}</div>}
             <div className="formRow">
-              <div className="field">
-                <label htmlFor="pic-input">Tetapkan PIC (Employee ID staff Creative aktif)</label>
-                <input id="pic-input" required value={picInput} onChange={(e) => setPicInput(e.target.value)} />
-              </div>
-              <button type="submit" className="btn btnPrimary btnSm" disabled={picSubmitting}>
+              <EmployeePicker
+                id="pic-input"
+                label="Tetapkan PIC (staff Creative aktif)"
+                required
+                employees={picCandidates}
+                loading={picLoading}
+                error={picLoadError}
+                value={picInput}
+                onChange={setPicInput}
+                emptyHint="Belum ada staff Creative aktif yang bisa ditetapkan sebagai PIC."
+              />
+              <button
+                type="submit"
+                className="btn btnPrimary btnSm"
+                disabled={picSubmitting || picInput === ''}
+              >
                 {picSubmitting ? 'Menyimpan...' : 'Tetapkan PIC'}
               </button>
             </div>

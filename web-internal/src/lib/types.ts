@@ -47,6 +47,28 @@ export interface AdminEmployee {
   flagged: boolean;
 }
 
+/**
+ * One row of GET /employees/assignable — the payload of every assignment
+ * dropdown (AM, Brief/Task/Asset PIC, Booking Coordinator).
+ *
+ * Narrower than `AdminEmployee` by design: the admin roster is Director/OD-only
+ * and carries email/flagged/sync staleness; this list is read by anyone who
+ * assigns work, so it carries only what is needed to pick a person.
+ *
+ * `divisi`/`jabatan` are the RAW HRIS strings — LABELS (this is what tells an
+ * "Account Manager" apart from a "CRO" inside the same Account division), never a
+ * scope. `division`/`level` are the resolved CDPS role the server validates
+ * against.
+ */
+export interface AssignableEmployee {
+  employee_id: string;
+  nama: string;
+  divisi: string;
+  jabatan: string;
+  division: string;
+  level: string;
+}
+
 export interface EmployeeSyncResult {
   synced: number;
   deactivated: number;

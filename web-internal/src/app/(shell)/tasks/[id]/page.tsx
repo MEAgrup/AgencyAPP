@@ -4,6 +4,8 @@ import { use, useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { LEVEL_STAFF, useAssignableEmployees } from '@/lib/directory';
+import EmployeePicker from '@/components/EmployeePicker';
 import {
   assignPIC,
   getAsset,
@@ -166,6 +168,16 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const canRequestBlock =
     !isODonly && !isDispatched && (isDirector || inDivision || isAM);
 
+  // PIC candidates = active STAFF of the task's own division, i.e. exactly what
+  // `task.validatePicForDivision` accepts (§2 Rule 1). Only fetched once the
+  // division is known and only for the role that may assign, so the request is
+  // never fired for a control that is not rendered.
+  const {
+    employees: picCandidates,
+    loading: picLoading,
+    error: picLoadError,
+  } = useAssignableEmployees(taskDivision, LEVEL_STAFF, canDecideBlock && taskDivision !== '');
+
   async function runTransition(
     fn: () => Promise<{ From: string; To: string }>,
     okLabel: string,
@@ -233,8 +245,9 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
     setPicMessage(null);
     setPicSubmitting(true);
     try {
-      const res = await assignPIC(source, id, picInput.trim());
-      setPicMessage(`PIC ditetapkan: ${res.assigned_pic}`);
+      const res = await assignPIC(source, id, picInput);
+      const pic = picCandidates?.find((e) => e.employee_id === res.assigned_pic);
+      setPicMessage(`PIC ditetapkan: ${pic ? `${pic.nama} (${res.assigned_pic})` : res.assigned_pic}`);
       setPicInput('');
       await load();
     } catch (err) {
@@ -518,16 +531,22 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
             {picError && <div className="alert alertError" role="alert">{picError}</div>}
             {picMessage && <div className="alert alertSuccess" role="status">{picMessage}</div>}
             <div className="formRow">
-              <div className="field">
-                <label htmlFor="pic-input">Tetapkan PIC (Employee ID staff divisi tujuan)</label>
-                <input
-                  id="pic-input"
-                  required
-                  value={picInput}
-                  onChange={(e) => setPicInput(e.target.value)}
-                />
-              </div>
-              <button type="submit" className="btn btnPrimary btnSm" disabled={picSubmitting}>
+              <EmployeePicker
+                id="pic-input"
+                label={`Tetapkan PIC${taskDivision ? ` (staff divisi ${taskDivision})` : ''}`}
+                required
+                employees={picCandidates}
+                loading={picLoading}
+                error={picLoadError}
+                value={picInput}
+                onChange={setPicInput}
+                emptyHint={`Belum ada staff aktif di divisi ${taskDivision || 'tujuan'} yang bisa ditetapkan sebagai PIC.`}
+              />
+              <button
+                type="submit"
+                className="btn btnPrimary btnSm"
+                disabled={picSubmitting || picInput === ''}
+              >
                 {picSubmitting ? 'Menyimpan...' : 'Tetapkan PIC'}
               </button>
             </div>

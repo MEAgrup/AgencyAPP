@@ -621,6 +621,123 @@ DO $$ BEGIN
 END $$;
 
 RESET ROLE;
+
+-- ---------------------------------------------------------------------------
+-- 33. Picker KARYAWAN untuk pintu penugasan (migrasi 20260804170000).
+--     Seorang SPV/Head Account adalah SATU-SATUNYA role yang boleh menunjuk AM
+--     (M6 §3 Rule 2), tapi ia BUKAN Director/OD — jadi `employees_select` hanya
+--     membuka barisnya sendiri, dan `role_mappings` default-deny. Kedua sisinya
+--     ditegakkan di sini: TABEL-nya tetap tertutup, TAPI
+--     `private.employee_assignable()` menjawab. Kalau assertion pertama merah,
+--     row-scope `employees` sudah dilebarkan diam-diam; kalau yang kedua merah,
+--     SEMUA dropdown penugasan tampil KOSONG di produksi dan orang kembali
+--     mengetik Employee ID dari hafalan — persis bug yang diperbaiki.
+-- ---------------------------------------------------------------------------
+
+-- Fixture (superuser): satu AM aktif, satu lead Account, satu AM nonaktif, dan
+-- satu karyawan tanpa role mapping. Yang boleh ditawarkan HANYA yang aktif +
+-- ter-mapping — sama dengan yang diterima `account.validateAMCandidate`.
+INSERT INTO role_mappings (divisi, jabatan, division, level, created_by)
+VALUES ('RLSDIV', 'RLSAM', 'Account', 'staff', 'EMP-RLS-DIR'),
+       ('RLSDIV', 'RLSHEAD', 'Account', 'lead', 'EMP-RLS-DIR');
+INSERT INTO employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+VALUES ('EMP-RLS-AM1', 'rls am aktif',    'rlsam1@mea.id',  'RLSDIV', 'RLSAM',   true,  'EMP-RLS-DIR'),
+       ('EMP-RLS-AM2', 'rls am nonaktif', 'rlsam2@mea.id',  'RLSDIV', 'RLSAM',   false, 'EMP-RLS-DIR'),
+       ('EMP-RLS-AH1', 'rls head account','rlsah1@mea.id',  'RLSDIV', 'RLSHEAD', true,  'EMP-RLS-DIR'),
+       ('EMP-RLS-NOM', 'rls tanpa map',   'rlsnom@mea.id',  'RLSDIV', 'RLSNOMAP',true,  'EMP-RLS-DIR');
+
+SET LOCAL ROLE authenticated;
+
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-AH1","division":"Account","level":"lead"}}', true);
+DO $$
+DECLARE offered text[];
+BEGIN
+  -- Tabelnya: hanya baris sendiri (arm `employee_id = jwt_employee_id()`).
+  IF (SELECT count(*) FROM employees WHERE employee_id LIKE 'EMP-RLS-A%') <> 1 THEN
+    RAISE EXCEPTION 'RLS employees: Account lead must read ONLY their own row (got %)',
+      (SELECT count(*) FROM employees WHERE employee_id LIKE 'EMP-RLS-A%');
+  END IF;
+
+  -- …dan yet picker-nya menjawab, dengan isi yang PERSIS = kandidat yang sah.
+  SELECT coalesce(array_agg(employee_id ORDER BY employee_id), '{}'::text[]) INTO offered
+    FROM private.employee_assignable()
+   WHERE employee_id LIKE 'EMP-RLS-%' AND division = 'Account' AND level = 'staff';
+  IF offered <> ARRAY['EMP-RLS-AM1'] THEN
+    RAISE EXCEPTION 'employee_assignable: Account/staff harus tepat {EMP-RLS-AM1} (got %) — nonaktif & tanpa-mapping wajib absen', offered;
+  END IF;
+END $$;
+
+-- Kontrol negatif: belum login tidak punya urusan dengan daftar karyawan.
+RESET ROLE;
+SET LOCAL ROLE anon;
+DO $$
+DECLARE denied boolean := false;
+BEGIN
+  BEGIN
+    PERFORM * FROM private.employee_assignable();
+  EXCEPTION WHEN insufficient_privilege THEN denied := true;
+  END;
+  IF NOT denied THEN
+    RAISE EXCEPTION 'employee_assignable: EXECUTE must be denied to anon';
+  END IF;
+END $$;
+
+RESET ROLE;
+
+-- ---------------------------------------------------------------------------
+-- 34. Antrean Intake Account (M6 §3 Rule 1, migrasi 20260804180000). Klien yang
+--     SUDAH dirilis tapi BELUM punya AM tidak dimiliki siapa pun secara
+--     perorangan, jadi tanpa arm divisi seorang SPV/Head Account membaca NOL
+--     baris — antrean penunjukan AM kosong tanpa error, dan penunjukan AM tidak
+--     bisa dilakukan lewat UI sama sekali. Empat arah diuji: lead Account LIHAT,
+--     staff Account (bukan AM klien itu) TIDAK, divisi lain TIDAK, Director LIHAT.
+-- ---------------------------------------------------------------------------
+
+-- Klien BARU (bukan `CLI-RLS-0009` milik blok 14-17, yang sudah punya sales_pic
+-- sendiri): dirilis ke Account dan SENGAJA tanpa AM — itulah bentuk baris yang
+-- antrean intake baca, dan bentuk yang tidak dimiliki siapa pun secara perorangan.
+INSERT INTO clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
+                     total_sales, sales_pic_id, commission_payment_pic_id,
+                     released_to_account_at, created_by)
+VALUES ('CLI-RLS-0009', 'PIC rls', 'rls fixture intake', 'Bandung', 'link', 'Fashion', 0, 0, 0,
+        'EMP-RLS-SLS9', 'EMP-RLS-SLS9', now(), 'EMP-RLS-SLS9');
+
+SET LOCAL ROLE authenticated;
+
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-AH1","division":"Account","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM clients WHERE id='CLI-RLS-0009') <> 1
+  THEN RAISE EXCEPTION 'RLS clients: Account lead/SPV must SEE the released-unassigned client (M6 §3 Rule 1 intake queue)'; END IF;
+END $$;
+
+-- Kontrol negatif 1: AM staff yang bukan pemegang klien itu tetap tidak melihat
+-- (M4 §6 "own clients"; `canReadIntake` juga menolak staff di app-layer).
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-AM1","division":"Account","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM clients WHERE id='CLI-RLS-0009') <> 0
+  THEN RAISE EXCEPTION 'RLS clients: Account STAFF must NOT read a client they do not own'; END IF;
+END $$;
+
+-- Kontrol negatif 2: divisi eksekusi tidak membaca tabel klien lewat arm ini.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRE9","division":"Creative","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM clients WHERE id='CLI-RLS-0009') <> 0
+  THEN RAISE EXCEPTION 'RLS clients: Creative lead must NOT read clients (arm is Account-only)'; END IF;
+END $$;
+
+-- Kontrol positif: Director (oversight) selalu melihat.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-DIR","director":true}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM clients WHERE id='CLI-RLS-0009') <> 1
+  THEN RAISE EXCEPTION 'RLS clients: Director must read all'; END IF;
+END $$;
+
+RESET ROLE;
 ROLLBACK;
 
 \echo 'rls_checks: PASS'
