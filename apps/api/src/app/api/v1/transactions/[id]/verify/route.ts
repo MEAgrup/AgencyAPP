@@ -24,6 +24,13 @@ interface Body {
   amount?: string;
   received_date?: string;
   proof_of_payment?: string;
+  /**
+   * Optional contract link, attached in the SAME domain transaction as the
+   * verification (M5 §7 Rule 1). The finance page now carries this field inside
+   * the verification form, so the [Lunas] gate (§7 Rule 2) can be satisfied by
+   * the one submit that trips it instead of a separate action nothing linked to it.
+   */
+  contract_attachment?: string;
 }
 
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
@@ -37,6 +44,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       amount: b.amount ?? '',
       receivedDate: b.received_date ?? '',
       proofOfPayment: b.proof_of_payment,
+      contractAttachment: b.contract_attachment,
     });
     // Re-read as the actor so the response reflects post-verification state
     // (payment_status, derived amounts, installment statuses) in one round trip.

@@ -132,6 +132,61 @@ describeDb('read models under RLS (O37)', () => {
     await expect(withClaims(sql, c, (tx) => reminderDashboard(tx))).resolves.toBeDefined();
   });
 
+  /**
+   * QA finance 2026-08-04. `clients_select` had no division arm at all, so every
+   * M5 read that joins `clients` — the reminder dashboard and the "Outstanding, No
+   * Due Date" list, both Finance's own per §8.1 — came back EMPTY for Finance and
+   * only for Finance. Nothing errored; the page just had no rows, which is why it
+   * outlived 20260729032805 (that migration fixed transactions / installments /
+   * payment_verifications and stopped one table short).
+   *
+   * Asserted through the join, not on `clients` directly: a policy that lets
+   * Finance read clients but leaves the dashboard empty for another reason would
+   * still be a broken page.
+   */
+  it('lets Finance read the client behind a transaction — the M5 §6 join (QA 2026-08-04)', async () => {
+    const CLI = 'CLI-ZZR-0001';
+    const TRX = 'TRX-ZZR-0001';
+    const INST = 'INST-ZZR-0001';
+    await sql`
+      insert into clients (id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, payment_intent, created_by)
+      values (${CLI}, 'RLS Finance Fixture', 'Ibu RLS', 'Jakarta', 'Fashion', 'https://shopee/zzr',
+              '9000000.00', '12000000.00', ${OWNER}, ${OWNER}, '[Termin]', ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into transactions (id, client_id, payment_intent_scheme, total_agreed_value,
+                               payment_status, created_by)
+      values (${TRX}, ${CLI}, '[Termin]', '9000000.00', '[Menunggu Verifikasi]', ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into installments (id, transaction_id, installment_no, amount, due_date, status, created_by)
+      values (${INST}, ${TRX}, 1, '9000000.00', current_date, '[Belum Jatuh Tempo]', ${OWNER})
+      on conflict (id) do nothing`;
+
+    try {
+      const asFinance = await withClaims(
+        sql,
+        claims({ employeeId: 'ZZR-FIN', division: 'Finance', level: 'staff' }),
+        (tx) => reminderDashboard(tx),
+      );
+      const seen = [...asFinance.overdue, ...asFinance.upcoming].some((r) => r.installmentId === INST);
+      expect(seen, 'Finance must see the reminder row it is responsible for chasing').toBe(true);
+
+      // Still scoped: an unrelated division sees neither the row nor the client.
+      const asOutsider = await withClaims(
+        sql,
+        claims({ employeeId: OUTSIDER, division: 'Creative', level: 'staff' }),
+        (tx) => reminderDashboard(tx),
+      );
+      expect([...asOutsider.overdue, ...asOutsider.upcoming].some((r) => r.installmentId === INST)).toBe(false);
+    } finally {
+      await sql`delete from installments where id = ${INST}`;
+      await sql`delete from transactions where id = ${TRX}`;
+      await sql`delete from clients where id = ${CLI}`;
+    }
+  });
+
   it('introspects the transition engine under RLS — the sm_edges 500 (QA 2026-08-03)', async () => {
     // `sm_edges` sat in the baseline's "pure internal" group (SELECT revoked from
     // `authenticated`) because its only reader used to be `sm_transition`, a

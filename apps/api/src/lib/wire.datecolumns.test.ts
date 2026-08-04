@@ -62,7 +62,11 @@ describe('O49 — kolom `date` dikirim YYYY-MM-DD, bukan RFC3339', () => {
   const inst: finance.InstallmentRow = {
     id: 'INST-202607-0001',
     installmentNo: 1,
-    amount: 'Rp. 9.000.000,00',
+    // Nilai uang di domain = desimal mentah dari kolom `numeric(15,2)`; wire
+    // mapper yang memformatnya ke IDR rumah (paritas Go `instViews`). Fixture ini
+    // dulu sudah ter-format, yang justru mencerminkan bug-nya.
+    amount: '9000000.00',
+    amountVerified: '0.00',
     dueDate: new Date('2026-07-30T00:00:00.000Z'),
     status: '[Belum Jatuh Tempo]',
     jatuhTempo: false,
@@ -98,7 +102,7 @@ describe('O49 — kolom `date` dikirim YYYY-MM-DD, bukan RFC3339', () => {
       clientId: 'CLI-202607-0001',
       toko: 'Toko A',
       installmentNo: 1,
-      amount: 'Rp. 9.000.000,00',
+      amount: '9000000.00',
       dueDate: new Date('2026-07-30T00:00:00.000Z'),
       daysOverdue: 3,
       salesPicId: '2101180004',
@@ -119,7 +123,7 @@ describe('O49 — kolom `date` dikirim YYYY-MM-DD, bukan RFC3339', () => {
     // orang yang harus menagih.
     const dueDate = new Date('2026-07-30T00:00:00.000Z');
     const row = { installmentId: 'I', transactionId: 'T', clientId: 'C', toko: 'X',
-      installmentNo: 1, amount: 'Rp. 1,00', dueDate, daysOverdue: 0,
+      installmentNo: 1, amount: '1.00', dueDate, daysOverdue: 0,
       salesPicId: 'S', status: '[Jatuh Tempo]', label: '' } as finance.ReminderRow;
     const wire = remindersToWire({ overdue: [row], upcoming: [], outstandingNoDueDate: [] } as finance.ReminderDashboard);
     // tz.dateString adalah fungsi yang sama yang dipakai jalur daysOverdue

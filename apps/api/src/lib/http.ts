@@ -57,6 +57,7 @@ export function mapError(err: unknown): Response {
     err instanceof finance.IncompleteError ||
     err instanceof finance.OverVerificationError ||
     err instanceof finance.ScheduleTotalError ||
+    err instanceof finance.OutstandingTotalError ||
     err instanceof client.IncompleteError ||
     err instanceof account.ValidationError ||
     err instanceof task.ValidationError ||
@@ -129,6 +130,7 @@ export function mapError(err: unknown): Response {
     err instanceof finance.SchemeLockedError ||
     err instanceof finance.SchemeNoScheduleError ||
     err instanceof finance.ScheduleExistsError ||
+    err instanceof finance.NoOutstandingError ||
     err instanceof client.LockedFieldError ||
     err instanceof client.IntentLockedError ||
     err instanceof account.ConflictError ||

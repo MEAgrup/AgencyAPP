@@ -5,12 +5,13 @@ import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import {
   SCHEME_OPTIONS,
-  attachContract,
   changeScheme,
   createSchedule,
   flagBermasalah,
   getBermasalah,
   getTransaction,
+  idrToInput,
+  scheduleOutstanding,
   verify,
   voteBermasalah,
   type BermasalahStatus,
@@ -23,10 +24,21 @@ function formatDate(value: string | null | undefined) {
   return new Date(value).toLocaleDateString('id-ID');
 }
 
+/** Today in the local calendar as YYYY-MM-DD, for `<input type="date">`. */
+function today(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 interface ScheduleRow {
   amount: string;
   due_date: string;
 }
+
+/** Schemes that carry an installment schedule from the start (M5 §4). */
+const SCHEDULED_SCHEMES = new Set(['[Termin]', '[Bayar di Belakang]']);
+const INST_TERVERIFIKASI = '[Terverifikasi]';
+const PAYMENT_LUNAS = '[Lunas]';
 
 export default function TransactionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -38,11 +50,12 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
   const [bermasalah, setBermasalah] = useState<BermasalahStatus | null>(null);
   const [bermasalahError, setBermasalahError] = useState<string | null>(null);
 
-  // Verifikasi
+  // Verifikasi (the contract link lives in this form — see handleVerify)
   const [verifyInstallmentId, setVerifyInstallmentId] = useState('');
   const [verifyAmount, setVerifyAmount] = useState('');
-  const [verifyDate, setVerifyDate] = useState('');
+  const [verifyDate, setVerifyDate] = useState(today());
   const [verifyProof, setVerifyProof] = useState('');
+  const [contractLink, setContractLink] = useState(''); // submitted with the verification
   const [verifySubmitting, setVerifySubmitting] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [verifyMessage, setVerifyMessage] = useState<string | null>(null);
@@ -52,10 +65,12 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
   const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
 
-  // Kontrak
-  const [contractLink, setContractLink] = useState('');
-  const [contractSubmitting, setContractSubmitting] = useState(false);
-  const [contractError, setContractError] = useState<string | null>(null);
+  // Jadwal penagihan kekurangan (M5 §6)
+  const [outstandingRows, setOutstandingRows] = useState<ScheduleRow[]>([{ amount: '', due_date: '' }]);
+  const [outstandingTouched, setOutstandingTouched] = useState(false);
+  const [outstandingSubmitting, setOutstandingSubmitting] = useState(false);
+  const [outstandingError, setOutstandingError] = useState<string | null>(null);
+  const [outstandingMessage, setOutstandingMessage] = useState<string | null>(null);
 
   // Ubah Skema
   const [schemeChoice, setSchemeChoice] = useState<string>(SCHEME_OPTIONS[0]);
@@ -76,14 +91,28 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
     setLoadError(null);
     try {
       const res = await getTransaction(id);
-      setTrx(res.transaction);
-      setContractLink(res.transaction.contract_attachment || '');
+      const t = res.transaction;
+      setTrx(t);
+      setContractLink(t.contract_attachment || '');
+      // The installment being verified is never a free choice: it is whichever
+      // rows are still open. Selecting a settled one could only ever be rejected.
+      const open = t.installments.filter((i) => i.status !== INST_TERVERIFIKASI);
+      setVerifyInstallmentId((current) =>
+        open.some((i) => i.id === current) ? current : (open[0]?.id ?? ''),
+      );
+      // The shortfall schedule must sum EXACTLY to Amount Outstanding, so seed one
+      // row with it — the common case is a single follow-up collection date. Only
+      // while untouched: re-seeding after every reload would overwrite a split the
+      // user is halfway through typing.
+      setOutstandingRows((rows) =>
+        outstandingTouched ? rows : [{ amount: idrToInput(t.amount_outstanding), due_date: rows[0]?.due_date ?? '' }],
+      );
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, outstandingTouched]);
 
   const loadBermasalah = useCallback(async () => {
     setBermasalahError(null);
@@ -100,22 +129,32 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
     loadBermasalah();
   }, [load, loadBermasalah]);
 
+  /**
+   * One submit carries the payment AND the contract link (M5 §7 Rule 1): the
+   * contract is the hard gate before [Lunas] (§7 Rule 2), so keeping it behind its
+   * own button meant the verification that trips the gate failed with nothing on
+   * screen connecting the two. The API attaches it in the same DB transaction.
+   */
   async function handleVerify(e: FormEvent) {
     e.preventDefault();
     setVerifyError(null);
     setVerifyMessage(null);
     setVerifySubmitting(true);
     try {
-      const res = await verify(id, {
+      await verify(id, {
         installment_id: verifyInstallmentId,
         amount: verifyAmount,
         received_date: verifyDate,
         proof_of_payment: verifyProof,
+        contract_attachment: contractLink,
       });
-      setTrx(res.transaction);
       setVerifyMessage('Verifikasi berhasil disimpan.');
       setVerifyAmount('');
       setVerifyProof('');
+      // Re-read instead of trusting the response body: a partial payment can
+      // leave an installment open, change which row is next, and change what the
+      // shortfall card should prefill.
+      await load();
     } catch (err) {
       setVerifyError(errorMessage(err));
     } finally {
@@ -149,17 +188,35 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
     }
   }
 
-  async function handleContract(e: FormEvent) {
+  function addOutstandingRow() {
+    setOutstandingTouched(true);
+    setOutstandingRows((rows) => [...rows, { amount: '', due_date: '' }]);
+  }
+
+  function removeOutstandingRow(idx: number) {
+    setOutstandingTouched(true);
+    setOutstandingRows((rows) => rows.filter((_, i) => i !== idx));
+  }
+
+  function updateOutstandingRow(idx: number, field: keyof ScheduleRow, value: string) {
+    setOutstandingTouched(true);
+    setOutstandingRows((rows) => rows.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+  }
+
+  async function handleOutstandingSchedule(e: FormEvent) {
     e.preventDefault();
-    setContractError(null);
-    setContractSubmitting(true);
+    setOutstandingError(null);
+    setOutstandingMessage(null);
+    setOutstandingSubmitting(true);
     try {
-      await attachContract(id, contractLink);
+      await scheduleOutstanding(id, outstandingRows);
+      setOutstandingMessage('Jadwal penagihan kekurangan berhasil disimpan.');
+      setOutstandingTouched(false);
       await load();
     } catch (err) {
-      setContractError(errorMessage(err));
+      setOutstandingError(errorMessage(err));
     } finally {
-      setContractSubmitting(false);
+      setOutstandingSubmitting(false);
     }
   }
 
@@ -210,7 +267,7 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
     }
   }
 
-  if (loading) return <div className="pageLoading">Memuat...</div>;
+  if (loading && !trx) return <div className="pageLoading">Memuat...</div>;
 
   if (loadError || !trx) {
     return (
@@ -220,6 +277,15 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
       </div>
     );
   }
+
+  // Which schedule surface applies. `[Termin]`/`[Bayar di Belakang]` need their
+  // ORIGINAL schedule (Σ = agreed total) while it is missing; everything else with
+  // money still owed and no open row gets the shortfall schedule (Σ = outstanding).
+  const openInstallments = trx.installments.filter((i) => i.status !== INST_TERVERIFIKASI);
+  const needsOriginalSchedule =
+    SCHEDULED_SCHEMES.has(trx.payment_intent_scheme) && trx.installments.length === 0;
+  const canScheduleOutstanding =
+    !needsOriginalSchedule && trx.payment_status !== PAYMENT_LUNAS && openInstallments.length === 0;
 
   return (
     <div className="stack">
@@ -288,6 +354,7 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                 <tr>
                   <th>No</th>
                   <th>Amount</th>
+                  <th>Terverifikasi</th>
                   <th>Jatuh Tempo</th>
                   <th>Status</th>
                   <th>Tanda</th>
@@ -299,6 +366,7 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
                   <tr key={inst.id}>
                     <td>{inst.installment_no}</td>
                     <td>{inst.amount}</td>
+                    <td>{inst.amount_verified}</td>
                     <td>{formatDate(inst.due_date)}</td>
                     <td><StatusBadge status={inst.status} /></td>
                     <td>{inst.jatuh_tempo ? <span className="badge badge-red">[Jatuh Tempo]</span> : '—'}</td>
@@ -334,22 +402,26 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
           {verifyMessage && <div className="alert alertSuccess" role="status">{verifyMessage}</div>}
           <div className="formRow">
             <div className="field">
-              <label htmlFor="verify-installment">Installment</label>
-              <select
-                id="verify-installment"
-                value={verifyInstallmentId}
-                onChange={(e) => setVerifyInstallmentId(e.target.value)}
-              >
-                <option value="">Langsung (tanpa jadwal)</option>
-                {trx.installments.map((inst) => (
-                  <option key={inst.id} value={inst.id}>
-                    #{inst.installment_no} &mdash; {inst.amount} ({inst.status})
-                  </option>
-                ))}
-              </select>
+              <label htmlFor="verify-installment">Termin</label>
+              {openInstallments.length > 0 ? (
+                <select
+                  id="verify-installment"
+                  value={verifyInstallmentId}
+                  onChange={(e) => setVerifyInstallmentId(e.target.value)}
+                  required
+                >
+                  {openInstallments.map((inst) => (
+                    <option key={inst.id} value={inst.id}>
+                      #{inst.installment_no} &mdash; {inst.amount} (jatuh tempo {formatDate(inst.due_date)})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input id="verify-installment" value="Langsung (tanpa jadwal termin)" readOnly disabled />
+              )}
             </div>
             <div className="field">
-              <label htmlFor="verify-amount">Amount</label>
+              <label htmlFor="verify-amount">Jumlah Diterima</label>
               <input
                 id="verify-amount"
                 type="number"
@@ -381,19 +453,42 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
               />
             </div>
           </div>
+          {/* Contract link lives in this form, not behind its own button: it is the
+              hard gate before [Lunas] (M5 §7 Rule 2), so it belongs to the submit
+              that needs it. Saved in the same transaction as the verification. */}
+          <div className="field">
+            <label htmlFor="contract-link">Link Kontrak (wajib sebelum pelunasan)</label>
+            <input
+              id="contract-link"
+              value={contractLink}
+              onChange={(e) => setContractLink(e.target.value)}
+              placeholder="https://..."
+            />
+          </div>
           <div>
             <button type="submit" className="btn btnPrimary" disabled={verifySubmitting}>
-              {verifySubmitting ? 'Memproses...' : 'Verifikasi'}
+              {verifySubmitting ? 'Memproses...' : 'Simpan Verifikasi'}
             </button>
           </div>
+          <p className="muted" style={{ fontSize: 13 }}>
+            Pembayaran sebagian tetap tercatat: sisa tagihan muncul sebagai Amount Outstanding dan
+            transaksi tetap ada di antrean Finance sampai [Lunas].
+          </p>
         </form>
       </section>
 
-      {trx.installments.length === 0 && (
+      {/* Only [Termin] / [Bayar di Belakang] carry an original schedule. It used to
+          render for every scheme with no installments, so on a Lunas / Bayar
+          Sebagian deal the only thing this form could do was 409 with
+          `[skema pembayaran ini tidak memakai termin]`. */}
+      {needsOriginalSchedule && (
         <section className="card">
           <div className="cardHeader">
             <h2>Jadwal Termin</h2>
           </div>
+          <p className="muted" style={{ fontSize: 13 }}>
+            Total jadwal harus sama dengan nilai transaksi ({trx.total_agreed_value}).
+          </p>
           <form className="form" onSubmit={handleSchedule}>
             {scheduleError && <div className="alert alertError" role="alert">{scheduleError}</div>}
             {scheduleRows.map((row, idx) => (
@@ -439,28 +534,70 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
         </section>
       )}
 
-      <section className="card">
-        <div className="cardHeader">
-          <h2>Kontrak</h2>
-        </div>
-        <form className="form" onSubmit={handleContract}>
-          {contractError && <div className="alert alertError" role="alert">{contractError}</div>}
-          <div className="field">
-            <label htmlFor="contract-link">Link Kontrak</label>
-            <input
-              id="contract-link"
-              required
-              value={contractLink}
-              onChange={(e) => setContractLink(e.target.value)}
-            />
+      {/* The shortfall: Finance dates what is still owed so it starts surfacing on
+          the Reminder Pembayaran dashboard (M5 §6) instead of relying on somebody
+          remembering. Σ must equal Amount Outstanding — the server checks it. */}
+      {canScheduleOutstanding && (
+        <section className="card">
+          <div className="cardHeader">
+            <h2>Jadwal Penagihan Kekurangan</h2>
           </div>
-          <div>
-            <button type="submit" className="btn btnPrimary" disabled={contractSubmitting}>
-              {contractSubmitting ? 'Menyimpan...' : 'Simpan Kontrak'}
-            </button>
-          </div>
-        </form>
-      </section>
+          <p className="muted" style={{ fontSize: 13 }}>
+            Kekurangan pembayaran saat ini <strong>{trx.amount_outstanding}</strong>. Total jadwal di
+            bawah harus sama dengan jumlah tersebut; setelah disimpan, tagihan ini masuk ke Reminder
+            Pembayaran dan ditandai [Jatuh Tempo] bila lewat tanggal.
+          </p>
+          <form className="form" onSubmit={handleOutstandingSchedule}>
+            {outstandingError && <div className="alert alertError" role="alert">{outstandingError}</div>}
+            {outstandingMessage && (
+              <div className="alert alertSuccess" role="status">{outstandingMessage}</div>
+            )}
+            {outstandingRows.map((row, idx) => (
+              <div className="formRow" key={idx}>
+                <div className="field">
+                  <label htmlFor={`out-amount-${idx}`}>Nilai Kekurangan</label>
+                  <input
+                    id={`out-amount-${idx}`}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    required
+                    value={row.amount}
+                    onChange={(e) => updateOutstandingRow(idx, 'amount', e.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor={`out-due-${idx}`}>Jadwal Penagihan</label>
+                  <input
+                    id={`out-due-${idx}`}
+                    type="date"
+                    required
+                    value={row.due_date}
+                    onChange={(e) => updateOutstandingRow(idx, 'due_date', e.target.value)}
+                  />
+                </div>
+                {outstandingRows.length > 1 && (
+                  <button
+                    type="button"
+                    className="btn btnGhost btnSm"
+                    onClick={() => removeOutstandingRow(idx)}
+                  >
+                    Hapus
+                  </button>
+                )}
+              </div>
+            ))}
+            <div className="row" style={{ gap: 10 }}>
+              <button type="button" className="btn btnSecondary btnSm" onClick={addOutstandingRow}>
+                Tambah Baris
+              </button>
+              <button type="submit" className="btn btnPrimary" disabled={outstandingSubmitting}>
+                {outstandingSubmitting ? 'Menyimpan...' : 'Simpan Jadwal Penagihan'}
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
 
       <section className="card">
         <div className="cardHeader">
