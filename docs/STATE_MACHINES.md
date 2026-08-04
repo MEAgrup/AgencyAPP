@@ -55,6 +55,7 @@ All else blocked: `[transisi status tidak diizinkan]`.
 - `[Jatuh Tempo]` = parallel flag per overdue installment (not a status); clears on verification.
 - `[Bermasalah]` = dispute/reversal flag; resolution needs joint SPV Finance + SPV Account approval (M5-OA-5).
 - **Routing gate:** Client releases to Account on first transition into `[Terverifikasi - Sebagian]` or `[Lunas]`. Before that, record visible to Finance only.
+- **Transaction change (`TCR-`, M5-OA-7 — owner decision 2026-08-04, `DECISIONS.md`).** Changing the payment scheme / open schedule does **not** touch this machine: `payment_status` is untouched by the change, and `TCR-.status` (pending → approved/rejected/cancelled) is the request row's own field, not a machine status — the same modelling as `lead_delete_requests` and `demo_task_block_requests`. Two doors: SPV/Head Finance **files**, Director **ACCs** (only the ACC applies it). One pending per Transaction, guaranteed by the index `uq_tcr_one_pending`. Allowed until `[Lunas]` — verified installments and verification records are never replaced, so only the open part of the schedule is rewritten, and its Σ must equal Amount Outstanding.
 
 ## 5. Installment `INST-` (M5)
 `[Belum Jatuh Tempo]` → `[Jatuh Tempo]` (due date passed unverified) → `[Terverifikasi]`; or `[Belum Jatuh Tempo]` → `[Terverifikasi]` directly. Transaction = `[Lunas]` only when ALL installments `[Terverifikasi]`.

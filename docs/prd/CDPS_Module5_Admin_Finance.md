@@ -67,7 +67,7 @@ Budi (Sales) set Alpha Digital's Payment Intent to `[Termin]` (Module 4 §5 exam
 2. **Bayar Sebagian** — one partial verification expected upfront, remainder has **no fixed schedule** (client pays "whenever," tracked as Amount Outstanding with no due date / no `[Jatuh Tempo]` flag — there's nothing to be overdue against).
 3. **Termin** — requires an **Installment schedule** (`INST-…`, child of the Transaction): N installments, each with amount + due date, set by Sales/Finance at intent time. Each installment is verified independently; `[Jatuh Tempo]` triggers per-installment if its due date passes unverified.
 4. **Bayar di Belakang** (post-paid) — client receives service first, payment expected after an agreed point (e.g. after first month's results). System still creates a single Installment with a due date = the agreed post-paid date, so it surfaces on the reminder dashboard like Termin once that date approaches.
-5. Switching schemes after intent (e.g. client renegotiates Lunas → Termin) requires Finance to log the change with reason (immutable history) — does not delete the original Transaction.
+5. Switching schemes after intent (e.g. client renegotiates Lunas → Termin) requires Finance to log the change with reason (immutable history) — does not delete the original Transaction. **REVISED 2026-08-04 (M5-OA-7, owner decision):** SPV/Head Finance *files* the change; it takes effect only on **Director approval**. It is allowed at any point before `[Lunas]` — including after payments have been verified — but only the still-open part of the schedule is replaced, and the replacement must sum to **Amount Outstanding**. Verified installments, verification records and Total Agreed Value are never touched.
 
 ### Flow
 1. At Payment Intent (Module 4 §5), Sales/Finance selects scheme. If `Termin` or `Bayar di Belakang`, schedule is entered (N installments × amount × due date, must sum to agreed total — system validates with `[total termin tidak sama dengan nilai transaksi]`).
@@ -139,14 +139,15 @@ Alpha Digital's Installment 2 (due 17 June, Rp 15.000.000) is unverified by 20 J
 | Role | Capabilities in Module 5 |
 |---|---|
 | **Admin & Finance (Staff)** | Verify payments (amount, date, proof); set/update Payment Status; manage Installment schedule edits (logged); flag `[Bermasalah]`; own the reminder dashboard. |
-| **Admin & Finance (Lead/Head)** | All Staff capabilities across all Transactions; jointly resolves `[Bermasalah]` flags with Account's SPV (M5-OA-5). |
+| **Admin & Finance (Lead/Head)** | All Staff capabilities across all Transactions; jointly resolves `[Bermasalah]` flags with Account's SPV (M5-OA-5); **files** transaction change requests (`TCR-…`, M5-OA-7) — filing is not actioning. |
 | **Sales (PIC)** | Read own clients' Payment Status/Installments; chase overdue installments (relationship); cannot edit verification. |
 | **Sales Lead/Head** | Read all sales' Transactions. |
 | **Account** | Read Payment Status only (gate check) — no edit access; sees the client once released (§5). |
 | **Org Development (OD)** | Read-only all Transactions + audit logs. |
-| **Director** | Full view; resolves disputed/`[Bermasalah]` cases at final authority. |
+| **Director** | Full view; resolves disputed/`[Bermasalah]` cases at final authority; **sole authority to approve a transaction change** (M5-OA-7) — approval is what applies it. |
 
 ### 8.2 Features
+0. Transaction change request (`TCR-…`) filed by SPV/Head Finance, applied only on Director ACC (M5-OA-7).
 1. Transaction record + Payment Status lifecycle (state machine).
 2. Payment verification (receipt confirmation against agreed total).
 3. 4-scheme handling: Lunas, Bayar Sebagian, Termin, Bayar di Belakang (with Installment sub-entity).
@@ -192,7 +193,14 @@ Alpha Digital's Installment 2 (due 17 June, Rp 15.000.000) is unverified by 20 J
   - **Precedence clarified (closes a cross-module gap):** the payment-verification gate (M5-OA-1) and the 7-day contract expectation are **parallel, not sequential** — if payment verifies before the contract is signed, Account still starts on schedule; the contract deadline is a compliance follow-up, never a blocker to starting delivery.
 - **M5-OA-4 (Who chases overdue installments) — ✅ Confirmed as proposed.** Sales chases (relationship owner); Finance records the result.
 - **M5-OA-5 (`[Bermasalah]` resolution authority) — ✅ Resolved, stricter than originally proposed.** Both **SPV Finance and SPV Account** must jointly approve next steps on a `[Bermasalah]` flag (not Finance Lead alone) — escalates to Director only if the two SPVs disagree or the case is severe enough to warrant it.
-- **M5-OA-6 (Scheme change mid-flight) — ✅ Confirmed, authority made explicit.** Allowed with a logged reason (doesn't delete the original Transaction), and requires minimum **SPV/Head Finance** approval to action.
+- **M5-OA-6 (Scheme change mid-flight) — ✅ Confirmed, authority made explicit.** Allowed with a logged reason (doesn't delete the original Transaction), and requires minimum **SPV/Head Finance** approval to action. — ⚠️ **SUPERSEDED on 2026-08-04 by M5-OA-7:** SPV/Head Finance is now the floor to *raise* the change, not the authority to *action* it.
+- **M5-OA-7 (Transaction change requires Director ACC) — ✅ New, owner decision 2026-08-04 (QA halaman finance).** A client can change payment method mid-deal, so Finance must be able to change a live Transaction — but the change must not become real on Finance's word alone.
+  - **Two-step, not one.** SPV/Head Finance **files** a change request (`TCR-…`): target scheme, mandatory reason, and — for `Termin` / `Bayar di Belakang` — the replacement schedule. Nothing about the Transaction moves while it waits. A **Director** approves (applies it) or rejects (leaves it untouched); the requester may withdraw their own filing while it is pending. A Director's own filing applies immediately — they are the approving authority, so a second confirmation step would be ceremony, not control. Finance **staff** may not file at all.
+  - **Mid-flight now means mid-flight.** The change is allowed at any point **before `[Lunas]`**, including after payments have been verified — that is the owner's actual case (client pays a deposit, *then* renegotiates). A settled Transaction is refused: `[transaksi sudah lunas, skema pembayaran tidak bisa diubah]`.
+  - **Verified money is never re-described.** `[Terverifikasi]` installments and every verification record survive the change untouched; only the still-open part of the schedule is replaced, and **Σ of the replacement must equal Amount Outstanding** (not the agreed total), so `Σ installments = Total Agreed Value` still holds afterwards. New installments continue the numbering — a retired number is never reused. `Total Agreed Value` stays immutable: this is the payment-**method** door, not a renegotiation of the deal's value.
+  - **Re-validated at approval, not at filing.** If a payment lands while the filing waits, the filed schedule no longer matches Amount Outstanding and the approval is refused (`[total jadwal penagihan tidak sama dengan kekurangan pembayaran]`) rather than applied against stale numbers; the filing stays pending so Finance can re-file.
+  - **One filing at a time** per Transaction (`[sudah ada pengajuan perubahan yang menunggu persetujuan direktur]`), and a decided filing cannot be decided again (`[pengajuan perubahan sudah diputuskan]`).
+  - **Trail + notifications.** Filing, verdict and application each append their own audit row (the replaced schedule is captured in the `before`, so the previous schedule is reconstructible). Directors are notified when a filing arrives (`m5.transaction.change_requested`), the requester when it is decided (`m5.transaction.change_decided`).
 
 ---
 

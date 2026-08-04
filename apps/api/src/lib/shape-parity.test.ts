@@ -378,6 +378,8 @@ const WIRE_TO_FE: Record<string, string> = {
   OutstandingRowWire: 'finance.ts::OutstandingRow',
   RemindersWire: 'finance.ts::RemindersResponse',
   FinanceScanResultWire: 'finance.ts::ScanResult',
+  SchemeChangeScheduleItemWire: 'finance.ts::SchemeChangeScheduleItem',
+  SchemeChangeRequestWire: 'finance.ts::SchemeChangeRequest',
   // M6 account & service
   IntakeClientWire: 'account.ts::IntakeClient',
   AMWorkloadWire: 'account.ts::AMWorkload',

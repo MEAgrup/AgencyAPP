@@ -39,6 +39,12 @@ export const EVENTS = {
   // cannot function if the Head is never told a request is waiting.
   LeadDeleteRequested: 'm1.lead.delete_requested', // -> Head of the lead's origin division
   LeadDeleteDecided: 'm1.lead.delete_decided', // -> Requester
+  // Transaction change approval (owner decision 2026-08-04, DECISIONS.md +
+  // M5-OA-7). Same justification as the two above: SPV/Head Finance may only
+  // REQUEST a payment-scheme change, so the Director has to be told one is
+  // waiting, and the requester has to be told how it was decided.
+  TransactionChangeRequested: 'm5.transaction.change_requested', // -> Directors
+  TransactionChangeDecided: 'm5.transaction.change_decided', // -> Requester
 } as const;
 
 /** A cataloged event type. */
@@ -77,6 +83,8 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
   [EVENTS.HoursLoggedReminder]: { description: 'Hours Logged end-of-day reminder', resolver: 'explicit' },
   [EVENTS.LeadDeleteRequested]: { description: 'Permintaan hapus lead diajukan', resolver: 'leadsOfDivision' },
   [EVENTS.LeadDeleteDecided]: { description: 'Permintaan hapus lead di-ACC/tolak', resolver: 'explicit' },
+  [EVENTS.TransactionChangeRequested]: { description: 'Pengajuan perubahan transaksi menunggu ACC Direktur', resolver: 'explicit' },
+  [EVENTS.TransactionChangeDecided]: { description: 'Pengajuan perubahan transaksi di-ACC/tolak', resolver: 'explicit' },
 };
 
 /** All registered event types (introspection / tests). */

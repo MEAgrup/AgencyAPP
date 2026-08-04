@@ -54,6 +54,7 @@ export const PREFIXES = {
   PERF: { entity: 'Performance Score', module: 'M14' },
   MSV: { entity: 'Master Service List version', module: 'Admin' },
   DBR: { entity: 'Demo Block Request', module: 'demo' },
+  TCR: { entity: 'Transaction Change Request', module: 'M5' },
 } as const satisfies Record<string, PrefixInfo>;
 
 /** A registered prefix string (e.g. 'CLI', 'TRX'). */

@@ -14,6 +14,7 @@
 | Client | `CLI-` | — | M0→M4 | At `Closed-Success` (winning attempt) |
 | Transaction | `TRX-` | CLI | M0→M5 | At closing |
 | Installment | `INST-` | TRX | M5 | Termin scheme: schedule set at intent time |
+| Transaction change request | `TCR-` | TRX | M5 | SPV/Head Finance mengajukan perubahan skema/jadwal (alasan wajib); **ACC Direktur** yang menerapkannya. **Revisi aturan M5-OA-6 → M5-OA-7** — keputusan pemilik 2026-08-04, lihat `DECISIONS.md`. Satu pending per TRX (`uq_tcr_one_pending`); jadwal pengganti Σ = Amount Outstanding, termin terverifikasi tidak disentuh |
 | Service | `SVC-`* | CLI | M0→M6 | At closing, one per service line; upsell = new Service; errors via Void Service (M4-OA-5) |
 | Strategy & Plan | `STR-` | SVC | M6 | Plan-gated services, before Brief creation |
 | Brief | `BRF-` | SVC | M6 | AM breaks a Service down; one Service → many Briefs across divisions |

@@ -2191,6 +2191,69 @@ export function bermasalahStatusToWire(s: finance.BermasalahStatusView): Bermasa
   };
 }
 
+/**
+ * One filed transaction change (M5-OA-7) as web-internal's
+ * `SchemeChangeRequest` expects it. Every amount — including the ones inside
+ * `schedule` — is pre-formatted `Rp. X.XXX.XXX,00` like the rest of M5 (rule
+ * #7), because this body is only ever RENDERED. A re-filing does not echo it
+ * back: the form posts freshly typed plain numbers, which the server re-parses.
+ */
+export interface SchemeChangeScheduleItemWire {
+  amount: string;
+  due_date: string;
+}
+
+export interface SchemeChangeRequestWire {
+  id: string;
+  transaction_id: string;
+  from_scheme: string;
+  to_scheme: string;
+  schedule: SchemeChangeScheduleItemWire[];
+  amount_outstanding: string;
+  reason: string;
+  status: string;
+  decision_note: string;
+  requested_by: string;
+  resolved_by: string;
+  resolved_at: string | null;
+  created_at: string;
+  // Joined context — present only on the queue projection, always emitted so a
+  // missing key never blanks the page (O43 house stance).
+  client_id: string;
+  toko: string;
+  total_agreed_value: string;
+  payment_status: string;
+  requested_by_nama: string;
+  resolved_by_nama: string;
+}
+
+export function schemeChangeRequestToWire(
+  r: finance.SchemeChangeRequest | finance.SchemeChangeQueueRow,
+): SchemeChangeRequestWire {
+  const q = r as finance.SchemeChangeQueueRow;
+  return {
+    id: r.id,
+    transaction_id: r.transactionId,
+    from_scheme: r.fromScheme,
+    to_scheme: r.toScheme,
+    schedule: r.schedule.map((s) => ({ amount: idr(s.amount), due_date: s.dueDate })),
+    amount_outstanding: idr(r.amountOutstanding),
+    reason: r.reason,
+    status: r.status,
+    decision_note: r.decisionNote,
+    requested_by: r.requestedBy,
+    resolved_by: r.resolvedBy,
+    resolved_at: r.resolvedAt ? r.resolvedAt.toISOString() : null,
+    created_at: r.createdAt.toISOString(),
+    client_id: q.clientId ?? '',
+    toko: q.toko ?? '',
+    total_agreed_value: q.totalAgreedValue ? idr(q.totalAgreedValue) : '',
+    payment_status: q.paymentStatus ?? '',
+    requested_by_nama: q.requestedByNama ?? '',
+    resolved_by_nama: q.resolvedByNama ?? '',
+  };
+}
+
 /** One reminder row as web-internal's `ReminderRow` expects it. */
 export interface ReminderRowWire {
   client_id: string;

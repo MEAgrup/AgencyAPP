@@ -10,8 +10,8 @@ import {
 } from './notification';
 
 describe('frozen catalog', () => {
-  it('has exactly 17 events — 15 frozen + the 2 logged lead-delete additions', () => {
-    expect(events()).toHaveLength(17);
+  it('has exactly 19 events — 15 frozen + 2 lead-delete + 2 transaction-change', () => {
+    expect(events()).toHaveLength(19);
   });
 
   it('matches the Go EventType string values verbatim', () => {
@@ -49,6 +49,20 @@ describe('frozen catalog', () => {
     expect(CATALOG[EVENTS.LeadDeleteRequested].resolver).toBe('leadsOfDivision');
     expect(CATALOG[EVENTS.LeadDeleteDecided].resolver).toBe('explicit');
     expect(events().filter((e) => e.startsWith('m1.lead.delete'))).toEqual(added);
+  });
+
+  it('carries exactly the two logged transaction-change additions and nothing else', () => {
+    // Owner decision 2026-08-04 (M5-OA-7): a payment-scheme change filed by
+    // SPV/Head Finance only takes effect on Director ACC, so the Director must
+    // be told one is waiting and the requester must be told the verdict.
+    const added = ['m5.transaction.change_requested', 'm5.transaction.change_decided'];
+    expect(EVENTS.TransactionChangeRequested).toBe('m5.transaction.change_requested');
+    expect(EVENTS.TransactionChangeDecided).toBe('m5.transaction.change_decided');
+    // 'explicit': Director is a LAYERED role (employee_layered_roles), not the
+    // lead of a division, so `leadsOfDivision` could never resolve to them.
+    expect(CATALOG[EVENTS.TransactionChangeRequested].resolver).toBe('explicit');
+    expect(CATALOG[EVENTS.TransactionChangeDecided].resolver).toBe('explicit');
+    expect(events().filter((e) => e.startsWith('m5.transaction.change'))).toEqual(added);
   });
 
   it('every event carries a description and a valid resolver', () => {
