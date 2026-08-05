@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
+import { isAccountLead, isAccountStaff } from '@/lib/account';
 import {
   DIVISIONS,
   TASK_STATUSES,
@@ -20,6 +22,14 @@ type ViewMode = 'mine' | 'division';
 const EXECUTABLE_TYPES = new Set(['brief', 'asset']);
 
 export default function TasksListPage() {
+  const { role } = useAuth();
+  // An AM landing here looking for "how do I onboard my new client" is looking in
+  // the wrong module: M12 executes work that ALREADY exists as a Brief or Asset,
+  // and a Brief is only born from a Service in M6 §5. Rather than grow a second
+  // onboarding UI here (a second copy of the §4/§5 gate order), point at the one
+  // place that owns it.
+  const showOnboardingPointer = isAccountStaff(role) || isAccountLead(role);
+
   const [mode, setMode] = useState<ViewMode>('mine');
   const [division, setDivision] = useState<string>('');
   const [assigneeInput, setAssigneeInput] = useState('');
@@ -78,6 +88,25 @@ export default function TasksListPage() {
           di sisi klien; tidak ada satu endpoint gabungan.
         </p>
       </div>
+
+      {showOnboardingPointer && (
+        <section className="card">
+          <div className="cardHeader">
+            <h2>Onboarding klien baru?</h2>
+          </div>
+          <p className="muted" style={{ fontSize: 13 }}>
+            Halaman ini mengeksekusi task yang <strong>sudah ada</strong>. Task lahir dari Brief, dan Brief
+            lahir dari layanan klien (M6 §5) &mdash; jadi klien berstatus <strong>[Awaiting Onboarding]</strong>{' '}
+            ditangani di antrean layanan, bukan di sini: buat Strategy &amp; Plan (untuk layanan plan-gated)
+            atau langsung Brief (layanan Direct).
+          </p>
+          <div>
+            <Link href="/account" className="btn btnPrimary btnSm">
+              Buka Antrean Layanan Klien
+            </Link>
+          </div>
+        </section>
+      )}
 
       <section className="card">
         <div className="row" style={{ gap: 8 }}>

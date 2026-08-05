@@ -83,6 +83,29 @@ export interface StrategyRequirement {
   reason: string;
 }
 
+/**
+ * One Service in the AM's personal queue (M6 §3 Rule 4) — GET /services and
+ * GET /services/{id}. No key is omitempty on this endpoint: `strategy_id` /
+ * `strategy_status` / `assigned_am_id` arrive as explicit null, because "no Plan
+ * yet" is precisely the state the onboarding UI must react to.
+ */
+export interface ServiceQueueRow {
+  service_id: string;
+  client_id: string;
+  toko: string;
+  nama_pic: string;
+  name: string;
+  status: string;
+  requires_strategy_plan: boolean; // EFFECTIVE gate (override ∨ MSL pin)
+  pinned_requires_strategy_plan: boolean;
+  overridden: boolean;
+  assigned_am_id: string | null;
+  strategy_id: string | null;
+  strategy_status: string | null;
+  brief_count: number;
+  released_to_account_at: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Cluster 3 — Brief breakdown & dispatch (brief.go)
 // ---------------------------------------------------------------------------
@@ -267,6 +290,88 @@ export function assignAM(clientId: string, amId: string): Promise<Assignment> {
 
 export function reassignAM(clientId: string, amId: string, reason: string): Promise<Assignment> {
   return api.post<Assignment>(`/clients/${clientId}/reassign-am`, { am_id: amId, reason });
+}
+
+// ---------------------------------------------------------------------------
+// Service queue (§3 Rule 4) — API + the derived next step
+// ---------------------------------------------------------------------------
+
+/** GET /services — every Service the actor may see, with its client + plan gate. */
+export function listServiceQueue(): Promise<{ data: ServiceQueueRow[] }> {
+  return api.get<{ data: ServiceQueueRow[] }>('/services');
+}
+
+/** GET /services/{id} — one Service (status + EFFECTIVE plan gate + its Plan). */
+export function getService(serviceId: string): Promise<ServiceQueueRow> {
+  return api.get<ServiceQueueRow>(`/services/${serviceId}`);
+}
+
+/** Service lifecycle labels (STATE_MACHINES §6) — UI gating only. */
+export const SERVICE_AWAITING_ONBOARDING = '[Awaiting Onboarding]';
+export const SERVICE_STRATEGY_APPROVED = '[Strategy Approved]';
+export const SERVICE_BRIEFED = '[Briefed]';
+export const SERVICE_IN_EXECUTION = '[In Execution]';
+export const SERVICE_VOIDED = '[Cancelled — Service Voided]';
+
+/**
+ * What the AM has to do next on one Service. Derived, never stored — and derived
+ * HERE rather than server-side so there is exactly one copy of the §4/§5 gate
+ * order in the domain (the write paths) and one copy in the UI that only decides
+ * which button to show. `kind` drives the control; `label` is the button text.
+ *
+ * The order matters and mirrors §2 / §4 Rule 5 / §5 Rule 5 exactly:
+ *   plan-gated: draft Plan → submit → SPV approves → create Brief;
+ *   Direct:     create Brief straight away (no Plan record ever exists, §4 Rule 6).
+ */
+export type OnboardingStepKind =
+  | 'draft_strategy'
+  | 'submit_strategy'
+  | 'await_approval'
+  | 'create_brief'
+  | 'monitor'
+  | 'none';
+
+export interface OnboardingStep {
+  kind: OnboardingStepKind;
+  label: string;
+}
+
+export function nextOnboardingStep(s: ServiceQueueRow): OnboardingStep {
+  if (s.status === SERVICE_VOIDED) {
+    return { kind: 'none', label: 'Service di-void' };
+  }
+  if (s.status === SERVICE_AWAITING_ONBOARDING) {
+    // Plan-gated (§4): the Plan must exist, be submitted, and be approved before
+    // any Brief may be created (§4 Rule 5).
+    if (s.requires_strategy_plan) {
+      if (s.strategy_id === null) {
+        return { kind: 'draft_strategy', label: 'Buat Strategy & Plan' };
+      }
+      if (s.strategy_status === STRATEGY_DRAFTING) {
+        return { kind: 'submit_strategy', label: 'Ajukan Plan untuk persetujuan' };
+      }
+      if (s.strategy_status === STRATEGY_SUBMITTED) {
+        return { kind: 'await_approval', label: 'Menunggu persetujuan SPV' };
+      }
+      // An approved Plan whose Service has not caught up should not happen (the
+      // approval drives both in one transaction, §6a) — treat as briefable.
+      return { kind: 'create_brief', label: 'Buat Brief' };
+    }
+    // Direct path (§5 Rule 3): straight to Brief creation.
+    return { kind: 'create_brief', label: 'Buat Brief (Direct)' };
+  }
+  if (s.status === SERVICE_STRATEGY_APPROVED) {
+    return { kind: 'create_brief', label: 'Buat Brief' };
+  }
+  // [Briefed] / [In Execution] / terminal roll-up — work is dispatched; the AM
+  // monitors and reviews it, there is nothing left to onboard.
+  return { kind: 'monitor', label: 'Pantau Brief' };
+}
+
+/** True while a Service still needs onboarding work — the queue proper. */
+export function needsOnboarding(s: ServiceQueueRow): boolean {
+  const step = nextOnboardingStep(s).kind;
+  return step !== 'monitor' && step !== 'none';
 }
 
 // ---------------------------------------------------------------------------

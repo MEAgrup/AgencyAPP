@@ -277,6 +277,49 @@ export function strategyRequirementToWire(r: account.StrategyRequirement): Strat
   };
 }
 
+/**
+ * module6_account.ServiceQueueRow — one Service in an AM's personal queue (§3
+ * Rule 4). NO key is omitted: `strategy_id`/`strategy_status` are sent as
+ * explicit `null` for a Service without a Plan, because a MISSING key is the O43
+ * failure mode (the page renders blank while the route answers 200), and here
+ * "no Plan yet" is exactly the state the UI must react to.
+ */
+export interface ServiceQueueRowWire {
+  service_id: string;
+  client_id: string;
+  toko: string;
+  nama_pic: string;
+  name: string;
+  status: string;
+  requires_strategy_plan: boolean;
+  pinned_requires_strategy_plan: boolean;
+  overridden: boolean;
+  assigned_am_id: string | null;
+  strategy_id: string | null;
+  strategy_status: string | null;
+  brief_count: number;
+  released_to_account_at: string | null;
+}
+
+export function serviceQueueRowToWire(r: account.ServiceQueueRow): ServiceQueueRowWire {
+  return {
+    service_id: r.serviceId,
+    client_id: r.clientId,
+    toko: r.toko,
+    nama_pic: r.namaPic,
+    name: r.name,
+    status: r.status,
+    requires_strategy_plan: r.requiresStrategyPlan,
+    pinned_requires_strategy_plan: r.pinnedRequiresStrategyPlan,
+    overridden: r.overridden,
+    assigned_am_id: r.assignedAmId,
+    strategy_id: r.strategyId,
+    strategy_status: r.strategyStatus,
+    brief_count: r.briefCount,
+    released_to_account_at: r.releasedToAccountAt ? r.releasedToAccountAt.toISOString() : null,
+  };
+}
+
 /** Request body → StrategyInput (snake_case wire → camelCase domain). */
 export function toStrategyInput(b: {
   objective?: string;
