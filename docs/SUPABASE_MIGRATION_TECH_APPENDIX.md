@@ -170,6 +170,54 @@ supabase/migrations/*.sql | sort)` di CI tetap menerapkan urutan yang sama.
 > Diperbaiki 2026-07-30. **Untuk penyelarasan berikutnya: petakan per makna, jangan per
 > nomor** — periksa isi migrasi tujuan benar-benar membuat hal yang dibicarakan komentar.
 
+### A.7b Penyelarasan RONDE KEDUA (dieksekusi 2026-08-05)
+
+Drift yang sama muncul lagi, sebabnya sama: empat migrasi 2026-08-03/04 di-apply ke live lewat
+`apply_migration` (versi = timestamp saat apply), sedangkan berkas repo memakai nomor yang
+dipilih penulisnya. Ditemukan oleh **pemilik** saat menjalankan `supabase migration list
+--linked` sebelum `db push` — gate "STOP kalau ada versi remote yang tak dikenal lokal"
+bekerja sebagaimana mestinya.
+
+Arah tetap **O38 opsi (A): repo mengikuti live**, dipetakan **1:1 berdasarkan nama migrasi**
+yang dibaca dari `supabase_migrations.schema_migrations.name` (bukan tebakan, bukan urutan):
+
+| Lama (repo) | Baru (= versi live) | Nama |
+|---|---|---|
+| `20260803120000` | `20260803123327` | `rls_sm_edges_read_path` |
+| `20260804035500` | `20260804073744` | `rls_finance_client_scope` |
+| `20260804061500` | `20260805022245` | `campaign_picker` |
+| `20260804154000` | `20260805022807` | `campaign_picker_all_statuses` |
+
+**Dua berkas yang BELUM ter-apply di mana pun ikut di-rename, dan itu keputusan tersendiri:**
+
+| Lama (repo) | Baru | Nama |
+|---|---|---|
+| `20260804170000` | `20260805030000` | `employee_picker` |
+| `20260804180000` | `20260805030100` | `rls_account_lead_client_scope` |
+
+Alasannya: sesudah keempat rename di atas, versi live terakhir adalah `20260805022807`,
+sehingga dua berkas `202608041…` itu akan menjadi **out-of-order** terhadap riwayat remote —
+`db push` mempersoalkan berkas lokal yang harus disisipkan SEBELUM migrasi terakhir di remote
+dan menuntut `--include-all`, flag yang pada keadaan drift justru berbahaya. Karena keduanya
+belum tercatat di riwayat mana pun, menggeser nomornya **gratis** dan membuat push berikutnya
+kembali menjadi "dua migrasi baru di ujung" — tanpa flag khusus.
+
+**Urutan lexicographic lestari DAN diverifikasi, bukan diasumsikan.** Rename mengubah urutan
+apply pada DB baru: `employee_picker` kini SESUDAH kedua picker campaign, dan
+`rls_account_lead_client_scope` tetap **sesudah** `rls_finance_client_scope` — yang terakhir ini
+load-bearing, karena keduanya menulis ulang SELURUH policy `clients_select`, jadi urutan
+terbalik akan menghapus arm Finance tanpa suara. Dibuktikan dengan **rebuild dari nol** (50
+migrasi + seed): `clients_select` berakhir dengan arm Finance DAN arm `jwt_is_lead() AND
+jwt_division() = 'Account'`, ketiga fungsi `private.*` picker ada, 54 tabel, 4 invariant SQL
+PASS, `@cdps/domain` 623 + `apps/api` 318 hijau.
+
+**23 rujukan versi di kode/test/header migrasi diperbarui** — dan sesuai peringatan di atas
+("petakan per makna, jangan per nomor") setiap rujukan diaudit terhadap ISI migrasi tujuannya,
+plus diverifikasi lewat `git log --all --diff-filter=A` bahwa keenam nomor baru **belum pernah**
+dipakai untuk migrasi lain (jadi jebakan `…0005` pra-O38 tidak berlaku di sini).
+`docs/DECISIONS.md` **sengaja TIDAK ditulis ulang** — ia catatan historis; tabel di atas adalah
+alat terjemahannya.
+
 **Baris live-only `20260723064826_rls_harden_execute_surface` — DITUTUP dengan back-port
 riwayat (2026-07-29).** Semula ini satu-satunya sisa: live punya 40 baris riwayat, repo 39
 berkas. `db push` sendiri hanya mendorong versi lokal yang belum ada di remote, jadi baris

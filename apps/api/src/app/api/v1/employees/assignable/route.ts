@@ -16,7 +16,7 @@
  * for exactly what its door will accept.
  *
  * Read through `readAsActor` like every other read (O37): the rows come from
- * `private.employee_assignable()` (SECURITY DEFINER, migration 20260804170000),
+ * `private.employee_assignable()` (SECURITY DEFINER, migration 20260805030000),
  * which is why `employees_select` can stay own-row for a normal employee and
  * `role_mappings` can stay default-deny.
  */
