@@ -855,7 +855,7 @@ function serviceQueueCols(sql: Queryable) {
  * server-side notion of "still open" that could drift from the §4/§5 gates.
  *
  * RLS is the second wall, not the first: an Account lead only sees these rows at
- * all because of the division arms added in 20260805060000; before that this
+ * all because of the division arms added in 20260805160305; before that this
  * read returned an empty list for the very role §3 Rule 1 puts in charge.
  */
 export async function serviceQueue(sql: Queryable, actor: Actor): Promise<ServiceQueueRow[]> {
