@@ -17,7 +17,7 @@
 --
 -- KEPUTUSAN (docs/DECISIONS.md 2026-08-04): tabelnya TIDAK dilebarkan; yang
 -- dibuka hanya JAWABANNYA, lewat SECURITY DEFINER di schema `private` — pola
--- yang sama persis dengan `private.sm_allowed_transitions` (20260803120000).
+-- yang sama persis dengan `private.sm_allowed_transitions` (20260803123327).
 --
 -- Mengapa bukan `... OR status = 'Active'` pada `campaigns_select` (ditolak):
 --   1. Itu melebarkan row-scope TABEL untuk semua pembaca, sedangkan yang butuh
@@ -26,7 +26,7 @@
 --      identitas (id, nama, channel, status, tanggal mulai) — tanpa
 --      `owner_employee_id`, tanpa `created_by`, tanpa `end_date`. Budget tetap
 --      di `marketing_performance_records` yang tidak disentuh sama sekali.
---   3. Arah dua migrasi hardening terakhir (20260727072443, 20260803120000)
+--   3. Arah dua migrasi hardening terakhir (20260727072443, 20260803123327)
 --      adalah MENGECILKAN permukaan `public` yang terekspos PostgREST; `private`
 --      tidak terekspos.
 --

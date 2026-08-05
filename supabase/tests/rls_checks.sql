@@ -112,7 +112,7 @@ END $$;
 --     invariant, and the page rendered a bare "internal server error" (an
 --     unmapped Postgres error → 500). The fix keeps the TABLE denied above and
 --     exposes only the ANSWER through `private.sm_allowed_transitions`
---     (SECURITY DEFINER, migration 20260803120000). Both halves are asserted
+--     (SECURITY DEFINER, migration 20260803123327). Both halves are asserted
 --     here: the call must succeed AND return the real edges, because a function
 --     that silently returned {} would render an action-less page instead of an
 --     error — the harder failure to notice.
@@ -191,7 +191,7 @@ END $$;
 RESET ROLE;
 
 -- ---------------------------------------------------------------------------
--- 13b. Picker campaign intake (M1 §9.3 Origin Campaign, migrasi 20260804061500).
+-- 13b. Picker campaign intake (M1 §9.3 Origin Campaign, migrasi 20260805022245).
 --      Sales HARUS bisa memilih campaign asal lead, padahal ia tidak memiliki
 --      campaign apa pun — sedangkan `campaigns_select` sengaja hanya membuka
 --      baris milik/ciptaan aktor. Kedua sisinya ditegakkan di sini: TABEL-nya
@@ -570,7 +570,7 @@ END $$;
 RESET ROLE;
 
 -- ---------------------------------------------------------------------------
--- 33. Picker KARYAWAN untuk pintu penugasan (migrasi 20260804170000).
+-- 33. Picker KARYAWAN untuk pintu penugasan (migrasi 20260805030000).
 --     Seorang SPV/Head Account adalah SATU-SATUNYA role yang boleh menunjuk AM
 --     (M6 §3 Rule 2), tapi ia BUKAN Director/OD — jadi `employees_select` hanya
 --     membuka barisnya sendiri, dan `role_mappings` default-deny. Kedua sisinya
@@ -633,7 +633,7 @@ END $$;
 RESET ROLE;
 
 -- ---------------------------------------------------------------------------
--- 34. Antrean Intake Account (M6 §3 Rule 1, migrasi 20260804180000). Klien yang
+-- 34. Antrean Intake Account (M6 §3 Rule 1, migrasi 20260805030100). Klien yang
 --     SUDAH dirilis tapi BELUM punya AM tidak dimiliki siapa pun secara
 --     perorangan, jadi tanpa arm divisi seorang SPV/Head Account membaca NOL
 --     baris — antrean penunjukan AM kosong tanpa error, dan penunjukan AM tidak

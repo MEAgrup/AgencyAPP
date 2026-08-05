@@ -194,7 +194,7 @@ describeDb('read models under RLS (O37)', () => {
     // this call — the one the attempt-detail page needs to know which action
     // buttons exist — started raising 42501 permission_denied, which `mapError`
     // does not map: the page rendered a bare "internal server error".
-    // 20260803120000_rls_sm_edges_read_path.sql grants SELECT + a USING (true)
+    // 20260803123327_rls_sm_edges_read_path.sql grants SELECT + a USING (true)
     // policy. Both halves are asserted: a grant without the policy would return
     // an EMPTY list here (a dead page with no buttons), not an error.
     const moves = await withClaims(sql, claims({ employeeId: 'ZZR-DIR', director: true }), (tx) =>

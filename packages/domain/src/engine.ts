@@ -30,7 +30,7 @@ import { type Queryable } from '@cdps/db';
  * `42501 permission denied for table sm_edges`, which `mapError` does not map:
  * `GET /attempts/{id}` answered 500 and the attempt-detail page rendered a bare
  * "internal server error". `private.sm_allowed_transitions`
- * (20260803120000_rls_sm_edges_read_path.sql) is SECURITY DEFINER, so the table
+ * (20260803123327_rls_sm_edges_read_path.sql) is SECURITY DEFINER, so the table
  * stays closed to `authenticated` while this read path gets exactly the answer it
  * publishes as `allowed_transitions` — and nothing else about the machine.
  *

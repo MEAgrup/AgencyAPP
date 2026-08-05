@@ -15,7 +15,7 @@
  * shadows `GET /marketing/campaigns/CMP-…`.
  *
  * Read through `readAsActor` like every other read (O37) — the rows come from
- * `private.campaign_selectable()` (SECURITY DEFINER, migration 20260804061500),
+ * `private.campaign_selectable()` (SECURITY DEFINER, migration 20260805022245),
  * which is why the `campaigns` table's owner scope can stay untouched.
  */
 import { campaign } from '@cdps/domain';
