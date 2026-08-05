@@ -3,6 +3,8 @@
 import { use, useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
+import { isAccountLead, isAccountStaff } from '@/lib/account';
 import {
   EDITABLE_FIELDS,
   PAYMENT_INTENT_OPTIONS,
@@ -24,6 +26,12 @@ function formatDate(value: string | null | undefined) {
 
 export default function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const { role } = useAuth();
+  // The Service hub (§4/§5) is an Account-division page — `account.getService`
+  // admits the owning AM, Account lead, OD and Director. Sales/Finance read this
+  // client record too, and a link that 403s for them is worse than no link.
+  const canOpenServiceHub =
+    isAccountStaff(role) || isAccountLead(role) || !!role?.od || !!role?.director;
 
   const [client, setClient] = useState<Client | null>(null);
   const [loading, setLoading] = useState(true);
@@ -284,6 +292,10 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
         </div>
         {voidError && <div className="alert alertError" role="alert">{voidError}</div>}
         {voidMessage && <div className="alert alertSuccess" role="status">{voidMessage}</div>}
+        {/* The Service ID is not decoration: every M6 §4/§5 door is keyed by it
+            (Strategy & Plan, Brief breakdown, the plan-flag override). It was in
+            the payload all along but never rendered, so the AM had a status to
+            look at and no way to act on it. */}
         {client.services.length === 0 ? (
           <div className="emptyState">Belum ada service.</div>
         ) : (
@@ -291,6 +303,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             <table className="table">
               <thead>
                 <tr>
+                  <th>Service ID</th>
                   <th>Nama</th>
                   <th>Harga Standar</th>
                   <th>Status</th>
@@ -300,20 +313,37 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
               <tbody>
                 {client.services.map((s) => (
                   <tr key={s.id}>
+                    <td>
+                      {canOpenServiceHub ? (
+                        <Link href={`/account/services/${encodeURIComponent(s.id)}`}>{s.id}</Link>
+                      ) : (
+                        s.id
+                      )}
+                    </td>
                     <td>{s.name}</td>
                     <td>{s.standard_price}</td>
                     <td><StatusBadge status={s.status} /></td>
                     <td>
-                      {s.status !== VOIDED_STATUS && (
-                        <button
-                          type="button"
-                          className="btn btnDanger btnSm"
-                          disabled={voidPendingId !== null}
-                          onClick={() => handleVoid(s.id, s.name)}
-                        >
-                          {voidPendingId === s.id ? 'Memproses...' : 'Void Service'}
-                        </button>
-                      )}
+                      <div className="row" style={{ gap: 8 }}>
+                        {canOpenServiceHub && s.status !== VOIDED_STATUS && (
+                          <Link
+                            href={`/account/services/${encodeURIComponent(s.id)}`}
+                            className="btn btnPrimary btnSm"
+                          >
+                            Onboarding &amp; Brief
+                          </Link>
+                        )}
+                        {s.status !== VOIDED_STATUS && (
+                          <button
+                            type="button"
+                            className="btn btnDanger btnSm"
+                            disabled={voidPendingId !== null}
+                            onClick={() => handleVoid(s.id, s.name)}
+                          >
+                            {voidPendingId === s.id ? 'Memproses...' : 'Void Service'}
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

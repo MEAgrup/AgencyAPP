@@ -752,6 +752,174 @@ export async function listStrategies(sql: Queryable, actor: Actor): Promise<Stra
   return rows.map(rowToStrategy);
 }
 
+// ---------------------------------------------------------------------------
+// The AM's Service queue (§3 Rule 4) — the only door into §4/§5.
+//
+// §3 Rule 4: "Once assigned, the client and all its Services move from the
+// Unassigned queue into that AM's personal queue; every Service still starts at
+// [Awaiting Onboarding]". That personal queue had no read model at all: the
+// intake queue (§3 Rule 1) lists only clients still WITHOUT an AM and goes blind
+// the moment one is assigned, and every §4/§5 door (createStrategy /
+// setStrategyRequirement / createBrief) is keyed by a Service ID the AM had no
+// way to obtain — `clientDetailToWire` carries `services[].id` but the client
+// page never rendered it, so onboarding was unreachable in the UI even though
+// every write endpoint behind it worked.
+//
+// A FACT-ONLY projection on purpose: which step comes next is presentation, and
+// deriving it here would put a second copy of the §4/§5 gate order next to the
+// one the write paths already enforce. The FE renders the call-to-action from
+// these fields (`nextOnboardingStep`, unit-tested there); the server keeps
+// deciding what is actually allowed.
+// ---------------------------------------------------------------------------
+
+/** Actor may not read the Account service queue (not Account, OD or Director). */
+export const MSG_SERVICE_QUEUE_FORBIDDEN = '[anda tidak memiliki akses ke antrean layanan Account]';
+
+/**
+ * ServiceQueueRow is one Service in an AM's personal queue, joined to the client
+ * it belongs to plus the two facts that decide what may happen next: the
+ * EFFECTIVE plan gate (override ∨ MSL pin, M6-OA-1) and the Strategy & Plan
+ * behind it, if any. `briefCount` distinguishes "briefed" from "not started"
+ * without a second round-trip.
+ */
+export interface ServiceQueueRow {
+  serviceId: string;
+  clientId: string;
+  toko: string;
+  namaPic: string;
+  name: string;
+  status: string;
+  /** effective gate: the M6-OA-1 override if set, else the pinned MSL flag. */
+  requiresStrategyPlan: boolean;
+  /** the immutable MSL pin, so the UI can show that the default was overridden. */
+  pinnedRequiresStrategyPlan: boolean;
+  overridden: boolean;
+  assignedAmId: string | null;
+  strategyId: string | null;
+  strategyStatus: string | null;
+  briefCount: number;
+  releasedToAccountAt: Date | null;
+}
+
+interface ServiceQueueDbRow {
+  id: string;
+  client_id: string;
+  toko: string;
+  nama_pic: string;
+  name: string;
+  status: string;
+  requires_strategy_plan: boolean;
+  requires_strategy_plan_override: boolean | null;
+  assigned_am_id: string | null;
+  strategy_id: string | null;
+  strategy_status: string | null;
+  brief_count: string;
+  released_to_account_at: Date | null;
+}
+
+function rowToServiceQueue(r: ServiceQueueDbRow): ServiceQueueRow {
+  return {
+    serviceId: r.id,
+    clientId: r.client_id,
+    toko: r.toko,
+    namaPic: r.nama_pic,
+    name: r.name,
+    status: r.status,
+    requiresStrategyPlan: effectiveRequiresPlan(r.requires_strategy_plan, r.requires_strategy_plan_override),
+    pinnedRequiresStrategyPlan: r.requires_strategy_plan,
+    overridden: r.requires_strategy_plan_override !== null,
+    assignedAmId: r.assigned_am_id,
+    strategyId: r.strategy_id,
+    strategyStatus: r.strategy_status,
+    briefCount: Number(r.brief_count),
+    releasedToAccountAt: r.released_to_account_at,
+  };
+}
+
+/** The projection shared by the queue list and the single-Service read. */
+function serviceQueueCols(sql: Queryable) {
+  return sql`sv.id, sv.client_id, c.toko, c.nama_pic, sv.name, sv.status,
+    sv.requires_strategy_plan, sv.requires_strategy_plan_override, c.assigned_am_id,
+    sp.id as strategy_id, sp.status as strategy_status,
+    (select count(*) from briefs b where b.service_id = sv.id) as brief_count,
+    c.released_to_account_at`;
+}
+
+/**
+ * serviceQueue returns the Services visible to the actor, longest-waiting client
+ * first (same ordering rationale as `intakeQueue`). Scope mirrors
+ * `listStrategies` exactly (§3 visibility): Account lead / OD / Director see all,
+ * an Account-staff AM sees the Services of the clients they own, anyone else is
+ * forbidden. Status filtering stays in the UI — one honest list, filtered where
+ * it is displayed (same as the Strategy inbox toggle), rather than a second
+ * server-side notion of "still open" that could drift from the §4/§5 gates.
+ *
+ * RLS is the second wall, not the first: an Account lead only sees these rows at
+ * all because of the division arms added in 20260805060000; before that this
+ * read returned an empty list for the very role §3 Rule 1 puts in charge.
+ */
+export async function serviceQueue(sql: Queryable, actor: Actor): Promise<ServiceQueueRow[]> {
+  const cols = serviceQueueCols(sql);
+  let rows: ServiceQueueDbRow[];
+  if (permission.canReadDivision(actor, ACCOUNT_DIVISION)) {
+    // Services of clients Finance has not released yet are still Sales/Finance
+    // stage work (M5 §5) — they are not in anybody's Account queue.
+    rows = await sql<ServiceQueueDbRow[]>`
+      select ${cols}
+        from services sv
+        join clients c on c.id = sv.client_id
+        left join strategy_plans sp on sp.service_id = sv.id
+       where c.released_to_account_at is not null
+       order by c.released_to_account_at asc, sv.id asc`;
+  } else if (actor.role.division === ACCOUNT_DIVISION && actor.role.level === permission.LevelStaff) {
+    rows = await sql<ServiceQueueDbRow[]>`
+      select ${cols}
+        from services sv
+        join clients c on c.id = sv.client_id
+        left join strategy_plans sp on sp.service_id = sv.id
+       where c.assigned_am_id = ${actor.employeeId}
+       order by c.released_to_account_at asc, sv.id asc`;
+  } else {
+    throw new ForbiddenError(MSG_SERVICE_QUEUE_FORBIDDEN);
+  }
+  return rows.map(rowToServiceQueue);
+}
+
+/**
+ * getService returns one Service with the same facts as a queue row — what the
+ * Service hub page needs in order to show the REAL execution path instead of
+ * guessing it from whether a Strategy row happens to exist (a plan-gated Service
+ * that has not been drafted yet looks Direct under that guess, so the page
+ * offered a Brief form the server was always going to reject with
+ * MSG_STRATEGY_REQUIRED).
+ *
+ * Read gate identical to `listServiceBriefs`, the sibling read on that same page:
+ * the owning AM, Account lead, OD or Director.
+ *
+ * NOTE on the status an outsider actually gets: over HTTP the read runs under
+ * `readAsActor`, so RLS removes the row before this gate is reached and the caller
+ * sees 404, not 403. That is the stricter answer (existence is not disclosed) and
+ * it is deliberate — the ForbiddenError below is what a privileged/service-role
+ * caller (and therefore the integration tests) hits. Do not "fix" the 404.
+ */
+export async function getService(sql: Queryable, actor: Actor, serviceId: string): Promise<ServiceQueueRow> {
+  const cols = serviceQueueCols(sql);
+  const rows = await sql<ServiceQueueDbRow[]>`
+    select ${cols}
+      from services sv
+      join clients c on c.id = sv.client_id
+      left join strategy_plans sp on sp.service_id = sv.id
+     where sv.id = ${serviceId}`;
+  if (rows.length === 0) {
+    throw new NotFoundError(MSG_SERVICE_NOT_FOUND);
+  }
+  const row = rowToServiceQueue(rows[0]);
+  if (!(permission.canReadDivision(actor, ACCOUNT_DIVISION) || row.assignedAmId === actor.employeeId)) {
+    throw new ForbiddenError(MSG_SERVICE_QUEUE_FORBIDDEN);
+  }
+  return row;
+}
+
 /**
  * guardBriefCreation is the §6 data-dependent guard the Brief-creation cluster
  * must call BEFORE driving a Service's [Awaiting Onboarding] → [Briefed] edge. A

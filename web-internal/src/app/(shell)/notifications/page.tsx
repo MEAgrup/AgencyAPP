@@ -3,10 +3,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, errorMessage } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
+import { eventLabel, notificationHref } from '@/lib/notifications';
 import type { NotificationsResponse } from '@/lib/types';
 
 export default function NotificationsPage() {
   const router = useRouter();
+  // The viewer resolves the m14 own-score link (see lib/notifications.ts).
+  const { employee } = useAuth();
   const [res, setRes] = useState<NotificationsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,8 +46,8 @@ export default function NotificationsPage() {
     }
   }
 
-  function handleOpen(deepLink: string) {
-    if (deepLink) router.push(deepLink);
+  function handleOpen(href: string | null) {
+    if (href) router.push(href);
   }
 
   return (
@@ -72,25 +76,30 @@ export default function NotificationsPage() {
         <div className="stack" style={{ gap: 8 }}>
           {res.data.map((n) => {
             const unread = !n.read_at;
+            const href = notificationHref(n, employee?.employee_id);
             return (
               <div key={n.id} className="card" style={{ padding: 14 }}>
                 <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <button
                     type="button"
-                    onClick={() => handleOpen(n.deep_link)}
+                    disabled={!href}
+                    onClick={() => handleOpen(href)}
                     style={{
                       textAlign: 'left',
                       background: 'none',
                       border: 'none',
-                      cursor: n.deep_link ? 'pointer' : 'default',
+                      cursor: href ? 'pointer' : 'default',
                       padding: 0,
                       flex: 1,
                     }}
                   >
-                    <div style={{ fontWeight: unread ? 700 : 500, fontSize: 13 }}>{n.event_type}</div>
+                    <div style={{ fontWeight: unread ? 700 : 500, fontSize: 13 }}>
+                      {eventLabel(n.event_type)}
+                    </div>
                     <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                      {n.entity_type} {n.entity_id} &middot; oleh {n.actor} &middot;{' '}
+                      {n.entity_id} &middot; oleh {n.actor} &middot;{' '}
                       {new Date(n.created_at).toLocaleString('id-ID')}
+                      {!href && ' · tidak ada halaman rinci'}
                     </div>
                   </button>
                   {unread && (

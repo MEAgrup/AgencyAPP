@@ -28,6 +28,7 @@ import {
   ForbiddenError,
   getBrief,
   getComplaint,
+  getService,
   getStrategy,
   guardBriefCreation,
   intakeQueue,
@@ -42,6 +43,7 @@ import {
   requestRevision,
   resolveComplaint,
   reviewBrief,
+  serviceQueue,
   setStrategyRequirement,
   startComplaint,
   STRATEGY_STATUS_APPROVED,
@@ -600,6 +602,82 @@ describeDb('strategy visibility (§3) + immutable history', () => {
       select id from audit_log where entity_id = ${st.id} and action = 'create' limit 1`;
     await expect(sql`update audit_log set action='tampered' where id = ${auditId}`).rejects.toBeTruthy();
     await expect(sql`delete from audit_log where id = ${auditId}`).rejects.toBeTruthy();
+  });
+});
+
+describeDb('serviceQueue + getService (§3 Rule 4 — the AM personal queue)', () => {
+  it('lists the Services of the clients an AM owns, and only those', async () => {
+    const { clientId, svcId, amId } = await planGatedFixture();
+    // A second client, owned by a DIFFERENT AM, must not leak into this AM's queue.
+    const otherClient = nextClientId();
+    const otherSvc = nextSvcId();
+    await insertClient(otherClient, true);
+    await setAM(otherClient, 'ZZ-OTHER');
+    await insertService(otherSvc, otherClient, false, '[Awaiting Onboarding]');
+
+    const mine = await serviceQueue(sql, accountStaff(amId));
+    expect(mine.map((r) => r.serviceId)).toContain(svcId);
+    expect(mine.map((r) => r.serviceId)).not.toContain(otherSvc);
+    expect(mine.every((r) => r.assignedAmId === amId)).toBe(true);
+    const row = mine.find((r) => r.serviceId === svcId)!;
+    expect(row.clientId).toBe(clientId);
+    expect(row.status).toBe('[Awaiting Onboarding]');
+    expect(row.briefCount).toBe(0);
+    expect(row.strategyId).toBeNull(); // nothing drafted yet — the FE's first step
+  });
+
+  it('reports the EFFECTIVE plan gate, not just the MSL pin (M6-OA-1)', async () => {
+    const { clientId } = await planGatedFixture();
+    const svc = nextSvcId();
+    await insertService(svc, clientId, false, '[Awaiting Onboarding]'); // Direct by pin
+    await setStrategyRequirement(sql, accountStaff('ZZ-SINTA'), svc, true, 'butuh strategi khusus');
+
+    const row = (await serviceQueue(sql, accountStaff('ZZ-SINTA'))).find((r) => r.serviceId === svc)!;
+    expect(row.requiresStrategyPlan).toBe(true); // effective
+    expect(row.pinnedRequiresStrategyPlan).toBe(false); // the immutable pin
+    expect(row.overridden).toBe(true);
+  });
+
+  it('carries the Strategy status once one exists, so the UI can name the next step', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    const st = await createDrafted(svcId, amId);
+    const row = (await serviceQueue(sql, accountStaff(amId))).find((r) => r.serviceId === svcId)!;
+    expect(row.strategyId).toBe(st.id);
+    expect(row.strategyStatus).toBe(STRATEGY_STATUS_DRAFTING);
+  });
+
+  it('counts the Briefs under a Service', async () => {
+    const { svcId } = await directFixture();
+    await createBrief(sql, accountStaff('ZZ-SINTA'), svcId, goodBrief());
+    const row = (await serviceQueue(sql, accountStaff('ZZ-SINTA'))).find((r) => r.serviceId === svcId)!;
+    expect(row.briefCount).toBe(1);
+  });
+
+  it('lead/OD/Director see the whole division; a non-Account actor is forbidden', async () => {
+    const { svcId } = await planGatedFixture();
+    for (const a of [accountLead(), od(), director()]) {
+      const rows = await serviceQueue(sql, a);
+      expect(rows.map((r) => r.serviceId)).toContain(svcId);
+    }
+    await expect(serviceQueue(sql, salesLead())).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(serviceQueue(sql, divisionStaff('Creative', 'ZZ-RIAN'))).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('hides Services of clients Finance has not released yet (M5 §5)', async () => {
+    const held = nextClientId();
+    const heldSvc = nextSvcId();
+    await insertClient(held, false); // not released
+    await insertService(heldSvc, held, true, '[Awaiting Onboarding]');
+    expect((await serviceQueue(sql, accountLead())).map((r) => r.serviceId)).not.toContain(heldSvc);
+  });
+
+  it('getService: owner AM / lead / OD / Director allowed, another AM forbidden, ghost not found', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    for (const a of [accountStaff(amId), accountLead(), od(), director()]) {
+      await expect(getService(sql, a, svcId)).resolves.toMatchObject({ serviceId: svcId });
+    }
+    await expect(getService(sql, accountStaff('ZZ-OTHER'), svcId)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(getService(sql, accountStaff(amId), 'SVC-GHOST-0')).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 

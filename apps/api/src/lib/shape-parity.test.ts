@@ -384,6 +384,7 @@ const WIRE_TO_FE: Record<string, string> = {
   AssignmentWire: 'account.ts::Assignment',
   StrategyWire: 'account.ts::Strategy',
   StrategyRequirementWire: 'account.ts::StrategyRequirement',
+  ServiceQueueRowWire: 'account.ts::ServiceQueueRow',
   BriefWire: 'account.ts::Brief',
   ComplaintWire: 'account.ts::Complaint',
   // M7 creative
