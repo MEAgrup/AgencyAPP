@@ -30,7 +30,7 @@
  *
  *     status_aktif AND rm.division = <target division> AND rm.level = 'staff'
  *
- * so `private.employee_assignable()` (migration 20260804170000) INNER JOINs
+ * so `private.employee_assignable()` (migration 20260805030000) INNER JOINs
  * `role_mappings` and filters `status_aktif`, and this module filters by
  * division/level on top. What is OFFERED is therefore exactly what is ACCEPTED.
  * A picker that lists someone the server then rejects is the fastest way to make

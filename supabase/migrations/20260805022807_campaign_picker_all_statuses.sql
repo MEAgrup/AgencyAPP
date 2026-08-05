@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Picker campaign: SELURUH status + funnel lead turunannya.
 --
--- Lanjutan langsung `20260804061500`, atas arahan pemilik 2026-08-04 (sesi yang
+-- Lanjutan langsung `20260805022245`, atas arahan pemilik 2026-08-04 (sesi yang
 -- sama, sesudah picker versi pertama dipakai): *"Sales perlu bisa membaca semua
 -- campaign milik marketing supaya bisa mengisi jumlah lead asli, qualified &
 -- not qualified"* — dan: *"tabel pilihan dari sales inilah yang menentukan

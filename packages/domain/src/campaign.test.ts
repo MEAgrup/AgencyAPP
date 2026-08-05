@@ -342,7 +342,7 @@ describeDb('listSelectableCampaigns — the lead-intake picker', () => {
   });
 
   it('answers a Sales actor UNDER RLS, where the campaigns table itself is closed', async () => {
-    // The point of migration 20260804061500. Every other assertion here runs as
+    // The point of migration 20260805022245. Every other assertion here runs as
     // the migration owner (BYPASSRLS) and would pass even with the picker reading
     // `campaigns` directly — which is exactly how a Sales actor would get an
     // empty dropdown in production (O37's shape).

@@ -8,7 +8,7 @@
 -- `EMP-...` rekan satu divisinya, apalagi rekan divisi lain: yang sebenarnya
 -- terjadi adalah salah ketik (ditolak server dengan pesan BI yang benar tapi
 -- tanpa petunjuk siapa yang valid) atau field-nya dilewati. Ini kelas kerusakan
--- yang sama persis dengan picker campaign (20260804061500): kolom penugasan
+-- yang sama persis dengan picker campaign (20260805022245): kolom penugasan
 -- kosong bukan karena tidak ada yang mengerjakannya, tapi karena tidak ada yang
 -- bisa MENEMUKAN orangnya.
 --
@@ -22,14 +22,14 @@
 -- KEPUTUSAN (docs/DECISIONS.md 2026-08-04): tabel `employees` TIDAK dilebarkan;
 -- yang dibuka hanya JAWABANNYA lewat SECURITY DEFINER di schema `private` —
 -- pola yang sama persis dengan `private.sm_allowed_transitions`
--- (20260803120000) dan `private.campaign_selectable` (20260804061500).
+-- (20260803123327) dan `private.campaign_selectable` (20260805022245).
 --
 -- Mengapa bukan pelebaran `employees_select` (ditolak): itu melebarkan row-scope
 -- TABEL untuk semua pembaca, sedangkan yang butuh hanya picker. Fungsi ini
 -- mengembalikan JAUH lebih sedikit daripada barisnya: identitas + jabatan +
 -- role hasil mapping — TANPA `email`, TANPA `flagged_for_review`, TANPA
 -- `synced_at`, TANPA baris nonaktif. Arah dua migrasi hardening terakhir
--- (20260727072443, 20260803120000) adalah MENGECILKAN permukaan `public` yang
+-- (20260727072443, 20260803123327) adalah MENGECILKAN permukaan `public` yang
 -- terekspos PostgREST; `private` tidak terekspos.
 --
 -- PREDIKATNYA SENGAJA IDENTIK DENGAN VALIDATOR-NYA. Kelima pintu penugasan

@@ -1,13 +1,13 @@
 -- ============================================================================
 -- Antrean Intake Account SELALU KOSONG untuk SPV/Head Account (M6 §3 Rule 1).
 --
--- Kembaran persis `20260804035500` (arm Finance), satu divisi sebelahnya —
+-- Kembaran persis `20260804073744` (arm Finance), satu divisi sebelahnya —
 -- ditemukan dengan cara yang sama: menjalankan alur pemilik lewat HTTP sungguhan
 -- saat memasang dropdown penunjukan AM. Gejalanya pola paling berbahaya di repo
 -- ini: **kosong tanpa error**.
 --
 -- MEKANISMENYA. `clients_select` (baseline 20260723064438, diperluas
--- 20260804035500) hanya membuka baris lewat kepemilikan PERORANGAN
+-- 20260804073744) hanya membuka baris lewat kepemilikan PERORANGAN
 -- (`sales_pic_id` / `assigned_am_id` / `commission_payment_pic_id` /
 -- `created_by`), oversight (`jwt_can_read_all()`), dan satu arm divisi:
 -- Finance. Tidak ada arm Account. Sedangkan:

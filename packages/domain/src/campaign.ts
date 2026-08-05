@@ -149,7 +149,7 @@ export interface CampaignInput {
  * able to flag + the DERIVED lead funnel — and nothing about ownership or money.
  *
  * The three counts are the M2 §4 / M1 §8 numbers verbatim, computed in
- * `private.campaign_selectable()` (migration 20260804154000). They are here
+ * `private.campaign_selectable()` (migration 20260805022807). They are here
  * because the picker is the only campaign surface Sales has (owner decision
  * 2026-08-04): the salesperson who chooses a campaign is the one whose choice
  * fills these numbers, so they see the effect of that choice. Read-only by
@@ -230,7 +230,7 @@ export function canReassign(a: Actor): boolean {
  *
  * What this opens is a NAME LIST of Active/Paused campaigns
  * (`SelectableCampaign`), not the Campaign record: no owner, no end date, no
- * budget, no rollup. See migration 20260804061500 for the SQL half.
+ * budget, no rollup. See migration 20260805022245 for the SQL half.
  */
 export function canPickCampaign(a: Actor): boolean {
   if (permission.canReadAll(a)) {
@@ -433,7 +433,7 @@ export async function listCampaigns(sql: Queryable, actor: Actor): Promise<Campa
  * picking a Draft campaign attributes the lead without launching it.
  *
  * The rows come from `private.campaign_selectable()` (SECURITY DEFINER,
- * migrations 20260804061500 + 20260804154000), so this works under `readAsActor`
+ * migrations 20260805022245 + 20260805022807), so this works under `readAsActor`
  * where the `campaigns` table itself stays owner-scoped. That indirection is the
  * whole point: the picker gets its answer without widening the table's RLS.
  */
