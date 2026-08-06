@@ -135,6 +135,32 @@ Tiga migrasi baru **hanya diterapkan ke DB lokal** (`npm run db:rebuild`):
 Terapkan HANYA lewat `supabase db push` / `apply_migration` — **jangan pernah
 `psql -f`** (itu yang melahirkan drift O38).
 
+### ⛔ `db push` masih TERBLOKIR PR #98 — landasannya dulu
+
+**PR #98 terbuka dan wajib mendarat SEBELUM ketiga migrasi ini bisa di-push.**
+Riwayat live memuat `20260805160305_rls_account_lead_service_scope` sementara
+berkas repo masih bernama `20260805060000_…` — migrasi yang sama, nomor berbeda.
+Tanpa rename itu, `db push` menganggapnya belum ter-apply **dan** out-of-order,
+lalu menuntut `--include-all` — flag yang pada keadaan drift justru memaksa apply
+ulang migrasi yang sudah berjalan. Itu ronde KETIGA dari drift yang sama; sebabnya
+tetap deploy campur `apply_migration` (MCP) + `db push`.
+
+**Konflik yang PR #99 tinggalkan untuk #98 — sudah diuji, bukan dugaan.**
+`git merge` #98 ke `main` sekarang:
+
+| Berkas | Hasil |
+|---|---|
+| `packages/domain/src/account.ts` | **auto-merge bersih** (perubahannya satu baris komentar; PR #99 menyentuh region lain) |
+| `docs/DECISIONS.md` | **KONFLIK** — keduanya menyisipkan baris baru di puncak tabel `## Decided` |
+
+Resolusinya sepele: **pertahankan KEDUA baris** (urutan menurut tanggal, entri
+2026-08-06 keduanya). Tidak ada logika yang bertabrakan.
+
+Nomor migrasi M6A/6B/6C (`20260806060000`/`061000`/`062000`) **tidak terpengaruh**
+rename #98 — ketiganya sudah di atas `20260806050000`, jadi urutan lexicographic
+tetap lestari dan push berikutnya kembali ke bentuk teraman: migrasi baru di
+ujung, tanpa flag.
+
 **Yang berubah di live setelah diterapkan** (dan kenapa ini butuh mata pemilik):
 `SVC-202608-0002` akan menjadi `plan_tier = 'plan_wajib'` ⇒ **plan-gated**, jadi
 halamannya berhenti menawarkan form Brief dan mulai menuntut Strategy & Plan.
@@ -247,6 +273,10 @@ BATASAN YANG TIDAK BOLEH DILANGGAR:
   belum terdaftar — daftarkan lewat migrasi, jangan reimplementasi di TS.
 - Migrasi HANYA lewat supabase/migrations/** + supabase db push /
   apply_migration. JANGAN psql -f (itu yang melahirkan drift O38).
+- Tiga migrasi sesi lalu BELUM diterapkan ke live, dan db push masih TERBLOKIR
+  PR #98 (rename 20260805060000 -> 20260805160305 supaya cocok riwayat live).
+  Landaskan #98 dulu; konfliknya hanya DECISIONS.md puncak tabel, pertahankan
+  kedua baris. Lihat handoff §4.
 - Sebelum menambah endpoint: cek apps/api/src/lib/route-parity.test.ts.
   KNOWN_GAPS harus tetap KOSONG.
 - Setiap response body snake_case, diterjemahkan HANYA di apps/api/src/lib/wire.ts.
