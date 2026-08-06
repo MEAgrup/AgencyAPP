@@ -37,6 +37,11 @@
 import { bi, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { onBriefReachedTerminal, validateBriefApproval } from './board';
+import {
+  effectiveGate,
+  type GateDecision,
+  type PlanTier,
+} from './plangate_rules';
 
 /** Authenticated employee + resolved role (from @cdps/core permission). */
 export type Actor = permission.Actor;
@@ -391,6 +396,9 @@ export const MSG_REVISION_NOTES_REQUIRED = '[catatan revisi wajib diisi]';
 export const MSG_INVALID_DIVISIONS = '[divisi yang terlibat tidak valid]';
 /** Actor may not read this Strategy & Plan (not owner AM / Account lead / OD / Director). */
 export const MSG_STRATEGY_FORBIDDEN = '[anda tidak memiliki akses ke Strategy & Plan ini]';
+/** M6C Rule 1: `ditentukan_am` tier with no recorded G-B decision blocks Brief creation. */
+export const MSG_PLAN_DETERMINATION_REQUIRED =
+  '[penentuan kebutuhan Plan wajib diselesaikan sebelum Brief dapat dibuat]';
 /** A plan-gated Service must reach [Strategy Approved] before any Brief (§6 guard). */
 export const MSG_STRATEGY_REQUIRED =
   '[layanan ini wajib memiliki Strategy & Plan yang disetujui sebelum dibuatkan Brief]';
@@ -508,9 +516,52 @@ function splitDivisions(s: string): string[] {
   return s.split(', ').filter((p) => p !== '');
 }
 
-/** effectiveRequiresPlan resolves the execution gate: override (M6-OA-1) if set, else the pin. */
-function effectiveRequiresPlan(pin: boolean, override: boolean | null): boolean {
-  return override === null ? pin : override;
+/**
+ * effectiveRequiresPlan resolves the execution gate.
+ *
+ * Since M6C the answer is no longer "override, else the pin": the catalog carries
+ * a three-value TIER, and for the middle tier (`ditentukan_am`) the gate is the
+ * AM's recorded G-B decision. Precedence is override (M6-OA-1) → recorded
+ * decision → tier, and the resolution itself lives in `plangate_rules.ts` so
+ * this file and the M6C module cannot drift apart.
+ *
+ * `pin` is still passed because the two locked tiers are bound to it by DB CHECK
+ * (`ck_services_tier_matches_flag`); it is the fallback when a row predates the
+ * tier column, which the migration's backfill makes impossible but which costs
+ * nothing to tolerate.
+ */
+function effectiveRequiresPlan(
+  pin: boolean,
+  override: boolean | null,
+  tier?: string | null,
+  gateDecision?: string | null,
+): boolean {
+  if (!tier) return override === null ? pin : override;
+  return effectiveGate({
+    tier: tier as PlanTier,
+    override: override ?? null,
+    keputusanAm: (gateDecision ?? null) as GateDecision | null,
+  }).requiresPlan;
+}
+
+/**
+ * planDeterminationPending is M6C Rule 1: a `ditentukan_am` Service with no G-B
+ * answer yet is not Direct, it is UNANSWERED — and Brief creation is blocked
+ * until the form is filled. Treating it as Direct is the exact failure M6C §1 is
+ * written against, because "no Plan" is the cheaper answer and nothing else
+ * checks it.
+ */
+function planDeterminationPending(
+  override: boolean | null,
+  tier: string | null,
+  gateDecision: string | null,
+): boolean {
+  if (!tier) return false;
+  return effectiveGate({
+    tier: tier as PlanTier,
+    override: override ?? null,
+    keputusanAm: gateDecision as GateDecision | null,
+  }).perluPenentuan;
 }
 
 /** dateStr normalizes a postgres `date` value (string or Date) to YYYY-MM-DD. */
@@ -794,6 +845,12 @@ export interface ServiceQueueRow {
   /** the immutable MSL pin, so the UI can show that the default was overridden. */
   pinnedRequiresStrategyPlan: boolean;
   overridden: boolean;
+  /** M6C: the catalog tier pinned at closing — which of the three paths applies. */
+  planTier: PlanTier;
+  /** the recorded G-B decision, null when the middle tier is still unanswered. */
+  gateDecision: GateDecision | null;
+  /** true when the tier is `ditentukan_am` and nobody has answered G-B yet. */
+  planDeterminationPending: boolean;
   assignedAmId: string | null;
   strategyId: string | null;
   strategyStatus: string | null;
@@ -810,6 +867,8 @@ interface ServiceQueueDbRow {
   status: string;
   requires_strategy_plan: boolean;
   requires_strategy_plan_override: boolean | null;
+  plan_tier: string;
+  gate_decision: string | null;
   assigned_am_id: string | null;
   strategy_id: string | null;
   strategy_status: string | null;
@@ -825,9 +884,16 @@ function rowToServiceQueue(r: ServiceQueueDbRow): ServiceQueueRow {
     namaPic: r.nama_pic,
     name: r.name,
     status: r.status,
-    requiresStrategyPlan: effectiveRequiresPlan(r.requires_strategy_plan, r.requires_strategy_plan_override),
+    requiresStrategyPlan: effectiveRequiresPlan(
+      r.requires_strategy_plan, r.requires_strategy_plan_override, r.plan_tier, r.gate_decision,
+    ),
     pinnedRequiresStrategyPlan: r.requires_strategy_plan,
     overridden: r.requires_strategy_plan_override !== null,
+    planTier: r.plan_tier as PlanTier,
+    gateDecision: r.gate_decision as GateDecision | null,
+    planDeterminationPending: planDeterminationPending(
+      r.requires_strategy_plan_override, r.plan_tier, r.gate_decision,
+    ),
     assignedAmId: r.assigned_am_id,
     strategyId: r.strategy_id,
     strategyStatus: r.strategy_status,
@@ -839,7 +905,9 @@ function rowToServiceQueue(r: ServiceQueueDbRow): ServiceQueueRow {
 /** The projection shared by the queue list and the single-Service read. */
 function serviceQueueCols(sql: Queryable) {
   return sql`sv.id, sv.client_id, c.toko, c.nama_pic, sv.name, sv.status,
-    sv.requires_strategy_plan, sv.requires_strategy_plan_override, c.assigned_am_id,
+    sv.requires_strategy_plan, sv.requires_strategy_plan_override, sv.plan_tier,
+    (select g.keputusan_am from service_plan_gate g where g.service_id = sv.id) as gate_decision,
+    c.assigned_am_id,
     sp.id as strategy_id, sp.status as strategy_status,
     (select count(*) from briefs b where b.service_id = sv.id) as brief_count,
     c.released_to_account_at`;
@@ -930,16 +998,43 @@ export async function getService(sql: Queryable, actor: Actor, serviceId: string
  */
 export async function guardBriefCreation(sql: Queryable, serviceId: string): Promise<void> {
   const rows = await sql<
-    { status: string; requires_strategy_plan: boolean; requires_strategy_plan_override: boolean | null }[]
+    {
+      status: string;
+      requires_strategy_plan: boolean;
+      requires_strategy_plan_override: boolean | null;
+      plan_tier: string | null;
+      keputusan_am: string | null;
+    }[]
   >`
-    select status, requires_strategy_plan, requires_strategy_plan_override
-      from services where id = ${serviceId}`;
+    select sv.status, sv.requires_strategy_plan, sv.requires_strategy_plan_override,
+           sv.plan_tier, g.keputusan_am
+      from services sv
+      left join service_plan_gate g on g.service_id = sv.id
+     where sv.id = ${serviceId}`;
   if (rows.length === 0) {
     throw new NotFoundError(MSG_SERVICE_NOT_FOUND);
   }
   const svc = rows[0];
+  // M6C Rule 1: the middle tier must be ANSWERED before any Brief. This is a
+  // distinct rejection from MSG_STRATEGY_REQUIRED — the AM's next action is
+  // "fill the G-B form", not "get the Strategy approved", and one message that
+  // covers both would send them to the wrong screen.
   if (
-    effectiveRequiresPlan(svc.requires_strategy_plan, svc.requires_strategy_plan_override) &&
+    planDeterminationPending(
+      svc.requires_strategy_plan_override,
+      svc.plan_tier,
+      svc.keputusan_am,
+    )
+  ) {
+    throw new ConflictError(MSG_PLAN_DETERMINATION_REQUIRED);
+  }
+  if (
+    effectiveRequiresPlan(
+      svc.requires_strategy_plan,
+      svc.requires_strategy_plan_override,
+      svc.plan_tier,
+      svc.keputusan_am,
+    ) &&
     svc.status === SERVICE_STATUS_AWAITING_ONBOARDING
   ) {
     throw new ConflictError(MSG_STRATEGY_REQUIRED);

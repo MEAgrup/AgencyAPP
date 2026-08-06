@@ -6,7 +6,7 @@
  * other way inline in each route (`toInput`).
  */
 import { money, tz } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, campaign, client, creative, demo, directory, finance, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
+import type { account, activity, admin, ads, audit, auth, board, campaign, client, creative, demo, directory, finance, health, kol, leads, livestream, marketing, msl, notification, performance, plangate, portal, sales, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -305,6 +305,12 @@ export interface ServiceQueueRowWire {
   requires_strategy_plan: boolean;
   pinned_requires_strategy_plan: boolean;
   overridden: boolean;
+  /** M6C: which of the three catalog tiers this Service was pinned to. */
+  plan_tier: string;
+  /** the recorded G-B decision, explicit null while the middle tier is unanswered. */
+  gate_decision: string | null;
+  /** true when the tier is `ditentukan_am` and G-B has not been answered yet. */
+  plan_determination_pending: boolean;
   assigned_am_id: string | null;
   strategy_id: string | null;
   strategy_status: string | null;
@@ -323,6 +329,9 @@ export function serviceQueueRowToWire(r: account.ServiceQueueRow): ServiceQueueR
     requires_strategy_plan: r.requiresStrategyPlan,
     pinned_requires_strategy_plan: r.pinnedRequiresStrategyPlan,
     overridden: r.overridden,
+    plan_tier: r.planTier,
+    gate_decision: r.gateDecision,
+    plan_determination_pending: r.planDeterminationPending,
     assigned_am_id: r.assignedAmId,
     strategy_id: r.strategyId,
     strategy_status: r.strategyStatus,
@@ -2567,5 +2576,202 @@ export function effortToWire(e: activity.EffortSummary): EffortSummaryWire {
     total: e.total,
     by_type: e.byType,
     last_activity_at: e.lastActivityAt === null ? null : e.lastActivityAt.toISOString(),
+  };
+}
+
+/**
+ * module6C.Gate + its G-A context — the plan-gate determination for one Service.
+ *
+ * Every optional field is sent as an EXPLICIT null, including the whole `gate`
+ * object when no determination exists yet: "belum ditentukan" is precisely the
+ * state the form must react to, and a missing key renders the panel blank while
+ * the route answers 200 (the O43 failure mode).
+ *
+ * `pemicu_*` are sent as-is rather than recomputed client-side. They are the
+ * STORED triggers (M6C §10) — the numbers that actually fired when the decision
+ * was made, which is what makes an old decision auditable after a threshold
+ * change.
+ */
+export interface PlanGateTriggerWire {
+  kode: string;
+  label: string;
+  dasar: string;
+}
+
+/** GB-8 — the four fields the no-Plan path leaves behind. Named (not inline)
+ *  so the shape guard can follow it to `account.ts::AssignmentSummary`. */
+export interface PlanGateAssignmentSummaryWire {
+  deliverable: string;
+  deadline: string;
+  divisi_pic: string;
+  hasil_diharapkan: string;
+}
+
+export interface PlanGateWire {
+  service_id: string;
+  tier_katalog: string;
+  divisi_terlibat: string[];
+  deliverable: string;
+  kuota_per_periode: number | null;
+  durasi_bulan: number | null;
+  berulang: boolean;
+  nilai_per_bulan: string | null;
+  target_angka_jenis: string | null;
+  target_angka_nilai: string | null;
+  sequence_dependency: boolean;
+  laporan_periodik: boolean;
+  floor_price: unknown | null;
+  pemicu_keras: PlanGateTriggerWire[];
+  pemicu_lunak: PlanGateTriggerWire[];
+  config_version_no: number;
+  rekomendasi: string;
+  keputusan_am: string;
+  kesesuaian: string;
+  alasan: string | null;
+  pemantauan_alternatif: string | null;
+  tanggal_tinjau_ulang: string;
+  ringkasan_penugasan: PlanGateAssignmentSummaryWire | null;
+  plan_id: string | null;
+  decided_by: string;
+  decided_at: string;
+}
+
+export function planGateToWire(g: plangate.Gate): PlanGateWire {
+  return {
+    service_id: g.serviceId,
+    tier_katalog: g.tierKatalog,
+    divisi_terlibat: g.divisiTerlibat,
+    deliverable: g.deliverable,
+    kuota_per_periode: g.kuotaPerPeriode,
+    durasi_bulan: g.durasiBulan,
+    berulang: g.berulang,
+    nilai_per_bulan: g.nilaiPerBulan,
+    target_angka_jenis: g.targetJenis,
+    target_angka_nilai: g.targetNilai,
+    sequence_dependency: g.sequenceDependency,
+    laporan_periodik: g.laporanPeriodik,
+    floor_price: g.floorPrice ?? null,
+    pemicu_keras: g.pemicuKeras,
+    pemicu_lunak: g.pemicuLunak,
+    config_version_no: g.configVersionNo,
+    rekomendasi: g.rekomendasi,
+    keputusan_am: g.keputusanAm,
+    kesesuaian: g.kesesuaian,
+    alasan: g.alasan,
+    pemantauan_alternatif: g.pemantauanAlternatif,
+    tanggal_tinjau_ulang: g.tanggalTinjauUlang,
+    ringkasan_penugasan:
+      g.ringkasanPenugasan === null
+        ? null
+        : {
+            deliverable: g.ringkasanPenugasan.deliverable,
+            deadline: g.ringkasanPenugasan.deadline,
+            divisi_pic: g.ringkasanPenugasan.divisiPic,
+            hasil_diharapkan: g.ringkasanPenugasan.hasilDiharapkan,
+          },
+    plan_id: g.planId,
+    decided_by: g.decidedBy,
+    decided_at: g.decidedAt,
+  };
+}
+
+export interface PlanGateConfigWire {
+  version_no: number;
+  kuota_threshold: number;
+  nilai_threshold: string;
+  durasi_threshold_bulan: number;
+  notif_join_threshold: string;
+}
+
+export interface PlanGateContextWire {
+  service_id: string;
+  service_name: string;
+  client_id: string;
+  toko: string | null;
+  tier_katalog: string;
+  standard_price: string;
+  frequency: string | null;
+  unit: string | null;
+  min_qty: number | null;
+  category: string | null;
+  plan_satuan_status: string;
+  ada_kontrak_full_management: boolean;
+  config: PlanGateConfigWire;
+  gate: PlanGateWire | null;
+  requires_plan: boolean;
+  perlu_penentuan: boolean;
+}
+
+export function planGateContextToWire(c: plangate.GateContext): PlanGateContextWire {
+  return {
+    service_id: c.serviceId,
+    service_name: c.serviceName,
+    client_id: c.clientId,
+    toko: c.toko,
+    tier_katalog: c.tierKatalog,
+    standard_price: c.standardPrice,
+    frequency: c.frequency,
+    unit: c.unit,
+    min_qty: c.minQty,
+    category: c.category,
+    plan_satuan_status: c.planSatuanStatus,
+    ada_kontrak_full_management: c.adaKontrakFullManagement,
+    config: {
+      version_no: c.config.versionNo,
+      kuota_threshold: c.config.kuotaThreshold,
+      nilai_threshold: c.config.nilaiThreshold,
+      durasi_threshold_bulan: c.config.durasiThresholdBulan,
+      notif_join_threshold: c.config.notifJoinThreshold,
+    },
+    gate: c.gate === null ? null : planGateToWire(c.gate),
+    requires_plan: c.requiresPlan,
+    perlu_penentuan: c.perluPenentuan,
+  };
+}
+
+/** The live recommendation preview (GB-1/GB-2) with no write. */
+export interface PlanGateRecommendationWire {
+  pemicu_keras: PlanGateTriggerWire[];
+  pemicu_lunak: PlanGateTriggerWire[];
+  rekomendasi: string;
+  ringkasan: string;
+}
+
+export function planGateRecommendationToWire(
+  r: plangate.Recommendation,
+): PlanGateRecommendationWire {
+  return {
+    pemicu_keras: r.pemicuKeras,
+    pemicu_lunak: r.pemicuLunak,
+    rekomendasi: r.rekomendasi,
+    ringkasan: r.ringkasan,
+  };
+}
+
+/**
+ * Inbound counterpart for the GB-8 summary: wire (snake_case) → domain
+ * (camelCase).
+ *
+ * This exists because it was missing, and the HTTP walk caught it: the
+ * plan-gate routes handed `b.ringkasan_penugasan` straight into the domain,
+ * whose `AssignmentSummary` reads `divisiPic`/`hasilDiharapkan`. Every field
+ * arrived `undefined`, so a de-escalation that DID carry a complete summary was
+ * rejected with `[ringkasan penugasan wajib diisi untuk jalur tanpa Plan]` — a
+ * validation error blaming the caller for a translation the route never did.
+ *
+ * Returns null for a missing or non-object body value; the domain's own GB-8
+ * completeness check then produces the BI message, so a partial summary is still
+ * rejected here rather than silently stored half-filled.
+ */
+export function assignmentSummaryFromWire(
+  v: unknown,
+): plangate.AssignmentSummary | null {
+  if (v === null || typeof v !== 'object') return null;
+  const r = v as Partial<PlanGateAssignmentSummaryWire>;
+  return {
+    deliverable: r.deliverable ?? '',
+    deadline: r.deadline ?? '',
+    divisiPic: r.divisi_pic ?? '',
+    hasilDiharapkan: r.hasil_diharapkan ?? '',
   };
 }

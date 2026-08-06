@@ -33,6 +33,9 @@ function svc(over: Partial<ServiceQueueRow> = {}): ServiceQueueRow {
     requires_strategy_plan: true,
     pinned_requires_strategy_plan: true,
     overridden: false,
+    plan_tier: 'plan_wajib',
+    gate_decision: null,
+    plan_determination_pending: false,
     assigned_am_id: 'EMP-0002',
     strategy_id: null,
     strategy_status: null,
@@ -115,5 +118,72 @@ describe('needsOnboarding — the queue filter', () => {
   it('drops dispatched and voided Services', () => {
     expect(needsOnboarding(svc({ status: SERVICE_BRIEFED }))).toBe(false);
     expect(needsOnboarding(svc({ status: SERVICE_VOIDED }))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Module 6C — the middle tier must be ANSWERED before anything else (Rule 1).
+// ---------------------------------------------------------------------------
+describe('plan-gate determination (M6C Rule 1)', () => {
+  it('asks for the determination first, ahead of every other step', () => {
+    // The trap this guards: `requires_strategy_plan` is false for an unanswered
+    // `ditentukan_am` Service, so a check that looked at the flag first would
+    // read it as Direct and offer a Brief the server always rejects.
+    const step = nextOnboardingStep(
+      svc({
+        plan_tier: 'ditentukan_am',
+        requires_strategy_plan: false,
+        pinned_requires_strategy_plan: false,
+        plan_determination_pending: true,
+      }),
+    );
+    expect(step.kind).toBe('determine_plan');
+  });
+
+  it('moves on to the Plan once the AM answered "butuh_plan"', () => {
+    const step = nextOnboardingStep(
+      svc({
+        plan_tier: 'ditentukan_am',
+        requires_strategy_plan: true,
+        pinned_requires_strategy_plan: false,
+        gate_decision: 'butuh_plan',
+        plan_determination_pending: false,
+      }),
+    );
+    expect(step.kind).toBe('draft_strategy');
+  });
+
+  it('goes straight to Brief once the AM answered "tanpa_plan"', () => {
+    const step = nextOnboardingStep(
+      svc({
+        plan_tier: 'ditentukan_am',
+        requires_strategy_plan: false,
+        pinned_requires_strategy_plan: false,
+        gate_decision: 'tanpa_plan',
+        plan_determination_pending: false,
+      }),
+    );
+    expect(step.kind).toBe('create_brief');
+  });
+
+  it('counts an unanswered determination as onboarding work', () => {
+    expect(
+      needsOnboarding(
+        svc({
+          plan_tier: 'ditentukan_am',
+          requires_strategy_plan: false,
+          plan_determination_pending: true,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('never asks for a determination on the two locked tiers', () => {
+    expect(nextOnboardingStep(svc({ plan_tier: 'plan_wajib' })).kind).toBe('draft_strategy');
+    expect(
+      nextOnboardingStep(
+        svc({ plan_tier: 'tanpa_plan', requires_strategy_plan: false, pinned_requires_strategy_plan: false }),
+      ).kind,
+    ).toBe('create_brief');
   });
 });

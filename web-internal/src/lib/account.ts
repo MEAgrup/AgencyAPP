@@ -96,9 +96,15 @@ export interface ServiceQueueRow {
   nama_pic: string;
   name: string;
   status: string;
-  requires_strategy_plan: boolean; // EFFECTIVE gate (override ∨ MSL pin)
+  requires_strategy_plan: boolean; // EFFECTIVE gate (override ∨ decision ∨ tier)
   pinned_requires_strategy_plan: boolean;
   overridden: boolean;
+  /** M6C S4 — which of the three catalog tiers this Service was pinned to. */
+  plan_tier: PlanTier;
+  /** the recorded G-B decision; null while the middle tier is unanswered. */
+  gate_decision: GateDecision | null;
+  /** true when the tier is `ditentukan_am` and G-B has not been answered yet. */
+  plan_determination_pending: boolean;
   assigned_am_id: string | null;
   strategy_id: string | null;
   strategy_status: string | null;
@@ -320,10 +326,12 @@ export const SERVICE_VOIDED = '[Cancelled — Service Voided]';
  * which button to show. `kind` drives the control; `label` is the button text.
  *
  * The order matters and mirrors §2 / §4 Rule 5 / §5 Rule 5 exactly:
+ *   `ditentukan_am`, unanswered: answer G-B first (M6C Rule 1);
  *   plan-gated: draft Plan → submit → SPV approves → create Brief;
  *   Direct:     create Brief straight away (no Plan record ever exists, §4 Rule 6).
  */
 export type OnboardingStepKind =
+  | 'determine_plan'
   | 'draft_strategy'
   | 'submit_strategy'
   | 'await_approval'
@@ -341,6 +349,14 @@ export function nextOnboardingStep(s: ServiceQueueRow): OnboardingStep {
     return { kind: 'none', label: 'Service di-void' };
   }
   if (s.status === SERVICE_AWAITING_ONBOARDING) {
+    // M6C Rule 1 comes FIRST: a `ditentukan_am` Service nobody has answered is
+    // not Direct, it is UNANSWERED, and Brief creation is blocked until the G-B
+    // form is filled. Checking `requires_strategy_plan` first would read this
+    // state as Direct and offer a Brief the server always rejects — the same
+    // class of bug as inferring the path from "does a Strategy row exist".
+    if (s.plan_determination_pending) {
+      return { kind: 'determine_plan', label: 'Tentukan kebutuhan Plan' };
+    }
     // Plan-gated (§4): the Plan must exist, be submitted, and be approved before
     // any Brief may be created (§4 Rule 5).
     if (s.requires_strategy_plan) {
@@ -404,6 +420,166 @@ export function approveStrategy(id: string): Promise<{ id: string; status: strin
 
 export function requestStrategyRevision(id: string, notes: string): Promise<{ id: string; status: string }> {
   return api.post<{ id: string; status: string }>(`/strategies/${id}/request-revision`, { notes });
+}
+
+// ---------------------------------------------------------------------------
+// Module 6C — Penentuan Kebutuhan Plan (plan-gate determination)
+// ---------------------------------------------------------------------------
+
+/** Catalog tier (M6C S4). The two locked tiers have no form; the middle one does. */
+export type PlanTier = 'plan_wajib' | 'ditentukan_am' | 'tanpa_plan';
+export type GateDecision = 'butuh_plan' | 'tanpa_plan';
+/** GB-4 — the two override directions are distinct on purpose (Rule 5). */
+export type GateFit = 'sesuai' | 'tolak_plan' | 'tambah_plan';
+export type TargetKind = 'gmv' | 'roas' | 'growth';
+
+export const TIER_LABELS: Record<PlanTier, string> = {
+  plan_wajib: 'Plan Wajib (dikunci katalog)',
+  ditentukan_am: 'Plan Ditentukan AM',
+  tanpa_plan: 'Tanpa Plan (dikunci katalog)',
+};
+
+export const FIT_LABELS: Record<GateFit, string> = {
+  sesuai: 'Sesuai Rekomendasi',
+  tolak_plan: 'Tolak Plan (menolak rekomendasi)',
+  tambah_plan: 'Tambah Plan (di luar rekomendasi)',
+};
+
+/** One trigger that fired, with the number that fired it (GB-1). */
+export interface GateTrigger {
+  kode: string;
+  label: string;
+  dasar: string;
+}
+
+/** GB-8 — the four fields the no-Plan path must still leave behind. */
+export interface AssignmentSummary {
+  deliverable: string;
+  deadline: string;
+  divisi_pic: string;
+  hasil_diharapkan: string;
+}
+
+export interface PlanGate {
+  service_id: string;
+  tier_katalog: PlanTier;
+  divisi_terlibat: string[];
+  deliverable: string;
+  kuota_per_periode: number | null;
+  durasi_bulan: number | null;
+  berulang: boolean;
+  nilai_per_bulan: string | null;
+  target_angka_jenis: TargetKind | null;
+  target_angka_nilai: string | null;
+  sequence_dependency: boolean;
+  laporan_periodik: boolean;
+  floor_price: unknown | null;
+  pemicu_keras: GateTrigger[];
+  pemicu_lunak: GateTrigger[];
+  config_version_no: number;
+  rekomendasi: GateDecision;
+  keputusan_am: GateDecision;
+  kesesuaian: GateFit;
+  alasan: string | null;
+  pemantauan_alternatif: string | null;
+  tanggal_tinjau_ulang: string;
+  ringkasan_penugasan: AssignmentSummary | null;
+  plan_id: string | null;
+  decided_by: string;
+  decided_at: string;
+}
+
+export interface PlanGateConfig {
+  version_no: number;
+  kuota_threshold: number;
+  nilai_threshold: string;
+  durasi_threshold_bulan: number;
+  notif_join_threshold: string;
+}
+
+/** Section G-A context + the determination on record (null when unanswered). */
+export interface PlanGateContext {
+  service_id: string;
+  service_name: string;
+  client_id: string;
+  toko: string | null;
+  tier_katalog: PlanTier;
+  standard_price: string;
+  frequency: string | null;
+  unit: string | null;
+  min_qty: number | null;
+  category: string | null;
+  plan_satuan_status: string;
+  ada_kontrak_full_management: boolean;
+  config: PlanGateConfig;
+  gate: PlanGate | null;
+  requires_plan: boolean;
+  perlu_penentuan: boolean;
+}
+
+export interface GateRecommendation {
+  pemicu_keras: GateTrigger[];
+  pemicu_lunak: GateTrigger[];
+  rekomendasi: GateDecision;
+  ringkasan: string;
+}
+
+/** The attributes the recommendation reads — wire names, snake_case. */
+export interface GateAttributesInput {
+  durasi_bulan: number | null;
+  berulang: boolean;
+  divisi_terlibat: string[];
+  target_angka_jenis: TargetKind | null;
+  kuota_per_periode: number | null;
+  nilai_per_bulan: string | null;
+  sequence_dependency: boolean;
+  laporan_periodik: boolean;
+}
+
+export interface GateDecisionBody extends GateAttributesInput {
+  target_angka_nilai: string | null;
+  deliverable: string;
+  keputusan_am: GateDecision;
+  alasan: string | null;
+  pemantauan_alternatif: string | null;
+  tanggal_tinjau_ulang: string;
+  ringkasan_penugasan: AssignmentSummary | null;
+}
+
+/** GET the G-A context + recorded determination. */
+export function getPlanGate(serviceId: string): Promise<PlanGateContext> {
+  return api.get<PlanGateContext>(`/services/${serviceId}/plan-gate`);
+}
+
+/**
+ * Recompute the recommendation server-side as the AM edits the attributes.
+ * Deliberately NOT reimplemented in the browser: two copies of the Rule 3
+ * trigger table would drift, and the one the AM sees must be the one that gets
+ * stored.
+ */
+export function previewPlanGate(
+  serviceId: string,
+  attrs: GateAttributesInput,
+): Promise<GateRecommendation> {
+  return api.post<GateRecommendation>(`/services/${serviceId}/plan-gate/preview`, attrs);
+}
+
+export function decidePlanGate(serviceId: string, body: GateDecisionBody): Promise<PlanGate> {
+  return api.post<PlanGate>(`/services/${serviceId}/plan-gate`, body);
+}
+
+/** Escalation (AM) or de-escalation (SPV only, Rules 11 & 12). */
+export function redecidePlanGate(
+  serviceId: string,
+  keputusan: GateDecision,
+  alasan: string,
+  ringkasan?: AssignmentSummary | null,
+): Promise<PlanGate> {
+  return api.post<PlanGate>(`/services/${serviceId}/plan-gate/redecide`, {
+    keputusan_am: keputusan,
+    alasan,
+    ringkasan_penugasan: ringkasan ?? null,
+  });
 }
 
 export function setStrategyRequirement(
