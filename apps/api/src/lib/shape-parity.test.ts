@@ -388,6 +388,13 @@ const WIRE_TO_FE: Record<string, string> = {
   StrategyWire: 'account.ts::Strategy',
   StrategyRequirementWire: 'account.ts::StrategyRequirement',
   ServiceQueueRowWire: 'account.ts::ServiceQueueRow',
+  // M6C plan gate
+  PlanGateWire: 'account.ts::PlanGate',
+  PlanGateTriggerWire: 'account.ts::GateTrigger',
+  PlanGateAssignmentSummaryWire: 'account.ts::AssignmentSummary',
+  PlanGateConfigWire: 'account.ts::PlanGateConfig',
+  PlanGateContextWire: 'account.ts::PlanGateContext',
+  PlanGateRecommendationWire: 'account.ts::GateRecommendation',
   BriefWire: 'account.ts::Brief',
   ComplaintWire: 'account.ts::Complaint',
   // M7 creative

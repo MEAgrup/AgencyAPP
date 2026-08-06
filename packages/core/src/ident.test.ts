@@ -21,8 +21,15 @@ describe('prefix registry', () => {
   });
 
   it('rejects unknown / test-only prefixes', () => {
-    // TST/DEMO are Go test scaffolding only — not part of the production registry.
-    for (const p of ['TST', 'DEMO', 'XYZ', 'cli', '']) {
+    // TST is Go test scaffolding only — not part of the production registry.
+    //
+    // `DEMO` used to be asserted here as unregistered, on the inherited belief
+    // that it was Go scaffolding too. It is not: `packages/domain/src/demo.ts`
+    // mints `DEMO-…` ids in this codebase, and it reached `ident_next` through
+    // the untyped executor so this guard never saw it. The M6A §7 registry scan
+    // (packages/db/src/ident.registry.test.ts) found it; it is registered now,
+    // which is why it moved out of this list.
+    for (const p of ['TST', 'XYZ', 'cli', '']) {
       expect(isRegisteredPrefix(p)).toBe(false);
     }
   });

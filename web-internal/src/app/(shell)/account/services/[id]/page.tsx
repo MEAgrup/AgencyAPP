@@ -6,11 +6,13 @@ import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { LEVEL_STAFF, useAssignableEmployees } from '@/lib/directory';
 import EmployeePicker from '@/components/EmployeePicker';
+import PlanGatePanel from '@/components/PlanGatePanel';
 import {
   BRIEF_DIVISIONS,
   PRIORITIES,
   SERVICE_AWAITING_ONBOARDING,
   STRATEGY_APPROVED,
+  TIER_LABELS,
   createBrief,
   createStrategy,
   getService,
@@ -291,13 +293,20 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
             <div>
               <div className="muted" style={{ fontSize: 12 }}>Jalur Eksekusi</div>
               <div>
-                {service.requires_strategy_plan ? 'Plan-gated (wajib Strategy & Plan)' : 'Direct (tanpa Plan)'}
+                {service.plan_determination_pending
+                  ? 'Belum ditentukan — isi form Penentuan Kebutuhan Plan'
+                  : service.requires_strategy_plan
+                    ? 'Plan-gated (wajib Strategy & Plan)'
+                    : 'Direct (tanpa Plan)'}
                 {service.overridden && (
                   <span className="muted" style={{ fontSize: 12 }}>
                     {' '}&middot; override dari pin MSL (
                     {service.pinned_requires_strategy_plan ? 'wajib' : 'tidak wajib'})
                   </span>
                 )}
+              </div>
+              <div className="muted" style={{ fontSize: 12 }}>
+                Tier katalog: {TIER_LABELS[service.plan_tier]}
               </div>
             </div>
             <div>
@@ -322,6 +331,24 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         </section>
       )}
 
+      {/* M6C — the plan-gate determination. Mounted ABOVE Strategy & Plan because
+          it is the gate that decides whether a Strategy is needed at all. Shown
+          for every tier (read-only on the two locked ones) so the AM can see why
+          there is or is not a form. */}
+      {service && (
+        <PlanGatePanel
+          serviceId={id}
+          canWrite={canWrite}
+          canDeescalate={!readOnly && (isAccountLead(role) || !!role?.director)}
+          onDecided={async () => {
+            // The execution path just changed — refetch so the header, the next
+            // step and the Brief form stop describing the old path.
+            await loadService();
+            await loadStrategy();
+          }}
+        />
+      )}
+
       <section className="card">
         <div className="cardHeader">
           <h2>Strategy &amp; Plan</h2>
@@ -342,7 +369,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
 
       {/* §4 Rule 1/6 + createStrategy's own gates: plan-gated only, no Plan yet,
           Service still [Awaiting Onboarding]. A Direct service has no Plan, ever. */}
-      {!strategy && canWrite && planGated && awaitingOnboarding && (
+      {!strategy && canWrite && planGated && awaitingOnboarding && !service?.plan_determination_pending && (
         <section className="card">
           <div className="cardHeader">
             <h2>Buat Strategy &amp; Plan</h2>
@@ -395,7 +422,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         </section>
       )}
 
-      {!strategy && canWrite && awaitingOnboarding && (
+      {!strategy && canWrite && awaitingOnboarding && !service?.plan_determination_pending && (
         <section className="card">
           <div className="cardHeader">
             <h2>Override Kebutuhan Strategy &amp; Plan</h2>
@@ -427,7 +454,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
 
       {/* A voided Service (M4-OA-5) has no live path left — createBrief rejects it
           with [brief tidak dapat dibuat untuk layanan pada status ini]. */}
-      {canWrite && step?.kind !== 'none' && (
+      {canWrite && step?.kind !== 'none' && step?.kind !== 'determine_plan' && (
         <section className="card">
           <div className="cardHeader">
             <h2>Buat Brief</h2>

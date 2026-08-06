@@ -81,6 +81,7 @@ export * as msl from './msl';
 export * as finance from './finance';
 export * as client from './client';
 export * as account from './account';
+export * as plangate from './plangate';
 export * as task from './task';
 export * as creative from './creative';
 export * as ads from './ads';

@@ -29,7 +29,7 @@
  * it reuses `sales.canWriteAttempt` so there is one answer, not two.
  */
 
-import { bi, permission } from '@cdps/core';
+import { bi, ident, permission } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import {
   ForbiddenError as SalesForbiddenError,
@@ -207,7 +207,7 @@ export async function log(
     }
 
     const ex = executors(tx);
-    const id = await ex.ident.identNext('ACT', now);
+    const id = await ident.nextId(ex.ident, 'ACT', now);
     await tx`
       insert into prospect_activities
         (id, attempt_id, lead_id, activity_type, occurred_at, summary, created_by)

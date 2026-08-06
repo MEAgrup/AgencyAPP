@@ -17,6 +17,10 @@
 | Installment | `INST-` | TRX | M5 | Termin scheme: schedule set at intent time |
 | Service | `SVC-`* | CLI | M0→M6 | At closing, one per service line; upsell = new Service; errors via Void Service (M4-OA-5) |
 | Strategy & Plan | `STR-` | SVC | M6 | Plan-gated services, before Brief creation |
+| Plan-gate determination | (lives on SVC, PK `service_id`) | SVC 1:1 | M6C | Tier katalog `ditentukan_am`: AM menjawab form G-B sebelum Brief pertama. Menyimpan pemicu yang menyala + keputusan + arah override (`sesuai`/`tolak_plan`/`tambah_plan`) |
+| Strategi (Full Store Management) | `STRG-` | SVC | M6A | **Belum dibangun** — lihat `DECISIONS.md` O56. Section A→J, satu aktif per kontrak |
+| Plan period | `PLAN-` | STRG (full-mgmt) atau CLI (Plan Satuan) | M6B | **Belum dibangun** — lihat `DECISIONS.md` O56. Periode anniversary-month |
+| Vendor | `VND-` | — | M6A | **Prefix terdaftar, tabel belum dibangun.** Prasyarat E-8/F-4 (live-stream vendor mode) |
 | Brief | `BRF-` | SVC | M6 | AM breaks a Service down; one Service → many Briefs across divisions |
 | Asset (Creative unit of work) | `AST-` | BRF | M7 | Brief breakdown into per-deliverable rows |
 | Ad Campaign (client-facing paid media) | `ADC-` | BRF (setup) | M8 | Distinct from M3 `CMP-`; persists across recurring strategy cycles |
@@ -30,6 +34,13 @@
 | Client Health Report Snapshot | `CHR-` | CLI | M13 | Monthly batch, immutable |
 | Performance Score | `PERF-` | User | M14 | Monthly batch, immutable |
 | Master Service List entry | (versioned config) | — | Phase 0 v2 §10 | Sales Head/SPV manages; deals reference the version at closing date |
+
+**Prefix registry (M6A §7).** Sejak 2026-08-06 daftar prefix hidup di DUA tempat yang
+dijaga tetap identik: tabel `entity_prefix` (PK ⇒ duplikat mustahil) dan `PREFIXES` di
+`packages/core/src/ident.ts`. `packages/db/src/ident.registry.test.ts` memindai setiap
+call site pembuat ID dan gagal kalau ada prefix yang tidak terdaftar. Tes itu menemukan
+`ACT`/`LDR`/`DEMO` mencetak ID tanpa terdaftar — jangan menambah prefix tanpa
+mendaftarkannya di kedua tempat.
 
 *`SVC-` prefix: Service IDs are generated at closing per M0 §6; exact prefix string not spelled in the PRDs — confirm prefix label at ticketing (registry pattern implies `SVC-YYYYMM-NNNN`). Log in DECISIONS.md once fixed.
 

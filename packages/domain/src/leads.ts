@@ -29,7 +29,7 @@
  * Reference: backend/internal/module1_leads/{leads,dedup,normalize,reads}.go.
  */
 
-import { bi, notification, permission, statemachine } from '@cdps/core';
+import { bi, ident, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 // Single source of truth for the CDPS division label (Go keeps a module-local
 // copy in module1_leads/bulk.go; here one exported constant serves both).
@@ -1452,7 +1452,7 @@ export async function requestDelete(
       return { kind: 'blocked', message: decision.message };
     }
 
-    const reqId = await ex.ident.identNext('LDR', now);
+    const reqId = await ident.nextId(ex.ident, 'LDR', now);
     await tx`
       insert into lead_delete_requests (id, lead_id, reason, status, requested_by, created_by)
       values (${reqId}, ${leadId}, ${trimmed}, ${DELETE_PENDING}, ${actor.employeeId}, ${actor.employeeId})`;
