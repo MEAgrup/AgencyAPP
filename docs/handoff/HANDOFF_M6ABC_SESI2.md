@@ -1,4 +1,11 @@
-# HANDOFF — M6A/M6B/M6C Sesi 2 (titik mulai sesi berikutnya)
+# HANDOFF — M6A/M6B/M6C Sesi 2
+
+> ⚠️ **BUKAN berkas terbaru.** Titik mulai ada di
+> `HANDOFF_M6ABC_SESI3.md` (A-05/A-06). Yang di bawah tetap berlaku sebagai
+> latar — khususnya §3 (yang belum tersambung) dan §6 (jebakan) — tapi §0
+> (branch, jumlah tabel, jumlah migrasi, jumlah test) sudah **kedaluwarsa**:
+> sesi 3 pindah ke branch `claude/ci-gates-db-migrations-101jt4`, tabel 69,
+> tujuh migrasi menunggu.
 
 > **Konteks:** lanjutan `HANDOFF_M6ABC_SESI1.md`. Sesi ini mengerjakan tiket
 > **A-02 (`VND-`)**, **A-03 (`STRG` + tabel anak)** dan **A-04 (mesin #15)** —

@@ -55,6 +55,18 @@ Domain `packages/domain/src/{vendor,strategi}.ts`, 17 route `apps/api`, tipe FE
 `web-internal/src/lib/strategi.ts` (kontrak untuk form A-05…A-09; ia juga yang
 membuat `shape-parity` bisa memeriksa converter-nya). Walk HTTP 40/40.
 
+### Sesi 3 (2026-08-06) — M6A A-05 / A-06
+
+| # | Ticket | Isi |
+|---|---|---|
+| A-05 | Section A (16 field) + A-15/A-16 | 20 kolom di `strategi` (Section A diisi SEKALI per Strategi, §4) + tabel `strategi_akses` (matriks channel × akses × status). **A-16 bukan tabel kedua** — ia flag `memblokir` + `target_tanggal_beres` di baris A-15 yang diblokirnya, dijaga CHECK. `channel = 'Umum'` disediakan karena akses gudang/stok bukan milik channel mana pun. Taksonomi tertutup A-14 dijaga containment jsonb (`<@`) |
+| A-06 | Section B per channel (grup B-2…B-9) | ±45 kolom di `strategi_channel`. **Komposisi trafik B-2.3 = enam kolom**, bukan jsonb: CHECK §7 "berjumlah 100 ±0,5" akan LOLOS diam-diam kalau sebuah kunci jsonb hilang. `gmv_per_jam_live` GENERATED (aturan rumah #4), NULL saat nol jam live. **B-1.5 (tren) tanpa kolom** — diturunkan saat dibaca; arah `month_index` dinyatakan: 1 = bulan TERTUA |
+
+Dua route baru (`PUT /strategi/{id}/konteks`, `PUT /strategi/{id}/akses`), 8
+interface struct baru di `wire.ts` + tipe FE-nya, gerbang submit diperluas
+(Section A per field-ID, A-15 per channel, B-2…B-9 per channel). Walk HTTP 42/42.
+Gate tabel 68 → **69** di KEDUA berkas. Pertanyaan terbuka baru: **O58**.
+
 ## 2. BELUM — M6A Strategi (O56)
 
 Prasyarat: **`VND-` entity** (M6A §7 menyebutnya blocker: "E-8 dan F-4 tidak bisa
@@ -66,14 +78,15 @@ diimplementasi sebelum ini mendarat, jadi ia masuk batch migrasi yang SAMA denga
 | ~~A-02~~ | ~~`VND-` Vendor entity~~ | ✅ **SELESAI sesi 2** |
 | ~~A-03~~ | ~~`STRG` + child tables~~ | ✅ **SELESAI sesi 2** — bentuknya; field per Section tetap di A-05…A-09 |
 | ~~A-04~~ | ~~Mesin status #15~~ | ✅ **SELESAI sesi 2.** `Aktif → Draft Revisi` TIDAK didaftarkan — bertentangan dengan Rule 13; revisi = baris baru. Lihat DECISIONS 2026-08-06 |
-| A-05 | Section A (16 field) | Konteks klien; A-15 matriks akses (channel × akses × status). **Menempel sebagai kolom di `strategi`** — tabelnya sudah ada, jadi ini ALTER + field form, bukan desain ulang |
-| A-06 | Section B per channel (±45 field ↻) | **Blank tidak boleh, `0` boleh** (Rule 5). Setiap grup wajib angka + periode + sumber (lampiran + tanggal ambil). Jendela baseline 1–6 bulan, default 3, <3 wajib alasan (Rule 5a, CHECK DB) |
+| ~~A-05~~ | ~~Section A (16 field)~~ | ✅ **SELESAI sesi 3** — data + domain + route + tipe FE + gerbang submit. **Form UI belum** (belum ada halaman Strategi sama sekali; lihat A-13 di bawah) |
+| ~~A-06~~ | ~~Section B per channel (±45 field ↻)~~ | ✅ **SELESAI sesi 3** — sama cakupannya. Kelengkapan Rule 5 ditegakkan gerbang submit per grup per channel, bukan `NOT NULL`: §7 meminta autosave 20 detik dan §5 langkah 5 meminta hitungan hidup, keduanya butuh keadaan setengah-terisi bisa disimpan |
 | A-07 | Section C + validasi kutipan baseline | Rule 6: setiap akar masalah WAJIB mereferensi ≥1 field-ID baseline, divalidasi ada di Strategi yang sama |
 | A-08 | Section D + asumsi | Stretch `>=` floor di level CHECK DB. `STRG_ASSUMPTION.status ∈ Berlaku/Gugur/Terverifikasi`; flip ke `Gugur` memicu `strategi_revisi_disarankan` (**terblokir O55**) |
 | A-09 | Section E/F/G/H/I/J | Floor price per hero SKU (E-4) dibaca validasi Brief; F soft-limit 20% (Rule 10); G-0 `tanggal_mulai_siklus` sekali-set (Rule 17) |
 | A-10 | Dua tier visibilitas | `STRG_FIELD_VISIBILITY` overlay + daftar hard-internal sebagai konstanta `packages/core`, ditolak di predikat TS **dan** CHECK DB (invariant beku: keduanya tidak boleh menyimpang) |
 | A-11 | Tautan klien read-only `/s/{token}` | Token 32-byte disimpan ter-hash, satu aktif per Strategi, version-pinned ke versi Aktif, revocable + expirable, access-logged. Filter visibilitas diterapkan **sebelum** serialisasi — nol field internal di payload HTML |
-| A-12 | Revisi + versioning | Rule 13: versi `n` tetap `Aktif` sampai `n+1` disetujui. Wajib trigger (dari H-2) + alasan + asumsi mana yang gugur |
+| A-12 | Revisi + versioning | Rule 13: versi `n` tetap `Aktif` sampai `n+1` disetujui. Wajib trigger (dari H-2) + alasan + asumsi mana yang gugur. **Mesinnya sudah jalan (A-04) dan carry-over Section A/B/akses sudah teruji** — yang tersisa UI-nya + diff J-4 |
+| **A-13** | **Halaman & form Section A→J** (tiket BARU, dipisah dari A-05…A-09) | Belum ada satu pun halaman Strategi. Sepuluh seksi tidak bisa jadi satu form: ia butuh shell halaman + navigasi seksi + autosave 20 detik (§7) + panel "kekurangan" hidup (§5 langkah 5) yang membaca `GET /strategi/{id}/kekurangan` per `kode`. **Kontraknya sudah ada dan sudah dijaga `shape-parity`** — `web-internal/src/lib/strategi.ts` mendeklarasikan setiap field Section A/B, jadi form bisa dibangun tanpa menebak bentuk badan respons. Bacalah `web-internal/AGENTS.md` lebih dulu: versi Next di repo ini bukan yang ada di data latih |
 
 ## 3. BELUM — M6B Plan (O56)
 
@@ -103,4 +116,5 @@ diimplementasi sebelum ini mendarat, jadi ia masuk batch migrasi yang SAMA denga
 | X-06 | RA-7 (tautan klien hanya versi aktif, tanpa riwayat/diff) | Yohan, sebelum client view dibangun |
 | X-07 | PA-2/PA-5 (jendela GMV manual 5 hari · force-close +7 hari) | Yulianti |
 | X-08 | PA-3 (metrik auto PE-3 belum tentu tersedia semua) | Hans — metrik yang belum ada harus jatuh ke manual **secara eksplisit**, tidak dicampur diam-diam dengan yang auto |
+| X-10 | **O58 — "tidak ada" vs "belum dijawab" untuk enam field daftar bertanda WAJIB** (A-11, A-14, B-5.3, B-8.1, B-8.2) | Yohan / Yulianti. Sesi 3 memilih bacaan yang tidak memblokir (gerbangi angka pendampingnya, bukan daftarnya) dan mencatatnya; menambah checkbox "tidak ada" berarti field yang PRD tidak mendefinisikan |
 | X-09 | **Tidak ada entitas CONTRACT di CDPS** — Strategi diikat ke `service_id` dan durasi/floor dideklarasi AM | Yohan / Yulianti — **O57**. Murah dibalik sekarang, mahal setelah periode Plan M6B digenerate di atasnya |
