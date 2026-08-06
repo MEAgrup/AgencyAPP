@@ -17,6 +17,7 @@ import {
   type LeadDetail,
   type LeadAttemptRow,
 } from '@/lib/leads';
+import { listLeadActivities, type ActivityRow } from '@/lib/leads';
 import { isTerminalAttempt, leadProgress, nextStepLabel } from '@/lib/lead-progress';
 import StatusBadge from '@/components/StatusBadge';
 import { extractStatusLabel, summarizeJson } from '@/lib/audit';
@@ -50,6 +51,10 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
   const [auditError, setAuditError] = useState<string | null>(null);
 
+  // Aktivitas SELURUH attempt pada lead ini (M1 §6: lead pool bisa dikerjakan
+  // beberapa sales sekaligus, dan membandingkan effort-nya justru gunanya).
+  const [activities, setActivities] = useState<ActivityRow[]>([]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
@@ -75,10 +80,20 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
     }
   }, [id]);
 
+  const loadActivities = useCallback(async () => {
+    try {
+      const res = await listLeadActivities(id);
+      setActivities(res.data ?? []);
+    } catch {
+      setActivities([]);
+    }
+  }, [id]);
+
   useEffect(() => {
     load();
     loadAudit();
-  }, [load, loadAudit]);
+    loadActivities();
+  }, [load, loadAudit, loadActivities]);
 
   if (loading) return <div className="pageLoading">Memuat...</div>;
 
@@ -261,6 +276,50 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
           loadAudit();
         }}
       />
+
+      {/* Aktivitas sales — read-only di sini; pencatatannya di halaman prospek
+          (`/sales/{attemptId}`), supaya satu aturan hanya punya satu pintu. */}
+      <section className="card">
+        <div className="cardHeader">
+          <h2>Aktivitas Sales</h2>
+          <span className="muted" style={{ fontSize: 13 }}>
+            Total effort: <strong>{activities.length}</strong> aktivitas
+          </span>
+        </div>
+        {activities.length === 0 ? (
+          <p className="muted">
+            Belum ada aktivitas tercatat. Aktivitas dicatat dari halaman prospek setelah status{' '}
+            <code>Qualified</code>.
+          </p>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Waktu</th>
+                  <th>Prospek</th>
+                  <th>Jenis</th>
+                  <th>Ringkasan Hasil</th>
+                  <th>Sales</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activities.map((a) => (
+                  <tr key={a.id}>
+                    <td>{formatDateTime(a.occurred_at)}</td>
+                    <td>
+                      <Link href={`/sales/${a.attempt_id}`}>{a.attempt_id}</Link>
+                    </td>
+                    <td>{a.activity_type}</td>
+                    <td style={{ whiteSpace: 'pre-wrap' }}>{a.summary}</td>
+                    <td>{a.created_by_nama || a.created_by}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       {/* Histori Audit */}
       <section className="card">

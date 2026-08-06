@@ -6,7 +6,7 @@
  * other way inline in each route (`toInput`).
  */
 import { money, tz } from '@cdps/core';
-import type { account, admin, ads, audit, auth, board, campaign, client, creative, demo, directory, finance, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
+import type { account, activity, admin, ads, audit, auth, board, campaign, client, creative, demo, directory, finance, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -2505,5 +2505,56 @@ export function bulkReportToWire(r: leads.BulkReport): BulkReportWire {
     summary: r.summary,
     rows: r.rows.map(row),
     rejections: r.rejections.map(row),
+  };
+}
+
+/** One logged prospect activity — web-internal's `ActivityRow`. */
+export interface ActivityWire {
+  id: string;
+  attempt_id: string;
+  lead_id: string;
+  activity_type: string;
+  occurred_at: string;
+  summary: string;
+  created_by: string;
+  created_by_nama: string;
+  created_at: string;
+}
+
+/** Maps one activity log entry (ACT-). */
+export function activityToWire(a: activity.Activity): ActivityWire {
+  return {
+    id: a.id,
+    attempt_id: a.attemptId,
+    lead_id: a.leadId,
+    activity_type: a.activityType,
+    occurred_at: a.occurredAt.toISOString(),
+    summary: a.summary,
+    created_by: a.createdBy,
+    created_by_nama: a.createdByNama,
+    created_at: a.createdAt.toISOString(),
+  };
+}
+
+/** The derived effort rollup for one attempt — web-internal's `EffortSummary`. */
+export interface EffortSummaryWire {
+  attempt_id: string;
+  total: number;
+  by_type: Record<string, number>;
+  last_activity_at: string | null;
+}
+
+/**
+ * Maps the effort rollup. `last_activity_at` is sent as an EXPLICIT null when
+ * there is no activity yet — a missing key would render the panel blank rather
+ * than "belum ada aktivitas" (CLAUDE.md: kunci yang HILANG lebih berbahaya
+ * daripada null).
+ */
+export function effortToWire(e: activity.EffortSummary): EffortSummaryWire {
+  return {
+    attempt_id: e.attemptId,
+    total: e.total,
+    by_type: e.byType,
+    last_activity_at: e.lastActivityAt === null ? null : e.lastActivityAt.toISOString(),
   };
 }

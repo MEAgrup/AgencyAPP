@@ -8,6 +8,15 @@
 - `Qualified` only via successful Qualified Form submit; exit without submit ⇒ stays `Contacted`.
 - Negotiation states: `Negotiation - Pending Approval` → { `Negotiation - Approved` | `Negotiation - Revision Required` | `Negotiation - Rejected` }; Revision Required → (accept ⇒ Approved) | (resubmit ⇒ Pending Approval, new version); `Negotiation - Rejected` → (resubmit ⇒ Pending Approval, new version) | `Closed-Lost` (DECISIONS O16); No-nego path ⇒ `Negotiation - Auto Approved`. Closing only from Approved/Auto Approved.
 
+### Log aktivitas prospek — SENGAJA BUKAN MESIN (keputusan pemilik 2026-08-06)
+`prospect_activities` (`ACT-`) mencatat Follow Up / Jadwal Meeting / Online Meeting / Visit / Lainnya
+dari status `Qualified` sampai state negosiasi terakhir. Ia **tidak punya kolom status**, tidak muncul
+di `sm_machines`, dan tidak pernah menyentuh `prospect_attempts.status`: mencatat aktivitas BUKAN
+transisi. Yang membatasinya bukan `sm_edges` melainkan gate status di `packages/domain/src/activity.ts`
+(`ACTIVITY_ALLOWED_STATUSES`) — di luar rentang itu ditolak `[aktivitas hanya bisa dicatat setelah lead
+qualified]`. Barisnya append-only (trigger `forbid_mutation` menolak UPDATE dan DELETE), sehingga metrik
+"effort sampai closing" selalu bisa dihitung ulang dari log (aturan rumah #3/#4). Lihat `DECISIONS.md`.
+
 ## 2. Lead record (M1)
 `[Pool]` (Marketing-imported, claimable) / active (scouted-owned) / `[Rejected]` / `[Not Qualified]` / `[Blocked - Duplikat]` (intake event).
 - Duplicate of active external lead ⇒ reject row: `[lead sudah ada & sedang diproses, tidak diimport]` (attempt logged, not counted).

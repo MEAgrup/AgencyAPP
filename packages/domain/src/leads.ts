@@ -837,6 +837,19 @@ export interface LeadListScope {
  * null when the actor has no access at all. Mirrors Go `leadListScope`:
  * Director/OD and Marketing-lead and Sales-lead see everything; Marketing staff
  * are narrowed to their own leads; everyone else is denied.
+ *
+ * SALES STAFF (added 2026-08-06, QA pemilik). Go denied them outright, and that
+ * port was faithful but wrong in practice: a salesperson who registers a lead
+ * through the M1 §4 door has NOWHERE to see it again. The lead lands `active`
+ * (scouted, exclusive), so it never appears on the Pool board — Pool is `[Pool]`
+ * only, by design (§6 rule 3) — and this gate answered 403 on the Database. The
+ * only trace was the derived PRSP row in the Sales workspace.
+ *
+ * Opening the endpoint does NOT widen what they can read: `leadsDatabase` runs
+ * through `readAsActor`, so `leads_select` still narrows the rows to leads they
+ * created or hold an attempt on (RLS baseline + 20260729031525). "Staff = own
+ * data only" is therefore still enforced where it was already enforced — one
+ * place, not two (CLAUDE.md: the two sides must never disagree).
  */
 export function leadListScope(actor: permission.Actor): LeadListScope | null {
   if (actor.role.director || actor.role.od) {
@@ -848,7 +861,7 @@ export function leadListScope(actor: permission.Actor): LeadListScope | null {
     }
     return { marketingStaffScope: true };
   }
-  if (actor.role.division === SALES_DIVISION && actor.role.level === permission.LevelLead) {
+  if (actor.role.division === SALES_DIVISION) {
     return { marketingStaffScope: false };
   }
   return null;
@@ -878,8 +891,20 @@ export interface PoolBoardRow {
  * poolBoard returns every `[Pool]` lead with its contest counts and the M1-OA-7
  * stale flag (unclaimed > 24h). Multiple salespeople compete on one pool lead
  * by design (M1-OA-1); `myOpenAttempt` marks rows the caller already holds.
+ *
+ * `q` (nama/telepon substring) and `source` narrow the board the same way they
+ * narrow `leadsDatabase` — same predicate shape, same parameter no-op when empty
+ * (`'' = ''` short-circuits), so there is no dynamic SQL to inject into. Added
+ * 2026-08-06 (QA pemilik): a pool that only ever grows is unusable without them.
  */
-export async function poolBoard(sql: Queryable, actorEmployeeId: string): Promise<PoolBoardRow[]> {
+export async function poolBoard(
+  sql: Queryable,
+  actorEmployeeId: string,
+  filter: { q?: string; source?: string } = {},
+): Promise<PoolBoardRow[]> {
+  const q = filter.q?.trim() ?? '';
+  const like = `%${q}%`;
+  const source = filter.source?.trim() ?? '';
   const rows = await sql<{
     id: string; lead_name: string; phone_number: string; source: string;
     origin_campaign_id: string | null; created_at: Date;
@@ -894,6 +919,8 @@ export async function poolBoard(sql: Queryable, actorEmployeeId: string): Promis
                and pa2.status <> all(${OPEN_ATTEMPT_TERMINAL})) as my_open_attempt
     from leads l
     where l.record_status = ${RECORD_POOL}
+      and (${q} = '' or l.lead_name ilike ${like} or l.phone_number ilike ${like})
+      and (${source} = '' or l.source = ${source})
     order by l.created_at desc, l.id desc`;
   return rows.map((r) => ({
     id: r.id, leadName: r.lead_name, phoneNumber: r.phone_number, source: r.source,
@@ -920,8 +947,18 @@ export interface LeadsDbRow {
 
 /**
  * leadsDatabase returns leads newest-first, optionally filtered by an exact
- * record_status and a name/phone substring. Filters are parameter no-ops when
- * empty (`'' = ''` short-circuits), so there is no dynamic SQL to inject into.
+ * record_status, a name/phone substring, an exact Source, and "mine only".
+ * Filters are parameter no-ops when empty (`'' = ''` short-circuits), so there
+ * is no dynamic SQL to inject into.
+ *
+ * `source` (added 2026-08-06, QA pemilik) is the "lead ini datang dari aktivitas
+ * mana" cut — Scouting / Event / Leads - Iklan / … — the dimension M1 §8 already
+ * evaluates lead quality by, but which the board had no way to slice.
+ *
+ * `mine` narrows to leads the actor registered (`created_by`) or holds an
+ * attempt on. It is a CONVENIENCE, never a security boundary: row visibility is
+ * `leads_select`'s job, and this filter can only ever subtract from what RLS
+ * already allows. `mineEmployeeId` is empty for callers that do not use it.
  *
  * Head-deleted leads are hidden from the unfiltered list — that is what "delete"
  * has to mean to the people using the board — but remain reachable by asking for
@@ -930,11 +967,13 @@ export interface LeadsDbRow {
  */
 export async function leadsDatabase(
   sql: Queryable,
-  filter: { status?: string; q?: string } = {},
+  filter: { status?: string; q?: string; source?: string; mineEmployeeId?: string } = {},
 ): Promise<LeadsDbRow[]> {
   const status = filter.status?.trim() ?? '';
   const q = filter.q?.trim() ?? '';
   const like = `%${q}%`;
+  const source = filter.source?.trim() ?? '';
+  const mine = filter.mineEmployeeId?.trim() ?? '';
   const rows = await sql<{
     id: string; lead_name: string; phone_number: string; email: string | null;
     source: string; origin_division: string; origin_campaign_id: string | null;
@@ -949,6 +988,10 @@ export async function leadsDatabase(
     where (${status} = '' or l.record_status = ${status})
       and (${status} = ${RECORD_DELETED} or l.record_status <> ${RECORD_DELETED})
       and (${q} = '' or l.lead_name ilike ${like} or l.phone_number ilike ${like})
+      and (${source} = '' or l.source = ${source})
+      and (${mine} = '' or l.created_by = ${mine} or exists(
+            select 1 from prospect_attempts pa3
+             where pa3.lead_id = l.id and pa3.owner_employee_id = ${mine}))
     order by l.created_at desc, l.id desc`;
   return rows.map((r) => ({
     id: r.id, leadName: r.lead_name, phoneNumber: r.phone_number, email: r.email,

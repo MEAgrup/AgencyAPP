@@ -10,6 +10,10 @@
  *   the central LEAD record and the salesperson's PRSP attempt with dedup v2.
  * - sales: M0 Qualified stage — Contacted progression, the MSL v2 pricing
  *   calculator + commission quote, and the Qualified Lead Form submit.
+ * - activity: the prospect activity log (ACT-) — Follow Up / Jadwal Meeting /
+ *   Online Meeting / Visit recorded from `Qualified` until closing, with the
+ *   derived effort rollups. Append-only; NOT a lifecycle (deviasi PRD, keputusan
+ *   pemilik 2026-08-06).
  * - msl: Master Service List admin (S0-09) — Sales-owned catalog with immutable
  *   versions, plus the canonical MSL read (effectiveAt) consumed by `sales`.
  * - directory: the assignable-employee READ behind every "who does this?" picker
@@ -72,6 +76,7 @@ export * as directory from './directory';
 export * as demo from './demo';
 export * as leads from './leads';
 export * as sales from './sales';
+export * as activity from './activity';
 export * as msl from './msl';
 export * as finance from './finance';
 export * as client from './client';

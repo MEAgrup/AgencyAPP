@@ -60,7 +60,7 @@ INSERT INTO employee_layered_roles (employee_id, role, enabled, created_by) VALU
 ON CONFLICT (employee_id, role) DO UPDATE SET enabled = true;
 
 -- ============================================================================
--- 4) Master service (3) — via ident_next('MSV'), guarded (hanya bila kosong)
+-- 4) Master service (3) — via ident_next('MSV'), guarded PER NAMA
 --    Setiap service: master_services + master_service_versions v1 + audit 'create'.
 --    Kolom pricing kalkulator memakai default (pricing_mode 'flat', apply_ppn false,
 --    requires_strategy_plan false) — persis ServiceInput minimal seed.go.
@@ -70,14 +70,19 @@ DECLARE
     v_id text;
     r    record;
 BEGIN
-    IF (SELECT count(*) FROM master_services) = 0 THEN
-        FOR r IN
-            SELECT * FROM (VALUES
-                ('Ads Management',      numeric '10000000.00', '5% of standard price'),
-                ('KOL Management',      numeric '7500000.00',  '4% of standard price'),
-                ('Live Stream Package', numeric '12000000.00', 'flat Rp 500.000')
-            ) AS t(name, price, rule)
-        LOOP
+    FOR r IN
+        SELECT * FROM (VALUES
+            ('Ads Management',      numeric '10000000.00', '5% of standard price'),
+            ('KOL Management',      numeric '7500000.00',  '4% of standard price'),
+            ('Live Stream Package', numeric '12000000.00', 'flat Rp 500.000')
+        ) AS t(name, price, rule)
+    LOOP
+        -- Guard PER NAMA, bukan "tabel kosong". Sejak migrasi 20260806050000
+        -- menanam layanan 'Komisi', tabelnya TIDAK PERNAH kosong lagi, jadi guard
+        -- lama akan melewatkan seluruh seed demo dan fixture Alpha Digital
+        -- kehilangan katalognya — gagal diam-diam, persis kelas cacat yang
+        -- CLAUDE.md peringatkan.
+        IF NOT EXISTS (SELECT 1 FROM master_service_versions WHERE name = r.name) THEN
             v_id := ident_next('MSV', now());
             INSERT INTO master_services (id, created_by) VALUES (v_id, 'SYSTEM');
             INSERT INTO master_service_versions
@@ -89,8 +94,8 @@ BEGIN
                                            'standard_price', to_char(r.price, 'FM9999999990.00'),
                                            'pricing_mode', 'flat'),
                         'SYSTEM');
-        END LOOP;
-    END IF;
+        END IF;
+    END LOOP;
 END $$;
 
 -- ============================================================================

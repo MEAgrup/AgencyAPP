@@ -29,6 +29,8 @@ import {
   resubmitNegotiation,
   setNotQualified,
   submitNegotiation,
+  listActivities,
+  logActivity,
   type AttemptDetail,
   type ClosingInput,
   type NegotiationDecision,
@@ -36,6 +38,7 @@ import {
   type Quote,
   type ServiceSelection,
 } from '@/lib/sales';
+import { ACTIVITY_TYPES, type ActivityRow, type EffortSummary } from '@/lib/leads';
 import StatusBadge from '@/components/StatusBadge';
 
 // Platform List checklist (M0 §4.3 — verbatim from the PRD, joined to a single
@@ -153,6 +156,17 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
   const [closeResult, setCloseResult] = useState<{ client_id: string; transaction_id: string } | null>(null);
   const closingInitRef = useRef(false);
 
+  // --- Log aktivitas (ACT-, keputusan pemilik 2026-08-06) ---
+  // Dicatat mulai status Qualified sampai sebelum terminal; server yang
+  // berwenang menolak (`[aktivitas hanya bisa dicatat setelah lead qualified]`).
+  const [activities, setActivities] = useState<ActivityRow[]>([]);
+  const [effort, setEffort] = useState<EffortSummary | null>(null);
+  const [actType, setActType] = useState<string>(ACTIVITY_TYPES[0]);
+  const [actWhen, setActWhen] = useState('');
+  const [actSummary, setActSummary] = useState('');
+  const [actSubmitting, setActSubmitting] = useState(false);
+  const [actError, setActError] = useState<string | null>(null);
+
   const quoteSeq = useRef(0);
   const quoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -180,10 +194,24 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
     }
   }, [id]);
 
+  const loadActivities = useCallback(async () => {
+    try {
+      const res = await listActivities(id);
+      setActivities(res.data ?? []);
+      setEffort(res.effort ?? null);
+    } catch {
+      // Panel effort tidak boleh menjatuhkan halaman prospek: kalau baca gagal
+      // (mis. RLS memang tidak memberi barisnya), panelnya kosong, bukan error.
+      setActivities([]);
+      setEffort(null);
+    }
+  }, [id]);
+
   useEffect(() => {
     load();
     loadAudit();
-  }, [load, loadAudit]);
+    loadActivities();
+  }, [load, loadAudit, loadActivities]);
 
   // Master services load once (only the picker at Contacted uses it; cheap + harmless elsewhere).
   useEffect(() => {
@@ -547,6 +575,28 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
+  async function handleLogActivity(e: FormEvent) {
+    e.preventDefault();
+    setActError(null);
+    setActSubmitting(true);
+    try {
+      await logActivity(id, {
+        activity_type: actType,
+        // Kosong = "sekarang" (server yang menentukan), jadi field tanggal
+        // opsional dan tidak perlu ditebak di klien.
+        occurred_at: actWhen ? new Date(actWhen).toISOString() : undefined,
+        summary: actSummary,
+      });
+      setActSummary('');
+      setActWhen('');
+      await loadActivities();
+    } catch (err) {
+      setActError(errorMessage(err));
+    } finally {
+      setActSubmitting(false);
+    }
+  }
+
   if (loading) return <div className="pageLoading">Memuat...</div>;
 
   if (loadError || !detail) {
@@ -561,6 +611,11 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
   const { attempt, lead, qualified_form, proposals, nq_reasons, allowed_transitions } = detail;
   const status = attempt.status;
   const showLostAtClosing = status === S_APPROVED || status === S_AUTO;
+  // Cermin ACTIVITY_ALLOWED_STATUSES di packages/domain/src/activity.ts: dari
+  // Qualified sampai state negosiasi terakhir, TIDAK termasuk status terminal.
+  // Server tetap otoritasnya — ini hanya memutuskan formulirnya ditampilkan.
+  const ACTIVITY_STAGES = [S_QUALIFIED, S_PENDING, S_REVISION, S_APPROVED, S_AUTO, S_REJECTED];
+  const canLogActivity = canAct && ACTIVITY_STAGES.includes(status);
 
   return (
     <div className="stack">
@@ -695,6 +750,114 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
           )}
         </section>
       )}
+
+      {/* ---- Log Aktivitas (effort sampai closing) ----
+           Keputusan pemilik 2026-08-06 (docs/DECISIONS.md): sebelum ini satu-satunya
+           jejak effort adalah transisi `Contacted`, jadi deal yang butuh enam kali
+           follow-up terlihat sama dengan deal sekali telepon. Panel ini BUKAN
+           lifecycle — mencatat aktivitas tidak memindahkan status prospek — dan
+           barisnya append-only (tidak ada tombol edit/hapus; DB pun menolaknya). */}
+      <section className="card">
+        <div className="cardHeader">
+          <h2>Log Aktivitas</h2>
+          <span className="muted" style={{ fontSize: 13 }}>
+            Total effort: <strong>{effort?.total ?? 0}</strong> aktivitas
+            {effort?.last_activity_at ? ` · terakhir ${formatDateTime(effort.last_activity_at)}` : ''}
+          </span>
+        </div>
+        <p className="muted" style={{ fontSize: 13 }}>
+          Follow up, jadwal meeting, online meeting, dan visit dicatat di sini &mdash; satu klien boleh
+          berkali-kali, setiap aktivitas wajib membawa ringkasan hasil, sampai closing. Angka effort
+          dihitung ulang dari log ini (tidak pernah disimpan).
+        </p>
+
+        {effort && effort.total > 0 && (
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            {ACTIVITY_TYPES.filter((t) => (effort.by_type?.[t] ?? 0) > 0).map((t) => (
+              <span key={t} className="badge">
+                {t}: {effort.by_type[t]}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {canLogActivity && (
+          <form className="form" onSubmit={handleLogActivity}>
+            {actError && <div className="alert alertError" role="alert">{actError}</div>}
+            <div className="formRow">
+              <div className="field">
+                <label htmlFor="act-type">Jenis Aktivitas</label>
+                <select id="act-type" value={actType} onChange={(e) => setActType(e.target.value)}>
+                  {ACTIVITY_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="act-when">Waktu (kosong = sekarang)</label>
+                <input
+                  id="act-when"
+                  type="datetime-local"
+                  value={actWhen}
+                  onChange={(e) => setActWhen(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="field">
+              <label htmlFor="act-summary">Ringkasan Hasil (wajib)</label>
+              <textarea
+                id="act-summary"
+                rows={3}
+                required
+                value={actSummary}
+                onChange={(e) => setActSummary(e.target.value)}
+                placeholder="mis. Visit ke gudang, minta penawaran ulang untuk paket live streaming"
+              />
+            </div>
+            <div>
+              <button type="submit" className="btn btnPrimary btnSm" disabled={actSubmitting}>
+                {actSubmitting ? 'Menyimpan...' : 'Catat Aktivitas'}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {!canLogActivity && canAct && (
+          <p className="muted" style={{ fontSize: 13 }}>
+            Aktivitas bisa dicatat setelah prospek berstatus <code>Qualified</code> dan sebelum prospek
+            ditutup.
+          </p>
+        )}
+
+        {activities.length === 0 ? (
+          <div className="emptyState">Belum ada aktivitas tercatat.</div>
+        ) : (
+          <div className="table-wrap" style={{ marginTop: 12 }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Waktu</th>
+                  <th>Jenis</th>
+                  <th>Ringkasan Hasil</th>
+                  <th>Dicatat oleh</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activities.map((a) => (
+                  <tr key={a.id}>
+                    <td>{formatDateTime(a.occurred_at)}</td>
+                    <td>{a.activity_type}</td>
+                    <td style={{ whiteSpace: 'pre-wrap' }}>{a.summary}</td>
+                    <td>{a.created_by_nama || a.created_by}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       {actionError && <div className="alert alertError" role="alert">{actionError}</div>}
       {actionMessage && <div className="alert alertSuccess" role="status">{actionMessage}</div>}

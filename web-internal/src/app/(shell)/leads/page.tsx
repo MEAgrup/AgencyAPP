@@ -64,15 +64,21 @@ export default function LeadsPage() {
   // (fe_m0m1_contract.md) — JANGAN lowercase.
   const isSales = role?.division === 'Sales';
   const isMarketing = role?.division === 'Marketing';
-  const isSalesLead = Boolean(isSales && role?.level === 'lead');
   const isOD = Boolean(role?.od);
   const isDirector = Boolean(role?.director);
   const odOnly = isOD && !isDirector;
 
   // Pool — Sales division (semua level), OD, Director.
   const canSeePool = isSales || isOD || isDirector;
-  // Database — Marketing (staff/lead), Sales lead, OD, Director. TIDAK Sales staff.
-  const canSeeDatabase = isMarketing || isSalesLead || isOD || isDirector;
+  // Database — Marketing (staff/lead), Sales (SEMUA level), OD, Director.
+  //
+  // Sales staff ditambahkan 2026-08-06 (QA pemilik): sebelum ini seorang sales
+  // yang mendaftarkan lead tidak punya tempat untuk melihatnya lagi — lead
+  // scouted lahir `active`, jadi tidak pernah muncul di Pool (Pool = `[Pool]`
+  // saja, memang begitu desainnya, M1 §6 rule 3), sementara tab ini menjawab
+  // 403. Membuka tab-nya TIDAK memperluas apa yang terbaca: `leads_select` (RLS)
+  // tetap membatasi barisnya ke lead yang ia daftarkan atau ia pegang.
+  const canSeeDatabase = isMarketing || isSales || isOD || isDirector;
   // Import — Marketing division non-odOnly, atau Director.
   const canSeeImport = (isMarketing && !odOnly) || isDirector;
   // Claim — Sales division non-odOnly, atau Director.
@@ -142,7 +148,10 @@ export default function LeadsPage() {
       {/* canRequestDelete mencerminkan permission.canWrite: Director selalu, sisanya
           butuh scope divisi (OD murni tanpa divisi tidak bisa menulis). */}
       {activeTab === 'database' && (
-        <DatabaseTab canRequestDelete={isDirector || (role?.division ?? '') !== ''} />
+        <DatabaseTab
+          canRequestDelete={isDirector || (role?.division ?? '') !== ''}
+          defaultMine={Boolean(isSales && role?.level === 'staff')}
+        />
       )}
       {activeTab === 'import' && <ImportTab />}
       {activeTab === 'deleteQueue' && (
@@ -165,22 +174,36 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
   const [claimError, setClaimError] = useState<string | null>(null);
   const [claimMessage, setClaimMessage] = useState<ReactNode | null>(null);
 
+  // Pencarian & filter dijalankan SERVER (query param), bukan menyaring array
+  // yang sudah diambil: pool tumbuh terus dan penyaringan klien hanya akan
+  // menyembunyikan bahwa yang dimuat cuma sebagian.
+  const [qInput, setQInput] = useState('');
+  const [sourceInput, setSourceInput] = useState('');
+  const [appliedQ, setAppliedQ] = useState('');
+  const [appliedSource, setAppliedSource] = useState('');
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await listPool();
+      const res = await listPool({ q: appliedQ || undefined, source: appliedSource || undefined });
       setRows(res.data);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [appliedQ, appliedSource]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  function applyPoolFilters(e: FormEvent) {
+    e.preventDefault();
+    setAppliedQ(qInput.trim());
+    setAppliedSource(sourceInput);
+  }
 
   async function handleClaim(leadId: string) {
     setClaimError(null);
@@ -209,7 +232,37 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
       </div>
       <p className="muted" style={{ fontSize: 13 }}>
         Lead marketing yang belum dimenangkan. Klaim diizinkan lebih dari satu sales per lead (kontes closing skill).
+        Lead yang Anda daftarkan sendiri (scouting) bersifat eksklusif dan tidak masuk pool &mdash; cari di tab{' '}
+        <strong>Database</strong>.
       </p>
+      <form className="formRow" onSubmit={applyPoolFilters}>
+        <div className="field">
+          <label htmlFor="pool-q">Cari (Nama/Telepon)</label>
+          <input
+            id="pool-q"
+            value={qInput}
+            onChange={(e) => setQInput(e.target.value)}
+            placeholder="mis. Alpha atau 0812"
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="pool-source">Source (aktivitas asal)</label>
+          <select id="pool-source" value={sourceInput} onChange={(e) => setSourceInput(e.target.value)}>
+            <option value="">Semua</option>
+            {SOURCES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field" style={{ justifyContent: 'flex-end' }}>
+          <label>&nbsp;</label>
+          <button type="submit" className="btn btnSecondary btnSm">
+            Terapkan
+          </button>
+        </div>
+      </form>
       {claimError && <div className="alert alertError" role="alert">{claimError}</div>}
       {claimMessage && <div className="alert alertSuccess" role="status">{claimMessage}</div>}
       {loading && <p className="muted">Memuat...</p>}
@@ -272,7 +325,13 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
 // Database tab
 // ---------------------------------------------------------------------------
 
-function DatabaseTab({ canRequestDelete }: { canRequestDelete: boolean }) {
+function DatabaseTab({
+  canRequestDelete,
+  defaultMine,
+}: {
+  canRequestDelete: boolean;
+  defaultMine: boolean;
+}) {
   const [rows, setRows] = useState<LeadRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -287,21 +346,33 @@ function DatabaseTab({ canRequestDelete }: { canRequestDelete: boolean }) {
 
   const [qInput, setQInput] = useState('');
   const [statusInput, setStatusInput] = useState('');
+  const [sourceInput, setSourceInput] = useState('');
+  // Default-ON untuk Sales staff: yang ia cari saat membuka tab ini adalah lead
+  // yang IA daftarkan. Untuk Lead/OD/Director default OFF — mereka memang
+  // membaca seluruh divisi, dan menyembunyikannya diam-diam akan menipu.
+  const [mineInput, setMineInput] = useState(defaultMine);
   const [appliedQ, setAppliedQ] = useState('');
   const [appliedStatus, setAppliedStatus] = useState('');
+  const [appliedSource, setAppliedSource] = useState('');
+  const [appliedMine, setAppliedMine] = useState(defaultMine);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await listLeads({ status: appliedStatus || undefined, q: appliedQ || undefined });
+      const res = await listLeads({
+        status: appliedStatus || undefined,
+        q: appliedQ || undefined,
+        source: appliedSource || undefined,
+        mine: appliedMine || undefined,
+      });
       setRows(res.data);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
-  }, [appliedStatus, appliedQ]);
+  }, [appliedStatus, appliedQ, appliedSource, appliedMine]);
 
   useEffect(() => {
     load();
@@ -311,6 +382,8 @@ function DatabaseTab({ canRequestDelete }: { canRequestDelete: boolean }) {
     e.preventDefault();
     setAppliedQ(qInput.trim());
     setAppliedStatus(statusInput);
+    setAppliedSource(sourceInput);
+    setAppliedMine(mineInput);
   }
 
   async function submitDeleteRequest(e: FormEvent, leadId: string) {
@@ -351,6 +424,29 @@ function DatabaseTab({ canRequestDelete }: { canRequestDelete: boolean }) {
             ))}
           </select>
         </div>
+        <div className="field">
+          <label htmlFor="db-source">Source (aktivitas asal)</label>
+          <select id="db-source" value={sourceInput} onChange={(e) => setSourceInput(e.target.value)}>
+            <option value="">Semua</option>
+            {SOURCES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="db-mine">Kepemilikan</label>
+          <label htmlFor="db-mine" className="muted" style={{ fontSize: 13, display: 'flex', gap: 6 }}>
+            <input
+              id="db-mine"
+              type="checkbox"
+              checked={mineInput}
+              onChange={(e) => setMineInput(e.target.checked)}
+            />
+            Hanya lead saya
+          </label>
+        </div>
         <div className="field" style={{ justifyContent: 'flex-end' }}>
           <label>&nbsp;</label>
           <button type="submit" className="btn btnSecondary btnSm">
@@ -358,6 +454,10 @@ function DatabaseTab({ canRequestDelete }: { canRequestDelete: boolean }) {
           </button>
         </div>
       </form>
+      <p className="muted" style={{ fontSize: 12 }}>
+        &ldquo;Hanya lead saya&rdquo; = lead yang Anda daftarkan atau yang Anda pegang prospeknya. Baris yang
+        bisa Anda baca tetap ditentukan server (staff = data sendiri).
+      </p>
 
       {deleteError && <div className="alert alertError" role="alert">{deleteError}</div>}
       {deleteNotice && <div className="alert alertSuccess" role="status">{deleteNotice}</div>}

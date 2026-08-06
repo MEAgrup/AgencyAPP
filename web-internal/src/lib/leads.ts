@@ -201,14 +201,27 @@ export function claimLead(leadId: string): Promise<{ attempt: AttemptStub }> {
   return api.post<{ attempt: AttemptStub }>(`/leads/${leadId}/claim`);
 }
 
-export function listPool(): Promise<{ data: PoolRow[] }> {
-  return api.get<{ data: PoolRow[] }>('/leads/pool');
+// GET /leads/pool[?q=&source=] — q mencari nama ATAU nomor telepon (substring,
+// case-insensitive); source menyaring persis satu nilai dari SOURCES.
+export function listPool(params?: { q?: string; source?: string }): Promise<{ data: PoolRow[] }> {
+  const search = new URLSearchParams();
+  if (params?.q) search.set('q', params.q);
+  if (params?.source) search.set('source', params.source);
+  const qs = search.toString();
+  return api.get<{ data: PoolRow[] }>(`/leads/pool${qs ? `?${qs}` : ''}`);
 }
 
-export function listLeads(params?: { status?: string; q?: string }): Promise<{ data: LeadRow[] }> {
+// GET /leads[?status=&q=&source=&mine=1] — `mine` mempersempit ke lead yang
+// didaftarkan aktor ATAU yang ia pegang attempt-nya. Ia KENYAMANAN, bukan batas
+// keamanan: baris yang boleh dibaca tetap ditentukan RLS `leads_select`.
+export function listLeads(
+  params?: { status?: string; q?: string; source?: string; mine?: boolean },
+): Promise<{ data: LeadRow[] }> {
   const search = new URLSearchParams();
   if (params?.status) search.set('status', params.status);
   if (params?.q) search.set('q', params.q);
+  if (params?.source) search.set('source', params.source);
+  if (params?.mine) search.set('mine', '1');
   const qs = search.toString();
   return api.get<{ data: LeadRow[] }>(`/leads${qs ? `?${qs}` : ''}`);
 }
@@ -258,4 +271,48 @@ export function rejectLeadDelete(reqId: string, note?: string): Promise<{ reques
   return api.post<{ request: DeleteRequest }>(`/leads/delete-requests/${reqId}/reject`, {
     note: note ?? '',
   });
+}
+
+// ---------------------------------------------------------------------------
+// Log aktivitas prospek (ACT-) — keputusan pemilik 2026-08-06, docs/DECISIONS.md.
+//
+// Bukan lifecycle: mencatat aktivitas TIDAK memindahkan status prospek. Baris
+// bersifat append-only (tidak ada endpoint edit/hapus, dan DB menolaknya lewat
+// trigger), jadi koreksi dilakukan dengan mencatat aktivitas baru.
+// ---------------------------------------------------------------------------
+
+export interface ActivityRow {
+  id: string;
+  attempt_id: string;
+  lead_id: string;
+  activity_type: string;
+  occurred_at: string;
+  summary: string;
+  created_by: string;
+  created_by_nama: string;
+  created_at: string;
+}
+
+// Rollup effort yang DITURUNKAN dari log (tidak pernah disimpan).
+export interface EffortSummary {
+  attempt_id: string;
+  total: number;
+  by_type: Record<string, number>;
+  last_activity_at: string | null;
+}
+
+// Taksonomi TERTUTUP — cermin ACTIVITY_TYPES di packages/domain/src/activity.ts
+// dan CHECK `ck_act_type` di migrasi 20260806050000. Menambah nilai di sini saja
+// hanya menghasilkan 400 dari server.
+export const ACTIVITY_TYPES = [
+  'Follow Up',
+  'Jadwal Meeting',
+  'Online Meeting',
+  'Visit',
+  'Lainnya',
+] as const;
+
+// GET /leads/{id}/activities — seluruh aktivitas SEMUA attempt pada satu lead.
+export function listLeadActivities(leadId: string): Promise<{ data: ActivityRow[] }> {
+  return api.get<{ data: ActivityRow[] }>(`/leads/${leadId}/activities`);
 }

@@ -160,16 +160,17 @@ jobs:
             "do \$\$ begin
                if (select count(*) from employees) <> 10 then raise exception 'expected 10 employees'; end if;
                if (select count(*) from role_mappings) <> 12 then raise exception 'expected 12 role_mappings'; end if;
-               if (select count(*) from master_services) <> 3 then raise exception 'expected 3 master_services (seed not idempotent?)'; end if;
+               if (select count(*) from master_services) <> 4 then raise exception 'expected 4 master_services (3 seed + Komisi dari migrasi 20260806050000; seed not idempotent?)'; end if;
                if (select count(*) from demo_tasks) <> 1 then raise exception 'expected 1 demo_task (seed not idempotent?)'; end if;
              end \$\$;"
-      # 54 = 53 + lead_delete_requests (20260729162101, DECISIONS 2026-07-29).
-      - name: Verify table count (expect 54)
+      # 55 = 54 + prospect_activities (20260806050000, keputusan pemilik 2026-08-06).
+      #      54 = 53 + lead_delete_requests (20260729162101, DECISIONS 2026-07-29).
+      - name: Verify table count (expect 55)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 54
+          test "$n" -eq 55
       - name: Invariant — ID generator (gap-free, WIB period)
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/ident_checks.sql
       - name: Invariant — append-only history (immutability)
