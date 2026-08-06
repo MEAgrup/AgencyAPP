@@ -159,8 +159,19 @@ diubah, nol baris lama disentuh. Berbeda dengan migrasi sesi 1
 (`20260806062000_m6c_retier_catalog.sql`), yang mengubah jalur kerja AM pada
 layanan yang sudah ada dan karena itu menunggu konfirmasi O54.
 
-Gate `scripts/db-rebuild.sh` sudah dinaikkan: tabel 58→**68**, sm_machines
-14→**16**.
+Gate jumlah tabel/mesin dinaikkan di **DUA** tempat — tabel 58→**68**,
+`sm_machines` 14→**16**:
+
+- `scripts/db-rebuild.sh` (gate lokal)
+- `.github/workflows/ci.yml` (job `db-and-migrations`)
+
+Keduanya menegakkan hal yang sama dan **mudah ketinggalan satu**: sesi ini
+menaikkan yang pertama saja, dan CI merah dengan `expected 14 machines`
+sementara seluruh test suite hijau. Kalau menambah tabel atau mesin, ubah
+keduanya dalam commit yang sama.
+
+`notif_events` di kedua gate TETAP **17** — itu yang membuat penambahan event
+tanpa keputusan O55 langsung merah.
 
 ---
 
