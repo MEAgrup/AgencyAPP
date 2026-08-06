@@ -116,6 +116,10 @@ export interface LeadRow {
   winning_attempt_id: string | null;
   created_at: string;
   open_attempt_count: number;
+  // Peran AKTOR atas lead ini — dipakai kolom "Peran" di tab Lead Saya.
+  // Keduanya false bila permintaan tidak memakai filter `mine`.
+  registered_by_me: boolean;
+  claimed_by_me: boolean;
 }
 
 // One row in GET /leads/{id}'s attempts list (the "kontes" for this lead).
@@ -129,7 +133,10 @@ export interface LeadAttemptRow {
 
 // GET /leads/{id} response — LeadRow minus open_attempt_count, plus attempts.
 export interface LeadDetail {
-  lead: Omit<LeadRow, 'open_attempt_count'>;
+  // Kolom peran ikut di-omit bersama rollup: ia menjawab "apa hubungan PEMBACA
+  // dengan baris ini" untuk kolom Peran di tab Lead Saya, sedangkan halaman
+  // detail sudah menampilkan seluruh kontes attempt lengkap dengan namanya.
+  lead: Omit<LeadRow, 'open_attempt_count' | 'registered_by_me' | 'claimed_by_me'>;
   attempts: LeadAttemptRow[];
 }
 
@@ -211,17 +218,30 @@ export function listPool(params?: { q?: string; source?: string }): Promise<{ da
   return api.get<{ data: PoolRow[] }>(`/leads/pool${qs ? `?${qs}` : ''}`);
 }
 
-// GET /leads[?status=&q=&source=&mine=1] — `mine` mempersempit ke lead yang
-// didaftarkan aktor ATAU yang ia pegang attempt-nya. Ia KENYAMANAN, bukan batas
-// keamanan: baris yang boleh dibaca tetap ditentukan RLS `leads_select`.
+// Mode kepemilikan untuk tab "Lead Saya" (keputusan pemilik 2026-08-06):
+//   registered — lead yang AKTOR daftarkan sendiri (M1 §4 / import Marketing);
+//   claimed    — lead orang lain yang ia pegang attempt-nya (klaim Pool, §6);
+//   any        — salah satu dari keduanya.
+export const MINE_MODES = ['registered', 'claimed', 'any'] as const;
+export type MineMode = (typeof MINE_MODES)[number];
+
+export const MINE_MODE_LABELS: Record<MineMode, string> = {
+  registered: 'Yang saya daftarkan',
+  claimed: 'Yang saya klaim',
+  any: 'Semua lead saya',
+};
+
+// GET /leads[?status=&q=&source=&mine=<mode>] — `mine` mempersempit ke lead
+// milik aktor. Ia KENYAMANAN, bukan batas keamanan: baris yang boleh dibaca
+// tetap ditentukan RLS `leads_select`.
 export function listLeads(
-  params?: { status?: string; q?: string; source?: string; mine?: boolean },
+  params?: { status?: string; q?: string; source?: string; mine?: MineMode },
 ): Promise<{ data: LeadRow[] }> {
   const search = new URLSearchParams();
   if (params?.status) search.set('status', params.status);
   if (params?.q) search.set('q', params.q);
   if (params?.source) search.set('source', params.source);
-  if (params?.mine) search.set('mine', '1');
+  if (params?.mine) search.set('mine', params.mine);
   const qs = search.toString();
   return api.get<{ data: LeadRow[] }>(`/leads${qs ? `?${qs}` : ''}`);
 }

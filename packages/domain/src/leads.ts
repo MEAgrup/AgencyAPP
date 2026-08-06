@@ -929,6 +929,27 @@ export async function poolBoard(
   }));
 }
 
+/**
+ * How "my lead" is resolved for the Lead Saya board (keputusan pemilik
+ * 2026-08-06). See `leadsDatabase`.
+ */
+export const MINE_REGISTERED = 'registered';
+export const MINE_CLAIMED = 'claimed';
+export const MINE_ANY = 'any';
+export type MineMode = typeof MINE_REGISTERED | typeof MINE_CLAIMED | typeof MINE_ANY;
+
+/**
+ * parseMineMode maps a wire value onto the closed set, defaulting to `any`.
+ * Unknown values are NOT an error: this is a view filter, and the safe reading
+ * of an unrecognised one is the widest of the three (which RLS still narrows).
+ */
+export function parseMineMode(raw: string | null | undefined): MineMode {
+  const v = (raw ?? '').trim();
+  if (v === MINE_REGISTERED) return MINE_REGISTERED;
+  if (v === MINE_CLAIMED) return MINE_CLAIMED;
+  return MINE_ANY;
+}
+
 /** One Leads Database row (contract §4). */
 export interface LeadsDbRow {
   id: string;
@@ -943,6 +964,15 @@ export interface LeadsDbRow {
   winningAttemptId: string | null;
   createdAt: Date;
   openAttemptCount: number;
+  /**
+   * Whether the CALLER created this lead record, and whether they hold an
+   * attempt on it. Both are always computed (false for an anonymous read), not
+   * only when a `mine` filter is applied: the Lead Saya board renders them as a
+   * "Peran" column, and a column that exists only under one filter is a column
+   * that renders blank under every other one.
+   */
+  registeredByMe: boolean;
+  claimedByMe: boolean;
 }
 
 /**
@@ -955,10 +985,17 @@ export interface LeadsDbRow {
  * mana" cut — Scouting / Event / Leads - Iklan / … — the dimension M1 §8 already
  * evaluates lead quality by, but which the board had no way to slice.
  *
- * `mine` narrows to leads the actor registered (`created_by`) or holds an
- * attempt on. It is a CONVENIENCE, never a security boundary: row visibility is
- * `leads_select`'s job, and this filter can only ever subtract from what RLS
- * already allows. `mineEmployeeId` is empty for callers that do not use it.
+ * `mineEmployeeId` + `mineMode` back the "Lead Saya" board (keputusan pemilik
+ * 2026-08-06). The mode matters because "my lead" has two genuinely different
+ * meanings in M1 and collapsing them hides work:
+ *   - `registered` — the actor CREATED the lead record (M1 §4 scouted intake, or
+ *     a Marketing import). This is the tab's default and the literal ask.
+ *   - `claimed`    — the actor holds a PRSP attempt on someone else's lead (a
+ *     Pool claim, §6). Not registered by them, but theirs to work.
+ *   - `any`        — either of the above.
+ * All three are a CONVENIENCE, never a security boundary: row visibility is
+ * `leads_select`'s job, and these can only ever subtract from what RLS already
+ * allows. `mineEmployeeId` is empty for callers that do not use it.
  *
  * Head-deleted leads are hidden from the unfiltered list — that is what "delete"
  * has to mean to the people using the board — but remain reachable by asking for
@@ -967,31 +1004,46 @@ export interface LeadsDbRow {
  */
 export async function leadsDatabase(
   sql: Queryable,
-  filter: { status?: string; q?: string; source?: string; mineEmployeeId?: string } = {},
+  filter: {
+    status?: string; q?: string; source?: string;
+    mineEmployeeId?: string; mineMode?: MineMode;
+  } = {},
 ): Promise<LeadsDbRow[]> {
   const status = filter.status?.trim() ?? '';
   const q = filter.q?.trim() ?? '';
   const like = `%${q}%`;
   const source = filter.source?.trim() ?? '';
   const mine = filter.mineEmployeeId?.trim() ?? '';
+  const mode: MineMode = filter.mineMode ?? MINE_ANY;
+  // Split into two independent booleans so the SQL below stays a fixed string
+  // with fixed parameters — no branch builds a different query.
+  const wantRegistered = mine !== '' && (mode === MINE_ANY || mode === MINE_REGISTERED);
+  const wantClaimed = mine !== '' && (mode === MINE_ANY || mode === MINE_CLAIMED);
   const rows = await sql<{
     id: string; lead_name: string; phone_number: string; email: string | null;
     source: string; origin_division: string; origin_campaign_id: string | null;
     last_touch_campaign_id: string | null; record_status: string;
     winning_attempt_id: string | null; created_at: Date; open_attempt_count: string;
+    registered_by_me: boolean; claimed_by_me: boolean;
   }[]>`
     select l.id, l.lead_name, l.phone_number, l.email, l.source, l.origin_division,
            l.origin_campaign_id, l.last_touch_campaign_id, l.record_status, l.winning_attempt_id, l.created_at,
            (select count(*) from prospect_attempts pa
-             where pa.lead_id = l.id and pa.status <> all(${OPEN_ATTEMPT_TERMINAL})) as open_attempt_count
+             where pa.lead_id = l.id and pa.status <> all(${OPEN_ATTEMPT_TERMINAL})) as open_attempt_count,
+           (${mine} <> '' and l.created_by = ${mine}) as registered_by_me,
+           (${mine} <> '' and exists(
+              select 1 from prospect_attempts pa4
+               where pa4.lead_id = l.id and pa4.owner_employee_id = ${mine})) as claimed_by_me
     from leads l
     where (${status} = '' or l.record_status = ${status})
       and (${status} = ${RECORD_DELETED} or l.record_status <> ${RECORD_DELETED})
       and (${q} = '' or l.lead_name ilike ${like} or l.phone_number ilike ${like})
       and (${source} = '' or l.source = ${source})
-      and (${mine} = '' or l.created_by = ${mine} or exists(
-            select 1 from prospect_attempts pa3
-             where pa3.lead_id = l.id and pa3.owner_employee_id = ${mine}))
+      and (${mine} = ''
+           or (${wantRegistered} and l.created_by = ${mine})
+           or (${wantClaimed} and exists(
+                 select 1 from prospect_attempts pa3
+                  where pa3.lead_id = l.id and pa3.owner_employee_id = ${mine})))
     order by l.created_at desc, l.id desc`;
   return rows.map((r) => ({
     id: r.id, leadName: r.lead_name, phoneNumber: r.phone_number, email: r.email,
@@ -999,6 +1051,7 @@ export async function leadsDatabase(
     lastTouchCampaignId: r.last_touch_campaign_id, recordStatus: r.record_status,
     winningAttemptId: r.winning_attempt_id, createdAt: r.created_at,
     openAttemptCount: Number(r.open_attempt_count),
+    registeredByMe: r.registered_by_me, claimedByMe: r.claimed_by_me,
   }));
 }
 
