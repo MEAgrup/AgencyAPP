@@ -411,6 +411,18 @@ const WIRE_TO_FE: Record<string, string> = {
   StrategiRiskWire: 'strategi.ts::StrategiRisk',
   StrategiEventWire: 'strategi.ts::StrategiEvent',
   StrategiKekuranganWire: 'strategi.ts::StrategiKekurangan',
+  // A-05 Section A + A-15/A-16, and the repeatable structs A-06 stores as jsonb.
+  // They are named interfaces rather than anonymous bags precisely so this guard
+  // descends into them — a struct typed `Record<string, unknown>[]` is a shape
+  // nothing compares.
+  StrategiDecisionMakerWire: 'strategi.ts::StrategiDecisionMaker',
+  StrategiAksesWire: 'strategi.ts::StrategiAkses',
+  StrategiTopSkuWire: 'strategi.ts::StrategiTopSku',
+  StrategiTopKeywordWire: 'strategi.ts::StrategiTopKeyword',
+  StrategiKampanyeBoncosWire: 'strategi.ts::StrategiKampanyeBoncos',
+  StrategiTopKreatorWire: 'strategi.ts::StrategiTopKreator',
+  StrategiVoucherWire: 'strategi.ts::StrategiVoucher',
+  StrategiKompetitorWire: 'strategi.ts::StrategiKompetitor',
   BriefWire: 'account.ts::Brief',
   ComplaintWire: 'account.ts::Complaint',
   // M7 creative

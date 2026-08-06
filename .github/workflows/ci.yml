@@ -168,7 +168,15 @@ jobs:
                if (select count(*) from master_services) <> 4 then raise exception 'expected 4 master_services (3 seed + Komisi dari migrasi 20260806050000; seed not idempotent?)'; end if;
                if (select count(*) from demo_tasks) <> 1 then raise exception 'expected 1 demo_task (seed not idempotent?)'; end if;
              end \$\$;"
-      # 68 = 58 + vendors (20260806063000, M6A §7/D19)
+      # KEEP IN STEP WITH `scripts/db-rebuild.sh` — the same gate lives in both
+      # files, and last session raised only one of them: the whole test suite was
+      # green while CI failed on `expected 14 machines`. Adding a table or a
+      # machine means editing BOTH, in the same commit.
+      #
+      # 69 = 68 + strategi_akses (20260806065000, M6A A-05: A-15 matriks akses ×
+      #           A-16 blocker sebagai flag di baris yang sama, bukan tabel kedua).
+      #           A-06 (20260806066000) menambah KOLOM ke strategi_channel, nol tabel.
+      #      68 = 58 + vendors (20260806063000, M6A §7/D19)
       #         + strategi & 7 tabel anaknya (20260806064000, M6A A-03):
       #           strategi · strategi_channel · strategi_baseline_bulan ·
       #           strategi_target · strategi_assumption · strategi_pillar ·
@@ -177,12 +185,12 @@ jobs:
       #         + plan_gate_config + service_plan_gate (20260806061000, M6C §10).
       #      55 = 54 + prospect_activities (20260806050000, keputusan pemilik 2026-08-06).
       #      54 = 53 + lead_delete_requests (20260729162101, DECISIONS 2026-07-29).
-      - name: Verify table count (expect 68)
+      - name: Verify table count (expect 69)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 68
+          test "$n" -eq 69
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND. The TS half (PREFIXES in
       # packages/core/src/ident.ts) is asserted against this table by

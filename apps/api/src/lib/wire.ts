@@ -2825,7 +2825,68 @@ export function vendorToWire(v: vendor.Vendor): VendorWire {
   };
 }
 
-/** The Strategi header (Section J-1 + the contract window). */
+/** A-12 — who may approve at the client, and how to escalate past them. */
+export interface StrategiDecisionMakerWire {
+  nama: string;
+  jabatan: string;
+  berhak_approve: boolean;
+  jalur_eskalasi: string;
+}
+
+/** B-3.3 — a top SKU by GMV. */
+export interface StrategiTopSkuWire {
+  nama: string;
+  gmv: string;
+  unit_terjual: number;
+  harga_jual: string;
+  margin_persen: number;
+}
+
+/** B-5.4 — a keyword/audience that produced orders. */
+export interface StrategiTopKeywordWire {
+  keyword: string;
+  jumlah_order: number;
+}
+
+/** B-5.5 — spend with no orders behind it. */
+export interface StrategiKampanyeBoncosWire {
+  nama: string;
+  spend: string;
+}
+
+/** B-6.4 — a top creator by GMV. */
+export interface StrategiTopKreatorWire {
+  nama: string;
+  gmv: string;
+}
+
+/** B-8.1 — an active voucher/promo. */
+export interface StrategiVoucherWire {
+  tipe: string;
+  nilai: string;
+  syarat: string;
+}
+
+/** B-9.1 — a competing store on this channel. */
+export interface StrategiKompetitorWire {
+  nama: string;
+  url: string;
+  harga_sebanding: string;
+  estimasi_penjualan_bulan: string;
+}
+
+/** A-15 + A-16 — one row per (channel, akses); the blocker is a flag on it. */
+export interface StrategiAksesWire {
+  id: number;
+  channel: string;
+  akses: string;
+  status: string;
+  memblokir: boolean;
+  target_tanggal_beres: string | null;
+  catatan: string;
+}
+
+/** The Strategi header (Section J-1 + the contract window) plus Section A. */
 export interface StrategiWire {
   id: string;
   service_id: string;
@@ -2846,6 +2907,28 @@ export interface StrategiWire {
   catatan_reviewer: string | null;
   created_by: string;
   created_at: string;
+  // Section A — Konteks Klien & Bisnis (A-05). Nullable because the record is
+  // born `Draft` and the form autosaves; presence is a submit-gate concern.
+  nama_brand: string | null;
+  kategori_utama: string | null;
+  sub_kategori: string[];
+  model_bisnis: string | null;
+  margin_kotor_persen: number | null;
+  posisi_harga: string | null;
+  usp: string[];
+  kapasitas_stok: string | null;
+  lead_time_restock_hari: number | null;
+  plafon_unit_per_bulan: number | null;
+  titik_kirim_kota: string | null;
+  titik_kirim_detail: string | null;
+  ekspektasi_klien: string | null;
+  riwayat_agensi: string | null;
+  pantangan_klien: string[];
+  decision_maker: StrategiDecisionMakerWire[];
+  sla_klien_jam: number | null;
+  sla_klien_catatan: string | null;
+  aset_dari_klien: string[];
+  aset_catatan: string | null;
 }
 
 export function strategiToWire(s: strategi.Strategi): StrategiWire {
@@ -2869,6 +2952,31 @@ export function strategiToWire(s: strategi.Strategi): StrategiWire {
     catatan_reviewer: s.catatanReviewer,
     created_by: s.createdBy,
     created_at: s.createdAt,
+    nama_brand: s.namaBrand,
+    kategori_utama: s.kategoriUtama,
+    sub_kategori: s.subKategori,
+    model_bisnis: s.modelBisnis,
+    margin_kotor_persen: s.marginKotorPersen,
+    posisi_harga: s.posisiHarga,
+    usp: s.usp,
+    kapasitas_stok: s.kapasitasStok,
+    lead_time_restock_hari: s.leadTimeRestockHari,
+    plafon_unit_per_bulan: s.plafonUnitPerBulan,
+    titik_kirim_kota: s.titikKirimKota,
+    titik_kirim_detail: s.titikKirimDetail,
+    ekspektasi_klien: s.ekspektasiKlien,
+    riwayat_agensi: s.riwayatAgensi,
+    pantangan_klien: s.pantanganKlien,
+    decision_maker: s.decisionMaker.map((d) => ({
+      nama: d.nama,
+      jabatan: d.jabatan,
+      berhak_approve: d.berhakApprove,
+      jalur_eskalasi: d.jalurEskalasi,
+    })),
+    sla_klien_jam: s.slaKlienJam,
+    sla_klien_catatan: s.slaKlienCatatan,
+    aset_dari_klien: s.asetDariKlien,
+    aset_catatan: s.asetCatatan,
   };
 }
 
@@ -2904,6 +3012,65 @@ export interface StrategiChannelWire {
   periode_akhir: string | null;
   alasan_periode_pendek: string | null;
   catatan_periode_pendek: string | null;
+  // Section B groups B-2 … B-9 (A-06). One figure per channel; the monthly ones
+  // (B-1, B-5.1/5.2) are rows in `baseline`.
+  pengunjung_per_bulan: number | null;
+  conversion_rate_persen: number | null;
+  trafik_organik_persen: number | null;
+  trafik_iklan_persen: number | null;
+  trafik_affiliate_persen: number | null;
+  trafik_live_persen: number | null;
+  trafik_video_persen: number | null;
+  trafik_luar_persen: number | null;
+  entry_point_utama: string | null;
+  entry_point_catatan: string | null;
+  sku_listed: number | null;
+  sku_aktif: number | null;
+  sku_pareto_80: number | null;
+  top_sku: StrategiTopSkuWire[];
+  sku_slow_moving: number | null;
+  sku_stok_kritis: string[];
+  listing_layak_persen: number | null;
+  rating_toko: number | null;
+  jumlah_ulasan: number | null;
+  chat_response_rate_persen: number | null;
+  chat_response_menit: number | null;
+  pesanan_terlambat_persen: number | null;
+  poin_penalti: number | null;
+  catatan_penalti: string | null;
+  tema_keluhan: string[];
+  tipe_kampanye: string[];
+  jumlah_kampanye_aktif: number | null;
+  top_keyword: StrategiTopKeywordWire[];
+  kampanye_boncos: StrategiKampanyeBoncosWire[];
+  affiliate_aktif_30hari: number | null;
+  gmv_affiliate: string | null;
+  gmv_affiliate_persen: number | null;
+  komisi_open_persen: number | null;
+  komisi_target_persen: number | null;
+  top_kreator: StrategiTopKreatorWire[];
+  program_sampel: string | null;
+  program_sampel_catatan: string | null;
+  jumlah_video_per_bulan: number | null;
+  total_views: number | null;
+  gmv_video: string | null;
+  jam_live_per_bulan: number | null;
+  gmv_live: string | null;
+  // B-7.2 third figure — computed, `null` at zero live hours (renders `—`).
+  gmv_per_jam_live: string | null;
+  host_live: string | null;
+  studio_live: string | null;
+  studio_catatan: string | null;
+  voucher_aktif: StrategiVoucherWire[];
+  program_platform: string[];
+  beban_promo_persen: number | null;
+  kompetitor: StrategiKompetitorWire[];
+  kompetitor_lebih_baik: string[];
+  kompetitor_catatan: string | null;
+  celah_kompetitor: string | null;
+  // B-1.5 — derived from `baseline`, never stored.
+  tren: string | null;
+  tren_persen: number | null;
   baseline: StrategiBaselineMonthWire[];
 }
 
@@ -2982,6 +3149,7 @@ export interface StrategiEventWire {
 /** The whole record as the Section A→J form loads it. */
 export interface StrategiDetailWire extends StrategiWire {
   channels: StrategiChannelWire[];
+  akses: StrategiAksesWire[];
   targets: StrategiTargetWire[];
   assumptions: StrategiAssumptionWire[];
   pillars: StrategiPillarWire[];
@@ -3012,6 +3180,79 @@ export function strategiDetailToWire(d: strategi.StrategiDetail): StrategiDetail
       periode_akhir: c.periodeAkhir,
       alasan_periode_pendek: c.alasanPeriodePendek,
       catatan_periode_pendek: c.catatanPeriodePendek,
+      pengunjung_per_bulan: c.pengunjungPerBulan,
+      conversion_rate_persen: c.conversionRatePersen,
+      trafik_organik_persen: c.trafikOrganikPersen,
+      trafik_iklan_persen: c.trafikIklanPersen,
+      trafik_affiliate_persen: c.trafikAffiliatePersen,
+      trafik_live_persen: c.trafikLivePersen,
+      trafik_video_persen: c.trafikVideoPersen,
+      trafik_luar_persen: c.trafikLuarPersen,
+      entry_point_utama: c.entryPointUtama,
+      entry_point_catatan: c.entryPointCatatan,
+      sku_listed: c.skuListed,
+      sku_aktif: c.skuAktif,
+      sku_pareto_80: c.skuPareto80,
+      top_sku: c.topSku.map((s) => ({
+        nama: s.nama,
+        gmv: s.gmv,
+        unit_terjual: s.unitTerjual,
+        harga_jual: s.hargaJual,
+        margin_persen: s.marginPersen,
+      })),
+      sku_slow_moving: c.skuSlowMoving,
+      sku_stok_kritis: c.skuStokKritis,
+      listing_layak_persen: c.listingLayakPersen,
+      rating_toko: c.ratingToko,
+      jumlah_ulasan: c.jumlahUlasan,
+      chat_response_rate_persen: c.chatResponseRatePersen,
+      chat_response_menit: c.chatResponseMenit,
+      pesanan_terlambat_persen: c.pesananTerlambatPersen,
+      poin_penalti: c.poinPenalti,
+      catatan_penalti: c.catatanPenalti,
+      tema_keluhan: c.temaKeluhan,
+      tipe_kampanye: c.tipeKampanye,
+      jumlah_kampanye_aktif: c.jumlahKampanyeAktif,
+      top_keyword: c.topKeyword.map((k) => ({
+        keyword: k.keyword,
+        jumlah_order: k.jumlahOrder,
+      })),
+      kampanye_boncos: c.kampanyeBoncos.map((k) => ({ nama: k.nama, spend: k.spend })),
+      affiliate_aktif_30hari: c.affiliateAktif30Hari,
+      gmv_affiliate: c.gmvAffiliate,
+      gmv_affiliate_persen: c.gmvAffiliatePersen,
+      komisi_open_persen: c.komisiOpenPersen,
+      komisi_target_persen: c.komisiTargetPersen,
+      top_kreator: c.topKreator.map((k) => ({ nama: k.nama, gmv: k.gmv })),
+      program_sampel: c.programSampel,
+      program_sampel_catatan: c.programSampelCatatan,
+      jumlah_video_per_bulan: c.jumlahVideoPerBulan,
+      total_views: c.totalViews,
+      gmv_video: c.gmvVideo,
+      jam_live_per_bulan: c.jamLivePerBulan,
+      gmv_live: c.gmvLive,
+      gmv_per_jam_live: c.gmvPerJamLive,
+      host_live: c.hostLive,
+      studio_live: c.studioLive,
+      studio_catatan: c.studioCatatan,
+      voucher_aktif: c.voucherAktif.map((v) => ({
+        tipe: v.tipe,
+        nilai: v.nilai,
+        syarat: v.syarat,
+      })),
+      program_platform: c.programPlatform,
+      beban_promo_persen: c.bebanPromoPersen,
+      kompetitor: c.kompetitor.map((k) => ({
+        nama: k.nama,
+        url: k.url,
+        harga_sebanding: k.hargaSebanding,
+        estimasi_penjualan_bulan: k.estimasiPenjualanBulan,
+      })),
+      kompetitor_lebih_baik: c.kompetitorLebihBaik,
+      kompetitor_catatan: c.kompetitorCatatan,
+      celah_kompetitor: c.celahKompetitor,
+      tren: c.tren,
+      tren_persen: c.trenPersen,
       baseline: c.baseline.map((b) => ({
         month_index: b.monthIndex,
         gmv: b.gmv,
@@ -3022,6 +3263,15 @@ export function strategiDetailToWire(d: strategi.StrategiDetail): StrategiDetail
         acos: b.acos,
         aov: b.aov,
       })),
+    })),
+    akses: d.akses.map((a) => ({
+      id: a.id,
+      channel: a.channel,
+      akses: a.akses,
+      status: a.status,
+      memblokir: a.memblokir,
+      target_tanggal_beres: a.targetTanggalBeres,
+      catatan: a.catatan,
     })),
     targets: d.targets.map((t) => ({
       channel: t.channel,
@@ -3174,7 +3424,62 @@ function numOrNull(v: unknown): number | null {
   return v === undefined || v === null || v === '' ? null : Number(v);
 }
 
-/** Inbound: Section B-0 channel blocks. */
+function strList(v: unknown): string[] {
+  return Array.isArray(v) ? v.map((x) => String(x)) : [];
+}
+
+/**
+ * Inbound: Section A — Konteks Klien & Bisnis (A-05).
+ *
+ * Absent fields become `null`/`[]` rather than being dropped, so the domain's own
+ * validator decides what is invalid and produces the BI message. The route never
+ * gets to rule on completeness — and here that matters more than usual, because
+ * an incomplete Section A is the NORMAL state of an autosaving draft.
+ */
+export function strategiKonteksFromWire(v: unknown): strategi.KonteksInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    namaBrand: strOrNull(b.nama_brand),
+    kategoriUtama: strOrNull(b.kategori_utama),
+    subKategori: strList(b.sub_kategori),
+    modelBisnis: (strOrNull(b.model_bisnis) as strategi.BusinessModel | null) ?? null,
+    marginKotorPersen: numOrNull(b.margin_kotor_persen),
+    posisiHarga: (strOrNull(b.posisi_harga) as strategi.PricePosition | null) ?? null,
+    usp: strList(b.usp),
+    kapasitasStok: (strOrNull(b.kapasitas_stok) as strategi.StockCapacity | null) ?? null,
+    leadTimeRestockHari: numOrNull(b.lead_time_restock_hari),
+    plafonUnitPerBulan: numOrNull(b.plafon_unit_per_bulan),
+    titikKirimKota: strOrNull(b.titik_kirim_kota),
+    titikKirimDetail: strOrNull(b.titik_kirim_detail),
+    ekspektasiKlien: strOrNull(b.ekspektasi_klien),
+    riwayatAgensi: strOrNull(b.riwayat_agensi),
+    pantanganKlien: strList(b.pantangan_klien),
+    decisionMaker: asRecords(b.decision_maker).map((d) => ({
+      nama: str(d.nama),
+      jabatan: str(d.jabatan),
+      berhakApprove: d.berhak_approve === true,
+      jalurEskalasi: str(d.jalur_eskalasi),
+    })),
+    slaKlienJam: numOrNull(b.sla_klien_jam),
+    slaKlienCatatan: strOrNull(b.sla_klien_catatan),
+    asetDariKlien: strList(b.aset_dari_klien),
+    asetCatatan: strOrNull(b.aset_catatan),
+  };
+}
+
+/** Inbound: A-15 matrix rows (A-16 rides on `memblokir` + the target date). */
+export function strategiAksesFromWire(v: unknown): strategi.AksesInput[] {
+  return asRecords(v).map((a) => ({
+    channel: str(a.channel) as strategi.AccessChannel,
+    akses: str(a.akses) as strategi.AccessKind,
+    status: str(a.status) as strategi.AccessState,
+    memblokir: a.memblokir === true,
+    targetTanggalBeres: strOrNull(a.target_tanggal_beres),
+    catatan: str(a.catatan),
+  }));
+}
+
+/** Inbound: Section B-0 channel blocks plus the B-2…B-9 groups (A-06). */
 export function strategiChannelsFromWire(v: unknown): strategi.ChannelInput[] {
   return asRecords(v).map((c) => ({
     channel: str(c.channel) as strategi.Channel,
@@ -3196,6 +3501,82 @@ export function strategiChannelsFromWire(v: unknown): strategi.ChannelInput[] {
     periodeAkhir: strOrNull(c.periode_akhir),
     alasanPeriodePendek: strOrNull(c.alasan_periode_pendek),
     catatanPeriodePendek: strOrNull(c.catatan_periode_pendek),
+    // Section B (A-06). Numbers stay `null` when absent for the same reason the
+    // baseline months do: Rule 5 distinguishes blank from `0`, and coercing here
+    // would erase the distinction before the validator ever sees it.
+    pengunjungPerBulan: numOrNull(c.pengunjung_per_bulan),
+    conversionRatePersen: numOrNull(c.conversion_rate_persen),
+    trafikOrganikPersen: numOrNull(c.trafik_organik_persen),
+    trafikIklanPersen: numOrNull(c.trafik_iklan_persen),
+    trafikAffiliatePersen: numOrNull(c.trafik_affiliate_persen),
+    trafikLivePersen: numOrNull(c.trafik_live_persen),
+    trafikVideoPersen: numOrNull(c.trafik_video_persen),
+    trafikLuarPersen: numOrNull(c.trafik_luar_persen),
+    entryPointUtama: (strOrNull(c.entry_point_utama) as strategi.EntryPoint | null) ?? null,
+    entryPointCatatan: strOrNull(c.entry_point_catatan),
+    skuListed: numOrNull(c.sku_listed),
+    skuAktif: numOrNull(c.sku_aktif),
+    skuPareto80: numOrNull(c.sku_pareto_80),
+    topSku: asRecords(c.top_sku).map((s) => ({
+      nama: str(s.nama),
+      gmv: str(s.gmv),
+      unitTerjual: Number(s.unit_terjual ?? 0),
+      hargaJual: str(s.harga_jual),
+      marginPersen: Number(s.margin_persen ?? 0),
+    })),
+    skuSlowMoving: numOrNull(c.sku_slow_moving),
+    skuStokKritis: strList(c.sku_stok_kritis),
+    listingLayakPersen: numOrNull(c.listing_layak_persen),
+    ratingToko: numOrNull(c.rating_toko),
+    jumlahUlasan: numOrNull(c.jumlah_ulasan),
+    chatResponseRatePersen: numOrNull(c.chat_response_rate_persen),
+    chatResponseMenit: numOrNull(c.chat_response_menit),
+    pesananTerlambatPersen: numOrNull(c.pesanan_terlambat_persen),
+    poinPenalti: numOrNull(c.poin_penalti),
+    catatanPenalti: strOrNull(c.catatan_penalti),
+    temaKeluhan: strList(c.tema_keluhan),
+    tipeKampanye: strList(c.tipe_kampanye),
+    jumlahKampanyeAktif: numOrNull(c.jumlah_kampanye_aktif),
+    topKeyword: asRecords(c.top_keyword).map((k) => ({
+      keyword: str(k.keyword),
+      jumlahOrder: Number(k.jumlah_order ?? 0),
+    })),
+    kampanyeBoncos: asRecords(c.kampanye_boncos).map((k) => ({
+      nama: str(k.nama),
+      spend: str(k.spend),
+    })),
+    affiliateAktif30Hari: numOrNull(c.affiliate_aktif_30hari),
+    gmvAffiliate: strOrNull(c.gmv_affiliate),
+    gmvAffiliatePersen: numOrNull(c.gmv_affiliate_persen),
+    komisiOpenPersen: numOrNull(c.komisi_open_persen),
+    komisiTargetPersen: numOrNull(c.komisi_target_persen),
+    topKreator: asRecords(c.top_kreator).map((k) => ({ nama: str(k.nama), gmv: str(k.gmv) })),
+    programSampel: (strOrNull(c.program_sampel) as strategi.SampleProgram | null) ?? null,
+    programSampelCatatan: strOrNull(c.program_sampel_catatan),
+    jumlahVideoPerBulan: numOrNull(c.jumlah_video_per_bulan),
+    totalViews: numOrNull(c.total_views),
+    gmvVideo: strOrNull(c.gmv_video),
+    jamLivePerBulan: numOrNull(c.jam_live_per_bulan),
+    gmvLive: strOrNull(c.gmv_live),
+    hostLive: (strOrNull(c.host_live) as strategi.LiveHost | null) ?? null,
+    studioLive: (strOrNull(c.studio_live) as strategi.StudioState | null) ?? null,
+    studioCatatan: strOrNull(c.studio_catatan),
+    voucherAktif: asRecords(c.voucher_aktif).map((v2) => ({
+      tipe: str(v2.tipe),
+      nilai: str(v2.nilai),
+      syarat: str(v2.syarat),
+    })),
+    programPlatform: strList(c.program_platform),
+    bebanPromoPersen: numOrNull(c.beban_promo_persen),
+    kompetitor: asRecords(c.kompetitor).map((k) => ({
+      nama: str(k.nama),
+      url: str(k.url),
+      hargaSebanding: str(k.harga_sebanding),
+      estimasiPenjualanBulan: str(k.estimasi_penjualan_bulan),
+    })),
+    kompetitorLebihBaik: strList(c.kompetitor_lebih_baik),
+    kompetitorCatatan: strOrNull(c.kompetitor_catatan),
+    celahKompetitor: strOrNull(c.celah_kompetitor),
   }));
 }
 

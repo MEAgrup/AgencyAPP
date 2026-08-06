@@ -26,8 +26,17 @@ import { ident, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import { ConflictError, ForbiddenError, ValidationError } from './account';
 import {
+  MSG_AKSES_BLOCKER_DATE,
+  MSG_AKSES_DUPLICATE,
+  MSG_AKSES_MATRIX_REQUIRED,
   MSG_ASSUMPTION_TARGET_UNKNOWN,
+  MSG_BASELINE_GROUP_INCOMPLETE,
+  MSG_CHANNEL_NOT_FOUND,
   MSG_CYCLE_LOCKED,
+  MSG_KOMPETITOR_REQUIRED,
+  MSG_TOP_SKU_REQUIRED,
+  MSG_TRAFFIC_MIX_SUM,
+  MSG_USP_MIN,
   MSG_NOT_PLAN_GATED,
   MSG_OUT_OF_SCOPE_REQUIRED,
   MSG_REVIEW_NOTES_REQUIRED,
@@ -51,15 +60,18 @@ import {
   listStrategiForService,
   openRevision,
   returnStrategi,
+  saveAkses,
   saveAssumptions,
   saveBaseline,
   saveChannels,
+  saveKonteks,
   savePillars,
   saveResources,
   saveRisks,
   saveTargets,
   submitStrategi,
   targetKey,
+  trenBaseline,
   updateHeader,
   type ChannelInput,
 } from './strategi';
@@ -116,6 +128,49 @@ describe('permission predicates (§7)', () => {
 describe('targetKey', () => {
   it('is the shape D-9 mappings are stored in', () => {
     expect(targetKey('gmv', 'Shopee', 3)).toBe('gmv:Shopee:3');
+  });
+});
+
+describe('trenBaseline — B-1.5, derived and never stored', () => {
+  const bulan = (monthIndex: number, gmv: string) => ({
+    monthIndex,
+    gmv,
+    jumlahPesanan: 100,
+    persenBatal: 0,
+    adSpend: '0',
+    roas: 0,
+    acos: 0,
+    aov: null,
+  });
+
+  it('calls the §6 Alpha Digital baseline flat', () => {
+    // 172jt → 165jt → 180jt, the numbers M6A §6 itself describes as "flat".
+    const t = trenBaseline([bulan(1, '172000000'), bulan(2, '165000000'), bulan(3, '180000000')]);
+    expect(t.tren).toBe('stabil');
+    expect(t.trenPersen).toBeCloseTo(4.65, 1);
+  });
+
+  it('reads the window oldest → newest, not in row order', () => {
+    // Same months, shuffled. `month_index` decides direction, not arrival order.
+    const t = trenBaseline([bulan(3, '200000000'), bulan(1, '100000000')]);
+    expect(t.tren).toBe('naik');
+    expect(t.trenPersen).toBeCloseTo(100, 5);
+  });
+
+  it('calls a real drop a drop', () => {
+    expect(trenBaseline([bulan(1, '200000000'), bulan(2, '100000000')]).tren).toBe('turun');
+  });
+
+  it('answers `—` for the magnitude when the window opens at zero', () => {
+    // House rule #7: division by zero is not an error. The direction is knowable,
+    // the percentage is not.
+    const t = trenBaseline([bulan(1, '0'), bulan(2, '5000000')]);
+    expect(t.tren).toBe('naik');
+    expect(t.trenPersen).toBeNull();
+  });
+
+  it('has no answer at all from a single month', () => {
+    expect(trenBaseline([bulan(1, '100')])).toEqual({ tren: null, trenPersen: null });
   });
 });
 
@@ -181,34 +236,149 @@ const HEADER = {
   tanggalMulaiSiklus: '2026-08-12',
 };
 
+/**
+ * Section B for Shopee, straight out of the M6A §6 Alpha Digital excerpt.
+ *
+ * Using the PRD's own numbers is not decoration: they are what makes the
+ * derived-field assertions checkable against something other than this file
+ * (`tren` must come out `stabil`, because §6 calls this baseline "flat").
+ */
 const SHOPEE: ChannelInput = {
   channel: 'Shopee',
   statusChannel: 'Eksisting',
   namaToko: 'Alpha Digital',
   urlToko: 'https://shopee.co.id/alpha',
+  umurTokoBulan: 30,
+  badge: 'Star Seller',
   sumberData: 'Shopee export',
   tanggalAmbilData: '2026-08-02',
   lampiran: 'shopee-export.csv',
   periodeBaselineBulan: 3,
   periodeMulai: '2026-05-01',
   periodeAkhir: '2026-07-31',
+  // B-2 — visitors 96.000, CR 2,1%, mix organik 41 / iklan 44 / affiliate 9 /
+  // live 0 / video 0 / luar 6 = 100.
+  pengunjungPerBulan: 96000,
+  conversionRatePersen: 2.1,
+  trafikOrganikPersen: 41,
+  trafikIklanPersen: 44,
+  trafikAffiliatePersen: 9,
+  trafikLivePersen: 0,
+  trafikVideoPersen: 0,
+  trafikLuarPersen: 6,
+  entryPointUtama: 'search',
+  // B-3 — 214 listed, 178 active, 7 SKU carry 80% of GMV, 96 slow-moving,
+  // 54% of listings adequate.
+  skuListed: 214,
+  skuAktif: 178,
+  skuPareto80: 7,
+  skuSlowMoving: 96,
+  listingLayakPersen: 54,
+  topSku: [
+    { nama: 'RAK-A', gmv: '52000000.00', unitTerjual: 610, hargaJual: '85000.00', marginPersen: 38 },
+  ],
+  // B-4 — rating 4,8 / 3.104 reviews, chat 88% / 34 min, 4,2% late.
+  ratingToko: 4.8,
+  jumlahUlasan: 3104,
+  chatResponseRatePersen: 88,
+  chatResponseMenit: 34,
+  pesananTerlambatPersen: 4.2,
+  poinPenalti: 0,
+  // B-5 — three of the running campaigns burn spend with no orders (§6 quick win).
+  tipeKampanye: ['gmv_max', 'manual_keyword'],
+  jumlahKampanyeAktif: 9,
+  kampanyeBoncos: [{ nama: 'GMV Max - rak lipat', spend: '6000000.00' }],
+  // B-6 — 22 active creators, Rp 15jt affiliate GMV, commission 6% → target 12%.
+  affiliateAktif30Hari: 22,
+  gmvAffiliate: '15000000.00',
+  gmvAffiliatePersen: 8.7,
+  komisiOpenPersen: 6,
+  komisiTargetPersen: 12,
+  programSampel: 'tidak_ada',
+  // B-7 — zero live hours. `0`, not blank: that is the Rule 5 distinction, and
+  // it is what makes `gmv_per_jam_live` render `—` instead of erroring.
+  jumlahVideoPerBulan: 4,
+  totalViews: 82000,
+  gmvVideo: '3000000.00',
+  jamLivePerBulan: 0,
+  gmvLive: '0.00',
+  hostLive: 'belum_ada',
+  studioLive: 'tidak_ada',
+  // B-8
+  voucherAktif: [{ tipe: 'diskon toko', nilai: '10%', syarat: 'min. Rp 100.000' }],
+  programPlatform: ['gratis_ongkir_xtra'],
+  bebanPromoPersen: 7,
+  // B-9 — three stores at Rp 69.000–75.000 with 3× the video volume.
+  kompetitor: [
+    {
+      nama: 'Rak Murah ID',
+      url: 'https://shopee.co.id/rakmurah',
+      hargaSebanding: '69000.00',
+      estimasiPenjualanBulan: '210000000.00',
+    },
+  ],
+  kompetitorLebihBaik: ['harga', 'konten'],
+  celahKompetitor: 'tidak ada yang menggarap bundling rak + organizer',
 };
+
+/** Section A, from the same §6 excerpt. */
+const KONTEKS = {
+  namaBrand: 'Alpha Digital',
+  kategoriUtama: 'Home Living',
+  subKategori: ['rak', 'organizer'],
+  modelBisnis: 'brand_owner' as const,
+  marginKotorPersen: 38,
+  posisiHarga: 'mid' as const,
+  usp: ['bahan tebal', 'garansi 1 tahun', 'desain modular'],
+  kapasitasStok: 'ready_stock' as const,
+  leadTimeRestockHari: 21,
+  plafonUnitPerBulan: 8000,
+  titikKirimKota: 'Bandung',
+  // A-9 is recorded verbatim — the client's words are the thing being kept.
+  ekspektasiKlien: 'pokoknya omzet naik 2x dan gak rugi di iklan.',
+  riwayatAgensi: 'agensi sebelumnya hanya menjalankan iklan; listing tidak pernah dibereskan',
+  pantanganKlien: ['harga hero SKU tidak boleh di bawah Rp 79.000'],
+  decisionMaker: [
+    { nama: 'Owner', jabatan: 'Pemilik', berhakApprove: true, jalurEskalasi: 'langsung ke owner' },
+  ],
+  slaKlienJam: 36,
+  asetDariKlien: ['foto_produk', 'katalog', 'budget_iklan'],
+};
+
+/** A-15/A-16, from the same excerpt: Shopee granted, TikTok Affiliate pending. */
+const AKSES = [
+  { channel: 'Shopee' as const, akses: 'seller_center' as const, status: 'sudah' as const },
+  { channel: 'Shopee' as const, akses: 'ads_manager' as const, status: 'sudah' as const },
+  {
+    channel: 'Shopee' as const,
+    akses: 'affiliate_center' as const,
+    status: 'pending' as const,
+    memblokir: true,
+    targetTanggalBeres: '2026-08-11',
+    catatan: 'menunggu approval pemilik',
+  },
+  { channel: 'Umum' as const, akses: 'gudang_stok' as const, status: 'sudah' as const },
+];
 
 /** Builds a Strategi that passes every submit rule, then returns its id. */
 async function seedSubmittable(): Promise<{ serviceId: string; strategiId: string }> {
   const serviceId = await seedService();
   const s = await createStrategi(sql, am(), serviceId, HEADER);
+  await saveKonteks(sql, am(), s.id, KONTEKS);
   const withChannel = await saveChannels(sql, am(), s.id, [SHOPEE]);
   const channelId = withChannel.channels[0].id;
+  await saveAkses(sql, am(), s.id, AKSES);
 
+  // §6: GMV M-3 172jt → M-2 165jt → M-1 180jt, which the PRD calls "flat".
+  // `month_index` runs oldest → newest, so M-3 is index 1.
   await saveBaseline(
     sql,
     am(),
     s.id,
     channelId,
-    [1, 2, 3].map((i) => ({
-      monthIndex: i,
-      gmv: '180000000.00',
+    ['172000000.00', '165000000.00', '180000000.00'].map((gmv, i) => ({
+      monthIndex: i + 1,
+      gmv,
       jumlahPesanan: 2050,
       persenBatal: 4.2,
       adSpend: '41000000.00',
@@ -546,6 +716,275 @@ describeDb('Section E — Rules 11 and 18', () => {
   });
 });
 
+describeDb('Section A — A-05 (Konteks Klien & Bisnis)', () => {
+  it('stores all sixteen answers and reads them back', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const saved = await saveKonteks(sql, am(), s.id, KONTEKS);
+
+    expect(saved.namaBrand).toBe('Alpha Digital');
+    expect(saved.modelBisnis).toBe('brand_owner');
+    expect(saved.marginKotorPersen).toBe(38);
+    expect(saved.posisiHarga).toBe('mid');
+    expect(saved.usp).toHaveLength(3);
+    expect(saved.kapasitasStok).toBe('ready_stock');
+    expect(saved.leadTimeRestockHari).toBe(21);
+    expect(saved.plafonUnitPerBulan).toBe(8000);
+    expect(saved.titikKirimKota).toBe('Bandung');
+    // A-9 verbatim: not trimmed into a summary anywhere along the way.
+    expect(saved.ekspektasiKlien).toBe('pokoknya omzet naik 2x dan gak rugi di iklan.');
+    expect(saved.pantanganKlien).toEqual(['harga hero SKU tidak boleh di bawah Rp 79.000']);
+    expect(saved.decisionMaker).toEqual([
+      { nama: 'Owner', jabatan: 'Pemilik', berhakApprove: true, jalurEskalasi: 'langsung ke owner' },
+    ]);
+    expect(saved.slaKlienJam).toBe(36);
+    expect(saved.asetDariKlien).toEqual(['foto_produk', 'katalog', 'budget_iklan']);
+  });
+
+  it('accepts a partial save — the form autosaves before it is finished (§7)', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const saved = await saveKonteks(sql, am(), s.id, { namaBrand: 'Alpha Digital' });
+    expect(saved.namaBrand).toBe('Alpha Digital');
+    // Everything else stays empty rather than being rejected or defaulted.
+    expect(saved.modelBisnis).toBeNull();
+    expect(saved.usp).toEqual([]);
+  });
+
+  it('refuses an enum outside its list and a percentage above 100', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(
+      saveKonteks(sql, am(), s.id, { modelBisnis: 'agensi' as never }),
+    ).rejects.toThrow(ValidationError);
+    await expect(saveKonteks(sql, am(), s.id, { marginKotorPersen: 140 })).rejects.toThrow(
+      ValidationError,
+    );
+    await expect(saveKonteks(sql, am(), s.id, { leadTimeRestockHari: -1 })).rejects.toThrow(
+      ValidationError,
+    );
+  });
+
+  it('refuses an asset outside the closed A-14 taxonomy', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(
+      saveKonteks(sql, am(), s.id, { asetDariKlien: ['foto_produk', 'gudang'] }),
+    ).rejects.toThrow(ValidationError);
+  });
+
+  it('drops a blank decision-maker row but refuses a half-typed one', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    // The form always shows one empty row for the next entry; autosave must not
+    // choke on it.
+    const saved = await saveKonteks(sql, am(), s.id, {
+      decisionMaker: [
+        { nama: 'Owner', jabatan: 'Pemilik', berhakApprove: true, jalurEskalasi: '' },
+        { nama: '', jabatan: '', berhakApprove: false, jalurEskalasi: '' },
+      ],
+    });
+    expect(saved.decisionMaker).toHaveLength(1);
+    await expect(
+      saveKonteks(sql, am(), s.id, {
+        decisionMaker: [{ nama: 'Owner', jabatan: '', berhakApprove: false, jalurEskalasi: '' }],
+      }),
+    ).rejects.toThrow(ValidationError);
+  });
+
+  it('is writable only by the owning AM, and only while a draft', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(saveKonteks(sql, otherAm(), strategiId, KONTEKS)).rejects.toThrow(ForbiddenError);
+    await submitStrategi(sql, am(), strategiId);
+    await expect(saveKonteks(sql, am(), strategiId, KONTEKS)).rejects.toThrow(ConflictError);
+  });
+
+  it('survives a revision — Section A lives on the row that gets copied', async () => {
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    const v2 = await openRevision(sql, am(), strategiId, {
+      triggerRevisi: ['stok kosong'],
+      alasanRevisi: 'hero SKU habis',
+      asumsiGugur: ['A1'],
+    });
+    const detail = await getStrategi(sql, am(), v2.id);
+    expect(detail.namaBrand).toBe('Alpha Digital');
+    expect(detail.decisionMaker).toHaveLength(1);
+    // A-15 travels too: access already granted is not re-requested, and an
+    // unresolved blocker must not vanish because a new version was opened.
+    expect(detail.akses.filter((a) => a.memblokir)).toHaveLength(1);
+  });
+});
+
+describeDb('A-15 / A-16 — the access matrix and its blockers', () => {
+  it('stores the matrix and flags the blocker on the row it blocks', async () => {
+    const { strategiId } = await seedSubmittable();
+    const detail = await getStrategi(sql, am(), strategiId);
+    expect(detail.akses).toHaveLength(4);
+    const blocker = detail.akses.find((a) => a.memblokir);
+    expect(blocker?.akses).toBe('affiliate_center');
+    expect(blocker?.status).toBe('pending');
+    expect(blocker?.targetTanggalBeres).toBe('2026-08-11');
+  });
+
+  it('refuses a blocker with no target date (A-16)', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(
+      saveAkses(sql, am(), strategiId, [
+        { channel: 'Shopee', akses: 'ads_manager', status: 'pending', memblokir: true },
+      ]),
+    ).rejects.toThrow(MSG_AKSES_BLOCKER_DATE);
+  });
+
+  it('refuses a blocker on an access that is already granted', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(
+      saveAkses(sql, am(), strategiId, [
+        {
+          channel: 'Shopee',
+          akses: 'ads_manager',
+          status: 'sudah',
+          memblokir: true,
+          targetTanggalBeres: '2026-09-01',
+        },
+      ]),
+    ).rejects.toThrow(MSG_AKSES_BLOCKER_DATE);
+  });
+
+  it('refuses a channel this Strategi does not contract, but accepts Umum', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(
+      saveAkses(sql, am(), strategiId, [
+        { channel: 'Lazada', akses: 'seller_center', status: 'pending' },
+      ]),
+    ).rejects.toThrow(MSG_CHANNEL_NOT_FOUND);
+    const ok = await saveAkses(sql, am(), strategiId, [
+      { channel: 'Umum', akses: 'gudang_stok', status: 'sudah' },
+    ]);
+    expect(ok.akses).toHaveLength(1);
+  });
+
+  it('refuses the same (channel, akses) twice — a matrix has one cell each', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(
+      saveAkses(sql, am(), strategiId, [
+        { channel: 'Shopee', akses: 'seller_center', status: 'sudah' },
+        { channel: 'Shopee', akses: 'seller_center', status: 'pending' },
+      ]),
+    ).rejects.toThrow(MSG_AKSES_DUPLICATE);
+  });
+});
+
+describeDb('Section B — A-06 (groups B-2 … B-9)', () => {
+  it('reads back the §6 Alpha Digital baseline, with the derived figures derived', async () => {
+    const { strategiId } = await seedSubmittable();
+    const c = (await getStrategi(sql, am(), strategiId)).channels[0];
+
+    expect(c.pengunjungPerBulan).toBe(96000);
+    expect(c.conversionRatePersen).toBe(2.1);
+    expect(c.skuListed).toBe(214);
+    expect(c.skuAktif).toBe(178);
+    expect(c.skuPareto80).toBe(7);
+    expect(c.ratingToko).toBe(4.8);
+    expect(c.jumlahUlasan).toBe(3104);
+    expect(c.komisiTargetPersen).toBe(12);
+    expect(c.tipeKampanye).toEqual(['gmv_max', 'manual_keyword']);
+    expect(c.topSku[0].nama).toBe('RAK-A');
+    expect(c.kompetitor[0].hargaSebanding).toBe('69000.00');
+    expect(c.kompetitorLebihBaik).toEqual(['harga', 'konten']);
+
+    // B-1.3 AOV = GMV/orders, computed in the DB (house rule #4).
+    expect(Number(c.baseline[2].aov)).toBeCloseTo(180000000 / 2050, 2);
+    // B-7.2 third figure: zero live hours, so division by zero renders `—`
+    // rather than erroring or pretending the answer is 0 (house rule #7).
+    expect(c.jamLivePerBulan).toBe(0);
+    expect(c.gmvPerJamLive).toBeNull();
+  });
+
+  it('derives the B-1.5 trend, and calls the §6 baseline flat', async () => {
+    const { strategiId } = await seedSubmittable();
+    const c = (await getStrategi(sql, am(), strategiId)).channels[0];
+    // 172jt → 180jt is +4,65%: inside the band, so `stabil` — which is exactly
+    // the word §6 uses for these numbers.
+    expect(c.tren).toBe('stabil');
+    expect(c.trenPersen).toBeCloseTo(4.65, 1);
+  });
+
+  it('refuses a traffic mix that is partial or does not add up (§7)', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    // Five of six filled: a composition that cannot be summed at all.
+    await expect(
+      saveChannels(sql, am(), s.id, [{ ...SHOPEE, trafikLuarPersen: null }]),
+    ).rejects.toThrow(MSG_TRAFFIC_MIX_SUM);
+    await expect(
+      saveChannels(sql, am(), s.id, [{ ...SHOPEE, trafikOrganikPersen: 20 }]),
+    ).rejects.toThrow(MSG_TRAFFIC_MIX_SUM);
+  });
+
+  it('refuses out-of-range and self-contradicting figures', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    // B-4.1 is a 0–5 scale, not a percentage.
+    await expect(saveChannels(sql, am(), s.id, [{ ...SHOPEE, ratingToko: 48 }])).rejects.toThrow(
+      ValidationError,
+    );
+    // More SKUs selling than listed is a typo, and Section C would cite it.
+    await expect(
+      saveChannels(sql, am(), s.id, [{ ...SHOPEE, skuAktif: 400 }]),
+    ).rejects.toThrow(ValidationError);
+    await expect(
+      saveChannels(sql, am(), s.id, [{ ...SHOPEE, skuPareto80: 200 }]),
+    ).rejects.toThrow(ValidationError);
+    await expect(
+      saveChannels(sql, am(), s.id, [{ ...SHOPEE, tipeKampanye: ['tiktok_magic'] }]),
+    ).rejects.toThrow(ValidationError);
+  });
+
+  it('caps the counts the PRD writes in brackets, and allows a shorter list', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const sku = SHOPEE.topSku![0];
+    await expect(
+      saveChannels(sql, am(), s.id, [{ ...SHOPEE, topSku: [sku, sku, sku, sku, sku, sku] }]),
+    ).rejects.toThrow(ValidationError);
+    const k = SHOPEE.kompetitor![0];
+    await expect(
+      saveChannels(sql, am(), s.id, [{ ...SHOPEE, kompetitor: [k, k, k, k] }]),
+    ).rejects.toThrow(ValidationError);
+    // One row is fine: a store with four active SKUs cannot honestly name five.
+    const ok = await saveChannels(sql, am(), s.id, [SHOPEE]);
+    expect(ok.channels[0].topSku).toHaveLength(1);
+  });
+
+  it('keeps `0` a valid answer where blank is not (Rule 5)', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const saved = await saveChannels(sql, am(), s.id, [
+      { ...SHOPEE, poinPenalti: 0, affiliateAktif30Hari: 0, bebanPromoPersen: 0 },
+    ]);
+    expect(saved.channels[0].poinPenalti).toBe(0);
+    expect(saved.channels[0].affiliateAktif30Hari).toBe(0);
+    expect(saved.channels[0].bebanPromoPersen).toBe(0);
+  });
+
+  it('survives a revision — Section B is copied with its channel', async () => {
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    const v2 = await openRevision(sql, am(), strategiId, {
+      triggerRevisi: ['klien ubah lini produk'],
+      alasanRevisi: 'lini baru masuk',
+      asumsiGugur: ['A1'],
+    });
+    const c = (await getStrategi(sql, am(), v2.id)).channels[0];
+    expect(c.pengunjungPerBulan).toBe(96000);
+    expect(c.topSku[0].nama).toBe('RAK-A');
+    expect(c.tren).toBe('stabil');
+  });
+});
+
 describeDb('checkCompleteness — every unmet rule, not the first one', () => {
   it('lists what is missing on an empty draft', async () => {
     const serviceId = await seedService();
@@ -557,8 +996,91 @@ describeDb('checkCompleteness — every unmet rule, not the first one', () => {
     expect(codes).toContain('D-8'); // three assumptions
     expect(codes).toContain('E-11'); // Rule 9
     expect(codes).toContain('H-1'); // three risks
-    // A first-error gate would have reported one of these and hidden four.
+    // A-05: every Section A answer is required, and the kode names which one so
+    // the form can jump to it rather than saying "something is missing".
+    expect(codes).toContain('A-1');
+    expect(codes).toContain('A-9');
+    expect(codes).toContain('A-12');
+    expect(codes).toContain('A-13');
+    expect(missing.find((m) => m.kode === 'A-5')?.pesan).toBe(MSG_USP_MIN);
+    // A first-error gate would have reported one of these and hidden the rest.
     expect(missing.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('lists every unfilled Section B group per channel, not just the first', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    // A B-0 block with a window and a source, but none of B-2…B-9 answered.
+    await saveChannels(sql, am(), s.id, [
+      {
+        channel: 'Shopee',
+        statusChannel: 'Eksisting',
+        namaToko: 'Alpha Digital',
+        urlToko: 'https://shopee.co.id/alpha',
+        sumberData: 'Shopee export',
+        tanggalAmbilData: '2026-08-02',
+        lampiran: 'shopee-export.csv',
+        periodeBaselineBulan: 3,
+        periodeMulai: '2026-05-01',
+        periodeAkhir: '2026-07-31',
+      },
+    ]);
+    const codes = (await checkCompleteness(sql, s.id)).map((m) => m.kode);
+    for (const g of ['B-2', 'B-3', 'B-4', 'B-5', 'B-6', 'B-7', 'B-8', 'B-9']) {
+      expect(codes).toContain(`${g}/Shopee`);
+    }
+    expect(codes).toContain('B-3.3/Shopee'); // no hero SKU for E-3 to promote
+    expect(codes).toContain('B-9.1/Shopee'); // nothing for C-4 to compare against
+    // A-15: the channel has no access checklist at all.
+    expect(codes).toContain('A-15/Shopee');
+  });
+
+  it('does not require Section B of a Belum Aktif channel (Rule 4)', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveChannels(sql, am(), s.id, [
+      {
+        channel: 'Tokopedia',
+        statusChannel: 'Belum Aktif',
+        namaToko: 'Alpha Digital',
+        urlToko: 'https://tokopedia.com/alpha',
+        targetTanggalLive: '2026-10-01',
+      },
+    ]);
+    const codes = (await checkCompleteness(sql, s.id)).map((m) => m.kode);
+    expect(codes).not.toContain('B-2/Tokopedia');
+    expect(codes).not.toContain('B-7/Tokopedia');
+    // The launch plan and the access checklist are still required, though.
+    expect(codes).toContain('A-15/Tokopedia');
+  });
+
+  it('flags a hero-SKU list and a competitor list left empty', async () => {
+    const { strategiId } = await seedSubmittable();
+    await saveChannels(sql, am(), strategiId, [{ ...SHOPEE, topSku: [], kompetitor: [] }]);
+    const pesan = (await checkCompleteness(sql, strategiId)).map((m) => m.pesan);
+    expect(pesan).toContain(MSG_TOP_SKU_REQUIRED);
+    expect(pesan).toContain(MSG_KOMPETITOR_REQUIRED);
+  });
+
+  it('flags a channel whose access checklist was never filled (A-15)', async () => {
+    const { strategiId } = await seedSubmittable();
+    await saveAkses(sql, am(), strategiId, [
+      // Only the non-channel row survives: Shopee itself is now unasked.
+      { channel: 'Umum', akses: 'gudang_stok', status: 'sudah' },
+    ]);
+    const missing = await checkCompleteness(sql, strategiId);
+    expect(missing.find((m) => m.kode === 'A-15/Shopee')?.pesan).toBe(MSG_AKSES_MATRIX_REQUIRED);
+  });
+
+  it('does not treat a zero as a blank when checking a group (Rule 5)', async () => {
+    const { strategiId } = await seedSubmittable();
+    // Every figure in B-7 is zero except the ones §6 gives — a store that never
+    // went live has ANSWERED, and the gate must not call that missing.
+    await saveChannels(sql, am(), strategiId, [
+      { ...SHOPEE, jumlahVideoPerBulan: 0, totalViews: 0, gmvVideo: '0.00' },
+    ]);
+    const codes = (await checkCompleteness(sql, strategiId)).map((m) => m.kode);
+    expect(codes).not.toContain('B-7/Shopee');
   });
 
   it('flags a GMV target no assumption points at (Rule 8)', async () => {

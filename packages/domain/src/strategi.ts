@@ -131,6 +131,136 @@ export type AssumptionState = (typeof ASSUMPTION_STATES)[number];
 export const RISK_LEVELS = ['rendah', 'sedang', 'tinggi'] as const;
 export type RiskLevel = (typeof RISK_LEVELS)[number];
 
+// --- Section A vocabulary (A-05). Every list below mirrors a CHECK in
+// supabase/migrations/20260806065000_m6a_section_a.sql. ---
+
+/** A-2 — produsen / brand owner / distributor / reseller. */
+export const BUSINESS_MODELS = ['produsen', 'brand_owner', 'distributor', 'reseller'] as const;
+export type BusinessModel = (typeof BUSINESS_MODELS)[number];
+
+/** A-4 — price position vs competitors. */
+export const PRICE_POSITIONS = ['premium', 'mid', 'budget', 'price_fighter'] as const;
+export type PricePosition = (typeof PRICE_POSITIONS)[number];
+
+/** A-6 — ready stock or made per order. */
+export const STOCK_CAPACITIES = ['ready_stock', 'produksi_per_order'] as const;
+export type StockCapacity = (typeof STOCK_CAPACITIES)[number];
+
+/** A-14 — closed checkbox taxonomy of what the client supplies. */
+export const CLIENT_ASSETS = [
+  'foto_produk',
+  'video',
+  'sampel',
+  'katalog',
+  'budget_iklan',
+  'host_live',
+] as const;
+export type ClientAsset = (typeof CLIENT_ASSETS)[number];
+
+/** A-5 — "3 alasan utama orang beli produk ini". The minimum is the point. */
+export const USP_MIN = 3;
+
+// --- A-15 / A-16 access matrix ---
+
+/** A-15 — the five accesses. `gudang_stok` is why `Umum` exists below. */
+export const ACCESS_KINDS = [
+  'seller_center',
+  'ads_manager',
+  'affiliate_center',
+  'akun_chat',
+  'gudang_stok',
+] as const;
+export type AccessKind = (typeof ACCESS_KINDS)[number];
+
+export const ACCESS_STATES = ['sudah', 'pending', 'ditolak'] as const;
+export type AccessState = (typeof ACCESS_STATES)[number];
+
+/**
+ * The matrix's channel axis: the contracted channels plus `Umum`.
+ *
+ * `Umum` is not a channel — it is where an access that belongs to no channel
+ * (warehouse/stock) is recorded. Without it that row has to be filed under an
+ * invented channel, and the matrix then misstates what is actually blocked.
+ */
+export const ACCESS_CHANNEL_UMUM = 'Umum';
+export const ACCESS_CHANNELS = [...CHANNELS, ACCESS_CHANNEL_UMUM] as const;
+export type AccessChannel = (typeof ACCESS_CHANNELS)[number];
+
+// --- Section B vocabulary (A-06) ---
+
+/** B-2.4 — biggest entry point (optional field). */
+export const ENTRY_POINTS = ['search', 'feed', 'live', 'keranjang', 'chat'] as const;
+export type EntryPoint = (typeof ENTRY_POINTS)[number];
+
+/** B-6.5 — who pays for the sampling/seeding programme. */
+export const SAMPLE_PROGRAMS = ['tidak_ada', 'klien', 'mea', 'kreator'] as const;
+export type SampleProgram = (typeof SAMPLE_PROGRAMS)[number];
+
+/** B-7.3 — who hosts the live sessions today. */
+export const LIVE_HOSTS = ['internal_klien', 'vendor', 'tim_mea', 'belum_ada'] as const;
+export type LiveHost = (typeof LIVE_HOSTS)[number];
+
+/** B-7.4 — studio & equipment availability. */
+export const STUDIO_STATES = ['tersedia', 'sebagian', 'tidak_ada'] as const;
+export type StudioState = (typeof STUDIO_STATES)[number];
+
+/** B-5.3 — campaign types running on the channel. */
+export const CAMPAIGN_TYPES = [
+  'gmv_max',
+  'manual_keyword',
+  'auto',
+  'live_ads',
+  'video_ads',
+  'affiliate_ads',
+  'lainnya',
+] as const;
+export type CampaignType = (typeof CAMPAIGN_TYPES)[number];
+
+/** B-8.2 — platform programmes the store joined. */
+export const PLATFORM_PROGRAMS = [
+  'gratis_ongkir_xtra',
+  'cashback',
+  'campaign_seasonal',
+  'flash_sale',
+  'voucher_platform',
+  'lainnya',
+] as const;
+export type PlatformProgram = (typeof PLATFORM_PROGRAMS)[number];
+
+/** B-9.2 — what competitors do better. */
+export const COMPETITOR_EDGES = [
+  'harga',
+  'konten',
+  'ulasan',
+  'iklan',
+  'live',
+  'bundling',
+] as const;
+export type CompetitorEdge = (typeof COMPETITOR_EDGES)[number];
+
+/**
+ * B-3.3 / B-9.1 caps.
+ *
+ * The PRD writes "Top 5 SKU … Repeatable struct (5)" and "Top 3 toko kompetitor
+ * … (3)". Read as a MAXIMUM, not an exact count: a store with four active SKUs
+ * cannot name five, and a form that refuses to submit until it does teaches the
+ * AM to invent rows — which is worse than a shorter honest list. At least one is
+ * required (see `checkCompleteness`); more than the cap is refused.
+ */
+export const TOP_SKU_MAX = 5;
+export const KOMPETITOR_MAX = 3;
+
+/**
+ * B-1.5 — the band inside which a baseline trend counts as `stabil`.
+ *
+ * Not arbitrary: M6A §6 calls Alpha Digital's Shopee baseline (Rp 180jt → 165jt →
+ * 172jt, a 4,4% spread) **"flat"**, so the PRD's own worked example has to come
+ * out `stabil` — which a band narrower than that would not do.
+ */
+export const TREN_STABIL_BAND_PERSEN = 5;
+export const TREN_STATES = ['naik', 'stabil', 'turun'] as const;
+export type TrenState = (typeof TREN_STATES)[number];
+
 const MACHINE_STRATEGI = 'strategi';
 const ENTITY_STRATEGI = 'strategi';
 
@@ -187,6 +317,27 @@ export const MSG_CHANNEL_NOT_FOUND = '[channel tidak ditemukan pada Strategi ini
 /** D-9 — an assumption points at a target that does not exist. */
 export const MSG_ASSUMPTION_TARGET_UNKNOWN =
   '[asumsi merujuk target yang tidak ada di Strategi ini]';
+/** A-05 — a required Section A field is still empty (kode names which one). */
+export const MSG_KONTEKS_INCOMPLETE = '[konteks klien & bisnis belum lengkap]';
+/** A-5 — "3 alasan utama orang beli produk ini". */
+export const MSG_USP_MIN = '[minimal tiga USP produk wajib diisi]';
+/** A-15 — every contracted channel needs its access checklist. */
+export const MSG_AKSES_MATRIX_REQUIRED =
+  '[matriks akses wajib diisi untuk setiap channel kontrak]';
+/** A-16 — a blocker without a target date is a complaint, not a work item. */
+export const MSG_AKSES_BLOCKER_DATE =
+  '[blocker akses wajib menyertakan target tanggal beres]';
+/** A-15 — the matrix is a matrix: one row per (channel, akses). */
+export const MSG_AKSES_DUPLICATE =
+  '[akses yang sama tidak boleh dicatat dua kali untuk satu channel]';
+/** A-06 / Rule 5 — a baseline group on an `Eksisting` channel is still blank. */
+export const MSG_BASELINE_GROUP_INCOMPLETE = '[data baseline channel belum lengkap]';
+/** B-2.3 / §7 — the traffic composition must add up. */
+export const MSG_TRAFFIC_MIX_SUM = '[komposisi sumber trafik wajib berjumlah 100%]';
+/** B-3.3 — at least one hero-SKU row; E-3 has nothing to promote without it. */
+export const MSG_TOP_SKU_REQUIRED = '[minimal satu SKU teratas wajib diisi per channel]';
+/** B-9.1 — at least one competitor; C-4 compares against it. */
+export const MSG_KOMPETITOR_REQUIRED = '[minimal satu kompetitor wajib diisi per channel]';
 
 const RE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -194,8 +345,114 @@ const RE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 // Types
 // ---------------------------------------------------------------------------
 
-/** The Strategi header (Section J-1 + the contract window). */
-export interface Strategi {
+// --- Repeatable structs stored as jsonb.
+//
+// They are declared as named interfaces rather than `Record<string, unknown>[]`
+// on purpose: the response-shape guard follows a key whose type NAMES an
+// interface and compares it against the FE side, and an anonymous bag is a shape
+// nothing verifies. Money inside these structs is a STRING, like every other
+// currency value that crosses the wire in CDPS.
+
+/** A-12 — who may approve, and how to escalate past them. */
+export interface StrategiDecisionMaker {
+  nama: string;
+  jabatan: string;
+  berhakApprove: boolean;
+  jalurEskalasi: string;
+}
+
+/** B-3.3 — top SKU by GMV. */
+export interface StrategiTopSku {
+  nama: string;
+  gmv: string;
+  unitTerjual: number;
+  hargaJual: string;
+  marginPersen: number;
+}
+
+/** B-5.4 — keyword/audience that produced orders (optional field). */
+export interface StrategiTopKeyword {
+  keyword: string;
+  jumlahOrder: number;
+}
+
+/** B-5.5 — spend with no orders behind it (optional field). */
+export interface StrategiKampanyeBoncos {
+  nama: string;
+  spend: string;
+}
+
+/** B-6.4 — top creator by GMV (optional field). */
+export interface StrategiTopKreator {
+  nama: string;
+  gmv: string;
+}
+
+/** B-8.1 — an active voucher/promo. */
+export interface StrategiVoucher {
+  tipe: string;
+  nilai: string;
+  syarat: string;
+}
+
+/** B-9.1 — a competing store on this channel. */
+export interface StrategiKompetitor {
+  nama: string;
+  url: string;
+  hargaSebanding: string;
+  estimasiPenjualanBulan: string;
+}
+
+/**
+ * Section A — Konteks Klien & Bisnis (A-05), filled once per Strategi.
+ *
+ * Every field is `W` in the PRD yet nullable here, and that is deliberate: the
+ * record is born `Draft`, §7 asks for autosave every 20s, and §5 step 5 asks the
+ * submit button to show a live count of unmet requirements. All three need a
+ * half-filled Section A to be storable. Presence is enforced by
+ * `checkCompleteness` inside the submit transaction; shape and range are enforced
+ * here and by CHECK constraints.
+ */
+export interface StrategiKonteks {
+  namaBrand: string | null;
+  kategoriUtama: string | null;
+  subKategori: string[];
+  modelBisnis: BusinessModel | null;
+  /** A-3 — §4.1 default `Internal Saja`. */
+  marginKotorPersen: number | null;
+  posisiHarga: PricePosition | null;
+  usp: string[];
+  kapasitasStok: StockCapacity | null;
+  leadTimeRestockHari: number | null;
+  plafonUnitPerBulan: number | null;
+  titikKirimKota: string | null;
+  titikKirimDetail: string | null;
+  /** A-9 — verbatim from the kickoff, not the AM's paraphrase. */
+  ekspektasiKlien: string | null;
+  /** A-10 — §4.1 HARD-INTERNAL, never shareable. */
+  riwayatAgensi: string | null;
+  pantanganKlien: string[];
+  decisionMaker: StrategiDecisionMaker[];
+  /** A-13 — §4.1 default `Internal Saja`. */
+  slaKlienJam: number | null;
+  slaKlienCatatan: string | null;
+  asetDariKlien: ClientAsset[];
+  asetCatatan: string | null;
+}
+
+/** A-15 + A-16 — one row per (channel, akses); the blocker is a flag on it. */
+export interface StrategiAkses {
+  id: number;
+  channel: AccessChannel;
+  akses: AccessKind;
+  status: AccessState;
+  memblokir: boolean;
+  targetTanggalBeres: string | null;
+  catatan: string;
+}
+
+/** The Strategi header (Section J-1 + the contract window) plus Section A. */
+export interface Strategi extends StrategiKonteks {
   id: string;
   serviceId: string;
   clientId: string;
@@ -237,6 +494,92 @@ export interface StrategiChannel {
   periodeAkhir: string | null;
   alasanPeriodePendek: string | null;
   catatanPeriodePendek: string | null;
+
+  // --- Section B groups B-2 … B-9 (A-06). One figure per channel, not per
+  // month — the monthly ones (B-1, B-5.1/5.2) are rows in `baseline` below.
+  // Nullable for the same reason Section A is: see `StrategiKonteks`.
+
+  // B-2 Trafik & Konversi
+  pengunjungPerBulan: number | null;
+  conversionRatePersen: number | null;
+  /** B-2.3 — six columns, so the §7 "sums to 100 ±0,5" CHECK is writable. */
+  trafikOrganikPersen: number | null;
+  trafikIklanPersen: number | null;
+  trafikAffiliatePersen: number | null;
+  trafikLivePersen: number | null;
+  trafikVideoPersen: number | null;
+  trafikLuarPersen: number | null;
+  entryPointUtama: EntryPoint | null;
+  entryPointCatatan: string | null;
+
+  // B-3 Portofolio SKU
+  skuListed: number | null;
+  skuAktif: number | null;
+  skuPareto80: number | null;
+  topSku: StrategiTopSku[];
+  skuSlowMoving: number | null;
+  skuStokKritis: string[];
+  listingLayakPersen: number | null;
+
+  // B-4 Kesehatan Toko & Layanan
+  ratingToko: number | null;
+  jumlahUlasan: number | null;
+  chatResponseRatePersen: number | null;
+  chatResponseMenit: number | null;
+  pesananTerlambatPersen: number | null;
+  poinPenalti: number | null;
+  catatanPenalti: string | null;
+  temaKeluhan: string[];
+
+  // B-5 Iklan (the per-month figures live in `baseline`)
+  tipeKampanye: CampaignType[];
+  jumlahKampanyeAktif: number | null;
+  topKeyword: StrategiTopKeyword[];
+  kampanyeBoncos: StrategiKampanyeBoncos[];
+
+  // B-6 Affiliate / KOL
+  affiliateAktif30Hari: number | null;
+  gmvAffiliate: string | null;
+  gmvAffiliatePersen: number | null;
+  komisiOpenPersen: number | null;
+  komisiTargetPersen: number | null;
+  topKreator: StrategiTopKreator[];
+  programSampel: SampleProgram | null;
+  programSampelCatatan: string | null;
+
+  // B-7 Konten & Live
+  jumlahVideoPerBulan: number | null;
+  totalViews: number | null;
+  gmvVideo: string | null;
+  jamLivePerBulan: number | null;
+  gmvLive: string | null;
+  /** B-7.2 third figure — computed (house rule #4), `null` at zero live hours. */
+  gmvPerJamLive: string | null;
+  hostLive: LiveHost | null;
+  studioLive: StudioState | null;
+  studioCatatan: string | null;
+
+  // B-8 Promo & Program Platform
+  voucherAktif: StrategiVoucher[];
+  programPlatform: PlatformProgram[];
+  bebanPromoPersen: number | null;
+
+  // B-9 Kompetitor di Channel Ini
+  kompetitor: StrategiKompetitor[];
+  kompetitorLebihBaik: CompetitorEdge[];
+  kompetitorCatatan: string | null;
+  celahKompetitor: string | null;
+
+  /**
+   * B-1.5 — trend across the declared baseline window. Auto (`A` in the PRD), so
+   * it is derived on read and never stored: a stored trend can go stale against
+   * the baseline rows that produced it (house rule #4).
+   *
+   * `trenPersen` is null when the oldest month's GMV is 0 — division by zero
+   * renders `—`, never an error (house rule #7).
+   */
+  tren: TrenState | null;
+  trenPersen: number | null;
 }
 
 /** B-1 / B-5 — one row per month of the declared window. */
@@ -335,6 +678,8 @@ export interface StrategiEvent {
 /** The whole record, as the form loads it. */
 export interface StrategiDetail extends Strategi {
   channels: (StrategiChannel & { baseline: BaselineMonth[] })[];
+  /** A-15 / A-16 — the access matrix and the blockers flagged inside it. */
+  akses: StrategiAkses[];
   targets: StrategiTarget[];
   assumptions: StrategiAssumption[];
   pillars: StrategiPillar[];
@@ -400,6 +745,27 @@ interface StrategiRow {
   catatan_reviewer: string | null;
   created_by: string;
   created_at: string | Date;
+  // Section A (A-05). `numeric` arrives as a string from postgres.js.
+  nama_brand: string | null;
+  kategori_utama: string | null;
+  sub_kategori: unknown;
+  model_bisnis: string | null;
+  margin_kotor_persen: string | null;
+  posisi_harga: string | null;
+  usp: unknown;
+  kapasitas_stok: string | null;
+  lead_time_restock_hari: number | null;
+  plafon_unit_per_bulan: number | null;
+  titik_kirim_kota: string | null;
+  titik_kirim_detail: string | null;
+  ekspektasi_klien: string | null;
+  riwayat_agensi: string | null;
+  pantangan_klien: unknown;
+  decision_maker: unknown;
+  sla_klien_jam: string | null;
+  sla_klien_catatan: string | null;
+  aset_dari_klien: unknown;
+  aset_catatan: string | null;
 }
 
 function dateStr(v: string | Date): string {
@@ -435,11 +801,121 @@ function rowToStrategi(r: StrategiRow): Strategi {
     catatanReviewer: r.catatan_reviewer,
     createdBy: r.created_by,
     createdAt: new Date(r.created_at).toISOString(),
+    // Section A
+    namaBrand: r.nama_brand,
+    kategoriUtama: r.kategori_utama,
+    subKategori: strArray(r.sub_kategori),
+    modelBisnis: r.model_bisnis as BusinessModel | null,
+    marginKotorPersen: numOrNull(r.margin_kotor_persen),
+    posisiHarga: r.posisi_harga as PricePosition | null,
+    usp: strArray(r.usp),
+    kapasitasStok: r.kapasitas_stok as StockCapacity | null,
+    leadTimeRestockHari: r.lead_time_restock_hari,
+    plafonUnitPerBulan: r.plafon_unit_per_bulan,
+    titikKirimKota: r.titik_kirim_kota,
+    titikKirimDetail: r.titik_kirim_detail,
+    ekspektasiKlien: r.ekspektasi_klien,
+    riwayatAgensi: r.riwayat_agensi,
+    pantanganKlien: strArray(r.pantangan_klien),
+    decisionMaker: decisionMakersOf(r.decision_maker),
+    slaKlienJam: numOrNull(r.sla_klien_jam),
+    slaKlienCatatan: r.sla_klien_catatan,
+    asetDariKlien: strArray(r.aset_dari_klien) as ClientAsset[],
+    asetCatatan: r.aset_catatan,
   };
 }
 
 function strArray(v: unknown): string[] {
   return Array.isArray(v) ? v.map((x) => String(x)) : [];
+}
+
+/** `numeric`/`bigint` reach us as strings; a genuine NULL must stay null. */
+function numOrNull(v: string | number | null): number | null {
+  return v === null || v === undefined ? null : Number(v);
+}
+
+function objArray(v: unknown): Record<string, unknown>[] {
+  return Array.isArray(v)
+    ? v.filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null)
+    : [];
+}
+
+function decisionMakersOf(v: unknown): StrategiDecisionMaker[] {
+  return objArray(v).map((d) => ({
+    nama: String(d.nama ?? ''),
+    jabatan: String(d.jabatan ?? ''),
+    berhakApprove: d.berhak_approve === true || d.berhakApprove === true,
+    jalurEskalasi: String(d.jalur_eskalasi ?? d.jalurEskalasi ?? ''),
+  }));
+}
+
+function topSkusOf(v: unknown): StrategiTopSku[] {
+  return objArray(v).map((s) => ({
+    nama: String(s.nama ?? ''),
+    gmv: String(s.gmv ?? '0'),
+    unitTerjual: Number(s.unit_terjual ?? 0),
+    hargaJual: String(s.harga_jual ?? '0'),
+    marginPersen: Number(s.margin_persen ?? 0),
+  }));
+}
+
+function topKeywordsOf(v: unknown): StrategiTopKeyword[] {
+  return objArray(v).map((k) => ({
+    keyword: String(k.keyword ?? ''),
+    jumlahOrder: Number(k.jumlah_order ?? 0),
+  }));
+}
+
+function boncosOf(v: unknown): StrategiKampanyeBoncos[] {
+  return objArray(v).map((k) => ({ nama: String(k.nama ?? ''), spend: String(k.spend ?? '0') }));
+}
+
+function kreatorsOf(v: unknown): StrategiTopKreator[] {
+  return objArray(v).map((k) => ({ nama: String(k.nama ?? ''), gmv: String(k.gmv ?? '0') }));
+}
+
+function vouchersOf(v: unknown): StrategiVoucher[] {
+  return objArray(v).map((x) => ({
+    tipe: String(x.tipe ?? ''),
+    nilai: String(x.nilai ?? ''),
+    syarat: String(x.syarat ?? ''),
+  }));
+}
+
+function kompetitorsOf(v: unknown): StrategiKompetitor[] {
+  return objArray(v).map((k) => ({
+    nama: String(k.nama ?? ''),
+    url: String(k.url ?? ''),
+    hargaSebanding: String(k.harga_sebanding ?? '0'),
+    estimasiPenjualanBulan: String(k.estimasi_penjualan_bulan ?? '0'),
+  }));
+}
+
+/**
+ * B-1.5 — derive the baseline trend, never store it.
+ *
+ * Compares the newest month against the oldest in the declared window.
+ * `month_index` runs oldest → newest (see the migration comment): the Section D
+ * target matrix indexes months forward in time, and a baseline that indexed them
+ * backwards would make every cross-section reading a trap.
+ */
+export function trenBaseline(months: BaselineMonth[]): {
+  tren: TrenState | null;
+  trenPersen: number | null;
+} {
+  if (months.length < 2) return { tren: null, trenPersen: null };
+  const urut = [...months].sort((a, b) => a.monthIndex - b.monthIndex);
+  const awal = Number(urut[0].gmv);
+  const akhir = Number(urut[urut.length - 1].gmv);
+  if (!(awal > 0)) {
+    // House rule #7: division by zero is not an error. A store that started at
+    // zero and sold anything since is rising; the magnitude is unanswerable.
+    return { tren: akhir > 0 ? 'naik' : 'stabil', trenPersen: null };
+  }
+  const delta = ((akhir - awal) / awal) * 100;
+  const bulat = Math.round(delta * 100) / 100;
+  if (Math.abs(bulat) <= TREN_STABIL_BAND_PERSEN) return { tren: 'stabil', trenPersen: bulat };
+  return { tren: bulat > 0 ? 'naik' : 'turun', trenPersen: bulat };
 }
 
 // ---------------------------------------------------------------------------
@@ -531,6 +1007,60 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
       periode_akhir: string | Date | null;
       alasan_periode_pendek: string | null;
       catatan_periode_pendek: string | null;
+      // Section B groups B-2 … B-9 (A-06)
+      pengunjung_per_bulan: number | null;
+      conversion_rate_persen: string | null;
+      trafik_organik_persen: string | null;
+      trafik_iklan_persen: string | null;
+      trafik_affiliate_persen: string | null;
+      trafik_live_persen: string | null;
+      trafik_video_persen: string | null;
+      trafik_luar_persen: string | null;
+      entry_point_utama: string | null;
+      entry_point_catatan: string | null;
+      sku_listed: number | null;
+      sku_aktif: number | null;
+      sku_pareto_80: number | null;
+      top_sku: unknown;
+      sku_slow_moving: number | null;
+      sku_stok_kritis: unknown;
+      listing_layak_persen: string | null;
+      rating_toko: string | null;
+      jumlah_ulasan: number | null;
+      chat_response_rate_persen: string | null;
+      chat_response_menit: number | null;
+      pesanan_terlambat_persen: string | null;
+      poin_penalti: number | null;
+      catatan_penalti: string | null;
+      tema_keluhan: unknown;
+      tipe_kampanye: unknown;
+      jumlah_kampanye_aktif: number | null;
+      top_keyword: unknown;
+      kampanye_boncos: unknown;
+      affiliate_aktif_30hari: number | null;
+      gmv_affiliate: string | null;
+      gmv_affiliate_persen: string | null;
+      komisi_open_persen: string | null;
+      komisi_target_persen: string | null;
+      top_kreator: unknown;
+      program_sampel: string | null;
+      program_sampel_catatan: string | null;
+      jumlah_video_per_bulan: number | null;
+      total_views: string | null;
+      gmv_video: string | null;
+      jam_live_per_bulan: string | null;
+      gmv_live: string | null;
+      gmv_per_jam_live: string | null;
+      host_live: string | null;
+      studio_live: string | null;
+      studio_catatan: string | null;
+      voucher_aktif: unknown;
+      program_platform: unknown;
+      beban_promo_persen: string | null;
+      kompetitor: unknown;
+      kompetitor_lebih_baik: unknown;
+      kompetitor_catatan: string | null;
+      celah_kompetitor: string | null;
     }[]
   >`select * from strategi_channel where strategi_id = ${id} order by id asc`;
 
@@ -552,26 +1082,8 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
      where c.strategi_id = ${id}
      order by b.channel_id asc, b.month_index asc`;
 
-  const channels = channelRows.map((c) => ({
-    id: Number(c.id),
-    channel: c.channel as Channel,
-    channelLain: c.channel_lain,
-    statusChannel: c.status_channel as ChannelState,
-    namaToko: c.nama_toko,
-    urlToko: c.url_toko,
-    umurTokoBulan: c.umur_toko_bulan,
-    badge: c.badge,
-    targetTanggalLive: dateOrNull(c.target_tanggal_live),
-    prasyaratPembukaan: strArray(c.prasyarat_pembukaan),
-    sumberData: c.sumber_data,
-    tanggalAmbilData: dateOrNull(c.tanggal_ambil_data),
-    lampiran: c.lampiran,
-    periodeBaselineBulan: c.periode_baseline_bulan,
-    periodeMulai: dateOrNull(c.periode_mulai),
-    periodeAkhir: dateOrNull(c.periode_akhir),
-    alasanPeriodePendek: c.alasan_periode_pendek,
-    catatanPeriodePendek: c.catatan_periode_pendek,
-    baseline: baselineRows
+  const channels = channelRows.map((c) => {
+    const baseline = baselineRows
       .filter((b) => Number(b.channel_id) === Number(c.id))
       .map((b) => ({
         monthIndex: b.month_index,
@@ -582,8 +1094,98 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
         roas: Number(b.roas),
         acos: Number(b.acos),
         aov: b.aov,
-      })),
-  }));
+      }));
+    return {
+      id: Number(c.id),
+      channel: c.channel as Channel,
+      channelLain: c.channel_lain,
+      statusChannel: c.status_channel as ChannelState,
+      namaToko: c.nama_toko,
+      urlToko: c.url_toko,
+      umurTokoBulan: c.umur_toko_bulan,
+      badge: c.badge,
+      targetTanggalLive: dateOrNull(c.target_tanggal_live),
+      prasyaratPembukaan: strArray(c.prasyarat_pembukaan),
+      sumberData: c.sumber_data,
+      tanggalAmbilData: dateOrNull(c.tanggal_ambil_data),
+      lampiran: c.lampiran,
+      periodeBaselineBulan: c.periode_baseline_bulan,
+      periodeMulai: dateOrNull(c.periode_mulai),
+      periodeAkhir: dateOrNull(c.periode_akhir),
+      alasanPeriodePendek: c.alasan_periode_pendek,
+      catatanPeriodePendek: c.catatan_periode_pendek,
+      // Section B (A-06)
+      pengunjungPerBulan: c.pengunjung_per_bulan,
+      conversionRatePersen: numOrNull(c.conversion_rate_persen),
+      trafikOrganikPersen: numOrNull(c.trafik_organik_persen),
+      trafikIklanPersen: numOrNull(c.trafik_iklan_persen),
+      trafikAffiliatePersen: numOrNull(c.trafik_affiliate_persen),
+      trafikLivePersen: numOrNull(c.trafik_live_persen),
+      trafikVideoPersen: numOrNull(c.trafik_video_persen),
+      trafikLuarPersen: numOrNull(c.trafik_luar_persen),
+      entryPointUtama: c.entry_point_utama as EntryPoint | null,
+      entryPointCatatan: c.entry_point_catatan,
+      skuListed: c.sku_listed,
+      skuAktif: c.sku_aktif,
+      skuPareto80: c.sku_pareto_80,
+      topSku: topSkusOf(c.top_sku),
+      skuSlowMoving: c.sku_slow_moving,
+      skuStokKritis: strArray(c.sku_stok_kritis),
+      listingLayakPersen: numOrNull(c.listing_layak_persen),
+      ratingToko: numOrNull(c.rating_toko),
+      jumlahUlasan: c.jumlah_ulasan,
+      chatResponseRatePersen: numOrNull(c.chat_response_rate_persen),
+      chatResponseMenit: c.chat_response_menit,
+      pesananTerlambatPersen: numOrNull(c.pesanan_terlambat_persen),
+      poinPenalti: c.poin_penalti,
+      catatanPenalti: c.catatan_penalti,
+      temaKeluhan: strArray(c.tema_keluhan),
+      tipeKampanye: strArray(c.tipe_kampanye) as CampaignType[],
+      jumlahKampanyeAktif: c.jumlah_kampanye_aktif,
+      topKeyword: topKeywordsOf(c.top_keyword),
+      kampanyeBoncos: boncosOf(c.kampanye_boncos),
+      affiliateAktif30Hari: c.affiliate_aktif_30hari,
+      gmvAffiliate: c.gmv_affiliate,
+      gmvAffiliatePersen: numOrNull(c.gmv_affiliate_persen),
+      komisiOpenPersen: numOrNull(c.komisi_open_persen),
+      komisiTargetPersen: numOrNull(c.komisi_target_persen),
+      topKreator: kreatorsOf(c.top_kreator),
+      programSampel: c.program_sampel as SampleProgram | null,
+      programSampelCatatan: c.program_sampel_catatan,
+      jumlahVideoPerBulan: c.jumlah_video_per_bulan,
+      totalViews: numOrNull(c.total_views),
+      gmvVideo: c.gmv_video,
+      jamLivePerBulan: numOrNull(c.jam_live_per_bulan),
+      gmvLive: c.gmv_live,
+      gmvPerJamLive: c.gmv_per_jam_live,
+      hostLive: c.host_live as LiveHost | null,
+      studioLive: c.studio_live as StudioState | null,
+      studioCatatan: c.studio_catatan,
+      voucherAktif: vouchersOf(c.voucher_aktif),
+      programPlatform: strArray(c.program_platform) as PlatformProgram[],
+      bebanPromoPersen: numOrNull(c.beban_promo_persen),
+      kompetitor: kompetitorsOf(c.kompetitor),
+      kompetitorLebihBaik: strArray(c.kompetitor_lebih_baik) as CompetitorEdge[],
+      kompetitorCatatan: c.kompetitor_catatan,
+      celahKompetitor: c.celah_kompetitor,
+      // B-1.5 — derived, never stored.
+      ...trenBaseline(baseline),
+      baseline,
+    };
+  });
+
+  const aksesRows = await sql<
+    {
+      id: string;
+      channel: string;
+      akses: string;
+      status: string;
+      memblokir: boolean;
+      target_tanggal_beres: string | Date | null;
+      catatan: string;
+    }[]
+  >`select * from strategi_akses where strategi_id = ${id}
+     order by channel asc, akses asc`;
 
   const targetRows = await sql<
     {
@@ -673,6 +1275,15 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
   return {
     ...head,
     channels,
+    akses: aksesRows.map((a) => ({
+      id: Number(a.id),
+      channel: a.channel as AccessChannel,
+      akses: a.akses as AccessKind,
+      status: a.status as AccessState,
+      memblokir: a.memblokir,
+      targetTanggalBeres: dateOrNull(a.target_tanggal_beres),
+      catatan: a.catatan,
+    })),
     targets: targetRows.map((t) => ({
       channel: t.channel,
       monthIndex: t.month_index,
@@ -925,6 +1536,318 @@ export async function updateHeader(
 }
 
 // ---------------------------------------------------------------------------
+// Writes — Section A (A-05)
+// ---------------------------------------------------------------------------
+
+/** Section A input. Everything optional: a partial save is the normal case. */
+export interface KonteksInput {
+  namaBrand?: string | null;
+  kategoriUtama?: string | null;
+  subKategori?: string[];
+  modelBisnis?: BusinessModel | null;
+  marginKotorPersen?: number | null;
+  posisiHarga?: PricePosition | null;
+  usp?: string[];
+  kapasitasStok?: StockCapacity | null;
+  leadTimeRestockHari?: number | null;
+  plafonUnitPerBulan?: number | null;
+  titikKirimKota?: string | null;
+  titikKirimDetail?: string | null;
+  ekspektasiKlien?: string | null;
+  riwayatAgensi?: string | null;
+  pantanganKlien?: string[];
+  decisionMaker?: StrategiDecisionMaker[];
+  slaKlienJam?: number | null;
+  slaKlienCatatan?: string | null;
+  asetDariKlien?: string[];
+  asetCatatan?: string | null;
+}
+
+/**
+ * saveKonteks replaces Section A.
+ *
+ * A replace-in-place UPDATE, not a replace-set: Section A is filled once per
+ * Strategi (§4 "Filled once, not per channel"), so it is columns on the parent.
+ *
+ * What is validated here is SHAPE, not completeness — an enum outside its list,
+ * a percentage above 100, a decision-maker row with no name. Presence of the 16
+ * required answers is checked by `checkCompleteness` at submit, because §7 asks
+ * for autosave every 20s and §5 step 5 asks for a live count of what is still
+ * missing; both need a half-filled Section A to be storable.
+ */
+export async function saveKonteks(
+  sql: Sql,
+  actor: Actor,
+  id: string,
+  input: KonteksInput,
+): Promise<StrategiDetail> {
+  const k = normalizeKonteks(input);
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const before = await requireDraftAndWriter(tx, actor, id);
+    await tx`
+      update strategi
+         set nama_brand = ${k.namaBrand},
+             kategori_utama = ${k.kategoriUtama},
+             sub_kategori = ${k.subKategori as never},
+             model_bisnis = ${k.modelBisnis},
+             margin_kotor_persen = ${k.marginKotorPersen},
+             posisi_harga = ${k.posisiHarga},
+             usp = ${k.usp as never},
+             kapasitas_stok = ${k.kapasitasStok},
+             lead_time_restock_hari = ${k.leadTimeRestockHari},
+             plafon_unit_per_bulan = ${k.plafonUnitPerBulan},
+             titik_kirim_kota = ${k.titikKirimKota},
+             titik_kirim_detail = ${k.titikKirimDetail},
+             ekspektasi_klien = ${k.ekspektasiKlien},
+             riwayat_agensi = ${k.riwayatAgensi},
+             pantangan_klien = ${k.pantanganKlien as never},
+             decision_maker = ${k.decisionMaker.map(dmToJson) as never},
+             sla_klien_jam = ${k.slaKlienJam},
+             sla_klien_catatan = ${k.slaKlienCatatan},
+             aset_dari_klien = ${k.asetDariKlien as never},
+             aset_catatan = ${k.asetCatatan}
+       where id = ${id}`;
+    await ex.audit.insertAudit({
+      entityType: ENTITY_STRATEGI,
+      entityId: id,
+      actorEmployeeId: actor.employeeId,
+      action: 'save_konteks',
+      beforeJson: {
+        nama_brand: before.namaBrand,
+        model_bisnis: before.modelBisnis,
+        margin_kotor_persen: before.marginKotorPersen,
+        posisi_harga: before.posisiHarga,
+        usp: before.usp,
+      },
+      afterJson: {
+        nama_brand: k.namaBrand,
+        model_bisnis: k.modelBisnis,
+        margin_kotor_persen: k.marginKotorPersen,
+        posisi_harga: k.posisiHarga,
+        usp: k.usp,
+      },
+      createdBy: actor.employeeId,
+    });
+    return loadDetail(tx, await loadStrategiRow(tx, id));
+  });
+}
+
+// --- jsonb serialisers. Keys go out snake_case so the stored document reads the
+// way the wire body does; postgres.js receives the OBJECT, never a JSON string
+// (a stringified value lands as jsonb of type `string` and fails the array CHECK).
+
+function topSkuToJson(s: StrategiTopSku): Record<string, unknown> {
+  return {
+    nama: s.nama,
+    gmv: s.gmv,
+    unit_terjual: s.unitTerjual,
+    harga_jual: s.hargaJual,
+    margin_persen: s.marginPersen,
+  };
+}
+
+function keywordToJson(k: StrategiTopKeyword): Record<string, unknown> {
+  return { keyword: k.keyword, jumlah_order: k.jumlahOrder };
+}
+
+function boncosToJson(k: StrategiKampanyeBoncos): Record<string, unknown> {
+  return { nama: k.nama, spend: k.spend };
+}
+
+function kreatorToJson(k: StrategiTopKreator): Record<string, unknown> {
+  return { nama: k.nama, gmv: k.gmv };
+}
+
+function voucherToJson(v: StrategiVoucher): Record<string, unknown> {
+  return { tipe: v.tipe, nilai: v.nilai, syarat: v.syarat };
+}
+
+function kompetitorToJson(k: StrategiKompetitor): Record<string, unknown> {
+  return {
+    nama: k.nama,
+    url: k.url,
+    harga_sebanding: k.hargaSebanding,
+    estimasi_penjualan_bulan: k.estimasiPenjualanBulan,
+  };
+}
+
+function dmToJson(d: StrategiDecisionMaker): Record<string, unknown> {
+  return {
+    nama: d.nama,
+    jabatan: d.jabatan,
+    berhak_approve: d.berhakApprove,
+    jalur_eskalasi: d.jalurEskalasi,
+  };
+}
+
+function normalizeKonteks(input: KonteksInput): StrategiKonteks {
+  const persen = (v: number | null | undefined, max = 100): number | null => {
+    if (v === null || v === undefined) return null;
+    const n = Number(v);
+    if (Number.isNaN(n) || n < 0 || n > max) throw new ValidationError(MSG_INCOMPLETE);
+    return n;
+  };
+  const nonNeg = (v: number | null | undefined): number | null => {
+    if (v === null || v === undefined) return null;
+    const n = Number(v);
+    if (Number.isNaN(n) || n < 0) throw new ValidationError(MSG_INCOMPLETE);
+    return n;
+  };
+  const inSet = <T extends string>(v: unknown, set: readonly T[]): T | null => {
+    const s = nullIfBlank(v as string | null | undefined);
+    if (s === null) return null;
+    if (!(set as readonly string[]).includes(s)) throw new ValidationError(MSG_INCOMPLETE);
+    return s as T;
+  };
+  // Blank entries are dropped rather than rejected: the form shows an empty row
+  // for the next item, and autosave must not fail on it.
+  const list = (v: string[] | undefined): string[] =>
+    (v ?? []).map((s) => String(s).trim()).filter((s) => s !== '');
+
+  const aset = list(input.asetDariKlien);
+  for (const a of aset) {
+    if (!(CLIENT_ASSETS as readonly string[]).includes(a)) {
+      throw new ValidationError(MSG_INCOMPLETE);
+    }
+  }
+  // A-12: a row without a name and a role names nobody. Fully blank rows are the
+  // form's placeholder and are dropped; a half-typed one is a real mistake.
+  const dm = (input.decisionMaker ?? [])
+    .map((d) => ({
+      nama: String(d.nama ?? '').trim(),
+      jabatan: String(d.jabatan ?? '').trim(),
+      berhakApprove: d.berhakApprove === true,
+      jalurEskalasi: String(d.jalurEskalasi ?? '').trim(),
+    }))
+    .filter((d) => !(d.nama === '' && d.jabatan === '' && d.jalurEskalasi === ''));
+  for (const d of dm) {
+    if (d.nama === '' || d.jabatan === '') throw new ValidationError(MSG_INCOMPLETE);
+  }
+
+  return {
+    namaBrand: nullIfBlank(input.namaBrand),
+    kategoriUtama: nullIfBlank(input.kategoriUtama),
+    subKategori: list(input.subKategori),
+    modelBisnis: inSet(input.modelBisnis, BUSINESS_MODELS),
+    marginKotorPersen: persen(input.marginKotorPersen),
+    posisiHarga: inSet(input.posisiHarga, PRICE_POSITIONS),
+    usp: list(input.usp),
+    kapasitasStok: inSet(input.kapasitasStok, STOCK_CAPACITIES),
+    leadTimeRestockHari: nonNeg(input.leadTimeRestockHari),
+    plafonUnitPerBulan: nonNeg(input.plafonUnitPerBulan),
+    titikKirimKota: nullIfBlank(input.titikKirimKota),
+    titikKirimDetail: nullIfBlank(input.titikKirimDetail),
+    ekspektasiKlien: nullIfBlank(input.ekspektasiKlien),
+    riwayatAgensi: nullIfBlank(input.riwayatAgensi),
+    pantanganKlien: list(input.pantanganKlien),
+    decisionMaker: dm,
+    slaKlienJam: nonNeg(input.slaKlienJam),
+    slaKlienCatatan: nullIfBlank(input.slaKlienCatatan),
+    asetDariKlien: aset as ClientAsset[],
+    asetCatatan: nullIfBlank(input.asetCatatan),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Writes — A-15 / A-16 access matrix
+// ---------------------------------------------------------------------------
+
+/** A-15 row input; `memblokir` + `targetTanggalBeres` are A-16 on the same row. */
+export interface AksesInput {
+  channel: AccessChannel;
+  akses: AccessKind;
+  status: AccessState;
+  memblokir?: boolean;
+  targetTanggalBeres?: string | null;
+  catatan?: string;
+}
+
+/**
+ * saveAkses replaces the A-15 matrix.
+ *
+ * Two validations that are not shape checks:
+ *
+ * 1. A channel other than `Umum` must be one of THIS Strategi's contracted
+ *    channels. An access row against a channel nobody sells on is a blocker
+ *    nobody will ever clear, and §5 step 3 puts these rows on the SPV dashboard.
+ * 2. A blocker (A-16) must carry a target date. Without one it is a complaint;
+ *    with one it is a work item that can fall due.
+ */
+export async function saveAkses(
+  sql: Sql,
+  actor: Actor,
+  id: string,
+  rows: AksesInput[],
+): Promise<StrategiDetail> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    await requireDraftAndWriter(tx, actor, id);
+
+    const contracted = new Set(
+      (
+        await tx<{ channel: string }[]>`
+          select channel from strategi_channel where strategi_id = ${id}`
+      ).map((c) => c.channel),
+    );
+
+    const seen = new Set<string>();
+    for (const r of rows) {
+      if (
+        !(ACCESS_CHANNELS as readonly string[]).includes(r.channel) ||
+        !(ACCESS_KINDS as readonly string[]).includes(r.akses) ||
+        !(ACCESS_STATES as readonly string[]).includes(r.status)
+      ) {
+        throw new ValidationError(MSG_INCOMPLETE);
+      }
+      if (r.channel !== ACCESS_CHANNEL_UMUM && !contracted.has(r.channel)) {
+        throw new ValidationError(MSG_CHANNEL_NOT_FOUND);
+      }
+      const key = `${r.channel}:${r.akses}`;
+      if (seen.has(key)) {
+        throw new ValidationError(MSG_AKSES_DUPLICATE);
+      }
+      seen.add(key);
+      const memblokir = r.memblokir === true;
+      if (memblokir) {
+        if (r.status === 'sudah' || !RE_DATE.test((r.targetTanggalBeres ?? '').trim())) {
+          throw new ValidationError(MSG_AKSES_BLOCKER_DATE);
+        }
+      }
+      if (
+        (r.targetTanggalBeres ?? '').trim() !== '' &&
+        !RE_DATE.test((r.targetTanggalBeres ?? '').trim())
+      ) {
+        throw new ValidationError(MSG_INCOMPLETE);
+      }
+    }
+
+    await tx`delete from strategi_akses where strategi_id = ${id}`;
+    for (const r of rows) {
+      await tx`
+        insert into strategi_akses
+          (strategi_id, channel, akses, status, memblokir, target_tanggal_beres, catatan, created_by)
+        values
+          (${id}, ${r.channel}, ${r.akses}, ${r.status}, ${r.memblokir === true},
+           ${nullIfBlank(r.targetTanggalBeres)}, ${(r.catatan ?? '').trim()}, ${actor.employeeId})`;
+    }
+    await ex.audit.insertAudit({
+      entityType: ENTITY_STRATEGI,
+      entityId: id,
+      actorEmployeeId: actor.employeeId,
+      action: 'save_akses',
+      beforeJson: null,
+      afterJson: {
+        count: rows.length,
+        blocker: rows.filter((r) => r.memblokir === true).map((r) => `${r.channel}:${r.akses}`),
+      },
+      createdBy: actor.employeeId,
+    });
+    return loadDetail(tx, await loadStrategiRow(tx, id));
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Writes — child sets
 // ---------------------------------------------------------------------------
 //
@@ -954,6 +1877,61 @@ export interface ChannelInput {
   periodeAkhir?: string | null;
   alasanPeriodePendek?: string | null;
   catatanPeriodePendek?: string | null;
+
+  // Section B groups B-2 … B-9 (A-06). Optional on the wire, because a long form
+  // is saved before it is finished; required at submit for `Eksisting` channels.
+  pengunjungPerBulan?: number | null;
+  conversionRatePersen?: number | null;
+  trafikOrganikPersen?: number | null;
+  trafikIklanPersen?: number | null;
+  trafikAffiliatePersen?: number | null;
+  trafikLivePersen?: number | null;
+  trafikVideoPersen?: number | null;
+  trafikLuarPersen?: number | null;
+  entryPointUtama?: EntryPoint | null;
+  entryPointCatatan?: string | null;
+  skuListed?: number | null;
+  skuAktif?: number | null;
+  skuPareto80?: number | null;
+  topSku?: StrategiTopSku[];
+  skuSlowMoving?: number | null;
+  skuStokKritis?: string[];
+  listingLayakPersen?: number | null;
+  ratingToko?: number | null;
+  jumlahUlasan?: number | null;
+  chatResponseRatePersen?: number | null;
+  chatResponseMenit?: number | null;
+  pesananTerlambatPersen?: number | null;
+  poinPenalti?: number | null;
+  catatanPenalti?: string | null;
+  temaKeluhan?: string[];
+  tipeKampanye?: string[];
+  jumlahKampanyeAktif?: number | null;
+  topKeyword?: StrategiTopKeyword[];
+  kampanyeBoncos?: StrategiKampanyeBoncos[];
+  affiliateAktif30Hari?: number | null;
+  gmvAffiliate?: string | null;
+  gmvAffiliatePersen?: number | null;
+  komisiOpenPersen?: number | null;
+  komisiTargetPersen?: number | null;
+  topKreator?: StrategiTopKreator[];
+  programSampel?: SampleProgram | null;
+  programSampelCatatan?: string | null;
+  jumlahVideoPerBulan?: number | null;
+  totalViews?: number | null;
+  gmvVideo?: string | null;
+  jamLivePerBulan?: number | null;
+  gmvLive?: string | null;
+  hostLive?: LiveHost | null;
+  studioLive?: StudioState | null;
+  studioCatatan?: string | null;
+  voucherAktif?: StrategiVoucher[];
+  programPlatform?: string[];
+  bebanPromoPersen?: number | null;
+  kompetitor?: StrategiKompetitor[];
+  kompetitorLebihBaik?: string[];
+  kompetitorCatatan?: string | null;
+  celahKompetitor?: string | null;
 }
 
 /**
@@ -986,6 +1964,22 @@ export async function saveChannels(
            umur_toko_bulan, badge, target_tanggal_live, prasyarat_pembukaan,
            sumber_data, tanggal_ambil_data, lampiran, periode_baseline_bulan,
            periode_mulai, periode_akhir, alasan_periode_pendek, catatan_periode_pendek,
+           pengunjung_per_bulan, conversion_rate_persen,
+           trafik_organik_persen, trafik_iklan_persen, trafik_affiliate_persen,
+           trafik_live_persen, trafik_video_persen, trafik_luar_persen,
+           entry_point_utama, entry_point_catatan,
+           sku_listed, sku_aktif, sku_pareto_80, top_sku, sku_slow_moving,
+           sku_stok_kritis, listing_layak_persen,
+           rating_toko, jumlah_ulasan, chat_response_rate_persen, chat_response_menit,
+           pesanan_terlambat_persen, poin_penalti, catatan_penalti, tema_keluhan,
+           tipe_kampanye, jumlah_kampanye_aktif, top_keyword, kampanye_boncos,
+           affiliate_aktif_30hari, gmv_affiliate, gmv_affiliate_persen,
+           komisi_open_persen, komisi_target_persen, top_kreator,
+           program_sampel, program_sampel_catatan,
+           jumlah_video_per_bulan, total_views, gmv_video,
+           jam_live_per_bulan, gmv_live, host_live, studio_live, studio_catatan,
+           voucher_aktif, program_platform, beban_promo_persen,
+           kompetitor, kompetitor_lebih_baik, kompetitor_catatan, celah_kompetitor,
            created_by)
         values
           (${id}, ${c.channel}, ${nullIfBlank(c.channelLain)}, ${c.statusChannel},
@@ -996,6 +1990,35 @@ export async function saveChannels(
            ${nullIfBlank(c.lampiran)}, ${c.periodeBaselineBulan ?? null},
            ${nullIfBlank(c.periodeMulai)}, ${nullIfBlank(c.periodeAkhir)},
            ${nullIfBlank(c.alasanPeriodePendek)}, ${nullIfBlank(c.catatanPeriodePendek)},
+           ${c.pengunjungPerBulan ?? null}, ${c.conversionRatePersen ?? null},
+           ${c.trafikOrganikPersen ?? null}, ${c.trafikIklanPersen ?? null},
+           ${c.trafikAffiliatePersen ?? null}, ${c.trafikLivePersen ?? null},
+           ${c.trafikVideoPersen ?? null}, ${c.trafikLuarPersen ?? null},
+           ${nullIfBlank(c.entryPointUtama)}, ${nullIfBlank(c.entryPointCatatan)},
+           ${c.skuListed ?? null}, ${c.skuAktif ?? null}, ${c.skuPareto80 ?? null},
+           ${(c.topSku ?? []).map(topSkuToJson) as never}, ${c.skuSlowMoving ?? null},
+           ${(c.skuStokKritis ?? []) as never}, ${c.listingLayakPersen ?? null},
+           ${c.ratingToko ?? null}, ${c.jumlahUlasan ?? null},
+           ${c.chatResponseRatePersen ?? null}, ${c.chatResponseMenit ?? null},
+           ${c.pesananTerlambatPersen ?? null}, ${c.poinPenalti ?? null},
+           ${nullIfBlank(c.catatanPenalti)}, ${(c.temaKeluhan ?? []) as never},
+           ${(c.tipeKampanye ?? []) as never}, ${c.jumlahKampanyeAktif ?? null},
+           ${(c.topKeyword ?? []).map(keywordToJson) as never},
+           ${(c.kampanyeBoncos ?? []).map(boncosToJson) as never},
+           ${c.affiliateAktif30Hari ?? null}, ${c.gmvAffiliate ?? null},
+           ${c.gmvAffiliatePersen ?? null}, ${c.komisiOpenPersen ?? null},
+           ${c.komisiTargetPersen ?? null},
+           ${(c.topKreator ?? []).map(kreatorToJson) as never},
+           ${nullIfBlank(c.programSampel)}, ${nullIfBlank(c.programSampelCatatan)},
+           ${c.jumlahVideoPerBulan ?? null}, ${c.totalViews ?? null}, ${c.gmvVideo ?? null},
+           ${c.jamLivePerBulan ?? null}, ${c.gmvLive ?? null},
+           ${nullIfBlank(c.hostLive)}, ${nullIfBlank(c.studioLive)},
+           ${nullIfBlank(c.studioCatatan)},
+           ${(c.voucherAktif ?? []).map(voucherToJson) as never},
+           ${(c.programPlatform ?? []) as never}, ${c.bebanPromoPersen ?? null},
+           ${(c.kompetitor ?? []).map(kompetitorToJson) as never},
+           ${(c.kompetitorLebihBaik ?? []) as never}, ${nullIfBlank(c.kompetitorCatatan)},
+           ${nullIfBlank(c.celahKompetitor)},
            ${actor.employeeId})`;
     }
     await ex.audit.insertAudit({
@@ -1021,6 +2044,10 @@ function validateChannel(c: ChannelInput): void {
   if ((c.channel === 'Lainnya') !== ((c.channelLain ?? '').trim() !== '')) {
     throw new ValidationError(MSG_INCOMPLETE);
   }
+  // Section B shape runs for BOTH channel states: Rule 4 says `Belum Aktif`
+  // *skips* the historical baseline, not that a figure supplied anyway may be
+  // out of range. Whether those figures are REQUIRED is decided at submit.
+  validateChannelBaselineShape(c);
   if (c.statusChannel === 'Belum Aktif') {
     // Rule 4: skipping the historical baseline does not skip the launch plan.
     if (!RE_DATE.test((c.targetTanggalLive ?? '').trim())) {
@@ -1046,6 +2073,146 @@ function validateChannel(c: ChannelInput): void {
   // Rule 5a: a window below three months is allowed, but never silently.
   if (bulan < 3 && (c.alasanPeriodePendek ?? '').trim() === '') {
     throw new ValidationError(MSG_INCOMPLETE);
+  }
+}
+
+/**
+ * Section B (A-06) shape: ranges, closed taxonomies, and the one cross-field
+ * rule §7 spells out — the traffic composition adds up to 100 (±0,5).
+ *
+ * Mirrors the CHECK constraints in `20260806066000_m6a_section_b.sql`. Both
+ * exist for the reason the rest of this module gives: the CHECK is the wall (a
+ * service-role caller never passes through here), this is the BI message.
+ */
+function validateChannelBaselineShape(c: ChannelInput): void {
+  const pct = (v: number | null | undefined): void => {
+    if (v === null || v === undefined) return;
+    const n = Number(v);
+    if (Number.isNaN(n) || n < 0 || n > 100) throw new ValidationError(MSG_INCOMPLETE);
+  };
+  const nonNeg = (v: number | null | string | undefined): void => {
+    if (v === null || v === undefined || v === '') return;
+    const n = Number(v);
+    if (Number.isNaN(n) || n < 0) throw new ValidationError(MSG_INCOMPLETE);
+  };
+  const subset = (vals: string[] | undefined, set: readonly string[]): void => {
+    for (const v of vals ?? []) {
+      if (!set.includes(v)) throw new ValidationError(MSG_INCOMPLETE);
+    }
+  };
+  const enumOrNull = (v: string | null | undefined, set: readonly string[]): void => {
+    const s = (v ?? '').trim();
+    if (s !== '' && !set.includes(s)) throw new ValidationError(MSG_INCOMPLETE);
+  };
+
+  for (const v of [
+    c.conversionRatePersen,
+    c.listingLayakPersen,
+    c.chatResponseRatePersen,
+    c.pesananTerlambatPersen,
+    c.gmvAffiliatePersen,
+    c.bebanPromoPersen,
+    c.komisiOpenPersen,
+    c.komisiTargetPersen,
+  ]) {
+    pct(v);
+  }
+  for (const v of [
+    c.pengunjungPerBulan,
+    c.skuListed,
+    c.skuAktif,
+    c.skuPareto80,
+    c.skuSlowMoving,
+    c.jumlahUlasan,
+    c.chatResponseMenit,
+    c.poinPenalti,
+    c.jumlahKampanyeAktif,
+    c.affiliateAktif30Hari,
+    c.jumlahVideoPerBulan,
+    c.totalViews,
+    c.jamLivePerBulan,
+  ]) {
+    nonNeg(v);
+  }
+  nonNeg(c.gmvAffiliate);
+  nonNeg(c.gmvVideo);
+  nonNeg(c.gmvLive);
+
+  // B-4.1: platform ratings are a 0–5 scale, not a percentage.
+  if (c.ratingToko !== null && c.ratingToko !== undefined) {
+    const r = Number(c.ratingToko);
+    if (Number.isNaN(r) || r < 0 || r > 5) throw new ValidationError(MSG_INCOMPLETE);
+  }
+  // B-3.1/B-3.2: active cannot exceed listed, and the Pareto count cannot exceed
+  // active. A baseline that breaks this is a typo, and Section C will cite it.
+  if (
+    c.skuListed !== null &&
+    c.skuListed !== undefined &&
+    c.skuAktif !== null &&
+    c.skuAktif !== undefined &&
+    Number(c.skuAktif) > Number(c.skuListed)
+  ) {
+    throw new ValidationError(MSG_INCOMPLETE);
+  }
+  if (
+    c.skuAktif !== null &&
+    c.skuAktif !== undefined &&
+    c.skuPareto80 !== null &&
+    c.skuPareto80 !== undefined &&
+    Number(c.skuPareto80) > Number(c.skuAktif)
+  ) {
+    throw new ValidationError(MSG_INCOMPLETE);
+  }
+
+  enumOrNull(c.entryPointUtama, ENTRY_POINTS);
+  enumOrNull(c.programSampel, SAMPLE_PROGRAMS);
+  enumOrNull(c.hostLive, LIVE_HOSTS);
+  enumOrNull(c.studioLive, STUDIO_STATES);
+  subset(c.tipeKampanye, CAMPAIGN_TYPES);
+  subset(c.programPlatform, PLATFORM_PROGRAMS);
+  subset(c.kompetitorLebihBaik, COMPETITOR_EDGES);
+
+  // The parenthetical counts in B-3.3 ("(5)") and B-9.1 ("(3)") are read as
+  // maximums — see TOP_SKU_MAX. Over the cap is a form that let the AM keep
+  // adding rows; under it is an honest short list.
+  if ((c.topSku ?? []).length > TOP_SKU_MAX) throw new ValidationError(MSG_INCOMPLETE);
+  if ((c.kompetitor ?? []).length > KOMPETITOR_MAX) throw new ValidationError(MSG_INCOMPLETE);
+  for (const s of c.topSku ?? []) {
+    if (String(s.nama ?? '').trim() === '') throw new ValidationError(MSG_INCOMPLETE);
+    nonNeg(s.unitTerjual);
+    nonNeg(s.gmv);
+    nonNeg(s.hargaJual);
+    pct(s.marginPersen);
+  }
+  for (const k of c.kompetitor ?? []) {
+    if (String(k.nama ?? '').trim() === '') throw new ValidationError(MSG_INCOMPLETE);
+    nonNeg(k.hargaSebanding);
+    nonNeg(k.estimasiPenjualanBulan);
+  }
+  for (const v of c.voucherAktif ?? []) {
+    if (String(v.tipe ?? '').trim() === '') throw new ValidationError(MSG_INCOMPLETE);
+  }
+
+  // B-2.3 / §7: the six shares are all present or all absent, and when present
+  // they sum to 100 ±0,5. Five of six filled is a composition that cannot be
+  // summed, and letting it through means Section C stands on a partial mix.
+  const mix = [
+    c.trafikOrganikPersen,
+    c.trafikIklanPersen,
+    c.trafikAffiliatePersen,
+    c.trafikLivePersen,
+    c.trafikVideoPersen,
+    c.trafikLuarPersen,
+  ];
+  const terisi = mix.filter((v) => v !== null && v !== undefined);
+  if (terisi.length !== 0 && terisi.length !== mix.length) {
+    throw new ValidationError(MSG_TRAFFIC_MIX_SUM);
+  }
+  if (terisi.length === mix.length) {
+    const total = terisi.reduce((a, b) => Number(a) + Number(b), 0);
+    if (!(total >= 99.5 && total <= 100.5)) {
+      throw new ValidationError(MSG_TRAFFIC_MIX_SUM);
+    }
   }
 }
 
@@ -1542,10 +2709,74 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
     out.push({ kode: 'G-0', pesan: MSG_CYCLE_START_REQUIRED });
   }
 
+  // Section A (A-05). Every field is `W`; the kode names which one so the form
+  // can jump to it, and the count is what §5 step 5 puts on the submit button.
+  for (const [kode, isi] of [
+    ['A-1', head.namaBrand !== null && head.kategoriUtama !== null],
+    ['A-2', head.modelBisnis !== null],
+    ['A-3', head.marginKotorPersen !== null],
+    ['A-4', head.posisiHarga !== null],
+    ['A-6', head.kapasitasStok !== null && head.leadTimeRestockHari !== null],
+    ['A-7', head.plafonUnitPerBulan !== null],
+    ['A-8', head.titikKirimKota !== null],
+    ['A-9', head.ekspektasiKlien !== null],
+    ['A-10', head.riwayatAgensi !== null],
+    ['A-12', head.decisionMaker.length > 0],
+    ['A-13', head.slaKlienJam !== null],
+  ] as const) {
+    if (!isi) out.push({ kode, pesan: MSG_KONTEKS_INCOMPLETE });
+  }
+  // A-5 has a stated minimum, so it gets its own message rather than the generic
+  // "Section A incomplete" — "you filled two of three" is a different problem.
+  if (head.usp.length < USP_MIN) {
+    out.push({ kode: 'A-5', pesan: MSG_USP_MIN });
+  }
+  // A-11 / A-14 are `W` list fields whose honest answer may be "none", and CDPS
+  // has no way to say "none" other than an empty list — so they are NOT gated
+  // here. See DECISIONS O58: adding an explicit "tidak ada" checkbox is a field
+  // the PRD does not define, and inventing one is the more expensive mistake.
+
   const channels = await sql<
-    { id: string; channel: string; status_channel: string; periode_baseline_bulan: number | null }[]
-  >`select id, channel, status_channel, periode_baseline_bulan
-      from strategi_channel where strategi_id = ${id}`;
+    {
+      id: string;
+      channel: string;
+      status_channel: string;
+      periode_baseline_bulan: number | null;
+      pengunjung_per_bulan: number | null;
+      conversion_rate_persen: string | null;
+      trafik_organik_persen: string | null;
+      sku_listed: number | null;
+      sku_aktif: number | null;
+      sku_pareto_80: number | null;
+      top_sku: unknown;
+      sku_slow_moving: number | null;
+      listing_layak_persen: string | null;
+      rating_toko: string | null;
+      jumlah_ulasan: number | null;
+      chat_response_rate_persen: string | null;
+      chat_response_menit: number | null;
+      pesanan_terlambat_persen: string | null;
+      poin_penalti: number | null;
+      jumlah_kampanye_aktif: number | null;
+      affiliate_aktif_30hari: number | null;
+      gmv_affiliate: string | null;
+      gmv_affiliate_persen: string | null;
+      komisi_open_persen: string | null;
+      komisi_target_persen: string | null;
+      program_sampel: string | null;
+      jumlah_video_per_bulan: number | null;
+      total_views: string | null;
+      gmv_video: string | null;
+      jam_live_per_bulan: string | null;
+      gmv_live: string | null;
+      host_live: string | null;
+      studio_live: string | null;
+      beban_promo_persen: string | null;
+      kompetitor: unknown;
+      kompetitor_lebih_baik: unknown;
+      celah_kompetitor: string | null;
+    }[]
+  >`select * from strategi_channel where strategi_id = ${id} order by id asc`;
   if (channels.length === 0) {
     out.push({ kode: 'B-0', pesan: MSG_NO_CHANNEL });
   }
@@ -1559,6 +2790,19 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
       select count(*)::int as n from strategi_baseline_bulan where channel_id = ${c.id}`;
     if (got[0].n !== want || want === 0) {
       out.push({ kode: `B-1/${c.channel}`, pesan: MSG_BASELINE_INCOMPLETE });
+    }
+    out.push(...kekuranganSectionB(c));
+  }
+
+  // A-15: the checklist is per channel, and §5 step 3 makes its blockers the
+  // first thing the SPV dashboard shows — a channel with no row has not been
+  // asked the question at all. `Umum` rows do not substitute for a channel's own.
+  const aksesRows = await sql<{ channel: string }[]>`
+    select distinct channel from strategi_akses where strategi_id = ${id}`;
+  const adaAkses = new Set(aksesRows.map((a) => a.channel));
+  for (const c of channels) {
+    if (!adaAkses.has(c.channel)) {
+      out.push({ kode: `A-15/${c.channel}`, pesan: MSG_AKSES_MATRIX_REQUIRED });
     }
   }
 
@@ -1600,6 +2844,120 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
     out.push({ kode: 'H-1', pesan: MSG_RISK_MIN });
   }
 
+  return out;
+}
+
+/**
+ * Section B (A-06) completeness for ONE `Eksisting` channel — Rule 5, per group.
+ *
+ * Rule 5 draws its line at "blank is not allowed, `0` is", which is why every
+ * test below is `!== null` and never truthiness: a store with zero live hours,
+ * zero affiliates or zero penalty points has ANSWERED, and a check that treated
+ * `0` as missing would refuse the honest answer and reward a guess.
+ *
+ * `Belum Aktif` channels never reach here (Rule 4 skips the historical baseline).
+ *
+ * Which `W` list fields are gated is a decision, not an oversight: only those
+ * whose emptiness would leave a downstream rule with nothing to read — B-3.3
+ * (E-3 picks hero SKUs from it) and B-9.1/B-9.2 (C-4 compares against them).
+ * B-5.3 campaign types and B-8.1/B-8.2 vouchers & programmes are NOT gated: a
+ * channel legitimately runs no campaigns and joins no programme, and the number
+ * beside them (`jumlah_kampanye_aktif`, `beban_promo_persen`) is what proves the
+ * question was answered. See DECISIONS O58.
+ */
+function kekuranganSectionB(c: {
+  channel: string;
+  pengunjung_per_bulan: number | null;
+  conversion_rate_persen: string | null;
+  trafik_organik_persen: string | null;
+  sku_listed: number | null;
+  sku_aktif: number | null;
+  sku_pareto_80: number | null;
+  top_sku: unknown;
+  sku_slow_moving: number | null;
+  listing_layak_persen: string | null;
+  rating_toko: string | null;
+  jumlah_ulasan: number | null;
+  chat_response_rate_persen: string | null;
+  chat_response_menit: number | null;
+  pesanan_terlambat_persen: string | null;
+  poin_penalti: number | null;
+  jumlah_kampanye_aktif: number | null;
+  affiliate_aktif_30hari: number | null;
+  gmv_affiliate: string | null;
+  gmv_affiliate_persen: string | null;
+  komisi_open_persen: string | null;
+  komisi_target_persen: string | null;
+  program_sampel: string | null;
+  jumlah_video_per_bulan: number | null;
+  total_views: string | null;
+  gmv_video: string | null;
+  jam_live_per_bulan: string | null;
+  gmv_live: string | null;
+  host_live: string | null;
+  studio_live: string | null;
+  beban_promo_persen: string | null;
+  kompetitor: unknown;
+  kompetitor_lebih_baik: unknown;
+  celah_kompetitor: string | null;
+}): Kekurangan[] {
+  const out: Kekurangan[] = [];
+  const ada = (...vals: (number | string | null)[]): boolean => vals.every((v) => v !== null);
+  const grup = (kode: string, lengkap: boolean): void => {
+    if (!lengkap) out.push({ kode: `${kode}/${c.channel}`, pesan: MSG_BASELINE_GROUP_INCOMPLETE });
+  };
+
+  // B-2.3: one column stands for all six — `ck_strch_trafik_total` already makes
+  // "five of six" unstorable, so the presence of one proves the presence of all.
+  grup('B-2', ada(c.pengunjung_per_bulan, c.conversion_rate_persen, c.trafik_organik_persen));
+  grup(
+    'B-3',
+    ada(c.sku_listed, c.sku_aktif, c.sku_pareto_80, c.sku_slow_moving, c.listing_layak_persen),
+  );
+  grup(
+    'B-4',
+    ada(
+      c.rating_toko,
+      c.jumlah_ulasan,
+      c.chat_response_rate_persen,
+      c.chat_response_menit,
+      c.pesanan_terlambat_persen,
+      c.poin_penalti,
+    ),
+  );
+  grup('B-5', ada(c.jumlah_kampanye_aktif));
+  grup(
+    'B-6',
+    ada(
+      c.affiliate_aktif_30hari,
+      c.gmv_affiliate,
+      c.gmv_affiliate_persen,
+      c.komisi_open_persen,
+      c.komisi_target_persen,
+      c.program_sampel,
+    ),
+  );
+  grup(
+    'B-7',
+    ada(
+      c.jumlah_video_per_bulan,
+      c.total_views,
+      c.gmv_video,
+      c.jam_live_per_bulan,
+      c.gmv_live,
+      c.host_live,
+      c.studio_live,
+    ),
+  );
+  grup('B-8', ada(c.beban_promo_persen));
+  grup('B-9', ada(c.celah_kompetitor) && strArray(c.kompetitor_lebih_baik).length > 0);
+
+  if (objArray(c.top_sku).length === 0) {
+    out.push({ kode: `B-3.3/${c.channel}`, pesan: MSG_TOP_SKU_REQUIRED });
+  }
+  if (objArray(c.kompetitor).length === 0) {
+    out.push({ kode: `B-9.1/${c.channel}`, pesan: MSG_KOMPETITOR_REQUIRED });
+  }
   return out;
 }
 
@@ -1786,16 +3144,31 @@ export async function openRevision(
 
     const newId = await ident.nextId(ex.ident, 'STRG', now);
     const induk = head.strategiIndukId ?? head.id;
+    // INSERT … SELECT from the version being revised, overriding only what a new
+    // version changes. Section A (A-05) lives on this row, so a VALUES list would
+    // have to re-marshal all twenty of its columns — and the day one is added and
+    // not appended there, every revision would silently start with a blank
+    // Section A while every test on version 1 still passed.
     await tx`
       insert into strategi
         (id, service_id, client_id, versi_no, strategi_induk_id, versi_sebelumnya_id, status,
          durasi_kontrak_bulan, tanggal_mulai_kontrak, tanggal_akhir_kontrak,
-         tanggal_mulai_siklus, siklus_terkunci, toleransi_over_persen, created_by)
-      values
-        (${newId}, ${head.serviceId}, ${head.clientId}, ${head.versiNo + 1}, ${induk}, ${head.id},
-         ${STRATEGI_DRAFT_REVISI}, ${head.durasiKontrakBulan}, ${head.tanggalMulaiKontrak},
-         ${head.tanggalAkhirKontrak}, ${head.tanggalMulaiSiklus}, ${head.siklusTerkunci},
-         ${head.toleransiOverPersen}, ${actor.employeeId})`;
+         tanggal_mulai_siklus, siklus_terkunci, toleransi_over_persen, created_by,
+         nama_brand, kategori_utama, sub_kategori, model_bisnis, margin_kotor_persen,
+         posisi_harga, usp, kapasitas_stok, lead_time_restock_hari, plafon_unit_per_bulan,
+         titik_kirim_kota, titik_kirim_detail, ekspektasi_klien, riwayat_agensi,
+         pantangan_klien, decision_maker, sla_klien_jam, sla_klien_catatan,
+         aset_dari_klien, aset_catatan)
+      select ${newId}, service_id, client_id, versi_no + 1, ${induk}, id,
+             ${STRATEGI_DRAFT_REVISI}, durasi_kontrak_bulan, tanggal_mulai_kontrak,
+             tanggal_akhir_kontrak, tanggal_mulai_siklus, siklus_terkunci,
+             toleransi_over_persen, ${actor.employeeId},
+             nama_brand, kategori_utama, sub_kategori, model_bisnis, margin_kotor_persen,
+             posisi_harga, usp, kapasitas_stok, lead_time_restock_hari, plafon_unit_per_bulan,
+             titik_kirim_kota, titik_kirim_detail, ekspektasi_klien, riwayat_agensi,
+             pantangan_klien, decision_maker, sla_klien_jam, sla_klien_catatan,
+             aset_dari_klien, aset_catatan
+        from strategi where id = ${head.id}`;
 
     await copyChildren(tx, head.id, newId, actor.employeeId);
 
@@ -1921,13 +3294,48 @@ async function copyChildren(
       (strategi_id, channel, channel_lain, status_channel, nama_toko, url_toko,
        umur_toko_bulan, badge, target_tanggal_live, prasyarat_pembukaan, sumber_data,
        tanggal_ambil_data, lampiran, periode_baseline_bulan, periode_mulai, periode_akhir,
-       alasan_periode_pendek, catatan_periode_pendek, created_by)
+       alasan_periode_pendek, catatan_periode_pendek,
+       pengunjung_per_bulan, conversion_rate_persen, trafik_organik_persen,
+       trafik_iklan_persen, trafik_affiliate_persen, trafik_live_persen,
+       trafik_video_persen, trafik_luar_persen, entry_point_utama, entry_point_catatan,
+       sku_listed, sku_aktif, sku_pareto_80, top_sku, sku_slow_moving, sku_stok_kritis,
+       listing_layak_persen, rating_toko, jumlah_ulasan, chat_response_rate_persen,
+       chat_response_menit, pesanan_terlambat_persen, poin_penalti, catatan_penalti,
+       tema_keluhan, tipe_kampanye, jumlah_kampanye_aktif, top_keyword, kampanye_boncos,
+       affiliate_aktif_30hari, gmv_affiliate, gmv_affiliate_persen, komisi_open_persen,
+       komisi_target_persen, top_kreator, program_sampel, program_sampel_catatan,
+       jumlah_video_per_bulan, total_views, gmv_video, jam_live_per_bulan, gmv_live,
+       host_live, studio_live, studio_catatan, voucher_aktif, program_platform,
+       beban_promo_persen, kompetitor, kompetitor_lebih_baik, kompetitor_catatan,
+       celah_kompetitor, created_by)
     select ${toId}, channel, channel_lain, status_channel, nama_toko, url_toko,
            umur_toko_bulan, badge, target_tanggal_live, prasyarat_pembukaan, sumber_data,
            tanggal_ambil_data, lampiran, periode_baseline_bulan, periode_mulai, periode_akhir,
-           alasan_periode_pendek, catatan_periode_pendek, ${actorId}
+           alasan_periode_pendek, catatan_periode_pendek,
+           pengunjung_per_bulan, conversion_rate_persen, trafik_organik_persen,
+           trafik_iklan_persen, trafik_affiliate_persen, trafik_live_persen,
+           trafik_video_persen, trafik_luar_persen, entry_point_utama, entry_point_catatan,
+           sku_listed, sku_aktif, sku_pareto_80, top_sku, sku_slow_moving, sku_stok_kritis,
+           listing_layak_persen, rating_toko, jumlah_ulasan, chat_response_rate_persen,
+           chat_response_menit, pesanan_terlambat_persen, poin_penalti, catatan_penalti,
+           tema_keluhan, tipe_kampanye, jumlah_kampanye_aktif, top_keyword, kampanye_boncos,
+           affiliate_aktif_30hari, gmv_affiliate, gmv_affiliate_persen, komisi_open_persen,
+           komisi_target_persen, top_kreator, program_sampel, program_sampel_catatan,
+           jumlah_video_per_bulan, total_views, gmv_video, jam_live_per_bulan, gmv_live,
+           host_live, studio_live, studio_catatan, voucher_aktif, program_platform,
+           beban_promo_persen, kompetitor, kompetitor_lebih_baik, kompetitor_catatan,
+           celah_kompetitor, ${actorId}
       from strategi_channel where strategi_id = ${fromId} order by id asc
     returning id`;
+
+  // A-15/A-16 travel with the revision: access already granted does not have to
+  // be requested again, and an unresolved blocker is exactly the thing that must
+  // NOT disappear because a new version was opened.
+  await tx`
+    insert into strategi_akses
+      (strategi_id, channel, akses, status, memblokir, target_tanggal_beres, catatan, created_by)
+    select ${toId}, channel, akses, status, memblokir, target_tanggal_beres, catatan, ${actorId}
+      from strategi_akses where strategi_id = ${fromId}`;
 
   const oldChannels = await tx<{ id: string }[]>`
     select id from strategi_channel where strategi_id = ${fromId} order by id asc`;

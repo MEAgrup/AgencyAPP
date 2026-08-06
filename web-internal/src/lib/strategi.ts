@@ -98,6 +98,116 @@ export type ChannelState = 'Eksisting' | 'Belum Aktif';
 export type AssumptionState = 'Berlaku' | 'Gugur' | 'Terverifikasi';
 export type RiskLevel = 'rendah' | 'sedang' | 'tinggi';
 
+// --- Section A / Section B repeatable structs (stored as jsonb server-side).
+// Named interfaces, not `Record<string, unknown>[]`: the response-shape guard
+// follows a key whose type names an interface, and an anonymous bag is a shape
+// nothing verifies. Money is a string, as everywhere else on this wire.
+
+/** A-12 — who may approve at the client, and how to escalate past them. */
+export interface StrategiDecisionMaker {
+  nama: string;
+  jabatan: string;
+  berhak_approve: boolean;
+  jalur_eskalasi: string;
+}
+
+/** B-3.3 — a top SKU by GMV. At most 5 (the PRD's "(5)" read as a maximum). */
+export interface StrategiTopSku {
+  nama: string;
+  gmv: string;
+  unit_terjual: number;
+  harga_jual: string;
+  margin_persen: number;
+}
+
+/** B-5.4 — a keyword/audience that produced orders. */
+export interface StrategiTopKeyword {
+  keyword: string;
+  jumlah_order: number;
+}
+
+/** B-5.5 — spend with no orders behind it. */
+export interface StrategiKampanyeBoncos {
+  nama: string;
+  spend: string;
+}
+
+/** B-6.4 — a top creator by GMV. */
+export interface StrategiTopKreator {
+  nama: string;
+  gmv: string;
+}
+
+/** B-8.1 — an active voucher/promo. */
+export interface StrategiVoucher {
+  tipe: string;
+  nilai: string;
+  syarat: string;
+}
+
+/** B-9.1 — a competing store. At most 3. */
+export interface StrategiKompetitor {
+  nama: string;
+  url: string;
+  harga_sebanding: string;
+  estimasi_penjualan_bulan: string;
+}
+
+export type BusinessModel = 'produsen' | 'brand_owner' | 'distributor' | 'reseller';
+export type PricePosition = 'premium' | 'mid' | 'budget' | 'price_fighter';
+export type StockCapacity = 'ready_stock' | 'produksi_per_order';
+export type ClientAsset =
+  | 'foto_produk'
+  | 'video'
+  | 'sampel'
+  | 'katalog'
+  | 'budget_iklan'
+  | 'host_live';
+
+export type AccessKind =
+  | 'seller_center'
+  | 'ads_manager'
+  | 'affiliate_center'
+  | 'akun_chat'
+  | 'gudang_stok';
+export type AccessState = 'sudah' | 'pending' | 'ditolak';
+/** `Umum` is not a channel — it is where an access owned by none is recorded. */
+export type AccessChannel = Channel | 'Umum';
+
+/** A-15 + A-16 — one row per (channel, akses); the blocker is a flag on it. */
+export interface StrategiAkses {
+  id: number;
+  channel: string;
+  akses: string;
+  status: string;
+  memblokir: boolean;
+  target_tanggal_beres: string | null;
+  catatan: string;
+}
+
+export type EntryPoint = 'search' | 'feed' | 'live' | 'keranjang' | 'chat';
+export type SampleProgram = 'tidak_ada' | 'klien' | 'mea' | 'kreator';
+export type LiveHost = 'internal_klien' | 'vendor' | 'tim_mea' | 'belum_ada';
+export type StudioState = 'tersedia' | 'sebagian' | 'tidak_ada';
+export type CampaignType =
+  | 'gmv_max'
+  | 'manual_keyword'
+  | 'auto'
+  | 'live_ads'
+  | 'video_ads'
+  | 'affiliate_ads'
+  | 'lainnya';
+export type PlatformProgram =
+  | 'gratis_ongkir_xtra'
+  | 'cashback'
+  | 'campaign_seasonal'
+  | 'flash_sale'
+  | 'voucher_platform'
+  | 'lainnya';
+export type CompetitorEdge = 'harga' | 'konten' | 'ulasan' | 'iklan' | 'live' | 'bundling';
+/** B-1.5 — derived from the baseline months, never typed. */
+export type TrenState = 'naik' | 'stabil' | 'turun';
+
 export interface Strategi {
   id: string;
   service_id: string;
@@ -118,6 +228,31 @@ export interface Strategi {
   catatan_reviewer: string | null;
   created_by: string;
   created_at: string;
+  // Section A — Konteks Klien & Bisnis (A-05). Nullable: the record is born
+  // `Draft`, the form autosaves, and the submit gate is what requires the 16
+  // answers (`strategiKekurangan` returns which ones are still missing).
+  nama_brand: string | null;
+  kategori_utama: string | null;
+  sub_kategori: string[];
+  model_bisnis: string | null;
+  // A-3 / A-13 default to `Internal Saja` in the §4.1 visibility map; A-10 is
+  // hard-internal and can never be shared. The overlay that enforces it is A-10.
+  margin_kotor_persen: number | null;
+  posisi_harga: string | null;
+  usp: string[];
+  kapasitas_stok: string | null;
+  lead_time_restock_hari: number | null;
+  plafon_unit_per_bulan: number | null;
+  titik_kirim_kota: string | null;
+  titik_kirim_detail: string | null;
+  ekspektasi_klien: string | null;
+  riwayat_agensi: string | null;
+  pantangan_klien: string[];
+  decision_maker: StrategiDecisionMaker[];
+  sla_klien_jam: number | null;
+  sla_klien_catatan: string | null;
+  aset_dari_klien: string[];
+  aset_catatan: string | null;
 }
 
 /** B-1 / B-5 — one row per month of the declared baseline window (B-0.7). */
@@ -152,6 +287,68 @@ export interface StrategiChannel {
   periode_akhir: string | null;
   alasan_periode_pendek: string | null;
   catatan_periode_pendek: string | null;
+  // Section B groups B-2 … B-9 (A-06). One figure per channel; the monthly ones
+  // (B-1, B-5.1/5.2) are rows in `baseline` below.
+  pengunjung_per_bulan: number | null;
+  conversion_rate_persen: number | null;
+  // B-2.3 — six shares, all present or all absent, summing to 100 ±0,5.
+  trafik_organik_persen: number | null;
+  trafik_iklan_persen: number | null;
+  trafik_affiliate_persen: number | null;
+  trafik_live_persen: number | null;
+  trafik_video_persen: number | null;
+  trafik_luar_persen: number | null;
+  entry_point_utama: string | null;
+  entry_point_catatan: string | null;
+  sku_listed: number | null;
+  sku_aktif: number | null;
+  sku_pareto_80: number | null;
+  top_sku: StrategiTopSku[];
+  sku_slow_moving: number | null;
+  sku_stok_kritis: string[];
+  listing_layak_persen: number | null;
+  rating_toko: number | null;
+  jumlah_ulasan: number | null;
+  chat_response_rate_persen: number | null;
+  chat_response_menit: number | null;
+  pesanan_terlambat_persen: number | null;
+  poin_penalti: number | null;
+  catatan_penalti: string | null;
+  tema_keluhan: string[];
+  tipe_kampanye: string[];
+  jumlah_kampanye_aktif: number | null;
+  top_keyword: StrategiTopKeyword[];
+  kampanye_boncos: StrategiKampanyeBoncos[];
+  affiliate_aktif_30hari: number | null;
+  gmv_affiliate: string | null;
+  gmv_affiliate_persen: number | null;
+  komisi_open_persen: number | null;
+  komisi_target_persen: number | null;
+  top_kreator: StrategiTopKreator[];
+  program_sampel: string | null;
+  program_sampel_catatan: string | null;
+  jumlah_video_per_bulan: number | null;
+  total_views: number | null;
+  gmv_video: string | null;
+  jam_live_per_bulan: number | null;
+  gmv_live: string | null;
+  // B-7.2 third figure — computed server-side. Null at zero live hours: render
+  // `—`, never `0` and never an error (house rules #4 and #7).
+  gmv_per_jam_live: string | null;
+  host_live: string | null;
+  studio_live: string | null;
+  studio_catatan: string | null;
+  voucher_aktif: StrategiVoucher[];
+  program_platform: string[];
+  beban_promo_persen: number | null;
+  kompetitor: StrategiKompetitor[];
+  kompetitor_lebih_baik: string[];
+  kompetitor_catatan: string | null;
+  celah_kompetitor: string | null;
+  // B-1.5 — derived from `baseline`, never stored. `tren_persen` is null when
+  // the oldest month's GMV was 0: render `—`.
+  tren: string | null;
+  tren_persen: number | null;
   baseline: StrategiBaselineMonth[];
 }
 
@@ -233,6 +430,7 @@ export interface StrategiEvent {
 
 export interface StrategiDetail extends Strategi {
   channels: StrategiChannel[];
+  akses: StrategiAkses[];
   targets: StrategiTarget[];
   assumptions: StrategiAssumption[];
   pillars: StrategiPillar[];
@@ -269,6 +467,53 @@ export function getStrategi(id: string): Promise<StrategiDetail> {
 
 export function updateStrategiHeader(id: string, body: StrategiHeaderBody): Promise<Strategi> {
   return api.put<Strategi>(`/strategi/${id}`, body);
+}
+
+/** Section A body (A-05). Every field optional — autosave posts what it has. */
+export interface StrategiKonteksBody {
+  nama_brand?: string | null;
+  kategori_utama?: string | null;
+  sub_kategori?: string[];
+  model_bisnis?: BusinessModel | null;
+  margin_kotor_persen?: number | null;
+  posisi_harga?: PricePosition | null;
+  usp?: string[];
+  kapasitas_stok?: StockCapacity | null;
+  lead_time_restock_hari?: number | null;
+  plafon_unit_per_bulan?: number | null;
+  titik_kirim_kota?: string | null;
+  titik_kirim_detail?: string | null;
+  ekspektasi_klien?: string | null;
+  riwayat_agensi?: string | null;
+  pantangan_klien?: string[];
+  decision_maker?: StrategiDecisionMaker[];
+  sla_klien_jam?: number | null;
+  sla_klien_catatan?: string | null;
+  aset_dari_klien?: ClientAsset[];
+  aset_catatan?: string | null;
+}
+
+/** A-15 row; `memblokir` + `target_tanggal_beres` are A-16 on the same row. */
+export interface StrategiAksesBody {
+  channel: AccessChannel;
+  akses: AccessKind;
+  status: AccessState;
+  memblokir?: boolean;
+  target_tanggal_beres?: string | null;
+  catatan?: string;
+}
+
+/** Section A — filled once per Strategi, not per channel (§4). */
+export function saveStrategiKonteks(
+  id: string,
+  body: StrategiKonteksBody,
+): Promise<StrategiDetail> {
+  return api.put<StrategiDetail>(`/strategi/${id}/konteks`, body);
+}
+
+/** A-15/A-16 — the whole matrix, saved as one set. */
+export function saveStrategiAkses(id: string, akses: StrategiAksesBody[]): Promise<StrategiDetail> {
+  return api.put<StrategiDetail>(`/strategi/${id}/akses`, { akses });
 }
 
 export function saveStrategiChannels(id: string, channels: unknown[]): Promise<StrategiDetail> {
