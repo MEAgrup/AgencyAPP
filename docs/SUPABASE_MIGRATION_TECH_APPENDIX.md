@@ -170,6 +170,36 @@ supabase/migrations/*.sql | sort)` di CI tetap menerapkan urutan yang sama.
 > Diperbaiki 2026-07-30. **Untuk penyelarasan berikutnya: petakan per makna, jangan per
 > nomor** — periksa isi migrasi tujuan benar-benar membuat hal yang dibicarakan komentar.
 
+### A.7c Penyelarasan RONDE KETIGA (dieksekusi 2026-08-06)
+
+Drift yang **sama, sebab yang sama, ronde ketiga** — dan itulah temuan yang paling penting di
+sini: selama deploy masih campur (`apply_migration` untuk sebagian, `db push` untuk sisanya),
+ini akan lahir lagi setiap kali. §A.7b sudah mencatat peringatan itu; ronde ini adalah buktinya.
+
+| Lama (repo) | Baru (= versi live) | Nama |
+|---|---|---|
+| `20260805060000` | `20260805160305` | `rls_account_lead_service_scope` |
+
+Ditemukan saat menyiapkan `db push` untuk `20260806050000` (`prospect_activity_and_komisi_service`):
+`supabase_migrations.schema_migrations` di `CDPS SG` memuat `20260805160305
+rls_account_lead_service_scope`, sedangkan berkasnya di repo bernama `20260805060000`. Migrasi
+yang SAMA, nomor berbeda — dipetakan 1:1 lewat `name`, bukan lewat urutan.
+
+**Kenapa ini blocker, bukan kosmetik.** Tanpa rename, `db push` melihat `20260805060000` sebagai
+migrasi lokal yang belum ter-apply, PADAHAL DDL-nya sudah jalan di live. Lebih buruk: nomor itu
+lebih kecil daripada versi live terakhir (`20260805160305`), jadi ia **out-of-order** dan CLI
+menuntut `--include-all` — flag yang pada keadaan drift memaksa apply ulang migrasi yang sudah
+jalan, persis skenario yang §A.7 gambarkan.
+
+**Urutan lexicographic lestari:** `20260805030100` < `20260805160305` < `20260806050000`, jadi
+posisi relatifnya tidak berubah dan tidak ada migrasi lain yang bergeser. Sesudah rename, push
+berikutnya kembali ke bentuk teraman — **satu migrasi baru di ujung**, tanpa flag.
+
+**3 rujukan versi di kode/test/header migrasi diperbarui** (`packages/domain/src/account.ts`,
+`supabase/tests/rls_checks.sql`, header `20260806050000_…`); entri `DECISIONS.md` bertanggal
+2026-08-05 sengaja TIDAK ditulis ulang — ia catatan historis, dan tabel di atas penerjemahnya
+(aturan yang sama dengan §A.7).
+
 ### A.7b Penyelarasan RONDE KEDUA (dieksekusi 2026-08-05)
 
 Drift yang sama muncul lagi, sebabnya sama: empat migrasi 2026-08-03/04 di-apply ke live lewat

@@ -691,7 +691,7 @@ RESET ROLE;
 -- 35. Log aktivitas prospek (`prospect_activities`, migrasi 20260806050000).
 --     Predikatnya dibuat kembar `prospect_attempts_select`: siapa pun yang boleh
 --     melihat attempt HARUS boleh melihat effort-nya, kalau tidak panel "Log
---     Aktivitas" kosong tanpa error — persis kelas cacat yang 20260805060000
+--     Aktivitas" kosong tanpa error — persis kelas cacat yang 20260805160305
 --     tambal untuk rantai Account. Lima arah diuji: pemilik attempt LIHAT,
 --     penulis LIHAT, lead sedivisi LIHAT, sales lain TIDAK, Director LIHAT.
 -- ---------------------------------------------------------------------------

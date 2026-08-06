@@ -82,7 +82,7 @@ ALTER TABLE public.prospect_activities ENABLE ROW LEVEL SECURITY;
 -- Predikatnya SENGAJA dibuat kembar `prospect_attempts_select` (baseline §M0/M1):
 -- aktivitas adalah anak dari attempt, jadi siapa pun yang boleh melihat attempt
 -- harus boleh melihat effort-nya — kalau tidak, panel aktivitas milik SPV kosong
--- tanpa error (kelas cacat yang sama dengan 20260805060000).
+-- tanpa error (kelas cacat yang sama dengan 20260805160305).
 CREATE POLICY prospect_activities_select ON public.prospect_activities FOR SELECT TO authenticated
 USING (jwt_can_read_all()
        OR created_by = jwt_employee_id()
