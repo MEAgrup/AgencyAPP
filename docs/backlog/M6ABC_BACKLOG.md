@@ -43,6 +43,18 @@ entity_prefix registry  ──►  M6C tier + gate  ──►  M6A Strategi  ─
 | C-06 | Gerbang Brief | `guardBriefCreation` menolak tier tengah yang belum dijawab dengan pesan sendiri; `nextOnboardingStep` dapat langkah pertama `determine_plan` |
 | C-07 | Re-tier katalog live | 33 entri dipetakan dari contoh M6C §3. **Usulan, bukan keputusan pemilik** — O54 |
 
+### Sesi 2 (2026-08-06) — M6A A-02 / A-03 / A-04
+
+| # | Ticket | Isi |
+|---|---|---|
+| A-02 | `VND-` Vendor entity | Tabel `vendors` (8 field §7) + mesin `vendor` (`Aktif ⇄ Nonaktif`, keduanya → `Blacklist`, `Blacklist → Nonaktif` — sengaja BUKAN terminal). Tarif berpasangan dengan skemanya lewat CHECK: `bagi_hasil` persen, sisanya rupiah. Nama unik case-insensitive. Tulis lead Account/Direksi, baca semua (picker E-8) |
+| A-03 | `STRG` + tabel anak | `strategi` + `strategi_channel` → `strategi_baseline_bulan` (baris per `(channel, month_index)`, D11) + `strategi_target` + `strategi_assumption` + `strategi_pillar` + `strategi_resource` + `strategi_risk` + `strategi_version` (append-only). Versi = BARIS (Rule 13). **Field per Section BELUM — itu A-05…A-09** |
+| A-04 | Mesin status #15 | `Draft`/`Draft Revisi` → `Diajukan` → (`Aktif` \| kembali ke laci asalnya); `Aktif` → `Kedaluwarsa`/`Diarsipkan`. Gerbang kelengkapan (Rules 3/5/8/9/17 + minimum D-8/H-1) berjalan di transaksi yang sama dengan transisinya |
+
+Domain `packages/domain/src/{vendor,strategi}.ts`, 17 route `apps/api`, tipe FE
+`web-internal/src/lib/strategi.ts` (kontrak untuk form A-05…A-09; ia juga yang
+membuat `shape-parity` bisa memeriksa converter-nya). Walk HTTP 40/40.
+
 ## 2. BELUM — M6A Strategi (O56)
 
 Prasyarat: **`VND-` entity** (M6A §7 menyebutnya blocker: "E-8 dan F-4 tidak bisa
@@ -51,10 +63,10 @@ diimplementasi sebelum ini mendarat, jadi ia masuk batch migrasi yang SAMA denga
 
 | # | Ticket | Catatan implementasi |
 |---|---|---|
-| A-02 | `VND-` Vendor entity | 8 field per §7. Relasi `STRG_PILLAR`(type `live`) → `VND` |
-| A-03 | `STRG` + `STRG_CHANNEL` + child tables | `STRG_TARGET`, `STRG_ASSUMPTION`, `STRG_PILLAR`, `STRG_RESOURCE`, `STRG_RISK`, `STRG_VERSION`. Baseline bulanan sebagai BARIS `(channel_id, month_index)` — **bukan** kolom `m1/m2/m3` tetap, karena jendelanya variabel 1–6 bulan (D11) |
-| A-04 | Mesin status #15 | `Draft → Diajukan → (Disetujui→Aktif \| Dikembalikan→Draft)`; `Aktif → Draft Revisi`; `Aktif → Kedaluwarsa`; superseded → `Diarsipkan`. Lewat `sm_transition` saja |
-| A-05 | Section A (16 field) | Konteks klien; A-15 matriks akses (channel × akses × status) |
+| ~~A-02~~ | ~~`VND-` Vendor entity~~ | ✅ **SELESAI sesi 2** |
+| ~~A-03~~ | ~~`STRG` + child tables~~ | ✅ **SELESAI sesi 2** — bentuknya; field per Section tetap di A-05…A-09 |
+| ~~A-04~~ | ~~Mesin status #15~~ | ✅ **SELESAI sesi 2.** `Aktif → Draft Revisi` TIDAK didaftarkan — bertentangan dengan Rule 13; revisi = baris baru. Lihat DECISIONS 2026-08-06 |
+| A-05 | Section A (16 field) | Konteks klien; A-15 matriks akses (channel × akses × status). **Menempel sebagai kolom di `strategi`** — tabelnya sudah ada, jadi ini ALTER + field form, bukan desain ulang |
 | A-06 | Section B per channel (±45 field ↻) | **Blank tidak boleh, `0` boleh** (Rule 5). Setiap grup wajib angka + periode + sumber (lampiran + tanggal ambil). Jendela baseline 1–6 bulan, default 3, <3 wajib alasan (Rule 5a, CHECK DB) |
 | A-07 | Section C + validasi kutipan baseline | Rule 6: setiap akar masalah WAJIB mereferensi ≥1 field-ID baseline, divalidasi ada di Strategi yang sama |
 | A-08 | Section D + asumsi | Stretch `>=` floor di level CHECK DB. `STRG_ASSUMPTION.status ∈ Berlaku/Gugur/Terverifikasi`; flip ke `Gugur` memicu `strategi_revisi_disarankan` (**terblokir O55**) |
@@ -91,3 +103,4 @@ diimplementasi sebelum ini mendarat, jadi ia masuk batch migrasi yang SAMA denga
 | X-06 | RA-7 (tautan klien hanya versi aktif, tanpa riwayat/diff) | Yohan, sebelum client view dibangun |
 | X-07 | PA-2/PA-5 (jendela GMV manual 5 hari · force-close +7 hari) | Yulianti |
 | X-08 | PA-3 (metrik auto PE-3 belum tentu tersedia semua) | Hans — metrik yang belum ada harus jatuh ke manual **secara eksplisit**, tidak dicampur diam-diam dengan yang auto |
+| X-09 | **Tidak ada entitas CONTRACT di CDPS** — Strategi diikat ke `service_id` dan durasi/floor dideklarasi AM | Yohan / Yulianti — **O57**. Murah dibalik sekarang, mahal setelah periode Plan M6B digenerate di atasnya |

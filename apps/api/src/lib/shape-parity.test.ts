@@ -173,7 +173,7 @@ const wire = parseInterfaces(readFileSync(WIRE_TS, 'utf8'));
 const FE_FILES = [
   'account.ts', 'ads.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'kol.ts', 'leads.ts', 'livestream.ts', 'marketing.ts',
-  'performance.ts', 'portal.ts', 'sales.ts', 'tasks.ts', 'types.ts',
+  'performance.ts', 'portal.ts', 'sales.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
 ];
 
 const fe = new Map<string, Parsed>();
@@ -395,6 +395,22 @@ const WIRE_TO_FE: Record<string, string> = {
   PlanGateConfigWire: 'account.ts::PlanGateConfig',
   PlanGateContextWire: 'account.ts::PlanGateContext',
   PlanGateRecommendationWire: 'account.ts::GateRecommendation',
+  // M6A — Vendor (VND-) and Strategi (STRG-). The Section A→J form is backlog
+  // A-05…A-09; the FE types exist now because a converter with no declared FE
+  // type is a converter this guard cannot check.
+  VendorWire: 'strategi.ts::Vendor',
+  VendorDocumentWire: 'strategi.ts::VendorDocument',
+  StrategiWire: 'strategi.ts::Strategi',
+  StrategiDetailWire: 'strategi.ts::StrategiDetail',
+  StrategiChannelWire: 'strategi.ts::StrategiChannel',
+  StrategiBaselineMonthWire: 'strategi.ts::StrategiBaselineMonth',
+  StrategiTargetWire: 'strategi.ts::StrategiTarget',
+  StrategiAssumptionWire: 'strategi.ts::StrategiAssumption',
+  StrategiPillarWire: 'strategi.ts::StrategiPillar',
+  StrategiResourceWire: 'strategi.ts::StrategiResource',
+  StrategiRiskWire: 'strategi.ts::StrategiRisk',
+  StrategiEventWire: 'strategi.ts::StrategiEvent',
+  StrategiKekuranganWire: 'strategi.ts::StrategiKekurangan',
   BriefWire: 'account.ts::Brief',
   ComplaintWire: 'account.ts::Complaint',
   // M7 creative

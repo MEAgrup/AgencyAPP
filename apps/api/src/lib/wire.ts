@@ -6,7 +6,7 @@
  * other way inline in each route (`toInput`).
  */
 import { money, tz } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, campaign, client, creative, demo, directory, finance, health, kol, leads, livestream, marketing, msl, notification, performance, plangate, portal, sales, task } from '@cdps/domain';
+import type { account, activity, admin, ads, audit, auth, board, campaign, client, creative, demo, directory, finance, health, kol, leads, livestream, marketing, msl, notification, performance, plangate, portal, sales, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -2773,5 +2773,533 @@ export function assignmentSummaryFromWire(
     deadline: r.deadline ?? '',
     divisiPic: r.divisi_pic ?? '',
     hasilDiharapkan: r.hasil_diharapkan ?? '',
+  };
+}
+
+// ===========================================================================
+// Module 6A — Vendor (VND-) and Strategi (STRG-).
+// ===========================================================================
+//
+// Every field is listed explicitly, including the nulls. A MISSING key is worse
+// than a null one (CLAUDE.md): the page renders `undefined` and the reader
+// concludes the record is broken rather than empty.
+
+/** One attachment on a vendor record (§7 `dokumen`). */
+export interface VendorDocumentWire {
+  nama: string;
+  url: string;
+}
+
+/** M6A §7 / D19 — the vendor record E-8 and F-4 point at. */
+export interface VendorWire {
+  id: string;
+  nama_vendor: string;
+  jenis_layanan: string;
+  status: string;
+  pic_nama: string;
+  pic_kontak: string;
+  skema_biaya: string;
+  tarif: string | null;
+  bagi_hasil_persen: number | null;
+  catatan_kinerja: string;
+  dokumen: VendorDocumentWire[];
+  created_by: string;
+  created_at: string;
+}
+
+export function vendorToWire(v: vendor.Vendor): VendorWire {
+  return {
+    id: v.id,
+    nama_vendor: v.namaVendor,
+    jenis_layanan: v.jenisLayanan,
+    status: v.status,
+    pic_nama: v.picNama,
+    pic_kontak: v.picKontak,
+    skema_biaya: v.skemaBiaya,
+    tarif: v.tarif,
+    bagi_hasil_persen: v.bagiHasilPersen,
+    catatan_kinerja: v.catatanKinerja,
+    dokumen: v.dokumen.map((d) => ({ nama: d.nama, url: d.url })),
+    created_by: v.createdBy,
+    created_at: v.createdAt,
+  };
+}
+
+/** The Strategi header (Section J-1 + the contract window). */
+export interface StrategiWire {
+  id: string;
+  service_id: string;
+  client_id: string;
+  versi_no: number;
+  strategi_induk_id: string | null;
+  versi_sebelumnya_id: string | null;
+  status: string;
+  durasi_kontrak_bulan: number;
+  tanggal_mulai_kontrak: string;
+  tanggal_akhir_kontrak: string;
+  tanggal_mulai_siklus: string | null;
+  siklus_terkunci: boolean;
+  toleransi_over_persen: number;
+  diajukan_pada: string | null;
+  disetujui_pada: string | null;
+  disetujui_oleh: string | null;
+  catatan_reviewer: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export function strategiToWire(s: strategi.Strategi): StrategiWire {
+  return {
+    id: s.id,
+    service_id: s.serviceId,
+    client_id: s.clientId,
+    versi_no: s.versiNo,
+    strategi_induk_id: s.strategiIndukId,
+    versi_sebelumnya_id: s.versiSebelumnyaId,
+    status: s.status,
+    durasi_kontrak_bulan: s.durasiKontrakBulan,
+    tanggal_mulai_kontrak: s.tanggalMulaiKontrak,
+    tanggal_akhir_kontrak: s.tanggalAkhirKontrak,
+    tanggal_mulai_siklus: s.tanggalMulaiSiklus,
+    siklus_terkunci: s.siklusTerkunci,
+    toleransi_over_persen: s.toleransiOverPersen,
+    diajukan_pada: s.diajukanPada,
+    disetujui_pada: s.disetujuiPada,
+    disetujui_oleh: s.disetujuiOleh,
+    catatan_reviewer: s.catatanReviewer,
+    created_by: s.createdBy,
+    created_at: s.createdAt,
+  };
+}
+
+/** B-1 / B-5 — one row per month of the declared window (D11). */
+export interface StrategiBaselineMonthWire {
+  month_index: number;
+  gmv: string;
+  jumlah_pesanan: number;
+  persen_batal: number;
+  ad_spend: string;
+  roas: number;
+  acos: number;
+  aov: string | null;
+}
+
+/** Section B-0 block, with its baseline months nested. */
+export interface StrategiChannelWire {
+  id: number;
+  channel: string;
+  channel_lain: string | null;
+  status_channel: string;
+  nama_toko: string;
+  url_toko: string;
+  umur_toko_bulan: number | null;
+  badge: string | null;
+  target_tanggal_live: string | null;
+  prasyarat_pembukaan: string[];
+  sumber_data: string | null;
+  tanggal_ambil_data: string | null;
+  lampiran: string | null;
+  periode_baseline_bulan: number | null;
+  periode_mulai: string | null;
+  periode_akhir: string | null;
+  alasan_periode_pendek: string | null;
+  catatan_periode_pendek: string | null;
+  baseline: StrategiBaselineMonthWire[];
+}
+
+export interface StrategiTargetWire {
+  channel: string;
+  month_index: number;
+  metric: string;
+  nilai_floor: string | null;
+  nilai_stretch: string;
+  sumber_floor: string | null;
+}
+
+export interface StrategiAssumptionWire {
+  kode: string;
+  asumsi: string;
+  pemilik: string;
+  cara_verifikasi: string;
+  status: string;
+  target_terkait: string[];
+}
+
+export interface StrategiPillarWire {
+  id: number;
+  jenis: string;
+  channel: string | null;
+  urutan: number;
+  sku: string | null;
+  peran: string | null;
+  aksi: string;
+  target: string;
+  harga_normal: string | null;
+  harga_promo: string | null;
+  floor_price: string | null;
+  vendor_id: string | null;
+  slot_jam: number | null;
+  tarif: string | null;
+  target_gmv_per_jam: string | null;
+  detail: Record<string, unknown>;
+}
+
+export interface StrategiResourceWire {
+  id: number;
+  jenis: string;
+  channel: string | null;
+  divisi: string | null;
+  nilai: string | null;
+  jumlah: number | null;
+  satuan: string | null;
+  sumber_dana: string | null;
+  vendor_id: string | null;
+  skema_biaya: string | null;
+  catatan: string;
+}
+
+export interface StrategiRiskWire {
+  id: number;
+  risiko: string;
+  dampak: string;
+  kemungkinan: string;
+  mitigasi: string;
+  pic: string;
+  urutan: number;
+}
+
+export interface StrategiEventWire {
+  versi_no: number;
+  peristiwa: string;
+  aktor: string;
+  catatan: string | null;
+  trigger_revisi: string[];
+  alasan_revisi: string | null;
+  asumsi_gugur: string[];
+  created_at: string;
+}
+
+/** The whole record as the Section A→J form loads it. */
+export interface StrategiDetailWire extends StrategiWire {
+  channels: StrategiChannelWire[];
+  targets: StrategiTargetWire[];
+  assumptions: StrategiAssumptionWire[];
+  pillars: StrategiPillarWire[];
+  resources: StrategiResourceWire[];
+  risks: StrategiRiskWire[];
+  riwayat: StrategiEventWire[];
+}
+
+export function strategiDetailToWire(d: strategi.StrategiDetail): StrategiDetailWire {
+  return {
+    ...strategiToWire(d),
+    channels: d.channels.map((c) => ({
+      id: c.id,
+      channel: c.channel,
+      channel_lain: c.channelLain,
+      status_channel: c.statusChannel,
+      nama_toko: c.namaToko,
+      url_toko: c.urlToko,
+      umur_toko_bulan: c.umurTokoBulan,
+      badge: c.badge,
+      target_tanggal_live: c.targetTanggalLive,
+      prasyarat_pembukaan: c.prasyaratPembukaan,
+      sumber_data: c.sumberData,
+      tanggal_ambil_data: c.tanggalAmbilData,
+      lampiran: c.lampiran,
+      periode_baseline_bulan: c.periodeBaselineBulan,
+      periode_mulai: c.periodeMulai,
+      periode_akhir: c.periodeAkhir,
+      alasan_periode_pendek: c.alasanPeriodePendek,
+      catatan_periode_pendek: c.catatanPeriodePendek,
+      baseline: c.baseline.map((b) => ({
+        month_index: b.monthIndex,
+        gmv: b.gmv,
+        jumlah_pesanan: b.jumlahPesanan,
+        persen_batal: b.persenBatal,
+        ad_spend: b.adSpend,
+        roas: b.roas,
+        acos: b.acos,
+        aov: b.aov,
+      })),
+    })),
+    targets: d.targets.map((t) => ({
+      channel: t.channel,
+      month_index: t.monthIndex,
+      metric: t.metric,
+      nilai_floor: t.nilaiFloor,
+      nilai_stretch: t.nilaiStretch,
+      sumber_floor: t.sumberFloor,
+    })),
+    assumptions: d.assumptions.map((a) => ({
+      kode: a.kode,
+      asumsi: a.asumsi,
+      pemilik: a.pemilik,
+      cara_verifikasi: a.caraVerifikasi,
+      status: a.status,
+      target_terkait: a.targetTerkait,
+    })),
+    pillars: d.pillars.map((p) => ({
+      id: p.id,
+      jenis: p.jenis,
+      channel: p.channel,
+      urutan: p.urutan,
+      sku: p.sku,
+      peran: p.peran,
+      aksi: p.aksi,
+      target: p.target,
+      harga_normal: p.hargaNormal,
+      harga_promo: p.hargaPromo,
+      floor_price: p.floorPrice,
+      vendor_id: p.vendorId,
+      slot_jam: p.slotJam,
+      tarif: p.tarif,
+      target_gmv_per_jam: p.targetGmvPerJam,
+      detail: p.detail,
+    })),
+    resources: d.resources.map((r) => ({
+      id: r.id,
+      jenis: r.jenis,
+      channel: r.channel,
+      divisi: r.divisi,
+      nilai: r.nilai,
+      jumlah: r.jumlah,
+      satuan: r.satuan,
+      sumber_dana: r.sumberDana,
+      vendor_id: r.vendorId,
+      skema_biaya: r.skemaBiaya,
+      catatan: r.catatan,
+    })),
+    risks: d.risks.map((r) => ({
+      id: r.id,
+      risiko: r.risiko,
+      dampak: r.dampak,
+      kemungkinan: r.kemungkinan,
+      mitigasi: r.mitigasi,
+      pic: r.pic,
+      urutan: r.urutan,
+    })),
+    riwayat: d.riwayat.map((e) => ({
+      versi_no: e.versiNo,
+      peristiwa: e.peristiwa,
+      aktor: e.aktor,
+      catatan: e.catatan,
+      trigger_revisi: e.triggerRevisi,
+      alasan_revisi: e.alasanRevisi,
+      asumsi_gugur: e.asumsiGugur,
+      created_at: e.createdAt,
+    })),
+  };
+}
+
+/** §5 step 5 — the live "still missing" list, not a first-error message. */
+export interface StrategiKekuranganWire {
+  kode: string;
+  pesan: string;
+}
+
+export function strategiKekuranganToWire(k: strategi.Kekurangan): StrategiKekuranganWire {
+  return { kode: k.kode, pesan: k.pesan };
+}
+
+/**
+ * Inbound: the vendor write body (snake_case) → the domain input (camelCase).
+ *
+ * It lives here, not in the route, for the reason `assignmentSummaryFromWire`
+ * exists: last session a plan-gate route handed a raw wire body to a domain
+ * function that reads camelCase, every field arrived `undefined`, and a valid
+ * request was rejected with a message blaming the caller. One translation site,
+ * used by both the create and the update route.
+ *
+ * Missing fields become empty strings / nulls rather than being dropped, so the
+ * domain's own validation produces the BI message — the route never decides
+ * whether a payload is complete.
+ */
+export function vendorInputFromWire(v: unknown): vendor.VendorInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  const dokumen = Array.isArray(b.dokumen)
+    ? b.dokumen
+        .filter((d): d is Record<string, unknown> => typeof d === 'object' && d !== null)
+        .map((d) => ({ nama: String(d.nama ?? ''), url: String(d.url ?? '') }))
+    : [];
+  return {
+    namaVendor: String(b.nama_vendor ?? ''),
+    jenisLayanan: (b.jenis_layanan ?? '') as vendor.VendorService,
+    picNama: String(b.pic_nama ?? ''),
+    picKontak: String(b.pic_kontak ?? ''),
+    skemaBiaya: (b.skema_biaya ?? '') as vendor.VendorFeeScheme,
+    tarif: b.tarif === undefined || b.tarif === null ? null : String(b.tarif),
+    bagiHasilPersen:
+      b.bagi_hasil_persen === undefined || b.bagi_hasil_persen === null
+        ? null
+        : Number(b.bagi_hasil_persen),
+    catatanKinerja: String(b.catatan_kinerja ?? ''),
+    dokumen,
+  };
+}
+
+/** Inbound: the Strategi header body (§ contract window + G-0 + F-7). */
+export function strategiHeaderFromWire(v: unknown): strategi.StrategiHeaderInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    durasiKontrakBulan: Number(b.durasi_kontrak_bulan ?? 0),
+    tanggalMulaiKontrak: String(b.tanggal_mulai_kontrak ?? ''),
+    tanggalAkhirKontrak: String(b.tanggal_akhir_kontrak ?? ''),
+    tanggalMulaiSiklus:
+      b.tanggal_mulai_siklus === undefined || b.tanggal_mulai_siklus === null
+        ? null
+        : String(b.tanggal_mulai_siklus),
+    toleransiOverPersen:
+      b.toleransi_over_persen === undefined || b.toleransi_over_persen === null
+        ? null
+        : Number(b.toleransi_over_persen),
+  };
+}
+
+function asRecords(v: unknown): Record<string, unknown>[] {
+  return Array.isArray(v)
+    ? v.filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null)
+    : [];
+}
+
+function str(v: unknown): string {
+  return v === undefined || v === null ? '' : String(v);
+}
+
+function strOrNull(v: unknown): string | null {
+  return v === undefined || v === null || v === '' ? null : String(v);
+}
+
+function numOrNull(v: unknown): number | null {
+  return v === undefined || v === null || v === '' ? null : Number(v);
+}
+
+/** Inbound: Section B-0 channel blocks. */
+export function strategiChannelsFromWire(v: unknown): strategi.ChannelInput[] {
+  return asRecords(v).map((c) => ({
+    channel: str(c.channel) as strategi.Channel,
+    channelLain: strOrNull(c.channel_lain),
+    statusChannel: str(c.status_channel) as strategi.ChannelState,
+    namaToko: str(c.nama_toko),
+    urlToko: str(c.url_toko),
+    umurTokoBulan: numOrNull(c.umur_toko_bulan),
+    badge: strOrNull(c.badge),
+    targetTanggalLive: strOrNull(c.target_tanggal_live),
+    prasyaratPembukaan: Array.isArray(c.prasyarat_pembukaan)
+      ? c.prasyarat_pembukaan.map((p) => String(p))
+      : [],
+    sumberData: strOrNull(c.sumber_data),
+    tanggalAmbilData: strOrNull(c.tanggal_ambil_data),
+    lampiran: strOrNull(c.lampiran),
+    periodeBaselineBulan: numOrNull(c.periode_baseline_bulan),
+    periodeMulai: strOrNull(c.periode_mulai),
+    periodeAkhir: strOrNull(c.periode_akhir),
+    alasanPeriodePendek: strOrNull(c.alasan_periode_pendek),
+    catatanPeriodePendek: strOrNull(c.catatan_periode_pendek),
+  }));
+}
+
+/**
+ * Inbound: B-1 / B-5 monthly rows.
+ *
+ * Absent numbers are passed through as `null`, NOT coerced to 0: Rule 5 says
+ * blank is invalid and `0` is a valid answer, so silently turning one into the
+ * other would defeat the only rule this section has.
+ */
+export function strategiBaselineFromWire(v: unknown): strategi.BaselineInput[] {
+  return asRecords(v).map((m) => ({
+    monthIndex: Number(m.month_index ?? 0),
+    gmv: strOrNull(m.gmv),
+    jumlahPesanan: numOrNull(m.jumlah_pesanan),
+    persenBatal: numOrNull(m.persen_batal),
+    adSpend: strOrNull(m.ad_spend),
+    roas: numOrNull(m.roas),
+    acos: numOrNull(m.acos),
+  }));
+}
+
+/** Inbound: D-1 / D-2 / D-4 target rows. */
+export function strategiTargetsFromWire(v: unknown): strategi.TargetInput[] {
+  return asRecords(v).map((t) => ({
+    channel: str(t.channel),
+    monthIndex: Number(t.month_index ?? 0),
+    metric: str(t.metric) as strategi.TargetMetric,
+    nilaiFloor: strOrNull(t.nilai_floor),
+    nilaiStretch: str(t.nilai_stretch),
+    sumberFloor: (strOrNull(t.sumber_floor) as 'kontrak' | 'input_am' | null) ?? null,
+  }));
+}
+
+/** Inbound: D-8 / D-9 assumptions. */
+export function strategiAssumptionsFromWire(v: unknown): strategi.AssumptionInput[] {
+  return asRecords(v).map((a) => ({
+    kode: str(a.kode),
+    asumsi: str(a.asumsi),
+    pemilik: str(a.pemilik),
+    caraVerifikasi: str(a.cara_verifikasi),
+    status: (strOrNull(a.status) as strategi.AssumptionState | null) ?? undefined,
+    targetTerkait: Array.isArray(a.target_terkait) ? a.target_terkait.map((k) => String(k)) : [],
+  }));
+}
+
+/** Inbound: Section E pillars. */
+export function strategiPillarsFromWire(v: unknown): strategi.PillarInput[] {
+  return asRecords(v).map((p, i) => ({
+    jenis: str(p.jenis) as strategi.PillarKind,
+    channel: strOrNull(p.channel),
+    urutan: numOrNull(p.urutan) ?? i,
+    sku: strOrNull(p.sku),
+    peran: strOrNull(p.peran),
+    aksi: str(p.aksi),
+    target: str(p.target),
+    hargaNormal: strOrNull(p.harga_normal),
+    hargaPromo: strOrNull(p.harga_promo),
+    floorPrice: strOrNull(p.floor_price),
+    vendorId: strOrNull(p.vendor_id),
+    slotJam: numOrNull(p.slot_jam),
+    tarif: strOrNull(p.tarif),
+    targetGmvPerJam: strOrNull(p.target_gmv_per_jam),
+    detail: (typeof p.detail === 'object' && p.detail !== null ? p.detail : {}) as Record<
+      string,
+      unknown
+    >,
+  }));
+}
+
+/** Inbound: Section F resource commitments. */
+export function strategiResourcesFromWire(v: unknown): strategi.ResourceInput[] {
+  return asRecords(v).map((r) => ({
+    jenis: str(r.jenis) as strategi.ResourceKind,
+    channel: strOrNull(r.channel),
+    divisi: strOrNull(r.divisi),
+    nilai: strOrNull(r.nilai),
+    jumlah: numOrNull(r.jumlah),
+    satuan: strOrNull(r.satuan),
+    sumberDana: (strOrNull(r.sumber_dana) as 'klien' | 'paket_mea' | null) ?? null,
+    vendorId: strOrNull(r.vendor_id),
+    skemaBiaya: strOrNull(r.skema_biaya),
+    catatan: str(r.catatan),
+  }));
+}
+
+/** Inbound: H-1 risk register. */
+export function strategiRisksFromWire(v: unknown): strategi.RiskInput[] {
+  return asRecords(v).map((r, i) => ({
+    risiko: str(r.risiko),
+    dampak: str(r.dampak) as strategi.RiskLevel,
+    kemungkinan: str(r.kemungkinan) as strategi.RiskLevel,
+    mitigasi: str(r.mitigasi),
+    pic: str(r.pic),
+    urutan: numOrNull(r.urutan) ?? i,
+  }));
+}
+
+/** Inbound: the Rule 13 revision declaration (trigger + reason + broken assumptions). */
+export function strategiRevisionFromWire(v: unknown): strategi.RevisionInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    triggerRevisi: Array.isArray(b.trigger_revisi) ? b.trigger_revisi.map((t) => String(t)) : [],
+    alasanRevisi: str(b.alasan_revisi),
+    asumsiGugur: Array.isArray(b.asumsi_gugur) ? b.asumsi_gugur.map((a) => String(a)) : [],
   };
 }

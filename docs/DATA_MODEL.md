@@ -18,9 +18,9 @@
 | Service | `SVC-`* | CLI | M0→M6 | At closing, one per service line; upsell = new Service; errors via Void Service (M4-OA-5) |
 | Strategy & Plan | `STR-` | SVC | M6 | Plan-gated services, before Brief creation |
 | Plan-gate determination | (lives on SVC, PK `service_id`) | SVC 1:1 | M6C | Tier katalog `ditentukan_am`: AM menjawab form G-B sebelum Brief pertama. Menyimpan pemicu yang menyala + keputusan + arah override (`sesuai`/`tolak_plan`/`tambah_plan`) |
-| Strategi (Full Store Management) | `STRG-` | SVC | M6A | **Belum dibangun** — lihat `DECISIONS.md` O56. Section A→J, satu aktif per kontrak |
+| Strategi (Full Store Management) | `STRG-` | SVC | M6A | Dibuat AM untuk Service plan-gated. **Satu versi = satu BARIS** (Rule 13): `versi_no` + `strategi_induk_id` + `versi_sebelumnya_id`; index parsial `uq_strategi_aktif_per_service` menjamin satu `Aktif`. Anak: `strategi_channel` → `strategi_baseline_bulan` (baris per `(channel, month_index)`, D11), `strategi_target`, `strategi_assumption`, `strategi_pillar`, `strategi_resource`, `strategi_risk`, `strategi_version` (append-only). **Field Section A/C/G/I menyusul A-05…A-09.** Diikat ke `SVC` karena CDPS tidak punya entitas CONTRACT — lihat O57 |
 | Plan period | `PLAN-` | STRG (full-mgmt) atau CLI (Plan Satuan) | M6B | **Belum dibangun** — lihat `DECISIONS.md` O56. Periode anniversary-month |
-| Vendor | `VND-` | — | M6A | **Prefix terdaftar, tabel belum dibangun.** Prasyarat E-8/F-4 (live-stream vendor mode) |
+| Vendor | `VND-` | — | M6A | Master record bersama (bukan milik satu klien). Prasyarat E-8/F-4 — live stream adalah mode VENDOR (D15/Rule 18), jadi pilar `live` menunjuk `vendors` lewat FK dan tidak menarik kapasitas divisi internal. Tulis: lead Account/Direksi; baca: semua karyawan (E-8 picker). Status lewat mesin `vendor` |
 | Brief | `BRF-` | SVC | M6 | AM breaks a Service down; one Service → many Briefs across divisions |
 | Asset (Creative unit of work) | `AST-` | BRF | M7 | Brief breakdown into per-deliverable rows |
 | Ad Campaign (client-facing paid media) | `ADC-` | BRF (setup) | M8 | Distinct from M3 `CMP-`; persists across recurring strategy cycles |
