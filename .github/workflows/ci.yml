@@ -145,11 +145,16 @@ jobs:
       # logged in docs/DECISIONS.md 2026-07-29. Keep in step with the CATALOG in
       # packages/core/src/notification.ts — the notification.test.ts assertions
       # are the other half of this gate.
-      - name: Verify migration seed counts (14 machines, 17 events)
+      # 16 machines = the 14 ported from Go + `vendor` and `strategi` (mesin #15),
+      # keduanya dari migrasi M6A 20260806063000/064000. `notif_events` TETAP 17:
+      # 13 event M6A/6B/6C belum diemisikan karena katalog v2 masih menunggu
+      # tanda tangan (DECISIONS O55) — angka ini merah kalau ada yang menambah
+      # baris tanpa keputusan itu, dan itu memang gunanya.
+      - name: Verify migration seed counts (16 machines, 17 events)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
-               if (select count(*) from sm_machines) <> 14 then raise exception 'expected 14 machines'; end if;
+               if (select count(*) from sm_machines) <> 16 then raise exception 'expected 16 machines'; end if;
                if (select count(*) from notif_events) <> 17 then raise exception 'expected 17 events'; end if;
              end \$\$;"
       - name: Alpha Digital seed fixture — apply twice (idempotency) + verify
@@ -163,16 +168,21 @@ jobs:
                if (select count(*) from master_services) <> 4 then raise exception 'expected 4 master_services (3 seed + Komisi dari migrasi 20260806050000; seed not idempotent?)'; end if;
                if (select count(*) from demo_tasks) <> 1 then raise exception 'expected 1 demo_task (seed not idempotent?)'; end if;
              end \$\$;"
-      # 58 = 55 + entity_prefix (20260806060000, M6A §7 registry prefix)
+      # 68 = 58 + vendors (20260806063000, M6A §7/D19)
+      #         + strategi & 7 tabel anaknya (20260806064000, M6A A-03):
+      #           strategi · strategi_channel · strategi_baseline_bulan ·
+      #           strategi_target · strategi_assumption · strategi_pillar ·
+      #           strategi_resource · strategi_risk · strategi_version.
+      #      58 = 55 + entity_prefix (20260806060000, M6A §7 registry prefix)
       #         + plan_gate_config + service_plan_gate (20260806061000, M6C §10).
       #      55 = 54 + prospect_activities (20260806050000, keputusan pemilik 2026-08-06).
       #      54 = 53 + lead_delete_requests (20260729162101, DECISIONS 2026-07-29).
-      - name: Verify table count (expect 58)
+      - name: Verify table count (expect 68)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 58
+          test "$n" -eq 68
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND. The TS half (PREFIXES in
       # packages/core/src/ident.ts) is asserted against this table by
