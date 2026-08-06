@@ -200,3 +200,76 @@ RA-4/RA-5/RA-7 (M6A), PA-2/PA-3/PA-5 (M6B).
    bersama partial unique index §4(b).
 4. **Rule 6 belum jalan** — `planSatuanStatus` melapor `belum_tersedia` alih-alih
    berpura-pura Plan sudah dibuka.
+
+---
+
+## 8. PROMPT untuk sesi berikutnya — salin utuh
+
+> Berkas ini adalah handoff-nya: `docs/handoff/HANDOFF_M6ABC_SESI1.md`.
+> Backlog per-ticket: `docs/backlog/M6ABC_BACKLOG.md`.
+> Prompt di bawah sengaja menyuruh keduanya dibaca lebih dulu, karena separuh
+> jebakan sesi ini bukan soal kode melainkan soal urutan dan data.
+
+```
+Lanjutkan pembangunan M6A/M6B (Strategi & Plan) di CDPS.
+
+BACA DULU, urut:
+1. docs/handoff/HANDOFF_M6ABC_SESI1.md   ← posisi persis + jebakan yang sudah
+                                           memakan waktu; jangan ulangi
+2. docs/backlog/M6ABC_BACKLOG.md         ← ticket A-02…A-12 (M6A) & B-01…B-11 (M6B)
+3. docs/prd/CDPS_Module6A_Strategi.md    ← spesifikasi form Strategi, penuh
+4. docs/prd/CDPS_Module6B_Plan.md        ← spesifikasi Plan
+5. docs/DECISIONS.md, cari O54/O55/O56   ← tiga pertanyaan terbuka
+6. CLAUDE.md                             ← aturan rumah; Go/MySQL SUDAH PENSIUN,
+                                           jangan sentuh backend/
+
+KEADAAN SEKARANG (sesi lalu):
+- Gerbang M6C SELESAI dan teruji: tier katalog tiga nilai, plan_gate_config,
+  service_plan_gate + mesin rekomendasi, form G-A/G-B/G-C, eskalasi/de-eskalasi,
+  langkah onboarding `determine_plan`.
+- entity_prefix registry + tes CI SELESAI. STRG/PLAN/VND sudah terdaftar.
+- M6A dan M6B BELUM ADA. Form Strategi di halaman Service masih 6 field M6 §4,
+  bukan Section A→J. Entitas PLAN belum ada sama sekali.
+
+TUGAS: mulai dari ticket M6A A-02 (entitas VND-) lalu A-03 (STRG + child tables),
+kecuali saya bilang lain. VND adalah blocker yang M6A §7 minta masuk batch
+migrasi yang SAMA dengan STRG — jangan tunda ke belakang.
+
+BATASAN YANG TIDAK BOLEH DILANGGAR:
+- Jangan tambah baris ke notif_events. Katalog notifikasi invariant BEKU dan
+  amandemen v2 masih menunggu tanda tangan (O55). Implementasi tanpa emisi
+  event, catat apa yang belum diemisikan.
+- Format ID pakai konvensi rumah PREFIX-YYYYMM-NNNN (CLAUDE.md #1), BUKAN
+  STRG-YYYY-NNNNN seperti tertulis di PRD. Deviasi ini sudah dicatat di
+  DECISIONS.md 2026-08-06 — jangan "perbaiki" balik.
+- Riwayat immutable hidup di audit_log, bukan kolom jsonb[] tersendiri.
+- Transisi status HANYA lewat sm_transition. Mesin #15 (STRG) dan #16 (PLAN)
+  belum terdaftar — daftarkan lewat migrasi, jangan reimplementasi di TS.
+- Migrasi HANYA lewat supabase/migrations/** + supabase db push /
+  apply_migration. JANGAN psql -f (itu yang melahirkan drift O38).
+- Sebelum menambah endpoint: cek apps/api/src/lib/route-parity.test.ts.
+  KNOWN_GAPS harus tetap KOSONG.
+- Setiap response body snake_case, diterjemahkan HANYA di apps/api/src/lib/wire.ts.
+  Kunci yang HILANG lebih berbahaya daripada null — kirim null eksplisit.
+  Ini bukan teori: sesi lalu route plan-gate menyerahkan body mentah ke domain
+  dan sebuah fitur ditolak dengan pesan validasi yang menyalahkan pemanggil.
+
+VERIFIKASI YANG SAYA HARAPKAN, bukan cuma unit test:
+- npm run db:rebuild -- --yes  (update gate jumlah tabel kalau menambah tabel)
+- DATABASE_URL=... npm test --workspaces --if-present
+- npx vitest run --root web-internal      ← TERPISAH, bukan anggota workspaces
+- walk HTTP lewat route nyata (pola di handoff §5), bukan cuma memanggil domain
+- npx next build web-internal
+
+DUA JEBAKAN DARI SESI LALU — handoff §5 menjelaskannya:
+- audit_log append-only: fixture ber-id tetap membuat assertion "tepat satu
+  baris audit" lolos/gagal tergantung riwayat run.
+- portal.test.ts > management dashboard menghitung SEMUA klien, tidak
+  ber-namespace. Fixture walk yang tertinggal membuatnya merah dan terlihat
+  seperti regresi. Bersihkan fixture sebelum menyimpulkan apa pun.
+
+Kalau PRD ambigu atau dua modul bertabrakan: STOP dan catat di DECISIONS.md
+sebagai pertanyaan terbuka. Jangan diam-diam memilih tafsir.
+
+Kerjakan di branch baru dari main, commit, push. Jangan buka PR kecuali saya minta.
+```
