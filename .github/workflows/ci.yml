@@ -163,14 +163,27 @@ jobs:
                if (select count(*) from master_services) <> 4 then raise exception 'expected 4 master_services (3 seed + Komisi dari migrasi 20260806050000; seed not idempotent?)'; end if;
                if (select count(*) from demo_tasks) <> 1 then raise exception 'expected 1 demo_task (seed not idempotent?)'; end if;
              end \$\$;"
-      # 55 = 54 + prospect_activities (20260806050000, keputusan pemilik 2026-08-06).
+      # 58 = 55 + entity_prefix (20260806060000, M6A §7 registry prefix)
+      #         + plan_gate_config + service_plan_gate (20260806061000, M6C §10).
+      #      55 = 54 + prospect_activities (20260806050000, keputusan pemilik 2026-08-06).
       #      54 = 53 + lead_delete_requests (20260729162101, DECISIONS 2026-07-29).
-      - name: Verify table count (expect 55)
+      - name: Verify table count (expect 58)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 55
+          test "$n" -eq 58
+      # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
+      # 26 as-built prefixes + STRG/PLAN/VND. The TS half (PREFIXES in
+      # packages/core/src/ident.ts) is asserted against this table by
+      # packages/db/src/ident.registry.test.ts, which also scans every
+      # ID-minting call site. A count gate here catches a migration that lands
+      # without its registry row.
+      - name: Verify entity_prefix registry (expect 29)
+        run: |
+          n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc "select count(*) from entity_prefix;")
+          echo "entity_prefix rows: $n"
+          test "$n" -eq 29
       - name: Invariant — ID generator (gap-free, WIB period)
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/ident_checks.sql
       - name: Invariant — append-only history (immutability)
