@@ -82,6 +82,31 @@ describeDb('poolBoard', () => {
     const rows = await poolBoard(sql, 'ZZ-BUDI');
     expect(rows.find((r) => r.id === id)!.stale).toBe(true);
   });
+
+  // Filter pencarian pool (QA pemilik 2026-08-06). Pool tumbuh terus, jadi tanpa
+  // pencarian satu-satunya cara menemukan lead adalah menggulir seluruh papan.
+  it('filters by name/phone substring and by exact source', async () => {
+    const { lead } = await register(sql, budi(), {
+      leadName: 'Kolam Kwitang', phoneNumber: uniquePhone(), source: 'Event',
+      // M1 §9.3: Event WAJIB membawa Origin Campaign; deklarasi "di luar
+      // campaign" adalah satu-satunya cara memenuhinya tanpa link.
+      outsideCampaign: true,
+    });
+    await sql`update prospect_attempts set status = 'Closed-Lost' where lead_id = ${lead.id}`;
+    await sql`update leads set record_status = '[Pool]' where id = ${lead.id}`;
+
+    const byName = await poolBoard(sql, 'ZZ-BUDI', { q: 'Kwitang' });
+    expect(byName.some((r) => r.id === lead.id)).toBe(true);
+
+    const byMiss = await poolBoard(sql, 'ZZ-BUDI', { q: 'tidak-ada-xyz' });
+    expect(byMiss.some((r) => r.id === lead.id)).toBe(false);
+
+    const bySource = await poolBoard(sql, 'ZZ-BUDI', { source: 'Event' });
+    expect(bySource.some((r) => r.id === lead.id)).toBe(true);
+
+    const byOtherSource = await poolBoard(sql, 'ZZ-BUDI', { source: 'Scouting' });
+    expect(byOtherSource.some((r) => r.id === lead.id)).toBe(false);
+  });
 });
 
 describeDb('leadsDatabase', () => {
@@ -107,6 +132,30 @@ describeDb('leadsDatabase', () => {
     // status filter excludes an 'active' lead when asking for [Pool].
     const pool = await leadsDatabase(sql, { status: '[Pool]' });
     expect(pool.some((r) => r.id === lead.id)).toBe(false);
+  });
+
+  // Filter source + "hanya lead saya" (QA pemilik 2026-08-06): "lead ini datang
+  // dari aktivitas mana" dan "mana yang saya daftarkan sendiri".
+  it('filters by exact source', async () => {
+    const { lead } = await register(sql, budi(), {
+      leadName: 'Sumber Event', phoneNumber: uniquePhone(), source: 'Event', outsideCampaign: true,
+    });
+    expect((await leadsDatabase(sql, { source: 'Event' })).some((r) => r.id === lead.id)).toBe(true);
+    expect((await leadsDatabase(sql, { source: 'Website' })).some((r) => r.id === lead.id)).toBe(false);
+  });
+
+  it('mine narrows to leads the actor registered or holds an attempt on', async () => {
+    const { lead } = await register(sql, budi(), {
+      leadName: 'Milik Budi', phoneNumber: uniquePhone(), source: 'Scouting',
+    });
+    expect((await leadsDatabase(sql, { mineEmployeeId: 'ZZ-BUDI' })).some((r) => r.id === lead.id)).toBe(true);
+    expect((await leadsDatabase(sql, { mineEmployeeId: 'ZZ-ANDI' })).some((r) => r.id === lead.id)).toBe(false);
+
+    // Andi joins the same lead (co-pursuit, dedup v2) → it becomes his too.
+    await register(sql, andi(), {
+      leadName: 'Milik Budi', phoneNumber: lead.phoneNumber, source: 'Scouting',
+    });
+    expect((await leadsDatabase(sql, { mineEmployeeId: 'ZZ-ANDI' })).some((r) => r.id === lead.id)).toBe(true);
   });
 });
 
@@ -169,9 +218,13 @@ describe('read-scope gates (O37)', () => {
       expect(leadListScope(role('Marketing', 'lead'))).toEqual({ marketingStaffScope: false });
     });
 
-    it('admits a Sales lead but denies Sales staff (Pool is their door, not this list)', () => {
+    // Diubah 2026-08-06 (QA pemilik): Sales staff DULU ditolak di sini, yang
+    // membuat lead yang ia daftarkan sendiri tidak bisa dilihat di mana pun —
+    // lead scouted lahir `active` sehingga tidak pernah muncul di Pool. Yang
+    // membatasi barisnya tetap RLS `leads_select`, bukan gate endpoint ini.
+    it('admits Sales at every level (rows still narrowed by RLS)', () => {
       expect(leadListScope(role('Sales', 'lead'))).toEqual({ marketingStaffScope: false });
-      expect(leadListScope(role('Sales', 'staff'))).toBeNull();
+      expect(leadListScope(role('Sales', 'staff'))).toEqual({ marketingStaffScope: false });
     });
 
     it('denies an unrelated or unmapped division', () => {

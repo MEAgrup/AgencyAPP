@@ -17,6 +17,7 @@
 // from the DB; format them with lib/money.ts in the page, never here.
 
 import { api } from '@/lib/api';
+import type { ActivityRow, EffortSummary } from '@/lib/leads';
 
 export interface ServiceSelection {
   master_service_id: string;
@@ -316,4 +317,41 @@ export function closeAttempt(id: string, input: ClosingInput): Promise<ClosingRe
 // POST /attempts/{id}/lost — contract §"Endpoint BARU" #6.
 export function markLost(id: string): Promise<{ status: string }> {
   return api.post<{ status: string }>(`/attempts/${id}/lost`);
+}
+
+// ---------------------------------------------------------------------------
+// Log aktivitas prospek (ACT-) — keputusan pemilik 2026-08-06.
+//
+// Bentuk baris & taksonominya hidup di `lib/leads.ts` (ActivityRow /
+// EffortSummary / ACTIVITY_TYPES) karena halaman /leads juga membacanya; di sini
+// hanya pintu per-attempt yang dipakai workspace Sales.
+// ---------------------------------------------------------------------------
+
+// GET /attempts/{id}/activities — log + rollup effort (total & per jenis).
+export function listActivities(
+  attemptId: string,
+): Promise<{ data: ActivityRow[]; effort: EffortSummary }> {
+  return api.get<{ data: ActivityRow[]; effort: EffortSummary }>(
+    `/attempts/${attemptId}/activities`,
+  );
+}
+
+// Body POST /attempts/{id}/activities. Dideklarasikan sebagai interface bernama
+// (bukan tipe inline) supaya `body-parity.test.ts` bisa membaca kunci-kuncinya —
+// pemindainya menyelesaikan tipe variabel lewat nama interface, dan body yang
+// tak terselesaikan tidak menjaga apa pun.
+export interface LogActivityInput {
+  activity_type: string;
+  occurred_at?: string;
+  summary: string;
+}
+
+// POST /attempts/{id}/activities — `summary` WAJIB (itu inti log-nya).
+// `occurred_at` kosong berarti "sekarang". Server menolak jenis di luar
+// ACTIVITY_TYPES dan status prospek yang belum Qualified.
+export function logActivity(
+  attemptId: string,
+  input: LogActivityInput,
+): Promise<{ data: ActivityRow }> {
+  return api.post<{ data: ActivityRow }>(`/attempts/${attemptId}/activities`, input);
 }

@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { account, admin, ads, auth, board, campaign, client, creative, demo, directory, finance, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
+import { account, activity, admin, ads, auth, board, campaign, client, creative, demo, directory, finance, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -49,6 +49,7 @@ export function mapError(err: unknown): Response {
     err instanceof demo.IncompleteError ||
     err instanceof leads.IncompleteError ||
     err instanceof sales.IncompleteError ||
+    err instanceof activity.IncompleteError ||
     err instanceof sales.TooManyServicesError ||
     err instanceof sales.CustomTermRequiresNegotiationError ||
     err instanceof sales.AllocationTotalError ||
@@ -126,6 +127,7 @@ export function mapError(err: unknown): Response {
   if (
     err instanceof leads.BlockedError ||
     err instanceof sales.NotClosableError ||
+    err instanceof activity.StageError ||
     err instanceof leads.AlreadyResolvedError ||
     err instanceof finance.ContractRequiredError ||
     err instanceof finance.SchemeLockedError ||

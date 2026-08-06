@@ -684,6 +684,71 @@ DO $$ BEGIN
   THEN RAISE EXCEPTION 'RLS clients: Director must read all'; END IF;
 END $$;
 
+
+RESET ROLE;
+
+-- ---------------------------------------------------------------------------
+-- 35. Log aktivitas prospek (`prospect_activities`, migrasi 20260806050000).
+--     Predikatnya dibuat kembar `prospect_attempts_select`: siapa pun yang boleh
+--     melihat attempt HARUS boleh melihat effort-nya, kalau tidak panel "Log
+--     Aktivitas" kosong tanpa error — persis kelas cacat yang 20260805060000
+--     tambal untuk rantai Account. Lima arah diuji: pemilik attempt LIHAT,
+--     penulis LIHAT, lead sedivisi LIHAT, sales lain TIDAK, Director LIHAT.
+-- ---------------------------------------------------------------------------
+
+INSERT INTO leads (id, lead_name, phone_number, phone_norm, source, origin_division,
+                   record_status, created_by)
+VALUES ('LEAD-RLS-ACT1', 'rls fixture aktivitas', '08120000001', '8120000001', 'Scouting',
+        'Sales', 'active', 'EMP-RLS-SLS9');
+INSERT INTO prospect_attempts (id, lead_id, owner_employee_id, status, created_by)
+VALUES ('PRSP-RLS-ACT1', 'LEAD-RLS-ACT1', 'EMP-RLS-SLS9', 'Qualified', 'EMP-RLS-SLS9');
+INSERT INTO prospect_activities (id, attempt_id, lead_id, activity_type, occurred_at,
+                                 summary, created_by)
+VALUES ('ACT-RLS-0001', 'PRSP-RLS-ACT1', 'LEAD-RLS-ACT1', 'Visit', now(),
+        'visit fixture rls', 'EMP-RLS-SLS9');
+
+SET LOCAL ROLE authenticated;
+
+-- Pemilik attempt (yang juga penulisnya) melihat effort-nya sendiri.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLS9","division":"Sales","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM prospect_activities WHERE id='ACT-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS prospect_activities: attempt owner must see own activity'; END IF;
+END $$;
+
+-- Head Sales membaca effort seluruh divisinya — justru alasan fitur ini diminta.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLD9","division":"Sales","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM prospect_activities WHERE id='ACT-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS prospect_activities: Sales lead must read division effort'; END IF;
+END $$;
+
+-- Kontrol negatif 1: sales lain (bukan pemilik attempt, bukan penulis) tidak.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLS8","division":"Sales","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM prospect_activities WHERE id='ACT-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS prospect_activities: another salesperson must NOT read it'; END IF;
+END $$;
+
+-- Kontrol negatif 2: lead divisi lain tidak — arm divisi memakai origin lead-nya.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRE9","division":"Creative","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM prospect_activities WHERE id='ACT-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS prospect_activities: a lead of another division must NOT read it'; END IF;
+END $$;
+
+-- Kontrol positif: Director (oversight) selalu melihat.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-DIR","director":true}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM prospect_activities WHERE id='ACT-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS prospect_activities: Director must read all'; END IF;
+END $$;
+
 RESET ROLE;
 ROLLBACK;
 

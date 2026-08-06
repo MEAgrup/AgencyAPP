@@ -22,7 +22,13 @@ export async function GET(request: Request): Promise<Response> {
     if (!leads.canReadPool(actor)) {
       throw new leads.ForbiddenError();
     }
-    const rows = await readAsActor(actor, (sql) => leads.poolBoard(sql, actor.employeeId));
+    // Optional ?q=<name/phone>&source=<Source> — the pool grows monotonically,
+    // so finding one lead in it needs a search, not scrolling.
+    const params = new URL(request.url).searchParams;
+    const rows = await readAsActor(actor, (sql) => leads.poolBoard(sql, actor.employeeId, {
+      q: params.get('q') ?? undefined,
+      source: params.get('source') ?? undefined,
+    }));
     return json({ data: rows.map(poolRowToWire) });
   });
 }

@@ -65,7 +65,12 @@ BEGIN
     ---------------------------------------------------------------------------
     -- snapshot tables: assert both no_update + no_delete guards are installed.
     ---------------------------------------------------------------------------
-    FOREACH t IN ARRAY ARRAY['client_health_snapshots', 'performance_snapshots'] LOOP
+    -- `prospect_activities` (20260806050000) ikut di sini, bukan sebagai tabel
+    -- snapshot: ia log effort sales yang metrik "berapa banyak effort sampai
+    -- closing" dihitung darinya, jadi satu baris yang bisa diedit atau dihapus
+    -- membuat angka itu tidak lagi bisa direkonstruksi (aturan rumah #3/#4).
+    FOREACH t IN ARRAY ARRAY['client_health_snapshots', 'performance_snapshots',
+                             'prospect_activities'] LOOP
         ASSERT (
             SELECT count(*) FROM information_schema.triggers
             WHERE event_object_table = t AND action_statement LIKE '%forbid_mutation%'

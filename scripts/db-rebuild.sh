@@ -136,12 +136,12 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "54"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "55"
 check "sm_machines"      "select count(*) from sm_machines"      "14"
 check "notif_events"     "select count(*) from notif_events"     "17"
 check "employees"        "select count(*) from employees"        "10"
 check "role_mappings"    "select count(*) from role_mappings"    "12"
-check "master_services"  "select count(*) from master_services"  "3"
+check "master_services"  "select count(*) from master_services"  "4"
 check "demo_tasks"       "select count(*) from demo_tasks"       "1"
 
 echo "→ invariant SQL"

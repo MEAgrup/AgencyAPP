@@ -26,11 +26,17 @@ export async function GET(request: Request): Promise<Response> {
     if (!leads.leadListScope(actor)) {
       throw new leads.ForbiddenError();
     }
-    // web-internal passes optional ?status=<record_status>&q=<name/phone>.
+    // web-internal passes optional ?status=<record_status>&q=<name/phone>
+    // &source=<Source>&mine=1. `mine` narrows to leads the caller registered or
+    // holds an attempt on — a convenience cut, never the security boundary: RLS
+    // (`leads_select`) already decides which rows exist for this actor.
     const params = new URL(request.url).searchParams;
+    const mine = params.get('mine');
     const rows = await readAsActor(actor, (sql) => leads.leadsDatabase(sql, {
       status: params.get('status') ?? undefined,
       q: params.get('q') ?? undefined,
+      source: params.get('source') ?? undefined,
+      mineEmployeeId: mine === '1' || mine === 'true' ? actor.employeeId : undefined,
     }));
     return json({ data: rows.map(leadRowToWire) });
   });

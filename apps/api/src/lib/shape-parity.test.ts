@@ -355,6 +355,9 @@ const WIRE_TO_FE: Record<string, string> = {
   DeleteRequestQueueRowWire: 'leads.ts::DeleteRequestQueueRow',
   BulkRowResultWire: 'leads.ts::BulkRowResult',
   BulkReportWire: 'leads.ts::BulkReport',
+  // Log aktivitas prospek (ACT-) — dibaca halaman /sales/{id} dan /leads/{id}.
+  ActivityWire: 'leads.ts::ActivityRow',
+  EffortSummaryWire: 'leads.ts::EffortSummary',
   // M2 marketing / M3 campaign
   PerformanceRecordWire: 'marketing.ts::Record',
   MarketingMetricsWire: 'marketing.ts::Metrics',
