@@ -15,6 +15,7 @@ import {
   leadListScope,
   leadsDatabase,
   NotFoundError,
+  parseMineMode,
   poolBoard,
   register,
   type Actor,
@@ -156,6 +157,64 @@ describeDb('leadsDatabase', () => {
       leadName: 'Milik Budi', phoneNumber: lead.phoneNumber, source: 'Scouting',
     });
     expect((await leadsDatabase(sql, { mineEmployeeId: 'ZZ-ANDI' })).some((r) => r.id === lead.id)).toBe(true);
+  });
+
+  // Papan "Lead Saya" (keputusan pemilik 2026-08-06). Yang diuji di sini adalah
+  // hal yang membuat tab-nya berguna: lead yang DIDAFTARKAN dibedakan dari lead
+  // orang lain yang sekadar DIKERJAKAN. Kalau kedua mode mengembalikan himpunan
+  // yang sama, tab-nya cuma salinan Database dengan judul berbeda.
+  it('mineMode separates registered from claimed, and flags the role per row', async () => {
+    const { lead } = await register(sql, budi(), {
+      leadName: 'Punya Budi', phoneNumber: uniquePhone(), source: 'Scouting',
+    });
+    // Andi co-pursues: he holds an attempt, but did NOT create the record.
+    await register(sql, andi(), {
+      leadName: 'Punya Budi', phoneNumber: lead.phoneNumber, source: 'Scouting',
+    });
+
+    const budiRegistered = await leadsDatabase(sql, {
+      mineEmployeeId: 'ZZ-BUDI', mineMode: 'registered',
+    });
+    expect(budiRegistered.some((r) => r.id === lead.id)).toBe(true);
+
+    const andiRegistered = await leadsDatabase(sql, {
+      mineEmployeeId: 'ZZ-ANDI', mineMode: 'registered',
+    });
+    expect(andiRegistered.some((r) => r.id === lead.id)).toBe(false);
+
+    const andiClaimed = await leadsDatabase(sql, {
+      mineEmployeeId: 'ZZ-ANDI', mineMode: 'claimed',
+    });
+    const andiRow = andiClaimed.find((r) => r.id === lead.id);
+    expect(andiRow).toBeDefined();
+    expect(andiRow!.registeredByMe).toBe(false);
+    expect(andiRow!.claimedByMe).toBe(true);
+
+    // Budi is both: he registered it AND holds the first attempt on it.
+    const budiAny = await leadsDatabase(sql, { mineEmployeeId: 'ZZ-BUDI', mineMode: 'any' });
+    const budiRow = budiAny.find((r) => r.id === lead.id);
+    expect(budiRow!.registeredByMe).toBe(true);
+    expect(budiRow!.claimedByMe).toBe(true);
+
+    // Without a mine filter the flags are false — they describe the CALLER, and
+    // an unfiltered read has no caller to describe.
+    const unfiltered = await leadsDatabase(sql, {});
+    const plain = unfiltered.find((r) => r.id === lead.id);
+    expect(plain!.registeredByMe).toBe(false);
+    expect(plain!.claimedByMe).toBe(false);
+  });
+});
+
+describe('parseMineMode', () => {
+  it('maps the closed set and widens anything unrecognised to any', () => {
+    expect(parseMineMode('registered')).toBe('registered');
+    expect(parseMineMode('claimed')).toBe('claimed');
+    expect(parseMineMode('any')).toBe('any');
+    // '1' is what the first cut of the FE sent; it must keep meaning "either".
+    expect(parseMineMode('1')).toBe('any');
+    expect(parseMineMode('')).toBe('any');
+    expect(parseMineMode(null)).toBe('any');
+    expect(parseMineMode(undefined)).toBe('any');
   });
 });
 

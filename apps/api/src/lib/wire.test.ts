@@ -134,12 +134,16 @@ describe('leads wire mappers', () => {
       originDivision: 'Sales', originCampaignId: 'CMP-1', lastTouchCampaignId: null,
       recordStatus: 'active', winningAttemptId: null,
       createdAt: new Date('2026-07-01T00:00:00.000Z'), openAttemptCount: 1,
+      registeredByMe: true, claimedByMe: false,
     };
     expect(leadRowToWire(row)).toEqual({
       id: 'LEAD-1', lead_name: 'X', phone_number: '08', email: null, source: 'Scouting',
       origin_division: 'Sales', origin_campaign_id: 'CMP-1', last_touch_campaign_id: null,
       record_status: 'active', winning_attempt_id: null,
       created_at: '2026-07-01T00:00:00.000Z', open_attempt_count: 1,
+      // Kolom Peran tab Lead Saya — dikirim EKSPLISIT sebagai boolean, tidak
+      // pernah dihilangkan saat false (kunci hilang = kolom kosong, O43).
+      registered_by_me: true, claimed_by_me: false,
     });
   });
 

@@ -129,6 +129,8 @@ export interface LeadRowWire {
   winning_attempt_id: string | null;
   created_at: string;
   open_attempt_count: number;
+  registered_by_me: boolean;
+  claimed_by_me: boolean;
 }
 
 export function leadRowToWire(r: leads.LeadsDbRow): LeadRowWire {
@@ -145,6 +147,8 @@ export function leadRowToWire(r: leads.LeadsDbRow): LeadRowWire {
     winning_attempt_id: r.winningAttemptId,
     created_at: r.createdAt.toISOString(),
     open_attempt_count: r.openAttemptCount,
+    registered_by_me: r.registeredByMe,
+    claimed_by_me: r.claimedByMe,
   };
 }
 
@@ -157,9 +161,16 @@ export interface LeadAttemptWire {
   claimed_at: string;
 }
 
-/** Lead detail (web-internal LeadDetail): lead core + attempt contest. */
+/**
+ * Lead detail (web-internal LeadDetail): lead core + attempt contest.
+ *
+ * `registered_by_me` / `claimed_by_me` are omitted alongside the rollup: they
+ * answer "what is the CALLER's relation to this row" for the Lead Saya board's
+ * Peran column, and the detail page already renders the full attempt contest —
+ * which says who owns what by name, for everyone, not just the reader.
+ */
 export interface LeadDetailWire {
-  lead: Omit<LeadRowWire, 'open_attempt_count'>;
+  lead: Omit<LeadRowWire, 'open_attempt_count' | 'registered_by_me' | 'claimed_by_me'>;
   attempts: LeadAttemptWire[];
 }
 

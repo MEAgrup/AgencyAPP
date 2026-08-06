@@ -7,6 +7,8 @@ import { useAuth } from '@/lib/auth-context';
 import StatusBadge from '@/components/StatusBadge';
 import {
   DELETED_RECORD_STATUS,
+  MINE_MODES,
+  MINE_MODE_LABELS,
   SOURCES,
   approveLeadDelete,
   claimLead,
@@ -21,6 +23,7 @@ import {
   type BulkRowResult,
   type DeleteRequestQueueRow,
   type LeadRow,
+  type MineMode,
   type PoolRow,
 } from '@/lib/leads';
 
@@ -38,7 +41,7 @@ const RECORD_STATUSES = [
   DELETED_RECORD_STATUS,
 ];
 
-type TabKey = 'pool' | 'database' | 'import' | 'deleteQueue';
+type TabKey = 'mine' | 'pool' | 'database' | 'import' | 'deleteQueue';
 
 function formatDate(value: string | null | undefined) {
   if (!value) return '—';
@@ -51,6 +54,7 @@ function formatDateTime(value: string | null | undefined) {
 }
 
 const TAB_LABELS: Record<TabKey, string> = {
+  mine: 'Lead Saya',
   pool: 'Pool',
   database: 'Database',
   import: 'Import',
@@ -96,14 +100,21 @@ export default function LeadsPage() {
   // dan OD berlapis di atas akun Lead memang boleh meng-ACC dari scope divisinya.
   const canDecideDelete = isDirector || role?.level === 'lead';
 
+  // "Lead Saya" ikut gate yang sama dengan Database — ia memakai endpoint yang
+  // sama (`GET /leads?mine=`), hanya dengan pertanyaan yang berbeda. Ia DIDAHULUKAN
+  // karena itulah yang dicari orang saat membuka halaman ini: lead yang baru saja
+  // ia daftarkan, bukan seluruh database.
+  const canSeeMine = canSeeDatabase;
+
   const visibleTabs = useMemo(() => {
     const tabs: TabKey[] = [];
+    if (canSeeMine) tabs.push('mine');
     if (canSeePool) tabs.push('pool');
     if (canSeeDatabase) tabs.push('database');
     if (canSeeImport) tabs.push('import');
     if (canSeeDeleteQueue) tabs.push('deleteQueue');
     return tabs;
-  }, [canSeePool, canSeeDatabase, canSeeImport, canSeeDeleteQueue]);
+  }, [canSeeMine, canSeePool, canSeeDatabase, canSeeImport, canSeeDeleteQueue]);
 
   const [activeTab, setActiveTab] = useState<TabKey | null>(null);
 
@@ -144,20 +155,258 @@ export default function LeadsPage() {
         </div>
       )}
 
+      {activeTab === 'mine' && (
+        <MineTab canRequestDelete={isDirector || (role?.division ?? '') !== ''} />
+      )}
       {activeTab === 'pool' && <PoolTab canClaim={canClaim} />}
       {/* canRequestDelete mencerminkan permission.canWrite: Director selalu, sisanya
           butuh scope divisi (OD murni tanpa divisi tidak bisa menulis). */}
       {activeTab === 'database' && (
-        <DatabaseTab
-          canRequestDelete={isDirector || (role?.division ?? '') !== ''}
-          defaultMine={Boolean(isSales && role?.level === 'staff')}
-        />
+        <DatabaseTab canRequestDelete={isDirector || (role?.division ?? '') !== ''} />
       )}
       {activeTab === 'import' && <ImportTab />}
       {activeTab === 'deleteQueue' && (
         <DeleteQueueTab canDecide={canDecideDelete} division={role?.division ?? ''} isDirector={isDirector} />
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Lead Saya tab (keputusan pemilik 2026-08-06)
+//
+// Tampilan TERPISAH dari Database untuk lead yang aktor sendiri daftarkan. Ia
+// memakai endpoint yang sama (`GET /leads?mine=`), jadi tidak ada aturan kedua
+// yang bisa menyimpang dari Database — yang berbeda hanya pertanyaannya.
+//
+// Kenapa ada pilihan mode dan bukan satu daftar: "lead saya" punya DUA arti di
+// M1 dan menggabungkannya menyembunyikan pekerjaan. Lead yang didaftarkan
+// sendiri (§4, scouted, eksklusif) bukan hal yang sama dengan lead pool yang
+// diklaim (§6, boleh diperebutkan). Default `registered` = permintaan harfiah
+// pemilik; dua mode lain ada supaya lead hasil klaim tidak jadi hilang dari
+// pandangan seperti masalah yang tab ini perbaiki.
+// ---------------------------------------------------------------------------
+
+function MineTab({ canRequestDelete }: { canRequestDelete: boolean }) {
+  const [rows, setRows] = useState<LeadRow[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [mode, setMode] = useState<MineMode>('registered');
+  const [qInput, setQInput] = useState('');
+  const [sourceInput, setSourceInput] = useState('');
+  const [appliedQ, setAppliedQ] = useState('');
+  const [appliedSource, setAppliedSource] = useState('');
+
+  // Pengajuan hapus inline — sama persis dengan tab Database (alasan wajib).
+  const [openFor, setOpenFor] = useState<string | null>(null);
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteNotice, setDeleteNotice] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await listLeads({
+        mine: mode,
+        q: appliedQ || undefined,
+        source: appliedSource || undefined,
+      });
+      setRows(res.data);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [mode, appliedQ, appliedSource]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  function applyFilters(e: FormEvent) {
+    e.preventDefault();
+    setAppliedQ(qInput.trim());
+    setAppliedSource(sourceInput);
+  }
+
+  async function submitDeleteRequest(e: FormEvent, leadId: string) {
+    e.preventDefault();
+    setDeleteError(null);
+    setDeleteNotice(null);
+    setSubmitting(true);
+    try {
+      await requestLeadDelete(leadId, reason);
+      setDeleteNotice(`Permintaan hapus ${leadId} diajukan — menunggu ACC Head.`);
+      setOpenFor(null);
+      setReason('');
+    } catch (err) {
+      setDeleteError(errorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="cardHeader">
+        <h2>Lead Saya</h2>
+        {rows && (
+          <span className="muted" style={{ fontSize: 13 }}>
+            {rows.length} lead
+          </span>
+        )}
+      </div>
+      <p className="muted" style={{ fontSize: 13 }}>
+        Semua lead yang Anda daftarkan sendiri &mdash; termasuk yang sudah berjalan ke Contacted,
+        Qualified, atau closing. Lead scouting bersifat eksklusif (tidak masuk pool, tidak bisa
+        diklaim sales lain).
+      </p>
+
+      <form className="formRow" onSubmit={applyFilters}>
+        <div className="field">
+          <label htmlFor="mine-mode">Kepemilikan</label>
+          <select id="mine-mode" value={mode} onChange={(e) => setMode(e.target.value as MineMode)}>
+            {MINE_MODES.map((m) => (
+              <option key={m} value={m}>
+                {MINE_MODE_LABELS[m]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="mine-q">Cari (Nama/Telepon)</label>
+          <input id="mine-q" value={qInput} onChange={(e) => setQInput(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor="mine-source">Source (aktivitas asal)</label>
+          <select id="mine-source" value={sourceInput} onChange={(e) => setSourceInput(e.target.value)}>
+            <option value="">Semua</option>
+            {SOURCES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field" style={{ justifyContent: 'flex-end' }}>
+          <label>&nbsp;</label>
+          <button type="submit" className="btn btnSecondary btnSm">
+            Terapkan
+          </button>
+        </div>
+      </form>
+
+      {deleteError && <div className="alert alertError" role="alert">{deleteError}</div>}
+      {deleteNotice && <div className="alert alertSuccess" role="status">{deleteNotice}</div>}
+      {loading && <p className="muted">Memuat...</p>}
+      {error && <div className="alert alertError" role="alert">{error}</div>}
+      {!loading && !error && rows && rows.length === 0 && (
+        <div className="emptyState">
+          Belum ada lead di sini. Daftarkan lead baru dari <Link href="/sales">Sales Workspace</Link>.
+        </div>
+      )}
+      {!loading && !error && rows && rows.length > 0 && (
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Nama Lead</th>
+                <th>Telepon</th>
+                <th>Source</th>
+                <th>Campaign</th>
+                <th>Peran</th>
+                <th>Status</th>
+                <th>Kontes</th>
+                <th>Didaftarkan</th>
+                {canRequestDelete && <th></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.flatMap((r) => {
+                // Cermin decideDeleteRequest, sama dengan tab Database.
+                const deletable =
+                  r.record_status !== '[Closed-Success]' &&
+                  (r.winning_attempt_id ?? '') === '' &&
+                  r.record_status !== DELETED_RECORD_STATUS;
+                const peran = [
+                  r.registered_by_me ? 'Didaftarkan' : '',
+                  r.claimed_by_me ? 'Dikerjakan' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' + ');
+                return [
+                  <tr key={r.id}>
+                    <td>
+                      <Link href={`/leads/${r.id}`}>{r.id}</Link>
+                    </td>
+                    <td>{r.lead_name}</td>
+                    <td>{r.phone_number}</td>
+                    <td>{r.source}</td>
+                    <td>{r.origin_campaign_id || '—'}</td>
+                    <td>{peran || '—'}</td>
+                    <td>
+                      <StatusBadge status={r.record_status} />
+                    </td>
+                    <td>{r.open_attempt_count}</td>
+                    <td>{formatDate(r.created_at)}</td>
+                    {canRequestDelete && (
+                      <td>
+                        {deletable && (
+                          <button
+                            type="button"
+                            className="btn btnSecondary btnSm"
+                            onClick={() => {
+                              setDeleteError(null);
+                              setDeleteNotice(null);
+                              setReason('');
+                              setOpenFor(openFor === r.id ? null : r.id);
+                            }}
+                          >
+                            {openFor === r.id ? 'Batal' : 'Ajukan Hapus'}
+                          </button>
+                        )}
+                      </td>
+                    )}
+                  </tr>,
+                  ...(canRequestDelete && openFor === r.id
+                    ? [
+                        <tr key={`${r.id}-delete-form`}>
+                          <td colSpan={10}>
+                            <form className="formRow" onSubmit={(e) => submitDeleteRequest(e, r.id)}>
+                              <div className="field" style={{ flex: 1 }}>
+                                <label htmlFor={`mine-reason-${r.id}`}>
+                                  Alasan hapus {r.id} (wajib)
+                                </label>
+                                <input
+                                  id={`mine-reason-${r.id}`}
+                                  required
+                                  value={reason}
+                                  onChange={(e) => setReason(e.target.value)}
+                                  placeholder="mis. lead uji coba, duplikat salah input"
+                                />
+                              </div>
+                              <div className="field" style={{ justifyContent: 'flex-end' }}>
+                                <label>&nbsp;</label>
+                                <button type="submit" className="btn btnPrimary btnSm" disabled={submitting}>
+                                  {submitting ? 'Memproses...' : 'Kirim Pengajuan'}
+                                </button>
+                              </div>
+                            </form>
+                          </td>
+                        </tr>,
+                      ]
+                    : []),
+                ];
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -325,13 +574,7 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
 // Database tab
 // ---------------------------------------------------------------------------
 
-function DatabaseTab({
-  canRequestDelete,
-  defaultMine,
-}: {
-  canRequestDelete: boolean;
-  defaultMine: boolean;
-}) {
+function DatabaseTab({ canRequestDelete }: { canRequestDelete: boolean }) {
   const [rows, setRows] = useState<LeadRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -347,14 +590,9 @@ function DatabaseTab({
   const [qInput, setQInput] = useState('');
   const [statusInput, setStatusInput] = useState('');
   const [sourceInput, setSourceInput] = useState('');
-  // Default-ON untuk Sales staff: yang ia cari saat membuka tab ini adalah lead
-  // yang IA daftarkan. Untuk Lead/OD/Director default OFF — mereka memang
-  // membaca seluruh divisi, dan menyembunyikannya diam-diam akan menipu.
-  const [mineInput, setMineInput] = useState(defaultMine);
   const [appliedQ, setAppliedQ] = useState('');
   const [appliedStatus, setAppliedStatus] = useState('');
   const [appliedSource, setAppliedSource] = useState('');
-  const [appliedMine, setAppliedMine] = useState(defaultMine);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -364,7 +602,6 @@ function DatabaseTab({
         status: appliedStatus || undefined,
         q: appliedQ || undefined,
         source: appliedSource || undefined,
-        mine: appliedMine || undefined,
       });
       setRows(res.data);
     } catch (err) {
@@ -372,7 +609,7 @@ function DatabaseTab({
     } finally {
       setLoading(false);
     }
-  }, [appliedStatus, appliedQ, appliedSource, appliedMine]);
+  }, [appliedStatus, appliedQ, appliedSource]);
 
   useEffect(() => {
     load();
@@ -383,7 +620,6 @@ function DatabaseTab({
     setAppliedQ(qInput.trim());
     setAppliedStatus(statusInput);
     setAppliedSource(sourceInput);
-    setAppliedMine(mineInput);
   }
 
   async function submitDeleteRequest(e: FormEvent, leadId: string) {
@@ -435,18 +671,6 @@ function DatabaseTab({
             ))}
           </select>
         </div>
-        <div className="field">
-          <label htmlFor="db-mine">Kepemilikan</label>
-          <label htmlFor="db-mine" className="muted" style={{ fontSize: 13, display: 'flex', gap: 6 }}>
-            <input
-              id="db-mine"
-              type="checkbox"
-              checked={mineInput}
-              onChange={(e) => setMineInput(e.target.checked)}
-            />
-            Hanya lead saya
-          </label>
-        </div>
         <div className="field" style={{ justifyContent: 'flex-end' }}>
           <label>&nbsp;</label>
           <button type="submit" className="btn btnSecondary btnSm">
@@ -455,8 +679,8 @@ function DatabaseTab({
         </div>
       </form>
       <p className="muted" style={{ fontSize: 12 }}>
-        &ldquo;Hanya lead saya&rdquo; = lead yang Anda daftarkan atau yang Anda pegang prospeknya. Baris yang
-        bisa Anda baca tetap ditentukan server (staff = data sendiri).
+        Baris yang bisa Anda baca ditentukan server (staff = data sendiri). Untuk melihat khusus lead
+        Anda sendiri, buka tab <strong>Lead Saya</strong>.
       </p>
 
       {deleteError && <div className="alert alertError" role="alert">{deleteError}</div>}
