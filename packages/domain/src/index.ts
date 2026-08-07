@@ -90,6 +90,7 @@ export * as finance from './finance';
 export * as client from './client';
 export * as account from './account';
 export * as plangate from './plangate';
+export * as contract from './contract';
 export * as vendor from './vendor';
 export * as strategi from './strategi';
 export * as task from './task';

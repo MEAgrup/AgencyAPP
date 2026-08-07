@@ -3,8 +3,30 @@
 > Dibuat 2026-08-06 dari QA halaman `/account/services/SVC-202608-0002`.
 > PRD: `docs/prd/CDPS_Module6A_Strategi.md`, `…6B_Plan.md`, `…6C_Plan_Gate_Satuan.md`.
 > Keputusan & deviasi: `docs/DECISIONS.md` 2026-08-06 + 2026-08-07.
-> **O54, O55, O58 SELESAI** (2026-08-07). **O57 sudah diputus, belum dieksekusi**
-> — rancangannya di `docs/handoff/HANDOFF_M6ABC_SESI5.md` §4. **O56 masih terbuka.**
+> **O54, O55, O57, O58 SELESAI** (2026-08-07). **O56 sudah dijawab pemilik
+> 2026-08-07: ronde berikutnya adalah CACAT 🔴 (O52/O51/O42) lebih dulu, bukan
+> M6A A-13 maupun M6B B-01.**
+
+## 0a. Papan skor (per 2026-08-07, sesudah B-00)
+
+Hitungan tiket, bukan effort — A-13 sendirian lebih besar dari A-05…A-07 digabung.
+
+| Bagian | Selesai | Total | % |
+|---|---|---|---|
+| **M6A Strategi** | A-00…A-07 = **8** | 14 | **57%** |
+| **M6B Plan** | B-00 = **1** | 12 | **8%** |
+| M6C Plan Gate | C-01…C-07 = 7 | 8 (B-10 menutup Rule 6) | 88% |
+| **M6A+M6B gabungan** | **9** | 26 | **35%** |
+
+Yang membuat angka M6A menyesatkan kalau dibaca sendirian:
+
+- **Lapisan data+domain M6A ≈ 70%** — 16 tabel, mesin #15, 137 test domain hijau.
+- **Lapisan UI M6A = 0%.** Tidak ada satu pun halaman `strategi`/`STRG`. Halaman
+  `account/strategies/[id]` yang ada adalah entitas **lama** M6 §4
+  (`strategy_plan`/`STR`, PR #37) — bukan entitas ini. Jangan tertipu namanya.
+- **Section A→J: 3 dari 10 mendarat** (A ✅ B ✅ C ✅ · D…J = A-08/A-09).
+- **M6B nol tabel `PLAN`** — `plan_gate_config` milik M6C, bukan M6B. Mesin #16
+  belum ada.
 
 ## 0. Kenapa urutannya begini
 
@@ -69,6 +91,25 @@ interface struct baru di `wire.ts` + tipe FE-nya, gerbang submit diperluas
 (Section A per field-ID, A-15 per channel, B-2…B-9 per channel). Walk HTTP 42/42.
 Gate tabel 68 → **69** di KEDUA berkas. Pertanyaan terbuka baru: **O58**.
 
+### Sesi 4 (2026-08-07) — M6A A-07
+
+| # | Ticket | Isi |
+|---|---|---|
+| A-07 | Section C (Diagnosa & Akar Masalah) | `strategi_diagnosa`: `bottleneck` enum tertutup, `field_ids` array jsonb, `akar_masalah`/`gap_kompetitor` non-kosong dijaga CHECK. Rule 6 ditegakkan atas **set tertutup** `VALID_BASELINE_FIELD_IDS` — kutipan ke field-ID yang tidak dikenal ditolak, bukan hanya "≥1 kutipan" |
+
+### Sesi 5–6 (2026-08-07) — B-00 + penutupan drift migrasi
+
+| # | Ticket | Isi |
+|---|---|---|
+| B-00 | Entitas `CONTRACT` (O57) | Lihat §3. Prasyarat keras M6B B-01 — satu-satunya tiket M6B yang selesai |
+
+Sesi 5 juga menerapkan **11 migrasi tertunda** ke live `CDPS SG` (drift O38 ronde 3
+ditutup) dan mengeksekusi O54/O55/O58. Sesi 6 memverifikasi live ≡ repo lewat
+**sidik jari struktural** (133 fakta: kolom, constraint, indeks, RLS policy,
+definisi fungsi, trigger) — `4e2580fd4a47bec0f05777dd2c19569e` identik di kedua
+sisi. Metode itu, bukan "migrasi jalan tanpa error", yang membuktikan tidak ada
+drift ronde keempat.
+
 ## 2. BELUM — M6A Strategi (O56)
 
 Prasyarat: **`VND-` entity** (M6A §7 menyebutnya blocker: "E-8 dan F-4 tidak bisa
@@ -82,7 +123,7 @@ diimplementasi sebelum ini mendarat, jadi ia masuk batch migrasi yang SAMA denga
 | ~~A-04~~ | ~~Mesin status #15~~ | ✅ **SELESAI sesi 2.** `Aktif → Draft Revisi` TIDAK didaftarkan — bertentangan dengan Rule 13; revisi = baris baru. Lihat DECISIONS 2026-08-06 |
 | ~~A-05~~ | ~~Section A (16 field)~~ | ✅ **SELESAI sesi 3** — data + domain + route + tipe FE + gerbang submit. **Form UI belum** (belum ada halaman Strategi sama sekali; lihat A-13 di bawah) |
 | ~~A-06~~ | ~~Section B per channel (±45 field ↻)~~ | ✅ **SELESAI sesi 3** — sama cakupannya. Kelengkapan Rule 5 ditegakkan gerbang submit per grup per channel, bukan `NOT NULL`: §7 meminta autosave 20 detik dan §5 langkah 5 meminta hitungan hidup, keduanya butuh keadaan setengah-terisi bisa disimpan |
-| A-07 | Section C + validasi kutipan baseline | Rule 6: setiap akar masalah WAJIB mereferensi ≥1 field-ID baseline, divalidasi ada di Strategi yang sama |
+| ~~A-07~~ | ~~Section C + validasi kutipan baseline~~ | ✅ **SELESAI sesi 4** (`a9b7a47`, migrasi `20260807000000_m6a_section_c.sql`, merged PR #103). Rule 6 ditegakkan atas **set field-ID tertutup** (`VALID_BASELINE_FIELD_IDS`), bukan string bebas: kutipan ke field yang tidak ada ditolak `MSG_DIAGNOSA_INVALID_FIELD_ID`, nol kutipan ditolak `MSG_DIAGNOSA_FIELD_ID_REQUIRED`. `field_ids` disimpan sebagai array jsonb (bukan objek) — perbaikan `58f6588` yang membuat A-07 bisa diuji terhadap DB. **Form UI belum** (A-13) |
 | A-08 | Section D + asumsi | Stretch `>=` floor di level CHECK DB. `STRG_ASSUMPTION.status ∈ Berlaku/Gugur/Terverifikasi`; flip ke `Gugur` memicu `strategi_revisi_disarankan` — **O55 SUDAH SELESAI 2026-08-07**, transisi + emit boleh disambung |
 | A-09 | Section E/F/G/H/I/J | Floor price per hero SKU (E-4) dibaca validasi Brief; F soft-limit 20% (Rule 10); G-0 `tanggal_mulai_siklus` sekali-set (Rule 17) |
 | A-10 | Dua tier visibilitas | `STRG_FIELD_VISIBILITY` overlay + daftar hard-internal sebagai konstanta `packages/core`, ditolak di predikat TS **dan** CHECK DB (invariant beku: keduanya tidak boleh menyimpang) |
@@ -94,7 +135,7 @@ diimplementasi sebelum ini mendarat, jadi ia masuk batch migrasi yang SAMA denga
 
 | # | Ticket | Catatan implementasi |
 |---|---|---|
-| **B-00** | **Entitas `CONTRACT` (O57)** | 🔴 **PRASYARAT KERAS B-01.** Keputusan pemilik 2026-08-07: kontrak = kumpulan Service satu klien dalam satu kesepakatan ⇒ `strategi.service_id` → `contract_id`. Rancangan langkah-demi-langkah: `docs/handoff/HANDOFF_M6ABC_SESI5.md` §4. Membalikkannya murah SEKARANG (satu FK, nol data produksi) dan mahal setelah periode Plan digenerate di atasnya |
+| ~~B-00~~ | ~~Entitas `CONTRACT` (O57)~~ | ✅ **SELESAI 2026-08-07** — migrasi `20260807120000`, domain `packages/domain/src/contract.ts`, 4 route baru. Prefix `CTR` (registry 29→30), tabel `contracts` (tabel 74→75), `services.contract_id` nullable, `strategi.contract_id` NOT NULL menggantikan `service_id`, tiga indeks unik jadi per-kontrak, RLS `private.jwt_is_am_of_contract` di dua tempat. Jendela kontrak PINDAH (tidak disalin) — lihat DECISIONS 2026-08-07 "O57 DIEKSEKUSI". `POST /services/{id}/strategi` tidak berubah: ia mencetak kontrak 1:1 kalau Service belum punya. **B-01 tidak lagi terblokir** |
 | B-01 | `PLAN` + 6 child tables | `PLAN_TARGET` (menyimpan `nilai_strategi` immutable **dan** `nilai_dipakai`), `PLAN_ROW`, `PLAN_ROW_WEEK`, `PLAN_ACTUAL`, `PLAN_REVIEW`, `PLAN_FLAG`. `lingkup ∈ kontrak/klien` + `strategi_id` nullable (Plan Satuan) + `status_dormansi` |
 | B-02 | Generasi periode | Anniversary-month dari `tanggal_mulai_siklus`. **Simpan day-of-month yang DIMAKSUD terpisah** dari tanggal terhitung, supaya start tanggal 31 tidak hanyut permanen ke 28 setelah lewat Februari |
 | B-03 | Mesin status #16 | Periode 1 butuh persetujuan SPV; 2…n auto-aktif 00:00 WIB; `Menunggu Persetujuan` hanya untuk `Turun >10%` |
@@ -120,4 +161,4 @@ diimplementasi sebelum ini mendarat, jadi ia masuk batch migrasi yang SAMA denga
 | X-07 | PA-2/PA-5 (jendela GMV manual 5 hari · force-close +7 hari) | Yulianti |
 | X-08 | PA-3 (metrik auto PE-3 belum tentu tersedia semua) | Hans — metrik yang belum ada harus jatuh ke manual **secara eksplisit**, tidak dicampur diam-diam dengan yang auto |
 | X-10 | **O58 — "tidak ada" vs "belum dijawab" untuk enam field daftar bertanda WAJIB** (A-11, A-14, B-5.3, B-8.1, B-8.2) | Yohan / Yulianti. Sesi 3 memilih bacaan yang tidak memblokir (gerbangi angka pendampingnya, bukan daftarnya) dan mencatatnya; menambah checkbox "tidak ada" berarti field yang PRD tidak mendefinisikan |
-| X-09 | **Tidak ada entitas CONTRACT di CDPS** — Strategi diikat ke `service_id` dan durasi/floor dideklarasi AM | Yohan / Yulianti — **O57**. Murah dibalik sekarang, mahal setelah periode Plan M6B digenerate di atasnya |
+| ~~X-09~~ | ~~Tidak ada entitas CONTRACT di CDPS~~ | ✅ **SELESAI 2026-08-07** — O57 diputus & dieksekusi (B-00) |

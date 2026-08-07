@@ -181,6 +181,9 @@ jobs:
       # green while CI failed on `expected 14 machines`. Adding a table or a
       # machine means editing BOTH, in the same commit.
       #
+      # 75 = 74 + contracts (20260807120000, O57/B-00: entitas CTR-). Migrasi yang
+      #      sama MEMBUANG service_id dari strategi tapi tidak membuang satu tabel
+      #      pun, jadi hitungannya naik satu.
       # 74 = 73 + notif_catalog_versions (20260807010000, O55: registry versi katalog).
       # 73 = 69 + strategi_diagnosa · strategi_quick_win · strategi_risiko_struktural ·
       #           strategi_prasyarat_klien (20260807000000, M6A A-07: Section C).
@@ -196,23 +199,23 @@ jobs:
       #         + plan_gate_config + service_plan_gate (20260806061000, M6C §10).
       #      55 = 54 + prospect_activities (20260806050000, keputusan pemilik 2026-08-06).
       #      54 = 53 + lead_delete_requests (20260729162101, DECISIONS 2026-07-29).
-      - name: Verify table count (expect 74)
+      - name: Verify table count (expect 75)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 74
+          test "$n" -eq 75
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
-      # 26 as-built prefixes + STRG/PLAN/VND. The TS half (PREFIXES in
+      # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57). The TS half (PREFIXES in
       # packages/core/src/ident.ts) is asserted against this table by
       # packages/db/src/ident.registry.test.ts, which also scans every
       # ID-minting call site. A count gate here catches a migration that lands
       # without its registry row.
-      - name: Verify entity_prefix registry (expect 29)
+      - name: Verify entity_prefix registry (expect 30)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc "select count(*) from entity_prefix;")
           echo "entity_prefix rows: $n"
-          test "$n" -eq 29
+          test "$n" -eq 30
       - name: Invariant — ID generator (gap-free, WIB period)
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/ident_checks.sql
       - name: Invariant — append-only history (immutability)

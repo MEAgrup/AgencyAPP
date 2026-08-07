@@ -51,6 +51,8 @@ import {
   MSG_TOP_SKU_REQUIRED,
   MSG_TRAFFIC_MIX_SUM,
   MSG_USP_MIN,
+  FLOOR_DISETUJUI_HEAD,
+  FLOOR_INPUT_AM,
   STRATEGI_AKTIF,
   STRATEGI_DIAJUKAN,
   STRATEGI_DIARSIPKAN,
@@ -208,6 +210,7 @@ afterEach(async () => {
   await sql`truncate strategi_version`;
   await sql`delete from strategi where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
+  await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
 });
 
@@ -456,7 +459,6 @@ async function seedSubmittable(): Promise<{ serviceId: string; strategiId: strin
       metric: 'gmv',
       nilaiFloor: '400000000.00',
       nilaiStretch: '460000000.00',
-      sumberFloor: 'input_am',
     },
   ]);
 
@@ -876,6 +878,99 @@ describeDb('Section A — A-05 (Konteks Klien & Bisnis)', () => {
     // A-15 travels too: access already granted is not re-requested, and an
     // unresolved blocker must not vanish because a new version was opened.
     expect(detail.akses.filter((a) => a.memblokir)).toHaveLength(1);
+  });
+});
+
+/**
+ * O57 item (b) — Rule 7 read as "floor read-only AFTER Head approval".
+ *
+ * The pre-O57 column was a quality signal (`kontrak` vs `input_am`) invented
+ * because no Contract existed to pull a floor from. The owner decision keeps the
+ * floor an AM input and puts a Head approval behind it, so what has to hold is:
+ * the AM cannot declare their own number approved, and once a Head has, nothing
+ * short of a new version moves it.
+ */
+describeDb('Rule 7 — the floor approval path (O57 item (b))', () => {
+  const floors = (strategiId: string) =>
+    sql<{ sumber_floor: string | null; nilai_floor: string | null; floor_disetujui_oleh: string | null }[]>`
+      select sumber_floor, nilai_floor, floor_disetujui_oleh
+        from strategi_target where strategi_id = ${strategiId} and metric = 'gmv'`;
+
+  it('starts at input_am — the AM who types the number cannot mark it approved', async () => {
+    const { strategiId } = await seedSubmittable();
+    const rows = await floors(strategiId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].sumber_floor).toBe(FLOOR_INPUT_AM);
+    expect(rows[0].floor_disetujui_oleh).toBeNull();
+
+    // `sumber_floor` is not on TargetInput at all (house rule #4). Passing it
+    // through the wire converter is a no-op rather than a back door.
+    await saveTargets(sql, am(), strategiId, [
+      {
+        channel: 'Shopee',
+        monthIndex: 1,
+        metric: 'gmv',
+        nilaiFloor: '400000000.00',
+        nilaiStretch: '460000000.00',
+        ...({ sumberFloor: FLOOR_DISETUJUI_HEAD } as object),
+      },
+    ]);
+    expect((await floors(strategiId))[0].sumber_floor).toBe(FLOOR_INPUT_AM);
+  });
+
+  it('flips to disetujui_head — stamped with the approver, who is not the author', async () => {
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    const rows = await floors(strategiId);
+    expect(rows[0].sumber_floor).toBe(FLOOR_DISETUJUI_HEAD);
+    expect(rows[0].floor_disetujui_oleh).toBe('ZZ-SPV');
+    expect(rows[0].floor_disetujui_oleh).not.toBe('ZZ-AM');
+  });
+
+  /**
+   * The wall, not the promise. Asserted through raw SQL on the service-role
+   * connection precisely because a TS-only guard would let exactly this call
+   * through — and a floor that can be lowered without a trace is D-7 Sanggahan
+   * Target with no enforcer.
+   */
+  it('freezes the number in the DATABASE once approved', async () => {
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+
+    await expect(
+      sql`update strategi_target set nilai_floor = '1.00'
+           where strategi_id = ${strategiId} and metric = 'gmv'`,
+    ).rejects.toThrow(/target floor tidak dapat diubah setelah disetujui Head Account/);
+    // …and the approval cannot be quietly withdrawn to unlock it either.
+    await expect(
+      sql`update strategi_target set sumber_floor = ${FLOOR_INPUT_AM}
+           where strategi_id = ${strategiId} and metric = 'gmv'`,
+    ).rejects.toThrow(/target floor tidak dapat diubah setelah disetujui Head Account/);
+    expect((await floors(strategiId))[0].nilai_floor).toBe('400000000.00');
+  });
+
+  /**
+   * The trap this pass was written to avoid: `copyChildren` copies every target
+   * column, so a revision would inherit `disetujui_head` and open ALREADY
+   * approved — frozen against the very edit the revision exists to make, and
+   * carrying a Head sign-off nobody gave for that version.
+   */
+  it('does NOT let a revision inherit the previous version’s approval', async () => {
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    const v2 = await openRevision(sql, am(), strategiId, {
+      triggerRevisi: ['target meleset'],
+      alasanRevisi: 'floor perlu ditinjau ulang',
+      asumsiGugur: ['A1'],
+    });
+    const rows = await floors(v2.id);
+    expect(rows[0].sumber_floor).toBe(FLOOR_INPUT_AM);
+    expect(rows[0].floor_disetujui_oleh).toBeNull();
+    // Version 1 keeps its approval — the revision is a new row, not an edit.
+    expect((await floors(strategiId))[0].sumber_floor).toBe(FLOOR_DISETUJUI_HEAD);
   });
 });
 
@@ -1482,9 +1577,12 @@ describeDb('Rule 13 — a revision is a new row, and n stays Aktif', () => {
       [1, STRATEGI_DIARSIPKAN],
     ]);
     // Rule 2, at the storage level: the partial unique index cannot hold two.
+    // O57 — now per CONTRACT, which is the whole point: two Services in one
+    // agreement share the single `Aktif` slot instead of getting one each.
     const active = await sql<{ n: number }[]>`
-      select count(*)::int as n from strategi
-       where service_id = ${serviceId} and status = 'Aktif'`;
+      select count(*)::int as n from strategi s
+        join services sv on sv.contract_id = s.contract_id
+       where sv.id = ${serviceId} and s.status = 'Aktif'`;
     expect(active[0].n).toBe(1);
   });
 
