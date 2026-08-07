@@ -23,6 +23,15 @@
 
 import { money, permission } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
+// `plangate_rules` is pure (its only import is @cdps/core), so taking the tier
+// vocabulary from it cannot form a cycle — unlike `sales`, which this module
+// deliberately never imports.
+import {
+  TIER_DITENTUKAN_AM,
+  TIER_PLAN_WAJIB,
+  TIER_TANPA_PLAN,
+  type PlanTier,
+} from './plangate_rules';
 
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;
@@ -90,6 +99,17 @@ export interface ServiceView {
   description: string;
   active: boolean;
   requiresStrategyPlan: boolean;
+  /**
+   * Catalog tier (M6C S4 / §3). This is the field the Sales Head actually sets;
+   * `requiresStrategyPlan` is the legacy boolean kept in lockstep with it by
+   * `reconcileTier` (and, at the DB layer, by the `normalize_plan_tier` trigger).
+   *
+   * O54 (DECISIONS 2026-08-07): tier is settable per catalog entry HERE, not in
+   * a migration — MEA's services are created dynamically per client need, so a
+   * new service that needs a Plan must not have to wait for an engineering
+   * release.
+   */
+  planTier: PlanTier;
   versionNo: number;
   effectiveFrom: string;
 }
@@ -109,6 +129,7 @@ interface VersionRow {
   description: string | null;
   active: boolean;
   requires_strategy_plan: boolean;
+  plan_tier: string;
   version_no: number;
   effective_from: Date | string;
 }
@@ -119,6 +140,7 @@ function toView(r: VersionRow): ServiceView {
     category: r.category ?? '', unit: r.unit ?? '', minQty: r.min_qty ?? '', pricingMode: r.pricing_mode,
     applyPPN: r.apply_ppn, frequency: r.frequency ?? '', priceNote: r.price_note ?? '',
     description: r.description ?? '', active: r.active, requiresStrategyPlan: r.requires_strategy_plan,
+    planTier: r.plan_tier as PlanTier,
     versionNo: r.version_no,
     effectiveFrom: r.effective_from instanceof Date
       ? r.effective_from.toISOString().slice(0, 10)
@@ -128,7 +150,7 @@ function toView(r: VersionRow): ServiceView {
 
 const VERSION_COLUMNS = `service_id, name, standard_price, commission_rule, category, unit, min_qty,
   pricing_mode, apply_ppn, frequency, price_note, description, active, requires_strategy_plan,
-  version_no, effective_from`;
+  plan_tier, version_no, effective_from`;
 
 /**
  * effectiveAt returns the MSL version effective on `date` (YYYY-MM-DD, WIB) for a
@@ -139,7 +161,7 @@ export async function effectiveAt(sql: Queryable, serviceId: string, date: strin
   const rows = await sql<VersionRow[]>`
     select service_id, name, standard_price, commission_rule, category, unit, min_qty,
            pricing_mode, apply_ppn, frequency, price_note, description, active,
-           requires_strategy_plan, version_no, effective_from
+           requires_strategy_plan, plan_tier, version_no, effective_from
     from master_service_versions
     where service_id = ${serviceId} and effective_from <= ${date}
     order by effective_from desc, version_no desc limit 1`;
@@ -159,7 +181,7 @@ export async function listEffectiveAt(sql: Queryable, date: string): Promise<Ser
     select distinct on (service_id)
            service_id, name, standard_price, commission_rule, category, unit, min_qty,
            pricing_mode, apply_ppn, frequency, price_note, description, active,
-           requires_strategy_plan, version_no, effective_from
+           requires_strategy_plan, plan_tier, version_no, effective_from
     from master_service_versions
     where effective_from <= ${date}
     order by service_id, effective_from desc, version_no desc`;
@@ -171,7 +193,7 @@ export async function listVersions(sql: Queryable, serviceId: string): Promise<S
   const rows = await sql<VersionRow[]>`
     select service_id, name, standard_price, commission_rule, category, unit, min_qty,
            pricing_mode, apply_ppn, frequency, price_note, description, active,
-           requires_strategy_plan, version_no, effective_from
+           requires_strategy_plan, plan_tier, version_no, effective_from
     from master_service_versions
     where service_id = ${serviceId}
     order by version_no desc`;
@@ -210,7 +232,53 @@ export interface ServiceInput {
   description?: string;
   active?: boolean;
   requiresStrategyPlan?: boolean;
+  /**
+   * Catalog tier (O54). Optional so every pre-M6C caller (seeder, fixtures,
+   * older clients that only know the boolean) keeps working unchanged —
+   * `reconcileTier` derives it from `requiresStrategyPlan` when absent.
+   */
+  planTier?: PlanTier;
   effectiveFrom: string; // YYYY-MM-DD
+}
+
+/** The three catalog tiers, as an input-validation set. */
+const PLAN_TIERS = new Set<string>([TIER_PLAN_WAJIB, TIER_DITENTUKAN_AM, TIER_TANPA_PLAN]);
+
+/**
+ * reconcileTier keeps `plan_tier` and the legacy `requires_strategy_plan`
+ * boolean in agreement, and is a LINE-FOR-LINE mirror of the DB trigger
+ * `normalize_plan_tier` (migration 20260806061000). The migration calls that
+ * agreement a frozen invariant: "predikat TS dan DB tidak boleh menyimpang".
+ *
+ * The branch order matters and is not arbitrary — it decides which column wins
+ * when the two disagree, by asking which one the caller actually spoke through:
+ *
+ *   - tier `ditentukan_am`      ⇒ boolean false. The effective gate for this
+ *                                 tier comes from `service_plan_gate`, never
+ *                                 from the catalog.
+ *   - tier `plan_wajib`         ⇒ boolean true. An M6C-era caller spoke via tier.
+ *   - tier left at the default  ⇒ a pre-M6C caller spoke via the boolean, so a
+ *     and boolean true            true boolean promotes the tier to `plan_wajib`.
+ *
+ * Keep this identical to the trigger. If they ever diverge, the row is still
+ * rejected by `ck_msv_tier_matches_flag` — but the error surfaces at INSERT
+ * time as a constraint violation instead of as a validation message, which is
+ * a much worse place to find out.
+ */
+export function reconcileTier(
+  planTier: PlanTier | undefined,
+  requiresStrategyPlan: boolean,
+): { planTier: PlanTier; requiresStrategyPlan: boolean } {
+  let tier: PlanTier = planTier ?? TIER_TANPA_PLAN;
+  let requires = requiresStrategyPlan;
+  if (tier === TIER_DITENTUKAN_AM) {
+    requires = false;
+  } else if (tier === TIER_PLAN_WAJIB) {
+    requires = true;
+  } else if (requires) {
+    tier = TIER_PLAN_WAJIB;
+  }
+  return { planTier: tier, requiresStrategyPlan: requires };
 }
 
 /** A normalized (validated) input ready to persist. */
@@ -243,6 +311,14 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
   if (frequency !== '' && !FREQUENCIES.has(frequency)) {
     throw new IncompleteError();
   }
+  // An unknown tier is rejected rather than silently coerced: the whole point of
+  // O54 is that the Sales Head chooses this value, and a typo that quietly
+  // became `tanpa_plan` would take the Strategi path off the table without
+  // anyone being told.
+  if (inp.planTier !== undefined && !PLAN_TIERS.has(inp.planTier)) {
+    throw new IncompleteError();
+  }
+  const tier = reconcileTier(inp.planTier, inp.requiresStrategyPlan ?? false);
 
   let standardPrice = inp.standardPrice ?? '';
   if (pricingMode === PRICING_PASSTHROUGH) {
@@ -284,7 +360,8 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
     name, standardPrice, commissionRule, effectiveFrom, pricingMode,
     category: inp.category ?? '', unit: inp.unit ?? '', minQty, frequency,
     priceNote: inp.priceNote ?? '', description: inp.description ?? '',
-    applyPPN: inp.applyPPN ?? false, requiresStrategyPlan: inp.requiresStrategyPlan ?? false,
+    applyPPN: inp.applyPPN ?? false, requiresStrategyPlan: tier.requiresStrategyPlan,
+    planTier: tier.planTier,
     active: inp.active ?? false,
   };
 }
@@ -317,12 +394,12 @@ async function insertVersion(
     insert into master_service_versions
       (service_id, version_no, name, standard_price, commission_rule, category, unit,
        min_qty, pricing_mode, apply_ppn, frequency, price_note, description,
-       active, requires_strategy_plan, effective_from, created_by)
+       active, requires_strategy_plan, plan_tier, effective_from, created_by)
     values
       (${serviceId}, ${versionNo}, ${inp.name}, ${inp.standardPrice}, ${inp.commissionRule},
        ${nullText(inp.category)}, ${nullText(inp.unit)}, ${nullText(inp.minQty)}, ${inp.pricingMode},
        ${inp.applyPPN}, ${nullText(inp.frequency)}, ${nullText(inp.priceNote)}, ${nullText(inp.description)},
-       ${inp.active}, ${inp.requiresStrategyPlan}, ${inp.effectiveFrom}, ${actorId})`;
+       ${inp.active}, ${inp.requiresStrategyPlan}, ${inp.planTier}, ${inp.effectiveFrom}, ${actorId})`;
 }
 
 /**

@@ -24,6 +24,7 @@ export interface MasterServiceWire {
   description: string;
   active: boolean;
   requires_strategy_plan: boolean;
+  plan_tier: string;
   version_no: number;
   effective_from: string;
 }
@@ -45,6 +46,7 @@ export function masterServiceToWire(v: msl.ServiceView): MasterServiceWire {
     description: v.description,
     active: v.active,
     requires_strategy_plan: v.requiresStrategyPlan,
+    plan_tier: v.planTier,
     version_no: v.versionNo,
     effective_from: v.effectiveFrom,
   };

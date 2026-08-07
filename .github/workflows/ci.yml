@@ -141,21 +141,29 @@ jobs:
             echo "applying $(basename "$f")"
             psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f "$f"
           done
-      # 17 events = the 15 frozen (Phase 0 v2 §9) + the 2 lead-delete additions
-      # logged in docs/DECISIONS.md 2026-07-29. Keep in step with the CATALOG in
-      # packages/core/src/notification.ts — the notification.test.ts assertions
-      # are the other half of this gate.
+      # 31 events = 17 (v1: the 15 frozen Phase 0 v2 §9 + the 2 lead-delete
+      # additions logged 2026-07-29) + 14 (v2: the single M6A/6B/6C amendment +
+      # m6.client.assigned, DECISIONS O55/O53 2026-08-07). Keep in step with the
+      # CATALOG in packages/core/src/notification.ts — notification.test.ts is
+      # the other half of this gate.
       # 16 machines = the 14 ported from Go + `vendor` and `strategi` (mesin #15),
-      # keduanya dari migrasi M6A 20260806063000/064000. `notif_events` TETAP 17:
-      # 13 event M6A/6B/6C belum diemisikan karena katalog v2 masih menunggu
-      # tanda tangan (DECISIONS O55) — angka ini merah kalau ada yang menambah
-      # baris tanpa keputusan itu, dan itu memang gunanya.
-      - name: Verify migration seed counts (16 machines, 17 events)
+      # keduanya dari migrasi M6A 20260806063000/064000.
+      #
+      # The literal 31 below is a convenience, NOT the invariant. The invariant is
+      # the second check: count(notif_events) must equal SUM(event_count) over
+      # notif_catalog_versions. That is what O55 bought — an event added without a
+      # registered version fails even if someone also bumps the literal.
+      - name: Verify migration seed counts (16 machines, 31 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
                if (select count(*) from sm_machines) <> 16 then raise exception 'expected 16 machines'; end if;
-               if (select count(*) from notif_events) <> 17 then raise exception 'expected 17 events'; end if;
+               if (select count(*) from notif_events) <> 31 then raise exception 'expected 31 events'; end if;
+               if (select count(*) from notif_events)
+                  <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
+                 then raise exception 'notif_events does not match the registered catalog versions'; end if;
+               if (select count(*) from notif_events where catalog_version = 1) <> 17
+                 then raise exception 'catalog v1 must stay at 17 events'; end if;
              end \$\$;"
       - name: Alpha Digital seed fixture — apply twice (idempotency) + verify
         run: |
@@ -173,6 +181,7 @@ jobs:
       # green while CI failed on `expected 14 machines`. Adding a table or a
       # machine means editing BOTH, in the same commit.
       #
+      # 74 = 73 + notif_catalog_versions (20260807010000, O55: registry versi katalog).
       # 73 = 69 + strategi_diagnosa · strategi_quick_win · strategi_risiko_struktural ·
       #           strategi_prasyarat_klien (20260807000000, M6A A-07: Section C).
       #      69 = 68 + strategi_akses (20260806065000, M6A A-05: A-15 matriks akses ×
@@ -187,12 +196,12 @@ jobs:
       #         + plan_gate_config + service_plan_gate (20260806061000, M6C §10).
       #      55 = 54 + prospect_activities (20260806050000, keputusan pemilik 2026-08-06).
       #      54 = 53 + lead_delete_requests (20260729162101, DECISIONS 2026-07-29).
-      - name: Verify table count (expect 73)
+      - name: Verify table count (expect 74)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 73
+          test "$n" -eq 74
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND. The TS half (PREFIXES in
       # packages/core/src/ident.ts) is asserted against this table by

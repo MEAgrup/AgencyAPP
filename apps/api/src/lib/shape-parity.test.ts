@@ -507,9 +507,11 @@ const ALLOWED_EXTRA: Record<string, string[]> = {
   // Go `admin.LayeredRole`.
   LayeredRoleWire: ['id', 'created_at'],
   RoleMappingWire: ['created_at'],
-  // Go `admin.ServiceView` — the M6-OA-1 pin. Read from the Strategy surface,
-  // not from the MSL list, so `MasterService` does not declare it.
-  MasterServiceWire: ['requires_strategy_plan'],
+  // (`MasterServiceWire` used to allow `requires_strategy_plan` as an extra —
+  // the MSL list did not surface the M6-OA-1 pin. O54 made the tier a Sales-Head
+  // setting on this very page, so both `requires_strategy_plan` and `plan_tier`
+  // are now declared FE-side and the allowance is gone. Do not re-add it: an
+  // entry here means the admin page cannot see a field it is meant to edit.)
   // Go `module14_performance.Snapshot.ID`.
   PerfSnapshotWire: ['id'],
   // The narrow roster projection — see DIVERGENCE below, same decision.

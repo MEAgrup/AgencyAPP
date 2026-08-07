@@ -2293,6 +2293,15 @@ export async function saveDiagnosa(
     }
 
     // Replace diagnosa — UPSERT on (strategi_id, channel).
+    //
+    // `field_ids` is written `to_jsonb(<array>::text[])`, deliberately NOT the
+    // interpolate-a-JSON-string-and-cast form. postgres.js binds a parameter
+    // that a jsonb column receives AS jsonb, so handing it an already-
+    // JSON.stringify'd string makes it encode that string a second time: the
+    // column ends up holding the jsonb *string* "[\"A-1\"]" instead of the
+    // array ["A-1"], and `ck_strdiag_field_ids_array` (jsonb_typeof = 'array')
+    // rejects every row. Passing a real JS array and letting Postgres build the
+    // array server-side has no such ambiguity.
     await tx`delete from strategi_diagnosa where strategi_id = ${id}`;
     for (const d of payload.diagnosa) {
       await tx`
@@ -2300,7 +2309,7 @@ export async function saveDiagnosa(
           (strategi_id, channel, bottleneck, field_ids, akar_masalah, gap_kompetitor, created_by)
         values (
           ${id}, ${d.channel}, ${d.bottleneck},
-          ${JSON.stringify(d.fieldIds)}::jsonb,
+          to_jsonb(${d.fieldIds}::text[]),
           ${nullIfBlank(d.akarMasalah)},
           ${nullIfBlank(d.gapKompetitor)},
           ${actor.employeeId}
