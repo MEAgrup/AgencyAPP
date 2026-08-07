@@ -3,13 +3,15 @@
 > Rantai: SESI1 → … → SESI6 → **SESI7 (ini, terbaru)**. Baca yang bernomor
 > tertinggi lebih dulu; sesi sebelumnya hanya untuk konteks sejarah.
 >
-> Sesi ini **tidak membangun fitur**. Ia menutup **tujuh** pertanyaan terbuka
-> dengan jawaban pemilik (X-05 · O26 · O34 · O35 · O25 · O6 · O9), membersihkan
-> satu baris backlog basi (X-10), dan menyiapkan **rekomendasi bernomor** untuk
-> lima cacat 🔴 yang masih menunggu pilihan pemilik.
+> Sesi ini punya **dua bagian**. Bagian 1 menutup pertanyaan terbuka dengan
+> jawaban pemilik (X-05 · O26 · O34 · O35 · O25 · O6 · O9) dan membersihkan satu
+> baris backlog basi (X-10). Bagian 2 — sesudah pemilik memilih — **mengeksekusi
+> ronde cacat 🔴**: O52 (b) · O51 (a) · O48 (b)+ledger mendarat di repo DAN di
+> live, dan O47b diputus (b).
 >
-> **Mulai dari sini:** §2 — cacat 🔴. Rekomendasinya sudah ditulis; yang kurang
-> hanya kata "ya" dari pemilik.
+> **Mulai dari sini:** §6 — apa yang tersisa. Ringkasnya: O47b langkah (2)
+> (rewrite histori, butuh sesi bersih), O42 pertanyaan (3), lalu kembali ke
+> fitur M6 (A-08/A-09/A-13, B-01).
 
 ## 0. Posisi persis — SALIN INI KE SESI BERIKUTNYA
 
@@ -18,9 +20,10 @@
 | Branch | `claude/handoff-m6abc-sesi6-bku90h` |
 | `main` | `574200c` — PR #105 (handoff SESI6) ter-merge |
 | PR terbuka | **NOL** per awal sesi ini |
-| Migrasi | **65 berkas**, live `CDPS SG` sinkron penuh & terverifikasi (SESI6 §2) |
-| Gate | tabel **76** · prefix **31** · mesin **16** · event **33** |
-| Skor | M6A **57%** (8/14) · M6B **8%** (1/12) — tidak berubah; sesi ini nol fitur |
+| Migrasi | **68 berkas** (65 + O51 · O52 · O48-GrupB). Live `CDPS SG` **sinkron & terverifikasi** — sidik jari `698e526c05aabd27e14cf11bb15cd117` \| 11 fakta, identik di lokal & live |
+| Gate | tabel **76** · prefix **31** · mesin **16** · event **33** — **tidak berubah** (ketiga migrasi hanya menambah fungsi/policy) |
+| Skor | M6A **57%** (8/14) · M6B **8%** (1/12) — tidak berubah; sesi ini ronde cacat, bukan fitur |
+| Test | domain 165 + 241 + 257 + 76 hijau · `apps/api` 324 hijau · 4 invariant SQL hijau |
 
 ## 1. Yang mendarat sesi ini
 
@@ -74,11 +77,41 @@ gerbang submit "daftar terisi XOR checkbox dicentang", pesan
 dari masalahnya. Cocokkan §Open dengan §Decided sebelum menyalin, jangan
 sesudahnya.
 
-## 2. Cacat 🔴 — REKOMENDASI, tinggal disetujui
+## 2. Cacat 🔴 — DIPUTUS DAN (tiga dari lima) DIEKSEKUSI
 
-Kelimanya menunggu pilihan pemilik sejak SESI6 §7.2. Berikut rekomendasi
-bernomor: apa cacatnya dalam satu contoh, pilihannya, dan mana yang dipilih
-kalau tidak ada arahan lain.
+Pemilik memilih **2026-08-07**, dan pilihannya sama dengan rekomendasi di bawah:
+
+| # | Pilihan pemilik | Status |
+|---|---|---|
+| O52 | **(b)** | ✅ mendarat — migrasi `20260807150000`, di-apply ke live |
+| O51 | **(a)** | ✅ mendarat — migrasi `20260807140000`, di-apply ke live |
+| O48 | **(b)** | ✅ `assets_select` + **ledger 38 policy** — migrasi `20260807160000`, di-apply ke live |
+| O47b | **(b)** | 🟡 diputus; langkah (1)+(3) disetujui, **langkah (2) rewrite BELUM** — lihat §4 |
+| O45 | — | ⏸️ belum ditanya lagi; rekomendasi §2.5 masih berdiri |
+| O44-asal | — | ⚠️ **ternyata sudah selesai sejak 29 Juli** — lihat §2.3 |
+
+Bagian di bawah ini adalah **alasannya**, dan sengaja dibiarkan utuh: yang
+berharga bukan pilihannya melainkan mengapa alternatifnya ditolak.
+
+### 2.0 Yang hanya ketahuan saat mengeksekusi — dan kenapa itu penting
+
+**O52 (b) sendirian TIDAK menyembuhkan halaman Asset.** Sesudah
+`private.brief_owner_am` dipasang, test jalur-baca-nyata (`reads_rls.test.ts`,
+klaim `Creative/lead` di bawah `SET LOCAL ROLE authenticated`) menunjukkan Brief
+lolos tapi **Asset tetap 404** — karena baris `assets` itu sendiri tak terlihat:
+
+```
+assets_select = jwt_can_read_all() OR assigned_pic = me OR created_by = me
+```
+
+Lead Creative bukan PIC dan bukan pembuat. Itu **O48 Grup B**, dan karena pemilik
+sudah memilih (b) "per tabel sesuai kebutuhan halaman", tabel yang dibutuhkan
+halaman hari ini adalah tabel ini — jadi arm-nya dipasang di ronde yang sama.
+
+**Yang membuat ini bisa ditemukan sama sekali:** suite privileged biasa
+**lolos di kedua keadaan**. Hanya test yang menjalankan klaim nyata di bawah
+`SET LOCAL ROLE authenticated` yang bisa merah. Itulah sebabnya §2.1 dulu menulis
+"perbaikannya wajib membawa test semacam itu" — dan itu terbukti bukan formalitas.
 
 ### 2.1 O52 — halaman Task/Asset/Booking 404 untuk divisi eksekusinya sendiri
 
@@ -131,36 +164,30 @@ menutup kelasnya, bukan instansnya.
 `role_mappings` **tidak** ada di daftar itu — itulah kenapa invariannya tidak
 pernah merah. Tambahkan ia ke daftar dalam commit yang sama.
 
-### 2.3 O44-asal / O42 — **satu-satunya yang MEMBLOKIR C-04**
+### 2.3 O44-asal / O42 — ⚠️ KOREKSI: O44-asal SUDAH SELESAI SEJAK 29 JULI
 
-Ini bukan pilihan (a)/(b) untuk butir (a) dan (b) — itu **pekerjaan developer
-yang tinggal dikerjakan**:
+Rekomendasi yang berdiri di sini sebelumnya ("port 3 route auth ke `apps/api`")
+**menjawab masalah yang sudah tidak ada.** Diverifikasi di kode, bukan di
+dokumen:
 
-- **(a)** `feCalls()` di `route-parity.test.ts` hanya membaca
-  `web-internal/src/lib`, tidak rekursif, tidak menyentuh `src/app/**`. Jadikan
-  rekursif atas **seluruh** `web-internal/src`.
-- **(b)** Port 6 route admin — `GET/POST /admin/role-mappings`,
-  `DELETE /admin/role-mappings/{}`, `GET /admin/employees`,
-  `POST /admin/layered-roles`, `POST /admin/employee-sync`.
+- **(a)** `parity-scan.ts` sudah punya `walkFe(FE_SRC)` **rekursif** atas seluruh
+  `web-internal/src` — bukan `readdirSync` datar atas `src/lib`.
+- **(b)** Keenam route admin dilayani:
+  `apps/api/src/app/api/v1/admin/{employees,role-mappings,layered-roles,employee-import}`.
+- **(c)** Ketiga route auth **ada** — `auth/change-password`,
+  `auth/admin/set-password`, `auth/admin/credentials`. O44c diputus pemilik
+  2026-07-29 arah (c) dan sudah diimplementasi.
 
-Yang butuh pemilik hanya **(c) arah auth**: tiga route (`POST /auth/change-password`,
-`POST /auth/admin/set-password`, `GET /auth/admin/credentials`) diport, atau
-digantikan Supabase Auth client-side. Hari ini **tidak ada** pemakaian
-`updateUser`/`resetPasswordForEmail` di `web-internal/src` — artinya
-**ganti-password de-facto tidak tersedia bagi pengguna**.
+`KNOWN_GAPS` kosong. **O44-asal tidak memblokir C-04, dan sudah tidak sejak 29
+Juli.**
 
-**➡️ Rekomendasi: port ketiganya ke `apps/api` (bukan client-side).** Alasannya
-bukan preferensi: `auth/admin/*` harus di-gate `adminMayManage` **di server**,
-dan memindahkannya ke klien berarti gate itu hidup di tempat yang bisa dilewati.
-Ganti-password mandiri boleh menyusul; yang mendesak adalah admin bisa
-me-reset password saat onboarding.
+Yang benar-benar tersisa dari kluster itu: **O42 pertanyaan (3) — rekonsiliasi
+`role_mappings` 38-vs-23-vs-12**, mana yang jadi sumber kebenaran. Itu milik
+pemilik.
 
-⚠️ **Catatan penting terhadap SESI6 §7.2:** baris O44-asal/O42 di sana
-mencampur dua hal. Sebagian besar O42 (siapa pemilik proses ubah-peran, lewat UI
-apa) **sudah terjawab oleh kode yang ada** — Director/OD, lewat halaman admin
-yang sudah dibangun. Yang benar-benar tersisa dari O42 adalah **pertanyaan (3):
-rekonsiliasi 38-vs-23-vs-12 baris `role_mappings`** — mana yang jadi sumber
-kebenaran. Itu masih milik pemilik.
+**Ini kejadian kedua berturut-turut** (yang pertama X-10, §1.3): daftar
+"terbuka" yang disalin antar-handoff hidup lebih lama dari masalahnya. Aturan
+yang dipasang: **cocokkan §Open ke §Decided SEBELUM menyalin, bukan sesudah.**
 
 ### 2.4 O48 — kelas O46 ternyata 36 policy, bukan 3
 
@@ -201,25 +228,36 @@ allow-list", dijalankan saat QA/UAT terhadap live. Menaruhnya di CI berarti CI
 butuh kredensial produksi — harga yang tidak sebanding untuk kelas cacat yang
 dampaknya hari ini nol dan yang advisor Supabase juga tangkap.
 
-### 2.6 Urutan yang disarankan
+### 2.6 Urutan yang DIJALANKAN (dan koreksinya)
 
-1. **O44-asal (a)+(b)** — satu-satunya yang memblokir C-04, dan (a) mencegah
-   kelas ini tumbuh lagi.
-2. **O51 (a)** — kecil, menutup kelasnya, + `role_mappings` masuk `rls_checks`.
-3. **O52 (b)** — terbesar dari ketiganya; butuh sweep verifikasi sendiri.
-4. **O48 invariant** — dipasang bersama O52, karena O52 adalah instans O48.
-5. **O45** — masuk checklist QA, bukan tiket kode.
+Urutan yang direncanakan menaruh **O44-asal lebih dulu** karena ia dikira
+memblokir C-04. Verifikasi kode menghapus langkah itu seluruhnya (§2.3), jadi
+yang benar-benar dikerjakan:
+
+1. **O51 (a)** — kecil, menutup kelasnya, `role_mappings` masuk `rls_checks` §9.
+2. **O52 (b)** — read model inti; test klaim-nyata dibuat lebih dulu supaya
+   perbaikannya bisa dibuktikan, bukan diasumsikan.
+3. **O48 Grup B** — tidak direncanakan sebagai tiket terpisah; ia **muncul dari**
+   test O52 yang tetap merah (§2.0). Ledger §42 dipasang bersamanya.
+4. **O45** — tetap di checklist QA, bukan tiket kode.
+
+Yang layak dibawa ke sesi berikutnya sebagai kebiasaan: **tulis test jalur-baca
+di bawah klaim nyata SEBELUM perbaikannya.** Di ronde ini test itulah yang
+memberi tahu bahwa perbaikan pertama belum menyembuhkan halamannya.
 
 ## 3. Yang masih menunggu pemilik sesudah sesi ini
 
 | # | Isi | Bentuk jawaban yang dibutuhkan |
 |---|---|---|
-| **O52 · O51 · O48 · O45** | Lihat §2 | "setuju rekomendasi" atau sebut pilihan lain |
-| **O44-asal (c)** | Arah auth ganti-password | Rekomendasi §2.3: port ke `apps/api` |
-| **O42 (3)** | Rekonsiliasi `role_mappings` 38-vs-23-vs-12 | Mana yang jadi sumber kebenaran |
-| **O47b** | Retensi PII di histori git — lihat §4 | Setuju hapus ~85 branch basi, atau terima PII tetap terjangkau di histori |
-| **O24** | `commission_rule` riil per 32 layanan MSL | Rate per layanan (O25 sudah selesai; ini tidak) |
-| **X-03 · X-04 · X-06 · X-07** | M6-spesifik — contoh masing-masing ada di backlog §4 | Angka/konfirmasi, semuanya kecil |
+| **O42 (3)** | Rekonsiliasi `role_mappings` **38-vs-23-vs-12** | Mana yang jadi sumber kebenaran. Ini **satu-satunya** sisa kluster O42/O44 |
+| **O45** | Cek paritas-grant menembak live | Rekomendasi §2.5: langkah QA ber-service-role, bukan CI |
+| **O24** | `commission_rule` riil per 32 layanan MSL | Rate per layanan. O25 sudah selesai; ini tidak |
+| **X-06** | RA-7 — tautan klien tanpa riwayat/diff | Konfirmasi posisi (contoh di backlog §4) |
+| **X-11** | 🆕 D-3 jadi turunan D-2, atau tetap diketik? | Konsekuensi jawaban X-04. Mengubah `W`→Auto butuh persetujuan. **Menggigit di A-08** |
+| **X-12** | 🆕 "point log buruk" X-07 belum punya komponen KPI | Nama komponen + bobot (dari mana diambil, total tetap 100) + ambang "terlambat" |
+
+**X-08** tetap terbuka tapi **bukan milik pemilik** — itu keputusan developer
+(daftar metrik manual ditulis eksplisit, tidak dicampur dengan yang auto).
 
 ## 4. O47b dijelaskan — kenapa "berkasnya sudah dihapus" tidak berarti bersih
 
@@ -269,6 +307,25 @@ dibiarkan menggantung sebagai temuan yang tidak pernah dijawab.
 
 **Tidak memblokir apa pun** — bukan cutover, bukan C-05.
 
+### 4.1 Keputusan pemilik: **(b)** — dan apa yang BELUM dijalankan
+
+Pemilik menyetujui (b). Yang perlu dibaca apa adanya sebelum siapa pun
+melaporkannya selesai:
+
+- **Menghapus branch ≠ menghapus PII.** Menghapus ~85 branch basi mengecilkan
+  permukaan rewrite; ia tidak menghapus satu byte pun selama `f8faf12` masih
+  terjangkau dari `main`.
+- **Langkah (2) — `git filter-repo` + force-push — TIDAK dijalankan di sesi
+  ini, dan itu keputusan sadar.** Sesi ini membawa tiga migrasi + perbaikan cacat
+  yang belum di-merge; menulis ulang histori di bawah kerja yang mengambang
+  adalah cara paling mudah kehilangan keduanya.
+- **Langkah (2) butuh sesi tersendiri**: nol pekerjaan mengambang, clone segar,
+  dan pemilik siap mengabari kontributor untuk re-clone.
+- **Langkah (3) tiket GitHub Support** tetap wajib — tanpa gc dari sisi mereka,
+  halaman commit di PR lama tetap bisa dibuka lewat URL langsung.
+
+Sampai (2) dan (3) selesai: **jangan laporkan PII sudah bersih.**
+
 ## 5. Aturan yang tidak berubah (diulang karena mahal)
 
 1. Migrasi **hanya** lewat `supabase/migrations/**` + `db push` /
@@ -301,3 +358,25 @@ hubungannya dengan kode**. Gejalanya mirip §3.2 SESI6 dan sama-sama palsu.
 Juga: **jangan** jalankan `npm ci` dari dalam `packages/*`. Itu membuat
 `node_modules` bersarang yang menutupi workspace root dan menghasilkan
 `Cannot find package 'vitest'`. Selalu dari root repo.
+
+## 6. Apa yang tersisa — urutan yang disarankan
+
+1. **O47b langkah (2)** — sesi tersendiri, tanpa pekerjaan mengambang. Ini satu-
+   satunya item yang tidak boleh digabung dengan apa pun.
+2. **O42 (3)** — butuh jawaban pemilik, bukan kode.
+3. **Kembali ke fitur M6** sesuai O56 sesudah ronde cacat: **A-08** (Section D +
+   asumsi) → **A-09** (Section E…J) → **A-13** (halaman & form) → **B-01**
+   (`PLAN` + 6 tabel anak).
+   - A-08 **terblokir X-11** (D-3 turunan atau diketik). Jangan pilih sendiri.
+   - B-06/B-07/B-09 wajib dibaca ulang dengan **deviasi X-07**: penutupan
+     periode berhenti mengunci.
+4. **O48** berjalan terus sebagai pekerjaan, bukan pertanyaan: setiap kali sebuah
+   halaman butuh tabel dari ledger §42, tabel itu dapat arm-nya dan barisnya
+   dicoret dari daftar — dalam commit yang sama.
+
+## 7. Jebakan lingkungan — tambahan atas §5.1
+
+Postgres di-SIGKILL **lagi** di tengah sesi ini (SESI6 §3.2, kambuh). Gejalanya
+kali ini bukan test merah melainkan `pg_isready` menolak koneksi begitu saja.
+`service postgresql start` + set ulang password menyelesaikannya; DB `cdps`
+selamat, tapi jangan berasumsi begitu — `npm run db:rebuild -- --yes` murah.

@@ -1697,13 +1697,20 @@ function rowToBrief(r: BriefRow): Brief {
   };
 }
 
-/** loadBrief reads one Brief (no lock) plus the owning AM, for the read path. */
+/**
+ * loadBrief reads one Brief (no lock) plus the owning AM, for the read path.
+ *
+ * O52: the owning AM comes from `private.brief_owner_am`, not from
+ * `join services join clients`. Those two policies have no execution-division
+ * arm, so the join dropped the row entirely and the page answered **404** for
+ * the very division the Brief was assigned to — while `canSeeBrief` below was
+ * saying yes. The Brief row itself survives RLS on its own (`briefs` has the
+ * division arm), so the only thing that ever needed opening was this one column.
+ */
 async function loadBrief(sql: Queryable, briefId: string): Promise<{ brief: Brief; ownerAm: string | null }> {
   const rows = await sql<BriefRow[]>`
-    select ${briefCols(sql)}, c.assigned_am_id
+    select ${briefCols(sql)}, private.brief_owner_am(b.id) as assigned_am_id
       from briefs b
-      join services sv on sv.id = b.service_id
-      join clients c on c.id = sv.client_id
      where b.id = ${briefId}`;
   if (rows.length === 0) {
     throw new NotFoundError(MSG_BRIEF_NOT_FOUND);

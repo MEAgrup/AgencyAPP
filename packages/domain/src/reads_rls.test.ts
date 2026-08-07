@@ -23,7 +23,9 @@ import { permission } from '@cdps/core';
 import { createClient, withClaims, type Sql } from '@cdps/db';
 import { leadsDatabase, poolBoard } from './leads';
 import { listClients } from './client';
-import { listStrategies, serviceQueue, type Actor } from './account';
+import { getBrief, listStrategies, serviceQueue, type Actor } from './account';
+import { getAsset } from './creative';
+import { staffLanding } from './portal';
 import { reminderDashboard } from './finance';
 import { allowedTransitions } from './engine';
 import { getAttempt } from './sales';
@@ -279,6 +281,129 @@ describeDb('read models under RLS (O37)', () => {
       await sql`delete from services where id = ${SVC}`;
       await sql`delete from contracts where client_id = ${CLI}`;
       await sql`delete from clients where id = ${CLI}`;
+    }
+  });
+
+  /**
+   * O52 (QA 2026-08-04, keputusan pemilik 2026-08-07 → pilihan (b)).
+   *
+   * `loadBrief`/`assetSelect` joined `services` + `clients` for one column —
+   * `clients.assigned_am_id`. Neither policy has an execution-division arm, so
+   * the join returned ZERO rows for the very division the Brief was assigned to
+   * and the detail page answered **404 `[aset tidak ditemukan]`** — not 403.
+   * `canSeeBrief` was saying yes the whole time; RLS on a JOINED table was
+   * contradicting the domain gate.
+   *
+   * The premise is asserted first: if `services`/`clients` ever open up to
+   * execution divisions, this test stops proving anything and someone must know.
+   */
+  it('lets the execution division open its own Brief and Asset — the O52 404', async () => {
+    const CLI = 'CLI-ZZR-0052';
+    const SVC = 'SVC-ZZR-0052';
+    const BRF = 'BRF-ZZR-0052';
+    const AST = 'AST-ZZR-0052';
+    const AM = 'ZZR-AM52';
+    const CRE = 'ZZR-CRE52';
+    await sql`
+      insert into clients (id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, assigned_am_id,
+                           released_to_account_at, created_by)
+      values (${CLI}, 'RLS O52 Fixture', 'Ibu RLS', 'Jakarta', 'Fashion', 'https://shopee/zzr52',
+              '9000000.00', '12000000.00', ${OWNER}, ${OWNER}, ${AM}, now(), ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                            commission_rule, status, created_by)
+      values (${SVC}, ${CLI}, 'MSV-ZZR-0052', 1, 'rls o52 service', '9000000.00',
+              '10% of standard price', 'Ongoing', ${AM})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into briefs (id, service_id, title, status, assigned_division, created_by)
+      values (${BRF}, ${SVC}, 'rls o52 brief', '[Draft]', 'Creative', ${AM})
+      on conflict (id) do nothing`;
+    // PIC and creator are STAFF, never the lead — so the lead's access can only
+    // come from the division arm, not from ownership.
+    await sql`
+      insert into assets (id, brief_id, asset_type, sequence_no, assigned_pic, status, created_by)
+      values (${AST}, ${BRF}, 'Video', 1, ${CRE}, '[To Do]', ${CRE})
+      on conflict (id) do nothing`;
+
+    const leadClaims = claims({ employeeId: 'ZZR-CRELEAD', division: 'Creative', level: 'lead' });
+    const leadActor = actor('ZZR-CRELEAD', 'Creative', 'lead');
+    try {
+      // Premise: the joined tables really are invisible to this actor.
+      const invisible = await withClaims(sql, leadClaims, (tx) =>
+        tx<{ svc: string; cli: string }[]>`
+          select (select count(*) from services where id = ${SVC}) as svc,
+                 (select count(*) from clients  where id = ${CLI}) as cli`,
+      );
+      expect(
+        Number(invisible[0].svc) + Number(invisible[0].cli),
+        'premise broken: if the execution division can read services/clients, O52 was silently decided as option (a)',
+      ).toBe(0);
+
+      const brief = await withClaims(sql, leadClaims, (tx) => getBrief(tx, leadActor, BRF));
+      expect(brief.id).toBe(BRF);
+
+      const asset = await withClaims(sql, leadClaims, (tx) => getAsset(tx, leadActor, AST));
+      expect(asset.id).toBe(AST);
+
+      // …and the AM the gate needs still arrives: a helper that returned NULL
+      // would let the page render while quietly breaking every owner check.
+      const ownerAm = await withClaims(sql, leadClaims, (tx) =>
+        tx<{ am: string | null }[]>`select private.brief_owner_am(${BRF}) as am`,
+      );
+      expect(ownerAm[0].am).toBe(AM);
+    } finally {
+      await sql`delete from assets where id = ${AST}`;
+      await sql`delete from briefs where id = ${BRF}`;
+      await sql`delete from services where id = ${SVC}`;
+      await sql`delete from contracts where client_id = ${CLI}`;
+      await sql`delete from clients where id = ${CLI}`;
+    }
+  });
+
+  /**
+   * O51 (found 2026-08-03, keputusan pemilik 2026-08-07 → pilihan (a)).
+   *
+   * `performance.staffRoleType` joined `role_mappings` — a table the baseline
+   * revokes from `authenticated` entirely — on a READ path, so `GET /portal/me`
+   * raised 42501, `mapError` did not map it, and `/portal` answered 500 for
+   * EVERY actor. `staffLanding` swallows only `performance.NotFoundError`, so
+   * the Postgres error went straight through.
+   *
+   * Asserted as "resolves", not as a score: the landing page is allowed to have
+   * no running score (no KPI Profile). What it is never allowed to do is throw a
+   * privilege error.
+   */
+  it('renders the portal landing under RLS without hitting role_mappings — the O51 500', async () => {
+    const STAFF = 'ZZR-PORTAL';
+    await sql`
+      insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+      values (${STAFF}, 'RLS Portal Fixture', 'zzr.portal@example.test', 'ACCOUNT', 'ZZR ACCOUNT EXEC', true, 'SYSTEM')
+      on conflict (employee_id) do nothing`;
+    await sql`
+      insert into role_mappings (divisi, jabatan, division, level, created_by)
+      values ('ACCOUNT', 'ZZR ACCOUNT EXEC', 'Account', 'staff', 'SYSTEM')
+      on conflict do nothing`;
+    try {
+      const landing = await withClaims(
+        sql,
+        claims({ employeeId: STAFF, division: 'Account', level: 'staff' }),
+        (tx) => staffLanding(tx, actor(STAFF, 'Account', 'staff'), new Date()),
+      );
+      expect(landing.employeeId).toBe(STAFF);
+
+      // The table itself stays shut — the fix opened the ANSWER, not the map of
+      // who-can-do-what across the company.
+      await expect(
+        withClaims(sql, claims({ employeeId: STAFF, division: 'Account', level: 'staff' }), (tx) =>
+          tx`select 1 from role_mappings limit 1`,
+        ),
+      ).rejects.toThrow();
+    } finally {
+      await sql`delete from role_mappings where divisi = 'ACCOUNT' and jabatan = 'ZZR ACCOUNT EXEC'`;
+      await sql`delete from employees where employee_id = ${STAFF}`;
     }
   });
 
