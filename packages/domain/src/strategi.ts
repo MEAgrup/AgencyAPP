@@ -338,6 +338,19 @@ export const MSG_TRAFFIC_MIX_SUM = '[komposisi sumber trafik wajib berjumlah 100
 export const MSG_TOP_SKU_REQUIRED = '[minimal satu SKU teratas wajib diisi per channel]';
 /** B-9.1 — at least one competitor; C-4 compares against it. */
 export const MSG_KOMPETITOR_REQUIRED = '[minimal satu kompetitor wajib diisi per channel]';
+/**
+ * A-11 / A-14 / B-5.3 / B-8.1 / B-8.2 — the O58 gate. Deliberately NOT the
+ * generic "belum lengkap": for these five the list being empty is not itself the
+ * problem, so telling the AM "incomplete" points at a field that may be
+ * correctly empty. The message has to name the second way to answer, or the
+ * checkbox O58 bought is invisible to the person who needs it.
+ *
+ * Coined here (the PRD does not quote a string for a field it does not define);
+ * logged in DECISIONS.md 2026-08-07 alongside the O58 decision, following the
+ * MSG_USP_MIN / MSG_TOP_SKU_REQUIRED precedent.
+ */
+export const MSG_TIDAK_ADA_BELUM_DIJAWAB =
+  '[pertanyaan ini wajib dijawab — isi daftarnya atau centang "tidak ada"]';
 
 // ---------------------------------------------------------------------------
 // Section C — Diagnosa & Akar Masalah (A-07)
@@ -563,11 +576,19 @@ export interface StrategiKonteks {
   /** A-10 — §4.1 HARD-INTERNAL, never shareable. */
   riwayatAgensi: string | null;
   pantanganKlien: string[];
+  /**
+   * A-11 (O58) — the AM asserting the client has NO restrictions. An empty
+   * `pantanganKlien` with this false means "not answered yet"; with this true it
+   * means "asked, and the answer is none". The submit gate reads both.
+   */
+  pantanganKlienTidakAda: boolean;
   decisionMaker: StrategiDecisionMaker[];
   /** A-13 — §4.1 default `Internal Saja`. */
   slaKlienJam: number | null;
   slaKlienCatatan: string | null;
   asetDariKlien: ClientAsset[];
+  /** A-14 (O58) — the AM asserting the client supplies NO assets. */
+  asetDariKlienTidakAda: boolean;
   asetCatatan: string | null;
 }
 
@@ -664,6 +685,8 @@ export interface StrategiChannel {
 
   // B-5 Iklan (the per-month figures live in `baseline`)
   tipeKampanye: CampaignType[];
+  /** B-5.3 (O58) — the AM asserting this channel runs NO campaigns. */
+  tipeKampanyeTidakAda: boolean;
   jumlahKampanyeAktif: number | null;
   topKeyword: StrategiTopKeyword[];
   kampanyeBoncos: StrategiKampanyeBoncos[];
@@ -692,7 +715,11 @@ export interface StrategiChannel {
 
   // B-8 Promo & Program Platform
   voucherAktif: StrategiVoucher[];
+  /** B-8.1 (O58) — the AM asserting there are NO running vouchers. */
+  voucherAktifTidakAda: boolean;
   programPlatform: PlatformProgram[];
+  /** B-8.2 (O58) — the AM asserting the store joined NO platform programmes. */
+  programPlatformTidakAda: boolean;
   bebanPromoPersen: number | null;
 
   // B-9 Kompetitor di Channel Ini
@@ -947,10 +974,12 @@ interface StrategiRow {
   ekspektasi_klien: string | null;
   riwayat_agensi: string | null;
   pantangan_klien: unknown;
+  pantangan_klien_tidak_ada: boolean;
   decision_maker: unknown;
   sla_klien_jam: string | null;
   sla_klien_catatan: string | null;
   aset_dari_klien: unknown;
+  aset_dari_klien_tidak_ada: boolean;
   aset_catatan: string | null;
 }
 
@@ -1003,10 +1032,12 @@ function rowToStrategi(r: StrategiRow): Strategi {
     ekspektasiKlien: r.ekspektasi_klien,
     riwayatAgensi: r.riwayat_agensi,
     pantanganKlien: strArray(r.pantangan_klien),
+    pantanganKlienTidakAda: r.pantangan_klien_tidak_ada,
     decisionMaker: decisionMakersOf(r.decision_maker),
     slaKlienJam: numOrNull(r.sla_klien_jam),
     slaKlienCatatan: r.sla_klien_catatan,
     asetDariKlien: strArray(r.aset_dari_klien) as ClientAsset[],
+    asetDariKlienTidakAda: r.aset_dari_klien_tidak_ada,
     asetCatatan: r.aset_catatan,
   };
 }
@@ -1220,6 +1251,7 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
       catatan_penalti: string | null;
       tema_keluhan: unknown;
       tipe_kampanye: unknown;
+      tipe_kampanye_tidak_ada: boolean;
       jumlah_kampanye_aktif: number | null;
       top_keyword: unknown;
       kampanye_boncos: unknown;
@@ -1241,7 +1273,9 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
       studio_live: string | null;
       studio_catatan: string | null;
       voucher_aktif: unknown;
+      voucher_aktif_tidak_ada: boolean;
       program_platform: unknown;
+      program_platform_tidak_ada: boolean;
       beban_promo_persen: string | null;
       kompetitor: unknown;
       kompetitor_lebih_baik: unknown;
@@ -1327,6 +1361,7 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
       catatanPenalti: c.catatan_penalti,
       temaKeluhan: strArray(c.tema_keluhan),
       tipeKampanye: strArray(c.tipe_kampanye) as CampaignType[],
+      tipeKampanyeTidakAda: c.tipe_kampanye_tidak_ada,
       jumlahKampanyeAktif: c.jumlah_kampanye_aktif,
       topKeyword: topKeywordsOf(c.top_keyword),
       kampanyeBoncos: boncosOf(c.kampanye_boncos),
@@ -1348,7 +1383,9 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
       studioLive: c.studio_live as StudioState | null,
       studioCatatan: c.studio_catatan,
       voucherAktif: vouchersOf(c.voucher_aktif),
+      voucherAktifTidakAda: c.voucher_aktif_tidak_ada,
       programPlatform: strArray(c.program_platform) as PlatformProgram[],
+      programPlatformTidakAda: c.program_platform_tidak_ada,
       bebanPromoPersen: numOrNull(c.beban_promo_persen),
       kompetitor: kompetitorsOf(c.kompetitor),
       kompetitorLebihBaik: strArray(c.kompetitor_lebih_baik) as CompetitorEdge[],
@@ -1814,10 +1851,12 @@ export interface KonteksInput {
   ekspektasiKlien?: string | null;
   riwayatAgensi?: string | null;
   pantanganKlien?: string[];
+  pantanganKlienTidakAda?: boolean;
   decisionMaker?: StrategiDecisionMaker[];
   slaKlienJam?: number | null;
   slaKlienCatatan?: string | null;
   asetDariKlien?: string[];
+  asetDariKlienTidakAda?: boolean;
   asetCatatan?: string | null;
 }
 
@@ -1860,10 +1899,12 @@ export async function saveKonteks(
              ekspektasi_klien = ${k.ekspektasiKlien},
              riwayat_agensi = ${k.riwayatAgensi},
              pantangan_klien = ${k.pantanganKlien as never},
+             pantangan_klien_tidak_ada = ${k.pantanganKlienTidakAda},
              decision_maker = ${k.decisionMaker.map(dmToJson) as never},
              sla_klien_jam = ${k.slaKlienJam},
              sla_klien_catatan = ${k.slaKlienCatatan},
              aset_dari_klien = ${k.asetDariKlien as never},
+             aset_dari_klien_tidak_ada = ${k.asetDariKlienTidakAda},
              aset_catatan = ${k.asetCatatan}
        where id = ${id}`;
     await ex.audit.insertAudit({
@@ -1969,6 +2010,17 @@ function normalizeKonteks(input: KonteksInput): StrategiKonteks {
       throw new ValidationError(MSG_INCOMPLETE);
     }
   }
+  // O58 — "tidak ada" is an ANSWER, so it cannot coexist with items. The DB
+  // CHECKs reject the contradiction too; catching it here means the AM gets the
+  // BI message instead of a constraint-violation 500. Resolving it silently (by
+  // clearing one side) would be worse: which side the AM meant is exactly the
+  // thing we cannot know.
+  const pantangan = list(input.pantanganKlien);
+  const pantanganTidakAda = input.pantanganKlienTidakAda === true;
+  const asetTidakAda = input.asetDariKlienTidakAda === true;
+  if ((pantanganTidakAda && pantangan.length > 0) || (asetTidakAda && aset.length > 0)) {
+    throw new ValidationError(MSG_INCOMPLETE);
+  }
   // A-12: a row without a name and a role names nobody. Fully blank rows are the
   // form's placeholder and are dropped; a half-typed one is a real mistake.
   const dm = (input.decisionMaker ?? [])
@@ -1998,11 +2050,13 @@ function normalizeKonteks(input: KonteksInput): StrategiKonteks {
     titikKirimDetail: nullIfBlank(input.titikKirimDetail),
     ekspektasiKlien: nullIfBlank(input.ekspektasiKlien),
     riwayatAgensi: nullIfBlank(input.riwayatAgensi),
-    pantanganKlien: list(input.pantanganKlien),
+    pantanganKlien: pantangan,
+    pantanganKlienTidakAda: pantanganTidakAda,
     decisionMaker: dm,
     slaKlienJam: nonNeg(input.slaKlienJam),
     slaKlienCatatan: nullIfBlank(input.slaKlienCatatan),
     asetDariKlien: aset as ClientAsset[],
+    asetDariKlienTidakAda: asetTidakAda,
     asetCatatan: nullIfBlank(input.asetCatatan),
   };
 }
@@ -2164,6 +2218,7 @@ export interface ChannelInput {
   catatanPenalti?: string | null;
   temaKeluhan?: string[];
   tipeKampanye?: string[];
+  tipeKampanyeTidakAda?: boolean;
   jumlahKampanyeAktif?: number | null;
   topKeyword?: StrategiTopKeyword[];
   kampanyeBoncos?: StrategiKampanyeBoncos[];
@@ -2184,7 +2239,9 @@ export interface ChannelInput {
   studioLive?: StudioState | null;
   studioCatatan?: string | null;
   voucherAktif?: StrategiVoucher[];
+  voucherAktifTidakAda?: boolean;
   programPlatform?: string[];
+  programPlatformTidakAda?: boolean;
   bebanPromoPersen?: number | null;
   kompetitor?: StrategiKompetitor[];
   kompetitorLebihBaik?: string[];
@@ -2394,13 +2451,15 @@ export async function saveChannels(
            sku_stok_kritis, listing_layak_persen,
            rating_toko, jumlah_ulasan, chat_response_rate_persen, chat_response_menit,
            pesanan_terlambat_persen, poin_penalti, catatan_penalti, tema_keluhan,
-           tipe_kampanye, jumlah_kampanye_aktif, top_keyword, kampanye_boncos,
+           tipe_kampanye, tipe_kampanye_tidak_ada,
+           jumlah_kampanye_aktif, top_keyword, kampanye_boncos,
            affiliate_aktif_30hari, gmv_affiliate, gmv_affiliate_persen,
            komisi_open_persen, komisi_target_persen, top_kreator,
            program_sampel, program_sampel_catatan,
            jumlah_video_per_bulan, total_views, gmv_video,
            jam_live_per_bulan, gmv_live, host_live, studio_live, studio_catatan,
-           voucher_aktif, program_platform, beban_promo_persen,
+           voucher_aktif, voucher_aktif_tidak_ada,
+           program_platform, program_platform_tidak_ada, beban_promo_persen,
            kompetitor, kompetitor_lebih_baik, kompetitor_catatan, celah_kompetitor,
            created_by)
         values
@@ -2424,7 +2483,8 @@ export async function saveChannels(
            ${c.chatResponseRatePersen ?? null}, ${c.chatResponseMenit ?? null},
            ${c.pesananTerlambatPersen ?? null}, ${c.poinPenalti ?? null},
            ${nullIfBlank(c.catatanPenalti)}, ${(c.temaKeluhan ?? []) as never},
-           ${(c.tipeKampanye ?? []) as never}, ${c.jumlahKampanyeAktif ?? null},
+           ${(c.tipeKampanye ?? []) as never}, ${c.tipeKampanyeTidakAda === true},
+           ${c.jumlahKampanyeAktif ?? null},
            ${(c.topKeyword ?? []).map(keywordToJson) as never},
            ${(c.kampanyeBoncos ?? []).map(boncosToJson) as never},
            ${c.affiliateAktif30Hari ?? null}, ${c.gmvAffiliate ?? null},
@@ -2437,7 +2497,9 @@ export async function saveChannels(
            ${nullIfBlank(c.hostLive)}, ${nullIfBlank(c.studioLive)},
            ${nullIfBlank(c.studioCatatan)},
            ${(c.voucherAktif ?? []).map(voucherToJson) as never},
-           ${(c.programPlatform ?? []) as never}, ${c.bebanPromoPersen ?? null},
+           ${c.voucherAktifTidakAda === true},
+           ${(c.programPlatform ?? []) as never}, ${c.programPlatformTidakAda === true},
+           ${c.bebanPromoPersen ?? null},
            ${(c.kompetitor ?? []).map(kompetitorToJson) as never},
            ${(c.kompetitorLebihBaik ?? []) as never}, ${nullIfBlank(c.kompetitorCatatan)},
            ${nullIfBlank(c.celahKompetitor)},
@@ -3153,10 +3215,18 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
   if (head.usp.length < USP_MIN) {
     out.push({ kode: 'A-5', pesan: MSG_USP_MIN });
   }
-  // A-11 / A-14 are `W` list fields whose honest answer may be "none", and CDPS
-  // has no way to say "none" other than an empty list — so they are NOT gated
-  // here. See DECISIONS O58: adding an explicit "tidak ada" checkbox is a field
-  // the PRD does not define, and inventing one is the more expensive mistake.
+  // A-11 / A-14 — `W` list fields whose honest answer may be "none". Since O58
+  // (owner decision 2026-08-07, option a) CDPS can SAY "none": each carries an
+  // explicit `…TidakAda` flag. So the gate is no longer "is the list empty" but
+  // "was the question answered at all" — filled list XOR the flag. That is what
+  // makes a submitted Strategi with no `pantangan` distinguishable from one
+  // where nobody ever asked.
+  for (const [kode, terjawab] of [
+    ['A-11', head.pantanganKlien.length > 0 || head.pantanganKlienTidakAda],
+    ['A-14', head.asetDariKlien.length > 0 || head.asetDariKlienTidakAda],
+  ] as const) {
+    if (!terjawab) out.push({ kode, pesan: MSG_TIDAK_ADA_BELUM_DIJAWAB });
+  }
 
   const channels = await sql<
     {
@@ -3194,6 +3264,12 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
       host_live: string | null;
       studio_live: string | null;
       beban_promo_persen: string | null;
+      tipe_kampanye: unknown;
+      tipe_kampanye_tidak_ada: boolean;
+      voucher_aktif: unknown;
+      voucher_aktif_tidak_ada: boolean;
+      program_platform: unknown;
+      program_platform_tidak_ada: boolean;
       kompetitor: unknown;
       kompetitor_lebih_baik: unknown;
       celah_kompetitor: string | null;
@@ -3368,6 +3444,12 @@ function kekuranganSectionB(c: {
   host_live: string | null;
   studio_live: string | null;
   beban_promo_persen: string | null;
+  tipe_kampanye: unknown;
+  tipe_kampanye_tidak_ada: boolean;
+  voucher_aktif: unknown;
+  voucher_aktif_tidak_ada: boolean;
+  program_platform: unknown;
+  program_platform_tidak_ada: boolean;
   kompetitor: unknown;
   kompetitor_lebih_baik: unknown;
   celah_kompetitor: string | null;
@@ -3396,6 +3478,10 @@ function kekuranganSectionB(c: {
       c.poin_penalti,
     ),
   );
+  // B-5 / B-8 keep gating the companion NUMBER: a valid `0` proves the question
+  // was reached, and that is a different proof path from the checkbox. O58 adds
+  // the list side rather than replacing it — both are cheap, and either one
+  // alone leaves a hole.
   grup('B-5', ada(c.jumlah_kampanye_aktif));
   grup(
     'B-6',
@@ -3422,6 +3508,18 @@ function kekuranganSectionB(c: {
   );
   grup('B-8', ada(c.beban_promo_persen));
   grup('B-9', ada(c.celah_kompetitor) && strArray(c.kompetitor_lebih_baik).length > 0);
+
+  // O58 — filled list XOR "tidak ada". Each gets its own code so the AM is sent
+  // to the one question that is actually unanswered, not to a whole group.
+  for (const [kode, terjawab] of [
+    ['B-5.3', strArray(c.tipe_kampanye).length > 0 || c.tipe_kampanye_tidak_ada],
+    ['B-8.1', objArray(c.voucher_aktif).length > 0 || c.voucher_aktif_tidak_ada],
+    ['B-8.2', strArray(c.program_platform).length > 0 || c.program_platform_tidak_ada],
+  ] as const) {
+    if (!terjawab) {
+      out.push({ kode: `${kode}/${c.channel}`, pesan: MSG_TIDAK_ADA_BELUM_DIJAWAB });
+    }
+  }
 
   if (objArray(c.top_sku).length === 0) {
     out.push({ kode: `B-3.3/${c.channel}`, pesan: MSG_TOP_SKU_REQUIRED });
@@ -3628,8 +3726,8 @@ export async function openRevision(
          nama_brand, kategori_utama, sub_kategori, model_bisnis, margin_kotor_persen,
          posisi_harga, usp, kapasitas_stok, lead_time_restock_hari, plafon_unit_per_bulan,
          titik_kirim_kota, titik_kirim_detail, ekspektasi_klien, riwayat_agensi,
-         pantangan_klien, decision_maker, sla_klien_jam, sla_klien_catatan,
-         aset_dari_klien, aset_catatan)
+         pantangan_klien, pantangan_klien_tidak_ada, decision_maker, sla_klien_jam,
+         sla_klien_catatan, aset_dari_klien, aset_dari_klien_tidak_ada, aset_catatan)
       select ${newId}, service_id, client_id, versi_no + 1, ${induk}, id,
              ${STRATEGI_DRAFT_REVISI}, durasi_kontrak_bulan, tanggal_mulai_kontrak,
              tanggal_akhir_kontrak, tanggal_mulai_siklus, siklus_terkunci,
@@ -3637,8 +3735,8 @@ export async function openRevision(
              nama_brand, kategori_utama, sub_kategori, model_bisnis, margin_kotor_persen,
              posisi_harga, usp, kapasitas_stok, lead_time_restock_hari, plafon_unit_per_bulan,
              titik_kirim_kota, titik_kirim_detail, ekspektasi_klien, riwayat_agensi,
-             pantangan_klien, decision_maker, sla_klien_jam, sla_klien_catatan,
-             aset_dari_klien, aset_catatan
+             pantangan_klien, pantangan_klien_tidak_ada, decision_maker, sla_klien_jam,
+             sla_klien_catatan, aset_dari_klien, aset_dari_klien_tidak_ada, aset_catatan
         from strategi where id = ${head.id}`;
 
     await copyChildren(tx, head.id, newId, actor.employeeId);
@@ -3772,11 +3870,14 @@ async function copyChildren(
        sku_listed, sku_aktif, sku_pareto_80, top_sku, sku_slow_moving, sku_stok_kritis,
        listing_layak_persen, rating_toko, jumlah_ulasan, chat_response_rate_persen,
        chat_response_menit, pesanan_terlambat_persen, poin_penalti, catatan_penalti,
-       tema_keluhan, tipe_kampanye, jumlah_kampanye_aktif, top_keyword, kampanye_boncos,
+       tema_keluhan, tipe_kampanye, tipe_kampanye_tidak_ada,
+       jumlah_kampanye_aktif, top_keyword, kampanye_boncos,
        affiliate_aktif_30hari, gmv_affiliate, gmv_affiliate_persen, komisi_open_persen,
        komisi_target_persen, top_kreator, program_sampel, program_sampel_catatan,
        jumlah_video_per_bulan, total_views, gmv_video, jam_live_per_bulan, gmv_live,
-       host_live, studio_live, studio_catatan, voucher_aktif, program_platform,
+       host_live, studio_live, studio_catatan,
+       voucher_aktif, voucher_aktif_tidak_ada,
+       program_platform, program_platform_tidak_ada,
        beban_promo_persen, kompetitor, kompetitor_lebih_baik, kompetitor_catatan,
        celah_kompetitor, created_by)
     select ${toId}, channel, channel_lain, status_channel, nama_toko, url_toko,
@@ -3789,11 +3890,14 @@ async function copyChildren(
            sku_listed, sku_aktif, sku_pareto_80, top_sku, sku_slow_moving, sku_stok_kritis,
            listing_layak_persen, rating_toko, jumlah_ulasan, chat_response_rate_persen,
            chat_response_menit, pesanan_terlambat_persen, poin_penalti, catatan_penalti,
-           tema_keluhan, tipe_kampanye, jumlah_kampanye_aktif, top_keyword, kampanye_boncos,
+           tema_keluhan, tipe_kampanye, tipe_kampanye_tidak_ada,
+           jumlah_kampanye_aktif, top_keyword, kampanye_boncos,
            affiliate_aktif_30hari, gmv_affiliate, gmv_affiliate_persen, komisi_open_persen,
            komisi_target_persen, top_kreator, program_sampel, program_sampel_catatan,
            jumlah_video_per_bulan, total_views, gmv_video, jam_live_per_bulan, gmv_live,
-           host_live, studio_live, studio_catatan, voucher_aktif, program_platform,
+           host_live, studio_live, studio_catatan,
+           voucher_aktif, voucher_aktif_tidak_ada,
+           program_platform, program_platform_tidak_ada,
            beban_promo_persen, kompetitor, kompetitor_lebih_baik, kompetitor_catatan,
            celah_kompetitor, ${actorId}
       from strategi_channel where strategi_id = ${fromId} order by id asc

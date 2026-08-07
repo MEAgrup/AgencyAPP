@@ -248,10 +248,14 @@ export interface Strategi {
   ekspektasi_klien: string | null;
   riwayat_agensi: string | null;
   pantangan_klien: string[];
+  /** A-11 (O58) — "tidak ada" as an explicit answer, not an empty list. */
+  pantangan_klien_tidak_ada: boolean;
   decision_maker: StrategiDecisionMaker[];
   sla_klien_jam: number | null;
   sla_klien_catatan: string | null;
   aset_dari_klien: string[];
+  /** A-14 (O58). */
+  aset_dari_klien_tidak_ada: boolean;
   aset_catatan: string | null;
 }
 
@@ -316,6 +320,8 @@ export interface StrategiChannel {
   catatan_penalti: string | null;
   tema_keluhan: string[];
   tipe_kampanye: string[];
+  /** B-5.3 (O58). */
+  tipe_kampanye_tidak_ada: boolean;
   jumlah_kampanye_aktif: number | null;
   top_keyword: StrategiTopKeyword[];
   kampanye_boncos: StrategiKampanyeBoncos[];
@@ -339,7 +345,11 @@ export interface StrategiChannel {
   studio_live: string | null;
   studio_catatan: string | null;
   voucher_aktif: StrategiVoucher[];
+  /** B-8.1 (O58). */
+  voucher_aktif_tidak_ada: boolean;
   program_platform: string[];
+  /** B-8.2 (O58). */
+  program_platform_tidak_ada: boolean;
   beban_promo_persen: number | null;
   kompetitor: StrategiKompetitor[];
   kompetitor_lebih_baik: string[];
@@ -528,10 +538,12 @@ export interface StrategiKonteksBody {
   ekspektasi_klien?: string | null;
   riwayat_agensi?: string | null;
   pantangan_klien?: string[];
+  pantangan_klien_tidak_ada?: boolean;
   decision_maker?: StrategiDecisionMaker[];
   sla_klien_jam?: number | null;
   sla_klien_catatan?: string | null;
   aset_dari_klien?: ClientAsset[];
+  aset_dari_klien_tidak_ada?: boolean;
   aset_catatan?: string | null;
 }
 

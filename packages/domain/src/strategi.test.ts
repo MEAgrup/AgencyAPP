@@ -36,6 +36,7 @@ import {
   MSG_DIAGNOSA_FIELD_ID_REQUIRED,
   MSG_DIAGNOSA_INVALID_FIELD_ID,
   MSG_DIAGNOSA_MISSING,
+  MSG_INCOMPLETE,
   MSG_KOMPETITOR_REQUIRED,
   MSG_NOT_PLAN_GATED,
   MSG_OUT_OF_SCOPE_REQUIRED,
@@ -46,6 +47,7 @@ import {
   MSG_RISIKO_STRUKTURAL_REQUIRED,
   MSG_STRATEGI_EXISTS,
   MSG_TARGET_WITHOUT_ASSUMPTION,
+  MSG_TIDAK_ADA_BELUM_DIJAWAB,
   MSG_TOP_SKU_REQUIRED,
   MSG_TRAFFIC_MIX_SUM,
   MSG_USP_MIN,
@@ -1116,6 +1118,110 @@ describeDb('checkCompleteness — every unmet rule, not the first one', () => {
     expect(codes).not.toContain('B-7/Tokopedia');
     // The launch plan and the access checklist are still required, though.
     expect(codes).toContain('A-15/Tokopedia');
+  });
+
+  // -------------------------------------------------------------------------
+  // O58 — "tidak ada" vs "belum dijawab" (owner decision 2026-08-07, option a).
+  //
+  // The five fields below are `W` lists whose honest answer may be empty. Before
+  // O58 an empty list passed the gate silently, and a submitted Strategi could
+  // not be told apart from one where the AM never reached the question. These
+  // tests exercise BOTH branches, because a gate that only ever sees the filled
+  // branch is indistinguishable from no gate at all — the whole suite stayed
+  // green when this gate was added precisely because the fixture fills all five.
+  // -------------------------------------------------------------------------
+  it('blocks A-11/A-14 left empty with no "tidak ada" — the pre-O58 silent pass', async () => {
+    const { strategiId } = await seedSubmittable();
+    await saveKonteks(sql, am(), strategiId, {
+      ...KONTEKS,
+      pantanganKlien: [],
+      asetDariKlien: [],
+    });
+    const missing = await checkCompleteness(sql, strategiId);
+    const byCode = Object.fromEntries(missing.map((m) => [m.kode, m.pesan]));
+    expect(byCode['A-11']).toBe(MSG_TIDAK_ADA_BELUM_DIJAWAB);
+    expect(byCode['A-14']).toBe(MSG_TIDAK_ADA_BELUM_DIJAWAB);
+  });
+
+  it('accepts A-11/A-14 empty ONCE "tidak ada" is ticked — "none" is now an answer', async () => {
+    const { strategiId } = await seedSubmittable();
+    await saveKonteks(sql, am(), strategiId, {
+      ...KONTEKS,
+      pantanganKlien: [],
+      pantanganKlienTidakAda: true,
+      asetDariKlien: [],
+      asetDariKlienTidakAda: true,
+    });
+    const codes = (await checkCompleteness(sql, strategiId)).map((m) => m.kode);
+    expect(codes).not.toContain('A-11');
+    expect(codes).not.toContain('A-14');
+  });
+
+  it('blocks B-5.3/B-8.1/B-8.2 left empty with no "tidak ada"', async () => {
+    const { strategiId } = await seedSubmittable();
+    await saveChannels(sql, am(), strategiId, [{
+      ...SHOPEE,
+      tipeKampanye: [],
+      jumlahKampanyeAktif: 0,
+      voucherAktif: [],
+      programPlatform: [],
+    }]);
+    const missing = await checkCompleteness(sql, strategiId);
+    const byCode = Object.fromEntries(missing.map((m) => [m.kode, m.pesan]));
+    expect(byCode['B-5.3/Shopee']).toBe(MSG_TIDAK_ADA_BELUM_DIJAWAB);
+    expect(byCode['B-8.1/Shopee']).toBe(MSG_TIDAK_ADA_BELUM_DIJAWAB);
+    expect(byCode['B-8.2/Shopee']).toBe(MSG_TIDAK_ADA_BELUM_DIJAWAB);
+    // The companion NUMBER is a separate proof path and stays satisfied by a
+    // valid 0 — O58 added the list gate, it did not replace the number gate.
+    expect(missing.map((m) => m.kode)).not.toContain('B-5/Shopee');
+  });
+
+  it('accepts B-5.3/B-8.1/B-8.2 empty ONCE "tidak ada" is ticked', async () => {
+    const { strategiId } = await seedSubmittable();
+    await saveChannels(sql, am(), strategiId, [{
+      ...SHOPEE,
+      tipeKampanye: [],
+      tipeKampanyeTidakAda: true,
+      jumlahKampanyeAktif: 0,
+      voucherAktif: [],
+      voucherAktifTidakAda: true,
+      programPlatform: [],
+      programPlatformTidakAda: true,
+    }]);
+    const codes = (await checkCompleteness(sql, strategiId)).map((m) => m.kode);
+    for (const k of ['B-5.3/Shopee', 'B-8.1/Shopee', 'B-8.2/Shopee']) {
+      expect(codes).not.toContain(k);
+    }
+  });
+
+  it('rejects "tidak ada" ticked ALONGSIDE a filled list — that is a contradiction, not an answer', async () => {
+    const { strategiId } = await seedSubmittable();
+    // Which side the AM meant is exactly what cannot be inferred, so this is
+    // refused rather than silently resolved by clearing one of them.
+    await expect(
+      saveKonteks(sql, am(), strategiId, {
+        ...KONTEKS,
+        pantanganKlien: ['tidak boleh diskon di bawah 20%'],
+        pantanganKlienTidakAda: true,
+      }),
+    ).rejects.toThrow(MSG_INCOMPLETE);
+    await expect(
+      saveKonteks(sql, am(), strategiId, {
+        ...KONTEKS,
+        asetDariKlien: ['foto_produk'],
+        asetDariKlienTidakAda: true,
+      }),
+    ).rejects.toThrow(MSG_INCOMPLETE);
+  });
+
+  it('refuses the same contradiction at the DB, not only in TS', async () => {
+    // Belt and braces: the TS guard gives the AM a BI message, but the CHECK is
+    // what makes the state unstorable by any path — including a future writer
+    // that forgets the guard.
+    const { strategiId } = await seedSubmittable();
+    await expect(
+      sql`update strategi set pantangan_klien_tidak_ada = true where id = ${strategiId}`,
+    ).rejects.toThrow(/ck_strategi_pantangan_tidak_ada/);
   });
 
   it('flags a hero-SKU list and a competitor list left empty', async () => {

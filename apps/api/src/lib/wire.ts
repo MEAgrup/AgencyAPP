@@ -2967,10 +2967,12 @@ export interface StrategiWire {
   ekspektasi_klien: string | null;
   riwayat_agensi: string | null;
   pantangan_klien: string[];
+  pantangan_klien_tidak_ada: boolean;
   decision_maker: StrategiDecisionMakerWire[];
   sla_klien_jam: number | null;
   sla_klien_catatan: string | null;
   aset_dari_klien: string[];
+  aset_dari_klien_tidak_ada: boolean;
   aset_catatan: string | null;
 }
 
@@ -3010,6 +3012,7 @@ export function strategiToWire(s: strategi.Strategi): StrategiWire {
     ekspektasi_klien: s.ekspektasiKlien,
     riwayat_agensi: s.riwayatAgensi,
     pantangan_klien: s.pantanganKlien,
+    pantangan_klien_tidak_ada: s.pantanganKlienTidakAda,
     decision_maker: s.decisionMaker.map((d) => ({
       nama: d.nama,
       jabatan: d.jabatan,
@@ -3019,6 +3022,7 @@ export function strategiToWire(s: strategi.Strategi): StrategiWire {
     sla_klien_jam: s.slaKlienJam,
     sla_klien_catatan: s.slaKlienCatatan,
     aset_dari_klien: s.asetDariKlien,
+    aset_dari_klien_tidak_ada: s.asetDariKlienTidakAda,
     aset_catatan: s.asetCatatan,
   };
 }
@@ -3083,6 +3087,7 @@ export interface StrategiChannelWire {
   catatan_penalti: string | null;
   tema_keluhan: string[];
   tipe_kampanye: string[];
+  tipe_kampanye_tidak_ada: boolean;
   jumlah_kampanye_aktif: number | null;
   top_keyword: StrategiTopKeywordWire[];
   kampanye_boncos: StrategiKampanyeBoncosWire[];
@@ -3105,7 +3110,9 @@ export interface StrategiChannelWire {
   studio_live: string | null;
   studio_catatan: string | null;
   voucher_aktif: StrategiVoucherWire[];
+  voucher_aktif_tidak_ada: boolean;
   program_platform: string[];
+  program_platform_tidak_ada: boolean;
   beban_promo_persen: number | null;
   kompetitor: StrategiKompetitorWire[];
   kompetitor_lebih_baik: string[];
@@ -3260,6 +3267,7 @@ export function strategiDetailToWire(d: strategi.StrategiDetail): StrategiDetail
       catatan_penalti: c.catatanPenalti,
       tema_keluhan: c.temaKeluhan,
       tipe_kampanye: c.tipeKampanye,
+      tipe_kampanye_tidak_ada: c.tipeKampanyeTidakAda,
       jumlah_kampanye_aktif: c.jumlahKampanyeAktif,
       top_keyword: c.topKeyword.map((k) => ({
         keyword: k.keyword,
@@ -3288,7 +3296,9 @@ export function strategiDetailToWire(d: strategi.StrategiDetail): StrategiDetail
         nilai: v.nilai,
         syarat: v.syarat,
       })),
+      voucher_aktif_tidak_ada: c.voucherAktifTidakAda,
       program_platform: c.programPlatform,
+      program_platform_tidak_ada: c.programPlatformTidakAda,
       beban_promo_persen: c.bebanPromoPersen,
       kompetitor: c.kompetitor.map((k) => ({
         nama: k.nama,
@@ -3530,6 +3540,7 @@ export function strategiKonteksFromWire(v: unknown): strategi.KonteksInput {
     ekspektasiKlien: strOrNull(b.ekspektasi_klien),
     riwayatAgensi: strOrNull(b.riwayat_agensi),
     pantanganKlien: strList(b.pantangan_klien),
+    pantanganKlienTidakAda: b.pantangan_klien_tidak_ada === true,
     decisionMaker: asRecords(b.decision_maker).map((d) => ({
       nama: str(d.nama),
       jabatan: str(d.jabatan),
@@ -3539,6 +3550,7 @@ export function strategiKonteksFromWire(v: unknown): strategi.KonteksInput {
     slaKlienJam: numOrNull(b.sla_klien_jam),
     slaKlienCatatan: strOrNull(b.sla_klien_catatan),
     asetDariKlien: strList(b.aset_dari_klien),
+    asetDariKlienTidakAda: b.aset_dari_klien_tidak_ada === true,
     asetCatatan: strOrNull(b.aset_catatan),
   };
 }
@@ -3612,6 +3624,7 @@ export function strategiChannelsFromWire(v: unknown): strategi.ChannelInput[] {
     catatanPenalti: strOrNull(c.catatan_penalti),
     temaKeluhan: strList(c.tema_keluhan),
     tipeKampanye: strList(c.tipe_kampanye),
+    tipeKampanyeTidakAda: c.tipe_kampanye_tidak_ada === true,
     jumlahKampanyeAktif: numOrNull(c.jumlah_kampanye_aktif),
     topKeyword: asRecords(c.top_keyword).map((k) => ({
       keyword: str(k.keyword),
@@ -3637,12 +3650,14 @@ export function strategiChannelsFromWire(v: unknown): strategi.ChannelInput[] {
     hostLive: (strOrNull(c.host_live) as strategi.LiveHost | null) ?? null,
     studioLive: (strOrNull(c.studio_live) as strategi.StudioState | null) ?? null,
     studioCatatan: strOrNull(c.studio_catatan),
+    voucherAktifTidakAda: c.voucher_aktif_tidak_ada === true,
     voucherAktif: asRecords(c.voucher_aktif).map((v2) => ({
       tipe: str(v2.tipe),
       nilai: str(v2.nilai),
       syarat: str(v2.syarat),
     })),
     programPlatform: strList(c.program_platform),
+    programPlatformTidakAda: c.program_platform_tidak_ada === true,
     bebanPromoPersen: numOrNull(c.beban_promo_persen),
     kompetitor: asRecords(c.kompetitor).map((k) => ({
       nama: str(k.nama),
