@@ -2528,6 +2528,88 @@ export function bulkReportToWire(r: leads.BulkReport): BulkReportWire {
   };
 }
 
+// --- M0 §5 negotiation proposal lines (request body → domain) ---
+
+/** One `lines[]` entry on the negotiation / resubmit / Edit Service bodies. */
+export interface ProposalLineBody {
+  master_service_id?: string;
+  proposed_price?: string;
+  commission_rule?: string;
+  payment_terms?: string;
+  quantity?: number;
+  amount?: string;
+}
+
+/**
+ * toProposalLines maps proposal-line bodies to domain lines, shared by the three
+ * routes that accept them (`/negotiation`, `/negotiation/resubmit`, `/services`).
+ *
+ * `proposed_price` / `commission_rule` are passed through UNTOUCHED including the
+ * empty string, because empty is meaningful: it is what tells the domain "price
+ * this line from the MSL at standard terms" (sales.isCustomLine). Defaulting them
+ * to anything else would turn a standard line into a custom one and, on the
+ * no-negotiation path, get the whole submission refused.
+ */
+export function toProposalLines(rows: ProposalLineBody[] | undefined): sales.ProposalLine[] {
+  return (rows ?? []).map((l) => ({
+    masterServiceId: l.master_service_id ?? '',
+    proposedPrice: l.proposed_price ?? '',
+    commissionRule: l.commission_rule ?? '',
+    paymentTerms: l.payment_terms,
+    quantity: l.quantity,
+    amount: l.amount,
+  }));
+}
+
+// --- M0 §3 batch lead registration (QA revisi 2026-08-07) ---
+
+/** Per-row verdict as web-internal's `BatchRegisterRowResult` expects it. */
+export interface BatchRegisterRowResultWire {
+  row_number: number;
+  lead_name: string;
+  phone_number: string;
+  registered: boolean;
+  lead_id: string;
+  attempt_id: string;
+  notice: string;
+  reason: string;
+}
+
+/** The batch-registration report as web-internal's `BatchRegisterReport` expects it. */
+export interface BatchRegisterReportWire {
+  registered: number;
+  rejected: number;
+  summary: string;
+  rows: BatchRegisterRowResultWire[];
+  rejections: BatchRegisterRowResultWire[];
+}
+
+/**
+ * Maps the batch-registration report. Every field is emitted explicitly — a
+ * MISSING key is worse than a null one here (CLAUDE.md §camelCase boundary): the
+ * page renders `notice` / `reason` per row, and an omitted `registered` would read
+ * as `false` and paint a successful row as rejected.
+ */
+export function batchRegisterReportToWire(r: leads.BatchRegisterReport): BatchRegisterReportWire {
+  const row = (v: leads.BatchRegisterRowResult): BatchRegisterRowResultWire => ({
+    row_number: v.rowNumber,
+    lead_name: v.leadName,
+    phone_number: v.phoneNumber,
+    registered: v.registered,
+    lead_id: v.leadId,
+    attempt_id: v.attemptId,
+    notice: v.notice,
+    reason: v.reason,
+  });
+  return {
+    registered: r.registered,
+    rejected: r.rejected,
+    summary: r.summary,
+    rows: r.rows.map(row),
+    rejections: r.rejections.map(row),
+  };
+}
+
 /** One logged prospect activity — web-internal's `ActivityRow`. */
 export interface ActivityWire {
   id: string;

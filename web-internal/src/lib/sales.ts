@@ -172,13 +172,23 @@ export interface QualifiedFormInput {
   services: ServiceSelection[];
 }
 
-// Body line for POST /attempts/{id}/negotiation|resubmit — mirrors
-// module0_sales.ProposalLine json tags.
+// Body line for POST /attempts/{id}/negotiation|negotiation/resubmit|services.
+//
+// DUA BENTUK, dan bedanya menentukan alurnya (lihat sales.isCustomLine di domain):
+//   - STANDAR — `proposed_price` dan `commission_rule` dikirim KOSONG. Server yang
+//     menghitung harganya dari versi MSL yang berlaku (subtotal kalkulator +
+//     commission_rule versi itu). Ini bentuk jasa yang BARU ditambahkan: klien
+//     hanya mengirim id + quantity, tidak pernah rupiah (CLAUDE.md #4).
+//   - CUSTOM — `proposed_price` diisi. Itu harga hasil negosiasi, jadi wajib lewat
+//     persetujuan Superior.
+// `quantity` / `amount` hanya dibaca untuk baris standar (masukan kalkulator).
 export interface ProposalLineInput {
   master_service_id: string;
   proposed_price: string;
   commission_rule: string;
   payment_terms?: string;
+  quantity?: number;
+  amount?: string;
 }
 
 export type NegotiationDecision = 'approve' | 'revise' | 'reject';
@@ -229,6 +239,12 @@ export const NQ_REASONS = [
   '[Tidak ada respon]',
   '[Lainnya ...]',
 ] as const;
+
+// Batas jasa per penawaran — cermin sales.MAX_SERVICES di domain (dinaikkan
+// 5 → 10 oleh keputusan pemilik 2026-08-07, docs/DECISIONS.md). Server tetap
+// otoritasnya (`[maksimal pilih 10 jasa saja!]`); konstanta ini hanya yang
+// menghentikan tombol "Tambah Jasa" dan menulis label "(maks N)".
+export const MAX_SERVICES = 10;
 
 // module0_sales — payment schemes (closing.go PaymentScheme*).
 export const PAYMENT_SCHEMES = [
@@ -308,6 +324,14 @@ export function acceptCounter(id: string): Promise<{ status: string }> {
 
 export function resubmitNegotiation(id: string, lines: ProposalLineInput[]): Promise<{ ok: boolean }> {
   return api.post<{ ok: boolean }>(`/attempts/${id}/negotiation/resubmit`, { lines });
+}
+
+// POST /attempts/{id}/services — Edit Service sebelum closing (M0 §5.1, keputusan
+// pemilik 2026-08-07). Menulis versi proposal BARU dengan set jasa final. Baris
+// standar saja ⇒ status tetap Approved/Auto Approved; ada harga custom ⇒ kembali
+// ke Negotiation - Pending Approval (server yang memutuskan).
+export function reviseServices(id: string, lines: ProposalLineInput[]): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/attempts/${id}/services`, { lines });
 }
 
 export function closeAttempt(id: string, input: ClosingInput): Promise<ClosingResult> {

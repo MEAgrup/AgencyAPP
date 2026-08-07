@@ -76,6 +76,8 @@ export const MSG_ALREADY_OWN_ATTEMPT = '[anda sudah memiliki prospek aktif untuk
 export const MSG_ACTIVE_OTHER_SALES_IMPORT = '[lead sedang diproses oleh sales lain (nama)]';
 /** NON-error notice returned on a co-pursuit join when others already pursue the lead. */
 export const MSG_LEAD_CO_WORKED = '[lead juga sedang dikerjakan sales lain]';
+/** Batch registration carrying more than MAX_REGISTER_BATCH prospects (QA revisi 2026-08-07). */
+export const MSG_MAX_REGISTER_BATCH = '[maksimal 5 lead per pendaftaran!]';
 
 // Delete-with-Head-ACC messages. NOT from the PRD (M1 has no delete door) — new
 // strings introduced by the owner decision of 2026-07-29 and logged verbatim in
@@ -115,6 +117,18 @@ export class BlockedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'LeadBlockedError';
+  }
+}
+
+/**
+ * More than MAX_REGISTER_BATCH prospects in one batch registration — carries the
+ * verbatim BI message; maps to HTTP 400 (a malformed submission, not a lifecycle
+ * conflict, so it is NOT a BlockedError/409).
+ */
+export class TooManyProspectsError extends Error {
+  constructor() {
+    super(MSG_MAX_REGISTER_BATCH);
+    this.name = 'LeadTooManyProspectsError';
   }
 }
 
@@ -520,6 +534,166 @@ export async function register(sql: Sql, actor: Actor, input: RegisterInput): Pr
     throw new BlockedError(committed.message);
   }
   return committed.result;
+}
+
+// ---------------------------------------------------------------------------
+// Batch registration door (QA revisi 2026-08-07, arahan Nerissa).
+//
+// One Source (and one Origin Campaign decision) covers up to MAX_REGISTER_BATCH
+// prospects, so a salesperson who scouted five contacts in one sitting registers
+// them with one click instead of retyping the Source five times.
+//
+// It is a LOOP OVER `register`, deliberately — not a second registration door:
+//   1. Every row gets the FULL M1 §5 dedup decision table, the §9.3 campaign
+//      rule, its own LEAD/PRSP ids and its own audit rows. There is exactly one
+//      set of registration rules in this file and batch does not fork it.
+//   2. ONE TRANSACTION PER ROW (as the import door, §3 rule 5): a duplicate on
+//      row 3 rejects itself and leaves rows 1, 2, 4, 5 committed. Wrapping the
+//      batch in one transaction would throw away four good leads over one
+//      duplicate — which is exactly what the salesperson was avoiding by
+//      batching.
+//   3. Two rows carrying the SAME phone need no new rule: the first mints the
+//      attempt, and the second meets the actor's own open attempt and is
+//      refused with MSG_ALREADY_OWN_ATTEMPT by `decide` — verbatim, per row.
+// ---------------------------------------------------------------------------
+
+/** Batch-registration cap: one Source, up to five prospects (QA revisi 2026-08-07). */
+export const MAX_REGISTER_BATCH = 5;
+
+/** One prospect line of a batch registration (Source/Campaign are batch-level). */
+export interface BatchProspect {
+  leadName: string;
+  phoneNumber: string;
+  email?: string;
+}
+
+/** A batch registration: the shared Source/Campaign + its prospect lines. */
+export interface BatchRegisterInput {
+  source?: string;
+  campaignId?: string;
+  outsideCampaign?: boolean;
+  prospects: BatchProspect[];
+}
+
+/** Per-row verdict of a batch registration (shaped like BulkRowResult). */
+export interface BatchRegisterRowResult {
+  rowNumber: number;
+  leadName: string;
+  phoneNumber: string;
+  registered: boolean;
+  leadId: string;
+  attemptId: string;
+  /** MSG_LEAD_CO_WORKED on a co-pursuit join; '' otherwise. */
+  notice: string;
+  /** verbatim BI rejection reason; '' for registered rows. */
+  reason: string;
+}
+
+/** The batch report: counts, summary line, all rows, and the rejects. */
+export interface BatchRegisterReport {
+  registered: number;
+  rejected: number;
+  summary: string;
+  rows: BatchRegisterRowResult[];
+  rejections: BatchRegisterRowResult[];
+}
+
+/** Renders the batch summary line (mirrors bulkSummary's shape). */
+export function batchSummary(registered: number, rejected: number): string {
+  return `[${registered} lead berhasil didaftarkan, ${rejected} ditolak]`;
+}
+
+/**
+ * registerBatch registers 1..MAX_REGISTER_BATCH prospects under ONE Source (M0
+ * §3 / M1 §4). Every row runs through `register`, so each carries the full dedup
+ * decision table, its own transaction, its own ids and its own audit trail.
+ *
+ * Batch-level failures throw and nothing is attempted: an empty/over-cap list
+ * (IncompleteError / MSG_MAX_REGISTER_BATCH) and the two campaign gates — the
+ * §9.3 conditional-mandatory rule and "the picked campaign does not exist" —
+ * because both describe the WHOLE submission, not one row. Checking them once up
+ * front is also what stops a stale campaign picker from producing five identical
+ * `[data tidak ditemukan]` rejections.
+ *
+ * Row-level failures never throw: a blocked duplicate or an incomplete line is a
+ * verdict in the report, and the other rows stay committed.
+ */
+export async function registerBatch(
+  sql: Sql,
+  actor: Actor,
+  input: BatchRegisterInput,
+): Promise<BatchRegisterReport> {
+  const prospects = input.prospects ?? [];
+  if (prospects.length === 0) {
+    throw new IncompleteError();
+  }
+  if (prospects.length > MAX_REGISTER_BATCH) {
+    throw new TooManyProspectsError();
+  }
+  const source = input.source?.trim() ?? '';
+  const campaignId = input.campaignId?.trim() ?? '';
+  const outsideCampaign = campaignId === '' && input.outsideCampaign === true;
+  // Same gate `register` applies per row, hoisted to the batch: the Source is
+  // shared, so a missing mandatory campaign is a property of the submission.
+  if (campaignId === '' && !outsideCampaign && campaignRequiredForSource(source)) {
+    throw new IncompleteError();
+  }
+  if (campaignId !== '') {
+    await requireSelectableCampaign(sql, campaignId);
+  }
+
+  const rows: BatchRegisterRowResult[] = [];
+  let registered = 0;
+  let rejected = 0;
+  for (let i = 0; i < prospects.length; i++) {
+    const p = prospects[i];
+    const base: BatchRegisterRowResult = {
+      rowNumber: i + 1,
+      leadName: (p.leadName ?? '').trim(),
+      phoneNumber: (p.phoneNumber ?? '').trim(),
+      registered: false,
+      leadId: '',
+      attemptId: '',
+      notice: '',
+      reason: '',
+    };
+    try {
+      const res = await register(sql, actor, {
+        leadName: p.leadName ?? '',
+        phoneNumber: p.phoneNumber ?? '',
+        email: p.email,
+        source,
+        campaignId: campaignId === '' ? undefined : campaignId,
+        outsideCampaign: outsideCampaign ? true : undefined,
+      });
+      registered++;
+      rows.push({
+        ...base,
+        registered: true,
+        leadId: res.lead.id,
+        attemptId: res.attempt.id,
+        notice: res.notice,
+      });
+    } catch (err) {
+      // BlockedError (dedup) and IncompleteError (missing name/phone) both carry
+      // the verbatim BI string the row must show. Anything else is degraded to
+      // the house default rather than leaking a driver error into the report —
+      // one broken row must not fail the batch (importOneRow does the same).
+      const reason = err instanceof BlockedError || err instanceof IncompleteError
+        ? err.message
+        : bi.INCOMPLETE_DATA;
+      rejected++;
+      rows.push({ ...base, reason });
+    }
+  }
+
+  return {
+    registered,
+    rejected,
+    summary: batchSummary(registered, rejected),
+    rows,
+    rejections: rows.filter((r) => !r.registered),
+  };
 }
 
 /**
