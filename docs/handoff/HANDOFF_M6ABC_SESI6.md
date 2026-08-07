@@ -4,23 +4,32 @@
 > tertinggi lebih dulu; sesi sebelumnya hanya untuk konteks sejarah.
 >
 > Sesi ini **mengeksekusi O57 / tiket B-00** (entitas `CONTRACT`) dan
-> **membuktikan** live ≡ repo dengan sidik jari struktural. Tidak ada keputusan
-> pemilik baru yang diminta.
+> **membuktikan** live ≡ repo dengan sidik jari struktural.
+>
+> **Pemilik: baca §7.** Di sana daftar lengkap yang menunggu Anda — 19 pertanyaan
+> `DECISIONS.md` yang belum selesai, disaring ke mana yang benar-benar butuh
+> jawaban Anda dan mana yang tidak. **§7.1 dijawab lebih dulu**: ia menentukan
+> pekerjaan ronde berikutnya.
 
 ## 0. Posisi persis — SALIN INI KE SESI BERIKUTNYA
 
 | | |
 |---|---|
 | Branch | `claude/handoff-m6abc-sesi5-2eq31i` |
-| Commit | `e8de6fa` + commit dokumen sesi ini |
-| PR aktif | **#104** (`B-00 / O57`), base `main` = `d384d95`, CI hijau |
+| Commit | `c8cb34c` (di atas `e8de6fa`) |
+| PR aktif | **#104** (`B-00 / O57`) — CI **hijau 5/5**, **menunggu merge pemilik** |
+| Base | `main` = `d384d95` (terkini, tidak tertinggal) |
 | Migrasi | **64 berkas**, live `CDPS SG` **sinkron penuh & terverifikasi** |
 | Gate | tabel **75** · prefix **30** · mesin **16** · event **31** |
 | Skor | M6A **57%** (8/14) · M6B **8%** (1/12) — papan skor di backlog §0a |
 
-**Ronde berikutnya BUKAN M6A/M6B.** Pemilik menjawab O56 pada 2026-08-07:
-kerjakan **CACAT 🔴 (O52 / O51 / O42)** lebih dulu, bukan A-13 maupun B-01.
-B-01 sudah tidak terblokir secara teknis — tapi ia bukan yang diminta berikutnya.
+**Tidak ada pekerjaan yang belum ter-push.** Working tree bersih; lokal ≡ remote.
+
+⚠️ **Ronde berikutnya belum pasti.** Backlog menulis bahwa pemilik menjawab O56
+pada 2026-08-07 ("kerjakan CACAT 🔴 O52/O51/O42 dulu, bukan A-13 / B-01"), **tapi
+`DECISIONS.md` tidak memuat entri padanannya** — dan di sanalah keputusan hidup
+(CLAUDE.md "Where truth lives"). Klaim itu **belum terverifikasi**. Lihat §7
+pertanyaan #1: konfirmasi ini dulu sebelum memilih pekerjaan ronde berikutnya.
 
 ## 1. Yang mendarat sesi ini — B-00 / O57
 
@@ -143,11 +152,38 @@ serahkan suite penuh ke CI.
 - **`emit()` katalog v2 belum dipasang** — katalognya ada (O55/X-01), pemanggilnya
   belum. Ini menunggu tiket yang memicunya, bukan pekerjaan tergantung.
 
+## 4b. Audit PR seluruh sesi (2026-08-07) — dua terbuka, nol menggantung diam-diam
+
+Repo punya **70+ branch lama** tanpa PR; semuanya sisa sesi yang kerjanya sudah
+masuk main lewat PR lain. Yang benar-benar terbuka hanya dua:
+
+| PR | Isi | Status | Tindakan |
+|---|---|---|---|
+| **#104** | B-00 / O57 entitas CONTRACT | CI hijau 5/5, base terkini | **Menunggu merge pemilik.** Preseden #102/#103 di-merge sendiri oleh `yohanagustian-del`, jadi sesi ini tidak merge sepihak |
+| **#91** | M5-OA-7 Finance — ubah transaksi wajib ACC Direktur | 🔴 **draft, `mergeable: false`, konflik nyata** | Sengaja **dibiarkan** — lihat di bawah |
+
+### Kenapa #91 tidak bisa "dibereskan" sebagai pekerjaan akhir sesi
+
+Kerjanya **nyata dan belum ada di main** (`20260805030200_transaction_change_request.sql`
+tidak ada di `origin/main`), jadi menutupnya berarti membuang fitur, bukan
+membuang sampah. Tapi merapikannya bukan pekerjaan lima menit:
+
+1. **9 penanda konflik** terhadap main.
+2. **Gate-nya basi dua generasi** — branch itu berharap **14 mesin / 19 event**;
+   main sudah **16 / 31**. Angka harus dinaikkan di `ci.yml` **dan**
+   `scripts/db-rebuild.sh` (dua berkas, satu commit).
+3. **Migrasinya out-of-order.** Timestamp `20260805030200` kini jatuh **sebelum**
+   `20260806*`/`20260807*` yang **sudah ter-apply ke live**. Menerapkannya apa
+   adanya melahirkan **drift O38 ronde keempat**. Ia harus digeser ke ujung
+   mengikuti pola §A.7b, persis seperti yang sudah dilakukan branch itu dua kali.
+
+**Perlakukan #91 sebagai tiket tersendiri**, bukan tempelan. Pemilik memutuskan
+2026-08-07: biarkan terbuka, catat sebagai utang.
+
 ## 5. Pertanyaan terbuka yang masih hidup
 
-Tidak ada yang baru sesi ini. Yang masih menunggu manusia: **X-03, X-04, X-05,
-X-06, X-07, X-08, X-10** — daftar lengkap di backlog §4. Dua yang paling dekat
-menggigit ronde berikutnya:
+Tidak ada yang baru sesi ini. Daftar lengkap ada di §7 (untuk pemilik) dan
+backlog §4 (X-03…X-10, khusus M6). Dua yang paling dekat menggigit:
 
 | # | Item | Menunggu | Menggigit saat |
 |---|---|---|---|
@@ -163,3 +199,56 @@ menggigit ronde berikutnya:
    `.github/workflows/ci.yml`). Menaikkan satu saja = CI merah dengan seluruh
    test suite hijau.
 4. Sesudah `db push`, **jalankan sidik jari §2**. Jangan percaya "tidak error".
+
+## 7. SEMUA yang menunggu keputusan pemilik — daftar lengkap
+
+Diambil dari `docs/DECISIONS.md` §Open (**19 item belum selesai** dari 61 baris)
+disaring ke yang benar-benar butuh Anda. Sisanya pekerjaan developer atau
+menunggu data live, dan **tidak** perlu Anda jawab.
+
+### 7.1 Jawab lebih dulu — menentukan pekerjaan ronde berikutnya
+
+| # | Pertanyaan | Kenapa mendesak |
+|---|---|---|
+| **1** | ⚠️ **Benarkah Anda memutuskan "kerjakan CACAT 🔴 (O52/O51/O42) dulu, bukan A-13 / B-01"?** | Klaim ini ada di **backlog** tapi **tidak** di `DECISIONS.md`. Sesi ini menolak memperlakukannya sebagai fakta, dan menolak menulis entri keputusan atas nama Anda untuk sesuatu yang tidak disaksikannya. Kalau **ya** → tulis entrinya, ronde berikutnya = cacat. Kalau **tidak** → ronde berikutnya kemungkinan A-08/A-09 |
+| **2** | **PR #104 — merge sekarang?** | Hijau 5/5 dan base terkini. Semua pekerjaan M6 berikutnya menumpuk di atasnya |
+| **3** | **PR #91 (M5-OA-7) — kapan dijadwalkan?** | Makin lama menunggu, makin jauh gate-nya tertinggal (sudah 14→16 mesin, 19→31 event). Utangnya bertambah sendiri |
+
+### 7.2 Cacat 🔴 yang menunggu pilihan Anda (a) atau (b)
+
+| # | Isi | Blokir |
+|---|---|---|
+| **O52** | Halaman detail Task/Asset/Booking **404 untuk divisi eksekusinya sendiri** | Tidak memblokir penugasan AM/PIC |
+| **O51** | `GET /portal/me` menabrak `role_mappings` — cacat sekelas `sm_edges` di satu jalur baca | Tidak memblokir halaman sales |
+| **O48** | Kelas cacat O46 ternyata **36 policy lebar**, bukan 3 arm (survei, bukan sampel) | Tidak memblokir cutover |
+| **O44-asal / O42** | `route-parity.test.ts` buta terhadap panggilan API dari komponen halaman ⇒ **6 route admin mati**, 2 halaman admin mati total. Bagian (c): arah auth ganti-password | **Memblokir C-04** |
+| **O45** | Invariant lokal tidak bisa melihat grant yang bocor di live | Tidak memblokir cutover |
+
+### 7.3 Kebijakan & data — butuh Anda atau HR
+
+| # | Isi | Menunggu |
+|---|---|---|
+| **O47b** | 🟠 **PII masih ada di HISTORI git**, cakupan scrub **89 branch** bukan `main` saja. Butuh persetujuan hapus ~85 branch basi + tiket GitHub Support | Kebijakan retensi (pemilik) |
+| **O26** | Layered role Director — **kirim NIK + email Yohan & Nerissa** | HR / Yohan |
+| **O34** | Roster HR riil tanpa aktor untuk beberapa peran Wave 2 (divisi KOL kosong dll) | Yohan + HR |
+| **O35** | Granularitas sub-tim Creative (Video/Graphic) M7 §3 | Nerissa / Yohan + HR |
+| **O25** | Anomali sheet kalkulator MSL (Nano KOL batas minimal dll) | Sales Head / COO |
+| **O6** | Sample data spreadsheet leads/klien existing untuk parser migrasi | Yohan (akses/export sheet) |
+| **O9** | Target periode nyata M14 (GMV Impact, Optimization Activity, Creator Count) | SPV Ads + OD |
+
+### 7.4 M6-spesifik (backlog §4) — menunggu Anda / Yulianti
+
+| # | Isi | Menggigit saat |
+|---|---|---|
+| **X-05** | RA-5 — `tanggal_mulai_siklus` default = tanggal mulai kontrak | B-02 |
+| **X-10** | O58 — enam field daftar bertanda WAJIB | A-08 / A-09 |
+| **X-03** | Ambang pemicu (20 item · Rp 15jt · 1 bulan) belum diuji ke data riil | GA-1 |
+| **X-04** | RA-4 — jendela baseline tak rata antar channel | validasi D-3 |
+| **X-06** | RA-7 — tautan klien hanya versi aktif, tanpa riwayat/diff | A-11 |
+| **X-07** | PA-2/PA-5 — jendela GMV manual 5 hari · force-close +7 hari | B-06 / B-09 |
+| **X-08** | PA-3 — metrik auto PE-3 belum tentu tersedia semua | B-06 |
+
+### 7.5 TIDAK perlu Anda jawab
+
+`O2` `O4` `O5` `O7` `O8` — timeline/head-dev/Phase-2/menunggu data live pasca
+Wave 2. Dicatat supaya tidak terus muncul sebagai "terbuka" yang mencemaskan.
