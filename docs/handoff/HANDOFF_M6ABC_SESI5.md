@@ -1,8 +1,9 @@
 # HANDOFF — M6A/M6B/M6C Sesi 5 (titik mulai sesi berikutnya)
 
 > **Konteks:** lanjutan `HANDOFF_M6ABC_SESI4.md`. Sesi ini menerima **keputusan
-> pemilik atas empat pertanyaan terbuka** (O54, O55, O57, O58) dan mengeksekusi
-> tiga di antaranya. Berkas SESI1–SESI4 tetap berlaku.
+> pemilik atas empat pertanyaan terbuka** (O54, O55, O57, O58), mengeksekusi
+> tiga di antaranya, dan **menutup drift migrasi O38 ronde 3** dengan menerapkan
+> 11 migrasi tertunda ke live. Berkas SESI1–SESI4 tetap berlaku.
 
 ---
 
@@ -11,12 +12,12 @@
 | | |
 |---|---|
 | **Branch kerja** | `claude/ci-gates-db-migrations-101jt4` |
-| **PR aktif** | **#101** masih TERBUKA. Sesi ini menumpuk DI ATASNYA |
-| **Migrasi** | **63 berkas** lokal, **63 tercatat di live** — sinkron penuh per 2026-08-07 (lihat §5) |
-| **Tabel** | **74** (dari 73). +`notif_catalog_versions` |
-| **`sm_machines`** | **16 — TIDAK disentuh** |
-| **`notif_events`** | **31** (dari 17) — 17 v1 + 14 v2. O55 SELESAI |
-| **Test** | **810 pass** (packages+apps, dengan DATABASE_URL) · **116 pass** (web-internal) |
+| **Commit terakhir** | `3e5f626` — "11 migrasi tertunda diterapkan ke live CDPS SG" |
+| **Sinkron dengan remote** | ✅ ya, working tree bersih |
+| **PR** | ⚠️ **BRANCH INI BELUM PUNYA PR** — lihat §1, ini keputusan pertama Anda |
+| **Migrasi** | **63 berkas** lokal, **63 tercatat di live** — sinkron penuh |
+| **Tabel** | **74** · **`sm_machines` 16** · **`notif_events` 31** (17 v1 + 14 v2) |
+| **Test** | **824 pass** (packages+apps, dengan DATABASE_URL) · **116 pass** (web-internal) |
 | **TypeScript** | `tsc --noEmit` EXIT 0 (core + domain + api + web-internal) |
 
 **Perintah untuk melanjutkan:**
@@ -32,139 +33,219 @@ DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/cdps" npm test --works
 npx vitest run --root web-internal      # TERPISAH — bukan anggota workspaces
 ```
 
-> ⚠️ **Postgres mati dua kali di tengah sesi ini** (container). Kalau test tiba-tiba
-> merah dengan `ECONNREFUSED 127.0.0.1:5432`, itu bukan regresi — `service
-> postgresql start`, ulangi `db:rebuild`, jalankan lagi.
+> ⚠️ **Postgres mati tiga kali di tengah sesi ini** (container). Kalau test
+> tiba-tiba merah dengan `ECONNREFUSED 127.0.0.1:5432`, itu **bukan regresi** —
+> `service postgresql start`, ulangi `db:rebuild`, jalankan lagi.
 
 ---
 
-## 1. Keputusan pemilik 2026-08-07 — semuanya di `docs/DECISIONS.md`
+## 1. ⚠️ PERTAMA: branch ini belum punya PR
+
+**PR #101 menunjuk branch LAIN** (`claude/m6ab-strategi-plan-3x7p0a`, head
+`ece2a4c`). Branch kerja kita **11 commit di depannya**, dan PR #101 **tidak
+menampilkan** satu pun dari:
+
+```
+3e5f626  11 migrasi diterapkan ke live CDPS SG
+2a014f8  Merge origin/main — QA sales M0/M1 (PR #102)
+4fdf388  handoff SESI5 + backlog
+291a6b5  O58 — checkbox "tidak ada"
+58f6588  O54 + O55 + perbaikan jsonb A-07
+23e38c7  Merge PR #102
+a9b7a47  M6A A-07 Section C
+… dan 4 lainnya
+```
+
+Catatan "sesi ini menumpuk DI ATAS #101" di SESI4 benar dalam arti **git
+ancestry** (kerja #101 seluruhnya ada di branch kita), tapi **tidak** dalam arti
+PR — #101 tidak akan pernah menunjukkan commit kita.
+
+**Tiga pilihan, pilih satu sebelum lanjut ngoding:**
+
+| | Aksi | Konsekuensi |
+|---|---|---|
+| **(a)** | Buka PR baru `claude/ci-gates-db-migrations-101jt4` → `main`, tutup #101 sebagai superseded | Paling bersih. Satu PR berisi seluruh M6A + migrasi |
+| (b) | Merge branch kita ke `claude/m6ab-strategi-plan-3x7p0a`, biarkan #101 hidup | #101 jadi sangat besar; judulnya (A-02/A-03/A-04) tidak lagi menggambarkan isinya |
+| (c) | Biarkan | Kerja O54/O55/O58 + 11 migrasi live tidak pernah masuk `main`. **Jangan** |
+
+PR **tidak** dibuat sesi ini karena instruksi eksplisit "jangan buat PR baru
+kecuali diminta". Rekomendasi: **(a)**.
+
+**PR terbuka lain:** #91 (M5-OA-7, Finance — tidak berhubungan, menggantung sejak
+2026-08-05).
+**PR yang ditutup sesi ini:** #95 dan #98 (lihat §5).
+
+---
+
+## 2. Keputusan pemilik 2026-08-07 — semuanya di `docs/DECISIONS.md`
 
 | # | Keputusan | Status |
 |---|---|---|
 | **O54** | Tier dikonfirmasi + `Customer Review Management` → `tanpa_plan`; tier jadi **pilihan di admin MSL** | ✅ **SELESAI** |
-| **O55** | Pilihan (a) — katalog notifikasi **berversi**, `notification_catalog_version = 2` | ✅ **SELESAI** (menutup O53 juga) |
-| **O58** | Pilihan (a) — **checkbox eksplisit "tidak ada"** per field daftar wajib | ✅ **SELESAI** (kecuali UI, lihat §3) |
-| **O57** | Entitas **`CONTRACT` BARU**; floor GMV = input AM + persetujuan Head | 🔴 **BELUM DIKERJAKAN** — lihat §4 |
+| **O55** | Pilihan (a) — katalog notifikasi **berversi** | ✅ **SELESAI** (menutup O53 juga) |
+| **O58** | Pilihan (a) — **checkbox eksplisit "tidak ada"** | ✅ **SELESAI** (kecuali UI, §4) |
+| **O57** | Entitas **`CONTRACT` BARU**; floor GMV = input AM + persetujuan Head | 🔴 **BELUM DIKERJAKAN** — §6 |
 
----
-
-## 2. Yang SELESAI sesi ini
-
-### 2.1 O54 — tier katalog + admin MSL (commit `58f6588`)
+### 2.1 O54 — tier katalog + admin MSL (`58f6588`)
 
 Koreksi pemilik dipasang di `20260806062000_m6c_retier_catalog.sql`:
 `Customer Review Management` keluar dari tier tengah — tersisa **12 nama**.
-Diterapkan ke katalog live: **12 dari 73 entri efektif = 16,4%**, jauh di bawah
-ambang §12 (<40%).
+Di katalog live: **12 dari 73 entri efektif = 16,4%**, jauh di bawah ambang §12
+(<40%).
 
-Yang lebih penting dari koreksi itu: jawaban butir (1) pemilik — *"kedepan sangat
-mungkin ada service lain yang perlu plan, maka buat supaya AM ada pilihan, karena
-service dibuat dinamis mengikuti kebutuhan klien"* — dieksekusi sebagai **fitur**,
-bukan sebagai baris migrasi. Tier sekarang disetel per entri di **admin Master
-Service List**: `msl.ServiceInput.planTier` → route → wire → selector di halaman
-`/master-services`, plus kolom "Strategi & Plan" di tabel utama dan riwayat versi.
-Layanan baru yang butuh Plan tidak lagi menunggu rilis engineering.
+Yang lebih besar dari koreksi itu: jawaban butir (1) — *"service dibuat dinamis
+mengikuti kebutuhan klien, buat supaya AM ada pilihan"* — dieksekusi sebagai
+**fitur**, bukan baris migrasi. Tier disetel per entri di **admin Master Service
+List**: `msl.ServiceInput.planTier` → route → wire → selector di
+`/master-services`, plus kolom "Strategi & Plan" di tabel utama & riwayat versi.
 
-**`reconcileTier` adalah cermin baris-per-baris trigger DB `normalize_plan_tier`.**
-Urutan cabangnya tidak sembarang — ia menentukan kolom mana yang menang saat
-keduanya berselisih. Yang paling mudah salah: `tier='tanpa_plan'` + `boolean=true`
-menghasilkan **`plan_wajib`**, bukan `tanpa_plan`, karena penulis pra-M6C bicara
-lewat boolean. Ada 4 tes unit yang mengunci tiap cabang dan 2 tes integrasi yang
-membuktikan nilai pilihan Sales Head selamat melewati trigger tanpa berubah.
+> **`reconcileTier` adalah cermin baris-per-baris trigger DB `normalize_plan_tier`.**
+> Urutan cabangnya menentukan kolom mana yang menang saat keduanya berselisih.
+> Yang paling mudah salah: `tier='tanpa_plan'` + `boolean=true` menghasilkan
+> **`plan_wajib`**, bukan `tanpa_plan`. 4 tes unit mengunci tiap cabang; 2 tes
+> integrasi membuktikan nilai pilihan Sales Head selamat melewati trigger.
 
-`shape-parity` kehilangan izin extra `MasterServiceWire.requires_strategy_plan` —
-halaman yang menyetel tier harus bisa melihatnya. **Jangan tambahkan kembali.**
+`shape-parity` kehilangan izin extra `MasterServiceWire.requires_strategy_plan`.
+**Jangan tambahkan kembali** — halaman yang menyetel tier harus bisa melihatnya.
 
-### 2.2 O55 — katalog notifikasi v2 (commit `58f6588`)
+### 2.2 O55 — katalog notifikasi v2 (`58f6588`)
 
-Migrasi `20260807010000_notif_catalog_v2.sql`. Tiga bagian:
+Migrasi `20260807010000_notif_catalog_v2.sql`:
 
 1. **`notif_catalog_versions`** — registry, satu baris per versi, dengan
    `event_count` yang versi itu perkenalkan. **Di sinilah angkanya sekarang
    hidup.** Tes berhenti meng-assert literal `== 15`/`== 17` dan mulai
-   meng-assert `events().length == registeredEventCount()` + per-versi.
-   Menambah event tanpa mendaftarkan versinya tetap merah **walau seseorang ikut
+   meng-assert `events().length == registeredEventCount()` + per-versi. Menambah
+   event tanpa mendaftarkan versinya tetap merah **walau seseorang ikut
    menaikkan literalnya** — itu yang dibeli O55.
 2. **14 event v2** — 4 Strategi + 6 Plan + 3 Gate + `m6.client.assigned` (O53).
 3. **Trigger `trg_notif_events_v1_frozen`** — 17 baris v1 tidak bisa
-   di-UPDATE/DELETE. "15 event lama tak disentuh" jadi ditegakkan, bukan
-   dijanjikan. Diuji dengan mutasi: UPDATE v1 ditolak, DELETE v1 ditolak,
-   UPDATE v2 lolos.
+   di-UPDATE/DELETE. Diuji dengan mutasi, **lokal dan di live**.
 
 > **PENAMAAN — jangan "dirapikan".** 13 event M6A/6B/6C ditulis persis seperti
-> PRD-nya (`strategi_diajukan`), tanpa prefix `mN.` yang dipakai 17 event v1.
-> Mengarang ulang identifier yang PRD tulis eksplisit adalah rename yang dilarang
-> aturan rumah. Dikunci assertion daftar penuh di `notification.test.ts` — kalau
-> Anda "memperbaiki" namanya, tes itu merah, dan itu memang gunanya.
+> PRD-nya (`strategi_diajukan`), tanpa prefix `mN.`. Mengarang ulang identifier
+> yang PRD tulis eksplisit adalah rename yang dilarang aturan rumah. Dikunci
+> assertion daftar penuh di `notification.test.ts`.
 
-**Yang O55 buka tapi BELUM disambung:** ke-14 event sudah ada di katalog, tapi
-belum ada satu pun `emit()` yang memanggilnya. A-08 secara khusus menunggu ini —
-flip asumsi ke `Gugur` sekarang boleh memicu transisi `strategi_revisi_disarankan`
-(SESI4 §2 menyuruh menundanya "sampai O55 selesai" — **sudah selesai**).
+### 2.3 O58 — "tidak ada" vs "belum dijawab" (`291a6b5`)
 
-### 2.3 O58 — "tidak ada" vs "belum dijawab" (commit `291a6b5`)
+Migrasi `20260807020000_m6a_tidak_ada_flags.sql`. **Lima** field, bukan enam
+(O58 menghitung B-3.5/B-4.5 yang sudah opsional).
 
-Migrasi `20260807020000_m6a_tidak_ada_flags.sql`. **Lima** field, bukan enam:
-O58 menghitung B-3.5/B-4.5 yang sudah opsional dan tidak pernah digerbangi.
-
-**Dua aturan, sengaja di dua lapisan** — ini bagian yang paling mudah dirusak:
+**Dua aturan, sengaja di dua lapisan** — bagian yang paling mudah dirusak:
 
 | Aturan | Di mana | Kenapa di sana |
 |---|---|---|
-| Kontradiksi (daftar terisi **DAN** checkbox dicentang) | **CHECK di DB** | Tidak pernah sah di state mana pun. Tidak boleh bisa DISIMPAN |
-| Belum dijawab (kosong **DAN** tidak dicentang) | **`checkCompleteness`** | Sah selama Draft — itulah rupa form setengah isi. Kalau ditaruh di CHECK, AM tidak bisa menyimpan draft sama sekali |
-
-Angka pendamping **tetap** digerbangi (`jumlah_kampanye_aktif`,
-`beban_promo_persen`) — jalur bukti berbeda, keduanya murah, salah satu sendirian
-meninggalkan lubang.
+| Kontradiksi (daftar terisi **DAN** dicentang) | **CHECK di DB** | Tidak pernah sah. Tidak boleh bisa DISIMPAN |
+| Belum dijawab (kosong **DAN** tidak dicentang) | **`checkCompleteness`** | Sah selama Draft. Kalau di CHECK, AM tidak bisa menyimpan draft |
 
 > **Kenapa jumlah tesnya penting.** Menambah gerbang ini tidak mengubah satu pun
-> dari 91 tes yang ada, karena fixture `seedSubmittable` mengisi kelima daftar.
-> Gerbang yang hanya pernah melihat cabang "terisi" tidak bisa dibedakan dari
-> tidak ada gerbang. 6 tes baru menguji **kedua** cabang, dan divalidasi dengan
-> mutasi: mengganti dua predikat gerbang dengan `true` membuat **tepat dua** tes
-> baru merah.
+> dari 91 tes yang ada, karena fixture mengisi kelima daftar. Gerbang yang hanya
+> pernah melihat cabang "terisi" tidak bisa dibedakan dari tidak ada gerbang.
+> 6 tes baru menguji **kedua** cabang, divalidasi dengan mutasi.
 
-**Jebakan yang sudah dihindari:** kelima kolom ditambahkan ke `openRevision`
-(INSERT … SELECT Section A) dan `copyChildren`. Komentar di `openRevision` sudah
-memperingatkan persis ini — kolom Section A yang lupa disalin membuat **setiap
-revisi** mulai dengan field kosong sementara semua tes pada versi 1 tetap hijau.
+**Jebakan yang sudah dihindari:** kelima kolom ditambahkan ke `openRevision` dan
+`copyChildren`. Kolom Section A yang lupa disalin membuat **setiap revisi** mulai
+dengan field kosong sementara semua tes pada versi 1 tetap hijau.
 
 ### 2.4 Perbaikan — A-07 Section C tidak pernah dijalankan terhadap DB
 
-`saveDiagnosa` menulis `${JSON.stringify(ids)}::jsonb`. postgres.js mengikat
-parameter itu **sebagai jsonb**, jadi ia meng-encode ulang string yang sudah
-di-encode: kolom berisi jsonb *string* `"[\"A-1\"]"`, bukan array `["A-1"]`, dan
+`saveDiagnosa` menulis `JSON.stringify(ids)` lalu di-cast `::jsonb`. postgres.js
+mengikat parameter itu **sebagai jsonb**, jadi ia meng-encode ulang string yang
+sudah di-encode: kolom berisi jsonb *string*, bukan array, dan
 `ck_strdiag_field_ids_array` menolak setiap baris. Diganti
 `to_jsonb(<array>::text[])`.
 
-**Ini membuat 44 dari 91 tes `strategi.test.ts` MERAH di HEAD.** SESI4 melaporkan
-"9 pass · 82 skip" karena dijalankan **tanpa** `DATABASE_URL` — seluruh jalur DB
-Section C tidak pernah tereksekusi. Setelah perbaikan: 91/91.
+**44 dari 91 tes MERAH di HEAD.** SESI4 melaporkan "9 pass · 82 skip" karena
+dijalankan **tanpa** `DATABASE_URL`. Setelah perbaikan: 91/91.
 
 > **Aturan yang lahir dari ini: jangan pernah melaporkan hijau dari run tanpa
 > `DATABASE_URL`.** "82 skip" bukan "82 lolos".
 
 `health.ts:698` memakai idiom yang sama untuk `components_json`. **Bukan bug
-hidup** — `jsonToComponents` dan `portal.draggingComponent` sama-sama mem-parse
-string itu, jadi round-trip-nya benar. Sengaja tidak diubah: mengubah bentuk
-tulisnya akan memecahkan dua pembaca yang mengkompensasinya, dan itu perubahan
-M13 yang tidak diminta.
+hidup** — kedua pembacanya mem-parse string itu. Sengaja tidak diubah.
 
 ---
 
-## 3. Yang BELUM — dan itu bukan kelalaian
+## 3. ✅ Migrasi — SELESAI, live sinkron penuh
 
-**Checkbox O58 belum punya UI.** Form Section A/B memang belum dibangun (O56):
-halaman Service masih menampilkan form 6-field M6 §4. DB, domain, wire, dan tipe
-FE sudah siap menerimanya — checkbox-nya menyusul bersama **A-13**.
+**Teka-teki SESI1 terpecahkan, dan bukan seperti dugaan PR #98.** SQL
+`20260805060000` **sudah jalan** di live (fungsi `private.jwt_is_am_of_service`
+ada; ketiga policy predikatnya sama persis dengan repo) tetapi **tidak punya
+baris di `schema_migrations`** — baik `20260805060000` maupun `20260805160305`.
+Baris riwayatnya yatim: objek masuk, catatan tidak.
 
-**14 event v2 belum diemisikan.** Katalognya ada; `emit()`-nya belum dipasang.
+**Penyebab struktural, dikonfirmasi pemilik:** dua akun Claude Code paralel — AM
+(M6A/6B/6C) di sini, QA sales (M0/M1) di akun lain. Migrasi sales
+`20260806050000` sudah di live sementara migrasi AM `20260805060000` yang
+bernomor **lebih kecil** belum. Itulah out-of-order-nya.
+
+**Yang dikerjakan:** repair (catat baris, nol SQL diulang) → merge `main` →
+11 migrasi diterapkan berurutan, masing-masing dengan baris riwayatnya di batch
+yang SAMA.
+
+| | Sebelum | Sesudah |
+|---|---|---|
+| Tabel | 55 | **74** |
+| `sm_machines` | 14 | **16** |
+| `notif_events` | 17 | **31** |
+| Migrasi tercatat | 51 | **63** |
+
+Invariant O55 dicek **di live**: registry `SUM(event_count)` = `COUNT(notif_events)`
+= 31. Trigger pembekuan v1 diuji **di live** — UPDATE baris v1 ditolak.
+
+**Cara penerapan (penting untuk diulang benar):** CLI Supabase tidak bisa dipakai
+di container ini (tidak ada `SUPABASE_ACCESS_TOKEN` maupun `DATABASE_URL` live),
+jadi lewat MCP `execute_sql` dengan **versi riwayat dikontrol manual** — sengaja
+**bukan `apply_migration`**, yang menghasilkan versi dari timestamp saat itu dan
+justru melahirkan drift ini. Atomisitas dibuktikan dulu dengan probe; komentar
+SQL dibuang dan kesetaraannya dibuktikan `pg_dump --schema-only` (identik di
+4415 baris).
+
+### ⚠️ Yang BERUBAH untuk AM — perlu diberitahukan ke tim
+
+| Service | Tier baru | Efek |
+|---|---|---|
+| `SVC-202608-0002`, `0003`, `0005` | `plan_wajib` | Berhenti menawarkan form Brief; menuntut Strategi & Plan |
+| `SVC-202608-0004` | `ditentukan_am` | Form G-B muncul (AM memutuskan) |
+
+Benar menurut M6A Rule 1, tapi **mengubah alur kerja AM pada layanan yang sudah
+ada** — dan form Strategi lengkapnya **belum dibangun** (O56), jadi yang muncul
+masih form 6-field M6 §4.
 
 ---
 
-## 4. O57 — BELUM DIKERJAKAN, dan ini rancangannya
+## 4. Yang BELUM — dan itu bukan kelalaian
+
+1. **UI checkbox O58** — form Section A/B belum dibangun (O56). DB, domain, wire,
+   tipe FE sudah siap. Menyusul bersama **A-13**.
+2. **14 event v2 belum diemisikan** — katalognya ada, `emit()`-nya belum dipasang.
+   **A-08 tidak lagi terblokir**: transisi `strategi_revisi_disarankan` boleh
+   disambung sekarang (SESI4 §2 menyuruh menundanya "sampai O55 selesai" —
+   sudah selesai).
+3. **O57 belum dikerjakan** — §6.
+
+---
+
+## 5. PR yang ditutup sesi ini
+
+**#95 dan #98** — keduanya perubahan yang sama (rename `20260805060000` →
+`20260805160305`) di branch berbeda. Ditutup karena:
+
+* riwayat live **tidak memuat** `20260805160305` maupun `20260805060000`,
+  sementara objeknya ada semua ⇒ masalahnya baris yatim, bukan nomor berbeda;
+* rename tidak menolong: tidak ada baris untuk dicocokkan, **dan**
+  `20260805160305` tetap < `20260806050000` yang sudah ter-apply ⇒ tuntutan
+  `--include-all` tetap muncul;
+* **merge-nya sekarang justru melahirkan drift baru** — berkas repo jadi
+  `20260805160305` sementara riwayat live memuat `20260805060000`.
+
+**#97 TIDAK ditutup** — sudah merged 2026-08-06, isinya benar (tab "Lead Saya"),
+tidak berhubungan dengan diagnosis migrasi.
+
+---
+
+## 6. O57 — BELUM DIKERJAKAN, ini rancangannya
 
 Keputusan pemilik: **(a) "Kontrak" = kumpulan Service satu klien dalam satu
 kesepakatan** ⇒ entitas `CONTRACT` baru, `strategi.service_id` → `contract_id`.
@@ -172,140 +253,93 @@ Klien yang membeli Store Management + GMV Max + Nano KOL dalam satu kesepakatan
 12 bulan mendapat **SATU** Strategi. **(b) Floor GMV = input AM + persetujuan
 Head**, bukan field baru di closing M0.
 
-Tidak dikerjakan sesi ini karena ini refactor terbesar dari keempatnya dan
-setengah-jadi lebih berbahaya daripada belum mulai: `strategi.service_id` adalah
-titik join gerbang M6C, dan ia muncul di RLS, tiga indeks unik, FK, dan ~20 route.
-Ketiga keputusan lain sudah mendarat utuh dan teruji; O57 dimulai dari bersih.
+Tidak dikerjakan karena ini refactor terbesar dari keempatnya dan setengah-jadi
+lebih berbahaya daripada belum mulai: `strategi.service_id` adalah titik join
+gerbang M6C.
 
-### Yang sudah dipetakan (hemat waktu sesi berikutnya)
+**Blast radius lebih kecil dari kelihatannya.** RLS hanya menyentuh `service_id`
+di **dua** tempat — policy `strategi_select` dan `private.jwt_can_read_strategi()`.
+Kelima tabel anak mewarisi lewat `EXISTS`, jadi **tidak** perlu disentuh.
 
-**Blast radius sebenarnya lebih kecil dari kelihatannya.** RLS hanya menyentuh
-`service_id` di **dua** tempat — policy `strategi_select` dan
-`private.jwt_can_read_strategi()`. Kelima tabel anak mewarisi lewat `EXISTS` ke
-`strategi`, jadi mereka **tidak** perlu disentuh sama sekali.
-
-**Langkah yang disarankan:**
+**Delapan langkah:**
 
 1. **Prefix `CTR-`** — `entity_prefix` (29 → 30) + `PREFIXES` di
-   `packages/core/src/ident.ts`. `packages/db/src/ident.registry.test.ts`
-   memeriksa keduanya cocok, jadi lupa salah satu = merah.
+   `packages/core/src/ident.ts`. `ident.registry.test.ts` memeriksa keduanya
+   cocok, jadi lupa salah satu = merah.
 2. **Tabel `contracts`** — `id CTR-`, `client_id`, `durasi_bulan`,
    `tanggal_mulai`, `tanggal_akhir`, `created_by`. Belum perlu mesin status.
-3. **`services.contract_id`** nullable FK → `contracts`. Nullable karena Service
-   yang di-closing tanpa kesepakatan payung tetap sah.
-4. **`strategi.contract_id`** NOT NULL FK menggantikan `service_id`. Ketiga
-   indeks unik ikut: `uq_strategi_aktif_per_service` → `_per_contract`, idem
+3. **`services.contract_id`** nullable FK → `contracts` (Service tanpa kesepakatan
+   payung tetap sah).
+4. **`strategi.contract_id`** NOT NULL FK menggantikan `service_id`. Ketiga indeks
+   unik ikut: `uq_strategi_aktif_per_service` → `_per_contract`, idem
    `uq_strategi_inflight_per_service` dan `uq_strategi_versi`.
 5. **Backfill** — untuk tiap `strategi` yang ada, buat satu `contracts` dari
-   service-nya (1:1) lalu tautkan. **Di live ini nol baris** (M6A belum
-   di-deploy), tapi tetap harus ditulis benar untuk DB lokal & CI.
-6. **RLS** — `private.jwt_is_am_of_service(service_id)` perlu padanan berbasis
-   kontrak (AM dari klien pemilik kontrak). Dua tempat, itu saja.
-7. **`/services/{id}/strategi`** tetap dipertahankan: resolve service → contract
-   di dalam route, jangan ubah kontrak URL-nya (`route-parity` akan merah).
+   service-nya (1:1) lalu tautkan. **Di live nol baris**, tapi tetap harus benar
+   untuk DB lokal & CI.
+6. **RLS** — padanan `jwt_is_am_of_service` berbasis kontrak. Dua tempat.
+7. **`/services/{id}/strategi`** dipertahankan: resolve service → contract di
+   dalam route. Jangan ubah kontrak URL (`route-parity` akan merah).
 8. **Floor GMV butir (b)** — `strategi_target.sumber_floor` berhenti berarti
    "kontraktual vs input sendiri" dan mulai mencatat **jalur persetujuan**.
    Rule 7 "read-only" dibaca sebagai **read-only setelah disetujui Head**; D-7
    Sanggahan Target tetap punya penegak karena yang menyetujui bukan yang
    mengetik.
 
-> **Kenapa ini harus SEBELUM M6B B-01:** membalikkan (a) murah sekarang (satu FK,
-> nol data produksi) dan mahal setelah periode Plan digenerate di atasnya.
+> **Kenapa SEBELUM M6B B-01:** membalikkan (a) murah sekarang (satu FK, nol data
+> produksi) dan mahal setelah periode Plan digenerate di atasnya.
 
 ---
 
-## 5. ✅ Migrasi — SELESAI diterapkan ke live `CDPS SG` 2026-08-07
+## 7. Pertanyaan terbuka & cacat yang masih hidup
 
-**Teka-teki SESI1 terpecahkan, dan bukan seperti dugaan PR #98.** Pengecekan
-langsung ke live menunjukkan: SQL `20260805060000` **sudah jalan** (fungsi
-`private.jwt_is_am_of_service` ada; ketiga policy predikatnya sama persis dengan
-repo) tetapi **tidak punya baris di `schema_migrations`** — baik dengan nama
-`20260805060000` maupun `20260805160305`. Baris riwayatnya yatim, khas
-`apply_migration` MCP atau `psql -f`: objeknya masuk, catatannya tidak.
+**Memblokir build berikutnya:**
 
-⇒ **PR #98 dan #95 memperbaiki masalah yang salah.** Rename ke `20260805160305`
-tidak menolong (live tidak punya baris itu), dan `20260805160305` pun masih di
-bawah `20260806050000`, jadi tetap out-of-order. **Tutup keduanya.**
-
-### Yang dikerjakan
-
-1. **Repair** — baris `20260805060000` dicatat, **nol SQL dijalankan ulang**.
-   Setelah itu tidak ada lagi migrasi belum-jalan yang bernomor di bawah garis.
-2. **11 migrasi diterapkan berurutan**, masing-masing dengan baris riwayatnya
-   di batch yang SAMA (atomik — dibuktikan lebih dulu dengan probe: CREATE TABLE
-   ikut ter-rollback saat statement berikutnya gagal, nol residu).
-
-### Hasil — live cocok dengan gate CI
-
-| | Sebelum | Sesudah |
+| # | Pemutus | Isi |
 |---|---|---|
-| Tabel | 55 | **74** |
-| `sm_machines` | 14 | **16** |
-| `notif_events` | 17 | **31** (17 v1 + 14 v2) |
-| `entity_prefix` | – | **29** |
-| Migrasi tercatat | 51 | **63** |
+| **O57** | — | **Sudah diputus**, belum dieksekusi (§6). Blokir keras M6B B-01 |
+| **O56** | Yohan | Urutan ronde berikutnya: **M6A dulu** (form Strategi, paling terlihat di halaman yang di-QA) atau **M6B dulu** (periode Plan, menutup `planSatuanStatus = belum_tersedia`) |
 
-Invariant O55 dicek di live: `SUM(event_count)` registry = `COUNT(notif_events)`
-= 31. Trigger pembekuan v1 diuji **di live** — UPDATE baris v1 ditolak, resolver
-utuh.
+**Cacat 🔴 yang masih terbuka (bukan dari sesi ini, tapi jangan hilang):**
 
-Tier efektif katalog live: **12 dari 73 entri (16,4%)** di `ditentukan_am` —
-jauh di bawah ambang §12 (<40%).
+| # | Isi |
+|---|---|
+| **O52** | Halaman detail Task/Asset/Booking **404 untuk divisi eksekusinya sendiri** — `account.loadBrief` men-join `services` + `clients`, kedua policy tidak punya arm divisi eksekusi |
+| **O51** | `GET /portal/me` menabrak `role_mappings` yang default-deny ⇒ 500. Halaman `/portal` belum pernah diuji |
+| **O48** | Kelas cacat O46 ternyata **36 policy lebar**, bukan 3 arm |
+| **O45** | Invariant lokal secara struktural tidak bisa melihat grant yang bocor di live |
+| **O42** | Tidak ada jalur admin untuk `role_mappings`, padahal tabel itu menentukan SELURUH permission |
 
-### ⚠️ Yang BERUBAH untuk AM — perlu diberitahukan
+**Catatan, bukan blocker:** `Shopee`/`TikTok Rating Optimization` tidak dijawab
+eksplisit di O54 — ditahan di tier tengah, reversibel nol-biaya lewat admin MSL.
 
-Tiga Service yang masih `[Awaiting Onboarding]` kini **plan-gated**:
-`SVC-202608-0002`, `SVC-202608-0003`, `SVC-202608-0005` → `plan_wajib`.
-`SVC-202608-0004` → `ditentukan_am` (form G-B muncul). Halaman ketiganya berhenti
-menawarkan form Brief dan mulai menuntut Strategi & Plan. Itu perilaku yang benar
-menurut M6A Rule 1, tapi **mengubah alur kerja AM pada layanan yang sudah ada**.
+---
 
-### Catatan cara penerapan
-
-CLI Supabase tidak bisa dipakai di container ini (tidak ada
-`SUPABASE_ACCESS_TOKEN` maupun `DATABASE_URL` live), jadi penerapan lewat MCP
-`execute_sql` dengan **versi riwayat dikontrol manual** — bukan `apply_migration`,
-yang menghasilkan versi dari timestamp saat itu dan justru melahirkan drift yang
-sesi ini perbaiki. Komentar SQL dibuang sebelum dikirim; kesetaraannya dibuktikan
-dengan `pg_dump --schema-only` versi asli vs telanjang: **identik di 4415 baris**
-(hanya nonce `\restrict` pg_dump yang berbeda) + row-count konfigurasi sama.
-
-### Aturan supaya tidak terjadi ronde keempat
+## 8. Aturan supaya drift migrasi tidak lahir ronde keempat
 
 1. **Satu pintu push.** Merge ke `main` dulu, push dari satu tempat. Dua akun
    boleh menulis migrasi paralel; yang tidak boleh adalah dua akun sama-sama push.
 2. **Jangan `apply_migration` MCP untuk skema** — versinya di-generate dari
-   timestamp, bukan dari nama berkas. Itu sumber drift O38 dan yang ini.
-3. **Timestamp = waktu UTC sebenarnya saat berkas dibuat.** Hampir kejadian lagi:
+   timestamp, bukan dari nama berkas. Itu sumber drift ronde 1, 2, dan 3.
+3. **Jangan pernah `psql -f`** ke live.
+4. **Timestamp = waktu UTC sebenarnya saat berkas dibuat.** Hampir kejadian lagi:
    `20260807010000`/`020000` kita bernomor di bawah `20260807040000` milik sales.
 
 ---
 
-## 6. Pertanyaan terbuka setelah sesi ini
+## 9. Jebakan sesi ini — tambahan atas SESI1 §5, SESI2 §6, SESI4
 
-| # | Pemutus | Isi |
-|---|---|---|
-| **O57** | Yohan / Yulianti | **SUDAH DIPUTUS**, belum dieksekusi — rancangan di §4. Blokir keras M6B B-01 |
-| **O56** | Yohan | urutan ronde berikutnya: M6A dulu (form Strategi) atau M6B dulu (periode Plan) |
-| **O54 sisa** | Yohan / Yulianti | `Shopee`/`TikTok Rating Optimization` tidak dijawab eksplisit — ditahan di tier tengah. Reversibel nol-biaya lewat admin MSL, jadi ini catatan, bukan blocker |
-
----
-
-## 7. Jebakan sesi ini — tambahan atas SESI1 §5, SESI2 §6, SESI4
-
-1. **`JSON.stringify(x)::jsonb` di postgres.js adalah bug, bukan idiom.**
+1. **`JSON.stringify(x)` + cast `::jsonb` di postgres.js adalah bug, bukan idiom.**
    Parameter yang diterima kolom jsonb di-encode **lagi**. Pakai
-   `to_jsonb(<array>::text[])`, atau `sql.json(x)`. Sudah memakan A-07 sekali.
-2. **"82 skip" bukan "82 lolos".** Run tanpa `DATABASE_URL` melewati seluruh
-   jalur DB. Selalu laporkan hijau dari run **dengan** `DATABASE_URL`.
-3. **Gerbang baru yang tidak mengubah satu pun tes patut dicurigai.** Fixture
-   yang lengkap membuat gerbang baru tak pernah tersentuh cabang gagalnya.
-   Mutasikan predikatnya dan pastikan tes yang tepat berubah merah.
+   `to_jsonb(<array>::text[])` atau `sql.json(x)`. Sudah memakan A-07 sekali.
+2. **"82 skip" bukan "82 lolos".** Selalu laporkan hijau dari run **dengan**
+   `DATABASE_URL`.
+3. **Gerbang baru yang tidak mengubah satu pun tes patut dicurigai.** Mutasikan
+   predikatnya dan pastikan tes yang tepat berubah merah.
 4. **Gate angka hidup di DUA berkas** — `scripts/db-rebuild.sh` dan
    `.github/workflows/ci.yml`. Sesi ini menaikkan tabel 73→74 dan notif 17→31 di
    keduanya, plus gate baru `count(notif_events) = SUM(event_count)`.
-5. **`types.ts` tidak boleh meng-import `account.ts`** — `account.ts` sudah
-   meng-import `types.ts`. `PlanTier` dipindah ke `types.ts` dan di-**re-export**
-   dari `account.ts` supaya importer lama tidak berubah.
-6. **Postgres bisa mati di tengah sesi.** `ECONNREFUSED 127.0.0.1:5432` di test
-   bukan regresi — restart, `db:rebuild`, ulangi.
+5. **`types.ts` tidak boleh meng-import `account.ts`** — arahnya sebaliknya.
+   `PlanTier` dipindah ke `types.ts` dan di-**re-export** dari `account.ts`.
+6. **Postgres bisa mati di tengah sesi.** `ECONNREFUSED` bukan regresi.
+7. **Cek branch PR sebelum percaya "menumpuk di atasnya".** SESI4 menulis PR #101
+   sebagai PR aktif; ternyata head-nya branch lain dan tertinggal 11 commit.
