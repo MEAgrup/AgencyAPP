@@ -12,7 +12,7 @@
 |---|---|
 | **Branch kerja** | `claude/ci-gates-db-migrations-101jt4` |
 | **PR aktif** | **#101** masih TERBUKA. Sesi ini menumpuk DI ATASNYA |
-| **Migrasi** | **62 berkas** lokal. **11 BELUM diterapkan ke live `CDPS SG`** |
+| **Migrasi** | **63 berkas** lokal, **63 tercatat di live** — sinkron penuh per 2026-08-07 (lihat §5) |
 | **Tabel** | **74** (dari 73). +`notif_catalog_versions` |
 | **`sm_machines`** | **16 — TIDAK disentuh** |
 | **`notif_events`** | **31** (dari 17) — 17 v1 + 14 v2. O55 SELESAI |
@@ -54,8 +54,9 @@ npx vitest run --root web-internal      # TERPISAH — bukan anggota workspaces
 ### 2.1 O54 — tier katalog + admin MSL (commit `58f6588`)
 
 Koreksi pemilik dipasang di `20260806062000_m6c_retier_catalog.sql`:
-`Customer Review Management` keluar dari tier tengah. Tier tengah **11/33 (33%)**,
-turun dari 36% — makin jauh di bawah ambang §12 (<40%).
+`Customer Review Management` keluar dari tier tengah — tersisa **12 nama**.
+Diterapkan ke katalog live: **12 dari 73 entri efektif = 16,4%**, jauh di bawah
+ambang §12 (<40%).
 
 Yang lebih penting dari koreksi itu: jawaban butir (1) pemilik — *"kedepan sangat
 mungkin ada service lain yang perlu plan, maka buat supaya AM ada pilihan, karena
@@ -213,58 +214,70 @@ Ketiga keputusan lain sudah mendarat utuh dan teruji; O57 dimulai dari bersih.
 
 ---
 
-## 5. ⚠️ Migrasi — sekarang SEBELAS yang belum di-push, dan satu hal harus dicek dulu
+## 5. ✅ Migrasi — SELESAI diterapkan ke live `CDPS SG` 2026-08-07
 
-| Migrasi | Isi |
-|---|---|
-| `20260805060000_rls_account_lead_service_scope` | **lihat peringatan di bawah** |
-| `20260806060000_entity_prefix_registry` | tabel + backfill 29 prefix |
-| `20260806061000_m6c_plan_gate` | tier + gate config + `service_plan_gate` |
-| `20260806062000_m6c_retier_catalog` | tier 33 entri — **kini dikonfirmasi pemilik (O54)** |
-| `20260806063000_m6a_vendor` | entitas `VND-` |
-| `20260806064000_m6a_strategi` | `strategi` + 8 tabel anak + mesin #15 |
-| `20260806065000_m6a_section_a` | 20 kolom Section A + `strategi_akses` |
-| `20260806066000_m6a_section_b` | ±45 kolom B-2…B-9 |
-| `20260807000000_m6a_section_c` | 4 tabel Section C |
-| `20260807010000_notif_catalog_v2` | **BARU** — registry versi + 14 event v2 |
-| `20260807020000_m6a_tidak_ada_flags` | **BARU** — 5 kolom boolean + 6 CHECK |
+**Teka-teki SESI1 terpecahkan, dan bukan seperti dugaan PR #98.** Pengecekan
+langsung ke live menunjukkan: SQL `20260805060000` **sudah jalan** (fungsi
+`private.jwt_is_am_of_service` ada; ketiga policy predikatnya sama persis dengan
+repo) tetapi **tidak punya baris di `schema_migrations`** — baik dengan nama
+`20260805060000` maupun `20260805160305`. Baris riwayatnya yatim, khas
+`apply_migration` MCP atau `psql -f`: objeknya masuk, catatannya tidak.
 
-Semuanya **penambahan murni**: nol tabel lama diubah bentuknya, nol baris lama
-disentuh. Satu-satunya UPDATE atas baris lama adalah backfill tier di
-`20260806062000`, dan itu dibatasi ke Service yang masih `[Awaiting Onboarding]`.
+⇒ **PR #98 dan #95 memperbaiki masalah yang salah.** Rename ke `20260805160305`
+tidak menolong (live tidak punya baris itu), dan `20260805160305` pun masih di
+bawah `20260806050000`, jadi tetap out-of-order. **Tutup keduanya.**
 
-### ⛔ Yang HARUS diperiksa manusia sebelum `db push`
+### Yang dikerjakan
 
-SESI1 §4 menyatakan riwayat live memuat `20260805160305_rls_account_lead_service_scope`
-sementara berkas repo bernama `20260805060000_…`, dan bahwa **PR #98 wajib
-mendarat dulu**.
+1. **Repair** — baris `20260805060000` dicatat, **nol SQL dijalankan ulang**.
+   Setelah itu tidak ada lagi migrasi belum-jalan yang bernomor di bawah garis.
+2. **11 migrasi diterapkan berurutan**, masing-masing dengan baris riwayatnya
+   di batch yang SAMA (atomik — dibuktikan lebih dulu dengan probe: CREATE TABLE
+   ikut ter-rollback saat statement berikutnya gagal, nol residu).
 
-**Pembacaan `list_migrations` di sesi ini TIDAK menampilkan `20260805160305`
-maupun `20260805060000` di live.** Riwayat live berhenti di
-`20260805030100_rls_account_lead_client_scope` lalu langsung
-`20260806050000_prospect_activity_and_komisi_service`.
+### Hasil — live cocok dengan gate CI
 
-Dua bacaan itu tidak bisa dua-duanya benar, dan saya **tidak** menerapkan apa pun
-ke live sebelum ini dijernihkan — kalau SESI1 benar, `db push` polos akan
-out-of-order; kalau pembacaan sesi ini benar, migrasi `20260805060000` belum
-pernah jalan di live sama sekali dan PR #98 menyelesaikan masalah yang berbeda
-dari yang dikira.
+| | Sebelum | Sesudah |
+|---|---|---|
+| Tabel | 55 | **74** |
+| `sm_machines` | 14 | **16** |
+| `notif_events` | 17 | **31** (17 v1 + 14 v2) |
+| `entity_prefix` | – | **29** |
+| Migrasi tercatat | 51 | **63** |
 
-**Jalankan ini dan bandingkan:**
+Invariant O55 dicek di live: `SUM(event_count)` registry = `COUNT(notif_events)`
+= 31. Trigger pembekuan v1 diuji **di live** — UPDATE baris v1 ditolak, resolver
+utuh.
 
-```sql
-select version, name
-  from supabase_migrations.schema_migrations
- where version >= '20260805000000'
- order by version;
-```
+Tier efektif katalog live: **12 dari 73 entri (16,4%)** di `ditentukan_am` —
+jauh di bawah ambang §12 (<40%).
 
-Sampai itu jelas: **jangan `db push`, jangan `--include-all`, dan jangan pernah
-`psql -f`** (itu yang melahirkan drift O38, tiga ronde beruntun).
+### ⚠️ Yang BERUBAH untuk AM — perlu diberitahukan
 
-**PR yang masih terbuka dan saling terkait:** #101 (branch ini), #98 (rename
-migrasi ronde 3), #95 (rename yang sama, ronde lebih awal), #91 (M5-OA-7).
-#95 dan #98 tampaknya menyasar hal yang sama — perlu diputuskan mana yang hidup.
+Tiga Service yang masih `[Awaiting Onboarding]` kini **plan-gated**:
+`SVC-202608-0002`, `SVC-202608-0003`, `SVC-202608-0005` → `plan_wajib`.
+`SVC-202608-0004` → `ditentukan_am` (form G-B muncul). Halaman ketiganya berhenti
+menawarkan form Brief dan mulai menuntut Strategi & Plan. Itu perilaku yang benar
+menurut M6A Rule 1, tapi **mengubah alur kerja AM pada layanan yang sudah ada**.
+
+### Catatan cara penerapan
+
+CLI Supabase tidak bisa dipakai di container ini (tidak ada
+`SUPABASE_ACCESS_TOKEN` maupun `DATABASE_URL` live), jadi penerapan lewat MCP
+`execute_sql` dengan **versi riwayat dikontrol manual** — bukan `apply_migration`,
+yang menghasilkan versi dari timestamp saat itu dan justru melahirkan drift yang
+sesi ini perbaiki. Komentar SQL dibuang sebelum dikirim; kesetaraannya dibuktikan
+dengan `pg_dump --schema-only` versi asli vs telanjang: **identik di 4415 baris**
+(hanya nonce `\restrict` pg_dump yang berbeda) + row-count konfigurasi sama.
+
+### Aturan supaya tidak terjadi ronde keempat
+
+1. **Satu pintu push.** Merge ke `main` dulu, push dari satu tempat. Dua akun
+   boleh menulis migrasi paralel; yang tidak boleh adalah dua akun sama-sama push.
+2. **Jangan `apply_migration` MCP untuk skema** — versinya di-generate dari
+   timestamp, bukan dari nama berkas. Itu sumber drift O38 dan yang ini.
+3. **Timestamp = waktu UTC sebenarnya saat berkas dibuat.** Hampir kejadian lagi:
+   `20260807010000`/`020000` kita bernomor di bawah `20260807040000` milik sales.
 
 ---
 

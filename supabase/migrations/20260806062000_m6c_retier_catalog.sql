@@ -37,8 +37,11 @@
 -- tengah persis berarti "AM yang memutuskan". Reversibel nol-biaya lewat admin.
 --
 -- §12 memakai "% `Plan Ditentukan AM` dari seluruh service" (<40%) sebagai sinyal
--- bahwa tier-nya salah set. Setelah koreksi: **11 dari 33 entri (33%)** di tier
--- tengah — turun dari 36%, makin jauh di bawah ambang.
+-- bahwa tier-nya salah set. Setelah koreksi ada **12 nama** di tier tengah
+-- (13 dikurangi Customer Review Management). Diterapkan ke katalog live
+-- `CDPS SG` 2026-08-07 hasilnya **12 dari 73 entri efektif = 16,4%** — jauh di
+-- bawah ambang. (Angka "33 entri" di atas adalah seed lokal; katalog live lebih
+-- besar. Pakai angka live untuk §12.)
 --
 -- ⚠️ Migrasi ini **bukan** tempat menetapkan tier layanan BARU. Keputusan O54
 -- butir (1) menyatakan layanan MEA dibuat dinamis mengikuti kebutuhan klien,
