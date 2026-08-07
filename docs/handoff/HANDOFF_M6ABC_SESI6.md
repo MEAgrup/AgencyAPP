@@ -6,21 +6,19 @@
 > Sesi ini **mengeksekusi O57 / tiket B-00** (entitas `CONTRACT`) dan
 > **membuktikan** live ≡ repo dengan sidik jari struktural.
 >
-> **Pemilik: baca §7.** Di sana daftar lengkap yang menunggu Anda — 19 pertanyaan
-> `DECISIONS.md` yang belum selesai, disaring ke mana yang benar-benar butuh
-> jawaban Anda dan mana yang tidak. **§7.1 dijawab lebih dulu**: ia menentukan
-> pekerjaan ronde berikutnya.
+> **Mulai dari sini:** ronde berikutnya adalah **cacat 🔴 — O52 → O51 →
+> O42/O44-asal** (O56 dijawab pemilik 2026-08-07). §7 memuat daftar lengkap yang
+> masih menunggu keputusan pemilik; §7.1 sudah kosong (ketiganya terjawab).
 
 ## 0. Posisi persis — SALIN INI KE SESI BERIKUTNYA
 
 | | |
 |---|---|
-| Branch | `claude/handoff-m6abc-sesi5-2eq31i` |
-| Commit | `c8cb34c` (di atas `e8de6fa`) |
-| PR aktif | **#104** (`B-00 / O57`) — CI **hijau 5/5**, **menunggu merge pemilik** |
-| Base | `main` = `d384d95` (terkini, tidak tertinggal) |
-| Migrasi | **64 berkas**, live `CDPS SG` **sinkron penuh & terverifikasi** |
-| Gate | tabel **75** · prefix **30** · mesin **16** · event **31** |
+| Branch | `claude/handoff-m6abc-sesi5-2eq31i` (di-restart dari main sesudah #104 merge) |
+| `main` | `43b057f` — **#104 dan #91 keduanya sudah ter-merge** |
+| PR terbuka | **NOL.** Diaudit seluruh sesi 2026-08-07 |
+| Migrasi | **65 berkas**, live `CDPS SG` **sinkron penuh & terverifikasi** |
+| Gate | tabel **76** · prefix **31** · mesin **16** · event **33** (katalog v1+v2+v3) |
 | Skor | M6A **57%** (8/14) · M6B **8%** (1/12) — papan skor di backlog §0a |
 
 **Tidak ada pekerjaan yang belum ter-push.** Working tree bersih; lokal ≡ remote.
@@ -155,33 +153,55 @@ serahkan suite penuh ke CI.
 - **`emit()` katalog v2 belum dipasang** — katalognya ada (O55/X-01), pemanggilnya
   belum. Ini menunggu tiket yang memicunya, bukan pekerjaan tergantung.
 
-## 4b. Audit PR seluruh sesi (2026-08-07) — dua terbuka, nol menggantung diam-diam
+## 4b. Audit PR seluruh sesi (2026-08-07) — SELESAI, nol PR terbuka
 
 Repo punya **70+ branch lama** tanpa PR; semuanya sisa sesi yang kerjanya sudah
-masuk main lewat PR lain. Yang benar-benar terbuka hanya dua:
+masuk main lewat PR lain. Hanya dua yang benar-benar terbuka, dan **keduanya
+ditutup sesi ini**:
 
-| PR | Isi | Status | Tindakan |
-|---|---|---|---|
-| **#104** | B-00 / O57 entitas CONTRACT | CI hijau 5/5, base terkini | **Menunggu merge pemilik.** Preseden #102/#103 di-merge sendiri oleh `yohanagustian-del`, jadi sesi ini tidak merge sepihak |
-| **#91** | M5-OA-7 Finance — ubah transaksi wajib ACC Direktur | 🔴 **draft, `mergeable: false`, konflik nyata** | Sengaja **dibiarkan** — lihat di bawah |
+| PR | Isi | Hasil |
+|---|---|---|
+| **#104** | B-00 / O57 entitas CONTRACT | ✅ merged `9db21c4` |
+| **#91** | M5-OA-7 Finance — ubah transaksi wajib ACC Direktur | ✅ merged `43b057f` |
 
-### Kenapa #91 tidak bisa "dibereskan" sebagai pekerjaan akhir sesi
+### #91 butuh tiga perbaikan nyata, bukan sekadar resolve konflik
 
-Kerjanya **nyata dan belum ada di main** (`20260805030200_transaction_change_request.sql`
-tidak ada di `origin/main`), jadi menutupnya berarti membuang fitur, bukan
-membuang sampah. Tapi merapikannya bukan pekerjaan lima menit:
+Ia dibuka 2026-08-04 dan `main` bergerak tiga kali di bawahnya. Selain 9 penanda
+konflik, dua persoalan **tidak muncul sebagai konflik sama sekali** dan hanya
+ketahuan karena gerbangnya menyala:
 
-1. **9 penanda konflik** terhadap main.
-2. **Gate-nya basi dua generasi** — branch itu berharap **14 mesin / 19 event**;
-   main sudah **16 / 31**. Angka harus dinaikkan di `ci.yml` **dan**
-   `scripts/db-rebuild.sh` (dua berkas, satu commit).
-3. **Migrasinya out-of-order.** Timestamp `20260805030200` kini jatuh **sebelum**
-   `20260806*`/`20260807*` yang **sudah ter-apply ke live**. Menerapkannya apa
-   adanya melahirkan **drift O38 ronde keempat**. Ia harus digeser ke ujung
-   mengikuti pola §A.7b, persis seperti yang sudah dilakukan branch itu dua kali.
+1. **Katalog notifikasi jadi berversi (O55) sesudah tiket itu ditulis.** Invariant
+   berubah dari literal jadi registry: `COUNT(notif_events)` wajib
+   `= SUM(event_count)`. Dua event M5-OA-7 tidak bisa lagi sekadar di-`INSERT`.
+   Didaftarkan sebagai **v3**, **bukan** ditumpangkan ke v2 — v2 adalah amandemen
+   M6A/6B/6C, dan menaruh event Finance di dalamnya membuat registry berbohong.
+2. **Prefix `TCR` tidak punya baris `entity_prefix`.** Tabel itu lahir di A-01
+   (2026-08-06), sesudah tiket. `ident.registry.test.ts` merah — persis tugasnya.
+   Kalau tes itu tidak ada, prefix akan hidup di TS saja dan `ident_next` menolak
+   di runtime, di produksi.
+3. **Migrasi out-of-order** — `20260805030200` jatuh **sebelum** migrasi yang
+   sudah ter-apply ke live. Digeser ke `20260807130000`.
 
-**Perlakukan #91 sebagai tiket tersendiri**, bukan tempelan. Pemilik memutuskan
-2026-08-07: biarkan terbuka, catat sebagai utang.
+Gate dinaikkan di **kedua** berkas dalam satu commit: tabel 75→**76** · prefix
+30→**31** · event 31→**33**.
+
+**Pelajaran untuk PR yang menganggur:** biaya menunggu bukan linear. Tiga hari
+membuat #91 butuh tiga perbaikan yang tak satu pun terlihat sebagai konflik git.
+PR yang tidak bisa di-merge minggu ini akan lebih mahal minggu depan.
+
+## 4c. Live `CDPS SG` — 65 migrasi, terverifikasi identik
+
+Merge #91 menciptakan drift satu migrasi (main 65, live 64). Ditutup di sesi yang
+sama lewat `apply_migration`, lalu **dibuktikan** dengan sidik jari struktural
+kedua — bukan diasumsikan:
+
+| | Hash |
+|---|---|
+| Lokal (`db-rebuild.sh`, 65 migrasi dari nol) | `990800c7b142dcef1c704b7b7cdcfe1a` \| 115 |
+| Live `CDPS SG` | `990800c7b142dcef1c704b7b7cdcfe1a` \| 115 |
+
+Live: **65 migrasi · 76 tabel · 31 prefix · 16 mesin · 33 event · katalog
+konsisten.** Tidak ada migrasi tertunda.
 
 ## 5. Pertanyaan terbuka yang masih hidup
 
@@ -214,8 +234,8 @@ menunggu data live, dan **tidak** perlu Anda jawab.
 | # | Pertanyaan | Kenapa mendesak |
 |---|---|---|
 | ~~1~~ | ✅ **TERJAWAB 2026-08-07 — ya, cacat dulu.** Entri `DECISIONS.md` sudah ditulis; O56 RESOLVED | — |
-| ~~2~~ | ✅ **TERJAWAB — di-merge 2026-08-07** | — |
-| ~~3~~ | ✅ **TERJAWAB — dikerjakan 2026-08-07**, sesi yang sama | — |
+| ~~2~~ | ✅ **SELESAI — #104 merged `9db21c4`** | — |
+| ~~3~~ | ✅ **SELESAI — #91 merged `43b057f`**, migrasinya sudah di live | — |
 
 ### 7.2 Cacat 🔴 yang menunggu pilihan Anda (a) atau (b)
 
