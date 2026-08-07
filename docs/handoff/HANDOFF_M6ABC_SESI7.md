@@ -324,7 +324,42 @@ melaporkannya selesai:
 - **Langkah (3) tiket GitHub Support** tetap wajib — tanpa gc dari sisi mereka,
   halaman commit di PR lama tetap bisa dibuka lewat URL langsung.
 
-Sampai (2) dan (3) selesai: **jangan laporkan PII sudah bersih.**
+### 4.2 🔴 …dan kemudian premisnya runtuh — dengan cara yang menguntungkan
+
+Saat menyiapkan langkah (1), premis seluruh rencana diverifikasi alih-alih
+dipercaya:
+
+```
+git merge-base --is-ancestor f8faf12 origin/main   # -> FALSE
+```
+
+**`main` tidak menjangkau commit PII-nya.** Repo pernah di-re-root; lineage lama
+terputus, dan **46 branch bahkan tidak punya merge base** dengan `main`. Hanya
+**26 ref** yang menjangkau `f8faf12`, dan `main` bukan salah satunya.
+
+| | Rencana (b) sebagaimana ditulis | Yang sebenarnya dibutuhkan |
+|---|---|---|
+| Rewrite histori `main` | wajib | **tidak perlu** |
+| Force-push · re-clone semua orang | wajib | **tidak perlu** |
+| Branch dihapus | ~85 | **26** |
+| Tiket GitHub Support | wajib | wajib (tidak berubah) |
+
+**Langkah (1) dicoba dan DITOLAK dari sesi ini** — `403` dari remote;
+hapus-branch di luar izin sesi. Runbook lengkap, daftar 26 branch, SHA
+pemulihan tiap branch, dan cara menghasilkan ulang daftarnya:
+**`docs/handoff/RUNBOOK_O47b_SCRUB_PII.md`**.
+
+**Catatan metode yang layak dibawa:** klasifikasi "branch basi" tidak boleh
+bersandar pada `rev-list --count main..branch` saja — PR di-squash-merge, jadi
+branch yang kerjanya sudah masuk tetap terlihat punya ratusan commit unik.
+Percobaan kedua salah lebih halus dan lebih berbahaya: `git diff main...branch`
+**gagal** dengan *no merge base* untuk 46 branch, dan skrip yang membaca
+keluaran kosong sebagai "aman" nyaris menandai 46 branch sebagai aman-dihapus
+**karena perintahnya error**. Ketahuan sebelum ada yang dihapus, dan hanya
+karena angkanya (46 "aman" mendadak muncul dari nol) tidak masuk akal.
+
+Sampai langkah (2) verifikasi dan (3) Support selesai: **jangan laporkan PII
+sudah bersih.**
 
 ## 5. Aturan yang tidak berubah (diulang karena mahal)
 
@@ -361,8 +396,10 @@ Juga: **jangan** jalankan `npm ci` dari dalam `packages/*`. Itu membuat
 
 ## 6. Apa yang tersisa — urutan yang disarankan
 
-1. **O47b langkah (2)** — sesi tersendiri, tanpa pekerjaan mengambang. Ini satu-
-   satunya item yang tidak boleh digabung dengan apa pun.
+1. **O47b langkah (1)** — hapus 26 branch pembawa PII, lalu verifikasi, lalu
+   tiket Support. Butuh izin hapus-branch (sesi ini `403`). **Bukan** lagi
+   operasi berisiko: nol rewrite, nol force-push, nol re-clone. Runbook:
+   `docs/handoff/RUNBOOK_O47b_SCRUB_PII.md`.
 2. **O42 (3)** — butuh jawaban pemilik, bukan kode.
 3. **Kembali ke fitur M6** sesuai O56 sesudah ronde cacat: **A-08** (Section D +
    asumsi) → **A-09** (Section E…J) → **A-13** (halaman & form) → **B-01**
