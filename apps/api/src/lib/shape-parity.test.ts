@@ -344,6 +344,14 @@ const WIRE_TO_FE: Record<string, string> = {
   AttemptDetailWire: 'sales.ts::AttemptDetail',
   AttemptDetailAttemptWire: 'sales.ts::AttemptDetailAttempt',
   AttemptDetailLeadWire: 'sales.ts::AttemptDetailLead',
+  // A REQUEST body, not a response — the only one in `wire.ts` with a named
+  // interface, because three routes share its mapper (`toProposalLines`). It is
+  // registered rather than exempted: the mechanical check is exactly the right one
+  // for a body too. `no_nego` (body-parity's first live bug) was a route reading a
+  // key by a different name than the FE sends, and a body whose keys are compared
+  // to the FE's `ProposalLineInput` cannot drift that way. Direction reverses
+  // (the FE emits, the route reads) but key-set equality is the same assertion.
+  ProposalLineBody: 'sales.ts::ProposalLineInput',
   // M1 leads
   LeadStubWire: 'leads.ts::LeadStub',
   AttemptStubWire: 'leads.ts::AttemptStub',
@@ -355,6 +363,8 @@ const WIRE_TO_FE: Record<string, string> = {
   DeleteRequestQueueRowWire: 'leads.ts::DeleteRequestQueueRow',
   BulkRowResultWire: 'leads.ts::BulkRowResult',
   BulkReportWire: 'leads.ts::BulkReport',
+  BatchRegisterRowResultWire: 'leads.ts::BatchRegisterRowResult',
+  BatchRegisterReportWire: 'leads.ts::BatchRegisterReport',
   // Log aktivitas prospek (ACT-) — dibaca halaman /sales/{id} dan /leads/{id}.
   ActivityWire: 'leads.ts::ActivityRow',
   EffortSummaryWire: 'leads.ts::EffortSummary',

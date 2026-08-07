@@ -48,6 +48,7 @@ export function mapError(err: unknown): Response {
   if (
     err instanceof demo.IncompleteError ||
     err instanceof leads.IncompleteError ||
+    err instanceof leads.TooManyProspectsError ||
     err instanceof sales.IncompleteError ||
     err instanceof activity.IncompleteError ||
     err instanceof sales.TooManyServicesError ||

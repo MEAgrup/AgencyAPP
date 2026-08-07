@@ -16,6 +16,7 @@ import { formatIDR } from '@/lib/money';
 import { extractStatusLabel, summarizeJson } from '@/lib/audit';
 import type { AuditEntry, MasterService } from '@/lib/types';
 import {
+  MAX_SERVICES,
   NQ_REASONS,
   PAYMENT_SCHEMES,
   acceptCounter,
@@ -27,6 +28,7 @@ import {
   previewQuote,
   qualify,
   resubmitNegotiation,
+  reviseServices,
   setNotQualified,
   submitNegotiation,
   listActivities,
@@ -76,12 +78,205 @@ interface QualifyRow {
   amount: string;
 }
 
+// Satu baris jasa di editor proposal. `proposed_price` KOSONG berarti "harga
+// standar" — server yang menghitungnya dari MSL (lihat lib/sales.ts
+// ProposalLineInput), jadi jasa yang baru ditambahkan tidak butuh rupiah dari
+// klien; `quantity` / `amount` yang jadi masukan kalkulatornya.
 interface LineRow {
   master_service_id: string;
   name: string;
   proposed_price: string;
   commission_rule: string;
   payment_terms: string;
+  quantity: string;
+  amount: string;
+}
+
+const emptyLineRow = (): LineRow => ({
+  master_service_id: '', name: '', proposed_price: '', commission_rule: '',
+  payment_terms: '', quantity: '', amount: '',
+});
+
+/**
+ * Editor set jasa untuk proposal negosiasi & Edit Service (M0 §5 / §5.1).
+ *
+ * `mode='standard'` menyembunyikan kolom uang seluruhnya: yang bisa diubah hanya
+ * JASA dan kuantitasnya, harga selalu datang dari MSL. Itu bentuk yang dipakai
+ * jalur No Negotiation dan Edit Service tanpa negosiasi — keduanya boleh melewati
+ * Superior justru KARENA tidak ada harga yang diketik.
+ *
+ * `mode='custom'` menambah Proposed Price / Commission Rule / Payment Terms.
+ * Baris yang harganya dibiarkan kosong tetap dihargai standar oleh server, jadi
+ * "tambah satu jasa dengan harga normal sambil menego yang lain" bisa dikirim
+ * dalam satu proposal.
+ */
+function ProposalLinesEditor({
+  rows,
+  mode,
+  services,
+  onChange,
+  disabled,
+}: {
+  rows: LineRow[];
+  mode: 'standard' | 'custom';
+  services: MasterService[];
+  onChange: (rows: LineRow[]) => void;
+  disabled?: boolean;
+}) {
+  const custom = mode === 'custom';
+  const byId = new Map(services.map((s) => [s.id, s]));
+
+  function update(idx: number, field: keyof LineRow, value: string) {
+    onChange(
+      rows.map((r, i) => {
+        if (i !== idx) return r;
+        // Ganti jasa ⇒ nama ikut ganti, dan harga custom yang sudah diketik untuk
+        // jasa LAMA dibuang: membiarkannya akan mengirim harga jasa A sebagai
+        // harga jasa B.
+        if (field === 'master_service_id') {
+          return { ...r, master_service_id: value, name: byId.get(value)?.name ?? '', proposed_price: '', commission_rule: '' };
+        }
+        return { ...r, [field]: value };
+      }),
+    );
+  }
+
+  return (
+    <div className="field">
+      <label>Jasa (maks {MAX_SERVICES})</label>
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Jasa</th>
+              <th>Qty / Nominal</th>
+              {custom && <th>Proposed Price</th>}
+              {custom && <th>Commission Rule</th>}
+              {custom && <th>Payment Terms</th>}
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((l, idx) => {
+              const svc = l.master_service_id ? byId.get(l.master_service_id) : undefined;
+              const isPassthrough = svc?.pricing_mode === 'passthrough';
+              return (
+                <tr key={`${l.master_service_id}-${idx}`}>
+                  <td>
+                    <select
+                      aria-label={`Jasa baris ${idx + 1}`}
+                      value={l.master_service_id}
+                      disabled={disabled}
+                      onChange={(e) => update(idx, 'master_service_id', e.target.value)}
+                    >
+                      <option value="">Pilih jasa...</option>
+                      {/* Jasa dari snapshot Qualified bisa saja sudah non-aktif di
+                          MSL; tetap ditampilkan agar barisnya tidak kosong. */}
+                      {l.master_service_id && !byId.has(l.master_service_id) && (
+                        <option value={l.master_service_id}>{l.name || l.master_service_id}</option>
+                      )}
+                      {services.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    {isPassthrough ? (
+                      <input
+                        aria-label={`Nominal baris ${idx + 1}`}
+                        type="number"
+                        min="0"
+                        placeholder="Nominal (Rp)"
+                        value={l.amount}
+                        disabled={disabled}
+                        onChange={(e) => update(idx, 'amount', e.target.value)}
+                        style={{ width: 150 }}
+                      />
+                    ) : (
+                      <input
+                        aria-label={`Quantity baris ${idx + 1}`}
+                        type="number"
+                        min="0"
+                        step="1"
+                        placeholder="Quantity"
+                        value={l.quantity}
+                        disabled={disabled}
+                        onChange={(e) => update(idx, 'quantity', e.target.value)}
+                        style={{ width: 110 }}
+                      />
+                    )}
+                  </td>
+                  {custom && (
+                    <td>
+                      <input
+                        aria-label={`Proposed Price baris ${idx + 1}`}
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="kosong = harga standar"
+                        value={l.proposed_price}
+                        disabled={disabled}
+                        onChange={(e) => update(idx, 'proposed_price', e.target.value)}
+                        style={{ width: 170 }}
+                      />
+                    </td>
+                  )}
+                  {custom && (
+                    <td>
+                      <input
+                        aria-label={`Commission Rule baris ${idx + 1}`}
+                        placeholder="kosong = rule standar"
+                        value={l.commission_rule}
+                        disabled={disabled}
+                        onChange={(e) => update(idx, 'commission_rule', e.target.value)}
+                      />
+                    </td>
+                  )}
+                  {custom && (
+                    <td>
+                      <input
+                        aria-label={`Payment Terms baris ${idx + 1}`}
+                        value={l.payment_terms}
+                        disabled={disabled}
+                        onChange={(e) => update(idx, 'payment_terms', e.target.value)}
+                      />
+                    </td>
+                  )}
+                  <td>
+                    {rows.length > 1 && (
+                      <button
+                        type="button"
+                        className="btn btnGhost btnSm"
+                        disabled={disabled}
+                        onClick={() => onChange(rows.filter((_, i) => i !== idx))}
+                      >
+                        Hapus
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <button
+          type="button"
+          className="btn btnSecondary btnSm"
+          disabled={disabled || rows.length >= MAX_SERVICES}
+          onClick={() => onChange([...rows, emptyLineRow()])}
+        >
+          Tambah Jasa
+        </button>
+      </div>
+      {custom && (
+        <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+          Biarkan Proposed Price kosong untuk memakai harga standar MSL (dihitung server).
+        </p>
+      )}
+    </div>
+  );
 }
 
 interface AllocRow {
@@ -134,11 +329,23 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
   const [nqSubmitting, setNqSubmitting] = useState(false);
   const [nqError, setNqError] = useState<string | null>(null);
 
-  // --- Negotiation proposal editor (shared: submit @ Qualified, resubmit @ Revision/Rejected) ---
+  // --- Negotiation proposal editor (shared: konfirmasi jasa @ No Negotiation,
+  //     submit @ Qualified, resubmit @ Revision/Rejected, Edit Service @ Approved) ---
   const [showNegoEditor, setShowNegoEditor] = useState(false);
+  const [showNoNegoEditor, setShowNoNegoEditor] = useState(false);
   const [propLines, setPropLines] = useState<LineRow[]>([]);
   const [negoSubmitting, setNegoSubmitting] = useState(false);
   const [negoError, setNegoError] = useState<string | null>(null);
+
+  // --- Edit Service sebelum closing (M0 §5.1) ---
+  // `reviseCustom` memilih apakah revisi memakai harga standar MSL (status tetap
+  // Approved) atau harga negosiasi (kembali menunggu Superior). Server yang
+  // menegakkan konsekuensinya; ini hanya menentukan kolom mana yang muncul.
+  const [showReviseEditor, setShowReviseEditor] = useState(false);
+  const [reviseCustom, setReviseCustom] = useState(false);
+  const [reviseSubmitting, setReviseSubmitting] = useState(false);
+  const [reviseError, setReviseError] = useState<string | null>(null);
+  const [reviseMessage, setReviseMessage] = useState<string | null>(null);
 
   // --- Superior decision (@ Pending Approval) ---
   const [decisionNote, setDecisionNote] = useState('');
@@ -213,7 +420,8 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
     loadActivities();
   }, [load, loadAudit, loadActivities]);
 
-  // Master services load once (only the picker at Contacted uses it; cheap + harmless elsewhere).
+  // Master services load once — the Qualified picker AND every proposal-line editor
+  // (negotiation, resubmit, Edit Service) pick services from it.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -236,7 +444,8 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
   }, [msvcs]);
 
   // Prefill the proposal line editor from the qualified form (@ Qualified) or the
-  // last proposal version (@ Revision / Rejected). Runs when the detail changes.
+  // last proposal version (@ Revision / Rejected / before closing). Runs when the
+  // detail changes.
   useEffect(() => {
     if (!detail) return;
     const s = detail.attempt.status;
@@ -248,18 +457,39 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
           proposed_price: sv.subtotal,
           commission_rule: sv.commission_rule,
           payment_terms: '',
+          // Kuantitas yang sudah dipin di snapshot Qualified, supaya baris yang
+          // harganya dikosongkan (jadi "standar") dihitung ulang server dengan
+          // qty yang SAMA, bukan diam-diam jadi 1.
+          quantity: sv.quantity ? String(Math.trunc(Number(sv.quantity))) : '',
+          amount: sv.input_amount ?? '',
         })),
       );
-    } else if ((s === S_REVISION || s === S_REJECTED) && detail.proposals.length > 0) {
+    } else if (
+      (s === S_REVISION || s === S_REJECTED || s === S_APPROVED || s === S_AUTO) &&
+      detail.proposals.length > 0
+    ) {
       const last = detail.proposals[detail.proposals.length - 1];
+      // Baris proposal tidak menyimpan kuantitas (hanya harga yang disepakati),
+      // jadi qty diambil dari snapshot Qualified untuk jasa yang memang
+      // ditawarkan. Tanpa ini, mengubah satu baris ke harga standar akan
+      // diam-diam menghitung ulang SEMUA baris dengan qty 1 — nilai dealnya
+      // berubah tanpa ada yang mengetiknya.
+      const offered = new Map(
+        (detail.qualified_form?.services ?? []).map((sv) => [sv.master_service_id, sv]),
+      );
       setPropLines(
-        last.lines.map((l) => ({
-          master_service_id: l.master_service_id,
-          name: l.name,
-          proposed_price: l.proposed_price,
-          commission_rule: l.commission_rule,
-          payment_terms: l.payment_terms ?? '',
-        })),
+        last.lines.map((l) => {
+          const sv = offered.get(l.master_service_id);
+          return {
+            master_service_id: l.master_service_id,
+            name: l.name,
+            proposed_price: l.proposed_price,
+            commission_rule: l.commission_rule,
+            payment_terms: l.payment_terms ?? '',
+            quantity: sv?.quantity ? String(Math.trunc(Number(sv.quantity))) : '',
+            amount: sv?.input_amount ?? '',
+          };
+        }),
       );
     }
   }, [detail]);
@@ -361,7 +591,9 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
 
   // ---- Qualified Lead Form ----
   function addQRow() {
-    setQRows((rows) => (rows.length >= 5 ? rows : [...rows, { master_service_id: '', quantity: '', amount: '' }]));
+    setQRows((rows) =>
+      rows.length >= MAX_SERVICES ? rows : [...rows, { master_service_id: '', quantity: '', amount: '' }],
+    );
   }
   function removeQRow(idx: number) {
     setQRows((rows) => rows.filter((_, i) => i !== idx));
@@ -421,23 +653,43 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
   }
 
   // ---- Negotiation proposal editor ----
-  function updatePropLine(idx: number, field: keyof LineRow, value: string) {
-    setPropLines((rows) => rows.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
-  }
-  function propPayload(): ProposalLineInput[] {
-    return propLines.map((l) => ({
-      master_service_id: l.master_service_id,
-      proposed_price: l.proposed_price,
-      commission_rule: l.commission_rule,
-      payment_terms: l.payment_terms || undefined,
-    }));
+
+  /**
+   * Rakit body `lines[]`. `strip=true` (jalur standar: No Negotiation / Edit
+   * Service tanpa negosiasi) MEMBUANG harga & rule, jadi server yang menghargai
+   * semuanya dari MSL — itulah yang membuat submit-nya boleh melewati Superior.
+   * `strip=false` mengirim harga apa adanya; baris yang harganya kosong tetap
+   * dihargai standar oleh server.
+   */
+  function propPayload(rows: LineRow[], strip: boolean): ProposalLineInput[] {
+    return rows.map((l) => {
+      const svc = l.master_service_id ? byId.get(l.master_service_id) : undefined;
+      const isPassthrough = svc?.pricing_mode === 'passthrough';
+      const qty = Number(l.quantity);
+      const line: ProposalLineInput = {
+        master_service_id: l.master_service_id,
+        proposed_price: strip ? '' : l.proposed_price.trim(),
+        commission_rule: strip ? '' : l.commission_rule.trim(),
+        payment_terms: l.payment_terms || undefined,
+      };
+      if (isPassthrough) {
+        if (l.amount.trim() !== '') line.amount = l.amount.trim();
+      } else if (!Number.isNaN(qty) && qty > 0) {
+        line.quantity = Math.trunc(qty);
+      }
+      return line;
+    });
   }
 
-  async function handleNoNego() {
+  async function handleNoNego(e: FormEvent) {
+    e.preventDefault();
     setNegoError(null);
     setNegoSubmitting(true);
     try {
-      await submitNegotiation(id, [], true);
+      // Set jasa yang dikonfirmasi (bisa sudah ditambah/dikurangi dari penawaran
+      // Qualified), semuanya dengan syarat standar — M0 §5 Flow Non-Negosiasi
+      // langkah 1. Harga tidak pernah dikirim dari sini.
+      await submitNegotiation(id, propPayload(propLines, true), true);
       await load();
       await loadAudit();
     } catch (err) {
@@ -452,7 +704,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
     setNegoError(null);
     setNegoSubmitting(true);
     try {
-      await submitNegotiation(id, propPayload(), false);
+      await submitNegotiation(id, propPayload(propLines, false), false);
       await load();
       await loadAudit();
     } catch (err) {
@@ -462,12 +714,39 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
+  // ---- Edit Service sebelum closing (M0 §5.1) ----
+  async function handleReviseServices(e: FormEvent) {
+    e.preventDefault();
+    setReviseError(null);
+    setReviseMessage(null);
+    setReviseSubmitting(true);
+    try {
+      const lines = propPayload(propLines, !reviseCustom);
+      await reviseServices(id, lines);
+      setReviseMessage(
+        reviseCustom
+          ? 'Revisi jasa terkirim — proposal kembali menunggu persetujuan Superior.'
+          : 'Set jasa diperbarui. Attempt tetap siap closing.',
+      );
+      setShowReviseEditor(false);
+      // Alokasi closing dipasang ulang: nilai transaksinya berubah, jadi form
+      // closing harus membaca versi proposal yang baru.
+      closingInitRef.current = false;
+      await load();
+      await loadAudit();
+    } catch (err) {
+      setReviseError(errorMessage(err));
+    } finally {
+      setReviseSubmitting(false);
+    }
+  }
+
   async function handleResubmit(e: FormEvent) {
     e.preventDefault();
     setNegoError(null);
     setNegoSubmitting(true);
     try {
-      await resubmitNegotiation(id, propPayload());
+      await resubmitNegotiation(id, propPayload(propLines, false));
       await load();
       await loadAudit();
     } catch (err) {
@@ -965,7 +1244,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
               </div>
 
               <div className="field">
-                <label>Jasa Ditawarkan (maks 5)</label>
+                <label>Jasa Ditawarkan (maks {MAX_SERVICES})</label>
                 <div className="table-wrap">
                   <table className="table">
                     <thead>
@@ -1032,7 +1311,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
                     type="button"
                     className="btn btnSecondary btnSm"
                     onClick={addQRow}
-                    disabled={qRows.length >= 5}
+                    disabled={qRows.length >= MAX_SERVICES}
                   >
                     Tambah Jasa
                   </button>
@@ -1103,60 +1382,61 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
           </div>
           {negoError && <div className="alert alertError" role="alert">{negoError}</div>}
           <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-            <button type="button" className="btn btnSecondary" disabled={negoSubmitting} onClick={handleNoNego}>
-              {negoSubmitting && !showNegoEditor ? 'Memproses...' : 'No Negotiation Required'}
+            <button
+              type="button"
+              className={`btn ${showNoNegoEditor ? 'btnPrimary' : 'btnSecondary'}`}
+              onClick={() => {
+                setShowNoNegoEditor((v) => !v);
+                setShowNegoEditor(false);
+              }}
+            >
+              No Negotiation Required
             </button>
             <button
               type="button"
               className={`btn ${showNegoEditor ? 'btnPrimary' : 'btnSecondary'}`}
-              onClick={() => setShowNegoEditor((v) => !v)}
+              onClick={() => {
+                setShowNegoEditor((v) => !v);
+                setShowNoNegoEditor(false);
+              }}
             >
               Negotiation Required
             </button>
           </div>
+
+          {/* M0 §5 Flow Non-Negosiasi langkah 1 — Service Selection & Confirmation:
+              jasa boleh dibatalkan/ditambah, tapi SEMUA memakai syarat standar. */}
+          {showNoNegoEditor && (
+            <form className="form" onSubmit={handleNoNego} style={{ marginTop: 12 }}>
+              <p className="muted" style={{ fontSize: 13 }}>
+                Konfirmasi set jasa yang diambil klien. Semua memakai harga &amp; komisi standar
+                Master Service List, jadi tidak butuh persetujuan Superior. Butuh ubah harga?
+                Pakai <strong>Negotiation Required</strong>.
+              </p>
+              <ProposalLinesEditor
+                rows={propLines}
+                mode="standard"
+                services={msvcs}
+                onChange={setPropLines}
+                disabled={negoSubmitting}
+              />
+              <div>
+                <button type="submit" className="btn btnPrimary" disabled={negoSubmitting}>
+                  {negoSubmitting ? 'Memproses...' : 'Konfirmasi Jasa (Tanpa Negosiasi)'}
+                </button>
+              </div>
+            </form>
+          )}
+
           {showNegoEditor && (
             <form className="form" onSubmit={handleSubmitNego} style={{ marginTop: 12 }}>
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Jasa</th>
-                      <th>Proposed Price</th>
-                      <th>Commission Rule</th>
-                      <th>Payment Terms</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {propLines.map((l, idx) => (
-                      <tr key={`${l.master_service_id}-${idx}`}>
-                        <td>{l.name || l.master_service_id}</td>
-                        <td>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={l.proposed_price}
-                            onChange={(e) => updatePropLine(idx, 'proposed_price', e.target.value)}
-                            style={{ width: 150 }}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={l.commission_rule}
-                            onChange={(e) => updatePropLine(idx, 'commission_rule', e.target.value)}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={l.payment_terms}
-                            onChange={(e) => updatePropLine(idx, 'payment_terms', e.target.value)}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ProposalLinesEditor
+                rows={propLines}
+                mode="custom"
+                services={msvcs}
+                onChange={setPropLines}
+                disabled={negoSubmitting}
+              />
               <div>
                 <button type="submit" className="btn btnPrimary" disabled={negoSubmitting}>
                   {negoSubmitting ? 'Memproses...' : 'Ajukan Negosiasi'}
@@ -1230,47 +1510,13 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
             </button>
           </div>
           <form className="form" onSubmit={handleResubmit}>
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Jasa</th>
-                    <th>Proposed Price</th>
-                    <th>Commission Rule</th>
-                    <th>Payment Terms</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {propLines.map((l, idx) => (
-                    <tr key={`${l.master_service_id}-${idx}`}>
-                      <td>{l.name || l.master_service_id}</td>
-                      <td>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={l.proposed_price}
-                          onChange={(e) => updatePropLine(idx, 'proposed_price', e.target.value)}
-                          style={{ width: 150 }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          value={l.commission_rule}
-                          onChange={(e) => updatePropLine(idx, 'commission_rule', e.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          value={l.payment_terms}
-                          onChange={(e) => updatePropLine(idx, 'payment_terms', e.target.value)}
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <ProposalLinesEditor
+              rows={propLines}
+              mode="custom"
+              services={msvcs}
+              onChange={setPropLines}
+              disabled={negoSubmitting}
+            />
             <div>
               <button type="submit" className="btn btnSecondary" disabled={negoSubmitting}>
                 {negoSubmitting ? 'Memproses...' : 'Resubmit Proposal'}
@@ -1293,53 +1539,76 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
             </button>
           </div>
           <form className="form" onSubmit={handleResubmit}>
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Jasa</th>
-                    <th>Proposed Price</th>
-                    <th>Commission Rule</th>
-                    <th>Payment Terms</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {propLines.map((l, idx) => (
-                    <tr key={`${l.master_service_id}-${idx}`}>
-                      <td>{l.name || l.master_service_id}</td>
-                      <td>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={l.proposed_price}
-                          onChange={(e) => updatePropLine(idx, 'proposed_price', e.target.value)}
-                          style={{ width: 150 }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          value={l.commission_rule}
-                          onChange={(e) => updatePropLine(idx, 'commission_rule', e.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          value={l.payment_terms}
-                          onChange={(e) => updatePropLine(idx, 'payment_terms', e.target.value)}
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <ProposalLinesEditor
+              rows={propLines}
+              mode="custom"
+              services={msvcs}
+              onChange={setPropLines}
+              disabled={negoSubmitting}
+            />
             <div>
               <button type="submit" className="btn btnSecondary" disabled={negoSubmitting}>
                 {negoSubmitting ? 'Memproses...' : 'Resubmit Proposal'}
               </button>
             </div>
           </form>
+        </section>
+      )}
+
+      {/* Edit Service sebelum closing (M0 §5.1, keputusan pemilik 2026-08-07).
+          Jasa yang benar-benar diambil klien sering berbeda dari yang ditawarkan
+          di Qualified; di sini set finalnya direvisi SEBELUM closing membekukannya
+          menjadi Service + Transaction. */}
+      {showLostAtClosing && canAct && !closeResult && (
+        <section className="card">
+          <div className="cardHeader">
+            <h2>Edit Service (sebelum closing)</h2>
+          </div>
+          {reviseError && <div className="alert alertError" role="alert">{reviseError}</div>}
+          {reviseMessage && <div className="alert alertSuccess" role="status">{reviseMessage}</div>}
+          <p className="muted" style={{ fontSize: 13 }}>
+            Closing membaca versi proposal TERAKHIR. Revisi dengan harga standar Master
+            Service List tidak mengubah status (tetap siap closing); begitu ada harga
+            negosiasi, proposal kembali menunggu persetujuan Superior.
+          </p>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className={`btn ${showReviseEditor ? 'btnPrimary' : 'btnSecondary'}`}
+              onClick={() => {
+                setShowReviseEditor((v) => !v);
+                setReviseError(null);
+                setReviseMessage(null);
+              }}
+            >
+              {showReviseEditor ? 'Tutup Editor Jasa' : 'Ubah Jasa'}
+            </button>
+          </div>
+          {showReviseEditor && (
+            <form className="form" onSubmit={handleReviseServices} style={{ marginTop: 12 }}>
+              <label className="row" style={{ gap: 8, fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  checked={reviseCustom}
+                  disabled={reviseSubmitting}
+                  onChange={(e) => setReviseCustom(e.target.checked)}
+                />
+                Pakai harga negosiasi (butuh persetujuan Superior lagi)
+              </label>
+              <ProposalLinesEditor
+                rows={propLines}
+                mode={reviseCustom ? 'custom' : 'standard'}
+                services={msvcs}
+                onChange={setPropLines}
+                disabled={reviseSubmitting}
+              />
+              <div>
+                <button type="submit" className="btn btnPrimary" disabled={reviseSubmitting}>
+                  {reviseSubmitting ? 'Memproses...' : 'Simpan Revisi Jasa'}
+                </button>
+              </div>
+            </form>
+          )}
         </section>
       )}
 

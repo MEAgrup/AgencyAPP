@@ -28,9 +28,12 @@ import {
   MSG_ALREADY_OWN_ATTEMPT,
   MSG_DUPLICATE_POOL,
   MSG_LEAD_CO_WORKED,
+  MSG_MAX_REGISTER_BATCH,
   NotFoundError,
   normalizePhone,
   register,
+  registerBatch,
+  TooManyProspectsError,
 } from './leads';
 
 const budi = (): Actor => ({
@@ -186,6 +189,26 @@ describe('mandatory-field gate (no DB)', () => {
   it('register rejects a missing phone with the exact BI message', async () => {
     await expect(register(noSql, budi(), { leadName: 'ABC Media', phoneNumber: '' }))
       .rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  it('registerBatch rejects an empty list and > 5 prospects (verbatim BI), touching no DB', async () => {
+    await expect(registerBatch(noSql, budi(), { source: 'Scouting', prospects: [] }))
+      .rejects.toBeInstanceOf(IncompleteError);
+    const six = Array.from({ length: 6 }, (_, i) => ({ leadName: `L${i}`, phoneNumber: `081200000${i}` }));
+    await expect(registerBatch(noSql, budi(), { source: 'Scouting', prospects: six }))
+      .rejects.toBeInstanceOf(TooManyProspectsError);
+    await expect(registerBatch(noSql, budi(), { source: 'Scouting', prospects: six }))
+      .rejects.toThrow(MSG_MAX_REGISTER_BATCH);
+  });
+
+  it('registerBatch applies the §9.3 campaign gate to the SHARED Source before any row runs', async () => {
+    // 'Broadcast' is in CAMPAIGN_REQUIRED_SOURCES: with no campaign and no
+    // "di luar campaign" declaration the whole submission is refused — noSql
+    // proves nothing was attempted per row.
+    await expect(registerBatch(noSql, budi(), {
+      source: 'Broadcast',
+      prospects: [{ leadName: 'ABC Media', phoneNumber: '08120001' }],
+    })).rejects.toBeInstanceOf(IncompleteError);
   });
 });
 
@@ -386,5 +409,116 @@ describeDb('register — reopen', () => {
       select count(*)::int as n from audit_log
       where entity_id = ${first.lead.id} and action like 'transition:%'`;
     expect(trans[0].n).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Batch registration (QA revisi 2026-08-07): one Source, up to 5 prospects.
+// ---------------------------------------------------------------------------
+describeDb('registerBatch', () => {
+  it('registers five prospects under one Source, each with its own LEAD + PRSP', async () => {
+    const phones = Array.from({ length: 5 }, () => uniquePhone());
+    const report = await registerBatch(sql, budi(), {
+      source: 'Scouting',
+      outsideCampaign: true,
+      prospects: phones.map((phoneNumber, i) => ({
+        leadName: `Prospek ${i + 1}`, phoneNumber, email: `p${i + 1}@example.com`,
+      })),
+    });
+
+    expect(report.registered).toBe(5);
+    expect(report.rejected).toBe(0);
+    expect(report.rejections).toEqual([]);
+    expect(report.summary).toBe('[5 lead berhasil didaftarkan, 0 ditolak]');
+    // Distinct ids per row — one click, five real leads (not one lead five times).
+    const leadIds = new Set(report.rows.map((r) => r.leadId));
+    const attemptIds = new Set(report.rows.map((r) => r.attemptId));
+    expect(leadIds.size).toBe(5);
+    expect(attemptIds.size).toBe(5);
+    for (const r of report.rows) {
+      expect(r.registered).toBe(true);
+      expect(r.leadId).toMatch(/^LEAD-\d{6}-\d{4}$/);
+      expect(r.attemptId).toMatch(/^PRSP-\d{6}-\d{4}$/);
+      expect(r.reason).toBe('');
+    }
+    // The shared Source landed on every row.
+    const sources = await sql<{ source: string }[]>`
+      select source from leads where id = any(${[...leadIds]})`;
+    expect(sources.map((s) => s.source)).toEqual(['Scouting', 'Scouting', 'Scouting', 'Scouting', 'Scouting']);
+  });
+
+  it('rejects only the offending row: the other rows stay committed (one tx per row)', async () => {
+    // Row 2 duplicates a phone Budi already holds an open attempt on, so `decide`
+    // refuses it. Rows 1 and 3 must still exist afterwards — the whole point of
+    // not wrapping the batch in a single transaction.
+    const taken = uniquePhone();
+    await register(sql, budi(), { leadName: 'Sudah Ada', phoneNumber: taken });
+    const fresh = [uniquePhone(), uniquePhone()];
+
+    const report = await registerBatch(sql, budi(), {
+      source: 'Scouting',
+      outsideCampaign: true,
+      prospects: [
+        { leadName: 'Baru A', phoneNumber: fresh[0] },
+        { leadName: 'Duplikat', phoneNumber: taken },
+        { leadName: 'Baru B', phoneNumber: fresh[1] },
+      ],
+    });
+
+    expect(report.registered).toBe(2);
+    expect(report.rejected).toBe(1);
+    expect(report.rows[1].registered).toBe(false);
+    expect(report.rows[1].reason).toBe(MSG_ALREADY_OWN_ATTEMPT);
+    expect(report.rows[1].rowNumber).toBe(2);
+    expect(report.rejections).toHaveLength(1);
+    // Rows 1 and 3 are really in the database.
+    const kept = await sql<{ n: number }[]>`
+      select count(*)::int as n from leads where id = any(${[report.rows[0].leadId, report.rows[2].leadId]})`;
+    expect(kept[0].n).toBe(2);
+  });
+
+  it('rejects an incomplete row with the house BI message, keeping the rest', async () => {
+    const report = await registerBatch(sql, budi(), {
+      source: 'Scouting',
+      outsideCampaign: true,
+      prospects: [
+        { leadName: 'Lengkap', phoneNumber: uniquePhone() },
+        { leadName: '   ', phoneNumber: uniquePhone() }, // no name
+        { leadName: 'Tanpa Telepon', phoneNumber: '' },
+      ],
+    });
+    expect(report.registered).toBe(1);
+    expect(report.rejected).toBe(2);
+    expect(report.rows[1].reason).toBe(bi.INCOMPLETE_DATA);
+    expect(report.rows[2].reason).toBe(bi.INCOMPLETE_DATA);
+  });
+
+  it('a second row on the SAME phone is refused (the batch does not double-open an attempt)', async () => {
+    const dup = uniquePhone();
+    const report = await registerBatch(sql, budi(), {
+      source: 'Scouting',
+      outsideCampaign: true,
+      prospects: [
+        { leadName: 'Sama A', phoneNumber: dup },
+        { leadName: 'Sama B', phoneNumber: dup },
+      ],
+    });
+    expect(report.registered).toBe(1);
+    expect(report.rows[1].reason).toBe(MSG_ALREADY_OWN_ATTEMPT);
+    const attempts = await sql<{ n: number }[]>`
+      select count(*)::int as n from prospect_attempts where lead_id = ${report.rows[0].leadId}`;
+    expect(attempts[0].n).toBe(1);
+  });
+
+  it('refuses the whole batch when the picked campaign does not exist (nothing registered)', async () => {
+    const phones = [uniquePhone(), uniquePhone()];
+    await expect(registerBatch(sql, budi(), {
+      source: 'Leads - Iklan',
+      campaignId: 'CMP-000000-0000',
+      prospects: phones.map((phoneNumber, i) => ({ leadName: `X${i}`, phoneNumber })),
+    })).rejects.toBeInstanceOf(NotFoundError);
+    const made = await sql<{ n: number }[]>`
+      select count(*)::int as n from leads where phone_norm = any(${phones.map(normalizePhone)})`;
+    expect(made[0].n).toBe(0);
   });
 });
