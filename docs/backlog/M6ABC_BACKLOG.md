@@ -3,8 +3,9 @@
 > Dibuat 2026-08-06 dari QA halaman `/account/services/SVC-202608-0002`.
 > PRD: `docs/prd/CDPS_Module6A_Strategi.md`, `…6B_Plan.md`, `…6C_Plan_Gate_Satuan.md`.
 > Keputusan & deviasi: `docs/DECISIONS.md` 2026-08-06 + 2026-08-07.
-> **O54, O55, O58 SELESAI** (2026-08-07). **O57 sudah diputus, belum dieksekusi**
-> — rancangannya di `docs/handoff/HANDOFF_M6ABC_SESI5.md` §4. **O56 masih terbuka.**
+> **O54, O55, O57, O58 SELESAI** (2026-08-07). **O56 sudah dijawab pemilik
+> 2026-08-07: ronde berikutnya adalah CACAT 🔴 (O52/O51/O42) lebih dulu, bukan
+> M6A A-13 maupun M6B B-01.**
 
 ## 0. Kenapa urutannya begini
 
@@ -94,7 +95,7 @@ diimplementasi sebelum ini mendarat, jadi ia masuk batch migrasi yang SAMA denga
 
 | # | Ticket | Catatan implementasi |
 |---|---|---|
-| **B-00** | **Entitas `CONTRACT` (O57)** | 🔴 **PRASYARAT KERAS B-01.** Keputusan pemilik 2026-08-07: kontrak = kumpulan Service satu klien dalam satu kesepakatan ⇒ `strategi.service_id` → `contract_id`. Rancangan langkah-demi-langkah: `docs/handoff/HANDOFF_M6ABC_SESI5.md` §4. Membalikkannya murah SEKARANG (satu FK, nol data produksi) dan mahal setelah periode Plan digenerate di atasnya |
+| ~~B-00~~ | ~~Entitas `CONTRACT` (O57)~~ | ✅ **SELESAI 2026-08-07** — migrasi `20260807120000`, domain `packages/domain/src/contract.ts`, 4 route baru. Prefix `CTR` (registry 29→30), tabel `contracts` (tabel 74→75), `services.contract_id` nullable, `strategi.contract_id` NOT NULL menggantikan `service_id`, tiga indeks unik jadi per-kontrak, RLS `private.jwt_is_am_of_contract` di dua tempat. Jendela kontrak PINDAH (tidak disalin) — lihat DECISIONS 2026-08-07 "O57 DIEKSEKUSI". `POST /services/{id}/strategi` tidak berubah: ia mencetak kontrak 1:1 kalau Service belum punya. **B-01 tidak lagi terblokir** |
 | B-01 | `PLAN` + 6 child tables | `PLAN_TARGET` (menyimpan `nilai_strategi` immutable **dan** `nilai_dipakai`), `PLAN_ROW`, `PLAN_ROW_WEEK`, `PLAN_ACTUAL`, `PLAN_REVIEW`, `PLAN_FLAG`. `lingkup ∈ kontrak/klien` + `strategi_id` nullable (Plan Satuan) + `status_dormansi` |
 | B-02 | Generasi periode | Anniversary-month dari `tanggal_mulai_siklus`. **Simpan day-of-month yang DIMAKSUD terpisah** dari tanggal terhitung, supaya start tanggal 31 tidak hanyut permanen ke 28 setelah lewat Februari |
 | B-03 | Mesin status #16 | Periode 1 butuh persetujuan SPV; 2…n auto-aktif 00:00 WIB; `Menunggu Persetujuan` hanya untuk `Turun >10%` |
@@ -120,4 +121,4 @@ diimplementasi sebelum ini mendarat, jadi ia masuk batch migrasi yang SAMA denga
 | X-07 | PA-2/PA-5 (jendela GMV manual 5 hari · force-close +7 hari) | Yulianti |
 | X-08 | PA-3 (metrik auto PE-3 belum tentu tersedia semua) | Hans — metrik yang belum ada harus jatuh ke manual **secara eksplisit**, tidak dicampur diam-diam dengan yang auto |
 | X-10 | **O58 — "tidak ada" vs "belum dijawab" untuk enam field daftar bertanda WAJIB** (A-11, A-14, B-5.3, B-8.1, B-8.2) | Yohan / Yulianti. Sesi 3 memilih bacaan yang tidak memblokir (gerbangi angka pendampingnya, bukan daftarnya) dan mencatatnya; menambah checkbox "tidak ada" berarti field yang PRD tidak mendefinisikan |
-| X-09 | **Tidak ada entitas CONTRACT di CDPS** — Strategi diikat ke `service_id` dan durasi/floor dideklarasi AM | Yohan / Yulianti — **O57**. Murah dibalik sekarang, mahal setelah periode Plan M6B digenerate di atasnya |
+| ~~X-09~~ | ~~Tidak ada entitas CONTRACT di CDPS~~ | ✅ **SELESAI 2026-08-07** — O57 diputus & dieksekusi (B-00) |

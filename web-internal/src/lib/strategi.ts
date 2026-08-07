@@ -210,12 +210,14 @@ export type TrenState = 'naik' | 'stabil' | 'turun';
 
 export interface Strategi {
   id: string;
-  service_id: string;
+  /** O57 — the agreement (CTR-), which may cover several Services. */
+  contract_id: string;
   client_id: string;
   versi_no: number;
   strategi_induk_id: string | null;
   versi_sebelumnya_id: string | null;
   status: StrategiStatus;
+  /** Derived from the Contract — read-only (house rule #4). */
   durasi_kontrak_bulan: number;
   tanggal_mulai_kontrak: string;
   tanggal_akhir_kontrak: string;
@@ -368,8 +370,9 @@ export interface StrategiTarget {
   metric: string;
   nilai_floor: string | null;
   nilai_stretch: string;
-  // O57: `kontrak` once a Contract record exists, `input_am` until then — a
-  // report must be able to tell a contractual floor from a self-set one.
+  // O57 item (b): the APPROVAL PATH, not the origin — `input_am` while the AM
+  // still owns the number, `disetujui_head` once a Head signed off, after which
+  // Rule 7 makes it read-only (enforced by a DB trigger).
   sumber_floor: string | null;
 }
 

@@ -71,6 +71,9 @@ export const PREFIXES = {
   STRG: { entity: 'Strategi (Full Store Management)', module: 'M6A' },
   PLAN: { entity: 'Plan period', module: 'M6B' },
   VND: { entity: 'Vendor', module: 'M6A' },
+  // O57 — the agreement a client signed, covering n Services. Strategi hangs off
+  // this, not off a Service, so Rule 2 / D-1 / §7 read as written.
+  CTR: { entity: 'Contract (kesepakatan klien)', module: 'M6A/M6B' },
 } as const satisfies Record<string, PrefixInfo>;
 
 /** A registered prefix string (e.g. 'CLI', 'TRX'). */

@@ -85,6 +85,7 @@ async function cleanup() {
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from client_platforms where created_by like 'ZZ-%'`;
   await sql`delete from client_sales_allocations where created_by like 'ZZ-%'`;
+  await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
   await sql`delete from negotiation_proposal_lines where created_by like 'ZZ-%'`;
   await sql`delete from negotiation_proposals where created_by like 'ZZ-%'`;

@@ -6,7 +6,7 @@
  * other way inline in each route (`toInput`).
  */
 import { money, tz } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, campaign, client, creative, demo, directory, finance, health, kol, leads, livestream, marketing, msl, notification, performance, plangate, portal, sales, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, audit, auth, board, campaign, client, contract, creative, demo, directory, finance, health, kol, leads, livestream, marketing, msl, notification, performance, plangate, portal, sales, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -2909,6 +2909,49 @@ export function vendorToWire(v: vendor.Vendor): VendorWire {
   };
 }
 
+// ---------------------------------------------------------------------------
+// O57 — Contract (CTR-)
+// ---------------------------------------------------------------------------
+
+/** The agreement one client signed, covering n Services (O57). */
+export interface ContractWire {
+  id: string;
+  client_id: string;
+  durasi_bulan: number;
+  tanggal_mulai: string;
+  tanggal_akhir: string;
+  catatan: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function contractToWire(c: contract.Contract): ContractWire {
+  return {
+    id: c.id,
+    client_id: c.clientId,
+    durasi_bulan: c.durasiBulan,
+    tanggal_mulai: c.tanggalMulai,
+    tanggal_akhir: c.tanggalAkhir,
+    catatan: c.catatan,
+    created_by: c.createdBy,
+    created_at: c.createdAt,
+    updated_at: c.updatedAt,
+  };
+}
+
+/** Inbound: the window an AM declares. */
+export function contractFromWire(v: unknown): contract.ContractInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    durasiBulan: Number(b.durasi_bulan ?? 0),
+    tanggalMulai: String(b.tanggal_mulai ?? ''),
+    tanggalAkhir: String(b.tanggal_akhir ?? ''),
+    catatan:
+      b.catatan === undefined || b.catatan === null ? null : String(b.catatan),
+  };
+}
+
 /** A-12 — who may approve at the client, and how to escalate past them. */
 export interface StrategiDecisionMakerWire {
   nama: string;
@@ -3014,12 +3057,18 @@ export interface StrategiPrasyaratKlienWire {
 /** The Strategi header (Section J-1 + the contract window) plus Section A. */
 export interface StrategiWire {
   id: string;
-  service_id: string;
+  /**
+   * O57 — the agreement, not a Service. A Strategi covers every Service under
+   * the contract, so `service_id` was replaced rather than kept alongside: one
+   * id there would name an arbitrary member of the set.
+   */
+  contract_id: string;
   client_id: string;
   versi_no: number;
   strategi_induk_id: string | null;
   versi_sebelumnya_id: string | null;
   status: string;
+  /** Derived from `contracts` — read-only here (house rule #4). */
   durasi_kontrak_bulan: number;
   tanggal_mulai_kontrak: string;
   tanggal_akhir_kontrak: string;
@@ -3061,7 +3110,7 @@ export interface StrategiWire {
 export function strategiToWire(s: strategi.Strategi): StrategiWire {
   return {
     id: s.id,
-    service_id: s.serviceId,
+    contract_id: s.contractId,
     client_id: s.clientId,
     versi_no: s.versiNo,
     strategi_induk_id: s.strategiIndukId,
@@ -3780,7 +3829,9 @@ export function strategiTargetsFromWire(v: unknown): strategi.TargetInput[] {
     metric: str(t.metric) as strategi.TargetMetric,
     nilaiFloor: strOrNull(t.nilai_floor),
     nilaiStretch: str(t.nilai_stretch),
-    sumberFloor: (strOrNull(t.sumber_floor) as 'kontrak' | 'input_am' | null) ?? null,
+    // `sumber_floor` is deliberately NOT read from the wire (O57 item (b)): it is
+    // the approval path, set by the server at Head approval. Accepting it here
+    // would let the AM who types the floor also declare it approved.
   }));
 }
 

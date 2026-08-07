@@ -171,7 +171,7 @@ const wire = parseInterfaces(readFileSync(WIRE_TS, 'utf8'));
  * any route).
  */
 const FE_FILES = [
-  'account.ts', 'ads.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'creative.ts',
+  'account.ts', 'ads.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'contract.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'kol.ts', 'leads.ts', 'livestream.ts', 'marketing.ts',
   'performance.ts', 'portal.ts', 'sales.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
 ];
@@ -408,6 +408,8 @@ const WIRE_TO_FE: Record<string, string> = {
   // M6A — Vendor (VND-) and Strategi (STRG-). The Section A→J form is backlog
   // A-05…A-09; the FE types exist now because a converter with no declared FE
   // type is a converter this guard cannot check.
+  // O57 — the Contract (CTR-) the Strategi hangs off.
+  ContractWire: 'contract.ts::Contract',
   VendorWire: 'strategi.ts::Vendor',
   VendorDocumentWire: 'strategi.ts::VendorDocument',
   StrategiWire: 'strategi.ts::Strategi',

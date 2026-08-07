@@ -196,6 +196,7 @@ describeDb('read models under RLS (O37)', () => {
     } finally {
       await sql`delete from installments where id = ${INST}`;
       await sql`delete from transactions where id = ${TRX}`;
+      await sql`delete from contracts where client_id = ${CLI}`;
       await sql`delete from clients where id = ${CLI}`;
     }
   });
@@ -276,6 +277,7 @@ describeDb('read models under RLS (O37)', () => {
     } finally {
       await sql`delete from strategy_plans where id = ${STR}`;
       await sql`delete from services where id = ${SVC}`;
+      await sql`delete from contracts where client_id = ${CLI}`;
       await sql`delete from clients where id = ${CLI}`;
     }
   });

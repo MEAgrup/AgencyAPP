@@ -56,6 +56,7 @@ import {
   ValidationError,
   type Actor,
 } from './account';
+import * as contract from './contract';
 import { effectiveGate, type PlanTier } from './plangate_rules';
 
 // ---------------------------------------------------------------------------
@@ -84,6 +85,20 @@ export type Channel = (typeof CHANNELS)[number];
 /** B-0.2 — `Belum Aktif` skips the historical baseline (Rule 4). */
 export const CHANNEL_STATES = ['Eksisting', 'Belum Aktif'] as const;
 export type ChannelState = (typeof CHANNEL_STATES)[number];
+
+/**
+ * `sumber_floor` — the floor's APPROVAL PATH (O57 item (b)), not its origin.
+ *
+ * The pre-O57 pair was `kontrak | input_am`, a quality signal invented because
+ * CDPS had no Contract to pull a floor from. The owner decision keeps the floor
+ * an AM input and puts a Head approval behind it, so what the column has to
+ * record is who has signed off — which is also what makes Rule 7's "read-only"
+ * enforceable: read-only AFTER `disetujui_head`, frozen by a DB trigger.
+ */
+export const FLOOR_INPUT_AM = 'input_am';
+export const FLOOR_DISETUJUI_HEAD = 'disetujui_head';
+export const FLOOR_SOURCES = [FLOOR_INPUT_AM, FLOOR_DISETUJUI_HEAD] as const;
+export type FloorSource = (typeof FLOOR_SOURCES)[number];
 
 /** D-2 / D-4 metrics. `gmv` is the one the floor/stretch rule applies to. */
 export const TARGET_METRICS = [
@@ -606,12 +621,16 @@ export interface StrategiAkses {
 /** The Strategi header (Section J-1 + the contract window) plus Section A. */
 export interface Strategi extends StrategiKonteks {
   id: string;
-  serviceId: string;
+  contractId: string;
   clientId: string;
   versiNo: number;
   strategiIndukId: string | null;
   versiSebelumnyaId: string | null;
   status: string;
+  // The contract window is DERIVED (O57): it is stored once, on `contracts`, and
+  // joined in here so callers keep reading it off the Strategi. Writing it means
+  // writing the Contract — house rule #4, and the reason M6B's period generator
+  // cannot find two different answers for "how many months".
   durasiKontrakBulan: number;
   tanggalMulaiKontrak: string;
   tanggalAkhirKontrak: string;
@@ -761,7 +780,7 @@ export interface StrategiTarget {
   nilaiFloor: string | null;
   nilaiStretch: string;
   /** O57: `kontrak` once a Contract record exists; `input_am` until then. */
-  sumberFloor: 'kontrak' | 'input_am' | null;
+  sumberFloor: FloorSource | null;
 }
 
 /** D-8 + D-9. */
@@ -940,7 +959,7 @@ export function canReadStrategi(actor: Actor, ownerAm: string | null): boolean {
 
 interface StrategiRow {
   id: string;
-  service_id: string;
+  contract_id: string;
   client_id: string;
   versi_no: number;
   strategi_induk_id: string | null;
@@ -998,7 +1017,7 @@ function tsOrNull(v: string | Date | null): string | null {
 function rowToStrategi(r: StrategiRow): Strategi {
   return {
     id: r.id,
-    serviceId: r.service_id,
+    contractId: r.contract_id,
     clientId: r.client_id,
     versiNo: r.versi_no,
     strategiIndukId: r.strategi_induk_id,
@@ -1142,7 +1161,7 @@ export function trenBaseline(months: BaselineMonth[]): {
 async function loadServiceContext(
   sql: Queryable,
   serviceId: string,
-): Promise<{ clientId: string; status: string; tier: PlanTier; override: boolean | null; ownerAm: string | null; gateDecision: string | null }> {
+): Promise<{ clientId: string; status: string; tier: PlanTier; override: boolean | null; ownerAm: string | null; gateDecision: string | null; contractId: string | null }> {
   const rows = await sql<
     {
       client_id: string;
@@ -1151,10 +1170,11 @@ async function loadServiceContext(
       requires_strategy_plan_override: boolean | null;
       assigned_am_id: string | null;
       keputusan_am: string | null;
+      contract_id: string | null;
     }[]
   >`
     select sv.client_id, sv.status, sv.plan_tier, sv.requires_strategy_plan_override,
-           c.assigned_am_id, g.keputusan_am
+           sv.contract_id, c.assigned_am_id, g.keputusan_am
       from services sv
       join clients c on c.id = sv.client_id
       left join service_plan_gate g on g.service_id = sv.id
@@ -1170,20 +1190,38 @@ async function loadServiceContext(
     override: r.requires_strategy_plan_override,
     ownerAm: r.assigned_am_id,
     gateDecision: r.keputusan_am,
+    contractId: r.contract_id,
   };
 }
 
+/**
+ * loadStrategiRow reads the header with its contract window joined in (O57).
+ *
+ * `FOR UPDATE OF s` — not a bare `FOR UPDATE`: the lock belongs on the Strategi
+ * row being written, and locking `contracts` as well would make two AMs editing
+ * two different Strategi under one agreement serialise against each other.
+ */
 async function loadStrategiRow(sql: Queryable, id: string, forUpdate = false): Promise<Strategi> {
   const rows = forUpdate
-    ? await sql<StrategiRow[]>`select * from strategi where id = ${id} for update`
-    : await sql<StrategiRow[]>`select * from strategi where id = ${id}`;
+    ? await sql<StrategiRow[]>`
+        select s.*, ct.durasi_bulan as durasi_kontrak_bulan,
+               ct.tanggal_mulai as tanggal_mulai_kontrak,
+               ct.tanggal_akhir as tanggal_akhir_kontrak
+          from strategi s join contracts ct on ct.id = s.contract_id
+         where s.id = ${id} for update of s`
+    : await sql<StrategiRow[]>`
+        select s.*, ct.durasi_bulan as durasi_kontrak_bulan,
+               ct.tanggal_mulai as tanggal_mulai_kontrak,
+               ct.tanggal_akhir as tanggal_akhir_kontrak
+          from strategi s join contracts ct on ct.id = s.contract_id
+         where s.id = ${id}`;
   if (rows.length === 0) {
     throw new NotFoundError(MSG_STRATEGI_NOT_FOUND);
   }
   return rowToStrategi(rows[0]);
 }
 
-/** ownerAmOf resolves the AM who owns the client behind a Strategi. */
+/** ownerAmOf resolves the AM who owns the client behind a Service. */
 async function ownerAmOf(sql: Queryable, serviceId: string): Promise<string | null> {
   const rows = await sql<{ assigned_am_id: string | null }[]>`
     select c.assigned_am_id from services sv join clients c on c.id = sv.client_id
@@ -1191,10 +1229,22 @@ async function ownerAmOf(sql: Queryable, serviceId: string): Promise<string | nu
   return rows.length === 0 ? null : rows[0].assigned_am_id;
 }
 
+/**
+ * ownerAmOfContract is the same question asked of an agreement (O57) — the TS
+ * mirror of the RLS helper `private.jwt_is_am_of_contract`. Every Strategi write
+ * gate goes through this now: the Strategi no longer knows a single Service.
+ */
+async function ownerAmOfContract(sql: Queryable, contractId: string): Promise<string | null> {
+  const rows = await sql<{ assigned_am_id: string | null }[]>`
+    select c.assigned_am_id from contracts ct join clients c on c.id = ct.client_id
+     where ct.id = ${contractId}`;
+  return rows.length === 0 ? null : rows[0].assigned_am_id;
+}
+
 /** getStrategi loads the whole record (header + every child). */
 export async function getStrategi(sql: Queryable, actor: Actor, id: string): Promise<StrategiDetail> {
   const head = await loadStrategiRow(sql, id);
-  const ownerAm = await ownerAmOf(sql, head.serviceId);
+  const ownerAm = await ownerAmOfContract(sql, head.contractId);
   if (!canReadStrategi(actor, ownerAm)) {
     throw new ForbiddenError(MSG_STRATEGI_FORBIDDEN);
   }
@@ -1585,7 +1635,7 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
       metric: t.metric as TargetMetric,
       nilaiFloor: t.nilai_floor,
       nilaiStretch: t.nilai_stretch,
-      sumberFloor: t.sumber_floor as 'kontrak' | 'input_am' | null,
+      sumberFloor: t.sumber_floor as FloorSource | null,
     })),
     assumptions: assumptionRows.map((a) => ({
       kode: a.kode,
@@ -1663,15 +1713,31 @@ export async function listStrategiForService(
   if (!canReadStrategi(actor, ownerAm)) {
     throw new ForbiddenError(MSG_STRATEGI_FORBIDDEN);
   }
+  // O57: the Strategi hangs off the agreement, so the Service is the way IN, not
+  // the owner. A Service with no agreement yet has no Strategi by construction —
+  // an empty list, not an error.
   const rows = await sql<StrategiRow[]>`
-    select * from strategi where service_id = ${serviceId} order by versi_no desc`;
+    select s.*, ct.durasi_bulan as durasi_kontrak_bulan,
+           ct.tanggal_mulai as tanggal_mulai_kontrak,
+           ct.tanggal_akhir as tanggal_akhir_kontrak
+      from strategi s
+      join contracts ct on ct.id = s.contract_id
+      join services sv on sv.contract_id = s.contract_id
+     where sv.id = ${serviceId}
+     order by s.versi_no desc`;
   return rows.map(rowToStrategi);
 }
 
 /** activeStrategi returns the one `Aktif` version, or null. Rule 2 guarantees ≤1. */
 export async function activeStrategi(sql: Queryable, serviceId: string): Promise<Strategi | null> {
   const rows = await sql<StrategiRow[]>`
-    select * from strategi where service_id = ${serviceId} and status = ${STRATEGI_AKTIF}`;
+    select s.*, ct.durasi_bulan as durasi_kontrak_bulan,
+           ct.tanggal_mulai as tanggal_mulai_kontrak,
+           ct.tanggal_akhir as tanggal_akhir_kontrak
+      from strategi s
+      join contracts ct on ct.id = s.contract_id
+      join services sv on sv.contract_id = s.contract_id
+     where sv.id = ${serviceId} and s.status = ${STRATEGI_AKTIF}`;
   return rows.length === 0 ? null : rowToStrategi(rows[0]);
 }
 
@@ -1747,9 +1813,28 @@ export async function createStrategi(
     if (!eff.requiresPlan) {
       throw new ConflictError(MSG_NOT_PLAN_GATED);
     }
+    // O57: the Strategi hangs off the agreement. A Service that has not been
+    // grouped yet gets a 1:1 Contract minted here from the window the AM typed —
+    // the same shape the old AM-declared columns produced — so the endpoint keeps
+    // working unchanged while the window gains a single owner.
+    const contractId = await contract.ensureContractForService(
+      tx,
+      actor,
+      serviceId,
+      svc.clientId,
+      svc.contractId,
+      {
+        durasiBulan: head.durasiKontrakBulan,
+        tanggalMulai: head.tanggalMulaiKontrak,
+        tanggalAkhir: head.tanggalAkhirKontrak,
+      },
+    );
+
+    // Rule 2 is now per AGREEMENT: a second Service under the same contract must
+    // not open a second Strategi — that is the whole point of O57 option (a).
     const existing = await tx<{ id: string }[]>`
       select id from strategi
-       where service_id = ${serviceId}
+       where contract_id = ${contractId}
          and status in (${STRATEGI_DRAFT}, ${STRATEGI_DIAJUKAN}, ${STRATEGI_AKTIF}, ${STRATEGI_DRAFT_REVISI})`;
     if (existing.length > 0) {
       throw new ConflictError(MSG_STRATEGI_EXISTS);
@@ -1758,12 +1843,10 @@ export async function createStrategi(
     const id = await ident.nextId(ex.ident, 'STRG', now);
     await tx`
       insert into strategi
-        (id, service_id, client_id, versi_no, status, durasi_kontrak_bulan,
-         tanggal_mulai_kontrak, tanggal_akhir_kontrak, tanggal_mulai_siklus,
+        (id, contract_id, client_id, versi_no, status, tanggal_mulai_siklus,
          toleransi_over_persen, created_by)
       values
-        (${id}, ${serviceId}, ${svc.clientId}, 1, ${STRATEGI_DRAFT}, ${head.durasiKontrakBulan},
-         ${head.tanggalMulaiKontrak}, ${head.tanggalAkhirKontrak}, ${head.tanggalMulaiSiklus},
+        (${id}, ${contractId}, ${svc.clientId}, 1, ${STRATEGI_DRAFT}, ${head.tanggalMulaiSiklus},
          ${head.toleransiOverPersen}, ${actor.employeeId})`;
 
     await appendEvent(tx, id, 1, 'dibuat', actor.employeeId, null);
@@ -1773,7 +1856,7 @@ export async function createStrategi(
       actorEmployeeId: actor.employeeId,
       action: 'create',
       beforeJson: null,
-      afterJson: { service_id: serviceId, versi_no: 1, status: STRATEGI_DRAFT },
+      afterJson: { contract_id: contractId, service_id: serviceId, versi_no: 1, status: STRATEGI_DRAFT },
       createdBy: actor.employeeId,
     });
 
@@ -1799,12 +1882,26 @@ export async function updateHeader(
     if (before.siklusTerkunci && head.tanggalMulaiSiklus !== before.tanggalMulaiSiklus) {
       throw new ConflictError(MSG_CYCLE_LOCKED);
     }
+    // O57: the window is the AGREEMENT's, so editing it here writes `contracts`
+    // — one storage location, still one user action and one transaction. The
+    // Contract-side gate (`MSG_WINDOW_LOCKED`) does not fire for this Strategi's
+    // own existence; that would make the window uneditable from the moment the
+    // draft is created, which is exactly the screen the AM is on.
+    const windowChanged =
+      head.durasiKontrakBulan !== before.durasiKontrakBulan ||
+      head.tanggalMulaiKontrak !== before.tanggalMulaiKontrak ||
+      head.tanggalAkhirKontrak !== before.tanggalAkhirKontrak;
+    if (windowChanged) {
+      await tx`
+        update contracts
+           set durasi_bulan = ${head.durasiKontrakBulan},
+               tanggal_mulai = ${head.tanggalMulaiKontrak},
+               tanggal_akhir = ${head.tanggalAkhirKontrak}
+         where id = ${before.contractId}`;
+    }
     await tx`
       update strategi
-         set durasi_kontrak_bulan = ${head.durasiKontrakBulan},
-             tanggal_mulai_kontrak = ${head.tanggalMulaiKontrak},
-             tanggal_akhir_kontrak = ${head.tanggalAkhirKontrak},
-             tanggal_mulai_siklus = ${head.tanggalMulaiSiklus},
+         set tanggal_mulai_siklus = ${head.tanggalMulaiSiklus},
              toleransi_over_persen = ${head.toleransiOverPersen}
        where id = ${id}`;
     await ex.audit.insertAudit({
@@ -2817,7 +2914,6 @@ export interface TargetInput {
   metric: TargetMetric;
   nilaiFloor?: string | null;
   nilaiStretch: string;
-  sumberFloor?: 'kontrak' | 'input_am' | null;
 }
 
 /**
@@ -2825,10 +2921,17 @@ export interface TargetInput {
  *
  * Rule 7 lives in the CHECK (`stretch >= floor` for GMV), not here — a stretch
  * below the contract floor is not a message to soften, it is a row Postgres
- * refuses. What this function adds is the floor's PROVENANCE: with no Contract
- * entity in CDPS (DECISIONS O57) a floor is either pulled from a contract record
- * or typed by the AM, and a report that cannot tell the two apart would present
- * a self-set target as a contractual one.
+ * refuses.
+ *
+ * `sumber_floor` is NOT an input (O57 item (b), house rule #4). It records the
+ * APPROVAL PATH, and the only way into it is: written `input_am` here, flipped
+ * to `disetujui_head` by `approveStrategi`. Letting the caller supply it would
+ * hand the AM who types the floor the power to mark it approved — the exact
+ * separation D-7 Sanggahan Target depends on.
+ *
+ * Reachable only while the record is a draft (`requireDraftAndWriter`), so an
+ * approved floor can never be rewritten through this door: by then the Strategi
+ * is `Aktif` and a change means a new version.
  */
 export async function saveTargets(
   sql: Sql,
@@ -2867,7 +2970,7 @@ export async function saveTargets(
           (strategi_id, channel, month_index, metric, nilai_floor, nilai_stretch, sumber_floor, created_by)
         values
           (${id}, ${t.channel}, ${t.monthIndex}, ${t.metric}, ${floor}, ${t.nilaiStretch},
-           ${floor === null ? null : (t.sumberFloor ?? 'input_am')}, ${actor.employeeId})`;
+           ${floor === null ? null : FLOOR_INPUT_AM}, ${actor.employeeId})`;
     }
     await ex.audit.insertAudit({
       entityType: ENTITY_STRATEGI,
@@ -3617,6 +3720,17 @@ export async function approveStrategi(sql: Sql, actor: Actor, id: string): Promi
       update strategi
          set disetujui_pada = now(), disetujui_oleh = ${actor.employeeId}, catatan_reviewer = null
        where id = ${id}`;
+    // O57 item (b) — Rule 7 read as "read-only AFTER Head approval". This is the
+    // moment the floor stops being the AM's typed number and becomes the
+    // agreement's; from here `trg_strategi_target_guard_floor` refuses to let it
+    // move, service role included.
+    await tx`
+      update strategi_target
+         set sumber_floor = ${FLOOR_DISETUJUI_HEAD},
+             floor_disetujui_oleh = ${actor.employeeId},
+             floor_disetujui_pada = now()
+       where strategi_id = ${id} and nilai_floor is not null
+         and sumber_floor = ${FLOOR_INPUT_AM}`;
     await appendEvent(tx, id, head.versiNo, 'disetujui', actor.employeeId, null);
     return loadStrategiRow(tx, id);
   });
@@ -3696,7 +3810,7 @@ export async function openRevision(
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
     const head = await loadStrategiRow(tx, id, true);
-    const ownerAm = await ownerAmOf(tx, head.serviceId);
+    const ownerAm = await ownerAmOfContract(tx, head.contractId);
     if (!canWriteStrategi(actor, ownerAm)) {
       throw new ForbiddenError(MSG_NOT_OWNER_AM);
     }
@@ -3705,7 +3819,7 @@ export async function openRevision(
     }
     const inflight = await tx<{ id: string }[]>`
       select id from strategi
-       where service_id = ${head.serviceId}
+       where contract_id = ${head.contractId}
          and status in (${STRATEGI_DRAFT}, ${STRATEGI_DIAJUKAN}, ${STRATEGI_DRAFT_REVISI})`;
     if (inflight.length > 0) {
       throw new ConflictError(MSG_STRATEGI_EXISTS);
@@ -3720,17 +3834,15 @@ export async function openRevision(
     // Section A while every test on version 1 still passed.
     await tx`
       insert into strategi
-        (id, service_id, client_id, versi_no, strategi_induk_id, versi_sebelumnya_id, status,
-         durasi_kontrak_bulan, tanggal_mulai_kontrak, tanggal_akhir_kontrak,
+        (id, contract_id, client_id, versi_no, strategi_induk_id, versi_sebelumnya_id, status,
          tanggal_mulai_siklus, siklus_terkunci, toleransi_over_persen, created_by,
          nama_brand, kategori_utama, sub_kategori, model_bisnis, margin_kotor_persen,
          posisi_harga, usp, kapasitas_stok, lead_time_restock_hari, plafon_unit_per_bulan,
          titik_kirim_kota, titik_kirim_detail, ekspektasi_klien, riwayat_agensi,
          pantangan_klien, pantangan_klien_tidak_ada, decision_maker, sla_klien_jam,
          sla_klien_catatan, aset_dari_klien, aset_dari_klien_tidak_ada, aset_catatan)
-      select ${newId}, service_id, client_id, versi_no + 1, ${induk}, id,
-             ${STRATEGI_DRAFT_REVISI}, durasi_kontrak_bulan, tanggal_mulai_kontrak,
-             tanggal_akhir_kontrak, tanggal_mulai_siklus, siklus_terkunci,
+      select ${newId}, contract_id, client_id, versi_no + 1, ${induk}, id,
+             ${STRATEGI_DRAFT_REVISI}, tanggal_mulai_siklus, siklus_terkunci,
              toleransi_over_persen, ${actor.employeeId},
              nama_brand, kategori_utama, sub_kategori, model_bisnis, margin_kotor_persen,
              posisi_harga, usp, kapasitas_stok, lead_time_restock_hari, plafon_unit_per_bulan,
@@ -3778,7 +3890,7 @@ export async function expireStrategi(sql: Sql, actor: Actor, id: string): Promis
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
     const head = await loadStrategiRow(tx, id, true);
-    const ownerAm = await ownerAmOf(tx, head.serviceId);
+    const ownerAm = await ownerAmOfContract(tx, head.contractId);
     if (!canWriteStrategi(actor, ownerAm) && !canApproveStrategi(actor)) {
       throw new ForbiddenError(MSG_NOT_OWNER_AM);
     }
@@ -3811,7 +3923,7 @@ async function requireDraftAndWriter(
   id: string,
 ): Promise<Strategi> {
   const head = await loadStrategiRow(tx, id, true);
-  const ownerAm = await ownerAmOf(tx, head.serviceId);
+  const ownerAm = await ownerAmOfContract(tx, head.contractId);
   if (!canWriteStrategi(actor, ownerAm)) {
     throw new ForbiddenError(MSG_NOT_OWNER_AM);
   }
@@ -3927,7 +4039,8 @@ async function copyChildren(
   await tx`
     insert into strategi_target
       (strategi_id, channel, month_index, metric, nilai_floor, nilai_stretch, sumber_floor, created_by)
-    select ${toId}, channel, month_index, metric, nilai_floor, nilai_stretch, sumber_floor, ${actorId}
+    select ${toId}, channel, month_index, metric, nilai_floor, nilai_stretch,
+           case when nilai_floor is null then null else ${FLOOR_INPUT_AM} end, ${actorId}
       from strategi_target where strategi_id = ${fromId}`;
 
   await tx`
