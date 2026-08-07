@@ -12,9 +12,9 @@
 | | |
 |---|---|
 | **Branch kerja** | `claude/ci-gates-db-migrations-101jt4` |
-| **Commit terakhir** | `3e5f626` — "11 migrasi tertunda diterapkan ke live CDPS SG" |
+| **Commit terakhir** | `8e142c1` — "docs(handoff): SESI5 final" |
 | **Sinkron dengan remote** | ✅ ya, working tree bersih |
-| **PR** | ⚠️ **BRANCH INI BELUM PUNYA PR** — lihat §1, ini keputusan pertama Anda |
+| **PR** | **#103** TERBUKA — dari branch ini → `main`. Menumpuk di atasnya |
 | **Migrasi** | **63 berkas** lokal, **63 tercatat di live** — sinkron penuh |
 | **Tabel** | **74** · **`sm_machines` 16** · **`notif_events` 31** (17 v1 + 14 v2) |
 | **Test** | **824 pass** (packages+apps, dengan DATABASE_URL) · **116 pass** (web-internal) |
@@ -39,41 +39,23 @@ npx vitest run --root web-internal      # TERPISAH — bukan anggota workspaces
 
 ---
 
-## 1. ⚠️ PERTAMA: branch ini belum punya PR
+## 1. PR #103 — inilah PR aktifnya sekarang
 
-**PR #101 menunjuk branch LAIN** (`claude/m6ab-strategi-plan-3x7p0a`, head
-`ece2a4c`). Branch kerja kita **11 commit di depannya**, dan PR #101 **tidak
-menampilkan** satu pun dari:
+**[#103](https://github.com/MEAgrup/AgencyAPP/pull/103)** — `claude/ci-gates-db-migrations-101jt4` → `main`.
+Menumpuk di atasnya untuk kerja berikutnya.
 
-```
-3e5f626  11 migrasi diterapkan ke live CDPS SG
-2a014f8  Merge origin/main — QA sales M0/M1 (PR #102)
-4fdf388  handoff SESI5 + backlog
-291a6b5  O58 — checkbox "tidak ada"
-58f6588  O54 + O55 + perbaikan jsonb A-07
-23e38c7  Merge PR #102
-a9b7a47  M6A A-07 Section C
-… dan 4 lainnya
-```
+**#101 ditutup sebagai superseded.** Ia menunjuk branch LAIN
+(`claude/m6ab-strategi-plan-3x7p0a`, head `ece2a4c`) yang tertinggal 11 commit,
+dan tidak akan pernah menampilkan A-05…A-07, O54, O55, O58, merge `main`, maupun
+penerapan migrasi ke live. Catatan SESI4 "sesi ini menumpuk DI ATAS #101" benar
+dalam arti **git ancestry** (kerja #101 seluruhnya ada di branch ini), tapi salah
+dalam arti **PR**.
 
-Catatan "sesi ini menumpuk DI ATAS #101" di SESI4 benar dalam arti **git
-ancestry** (kerja #101 seluruhnya ada di branch kita), tapi **tidak** dalam arti
-PR — #101 tidak akan pernah menunjukkan commit kita.
-
-**Tiga pilihan, pilih satu sebelum lanjut ngoding:**
-
-| | Aksi | Konsekuensi |
-|---|---|---|
-| **(a)** | Buka PR baru `claude/ci-gates-db-migrations-101jt4` → `main`, tutup #101 sebagai superseded | Paling bersih. Satu PR berisi seluruh M6A + migrasi |
-| (b) | Merge branch kita ke `claude/m6ab-strategi-plan-3x7p0a`, biarkan #101 hidup | #101 jadi sangat besar; judulnya (A-02/A-03/A-04) tidak lagi menggambarkan isinya |
-| (c) | Biarkan | Kerja O54/O55/O58 + 11 migrasi live tidak pernah masuk `main`. **Jangan** |
-
-PR **tidak** dibuat sesi ini karena instruksi eksplisit "jangan buat PR baru
-kecuali diminta". Rekomendasi: **(a)**.
+**Isi #103:** seluruh jalur M6A A-02…A-07 + tiga keputusan pemilik 2026-08-07 +
+penutupan drift migrasi O38 ronde 3. 58 berkas, ~12.5k baris.
 
 **PR terbuka lain:** #91 (M5-OA-7, Finance — tidak berhubungan, menggantung sejak
 2026-08-05).
-**PR yang ditutup sesi ini:** #95 dan #98 (lihat §5).
 
 ---
 
@@ -240,8 +222,14 @@ masih form 6-field M6 §4.
 * **merge-nya sekarang justru melahirkan drift baru** — berkas repo jadi
   `20260805160305` sementara riwayat live memuat `20260805060000`.
 
+**#101** — ditutup sebagai **superseded**, digantikan **#103** (lihat §1).
+
 **#97 TIDAK ditutup** — sudah merged 2026-08-06, isinya benar (tab "Lead Saya"),
-tidak berhubungan dengan diagnosis migrasi.
+tidak berhubungan dengan diagnosis migrasi. (Permintaan pemilik menyebut "#95 &
+#97"; #97 ternyata salah ketik untuk #98 — diperiksa dulu, tidak ditutup.)
+
+**Papan PR sesudah sesi ini:** #103 terbuka (kerja ini) · #91 terbuka (Finance,
+tidak berhubungan) · #95/#98/#101 ditutup.
 
 ---
 
@@ -343,3 +331,10 @@ eksplisit di O54 — ditahan di tier tengah, reversibel nol-biaya lewat admin MS
 6. **Postgres bisa mati di tengah sesi.** `ECONNREFUSED` bukan regresi.
 7. **Cek branch PR sebelum percaya "menumpuk di atasnya".** SESI4 menulis PR #101
    sebagai PR aktif; ternyata head-nya branch lain dan tertinggal 11 commit.
+8. **Checkout lokal bisa MUNDUR tanpa pemberitahuan; remote yang benar.** Sesi
+   ini `git log` lokal tiba-tiba kehilangan dua commit yang sudah ter-push, dan
+   reflog pun tidak menyimpan jejaknya — sempat terbaca sebagai "commit hilang".
+   Padahal `origin` memegang keduanya dengan utuh; yang stale adalah checkout-nya.
+   **Sebelum menyimpulkan kerja hilang dan membuatnya ulang, `git fetch` lalu
+   baca `git log origin/<branch>`.** Membuat ulang di atas checkout yang stale
+   menghasilkan commit duplikat yang harus di-`reset --hard` lagi.
