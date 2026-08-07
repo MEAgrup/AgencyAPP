@@ -72,6 +72,7 @@ describe('masterServiceToWire', () => {
       description: 'Full-funnel Meta ads',
       active: true,
       requiresStrategyPlan: false,
+      planTier: 'ditentukan_am',
       versionNo: 3,
       effectiveFrom: '2026-07-01',
     };
@@ -90,6 +91,7 @@ describe('masterServiceToWire', () => {
       description: 'Full-funnel Meta ads',
       active: true,
       requires_strategy_plan: false,
+      plan_tier: 'ditentukan_am',
       version_no: 3,
       effective_from: '2026-07-01',
     });

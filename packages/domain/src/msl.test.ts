@@ -19,6 +19,7 @@ import {
   listEffectiveAt,
   listVersions,
   MSG_MASTER_SERVICE_DENIED,
+  reconcileTier,
   ServiceNotFoundError,
   updateService,
 } from './msl';
@@ -44,6 +45,56 @@ describe('canEditMasterServices', () => {
     expect(canEditMasterServices({
       employeeId: 'ZZ-CLEAD', role: permission.makeRole({ division: 'Creative', level: 'lead' }),
     })).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unit: tier ↔ boolean reconciliation (O54).
+//
+// These assertions are the TS half of a frozen invariant: `reconcileTier` must
+// stay identical to the DB trigger `normalize_plan_tier` (migration
+// 20260806061000). Each case below is the same case the trigger branches on.
+// ---------------------------------------------------------------------------
+describe('reconcileTier', () => {
+  it('forces the boolean false for ditentukan_am — the catalog never gates the middle tier', () => {
+    // Even a caller that insists on true gets false: for this tier the effective
+    // gate comes from `service_plan_gate`, and a true boolean here would make
+    // the catalog decide something it is not allowed to decide.
+    expect(reconcileTier('ditentukan_am', true)).toEqual({
+      planTier: 'ditentukan_am', requiresStrategyPlan: false,
+    });
+    expect(reconcileTier('ditentukan_am', false)).toEqual({
+      planTier: 'ditentukan_am', requiresStrategyPlan: false,
+    });
+  });
+
+  it('forces the boolean true for plan_wajib', () => {
+    expect(reconcileTier('plan_wajib', false)).toEqual({
+      planTier: 'plan_wajib', requiresStrategyPlan: true,
+    });
+  });
+
+  it('promotes a pre-M6C caller that only spoke through the boolean', () => {
+    // No tier given + boolean true = a seeder/fixture written before the column
+    // existed. It means plan_wajib, and must not be read as tanpa_plan.
+    expect(reconcileTier(undefined, true)).toEqual({
+      planTier: 'plan_wajib', requiresStrategyPlan: true,
+    });
+    expect(reconcileTier(undefined, false)).toEqual({
+      planTier: 'tanpa_plan', requiresStrategyPlan: false,
+    });
+  });
+
+  it('lets the boolean win over an explicit tanpa_plan — mirroring the trigger', () => {
+    // Deliberately NOT "tanpa_plan wins". The trigger's ELSIF chain reaches the
+    // boolean branch here, and TS diverging from it is exactly the drift the
+    // migration calls a frozen invariant.
+    expect(reconcileTier('tanpa_plan', true)).toEqual({
+      planTier: 'plan_wajib', requiresStrategyPlan: true,
+    });
+    expect(reconcileTier('tanpa_plan', false)).toEqual({
+      planTier: 'tanpa_plan', requiresStrategyPlan: false,
+    });
   });
 });
 
@@ -109,6 +160,44 @@ describeDb('createService', () => {
       name: 'x', standardPrice: '1000', commissionRule: 'flat Rp 100', effectiveFrom: '2020-01-01',
       pricingMode: 'min_floor', minQty: '2.5',
     })).rejects.toBeInstanceOf(IncompleteError);
+    // An unknown tier is rejected, not silently coerced to the default — a typo
+    // that quietly became `tanpa_plan` would remove the Strategi path with
+    // nobody told (O54).
+    await expect(createService(sql, salesLead(), {
+      name: 'x', standardPrice: '1000', commissionRule: 'flat Rp 100', effectiveFrom: '2020-01-01',
+      planTier: 'wajib' as never,
+    })).rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  it('persists the tier the Sales Head chose, and the DB agrees with TS (O54)', async () => {
+    // The point of this test is NOT that a string round-trips. It is that the
+    // value TS computed survives `normalize_plan_tier` unchanged: if the trigger
+    // and `reconcileTier` ever disagree, the row comes back with a different
+    // tier than the one the Sales Head picked — or is rejected outright by
+    // `ck_msv_tier_matches_flag`. Reading it back is what catches that.
+    for (const tier of ['plan_wajib', 'ditentukan_am', 'tanpa_plan'] as const) {
+      const id = await createService(sql, salesLead(), {
+        name: `Jasa Tier ${tier}`, standardPrice: '1000000',
+        commissionRule: '0% of standard price', effectiveFrom: '2020-01-01',
+        planTier: tier, active: true,
+      });
+      const v = await effectiveAt(sql, id, TODAY);
+      expect(v.planTier).toBe(tier);
+      expect(v.requiresStrategyPlan).toBe(tier === 'plan_wajib');
+    }
+  });
+
+  it('reads a pre-M6C caller that only set the boolean as plan_wajib', async () => {
+    // Every seeder and fixture written before the tier column exists takes this
+    // path. It must keep meaning what it meant.
+    const id = await createService(sql, salesLead(), {
+      name: 'Jasa Legacy Boolean', standardPrice: '1000000',
+      commissionRule: '0% of standard price', effectiveFrom: '2020-01-01',
+      requiresStrategyPlan: true, active: true,
+    });
+    const v = await effectiveAt(sql, id, TODAY);
+    expect(v.planTier).toBe('plan_wajib');
+    expect(v.requiresStrategyPlan).toBe(true);
   });
 });
 

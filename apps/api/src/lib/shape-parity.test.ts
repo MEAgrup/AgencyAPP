@@ -173,7 +173,7 @@ const wire = parseInterfaces(readFileSync(WIRE_TS, 'utf8'));
 const FE_FILES = [
   'account.ts', 'ads.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'kol.ts', 'leads.ts', 'livestream.ts', 'marketing.ts',
-  'performance.ts', 'portal.ts', 'sales.ts', 'tasks.ts', 'types.ts',
+  'performance.ts', 'portal.ts', 'sales.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
 ];
 
 const fe = new Map<string, Parsed>();
@@ -405,6 +405,39 @@ const WIRE_TO_FE: Record<string, string> = {
   PlanGateConfigWire: 'account.ts::PlanGateConfig',
   PlanGateContextWire: 'account.ts::PlanGateContext',
   PlanGateRecommendationWire: 'account.ts::GateRecommendation',
+  // M6A — Vendor (VND-) and Strategi (STRG-). The Section A→J form is backlog
+  // A-05…A-09; the FE types exist now because a converter with no declared FE
+  // type is a converter this guard cannot check.
+  VendorWire: 'strategi.ts::Vendor',
+  VendorDocumentWire: 'strategi.ts::VendorDocument',
+  StrategiWire: 'strategi.ts::Strategi',
+  StrategiDetailWire: 'strategi.ts::StrategiDetail',
+  StrategiChannelWire: 'strategi.ts::StrategiChannel',
+  StrategiBaselineMonthWire: 'strategi.ts::StrategiBaselineMonth',
+  StrategiTargetWire: 'strategi.ts::StrategiTarget',
+  StrategiAssumptionWire: 'strategi.ts::StrategiAssumption',
+  StrategiPillarWire: 'strategi.ts::StrategiPillar',
+  StrategiResourceWire: 'strategi.ts::StrategiResource',
+  StrategiRiskWire: 'strategi.ts::StrategiRisk',
+  StrategiEventWire: 'strategi.ts::StrategiEvent',
+  StrategiKekuranganWire: 'strategi.ts::StrategiKekurangan',
+  // A-05 Section A + A-15/A-16, and the repeatable structs A-06 stores as jsonb.
+  // They are named interfaces rather than anonymous bags precisely so this guard
+  // descends into them — a struct typed `Record<string, unknown>[]` is a shape
+  // nothing compares.
+  StrategiDecisionMakerWire: 'strategi.ts::StrategiDecisionMaker',
+  StrategiAksesWire: 'strategi.ts::StrategiAkses',
+  StrategiTopSkuWire: 'strategi.ts::StrategiTopSku',
+  StrategiTopKeywordWire: 'strategi.ts::StrategiTopKeyword',
+  StrategiKampanyeBoncosWire: 'strategi.ts::StrategiKampanyeBoncos',
+  StrategiTopKreatorWire: 'strategi.ts::StrategiTopKreator',
+  StrategiVoucherWire: 'strategi.ts::StrategiVoucher',
+  StrategiKompetitorWire: 'strategi.ts::StrategiKompetitor',
+  // A-07 Section C
+  StrategiDiagnosaWire: 'strategi.ts::StrategiDiagnosa',
+  StrategiQuickWinWire: 'strategi.ts::StrategiQuickWin',
+  StrategiRisikoStrukturalWire: 'strategi.ts::StrategiRisikoStruktural',
+  StrategiPrasyaratKlienWire: 'strategi.ts::StrategiPrasyaratKlien',
   BriefWire: 'account.ts::Brief',
   ComplaintWire: 'account.ts::Complaint',
   // M7 creative
@@ -484,9 +517,11 @@ const ALLOWED_EXTRA: Record<string, string[]> = {
   // Go `admin.LayeredRole`.
   LayeredRoleWire: ['id', 'created_at'],
   RoleMappingWire: ['created_at'],
-  // Go `admin.ServiceView` — the M6-OA-1 pin. Read from the Strategy surface,
-  // not from the MSL list, so `MasterService` does not declare it.
-  MasterServiceWire: ['requires_strategy_plan'],
+  // (`MasterServiceWire` used to allow `requires_strategy_plan` as an extra —
+  // the MSL list did not surface the M6-OA-1 pin. O54 made the tier a Sales-Head
+  // setting on this very page, so both `requires_strategy_plan` and `plan_tier`
+  // are now declared FE-side and the allowance is gone. Do not re-add it: an
+  // entry here means the admin page cannot see a field it is meant to edit.)
   // Go `module14_performance.Snapshot.ID`.
   PerfSnapshotWire: ['id'],
   // The narrow roster projection — see DIVERGENCE below, same decision.

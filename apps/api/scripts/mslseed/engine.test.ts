@@ -37,7 +37,7 @@ function view(over: Partial<msl.ServiceView> = {}): msl.ServiceView {
     id: 'MSV-202607-0001', name: 'Jasa A', standardPrice: '1000000.00',
     commissionRule: '0% of standard price', category: 'Kat', unit: 'paket', minQty: '',
     pricingMode: 'flat', applyPPN: false, frequency: 'Monthly', priceNote: 'catatan',
-    description: 'desc', active: true, requiresStrategyPlan: false, versionNo: 1,
+    description: 'desc', active: true, requiresStrategyPlan: false, planTier: 'tanpa_plan', versionNo: 1,
     effectiveFrom: '2026-07-16', ...over,
   };
 }

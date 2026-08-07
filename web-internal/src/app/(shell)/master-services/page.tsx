@@ -2,7 +2,8 @@
 
 import { Fragment, useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api, errorMessage } from '@/lib/api';
-import { FREQUENCIES, PRICING_MODES, type MasterService } from '@/lib/types';
+import { FREQUENCIES, PRICING_MODES, type MasterService, type PlanTier } from '@/lib/types';
+import { TIER_LABELS } from '@/lib/account';
 import { formatIDR } from '@/lib/money';
 
 function todayISO() {
@@ -31,6 +32,7 @@ interface FormState {
   price_note: string;
   description: string;
   active: boolean;
+  plan_tier: PlanTier;
   effective_from: string;
 }
 
@@ -47,6 +49,9 @@ const EMPTY_FORM: FormState = {
   price_note: '',
   description: '',
   active: true,
+  // Default to the safest tier: a new catalog entry must not silently start
+  // demanding a Strategi. The Sales Head opts in (O54).
+  plan_tier: 'tanpa_plan',
   effective_from: todayISO(),
 };
 
@@ -106,6 +111,7 @@ export default function MasterServicesPage() {
       price_note: service.price_note,
       description: service.description,
       active: service.active,
+      plan_tier: service.plan_tier,
       effective_from: todayISO(),
     });
     setFormError(null);
@@ -133,6 +139,7 @@ export default function MasterServicesPage() {
       price_note: form.price_note,
       description: form.description,
       active: form.active,
+      plan_tier: form.plan_tier,
       effective_from: form.effective_from,
     };
     try {
@@ -318,6 +325,25 @@ export default function MasterServicesPage() {
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
               />
             </div>
+            <div className="field">
+              <label htmlFor="plan_tier">Kebutuhan Strategi &amp; Plan</label>
+              <select
+                id="plan_tier"
+                value={form.plan_tier}
+                onChange={(e) => setForm((f) => ({ ...f, plan_tier: e.target.value as PlanTier }))}
+              >
+                <option value="tanpa_plan">{TIER_LABELS.tanpa_plan}</option>
+                <option value="ditentukan_am">{TIER_LABELS.ditentukan_am}</option>
+                <option value="plan_wajib">{TIER_LABELS.plan_wajib}</option>
+              </select>
+              <span className="muted" style={{ fontSize: 12 }}>
+                Menentukan jalur onboarding layanan ini. <strong>Plan Wajib</strong> selalu menuntut
+                Strategi &amp; Plan sebelum Brief; <strong>Plan Ditentukan AM</strong> menampilkan form
+                penentuan dan mencatat keputusan AM; <strong>Tanpa Plan</strong> langsung ke Brief.
+                Perubahan hanya berlaku untuk layanan yang di-closing SETELAH versi ini — engagement
+                yang sedang jalan memakai versi yang sudah dipin.
+              </span>
+            </div>
             <label className="row" style={{ gap: 6, fontSize: 13 }}>
               <input
                 type="checkbox"
@@ -366,6 +392,7 @@ export default function MasterServicesPage() {
                   <th>Mode</th>
                   <th>PPN</th>
                   <th>Frekuensi</th>
+                  <th>Strategi &amp; Plan</th>
                   <th>Aktif</th>
                   <th>Versi</th>
                   <th>Berlaku Sejak</th>
@@ -385,6 +412,7 @@ export default function MasterServicesPage() {
                       <td>{s.pricing_mode || 'flat'}</td>
                       <td>{s.apply_ppn ? 'Ya' : 'Tidak'}</td>
                       <td>{s.frequency || '—'}</td>
+                      <td>{TIER_LABELS[s.plan_tier]}</td>
                       <td>
                         <span className={`badge badge-${s.active ? 'green' : 'darkgray'}`}>
                           {s.active ? 'Aktif' : 'Nonaktif'}
@@ -405,7 +433,7 @@ export default function MasterServicesPage() {
                     </tr>
                     {expandedId === s.id && (
                       <tr>
-                        <td colSpan={12} style={{ background: 'var(--color-bg)' }}>
+                        <td colSpan={13} style={{ background: 'var(--color-bg)' }}>
                           {versionsLoadingId === s.id && <p className="muted">Memuat riwayat versi...</p>}
                           {versionsError && <div className="alert alertError">{versionsError}</div>}
                           {versionsByService[s.id] && versionsByService[s.id].length > 0 && (
@@ -421,6 +449,7 @@ export default function MasterServicesPage() {
                                   <th>Mode</th>
                                   <th>PPN</th>
                                   <th>Frekuensi</th>
+                                  <th>Strategi &amp; Plan</th>
                                   <th>Aktif</th>
                                   <th>Berlaku Sejak</th>
                                 </tr>
@@ -437,6 +466,7 @@ export default function MasterServicesPage() {
                                     <td>{v.pricing_mode || 'flat'}</td>
                                     <td>{v.apply_ppn ? 'Ya' : 'Tidak'}</td>
                                     <td>{v.frequency || '—'}</td>
+                                    <td>{TIER_LABELS[v.plan_tier]}</td>
                                     <td>{v.active ? 'Aktif' : 'Nonaktif'}</td>
                                     <td>{v.effective_from}</td>
                                   </tr>

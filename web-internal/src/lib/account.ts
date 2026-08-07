@@ -15,7 +15,7 @@
 //    duplicate a local patch() helper — lib/api.ts covers get/post/put/delete.
 
 import { api } from '@/lib/api';
-import type { Role } from '@/lib/types';
+import type { PlanTier, Role } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
 // Cluster 1 — Intake & AM assignment (account.go)
@@ -426,8 +426,12 @@ export function requestStrategyRevision(id: string, notes: string): Promise<{ id
 // Module 6C — Penentuan Kebutuhan Plan (plan-gate determination)
 // ---------------------------------------------------------------------------
 
-/** Catalog tier (M6C S4). The two locked tiers have no form; the middle one does. */
-export type PlanTier = 'plan_wajib' | 'ditentukan_am' | 'tanpa_plan';
+/**
+ * Catalog tier (M6C S4). The two locked tiers have no form; the middle one does.
+ * Defined in `types.ts` (which this file already imports) and re-exported here so
+ * the many existing `from '@/lib/account'` importers keep working.
+ */
+export type { PlanTier };
 export type GateDecision = 'butuh_plan' | 'tanpa_plan';
 /** GB-4 — the two override directions are distinct on purpose (Rule 5). */
 export type GateFit = 'sesuai' | 'tolak_plan' | 'tambah_plan';
