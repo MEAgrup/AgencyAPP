@@ -6,6 +6,9 @@
 > **O54, O55, O57, O58 SELESAI** (2026-08-07). **O56 sudah dijawab pemilik
 > 2026-08-07: ronde berikutnya adalah CACAT 🔴 (O52/O51/O42) lebih dulu, bukan
 > M6A A-13 maupun M6B B-01.**
+> **QA pemilik ronde 2 (2026-08-07): X-05 dijawab & diimplementasi; X-10 dicoret
+> (sudah selesai sejak sesi 5, barisnya basi); O26/O34/O35/O25/O6/O9 ditutup.
+> Rekomendasi untuk kelima cacat 🔴 ada di `docs/handoff/HANDOFF_M6ABC_SESI7.md` §2.**
 
 ## 0a. Papan skor (per 2026-08-07, sesudah B-00)
 
@@ -154,11 +157,11 @@ diimplementasi sebelum ini mendarat, jadi ia masuk batch migrasi yang SAMA denga
 |---|---|---|
 | ~~X-01~~ | ~~Katalog notifikasi v2~~ | ✅ **SELESAI 2026-08-07** — O55 pilihan (a). `notif_catalog_versions` + 14 event v2 (13 M6A/6B/6C + `m6.client.assigned` O53). Katalog ada; `emit()`-nya belum dipasang |
 | ~~X-02~~ | ~~Konfirmasi tier 33 entri katalog~~ | ✅ **SELESAI 2026-08-07** — O54. `Customer Review Management` → `tanpa_plan`; tier tengah 33%. Tier kini disetel di admin MSL, bukan migrasi |
-| X-03 | Ambang pemicu (20 item · Rp 15jt · 1 bulan) | M6A GA-1: nilai awal, belum diuji ke data service riil |
-| X-04 | RA-4 (jendela baseline tak rata antar channel → warning) | Yohan, sebelum validasi D-3 dikode |
-| X-05 | RA-5 (`tanggal_mulai_siklus` default = tanggal mulai kontrak) | Yulianti, sebelum generasi Plan dikode |
-| X-06 | RA-7 (tautan klien hanya versi aktif, tanpa riwayat/diff) | Yohan, sebelum client view dibangun |
-| X-07 | PA-2/PA-5 (jendela GMV manual 5 hari · force-close +7 hari) | Yulianti |
-| X-08 | PA-3 (metrik auto PE-3 belum tentu tersedia semua) | Hans — metrik yang belum ada harus jatuh ke manual **secara eksplisit**, tidak dicampur diam-diam dengan yang auto |
-| X-10 | **O58 — "tidak ada" vs "belum dijawab" untuk enam field daftar bertanda WAJIB** (A-11, A-14, B-5.3, B-8.1, B-8.2) | Yohan / Yulianti. Sesi 3 memilih bacaan yang tidak memblokir (gerbangi angka pendampingnya, bukan daftarnya) dan mencatatnya; menambah checkbox "tidak ada" berarti field yang PRD tidak mendefinisikan |
+| X-03 | Ambang pemicu M6C (**20 item/bln · Rp 15jt/bln · durasi >1 bulan**) | Pemilik / Yohan. **Contoh yang membuatnya konkret:** service "Desain Konten 15 post/bln, Rp 9jt/bln, 3 bulan" → nol hard trigger dari kuota & nilai, tapi **durasi >1 bulan menyala** (hard) ⇒ sistem tetap merekomendasikan Plan. Kalau di MEA service 3 bulan kecil semacam itu memang cukup dipantau tanpa Plan, ambangnya yang salah, bukan AM-nya. Bisa dijawab dari data service riil dalam 15 menit; tanpa itu GA-1 dikode dengan angka PRD apa adanya |
+| X-04 | RA-4 (jendela baseline tak rata antar channel → **warning**, bukan blokir) | Yohan, sebelum validasi D-3 dikode. **Contoh:** Shopee punya 6 bulan data, TikTok baru buka 1 bulan → selisih 5 bulan. D-3 minta AM membagi kontribusi GMV %, dan pembagian itu berdiri di atas tanah yang tidak rata. Yang perlu dijawab hanya: **berapa bulan selisih yang layak diperingatkan** (PRD menebak 2) |
+| ~~X-05~~ | ~~RA-5 (`tanggal_mulai_siklus` default = tanggal mulai kontrak)~~ | ✅ **SELESAI 2026-08-07** — dijawab pemilik ("tanggal mulai siklus = tanggal mulai kontrak") dan langsung diimplementasi: `normalizeHeader` mengisi G-0 dari `tanggalMulaiKontrak` saat kosong; override AM tetap hidup; Rule 17 tidak dilonggarkan. Nol migrasi. Lihat DECISIONS 2026-08-07 |
+| X-06 | RA-7 (tautan klien hanya versi aktif, tanpa riwayat/diff) | Yohan, sebelum A-11 dibangun. **Contoh:** Strategi v1 janji ROAS 4,0; v2 (revisi bulan ke-3) menurunkannya jadi 3,2. Klien membuka `/s/{token}` dan melihat **3,2 saja** — tanpa jejak bahwa pernah 4,0. PRD memang meminta itu (AM menjelaskan di meeting). Yang perlu ditegaskan: apakah itu tetap posisi MEA kalau kliennya menanyakannya |
+| X-07 | PA-2/PA-5 (jendela GMV manual **5 hari** · force-close **+7 hari**) | Yulianti. **Contoh:** periode 12 Agu–11 Sep tutup 11 Sep. AM belum input GMV aktual → **16 Sep** warning menyala (PA-2); **18 Sep** periode `Ditutup Otomatis` tanpa angka GMV (PA-5). Artinya ada jendela 2 hari antara "ditegur" dan "dikunci". Kalau AM MEA biasanya menarik export akhir bulan, kedua angka ini kependekan |
+| X-08 | PA-3 (metrik auto PE-3 belum tentu tersedia semua) | Hans / developer — bukan pemilik. **Contoh:** PE-3 mendaftar 6 metrik auto (ad spend, ROAS/ACOS, jumlah video selesai, kreator aktif, **jam live vendor**, Brief selesai/total). Jam live vendor datang dari M10 yang vendornya melapor **di luar sistem** (PA-4) ⇒ metrik itu de-facto manual. Yang wajib: daftar metrik manual ditulis **eksplisit** di UI, tidak dicampur diam-diam dengan yang auto, supaya AM tahu angka mana yang dia pertanggungjawabkan |
+| ~~X-10~~ | ~~O58 — "tidak ada" vs "belum dijawab" untuk field daftar bertanda WAJIB~~ | ✅ **SELESAI 2026-08-07** — O58 dijawab pemilik (pilihan (a)) dan sudah mendarat: kolom `{field}_tidak_ada` untuk **lima** field (A-11, A-14, B-5.3, B-8.1, B-8.2 — bukan enam; B-3.5/B-4.5 sudah opsional), gerbang submit jadi "daftar terisi XOR checkbox dicentang", pesan `MSG_TIDAK_ADA_BELUM_DIJAWAB`. Baris ini basi sejak sesi 5; UI checkbox-nya menunggu A-13 |
 | ~~X-09~~ | ~~Tidak ada entitas CONTRACT di CDPS~~ | ✅ **SELESAI 2026-08-07** — O57 diputus & dieksekusi (B-00) |

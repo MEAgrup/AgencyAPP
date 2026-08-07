@@ -1770,10 +1770,17 @@ function normalizeHeader(input: StrategiHeaderInput): Required<StrategiHeaderInp
     durasiKontrakBulan: durasi,
     tanggalMulaiKontrak: mulai,
     tanggalAkhirKontrak: akhir,
-    // RA-5 default (`tanggal_mulai_siklus` = contract start) is NOT applied
-    // silently: the assumption is still open (backlog X-05), and quietly picking
-    // a date the AM never saw would put every Plan period boundary on a guess.
-    tanggalMulaiSiklus: siklus === '' ? null : siklus,
+    // RA-5 (backlog X-05) DIPUTUS PEMILIK 2026-08-07: G-0 defaults to the
+    // contract start date, and the AM overrides it only when the client wants
+    // reporting aligned to something else. So a blank G-0 is no longer "belum
+    // dijawab" — it is "pakai default", and the stored value is a real date the
+    // AM can see rather than a null that B-02 would have to guess around.
+    //
+    // `mulai` IS the contract start, not a second opinion about it:
+    // `ensureContractForService` rejects a window that disagrees with the stored
+    // agreement (`MSG_WINDOW_MISMATCH`), so the default cannot drift from
+    // `contracts.tanggal_mulai` even when the Service was grouped earlier.
+    tanggalMulaiSiklus: siklus === '' ? mulai : siklus,
     toleransiOverPersen: toleransi,
   };
 }

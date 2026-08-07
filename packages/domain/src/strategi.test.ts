@@ -1146,6 +1146,11 @@ describeDb('checkCompleteness — every unmet rule, not the first one', () => {
   it('lists what is missing on an empty draft', async () => {
     const serviceId = await seedService();
     const s = await createStrategi(sql, am(), serviceId, { ...HEADER, tanggalMulaiSiklus: null });
+    // RA-5 fills G-0 from the contract start, so a blank header no longer
+    // produces a null cycle start. The G-0 rule still has to hold for rows that
+    // predate the default (and for a service-role write), so the null is made
+    // here rather than deleting the assertion it guards.
+    await sql`update strategi set tanggal_mulai_siklus = null where id = ${s.id}`;
     const missing = await checkCompleteness(sql, s.id);
     const codes = missing.map((m) => m.kode);
     expect(codes).toContain('G-0'); // Rule 17
@@ -1597,6 +1602,33 @@ describeDb('Rule 13 — a revision is a new row, and n stays Aktif', () => {
     };
     await openRevision(sql, am(), strategiId, rev);
     await expect(openRevision(sql, am(), strategiId, rev)).rejects.toThrow(MSG_STRATEGI_EXISTS);
+  });
+});
+
+describeDb('RA-5 (X-05) — G-0 defaults to the contract start date', () => {
+  it('fills the cycle start from the contract when the AM leaves it blank', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, { ...HEADER, tanggalMulaiSiklus: null });
+    expect(s.tanggalMulaiSiklus).toBe(HEADER.tanggalMulaiKontrak);
+  });
+
+  it('keeps the AM override — the default is a default, not a rule', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, {
+      ...HEADER,
+      tanggalMulaiSiklus: '2026-09-01',
+    });
+    expect(s.tanggalMulaiSiklus).toBe('2026-09-01');
+  });
+
+  it('re-applies the default on updateHeader, so a cleared field is not a null', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, {
+      ...HEADER,
+      tanggalMulaiSiklus: '2026-09-01',
+    });
+    const back = await updateHeader(sql, am(), s.id, { ...HEADER, tanggalMulaiSiklus: null });
+    expect(back.tanggalMulaiSiklus).toBe(HEADER.tanggalMulaiKontrak);
   });
 });
 
