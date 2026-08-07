@@ -428,9 +428,51 @@ export interface StrategiEvent {
   created_at: string;
 }
 
+/** A-07 Section C — C-1/C-2/C-3/C-4 per channel. */
+export interface StrategiDiagnosa {
+  id: number;
+  channel: string;
+  bottleneck: string;
+  /** Rule 6: baseline field-ID references (e.g. "B-2.2"). Min 1 required. */
+  field_ids: string[];
+  akar_masalah: string | null;
+  gap_kompetitor: string | null;
+}
+
+/** A-07 Section C-5 — quick wins in the first 14 days. */
+export interface StrategiQuickWin {
+  id: number;
+  aksi: string;
+  channel: string;
+  pic_divisi: string;
+  dampak_diharapkan: string;
+  urutan: number;
+}
+
+/** A-07 Section C-6 — structural risks that cannot be eliminated. */
+export interface StrategiRisikoStruktural {
+  id: number;
+  risiko: string;
+  urutan: number;
+}
+
+/** A-07 Section C-7 — things the client must resolve before execution. */
+export interface StrategiPrasyaratKlien {
+  id: number;
+  item: string;
+  pic_klien: string;
+  deadline: string | null;
+  urutan: number;
+}
+
 export interface StrategiDetail extends Strategi {
   channels: StrategiChannel[];
   akses: StrategiAkses[];
+  /** A-07 Section C. */
+  diagnosa: StrategiDiagnosa[];
+  quick_wins: StrategiQuickWin[];
+  risiko_struktural: StrategiRisikoStruktural[];
+  prasyarat_klien: StrategiPrasyaratKlien[];
   targets: StrategiTarget[];
   assumptions: StrategiAssumption[];
   pillars: StrategiPillar[];
@@ -514,6 +556,54 @@ export function saveStrategiKonteks(
 /** A-15/A-16 — the whole matrix, saved as one set. */
 export function saveStrategiAkses(id: string, akses: StrategiAksesBody[]): Promise<StrategiDetail> {
   return api.put<StrategiDetail>(`/strategi/${id}/akses`, { akses });
+}
+
+// ---------------------------------------------------------------------------
+// Section C (A-07) bodies
+// ---------------------------------------------------------------------------
+
+export interface StrategiDiagnosaBody {
+  channel: string;
+  bottleneck: string;
+  /** Rule 6: baseline field-ID references, min 1 required. */
+  field_ids: string[];
+  akar_masalah?: string | null;
+  gap_kompetitor?: string | null;
+}
+
+export interface StrategiQuickWinBody {
+  aksi: string;
+  channel: string;
+  pic_divisi: string;
+  dampak_diharapkan: string;
+  urutan?: number;
+}
+
+export interface StrategiRisikoStrukturalBody {
+  risiko: string;
+  urutan?: number;
+}
+
+export interface StrategiPrasyaratKlienBody {
+  item: string;
+  pic_klien: string;
+  deadline?: string | null;
+  urutan?: number;
+}
+
+export interface StrategiDiagnosaPayload {
+  diagnosa: StrategiDiagnosaBody[];
+  quick_wins: StrategiQuickWinBody[];
+  risiko_struktural: StrategiRisikoStrukturalBody[];
+  prasyarat_klien: StrategiPrasyaratKlienBody[];
+}
+
+/** Section C — saved as one atomic set (diagnosa + quick wins + risks + prereqs). */
+export function saveStrategiDiagnosa(
+  id: string,
+  body: StrategiDiagnosaPayload,
+): Promise<StrategiDetail> {
+  return api.put<StrategiDetail>(`/strategi/${id}/diagnosa`, body);
 }
 
 export function saveStrategiChannels(id: string, channels: unknown[]): Promise<StrategiDetail> {

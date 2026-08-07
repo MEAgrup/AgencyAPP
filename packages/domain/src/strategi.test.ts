@@ -33,16 +33,22 @@ import {
   MSG_BASELINE_GROUP_INCOMPLETE,
   MSG_CHANNEL_NOT_FOUND,
   MSG_CYCLE_LOCKED,
+  MSG_DIAGNOSA_FIELD_ID_REQUIRED,
+  MSG_DIAGNOSA_INVALID_FIELD_ID,
+  MSG_DIAGNOSA_MISSING,
   MSG_KOMPETITOR_REQUIRED,
+  MSG_NOT_PLAN_GATED,
+  MSG_OUT_OF_SCOPE_REQUIRED,
+  MSG_PRASYARAT_KLIEN_REQUIRED,
+  MSG_QUICK_WIN_MIN,
+  MSG_REVIEW_NOTES_REQUIRED,
+  MSG_REVISION_INCOMPLETE,
+  MSG_RISIKO_STRUKTURAL_REQUIRED,
+  MSG_STRATEGI_EXISTS,
+  MSG_TARGET_WITHOUT_ASSUMPTION,
   MSG_TOP_SKU_REQUIRED,
   MSG_TRAFFIC_MIX_SUM,
   MSG_USP_MIN,
-  MSG_NOT_PLAN_GATED,
-  MSG_OUT_OF_SCOPE_REQUIRED,
-  MSG_REVIEW_NOTES_REQUIRED,
-  MSG_REVISION_INCOMPLETE,
-  MSG_STRATEGI_EXISTS,
-  MSG_TARGET_WITHOUT_ASSUMPTION,
   STRATEGI_AKTIF,
   STRATEGI_DIAJUKAN,
   STRATEGI_DIARSIPKAN,
@@ -64,6 +70,7 @@ import {
   saveAssumptions,
   saveBaseline,
   saveChannels,
+  saveDiagnosa,
   saveKonteks,
   savePillars,
   saveResources,
@@ -360,6 +367,58 @@ const AKSES = [
   { channel: 'Umum' as const, akses: 'gudang_stok' as const, status: 'sudah' as const },
 ];
 
+/**
+ * A-07 Section C fixture — based on the §6 Alpha Digital / Shopee worked example.
+ *
+ * Shopee diagnosa: bottleneck = konversi, evidence = B-2.2 (conversion rate) and
+ * B-3.6 (basket size), matching the PRD's "CvR 1.3% vs benchmark 2.8%" narrative.
+ * Three quick wins, one structural risk, one client prerequisite satisfy the
+ * minimum-count gates (C-5 min 3, C-6 min 1, C-7 min 1).
+ */
+const DIAGNOSA_PAYLOAD = {
+  diagnosa: [
+    {
+      channel: 'Shopee',
+      bottleneck: 'konversi' as const,
+      fieldIds: ['B-2.2', 'B-3.6'],
+      akarMasalah: 'CvR 1,3% vs benchmark platform 2,8%; nilai AOV turun karena bundling hilang',
+      gapKompetitor: 'Kompetitor A CvR 2,6% dengan bundling 3-pcs di flash sale',
+    },
+  ],
+  quickWins: [
+    {
+      aksi: 'Aktifkan bundling 3-pcs di Shopee Flash Sale minggu 1',
+      channel: 'Shopee',
+      picDivisi: 'Account',
+      dampakDiharapkan: 'AOV +15%, CvR +0,3pp dalam 7 hari',
+    },
+    {
+      aksi: 'Pasang voucher toko 10% untuk repeat buyer hari 1–7',
+      channel: 'Shopee',
+      picDivisi: 'Account',
+      dampakDiharapkan: 'Repeat rate +5% dari segmen lapsed 30 hari',
+    },
+    {
+      aksi: 'Update main banner dengan harga coret yang terlihat jelas',
+      channel: 'Shopee',
+      picDivisi: 'Creative',
+      dampakDiharapkan: 'CTR organic +10% dalam 14 hari',
+    },
+  ],
+  risikoStruktural: [
+    {
+      risiko: 'Kapasitas produksi terbatas: restock rata-rata 21 hari, demand spike tidak bisa dipenuhi instan',
+    },
+  ],
+  prasyaratKlien: [
+    {
+      item: 'Klien harus memberikan akses Shopee Ads Manager sebelum eksekusi iklan M1',
+      picKlien: 'Owner',
+      deadline: '2026-08-15',
+    },
+  ],
+};
+
 /** Builds a Strategi that passes every submit rule, then returns its id. */
 async function seedSubmittable(): Promise<{ serviceId: string; strategiId: string }> {
   const serviceId = await seedService();
@@ -368,6 +427,7 @@ async function seedSubmittable(): Promise<{ serviceId: string; strategiId: strin
   const withChannel = await saveChannels(sql, am(), s.id, [SHOPEE]);
   const channelId = withChannel.channels[0].id;
   await saveAkses(sql, am(), s.id, AKSES);
+  await saveDiagnosa(sql, am(), s.id, DIAGNOSA_PAYLOAD);
 
   // §6: GMV M-3 172jt → M-2 165jt → M-1 180jt, which the PRD calls "flat".
   // `month_index` runs oldest → newest, so M-3 is index 1.
@@ -1003,6 +1063,10 @@ describeDb('checkCompleteness — every unmet rule, not the first one', () => {
     expect(codes).toContain('A-12');
     expect(codes).toContain('A-13');
     expect(missing.find((m) => m.kode === 'A-5')?.pesan).toBe(MSG_USP_MIN);
+    // A-07 Section C: zero channels → no C-1 per channel, but C-5/C-6/C-7 fire.
+    expect(codes).toContain('C-5'); // no quick wins yet
+    expect(codes).toContain('C-6'); // no structural risks yet
+    expect(codes).toContain('C-7'); // no client prerequisites yet
     // A first-error gate would have reported one of these and hidden the rest.
     expect(missing.length).toBeGreaterThanOrEqual(5);
   });
@@ -1267,6 +1331,13 @@ describeDb('Rule 13 — a revision is a new row, and n stays Aktif', () => {
     expect(copied.targets).toHaveLength(1);
     expect(copied.assumptions.map((a) => a.kode)).toEqual(['A1', 'A2', 'A3']);
     expect(copied.risks).toHaveLength(3);
+    // Section C is copied too: the AM revises strategy, not the situation.
+    expect(copied.diagnosa).toHaveLength(1);
+    expect(copied.diagnosa[0].channel).toBe('Shopee');
+    expect(copied.diagnosa[0].bottleneck).toBe('konversi');
+    expect(copied.quickWins).toHaveLength(3);
+    expect(copied.risikoStruktural).toHaveLength(1);
+    expect(copied.prasyaratKlien).toHaveLength(1);
     expect(copied.riwayat[0].peristiwa).toBe('revisi_dibuka');
     expect(copied.riwayat[0].triggerRevisi).toEqual(['budget iklan dipotong']);
     expect(copied.riwayat[0].asumsiGugur).toEqual(['A1']);
@@ -1360,5 +1431,225 @@ describeDb('reads', () => {
     await expect(getStrategi(sql, otherAm(), strategiId)).rejects.toThrow(ForbiddenError);
     expect((await getStrategi(sql, spv(), strategiId)).id).toBe(strategiId);
     expect((await getStrategi(sql, od(), strategiId)).id).toBe(strategiId);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section C — A-07 (Diagnosa & Akar Masalah)
+// ---------------------------------------------------------------------------
+
+describeDb('Section C — A-07 (Diagnosa & Akar Masalah)', () => {
+  it('saves all four sub-sections atomically and returns the full detail', async () => {
+    const { strategiId } = await seedSubmittable();
+    // The fixture was already applied by seedSubmittable; re-read and verify shape.
+    const detail = await getStrategi(sql, am(), strategiId);
+
+    expect(detail.diagnosa).toHaveLength(1);
+    const d = detail.diagnosa[0];
+    expect(d.channel).toBe('Shopee');
+    expect(d.bottleneck).toBe('konversi');
+    expect(d.fieldIds).toEqual(['B-2.2', 'B-3.6']);
+    expect(d.akarMasalah).toContain('CvR');
+    expect(d.gapKompetitor).toContain('Kompetitor');
+
+    expect(detail.quickWins).toHaveLength(3);
+    expect(detail.quickWins[0].channel).toBe('Shopee');
+    expect(detail.quickWins[0].picDivisi).toBe('Account');
+
+    expect(detail.risikoStruktural).toHaveLength(1);
+    expect(detail.risikoStruktural[0].risiko).toContain('restock');
+
+    expect(detail.prasyaratKlien).toHaveLength(1);
+    expect(detail.prasyaratKlien[0].picKlien).toBe('Owner');
+    expect(detail.prasyaratKlien[0].deadline).toBe('2026-08-15');
+  });
+
+  it('Rule 6 — rejects an empty fieldIds list', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveChannels(sql, am(), s.id, [SHOPEE]);
+    await expect(
+      saveDiagnosa(sql, am(), s.id, {
+        ...DIAGNOSA_PAYLOAD,
+        diagnosa: [{ ...DIAGNOSA_PAYLOAD.diagnosa[0], fieldIds: [] }],
+      }),
+    ).rejects.toThrow(MSG_DIAGNOSA_FIELD_ID_REQUIRED);
+  });
+
+  it('Rule 6 — rejects a field-ID that is not in VALID_BASELINE_FIELD_IDS', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveChannels(sql, am(), s.id, [SHOPEE]);
+    await expect(
+      saveDiagnosa(sql, am(), s.id, {
+        ...DIAGNOSA_PAYLOAD,
+        diagnosa: [{ ...DIAGNOSA_PAYLOAD.diagnosa[0], fieldIds: ['X-99', 'B-2.2'] }],
+      }),
+    ).rejects.toThrow(MSG_DIAGNOSA_INVALID_FIELD_ID);
+  });
+
+  it('Rule 6 — accepts every boundary ID in VALID_BASELINE_FIELD_IDS (A-1 and B-9.3)', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveChannels(sql, am(), s.id, [SHOPEE]);
+    // A-1 is the first A-section field; B-9.3 is the last B-section field.
+    await expect(
+      saveDiagnosa(sql, am(), s.id, {
+        ...DIAGNOSA_PAYLOAD,
+        diagnosa: [{ ...DIAGNOSA_PAYLOAD.diagnosa[0], fieldIds: ['A-1', 'B-9.3'] }],
+      }),
+    ).resolves.not.toThrow();
+  });
+
+  it('rejects a diagnosa for a channel not registered in this Strategi', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveChannels(sql, am(), s.id, [SHOPEE]);
+    await expect(
+      saveDiagnosa(sql, am(), s.id, {
+        ...DIAGNOSA_PAYLOAD,
+        diagnosa: [{ ...DIAGNOSA_PAYLOAD.diagnosa[0], channel: 'Lazada' }],
+      }),
+    ).rejects.toThrow(ValidationError);
+  });
+
+  it('rejects duplicate diagnosa for the same channel', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveChannels(sql, am(), s.id, [SHOPEE]);
+    await expect(
+      saveDiagnosa(sql, am(), s.id, {
+        ...DIAGNOSA_PAYLOAD,
+        diagnosa: [
+          DIAGNOSA_PAYLOAD.diagnosa[0],
+          { ...DIAGNOSA_PAYLOAD.diagnosa[0], bottleneck: 'trafik' as const },
+        ],
+      }),
+    ).rejects.toThrow(ValidationError);
+  });
+
+  it('replaces all four sub-sections atomically (idempotent second save)', async () => {
+    const { strategiId } = await seedSubmittable();
+    // Second save with different data: old rows must be gone.
+    const updated = await saveDiagnosa(sql, am(), strategiId, {
+      diagnosa: [
+        {
+          channel: 'Shopee',
+          bottleneck: 'trafik' as const,
+          fieldIds: ['B-2.1', 'A-5'],
+          akarMasalah: 'organic traffic turun 30% pasca-algo update',
+          gapKompetitor: 'Kompetitor dominasi top search dengan video',
+        },
+      ],
+      quickWins: [
+        {
+          aksi: 'Live streaming 3x seminggu',
+          channel: 'Shopee',
+          picDivisi: 'Account',
+          dampakDiharapkan: 'Trafik live +20%',
+        },
+        {
+          aksi: 'Upload 10 video produk per minggu',
+          channel: 'Shopee',
+          picDivisi: 'Creative',
+          dampakDiharapkan: 'Impresi video +40% dalam 14 hari',
+        },
+        {
+          aksi: 'Optimalkan kata kunci listing top-5 SKU',
+          channel: 'Shopee',
+          picDivisi: 'Account',
+          dampakDiharapkan: 'Organic rank naik 5 posisi',
+        },
+      ],
+      risikoStruktural: [{ risiko: 'Algoritma Shopee berubah sewaktu-waktu tanpa notice' }],
+      prasyaratKlien: [{ item: 'Budget live streaming Rp5jt/minggu dikonfirmasi', picKlien: 'Finance' }],
+    });
+    expect(updated.diagnosa).toHaveLength(1);
+    expect(updated.diagnosa[0].bottleneck).toBe('trafik');
+    expect(updated.quickWins).toHaveLength(3);
+    expect(updated.quickWins[0].aksi).toContain('Live');
+  });
+
+  it('blocks writes once the record leaves Draft', async () => {
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await expect(saveDiagnosa(sql, am(), strategiId, DIAGNOSA_PAYLOAD)).rejects.toThrow(
+      ConflictError,
+    );
+  });
+
+  it('checkCompleteness — flags C-1 for every channel with no diagnosa', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveChannels(sql, am(), s.id, [SHOPEE]);
+    const codes = (await checkCompleteness(sql, s.id)).map((m) => m.kode);
+    expect(codes).toContain('C-1/Shopee');
+  });
+
+  it('checkCompleteness — flags C-3 when akar_masalah is blank', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveChannels(sql, am(), s.id, [SHOPEE]);
+    await saveDiagnosa(sql, am(), s.id, {
+      ...DIAGNOSA_PAYLOAD,
+      diagnosa: [{ ...DIAGNOSA_PAYLOAD.diagnosa[0], akarMasalah: '' }],
+    });
+    const codes = (await checkCompleteness(sql, s.id)).map((m) => m.kode);
+    expect(codes).toContain('C-3/Shopee');
+    expect(codes).not.toContain('C-1/Shopee');
+  });
+
+  it('checkCompleteness — flags C-4 when gap_kompetitor is blank', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveChannels(sql, am(), s.id, [SHOPEE]);
+    await saveDiagnosa(sql, am(), s.id, {
+      ...DIAGNOSA_PAYLOAD,
+      diagnosa: [{ ...DIAGNOSA_PAYLOAD.diagnosa[0], gapKompetitor: null }],
+    });
+    const codes = (await checkCompleteness(sql, s.id)).map((m) => m.kode);
+    expect(codes).toContain('C-4/Shopee');
+    expect(codes).not.toContain('C-1/Shopee');
+  });
+
+  it('checkCompleteness — flags C-5 when quick wins are fewer than 3', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveChannels(sql, am(), s.id, [SHOPEE]);
+    await saveDiagnosa(sql, am(), s.id, {
+      ...DIAGNOSA_PAYLOAD,
+      quickWins: DIAGNOSA_PAYLOAD.quickWins.slice(0, 2), // only 2 of 3
+    });
+    const pesan = (await checkCompleteness(sql, s.id)).map((m) => m.pesan);
+    expect(pesan).toContain(MSG_QUICK_WIN_MIN);
+  });
+
+  it('checkCompleteness — flags C-6 when risiko struktural is empty', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveChannels(sql, am(), s.id, [SHOPEE]);
+    await saveDiagnosa(sql, am(), s.id, { ...DIAGNOSA_PAYLOAD, risikoStruktural: [] });
+    const pesan = (await checkCompleteness(sql, s.id)).map((m) => m.pesan);
+    expect(pesan).toContain(MSG_RISIKO_STRUKTURAL_REQUIRED);
+  });
+
+  it('checkCompleteness — flags C-7 when prasyarat klien is empty', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveChannels(sql, am(), s.id, [SHOPEE]);
+    await saveDiagnosa(sql, am(), s.id, { ...DIAGNOSA_PAYLOAD, prasyaratKlien: [] });
+    const pesan = (await checkCompleteness(sql, s.id)).map((m) => m.pesan);
+    expect(pesan).toContain(MSG_PRASYARAT_KLIEN_REQUIRED);
+  });
+
+  it('checkCompleteness — Section C is complete with the seedSubmittable fixture', async () => {
+    const { strategiId } = await seedSubmittable();
+    const codes = (await checkCompleteness(sql, strategiId)).map((m) => m.kode);
+    expect(codes).not.toContain('C-1/Shopee');
+    expect(codes).not.toContain('C-3/Shopee');
+    expect(codes).not.toContain('C-4/Shopee');
+    expect(codes).not.toContain('C-5');
+    expect(codes).not.toContain('C-6');
+    expect(codes).not.toContain('C-7');
   });
 });

@@ -2886,6 +2886,47 @@ export interface StrategiAksesWire {
   catatan: string;
 }
 
+// ---------------------------------------------------------------------------
+// Section C (A-07) wire types
+// ---------------------------------------------------------------------------
+
+/** C-1/C-2/C-3/C-4 — one row per contracted channel. */
+export interface StrategiDiagnosaWire {
+  id: number;
+  channel: string;
+  bottleneck: string;
+  /** Rule 6: array of baseline field-ID strings, min 1. */
+  field_ids: string[];
+  akar_masalah: string | null;
+  gap_kompetitor: string | null;
+}
+
+/** C-5 — quick wins in the first 14 days. */
+export interface StrategiQuickWinWire {
+  id: number;
+  aksi: string;
+  channel: string;
+  pic_divisi: string;
+  dampak_diharapkan: string;
+  urutan: number;
+}
+
+/** C-6 — structural risks. */
+export interface StrategiRisikoStrukturalWire {
+  id: number;
+  risiko: string;
+  urutan: number;
+}
+
+/** C-7 — client prerequisites. */
+export interface StrategiPrasyaratKlienWire {
+  id: number;
+  item: string;
+  pic_klien: string;
+  deadline: string | null;
+  urutan: number;
+}
+
 /** The Strategi header (Section J-1 + the contract window) plus Section A. */
 export interface StrategiWire {
   id: string;
@@ -3150,6 +3191,11 @@ export interface StrategiEventWire {
 export interface StrategiDetailWire extends StrategiWire {
   channels: StrategiChannelWire[];
   akses: StrategiAksesWire[];
+  /** A-07 Section C: per-channel diagnosis. */
+  diagnosa: StrategiDiagnosaWire[];
+  quick_wins: StrategiQuickWinWire[];
+  risiko_struktural: StrategiRisikoStrukturalWire[];
+  prasyarat_klien: StrategiPrasyaratKlienWire[];
   targets: StrategiTargetWire[];
   assumptions: StrategiAssumptionWire[];
   pillars: StrategiPillarWire[];
@@ -3272,6 +3318,34 @@ export function strategiDetailToWire(d: strategi.StrategiDetail): StrategiDetail
       memblokir: a.memblokir,
       target_tanggal_beres: a.targetTanggalBeres,
       catatan: a.catatan,
+    })),
+    diagnosa: d.diagnosa.map((diag) => ({
+      id: diag.id,
+      channel: diag.channel,
+      bottleneck: diag.bottleneck,
+      field_ids: diag.fieldIds,
+      akar_masalah: diag.akarMasalah,
+      gap_kompetitor: diag.gapKompetitor,
+    })),
+    quick_wins: d.quickWins.map((q) => ({
+      id: q.id,
+      aksi: q.aksi,
+      channel: q.channel,
+      pic_divisi: q.picDivisi,
+      dampak_diharapkan: q.dampakDiharapkan,
+      urutan: q.urutan,
+    })),
+    risiko_struktural: d.risikoStruktural.map((r) => ({
+      id: r.id,
+      risiko: r.risiko,
+      urutan: r.urutan,
+    })),
+    prasyarat_klien: d.prasyaratKlien.map((p) => ({
+      id: p.id,
+      item: p.item,
+      pic_klien: p.picKlien,
+      deadline: p.deadline,
+      urutan: p.urutan,
     })),
     targets: d.targets.map((t) => ({
       channel: t.channel,
@@ -3682,5 +3756,40 @@ export function strategiRevisionFromWire(v: unknown): strategi.RevisionInput {
     triggerRevisi: Array.isArray(b.trigger_revisi) ? b.trigger_revisi.map((t) => String(t)) : [],
     alasanRevisi: str(b.alasan_revisi),
     asumsiGugur: Array.isArray(b.asumsi_gugur) ? b.asumsi_gugur.map((a) => String(a)) : [],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Section C inbound parsers (A-07)
+// ---------------------------------------------------------------------------
+
+/** Inbound: PUT /strategi/{id}/diagnosa body → DiagnosaPayload. */
+export function strategiDiagnosaFromWire(v: unknown): strategi.DiagnosaPayload {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    diagnosa: asRecords(b.diagnosa).map((d) => ({
+      channel: str(d.channel),
+      bottleneck: str(d.bottleneck) as strategi.BottleneckKind,
+      fieldIds: Array.isArray(d.field_ids) ? d.field_ids.map((f) => String(f)) : [],
+      akarMasalah: strOrNull(d.akar_masalah),
+      gapKompetitor: strOrNull(d.gap_kompetitor),
+    })),
+    quickWins: asRecords(b.quick_wins).map((q, i) => ({
+      aksi: str(q.aksi),
+      channel: str(q.channel),
+      picDivisi: str(q.pic_divisi),
+      dampakDiharapkan: str(q.dampak_diharapkan),
+      urutan: numOrNull(q.urutan) ?? i,
+    })),
+    risikoStruktural: asRecords(b.risiko_struktural).map((r, i) => ({
+      risiko: str(r.risiko),
+      urutan: numOrNull(r.urutan) ?? i,
+    })),
+    prasyaratKlien: asRecords(b.prasyarat_klien).map((p, i) => ({
+      item: str(p.item),
+      picKlien: str(p.pic_klien),
+      deadline: strOrNull(p.deadline),
+      urutan: numOrNull(p.urutan) ?? i,
+    })),
   };
 }

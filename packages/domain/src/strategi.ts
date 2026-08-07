@@ -339,6 +339,137 @@ export const MSG_TOP_SKU_REQUIRED = '[minimal satu SKU teratas wajib diisi per c
 /** B-9.1 — at least one competitor; C-4 compares against it. */
 export const MSG_KOMPETITOR_REQUIRED = '[minimal satu kompetitor wajib diisi per channel]';
 
+// ---------------------------------------------------------------------------
+// Section C — Diagnosa & Akar Masalah (A-07)
+// ---------------------------------------------------------------------------
+
+/** C-1 enum — bottleneck utama per channel. */
+export const BOTTLENECK_KINDS = [
+  'trafik',
+  'konversi',
+  'aov',
+  'repeat_order',
+  'margin',
+  'operasional',
+  'konten',
+  'harga',
+  'listing',
+] as const;
+export type BottleneckKind = (typeof BOTTLENECK_KINDS)[number];
+
+/**
+ * C-2 Rule 6 — closed set of valid baseline field-IDs that a diagnosa may
+ * cite as evidence. This is the set of all W + A field IDs from Section A
+ * (A-1 through A-16) and Section B (B-0.1 through B-9.3).
+ *
+ * The DB cannot enforce this set with a CHECK (subqueries inside CHECKs are
+ * forbidden). Domain validates membership here at save time (not at submit),
+ * so an invalid ID is caught when the AM types it rather than at the gate.
+ */
+export const VALID_BASELINE_FIELD_IDS: ReadonlySet<string> = new Set([
+  // Section A
+  'A-1',
+  'A-2',
+  'A-3',
+  'A-4',
+  'A-5',
+  'A-6',
+  'A-7',
+  'A-8',
+  'A-9',
+  'A-10',
+  'A-11',
+  'A-12',
+  'A-13',
+  'A-14',
+  'A-15',
+  'A-16',
+  // Section B — B-0 (channel identity)
+  'B-0.1',
+  'B-0.2',
+  'B-0.3',
+  'B-0.4',
+  'B-0.5',
+  'B-0.6',
+  'B-0.7',
+  'B-0.8',
+  // B-1 (penjualan)
+  'B-1.1',
+  'B-1.2',
+  'B-1.3',
+  'B-1.4',
+  'B-1.5',
+  // B-2 (trafik & konversi)
+  'B-2.1',
+  'B-2.2',
+  'B-2.3',
+  'B-2.4',
+  // B-3 (portofolio SKU)
+  'B-3.1',
+  'B-3.2',
+  'B-3.3',
+  'B-3.4',
+  'B-3.5',
+  'B-3.6',
+  // B-4 (kesehatan toko)
+  'B-4.1',
+  'B-4.2',
+  'B-4.3',
+  'B-4.4',
+  'B-4.5',
+  // B-5 (iklan)
+  'B-5.1',
+  'B-5.2',
+  'B-5.3',
+  'B-5.4',
+  'B-5.5',
+  // B-6 (affiliate / KOL)
+  'B-6.1',
+  'B-6.2',
+  'B-6.3',
+  'B-6.4',
+  'B-6.5',
+  // B-7 (konten & live)
+  'B-7.1',
+  'B-7.2',
+  'B-7.3',
+  'B-7.4',
+  // B-8 (promo & program platform)
+  'B-8.1',
+  'B-8.2',
+  'B-8.3',
+  // B-9 (kompetitor)
+  'B-9.1',
+  'B-9.2',
+  'B-9.3',
+]);
+
+/** Minimum quick wins required at submit (C-5). */
+export const QUICK_WIN_MIN = 3;
+
+/** C-2: each diagnosa must cite ≥1 baseline field-ID (Rule 6). */
+export const MSG_DIAGNOSA_FIELD_ID_REQUIRED =
+  '[setiap diagnosa wajib mencantumkan minimal satu field-ID baseline sebagai bukti]';
+
+/** C-2: the cited field-ID does not exist in VALID_BASELINE_FIELD_IDS. */
+export const MSG_DIAGNOSA_INVALID_FIELD_ID =
+  '[field-ID baseline tidak valid — gunakan ID yang terdaftar seperti B-2.2 atau A-5]';
+
+/** C-1/C-3: each contracted channel must have a diagnosa row. */
+export const MSG_DIAGNOSA_MISSING =
+  '[diagnosa wajib diisi untuk setiap channel yang dikontrak]';
+
+/** C-5: at least QUICK_WIN_MIN quick wins across all channels. */
+export const MSG_QUICK_WIN_MIN = `[minimal ${QUICK_WIN_MIN} quick win 14 hari wajib diisi]`;
+
+/** C-6: at least one structural risk. */
+export const MSG_RISIKO_STRUKTURAL_REQUIRED =
+  '[minimal satu risiko struktural wajib diisi]';
+
+/** C-7: at least one client prerequisite. */
+export const MSG_PRASYARAT_KLIEN_REQUIRED =
+  '[minimal satu prasyarat klien wajib diisi]';
+
 const RE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 // ---------------------------------------------------------------------------
@@ -663,6 +794,56 @@ export interface StrategiRisk {
   urutan: number;
 }
 
+// ---------------------------------------------------------------------------
+// Section C (A-07)
+// ---------------------------------------------------------------------------
+
+/**
+ * C-1/C-2/C-3/C-4 — one diagnosa row per contracted channel.
+ * Rule 6: `fieldIds` must have ≥1 entry from VALID_BASELINE_FIELD_IDS.
+ */
+export interface StrategiDiagnosa {
+  id: number;
+  channel: string;
+  /** C-1 — main bottleneck type for this channel. */
+  bottleneck: BottleneckKind;
+  /**
+   * C-2 — baseline field-ID references that prove the bottleneck diagnosis.
+   * Example: ["B-2.2", "B-3.6"]. Min 1, validated against VALID_BASELINE_FIELD_IDS.
+   */
+  fieldIds: string[];
+  /** C-3 — root cause (not symptom). NULLable (autosave); gated at submit. */
+  akarMasalah: string | null;
+  /** C-4 — most decisive gap vs competitors. NULLable; gated at submit. */
+  gapKompetitor: string | null;
+}
+
+/** C-5 — quick wins in the first 14 days (min 3 total). */
+export interface StrategiQuickWin {
+  id: number;
+  aksi: string;
+  channel: string;
+  picDivisi: string;
+  dampakDiharapkan: string;
+  urutan: number;
+}
+
+/** C-6 — structural risks that cannot be eliminated. */
+export interface StrategiRisikoStruktural {
+  id: number;
+  risiko: string;
+  urutan: number;
+}
+
+/** C-7 — things the client must resolve before execution can proceed. */
+export interface StrategiPrasyaratKlien {
+  id: number;
+  item: string;
+  picKlien: string;
+  deadline: string | null;
+  urutan: number;
+}
+
 /** Section J — one row per event, append-only. */
 export interface StrategiEvent {
   versiNo: number;
@@ -680,6 +861,11 @@ export interface StrategiDetail extends Strategi {
   channels: (StrategiChannel & { baseline: BaselineMonth[] })[];
   /** A-15 / A-16 — the access matrix and the blockers flagged inside it. */
   akses: StrategiAkses[];
+  /** A-07 — Section C: per-channel diagnosis + quick wins + structural risks + client prereqs. */
+  diagnosa: StrategiDiagnosa[];
+  quickWins: StrategiQuickWin[];
+  risikoStruktural: StrategiRisikoStruktural[];
+  prasyaratKlien: StrategiPrasyaratKlien[];
   targets: StrategiTarget[];
   assumptions: StrategiAssumption[];
   pillars: StrategiPillar[];
@@ -1187,6 +1373,50 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
   >`select * from strategi_akses where strategi_id = ${id}
      order by channel asc, akses asc`;
 
+  // Section C (A-07)
+  const diagnosaRows = await sql<
+    {
+      id: string;
+      channel: string;
+      bottleneck: string;
+      field_ids: unknown;
+      akar_masalah: string | null;
+      gap_kompetitor: string | null;
+    }[]
+  >`select id, channel, bottleneck, field_ids, akar_masalah, gap_kompetitor
+      from strategi_diagnosa where strategi_id = ${id}
+     order by channel asc`;
+
+  const quickWinRows = await sql<
+    {
+      id: string;
+      aksi: string;
+      channel: string;
+      pic_divisi: string;
+      dampak_diharapkan: string;
+      urutan: number;
+    }[]
+  >`select id, aksi, channel, pic_divisi, dampak_diharapkan, urutan
+      from strategi_quick_win where strategi_id = ${id}
+     order by urutan asc, id asc`;
+
+  const risikoStrukturalRows = await sql<
+    { id: string; risiko: string; urutan: number }[]
+  >`select id, risiko, urutan from strategi_risiko_struktural
+     where strategi_id = ${id} order by urutan asc, id asc`;
+
+  const prasyaratRows = await sql<
+    {
+      id: string;
+      item: string;
+      pic_klien: string;
+      deadline: string | Date | null;
+      urutan: number;
+    }[]
+  >`select id, item, pic_klien, deadline, urutan
+      from strategi_prasyarat_klien where strategi_id = ${id}
+     order by urutan asc, id asc`;
+
   const targetRows = await sql<
     {
       channel: string;
@@ -1283,6 +1513,34 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
       memblokir: a.memblokir,
       targetTanggalBeres: dateOrNull(a.target_tanggal_beres),
       catatan: a.catatan,
+    })),
+    diagnosa: diagnosaRows.map((d) => ({
+      id: Number(d.id),
+      channel: d.channel,
+      bottleneck: d.bottleneck as BottleneckKind,
+      fieldIds: strArray(d.field_ids),
+      akarMasalah: d.akar_masalah,
+      gapKompetitor: d.gap_kompetitor,
+    })),
+    quickWins: quickWinRows.map((q) => ({
+      id: Number(q.id),
+      aksi: q.aksi,
+      channel: q.channel,
+      picDivisi: q.pic_divisi,
+      dampakDiharapkan: q.dampak_diharapkan,
+      urutan: q.urutan,
+    })),
+    risikoStruktural: risikoStrukturalRows.map((r) => ({
+      id: Number(r.id),
+      risiko: r.risiko,
+      urutan: r.urutan,
+    })),
+    prasyaratKlien: prasyaratRows.map((p) => ({
+      id: Number(p.id),
+      item: p.item,
+      picKlien: p.pic_klien,
+      deadline: dateOrNull(p.deadline),
+      urutan: p.urutan,
     })),
     targets: targetRows.map((t) => ({
       channel: t.channel,
@@ -1932,6 +2190,161 @@ export interface ChannelInput {
   kompetitorLebihBaik?: string[];
   kompetitorCatatan?: string | null;
   celahKompetitor?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Section C write path (A-07)
+// ---------------------------------------------------------------------------
+
+/**
+ * Input for one diagnosa row (C-1..C-4). Channel must be a channel already
+ * registered in the Strategi's `strategi_channel` table.
+ */
+export interface DiagnosaInput {
+  channel: string;
+  bottleneck: BottleneckKind;
+  /** Rule 6: at least one entry from VALID_BASELINE_FIELD_IDS. */
+  fieldIds: string[];
+  akarMasalah?: string | null;
+  gapKompetitor?: string | null;
+}
+
+export interface QuickWinInput {
+  aksi: string;
+  channel: string;
+  picDivisi: string;
+  dampakDiharapkan: string;
+  urutan?: number;
+}
+
+export interface RisikoStrukturalInput {
+  risiko: string;
+  urutan?: number;
+}
+
+export interface PrasyaratKlienInput {
+  item: string;
+  picKlien: string;
+  deadline?: string | null;
+  urutan?: number;
+}
+
+export interface DiagnosaPayload {
+  diagnosa: DiagnosaInput[];
+  quickWins: QuickWinInput[];
+  risikoStruktural: RisikoStrukturalInput[];
+  prasyaratKlien: PrasyaratKlienInput[];
+}
+
+/**
+ * saveDiagnosa replaces Section C (all four sub-sections) atomically.
+ *
+ * Validation rules enforced here:
+ * - Rule 6 (§4): each diagnosa row must cite ≥1 field-ID from
+ *   VALID_BASELINE_FIELD_IDS. This is validated at save time (not at submit)
+ *   so the AM gets immediate feedback rather than discovering the problem
+ *   only when they hit the submit button.
+ * - Each diagnosa channel must be a channel registered in this Strategi
+ *   (prevents dangling references if a channel is removed).
+ * - No duplicate channel in the diagnosa list.
+ *
+ * All fields other than `bottleneck` + `fieldIds` are NULLable here because
+ * §7 requires autosave every 20 s; completeness is checked at submit via
+ * `checkCompleteness`.
+ */
+export async function saveDiagnosa(
+  sql: Sql,
+  actor: Actor,
+  id: string,
+  payload: DiagnosaPayload,
+): Promise<StrategiDetail> {
+  return withTransaction(sql, async (tx) => {
+    await requireDraftAndWriter(tx, actor, id);
+
+    // Fetch the contracted channels for this Strategi.
+    const channelRows = await tx<{ channel: string }[]>`
+      select channel from strategi_channel where strategi_id = ${id}`;
+    const validChannels = new Set(channelRows.map((c) => c.channel));
+
+    // Validate diagnosa inputs before any writes.
+    const seenDiagnosaChannels = new Set<string>();
+    for (const d of payload.diagnosa) {
+      if (!validChannels.has(d.channel)) {
+        throw new ValidationError(
+          `[channel '${d.channel}' tidak terdaftar di Strategi ini]`,
+        );
+      }
+      if (seenDiagnosaChannels.has(d.channel)) {
+        throw new ValidationError(
+          `[diagnosa untuk channel '${d.channel}' didaftarkan lebih dari sekali]`,
+        );
+      }
+      seenDiagnosaChannels.add(d.channel);
+
+      // Rule 6: at least one valid baseline field-ID.
+      if (d.fieldIds.length === 0) {
+        throw new ValidationError(MSG_DIAGNOSA_FIELD_ID_REQUIRED);
+      }
+      for (const fid of d.fieldIds) {
+        if (!VALID_BASELINE_FIELD_IDS.has(fid)) {
+          throw new ValidationError(MSG_DIAGNOSA_INVALID_FIELD_ID);
+        }
+      }
+    }
+
+    // Replace diagnosa — UPSERT on (strategi_id, channel).
+    await tx`delete from strategi_diagnosa where strategi_id = ${id}`;
+    for (const d of payload.diagnosa) {
+      await tx`
+        insert into strategi_diagnosa
+          (strategi_id, channel, bottleneck, field_ids, akar_masalah, gap_kompetitor, created_by)
+        values (
+          ${id}, ${d.channel}, ${d.bottleneck},
+          ${JSON.stringify(d.fieldIds)}::jsonb,
+          ${nullIfBlank(d.akarMasalah)},
+          ${nullIfBlank(d.gapKompetitor)},
+          ${actor.employeeId}
+        )`;
+    }
+
+    // Replace quick wins.
+    await tx`delete from strategi_quick_win where strategi_id = ${id}`;
+    for (const [i, q] of payload.quickWins.entries()) {
+      await tx`
+        insert into strategi_quick_win
+          (strategi_id, aksi, channel, pic_divisi, dampak_diharapkan, urutan, created_by)
+        values (
+          ${id}, ${q.aksi.trim()}, ${q.channel.trim()},
+          ${q.picDivisi.trim()}, ${q.dampakDiharapkan.trim()},
+          ${q.urutan ?? i}, ${actor.employeeId}
+        )`;
+    }
+
+    // Replace risiko struktural.
+    await tx`delete from strategi_risiko_struktural where strategi_id = ${id}`;
+    for (const [i, r] of payload.risikoStruktural.entries()) {
+      await tx`
+        insert into strategi_risiko_struktural
+          (strategi_id, risiko, urutan, created_by)
+        values (${id}, ${r.risiko.trim()}, ${r.urutan ?? i}, ${actor.employeeId})`;
+    }
+
+    // Replace prasyarat klien.
+    await tx`delete from strategi_prasyarat_klien where strategi_id = ${id}`;
+    for (const [i, p] of payload.prasyaratKlien.entries()) {
+      const dl = nullIfBlank(p.deadline);
+      await tx`
+        insert into strategi_prasyarat_klien
+          (strategi_id, item, pic_klien, deadline, urutan, created_by)
+        values (
+          ${id}, ${p.item.trim()}, ${p.picKlien.trim()},
+          ${dl}::date,
+          ${p.urutan ?? i}, ${actor.employeeId}
+        )`;
+    }
+
+    return loadDetail(tx, await loadStrategiRow(tx, id));
+  });
 }
 
 /**
@@ -2844,6 +3257,55 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
     out.push({ kode: 'H-1', pesan: MSG_RISK_MIN });
   }
 
+  // -----------------------------------------------------------------------
+  // Section C (A-07)
+  // -----------------------------------------------------------------------
+  // C-1..C-4: every contracted channel must have a diagnosa row, and each
+  // diagnosa must have an akar_masalah (C-3) and gap_kompetitor (C-4) filled.
+  // The Rule 6 field-ID check happens at save time (saveDiagnosa), not here —
+  // an invalid field-ID cannot be stored, so if a diagnosa row exists its
+  // field_ids are already valid.
+  const diagnosaRows = await sql<
+    { channel: string; akar_masalah: string | null; gap_kompetitor: string | null }[]
+  >`select channel, akar_masalah, gap_kompetitor from strategi_diagnosa
+     where strategi_id = ${id}`;
+  const adaDiagnosa = new Map(diagnosaRows.map((d) => [d.channel, d]));
+
+  for (const c of channels) {
+    const d = adaDiagnosa.get(c.channel);
+    if (!d) {
+      out.push({ kode: `C-1/${c.channel}`, pesan: MSG_DIAGNOSA_MISSING });
+    } else {
+      if (!d.akar_masalah || d.akar_masalah.trim() === '') {
+        out.push({ kode: `C-3/${c.channel}`, pesan: MSG_KONTEKS_INCOMPLETE });
+      }
+      if (!d.gap_kompetitor || d.gap_kompetitor.trim() === '') {
+        out.push({ kode: `C-4/${c.channel}`, pesan: MSG_KONTEKS_INCOMPLETE });
+      }
+    }
+  }
+
+  // C-5: at least QUICK_WIN_MIN quick wins (PRD says "W (min 3)").
+  const qwCount = await sql<{ n: number }[]>`
+    select count(*)::int as n from strategi_quick_win where strategi_id = ${id}`;
+  if (qwCount[0].n < QUICK_WIN_MIN) {
+    out.push({ kode: 'C-5', pesan: MSG_QUICK_WIN_MIN });
+  }
+
+  // C-6: at least one structural risk (W).
+  const riskStrCount = await sql<{ n: number }[]>`
+    select count(*)::int as n from strategi_risiko_struktural where strategi_id = ${id}`;
+  if (riskStrCount[0].n === 0) {
+    out.push({ kode: 'C-6', pesan: MSG_RISIKO_STRUKTURAL_REQUIRED });
+  }
+
+  // C-7: at least one client prerequisite (W).
+  const preqCount = await sql<{ n: number }[]>`
+    select count(*)::int as n from strategi_prasyarat_klien where strategi_id = ${id}`;
+  if (preqCount[0].n === 0) {
+    out.push({ kode: 'C-7', pesan: MSG_PRASYARAT_KLIEN_REQUIRED });
+  }
+
   return out;
 }
 
@@ -3382,6 +3844,34 @@ async function copyChildren(
       (strategi_id, risiko, dampak, kemungkinan, mitigasi, pic, urutan, created_by)
     select ${toId}, risiko, dampak, kemungkinan, mitigasi, pic, urutan, ${actorId}
       from strategi_risk where strategi_id = ${fromId}`;
+
+  // Section C (A-07) — diagnosa and supporting lists travel with the revision
+  // for the same reason as A-15/A-16: the AM revisits the strategy, not the
+  // client's situation. A revision that inherits a blank Section C would force
+  // re-typing content the AM may not want to change.
+  await tx`
+    insert into strategi_diagnosa
+      (strategi_id, channel, bottleneck, field_ids, akar_masalah, gap_kompetitor, created_by)
+    select ${toId}, channel, bottleneck, field_ids, akar_masalah, gap_kompetitor, ${actorId}
+      from strategi_diagnosa where strategi_id = ${fromId}`;
+
+  await tx`
+    insert into strategi_quick_win
+      (strategi_id, aksi, channel, pic_divisi, dampak_diharapkan, urutan, created_by)
+    select ${toId}, aksi, channel, pic_divisi, dampak_diharapkan, urutan, ${actorId}
+      from strategi_quick_win where strategi_id = ${fromId}`;
+
+  await tx`
+    insert into strategi_risiko_struktural
+      (strategi_id, risiko, urutan, created_by)
+    select ${toId}, risiko, urutan, ${actorId}
+      from strategi_risiko_struktural where strategi_id = ${fromId}`;
+
+  await tx`
+    insert into strategi_prasyarat_klien
+      (strategi_id, item, pic_klien, deadline, urutan, created_by)
+    select ${toId}, item, pic_klien, deadline, urutan, ${actorId}
+      from strategi_prasyarat_klien where strategi_id = ${fromId}`;
 }
 
 /** transitionError maps an engine rejection to the shared error taxonomy. */
