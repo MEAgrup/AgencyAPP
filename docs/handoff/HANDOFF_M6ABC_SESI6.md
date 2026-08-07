@@ -25,11 +25,14 @@
 
 **Tidak ada pekerjaan yang belum ter-push.** Working tree bersih; lokal ≡ remote.
 
-⚠️ **Ronde berikutnya belum pasti.** Backlog menulis bahwa pemilik menjawab O56
-pada 2026-08-07 ("kerjakan CACAT 🔴 O52/O51/O42 dulu, bukan A-13 / B-01"), **tapi
-`DECISIONS.md` tidak memuat entri padanannya** — dan di sanalah keputusan hidup
-(CLAUDE.md "Where truth lives"). Klaim itu **belum terverifikasi**. Lihat §7
-pertanyaan #1: konfirmasi ini dulu sebelum memilih pekerjaan ronde berikutnya.
+✅ **Ronde berikutnya SUDAH pasti: CACAT 🔴, bukan fitur M6.** Pemilik
+mengonfirmasi O56 pada 2026-08-07 — kerjakan **O52 → O51 → O42/O44-asal** lebih
+dulu; A-08/A-09/A-13 dan B-01 **ditunda**. Keputusannya kini tercatat di
+`DECISIONS.md` §Decided; sebelumnya klaim itu hanya ada di backlog tanpa entri
+padanan, dan celah itu ditutup. O56 ditandai RESOLVED di §Open.
+
+Konsekuensi yang diterima pemilik: M6A membeku di **57%** dan M6B di **8%**
+selama ronde cacat berjalan.
 
 ## 1. Yang mendarat sesi ini — B-00 / O57
 
@@ -210,9 +213,9 @@ menunggu data live, dan **tidak** perlu Anda jawab.
 
 | # | Pertanyaan | Kenapa mendesak |
 |---|---|---|
-| **1** | ⚠️ **Benarkah Anda memutuskan "kerjakan CACAT 🔴 (O52/O51/O42) dulu, bukan A-13 / B-01"?** | Klaim ini ada di **backlog** tapi **tidak** di `DECISIONS.md`. Sesi ini menolak memperlakukannya sebagai fakta, dan menolak menulis entri keputusan atas nama Anda untuk sesuatu yang tidak disaksikannya. Kalau **ya** → tulis entrinya, ronde berikutnya = cacat. Kalau **tidak** → ronde berikutnya kemungkinan A-08/A-09 |
-| **2** | **PR #104 — merge sekarang?** | Hijau 5/5 dan base terkini. Semua pekerjaan M6 berikutnya menumpuk di atasnya |
-| **3** | **PR #91 (M5-OA-7) — kapan dijadwalkan?** | Makin lama menunggu, makin jauh gate-nya tertinggal (sudah 14→16 mesin, 19→31 event). Utangnya bertambah sendiri |
+| ~~1~~ | ✅ **TERJAWAB 2026-08-07 — ya, cacat dulu.** Entri `DECISIONS.md` sudah ditulis; O56 RESOLVED | — |
+| ~~2~~ | ✅ **TERJAWAB — di-merge 2026-08-07** | — |
+| ~~3~~ | ✅ **TERJAWAB — dikerjakan 2026-08-07**, sesi yang sama | — |
 
 ### 7.2 Cacat 🔴 yang menunggu pilihan Anda (a) atau (b)
 
