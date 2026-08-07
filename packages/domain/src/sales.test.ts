@@ -30,6 +30,7 @@ import {
   listAttempts,
   markContacted,
   markLost,
+  MAX_SERVICES,
   NotFoundError,
   MSG_MAX_SERVICES,
   NotClosableError,
@@ -44,6 +45,7 @@ import {
   PRICING_PASSTHROUGH,
   type ProposalLine,
   resubmitNegotiation,
+  reviseServices,
   type ServiceLine,
   setNotQualified,
   submitNegotiation,
@@ -156,11 +158,17 @@ describe('buildQuote', () => {
     expect(q.lines).toHaveLength(3);
   });
 
-  it('rejects an empty selection and enforces the 1..5 cap (verbatim BI)', () => {
+  it('rejects an empty selection and enforces the 1..MAX_SERVICES cap (verbatim BI)', () => {
     expect(() => buildQuote([])).toThrow(IncompleteError);
-    const six = Array.from({ length: 6 }, (_, i) => line(`SVC-${i}`, '100000', 'flat Rp 10.000'));
-    expect(() => buildQuote(six)).toThrow(TooManyServicesError);
-    expect(() => buildQuote(six)).toThrow(MSG_MAX_SERVICES);
+    // The cap is 10 since the owner's 2026-08-07 QA revisi: ten lines must PASS
+    // and the eleventh must carry the verbatim message. Asserting both sides is
+    // what stops a future edit from moving the number without moving the message.
+    const ten = Array.from({ length: MAX_SERVICES }, (_, i) => line(`SVC-${i}`, '100000', 'flat Rp 10.000'));
+    expect(() => buildQuote(ten)).not.toThrow();
+    const eleven = [...ten, line('SVC-over', '100000', 'flat Rp 10.000')];
+    expect(() => buildQuote(eleven)).toThrow(TooManyServicesError);
+    expect(() => buildQuote(eleven)).toThrow(MSG_MAX_SERVICES);
+    expect(MSG_MAX_SERVICES).toBe('[maksimal pilih 10 jasa saja!]');
   });
 });
 
@@ -411,9 +419,24 @@ describeDb('submitQualifiedForm', () => {
     expect(audit[0].n).toBe(1);
   });
 
-  it('rejects > 5 services (verbatim BI) without persisting', async () => {
+  it(`accepts exactly ${MAX_SERVICES} services (the raised cap really is usable)`, async () => {
     const ids: string[] = [];
-    for (let i = 0; i < 6; i++) ids.push(await seedService(`SVC-ZZ-CAP-${i}`));
+    for (let i = 0; i < MAX_SERVICES; i++) ids.push(await seedService(`SVC-ZZ-TEN-${i}`, '1000000.00'));
+    const attemptId = await contactedAttempt(budi());
+    const res = await submitQualifiedForm(sql, budi(), attemptId, {
+      namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta', linkToko: 'https://shopee/alpha',
+      kategori: 'Fashion', platform: 'Shopee', gmvBaseline: '50000000', targetGmv: '80000000',
+      services: ids.map((id) => ({ masterServiceId: id, quantity: 1 })),
+    });
+    expect(res.ok).toBe(true);
+    const lines = await sql<{ n: number }[]>`
+      select count(*)::int as n from qualified_form_services where attempt_id = ${attemptId}`;
+    expect(lines[0].n).toBe(MAX_SERVICES);
+  });
+
+  it(`rejects > ${MAX_SERVICES} services (verbatim BI) without persisting`, async () => {
+    const ids: string[] = [];
+    for (let i = 0; i <= MAX_SERVICES; i++) ids.push(await seedService(`SVC-ZZ-CAP-${i}`));
     const attemptId = await contactedAttempt(budi());
     await expect(
       submitQualifiedForm(sql, budi(), attemptId, {
@@ -426,6 +449,27 @@ describeDb('submitQualifiedForm', () => {
     expect(attempt[0].status).toBe('Contacted');
     const form = await sql<{ n: number }[]>`select count(*)::int as n from qualified_forms where attempt_id = ${attemptId}`;
     expect(form[0].n).toBe(0);
+  });
+
+  it('rejects the SAME service twice (it would multiply the closing join)', async () => {
+    // Two snapshot rows for one service make closing's join to
+    // qualified_form_services return two rows per proposal line — duplicated
+    // Service rows and an inflated total_agreed_value, with no error raised.
+    // Quantity is the field for "two of this service".
+    const svc = await seedService('SVC-ZZ-DUP');
+    const attemptId = await contactedAttempt(budi());
+    await expect(
+      submitQualifiedForm(sql, budi(), attemptId, {
+        namaPic: 'Ibu Alpha', toko: 'Alpha Digital', kota: 'Jakarta', linkToko: 'https://shopee/alpha',
+        kategori: 'Fashion', platform: 'Shopee', gmvBaseline: '1', targetGmv: '1',
+        services: [{ masterServiceId: svc, quantity: 1 }, { masterServiceId: svc, quantity: 1 }],
+      }),
+    ).rejects.toBeInstanceOf(IncompleteError);
+    const attempt = await sql<{ status: string }[]>`select status from prospect_attempts where id = ${attemptId}`;
+    expect(attempt[0].status).toBe('Contacted');
+    const lines = await sql<{ n: number }[]>`
+      select count(*)::int as n from qualified_form_services where attempt_id = ${attemptId}`;
+    expect(lines[0].n).toBe(0);
   });
 
   it('rejects an incomplete client draft with the exact BI message', async () => {
@@ -544,6 +588,133 @@ describeDb('negotiation', () => {
     const accepted = await acceptCounter(sql, budi(), attemptId);
     expect(accepted.ok).toBe(true);
     expect(await status(attemptId)).toBe('Negotiation - Approved');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Edit Service before closing (M0 §5.1, owner QA revisi 2026-08-07).
+// ---------------------------------------------------------------------------
+describeDb('reviseServices — Edit Service sebelum closing', () => {
+  const status = async (attemptId: string): Promise<string> =>
+    (await sql<{ status: string }[]>`select status from prospect_attempts where id = ${attemptId}`)[0].status;
+
+  const latestLines = async (attemptId: string) =>
+    sql<{ master_service_id: string; proposed_price: string; commission_rule: string }[]>`
+      select npl.master_service_id, npl.proposed_price, npl.commission_rule
+      from negotiation_proposal_lines npl
+      join negotiation_proposals np on np.id = npl.proposal_id
+      where np.attempt_id = ${attemptId}
+        and np.version_no = (select max(version_no) from negotiation_proposals where attempt_id = ${attemptId})
+      order by npl.id`;
+
+  it('swaps the offered service for a different one at standard terms, staying ready to close', async () => {
+    // This is the reported case: the deal that was negotiated is NOT the service
+    // that was offered at Qualified.
+    const offered = await seedService('SVC-ZZ-REV-OFFERED');
+    const taken = await seedService('SVC-ZZ-REV-TAKEN', '6000000.00', '12% of standard price');
+    const attemptId = await autoApprovedAttempt(budi(), offered);
+
+    const res = await reviseServices(sql, budi(), attemptId, [{ masterServiceId: taken, quantity: 1 }]);
+    expect(res.ok).toBe(true);
+    // Standard terms bypass the superior, exactly as the no-negotiation flow does.
+    expect(await status(attemptId)).toBe('Negotiation - Auto Approved');
+
+    const lines = await latestLines(attemptId);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].master_service_id).toBe(taken);
+    // Priced by the SERVER from the MSL — the caller sent no rupiah at all.
+    expect(money.parse(lines[0].proposed_price)).toBe(money.parse('6000000'));
+    expect(lines[0].commission_rule).toBe('12% of standard price');
+
+    // A new version, and the previous one is still there (immutable history).
+    const versions = await sql<{ n: number }[]>`
+      select count(*)::int as n from negotiation_proposals where attempt_id = ${attemptId}`;
+    expect(versions[0].n).toBe(2);
+  });
+
+  it('the revised set is what closing turns into Services (name + price from the MSL)', async () => {
+    // The regression this guards: a service the Qualified Form never offered has no
+    // qualified_form_services row, so closing used to write a NAMELESS Service with
+    // master_version_no 0 and requires_strategy_plan silently false.
+    const offered = await seedService('SVC-ZZ-REV-CLOSE-A');
+    const added = await seedService('SVC-ZZ-REV-CLOSE-B', '7000000.00');
+    await sql`update master_service_versions set requires_strategy_plan = true where service_id = ${added}`;
+    const attemptId = await autoApprovedAttempt(budi(), offered);
+
+    await reviseServices(sql, budi(), attemptId, [
+      { masterServiceId: offered, quantity: 1 },
+      { masterServiceId: added, quantity: 1 },
+    ]);
+    const closed = await close(sql, budi(), attemptId, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+
+    const svcRows = await sql<{
+      master_service_id: string; name: string; master_version_no: number; requires_strategy_plan: boolean;
+    }[]>`
+      select master_service_id, name, master_version_no, requires_strategy_plan
+      from services where client_id = ${closed.clientId} order by master_service_id`;
+    expect(svcRows).toHaveLength(2);
+    for (const r of svcRows) {
+      expect(r.name).not.toBe(''); // the nameless-Service bug
+      expect(r.master_version_no).toBe(1);
+    }
+    // The added service's M6 plan gate survived the closing.
+    const addedRow = svcRows.find((r) => r.master_service_id === added);
+    expect(addedRow?.requires_strategy_plan).toBe(true);
+    // Transaction total = Σ of the REVISED set (9jt + 7jt), not the original offer.
+    const trx = await sql<{ total_agreed_value: string }[]>`
+      select total_agreed_value from transactions where id = ${closed.transactionId}`;
+    expect(money.parse(trx[0].total_agreed_value)).toBe(money.parse('16000000'));
+  });
+
+  it('a custom price re-opens the superior approval (an approved deal is not silently re-priced)', async () => {
+    const svc = await seedService('SVC-ZZ-REV-CUSTOM');
+    const attemptId = await qualifiedAttempt(budi(), svc);
+    await submitNegotiation(sql, budi(), attemptId, [
+      { masterServiceId: svc, proposedPrice: '8000000', commissionRule: '10% of standard price' },
+    ], false);
+    await decideNegotiation(sql, salesLead(), attemptId, DECISION_APPROVE);
+    expect(await status(attemptId)).toBe('Negotiation - Approved');
+
+    const res = await reviseServices(sql, budi(), attemptId, [
+      { masterServiceId: svc, proposedPrice: '7000000', commissionRule: '10% of standard price' },
+    ]);
+    expect(res.ok).toBe(true);
+    expect(await status(attemptId)).toBe('Negotiation - Pending Approval');
+
+    // The superior was notified about the fresh version.
+    const notif = await sql<{ n: number }[]>`
+      select count(*)::int as n from notifications
+      where entity_id = ${attemptId} and event_type = 'm0.negotiation.pending_approval'`;
+    expect(notif[0].n).toBeGreaterThanOrEqual(2); // the original submit + this revision
+  });
+
+  it('refuses an empty set, a duplicated service, and more than the cap', async () => {
+    const svc = await seedService('SVC-ZZ-REV-GATE');
+    const attemptId = await autoApprovedAttempt(budi(), svc);
+    await expect(reviseServices(sql, budi(), attemptId, [])).rejects.toBeInstanceOf(IncompleteError);
+    await expect(reviseServices(sql, budi(), attemptId, [
+      { masterServiceId: svc, quantity: 1 }, { masterServiceId: svc, quantity: 2 },
+    ])).rejects.toBeInstanceOf(IncompleteError);
+    const many = Array.from({ length: MAX_SERVICES + 1 }, (_, i) => ({ masterServiceId: `SVC-ZZ-REV-N-${i}` }));
+    await expect(reviseServices(sql, budi(), attemptId, many)).rejects.toThrow(MSG_MAX_SERVICES);
+    // Nothing was written by any of the three refusals.
+    const versions = await sql<{ n: number }[]>`
+      select count(*)::int as n from negotiation_proposals where attempt_id = ${attemptId}`;
+    expect(versions[0].n).toBe(1);
+  });
+
+  it('is refused outside the pre-closing window, and denied to a non-owner staff', async () => {
+    const svc = await seedService('SVC-ZZ-REV-WINDOW');
+    const stillQualified = await qualifiedAttempt(budi(), svc);
+    await expect(reviseServices(sql, budi(), stillQualified, [{ masterServiceId: svc, quantity: 1 }]))
+      .rejects.toBeInstanceOf(NotClosableError);
+
+    const approved = await autoApprovedAttempt(budi(), svc);
+    await expect(reviseServices(sql, andi(), approved, [{ masterServiceId: svc, quantity: 1 }]))
+      .rejects.toBeInstanceOf(ForbiddenError);
   });
 });
 

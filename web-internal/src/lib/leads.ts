@@ -57,6 +57,57 @@ export interface RegisterLeadResult {
   notice?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Pendaftaran lead BATCH (QA revisi 2026-08-07) — POST /leads/batch.
+//
+// Satu Source (dan satu keputusan Origin Campaign) untuk maksimal 5 prospek;
+// tiap baris tetap melewati pintu dedup M1 §5 sendiri, jadi laporannya per baris:
+// baris yang bentrok ditolak dengan pesan BI verbatim sementara baris lain tetap
+// terdaftar. Berbeda dari /leads/bulk (pintu import Marketing) karena di sini
+// setiap lead melahirkan PRSP milik si sales.
+// ---------------------------------------------------------------------------
+
+// Satu baris prospek — Source/Campaign ada di level batch, bukan per baris.
+export interface BatchProspectInput {
+  lead_name: string;
+  phone_number: string;
+  email?: string;
+}
+
+// Body POST /leads/batch.
+export interface BatchRegisterInput {
+  source: string;
+  campaign_id?: string;
+  outside_campaign?: boolean;
+  prospects: BatchProspectInput[];
+}
+
+// Verdict per baris — `notice` = pesan co-pursuit, `reason` = alasan penolakan.
+export interface BatchRegisterRowResult {
+  row_number: number;
+  lead_name: string;
+  phone_number: string;
+  registered: boolean;
+  lead_id: string;
+  attempt_id: string;
+  notice: string;
+  reason: string;
+}
+
+// Response POST /leads/batch.
+export interface BatchRegisterReport {
+  registered: number;
+  rejected: number;
+  summary: string;
+  rows: BatchRegisterRowResult[];
+  rejections: BatchRegisterRowResult[];
+}
+
+// Batas prospek per pendaftaran — cermin leads.MAX_REGISTER_BATCH di domain.
+// Server tetap otoritasnya (`[maksimal 5 lead per pendaftaran!]`); ini hanya
+// yang membuat tombol "Tambah Prospek" berhenti di baris kelima.
+export const MAX_REGISTER_BATCH = 5;
+
 // One row for POST /leads/bulk — mirrors module1_leads.BulkRow.
 export interface BulkRow {
   lead_name: string;
@@ -198,6 +249,10 @@ export const SOURCES = [
 
 export function registerLead(input: RegisterLeadInput): Promise<RegisterLeadResult> {
   return api.post<RegisterLeadResult>('/leads', input);
+}
+
+export function registerLeadsBatch(input: BatchRegisterInput): Promise<BatchRegisterReport> {
+  return api.post<BatchRegisterReport>('/leads/batch', input);
 }
 
 export function bulkImportLeads(campaignId: string | undefined, rows: BulkRow[]): Promise<BulkReport> {

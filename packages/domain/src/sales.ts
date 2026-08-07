@@ -18,7 +18,7 @@
  *     All rupiah math is exact via @cdps/core money (bigint minor units).
  *   - IDs are not minted here (attempts already exist); status is written ONLY
  *     through sm_transition; every write appends to the audit log.
- *   - Exact BI `[...]` messages: the 1..5 cap message and the house default.
+ *   - Exact BI `[...]` messages: the 1..MAX_SERVICES cap message and the house default.
  *
  * Deferred to later slices (kept out per build order): Negotiation + Closing
  * (module0_sales negotiation/closing/allocation.go) and the MSL admin CRUD
@@ -56,11 +56,19 @@ export const STATUS_NEG_REJECTED = 'Negotiation - Rejected';
 export const STATUS_CLOSED_SUCCESS = 'Closed-Success';
 export const STATUS_CLOSED_LOST = 'Closed-Lost';
 
-/** Qualified Lead Form service cap (M0 §4.3). */
-export const MAX_SERVICES = 5;
+/**
+ * Qualified Lead Form service cap (M0 §4.3).
+ *
+ * Raised 5 → 10 by the owner on 2026-08-07 (QA revisi, `docs/DECISIONS.md`): real
+ * bundles regularly exceed five lines, and a salesperson who hit the cap had no
+ * legal way to quote the deal. The cap itself stays — it is what keeps the quote a
+ * quote — and it is enforced in three places (buildQuote, submitQualifiedForm,
+ * writeProposal), all reading THIS constant so they cannot drift apart.
+ */
+export const MAX_SERVICES = 10;
 
 /** Exact BI message for the over-limit service selection (M0 §4.3). */
-export const MSG_MAX_SERVICES = '[maksimal pilih 5 jasa saja!]';
+export const MSG_MAX_SERVICES = '[maksimal pilih 10 jasa saja!]';
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -618,6 +626,19 @@ export async function submitQualifiedForm(
   if (form.services.length > MAX_SERVICES) {
     throw new TooManyServicesError();
   }
+  // The same service twice is refused HERE, at the door that creates the snapshot.
+  // Closing joins each proposal line to `qualified_form_services` on
+  // master_service_id, so a duplicated snapshot row multiplies that join: the deal
+  // closes with duplicated Service rows and an inflated total_agreed_value, with no
+  // error anywhere. Quantity is the field for "two of this service", not a second row.
+  const picked = new Set<string>();
+  for (const sel of form.services) {
+    const sid = (sel.masterServiceId ?? '').trim();
+    if (sid === '' || picked.has(sid)) {
+      throw new IncompleteError();
+    }
+    picked.add(sid);
+  }
 
   // Resolve MSL versions + compute subtotals BEFORE the write transaction; the
   // pinned snapshot (params + subtotal) is what gets persisted.
@@ -731,21 +752,65 @@ export const DECISION_APPROVE = 'approve';
 export const DECISION_REVISE = 'revise';
 export const DECISION_REJECT = 'reject';
 
-/** One negotiated service line (custom price / commission / payment terms). */
+/**
+ * One service line of a negotiation proposal.
+ *
+ * TWO shapes, and which one it is decides everything downstream:
+ *
+ *   - **standard** — `proposedPrice` and `commissionRule` both empty. The line is
+ *     priced by the SERVER from the MSL version effective now (calculator subtotal
+ *     + the version's own commission_rule), exactly as the Qualified Form is. This
+ *     is the shape a newly ADDED service arrives in: the client sends an id and a
+ *     quantity, never a price, so money math stays server-side (CLAUDE.md #4/#7).
+ *   - **custom** — an explicit `proposedPrice` (and `commissionRule`). This is a
+ *     negotiated term and therefore needs the superior (M0 §5).
+ *
+ * `quantity` / `amount` feed the calculator and are read for STANDARD lines only;
+ * a custom line already carries its agreed rupiah value.
+ */
 export interface ProposalLine {
   masterServiceId: string;
-  proposedPrice: string;
-  commissionRule: string;
+  proposedPrice?: string;
+  commissionRule?: string;
   paymentTerms?: string;
+  /** calculator quantity for a standard line (omitted / 0 defaults to 1). */
+  quantity?: number;
+  /** passthrough rupiah nominal for a standard line in passthrough mode. */
+  amount?: string;
 }
 
 /**
- * submitNegotiation opens the negotiation from a Qualified attempt. `noNego=true`
- * takes the standard terms (the Qualified Form snapshot's pinned subtotals)
- * straight to Negotiation - Auto Approved (bypasses the superior). Otherwise the
- * custom lines are versioned (NEG-) and routed to the superior as Negotiation -
- * Pending Approval, firing the pending-approval notification. Owner / Sales Lead
- * / Director only.
+ * isCustomLine reports whether a line carries negotiated terms (an explicit price
+ * or commission rule) rather than standard MSL terms. This single predicate is what
+ * routes a submission: standard-only may bypass the superior (§5 non-negotiation),
+ * anything custom may not.
+ */
+export function isCustomLine(l: ProposalLine): boolean {
+  return (l.proposedPrice ?? '').trim() !== '' || (l.commissionRule ?? '').trim() !== '';
+}
+
+/** hasCustomLine reports whether ANY line in the set carries negotiated terms. */
+export function hasCustomLine(lines: ProposalLine[]): boolean {
+  return lines.some(isCustomLine);
+}
+
+/**
+ * submitNegotiation opens the negotiation from a Qualified attempt.
+ *
+ * `noNego=true` is the §5 Non-Negotiation flow and goes straight to Negotiation -
+ * Auto Approved (bypasses the superior). Two sub-cases, both standard-terms-only:
+ *   - EMPTY `lines` — take the Qualified Form snapshot as it stands (its pinned
+ *     subtotals). This is the plain "client accepts the offer" path.
+ *   - NON-EMPTY `lines` — the §5 Flow step 1 "Service Selection & Confirmation"
+ *     screen: the salesperson deselected some offered services and/or added
+ *     others from the Master Service List. Every line must use standard terms, so
+ *     the server prices them from the MSL; a line carrying a custom price is
+ *     refused with CustomTermRequiresNegotiationError ("switch to the Negotiation
+ *     flow"), exactly as §5 rule 2 requires.
+ *
+ * Otherwise (`noNego=false`) the lines are versioned (NEG-) and routed to the
+ * superior as Negotiation - Pending Approval, firing the pending-approval
+ * notification. Owner / Sales Lead / Director only.
  */
 export async function submitNegotiation(
   sql: Sql,
@@ -755,7 +820,7 @@ export async function submitNegotiation(
   noNego: boolean,
   now: Date = new Date(),
 ): Promise<statemachine.TransitionResult> {
-  if (noNego && lines.length > 0) {
+  if (noNego && hasCustomLine(lines)) {
     throw new CustomTermRequiresNegotiationError();
   }
   if (!noNego && lines.length === 0) {
@@ -774,11 +839,75 @@ export async function submitNegotiation(
     if (!result.ok) {
       return result;
     }
-    const proposalLines = noNego ? await standardLines(tx, attemptId) : lines;
-    await writeProposal(tx, ex, actor, attemptId, proposalLines, now);
+    const proposalLines = noNego && lines.length === 0 ? await standardLines(tx, attemptId) : lines;
+    await writeProposal(tx, ex, actor, attemptId, proposalLines, now, !noNego);
     if (!noNego) {
       await emitPendingApproval(ex.notify, actor, attemptId);
     }
+    return result;
+  });
+}
+
+/**
+ * reviseServices is the **Edit Service** door: the final service set often differs
+ * from what was offered at Qualified, and until now the only way to change it was
+ * to have never left the Qualified stage (owner QA revisi 2026-08-07,
+ * `docs/DECISIONS.md`).
+ *
+ * It appends a NEW proposal version carrying the revised set, from an
+ * already-approved attempt (`Negotiation - Approved` / `- Auto Approved`), i.e. in
+ * the window between approval and closing. Where it lands depends on the terms —
+ * the same rule §5 already applies to the first proposal, not a new one:
+ *   - every line STANDARD ⇒ status unchanged. Standard terms are what the
+ *     non-negotiation flow lets bypass the superior, so re-picking standard
+ *     services cannot need an approval the original selection did not.
+ *   - ANY line CUSTOM ⇒ back to `Negotiation - Pending Approval` and the superior
+ *     is notified. A salesperson must not be able to rewrite a price the superior
+ *     already approved; changing money re-opens the approval (edges added in
+ *     20260807040000_edit_service_reapproval.sql).
+ *
+ * The previous version is never mutated — the proposal chain is the immutable
+ * record of what changed and when (house rule #3), and `close` always reads the
+ * LATEST version, so the revision is what gets born as Services at closing.
+ *
+ * Owner / Sales Lead / Director only.
+ */
+export async function reviseServices(
+  sql: Sql,
+  actor: Actor,
+  attemptId: string,
+  lines: ProposalLine[],
+  now: Date = new Date(),
+): Promise<statemachine.TransitionResult> {
+  if (lines.length === 0) {
+    throw new IncompleteError();
+  }
+  const custom = hasCustomLine(lines);
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const a = await loadAttempt(tx, attemptId, true);
+    if (!canWriteAttempt(actor, a.ownerId)) {
+      throw new ForbiddenError();
+    }
+    // Only the pre-closing window. Anything else (still negotiating, already
+    // closed) has its own door, so refuse rather than silently writing a version
+    // nobody will read.
+    if (a.status !== STATUS_NEG_APPROVED && a.status !== STATUS_NEG_AUTO_APPROVE) {
+      throw new NotClosableError();
+    }
+    if (!custom) {
+      // Standard-only: no status move at all, so no sm_transition — the audit row
+      // written by writeProposal is the history of the change.
+      await writeProposal(tx, ex, actor, attemptId, lines, now, false);
+      const unmoved: statemachine.TransitionOk = { ok: true, from: a.status, to: a.status };
+      return unmoved;
+    }
+    const result = await attemptTransition(ex.sm, attemptId, STATUS_NEG_PENDING, actor);
+    if (!result.ok) {
+      return result;
+    }
+    await writeProposal(tx, ex, actor, attemptId, lines, now, true);
+    await emitPendingApproval(ex.notify, actor, attemptId);
     return result;
   });
 }
@@ -808,7 +937,7 @@ export async function resubmitNegotiation(
     if (!result.ok) {
       return result;
     }
-    await writeProposal(tx, ex, actor, attemptId, lines, now);
+    await writeProposal(tx, ex, actor, attemptId, lines, now, hasCustomLine(lines));
     await emitPendingApproval(ex.notify, actor, attemptId);
     return result;
   });
@@ -901,9 +1030,56 @@ async function standardLines(tx: Queryable, attemptId: string): Promise<Proposal
 }
 
 /**
- * writeProposal appends a new immutable proposal version + its lines. Each line's
- * proposed price and commission_rule are validated (money math is never guessed);
- * the 1..MAX_SERVICES cap holds here too.
+ * resolveProposalLine turns one input line into the (price, commission_rule) pair
+ * that gets persisted.
+ *
+ * A CUSTOM line is validated and passed through — its price is the negotiated
+ * number and this layer never second-guesses it. A STANDARD line (no price, no
+ * rule) is priced HERE, from the MSL version effective today: the calculator
+ * subtotal for the given quantity/nominal plus that version's own commission_rule.
+ * That is why an added service needs no price on the wire — the client cannot
+ * compute rupiah (CLAUDE.md #4), and a price it did compute could not be trusted.
+ */
+async function resolveProposalLine(
+  tx: Queryable,
+  l: ProposalLine,
+  now: Date,
+): Promise<{ price: string; rule: string }> {
+  if ((l.masterServiceId ?? '').trim() === '') {
+    throw new IncompleteError();
+  }
+  if (isCustomLine(l)) {
+    const price = (l.proposedPrice ?? '').trim();
+    const rule = (l.commissionRule ?? '').trim();
+    // A half-custom line (price without rule, or rule without price) is ambiguous:
+    // it names neither the standard terms nor a complete negotiated one.
+    if (price === '' || rule === '') {
+      throw new IncompleteError();
+    }
+    try {
+      money.parse(price);
+    } catch {
+      throw new IncompleteError();
+    }
+    parseCommissionRule(rule); // throws BadCommissionRuleError on a bad shape
+    return { price, rule };
+  }
+  const view = await effectiveAt(tx, l.masterServiceId, tz.dateString(now));
+  const qty = l.quantity && l.quantity > 0 ? BigInt(Math.trunc(l.quantity)) : 0n;
+  const line = lineFromView(view, qty, l.amount ?? '');
+  return { price: money.decimal(lineSubtotal(line)), rule: line.rule.raw };
+}
+
+/**
+ * writeProposal appends a new immutable proposal version + its lines. Custom lines
+ * are validated and standard ones priced from the MSL (resolveProposalLine); the
+ * 1..MAX_SERVICES cap holds here too.
+ *
+ * The SAME service twice in one set is refused. That is not tidiness: closing
+ * enriches each proposal line by joining `qualified_form_services` on
+ * master_service_id, so two rows for one service MULTIPLY the join — the deal
+ * closes with duplicated Service rows and an inflated `total_agreed_value`, silently.
+ * `submitQualifiedForm` refuses duplicates for the same reason.
  */
 async function writeProposal(
   tx: Queryable,
@@ -912,10 +1088,32 @@ async function writeProposal(
   attemptId: string,
   lines: ProposalLine[],
   now: Date,
+  // Whether the CALLER asked for negotiated terms. Passed in rather than derived
+  // from `lines`, because the no-negotiation path substitutes the Qualified
+  // snapshot (which carries pinned prices and would read as custom here) — the
+  // audit row must say what the salesperson actually did.
+  customTerms: boolean,
 ): Promise<void> {
   if (lines.length === 0 || lines.length > MAX_SERVICES) {
-    throw new IncompleteError();
+    throw lines.length > MAX_SERVICES ? new TooManyServicesError() : new IncompleteError();
   }
+  const seen = new Set<string>();
+  for (const l of lines) {
+    const id = (l.masterServiceId ?? '').trim();
+    if (id === '' || seen.has(id)) {
+      throw new IncompleteError();
+    }
+    seen.add(id);
+  }
+  // Resolve every line BEFORE the first insert: a bad line must not leave a
+  // half-written proposal version behind (the whole call is one transaction, but
+  // resolving first also means no NEG- id is burned on an invalid set).
+  const resolved: { line: ProposalLine; price: string; rule: string }[] = [];
+  for (const l of lines) {
+    const { price, rule } = await resolveProposalLine(tx, l, now);
+    resolved.push({ line: l, price, rule });
+  }
+
   const verRows = await tx<{ max: number | null }[]>`
     select max(version_no) as max from negotiation_proposals where attempt_id = ${attemptId}`;
   const version = Number(verRows[0]?.max ?? 0) + 1;
@@ -925,27 +1123,24 @@ async function writeProposal(
     insert into negotiation_proposals (id, attempt_id, version_no, proposed_by, created_by)
     values (${proposalId}, ${attemptId}, ${version}, ${actor.employeeId}, ${actor.employeeId})`;
 
-  for (const l of lines) {
-    if ((l.masterServiceId ?? '') === '' || (l.proposedPrice ?? '') === '' || (l.commissionRule ?? '') === '') {
-      throw new IncompleteError();
-    }
-    // Validate the proposed price and commission rule before persisting.
-    try {
-      money.parse(l.proposedPrice);
-    } catch {
-      throw new IncompleteError();
-    }
-    parseCommissionRule(l.commissionRule); // throws BadCommissionRuleError on a bad shape
+  for (const { line: l, price, rule } of resolved) {
     await tx`
       insert into negotiation_proposal_lines
         (proposal_id, master_service_id, proposed_price, commission_rule, payment_terms, created_by)
-      values (${proposalId}, ${l.masterServiceId}, ${l.proposedPrice}, ${l.commissionRule},
+      values (${proposalId}, ${l.masterServiceId}, ${price}, ${rule},
               ${nullString(l.paymentTerms)}, ${actor.employeeId})`;
   }
   await ex.audit.insertAudit({
     entityType: 'prospect_attempt', entityId: attemptId, actorEmployeeId: actor.employeeId,
     action: 'negotiation_version', beforeJson: null,
-    afterJson: { proposal_id: proposalId, version_no: version, lines: lines.length }, createdBy: actor.employeeId,
+    afterJson: {
+      proposal_id: proposalId, version_no: version, lines: lines.length,
+      // Which services the version carries, so a set CHANGE is readable from the
+      // log itself and not only by diffing two proposal rows (house rule #3).
+      services: resolved.map((r) => r.line.masterServiceId),
+      custom_terms: customTerms,
+    },
+    createdBy: actor.employeeId,
   });
 }
 
@@ -1299,9 +1494,19 @@ async function loadQualifiedForm(tx: Queryable, attemptId: string): Promise<Qual
 }
 
 /**
- * loadApprovedLines returns the latest proposal version's lines, enriched with
- * the pinned MSL version_no + name + requires_strategy_plan from the Qualified
- * Form snapshot.
+ * loadApprovedLines returns the latest proposal version's lines, enriched with the
+ * MSL name + version_no + requires_strategy_plan the closing needs.
+ *
+ * Enrichment has TWO sources, and the fallback is not cosmetic. A service the
+ * Qualified Form never offered — added later through the negotiation editor or the
+ * Edit Service door — has no `qualified_form_services` row, so joining only there
+ * produced `name = ''`, `master_version_no = 0` and `requires_strategy_plan =
+ * false`. That closes into a Client Record holding a NAMELESS Service whose M6
+ * plan gate is silently off. So:
+ *   - offered service ⇒ the version PINNED at Qualified (unchanged; that pin is
+ *     what makes the deal reproducible even after the MSL is re-versioned);
+ *   - added service   ⇒ the version effective when the proposal was made, which is
+ *     the version the price in that proposal was computed from.
  */
 async function loadApprovedLines(tx: Queryable, attemptId: string): Promise<ApprovedLine[]> {
   const rows = await tx<
@@ -1311,15 +1516,24 @@ async function loadApprovedLines(tx: Queryable, attemptId: string): Promise<Appr
     }[]
   >`
     select npl.master_service_id, npl.proposed_price, npl.commission_rule,
-           coalesce(qfs.name, '') as name,
-           coalesce(qfs.master_version_no, 0) as master_version_no,
-           coalesce(msv.requires_strategy_plan, false) as requires_strategy_plan
+           coalesce(qfs.name, at_proposal.name, '') as name,
+           coalesce(qfs.master_version_no, at_proposal.version_no, 0) as master_version_no,
+           coalesce(pinned.requires_strategy_plan, at_proposal.requires_strategy_plan, false)
+             as requires_strategy_plan
     from negotiation_proposal_lines npl
     join negotiation_proposals np on np.id = npl.proposal_id
     left join qualified_form_services qfs
            on qfs.attempt_id = np.attempt_id and qfs.master_service_id = npl.master_service_id
-    left join master_service_versions msv
-           on msv.service_id = npl.master_service_id and msv.version_no = qfs.master_version_no
+    left join master_service_versions pinned
+           on pinned.service_id = npl.master_service_id and pinned.version_no = qfs.master_version_no
+    left join lateral (
+      select msv.version_no, msv.name, msv.requires_strategy_plan
+      from master_service_versions msv
+      where msv.service_id = npl.master_service_id
+        and msv.effective_from <= (np.created_at at time zone 'Asia/Jakarta')::date
+      order by msv.effective_from desc, msv.version_no desc
+      limit 1
+    ) at_proposal on true
     where np.attempt_id = ${attemptId}
       and np.version_no = (select max(version_no) from negotiation_proposals where attempt_id = ${attemptId})
     order by npl.id`;
@@ -1599,11 +1813,20 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
       master_service_id: string; name: string; proposed_price: string;
       commission_rule: string; payment_terms: string | null;
     }[]>`
-      select npl.master_service_id, coalesce(qfs.name, '') as name,
+      select npl.master_service_id, coalesce(qfs.name, latest.name, '') as name,
              npl.proposed_price, npl.commission_rule, npl.payment_terms
       from negotiation_proposal_lines npl
       left join qualified_form_services qfs
              on qfs.attempt_id = ${id} and qfs.master_service_id = npl.master_service_id
+      -- A service ADDED during negotiation / Edit Service has no Qualified
+      -- snapshot row, so its name comes from the MSL. Without this the
+      -- negotiation panel renders a priced line with a blank service name.
+      left join lateral (
+        select msv.name from master_service_versions msv
+        where msv.service_id = npl.master_service_id
+        order by msv.effective_from desc, msv.version_no desc
+        limit 1
+      ) latest on true
       where npl.proposal_id = ${p.id}
       order by npl.id`;
     proposals.push({

@@ -99,12 +99,13 @@ Result: 46 `[Pool]` leads linked to `CMP-202603-0007`, Source = **Leads - Iklan*
 
 ---
 
-## 4. Feature: Lead Intake — Sales (single registration)
+## 4. Feature: Lead Intake — Sales (single + batch registration)
 
 ### Rules
 1. Behaves exactly as the reference **Lead Registration** — same mandatory fields, same dedup, `[Pending Validation] → [New Lead]`, **Prospect ID** on success, **exclusive single owner** (scouted leads are not contestable).
 2. Written into **this central table**, sharing the dedup namespace with Marketing-sourced leads.
 3. Source uses the reference list: **Scouting · Leads - Socmed · Leads - Iklan · Website · Referral (Affiliasi) · Broadcast · Event · Kulwa · Database · Others …**.
+4. **Batch: up to 5 prospects per submission under one Source** (owner decision 2026-08-07 — full rules in **M0 §3.1**, `docs/DECISIONS.md`). It is the SAME door: each row runs the §5 dedup engine, mints its own `LEAD-`/`PRSP-`, and commits in its own transaction, so one duplicate rejects only its own row. Over five → `[maksimal 5 lead per pendaftaran!]`. This is **not** the Marketing bulk import of §3: batch rows are owned prospect attempts, imported rows land in `[Pool]` unowned.
 
 ### Flow
 Identical to the reference. On dedup collision with another salesperson's active scouted lead: `[tidak bisa ditambahkan, lead sedang diproses oleh sales lain (nama)]`.
