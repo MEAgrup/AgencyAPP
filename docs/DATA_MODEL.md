@@ -8,6 +8,7 @@
 |---|---|---|---|---|
 | Lead record (central registry) | `LEAD-` | — | M1 | First valid intake (Marketing import or Sales registration) |
 | Prospect attempt | `PRSP-` | LEAD | M0/M1 | Sales registration or Pool claim; multiple attempts per LEAD allowed for Pool leads |
+| Prospect activity (log effort) | `ACT-` | PRSP | M0/M1 | Sales mencatat aktivitas (Follow Up / Jadwal Meeting / Online Meeting / Visit / Lainnya) pada prospek ber-status `Qualified` s.d. state negosiasi terakhir. Banyak per PRSP; append-only (trigger menolak UPDATE/DELETE); ringkasan hasil wajib. **Deviasi PRD** — keputusan pemilik 2026-08-06, lihat `DECISIONS.md` |
 | Lead delete request | `LDR-` | LEAD | M1 | Sales mengajukan hapus (alasan wajib); ACC Head memindahkan lead ke `[Deleted]`. **Deviasi PRD** — keputusan pemilik 2026-07-29, lihat `DECISIONS.md`. Satu pending per LEAD (`uq_ldr_one_pending`) |
 | Campaign (acquisition) | `CMP-` | — | M3 | Marketing creates; 1:1 with Marketing Performance Record (M2) |
 | Marketing Performance Record | (lives on CMP) | CMP 1:1 | M2 | With campaign; holds budget + auto metrics |
@@ -17,6 +18,11 @@
 | Transaction change request | `TCR-` | TRX | M5 | SPV/Head Finance mengajukan perubahan skema/jadwal (alasan wajib); **ACC Direktur** yang menerapkannya. **Revisi aturan M5-OA-6 → M5-OA-7** — keputusan pemilik 2026-08-04, lihat `DECISIONS.md`. Satu pending per TRX (`uq_tcr_one_pending`); jadwal pengganti Σ = Amount Outstanding, termin terverifikasi tidak disentuh |
 | Service | `SVC-`* | CLI | M0→M6 | At closing, one per service line; upsell = new Service; errors via Void Service (M4-OA-5) |
 | Strategy & Plan | `STR-` | SVC | M6 | Plan-gated services, before Brief creation |
+| Plan-gate determination | (lives on SVC, PK `service_id`) | SVC 1:1 | M6C | Tier katalog `ditentukan_am`: AM menjawab form G-B sebelum Brief pertama. Menyimpan pemicu yang menyala + keputusan + arah override (`sesuai`/`tolak_plan`/`tambah_plan`) |
+| Contract (kesepakatan klien) | `CTR-` | CLI | M6A/M6B | **O57, keputusan pemilik 2026-08-07.** Satu kesepakatan yang memayungi n Service milik SATU klien — klien yang membeli Store Management + GMV Max + Nano KOL dalam satu kesepakatan 12 bulan mendapat SATU Strategi, bukan tiga. Memegang **jendela kontrak** (`durasi_bulan`, `tanggal_mulai`, `tanggal_akhir`) sebagai satu-satunya sumber: kolom senama di `strategi` DIHAPUS migrasi 20260807120000, supaya generator periode M6B (§7 "n periode = n bulan kontrak") tidak punya dua angka untuk dipilih. `services.contract_id` nullable — Service tanpa kesepakatan payung tetap sah. Konsistensi klien dijaga FK KOMPOSIT `(contract_id, client_id)` ke `contracts (id, client_id)`, bukan trigger. **Tanpa mesin status**: tidak ada PRD yang memberi kontrak siklus hidup, dan mendaftarkan mesin kosong berarti mengarang nama state (aturan rumah #2). Uang TIDAK di sini — nilai sepakat & termin tetap `TRX`/`INST` |
+| Strategi (Full Store Management) | `STRG-` | CTR | M6A | Dibuat AM untuk Service plan-gated. **Satu versi = satu BARIS** (Rule 13): `versi_no` + `strategi_induk_id` + `versi_sebelumnya_id`; index parsial `uq_strategi_aktif_per_contract` menjamin satu `Aktif` **per KONTRAK** (O57). Anak: `strategi_channel` → `strategi_baseline_bulan` (baris per `(channel, month_index)`, D11), `strategi_target`, `strategi_assumption`, `strategi_pillar`, `strategi_resource`, `strategi_risk`, `strategi_version` (append-only), `strategi_akses` (A-15 matriks channel × akses × status; A-16 blocker = flag `memblokir` + `target_tanggal_beres` pada baris yang SAMA, bukan tabel kedua). **Section A (A-05) adalah 20 kolom di `strategi` sendiri** — diisi sekali per Strategi, bukan per channel (§4); **Section B grup B-2…B-9 (A-06) adalah kolom di `strategi_channel`** (satu angka per channel; yang per bulan tetap baris di `strategi_baseline_bulan`). Kolom Section A/B NULLable dan kelengkapannya ditegakkan gerbang submit, karena §7 meminta autosave 20 detik dan §5 langkah 5 meminta hitungan hidup field yang belum terisi. **Field Section C/D/G/I menyusul A-08…A-09.** Diikat ke `CTR`, bukan `SVC` (O57 SELESAI 2026-08-07): jalur Service → Strategi tetap satu hop lewat `services.contract_id`, dan `GET/POST /services/{id}/strategi` tidak berubah. `strategi_target.sumber_floor` mencatat **jalur persetujuan** (`input_am` → `disetujui_head`), bukan asal angka |
+| Plan period | `PLAN-` | STRG (full-mgmt) atau CLI (Plan Satuan) | M6B | **Belum dibangun** — lihat `DECISIONS.md` O56. Periode anniversary-month |
+| Vendor | `VND-` | — | M6A | Master record bersama (bukan milik satu klien). Prasyarat E-8/F-4 — live stream adalah mode VENDOR (D15/Rule 18), jadi pilar `live` menunjuk `vendors` lewat FK dan tidak menarik kapasitas divisi internal. Tulis: lead Account/Direksi; baca: semua karyawan (E-8 picker). Status lewat mesin `vendor` |
 | Brief | `BRF-` | SVC | M6 | AM breaks a Service down; one Service → many Briefs across divisions |
 | Asset (Creative unit of work) | `AST-` | BRF | M7 | Brief breakdown into per-deliverable rows |
 | Ad Campaign (client-facing paid media) | `ADC-` | BRF (setup) | M8 | Distinct from M3 `CMP-`; persists across recurring strategy cycles |
@@ -30,6 +36,13 @@
 | Client Health Report Snapshot | `CHR-` | CLI | M13 | Monthly batch, immutable |
 | Performance Score | `PERF-` | User | M14 | Monthly batch, immutable |
 | Master Service List entry | (versioned config) | — | Phase 0 v2 §10 | Sales Head/SPV manages; deals reference the version at closing date |
+
+**Prefix registry (M6A §7).** Sejak 2026-08-06 daftar prefix hidup di DUA tempat yang
+dijaga tetap identik: tabel `entity_prefix` (PK ⇒ duplikat mustahil) dan `PREFIXES` di
+`packages/core/src/ident.ts`. `packages/db/src/ident.registry.test.ts` memindai setiap
+call site pembuat ID dan gagal kalau ada prefix yang tidak terdaftar. Tes itu menemukan
+`ACT`/`LDR`/`DEMO` mencetak ID tanpa terdaftar — jangan menambah prefix tanpa
+mendaftarkannya di kedua tempat.
 
 *`SVC-` prefix: Service IDs are generated at closing per M0 §6; exact prefix string not spelled in the PRDs — confirm prefix label at ticketing (registry pattern implies `SVC-YYYYMM-NNNN`). Log in DECISIONS.md once fixed.
 

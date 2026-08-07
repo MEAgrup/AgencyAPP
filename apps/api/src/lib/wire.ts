@@ -6,7 +6,7 @@
  * other way inline in each route (`toInput`).
  */
 import { money, tz } from '@cdps/core';
-import type { account, admin, ads, audit, auth, board, campaign, client, creative, demo, directory, finance, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
+import type { account, activity, admin, ads, audit, auth, board, campaign, client, contract, creative, demo, directory, finance, health, kol, leads, livestream, marketing, msl, notification, performance, plangate, portal, sales, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -24,6 +24,7 @@ export interface MasterServiceWire {
   description: string;
   active: boolean;
   requires_strategy_plan: boolean;
+  plan_tier: string;
   version_no: number;
   effective_from: string;
 }
@@ -45,6 +46,7 @@ export function masterServiceToWire(v: msl.ServiceView): MasterServiceWire {
     description: v.description,
     active: v.active,
     requires_strategy_plan: v.requiresStrategyPlan,
+    plan_tier: v.planTier,
     version_no: v.versionNo,
     effective_from: v.effectiveFrom,
   };
@@ -129,6 +131,8 @@ export interface LeadRowWire {
   winning_attempt_id: string | null;
   created_at: string;
   open_attempt_count: number;
+  registered_by_me: boolean;
+  claimed_by_me: boolean;
 }
 
 export function leadRowToWire(r: leads.LeadsDbRow): LeadRowWire {
@@ -145,6 +149,8 @@ export function leadRowToWire(r: leads.LeadsDbRow): LeadRowWire {
     winning_attempt_id: r.winningAttemptId,
     created_at: r.createdAt.toISOString(),
     open_attempt_count: r.openAttemptCount,
+    registered_by_me: r.registeredByMe,
+    claimed_by_me: r.claimedByMe,
   };
 }
 
@@ -157,9 +163,16 @@ export interface LeadAttemptWire {
   claimed_at: string;
 }
 
-/** Lead detail (web-internal LeadDetail): lead core + attempt contest. */
+/**
+ * Lead detail (web-internal LeadDetail): lead core + attempt contest.
+ *
+ * `registered_by_me` / `claimed_by_me` are omitted alongside the rollup: they
+ * answer "what is the CALLER's relation to this row" for the Lead Saya board's
+ * Peran column, and the detail page already renders the full attempt contest —
+ * which says who owns what by name, for everyone, not just the reader.
+ */
 export interface LeadDetailWire {
-  lead: Omit<LeadRowWire, 'open_attempt_count'>;
+  lead: Omit<LeadRowWire, 'open_attempt_count' | 'registered_by_me' | 'claimed_by_me'>;
   attempts: LeadAttemptWire[];
 }
 
@@ -274,6 +287,58 @@ export function strategyRequirementToWire(r: account.StrategyRequirement): Strat
     overridden: r.overridden,
     set_by: r.setBy,
     reason: r.reason,
+  };
+}
+
+/**
+ * module6_account.ServiceQueueRow — one Service in an AM's personal queue (§3
+ * Rule 4). NO key is omitted: `strategy_id`/`strategy_status` are sent as
+ * explicit `null` for a Service without a Plan, because a MISSING key is the O43
+ * failure mode (the page renders blank while the route answers 200), and here
+ * "no Plan yet" is exactly the state the UI must react to.
+ */
+export interface ServiceQueueRowWire {
+  service_id: string;
+  client_id: string;
+  toko: string;
+  nama_pic: string;
+  name: string;
+  status: string;
+  requires_strategy_plan: boolean;
+  pinned_requires_strategy_plan: boolean;
+  overridden: boolean;
+  /** M6C: which of the three catalog tiers this Service was pinned to. */
+  plan_tier: string;
+  /** the recorded G-B decision, explicit null while the middle tier is unanswered. */
+  gate_decision: string | null;
+  /** true when the tier is `ditentukan_am` and G-B has not been answered yet. */
+  plan_determination_pending: boolean;
+  assigned_am_id: string | null;
+  strategy_id: string | null;
+  strategy_status: string | null;
+  brief_count: number;
+  released_to_account_at: string | null;
+}
+
+export function serviceQueueRowToWire(r: account.ServiceQueueRow): ServiceQueueRowWire {
+  return {
+    service_id: r.serviceId,
+    client_id: r.clientId,
+    toko: r.toko,
+    nama_pic: r.namaPic,
+    name: r.name,
+    status: r.status,
+    requires_strategy_plan: r.requiresStrategyPlan,
+    pinned_requires_strategy_plan: r.pinnedRequiresStrategyPlan,
+    overridden: r.overridden,
+    plan_tier: r.planTier,
+    gate_decision: r.gateDecision,
+    plan_determination_pending: r.planDeterminationPending,
+    assigned_am_id: r.assignedAmId,
+    strategy_id: r.strategyId,
+    strategy_status: r.strategyStatus,
+    brief_count: r.briefCount,
+    released_to_account_at: r.releasedToAccountAt ? r.releasedToAccountAt.toISOString() : null,
   };
 }
 
@@ -2525,5 +2590,1419 @@ export function bulkReportToWire(r: leads.BulkReport): BulkReportWire {
     summary: r.summary,
     rows: r.rows.map(row),
     rejections: r.rejections.map(row),
+  };
+}
+
+// --- M0 §5 negotiation proposal lines (request body → domain) ---
+
+/** One `lines[]` entry on the negotiation / resubmit / Edit Service bodies. */
+export interface ProposalLineBody {
+  master_service_id?: string;
+  proposed_price?: string;
+  commission_rule?: string;
+  payment_terms?: string;
+  quantity?: number;
+  amount?: string;
+}
+
+/**
+ * toProposalLines maps proposal-line bodies to domain lines, shared by the three
+ * routes that accept them (`/negotiation`, `/negotiation/resubmit`, `/services`).
+ *
+ * `proposed_price` / `commission_rule` are passed through UNTOUCHED including the
+ * empty string, because empty is meaningful: it is what tells the domain "price
+ * this line from the MSL at standard terms" (sales.isCustomLine). Defaulting them
+ * to anything else would turn a standard line into a custom one and, on the
+ * no-negotiation path, get the whole submission refused.
+ */
+export function toProposalLines(rows: ProposalLineBody[] | undefined): sales.ProposalLine[] {
+  return (rows ?? []).map((l) => ({
+    masterServiceId: l.master_service_id ?? '',
+    proposedPrice: l.proposed_price ?? '',
+    commissionRule: l.commission_rule ?? '',
+    paymentTerms: l.payment_terms,
+    quantity: l.quantity,
+    amount: l.amount,
+  }));
+}
+
+// --- M0 §3 batch lead registration (QA revisi 2026-08-07) ---
+
+/** Per-row verdict as web-internal's `BatchRegisterRowResult` expects it. */
+export interface BatchRegisterRowResultWire {
+  row_number: number;
+  lead_name: string;
+  phone_number: string;
+  registered: boolean;
+  lead_id: string;
+  attempt_id: string;
+  notice: string;
+  reason: string;
+}
+
+/** The batch-registration report as web-internal's `BatchRegisterReport` expects it. */
+export interface BatchRegisterReportWire {
+  registered: number;
+  rejected: number;
+  summary: string;
+  rows: BatchRegisterRowResultWire[];
+  rejections: BatchRegisterRowResultWire[];
+}
+
+/**
+ * Maps the batch-registration report. Every field is emitted explicitly — a
+ * MISSING key is worse than a null one here (CLAUDE.md §camelCase boundary): the
+ * page renders `notice` / `reason` per row, and an omitted `registered` would read
+ * as `false` and paint a successful row as rejected.
+ */
+export function batchRegisterReportToWire(r: leads.BatchRegisterReport): BatchRegisterReportWire {
+  const row = (v: leads.BatchRegisterRowResult): BatchRegisterRowResultWire => ({
+    row_number: v.rowNumber,
+    lead_name: v.leadName,
+    phone_number: v.phoneNumber,
+    registered: v.registered,
+    lead_id: v.leadId,
+    attempt_id: v.attemptId,
+    notice: v.notice,
+    reason: v.reason,
+  });
+  return {
+    registered: r.registered,
+    rejected: r.rejected,
+    summary: r.summary,
+    rows: r.rows.map(row),
+    rejections: r.rejections.map(row),
+  };
+}
+
+/** One logged prospect activity — web-internal's `ActivityRow`. */
+export interface ActivityWire {
+  id: string;
+  attempt_id: string;
+  lead_id: string;
+  activity_type: string;
+  occurred_at: string;
+  summary: string;
+  created_by: string;
+  created_by_nama: string;
+  created_at: string;
+}
+
+/** Maps one activity log entry (ACT-). */
+export function activityToWire(a: activity.Activity): ActivityWire {
+  return {
+    id: a.id,
+    attempt_id: a.attemptId,
+    lead_id: a.leadId,
+    activity_type: a.activityType,
+    occurred_at: a.occurredAt.toISOString(),
+    summary: a.summary,
+    created_by: a.createdBy,
+    created_by_nama: a.createdByNama,
+    created_at: a.createdAt.toISOString(),
+  };
+}
+
+/** The derived effort rollup for one attempt — web-internal's `EffortSummary`. */
+export interface EffortSummaryWire {
+  attempt_id: string;
+  total: number;
+  by_type: Record<string, number>;
+  last_activity_at: string | null;
+}
+
+/**
+ * Maps the effort rollup. `last_activity_at` is sent as an EXPLICIT null when
+ * there is no activity yet — a missing key would render the panel blank rather
+ * than "belum ada aktivitas" (CLAUDE.md: kunci yang HILANG lebih berbahaya
+ * daripada null).
+ */
+export function effortToWire(e: activity.EffortSummary): EffortSummaryWire {
+  return {
+    attempt_id: e.attemptId,
+    total: e.total,
+    by_type: e.byType,
+    last_activity_at: e.lastActivityAt === null ? null : e.lastActivityAt.toISOString(),
+  };
+}
+
+/**
+ * module6C.Gate + its G-A context — the plan-gate determination for one Service.
+ *
+ * Every optional field is sent as an EXPLICIT null, including the whole `gate`
+ * object when no determination exists yet: "belum ditentukan" is precisely the
+ * state the form must react to, and a missing key renders the panel blank while
+ * the route answers 200 (the O43 failure mode).
+ *
+ * `pemicu_*` are sent as-is rather than recomputed client-side. They are the
+ * STORED triggers (M6C §10) — the numbers that actually fired when the decision
+ * was made, which is what makes an old decision auditable after a threshold
+ * change.
+ */
+export interface PlanGateTriggerWire {
+  kode: string;
+  label: string;
+  dasar: string;
+}
+
+/** GB-8 — the four fields the no-Plan path leaves behind. Named (not inline)
+ *  so the shape guard can follow it to `account.ts::AssignmentSummary`. */
+export interface PlanGateAssignmentSummaryWire {
+  deliverable: string;
+  deadline: string;
+  divisi_pic: string;
+  hasil_diharapkan: string;
+}
+
+export interface PlanGateWire {
+  service_id: string;
+  tier_katalog: string;
+  divisi_terlibat: string[];
+  deliverable: string;
+  kuota_per_periode: number | null;
+  durasi_bulan: number | null;
+  berulang: boolean;
+  nilai_per_bulan: string | null;
+  target_angka_jenis: string | null;
+  target_angka_nilai: string | null;
+  sequence_dependency: boolean;
+  laporan_periodik: boolean;
+  floor_price: unknown | null;
+  pemicu_keras: PlanGateTriggerWire[];
+  pemicu_lunak: PlanGateTriggerWire[];
+  config_version_no: number;
+  rekomendasi: string;
+  keputusan_am: string;
+  kesesuaian: string;
+  alasan: string | null;
+  pemantauan_alternatif: string | null;
+  tanggal_tinjau_ulang: string;
+  ringkasan_penugasan: PlanGateAssignmentSummaryWire | null;
+  plan_id: string | null;
+  decided_by: string;
+  decided_at: string;
+}
+
+export function planGateToWire(g: plangate.Gate): PlanGateWire {
+  return {
+    service_id: g.serviceId,
+    tier_katalog: g.tierKatalog,
+    divisi_terlibat: g.divisiTerlibat,
+    deliverable: g.deliverable,
+    kuota_per_periode: g.kuotaPerPeriode,
+    durasi_bulan: g.durasiBulan,
+    berulang: g.berulang,
+    nilai_per_bulan: g.nilaiPerBulan,
+    target_angka_jenis: g.targetJenis,
+    target_angka_nilai: g.targetNilai,
+    sequence_dependency: g.sequenceDependency,
+    laporan_periodik: g.laporanPeriodik,
+    floor_price: g.floorPrice ?? null,
+    pemicu_keras: g.pemicuKeras,
+    pemicu_lunak: g.pemicuLunak,
+    config_version_no: g.configVersionNo,
+    rekomendasi: g.rekomendasi,
+    keputusan_am: g.keputusanAm,
+    kesesuaian: g.kesesuaian,
+    alasan: g.alasan,
+    pemantauan_alternatif: g.pemantauanAlternatif,
+    tanggal_tinjau_ulang: g.tanggalTinjauUlang,
+    ringkasan_penugasan:
+      g.ringkasanPenugasan === null
+        ? null
+        : {
+            deliverable: g.ringkasanPenugasan.deliverable,
+            deadline: g.ringkasanPenugasan.deadline,
+            divisi_pic: g.ringkasanPenugasan.divisiPic,
+            hasil_diharapkan: g.ringkasanPenugasan.hasilDiharapkan,
+          },
+    plan_id: g.planId,
+    decided_by: g.decidedBy,
+    decided_at: g.decidedAt,
+  };
+}
+
+export interface PlanGateConfigWire {
+  version_no: number;
+  kuota_threshold: number;
+  nilai_threshold: string;
+  durasi_threshold_bulan: number;
+  notif_join_threshold: string;
+}
+
+export interface PlanGateContextWire {
+  service_id: string;
+  service_name: string;
+  client_id: string;
+  toko: string | null;
+  tier_katalog: string;
+  standard_price: string;
+  frequency: string | null;
+  unit: string | null;
+  min_qty: number | null;
+  category: string | null;
+  plan_satuan_status: string;
+  ada_kontrak_full_management: boolean;
+  config: PlanGateConfigWire;
+  gate: PlanGateWire | null;
+  requires_plan: boolean;
+  perlu_penentuan: boolean;
+}
+
+export function planGateContextToWire(c: plangate.GateContext): PlanGateContextWire {
+  return {
+    service_id: c.serviceId,
+    service_name: c.serviceName,
+    client_id: c.clientId,
+    toko: c.toko,
+    tier_katalog: c.tierKatalog,
+    standard_price: c.standardPrice,
+    frequency: c.frequency,
+    unit: c.unit,
+    min_qty: c.minQty,
+    category: c.category,
+    plan_satuan_status: c.planSatuanStatus,
+    ada_kontrak_full_management: c.adaKontrakFullManagement,
+    config: {
+      version_no: c.config.versionNo,
+      kuota_threshold: c.config.kuotaThreshold,
+      nilai_threshold: c.config.nilaiThreshold,
+      durasi_threshold_bulan: c.config.durasiThresholdBulan,
+      notif_join_threshold: c.config.notifJoinThreshold,
+    },
+    gate: c.gate === null ? null : planGateToWire(c.gate),
+    requires_plan: c.requiresPlan,
+    perlu_penentuan: c.perluPenentuan,
+  };
+}
+
+/** The live recommendation preview (GB-1/GB-2) with no write. */
+export interface PlanGateRecommendationWire {
+  pemicu_keras: PlanGateTriggerWire[];
+  pemicu_lunak: PlanGateTriggerWire[];
+  rekomendasi: string;
+  ringkasan: string;
+}
+
+export function planGateRecommendationToWire(
+  r: plangate.Recommendation,
+): PlanGateRecommendationWire {
+  return {
+    pemicu_keras: r.pemicuKeras,
+    pemicu_lunak: r.pemicuLunak,
+    rekomendasi: r.rekomendasi,
+    ringkasan: r.ringkasan,
+  };
+}
+
+/**
+ * Inbound counterpart for the GB-8 summary: wire (snake_case) → domain
+ * (camelCase).
+ *
+ * This exists because it was missing, and the HTTP walk caught it: the
+ * plan-gate routes handed `b.ringkasan_penugasan` straight into the domain,
+ * whose `AssignmentSummary` reads `divisiPic`/`hasilDiharapkan`. Every field
+ * arrived `undefined`, so a de-escalation that DID carry a complete summary was
+ * rejected with `[ringkasan penugasan wajib diisi untuk jalur tanpa Plan]` — a
+ * validation error blaming the caller for a translation the route never did.
+ *
+ * Returns null for a missing or non-object body value; the domain's own GB-8
+ * completeness check then produces the BI message, so a partial summary is still
+ * rejected here rather than silently stored half-filled.
+ */
+export function assignmentSummaryFromWire(
+  v: unknown,
+): plangate.AssignmentSummary | null {
+  if (v === null || typeof v !== 'object') return null;
+  const r = v as Partial<PlanGateAssignmentSummaryWire>;
+  return {
+    deliverable: r.deliverable ?? '',
+    deadline: r.deadline ?? '',
+    divisiPic: r.divisi_pic ?? '',
+    hasilDiharapkan: r.hasil_diharapkan ?? '',
+  };
+}
+
+// ===========================================================================
+// Module 6A — Vendor (VND-) and Strategi (STRG-).
+// ===========================================================================
+//
+// Every field is listed explicitly, including the nulls. A MISSING key is worse
+// than a null one (CLAUDE.md): the page renders `undefined` and the reader
+// concludes the record is broken rather than empty.
+
+/** One attachment on a vendor record (§7 `dokumen`). */
+export interface VendorDocumentWire {
+  nama: string;
+  url: string;
+}
+
+/** M6A §7 / D19 — the vendor record E-8 and F-4 point at. */
+export interface VendorWire {
+  id: string;
+  nama_vendor: string;
+  jenis_layanan: string;
+  status: string;
+  pic_nama: string;
+  pic_kontak: string;
+  skema_biaya: string;
+  tarif: string | null;
+  bagi_hasil_persen: number | null;
+  catatan_kinerja: string;
+  dokumen: VendorDocumentWire[];
+  created_by: string;
+  created_at: string;
+}
+
+export function vendorToWire(v: vendor.Vendor): VendorWire {
+  return {
+    id: v.id,
+    nama_vendor: v.namaVendor,
+    jenis_layanan: v.jenisLayanan,
+    status: v.status,
+    pic_nama: v.picNama,
+    pic_kontak: v.picKontak,
+    skema_biaya: v.skemaBiaya,
+    tarif: v.tarif,
+    bagi_hasil_persen: v.bagiHasilPersen,
+    catatan_kinerja: v.catatanKinerja,
+    dokumen: v.dokumen.map((d) => ({ nama: d.nama, url: d.url })),
+    created_by: v.createdBy,
+    created_at: v.createdAt,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// O57 — Contract (CTR-)
+// ---------------------------------------------------------------------------
+
+/** The agreement one client signed, covering n Services (O57). */
+export interface ContractWire {
+  id: string;
+  client_id: string;
+  durasi_bulan: number;
+  tanggal_mulai: string;
+  tanggal_akhir: string;
+  catatan: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function contractToWire(c: contract.Contract): ContractWire {
+  return {
+    id: c.id,
+    client_id: c.clientId,
+    durasi_bulan: c.durasiBulan,
+    tanggal_mulai: c.tanggalMulai,
+    tanggal_akhir: c.tanggalAkhir,
+    catatan: c.catatan,
+    created_by: c.createdBy,
+    created_at: c.createdAt,
+    updated_at: c.updatedAt,
+  };
+}
+
+/** Inbound: the window an AM declares. */
+export function contractFromWire(v: unknown): contract.ContractInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    durasiBulan: Number(b.durasi_bulan ?? 0),
+    tanggalMulai: String(b.tanggal_mulai ?? ''),
+    tanggalAkhir: String(b.tanggal_akhir ?? ''),
+    catatan:
+      b.catatan === undefined || b.catatan === null ? null : String(b.catatan),
+  };
+}
+
+/** A-12 — who may approve at the client, and how to escalate past them. */
+export interface StrategiDecisionMakerWire {
+  nama: string;
+  jabatan: string;
+  berhak_approve: boolean;
+  jalur_eskalasi: string;
+}
+
+/** B-3.3 — a top SKU by GMV. */
+export interface StrategiTopSkuWire {
+  nama: string;
+  gmv: string;
+  unit_terjual: number;
+  harga_jual: string;
+  margin_persen: number;
+}
+
+/** B-5.4 — a keyword/audience that produced orders. */
+export interface StrategiTopKeywordWire {
+  keyword: string;
+  jumlah_order: number;
+}
+
+/** B-5.5 — spend with no orders behind it. */
+export interface StrategiKampanyeBoncosWire {
+  nama: string;
+  spend: string;
+}
+
+/** B-6.4 — a top creator by GMV. */
+export interface StrategiTopKreatorWire {
+  nama: string;
+  gmv: string;
+}
+
+/** B-8.1 — an active voucher/promo. */
+export interface StrategiVoucherWire {
+  tipe: string;
+  nilai: string;
+  syarat: string;
+}
+
+/** B-9.1 — a competing store on this channel. */
+export interface StrategiKompetitorWire {
+  nama: string;
+  url: string;
+  harga_sebanding: string;
+  estimasi_penjualan_bulan: string;
+}
+
+/** A-15 + A-16 — one row per (channel, akses); the blocker is a flag on it. */
+export interface StrategiAksesWire {
+  id: number;
+  channel: string;
+  akses: string;
+  status: string;
+  memblokir: boolean;
+  target_tanggal_beres: string | null;
+  catatan: string;
+}
+
+// ---------------------------------------------------------------------------
+// Section C (A-07) wire types
+// ---------------------------------------------------------------------------
+
+/** C-1/C-2/C-3/C-4 — one row per contracted channel. */
+export interface StrategiDiagnosaWire {
+  id: number;
+  channel: string;
+  bottleneck: string;
+  /** Rule 6: array of baseline field-ID strings, min 1. */
+  field_ids: string[];
+  akar_masalah: string | null;
+  gap_kompetitor: string | null;
+}
+
+/** C-5 — quick wins in the first 14 days. */
+export interface StrategiQuickWinWire {
+  id: number;
+  aksi: string;
+  channel: string;
+  pic_divisi: string;
+  dampak_diharapkan: string;
+  urutan: number;
+}
+
+/** C-6 — structural risks. */
+export interface StrategiRisikoStrukturalWire {
+  id: number;
+  risiko: string;
+  urutan: number;
+}
+
+/** C-7 — client prerequisites. */
+export interface StrategiPrasyaratKlienWire {
+  id: number;
+  item: string;
+  pic_klien: string;
+  deadline: string | null;
+  urutan: number;
+}
+
+/** The Strategi header (Section J-1 + the contract window) plus Section A. */
+export interface StrategiWire {
+  id: string;
+  /**
+   * O57 — the agreement, not a Service. A Strategi covers every Service under
+   * the contract, so `service_id` was replaced rather than kept alongside: one
+   * id there would name an arbitrary member of the set.
+   */
+  contract_id: string;
+  client_id: string;
+  versi_no: number;
+  strategi_induk_id: string | null;
+  versi_sebelumnya_id: string | null;
+  status: string;
+  /** Derived from `contracts` — read-only here (house rule #4). */
+  durasi_kontrak_bulan: number;
+  tanggal_mulai_kontrak: string;
+  tanggal_akhir_kontrak: string;
+  tanggal_mulai_siklus: string | null;
+  siklus_terkunci: boolean;
+  toleransi_over_persen: number;
+  diajukan_pada: string | null;
+  disetujui_pada: string | null;
+  disetujui_oleh: string | null;
+  catatan_reviewer: string | null;
+  created_by: string;
+  created_at: string;
+  // Section A — Konteks Klien & Bisnis (A-05). Nullable because the record is
+  // born `Draft` and the form autosaves; presence is a submit-gate concern.
+  nama_brand: string | null;
+  kategori_utama: string | null;
+  sub_kategori: string[];
+  model_bisnis: string | null;
+  margin_kotor_persen: number | null;
+  posisi_harga: string | null;
+  usp: string[];
+  kapasitas_stok: string | null;
+  lead_time_restock_hari: number | null;
+  plafon_unit_per_bulan: number | null;
+  titik_kirim_kota: string | null;
+  titik_kirim_detail: string | null;
+  ekspektasi_klien: string | null;
+  riwayat_agensi: string | null;
+  pantangan_klien: string[];
+  pantangan_klien_tidak_ada: boolean;
+  decision_maker: StrategiDecisionMakerWire[];
+  sla_klien_jam: number | null;
+  sla_klien_catatan: string | null;
+  aset_dari_klien: string[];
+  aset_dari_klien_tidak_ada: boolean;
+  aset_catatan: string | null;
+}
+
+export function strategiToWire(s: strategi.Strategi): StrategiWire {
+  return {
+    id: s.id,
+    contract_id: s.contractId,
+    client_id: s.clientId,
+    versi_no: s.versiNo,
+    strategi_induk_id: s.strategiIndukId,
+    versi_sebelumnya_id: s.versiSebelumnyaId,
+    status: s.status,
+    durasi_kontrak_bulan: s.durasiKontrakBulan,
+    tanggal_mulai_kontrak: s.tanggalMulaiKontrak,
+    tanggal_akhir_kontrak: s.tanggalAkhirKontrak,
+    tanggal_mulai_siklus: s.tanggalMulaiSiklus,
+    siklus_terkunci: s.siklusTerkunci,
+    toleransi_over_persen: s.toleransiOverPersen,
+    diajukan_pada: s.diajukanPada,
+    disetujui_pada: s.disetujuiPada,
+    disetujui_oleh: s.disetujuiOleh,
+    catatan_reviewer: s.catatanReviewer,
+    created_by: s.createdBy,
+    created_at: s.createdAt,
+    nama_brand: s.namaBrand,
+    kategori_utama: s.kategoriUtama,
+    sub_kategori: s.subKategori,
+    model_bisnis: s.modelBisnis,
+    margin_kotor_persen: s.marginKotorPersen,
+    posisi_harga: s.posisiHarga,
+    usp: s.usp,
+    kapasitas_stok: s.kapasitasStok,
+    lead_time_restock_hari: s.leadTimeRestockHari,
+    plafon_unit_per_bulan: s.plafonUnitPerBulan,
+    titik_kirim_kota: s.titikKirimKota,
+    titik_kirim_detail: s.titikKirimDetail,
+    ekspektasi_klien: s.ekspektasiKlien,
+    riwayat_agensi: s.riwayatAgensi,
+    pantangan_klien: s.pantanganKlien,
+    pantangan_klien_tidak_ada: s.pantanganKlienTidakAda,
+    decision_maker: s.decisionMaker.map((d) => ({
+      nama: d.nama,
+      jabatan: d.jabatan,
+      berhak_approve: d.berhakApprove,
+      jalur_eskalasi: d.jalurEskalasi,
+    })),
+    sla_klien_jam: s.slaKlienJam,
+    sla_klien_catatan: s.slaKlienCatatan,
+    aset_dari_klien: s.asetDariKlien,
+    aset_dari_klien_tidak_ada: s.asetDariKlienTidakAda,
+    aset_catatan: s.asetCatatan,
+  };
+}
+
+/** B-1 / B-5 — one row per month of the declared window (D11). */
+export interface StrategiBaselineMonthWire {
+  month_index: number;
+  gmv: string;
+  jumlah_pesanan: number;
+  persen_batal: number;
+  ad_spend: string;
+  roas: number;
+  acos: number;
+  aov: string | null;
+}
+
+/** Section B-0 block, with its baseline months nested. */
+export interface StrategiChannelWire {
+  id: number;
+  channel: string;
+  channel_lain: string | null;
+  status_channel: string;
+  nama_toko: string;
+  url_toko: string;
+  umur_toko_bulan: number | null;
+  badge: string | null;
+  target_tanggal_live: string | null;
+  prasyarat_pembukaan: string[];
+  sumber_data: string | null;
+  tanggal_ambil_data: string | null;
+  lampiran: string | null;
+  periode_baseline_bulan: number | null;
+  periode_mulai: string | null;
+  periode_akhir: string | null;
+  alasan_periode_pendek: string | null;
+  catatan_periode_pendek: string | null;
+  // Section B groups B-2 … B-9 (A-06). One figure per channel; the monthly ones
+  // (B-1, B-5.1/5.2) are rows in `baseline`.
+  pengunjung_per_bulan: number | null;
+  conversion_rate_persen: number | null;
+  trafik_organik_persen: number | null;
+  trafik_iklan_persen: number | null;
+  trafik_affiliate_persen: number | null;
+  trafik_live_persen: number | null;
+  trafik_video_persen: number | null;
+  trafik_luar_persen: number | null;
+  entry_point_utama: string | null;
+  entry_point_catatan: string | null;
+  sku_listed: number | null;
+  sku_aktif: number | null;
+  sku_pareto_80: number | null;
+  top_sku: StrategiTopSkuWire[];
+  sku_slow_moving: number | null;
+  sku_stok_kritis: string[];
+  listing_layak_persen: number | null;
+  rating_toko: number | null;
+  jumlah_ulasan: number | null;
+  chat_response_rate_persen: number | null;
+  chat_response_menit: number | null;
+  pesanan_terlambat_persen: number | null;
+  poin_penalti: number | null;
+  catatan_penalti: string | null;
+  tema_keluhan: string[];
+  tipe_kampanye: string[];
+  tipe_kampanye_tidak_ada: boolean;
+  jumlah_kampanye_aktif: number | null;
+  top_keyword: StrategiTopKeywordWire[];
+  kampanye_boncos: StrategiKampanyeBoncosWire[];
+  affiliate_aktif_30hari: number | null;
+  gmv_affiliate: string | null;
+  gmv_affiliate_persen: number | null;
+  komisi_open_persen: number | null;
+  komisi_target_persen: number | null;
+  top_kreator: StrategiTopKreatorWire[];
+  program_sampel: string | null;
+  program_sampel_catatan: string | null;
+  jumlah_video_per_bulan: number | null;
+  total_views: number | null;
+  gmv_video: string | null;
+  jam_live_per_bulan: number | null;
+  gmv_live: string | null;
+  // B-7.2 third figure — computed, `null` at zero live hours (renders `—`).
+  gmv_per_jam_live: string | null;
+  host_live: string | null;
+  studio_live: string | null;
+  studio_catatan: string | null;
+  voucher_aktif: StrategiVoucherWire[];
+  voucher_aktif_tidak_ada: boolean;
+  program_platform: string[];
+  program_platform_tidak_ada: boolean;
+  beban_promo_persen: number | null;
+  kompetitor: StrategiKompetitorWire[];
+  kompetitor_lebih_baik: string[];
+  kompetitor_catatan: string | null;
+  celah_kompetitor: string | null;
+  // B-1.5 — derived from `baseline`, never stored.
+  tren: string | null;
+  tren_persen: number | null;
+  baseline: StrategiBaselineMonthWire[];
+}
+
+export interface StrategiTargetWire {
+  channel: string;
+  month_index: number;
+  metric: string;
+  nilai_floor: string | null;
+  nilai_stretch: string;
+  sumber_floor: string | null;
+}
+
+export interface StrategiAssumptionWire {
+  kode: string;
+  asumsi: string;
+  pemilik: string;
+  cara_verifikasi: string;
+  status: string;
+  target_terkait: string[];
+}
+
+export interface StrategiPillarWire {
+  id: number;
+  jenis: string;
+  channel: string | null;
+  urutan: number;
+  sku: string | null;
+  peran: string | null;
+  aksi: string;
+  target: string;
+  harga_normal: string | null;
+  harga_promo: string | null;
+  floor_price: string | null;
+  vendor_id: string | null;
+  slot_jam: number | null;
+  tarif: string | null;
+  target_gmv_per_jam: string | null;
+  detail: Record<string, unknown>;
+}
+
+export interface StrategiResourceWire {
+  id: number;
+  jenis: string;
+  channel: string | null;
+  divisi: string | null;
+  nilai: string | null;
+  jumlah: number | null;
+  satuan: string | null;
+  sumber_dana: string | null;
+  vendor_id: string | null;
+  skema_biaya: string | null;
+  catatan: string;
+}
+
+export interface StrategiRiskWire {
+  id: number;
+  risiko: string;
+  dampak: string;
+  kemungkinan: string;
+  mitigasi: string;
+  pic: string;
+  urutan: number;
+}
+
+export interface StrategiEventWire {
+  versi_no: number;
+  peristiwa: string;
+  aktor: string;
+  catatan: string | null;
+  trigger_revisi: string[];
+  alasan_revisi: string | null;
+  asumsi_gugur: string[];
+  created_at: string;
+}
+
+/** The whole record as the Section A→J form loads it. */
+export interface StrategiDetailWire extends StrategiWire {
+  channels: StrategiChannelWire[];
+  akses: StrategiAksesWire[];
+  /** A-07 Section C: per-channel diagnosis. */
+  diagnosa: StrategiDiagnosaWire[];
+  quick_wins: StrategiQuickWinWire[];
+  risiko_struktural: StrategiRisikoStrukturalWire[];
+  prasyarat_klien: StrategiPrasyaratKlienWire[];
+  targets: StrategiTargetWire[];
+  assumptions: StrategiAssumptionWire[];
+  pillars: StrategiPillarWire[];
+  resources: StrategiResourceWire[];
+  risks: StrategiRiskWire[];
+  riwayat: StrategiEventWire[];
+}
+
+export function strategiDetailToWire(d: strategi.StrategiDetail): StrategiDetailWire {
+  return {
+    ...strategiToWire(d),
+    channels: d.channels.map((c) => ({
+      id: c.id,
+      channel: c.channel,
+      channel_lain: c.channelLain,
+      status_channel: c.statusChannel,
+      nama_toko: c.namaToko,
+      url_toko: c.urlToko,
+      umur_toko_bulan: c.umurTokoBulan,
+      badge: c.badge,
+      target_tanggal_live: c.targetTanggalLive,
+      prasyarat_pembukaan: c.prasyaratPembukaan,
+      sumber_data: c.sumberData,
+      tanggal_ambil_data: c.tanggalAmbilData,
+      lampiran: c.lampiran,
+      periode_baseline_bulan: c.periodeBaselineBulan,
+      periode_mulai: c.periodeMulai,
+      periode_akhir: c.periodeAkhir,
+      alasan_periode_pendek: c.alasanPeriodePendek,
+      catatan_periode_pendek: c.catatanPeriodePendek,
+      pengunjung_per_bulan: c.pengunjungPerBulan,
+      conversion_rate_persen: c.conversionRatePersen,
+      trafik_organik_persen: c.trafikOrganikPersen,
+      trafik_iklan_persen: c.trafikIklanPersen,
+      trafik_affiliate_persen: c.trafikAffiliatePersen,
+      trafik_live_persen: c.trafikLivePersen,
+      trafik_video_persen: c.trafikVideoPersen,
+      trafik_luar_persen: c.trafikLuarPersen,
+      entry_point_utama: c.entryPointUtama,
+      entry_point_catatan: c.entryPointCatatan,
+      sku_listed: c.skuListed,
+      sku_aktif: c.skuAktif,
+      sku_pareto_80: c.skuPareto80,
+      top_sku: c.topSku.map((s) => ({
+        nama: s.nama,
+        gmv: s.gmv,
+        unit_terjual: s.unitTerjual,
+        harga_jual: s.hargaJual,
+        margin_persen: s.marginPersen,
+      })),
+      sku_slow_moving: c.skuSlowMoving,
+      sku_stok_kritis: c.skuStokKritis,
+      listing_layak_persen: c.listingLayakPersen,
+      rating_toko: c.ratingToko,
+      jumlah_ulasan: c.jumlahUlasan,
+      chat_response_rate_persen: c.chatResponseRatePersen,
+      chat_response_menit: c.chatResponseMenit,
+      pesanan_terlambat_persen: c.pesananTerlambatPersen,
+      poin_penalti: c.poinPenalti,
+      catatan_penalti: c.catatanPenalti,
+      tema_keluhan: c.temaKeluhan,
+      tipe_kampanye: c.tipeKampanye,
+      tipe_kampanye_tidak_ada: c.tipeKampanyeTidakAda,
+      jumlah_kampanye_aktif: c.jumlahKampanyeAktif,
+      top_keyword: c.topKeyword.map((k) => ({
+        keyword: k.keyword,
+        jumlah_order: k.jumlahOrder,
+      })),
+      kampanye_boncos: c.kampanyeBoncos.map((k) => ({ nama: k.nama, spend: k.spend })),
+      affiliate_aktif_30hari: c.affiliateAktif30Hari,
+      gmv_affiliate: c.gmvAffiliate,
+      gmv_affiliate_persen: c.gmvAffiliatePersen,
+      komisi_open_persen: c.komisiOpenPersen,
+      komisi_target_persen: c.komisiTargetPersen,
+      top_kreator: c.topKreator.map((k) => ({ nama: k.nama, gmv: k.gmv })),
+      program_sampel: c.programSampel,
+      program_sampel_catatan: c.programSampelCatatan,
+      jumlah_video_per_bulan: c.jumlahVideoPerBulan,
+      total_views: c.totalViews,
+      gmv_video: c.gmvVideo,
+      jam_live_per_bulan: c.jamLivePerBulan,
+      gmv_live: c.gmvLive,
+      gmv_per_jam_live: c.gmvPerJamLive,
+      host_live: c.hostLive,
+      studio_live: c.studioLive,
+      studio_catatan: c.studioCatatan,
+      voucher_aktif: c.voucherAktif.map((v) => ({
+        tipe: v.tipe,
+        nilai: v.nilai,
+        syarat: v.syarat,
+      })),
+      voucher_aktif_tidak_ada: c.voucherAktifTidakAda,
+      program_platform: c.programPlatform,
+      program_platform_tidak_ada: c.programPlatformTidakAda,
+      beban_promo_persen: c.bebanPromoPersen,
+      kompetitor: c.kompetitor.map((k) => ({
+        nama: k.nama,
+        url: k.url,
+        harga_sebanding: k.hargaSebanding,
+        estimasi_penjualan_bulan: k.estimasiPenjualanBulan,
+      })),
+      kompetitor_lebih_baik: c.kompetitorLebihBaik,
+      kompetitor_catatan: c.kompetitorCatatan,
+      celah_kompetitor: c.celahKompetitor,
+      tren: c.tren,
+      tren_persen: c.trenPersen,
+      baseline: c.baseline.map((b) => ({
+        month_index: b.monthIndex,
+        gmv: b.gmv,
+        jumlah_pesanan: b.jumlahPesanan,
+        persen_batal: b.persenBatal,
+        ad_spend: b.adSpend,
+        roas: b.roas,
+        acos: b.acos,
+        aov: b.aov,
+      })),
+    })),
+    akses: d.akses.map((a) => ({
+      id: a.id,
+      channel: a.channel,
+      akses: a.akses,
+      status: a.status,
+      memblokir: a.memblokir,
+      target_tanggal_beres: a.targetTanggalBeres,
+      catatan: a.catatan,
+    })),
+    diagnosa: d.diagnosa.map((diag) => ({
+      id: diag.id,
+      channel: diag.channel,
+      bottleneck: diag.bottleneck,
+      field_ids: diag.fieldIds,
+      akar_masalah: diag.akarMasalah,
+      gap_kompetitor: diag.gapKompetitor,
+    })),
+    quick_wins: d.quickWins.map((q) => ({
+      id: q.id,
+      aksi: q.aksi,
+      channel: q.channel,
+      pic_divisi: q.picDivisi,
+      dampak_diharapkan: q.dampakDiharapkan,
+      urutan: q.urutan,
+    })),
+    risiko_struktural: d.risikoStruktural.map((r) => ({
+      id: r.id,
+      risiko: r.risiko,
+      urutan: r.urutan,
+    })),
+    prasyarat_klien: d.prasyaratKlien.map((p) => ({
+      id: p.id,
+      item: p.item,
+      pic_klien: p.picKlien,
+      deadline: p.deadline,
+      urutan: p.urutan,
+    })),
+    targets: d.targets.map((t) => ({
+      channel: t.channel,
+      month_index: t.monthIndex,
+      metric: t.metric,
+      nilai_floor: t.nilaiFloor,
+      nilai_stretch: t.nilaiStretch,
+      sumber_floor: t.sumberFloor,
+    })),
+    assumptions: d.assumptions.map((a) => ({
+      kode: a.kode,
+      asumsi: a.asumsi,
+      pemilik: a.pemilik,
+      cara_verifikasi: a.caraVerifikasi,
+      status: a.status,
+      target_terkait: a.targetTerkait,
+    })),
+    pillars: d.pillars.map((p) => ({
+      id: p.id,
+      jenis: p.jenis,
+      channel: p.channel,
+      urutan: p.urutan,
+      sku: p.sku,
+      peran: p.peran,
+      aksi: p.aksi,
+      target: p.target,
+      harga_normal: p.hargaNormal,
+      harga_promo: p.hargaPromo,
+      floor_price: p.floorPrice,
+      vendor_id: p.vendorId,
+      slot_jam: p.slotJam,
+      tarif: p.tarif,
+      target_gmv_per_jam: p.targetGmvPerJam,
+      detail: p.detail,
+    })),
+    resources: d.resources.map((r) => ({
+      id: r.id,
+      jenis: r.jenis,
+      channel: r.channel,
+      divisi: r.divisi,
+      nilai: r.nilai,
+      jumlah: r.jumlah,
+      satuan: r.satuan,
+      sumber_dana: r.sumberDana,
+      vendor_id: r.vendorId,
+      skema_biaya: r.skemaBiaya,
+      catatan: r.catatan,
+    })),
+    risks: d.risks.map((r) => ({
+      id: r.id,
+      risiko: r.risiko,
+      dampak: r.dampak,
+      kemungkinan: r.kemungkinan,
+      mitigasi: r.mitigasi,
+      pic: r.pic,
+      urutan: r.urutan,
+    })),
+    riwayat: d.riwayat.map((e) => ({
+      versi_no: e.versiNo,
+      peristiwa: e.peristiwa,
+      aktor: e.aktor,
+      catatan: e.catatan,
+      trigger_revisi: e.triggerRevisi,
+      alasan_revisi: e.alasanRevisi,
+      asumsi_gugur: e.asumsiGugur,
+      created_at: e.createdAt,
+    })),
+  };
+}
+
+/** §5 step 5 — the live "still missing" list, not a first-error message. */
+export interface StrategiKekuranganWire {
+  kode: string;
+  pesan: string;
+}
+
+export function strategiKekuranganToWire(k: strategi.Kekurangan): StrategiKekuranganWire {
+  return { kode: k.kode, pesan: k.pesan };
+}
+
+/**
+ * Inbound: the vendor write body (snake_case) → the domain input (camelCase).
+ *
+ * It lives here, not in the route, for the reason `assignmentSummaryFromWire`
+ * exists: last session a plan-gate route handed a raw wire body to a domain
+ * function that reads camelCase, every field arrived `undefined`, and a valid
+ * request was rejected with a message blaming the caller. One translation site,
+ * used by both the create and the update route.
+ *
+ * Missing fields become empty strings / nulls rather than being dropped, so the
+ * domain's own validation produces the BI message — the route never decides
+ * whether a payload is complete.
+ */
+export function vendorInputFromWire(v: unknown): vendor.VendorInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  const dokumen = Array.isArray(b.dokumen)
+    ? b.dokumen
+        .filter((d): d is Record<string, unknown> => typeof d === 'object' && d !== null)
+        .map((d) => ({ nama: String(d.nama ?? ''), url: String(d.url ?? '') }))
+    : [];
+  return {
+    namaVendor: String(b.nama_vendor ?? ''),
+    jenisLayanan: (b.jenis_layanan ?? '') as vendor.VendorService,
+    picNama: String(b.pic_nama ?? ''),
+    picKontak: String(b.pic_kontak ?? ''),
+    skemaBiaya: (b.skema_biaya ?? '') as vendor.VendorFeeScheme,
+    tarif: b.tarif === undefined || b.tarif === null ? null : String(b.tarif),
+    bagiHasilPersen:
+      b.bagi_hasil_persen === undefined || b.bagi_hasil_persen === null
+        ? null
+        : Number(b.bagi_hasil_persen),
+    catatanKinerja: String(b.catatan_kinerja ?? ''),
+    dokumen,
+  };
+}
+
+/** Inbound: the Strategi header body (§ contract window + G-0 + F-7). */
+export function strategiHeaderFromWire(v: unknown): strategi.StrategiHeaderInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    durasiKontrakBulan: Number(b.durasi_kontrak_bulan ?? 0),
+    tanggalMulaiKontrak: String(b.tanggal_mulai_kontrak ?? ''),
+    tanggalAkhirKontrak: String(b.tanggal_akhir_kontrak ?? ''),
+    tanggalMulaiSiklus:
+      b.tanggal_mulai_siklus === undefined || b.tanggal_mulai_siklus === null
+        ? null
+        : String(b.tanggal_mulai_siklus),
+    toleransiOverPersen:
+      b.toleransi_over_persen === undefined || b.toleransi_over_persen === null
+        ? null
+        : Number(b.toleransi_over_persen),
+  };
+}
+
+function asRecords(v: unknown): Record<string, unknown>[] {
+  return Array.isArray(v)
+    ? v.filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null)
+    : [];
+}
+
+function str(v: unknown): string {
+  return v === undefined || v === null ? '' : String(v);
+}
+
+function strOrNull(v: unknown): string | null {
+  return v === undefined || v === null || v === '' ? null : String(v);
+}
+
+function numOrNull(v: unknown): number | null {
+  return v === undefined || v === null || v === '' ? null : Number(v);
+}
+
+function strList(v: unknown): string[] {
+  return Array.isArray(v) ? v.map((x) => String(x)) : [];
+}
+
+/**
+ * Inbound: Section A — Konteks Klien & Bisnis (A-05).
+ *
+ * Absent fields become `null`/`[]` rather than being dropped, so the domain's own
+ * validator decides what is invalid and produces the BI message. The route never
+ * gets to rule on completeness — and here that matters more than usual, because
+ * an incomplete Section A is the NORMAL state of an autosaving draft.
+ */
+export function strategiKonteksFromWire(v: unknown): strategi.KonteksInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    namaBrand: strOrNull(b.nama_brand),
+    kategoriUtama: strOrNull(b.kategori_utama),
+    subKategori: strList(b.sub_kategori),
+    modelBisnis: (strOrNull(b.model_bisnis) as strategi.BusinessModel | null) ?? null,
+    marginKotorPersen: numOrNull(b.margin_kotor_persen),
+    posisiHarga: (strOrNull(b.posisi_harga) as strategi.PricePosition | null) ?? null,
+    usp: strList(b.usp),
+    kapasitasStok: (strOrNull(b.kapasitas_stok) as strategi.StockCapacity | null) ?? null,
+    leadTimeRestockHari: numOrNull(b.lead_time_restock_hari),
+    plafonUnitPerBulan: numOrNull(b.plafon_unit_per_bulan),
+    titikKirimKota: strOrNull(b.titik_kirim_kota),
+    titikKirimDetail: strOrNull(b.titik_kirim_detail),
+    ekspektasiKlien: strOrNull(b.ekspektasi_klien),
+    riwayatAgensi: strOrNull(b.riwayat_agensi),
+    pantanganKlien: strList(b.pantangan_klien),
+    pantanganKlienTidakAda: b.pantangan_klien_tidak_ada === true,
+    decisionMaker: asRecords(b.decision_maker).map((d) => ({
+      nama: str(d.nama),
+      jabatan: str(d.jabatan),
+      berhakApprove: d.berhak_approve === true,
+      jalurEskalasi: str(d.jalur_eskalasi),
+    })),
+    slaKlienJam: numOrNull(b.sla_klien_jam),
+    slaKlienCatatan: strOrNull(b.sla_klien_catatan),
+    asetDariKlien: strList(b.aset_dari_klien),
+    asetDariKlienTidakAda: b.aset_dari_klien_tidak_ada === true,
+    asetCatatan: strOrNull(b.aset_catatan),
+  };
+}
+
+/** Inbound: A-15 matrix rows (A-16 rides on `memblokir` + the target date). */
+export function strategiAksesFromWire(v: unknown): strategi.AksesInput[] {
+  return asRecords(v).map((a) => ({
+    channel: str(a.channel) as strategi.AccessChannel,
+    akses: str(a.akses) as strategi.AccessKind,
+    status: str(a.status) as strategi.AccessState,
+    memblokir: a.memblokir === true,
+    targetTanggalBeres: strOrNull(a.target_tanggal_beres),
+    catatan: str(a.catatan),
+  }));
+}
+
+/** Inbound: Section B-0 channel blocks plus the B-2…B-9 groups (A-06). */
+export function strategiChannelsFromWire(v: unknown): strategi.ChannelInput[] {
+  return asRecords(v).map((c) => ({
+    channel: str(c.channel) as strategi.Channel,
+    channelLain: strOrNull(c.channel_lain),
+    statusChannel: str(c.status_channel) as strategi.ChannelState,
+    namaToko: str(c.nama_toko),
+    urlToko: str(c.url_toko),
+    umurTokoBulan: numOrNull(c.umur_toko_bulan),
+    badge: strOrNull(c.badge),
+    targetTanggalLive: strOrNull(c.target_tanggal_live),
+    prasyaratPembukaan: Array.isArray(c.prasyarat_pembukaan)
+      ? c.prasyarat_pembukaan.map((p) => String(p))
+      : [],
+    sumberData: strOrNull(c.sumber_data),
+    tanggalAmbilData: strOrNull(c.tanggal_ambil_data),
+    lampiran: strOrNull(c.lampiran),
+    periodeBaselineBulan: numOrNull(c.periode_baseline_bulan),
+    periodeMulai: strOrNull(c.periode_mulai),
+    periodeAkhir: strOrNull(c.periode_akhir),
+    alasanPeriodePendek: strOrNull(c.alasan_periode_pendek),
+    catatanPeriodePendek: strOrNull(c.catatan_periode_pendek),
+    // Section B (A-06). Numbers stay `null` when absent for the same reason the
+    // baseline months do: Rule 5 distinguishes blank from `0`, and coercing here
+    // would erase the distinction before the validator ever sees it.
+    pengunjungPerBulan: numOrNull(c.pengunjung_per_bulan),
+    conversionRatePersen: numOrNull(c.conversion_rate_persen),
+    trafikOrganikPersen: numOrNull(c.trafik_organik_persen),
+    trafikIklanPersen: numOrNull(c.trafik_iklan_persen),
+    trafikAffiliatePersen: numOrNull(c.trafik_affiliate_persen),
+    trafikLivePersen: numOrNull(c.trafik_live_persen),
+    trafikVideoPersen: numOrNull(c.trafik_video_persen),
+    trafikLuarPersen: numOrNull(c.trafik_luar_persen),
+    entryPointUtama: (strOrNull(c.entry_point_utama) as strategi.EntryPoint | null) ?? null,
+    entryPointCatatan: strOrNull(c.entry_point_catatan),
+    skuListed: numOrNull(c.sku_listed),
+    skuAktif: numOrNull(c.sku_aktif),
+    skuPareto80: numOrNull(c.sku_pareto_80),
+    topSku: asRecords(c.top_sku).map((s) => ({
+      nama: str(s.nama),
+      gmv: str(s.gmv),
+      unitTerjual: Number(s.unit_terjual ?? 0),
+      hargaJual: str(s.harga_jual),
+      marginPersen: Number(s.margin_persen ?? 0),
+    })),
+    skuSlowMoving: numOrNull(c.sku_slow_moving),
+    skuStokKritis: strList(c.sku_stok_kritis),
+    listingLayakPersen: numOrNull(c.listing_layak_persen),
+    ratingToko: numOrNull(c.rating_toko),
+    jumlahUlasan: numOrNull(c.jumlah_ulasan),
+    chatResponseRatePersen: numOrNull(c.chat_response_rate_persen),
+    chatResponseMenit: numOrNull(c.chat_response_menit),
+    pesananTerlambatPersen: numOrNull(c.pesanan_terlambat_persen),
+    poinPenalti: numOrNull(c.poin_penalti),
+    catatanPenalti: strOrNull(c.catatan_penalti),
+    temaKeluhan: strList(c.tema_keluhan),
+    tipeKampanye: strList(c.tipe_kampanye),
+    tipeKampanyeTidakAda: c.tipe_kampanye_tidak_ada === true,
+    jumlahKampanyeAktif: numOrNull(c.jumlah_kampanye_aktif),
+    topKeyword: asRecords(c.top_keyword).map((k) => ({
+      keyword: str(k.keyword),
+      jumlahOrder: Number(k.jumlah_order ?? 0),
+    })),
+    kampanyeBoncos: asRecords(c.kampanye_boncos).map((k) => ({
+      nama: str(k.nama),
+      spend: str(k.spend),
+    })),
+    affiliateAktif30Hari: numOrNull(c.affiliate_aktif_30hari),
+    gmvAffiliate: strOrNull(c.gmv_affiliate),
+    gmvAffiliatePersen: numOrNull(c.gmv_affiliate_persen),
+    komisiOpenPersen: numOrNull(c.komisi_open_persen),
+    komisiTargetPersen: numOrNull(c.komisi_target_persen),
+    topKreator: asRecords(c.top_kreator).map((k) => ({ nama: str(k.nama), gmv: str(k.gmv) })),
+    programSampel: (strOrNull(c.program_sampel) as strategi.SampleProgram | null) ?? null,
+    programSampelCatatan: strOrNull(c.program_sampel_catatan),
+    jumlahVideoPerBulan: numOrNull(c.jumlah_video_per_bulan),
+    totalViews: numOrNull(c.total_views),
+    gmvVideo: strOrNull(c.gmv_video),
+    jamLivePerBulan: numOrNull(c.jam_live_per_bulan),
+    gmvLive: strOrNull(c.gmv_live),
+    hostLive: (strOrNull(c.host_live) as strategi.LiveHost | null) ?? null,
+    studioLive: (strOrNull(c.studio_live) as strategi.StudioState | null) ?? null,
+    studioCatatan: strOrNull(c.studio_catatan),
+    voucherAktifTidakAda: c.voucher_aktif_tidak_ada === true,
+    voucherAktif: asRecords(c.voucher_aktif).map((v2) => ({
+      tipe: str(v2.tipe),
+      nilai: str(v2.nilai),
+      syarat: str(v2.syarat),
+    })),
+    programPlatform: strList(c.program_platform),
+    programPlatformTidakAda: c.program_platform_tidak_ada === true,
+    bebanPromoPersen: numOrNull(c.beban_promo_persen),
+    kompetitor: asRecords(c.kompetitor).map((k) => ({
+      nama: str(k.nama),
+      url: str(k.url),
+      hargaSebanding: str(k.harga_sebanding),
+      estimasiPenjualanBulan: str(k.estimasi_penjualan_bulan),
+    })),
+    kompetitorLebihBaik: strList(c.kompetitor_lebih_baik),
+    kompetitorCatatan: strOrNull(c.kompetitor_catatan),
+    celahKompetitor: strOrNull(c.celah_kompetitor),
+  }));
+}
+
+/**
+ * Inbound: B-1 / B-5 monthly rows.
+ *
+ * Absent numbers are passed through as `null`, NOT coerced to 0: Rule 5 says
+ * blank is invalid and `0` is a valid answer, so silently turning one into the
+ * other would defeat the only rule this section has.
+ */
+export function strategiBaselineFromWire(v: unknown): strategi.BaselineInput[] {
+  return asRecords(v).map((m) => ({
+    monthIndex: Number(m.month_index ?? 0),
+    gmv: strOrNull(m.gmv),
+    jumlahPesanan: numOrNull(m.jumlah_pesanan),
+    persenBatal: numOrNull(m.persen_batal),
+    adSpend: strOrNull(m.ad_spend),
+    roas: numOrNull(m.roas),
+    acos: numOrNull(m.acos),
+  }));
+}
+
+/** Inbound: D-1 / D-2 / D-4 target rows. */
+export function strategiTargetsFromWire(v: unknown): strategi.TargetInput[] {
+  return asRecords(v).map((t) => ({
+    channel: str(t.channel),
+    monthIndex: Number(t.month_index ?? 0),
+    metric: str(t.metric) as strategi.TargetMetric,
+    nilaiFloor: strOrNull(t.nilai_floor),
+    nilaiStretch: str(t.nilai_stretch),
+    // `sumber_floor` is deliberately NOT read from the wire (O57 item (b)): it is
+    // the approval path, set by the server at Head approval. Accepting it here
+    // would let the AM who types the floor also declare it approved.
+  }));
+}
+
+/** Inbound: D-8 / D-9 assumptions. */
+export function strategiAssumptionsFromWire(v: unknown): strategi.AssumptionInput[] {
+  return asRecords(v).map((a) => ({
+    kode: str(a.kode),
+    asumsi: str(a.asumsi),
+    pemilik: str(a.pemilik),
+    caraVerifikasi: str(a.cara_verifikasi),
+    status: (strOrNull(a.status) as strategi.AssumptionState | null) ?? undefined,
+    targetTerkait: Array.isArray(a.target_terkait) ? a.target_terkait.map((k) => String(k)) : [],
+  }));
+}
+
+/** Inbound: Section E pillars. */
+export function strategiPillarsFromWire(v: unknown): strategi.PillarInput[] {
+  return asRecords(v).map((p, i) => ({
+    jenis: str(p.jenis) as strategi.PillarKind,
+    channel: strOrNull(p.channel),
+    urutan: numOrNull(p.urutan) ?? i,
+    sku: strOrNull(p.sku),
+    peran: strOrNull(p.peran),
+    aksi: str(p.aksi),
+    target: str(p.target),
+    hargaNormal: strOrNull(p.harga_normal),
+    hargaPromo: strOrNull(p.harga_promo),
+    floorPrice: strOrNull(p.floor_price),
+    vendorId: strOrNull(p.vendor_id),
+    slotJam: numOrNull(p.slot_jam),
+    tarif: strOrNull(p.tarif),
+    targetGmvPerJam: strOrNull(p.target_gmv_per_jam),
+    detail: (typeof p.detail === 'object' && p.detail !== null ? p.detail : {}) as Record<
+      string,
+      unknown
+    >,
+  }));
+}
+
+/** Inbound: Section F resource commitments. */
+export function strategiResourcesFromWire(v: unknown): strategi.ResourceInput[] {
+  return asRecords(v).map((r) => ({
+    jenis: str(r.jenis) as strategi.ResourceKind,
+    channel: strOrNull(r.channel),
+    divisi: strOrNull(r.divisi),
+    nilai: strOrNull(r.nilai),
+    jumlah: numOrNull(r.jumlah),
+    satuan: strOrNull(r.satuan),
+    sumberDana: (strOrNull(r.sumber_dana) as 'klien' | 'paket_mea' | null) ?? null,
+    vendorId: strOrNull(r.vendor_id),
+    skemaBiaya: strOrNull(r.skema_biaya),
+    catatan: str(r.catatan),
+  }));
+}
+
+/** Inbound: H-1 risk register. */
+export function strategiRisksFromWire(v: unknown): strategi.RiskInput[] {
+  return asRecords(v).map((r, i) => ({
+    risiko: str(r.risiko),
+    dampak: str(r.dampak) as strategi.RiskLevel,
+    kemungkinan: str(r.kemungkinan) as strategi.RiskLevel,
+    mitigasi: str(r.mitigasi),
+    pic: str(r.pic),
+    urutan: numOrNull(r.urutan) ?? i,
+  }));
+}
+
+/** Inbound: the Rule 13 revision declaration (trigger + reason + broken assumptions). */
+export function strategiRevisionFromWire(v: unknown): strategi.RevisionInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    triggerRevisi: Array.isArray(b.trigger_revisi) ? b.trigger_revisi.map((t) => String(t)) : [],
+    alasanRevisi: str(b.alasan_revisi),
+    asumsiGugur: Array.isArray(b.asumsi_gugur) ? b.asumsi_gugur.map((a) => String(a)) : [],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Section C inbound parsers (A-07)
+// ---------------------------------------------------------------------------
+
+/** Inbound: PUT /strategi/{id}/diagnosa body → DiagnosaPayload. */
+export function strategiDiagnosaFromWire(v: unknown): strategi.DiagnosaPayload {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    diagnosa: asRecords(b.diagnosa).map((d) => ({
+      channel: str(d.channel),
+      bottleneck: str(d.bottleneck) as strategi.BottleneckKind,
+      fieldIds: Array.isArray(d.field_ids) ? d.field_ids.map((f) => String(f)) : [],
+      akarMasalah: strOrNull(d.akar_masalah),
+      gapKompetitor: strOrNull(d.gap_kompetitor),
+    })),
+    quickWins: asRecords(b.quick_wins).map((q, i) => ({
+      aksi: str(q.aksi),
+      channel: str(q.channel),
+      picDivisi: str(q.pic_divisi),
+      dampakDiharapkan: str(q.dampak_diharapkan),
+      urutan: numOrNull(q.urutan) ?? i,
+    })),
+    risikoStruktural: asRecords(b.risiko_struktural).map((r, i) => ({
+      risiko: str(r.risiko),
+      urutan: numOrNull(r.urutan) ?? i,
+    })),
+    prasyaratKlien: asRecords(b.prasyarat_klien).map((p, i) => ({
+      item: str(p.item),
+      picKlien: str(p.pic_klien),
+      deadline: strOrNull(p.deadline),
+      urutan: numOrNull(p.urutan) ?? i,
+    })),
   };
 }

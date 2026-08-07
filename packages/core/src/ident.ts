@@ -29,10 +29,19 @@ export interface PrefixInfo {
  * Prefix registry — the exact set used by `ident.Next` across the Go backend,
  * cross-checked against docs/DATA_MODEL.md §1. Immutable & never reused
  * (CLAUDE.md #1). Adding a prefix requires a DATA_MODEL.md entry.
+ *
+ * This object is the TS half of the M6A §7 two-mechanism guarantee; the DB half
+ * is the `entity_prefix` table (PK ⇒ duplicates impossible). The two must not
+ * diverge — `ident.registry.test.ts` asserts it both ways, and the same test
+ * scans every ID-minting call site so a prefix cannot reach `ident_next` without
+ * being registered here. That check was added because three had already slipped
+ * through (`ACT`, `LDR`, `DEMO`): they called the untyped executor directly.
  */
 export const PREFIXES = {
   LEAD: { entity: 'Lead record', module: 'M1' },
   PRSP: { entity: 'Prospect attempt', module: 'M0/M1' },
+  ACT: { entity: 'Prospect activity', module: 'M0/M1' },
+  LDR: { entity: 'Lead delete request', module: 'M1' },
   NEG: { entity: 'Negotiation proposal', module: 'M0' },
   CMP: { entity: 'Campaign (acquisition)', module: 'M3' },
   CLI: { entity: 'Client', module: 'M0→M4' },
@@ -54,6 +63,19 @@ export const PREFIXES = {
   PERF: { entity: 'Performance Score', module: 'M14' },
   MSV: { entity: 'Master Service List version', module: 'Admin' },
   DBR: { entity: 'Demo Block Request', module: 'demo' },
+  DEMO: { entity: 'Demo task', module: 'demo' },
+  // M6A/6B/6C. `STRG` is deliberately four letters (M6A §7): three-letter space
+  // is where collisions live, and `STR` is already the old M6 §4 entity. The
+  // registry confirmed STRG/PLAN/VND are all free, so the PRD's `STGY`/`PPRD`
+  // fallback is not used.
+  STRG: { entity: 'Strategi (Full Store Management)', module: 'M6A' },
+  PLAN: { entity: 'Plan period', module: 'M6B' },
+  VND: { entity: 'Vendor', module: 'M6A' },
+  // O57 — the agreement a client signed, covering n Services. Strategi hangs off
+  // this, not off a Service, so Rule 2 / D-1 / §7 read as written.
+  CTR: { entity: 'Contract (kesepakatan klien)', module: 'M6A/M6B' },
+  // M5-OA-7 — a Finance-filed request to change a transaction's payment scheme,
+  // applied only on Director ACC. Minted after validation passes (house rule #1).
   TCR: { entity: 'Transaction Change Request', module: 'M5' },
 } as const satisfies Record<string, PrefixInfo>;
 

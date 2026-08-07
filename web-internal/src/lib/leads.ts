@@ -57,6 +57,57 @@ export interface RegisterLeadResult {
   notice?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Pendaftaran lead BATCH (QA revisi 2026-08-07) — POST /leads/batch.
+//
+// Satu Source (dan satu keputusan Origin Campaign) untuk maksimal 5 prospek;
+// tiap baris tetap melewati pintu dedup M1 §5 sendiri, jadi laporannya per baris:
+// baris yang bentrok ditolak dengan pesan BI verbatim sementara baris lain tetap
+// terdaftar. Berbeda dari /leads/bulk (pintu import Marketing) karena di sini
+// setiap lead melahirkan PRSP milik si sales.
+// ---------------------------------------------------------------------------
+
+// Satu baris prospek — Source/Campaign ada di level batch, bukan per baris.
+export interface BatchProspectInput {
+  lead_name: string;
+  phone_number: string;
+  email?: string;
+}
+
+// Body POST /leads/batch.
+export interface BatchRegisterInput {
+  source: string;
+  campaign_id?: string;
+  outside_campaign?: boolean;
+  prospects: BatchProspectInput[];
+}
+
+// Verdict per baris — `notice` = pesan co-pursuit, `reason` = alasan penolakan.
+export interface BatchRegisterRowResult {
+  row_number: number;
+  lead_name: string;
+  phone_number: string;
+  registered: boolean;
+  lead_id: string;
+  attempt_id: string;
+  notice: string;
+  reason: string;
+}
+
+// Response POST /leads/batch.
+export interface BatchRegisterReport {
+  registered: number;
+  rejected: number;
+  summary: string;
+  rows: BatchRegisterRowResult[];
+  rejections: BatchRegisterRowResult[];
+}
+
+// Batas prospek per pendaftaran — cermin leads.MAX_REGISTER_BATCH di domain.
+// Server tetap otoritasnya (`[maksimal 5 lead per pendaftaran!]`); ini hanya
+// yang membuat tombol "Tambah Prospek" berhenti di baris kelima.
+export const MAX_REGISTER_BATCH = 5;
+
 // One row for POST /leads/bulk — mirrors module1_leads.BulkRow.
 export interface BulkRow {
   lead_name: string;
@@ -116,6 +167,10 @@ export interface LeadRow {
   winning_attempt_id: string | null;
   created_at: string;
   open_attempt_count: number;
+  // Peran AKTOR atas lead ini — dipakai kolom "Peran" di tab Lead Saya.
+  // Keduanya false bila permintaan tidak memakai filter `mine`.
+  registered_by_me: boolean;
+  claimed_by_me: boolean;
 }
 
 // One row in GET /leads/{id}'s attempts list (the "kontes" for this lead).
@@ -129,7 +184,10 @@ export interface LeadAttemptRow {
 
 // GET /leads/{id} response — LeadRow minus open_attempt_count, plus attempts.
 export interface LeadDetail {
-  lead: Omit<LeadRow, 'open_attempt_count'>;
+  // Kolom peran ikut di-omit bersama rollup: ia menjawab "apa hubungan PEMBACA
+  // dengan baris ini" untuk kolom Peran di tab Lead Saya, sedangkan halaman
+  // detail sudah menampilkan seluruh kontes attempt lengkap dengan namanya.
+  lead: Omit<LeadRow, 'open_attempt_count' | 'registered_by_me' | 'claimed_by_me'>;
   attempts: LeadAttemptRow[];
 }
 
@@ -193,6 +251,10 @@ export function registerLead(input: RegisterLeadInput): Promise<RegisterLeadResu
   return api.post<RegisterLeadResult>('/leads', input);
 }
 
+export function registerLeadsBatch(input: BatchRegisterInput): Promise<BatchRegisterReport> {
+  return api.post<BatchRegisterReport>('/leads/batch', input);
+}
+
 export function bulkImportLeads(campaignId: string | undefined, rows: BulkRow[]): Promise<BulkReport> {
   return api.post<BulkReport>('/leads/bulk', { campaign_id: campaignId ?? '', rows });
 }
@@ -201,14 +263,40 @@ export function claimLead(leadId: string): Promise<{ attempt: AttemptStub }> {
   return api.post<{ attempt: AttemptStub }>(`/leads/${leadId}/claim`);
 }
 
-export function listPool(): Promise<{ data: PoolRow[] }> {
-  return api.get<{ data: PoolRow[] }>('/leads/pool');
+// GET /leads/pool[?q=&source=] — q mencari nama ATAU nomor telepon (substring,
+// case-insensitive); source menyaring persis satu nilai dari SOURCES.
+export function listPool(params?: { q?: string; source?: string }): Promise<{ data: PoolRow[] }> {
+  const search = new URLSearchParams();
+  if (params?.q) search.set('q', params.q);
+  if (params?.source) search.set('source', params.source);
+  const qs = search.toString();
+  return api.get<{ data: PoolRow[] }>(`/leads/pool${qs ? `?${qs}` : ''}`);
 }
 
-export function listLeads(params?: { status?: string; q?: string }): Promise<{ data: LeadRow[] }> {
+// Mode kepemilikan untuk tab "Lead Saya" (keputusan pemilik 2026-08-06):
+//   registered — lead yang AKTOR daftarkan sendiri (M1 §4 / import Marketing);
+//   claimed    — lead orang lain yang ia pegang attempt-nya (klaim Pool, §6);
+//   any        — salah satu dari keduanya.
+export const MINE_MODES = ['registered', 'claimed', 'any'] as const;
+export type MineMode = (typeof MINE_MODES)[number];
+
+export const MINE_MODE_LABELS: Record<MineMode, string> = {
+  registered: 'Yang saya daftarkan',
+  claimed: 'Yang saya klaim',
+  any: 'Semua lead saya',
+};
+
+// GET /leads[?status=&q=&source=&mine=<mode>] — `mine` mempersempit ke lead
+// milik aktor. Ia KENYAMANAN, bukan batas keamanan: baris yang boleh dibaca
+// tetap ditentukan RLS `leads_select`.
+export function listLeads(
+  params?: { status?: string; q?: string; source?: string; mine?: MineMode },
+): Promise<{ data: LeadRow[] }> {
   const search = new URLSearchParams();
   if (params?.status) search.set('status', params.status);
   if (params?.q) search.set('q', params.q);
+  if (params?.source) search.set('source', params.source);
+  if (params?.mine) search.set('mine', params.mine);
   const qs = search.toString();
   return api.get<{ data: LeadRow[] }>(`/leads${qs ? `?${qs}` : ''}`);
 }
@@ -258,4 +346,48 @@ export function rejectLeadDelete(reqId: string, note?: string): Promise<{ reques
   return api.post<{ request: DeleteRequest }>(`/leads/delete-requests/${reqId}/reject`, {
     note: note ?? '',
   });
+}
+
+// ---------------------------------------------------------------------------
+// Log aktivitas prospek (ACT-) — keputusan pemilik 2026-08-06, docs/DECISIONS.md.
+//
+// Bukan lifecycle: mencatat aktivitas TIDAK memindahkan status prospek. Baris
+// bersifat append-only (tidak ada endpoint edit/hapus, dan DB menolaknya lewat
+// trigger), jadi koreksi dilakukan dengan mencatat aktivitas baru.
+// ---------------------------------------------------------------------------
+
+export interface ActivityRow {
+  id: string;
+  attempt_id: string;
+  lead_id: string;
+  activity_type: string;
+  occurred_at: string;
+  summary: string;
+  created_by: string;
+  created_by_nama: string;
+  created_at: string;
+}
+
+// Rollup effort yang DITURUNKAN dari log (tidak pernah disimpan).
+export interface EffortSummary {
+  attempt_id: string;
+  total: number;
+  by_type: Record<string, number>;
+  last_activity_at: string | null;
+}
+
+// Taksonomi TERTUTUP — cermin ACTIVITY_TYPES di packages/domain/src/activity.ts
+// dan CHECK `ck_act_type` di migrasi 20260806050000. Menambah nilai di sini saja
+// hanya menghasilkan 400 dari server.
+export const ACTIVITY_TYPES = [
+  'Follow Up',
+  'Jadwal Meeting',
+  'Online Meeting',
+  'Visit',
+  'Lainnya',
+] as const;
+
+// GET /leads/{id}/activities — seluruh aktivitas SEMUA attempt pada satu lead.
+export function listLeadActivities(leadId: string): Promise<{ data: ActivityRow[] }> {
+  return api.get<{ data: ActivityRow[] }>(`/leads/${leadId}/activities`);
 }

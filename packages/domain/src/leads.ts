@@ -29,7 +29,7 @@
  * Reference: backend/internal/module1_leads/{leads,dedup,normalize,reads}.go.
  */
 
-import { bi, notification, permission, statemachine } from '@cdps/core';
+import { bi, ident, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 // Single source of truth for the CDPS division label (Go keeps a module-local
 // copy in module1_leads/bulk.go; here one exported constant serves both).
@@ -76,6 +76,8 @@ export const MSG_ALREADY_OWN_ATTEMPT = '[anda sudah memiliki prospek aktif untuk
 export const MSG_ACTIVE_OTHER_SALES_IMPORT = '[lead sedang diproses oleh sales lain (nama)]';
 /** NON-error notice returned on a co-pursuit join when others already pursue the lead. */
 export const MSG_LEAD_CO_WORKED = '[lead juga sedang dikerjakan sales lain]';
+/** Batch registration carrying more than MAX_REGISTER_BATCH prospects (QA revisi 2026-08-07). */
+export const MSG_MAX_REGISTER_BATCH = '[maksimal 5 lead per pendaftaran!]';
 
 // Delete-with-Head-ACC messages. NOT from the PRD (M1 has no delete door) — new
 // strings introduced by the owner decision of 2026-07-29 and logged verbatim in
@@ -115,6 +117,18 @@ export class BlockedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'LeadBlockedError';
+  }
+}
+
+/**
+ * More than MAX_REGISTER_BATCH prospects in one batch registration — carries the
+ * verbatim BI message; maps to HTTP 400 (a malformed submission, not a lifecycle
+ * conflict, so it is NOT a BlockedError/409).
+ */
+export class TooManyProspectsError extends Error {
+  constructor() {
+    super(MSG_MAX_REGISTER_BATCH);
+    this.name = 'LeadTooManyProspectsError';
   }
 }
 
@@ -522,6 +536,166 @@ export async function register(sql: Sql, actor: Actor, input: RegisterInput): Pr
   return committed.result;
 }
 
+// ---------------------------------------------------------------------------
+// Batch registration door (QA revisi 2026-08-07, arahan Nerissa).
+//
+// One Source (and one Origin Campaign decision) covers up to MAX_REGISTER_BATCH
+// prospects, so a salesperson who scouted five contacts in one sitting registers
+// them with one click instead of retyping the Source five times.
+//
+// It is a LOOP OVER `register`, deliberately — not a second registration door:
+//   1. Every row gets the FULL M1 §5 dedup decision table, the §9.3 campaign
+//      rule, its own LEAD/PRSP ids and its own audit rows. There is exactly one
+//      set of registration rules in this file and batch does not fork it.
+//   2. ONE TRANSACTION PER ROW (as the import door, §3 rule 5): a duplicate on
+//      row 3 rejects itself and leaves rows 1, 2, 4, 5 committed. Wrapping the
+//      batch in one transaction would throw away four good leads over one
+//      duplicate — which is exactly what the salesperson was avoiding by
+//      batching.
+//   3. Two rows carrying the SAME phone need no new rule: the first mints the
+//      attempt, and the second meets the actor's own open attempt and is
+//      refused with MSG_ALREADY_OWN_ATTEMPT by `decide` — verbatim, per row.
+// ---------------------------------------------------------------------------
+
+/** Batch-registration cap: one Source, up to five prospects (QA revisi 2026-08-07). */
+export const MAX_REGISTER_BATCH = 5;
+
+/** One prospect line of a batch registration (Source/Campaign are batch-level). */
+export interface BatchProspect {
+  leadName: string;
+  phoneNumber: string;
+  email?: string;
+}
+
+/** A batch registration: the shared Source/Campaign + its prospect lines. */
+export interface BatchRegisterInput {
+  source?: string;
+  campaignId?: string;
+  outsideCampaign?: boolean;
+  prospects: BatchProspect[];
+}
+
+/** Per-row verdict of a batch registration (shaped like BulkRowResult). */
+export interface BatchRegisterRowResult {
+  rowNumber: number;
+  leadName: string;
+  phoneNumber: string;
+  registered: boolean;
+  leadId: string;
+  attemptId: string;
+  /** MSG_LEAD_CO_WORKED on a co-pursuit join; '' otherwise. */
+  notice: string;
+  /** verbatim BI rejection reason; '' for registered rows. */
+  reason: string;
+}
+
+/** The batch report: counts, summary line, all rows, and the rejects. */
+export interface BatchRegisterReport {
+  registered: number;
+  rejected: number;
+  summary: string;
+  rows: BatchRegisterRowResult[];
+  rejections: BatchRegisterRowResult[];
+}
+
+/** Renders the batch summary line (mirrors bulkSummary's shape). */
+export function batchSummary(registered: number, rejected: number): string {
+  return `[${registered} lead berhasil didaftarkan, ${rejected} ditolak]`;
+}
+
+/**
+ * registerBatch registers 1..MAX_REGISTER_BATCH prospects under ONE Source (M0
+ * §3 / M1 §4). Every row runs through `register`, so each carries the full dedup
+ * decision table, its own transaction, its own ids and its own audit trail.
+ *
+ * Batch-level failures throw and nothing is attempted: an empty/over-cap list
+ * (IncompleteError / MSG_MAX_REGISTER_BATCH) and the two campaign gates — the
+ * §9.3 conditional-mandatory rule and "the picked campaign does not exist" —
+ * because both describe the WHOLE submission, not one row. Checking them once up
+ * front is also what stops a stale campaign picker from producing five identical
+ * `[data tidak ditemukan]` rejections.
+ *
+ * Row-level failures never throw: a blocked duplicate or an incomplete line is a
+ * verdict in the report, and the other rows stay committed.
+ */
+export async function registerBatch(
+  sql: Sql,
+  actor: Actor,
+  input: BatchRegisterInput,
+): Promise<BatchRegisterReport> {
+  const prospects = input.prospects ?? [];
+  if (prospects.length === 0) {
+    throw new IncompleteError();
+  }
+  if (prospects.length > MAX_REGISTER_BATCH) {
+    throw new TooManyProspectsError();
+  }
+  const source = input.source?.trim() ?? '';
+  const campaignId = input.campaignId?.trim() ?? '';
+  const outsideCampaign = campaignId === '' && input.outsideCampaign === true;
+  // Same gate `register` applies per row, hoisted to the batch: the Source is
+  // shared, so a missing mandatory campaign is a property of the submission.
+  if (campaignId === '' && !outsideCampaign && campaignRequiredForSource(source)) {
+    throw new IncompleteError();
+  }
+  if (campaignId !== '') {
+    await requireSelectableCampaign(sql, campaignId);
+  }
+
+  const rows: BatchRegisterRowResult[] = [];
+  let registered = 0;
+  let rejected = 0;
+  for (let i = 0; i < prospects.length; i++) {
+    const p = prospects[i];
+    const base: BatchRegisterRowResult = {
+      rowNumber: i + 1,
+      leadName: (p.leadName ?? '').trim(),
+      phoneNumber: (p.phoneNumber ?? '').trim(),
+      registered: false,
+      leadId: '',
+      attemptId: '',
+      notice: '',
+      reason: '',
+    };
+    try {
+      const res = await register(sql, actor, {
+        leadName: p.leadName ?? '',
+        phoneNumber: p.phoneNumber ?? '',
+        email: p.email,
+        source,
+        campaignId: campaignId === '' ? undefined : campaignId,
+        outsideCampaign: outsideCampaign ? true : undefined,
+      });
+      registered++;
+      rows.push({
+        ...base,
+        registered: true,
+        leadId: res.lead.id,
+        attemptId: res.attempt.id,
+        notice: res.notice,
+      });
+    } catch (err) {
+      // BlockedError (dedup) and IncompleteError (missing name/phone) both carry
+      // the verbatim BI string the row must show. Anything else is degraded to
+      // the house default rather than leaking a driver error into the report —
+      // one broken row must not fail the batch (importOneRow does the same).
+      const reason = err instanceof BlockedError || err instanceof IncompleteError
+        ? err.message
+        : bi.INCOMPLETE_DATA;
+      rejected++;
+      rows.push({ ...base, reason });
+    }
+  }
+
+  return {
+    registered,
+    rejected,
+    summary: batchSummary(registered, rejected),
+    rows,
+    rejections: rows.filter((r) => !r.registered),
+  };
+}
+
 /**
  * requireSelectableCampaign re-checks server-side that `campaignId` names a
  * campaign that EXISTS. That is the whole gate, and the narrowness is deliberate.
@@ -837,6 +1011,19 @@ export interface LeadListScope {
  * null when the actor has no access at all. Mirrors Go `leadListScope`:
  * Director/OD and Marketing-lead and Sales-lead see everything; Marketing staff
  * are narrowed to their own leads; everyone else is denied.
+ *
+ * SALES STAFF (added 2026-08-06, QA pemilik). Go denied them outright, and that
+ * port was faithful but wrong in practice: a salesperson who registers a lead
+ * through the M1 §4 door has NOWHERE to see it again. The lead lands `active`
+ * (scouted, exclusive), so it never appears on the Pool board — Pool is `[Pool]`
+ * only, by design (§6 rule 3) — and this gate answered 403 on the Database. The
+ * only trace was the derived PRSP row in the Sales workspace.
+ *
+ * Opening the endpoint does NOT widen what they can read: `leadsDatabase` runs
+ * through `readAsActor`, so `leads_select` still narrows the rows to leads they
+ * created or hold an attempt on (RLS baseline + 20260729031525). "Staff = own
+ * data only" is therefore still enforced where it was already enforced — one
+ * place, not two (CLAUDE.md: the two sides must never disagree).
  */
 export function leadListScope(actor: permission.Actor): LeadListScope | null {
   if (actor.role.director || actor.role.od) {
@@ -848,7 +1035,7 @@ export function leadListScope(actor: permission.Actor): LeadListScope | null {
     }
     return { marketingStaffScope: true };
   }
-  if (actor.role.division === SALES_DIVISION && actor.role.level === permission.LevelLead) {
+  if (actor.role.division === SALES_DIVISION) {
     return { marketingStaffScope: false };
   }
   return null;
@@ -878,8 +1065,20 @@ export interface PoolBoardRow {
  * poolBoard returns every `[Pool]` lead with its contest counts and the M1-OA-7
  * stale flag (unclaimed > 24h). Multiple salespeople compete on one pool lead
  * by design (M1-OA-1); `myOpenAttempt` marks rows the caller already holds.
+ *
+ * `q` (nama/telepon substring) and `source` narrow the board the same way they
+ * narrow `leadsDatabase` — same predicate shape, same parameter no-op when empty
+ * (`'' = ''` short-circuits), so there is no dynamic SQL to inject into. Added
+ * 2026-08-06 (QA pemilik): a pool that only ever grows is unusable without them.
  */
-export async function poolBoard(sql: Queryable, actorEmployeeId: string): Promise<PoolBoardRow[]> {
+export async function poolBoard(
+  sql: Queryable,
+  actorEmployeeId: string,
+  filter: { q?: string; source?: string } = {},
+): Promise<PoolBoardRow[]> {
+  const q = filter.q?.trim() ?? '';
+  const like = `%${q}%`;
+  const source = filter.source?.trim() ?? '';
   const rows = await sql<{
     id: string; lead_name: string; phone_number: string; source: string;
     origin_campaign_id: string | null; created_at: Date;
@@ -894,12 +1093,35 @@ export async function poolBoard(sql: Queryable, actorEmployeeId: string): Promis
                and pa2.status <> all(${OPEN_ATTEMPT_TERMINAL})) as my_open_attempt
     from leads l
     where l.record_status = ${RECORD_POOL}
+      and (${q} = '' or l.lead_name ilike ${like} or l.phone_number ilike ${like})
+      and (${source} = '' or l.source = ${source})
     order by l.created_at desc, l.id desc`;
   return rows.map((r) => ({
     id: r.id, leadName: r.lead_name, phoneNumber: r.phone_number, source: r.source,
     originCampaignId: r.origin_campaign_id, createdAt: r.created_at,
     stale: r.stale, openAttemptCount: Number(r.open_attempt_count), myOpenAttempt: r.my_open_attempt,
   }));
+}
+
+/**
+ * How "my lead" is resolved for the Lead Saya board (keputusan pemilik
+ * 2026-08-06). See `leadsDatabase`.
+ */
+export const MINE_REGISTERED = 'registered';
+export const MINE_CLAIMED = 'claimed';
+export const MINE_ANY = 'any';
+export type MineMode = typeof MINE_REGISTERED | typeof MINE_CLAIMED | typeof MINE_ANY;
+
+/**
+ * parseMineMode maps a wire value onto the closed set, defaulting to `any`.
+ * Unknown values are NOT an error: this is a view filter, and the safe reading
+ * of an unrecognised one is the widest of the three (which RLS still narrows).
+ */
+export function parseMineMode(raw: string | null | undefined): MineMode {
+  const v = (raw ?? '').trim();
+  if (v === MINE_REGISTERED) return MINE_REGISTERED;
+  if (v === MINE_CLAIMED) return MINE_CLAIMED;
+  return MINE_ANY;
 }
 
 /** One Leads Database row (contract §4). */
@@ -916,12 +1138,38 @@ export interface LeadsDbRow {
   winningAttemptId: string | null;
   createdAt: Date;
   openAttemptCount: number;
+  /**
+   * Whether the CALLER created this lead record, and whether they hold an
+   * attempt on it. Both are always computed (false for an anonymous read), not
+   * only when a `mine` filter is applied: the Lead Saya board renders them as a
+   * "Peran" column, and a column that exists only under one filter is a column
+   * that renders blank under every other one.
+   */
+  registeredByMe: boolean;
+  claimedByMe: boolean;
 }
 
 /**
  * leadsDatabase returns leads newest-first, optionally filtered by an exact
- * record_status and a name/phone substring. Filters are parameter no-ops when
- * empty (`'' = ''` short-circuits), so there is no dynamic SQL to inject into.
+ * record_status, a name/phone substring, an exact Source, and "mine only".
+ * Filters are parameter no-ops when empty (`'' = ''` short-circuits), so there
+ * is no dynamic SQL to inject into.
+ *
+ * `source` (added 2026-08-06, QA pemilik) is the "lead ini datang dari aktivitas
+ * mana" cut — Scouting / Event / Leads - Iklan / … — the dimension M1 §8 already
+ * evaluates lead quality by, but which the board had no way to slice.
+ *
+ * `mineEmployeeId` + `mineMode` back the "Lead Saya" board (keputusan pemilik
+ * 2026-08-06). The mode matters because "my lead" has two genuinely different
+ * meanings in M1 and collapsing them hides work:
+ *   - `registered` — the actor CREATED the lead record (M1 §4 scouted intake, or
+ *     a Marketing import). This is the tab's default and the literal ask.
+ *   - `claimed`    — the actor holds a PRSP attempt on someone else's lead (a
+ *     Pool claim, §6). Not registered by them, but theirs to work.
+ *   - `any`        — either of the above.
+ * All three are a CONVENIENCE, never a security boundary: row visibility is
+ * `leads_select`'s job, and these can only ever subtract from what RLS already
+ * allows. `mineEmployeeId` is empty for callers that do not use it.
  *
  * Head-deleted leads are hidden from the unfiltered list — that is what "delete"
  * has to mean to the people using the board — but remain reachable by asking for
@@ -930,25 +1178,46 @@ export interface LeadsDbRow {
  */
 export async function leadsDatabase(
   sql: Queryable,
-  filter: { status?: string; q?: string } = {},
+  filter: {
+    status?: string; q?: string; source?: string;
+    mineEmployeeId?: string; mineMode?: MineMode;
+  } = {},
 ): Promise<LeadsDbRow[]> {
   const status = filter.status?.trim() ?? '';
   const q = filter.q?.trim() ?? '';
   const like = `%${q}%`;
+  const source = filter.source?.trim() ?? '';
+  const mine = filter.mineEmployeeId?.trim() ?? '';
+  const mode: MineMode = filter.mineMode ?? MINE_ANY;
+  // Split into two independent booleans so the SQL below stays a fixed string
+  // with fixed parameters — no branch builds a different query.
+  const wantRegistered = mine !== '' && (mode === MINE_ANY || mode === MINE_REGISTERED);
+  const wantClaimed = mine !== '' && (mode === MINE_ANY || mode === MINE_CLAIMED);
   const rows = await sql<{
     id: string; lead_name: string; phone_number: string; email: string | null;
     source: string; origin_division: string; origin_campaign_id: string | null;
     last_touch_campaign_id: string | null; record_status: string;
     winning_attempt_id: string | null; created_at: Date; open_attempt_count: string;
+    registered_by_me: boolean; claimed_by_me: boolean;
   }[]>`
     select l.id, l.lead_name, l.phone_number, l.email, l.source, l.origin_division,
            l.origin_campaign_id, l.last_touch_campaign_id, l.record_status, l.winning_attempt_id, l.created_at,
            (select count(*) from prospect_attempts pa
-             where pa.lead_id = l.id and pa.status <> all(${OPEN_ATTEMPT_TERMINAL})) as open_attempt_count
+             where pa.lead_id = l.id and pa.status <> all(${OPEN_ATTEMPT_TERMINAL})) as open_attempt_count,
+           (${mine} <> '' and l.created_by = ${mine}) as registered_by_me,
+           (${mine} <> '' and exists(
+              select 1 from prospect_attempts pa4
+               where pa4.lead_id = l.id and pa4.owner_employee_id = ${mine})) as claimed_by_me
     from leads l
     where (${status} = '' or l.record_status = ${status})
       and (${status} = ${RECORD_DELETED} or l.record_status <> ${RECORD_DELETED})
       and (${q} = '' or l.lead_name ilike ${like} or l.phone_number ilike ${like})
+      and (${source} = '' or l.source = ${source})
+      and (${mine} = ''
+           or (${wantRegistered} and l.created_by = ${mine})
+           or (${wantClaimed} and exists(
+                 select 1 from prospect_attempts pa3
+                  where pa3.lead_id = l.id and pa3.owner_employee_id = ${mine})))
     order by l.created_at desc, l.id desc`;
   return rows.map((r) => ({
     id: r.id, leadName: r.lead_name, phoneNumber: r.phone_number, email: r.email,
@@ -956,6 +1225,7 @@ export async function leadsDatabase(
     lastTouchCampaignId: r.last_touch_campaign_id, recordStatus: r.record_status,
     winningAttemptId: r.winning_attempt_id, createdAt: r.created_at,
     openAttemptCount: Number(r.open_attempt_count),
+    registeredByMe: r.registered_by_me, claimedByMe: r.claimed_by_me,
   }));
 }
 
@@ -1356,7 +1626,7 @@ export async function requestDelete(
       return { kind: 'blocked', message: decision.message };
     }
 
-    const reqId = await ex.ident.identNext('LDR', now);
+    const reqId = await ident.nextId(ex.ident, 'LDR', now);
     await tx`
       insert into lead_delete_requests (id, lead_id, reason, status, requested_by, created_by)
       values (${reqId}, ${leadId}, ${trimmed}, ${DELETE_PENDING}, ${actor.employeeId}, ${actor.employeeId})`;

@@ -6,19 +6,25 @@ import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { LEVEL_STAFF, useAssignableEmployees } from '@/lib/directory';
 import EmployeePicker from '@/components/EmployeePicker';
+import PlanGatePanel from '@/components/PlanGatePanel';
 import {
   BRIEF_DIVISIONS,
   PRIORITIES,
+  SERVICE_AWAITING_ONBOARDING,
   STRATEGY_APPROVED,
+  TIER_LABELS,
   createBrief,
   createStrategy,
+  getService,
   isAccountLead,
   isAccountStaff,
   isReadOnlyOD,
   listServiceBriefs,
   listStrategies,
+  nextOnboardingStep,
   setStrategyRequirement,
   type Brief,
+  type ServiceQueueRow,
   type Strategy,
 } from '@/lib/account';
 import StatusBadge from '@/components/StatusBadge';
@@ -37,6 +43,13 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   const [briefs, setBriefs] = useState<Brief[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // The Service row itself. Before it was fetched, this page inferred the
+  // execution path from "does a Strategy row exist" — which reads a plan-gated
+  // Service nobody has drafted yet as Direct, so it offered a Brief form the
+  // server always rejected with [layanan ini wajib memiliki Strategy & Plan …].
+  const [service, setService] = useState<ServiceQueueRow | null>(null);
+  const [serviceError, setServiceError] = useState<string | null>(null);
 
   const [strategy, setStrategy] = useState<Strategy | null>(null);
   const [strategyError, setStrategyError] = useState<string | null>(null);
@@ -99,6 +112,19 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
     }
   }, [id]);
 
+  const loadService = useCallback(async () => {
+    setServiceError(null);
+    try {
+      const svc = await getService(id);
+      setService(svc);
+      // The override control shows the CURRENT effective requirement, so the AM
+      // sees what they are changing instead of a checkbox that always reads "no".
+      setReqValue(svc.requires_strategy_plan);
+    } catch (err) {
+      setServiceError(errorMessage(err));
+    }
+  }, [id]);
+
   const loadStrategy = useCallback(async () => {
     setStrategyError(null);
     try {
@@ -111,8 +137,9 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
 
   useEffect(() => {
     load();
+    loadService();
     loadStrategy();
-  }, [load, loadStrategy]);
+  }, [load, loadService, loadStrategy]);
 
   function toggleSDivision(div: string) {
     setSDivisions((prev) => (prev.includes(div) ? prev.filter((d) => d !== div) : [...prev, div]));
@@ -151,6 +178,9 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         `Kebutuhan Strategy & Plan diset ke ${res.requires_strategy_plan ? 'wajib' : 'tidak wajib'} (pin MSL: ${res.pinned_requires_strategy_plan ? 'wajib' : 'tidak wajib'}).`,
       );
       setReqReason('');
+      // The execution path just changed — refetch so the header, the next-step
+      // hint and the Brief form stop describing the old path.
+      await loadService();
     } catch (err) {
       setReqError(errorMessage(err));
     } finally {
@@ -158,8 +188,19 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
     }
   }
 
-  const planGated = strategy !== null; // a Strategy row exists for this Service
+  // The EFFECTIVE gate from the Service row (override ∨ MSL pin, M6-OA-1) — the
+  // same value `guardBriefCreation` enforces server-side. The old "a Strategy row
+  // exists" guess is kept only as a fallback for the window where the Service read
+  // failed (e.g. an execution-division actor who may read Briefs but not the
+  // Service), so the page degrades instead of mislabelling everything Direct.
+  const planGated = service ? service.requires_strategy_plan : strategy !== null;
   const approvedStrategy = strategy?.status === STRATEGY_APPROVED ? strategy : null;
+  // The two §4 write doors are only open at [Awaiting Onboarding] (createStrategy /
+  // setStrategyRequirement both reject otherwise, MSG_SERVICE_NOT_AWAITING). When
+  // the Service read is unavailable, fall back to permissive and let the server
+  // answer — hiding a control that would have worked is the worse failure.
+  const awaitingOnboarding = service ? service.status === SERVICE_AWAITING_ONBOARDING : true;
+  const step = service ? nextOnboardingStep(service) : null;
 
   async function handleCreateBrief(e: FormEvent) {
     e.preventDefault();
@@ -221,9 +262,92 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
       </div>
 
       <div>
-        <h1>Layanan {id}</h1>
-        <p className="muted">Kelola Strategy &amp; Plan dan Brief untuk layanan ini (M6 §4/§5).</p>
+        <h1>{service ? service.name : `Layanan ${id}`}</h1>
+        <p className="muted">
+          {service ? (
+            <>
+              {id} &middot;{' '}
+              <Link href={`/clients/${encodeURIComponent(service.client_id)}`}>
+                {service.toko || service.client_id}
+              </Link>
+            </>
+          ) : (
+            id
+          )}
+          {' '}&mdash; Strategy &amp; Plan dan Brief untuk layanan ini (M6 §4/§5).
+        </p>
       </div>
+
+      {serviceError && <div className="alert alertError" role="alert">{serviceError}</div>}
+
+      {/* The onboarding state of THIS service, in the order the gates run. It
+          names the next door explicitly: the AM's complaint was never that the
+          forms were missing, it was that nothing said which one applies. */}
+      {service && (
+        <section className="card">
+          <div className="cardHeader">
+            <h2>Status Onboarding</h2>
+            <StatusBadge status={service.status} />
+          </div>
+          <div className="grid2">
+            <div>
+              <div className="muted" style={{ fontSize: 12 }}>Jalur Eksekusi</div>
+              <div>
+                {service.plan_determination_pending
+                  ? 'Belum ditentukan — isi form Penentuan Kebutuhan Plan'
+                  : service.requires_strategy_plan
+                    ? 'Plan-gated (wajib Strategy & Plan)'
+                    : 'Direct (tanpa Plan)'}
+                {service.overridden && (
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    {' '}&middot; override dari pin MSL (
+                    {service.pinned_requires_strategy_plan ? 'wajib' : 'tidak wajib'})
+                  </span>
+                )}
+              </div>
+              <div className="muted" style={{ fontSize: 12 }}>
+                Tier katalog: {TIER_LABELS[service.plan_tier]}
+              </div>
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: 12 }}>Langkah Berikutnya</div>
+              <div>{step?.label ?? '—'}</div>
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: 12 }}>Jumlah Brief</div>
+              <div>{service.brief_count}</div>
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: 12 }}>AM Pemilik</div>
+              <div>{service.assigned_am_id || 'Belum ditugaskan'}</div>
+            </div>
+          </div>
+          {step?.kind === 'await_approval' && (
+            <p className="muted" style={{ fontSize: 13 }}>
+              Plan sudah diajukan. Persetujuan ada di SPV/Head Account (M6 §4 Rule 4) &mdash; Brief baru bisa
+              dibuat setelah Plan disetujui.
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* M6C — the plan-gate determination. Mounted ABOVE Strategy & Plan because
+          it is the gate that decides whether a Strategy is needed at all. Shown
+          for every tier (read-only on the two locked ones) so the AM can see why
+          there is or is not a form. */}
+      {service && (
+        <PlanGatePanel
+          serviceId={id}
+          canWrite={canWrite}
+          canDeescalate={!readOnly && (isAccountLead(role) || !!role?.director)}
+          onDecided={async () => {
+            // The execution path just changed — refetch so the header, the next
+            // step and the Brief form stop describing the old path.
+            await loadService();
+            await loadStrategy();
+          }}
+        />
+      )}
 
       <section className="card">
         <div className="cardHeader">
@@ -243,13 +367,16 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         )}
       </section>
 
-      {!strategy && canWrite && (
+      {/* §4 Rule 1/6 + createStrategy's own gates: plan-gated only, no Plan yet,
+          Service still [Awaiting Onboarding]. A Direct service has no Plan, ever. */}
+      {!strategy && canWrite && planGated && awaitingOnboarding && !service?.plan_determination_pending && (
         <section className="card">
           <div className="cardHeader">
             <h2>Buat Strategy &amp; Plan</h2>
           </div>
           <p className="muted" style={{ fontSize: 13 }}>
-            Hanya untuk layanan plan-gated yang masih berstatus [Awaiting Onboarding].
+            Layanan ini plan-gated: Plan wajib dibuat, diajukan, dan disetujui SPV sebelum Brief bisa dibuat
+            (M6 §4 Rule 5).
           </p>
           <form className="form" onSubmit={handleCreateStrategy}>
             {sError && <div className="alert alertError" role="alert">{sError}</div>}
@@ -295,13 +422,15 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         </section>
       )}
 
-      {!strategy && canWrite && (
+      {!strategy && canWrite && awaitingOnboarding && !service?.plan_determination_pending && (
         <section className="card">
           <div className="cardHeader">
             <h2>Override Kebutuhan Strategy &amp; Plan</h2>
           </div>
           <p className="muted" style={{ fontSize: 13 }}>
             Hanya bisa saat belum ada Strategy &amp; Plan dan layanan masih [Awaiting Onboarding]. Alasan wajib.
+            Pin Master Service List tidak berubah &mdash; override ini berlaku untuk engagement ini saja
+            (M6-OA-1).
           </p>
           <form className="form" onSubmit={handleOverride}>
             {reqError && <div className="alert alertError" role="alert">{reqError}</div>}
@@ -323,11 +452,20 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         </section>
       )}
 
-      {canWrite && (
+      {/* A voided Service (M4-OA-5) has no live path left — createBrief rejects it
+          with [brief tidak dapat dibuat untuk layanan pada status ini]. */}
+      {canWrite && step?.kind !== 'none' && step?.kind !== 'determine_plan' && (
         <section className="card">
           <div className="cardHeader">
             <h2>Buat Brief</h2>
           </div>
+          {planGated && !approvedStrategy && (
+            <div className="alert alertInfo" role="status">
+              Layanan plan-gated: Brief baru bisa dibuat setelah Strategy &amp; Plan disetujui SPV/Head Account
+              (M6 §4 Rule 5).
+              {!strategy && ' Mulai dari "Buat Strategy & Plan" di atas.'}
+            </div>
+          )}
           <form className="form" onSubmit={handleCreateBrief}>
             {bError && <div className="alert alertError" role="alert">{bError}</div>}
             {bMessage && <div className="alert alertSuccess" role="status">{bMessage}</div>}

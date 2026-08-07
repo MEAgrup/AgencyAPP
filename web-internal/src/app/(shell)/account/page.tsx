@@ -13,12 +13,16 @@ import {
   canManageAssignment,
   canReadIntake,
   listIntake,
+  listServiceQueue,
   listStrategies,
   listWorkload,
+  needsOnboarding,
+  nextOnboardingStep,
   reassignAM,
   STRATEGY_SUBMITTED,
   type AMWorkload,
   type IntakeClient,
+  type ServiceQueueRow,
   type Strategy,
 } from '@/lib/account';
 import StatusBadge from '@/components/StatusBadge';
@@ -44,6 +48,14 @@ export default function AccountWorkspacePage() {
   const [workload, setWorkload] = useState<AMWorkload[] | null>(null);
   const [workloadLoading, setWorkloadLoading] = useState(true);
   const [workloadError, setWorkloadError] = useState<string | null>(null);
+
+  // Service queue (§3 Rule 4) — the AM's own work list, and the ONLY navigable
+  // door into §4/§5. Every actor who reaches this page may read it (the endpoint
+  // scopes itself: AM → own clients, lead/OD/Director → all).
+  const [services, setServices] = useState<ServiceQueueRow[] | null>(null);
+  const [servicesLoading, setServicesLoading] = useState(true);
+  const [servicesError, setServicesError] = useState<string | null>(null);
+  const [serviceFilter, setServiceFilter] = useState<'onboarding' | 'all'>('onboarding');
 
   // Strategies
   const [strategies, setStrategies] = useState<Strategy[] | null>(null);
@@ -110,6 +122,19 @@ export default function AccountWorkspacePage() {
     }
   }, [showIntake]);
 
+  const loadServices = useCallback(async () => {
+    setServicesLoading(true);
+    setServicesError(null);
+    try {
+      const res = await listServiceQueue();
+      setServices(res.data);
+    } catch (err) {
+      setServicesError(errorMessage(err));
+    } finally {
+      setServicesLoading(false);
+    }
+  }, []);
+
   const loadStrategies = useCallback(async () => {
     setStrategiesLoading(true);
     setStrategiesError(null);
@@ -126,8 +151,9 @@ export default function AccountWorkspacePage() {
   useEffect(() => {
     loadIntake();
     loadWorkload();
+    loadServices();
     loadStrategies();
-  }, [loadIntake, loadWorkload, loadStrategies]);
+  }, [loadIntake, loadWorkload, loadServices, loadStrategies]);
 
   /** Opens the assign panel for one intake row (nothing is sent yet). */
   function openAssign(client: IntakeClient) {
@@ -147,12 +173,16 @@ export default function AccountWorkspacePage() {
       const res = await assignAM(clientId, assignAmId);
       const am = amCandidates?.find((e) => e.employee_id === res.assigned_am);
       setAssignMessage(
-        `AM ${am ? `${am.nama} (${res.assigned_am})` : res.assigned_am} ditugaskan untuk ${res.client_id}.`,
+        `AM ${am ? `${am.nama} (${res.assigned_am})` : res.assigned_am} ditugaskan untuk ${res.client_id}. ` +
+          'Semua layanan klien ini kini ada di antrean onboarding AM tersebut.',
       );
       setAssignTarget(null);
       setAssignAmId('');
       await loadIntake();
       await loadWorkload();
+      // The client just LEFT the intake queue and ENTERED the service queue —
+      // refresh both, or the row appears to vanish into nothing.
+      await loadServices();
     } catch (err) {
       setAssignError(errorMessage(err));
     } finally {
@@ -190,6 +220,9 @@ export default function AccountWorkspacePage() {
       ? strategies.filter((s) => s.status === STRATEGY_SUBMITTED)
       : strategies;
 
+  const visibleServices =
+    services && serviceFilter === 'onboarding' ? services.filter(needsOnboarding) : services;
+
   /**
    * Per-AM workload note inside the picker (§3 Rule 5): the count is a REFERENCE,
    * not a hard cap, and it belongs next to the choice it informs — the table below
@@ -225,6 +258,108 @@ export default function AccountWorkspacePage() {
           Workspace Account (M6) &mdash; intake &amp; penunjukan AM, Strategy &amp; Plan, Brief, dan komplain.
         </p>
       </div>
+
+      {/* §3 Rule 4 — the AM's personal queue. First on the page because it is the
+          work: every §4/§5 door is keyed by a Service ID, and before this list
+          existed the only way to obtain one was to already know it. */}
+      <section className="card">
+        <div className="cardHeader">
+          <h2>Antrean Layanan Klien</h2>
+          <div className="row" style={{ gap: 8 }}>
+            <button
+              type="button"
+              className={`btn btnSm ${serviceFilter === 'onboarding' ? 'btnPrimary' : 'btnSecondary'}`}
+              onClick={() => setServiceFilter('onboarding')}
+            >
+              Perlu Onboarding
+            </button>
+            <button
+              type="button"
+              className={`btn btnSm ${serviceFilter === 'all' ? 'btnPrimary' : 'btnSecondary'}`}
+              onClick={() => setServiceFilter('all')}
+            >
+              Semua
+            </button>
+          </div>
+        </div>
+        <p className="muted" style={{ fontSize: 13 }}>
+          Layanan klien yang Anda pegang. Kolom <strong>Langkah Berikutnya</strong> menunjukkan pintu yang
+          harus dibuka: layanan <em>plan-gated</em>{' '}
+          wajib punya Strategy &amp; Plan yang disetujui SPV sebelum Brief bisa dibuat (M6 §4 Rule 5),
+          layanan <em>Direct</em> langsung ke Brief (§5 Rule 3).
+        </p>
+        {servicesLoading && <p className="muted">Memuat...</p>}
+        {servicesError && <div className="alert alertError" role="alert">{servicesError}</div>}
+        {!servicesLoading && !servicesError && visibleServices && visibleServices.length === 0 && (
+          <div className="emptyState">
+            {serviceFilter === 'onboarding'
+              ? 'Tidak ada layanan yang menunggu onboarding.'
+              : 'Belum ada layanan klien yang terlihat untuk peran Anda.'}
+          </div>
+        )}
+        {!servicesLoading && !servicesError && visibleServices && visibleServices.length > 0 && (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Klien</th>
+                  <th>Layanan</th>
+                  <th>Service ID</th>
+                  <th>Jalur</th>
+                  <th>Status</th>
+                  <th>Brief</th>
+                  <th>Langkah Berikutnya</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleServices.map((s) => {
+                  const step = nextOnboardingStep(s);
+                  return (
+                    <tr key={s.service_id}>
+                      <td>
+                        <Link href={`/clients/${encodeURIComponent(s.client_id)}`}>{s.toko || s.client_id}</Link>
+                      </td>
+                      <td>{s.name}</td>
+                      <td>{s.service_id}</td>
+                      <td>
+                        {s.requires_strategy_plan ? (
+                          <span className="badge badge-purple">Plan-gated</span>
+                        ) : (
+                          <span className="badge badge-gray">Direct</span>
+                        )}
+                        {s.overridden && (
+                          <span className="muted" style={{ fontSize: 11, marginLeft: 6 }} title="Kebutuhan Strategy & Plan di-override dari pin Master Service List">
+                            override
+                          </span>
+                        )}
+                      </td>
+                      <td><StatusBadge status={s.status} /></td>
+                      <td>{s.brief_count}</td>
+                      <td>
+                        {step.label}
+                        {s.strategy_id && (
+                          <div className="muted" style={{ fontSize: 11 }}>
+                            <Link href={`/account/strategies/${s.strategy_id}`}>{s.strategy_id}</Link>
+                          </div>
+                        )}
+                      </td>
+                      <td>
+                        <Link
+                          href={`/account/services/${encodeURIComponent(s.service_id)}`}
+                          className="btn btnPrimary btnSm"
+                        >
+                          {step.kind === 'monitor' || step.kind === 'none' ? 'Buka' : 'Kelola'}
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <div className="grid2">
         <section className="card">

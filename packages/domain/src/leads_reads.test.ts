@@ -15,6 +15,7 @@ import {
   leadListScope,
   leadsDatabase,
   NotFoundError,
+  parseMineMode,
   poolBoard,
   register,
   type Actor,
@@ -82,6 +83,31 @@ describeDb('poolBoard', () => {
     const rows = await poolBoard(sql, 'ZZ-BUDI');
     expect(rows.find((r) => r.id === id)!.stale).toBe(true);
   });
+
+  // Filter pencarian pool (QA pemilik 2026-08-06). Pool tumbuh terus, jadi tanpa
+  // pencarian satu-satunya cara menemukan lead adalah menggulir seluruh papan.
+  it('filters by name/phone substring and by exact source', async () => {
+    const { lead } = await register(sql, budi(), {
+      leadName: 'Kolam Kwitang', phoneNumber: uniquePhone(), source: 'Event',
+      // M1 §9.3: Event WAJIB membawa Origin Campaign; deklarasi "di luar
+      // campaign" adalah satu-satunya cara memenuhinya tanpa link.
+      outsideCampaign: true,
+    });
+    await sql`update prospect_attempts set status = 'Closed-Lost' where lead_id = ${lead.id}`;
+    await sql`update leads set record_status = '[Pool]' where id = ${lead.id}`;
+
+    const byName = await poolBoard(sql, 'ZZ-BUDI', { q: 'Kwitang' });
+    expect(byName.some((r) => r.id === lead.id)).toBe(true);
+
+    const byMiss = await poolBoard(sql, 'ZZ-BUDI', { q: 'tidak-ada-xyz' });
+    expect(byMiss.some((r) => r.id === lead.id)).toBe(false);
+
+    const bySource = await poolBoard(sql, 'ZZ-BUDI', { source: 'Event' });
+    expect(bySource.some((r) => r.id === lead.id)).toBe(true);
+
+    const byOtherSource = await poolBoard(sql, 'ZZ-BUDI', { source: 'Scouting' });
+    expect(byOtherSource.some((r) => r.id === lead.id)).toBe(false);
+  });
 });
 
 describeDb('leadsDatabase', () => {
@@ -107,6 +133,88 @@ describeDb('leadsDatabase', () => {
     // status filter excludes an 'active' lead when asking for [Pool].
     const pool = await leadsDatabase(sql, { status: '[Pool]' });
     expect(pool.some((r) => r.id === lead.id)).toBe(false);
+  });
+
+  // Filter source + "hanya lead saya" (QA pemilik 2026-08-06): "lead ini datang
+  // dari aktivitas mana" dan "mana yang saya daftarkan sendiri".
+  it('filters by exact source', async () => {
+    const { lead } = await register(sql, budi(), {
+      leadName: 'Sumber Event', phoneNumber: uniquePhone(), source: 'Event', outsideCampaign: true,
+    });
+    expect((await leadsDatabase(sql, { source: 'Event' })).some((r) => r.id === lead.id)).toBe(true);
+    expect((await leadsDatabase(sql, { source: 'Website' })).some((r) => r.id === lead.id)).toBe(false);
+  });
+
+  it('mine narrows to leads the actor registered or holds an attempt on', async () => {
+    const { lead } = await register(sql, budi(), {
+      leadName: 'Milik Budi', phoneNumber: uniquePhone(), source: 'Scouting',
+    });
+    expect((await leadsDatabase(sql, { mineEmployeeId: 'ZZ-BUDI' })).some((r) => r.id === lead.id)).toBe(true);
+    expect((await leadsDatabase(sql, { mineEmployeeId: 'ZZ-ANDI' })).some((r) => r.id === lead.id)).toBe(false);
+
+    // Andi joins the same lead (co-pursuit, dedup v2) → it becomes his too.
+    await register(sql, andi(), {
+      leadName: 'Milik Budi', phoneNumber: lead.phoneNumber, source: 'Scouting',
+    });
+    expect((await leadsDatabase(sql, { mineEmployeeId: 'ZZ-ANDI' })).some((r) => r.id === lead.id)).toBe(true);
+  });
+
+  // Papan "Lead Saya" (keputusan pemilik 2026-08-06). Yang diuji di sini adalah
+  // hal yang membuat tab-nya berguna: lead yang DIDAFTARKAN dibedakan dari lead
+  // orang lain yang sekadar DIKERJAKAN. Kalau kedua mode mengembalikan himpunan
+  // yang sama, tab-nya cuma salinan Database dengan judul berbeda.
+  it('mineMode separates registered from claimed, and flags the role per row', async () => {
+    const { lead } = await register(sql, budi(), {
+      leadName: 'Punya Budi', phoneNumber: uniquePhone(), source: 'Scouting',
+    });
+    // Andi co-pursues: he holds an attempt, but did NOT create the record.
+    await register(sql, andi(), {
+      leadName: 'Punya Budi', phoneNumber: lead.phoneNumber, source: 'Scouting',
+    });
+
+    const budiRegistered = await leadsDatabase(sql, {
+      mineEmployeeId: 'ZZ-BUDI', mineMode: 'registered',
+    });
+    expect(budiRegistered.some((r) => r.id === lead.id)).toBe(true);
+
+    const andiRegistered = await leadsDatabase(sql, {
+      mineEmployeeId: 'ZZ-ANDI', mineMode: 'registered',
+    });
+    expect(andiRegistered.some((r) => r.id === lead.id)).toBe(false);
+
+    const andiClaimed = await leadsDatabase(sql, {
+      mineEmployeeId: 'ZZ-ANDI', mineMode: 'claimed',
+    });
+    const andiRow = andiClaimed.find((r) => r.id === lead.id);
+    expect(andiRow).toBeDefined();
+    expect(andiRow!.registeredByMe).toBe(false);
+    expect(andiRow!.claimedByMe).toBe(true);
+
+    // Budi is both: he registered it AND holds the first attempt on it.
+    const budiAny = await leadsDatabase(sql, { mineEmployeeId: 'ZZ-BUDI', mineMode: 'any' });
+    const budiRow = budiAny.find((r) => r.id === lead.id);
+    expect(budiRow!.registeredByMe).toBe(true);
+    expect(budiRow!.claimedByMe).toBe(true);
+
+    // Without a mine filter the flags are false — they describe the CALLER, and
+    // an unfiltered read has no caller to describe.
+    const unfiltered = await leadsDatabase(sql, {});
+    const plain = unfiltered.find((r) => r.id === lead.id);
+    expect(plain!.registeredByMe).toBe(false);
+    expect(plain!.claimedByMe).toBe(false);
+  });
+});
+
+describe('parseMineMode', () => {
+  it('maps the closed set and widens anything unrecognised to any', () => {
+    expect(parseMineMode('registered')).toBe('registered');
+    expect(parseMineMode('claimed')).toBe('claimed');
+    expect(parseMineMode('any')).toBe('any');
+    // '1' is what the first cut of the FE sent; it must keep meaning "either".
+    expect(parseMineMode('1')).toBe('any');
+    expect(parseMineMode('')).toBe('any');
+    expect(parseMineMode(null)).toBe('any');
+    expect(parseMineMode(undefined)).toBe('any');
   });
 });
 
@@ -169,9 +277,13 @@ describe('read-scope gates (O37)', () => {
       expect(leadListScope(role('Marketing', 'lead'))).toEqual({ marketingStaffScope: false });
     });
 
-    it('admits a Sales lead but denies Sales staff (Pool is their door, not this list)', () => {
+    // Diubah 2026-08-06 (QA pemilik): Sales staff DULU ditolak di sini, yang
+    // membuat lead yang ia daftarkan sendiri tidak bisa dilihat di mana pun —
+    // lead scouted lahir `active` sehingga tidak pernah muncul di Pool. Yang
+    // membatasi barisnya tetap RLS `leads_select`, bukan gate endpoint ini.
+    it('admits Sales at every level (rows still narrowed by RLS)', () => {
       expect(leadListScope(role('Sales', 'lead'))).toEqual({ marketingStaffScope: false });
-      expect(leadListScope(role('Sales', 'staff'))).toBeNull();
+      expect(leadListScope(role('Sales', 'staff'))).toEqual({ marketingStaffScope: false });
     });
 
     it('denies an unrelated or unmapped division', () => {

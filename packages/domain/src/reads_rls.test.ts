@@ -19,9 +19,11 @@
  * afterAll.
  */
 import { afterAll, describe, expect, it } from 'vitest';
+import { permission } from '@cdps/core';
 import { createClient, withClaims, type Sql } from '@cdps/db';
 import { leadsDatabase, poolBoard } from './leads';
 import { listClients } from './client';
+import { listStrategies, serviceQueue, type Actor } from './account';
 import { reminderDashboard } from './finance';
 import { allowedTransitions } from './engine';
 import { getAttempt } from './sales';
@@ -51,6 +53,17 @@ const claims = (o: {
       director: o.director ?? false,
     },
   });
+
+/**
+ * The domain-side Actor matching a claim envelope. The read models gate on this
+ * BEFORE RLS is reached, so both halves must describe the same person — passing
+ * one actor with another's claims would prove nothing.
+ */
+const actor = (employeeId: string, division: string, level: string): Actor => ({
+  employeeId,
+  divisi: division,
+  role: permission.makeRole({ division, level }),
+});
 
 const LEAD_ID = 'LEAD-ZZR-0001';
 const CMP_ID = 'CMP-ZZR-0001';
@@ -183,6 +196,88 @@ describeDb('read models under RLS (O37)', () => {
     } finally {
       await sql`delete from installments where id = ${INST}`;
       await sql`delete from transactions where id = ${TRX}`;
+      await sql`delete from contracts where client_id = ${CLI}`;
+      await sql`delete from clients where id = ${CLI}`;
+    }
+  });
+
+  /**
+   * QA account 2026-08-05. `20260805030100` opened `clients` for the Account lead
+   * but stopped there, so the CHILDREN of those clients stayed invisible:
+   * `services_select` and `strategy_plans_select` had ownership arms only. Two
+   * consequences, both silent:
+   *
+   *   - the Service queue (§3 Rule 4) was empty for SPV/Head Account, and
+   *   - a Plan the AM had just SUBMITTED has no `approved_by` yet — that is the
+   *     column the approval fills — so the "Menunggu Persetujuan" inbox was
+   *     ALWAYS empty and §4 Rule 4 could not be performed at all. Without
+   *     [Strategy Approved] no plan-gated Service can ever be briefed (§5 Rule 5),
+   *     so one policy stalled the whole chain.
+   *
+   * Asserted through the domain read models (not raw SELECTs): a policy that lets
+   * the lead read the tables but leaves the queue empty for another reason would
+   * still be a broken page.
+   */
+  it('lets the Account lead read the service queue and the Plan awaiting their approval (QA 2026-08-05)', async () => {
+    const CLI = 'CLI-ZZR-0002';
+    const SVC = 'SVC-ZZR-0002';
+    const STR = 'STR-ZZR-0002';
+    const AM = 'ZZR-AM';
+    await sql`
+      insert into clients (id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, assigned_am_id,
+                           released_to_account_at, created_by)
+      values (${CLI}, 'RLS Account Fixture', 'Ibu RLS', 'Jakarta', 'Fashion', 'https://shopee/zzr2',
+              '9000000.00', '12000000.00', ${OWNER}, ${OWNER}, ${AM}, now(), ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                            commission_rule, status, requires_strategy_plan, created_by)
+      values (${SVC}, ${CLI}, 'MSV-ZZR', 1, 'TikTok Shop Full Management', '9000000.00', 'rule',
+              '[Awaiting Onboarding]', true, ${OWNER})
+      on conflict (id) do nothing`;
+    // Created by the AM and submitted — approved_by is still NULL, which is the
+    // whole point: this is the row the SPV must be able to see in order to act.
+    await sql`
+      insert into strategy_plans (id, service_id, objective, target_kpi, divisions_involved,
+                                  planned_brief_outline, timeline_start, timeline_end, status, created_by)
+      values (${STR}, ${SVC}, 'naik 30%', 'GMV +30%', 'Creative, Ads', '12 video',
+              current_date, current_date + 30, '[Strategy Submitted for Approval]', ${AM})
+      on conflict (id) do nothing`;
+
+    const lead = claims({ employeeId: 'ZZR-ALEAD', division: 'Account', level: 'lead' });
+    try {
+      const queue = await withClaims(sql, lead, (tx) => serviceQueue(tx, actor('ZZR-ALEAD', 'Account', 'lead')));
+      expect(
+        queue.some((r) => r.serviceId === SVC),
+        'SPV/Head Account must see the services of their division',
+      ).toBe(true);
+
+      const inbox = await withClaims(sql, lead, (tx) => listStrategies(tx, actor('ZZR-ALEAD', 'Account', 'lead')));
+      expect(
+        inbox.some((s) => s.id === STR),
+        'the approval inbox must contain a Plan submitted by an AM (approved_by still NULL)',
+      ).toBe(true);
+
+      // The owning AM keeps their own scope — and is not the creator of anything
+      // here except the Plan, so this also covers the inherited-client case.
+      const amQueue = await withClaims(
+        sql,
+        claims({ employeeId: AM, division: 'Account', level: 'staff' }),
+        (tx) => serviceQueue(tx, actor(AM, 'Account', 'staff')),
+      );
+      expect(amQueue.some((r) => r.serviceId === SVC)).toBe(true);
+
+      // Still scoped: another division's lead sees neither.
+      const outsider = claims({ employeeId: OUTSIDER, division: 'Creative', level: 'lead' });
+      const seen = await withClaims(sql, outsider, (tx) =>
+        tx<{ n: string }[]>`select count(*) as n from services where id = ${SVC}`,
+      );
+      expect(Number(seen[0].n)).toBe(0);
+    } finally {
+      await sql`delete from strategy_plans where id = ${STR}`;
+      await sql`delete from services where id = ${SVC}`;
+      await sql`delete from contracts where client_id = ${CLI}`;
       await sql`delete from clients where id = ${CLI}`;
     }
   });

@@ -72,7 +72,18 @@ CREATE UNIQUE INDEX uq_tcr_one_pending ON transaction_change_requests (transacti
     WHERE status = 'pending';
 
 -- ---------------------------------------------------------------------------
--- 2. Katalog notifikasi: +2 event (17 → 19)
+-- 1b. Registry prefix (A-01) — WAJIB, bukan opsional
+-- ---------------------------------------------------------------------------
+-- Tabel `entity_prefix` lahir di A-01 (2026-08-06), SESUDAH tiket ini ditulis.
+-- Prefix `TCR` sudah ada di packages/core/src/ident.ts sejak awal, tapi tanpa
+-- baris di sini kedua sisi jaminan dua-mekanisme M6A §7 berselisih dan
+-- `packages/db/src/ident.registry.test.ts` merah — itulah gunanya tes tersebut.
+-- ---------------------------------------------------------------------------
+INSERT INTO entity_prefix (prefix, entity_name, module) VALUES
+    ('TCR', 'Transaction Change Request', 'M5');
+
+-- ---------------------------------------------------------------------------
+-- 2. Katalog notifikasi: +2 event sebagai VERSI 3 (31 → 33)
 -- ---------------------------------------------------------------------------
 -- Alasannya sama dengan dua event m1.lead.delete_* (20260729162101): alur ACC
 -- mati kalau Direktur tidak pernah diberi tahu ada yang menunggu, dan pengaju
@@ -80,9 +91,21 @@ CREATE UNIQUE INDEX uq_tcr_one_pending ON transaction_change_requests (transacti
 -- "lead sebuah divisi": Direktur adalah layered role (employee_layered_roles),
 -- jadi daftar penerimanya di-resolve di TypeScript lalu dikirim eksplisit.
 -- Harus tetap sinkron dengan packages/core/src/notification.ts (CATALOG).
-INSERT INTO notif_events (event_type, description, resolver) VALUES
-    ('m5.transaction.change_requested', 'Pengajuan perubahan transaksi menunggu ACC Direktur', 'explicit'),
-    ('m5.transaction.change_decided',   'Pengajuan perubahan transaksi di-ACC/tolak',          'explicit');
+--
+-- VERSI 3, bukan tambahan ke v2. Katalog jadi berversi lewat O55
+-- (20260807010000) SESUDAH tiket ini ditulis, dan invariant di sana menuntut
+-- COUNT(notif_events) = SUM(event_count) — jadi menyisipkan dua baris tanpa
+-- mendaftarkan versinya membuat gerbang merah, dan itu memang tujuannya.
+-- Menumpangkannya ke v2 akan lebih buruk daripada merah: v2 adalah amandemen
+-- M6A/6B/6C, dan menaruh event Finance di dalamnya membuat registry berbohong
+-- tentang apa yang amandemen itu perkenalkan.
+INSERT INTO notif_catalog_versions (version, description, event_count, decision_ref) VALUES
+    (3, 'M5-OA-7 — perubahan skema transaksi wajib ACC Direktur: 2 event Finance', 2,
+        'docs/DECISIONS.md 2026-08-04 (M5-OA-7)');
+
+INSERT INTO notif_events (event_type, description, resolver, catalog_version) VALUES
+    ('m5.transaction.change_requested', 'Pengajuan perubahan transaksi menunggu ACC Direktur', 'explicit', 3),
+    ('m5.transaction.change_decided',   'Pengajuan perubahan transaksi di-ACC/tolak',          'explicit', 3);
 
 -- ---------------------------------------------------------------------------
 -- 3. RLS — tabel dibuat SETELAH 20260723064438_rls_baseline, jadi loop grant di

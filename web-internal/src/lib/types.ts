@@ -122,6 +122,13 @@ export type PricingMode = (typeof PRICING_MODES)[number];
 // Frequency enum as stored/returned by the backend ("" = tidak ditentukan).
 export const FREQUENCIES = ['', 'Monthly', 'One-time', 'Campaign'] as const;
 
+/**
+ * Catalog tier (M6C S4). Declared HERE rather than in `account.ts` because
+ * `account.ts` imports this file — putting it the other way round would make a
+ * cycle. `account.ts` re-exports it, so existing importers are unaffected.
+ */
+export type PlanTier = 'plan_wajib' | 'ditentukan_am' | 'tanpa_plan';
+
 export interface MasterService {
   id: string;
   name: string;
@@ -136,6 +143,9 @@ export interface MasterService {
   price_note: string;
   description: string;
   active: boolean;
+  requires_strategy_plan: boolean;
+  /** Catalog tier — set by Sales Head in the MSL admin (O54). */
+  plan_tier: PlanTier;
   version_no: number;
   effective_from: string;
 }

@@ -22,6 +22,7 @@ interface ServiceBody {
   description?: string;
   active?: boolean;
   requires_strategy_plan?: boolean;
+  plan_tier?: string;
   effective_from?: string;
 }
 
@@ -44,6 +45,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
       description: b.description,
       active: b.active,
       requiresStrategyPlan: b.requires_strategy_plan,
+      planTier: b.plan_tier as msl.ServiceInput['planTier'],
       effectiveFrom: b.effective_from ?? '',
     });
     return json({ id, version_no: versionNo });

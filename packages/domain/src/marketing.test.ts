@@ -125,6 +125,7 @@ afterEach(async () => {
   await sql`delete from transactions where created_by like 'ZZ-%'`;
   await sql`delete from prospect_attempt_nq_reasons where created_by like 'ZZ-%'`;
   await sql`delete from prospect_attempts where created_by like 'ZZ-%'`;
+  await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
   await sql`delete from leads where created_by like 'ZZ-%'`;
   await sql`delete from campaigns where created_by like 'ZZ-%'`;

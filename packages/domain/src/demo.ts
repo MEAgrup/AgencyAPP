@@ -17,7 +17,7 @@
  * Reference: backend/internal/demo/task.go.
  */
 
-import { bi, notification, permission, statemachine } from '@cdps/core';
+import { bi, ident, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 
 /** Authenticated employee + resolved role (from @cdps/core permission). */
@@ -84,7 +84,7 @@ export async function create(
 
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
-    const id = await ex.ident.identNext('DEMO', now);
+    const id = await ident.nextId(ex.ident, 'DEMO', now);
     await tx`
       insert into demo_tasks (id, title, description, division, status, created_by)
       values (${id}, ${title}, ${description}, ${division}, ${DEMO_INITIAL_STATUS}, ${actor.employeeId})`;

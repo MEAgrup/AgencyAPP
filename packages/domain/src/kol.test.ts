@@ -192,6 +192,7 @@ afterEach(async () => {
   await sql`delete from creator_bookings where created_by like 'ZZ-%'`;
   await sql`delete from briefs where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
+  await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
   await sql`delete from employees where created_by like 'ZZ-%'`;
   await sql`delete from role_mappings where created_by like 'ZZ-%'`;

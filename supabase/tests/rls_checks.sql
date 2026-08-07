@@ -737,6 +737,143 @@ DO $$ BEGIN
   THEN RAISE EXCEPTION 'RLS clients: Director must read all'; END IF;
 END $$;
 
+
+RESET ROLE;
+
+-- ---------------------------------------------------------------------------
+-- 35. Log aktivitas prospek (`prospect_activities`, migrasi 20260806050000).
+--     Predikatnya dibuat kembar `prospect_attempts_select`: siapa pun yang boleh
+--     melihat attempt HARUS boleh melihat effort-nya, kalau tidak panel "Log
+--     Aktivitas" kosong tanpa error — persis kelas cacat yang 20260805060000
+--     tambal untuk rantai Account. Lima arah diuji: pemilik attempt LIHAT,
+--     penulis LIHAT, lead sedivisi LIHAT, sales lain TIDAK, Director LIHAT.
+-- ---------------------------------------------------------------------------
+
+INSERT INTO leads (id, lead_name, phone_number, phone_norm, source, origin_division,
+                   record_status, created_by)
+VALUES ('LEAD-RLS-ACT1', 'rls fixture aktivitas', '08120000001', '8120000001', 'Scouting',
+        'Sales', 'active', 'EMP-RLS-SLS9');
+INSERT INTO prospect_attempts (id, lead_id, owner_employee_id, status, created_by)
+VALUES ('PRSP-RLS-ACT1', 'LEAD-RLS-ACT1', 'EMP-RLS-SLS9', 'Qualified', 'EMP-RLS-SLS9');
+INSERT INTO prospect_activities (id, attempt_id, lead_id, activity_type, occurred_at,
+                                 summary, created_by)
+VALUES ('ACT-RLS-0001', 'PRSP-RLS-ACT1', 'LEAD-RLS-ACT1', 'Visit', now(),
+        'visit fixture rls', 'EMP-RLS-SLS9');
+
+SET LOCAL ROLE authenticated;
+
+-- Pemilik attempt (yang juga penulisnya) melihat effort-nya sendiri.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLS9","division":"Sales","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM prospect_activities WHERE id='ACT-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS prospect_activities: attempt owner must see own activity'; END IF;
+END $$;
+
+-- Head Sales membaca effort seluruh divisinya — justru alasan fitur ini diminta.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLD9","division":"Sales","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM prospect_activities WHERE id='ACT-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS prospect_activities: Sales lead must read division effort'; END IF;
+END $$;
+
+-- Kontrol negatif 1: sales lain (bukan pemilik attempt, bukan penulis) tidak.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLS8","division":"Sales","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM prospect_activities WHERE id='ACT-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS prospect_activities: another salesperson must NOT read it'; END IF;
+END $$;
+
+-- Kontrol negatif 2: lead divisi lain tidak — arm divisi memakai origin lead-nya.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRE9","division":"Creative","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM prospect_activities WHERE id='ACT-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS prospect_activities: a lead of another division must NOT read it'; END IF;
+END $$;
+
+-- Kontrol positif: Director (oversight) selalu melihat.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-DIR","director":true}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM prospect_activities WHERE id='ACT-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS prospect_activities: Director must read all'; END IF;
+END $$;
+
+RESET ROLE;
+
+-- ---------------------------------------------------------------------------
+-- O57 — `contracts` + `strategi` scoped through `private.jwt_is_am_of_contract`.
+--
+-- The Strategi row-scope moved from Service to Contract in 20260807120000. The
+-- predicate is supposed to be UNCHANGED — the owning AM of the client — with
+-- only the entry point different, and this is what proves it, because "the
+-- policy compiles" and "the policy still scopes" are different claims. The one
+-- that would have gone unnoticed: `jwt_is_am_of_contract` returning false for
+-- everyone, which reads as a locked page rather than an error.
+-- ---------------------------------------------------------------------------
+
+INSERT INTO clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
+                     total_sales, sales_pic_id, commission_payment_pic_id, assigned_am_id,
+                     payment_intent, created_by)
+VALUES ('CLI-RLS-CTR1', 'Rani', 'RLS Contract Fixture', 'Bandung', 'https://shopee/rlsctr',
+        'Home Living', 0, 0, 0, 'EMP-RLS-SLS9', 'EMP-RLS-SLS9', 'EMP-RLS-AM1',
+        '[Termin]', 'EMP-RLS-AM1');
+INSERT INTO contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, created_by)
+VALUES ('CTR-RLS-0001', 'CLI-RLS-CTR1', 6, DATE '2026-08-12', DATE '2027-02-11', 'EMP-RLS-AM1');
+INSERT INTO strategi (id, contract_id, client_id, versi_no, status, created_by)
+VALUES ('STRG-RLS-0001', 'CTR-RLS-0001', 'CLI-RLS-CTR1', 1, 'Draft', 'EMP-RLS-AM1');
+
+SET LOCAL ROLE authenticated;
+
+-- The owning AM reads both the agreement and the Strategi hanging off it.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-AM1","division":"Account","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM contracts WHERE id='CTR-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS contracts: owning AM must see the agreement'; END IF;
+  IF (SELECT count(*) FROM strategi WHERE id='STRG-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS strategi: owning AM must see the Strategi via jwt_is_am_of_contract'; END IF;
+END $$;
+
+-- Negative control: another Account staff member, who owns a different client.
+-- If `jwt_is_am_of_contract` were written as `true` this is the check that fails.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-AM2","division":"Account","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM contracts WHERE id='CTR-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS contracts: an unrelated AM must NOT see the agreement'; END IF;
+  IF (SELECT count(*) FROM strategi WHERE id='STRG-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS strategi: an unrelated AM must NOT see the Strategi'; END IF;
+END $$;
+
+-- Negative control 2: a lead of an execution division. Section E/F reach into
+-- `strategi_pillar` / `strategi_resource` for their own pillar (§7), but the
+-- header itself is not theirs.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRE9","division":"Creative","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM strategi WHERE id='STRG-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS strategi: a Creative lead must NOT read the Strategi header'; END IF;
+END $$;
+
+-- Positive control: the Account lead (division-wide) and the Director.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-ACL9","division":"Account","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM strategi WHERE id='STRG-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS strategi: the Account lead must read division-wide'; END IF;
+END $$;
+
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-DIR","director":true}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM contracts WHERE id='CTR-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS contracts: Director must read all'; END IF;
+END $$;
+
 RESET ROLE;
 ROLLBACK;
 

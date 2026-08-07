@@ -130,18 +130,27 @@ qfile supabase/seed.sql
 qfile supabase/seed.sql
 
 echo "→ verifikasi gate"
+# KEEP IN STEP WITH `.github/workflows/ci.yml` job `db-and-migrations` — angka di
+# bawah hidup di DUA berkas. Sesi lalu hanya menaikkan yang di sini, dan CI merah
+# dengan `expected 14 machines` sementara seluruh test suite hijau. Menambah tabel
+# atau mesin berarti mengubah KEDUANYA di commit yang sama.
 fail=0
 check() { # nama · sql · harapan
   local got; got="$(qv "$2")"
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "55"
-check "sm_machines"      "select count(*) from sm_machines"      "14"
-check "notif_events"     "select count(*) from notif_events"     "19"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "76"
+check "entity_prefix"    "select count(*) from entity_prefix"    "31"
+check "sm_machines"      "select count(*) from sm_machines"      "16"
+check "notif_events"     "select count(*) from notif_events"     "33"
+# 33 = 17 (v1) + 14 (v2, O55) + 2 (v3, M5-OA-7). Angka ini TIDAK boleh dinaikkan sendirian: ia
+# harus sama dengan SUM(event_count) di notif_catalog_versions, dan gate di
+# bawah yang memaksanya. Menambah event tanpa mendaftarkan versinya = merah.
+check "notif_katalog_sesuai" "select case when (select count(*) from notif_events) = (select coalesce(sum(event_count),0) from notif_catalog_versions) then 1 else 0 end" "1"
 check "employees"        "select count(*) from employees"        "10"
 check "role_mappings"    "select count(*) from role_mappings"    "12"
-check "master_services"  "select count(*) from master_services"  "3"
+check "master_services"  "select count(*) from master_services"  "4"
 check "demo_tasks"       "select count(*) from demo_tasks"       "1"
 
 echo "→ invariant SQL"

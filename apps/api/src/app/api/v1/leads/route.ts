@@ -26,11 +26,22 @@ export async function GET(request: Request): Promise<Response> {
     if (!leads.leadListScope(actor)) {
       throw new leads.ForbiddenError();
     }
-    // web-internal passes optional ?status=<record_status>&q=<name/phone>.
+    // web-internal passes optional ?status=<record_status>&q=<name/phone>
+    // &source=<Source>&mine=<registered|claimed|any|1>.
+    //
+    // `mine` backs the "Lead Saya" board: `registered` = the caller created the
+    // lead record (M1 §4 intake), `claimed` = they hold an attempt on someone
+    // else's (§6 Pool claim), `any`/`1` = either. It is a convenience cut, never
+    // the security boundary: RLS (`leads_select`) already decides which rows
+    // exist for this actor, and this can only subtract from that.
     const params = new URL(request.url).searchParams;
+    const mine = params.get('mine');
     const rows = await readAsActor(actor, (sql) => leads.leadsDatabase(sql, {
       status: params.get('status') ?? undefined,
       q: params.get('q') ?? undefined,
+      source: params.get('source') ?? undefined,
+      mineEmployeeId: mine ? actor.employeeId : undefined,
+      mineMode: leads.parseMineMode(mine),
     }));
     return json({ data: rows.map(leadRowToWire) });
   });

@@ -51,6 +51,8 @@ import {
   toBriefInput,
   toComplaintInput,
   toStrategyInput,
+  assignmentSummaryFromWire,
+  planGateToWire,
 } from './wire';
 
 describe('masterServiceToWire', () => {
@@ -70,6 +72,7 @@ describe('masterServiceToWire', () => {
       description: 'Full-funnel Meta ads',
       active: true,
       requiresStrategyPlan: false,
+      planTier: 'ditentukan_am',
       versionNo: 3,
       effectiveFrom: '2026-07-01',
     };
@@ -88,6 +91,7 @@ describe('masterServiceToWire', () => {
       description: 'Full-funnel Meta ads',
       active: true,
       requires_strategy_plan: false,
+      plan_tier: 'ditentukan_am',
       version_no: 3,
       effective_from: '2026-07-01',
     });
@@ -134,12 +138,16 @@ describe('leads wire mappers', () => {
       originDivision: 'Sales', originCampaignId: 'CMP-1', lastTouchCampaignId: null,
       recordStatus: 'active', winningAttemptId: null,
       createdAt: new Date('2026-07-01T00:00:00.000Z'), openAttemptCount: 1,
+      registeredByMe: true, claimedByMe: false,
     };
     expect(leadRowToWire(row)).toEqual({
       id: 'LEAD-1', lead_name: 'X', phone_number: '08', email: null, source: 'Scouting',
       origin_division: 'Sales', origin_campaign_id: 'CMP-1', last_touch_campaign_id: null,
       record_status: 'active', winning_attempt_id: null,
       created_at: '2026-07-01T00:00:00.000Z', open_attempt_count: 1,
+      // Kolom Peran tab Lead Saya — dikirim EKSPLISIT sebagai boolean, tidak
+      // pernah dihilangkan saat false (kunci hilang = kolom kosong, O43).
+      registered_by_me: true, claimed_by_me: false,
     });
   });
 
@@ -1263,5 +1271,110 @@ describe('demo task wire mappers (S0-12 reference vertical)', () => {
     const wire = demoTaskDetailToWire(task, [], []);
     expect(wire.allowed_transitions).toEqual([]);
     expect(wire.audit).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M6C plan gate — the boundary that was actually broken (found by HTTP walk).
+// ---------------------------------------------------------------------------
+describe('M6C assignmentSummaryFromWire (the inbound half of the boundary)', () => {
+  it('translates snake_case wire keys into the domain camelCase shape', () => {
+    // The bug this locks: the plan-gate routes handed the raw body through, so
+    // `divisiPic`/`hasilDiharapkan` arrived undefined and a de-escalation that
+    // DID carry a complete GB-8 summary was rejected as incomplete.
+    expect(
+      assignmentSummaryFromWire({
+        deliverable: '40 foto produk',
+        deadline: '2026-09-05',
+        divisi_pic: 'Creative',
+        hasil_diharapkan: 'listing 12 SKU Pareto',
+      }),
+    ).toEqual({
+      deliverable: '40 foto produk',
+      deadline: '2026-09-05',
+      divisiPic: 'Creative',
+      hasilDiharapkan: 'listing 12 SKU Pareto',
+    });
+  });
+
+  it('returns null for a missing or non-object value', () => {
+    expect(assignmentSummaryFromWire(null)).toBeNull();
+    expect(assignmentSummaryFromWire(undefined)).toBeNull();
+    expect(assignmentSummaryFromWire('bukan objek')).toBeNull();
+  });
+
+  it('maps a partial summary to blanks, so the domain GB-8 check rejects it', () => {
+    // Deliberately NOT throwing here: the BI message belongs to the domain, and
+    // silently defaulting to blanks means the completeness check still fires.
+    expect(assignmentSummaryFromWire({ deliverable: '40 foto' })).toEqual({
+      deliverable: '40 foto',
+      deadline: '',
+      divisiPic: '',
+      hasilDiharapkan: '',
+    });
+  });
+});
+
+describe('M6C planGateToWire', () => {
+  const gate = {
+    serviceId: 'SVC-202608-0002',
+    tierKatalog: 'ditentukan_am' as const,
+    divisiTerlibat: ['Ads'],
+    deliverable: '3 kampanye',
+    kuotaPerPeriode: null,
+    durasiBulan: 3,
+    berulang: false,
+    nilaiPerBulan: '12000000.00',
+    targetJenis: 'roas' as const,
+    targetNilai: '5.00',
+    sequenceDependency: false,
+    laporanPeriodik: true,
+    floorPrice: null,
+    pemicuKeras: [{ kode: 'target_numerik', label: 'Target angka', dasar: 'target ROAS' }],
+    pemicuLunak: [],
+    configVersionNo: 1,
+    rekomendasi: 'butuh_plan' as const,
+    keputusanAm: 'butuh_plan' as const,
+    kesesuaian: 'sesuai' as const,
+    alasan: null,
+    pemantauanAlternatif: null,
+    tanggalTinjauUlang: '2026-09-15',
+    ringkasanPenugasan: null,
+    planId: null,
+    decidedBy: 'EMP-0002',
+    decidedAt: '2026-08-06T00:00:00.000Z',
+  };
+
+  it('sends every optional field as an EXPLICIT null, never an absent key (O43)', () => {
+    const w = planGateToWire(gate);
+    for (const key of [
+      'kuota_per_periode', 'floor_price', 'alasan', 'pemantauan_alternatif',
+      'ringkasan_penugasan', 'plan_id',
+    ]) {
+      expect(Object.prototype.hasOwnProperty.call(w, key), `missing key ${key}`).toBe(true);
+      expect(w[key as keyof typeof w]).toBeNull();
+    }
+  });
+
+  it('passes the STORED triggers through rather than recomputing them (§10)', () => {
+    const w = planGateToWire(gate);
+    expect(w.pemicu_keras).toEqual(gate.pemicuKeras);
+    expect(w.config_version_no).toBe(1);
+  });
+
+  it('renders the GB-8 summary in snake_case when present', () => {
+    const w = planGateToWire({
+      ...gate,
+      ringkasanPenugasan: {
+        deliverable: '40 foto', deadline: '2026-09-05',
+        divisiPic: 'Creative', hasilDiharapkan: 'listing 12 SKU',
+      },
+    });
+    expect(w.ringkasan_penugasan).toEqual({
+      deliverable: '40 foto',
+      deadline: '2026-09-05',
+      divisi_pic: 'Creative',
+      hasil_diharapkan: 'listing 12 SKU',
+    });
   });
 });

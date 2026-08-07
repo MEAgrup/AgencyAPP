@@ -10,6 +10,10 @@
  *   the central LEAD record and the salesperson's PRSP attempt with dedup v2.
  * - sales: M0 Qualified stage — Contacted progression, the MSL v2 pricing
  *   calculator + commission quote, and the Qualified Lead Form submit.
+ * - activity: the prospect activity log (ACT-) — Follow Up / Jadwal Meeting /
+ *   Online Meeting / Visit recorded from `Qualified` until closing, with the
+ *   derived effort rollups. Append-only; NOT a lifecycle (deviasi PRD, keputusan
+ *   pemilik 2026-08-06).
  * - msl: Master Service List admin (S0-09) — Sales-owned catalog with immutable
  *   versions, plus the canonical MSL read (effectiveAt) consumed by `sales`.
  * - directory: the assignable-employee READ behind every "who does this?" picker
@@ -56,6 +60,14 @@
  *   input) + the read-only Auto-Metrics Engine (Lead-by-Dashboard/Real/Quality,
  *   Attributed Sales last-touch, CPL/CPRL/ROAS, Collected-ROAS, junk breakdown) and
  *   the Lead/Staff dashboard split. Reuses `campaign` for the §5 gate + Online/Offline.
+ * - vendor: M6A §7/D19 — the VND- entity. Live Stream is vendor mode (D15/Rule 18),
+ *   so E-8 and F-4 need a vendor record before Section E can exist at all. Shared
+ *   master data: Account lead/Director write, everyone reads, status via sm_transition.
+ * - strategi: M6A — the STRG- entity + its child tables + machine #15. The record
+ *   the Section A→J form is built on: versions are rows (Rule 13), the baseline is
+ *   rows per (channel, month) not fixed columns (D11), and the submit gate is the
+ *   PRD's own rules (3/5/8/9/17). Does NOT yet unlock Brief dispatch — that gate
+ *   still reads the old M6 §4 entity until the form swap (A-05…A-09).
  * - notification: the in-app inbox (Phase 0 v2 §9) — the READ + mark-as-read side of
  *   the FROZEN 15-event catalog. Emission stays in @cdps/core `emit()`/`notify_emit`;
  *   there is no delete path here, by house rule §8.
@@ -72,10 +84,15 @@ export * as directory from './directory';
 export * as demo from './demo';
 export * as leads from './leads';
 export * as sales from './sales';
+export * as activity from './activity';
 export * as msl from './msl';
 export * as finance from './finance';
 export * as client from './client';
 export * as account from './account';
+export * as plangate from './plangate';
+export * as contract from './contract';
+export * as vendor from './vendor';
+export * as strategi from './strategi';
 export * as task from './task';
 export * as creative from './creative';
 export * as ads from './ads';

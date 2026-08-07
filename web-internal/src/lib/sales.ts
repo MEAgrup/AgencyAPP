@@ -17,6 +17,7 @@
 // from the DB; format them with lib/money.ts in the page, never here.
 
 import { api } from '@/lib/api';
+import type { ActivityRow, EffortSummary } from '@/lib/leads';
 
 export interface ServiceSelection {
   master_service_id: string;
@@ -171,13 +172,23 @@ export interface QualifiedFormInput {
   services: ServiceSelection[];
 }
 
-// Body line for POST /attempts/{id}/negotiation|resubmit — mirrors
-// module0_sales.ProposalLine json tags.
+// Body line for POST /attempts/{id}/negotiation|negotiation/resubmit|services.
+//
+// DUA BENTUK, dan bedanya menentukan alurnya (lihat sales.isCustomLine di domain):
+//   - STANDAR — `proposed_price` dan `commission_rule` dikirim KOSONG. Server yang
+//     menghitung harganya dari versi MSL yang berlaku (subtotal kalkulator +
+//     commission_rule versi itu). Ini bentuk jasa yang BARU ditambahkan: klien
+//     hanya mengirim id + quantity, tidak pernah rupiah (CLAUDE.md #4).
+//   - CUSTOM — `proposed_price` diisi. Itu harga hasil negosiasi, jadi wajib lewat
+//     persetujuan Superior.
+// `quantity` / `amount` hanya dibaca untuk baris standar (masukan kalkulator).
 export interface ProposalLineInput {
   master_service_id: string;
   proposed_price: string;
   commission_rule: string;
   payment_terms?: string;
+  quantity?: number;
+  amount?: string;
 }
 
 export type NegotiationDecision = 'approve' | 'revise' | 'reject';
@@ -228,6 +239,12 @@ export const NQ_REASONS = [
   '[Tidak ada respon]',
   '[Lainnya ...]',
 ] as const;
+
+// Batas jasa per penawaran — cermin sales.MAX_SERVICES di domain (dinaikkan
+// 5 → 10 oleh keputusan pemilik 2026-08-07, docs/DECISIONS.md). Server tetap
+// otoritasnya (`[maksimal pilih 10 jasa saja!]`); konstanta ini hanya yang
+// menghentikan tombol "Tambah Jasa" dan menulis label "(maks N)".
+export const MAX_SERVICES = 10;
 
 // module0_sales — payment schemes (closing.go PaymentScheme*).
 export const PAYMENT_SCHEMES = [
@@ -309,6 +326,14 @@ export function resubmitNegotiation(id: string, lines: ProposalLineInput[]): Pro
   return api.post<{ ok: boolean }>(`/attempts/${id}/negotiation/resubmit`, { lines });
 }
 
+// POST /attempts/{id}/services — Edit Service sebelum closing (M0 §5.1, keputusan
+// pemilik 2026-08-07). Menulis versi proposal BARU dengan set jasa final. Baris
+// standar saja ⇒ status tetap Approved/Auto Approved; ada harga custom ⇒ kembali
+// ke Negotiation - Pending Approval (server yang memutuskan).
+export function reviseServices(id: string, lines: ProposalLineInput[]): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/attempts/${id}/services`, { lines });
+}
+
 export function closeAttempt(id: string, input: ClosingInput): Promise<ClosingResult> {
   return api.post<ClosingResult>(`/attempts/${id}/close`, input);
 }
@@ -316,4 +341,41 @@ export function closeAttempt(id: string, input: ClosingInput): Promise<ClosingRe
 // POST /attempts/{id}/lost — contract §"Endpoint BARU" #6.
 export function markLost(id: string): Promise<{ status: string }> {
   return api.post<{ status: string }>(`/attempts/${id}/lost`);
+}
+
+// ---------------------------------------------------------------------------
+// Log aktivitas prospek (ACT-) — keputusan pemilik 2026-08-06.
+//
+// Bentuk baris & taksonominya hidup di `lib/leads.ts` (ActivityRow /
+// EffortSummary / ACTIVITY_TYPES) karena halaman /leads juga membacanya; di sini
+// hanya pintu per-attempt yang dipakai workspace Sales.
+// ---------------------------------------------------------------------------
+
+// GET /attempts/{id}/activities — log + rollup effort (total & per jenis).
+export function listActivities(
+  attemptId: string,
+): Promise<{ data: ActivityRow[]; effort: EffortSummary }> {
+  return api.get<{ data: ActivityRow[]; effort: EffortSummary }>(
+    `/attempts/${attemptId}/activities`,
+  );
+}
+
+// Body POST /attempts/{id}/activities. Dideklarasikan sebagai interface bernama
+// (bukan tipe inline) supaya `body-parity.test.ts` bisa membaca kunci-kuncinya —
+// pemindainya menyelesaikan tipe variabel lewat nama interface, dan body yang
+// tak terselesaikan tidak menjaga apa pun.
+export interface LogActivityInput {
+  activity_type: string;
+  occurred_at?: string;
+  summary: string;
+}
+
+// POST /attempts/{id}/activities — `summary` WAJIB (itu inti log-nya).
+// `occurred_at` kosong berarti "sekarang". Server menolak jenis di luar
+// ACTIVITY_TYPES dan status prospek yang belum Qualified.
+export function logActivity(
+  attemptId: string,
+  input: LogActivityInput,
+): Promise<{ data: ActivityRow }> {
+  return api.post<{ data: ActivityRow }>(`/attempts/${attemptId}/activities`, input);
 }

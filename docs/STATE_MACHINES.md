@@ -7,6 +7,16 @@
 - Intake collision ⇒ `Blocked` (no updates possible). Pool competitors on win ⇒ `[Closed - Kalah Kompetisi]` (auto).
 - `Qualified` only via successful Qualified Form submit; exit without submit ⇒ stays `Contacted`.
 - Negotiation states: `Negotiation - Pending Approval` → { `Negotiation - Approved` | `Negotiation - Revision Required` | `Negotiation - Rejected` }; Revision Required → (accept ⇒ Approved) | (resubmit ⇒ Pending Approval, new version); `Negotiation - Rejected` → (resubmit ⇒ Pending Approval, new version) | `Closed-Lost` (DECISIONS O16); No-nego path ⇒ `Negotiation - Auto Approved`. Closing only from Approved/Auto Approved.
+- **Edit Service sebelum closing** (M0 §5.1, keputusan pemilik 2026-08-07): `Negotiation - Approved` / `Negotiation - Auto Approved` → `Negotiation - Pending Approval` (versi proposal baru, `require_lead = false` seperti seluruh edge masuk Pending Approval yang digerakkan sales; migrasi `20260807040000_edit_service_reapproval.sql`). Edge ini HANYA dipakai revisi ber-harga **custom** — revisi dengan harga standar MSL menulis versi proposal baru **tanpa transisi status sama sekali**, jadi tidak melewati mesin ini.
+
+### Log aktivitas prospek — SENGAJA BUKAN MESIN (keputusan pemilik 2026-08-06)
+`prospect_activities` (`ACT-`) mencatat Follow Up / Jadwal Meeting / Online Meeting / Visit / Lainnya
+dari status `Qualified` sampai state negosiasi terakhir. Ia **tidak punya kolom status**, tidak muncul
+di `sm_machines`, dan tidak pernah menyentuh `prospect_attempts.status`: mencatat aktivitas BUKAN
+transisi. Yang membatasinya bukan `sm_edges` melainkan gate status di `packages/domain/src/activity.ts`
+(`ACTIVITY_ALLOWED_STATUSES`) — di luar rentang itu ditolak `[aktivitas hanya bisa dicatat setelah lead
+qualified]`. Barisnya append-only (trigger `forbid_mutation` menolak UPDATE dan DELETE), sehingga metrik
+"effort sampai closing" selalu bisa dihitung ulang dari log (aturan rumah #3/#4). Lihat `DECISIONS.md`.
 
 ## 2. Lead record (M1)
 `[Pool]` (Marketing-imported, claimable) / active (scouted-owned) / `[Rejected]` / `[Not Qualified]` / `[Blocked - Duplikat]` (intake event).
@@ -75,6 +85,42 @@ All else blocked: `[transisi status tidak diizinkan]`.
 - One Strategy per Service (1:1, §4 Rule 1). Direct-path Services have **no** STR record (§4 Rule 6).
 - Only `[Strategy Approved]` unlocks Brief creation for that Service (§4 Rule 5).
 - The approval gate is division-specific (Account lead / Director), stricter than the engine's division-agnostic `requireLead`; the code checks it before the transition (mirrors the Void-Service gate).
+
+## 6b. Strategi `STRG-` (M6A) — mesin #15, Full Store Management
+
+`Draft` → `Diajukan` → (`Aktif` | kembali ke laci asalnya); `Aktif` → `Kedaluwarsa` | `Diarsipkan`.
+
+| From | To | Who | Effect |
+|---|---|---|---|
+| `Draft` | `Diajukan` | AM pemilik (Direksi lolos) | Gerbang kelengkapan berjalan di transaksi yang SAMA (Rules 3/5/8/9/17 + minimum D-8/H-1); `diajukan_pada` dicatat |
+| `Draft Revisi` | `Diajukan` | AM pemilik | Sama, untuk versi n+1 |
+| `Diajukan` | `Aktif` | SPV / Head Account (requireLead) | Rule 12. Kalau ada `versi_sebelumnya_id` yang masih `Aktif`, versi itu diarsipkan di transaksi yang sama (Rule 13) |
+| `Diajukan` | `Draft` | SPV / Head Account (requireLead) | Dikembalikan, catatan WAJIB, nomor versi TIDAK berubah (Rule 12) |
+| `Diajukan` | `Draft Revisi` | SPV / Head Account (requireLead) | Idem untuk versi >1 — `sm_edges` tidak bisa melihat asal sebuah `Diajukan`, jadi domain yang memilih tujuan dari `versi_no` |
+| `Aktif` | `Kedaluwarsa` | AM pemilik / SPV | Kontrak berakhir (Rule 14). Terminal |
+| `Aktif` | `Diarsipkan` | AM/SPV (lewat persetujuan versi n+1) | Versi digantikan (Rule 13). Terminal |
+| `Draft Revisi` | `Diarsipkan` | AM pemilik | Revisi dibatalkan sebelum diajukan — kalau tidak, `uq_strategi_inflight_per_service` terkunci selamanya |
+| `Draft` | `Diarsipkan` | SPV (requireLead) | Draft v1 dibatalkan |
+
+- **Satu versi = satu baris.** §7 PRD menuliskan `Aktif → Draft Revisi`, yang bertentangan dengan Rule 13 di dokumen yang sama ("version n stays Aktif until n+1 is approved"). Rule 13 yang dipakai; edge itu TIDAK didaftarkan. Dicatat di `DECISIONS.md` 2026-08-06.
+- Rule 2 ditegakkan index parsial `uq_strategi_aktif_per_service`, bukan oleh kode.
+- **Belum membuka gerbang Brief.** `account.guardBriefCreation` masih membaca entitas M6 §4 (`STR-`) yang dipakai halaman Service hari ini; penyambungannya ikut penggantian form (backlog A-05…A-09).
+- Empat event notifikasi M6A belum diemisikan — katalog v2 masih menunggu tanda tangan (O55). Transisinya tetap tercatat penuh di `audit_log` lewat `sm_transition`.
+
+## 6c. Vendor `VND-` (M6A §7) — master record bersama
+
+`Aktif` ⇄ `Nonaktif`; keduanya → `Blacklist`; `Blacklist` → `Nonaktif`.
+
+| From | To | Who | Effect |
+|---|---|---|---|
+| `Aktif` | `Nonaktif` | lead Account / Direksi (requireLead) | Vendor tidak lagi ditawarkan di picker E-8/F-4 |
+| `Nonaktif` | `Aktif` | lead Account / Direksi | Diaktifkan kembali |
+| `Aktif` / `Nonaktif` | `Blacklist` | lead Account / Direksi | Tidak dipakai lagi |
+| `Blacklist` | `Nonaktif` | lead Account / Direksi | Jalan pulang, SENGAJA dua langkah |
+
+- **`Blacklist` bukan terminal.** Kalau terminal, satu-satunya cara membatalkan blacklist yang salah adalah UPDATE mentah — persis yang dilarang aturan rumah #2.
+- Semua edge `requireLead`: vendor dipakai bersama, satu AM tidak boleh mematikan vendor yang dibooking AM lain.
+- Mesin ini TIDAK bernomor di PRD (M6A/6B/6C hanya menomori #15 Strategi dan #16 Plan; #17 sudah dipesan M6C §7 untuk dormansi Plan Satuan). Didaftarkan atas aturan rumah #2 — dicatat di `DECISIONS.md` 2026-08-06.
 
 ## 7. Brief `BRF-` (M6) — also the canonical Task machine (M12) applied to AST / BKG / BRF-as-task
 `[To Do]` → `[In Progress]` → `[Submitted]` → `[In Review]` → `[Approved]` (terminal)

@@ -5,7 +5,12 @@ import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { ATTEMPT_STATUSES, listAttempts, type AttemptRow } from '@/lib/sales';
-import { SOURCES, registerLead } from '@/lib/leads';
+import {
+  MAX_REGISTER_BATCH,
+  SOURCES,
+  registerLeadsBatch,
+  type BatchRegisterReport,
+} from '@/lib/leads';
 import { OUTSIDE_CAMPAIGN, campaignRequiredForSource } from '@/lib/campaign-picker';
 import { listSelectableCampaigns, type SelectableCampaign } from '@/lib/marketing';
 import CampaignPicker from '@/components/CampaignPicker';
@@ -15,6 +20,18 @@ function formatDate(value: string | null | undefined) {
   if (!value) return '—';
   return new Date(value).toLocaleDateString('id-ID');
 }
+
+// Satu baris prospek di form registrasi (QA revisi 2026-08-07). Source dan
+// Origin Campaign TIDAK ada di sini: keduanya dipilih sekali untuk seluruh batch,
+// yang justru inti keluhannya — sales yang scouting 5 kontak sekaligus tidak
+// perlu mengulang Source lima kali.
+interface ProspectRow {
+  lead_name: string;
+  phone_number: string;
+  email: string;
+}
+
+const emptyProspect = (): ProspectRow => ({ lead_name: '', phone_number: '', email: '' });
 
 export default function SalesWorkspacePage() {
   const { role } = useAuth();
@@ -31,17 +48,14 @@ export default function SalesWorkspacePage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('Semua');
 
-  // Registrasi Lead (M0 §3)
-  const [leadName, setLeadName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
+  // Registrasi Lead (M0 §3) — sampai MAX_REGISTER_BATCH prospek per submit.
+  const [prospects, setProspects] = useState<ProspectRow[]>([emptyProspect()]);
   const [source, setSource] = useState<string>(SOURCES[0]);
   // '' | OUTSIDE_CAMPAIGN | a CMP- id — see CampaignPicker.
   const [campaignChoice, setCampaignChoice] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [regError, setRegError] = useState<string | null>(null);
-  const [regMessage, setRegMessage] = useState<string | null>(null);
-  const [regNotice, setRegNotice] = useState<string | null>(null);
+  const [regReport, setRegReport] = useState<BatchRegisterReport | null>(null);
 
   // Origin Campaign picker (M1 §9.3). Loaded once for the whole session of the
   // page: the list is small, Active/Paused only, and re-fetching per keystroke
@@ -93,17 +107,23 @@ export default function SalesWorkspacePage() {
     };
   }, [canRegister]);
 
+  function addProspect() {
+    setProspects((rows) => (rows.length >= MAX_REGISTER_BATCH ? rows : [...rows, emptyProspect()]));
+  }
+  function removeProspect(idx: number) {
+    setProspects((rows) => (rows.length <= 1 ? rows : rows.filter((_, i) => i !== idx)));
+  }
+  function updateProspect(idx: number, field: keyof ProspectRow, value: string) {
+    setProspects((rows) => rows.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+  }
+
   async function handleRegister(e: FormEvent) {
     e.preventDefault();
     setRegError(null);
-    setRegMessage(null);
-    setRegNotice(null);
+    setRegReport(null);
     setSubmitting(true);
     try {
-      const res = await registerLead({
-        lead_name: leadName,
-        phone_number: phone,
-        email: email || undefined,
+      const report = await registerLeadsBatch({
         source,
         // The picker's sentinel never goes on the wire: "di luar campaign" is
         // sent as the outside_campaign declaration, which is what lets the server
@@ -111,14 +131,24 @@ export default function SalesWorkspacePage() {
         campaign_id:
           campaignChoice !== '' && campaignChoice !== OUTSIDE_CAMPAIGN ? campaignChoice : undefined,
         outside_campaign: campaignChoice === OUTSIDE_CAMPAIGN ? true : undefined,
+        prospects: prospects.map((p) => ({
+          lead_name: p.lead_name.trim(),
+          phone_number: p.phone_number.trim(),
+          email: p.email.trim() || undefined,
+        })),
       });
-      setRegMessage(`Lead terdaftar: ${res.lead.id} · attempt ${res.attempt.id}.`);
-      if (res.notice) setRegNotice(res.notice);
-      setLeadName('');
-      setPhone('');
-      setEmail('');
-      setSource(SOURCES[0]);
-      setCampaignChoice('');
+      setRegReport(report);
+      // Baris yang DITOLAK tetap di form supaya sales bisa memperbaikinya; yang
+      // terdaftar dibuang. Kalau semuanya lolos, form kembali ke satu baris
+      // kosong. Membersihkan seluruh form pada kegagalan sebagian akan
+      // menghilangkan data yang baru saja diketik dan belum tersimpan.
+      const failedPhones = new Set(report.rejections.map((r) => r.phone_number));
+      const keep = prospects.filter((p) => failedPhones.has(p.phone_number.trim()));
+      setProspects(keep.length > 0 ? keep : [emptyProspect()]);
+      if (report.rejected === 0) {
+        setSource(SOURCES[0]);
+        setCampaignChoice('');
+      }
       await load();
     } catch (err) {
       setRegError(errorMessage(err));
@@ -148,39 +178,27 @@ export default function SalesWorkspacePage() {
           </div>
           <form className="form" onSubmit={handleRegister}>
             {regError && <div className="alert alertError" role="alert">{regError}</div>}
-            {regMessage && <div className="alert alertSuccess" role="status">{regMessage}</div>}
-            {regNotice && <div className="alert alertInfo" role="status">{regNotice}</div>}
-            <div className="formRow">
-              <div className="field">
-                <label htmlFor="reg-name">Lead Name</label>
-                <input id="reg-name" required value={leadName} onChange={(e) => setLeadName(e.target.value)} />
+            {regReport && (
+              <div
+                className={`alert ${regReport.rejected === 0 ? 'alertSuccess' : 'alertInfo'}`}
+                role="status"
+              >
+                {regReport.summary}
               </div>
-              <div className="field">
-                <label htmlFor="reg-phone">Phone Number</label>
-                <input
-                  id="reg-phone"
-                  type="tel"
-                  inputMode="numeric"
-                  required
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                />
-              </div>
+            )}
+
+            <div className="field">
+              <label htmlFor="reg-source">Source</label>
+              <select id="reg-source" value={source} onChange={(e) => setSource(e.target.value)}>
+                {SOURCES.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+              <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                Source &amp; Origin Campaign berlaku untuk semua prospek di bawah.
+              </p>
             </div>
-            <div className="formRow">
-              <div className="field">
-                <label htmlFor="reg-email">Email (opsional)</label>
-                <input id="reg-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-              </div>
-              <div className="field">
-                <label htmlFor="reg-source">Source</label>
-                <select id="reg-source" value={source} onChange={(e) => setSource(e.target.value)}>
-                  {SOURCES.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
+
             <CampaignPicker
               id="reg-campaign"
               campaigns={campaigns}
@@ -191,6 +209,110 @@ export default function SalesWorkspacePage() {
               required={campaignRequired}
               disabled={submitting}
             />
+
+            <div className="field">
+              <label>Data Prospek (maks {MAX_REGISTER_BATCH})</label>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Lead Name</th>
+                      <th>Phone Number</th>
+                      <th>Email (opsional)</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {prospects.map((p, idx) => (
+                      <tr key={idx}>
+                        <td className="muted">{idx + 1}</td>
+                        <td>
+                          <input
+                            aria-label={`Lead Name prospek ${idx + 1}`}
+                            required
+                            value={p.lead_name}
+                            onChange={(e) => updateProspect(idx, 'lead_name', e.target.value)}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            aria-label={`Phone Number prospek ${idx + 1}`}
+                            type="tel"
+                            inputMode="numeric"
+                            required
+                            value={p.phone_number}
+                            onChange={(e) => updateProspect(idx, 'phone_number', e.target.value)}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            aria-label={`Email prospek ${idx + 1}`}
+                            type="email"
+                            value={p.email}
+                            onChange={(e) => updateProspect(idx, 'email', e.target.value)}
+                          />
+                        </td>
+                        <td>
+                          {prospects.length > 1 && (
+                            <button
+                              type="button"
+                              className="btn btnGhost btnSm"
+                              onClick={() => removeProspect(idx)}
+                            >
+                              Hapus
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ marginTop: 8 }}>
+                <button
+                  type="button"
+                  className="btn btnSecondary btnSm"
+                  onClick={addProspect}
+                  disabled={submitting || prospects.length >= MAX_REGISTER_BATCH}
+                >
+                  Tambah Prospek
+                </button>
+              </div>
+            </div>
+
+            {/* Verdict per baris: satu duplikat tidak menggagalkan yang lain. */}
+            {regReport && regReport.rows.length > 0 && (
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Lead</th>
+                      <th>Telepon</th>
+                      <th>Hasil</th>
+                      <th>Keterangan</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {regReport.rows.map((r) => (
+                      <tr key={r.row_number}>
+                        <td className="muted">{r.row_number}</td>
+                        <td>{r.lead_name || '—'}</td>
+                        <td>{r.phone_number || '—'}</td>
+                        <td>{r.registered ? 'Terdaftar' : 'Ditolak'}</td>
+                        <td>
+                          {r.registered
+                            ? `${r.lead_id} · attempt ${r.attempt_id}${r.notice ? ` · ${r.notice}` : ''}`
+                            : r.reason}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
             <div>
               <button type="submit" className="btn btnPrimary" disabled={submitting}>
                 {submitting ? 'Memproses...' : 'Registrasi Lead'}
