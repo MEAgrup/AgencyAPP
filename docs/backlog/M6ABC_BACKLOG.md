@@ -2,7 +2,9 @@
 
 > Dibuat 2026-08-06 dari QA halaman `/account/services/SVC-202608-0002`.
 > PRD: `docs/prd/CDPS_Module6A_Strategi.md`, `…6B_Plan.md`, `…6C_Plan_Gate_Satuan.md`.
-> Keputusan & deviasi: `docs/DECISIONS.md` 2026-08-06 + O54/O55/O56.
+> Keputusan & deviasi: `docs/DECISIONS.md` 2026-08-06 + 2026-08-07.
+> **O54, O55, O58 SELESAI** (2026-08-07). **O57 sudah diputus, belum dieksekusi**
+> — rancangannya di `docs/handoff/HANDOFF_M6ABC_SESI5.md` §4. **O56 masih terbuka.**
 
 ## 0. Kenapa urutannya begini
 
@@ -81,7 +83,7 @@ diimplementasi sebelum ini mendarat, jadi ia masuk batch migrasi yang SAMA denga
 | ~~A-05~~ | ~~Section A (16 field)~~ | ✅ **SELESAI sesi 3** — data + domain + route + tipe FE + gerbang submit. **Form UI belum** (belum ada halaman Strategi sama sekali; lihat A-13 di bawah) |
 | ~~A-06~~ | ~~Section B per channel (±45 field ↻)~~ | ✅ **SELESAI sesi 3** — sama cakupannya. Kelengkapan Rule 5 ditegakkan gerbang submit per grup per channel, bukan `NOT NULL`: §7 meminta autosave 20 detik dan §5 langkah 5 meminta hitungan hidup, keduanya butuh keadaan setengah-terisi bisa disimpan |
 | A-07 | Section C + validasi kutipan baseline | Rule 6: setiap akar masalah WAJIB mereferensi ≥1 field-ID baseline, divalidasi ada di Strategi yang sama |
-| A-08 | Section D + asumsi | Stretch `>=` floor di level CHECK DB. `STRG_ASSUMPTION.status ∈ Berlaku/Gugur/Terverifikasi`; flip ke `Gugur` memicu `strategi_revisi_disarankan` (**terblokir O55**) |
+| A-08 | Section D + asumsi | Stretch `>=` floor di level CHECK DB. `STRG_ASSUMPTION.status ∈ Berlaku/Gugur/Terverifikasi`; flip ke `Gugur` memicu `strategi_revisi_disarankan` — **O55 SUDAH SELESAI 2026-08-07**, transisi + emit boleh disambung |
 | A-09 | Section E/F/G/H/I/J | Floor price per hero SKU (E-4) dibaca validasi Brief; F soft-limit 20% (Rule 10); G-0 `tanggal_mulai_siklus` sekali-set (Rule 17) |
 | A-10 | Dua tier visibilitas | `STRG_FIELD_VISIBILITY` overlay + daftar hard-internal sebagai konstanta `packages/core`, ditolak di predikat TS **dan** CHECK DB (invariant beku: keduanya tidak boleh menyimpang) |
 | A-11 | Tautan klien read-only `/s/{token}` | Token 32-byte disimpan ter-hash, satu aktif per Strategi, version-pinned ke versi Aktif, revocable + expirable, access-logged. Filter visibilitas diterapkan **sebelum** serialisasi — nol field internal di payload HTML |
@@ -92,6 +94,7 @@ diimplementasi sebelum ini mendarat, jadi ia masuk batch migrasi yang SAMA denga
 
 | # | Ticket | Catatan implementasi |
 |---|---|---|
+| **B-00** | **Entitas `CONTRACT` (O57)** | 🔴 **PRASYARAT KERAS B-01.** Keputusan pemilik 2026-08-07: kontrak = kumpulan Service satu klien dalam satu kesepakatan ⇒ `strategi.service_id` → `contract_id`. Rancangan langkah-demi-langkah: `docs/handoff/HANDOFF_M6ABC_SESI5.md` §4. Membalikkannya murah SEKARANG (satu FK, nol data produksi) dan mahal setelah periode Plan digenerate di atasnya |
 | B-01 | `PLAN` + 6 child tables | `PLAN_TARGET` (menyimpan `nilai_strategi` immutable **dan** `nilai_dipakai`), `PLAN_ROW`, `PLAN_ROW_WEEK`, `PLAN_ACTUAL`, `PLAN_REVIEW`, `PLAN_FLAG`. `lingkup ∈ kontrak/klien` + `strategi_id` nullable (Plan Satuan) + `status_dormansi` |
 | B-02 | Generasi periode | Anniversary-month dari `tanggal_mulai_siklus`. **Simpan day-of-month yang DIMAKSUD terpisah** dari tanggal terhitung, supaya start tanggal 31 tidak hanyut permanen ke 28 setelah lewat Februari |
 | B-03 | Mesin status #16 | Periode 1 butuh persetujuan SPV; 2…n auto-aktif 00:00 WIB; `Menunggu Persetujuan` hanya untuk `Turun >10%` |
@@ -108,8 +111,8 @@ diimplementasi sebelum ini mendarat, jadi ia masuk batch migrasi yang SAMA denga
 
 | # | Item | Menunggu |
 |---|---|---|
-| X-01 | Katalog notifikasi v2 (28 event) | Tanda tangan Hans atas perubahan invariant beku — **O55**. Memblokir 13 event di ketiga modul |
-| X-02 | Konfirmasi tier 33 entri katalog | Yohan / Yulianti — **O54** |
+| ~~X-01~~ | ~~Katalog notifikasi v2~~ | ✅ **SELESAI 2026-08-07** — O55 pilihan (a). `notif_catalog_versions` + 14 event v2 (13 M6A/6B/6C + `m6.client.assigned` O53). Katalog ada; `emit()`-nya belum dipasang |
+| ~~X-02~~ | ~~Konfirmasi tier 33 entri katalog~~ | ✅ **SELESAI 2026-08-07** — O54. `Customer Review Management` → `tanpa_plan`; tier tengah 33%. Tier kini disetel di admin MSL, bukan migrasi |
 | X-03 | Ambang pemicu (20 item · Rp 15jt · 1 bulan) | M6A GA-1: nilai awal, belum diuji ke data service riil |
 | X-04 | RA-4 (jendela baseline tak rata antar channel → warning) | Yohan, sebelum validasi D-3 dikode |
 | X-05 | RA-5 (`tanggal_mulai_siklus` default = tanggal mulai kontrak) | Yulianti, sebelum generasi Plan dikode |
