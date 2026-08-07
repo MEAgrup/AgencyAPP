@@ -135,6 +135,8 @@ export function mapError(err: unknown): Response {
     err instanceof finance.SchemeNoScheduleError ||
     err instanceof finance.ScheduleExistsError ||
     err instanceof finance.NoOutstandingError ||
+    err instanceof finance.ChangePendingError ||
+    err instanceof finance.ChangeDecidedError ||
     err instanceof client.LockedFieldError ||
     err instanceof client.IntentLockedError ||
     err instanceof account.ConflictError ||

@@ -316,6 +316,59 @@ END $$;
 RESET ROLE;
 
 -- ---------------------------------------------------------------------------
+-- 17b-17e. M5-OA-7 (keputusan pemilik 2026-08-04) — pengajuan perubahan
+--          transaksi. Antrian ACC ini memuat rencana uang (skema + jadwal
+--          pengganti) sebuah deal, jadi lingkupnya sengaja SAMA SEMPITNYA dengan
+--          jalur baca M5: Finance (worklist-nya), pihak yang terlibat, dan
+--          Director/OD. Sales & Account TIDAK dapat arm — mereka membaca Payment
+--          Status, bukan proses persetujuan internal Finance.
+-- ---------------------------------------------------------------------------
+INSERT INTO transaction_change_requests
+  (id, transaction_id, from_scheme, to_scheme, schedule_json, amount_outstanding,
+   reason, status, requested_by, created_by)
+VALUES
+  ('TCR-RLS-0001', 'TRX-RLS-0001', '[Bayar Penuh (Lunas)]', '[Termin]',
+   '[{"amount":"9000000","due_date":"2026-09-01"}]'::jsonb, 9000000,
+   'klien pindah metode bayar', 'pending', 'EMP-RLS-FINLEAD', 'EMP-RLS-FINLEAD');
+
+SET LOCAL ROLE authenticated;
+
+-- 17b. Finance melihat antrian ACC-nya (staff sekalipun — halaman transaksi M5
+--      menampilkan panel ini, dan nol di sini berarti panelnya kosong senyap).
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-FIN1","division":"Finance","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM transaction_change_requests WHERE id='TCR-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS transaction_change_requests: Finance must see the ACC queue (M5-OA-7)'; END IF;
+END $$;
+
+-- 17c. Director membaca semuanya — dialah yang harus memutuskan. Kalau check ini
+--      merah, tombol ACC-nya tidak pernah punya baris untuk ditindak.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-DIR","division":"Management","level":"staff","director":true}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM transaction_change_requests WHERE id='TCR-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS transaction_change_requests: Director must see every filing (M5-OA-7)'; END IF;
+END $$;
+
+-- 17d. Sales — termasuk PIC klien-nya sendiri — TIDAK melihat antrian ini.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLS1","division":"Sales","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM transaction_change_requests WHERE id='TCR-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS transaction_change_requests: Sales PIC must NOT see the Finance approval queue (M5-OA-7)'; END IF;
+END $$;
+
+-- 17e. Fail-closed: klaim kosong membaca NOL.
+SELECT set_config('request.jwt.claims', '{"app_metadata":{}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM transaction_change_requests WHERE id='TCR-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS transaction_change_requests: empty claims must read NOTHING'; END IF;
+END $$;
+
+RESET ROLE;
+
+-- ---------------------------------------------------------------------------
 -- 18-23. O46 — arm "Lead/SPV = division-wide" (PRD Role Matrix §6), ditambahkan
 --        20260730091540. Dua policy sebelumnya lebih SEMPIT dari Go DAN dari PRD:
 --        `transactions_select` tak punya arm Sales-Lead (Go `trxVisibility` memberi

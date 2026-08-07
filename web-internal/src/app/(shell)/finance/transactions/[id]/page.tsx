@@ -5,18 +5,24 @@ import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import {
   SCHEME_OPTIONS,
-  changeScheme,
+  approveSchemeChange,
+  cancelSchemeChange,
   createSchedule,
   flagBermasalah,
   getBermasalah,
   getTransaction,
   idrToInput,
+  listSchemeChangeRequests,
+  rejectSchemeChange,
+  requestSchemeChange,
   scheduleOutstanding,
   verify,
   voteBermasalah,
   type BermasalahStatus,
+  type SchemeChangeRequest,
   type Transaction,
 } from '@/lib/finance';
+import { useAuth } from '@/lib/auth-context';
 import StatusBadge from '@/components/StatusBadge';
 
 function formatDate(value: string | null | undefined) {
@@ -40,8 +46,17 @@ const SCHEDULED_SCHEMES = new Set(['[Termin]', '[Bayar di Belakang]']);
 const INST_TERVERIFIKASI = '[Terverifikasi]';
 const PAYMENT_LUNAS = '[Lunas]';
 
+/** Label Bahasa Indonesia untuk status pengajuan perubahan (M5-OA-7). */
+const CHANGE_STATUS_LABEL: Record<SchemeChangeRequest['status'], string> = {
+  pending: 'Menunggu ACC Direktur',
+  approved: 'Disetujui Direktur',
+  rejected: 'Ditolak Direktur',
+  cancelled: 'Dibatalkan Pengaju',
+};
+
 export default function TransactionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const { employee, role } = useAuth();
 
   const [trx, setTrx] = useState<Transaction | null>(null);
   const [loading, setLoading] = useState(true);
@@ -72,11 +87,17 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
   const [outstandingError, setOutstandingError] = useState<string | null>(null);
   const [outstandingMessage, setOutstandingMessage] = useState<string | null>(null);
 
-  // Ubah Skema
+  // Ubah Transaksi — diajukan Finance, di-ACC Direktur (M5-OA-7)
   const [schemeChoice, setSchemeChoice] = useState<string>(SCHEME_OPTIONS[0]);
   const [schemeReason, setSchemeReason] = useState('');
+  const [schemeRows, setSchemeRows] = useState<ScheduleRow[]>([{ amount: '', due_date: '' }]);
   const [schemeSubmitting, setSchemeSubmitting] = useState(false);
   const [schemeError, setSchemeError] = useState<string | null>(null);
+  const [schemeMessage, setSchemeMessage] = useState<string | null>(null);
+  const [changeRequests, setChangeRequests] = useState<SchemeChangeRequest[]>([]);
+  const [decisionNote, setDecisionNote] = useState('');
+  const [decisionSubmitting, setDecisionSubmitting] = useState(false);
+  const [decisionError, setDecisionError] = useState<string | null>(null);
 
   // [Bermasalah]
   const [flagSubmitting, setFlagSubmitting] = useState(false);
@@ -114,6 +135,17 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
     }
   }, [id, outstandingTouched]);
 
+  const loadChangeRequests = useCallback(async () => {
+    try {
+      const res = await listSchemeChangeRequests(id);
+      setChangeRequests(res.data);
+    } catch (err) {
+      // The filing panel is secondary to the money on this page: surface the
+      // error inside its own card rather than blanking the transaction.
+      setSchemeError(errorMessage(err));
+    }
+  }, [id]);
+
   const loadBermasalah = useCallback(async () => {
     setBermasalahError(null);
     try {
@@ -127,7 +159,8 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
   useEffect(() => {
     load();
     loadBermasalah();
-  }, [load, loadBermasalah]);
+    loadChangeRequests();
+  }, [load, loadBermasalah, loadChangeRequests]);
 
   /**
    * One submit carries the payment AND the contract link (M5 §7 Rule 1): the
@@ -220,18 +253,67 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
     }
   }
 
+  function addSchemeRow() {
+    setSchemeRows((rows) => [...rows, { amount: '', due_date: '' }]);
+  }
+
+  function removeSchemeRow(idx: number) {
+    setSchemeRows((rows) => rows.filter((_, i) => i !== idx));
+  }
+
+  function updateSchemeRow(idx: number, field: keyof ScheduleRow, value: string) {
+    setSchemeRows((rows) => rows.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+  }
+
+  /**
+   * Files the change (M5-OA-7). For SPV/Head Finance this only queues it — the
+   * transaction does not move until a Director approves, which is why the
+   * success message says so instead of "berhasil diubah". A Director filing is
+   * applied on the spot, so the answer distinguishes the two.
+   */
   async function handleScheme(e: FormEvent) {
     e.preventDefault();
     setSchemeError(null);
+    setSchemeMessage(null);
     setSchemeSubmitting(true);
     try {
-      await changeScheme(id, schemeChoice, schemeReason);
+      const res = await requestSchemeChange(id, {
+        payment_intent_scheme: schemeChoice,
+        reason: schemeReason,
+        // A scheme without instalments must carry an EMPTY schedule — sending
+        // half-typed rows would be rejected as incomplete data.
+        installments: SCHEDULED_SCHEMES.has(schemeChoice) ? schemeRows : [],
+      });
+      setSchemeMessage(
+        res.request.status === 'approved'
+          ? 'Perubahan diterapkan (ACC Direktur).'
+          : `Pengajuan ${res.request.id} tersimpan dan menunggu persetujuan Direktur. Transaksi belum berubah.`,
+      );
       setSchemeReason('');
-      await load();
+      setSchemeRows([{ amount: '', due_date: '' }]);
+      await Promise.all([load(), loadChangeRequests()]);
     } catch (err) {
       setSchemeError(errorMessage(err));
     } finally {
       setSchemeSubmitting(false);
+    }
+  }
+
+  /** The Director's verdict, or the requester withdrawing their own filing. */
+  async function handleDecision(reqId: string, action: 'approve' | 'reject' | 'cancel') {
+    setDecisionError(null);
+    setSchemeMessage(null);
+    setDecisionSubmitting(true);
+    try {
+      if (action === 'approve') await approveSchemeChange(reqId, decisionNote);
+      else if (action === 'reject') await rejectSchemeChange(reqId, decisionNote);
+      else await cancelSchemeChange(reqId);
+      setDecisionNote('');
+      await Promise.all([load(), loadChangeRequests()]);
+    } catch (err) {
+      setDecisionError(errorMessage(err));
+    } finally {
+      setDecisionSubmitting(false);
     }
   }
 
@@ -286,6 +368,15 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
     SCHEDULED_SCHEMES.has(trx.payment_intent_scheme) && trx.installments.length === 0;
   const canScheduleOutstanding =
     !needsOriginalSchedule && trx.payment_status !== PAYMENT_LUNAS && openInstallments.length === 0;
+
+  // Transaction change (M5-OA-7). Role checks here only decide what is OFFERED —
+  // the server owns the gate, and a hidden button is not a permission.
+  const pendingChange = changeRequests.find((r) => r.status === 'pending') ?? null;
+  const decidedChanges = changeRequests.filter((r) => r.status !== 'pending');
+  const canRequestChange = !!role && (role.director || (role.division === 'Finance' && role.level === 'lead'));
+  const canDecide = !!role?.director;
+  const canCancelChange =
+    !!pendingChange && !!employee && pendingChange.requested_by === employee.employee_id;
 
   return (
     <div className="stack">
@@ -599,37 +690,196 @@ export default function TransactionDetailPage({ params }: { params: Promise<{ id
         </section>
       )}
 
+      {/* Ubah Transaksi (M5-OA-7): SPV/Head Finance mengajukan, Direktur meng-ACC.
+          Termin yang sudah terverifikasi tidak pernah disentuh — jadwal pengganti
+          hanya menggambarkan kekurangan pembayaran, jadi Σ-nya harus sama dengan
+          Amount Outstanding, bukan dengan nilai transaksi. */}
       <section className="card">
         <div className="cardHeader">
-          <h2>Ubah Skema</h2>
+          <h2>Ubah Transaksi (perlu ACC Direktur)</h2>
         </div>
-        <form className="form" onSubmit={handleScheme}>
-          {schemeError && <div className="alert alertError" role="alert">{schemeError}</div>}
-          <div className="formRow">
-            <div className="field">
-              <label htmlFor="scheme-choice">Skema Baru</label>
-              <select id="scheme-choice" value={schemeChoice} onChange={(e) => setSchemeChoice(e.target.value)}>
-                {SCHEME_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
-              </select>
+
+        {decisionError && <div className="alert alertError" role="alert">{decisionError}</div>}
+
+        {pendingChange && (
+          <div className="alert alertInfo" role="status">
+            <strong>{pendingChange.id}</strong> — {CHANGE_STATUS_LABEL[pendingChange.status]}
+            <div style={{ marginTop: 6 }}>
+              Skema: {pendingChange.from_scheme || '—'} &rarr; <strong>{pendingChange.to_scheme}</strong>
+              {' '}&middot; Kekurangan saat diajukan: {pendingChange.amount_outstanding}
             </div>
+            <div>Alasan: {pendingChange.reason}</div>
+            <div className="muted" style={{ fontSize: 13 }}>
+              Diajukan oleh {pendingChange.requested_by_nama || pendingChange.requested_by} pada{' '}
+              {new Date(pendingChange.created_at).toLocaleString('id-ID')}
+            </div>
+            {pendingChange.schedule.length > 0 && (
+              <ul style={{ margin: '6px 0 0 18px' }}>
+                {pendingChange.schedule.map((s, idx) => (
+                  <li key={idx}>{s.amount} &middot; jatuh tempo {formatDate(s.due_date)}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {pendingChange && canDecide && (
+          <div className="form" style={{ marginTop: 12 }}>
             <div className="field">
-              <label htmlFor="scheme-reason">Alasan</label>
-              <input
-                id="scheme-reason"
-                required
-                value={schemeReason}
-                onChange={(e) => setSchemeReason(e.target.value)}
-              />
+              <label htmlFor="decision-note">Catatan Keputusan (opsional)</label>
+              <input id="decision-note" value={decisionNote} onChange={(e) => setDecisionNote(e.target.value)} />
+            </div>
+            <div className="row" style={{ gap: 10 }}>
+              <button
+                type="button"
+                className="btn btnPrimary"
+                disabled={decisionSubmitting}
+                onClick={() => handleDecision(pendingChange.id, 'approve')}
+              >
+                {decisionSubmitting ? 'Memproses...' : 'Setujui & Terapkan'}
+              </button>
+              <button
+                type="button"
+                className="btn btnDanger"
+                disabled={decisionSubmitting}
+                onClick={() => handleDecision(pendingChange.id, 'reject')}
+              >
+                Tolak
+              </button>
             </div>
           </div>
-          <div>
-            <button type="submit" className="btn btnPrimary" disabled={schemeSubmitting}>
-              {schemeSubmitting ? 'Menyimpan...' : 'Ubah Skema'}
+        )}
+
+        {pendingChange && canCancelChange && (
+          <div className="row" style={{ gap: 10, marginTop: 12 }}>
+            <button
+              type="button"
+              className="btn btnSecondary btnSm"
+              disabled={decisionSubmitting}
+              onClick={() => handleDecision(pendingChange.id, 'cancel')}
+            >
+              Batalkan Pengajuan
             </button>
           </div>
-        </form>
+        )}
+
+        {/* One pending filing per transaction — the server enforces it, so the
+            form is hidden rather than offering a submit that can only 409. */}
+        {!pendingChange && (
+          <form className="form" onSubmit={handleScheme} style={{ marginTop: 12 }}>
+            {schemeError && <div className="alert alertError" role="alert">{schemeError}</div>}
+            {schemeMessage && <div className="alert alertSuccess" role="status">{schemeMessage}</div>}
+            <p className="muted" style={{ fontSize: 13 }}>
+              Ajukan perubahan metode/skema pembayaran klien. Pengajuan dicatat dengan alasan dan{' '}
+              <strong>baru berlaku setelah disetujui Direktur</strong> — pembayaran yang sudah
+              diverifikasi tidak pernah diubah. Untuk skema bertermin, total jadwal baru harus sama
+              dengan kekurangan pembayaran saat ini ({trx.amount_outstanding}).
+            </p>
+            <div className="formRow">
+              <div className="field">
+                <label htmlFor="scheme-choice">Skema Baru</label>
+                <select id="scheme-choice" value={schemeChoice} onChange={(e) => setSchemeChoice(e.target.value)}>
+                  {SCHEME_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="scheme-reason">Alasan</label>
+                <input
+                  id="scheme-reason"
+                  required
+                  value={schemeReason}
+                  onChange={(e) => setSchemeReason(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {SCHEDULED_SCHEMES.has(schemeChoice) && (
+              <>
+                {schemeRows.map((row, idx) => (
+                  <div className="formRow" key={idx}>
+                    <div className="field">
+                      <label htmlFor={`change-amount-${idx}`}>Nilai Termin Baru</label>
+                      <input
+                        id={`change-amount-${idx}`}
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        required
+                        value={row.amount}
+                        onChange={(e) => updateSchemeRow(idx, 'amount', e.target.value)}
+                      />
+                    </div>
+                    <div className="field">
+                      <label htmlFor={`change-due-${idx}`}>Jatuh Tempo</label>
+                      <input
+                        id={`change-due-${idx}`}
+                        type="date"
+                        required
+                        value={row.due_date}
+                        onChange={(e) => updateSchemeRow(idx, 'due_date', e.target.value)}
+                      />
+                    </div>
+                    {schemeRows.length > 1 && (
+                      <button type="button" className="btn btnGhost btnSm" onClick={() => removeSchemeRow(idx)}>
+                        Hapus
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <div>
+                  <button type="button" className="btn btnSecondary btnSm" onClick={addSchemeRow}>
+                    Tambah Baris
+                  </button>
+                </div>
+              </>
+            )}
+
+            <div>
+              <button type="submit" className="btn btnPrimary" disabled={schemeSubmitting || !canRequestChange}>
+                {schemeSubmitting ? 'Menyimpan...' : 'Ajukan Perubahan'}
+              </button>
+            </div>
+            {!canRequestChange && (
+              <p className="muted" style={{ fontSize: 13 }}>
+                Hanya SPV/Head Finance atau Direktur yang bisa mengajukan perubahan transaksi.
+              </p>
+            )}
+          </form>
+        )}
+
+        {decidedChanges.length > 0 && (
+          <div className="table-wrap" style={{ marginTop: 12 }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Pengajuan</th>
+                  <th>Perubahan</th>
+                  <th>Alasan</th>
+                  <th>Status</th>
+                  <th>Diputuskan</th>
+                </tr>
+              </thead>
+              <tbody>
+                {decidedChanges.map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.id}</td>
+                    <td>{r.from_scheme || '—'} &rarr; {r.to_scheme}</td>
+                    <td>{r.reason}</td>
+                    <td>{CHANGE_STATUS_LABEL[r.status]}</td>
+                    <td>
+                      {r.resolved_at
+                        ? `${new Date(r.resolved_at).toLocaleString('id-ID')} oleh ${r.resolved_by_nama || r.resolved_by}`
+                        : '—'}
+                      {r.decision_note && <> &middot; {r.decision_note}</>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       <section className="card">

@@ -156,14 +156,40 @@ export class OutstandingTotalError extends Error {
 }
 
 /**
- * A scheme change was attempted after money already came in. Scheme change is a
- * pre-verification edit only (see changeScheme) — once a payment is verified the
- * schedule is locked. Reuses the verbatim engine BI (→ 409).
+ * A scheme change was attempted on a Transaction with nothing left to collect
+ * (→ 409).
+ *
+ * RULE REVISED 2026-08-04 (owner decision, M5-OA-7 — see requestSchemeChange).
+ * This error used to mean "money already came in, the scheme is frozen", which
+ * made the one case the owner actually has — client renegotiates the payment
+ * method AFTER paying a deposit — unreachable. The lock now sits at settlement
+ * instead: everything up to [Lunas] is changeable (with Director ACC), and a
+ * settled Transaction has no remaining schedule to change. The message says
+ * exactly that, instead of the generic engine string it borrowed before.
  */
+export const MSG_CHANGE_SETTLED = '[transaksi sudah lunas, skema pembayaran tidak bisa diubah]';
 export class SchemeLockedError extends Error {
   constructor() {
-    super(bi.TRANSITION_NOT_ALLOWED);
+    super(MSG_CHANGE_SETTLED);
     this.name = 'SchemeLockedError';
+  }
+}
+
+/** A second change request while one is still waiting for the Director (→ 409). */
+export const MSG_CHANGE_PENDING_EXISTS = '[sudah ada pengajuan perubahan yang menunggu persetujuan direktur]';
+export class ChangePendingError extends Error {
+  constructor() {
+    super(MSG_CHANGE_PENDING_EXISTS);
+    this.name = 'ChangePendingError';
+  }
+}
+
+/** A verdict (or cancel) on a request that is no longer pending (→ 409). */
+export const MSG_CHANGE_ALREADY_DECIDED = '[pengajuan perubahan sudah diputuskan]';
+export class ChangeDecidedError extends Error {
+  constructor() {
+    super(MSG_CHANGE_ALREADY_DECIDED);
+    this.name = 'ChangeDecidedError';
   }
 }
 
@@ -184,10 +210,24 @@ export function canVerifyPayment(actor: Actor): boolean {
 /** The Account division (SPV Account co-approves [Bermasalah] resolution, M5-OA-5). */
 export const ACCOUNT_DIVISION = 'Account';
 
-/** canManageScheme: scheme change needs SPV/Head Finance or Director (M5-OA-6). */
+/**
+ * canManageScheme: who may FILE a transaction change (M5-OA-6 authority floor —
+ * SPV/Head Finance or Director). Since M5-OA-7 (owner decision 2026-08-04)
+ * filing is no longer the same thing as actioning: a change filed by Finance
+ * only takes effect once a Director approves it (canApproveSchemeChange).
+ */
 export function canManageScheme(actor: Actor): boolean {
   return actor.role.director ||
     (actor.role.division === FINANCE_DIVISION && actor.role.level === permission.LevelLead);
+}
+
+/**
+ * canApproveSchemeChange: only a Director may ACTION a transaction change
+ * (M5-OA-7). Deliberately narrower than canManageScheme — if SPV Finance could
+ * approve, the approval gate the owner asked for would not exist.
+ */
+export function canApproveSchemeChange(actor: Actor): boolean {
+  return actor.role.director;
 }
 
 /**
@@ -1043,7 +1083,34 @@ export async function resolveBermasalah(
 }
 
 // ---------------------------------------------------------------------------
-// Scheme change (M5 §4 Rule 5 / M5-OA-6) — pre-verification edit only.
+// Transaction change: SPV/Head Finance FILES, Director ACTIONS
+// (M5 §4 Rule 5 / M5-OA-7 — owner decision 2026-08-04, docs/DECISIONS.md).
+//
+// TWO PRIOR RULES ARE DELIBERATELY REVISED HERE. The owner's case in QA: a
+// client changes payment method mid-deal, Finance must be able to reflect it,
+// and it must not become real until a Director says so.
+//
+//   (a) M5-OA-6 read "requires minimum SPV/Head Finance approval to action" —
+//       SPV Finance both decided AND executed. Now SPV/Head Finance may only
+//       file; a Director approval is what applies it (a Director filing is
+//       applied on the spot — they are the approving authority, so making them
+//       approve their own filing in a second call would be ceremony, not
+//       control). The filing floor is unchanged: Finance staff still cannot.
+//   (b) The TS port refused any change once money had arrived
+//       (SchemeLockedError, pre-verification only). That froze exactly the case
+//       the owner has — the client pays a deposit and THEN renegotiates. The
+//       lock moved to settlement: changeable until [Lunas].
+//
+// What is NOT revised, because house rule #3 is not negotiable:
+//   - [Terverifikasi] installments and every payment_verifications row are
+//     untouched. Only the OPEN part of the schedule is replaced, and the
+//     replacement must sum EXACTLY to Amount Outstanding — so the invariant
+//     "Σ schedule = Total Agreed Value" survives a mid-flight change.
+//   - total_agreed_value stays immutable: this is the payment-METHOD door, not
+//     a renegotiation of the deal's value (that is M0/M4's).
+//   - filing, verdict and application each append their own audit row, and the
+//     replaced installments are captured in the audit `before` so the previous
+//     schedule is reconstructible from the log alone.
 // ---------------------------------------------------------------------------
 
 /** One installment of a replacement schedule. */
@@ -1052,71 +1119,498 @@ export interface ScheduleInput {
   dueDate: string; // YYYY-MM-DD
 }
 
+/** `transaction_change_requests.status` — the request row's own lifecycle. */
+export const CHANGE_PENDING = 'pending';
+export const CHANGE_APPROVED = 'approved';
+export const CHANGE_REJECTED = 'rejected';
+export const CHANGE_CANCELLED = 'cancelled';
+
+/** What a filing asks for. */
+export interface SchemeChangeInput {
+  newScheme: string;
+  reason: string;
+  /** replacement schedule for the OPEN portion; Σ = Amount Outstanding. */
+  schedule?: ScheduleInput[];
+}
+
+/** One filed change request (TCR-…). */
+export interface SchemeChangeRequest {
+  id: string;
+  transactionId: string;
+  fromScheme: string;
+  toScheme: string;
+  schedule: ScheduleInput[];
+  /** Amount Outstanding as it stood when the request was filed. */
+  amountOutstanding: string;
+  reason: string;
+  status: string;
+  decisionNote: string;
+  requestedBy: string;
+  resolvedBy: string;
+  resolvedAt: Date | null;
+  createdAt: Date;
+}
+
+/** One schedule item as it is stored inside `schedule_json` (wire spelling). */
+interface ScheduleJsonItem {
+  amount: string;
+  due_date: string;
+}
+
 /**
- * changeScheme switches a Transaction's Payment Intent scheme with a logged
- * reason (M5 §4 Rule 5 / M5-OA-6) — never deleting the Transaction. It requires
- * SPV/Head Finance or Director, and is a PRE-VERIFICATION edit only: once any
- * payment is verified the schedule is locked (SchemeLockedError) because
- * reconciling verified installments against a new schedule is out of scope. A
- * scheduled scheme must carry a schedule summing to the agreed total
- * (ScheduleTotalError); Lunas / Bayar Sebagian carry none.
+ * `schedule_json` reaches us EITHER already parsed OR as raw JSON text: with
+ * `prepare: false` (mandatory on the Supabase transaction pooler) postgres.js
+ * does not always learn the column is jsonb, and hands back the string instead.
+ * Both shapes are normalized here rather than at each call site — the version
+ * that assumed an array crashed with `.map is not a function` the moment a row
+ * came back over the un-described path.
  */
-export async function changeScheme(
+function parseScheduleJson(value: unknown): ScheduleJsonItem[] {
+  const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+  return Array.isArray(parsed) ? (parsed as ScheduleJsonItem[]) : [];
+}
+
+interface ChangeRequestDbRow {
+  id: string;
+  transaction_id: string;
+  from_scheme: string;
+  to_scheme: string;
+  schedule_json: ScheduleJsonItem[] | string | null;
+  amount_outstanding: string;
+  reason: string;
+  status: string;
+  decision_note: string | null;
+  requested_by: string;
+  resolved_by: string | null;
+  resolved_at: Date | null;
+  created_at: Date;
+}
+
+function toChangeRequest(r: ChangeRequestDbRow): SchemeChangeRequest {
+  return {
+    id: r.id, transactionId: r.transaction_id, fromScheme: r.from_scheme, toScheme: r.to_scheme,
+    schedule: parseScheduleJson(r.schedule_json).map((s) => ({ amount: s.amount, dueDate: s.due_date })),
+    amountOutstanding: r.amount_outstanding, reason: r.reason, status: r.status,
+    decisionNote: r.decision_note ?? '', requestedBy: r.requested_by,
+    resolvedBy: r.resolved_by ?? '', resolvedAt: r.resolved_at, createdAt: r.created_at,
+  };
+}
+
+/**
+ * requestSchemeChange files a payment-scheme change on a Transaction
+ * (M5 §4 Rule 5 / M5-OA-7). SPV/Head Finance files and nothing about the
+ * Transaction moves; a Director filing is applied immediately (see the section
+ * comment). The mandatory reason and the schedule shape are validated BEFORE the
+ * TCR- id is minted (house rule #1).
+ *
+ * Guards (all 409 with a verbatim BI string): a settled Transaction has nothing
+ * left to reschedule (SchemeLockedError); only one filing may wait at a time
+ * (ChangePendingError). Σ of the replacement schedule must equal Amount
+ * Outstanding — ScheduleTotalError while no money has arrived (the outstanding
+ * IS the agreed total then, so the existing message is the accurate one), and
+ * OutstandingTotalError once it has.
+ */
+export async function requestSchemeChange(
   sql: Sql,
   actor: Actor,
   transactionId: string,
-  newScheme: string,
-  reason: string,
-  schedule: ScheduleInput[] = [],
+  input: SchemeChangeInput,
   now: Date = new Date(),
-): Promise<void> {
+): Promise<SchemeChangeRequest> {
   if (!canManageScheme(actor)) {
     throw new ForbiddenError();
   }
-  const why = (reason ?? '').trim();
-  if (why === '' || !PAYMENT_SCHEMES_VALID.has(newScheme)) {
+  const why = (input.reason ?? '').trim();
+  if (why === '' || !PAYMENT_SCHEMES_VALID.has(input.newScheme)) {
     throw new IncompleteError();
   }
+  const schedule = input.schedule ?? [];
 
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
     const trx = await loadTransaction(tx, transactionId, true);
 
-    // Pre-verification only: any money in locks the scheme.
-    const verified = await sumVerified(tx, trx.id);
-    if (verified > 0n || trx.paymentStatus !== PAYMENT_MENUNGGU) {
-      throw new SchemeLockedError();
+    const outstanding = await outstandingOf(tx, trx);
+    validateChangeSchedule(input.newScheme, schedule, outstanding, trx.totalAgreed);
+
+    const pending = await tx<{ n: number }[]>`
+      select count(*)::int as n from transaction_change_requests
+      where transaction_id = ${trx.id} and status = ${CHANGE_PENDING}`;
+    if (pending[0].n > 0) {
+      throw new ChangePendingError();
     }
 
-    const scheduled = SCHEDULED_SCHEMES.has(newScheme);
-    validateSchedule(newScheme, scheduled, schedule, trx.totalAgreed);
+    const reqId = await ex.ident.identNext('TCR', now);
+    const decided = actor.role.director;
+    const inserted = await tx<ChangeRequestDbRow[]>`
+      insert into transaction_change_requests
+        (id, transaction_id, from_scheme, to_scheme, schedule_json, amount_outstanding,
+         reason, status, decision_note, requested_by, resolved_by, resolved_at, created_by)
+      values
+        (${reqId}, ${trx.id}, ${trx.scheme}, ${input.newScheme},
+         ${JSON.stringify(schedule.map((s) => ({ amount: s.amount, due_date: s.dueDate })))}::jsonb,
+         ${money.decimal(outstanding)}, ${why},
+         ${decided ? CHANGE_APPROVED : CHANGE_PENDING}, null, ${actor.employeeId},
+         ${decided ? actor.employeeId : null}, ${decided ? now : null}, ${actor.employeeId})
+      returning id, transaction_id, from_scheme, to_scheme, schedule_json,
+                amount_outstanding::text as amount_outstanding, reason, status, decision_note,
+                requested_by, resolved_by, resolved_at, created_at`;
 
-    // Replace the (all-unverified) installment schedule.
-    await tx`delete from installments where transaction_id = ${trx.id}`;
-    for (let i = 0; i < schedule.length; i++) {
-      const instId = await ex.ident.identNext('INST', now);
-      await tx`
-        insert into installments (id, transaction_id, installment_no, amount, due_date, status, created_by)
-        values (${instId}, ${trx.id}, ${i + 1}, ${money.decimal(money.parse(schedule[i].amount))},
-                ${schedule[i].dueDate}, ${INST_BELUM}, ${actor.employeeId})`;
-    }
-
-    await tx`update transactions set payment_intent_scheme = ${newScheme} where id = ${trx.id}`;
-    await tx`update clients set payment_intent = ${newScheme} where id = ${trx.clientId}`;
     await ex.audit.insertAudit({
       entityType: 'transaction', entityId: trx.id, actorEmployeeId: actor.employeeId,
-      action: 'scheme_changed', beforeJson: { payment_intent_scheme: trx.scheme },
-      afterJson: { payment_intent_scheme: newScheme, installments: schedule.length, reason: why },
+      action: 'scheme_change_requested', beforeJson: { payment_intent_scheme: trx.scheme },
+      afterJson: {
+        request_id: reqId, payment_intent_scheme: input.newScheme, installments: schedule.length,
+        amount_outstanding: money.decimal(outstanding), reason: why,
+        auto_approved: decided, status: decided ? CHANGE_APPROVED : CHANGE_PENDING,
+      },
       createdBy: actor.employeeId,
     });
+
+    if (decided) {
+      // Director authority: the filing IS the approval, applied in the same
+      // transaction so a request row can never be 'approved' while the schedule
+      // it describes failed to land.
+      await applySchemeChange(tx, ex, trx, input.newScheme, schedule, actor, now, reqId);
+    } else {
+      await notification.emit(ex.notify, {
+        event: notification.EVENTS.TransactionChangeRequested,
+        entityType: 'transaction', entityId: trx.id, actor: actor.employeeId,
+        explicitRecipients: await directorIds(tx), notifyActor: false,
+        deepLink: `/finance/transactions/${trx.id}`,
+      });
+    }
+    return toChangeRequest(inserted[0]);
+  });
+}
+
+/**
+ * approveSchemeChange is the Director's ACC — the step that makes a filed change
+ * real (M5-OA-7). Everything is RE-DERIVED and RE-VALIDATED here rather than
+ * trusted from the request row: a payment may have been verified while the
+ * filing waited, which moves Amount Outstanding, and applying a stale schedule
+ * would silently break Σ schedule = Total Agreed Value. A filing that no longer
+ * reconciles is refused with the verbatim BI message and stays pending, so
+ * Finance can re-file against the real number instead of the numbers being
+ * quietly wrong.
+ */
+export async function approveSchemeChange(
+  sql: Sql,
+  actor: Actor,
+  reqId: string,
+  note = '',
+  now: Date = new Date(),
+): Promise<SchemeChangeRequest> {
+  if (!canApproveSchemeChange(actor)) {
+    throw new ForbiddenError();
+  }
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const req = await lockPendingChange(tx, reqId);
+    const trx = await loadTransaction(tx, req.transaction_id, true);
+
+    const outstanding = await outstandingOf(tx, trx);
+    const schedule = toChangeRequest(req).schedule;
+    validateChangeSchedule(req.to_scheme, schedule, outstanding, trx.totalAgreed);
+
+    await applySchemeChange(tx, ex, trx, req.to_scheme, schedule, actor, now, req.id);
+    const updated = await resolveChange(tx, req.id, CHANGE_APPROVED, actor, note, now);
+
+    await ex.audit.insertAudit({
+      entityType: 'transaction', entityId: trx.id, actorEmployeeId: actor.employeeId,
+      action: 'scheme_change_approved', beforeJson: { payment_intent_scheme: trx.scheme },
+      afterJson: {
+        request_id: req.id, payment_intent_scheme: req.to_scheme,
+        amount_outstanding: money.decimal(outstanding), note: note.trim(),
+      },
+      createdBy: actor.employeeId,
+    });
+    await notifyChangeDecided(ex, trx.id, actor, req.requested_by);
+    return updated;
+  });
+}
+
+/**
+ * rejectSchemeChange is the Director refusing a filing (M5-OA-7). The
+ * Transaction is left exactly as it was; the requester is notified through the
+ * same event as an approval so both verdicts reach them the same way.
+ */
+export async function rejectSchemeChange(
+  sql: Sql,
+  actor: Actor,
+  reqId: string,
+  note = '',
+  now: Date = new Date(),
+): Promise<SchemeChangeRequest> {
+  if (!canApproveSchemeChange(actor)) {
+    throw new ForbiddenError();
+  }
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const req = await lockPendingChange(tx, reqId);
+    const updated = await resolveChange(tx, req.id, CHANGE_REJECTED, actor, note, now);
+    await ex.audit.insertAudit({
+      entityType: 'transaction', entityId: req.transaction_id, actorEmployeeId: actor.employeeId,
+      action: 'scheme_change_rejected', beforeJson: null,
+      afterJson: { request_id: req.id, payment_intent_scheme: req.to_scheme, note: note.trim() },
+      createdBy: actor.employeeId,
+    });
+    await notifyChangeDecided(ex, req.transaction_id, actor, req.requested_by);
+    return updated;
+  });
+}
+
+/**
+ * cancelSchemeChange withdraws a filing before a Director rules on it. Only the
+ * requester (or a Director) may cancel — otherwise one SPV could clear another's
+ * pending request out of the way and file their own against the same money.
+ * Cancelling is not a verdict, so nobody is notified.
+ */
+export async function cancelSchemeChange(
+  sql: Sql,
+  actor: Actor,
+  reqId: string,
+  now: Date = new Date(),
+): Promise<SchemeChangeRequest> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const req = await lockPendingChange(tx, reqId);
+    if (!actor.role.director && req.requested_by !== actor.employeeId) {
+      throw new ForbiddenError();
+    }
+    const updated = await resolveChange(tx, req.id, CHANGE_CANCELLED, actor, '', now);
+    await ex.audit.insertAudit({
+      entityType: 'transaction', entityId: req.transaction_id, actorEmployeeId: actor.employeeId,
+      action: 'scheme_change_cancelled', beforeJson: null,
+      afterJson: { request_id: req.id, payment_intent_scheme: req.to_scheme },
+      createdBy: actor.employeeId,
+    });
+    return updated;
+  });
+}
+
+/** One row of the Director's ACC queue — the request plus who/what it is about. */
+export interface SchemeChangeQueueRow extends SchemeChangeRequest {
+  clientId: string;
+  toko: string;
+  totalAgreedValue: string;
+  paymentStatus: string;
+  requestedByNama: string;
+  resolvedByNama: string;
+}
+
+/**
+ * schemeChangeRequests lists filings, newest first: for one Transaction (detail
+ * page, any status) or across all of them (the Director's ACC queue, default
+ * `pending`). Row scope belongs to the `transaction_change_requests_select`
+ * policy when read through readAsActor — this only shapes the projection, the
+ * same division of labour as deleteRequestQueue / poolBoard.
+ */
+export async function schemeChangeRequests(
+  sql: Queryable,
+  filter: { transactionId?: string; status?: string } = {},
+): Promise<SchemeChangeQueueRow[]> {
+  const status = filter.status?.trim() ?? CHANGE_PENDING;
+  const transactionId = filter.transactionId?.trim() ?? '';
+  const rows = await sql<(ChangeRequestDbRow & {
+    client_id: string; toko: string; total_agreed_value: string; payment_status: string;
+    requested_by_nama: string; resolved_by_nama: string | null;
+  })[]>`
+    select r.id, r.transaction_id, r.from_scheme, r.to_scheme, r.schedule_json,
+           r.amount_outstanding::text as amount_outstanding, r.reason, r.status, r.decision_note,
+           r.requested_by, r.resolved_by, r.resolved_at, r.created_at,
+           t.client_id, t.total_agreed_value::text as total_agreed_value, t.payment_status,
+           c.toko,
+           coalesce(req.nama, r.requested_by) as requested_by_nama,
+           coalesce(res.nama, r.resolved_by)  as resolved_by_nama
+    from transaction_change_requests r
+    join transactions t on t.id = r.transaction_id
+    join clients c on c.id = t.client_id
+    left join employees req on req.employee_id = r.requested_by
+    left join employees res on res.employee_id = r.resolved_by
+    where (${status} = '' or r.status = ${status})
+      and (${transactionId} = '' or r.transaction_id = ${transactionId})
+    order by r.created_at desc, r.id desc`;
+  return rows.map((r) => ({
+    ...toChangeRequest(r),
+    clientId: r.client_id, toko: r.toko,
+    totalAgreedValue: money.decimal(money.parse(r.total_agreed_value)),
+    paymentStatus: r.payment_status,
+    requestedByNama: r.requested_by_nama, resolvedByNama: r.resolved_by_nama ?? '',
+  }));
+}
+
+/**
+ * applySchemeChange is the ONLY place a filed change becomes real, shared by the
+ * Director's ACC and a Director's own filing so the two can never drift on what
+ * "applied" means.
+ *
+ * Verified installments survive untouched; only the open ones are replaced, and
+ * the new rows CONTINUE the numbering so #1 never means two different things on
+ * one Transaction. The replaced rows go into the audit `before`, which is what
+ * keeps the previous schedule reconstructible from the log (house rule #3) even
+ * though the rows themselves are gone.
+ */
+async function applySchemeChange(
+  tx: Queryable,
+  ex: ReturnType<typeof executors>,
+  trx: TransactionInfo,
+  newScheme: string,
+  schedule: ScheduleInput[],
+  actor: Actor,
+  now: Date,
+  requestId: string,
+): Promise<void> {
+  // Numbering continues past the HIGHEST number the Transaction has ever used —
+  // read BEFORE the delete, so a replaced installment's number is retired with
+  // it. Reading it after would recycle #2 onto a different row, and the audit
+  // trail would then hold two different "installment #2" for one Transaction.
+  const seq = await tx<{ next_no: number }[]>`
+    select coalesce(max(installment_no), 0)::int + 1 as next_no
+    from installments where transaction_id = ${trx.id}`;
+  const firstNo = seq[0].next_no;
+
+  const replaced = await tx<{ id: string; installment_no: number; amount: string; due_date: Date | null }[]>`
+    delete from installments
+    where transaction_id = ${trx.id} and status <> ${INST_TERVERIFIKASI}
+    returning id, installment_no, amount, due_date`;
+
+  const created: string[] = [];
+  for (let i = 0; i < schedule.length; i++) {
+    const instId = await ex.ident.identNext('INST', now);
+    await tx`
+      insert into installments (id, transaction_id, installment_no, amount, due_date, status, created_by)
+      values (${instId}, ${trx.id}, ${firstNo + i}, ${money.decimal(money.parse(schedule[i].amount))},
+              ${schedule[i].dueDate}, ${INST_BELUM}, ${actor.employeeId})`;
+    created.push(instId);
+  }
+
+  await tx`update transactions set payment_intent_scheme = ${newScheme} where id = ${trx.id}`;
+  await tx`update clients set payment_intent = ${newScheme} where id = ${trx.clientId}`;
+  await ex.audit.insertAudit({
+    entityType: 'transaction', entityId: trx.id, actorEmployeeId: actor.employeeId,
+    action: 'scheme_changed',
+    beforeJson: {
+      payment_intent_scheme: trx.scheme,
+      installments: replaced.map((r) => ({
+        id: r.id, installment_no: r.installment_no, amount: r.amount,
+        due_date: r.due_date ? tz.dateString(r.due_date) : null,
+      })),
+    },
+    afterJson: {
+      payment_intent_scheme: newScheme, installments: created.length, installment_ids: created,
+      from_installment_no: firstNo, request_id: requestId,
+    },
+    createdBy: actor.employeeId,
+  });
+  trx.scheme = newScheme;
+}
+
+/** Amount Outstanding right now, refusing a Transaction with nothing left to move. */
+async function outstandingOf(tx: Queryable, trx: TransactionInfo): Promise<money.Money> {
+  const verified = await sumVerified(tx, trx.id);
+  const outstanding = trx.totalAgreed - verified;
+  if (outstanding <= 0n || trx.paymentStatus === PAYMENT_LUNAS) {
+    throw new SchemeLockedError();
+  }
+  return outstanding;
+}
+
+/** Locks a pending filing; anything already decided is refused, never re-decided. */
+async function lockPendingChange(tx: Queryable, reqId: string): Promise<ChangeRequestDbRow> {
+  const rows = await tx<ChangeRequestDbRow[]>`
+    select id, transaction_id, from_scheme, to_scheme, schedule_json,
+           amount_outstanding::text as amount_outstanding, reason, status, decision_note,
+           requested_by, resolved_by, resolved_at, created_at
+    from transaction_change_requests where id = ${reqId} for update`;
+  if (rows.length === 0) {
+    throw new NotFoundError('transaction change request not found');
+  }
+  if (rows[0].status !== CHANGE_PENDING) {
+    throw new ChangeDecidedError();
+  }
+  return rows[0];
+}
+
+/** Writes the verdict onto the request row (the row's own status, not a machine). */
+async function resolveChange(
+  tx: Queryable,
+  reqId: string,
+  status: string,
+  actor: Actor,
+  note: string,
+  now: Date,
+): Promise<SchemeChangeRequest> {
+  const rows = await tx<ChangeRequestDbRow[]>`
+    update transaction_change_requests
+       set status = ${status}, resolved_by = ${actor.employeeId}, resolved_at = ${now},
+           decision_note = ${nullString(note)}
+     where id = ${reqId}
+    returning id, transaction_id, from_scheme, to_scheme, schedule_json,
+              amount_outstanding::text as amount_outstanding, reason, status, decision_note,
+              requested_by, resolved_by, resolved_at, created_at`;
+  return toChangeRequest(rows[0]);
+}
+
+/** The Directors' employee ids — layered role, so never resolvable by division. */
+async function directorIds(tx: Queryable): Promise<string[]> {
+  const rows = await tx<{ employee_id: string }[]>`
+    select e.employee_id
+    from employee_layered_roles r
+    join employees e on e.employee_id = r.employee_id
+    where r.role = 'director' and r.enabled = true and e.status_aktif = true
+    order by e.employee_id`;
+  return rows.map((r) => r.employee_id);
+}
+
+/** Both verdicts reach the requester through one event (M5-OA-7 catalog entry). */
+function notifyChangeDecided(
+  ex: ReturnType<typeof executors>,
+  transactionId: string,
+  actor: Actor,
+  requestedBy: string,
+): Promise<string[]> {
+  return notification.emit(ex.notify, {
+    event: notification.EVENTS.TransactionChangeDecided,
+    entityType: 'transaction', entityId: transactionId, actor: actor.employeeId,
+    explicitRecipients: [requestedBy], notifyActor: false,
+    deepLink: `/finance/transactions/${transactionId}`,
   });
 }
 
 /** All four valid payment schemes. */
 const PAYMENT_SCHEMES_VALID = new Set<string>([SCHEME_LUNAS, SCHEME_SEBAGIAN, SCHEME_TERMIN, SCHEME_DI_BELAKANG]);
 
-/** validateSchedule enforces the scheme ↔ schedule shape + Σ = total (M5 §4). */
-function validateSchedule(scheme: string, scheduled: boolean, schedule: ScheduleInput[], total: money.Money): void {
+/**
+ * validateChangeSchedule enforces the scheme ↔ schedule shape and Σ = Amount
+ * Outstanding for a mid-flight change (M5-OA-7). Comparing against the OUTSTANDING
+ * rather than the agreed total is what lets a partly-paid deal move scheme
+ * without touching a single verified row: the verified part keeps its own
+ * installments, the filing only re-describes what is still owed.
+ *
+ * The mismatch error names the number the user must fix: with no money in, the
+ * outstanding IS the agreed total, so `[total termin tidak sama dengan nilai
+ * transaksi]` is the accurate string; once money is in, sending them to compare
+ * against the total would send them to the wrong number.
+ */
+function validateChangeSchedule(
+  scheme: string,
+  schedule: ScheduleInput[],
+  outstanding: money.Money,
+  totalAgreed: money.Money,
+): void {
+  validateSchedule(scheme, SCHEDULED_SCHEMES.has(scheme), schedule, outstanding, () =>
+    outstanding === totalAgreed ? new ScheduleTotalError() : new OutstandingTotalError());
+}
+
+/** validateSchedule enforces the scheme ↔ schedule shape + Σ = target (M5 §4). */
+function validateSchedule(
+  scheme: string,
+  scheduled: boolean,
+  schedule: ScheduleInput[],
+  target: money.Money,
+  onMismatch: () => Error = () => new ScheduleTotalError(),
+): void {
   if (!scheduled) {
     if (schedule.length !== 0) {
       throw new IncompleteError();
@@ -1142,8 +1636,8 @@ function validateSchedule(scheme: string, scheduled: boolean, schedule: Schedule
     }
     sum += amt;
   }
-  if (sum !== total) {
-    throw new ScheduleTotalError();
+  if (sum !== target) {
+    throw onMismatch();
   }
 }
 

@@ -74,6 +74,9 @@ export const PREFIXES = {
   // O57 — the agreement a client signed, covering n Services. Strategi hangs off
   // this, not off a Service, so Rule 2 / D-1 / §7 read as written.
   CTR: { entity: 'Contract (kesepakatan klien)', module: 'M6A/M6B' },
+  // M5-OA-7 — a Finance-filed request to change a transaction's payment scheme,
+  // applied only on Director ACC. Minted after validation passes (house rule #1).
+  TCR: { entity: 'Transaction Change Request', module: 'M5' },
 } as const satisfies Record<string, PrefixInfo>;
 
 /** A registered prefix string (e.g. 'CLI', 'TRX'). */

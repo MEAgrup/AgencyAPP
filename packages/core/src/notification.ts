@@ -47,6 +47,7 @@ export const EVENTS = {
   LeadDeleteRequested: 'm1.lead.delete_requested', // -> Head of the lead's origin division
   LeadDeleteDecided: 'm1.lead.delete_decided', // -> Requester
 
+
   // ----- catalog v2 (O55) — 4 Strategi (M6A §7 D12) -----
   StrategiDiajukan: 'strategi_diajukan', // -> SPV / Head of Account
   StrategiDisetujui: 'strategi_disetujui', // -> AM + execution division leads + Finance
@@ -65,6 +66,15 @@ export const EVENTS = {
   GateDeeskalasiDiminta: 'gate_deeskalasi_diminta', // -> SPV
   // ----- catalog v2 — 1 Account (O53) -----
   ClientAssigned: 'm6.client.assigned', // -> the assigned AM
+  // ----- catalog v3 (M5-OA-7) — 2 Finance -----
+  // Owner decision 2026-08-04: SPV/Head Finance may only REQUEST a
+  // payment-scheme change, so the Director has to be told one is waiting, and
+  // the requester has to be told how it was decided. A SEPARATE version from
+  // v2: v2 is the M6A/6B/6C amendment, and folding a Finance event into it
+  // would misdescribe what that amendment was.
+  TransactionChangeRequested: 'm5.transaction.change_requested', // -> Directors
+  TransactionChangeDecided: 'm5.transaction.change_decided', // -> Requester
+
 } as const;
 
 /** A cataloged event type. */
@@ -97,6 +107,12 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
     description: 'M6A §7 D12 + M6B §9 + M6C §10 — 4 Strategi, 6 Plan, 3 Gate; + m6.client.assigned (O53)',
     eventCount: 14,
     decisionRef: 'docs/DECISIONS.md 2026-08-07 (O55 pilihan a; menutup O53)',
+  },
+  {
+    version: 3,
+    description: 'M5-OA-7 — perubahan skema transaksi wajib ACC Direktur: 2 event Finance',
+    eventCount: 2,
+    decisionRef: 'docs/DECISIONS.md 2026-08-04 (M5-OA-7)',
   },
 ] as const;
 
@@ -133,6 +149,7 @@ export interface CatalogEntry {
  * 20260807010000_notif_catalog_v2.sql) plus `m6.client.assigned` (O53).
  */
 export const CATALOG: Record<EventType, CatalogEntry> = {
+
   [EVENTS.NegotiationPendingApproval]: { description: 'Negotiation Pending Approval submitted', resolver: 'leadsOfDivision', version: 1 },
   [EVENTS.NegotiationDecision]: { description: 'Negotiation decision', resolver: 'explicit', version: 1 },
   [EVENTS.InstallmentDue]: { description: 'Installment due/overdue', resolver: 'explicitOrLeads', version: 1 },
@@ -166,6 +183,9 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
   [EVENTS.PlanSekarangDisarankan]: { description: 'Pemicu keras muncul pada service tanpa Plan — ke AM + SPV', resolver: 'explicitOrLeads', version: 2 },
   [EVENTS.GateDeeskalasiDiminta]: { description: 'AM minta mematikan Plan di tengah service — ke SPV (butuh persetujuan)', resolver: 'leadsOfDivision', version: 2 },
   [EVENTS.ClientAssigned]: { description: 'Klien di-assign ke AM — ke AM bersangkutan', resolver: 'explicit', version: 2 },
+  [EVENTS.TransactionChangeRequested]: { description: 'Pengajuan perubahan transaksi menunggu ACC Direktur', resolver: 'explicit', version: 3 },
+  [EVENTS.TransactionChangeDecided]: { description: 'Pengajuan perubahan transaksi di-ACC/tolak', resolver: 'explicit', version: 3 },
+
 };
 
 /** All registered event types (introspection / tests). */

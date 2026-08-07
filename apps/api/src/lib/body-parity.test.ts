@@ -54,7 +54,10 @@ describe('FE↔API request-body parity', () => {
     // The two regressions above must be in scope, by name.
     const paths = writes.map((w) => w.call);
     expect(paths).toContain('POST /attempts/{}/negotiation');
-    expect(paths).toContain('POST /transactions/{}/scheme');
+    // The scheme-change body moved to the filing door when a Director ACC became
+    // mandatory (M5-OA-7, 2026-08-04). Same body keys, same regression risk — the
+    // anchor follows the call the FE actually makes.
+    expect(paths).toContain('POST /transactions/{}/change-requests');
     // And so must the rest of the lead→transaction path, including the two
     // variable-body steps that only interface resolution reaches.
     expect(paths).toContain('POST /leads');

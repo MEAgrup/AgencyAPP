@@ -34,9 +34,9 @@ describe('frozen catalog', () => {
     }
   });
 
-  it('is at version 2, and the versions are registered in order with no gaps', () => {
-    expect(CATALOG_VERSION).toBe(2);
-    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2]);
+  it('is at version 3, and the versions are registered in order with no gaps', () => {
+    expect(CATALOG_VERSION).toBe(3);
+    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3]);
     // A registry row with no decision reference is how an un-signed-off
     // amendment would sneak in looking legitimate.
     for (const v of CATALOG_VERSIONS) {
@@ -115,6 +115,24 @@ describe('frozen catalog', () => {
     // be claimed without the event actually existing.
     expect(EVENTS.ClientAssigned).toBe('m6.client.assigned');
     expect(CATALOG[EVENTS.ClientAssigned].version).toBe(2);
+  });
+
+  it('carries exactly the 2 v3 events of the M5-OA-7 amendment', () => {
+    // Owner decision 2026-08-04: a payment-scheme change filed by SPV/Head
+    // Finance only takes effect on Director ACC, so the Director must be told
+    // one is waiting and the requester must be told the verdict.
+    expect(eventsOfVersion(3).sort()).toEqual([
+      'm5.transaction.change_decided',
+      'm5.transaction.change_requested',
+    ]);
+    // A SEPARATE version from v2 on purpose: v2 is the M6A/6B/6C amendment, and
+    // folding a Finance event into it would misdescribe what that amendment was.
+    expect(CATALOG[EVENTS.TransactionChangeRequested].version).toBe(3);
+    expect(CATALOG[EVENTS.TransactionChangeDecided].version).toBe(3);
+    // 'explicit': Director is a LAYERED role (employee_layered_roles), not the
+    // lead of a division, so `leadsOfDivision` could never resolve to them.
+    expect(CATALOG[EVENTS.TransactionChangeRequested].resolver).toBe('explicit');
+    expect(CATALOG[EVENTS.TransactionChangeDecided].resolver).toBe('explicit');
   });
 
   it('every event carries a description and a valid resolver', () => {

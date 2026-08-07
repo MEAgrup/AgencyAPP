@@ -26,10 +26,10 @@ import {
 } from './sales';
 import {
   verifyPayment, attachContract, getPaymentStatus, commissionAchievement, scanReminders,
-  reminderDashboard, changeScheme,
+  reminderDashboard, requestSchemeChange, cancelSchemeChange,
   OverVerificationError, ContractRequiredError, ScheduleTotalError, SchemeLockedError,
   PAYMENT_SEBAGIAN, PAYMENT_LUNAS, INST_JATUH_TEMPO, INST_TERVERIFIKASI,
-  MSG_OVER_VERIFICATION, MSG_CONTRACT_REQUIRED, MSG_SCHEDULE_TOTAL,
+  MSG_OVER_VERIFICATION, MSG_CONTRACT_REQUIRED, MSG_SCHEDULE_TOTAL, MSG_OUTSTANDING_TOTAL,
 } from './finance';
 import {
   updateClient, addPlatform, updatePlatform, voidService,
@@ -79,6 +79,7 @@ async function cleanup() {
   // DB (the runbook prescribes this); it is env-gated (UAT=1) out of the default
   // suite so it never pollutes finance.test's global reminder-count assertions.
   await sql`delete from transaction_issue_approvals where created_by like 'ZZ-%'`.catch(() => {});
+  await sql`delete from transaction_change_requests where created_by like 'ZZ-%'`.catch(() => {});
   await sql`delete from payment_verifications where created_by like 'ZZ-%'`.catch(() => {});
   await sql`delete from installments where created_by like 'ZZ-%'`;
   await sql`delete from transactions where created_by like 'ZZ-%'`;
@@ -208,9 +209,11 @@ describeDb('Wave 1 exit — end-to-end money-path UAT', () => {
       ? pass('C3 platform add/deactivate', 'Account Lead', `Shopee kept, TikTok active=false (no DELETE)`)
       : fail('C3 platform', 'Account Lead', JSON.stringify(plats));
 
-    // === C4a — changeScheme wrong total (pre-verification guard)
+    // === C4a — filed scheme change, wrong total (pre-verification guard)
     await expectThrow('C4 schedule-total guard', 'Finance SPV', MSG_SCHEDULE_TOTAL, () =>
-      changeScheme(sql, financeLead(), trxId, PAYMENT_SCHEME_TERMIN, 'coba', [{ amount: '1', dueDate: '2026-08-01' }]));
+      requestSchemeChange(sql, financeLead(), trxId, {
+        newScheme: PAYMENT_SCHEME_TERMIN, reason: 'coba', schedule: [{ amount: '1', dueDate: '2026-08-01' }],
+      }));
 
     const p0 = await getPaymentStatus(sql, trxId);
     money.parse(p0.amountVerified) === 0n && money.parse(p0.amountOutstanding) === rp('21900000')
@@ -243,9 +246,28 @@ describeDb('Wave 1 exit — end-to-end money-path UAT', () => {
       : fail('C5 verify #1', 'Finance', JSON.stringify(v1));
 
     // === C6 — verify #2 does not re-trigger release (timestamp stable). Demonstrated via C8 sequencing.
-    // === C4b — changeScheme now locked (payment exists) → SchemeLockedError ([transisi status tidak diizinkan])
-    await expectThrow('C4 scheme locked post-verify', 'Finance SPV', '[transisi status tidak diizinkan]', () =>
-      changeScheme(sql, financeLead(), trxId, PAYMENT_SCHEME_TERMIN, 'x', [{ amount: '21900000', dueDate: '2026-08-01' }]));
+    // === C4b — mid-flight scheme change (M5-OA-7, owner decision 2026-08-04).
+    // A payment exists, so the schedule now reconciles against Amount Outstanding
+    // (Rp 11.900.000), not the agreed total — filing the old total is refused.
+    await expectThrow('C4 change vs outstanding', 'Finance SPV', MSG_OUTSTANDING_TOTAL, () =>
+      requestSchemeChange(sql, financeLead(), trxId, {
+        newScheme: PAYMENT_SCHEME_TERMIN, reason: 'x', schedule: [{ amount: '21900000', dueDate: '2026-08-01' }],
+      }));
+    // A correct filing by Finance SPV is accepted but changes NOTHING until a
+    // Director acts. Cancelled straight after so the rest of this run still owns
+    // the original INST#2 (the ACC path itself is covered in finance.test.ts).
+    const tcr = await requestSchemeChange(sql, financeLead(), trxId, {
+      newScheme: PAYMENT_SCHEME_TERMIN, reason: 'klien pindah metode bayar',
+      schedule: [{ amount: '11900000', dueDate: '2026-08-01' }],
+    });
+    const schemeWhilePending = (await sql<{ payment_intent_scheme: string }[]>`
+      select payment_intent_scheme from transactions where id = ${trxId}`)[0].payment_intent_scheme;
+    const instWhilePending = (await sql<{ n: number }[]>`
+      select count(*)::int n from installments where transaction_id = ${trxId}`)[0].n;
+    tcr.status === 'pending' && /^TCR-\d{6}-\d{4}$/.test(tcr.id) && schemeWhilePending === PAYMENT_SCHEME_TERMIN && instWhilePending === 2
+      ? pass('C4 change awaits Director ACC', 'Finance SPV', `${tcr.id} pending; skema & 2 INST tidak berubah`)
+      : fail('C4 change awaits Director ACC', 'Finance SPV', JSON.stringify({ st: tcr.status, instWhilePending }));
+    await cancelSchemeChange(sql, financeLead(), tcr.id);
 
     // === C8 — contract gate before final verify, then [Lunas]
     await expectThrow('C8 contract gate before Lunas', 'Finance', MSG_CONTRACT_REQUIRED, () =>

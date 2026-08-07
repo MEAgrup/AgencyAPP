@@ -13,23 +13,36 @@ import { money, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import { leads, sales } from './index';
 import {
+  approveSchemeChange,
   attachContract,
+  cancelSchemeChange,
+  canApproveSchemeChange,
   canManageScheme,
   canVerifyPayment,
   canVoteBermasalah,
-  changeScheme,
+  CHANGE_APPROVED,
+  CHANGE_CANCELLED,
+  CHANGE_PENDING,
+  CHANGE_REJECTED,
+  ChangeDecidedError,
+  ChangePendingError,
   commissionAchievement,
   ContractRequiredError,
   flagBermasalah,
   ForbiddenError,
   getPaymentStatus,
   IncompleteError,
+  INST_TERVERIFIKASI,
   NotFoundError,
   overdueLabel,
+  OutstandingTotalError,
   OverVerificationError,
+  rejectSchemeChange,
   reminderDashboard,
+  requestSchemeChange,
   resolveBermasalah,
   ScheduleTotalError,
+  schemeChangeRequests,
   scanReminders,
   SchemeLockedError,
   type Actor,
@@ -74,12 +87,21 @@ describe('canVerifyPayment', () => {
   });
 });
 
-describe('canManageScheme / canVoteBermasalah', () => {
-  it('scheme change needs SPV/Head Finance or Director (not staff)', () => {
+describe('canManageScheme / canApproveSchemeChange / canVoteBermasalah', () => {
+  it('FILING a scheme change needs SPV/Head Finance or Director (not staff)', () => {
     expect(canManageScheme(financeLead())).toBe(true);
     expect(canManageScheme(director())).toBe(true);
     expect(canManageScheme(financeStaff())).toBe(false);
     expect(canManageScheme(budi())).toBe(false);
+  });
+
+  it('ACTIONING one is Director-only — that is the whole point of M5-OA-7', () => {
+    expect(canApproveSchemeChange(director())).toBe(true);
+    // SPV Finance may file but may not approve: if this ever returns true the
+    // Director gate the owner asked for has silently stopped existing.
+    expect(canApproveSchemeChange(financeLead())).toBe(false);
+    expect(canApproveSchemeChange(financeStaff())).toBe(false);
+    expect(canApproveSchemeChange(accountLead())).toBe(false);
   });
 
   it('bermasalah vote needs SPV Finance / SPV Account / Director', () => {
@@ -177,6 +199,7 @@ afterAll(async () => {
 afterEach(async () => {
   if (!sql) return;
   await sql`delete from transaction_issue_approvals where created_by like 'ZZ-%'`;
+  await sql`delete from transaction_change_requests where created_by like 'ZZ-%'`;
   await sql`delete from payment_verifications where created_by like 'ZZ-%'`;
   await sql`delete from installments where created_by like 'ZZ-%'`;
   await sql`delete from transactions where created_by like 'ZZ-%'`;
@@ -560,43 +583,250 @@ describeDb('[Bermasalah] flag + joint resolution (M5-OA-5)', () => {
   });
 });
 
-describeDb('changeScheme (M5-OA-6)', () => {
-  it('switches Lunas → Termin with a schedule (SPV Finance), replacing installments', async () => {
+// ---------------------------------------------------------------------------
+// Transaction change: filed by SPV/Head Finance, actioned by the Director
+// (M5-OA-7, owner decision 2026-08-04 — see docs/DECISIONS.md).
+//
+// Two rules under test here were DELIBERATELY REVERSED from the old
+// `changeScheme`: (a) SPV Finance no longer applies a change by itself, and
+// (b) a verified payment no longer freezes the scheme. Both directions are
+// asserted, so a regression to the old behaviour fails loudly rather than
+// quietly re-locking the door the owner asked to open.
+// ---------------------------------------------------------------------------
+describeDb('scheme change: file → Director ACC (M5-OA-7)', () => {
+  it('a Finance SPV filing waits for the Director — the transaction does not move', async () => {
     const { transactionId, clientId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
-    await changeScheme(sql, financeLead(), transactionId, sales.PAYMENT_SCHEME_TERMIN, 'klien minta cicilan', [
-      { amount: '3000000', dueDate: '2026-08-01' },
-      { amount: '3000000', dueDate: '2026-09-01' },
-      { amount: '3000000', dueDate: '2026-10-01' },
-    ]);
-    const trx = await sql<{ payment_intent_scheme: string }[]>`select payment_intent_scheme from transactions where id = ${transactionId}`;
-    expect(trx[0].payment_intent_scheme).toBe('[Termin]');
-    const insts = await sql<{ n: number }[]>`select count(*)::int as n from installments where transaction_id = ${transactionId}`;
-    expect(insts[0].n).toBe(3);
+    const req = await requestSchemeChange(sql, financeLead(), transactionId, {
+      newScheme: sales.PAYMENT_SCHEME_TERMIN,
+      reason: 'klien minta cicilan',
+      schedule: [
+        { amount: '3000000', dueDate: '2026-08-01' },
+        { amount: '3000000', dueDate: '2026-09-01' },
+        { amount: '3000000', dueDate: '2026-10-01' },
+      ],
+    });
+    expect(req.id).toMatch(/^TCR-\d{6}-\d{4}$/);
+    expect(req.status).toBe(CHANGE_PENDING);
+
+    const trx = await sql<{ payment_intent_scheme: string }[]>`
+      select payment_intent_scheme from transactions where id = ${transactionId}`;
+    expect(trx[0].payment_intent_scheme).toBe(sales.PAYMENT_SCHEME_LUNAS);
+    const insts = await sql<{ n: number }[]>`
+      select count(*)::int as n from installments where transaction_id = ${transactionId}`;
+    expect(insts[0].n).toBe(0);
     const client = await sql<{ payment_intent: string }[]>`select payment_intent from clients where id = ${clientId}`;
-    expect(client[0].payment_intent).toBe('[Termin]');
+    expect(client[0].payment_intent).toBe(sales.PAYMENT_SCHEME_LUNAS);
   });
 
-  it('rejects a schedule that does not sum to the agreed total', async () => {
+  it('the Director ACC is what applies it (scheme + schedule + client intent)', async () => {
+    const { transactionId, clientId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    const req = await requestSchemeChange(sql, financeLead(), transactionId, {
+      newScheme: sales.PAYMENT_SCHEME_TERMIN,
+      reason: 'klien minta cicilan',
+      schedule: [
+        { amount: '4000000', dueDate: '2026-08-01' },
+        { amount: '5000000', dueDate: '2026-09-01' },
+      ],
+    });
+    const approved = await approveSchemeChange(sql, director(), req.id, 'disetujui');
+    expect(approved.status).toBe(CHANGE_APPROVED);
+    expect(approved.resolvedBy).toBe('ZZ-DIR');
+
+    const trx = await sql<{ payment_intent_scheme: string }[]>`
+      select payment_intent_scheme from transactions where id = ${transactionId}`;
+    expect(trx[0].payment_intent_scheme).toBe(sales.PAYMENT_SCHEME_TERMIN);
+    const insts = await sql<{ installment_no: number; amount: string }[]>`
+      select installment_no, amount from installments where transaction_id = ${transactionId} order by installment_no`;
+    expect(insts.map((i) => i.installment_no)).toEqual([1, 2]);
+    const client = await sql<{ payment_intent: string }[]>`select payment_intent from clients where id = ${clientId}`;
+    expect(client[0].payment_intent).toBe(sales.PAYMENT_SCHEME_TERMIN);
+  });
+
+  it('a Director filing applies on the spot (they are the approving authority)', async () => {
     const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
-    await expect(changeScheme(sql, financeLead(), transactionId, sales.PAYMENT_SCHEME_TERMIN, 'x', [
-      { amount: '3000000', dueDate: '2026-08-01' },
-      { amount: '3000000', dueDate: '2026-09-01' },
-    ])).rejects.toBeInstanceOf(ScheduleTotalError);
+    const req = await requestSchemeChange(sql, director(), transactionId, {
+      newScheme: sales.PAYMENT_SCHEME_SEBAGIAN, reason: 'klien bayar sebagian dulu',
+    });
+    expect(req.status).toBe(CHANGE_APPROVED);
+    const trx = await sql<{ payment_intent_scheme: string }[]>`
+      select payment_intent_scheme from transactions where id = ${transactionId}`;
+    expect(trx[0].payment_intent_scheme).toBe(sales.PAYMENT_SCHEME_SEBAGIAN);
   });
 
-  it('requires SPV/Head Finance (staff denied)', async () => {
-    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
-    await expect(changeScheme(sql, financeStaff(), transactionId, sales.PAYMENT_SCHEME_LUNAS, 'x'))
-      .rejects.toBeInstanceOf(ForbiddenError);
-  });
-
-  it('is locked once a payment has been verified', async () => {
+  // THE REVISED RULE. The old implementation threw SchemeLockedError here.
+  it('WORKS MID-FLIGHT: verified money no longer freezes the scheme', async () => {
     const { transactionId, installmentIds } = await closedDeal(sales.PAYMENT_SCHEME_TERMIN, [
       { amount: '4500000', dueDate: '2026-08-01' },
       { amount: '4500000', dueDate: '2026-09-01' },
     ]);
-    await verifyPayment(sql, financeStaff(), { transactionId, installmentId: installmentIds[0], amount: '4500000', receivedDate: '2026-08-01' });
-    await expect(changeScheme(sql, financeLead(), transactionId, sales.PAYMENT_SCHEME_LUNAS, 'x'))
-      .rejects.toBeInstanceOf(SchemeLockedError);
+    await verifyPayment(sql, financeStaff(), {
+      transactionId, installmentId: installmentIds[0], amount: '4500000', receivedDate: '2026-08-01',
+    });
+    // Outstanding is now Rp 4.500.000 — the replacement schedule reconciles
+    // against THAT, not against the Rp 9.000.000 agreed total.
+    const req = await requestSchemeChange(sql, financeLead(), transactionId, {
+      newScheme: sales.PAYMENT_SCHEME_TERMIN, reason: 'klien pindah ke 3x cicilan sisa',
+      schedule: [
+        { amount: '1500000', dueDate: '2026-10-01' },
+        { amount: '1500000', dueDate: '2026-11-01' },
+        { amount: '1500000', dueDate: '2026-12-01' },
+      ],
+    });
+    await approveSchemeChange(sql, director(), req.id);
+
+    const insts = await sql<{ id: string; installment_no: number; amount: string; status: string }[]>`
+      select id, installment_no, amount, status from installments
+      where transaction_id = ${transactionId} order by installment_no`;
+    // The VERIFIED installment survives untouched, keeps its number, and the
+    // new rows continue the numbering (house rule #3 — no rewriting history).
+    expect(insts).toHaveLength(4);
+    expect(insts[0].id).toBe(installmentIds[0]);
+    expect(insts[0].status).toBe(INST_TERVERIFIKASI);
+    expect(insts.map((i) => i.installment_no)).toEqual([1, 3, 4, 5]);
+    // Σ over the whole schedule is still the agreed total.
+    const total = insts.reduce((acc, i) => acc + money.parse(i.amount), 0n);
+    expect(money.decimal(total)).toBe('9000000.00');
+
+    const view = await getPaymentStatus(sql, transactionId);
+    expect(view.amountVerified).toBe('4500000.00');
+    expect(view.amountOutstanding).toBe('4500000.00');
+  });
+
+  it('rejects a schedule that does not sum to Amount Outstanding', async () => {
+    const { transactionId, installmentIds } = await closedDeal(sales.PAYMENT_SCHEME_TERMIN, [
+      { amount: '4500000', dueDate: '2026-08-01' },
+      { amount: '4500000', dueDate: '2026-09-01' },
+    ]);
+    // Before any money: the outstanding IS the agreed total, so the mismatch is
+    // reported against the total (existing verbatim string).
+    await expect(requestSchemeChange(sql, financeLead(), transactionId, {
+      newScheme: sales.PAYMENT_SCHEME_TERMIN, reason: 'x',
+      schedule: [{ amount: '3000000', dueDate: '2026-08-01' }],
+    })).rejects.toBeInstanceOf(ScheduleTotalError);
+
+    await verifyPayment(sql, financeStaff(), {
+      transactionId, installmentId: installmentIds[0], amount: '4500000', receivedDate: '2026-08-01',
+    });
+    // After money in, sending Finance to compare against the total would send
+    // them to the wrong number — the message names the shortfall instead.
+    await expect(requestSchemeChange(sql, financeLead(), transactionId, {
+      newScheme: sales.PAYMENT_SCHEME_TERMIN, reason: 'x',
+      schedule: [{ amount: '9000000', dueDate: '2026-10-01' }],
+    })).rejects.toBeInstanceOf(OutstandingTotalError);
+  });
+
+  it('refuses a settled transaction — there is nothing left to reschedule', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    await attachContract(sql, financeStaff(), transactionId, 'https://drive/contract.pdf');
+    await verifyPayment(sql, financeStaff(), { transactionId, amount: '9000000', receivedDate: '2026-08-01' });
+    await expect(requestSchemeChange(sql, financeLead(), transactionId, {
+      newScheme: sales.PAYMENT_SCHEME_TERMIN, reason: 'x',
+      schedule: [{ amount: '9000000', dueDate: '2026-10-01' }],
+    })).rejects.toBeInstanceOf(SchemeLockedError);
+  });
+
+  it('allows only one pending filing per transaction', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    await requestSchemeChange(sql, financeLead(), transactionId, {
+      newScheme: sales.PAYMENT_SCHEME_SEBAGIAN, reason: 'pertama',
+    });
+    await expect(requestSchemeChange(sql, financeLead(), transactionId, {
+      newScheme: sales.PAYMENT_SCHEME_SEBAGIAN, reason: 'kedua',
+    })).rejects.toBeInstanceOf(ChangePendingError);
+  });
+
+  it('a rejected filing leaves the transaction alone and cannot be decided twice', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    const req = await requestSchemeChange(sql, financeLead(), transactionId, {
+      newScheme: sales.PAYMENT_SCHEME_SEBAGIAN, reason: 'klien minta',
+    });
+    const rejected = await rejectSchemeChange(sql, director(), req.id, 'belum disetujui manajemen');
+    expect(rejected.status).toBe(CHANGE_REJECTED);
+    expect(rejected.decisionNote).toBe('belum disetujui manajemen');
+    const trx = await sql<{ payment_intent_scheme: string }[]>`
+      select payment_intent_scheme from transactions where id = ${transactionId}`;
+    expect(trx[0].payment_intent_scheme).toBe(sales.PAYMENT_SCHEME_LUNAS);
+    await expect(approveSchemeChange(sql, director(), req.id)).rejects.toBeInstanceOf(ChangeDecidedError);
+  });
+
+  it('only the requester (or a Director) may cancel a pending filing', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    const req = await requestSchemeChange(sql, financeLead(), transactionId, {
+      newScheme: sales.PAYMENT_SCHEME_SEBAGIAN, reason: 'klien minta',
+    });
+    const otherSpv: Actor = {
+      employeeId: 'ZZ-FINLEAD2', divisi: 'Finance',
+      role: permission.makeRole({ division: 'Finance', level: 'lead' }),
+    };
+    await expect(cancelSchemeChange(sql, otherSpv, req.id)).rejects.toBeInstanceOf(ForbiddenError);
+    const cancelled = await cancelSchemeChange(sql, financeLead(), req.id);
+    expect(cancelled.status).toBe(CHANGE_CANCELLED);
+    // Cancelling frees the slot — the point of allowing it at all.
+    const again = await requestSchemeChange(sql, financeLead(), transactionId, {
+      newScheme: sales.PAYMENT_SCHEME_SEBAGIAN, reason: 'revisi',
+    });
+    expect(again.status).toBe(CHANGE_PENDING);
+  });
+
+  it('SPV Finance cannot approve, and Finance staff cannot even file', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    await expect(requestSchemeChange(sql, financeStaff(), transactionId, {
+      newScheme: sales.PAYMENT_SCHEME_SEBAGIAN, reason: 'x',
+    })).rejects.toBeInstanceOf(ForbiddenError);
+    const req = await requestSchemeChange(sql, financeLead(), transactionId, {
+      newScheme: sales.PAYMENT_SCHEME_SEBAGIAN, reason: 'x',
+    });
+    await expect(approveSchemeChange(sql, financeLead(), req.id)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(rejectSchemeChange(sql, financeLead(), req.id)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('re-validates at ACC time: a payment landing while it waits blocks a stale filing', async () => {
+    const { transactionId, installmentIds } = await closedDeal(sales.PAYMENT_SCHEME_TERMIN, [
+      { amount: '4500000', dueDate: '2026-08-01' },
+      { amount: '4500000', dueDate: '2026-09-01' },
+    ]);
+    const req = await requestSchemeChange(sql, financeLead(), transactionId, {
+      newScheme: sales.PAYMENT_SCHEME_TERMIN, reason: 'jadwal ulang',
+      schedule: [{ amount: '9000000', dueDate: '2026-10-01' }],
+    });
+    // Money arrives while the Director has not ruled yet: the filed schedule no
+    // longer equals Amount Outstanding, so applying it would silently break
+    // Σ schedule = Total Agreed Value.
+    await verifyPayment(sql, financeStaff(), {
+      transactionId, installmentId: installmentIds[0], amount: '4500000', receivedDate: '2026-08-01',
+    });
+    await expect(approveSchemeChange(sql, director(), req.id)).rejects.toBeInstanceOf(OutstandingTotalError);
+    const still = await schemeChangeRequests(sql, { transactionId, status: '' });
+    expect(still[0].status).toBe(CHANGE_PENDING); // left pending, not consumed
+  });
+
+  it('lists filings for the detail page and the Director ACC queue', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    const req = await requestSchemeChange(sql, financeLead(), transactionId, {
+      newScheme: sales.PAYMENT_SCHEME_SEBAGIAN, reason: 'klien minta',
+    });
+    const forTrx = await schemeChangeRequests(sql, { transactionId, status: '' });
+    expect(forTrx).toHaveLength(1);
+    expect(forTrx[0].id).toBe(req.id);
+    expect(forTrx[0].toko).toBe('Alpha Digital');
+    expect(forTrx[0].fromScheme).toBe(sales.PAYMENT_SCHEME_LUNAS);
+    expect(forTrx[0].toScheme).toBe(sales.PAYMENT_SCHEME_SEBAGIAN);
+    const queue = await schemeChangeRequests(sql); // default: pending only
+    expect(queue.some((r) => r.id === req.id)).toBe(true);
+  });
+
+  it('audits the filing, the verdict and the application (house rule #3)', async () => {
+    const { transactionId } = await closedDeal(sales.PAYMENT_SCHEME_LUNAS);
+    const req = await requestSchemeChange(sql, financeLead(), transactionId, {
+      newScheme: sales.PAYMENT_SCHEME_TERMIN, reason: 'klien minta cicilan',
+      schedule: [{ amount: '9000000', dueDate: '2026-10-01' }],
+    });
+    await approveSchemeChange(sql, director(), req.id);
+    const actions = await sql<{ action: string }[]>`
+      select action from audit_log where entity_id = ${transactionId} order by id`;
+    const seen = actions.map((a) => a.action);
+    expect(seen).toContain('scheme_change_requested');
+    expect(seen).toContain('scheme_change_approved');
+    expect(seen).toContain('scheme_changed');
   });
 });
