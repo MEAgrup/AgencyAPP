@@ -9,9 +9,9 @@
 > menang, dan itu sudah dieksekusi + terverifikasi. Live **≡ repo** untuk
 > Section D + A-09a. Lihat §10.
 >
-> 🔴 **DUA premis tercatat runtuh sesi ini, dan keduanya penting:** O59 (live
-> memuat migrasi Section D yang tidak ada di repo, §4) dan **O47b §0** (`main`
-> TERNYATA memuat PII ⇒ rewrite tetap wajib, §8).
+> 🔴 **DUA premis tercatat runtuh sesi ini:** O59 (§4 — **sudah diselesaikan**,
+> lihat §10) dan **O47b §0** (`main` TERNYATA memuat PII ⇒ rewrite tetap wajib,
+> §8 — **belum** diselesaikan, menunggu #107 merge).
 >
 > | Bagian | Isi |
 > |---|---|
@@ -19,7 +19,7 @@
 > | 1 | A-08 — D-5, D-6, D-7, flip D-8 → notifikasi. Nol tabel baru |
 > | 2 | Dua deviasi tercatat: katalog v4 · D-7 tanpa ping ulang |
 > | 3 | Bug `openRevision` yang tersingkap — dan kenapa ia tidak diam |
-> | 4 | 🔴 **O59 — live memuat migrasi Section D yang tidak ada di repo** |
+> | 4 | ~~O59 — live memuat migrasi Section D yang tidak ada di repo~~ → **SELESAI, §10** |
 > | 5 | X-13 dibuka: PRD tidak pernah menulis daftar enum D-6 |
 > | 6 | Apa yang tersisa dan urutannya |
 > | 7 | Jebakan lingkungan (bertambah dua) |
@@ -154,7 +154,12 @@ terbaca. Dikunci test yang meng-assert carry D-5/D-6 **dan** non-carry D-7.
 daftar di `openRevision`. Kalau field A-09 tidak jadi syarat submit, ia akan
 hilang di revisi **tanpa satu test pun merah**. Itu perangkap yang masih aktif.
 
-## 4. 🔴 O59 — drift migrasi ronde kelima (BLOCKER deploy)
+## 4. ~~🔴 O59 — drift migrasi ronde kelima (BLOCKER deploy)~~ → **SELESAI, lihat §10**
+
+> ✅ **Diputus pemilik 2026-08-08: (b) repo menang, dan sudah dieksekusi.**
+> Bagian ini dipertahankan karena ia memuat diagnosis awalnya; **status dan
+> angkanya sudah usang** — §10 yang berlaku. Yang §4 belum tahu: drift-nya
+> ternyata TIGA perbedaan, dan yang ketiga (nama event v4) lolos semua gerbang.
 
 Ditemukan saat hendak menerapkan A-08 ke live. `list_migrations` menunjukkan
 baris terakhir live = `20260808024726` bernama **`20260808020000_m6a_section_d`**
@@ -264,7 +269,10 @@ memilihnya.
 
 ### 6.4 Yang JANGAN dikerjakan
 
-- **Jangan** menerapkan migrasi A-08 ke live sebelum O59 diputus — ia akan gagal.
+- ~~Jangan menerapkan migrasi A-08 ke live sebelum O59 diputus~~ ✅ sudah
+  diterapkan & diverifikasi (§10). Yang masih berlaku: **jangan** membuat migrasi
+  Section D baru tanpa memeriksa `list_migrations` live lebih dulu — riwayat live
+  memakai versi yang di-generate saat apply, bukan persis nama berkas repo.
 - **Jangan** menambah kolom penyimpan untuk D-3 (X-11).
 - **Jangan** menyentuh `backend/**` kecuali menjaga job-nya hijau (CLAUDE.md).
 - **Jangan** menambah baris ke `KNOWN_GAPS` di `route-parity.test.ts` — kosong,
