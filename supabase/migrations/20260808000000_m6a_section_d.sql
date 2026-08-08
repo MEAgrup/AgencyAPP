@@ -76,12 +76,13 @@
 -- keadaan setengah-terisi bisa DISIMPAN. Kewajiban (`W`) ditegakkan di gerbang
 -- submit `checkCompleteness`, bukan `NOT NULL` — pola yang A-05/A-06 tetapkan.
 ALTER TABLE strategi
-    ADD COLUMN definisi_berhasil_30 text NULL,
-    ADD COLUMN definisi_berhasil_60 text NULL,
-    ADD COLUMN definisi_berhasil_90 text NULL;
+    ADD COLUMN IF NOT EXISTS definisi_berhasil_30 text NULL,
+    ADD COLUMN IF NOT EXISTS definisi_berhasil_60 text NULL,
+    ADD COLUMN IF NOT EXISTS definisi_berhasil_90 text NULL;
 
 -- Yang DB perjaga: kalau terisi, ia bukan spasi. Sebuah definisi berhasil
 -- berisi " " lolos pemeriksaan "tidak null" dan gagal setiap gunanya.
+ALTER TABLE strategi DROP CONSTRAINT IF EXISTS ck_strategi_definisi_berhasil_isi;
 ALTER TABLE strategi
     ADD CONSTRAINT ck_strategi_definisi_berhasil_isi CHECK (
         (definisi_berhasil_30 IS NULL OR btrim(definisi_berhasil_30) <> '')
@@ -106,8 +107,9 @@ COMMENT ON COLUMN strategi.definisi_berhasil_90 IS 'M6A §4 D-5 — definisi ber
 -- pernah dilebarkan, yang lain harus ikut di commit yang SAMA — dua daftar
 -- yang bisa menyimpang adalah cacat yang O48/O51 sudah dua kali dibayar.
 ALTER TABLE strategi
-    ADD COLUMN leading_indicator jsonb NOT NULL DEFAULT '[]'::jsonb;
+    ADD COLUMN IF NOT EXISTS leading_indicator jsonb NOT NULL DEFAULT '[]'::jsonb;
 
+ALTER TABLE strategi DROP CONSTRAINT IF EXISTS ck_strategi_leading_indicator;
 ALTER TABLE strategi
     ADD CONSTRAINT ck_strategi_leading_indicator CHECK (
         jsonb_typeof(leading_indicator) = 'array'
@@ -135,16 +137,17 @@ COMMENT ON COLUMN strategi.leading_indicator IS
 -- A-10 tidak perlu menebak. Tautan klien `/s/{token}` (A-11) belum ada, jadi
 -- belum ada permukaan yang bisa membocorkannya.
 ALTER TABLE strategi
-    ADD COLUMN sanggahan_alasan           text          NULL,
-    ADD COLUMN sanggahan_angka_pembanding numeric(18,2) NULL,
-    ADD COLUMN sanggahan_target_realistis numeric(18,2) NULL,
-    ADD COLUMN sanggahan_diajukan_pada    timestamptz   NULL,
-    ADD COLUMN sanggahan_diajukan_oleh    varchar(64)   NULL;
+    ADD COLUMN IF NOT EXISTS sanggahan_alasan           text          NULL,
+    ADD COLUMN IF NOT EXISTS sanggahan_angka_pembanding numeric(18,2) NULL,
+    ADD COLUMN IF NOT EXISTS sanggahan_target_realistis numeric(18,2) NULL,
+    ADD COLUMN IF NOT EXISTS sanggahan_diajukan_pada    timestamptz   NULL,
+    ADD COLUMN IF NOT EXISTS sanggahan_diajukan_oleh    varchar(64)   NULL;
 
 -- Satu sanggahan adalah SATU catatan, jadi ia ada seluruhnya atau tidak ada
 -- sama sekali. Setengah sanggahan — alasan tanpa angka pembanding — persis
 -- bentuk yang membuat post-mortem tidak bisa dijawab: "kata siapa tidak
 -- realistis, dibanding apa?".
+ALTER TABLE strategi DROP CONSTRAINT IF EXISTS ck_strategi_sanggahan_utuh;
 ALTER TABLE strategi
     ADD CONSTRAINT ck_strategi_sanggahan_utuh CHECK (
         (sanggahan_alasan IS NULL
@@ -158,6 +161,7 @@ ALTER TABLE strategi
          AND sanggahan_diajukan_pada IS NOT NULL
          AND btrim(COALESCE(sanggahan_diajukan_oleh, '')) <> ''));
 
+ALTER TABLE strategi DROP CONSTRAINT IF EXISTS ck_strategi_sanggahan_nonneg;
 ALTER TABLE strategi
     ADD CONSTRAINT ck_strategi_sanggahan_nonneg CHECK (
         (sanggahan_angka_pembanding IS NULL OR sanggahan_angka_pembanding >= 0)
@@ -179,14 +183,19 @@ COMMENT ON COLUMN strategi.sanggahan_target_realistis IS
 -- kenapa namanya bertitik. Resolver `explicitOrLeads`: `leadsOfDivision` hanya
 -- bisa menyelesaikan SATU divisi, sementara penerima D-7 melintasi dua (SPV
 -- Account lewat `division`, Head of Sales lewat `explicit` yang domain isi).
+-- `ON CONFLICT` bukan kelonggaran: live sudah punya baris v4 (isi berbeda, lihat
+-- kepala berkas), dan yang menormalkannya adalah migrasi rekonsiliasi O59.
+-- Tanpa ini, berkas ini gagal di live pada PK `version`.
 INSERT INTO notif_catalog_versions (version, description, event_count, decision_ref) VALUES
     (4, 'M6A §4 D-7 — sanggahan target memberi tahu SPV Account + Head of Sales: 1 event Strategi', 1,
-        'docs/DECISIONS.md 2026-08-08 (A-08 — §4 vs §7 D12)');
+        'docs/DECISIONS.md 2026-08-08 (A-08 — §4 vs §7 D12)')
+ON CONFLICT (version) DO NOTHING;
 
 INSERT INTO notif_events (event_type, description, resolver, catalog_version) VALUES
     ('m6a.strategi.sanggahan_target',
      'AM mengajukan Sanggahan Target (D-7, advisory) — ke SPV Account + Head of Sales',
-     'explicitOrLeads', 4);
+     'explicitOrLeads', 4)
+ON CONFLICT (event_type) DO NOTHING;
 
 -- ===========================================================================
 -- 5. RLS — nol perubahan, dan itu disengaja

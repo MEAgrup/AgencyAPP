@@ -57,22 +57,26 @@
 -- Gerbang jumlah tabel tetap **76**: nol tabel baru.
 -- ===========================================================================
 
+-- `IF NOT EXISTS` / drop-then-add: sama alasannya dengan `20260808000000` —
+-- berkas ini juga belum ada di riwayat live, jadi ia harus konvergen, bukan
+-- mengasumsikan kolomnya belum ada (O59).
 ALTER TABLE strategi
     -- E-1. NULLable seperti seluruh field Section A/B/D: §7 minta autosave 20
     -- detik dan §5 langkah 5 minta hitungan kekurangan yang hidup, dan keduanya
     -- menuntut keadaan setengah-terisi bisa DISIMPAN. Kewajiban (`W`) ditegakkan
     -- gerbang submit `checkCompleteness`, bukan NOT NULL — pola A-05/A-06/A-08.
-    ADD COLUMN growth_thesis          text NULL,
+    ADD COLUMN IF NOT EXISTS growth_thesis          text NULL,
     -- E-13.
-    ADD COLUMN urutan_eksekusi_alasan text NULL,
+    ADD COLUMN IF NOT EXISTS urutan_eksekusi_alasan text NULL,
     -- H-3.
-    ADD COLUMN skenario_mundur        text NULL,
+    ADD COLUMN IF NOT EXISTS skenario_mundur        text NULL,
     -- H-4. `O` (opsional) di §4 — dan HARD-INTERNAL di §4.1.
-    ADD COLUMN kondisi_stop_scope     text NULL;
+    ADD COLUMN IF NOT EXISTS kondisi_stop_scope     text NULL;
 
 -- Terisi berarti terisi: sebuah tesis berisi " " lolos "tidak null" dan gagal
 -- setiap gunanya. Pola yang sama dipakai `ck_strategi_definisi_berhasil_isi`
 -- (A-08), jadi "kosong" dan "belum dijawab" tetap satu keadaan, bukan dua.
+ALTER TABLE strategi DROP CONSTRAINT IF EXISTS ck_strategi_narasi_ehi_isi;
 ALTER TABLE strategi
     ADD CONSTRAINT ck_strategi_narasi_ehi_isi CHECK (
         (growth_thesis          IS NULL OR btrim(growth_thesis)          <> '')

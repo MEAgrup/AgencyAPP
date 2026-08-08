@@ -5,7 +5,9 @@
 >
 > **Sesi ini: A-08 (Section D lengkap) + A-09a (narasi E/H) + koreksi O47b +
 > detail cek O42.** Kode ter-commit, ter-push, PR **#107** terbuka.
-> **Live `CDPS SG` TIDAK disentuh sesi ini** — lihat §4, itu keputusan pemilik.
+> **Live `CDPS SG` SUDAH direkonsiliasi** — pemilik memutuskan O59 = (b) repo
+> menang, dan itu sudah dieksekusi + terverifikasi. Live **≡ repo** untuk
+> Section D + A-09a. Lihat §10.
 >
 > 🔴 **DUA premis tercatat runtuh sesi ini, dan keduanya penting:** O59 (live
 > memuat migrasi Section D yang tidak ada di repo, §4) dan **O47b §0** (`main`
@@ -23,6 +25,7 @@
 > | 7 | Jebakan lingkungan (bertambah dua) |
 > | 8 | 🔴 **O47b — premis §0 runtuh: `main` MEMUAT PII, rewrite tetap wajib** |
 > | 9 | O42 — detail cek disiapkan · A-09a mendarat · A-09b di-scope |
+> | 10 | ✅ **O59 DIEKSEKUSI — live ≡ repo. Dan temuan nama event yang lolos semua gerbang** |
 
 ## 0. Posisi persis — SALIN INI KE SESI BERIKUTNYA
 
@@ -31,11 +34,11 @@
 | Branch | `claude/handoff-sesi6-migration-mrqglv` |
 | `main` | `1316705` — PR #106 ter-merge |
 | PR terbuka | **#107** (A-08) — dibuka sesi ini, belum di-review |
-| Migrasi | **70 berkas** (68 + A-08 `20260808000000` + A-09a `20260808010000`). ⚠️ **Live TIDAK sinkron — O59.** Lokal: 70 migrasi bersih lewat `db-rebuild` |
+| Migrasi | **71 berkas** (68 + A-08 + A-09a + O59 `20260808030000`). ✅ **Live ≡ repo** — O59 direkonsiliasi & diverifikasi. Lokal: 71 migrasi bersih |
 | Gate | tabel **76** (tidak berubah) · prefix **31** · mesin **16** · event **33 → 34** · `CATALOG_VERSION` **3 → 4** |
 | Skor | M6A **~68%** (9,5/14) — A-08 + A-09a mendarat, A-09b tersisa · M6B **8%** (1/12) |
 | Test | domain **895 hijau + 1 skipped** · `apps/api` **324** · `packages/core` **118** · `packages/db` **15** · 4 invariant SQL hijau · typecheck FE bersih |
-| Menggantung | Kode: **NOL** (working tree bersih, lokal ≡ remote). Keputusan: **O59** (blocker deploy) · **O47b rewrite** (§8) · **O42** (3 keputusan) · **X-13** |
+| Menggantung | Kode: **NOL**. Keputusan: **O59 ✅ selesai** · **X-13 ✅ ditutup** · **O47b** rewrite dijadwalkan sesudah #107 merge · **O42-b** tiket seed HRIS (keputusan sudah ada, eksekusi belum) |
 
 ### 0.1 ⚠️ Handoff yang masuk ke sesi ini SALAH di empat titik
 
@@ -396,3 +399,89 @@ Dua keputusan yang bisa salah kalau ditebak:
   test pun merah — perangkap yang masih aktif.
 - E-4 floor price sudah ada (`strategi_pillar.floor_price`); yang belum adalah
   validasi Brief yang MEMBACANYA — tiket M7/M12, bukan M6A.
+
+## 10. ✅ O59 DIEKSEKUSI — live ≡ repo, dan satu temuan yang lolos semua gerbang
+
+Pemilik memutuskan **(b) repo menang**. Premisnya diverifikasi lebih dulu, bukan
+dipercaya: `strategi` live **0 baris** (juga `strategi_target`,
+`strategi_assumption`, `strategi_definisi_berhasil`) ⇒ membongkar bentuk live
+nol kehilangan data.
+
+### 10.1 Drift-nya TIGA perbedaan, bukan satu
+
+| Hal | Live (sesi hilang) | Repo | Aksi |
+|---|---|---|---|
+| D-5 | tabel anak `strategi_definisi_berhasil` | 3 kolom `definisi_berhasil_*` | tabel dibongkar |
+| CHECK D-6 | `ck_strategi_leading_{array,maks,taksonomi}` | `ck_strategi_leading_indicator` | nama live dibuang |
+| CHECK D-7 | `ck_strategi_sanggahan` | `ck_strategi_sanggahan_utuh` | nama live dibuang |
+| **event v4** | **`strategi_sanggahan_target`** | **`m6a.strategi.sanggahan_target`** | disatukan |
+
+### 10.2 🔴 Yang ketiga adalah temuan terpenting sesi ini
+
+**Perbedaan nama event lolos SEMUA gerbang.** Keduanya "1 event di versi 4", jadi
+`COUNT(notif_events) = 34` **dan** `SUM(event_count) = 34` **cocok di kedua
+sisi** — sepanjang waktu, hijau. Gerbang berbasis **hitungan** tidak bisa melihat
+nama yang berbeda.
+
+Akibatnya bukan kosmetik: `raiseSanggahan` memanggil
+`notify_emit('m6a.strategi.sanggahan_target')`, dan live akan
+`RAISE EXCEPTION 'notification: unknown event %'` ⇒ **Sanggahan Target GAGAL
+TOTAL di produksi**, bukan sekadar tidak menotifikasi.
+
+**Aturan yang lahir dari ini:** gerbang hitungan cukup mendeteksi event yang
+**HILANG**, tidak yang **SALAH NAMA**. Migrasi rekonsiliasi §5 sekarang
+meng-assert nama secara eksplisit, termasuk bahwa nama versi live sudah TIDAK
+ADA lagi.
+
+### 10.3 Cara eksekusinya — dan satu kegagalan yang mengajari sesuatu
+
+`20260808000000` (A-08) dan `20260808010000` (A-09a) dibuat **KONVERGEN**
+(`ADD COLUMN IF NOT EXISTS`, `DROP CONSTRAINT IF EXISTS` sebelum `ADD`,
+`ON CONFLICT DO NOTHING`) — wajib, karena versinya tidak ada di riwayat live
+sehingga `db push` akan mencobanya di sana dan `ADD COLUMN` polos akan gagal.
+
+Lalu `20260808030000_o59_rekonsiliasi_section_d`, dengan **guard sebelum DROP**:
+menolak berjalan (`RAISE EXCEPTION`) kalau `strategi_definisi_berhasil` memuat
+>0 baris. Premis "tabel kosong" ditegakkan, bukan dipercaya — kalau seseorang
+mengisinya antara keputusan dan penerapan, lebih baik merah di deploy daripada
+hilang di produksi.
+
+**Penerapan pertama GAGAL**, dan itu berguna: `UPDATE … SET event_type = <bertitik>`
+menabrak PK, karena `20260808000000` **sudah** meng-INSERT nama bertitik ⇒ live
+sempat memuat KEDUA nama (35 event vs 34 terdaftar, katalog tidak konsisten).
+Diperbaiki jadi **dua cabang**: nama bertitik sudah ada ⇒ HAPUS yang polos;
+belum ada ⇒ RENAME. Itu membuatnya idempoten atas urutan penerapan yang berbeda
+antara live (sudah lewat 20260808000000) dan DB kosong (belum).
+
+### 10.4 Hasil terverifikasi di live
+
+| | Sebelum | Sesudah |
+|---|---|---|
+| tabel `public` | 77 | **76** |
+| `notif_events` / terdaftar | 35 / 34 ❌ | **34 / 34** |
+| event v4 | dua nama | **`m6a.strategi.sanggahan_target`** |
+| D-5 | tabel anak | **3 kolom** |
+| narasi A-09a | 0 kolom | **4 kolom** |
+| nama CHECK | versi live | **5 nama repo** |
+| prefix · mesin | 31 · 16 | **31 · 16** |
+
+Lokal: **71 migrasi** bersih, domain **895 + 1 skipped**, `apps/api` **324**.
+
+⚠️ **Riwayat migrasi live memakai versi yang di-generate saat apply**, bukan
+persis nama berkas repo (pola yang sudah ada di repo ini sejak
+`20260807174753`). Nama-nya sengaja disamakan dengan nama berkas repo supaya
+pemetaan 1:1 tetap terbaca.
+
+### 10.5 O47b · O42 · X-13 — status sesudah keputusan
+
+- **O47b = (b)**, rewrite **sesudah #107 merge**. Urutan di §8 + runbook §5.4.
+  Sampai langkah Support selesai: **PII belum bersih.**
+- **O42**: (a) sumber kebenaran = **live**; (b) seed pindah ke mapping **B**
+  (UPPERCASE HRIS) ⇒ **tiket `O42-b`** di backlog, karena ia mengharuskan 10
+  karyawan seed ikut berubah bentuk (join peka huruf besar-kecil) dan menyentuh
+  gerbang `role_mappings = 12`; (c) **Direktur memang tidak punya divisi** ⇒
+  `Management/Director` tanpa mapping BENAR, INNER JOIN O51 tetap, dan
+  `m5.transaction.change_requested` tetap `explicit` — jangan pernah
+  `leadsOfDivision`.
+- **X-13 ✅ ditutup** — set D-6 = kosakata metrik D-4 apa adanya. Nol perubahan
+  kode; yang berubah hanya statusnya.
