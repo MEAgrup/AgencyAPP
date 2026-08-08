@@ -3168,6 +3168,26 @@ export interface StrategiWire {
   aset_dari_klien: string[];
   aset_dari_klien_tidak_ada: boolean;
   aset_catatan: string | null;
+  // Section D — Target & KPI (A-08).
+  /** D-6 — max 5, from the D-4 metric vocabulary. */
+  leading_indicator: string[];
+  /** D-7 — HARD-INTERNAL (§4.1). `null` when no objection was raised. */
+  sanggahan: StrategiSanggahanWire | null;
+}
+
+/** D-7 — Sanggahan Target. Advisory (Rule 19): the contract floor never moves. */
+export interface StrategiSanggahanWire {
+  alasan: string;
+  angka_pembanding: string;
+  target_realistis: string;
+  diajukan_oleh: string;
+  diajukan_pada: string;
+}
+
+/** D-5 — definisi berhasil per horizon (30 / 60 / 90 hari). */
+export interface StrategiDefinisiBerhasilWire {
+  horizon_hari: number;
+  definisi: string;
 }
 
 export function strategiToWire(s: strategi.Strategi): StrategiWire {
@@ -3218,6 +3238,18 @@ export function strategiToWire(s: strategi.Strategi): StrategiWire {
     aset_dari_klien: s.asetDariKlien,
     aset_dari_klien_tidak_ada: s.asetDariKlienTidakAda,
     aset_catatan: s.asetCatatan,
+    leading_indicator: s.leadingIndicator,
+    // Sent explicitly as `null` when no objection exists, never omitted (O43).
+    sanggahan:
+      s.sanggahan === null
+        ? null
+        : {
+            alasan: s.sanggahan.alasan,
+            angka_pembanding: s.sanggahan.angkaPembanding,
+            target_realistis: s.sanggahan.targetRealistis,
+            diajukan_oleh: s.sanggahan.diajukanOleh,
+            diajukan_pada: s.sanggahan.diajukanPada,
+          },
   };
 }
 
@@ -3411,6 +3443,8 @@ export interface StrategiDetailWire extends StrategiWire {
   prasyarat_klien: StrategiPrasyaratKlienWire[];
   targets: StrategiTargetWire[];
   komposisi_kontribusi: StrategiKomposisiWire[];
+  /** D-5 — ascending by horizon. */
+  definisi_berhasil: StrategiDefinisiBerhasilWire[];
   assumptions: StrategiAssumptionWire[];
   pillars: StrategiPillarWire[];
   resources: StrategiResourceWire[];
@@ -3578,6 +3612,10 @@ export function strategiDetailToWire(d: strategi.StrategiDetail): StrategiDetail
       // Sent explicitly as `null`, never omitted: a MISSING key blanks the cell
       // in a way the page cannot distinguish from "no data loaded" (O43).
       persen: k.persen,
+    })),
+    definisi_berhasil: d.definisiBerhasil.map((x) => ({
+      horizon_hari: x.horizonHari,
+      definisi: x.definisi,
     })),
     assumptions: d.assumptions.map((a) => ({
       kode: a.kode,
@@ -3926,6 +3964,35 @@ export function strategiAssumptionsFromWire(v: unknown): strategi.AssumptionInpu
     status: (strOrNull(a.status) as strategi.AssumptionState | null) ?? undefined,
     targetTerkait: Array.isArray(a.target_terkait) ? a.target_terkait.map((k) => String(k)) : [],
   }));
+}
+
+/** Inbound: D-5 + D-6 (A-08). */
+export function strategiKpiFromWire(v: unknown): strategi.KpiInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    definisiBerhasil: asRecords(b.definisi_berhasil).map((d) => ({
+      horizonHari: numOrNull(d.horizon_hari) ?? 0,
+      definisi: str(d.definisi),
+    })),
+    leadingIndicator: Array.isArray(b.leading_indicator)
+      ? b.leading_indicator.map((x) => String(x))
+      : [],
+  };
+}
+
+/**
+ * Inbound: D-7 Sanggahan Target. A body with no `alasan` is a RETRACTION, which
+ * is why this returns `null` rather than an empty object — the domain treats the
+ * two differently and the distinction has to survive the wire.
+ */
+export function strategiSanggahanFromWire(v: unknown): strategi.SanggahanInput | null {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  if (strOrNull(b.alasan) === null) return null;
+  return {
+    alasan: str(b.alasan),
+    angkaPembanding: str(b.angka_pembanding),
+    targetRealistis: str(b.target_realistis),
+  };
 }
 
 /** Inbound: Section E pillars. */

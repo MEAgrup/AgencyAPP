@@ -34,9 +34,9 @@ describe('frozen catalog', () => {
     }
   });
 
-  it('is at version 3, and the versions are registered in order with no gaps', () => {
-    expect(CATALOG_VERSION).toBe(3);
-    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3]);
+  it('is at version 4, and the versions are registered in order with no gaps', () => {
+    expect(CATALOG_VERSION).toBe(4);
+    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4]);
     // A registry row with no decision reference is how an un-signed-off
     // amendment would sneak in looking legitimate.
     for (const v of CATALOG_VERSIONS) {
@@ -133,6 +133,20 @@ describe('frozen catalog', () => {
     // lead of a division, so `leadsOfDivision` could never resolve to them.
     expect(CATALOG[EVENTS.TransactionChangeRequested].resolver).toBe('explicit');
     expect(CATALOG[EVENTS.TransactionChangeDecided].resolver).toBe('explicit');
+  });
+
+  it('carries exactly the 1 v4 event of the A-08 Section D amendment', () => {
+    // M6A D-7 is marked `O (notif SPV + Head of Sales)` and Rule 19 repeats it
+    // as behaviour, but §7 catalogs only the four Strategi LIFECYCLE events —
+    // so a sanggahan has nothing to ride on, and folding it into
+    // `strategi_diajukan` would send the wrong people the wrong meaning.
+    expect(eventsOfVersion(4)).toEqual(['strategi_sanggahan_target']);
+    expect(CATALOG[EVENTS.StrategiSanggahanTarget].version).toBe(4);
+    // 'explicitOrLeads': the SPV arrives through the entity's division arm
+    // (Account); Head of Sales cannot, so the domain resolves and sends them
+    // explicitly. One emission carries one division, and this event has two
+    // audiences in two divisions.
+    expect(CATALOG[EVENTS.StrategiSanggahanTarget].resolver).toBe('explicitOrLeads');
   });
 
   it('every event carries a description and a valid resolver', () => {

@@ -20,18 +20,18 @@ Hitungan tiket, bukan effort — A-13 sendirian lebih besar dari A-05…A-07 dig
 
 | Bagian | Selesai | Total | % |
 |---|---|---|---|
-| **M6A Strategi** | A-00…A-07 = **8** | 14 | **57%** |
+| **M6A Strategi** | A-00…A-08 = **9** | 14 | **64%** |
 | **M6B Plan** | B-00 = **1** | 12 | **8%** |
 | M6C Plan Gate | C-01…C-07 = 7 | 8 (B-10 menutup Rule 6) | 88% |
-| **M6A+M6B gabungan** | **9** | 26 | **35%** |
+| **M6A+M6B gabungan** | **10** | 26 | **38%** |
 
 Yang membuat angka M6A menyesatkan kalau dibaca sendirian:
 
-- **Lapisan data+domain M6A ≈ 70%** — 16 tabel, mesin #15, 137 test domain hijau.
+- **Lapisan data+domain M6A ≈ 75%** — 17 tabel, mesin #15, 140 test `strategi` hijau.
 - **Lapisan UI M6A = 0%.** Tidak ada satu pun halaman `strategi`/`STRG`. Halaman
   `account/strategies/[id]` yang ada adalah entitas **lama** M6 §4
   (`strategy_plan`/`STR`, PR #37) — bukan entitas ini. Jangan tertipu namanya.
-- **Section A→J: 3 dari 10 mendarat** (A ✅ B ✅ C ✅ · D…J = A-08/A-09).
+- **Section A→J: 4 dari 10 mendarat** (A ✅ B ✅ C ✅ D ✅ · E…J = A-09).
 - **M6B nol tabel `PLAN`** — `plan_gate_config` milik M6C, bukan M6B. Mesin #16
   belum ada.
 
@@ -131,7 +131,7 @@ diimplementasi sebelum ini mendarat, jadi ia masuk batch migrasi yang SAMA denga
 | ~~A-05~~ | ~~Section A (16 field)~~ | ✅ **SELESAI sesi 3** — data + domain + route + tipe FE + gerbang submit. **Form UI belum** (belum ada halaman Strategi sama sekali; lihat A-13 di bawah) |
 | ~~A-06~~ | ~~Section B per channel (±45 field ↻)~~ | ✅ **SELESAI sesi 3** — sama cakupannya. Kelengkapan Rule 5 ditegakkan gerbang submit per grup per channel, bukan `NOT NULL`: §7 meminta autosave 20 detik dan §5 langkah 5 meminta hitungan hidup, keduanya butuh keadaan setengah-terisi bisa disimpan |
 | ~~A-07~~ | ~~Section C + validasi kutipan baseline~~ | ✅ **SELESAI sesi 4** (`a9b7a47`, migrasi `20260807000000_m6a_section_c.sql`, merged PR #103). Rule 6 ditegakkan atas **set field-ID tertutup** (`VALID_BASELINE_FIELD_IDS`), bukan string bebas: kutipan ke field yang tidak ada ditolak `MSG_DIAGNOSA_INVALID_FIELD_ID`, nol kutipan ditolak `MSG_DIAGNOSA_FIELD_ID_REQUIRED`. `field_ids` disimpan sebagai array jsonb (bukan objek) — perbaikan `58f6588` yang membuat A-07 bisa diuji terhadap DB. **Form UI belum** (A-13) |
-| A-08 | Section D + asumsi | Stretch `>=` floor di level CHECK DB. `STRG_ASSUMPTION.status ∈ Berlaku/Gugur/Terverifikasi`; flip ke `Gugur` memicu `strategi_revisi_disarankan` — **O55 SUDAH SELESAI 2026-08-07**, transisi + emit boleh disambung |
+| ~~A-08~~ | ~~Section D + asumsi~~ | ✅ **SELESAI 2026-08-08** — migrasi `20260808020000_m6a_section_d.sql`, 30 test baru. D-1/D-2/D-4 (stretch `>=` floor di CHECK) dan D-3 (turunan, X-11) sudah ada sebelumnya; yang mendarat: **D-5** tabel anak `strategi_definisi_berhasil` (30/60/90, set tertutup di CHECK, kelengkapan per-horizon di gerbang submit), **D-6** `strategi.leading_indicator` jsonb ≤5 dengan kosakata metrik D-4 (PRD tidak mendaftarkan nilainya ⇒ **X-13**), **D-7** Sanggahan Target lima kolom all-or-nothing + event katalog **v4** `strategi_sanggahan_target` ke SPV Account + Head of Sales. **Flip asumsi → `Gugur` memicu `strategi_revisi_disarankan`** — pemanggil `emit()` PERTAMA untuk katalog v2, dan **sengaja tidak dibatasi Draft**: asumsi gugur baru berarti saat Strategi `Aktif`. Rule 19 ditegakkan oleh LETAK, bukan teks: nol jalur dari sanggahan ke `strategi_target`. **Form UI belum** (A-13) |
 | A-09 | Section E/F/G/H/I/J | Floor price per hero SKU (E-4) dibaca validasi Brief; F soft-limit 20% (Rule 10); G-0 `tanggal_mulai_siklus` sekali-set (Rule 17) |
 | A-10 | Dua tier visibilitas | `STRG_FIELD_VISIBILITY` overlay + daftar hard-internal sebagai konstanta `packages/core`, ditolak di predikat TS **dan** CHECK DB (invariant beku: keduanya tidak boleh menyimpang) |
 | A-11 | Tautan klien read-only `/s/{token}` | Token 32-byte disimpan ter-hash, satu aktif per Strategi, version-pinned ke versi Aktif, revocable + expirable, access-logged. Filter visibilitas diterapkan **sebelum** serialisasi — nol field internal di payload HTML |
@@ -169,5 +169,6 @@ diimplementasi sebelum ini mendarat, jadi ia masuk batch migrasi yang SAMA denga
 | X-08 | PA-3 (metrik auto PE-3 belum tentu tersedia semua) | Hans / developer — bukan pemilik. **Contoh:** PE-3 mendaftar 6 metrik auto (ad spend, ROAS/ACOS, jumlah video selesai, kreator aktif, **jam live vendor**, Brief selesai/total). Jam live vendor datang dari M10 yang vendornya melapor **di luar sistem** (PA-4) ⇒ metrik itu de-facto manual. Yang wajib: daftar metrik manual ditulis **eksplisit** di UI, tidak dicampur diam-diam dengan yang auto, supaya AM tahu angka mana yang dia pertanggungjawabkan |
 | ~~X-10~~ | ~~O58 — "tidak ada" vs "belum dijawab" untuk field daftar bertanda WAJIB~~ | ✅ **SELESAI 2026-08-07** — O58 dijawab pemilik (pilihan (a)) dan sudah mendarat: kolom `{field}_tidak_ada` untuk **lima** field (A-11, A-14, B-5.3, B-8.1, B-8.2 — bukan enam; B-3.5/B-4.5 sudah opsional), gerbang submit jadi "daftar terisi XOR checkbox dicentang", pesan `MSG_TIDAK_ADA_BELUM_DIJAWAB`. Baris ini basi sejak sesi 5; UI checkbox-nya menunggu A-13 |
 | ~~X-11~~ | ~~D-3 turunan atau diketik?~~ | ✅ **SELESAI 2026-08-07 (provisional)** — pemilik: *"buat target turunan dulu, biarkan nanti saya QC di production"*. `komposisiKontribusi()` dihitung dari D-2 metrik `gmv`; **nol kolom penyimpan, nol migrasi** supaya berubah pikiran tetap murah. Deviasi PRD tercatat (`W`→Auto). A-08 **tidak lagi terblokir** |
+| **X-13** | **D-6 — kosakata leading indicator: cukupkah metrik D-4?** 🟡 **BARU 2026-08-08, tidak memblokir.** PRD menulis D-6 "Multi-enum (≤5)" dan tidak pernah mendaftar nilainya, jadi A-08 memakai kosakata metrik D-4 yang sudah ada di DB (gmv, pengunjung, cr, aov, roas_min, acos_maks, sku_winner, affiliate_aktif, jam_live, jumlah_video) — nol nama dikarang. **Contoh yang belum terjawab:** kalau AM ingin memantau "jumlah keluhan masuk" atau "hari stok habis" mingguan, keduanya bukan metrik target dan sekarang ditolak. Menambahkannya adalah penambahan taksonomi (satu migrasi CHECK), bukan pembongkaran bentuk. Yang perlu Yohan/Yulianti tentukan: apakah leading indicator memang harus selalu metrik yang ditargetkan | Sebelum A-13 membangun form Section D |
 | X-12 | "Point log buruk" X-07 belum punya komponen KPI | 🟡 **DIJADWALKAN 2026-08-07** — pemilik: *"rumahnya akan dibuat menyusul"*. Bukan blocker. **Batas sampai rumahnya ada:** B-09 boleh mencatat keterlambatan ke audit log, **tidak boleh** mengklaim ia memengaruhi Performance Score, dan tidak boleh mengarang bobotnya |
 | ~~X-09~~ | ~~Tidak ada entitas CONTRACT di CDPS~~ | ✅ **SELESAI 2026-08-07** — O57 diputus & dieksekusi (B-00) |

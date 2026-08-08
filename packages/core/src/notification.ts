@@ -75,6 +75,13 @@ export const EVENTS = {
   TransactionChangeRequested: 'm5.transaction.change_requested', // -> Directors
   TransactionChangeDecided: 'm5.transaction.change_decided', // -> Requester
 
+  // ----- catalog v4 (A-08) — 1 Strategi advisory (M6A D-7 / Rule 19) -----
+  // D-7 is marked `O (notif SPV + Head of Sales)` and Rule 19 repeats it as
+  // behaviour. The four v2 Strategi events are all lifecycle ones, so there is
+  // nothing to fold this into: the recipients differ (Head of Sales gets no
+  // Strategi submissions) and so does the meaning.
+  StrategiSanggahanTarget: 'strategi_sanggahan_target', // -> SPV Account + Head of Sales
+
 } as const;
 
 /** A cataloged event type. */
@@ -113,6 +120,12 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
     description: 'M5-OA-7 — perubahan skema transaksi wajib ACC Direktur: 2 event Finance',
     eventCount: 2,
     decisionRef: 'docs/DECISIONS.md 2026-08-04 (M5-OA-7)',
+  },
+  {
+    version: 4,
+    description: 'M6A A-08 — Sanggahan Target (D-7 / Rule 19): 1 event advisory',
+    eventCount: 1,
+    decisionRef: 'docs/DECISIONS.md 2026-08-08 (A-08 Section D)',
   },
 ] as const;
 
@@ -185,6 +198,9 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
   [EVENTS.ClientAssigned]: { description: 'Klien di-assign ke AM — ke AM bersangkutan', resolver: 'explicit', version: 2 },
   [EVENTS.TransactionChangeRequested]: { description: 'Pengajuan perubahan transaksi menunggu ACC Direktur', resolver: 'explicit', version: 3 },
   [EVENTS.TransactionChangeDecided]: { description: 'Pengajuan perubahan transaksi di-ACC/tolak', resolver: 'explicit', version: 3 },
+
+  // --- v4 (A-08) — description and resolver must match the migration seed ---
+  [EVENTS.StrategiSanggahanTarget]: { description: 'AM menyanggah target kontrak (D-7, advisory) — ke SPV Account + Head of Sales', resolver: 'explicitOrLeads', version: 4 },
 
 };
 

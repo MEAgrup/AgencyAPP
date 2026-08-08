@@ -29,15 +29,21 @@ import {
   MSG_AKSES_BLOCKER_DATE,
   MSG_AKSES_DUPLICATE,
   MSG_AKSES_MATRIX_REQUIRED,
+  MSG_ASSUMPTION_NOT_FOUND,
   MSG_ASSUMPTION_TARGET_UNKNOWN,
   MSG_BASELINE_GROUP_INCOMPLETE,
   MSG_CHANNEL_NOT_FOUND,
   MSG_CYCLE_LOCKED,
+  MSG_DEFINISI_BERHASIL_REQUIRED,
+  MSG_DEFINISI_HORIZON_UNKNOWN,
   MSG_DIAGNOSA_FIELD_ID_REQUIRED,
   MSG_DIAGNOSA_INVALID_FIELD_ID,
   MSG_DIAGNOSA_MISSING,
   MSG_INCOMPLETE,
   MSG_KOMPETITOR_REQUIRED,
+  MSG_LEADING_INDICATOR_MAX,
+  MSG_LEADING_INDICATOR_REQUIRED,
+  MSG_LEADING_INDICATOR_UNKNOWN,
   MSG_NOT_PLAN_GATED,
   MSG_OUT_OF_SCOPE_REQUIRED,
   MSG_PRASYARAT_KLIEN_REQUIRED,
@@ -45,6 +51,7 @@ import {
   MSG_REVIEW_NOTES_REQUIRED,
   MSG_REVISION_INCOMPLETE,
   MSG_RISIKO_STRUKTURAL_REQUIRED,
+  MSG_SANGGAHAN_INCOMPLETE,
   MSG_STRATEGI_EXISTS,
   MSG_TARGET_WITHOUT_ASSUMPTION,
   MSG_TIDAK_ADA_BELUM_DIJAWAB,
@@ -76,11 +83,14 @@ import {
   saveChannels,
   saveDiagnosa,
   saveKonteks,
+  saveKpi,
   savePillars,
+  saveSanggahan,
   saveResources,
   saveRisks,
   komposisiKontribusi,
   saveTargets,
+  setAssumptionStatus,
   submitStrategi,
   targetKey,
   trenBaseline,
@@ -475,6 +485,17 @@ async function seedSubmittable(): Promise<{ serviceId: string; strategiId: strin
       targetTerkait: i === 0 ? [targetKey('gmv', 'Shopee', 1)] : [],
     })),
   );
+
+  // D-5 + D-6 (A-08). Part of the submit gate, so the fixture that is meant to
+  // pass every rule has to answer them too.
+  await saveKpi(sql, am(), s.id, {
+    definisiBerhasil: [
+      { horizonHari: 30, definisi: 'Kampanye boncos dimatikan, ROAS >= 4,0' },
+      { horizonHari: 60, definisi: 'GMV bulanan menembus floor kontrak' },
+      { horizonHari: 90, definisi: 'Repeat rate naik 5%, 3 SKU winner baru' },
+    ],
+    leadingIndicator: ['roas_min', 'pengunjung'],
+  });
 
   await savePillars(sql, am(), s.id, [
     { jenis: 'tidak_dikerjakan', aksi: 'tanpa reshoot foto di M1' },
@@ -1963,5 +1984,401 @@ describeDb('Section C — A-07 (Diagnosa & Akar Masalah)', () => {
     expect(codes).not.toContain('C-5');
     expect(codes).not.toContain('C-6');
     expect(codes).not.toContain('C-7');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section D — A-08 (D-5, D-6, D-7 + the D-8 status flip)
+// ---------------------------------------------------------------------------
+
+describeDb('Section D — D-5 definisi berhasil (A-08)', () => {
+  it('stores the three horizons in ascending order', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const saved = await saveKpi(sql, am(), s.id, {
+      // Deliberately out of order: the read path sorts, the caller does not.
+      definisiBerhasil: [
+        { horizonHari: 90, definisi: 'repeat rate +5%' },
+        { horizonHari: 30, definisi: 'kampanye boncos mati' },
+        { horizonHari: 60, definisi: 'GMV tembus floor' },
+      ],
+      leadingIndicator: ['roas_min'],
+    });
+    expect(saved.definisiBerhasil.map((d) => d.horizonHari)).toEqual([30, 60, 90]);
+    expect(saved.definisiBerhasil[0].definisi).toBe('kampanye boncos mati');
+  });
+
+  it('refuses a horizon the PRD does not name', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(
+      saveKpi(sql, am(), s.id, {
+        definisiBerhasil: [{ horizonHari: 45, definisi: 'x' }],
+        leadingIndicator: [],
+      }),
+    ).rejects.toThrow(MSG_DEFINISI_HORIZON_UNKNOWN);
+  });
+
+  it('refuses two answers for one horizon — last-write-wins is not an answer', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(
+      saveKpi(sql, am(), s.id, {
+        definisiBerhasil: [
+          { horizonHari: 30, definisi: 'a' },
+          { horizonHari: 30, definisi: 'b' },
+        ],
+        leadingIndicator: [],
+      }),
+    ).rejects.toThrow(MSG_DEFINISI_HORIZON_UNKNOWN);
+  });
+
+  it('lets the DB refuse an unknown horizon too — the CHECK is the wall', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(
+      sql`insert into strategi_definisi_berhasil (strategi_id, horizon_hari, definisi, created_by)
+          values (${s.id}, 45, 'x', 'ZZ-AM')`,
+    ).rejects.toThrow();
+  });
+
+  it('refuses a blank definition (whitespace is not an answer)', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(
+      saveKpi(sql, am(), s.id, {
+        definisiBerhasil: [{ horizonHari: 30, definisi: '   ' }],
+        leadingIndicator: [],
+      }),
+    ).rejects.toThrow(MSG_INCOMPLETE);
+  });
+
+  it('replaces the set rather than merging into it', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveKpi(sql, am(), s.id, {
+      definisiBerhasil: [
+        { horizonHari: 30, definisi: 'a' },
+        { horizonHari: 60, definisi: 'b' },
+      ],
+      leadingIndicator: [],
+    });
+    const saved = await saveKpi(sql, am(), s.id, {
+      definisiBerhasil: [{ horizonHari: 90, definisi: 'c' }],
+      leadingIndicator: [],
+    });
+    expect(saved.definisiBerhasil).toEqual([{ horizonHari: 90, definisi: 'c' }]);
+  });
+});
+
+describeDb('Section D — D-6 leading indicator (A-08)', () => {
+  it('refuses more than five', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(
+      saveKpi(sql, am(), s.id, {
+        definisiBerhasil: [],
+        leadingIndicator: ['gmv', 'cr', 'aov', 'roas_min', 'pengunjung', 'jam_live'],
+      }),
+    ).rejects.toThrow(MSG_LEADING_INDICATOR_MAX);
+  });
+
+  it('refuses an indicator outside the D-4 metric vocabulary', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(
+      saveKpi(sql, am(), s.id, { definisiBerhasil: [], leadingIndicator: ['jumlah_keluhan'] }),
+    ).rejects.toThrow(MSG_LEADING_INDICATOR_UNKNOWN);
+  });
+
+  it('lets the DB refuse an unknown indicator too', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(
+      sql`update strategi set leading_indicator = '["jumlah_keluhan"]'::jsonb where id = ${s.id}`,
+    ).rejects.toThrow();
+  });
+
+  it('lets the DB refuse a sixth indicator too', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(
+      sql`update strategi set leading_indicator =
+            '["gmv","cr","aov","roas_min","pengunjung","jam_live"]'::jsonb where id = ${s.id}`,
+    ).rejects.toThrow();
+  });
+
+  it('de-duplicates rather than spending two of the five slots on one metric', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const saved = await saveKpi(sql, am(), s.id, {
+      definisiBerhasil: [],
+      leadingIndicator: ['gmv', 'gmv', 'cr'],
+    });
+    expect(saved.leadingIndicator).toEqual(['gmv', 'cr']);
+  });
+});
+
+describeDb('Section D — D-5/D-6 in the submit gate', () => {
+  it('names each missing horizon separately, and the empty watch list', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveKpi(sql, am(), s.id, {
+      definisiBerhasil: [{ horizonHari: 30, definisi: 'a' }],
+      leadingIndicator: [],
+    });
+    const kurang = await checkCompleteness(sql, s.id);
+    const codes = kurang.map((k) => k.kode);
+    expect(codes).not.toContain('D-5/30');
+    expect(codes).toContain('D-5/60');
+    expect(codes).toContain('D-5/90');
+    expect(codes).toContain('D-6');
+    expect(kurang.find((k) => k.kode === 'D-5/60')?.pesan).toBe(MSG_DEFINISI_BERHASIL_REQUIRED);
+    expect(kurang.find((k) => k.kode === 'D-6')?.pesan).toBe(MSG_LEADING_INDICATOR_REQUIRED);
+  });
+
+  it('drops both once Section D is answered — the submittable fixture passes', async () => {
+    const { strategiId } = await seedSubmittable();
+    const codes = (await checkCompleteness(sql, strategiId)).map((k) => k.kode);
+    expect(codes).not.toContain('D-5/30');
+    expect(codes).not.toContain('D-5/60');
+    expect(codes).not.toContain('D-5/90');
+    expect(codes).not.toContain('D-6');
+  });
+});
+
+describeDb('Section D — D-7 Sanggahan Target (Rule 19)', () => {
+  it('stores all three parts plus who raised it and when', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const saved = await saveSanggahan(sql, am(), s.id, {
+      alasan: 'Floor 400jt/bulan mengandaikan budget iklan 2x baseline',
+      angkaPembanding: '180000000.00',
+      targetRealistis: '300000000.00',
+    });
+    expect(saved.sanggahan).not.toBeNull();
+    expect(saved.sanggahan?.angkaPembanding).toBe('180000000.00');
+    expect(saved.sanggahan?.targetRealistis).toBe('300000000.00');
+    expect(saved.sanggahan?.diajukanOleh).toBe('ZZ-AM');
+    expect(saved.sanggahan?.diajukanPada).not.toBe('');
+  });
+
+  it('does NOT move the floor — that is the whole of Rule 19', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveTargets(sql, am(), s.id, [
+      {
+        channel: 'Shopee',
+        monthIndex: 1,
+        metric: 'gmv',
+        nilaiFloor: '400000000.00',
+        nilaiStretch: '460000000.00',
+      },
+    ]);
+    const saved = await saveSanggahan(sql, am(), s.id, {
+      alasan: 'tidak realistis',
+      angkaPembanding: '180000000.00',
+      targetRealistis: '300000000.00',
+    });
+    // The floor is exactly where it was, and the stretch still clears it.
+    expect(saved.targets[0].nilaiFloor).toBe('400000000.00');
+    expect(saved.targets[0].nilaiStretch).toBe('460000000.00');
+    // And the objection is still not an escape hatch: a stretch below the floor
+    // is refused after the sanggahan exactly as it was before.
+    await expect(
+      saveTargets(sql, am(), s.id, [
+        {
+          channel: 'Shopee',
+          monthIndex: 1,
+          metric: 'gmv',
+          nilaiFloor: '400000000.00',
+          nilaiStretch: '300000000.00',
+        },
+      ]),
+    ).rejects.toThrow(ValidationError);
+  });
+
+  it('notifies Head of Sales — the audience the entity division cannot reach', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveSanggahan(sql, am(), s.id, {
+      alasan: 'tidak realistis',
+      angkaPembanding: '180000000.00',
+      targetRealistis: '300000000.00',
+    });
+    // EMP-0006 is the seed's Sales Head (role_mappings level `lead`). It cannot
+    // arrive through the emission's division arm — that arm carries Account.
+    const rows = await sql<{ n: number }[]>`
+      select count(*)::int as n from notifications
+       where entity_id = ${s.id} and event_type = 'strategi_sanggahan_target'
+         and recipient_employee_id = 'EMP-0006'`;
+    expect(rows[0].n).toBe(1);
+  });
+
+  it('refuses an objection with no comparison figure', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(
+      saveSanggahan(sql, am(), s.id, {
+        alasan: 'tidak realistis',
+        angkaPembanding: '',
+        targetRealistis: '300000000.00',
+      }),
+    ).rejects.toThrow(MSG_SANGGAHAN_INCOMPLETE);
+  });
+
+  it('refuses a non-numeric figure before it reaches the CHECK', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(
+      saveSanggahan(sql, am(), s.id, {
+        alasan: 'tidak realistis',
+        angkaPembanding: 'kira-kira 180jt',
+        targetRealistis: '300000000.00',
+      }),
+    ).rejects.toThrow(MSG_SANGGAHAN_INCOMPLETE);
+  });
+
+  it('lets the DB refuse a half-written sanggahan too', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(
+      sql`update strategi set sanggahan_alasan = 'tidak realistis' where id = ${s.id}`,
+    ).rejects.toThrow();
+  });
+
+  it('can be retracted — an optional field that cannot be emptied is a trap', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveSanggahan(sql, am(), s.id, {
+      alasan: 'tidak realistis',
+      angkaPembanding: '180000000.00',
+      targetRealistis: '300000000.00',
+    });
+    const cleared = await saveSanggahan(sql, am(), s.id, null);
+    expect(cleared.sanggahan).toBeNull();
+    // Retraction is audited, so the post-mortem still sees the objection existed.
+    const audit = await sql<{ n: number }[]>`
+      select count(*)::int as n from audit_log
+       where entity_id = ${s.id} and action = 'retract_sanggahan'`;
+    expect(audit[0].n).toBe(1);
+  });
+
+  it('is refused to an AM who does not own the client', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(
+      saveSanggahan(sql, otherAm(), s.id, {
+        alasan: 'x',
+        angkaPembanding: '1.00',
+        targetRealistis: '2.00',
+      }),
+    ).rejects.toThrow(ForbiddenError);
+  });
+});
+
+describeDb('Section D — D-8 status flip (A-08)', () => {
+  /** A submitted + approved Strategi, i.e. the state a flip actually matters in. */
+  async function seedAktif(): Promise<string> {
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    return strategiId;
+  }
+
+  it('flips to Gugur on an ACTIVE Strategi — the state the event exists for', async () => {
+    const id = await seedAktif();
+    const after = await setAssumptionStatus(sql, spv(), id, 'A1', 'Gugur');
+    expect(after.status).toBe(STRATEGI_AKTIF);
+    expect(after.assumptions.find((a) => a.kode === 'A1')?.status).toBe('Gugur');
+  });
+
+  it('fires strategi_revisi_disarankan to the owning AM', async () => {
+    const id = await seedAktif();
+    await setAssumptionStatus(sql, spv(), id, 'A1', 'Gugur');
+    const rows = await sql<{ n: number }[]>`
+      select count(*)::int as n from notifications
+       where entity_id = ${id} and event_type = 'strategi_revisi_disarankan'
+         and recipient_employee_id = 'ZZ-AM'`;
+    expect(rows[0].n).toBe(1);
+  });
+
+  it('does not fire on the way to Terverifikasi', async () => {
+    const id = await seedAktif();
+    await setAssumptionStatus(sql, spv(), id, 'A1', 'Terverifikasi');
+    const rows = await sql<{ n: number }[]>`
+      select count(*)::int as n from notifications
+       where entity_id = ${id} and event_type = 'strategi_revisi_disarankan'`;
+    expect(rows[0].n).toBe(0);
+  });
+
+  it('is idempotent — re-setting the same status notifies nobody twice', async () => {
+    const id = await seedAktif();
+    await setAssumptionStatus(sql, spv(), id, 'A1', 'Gugur');
+    await setAssumptionStatus(sql, spv(), id, 'A1', 'Gugur');
+    const notif = await sql<{ n: number }[]>`
+      select count(*)::int as n from notifications
+       where entity_id = ${id} and event_type = 'strategi_revisi_disarankan'`;
+    expect(notif[0].n).toBe(1);
+    const audit = await sql<{ n: number }[]>`
+      select count(*)::int as n from audit_log
+       where entity_id = ${id} and action = 'set_assumption_status'`;
+    expect(audit[0].n).toBe(1);
+  });
+
+  it('writes the before value, so the audit log answers "from what?"', async () => {
+    const id = await seedAktif();
+    await setAssumptionStatus(sql, spv(), id, 'A1', 'Gugur');
+    const rows = await sql<{ before_json: unknown }[]>`
+      select before_json from audit_log
+       where entity_id = ${id} and action = 'set_assumption_status' limit 1`;
+    expect((rows[0].before_json as Record<string, unknown>).status).toBe('Berlaku');
+  });
+
+  it('rejects an unknown assumption code', async () => {
+    const id = await seedAktif();
+    await expect(setAssumptionStatus(sql, spv(), id, 'A9', 'Gugur')).rejects.toThrow(
+      MSG_ASSUMPTION_NOT_FOUND,
+    );
+  });
+
+  it('rejects a status outside the three', async () => {
+    const id = await seedAktif();
+    await expect(
+      setAssumptionStatus(sql, spv(), id, 'A1', 'Batal' as never),
+    ).rejects.toThrow(ValidationError);
+  });
+
+  it('is refused to an AM who does not own the client', async () => {
+    const id = await seedAktif();
+    await expect(setAssumptionStatus(sql, otherAm(), id, 'A1', 'Gugur')).rejects.toThrow(
+      ForbiddenError,
+    );
+  });
+});
+
+describeDb('Rule 13 — what Section D carries into a revision, and what it does not', () => {
+  it('carries D-5 and D-6 forward, but not the D-7 objection', async () => {
+    const { strategiId } = await seedSubmittable();
+    await saveSanggahan(sql, am(), strategiId, {
+      alasan: 'floor tidak realistis',
+      angkaPembanding: '180000000.00',
+      targetRealistis: '300000000.00',
+    });
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+
+    const revisi = await openRevision(sql, am(), strategiId, {
+      triggerRevisi: ['asumsi_gugur'],
+      alasanRevisi: 'budget iklan tidak cair',
+      asumsiGugur: ['A1'],
+    });
+    const detail = await getStrategi(sql, am(), revisi.id);
+
+    expect(detail.definisiBerhasil.map((d) => d.horizonHari)).toEqual([30, 60, 90]);
+    expect(detail.leadingIndicator).toEqual(['roas_min', 'pengunjung']);
+    // The objection belonged to v1's targets. v2 has not written its targets
+    // yet, so carrying it would attribute an objection to numbers nobody typed.
+    expect(detail.sanggahan).toBeNull();
   });
 });

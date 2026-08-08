@@ -999,7 +999,8 @@ DECLARE
     'optimization_logs_select','plan_gate_config_select','prospect_attempt_nq_reasons_select',
     'prospect_attempts_select','qualified_form_services_select','qualified_forms_select',
     'strategi_akses_select','strategi_assumption_select','strategi_baseline_bulan_select',
-    'strategi_channel_select','strategi_diagnosa_select','strategi_prasyarat_klien_select',
+    'strategi_channel_select','strategi_definisi_berhasil_select','strategi_diagnosa_select',
+    'strategi_prasyarat_klien_select',
     'strategi_quick_win_select','strategi_risiko_struktural_select','strategi_risk_select',
     'strategi_target_select','strategi_version_select','vendors_select'
   ];

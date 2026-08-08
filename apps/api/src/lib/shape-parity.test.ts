@@ -443,6 +443,9 @@ const WIRE_TO_FE: Record<string, string> = {
   StrategiQuickWinWire: 'strategi.ts::StrategiQuickWin',
   StrategiRisikoStrukturalWire: 'strategi.ts::StrategiRisikoStruktural',
   StrategiPrasyaratKlienWire: 'strategi.ts::StrategiPrasyaratKlien',
+  // A-08 Section D
+  StrategiDefinisiBerhasilWire: 'strategi.ts::StrategiDefinisiBerhasil',
+  StrategiSanggahanWire: 'strategi.ts::StrategiSanggahan',
   BriefWire: 'account.ts::Brief',
   ComplaintWire: 'account.ts::Complaint',
   // M7 creative

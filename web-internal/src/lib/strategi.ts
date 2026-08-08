@@ -259,6 +259,32 @@ export interface Strategi {
   /** A-14 (O58). */
   aset_dari_klien_tidak_ada: boolean;
   aset_catatan: string | null;
+  /** D-6 — maks 5, kosakata = metrik D-4 (A-08). */
+  leading_indicator: string[];
+  /**
+   * D-7 — HARD-INTERNAL (§4.1): jangan pernah render field ini di tautan klien
+   * `/s/{token}` (A-11). `null` = tidak ada sanggahan.
+   */
+  sanggahan: StrategiSanggahan | null;
+}
+
+/**
+ * D-7 — Sanggahan Target. Advisory (Rule 19): floor kontrak (D-1) TIDAK berubah
+ * dan stretch tetap wajib >= floor. Form boleh menampilkan angka yang menurut AM
+ * realistis, tapi angka itu bukan target — ia bukti untuk post-mortem.
+ */
+export interface StrategiSanggahan {
+  alasan: string;
+  angka_pembanding: string;
+  target_realistis: string;
+  diajukan_oleh: string;
+  diajukan_pada: string;
+}
+
+/** D-5 — definisi berhasil per horizon (30 / 60 / 90 hari). */
+export interface StrategiDefinisiBerhasil {
+  horizon_hari: number;
+  definisi: string;
 }
 
 /** B-1 / B-5 — one row per month of the declared baseline window (B-0.7). */
@@ -502,6 +528,8 @@ export interface StrategiDetail extends Strategi {
   prasyarat_klien: StrategiPrasyaratKlien[];
   targets: StrategiTarget[];
   komposisi_kontribusi: StrategiKomposisi[];
+  /** D-5 — urut naik menurut horizon. */
+  definisi_berhasil: StrategiDefinisiBerhasil[];
   assumptions: StrategiAssumption[];
   pillars: StrategiPillar[];
   resources: StrategiResource[];
@@ -654,6 +682,54 @@ export function saveStrategiTargets(id: string, targets: unknown[]): Promise<Str
 
 export function saveStrategiAssumptions(id: string, assumptions: unknown[]): Promise<StrategiDetail> {
   return api.put<StrategiDetail>(`/strategi/${id}/assumptions`, { assumptions });
+}
+
+/** D-5 + D-6 — satu aksi, satu simpan (A-08). */
+export function saveStrategiKpi(
+  id: string,
+  definisiBerhasil: unknown[],
+  leadingIndicator: string[],
+): Promise<StrategiDetail> {
+  return api.put<StrategiDetail>(`/strategi/${id}/kpi`, {
+    definisi_berhasil: definisiBerhasil,
+    leading_indicator: leadingIndicator,
+  });
+}
+
+/**
+ * D-7 — ajukan Sanggahan Target.
+ *
+ * Rule 19: ini TIDAK menurunkan floor. Form tidak boleh memakainya sebagai jalan
+ * memutar untuk mengubah D-1 — floor tetap read-only dan stretch tetap >= floor.
+ */
+export function saveStrategiSanggahan(
+  id: string,
+  alasan: string,
+  angkaPembanding: string,
+  targetRealistis: string,
+): Promise<StrategiDetail> {
+  return api.put<StrategiDetail>(`/strategi/${id}/sanggahan`, {
+    alasan,
+    angka_pembanding: angkaPembanding,
+    target_realistis: targetRealistis,
+  });
+}
+
+/** D-7 — cabut sanggahan yang terlanjur diajukan. Badan tanpa `alasan` = cabut. */
+export function retractStrategiSanggahan(id: string): Promise<StrategiDetail> {
+  return api.put<StrategiDetail>(`/strategi/${id}/sanggahan`, {});
+}
+
+/** D-8 — flip status satu asumsi; `Gugur` memberi tahu AM + SPV. */
+export function setStrategiAssumptionStatus(
+  id: string,
+  kode: string,
+  status: AssumptionState,
+): Promise<StrategiDetail> {
+  return api.put<StrategiDetail>(
+    `/strategi/${id}/assumptions/${encodeURIComponent(kode)}/status`,
+    { status },
+  );
 }
 
 export function saveStrategiPillars(id: string, pillars: unknown[]): Promise<StrategiDetail> {
