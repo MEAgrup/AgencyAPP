@@ -75,6 +75,13 @@ tulisnya tidak menyentuh `strategi_target`, tempat `ck_strtg_stretch_gmv`
 hidup. Itu Rule 19. Ada test yang mengajukan "target realistis" **di bawah
 floor** dan membuktikan floor-nya tidak bergerak.
 
+**Kedua angka D-7 adalah UANG, jadi string** — satuan minor bilangan bulat,
+sama seperti `nilai_floor`/`nilai_stretch`/`gmv`. Sempat ditulis `number` di
+sesi ini dan diperbaiki sebelum merge: `number` untuk rupiah adalah
+representasi KEDUA untuk jenis nilai yang sama, kelas yang sama dengan dua
+daftar tertutup yang bisa menyimpang (O48/O51). Bukan bug hari ini (Rp 320jt
+aman di double) — jalur kedua yang selalu ditagih belakangan.
+
 Domain: `saveKpi` · `raiseSanggahan` · `setAssumptionStatus` · gerbang submit
 `D-5`/`D-6`.
 Route: `PUT /strategi/{id}/kpi` · `POST /strategi/{id}/sanggahan` ·
@@ -260,10 +267,14 @@ memilihnya.
 
 Selain yang SESI6/SESI7 catat, sesi ini menemukan dua yang memakan waktu:
 
-1. **Postgres mati lagi** (kambuh ketiga). `service postgresql start` **lalu
-   set ulang password** (`alter user postgres with password 'postgres'`) —
-   passwordnya tidak selamat kali ini, dan DB `cdps` **hilang**, jadi
-   `npm run db:rebuild -- --yes` wajib. Itu murah dan sekalian menguji migrasi.
+1. **Postgres mati DUA KALI dalam satu sesi** (jadi kambuh keempat & kelima).
+   Kali pertama: password tidak selamat **dan** DB `cdps` hilang ⇒
+   `service postgresql start` + `alter user postgres with password 'postgres'`
+   + `npm run db:rebuild -- --yes`. Kali kedua (di tengah menjalankan test,
+   gejalanya `connect ECONNREFUSED 127.0.0.1:5432` di setiap test DB): cukup
+   `service postgresql start`, DB-nya selamat. **Jangan simpulkan test Anda
+   merah** sebelum `pg_isready` diperiksa — ECONNREFUSED di SEMUA test DB
+   sekaligus adalah gejala server mati, bukan gejala kode.
 2. **`npx tsc` me-resolve TypeScript 6.0.2 global** sementara repo pin `^5`, dan
    ia gagal dengan `TS5101 baseUrl is deprecated` — **bukan** error kode Anda.
    `node_modules` juga bisa kosong di container baru: jalankan `npm install`
