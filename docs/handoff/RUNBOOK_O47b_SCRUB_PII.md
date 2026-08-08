@@ -1,12 +1,85 @@
 # RUNBOOK O47b — scrub PII dari histori git
 
-> Status per 2026-08-07: **diagnosis SELESAI, eksekusi BELUM.** Penghapusan
-> branch ditolak dari sesi ini (`403` dari remote), jadi Langkah 1 butuh sesi
-> atau orang dengan izin hapus-branch.
+> ## 🔴 KOREKSI 2026-08-08 — §0 DI BAWAH SALAH. BACA INI DULU.
 >
-> Keputusan pemilik: **O47b pilihan (b)** (`docs/DECISIONS.md` 2026-08-07).
+> §0 menyimpulkan *"`main` tidak memuat PII"* dan karenanya scrub menyusut dari
+> rewrite menjadi 26 penghapusan ref. **Kesimpulan itu tidak benar, dan
+> menjalankan §2 sebagaimana tertulis akan menghasilkan laporan "PII bersih"
+> yang PALSU** — kegagalan yang runbook ini sendiri memperingatkan dua kali.
+>
+> **Kekeliruannya ada pada pemilihan penanda, bukan pada perintahnya.** Seluruh
+> §0 bersandar pada `f8faf12` sebagai "commit PII". Diperiksa:
+>
+> ```
+> git show --stat f8faf12
+> #  docs/DECISIONS.md                         | 1 +
+> #  docs/handoff/HANDOFF_SESSION_20260717C.md | 7 +++++--
+> git show f8faf12:docs/handoff/HANDOFF_SESSION_20260717C.md \
+>   | grep -icE '@meagency\.co\.id|password|sandi'      # -> 0
+> ```
+>
+> `f8faf12` adalah commit **dokumentasi** (entri Open O35) dengan **nol** pola
+> PII. Ia hanya penanda lineage lama. Jadi
+> `merge-base --is-ancestor f8faf12 origin/main` = FALSE membuktikan `main`
+> tidak menjangkau **satu commit docs**, dan tidak mengatakan apa pun tentang PII.
+>
+> **PII yang sesungguhnya** adalah CSV karyawan di
+> `backend/testdata/import_samples/`, dihapus oleh commit `22af45b`
+> (*"O47 RESOLVED … retensi PII dieksekusi (import_samples dihapus)"*). Dan:
+>
+> ```
+> git merge-base --is-ancestor 22af45b origin/main        # -> YES, ada di main
+> git rev-list origin/main --objects | grep <blob-csv>    # -> ketemu, 4 dari 4
+> ```
+>
+> | Blob | Berkas | Terjangkau dari `origin/main`? |
+> |---|---|---|
+> | `14eac102fc1e` | `employees_cdps.csv` | **YA** |
+> | `d6c03f42c449` | `employees_from_hris.csv` | **YA** |
+> | `373c9c700ab2` | `employees_uat.csv` | **YA** |
+> | `a193bbb1a9aa` | `nik_email.csv` | **YA** |
+>
+> **`main` MEMUAT PII di histori-nya.** Penghapusan berkas 2026-07-30
+> mengeluarkannya dari *tree*, bukan dari *histori* — persis yang DECISIONS
+> catat sebagai laporan palsu pertama.
+>
+> ### Artinya untuk rencananya
+>
+> | | §0 mengklaim | Kenyataan |
+> |---|---|---|
+> | Rewrite histori `main` | tidak perlu | **WAJIB** (`git filter-repo`) |
+> | Force-push | tidak perlu | **WAJIB** |
+> | Re-clone semua kontributor | tidak perlu | **WAJIB** |
+> | Hapus 26 ref lineage lama | inti scrub-nya | **nol efek untuk PII** — ref itu berbagi blob yang sama dengan `main`; tetap berguna sebagai langkah (1) rencana (b), hanya bukan solusinya |
+> | Tiket GitHub Support | wajib | wajib — satu-satunya yang tidak berubah |
+>
+> Jadi rencana (b) **sebagaimana DECISIONS 2026-08-07 menuliskannya** — hapus
+> branch basi → `filter-repo` atas yang tersisa hidup → tiket Support — ternyata
+> benar sejak awal. Yang salah hanyalah §0, yang mengira langkah kedua bisa
+> dilewati.
+>
+> ### Status eksekusi per 2026-08-08
+>
+> - **Langkah 1 (hapus ref):** BELUM. Dicoba, **ditolak classifier izin** di
+>   sesi 2026-08-08 (sebelumnya `403` dari remote 2026-08-07). Daftar ter-verifikasi
+>   ulang: **25 ref**, bukan 26 — `claude/fase1-sesi4-handoff-1x8v1i` (`556c70f`,
+>   masih ada di remote, SHA tidak berubah) **tidak** menjangkau `f8faf12`, jadi
+>   ia false positive di §3. Tidak relevan lagi juga: kriteria `f8faf12` bukan
+>   kriteria yang benar.
+> - **Langkah 2 (verifikasi):** JANGAN jalankan versi §2 apa adanya. Ia menguji
+>   `f8faf12` dan **akan mengembalikan kosong sambil PII masih ada di `main`** —
+>   yaitu lampu hijau palsu. Versi yang benar ada di §5 baru di bawah.
+> - **Langkah 3 (tiket Support):** BELUM, dan tidak boleh dibuka sebagai
+>   "ref sudah dihapus" sampai rewrite selesai.
+>
+> **Sampai rewrite `main` selesai: JANGAN laporkan PII bersih.** Menghapus 25 ref
+> lalu menyebut O47b selesai adalah laporan palsu KETIGA untuk masalah yang sama.
 
-## 0. Temuan yang MENGUBAH rencananya — `main` tidak memuat PII
+## 0. ~~Temuan yang MENGUBAH rencananya — `main` tidak memuat PII~~ (DIBATALKAN — lihat koreksi di atas)
+
+> ⚠️ Bagian ini dipertahankan apa adanya karena ia menjelaskan bagaimana
+> kesimpulan yang salah terbentuk, dan §1/§3 masih memuat data yang berguna.
+> **Kesimpulannya tidak berlaku.**
 
 Rencana (b) berdiri di atas asumsi bahwa `main` memuat commit PII `f8faf12`,
 sehingga scrub butuh `git filter-repo` + force-push + re-clone semua
@@ -203,3 +276,60 @@ git for-each-ref --format='%(objectname) %(refname:short)' refs/remotes/origin |
     [ "$(git rev-list --count origin/main..$ref)" = "0" ] && echo "$sha $ref"
   done
 ```
+
+## 5. Verifikasi yang BENAR (2026-08-08) — pakai ini, bukan §2 Langkah 2
+
+§2 Langkah 2 menguji `f8faf12`, penanda yang salah. Uji **blob PII-nya sendiri**.
+
+### 5.1 Dapatkan blob PII (jangan hardcode dari ingatan)
+
+```
+git rev-parse 22af45b^ >/dev/null || git fetch origin
+git ls-tree -r 22af45b^ -- backend/testdata/import_samples/
+```
+
+Empat yang membawa data orang: `employees_cdps.csv`, `employees_from_hris.csv`,
+`employees_uat.csv`, `nik_email.csv`. (`README.md`, `hris_karyawan.csv`,
+`layered_roles_uat.csv`, `role_mappings_uat.csv` juga di sana — periksa
+isinya sebelum memutuskan mana yang PII; `nik_email.csv` namanya sudah cukup
+menjelaskan.)
+
+### 5.2 Ref mana yang masih menjangkau blob itu
+
+```
+git fetch origin --prune
+for blob in <sha1> <sha2> <sha3> <sha4>; do
+  git for-each-ref --format='%(refname:short)' refs/remotes/origin | while read r; do
+    git rev-list "$r" --objects 2>/dev/null | grep -q "^$blob " && echo "$blob $r"
+  done
+done
+```
+
+Per 2026-08-08 keluarannya memuat **`origin/main`**. Itu inti koreksi ini.
+
+### 5.3 Gerbang laporan — tiga syarat, semuanya wajib
+
+O47b hanya boleh disebut selesai kalau **ketiganya** benar:
+
+1. §5.2 mengembalikan **kosong** untuk keempat blob, `origin/main` termasuk;
+2. `git log --all --diff-filter=A -- backend/testdata/import_samples/` kosong
+   (tidak ada jalur lain yang pernah menambahkannya kembali);
+3. Support sudah menjalankan gc — tanpa ini, SHA yang tersimpan di halaman PR
+   lama masih membuka blob-nya lewat URL commit langsung.
+
+Syarat (1) **tidak bisa** dipenuhi tanpa menulis ulang histori `main`.
+
+### 5.4 Kenapa rewrite-nya butuh orang, bukan sesi agen
+
+`filter-repo` + force-push atas `main` mengubah SHA setiap commit sesudah titik
+sentuh. Yang harus dikoordinasikan **sebelum** dijalankan:
+
+- setiap kontributor & setiap worktree/CI cache harus re-clone; klon lama yang
+  di-`git pull` akan menghidupkan kembali objek lama;
+- **PR terbuka mati** — per 2026-08-08 itu **#107**; merge dulu atau terima ia
+  harus dibuka ulang;
+- branch protection `main` harus dilonggarkan sementara lalu dipasang kembali;
+- deployment Vercel yang menunjuk SHA lama berhenti bisa di-redeploy.
+
+Karena itu ia bukan langkah yang boleh diambil sesi agen atas inisiatif sendiri,
+bahkan dengan izin push — biayanya jatuh ke orang lain, bukan ke repo.
