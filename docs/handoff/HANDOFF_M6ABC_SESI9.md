@@ -17,8 +17,10 @@
 >    itu, karena ia memeriksa apakah path yang dipanggil FE dilayani, bukan
 >    apakah ada manusia yang bisa sampai ke sana. Lihat §8.
 >
-> ⚠️ **Migrasi A-09b masih BELUM diterapkan ke live.** #107 sudah merge, tapi
-> A-09b sendiri belum. Lihat §5 — urutannya tetap: merge dulu, `db push` sesudah.
+> ✅ **Live `CDPS SG` ≡ repo, diverifikasi lewat ISI.** #107 dan #108 keduanya
+> merge sesi ini, migrasi A-09b disusulkan sesudahnya, dan sidik jari struktural
+> **`d8daaa2506691ce206c15b5641464aac` atas 148 fakta identik** di live dan
+> lokal. Lihat §5.
 
 ## 0. Posisi persis — VERIFIKASI SEBELUM MENYALIN
 
@@ -28,13 +30,13 @@ Empat perintah yang membuat tiga sesi terakhir tidak perlu kehilangan waktu:
 
 | | |
 |---|---|
-| Branch | `claude/sesi6-migration-handoff-1afolk` — sudah **di-rebase ke `main`**, tidak lagi stacked |
-| `main` | `bc7aa4e` — **PR #107 ter-merge sesi ini**. 71 migrasi |
-| PR terbuka | Untuk branch ini (A-09b + A-13a). #107 sudah tidak terbuka |
+| Branch | `claude/sesi6-migration-handoff-1afolk` — sudah ter-merge ke `main` |
+| `main` | `c2dc953` — #107 lalu #108 ter-merge sesi ini. **72 migrasi** |
+| PR | **NOL terbuka.** #107 (`bc7aa4e`) dan #108 (`c2dc953`) keduanya ter-merge sesi ini |
 | Migrasi | **72 berkas** (71 dari #107 + `20260808040000_m6a_section_efghi`) |
 | Gate | tabel **76 → 81** · prefix 31 · mesin 16 · event 34 · `CATALOG_VERSION` 4 · `role_mappings` 12 |
 | Test | domain **919 hijau + 1 skipped** · `apps/api` **324** · `packages/core` **118** · `packages/db` **15** · `web-internal` **128** (+12) · 4 invariant SQL · `db-rebuild` **72 migrasi** dari nol · lint + typecheck + build Next bersih |
-| Live `CDPS SG` | **Sinkron dengan `main`, tertinggal satu migrasi dari branch ini.** Itu arah yang benar — §5 |
+| Live `CDPS SG` | ✅ **≡ repo**, 73 baris riwayat. Sidik jari `d8daaa25…` \| 148 fakta **identik** dengan lokal — dibandingkan isinya (definisi constraint, indexdef, predikat policy, tipe kolom), bukan jumlahnya. Itu pelajaran O59 dipakai, bukan diulang |
 | Menggantung | Kode: **NOL**. Keputusan: **O60** (detektor ledger O48) · dan yang diwarisi: O47b rewrite · O42-b · O59-b · O24 · O45 · X-06 · X-12. **X-14 ✅ dijawab pemilik** |
 
 ### 0.1 Skor — dan kenapa angkanya menyesatkan
@@ -190,8 +192,11 @@ Live `CDPS SG` sinkron dengan **`main`** (72 baris riwayat: 71 migrasi repo +
 satu baris yatim `20260808024726` yang efek skemanya sudah dibongkar O59).
 #107 sudah merge sesi ini, jadi `main` ≡ live.
 
-Migrasi A-09b **tidak** diterapkan, dan alasannya bukan kehati-hatian umum:
-**PR-nya belum merge.** Menerapkan migrasi keempat ke live sementara `main`
+> ✅ **Sudah dijalankan sesi ini, sesudah #108 merge.** Yang di bawah adalah
+> alasan urutannya, dan ia tetap berlaku untuk migrasi berikutnya.
+
+Migrasi A-09b tidak diterapkan **sebelum PR-nya merge**, dan alasannya bukan
+kehati-hatian umum. Menerapkan migrasi keempat ke live sementara `main`
 masih tertinggal tiga menghasilkan keadaan "live lebih maju dari `main`" — dan
 itu **persis bentuk O38, O59, dan tiga ronde drift sebelumnya**.
 
@@ -199,17 +204,31 @@ Arah yang aman adalah kebalikannya: **live boleh tertinggal dari repo** (bisa
 dideteksi, bisa disusul dengan `db push`); live yang **mendahului** repo adalah
 drift yang hanya ketahuan kalau ada yang membandingkan DDL satu per satu.
 
-**Urutan yang benar:** ~~merge #107~~ ✅ → merge PR branch ini → baru `db push`
-ke live, lalu sidik jari struktural (SESI6 §2). Jangan dibalik.
+**Urutan yang dijalankan:** merge #107 ✅ → merge #108 ✅ → `apply_migration` ✅ →
+sidik jari struktural ✅. Jangan dibalik untuk migrasi berikutnya.
+
+**Guard-nya dibuktikan lebih dulu, bukan diasumsikan:** live diperiksa `strategi`
+**0 baris** dan `strategi_version` **0 baris** SEBELUM `ck_strver_trigger_set`
+dipasang — CHECK baru atas tabel append-only yang sudah berisi baris melanggar
+akan menggagalkan seluruh migrasi di tengah jalan.
+
+⚠️ **Satu catatan kejujuran:** SQL yang tersimpan di riwayat migrasi live adalah
+versi yang **komentar penjelasnya dipangkas** (payload `apply_migration` punya
+batas praktis). **Seluruh DDL dan seluruh `COMMENT ON` identik** — dan itu
+dibuktikan sidik jari 148 fakta di atas, yang membandingkan definisi constraint,
+`indexdef`, predikat policy, dan tipe kolom. Yang berbeda hanya komentar `--`
+di dalam teks migrasi yang tersimpan, bukan skemanya.
 
 ## 6. Apa yang tersisa — dan urutannya
 
 ### 6.1 Lebih dulu daripada fitur apa pun
 
-1. ~~**Merge PR #107**~~ ✅ **SELESAI sesi ini** (`bc7aa4e`). Itu juga yang
-   membuka O47b: rewrite histori sekarang tidak lagi menunggu PR itu.
-2. **Review + merge PR branch ini** (A-09b + A-13a). Sesudah itu `db push`
-   migrasi A-09b ke live — §5.
+~~Keduanya~~ ✅ **SELESAI sesi ini.** #107 (`bc7aa4e`) dan #108 (`c2dc953`)
+ter-merge, migrasi disusulkan ke live, sidik jari cocok.
+
+**Konsekuensi yang perlu dibaca:** O47b tidak lagi menunggu PR mana pun. Nol PR
+terbuka, jadi rewrite histori sekarang hanya menunggu **jendela waktu pemilik**
+— itu satu-satunya yang tersisa di depannya.
 
 ### 6.2 Butuh izin/orang, bukan kode
 
