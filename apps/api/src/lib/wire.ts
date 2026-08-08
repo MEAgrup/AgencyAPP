@@ -3194,6 +3194,12 @@ export interface StrategiWire {
   skenario_mundur: string | null;
   /** H-4 — §4.1 HARD-INTERNAL, same caveat as `sanggahan_*` above. */
   kondisi_stop_scope: string | null;
+  // Section G/I header fields (A-09b). G-1/G-2 are child rows below.
+  review_klien_frekuensi: string | null;
+  review_klien_format: string | null;
+  review_klien_pic: string | null;
+  review_internal_frekuensi: string | null;
+  metrik_laporan_klien: string[];
 }
 
 export function strategiToWire(s: strategi.Strategi): StrategiWire {
@@ -3257,6 +3263,11 @@ export function strategiToWire(s: strategi.Strategi): StrategiWire {
     urutan_eksekusi_alasan: s.urutanEksekusiAlasan,
     skenario_mundur: s.skenarioMundur,
     kondisi_stop_scope: s.kondisiStopScope,
+    review_klien_frekuensi: s.reviewKlienFrekuensi,
+    review_klien_format: s.reviewKlienFormat,
+    review_klien_pic: s.reviewKlienPic,
+    review_internal_frekuensi: s.reviewInternalFrekuensi,
+    metrik_laporan_klien: s.metrikLaporanKlien,
   };
 }
 
@@ -3291,6 +3302,9 @@ export interface StrategiChannelWire {
   periode_mulai: string | null;
   periode_akhir: string | null;
   alasan_periode_pendek: string | null;
+  /** E-2 (A-09b) — Section E, stored per channel because that is its grain. */
+  prioritas: string | null;
+  prioritas_alasan: string | null;
   catatan_periode_pendek: string | null;
   // Section B groups B-2 … B-9 (A-06). One figure per channel; the monthly ones
   // (B-1, B-5.1/5.2) are rows in `baseline`.
@@ -3428,6 +3442,56 @@ export interface StrategiRiskWire {
   urutan: number;
 }
 
+/** E-12 — client dependency during execution (A-09b). */
+export interface StrategiKetergantunganWire {
+  id: number;
+  item: string;
+  kapan: string;
+  konsekuensi: string;
+  urutan: number;
+}
+
+/** G-1 — work phase (A-09b). */
+export interface StrategiFaseWire {
+  id: number;
+  nama: string;
+  tanggal_mulai: string;
+  tanggal_akhir: string;
+  tujuan: string;
+  kriteria_lulus: string;
+  urutan: number;
+}
+
+/** G-2 — big date inside the contract window (A-09b). */
+export interface StrategiTanggalBesarWire {
+  id: number;
+  tanggal: string;
+  nama: string;
+  peran: string;
+  urutan: number;
+}
+
+/**
+ * H-2 — a declared revision trigger (A-09b).
+ * `ambang` is a COUNT (percent or days), not money, so it stays a number — the
+ * string rule on this boundary is specifically about rupiah.
+ */
+export interface StrategiTriggerRevisiWire {
+  id: number;
+  kode: string;
+  ambang: number | null;
+  catatan: string | null;
+  urutan: number;
+}
+
+/** I-2 + I-4 — Brief-receiving division, dispatch position, division note. */
+export interface StrategiDispatchWire {
+  id: number;
+  divisi: string;
+  urutan: number;
+  catatan: string | null;
+}
+
 export interface StrategiEventWire {
   versi_no: number;
   peristiwa: string;
@@ -3454,6 +3518,12 @@ export interface StrategiDetailWire extends StrategiWire {
   pillars: StrategiPillarWire[];
   resources: StrategiResourceWire[];
   risks: StrategiRiskWire[];
+  // A-09b — Section E-12 / G-1 / G-2 / H-2 / I-2+I-4.
+  ketergantungan: StrategiKetergantunganWire[];
+  fase: StrategiFaseWire[];
+  tanggal_besar: StrategiTanggalBesarWire[];
+  trigger_revisi: StrategiTriggerRevisiWire[];
+  dispatch: StrategiDispatchWire[];
   riwayat: StrategiEventWire[];
 }
 
@@ -3478,6 +3548,8 @@ export function strategiDetailToWire(d: strategi.StrategiDetail): StrategiDetail
       periode_mulai: c.periodeMulai,
       periode_akhir: c.periodeAkhir,
       alasan_periode_pendek: c.alasanPeriodePendek,
+      prioritas: c.prioritas,
+      prioritas_alasan: c.prioritasAlasan,
       catatan_periode_pendek: c.catatanPeriodePendek,
       pengunjung_per_bulan: c.pengunjungPerBulan,
       conversion_rate_persen: c.conversionRatePersen,
@@ -3666,6 +3738,42 @@ export function strategiDetailToWire(d: strategi.StrategiDetail): StrategiDetail
       pic: r.pic,
       urutan: r.urutan,
     })),
+    ketergantungan: d.ketergantungan.map((k) => ({
+      id: k.id,
+      item: k.item,
+      kapan: k.kapan,
+      konsekuensi: k.konsekuensi,
+      urutan: k.urutan,
+    })),
+    fase: d.fase.map((f) => ({
+      id: f.id,
+      nama: f.nama,
+      tanggal_mulai: f.tanggalMulai,
+      tanggal_akhir: f.tanggalAkhir,
+      tujuan: f.tujuan,
+      kriteria_lulus: f.kriteriaLulus,
+      urutan: f.urutan,
+    })),
+    tanggal_besar: d.tanggalBesar.map((t) => ({
+      id: t.id,
+      tanggal: t.tanggal,
+      nama: t.nama,
+      peran: t.peran,
+      urutan: t.urutan,
+    })),
+    trigger_revisi: d.triggerRevisi.map((t) => ({
+      id: t.id,
+      kode: t.kode,
+      ambang: t.ambang,
+      catatan: t.catatan,
+      urutan: t.urutan,
+    })),
+    dispatch: d.dispatch.map((x) => ({
+      id: x.id,
+      divisi: x.divisi,
+      urutan: x.urutan,
+      catatan: x.catatan,
+    })),
     riwayat: d.riwayat.map((e) => ({
       versi_no: e.versiNo,
       peristiwa: e.peristiwa,
@@ -3839,6 +3947,8 @@ export function strategiChannelsFromWire(v: unknown): strategi.ChannelInput[] {
     periodeMulai: strOrNull(c.periode_mulai),
     periodeAkhir: strOrNull(c.periode_akhir),
     alasanPeriodePendek: strOrNull(c.alasan_periode_pendek),
+    prioritas: strOrNull(c.prioritas) as strategi.ChannelPrioritas | null,
+    prioritasAlasan: strOrNull(c.prioritas_alasan),
     catatanPeriodePendek: strOrNull(c.catatan_periode_pendek),
     // Section B (A-06). Numbers stay `null` when absent for the same reason the
     // baseline months do: Rule 5 distinguishes blank from `0`, and coercing here
@@ -4069,6 +4179,78 @@ export function strategiRisksFromWire(v: unknown): strategi.RiskInput[] {
     pic: str(r.pic),
     urutan: numOrNull(r.urutan) ?? i,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Section E-12 / G / H-2 / I inbound parsers (A-09b)
+// ---------------------------------------------------------------------------
+
+/** Inbound: E-12 client dependencies. */
+export function strategiKetergantunganFromWire(v: unknown): strategi.KetergantunganInput[] {
+  return asRecords(v).map((k, i) => ({
+    item: str(k.item),
+    kapan: str(k.kapan),
+    konsekuensi: str(k.konsekuensi),
+    urutan: numOrNull(k.urutan) ?? i,
+  }));
+}
+
+/**
+ * Inbound: Section G — G-1 phases, G-2 big dates, G-3/G-4 review cadence.
+ *
+ * A missing `fase`/`tanggal_besar` key parses to `[]`, which CLEARS the list.
+ * That is the same contract every other list endpoint here has (pillars, risks,
+ * akses): the body is the new state, not a patch. The submit gate is what
+ * reports an empty G-1 as `G-1` still missing.
+ */
+export function strategiKalenderFromWire(v: unknown): strategi.KalenderInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    fase: asRecords(b.fase).map((f, i) => ({
+      nama: str(f.nama),
+      tanggalMulai: str(f.tanggal_mulai),
+      tanggalAkhir: str(f.tanggal_akhir),
+      tujuan: str(f.tujuan),
+      kriteriaLulus: str(f.kriteria_lulus),
+      urutan: numOrNull(f.urutan) ?? i,
+    })),
+    tanggalBesar: asRecords(b.tanggal_besar).map((t, i) => ({
+      tanggal: str(t.tanggal),
+      nama: str(t.nama),
+      peran: str(t.peran),
+      urutan: numOrNull(t.urutan) ?? i,
+    })),
+    reviewKlienFrekuensi: strOrNull(b.review_klien_frekuensi),
+    reviewKlienFormat: strOrNull(b.review_klien_format),
+    reviewKlienPic: strOrNull(b.review_klien_pic),
+    reviewInternalFrekuensi: strOrNull(b.review_internal_frekuensi),
+  };
+}
+
+/** Inbound: H-2 declared revision triggers. */
+export function strategiTriggerRevisiFromWire(v: unknown): strategi.TriggerRevisiInput[] {
+  return asRecords(v).map((t, i) => ({
+    kode: str(t.kode) as strategi.TriggerRevisiCode,
+    // A COUNT, not money — see StrategiTriggerRevisiWire.
+    ambang: numOrNull(t.ambang),
+    catatan: strOrNull(t.catatan),
+    urutan: numOrNull(t.urutan) ?? i,
+  }));
+}
+
+/** Inbound: Section I — I-2 dispatch order, I-3 report metrics, I-4 notes. */
+export function strategiHandoffFromWire(v: unknown): strategi.HandoffInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    dispatch: asRecords(b.dispatch).map((d, i) => ({
+      divisi: str(d.divisi) as strategi.DispatchDivision,
+      urutan: numOrNull(d.urutan) ?? i + 1,
+      catatan: strOrNull(d.catatan),
+    })),
+    metrikLaporanKlien: Array.isArray(b.metrik_laporan_klien)
+      ? (b.metrik_laporan_klien.map((m) => String(m)) as strategi.LaporanMetric[])
+      : [],
+  };
 }
 
 /** Inbound: the Rule 13 revision declaration (trigger + reason + broken assumptions). */

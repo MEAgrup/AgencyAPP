@@ -1,0 +1,491 @@
+'use client';
+
+/**
+ * A-13 — the Strategi form (M6A §4 Section A→J).
+ *
+ * ⚠️ **This is `/account/strategi/{id}`, not `/account/strategies/{id}`.** The
+ * latter is the OLD M6 §4 entity (`strategy_plan` / `STR-`) and is a different
+ * record with a different lifecycle. They are one letter apart on purpose —
+ * nothing links between them, and neither should.
+ *
+ * ## What this page is responsible for
+ *
+ * The shell: load the record, chapter it into the ten sections §4 defines, show
+ * the live gap count §5 step 5 asks for, autosave every 20s (§7), and run the
+ * status transitions. Each section's fields live in its own component.
+ *
+ * ## Three shapes that come from the PRD, not from taste
+ *
+ * 1. **The gap count is server-derived, always.** It comes from
+ *    `GET /strategi/{id}/kekurangan` and is re-fetched after every save. The
+ *    form never decides for itself whether a field is complete: the submit gate
+ *    is `checkCompleteness` inside the submit transaction, and a second copy of
+ *    those rules here would eventually disagree with it — the AM would see "siap
+ *    diajukan" and get `[data tidak lengkap …]`.
+ *
+ * 2. **Sections save independently.** Each section has its own endpoint, and
+ *    each endpoint REPLACES its slice. Saving Section G never touches Section H,
+ *    so a half-finished section cannot take another one down with it.
+ *
+ * 3. **Leaving a section flushes it first.** Switching chapters with a pending
+ *    autosave would drop the edit — the draft state is per-section and is
+ *    rebuilt from the server response on load.
+ *
+ * Sections A, B, C, E and F are not wired yet (A-13b). Their nav rows still show
+ * their gap counts, because a section you cannot open yet still has to be
+ * countable — otherwise the total on the submit button would not add up and the
+ * AM would have no way to explain the difference.
+ */
+
+import { use, useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { errorMessage } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
+import { isAccountLead, isAccountStaff, isReadOnlyOD } from '@/lib/account';
+import StatusBadge from '@/components/StatusBadge';
+import SectionD, { kpiDraftOf, type KpiDraft } from '@/components/strategi/SectionD';
+import SectionG, { kalenderDraftOf, type KalenderDraft } from '@/components/strategi/SectionG';
+import SectionH, {
+  riskDraftOf,
+  triggerDraftOf,
+  type NarasiHDraft,
+  type RiskDraft,
+  type TriggerDraft,
+} from '@/components/strategi/SectionH';
+import SectionI, { handoffDraftOf, type HandoffDraft } from '@/components/strategi/SectionI';
+import {
+  STRATEGI_SECTIONS,
+  groupKekurangan,
+  isEditable,
+  sectionLabel,
+  type Kekurangan,
+  type SectionKey,
+} from '@/lib/strategi-sections';
+import { AUTOSAVE_MS, useAutosave } from '@/lib/use-autosave';
+import {
+  approveStrategi,
+  getStrategi,
+  returnStrategi,
+  saveStrategiHandoff,
+  saveStrategiKalender,
+  saveStrategiKpi,
+  saveStrategiNarasi,
+  saveStrategiRisks,
+  saveStrategiTriggerRevisi,
+  strategiKekurangan,
+  submitStrategi,
+  type StrategiDetail,
+} from '@/lib/strategi';
+
+/** The sections this page can open today. The rest are A-13b. */
+const WIRED: SectionKey[] = ['D', 'G', 'H', 'I'];
+
+interface Drafts {
+  kpi: KpiDraft;
+  kalender: KalenderDraft;
+  risks: RiskDraft[];
+  triggers: TriggerDraft[];
+  narasiH: NarasiHDraft;
+  handoff: HandoffDraft;
+}
+
+function draftsOf(d: StrategiDetail): Drafts {
+  return {
+    kpi: kpiDraftOf(d),
+    kalender: kalenderDraftOf(d),
+    risks: riskDraftOf(d),
+    triggers: triggerDraftOf(d),
+    narasiH: {
+      skenario_mundur: d.skenario_mundur ?? '',
+      kondisi_stop_scope: d.kondisi_stop_scope ?? '',
+    },
+    handoff: handoffDraftOf(d),
+  };
+}
+
+export default function StrategiFormPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const { role } = useAuth();
+  const readOnly = isReadOnlyOD(role);
+  // Section writes belong to the owning AM or a Director. Ownership itself is
+  // NOT checked here — the response carries no owner field, and the server is
+  // the authority either way (CLAUDE.md #6). This only decides whether to render
+  // controls that would otherwise 403 on every click.
+  const canWrite = !readOnly && (isAccountStaff(role) || isAccountLead(role) || !!role?.director);
+  const canApprove = !readOnly && (isAccountLead(role) || !!role?.director);
+
+  const [detail, setDetail] = useState<StrategiDetail | null>(null);
+  const [kekurangan, setKekurangan] = useState<Kekurangan[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const [active, setActive] = useState<SectionKey>('D');
+  const [drafts, setDrafts] = useState<Drafts | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const [returnNote, setReturnNote] = useState('');
+  const [acting, setActing] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [d, k] = await Promise.all([getStrategi(id), strategiKekurangan(id)]);
+      setDetail(d);
+      setDrafts(draftsOf(d));
+      setKekurangan(k);
+      setDirty(false);
+    } catch (err) {
+      setLoadError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const editable = detail !== null && isEditable(detail.status) && canWrite;
+
+  /**
+   * Saves the ACTIVE section only.
+   *
+   * Sending every section on every tick would make one invalid row anywhere
+   * block the save of the section the AM is actually in — and, worse, would
+   * rewrite sections the AM never opened with whatever this page last loaded.
+   */
+  const saveActive = useCallback(async () => {
+    if (!drafts || !editable) return;
+    setSaving(true);
+    setError(null);
+    try {
+      let next: StrategiDetail;
+      if (active === 'D') {
+        next = await saveStrategiKpi(id, drafts.kpi);
+      } else if (active === 'G') {
+        next = await saveStrategiKalender(id, drafts.kalender);
+      } else if (active === 'H') {
+        // Section H spans three endpoints because its parts have three
+        // different grains (risk rows, trigger rows, header paragraphs). They
+        // run in sequence, not in parallel: each response is a full
+        // StrategiDetail, and racing them would leave the page holding whichever
+        // reply landed last as if it were the whole truth.
+        await saveStrategiRisks(id, drafts.risks);
+        await saveStrategiTriggerRevisi(
+          id,
+          drafts.triggers.map((t) => ({
+            kode: t.kode,
+            ambang: t.ambang.trim() === '' ? null : Number(t.ambang),
+            catatan: t.catatan.trim() === '' ? null : t.catatan.trim(),
+          })),
+        );
+        // H-3/H-4 share the narasi endpoint with E-1/E-13, so the two Section E
+        // fields must be sent back unchanged — the endpoint replaces all four,
+        // and omitting them would blank Section E from a Section H save.
+        next = await saveStrategiNarasi(id, {
+          growth_thesis: detail?.growth_thesis ?? null,
+          urutan_eksekusi_alasan: detail?.urutan_eksekusi_alasan ?? null,
+          skenario_mundur: drafts.narasiH.skenario_mundur,
+          kondisi_stop_scope: drafts.narasiH.kondisi_stop_scope,
+        });
+      } else if (active === 'I') {
+        next = await saveStrategiHandoff(id, {
+          dispatch: drafts.handoff.dispatch.map((d, i) => ({
+            divisi: d.divisi,
+            urutan: i + 1,
+            catatan: d.catatan.trim() === '' ? null : d.catatan.trim(),
+          })),
+          metrik_laporan_klien: drafts.handoff.metrik_laporan_klien,
+        });
+      } else {
+        return;
+      }
+      setDetail(next);
+      setDrafts(draftsOf(next));
+      setDirty(false);
+      setSavedAt(new Date().toLocaleTimeString('id-ID'));
+      setKekurangan(await strategiKekurangan(id));
+    } catch (err) {
+      // `dirty` stays set: the edit is still unsaved, the banner says so, and
+      // the next change re-arms autosave. Clearing it here would show a clean
+      // form over an unsaved change.
+      setError(errorMessage(err));
+      throw err;
+    } finally {
+      setSaving(false);
+    }
+  }, [active, drafts, editable, id, detail]);
+
+  const { flush } = useAutosave({ dirty, enabled: editable, save: saveActive });
+
+  const patch = useCallback(<K extends keyof Drafts>(key: K, value: Drafts[K]) => {
+    setDrafts((d) => (d === null ? d : { ...d, [key]: value }));
+    setDirty(true);
+  }, []);
+
+  const goTo = useCallback(
+    async (key: SectionKey) => {
+      if (key === active) return;
+      if (dirty && editable) {
+        try {
+          await flush();
+        } catch {
+          // Save failed; stay put so the AM sees the error next to the fields
+          // that caused it rather than on a section they did not edit.
+          return;
+        }
+      }
+      setActive(key);
+      setError(null);
+    },
+    [active, dirty, editable, flush],
+  );
+
+  const grouped = useMemo(() => groupKekurangan(kekurangan), [kekurangan]);
+
+  const act = useCallback(
+    async (fn: () => Promise<unknown>) => {
+      setActing(true);
+      setError(null);
+      try {
+        await fn();
+        await load();
+      } catch (err) {
+        setError(errorMessage(err));
+      } finally {
+        setActing(false);
+      }
+    },
+    [load],
+  );
+
+  if (loading) return <p className="pageLoading">Memuat…</p>;
+  if (loadError) return <div className="alert alertError">{loadError}</div>;
+  if (!detail || !drafts) return <div className="alert alertError">[Strategi tidak ditemukan]</div>;
+
+  const total = kekurangan.length;
+
+  return (
+    <div className="stack">
+      <div className="card">
+        <div className="row" style={{ alignItems: 'center', gap: 12 }}>
+          <h1 style={{ margin: 0, fontSize: 20 }}>{detail.id}</h1>
+          <StatusBadge status={detail.status} />
+          <span className="muted">versi {detail.versi_no}</span>
+          <span style={{ flex: 1 }} />
+          <Link href={`/clients/${detail.client_id}`} className="btn btnGhost btnSm">
+            Klien
+          </Link>
+        </div>
+        <p className="muted" style={{ fontSize: 12, margin: '6px 0 0' }}>
+          Kontrak {detail.contract_id} · {detail.tanggal_mulai_kontrak} →{' '}
+          {detail.tanggal_akhir_kontrak} ({detail.durasi_kontrak_bulan} bulan)
+        </p>
+      </div>
+
+      {error && <div className="alert alertError">{error}</div>}
+
+      <div className="row" style={{ alignItems: 'flex-start', gap: 16 }}>
+        <nav className="card" style={{ width: 260, flexShrink: 0 }}>
+          <div className="cardHeader">Seksi</div>
+          <div className="stack" style={{ gap: 2 }}>
+            {STRATEGI_SECTIONS.map((s) => {
+              const n = grouped.get(s.key)?.length ?? 0;
+              const wired = WIRED.includes(s.key);
+              return (
+                <button
+                  key={s.key}
+                  type="button"
+                  className={active === s.key ? 'btn btnSecondary btnSm' : 'btn btnGhost btnSm'}
+                  style={{ justifyContent: 'space-between', display: 'flex', width: '100%' }}
+                  onClick={() => goTo(s.key)}
+                  disabled={!wired}
+                  title={wired ? undefined : 'Form seksi ini belum dibuat (A-13b)'}
+                >
+                  <span style={{ opacity: wired ? 1 : 0.55 }}>
+                    {s.key}. {s.label}
+                  </span>
+                  {n > 0 && <span className="badge badge-amber">{n}</span>}
+                </button>
+              );
+            })}
+            {/* Only rendered when something landed in it — an unclassified gap
+                must never be invisible, because it is counted on the submit
+                button and the AM has no other way to find it. */}
+            {(grouped.get('lain')?.length ?? 0) > 0 && (
+              <div className="alert alertError" style={{ fontSize: 12, marginTop: 8 }}>
+                {grouped.get('lain')!.length} kekurangan tidak dikenali seksinya — laporkan ke tim
+                sistem:
+                <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                  {grouped.get('lain')!.map((k) => (
+                    <li key={k.kode}>
+                      <code>{k.kode}</code> {k.pesan}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </nav>
+
+        <div className="stack" style={{ flex: 1 }}>
+          <div className="card">
+            <div className="row" style={{ alignItems: 'center', gap: 8 }}>
+              <div className="cardHeader" style={{ flex: 1, marginBottom: 0 }}>
+                {sectionLabel(active)}
+              </div>
+              {editable && (
+                <>
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    {saving
+                      ? 'Menyimpan…'
+                      : dirty
+                        ? `Belum tersimpan — otomatis dalam ${AUTOSAVE_MS / 1000} detik`
+                        : savedAt
+                          ? `Tersimpan ${savedAt}`
+                          : ''}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btnSecondary btnSm"
+                    disabled={!dirty || saving}
+                    onClick={() => void flush().catch(() => undefined)}
+                  >
+                    Simpan
+                  </button>
+                </>
+              )}
+            </div>
+
+            {!editable && (
+              <div className="alert alertInfo" style={{ fontSize: 13 }}>
+                {isEditable(detail.status)
+                  ? 'Anda tidak punya hak ubah pada Strategi ini.'
+                  : `Strategi berstatus ${detail.status} — Section A→I hanya bisa diubah saat Draft atau Draft Revisi.`}
+              </div>
+            )}
+
+            <div style={{ marginTop: 12 }}>
+              {active === 'D' && (
+                <SectionD
+                  detail={detail}
+                  draft={drafts.kpi}
+                  onChange={(p) => patch('kpi', { ...drafts.kpi, ...p })}
+                  disabled={!editable}
+                />
+              )}
+              {active === 'G' && (
+                <SectionG
+                  detail={detail}
+                  draft={drafts.kalender}
+                  onChange={(p) => patch('kalender', { ...drafts.kalender, ...p })}
+                  disabled={!editable}
+                />
+              )}
+              {active === 'H' && (
+                <SectionH
+                  risks={drafts.risks}
+                  triggers={drafts.triggers}
+                  narasi={drafts.narasiH}
+                  onRisks={(rows) => patch('risks', rows)}
+                  onTriggers={(rows) => patch('triggers', rows)}
+                  onNarasi={(p) => patch('narasiH', { ...drafts.narasiH, ...p })}
+                  disabled={!editable}
+                />
+              )}
+              {active === 'I' && (
+                <SectionI
+                  draft={drafts.handoff}
+                  onChange={(p) => patch('handoff', { ...drafts.handoff, ...p })}
+                  disabled={!editable}
+                />
+              )}
+              {!WIRED.includes(active) && (
+                <p className="muted">Form seksi ini belum dibuat (A-13b).</p>
+              )}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="cardHeader">
+              Kekurangan{' '}
+              {total === 0 ? (
+                <span className="badge badge-green">lengkap</span>
+              ) : (
+                <span className="badge badge-amber">{total}</span>
+              )}
+            </div>
+            {total === 0 ? (
+              <p className="muted" style={{ fontSize: 13 }}>
+                Semua pertanyaan wajib sudah terisi.
+              </p>
+            ) : (
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+                {(grouped.get(active) ?? []).map((k) => (
+                  <li key={k.kode}>
+                    <code>{k.kode}</code> {k.pesan}
+                  </li>
+                ))}
+                {(grouped.get(active)?.length ?? 0) === 0 && (
+                  <li className="muted">Tidak ada di seksi ini — lihat angka di navigasi kiri.</li>
+                )}
+              </ul>
+            )}
+
+            <div className="row" style={{ gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+              {editable && (
+                <button
+                  type="button"
+                  className="btn btnPrimary"
+                  disabled={acting || dirty || saving}
+                  onClick={() => void act(() => submitStrategi(id))}
+                  // Not disabled on `total > 0`: the count is a snapshot, and the
+                  // submit transaction re-runs the gate anyway. Blocking here
+                  // would hide the server's exact message — the one thing that
+                  // tells the AM what to fix.
+                  title={
+                    total > 0
+                      ? `${total} pertanyaan wajib masih kosong — pengajuan akan ditolak`
+                      : undefined
+                  }
+                >
+                  Ajukan{total > 0 ? ` (${total} kurang)` : ''}
+                </button>
+              )}
+              {canApprove && detail.status === 'Diajukan' && (
+                <>
+                  <button
+                    type="button"
+                    className="btn btnPrimary"
+                    disabled={acting}
+                    onClick={() => void act(() => approveStrategi(id))}
+                  >
+                    Setujui
+                  </button>
+                  <input
+                    placeholder="Catatan pengembalian (wajib)"
+                    value={returnNote}
+                    onChange={(e) => setReturnNote(e.target.value)}
+                    style={{ flex: 1, minWidth: 220 }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btnDanger"
+                    disabled={acting || returnNote.trim() === ''}
+                    onClick={() => void act(() => returnStrategi(id, returnNote.trim()))}
+                  >
+                    Kembalikan
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

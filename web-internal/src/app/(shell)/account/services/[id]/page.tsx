@@ -28,6 +28,7 @@ import {
   type Strategy,
 } from '@/lib/account';
 import StatusBadge from '@/components/StatusBadge';
+import { listStrategi, type Strategi } from '@/lib/strategi';
 
 export default function ServiceHubPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -53,6 +54,11 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
 
   const [strategy, setStrategy] = useState<Strategy | null>(null);
   const [strategyError, setStrategyError] = useState<string | null>(null);
+  // M6A Strategi (STRG-) — a different entity from `strategy` above; see the
+  // card comment. Listed rather than singled out because Rule 13 makes versions
+  // ROWS, so a Service legitimately has several.
+  const [strategiList, setStrategiList] = useState<Strategi[]>([]);
+  const [strategiError, setStrategiError] = useState<string | null>(null);
 
   // Create Strategy form
   const [sObjective, setSObjective] = useState('');
@@ -135,11 +141,21 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
     }
   }, [id]);
 
+  const loadStrategi = useCallback(async () => {
+    setStrategiError(null);
+    try {
+      setStrategiList(await listStrategi(id));
+    } catch (err) {
+      setStrategiError(errorMessage(err));
+    }
+  }, [id]);
+
   useEffect(() => {
     load();
     loadService();
     loadStrategy();
-  }, [load, loadService, loadStrategy]);
+    loadStrategi();
+  }, [load, loadService, loadStrategy, loadStrategi]);
 
   function toggleSDivision(div: string) {
     setSDivisions((prev) => (prev.includes(div) ? prev.filter((d) => d !== div) : [...prev, div]));
@@ -364,6 +380,36 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
           </div>
         ) : (
           <p className="muted">Belum ada Strategy &amp; Plan untuk layanan ini.</p>
+        )}
+      </section>
+
+      {/* M6A Strategi (STRG-) — the entity M6A §4 defines, and a DIFFERENT record
+          from "Strategy & Plan" above (M6 §4, `strategy_plan` / `STR-`). They are
+          shown as two cards rather than merged because merging them would imply
+          one supersedes the other, and nothing in either module says that.
+
+          Without this card the whole M6A form is unreachable: `/account/strategi/{id}`
+          has no other entry point, and a page nobody can navigate to reads as
+          "built" while being unusable. */}
+      <section className="card">
+        <div className="cardHeader">
+          <h2>Strategi M6A</h2>
+        </div>
+        {strategiError && <div className="alert alertError" role="alert">{strategiError}</div>}
+        {strategiList.length === 0 ? (
+          <p className="muted">Belum ada Strategi M6A untuk layanan ini.</p>
+        ) : (
+          <div className="stack" style={{ gap: 6 }}>
+            {strategiList.map((st) => (
+              <div key={st.id} className="row" style={{ justifyContent: 'space-between' }}>
+                <div>
+                  <Link href={`/account/strategi/${st.id}`}>{st.id}</Link>
+                  <div className="muted" style={{ fontSize: 12 }}>versi {st.versi_no}</div>
+                </div>
+                <StatusBadge status={st.status} />
+              </div>
+            ))}
+          </div>
         )}
       </section>
 
