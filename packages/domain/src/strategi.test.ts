@@ -2154,8 +2154,10 @@ describeDb('Section D — D-7 Sanggahan Target (Rule 19, A-08)', () => {
       targetRealistis: '320000000.00',
     });
     expect(after.sanggahanAlasan).toContain('tidak realistis');
-    expect(after.sanggahanAngkaPembanding).toBe(180000000);
-    expect(after.sanggahanTargetRealistis).toBe(320000000);
+    // Money stays a STRING end to end (integer minor units, frozen invariant) —
+    // the same representation as `targets[].nilaiFloor`, not a second one.
+    expect(after.sanggahanAngkaPembanding).toBe('180000000.00');
+    expect(after.sanggahanTargetRealistis).toBe('320000000.00');
     expect(after.sanggahanDiajukanOleh).toBe('ZZ-AM');
     expect(after.sanggahanDiajukanPada).not.toBeNull();
 

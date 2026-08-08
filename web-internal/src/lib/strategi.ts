@@ -301,8 +301,9 @@ export interface Strategi {
    * `null` across all five means no challenge was filed (D-7 is `O`).
    */
   sanggahan_alasan: string | null;
-  sanggahan_angka_pembanding: number | null;
-  sanggahan_target_realistis: number | null;
+  /** Money ⇒ string (integer minor units), formatted `Rp. X.XXX.XXX,00` for display. */
+  sanggahan_angka_pembanding: string | null;
+  sanggahan_target_realistis: string | null;
   sanggahan_diajukan_pada: string | null;
   sanggahan_diajukan_oleh: string | null;
 }

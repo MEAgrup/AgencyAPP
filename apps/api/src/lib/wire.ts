@@ -3182,8 +3182,9 @@ export interface StrategiWire {
    * never reuse this shape.
    */
   sanggahan_alasan: string | null;
-  sanggahan_angka_pembanding: number | null;
-  sanggahan_target_realistis: number | null;
+  /** Money ⇒ string, integer minor units (frozen invariant), like `nilai_floor`. */
+  sanggahan_angka_pembanding: string | null;
+  sanggahan_target_realistis: string | null;
   sanggahan_diajukan_pada: string | null;
   sanggahan_diajukan_oleh: string | null;
 }

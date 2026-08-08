@@ -707,8 +707,14 @@ export interface Strategi extends StrategiKonteks {
    * The floor is untouchable by design (`ck_strtg_stretch_gmv`).
    */
   sanggahanAlasan: string | null;
-  sanggahanAngkaPembanding: number | null;
-  sanggahanTargetRealistis: number | null;
+  /**
+   * Money, so a STRING — integer minor units, exactly like `StrategiTarget.nilaiFloor`
+   * and every other rupiah figure on this boundary (frozen invariant). Typing it
+   * `number` would put a second representation of the same kind of value in the
+   * codebase, which is the drift the money rules exist to prevent.
+   */
+  sanggahanAngkaPembanding: string | null;
+  sanggahanTargetRealistis: string | null;
   sanggahanDiajukanPada: string | null;
   sanggahanDiajukanOleh: string | null;
 }
@@ -1172,8 +1178,10 @@ function rowToStrategi(r: StrategiRow): Strategi {
     definisiBerhasil90: r.definisi_berhasil_90,
     leadingIndicator: strArray(r.leading_indicator) as LeadingIndicator[],
     sanggahanAlasan: r.sanggahan_alasan,
-    sanggahanAngkaPembanding: numOrNull(r.sanggahan_angka_pembanding),
-    sanggahanTargetRealistis: numOrNull(r.sanggahan_target_realistis),
+    // Passed through raw, not `numOrNull`: postgres.js hands `numeric` over as a
+    // string already, and that string IS the canonical form (same as nilai_floor).
+    sanggahanAngkaPembanding: r.sanggahan_angka_pembanding,
+    sanggahanTargetRealistis: r.sanggahan_target_realistis,
     sanggahanDiajukanPada: tsOrNull(r.sanggahan_diajukan_pada),
     sanggahanDiajukanOleh: r.sanggahan_diajukan_oleh,
   };
