@@ -29,15 +29,21 @@ import {
   MSG_AKSES_BLOCKER_DATE,
   MSG_AKSES_DUPLICATE,
   MSG_AKSES_MATRIX_REQUIRED,
+  MSG_ASSUMPTION_NOT_FOUND,
+  MSG_ASSUMPTION_STATUS_INVALID,
   MSG_ASSUMPTION_TARGET_UNKNOWN,
   MSG_BASELINE_GROUP_INCOMPLETE,
   MSG_CHANNEL_NOT_FOUND,
   MSG_CYCLE_LOCKED,
+  MSG_DEFINISI_BERHASIL_REQUIRED,
+  MSG_GROWTH_THESIS_REQUIRED,
   MSG_DIAGNOSA_FIELD_ID_REQUIRED,
   MSG_DIAGNOSA_INVALID_FIELD_ID,
   MSG_DIAGNOSA_MISSING,
   MSG_INCOMPLETE,
   MSG_KOMPETITOR_REQUIRED,
+  MSG_LEADING_INDICATOR_MAX,
+  MSG_LEADING_INDICATOR_REQUIRED,
   MSG_NOT_PLAN_GATED,
   MSG_OUT_OF_SCOPE_REQUIRED,
   MSG_PRASYARAT_KLIEN_REQUIRED,
@@ -45,10 +51,13 @@ import {
   MSG_REVIEW_NOTES_REQUIRED,
   MSG_REVISION_INCOMPLETE,
   MSG_RISIKO_STRUKTURAL_REQUIRED,
+  MSG_SANGGAHAN_INCOMPLETE,
+  MSG_SKENARIO_MUNDUR_REQUIRED,
   MSG_STRATEGI_EXISTS,
   MSG_TARGET_WITHOUT_ASSUMPTION,
   MSG_TIDAK_ADA_BELUM_DIJAWAB,
   MSG_TOP_SKU_REQUIRED,
+  MSG_URUTAN_EKSEKUSI_REQUIRED,
   MSG_TRAFFIC_MIX_SUM,
   MSG_USP_MIN,
   FLOOR_DISETUJUI_HEAD,
@@ -76,11 +85,18 @@ import {
   saveChannels,
   saveDiagnosa,
   saveKonteks,
+  saveKpi,
+  saveNarasi,
   savePillars,
   saveResources,
   saveRisks,
   komposisiKontribusi,
   saveTargets,
+  raiseSanggahan,
+  setAssumptionStatus,
+  LEADING_INDICATORS,
+  LEADING_INDICATOR_MAX,
+  TARGET_METRICS,
   submitStrategi,
   targetKey,
   trenBaseline,
@@ -475,6 +491,25 @@ async function seedSubmittable(): Promise<{ serviceId: string; strategiId: strin
       targetTerkait: i === 0 ? [targetKey('gmv', 'Shopee', 1)] : [],
     })),
   );
+
+  // Section D header (A-08). D-5 and D-6 are `W`, so a Strategi without them is
+  // no longer submittable — that is what makes them part of THIS fixture rather
+  // than only of their own tests.
+  await saveKpi(sql, am(), s.id, {
+    definisiBerhasil30: 'listing 7 SKU Pareto selesai ditulis ulang',
+    definisiBerhasil60: 'CR Shopee naik dari 2,1% ke 2,8%',
+    definisiBerhasil90: 'GMV gabungan menyentuh Rp 460jt',
+    leadingIndicator: ['cr', 'jumlah_video'],
+  });
+
+  // Section E/H narasi (A-09a). E-1/E-13/H-3 are `W`, so a Strategi without them
+  // is no longer submittable — that is why they belong to THIS fixture.
+  await saveNarasi(sql, am(), s.id, {
+    growthThesis:
+      'Toko ini tumbuh dengan mengonversi trafik yang sudah ada lebih dulu, karena ad spend sudah wajar sementara CR dan kualitas listing tertinggal.',
+    urutanEksekusiAlasan: 'Listing dibereskan sebelum budget dinaikkan — kalau tidak, kita mengulangi kesalahan agensi sebelumnya.',
+    skenarioMundur: 'Kalau CR tidak naik di fase 1, budget digeser ke TikTok dan Shopee turun ke maintenance.',
+  });
 
   await savePillars(sql, am(), s.id, [
     { jenis: 'tidak_dikerjakan', aksi: 'tanpa reshoot foto di M1' },
@@ -1963,5 +1998,492 @@ describeDb('Section C — A-07 (Diagnosa & Akar Masalah)', () => {
     expect(codes).not.toContain('C-5');
     expect(codes).not.toContain('C-6');
     expect(codes).not.toContain('C-7');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section D — D-5, D-6, D-7 and the D-8 status flip (A-08)
+// ---------------------------------------------------------------------------
+// D-1/D-2/D-4 (`strategi_target`) and D-8/D-9 (`strategi_assumption`) landed with
+// A-03 and are covered by the Rule 7 / Rule 8 blocks above. D-3 has no storage at
+// all (X-11) and is covered by the `komposisiKontribusi` unit block. What is new
+// here is the three header fields plus the flip that fires a notification.
+describeDb('Section D — D-5 & D-6 (A-08)', () => {
+  it('stores the three horizons and the weekly indicators', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const after = await saveKpi(sql, am(), s.id, {
+      definisiBerhasil30: 'listing 7 SKU Pareto selesai',
+      definisiBerhasil60: 'CR naik ke 2,8%',
+      definisiBerhasil90: 'GMV Rp 460jt',
+      leadingIndicator: ['cr', 'jumlah_video', 'roas_min'],
+    });
+    expect(after.definisiBerhasil30).toBe('listing 7 SKU Pareto selesai');
+    expect(after.definisiBerhasil60).toBe('CR naik ke 2,8%');
+    expect(after.definisiBerhasil90).toBe('GMV Rp 460jt');
+    expect(after.leadingIndicator).toEqual(['cr', 'jumlah_video', 'roas_min']);
+  });
+
+  it('normalises blank to null, so "empty" and "unanswered" are one state', async () => {
+    // If `''` were stored, the submit gate would have to test for both forever —
+    // and the D-5 message would stop being reachable for a whitespace answer.
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const after = await saveKpi(sql, am(), s.id, {
+      definisiBerhasil30: '   ',
+      definisiBerhasil60: '',
+      definisiBerhasil90: 'GMV Rp 460jt',
+    });
+    expect(after.definisiBerhasil30).toBeNull();
+    expect(after.definisiBerhasil60).toBeNull();
+    expect((await checkCompleteness(sql, s.id)).map((m) => m.pesan)).toContain(
+      MSG_DEFINISI_BERHASIL_REQUIRED,
+    );
+  });
+
+  it('accepts a partial save — autosave (§7) needs a half-filled Section D storable', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const after = await saveKpi(sql, am(), s.id, { definisiBerhasil30: 'listing selesai' });
+    expect(after.definisiBerhasil30).toBe('listing selesai');
+    expect(after.definisiBerhasil90).toBeNull();
+    expect(after.leadingIndicator).toEqual([]);
+  });
+
+  it('refuses more than the D-6 cap, and refuses an unknown indicator', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(
+      saveKpi(sql, am(), s.id, {
+        leadingIndicator: ['gmv', 'cr', 'aov', 'roas_min', 'jam_live', 'jumlah_video'],
+      }),
+    ).rejects.toThrow(MSG_LEADING_INDICATOR_MAX);
+    await expect(
+      // Outside the D-4 vocabulary the D-6 set is drawn from (X-13).
+      saveKpi(sql, am(), s.id, { leadingIndicator: ['jumlah_reels' as never] }),
+    ).rejects.toThrow(MSG_INCOMPLETE);
+    // A duplicate would burn one of the five slots without watching anything new.
+    await expect(
+      saveKpi(sql, am(), s.id, { leadingIndicator: ['cr', 'cr'] }),
+    ).rejects.toThrow(MSG_INCOMPLETE);
+  });
+
+  it('has the cap enforced by the DB too, not only by the domain', async () => {
+    // The domain message is for humans; this is what stops a second write path
+    // (a future admin script, a fixture) from parking six indicators in the row.
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const enam = JSON.stringify(['gmv', 'cr', 'aov', 'roas_min', 'jam_live', 'jumlah_video']);
+    await expect(
+      sql`update strategi set leading_indicator = ${enam}::jsonb where id = ${s.id}`,
+    ).rejects.toThrow(/ck_strategi_leading_indicator/);
+    // Same constraint, other half: membership of the closed set.
+    await expect(
+      sql`update strategi set leading_indicator = '["jumlah_reels"]'::jsonb where id = ${s.id}`,
+    ).rejects.toThrow(/ck_strategi_leading_indicator/);
+  });
+
+  it('checkCompleteness flags D-5 and D-6 while they are empty, and clears them once filled', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const kosong = await checkCompleteness(sql, s.id);
+    expect(kosong.map((m) => m.kode)).toContain('D-5');
+    expect(kosong.map((m) => m.kode)).toContain('D-6');
+    expect(kosong.map((m) => m.pesan)).toContain(MSG_LEADING_INDICATOR_REQUIRED);
+
+    await saveKpi(sql, am(), s.id, {
+      definisiBerhasil30: 'a',
+      definisiBerhasil60: 'b',
+      definisiBerhasil90: 'c',
+      leadingIndicator: ['cr'],
+    });
+    const terisi = (await checkCompleteness(sql, s.id)).map((m) => m.kode);
+    expect(terisi).not.toContain('D-5');
+    expect(terisi).not.toContain('D-6');
+  });
+
+  it('is complete in the seedSubmittable fixture', async () => {
+    const { strategiId } = await seedSubmittable();
+    const codes = (await checkCompleteness(sql, strategiId)).map((m) => m.kode);
+    expect(codes).not.toContain('D-5');
+    expect(codes).not.toContain('D-6');
+  });
+
+  it('refuses a non-owner, and refuses a write once the record leaves Draft', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(
+      saveKpi(sql, otherAm(), strategiId, { leadingIndicator: ['cr'] }),
+    ).rejects.toThrow(ForbiddenError);
+    await submitStrategi(sql, am(), strategiId);
+    await expect(
+      saveKpi(sql, am(), strategiId, { leadingIndicator: ['cr'] }),
+    ).rejects.toThrow(ConflictError);
+  });
+
+  it('carries D-5/D-6 into a revision, but not D-7', async () => {
+    // The regression this locks in: `openRevision` INSERT…SELECTs the header, and
+    // a column not listed there arrives blank in version n+1. Because D-5/D-6 are
+    // submit requirements, that would have turned every revision into a form the
+    // AM has to refill — and version 1's tests would all still have passed.
+    const { strategiId } = await seedSubmittable();
+    await raiseSanggahan(sql, am(), strategiId, {
+      alasan: 'floor terlalu tinggi',
+      angkaPembanding: '180000000.00',
+      targetRealistis: '320000000.00',
+    });
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+
+    const v2 = await openRevision(sql, am(), strategiId, {
+      triggerRevisi: ['asumsi gugur'],
+      alasanRevisi: 'budget klien tidak cair',
+      asumsiGugur: ['A1'],
+    });
+    expect(v2.definisiBerhasil30).toBe('listing 7 SKU Pareto selesai ditulis ulang');
+    expect(v2.definisiBerhasil90).toBe('GMV gabungan menyentuh Rp 460jt');
+    expect(v2.leadingIndicator).toEqual(['cr', 'jumlah_video']);
+
+    // D-7 is an ACT, not content: version 2 was never challenged by anyone.
+    expect(v2.sanggahanAlasan).toBeNull();
+    expect(v2.sanggahanDiajukanOleh).toBeNull();
+    // …and version 1 still holds its own, unchanged and readable.
+    expect((await getStrategi(sql, am(), strategiId)).sanggahanAlasan).toBe('floor terlalu tinggi');
+  });
+
+  it('keeps the D-6 vocabulary identical to the D-4 metric list (X-13)', () => {
+    // Two closed sets that can drift apart is the O48/O51 defect class. This is
+    // the cheap guard: they are the same array, and this asserts nobody forked it.
+    expect([...LEADING_INDICATORS]).toEqual([...TARGET_METRICS]);
+    expect(LEADING_INDICATOR_MAX).toBe(5);
+  });
+});
+
+describeDb('Section D — D-7 Sanggahan Target (Rule 19, A-08)', () => {
+  it('records the challenge and notifies Head of Sales + Account leads', async () => {
+    const { strategiId } = await seedSubmittable();
+    const after = await raiseSanggahan(sql, am(), strategiId, {
+      alasan: 'floor Rp 400jt tidak realistis dengan restock 21 hari',
+      angkaPembanding: '180000000.00',
+      targetRealistis: '320000000.00',
+    });
+    expect(after.sanggahanAlasan).toContain('tidak realistis');
+    // Money stays a STRING end to end (integer minor units, frozen invariant) —
+    // the same representation as `targets[].nilaiFloor`, not a second one.
+    expect(after.sanggahanAngkaPembanding).toBe('180000000.00');
+    expect(after.sanggahanTargetRealistis).toBe('320000000.00');
+    expect(after.sanggahanDiajukanOleh).toBe('ZZ-AM');
+    expect(after.sanggahanDiajukanPada).not.toBeNull();
+
+    // EMP-0006 is Sales/Sales Head in the Alpha Digital seed → the Head of Sales
+    // arm of Rule 19. It can only arrive as an explicit recipient: `notify_emit`
+    // resolves leads for ONE division, and that slot is spent on Account.
+    const kena = await sql<{ recipient_employee_id: string }[]>`
+      select recipient_employee_id from notifications
+       where entity_id = ${strategiId} and event_type = 'm6a.strategi.sanggahan_target'`;
+    expect(kena.map((r) => r.recipient_employee_id)).toContain('EMP-0006');
+  });
+
+  it('does NOT touch the floor — that is the whole of Rule 19', async () => {
+    const { strategiId } = await seedSubmittable();
+    const sebelum = await getStrategi(sql, am(), strategiId);
+    const floorSebelum = sebelum.targets.find((t) => t.metric === 'gmv')?.nilaiFloor;
+
+    await raiseSanggahan(sql, am(), strategiId, {
+      alasan: 'terlalu tinggi',
+      angkaPembanding: '180000000.00',
+      // A "realistic" target far BELOW the floor. If a challenge could lower the
+      // floor, this is the call that would do it.
+      targetRealistis: '150000000.00',
+    });
+
+    const sesudah = await getStrategi(sql, am(), strategiId);
+    expect(sesudah.targets.find((t) => t.metric === 'gmv')?.nilaiFloor).toBe(floorSebelum);
+    // And the stretch is still above the untouched floor, so submit is unaffected.
+    expect((await checkCompleteness(sql, strategiId)).map((m) => m.kode)).not.toContain('D-2/Shopee');
+  });
+
+  it('refuses a half-filled challenge (all three parts or none)', async () => {
+    const { strategiId } = await seedSubmittable();
+    for (const payload of [
+      { alasan: 'terlalu tinggi', angkaPembanding: '', targetRealistis: '150000000.00' },
+      { alasan: '', angkaPembanding: '180000000.00', targetRealistis: '150000000.00' },
+      { alasan: 'terlalu tinggi', angkaPembanding: '180000000.00', targetRealistis: '' },
+      { alasan: 'terlalu tinggi', angkaPembanding: 'bukan angka', targetRealistis: '1' },
+      { alasan: 'terlalu tinggi', angkaPembanding: '-1', targetRealistis: '1' },
+    ]) {
+      await expect(raiseSanggahan(sql, am(), strategiId, payload)).rejects.toThrow(
+        MSG_SANGGAHAN_INCOMPLETE,
+      );
+    }
+    // Nothing was stored by any of the five attempts.
+    expect((await getStrategi(sql, am(), strategiId)).sanggahanAlasan).toBeNull();
+  });
+
+  it('notifies once — a correction while drafting is not a second event', async () => {
+    const { strategiId } = await seedSubmittable();
+    const payload = {
+      alasan: 'floor terlalu tinggi',
+      angkaPembanding: '180000000.00',
+      targetRealistis: '320000000.00',
+    };
+    await raiseSanggahan(sql, am(), strategiId, payload);
+    await raiseSanggahan(sql, am(), strategiId, { ...payload, alasan: 'floor terlalu tinggi (revisi)' });
+
+    const n = await sql<{ n: number }[]>`
+      select count(*)::int as n from notifications
+       where entity_id = ${strategiId} and event_type = 'm6a.strategi.sanggahan_target'`;
+    expect(n[0].n).toBe(1);
+    // The correction is not lost, though — it is in the audit log.
+    const aksi = await sql<{ action: string }[]>`
+      select action from audit_log where entity_id = ${strategiId}
+        and action in ('raise_sanggahan', 'edit_sanggahan') order by id asc`;
+    expect(aksi.map((a) => a.action)).toEqual(['raise_sanggahan', 'edit_sanggahan']);
+  });
+
+  it('is optional — an unchallenged Strategi still submits', async () => {
+    const { strategiId } = await seedSubmittable();
+    const codes = (await checkCompleteness(sql, strategiId)).map((m) => m.kode);
+    expect(codes).not.toContain('D-7');
+    expect(codes).toEqual([]);
+  });
+
+  it('refuses a non-owner', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(
+      raiseSanggahan(sql, otherAm(), strategiId, {
+        alasan: 'terlalu tinggi',
+        angkaPembanding: '1',
+        targetRealistis: '1',
+      }),
+    ).rejects.toThrow(ForbiddenError);
+  });
+});
+
+describeDb('Section D — D-8 status flip fires strategi_revisi_disarankan (A-08)', () => {
+  it('fires the event on the way into Gugur, to the AM and the Account leads', async () => {
+    const { strategiId } = await seedSubmittable();
+    const after = await setAssumptionStatus(sql, am(), strategiId, 'A1', 'Gugur');
+    expect(after.assumptions.find((a) => a.kode === 'A1')?.status).toBe('Gugur');
+
+    const kena = await sql<{ recipient_employee_id: string }[]>`
+      select recipient_employee_id from notifications
+       where entity_id = ${strategiId} and event_type = 'strategi_revisi_disarankan'`;
+    // The AM arrives explicitly (they are not a lead, so `division` can never
+    // resolve them). `notifyActor` is false, so an AM flipping their own
+    // assumption is not pinged about their own click — here the actor IS the AM,
+    // which is exactly the case that would produce a useless self-notification.
+    expect(kena.map((r) => r.recipient_employee_id)).not.toContain('ZZ-AM');
+  });
+
+  it('notifies the AM when it is the reviewer who flips it', async () => {
+    // The realistic path: the SPV learns in a meeting that the client's budget
+    // slipped, and the AM is the one who needs to be told to revise.
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    await setAssumptionStatus(sql, spv(), strategiId, 'A1', 'Gugur');
+
+    const kena = await sql<{ recipient_employee_id: string }[]>`
+      select recipient_employee_id from notifications
+       where entity_id = ${strategiId} and event_type = 'strategi_revisi_disarankan'`;
+    expect(kena.map((r) => r.recipient_employee_id)).toContain('ZZ-AM');
+  });
+
+  it('is reachable while Aktif — the only moment an assumption actually breaks', async () => {
+    // Every other Section-D write is Draft-only. If this one were too, the
+    // feature would be unreachable exactly when it is needed: mid-execution.
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    const aktif = await approveStrategi(sql, spv(), strategiId);
+    expect(aktif.status).toBe(STRATEGI_AKTIF);
+
+    const after = await setAssumptionStatus(sql, am(), strategiId, 'A2', 'Gugur');
+    expect(after.assumptions.find((a) => a.kode === 'A2')?.status).toBe('Gugur');
+  });
+
+  it('does not fire on Terverifikasi, and does not fire twice for the same flip', async () => {
+    // The SPV does the flipping here, not the AM. With the AM as actor the only
+    // recipient (themselves) is filtered out by `notifyActor: false` and the
+    // count would be 0 for a reason that has nothing to do with what is being
+    // asserted — the count has to be able to reach 1 for "not twice" to mean
+    // anything.
+    const { strategiId } = await seedSubmittable();
+    const jumlah = async (): Promise<number> =>
+      (
+        await sql<{ n: number }[]>`
+          select count(*)::int as n from notifications
+           where entity_id = ${strategiId} and event_type = 'strategi_revisi_disarankan'`
+      )[0].n;
+
+    await setAssumptionStatus(sql, spv(), strategiId, 'A1', 'Terverifikasi');
+    expect(await jumlah()).toBe(0);
+
+    await setAssumptionStatus(sql, spv(), strategiId, 'A1', 'Gugur');
+    expect(await jumlah()).toBe(1);
+    // Idempotent: re-asserting the status it already has must not ping again.
+    await setAssumptionStatus(sql, spv(), strategiId, 'A1', 'Gugur');
+    expect(await jumlah()).toBe(1);
+  });
+
+  it('does not open a revision by itself — Rule 13 needs a human', async () => {
+    // "disarankan" is the whole word. A flip suggests; it never mints version n+1,
+    // because Rule 13 requires a trigger, a reason and the broken assumptions.
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    await setAssumptionStatus(sql, am(), strategiId, 'A1', 'Gugur');
+
+    const versi = await sql<{ n: number }[]>`
+      select count(*)::int as n from strategi where strategi_induk_id = ${strategiId}`;
+    expect(versi[0].n).toBe(0);
+    expect((await getStrategi(sql, am(), strategiId)).status).toBe(STRATEGI_AKTIF);
+  });
+
+  it('writes the before→after pair to the audit log', async () => {
+    const { strategiId } = await seedSubmittable();
+    await setAssumptionStatus(sql, am(), strategiId, 'A1', 'Gugur');
+    const rows = await sql<{ before_json: unknown; after_json: unknown }[]>`
+      select before_json, after_json from audit_log
+       where entity_id = ${strategiId} and action = 'set_assumption_status'`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].before_json).toMatchObject({ kode: 'A1', status: 'Berlaku' });
+    expect(rows[0].after_json).toMatchObject({ kode: 'A1', status: 'Gugur' });
+  });
+
+  it('rejects an unknown status and an unknown assumption code', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(
+      setAssumptionStatus(sql, am(), strategiId, 'A1', 'Batal' as never),
+    ).rejects.toThrow(MSG_ASSUMPTION_STATUS_INVALID);
+    await expect(
+      setAssumptionStatus(sql, am(), strategiId, 'TIDAK-ADA', 'Gugur'),
+    ).rejects.toThrow(MSG_ASSUMPTION_NOT_FOUND);
+  });
+
+  it('refuses an AM who does not own the account', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(
+      setAssumptionStatus(sql, otherAm(), strategiId, 'A1', 'Gugur'),
+    ).rejects.toThrow(ForbiddenError);
+    // An OD reads everything but writes nothing — a flip is a write.
+    await expect(
+      setAssumptionStatus(sql, od(), strategiId, 'A1', 'Gugur'),
+    ).rejects.toThrow(ForbiddenError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section E/H narasi — E-1, E-13, H-3, H-4 (A-09a)
+// ---------------------------------------------------------------------------
+// The rest of E and H are child rows and are covered by the Rule 9 / H-1 blocks
+// above. These four are the paragraphs those rows cannot hold.
+describeDb('Section E/H narasi (A-09a)', () => {
+  it('stores all four, and normalises blank to null', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const after = await saveNarasi(sql, am(), s.id, {
+      growthThesis: 'tumbuh dengan konversi dulu',
+      urutanEksekusiAlasan: 'listing sebelum budget',
+      skenarioMundur: 'geser budget ke TikTok',
+      kondisiStopScope: '   ', // whitespace-only -> null, not stored
+    });
+    expect(after.growthThesis).toBe('tumbuh dengan konversi dulu');
+    expect(after.urutanEksekusiAlasan).toBe('listing sebelum budget');
+    expect(after.skenarioMundur).toBe('geser budget ke TikTok');
+    expect(after.kondisiStopScope).toBeNull();
+  });
+
+  it('has the non-blank rule enforced by the DB too, not only by the domain', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(
+      sql`update strategi set growth_thesis = '   ' where id = ${s.id}`,
+    ).rejects.toThrow(/ck_strategi_narasi_ehi_isi/);
+  });
+
+  it('gates E-1, E-13 and H-3 at submit — but never H-4, which is `O`', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const kosong = await checkCompleteness(sql, s.id);
+    expect(kosong.map((m) => m.kode)).toEqual(expect.arrayContaining(['E-1', 'E-13', 'H-3']));
+    expect(kosong.map((m) => m.pesan)).toEqual(
+      expect.arrayContaining([
+        MSG_GROWTH_THESIS_REQUIRED,
+        MSG_URUTAN_EKSEKUSI_REQUIRED,
+        MSG_SKENARIO_MUNDUR_REQUIRED,
+      ]),
+    );
+    // H-4 is optional: it must never appear as a blocker, filled or not.
+    expect(kosong.map((m) => m.kode)).not.toContain('H-4');
+
+    await saveNarasi(sql, am(), s.id, {
+      growthThesis: 'a',
+      urutanEksekusiAlasan: 'b',
+      skenarioMundur: 'c',
+    });
+    const terisi = (await checkCompleteness(sql, s.id)).map((m) => m.kode);
+    for (const kode of ['E-1', 'E-13', 'H-3', 'H-4']) expect(terisi).not.toContain(kode);
+  });
+
+  it('is complete in the seedSubmittable fixture', async () => {
+    const { strategiId } = await seedSubmittable();
+    expect((await checkCompleteness(sql, strategiId)).map((m) => m.kode)).toEqual([]);
+  });
+
+  it('carries all four into a revision — including the optional H-4', async () => {
+    // Same regression class the A-08 carry test locks in: `openRevision`
+    // INSERT…SELECTs the header, so a column missing from those two lists starts
+    // blank in version n+1. H-4 is included on purpose even though it is `O` —
+    // it is CONTENT (a standing condition), unlike D-7 which is an ACT.
+    const { strategiId } = await seedSubmittable();
+    await saveNarasi(sql, am(), strategiId, {
+      growthThesis: 'tesis v1',
+      urutanEksekusiAlasan: 'urutan v1',
+      skenarioMundur: 'mundur v1',
+      kondisiStopScope: 'stop kalau margin < 15%',
+    });
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+
+    const v2 = await openRevision(sql, am(), strategiId, {
+      triggerRevisi: ['asumsi gugur'],
+      alasanRevisi: 'budget klien tidak cair',
+      asumsiGugur: ['A1'],
+    });
+    expect(v2.growthThesis).toBe('tesis v1');
+    expect(v2.urutanEksekusiAlasan).toBe('urutan v1');
+    expect(v2.skenarioMundur).toBe('mundur v1');
+    expect(v2.kondisiStopScope).toBe('stop kalau margin < 15%');
+    // …and version 2 is submittable without retyping them.
+    expect((await checkCompleteness(sql, v2.id)).map((m) => m.kode)).not.toContain('E-1');
+  });
+
+  it('refuses a non-owner, and refuses a write once the record leaves Draft', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(
+      saveNarasi(sql, otherAm(), strategiId, { growthThesis: 'x' }),
+    ).rejects.toThrow(ForbiddenError);
+    await submitStrategi(sql, am(), strategiId);
+    await expect(
+      saveNarasi(sql, am(), strategiId, { growthThesis: 'x' }),
+    ).rejects.toThrow(ConflictError);
+  });
+
+  it('keeps H-4 out of the audit row — it is hard-internal (§4.1)', async () => {
+    // `audit_log` has a different read scope from `strategi`, so copying a
+    // hard-internal paragraph into it would widen who can read it. The auditable
+    // fact is WHICH fields were answered.
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveNarasi(sql, am(), s.id, {
+      growthThesis: 'tesis',
+      kondisiStopScope: 'RAHASIA-INTERNAL-MARKER',
+    });
+    const rows = await sql<{ after_json: unknown }[]>`
+      select after_json from audit_log
+       where entity_id = ${s.id} and action = 'save_narasi'`;
+    expect(rows).toHaveLength(1);
+    expect(JSON.stringify(rows[0].after_json)).not.toContain('RAHASIA-INTERNAL-MARKER');
+    expect(rows[0].after_json).toMatchObject({ terisi: ['E-1', 'H-4'] });
   });
 });

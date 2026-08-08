@@ -34,9 +34,9 @@ describe('frozen catalog', () => {
     }
   });
 
-  it('is at version 3, and the versions are registered in order with no gaps', () => {
-    expect(CATALOG_VERSION).toBe(3);
-    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3]);
+  it('is at version 4, and the versions are registered in order with no gaps', () => {
+    expect(CATALOG_VERSION).toBe(4);
+    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4]);
     // A registry row with no decision reference is how an un-signed-off
     // amendment would sneak in looking legitimate.
     for (const v of CATALOG_VERSIONS) {
@@ -133,6 +133,24 @@ describe('frozen catalog', () => {
     // lead of a division, so `leadsOfDivision` could never resolve to them.
     expect(CATALOG[EVENTS.TransactionChangeRequested].resolver).toBe('explicit');
     expect(CATALOG[EVENTS.TransactionChangeDecided].resolver).toBe('explicit');
+  });
+
+  it('carries exactly the 1 v4 event of the A-08 D-7 amendment', () => {
+    expect(eventsOfVersion(4)).toEqual(['m6a.strategi.sanggahan_target']);
+    // Its own version, not an addition to v2 — same reason as v3: v2 is the
+    // M6A/6B/6C §7 amendment, and §7 D12 never lists a sanggahan event. The
+    // event exists because §4 marks D-7 `O (notif SPV + Head of Sales)`, i.e.
+    // the PRD contradicts itself and §4 wins; the version row is where that
+    // choice is visible instead of buried.
+    expect(CATALOG[EVENTS.StrategiSanggahanTarget].version).toBe(4);
+    // DOTTED identifier on purpose. The four v2 `strategi_*` names are plain
+    // because the PRD spelled them; this one the PRD never spelled, so it takes
+    // the house `mN.entitas.aksi` convention — like `m6.client.assigned`.
+    expect(EVENTS.StrategiSanggahanTarget).toBe('m6a.strategi.sanggahan_target');
+    // 'explicitOrLeads' because the recipients cross TWO divisions: SPV Account
+    // resolves from `division`, Head of Sales has to come in as `explicit`.
+    // `leadsOfDivision` can only ever resolve one of the two.
+    expect(CATALOG[EVENTS.StrategiSanggahanTarget].resolver).toBe('explicitOrLeads');
   });
 
   it('every event carries a description and a valid resolver', () => {

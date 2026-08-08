@@ -3168,6 +3168,32 @@ export interface StrategiWire {
   aset_dari_klien: string[];
   aset_dari_klien_tidak_ada: boolean;
   aset_catatan: string | null;
+  // Section D header (A-08). D-1/D-2/D-4 ride in `targets`, D-8/D-9 in
+  // `assumptions`, and D-3 is derived (`komposisi_kontribusi`) — these four are
+  // what is neither a matrix nor a list.
+  definisi_berhasil_30: string | null;
+  definisi_berhasil_60: string | null;
+  definisi_berhasil_90: string | null;
+  leading_indicator: string[];
+  /**
+   * D-7 — §4.1 HARD-INTERNAL. Present here because this body serves the INTERNAL
+   * app only; the client-facing `/s/{token}` renderer (A-11) is a separate
+   * serialiser that applies the visibility filter BEFORE serialising, so it must
+   * never reuse this shape.
+   */
+  sanggahan_alasan: string | null;
+  /** Money ⇒ string, integer minor units (frozen invariant), like `nilai_floor`. */
+  sanggahan_angka_pembanding: string | null;
+  sanggahan_target_realistis: string | null;
+  sanggahan_diajukan_pada: string | null;
+  sanggahan_diajukan_oleh: string | null;
+  // Section E/H narrative header fields (A-09a). The rest of E/H are child rows:
+  // E-3…E-11 in `pillars`, H-1 in `risks`.
+  growth_thesis: string | null;
+  urutan_eksekusi_alasan: string | null;
+  skenario_mundur: string | null;
+  /** H-4 — §4.1 HARD-INTERNAL, same caveat as `sanggahan_*` above. */
+  kondisi_stop_scope: string | null;
 }
 
 export function strategiToWire(s: strategi.Strategi): StrategiWire {
@@ -3218,6 +3244,19 @@ export function strategiToWire(s: strategi.Strategi): StrategiWire {
     aset_dari_klien: s.asetDariKlien,
     aset_dari_klien_tidak_ada: s.asetDariKlienTidakAda,
     aset_catatan: s.asetCatatan,
+    definisi_berhasil_30: s.definisiBerhasil30,
+    definisi_berhasil_60: s.definisiBerhasil60,
+    definisi_berhasil_90: s.definisiBerhasil90,
+    leading_indicator: s.leadingIndicator,
+    sanggahan_alasan: s.sanggahanAlasan,
+    sanggahan_angka_pembanding: s.sanggahanAngkaPembanding,
+    sanggahan_target_realistis: s.sanggahanTargetRealistis,
+    sanggahan_diajukan_pada: s.sanggahanDiajukanPada,
+    sanggahan_diajukan_oleh: s.sanggahanDiajukanOleh,
+    growth_thesis: s.growthThesis,
+    urutan_eksekusi_alasan: s.urutanEksekusiAlasan,
+    skenario_mundur: s.skenarioMundur,
+    kondisi_stop_scope: s.kondisiStopScope,
   };
 }
 
@@ -3926,6 +3965,58 @@ export function strategiAssumptionsFromWire(v: unknown): strategi.AssumptionInpu
     status: (strOrNull(a.status) as strategi.AssumptionState | null) ?? undefined,
     targetTerkait: Array.isArray(a.target_terkait) ? a.target_terkait.map((k) => String(k)) : [],
   }));
+}
+
+/**
+ * Inbound: Section D-5 + D-6 (A-08).
+ *
+ * The three horizons pass through as `undefined` when the key is ABSENT and as
+ * `null`/`''` when the form cleared them — `saveKpi` collapses both to `null`, so
+ * the distinction dies here rather than becoming a third state the gate has to
+ * know about. `leading_indicator` is not narrowed to the enum here: an unknown
+ * value must reach the domain to be refused with the BI message, not be silently
+ * dropped on the way in.
+ */
+export function strategiKpiFromWire(v: unknown): strategi.KpiInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    definisiBerhasil30: strOrNull(b.definisi_berhasil_30),
+    definisiBerhasil60: strOrNull(b.definisi_berhasil_60),
+    definisiBerhasil90: strOrNull(b.definisi_berhasil_90),
+    leadingIndicator: Array.isArray(b.leading_indicator)
+      ? (b.leading_indicator.map((k) => String(k)) as strategi.LeadingIndicator[])
+      : [],
+  };
+}
+
+/**
+ * Inbound: Section E/H narrative fields (A-09a).
+ *
+ * Absent key and cleared key both collapse to `null` in `saveNarasi`, so the
+ * distinction dies here rather than becoming a third state the submit gate has to
+ * know about — same contract as `strategiKpiFromWire`.
+ */
+export function strategiNarasiFromWire(v: unknown): strategi.NarasiInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    growthThesis: strOrNull(b.growth_thesis),
+    urutanEksekusiAlasan: strOrNull(b.urutan_eksekusi_alasan),
+    skenarioMundur: strOrNull(b.skenario_mundur),
+    kondisiStopScope: strOrNull(b.kondisi_stop_scope),
+  };
+}
+
+/** Inbound: Section D-7 Sanggahan Target (A-08). */
+export function strategiSanggahanFromWire(v: unknown): strategi.SanggahanInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    alasan: str(b.alasan),
+    // Currency stays a STRING across the wire (frozen invariant: integer minor
+    // units, never a float). `Number()` here would reintroduce the drift the
+    // money rules exist to prevent.
+    angkaPembanding: str(b.angka_pembanding),
+    targetRealistis: str(b.target_realistis),
+  };
 }
 
 /** Inbound: Section E pillars. */

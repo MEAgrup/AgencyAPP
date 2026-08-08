@@ -46,7 +46,7 @@
  * Reference: docs/prd/CDPS_Module6A_Strategi.md.
  */
 
-import { ident, money, permission, statemachine } from '@cdps/core';
+import { ident, money, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import {
   ACCOUNT_DIVISION,
@@ -142,6 +142,29 @@ export type ResourceKind = (typeof RESOURCE_KINDS)[number];
 
 export const ASSUMPTION_STATES = ['Berlaku', 'Gugur', 'Terverifikasi'] as const;
 export type AssumptionState = (typeof ASSUMPTION_STATES)[number];
+
+/**
+ * D-6 — the closed set a weekly leading indicator may be drawn from, and the cap.
+ *
+ * §4 says only "Multi-enum (maks 5)" — it never writes the list. Rather than coin
+ * a vocabulary (house rule: never invent), this IS `TARGET_METRICS`, the metric
+ * vocabulary the PRD spells out itself in D-4. Mirrored by
+ * `ck_strategi_leading_indicator` via jsonb containment; if either list is ever
+ * widened, both move in the same commit. Open question **X-13**.
+ */
+export const LEADING_INDICATORS = TARGET_METRICS;
+export type LeadingIndicator = TargetMetric;
+export const LEADING_INDICATOR_MAX = 5;
+
+/** D-5 — the three fixed horizons. Fixed cardinality is why D-5 is columns. */
+export const DEFINISI_BERHASIL_HORIZONS = [30, 60, 90] as const;
+
+/**
+ * D-7 sends its notification to SPV Account **and Head of Sales** — the second
+ * division named anywhere in M6A. Spelled as a constant here rather than inline
+ * because `role_mappings.division` is the string it has to match exactly.
+ */
+export const SALES_DIVISION = 'Sales';
 
 export const RISK_LEVELS = ['rendah', 'sedang', 'tinggi'] as const;
 export type RiskLevel = (typeof RISK_LEVELS)[number];
@@ -332,6 +355,34 @@ export const MSG_CHANNEL_NOT_FOUND = '[channel tidak ditemukan pada Strategi ini
 /** D-9 — an assumption points at a target that does not exist. */
 export const MSG_ASSUMPTION_TARGET_UNKNOWN =
   '[asumsi merujuk target yang tidak ada di Strategi ini]';
+/** D-5 — all three horizons are required before submit. */
+export const MSG_DEFINISI_BERHASIL_REQUIRED =
+  '[definisi berhasil 30, 60, dan 90 hari wajib diisi]';
+/** D-6 — at least one weekly leading indicator must be chosen. */
+export const MSG_LEADING_INDICATOR_REQUIRED =
+  '[minimal satu leading indicator mingguan wajib dipilih]';
+/** D-6 — "maks 5"; more than the cap is refused, not truncated. */
+export const MSG_LEADING_INDICATOR_MAX = `[maksimal ${LEADING_INDICATOR_MAX} leading indicator mingguan]`;
+/**
+ * D-7 — a half-filled challenge cannot be stored (mirrors
+ * `ck_strategi_sanggahan_utuh`): "unrealistic compared to what?" must have an
+ * answer at post-mortem time.
+ */
+export const MSG_SANGGAHAN_INCOMPLETE =
+  '[sanggahan target wajib menyertakan alasan, angka pembanding, dan target yang realistis]';
+/**
+ * D-8 — the flip target must be one of the three statuses. Not a state machine:
+ * this is a child-row ATTRIBUTE (see the migration comment on the column).
+ */
+export const MSG_ASSUMPTION_STATUS_INVALID = '[status asumsi tidak dikenal]';
+/** D-8 — the code does not name an assumption on this Strategi. */
+export const MSG_ASSUMPTION_NOT_FOUND = '[asumsi tidak ditemukan pada Strategi ini]';
+/** E-1 — the thesis the whole of Section E hangs off. */
+export const MSG_GROWTH_THESIS_REQUIRED = '[growth thesis wajib diisi]';
+/** E-13 — the order is stored on the pillars; the reason is not. */
+export const MSG_URUTAN_EKSEKUSI_REQUIRED = '[alasan urutan eksekusi pilar wajib diisi]';
+/** H-3 — a plan with no fallback is a bet, not a plan. */
+export const MSG_SKENARIO_MUNDUR_REQUIRED = '[skenario mundur wajib diisi]';
 /** A-05 — a required Section A field is still empty (kode names which one). */
 export const MSG_KONTEKS_INCOMPLETE = '[konteks klien & bisnis belum lengkap]';
 /** A-5 — "3 alasan utama orang beli produk ini". */
@@ -643,6 +694,54 @@ export interface Strategi extends StrategiKonteks {
   catatanReviewer: string | null;
   createdBy: string;
   createdAt: string;
+
+  // --- Section D header fields (A-08). D-1/D-2/D-4 live in `targets`, D-8/D-9
+  // in `assumptions`, and D-3 is DERIVED (`komposisiKontribusi`, X-11) — so what
+  // lands on the header is exactly the three that are neither a matrix nor a
+  // repeatable list. Nullable for the same autosave reason as Section A.
+  /** D-5 — definisi berhasil di 30 hari. */
+  definisiBerhasil30: string | null;
+  /** D-5 — definisi berhasil di 60 hari. */
+  definisiBerhasil60: string | null;
+  /** D-5 — definisi berhasil di 90 hari. */
+  definisiBerhasil90: string | null;
+  /** D-6 — leading indicator mingguan, maks `LEADING_INDICATOR_MAX`. */
+  leadingIndicator: LeadingIndicator[];
+  /**
+   * D-7 — Sanggahan Target. §4.1 HARD-INTERNAL, never shareable, and ADVISORY:
+   * `sanggahanTargetRealistis` is the AM's opinion and is never read as a floor.
+   * The floor is untouchable by design (`ck_strtg_stretch_gmv`).
+   */
+  sanggahanAlasan: string | null;
+  /**
+   * Money, so a STRING — integer minor units, exactly like `StrategiTarget.nilaiFloor`
+   * and every other rupiah figure on this boundary (frozen invariant). Typing it
+   * `number` would put a second representation of the same kind of value in the
+   * codebase, which is the drift the money rules exist to prevent.
+   */
+  sanggahanAngkaPembanding: string | null;
+  sanggahanTargetRealistis: string | null;
+  sanggahanDiajukanPada: string | null;
+  sanggahanDiajukanOleh: string | null;
+
+  // --- Section E/H narrative header fields (A-09a). The rest of E and H are
+  // child rows: E-3…E-11 in `strategi_pillar`, H-1 in `strategi_risk`. These four
+  // are the paragraphs those rows cannot hold.
+  /** E-1 — the thesis every other Section E row descends from. §4.1 shareable. */
+  growthThesis: string | null;
+  /**
+   * E-13 — WHY pillar A precedes pillar B. `strategi_pillar.urutan` stores the
+   * order; it never stores the reason. §4.1 shareable.
+   */
+  urutanEksekusiAlasan: string | null;
+  /** H-3 — fallback if the main strategy fails in phase 1. §4.1 shareable. */
+  skenarioMundur: string | null;
+  /**
+   * H-4 — when MEA advises stopping or changing scope.
+   * ⚠️ §4.1 **HARD-INTERNAL, never shareable** — never serialise to `/s/{token}`.
+   * Optional in §4, so it is deliberately NOT gated at submit.
+   */
+  kondisiStopScope: string | null;
 }
 
 /** Section B-0 — one block per contracted channel (D4). */
@@ -1030,6 +1129,21 @@ interface StrategiRow {
   aset_dari_klien: unknown;
   aset_dari_klien_tidak_ada: boolean;
   aset_catatan: string | null;
+  // Section D header (A-08).
+  definisi_berhasil_30: string | null;
+  definisi_berhasil_60: string | null;
+  definisi_berhasil_90: string | null;
+  leading_indicator: unknown;
+  sanggahan_alasan: string | null;
+  sanggahan_angka_pembanding: string | null;
+  sanggahan_target_realistis: string | null;
+  sanggahan_diajukan_pada: string | Date | null;
+  sanggahan_diajukan_oleh: string | null;
+  // Section E/H narrative (A-09a).
+  growth_thesis: string | null;
+  urutan_eksekusi_alasan: string | null;
+  skenario_mundur: string | null;
+  kondisi_stop_scope: string | null;
 }
 
 function dateStr(v: string | Date): string {
@@ -1088,6 +1202,23 @@ function rowToStrategi(r: StrategiRow): Strategi {
     asetDariKlien: strArray(r.aset_dari_klien) as ClientAsset[],
     asetDariKlienTidakAda: r.aset_dari_klien_tidak_ada,
     asetCatatan: r.aset_catatan,
+    // Section D (A-08)
+    definisiBerhasil30: r.definisi_berhasil_30,
+    definisiBerhasil60: r.definisi_berhasil_60,
+    definisiBerhasil90: r.definisi_berhasil_90,
+    leadingIndicator: strArray(r.leading_indicator) as LeadingIndicator[],
+    sanggahanAlasan: r.sanggahan_alasan,
+    // Passed through raw, not `numOrNull`: postgres.js hands `numeric` over as a
+    // string already, and that string IS the canonical form (same as nilai_floor).
+    sanggahanAngkaPembanding: r.sanggahan_angka_pembanding,
+    sanggahanTargetRealistis: r.sanggahan_target_realistis,
+    sanggahanDiajukanPada: tsOrNull(r.sanggahan_diajukan_pada),
+    sanggahanDiajukanOleh: r.sanggahan_diajukan_oleh,
+    // Section E/H narrative (A-09a)
+    growthThesis: r.growth_thesis,
+    urutanEksekusiAlasan: r.urutan_eksekusi_alasan,
+    skenarioMundur: r.skenario_mundur,
+    kondisiStopScope: r.kondisi_stop_scope,
   };
 }
 
@@ -3144,6 +3275,340 @@ export async function saveAssumptions(
   });
 }
 
+/** D-5 + D-6 input — the two header fields of Section D that are AM-typed. */
+export interface KpiInput {
+  definisiBerhasil30?: string | null;
+  definisiBerhasil60?: string | null;
+  definisiBerhasil90?: string | null;
+  leadingIndicator?: LeadingIndicator[];
+}
+
+/**
+ * saveKpi writes D-5 and D-6.
+ *
+ * Partial saves are allowed on purpose (§7 autosave, §5 step 5 live count) — a
+ * blank horizon is stored as `null` and reported by `checkCompleteness`, not
+ * rejected here. What IS rejected: a value outside the D-6 vocabulary, and more
+ * than `LEADING_INDICATOR_MAX` of them. Both are also CHECK constraints, so this
+ * layer exists to name the failure in Bahasa Indonesia rather than to be the only
+ * thing standing between a bad row and the table.
+ *
+ * Blank strings are normalised to `null` rather than stored: `''` and "unanswered"
+ * must not be two different ways of saying the same thing, or the submit gate has
+ * to test for both forever.
+ */
+export async function saveKpi(
+  sql: Sql,
+  actor: Actor,
+  id: string,
+  input: KpiInput,
+): Promise<StrategiDetail> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    await requireDraftAndWriter(tx, actor, id);
+
+    const indikator = input.leadingIndicator ?? [];
+    if (indikator.length > LEADING_INDICATOR_MAX) {
+      throw new ValidationError(MSG_LEADING_INDICATOR_MAX);
+    }
+    for (const k of indikator) {
+      if (!LEADING_INDICATORS.includes(k)) {
+        throw new ValidationError(MSG_INCOMPLETE);
+      }
+    }
+    // A duplicate would consume one of the five slots without adding a thing
+    // watched weekly — the cap is about the AM's attention, not about row count.
+    if (new Set(indikator).size !== indikator.length) {
+      throw new ValidationError(MSG_INCOMPLETE);
+    }
+
+    const teks = (v: string | null | undefined): string | null => {
+      const t = (v ?? '').trim();
+      return t === '' ? null : t;
+    };
+
+    await tx`
+      update strategi set
+        definisi_berhasil_30 = ${teks(input.definisiBerhasil30)},
+        definisi_berhasil_60 = ${teks(input.definisiBerhasil60)},
+        definisi_berhasil_90 = ${teks(input.definisiBerhasil90)},
+        leading_indicator    = ${indikator as never}
+       where id = ${id}`;
+
+    await ex.audit.insertAudit({
+      entityType: ENTITY_STRATEGI,
+      entityId: id,
+      actorEmployeeId: actor.employeeId,
+      action: 'save_kpi',
+      beforeJson: null,
+      afterJson: { leadingIndicator: indikator },
+      createdBy: actor.employeeId,
+    });
+    return loadDetail(tx, await loadStrategiRow(tx, id));
+  });
+}
+
+/** E-1 / E-13 / H-3 / H-4 input (A-09a) — the narrative header fields. */
+export interface NarasiInput {
+  growthThesis?: string | null;
+  urutanEksekusiAlasan?: string | null;
+  skenarioMundur?: string | null;
+  kondisiStopScope?: string | null;
+}
+
+/**
+ * saveNarasi writes the four Section E/H paragraph fields.
+ *
+ * Partial saves are legal (§7 autosave, §5 step 5 live count), and blank is
+ * normalised to `null` for the same reason as `saveKpi`: `''` and "unanswered"
+ * must not be two ways of saying the same thing, or every gate downstream has to
+ * test for both forever. The DB agrees via `ck_strategi_narasi_ehi_isi`.
+ *
+ * **H-4 is written here but never gated** — §4 marks it `O`. It is also §4.1
+ * hard-internal, so no caller may put it on a client-facing path; the enforcement
+ * for that is A-10, and until then this comment is the only thing saying so.
+ */
+export async function saveNarasi(
+  sql: Sql,
+  actor: Actor,
+  id: string,
+  input: NarasiInput,
+): Promise<StrategiDetail> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    await requireDraftAndWriter(tx, actor, id);
+
+    const teks = (v: string | null | undefined): string | null => {
+      const t = (v ?? '').trim();
+      return t === '' ? null : t;
+    };
+
+    await tx`
+      update strategi set
+        growth_thesis          = ${teks(input.growthThesis)},
+        urutan_eksekusi_alasan = ${teks(input.urutanEksekusiAlasan)},
+        skenario_mundur        = ${teks(input.skenarioMundur)},
+        kondisi_stop_scope     = ${teks(input.kondisiStopScope)}
+       where id = ${id}`;
+
+    await ex.audit.insertAudit({
+      entityType: ENTITY_STRATEGI,
+      entityId: id,
+      actorEmployeeId: actor.employeeId,
+      action: 'save_narasi',
+      beforeJson: null,
+      // The paragraphs themselves are not copied into the audit row: H-4 is
+      // hard-internal, and `audit_log` has a different read scope from
+      // `strategi`. Which fields were answered is the auditable fact here; the
+      // content lives on the record, versioned by `strategi_version`.
+      afterJson: {
+        terisi: (
+          [
+            ['E-1', input.growthThesis],
+            ['E-13', input.urutanEksekusiAlasan],
+            ['H-3', input.skenarioMundur],
+            ['H-4', input.kondisiStopScope],
+          ] as const
+        )
+          .filter(([, v]) => (v ?? '').trim() !== '')
+          .map(([k]) => k),
+      },
+      createdBy: actor.employeeId,
+    });
+    return loadDetail(tx, await loadStrategiRow(tx, id));
+  });
+}
+
+/** D-7 input. All three parts are mandatory together — see Rule 19. */
+export interface SanggahanInput {
+  alasan: string;
+  angkaPembanding: string;
+  targetRealistis: string;
+}
+
+/**
+ * raiseSanggahan records D-7 and notifies SPV Account + Head of Sales (Rule 19).
+ *
+ * **It does not touch the floor, and it cannot.** The stretch/floor relation is
+ * `ck_strtg_stretch_gmv` on `strategi_target`; nothing here writes that table.
+ * That is the whole point of Rule 19 — a challenge is evidence for the
+ * post-mortem, not an escape hatch, so the code path that files one has no reach
+ * into the numbers it disputes.
+ *
+ * The notification fires only on the FIRST filing (`null` → filled). Re-editing a
+ * challenge while still drafting is a correction, not a new event, and pinging the
+ * Head of Sales once per keystroke-save would make the event worthless.
+ *
+ * Recipients cross two divisions, which is why the event resolves
+ * `explicitOrLeads`: SPV Account comes from `division`, and the Sales leads are
+ * looked up here and passed explicitly. `leadsOfDivision` can only ever reach one
+ * of the two.
+ */
+export async function raiseSanggahan(
+  sql: Sql,
+  actor: Actor,
+  id: string,
+  input: SanggahanInput,
+): Promise<StrategiDetail> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const head = await requireDraftAndWriter(tx, actor, id);
+
+    const alasan = (input.alasan ?? '').trim();
+    const pembanding = (input.angkaPembanding ?? '').trim();
+    const realistis = (input.targetRealistis ?? '').trim();
+    if (alasan === '' || pembanding === '' || realistis === '') {
+      throw new ValidationError(MSG_SANGGAHAN_INCOMPLETE);
+    }
+    if (Number.isNaN(Number(pembanding)) || Number(pembanding) < 0) {
+      throw new ValidationError(MSG_SANGGAHAN_INCOMPLETE);
+    }
+    if (Number.isNaN(Number(realistis)) || Number(realistis) < 0) {
+      throw new ValidationError(MSG_SANGGAHAN_INCOMPLETE);
+    }
+
+    const pertamaKali = head.sanggahanAlasan === null;
+
+    await tx`
+      update strategi set
+        sanggahan_alasan           = ${alasan},
+        sanggahan_angka_pembanding = ${pembanding},
+        sanggahan_target_realistis = ${realistis},
+        sanggahan_diajukan_pada    = now(),
+        sanggahan_diajukan_oleh    = ${actor.employeeId}
+       where id = ${id}`;
+
+    await ex.audit.insertAudit({
+      entityType: ENTITY_STRATEGI,
+      entityId: id,
+      actorEmployeeId: actor.employeeId,
+      action: pertamaKali ? 'raise_sanggahan' : 'edit_sanggahan',
+      beforeJson: pertamaKali ? null : { alasan: head.sanggahanAlasan },
+      afterJson: { alasan, angkaPembanding: pembanding, targetRealistis: realistis },
+      createdBy: actor.employeeId,
+    });
+
+    if (pertamaKali) {
+      await notification.emit(ex.notify, {
+        event: notification.EVENTS.StrategiSanggahanTarget,
+        entityType: ENTITY_STRATEGI,
+        entityId: id,
+        actor: actor.employeeId,
+        deepLink: `/account/strategi/${id}`,
+        division: ACCOUNT_DIVISION,
+        explicitRecipients: await leadsOfDivision(tx, SALES_DIVISION),
+      });
+    }
+    return loadDetail(tx, await loadStrategiRow(tx, id));
+  });
+}
+
+/**
+ * setAssumptionStatus flips one D-8 assumption, firing
+ * `strategi_revisi_disarankan` on the way into `Gugur` (§7 field-level notes).
+ *
+ * **Reachable while the Strategi is `Aktif`, unlike every other Section-D write.**
+ * That is the reason it is a separate function rather than a field on
+ * `saveAssumptions`: an assumption breaks during EXECUTION — the ads budget lands
+ * late in month 3 — which is exactly when the record is `Aktif` and every editing
+ * door is shut. Routing this through `requireDraftAndWriter` would make the
+ * feature unreachable at the only moment it matters.
+ *
+ * It is not a state machine and does not go through `sm_transition`: `status` here
+ * is a child-row attribute with no ID and no screen of its own, handled like
+ * `service_plan_gate.keputusan_am` (the accepted M6C precedent). Every flip still
+ * writes `audit_log`.
+ *
+ * Flipping to `Gugur` does NOT open a revision by itself. Rule 13 says a revision
+ * needs a trigger, a reason, and the broken assumptions — a human decision. This
+ * emits the suggestion (`strategi_revisi_disarankan`, "disarankan"), which is what
+ * the PRD asks for and no more.
+ */
+export async function setAssumptionStatus(
+  sql: Sql,
+  actor: Actor,
+  id: string,
+  kode: string,
+  status: AssumptionState,
+): Promise<StrategiDetail> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    if (!ASSUMPTION_STATES.includes(status)) {
+      throw new ValidationError(MSG_ASSUMPTION_STATUS_INVALID);
+    }
+    const head = await loadStrategiRow(tx, id, true);
+    const ownerAm = await ownerAmOfContract(tx, head.contractId);
+    // Read-scope is wrong here (an OD may read everything) and draft-scope is too
+    // narrow, so the gate is the WRITE set plus the reviewer: the AM who owns the
+    // account or the Account lead who approved it are the two people who can know
+    // an assumption stopped holding.
+    if (!canWriteStrategi(actor, ownerAm) && !canApproveStrategi(actor)) {
+      throw new ForbiddenError(MSG_NOT_OWNER_AM);
+    }
+
+    const rows = await tx<{ status: string }[]>`
+      select status from strategi_assumption
+       where strategi_id = ${id} and kode = ${kode} for update`;
+    if (rows.length === 0) {
+      throw new NotFoundError(MSG_ASSUMPTION_NOT_FOUND);
+    }
+    const sebelum = rows[0].status;
+    if (sebelum === status) {
+      // Idempotent: re-asserting the current status is not an error, and must not
+      // fire a second notification.
+      return loadDetail(tx, head);
+    }
+
+    await tx`
+      update strategi_assumption set status = ${status}
+       where strategi_id = ${id} and kode = ${kode}`;
+
+    await ex.audit.insertAudit({
+      entityType: ENTITY_STRATEGI,
+      entityId: id,
+      actorEmployeeId: actor.employeeId,
+      action: 'set_assumption_status',
+      beforeJson: { kode, status: sebelum },
+      afterJson: { kode, status },
+      createdBy: actor.employeeId,
+    });
+
+    if (status === 'Gugur') {
+      await notification.emit(ex.notify, {
+        event: notification.EVENTS.StrategiRevisiDisarankan,
+        entityType: ENTITY_STRATEGI,
+        entityId: id,
+        actor: actor.employeeId,
+        deepLink: `/account/strategi/${id}`,
+        division: ACCOUNT_DIVISION,
+        // "-> AM + SPV": the SPV arm is the Account leads resolved from
+        // `division`; the AM has to be explicit because they are not a lead.
+        // `notifyActor` stays false, so an AM who flips their own assumption is
+        // not told what they just did.
+        explicitRecipients: ownerAm === null ? [] : [ownerAm],
+      });
+    }
+    return loadDetail(tx, await loadStrategiRow(tx, id));
+  });
+}
+
+/**
+ * leadsOfDivision resolves the active leads/SPVs of one CDPS division.
+ *
+ * `notify_emit` already does this for the `division` argument, but it can only do
+ * it for ONE division per emission. D-7 needs two, so the second set is resolved
+ * here and passed as explicit recipients. The JOIN mirrors `notify_emit`'s
+ * candidate CTE exactly — including `status_aktif`, so an employee deactivated in
+ * HRIS stops receiving notifications on the next sync.
+ */
+async function leadsOfDivision(sql: Queryable, division: string): Promise<string[]> {
+  const rows = await sql<{ employee_id: string }[]>`
+    select e.employee_id from employees e
+      join role_mappings rm on rm.divisi = e.divisi and rm.jabatan = e.jabatan
+     where rm.division = ${division} and rm.level = 'lead' and e.status_aktif = true`;
+  return rows.map((r) => r.employee_id);
+}
+
 /** Section E input. */
 export interface PillarInput {
   jenis: PillarKind;
@@ -3497,6 +3962,28 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
     }
   }
 
+  // D-5 (A-08): all three horizons, `W`. One message for the group rather than
+  // three near-identical ones — "definisi berhasil belum lengkap" is the same
+  // problem whichever horizon is blank, and the form jumps to D-5 either way.
+  if (
+    head.definisiBerhasil30 === null ||
+    head.definisiBerhasil60 === null ||
+    head.definisiBerhasil90 === null
+  ) {
+    out.push({ kode: 'D-5', pesan: MSG_DEFINISI_BERHASIL_REQUIRED });
+  }
+
+  // D-6 (A-08): `W`, so at least one. The cap is enforced at save time and by
+  // CHECK, which is why only the floor is checked here — a row over the cap
+  // cannot exist to be reported.
+  if (head.leadingIndicator.length === 0) {
+    out.push({ kode: 'D-6', pesan: MSG_LEADING_INDICATOR_REQUIRED });
+  }
+
+  // D-7 is `O` (optional) and deliberately NOT gated: Rule 19 makes a challenge
+  // advisory, and requiring one would turn "the floor looks unachievable" from
+  // evidence into paperwork every AM fills to pass validation.
+
   const assumptions = await sql<{ kode: string; target_terkait: unknown }[]>`
     select kode, target_terkait from strategi_assumption where strategi_id = ${id}`;
   if (assumptions.length < 3) {
@@ -3509,6 +3996,18 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
   const uncovered = targets.filter((t) => !covered.has(targetKey('gmv', t.channel, t.month_index)));
   if (uncovered.length > 0) {
     out.push({ kode: 'Rule 8', pesan: MSG_TARGET_WITHOUT_ASSUMPTION });
+  }
+
+  // Section E/H narrative (A-09a). Three of the four are `W`; H-4 is `O` and is
+  // deliberately absent — see `saveNarasi`.
+  if (head.growthThesis === null) {
+    out.push({ kode: 'E-1', pesan: MSG_GROWTH_THESIS_REQUIRED });
+  }
+  if (head.urutanEksekusiAlasan === null) {
+    out.push({ kode: 'E-13', pesan: MSG_URUTAN_EKSEKUSI_REQUIRED });
+  }
+  if (head.skenarioMundur === null) {
+    out.push({ kode: 'H-3', pesan: MSG_SKENARIO_MUNDUR_REQUIRED });
   }
 
   // Rule 9 / E-11: the anti-scope-creep record. Empty is a validation error, by
@@ -3913,6 +4412,16 @@ export async function openRevision(
     // have to re-marshal all twenty of its columns — and the day one is added and
     // not appended there, every revision would silently start with a blank
     // Section A while every test on version 1 still passed.
+    //
+    // A-08 was that day, and it did NOT stay silent: the D-5/D-6 columns landed
+    // as submit requirements, so a revision that dropped them failed the gate
+    // instead of shipping half-empty. Carried forward here for the same reason
+    // Section A is — the AM is revising a strategy, not retyping it.
+    //
+    // D-7 is deliberately NOT carried. A Sanggahan Target is an ACT, with an
+    // actor and a timestamp, aimed at one version's floor; copying it would show
+    // the new version as challenged by someone who never challenged it. Version
+    // n keeps its own challenge, immutable and still readable.
     await tx`
       insert into strategi
         (id, contract_id, client_id, versi_no, strategi_induk_id, versi_sebelumnya_id, status,
@@ -3921,7 +4430,9 @@ export async function openRevision(
          posisi_harga, usp, kapasitas_stok, lead_time_restock_hari, plafon_unit_per_bulan,
          titik_kirim_kota, titik_kirim_detail, ekspektasi_klien, riwayat_agensi,
          pantangan_klien, pantangan_klien_tidak_ada, decision_maker, sla_klien_jam,
-         sla_klien_catatan, aset_dari_klien, aset_dari_klien_tidak_ada, aset_catatan)
+         sla_klien_catatan, aset_dari_klien, aset_dari_klien_tidak_ada, aset_catatan,
+         definisi_berhasil_30, definisi_berhasil_60, definisi_berhasil_90, leading_indicator,
+         growth_thesis, urutan_eksekusi_alasan, skenario_mundur, kondisi_stop_scope)
       select ${newId}, contract_id, client_id, versi_no + 1, ${induk}, id,
              ${STRATEGI_DRAFT_REVISI}, tanggal_mulai_siklus, siklus_terkunci,
              toleransi_over_persen, ${actor.employeeId},
@@ -3929,7 +4440,9 @@ export async function openRevision(
              posisi_harga, usp, kapasitas_stok, lead_time_restock_hari, plafon_unit_per_bulan,
              titik_kirim_kota, titik_kirim_detail, ekspektasi_klien, riwayat_agensi,
              pantangan_klien, pantangan_klien_tidak_ada, decision_maker, sla_klien_jam,
-             sla_klien_catatan, aset_dari_klien, aset_dari_klien_tidak_ada, aset_catatan
+             sla_klien_catatan, aset_dari_klien, aset_dari_klien_tidak_ada, aset_catatan,
+             definisi_berhasil_30, definisi_berhasil_60, definisi_berhasil_90, leading_indicator,
+             growth_thesis, urutan_eksekusi_alasan, skenario_mundur, kondisi_stop_scope
         from strategi where id = ${head.id}`;
 
     await copyChildren(tx, head.id, newId, actor.employeeId);
