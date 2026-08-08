@@ -74,6 +74,16 @@ export const EVENTS = {
   // would misdescribe what that amendment was.
   TransactionChangeRequested: 'm5.transaction.change_requested', // -> Directors
   TransactionChangeDecided: 'm5.transaction.change_decided', // -> Requester
+  // ----- catalog v4 (A-08) — 1 Strategi -----
+  // M6A §4 marks D-7 `O (notif SPV + Head of Sales)`, but §7 D12 lists only the
+  // four `strategi_*` events and none of them is a target challenge. The PRD
+  // contradicting itself is not a licence to pick silently, so §4 is built (the
+  // PRD wins) through the mechanism O55 exists for: its own version row.
+  // The identifier is DOTTED, unlike the four PRD-named ones — the v2 naming
+  // rule says the plain style is used precisely because the PRD wrote it that
+  // way. The PRD never wrote this one, so it follows the house convention,
+  // exactly like `m6.client.assigned` (O53).
+  StrategiSanggahanTarget: 'm6a.strategi.sanggahan_target', // -> SPV Account + Head of Sales
 
 } as const;
 
@@ -114,6 +124,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
     eventCount: 2,
     decisionRef: 'docs/DECISIONS.md 2026-08-04 (M5-OA-7)',
   },
+  {
+    version: 4,
+    description:
+      'M6A §4 D-7 — sanggahan target memberi tahu SPV Account + Head of Sales: 1 event Strategi',
+    eventCount: 1,
+    decisionRef: 'docs/DECISIONS.md 2026-08-08 (A-08 — §4 vs §7 D12)',
+  },
 ] as const;
 
 /** The catalog version currently in force. */
@@ -147,6 +164,14 @@ export interface CatalogEntry {
  *
  * v2 (14): the single M6A/6B/6C amendment (O55, seeded in
  * 20260807010000_notif_catalog_v2.sql) plus `m6.client.assigned` (O53).
+ *
+ * v3 (2): the Finance ACC flow (M5-OA-7, seeded in
+ * 20260807130000_transaction_change_request.sql).
+ *
+ * v4 (1): D-7 Sanggahan Target (A-08, seeded in
+ * 20260808000000_m6a_section_d.sql). Its own version rather than an addition to
+ * v2 for the same reason v3 got one: v2 is the M6A/6B/6C §7 amendment, and an
+ * event §7 never lists would make the registry misdescribe it.
  */
 export const CATALOG: Record<EventType, CatalogEntry> = {
 
@@ -185,6 +210,9 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
   [EVENTS.ClientAssigned]: { description: 'Klien di-assign ke AM — ke AM bersangkutan', resolver: 'explicit', version: 2 },
   [EVENTS.TransactionChangeRequested]: { description: 'Pengajuan perubahan transaksi menunggu ACC Direktur', resolver: 'explicit', version: 3 },
   [EVENTS.TransactionChangeDecided]: { description: 'Pengajuan perubahan transaksi di-ACC/tolak', resolver: 'explicit', version: 3 },
+
+  // --- v4 (A-08) — description and resolver must match the migration seed ---
+  [EVENTS.StrategiSanggahanTarget]: { description: 'AM mengajukan Sanggahan Target (D-7, advisory) — ke SPV Account + Head of Sales', resolver: 'explicitOrLeads', version: 4 },
 
 };
 

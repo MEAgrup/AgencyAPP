@@ -98,6 +98,27 @@ export type ChannelState = 'Eksisting' | 'Belum Aktif';
 export type AssumptionState = 'Berlaku' | 'Gugur' | 'Terverifikasi';
 export type RiskLevel = 'rendah' | 'sedang' | 'tinggi';
 
+/**
+ * D-4 metric vocabulary — and therefore also the D-6 leading-indicator set
+ * (A-08). §4 never wrote D-6's list, so it reuses the one the PRD did write
+ * (open question X-13). Server-side these are one array (`TARGET_METRICS`) and a
+ * DB CHECK; if the set is ever widened, this literal moves in the same commit.
+ */
+export type LeadingIndicator =
+  | 'gmv'
+  | 'pengunjung'
+  | 'cr'
+  | 'aov'
+  | 'roas_min'
+  | 'acos_maks'
+  | 'sku_winner'
+  | 'affiliate_aktif'
+  | 'jam_live'
+  | 'jumlah_video';
+
+/** D-6 — "maks 5" (§4). Enforced by the API and by `ck_strategi_leading_indicator`. */
+export const LEADING_INDICATOR_MAX = 5;
+
 // --- Section A / Section B repeatable structs (stored as jsonb server-side).
 // Named interfaces, not `Record<string, unknown>[]`: the response-shape guard
 // follows a key whose type names an interface, and an anonymous bag is a shape
@@ -259,6 +280,31 @@ export interface Strategi {
   /** A-14 (O58). */
   aset_dari_klien_tidak_ada: boolean;
   aset_catatan: string | null;
+
+  // Section D header (A-08). The rest of Section D is elsewhere in this shape:
+  // D-1/D-2/D-4 in `targets`, D-3 in `komposisi_kontribusi` (derived), D-8/D-9 in
+  // `assumptions`.
+  /** D-5 — all three are `W`; the submit gate reports the group as `D-5`. */
+  definisi_berhasil_30: string | null;
+  definisi_berhasil_60: string | null;
+  definisi_berhasil_90: string | null;
+  /**
+   * D-6 — maks 5, drawn from the D-4 metric vocabulary (`TARGET_METRICS`). The
+   * form must offer a closed checkbox list, not a free-text field: a value outside
+   * the set is refused by the API and by a DB CHECK.
+   */
+  leading_indicator: LeadingIndicator[];
+  /**
+   * D-7 — Sanggahan Target. **HARD-INTERNAL (§4.1): never render this on anything
+   * client-facing.** Advisory only: `sanggahan_target_realistis` is the AM's
+   * opinion and is never the floor — the floor stays `targets[].nilai_floor`.
+   * `null` across all five means no challenge was filed (D-7 is `O`).
+   */
+  sanggahan_alasan: string | null;
+  sanggahan_angka_pembanding: number | null;
+  sanggahan_target_realistis: number | null;
+  sanggahan_diajukan_pada: string | null;
+  sanggahan_diajukan_oleh: string | null;
 }
 
 /** B-1 / B-5 — one row per month of the declared baseline window (B-0.7). */
@@ -654,6 +700,57 @@ export function saveStrategiTargets(id: string, targets: unknown[]): Promise<Str
 
 export function saveStrategiAssumptions(id: string, assumptions: unknown[]): Promise<StrategiDetail> {
   return api.put<StrategiDetail>(`/strategi/${id}/assumptions`, { assumptions });
+}
+
+/**
+ * D-5 + D-6 (A-08). Partial bodies are legal — this is the autosave door (§7), so
+ * the form may send whatever the AM has typed so far. There is deliberately NO
+ * setter for D-3: it is derived from D-2 (X-11) and arrives as
+ * `komposisi_kontribusi`.
+ */
+export function saveStrategiKpi(
+  id: string,
+  body: {
+    definisi_berhasil_30?: string | null;
+    definisi_berhasil_60?: string | null;
+    definisi_berhasil_90?: string | null;
+    leading_indicator?: LeadingIndicator[];
+  },
+): Promise<StrategiDetail> {
+  return api.put<StrategiDetail>(`/strategi/${id}/kpi`, body);
+}
+
+/**
+ * D-7 Sanggahan Target (Rule 19). POST because filing one is an act: the first
+ * call notifies SPV Account + Head of Sales, later calls correct the text without
+ * notifying again.
+ *
+ * It does not and cannot lower the floor — the form must not present it as a way
+ * to change the target. `angka_pembanding` / `target_realistis` are money, so they
+ * travel as strings.
+ */
+export function raiseStrategiSanggahan(
+  id: string,
+  body: { alasan: string; angka_pembanding: string; target_realistis: string },
+): Promise<StrategiDetail> {
+  return api.post<StrategiDetail>(`/strategi/${id}/sanggahan`, body);
+}
+
+/**
+ * Flip one D-8 assumption's status. Reachable while the Strategi is `Aktif` —
+ * unlike `saveStrategiAssumptions`, which is Draft-only — because that is when an
+ * assumption actually breaks. `Gugur` notifies AM + SPV that a revision is
+ * advisable; it does not start one.
+ */
+export function setStrategiAssumptionStatus(
+  id: string,
+  kode: string,
+  status: AssumptionState,
+): Promise<StrategiDetail> {
+  return api.put<StrategiDetail>(
+    `/strategi/${id}/assumptions/${encodeURIComponent(kode)}/status`,
+    { status },
+  );
 }
 
 export function saveStrategiPillars(id: string, pillars: unknown[]): Promise<StrategiDetail> {
