@@ -3,9 +3,13 @@
 > Rantai: SESI1 → … → SESI7 → **SESI8 (ini, terbaru)**. Baca yang bernomor
 > tertinggi lebih dulu; sesi sebelumnya hanya untuk konteks sejarah.
 >
-> **Sesi ini mengeksekusi A-08 (Section D lengkap) dan menemukan drift migrasi
-> ronde kelima di live.** Kode ter-commit, ter-push, PR **#107** terbuka.
+> **Sesi ini: A-08 (Section D lengkap) + A-09a (narasi E/H) + koreksi O47b +
+> detail cek O42.** Kode ter-commit, ter-push, PR **#107** terbuka.
 > **Live `CDPS SG` TIDAK disentuh sesi ini** — lihat §4, itu keputusan pemilik.
+>
+> 🔴 **DUA premis tercatat runtuh sesi ini, dan keduanya penting:** O59 (live
+> memuat migrasi Section D yang tidak ada di repo, §4) dan **O47b §0** (`main`
+> TERNYATA memuat PII ⇒ rewrite tetap wajib, §8).
 >
 > | Bagian | Isi |
 > |---|---|
@@ -17,6 +21,8 @@
 > | 5 | X-13 dibuka: PRD tidak pernah menulis daftar enum D-6 |
 > | 6 | Apa yang tersisa dan urutannya |
 > | 7 | Jebakan lingkungan (bertambah dua) |
+> | 8 | 🔴 **O47b — premis §0 runtuh: `main` MEMUAT PII, rewrite tetap wajib** |
+> | 9 | O42 — detail cek disiapkan · A-09a mendarat · A-09b di-scope |
 
 ## 0. Posisi persis — SALIN INI KE SESI BERIKUTNYA
 
@@ -25,11 +31,11 @@
 | Branch | `claude/handoff-sesi6-migration-mrqglv` |
 | `main` | `1316705` — PR #106 ter-merge |
 | PR terbuka | **#107** (A-08) — dibuka sesi ini, belum di-review |
-| Migrasi | **69 berkas** (68 + A-08 `20260808000000`). ⚠️ **Live TIDAK sinkron — O59.** Lokal: 69 migrasi bersih lewat `db-rebuild` |
+| Migrasi | **70 berkas** (68 + A-08 `20260808000000` + A-09a `20260808010000`). ⚠️ **Live TIDAK sinkron — O59.** Lokal: 70 migrasi bersih lewat `db-rebuild` |
 | Gate | tabel **76** (tidak berubah) · prefix **31** · mesin **16** · event **33 → 34** · `CATALOG_VERSION` **3 → 4** |
-| Skor | M6A **64%** (9/14) — A-08 mendarat · M6B **8%** (1/12) |
-| Test | domain **888 hijau + 1 skipped** · `apps/api` **324** · `packages/core` **118** · `packages/db` **15** · 4 invariant SQL hijau |
-| Menggantung | Kode: **NOL**. Keputusan: **O59** (blocker deploy) + **X-13** |
+| Skor | M6A **~68%** (9,5/14) — A-08 + A-09a mendarat, A-09b tersisa · M6B **8%** (1/12) |
+| Test | domain **895 hijau + 1 skipped** · `apps/api` **324** · `packages/core` **118** · `packages/db` **15** · 4 invariant SQL hijau · typecheck FE bersih |
+| Menggantung | Kode: **NOL** (working tree bersih, lokal ≡ remote). Keputusan: **O59** (blocker deploy) · **O47b rewrite** (§8) · **O42** (3 keputusan) · **X-13** |
 
 ### 0.1 ⚠️ Handoff yang masuk ke sesi ini SALAH di empat titik
 
@@ -286,3 +292,107 @@ Selain yang SESI6/SESI7 catat, sesi ini menemukan dua yang memakan waktu:
    pool postgres berebut satu DB. `packages/domain/vitest.config.ts` menyetel
    `fileParallelism: false` justru untuk itu — jalankan **per workspace**
    (`cd packages/domain && npm test`).
+
+## 8. 🔴 O47b — premis §0 runbook runtuh: `main` MEMUAT PII
+
+Pemilik minta *"jalankan sesuai rekomendasi"*. Premisnya diperiksa lebih dulu —
+dan runtuh, jadi yang mendarat adalah koreksinya, bukan eksekusinya.
+
+**Kekeliruannya pada pemilihan penanda, bukan pada perintahnya.** Seluruh §0
+`RUNBOOK_O47b_SCRUB_PII.md` bersandar pada `f8faf12` sebagai "commit PII":
+
+```
+git show --stat f8faf12
+#  docs/DECISIONS.md · docs/handoff/HANDOFF_SESSION_20260717C.md
+git show f8faf12:docs/handoff/HANDOFF_SESSION_20260717C.md \
+  | grep -icE '@meagency\.co\.id|password|sandi'          # -> 0
+```
+
+`f8faf12` adalah commit **dokumentasi** (entri Open O35) dengan **nol** pola PII.
+Jadi `is-ancestor f8faf12 origin/main` = FALSE membuktikan `main` tidak
+menjangkau **satu commit docs** — bukan apa pun soal PII.
+
+**PII yang sesungguhnya:** CSV karyawan `backend/testdata/import_samples/`
+(`employees_cdps`, `employees_from_hris`, `employees_uat`, `nik_email`), dihapus
+commit `22af45b`. Dan `22af45b` **ADA DI `main`** — keempat blob-nya ditemukan di
+`git rev-list origin/main --objects`. Penghapusan 2026-07-30 mengeluarkannya dari
+**tree**, bukan dari **histori**: persis laporan palsu pertama.
+
+| | §0 mengklaim | Kenyataan |
+|---|---|---|
+| Rewrite `main` · force-push · re-clone | tidak perlu | **WAJIB** |
+| Hapus 26 ref | inti scrub | **nol efek untuk PII** (berbagi blob dengan `main`) |
+| Tiket Support | wajib | wajib |
+
+Jadi rencana (b) **sebagaimana DECISIONS 2026-08-07 menuliskannya** benar sejak
+awal; yang salah hanya "jalan pintas" yang ditemukan sesudahnya.
+
+**Status:** Langkah 1 (hapus 25 ref — bukan 26; `claude/fase1-sesi4-handoff-1x8v1i`
+false positive) **BELUM**: dicoba, **ditolak classifier izin**. Rewrite **tidak**
+dijalankan — biayanya jatuh ke orang lain (semua kontributor re-clone, PR #107
+mati, branch protection, redeploy Vercel SHA lama), jadi bukan langkah sesi agen.
+
+**Runbook sudah diperbaiki:** blok koreksi di kepala + **§5 verifikasi yang
+menguji BLOB**, bukan `f8faf12`, dengan gerbang laporan tiga syarat. §0 tidak
+dihapus, ditandai DIBATALKAN supaya cara kesimpulan salah itu terbentuk terbaca.
+
+⚠️ **JANGAN laporkan PII bersih sampai rewrite selesai.** Menghapus ref lalu
+menyebut O47b selesai = laporan palsu KETIGA untuk masalah yang sama.
+
+## 9. O42 detail cek · A-09a mendarat · A-09b di-scope
+
+### 9.1 O42 — `docs/handoff/O42_REKONSILIASI_ROLE_MAPPINGS.md`
+
+6 kueri berurut + 3 keputusan. **Temuan yang mengubah bentuk pertanyaannya:**
+`38 vs 23 vs 12` BUKAN tiga versi satu daftar.
+
+| Sumber | Baris | Bentuk kunci |
+|---|---|---|
+| `supabase/seed.sql` | 12 | **Title Case** karangan CDPS (`Sales`/`Sales Executive`) |
+| `supabase/seed/role_mappings_riil.csv` | 23 | **UPPERCASE** HRIS (`SALES`/`SALES JASA`) |
+| live `CDPS SG` | 38 (→39) | UPPERCASE + tambahan |
+
+Join `rm.divisi = e.divisi AND rm.jabatan = e.jabatan` **peka huruf besar-kecil**
+⇒ A dan B beririsan **NOL baris**. Jadi 12 itu **fixture**, bukan versi kurang
+lengkap dari 38 — dan pertanyaan sebenarnya: **apakah `employees` produksi
+menyimpan string HRIS mentah?** Karyawan seed memang Title Case, itu sebabnya
+fixture-nya cocok.
+
+Dampaknya kalau salah: `private.employee_role` INNER JOIN ⇒ karyawan tanpa
+mapping **404 di `/portal`** dan **tidak pernah** jadi penerima `notify_emit`,
+jadi notifikasi ke lead divisinya menguap **tanpa error** (nol penerima sah).
+Live dilaporkan 7 karyawan aktif tanpa mapping; 3 `Management/Director` sengaja
+(layered role), **4 sisanya perlu diputuskan**.
+
+### 9.2 A-09a — narasi Section E/H (SELESAI)
+
+Migrasi `20260808010000`, **nol tabel baru**, gerbang tabel tetap **76**.
+E-1 `growth_thesis` · E-13 `urutan_eksekusi_alasan` · H-3 `skenario_mundur` ·
+H-4 `kondisi_stop_scope`. Tiga pertama `W` + digerbangi; H-4 `O`, sengaja tidak.
+
+Dua keputusan yang bisa salah kalau ditebak:
+
+1. **H-4 IKUT tersalin ke revisi** walau `O` — ia **KONTEN** (kondisi yang
+   berlaku terus). Bandingkan **D-7 yang sengaja TIDAK tersalin**: sanggahan
+   adalah **TINDAKAN** dengan aktor + timestamp. Bedanya itu, bukan wajib/opsional.
+2. **H-4 tidak ditulis ke `audit_log`.** Ia hard-internal §4.1 dan `audit_log`
+   punya read-scope berbeda dari `strategi` ⇒ menyalin paragrafnya ke sana
+   memperluas siapa yang bisa membacanya. Yang dicatat: field MANA yang terjawab.
+   Ada test yang meng-assert marker rahasia TIDAK muncul di `after_json`.
+
+### 9.3 A-09b — sisa Section E/F/G/H/I (analisis celah SUDAH dikerjakan)
+
+**Jangan ulangi analisisnya**, ada di `docs/backlog/M6ABC_BACKLOG.md`. Ringkas:
+
+- **Sudah ada:** E-3…E-11 (`strategi_pillar`) · F-1…F-6 (`strategi_resource`) ·
+  F-7 + G-0 (header) · H-1 (`strategi_risk`) · J-1/J-2 (header) · J-3
+  (`strategi_version`) · **I-1 + J-4 turunan, tidak pernah disimpan**.
+- **Belum ada:** E-2 · E-12 · G-1 · G-2 · G-3/G-4 · H-2 · I-2 · I-3 · I-4.
+- ⚠️ **H-2 harus memakai set enum yang SAMA** dengan
+  `strategi_version.trigger_revisi` (J-3) yang sudah memakai kode trigger — dua
+  daftar tertutup yang bisa menyimpang adalah kelas O48/O51.
+- ⚠️ **Setiap kolom header baru WAJIB masuk DUA daftar di `openRevision`**
+  (§3). Kalau field-nya bukan syarat submit, hilangnya **tidak** membuat satu
+  test pun merah — perangkap yang masih aktif.
+- E-4 floor price sudah ada (`strategi_pillar.floor_price`); yang belum adalah
+  validasi Brief yang MEMBACANYA — tiket M7/M12, bukan M6A.
