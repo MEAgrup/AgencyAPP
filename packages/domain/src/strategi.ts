@@ -46,7 +46,7 @@
  * Reference: docs/prd/CDPS_Module6A_Strategi.md.
  */
 
-import { ident, permission, statemachine } from '@cdps/core';
+import { ident, money, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import {
   ACCOUNT_DIVISION,
@@ -783,6 +783,34 @@ export interface StrategiTarget {
   sumberFloor: FloorSource | null;
 }
 
+/**
+ * D-3 — komposisi kontribusi channel (% dari total GMV).
+ *
+ * **TURUNAN, tidak pernah disimpan** (X-11, keputusan pemilik 2026-08-07:
+ * *"buat target turunan dulu, biarkan nanti saya QC di production"*). PRD M6A
+ * menandai D-3 `W` (diketik AM, Σ=100 ±0,5). Jawaban X-04 — *"target GMV dibuat
+ * per platform sama dengan baseline"* — membuat komposisi menjadi **akibat**
+ * dari D-2, bukan input: kalau setiap channel dijangkarkan ke baseline-nya
+ * sendiri, persentasenya sudah ditentukan begitu D-2 terisi. Mengetiknya lagi
+ * berarti dua sumber untuk satu angka, dan yang kedua bisa berbohong.
+ *
+ * ⚠️ **Provisional.** Pemilik akan meninjaunya di QC produksi; kalau ternyata
+ * AM memang perlu menyatakan komposisi sebagai NIAT (berbeda dari yang tersirat
+ * D-2), bentuknya berubah jadi "diketik + peringatan bila berselisih". Sampai
+ * itu diputuskan, jangan tambahkan kolom penyimpan — menambahkannya lebih mudah
+ * daripada mencabutnya.
+ */
+export interface StrategiKomposisi {
+  channel: string;
+  /** Σ stretch GMV channel ini, seluruh bulan. Rupiah, string desimal. */
+  targetGmv: string;
+  /**
+   * % dari total GMV seluruh channel, 2 desimal. `null` saat totalnya nol —
+   * pembagian nol dirender `—`, bukan error (aturan rumah #7).
+   */
+  persen: number | null;
+}
+
 /** D-8 + D-9. */
 export interface StrategiAssumption {
   kode: string;
@@ -913,6 +941,8 @@ export interface StrategiDetail extends Strategi {
   risikoStruktural: StrategiRisikoStruktural[];
   prasyaratKlien: StrategiPrasyaratKlien[];
   targets: StrategiTarget[];
+  /** D-3 — turunan dari `targets` (metrik `gmv`), tidak pernah disimpan. */
+  komposisiKontribusi: StrategiKomposisi[];
   assumptions: StrategiAssumption[];
   pillars: StrategiPillar[];
   resources: StrategiResource[];
@@ -1152,6 +1182,44 @@ export function trenBaseline(months: BaselineMonth[]): {
   const bulat = Math.round(delta * 100) / 100;
   if (Math.abs(bulat) <= TREN_STABIL_BAND_PERSEN) return { tren: 'stabil', trenPersen: bulat };
   return { tren: bulat > 0 ? 'naik' : 'turun', trenPersen: bulat };
+}
+
+/**
+ * D-3 — derive the channel contribution mix from the D-2 GMV targets (X-11).
+ *
+ * Summed in **integer cents** through `money.parse`, not in `Number`: a stretch
+ * matrix is 12 months × n channels of rupiah values, and float addition over
+ * that many terms drifts by enough to make the percentages disagree with the
+ * totals shown next to them.
+ *
+ * Rounding is to 2 decimals per channel, so the column may sum to 99,99 or
+ * 100,01. That is correct for a DERIVED display and must not be "fixed" by
+ * forcing the last row to absorb the remainder — the PRD's Σ=100 ±0,5 rule was
+ * a validation on a TYPED field; here the composition is 100% by construction
+ * and only the rendering rounds.
+ *
+ * Channels are those that actually carry a GMV target. A channel present in
+ * Section B but with no D-2 row yet is absent here rather than shown as 0% —
+ * "belum diisi" and "diberi nol" are different answers, and M6A §9's anti-vanity
+ * guard exists precisely because they get confused.
+ */
+export function komposisiKontribusi(targets: StrategiTarget[]): StrategiKomposisi[] {
+  const perChannel = new Map<string, bigint>();
+  for (const t of targets) {
+    if (t.metric !== 'gmv') continue;
+    perChannel.set(t.channel, (perChannel.get(t.channel) ?? 0n) + money.parse(t.nilaiStretch));
+  }
+  let total = 0n;
+  for (const v of perChannel.values()) total += v;
+  return [...perChannel.entries()]
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .map(([channel, cents]) => ({
+      channel,
+      targetGmv: money.decimal(cents),
+      // House rule #7: nothing divides by zero here — a matrix of zeroes has no
+      // composition to report, and `null` is what renders `—`.
+      persen: total === 0n ? null : Number((cents * 10000n + total / 2n) / total) / 100,
+    }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1516,6 +1584,15 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
   >`select * from strategi_target where strategi_id = ${id}
      order by metric asc, channel asc, month_index asc`;
 
+  const targets: StrategiTarget[] = targetRows.map((t) => ({
+    channel: t.channel,
+    monthIndex: t.month_index,
+    metric: t.metric as TargetMetric,
+    nilaiFloor: t.nilai_floor,
+    nilaiStretch: t.nilai_stretch,
+    sumberFloor: t.sumber_floor as FloorSource | null,
+  }));
+
   const assumptionRows = await sql<
     {
       kode: string;
@@ -1629,14 +1706,11 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
       deadline: dateOrNull(p.deadline),
       urutan: p.urutan,
     })),
-    targets: targetRows.map((t) => ({
-      channel: t.channel,
-      monthIndex: t.month_index,
-      metric: t.metric as TargetMetric,
-      nilaiFloor: t.nilai_floor,
-      nilaiStretch: t.nilai_stretch,
-      sumberFloor: t.sumber_floor as FloorSource | null,
-    })),
+    targets: targets,
+    // D-3 (X-11): derived here rather than in the route, so every reader of the
+    // detail — API, tests, a future job — sees the same number from the same
+    // place. There is no second definition to drift from.
+    komposisiKontribusi: komposisiKontribusi(targets),
     assumptions: assumptionRows.map((a) => ({
       kode: a.kode,
       asumsi: a.asumsi,

@@ -79,6 +79,7 @@ import {
   savePillars,
   saveResources,
   saveRisks,
+  komposisiKontribusi,
   saveTargets,
   submitStrategi,
   targetKey,
@@ -1602,6 +1603,81 @@ describeDb('Rule 13 — a revision is a new row, and n stays Aktif', () => {
     };
     await openRevision(sql, am(), strategiId, rev);
     await expect(openRevision(sql, am(), strategiId, rev)).rejects.toThrow(MSG_STRATEGI_EXISTS);
+  });
+});
+
+describeDb('D-3 (X-11) — komposisi kontribusi channel adalah TURUNAN, bukan input', () => {
+  it('derives the mix from the D-2 GMV targets', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveTargets(sql, am(), s.id, [
+      { channel: 'Shopee', monthIndex: 1, metric: 'gmv', nilaiFloor: '600000000.00', nilaiStretch: '600000000.00' },
+      { channel: 'Shopee', monthIndex: 2, metric: 'gmv', nilaiFloor: '600000000.00', nilaiStretch: '600000000.00' },
+      { channel: 'TikTok', monthIndex: 1, metric: 'gmv', nilaiFloor: '400000000.00', nilaiStretch: '400000000.00' },
+    ]);
+    const detail = await getStrategi(sql, am(), s.id);
+    expect(detail.komposisiKontribusi).toEqual([
+      { channel: 'Shopee', targetGmv: '1200000000.00', persen: 75 },
+      { channel: 'TikTok', targetGmv: '400000000.00', persen: 25 },
+    ]);
+  });
+
+  it('ignores non-GMV metrics — D-3 is a GMV mix, not a metric mix', () => {
+    const mix = komposisiKontribusi([
+      { channel: 'Shopee', monthIndex: 1, metric: 'gmv', nilaiFloor: null, nilaiStretch: '100.00', sumberFloor: null },
+      { channel: 'TikTok', monthIndex: 1, metric: 'roas_min', nilaiFloor: null, nilaiStretch: '4.00', sumberFloor: null },
+    ]);
+    expect(mix.map((m) => m.channel)).toEqual(['Shopee']);
+    expect(mix[0].persen).toBe(100);
+  });
+
+  it('renders `—` instead of dividing by zero when every target is 0 (house rule #7)', () => {
+    const mix = komposisiKontribusi([
+      { channel: 'Shopee', monthIndex: 1, metric: 'gmv', nilaiFloor: null, nilaiStretch: '0.00', sumberFloor: null },
+      { channel: 'TikTok', monthIndex: 1, metric: 'gmv', nilaiFloor: null, nilaiStretch: '0.00', sumberFloor: null },
+    ]);
+    expect(mix.map((m) => m.persen)).toEqual([null, null]);
+  });
+
+  it('leaves a channel with no GMV target OUT — "belum diisi" is not "nol persen"', () => {
+    const mix = komposisiKontribusi([
+      { channel: 'Shopee', monthIndex: 1, metric: 'gmv', nilaiFloor: null, nilaiStretch: '100.00', sumberFloor: null },
+    ]);
+    expect(mix).toHaveLength(1);
+  });
+
+  it('sums to 100 within rounding on a matrix that does not divide evenly', () => {
+    const mix = komposisiKontribusi(
+      ['A', 'B', 'C'].map((channel) => ({
+        channel,
+        monthIndex: 1,
+        metric: 'gmv' as const,
+        nilaiFloor: null,
+        nilaiStretch: '100.00',
+        sumberFloor: null,
+      })),
+    );
+    // 33,33 × 3 = 99,99. That is CORRECT for a derived display; forcing the last
+    // row to absorb 0,01 would make one channel's percentage disagree with its
+    // own rupiah figure.
+    expect(mix.map((m) => m.persen)).toEqual([33.33, 33.33, 33.33]);
+    const total = mix.reduce((n, m) => n + (m.persen ?? 0), 0);
+    expect(Math.abs(total - 100)).toBeLessThanOrEqual(0.5);
+  });
+
+  it('adds in integer cents, so a long matrix does not drift', () => {
+    // 12 months × 0,10 = 1,20 exactly. In float, 0.1 summed 12 times is not 1.2.
+    const mix = komposisiKontribusi(
+      Array.from({ length: 12 }, (_, i) => ({
+        channel: 'Shopee',
+        monthIndex: i + 1,
+        metric: 'gmv' as const,
+        nilaiFloor: null,
+        nilaiStretch: '0.10',
+        sumberFloor: null,
+      })),
+    );
+    expect(mix[0].targetGmv).toBe('1.20');
   });
 });
 

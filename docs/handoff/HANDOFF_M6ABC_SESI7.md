@@ -3,15 +3,19 @@
 > Rantai: SESI1 → … → SESI6 → **SESI7 (ini, terbaru)**. Baca yang bernomor
 > tertinggi lebih dulu; sesi sebelumnya hanya untuk konteks sejarah.
 >
-> Sesi ini punya **dua bagian**. Bagian 1 menutup pertanyaan terbuka dengan
-> jawaban pemilik (X-05 · O26 · O34 · O35 · O25 · O6 · O9) dan membersihkan satu
-> baris backlog basi (X-10). Bagian 2 — sesudah pemilik memilih — **mengeksekusi
-> ronde cacat 🔴**: O52 (b) · O51 (a) · O48 (b)+ledger mendarat di repo DAN di
-> live, dan O47b diputus (b).
+> **Sesi ini menutup 13 pertanyaan terbuka dan mengeksekusi ronde cacat 🔴.**
+> Tidak ada pekerjaan yang menggantung: semua ter-commit, ter-push, dan tiga
+> migrasi sudah di-apply ke live `CDPS SG` dengan sidik jari terverifikasi.
 >
-> **Mulai dari sini:** §6 — apa yang tersisa. Ringkasnya: O47b langkah (2)
-> (rewrite histori, butuh sesi bersih), O42 pertanyaan (3), lalu kembali ke
-> fitur M6 (A-08/A-09/A-13, B-01).
+> | Bagian | Isi |
+> |---|---|
+> | 1 | X-05 · O26 · O34 · O35 · O25 · O6 · O9 ditutup · X-10 ternyata basi · **D-3 turunan (X-11) diimplementasi** |
+> | 2 | **Cacat 🔴 dieksekusi** — O52 (b) · O51 (a) · O48 (b)+ledger, repo **dan** live |
+> | 3 | **O47b: premisnya runtuh** — `main` tidak memuat PII, scrub menyusut dari rewrite jadi 26 hapus ref |
+>
+> **Mulai dari sini:** §6 — apa yang tersisa dan urutannya. Ringkas: **A-08
+> sudah tidak terblokir** (X-11 terjawab), lalu A-09 → A-13 → B-01. Satu item
+> di luar M6 butuh izin yang sesi ini tidak punya: O47b langkah (1).
 
 ## 0. Posisi persis — SALIN INI KE SESI BERIKUTNYA
 
@@ -23,7 +27,8 @@
 | Migrasi | **68 berkas** (65 + O51 · O52 · O48-GrupB). Live `CDPS SG` **sinkron & terverifikasi** — sidik jari `698e526c05aabd27e14cf11bb15cd117` \| 11 fakta, identik di lokal & live |
 | Gate | tabel **76** · prefix **31** · mesin **16** · event **33** — **tidak berubah** (ketiga migrasi hanya menambah fungsi/policy) |
 | Skor | M6A **57%** (8/14) · M6B **8%** (1/12) — tidak berubah; sesi ini ronde cacat, bukan fitur |
-| Test | domain 165 + 241 + 257 + 76 hijau · `apps/api` 324 hijau · 4 invariant SQL hijau |
+| Test | **domain 864/864 hijau** (suite penuh, sekali jalan) · `apps/api` 324 · `packages/core` 117 · 4 invariant SQL hijau |
+| Menggantung | **NOL.** Working tree bersih, lokal ≡ remote, nol migrasi tertunda |
 
 ## 1. Yang mendarat sesi ini
 
@@ -76,6 +81,52 @@ gerbang submit "daftar terisi XOR checkbox dicentang", pesan
 **Pelajaran:** daftar "terbuka" yang disalin antar-handoff bisa hidup lebih lama
 dari masalahnya. Cocokkan §Open dengan §Decided sebelum menyalin, jangan
 sesudahnya.
+
+### 1.4 X-11 — D-3 dibangun sebagai FIELD TURUNAN (provisional)
+
+Pemilik: *"buat target turunan dulu, biarkan nanti saya QC di production kita
+akan putuskan nanti"*.
+
+D-3 (komposisi kontribusi channel, % dari total GMV) sekarang **dihitung** dari
+D-2, tidak diketik: `komposisiKontribusi(targets)` di `packages/domain/src/strategi.ts`,
+dipanggil dari perakitan `StrategiDetail` sehingga setiap pembaca melihat angka
+yang sama dari satu tempat. Ada di wire sebagai `komposisi_kontribusi`, tipe FE-nya
+terdaftar di `WIRE_TO_FE`.
+
+**NOL kolom penyimpan, NOL migrasi** — dan itu bagian terpenting dari keputusan
+ini. Menambah kolom nanti mudah; mencabut kolom yang sudah diisi produksi tidak.
+Kalau QC memutuskan AM perlu menyatakan komposisi sebagai NIAT, bentuknya
+berubah jadi "diketik + peringatan bila berselisih" dan **tidak ada data lama
+yang harus dimigrasikan**.
+
+Empat keputusan kecil di dalamnya yang akan salah kalau ditebak ulang:
+
+1. Dijumlahkan dalam **sen bilangan bulat** lewat `money.parse`, bukan `Number`.
+   Matriks stretch bisa 12 bulan × n channel; penjumlahan float sebanyak itu
+   menggeser angka sampai persentasenya berselisih dari total rupiah di
+   sebelahnya.
+2. Total nol ⇒ `persen: null`, dirender `—`, bukan `0%` (aturan rumah #7).
+3. Channel yang **belum punya baris D-2** tidak muncul — bukan muncul 0%.
+   "Belum diisi" dan "diberi nol" adalah jawaban berbeda.
+4. Pembulatan 2 desimal per baris berarti kolomnya bisa berjumlah **99,99**.
+   Itu benar untuk field turunan dan **jangan** "diperbaiki" dengan memaksa
+   baris terakhir menyerap sisa — itu membuat satu channel punya persentase
+   yang berselisih dari angka rupiahnya sendiri. Σ=100 ±0,5 di PRD adalah
+   validasi atas field yang **diketik**.
+
+⚠️ **Deviasi PRD tercatat:** M6A menandai D-3 `W`. Ini `Auto`. Sah karena
+tercatat, provisional karena pemilik akan meninjaunya.
+
+**Konsekuensi untuk sesi berikutnya: A-08 tidak lagi terblokir.**
+
+### 1.5 X-12 — dijadwalkan, bukan dijawab
+
+Pemilik: *"rumahnya akan dibuat menyusul"*. Komponen KPI untuk keterlambatan
+realisasi Plan **akan** ada, jadi X-12 berhenti jadi pertanyaan terbuka.
+
+**Batas yang berlaku sampai rumahnya ada, dan B-09 wajib menghormatinya:**
+keterlambatan boleh ditulis ke audit log; **tidak boleh** diklaim memengaruhi
+Performance Score; bobotnya **tidak boleh** dikarang.
 
 ## 2. Cacat 🔴 — DIPUTUS DAN (tiga dari lima) DIEKSEKUSI
 
@@ -245,19 +296,11 @@ Yang layak dibawa ke sesi berikutnya sebagai kebiasaan: **tulis test jalur-baca
 di bawah klaim nyata SEBELUM perbaikannya.** Di ronde ini test itulah yang
 memberi tahu bahwa perbaikan pertama belum menyembuhkan halamannya.
 
-## 3. Yang masih menunggu pemilik sesudah sesi ini
+## 3. Yang masih menunggu pemilik
 
-| # | Isi | Bentuk jawaban yang dibutuhkan |
-|---|---|---|
-| **O42 (3)** | Rekonsiliasi `role_mappings` **38-vs-23-vs-12** | Mana yang jadi sumber kebenaran. Ini **satu-satunya** sisa kluster O42/O44 |
-| **O45** | Cek paritas-grant menembak live | Rekomendasi §2.5: langkah QA ber-service-role, bukan CI |
-| **O24** | `commission_rule` riil per 32 layanan MSL | Rate per layanan. O25 sudah selesai; ini tidak |
-| **X-06** | RA-7 — tautan klien tanpa riwayat/diff | Konfirmasi posisi (contoh di backlog §4) |
-| **X-11** | 🆕 D-3 jadi turunan D-2, atau tetap diketik? | Konsekuensi jawaban X-04. Mengubah `W`→Auto butuh persetujuan. **Menggigit di A-08** |
-| **X-12** | 🆕 "point log buruk" X-07 belum punya komponen KPI | Nama komponen + bobot (dari mana diambil, total tetap 100) + ambang "terlambat" |
-
-**X-08** tetap terbuka tapi **bukan milik pemilik** — itu keputusan developer
-(daftar metrik manual ditulis eksplisit, tidak dicampur dengan yang auto).
+→ **§6.1.** Sengaja tidak diulang di sini: dua daftar yang sama akan menyimpang,
+dan sesi ini sudah kehilangan waktu dua kali karena daftar "terbuka" yang basi
+(X-10, lalu O44-asal). Satu daftar, satu tempat.
 
 ## 4. O47b dijelaskan — kenapa "berkasnya sudah dihapus" tidak berarti bersih
 
@@ -370,9 +413,11 @@ sudah bersih.**
    `.github/workflows/ci.yml`). Menaikkan satu saja = CI merah.
 4. Sesudah `db push`, jalankan **sidik jari struktural** (SESI6 §2). Jangan
    percaya "tidak error".
-5. Suite penuh (~844 test) **tidak andal dijalankan lokal** — postgres di
-   container ini di-SIGKILL sebelum selesai (SESI6 §3.2). Jalankan berkas yang
-   relevan; serahkan suite penuh ke CI.
+5. Suite penuh **bisa** jalan lokal (sesi ini: 864/864 dalam 44 detik) tapi
+   **tidak andal** — postgres di container ini kadang di-SIGKILL di tengah
+   (SESI6 §3.2, kambuh lagi hari ini). Kalau ia mati, kegagalannya **seragam**
+   `Test timed out in 5000ms` di seluruh berkas: itu infrastruktur, bukan
+   regresi. Cek `pg_isready` sebelum mempercayai hasil merah.
 
 ### 5.1 Tambahan sesi ini — postgres perlu dinyalakan dan diberi password
 
@@ -394,22 +439,57 @@ Juga: **jangan** jalankan `npm ci` dari dalam `packages/*`. Itu membuat
 `node_modules` bersarang yang menutupi workspace root dan menghasilkan
 `Cannot find package 'vitest'`. Selalu dari root repo.
 
-## 6. Apa yang tersisa — urutan yang disarankan
+## 6. Apa yang tersisa — dan urutannya
 
-1. **O47b langkah (1)** — hapus 26 branch pembawa PII, lalu verifikasi, lalu
-   tiket Support. Butuh izin hapus-branch (sesi ini `403`). **Bukan** lagi
-   operasi berisiko: nol rewrite, nol force-push, nol re-clone. Runbook:
-   `docs/handoff/RUNBOOK_O47b_SCRUB_PII.md`.
-2. **O42 (3)** — butuh jawaban pemilik, bukan kode.
-3. **Kembali ke fitur M6** sesuai O56 sesudah ronde cacat: **A-08** (Section D +
-   asumsi) → **A-09** (Section E…J) → **A-13** (halaman & form) → **B-01**
-   (`PLAN` + 6 tabel anak).
-   - A-08 **terblokir X-11** (D-3 turunan atau diketik). Jangan pilih sendiri.
-   - B-06/B-07/B-09 wajib dibaca ulang dengan **deviasi X-07**: penutupan
-     periode berhenti mengunci.
-4. **O48** berjalan terus sebagai pekerjaan, bukan pertanyaan: setiap kali sebuah
-   halaman butuh tabel dari ledger §42, tabel itu dapat arm-nya dan barisnya
-   dicoret dari daftar — dalam commit yang sama.
+**Nol pekerjaan menggantung dari sesi ini.** Yang di bawah ini adalah pekerjaan
+berikutnya, bukan sisa yang belum selesai.
+
+### 6.1 Butuh izin/orang, bukan kode
+
+| # | Isi | Kenapa bukan saya |
+|---|---|---|
+| **O47b langkah (1)** | Hapus 26 branch pembawa PII → verifikasi → tiket GitHub Support | Hapus-branch ditolak `403` dari sesi ini. **Bukan lagi operasi berisiko**: nol rewrite, nol force-push, nol re-clone. Runbook: `docs/handoff/RUNBOOK_O47b_SCRUB_PII.md` |
+| **O42 (3)** | Rekonsiliasi `role_mappings` **38-vs-23-vs-12** | Keputusan pemilik: mana sumber kebenarannya |
+| **O24** | `commission_rule` riil per 32 layanan MSL | Rate per layanan (Sales Head) |
+| **O45** | Cek paritas-grant menembak live | Rekomendasi §2.5: langkah QA ber-service-role, bukan CI |
+| **X-06** | RA-7 — tautan klien tanpa riwayat/diff | Konfirmasi posisi (contoh di backlog §4) |
+| **X-12** | Rumah komponen KPI keterlambatan Plan | Pemilik: *"menyusul"*. Batasnya di §1.5 |
+
+### 6.2 Fitur M6 — jalur yang sekarang terbuka
+
+O56 menetapkan cacat lebih dulu; ronde itu **selesai**, jadi urutannya kembali
+ke fitur:
+
+1. **A-08** — Section D + asumsi. **Tidak lagi terblokir** (X-11 terjawab, dan
+   D-3-nya sudah ada sebagai turunan). Stretch `>=` floor di level CHECK DB;
+   `STRG_ASSUMPTION.status` flip ke `Gugur` memicu `strategi_revisi_disarankan`
+   — katalog v2 sudah ada (O55), tinggal menyambung `emit()`.
+2. **A-09** — Section E/F/G/H/I/J. Floor price per hero SKU (E-4) dibaca
+   validasi Brief; F soft-limit 20% (Rule 10); G-0 sekali-set (Rule 17, sudah
+   ada default RA-5 dari §1.1).
+3. **A-13** — halaman & form Section A→J. Baca `web-internal/AGENTS.md` lebih
+   dulu: versi Next di repo ini bukan yang ada di data latih. ⚠️ Halaman
+   `account/strategies/[id]` yang ADA adalah entitas **lama** M6 §4
+   (`strategy_plan`/`STR`) — jangan pakai sebagai titik mulai.
+4. **B-01** — `PLAN` + 6 tabel anak. Tidak lagi terblokir sejak B-00.
+   - **B-06/B-07/B-09 wajib dibaca ulang dengan deviasi X-07**: penutupan
+     periode **berhenti mengunci**; keterlambatan jadi sinyal kinerja, dan
+     sampai X-12 punya rumah ia hanya boleh masuk audit log.
+
+### 6.3 O48 — pekerjaan berjalan, bukan pertanyaan
+
+Setiap kali sebuah halaman butuh tabel dari ledger `rls_checks.sql` §42, tabel
+itu dapat arm lead/divisinya dan **barisnya dicoret dari daftar dalam commit
+yang sama**. Daftar hanya boleh menyusut; menambahnya butuh entri Decided.
+
+### 6.4 Yang JANGAN dikerjakan
+
+- **Jangan** menambah kolom penyimpan untuk D-3 (§1.4) sebelum QC produksi
+  memutuskan — nilai keputusan X-11 justru ada pada tidak adanya kolom itu.
+- **Jangan** menyentuh `backend/**` kecuali menjaga job-nya hijau (CLAUDE.md).
+- **Jangan** menambah baris ke `KNOWN_GAPS` di `route-parity.test.ts` — ia
+  kosong dan harus tetap kosong.
+- **Jangan** melaporkan PII sudah bersih sebelum O47b (2)+(3) selesai.
 
 ## 7. Jebakan lingkungan — tambahan atas §5.1
 

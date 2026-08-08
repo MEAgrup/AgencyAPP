@@ -376,6 +376,20 @@ export interface StrategiTarget {
   sumber_floor: string | null;
 }
 
+/**
+ * D-3 — komposisi kontribusi channel (% dari total GMV).
+ *
+ * TURUNAN dari `targets` metrik `gmv` (X-11): server yang menghitungnya, form
+ * TIDAK boleh menyediakan input untuk ini. `persen` null saat total nol —
+ * render `—`, bukan `0%` (aturan rumah #7). Kolomnya bisa berjumlah 99,99 atau
+ * 100,01 karena pembulatan per baris; itu benar untuk field turunan.
+ */
+export interface StrategiKomposisi {
+  channel: string;
+  target_gmv: string;
+  persen: number | null;
+}
+
 export interface StrategiAssumption {
   kode: string;
   asumsi: string;
@@ -487,6 +501,7 @@ export interface StrategiDetail extends Strategi {
   risiko_struktural: StrategiRisikoStruktural[];
   prasyarat_klien: StrategiPrasyaratKlien[];
   targets: StrategiTarget[];
+  komposisi_kontribusi: StrategiKomposisi[];
   assumptions: StrategiAssumption[];
   pillars: StrategiPillar[];
   resources: StrategiResource[];

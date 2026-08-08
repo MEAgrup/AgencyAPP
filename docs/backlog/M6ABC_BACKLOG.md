@@ -9,8 +9,10 @@
 > **QA pemilik ronde 2 (2026-08-07): X-03/X-04/X-05/X-07 dijawab; X-10 dicoret
 > (sudah selesai sejak sesi 5, barisnya basi); O26/O34/O35/O25/O6/O9 ditutup.**
 > **RONDE CACAT DIEKSEKUSI 2026-08-07 — O52 (b) · O51 (a) · O48 (b)+ledger sudah
-> mendarat & di-apply ke live; O47b diputus (b), langkah rewrite BELUM dijalankan.
-> O44-asal ternyata sudah selesai sejak 29 Juli — lihat `HANDOFF_M6ABC_SESI7.md`.**
+> mendarat & di-apply ke live. O47b diputus (b) dan cakupannya menyusut drastis
+> (`main` tidak memuat PII). O44-asal ternyata sudah selesai sejak 29 Juli.
+> X-11 diputus provisional & diimplementasi (D-3 turunan). Semua di
+> `HANDOFF_M6ABC_SESI7.md` — baca itu untuk memulai.**
 
 ## 0a. Papan skor (per 2026-08-07, sesudah B-00)
 
@@ -166,6 +168,6 @@ diimplementasi sebelum ini mendarat, jadi ia masuk batch migrasi yang SAMA denga
 | ~~X-07~~ | ~~PA-2/PA-5 (jendela GMV manual 5 hari · force-close +7 hari)~~ | ✅ **SELESAI 2026-08-07 — 🔶 DEVIASI PRD.** Pemilik: *"jangan buat jendela ditutup tidak bisa update, biarkan tetap terbuka, tapi jadi point log buruk untuk kinerja AM"*. State `Ditutup Otomatis` **tetap ada dan tetap otomatis** (mesin #16 tidak berubah); yang dicabut adalah **efek kuncinya**. B-06/B-07/B-09 wajib dibaca ulang dengan ini. Komponen KPI-nya belum ada ⇒ **X-12** |
 | X-08 | PA-3 (metrik auto PE-3 belum tentu tersedia semua) | Hans / developer — bukan pemilik. **Contoh:** PE-3 mendaftar 6 metrik auto (ad spend, ROAS/ACOS, jumlah video selesai, kreator aktif, **jam live vendor**, Brief selesai/total). Jam live vendor datang dari M10 yang vendornya melapor **di luar sistem** (PA-4) ⇒ metrik itu de-facto manual. Yang wajib: daftar metrik manual ditulis **eksplisit** di UI, tidak dicampur diam-diam dengan yang auto, supaya AM tahu angka mana yang dia pertanggungjawabkan |
 | ~~X-10~~ | ~~O58 — "tidak ada" vs "belum dijawab" untuk field daftar bertanda WAJIB~~ | ✅ **SELESAI 2026-08-07** — O58 dijawab pemilik (pilihan (a)) dan sudah mendarat: kolom `{field}_tidak_ada` untuk **lima** field (A-11, A-14, B-5.3, B-8.1, B-8.2 — bukan enam; B-3.5/B-4.5 sudah opsional), gerbang submit jadi "daftar terisi XOR checkbox dicentang", pesan `MSG_TIDAK_ADA_BELUM_DIJAWAB`. Baris ini basi sejak sesi 5; UI checkbox-nya menunggu A-13 |
-| **X-11** | **BARU — D-3 (komposisi kontribusi channel) jadi TURUNAN atau tetap diketik?** | Konsekuensi jawaban X-04. Kalau target per channel dijangkarkan ke baseline channel-nya sendiri, komposisi % adalah akibat, bukan input — padahal PRD menandai D-3 `W`. (a) D-3 jadi Auto (aturan rumah #4); (b) tetap diketik + peringatan bila berselisih dari D-2. Mengubah `W`→Auto butuh persetujuan. **Menggigit saat A-08** |
-| **X-12** | **BARU — "point log buruk" X-07 belum punya komponen KPI** | Deviasi X-07 membuat keterlambatan realisasi jadi sinyal kinerja AM, tapi Phase 0 OA-5 / M14 tidak punya komponennya. Butuh: nama komponen, bobot (dan dari mana bobot itu diambil — total tetap 100), ambang "terlambat". Sampai ada, B-09 boleh mencatat ke audit log tapi **tidak boleh** mengklaim ia memengaruhi skor. Pemilik + OD
+| ~~X-11~~ | ~~D-3 turunan atau diketik?~~ | ✅ **SELESAI 2026-08-07 (provisional)** — pemilik: *"buat target turunan dulu, biarkan nanti saya QC di production"*. `komposisiKontribusi()` dihitung dari D-2 metrik `gmv`; **nol kolom penyimpan, nol migrasi** supaya berubah pikiran tetap murah. Deviasi PRD tercatat (`W`→Auto). A-08 **tidak lagi terblokir** |
+| X-12 | "Point log buruk" X-07 belum punya komponen KPI | 🟡 **DIJADWALKAN 2026-08-07** — pemilik: *"rumahnya akan dibuat menyusul"*. Bukan blocker. **Batas sampai rumahnya ada:** B-09 boleh mencatat keterlambatan ke audit log, **tidak boleh** mengklaim ia memengaruhi Performance Score, dan tidak boleh mengarang bobotnya |
 | ~~X-09~~ | ~~Tidak ada entitas CONTRACT di CDPS~~ | ✅ **SELESAI 2026-08-07** — O57 diputus & dieksekusi (B-00) |
