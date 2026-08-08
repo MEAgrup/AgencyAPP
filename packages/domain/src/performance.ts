@@ -1455,13 +1455,17 @@ export async function previewCurrent(sql: Queryable, actor: Actor, staffID: stri
  * staffRoleType resolves a staff member's Module 14 role type from role_mappings.
  * null when the employee has no active role mapping or maps to a division/level
  * without a KPI Profile.
+ *
+ * O51: this reads through `private.employee_role` rather than joining
+ * `role_mappings` directly. The table is default-deny for `authenticated`
+ * (`rls_baseline` §5), and this is a READ path — every caller arrives through
+ * `readAsActor`, so the direct join raised `42501` and `/portal` answered 500
+ * for every actor. The function returns the same two columns and nothing else;
+ * the permission map of the whole company stays closed.
  */
 async function staffRoleType(sql: Queryable, staffID: string): Promise<string | null> {
   const rows = await sql<{ division: string; level: string }[]>`
-    select rm.division, rm.level
-      from employees e
-      join role_mappings rm on rm.divisi = e.divisi and rm.jabatan = e.jabatan
-     where e.employee_id = ${staffID}`;
+    select division, level from private.employee_role(${staffID})`;
   if (rows.length === 0) {
     return null;
   }

@@ -1,7 +1,14 @@
-# HANDOFF — M6A/M6B/M6C Sesi 6 (titik mulai sesi berikutnya)
+# HANDOFF — M6A/M6B/M6C Sesi 6
 
-> Rantai: SESI1 → … → SESI5 → **SESI6 (ini, terbaru)**. Baca yang bernomor
-> tertinggi lebih dulu; sesi sebelumnya hanya untuk konteks sejarah.
+> ⚠️ **DISUSUL `HANDOFF_M6ABC_SESI7.md` — baca itu lebih dulu.** Yang sudah
+> kedaluwarsa di sini: §5 dan §7.4 masih mencantumkan **X-05** (dijawab pemilik
+> & diimplementasi 2026-08-07) dan **X-10** (sebenarnya sudah selesai sejak sesi
+> 5), dan §7.3 masih menanyakan **O26 · O34 · O35 · O25 · O6 · O9** yang
+> keenamnya sudah dijawab. §7.2 masih akurat, dan rekomendasi untuk kelimanya
+> kini ada di SESI7 §2.
+>
+> Rantai: SESI1 → … → SESI5 → SESI6 (ini) → **SESI7 (terbaru)**. Baca yang
+> bernomor tertinggi lebih dulu; sesi sebelumnya hanya untuk konteks sejarah.
 >
 > Sesi ini **mengeksekusi O57 / tiket B-00** (entitas `CONTRACT`) dan
 > **membuktikan** live ≡ repo dengan sidik jari struktural.

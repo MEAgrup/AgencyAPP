@@ -94,7 +94,7 @@ SELECT set_config('request.jwt.claims',
 DO $$
 DECLARE t text; denied boolean;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['sessions','employee_credentials','id_sequences','sm_edges'] LOOP
+  FOREACH t IN ARRAY ARRAY['sessions','employee_credentials','id_sequences','sm_edges','role_mappings'] LOOP
     denied := false;
     BEGIN
       EXECUTE format('SELECT 1 FROM public.%I LIMIT 1', t);
@@ -540,18 +540,28 @@ DO $$ BEGIN
   THEN RAISE EXCEPTION 'RLS brief_block_requests: Creative LEAD must see own-division queue (O48 Grup C)'; END IF;
 END $$;
 
--- 25. 🔴 CHECK PEMBEDA — inilah yang membuktikan helper WAJIB SECURITY DEFINER.
---     Lead Creative melihat block request ASSET-nya, PADAHAL ia tidak bisa
---     melihat baris `assets` itu sendiri (`assets_select` belum punya arm lead —
---     O48 Grup B, sengaja di luar cakupan). Kalau seseorang mengganti
---     `private.jwt_division_owns_asset` dengan `EXISTS (SELECT 1 FROM assets …)`
+-- 25. Lead Creative melihat block request ASSET divisinya.
+--
+--     ⚠️ CHECK INI DULU PUNYA DAYA BEDA YANG SEKARANG HILANG, dan itu ditulis
+--     di sini alih-alih didiamkan. Sampai `20260807160000` (O48 Grup B) premisnya
+--     adalah "lead Creative TIDAK bisa melihat baris `assets`", sehingga check
+--     ini membuktikan `private.jwt_division_owns_asset` WAJIB SECURITY DEFINER:
+--     kalau seseorang menggantinya dengan `EXISTS (SELECT 1 FROM assets …)`
 --     inline, subquery-nya ikut disaring RLS, hasilnya false, dan check ini
---     MERAH — yaitu tepat kelas cacat O46 yang tertangkap sebelum di-apply.
+--     merah — tepat kelas cacat O46.
+--
+--     O48 Grup B memberi `assets_select` arm lead/divisi (dibutuhkan O52: tanpa
+--     itu `GET /assets/{id}` tetap 404 untuk divisi eksekusinya sendiri), jadi
+--     baris `assets`-nya kini TERLIHAT dan `EXISTS` inline pun akan lolos.
+--     Konsekuensinya: penjaga anti-O46 untuk helper ini sekarang hidup di
+--     definisi fungsinya + review, bukan di sini. Dicatat di DECISIONS 2026-08-07.
+--     Yang MASIH dijaga check ini: arm Grup C-nya sendiri (queue divisi terlihat
+--     oleh lead) — dan check 27/28 tetap menjaga ia tidak melebar.
 DO $$ BEGIN
-  IF (SELECT count(*) FROM assets WHERE id='AST-RLS-0001') <> 0
-  THEN RAISE EXCEPTION 'RLS premis check 25 rusak: lead Creative TIDAK boleh melihat assets row (kalau ia bisa, check 25 kehilangan daya bedanya)'; END IF;
+  IF (SELECT count(*) FROM assets WHERE id='AST-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS assets: Creative LEAD must see own-division asset (O48 Grup B, migrasi 20260807160000)'; END IF;
   IF (SELECT count(*) FROM asset_block_requests WHERE id='ABR-RLS-0001') <> 1
-  THEN RAISE EXCEPTION 'RLS asset_block_requests: Creative LEAD must see the queue even though assets row is invisible (O48 Grup C — helper must be SECURITY DEFINER)'; END IF;
+  THEN RAISE EXCEPTION 'RLS asset_block_requests: Creative LEAD must see own-division queue (O48 Grup C)'; END IF;
 END $$;
 
 -- 26. Grup C — block request DEMO TASK divisinya.
@@ -875,6 +885,149 @@ DO $$ BEGIN
 END $$;
 
 RESET ROLE;
+-- ---------------------------------------------------------------------------
+-- 40-41. O51 + O52 — dua instans dari SATU kelas cacat: sebuah jalur BACA
+--        menabrak tabel yang sengaja tertutup (atau yang policy-nya tidak punya
+--        arm untuk aktor itu), lalu gagal dengan gejala yang TIDAK terlihat
+--        seperti izin: 500 opaque (O51) dan 404 "tidak ada" (O52).
+--
+--        Keduanya diperbaiki dengan pola yang sama seperti `sm_edges`
+--        (20260803123327): tabelnya tetap tertutup, yang dibuka hanya
+--        JAWABANNYA lewat SECURITY DEFINER di schema `private`.
+--
+--        Check 9 di atas kini ikut meng-assert `role_mappings` tertutup — itu
+--        yang HILANG saat O51 lolos: invariannya hanya menyebut 4 tabel, jadi
+--        tidak ada yang bisa merah karena temuan itu.
+-- ---------------------------------------------------------------------------
+
+-- Fixture (superuser). Klien blok 14 belum punya AM; O52 justru tentang kolom
+-- itu, jadi ia diberikan di sini — sesudah seluruh check finance/account
+-- berjalan, sehingga tidak ada check lain yang berubah artinya.
+UPDATE clients SET assigned_am_id = 'EMP-RLS-AM52' WHERE id = 'CLI-RLS-0001';
+
+SET LOCAL ROLE authenticated;
+
+-- 40. O51 — `private.employee_role` bisa dipanggil `authenticated` DAN
+--     mengembalikan pemetaan yang benar. Dua-duanya di-assert: fungsi yang
+--     mengembalikan nol baris diam-diam akan membuat `/portal` menjawab 404
+--     alih-alih 500 — tetap salah, tapi lebih sulit dilihat.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRE1","division":"Creative","level":"staff"}}', true);
+DO $$
+DECLARE d text; l text;
+BEGIN
+  SELECT division, level INTO d, l FROM private.employee_role('EMP-RLS-CRE1');
+  IF d IS DISTINCT FROM 'Creative' OR l IS DISTINCT FROM 'staff' THEN
+    RAISE EXCEPTION 'private.employee_role must resolve EMP-RLS-CRE1 to Creative/staff (got %/%)', d, l;
+  END IF;
+  -- Karyawan tanpa mapping ⇒ NOL BARIS, bukan ('',''). `staffRoleType`
+  -- memetakan nol baris ke null ⇒ NotFoundError; baris kosong akan membuat
+  -- `roleTypeFor` memutuskan atas divisi kosong.
+  IF EXISTS (SELECT 1 FROM private.employee_role('EMP-TIDAK-ADA')) THEN
+    RAISE EXCEPTION 'private.employee_role must return zero rows for an unknown employee';
+  END IF;
+END $$;
+
+-- 41. O52 — lead Creative membaca Brief divisinya BESERTA AM pemiliknya, tanpa
+--     bisa membaca `services` maupun `clients`. Premisnya di-assert lebih dulu:
+--     kalau salah satu dari kedua tabel itu suatu hari terbuka untuk divisi
+--     eksekusi, check ini kehilangan daya bedanya dan harus diketahui.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRELEAD","division":"Creative","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM services WHERE id='SVC-RLS-0001') <> 0
+  OR (SELECT count(*) FROM clients  WHERE id='CLI-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'premis check 41 rusak: divisi eksekusi TIDAK boleh membaca services/clients (kalau bisa, O52 sudah jadi keputusan (a) tanpa entri Decided)'; END IF;
+
+  -- Barisnya sendiri memang selamat — `briefs` punya arm divisi. Inilah yang
+  -- membuat 404-nya membingungkan: yang hilang cuma hasil JOIN-nya.
+  IF (SELECT count(*) FROM briefs WHERE id='BRF-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS briefs: Creative lead must read own-division brief'; END IF;
+
+  IF private.brief_owner_am('BRF-RLS-0001') IS DISTINCT FROM 'EMP-RLS-AM52'
+  THEN RAISE EXCEPTION 'private.brief_owner_am must return the owning AM for the execution division (O52)'; END IF;
+
+  IF private.service_owner_am('SVC-RLS-0001') IS DISTINCT FROM 'EMP-RLS-AM52'
+  THEN RAISE EXCEPTION 'private.service_owner_am must return the owning AM for the execution division (O52)'; END IF;
+
+  -- Entitas tak dikenal ⇒ NULL, bukan error: pemanggil membedakan
+  -- "tidak ditemukan" lewat keberadaan baris induknya, bukan lewat exception.
+  IF private.brief_owner_am('BRF-TIDAK-ADA') IS NOT NULL
+  THEN RAISE EXCEPTION 'private.brief_owner_am must be NULL for an unknown brief'; END IF;
+END $$;
+
+RESET ROLE;
+
+-- ---------------------------------------------------------------------------
+-- 42. O48 — LEDGER policy SELECT yang BELUM punya arm lead/divisi.
+--
+--     Keputusan pemilik 2026-08-07: pilihan **(b)** — perbaiki per tabel sesuai
+--     kebutuhan halaman, bukan menyapu semuanya dalam satu migrasi. Yang
+--     membuat (b) aman adalah daftar ini: tanpa ledger, "per tabel sesuai
+--     kebutuhan" berarti setiap halaman baru berpotensi menemukan ulang cacat
+--     yang sama, dan itulah yang terjadi pada O46 (ia menyebut 3 arm; survei
+--     kemudian menemukan 36 — angkanya bukan hasil hitungan).
+--
+--     ATURAN: daftar ini hanya boleh MENYUSUT. Menghapus satu baris = sebuah
+--     migrasi memberi tabel itu arm lead/divisi (bagus, catat di DECISIONS).
+--     MENAMBAH baris = sebuah tabel baru lahir tanpa arm, dan itu keputusan
+--     visibility yang butuh entri Decided — bukan sesuatu yang boleh mendarat
+--     karena tesnya diperbarui agar cocok.
+--
+--     Deteksinya sintaktik (`jwt_is_lead`/`jwt_division` di predikat), sama
+--     seperti survei O48. Itu bisa memberi false-negative kalau seseorang
+--     menulis arm divisi tanpa memakai kedua helper — dan itu justru alasan
+--     tambahan untuk memakai helper yang ada.
+--
+--     Sebagian besar isi daftar ini adalah TABEL ANAK yang visibilitasnya
+--     mengalir dari induknya lewat `jwt_owns_*`/`EXISTS`. Mereka BUKAN 39 gap
+--     independen — memperbaiki induknya memperbaiki mereka. Daftar ini
+--     mengukur permukaan, bukan jumlah bug.
+-- ---------------------------------------------------------------------------
+RESET ROLE;
+DO $$
+DECLARE
+  actual text[];
+  expected text[] := ARRAY[
+    'ad_campaign_assets_select','ad_campaigns_select','campaigns_select',
+    'client_platforms_select','client_sales_allocations_select','complaints_select',
+    'creator_bookings_select','creator_lists_select','creator_payment_requests_select',
+    'dependencies_select','employees_select','live_stream_sessions_select',
+    'marketing_performance_records_select','master_service_versions_select',
+    'master_services_select','metric_entries_select','metric_entry_assets_select',
+    'negotiation_proposal_lines_select','negotiation_proposals_select','notifications_select',
+    'optimization_logs_select','plan_gate_config_select','prospect_attempt_nq_reasons_select',
+    'prospect_attempts_select','qualified_form_services_select','qualified_forms_select',
+    'strategi_akses_select','strategi_assumption_select','strategi_baseline_bulan_select',
+    'strategi_channel_select','strategi_diagnosa_select','strategi_prasyarat_klien_select',
+    'strategi_quick_win_select','strategi_risiko_struktural_select','strategi_risk_select',
+    'strategi_target_select','strategi_version_select','vendors_select'
+  ];
+  gained text[];
+  lost   text[];
+BEGIN
+  SELECT coalesce(array_agg(p.polname ORDER BY p.polname), '{}')
+    INTO actual
+    FROM pg_policy p
+    JOIN pg_class c ON c.oid = p.polrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'public'
+     AND p.polcmd IN ('r','*')
+     AND coalesce(pg_get_expr(p.polqual, p.polrelid), '') !~ 'jwt_is_lead|jwt_division';
+
+  SELECT coalesce(array_agg(x ORDER BY x), '{}') INTO gained
+    FROM unnest(actual) x WHERE x <> ALL (expected);
+  SELECT coalesce(array_agg(x ORDER BY x), '{}') INTO lost
+    FROM unnest(expected) x WHERE x <> ALL (actual);
+
+  IF cardinality(gained) > 0 THEN
+    RAISE EXCEPTION 'O48 ledger GREW: % has no lead/division arm. A new table without one is a visibility decision — write a DECISIONS entry, do not extend this list to make the test pass.', gained;
+  END IF;
+  IF cardinality(lost) > 0 THEN
+    RAISE EXCEPTION 'O48 ledger SHRANK (good) — % now has a lead/division arm. Remove it from `expected` in this check, in the same commit as the migration.', lost;
+  END IF;
+END $$;
+
 ROLLBACK;
 
 \echo 'rls_checks: PASS'

@@ -848,7 +848,7 @@ export async function getBooking(sql: Queryable, actor: Actor, bookingId: string
 /** listBriefBookings returns all Bookings of a KOL Brief in id order, view-gated. */
 export async function listBriefBookings(sql: Queryable, actor: Actor, briefId: string): Promise<Booking[]> {
   const owner = await sql<{ assigned_division: string; assigned_am_id: string | null }[]>`
-    select b.assigned_division, c.assigned_am_id from briefs b join services sv on sv.id = b.service_id join clients c on c.id = sv.client_id where b.id = ${briefId}`;
+    select b.assigned_division, private.brief_owner_am(b.id) as assigned_am_id from briefs b where b.id = ${briefId}`;
   if (owner.length === 0) {
     throw new NotFoundError(MSG_BRIEF_NOT_FOUND);
   }
@@ -872,12 +872,11 @@ export async function getPaymentRequest(sql: Queryable, actor: Actor, requestId:
     { id: string; booking_id: string; amount: string; payment_details: string; status: string; rejection_reason: string | null; requested_by: string; paid_by: string | null; created_by: string; created_at: Date; assigned_division: string; assigned_am_id: string | null }[]
   >`
     select cpr.id, cpr.booking_id, cpr.amount, cpr.payment_details, cpr.status, cpr.rejection_reason,
-           cpr.requested_by, cpr.paid_by, cpr.created_by, cpr.created_at, b.assigned_division, c.assigned_am_id
+           cpr.requested_by, cpr.paid_by, cpr.created_by, cpr.created_at, b.assigned_division,
+           private.brief_owner_am(bk.brief_id) as assigned_am_id
       from creator_payment_requests cpr
       join creator_bookings bk on bk.id = cpr.booking_id
       join briefs b on b.id = bk.brief_id
-      join services sv on sv.id = b.service_id
-      join clients c on c.id = sv.client_id
      where cpr.id = ${requestId}`;
   if (rows.length === 0) {
     throw new NotFoundError(MSG_PAYMENT_REQUEST_NOT_FOUND);
@@ -962,7 +961,7 @@ export async function generateCreatorList(sql: Sql, actor: Actor, briefId: strin
 /** getCreatorList returns the compiled list + the LIVE eligible set, view-gated. */
 export async function getCreatorList(sql: Queryable, actor: Actor, briefId: string): Promise<CreatorList> {
   const owner = await sql<{ assigned_division: string; assigned_am_id: string | null }[]>`
-    select b.assigned_division, c.assigned_am_id from briefs b join services sv on sv.id = b.service_id join clients c on c.id = sv.client_id where b.id = ${briefId}`;
+    select b.assigned_division, private.brief_owner_am(b.id) as assigned_am_id from briefs b where b.id = ${briefId}`;
   if (owner.length === 0) {
     throw new NotFoundError(MSG_BRIEF_NOT_FOUND);
   }
@@ -1017,11 +1016,10 @@ export interface BookingMetrics {
 /** bookingMetrics returns a Booking's recomputed-from-log metrics, view-gated. */
 export async function bookingMetrics(sql: Queryable, actor: Actor, bookingId: string): Promise<BookingMetrics> {
   const rows = await sql<{ assigned_division: string; status: string; created_at: Date; sla_target_hours: string | null; assigned_am_id: string | null }[]>`
-    select b.assigned_division, bk.status, bk.created_at, bk.sla_target_hours, c.assigned_am_id
+    select b.assigned_division, bk.status, bk.created_at, bk.sla_target_hours,
+           private.brief_owner_am(bk.brief_id) as assigned_am_id
       from creator_bookings bk
       join briefs b on b.id = bk.brief_id
-      join services sv on sv.id = b.service_id
-      join clients c on c.id = sv.client_id
      where bk.id = ${bookingId}`;
   if (rows.length === 0) {
     throw new NotFoundError(MSG_BOOKING_NOT_FOUND);
@@ -1186,11 +1184,9 @@ function bookingSelect(sql: Queryable) {
     select bk.id, bk.brief_id, bk.creator_name, bk.creator_handle, bk.platform, bk.niche, bk.source_pool,
            bk.pool_reference, bk.agreed_rate, bk.status, bk.content_link, bk.qc_notes, bk.sla_target_hours,
            bk.hours_logged, bk.assigned_coordinator, bk.attributed_gmv, bk.created_by, bk.created_at,
-           b.assigned_division, c.assigned_am_id
+           b.assigned_division, private.brief_owner_am(bk.brief_id) as assigned_am_id
       from creator_bookings bk
-      join briefs b on b.id = bk.brief_id
-      join services sv on sv.id = b.service_id
-      join clients c on c.id = sv.client_id`;
+      join briefs b on b.id = bk.brief_id`;
 }
 
 const numOrNull = (v: string | null): number | null => (v === null ? null : Number(v));

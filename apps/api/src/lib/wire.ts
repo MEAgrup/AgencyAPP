@@ -3327,6 +3327,16 @@ export interface StrategiTargetWire {
   sumber_floor: string | null;
 }
 
+/**
+ * D-3 — komposisi kontribusi channel. TURUNAN (X-11), tidak pernah disimpan.
+ * `persen` null saat total GMV nol — klien merender `—` (aturan rumah #7).
+ */
+export interface StrategiKomposisiWire {
+  channel: string;
+  target_gmv: string;
+  persen: number | null;
+}
+
 export interface StrategiAssumptionWire {
   kode: string;
   asumsi: string;
@@ -3400,6 +3410,7 @@ export interface StrategiDetailWire extends StrategiWire {
   risiko_struktural: StrategiRisikoStrukturalWire[];
   prasyarat_klien: StrategiPrasyaratKlienWire[];
   targets: StrategiTargetWire[];
+  komposisi_kontribusi: StrategiKomposisiWire[];
   assumptions: StrategiAssumptionWire[];
   pillars: StrategiPillarWire[];
   resources: StrategiResourceWire[];
@@ -3560,6 +3571,13 @@ export function strategiDetailToWire(d: strategi.StrategiDetail): StrategiDetail
       nilai_floor: t.nilaiFloor,
       nilai_stretch: t.nilaiStretch,
       sumber_floor: t.sumberFloor,
+    })),
+    komposisi_kontribusi: d.komposisiKontribusi.map((k) => ({
+      channel: k.channel,
+      target_gmv: k.targetGmv,
+      // Sent explicitly as `null`, never omitted: a MISSING key blanks the cell
+      // in a way the page cannot distinguish from "no data loaded" (O43).
+      persen: k.persen,
     })),
     assumptions: d.assumptions.map((a) => ({
       kode: a.kode,

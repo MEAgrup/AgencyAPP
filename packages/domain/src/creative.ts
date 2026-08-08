@@ -396,9 +396,11 @@ export async function getAsset(sql: Queryable, actor: Actor, assetId: string): P
  * §4 Rule 1), ordered by Sequence #. Same read gate as getAsset.
  */
 export async function listBriefAssets(sql: Queryable, actor: Actor, briefId: string): Promise<Asset[]> {
+  // O52: same read-path fix as assetSelect — the client join used to erase the
+  // row for the Brief's own division.
   const owner = await sql<{ assigned_division: string; assigned_am_id: string | null }[]>`
-    select b.assigned_division, c.assigned_am_id
-      from briefs b join services sv on sv.id = b.service_id join clients c on c.id = sv.client_id
+    select b.assigned_division, private.brief_owner_am(b.id) as assigned_am_id
+      from briefs b
      where b.id = ${briefId}`;
   if (owner.length === 0) {
     throw new NotFoundError(MSG_BRIEF_NOT_FOUND);
@@ -430,15 +432,24 @@ interface AssetRow {
   assigned_am_id: string | null;
 }
 
+/**
+ * assetSelect is the shared Asset read model.
+ *
+ * O52: the owning AM arrives through `private.brief_owner_am`, not through
+ * `join services join clients`. Neither policy has an execution-division arm, so
+ * that join returned zero rows for Creative staff/lead and `GET /assets/{id}`
+ * answered **404 `[aset tidak ditemukan]`** for the division doing the work.
+ * `assets` and `briefs` both survive RLS on their own; only `assigned_am_id`
+ * ever needed a door.
+ */
 function assetSelect(sql: Queryable) {
   return sql`
     select a.id, a.brief_id, a.asset_type, a.sequence_no, a.assigned_pic, a.output_link, a.status,
            a.sla_target_hours, a.revision_sla_target_hours, a.hours_logged, a.attributed_gmv,
-           a.created_by, a.created_at, b.assigned_division, c.assigned_am_id
+           a.created_by, a.created_at, b.assigned_division,
+           private.brief_owner_am(a.brief_id) as assigned_am_id
       from assets a
-      join briefs b on b.id = a.brief_id
-      join services sv on sv.id = b.service_id
-      join clients c on c.id = sv.client_id`;
+      join briefs b on b.id = a.brief_id`;
 }
 
 const numOrNull = (v: string | null): number | null => (v === null ? null : Number(v));

@@ -419,6 +419,7 @@ const WIRE_TO_FE: Record<string, string> = {
   StrategiChannelWire: 'strategi.ts::StrategiChannel',
   StrategiBaselineMonthWire: 'strategi.ts::StrategiBaselineMonth',
   StrategiTargetWire: 'strategi.ts::StrategiTarget',
+  StrategiKomposisiWire: 'strategi.ts::StrategiKomposisi',
   StrategiAssumptionWire: 'strategi.ts::StrategiAssumption',
   StrategiPillarWire: 'strategi.ts::StrategiPillar',
   StrategiResourceWire: 'strategi.ts::StrategiResource',
