@@ -321,6 +321,18 @@ export interface Strategi {
    * ⚠️ **HARD-INTERNAL (§4.1): never render this anywhere client-facing.**
    */
   kondisi_stop_scope: string | null;
+
+  // --- Section G/I header (A-09b). G-1/G-2 are child lists on StrategiDetail.
+  /** G-3 — client review cadence. FREE TEXT: §4 marks G-3/G-4 `Struct`, not enum. */
+  review_klien_frekuensi: string | null;
+  /** G-3 — report format used at the review. */
+  review_klien_format: string | null;
+  /** G-3 — who runs it on MEA's side. */
+  review_klien_pic: string | null;
+  /** G-4 — internal SPV review cadence. Free text, same reason as G-3. */
+  review_internal_frekuensi: string | null;
+  /** I-3 — metrics pulled into the monthly client report (D-4 vocabulary). */
+  metrik_laporan_klien: string[];
 }
 
 /** B-1 / B-5 — one row per month of the declared baseline window (B-0.7). */
@@ -355,6 +367,14 @@ export interface StrategiChannel {
   periode_akhir: string | null;
   alasan_periode_pendek: string | null;
   catatan_periode_pendek: string | null;
+  /**
+   * E-2 (A-09b) — Section E, but per channel, because that is the grain of the
+   * question. Sent back through `saveStrategiChannels`, NOT a separate call:
+   * that endpoint replaces the whole channel list, so a channel posted without
+   * these two clears them.
+   */
+  prioritas: string | null;
+  prioritas_alasan: string | null;
   // Section B groups B-2 … B-9 (A-06). One figure per channel; the monthly ones
   // (B-1, B-5.1/5.2) are rows in `baseline` below.
   pengunjung_per_bulan: number | null;
@@ -505,6 +525,59 @@ export interface StrategiRisk {
   urutan: number;
 }
 
+/** A-09b E-12 — what the client supplies DURING execution, and the cost of late. */
+export interface StrategiKetergantungan {
+  id: number;
+  item: string;
+  /** Free text, not a date: §4 exemplifies "tiap tgl 1". */
+  kapan: string;
+  konsekuensi: string;
+  urutan: number;
+}
+
+/** A-09b G-1 — work phase. Min 2 required at submit. */
+export interface StrategiFase {
+  id: number;
+  nama: string;
+  tanggal_mulai: string;
+  tanggal_akhir: string;
+  tujuan: string;
+  kriteria_lulus: string;
+  urutan: number;
+}
+
+/** A-09b G-2 — big date in the contract window, and its role. */
+export interface StrategiTanggalBesar {
+  id: number;
+  tanggal: string;
+  nama: string;
+  peran: string;
+  urutan: number;
+}
+
+/**
+ * A-09b H-2 — a declared revision trigger.
+ * `ambang` is a COUNT (percent for `pencapaian_di_bawah_target`, days for
+ * `stok_kosong`), so it is a number — the string rule here is only for rupiah.
+ * Required for exactly those two codes, and null for the rest.
+ */
+export interface StrategiTriggerRevisi {
+  id: number;
+  kode: string;
+  ambang: number | null;
+  catatan: string | null;
+  urutan: number;
+}
+
+/** A-09b I-2 + I-4 — Brief-receiving division, dispatch position, division note. */
+export interface StrategiDispatch {
+  id: number;
+  divisi: string;
+  urutan: number;
+  /** I-4 — optional. */
+  catatan: string | null;
+}
+
 /** Section J — append-only, one row per event (a version can be returned twice). */
 export interface StrategiEvent {
   versi_no: number;
@@ -568,6 +641,12 @@ export interface StrategiDetail extends Strategi {
   pillars: StrategiPillar[];
   resources: StrategiResource[];
   risks: StrategiRisk[];
+  /** A-09b — Section E-12 / G-1 / G-2 / H-2 / I-2+I-4. */
+  ketergantungan: StrategiKetergantungan[];
+  fase: StrategiFase[];
+  tanggal_besar: StrategiTanggalBesar[];
+  trigger_revisi: StrategiTriggerRevisi[];
+  dispatch: StrategiDispatch[];
   riwayat: StrategiEvent[];
 }
 
@@ -799,6 +878,65 @@ export function saveStrategiResources(id: string, resources: unknown[]): Promise
 
 export function saveStrategiRisks(id: string, risks: unknown[]): Promise<StrategiDetail> {
   return api.put<StrategiDetail>(`/strategi/${id}/risks`, { risks });
+}
+
+/**
+ * E-12 (A-09b). The body replaces the list — an empty array clears it, same as
+ * `saveStrategiPillars`. Do NOT reuse the C-7 form for this: C-7 is the
+ * pre-execution gate list and has no `konsekuensi`, which is the field that
+ * makes E-12 worth citing when a target is missed.
+ */
+export function saveStrategiKetergantungan(
+  id: string,
+  ketergantungan: unknown[],
+): Promise<StrategiDetail> {
+  return api.put<StrategiDetail>(`/strategi/${id}/ketergantungan`, { ketergantungan });
+}
+
+/**
+ * Section G (A-09b) — G-1 phases, G-2 big dates, G-3/G-4 review cadence, saved
+ * together because they are one screen and one autosave (§7).
+ *
+ * G-0 (`tanggal_mulai_siklus`) is NOT here: Rule 17 locks it once period 1
+ * closes, so it stays on the header endpoint rather than riding an autosave.
+ */
+export function saveStrategiKalender(
+  id: string,
+  body: {
+    fase?: unknown[];
+    tanggal_besar?: unknown[];
+    review_klien_frekuensi?: string | null;
+    review_klien_format?: string | null;
+    review_klien_pic?: string | null;
+    review_internal_frekuensi?: string | null;
+  },
+): Promise<StrategiDetail> {
+  return api.put<StrategiDetail>(`/strategi/${id}/kalender`, body);
+}
+
+/**
+ * H-2 (A-09b) — the triggers this client's revisions may cite.
+ *
+ * The form must offer exactly `TRIGGER_REVISI_CODES`; `openRevision` refuses
+ * anything not declared here, so a free-text field would produce a Strategi that
+ * cannot state why it was revised.
+ */
+export function saveStrategiTriggerRevisi(
+  id: string,
+  trigger_revisi: unknown[],
+): Promise<StrategiDetail> {
+  return api.put<StrategiDetail>(`/strategi/${id}/trigger-revisi`, { trigger_revisi });
+}
+
+/**
+ * Section I (A-09b) — I-2 dispatch order, I-3 report metrics, I-4 division notes.
+ * I-1 and J-4 are derived server-side and never posted.
+ */
+export function saveStrategiHandoff(
+  id: string,
+  body: { dispatch?: unknown[]; metrik_laporan_klien?: string[] },
+): Promise<StrategiDetail> {
+  return api.put<StrategiDetail>(`/strategi/${id}/handoff`, body);
 }
 
 /** The live "what is still missing" list the submit button reads (§5 step 5). */

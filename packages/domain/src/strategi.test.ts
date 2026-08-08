@@ -24,7 +24,7 @@
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { ident, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
-import { ConflictError, ForbiddenError, ValidationError } from './account';
+import { ALLOWED_DIVISIONS, ConflictError, ForbiddenError, ValidationError } from './account';
 import {
   MSG_AKSES_BLOCKER_DATE,
   MSG_AKSES_DUPLICATE,
@@ -90,6 +90,28 @@ import {
   savePillars,
   saveResources,
   saveRisks,
+  saveKetergantungan,
+  CHANNEL_PRIORITAS,
+  DISPATCH_DIVISIONS,
+  LAPORAN_METRICS,
+  TRIGGER_REVISI_CODES,
+  MSG_PRIORITAS_INVALID,
+  MSG_KETERGANTUNGAN_INCOMPLETE,
+  MSG_FASE_RENTANG,
+  MSG_TRIGGER_AMBANG_REQUIRED,
+  MSG_TRIGGER_AMBANG_TERLARANG,
+  MSG_TRIGGER_AMBANG_INVALID,
+  MSG_TRIGGER_REVISI_INVALID,
+  MSG_TRIGGER_DUPLICATE,
+  MSG_TRIGGER_LAINNYA_CATATAN,
+  MSG_TRIGGER_NOT_DECLARED,
+  MSG_DISPATCH_INVALID,
+  MSG_DISPATCH_DUPLICATE,
+  MSG_DISPATCH_URUTAN_DUPLICATE,
+  MSG_METRIK_LAPORAN_INVALID,
+  saveKalender,
+  saveTriggerRevisi,
+  saveHandoff,
   komposisiKontribusi,
   saveTargets,
   raiseSanggahan,
@@ -275,6 +297,10 @@ const HEADER = {
 const SHOPEE: ChannelInput = {
   channel: 'Shopee',
   statusChannel: 'Eksisting',
+  // E-2 (A-09b) — `W` per channel, so it belongs to the shared fixture rather
+  // than only to its own test. §6: Shopee is the engine, TikTok the support.
+  prioritas: 'engine_utama',
+  prioritasAlasan: 'Shopee menyumbang mayoritas GMV baseline dan punya histori iklan yang bisa dioptimasi lebih dulu.',
   namaToko: 'Alpha Digital',
   urlToko: 'https://shopee.co.id/alpha',
   umurTokoBulan: 30,
@@ -528,6 +554,56 @@ async function seedSubmittable(): Promise<{ serviceId: string; strategiId: strin
       pic: 'ZZ-AM',
     })),
   );
+
+  // Section E-12 / G / H-2 / I (A-09b). Every one of these is `W`, so they are
+  // part of the shared fixture for the same reason D-5/D-6 and E-1/E-13/H-3 are:
+  // without them nothing in this file can reach `Diajukan` any more.
+  await saveKetergantungan(sql, am(), s.id, [
+    {
+      item: 'Budget iklan Rp 41jt cair',
+      kapan: 'tiap tanggal 1',
+      konsekuensi: 'Fase scale mundur satu minggu dan target GMV bulan berjalan ditinjau',
+    },
+  ]);
+
+  await saveKalender(sql, am(), s.id, {
+    fase: [
+      {
+        nama: 'Fase 1 — Perbaikan listing',
+        tanggalMulai: '2026-08-12',
+        tanggalAkhir: '2026-09-11',
+        tujuan: 'Menaikkan CR tanpa menambah budget',
+        kriteriaLulus: 'CR Shopee >= 2,4% dan 7 SKU Pareto selesai ditulis ulang',
+      },
+      {
+        nama: 'Fase 2 — Scale iklan',
+        tanggalMulai: '2026-09-12',
+        tanggalAkhir: '2026-10-11',
+        tujuan: 'Menambah volume di listing yang sudah mengonversi',
+        kriteriaLulus: 'ROAS >= 4,0 pada budget naik 25%',
+      },
+    ],
+    tanggalBesar: [
+      { tanggal: '2026-09-09', nama: '9.9', peran: 'Puncak penjualan — stok dan voucher disiapkan H-14' },
+    ],
+    reviewKlienFrekuensi: 'bulanan',
+    reviewKlienFormat: 'Deck performa + rekomendasi bulan berikutnya',
+    reviewKlienPic: 'ZZ-AM',
+    reviewInternalFrekuensi: 'mingguan',
+  });
+
+  await saveTriggerRevisi(sql, am(), s.id, [
+    { kode: 'pencapaian_di_bawah_target', ambang: 80 },
+    { kode: 'stok_kosong', ambang: 14 },
+  ]);
+
+  await saveHandoff(sql, am(), s.id, {
+    dispatch: [
+      { divisi: 'Creative', urutan: 1, catatan: 'Foto lama saja di M1 — tidak ada reshoot' },
+      { divisi: 'Ads', urutan: 2 },
+    ],
+    metrikLaporanKlien: ['gmv', 'cr', 'roas_min'],
+  });
 
   return { serviceId, strategiId: s.id };
 }
@@ -904,7 +980,7 @@ describeDb('Section A — A-05 (Konteks Klien & Bisnis)', () => {
     await submitStrategi(sql, am(), strategiId);
     await approveStrategi(sql, spv(), strategiId);
     const v2 = await openRevision(sql, am(), strategiId, {
-      triggerRevisi: ['stok kosong'],
+      triggerRevisi: ['stok_kosong'],
       alasanRevisi: 'hero SKU habis',
       asumsiGugur: ['A1'],
     });
@@ -998,7 +1074,7 @@ describeDb('Rule 7 — the floor approval path (O57 item (b))', () => {
     await submitStrategi(sql, am(), strategiId);
     await approveStrategi(sql, spv(), strategiId);
     const v2 = await openRevision(sql, am(), strategiId, {
-      triggerRevisi: ['target meleset'],
+      triggerRevisi: ['pencapaian_di_bawah_target'],
       alasanRevisi: 'floor perlu ditinjau ulang',
       asumsiGugur: ['A1'],
     });
@@ -1167,7 +1243,7 @@ describeDb('Section B — A-06 (groups B-2 … B-9)', () => {
     await submitStrategi(sql, am(), strategiId);
     await approveStrategi(sql, spv(), strategiId);
     const v2 = await openRevision(sql, am(), strategiId, {
-      triggerRevisi: ['klien ubah lini produk'],
+      triggerRevisi: ['stok_kosong'],
       alasanRevisi: 'lini baru masuk',
       asumsiGugur: ['A1'],
     });
@@ -1537,7 +1613,7 @@ describeDb('Rule 13 — a revision is a new row, and n stays Aktif', () => {
     const { strategiId } = await seedSubmittable();
     await expect(
       openRevision(sql, am(), strategiId, {
-        triggerRevisi: ['stok kosong'],
+        triggerRevisi: ['stok_kosong'],
         alasanRevisi: 'x',
         asumsiGugur: ['A1'],
       }),
@@ -1550,7 +1626,7 @@ describeDb('Rule 13 — a revision is a new row, and n stays Aktif', () => {
     await approveStrategi(sql, spv(), strategiId);
 
     const v2 = await openRevision(sql, am(), strategiId, {
-      triggerRevisi: ['budget iklan dipotong'],
+      triggerRevisi: ['pencapaian_di_bawah_target'],
       alasanRevisi: 'klien memotong budget 40%',
       asumsiGugur: ['A1'],
     });
@@ -1581,7 +1657,7 @@ describeDb('Rule 13 — a revision is a new row, and n stays Aktif', () => {
     expect(copied.risikoStruktural).toHaveLength(1);
     expect(copied.prasyaratKlien).toHaveLength(1);
     expect(copied.riwayat[0].peristiwa).toBe('revisi_dibuka');
-    expect(copied.riwayat[0].triggerRevisi).toEqual(['budget iklan dipotong']);
+    expect(copied.riwayat[0].triggerRevisi).toEqual(['pencapaian_di_bawah_target']);
     expect(copied.riwayat[0].asumsiGugur).toEqual(['A1']);
   });
 
@@ -1590,7 +1666,7 @@ describeDb('Rule 13 — a revision is a new row, and n stays Aktif', () => {
     await submitStrategi(sql, am(), strategiId);
     await approveStrategi(sql, spv(), strategiId);
     const v2 = await openRevision(sql, am(), strategiId, {
-      triggerRevisi: ['stok kosong'],
+      triggerRevisi: ['stok_kosong'],
       alasanRevisi: 'restock meleset',
       asumsiGugur: ['A2'],
     });
@@ -1605,7 +1681,7 @@ describeDb('Rule 13 — a revision is a new row, and n stays Aktif', () => {
     await submitStrategi(sql, am(), strategiId);
     await approveStrategi(sql, spv(), strategiId);
     const v2 = await openRevision(sql, am(), strategiId, {
-      triggerRevisi: ['klien ubah lini produk'],
+      triggerRevisi: ['stok_kosong'],
       alasanRevisi: 'produk baru masuk',
       asumsiGugur: ['A3'],
     });
@@ -1632,7 +1708,7 @@ describeDb('Rule 13 — a revision is a new row, and n stays Aktif', () => {
     await submitStrategi(sql, am(), strategiId);
     await approveStrategi(sql, spv(), strategiId);
     const rev = {
-      triggerRevisi: ['ganti PIC klien'],
+      triggerRevisi: ['stok_kosong'],
       alasanRevisi: 'PIC baru',
       asumsiGugur: ['A1'],
     };
@@ -2135,7 +2211,7 @@ describeDb('Section D — D-5 & D-6 (A-08)', () => {
     await approveStrategi(sql, spv(), strategiId);
 
     const v2 = await openRevision(sql, am(), strategiId, {
-      triggerRevisi: ['asumsi gugur'],
+      triggerRevisi: ['pencapaian_di_bawah_target'],
       alasanRevisi: 'budget klien tidak cair',
       asumsiGugur: ['A1'],
     });
@@ -2446,7 +2522,7 @@ describeDb('Section E/H narasi (A-09a)', () => {
     await approveStrategi(sql, spv(), strategiId);
 
     const v2 = await openRevision(sql, am(), strategiId, {
-      triggerRevisi: ['asumsi gugur'],
+      triggerRevisi: ['pencapaian_di_bawah_target'],
       alasanRevisi: 'budget klien tidak cair',
       asumsiGugur: ['A1'],
     });
@@ -2485,5 +2561,352 @@ describeDb('Section E/H narasi (A-09a)', () => {
     expect(rows).toHaveLength(1);
     expect(JSON.stringify(rows[0].after_json)).not.toContain('RAHASIA-INTERNAL-MARKER');
     expect(rows[0].after_json).toMatchObject({ terisi: ['E-1', 'H-4'] });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A-09b — Section E-2/E-12, G, H-2, I
+// ---------------------------------------------------------------------------
+
+describeDb('Section E-2 prioritas channel (A-09b)', () => {
+  it('travels with the channel, and refuses a role outside the three §4 writes', async () => {
+    const { strategiId } = await seedSubmittable();
+    const d = await getStrategi(sql, am(), strategiId);
+    expect(d.channels[0].prioritas).toBe('engine_utama');
+    expect(d.channels[0].prioritasAlasan).toContain('mayoritas GMV');
+
+    await expect(
+      saveChannels(sql, am(), strategiId, [
+        { ...SHOPEE, prioritas: 'engine_cadangan' as never },
+      ]),
+    ).rejects.toThrow(MSG_PRIORITAS_INVALID);
+  });
+
+  it('gates BOTH halves per channel — a role with no reason is half an answer', async () => {
+    const { strategiId } = await seedSubmittable();
+    await saveChannels(sql, am(), strategiId, [
+      { ...SHOPEE, prioritas: 'maintenance', prioritasAlasan: null },
+    ]);
+    const kurang = await checkCompleteness(sql, strategiId);
+    expect(kurang.map((k) => k.kode)).toContain('E-2/Shopee');
+  });
+
+  it('survives a Section B save — E-2 is on the channel row, not beside it', async () => {
+    const { strategiId } = await seedSubmittable();
+    // saveChannels is DELETE-then-INSERT; this is the exact path on which a
+    // separate E-2 table would have been silently wiped.
+    const after = await saveChannels(sql, am(), strategiId, [
+      { ...SHOPEE, pengunjungPerBulan: 999_000 },
+    ]);
+    expect(after.channels[0].pengunjungPerBulan).toBe(999_000);
+    expect(after.channels[0].prioritas).toBe('engine_utama');
+  });
+});
+
+describeDb('Section E-12 ketergantungan klien (A-09b)', () => {
+  it('is a separate list from C-7, and keeps its own consequence', async () => {
+    const { strategiId } = await seedSubmittable();
+    const d = await getStrategi(sql, am(), strategiId);
+
+    expect(d.ketergantungan).toHaveLength(1);
+    expect(d.ketergantungan[0].konsekuensi).toContain('mundur satu minggu');
+    // C-7 is untouched by the E-12 write and still holds its own row.
+    expect(d.prasyaratKlien).toHaveLength(1);
+    expect(d.prasyaratKlien[0].item).toContain('Shopee Ads Manager');
+  });
+
+  it('refuses a dependency with no consequence, and gates an empty list', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(
+      saveKetergantungan(sql, am(), strategiId, [
+        { item: 'foto produk', kapan: 'H-7', konsekuensi: '  ' },
+      ]),
+    ).rejects.toThrow(MSG_KETERGANTUNGAN_INCOMPLETE);
+
+    await saveKetergantungan(sql, am(), strategiId, []);
+    const kurang = await checkCompleteness(sql, strategiId);
+    expect(kurang.map((k) => k.kode)).toContain('E-12');
+  });
+});
+
+describeDb('Section G kalender (A-09b)', () => {
+  it('stores phases, big dates and both review cadences', async () => {
+    const { strategiId } = await seedSubmittable();
+    const d = await getStrategi(sql, am(), strategiId);
+
+    expect(d.fase).toHaveLength(2);
+    expect(d.fase[0].nama).toContain('Fase 1');
+    expect(d.fase[0].kriteriaLulus).toContain('CR Shopee');
+    expect(d.tanggalBesar[0].tanggal).toBe('2026-09-09');
+    expect(d.reviewKlienFrekuensi).toBe('bulanan');
+    expect(d.reviewInternalFrekuensi).toBe('mingguan');
+  });
+
+  it('refuses a phase whose window runs backwards', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(
+      saveKalender(sql, am(), strategiId, {
+        fase: [
+          {
+            nama: 'Fase mundur',
+            tanggalMulai: '2026-09-11',
+            tanggalAkhir: '2026-08-12',
+            tujuan: 'x',
+            kriteriaLulus: 'y',
+          },
+        ],
+        tanggalBesar: [],
+      }),
+    ).rejects.toThrow(MSG_FASE_RENTANG);
+  });
+
+  it('gates G-1 at two phases, and G-2/G-3/G-4 individually', async () => {
+    const { strategiId } = await seedSubmittable();
+    await saveKalender(sql, am(), strategiId, {
+      fase: [
+        {
+          nama: 'Satu-satunya fase',
+          tanggalMulai: '2026-08-12',
+          tanggalAkhir: '2026-09-11',
+          tujuan: 'x',
+          kriteriaLulus: 'y',
+        },
+      ],
+      tanggalBesar: [],
+    });
+    const kodes = (await checkCompleteness(sql, strategiId)).map((k) => k.kode);
+    // One phase is not "none" — §4 writes min 2, so it gets its own message.
+    expect(kodes).toContain('G-1');
+    expect(kodes).toContain('G-2');
+    expect(kodes).toContain('G-3');
+    expect(kodes).toContain('G-4');
+  });
+
+  it('does NOT touch G-0 — Rule 17 keeps the cycle start on its own door', async () => {
+    const { strategiId } = await seedSubmittable();
+    const before = await getStrategi(sql, am(), strategiId);
+    const after = await saveKalender(sql, am(), strategiId, { fase: [], tanggalBesar: [] });
+    expect(after.tanggalMulaiSiklus).toBe(before.tanggalMulaiSiklus);
+    expect(after.tanggalMulaiSiklus).not.toBeNull();
+  });
+});
+
+describeDb('Section H-2 trigger revisi (A-09b)', () => {
+  it('requires a threshold for exactly the two codes §4 writes with an X', async () => {
+    const { strategiId } = await seedSubmittable();
+
+    await expect(
+      saveTriggerRevisi(sql, am(), strategiId, [{ kode: 'stok_kosong' }]),
+    ).rejects.toThrow(MSG_TRIGGER_AMBANG_REQUIRED);
+
+    // …and REFUSES one on the codes that have none. The equivalence runs both
+    // ways so "ganti PIC klien >30" cannot be stored at all.
+    await expect(
+      saveTriggerRevisi(sql, am(), strategiId, [{ kode: 'ganti_pic_klien', ambang: 30 }]),
+    ).rejects.toThrow(MSG_TRIGGER_AMBANG_TERLARANG);
+
+    await expect(
+      saveTriggerRevisi(sql, am(), strategiId, [
+        { kode: 'pencapaian_di_bawah_target', ambang: 140 },
+      ]),
+    ).rejects.toThrow(MSG_TRIGGER_AMBANG_INVALID);
+  });
+
+  it('refuses an unknown code, a duplicate, and `lainnya` with no explanation', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(
+      saveTriggerRevisi(sql, am(), strategiId, [{ kode: 'harga naik' as never }]),
+    ).rejects.toThrow(MSG_TRIGGER_REVISI_INVALID);
+
+    await expect(
+      saveTriggerRevisi(sql, am(), strategiId, [
+        { kode: 'ganti_pic_klien' },
+        { kode: 'ganti_pic_klien' },
+      ]),
+    ).rejects.toThrow(MSG_TRIGGER_DUPLICATE);
+
+    await expect(
+      saveTriggerRevisi(sql, am(), strategiId, [{ kode: 'lainnya' }]),
+    ).rejects.toThrow(MSG_TRIGGER_LAINNYA_CATATAN);
+
+    // `lainnya` MAY repeat — what distinguishes two of them is the note.
+    const saved = await saveTriggerRevisi(sql, am(), strategiId, [
+      { kode: 'lainnya', catatan: 'Marketplace menutup kategori' },
+      { kode: 'lainnya', catatan: 'Pabrik pindah lokasi' },
+    ]);
+    expect(saved.triggerRevisi).toHaveLength(2);
+  });
+
+  it('is enforced by the DB, not only by TS', async () => {
+    const { strategiId } = await seedSubmittable();
+    // Straight at the table, bypassing the domain entirely: the CHECK has to
+    // hold for service-role writes too, or the closed set is a convention.
+    await expect(
+      sql`insert into strategi_trigger_revisi (strategi_id, kode, created_by)
+          values (${strategiId}, 'harga naik', 'ZZ-AM')`,
+    ).rejects.toThrow(/ck_strtrg_kode/);
+    await expect(
+      sql`insert into strategi_trigger_revisi (strategi_id, kode, ambang, created_by)
+          values (${strategiId}, 'ganti_pic_klien', 30, 'ZZ-AM')`,
+    ).rejects.toThrow(/ck_strtrg_ambang/);
+  });
+
+  it('gates an empty H-2 at submit', async () => {
+    const { strategiId } = await seedSubmittable();
+    await saveTriggerRevisi(sql, am(), strategiId, []);
+    const kurang = await checkCompleteness(sql, strategiId);
+    expect(kurang.map((k) => k.kode)).toContain('H-2');
+  });
+});
+
+describeDb('J-3 is the SAME list as H-2 (A-09b)', () => {
+  it('refuses a revision trigger this Strategi never declared', async () => {
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+
+    // The fixture declares pencapaian_di_bawah_target + stok_kosong. This code
+    // is in the global vocabulary and still refused — that is the subset rule
+    // the DB CHECK structurally cannot express.
+    await expect(
+      openRevision(sql, am(), strategiId, {
+        triggerRevisi: ['ganti_pic_klien'],
+        alasanRevisi: 'PIC klien berganti',
+        asumsiGugur: ['A1'],
+      }),
+    ).rejects.toThrow(MSG_TRIGGER_NOT_DECLARED);
+  });
+
+  it('refuses a free-text trigger at the DB level, whatever the caller', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(
+      sql`insert into strategi_version
+            (strategi_id, versi_no, peristiwa, aktor, trigger_revisi, alasan_revisi,
+             asumsi_gugur, created_by)
+          values (${strategiId}, 1, 'revisi_dibuka', 'ZZ-AM',
+                  '["stok kosong"]'::jsonb, 'alasan', '["A1"]'::jsonb, 'ZZ-AM')`,
+    ).rejects.toThrow(/ck_strver_trigger_set/);
+  });
+
+  it('carries H-2 into the revision, so the next revision can still cite one', async () => {
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    const v2 = await openRevision(sql, am(), strategiId, {
+      triggerRevisi: ['stok_kosong'],
+      alasanRevisi: 'stok hero SKU kosong 20 hari',
+      asumsiGugur: ['A1'],
+    });
+    const copied = await getStrategi(sql, am(), v2.id);
+    expect(copied.triggerRevisi.map((t) => t.kode).sort()).toEqual([
+      'pencapaian_di_bawah_target',
+      'stok_kosong',
+    ]);
+    expect(copied.triggerRevisi.find((t) => t.kode === 'stok_kosong')?.ambang).toBe(14);
+  });
+});
+
+describeDb('Section I handoff (A-09b)', () => {
+  it('keeps I-2, I-3 and I-4 on one key, and carries them into a revision', async () => {
+    const { strategiId } = await seedSubmittable();
+    const d = await getStrategi(sql, am(), strategiId);
+
+    expect(d.dispatch.map((x) => x.divisi)).toEqual(['Creative', 'Ads']);
+    // I-4 rides the I-2 row: a note for a division that receives no Brief has
+    // no reader, which is why there is no second table.
+    expect(d.dispatch[0].catatan).toContain('tidak ada reshoot');
+    expect(d.dispatch[1].catatan).toBeNull();
+    expect(d.metrikLaporanKlien).toEqual(['gmv', 'cr', 'roas_min']);
+
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    const v2 = await openRevision(sql, am(), strategiId, {
+      triggerRevisi: ['stok_kosong'],
+      alasanRevisi: 'stok hero SKU kosong 20 hari',
+      asumsiGugur: ['A1'],
+    });
+    const copied = await getStrategi(sql, am(), v2.id);
+    expect(copied.dispatch.map((x) => x.divisi)).toEqual(['Creative', 'Ads']);
+    expect(copied.metrikLaporanKlien).toEqual(['gmv', 'cr', 'roas_min']);
+    expect(copied.fase).toHaveLength(2);
+    expect(copied.tanggalBesar).toHaveLength(1);
+    expect(copied.ketergantungan).toHaveLength(1);
+    expect(copied.reviewKlienPic).toBe('ZZ-AM');
+  });
+
+  it('refuses an unknown division, a duplicate, and a repeated dispatch position', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(
+      saveHandoff(sql, am(), strategiId, { dispatch: [{ divisi: 'Finance' as never }] }),
+    ).rejects.toThrow(MSG_DISPATCH_INVALID);
+
+    await expect(
+      saveHandoff(sql, am(), strategiId, {
+        dispatch: [{ divisi: 'Ads', urutan: 1 }, { divisi: 'Ads', urutan: 2 }],
+      }),
+    ).rejects.toThrow(MSG_DISPATCH_DUPLICATE);
+
+    // "Dispatch order" with two divisions at position 1 is not an order.
+    await expect(
+      saveHandoff(sql, am(), strategiId, {
+        dispatch: [{ divisi: 'Ads', urutan: 1 }, { divisi: 'KOL', urutan: 1 }],
+      }),
+    ).rejects.toThrow(MSG_DISPATCH_URUTAN_DUPLICATE);
+  });
+
+  it('refuses an I-3 metric outside the D-4 vocabulary and dedups the rest', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(
+      saveHandoff(sql, am(), strategiId, {
+        dispatch: [{ divisi: 'Ads' }],
+        metrikLaporanKlien: ['jumlah_komplain' as never],
+      }),
+    ).rejects.toThrow(MSG_METRIK_LAPORAN_INVALID);
+
+    // I-3 is a SET: "GMV twice" is the same answer as "GMV".
+    const saved = await saveHandoff(sql, am(), strategiId, {
+      dispatch: [{ divisi: 'Ads' }],
+      metrikLaporanKlien: ['gmv', 'gmv', 'cr'],
+    });
+    expect(saved.metrikLaporanKlien).toEqual(['gmv', 'cr']);
+  });
+
+  it('gates I-2 and I-3 at submit', async () => {
+    const { strategiId } = await seedSubmittable();
+    await saveHandoff(sql, am(), strategiId, { dispatch: [], metrikLaporanKlien: [] });
+    const kodes = (await checkCompleteness(sql, strategiId)).map((k) => k.kode);
+    expect(kodes).toContain('I-2');
+    expect(kodes).toContain('I-3');
+  });
+});
+
+describeDb('A-09b closed sets do not drift', () => {
+  it('keeps D-4, D-6 and I-3 the same list', async () => {
+    // Three closed sets that are meant to be one. Two lists that CAN diverge is
+    // the O48/O51 defect class; this is the cheapest possible guard against it.
+    expect([...LAPORAN_METRICS]).toEqual([...TARGET_METRICS]);
+    expect([...LEADING_INDICATORS]).toEqual([...TARGET_METRICS]);
+  });
+
+  it('keeps H-2 and J-3 the same list, in TS and in the DB', async () => {
+    const rows = await sql<{ def: string }[]>`
+      select pg_get_constraintdef(oid) as def from pg_constraint
+       where conname in ('ck_strtrg_kode', 'ck_strver_trigger_set')`;
+    expect(rows).toHaveLength(2);
+    for (const kode of TRIGGER_REVISI_CODES) {
+      for (const r of rows) expect(r.def).toContain(kode);
+    }
+  });
+
+  it('keeps I-2 divisions identical to the Brief-receiving divisions', async () => {
+    expect([...DISPATCH_DIVISIONS]).toEqual([...ALLOWED_DIVISIONS]);
+  });
+
+  it('keeps E-2 roles identical in TS and in the DB CHECK', async () => {
+    const rows = await sql<{ def: string }[]>`
+      select pg_get_constraintdef(oid) as def from pg_constraint
+       where conname = 'ck_strchan_prioritas'`;
+    expect(rows).toHaveLength(1);
+    for (const p of CHANNEL_PRIORITAS) expect(rows[0].def).toContain(p);
   });
 });

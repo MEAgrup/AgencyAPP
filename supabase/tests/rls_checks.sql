@@ -983,6 +983,20 @@ RESET ROLE;
 --     mengalir dari induknya lewat `jwt_owns_*`/`EXISTS`. Mereka BUKAN 39 gap
 --     independen — memperbaiki induknya memperbaiki mereka. Daftar ini
 --     mengukur permukaan, bukan jumlah bug.
+--
+--     ⚠️ **Sepuluh baris `strategi_*` di bawah adalah FALSE-NEGATIVE yang sudah
+--     diverifikasi, bukan gap.** Predikatnya `private.jwt_can_read_strategi()`,
+--     dan badan fungsi itu adalah cermin persis `strategi_select` — TERMASUK
+--     arm `jwt_is_lead() AND jwt_division() = 'Account'`. Jadi arm-nya ADA; ia
+--     hanya satu tingkat di balik SECURITY DEFINER, yang tidak bisa dilihat
+--     detektor sintaktik di atas (persis false-negative yang paragraf
+--     sebelumnya sudah antisipasi). Lima di antaranya ditambahkan oleh A-09b
+--     (DECISIONS 2026-08-08 "A-09b — lima tabel anak Strategi masuk ledger
+--     O48"); mereka mengikuti kelas siblingnya, bukan membuka kelas baru.
+--     Membuat detektor menembus satu tingkat indireksi akan MENGHAPUS
+--     kesepuluhnya sekaligus — diusulkan sebagai **O60**, sengaja tidak
+--     dikerjakan di dalam tiket fitur: mengubah semantik invariant bersama
+--     supaya tiket sendiri hijau adalah cara paling mudah kehilangan gerbang.
 -- ---------------------------------------------------------------------------
 RESET ROLE;
 DO $$
@@ -999,9 +1013,12 @@ DECLARE
     'optimization_logs_select','plan_gate_config_select','prospect_attempt_nq_reasons_select',
     'prospect_attempts_select','qualified_form_services_select','qualified_forms_select',
     'strategi_akses_select','strategi_assumption_select','strategi_baseline_bulan_select',
-    'strategi_channel_select','strategi_diagnosa_select','strategi_prasyarat_klien_select',
-    'strategi_quick_win_select','strategi_risiko_struktural_select','strategi_risk_select',
-    'strategi_target_select','strategi_version_select','vendors_select'
+    'strategi_channel_select','strategi_diagnosa_select','strategi_dispatch_select',
+    'strategi_fase_select','strategi_ketergantungan_klien_select',
+    'strategi_prasyarat_klien_select','strategi_quick_win_select',
+    'strategi_risiko_struktural_select','strategi_risk_select',
+    'strategi_tanggal_besar_select','strategi_target_select',
+    'strategi_trigger_revisi_select','strategi_version_select','vendors_select'
   ];
   gained text[];
   lost   text[];

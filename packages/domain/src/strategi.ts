@@ -159,6 +159,74 @@ export const LEADING_INDICATOR_MAX = 5;
 /** D-5 — the three fixed horizons. Fixed cardinality is why D-5 is columns. */
 export const DEFINISI_BERHASIL_HORIZONS = [30, 60, 90] as const;
 
+// ---------------------------------------------------------------------------
+// Section E/G/H/I closed sets (A-09b)
+// ---------------------------------------------------------------------------
+
+/** E-2 — a channel's role. The three values are written by §4 E-2 itself. */
+export const CHANNEL_PRIORITAS = ['engine_utama', 'pendukung', 'maintenance'] as const;
+export type ChannelPrioritas = (typeof CHANNEL_PRIORITAS)[number];
+
+/**
+ * H-2 — the revision triggers, transcribed from §4 H-2 (which does write its
+ * own list, unlike D-6 and I-3).
+ *
+ * **This is also the J-3 list.** `strategi_version.trigger_revisi` accepted any
+ * string until A-09b, because Rule 13's "a trigger from the enumerated list"
+ * had no enumerated list to point at. Keeping J-3 open now that H-2 exists would
+ * be two lists for one thing — the O48/O51 defect class. Mirrored by
+ * `ck_strtrg_kode` and `ck_strver_trigger_set`; widening one moves both.
+ */
+export const TRIGGER_REVISI_CODES = [
+  'pencapaian_di_bawah_target',
+  'klien_ubah_lini_produk',
+  'stok_kosong',
+  'budget_iklan_dipotong',
+  'kebijakan_platform_berubah',
+  'ganti_pic_klien',
+  'lainnya',
+] as const;
+export type TriggerRevisiCode = (typeof TRIGGER_REVISI_CODES)[number];
+
+/**
+ * The two codes §4 writes with an "X" are the two that carry a threshold, and
+ * the DB enforces the equivalence in both directions (`ck_strtrg_ambang`): a
+ * threshold is required for these and forbidden for the rest, so "stok kosong
+ * >30 hari" cannot be stored as "ganti PIC klien >30".
+ */
+export const TRIGGER_REVISI_BERAMBANG: readonly TriggerRevisiCode[] = [
+  'pencapaian_di_bawah_target',
+  'stok_kosong',
+] as const;
+
+/**
+ * I-3 — metrics pulled into the monthly client report.
+ *
+ * Same situation as D-6/X-13: §4 marks it "Multi-enum" and never writes the
+ * list, so this IS `TARGET_METRICS` rather than a coined vocabulary. Open
+ * question **X-14** — whether a client report carries anything that is not a
+ * D-4 target metric. A test asserts D-4 ≡ D-6 ≡ I-3 so the three cannot drift
+ * apart silently.
+ */
+export const LAPORAN_METRICS = TARGET_METRICS;
+export type LaporanMetric = TargetMetric;
+
+/**
+ * I-2 — the divisions that can receive a Brief.
+ *
+ * Identical to `briefs.assigned_division` / `ALLOWED_DIVISIONS`, and that is the
+ * point: I-2 asks which divisions receive Briefs, so a second list would let a
+ * Strategi dispatch to a division that has no Brief board. `Live Stream` is
+ * included even though Rule 18 keeps hosting with a vendor — the as-built brief
+ * table carries Live Stream briefs (they skip the task machine and end at a
+ * vendor tracker), so the dispatch order has to be able to name it.
+ */
+export const DISPATCH_DIVISIONS = ['Creative', 'Ads', 'KOL', 'Live Stream'] as const;
+export type DispatchDivision = (typeof DISPATCH_DIVISIONS)[number];
+
+/** G-1 — §4 says "Repeatable struct (min 2)". One phase is not a calendar. */
+export const FASE_MIN = 2;
+
 /**
  * D-7 sends its notification to SPV Account **and Head of Sales** — the second
  * division named anywhere in M6A. Spelled as a constant here rather than inline
@@ -549,6 +617,62 @@ export const MSG_RISIKO_STRUKTURAL_REQUIRED =
 export const MSG_PRASYARAT_KLIEN_REQUIRED =
   '[minimal satu prasyarat klien wajib diisi]';
 
+// --- Section E/G/H/I (A-09b) ------------------------------------------------
+
+/** E-2: both halves of the answer — the role AND the reason §4 asks for. */
+export const MSG_PRIORITAS_CHANNEL_REQUIRED =
+  '[prioritas channel dan alasannya wajib diisi untuk setiap channel]';
+export const MSG_PRIORITAS_INVALID = '[prioritas channel tidak dikenal]';
+
+/** E-12. */
+export const MSG_KETERGANTUNGAN_REQUIRED =
+  '[minimal satu ketergantungan pada klien wajib diisi]';
+export const MSG_KETERGANTUNGAN_INCOMPLETE =
+  '[ketergantungan klien wajib memuat item, kapan, dan konsekuensi]';
+
+/** G-1. */
+export const MSG_FASE_MIN = `[minimal ${FASE_MIN} fase kerja wajib diisi]`;
+export const MSG_FASE_INCOMPLETE =
+  '[fase kerja wajib memuat nama, rentang tanggal, tujuan, dan kriteria lulus]';
+export const MSG_FASE_RENTANG =
+  '[tanggal akhir fase tidak boleh lebih awal dari tanggal mulai]';
+
+/** G-2. */
+export const MSG_TANGGAL_BESAR_REQUIRED = '[minimal satu tanggal besar wajib diisi]';
+export const MSG_TANGGAL_BESAR_INCOMPLETE =
+  '[tanggal besar wajib memuat tanggal, nama, dan perannya]';
+
+/** G-3 / G-4. */
+export const MSG_REVIEW_KLIEN_REQUIRED =
+  '[jadwal review klien wajib memuat frekuensi, format laporan, dan PIC]';
+export const MSG_REVIEW_INTERNAL_REQUIRED = '[frekuensi review internal SPV wajib diisi]';
+
+/** H-2. */
+export const MSG_TRIGGER_REVISI_REQUIRED = '[minimal satu trigger revisi wajib dipilih]';
+export const MSG_TRIGGER_REVISI_INVALID = '[trigger revisi tidak dikenal]';
+export const MSG_TRIGGER_AMBANG_REQUIRED = '[trigger ini wajib disertai ambang angka]';
+export const MSG_TRIGGER_AMBANG_TERLARANG = '[trigger ini tidak memakai ambang angka]';
+export const MSG_TRIGGER_AMBANG_INVALID = '[ambang trigger revisi tidak valid]';
+export const MSG_TRIGGER_LAINNYA_CATATAN =
+  '[trigger "lainnya" wajib disertai penjelasan]';
+export const MSG_TRIGGER_DUPLICATE = '[trigger revisi yang sama dipilih lebih dari sekali]';
+/**
+ * Rule 13 + §4 J-3 "trigger yang terpicu (dari H-2)": a revision may only cite a
+ * trigger this Strategi actually declared. The DB CHECK can only hold the global
+ * set — a per-Strategi subset is a cross-row comparison, so it lives here.
+ */
+export const MSG_TRIGGER_NOT_DECLARED =
+  '[trigger revisi ini tidak dideklarasikan di H-2 pada Strategi ini]';
+
+/** I-2 / I-3. */
+export const MSG_DISPATCH_REQUIRED = '[minimal satu divisi penerima Brief wajib dipilih]';
+export const MSG_DISPATCH_INVALID = '[divisi penerima Brief tidak dikenal]';
+export const MSG_DISPATCH_DUPLICATE = '[divisi penerima Brief terdaftar lebih dari sekali]';
+export const MSG_DISPATCH_URUTAN_DUPLICATE = '[urutan dispatch tidak boleh sama]';
+export const MSG_METRIK_LAPORAN_REQUIRED =
+  '[minimal satu metrik laporan klien wajib dipilih]';
+export const MSG_METRIK_LAPORAN_INVALID = '[metrik laporan klien tidak dikenal]';
+
 const RE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 // ---------------------------------------------------------------------------
@@ -742,6 +866,28 @@ export interface Strategi extends StrategiKonteks {
    * Optional in §4, so it is deliberately NOT gated at submit.
    */
   kondisiStopScope: string | null;
+
+  // --- Section G/I header fields (A-09b). G-1/G-2 are repeatable structs and
+  // live in child tables; these are the ones whose cardinality is fixed at one.
+  /**
+   * G-3 — review cadence with the client. FREE TEXT, and that is a decision:
+   * §4 marks G-3/G-4 `Struct`, not `Enum`, and the PRD never writes a frequency
+   * vocabulary anywhere. Inventing `mingguan|bulanan|…` here would be a closed
+   * set nobody asked for, enforced by a CHECK that is expensive to undo.
+   */
+  reviewKlienFrekuensi: string | null;
+  /** G-3 — report format used at the client review. */
+  reviewKlienFormat: string | null;
+  /** G-3 — who runs the review on MEA's side. */
+  reviewKlienPic: string | null;
+  /** G-4 — internal SPV review cadence. Free text, same reason as G-3. */
+  reviewInternalFrekuensi: string | null;
+  /**
+   * I-3 — metrics pulled into the monthly client report. Closed set = the D-4
+   * metric vocabulary (`TARGET_METRICS`), for the same reason D-6 reuses it
+   * (X-13): §4 says "Multi-enum" and never writes the list. Open question X-14.
+   */
+  metrikLaporanKlien: LaporanMetric[];
 }
 
 /** Section B-0 — one block per contracted channel (D4). */
@@ -764,6 +910,16 @@ export interface StrategiChannel {
   periodeAkhir: string | null;
   alasanPeriodePendek: string | null;
   catatanPeriodePendek: string | null;
+
+  // --- E-2 (A-09b). Section E, but stored per channel, because that is the
+  // grain of the question ("which channel is the engine"). It lives on this row
+  // rather than in a child table because `saveChannels` is DELETE-then-INSERT:
+  // a separate table keyed by channel would be silently wiped — or silently
+  // orphaned — every time the AM saves Section B.
+  /** E-2 — engine_utama / pendukung / maintenance. */
+  prioritas: ChannelPrioritas | null;
+  /** E-2 — the "+ alasan" half of the same question. */
+  prioritasAlasan: string | null;
 
   // --- Section B groups B-2 … B-9 (A-06). One figure per channel, not per
   // month — the monthly ones (B-1, B-5.1/5.2) are rows in `baseline` below.
@@ -1017,6 +1173,75 @@ export interface StrategiPrasyaratKlien {
   urutan: number;
 }
 
+// ---------------------------------------------------------------------------
+// Section E/G/H/I child rows (A-09b)
+// ---------------------------------------------------------------------------
+
+/**
+ * E-12 — what the client must supply DURING execution, when, and what happens
+ * if it is late.
+ *
+ * Deliberately not merged with C-7 (`StrategiPrasyaratKlien`). C-7 is the gate
+ * list before execution starts and has no consequence field because its
+ * consequence is that execution does not start; E-12 is the running dependency,
+ * and `konsekuensi` is the whole reason it exists separately — it is what gets
+ * cited when a target is missed.
+ */
+export interface StrategiKetergantungan {
+  id: number;
+  item: string;
+  /** Free text, not a date: §4 exemplifies "tiap tgl 1", which is no single day. */
+  kapan: string;
+  konsekuensi: string;
+  urutan: number;
+}
+
+/** G-1 — work phases. Min `FASE_MIN`; H-3's "fails in phase 1" depends on these. */
+export interface StrategiFase {
+  id: number;
+  nama: string;
+  tanggalMulai: string;
+  tanggalAkhir: string;
+  tujuan: string;
+  kriteriaLulus: string;
+  urutan: number;
+}
+
+/**
+ * G-2 — big dates inside the contract window and each one's role.
+ * Read downstream by M6B Rule 7, which re-weights the weekly Plan split toward
+ * the weeks containing them.
+ */
+export interface StrategiTanggalBesar {
+  id: number;
+  tanggal: string;
+  nama: string;
+  peran: string;
+  urutan: number;
+}
+
+/**
+ * H-2 — a revision trigger declared for this client.
+ * `ambang` is required for exactly `TRIGGER_REVISI_BERAMBANG` and must be null
+ * for the rest; its unit is implied by the code (percent, or days).
+ */
+export interface StrategiTriggerRevisi {
+  id: number;
+  kode: TriggerRevisiCode;
+  ambang: number | null;
+  catatan: string | null;
+  urutan: number;
+}
+
+/** I-2 (division + dispatch order) and I-4 (`catatan`, optional) — one row. */
+export interface StrategiDispatch {
+  id: number;
+  divisi: DispatchDivision;
+  urutan: number;
+  /** I-4 — what this division most easily misreads. Optional in §4. */
+  catatan: string | null;
+}
+
 /** Section J — one row per event, append-only. */
 export interface StrategiEvent {
   versiNo: number;
@@ -1046,6 +1271,12 @@ export interface StrategiDetail extends Strategi {
   pillars: StrategiPillar[];
   resources: StrategiResource[];
   risks: StrategiRisk[];
+  /** A-09b — Section E-12 / G-1 / G-2 / H-2 / I-2+I-4. */
+  ketergantungan: StrategiKetergantungan[];
+  fase: StrategiFase[];
+  tanggalBesar: StrategiTanggalBesar[];
+  triggerRevisi: StrategiTriggerRevisi[];
+  dispatch: StrategiDispatch[];
   riwayat: StrategiEvent[];
 }
 
@@ -1144,6 +1375,12 @@ interface StrategiRow {
   urutan_eksekusi_alasan: string | null;
   skenario_mundur: string | null;
   kondisi_stop_scope: string | null;
+  // Section G/I header (A-09b).
+  review_klien_frekuensi: string | null;
+  review_klien_format: string | null;
+  review_klien_pic: string | null;
+  review_internal_frekuensi: string | null;
+  metrik_laporan_klien: unknown;
 }
 
 function dateStr(v: string | Date): string {
@@ -1219,6 +1456,12 @@ function rowToStrategi(r: StrategiRow): Strategi {
     urutanEksekusiAlasan: r.urutan_eksekusi_alasan,
     skenarioMundur: r.skenario_mundur,
     kondisiStopScope: r.kondisi_stop_scope,
+    // Section G/I header (A-09b)
+    reviewKlienFrekuensi: r.review_klien_frekuensi,
+    reviewKlienFormat: r.review_klien_format,
+    reviewKlienPic: r.review_klien_pic,
+    reviewInternalFrekuensi: r.review_internal_frekuensi,
+    metrikLaporanKlien: strArray(r.metrik_laporan_klien) as LaporanMetric[],
   };
 }
 
@@ -1472,6 +1715,8 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
       periode_mulai: string | Date | null;
       periode_akhir: string | Date | null;
       alasan_periode_pendek: string | null;
+      prioritas: string | null;
+      prioritas_alasan: string | null;
       catatan_periode_pendek: string | null;
       // Section B groups B-2 … B-9 (A-06)
       pengunjung_per_bulan: number | null;
@@ -1583,6 +1828,8 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
       periodeAkhir: dateOrNull(c.periode_akhir),
       alasanPeriodePendek: c.alasan_periode_pendek,
       catatanPeriodePendek: c.catatan_periode_pendek,
+      prioritas: c.prioritas as ChannelPrioritas | null,
+      prioritasAlasan: c.prioritas_alasan,
       // Section B (A-06)
       pengunjungPerBulan: c.pengunjung_per_bulan,
       conversionRatePersen: numOrNull(c.conversion_rate_persen),
@@ -1784,6 +2031,38 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
     }[]
   >`select * from strategi_risk where strategi_id = ${id} order by urutan asc, id asc`;
 
+  // --- A-09b child rows -----------------------------------------------------
+  const ketergantunganRows = await sql<
+    { id: string; item: string; kapan: string; konsekuensi: string; urutan: number }[]
+  >`select * from strategi_ketergantungan_klien where strategi_id = ${id}
+     order by urutan asc, id asc`;
+
+  const faseRows = await sql<
+    {
+      id: string;
+      nama: string;
+      tanggal_mulai: string | Date;
+      tanggal_akhir: string | Date;
+      tujuan: string;
+      kriteria_lulus: string;
+      urutan: number;
+    }[]
+  >`select * from strategi_fase where strategi_id = ${id} order by urutan asc, id asc`;
+
+  const tanggalBesarRows = await sql<
+    { id: string; tanggal: string | Date; nama: string; peran: string; urutan: number }[]
+  >`select * from strategi_tanggal_besar where strategi_id = ${id}
+     order by tanggal asc, id asc`;
+
+  const triggerRows = await sql<
+    { id: string; kode: string; ambang: string | null; catatan: string | null; urutan: number }[]
+  >`select * from strategi_trigger_revisi where strategi_id = ${id}
+     order by urutan asc, id asc`;
+
+  const dispatchRows = await sql<
+    { id: string; divisi: string; urutan: number; catatan: string | null }[]
+  >`select * from strategi_dispatch where strategi_id = ${id} order by urutan asc`;
+
   const eventRows = await sql<
     {
       versi_no: number;
@@ -1889,6 +2168,45 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
       mitigasi: r.mitigasi,
       pic: r.pic,
       urutan: r.urutan,
+    })),
+    ketergantungan: ketergantunganRows.map((k) => ({
+      id: Number(k.id),
+      item: k.item,
+      kapan: k.kapan,
+      konsekuensi: k.konsekuensi,
+      urutan: k.urutan,
+    })),
+    fase: faseRows.map((f) => ({
+      id: Number(f.id),
+      nama: f.nama,
+      tanggalMulai: dateStr(f.tanggal_mulai),
+      tanggalAkhir: dateStr(f.tanggal_akhir),
+      tujuan: f.tujuan,
+      kriteriaLulus: f.kriteria_lulus,
+      urutan: f.urutan,
+    })),
+    tanggalBesar: tanggalBesarRows.map((t) => ({
+      id: Number(t.id),
+      tanggal: dateStr(t.tanggal),
+      nama: t.nama,
+      peran: t.peran,
+      urutan: t.urutan,
+    })),
+    triggerRevisi: triggerRows.map((t) => ({
+      id: Number(t.id),
+      kode: t.kode as TriggerRevisiCode,
+      // `numeric` arrives as a string from postgres.js. A threshold is a
+      // COUNT (percent, or days) — not money — so `Number` is the right
+      // representation here, unlike every rupiah figure on this boundary.
+      ambang: t.ambang === null ? null : Number(t.ambang),
+      catatan: t.catatan,
+      urutan: t.urutan,
+    })),
+    dispatch: dispatchRows.map((d) => ({
+      id: Number(d.id),
+      divisi: d.divisi as DispatchDivision,
+      urutan: d.urutan,
+      catatan: d.catatan,
     })),
     riwayat: eventRows.map((e) => ({
       versiNo: e.versi_no,
@@ -2499,6 +2817,11 @@ export interface ChannelInput {
   alasanPeriodePendek?: string | null;
   catatanPeriodePendek?: string | null;
 
+  // E-2 (A-09b). Optional on the wire like every other half-filled-form field;
+  // required per channel at submit (`checkCompleteness`).
+  prioritas?: ChannelPrioritas | null;
+  prioritasAlasan?: string | null;
+
   // Section B groups B-2 … B-9 (A-06). Optional on the wire, because a long form
   // is saved before it is finished; required at submit for `Eksisting` channels.
   pengunjungPerBulan?: number | null;
@@ -2752,6 +3075,7 @@ export async function saveChannels(
            umur_toko_bulan, badge, target_tanggal_live, prasyarat_pembukaan,
            sumber_data, tanggal_ambil_data, lampiran, periode_baseline_bulan,
            periode_mulai, periode_akhir, alasan_periode_pendek, catatan_periode_pendek,
+           prioritas, prioritas_alasan,
            pengunjung_per_bulan, conversion_rate_persen,
            trafik_organik_persen, trafik_iklan_persen, trafik_affiliate_persen,
            trafik_live_persen, trafik_video_persen, trafik_luar_persen,
@@ -2780,6 +3104,7 @@ export async function saveChannels(
            ${nullIfBlank(c.lampiran)}, ${c.periodeBaselineBulan ?? null},
            ${nullIfBlank(c.periodeMulai)}, ${nullIfBlank(c.periodeAkhir)},
            ${nullIfBlank(c.alasanPeriodePendek)}, ${nullIfBlank(c.catatanPeriodePendek)},
+           ${c.prioritas ?? null}, ${nullIfBlank(c.prioritasAlasan)},
            ${c.pengunjungPerBulan ?? null}, ${c.conversionRatePersen ?? null},
            ${c.trafikOrganikPersen ?? null}, ${c.trafikIklanPersen ?? null},
            ${c.trafikAffiliatePersen ?? null}, ${c.trafikLivePersen ?? null},
@@ -2836,6 +3161,13 @@ function validateChannel(c: ChannelInput): void {
   }
   if ((c.channel === 'Lainnya') !== ((c.channelLain ?? '').trim() !== '')) {
     throw new ValidationError(MSG_INCOMPLETE);
+  }
+  // E-2 shape only — an unknown role is refused now, a MISSING one is reported
+  // at submit. That split is the same one every Section A/B field uses: §7 wants
+  // a half-filled form to be savable, and §5 step 5 wants the gaps counted, not
+  // thrown.
+  if (c.prioritas !== null && c.prioritas !== undefined && !CHANNEL_PRIORITAS.includes(c.prioritas)) {
+    throw new ValidationError(MSG_PRIORITAS_INVALID);
   }
   // Section B shape runs for BOTH channel states: Rule 4 says `Belum Aktif`
   // *skips* the historical baseline, not that a figure supplied anyway may be
@@ -3815,6 +4147,360 @@ export async function saveRisks(
 }
 
 // ---------------------------------------------------------------------------
+// Section E-12 / G / H-2 / I (A-09b)
+// ---------------------------------------------------------------------------
+
+/** E-12 — one client dependency. All three parts are the point (see the type). */
+export interface KetergantunganInput {
+  item: string;
+  kapan: string;
+  konsekuensi: string;
+  urutan?: number | null;
+}
+
+/** G-1 — one work phase. */
+export interface FaseInput {
+  nama: string;
+  tanggalMulai: string;
+  tanggalAkhir: string;
+  tujuan: string;
+  kriteriaLulus: string;
+  urutan?: number | null;
+}
+
+/** G-2 — one big date. */
+export interface TanggalBesarInput {
+  tanggal: string;
+  nama: string;
+  peran: string;
+  urutan?: number | null;
+}
+
+/**
+ * G-1 + G-2 + G-3 + G-4 in one call, because Section G is one screen and one
+ * autosave. Splitting it would make the calendar savable in states where the
+ * phases exist but the review cadence that reads them does not.
+ */
+export interface KalenderInput {
+  fase: FaseInput[];
+  tanggalBesar: TanggalBesarInput[];
+  reviewKlienFrekuensi?: string | null;
+  reviewKlienFormat?: string | null;
+  reviewKlienPic?: string | null;
+  reviewInternalFrekuensi?: string | null;
+}
+
+/**
+ * saveKetergantungan writes E-12.
+ *
+ * Kept out of `saveKalender` on purpose: E-12 is Section E, and folding it into
+ * a Section G call would make the form's "which section is incomplete" answer
+ * depend on which route happened to save last.
+ */
+export async function saveKetergantungan(
+  sql: Sql,
+  actor: Actor,
+  id: string,
+  rows: KetergantunganInput[],
+): Promise<StrategiDetail> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    await requireDraftAndWriter(tx, actor, id);
+    for (const k of rows) {
+      if (
+        (k.item ?? '').trim() === '' ||
+        (k.kapan ?? '').trim() === '' ||
+        (k.konsekuensi ?? '').trim() === ''
+      ) {
+        throw new ValidationError(MSG_KETERGANTUNGAN_INCOMPLETE);
+      }
+    }
+    await tx`delete from strategi_ketergantungan_klien where strategi_id = ${id}`;
+    let i = 0;
+    for (const k of rows) {
+      await tx`
+        insert into strategi_ketergantungan_klien
+          (strategi_id, item, kapan, konsekuensi, urutan, created_by)
+        values
+          (${id}, ${k.item.trim()}, ${k.kapan.trim()}, ${k.konsekuensi.trim()},
+           ${k.urutan ?? i}, ${actor.employeeId})`;
+      i += 1;
+    }
+    await ex.audit.insertAudit({
+      entityType: ENTITY_STRATEGI,
+      entityId: id,
+      actorEmployeeId: actor.employeeId,
+      action: 'save_ketergantungan',
+      beforeJson: null,
+      afterJson: { count: rows.length },
+      createdBy: actor.employeeId,
+    });
+    return loadDetail(tx, await loadStrategiRow(tx, id));
+  });
+}
+
+/** saveKalender writes G-1, G-2, G-3 and G-4. */
+export async function saveKalender(
+  sql: Sql,
+  actor: Actor,
+  id: string,
+  input: KalenderInput,
+): Promise<StrategiDetail> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    await requireDraftAndWriter(tx, actor, id);
+
+    const teks = (v: string | null | undefined): string | null => {
+      const t = (v ?? '').trim();
+      return t === '' ? null : t;
+    };
+
+    const fase = input.fase ?? [];
+    for (const f of fase) {
+      if (
+        (f.nama ?? '').trim() === '' ||
+        (f.tujuan ?? '').trim() === '' ||
+        (f.kriteriaLulus ?? '').trim() === '' ||
+        !RE_DATE.test((f.tanggalMulai ?? '').trim()) ||
+        !RE_DATE.test((f.tanggalAkhir ?? '').trim())
+      ) {
+        throw new ValidationError(MSG_FASE_INCOMPLETE);
+      }
+      // Checked here as well as by `ck_strfase_rentang` so the AM gets the
+      // named reason rather than a constraint violation. The CHECK stays the
+      // enforcement; this is the translation.
+      if (f.tanggalAkhir.trim() < f.tanggalMulai.trim()) {
+        throw new ValidationError(MSG_FASE_RENTANG);
+      }
+    }
+
+    const besar = input.tanggalBesar ?? [];
+    for (const t of besar) {
+      if (
+        !RE_DATE.test((t.tanggal ?? '').trim()) ||
+        (t.nama ?? '').trim() === '' ||
+        (t.peran ?? '').trim() === ''
+      ) {
+        throw new ValidationError(MSG_TANGGAL_BESAR_INCOMPLETE);
+      }
+    }
+
+    await tx`delete from strategi_fase where strategi_id = ${id}`;
+    let i = 0;
+    for (const f of fase) {
+      await tx`
+        insert into strategi_fase
+          (strategi_id, nama, tanggal_mulai, tanggal_akhir, tujuan, kriteria_lulus,
+           urutan, created_by)
+        values
+          (${id}, ${f.nama.trim()}, ${f.tanggalMulai.trim()}, ${f.tanggalAkhir.trim()},
+           ${f.tujuan.trim()}, ${f.kriteriaLulus.trim()}, ${f.urutan ?? i},
+           ${actor.employeeId})`;
+      i += 1;
+    }
+
+    await tx`delete from strategi_tanggal_besar where strategi_id = ${id}`;
+    i = 0;
+    for (const t of besar) {
+      await tx`
+        insert into strategi_tanggal_besar
+          (strategi_id, tanggal, nama, peran, urutan, created_by)
+        values
+          (${id}, ${t.tanggal.trim()}, ${t.nama.trim()}, ${t.peran.trim()},
+           ${t.urutan ?? i}, ${actor.employeeId})`;
+      i += 1;
+    }
+
+    await tx`
+      update strategi set
+        review_klien_frekuensi    = ${teks(input.reviewKlienFrekuensi)},
+        review_klien_format       = ${teks(input.reviewKlienFormat)},
+        review_klien_pic          = ${teks(input.reviewKlienPic)},
+        review_internal_frekuensi = ${teks(input.reviewInternalFrekuensi)}
+       where id = ${id}`;
+
+    await ex.audit.insertAudit({
+      entityType: ENTITY_STRATEGI,
+      entityId: id,
+      actorEmployeeId: actor.employeeId,
+      action: 'save_kalender',
+      beforeJson: null,
+      afterJson: { fase: fase.length, tanggal_besar: besar.length },
+      createdBy: actor.employeeId,
+    });
+    return loadDetail(tx, await loadStrategiRow(tx, id));
+  });
+}
+
+/** H-2 — one declared revision trigger. */
+export interface TriggerRevisiInput {
+  kode: TriggerRevisiCode;
+  ambang?: number | null;
+  catatan?: string | null;
+  urutan?: number | null;
+}
+
+/**
+ * saveTriggerRevisi writes H-2.
+ *
+ * Every rule below is also a DB CHECK. The duplication is deliberate and is the
+ * house pattern (A-08 D-6): the CHECK is the enforcement — it holds against
+ * service-role writes and any future caller — and this layer exists to name the
+ * failure in Bahasa Indonesia instead of surfacing `ck_strtrg_ambang`.
+ */
+export async function saveTriggerRevisi(
+  sql: Sql,
+  actor: Actor,
+  id: string,
+  rows: TriggerRevisiInput[],
+): Promise<StrategiDetail> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    await requireDraftAndWriter(tx, actor, id);
+
+    // `lainnya` is excluded from the duplicate check for the same reason
+    // `uq_strtrg_kode` is partial: what distinguishes two `lainnya` rows is the
+    // note, not the code.
+    const seen = new Set<string>();
+    for (const t of rows) {
+      if (!TRIGGER_REVISI_CODES.includes(t.kode)) {
+        throw new ValidationError(MSG_TRIGGER_REVISI_INVALID);
+      }
+      if (t.kode !== 'lainnya') {
+        if (seen.has(t.kode)) throw new ValidationError(MSG_TRIGGER_DUPLICATE);
+        seen.add(t.kode);
+      }
+      const perluAmbang = TRIGGER_REVISI_BERAMBANG.includes(t.kode);
+      const ambang = t.ambang ?? null;
+      if (perluAmbang && ambang === null) {
+        throw new ValidationError(MSG_TRIGGER_AMBANG_REQUIRED);
+      }
+      if (!perluAmbang && ambang !== null) {
+        throw new ValidationError(MSG_TRIGGER_AMBANG_TERLARANG);
+      }
+      if (ambang !== null) {
+        if (!Number.isFinite(ambang) || ambang <= 0) {
+          throw new ValidationError(MSG_TRIGGER_AMBANG_INVALID);
+        }
+        // "<X% target" only means anything up to 100; days have no such ceiling.
+        if (t.kode === 'pencapaian_di_bawah_target' && ambang > 100) {
+          throw new ValidationError(MSG_TRIGGER_AMBANG_INVALID);
+        }
+      }
+      if (t.kode === 'lainnya' && (t.catatan ?? '').trim() === '') {
+        throw new ValidationError(MSG_TRIGGER_LAINNYA_CATATAN);
+      }
+    }
+
+    await tx`delete from strategi_trigger_revisi where strategi_id = ${id}`;
+    let i = 0;
+    for (const t of rows) {
+      await tx`
+        insert into strategi_trigger_revisi
+          (strategi_id, kode, ambang, catatan, urutan, created_by)
+        values
+          (${id}, ${t.kode}, ${t.ambang ?? null}, ${nullIfBlank(t.catatan)},
+           ${t.urutan ?? i}, ${actor.employeeId})`;
+      i += 1;
+    }
+    await ex.audit.insertAudit({
+      entityType: ENTITY_STRATEGI,
+      entityId: id,
+      actorEmployeeId: actor.employeeId,
+      action: 'save_trigger_revisi',
+      beforeJson: null,
+      afterJson: { kode: rows.map((t) => t.kode) },
+      createdBy: actor.employeeId,
+    });
+    return loadDetail(tx, await loadStrategiRow(tx, id));
+  });
+}
+
+/** I-2 + I-4 — a receiving division, its dispatch position, and its note. */
+export interface DispatchInput {
+  divisi: DispatchDivision;
+  urutan?: number | null;
+  /** I-4, optional. */
+  catatan?: string | null;
+}
+
+/** I-2 + I-3 + I-4 — Section I is one screen. */
+export interface HandoffInput {
+  dispatch: DispatchInput[];
+  metrikLaporanKlien?: LaporanMetric[];
+}
+
+/** saveHandoff writes I-2, I-3 and I-4. */
+export async function saveHandoff(
+  sql: Sql,
+  actor: Actor,
+  id: string,
+  input: HandoffInput,
+): Promise<StrategiDetail> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    await requireDraftAndWriter(tx, actor, id);
+
+    const rows = input.dispatch ?? [];
+    const divisiSeen = new Set<string>();
+    const urutanSeen = new Set<number>();
+    let i = 1;
+    const normalised = rows.map((d) => {
+      if (!DISPATCH_DIVISIONS.includes(d.divisi)) {
+        throw new ValidationError(MSG_DISPATCH_INVALID);
+      }
+      if (divisiSeen.has(d.divisi)) throw new ValidationError(MSG_DISPATCH_DUPLICATE);
+      divisiSeen.add(d.divisi);
+      // Position defaults to arrival order. An order with two divisions at
+      // position 1 is not an order — `uq_strdisp_urutan` refuses it, and this
+      // names the refusal.
+      const urutan = d.urutan ?? i;
+      if (!Number.isInteger(urutan) || urutan < 1) {
+        throw new ValidationError(MSG_DISPATCH_INVALID);
+      }
+      if (urutanSeen.has(urutan)) throw new ValidationError(MSG_DISPATCH_URUTAN_DUPLICATE);
+      urutanSeen.add(urutan);
+      i += 1;
+      return { divisi: d.divisi, urutan, catatan: nullIfBlank(d.catatan) };
+    });
+
+    const metrik = input.metrikLaporanKlien ?? [];
+    for (const m of metrik) {
+      if (!LAPORAN_METRICS.includes(m)) {
+        throw new ValidationError(MSG_METRIK_LAPORAN_INVALID);
+      }
+    }
+    // Duplicates are dropped rather than refused: I-3 is a SET of metrics, and
+    // "GMV twice" is the same answer as "GMV", not a different one.
+    const metrikUnik = [...new Set(metrik)];
+
+    await tx`delete from strategi_dispatch where strategi_id = ${id}`;
+    for (const d of normalised) {
+      await tx`
+        insert into strategi_dispatch (strategi_id, divisi, urutan, catatan, created_by)
+        values (${id}, ${d.divisi}, ${d.urutan}, ${d.catatan}, ${actor.employeeId})`;
+    }
+    await tx`
+      update strategi set metrik_laporan_klien = ${metrikUnik as never}::jsonb
+       where id = ${id}`;
+
+    await ex.audit.insertAudit({
+      entityType: ENTITY_STRATEGI,
+      entityId: id,
+      actorEmployeeId: actor.employeeId,
+      action: 'save_handoff',
+      beforeJson: null,
+      afterJson: {
+        dispatch: normalised.map((d) => `${d.urutan}:${d.divisi}`),
+        metrik_laporan_klien: metrikUnik,
+      },
+      createdBy: actor.employeeId,
+    });
+    return loadDetail(tx, await loadStrategiRow(tx, id));
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Submit gate (Rules 3, 5, 8, 9, 17 + D-8 / H-1 minimums)
 // ---------------------------------------------------------------------------
 
@@ -3883,6 +4569,11 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
       channel: string;
       status_channel: string;
       periode_baseline_bulan: number | null;
+      // E-2 (A-09b) — gated for EVERY channel, `Belum Aktif` included: a channel
+      // with no history still has a role in the plan, which is exactly what a
+      // launch channel needs declared.
+      prioritas: string | null;
+      prioritas_alasan: string | null;
       pengunjung_per_bulan: number | null;
       conversion_rate_persen: string | null;
       trafik_organik_persen: string | null;
@@ -4073,6 +4764,73 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
   if (preqCount[0].n === 0) {
     out.push({ kode: 'C-7', pesan: MSG_PRASYARAT_KLIEN_REQUIRED });
   }
+
+  // -----------------------------------------------------------------------
+  // Section E-2/E-12, G, H-2, I (A-09b)
+  // -----------------------------------------------------------------------
+
+  // E-2 is per channel, and BOTH halves are gated: §4 asks for the role "+
+  // alasan", so a channel marked `maintenance` with no reason has answered half
+  // the question. Reported per channel so the form can jump to the block.
+  for (const c of channels) {
+    if (c.prioritas === null || c.prioritas_alasan === null) {
+      out.push({ kode: `E-2/${c.channel}`, pesan: MSG_PRIORITAS_CHANNEL_REQUIRED });
+    }
+  }
+
+  const ketergantunganCount = await sql<{ n: number }[]>`
+    select count(*)::int as n from strategi_ketergantungan_klien where strategi_id = ${id}`;
+  if (ketergantunganCount[0].n === 0) {
+    out.push({ kode: 'E-12', pesan: MSG_KETERGANTUNGAN_REQUIRED });
+  }
+
+  // G-1: §4 writes "min 2" explicitly, so this has its own message rather than
+  // the generic one — "you entered one of two" is a different problem from
+  // "you entered none".
+  const faseCount = await sql<{ n: number }[]>`
+    select count(*)::int as n from strategi_fase where strategi_id = ${id}`;
+  if (faseCount[0].n < FASE_MIN) {
+    out.push({ kode: 'G-1', pesan: MSG_FASE_MIN });
+  }
+
+  const tanggalBesarCount = await sql<{ n: number }[]>`
+    select count(*)::int as n from strategi_tanggal_besar where strategi_id = ${id}`;
+  if (tanggalBesarCount[0].n === 0) {
+    out.push({ kode: 'G-2', pesan: MSG_TANGGAL_BESAR_REQUIRED });
+  }
+
+  // G-3: one message for the group of three. Whichever part is blank, the form
+  // jumps to G-3 and the AM is looking at the same three inputs.
+  if (
+    head.reviewKlienFrekuensi === null ||
+    head.reviewKlienFormat === null ||
+    head.reviewKlienPic === null
+  ) {
+    out.push({ kode: 'G-3', pesan: MSG_REVIEW_KLIEN_REQUIRED });
+  }
+  if (head.reviewInternalFrekuensi === null) {
+    out.push({ kode: 'G-4', pesan: MSG_REVIEW_INTERNAL_REQUIRED });
+  }
+
+  // H-2 (W). This is also what makes the J-3 subset check in `openRevision`
+  // reachable: Rule 13 can only demand a trigger "from H-2" if H-2 is
+  // guaranteed non-empty on every approved version.
+  const triggerCount = await sql<{ n: number }[]>`
+    select count(*)::int as n from strategi_trigger_revisi where strategi_id = ${id}`;
+  if (triggerCount[0].n === 0) {
+    out.push({ kode: 'H-2', pesan: MSG_TRIGGER_REVISI_REQUIRED });
+  }
+  // H-4 is `O` and deliberately not gated (A-09a).
+
+  const dispatchCount = await sql<{ n: number }[]>`
+    select count(*)::int as n from strategi_dispatch where strategi_id = ${id}`;
+  if (dispatchCount[0].n === 0) {
+    out.push({ kode: 'I-2', pesan: MSG_DISPATCH_REQUIRED });
+  }
+  if (head.metrikLaporanKlien.length === 0) {
+    out.push({ kode: 'I-3', pesan: MSG_METRIK_LAPORAN_REQUIRED });
+  }
+  // I-4 is `O`. I-1 and J-4 are derived and can never be "missing".
 
   return out;
 }
@@ -4405,6 +5163,25 @@ export async function openRevision(
       throw new ConflictError(MSG_STRATEGI_EXISTS);
     }
 
+    // Rule 13 + §4 J-3 "trigger yang terpicu (DARI H-2)". `ck_strver_trigger_set`
+    // already refuses anything outside the global vocabulary; what it cannot do
+    // is refuse a trigger this Strategi never declared, because that is a
+    // cross-row comparison and a CHECK may not carry a subquery.
+    //
+    // Reachable at all only because H-2 is a submit requirement: an approved
+    // version always has at least one declared trigger, so this can never be an
+    // empty set that blocks every revision. Read off the version BEING revised —
+    // the new version inherits the same rows via `copyChildren`, but it does not
+    // exist yet.
+    const declared = await tx<{ kode: string }[]>`
+      select kode from strategi_trigger_revisi where strategi_id = ${head.id}`;
+    const declaredSet = new Set(declared.map((d) => d.kode));
+    for (const t of triggers) {
+      if (!declaredSet.has(t)) {
+        throw new ValidationError(MSG_TRIGGER_NOT_DECLARED);
+      }
+    }
+
     const newId = await ident.nextId(ex.ident, 'STRG', now);
     const induk = head.strategiIndukId ?? head.id;
     // INSERT … SELECT from the version being revised, overriding only what a new
@@ -4432,7 +5209,9 @@ export async function openRevision(
          pantangan_klien, pantangan_klien_tidak_ada, decision_maker, sla_klien_jam,
          sla_klien_catatan, aset_dari_klien, aset_dari_klien_tidak_ada, aset_catatan,
          definisi_berhasil_30, definisi_berhasil_60, definisi_berhasil_90, leading_indicator,
-         growth_thesis, urutan_eksekusi_alasan, skenario_mundur, kondisi_stop_scope)
+         growth_thesis, urutan_eksekusi_alasan, skenario_mundur, kondisi_stop_scope,
+         review_klien_frekuensi, review_klien_format, review_klien_pic,
+         review_internal_frekuensi, metrik_laporan_klien)
       select ${newId}, contract_id, client_id, versi_no + 1, ${induk}, id,
              ${STRATEGI_DRAFT_REVISI}, tanggal_mulai_siklus, siklus_terkunci,
              toleransi_over_persen, ${actor.employeeId},
@@ -4442,7 +5221,9 @@ export async function openRevision(
              pantangan_klien, pantangan_klien_tidak_ada, decision_maker, sla_klien_jam,
              sla_klien_catatan, aset_dari_klien, aset_dari_klien_tidak_ada, aset_catatan,
              definisi_berhasil_30, definisi_berhasil_60, definisi_berhasil_90, leading_indicator,
-             growth_thesis, urutan_eksekusi_alasan, skenario_mundur, kondisi_stop_scope
+             growth_thesis, urutan_eksekusi_alasan, skenario_mundur, kondisi_stop_scope,
+             review_klien_frekuensi, review_klien_format, review_klien_pic,
+             review_internal_frekuensi, metrik_laporan_klien
         from strategi where id = ${head.id}`;
 
     await copyChildren(tx, head.id, newId, actor.employeeId);
@@ -4569,7 +5350,7 @@ async function copyChildren(
       (strategi_id, channel, channel_lain, status_channel, nama_toko, url_toko,
        umur_toko_bulan, badge, target_tanggal_live, prasyarat_pembukaan, sumber_data,
        tanggal_ambil_data, lampiran, periode_baseline_bulan, periode_mulai, periode_akhir,
-       alasan_periode_pendek, catatan_periode_pendek,
+       alasan_periode_pendek, catatan_periode_pendek, prioritas, prioritas_alasan,
        pengunjung_per_bulan, conversion_rate_persen, trafik_organik_persen,
        trafik_iklan_persen, trafik_affiliate_persen, trafik_live_persen,
        trafik_video_persen, trafik_luar_persen, entry_point_utama, entry_point_catatan,
@@ -4589,7 +5370,7 @@ async function copyChildren(
     select ${toId}, channel, channel_lain, status_channel, nama_toko, url_toko,
            umur_toko_bulan, badge, target_tanggal_live, prasyarat_pembukaan, sumber_data,
            tanggal_ambil_data, lampiran, periode_baseline_bulan, periode_mulai, periode_akhir,
-           alasan_periode_pendek, catatan_periode_pendek,
+           alasan_periode_pendek, catatan_periode_pendek, prioritas, prioritas_alasan,
            pengunjung_per_bulan, conversion_rate_persen, trafik_organik_persen,
            trafik_iklan_persen, trafik_affiliate_persen, trafik_live_persen,
            trafik_video_persen, trafik_luar_persen, entry_point_utama, entry_point_catatan,
@@ -4692,6 +5473,44 @@ async function copyChildren(
       (strategi_id, item, pic_klien, deadline, urutan, created_by)
     select ${toId}, item, pic_klien, deadline, urutan, ${actorId}
       from strategi_prasyarat_klien where strategi_id = ${fromId}`;
+
+  // Section E-12 / G / H-2 / I (A-09b). All five carry, and none of them is a
+  // borderline call the way D-7 was: every one is CONTENT the AM would
+  // otherwise retype, not an act with an actor and a timestamp.
+  //
+  // H-2 in particular MUST carry: `openRevision` refuses a J-3 trigger that the
+  // version being revised did not declare, so a revision that inherited an
+  // empty H-2 would be unable to declare its own reason for existing the next
+  // time round.
+  await tx`
+    insert into strategi_ketergantungan_klien
+      (strategi_id, item, kapan, konsekuensi, urutan, created_by)
+    select ${toId}, item, kapan, konsekuensi, urutan, ${actorId}
+      from strategi_ketergantungan_klien where strategi_id = ${fromId}`;
+
+  await tx`
+    insert into strategi_fase
+      (strategi_id, nama, tanggal_mulai, tanggal_akhir, tujuan, kriteria_lulus, urutan, created_by)
+    select ${toId}, nama, tanggal_mulai, tanggal_akhir, tujuan, kriteria_lulus, urutan, ${actorId}
+      from strategi_fase where strategi_id = ${fromId}`;
+
+  await tx`
+    insert into strategi_tanggal_besar
+      (strategi_id, tanggal, nama, peran, urutan, created_by)
+    select ${toId}, tanggal, nama, peran, urutan, ${actorId}
+      from strategi_tanggal_besar where strategi_id = ${fromId}`;
+
+  await tx`
+    insert into strategi_trigger_revisi
+      (strategi_id, kode, ambang, catatan, urutan, created_by)
+    select ${toId}, kode, ambang, catatan, urutan, ${actorId}
+      from strategi_trigger_revisi where strategi_id = ${fromId}`;
+
+  await tx`
+    insert into strategi_dispatch
+      (strategi_id, divisi, urutan, catatan, created_by)
+    select ${toId}, divisi, urutan, catatan, ${actorId}
+      from strategi_dispatch where strategi_id = ${fromId}`;
 }
 
 /** transitionError maps an engine rejection to the shared error taxonomy. */
