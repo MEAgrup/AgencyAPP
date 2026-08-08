@@ -3187,6 +3187,13 @@ export interface StrategiWire {
   sanggahan_target_realistis: string | null;
   sanggahan_diajukan_pada: string | null;
   sanggahan_diajukan_oleh: string | null;
+  // Section E/H narrative header fields (A-09a). The rest of E/H are child rows:
+  // E-3…E-11 in `pillars`, H-1 in `risks`.
+  growth_thesis: string | null;
+  urutan_eksekusi_alasan: string | null;
+  skenario_mundur: string | null;
+  /** H-4 — §4.1 HARD-INTERNAL, same caveat as `sanggahan_*` above. */
+  kondisi_stop_scope: string | null;
 }
 
 export function strategiToWire(s: strategi.Strategi): StrategiWire {
@@ -3246,6 +3253,10 @@ export function strategiToWire(s: strategi.Strategi): StrategiWire {
     sanggahan_target_realistis: s.sanggahanTargetRealistis,
     sanggahan_diajukan_pada: s.sanggahanDiajukanPada,
     sanggahan_diajukan_oleh: s.sanggahanDiajukanOleh,
+    growth_thesis: s.growthThesis,
+    urutan_eksekusi_alasan: s.urutanEksekusiAlasan,
+    skenario_mundur: s.skenarioMundur,
+    kondisi_stop_scope: s.kondisiStopScope,
   };
 }
 
@@ -3975,6 +3986,23 @@ export function strategiKpiFromWire(v: unknown): strategi.KpiInput {
     leadingIndicator: Array.isArray(b.leading_indicator)
       ? (b.leading_indicator.map((k) => String(k)) as strategi.LeadingIndicator[])
       : [],
+  };
+}
+
+/**
+ * Inbound: Section E/H narrative fields (A-09a).
+ *
+ * Absent key and cleared key both collapse to `null` in `saveNarasi`, so the
+ * distinction dies here rather than becoming a third state the submit gate has to
+ * know about — same contract as `strategiKpiFromWire`.
+ */
+export function strategiNarasiFromWire(v: unknown): strategi.NarasiInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    growthThesis: strOrNull(b.growth_thesis),
+    urutanEksekusiAlasan: strOrNull(b.urutan_eksekusi_alasan),
+    skenarioMundur: strOrNull(b.skenario_mundur),
+    kondisiStopScope: strOrNull(b.kondisi_stop_scope),
   };
 }
 

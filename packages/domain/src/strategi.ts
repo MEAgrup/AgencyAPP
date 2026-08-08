@@ -377,6 +377,12 @@ export const MSG_SANGGAHAN_INCOMPLETE =
 export const MSG_ASSUMPTION_STATUS_INVALID = '[status asumsi tidak dikenal]';
 /** D-8 — the code does not name an assumption on this Strategi. */
 export const MSG_ASSUMPTION_NOT_FOUND = '[asumsi tidak ditemukan pada Strategi ini]';
+/** E-1 — the thesis the whole of Section E hangs off. */
+export const MSG_GROWTH_THESIS_REQUIRED = '[growth thesis wajib diisi]';
+/** E-13 — the order is stored on the pillars; the reason is not. */
+export const MSG_URUTAN_EKSEKUSI_REQUIRED = '[alasan urutan eksekusi pilar wajib diisi]';
+/** H-3 — a plan with no fallback is a bet, not a plan. */
+export const MSG_SKENARIO_MUNDUR_REQUIRED = '[skenario mundur wajib diisi]';
 /** A-05 — a required Section A field is still empty (kode names which one). */
 export const MSG_KONTEKS_INCOMPLETE = '[konteks klien & bisnis belum lengkap]';
 /** A-5 — "3 alasan utama orang beli produk ini". */
@@ -717,6 +723,25 @@ export interface Strategi extends StrategiKonteks {
   sanggahanTargetRealistis: string | null;
   sanggahanDiajukanPada: string | null;
   sanggahanDiajukanOleh: string | null;
+
+  // --- Section E/H narrative header fields (A-09a). The rest of E and H are
+  // child rows: E-3…E-11 in `strategi_pillar`, H-1 in `strategi_risk`. These four
+  // are the paragraphs those rows cannot hold.
+  /** E-1 — the thesis every other Section E row descends from. §4.1 shareable. */
+  growthThesis: string | null;
+  /**
+   * E-13 — WHY pillar A precedes pillar B. `strategi_pillar.urutan` stores the
+   * order; it never stores the reason. §4.1 shareable.
+   */
+  urutanEksekusiAlasan: string | null;
+  /** H-3 — fallback if the main strategy fails in phase 1. §4.1 shareable. */
+  skenarioMundur: string | null;
+  /**
+   * H-4 — when MEA advises stopping or changing scope.
+   * ⚠️ §4.1 **HARD-INTERNAL, never shareable** — never serialise to `/s/{token}`.
+   * Optional in §4, so it is deliberately NOT gated at submit.
+   */
+  kondisiStopScope: string | null;
 }
 
 /** Section B-0 — one block per contracted channel (D4). */
@@ -1114,6 +1139,11 @@ interface StrategiRow {
   sanggahan_target_realistis: string | null;
   sanggahan_diajukan_pada: string | Date | null;
   sanggahan_diajukan_oleh: string | null;
+  // Section E/H narrative (A-09a).
+  growth_thesis: string | null;
+  urutan_eksekusi_alasan: string | null;
+  skenario_mundur: string | null;
+  kondisi_stop_scope: string | null;
 }
 
 function dateStr(v: string | Date): string {
@@ -1184,6 +1214,11 @@ function rowToStrategi(r: StrategiRow): Strategi {
     sanggahanTargetRealistis: r.sanggahan_target_realistis,
     sanggahanDiajukanPada: tsOrNull(r.sanggahan_diajukan_pada),
     sanggahanDiajukanOleh: r.sanggahan_diajukan_oleh,
+    // Section E/H narrative (A-09a)
+    growthThesis: r.growth_thesis,
+    urutanEksekusiAlasan: r.urutan_eksekusi_alasan,
+    skenarioMundur: r.skenario_mundur,
+    kondisiStopScope: r.kondisi_stop_scope,
   };
 }
 
@@ -3313,6 +3348,77 @@ export async function saveKpi(
   });
 }
 
+/** E-1 / E-13 / H-3 / H-4 input (A-09a) — the narrative header fields. */
+export interface NarasiInput {
+  growthThesis?: string | null;
+  urutanEksekusiAlasan?: string | null;
+  skenarioMundur?: string | null;
+  kondisiStopScope?: string | null;
+}
+
+/**
+ * saveNarasi writes the four Section E/H paragraph fields.
+ *
+ * Partial saves are legal (§7 autosave, §5 step 5 live count), and blank is
+ * normalised to `null` for the same reason as `saveKpi`: `''` and "unanswered"
+ * must not be two ways of saying the same thing, or every gate downstream has to
+ * test for both forever. The DB agrees via `ck_strategi_narasi_ehi_isi`.
+ *
+ * **H-4 is written here but never gated** — §4 marks it `O`. It is also §4.1
+ * hard-internal, so no caller may put it on a client-facing path; the enforcement
+ * for that is A-10, and until then this comment is the only thing saying so.
+ */
+export async function saveNarasi(
+  sql: Sql,
+  actor: Actor,
+  id: string,
+  input: NarasiInput,
+): Promise<StrategiDetail> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    await requireDraftAndWriter(tx, actor, id);
+
+    const teks = (v: string | null | undefined): string | null => {
+      const t = (v ?? '').trim();
+      return t === '' ? null : t;
+    };
+
+    await tx`
+      update strategi set
+        growth_thesis          = ${teks(input.growthThesis)},
+        urutan_eksekusi_alasan = ${teks(input.urutanEksekusiAlasan)},
+        skenario_mundur        = ${teks(input.skenarioMundur)},
+        kondisi_stop_scope     = ${teks(input.kondisiStopScope)}
+       where id = ${id}`;
+
+    await ex.audit.insertAudit({
+      entityType: ENTITY_STRATEGI,
+      entityId: id,
+      actorEmployeeId: actor.employeeId,
+      action: 'save_narasi',
+      beforeJson: null,
+      // The paragraphs themselves are not copied into the audit row: H-4 is
+      // hard-internal, and `audit_log` has a different read scope from
+      // `strategi`. Which fields were answered is the auditable fact here; the
+      // content lives on the record, versioned by `strategi_version`.
+      afterJson: {
+        terisi: (
+          [
+            ['E-1', input.growthThesis],
+            ['E-13', input.urutanEksekusiAlasan],
+            ['H-3', input.skenarioMundur],
+            ['H-4', input.kondisiStopScope],
+          ] as const
+        )
+          .filter(([, v]) => (v ?? '').trim() !== '')
+          .map(([k]) => k),
+      },
+      createdBy: actor.employeeId,
+    });
+    return loadDetail(tx, await loadStrategiRow(tx, id));
+  });
+}
+
 /** D-7 input. All three parts are mandatory together — see Rule 19. */
 export interface SanggahanInput {
   alasan: string;
@@ -3892,6 +3998,18 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
     out.push({ kode: 'Rule 8', pesan: MSG_TARGET_WITHOUT_ASSUMPTION });
   }
 
+  // Section E/H narrative (A-09a). Three of the four are `W`; H-4 is `O` and is
+  // deliberately absent — see `saveNarasi`.
+  if (head.growthThesis === null) {
+    out.push({ kode: 'E-1', pesan: MSG_GROWTH_THESIS_REQUIRED });
+  }
+  if (head.urutanEksekusiAlasan === null) {
+    out.push({ kode: 'E-13', pesan: MSG_URUTAN_EKSEKUSI_REQUIRED });
+  }
+  if (head.skenarioMundur === null) {
+    out.push({ kode: 'H-3', pesan: MSG_SKENARIO_MUNDUR_REQUIRED });
+  }
+
   // Rule 9 / E-11: the anti-scope-creep record. Empty is a validation error, by
   // design — it is the answer the AM needs three months later.
   const outOfScope = await sql<{ n: number }[]>`
@@ -4313,7 +4431,8 @@ export async function openRevision(
          titik_kirim_kota, titik_kirim_detail, ekspektasi_klien, riwayat_agensi,
          pantangan_klien, pantangan_klien_tidak_ada, decision_maker, sla_klien_jam,
          sla_klien_catatan, aset_dari_klien, aset_dari_klien_tidak_ada, aset_catatan,
-         definisi_berhasil_30, definisi_berhasil_60, definisi_berhasil_90, leading_indicator)
+         definisi_berhasil_30, definisi_berhasil_60, definisi_berhasil_90, leading_indicator,
+         growth_thesis, urutan_eksekusi_alasan, skenario_mundur, kondisi_stop_scope)
       select ${newId}, contract_id, client_id, versi_no + 1, ${induk}, id,
              ${STRATEGI_DRAFT_REVISI}, tanggal_mulai_siklus, siklus_terkunci,
              toleransi_over_persen, ${actor.employeeId},
@@ -4322,7 +4441,8 @@ export async function openRevision(
              titik_kirim_kota, titik_kirim_detail, ekspektasi_klien, riwayat_agensi,
              pantangan_klien, pantangan_klien_tidak_ada, decision_maker, sla_klien_jam,
              sla_klien_catatan, aset_dari_klien, aset_dari_klien_tidak_ada, aset_catatan,
-             definisi_berhasil_30, definisi_berhasil_60, definisi_berhasil_90, leading_indicator
+             definisi_berhasil_30, definisi_berhasil_60, definisi_berhasil_90, leading_indicator,
+             growth_thesis, urutan_eksekusi_alasan, skenario_mundur, kondisi_stop_scope
         from strategi where id = ${head.id}`;
 
     await copyChildren(tx, head.id, newId, actor.employeeId);

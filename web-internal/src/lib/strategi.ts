@@ -306,6 +306,21 @@ export interface Strategi {
   sanggahan_target_realistis: string | null;
   sanggahan_diajukan_pada: string | null;
   sanggahan_diajukan_oleh: string | null;
+
+  // Section E/H narrative (A-09a). The rest of E/H are child rows: E-3…E-11 in
+  // `pillars`, H-1 in `risks`. `E-1`/`E-13`/`H-3` are `W` and appear in
+  // `strategiKekurangan`; `H-4` is `O`.
+  /** E-1 — the thesis the rest of Section E descends from. */
+  growth_thesis: string | null;
+  /** E-13 — why pillar A precedes pillar B (the order itself is `pillars[].urutan`). */
+  urutan_eksekusi_alasan: string | null;
+  /** H-3 — fallback if the main strategy fails in phase 1. */
+  skenario_mundur: string | null;
+  /**
+   * H-4 — when MEA advises stop / scope change.
+   * ⚠️ **HARD-INTERNAL (§4.1): never render this anywhere client-facing.**
+   */
+  kondisi_stop_scope: string | null;
 }
 
 /** B-1 / B-5 — one row per month of the declared baseline window (B-0.7). */
@@ -719,6 +734,26 @@ export function saveStrategiKpi(
   },
 ): Promise<StrategiDetail> {
   return api.put<StrategiDetail>(`/strategi/${id}/kpi`, body);
+}
+
+/**
+ * E-1 / E-13 / H-3 / H-4 (A-09a) — the Section E/H paragraph fields. Partial
+ * bodies are legal; this is the autosave door (§7). The rest of E/H go through
+ * `saveStrategiPillars` (E-3…E-11) and `saveStrategiRisks` (H-1).
+ *
+ * ⚠️ `kondisi_stop_scope` is HARD-INTERNAL (§4.1) — the form may collect it, but
+ * it must never reach a client-facing view.
+ */
+export function saveStrategiNarasi(
+  id: string,
+  body: {
+    growth_thesis?: string | null;
+    urutan_eksekusi_alasan?: string | null;
+    skenario_mundur?: string | null;
+    kondisi_stop_scope?: string | null;
+  },
+): Promise<StrategiDetail> {
+  return api.put<StrategiDetail>(`/strategi/${id}/narasi`, body);
 }
 
 /**

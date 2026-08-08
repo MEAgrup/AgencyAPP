@@ -36,6 +36,7 @@ import {
   MSG_CHANNEL_NOT_FOUND,
   MSG_CYCLE_LOCKED,
   MSG_DEFINISI_BERHASIL_REQUIRED,
+  MSG_GROWTH_THESIS_REQUIRED,
   MSG_DIAGNOSA_FIELD_ID_REQUIRED,
   MSG_DIAGNOSA_INVALID_FIELD_ID,
   MSG_DIAGNOSA_MISSING,
@@ -51,10 +52,12 @@ import {
   MSG_REVISION_INCOMPLETE,
   MSG_RISIKO_STRUKTURAL_REQUIRED,
   MSG_SANGGAHAN_INCOMPLETE,
+  MSG_SKENARIO_MUNDUR_REQUIRED,
   MSG_STRATEGI_EXISTS,
   MSG_TARGET_WITHOUT_ASSUMPTION,
   MSG_TIDAK_ADA_BELUM_DIJAWAB,
   MSG_TOP_SKU_REQUIRED,
+  MSG_URUTAN_EKSEKUSI_REQUIRED,
   MSG_TRAFFIC_MIX_SUM,
   MSG_USP_MIN,
   FLOOR_DISETUJUI_HEAD,
@@ -83,6 +86,7 @@ import {
   saveDiagnosa,
   saveKonteks,
   saveKpi,
+  saveNarasi,
   savePillars,
   saveResources,
   saveRisks,
@@ -496,6 +500,15 @@ async function seedSubmittable(): Promise<{ serviceId: string; strategiId: strin
     definisiBerhasil60: 'CR Shopee naik dari 2,1% ke 2,8%',
     definisiBerhasil90: 'GMV gabungan menyentuh Rp 460jt',
     leadingIndicator: ['cr', 'jumlah_video'],
+  });
+
+  // Section E/H narasi (A-09a). E-1/E-13/H-3 are `W`, so a Strategi without them
+  // is no longer submittable — that is why they belong to THIS fixture.
+  await saveNarasi(sql, am(), s.id, {
+    growthThesis:
+      'Toko ini tumbuh dengan mengonversi trafik yang sudah ada lebih dulu, karena ad spend sudah wajar sementara CR dan kualitas listing tertinggal.',
+    urutanEksekusiAlasan: 'Listing dibereskan sebelum budget dinaikkan — kalau tidak, kita mengulangi kesalahan agensi sebelumnya.',
+    skenarioMundur: 'Kalau CR tidak naik di fase 1, budget digeser ke TikTok dan Shopee turun ke maintenance.',
   });
 
   await savePillars(sql, am(), s.id, [
@@ -2356,5 +2369,121 @@ describeDb('Section D — D-8 status flip fires strategi_revisi_disarankan (A-08
     await expect(
       setAssumptionStatus(sql, od(), strategiId, 'A1', 'Gugur'),
     ).rejects.toThrow(ForbiddenError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section E/H narasi — E-1, E-13, H-3, H-4 (A-09a)
+// ---------------------------------------------------------------------------
+// The rest of E and H are child rows and are covered by the Rule 9 / H-1 blocks
+// above. These four are the paragraphs those rows cannot hold.
+describeDb('Section E/H narasi (A-09a)', () => {
+  it('stores all four, and normalises blank to null', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const after = await saveNarasi(sql, am(), s.id, {
+      growthThesis: 'tumbuh dengan konversi dulu',
+      urutanEksekusiAlasan: 'listing sebelum budget',
+      skenarioMundur: 'geser budget ke TikTok',
+      kondisiStopScope: '   ', // whitespace-only -> null, not stored
+    });
+    expect(after.growthThesis).toBe('tumbuh dengan konversi dulu');
+    expect(after.urutanEksekusiAlasan).toBe('listing sebelum budget');
+    expect(after.skenarioMundur).toBe('geser budget ke TikTok');
+    expect(after.kondisiStopScope).toBeNull();
+  });
+
+  it('has the non-blank rule enforced by the DB too, not only by the domain', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(
+      sql`update strategi set growth_thesis = '   ' where id = ${s.id}`,
+    ).rejects.toThrow(/ck_strategi_narasi_ehi_isi/);
+  });
+
+  it('gates E-1, E-13 and H-3 at submit — but never H-4, which is `O`', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const kosong = await checkCompleteness(sql, s.id);
+    expect(kosong.map((m) => m.kode)).toEqual(expect.arrayContaining(['E-1', 'E-13', 'H-3']));
+    expect(kosong.map((m) => m.pesan)).toEqual(
+      expect.arrayContaining([
+        MSG_GROWTH_THESIS_REQUIRED,
+        MSG_URUTAN_EKSEKUSI_REQUIRED,
+        MSG_SKENARIO_MUNDUR_REQUIRED,
+      ]),
+    );
+    // H-4 is optional: it must never appear as a blocker, filled or not.
+    expect(kosong.map((m) => m.kode)).not.toContain('H-4');
+
+    await saveNarasi(sql, am(), s.id, {
+      growthThesis: 'a',
+      urutanEksekusiAlasan: 'b',
+      skenarioMundur: 'c',
+    });
+    const terisi = (await checkCompleteness(sql, s.id)).map((m) => m.kode);
+    for (const kode of ['E-1', 'E-13', 'H-3', 'H-4']) expect(terisi).not.toContain(kode);
+  });
+
+  it('is complete in the seedSubmittable fixture', async () => {
+    const { strategiId } = await seedSubmittable();
+    expect((await checkCompleteness(sql, strategiId)).map((m) => m.kode)).toEqual([]);
+  });
+
+  it('carries all four into a revision — including the optional H-4', async () => {
+    // Same regression class the A-08 carry test locks in: `openRevision`
+    // INSERT…SELECTs the header, so a column missing from those two lists starts
+    // blank in version n+1. H-4 is included on purpose even though it is `O` —
+    // it is CONTENT (a standing condition), unlike D-7 which is an ACT.
+    const { strategiId } = await seedSubmittable();
+    await saveNarasi(sql, am(), strategiId, {
+      growthThesis: 'tesis v1',
+      urutanEksekusiAlasan: 'urutan v1',
+      skenarioMundur: 'mundur v1',
+      kondisiStopScope: 'stop kalau margin < 15%',
+    });
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+
+    const v2 = await openRevision(sql, am(), strategiId, {
+      triggerRevisi: ['asumsi gugur'],
+      alasanRevisi: 'budget klien tidak cair',
+      asumsiGugur: ['A1'],
+    });
+    expect(v2.growthThesis).toBe('tesis v1');
+    expect(v2.urutanEksekusiAlasan).toBe('urutan v1');
+    expect(v2.skenarioMundur).toBe('mundur v1');
+    expect(v2.kondisiStopScope).toBe('stop kalau margin < 15%');
+    // …and version 2 is submittable without retyping them.
+    expect((await checkCompleteness(sql, v2.id)).map((m) => m.kode)).not.toContain('E-1');
+  });
+
+  it('refuses a non-owner, and refuses a write once the record leaves Draft', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(
+      saveNarasi(sql, otherAm(), strategiId, { growthThesis: 'x' }),
+    ).rejects.toThrow(ForbiddenError);
+    await submitStrategi(sql, am(), strategiId);
+    await expect(
+      saveNarasi(sql, am(), strategiId, { growthThesis: 'x' }),
+    ).rejects.toThrow(ConflictError);
+  });
+
+  it('keeps H-4 out of the audit row — it is hard-internal (§4.1)', async () => {
+    // `audit_log` has a different read scope from `strategi`, so copying a
+    // hard-internal paragraph into it would widen who can read it. The auditable
+    // fact is WHICH fields were answered.
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveNarasi(sql, am(), s.id, {
+      growthThesis: 'tesis',
+      kondisiStopScope: 'RAHASIA-INTERNAL-MARKER',
+    });
+    const rows = await sql<{ after_json: unknown }[]>`
+      select after_json from audit_log
+       where entity_id = ${s.id} and action = 'save_narasi'`;
+    expect(rows).toHaveLength(1);
+    expect(JSON.stringify(rows[0].after_json)).not.toContain('RAHASIA-INTERNAL-MARKER');
+    expect(rows[0].after_json).toMatchObject({ terisi: ['E-1', 'H-4'] });
   });
 });
