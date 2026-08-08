@@ -2881,10 +2881,19 @@ describeDb('Section I handoff (A-09b)', () => {
 });
 
 describeDb('A-09b closed sets do not drift', () => {
-  it('keeps D-4, D-6 and I-3 the same list', async () => {
-    // Three closed sets that are meant to be one. Two lists that CAN diverge is
-    // the O48/O51 defect class; this is the cheapest possible guard against it.
+  it('keeps D-4, D-6 and I-3 the same list — for now, and I-3 is the one that will leave', async () => {
+    // Two lists that CAN diverge is the O48/O51 defect class, so this is the
+    // cheapest possible guard while all three are meant to be one.
+    //
+    // ⚠️ I-3 is EXPECTED to diverge later, and that is a decision, not a bug
+    // (X-14, owner 2026-08-08: the monthly client report comes from an HTML
+    // generator and most of its metrics are not in CDPS yet). When it does:
+    // widen `LAPORAN_METRICS` and DELETE the first assertion below — do NOT
+    // widen D-4/D-6 to make it pass. D-4 is what the AM commits to and D-6 is
+    // what is watched weekly; neither grows because a report gained a column.
     expect([...LAPORAN_METRICS]).toEqual([...TARGET_METRICS]);
+    // D-6 = D-4 has no such exit: X-13 settled it, and D-6 asks for a subset of
+    // the metrics D-4 already carries targets for.
     expect([...LEADING_INDICATORS]).toEqual([...TARGET_METRICS]);
   });
 

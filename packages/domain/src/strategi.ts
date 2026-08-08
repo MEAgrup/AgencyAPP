@@ -203,10 +203,20 @@ export const TRIGGER_REVISI_BERAMBANG: readonly TriggerRevisiCode[] = [
  * I-3 — metrics pulled into the monthly client report.
  *
  * Same situation as D-6/X-13: §4 marks it "Multi-enum" and never writes the
- * list, so this IS `TARGET_METRICS` rather than a coined vocabulary. Open
- * question **X-14** — whether a client report carries anything that is not a
- * D-4 target metric. A test asserts D-4 ≡ D-6 ≡ I-3 so the three cannot drift
- * apart silently.
+ * list, so this IS `TARGET_METRICS` rather than a coined vocabulary.
+ *
+ * **X-14 answered 2026-08-08 (owner): the monthly client report is produced by
+ * an HTML generator, most of its metrics are not in CDPS yet, and it is
+ * scheduled AFTER Strategi and Plan.** So this set is deliberately the subset
+ * CDPS can supply today, not the report's full column list — and it is expected
+ * to widen when the generator lands.
+ *
+ * Two boundaries that hold until then:
+ * 1. I-3 must NOT be read as "everything the client report contains". It is
+ *    what the Strategi commits to feeding it.
+ * 2. When I-3 widens, **D-4 and D-6 do not follow.** This is the one legitimate
+ *    divergence among the three; the test that pins them together names its own
+ *    exit so nobody widens the wrong list to make it pass.
  */
 export const LAPORAN_METRICS = TARGET_METRICS;
 export type LaporanMetric = TargetMetric;
