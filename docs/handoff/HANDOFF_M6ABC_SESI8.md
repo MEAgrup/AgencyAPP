@@ -33,12 +33,12 @@
 |---|---|
 | Branch | `claude/handoff-sesi6-migration-mrqglv` |
 | `main` | `1316705` — PR #106 ter-merge |
-| PR terbuka | **#107** (A-08) — dibuka sesi ini, belum di-review |
-| Migrasi | **71 berkas** (68 + A-08 + A-09a + O59 `20260808030000`). ✅ **Live ≡ repo** — O59 direkonsiliasi & diverifikasi. Lokal: 71 migrasi bersih |
-| Gate | tabel **76** (tidak berubah) · prefix **31** · mesin **16** · event **33 → 34** · `CATALOG_VERSION` **3 → 4** |
-| Skor | M6A **~68%** (9,5/14) — A-08 + A-09a mendarat, A-09b tersisa · M6B **8%** (1/12) |
-| Test | domain **895 hijau + 1 skipped** · `apps/api` **324** · `packages/core` **118** · `packages/db` **15** · 4 invariant SQL hijau · typecheck FE bersih |
-| Menggantung | Kode: **NOL**. Keputusan: **O59 ✅ selesai** · **X-13 ✅ ditutup** · **O47b** rewrite dijadwalkan sesudah #107 merge · **O42-b** tiket seed HRIS (keputusan sudah ada, eksekusi belum) |
+| PR terbuka | **#107** — head `85f2778`, **11/11 check hijau**, `mergeable_state: clean`, 9 commit. Menunggu **review manusia**; nol pekerjaan tersisa di dalamnya |
+| Migrasi | **71 berkas** (68 + A-08 + A-09a + O59 `20260808030000`). ✅ **Live ≡ repo** — O59 direkonsiliasi & diverifikasi. Lokal: `db-rebuild` 71 migrasi bersih, semua gate + 4 invariant lolos |
+| Gate | tabel **76** (tidak berubah) · prefix **31** · mesin **16** · event **33 → 34** · `CATALOG_VERSION` **3 → 4** · `role_mappings` **12** (bergerak di O42-b) |
+| Skor | M6A **10/15 tiket** · M6B **1/12** — ⚠️ **jangan baca sebagai persen pekerjaan**: sisa M6A didominasi **A-13** (halaman & form sepuluh seksi, nol halaman Strategi hari ini), yang sendirian lebih besar dari A-05…A-09a digabung. Yang sudah selesai adalah **seluruh lapisan data + domain + route + kontrak FE**; yang belum adalah **UI-nya** + A-09b/A-10/A-11/A-12 |
+| Test | domain **895 hijau + 1 skipped** · `apps/api` **324** · `packages/core` **118** · `packages/db` **15** · 4 invariant SQL hijau. ⚠️ **Diukur ulang sesi ini dengan DB dibangun** — lihat §7.0, tanpa `DATABASE_URL` angkanya jadi 250/646-skipped dan tetap tampak hijau |
+| Menggantung | Kode: **NOL** (tree bersih, lokal ≡ remote). Keputusan: **O59 ✅** · **X-13 ✅** · **O42 (a)(b)(c) ✅ diputus** · **O47b** rewrite menunggu #107 merge + jendela pemilik · **O42-b** eksekusi seed HRIS · **O59-b** gerbang nama-event (usul, belum diotorisasi) |
 
 ### 0.1 ⚠️ Handoff yang masuk ke sesi ini SALAH di empat titik
 
@@ -228,29 +228,49 @@ memilihnya.
 
 ### 6.1 Lebih dulu daripada fitur apa pun
 
-1. **O59** (§4) — keputusan pemilik + baca DDL live. Ini memblokir deploy dan
-   memblokir penomoran migrasi A-09.
-2. **Review PR #107.**
+1. ~~**O59**~~ ✅ **SELESAI** — pemilik memutus (b), dieksekusi, live ≡ repo
+   terverifikasi (§10). Ia **tidak lagi** memblokir deploy maupun penomoran A-09b.
+2. **Review + merge PR #107.** Semua **11 check hijau**, `mergeable_state: clean`,
+   9 commit. Ia menunggu **review manusia**, bukan pekerjaan lagi. Merge-nya
+   membuka O47b (langkah rewrite disekuens sesudahnya).
 
 ### 6.2 Butuh izin/orang, bukan kode
 
 | # | Isi | Kenapa bukan saya |
 |---|---|---|
-| **O47b langkah (1)** | Hapus 26 branch pembawa PII → verifikasi → tiket GitHub Support | Hapus-branch ditolak `403`. Nol rewrite, nol force-push. Runbook: `docs/handoff/RUNBOOK_O47b_SCRUB_PII.md` |
-| **O42 (3)** | Rekonsiliasi `role_mappings` **38-vs-23-vs-12** | Keputusan pemilik: mana sumber kebenarannya |
+| **O47b — REWRITE** | `git filter-repo` buang `backend/testdata/import_samples/` → force-push `main` → semua kontributor re-clone → tiket GitHub Support gc | ⚠️ **Premis §0 runbook RUNTUH (§8): `main` MEMUAT PII.** Menghapus 25 ref memberi **nol** efek. Biayanya jatuh ke orang lain (PR mati, branch protection, redeploy Vercel SHA lama) ⇒ butuh jendela waktu pemilik. Disekuens **sesudah #107 merge**. Runbook: `RUNBOOK_O47b_SCRUB_PII.md` — **§5**, bukan §0 (§0 DIBATALKAN) |
 | **O24** | `commission_rule` riil per 32 layanan MSL | Rate per layanan (Sales Head) |
 | **O45** | Cek paritas-grant menembak live | Langkah QA ber-service-role, bukan CI |
 | **X-06** | RA-7 — tautan klien tanpa riwayat/diff | Konfirmasi posisi, sebelum A-11 |
 | **X-12** | Rumah komponen KPI keterlambatan Plan | Pemilik: *"menyusul"* |
-| **X-13** | Daftar enum D-6 (§5) | Konfirmasi kosakata |
+
+**Sudah diputus pemilik 2026-08-08, tidak lagi menunggu siapa pun:**
+
+| # | Keputusan | Status eksekusi |
+|---|---|---|
+| **O59** | (b) **repo menang** | ✅ dieksekusi + diverifikasi (§10) |
+| **X-13** | Set D-6 = kosakata metrik D-4 apa adanya | ✅ nol perubahan kode — sudah begitu sejak A-08 |
+| **O42 (a)** | Sumber kebenaran = **live** | ⏳ eksekusi = **O42-b** |
+| **O42 (b)** | Seed pakai mapping HRIS dari `role_mappings_riil.csv` (UPPERCASE) | ⏳ eksekusi = **O42-b** |
+| **O42 (c)** | Direktur memang **tanpa divisi** ⇒ `Management/Director` tanpa mapping BENAR | ✅ nol perubahan — dan **jangan pernah** ubah resolver `m5.transaction.change_requested` dari `explicit` |
+| **O47b** | (b) rewrite histori | ⏳ menunggu #107 merge + jendela pemilik |
 
 ### 6.3 Fitur M6 — jalur yang sekarang terbuka
 
-1. **A-09** — Section E/F/G/H/I/J. Floor price per hero SKU (E-4) dibaca
-   validasi Brief; F soft-limit 20% (Rule 10); G-0 sekali-set (Rule 17, default
-   RA-5 sudah ada). ⚠️ **Baca §3 dulu**: setiap kolom header baru wajib masuk
-   DUA daftar di `openRevision`, dan kalau field-nya bukan syarat submit,
-   hilangnya **tidak** membuat satu test pun merah.
+1. **A-09b** — sisa Section E/F/G/H/I. **A-09a sudah mendarat** (E-1, E-13, H-3,
+   H-4 — §9), jadi yang tersisa: **E-2** prioritas channel · **E-12** ketergantungan
+   klien (tabel anak) · **G-1** fase kerja (tabel anak, min 2) · **G-2** tanggal
+   besar (tabel anak) · **G-3/G-4** jadwal review (kolom header) · **H-2** trigger
+   revisi · **I-2/I-3/I-4**. ⚠️ **Analisis celahnya SUDAH ditulis di
+   `docs/backlog/M6ABC_BACKLOG.md` — jangan diulang**; ia mencatat juga apa yang
+   SUDAH ada sejak A-03 supaya tidak dibangun dua kali. ⚠️ **H-2 wajib memakai set
+   enum yang SAMA** dengan `strategi_version.trigger_revisi` (J-3) yang sudah
+   memakai kode trigger — dua daftar tertutup yang bisa menyimpang adalah kelas
+   O48/O51. ⚠️ **Baca §3 dulu**: setiap kolom header baru wajib masuk DUA daftar
+   di `openRevision`, dan kalau field-nya bukan syarat submit, hilangnya **tidak**
+   membuat satu test pun merah.
+   E-4 floor price **sudah ada** (`strategi_pillar.floor_price`); yang belum
+   adalah validasi Brief yang MEMBACANYA — itu tiket M7/M12, bukan M6A.
 2. **A-13** — halaman & form Section A→J. Baca `web-internal/AGENTS.md` lebih
    dulu: versi Next di repo ini bukan yang ada di data latih. ⚠️ Halaman
    `account/strategies/[id]` yang ADA adalah entitas **lama** M6 §4
@@ -282,7 +302,26 @@ memilihnya.
 
 ## 7. Jebakan lingkungan
 
-Selain yang SESI6/SESI7 catat, sesi ini menemukan dua yang memakan waktu:
+Selain yang SESI6/SESI7 catat, sesi ini menemukan tiga yang memakan waktu —
+**dan yang keempat di bawah adalah pabrik laporan-hijau-palsu, baca itu dulu:**
+
+0. **⚠️ `vitest` TANPA `DATABASE_URL` LULUS DENGAN MELEWATI, bukan gagal.**
+   Diukur sesi ini di container yang DB-nya belum dibangun:
+   `cd packages/domain && npx vitest run` ⇒ **`250 passed | 646 skipped`**, exit
+   code **0**, tulisan hijau di layar. Tidak ada satu pun baris merah. 646 test
+   itu adalah **seluruh** lapisan yang menembak DB — mesin transisi, RLS,
+   CHECK, `notify_emit`. Jadi "test saya hijau" tanpa DB berarti **72% test
+   tidak pernah dijalankan**.
+   ```bash
+   npm run db:rebuild -- --yes                 # bangun DB dulu
+   export DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/cdps"
+   cd packages/domain && npx vitest run        # baru: 895 passed | 1 skipped
+   ```
+   **Selalu baca angka `skipped`-nya, jangan hanya warnanya.** Kalau `domain`
+   melaporkan ratusan skipped, Anda belum menguji apa pun yang penting. Angka
+   yang benar untuk repo pada commit ini: `domain` **895 + 1 skipped** ·
+   `apps/api` **324** · `packages/core` **118** (tanpa DB pun 118) ·
+   `packages/db` **15** (tanpa DB: 7 + 8 skipped).
 
 1. **Postgres mati DUA KALI dalam satu sesi** (jadi kambuh keempat & kelima).
    Kali pertama: password tidak selamat **dan** DB `cdps` hilang ⇒
