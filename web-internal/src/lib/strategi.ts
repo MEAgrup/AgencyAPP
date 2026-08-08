@@ -119,6 +119,85 @@ export type LeadingIndicator =
 /** D-6 — "maks 5" (§4). Enforced by the API and by `ck_strategi_leading_indicator`. */
 export const LEADING_INDICATOR_MAX = 5;
 
+/**
+ * The metric vocabulary as the form offers it (A-13).
+ *
+ * ONE list, three uses — D-4 targets, D-6 leading indicators, I-3 report
+ * metrics — because server-side it is one array and one DB CHECK. A second
+ * literal here would be the O48/O51 defect class wearing a UI costume: the
+ * picker would drift from what the server accepts, and the AM would get
+ * `[metrik laporan klien tidak dikenal]` for an option the form offered them.
+ *
+ * ⚠️ I-3 is expected to widen later (X-14, owner 2026-08-08: the monthly client
+ * report comes from an HTML generator and most of its metrics are not in CDPS
+ * yet). When it does, I-3 gets its OWN list here — D-4/D-6 do not follow.
+ */
+export const METRIC_LABELS: { value: LeadingIndicator; label: string }[] = [
+  { value: 'gmv', label: 'GMV' },
+  { value: 'pengunjung', label: 'Pengunjung' },
+  { value: 'cr', label: 'Conversion rate' },
+  { value: 'aov', label: 'AOV' },
+  { value: 'roas_min', label: 'ROAS minimum' },
+  { value: 'acos_maks', label: 'ACOS maksimum' },
+  { value: 'sku_winner', label: 'SKU winner baru' },
+  { value: 'affiliate_aktif', label: 'Affiliate aktif' },
+  { value: 'jam_live', label: 'Jam live' },
+  { value: 'jumlah_video', label: 'Jumlah video' },
+];
+
+/** E-2 — the three channel roles §4 writes itself. */
+export const PRIORITAS_LABELS: { value: string; label: string }[] = [
+  { value: 'engine_utama', label: 'Engine utama' },
+  { value: 'pendukung', label: 'Pendukung' },
+  { value: 'maintenance', label: 'Maintenance' },
+];
+
+/**
+ * H-2 — the seven revision triggers, transcribed from §4 H-2.
+ *
+ * `ambang` marks the two §4 writes with an "X". The API refuses a threshold on
+ * the other five and refuses its absence on these two (`ck_strtrg_ambang`
+ * enforces the equivalence in both directions), so the form must not offer the
+ * input where it does not belong.
+ *
+ * This is also the J-3 list: `openStrategiRevision` only accepts a trigger this
+ * Strategi declared here.
+ */
+export const TRIGGER_REVISI_LABELS: {
+  value: string;
+  label: string;
+  ambang?: { satuan: string; maks?: number };
+}[] = [
+  {
+    value: 'pencapaian_di_bawah_target',
+    label: 'Pencapaian di bawah target 2 bulan berturut',
+    ambang: { satuan: '% target', maks: 100 },
+  },
+  { value: 'klien_ubah_lini_produk', label: 'Klien ubah lini produk' },
+  { value: 'stok_kosong', label: 'Stok kosong', ambang: { satuan: 'hari' } },
+  { value: 'budget_iklan_dipotong', label: 'Budget iklan dipotong' },
+  { value: 'kebijakan_platform_berubah', label: 'Perubahan kebijakan platform' },
+  { value: 'ganti_pic_klien', label: 'Ganti PIC klien' },
+  { value: 'lainnya', label: 'Lainnya (wajib dijelaskan)' },
+];
+
+/**
+ * I-2 — divisions that can receive a Brief.
+ *
+ * Identical to `briefs.assigned_division`. `Live Stream` is here even though
+ * Rule 18 keeps hosting with a vendor: Live Stream briefs exist, they just skip
+ * the task machine and end at a vendor tracker, so the dispatch order has to be
+ * able to name one.
+ */
+export const DISPATCH_DIVISIONS = ['Creative', 'Ads', 'KOL', 'Live Stream'] as const;
+
+/** H-1 — §4's three impact/likelihood levels. */
+export const RISK_LEVELS: { value: RiskLevel; label: string }[] = [
+  { value: 'rendah', label: 'Rendah' },
+  { value: 'sedang', label: 'Sedang' },
+  { value: 'tinggi', label: 'Tinggi' },
+];
+
 // --- Section A / Section B repeatable structs (stored as jsonb server-side).
 // Named interfaces, not `Record<string, unknown>[]`: the response-shape guard
 // follows a key whose type names an interface, and an anonymous bag is a shape
