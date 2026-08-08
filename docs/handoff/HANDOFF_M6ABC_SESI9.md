@@ -3,17 +3,22 @@
 > Rantai: SESI1 → … → SESI8 → **SESI9 (ini, terbaru)**. Baca yang bernomor
 > tertinggi lebih dulu; sesi sebelumnya hanya untuk konteks sejarah.
 >
-> **Sesi ini: A-09b — Section E, G, H dan I ditutup di lapisan data.** Sesudah
-> ini **sembilan dari sepuluh Section M6A tertutup**; sisanya J, yang tidak
+> **Sesi ini: A-09b (Section E/G/H/I di lapisan data) + A-13a (halaman Strategi
+> pertama) + PR #107 di-merge + X-14 dijawab pemilik.** Sesudah A-09b,
+> **sembilan dari sepuluh Section M6A tertutup** di data; sisanya J, yang tidak
 > butuh tiket data. Nol pekerjaan menggantung: ter-commit, ter-push.
 >
-> 🔴 **Satu temuan lebih besar dari tiketnya:** J-3 (`strategi_version.trigger_revisi`)
-> menerima string APA PUN sejak A-03, sementara Rule 13 menuntut *"a trigger from
-> the enumerated list"*. Daftar itu **tidak pernah ada** sampai H-2 membawanya
-> sesi ini. Lihat §2.
+> 🔴 **DUA temuan lebih besar dari tiketnya masing-masing:**
+> 1. **J-3 menerima string APA PUN sejak A-03** — Rule 13 menuntut *"a trigger
+>    from the enumerated list"* dan daftar itu tidak pernah ada sampai H-2
+>    membawanya. Lihat §2.
+> 2. **Seluruh lapisan klien `lib/strategi.ts` belum pernah punya SATU pemanggil
+>    di halaman mana pun** sejak A-03 — dan `route-parity` hijau sepanjang waktu
+>    itu, karena ia memeriksa apakah path yang dipanggil FE dilayani, bukan
+>    apakah ada manusia yang bisa sampai ke sana. Lihat §8.
 >
-> ⚠️ **Migrasi sesi ini TIDAK diterapkan ke live, dan itu disengaja.** PR #107
-> belum merge. Lihat §5 sebelum menerapkan apa pun.
+> ⚠️ **Migrasi A-09b masih BELUM diterapkan ke live.** #107 sudah merge, tapi
+> A-09b sendiri belum. Lihat §5 — urutannya tetap: merge dulu, `db push` sesudah.
 
 ## 0. Posisi persis — VERIFIKASI SEBELUM MENYALIN
 
@@ -23,28 +28,27 @@ Empat perintah yang membuat tiga sesi terakhir tidak perlu kehilangan waktu:
 
 | | |
 |---|---|
-| Branch | `claude/sesi6-migration-handoff-1afolk` — **dicabangkan dari head PR #107**, bukan dari `main` |
-| `main` | `1316705` — PR #106 ter-merge. **68 migrasi** |
-| PR #107 | **TERBUKA**, head `a0bee31`, **10 commit** (bukan 9 — handoff masuk tertinggal satu), 11/11 check hijau, `mergeable_state: clean`. **Nol pekerjaan tersisa di dalamnya; ia menunggu review manusia** |
-| Branch ini | `9019189` + handoff. Berisi **seluruh isi #107 + A-09b** ⇒ ia **stacked**, dan PR-nya (kalau dibuka) berbasis #107, bukan `main` |
+| Branch | `claude/sesi6-migration-handoff-1afolk` — sudah **di-rebase ke `main`**, tidak lagi stacked |
+| `main` | `bc7aa4e` — **PR #107 ter-merge sesi ini**. 71 migrasi |
+| PR terbuka | Untuk branch ini (A-09b + A-13a). #107 sudah tidak terbuka |
 | Migrasi | **72 berkas** (71 dari #107 + `20260808040000_m6a_section_efghi`) |
 | Gate | tabel **76 → 81** · prefix 31 · mesin 16 · event 34 · `CATALOG_VERSION` 4 · `role_mappings` 12 |
-| Test | domain **919 hijau + 1 skipped** (+24) · `apps/api` **324** · `packages/core` **118** · `packages/db` **15** · `web-internal` **116** + build Next bersih · 4 invariant SQL hijau · `db-rebuild` **72 migrasi** dari nol |
-| Live `CDPS SG` | **Sinkron dengan #107, TERTINGGAL satu migrasi dari branch ini.** Itu arah yang benar — lihat §5 |
-| Menggantung | Kode: **NOL**. Keputusan: **X-14** (enum I-3) · **O60** (detektor ledger O48) · dan yang diwarisi: O47b rewrite · O42-b · O59-b · O24 · O45 · X-06 · X-12 |
+| Test | domain **919 hijau + 1 skipped** · `apps/api` **324** · `packages/core` **118** · `packages/db` **15** · `web-internal` **128** (+12) · 4 invariant SQL · `db-rebuild` **72 migrasi** dari nol · lint + typecheck + build Next bersih |
+| Live `CDPS SG` | **Sinkron dengan `main`, tertinggal satu migrasi dari branch ini.** Itu arah yang benar — §5 |
+| Menggantung | Kode: **NOL**. Keputusan: **O60** (detektor ledger O48) · dan yang diwarisi: O47b rewrite · O42-b · O59-b · O24 · O45 · X-06 · X-12. **X-14 ✅ dijawab pemilik** |
 
 ### 0.1 Skor — dan kenapa angkanya menyesatkan
 
-M6A **11/15 tiket** · M6B **1/12**.
+M6A **12/16 tiket** (A-13 dipotong jadi A-13a ✅ / A-13b) · M6B **1/12**.
 
-**Jangan baca sebagai persen pekerjaan.** Yang selesai sesi ini menutup
-*sembilan Section*, tapi yang tersisa didominasi **A-13** — halaman & form
-sepuluh seksi, dan hari ini **nol halaman Strategi ada**. A-13 sendirian lebih
-besar dari A-05…A-09b digabung.
+**Jangan baca sebagai persen pekerjaan.** Halaman Strategi sekarang ADA, tapi
+ia melayani **empat dari sepuluh seksi** (D, G, H, I). Yang tersisa di A-13b —
+Section A, B, C, E, F — lebih besar daripada A-13a, dan **Section B sendirian**
+adalah ±45 field dikali jumlah channel.
 
 Yang benar-benar terjadi: **seluruh lapisan data + domain + route + kontrak FE
-M6A sudah ada.** Yang belum: UI-nya, plus A-10 (tier visibilitas), A-11 (tautan
-klien), A-12 (UI revisi).
+M6A sudah ada, dan sekarang ada pintu masuk manusia ke sebagiannya.** Yang
+belum: A-13b, A-10 (tier visibilitas), A-11 (tautan klien), A-12 (UI revisi).
 
 ## 1. Yang mendarat: A-09b
 
@@ -182,11 +186,12 @@ Dibuka sebagai **O60**.
 
 ## 5. ⚠️ Live TIDAK disentuh sesi ini — baca sebelum menerapkan apa pun
 
-Live `CDPS SG` sinkron dengan **#107** (72 baris riwayat: 71 migrasi repo + satu
-baris yatim `20260808024726` yang efek skemanya sudah dibongkar O59).
+Live `CDPS SG` sinkron dengan **`main`** (72 baris riwayat: 71 migrasi repo +
+satu baris yatim `20260808024726` yang efek skemanya sudah dibongkar O59).
+#107 sudah merge sesi ini, jadi `main` ≡ live.
 
 Migrasi A-09b **tidak** diterapkan, dan alasannya bukan kehati-hatian umum:
-**PR #107 belum merge.** Menerapkan migrasi keempat ke live sementara `main`
+**PR-nya belum merge.** Menerapkan migrasi keempat ke live sementara `main`
 masih tertinggal tiga menghasilkan keadaan "live lebih maju dari `main`" — dan
 itu **persis bentuk O38, O59, dan tiga ronde drift sebelumnya**.
 
@@ -194,24 +199,24 @@ Arah yang aman adalah kebalikannya: **live boleh tertinggal dari repo** (bisa
 dideteksi, bisa disusul dengan `db push`); live yang **mendahului** repo adalah
 drift yang hanya ketahuan kalau ada yang membandingkan DDL satu per satu.
 
-**Urutan yang benar:** merge #107 → merge PR A-09b → baru `db push` ke live,
-lalu sidik jari struktural (SESI6 §2). Jangan dibalik.
+**Urutan yang benar:** ~~merge #107~~ ✅ → merge PR branch ini → baru `db push`
+ke live, lalu sidik jari struktural (SESI6 §2). Jangan dibalik.
 
 ## 6. Apa yang tersisa — dan urutannya
 
 ### 6.1 Lebih dulu daripada fitur apa pun
 
-1. **Review + merge PR #107.** 11/11 hijau, `clean`, nol pekerjaan di dalamnya.
-   Ia menunggu **manusia**. Merge-nya membuka O47b **dan** membuat branch ini
-   berhenti stacked.
-2. **PR untuk A-09b** (branch ini). Ia berbasis #107, jadi urutannya terikat.
+1. ~~**Merge PR #107**~~ ✅ **SELESAI sesi ini** (`bc7aa4e`). Itu juga yang
+   membuka O47b: rewrite histori sekarang tidak lagi menunggu PR itu.
+2. **Review + merge PR branch ini** (A-09b + A-13a). Sesudah itu `db push`
+   migrasi A-09b ke live — §5.
 
 ### 6.2 Butuh izin/orang, bukan kode
 
 | # | Isi | Kenapa bukan saya |
 |---|---|---|
 | **O47b — REWRITE** | `git filter-repo` buang `backend/testdata/import_samples/` → force-push `main` → semua kontributor re-clone → tiket GitHub Support | Premis §0 runbook sudah dikoreksi (SESI8 §8): **`main` MEMUAT PII**, menghapus 25 ref memberi **nol** efek. Biayanya jatuh ke orang lain ⇒ butuh jendela pemilik. Runbook: **§5**, bukan §0 (§0 DIBATALKAN) |
-| **X-14** 🟡 BARU | Apakah laporan klien bulanan (I-3) memuat metrik yang BUKAN metrik target D-4 | Yohan. Tidak memblokir — A-09b mendarat dengan set D-4, dan membalikkannya satu `ALTER` selama belum ada Strategi live |
+| ~~X-14~~ | ✅ **DIJAWAB pemilik 2026-08-08:** laporan klien bulanan dibuat dari **HTML generator**, mayoritas metriknya belum masuk CDPS, dan itu dikerjakan **setelah Strategi dan Plan**. I-3 tetap set D-4, dan **sengaja melebar nanti** — saat itu D-4/D-6 TIDAK ikut. Test yang mengunci ketiganya sudah menuliskan jalan keluarnya sendiri | — |
 | **O42-b** | Eksekusi seed `role_mappings` ke bentuk HRIS UPPERCASE | Menggeser gerbang `role_mappings = 12` + bentuk 10 karyawan seed |
 | **O59-b** | Gerbang atas **nama** event, bukan jumlahnya | Usul sejak SESI8; masih belum diotorisasi |
 | **O60** 🟡 BARU | Detektor ledger O48 menembus satu tingkat indireksi | Keputusan teknis; siapa pun yang meninjau §42 |
@@ -219,12 +224,17 @@ lalu sidik jari struktural (SESI6 §2). Jangan dibalik.
 
 ### 6.3 Fitur M6 — jalur yang sekarang terbuka
 
-1. **A-13 — halaman & form Section A→J.** Sekarang **tidak ada lagi alasan
-   menundanya**: seluruh kontrak FE ada dan dijaga `shape-parity`, jadi form
-   bisa dibangun tanpa menebak bentuk respons. Baca `web-internal/AGENTS.md`
-   lebih dulu — versi Next di repo ini bukan yang ada di data latih.
+1. **A-13b — Section A, B, C, E, F + UI revisi.** A-13a sudah memberi shell,
+   navigasi, panel kekurangan, autosave, dan Section D/G/H/I, jadi yang tersisa
+   adalah mengisi lima seksi ke dalam pola yang sudah ada. Baca
+   `web-internal/AGENTS.md` lebih dulu — Next di repo ini **16.2.10** dan React
+   **19.2.4**, bukan yang ada di data latih.
    ⚠️ Halaman `account/strategies/[id]` yang ADA adalah entitas **lama** M6 §4
-   (`strategy_plan`/`STR`) — **jangan** pakai sebagai titik mulai.
+   (`strategy_plan`/`STR`) — **jangan** pakai sebagai titik mulai; yang baru
+   `account/strategi/[id]`, beda satu huruf.
+   ⚠️ **`saveStrategiNarasi` mengganti KEEMPAT field E-1/E-13/H-3/H-4.** Section
+   E wajib mengirim ulang H-3/H-4 apa adanya, persis seperti Section H hari ini
+   mengirim ulang E-1/E-13. Kalau tidak, menyimpan Section E mengosongkan H.
 2. **B-01** — `PLAN` + 6 tabel anak. Tidak terblokir sejak B-00. Sekarang
    sumbernya lengkap: G-1 fase, **G-2 tanggal besar (Rule 7 reweight)**, D-2
    target, E-4 floor price, F kuota, D-8 asumsi — keenamnya ada.
@@ -275,3 +285,92 @@ Semua yang SESI7 §5.1 dan SESI8 §7 catat masih berlaku. Yang kambuh:
 dihapus dari `wire.ts` ⇒ `shape-parity` merah dan **menyebut kuncinya**. Tanpa
 itu, "gerbangnya menjaga A-09b" hanyalah asumsi — dan O43 adalah kelas cacat di
 mana route menjawab 200 sementara halamannya blank.
+
+## 8. 🔴 Lapisan klien M6A tidak bisa dijangkau siapa pun — dan gerbangnya hijau
+
+`web-internal/src/lib/strategi.ts` dibangun bertahap sejak A-03 dan tumbuh jadi
+sekitar tiga puluh fungsi klien: `getStrategi`, `saveStrategiKonteks`,
+`saveStrategiKpi`, `saveStrategiNarasi`, … Sampai sesi ini, **nol** di antaranya
+dipanggil dari sebuah halaman.
+
+```
+grep -rn "from '@/lib/strategi'" web-internal/src/app   # -> tidak ada satu pun
+```
+
+**Dan `route-parity` hijau sepanjang waktu itu — dengan benar.** Ia menjawab
+*"apakah setiap path yang dipanggil `web-internal` dilayani `apps/api`"*. Sebuah
+fungsi klien yang tidak pernah dipanggil dari halaman **tetap** sebuah call site
+untuk pemindainya, jadi paritasnya terpenuhi. Yang tidak ditanyakan gerbang mana
+pun: *apakah ada manusia yang bisa sampai ke sana*.
+
+**Kenapa ini berbahaya dan bukan sekadar rapi:** empat sesi berturut-turut
+melaporkan "kontrak FE lengkap dan dijaga `shape-parity`" — dan itu benar. Tapi
+kalimat itu mudah dibaca sebagai "fitur ini bisa dipakai", padahal jaraknya ke
+sana adalah seluruh A-13. Ukuran yang jujur adalah **apakah ada tautan menuju
+ke sana**, dan itu tidak diukur siapa pun.
+
+Diperbaiki di A-13a: Service hub sekarang menampilkan kartu **Strategi M6A**
+dengan tautan ke `/account/strategi/{id}`.
+
+**⚠️ Beda satu huruf, dan itu disengaja.** `/account/strategies/{id}` adalah
+entitas **LAMA** M6 §4 (`strategy_plan` / `STR-`), record berbeda dengan siklus
+hidup berbeda. Keduanya ditampilkan sebagai **dua kartu terpisah** di Service
+hub: menggabungkannya menyiratkan salah satu menggantikan yang lain, dan tidak
+ada modul yang menyatakan itu.
+
+**Usul yang TIDAK dikerjakan sesi ini** (sekelas O59-b/O60, biar diputus di
+luar tiket fitur): gerbang yang meng-assert setiap halaman `app/**` bisa
+dijangkau dari nav atau dari halaman lain. Ia akan menangkap kelas ini sekali
+untuk semua — tapi ia juga akan menandai halaman yang memang hanya dituju dari
+notifikasi, jadi ia butuh daftar pengecualian, dan daftar pengecualian yang
+lahir di tengah tiket fitur adalah cara daftar itu jadi tempat sampah.
+
+## 9. A-13a — apa yang ada, dan apa yang belum
+
+**Ada:** `/account/strategi/{id}` — navigasi sepuluh seksi dengan hitungan
+kekurangan per seksi, panel kekurangan hidup (§5 langkah 5), autosave 20 detik
+(§7), aksi Ajukan / Setujui / Kembalikan, dan form penuh **Section D, G, H, I**.
+
+**Tiga bentuk yang datang dari PRD, bukan dari selera — jangan "sederhanakan":**
+
+1. **Hitungan kekurangan selalu dari server**, di-fetch ulang tiap save. Salinan
+   kedua aturan kelengkapan di FE akan menyimpang dari `checkCompleteness` yang
+   berjalan di transaksi submit, dan AM akan melihat "siap diajukan" lalu
+   ditolak `[data tidak lengkap …]`.
+2. **Tiap seksi menyimpan ke endpoint-nya sendiri.** Mengirim semua seksi tiap
+   tick membuat satu baris tidak valid di seksi mana pun memblokir penyimpanan
+   seksi yang sedang dikerjakan — dan menimpa seksi yang AM tidak pernah buka.
+3. **Tombol Ajukan TIDAK di-disable saat masih ada kekurangan.** Hitungannya
+   snapshot; gerbangnya dijalankan ulang di transaksi submit. Memblokir di FE
+   menyembunyikan pesan server, yaitu satu-satunya hal yang memberi tahu AM apa
+   yang harus diperbaiki.
+
+**Belum, dan itu A-13b:** Section A, B, C, E, F. Baris navigasinya **tetap ada
+dan tetap menampilkan hitungan kekurangannya** — seksi yang belum bisa dibuka
+tetap harus terhitung, kalau tidak total di tombol Ajukan tidak menjumlah dan AM
+tidak punya cara menjelaskan selisihnya.
+
+### 9.1 Dua bug React yang ditemukan lint, bukan test
+
+`npx eslint src` menolak dua hal yang keduanya cacat nyata, bukan gaya:
+`useAutosave` menulis ref saat render, dan `RepeatList` memanggil `setState`
+saat render. Keduanya sudah diperbaiki (ref pindah ke effect; rekonsiliasi key
+pindah ke effect dengan key `pending-` sementara untuk satu render).
+
+**Pelajarannya:** `npm test` di `web-internal` bebas-framework (konvensi repo),
+jadi ia **secara struktural tidak bisa** menangkap kelas ini. `eslint` bisa, dan
+ia tidak dijalankan CI hari ini — CI hanya `npm run build` + `npm test`.
+Jalankan `npx eslint src` sebelum menganggap kerja FE selesai.
+
+### 9.2 Apa yang TIDAK diverifikasi, dan tidak diklaim
+
+Halaman diverifikasi terhadap `next dev` yang benar-benar berjalan:
+`/account/strategi/{id}`, `/account/services/{id}` dan `/account` ketiganya
+**200 tanpa penanda error runtime**. Itu menutup kelas "halaman crash saat
+di-render".
+
+Yang **tidak** ditutup: jalur interaktif dengan data nyata. DB lokal punya
+**nol** `services`, `contracts`, dan `strategi`, jadi tidak ada record untuk
+dibuka, dan repo ini tidak punya harness test DOM (konvensinya: pisahkan logika
+yang bisa diuji ke modul bebas framework — itulah `lib/strategi-sections.ts`,
+12 test). **Jangan laporkan A-13a sebagai "teruji dengan data produksi".**
