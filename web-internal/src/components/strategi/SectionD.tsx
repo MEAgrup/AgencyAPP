@@ -47,10 +47,16 @@
  * the AM cannot locate.
  */
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import RepeatList from './RepeatList';
 import { LEADING_INDICATOR_MAX, METRIC_LABELS } from '@/lib/strategi';
-import type { LeadingIndicator, StrategiDetail } from '@/lib/strategi';
+import type { AssumptionState, LeadingIndicator, StrategiDetail } from '@/lib/strategi';
+import {
+  SANGGAHAN_KOSONG,
+  nextAsumsiStatus,
+  sanggahanLengkap,
+  type SanggahanDraft,
+} from '@/lib/strategi-revisi';
 import {
   channelsMissingSupport,
   gmvGridOf,
@@ -126,6 +132,11 @@ export default function SectionD({
   onChange,
   onTargets,
   disabled,
+  onSanggahan,
+  onAsumsiStatus,
+  sanggahanEnabled,
+  asumsiFlipEnabled,
+  busy,
 }: {
   detail: StrategiDetail;
   draft: KpiDraft;
@@ -133,7 +144,17 @@ export default function SectionD({
   onChange: (patch: Partial<KpiDraft>) => void;
   onTargets: (patch: Partial<TargetDraft>) => void;
   disabled: boolean;
+  /** D-7 (Rule 19). POSTs immediately — it is an act with a notification, not an autosaved field. */
+  onSanggahan: (body: SanggahanDraft) => Promise<void>;
+  /** D-8 status flip. Fires `strategi_revisi_disarankan` on the way into `Gugur`. */
+  onAsumsiStatus: (kode: string, status: AssumptionState) => Promise<void>;
+  /** Draft-only, same gate as every other Section D write (`requireDraftAndWriter`). */
+  sanggahanEnabled: boolean;
+  /** NOT the same gate — an assumption breaks during execution. See `canFlipAsumsi`. */
+  asumsiFlipEnabled: boolean;
+  busy: boolean;
 }) {
+  const [sanggahan, setSanggahan] = useState<SanggahanDraft>(SANGGAHAN_KOSONG);
   const toggleIndicator = (v: LeadingIndicator) => {
     const has = draft.leading_indicator.includes(v);
     if (!has && draft.leading_indicator.length >= LEADING_INDICATOR_MAX) return;
@@ -535,7 +556,98 @@ export default function SectionD({
             </div>
           </div>
         )}
+
+        {/* The form. NOT autosaved: `raiseSanggahan` notifies SPV + Head of Sales
+            (Rule 19), and an event that fires every 20 seconds while the AM is
+            still choosing their words is not a notification, it is noise. A
+            second submit is recorded as `edit_sanggahan` — a correction, not a
+            second challenge — so re-filing does not re-ping anyone. */}
+        {sanggahanEnabled && (
+          <div className="stack" style={{ gap: 6, marginTop: 12 }}>
+            <textarea
+              rows={3}
+              placeholder="Alasan target dinilai tidak realistis (wajib)"
+              value={sanggahan.alasan}
+              onChange={(e) => setSanggahan({ ...sanggahan, alasan: e.target.value })}
+            />
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              <input
+                placeholder="Angka pembanding (Rp, wajib)"
+                value={sanggahan.angka_pembanding}
+                onChange={(e) =>
+                  setSanggahan({ ...sanggahan, angka_pembanding: e.target.value })
+                }
+                style={{ flex: 1, minWidth: 180 }}
+              />
+              <input
+                placeholder="Target yang dinilai realistis (Rp, wajib)"
+                value={sanggahan.target_realistis}
+                onChange={(e) =>
+                  setSanggahan({ ...sanggahan, target_realistis: e.target.value })
+                }
+                style={{ flex: 1, minWidth: 180 }}
+              />
+              <button
+                type="button"
+                className="btn btnSecondary btnSm"
+                disabled={busy || !sanggahanLengkap(sanggahan)}
+                onClick={() => {
+                  void onSanggahan(sanggahan).then(() => setSanggahan(SANGGAHAN_KOSONG));
+                }}
+              >
+                {detail.sanggahan_alasan === null ? 'Ajukan sanggahan' : 'Perbarui sanggahan'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* D-8 status — the one Section D control that outlives Draft ---------- */}
+      {detail.assumptions.length > 0 && (
+        <div className="card">
+          <div className="cardHeader">
+            Status asumsi (D-8){' '}
+            {asumsiFlipEnabled && <span className="badge badge-gray">bisa diubah saat Aktif</span>}
+          </div>
+          <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+            Menandai sebuah asumsi <strong>Gugur</strong> memberi tahu AM &amp; SPV bahwa revisi
+            disarankan — ia <strong>tidak</strong> membuka revisi. Rule 13 tetap menuntut manusia
+            yang menekan &ldquo;Buka revisi&rdquo;, beserta trigger dan alasannya.
+          </p>
+          {/* Reads `detail`, not the draft: this is server state, and the editor
+              above is Draft-only. One list showing both would make a flip look
+              like something the 20-second autosave would carry. */}
+          <div className="stack" style={{ gap: 4 }}>
+            {detail.assumptions.map((a) => (
+              <div key={a.kode} className="row" style={{ alignItems: 'center', gap: 8 }}>
+                <code style={{ minWidth: 52 }}>{a.kode}</code>
+                <span style={{ flex: 1, fontSize: 13 }}>{a.asumsi}</span>
+                <span
+                  className={
+                    a.status === 'Gugur'
+                      ? 'badge badge-amber'
+                      : a.status === 'Terverifikasi'
+                        ? 'badge badge-green'
+                        : 'badge badge-gray'
+                  }
+                >
+                  {a.status}
+                </span>
+                {asumsiFlipEnabled && (
+                  <button
+                    type="button"
+                    className="btn btnGhost btnSm"
+                    disabled={busy}
+                    onClick={() => void onAsumsiStatus(a.kode, nextAsumsiStatus(a.status))}
+                  >
+                    {a.status === 'Gugur' ? 'Batalkan gugur' : 'Tandai gugur'}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* D-8 + D-9 --------------------------------------------------------- */}
       <div className="card">
