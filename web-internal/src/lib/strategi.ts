@@ -833,6 +833,25 @@ export interface StrategiPrasyaratKlien {
   urutan: number;
 }
 
+/**
+ * A-10 / Rule 16 — one field's client visibility.
+ *
+ * `tier` and `dapat_diubah` arrive from the server DERIVED, and the page must
+ * use them rather than re-deciding: the §4.1 map lives in `packages/core` and a
+ * copy of it here is the copy most likely to forget a hard-internal field, which
+ * is a leak rather than a bug. Render `dapat_diubah: false` as a locked row.
+ */
+export interface StrategiFieldVisibility {
+  field_id: string;
+  visibilitas: string;
+  /** `hard_internal` | `default_internal` | `default_shareable`. */
+  tier: string;
+  dapat_diubah: boolean;
+  /** null while the row is still the untouched §4.1 default. */
+  diubah_oleh: string | null;
+  diubah_pada: string | null;
+}
+
 export interface StrategiDetail extends Strategi {
   channels: StrategiChannel[];
   akses: StrategiAkses[];
@@ -853,6 +872,8 @@ export interface StrategiDetail extends Strategi {
   tanggal_besar: StrategiTanggalBesar[];
   trigger_revisi: StrategiTriggerRevisi[];
   dispatch: StrategiDispatch[];
+  /** A-10 — the §4.1 visibility overlay, one entry per field ID (Rule 16). */
+  visibilitas: StrategiFieldVisibility[];
   riwayat: StrategiEvent[];
 }
 
@@ -1097,6 +1118,29 @@ export function saveStrategiKetergantungan(
   ketergantungan: unknown[],
 ): Promise<StrategiDetail> {
   return api.put<StrategiDetail>(`/strategi/${id}/ketergantungan`, { ketergantungan });
+}
+
+/**
+ * A-10 / Rule 16(b) — flip one field's client visibility.
+ *
+ * ONE field per call, unlike every other saver in this file. The others replace
+ * a list; this records a decision, and Rule 16(b) requires it audit-logged — a
+ * batch would write "12 fields changed" into the log that exists to answer which
+ * one, and who.
+ *
+ * Returns the whole overlay, so the page replaces its copy rather than merging
+ * one row into it. Never send a field whose `dapat_diubah` is false: the server
+ * refuses it twice (domain + DB CHECK), and the UI should not offer the switch.
+ */
+export function setStrategiFieldVisibility(
+  id: string,
+  fieldId: string,
+  visibilitas: string,
+): Promise<{ visibilitas: StrategiFieldVisibility[] }> {
+  return api.put<{ visibilitas: StrategiFieldVisibility[] }>(`/strategi/${id}/visibilitas`, {
+    field_id: fieldId,
+    visibilitas,
+  });
 }
 
 /**

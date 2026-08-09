@@ -31,6 +31,16 @@
  *    autosave would drop the edit — the draft state is per-section and is
  *    rebuilt from the server response on load.
  *
+ * ## A section's endpoints run in sequence, and sometimes the order is a rule
+ *
+ * Four sections span more than one endpoint (A, B, D, E). In three of them the
+ * order is merely "each response is a full StrategiDetail, so racing them would
+ * leave the page holding whichever reply landed last". In **B and D it is a
+ * constraint**: Section B's baseline rows need the channel IDs that only exist
+ * after `saveChannels` answers, and Section D's D-9 mapping is validated against
+ * `strategi_target` rows that only exist after `saveTargets` answers. Reordering
+ * either one produces a save that fails for a reason the AM cannot see on screen.
+ *
  * ## NarasiDraft lives in SectionEDraft
  *
  * E-1 (growth_thesis) and E-13 (urutan_eksekusi_alasan) in Section E share the
@@ -63,9 +73,16 @@ import SectionC, {
   diagnosaDraftToPayload,
   type DiagnosaDraftAll,
 } from '@/components/strategi/SectionC';
-import SectionD, { kpiDraftOf, type KpiDraft } from '@/components/strategi/SectionD';
+import SectionD, {
+  kpiDraftOf,
+  targetDraftOf,
+  type KpiDraft,
+  type TargetDraft,
+} from '@/components/strategi/SectionD';
 import SectionE, {
+  ketergantunganToBody,
   sectionEDraftOf,
+  type KetergantunganDraft,
   type NarasiDraft,
   type SectionEDraft,
 } from '@/components/strategi/SectionE';
@@ -96,23 +113,33 @@ import {
   getStrategi,
   returnStrategi,
   saveStrategiAkses,
+  saveStrategiAssumptions,
   saveStrategiBaseline,
   saveStrategiChannels,
   saveStrategiDiagnosa,
   saveStrategiHandoff,
   saveStrategiKalender,
+  saveStrategiKetergantungan,
   saveStrategiKonteks,
   saveStrategiKpi,
   saveStrategiNarasi,
   saveStrategiPillars,
   saveStrategiResources,
   saveStrategiRisks,
+  saveStrategiTargets,
   saveStrategiTriggerRevisi,
   strategiKekurangan,
   submitStrategi,
   updateStrategiHeader,
   type StrategiDetail,
 } from '@/lib/strategi';
+import {
+  assumptionsToBody,
+  gmvCellsToBody,
+  offerableTargetKeys,
+  pruneTargetTerkait,
+  supportRowsToBody,
+} from '@/lib/strategi-target';
 
 /** All sections are now wired (A-13 + A-13b complete). */
 const WIRED: SectionKey[] = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'];
@@ -122,7 +149,9 @@ interface Drafts {
   channels: ChannelDraft[];
   diagnosa: DiagnosaDraftAll;
   kpi: KpiDraft;
-  /** Holds all four narasi fields (E-1, E-13, H-3, H-4) plus E-11 tidak_dikerjakan. */
+  /** A-13c — D-1/D-2 matrix, D-4 supporting metrics, D-8/D-9 assumptions. */
+  targets: TargetDraft;
+  /** Holds all four narasi fields (E-1, E-13, H-3, H-4), E-11 and E-12. */
   sectionE: SectionEDraft;
   sectionF: SectionFDraft;
   kalender: KalenderDraft;
@@ -137,6 +166,7 @@ function draftsOf(d: StrategiDetail): Drafts {
     channels: channelsDraftOf(d),
     diagnosa: diagnosaDraftOf(d),
     kpi: kpiDraftOf(d),
+    targets: targetDraftOf(d),
     sectionE: sectionEDraftOf(d),
     sectionF: sectionFDraftOf(d),
     kalender: kalenderDraftOf(d),
@@ -251,6 +281,28 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
       } else if (active === 'C') {
         next = await saveStrategiDiagnosa(id, diagnosaDraftToPayload(drafts.diagnosa));
       } else if (active === 'D') {
+        // THREE endpoints, and the ORDER is load-bearing — this is the same
+        // trap Section B has with channels-then-baseline.
+        //
+        // `saveAssumptions` refuses any D-9 reference that does not name a real
+        // `strategi_target` row (`[asumsi menunjuk target yang tidak ada]`), and
+        // it refuses the WHOLE call for one bad key. So targets must land first,
+        // and the assumptions that follow must reference only what actually
+        // landed: half-filled GMV cells are skipped by `gmvCellsToBody` (the
+        // component says so on screen), and a D-9 tick pointing at one of them
+        // would otherwise block the save with no visible cause.
+        const { rows: gmvRows } = gmvCellsToBody(drafts.targets.gmv);
+        next = await saveStrategiTargets(id, [
+          ...gmvRows,
+          ...supportRowsToBody(drafts.targets.pendukung),
+        ]);
+        next = await saveStrategiAssumptions(
+          id,
+          pruneTargetTerkait(
+            assumptionsToBody(drafts.targets.assumptions),
+            offerableTargetKeys(drafts.targets.gmv),
+          ),
+        );
         next = await saveStrategiKpi(id, drafts.kpi);
       } else if (active === 'E') {
         // E-1 / E-13 — same narasi endpoint as H-3 / H-4. The four fields are
@@ -276,6 +328,15 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
             urutan: keepPillars.length + i + 1,
           }));
         next = await saveStrategiPillars(id, [...keepPillars, ...tdPillars]);
+        // E-12 has its own endpoint and its own table. Deliberately NOT folded
+        // into `saveKalender` even though §4 groups it near the calendar: the
+        // gap kode is `E-12`, so the nav sends the AM here, and a Section G save
+        // owning it would make "which section is incomplete" depend on which
+        // route happened to run last.
+        next = await saveStrategiKetergantungan(
+          id,
+          ketergantunganToBody(drafts.sectionE.ketergantungan),
+        );
       } else if (active === 'F') {
         next = await saveStrategiResources(
           id,
@@ -530,7 +591,9 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                 <SectionD
                   detail={detail}
                   draft={drafts.kpi}
+                  targets={drafts.targets}
                   onChange={(p) => patch('kpi', { ...drafts.kpi, ...p })}
+                  onTargets={(p) => patch('targets', { ...drafts.targets, ...p })}
                   disabled={!editable}
                 />
               )}
@@ -546,6 +609,9 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                   }
                   onTidakDikerjakan={(rows) =>
                     patch('sectionE', { ...drafts.sectionE, tidak_dikerjakan: rows })
+                  }
+                  onKetergantungan={(rows: KetergantunganDraft[]) =>
+                    patch('sectionE', { ...drafts.sectionE, ketergantungan: rows })
                   }
                   disabled={!editable}
                 />

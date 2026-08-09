@@ -53,6 +53,25 @@ export interface Kekurangan {
 const SECTION_KEYS: readonly string[] = STRATEGI_SECTIONS.map((s) => s.key);
 
 /**
+ * Kodes that are not field IDs and therefore cannot be parsed for a section.
+ *
+ * `checkCompleteness` emits one: `Rule 8` ("every target carries an assumption"),
+ * which is a cross-field rule over D-2 and D-9 and so has no field number of its
+ * own. Left to the parser it lands in `lain`, where the page renders it as
+ * "tidak dikenali seksinya — laporkan ke tim sistem". That message is right for a
+ * kode nobody can act on and WRONG here: Rule 8 is fixed by ticking a D-9
+ * checkbox, and telling the AM to file a bug report instead is how a fixable gap
+ * becomes a permanent one.
+ *
+ * This map is for kodes the server deliberately emits without a field ID. It is
+ * NOT a place to paper over a kode that should have had one — a `Z-9` still goes
+ * to `lain`, on purpose.
+ */
+const KODE_SECTION_OVERRIDE: Readonly<Record<string, SectionKey>> = {
+  'Rule 8': 'D',
+};
+
+/**
  * sectionOf maps a kekurangan kode to its section.
  *
  * Accepts `A-5`, `B-1/Shopee`, and `G-1` alike: the section is the leading
@@ -62,6 +81,8 @@ const SECTION_KEYS: readonly string[] = STRATEGI_SECTIONS.map((s) => s.key);
  */
 export function sectionOf(kode: string): SectionKey {
   const k = kode.trim();
+  const override = KODE_SECTION_OVERRIDE[k];
+  if (override !== undefined) return override;
   // `k[1] === '-'` matters: without it a future kode like `AKSES-3` would be
   // filed under A purely because it starts with the same letter.
   if (k.length >= 2 && k[1] === '-' && SECTION_KEYS.includes(k[0])) {

@@ -46,7 +46,7 @@
  * Reference: docs/prd/CDPS_Module6A_Strategi.md.
  */
 
-import { ident, money, notification, permission, statemachine } from '@cdps/core';
+import { ident, money, notification, permission, statemachine, visibility } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import {
   ACCOUNT_DIVISION,
@@ -414,6 +414,17 @@ export const MSG_BASELINE_INCOMPLETE =
   '[baseline bulanan belum lengkap untuk seluruh periode yang dideklarasikan]';
 /** D-2 — no GMV stretch target for a contracted channel. */
 export const MSG_TARGET_MISSING = '[target GMV per bulan wajib diisi untuk setiap channel]';
+/**
+ * D-4 — no supporting-metric target at all for a contracted channel (X-15).
+ *
+ * Says "minimal satu" out loud because that IS the rule: the owner's decision
+ * gates the QUESTION, not the full matrix. A message reading "target metrik
+ * pendukung wajib diisi" would leave the AM guessing whether nine metrics × n
+ * months are expected, and guessing upward is how a required field turns into a
+ * column of copied numbers.
+ */
+export const MSG_TARGET_PENDUKUNG_MISSING =
+  '[minimal satu target metrik pendukung wajib diisi untuk setiap channel]';
 /** D-8 — at least three assumptions. */
 export const MSG_ASSUMPTION_MIN = '[minimal tiga asumsi target wajib diisi]';
 /** Rule 8 — every monthly stretch figure carries an assumption. */
@@ -682,6 +693,24 @@ export const MSG_DISPATCH_URUTAN_DUPLICATE = '[urutan dispatch tidak boleh sama]
 export const MSG_METRIK_LAPORAN_REQUIRED =
   '[minimal satu metrik laporan klien wajib dipilih]';
 export const MSG_METRIK_LAPORAN_INVALID = '[metrik laporan klien tidak dikenal]';
+
+/** A-10 / Rule 16 — the visibility overlay. */
+export const MSG_VISIBILITAS_INVALID = '[pilihan visibilitas tidak dikenal]';
+export const MSG_FIELD_ID_UNKNOWN = '[field ini tidak ada di formulir Strategi]';
+/**
+ * Rule 16(a). Named in the message on purpose: an AM who ticked the wrong row
+ * needs to know WHICH field refused, and a generic "tidak boleh" sends them
+ * looking for a permission problem they do not have.
+ */
+export const MSG_VISIBILITAS_HARD_INTERNAL =
+  '[field ini tidak pernah bisa dibagikan ke klien]';
+/**
+ * Rule 13 — an archived or expired version is immutable and still readable. Its
+ * visibility is part of what a client already saw; changing it would rewrite the
+ * answer to "what was shared on the day of the dispute".
+ */
+export const MSG_VISIBILITAS_TERKUNCI =
+  '[visibilitas tidak dapat diubah pada versi yang sudah diarsipkan atau kedaluwarsa]';
 
 const RE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -1252,6 +1281,25 @@ export interface StrategiDispatch {
   catatan: string | null;
 }
 
+/**
+ * A-10 / Rule 16 — one row of the `STRG_FIELD_VISIBILITY` overlay.
+ *
+ * `tier` and `dapatDiubah` are DERIVED from `packages/core`, never stored: the
+ * §4.1 classification is a rule, and a rule copied into rows is a rule that can
+ * disagree with itself. What IS stored is the answer (`visibilitas`) and who
+ * gave it (`diubahOleh` / `diubahPada`, both null while the row is still the
+ * untouched §4.1 seed).
+ */
+export interface StrategiFieldVisibility {
+  fieldId: string;
+  visibilitas: visibility.Visibility;
+  tier: visibility.VisibilityTier;
+  /** Rule 16(a) — false for the hard-internal set, and the UI must not offer a switch. */
+  dapatDiubah: boolean;
+  diubahOleh: string | null;
+  diubahPada: string | null;
+}
+
 /** Section J — one row per event, append-only. */
 export interface StrategiEvent {
   versiNo: number;
@@ -1287,6 +1335,8 @@ export interface StrategiDetail extends Strategi {
   tanggalBesar: StrategiTanggalBesar[];
   triggerRevisi: StrategiTriggerRevisi[];
   dispatch: StrategiDispatch[];
+  /** A-10 — the §4.1 visibility overlay, one row per field ID (Rule 16). */
+  visibilitas: StrategiFieldVisibility[];
   riwayat: StrategiEvent[];
 }
 
@@ -2073,6 +2123,8 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
     { id: string; divisi: string; urutan: number; catatan: string | null }[]
   >`select * from strategi_dispatch where strategi_id = ${id} order by urutan asc`;
 
+  const visRows = await loadFieldVisibility(sql, id);
+
   const eventRows = await sql<
     {
       versi_no: number;
@@ -2218,6 +2270,7 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
       urutan: d.urutan,
       catatan: d.catatan,
     })),
+    visibilitas: visRows,
     riwayat: eventRows.map((e) => ({
       versiNo: e.versi_no,
       peristiwa: e.peristiwa,
@@ -2388,6 +2441,11 @@ export async function createStrategi(
       values
         (${id}, ${contractId}, ${svc.clientId}, 1, ${STRATEGI_DRAFT}, ${head.tanggalMulaiSiklus},
          ${head.toleransiOverPersen}, ${actor.employeeId})`;
+
+    // A-10 / §7 — the overlay is seeded with the §4.1 defaults at creation, so
+    // the document carries its own visibility rather than borrowing today's
+    // constant every time it is rendered.
+    await seedFieldVisibility(tx, id, actor.employeeId);
 
     await appendEvent(tx, id, 1, 'dibuat', actor.employeeId, null);
     await ex.audit.insertAudit({
@@ -4511,6 +4569,194 @@ export async function saveHandoff(
 }
 
 // ---------------------------------------------------------------------------
+// A-10 — the §4.1 visibility overlay (Rule 16)
+// ---------------------------------------------------------------------------
+
+/** Statuses whose visibility is settled: a version a client may already have read. */
+const VISIBILITAS_TERKUNCI_STATUS: readonly string[] = [
+  STRATEGI_DIARSIPKAN,
+  STRATEGI_KEDALUWARSA,
+];
+
+/**
+ * Seeds `STRG_FIELD_VISIBILITY` with the §4.1 defaults for one Strategi (§7).
+ *
+ * Every field on the roster gets a row, so the overlay describes the document as
+ * it stood the day it was created rather than as the constant reads today —
+ * which matters because `/s/{token}` (A-11) publishes to someone who cannot be
+ * asked to re-read it. `ON CONFLICT DO NOTHING` because `copyChildren` seeds a
+ * revision from its predecessor first: the carried-over AM decisions win, and
+ * this only fills fields that did not exist in the previous version.
+ */
+async function seedFieldVisibility(
+  tx: TransactionSql,
+  strategiId: string,
+  actorId: string,
+): Promise<void> {
+  const rows = visibility.STRATEGI_FIELD_ROSTER.map((fieldId) => ({
+    strategi_id: strategiId,
+    field_id: fieldId,
+    // Non-null over the whole roster — `visibility.test.ts` proves it, so the
+    // `?? VISIBILITY_INTERNAL` here is a type narrowing, not a silent default.
+    visibilitas: visibility.defaultVisibility(fieldId) ?? visibility.VISIBILITY_INTERNAL,
+    created_by: actorId,
+  }));
+  await tx`
+    insert into strategi_field_visibility ${tx(rows, 'strategi_id', 'field_id', 'visibilitas', 'created_by')}
+    on conflict (strategi_id, field_id) do nothing`;
+}
+
+/**
+ * Reads the overlay and joins each row to its §4.1 tier.
+ *
+ * A row whose `field_id` the registry no longer knows is DROPPED, not returned
+ * with a guessed tier. `tierOf` answering `null` means "this is not a Strategi
+ * field", and the one thing that must never happen is such a row reaching a
+ * caller that reads `visibilitas` without re-checking the tier.
+ */
+async function loadFieldVisibility(
+  sql: Queryable,
+  strategiId: string,
+): Promise<StrategiFieldVisibility[]> {
+  const rows = await sql<
+    {
+      field_id: string;
+      visibilitas: string;
+      diubah_oleh: string | null;
+      diubah_pada: string | Date | null;
+    }[]
+  >`select field_id, visibilitas, diubah_oleh, diubah_pada
+      from strategi_field_visibility
+     where strategi_id = ${strategiId}
+     order by field_id asc`;
+
+  const out: StrategiFieldVisibility[] = [];
+  for (const r of rows) {
+    const tier = visibility.tierOf(r.field_id);
+    if (tier === null) continue;
+    out.push({
+      fieldId: r.field_id,
+      // Rule 16(a) applied on READ as well as on write. The overlay is a table;
+      // a hard-internal row that somehow says `Bagikan ke Klien` — a bad
+      // migration, a service-role script — must read back as internal rather
+      // than be reported as shareable to whatever renders next.
+      visibilitas:
+        tier === 'hard_internal'
+          ? visibility.VISIBILITY_INTERNAL
+          : (r.visibilitas as visibility.Visibility),
+      tier,
+      dapatDiubah: visibility.canToggleShareable(r.field_id),
+      diubahOleh: r.diubah_oleh,
+      diubahPada: r.diubah_pada === null ? null : new Date(r.diubah_pada).toISOString(),
+    });
+  }
+  return out;
+}
+
+/**
+ * setFieldVisibility flips one field's `visibilitas` (Rule 16(b)).
+ *
+ * **Not Draft-only, and that is deliberate.** Rule 16(c) serves the client view
+ * from the approved active version, so a Draft-only toggle would mean the only
+ * way to share one more field with a client mid-contract is to open a revision —
+ * which Rule 13 makes expensive on purpose (a trigger from H-2, a written
+ * reason, a broken assumption) and which bumps the version number over a
+ * decision that changed nothing about the strategy. `setAssumptionStatus` is the
+ * existing precedent for a non-Draft write on this record.
+ *
+ * What IS refused is a version whose visibility is already history: `Diarsipkan`
+ * and `Kedaluwarsa` (Rule 13 — "immutable, still readable").
+ *
+ * One field per call, because one toggle is one decision and the audit row has
+ * to be able to name it. A batch endpoint would write "12 fields changed" into
+ * the log, which answers nothing during the dispute this log exists for.
+ */
+export async function setFieldVisibility(
+  sql: Sql,
+  actor: Actor,
+  id: string,
+  fieldId: string,
+  visibilitas: string,
+): Promise<StrategiFieldVisibility[]> {
+  const field = (fieldId ?? '').trim();
+  const value = (visibilitas ?? '').trim();
+
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const head = await loadStrategiRow(tx, id, true);
+    const ownerAm = await ownerAmOfContract(tx, head.contractId);
+    if (!canWriteStrategi(actor, ownerAm)) {
+      throw new ForbiddenError(MSG_NOT_OWNER_AM);
+    }
+    if (VISIBILITAS_TERKUNCI_STATUS.includes(head.status)) {
+      throw new ConflictError(MSG_VISIBILITAS_TERKUNCI);
+    }
+
+    const tier = visibility.tierOf(field);
+    if (tier === null) {
+      throw new ValidationError(MSG_FIELD_ID_UNKNOWN);
+    }
+    if (!(visibility.VISIBILITIES as readonly string[]).includes(value)) {
+      throw new ValidationError(MSG_VISIBILITAS_INVALID);
+    }
+    // Rule 16(a) covers BOTH directions for a hard-internal field. Accepting
+    // `Internal Saja` here would be a no-op that reads, in the audit log, as a
+    // visibility decision someone made about A-10 — and the next reader would
+    // reasonably conclude the other direction was available too.
+    if (tier === 'hard_internal') {
+      throw new ForbiddenError(MSG_VISIBILITAS_HARD_INTERNAL);
+    }
+
+    const prev = await tx<{ visibilitas: string }[]>`
+      select visibilitas from strategi_field_visibility
+       where strategi_id = ${id} and field_id = ${field}`;
+    const before = prev.length > 0 ? prev[0].visibilitas : visibility.defaultVisibility(field);
+
+    // UPSERT rather than UPDATE: a field added to §4 after this Strategi was
+    // created has no seeded row, and refusing to record the AM's answer because
+    // of when the record happened to be made is the wrong failure.
+    await tx`
+      insert into strategi_field_visibility
+        (strategi_id, field_id, visibilitas, diubah_oleh, diubah_pada, created_by)
+      values (${id}, ${field}, ${value}, ${actor.employeeId}, now(), ${actor.employeeId})
+      on conflict (strategi_id, field_id) do update
+        set visibilitas = excluded.visibilitas,
+            diubah_oleh = excluded.diubah_oleh,
+            diubah_pada = excluded.diubah_pada`;
+
+    // Rule 16(b) — "the toggle is audit-logged". before→after by field, which is
+    // what answers "who decided the client could see the margin figure".
+    await ex.audit.insertAudit({
+      entityType: ENTITY_STRATEGI,
+      entityId: id,
+      actorEmployeeId: actor.employeeId,
+      action: 'set_field_visibility',
+      beforeJson: { field_id: field, visibilitas: before },
+      afterJson: { field_id: field, visibilitas: value },
+      createdBy: actor.employeeId,
+    });
+
+    return loadFieldVisibility(tx, id);
+  });
+}
+
+/**
+ * The field IDs a client may see for one Strategi, overlay applied.
+ *
+ * The single door A-11 (`/s/{token}`) will render through, so that the filter
+ * §7 requires to run BEFORE serialisation has exactly one implementation. It
+ * takes the roster from `packages/core` rather than from the overlay rows: a
+ * field with no row must fall back to its §4.1 default, and a field the registry
+ * has never heard of must not appear because a row exists for it.
+ */
+export async function shareableFieldIds(sql: Queryable, id: string): Promise<string[]> {
+  const rows = await loadFieldVisibility(sql, id);
+  const overlay: Record<string, visibility.Visibility> = {};
+  for (const r of rows) overlay[r.fieldId] = r.visibilitas;
+  return visibility.shareableFields(visibility.STRATEGI_FIELD_ROSTER, overlay);
+}
+
+// ---------------------------------------------------------------------------
 // Submit gate (Rules 3, 5, 8, 9, 17 + D-8 / H-1 minimums)
 // ---------------------------------------------------------------------------
 
@@ -4654,12 +4900,40 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
     }
   }
 
-  const targets = await sql<{ channel: string; month_index: number; metric: string }[]>`
-    select channel, month_index, metric from strategi_target
-     where strategi_id = ${id} and metric = 'gmv'`;
+  // Both D-2 and D-4 are read off this one query — D-2 is the `gmv` rows, D-4 is
+  // everything else. Two queries would let the two gates disagree about what is
+  // stored the moment one of them grows a filter the other does not.
+  const allTargets = await sql<{ channel: string; month_index: number; metric: string }[]>`
+    select channel, month_index, metric from strategi_target where strategi_id = ${id}`;
+  const targets = allTargets.filter((t) => t.metric === 'gmv');
   for (const c of channels) {
     if (!targets.some((t) => t.channel === c.channel)) {
       out.push({ kode: `D-2/${c.channel}`, pesan: MSG_TARGET_MISSING });
+    }
+  }
+
+  // D-4 (X-15, owner decision 2026-08-09) — MINIMAL ONE supporting-metric target
+  // per channel, deliberately not the full matrix.
+  //
+  // §4 marks D-4 `W`, but until this decision nothing checked it, so a Strategi
+  // could be submitted AND approved with no supporting metric at all — and then
+  // "GMV missed by 30%" had nothing to be tested against, which is the exact
+  // failure M6A exists to prevent (§2 problem (c): the post-mortem becomes
+  // opinion).
+  //
+  // Why one and not the matrix: nine metrics × n months × n channels is 108
+  // boxes on a six-month two-channel contract, and a required field that costs
+  // 108 boxes is filled by copying one number down a column — the vanity-metric
+  // shape §9 guards against. The PRD argues the same way about the SAME
+  // vocabulary one field earlier: D-6 caps leading indicators at five because
+  // "kalau semuanya dipantau, tidak ada yang dipantau".
+  //
+  // Per CHANNEL, not per Strategi: a second channel with no supporting metric is
+  // a channel nobody stated a hypothesis about, and the kode carries the channel
+  // so the form can point at it.
+  for (const c of channels) {
+    if (!allTargets.some((t) => t.channel === c.channel && t.metric !== 'gmv')) {
+      out.push({ kode: `D-4/${c.channel}`, pesan: MSG_TARGET_PENDUKUNG_MISSING });
     }
   }
 
@@ -5521,6 +5795,23 @@ async function copyChildren(
       (strategi_id, divisi, urutan, catatan, created_by)
     select ${toId}, divisi, urutan, catatan, ${actorId}
       from strategi_dispatch where strategi_id = ${fromId}`;
+
+  // A-10 — the visibility overlay travels with the revision, `diubah_oleh` and
+  // `diubah_pada` included. Resetting it to the §4.1 defaults would mean every
+  // field the AM chose to share in version n silently goes dark the moment n+1
+  // is approved — and Rule 16(c) serves the client from the active version, so
+  // the client would watch the document get thinner with no one having decided
+  // that. Carrying it forward errs the other way: a field stays shared because
+  // someone already decided it should be, which is a decision on the record.
+  await tx`
+    insert into strategi_field_visibility
+      (strategi_id, field_id, visibilitas, diubah_oleh, diubah_pada, created_by)
+    select ${toId}, field_id, visibilitas, diubah_oleh, diubah_pada, ${actorId}
+      from strategi_field_visibility where strategi_id = ${fromId}`;
+  // …and then top up whatever §4 gained since version n was created. `ON
+  // CONFLICT DO NOTHING` inside makes this additive only: the rows just copied
+  // win over the defaults.
+  await seedFieldVisibility(tx, toId, actorId);
 }
 
 /** transitionError maps an engine rejection to the shared error taxonomy. */

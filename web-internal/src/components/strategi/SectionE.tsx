@@ -21,8 +21,13 @@
  * - E-11 (out-of-scope list) is stored as pillars of type `tidak_dikerjakan`.
  *   Rule 9 requires at least one entry, so it is editable here.
  *
- * - E-12 (client dependencies during execution) lives in Section G's UI and is
- *   saved via `/ketergantungan`.
+ * - E-12 (client dependencies during execution) is edited HERE, not in Section
+ *   G's UI as an earlier draft of this note claimed. It is a submit requirement,
+ *   and `checkCompleteness` emits its gap as the kode `E-12`, which the nav files
+ *   under Section E. An editor in Section G would put the box in a chapter the
+ *   AM is never sent to — the badge would say E and the field would be under G.
+ *   It is still saved by its own endpoint (`/ketergantungan`), never folded into
+ *   `saveKalender`.
  */
 
 import RepeatList from './RepeatList';
@@ -50,9 +55,28 @@ export interface NarasiDraft {
   kondisi_stop_scope: string;
 }
 
+/**
+ * E-12 — one thing the client must supply while the work is running.
+ *
+ * All three parts are the point, and `konsekuensi` is what separates this from
+ * C-7 (prasyarat klien). C-7 is the gate BEFORE execution starts, and its
+ * consequence is fixed: execution does not begin. E-12 runs alongside delivery,
+ * where "late" has a different cost every time — which is the field cited when a
+ * target is missed. They have separate tables and separate endpoints for exactly
+ * this reason; do not reuse the C-7 form here.
+ */
+export interface KetergantunganDraft {
+  item: string;
+  /** Free text, not a date — §4's own example is "tiap tgl 1". */
+  kapan: string;
+  konsekuensi: string;
+}
+
 export interface SectionEDraft {
   narasi: NarasiDraft;
   tidak_dikerjakan: OutOfScopeDraft[];
+  /** E-12. Saved by `/ketergantungan`, which replaces the whole list. */
+  ketergantungan: KetergantunganDraft[];
 }
 
 export function sectionEDraftOf(d: StrategiDetail): SectionEDraft {
@@ -66,7 +90,29 @@ export function sectionEDraftOf(d: StrategiDetail): SectionEDraft {
     tidak_dikerjakan: d.pillars
       .filter((p) => p.jenis === 'tidak_dikerjakan')
       .map((p) => ({ item: p.aksi })),
+    ketergantungan: d.ketergantungan.map((k) => ({
+      item: k.item,
+      kapan: k.kapan,
+      konsekuensi: k.konsekuensi,
+    })),
   };
+}
+
+/**
+ * Drops rows the AM added and never typed into, keeping any row with something
+ * in it so the server's `[ketergantungan klien belum lengkap …]` answers it —
+ * the same split `assumptionsToBody` makes, and for the same reason.
+ *
+ * `urutan` is not sent: `strategiKetergantunganFromWire` falls back to the array
+ * index, which is the order on screen. Sending our own copy of the same number
+ * would be a second source for one fact.
+ */
+export function ketergantunganToBody(
+  rows: readonly KetergantunganDraft[],
+): KetergantunganDraft[] {
+  return rows.filter(
+    (k) => k.item.trim() !== '' || k.kapan.trim() !== '' || k.konsekuensi.trim() !== '',
+  );
 }
 
 // ---- Component ------------------------------------------------------------
@@ -76,12 +122,14 @@ export default function SectionE({
   draft,
   onNarasi,
   onTidakDikerjakan,
+  onKetergantungan,
   disabled,
 }: {
   detail: StrategiDetail;
   draft: SectionEDraft;
   onNarasi: (patch: Partial<NarasiDraft>) => void;
   onTidakDikerjakan: (rows: OutOfScopeDraft[]) => void;
+  onKetergantungan: (rows: KetergantunganDraft[]) => void;
   disabled: boolean;
 }) {
   return (
@@ -155,6 +203,51 @@ export default function SectionE({
             disabled={disabled}
             onChange={(e) => set({ item: e.target.value })}
           />
+        )}
+      </RepeatList>
+
+      {/* E-12 -------------------------------------------------------------- */}
+      <RepeatList<KetergantunganDraft>
+        label="E-12 · Ketergantungan pada klien (selama eksekusi)"
+        hint="Apa yang klien harus sediakan, kapan, dan konsekuensinya kalau terlambat. Minimal satu wajib sebelum bisa diajukan. Beda dari C-7: C-7 adalah syarat SEBELUM eksekusi mulai, ini yang berjalan terus — dan `konsekuensi` adalah field yang nanti dikutip saat target meleset."
+        rows={draft.ketergantungan}
+        min={1}
+        onChange={onKetergantungan}
+        blank={() => ({ item: '', kapan: '', konsekuensi: '' })}
+        disabled={disabled}
+        addLabel="Tambah ketergantungan"
+        empty="Belum ada — minimal satu wajib diisi."
+      >
+        {(row, set) => (
+          <div className="formRow">
+            <label className="field">
+              <span className="muted" style={{ fontSize: 12 }}>Yang klien sediakan</span>
+              <input
+                placeholder="mis. stok hero SKU 2.000 pcs"
+                value={row.item}
+                disabled={disabled}
+                onChange={(e) => set({ item: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span className="muted" style={{ fontSize: 12 }}>Kapan</span>
+              <input
+                placeholder="mis. tiap tgl 1"
+                value={row.kapan}
+                disabled={disabled}
+                onChange={(e) => set({ kapan: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span className="muted" style={{ fontSize: 12 }}>Konsekuensi kalau terlambat</span>
+              <input
+                placeholder="mis. target GMV bulan itu ditinjau ulang"
+                value={row.konsekuensi}
+                disabled={disabled}
+                onChange={(e) => set({ konsekuensi: e.target.value })}
+              />
+            </label>
+          </div>
         )}
       </RepeatList>
 

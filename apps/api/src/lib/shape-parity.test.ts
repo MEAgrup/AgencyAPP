@@ -449,6 +449,7 @@ const WIRE_TO_FE: Record<string, string> = {
   StrategiTanggalBesarWire: 'strategi.ts::StrategiTanggalBesar',
   StrategiTriggerRevisiWire: 'strategi.ts::StrategiTriggerRevisi',
   StrategiDispatchWire: 'strategi.ts::StrategiDispatch',
+  StrategiFieldVisibilityWire: 'strategi.ts::StrategiFieldVisibility',
   BriefWire: 'account.ts::Brief',
   ComplaintWire: 'account.ts::Complaint',
   // M7 creative
