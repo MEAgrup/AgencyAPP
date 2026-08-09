@@ -183,6 +183,8 @@ jobs:
       # green while CI failed on `expected 14 machines`. Adding a table or a
       # machine means editing BOTH, in the same commit.
       #
+      # 84 = 82 + strategi_share_token + strategi_share_access_log
+      #      (20260809010000, M6A A-11: tautan klien read-only /s/{token}, §7 D20).
       # 82 = 81 + strategi_field_visibility (20260809000000, M6A A-10 bagian 2:
       #      overlay visibilitas per field ID, §7 STRG_FIELD_VISIBILITY).
       # 81 = 76 + strategi_ketergantungan_klien · strategi_fase ·
@@ -209,12 +211,12 @@ jobs:
       #         + plan_gate_config + service_plan_gate (20260806061000, M6C §10).
       #      55 = 54 + prospect_activities (20260806050000, keputusan pemilik 2026-08-06).
       #      54 = 53 + lead_delete_requests (20260729162101, DECISIONS 2026-07-29).
-      - name: Verify table count (expect 82)
+      - name: Verify table count (expect 84)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 82
+          test "$n" -eq 84
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57). The TS half (PREFIXES in
       # packages/core/src/ident.ts) is asserted against this table by

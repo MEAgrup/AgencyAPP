@@ -58,6 +58,7 @@ import {
 } from './account';
 import * as contract from './contract';
 import { effectiveGate, type PlanTier } from './plangate_rules';
+import { createHash, randomBytes } from 'node:crypto';
 
 // ---------------------------------------------------------------------------
 // Vocabulary — mirrors the CHECK constraints in
@@ -486,6 +487,12 @@ export const MSG_ASSUMPTION_NOT_FOUND = '[asumsi tidak ditemukan pada Strategi i
  */
 export const MSG_ASSUMPTION_STATUS_TERKUNCI =
   '[status asumsi tidak dapat diubah pada versi yang sudah diarsipkan atau kedaluwarsa]';
+/**
+ * A-11 (§7 D20) — a share link can only be minted once there is an approved
+ * active version to pin it to; the link always renders that version.
+ */
+export const MSG_SHARE_NO_ACTIVE_VERSION =
+  '[tautan klien hanya bisa dibuat setelah ada versi Strategi yang aktif]';
 /** E-1 — the thesis the whole of Section E hangs off. */
 export const MSG_GROWTH_THESIS_REQUIRED = '[growth thesis wajib diisi]';
 /** E-13 — the order is stored on the pillars; the reason is not. */
@@ -4780,6 +4787,309 @@ export async function shareableFieldIds(sql: Queryable, id: string): Promise<str
   const overlay: Record<string, visibility.Visibility> = {};
   for (const r of rows) overlay[r.fieldId] = r.visibilitas;
   return visibility.shareableFields(visibility.STRATEGI_FIELD_ROSTER, overlay);
+}
+
+// ---------------------------------------------------------------------------
+// A-11 — client share link `/s/{token}` (§7 D20, RA-3, RA-7)
+// ---------------------------------------------------------------------------
+
+/** Status of the current share link, without ever exposing the secret. */
+export interface ShareLinkStatus {
+  /** `none` = never created; `aktif` = live; `dicabut` = revoked. */
+  status: 'none' | 'aktif' | 'dicabut';
+  tanggalKedaluwarsa: string | null;
+  createdAt: string | null;
+  createdBy: string | null;
+  dicabutPada: string | null;
+}
+
+/** What `createShareToken` returns — the plaintext token, shown exactly once. */
+export interface ShareTokenCreated extends ShareLinkStatus {
+  /** The 32-byte secret, base64url. Never stored; if lost, regenerate. */
+  token: string;
+}
+
+/** One shareable datum in the client view, tagged with the §4 field it came from. */
+export interface ClientViewField {
+  fieldId: string;
+  label: string;
+  value: string;
+}
+
+/** A section of the client view — only sections with at least one shareable field. */
+export interface ClientViewSection {
+  seksi: string;
+  fields: ClientViewField[];
+}
+
+/**
+ * The client-safe render of a Strategi. **RA-7 / X-06 (owner 2026-08-09): the
+ * client link carries the ACTIVE version only — no version history, no diff.**
+ * The full versioned record with history stays internal; if a client asks "what
+ * changed", the AM explains it in the meeting rather than the system exposing it.
+ */
+export interface ShareLinkResolved {
+  /** `false` for an unknown/revoked/expired token, or a contract with no active
+   * version — all rendered as the same neutral "tautan tidak aktif" page (§7). */
+  aktif: boolean;
+  versiNo?: number;
+  disetujuiPada?: string | null;
+  sections?: ClientViewSection[];
+}
+
+/** SHA-256 hex of the raw token. Only the hash is ever stored or looked up (§7). */
+function hashShareToken(raw: string): string {
+  return createHash('sha256').update(raw).digest('hex');
+}
+
+/** `YYYY-MM-DD` + n days, UTC-anchored so it never drifts by a calendar day. */
+function addDaysISO(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** The row with status `Aktif` for a contract, or null — the version a link pins to. */
+async function activeStrategiOfContract(
+  sql: Queryable,
+  contractId: string,
+): Promise<Strategi | null> {
+  const rows = await sql<{ id: string }[]>`
+    select id from strategi where contract_id = ${contractId} and status = ${STRATEGI_AKTIF} limit 1`;
+  if (rows.length === 0) return null;
+  return loadStrategiRow(sql, rows[0].id);
+}
+
+/**
+ * Projects a full StrategiDetail down to the client-safe view.
+ *
+ * **Safe by construction:** every block is gated on the field ID it renders being
+ * in `shareable`, so a field that is hard-internal or that the AM switched off can
+ * never appear — the same guarantee `shareableFields` gives per field, applied at
+ * the block level. Adding a block means adding a gate; there is no default that
+ * renders an ungated field. History and diff are never projected (RA-7).
+ */
+function clientView(detail: StrategiDetail, shareable: ReadonlySet<string>): ClientViewSection[] {
+  const out: ClientViewSection[] = [];
+
+  // Section B — the channels in scope. B is wholly shareable (§4.1); gate on a
+  // representative B field so an AM who hid all of B hides this block too.
+  if (shareable.has('B-1.1') && detail.channels.length > 0) {
+    out.push({
+      seksi: 'Channel',
+      fields: detail.channels.map((c) => ({
+        fieldId: 'B-1.1',
+        label: c.namaToko || c.channel,
+        value: c.channelLain ? `${c.channel} (${c.channelLain})` : c.channel,
+      })),
+    });
+  }
+
+  // Section E-1 — the growth thesis the whole strategy hangs off.
+  if (shareable.has('E-1') && detail.growthThesis) {
+    out.push({ seksi: 'Tesis Pertumbuhan', fields: [{ fieldId: 'E-1', label: 'Tesis', value: detail.growthThesis }] });
+  }
+
+  // Section D-2 — the target matrix, the numbers a client came to see.
+  if (shareable.has('D-2') && detail.targets.length > 0) {
+    out.push({
+      seksi: 'Target',
+      fields: detail.targets.map((t) => ({
+        fieldId: 'D-2',
+        label: `${t.metric} · ${t.channel} · Bulan ${t.monthIndex}`,
+        value: t.nilaiFloor ? `${t.nilaiFloor} → ${t.nilaiStretch}` : t.nilaiStretch,
+      })),
+    });
+  }
+
+  // Section D-8 — the assumptions, mostly things the client must deliver. §4.1
+  // calls this deliberately shareable: it turns "kenapa target gak kejar" into a
+  // checklist both sides signed off on.
+  if (shareable.has('D-8') && detail.assumptions.length > 0) {
+    out.push({
+      seksi: 'Asumsi',
+      fields: detail.assumptions.map((a) => ({
+        fieldId: 'D-8',
+        label: a.asumsi,
+        value: a.pemilik ? `PIC: ${a.pemilik}` : '',
+      })),
+    });
+  }
+
+  return out;
+}
+
+/**
+ * createShareToken mints (or rotates) the one active link for a Strategi's
+ * contract (§7 D20).
+ *
+ * The token binds to `contract_id`, not to one version row, so it follows the
+ * active version across revisions (see the migration comment). Regenerating
+ * revokes the previous active token in the same transaction — §7 "regenerating
+ * invalidates the old one immediately". The 32-byte secret is returned exactly
+ * once; only its SHA-256 is stored. Default expiry is contract end + 30 days.
+ */
+export async function createShareToken(
+  sql: Sql,
+  actor: Actor,
+  id: string,
+): Promise<ShareTokenCreated> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const head = await loadStrategiRow(tx, id, true);
+    const ownerAm = await ownerAmOfContract(tx, head.contractId);
+    // AM (owner) or Account lead/SPV — §7 "AM or SPV can revoke instantly", and
+    // the same two roles mint it.
+    if (!canWriteStrategi(actor, ownerAm) && !canApproveStrategi(actor)) {
+      throw new ForbiddenError(MSG_NOT_OWNER_AM);
+    }
+    const active = await activeStrategiOfContract(tx, head.contractId);
+    if (active === null) {
+      throw new ValidationError(MSG_SHARE_NO_ACTIVE_VERSION);
+    }
+
+    await tx`
+      update strategi_share_token
+         set status = 'Dicabut', dicabut_oleh = ${actor.employeeId}, dicabut_pada = now()
+       where contract_id = ${head.contractId} and status = 'Aktif'`;
+
+    const raw = randomBytes(32).toString('base64url');
+    const expiry = addDaysISO(active.tanggalAkhirKontrak, 30);
+    const rows = await tx<{ tanggal_kedaluwarsa: string; created_at: string }[]>`
+      insert into strategi_share_token (contract_id, token_hash, tanggal_kedaluwarsa, created_by)
+      values (${head.contractId}, ${hashShareToken(raw)}, ${expiry}, ${actor.employeeId})
+      returning tanggal_kedaluwarsa, created_at`;
+
+    await ex.audit.insertAudit({
+      entityType: ENTITY_STRATEGI,
+      entityId: active.id,
+      actorEmployeeId: actor.employeeId,
+      action: 'create_share_token',
+      beforeJson: null,
+      afterJson: { contract_id: head.contractId, tanggal_kedaluwarsa: expiry },
+      createdBy: actor.employeeId,
+    });
+
+    return {
+      token: raw,
+      status: 'aktif',
+      tanggalKedaluwarsa: rows[0].tanggal_kedaluwarsa,
+      createdAt: String(rows[0].created_at),
+      createdBy: actor.employeeId,
+      dicabutPada: null,
+    };
+  });
+}
+
+/** revokeShareToken kills the active link immediately (§7). Idempotent. */
+export async function revokeShareToken(sql: Sql, actor: Actor, id: string): Promise<ShareLinkStatus> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const head = await loadStrategiRow(tx, id, true);
+    const ownerAm = await ownerAmOfContract(tx, head.contractId);
+    if (!canWriteStrategi(actor, ownerAm) && !canApproveStrategi(actor)) {
+      throw new ForbiddenError(MSG_NOT_OWNER_AM);
+    }
+    const rows = await tx<{ id: string }[]>`
+      update strategi_share_token
+         set status = 'Dicabut', dicabut_oleh = ${actor.employeeId}, dicabut_pada = now()
+       where contract_id = ${head.contractId} and status = 'Aktif'
+      returning id`;
+    if (rows.length > 0) {
+      await ex.audit.insertAudit({
+        entityType: ENTITY_STRATEGI,
+        entityId: id,
+        actorEmployeeId: actor.employeeId,
+        action: 'revoke_share_token',
+        beforeJson: { status: 'Aktif' },
+        afterJson: { status: 'Dicabut' },
+        createdBy: actor.employeeId,
+      });
+    }
+    return shareLinkStatusOf(tx, head.contractId);
+  });
+}
+
+/** getShareLinkStatus reports the current link for the internal Strategi page. */
+export async function getShareLinkStatus(
+  sql: Queryable,
+  actor: Actor,
+  id: string,
+): Promise<ShareLinkStatus> {
+  const head = await loadStrategiRow(sql, id);
+  const ownerAm = await ownerAmOfContract(sql, head.contractId);
+  if (!canReadStrategi(actor, ownerAm)) {
+    throw new ForbiddenError(MSG_NOT_OWNER_AM);
+  }
+  return shareLinkStatusOf(sql, head.contractId);
+}
+
+/** The active token if any, else the most recent revoked one, as status only. */
+async function shareLinkStatusOf(sql: Queryable, contractId: string): Promise<ShareLinkStatus> {
+  const rows = await sql<
+    { status: string; tanggal_kedaluwarsa: string | null; created_at: string; created_by: string; dicabut_pada: string | null }[]
+  >`
+    select status, tanggal_kedaluwarsa, created_at, created_by, dicabut_pada
+      from strategi_share_token
+     where contract_id = ${contractId}
+     order by (status = 'Aktif') desc, created_at desc
+     limit 1`;
+  if (rows.length === 0) {
+    return { status: 'none', tanggalKedaluwarsa: null, createdAt: null, createdBy: null, dicabutPada: null };
+  }
+  const r = rows[0];
+  return {
+    status: r.status === 'Aktif' ? 'aktif' : 'dicabut',
+    tanggalKedaluwarsa: r.tanggal_kedaluwarsa,
+    createdAt: String(r.created_at),
+    createdBy: r.created_by,
+    dicabutPada: r.dicabut_pada === null ? null : String(r.dicabut_pada),
+  };
+}
+
+/**
+ * resolveShareLink turns a raw `/s/{token}` secret into the client-safe view,
+ * and writes the access log (§7). NO actor: the token IS the credential, so this
+ * runs on a service-role connection and the safety comes entirely from the filter
+ * and the checks here — never from RLS.
+ *
+ * Returns `{ aktif: false }` — the single neutral outcome — for an unknown,
+ * revoked, or expired token, and for a contract with no approved active version
+ * (a Draft/Draft Revisi is never reachable, §7). No branch leaks which case it was.
+ */
+export async function resolveShareLink(
+  sql: Sql,
+  rawToken: string,
+  meta: { ip?: string | null; userAgent?: string | null } = {},
+): Promise<ShareLinkResolved> {
+  const hash = hashShareToken((rawToken ?? '').trim());
+  return withTransaction(sql, async (tx) => {
+    const toks = await tx<{ id: string; contract_id: string; status: string; expired: boolean }[]>`
+      select id, contract_id, status,
+             (tanggal_kedaluwarsa is not null and tanggal_kedaluwarsa < wib_date(now())) as expired
+        from strategi_share_token where token_hash = ${hash}`;
+    if (toks.length === 0) return { aktif: false };
+    const tok = toks[0];
+    if (tok.status !== 'Aktif' || tok.expired) return { aktif: false };
+
+    const active = await activeStrategiOfContract(tx, tok.contract_id);
+    if (active === null) return { aktif: false };
+
+    const detail = await loadDetail(tx, active);
+    const shareable = new Set(await shareableFieldIds(tx, active.id));
+    const sections = clientView(detail, shareable);
+
+    await tx`
+      insert into strategi_share_access_log (token_id, strategi_id, versi_no, ip, user_agent)
+      values (${tok.id}, ${active.id}, ${active.versiNo}, ${meta.ip ?? null}, ${meta.userAgent ?? null})`;
+
+    return {
+      aktif: true,
+      versiNo: active.versiNo,
+      disetujuiPada: active.disetujuiPada,
+      sections,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
