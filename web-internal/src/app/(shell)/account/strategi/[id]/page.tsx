@@ -31,10 +31,13 @@
  *    autosave would drop the edit — the draft state is per-section and is
  *    rebuilt from the server response on load.
  *
- * Sections A, B, C, E and F are not wired yet (A-13b). Their nav rows still show
- * their gap counts, because a section you cannot open yet still has to be
- * countable — otherwise the total on the submit button would not add up and the
- * AM would have no way to explain the difference.
+ * ## NarasiDraft lives in SectionEDraft
+ *
+ * E-1 (growth_thesis) and E-13 (urutan_eksekusi_alasan) in Section E share the
+ * `/narasi` endpoint with H-3 (skenario_mundur) and H-4 (kondisi_stop_scope) in
+ * Section H. The canonical `NarasiDraft` interface is in SectionE — all four
+ * fields together. The page holds one copy at `drafts.sectionE.narasi`; Section
+ * H reads from it and patches it through the same `patch('sectionE', ...)` path.
  */
 
 import { use, useCallback, useEffect, useMemo, useState } from 'react';
@@ -43,12 +46,38 @@ import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { isAccountLead, isAccountStaff, isReadOnlyOD } from '@/lib/account';
 import StatusBadge from '@/components/StatusBadge';
+import SectionA, {
+  konteksDraftOf,
+  konteksDraftToBody,
+  aksesDraftToBody,
+  type KonteksDraft,
+} from '@/components/strategi/SectionA';
+import SectionB, {
+  channelsDraftOf,
+  channelDraftToBody,
+  baselineDraftToBody,
+  type ChannelDraft,
+} from '@/components/strategi/SectionB';
+import SectionC, {
+  diagnosaDraftOf,
+  diagnosaDraftToPayload,
+  type DiagnosaDraftAll,
+} from '@/components/strategi/SectionC';
 import SectionD, { kpiDraftOf, type KpiDraft } from '@/components/strategi/SectionD';
+import SectionE, {
+  sectionEDraftOf,
+  type NarasiDraft,
+  type SectionEDraft,
+} from '@/components/strategi/SectionE';
+import SectionF, {
+  sectionFDraftOf,
+  sectionFToResources,
+  type SectionFDraft,
+} from '@/components/strategi/SectionF';
 import SectionG, { kalenderDraftOf, type KalenderDraft } from '@/components/strategi/SectionG';
 import SectionH, {
   riskDraftOf,
   triggerDraftOf,
-  type NarasiHDraft,
   type RiskDraft,
   type TriggerDraft,
 } from '@/components/strategi/SectionH';
@@ -66,39 +95,53 @@ import {
   approveStrategi,
   getStrategi,
   returnStrategi,
+  saveStrategiAkses,
+  saveStrategiBaseline,
+  saveStrategiChannels,
+  saveStrategiDiagnosa,
   saveStrategiHandoff,
   saveStrategiKalender,
+  saveStrategiKonteks,
   saveStrategiKpi,
   saveStrategiNarasi,
+  saveStrategiPillars,
+  saveStrategiResources,
   saveStrategiRisks,
   saveStrategiTriggerRevisi,
   strategiKekurangan,
   submitStrategi,
+  updateStrategiHeader,
   type StrategiDetail,
 } from '@/lib/strategi';
 
-/** The sections this page can open today. The rest are A-13b. */
-const WIRED: SectionKey[] = ['D', 'G', 'H', 'I'];
+/** All sections are now wired (A-13 + A-13b complete). */
+const WIRED: SectionKey[] = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'];
 
 interface Drafts {
+  konteks: KonteksDraft;
+  channels: ChannelDraft[];
+  diagnosa: DiagnosaDraftAll;
   kpi: KpiDraft;
+  /** Holds all four narasi fields (E-1, E-13, H-3, H-4) plus E-11 tidak_dikerjakan. */
+  sectionE: SectionEDraft;
+  sectionF: SectionFDraft;
   kalender: KalenderDraft;
   risks: RiskDraft[];
   triggers: TriggerDraft[];
-  narasiH: NarasiHDraft;
   handoff: HandoffDraft;
 }
 
 function draftsOf(d: StrategiDetail): Drafts {
   return {
+    konteks: konteksDraftOf(d),
+    channels: channelsDraftOf(d),
+    diagnosa: diagnosaDraftOf(d),
     kpi: kpiDraftOf(d),
+    sectionE: sectionEDraftOf(d),
+    sectionF: sectionFDraftOf(d),
     kalender: kalenderDraftOf(d),
     risks: riskDraftOf(d),
     triggers: triggerDraftOf(d),
-    narasiH: {
-      skenario_mundur: d.skenario_mundur ?? '',
-      kondisi_stop_scope: d.kondisi_stop_scope ?? '',
-    },
     handoff: handoffDraftOf(d),
   };
 }
@@ -119,7 +162,7 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [active, setActive] = useState<SectionKey>('D');
+  const [active, setActive] = useState<SectionKey>('A');
   const [drafts, setDrafts] = useState<Drafts | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -159,13 +202,101 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
    * rewrite sections the AM never opened with whatever this page last loaded.
    */
   const saveActive = useCallback(async () => {
-    if (!drafts || !editable) return;
+    if (!drafts || !editable || !detail) return;
     setSaving(true);
     setError(null);
     try {
       let next: StrategiDetail;
-      if (active === 'D') {
+      if (active === 'A') {
+        // Section A spans two endpoints: konteks (header scalars) + akses (matrix).
+        // They run in sequence — each is a full StrategiDetail; the second wins.
+        await saveStrategiKonteks(id, konteksDraftToBody(drafts.konteks));
+        next = await saveStrategiAkses(id, aksesDraftToBody(drafts.konteks.akses));
+      } else if (active === 'B') {
+        // Step 1: save channel metadata (+ E-2 priority). The response contains
+        // the server-assigned channel IDs.
+        const channelResult = await saveStrategiChannels(
+          id,
+          drafts.channels.map(channelDraftToBody),
+        );
+        // Step 2: for each Eksisting channel with a declared period, save its
+        // baseline months. Runs sequentially — each response is a full detail.
+        let current = channelResult;
+        for (const ch of drafts.channels) {
+          if (ch.status_channel === 'Belum Aktif') continue;
+          const nMonths = ch.periode_baseline_bulan.trim()
+            ? Math.max(1, Math.min(12, Math.round(Number(ch.periode_baseline_bulan))))
+            : 0;
+          if (nMonths === 0) continue;
+          const saved = channelResult.channels.find((c) => c.channel === ch.channel);
+          if (!saved) continue;
+          // Ensure the baseline array covers exactly nMonths rows (same logic as
+          // the component's ensuredBaseline — the component only manages display).
+          const months = Array.from({ length: nMonths }, (_, i) => {
+            return (
+              ch.baseline.find((m) => m.month_index === i) ?? {
+                month_index: i,
+                gmv: '',
+                jumlah_pesanan: '',
+                persen_batal: '',
+                ad_spend: '',
+                roas: '',
+                acos: '',
+              }
+            );
+          });
+          current = await saveStrategiBaseline(id, saved.id, baselineDraftToBody(months));
+        }
+        next = current;
+      } else if (active === 'C') {
+        next = await saveStrategiDiagnosa(id, diagnosaDraftToPayload(drafts.diagnosa));
+      } else if (active === 'D') {
         next = await saveStrategiKpi(id, drafts.kpi);
+      } else if (active === 'E') {
+        // E-1 / E-13 — same narasi endpoint as H-3 / H-4. The four fields are
+        // always sent together so a Section E save never blanks H-3/H-4 and vice
+        // versa.
+        const n = drafts.sectionE.narasi;
+        await saveStrategiNarasi(id, {
+          growth_thesis: n.growth_thesis || null,
+          urutan_eksekusi_alasan: n.urutan_eksekusi_alasan || null,
+          skenario_mundur: n.skenario_mundur || null,
+          kondisi_stop_scope: n.kondisi_stop_scope || null,
+        });
+        // E-11 (tidak_dikerjakan) is stored as pillars. Preserve the non-E-11
+        // pillars (E-3…E-10) which have their own editor (not yet wired); replace
+        // only the tidak_dikerjakan slice.
+        const keepPillars = detail.pillars
+          .filter((p) => p.jenis !== 'tidak_dikerjakan');
+        const tdPillars = drafts.sectionE.tidak_dikerjakan
+          .filter((t) => t.item.trim())
+          .map((t, i) => ({
+            jenis: 'tidak_dikerjakan',
+            aksi: t.item,
+            urutan: keepPillars.length + i + 1,
+          }));
+        next = await saveStrategiPillars(id, [...keepPillars, ...tdPillars]);
+      } else if (active === 'F') {
+        next = await saveStrategiResources(
+          id,
+          sectionFToResources(drafts.sectionF),
+        );
+        // F-7 is NOT a resource row — it is `strategi.toleransi_over_persen`,
+        // reachable only through the header endpoint. That endpoint answers
+        // with a Strategi (header), not a StrategiDetail, so the detail has to
+        // be re-read; the write is skipped entirely when the value is unchanged
+        // so a Section F save does not touch the contract window for nothing.
+        const tol = drafts.sectionF.toleransi_over_persen.trim();
+        if (tol !== '' && Number(tol) !== next.toleransi_over_persen) {
+          await updateStrategiHeader(id, {
+            durasi_kontrak_bulan: next.durasi_kontrak_bulan,
+            tanggal_mulai_kontrak: next.tanggal_mulai_kontrak,
+            tanggal_akhir_kontrak: next.tanggal_akhir_kontrak,
+            tanggal_mulai_siklus: next.tanggal_mulai_siklus,
+            toleransi_over_persen: Number(tol),
+          });
+          next = await getStrategi(id);
+        }
       } else if (active === 'G') {
         next = await saveStrategiKalender(id, drafts.kalender);
       } else if (active === 'H') {
@@ -186,11 +317,12 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
         // H-3/H-4 share the narasi endpoint with E-1/E-13, so the two Section E
         // fields must be sent back unchanged — the endpoint replaces all four,
         // and omitting them would blank Section E from a Section H save.
+        const n = drafts.sectionE.narasi;
         next = await saveStrategiNarasi(id, {
-          growth_thesis: detail?.growth_thesis ?? null,
-          urutan_eksekusi_alasan: detail?.urutan_eksekusi_alasan ?? null,
-          skenario_mundur: drafts.narasiH.skenario_mundur,
-          kondisi_stop_scope: drafts.narasiH.kondisi_stop_scope,
+          growth_thesis: n.growth_thesis || null,
+          urutan_eksekusi_alasan: n.urutan_eksekusi_alasan || null,
+          skenario_mundur: n.skenario_mundur || null,
+          kondisi_stop_scope: n.kondisi_stop_scope || null,
         });
       } else if (active === 'I') {
         next = await saveStrategiHandoff(id, {
@@ -304,7 +436,7 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                   style={{ justifyContent: 'space-between', display: 'flex', width: '100%' }}
                   onClick={() => goTo(s.key)}
                   disabled={!wired}
-                  title={wired ? undefined : 'Form seksi ini belum dibuat (A-13b)'}
+                  title={wired ? undefined : 'Form seksi ini belum dibuat'}
                 >
                   <span style={{ opacity: wired ? 1 : 0.55 }}>
                     {s.key}. {s.label}
@@ -370,11 +502,59 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
             )}
 
             <div style={{ marginTop: 12 }}>
+              {active === 'A' && (
+                <SectionA
+                  detail={detail}
+                  draft={drafts.konteks}
+                  onChange={(p) => patch('konteks', { ...drafts.konteks, ...p })}
+                  disabled={!editable}
+                />
+              )}
+              {active === 'B' && (
+                <SectionB
+                  detail={detail}
+                  draft={drafts.channels}
+                  onChange={(channels) => patch('channels', channels)}
+                  disabled={!editable}
+                />
+              )}
+              {active === 'C' && (
+                <SectionC
+                  detail={detail}
+                  draft={drafts.diagnosa}
+                  onChange={(p) => patch('diagnosa', { ...drafts.diagnosa, ...p })}
+                  disabled={!editable}
+                />
+              )}
               {active === 'D' && (
                 <SectionD
                   detail={detail}
                   draft={drafts.kpi}
                   onChange={(p) => patch('kpi', { ...drafts.kpi, ...p })}
+                  disabled={!editable}
+                />
+              )}
+              {active === 'E' && (
+                <SectionE
+                  detail={detail}
+                  draft={drafts.sectionE}
+                  onNarasi={(p) =>
+                    patch('sectionE', {
+                      ...drafts.sectionE,
+                      narasi: { ...drafts.sectionE.narasi, ...p },
+                    })
+                  }
+                  onTidakDikerjakan={(rows) =>
+                    patch('sectionE', { ...drafts.sectionE, tidak_dikerjakan: rows })
+                  }
+                  disabled={!editable}
+                />
+              )}
+              {active === 'F' && (
+                <SectionF
+                  detail={detail}
+                  draft={drafts.sectionF}
+                  onChange={(p) => patch('sectionF', { ...drafts.sectionF, ...p })}
                   disabled={!editable}
                 />
               )}
@@ -390,10 +570,15 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                 <SectionH
                   risks={drafts.risks}
                   triggers={drafts.triggers}
-                  narasi={drafts.narasiH}
+                  narasi={drafts.sectionE.narasi}
                   onRisks={(rows) => patch('risks', rows)}
                   onTriggers={(rows) => patch('triggers', rows)}
-                  onNarasi={(p) => patch('narasiH', { ...drafts.narasiH, ...p })}
+                  onNarasi={(p) =>
+                    patch('sectionE', {
+                      ...drafts.sectionE,
+                      narasi: { ...drafts.sectionE.narasi, ...p } as NarasiDraft,
+                    })
+                  }
                   disabled={!editable}
                 />
               )}
@@ -405,7 +590,7 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                 />
               )}
               {!WIRED.includes(active) && (
-                <p className="muted">Form seksi ini belum dibuat (A-13b).</p>
+                <p className="muted">Form seksi ini belum dibuat.</p>
               )}
             </div>
           </div>

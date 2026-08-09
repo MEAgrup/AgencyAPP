@@ -21,6 +21,7 @@
  */
 
 import RepeatList from './RepeatList';
+import type { NarasiDraft } from './SectionE';
 import { RISK_LEVELS, TRIGGER_REVISI_LABELS } from '@/lib/strategi';
 import type { RiskLevel, StrategiDetail } from '@/lib/strategi';
 
@@ -39,10 +40,8 @@ export interface TriggerDraft {
   catatan: string;
 }
 
-export interface NarasiHDraft {
-  skenario_mundur: string;
-  kondisi_stop_scope: string;
-}
+// NarasiDraft (re-exported for import convenience — the canonical definition is in SectionE).
+export type { NarasiDraft };
 
 export function riskDraftOf(d: StrategiDetail): RiskDraft[] {
   return d.risks.map((r) => ({
@@ -73,10 +72,10 @@ export default function SectionH({
 }: {
   risks: RiskDraft[];
   triggers: TriggerDraft[];
-  narasi: NarasiHDraft;
+  narasi: NarasiDraft;
   onRisks: (rows: RiskDraft[]) => void;
   onTriggers: (rows: TriggerDraft[]) => void;
-  onNarasi: (patch: Partial<NarasiHDraft>) => void;
+  onNarasi: (patch: Partial<NarasiDraft>) => void;
   disabled: boolean;
 }) {
   // `lainnya` may repeat (what distinguishes two of them is the note), so it is

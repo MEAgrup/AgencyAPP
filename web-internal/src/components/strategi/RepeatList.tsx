@@ -41,6 +41,13 @@ export interface RepeatListProps<T> {
   disabled?: boolean;
   /** Shown as guidance only — never enforced here. See the module note. */
   min?: number;
+  /**
+   * A ceiling the server actually enforces (B-3.3 top-5 SKU, B-9.1 kompetitor).
+   * Unlike `min` this DOES hide the add button: the minimum is a shortfall the
+   * AM is on their way to fixing, while a row past the maximum is a guaranteed
+   * rejection — offering the button would only produce it.
+   */
+  max?: number;
   addLabel?: string;
   /** Shown when there are no rows at all. */
   empty?: string;
@@ -65,6 +72,7 @@ export default function RepeatList<T>({
   children,
   disabled = false,
   min,
+  max,
   addLabel = 'Tambah baris',
   empty = 'Belum ada baris.',
 }: RepeatListProps<T>) {
@@ -124,6 +132,7 @@ export default function RepeatList<T>({
   );
 
   const kurang = min !== undefined && rows.length < min;
+  const penuh = max !== undefined && rows.length >= max;
 
   return (
     <div className="field" style={{ display: 'block' }}>
@@ -176,7 +185,13 @@ export default function RepeatList<T>({
         </p>
       )}
 
-      {!disabled && (
+      {penuh && (
+        <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+          Maksimal {max} baris — hapus salah satu dulu untuk menambah yang lain.
+        </p>
+      )}
+
+      {!disabled && !penuh && (
         <button type="button" className="btn btnSecondary btnSm" style={{ marginTop: 8 }} onClick={add}>
           {addLabel}
         </button>

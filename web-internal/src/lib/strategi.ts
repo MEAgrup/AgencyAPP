@@ -198,10 +198,137 @@ export const RISK_LEVELS: { value: RiskLevel; label: string }[] = [
   { value: 'tinggi', label: 'Tinggi' },
 ];
 
-// --- Section A / Section B repeatable structs (stored as jsonb server-side).
+// ---------------------------------------------------------------------------
+// Vocabulary constants — runtime arrays that mirror the type unions above and
+// the DB CHECKs in the migration files. Components import these for <select>
+// and checkbox lists. Any change here must match the corresponding constant in
+// `packages/domain/src/strategi.ts` and the DB CHECK; they are one truth in
+// three representations, not three separate truths.
+// ---------------------------------------------------------------------------
+
+// --- Section A (A-05) ---
+
+export const CHANNELS = [
+  'Shopee',
+  'TikTok Shop',
+  'Tokopedia',
+  'Lazada',
+  'Website',
+  'Lainnya',
+] as const;
+
+/** B-0.2 — `Belum Aktif` skips the historical baseline (Rule 4). */
+export const CHANNEL_STATES = ['Eksisting', 'Belum Aktif'] as const;
+
+export const BUSINESS_MODELS = [
+  'produsen',
+  'brand_owner',
+  'distributor',
+  'reseller',
+] as const;
+
+export const PRICE_POSITIONS = ['premium', 'mid', 'budget', 'price_fighter'] as const;
+
+export const STOCK_CAPACITIES = ['ready_stock', 'produksi_per_order'] as const;
+
+export const CLIENT_ASSETS = [
+  'foto_produk',
+  'video',
+  'sampel',
+  'katalog',
+  'budget_iklan',
+  'host_live',
+] as const;
+
+/** A-5 minimum unique selling points. */
+export const USP_MIN = 3;
+
+export const ACCESS_KINDS = [
+  'seller_center',
+  'ads_manager',
+  'affiliate_center',
+  'akun_chat',
+  'gudang_stok',
+] as const;
+
+export const ACCESS_STATES = ['sudah', 'pending', 'ditolak'] as const;
+
+// --- Section B (A-06) ---
+
+/** B-2.4 — biggest entry point (optional field). */
+export const ENTRY_POINTS = ['search', 'feed', 'live', 'keranjang', 'chat'] as const;
+
+/** B-6.5 — who funds the sampling/seeding programme. */
+export const SAMPLE_PROGRAMS = ['tidak_ada', 'klien', 'mea', 'kreator'] as const;
+
+/** B-7.3 — who hosts the live sessions today. */
+export const LIVE_HOSTS = [
+  'internal_klien',
+  'vendor',
+  'tim_mea',
+  'belum_ada',
+] as const;
+
+/** B-7.4 — studio & equipment availability. */
+export const STUDIO_STATES = ['tersedia', 'sebagian', 'tidak_ada'] as const;
+
+/** B-5.3 — campaign types running on the channel. */
+export const CAMPAIGN_TYPES = [
+  'gmv_max',
+  'manual_keyword',
+  'auto',
+  'live_ads',
+  'video_ads',
+  'affiliate_ads',
+  'lainnya',
+] as const;
+
+/** B-8.2 — platform programmes the store joined. */
+export const PLATFORM_PROGRAMS = [
+  'gratis_ongkir_xtra',
+  'cashback',
+  'campaign_seasonal',
+  'flash_sale',
+  'voucher_platform',
+  'lainnya',
+] as const;
+
+/** B-9.2 — what competitors do better. */
+export const COMPETITOR_EDGES = [
+  'harga',
+  'konten',
+  'ulasan',
+  'iklan',
+  'live',
+  'bundling',
+] as const;
+
+/** B-3.3 cap — at most 5 top SKUs. */
+export const TOP_SKU_MAX = 5;
+/** B-9.1 cap — at most 3 competing stores. */
+export const KOMPETITOR_MAX = 3;
+
+// --- Section C (A-07) ---
+
+/** C-1 enum — bottleneck utama per channel. */
+export const BOTTLENECK_KINDS = [
+  'trafik',
+  'konversi',
+  'aov',
+  'repeat_order',
+  'margin',
+  'operasional',
+  'konten',
+  'harga',
+  'listing',
+] as const;
+
+// ---------------------------------------------------------------------------
+// Section A / Section B repeatable structs (stored as jsonb server-side).
 // Named interfaces, not `Record<string, unknown>[]`: the response-shape guard
 // follows a key whose type names an interface, and an anonymous bag is a shape
 // nothing verifies. Money is a string, as everywhere else on this wire.
+// ---------------------------------------------------------------------------
 
 /** A-12 — who may approve at the client, and how to escalate past them. */
 export interface StrategiDecisionMaker {
