@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assumptionsToBody,
+  channelsMissingSupport,
   gmvCellsToBody,
   gmvGridOf,
   offerableTargetKeys,
@@ -200,6 +201,49 @@ describe('uncoveredTargetKeys (Rule 8)', () => {
       'gmv:Shopee:1',
       'gmv:Shopee:2',
     ]);
+  });
+});
+
+describe('channelsMissingSupport (D-4 gate, X-15)', () => {
+  const channels = [{ channel: 'Shopee' }, { channel: 'TikTok Shop' }];
+
+  it('names the channels with no supporting metric', () => {
+    expect(
+      channelsMissingSupport(channels, [
+        { channel: 'Shopee', month_index: 1, metric: 'cr', nilai_stretch: '2.8' },
+      ]),
+    ).toEqual(['TikTok Shop']);
+  });
+
+  it('is satisfied by ONE row per channel — the owner gated the question, not the matrix', () => {
+    // If this ever needs a second row to pass, the mirror has drifted past the
+    // decision, and the AM would be chasing a gap the server never reports.
+    expect(
+      channelsMissingSupport(channels, [
+        { channel: 'Shopee', month_index: 1, metric: 'cr', nilai_stretch: '2.8' },
+        { channel: 'TikTok Shop', month_index: 1, metric: 'aov', nilai_stretch: '90000' },
+      ]),
+    ).toEqual([]);
+  });
+
+  it('does not let a GMV row satisfy D-4 — that is D-2, the other question', () => {
+    expect(
+      channelsMissingSupport(channels, [
+        { channel: 'Shopee', month_index: 1, metric: 'gmv', nilai_stretch: '460000000' },
+        { channel: 'TikTok Shop', month_index: 1, metric: 'aov', nilai_stretch: '90000' },
+      ]),
+    ).toEqual(['Shopee']);
+  });
+
+  it('ignores a row the AM added but never filled', () => {
+    // It will not be saved, so the server will still report the gap. Counting it
+    // here would show a green form over a submit that is about to be refused.
+    expect(
+      channelsMissingSupport(channels, [
+        { channel: 'Shopee', month_index: 1, metric: 'cr', nilai_stretch: '' },
+        { channel: 'TikTok Shop', month_index: 1, metric: 'aov', nilai_stretch: '90000' },
+      ]),
+    ).toEqual(['Shopee']);
   });
 });
 

@@ -2,236 +2,269 @@
 
 > Rantai: SESI1 → … → SESI10 → **SESI11 (ini, terbaru)**. Baca yang bernomor
 > tertinggi lebih dulu; sesi sebelumnya hanya untuk konteks sejarah.
->
-> **Sesi ini: A-13c (D-2 · D-8/D-9 · E-12) — gerbang Ajukan akhirnya bisa
-> dilewati dari UI.** Sebelum sesi ini **tidak ada satu pun Strategi** yang bisa
-> diajukan dari halaman mana pun, karena tiga field wajib tidak punya kotak
-> isian. Sekarang bisa, dan itu dibuktikan ujung-ke-ujung, bukan diklaim.
->
-> 🟡 **Satu ketidakcocokan PRD↔kode ditemukan dan TIDAK diputus sendiri:** D-4
-> ditandai `W` di §4 tapi tidak pernah digerbangi `checkCompleteness` — sudah
-> begitu sejak A-08. Editornya dibangun, gerbangnya tidak disentuh, dan
-> pertanyaannya dibuka sebagai **X-15**. Lihat §4.
 
-## 0. Posisi persis — VERIFIKASI SEBELUM MENYALIN
+## 0. CARA MELANJUTKAN DI CHAT BARU — baca ini dulu
 
 | | |
 |---|---|
-| Branch | `claude/migrasi-a13c-editor-penyimpanan-64n1oe` |
-| Basis | `1f77e49` (merge PR #110) |
-| Migrasi | **72 berkas — TIDAK BERUBAH.** A-13c murni frontend + tes; nol migrasi, nol perubahan domain, nol perubahan route |
+| **Repo** | `MEAgrup/AgencyAPP` |
+| **Branch** | **`claude/migrasi-a13c-editor-penyimpanan-64n1oe`** |
+| **PR** | **#111** — terbuka, belum merge |
+| **Basis** | `1f77e49` (merge PR #110, `main`) |
+| **Commit terakhir** | `f0da5eb` |
+
+```bash
+git fetch origin claude/migrasi-a13c-editor-penyimpanan-64n1oe
+git checkout claude/migrasi-a13c-editor-penyimpanan-64n1oe
+```
+
+> ⚠️ **Kalau PR #111 sudah ter-merge saat Anda membaca ini**, jangan menumpuk
+> commit di atasnya. Mulai ulang dari `main`:
+> `git fetch origin main && git checkout -B <branch-baru> origin/main`.
+
+### 0.1 DB lokal — WAJIB, dan angka test menyesatkan tanpanya
+
+`packages/domain` melaporkan **~670 skip** kalau `DATABASE_URL` tidak di-set.
+Itu **bukan** keadaan normal — itu berarti Anda tidak menguji apa pun yang
+menyentuh DB. Sandbox punya PostgreSQL 16 tapi **tidak berjalan otomatis** dan
+**mati sendiri** setelah beberapa saat (container mereklamasinya).
+
+```bash
+# 1. nyalakan (ulangi kapan pun `pg_isready` bilang "no response")
+mkdir -p /var/run/postgresql && chown postgres:postgres /var/run/postgresql
+su postgres -c "/usr/lib/postgresql/16/bin/pg_ctl -D /var/lib/postgresql/16/main \
+  -o '-c config_file=/etc/postgresql/16/main/postgresql.conf' \
+  -l /var/lib/postgresql/pg.log start"
+
+# 2. HANYA PERTAMA KALI — role postgres tidak punya password, jadi koneksi TCP ditolak
+su postgres -c "psql -q -c \"alter role postgres with password 'postgres'\""
+
+# 3. bangun DB dari nol (72 migrasi + seed Alpha Digital + gate + 4 invariant SQL)
+scripts/db-rebuild.sh --yes
+
+# 4. jalankan
+DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/cdps" npm test --workspaces --if-present
+cd web-internal && npm ci && npm test && npx tsc --noEmit && npx eslint && npm run build
+```
+
+`web-internal` **bukan** anggota workspace (root hanya `apps/*` + `packages/*`),
+jadi ia butuh `npm ci` dan perintah test sendiri. Melewatkannya adalah cara
+paling gampang mengira semuanya hijau.
+
+### 0.2 Posisi persis
+
+| | |
+|---|---|
+| Migrasi | **72 berkas — TIDAK BERUBAH** sepanjang sesi ini. Nol migrasi di A-13c, X-15 maupun A-10 bagian 1 |
 | Gate | tabel 81 · prefix 31 · mesin 16 · event 34 · `CATALOG_VERSION` 4 · `role_mappings` 12 — semuanya tidak disentuh |
-| Test | `web-internal` **154** (+26) · `apps/api` **338** (+14) · `packages/core` **118** · `packages/db` **15** · `packages/domain` **919 + 1 skip** · `route-parity` hijau, `KNOWN_GAPS` tetap **kosong** · lint + typecheck + `next build` bersih |
-| Live `CDPS SG` | **Tidak disentuh sesi ini** — tidak ada migrasi. Status terakhir terverifikasi: SESI9 §5 |
-| Menggantung | Kode: **NOL**. Keputusan yang diwarisi: **X-15 (baru)** · O60 · O47b rewrite · O42-b · O59-b · O24 · O45 · X-06 · X-12 |
+| Test | `web-internal` **158** · `apps/api` **338** · `packages/core` **134** · `packages/db` **15** · `packages/domain` **922 + 1 skip** · lint + typecheck + `next build` bersih · `KNOWN_GAPS` tetap **kosong** |
+| Live `CDPS SG` | **Tidak disentuh** — tidak ada migrasi. Status terakhir terverifikasi: SESI9 §5 |
+| Menggantung | Kode: **NOL**. Keputusan: **X-16 (baru, butuh pemilik)** · O60 · O47b rewrite · O42-b · O59-b · O24 · O45 · X-06 · X-12 |
 
-> ⚠️ **Test dijalankan dengan DB lokal penuh.** Kalau di sesi Anda `packages/domain`
-> melaporkan ~670 skip, itu bukan keadaan normal — itu berarti `DATABASE_URL`
-> tidak di-set. Bangun DB-nya (`scripts/db-rebuild.sh --yes`) lalu jalankan dengan
-> `DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/cdps"`. Angka di atas
-> adalah angka DB-penuh; membandingkan dengan angka skip akan menyesatkan.
+## 1. Apa yang berubah di sesi ini
 
-## 1. Yang mendarat
+Tiga commit, satu tema: **halaman Strategi berhenti jadi form yang tidak bisa
+dikirim.**
 
-Sepuluh dari sepuluh seksi Strategi kini punya pintu masuk. Tapi angka itu bukan
-inti sesi ini — **inti sesi ini adalah gerbangnya bisa dilewati**, dan itu
-pernyataan yang berbeda (SESI10 §0.1 menulis alasannya).
+| Commit | Isi |
+|---|---|
+| `96648a8` | **A-13c** — D-2 matriks target, D-8/D-9 asumsi, E-12 ketergantungan + tiga guard baru |
+| `0de8b7b` | **A-10 bagian 1** — peta visibilitas §4.1 sebagai peta TOTAL di `packages/core` |
+| `f0da5eb` | **X-15 dieksekusi** — gerbang ringan D-4 (keputusan pemilik) |
 
-### 1.1 D-2 — matriks target (`SectionD.tsx`)
+### 1.1 A-13c — gerbang Ajukan akhirnya bisa dilewati
 
-Channel × bulan kontrak (M1…Mn), floor (D-1) + stretch (D-2) per sel.
+Sebelum sesi ini **tidak ada satu pun Strategi** yang bisa diajukan dari halaman
+mana pun: D-2, D-8 dan E-12 adalah syarat submit yang tidak punya kotak isian.
+Sembilan seksi punya pintu, gerbangnya tetap mustahil.
 
-Tiga hal yang akan salah kalau ditebak ulang:
+Empat hal yang akan salah kalau ditebak ulang:
 
-- **Bulan 1-based.** `ck_strtg_month CHECK (month_index BETWEEN 1 AND 36)`.
-  Baseline Section B **0-based**. Keduanya memang beda: baseline adalah offset ke
-  jendela masa lalu, target adalah bulan kontrak M1.
-- **Rule 7 (`stretch >= floor`) TIDAK ditulis ulang di TS.** Ia
-  `ck_strtg_stretch_gmv`. Form menampilkan selisihnya di sebelah sel dan tidak
-  memblokir ketikan — jawaban PRD atas "stretch di bawah floor" adalah D-7
-  Sanggahan Target (Rule 19), bukan aturan klien yang lebih lunak.
-- **Sel terisi separuh DILAPORKAN, tidak dikirim, tidak dibuang.** Baris GMV
-  tidak bisa ada separuh (`nilai_stretch` NOT NULL + CHECK menuntut floor di
-  sebelahnya). Mengirimnya ⇒ autosave gagal tiap 20 detik dan sel yang lengkap
-  ikut tidak mendarat. Membuangnya diam-diam ⇒ kelas O43 yang sama persis dengan
-  bug F-2/F-3 sesi lalu. Jadi ia dilewati **dan disebut namanya di layar**.
+- **Bulan target 1-based**, baseline Section B 0-based. Memang beda: baseline
+  adalah offset ke jendela masa lalu, target adalah bulan kontrak M1.
+- **Rule 7 (`stretch >= floor`) tidak ditulis ulang di TS** — ia
+  `ck_strtg_stretch_gmv`. Form menampilkan selisihnya dan tidak memblokir
+  ketikan; jawaban PRD atas stretch di bawah floor adalah **D-7 Sanggahan**.
+- **Sel GMV terisi separuh dilaporkan, tidak dikirim, tidak dibuang.** Baris GMV
+  tak bisa ada separuh. Mengirimnya ⇒ autosave gagal tiap 20 detik dan sel yang
+  lengkap ikut tidak mendarat. Membuangnya ⇒ kelas O43, sama persis dengan bug
+  F-2/F-3 sesi lalu.
+- **Urutan simpan Section D adalah ATURAN:** `targets → assumptions → kpi`.
+  `saveAssumptions` menolak **seluruh** panggilan untuk satu referensi D-9 yang
+  menggantung, dan sel separuh-terisi menghasilkan referensi menggantung persis
+  begitu. Itu sebabnya `pruneTargetTerkait` dijalankan terhadap
+  `offerableTargetKeys(draft)`, bukan terhadap seluruh grid.
 
-Tombol *"samakan semua bulan dengan M1"* bukan pemanis: X-04 menjangkarkan target
-tiap channel ke baseline channel itu sendiri, jadi angka bulanan yang rata adalah
-titik awal yang biasa, dan kontrak 12 bulan tanpa itu adalah 24 kotak berisi dua
-angka yang sama.
+E-12 ditempatkan di **Section E**, bukan Section G seperti dokumen komponen
+sempat klaim: kode kekurangannya `E-12`, jadi navigasi mengirim AM ke E.
 
-### 1.2 D-8 / D-9 — asumsi (`SectionD.tsx`)
+### 1.2 X-15 — gerbang ringan D-4 (KEPUTUSAN PEMILIK, sudah dieksekusi)
 
-Min 3, tiap asumsi punya kode/asumsi/pemilik/cara verifikasi + pemetaan D-9
-sebagai checkbox atas target GMV.
+Pemilik: *"D-4 buat gerbang ringan"*. Gerbangnya **minimal satu target metrik
+pendukung per channel** — bukan matriks penuh.
 
-- **Checkbox D-9 diisi dari DRAFT, bukan dari `detail.targets`.** AM mengetik
-  matriks dan asumsi di seksi yang sama dan simpan yang sama; picker yang
-  bersumber dari data tersimpan akan **kosong sampai simpan pertama** dan AM
-  tidak punya cara tahu kenapa.
-- **Panel Rule 8 hidup.** `checkCompleteness` melaporkan **satu** baris `Rule 8`
-  untuk berapa pun target yang telanjang. Tanpa panel yang menyebut
-  *"Shopee · M5, Shopee · M6"*, AM tahu ada yang kurang tapi tidak tahu di mana.
-  Perhitungannya ada di `lib/strategi-target.ts` dengan test yang memakukannya ke
-  cara server menghitung — satu-satunya tempat di form ini di mana salinan kedua
-  aturan server layak dibayar, karena alternatifnya adalah kekurangan yang tidak
-  bisa ditemukan AM.
+Sebelumnya §4 menandai D-4 `W` tapi tidak ada yang memeriksanya sejak A-08, jadi
+Strategi bisa diajukan **dan disetujui** tanpa satu pun metrik pendukung. Saat
+GMV meleset 30% di bulan ketiga, tidak ada angka untuk diuji — kegagalan yang
+M6A §2 (c) sebut sendiri.
 
-### 1.3 E-12 — ketergantungan klien (`SectionE.tsx`)
+Kenapa satu dan bukan matriks: 9 metrik × n bulan × n channel = **108 kotak**
+pada kontrak 6 bulan 2 channel, dan field wajib seharga 108 kotak diisi dengan
+menyalin satu angka ke bawah. PRD beralasan identik atas kosakata yang **sama**
+satu field sebelumnya — D-6 dibatasi maks 5 karena *"kalau semuanya dipantau,
+tidak ada yang dipantau"*.
 
-Repeatable struct (item, kapan, konsekuensi), min 1.
+**Dua hal tersingkap saat mengeksekusinya, keduanya sehat:**
 
-**Ditempatkan di Section E, bukan Section G** — dokumen `SectionE.tsx` sebelumnya
-menulis *"lives in Section G's UI"* dan itu salah: kode kekurangannya `E-12`,
-jadi navigasi mengirim AM ke seksi **E**. Editor di G berarti badge di satu bab
-dan kotaknya di bab lain. Tetap endpoint sendiri (`/ketergantungan`), tidak
-pernah dilipat ke `saveKalender`.
+1. `gate-reachability.test.ts` **langsung merah** menuntut baris `DOORS` untuk
+   `D-4`. Guard yang dibangun beberapa jam sebelumnya bekerja persis sebagaimana
+   dirancang pada pemakaian nyata pertamanya.
+2. Assertion Rule 13 `expect(copied.targets).toHaveLength(1)` jadi basi. Diubah
+   memeriksa **metrik** (`['cr','gmv']`) bukan hitungan — yang penting adalah
+   revisi tidak lahir dengan kekurangan D-4 di hari pertama, yang akan terjadi
+   kalau `copyChildren` hanya membawa `gmv`.
 
-### 1.4 Urutan simpan Section D adalah ATURAN, bukan gaya
+### 1.3 A-10 bagian 1 — peta visibilitas
 
-```
-saveStrategiTargets → saveStrategiAssumptions → saveStrategiKpi
-```
+`packages/core/src/visibility.ts`. Set hard-internal (7 field) dan set
+togglable (6 field) dari §4.1, dipaku member-per-member oleh test.
 
-`saveAssumptions` menolak **seluruh** panggilan untuk satu referensi D-9 yang
-menggantung (`MSG_ASSUMPTION_TARGET_UNKNOWN`). Jadi target harus mendarat lebih
-dulu, dan asumsi yang menyusul hanya boleh menunjuk yang **benar-benar mendarat** —
-sel separuh-terisi tidak, itulah kenapa `pruneTargetTerkait` dijalankan terhadap
-`offerableTargetKeys(draft)` dan bukan terhadap seluruh grid.
+**`tierOf` sengaja TOTAL — tidak ada cabang default.** Itu properti keamanannya:
+peta berlubang butuh fallback, dan **kedua** fallback adalah bug. Jatuh ke
+*shareable* menerbitkan field yang tak pernah diklasifikasi ke klien; jatuh ke
+*internal* membuat field baru hilang diam-diam dari dokumen klien sampai ada
+klien bertanya kenapa deknya menipis. Test gagal **menyebut nama** field yang
+belum bertier. Jangan tambahkan cabang default supaya ia berhenti merah.
 
-Ini jebakan yang sama dengan Section B (channels dulu, baru baseline, karena id
-channel lahir di respons pertama). Sekarang tertulis di kepala `page.tsx`.
+Filter hard-internal diterapkan **terakhir dan tanpa syarat**: overlay adalah
+tabel yang AM tulis, jadi baris yang mengaku `A-10` shareable adalah data untuk
+diabaikan, bukan instruksi untuk dipatuhi.
 
-## 2. 🟢 Tiga guard baru — dua untuk kelas cacat yang lolos A-13b
+## 2. Tiga guard baru — dan kenapa dua di antaranya ada
 
 ### 2.1 `apps/api/src/lib/gate-reachability.test.ts`
 
-**Ini guard yang seharusnya ada sebelum A-13b.**
+Tiap kode yang `checkCompleteness` bisa keluarkan wajib punya baris `DOORS` yang
+menyebut fungsi FE penjawabnya, **dan** fungsi itu wajib punya pemanggil di luar
+`lib/strategi.ts`.
 
-Tiap kode yang `checkCompleteness` bisa keluarkan wajib punya baris di `DOORS`
-yang menyebut fungsi FE penjawabnya, **dan** fungsi itu wajib punya pemanggil di
-`web-internal/src` di luar berkas definisinya.
+**Diverifikasi negatif:** `page.tsx` dikembalikan ke versi A-13b ⇒ merah, menyebut
+`saveStrategiAssumptions, saveStrategiKetergantungan, saveStrategiTargets` per
+nama. `route-parity` tidak bisa melihat ini — ia berangkat dari panggilan yang FE
+**sudah** buat, jadi path yang tidak dipanggil siapa pun tak terlihat olehnya.
 
-**Diverifikasi secara NEGATIF, bukan diasumsikan:** `page.tsx` dikembalikan ke
-versi A-13b, dan test-nya merah sambil menyebut ketiganya per nama —
-`saveStrategiAssumptions, saveStrategiKetergantungan, saveStrategiTargets`.
-
-Kenapa `route-parity` tidak bisa menangkapnya: ia berangkat dari panggilan yang
-FE **sudah** buat. Path yang tidak dipanggil siapa pun tidak terlihat olehnya —
-sementara bagi pengguna itu justru fatal.
-
-⚠️ **Kalau ia merah, jangan hapus barisnya.** Merah berarti salah satu dari dua:
-gerbang baru tanpa pintu (⇒ field-nya tidak bisa dijawab, itu bug-nya), atau
-pintu tanpa pemanggil (⇒ pasang form-nya). Menghapus baris untuk menghijaukan
-akan membuat ulang lubang yang persis ini dibangun untuk menutup.
+⚠️ **Kalau merah, jangan hapus barisnya.** Merah = gerbang baru tanpa pintu
+(⇒ field tidak bisa dijawab) atau pintu tanpa pemanggil (⇒ pasang form-nya).
 
 ### 2.2 `apps/api/src/lib/wire.strategi-sectiond.test.ts`
 
-**`body-parity` hanya memeriksa kunci TOP-LEVEL.** Ketiga body A-13c adalah satu
-kunci membungkus ARRAY struct (`{ targets: [...] }`), jadi body-parity
-membuktikan tepat satu hal: kata `targets` muncul di kedua sisi. Setiap field
-yang benar-benar membawa jawaban — `month_index`, `nilai_floor`,
-`cara_verifikasi`, `target_terkait`, `konsekuensi` — ada satu lapis di bawah,
-tempat tidak ada yang melihat.
-
-Itu lebih berbahaya di sini daripada di body datar: `*FromWire` membaca kunci
-yang hilang lewat `str()` / `Number(x ?? 0)`, jadi kunci salah eja **tidak**
-melempar dan **tidak** tiba sebagai `undefined` — ia tiba sebagai `''` atau `0`,
-yaitu permintaan lain yang tampak sah. `month_index` yang terbaca `0` gagal di
-pemeriksaan rentang domain dengan `[data tidak lengkap …]`: pesan yang menyebut
-masalah yang salah dan mengirim AM memeriksa kotak yang sudah benar mereka isi.
+`body-parity` hanya memeriksa kunci **top-level**. Ketiga body A-13c adalah satu
+kunci membungkus ARRAY struct, jadi setiap field yang membawa jawaban
+(`month_index`, `cara_verifikasi`, `target_terkait`, `konsekuensi`) ada satu
+lapis di bawah, tempat tidak ada yang melihat. Berbahaya di sini karena
+`*FromWire` membaca kunci hilang lewat `str()` / `Number(x ?? 0)`: kunci salah
+eja tiba sebagai `''` atau `0`, yaitu **permintaan lain yang tampak sah**.
 
 ### 2.3 `web-internal/src/lib/strategi-target.ts` + test
 
-Logika yang membawa aturan dipisah dari JSX (pola `strategi-sections.ts` /
-`nav.ts`), 26 test. Yang dipakukan: format kunci target
-`metric:channel:monthIndex` sebagai string harfiah (kalau ia melenceng dari
-`targetKey` di `packages/domain`, **setiap** pemetaan D-9 ditolak dan tidak ada
-hal lain yang gagal lebih dulu), perhitungan cakupan Rule 8, dan perlakuan sel
-separuh-terisi.
+Logika yang membawa aturan dipisah dari JSX (pola `strategi-sections.ts`), 30
+test. Memaku format kunci target `metric:channel:monthIndex` ke string harfiah,
+perhitungan cakupan Rule 8, cermin gerbang D-4, dan perlakuan sel separuh-terisi.
 
-### 2.4 Perbaikan kecil dengan akibat besar: `sectionOf('Rule 8')`
+Ditambah perbaikan kecil berakibat besar: `sectionOf('Rule 8')` dulu jatuh ke
+`lain`, tempat halaman menulis *"tidak dikenali seksinya — laporkan ke tim
+sistem"* untuk kekurangan yang diperbaiki dengan **mencentang satu checkbox**.
 
-Dulu jatuh ke `lain`, tempat halaman menulis *"tidak dikenali seksinya — laporkan
-ke tim sistem"*. Untuk kekurangan yang diperbaiki dengan **mencentang satu
-checkbox dua kartu di atasnya.** Sekarang dipetakan ke D lewat
-`KODE_SECTION_OVERRIDE` — daftar untuk kode yang server memang keluarkan tanpa
-field ID, **bukan** tempat menambal kode yang seharusnya punya satu (`Z-9` tetap
-ke `lain`, sengaja).
+## 3. Bukti "gerbang bisa dilewati" — dan kenapa bentuknya begini
 
-## 3. Bukti "selesai" — dan kenapa bentuknya begini
-
-Backlog menulis: *"Selesai = `submitStrategi` menjawab 200 atas fixture Alpha
-Digital, bukan tiga form terpasang"*.
-
-Yang dijalankan: fixture Alpha Digital (`seedSubmittable`), lalu Section D dan
-E-12 dibangun ulang lewat **fungsi transformasi FE yang sungguhan** —
-`gmvGridOf` → `gmvCellsToBody` → `assumptionsToBody` → `pruneTargetTerkait` —
-diimpor langsung dari `web-internal/src/lib/strategi-target.ts` ke dalam harness
-domain. Termasuk dua kasus yang justru jadi intinya:
-
-- satu sel sengaja diisi separuh ⇒ tidak dikirim, dan `checkCompleteness` tetap
-  menjawab `[]` (gerbang D-2 adalah "≥1 target GMV per channel", bukan per bulan);
-- satu kunci D-9 basi (`gmv:Lazada:99`) ⇒ dipangkas, karena tanpa itu **seluruh**
-  panggilan asumsi ditolak.
+Fixture Alpha Digital, lalu Section D dan E-12 dibangun ulang lewat **fungsi
+transformasi FE yang sungguhan** (`gmvGridOf` → `gmvCellsToBody` →
+`assumptionsToBody` → `pruneTargetTerkait`), diimpor langsung dari
+`web-internal/src/lib/strategi-target.ts` ke harness domain. Termasuk dua kasus
+yang jadi intinya: satu sel sengaja separuh terisi, dan satu kunci D-9 basi.
 
 Hasil: `checkCompleteness` → `[]`, `submitStrategi` → **`Diajukan`**.
 
-**Test itu TIDAK di-commit, dan itu disengaja.** Ia mengimpor `web-internal` dari
-`packages/domain`, yang membalik arah ketergantungan — paket domain tidak boleh
-tahu frontend ada. Sebagai verifikasi sekali jalan ia benar; sebagai berkas
-permanen ia adalah aturan arsitektur yang dilanggar. Yang di-commit adalah tiga
-guard di §2, yang menjaga hal yang sama dari sisi yang benar.
+**Test itu TIDAK di-commit, dan itu disengaja** — ia mengimpor `web-internal` dari
+`packages/domain`, membalik arah ketergantungan. Sebagai verifikasi sekali jalan
+ia benar; sebagai berkas permanen ia aturan arsitektur yang dilanggar. Yang
+di-commit adalah tiga guard di §2, yang menjaga hal yang sama dari sisi benar.
 
-Kalau Anda ingin menjalankannya lagi, bentuknya ada di riwayat sesi ini: tempel
-blok `describeDb` ke ekor `packages/domain/src/strategi.test.ts`, jalankan
-`-t "A-13c"`, lalu `git checkout` berkasnya.
+Untuk mengulanginya: tempel blok `describeDb` ke ekor
+`packages/domain/src/strategi.test.ts`, jalankan `-t "A-13c"`, lalu
+`git checkout` berkasnya.
 
-## 4. 🟡 X-15 — D-4 wajib di atas kertas, opsional di mesin
+## 4. 🔴 TUGAS BERIKUTNYA
 
-§4 menandai D-4 (target metrik pendukung per channel) `W`, sama seperti D-2, D-5,
-D-6, D-8 — yang semuanya punya baris di gerbang submit. **D-4 tidak punya**, dan
-sudah begitu sejak A-08. Jadi hari ini sebuah Strategi bisa diajukan **dan
-disetujui** tanpa satu pun target metrik pendukung.
+### 4.1 A-10 bagian 2 — TIDAK diblokir apa pun, kerjakan ini dulu
 
-Yang dilakukan sesi ini: **editornya dibangun** (sebelumnya nol input di mana pun,
-jadi field `W` ini tidak bisa dijawab sama sekali), **gerbangnya tidak disentuh**.
+Sisa A-10 setelah peta konstantanya mendarat:
 
-Kenapa tidak diputus sendiri: menambah gerbang mengubah apa yang membuat sebuah
-Strategi sah. Setiap Strategi yang lolos hari ini berhenti lolos, `seedSubmittable`
-dan sepuluh test yang bersandar padanya jadi merah, dan aturan rumah melarang
-memilih diam-diam saat PRD dan kode berselisih.
+1. **Migrasi** `STRG_FIELD_VISIBILITY` (`strategi_id`, `field_id`, `visibilitas`,
+   `diubah_oleh`, `diubah_pada`) — tabel **81 → 82**, dan ingat gerbang hitungan
+   tabel ada di **DUA** berkas: `.github/workflows/ci.yml` **dan**
+   `scripts/db-rebuild.sh`. Menaikkan satu saja = seluruh test hijau sementara CI
+   merah (kesalahan yang sudah terjadi sekali, lihat komentar di ci.yml).
+2. **CHECK DB yang mencerminkan set hard-internal.** §7 menyebutnya invariant
+   beku: predikat TS dan CHECK tidak boleh menyimpang. Pola yang sudah ada dan
+   harus diikuti: `ck_strategi_leading_indicator` (keanggotaan set tertutup lewat
+   `<@`), plus test SQL yang membandingkan **isi** CHECK dengan konstanta TS —
+   `A-09b closed sets do not drift` di `strategi.test.ts` adalah contohnya.
+3. **Endpoint toggle** + audit (Rule 16 menuntut toggle-nya audit-logged), dengan
+   penolakan hard-internal di domain **dan** di CHECK.
+4. Seed overlay saat `createStrategi` dari `defaultVisibility`.
 
-Detail dua bacaan yang sah ada di `docs/DECISIONS.md` → Open → **X-15**. Satu
-catatan yang mempersempit pilihan dan layak dibaca sebelum menjawab: D-6 memakai
-**kosakata yang sama** dan dibatasi maks 5 dengan alasan eksplisit *"kalau
-semuanya dipantau, tidak ada yang dipantau"* — logika yang sama menentang
-mewajibkan sepuluh metrik D-4.
+### 4.2 A-11 (`/s/{token}`) — DIBLOKIR X-16, jangan mulai
 
-## 5. Yang masih belum punya editor (dan itu disengaja)
+Halaman klien tidak boleh terbit sebelum keenam tier X-16 benar: di situlah
+keputusannya jadi terlihat oleh klien, dan dokumen yang sudah dibaca tidak bisa
+di-*un-publish*.
+
+## 5. 🟡 X-16 — keputusan yang masih menunggu pemilik
+
+§4.1 membantah dirinya sendiri: baris ketiga berbunyi *"everything else"* lalu
+**mendaftar** apa yang dimaksud, dan enam field ID tidak ada di daftar mana pun.
+
+| Field | Isi | Nilai sementara | Rekomendasi |
+|---|---|---|---|
+| **A-15** | akses & hak per channel | `default_internal` | shareable — argumen sama dengan C-7 yang PRD sudah tetapkan shareable |
+| **A-16** | blocker akses + target tanggal | `default_internal` | shareable — yang harus memberi akses adalah klien |
+| **I-1** | ringkasan turunan ke kerangka Plan | `default_internal` | shareable |
+| **J-1** | versi, status, tanggal submit, AM | `default_internal` | shareable — ini identitas dokumennya |
+| **I-4** | catatan per divisi eksekusi | **`hard_internal`** | tetap hard-internal — lihat bawah |
+| **J-4** | auto-diff vs versi sebelumnya | `default_internal` | tetap internal + filter wajib — lihat bawah |
+
+**I-4** = *"hal yang mudah salah dipahami"* untuk divisi kita sendiri. Contoh
+realistis: *"Divisi Ads: klien ini tidak mau diskon di bawah 15%, tim sering lupa
+dan pasang voucher 20% — cek dua kali."* Dibaca klien, itu daftar kesalahan yang
+tim kita berulang di akun mereka.
+
+⚠️ **J-4 membawa bahaya di luar tier-nya sendiri.** Ia auto-diff atas **seluruh**
+rekaman, jadi J-4 yang shareable merender perubahan pada field yang sendirinya
+hard-internal — misalnya `D-7 Sanggahan Target: kosong → "target Rp 460jt tidak
+realistis"`. Bocor lewat pintu belakang sementara **setiap pemeriksaan per-field
+tetap hijau**, karena yang dirender adalah J-4, bukan D-7. **Tier apa pun yang
+J-4 dapat, generator diff wajib memfilter barisnya sendiri.** Itu tidak tersirat
+dari tabel tier dan tidak boleh dianggap otomatis.
+
+## 6. Yang masih belum punya editor (dan itu disengaja)
 
 | Field | Keadaan | Catatan |
 |---|---|---|
-| **E-3…E-10** | ringkasan baca saja | Pilar strategi per jenis aktivitas — struct kaya, ruang lingkupnya sendiri. **Tidak digerbangi submit**, jadi ia tidak memblokir apa pun hari ini |
-| **D-7 Sanggahan** | baca saja | `raiseStrategiSanggahan` masih nol pemanggil. `O` (opsional), jadi bukan gerbang — tapi ia satu-satunya jalur Rule 19 dan AM belum bisa mengajukannya |
-| **flip D-8 `Gugur`** | belum ada kontrol | `setStrategiAssumptionStatus` nol pemanggil. **Sengaja tidak di form ini**: ia bisa dijangkau saat `Aktif`, satu-satunya tulis Section D yang bukan Draft-only, karena asumsi gugur saat EKSEKUSI. Rumahnya bukan form draft |
+| **E-3…E-10** | ringkasan baca saja | Pilar strategi per jenis aktivitas. **Tidak digerbangi submit**, jadi tidak memblokir apa pun |
+| **D-7 Sanggahan** | baca saja | `raiseStrategiSanggahan` nol pemanggil. `O`, jadi bukan gerbang — tapi ia satu-satunya jalur Rule 19 |
+| **flip D-8 `Gugur`** | belum ada kontrol | `setStrategiAssumptionStatus` nol pemanggil. **Sengaja tidak di form ini**: ia bisa dijangkau saat `Aktif`, satu-satunya tulis Section D yang bukan Draft-only |
 | **A-12 revisi** | belum ada kontrol | `openStrategiRevision` nol pemanggil |
 
-Ketiga yang terakhir **lolos `gate-reachability`** karena memang bukan syarat
-submit — guard itu menjawab "bisakah Strategi diajukan", bukan "apakah semua
-fitur terpasang". Jangan baca hijaunya sebagai yang kedua.
+Ketiganya **lolos `gate-reachability`** karena memang bukan syarat submit — guard
+itu menjawab *"bisakah Strategi diajukan"*, bukan *"apakah semua fitur
+terpasang"*. Jangan baca hijaunya sebagai yang kedua.
 
-## 6. Tugas berikutnya
+## 7. Perintah pertama di chat baru
 
-**A-10 / A-11 / A-12** sekarang tidak lagi terhalang: prasyaratnya adalah
-"ada Strategi yang bisa mencapai `Diajukan` dari UI", dan itu sudah benar.
-
-Sebelum mulai apa pun di M6A, jalankan dulu:
-
-```
+```bash
 npx vitest run src/lib/gate-reachability.test.ts --root apps/api
 ```
 
-Kalau ia merah, form-nya rusak untuk pengguna sekarang juga, dan itu didahulukan
+Kalau merah, form-nya rusak untuk pengguna **sekarang juga**, dan itu didahulukan
 di atas tiket apa pun yang sedang Anda pegang.

@@ -29,6 +29,14 @@
  * rule. What the form does do is SHOW the shortfall next to the cell, so the AM
  * meets it here rather than as a rejected save.
  *
+ * ## Two server rules are mirrored here, and that is deliberate
+ *
+ * D-4 (X-15, pemilik 2026-08-09) and Rule 8 both report per channel / per target
+ * and would otherwise reach the AM as one opaque line each. The mirrors live in
+ * `lib/strategi-target.ts` with tests pinning them to the server's own
+ * computation — the only place in this form where a second copy of a server rule
+ * earns its keep, because the alternative is a gap the AM cannot locate.
+ *
  * ## Rule 8 is mirrored here, and that is also deliberate
  *
  * "Every target carries an assumption" is checked by `checkCompleteness` at
@@ -44,6 +52,7 @@ import RepeatList from './RepeatList';
 import { LEADING_INDICATOR_MAX, METRIC_LABELS } from '@/lib/strategi';
 import type { LeadingIndicator, StrategiDetail } from '@/lib/strategi';
 import {
+  channelsMissingSupport,
   gmvGridOf,
   gmvCellsToBody,
   offerableTargetKeys,
@@ -146,6 +155,10 @@ export default function SectionD({
     [targets.gmv, targets.assumptions],
   );
   const incomplete = useMemo(() => gmvCellsToBody(targets.gmv).incomplete, [targets.gmv]);
+  const kurangPendukung = useMemo(
+    () => channelsMissingSupport(detail.channels, targets.pendukung),
+    [detail.channels, targets.pendukung],
+  );
 
   const setCell = (channel: string, month: number, patch: Partial<GmvCell>) => {
     onTargets({
@@ -319,9 +332,21 @@ export default function SectionD({
       </div>
 
       {/* D-4 --------------------------------------------------------------- */}
+      {/* Gated since X-15 (pemilik, 2026-08-09) at MINIMAL SATU baris per
+          channel — bukan matriks penuh. Ditampilkan per channel karena itulah
+          bentuk kode servernya (`D-4/{channel}`); `min` pada RepeatList hanya
+          bisa menghitung seluruh daftar dan akan menghijau saat satu channel
+          punya dua baris sementara channel lain punya nol. */}
+      {kurangPendukung.length > 0 && (
+        <div className="alert alertInfo" style={{ fontSize: 12 }}>
+          <strong>D-4</strong> — {kurangPendukung.length} channel belum punya satu pun target
+          metrik pendukung: {kurangPendukung.join(', ')}. Cukup satu baris per channel; itu yang
+          membuat &ldquo;GMV meleset&rdquo; nanti bisa ditelusuri ke angka, bukan ke opini.
+        </div>
+      )}
       <RepeatList<SupportTargetRow>
         label="D-4 · Target metrik pendukung"
-        hint="Per channel, per bulan: pengunjung, CR, AOV, ROAS minimum, ACOS maksimum, SKU winner baru, affiliate aktif, jam live, jumlah video. Angka saja — floor hanya berlaku untuk GMV."
+        hint="Minimal satu per channel (wajib). Pilih metrik yang paling menentukan untuk klien ini — pengunjung, CR, AOV, ROAS minimum, ACOS maksimum, SKU winner baru, affiliate aktif, jam live, jumlah video. Angka saja; floor hanya berlaku untuk GMV."
         rows={targets.pendukung}
         onChange={(rows) => onTargets({ pendukung: rows })}
         blank={() => ({

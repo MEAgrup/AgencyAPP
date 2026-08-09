@@ -226,6 +226,29 @@ export function uncoveredTargetKeys(
 }
 
 /**
+ * D-4 gate (X-15) — the contracted channels with no supporting-metric target.
+ *
+ * Mirrors `checkCompleteness`: the owner's decision gates **one row per
+ * channel**, not the full matrix, so this counts channels rather than cells. Same
+ * reasoning as `uncoveredTargetKeys`: the server reports `D-4/{channel}` and the
+ * form should say which channel BEFORE the AM presses Ajukan.
+ *
+ * A row whose metric is `gmv` does not count — that is D-2, the other question
+ * over the same table, and counting it would make the gate unfailable.
+ */
+export function channelsMissingSupport(
+  channels: readonly { channel: string }[],
+  rows: readonly SupportTargetRow[],
+): string[] {
+  const filled = new Set(
+    supportRowsToBody(rows)
+      .filter((r) => r.metric !== 'gmv')
+      .map((r) => r.channel),
+  );
+  return channels.map((c) => c.channel).filter((c) => !filled.has(c));
+}
+
+/**
  * Drops D-9 references to targets that no longer exist, and de-duplicates.
  *
  * Necessary because the two halves of Section D move independently: the AM ties

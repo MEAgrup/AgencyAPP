@@ -414,6 +414,17 @@ export const MSG_BASELINE_INCOMPLETE =
   '[baseline bulanan belum lengkap untuk seluruh periode yang dideklarasikan]';
 /** D-2 — no GMV stretch target for a contracted channel. */
 export const MSG_TARGET_MISSING = '[target GMV per bulan wajib diisi untuk setiap channel]';
+/**
+ * D-4 — no supporting-metric target at all for a contracted channel (X-15).
+ *
+ * Says "minimal satu" out loud because that IS the rule: the owner's decision
+ * gates the QUESTION, not the full matrix. A message reading "target metrik
+ * pendukung wajib diisi" would leave the AM guessing whether nine metrics × n
+ * months are expected, and guessing upward is how a required field turns into a
+ * column of copied numbers.
+ */
+export const MSG_TARGET_PENDUKUNG_MISSING =
+  '[minimal satu target metrik pendukung wajib diisi untuk setiap channel]';
 /** D-8 — at least three assumptions. */
 export const MSG_ASSUMPTION_MIN = '[minimal tiga asumsi target wajib diisi]';
 /** Rule 8 — every monthly stretch figure carries an assumption. */
@@ -4654,12 +4665,40 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
     }
   }
 
-  const targets = await sql<{ channel: string; month_index: number; metric: string }[]>`
-    select channel, month_index, metric from strategi_target
-     where strategi_id = ${id} and metric = 'gmv'`;
+  // Both D-2 and D-4 are read off this one query — D-2 is the `gmv` rows, D-4 is
+  // everything else. Two queries would let the two gates disagree about what is
+  // stored the moment one of them grows a filter the other does not.
+  const allTargets = await sql<{ channel: string; month_index: number; metric: string }[]>`
+    select channel, month_index, metric from strategi_target where strategi_id = ${id}`;
+  const targets = allTargets.filter((t) => t.metric === 'gmv');
   for (const c of channels) {
     if (!targets.some((t) => t.channel === c.channel)) {
       out.push({ kode: `D-2/${c.channel}`, pesan: MSG_TARGET_MISSING });
+    }
+  }
+
+  // D-4 (X-15, owner decision 2026-08-09) — MINIMAL ONE supporting-metric target
+  // per channel, deliberately not the full matrix.
+  //
+  // §4 marks D-4 `W`, but until this decision nothing checked it, so a Strategi
+  // could be submitted AND approved with no supporting metric at all — and then
+  // "GMV missed by 30%" had nothing to be tested against, which is the exact
+  // failure M6A exists to prevent (§2 problem (c): the post-mortem becomes
+  // opinion).
+  //
+  // Why one and not the matrix: nine metrics × n months × n channels is 108
+  // boxes on a six-month two-channel contract, and a required field that costs
+  // 108 boxes is filled by copying one number down a column — the vanity-metric
+  // shape §9 guards against. The PRD argues the same way about the SAME
+  // vocabulary one field earlier: D-6 caps leading indicators at five because
+  // "kalau semuanya dipantau, tidak ada yang dipantau".
+  //
+  // Per CHANNEL, not per Strategi: a second channel with no supporting metric is
+  // a channel nobody stated a hypothesis about, and the kode carries the channel
+  // so the form can point at it.
+  for (const c of channels) {
+    if (!allTargets.some((t) => t.channel === c.channel && t.metric !== 'gmv')) {
+      out.push({ kode: `D-4/${c.channel}`, pesan: MSG_TARGET_PENDUKUNG_MISSING });
     }
   }
 

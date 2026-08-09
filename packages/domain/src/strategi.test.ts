@@ -32,6 +32,7 @@ import {
   MSG_ASSUMPTION_NOT_FOUND,
   MSG_ASSUMPTION_STATUS_INVALID,
   MSG_ASSUMPTION_TARGET_UNKNOWN,
+  MSG_TARGET_PENDUKUNG_MISSING,
   MSG_BASELINE_GROUP_INCOMPLETE,
   MSG_CHANNEL_NOT_FOUND,
   MSG_CYCLE_LOCKED,
@@ -495,6 +496,10 @@ async function seedSubmittable(): Promise<{ serviceId: string; strategiId: strin
     })),
   );
 
+  // D-2 (the GMV row) plus ONE D-4 supporting metric, which is what X-15 gates:
+  // minimum one per channel, not the full matrix. It belongs to THIS fixture for
+  // the same reason D-5/D-6 and E-1/E-13/H-3 do — without it nothing in this
+  // file can reach `Diajukan` any more.
   await saveTargets(sql, am(), s.id, [
     {
       channel: 'Shopee',
@@ -503,6 +508,7 @@ async function seedSubmittable(): Promise<{ serviceId: string; strategiId: strin
       nilaiFloor: '400000000.00',
       nilaiStretch: '460000000.00',
     },
+    { channel: 'Shopee', monthIndex: 1, metric: 'cr', nilaiFloor: null, nilaiStretch: '2.80' },
   ]);
 
   await saveAssumptions(
@@ -845,6 +851,79 @@ describeDb('Section D — Rules 7 and 8', () => {
         },
       ]),
     ).rejects.toThrow(MSG_ASSUMPTION_TARGET_UNKNOWN);
+  });
+});
+
+/**
+ * D-4 gate — owner decision X-15 (2026-08-09).
+ *
+ * §4 marks D-4 `W`, and until this decision nothing checked it: a Strategi could
+ * be submitted AND approved with no supporting-metric target at all, which left
+ * "GMV missed by 30%" with nothing to be tested against.
+ *
+ * The gate is deliberately MINIMAL ONE PER CHANNEL, not the full matrix. These
+ * tests pin both halves of that: it fires when a channel has none, and it stays
+ * silent on a single row — because a gate that quietly grew into "every metric,
+ * every month" would be the vanity-metric shape §9 guards against, and nothing
+ * else would notice.
+ */
+describeDb('Section D-4 gate (X-15)', () => {
+  it('reports a channel with no supporting metric, and names the channel', async () => {
+    const { strategiId } = await seedSubmittable();
+    // Rewrite the matrix with the GMV row only — the same call the form makes
+    // when the AM has filled D-2 and skipped D-4 entirely.
+    await saveTargets(sql, am(), strategiId, [
+      {
+        channel: 'Shopee',
+        monthIndex: 1,
+        metric: 'gmv',
+        nilaiFloor: '400000000.00',
+        nilaiStretch: '460000000.00',
+      },
+    ]);
+    const kurang = await checkCompleteness(sql, strategiId);
+    expect(kurang).toContainEqual({
+      kode: 'D-4/Shopee',
+      pesan: MSG_TARGET_PENDUKUNG_MISSING,
+    });
+    await expect(submitStrategi(sql, am(), strategiId)).rejects.toThrow(ValidationError);
+  });
+
+  it('is satisfied by ONE row — not by one per month, and not by one per metric', async () => {
+    // The whole point of the owner's decision. If this ever needs a second row to
+    // pass, the gate has grown past what was approved.
+    const { strategiId } = await seedSubmittable();
+    expect(await checkCompleteness(sql, strategiId)).toEqual([]);
+    const pendukung = (await getStrategi(sql, am(), strategiId)).targets.filter(
+      (t) => t.metric !== 'gmv',
+    );
+    expect(pendukung).toHaveLength(1);
+  });
+
+  it('does not accept a GMV row as its own supporting metric', async () => {
+    // D-2 and D-4 are different questions over the same table. Counting the GMV
+    // row would make the gate unfailable and therefore pointless.
+    const { strategiId } = await seedSubmittable();
+    await saveTargets(sql, am(), strategiId, [
+      {
+        channel: 'Shopee',
+        monthIndex: 1,
+        metric: 'gmv',
+        nilaiFloor: '400000000.00',
+        nilaiStretch: '460000000.00',
+      },
+      {
+        channel: 'Shopee',
+        monthIndex: 2,
+        metric: 'gmv',
+        nilaiFloor: '400000000.00',
+        nilaiStretch: '470000000.00',
+      },
+    ]);
+    expect(await checkCompleteness(sql, strategiId)).toContainEqual({
+      kode: 'D-4/Shopee',
+      pesan: MSG_TARGET_PENDUKUNG_MISSING,
+    });
   });
 });
 
@@ -1646,7 +1725,12 @@ describeDb('Rule 13 — a revision is a new row, and n stays Aktif', () => {
     const copied = await getStrategi(sql, am(), v2.id);
     expect(copied.channels).toHaveLength(1);
     expect(copied.channels[0].baseline).toHaveLength(3);
-    expect(copied.targets).toHaveLength(1);
+    // BOTH target rows: the D-2 GMV figure and the one D-4 supporting metric.
+    // Asserted by metric rather than by count, because the count is what went
+    // stale when X-15 added D-4 to the fixture — and because the thing that
+    // matters is that a revision does not open with a D-4 gap on day one, which
+    // a copy that carried only `gmv` would produce.
+    expect(copied.targets.map((t) => t.metric).sort()).toEqual(['cr', 'gmv']);
     expect(copied.assumptions.map((a) => a.kode)).toEqual(['A1', 'A2', 'A3']);
     expect(copied.risks).toHaveLength(3);
     // Section C is copied too: the AM revises strategy, not the situation.

@@ -115,6 +115,10 @@ const DOORS: Readonly<Record<string, string>> = {
 
   // Section D (A-13c). These three were the hole.
   'D-2': 'saveStrategiTargets',
+  // D-4 shares the endpoint with D-2 — one `strategi_target` table, one
+  // replace-set. Gated since X-15 (owner, 2026-08-09) at MINIMAL ONE row per
+  // channel; the editor is the "target metrik pendukung" list in SectionD.
+  'D-4': 'saveStrategiTargets',
   'D-5': 'saveStrategiKpi',
   'D-6': 'saveStrategiKpi',
   'D-8': 'saveStrategiAssumptions',
