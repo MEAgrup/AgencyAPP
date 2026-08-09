@@ -21,9 +21,14 @@ Hitungan tiket, bukan effort — A-13 sendirian lebih besar dari A-05…A-07 dig
 | Bagian | Selesai | Total | % |
 |---|---|---|---|
 | **M6A Strategi** | A-00…A-07 = **8** | 14 | **57%** |
-| **M6B Plan** | B-00 = **1** | 12 | **8%** |
+| **M6B Plan** | B-00, **B-01** = **2** | 12 | **17%** |
 | M6C Plan Gate | C-01…C-07 = 7 | 8 (B-10 menutup Rule 6) | 88% |
-| **M6A+M6B gabungan** | **9** | 26 | **35%** |
+| **M6A+M6B gabungan** | **10** | 26 | **38%** |
+
+> **Delta 2026-08-10:** baris M6A di atas adalah snapshot 2026-08-07 dan sudah
+> basi — A-08…A-13d mendarat setelahnya (lihat `HANDOFF_M6ABC_SESI13.md`). Yang
+> berubah tabel ini hari ini adalah **M6B: B-01 selesai** (bentuk `PLAN` + 6 anak
+> + mesin #16). B-02…B-11 tersisa.
 
 Yang membuat angka M6A menyesatkan kalau dibaca sendirian:
 
@@ -157,9 +162,9 @@ diimplementasi sebelum ini mendarat, jadi ia masuk batch migrasi yang SAMA denga
 | # | Ticket | Catatan implementasi |
 |---|---|---|
 | ~~B-00~~ | ~~Entitas `CONTRACT` (O57)~~ | ✅ **SELESAI 2026-08-07** — migrasi `20260807120000`, domain `packages/domain/src/contract.ts`, 4 route baru. Prefix `CTR` (registry 29→30), tabel `contracts` (tabel 74→75), `services.contract_id` nullable, `strategi.contract_id` NOT NULL menggantikan `service_id`, tiga indeks unik jadi per-kontrak, RLS `private.jwt_is_am_of_contract` di dua tempat. Jendela kontrak PINDAH (tidak disalin) — lihat DECISIONS 2026-08-07 "O57 DIEKSEKUSI". `POST /services/{id}/strategi` tidak berubah: ia mencetak kontrak 1:1 kalau Service belum punya. **B-01 tidak lagi terblokir** |
-| B-01 | `PLAN` + 6 child tables | `PLAN_TARGET` (menyimpan `nilai_strategi` immutable **dan** `nilai_dipakai`), `PLAN_ROW`, `PLAN_ROW_WEEK`, `PLAN_ACTUAL`, `PLAN_REVIEW`, `PLAN_FLAG`. `lingkup ∈ kontrak/klien` + `strategi_id` nullable (Plan Satuan) + `status_dormansi` |
+| ~~B-01~~ | ~~`PLAN` + 6 child tables~~ | ✅ **SELESAI 2026-08-10** — migrasi `20260810000000_m6b_plan.sql` (tabel **82 → 89**, mesin **16 → 17**), domain `packages/domain/src/plan.ts` (reads + shape; **tanpa** `createPlan` — Rule 1, generasi = B-02), 14 test `plan` hijau. `plan_target` PK (plan,channel,metric) dengan `nilai_strategi` **immutable lewat trigger** + `nilai_dipakai`; `plan_row` unit kerja P-C dengan `ck_plan_row_asal_tunggal` (tepat satu asal: pilar / service / di-luar+alasan); `plan_row_week`/`plan_actual`/`plan_review`/`plan_flag`. `lingkup ∈ kontrak/klien` + `contract_id`/`strategi_id` nullable, dipasangkan `ck_plan_lingkup_shape`. Mesin #16 di STATE_MACHINES §6d. **`status_dormansi` + mesin #17 DITUNDA ke B-10** (status tanpa mesin melanggar aturan rumah #2 — DECISIONS 2026-08-10). Empat anak masuk ledger O48. |
 | B-02 | Generasi periode | Anniversary-month dari `tanggal_mulai_siklus`. **Simpan day-of-month yang DIMAKSUD terpisah** dari tanggal terhitung, supaya start tanggal 31 tidak hanyut permanen ke 28 setelah lewat Februari |
-| B-03 | Mesin status #16 | Periode 1 butuh persetujuan SPV; 2…n auto-aktif 00:00 WIB; `Menunggu Persetujuan` hanya untuk `Turun >10%` |
+| B-03 | Gerbang transisi mesin #16 (edge sudah didaftar B-01) | GERBANG domain di atas mesin yang sudah ada: periode 1 butuh persetujuan SPV; 2…n auto-aktif 00:00 WIB (job, B-09); `Menunggu Persetujuan` hanya untuk `Turun >10%`. `sm_edges` sudah ada (B-01) — B-03 memutuskan SIAPA & KAPAN, plus wrapper domain `transitionPlan` |
 | B-04 | Penyesuaian target asimetris | §3: naik bebas · turun ≤10% wajib alasan + notif · turun >10% butuh SPV. **`defisit_terbawa` computed, immutable, tidak pernah diketik** — dan tidak pernah dihapus, hanya dibawa |
 | B-05 | Distribusi mingguan turunan | Trigger DB: Σ kuota mingguan = `PLAN_ROW.kuota`, tolak dengan row-ID + delta (bukan error generik). Minggu terakhir menyerap sisa 8–10 hari, bukan minggu stub |
 | B-06 | Realisasi hybrid | GMV manual (+ lampiran + tanggal ambil, jendela 5 hari); metrik lain auto & `UPDATE`-blocked untuk role AM di level DB **dan** RLS |

@@ -93,6 +93,7 @@ export * as plangate from './plangate';
 export * as contract from './contract';
 export * as vendor from './vendor';
 export * as strategi from './strategi';
+export * as plan from './plan';
 export * as task from './task';
 export * as creative from './creative';
 export * as ads from './ads';
