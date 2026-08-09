@@ -2,35 +2,20 @@ import { describe, expect, it } from 'vitest';
 import {
   STRATEGI_DEFAULT_INTERNAL,
   STRATEGI_FIELD_IDS,
+  STRATEGI_FIELD_ROSTER,
   STRATEGI_HARD_INTERNAL,
+  STRATEGI_SECTION_B_FIELD_IDS as SECTION_B,
+  STRATEGI_SECTION_G_FIELD_IDS as SECTION_G,
   STRATEGI_TIER_UNDECIDED,
   VISIBILITY_INTERNAL,
   VISIBILITY_SHAREABLE,
   canToggleShareable,
   defaultVisibility,
+  hardInternalFieldIds,
   isHardInternal,
   shareableFields,
   tierOf,
 } from './visibility';
-
-/**
- * Section B and G field IDs, taken from M6A §4 rather than re-derived, because
- * §4.1 covers them with "all of B" / "all of G" and a rule stated over a section
- * is only safe if the section is actually enumerable.
- */
-const SECTION_B = [
-  'B-0.1', 'B-0.2', 'B-0.3', 'B-0.4', 'B-0.5', 'B-0.6', 'B-0.7', 'B-0.8',
-  'B-1.1', 'B-1.2', 'B-1.3', 'B-1.4', 'B-1.5',
-  'B-2.1', 'B-2.2', 'B-2.3', 'B-2.4',
-  'B-3.1', 'B-3.2', 'B-3.3', 'B-3.4', 'B-3.5', 'B-3.6',
-  'B-4.1', 'B-4.2', 'B-4.3', 'B-4.4', 'B-4.5',
-  'B-5.1', 'B-5.2', 'B-5.3', 'B-5.4', 'B-5.5',
-  'B-6.1', 'B-6.2', 'B-6.3', 'B-6.4', 'B-6.5',
-  'B-7.1', 'B-7.2', 'B-7.3', 'B-7.4',
-  'B-8.1', 'B-8.2', 'B-8.3',
-  'B-9.1', 'B-9.2', 'B-9.3',
-];
-const SECTION_G = ['G-0', 'G-1', 'G-2', 'G-3', 'G-4'];
 
 describe('§4.1 tier map is TOTAL', () => {
   it('gives every §4 field ID a tier — no holes, no fallback', () => {
@@ -38,9 +23,7 @@ describe('§4.1 tier map is TOTAL', () => {
     // and both possible defaults are bugs: shareable publishes an unclassified
     // field to a client, internal makes new fields silently vanish from the
     // client document. See the module note.
-    const untiered = [...STRATEGI_FIELD_IDS, ...SECTION_B, ...SECTION_G].filter(
-      (id) => tierOf(id) === null,
-    );
+    const untiered = STRATEGI_FIELD_ROSTER.filter((id) => tierOf(id) === null);
     expect(untiered, `field IDs with no §4.1 tier: ${untiered.join(', ')}`).toEqual([]);
   });
 
@@ -72,6 +55,17 @@ describe('hard-internal set (FROZEN — §7 says the DB CHECK must match)', () =
       expect(canToggleShareable(id)).toBe(false);
       expect(defaultVisibility(id)).toBe(VISIBILITY_INTERNAL);
     }
+  });
+
+  it('hands the DB CHECK the eight IDs the TS predicate actually refuses', () => {
+    // The list the migration's CHECK is built from and asserted against. It is
+    // §4.1's seven PLUS I-4, which X-16 leaves provisionally hard-internal — and
+    // that eighth member is the whole reason this is computed rather than typed
+    // out again. A CHECK carrying only the §4.1 seven would let a client read
+    // I-4 through a direct write while `isHardInternal('I-4')` still said false.
+    expect(hardInternalFieldIds().sort()).toEqual(
+      ['A-10', 'D-7', 'F-5', 'F-7', 'H-4', 'I-4', 'J-2', 'J-3'].sort(),
+    );
   });
 
   it('is ignored even when the overlay says otherwise', () => {
@@ -147,6 +141,20 @@ describe('⚠️ provisional tiers (X-16 — awaiting owner)', () => {
   });
 });
 
+describe('the seed roster', () => {
+  it('carries every §4 field ID exactly once', () => {
+    // A duplicate is not cosmetic here: the overlay is keyed (strategi_id,
+    // field_id), so a repeated ID makes the seed INSERT fail on the primary key
+    // and takes `createStrategi` down with it.
+    expect(new Set(STRATEGI_FIELD_ROSTER).size).toBe(STRATEGI_FIELD_ROSTER.length);
+    expect(STRATEGI_FIELD_ROSTER).toEqual([...STRATEGI_FIELD_IDS, ...SECTION_B, ...SECTION_G]);
+  });
+
+  it('gives every entry a seedable default', () => {
+    for (const id of STRATEGI_FIELD_ROSTER) expect(defaultVisibility(id)).not.toBeNull();
+  });
+});
+
 describe('shareableFields', () => {
   it('drops unknown IDs rather than passing them through', () => {
     expect(shareableFields(['B-1.1', 'K-9', ''])).toEqual(['B-1.1']);
@@ -159,8 +167,7 @@ describe('shareableFields', () => {
   });
 
   it('answers the whole §4.1 map in one call without leaking a hard-internal field', () => {
-    const all = [...STRATEGI_FIELD_IDS, ...SECTION_B, ...SECTION_G];
-    const out = shareableFields(all);
+    const out = shareableFields(STRATEGI_FIELD_ROSTER);
     for (const id of STRATEGI_HARD_INTERNAL) expect(out).not.toContain(id);
     for (const id of STRATEGI_DEFAULT_INTERNAL) expect(out).not.toContain(id);
     expect(out).toContain('D-8');

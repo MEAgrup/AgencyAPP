@@ -22,7 +22,7 @@
  * depend on run history (the trap HANDOFF_M6ABC_SESI1 §5 warns about).
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { ident, permission } from '@cdps/core';
+import { ident, permission, visibility } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import { ALLOWED_DIVISIONS, ConflictError, ForbiddenError, ValidationError } from './account';
 import {
@@ -110,6 +110,12 @@ import {
   MSG_DISPATCH_DUPLICATE,
   MSG_DISPATCH_URUTAN_DUPLICATE,
   MSG_METRIK_LAPORAN_INVALID,
+  MSG_FIELD_ID_UNKNOWN,
+  MSG_VISIBILITAS_HARD_INTERNAL,
+  MSG_VISIBILITAS_INVALID,
+  MSG_VISIBILITAS_TERKUNCI,
+  setFieldVisibility,
+  shareableFieldIds,
   saveKalender,
   saveTriggerRevisi,
   saveHandoff,
@@ -3001,5 +3007,253 @@ describeDb('A-09b closed sets do not drift', () => {
        where conname = 'ck_strchan_prioritas'`;
     expect(rows).toHaveLength(1);
     for (const p of CHANNEL_PRIORITAS) expect(rows[0].def).toContain(p);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A-10 bagian 2 — the §4.1 visibility overlay (Rule 16)
+// ---------------------------------------------------------------------------
+
+describeDb('A-10 — STRG_FIELD_VISIBILITY is seeded from §4.1', () => {
+  const vis = (id: string) =>
+    sql<{ visibilitas: string; diubah_oleh: string | null; diubah_pada: Date | null }[]>`
+      select visibilitas, diubah_oleh, diubah_pada from strategi_field_visibility
+       where strategi_id = ${id} order by field_id asc`;
+
+  it('writes one row per roster field, at its §4.1 default', async () => {
+    const s = await createStrategi(sql, am(), await seedService(), HEADER);
+    const rows = await sql<{ field_id: string; visibilitas: string }[]>`
+      select field_id, visibilitas from strategi_field_visibility where strategi_id = ${s.id}`;
+    expect(rows).toHaveLength(visibility.STRATEGI_FIELD_ROSTER.length);
+
+    const byField = new Map(rows.map((r) => [r.field_id, r.visibilitas]));
+    // One from each §4.1 row, so a map that collapsed to a single tier fails here.
+    expect(byField.get('A-10')).toBe(visibility.VISIBILITY_INTERNAL); // hard-internal
+    expect(byField.get('A-3')).toBe(visibility.VISIBILITY_INTERNAL); // default internal
+    expect(byField.get('D-8')).toBe(visibility.VISIBILITY_SHAREABLE); // shareable by design
+    expect(byField.get('B-3.3')).toBe(visibility.VISIBILITY_SHAREABLE); // "all of B"
+    expect(byField.get('G-0')).toBe(visibility.VISIBILITY_SHAREABLE); // "all of G"
+  });
+
+  it('leaves diubah_oleh / diubah_pada null until a human touches it', async () => {
+    // The difference the columns exist to record: "our default" vs "the AM
+    // decided this". A seed that stamped itself would erase it.
+    const s = await createStrategi(sql, am(), await seedService(), HEADER);
+    const rows = await vis(s.id);
+    expect(rows.every((r) => r.diubah_oleh === null && r.diubah_pada === null)).toBe(true);
+  });
+
+  it('ships the overlay inside GET /strategi/{id}, tier and lock included', async () => {
+    const s = await createStrategi(sql, am(), await seedService(), HEADER);
+    const detail = await getStrategi(sql, am(), s.id);
+    const byField = new Map(detail.visibilitas.map((v) => [v.fieldId, v]));
+    expect(byField.get('A-10')).toMatchObject({ tier: 'hard_internal', dapatDiubah: false });
+    expect(byField.get('A-3')).toMatchObject({ tier: 'default_internal', dapatDiubah: true });
+    expect(byField.get('B-3.3')).toMatchObject({ tier: 'default_shareable', dapatDiubah: true });
+  });
+});
+
+describeDb('A-10 — the toggle (Rule 16(b))', () => {
+  it('shares a default-internal field and stamps who did it', async () => {
+    const s = await createStrategi(sql, am(), await seedService(), HEADER);
+    const rows = await setFieldVisibility(sql, am(), s.id, 'A-3', visibility.VISIBILITY_SHAREABLE);
+    const a3 = rows.find((r) => r.fieldId === 'A-3');
+    expect(a3).toMatchObject({
+      visibilitas: visibility.VISIBILITY_SHAREABLE,
+      diubahOleh: 'ZZ-AM',
+    });
+    expect(a3?.diubahPada).not.toBeNull();
+    // …and it comes back on the whole overlay, not just the row that moved.
+    expect(rows).toHaveLength(visibility.STRATEGI_FIELD_ROSTER.length);
+  });
+
+  it('writes the before→after pair to the audit log', async () => {
+    // Rule 16(b) names the audit explicitly. The pair is what answers "who
+    // decided the client could see the margin figure", so both halves must
+    // name the field — an entry saying only `Bagikan ke Klien` answers nothing.
+    const s = await createStrategi(sql, am(), await seedService(), HEADER);
+    await setFieldVisibility(sql, am(), s.id, 'A-3', visibility.VISIBILITY_SHAREABLE);
+    const rows = await sql<{ before_json: unknown; after_json: unknown }[]>`
+      select before_json, after_json from audit_log
+       where entity_id = ${s.id} and action = 'set_field_visibility'`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].before_json).toMatchObject({
+      field_id: 'A-3',
+      visibilitas: visibility.VISIBILITY_INTERNAL,
+    });
+    expect(rows[0].after_json).toMatchObject({
+      field_id: 'A-3',
+      visibilitas: visibility.VISIBILITY_SHAREABLE,
+    });
+  });
+
+  it('hides a default-shareable field too — the switch runs both ways', async () => {
+    const s = await createStrategi(sql, am(), await seedService(), HEADER);
+    await setFieldVisibility(sql, am(), s.id, 'B-3.3', visibility.VISIBILITY_INTERNAL);
+    expect(await shareableFieldIds(sql, s.id)).not.toContain('B-3.3');
+  });
+
+  it('refuses a field ID the form does not have, and a value outside the set', async () => {
+    const s = await createStrategi(sql, am(), await seedService(), HEADER);
+    await expect(
+      setFieldVisibility(sql, am(), s.id, 'K-9', visibility.VISIBILITY_SHAREABLE),
+    ).rejects.toThrow(MSG_FIELD_ID_UNKNOWN);
+    await expect(setFieldVisibility(sql, am(), s.id, 'A-3', 'Bagikan')).rejects.toThrow(
+      MSG_VISIBILITAS_INVALID,
+    );
+  });
+
+  it('refuses an AM who does not own the Service', async () => {
+    const s = await createStrategi(sql, am(), await seedService(), HEADER);
+    await expect(
+      setFieldVisibility(sql, otherAm(), s.id, 'A-3', visibility.VISIBILITY_SHAREABLE),
+    ).rejects.toThrow(ForbiddenError);
+  });
+
+  it('is reachable while Aktif — the version the client is actually reading', async () => {
+    // Deliberately NOT Draft-only. Rule 16(c) serves the client view from the
+    // approved active version, so a Draft-only toggle would make "share one more
+    // field with the client" cost a Rule 13 revision: a trigger, a written
+    // reason, a broken assumption, and a version number — for a decision that
+    // changed nothing about the strategy.
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    const rows = await setFieldVisibility(
+      sql,
+      am(),
+      strategiId,
+      'H-1',
+      visibility.VISIBILITY_SHAREABLE,
+    );
+    expect(rows.find((r) => r.fieldId === 'H-1')?.visibilitas).toBe(
+      visibility.VISIBILITY_SHAREABLE,
+    );
+  });
+
+  it('refuses an archived and an expired version — that visibility is history', async () => {
+    // Rule 13: version n is "immutable, still readable". Its overlay is part of
+    // what a client already saw, and editing it rewrites the answer to "what was
+    // shared on the day of the dispute".
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    const v2 = await openRevision(sql, am(), strategiId, {
+      triggerRevisi: ['pencapaian_di_bawah_target'],
+      alasanRevisi: 'target perlu ditinjau ulang',
+      asumsiGugur: ['A1'],
+    });
+    await submitStrategi(sql, am(), v2.id);
+    await approveStrategi(sql, spv(), v2.id);
+    expect((await getStrategi(sql, am(), strategiId)).status).toBe(STRATEGI_DIARSIPKAN);
+    await expect(
+      setFieldVisibility(sql, am(), strategiId, 'A-3', visibility.VISIBILITY_SHAREABLE),
+    ).rejects.toThrow(MSG_VISIBILITAS_TERKUNCI);
+
+    await expireStrategi(sql, am(), v2.id);
+    expect((await getStrategi(sql, am(), v2.id)).status).toBe(STRATEGI_KEDALUWARSA);
+    await expect(
+      setFieldVisibility(sql, am(), v2.id, 'A-3', visibility.VISIBILITY_SHAREABLE),
+    ).rejects.toThrow(MSG_VISIBILITAS_TERKUNCI);
+  });
+});
+
+describeDb('A-10 — Rule 16(a): the hard-internal set has no door at all', () => {
+  it('refuses the toggle in TypeScript, in BOTH directions', async () => {
+    const s = await createStrategi(sql, am(), await seedService(), HEADER);
+    for (const id of visibility.hardInternalFieldIds()) {
+      await expect(
+        setFieldVisibility(sql, am(), s.id, id, visibility.VISIBILITY_SHAREABLE),
+      ).rejects.toThrow(MSG_VISIBILITAS_HARD_INTERNAL);
+      // Accepting `Internal Saja` would be a harmless no-op that nonetheless
+      // writes a visibility DECISION about A-10 into the audit log — and the
+      // next reader would reasonably infer the other direction existed too.
+      await expect(
+        setFieldVisibility(sql, am(), s.id, id, visibility.VISIBILITY_INTERNAL),
+      ).rejects.toThrow(MSG_VISIBILITAS_HARD_INTERNAL);
+    }
+  });
+
+  it('refuses it in the DATABASE too — the wall, not the promise', async () => {
+    // §7 calls this a frozen invariant enforced twice. A TS-only guard lets
+    // exactly this call through, and the service-role connection is what a
+    // migration or a repair script runs as.
+    const s = await createStrategi(sql, am(), await seedService(), HEADER);
+    await expect(
+      sql`update strategi_field_visibility set visibilitas = ${visibility.VISIBILITY_SHAREABLE}
+           where strategi_id = ${s.id} and field_id = 'A-10'`,
+    ).rejects.toThrow(/ck_strfv_hard_internal/);
+    await expect(
+      sql`update strategi_field_visibility set visibilitas = ${visibility.VISIBILITY_SHAREABLE}
+           where strategi_id = ${s.id} and field_id = 'I-4'`,
+    ).rejects.toThrow(/ck_strfv_hard_internal/);
+  });
+
+  it('keeps them out of shareableFieldIds — the filter A-11 will render through', async () => {
+    const s = await createStrategi(sql, am(), await seedService(), HEADER);
+    const ids = await shareableFieldIds(sql, s.id);
+    for (const id of visibility.hardInternalFieldIds()) expect(ids).not.toContain(id);
+    for (const id of visibility.STRATEGI_DEFAULT_INTERNAL) expect(ids).not.toContain(id);
+    expect(ids).toContain('D-8');
+    expect(ids).toContain('B-3.3');
+  });
+});
+
+describeDb('A-10 — the frozen invariant does not drift (§7)', () => {
+  it('gives ck_strfv_hard_internal exactly the IDs the TS predicate refuses', async () => {
+    // Two-directional on purpose. Asserting only "every TS ID appears in the
+    // CHECK" would pass a CHECK that also froze a field TypeScript happily lets
+    // an AM share — the AM would tick the box, get a 200, and the write would
+    // fail at the wall with no BI message anywhere near it.
+    const rows = await sql<{ def: string }[]>`
+      select pg_get_constraintdef(oid) as def from pg_constraint
+       where conname = 'ck_strfv_hard_internal'`;
+    expect(rows).toHaveLength(1);
+    const inCheck = [...new Set(rows[0].def.match(/[A-J]-\d+(?:\.\d+)?/g) ?? [])].sort();
+    expect(inCheck).toEqual(visibility.hardInternalFieldIds().sort());
+  });
+
+  it('gives ck_strfv_visibilitas exactly the two §4 values', async () => {
+    const rows = await sql<{ def: string }[]>`
+      select pg_get_constraintdef(oid) as def from pg_constraint
+       where conname = 'ck_strfv_visibilitas'`;
+    expect(rows).toHaveLength(1);
+    for (const v of visibility.VISIBILITIES) expect(rows[0].def).toContain(v);
+    // A third value would mean the DB accepts a visibility the TS union cannot
+    // name, and `loadFieldVisibility` would cast it through unchallenged.
+    expect(rows[0].def.match(/'[^']+'::/g) ?? []).toHaveLength(visibility.VISIBILITIES.length);
+  });
+});
+
+describeDb('A-10 — a revision inherits the sharing decisions (Rule 13 + 16(c))', () => {
+  it('carries the overlay forward, stamp included', async () => {
+    // Resetting to the §4.1 defaults would mean every field the AM chose to
+    // share in version n goes dark the moment n+1 is approved — and Rule 16(c)
+    // serves the client from the active version, so the client would watch the
+    // document get thinner with nobody having decided that.
+    const { strategiId } = await seedSubmittable();
+    await setFieldVisibility(sql, am(), strategiId, 'A-3', visibility.VISIBILITY_SHAREABLE);
+    await setFieldVisibility(sql, am(), strategiId, 'B-3.3', visibility.VISIBILITY_INTERNAL);
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    const v2 = await openRevision(sql, am(), strategiId, {
+      triggerRevisi: ['pencapaian_di_bawah_target'],
+      alasanRevisi: 'target perlu ditinjau ulang',
+      asumsiGugur: ['A1'],
+    });
+
+    const rows = await getStrategi(sql, am(), v2.id);
+    const byField = new Map(rows.visibilitas.map((v) => [v.fieldId, v]));
+    expect(byField.get('A-3')).toMatchObject({
+      visibilitas: visibility.VISIBILITY_SHAREABLE,
+      diubahOleh: 'ZZ-AM',
+    });
+    expect(byField.get('B-3.3')?.visibilitas).toBe(visibility.VISIBILITY_INTERNAL);
+    // The untouched rows still arrive, and still arrive unstamped.
+    expect(rows.visibilitas).toHaveLength(visibility.STRATEGI_FIELD_ROSTER.length);
+    expect(byField.get('D-8')).toMatchObject({
+      visibilitas: visibility.VISIBILITY_SHAREABLE,
+      diubahOleh: null,
+    });
   });
 });

@@ -157,6 +157,59 @@ export const STRATEGI_FIELD_IDS: readonly string[] = [
   ...Array.from({ length: 4 }, (_, i) => `J-${i + 1}`),
 ];
 
+/**
+ * Section B field IDs, transcribed from M6A §4 rather than derived.
+ *
+ * ⚠️ This list is NOT what makes B shareable — `tierOf` answers that from the
+ * section rule above, and it keeps answering for a `B-10.4` that nobody added
+ * here. The list exists for the one job the section rule cannot do: **seeding**
+ * `STRG_FIELD_VISIBILITY`, which needs actual IDs to write rows for.
+ *
+ * So a missing entry costs a seed row, not a tier: the field still resolves
+ * through `defaultVisibility` at read time. That asymmetry is why enumerating
+ * here is safe when enumerating inside `tierOf` would not be.
+ */
+export const STRATEGI_SECTION_B_FIELD_IDS: readonly string[] = [
+  'B-0.1', 'B-0.2', 'B-0.3', 'B-0.4', 'B-0.5', 'B-0.6', 'B-0.7', 'B-0.8',
+  'B-1.1', 'B-1.2', 'B-1.3', 'B-1.4', 'B-1.5',
+  'B-2.1', 'B-2.2', 'B-2.3', 'B-2.4',
+  'B-3.1', 'B-3.2', 'B-3.3', 'B-3.4', 'B-3.5', 'B-3.6',
+  'B-4.1', 'B-4.2', 'B-4.3', 'B-4.4', 'B-4.5',
+  'B-5.1', 'B-5.2', 'B-5.3', 'B-5.4', 'B-5.5',
+  'B-6.1', 'B-6.2', 'B-6.3', 'B-6.4', 'B-6.5',
+  'B-7.1', 'B-7.2', 'B-7.3', 'B-7.4',
+  'B-8.1', 'B-8.2', 'B-8.3',
+  'B-9.1', 'B-9.2', 'B-9.3',
+];
+
+/** Section G field IDs — see the note on `STRATEGI_SECTION_B_FIELD_IDS`. */
+export const STRATEGI_SECTION_G_FIELD_IDS: readonly string[] = ['G-0', 'G-1', 'G-2', 'G-3', 'G-4'];
+
+/**
+ * Every field ID a Strategi carries — the roster `createStrategi` seeds the
+ * overlay from, and the roster `visibility.test.ts` proves `tierOf` is total over.
+ */
+export const STRATEGI_FIELD_ROSTER: readonly string[] = [
+  ...STRATEGI_FIELD_IDS,
+  ...STRATEGI_SECTION_B_FIELD_IDS,
+  ...STRATEGI_SECTION_G_FIELD_IDS,
+];
+
+/**
+ * The exact list of field IDs the DB CHECK must refuse to mark shareable.
+ *
+ * COMPUTED, never typed a second time: §7 calls the hard-internal set a frozen
+ * invariant enforced twice and forbids the two enforcers to diverge, so the
+ * migration's CHECK is asserted against THIS — not against
+ * `STRATEGI_HARD_INTERNAL`, which is only part of the answer while X-16 keeps
+ * I-4 provisionally hard-internal. A CHECK written from the seven-member §4.1
+ * row would let an AM publish I-4 through the database while `isHardInternal`
+ * said no in TypeScript, which is precisely the divergence §7 names.
+ */
+export function hardInternalFieldIds(): string[] {
+  return STRATEGI_FIELD_ROSTER.filter((id) => isHardInternal(id));
+}
+
 /** `A-15` → `A`; `B-3.3` → `B`. Section letter only, channel suffixes never reach here. */
 function sectionOf(fieldId: string): string {
   return fieldId.trim().charAt(0).toUpperCase();

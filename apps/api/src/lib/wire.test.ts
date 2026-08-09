@@ -53,6 +53,7 @@ import {
   toStrategyInput,
   assignmentSummaryFromWire,
   planGateToWire,
+  strategiFieldVisibilityToWire,
 } from './wire';
 
 describe('masterServiceToWire', () => {
@@ -1376,5 +1377,49 @@ describe('M6C planGateToWire', () => {
       divisi_pic: 'Creative',
       hasil_diharapkan: 'listing 12 SKU',
     });
+  });
+});
+
+describe('strategiFieldVisibilityToWire (A-10 / Rule 16)', () => {
+  it('renames the two derived keys the page reads to decide what is locked', () => {
+    // `shape-parity` proves the FE declares these keys; it cannot prove they
+    // carry the right values. `dapat_diubah` is the one that matters: reading
+    // the wrong source here would render a hard-internal field with a live
+    // switch, and the AM would only find out from a 403 after ticking it.
+    expect(
+      strategiFieldVisibilityToWire({
+        fieldId: 'A-10',
+        visibilitas: 'Internal Saja',
+        tier: 'hard_internal',
+        dapatDiubah: false,
+        diubahOleh: null,
+        diubahPada: null,
+      }),
+    ).toEqual({
+      field_id: 'A-10',
+      visibilitas: 'Internal Saja',
+      tier: 'hard_internal',
+      dapat_diubah: false,
+      diubah_oleh: null,
+      diubah_pada: null,
+    });
+  });
+
+  it('sends the stamp explicitly rather than omitting it', () => {
+    // House rule for this boundary: a MISSING key is more dangerous than a null
+    // one, because the FE reads it as "never touched" instead of "unknown".
+    const w = strategiFieldVisibilityToWire({
+      fieldId: 'A-3',
+      visibilitas: 'Bagikan ke Klien',
+      tier: 'default_internal',
+      dapatDiubah: true,
+      diubahOleh: 'EMP-001',
+      diubahPada: '2026-08-09T03:00:00.000Z',
+    });
+    expect(w.diubah_oleh).toBe('EMP-001');
+    expect(w.diubah_pada).toBe('2026-08-09T03:00:00.000Z');
+    expect(Object.keys(w).sort()).toEqual(
+      ['dapat_diubah', 'diubah_oleh', 'diubah_pada', 'field_id', 'tier', 'visibilitas'].sort(),
+    );
   });
 });

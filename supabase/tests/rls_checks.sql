@@ -984,7 +984,7 @@ RESET ROLE;
 --     independen — memperbaiki induknya memperbaiki mereka. Daftar ini
 --     mengukur permukaan, bukan jumlah bug.
 --
---     ⚠️ **Sepuluh baris `strategi_*` di bawah adalah FALSE-NEGATIVE yang sudah
+--     ⚠️ **Sebelas baris `strategi_*` di bawah adalah FALSE-NEGATIVE yang sudah
 --     diverifikasi, bukan gap.** Predikatnya `private.jwt_can_read_strategi()`,
 --     dan badan fungsi itu adalah cermin persis `strategi_select` — TERMASUK
 --     arm `jwt_is_lead() AND jwt_division() = 'Account'`. Jadi arm-nya ADA; ia
@@ -992,9 +992,11 @@ RESET ROLE;
 --     detektor sintaktik di atas (persis false-negative yang paragraf
 --     sebelumnya sudah antisipasi). Lima di antaranya ditambahkan oleh A-09b
 --     (DECISIONS 2026-08-08 "A-09b — lima tabel anak Strategi masuk ledger
---     O48"); mereka mengikuti kelas siblingnya, bukan membuka kelas baru.
+--     O48") dan satu oleh A-10 bagian 2 (DECISIONS 2026-08-09
+--     "strategi_field_visibility masuk ledger O48"); mereka mengikuti kelas
+--     siblingnya, bukan membuka kelas baru.
 --     Membuat detektor menembus satu tingkat indireksi akan MENGHAPUS
---     kesepuluhnya sekaligus — diusulkan sebagai **O60**, sengaja tidak
+--     kesebelasnya sekaligus — diusulkan sebagai **O60**, sengaja tidak
 --     dikerjakan di dalam tiket fitur: mengubah semantik invariant bersama
 --     supaya tiket sendiri hijau adalah cara paling mudah kehilangan gerbang.
 -- ---------------------------------------------------------------------------
@@ -1014,7 +1016,8 @@ DECLARE
     'prospect_attempts_select','qualified_form_services_select','qualified_forms_select',
     'strategi_akses_select','strategi_assumption_select','strategi_baseline_bulan_select',
     'strategi_channel_select','strategi_diagnosa_select','strategi_dispatch_select',
-    'strategi_fase_select','strategi_ketergantungan_klien_select',
+    'strategi_fase_select','strategi_field_visibility_select',
+    'strategi_ketergantungan_klien_select',
     'strategi_prasyarat_klien_select','strategi_quick_win_select',
     'strategi_risiko_struktural_select','strategi_risk_select',
     'strategi_tanggal_besar_select','strategi_target_select',

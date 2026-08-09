@@ -3492,6 +3492,37 @@ export interface StrategiDispatchWire {
   catatan: string | null;
 }
 
+/**
+ * A-10 / Rule 16 — one field's visibility, with everything the form needs to
+ * draw the switch.
+ *
+ * `tier` and `dapat_diubah` are DERIVED and shipped anyway: without them the FE
+ * would have to carry its own copy of the §4.1 map to know which switches to
+ * render as locked, and a third copy of that map is exactly the leak
+ * `packages/core/src/visibility.ts` was centralised to prevent.
+ */
+export interface StrategiFieldVisibilityWire {
+  field_id: string;
+  visibilitas: string;
+  tier: string;
+  dapat_diubah: boolean;
+  diubah_oleh: string | null;
+  diubah_pada: string | null;
+}
+
+export function strategiFieldVisibilityToWire(
+  v: strategi.StrategiFieldVisibility,
+): StrategiFieldVisibilityWire {
+  return {
+    field_id: v.fieldId,
+    visibilitas: v.visibilitas,
+    tier: v.tier,
+    dapat_diubah: v.dapatDiubah,
+    diubah_oleh: v.diubahOleh,
+    diubah_pada: v.diubahPada,
+  };
+}
+
 export interface StrategiEventWire {
   versi_no: number;
   peristiwa: string;
@@ -3524,6 +3555,8 @@ export interface StrategiDetailWire extends StrategiWire {
   tanggal_besar: StrategiTanggalBesarWire[];
   trigger_revisi: StrategiTriggerRevisiWire[];
   dispatch: StrategiDispatchWire[];
+  /** A-10 — the §4.1 visibility overlay, one entry per field ID. */
+  visibilitas: StrategiFieldVisibilityWire[];
   riwayat: StrategiEventWire[];
 }
 
@@ -3774,6 +3807,7 @@ export function strategiDetailToWire(d: strategi.StrategiDetail): StrategiDetail
       urutan: x.urutan,
       catatan: x.catatan,
     })),
+    visibilitas: d.visibilitas.map(strategiFieldVisibilityToWire),
     riwayat: d.riwayat.map((e) => ({
       versi_no: e.versiNo,
       peristiwa: e.peristiwa,
