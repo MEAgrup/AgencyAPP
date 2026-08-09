@@ -11,7 +11,7 @@
 | **Branch** | **`claude/migrasi-a13c-editor-penyimpanan-64n1oe`** |
 | **PR** | **#111** — terbuka, belum merge |
 | **Basis** | `1f77e49` (merge PR #110, `main`) |
-| **Commit terakhir** | `f0da5eb` |
+| **Commit terakhir** | `d4b003d` |
 
 ```bash
 git fetch origin claude/migrasi-a13c-editor-penyimpanan-64n1oe
@@ -70,7 +70,7 @@ dikirim.**
 |---|---|
 | `96648a8` | **A-13c** — D-2 matriks target, D-8/D-9 asumsi, E-12 ketergantungan + tiga guard baru |
 | `0de8b7b` | **A-10 bagian 1** — peta visibilitas §4.1 sebagai peta TOTAL di `packages/core` |
-| `f0da5eb` | **X-15 dieksekusi** — gerbang ringan D-4 (keputusan pemilik) |
+| `d4b003d` | **X-15 dieksekusi** — gerbang ringan D-4 (keputusan pemilik) |
 
 ### 1.1 A-13c — gerbang Ajukan akhirnya bisa dilewati
 
