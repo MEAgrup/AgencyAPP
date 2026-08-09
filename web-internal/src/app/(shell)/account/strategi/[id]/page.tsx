@@ -109,11 +109,27 @@ import {
   type SectionKey,
 } from '@/lib/strategi-sections';
 import { canEditVisibilitas } from '@/lib/strategi-visibilitas';
+import {
+  REVISI_KOSONG,
+  canFlipAsumsi,
+  canOpenRevisi,
+  canRaiseSanggahan,
+  declaredTriggers,
+  revisiKekurangan,
+  revisiToBody,
+  toggleIn,
+  type RevisiDraft,
+  type SanggahanDraft,
+} from '@/lib/strategi-revisi';
+import { TRIGGER_REVISI_LABELS } from '@/lib/strategi';
 import { AUTOSAVE_MS, useAutosave } from '@/lib/use-autosave';
 import {
   approveStrategi,
   getStrategi,
+  openStrategiRevision,
+  raiseStrategiSanggahan,
   returnStrategi,
+  setStrategiAssumptionStatus,
   saveStrategiAkses,
   saveStrategiAssumptions,
   saveStrategiBaseline,
@@ -133,6 +149,7 @@ import {
   strategiKekurangan,
   submitStrategi,
   updateStrategiHeader,
+  type AssumptionState,
   type StrategiDetail,
 } from '@/lib/strategi';
 import {
@@ -203,6 +220,8 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
 
   const [returnNote, setReturnNote] = useState('');
   const [acting, setActing] = useState(false);
+  /** A-12 — the Rule 13 dialog. `null` while closed, so opening it always starts empty. */
+  const [revisi, setRevisi] = useState<RevisiDraft | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -602,6 +621,18 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                   onChange={(p) => patch('kpi', { ...drafts.kpi, ...p })}
                   onTargets={(p) => patch('targets', { ...drafts.targets, ...p })}
                   disabled={!editable}
+                  onSanggahan={(body: SanggahanDraft) =>
+                    act(() => raiseStrategiSanggahan(id, body))
+                  }
+                  onAsumsiStatus={(kode: string, status: AssumptionState) =>
+                    act(() => setStrategiAssumptionStatus(id, kode, status))
+                  }
+                  // Draft-only, exactly like every other Section D write.
+                  sanggahanEnabled={canWrite && canRaiseSanggahan(detail.status)}
+                  // NOT the same gate: an assumption breaks during execution,
+                  // which is precisely when `editable` is false.
+                  asumsiFlipEnabled={canWrite && canFlipAsumsi(detail.status)}
+                  busy={acting || dirty || saving}
                 />
               )}
               {active === 'E' && (
@@ -740,7 +771,136 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                   </button>
                 </>
               )}
+              {/* A-12 / Rule 13. `Aktif` ONLY — not "anything not a draft":
+                  `Diajukan` is awaiting approval and `Diarsipkan` is already
+                  superseded, and revising either is a request the server refuses. */}
+              {canWrite && canOpenRevisi(detail.status) && revisi === null && (
+                <button
+                  type="button"
+                  className="btn btnSecondary"
+                  disabled={acting}
+                  onClick={() => setRevisi(REVISI_KOSONG)}
+                >
+                  Buka revisi
+                </button>
+              )}
             </div>
+
+            {revisi !== null && (
+              <div className="stack" style={{ gap: 10, marginTop: 12 }}>
+                <div className="alert alertInfo" style={{ fontSize: 13 }}>
+                  Revisi membuat <strong>versi {detail.versi_no + 1}</strong> berstatus{' '}
+                  <code>Draft Revisi</code>. Versi {detail.versi_no} tetap <code>Aktif</code> dan
+                  baru diarsipkan saat versi baru disetujui — klien tidak pernah kehilangan
+                  dokumen di tengah revisi.
+                </div>
+
+                <div>
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+                    Trigger yang terpicu — hanya yang Strategi ini deklarasikan di H-2
+                  </div>
+                  {declaredTriggers(detail).length === 0 ? (
+                    // Unreachable on an approved record (H-2 is a submit
+                    // requirement), so if it ever shows, the record predates that
+                    // gate — say so instead of rendering an empty box.
+                    <p className="muted" style={{ fontSize: 13 }}>
+                      Strategi ini tidak mendeklarasikan satu pun trigger di H-2 — revisi tidak
+                      bisa dibuka. Laporkan ke tim sistem.
+                    </p>
+                  ) : (
+                    <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                      {declaredTriggers(detail).map((kode) => {
+                        const label =
+                          TRIGGER_REVISI_LABELS.find((t) => t.value === kode)?.label ?? kode;
+                        const on = revisi.trigger_revisi.includes(kode);
+                        return (
+                          <button
+                            key={kode}
+                            type="button"
+                            className={on ? 'btn btnSecondary btnSm' : 'btn btnGhost btnSm'}
+                            onClick={() =>
+                              setRevisi({
+                                ...revisi,
+                                trigger_revisi: toggleIn(revisi.trigger_revisi, kode),
+                              })
+                            }
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+                    Asumsi D-8 yang gugur
+                  </div>
+                  <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                    {detail.assumptions.map((a) => {
+                      const on = revisi.asumsi_gugur.includes(a.kode);
+                      return (
+                        <button
+                          key={a.kode}
+                          type="button"
+                          className={on ? 'btn btnSecondary btnSm' : 'btn btnGhost btnSm'}
+                          title={a.asumsi}
+                          onClick={() =>
+                            setRevisi({
+                              ...revisi,
+                              asumsi_gugur: toggleIn(revisi.asumsi_gugur, a.kode),
+                            })
+                          }
+                        >
+                          {a.kode}
+                          {a.status === 'Gugur' && ' ·  sudah gugur'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <textarea
+                  rows={3}
+                  placeholder="Alasan revisi (wajib)"
+                  value={revisi.alasan_revisi}
+                  onChange={(e) => setRevisi({ ...revisi, alasan_revisi: e.target.value })}
+                />
+
+                <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn btnPrimary"
+                    disabled={acting || revisiKekurangan(revisi).length > 0}
+                    onClick={() =>
+                      void act(async () => {
+                        await openStrategiRevision(id, revisiToBody(revisi));
+                        setRevisi(null);
+                      })
+                    }
+                  >
+                    Buat versi {detail.versi_no + 1}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btnGhost"
+                    disabled={acting}
+                    onClick={() => setRevisi(null)}
+                  >
+                    Batal
+                  </button>
+                  {/* Names WHICH of Rule 13's three boxes is empty. The server
+                      answers all three with one sentence, which is correct as a
+                      gate and useless as a hint. */}
+                  {revisiKekurangan(revisi).length > 0 && (
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      Masih kurang: {revisiKekurangan(revisi).join(', ')}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* A-13d — Rule 16. Sits below the gap panel because it answers a
