@@ -99,6 +99,7 @@ import SectionH, {
   type TriggerDraft,
 } from '@/components/strategi/SectionH';
 import SectionI, { handoffDraftOf, type HandoffDraft } from '@/components/strategi/SectionI';
+import VisibilitasPanel from '@/components/strategi/VisibilitasPanel';
 import {
   STRATEGI_SECTIONS,
   groupKekurangan,
@@ -107,6 +108,7 @@ import {
   type Kekurangan,
   type SectionKey,
 } from '@/lib/strategi-sections';
+import { canEditVisibilitas } from '@/lib/strategi-visibilitas';
 import { AUTOSAVE_MS, useAutosave } from '@/lib/use-autosave';
 import {
   approveStrategi,
@@ -223,6 +225,11 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
   }, [load]);
 
   const editable = detail !== null && isEditable(detail.status) && canWrite;
+  // ⚠️ NOT `editable`. Rule 16 is the one control on this page that is not
+  // Draft-only — see `canEditVisibilitas` for why, and for the two statuses it
+  // does refuse. Reusing `editable` here would quietly re-impose the Draft-only
+  // rule the domain deliberately does not have.
+  const visibilitasEditable = detail !== null && canEditVisibilitas(detail.status) && canWrite;
 
   /**
    * Saves the ACTIVE section only.
@@ -735,6 +742,24 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
               )}
             </div>
           </div>
+
+          {/* A-13d — Rule 16. Sits below the gap panel because it answers a
+              different question about the same chapter: not "what is still
+              missing" but "what of this will the client actually read". */}
+          <VisibilitasPanel
+            strategiId={id}
+            rows={detail.visibilitas}
+            active={active}
+            reachable={WIRED}
+            disabled={!visibilitasEditable || acting}
+            onChanged={(rows) =>
+              // Patch `detail` in place — do NOT call `draftsOf` here. A toggle is
+              // its own request, unrelated to whatever the AM has half-typed into
+              // this section; rebuilding the drafts from the response would throw
+              // away every unsaved edit the moment someone flips a switch.
+              setDetail((d) => (d === null ? d : { ...d, visibilitas: rows }))
+            }
+          />
         </div>
       </div>
     </div>
