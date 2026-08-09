@@ -30,6 +30,13 @@ describe('sectionOf', () => {
     expect(sectionOf('')).toBe('lain');
   });
 
+  it('files `Rule 8` under D, where the D-9 checkbox that fixes it lives', () => {
+    // `checkCompleteness` emits this kode with no field ID. In `lain` the page
+    // tells the AM to report it to the systems team — for a gap they fix by
+    // ticking a box two cards up.
+    expect(sectionOf('Rule 8')).toBe('D');
+  });
+
   it('sends an unknown section letter to `lain` rather than dropping it', () => {
     // The whole point: a gap nobody can classify still has to be counted, or the
     // submit button lies while the server refuses the submit.
