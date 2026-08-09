@@ -8,22 +8,17 @@
 | | |
 |---|---|
 | **Repo** | `MEAgrup/AgencyAPP` |
-| **Branch** | **`claude/a12-revisi-sanggahan-asumsi`** |
-| **PR** | **#113** — terbuka, belum merge |
-| **Basis** | `66f5710` (merge PR #112, `main`) |
-| **Commit terakhir** | `85961c7` |
+| **Branch** | **`main`** — mulai cabang BARU dari sini |
+| **PR terbuka** | **NIHIL** — semua sudah merge |
+| **`main` di** | `ac372e5` (merge PR #113) |
 
 ```bash
-git fetch origin claude/a12-revisi-sanggahan-asumsi
-git checkout claude/a12-revisi-sanggahan-asumsi
+git fetch origin main && git checkout -B <cabang-baru> origin/main
 ```
 
-> ⚠️ **Kalau PR #113 sudah ter-merge saat Anda membaca ini**, jangan menumpuk
-> commit di atasnya. Mulai ulang dari `main`:
-> `git fetch origin main && git checkout -B <branch-baru> origin/main`.
-
-**Sudah ter-merge sesi ini:** PR #111 (`af8813e`) dan PR #112 (`66f5710`).
-Tidak ada PR lain yang menggantung selain #113.
+**Semua PR sesi ini sudah ter-merge:** #111 (`af8813e`) → #112 (`66f5710`) →
+#113 (`ac372e5`). Tidak ada cabang yang perlu dilanjutkan dan tidak ada commit
+yang menggantung — mulai bersih dari `main`.
 
 ### 0.1 DB lokal — WAJIB, dan angka test menyesatkan tanpanya
 
