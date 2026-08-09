@@ -10,6 +10,8 @@
  * - statemachine: lifecycle transitions wrapper (SQL sm_transition) ✅
  * - audit: append-only immutable audit writer + no-secret guard ✅
  * - notification: 15 FROZEN events catalog + emit wrapper (SQL notify_emit) ✅
+ * - visibility: M6A §4.1 / Rule 16 two-tier client visibility + FROZEN
+ *   hard-internal set (mirrored by a DB CHECK — the two must not diverge) ✅
  *
  * All implementations must maintain house-rule compliance (CLAUDE.md §Non-negotiable):
  * - State machines server-side enforced + exact Bahasa Indonesia [...] messages
@@ -29,3 +31,4 @@ export * as ident from './ident';
 export * as statemachine from './statemachine';
 export * as audit from './audit';
 export * as notification from './notification';
+export * as visibility from './visibility';
