@@ -6,7 +6,6 @@ import {
   STRATEGI_HARD_INTERNAL,
   STRATEGI_SECTION_B_FIELD_IDS as SECTION_B,
   STRATEGI_SECTION_G_FIELD_IDS as SECTION_G,
-  STRATEGI_TIER_UNDECIDED,
   VISIBILITY_INTERNAL,
   VISIBILITY_SHAREABLE,
   canToggleShareable,
@@ -39,11 +38,13 @@ describe('§4.1 tier map is TOTAL', () => {
 });
 
 describe('hard-internal set (FROZEN — §7 says the DB CHECK must match)', () => {
-  it('is exactly the seven fields §4.1 names', () => {
+  it('is §4.1\'s seven plus I-4, which X-16 classified hard-internal (2026-08-09)', () => {
     // Pinned member by member on purpose. Widening this set must show up in a
     // diff; narrowing it is a disclosure decision and belongs in DECISIONS.md.
+    // I-4 was unclassified by §4.1 and the owner ruled it hard-internal — see
+    // the module note and DECISIONS.md 2026-08-09.
     expect([...STRATEGI_HARD_INTERNAL].sort()).toEqual(
-      ['A-10', 'D-7', 'F-5', 'F-7', 'H-4', 'J-2', 'J-3'].sort(),
+      ['A-10', 'D-7', 'F-5', 'F-7', 'H-4', 'I-4', 'J-2', 'J-3'].sort(),
     );
   });
 
@@ -57,12 +58,13 @@ describe('hard-internal set (FROZEN — §7 says the DB CHECK must match)', () =
     }
   });
 
-  it('hands the DB CHECK the eight IDs the TS predicate actually refuses', () => {
-    // The list the migration's CHECK is built from and asserted against. It is
-    // §4.1's seven PLUS I-4, which X-16 leaves provisionally hard-internal — and
-    // that eighth member is the whole reason this is computed rather than typed
-    // out again. A CHECK carrying only the §4.1 seven would let a client read
-    // I-4 through a direct write while `isHardInternal('I-4')` still said false.
+  it('hands the DB CHECK exactly the IDs the TS predicate refuses', () => {
+    // The list the migration's CHECK is built from and asserted against, computed
+    // from the tier map so the two enforcers can never drift. It equals
+    // STRATEGI_HARD_INTERNAL because the roster contains no other hard-internal
+    // field, but it is derived rather than copied on purpose (see the note on
+    // hardInternalFieldIds).
+    expect(hardInternalFieldIds().sort()).toEqual([...STRATEGI_HARD_INTERNAL].sort());
     expect(hardInternalFieldIds().sort()).toEqual(
       ['A-10', 'D-7', 'F-5', 'F-7', 'H-4', 'I-4', 'J-2', 'J-3'].sort(),
     );
@@ -80,9 +82,11 @@ describe('hard-internal set (FROZEN — §7 says the DB CHECK must match)', () =
 });
 
 describe('default-internal set (§4.1 row 2 — AM may share, audit-logged)', () => {
-  it('is exactly the six fields §4.1 names', () => {
+  it('is §4.1\'s six plus J-4, which X-16 classified default-internal (2026-08-09)', () => {
+    // J-4 was unclassified by §4.1; the owner ruled it default-internal. Its
+    // diff-generator filter obligation lives in the module note, not here.
     expect([...STRATEGI_DEFAULT_INTERNAL].sort()).toEqual(
-      ['A-3', 'A-13', 'C-6', 'E-4', 'F-1', 'H-1'].sort(),
+      ['A-3', 'A-13', 'C-6', 'E-4', 'F-1', 'H-1', 'J-4'].sort(),
     );
   });
 
@@ -116,28 +120,34 @@ describe('default-shareable', () => {
   });
 });
 
-describe('⚠️ provisional tiers (X-16 — awaiting owner)', () => {
-  it('names exactly the six IDs §4.1 leaves unclassified', () => {
-    // §4.1's third row says "everything else" and then enumerates what that
-    // means; these six appear in §4 but in none of the three rows. The PRD
-    // contradicts itself, so the house rule is to flag, not to pick quietly.
-    expect([...STRATEGI_TIER_UNDECIDED].sort()).toEqual(
-      ['A-15', 'A-16', 'I-1', 'I-4', 'J-1', 'J-4'].sort(),
-    );
-  });
-
-  it('errs toward hiding, because publishing is the direction that cannot be undone', () => {
-    for (const id of STRATEGI_TIER_UNDECIDED) {
-      expect(defaultVisibility(id)).toBe(VISIBILITY_INTERNAL);
+describe('X-16 (RESOLVED 2026-08-09) — the six §4.1 left unclassified', () => {
+  // §4.1's third row said "everything else" and then enumerated what it meant;
+  // these six appeared in §4 but in none of the three rows. The owner ruled:
+  // A-15/A-16/I-1/J-1 shareable, I-4 hard-internal, J-4 default-internal.
+  it('makes A-15, A-16, I-1, J-1 default-shareable — this is what unblocked A-11', () => {
+    for (const id of ['A-15', 'A-16', 'I-1', 'J-1']) {
+      expect(tierOf(id)).toBe('default_shareable');
+      expect(defaultVisibility(id)).toBe(VISIBILITY_SHAREABLE);
+      expect(canToggleShareable(id)).toBe(true);
     }
   });
 
-  it('keeps I-4 unshareable even by AM toggle until the owner rules otherwise', () => {
+  it('keeps I-4 hard-internal — no toggle, no default sharing', () => {
     // I-4 is notes to our own delivery divisions about "hal yang mudah salah
     // dipahami". To a client that reads as a list of mistakes our team keeps
-    // making on their account — so the provisional answer is the strict one.
+    // making on their account.
+    expect(tierOf('I-4')).toBe('hard_internal');
     expect(isHardInternal('I-4')).toBe(true);
     expect(canToggleShareable('I-4')).toBe(false);
+    expect(defaultVisibility('I-4')).toBe(VISIBILITY_INTERNAL);
+  });
+
+  it('keeps J-4 default-internal — hidden by default, AM may share', () => {
+    // The diff generator must still filter its own rows (see the module note);
+    // the tier alone does not make an AUTO DIFF over the whole record safe.
+    expect(tierOf('J-4')).toBe('default_internal');
+    expect(defaultVisibility('J-4')).toBe(VISIBILITY_INTERNAL);
+    expect(canToggleShareable('J-4')).toBe(true);
   });
 });
 

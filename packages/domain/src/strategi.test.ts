@@ -31,6 +31,7 @@ import {
   MSG_AKSES_MATRIX_REQUIRED,
   MSG_ASSUMPTION_NOT_FOUND,
   MSG_ASSUMPTION_STATUS_INVALID,
+  MSG_ASSUMPTION_STATUS_TERKUNCI,
   MSG_ASSUMPTION_TARGET_UNKNOWN,
   MSG_TARGET_PENDUKUNG_MISSING,
   MSG_BASELINE_GROUP_INCOMPLETE,
@@ -2535,6 +2536,32 @@ describeDb('Section D — D-8 status flip fires strategi_revisi_disarankan (A-08
     await expect(
       setAssumptionStatus(sql, od(), strategiId, 'A1', 'Gugur'),
     ).rejects.toThrow(ForbiddenError);
+  });
+
+  it('refuses a flip on an archived and on an expired version (X-17)', async () => {
+    // `Aktif` is open on purpose; a version that is already history is not. A
+    // flip there would fire strategi_revisi_disarankan about a superseded
+    // version — a "please revise" with no correct action for its recipient.
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    const v2 = await openRevision(sql, am(), strategiId, {
+      triggerRevisi: ['pencapaian_di_bawah_target'],
+      alasanRevisi: 'target perlu ditinjau ulang',
+      asumsiGugur: ['A1'],
+    });
+    await submitStrategi(sql, am(), v2.id);
+    await approveStrategi(sql, spv(), v2.id);
+    expect((await getStrategi(sql, am(), strategiId)).status).toBe(STRATEGI_DIARSIPKAN);
+    await expect(
+      setAssumptionStatus(sql, am(), strategiId, 'A1', 'Gugur'),
+    ).rejects.toThrow(MSG_ASSUMPTION_STATUS_TERKUNCI);
+
+    await expireStrategi(sql, am(), v2.id);
+    expect((await getStrategi(sql, am(), v2.id)).status).toBe(STRATEGI_KEDALUWARSA);
+    await expect(
+      setAssumptionStatus(sql, am(), v2.id, 'A1', 'Terverifikasi'),
+    ).rejects.toThrow(MSG_ASSUMPTION_STATUS_TERKUNCI);
   });
 });
 

@@ -181,13 +181,14 @@ describe('unreachableSections — a switch with no door is reported, not hidden'
   const WIRED = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'] as const;
 
   it('names Section J, which carries two toggleable fields and no form', () => {
-    // J-1 and J-4 are `default_internal`: the AM may share them. The nav
-    // disables J because Section J has no form, so today those switches exist
-    // and cannot be reached. That is the UI arriving at the same defect
-    // `gate-reachability.test.ts` guards against on the server.
+    // Post X-16 (2026-08-09): J-1 is `default_shareable`, J-4 `default_internal`
+    // — both toggleable, so the AM may change either. The nav disables J because
+    // Section J has no form, so today those switches exist and cannot be reached.
+    // That is the UI arriving at the same defect `gate-reachability.test.ts`
+    // guards against on the server.
     const rows = [
       row({ field_id: 'A-3', tier: 'default_internal' }),
-      row({ field_id: 'J-1', tier: 'default_internal' }),
+      row({ field_id: 'J-1', tier: 'default_shareable' }),
       row({ field_id: 'J-4', tier: 'default_internal' }),
     ];
     expect(unreachableSections(rows, WIRED)).toEqual(['J']);

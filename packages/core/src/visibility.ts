@@ -48,7 +48,7 @@ export type Visibility = (typeof VISIBILITIES)[number];
 export type VisibilityTier = 'hard_internal' | 'default_internal' | 'default_shareable';
 
 /**
- * §4.1 row 1 — never shareable, not by anyone, not with a toggle.
+ * The hard-internal set — never shareable, not by anyone, not with a toggle.
  *
  * **FROZEN.** This exact set is re-asserted by a DB CHECK; `visibility.test.ts`
  * pins it member by member so that widening it needs an explicit edit in a diff
@@ -59,8 +59,14 @@ export type VisibilityTier = 'hard_internal' | 'default_internal' | 'default_sha
  * previous agency did wrong (A-10), that we think their target is unrealistic
  * (D-7), how many of our people we put on them and for how long (F-5), how far
  * over we let ourselves go before escalating (F-7), the conditions under which
- * we would stop or shrink the scope (H-4), and what our own reviewer said about
- * the AM's work (J-2, J-3).
+ * we would stop or shrink the scope (H-4), what our own reviewer said about the
+ * AM's work (J-2, J-3), and the per-division notes about "hal yang mudah salah
+ * dipahami" on this account (I-4).
+ *
+ * §4.1 enumerated the first seven. **I-4 was left unclassified by §4.1 and the
+ * owner ruled it hard-internal (X-16, `docs/DECISIONS.md` 2026-08-09)** — read to
+ * a client, I-4 reads as a list of the mistakes our team keeps making on their
+ * account, so it gets the strictest tier and no toggle.
  */
 export const STRATEGI_HARD_INTERNAL: readonly string[] = [
   'A-10', // riwayat agensi sebelumnya
@@ -68,6 +74,7 @@ export const STRATEGI_HARD_INTERNAL: readonly string[] = [
   'F-5', // divisi & beban tim
   'F-7', // batas toleransi over-komitmen
   'H-4', // kondisi stop / ubah scope
+  'I-4', // catatan per divisi eksekusi — §4.1 unclassified, hard-internal per X-16 (2026-08-09)
   'J-2', // catatan reviewer
   'J-3', // alasan revisi
 ];
@@ -79,6 +86,14 @@ export const STRATEGI_HARD_INTERNAL: readonly string[] = [
  * These are the judgement calls: sharing them can be exactly right with a mature
  * client and exactly wrong with a new one, which is why the PRD gives the AM the
  * switch rather than picking for them.
+ *
+ * **J-4 was left unclassified by §4.1 and the owner ruled it default-internal
+ * (X-16, `docs/DECISIONS.md` 2026-08-09).** ⚠️ J-4 is an AUTO DIFF over the whole
+ * record, so even a J-4 an AM shares renders changes to fields that are
+ * themselves hard-internal — the diff would leak D-7 and H-4 through the back
+ * door while every per-field check passed. Whatever visibility J-4 carries, the
+ * diff generator MUST filter its own rows through `shareableFields`; that is not
+ * optional and it is not implied by this list.
  */
 export const STRATEGI_DEFAULT_INTERNAL: readonly string[] = [
   'A-3', // ruang margin
@@ -87,48 +102,29 @@ export const STRATEGI_DEFAULT_INTERNAL: readonly string[] = [
   'E-4', // floor price
   'F-1', // sumber dana iklan
   'H-1', // risk register
+  'J-4', // auto-diff vs versi sebelumnya — §4.1 unclassified, default-internal per X-16 (2026-08-09); see ⚠️ above
 ];
 
 /**
- * ⚠️ **PROVISIONAL — awaiting an owner decision (X-16).**
+ * X-16 (RESOLVED 2026-08-09, `docs/DECISIONS.md`) — the six field IDs §4.1 left
+ * unclassified.
  *
- * §4.1 describes its third row as "everything else" and then ENUMERATES what
- * that means. The two do not agree: six field IDs appear in §4 but in none of
- * the three rows. That is the PRD contradicting the PRD, which the house rule
- * says to flag rather than quietly resolve.
+ * §4.1 described its third row as "everything else" and then ENUMERATED what it
+ * meant, so six IDs appeared in §4 but in none of the three rows — the PRD
+ * contradicting the PRD. The house rule was to flag rather than quietly resolve;
+ * the owner then ruled:
  *
- * Until it is decided, each one gets the tier that is **wrong in the recoverable
- * direction**. For a field whose answer might embarrass MEA or expose its
- * internal workings, that is `default_internal`: the client sees less than they
- * might have, the AM can still switch it on per Strategi, and flipping the
- * default later costs one edit — there is no un-publishing a document a client
- * already read.
+ *   - **A-15, A-16, I-1, J-1 → `default_shareable`.** They carry no entry of
+ *     their own: `tierOf` resolves them through the `STRATEGI_FIELD_IDS`
+ *     fallback, the same door every ordinary client-facing field uses. Making
+ *     them shareable is what unblocked A-11 (`/s/{token}`).
+ *   - **I-4 → `hard_internal`** — see `STRATEGI_HARD_INTERNAL`.
+ *   - **J-4 → `default_internal`** — see `STRATEGI_DEFAULT_INTERNAL` and its
+ *     diff-filter warning.
  *
- * The one that is not a judgement call is **I-4**, provisionally hard-internal:
- * §4 defines it as notes to our own delivery divisions about "hal yang mudah
- * salah dipahami". Shown to a client, that reads as a list of the mistakes our
- * team keeps making on their account.
+ * Moving I-4 or J-4 out later is a disclosure decision and needs a DECISIONS.md
+ * entry plus (for I-4) a `DROP/ADD CONSTRAINT` in the same commit as the change.
  */
-export const STRATEGI_TIER_PROVISIONAL: Readonly<Record<string, VisibilityTier>> = {
-  'A-15': 'default_internal', // akses & hak per channel — argues for shareable (it is a joint checklist)
-  'A-16': 'default_internal', // blocker akses — same argument as C-7, which IS shareable
-  'I-1': 'default_internal', // ringkasan turunan otomatis ke kerangka Plan
-  'I-4': 'hard_internal', // catatan per divisi eksekusi — see the note above
-  'J-1': 'default_internal', // versi, status, tanggal submit, AM pengisi — a document header
-  'J-4': 'default_internal', // auto-diff vs versi sebelumnya — see the warning below
-};
-
-/**
- * Field IDs that §4.1 leaves unclassified, named so the decision is greppable.
- *
- * ⚠️ **J-4 carries a hazard beyond its own tier.** It is an AUTO DIFF over the
- * whole record, so a shareable J-4 renders changes to fields that are themselves
- * hard-internal — the diff would leak D-7 and H-4 through the back door while
- * every per-field check passed. Whatever tier J-4 ends up with, the diff
- * generator must apply the field filter to its own rows; that is not optional
- * and it is not implied by this table.
- */
-export const STRATEGI_TIER_UNDECIDED: readonly string[] = Object.keys(STRATEGI_TIER_PROVISIONAL);
 
 /**
  * Sections whose every field §4.1 declares shareable in one stroke ("all of B",
@@ -198,13 +194,14 @@ export const STRATEGI_FIELD_ROSTER: readonly string[] = [
 /**
  * The exact list of field IDs the DB CHECK must refuse to mark shareable.
  *
- * COMPUTED, never typed a second time: §7 calls the hard-internal set a frozen
- * invariant enforced twice and forbids the two enforcers to diverge, so the
- * migration's CHECK is asserted against THIS — not against
- * `STRATEGI_HARD_INTERNAL`, which is only part of the answer while X-16 keeps
- * I-4 provisionally hard-internal. A CHECK written from the seven-member §4.1
- * row would let an AM publish I-4 through the database while `isHardInternal`
- * said no in TypeScript, which is precisely the divergence §7 names.
+ * COMPUTED from the tier map, never typed a second time: §7 calls the
+ * hard-internal set a frozen invariant enforced twice and forbids the two
+ * enforcers to diverge, so the migration's CHECK is asserted against the output
+ * of `isHardInternal` — not against a hand-copied literal that a later edit to
+ * `STRATEGI_HARD_INTERNAL` could silently leave behind. A CHECK and a TS
+ * predicate carrying different sets is precisely the divergence §7 names, and it
+ * is a leak: the AM ticks the box, gets a 200, and the write fails at the wall
+ * with no BI message anywhere near it.
  */
 export function hardInternalFieldIds(): string[] {
   return STRATEGI_FIELD_ROSTER.filter((id) => isHardInternal(id));
@@ -227,9 +224,6 @@ export function tierOf(fieldId: string): VisibilityTier | null {
 
   if (STRATEGI_HARD_INTERNAL.includes(id)) return 'hard_internal';
   if (STRATEGI_DEFAULT_INTERNAL.includes(id)) return 'default_internal';
-
-  const provisional = STRATEGI_TIER_PROVISIONAL[id];
-  if (provisional !== undefined) return provisional;
 
   // Whole-section rules come AFTER the explicit lists so a future exception
   // inside B or G is honoured rather than swallowed by the section.

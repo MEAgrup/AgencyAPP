@@ -163,32 +163,33 @@ export function ringkasVisibilitas(
  * rule and render with their kode, the same vocabulary the gap panel already
  * uses on this page.
  *
- * Six of them carry a ⚠️ because X-16 has not been answered: their tier is
- * provisional, chosen to be wrong in the recoverable direction.
+ * The six §4.1 once left unclassified are named here too. The owner resolved
+ * their tiers via X-16 on 2026-08-09 (`docs/DECISIONS.md`), so they are grouped
+ * below by the tier they landed in — no longer flagged as provisional.
  */
 export const FIELD_LABEL: Readonly<Record<string, string>> = {
-  // §4.1 row 1 — hard-internal, never shareable.
+  // §4.1 row 1 (+ I-4 via X-16, 2026-08-09) — hard-internal, never shareable.
   'A-10': 'Riwayat agensi sebelumnya',
   'D-7': 'Sanggahan target',
   'F-5': 'Divisi & beban tim',
   'F-7': 'Batas toleransi over-komitmen',
   'H-4': 'Kondisi stop / ubah scope',
+  'I-4': 'Catatan per divisi eksekusi',
   'J-2': 'Catatan reviewer',
   'J-3': 'Alasan revisi',
-  // §4.1 row 2 — internal by default, the AM may share.
+  // §4.1 row 2 (+ J-4 via X-16, 2026-08-09) — internal by default, the AM may share.
   'A-3': 'Ruang margin',
   'A-13': 'SLA klien',
   'C-6': 'Risiko struktural',
   'E-4': 'Floor price',
   'F-1': 'Sumber dana iklan',
   'H-1': 'Risk register',
-  // Unclassified by §4.1 — X-16, tier masih sementara.
+  'J-4': 'Auto-diff vs versi sebelumnya',
+  // Default-shareable via X-16 (2026-08-09) — named here for a friendlier badge.
   'A-15': 'Akses & hak per channel',
   'A-16': 'Blocker akses + target tanggal',
   'I-1': 'Ringkasan turunan ke kerangka Plan',
-  'I-4': 'Catatan per divisi eksekusi',
   'J-1': 'Versi, status, tanggal submit, AM',
-  'J-4': 'Auto-diff vs versi sebelumnya',
 };
 
 /** The label for a field ID, or the kode itself when §4.1 does not name it. */

@@ -71,6 +71,19 @@ export const STRATEGI_DRAFT_REVISI = 'Draft Revisi';
 export const STRATEGI_KEDALUWARSA = 'Kedaluwarsa';
 export const STRATEGI_DIARSIPKAN = 'Diarsipkan';
 
+/**
+ * Statuses of a version that is already history — immutable and still readable
+ * (Rule 13). A write against one of these is refused by every endpoint reachable
+ * after `Aktif`: `setFieldVisibility` (rewriting what a client already saw) and
+ * `setAssumptionStatus` (X-17 — a flip on an archived version would fire
+ * `strategi_revisi_disarankan`, a "please revise" about a version that has
+ * already been superseded, a message with no correct action for its recipient).
+ */
+export const VERSI_HISTORIS_STATUS: readonly string[] = [
+  STRATEGI_DIARSIPKAN,
+  STRATEGI_KEDALUWARSA,
+];
+
 /** D1 — the contracted channel scope. */
 export const CHANNELS = [
   'Shopee',
@@ -466,6 +479,13 @@ export const MSG_SANGGAHAN_INCOMPLETE =
 export const MSG_ASSUMPTION_STATUS_INVALID = '[status asumsi tidak dikenal]';
 /** D-8 — the code does not name an assumption on this Strategi. */
 export const MSG_ASSUMPTION_NOT_FOUND = '[asumsi tidak ditemukan pada Strategi ini]';
+/**
+ * D-8 / X-17 — an archived or expired version is history (Rule 13); its
+ * assumptions can no longer be flipped, because the flip would suggest revising
+ * a version that has already been superseded.
+ */
+export const MSG_ASSUMPTION_STATUS_TERKUNCI =
+  '[status asumsi tidak dapat diubah pada versi yang sudah diarsipkan atau kedaluwarsa]';
 /** E-1 — the thesis the whole of Section E hangs off. */
 export const MSG_GROWTH_THESIS_REQUIRED = '[growth thesis wajib diisi]';
 /** E-13 — the order is stored on the pillars; the reason is not. */
@@ -3923,6 +3943,14 @@ export async function raiseSanggahan(
  * needs a trigger, a reason, and the broken assumptions — a human decision. This
  * emits the suggestion (`strategi_revisi_disarankan`, "disarankan"), which is what
  * the PRD asks for and no more.
+ *
+ * **Refused once the version is history (X-17, `docs/DECISIONS.md` 2026-08-09).**
+ * `Aktif` is open on purpose — an assumption breaks during execution — but
+ * `Diarsipkan`/`Kedaluwarsa` are not: a flip there would fire
+ * `strategi_revisi_disarankan` about a version already superseded, a "please
+ * revise" with no correct action for its recipient. The UI already declines to
+ * offer it (`canFlipAsumsi`); this closes the same door for a direct or
+ * service-role caller, using the `setFieldVisibility` precedent for the check.
  */
 export async function setAssumptionStatus(
   sql: Sql,
@@ -3944,6 +3972,10 @@ export async function setAssumptionStatus(
     // an assumption stopped holding.
     if (!canWriteStrategi(actor, ownerAm) && !canApproveStrategi(actor)) {
       throw new ForbiddenError(MSG_NOT_OWNER_AM);
+    }
+    // X-17 — a version that is already history takes no flip (see the note above).
+    if (VERSI_HISTORIS_STATUS.includes(head.status)) {
+      throw new ConflictError(MSG_ASSUMPTION_STATUS_TERKUNCI);
     }
 
     const rows = await tx<{ status: string }[]>`
@@ -4572,12 +4604,6 @@ export async function saveHandoff(
 // A-10 — the §4.1 visibility overlay (Rule 16)
 // ---------------------------------------------------------------------------
 
-/** Statuses whose visibility is settled: a version a client may already have read. */
-const VISIBILITAS_TERKUNCI_STATUS: readonly string[] = [
-  STRATEGI_DIARSIPKAN,
-  STRATEGI_KEDALUWARSA,
-];
-
 /**
  * Seeds `STRG_FIELD_VISIBILITY` with the §4.1 defaults for one Strategi (§7).
  *
@@ -4688,7 +4714,7 @@ export async function setFieldVisibility(
     if (!canWriteStrategi(actor, ownerAm)) {
       throw new ForbiddenError(MSG_NOT_OWNER_AM);
     }
-    if (VISIBILITAS_TERKUNCI_STATUS.includes(head.status)) {
+    if (VERSI_HISTORIS_STATUS.includes(head.status)) {
       throw new ConflictError(MSG_VISIBILITAS_TERKUNCI);
     }
 
