@@ -147,7 +147,8 @@ export function mapError(err: unknown): Response {
     err instanceof kol.ConflictError ||
     err instanceof board.ConflictError ||
     err instanceof livestream.ConflictError ||
-    err instanceof marketing.DuplicateError
+    err instanceof marketing.DuplicateError ||
+    err instanceof admin.ConflictError
   ) {
     // Lifecycle conflicts: a dedup block, an un-closable attempt, a lead whose
     // win was already resolved, or a full-verification blocked on a missing
