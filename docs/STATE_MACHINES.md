@@ -141,7 +141,7 @@ All else blocked: `[transisi status tidak diizinkan]`.
 - **Terminal:** `Ditutup`, `Ditutup Otomatis`.
 - `Disetujui`/`Dikembalikan` di PRD §8 **bukan state** — PA-5 tidak memuat keduanya; itu cara §8 menuliskan aksi "SPV setuju ⇒ `Aktif`" / "SPV kembalikan ⇒ `Draft`".
 - **Hanya satu periode `Aktif` per rantai** (Rule 5) ditegakkan index parsial `uq_plan_aktif_kontrak`/`uq_plan_aktif_klien`, bukan oleh mesin.
-- **Edge = data (B-01); GERBANG = domain (B-03).** Mesin ini mendaftar transisi MANA yang sah. SIAPA yang boleh menekan tombol mana pada periode 1, KAPAN sebuah `Terjadwal` boleh auto vs harus lewat `Menunggu Persetujuan`, dan job aktivasi 00:00 WIB adalah B-03/B-09 — bukan sesuatu yang bisa dilihat `sm_edges`.
+- **Edge = data (B-01); GERBANG = domain (B-03, MENDARAT).** Mesin ini mendaftar transisi MANA yang sah; SIAPA yang boleh menekan tombol mana adalah `packages/domain/src/plan.ts`: `submitPlanPeriode` (`Draft → Diajukan`, AM pemilik + PA-7 wajib), `approvePlanPeriode`/`returnPlanPeriode` (periode 1, gerbang `isLead(Account)`, catatan wajib saat kembali), `activatePlanPeriode` (`Terjadwal → Aktif`, service-role, bukan lead). Semua lewat `transitionPlan` — pembungkus tunggal atas `sm_transition`. **Masih tiketnya:** KAPAN `Terjadwal` harus lewat `Menunggu Persetujuan` (penyesuaian `Turun >10%`) = B-04; job aktivasi/force-close 00:00 WIB = B-09.
 - **Dormansi Plan Satuan = mesin #17** (`Aktif ⇄ Dorman`, M6C §7), properti RANTAI periode bukan satu periode. Menyusul di B-10; belum didaftarkan. Periode-nya sendiri tetap memakai mesin #16 ini apa adanya.
 
 ## 7. Brief `BRF-` (M6) — also the canonical Task machine (M12) applied to AST / BKG / BRF-as-task

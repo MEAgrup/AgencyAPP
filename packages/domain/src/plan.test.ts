@@ -23,11 +23,17 @@
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
-import { ForbiddenError, NotFoundError } from './account';
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from './account';
 import { createStrategi } from './strategi';
 import {
+  MSG_PLAN_APPROVE_FORBIDDEN,
+  MSG_PLAN_CATATAN_PEMBUKA_REQUIRED,
   MSG_PLAN_FORBIDDEN,
   MSG_PLAN_NOT_FOUND,
+  MSG_PLAN_RETURN_NOTES_REQUIRED,
+  activatePlanPeriode,
+  approvePlanPeriode,
+  canApprovePlan,
   canReadPlan,
   canWritePlan,
   computePeriods,
@@ -35,6 +41,8 @@ import {
   getPlan,
   getPlanDetail,
   listPlansForContract,
+  returnPlanPeriode,
+  submitPlanPeriode,
 } from './plan';
 
 const am = (id = 'ZZ-AM') => ({
@@ -72,6 +80,14 @@ describe('permission predicates', () => {
     expect(canReadPlan(od(), 'ZZ-AM')).toBe(true);
     expect(canWritePlan(od(), 'ZZ-AM')).toBe(false);
     expect(canReadPlan(otherAm(), 'ZZ-AM')).toBe(false);
+  });
+
+  it('gates period-1 approval to an Account lead / Director only (Rule 3)', () => {
+    expect(canApprovePlan(spv())).toBe(true);
+    expect(canApprovePlan(director())).toBe(true);
+    // An AM cannot approve their own period; a read-only OD never writes.
+    expect(canApprovePlan(am())).toBe(false);
+    expect(canApprovePlan(od())).toBe(false);
   });
 });
 
@@ -486,5 +502,122 @@ describeDb('generatePlanPeriods', () => {
     );
     expect(second).toEqual([]);
     expect(await listPlansForContract(sql, am(), f.contractId)).toHaveLength(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-03 — lifecycle gates (machine #16)
+// ---------------------------------------------------------------------------
+
+async function statusOf(id: string): Promise<string> {
+  const r = await sql<{ status: string }[]>`select status from plan where id = ${id}`;
+  return r[0].status;
+}
+
+describeDb('submitPlanPeriode (Draft → Diajukan)', () => {
+  it('lets the owning AM submit once the opening note is filled (PA-7)', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriod(f, { status: 'Draft' });
+    // PA-7 is mandatory at submit — an empty opening is rejected first.
+    await expect(submitPlanPeriode(sql, am(), id)).rejects.toThrow(
+      MSG_PLAN_CATATAN_PEMBUKA_REQUIRED,
+    );
+    await expect(submitPlanPeriode(sql, am(), id)).rejects.toBeInstanceOf(ValidationError);
+    await sql`update plan set catatan_pembuka = 'Fokus akuisisi bulan 1' where id = ${id}`;
+    const plan = await submitPlanPeriode(sql, am(), id);
+    expect(plan.status).toBe('Diajukan');
+  });
+
+  it('refuses an unrelated AM, and lets the machine confine it to period 1', async () => {
+    const f = await seedContractStrategi();
+    const draft = await seedPeriod(f, { periodeNo: 1, status: 'Draft' });
+    await sql`update plan set catatan_pembuka = 'x' where id = ${draft}`;
+    await expect(submitPlanPeriode(sql, otherAm(), draft)).rejects.toThrow(MSG_PLAN_FORBIDDEN);
+    // A period 2..n never sits in Draft: with the note set, the move is still
+    // blocked because Terjadwal has no `→ Diajukan` edge (not a silent no-op).
+    const sched = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    await sql`update plan set catatan_pembuka = 'x' where id = ${sched}`;
+    await expect(submitPlanPeriode(sql, am(), sched)).rejects.toBeInstanceOf(ConflictError);
+    expect(await statusOf(sched)).toBe('Terjadwal');
+  });
+});
+
+describeDb('approvePlanPeriode (Diajukan → Aktif)', () => {
+  it('activates period 1 when the SPV approves, and switches on the chain', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriod(f, { periodeNo: 1, status: 'Diajukan' });
+    const plan = await approvePlanPeriode(sql, spv(), id);
+    expect(plan.status).toBe('Aktif');
+  });
+
+  it('refuses a non-lead, and blocks approval of a period not yet submitted', async () => {
+    const f = await seedContractStrategi();
+    const diajukan = await seedPeriod(f, { periodeNo: 1, status: 'Diajukan' });
+    // An AM (even the owner) is not the SPV — the domain gate refuses before the DB.
+    await expect(approvePlanPeriode(sql, am(), diajukan)).rejects.toThrow(
+      MSG_PLAN_APPROVE_FORBIDDEN,
+    );
+    await expect(approvePlanPeriode(sql, am(), diajukan)).rejects.toBeInstanceOf(ForbiddenError);
+    // A Draft has no `→ Aktif` edge: the SPV cannot skip the AM's submit.
+    const draft = await seedPeriod(f, { periodeNo: 2, status: 'Draft' });
+    await expect(approvePlanPeriode(sql, spv(), draft)).rejects.toBeInstanceOf(ConflictError);
+    expect(await statusOf(draft)).toBe('Draft');
+  });
+
+  it('404s a missing period', async () => {
+    await expect(approvePlanPeriode(sql, spv(), 'PLAN-209901-9999')).rejects.toThrow(
+      MSG_PLAN_NOT_FOUND,
+    );
+  });
+});
+
+describeDb('returnPlanPeriode (Diajukan → Draft)', () => {
+  it('sends period 1 back with a mandatory note recorded in the audit log', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriod(f, { periodeNo: 1, status: 'Diajukan' });
+    // A blank note is rejected before anything moves (checked ahead of the gate).
+    await expect(returnPlanPeriode(sql, spv(), id, '   ')).rejects.toThrow(
+      MSG_PLAN_RETURN_NOTES_REQUIRED,
+    );
+    await expect(returnPlanPeriode(sql, spv(), id, '')).rejects.toBeInstanceOf(ValidationError);
+    expect(await statusOf(id)).toBe('Diajukan');
+
+    const plan = await returnPlanPeriode(sql, spv(), id, 'Target Shopee terlalu agresif');
+    expect(plan.status).toBe('Draft');
+    // The note lands in the immutable log (Rule 19), not on a mutable column.
+    const audit = await sql<{ after_json: { catatan?: string } }[]>`
+      select after_json from audit_log
+       where entity_type = 'plan' and entity_id = ${id} and action = 'dikembalikan'`;
+    expect(audit).toHaveLength(1);
+    expect(audit[0].after_json.catatan).toBe('Target Shopee terlalu agresif');
+  });
+
+  it('refuses a non-lead even with a note', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriod(f, { periodeNo: 1, status: 'Diajukan' });
+    await expect(returnPlanPeriode(sql, am(), id, 'coba')).rejects.toThrow(
+      MSG_PLAN_APPROVE_FORBIDDEN,
+    );
+    expect(await statusOf(id)).toBe('Diajukan');
+  });
+});
+
+describeDb('activatePlanPeriode (Terjadwal → Aktif, periods 2..n)', () => {
+  it('auto-activates a scheduled period WITHOUT a lead (the service-role path)', async () => {
+    const f = await seedContractStrategi();
+    // Period 1 closed, period 2 scheduled — the one-Aktif-per-chain rule is free.
+    await seedPeriod(f, { periodeNo: 1, status: 'Ditutup' });
+    const p2 = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    // A staff AM is explicitly NOT a lead: activation still succeeds, proving the
+    // edge is not lead-gated (Rule 4). The 00:00 WIB job (B-09) is the real caller.
+    const plan = await activatePlanPeriode(sql, am(), p2);
+    expect(plan.status).toBe('Aktif');
+  });
+
+  it('refuses an unrelated account', async () => {
+    const f = await seedContractStrategi();
+    const p2 = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    await expect(activatePlanPeriode(sql, otherAm(), p2)).rejects.toThrow(MSG_PLAN_FORBIDDEN);
+    expect(await statusOf(p2)).toBe('Terjadwal');
   });
 });
