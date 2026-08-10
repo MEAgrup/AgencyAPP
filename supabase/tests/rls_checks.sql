@@ -995,6 +995,14 @@ RESET ROLE;
 --     O48") dan satu oleh A-10 bagian 2 (DECISIONS 2026-08-09
 --     "strategi_field_visibility masuk ledger O48"); mereka mengikuti kelas
 --     siblingnya, bukan membuka kelas baru.
+--     Empat baris `plan_*` (target/actual/review/flag) adalah kelas yang SAMA:
+--     predikatnya `private.jwt_can_read_plan()`, cermin persis `plan_select` —
+--     termasuk arm `jwt_is_lead() AND jwt_division() = 'Account'` (DECISIONS
+--     2026-08-10 "B-01 — empat tabel anak Plan masuk ledger O48"). `plan_row`
+--     TIDAK di sini: policy-nya membawa arm divisi PIC-nya sendiri, dan
+--     `plan_row_week` mewarisinya lewat EXISTS, jadi keduanya lolos detektor.
+--     O60 (jika dikerjakan) akan menghapus keempatnya bersama kesebelas
+--     `strategi_*` sekaligus.
 --     Membuat detektor menembus satu tingkat indireksi akan MENGHAPUS
 --     kesebelasnya sekaligus — diusulkan sebagai **O60**, sengaja tidak
 --     dikerjakan di dalam tiket fitur: mengubah semantik invariant bersama
@@ -1012,7 +1020,9 @@ DECLARE
     'marketing_performance_records_select','master_service_versions_select',
     'master_services_select','metric_entries_select','metric_entry_assets_select',
     'negotiation_proposal_lines_select','negotiation_proposals_select','notifications_select',
-    'optimization_logs_select','plan_gate_config_select','prospect_attempt_nq_reasons_select',
+    'optimization_logs_select','plan_actual_select','plan_flag_select',
+    'plan_gate_config_select','plan_review_select','plan_target_select',
+    'prospect_attempt_nq_reasons_select',
     'prospect_attempts_select','qualified_form_services_select','qualified_forms_select',
     'strategi_akses_select','strategi_assumption_select','strategi_baseline_bulan_select',
     'strategi_channel_select','strategi_diagnosa_select','strategi_dispatch_select',

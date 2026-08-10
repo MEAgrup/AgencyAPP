@@ -140,9 +140,9 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "82"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "89"
 check "entity_prefix"    "select count(*) from entity_prefix"    "31"
-check "sm_machines"      "select count(*) from sm_machines"      "16"
+check "sm_machines"      "select count(*) from sm_machines"      "17"
 check "notif_events"     "select count(*) from notif_events"     "34"
 # 34 = 17 (v1) + 14 (v2, O55) + 2 (v3, M5-OA-7) + 1 (v4, A-08 D-7). Angka ini TIDAK boleh dinaikkan sendirian: ia
 # harus sama dengan SUM(event_count) di notif_catalog_versions, dan gate di

@@ -122,6 +122,28 @@ All else blocked: `[transisi status tidak diizinkan]`.
 - Semua edge `requireLead`: vendor dipakai bersama, satu AM tidak boleh mematikan vendor yang dibooking AM lain.
 - Mesin ini TIDAK bernomor di PRD (M6A/6B/6C hanya menomori #15 Strategi dan #16 Plan; #17 sudah dipesan M6C §7 untuk dormansi Plan Satuan). Didaftarkan atas aturan rumah #2 — dicatat di `DECISIONS.md` 2026-08-06.
 
+## 6d. Plan `PLAN-` (M6B §8) — mesin #16, periode Plan
+
+`Terjadwal` → `Draft` (periode 1) → `Diajukan` → (`Aktif` | kembali `Draft`); `Terjadwal` → `Aktif` (auto, periode 2..n); `Terjadwal` → `Menunggu Persetujuan` → `Aktif`; `Aktif` → `Ditutup` | `Ditutup Otomatis`.
+
+| From | To | Who | Effect |
+|---|---|---|---|
+| `Terjadwal` | `Draft` | sistem/AM | Periode 1 dibuka untuk diisi (Rule 2) |
+| `Draft` | `Diajukan` | AM pemilik | AM mengajukan periode 1 (Rule 3) |
+| `Diajukan` | `Aktif` | SPV / Head Account (requireLead) | Persetujuan periode 1 — yang mengaktifkan mekanisme Plan seluruh kontrak (Rule 3) |
+| `Diajukan` | `Draft` | SPV / Head Account (requireLead) | Dikembalikan, catatan WAJIB (Rule 3) |
+| `Terjadwal` | `Aktif` | sistem (job 00:00 WIB) | Periode 2..n auto-aktif di tanggal mulainya (Rule 4). BUKAN requireLead: dijalankan service-role, bukan seorang lead |
+| `Terjadwal` | `Menunggu Persetujuan` | sistem | Penyesuaian `Turun >10%` tertunda menahan aktivasi (Rule 4/9) |
+| `Menunggu Persetujuan` | `Aktif` | sistem/SPV | Penyesuaian diselesaikan, atau kedaluwarsa di tanggal mulai ⇒ aktif dengan target Strategi asli (Rule 4) |
+| `Aktif` | `Ditutup` | AM pemilik | Penutupan periode oleh AM (Rule 15) — GMV manual + semua baris terminal + review lengkap, transaksional |
+| `Aktif` | `Ditutup Otomatis` | sistem | Force-close saat lewat jendela (Rule 5/15). Terminal |
+
+- **Terminal:** `Ditutup`, `Ditutup Otomatis`.
+- `Disetujui`/`Dikembalikan` di PRD §8 **bukan state** — PA-5 tidak memuat keduanya; itu cara §8 menuliskan aksi "SPV setuju ⇒ `Aktif`" / "SPV kembalikan ⇒ `Draft`".
+- **Hanya satu periode `Aktif` per rantai** (Rule 5) ditegakkan index parsial `uq_plan_aktif_kontrak`/`uq_plan_aktif_klien`, bukan oleh mesin.
+- **Edge = data (B-01); GERBANG = domain (B-03).** Mesin ini mendaftar transisi MANA yang sah. SIAPA yang boleh menekan tombol mana pada periode 1, KAPAN sebuah `Terjadwal` boleh auto vs harus lewat `Menunggu Persetujuan`, dan job aktivasi 00:00 WIB adalah B-03/B-09 — bukan sesuatu yang bisa dilihat `sm_edges`.
+- **Dormansi Plan Satuan = mesin #17** (`Aktif ⇄ Dorman`, M6C §7), properti RANTAI periode bukan satu periode. Menyusul di B-10; belum didaftarkan. Periode-nya sendiri tetap memakai mesin #16 ini apa adanya.
+
 ## 7. Brief `BRF-` (M6) — also the canonical Task machine (M12) applied to AST / BKG / BRF-as-task
 `[To Do]` → `[In Progress]` → `[Submitted]` → `[In Review]` → `[Approved]` (terminal)
 - `[In Review]` → `[Revision Requested]` → `[In Progress]` (loop; Revision Count +1; turnaround does NOT reset).
