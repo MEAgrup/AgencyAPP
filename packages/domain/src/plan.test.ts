@@ -41,9 +41,16 @@ import {
   MSG_PLAN_RETURN_NOTES_REQUIRED,
   MSG_PLAN_ROW_NOT_FOUND,
   MSG_PLAN_TARGET_NOT_FOUND,
+  MSG_ACTUAL_BUKTI_REQUIRED,
+  MSG_ACTUAL_METRIC_NOT_MANUAL,
+  MSG_ACTUAL_NILAI_INVALID,
+  MSG_ACTUAL_NOT_FOUND,
   MSG_PLAN_WEEK_NO_INVALID,
   MSG_PLAN_WEEK_STATUS,
   MSG_PLAN_WEEK_SUM_MISMATCH,
+  MSG_SENGKETA_ALASAN_REQUIRED,
+  MSG_SENGKETA_NOT_AUTO,
+  MANUAL_METRICS,
   activatePlanPeriode,
   adjustPlanTarget,
   approvePlanPeriode,
@@ -55,10 +62,13 @@ import {
   computePeriods,
   contractDeficit,
   distributeWeeks,
+  fileSengketa,
   generatePlanPeriods,
   getPlan,
   getPlanDetail,
   listPlansForContract,
+  recordAutoActual,
+  recordManualActual,
   rejectTargetAdjustment,
   returnPlanPeriode,
   setWeeklyDistribution,
@@ -1091,5 +1101,120 @@ describeDb('setWeeklyDistribution (AM re-drag, Rule 7/18)', () => {
       MSG_PLAN_ROW_NOT_FOUND,
     );
     expect(p).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-06 — hybrid actuals (Rule 10/11, Section P-E)
+// ---------------------------------------------------------------------------
+
+describe('MANUAL_METRICS (X-08 — explicit, not silently mixed)', () => {
+  it('names exactly GMV, and not the auto metrics', () => {
+    expect(MANUAL_METRICS).toEqual(['gmv']);
+    expect(MANUAL_METRICS).not.toContain('roas_min');
+    expect(MANUAL_METRICS).not.toContain('jam_live'); // conditional (PA-4/X-08), not yet
+  });
+});
+
+describeDb('recordManualActual (PE-1/PE-2, Rule 10/11)', () => {
+  const BUKTI = { fileBukti: 'export-shopee.pdf', tanggalAmbil: '2026-09-12' };
+
+  it('writes a manual GMV row with its proof, and is idempotent (a correction)', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { status: 'Aktif' });
+    const a = await recordManualActual(sql, am(), p, 'Shopee', 'gmv', 188000000, BUKTI);
+    expect(a.sumber).toBe('manual');
+    expect(a.nilai).toBe(188000000);
+    expect(a.fileBukti).toBe('export-shopee.pdf');
+    expect(a.tanggalAmbil).toBe('2026-09-12');
+    // A re-entry overwrites the figure (no second row).
+    const a2 = await recordManualActual(sql, am(), p, 'Shopee', 'gmv', 190000000, BUKTI);
+    expect(a2.nilai).toBe(190000000);
+    const detail = await getPlanDetail(sql, am(), p);
+    expect(detail.actuals.filter((x) => x.metric === 'gmv')).toHaveLength(1);
+  });
+
+  it('rejects a non-manual metric, missing proof, a negative figure, and an unrelated AM', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { status: 'Aktif' });
+    await expect(
+      recordManualActual(sql, am(), p, 'Shopee', 'roas_min', 4.6, BUKTI),
+    ).rejects.toThrow(MSG_ACTUAL_METRIC_NOT_MANUAL);
+    await expect(
+      recordManualActual(sql, am(), p, 'Shopee', 'gmv', 1, { fileBukti: '', tanggalAmbil: '2026-09-12' }),
+    ).rejects.toThrow(MSG_ACTUAL_BUKTI_REQUIRED);
+    await expect(
+      recordManualActual(sql, am(), p, 'Shopee', 'gmv', -1, BUKTI),
+    ).rejects.toThrow(MSG_ACTUAL_NILAI_INVALID);
+    await expect(
+      recordManualActual(sql, otherAm(), p, 'Shopee', 'gmv', 1, BUKTI),
+    ).rejects.toThrow(MSG_PLAN_FORBIDDEN);
+  });
+
+  it('accepts a post-close entry and logs it as an amendment (X-07: no lock)', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { status: 'Ditutup' });
+    const a = await recordManualActual(sql, am(), p, 'Shopee', 'gmv', 188000000, BUKTI);
+    expect(a.nilai).toBe(188000000);
+    const log = await sql<{ action: string }[]>`
+      select action from audit_log where entity_id = ${p} order by id desc limit 1`;
+    expect(log[0].action).toBe('realisasi_amandemen');
+  });
+
+  it('logs a within-period entry as an ordinary realisasi', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { status: 'Aktif' });
+    await recordManualActual(sql, am(), p, 'Shopee', 'gmv', 188000000, BUKTI);
+    const log = await sql<{ action: string }[]>`
+      select action from audit_log where entity_id = ${p} order by id desc limit 1`;
+    expect(log[0].action).toBe('realisasi_manual');
+  });
+});
+
+describeDb('fileSengketa (PE-6 — dispute an auto metric)', () => {
+  async function seedAuto(planId: string, metric = 'roas_min', nilai = 4.6): Promise<void> {
+    await sql`insert into plan_actual (plan_id, channel, metric, sumber, nilai, created_by)
+              values (${planId}, 'Shopee', ${metric}, 'otomatis', ${nilai}, 'SYSTEM')`;
+  }
+
+  it('records the note on an auto row without touching its value', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { status: 'Aktif' });
+    await seedAuto(p);
+    const a = await fileSengketa(sql, am(), p, 'Shopee', 'roas_min', 'tidak cocok dashboard iklan');
+    expect(a.sengketa).toBe('tidak cocok dashboard iklan');
+    expect(a.nilai).toBe(4.6);
+    expect(a.sumber).toBe('otomatis');
+  });
+
+  it('refuses a dispute on a manual metric, an empty reason, and a missing row', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { status: 'Aktif' });
+    await recordManualActual(sql, am(), p, 'Shopee', 'gmv', 1, {
+      fileBukti: 'x.pdf',
+      tanggalAmbil: '2026-09-12',
+    });
+    await expect(fileSengketa(sql, am(), p, 'Shopee', 'gmv', 'alasan')).rejects.toThrow(
+      MSG_SENGKETA_NOT_AUTO,
+    );
+    await seedAuto(p, 'jumlah_video', 11);
+    await expect(fileSengketa(sql, am(), p, 'Shopee', 'jumlah_video', '  ')).rejects.toThrow(
+      MSG_SENGKETA_ALASAN_REQUIRED,
+    );
+    await expect(fileSengketa(sql, am(), p, 'TikTok Shop', 'roas_min', 'alasan')).rejects.toThrow(
+      MSG_ACTUAL_NOT_FOUND,
+    );
+  });
+});
+
+describeDb('recordAutoActual (system ingestion, PE-3)', () => {
+  it('writes an auto row that reads back through getPlanDetail', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { status: 'Aktif' });
+    const a = await recordAutoActual(sql, p, 'Shopee', 'roas_min', 4.6, 'SYSTEM');
+    expect(a.sumber).toBe('otomatis');
+    expect(a.nilai).toBe(4.6);
+    const detail = await getPlanDetail(sql, am(), p);
+    expect(detail.actuals.find((x) => x.metric === 'roas_min')?.sumber).toBe('otomatis');
   });
 });
