@@ -10,11 +10,15 @@
  * (Director/OD see all; an employee sees their own row), so RLS does the row
  * scoping and this handler only enforces the coarse Director/OD gate that Go's
  * handler enforced.
+ *
+ * POST adds ONE employee manually (the "bukan lewat sheets" path) — same end
+ * state as a one-row CSV import (upsert + credential provision + GoTrue link +
+ * audit), gated Director OR HR-division Lead. Privileged client, gate in domain.
  */
 import { admin } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
-import { readAsActor } from '@/lib/db';
-import { handle, json } from '@/lib/http';
+import { db, readAsActor } from '@/lib/db';
+import { handle, json, readJson } from '@/lib/http';
 import { adminEmployeeToWire } from '@/lib/wire';
 
 export async function GET(request: Request): Promise<Response> {
@@ -26,5 +30,32 @@ export async function GET(request: Request): Promise<Response> {
     }
     const rows = await readAsActor(actor, (sql) => admin.listEmployees(sql));
     return json({ data: rows.map(adminEmployeeToWire) });
+  });
+}
+
+interface NewEmployeeBody {
+  employee_id?: string;
+  nama?: string;
+  email?: string;
+  divisi?: string;
+  jabatan?: string;
+  status_aktif?: boolean;
+  temp_password?: string;
+}
+
+export async function POST(request: Request): Promise<Response> {
+  return handle(async () => {
+    const actor = requireActor(request);
+    const body = await readJson<NewEmployeeBody>(request);
+    const result = await admin.addEmployeeManually(db(), actor, {
+      employeeId: body.employee_id ?? '',
+      nama: body.nama ?? '',
+      email: body.email ?? '',
+      divisi: body.divisi ?? '',
+      jabatan: body.jabatan ?? '',
+      statusAktif: body.status_aktif ?? true,
+      tempPassword: body.temp_password ?? '',
+    });
+    return json({ result });
   });
 }

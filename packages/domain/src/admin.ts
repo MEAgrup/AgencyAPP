@@ -39,6 +39,13 @@
 
 import { permission } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
+import {
+  linkAuthUsers,
+  provisionCredentials,
+  syncEmployees,
+  type Employee,
+  type ImportResult,
+} from './employees';
 
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;
@@ -74,6 +81,11 @@ export const MSG_EMPLOYEE_MUTATION_DENIED =
   '[hanya Director atau Lead HR yang dapat mengubah divisi/jabatan karyawan]';
 /** Employee-mutation target does not exist. */
 export const MSG_EMPLOYEE_NOT_FOUND = '[karyawan tidak ditemukan]';
+/** Manual add-employee write denied (same gate as mutation: Director OR HR Lead). */
+export const MSG_EMPLOYEE_ADD_DENIED =
+  '[hanya Director atau Lead HR yang dapat menambah karyawan]';
+/** Manual add hit an existing employee_id or email (PK / uq_employees_email). */
+export const MSG_EMPLOYEE_EXISTS = '[karyawan dengan ID atau email itu sudah terdaftar]';
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -100,6 +112,14 @@ export class NotFoundError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'AdminNotFoundError';
+  }
+}
+
+/** Duplicate on a uniqueness constraint (employee_id / email). Maps to 409. */
+export class ConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AdminConflictError';
   }
 }
 
@@ -263,6 +283,87 @@ export async function updateEmployeeAssignment(
       flagged: r.flagged_for_review,
       syncedAt: r.synced_at,
     };
+  });
+}
+
+/** Input for a manual single-employee add (the "bukan lewat sheets" path). */
+export interface NewEmployeeInput {
+  employeeId: string;
+  nama: string;
+  email: string;
+  divisi: string;
+  jabatan: string;
+  /** Defaults to true — a manual add is normally an active hire. */
+  statusAktif?: boolean;
+  /** Optional initial temp password; blank => module DEFAULT_TEMP_PASSWORD. */
+  tempPassword?: string;
+}
+
+/**
+ * addEmployeeManually creates ONE employee without a CSV/sheet import — the same
+ * end state as a one-row import, in a single transaction: upsert `employees`,
+ * provision a bcrypt credential (`must_change_password=true`), link the GoTrue
+ * user, and append a `create` audit row. So the new hire can log in with a temp
+ * password and is forced to change it on first login.
+ *
+ * `employee_id` is the HRIS-issued NIK — CDPS never invents it (DATA_MODEL), so
+ * the caller supplies it. A pre-check turns a PK/`uq_employees_email` clash into
+ * a clean BI message instead of a raw constraint violation.
+ *
+ * Gate: Director OR HR-division Lead (same authority as a transfer — this is HR
+ * roster management). Takes the PRIVILEGED client: provisioning + GoTrue link go
+ * through service-role-only SQL functions, exactly like the CSV import.
+ */
+export async function addEmployeeManually(
+  sql: Sql,
+  actor: Actor,
+  input: NewEmployeeInput,
+): Promise<ImportResult> {
+  if (!canManageEmployeeAssignment(actor)) {
+    throw new ForbiddenError(MSG_EMPLOYEE_ADD_DENIED);
+  }
+  const emp: Employee = {
+    employeeId: input.employeeId.trim(),
+    nama: input.nama.trim(),
+    email: input.email.trim(),
+    divisi: input.divisi.trim(),
+    jabatan: input.jabatan.trim(),
+    statusAktif: input.statusAktif ?? true,
+    password: (input.tempPassword ?? '').trim() || undefined,
+  };
+  if (
+    emp.employeeId === '' || emp.nama === '' || emp.email === '' ||
+    emp.divisi === '' || emp.jabatan === ''
+  ) {
+    throw new ValidationError(MSG_INCOMPLETE);
+  }
+  return withTransaction(sql, async (tx) => {
+    // Reject a duplicate up front so "add" never silently overwrites an existing
+    // employee (the mutation feature is the path for editing one).
+    const clash = await tx<{ employee_id: string }[]>`
+      select employee_id from employees
+       where employee_id = ${emp.employeeId} or email = ${emp.email}
+       limit 1`;
+    if (clash.length > 0) {
+      throw new ConflictError(MSG_EMPLOYEE_EXISTS);
+    }
+    // Reuse the tested import building blocks (NOT full — never touch other rows).
+    const sync = await syncEmployees(tx, [emp], actor.employeeId, { full: false });
+    const provisioned = await provisionCredentials(tx, [emp], actor.employeeId);
+    const linked = await linkAuthUsers(tx);
+    await executors(tx).audit.insertAudit({
+      entityType: 'employee',
+      entityId: emp.employeeId,
+      actorEmployeeId: actor.employeeId,
+      action: 'create',
+      beforeJson: null,
+      afterJson: {
+        nama: emp.nama, email: emp.email, divisi: emp.divisi,
+        jabatan: emp.jabatan, status_aktif: emp.statusAktif,
+      },
+      createdBy: actor.employeeId,
+    });
+    return { source: 'manual', sync, provisioned, linked };
   });
 }
 

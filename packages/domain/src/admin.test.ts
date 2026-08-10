@@ -16,9 +16,11 @@ import { permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import {
   type Actor,
+  addEmployeeManually,
   canManageEmployeeAssignment,
   canReadAdmin,
   canWriteAdmin,
+  ConflictError,
   deleteRoleMapping,
   ForbiddenError,
   HR_DIVISION,
@@ -28,6 +30,8 @@ import {
   MSG_ADMIN_READ_DENIED,
   MSG_BAD_LEVEL,
   MSG_BAD_ROLE,
+  MSG_EMPLOYEE_ADD_DENIED,
+  MSG_EMPLOYEE_EXISTS,
   MSG_EMPLOYEE_MUTATION_DENIED,
   MSG_EMPLOYEE_NOT_FOUND,
   MSG_INCOMPLETE,
@@ -116,6 +120,8 @@ afterEach(async () => {
   if (!sql) return;
   await sql`delete from employee_layered_roles where created_by like 'ZZ-%'`;
   await sql`delete from role_mappings where created_by like 'ZZ-%'`;
+  // addEmployeeManually provisions credentials; clear them before employees (FK).
+  await sql`delete from employee_credentials where employee_id like 'ZZ-%'`;
   await sql`delete from employees where employee_id like 'ZZ-%'`;
 });
 
@@ -435,6 +441,83 @@ describeDb('updateEmployeeAssignment', () => {
   });
 });
 
+describeDb('addEmployeeManually', () => {
+  it('creates the employee, provisions a login credential, and audits create', async () => {
+    const wm = await auditWatermark();
+    const res = await addEmployeeManually(sql, director(), {
+      employeeId: 'ZZ-NEW1', nama: 'Baru Satu', email: 'zz-new1@zz.local',
+      divisi: 'ACCOUNT', jabatan: 'ACCOUNT MANAGER',
+    });
+    expect(res.sync.synced).toBe(1);
+    expect(res.provisioned).toBe(1);
+
+    const made = (await listEmployees(sql)).find((e) => e.employeeId === 'ZZ-NEW1');
+    expect(made).toBeDefined();
+    expect(made!.divisi).toBe('ACCOUNT');
+    expect(made!.statusAktif).toBe(true);
+
+    // A credential exists, forced-change on first login — the point of "can log in".
+    const cred = await sql<{ must_change_password: boolean }[]>`
+      select must_change_password from employee_credentials where employee_id = 'ZZ-NEW1'`;
+    expect(cred).toHaveLength(1);
+    expect(cred[0].must_change_password).toBe(true);
+
+    const audit = await sql<
+      { before_json: unknown; after_json: Record<string, unknown> }[]
+    >`select before_json, after_json from audit_log
+       where entity_type = 'employee' and entity_id = 'ZZ-NEW1' and action = 'create'
+         and id > ${wm}::bigint`;
+    expect(audit).toHaveLength(1);
+    expect(audit[0].before_json).toBeNull();
+    expect(audit[0].after_json).toMatchObject({
+      nama: 'Baru Satu', divisi: 'ACCOUNT', jabatan: 'ACCOUNT MANAGER', status_aktif: true,
+    });
+  });
+
+  it('rejects a duplicate employee_id or email with a clean BI message', async () => {
+    await seedEmployee('ZZ-DUP', 'ACCOUNT', 'ADMIN A&S'); // email zz-dup@zz.local
+    await expect(
+      addEmployeeManually(sql, director(), {
+        employeeId: 'ZZ-DUP', nama: 'x', email: 'lain@zz.local', divisi: 'ACCOUNT', jabatan: 'X',
+      }),
+    ).rejects.toThrow(MSG_EMPLOYEE_EXISTS);
+    await expect(
+      addEmployeeManually(sql, director(), {
+        employeeId: 'ZZ-DUP2', nama: 'x', email: 'zz-dup@zz.local', divisi: 'ACCOUNT', jabatan: 'X',
+      }),
+    ).rejects.toBeInstanceOf(ConflictError);
+    // The clashing add never created a rival row.
+    expect((await listEmployees(sql)).filter((e) => e.employeeId === 'ZZ-DUP2')).toHaveLength(0);
+  });
+
+  it('lets an HR-division Lead add, denies a Sales Lead/staff, and needs all fields', async () => {
+    await expect(
+      addEmployeeManually(sql, salesLead(), {
+        employeeId: 'ZZ-NEW2', nama: 'x', email: 'zz-new2@zz.local', divisi: 'ACCOUNT', jabatan: 'X',
+      }),
+    ).rejects.toThrow(MSG_EMPLOYEE_ADD_DENIED);
+    await expect(
+      addEmployeeManually(sql, salesStaff(), {
+        employeeId: 'ZZ-NEW2', nama: 'x', email: 'zz-new2@zz.local', divisi: 'ACCOUNT', jabatan: 'X',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    // A denied add wrote nothing.
+    expect((await listEmployees(sql)).filter((e) => e.employeeId === 'ZZ-NEW2')).toHaveLength(0);
+
+    await expect(
+      addEmployeeManually(sql, director(), {
+        employeeId: 'ZZ-NEW3', nama: '', email: 'zz-new3@zz.local', divisi: 'ACCOUNT', jabatan: 'X',
+      }),
+    ).rejects.toThrow(MSG_INCOMPLETE);
+
+    const res = await addEmployeeManually(sql, hrLead(), {
+      employeeId: 'ZZ-NEW4', nama: 'HR Add', email: 'zz-new4@zz.local', divisi: 'KOL', jabatan: 'KOL SPECIALIST',
+    });
+    expect(res.provisioned).toBe(1);
+    expect((await listEmployees(sql)).find((e) => e.employeeId === 'ZZ-NEW4')!.divisi).toBe('KOL');
+  });
+});
+
 describe('BI messages are the exact ported strings', () => {
   it('never drifts from the Go handlers', () => {
     // These are user-visible and ported byte-for-byte; a reword is a regression.
@@ -456,5 +539,7 @@ describe('BI messages are the exact ported strings', () => {
       '[hanya Director atau Lead HR yang dapat mengubah divisi/jabatan karyawan]',
     );
     expect(MSG_EMPLOYEE_NOT_FOUND).toBe('[karyawan tidak ditemukan]');
+    expect(MSG_EMPLOYEE_ADD_DENIED).toBe('[hanya Director atau Lead HR yang dapat menambah karyawan]');
+    expect(MSG_EMPLOYEE_EXISTS).toBe('[karyawan dengan ID atau email itu sudah terdaftar]');
   });
 });
