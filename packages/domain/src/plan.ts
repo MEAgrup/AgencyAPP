@@ -145,6 +145,23 @@ export const MSG_REVIEW_PERIOD = '[review periode hanya dapat diisi saat periode
 /** PF-3 — an out-of-vocabulary Diagnosa Gap value. */
 export const MSG_REVIEW_DIAGNOSA_INVALID = '[diagnosa gap tidak valid]';
 
+// --- B-08: explicit carry-over (Rule 16 / PF-5) --------------------------
+
+/** PF-5 — the carry-over choice is not one of the three allowed values. */
+export const MSG_CARRYOVER_KEPUTUSAN_INVALID = '[keputusan carry-over tidak valid]';
+/** A carry-over decision is taken only after the row's period has closed. */
+export const MSG_CARRYOVER_PERIOD =
+  '[keputusan carry-over hanya dapat diambil setelah periode ditutup]';
+/** Only a `Sebagian` / `Tidak Dikerjakan` row gets a carry-over decision (Rule 16). */
+export const MSG_CARRYOVER_ROW_STATUS =
+  '[keputusan carry-over hanya untuk baris Sebagian atau Tidak Dikerjakan]';
+/** The row was already decided — a carry-over choice is recorded once. */
+export const MSG_CARRYOVER_ALREADY_DECIDED =
+  '[keputusan carry-over untuk baris ini sudah diambil]';
+/** `dibawa` needs a later period able to receive the row; there is none. */
+export const MSG_CARRYOVER_NO_TARGET =
+  '[tidak ada periode berikutnya yang dapat menerima baris terbawa]';
+
 // ---------------------------------------------------------------------------
 // Shape — one interface per table, camelCase (the wire boundary snake_cases)
 // ---------------------------------------------------------------------------
@@ -216,6 +233,14 @@ export interface PlanRow {
   keberatanAlasan: string | null;
   terbawa: boolean;
   periodeAsalId: string | null;
+  /**
+   * PF-5 / Rule 16 (B-08) — the carry-over disposition of THIS row when its
+   * period closed while it was `Sebagian` / `Tidak Dikerjakan`: `dibawa` /
+   * `dibatalkan` / `revisi`, or `null` while undecided (or on a row that never
+   * needs a decision). Distinct from `terbawa`, which marks a row carried INTO
+   * this period; this marks what was decided about a row leaving its own period.
+   */
+  keputusanCarryover: 'dibawa' | 'dibatalkan' | 'revisi' | null;
 }
 
 export interface PlanRowWeek {
@@ -634,6 +659,7 @@ function rowToPlanRow(r: Record<string, unknown>): PlanRow {
     keberatanAlasan: (r.keberatan_alasan as string | null) ?? null,
     terbawa: r.terbawa as boolean,
     periodeAsalId: (r.periode_asal_id as string | null) ?? null,
+    keputusanCarryover: (r.keputusan_carryover as PlanRow['keputusanCarryover']) ?? null,
   };
 }
 
@@ -2127,4 +2153,231 @@ export async function forceClosePlanPeriode(sql: Sql, actor: Actor, planId: stri
     });
     return loadPlan(tx, planId);
   });
+}
+
+// ---------------------------------------------------------------------------
+// B-08 — explicit carry-over (Rule 16 / PF-5)
+// ---------------------------------------------------------------------------
+//
+// "Carry-over is explicit." A row that ends a period `Sebagian` / `Tidak
+// Dikerjakan` does not silently vanish or silently reappear — it PROMPTS a
+// per-row decision (PF-5): carry it to the next period, drop it, or escalate it
+// to a Strategi revision. The choice is recorded (Rule 19), and a carried row
+// appears in the next period tagged `Terbawa` with its origin period.
+//
+// WHERE the decision lives. The `dibawa` OUTCOME already had a home (B-01):
+// `plan_row.terbawa` + `periode_asal_id` mark the DESTINATION row — the new row
+// born in the next period. What B-08 adds is the DECISION on the SOURCE row,
+// `keputusan_carryover` (migration 20260810030000): it records all three
+// choices, tells us which unfinished rows still await a decision, and lets a row
+// be decided exactly once. It is NOT a copy of `terbawa` — `terbawa` is a
+// property of the row carried IN; `keputusan_carryover` is the disposition of a
+// row leaving its own period. The immutable trail is the `audit_log` row, the
+// same split B-04 used for `status_persetujuan`.
+//
+// WHEN. A carry-over decision is taken AFTER the period is closed (`Ditutup` /
+// `Ditutup Otomatis`) — that is when a row's terminal status is fixed and the
+// P-F review is done. B-07 deliberately made PF-5 NOT a close precondition; this
+// is the step that follows close, exactly the entry point the flow (step 7→8)
+// describes: close, then decide each unfinished row, then the next period
+// activates carrying the `Terbawa` rows.
+//
+// WHAT carries. A `dibawa` row is copied into the next period with its full row
+// definition and `kuota` UNCHANGED. There is deliberately NO "remaining units"
+// math: a `plan_row` stores a planned quota, not an achieved count (achievement
+// lives in auto metrics / GMV, keyed per channel, not per row), so computing a
+// "remaining" quota would be inventing a number the model does not hold (house
+// rule #4 forbids user-typed derived fields; this forbids machine-invented ones
+// just as much). The AM adjusts the carried row's quota in the new period by
+// normal row editing if the remainder differs. The carried row starts fresh:
+// `status_baris='Rencana'`, no status reason, no capacity objection.
+//
+// The `defisit_terbawa` §263 VARIANCE component ("plus Σ negative variance where
+// chosen to carry") is intentionally NOT built here — see DECISIONS 2026-08-10
+// (X-18). `defisit_terbawa` stays = Σ downward adjustments (B-04): the sole
+// worked example never carries a period's variance into the deficit, PA-7 warns
+// of double-counting, and no PRD field records "chosen to carry" for money (PF-5
+// carries work rows). Because the deficit is COMPUTED, adding the component once
+// the owner pins its semantics is a zero-migration change.
+
+/** The exact value type postgres.js `sql.json` accepts (jsonb serializer). The
+ * carried arrays are genuine JSON but typed `unknown[]` on the domain shape. */
+type JsonParam = Parameters<TransactionSql['json']>[0];
+
+/** The three PF-5 carry-over choices. */
+export type CarryOverKeputusan = 'dibawa' | 'dibatalkan' | 'revisi';
+const CARRYOVER_KEPUTUSAN: readonly CarryOverKeputusan[] = ['dibawa', 'dibatalkan', 'revisi'];
+
+/** The row statuses that prompt a carry-over decision (Rule 16). */
+const CARRYOVER_ROW_STATUSES: readonly PlanRow['statusBaris'][] = ['Sebagian', 'Tidak Dikerjakan'];
+
+/** The result of a carry-over decision: the decided source row, and — for
+ * `dibawa` — the new `Terbawa` row created in the next period (else `null`). */
+export interface CarryOverResult {
+  row: PlanRow;
+  carried: PlanRow | null;
+}
+
+/**
+ * nextPeriodInChain finds the period that follows `plan` — same chain, one
+ * period number higher — that is able to receive a carried row (i.e. not itself
+ * closed). A full-management chain shares a contract; a Plan Satuan chain
+ * (`lingkup='klien'`, no contract) shares the client. Returns the period id, or
+ * `null` when there is no such period (the source is the last period, or the
+ * next one has already closed).
+ */
+async function nextPeriodInChain(tx: TransactionSql, plan: Plan): Promise<string | null> {
+  const rows =
+    plan.contractId !== null
+      ? await tx<{ id: string; status: PlanStatus }[]>`
+          select id, status from plan
+           where contract_id = ${plan.contractId} and periode_no = ${plan.periodeNo + 1}
+           for update`
+      : await tx<{ id: string; status: PlanStatus }[]>`
+          select id, status from plan
+           where client_id = ${plan.clientId} and lingkup = 'klien'
+             and periode_no = ${plan.periodeNo + 1}
+           for update`;
+  if (rows.length === 0) return null;
+  if (PLAN_TERMINAL.includes(rows[0].status)) return null;
+  return rows[0].id;
+}
+
+/**
+ * decideCarryOver records the PF-5 decision for ONE unfinished row of a closed
+ * period (Rule 16). The owning AM / Account lead chooses `dibawa` / `dibatalkan`
+ * / `revisi`; the choice is stamped on the source row (`keputusan_carryover`)
+ * and appended to the immutable log, and a row is decided exactly once.
+ *
+ * `dibawa` also creates the destination row: a full copy of the source row in
+ * the next period, `terbawa=true`, `periode_asal_id` = the source period, reset
+ * to `Rencana`. `dibatalkan` (drop) and `revisi` (escalate to a Strategi
+ * revision — the revision itself is PF-7's flow) record the decision only.
+ *
+ * The period must be closed and the row must be `Sebagian` / `Tidak Dikerjakan`
+ * — the only rows Rule 16 prompts for.
+ */
+export async function decideCarryOver(
+  sql: Sql,
+  actor: Actor,
+  planRowId: number,
+  keputusan: CarryOverKeputusan,
+): Promise<CarryOverResult> {
+  if (!CARRYOVER_KEPUTUSAN.includes(keputusan)) {
+    throw new ValidationError(MSG_CARRYOVER_KEPUTUSAN_INVALID);
+  }
+  return withTransaction(sql, async (tx) => {
+    const src = await tx<Record<string, unknown>[]>`
+      select * from plan_row where id = ${planRowId} for update`;
+    if (src.length === 0) throw new NotFoundError(MSG_PLAN_ROW_NOT_FOUND);
+    const source = rowToPlanRow(src[0]);
+
+    const plan = await loadPlanForUpdate(tx, source.planId);
+    const ownerAm = await ownerAmOfClient(tx, plan.clientId);
+    if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+
+    if (!PLAN_TERMINAL.includes(plan.status)) throw new ConflictError(MSG_CARRYOVER_PERIOD);
+    if (!CARRYOVER_ROW_STATUSES.includes(source.statusBaris)) {
+      throw new ConflictError(MSG_CARRYOVER_ROW_STATUS);
+    }
+    if (source.keputusanCarryover !== null) throw new ConflictError(MSG_CARRYOVER_ALREADY_DECIDED);
+
+    let carried: PlanRow | null = null;
+    if (keputusan === 'dibawa') {
+      const targetPlanId = await nextPeriodInChain(tx, plan);
+      if (targetPlanId === null) throw new ValidationError(MSG_CARRYOVER_NO_TARGET);
+      carried = await copyRowToPeriod(tx, actor, source, targetPlanId, plan.id);
+    }
+
+    await tx`
+      update plan_row set keputusan_carryover = ${keputusan} where id = ${planRowId}`;
+
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: source.planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'keputusan_carryover',
+      beforeJson: {
+        plan_row_id: planRowId,
+        status_baris: source.statusBaris,
+        keputusan_carryover: null,
+      },
+      afterJson: {
+        plan_row_id: planRowId,
+        keputusan_carryover: keputusan,
+        // For `dibawa`: the new row's id + the period it landed in (Rule 16 —
+        // the decision and its concrete outcome are one immutable record).
+        baris_terbawa_id: carried?.id ?? null,
+        periode_tujuan_id: carried?.planId ?? null,
+      },
+      createdBy: actor.employeeId,
+    });
+
+    return { row: await loadPlanRow(tx, planRowId), carried };
+  });
+}
+
+/**
+ * copyRowToPeriod inserts a `Terbawa` copy of `src` into `targetPlanId`. It
+ * carries the row's whole definition (`kuota` unchanged — see the section note
+ * on why there is no "remaining" math) and its single origin (`strategi_pillar_id`
+ * / `service_id` / `di_luar_*`, preserving `ck_plan_row_asal_tunggal`), resets
+ * the execution state (`Rencana`, no status reason, no capacity objection), and
+ * stamps `terbawa=true` + `periode_asal_id` = the source period. The carried row
+ * is itself undecided (`keputusan_carryover=null`) — it can be carried again from
+ * the next period if it stays unfinished.
+ */
+async function copyRowToPeriod(
+  tx: TransactionSql,
+  actor: Actor,
+  source: PlanRow,
+  targetPlanId: string,
+  periodeAsalId: string,
+): Promise<PlanRow> {
+  const inserted = await tx<{ id: string | number }[]>`
+    insert into plan_row
+      (plan_id, channel, pilar, strategi_pillar_id, service_id,
+       di_luar_strategi, di_luar_service, di_luar_alasan,
+       aksi, sku_sasaran, kuota, satuan, budget, divisi_pic, minggu_sasaran,
+       prioritas, hasil_diharapkan, prasyarat,
+       status_baris, status_baris_alasan, visibilitas,
+       keberatan_kapasitas, keberatan_alasan,
+       terbawa, periode_asal_id, keputusan_carryover, created_by)
+    values
+      (${targetPlanId}, ${source.channel}, ${source.pilar},
+       ${source.strategiPillarId}, ${source.serviceId},
+       ${source.diLuarStrategi}, ${source.diLuarService}, ${source.diLuarAlasan},
+       ${source.aksi}, ${tx.json((source.skuSasaran ?? []) as JsonParam)},
+       ${source.kuota}, ${source.satuan}, ${source.budget}, ${source.divisiPic},
+       ${tx.json((source.mingguSasaran ?? []) as JsonParam)},
+       ${source.prioritas}, ${source.hasilDiharapkan}, ${source.prasyarat},
+       'Rencana', null, ${source.visibilitas},
+       false, null,
+       true, ${periodeAsalId}, null, ${actor.employeeId})
+    returning id`;
+  return loadPlanRow(tx, Number(inserted[0].id));
+}
+
+/**
+ * listCarryOverPending returns the rows of a CLOSED period that still await a
+ * carry-over decision — `Sebagian` / `Tidak Dikerjakan` with no
+ * `keputusan_carryover` yet. It is the "what is left to decide" read the P-F
+ * carry-over step drives from; read-scoped like every other Plan read.
+ */
+export async function listCarryOverPending(
+  sql: Queryable,
+  actor: Actor,
+  planId: string,
+): Promise<PlanRow[]> {
+  const plan = await loadPlan(sql, planId);
+  const ownerAm = await ownerAmOfClient(sql, plan.clientId);
+  if (!canReadPlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+  const rows = await sql<Record<string, unknown>[]>`
+    select * from plan_row
+     where plan_id = ${planId}
+       and status_baris in ('Sebagian', 'Tidak Dikerjakan')
+       and keputusan_carryover is null
+     order by id`;
+  return rows.map(rowToPlanRow);
 }

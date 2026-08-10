@@ -59,10 +59,17 @@ import {
   MSG_ROW_STATUS_PERIOD,
   MSG_REVIEW_PERIOD,
   MSG_REVIEW_DIAGNOSA_INVALID,
+  MSG_CARRYOVER_KEPUTUSAN_INVALID,
+  MSG_CARRYOVER_PERIOD,
+  MSG_CARRYOVER_ROW_STATUS,
+  MSG_CARRYOVER_ALREADY_DECIDED,
+  MSG_CARRYOVER_NO_TARGET,
   MANUAL_METRICS,
   FORCE_CLOSE_ALASAN,
   ROW_TERMINAL_STATUSES,
   activatePlanPeriode,
+  decideCarryOver,
+  listCarryOverPending,
   adjustPlanTarget,
   approvePlanPeriode,
   approveTargetAdjustment,
@@ -1541,5 +1548,206 @@ describeDb('forceClosePlanPeriode (Aktif → Ditutup Otomatis, Rule 5/15)', () =
     await expect(forceClosePlanPeriode(sql, otherAm(), p)).rejects.toThrow(MSG_PLAN_FORBIDDEN);
     const sched = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
     await expect(forceClosePlanPeriode(sql, am(), sched)).rejects.toThrow(MSG_CLOSE_STATUS);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-08 — explicit carry-over (Rule 16 / PF-5)
+// ---------------------------------------------------------------------------
+
+/** Set a row's terminal status directly (the DB state after a close). */
+async function setRowStatusRaw(
+  rid: number,
+  status: 'Sebagian' | 'Tidak Dikerjakan' | 'Selesai',
+): Promise<void> {
+  const alasan = status === 'Selesai' ? null : 'separuh kuota tercapai';
+  await sql`update plan_row set status_baris = ${status}, status_baris_alasan = ${alasan} where id = ${rid}`;
+}
+
+/** A closed period-1 + a scheduled period-2 in the same contract chain, with a
+ * period-1 row in `status`. Mirrors the state after close, before the decision. */
+async function closedChainWithRow(
+  status: 'Sebagian' | 'Tidak Dikerjakan' | 'Selesai' = 'Sebagian',
+  p1Status = 'Ditutup',
+): Promise<{ f: Awaited<ReturnType<typeof seedContractStrategi>>; p1: string; p2: string; rid: number }> {
+  const f = await seedContractStrategi();
+  const p1 = await seedPeriod(f, { periodeNo: 1, status: p1Status });
+  const p2 = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+  const rid = await seedRow(p1, 100);
+  await setRowStatusRaw(rid, status);
+  return { f, p1, p2, rid };
+}
+
+async function rowsOf(planId: string) {
+  return sql<Record<string, unknown>[]>`select * from plan_row where plan_id = ${planId} order by id`;
+}
+
+describeDb('decideCarryOver (PF-5 / Rule 16)', () => {
+  it('dibawa creates a Terbawa copy in the next period, tagged with its origin', async () => {
+    const { p1, p2, rid } = await closedChainWithRow('Sebagian');
+    // Give the row real jsonb payloads so the copy proves they round-trip.
+    await sql`update plan_row
+                 set sku_sasaran = ${sql.json(['SKU-1', 'SKU-2'])},
+                     minggu_sasaran = ${sql.json([2, 3])}
+               where id = ${rid}`;
+    const res = await decideCarryOver(sql, am(), rid, 'dibawa');
+
+    expect(res.row.keputusanCarryover).toBe('dibawa');
+    expect(res.carried).not.toBeNull();
+    const carried = res.carried!;
+    expect(carried.planId).toBe(p2);
+    expect(carried.terbawa).toBe(true);
+    expect(carried.periodeAsalId).toBe(p1);
+    expect(carried.statusBaris).toBe('Rencana'); // reset — fresh in the new period
+    expect(carried.statusBarisAlasan).toBeNull();
+    expect(carried.keputusanCarryover).toBeNull(); // itself undecided
+    // The definition carries over unchanged (no invented "remaining" math).
+    expect(carried.channel).toBe('Shopee');
+    expect(carried.kuota).toBe(100);
+    expect(carried.keberatanKapasitas).toBe(false);
+    // jsonb payloads survive the copy intact (no double-encoding).
+    expect(carried.skuSasaran).toEqual(['SKU-1', 'SKU-2']);
+    expect(carried.mingguSasaran).toEqual([2, 3]);
+
+    // The next period now holds exactly the one carried row.
+    const p2rows = await rowsOf(p2);
+    expect(p2rows).toHaveLength(1);
+    expect(Number(p2rows[0].id)).toBe(carried.id);
+  });
+
+  it('dibatalkan records the decision and carries nothing', async () => {
+    const { p2, rid } = await closedChainWithRow('Tidak Dikerjakan');
+    const res = await decideCarryOver(sql, am(), rid, 'dibatalkan');
+    expect(res.row.keputusanCarryover).toBe('dibatalkan');
+    expect(res.carried).toBeNull();
+    expect(await rowsOf(p2)).toHaveLength(0);
+  });
+
+  it('revisi records the decision and carries nothing', async () => {
+    const { p2, rid } = await closedChainWithRow('Sebagian');
+    const res = await decideCarryOver(sql, am(), rid, 'revisi');
+    expect(res.row.keputusanCarryover).toBe('revisi');
+    expect(res.carried).toBeNull();
+    expect(await rowsOf(p2)).toHaveLength(0);
+  });
+
+  it('carries over an Auto-closed (Ditutup Otomatis) period too', async () => {
+    const { p2, rid } = await closedChainWithRow('Tidak Dikerjakan', 'Ditutup Otomatis');
+    const res = await decideCarryOver(sql, am(), rid, 'dibawa');
+    expect(res.carried?.planId).toBe(p2);
+  });
+
+  it('writes an immutable audit row naming the decision and its outcome', async () => {
+    const { p1, rid } = await closedChainWithRow('Sebagian');
+    const res = await decideCarryOver(sql, am(), rid, 'dibawa');
+    const log = await sql<{ action: string; after_json: Record<string, unknown> }[]>`
+      select action, after_json from audit_log
+       where entity_type = 'plan' and entity_id = ${p1} and action = 'keputusan_carryover'`;
+    expect(log).toHaveLength(1);
+    expect(log[0].after_json.keputusan_carryover).toBe('dibawa');
+    expect(log[0].after_json.baris_terbawa_id).toBe(res.carried!.id);
+  });
+
+  it('lets a carried row be carried again from the next period', async () => {
+    const { f, p2, rid } = await closedChainWithRow('Sebagian');
+    const p3 = await seedPeriod(f, { periodeNo: 3, status: 'Terjadwal' });
+    const first = await decideCarryOver(sql, am(), rid, 'dibawa');
+    // Close p2 and leave the carried row unfinished again.
+    await sql`update plan set status = 'Ditutup' where id = ${p2}`;
+    await setRowStatusRaw(first.carried!.id, 'Sebagian');
+    const second = await decideCarryOver(sql, am(), first.carried!.id, 'dibawa');
+    expect(second.carried?.planId).toBe(p3);
+    expect(second.carried?.periodeAsalId).toBe(p2);
+  });
+
+  it('carries a Plan Satuan row along the client chain (lingkup=klien)', async () => {
+    const clientId = await seedClient();
+    const p1 = await seedPeriod(
+      { clientId, contractId: null, strategiId: null },
+      { periodeNo: 1, status: 'Ditutup', lingkup: 'klien' },
+    );
+    const p2 = await seedPeriod(
+      { clientId, contractId: null, strategiId: null },
+      { periodeNo: 2, status: 'Terjadwal', lingkup: 'klien' },
+    );
+    const rid = await seedRow(p1, 40);
+    await setRowStatusRaw(rid, 'Sebagian');
+    const res = await decideCarryOver(sql, am(), rid, 'dibawa');
+    expect(res.carried?.planId).toBe(p2);
+  });
+
+  it('refuses a decision while the period is not yet closed', async () => {
+    const { rid } = await closedChainWithRow('Sebagian', 'Aktif');
+    await expect(decideCarryOver(sql, am(), rid, 'dibawa')).rejects.toThrow(MSG_CARRYOVER_PERIOD);
+  });
+
+  it('refuses a row that is not Sebagian / Tidak Dikerjakan', async () => {
+    const { rid } = await closedChainWithRow('Selesai');
+    await expect(decideCarryOver(sql, am(), rid, 'dibawa')).rejects.toThrow(MSG_CARRYOVER_ROW_STATUS);
+  });
+
+  it('refuses a second decision on the same row', async () => {
+    const { rid } = await closedChainWithRow('Sebagian');
+    await decideCarryOver(sql, am(), rid, 'dibatalkan');
+    await expect(decideCarryOver(sql, am(), rid, 'dibawa')).rejects.toThrow(
+      MSG_CARRYOVER_ALREADY_DECIDED,
+    );
+  });
+
+  it('refuses dibawa when there is no next period', async () => {
+    // Last period of the chain: no period 2 exists.
+    const f = await seedContractStrategi();
+    const last = await seedPeriod(f, { periodeNo: 1, status: 'Ditutup' });
+    const rid = await seedRow(last, 100);
+    await setRowStatusRaw(rid, 'Sebagian');
+    await expect(decideCarryOver(sql, am(), rid, 'dibawa')).rejects.toThrow(MSG_CARRYOVER_NO_TARGET);
+  });
+
+  it('refuses dibawa when the next period has already closed, but still allows dibatalkan', async () => {
+    const chain = await closedChainWithRow('Sebagian');
+    await sql`update plan set status = 'Ditutup' where id = ${chain.p2}`;
+    await expect(decideCarryOver(sql, am(), chain.rid, 'dibawa')).rejects.toThrow(
+      MSG_CARRYOVER_NO_TARGET,
+    );
+    // A drop needs no target — it still records the decision.
+    expect((await decideCarryOver(sql, am(), chain.rid, 'dibatalkan')).row.keputusanCarryover).toBe(
+      'dibatalkan',
+    );
+  });
+
+  it('rejects an out-of-vocabulary decision', async () => {
+    const { rid } = await closedChainWithRow('Sebagian');
+    await expect(
+      decideCarryOver(sql, am(), rid, 'buang' as unknown as 'dibawa'),
+    ).rejects.toThrow(MSG_CARRYOVER_KEPUTUSAN_INVALID);
+  });
+
+  it('refuses an unrelated account and 404s a missing row', async () => {
+    const { rid } = await closedChainWithRow('Sebagian');
+    await expect(decideCarryOver(sql, otherAm(), rid, 'dibawa')).rejects.toThrow(MSG_PLAN_FORBIDDEN);
+    await expect(decideCarryOver(sql, am(), 999999999, 'dibawa')).rejects.toThrow(
+      MSG_PLAN_ROW_NOT_FOUND,
+    );
+  });
+});
+
+describeDb('listCarryOverPending (rows awaiting a decision)', () => {
+  it('returns only undecided Sebagian / Tidak Dikerjakan rows', async () => {
+    const { p1, rid } = await closedChainWithRow('Sebagian');
+    // A decided row, a Selesai row, and a still-Rencana row must all be excluded.
+    const decided = await seedRow(p1, 20);
+    await setRowStatusRaw(decided, 'Tidak Dikerjakan');
+    await decideCarryOver(sql, am(), decided, 'dibatalkan');
+    const doneRow = await seedRow(p1, 30);
+    await setRowStatusRaw(doneRow, 'Selesai');
+    await seedRow(p1, 40); // stays Rencana
+
+    const pending = await listCarryOverPending(sql, am(), p1);
+    expect(pending.map((r) => r.id)).toEqual([rid]);
+  });
+
+  it('honours read scope', async () => {
+    const { p1 } = await closedChainWithRow('Sebagian');
+    await expect(listCarryOverPending(sql, otherAm(), p1)).rejects.toThrow(MSG_PLAN_FORBIDDEN);
   });
 });
