@@ -65,6 +65,15 @@ export const MSG_BAD_LEVEL = "[level harus 'staff' atau 'lead']";
 export const MSG_BAD_ROLE = "[role harus 'od', 'director', atau 'lead']";
 /** House default mandatory-field gate (CLAUDE.md #5). */
 export const MSG_INCOMPLETE = '[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]';
+/**
+ * Employee-mutation (divisi/jabatan) write denied. NEW string — this feature has
+ * no Go ancestor (the roster mutation UI was added on the TS stack). Gate is
+ * Director OR a Lead of the HR division (see `canManageEmployeeAssignment`).
+ */
+export const MSG_EMPLOYEE_MUTATION_DENIED =
+  '[hanya Director atau Lead HR yang dapat mengubah divisi/jabatan karyawan]';
+/** Employee-mutation target does not exist. */
+export const MSG_EMPLOYEE_NOT_FOUND = '[karyawan tidak ditemukan]';
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -86,6 +95,14 @@ export class ValidationError extends Error {
   }
 }
 
+/** Admin-plane target row not found (verbatim BI message). Maps to 404. */
+export class NotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AdminNotFoundError';
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Permission predicates (Phase 0 §4; mirror of Go's handler gates)
 // ---------------------------------------------------------------------------
@@ -98,6 +115,36 @@ export function canReadAdmin(actor: Actor): boolean {
 /** Only Director may WRITE the admin plane (OD stays read-only). */
 export function canWriteAdmin(actor: Actor): boolean {
   return permission.canManageAdmin(actor);
+}
+
+/**
+ * The CDPS division whose Lead is trusted to run employee mutations (transfers).
+ *
+ * CDPS has no dedicated "HR" role — the model is Staff/Lead/OD/Director. The
+ * owner's decision (DECISIONS 2026-08-10) is that, besides Director, the Lead of
+ * the HR division may edit an employee's divisi/jabatan. This is a plain CDPS
+ * division string on the RIGHT side of a `role_mappings` row (like `Account`,
+ * `Ads`, `Finance`), NOT a raw HRIS divisi. There are ZERO holders until a
+ * Director maps some HR jabatan → (division `HR`, level `lead`); the gate is
+ * written now so the arm exists the moment that mapping is created.
+ */
+export const HR_DIVISION = 'HR';
+
+/**
+ * canManageEmployeeAssignment gates the divisi/jabatan mutation. Director always;
+ * otherwise ONLY a Lead of the HR division.
+ *
+ * This is deliberately NARROW (not "any division Lead") because divisi+jabatan is
+ * the LEFT side of a role mapping: editing it re-derives an employee's CDPS role
+ * via `employee_claims()` (and `trg_sync_claims_employee` re-issues their JWT
+ * claims). Letting an arbitrary Lead rewrite it would be privilege escalation —
+ * they could re-grade themselves onto a Director-mapped jabatan.
+ */
+export function canManageEmployeeAssignment(actor: Actor): boolean {
+  if (actor.role.director) {
+    return true;
+  }
+  return actor.role.level === permission.LevelLead && actor.role.division === HR_DIVISION;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +193,77 @@ export async function listEmployees(sql: Queryable): Promise<EmployeeRow[]> {
     flagged: r.flagged_for_review,
     syncedAt: r.synced_at,
   }));
+}
+
+/**
+ * updateEmployeeAssignment edits ONE employee's divisi/jabatan (a "mutasi" /
+ * transfer) and appends an audit row, in a single transaction. Returns the
+ * updated row.
+ *
+ * Consequences to keep in mind (all handled by existing DB machinery, not here):
+ *   - divisi+jabatan is the LEFT side of a `role_mappings` row, so this can
+ *     re-derive the employee's CDPS division/level. `trg_sync_claims_employee`
+ *     (fires `AFTER UPDATE OF ... divisi, jabatan`) re-issues their `auth.users`
+ *     app-metadata, so the new claims take effect on their next token refresh.
+ *   - the audit row carries the BEFORE state so a silent transfer is
+ *     reconstructible from the log (house rule #3).
+ *
+ * Gate: Director OR HR-division Lead (`canManageEmployeeAssignment`). Takes the
+ * PRIVILEGED client — the write bypasses RLS and the trigger's claim re-sync is
+ * service-role only; the gate is enforced HERE, mirroring the role-mapping writes.
+ */
+export async function updateEmployeeAssignment(
+  sql: Sql,
+  actor: Actor,
+  employeeId: string,
+  divisi: string,
+  jabatan: string,
+): Promise<EmployeeRow> {
+  if (!canManageEmployeeAssignment(actor)) {
+    throw new ForbiddenError(MSG_EMPLOYEE_MUTATION_DENIED);
+  }
+  const id = employeeId.trim();
+  const d = divisi.trim();
+  const j = jabatan.trim();
+  if (id === '' || d === '' || j === '') {
+    throw new ValidationError(MSG_INCOMPLETE);
+  }
+  return withTransaction(sql, async (tx) => {
+    const before = await tx<{ divisi: string; jabatan: string }[]>`
+      select divisi, jabatan from employees where employee_id = ${id} for update`;
+    if (before.length === 0) {
+      throw new NotFoundError(MSG_EMPLOYEE_NOT_FOUND);
+    }
+    const rows = await tx<
+      {
+        employee_id: string; nama: string; email: string; divisi: string; jabatan: string;
+        status_aktif: boolean; flagged_for_review: boolean; synced_at: Date | null;
+      }[]
+    >`
+      update employees set divisi = ${d}, jabatan = ${j}
+       where employee_id = ${id}
+      returning employee_id, nama, email, divisi, jabatan, status_aktif, flagged_for_review, synced_at`;
+    await executors(tx).audit.insertAudit({
+      entityType: 'employee',
+      entityId: id,
+      actorEmployeeId: actor.employeeId,
+      action: 'reassign',
+      beforeJson: { divisi: before[0].divisi, jabatan: before[0].jabatan },
+      afterJson: { divisi: d, jabatan: j },
+      createdBy: actor.employeeId,
+    });
+    const r = rows[0]!;
+    return {
+      employeeId: r.employee_id,
+      nama: r.nama,
+      email: r.email,
+      divisi: r.divisi,
+      jabatan: r.jabatan,
+      statusAktif: r.status_aktif,
+      flagged: r.flagged_for_review,
+      syncedAt: r.synced_at,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------

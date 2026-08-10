@@ -96,6 +96,7 @@ export function mapError(err: unknown): Response {
     err instanceof livestream.NotFoundError ||
     err instanceof campaign.NotFoundError ||
     err instanceof marketing.NotFoundError ||
+    err instanceof admin.NotFoundError ||
     err instanceof auth.EmployeeNotFoundError
   ) {
     return errorJson(err.message, 404);
