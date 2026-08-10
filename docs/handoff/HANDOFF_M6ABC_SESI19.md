@@ -10,8 +10,8 @@
 | Hal | Nilai |
 |---|---|
 | **Repo** | `MEAgrup/AgencyAPP` |
-| **`main` (default)** | memuat **B-00…B-05 + M6A A-00…A-13d** (per handoff SESI18). **B-06 belum di `main`** sampai PR-nya merge |
-| **Branch kerja sesi ini** | `claude/handoff-m6abc-sesi18-j749x6` — memuat **B-06 realisasi hybrid** (di atas `main`) |
+| **`main` (default)** | memuat **B-00…B-05 + M6A A-00…A-13d** (per handoff SESI18). **B-06 belum di `main`** sampai PR **#121** merge |
+| **Branch kerja sesi ini** | `claude/handoff-m6abc-sesi18-j749x6` — memuat **B-06 realisasi hybrid** (di atas `main`) → **PR #121** (terbuka, menunggu merge) |
 | **PR MASIH TERBUKA (bukan pekerjaan sesi ini)** | **#115** — M6A **A-11** (`/s/{token}`) + X-16/X-17. Keputusan pemilik. Lihat §3 handoff SESI18 |
 | **Branch untuk B-07** | Buat BARU dari `main` **setelah B-06 merge**: `git fetch origin main && git checkout -B claude/b-07-tutup-transaksional origin/main` |
 
@@ -39,7 +39,7 @@ DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/cdps" npm test --works
 |---|---|
 | Migrasi | **76 berkas** · gerbang tabel **89** · prefix 31 · mesin **17** · event 34 · `CATALOG_VERSION` 4 |
 | Test | `apps/api` **340** · `core` **137** · `db` **15** · `domain` **1010 + 1 skip** (`plan.test.ts` **65** + `plan.reals.test.ts` **7**) · db-rebuild gate + invariant hijau · typecheck 4 workspace bersih · `KNOWN_GAPS` kosong |
-| Live `CDPS SG` (`egddxfcnrtecheiykhlf`) | ⚠️ **B-06 migration BELUM di-apply ke live** kalau sesi ini belum melakukannya — cek dulu (`list_migrations`). B-06 = `20260810020000_m6b_realisasi_hybrid.sql` (fungsi + trigger + policy + grant, NOL tabel; additive & aman — fitur M6B belum dipakai). Terapkan lewat `apply_migration` (JANGAN `psql -f`) untuk jaga live ≡ repo |
+| Live `CDPS SG` (`egddxfcnrtecheiykhlf`) | ✅ **B-06 SUDAH di-apply & diverifikasi** (2026-08-10, versi apply-timestamp `m6b_realisasi_hybrid`). Terverifikasi hadir: trigger `trg_plan_actual_no_manual_auto` + fungsi `private.jwt_can_write_plan` + `guard_plan_actual_no_manual_auto` + 2 policy tulis (`plan_actual_insert/update`) + grant `INSERT,SELECT,UPDATE`. Live ≡ repo s/d B-06. ⚠️ Versi migrasi live ber-timestamp apply ≠ nama berkas repo — **normal** (`apply_migration` assign versi sendiri) |
 | Menggantung | Kode: **NOL** (untuk M6B s/d B-06). Keputusan pemilik: X-06 · X-08 (metrik manual: `jam_live`?) · X-12 · X-16 · X-17 · O59-b · O42-b · O60 · O47b |
 
 ## 1. Apa yang berubah sesi ini — B-06 realisasi hybrid
