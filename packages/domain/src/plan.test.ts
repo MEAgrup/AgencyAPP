@@ -30,6 +30,8 @@ import {
   MSG_PLAN_NOT_FOUND,
   canReadPlan,
   canWritePlan,
+  computePeriods,
+  generatePlanPeriods,
   getPlan,
   getPlanDetail,
   listPlansForContract,
@@ -70,6 +72,49 @@ describe('permission predicates', () => {
     expect(canReadPlan(od(), 'ZZ-AM')).toBe(true);
     expect(canWritePlan(od(), 'ZZ-AM')).toBe(false);
     expect(canReadPlan(otherAm(), 'ZZ-AM')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computePeriods — anniversary-month boundary math (no DB)
+// ---------------------------------------------------------------------------
+
+describe('computePeriods', () => {
+  it('lays out the Alpha Digital contract exactly as §7 states', () => {
+    const p = computePeriods('2026-08-12', 6);
+    expect(p).toHaveLength(6);
+    expect(p[0]).toMatchObject({
+      periodeNo: 1,
+      tanggalMulai: '2026-08-12',
+      tanggalAkhir: '2026-09-11',
+    });
+    // Last period ends on the contract's last day (12 Aug + 6 months − 1 day).
+    expect(p[5]).toMatchObject({
+      periodeNo: 6,
+      tanggalMulai: '2027-01-12',
+      tanggalAkhir: '2027-02-11',
+    });
+    // Each period is one calendar month → 4 weeks (last absorbs 8-10 days, PD-4).
+    expect(p.every((x) => x.jumlahMinggu >= 4 && x.jumlahMinggu <= 6)).toBe(true);
+  });
+
+  it('recovers the intended day after a short month — no permanent drift', () => {
+    // The failure B-02 names: a cycle on the 31st must not stick to the 28th
+    // once February clamps it.
+    const p = computePeriods('2026-01-31', 4);
+    expect(p.map((x) => x.tanggalMulai)).toEqual([
+      '2026-01-31',
+      '2026-02-28', // clamped (Feb 2026 = 28 days)
+      '2026-03-31', // RECOVERED to the intended 31st, not drifted to the 28th
+      '2026-04-30', // clamped again (Apr = 30 days)
+    ]);
+    expect(p[0].tanggalAkhir).toBe('2026-02-27');
+    expect(p[2].tanggalAkhir).toBe('2026-04-29');
+  });
+
+  it('rejects a bad cycle-start and a non-positive count', () => {
+    expect(() => computePeriods('2026-8-1', 3)).toThrow();
+    expect(() => computePeriods('2026-08-12', 0)).toThrow();
   });
 });
 
@@ -358,5 +403,88 @@ describeDb('reads', () => {
     await expect(getPlan(sql, am(), 'ZZ-PLAN-nope')).rejects.toBeInstanceOf(NotFoundError);
     // read-all still sees it.
     expect((await getPlan(sql, od(), id)).id).toBe(id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generatePlanPeriods (B-02)
+// ---------------------------------------------------------------------------
+
+describeDb('generatePlanPeriods', () => {
+  async function seedTargets(strategiId: string, months = 6): Promise<void> {
+    // `pengunjung` (not gmv) so no floor is required by strategi_target CHECKs.
+    for (let m = 1; m <= months; m += 1) {
+      await sql`
+        insert into strategi_target
+          (strategi_id, channel, month_index, metric, nilai_floor, nilai_stretch, sumber_floor, created_by)
+        values (${strategiId}, 'Shopee', ${m}, 'pengunjung', null, ${1000 + m}, null, 'ZZ-AM')`;
+    }
+  }
+
+  it('mints n periods (1 Draft, rest Terjadwal) and prefills each month target', async () => {
+    const f = await seedContractStrategi();
+    await seedTargets(f.strategiId, 6);
+    const ids = await sql.begin((tx) =>
+      generatePlanPeriods(tx, am(), {
+        id: f.strategiId,
+        contractId: f.contractId,
+        clientId: f.clientId,
+        tanggalMulaiSiklus: '2026-08-12',
+        durasiKontrakBulan: 6,
+      }),
+    );
+    expect(ids).toHaveLength(6);
+    expect(ids.every((id) => /^PLAN-\d{6}-\d{4}$/.test(id))).toBe(true);
+
+    const periods = await listPlansForContract(sql, am(), f.contractId);
+    expect(periods.map((p) => p.status)).toEqual([
+      'Draft',
+      'Terjadwal',
+      'Terjadwal',
+      'Terjadwal',
+      'Terjadwal',
+      'Terjadwal',
+    ]);
+    expect(periods[0].tanggalMulai).toBe('2026-08-12');
+    expect(periods[0].strategiId).toBe(f.strategiId);
+
+    // Each period carries its own month's target, anchored + frozen.
+    const detail1 = await getPlanDetail(sql, am(), periods[0].id);
+    expect(detail1.targets).toHaveLength(1);
+    expect(detail1.targets[0]).toMatchObject({
+      channel: 'Shopee',
+      metric: 'pengunjung',
+      nilaiStrategi: 1001,
+      nilaiDipakai: 1001,
+      arah: 'tetap',
+    });
+    const detail6 = await getPlanDetail(sql, am(), periods[5].id);
+    expect(detail6.targets[0].nilaiStrategi).toBe(1006);
+  });
+
+  it('is idempotent by contract — a second run mints nothing', async () => {
+    const f = await seedContractStrategi();
+    await seedTargets(f.strategiId, 3);
+    const first = await sql.begin((tx) =>
+      generatePlanPeriods(tx, am(), {
+        id: f.strategiId,
+        contractId: f.contractId,
+        clientId: f.clientId,
+        tanggalMulaiSiklus: '2026-08-12',
+        durasiKontrakBulan: 3,
+      }),
+    );
+    expect(first).toHaveLength(3);
+    const second = await sql.begin((tx) =>
+      generatePlanPeriods(tx, am(), {
+        id: f.strategiId,
+        contractId: f.contractId,
+        clientId: f.clientId,
+        tanggalMulaiSiklus: '2026-08-12',
+        durasiKontrakBulan: 3,
+      }),
+    );
+    expect(second).toEqual([]);
+    expect(await listPlansForContract(sql, am(), f.contractId)).toHaveLength(3);
   });
 });

@@ -27,8 +27,8 @@
  * *their own rows* is an RLS arm on `plan_row`, not a whole-Plan grant.
  */
 
-import { permission } from '@cdps/core';
-import { type Queryable } from '@cdps/db';
+import { ident, permission } from '@cdps/core';
+import { executors, type Queryable, type TransactionSql } from '@cdps/db';
 import {
   ACCOUNT_DIVISION,
   ForbiddenError,
@@ -455,4 +455,180 @@ function rowToPlanRow(r: Record<string, unknown>): PlanRow {
     terbawa: r.terbawa as boolean,
     periodeAsalId: (r.periode_asal_id as string | null) ?? null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// B-02 — period generation
+// ---------------------------------------------------------------------------
+//
+// Rule 1 / P7: periods are generated on Strategi approval, n = contract months,
+// anniversary-month boundaries from `tanggal_mulai_siklus` (M6A G-0/Rule 17).
+// There is NO manual create path — `generatePlanPeriods` is called from
+// `approveStrategi`, in its transaction.
+
+/** One computed period window — the boundary math kept pure and testable. */
+export interface PeriodBoundary {
+  periodeNo: number;
+  tanggalMulai: string;
+  tanggalAkhir: string;
+  jumlahMinggu: number;
+}
+
+const pad2 = (n: number): string => String(n).padStart(2, '0');
+const fmt = (y: number, m: number, d: number): string => `${y}-${pad2(m)}-${pad2(d)}`;
+
+/** Days in month `m` (1-12) of year `y`. */
+function daysInMonth(y: number, m: number): number {
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
+/** The date one day before `dateStr` ('YYYY-MM-DD'), as 'YYYY-MM-DD'. */
+function dayBefore(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  t.setUTCDate(t.getUTCDate() - 1);
+  return fmt(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
+}
+
+/** Inclusive day count between two 'YYYY-MM-DD' dates. */
+function daysInclusive(fromStr: string, toStr: string): number {
+  const [fy, fm, fd] = fromStr.split('-').map(Number);
+  const [ty, tm, td] = toStr.split('-').map(Number);
+  const from = Date.UTC(fy, fm - 1, fd);
+  const to = Date.UTC(ty, tm - 1, td);
+  return Math.round((to - from) / 86400000) + 1;
+}
+
+/**
+ * computePeriods lays out `n` anniversary-month periods from `cycleStart`.
+ *
+ * The intended day-of-month is `cycleStart`'s day, and **every** period start is
+ * recomputed from it — not walked forward from the previous (clamped) start. A
+ * cycle starting the 31st therefore reads Jan 31 → Feb 28 → **Mar 31** (not Mar
+ * 28): February clamps, but March recovers the intended day. Walking from the
+ * clamped date would drift it to the 28th permanently — the failure B-02 calls
+ * out by name. This is why nothing stores a per-period "intended day": the one
+ * source is `cycleStart`, immutable once the first period closes (Rule 17).
+ */
+export function computePeriods(cycleStart: string, n: number): PeriodBoundary[] {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cycleStart)) {
+    throw new Error(`computePeriods: cycleStart bukan YYYY-MM-DD: ${cycleStart}`);
+  }
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error(`computePeriods: n harus bilangan bulat >= 1: ${n}`);
+  }
+  const [cy, cm, cd] = cycleStart.split('-').map(Number);
+  // n+1 starts: period i runs from starts[i] to the day before starts[i+1].
+  const starts: string[] = [];
+  for (let i = 0; i <= n; i += 1) {
+    const monthZero = cm - 1 + i;
+    const y = cy + Math.floor(monthZero / 12);
+    const m = (((monthZero % 12) + 12) % 12) + 1;
+    const d = Math.min(cd, daysInMonth(y, m));
+    starts.push(fmt(y, m, d));
+  }
+  const periods: PeriodBoundary[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const tanggalMulai = starts[i];
+    const tanggalAkhir = dayBefore(starts[i + 1]);
+    const days = daysInclusive(tanggalMulai, tanggalAkhir);
+    // A calendar month is 28-31 days → 4 full weeks with the last absorbing the
+    // 0-3 day remainder (PD-4). Clamp to the plan CHECK's [4,6] as a guardrail.
+    const jumlahMinggu = Math.min(6, Math.max(4, Math.floor(days / 7)));
+    periods.push({ periodeNo: i + 1, tanggalMulai, tanggalAkhir, jumlahMinggu });
+  }
+  return periods;
+}
+
+/** The strategi header fields the generator consumes. */
+export interface GenerateSource {
+  id: string;
+  contractId: string;
+  clientId: string;
+  tanggalMulaiSiklus: string | null;
+  durasiKontrakBulan: number;
+}
+
+/**
+ * generatePlanPeriods creates the `n` periods of a freshly-approved Strategi:
+ * period 1 in `Draft`, periods 2..n in `Terjadwal`, each pre-filled with the
+ * month's targets from Strategi D-2 (`plan_target`, `arah='tetap'`,
+ * `nilai_dipakai = nilai_strategi`).
+ *
+ * **Idempotent by contract.** If the contract already carries periods it does
+ * nothing and returns `[]` — so approving a *revision* does not mint a second
+ * chain. Regenerating the still-`Terjadwal` periods of a revised Strategi (Rule
+ * 17: unstarted periods only) is a later ticket; this is initial generation.
+ *
+ * **No row skeleton yet.** Flow step 1 mentions seeding rows from E+F, but every
+ * P-C field an AM must fill (`aksi`, `hasil_diharapkan`, `divisi_pic`) is `W`
+ * with no PRD default, and `divisi_pic` is NOT NULL — auto-assigning a division
+ * per pillar would be invented data. Left to the row form / an owner decision;
+ * targets, which ARE fully specified by D-2, are seeded here.
+ *
+ * Runs inside the approval transaction (`approveStrategi`), so a failed
+ * generation rolls the approval back with it.
+ */
+export async function generatePlanPeriods(
+  tx: TransactionSql,
+  actor: Actor,
+  s: GenerateSource,
+): Promise<string[]> {
+  const existing = await tx`select 1 from plan where contract_id = ${s.contractId} limit 1`;
+  if (existing.length > 0) return [];
+
+  if (s.tanggalMulaiSiklus === null) {
+    // Should not happen: createStrategi defaults the cycle start to the contract
+    // start. Fail loudly rather than mint periods off a guessed date.
+    throw new Error('generatePlanPeriods: tanggal_mulai_siklus belum ditetapkan');
+  }
+  const periods = computePeriods(s.tanggalMulaiSiklus, s.durasiKontrakBulan);
+
+  const targets = await tx<
+    { channel: string; month_index: number | string; metric: string; nilai_stretch: string | number }[]
+  >`select channel, month_index, metric, nilai_stretch
+      from strategi_target where strategi_id = ${s.id}`;
+
+  const ex = executors(tx);
+  const now = new Date();
+  const ids: string[] = [];
+  for (const p of periods) {
+    const id = await ident.nextId(ex.ident, 'PLAN', now);
+    const status = p.periodeNo === 1 ? 'Draft' : 'Terjadwal';
+    await tx`
+      insert into plan
+        (id, lingkup, contract_id, client_id, strategi_id, periode_no,
+         tanggal_mulai, tanggal_akhir, jumlah_minggu, status, created_by)
+      values
+        (${id}, 'kontrak', ${s.contractId}, ${s.clientId}, ${s.id}, ${p.periodeNo},
+         ${p.tanggalMulai}, ${p.tanggalAkhir}, ${p.jumlahMinggu}, ${status}, ${actor.employeeId})`;
+
+    for (const t of targets) {
+      if (num(t.month_index) !== p.periodeNo) continue;
+      await tx`
+        insert into plan_target
+          (plan_id, channel, metric, nilai_strategi, nilai_dipakai, created_by)
+        values
+          (${id}, ${t.channel}, ${t.metric}, ${t.nilai_stretch}, ${t.nilai_stretch}, ${actor.employeeId})`;
+    }
+
+    await ex.audit.insertAudit({
+      entityType: 'plan',
+      entityId: id,
+      actorEmployeeId: actor.employeeId,
+      action: 'generate',
+      beforeJson: null,
+      afterJson: {
+        strategi_id: s.id,
+        contract_id: s.contractId,
+        periode_no: p.periodeNo,
+        tanggal_mulai: p.tanggalMulai,
+        tanggal_akhir: p.tanggalAkhir,
+        status,
+      },
+      createdBy: actor.employeeId,
+    });
+    ids.push(id);
+  }
+  return ids;
 }

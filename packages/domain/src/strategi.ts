@@ -57,6 +57,7 @@ import {
   type Actor,
 } from './account';
 import * as contract from './contract';
+import { generatePlanPeriods } from './plan';
 import { effectiveGate, type PlanTier } from './plangate_rules';
 
 // ---------------------------------------------------------------------------
@@ -5354,6 +5355,20 @@ export async function approveStrategi(sql: Sql, actor: Actor, id: string): Promi
        where strategi_id = ${id} and nilai_floor is not null
          and sumber_floor = ${FLOOR_INPUT_AM}`;
     await appendEvent(tx, id, head.versiNo, 'disetujui', actor.employeeId, null);
+
+    // M6B Rule 1: approval is the ONLY thing that generates Plan periods. Runs in
+    // this transaction, so a failed generation rolls the approval back with it.
+    // Idempotent by contract, so approving a revision does not mint a second
+    // chain — regenerating a revision's `Terjadwal` periods (Rule 17) is a later
+    // ticket. `head` already carries the contract window (joined, O57).
+    await generatePlanPeriods(tx, actor, {
+      id,
+      contractId: head.contractId,
+      clientId: head.clientId,
+      tanggalMulaiSiklus: head.tanggalMulaiSiklus,
+      durasiKontrakBulan: head.durasiKontrakBulan,
+    });
+
     return loadStrategiRow(tx, id);
   });
 }

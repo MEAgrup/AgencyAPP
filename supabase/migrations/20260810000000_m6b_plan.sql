@@ -149,9 +149,13 @@ CREATE TABLE plan (
     -- FK komposit ke contracts(id, client_id): sebuah periode tidak bisa
     -- menggantung di kontrak klien lain (preseden services/strategi O57).
     -- MATCH SIMPLE ⇒ tidak diperiksa saat contract_id NULL (Plan Satuan sah).
+    -- ON DELETE CASCADE: sebuah periode tidak bisa hidup tanpa kontrak/versi
+    -- Strategi induknya. Di produksi keduanya tak pernah di-DELETE (transisi
+    -- status, bukan hapus), jadi cascade ini jaring pengaman + kebersihan test.
     CONSTRAINT fk_plan_contract FOREIGN KEY (contract_id, client_id)
-        REFERENCES contracts (id, client_id),
-    CONSTRAINT fk_plan_strategi FOREIGN KEY (strategi_id) REFERENCES strategi (id),
+        REFERENCES contracts (id, client_id) ON DELETE CASCADE,
+    CONSTRAINT fk_plan_strategi FOREIGN KEY (strategi_id)
+        REFERENCES strategi (id) ON DELETE CASCADE,
 
     CONSTRAINT ck_plan_lingkup CHECK (lingkup IN ('kontrak', 'klien')),
     -- (2): pasangan lingkup ↔ contract/strategi ditegakkan, bukan diandalkan
@@ -321,10 +325,16 @@ CREATE TABLE plan_row (
 
     CONSTRAINT fk_plan_row_plan FOREIGN KEY (plan_id)
         REFERENCES plan (id) ON DELETE CASCADE,
+    -- Pilar/service induk: kalau ia lenyap, barisnya ikut (barisnya kehilangan
+    -- asal tunggalnya — ck_plan_row_asal_tunggal tak bisa dipenuhi lagi).
     CONSTRAINT fk_plan_row_pillar FOREIGN KEY (strategi_pillar_id)
-        REFERENCES strategi_pillar (id),
-    CONSTRAINT fk_plan_row_service FOREIGN KEY (service_id) REFERENCES services (id),
-    CONSTRAINT fk_plan_row_asal    FOREIGN KEY (periode_asal_id) REFERENCES plan (id),
+        REFERENCES strategi_pillar (id) ON DELETE CASCADE,
+    CONSTRAINT fk_plan_row_service FOREIGN KEY (service_id)
+        REFERENCES services (id) ON DELETE CASCADE,
+    -- Periode asal (carry-over) hanya metadata; kalau periode asalnya hilang,
+    -- baris terbawa tetap ada, cuma kehilangan penunjuk asalnya.
+    CONSTRAINT fk_plan_row_asal    FOREIGN KEY (periode_asal_id)
+        REFERENCES plan (id) ON DELETE SET NULL,
     -- Pilar = kosakata pilar Strategi (disalin dari ck_strpil_jenis, tanpa
     -- 'tidak_dikerjakan' yang milik status pilar, bukan baris kerja).
     CONSTRAINT ck_plan_row_pilar CHECK (pilar IN (
