@@ -102,6 +102,24 @@ export const MSG_PLAN_WEEK_NO_INVALID =
 export const MSG_PLAN_WEEK_STATUS =
   '[distribusi mingguan hanya dapat diubah saat periode aktif]';
 
+// --- B-06: hybrid actuals (Rule 10/11, Section P-E) ----------------------
+
+/** Only GMV is entered manually (PE-1 / Rule 10); every other metric is auto. */
+export const MSG_ACTUAL_METRIC_NOT_MANUAL =
+  '[metrik ini bukan metrik manual — hanya GMV aktual yang diinput manual]';
+/** PE-2 — a manual GMV entry must carry its source attachment and capture date. */
+export const MSG_ACTUAL_BUKTI_REQUIRED =
+  '[lampiran sumber dan tanggal ambil data wajib untuk realisasi GMV manual]';
+/** A negative actual figure. */
+export const MSG_ACTUAL_NILAI_INVALID = '[nilai realisasi tidak boleh negatif]';
+/** The actual row (plan_id, channel, metric) does not resolve. */
+export const MSG_ACTUAL_NOT_FOUND = '[data realisasi tidak ditemukan]';
+/** PE-6 — a Sengketa Angka only makes sense against an auto metric. */
+export const MSG_SENGKETA_NOT_AUTO =
+  '[sengketa angka hanya dapat diajukan atas metrik otomatis]';
+/** PE-6 — the dispute needs a written reason (it is the whole point of the note). */
+export const MSG_SENGKETA_ALASAN_REQUIRED = '[alasan sengketa wajib diisi]';
+
 // ---------------------------------------------------------------------------
 // Shape — one interface per table, camelCase (the wire boundary snake_cases)
 // ---------------------------------------------------------------------------
@@ -804,6 +822,22 @@ const PLAN_DIAJUKAN = 'Diajukan';
 const PLAN_AKTIF = 'Aktif';
 const PLAN_TERJADWAL = 'Terjadwal';
 const PLAN_MENUNGGU = 'Menunggu Persetujuan';
+const PLAN_DITUTUP = 'Ditutup';
+const PLAN_DITUTUP_OTOMATIS = 'Ditutup Otomatis';
+
+/** A closed period (either terminal state of machine #16). */
+const PLAN_TERMINAL: readonly PlanStatus[] = [PLAN_DITUTUP, PLAN_DITUTUP_OTOMATIS];
+
+/**
+ * B-06 / X-08 — the metrics an AM enters by hand, as a SINGLE explicit source of
+ * truth (X-08: the manual list must be explicit, never silently mixed with the
+ * auto ones). PE-1 / Rule 10 names exactly one: GMV per channel. `jam_live` is a
+ * *conditional* candidate (PA-4: if the live-stream vendor reports hours outside
+ * the system it becomes manual) — deliberately NOT added here without Hans/owner
+ * resolving X-08/PA-4, because widening it silently is the very mixing X-08
+ * warns against. Everything not in this set is auto and read-only to the AM.
+ */
+export const MANUAL_METRICS: readonly string[] = ['gmv'];
 
 /** status_persetujuan values (PH-3) — the > 10% approval flow. */
 const ADJ_PENDING = 'Menunggu Persetujuan';
@@ -1432,5 +1466,226 @@ export async function setWeeklyDistribution(
       mingguNo: num(w.minggu_no),
       kuota: num(w.kuota),
     }));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// B-06 — hybrid actuals (Rule 10/11, Section P-E)
+// ---------------------------------------------------------------------------
+//
+// Actuals are HYBRID (P5): GMV per channel is entered manually by the owning AM
+// with a source attachment + capture date (PE-1/PE-2); every other metric is
+// pulled from the execution modules by the system and is read-only to the AM
+// (PE-3). The AM cannot overwrite an auto metric — Rule 10 — they can only file
+// a `Sengketa Angka` note against it (PE-6), which is meant to route to the SPV
+// (the notification is deferred until the catalog is raised — PA-8/O55, so this
+// records the dispute but emits nothing yet, exactly like B-03…B-05).
+//
+// The AM-cannot-write-auto rule is a FROZEN INVARIANT enforced in three agreeing
+// places (`plan.reals.test.ts` proves they don't diverge): this TS write path,
+// the RLS `WITH CHECK`, and the `trg_plan_actual_no_manual_auto` trigger. The TS
+// side simply offers NO path for an actor to set an `otomatis` value: the manual
+// path below is `sumber='manual'` only, and disputing is a note, not a rewrite.
+// Auto ingestion is a system path (`recordAutoActual`, no Actor — service-role,
+// used by B-09 / the execution modules).
+//
+// Close does NOT lock (X-07 deviation, owner 2026-08-07): a manual GMV entered
+// after the period closed is accepted and recorded as an AMENDMENT in the
+// immutable log (Rule 11 "post-close correction creates an audit-logged
+// amendment visible on the period view"), rather than blocked — blocking a late
+// number does not make it exist, it only loses it forever (house rule #3). The
+// lateness *signal* (the "bad performance log point" X-07 wants, and the +5-day
+// `plan_realisasi_belum_lengkap` warning) is the B-09 job's, not this write's —
+// and it may not claim a KPI weight until X-12 gives it one.
+
+function rowToPlanActual(a: PlanActualDbRow): PlanActual {
+  return {
+    planId: a.plan_id,
+    channel: a.channel,
+    metric: a.metric,
+    sumber: a.sumber,
+    nilai: num(a.nilai),
+    fileBukti: a.file_bukti,
+    tanggalAmbil: optDate(a.tanggal_ambil),
+    sengketa: a.sengketa,
+  };
+}
+
+interface PlanActualDbRow {
+  plan_id: string;
+  channel: string;
+  metric: string;
+  sumber: 'manual' | 'otomatis';
+  nilai: string | number;
+  file_bukti: string | null;
+  tanggal_ambil: string | Date | null;
+  sengketa: string | null;
+}
+
+/** Load one actual FOR UPDATE — locks it so a dispute/write cannot race. */
+async function loadActualForUpdate(
+  tx: TransactionSql,
+  planId: string,
+  channel: string,
+  metric: string,
+): Promise<PlanActualDbRow> {
+  const rows = await tx<PlanActualDbRow[]>`
+    select * from plan_actual
+     where plan_id = ${planId} and channel = ${channel} and metric = ${metric}
+     for update`;
+  if (rows.length === 0) throw new NotFoundError(MSG_ACTUAL_NOT_FOUND);
+  return rows[0];
+}
+
+/**
+ * recordManualActual is the single write path for a manual actual (PE-1/PE-2):
+ * the owning AM sets GMV for one channel, with a source attachment + capture
+ * date. `metric` must be a MANUAL_METRICS member (GMV only, X-08) — an attempt
+ * to enter an auto metric by hand is rejected here, before it can reach the DB.
+ * Idempotent per (plan, channel, metric): a re-entry overwrites the prior manual
+ * figure (a correction), and every write appends to the immutable log.
+ *
+ * Not status-gated (X-07): a figure entered after the period closed is accepted
+ * and logged as an amendment (`action='realisasi_amandemen'`), not blocked.
+ */
+export async function recordManualActual(
+  sql: Sql,
+  actor: Actor,
+  planId: string,
+  channel: string,
+  metric: string,
+  nilai: number,
+  opts: { fileBukti: string; tanggalAmbil: string },
+): Promise<PlanActual> {
+  if (!MANUAL_METRICS.includes(metric)) {
+    throw new ValidationError(MSG_ACTUAL_METRIC_NOT_MANUAL);
+  }
+  if (!Number.isFinite(nilai) || nilai < 0) {
+    throw new ValidationError(MSG_ACTUAL_NILAI_INVALID);
+  }
+  const fileBukti = (opts.fileBukti ?? '').trim();
+  const tanggalAmbil = (opts.tanggalAmbil ?? '').trim();
+  if (fileBukti === '' || tanggalAmbil === '') {
+    throw new ValidationError(MSG_ACTUAL_BUKTI_REQUIRED);
+  }
+  return withTransaction(sql, async (tx) => {
+    const plan = await loadPlanForUpdate(tx, planId);
+    const ownerAm = await ownerAmOfClient(tx, plan.clientId);
+    if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+
+    const isAmendment = PLAN_TERMINAL.includes(plan.status);
+    const before = await tx<PlanActualDbRow[]>`
+      select * from plan_actual
+       where plan_id = ${planId} and channel = ${channel} and metric = ${metric}
+       for update`;
+
+    await tx`
+      insert into plan_actual
+        (plan_id, channel, metric, sumber, nilai, file_bukti, tanggal_ambil, created_by)
+      values (${planId}, ${channel}, ${metric}, 'manual', ${nilai},
+              ${fileBukti}, ${tanggalAmbil}, ${actor.employeeId})
+      on conflict (plan_id, channel, metric) do update
+        set sumber = 'manual', nilai = excluded.nilai,
+            file_bukti = excluded.file_bukti, tanggal_ambil = excluded.tanggal_ambil`;
+
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      // Rule 11 — a post-close correction is an amendment, and the log says so.
+      action: isAmendment ? 'realisasi_amandemen' : 'realisasi_manual',
+      beforeJson:
+        before.length === 0
+          ? { channel, metric }
+          : { channel, metric, nilai: num(before[0].nilai) },
+      afterJson: {
+        channel,
+        metric,
+        nilai,
+        file_bukti: fileBukti,
+        tanggal_ambil: tanggalAmbil,
+        periode_status: plan.status,
+      },
+      createdBy: actor.employeeId,
+    });
+
+    const after = await loadActualForUpdate(tx, planId, channel, metric);
+    return rowToPlanActual(after);
+  });
+}
+
+/**
+ * fileSengketa records the AM's `Sengketa Angka` (PE-6): a written challenge to
+ * an AUTO metric they believe is wrong. It sets only the `sengketa` note on the
+ * existing auto row — it never touches the value (that is the source module's,
+ * Rule 10). The dispute is meant to route to the SPV; the notification waits on
+ * the catalog (PA-8/O55), so this logs the dispute and emits nothing yet.
+ */
+export async function fileSengketa(
+  sql: Sql,
+  actor: Actor,
+  planId: string,
+  channel: string,
+  metric: string,
+  alasan: string,
+): Promise<PlanActual> {
+  const note = (alasan ?? '').trim();
+  if (note === '') throw new ValidationError(MSG_SENGKETA_ALASAN_REQUIRED);
+  return withTransaction(sql, async (tx) => {
+    const plan = await loadPlanForUpdate(tx, planId);
+    const ownerAm = await ownerAmOfClient(tx, plan.clientId);
+    if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+
+    const before = await loadActualForUpdate(tx, planId, channel, metric);
+    if (before.sumber !== 'otomatis') throw new ConflictError(MSG_SENGKETA_NOT_AUTO);
+
+    await tx`
+      update plan_actual set sengketa = ${note}
+       where plan_id = ${planId} and channel = ${channel} and metric = ${metric}`;
+
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'sengketa_angka',
+      beforeJson: { channel, metric, sengketa: before.sengketa },
+      afterJson: { channel, metric, nilai: num(before.nilai), sengketa: note },
+      createdBy: actor.employeeId,
+    });
+
+    const after = await loadActualForUpdate(tx, planId, channel, metric);
+    return rowToPlanActual(after);
+  });
+}
+
+/**
+ * recordAutoActual is the SYSTEM ingestion path for an auto metric (PE-3): the
+ * execution modules / the B-09 close job push a computed figure in. It takes no
+ * Actor because it is never a human action — it runs service-role, where the
+ * DB guard trigger sees no JWT actor and lets the auto write through. Kept here
+ * as the counterpart to the AM block so B-09 has one place to write auto rows;
+ * `createdBy` is the system/job identity the caller supplies.
+ */
+export async function recordAutoActual(
+  sql: Sql,
+  planId: string,
+  channel: string,
+  metric: string,
+  nilai: number,
+  createdBy: string,
+): Promise<PlanActual> {
+  if (!Number.isFinite(nilai) || nilai < 0) {
+    throw new ValidationError(MSG_ACTUAL_NILAI_INVALID);
+  }
+  return withTransaction(sql, async (tx) => {
+    await tx`
+      insert into plan_actual (plan_id, channel, metric, sumber, nilai, created_by)
+      values (${planId}, ${channel}, ${metric}, 'otomatis', ${nilai}, ${createdBy})
+      on conflict (plan_id, channel, metric) do update
+        set sumber = 'otomatis', nilai = excluded.nilai`;
+    const after = await loadActualForUpdate(tx, planId, channel, metric);
+    return rowToPlanActual(after);
   });
 }
