@@ -16,20 +16,26 @@ import { permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import {
   type Actor,
+  canManageEmployeeAssignment,
   canReadAdmin,
   canWriteAdmin,
   deleteRoleMapping,
   ForbiddenError,
+  HR_DIVISION,
   listEmployees,
   listLayeredRoles,
   listRoleMappings,
   MSG_ADMIN_READ_DENIED,
   MSG_BAD_LEVEL,
   MSG_BAD_ROLE,
+  MSG_EMPLOYEE_MUTATION_DENIED,
+  MSG_EMPLOYEE_NOT_FOUND,
   MSG_INCOMPLETE,
   MSG_LAYERED_ROLE_DENIED,
   MSG_ROLE_MAPPING_DENIED,
+  NotFoundError,
   setLayeredRole,
+  updateEmployeeAssignment,
   upsertRoleMapping,
   ValidationError,
 } from './admin';
@@ -45,6 +51,9 @@ const salesLead = (): Actor => ({
 });
 const salesStaff = (): Actor => ({
   employeeId: 'ZZ-SSTAFF', role: permission.makeRole({ division: 'Sales', level: 'staff' }),
+});
+const hrLead = (): Actor => ({
+  employeeId: 'ZZ-HRLEAD', role: permission.makeRole({ division: HR_DIVISION, level: 'lead' }),
 });
 
 // ---------------------------------------------------------------------------
@@ -68,6 +77,23 @@ describe('admin permission matrix', () => {
     expect(canWriteAdmin(od())).toBe(false);
     expect(canWriteAdmin(salesLead())).toBe(false);
     expect(canWriteAdmin(salesStaff())).toBe(false);
+  });
+
+  it('gates employee mutation to Director + HR-division Lead ONLY', () => {
+    // Director always; the HR Lead is the one non-Director allowed (owner
+    // decision 2026-08-10). Crucially a Lead of ANOTHER division must NOT be able
+    // to re-grade employees — that would be self-promotion via jabatan.
+    expect(canManageEmployeeAssignment(director())).toBe(true);
+    expect(canManageEmployeeAssignment(hrLead())).toBe(true);
+    expect(canManageEmployeeAssignment(salesLead())).toBe(false);
+    expect(canManageEmployeeAssignment(salesStaff())).toBe(false);
+    expect(canManageEmployeeAssignment(od())).toBe(false);
+    // An HR *staff* (not lead) is not enough either.
+    expect(
+      canManageEmployeeAssignment({
+        employeeId: 'ZZ-HRSTAFF', role: permission.makeRole({ division: HR_DIVISION, level: 'staff' }),
+      }),
+    ).toBe(false);
   });
 });
 
@@ -336,6 +362,79 @@ describeDb('listEmployees', () => {
   });
 });
 
+describeDb('updateEmployeeAssignment', () => {
+  it('mutates divisi/jabatan and audits the before→after transfer', async () => {
+    await seedEmployee('ZZ-EMP5', 'ACCOUNT', 'ADMIN A&S');
+    const wm = await auditWatermark();
+
+    const row = await updateEmployeeAssignment(sql, director(), 'ZZ-EMP5', 'CREATIVE', 'GRAPHIC DESIGNER');
+    expect(row.divisi).toBe('CREATIVE');
+    expect(row.jabatan).toBe('GRAPHIC DESIGNER');
+
+    // The row itself moved.
+    const after = (await listEmployees(sql)).find((e) => e.employeeId === 'ZZ-EMP5')!;
+    expect(after.divisi).toBe('CREATIVE');
+    expect(after.jabatan).toBe('GRAPHIC DESIGNER');
+
+    // A transfer must be reconstructible from the log (house rule #3).
+    const audit = await sql<
+      {
+        before_json: { divisi: string; jabatan: string } | null;
+        after_json: { divisi: string; jabatan: string };
+      }[]
+    >`select before_json, after_json from audit_log
+       where entity_type = 'employee' and entity_id = 'ZZ-EMP5' and action = 'reassign'
+         and id > ${wm}::bigint`;
+    expect(audit).toHaveLength(1);
+    expect(audit[0].before_json).toEqual({ divisi: 'ACCOUNT', jabatan: 'ADMIN A&S' });
+    expect(audit[0].after_json).toEqual({ divisi: 'CREATIVE', jabatan: 'GRAPHIC DESIGNER' });
+  });
+
+  it('trims input so a stray space cannot mint an unmatchable divisi', async () => {
+    await seedEmployee('ZZ-EMP6', 'ACCOUNT', 'ADMIN A&S');
+    const row = await updateEmployeeAssignment(sql, director(), 'ZZ-EMP6', '  CREATIVE  ', '  VIDEOGRAPHER  ');
+    expect(row.divisi).toBe('CREATIVE');
+    expect(row.jabatan).toBe('VIDEOGRAPHER');
+  });
+
+  it('lets an HR-division Lead mutate, but denies a Sales Lead, OD and staff', async () => {
+    await seedEmployee('ZZ-EMP7', 'ACCOUNT', 'ADMIN A&S');
+
+    // Denied paths write nothing and carry the verbatim BI message.
+    for (const bad of [salesLead(), od(), salesStaff()]) {
+      await expect(
+        updateEmployeeAssignment(sql, bad, 'ZZ-EMP7', 'CREATIVE', 'VIDEOGRAPHER'),
+      ).rejects.toThrow(MSG_EMPLOYEE_MUTATION_DENIED);
+    }
+    await expect(
+      updateEmployeeAssignment(sql, salesLead(), 'ZZ-EMP7', 'CREATIVE', 'VIDEOGRAPHER'),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect((await listEmployees(sql)).find((e) => e.employeeId === 'ZZ-EMP7')!.divisi).toBe('ACCOUNT');
+
+    // HR Lead is allowed.
+    const row = await updateEmployeeAssignment(sql, hrLead(), 'ZZ-EMP7', 'KOL', 'KOL SPECIALIST');
+    expect(row.divisi).toBe('KOL');
+    expect(row.jabatan).toBe('KOL SPECIALIST');
+  });
+
+  it('reports incompleteness for an empty divisi/jabatan, and 404 for an unknown employee', async () => {
+    await seedEmployee('ZZ-EMP8', 'ACCOUNT', 'ADMIN A&S');
+    await expect(
+      updateEmployeeAssignment(sql, director(), 'ZZ-EMP8', '', 'X'),
+    ).rejects.toThrow(MSG_INCOMPLETE);
+    await expect(
+      updateEmployeeAssignment(sql, director(), 'ZZ-EMP8', 'X', '  '),
+    ).rejects.toBeInstanceOf(ValidationError);
+
+    await expect(
+      updateEmployeeAssignment(sql, director(), 'ZZ-NOPE', 'CREATIVE', 'VIDEOGRAPHER'),
+    ).rejects.toThrow(MSG_EMPLOYEE_NOT_FOUND);
+    await expect(
+      updateEmployeeAssignment(sql, director(), 'ZZ-NOPE', 'CREATIVE', 'VIDEOGRAPHER'),
+    ).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
 describe('BI messages are the exact ported strings', () => {
   it('never drifts from the Go handlers', () => {
     // These are user-visible and ported byte-for-byte; a reword is a regression.
@@ -350,5 +449,12 @@ describe('BI messages are the exact ported strings', () => {
     // Every other message here is still byte-for-byte the ported one.
     expect(MSG_BAD_ROLE).toBe("[role harus 'od', 'director', atau 'lead']");
     expect(MSG_INCOMPLETE).toBe('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
+  });
+
+  it('locks the NEW mutation strings (no Go ancestor — TS-only feature)', () => {
+    expect(MSG_EMPLOYEE_MUTATION_DENIED).toBe(
+      '[hanya Director atau Lead HR yang dapat mengubah divisi/jabatan karyawan]',
+    );
+    expect(MSG_EMPLOYEE_NOT_FOUND).toBe('[karyawan tidak ditemukan]');
   });
 });

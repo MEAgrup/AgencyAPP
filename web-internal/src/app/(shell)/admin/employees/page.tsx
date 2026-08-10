@@ -1,13 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '@/lib/api';
-import type { AdminEmployee, CredentialInfo, EmployeeImportResult } from '@/lib/types';
+import { useAuth } from '@/lib/auth-context';
+import type { CredentialInfo, EmployeeImportResult } from '@/lib/types';
 
 export default function AdminEmployeesPage() {
-  const [employees, setEmployees] = useState<AdminEmployee[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { role } = useAuth();
 
   const [csv, setCsv] = useState('');
   const [full, setFull] = useState(false);
@@ -15,29 +14,32 @@ export default function AdminEmployeesPage() {
   const [syncResult, setSyncResult] = useState<EmployeeImportResult | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
 
-  // B1 recovery path: credential status + temp-password reset.
+  // The single employee roster. Sourced from /auth/admin/credentials, which
+  // already carries email/divisi/jabatan alongside the credential status — so the
+  // page shows ONE table (DECISIONS 2026-08-10: the second, /admin/employees
+  // directory table was a duplicate and was removed).
   const [creds, setCreds] = useState<CredentialInfo[] | null>(null);
   const [credError, setCredError] = useState<string | null>(null);
+
+  // Reset password (temp-password recovery path).
   const [resetTarget, setResetTarget] = useState('');
   const [tempPassword, setTempPassword] = useState('');
   const [resetting, setResetting] = useState(false);
   const [resetMsg, setResetMsg] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await api.get<{ data: AdminEmployee[] }>('/admin/employees');
-      setEmployees(res.data);
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // Name search over the roster.
+  const [query, setQuery] = useState('');
 
-  // Credential status is a separate gate from the directory (Director OR division
-  // Lead), so a 403 here must not blank the employee table — keep the errors apart.
+  // Mutasi (edit divisi/jabatan) — Director or HR-division Lead only. Server is
+  // the real gate (the button is a cosmetic hide, per house convention).
+  const canMutate = !!role?.director || (role?.level === 'lead' && role?.division === 'HR');
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editDivisi, setEditDivisi] = useState('');
+  const [editJabatan, setEditJabatan] = useState('');
+  const [savingMut, setSavingMut] = useState(false);
+  const [mutError, setMutError] = useState<string | null>(null);
+  const [mutMsg, setMutMsg] = useState<string | null>(null);
+
   const loadCreds = useCallback(async () => {
     setCredError(null);
     try {
@@ -49,9 +51,20 @@ export default function AdminEmployeesPage() {
   }, []);
 
   useEffect(() => {
-    load();
     loadCreds();
-  }, [load, loadCreds]);
+  }, [loadCreds]);
+
+  const filtered = useMemo(() => {
+    const list = creds ?? [];
+    const q = query.trim().toLowerCase();
+    if (q === '') return list;
+    return list.filter(
+      (c) =>
+        c.nama.toLowerCase().includes(q) ||
+        c.employee_id.toLowerCase().includes(q) ||
+        c.email.toLowerCase().includes(q),
+    );
+  }, [creds, query]);
 
   async function handleReset() {
     setResetMsg(null);
@@ -95,11 +108,46 @@ export default function AdminEmployeesPage() {
         full,
       });
       setSyncResult(res.result);
-      await load();
+      await loadCreds();
     } catch (err) {
       setSyncError(errorMessage(err));
     } finally {
       setSyncing(false);
+    }
+  }
+
+  function startEdit(c: CredentialInfo) {
+    setEditId(c.employee_id);
+    setEditDivisi(c.divisi);
+    setEditJabatan(c.jabatan);
+    setMutError(null);
+    setMutMsg(null);
+  }
+
+  function cancelEdit() {
+    setEditId(null);
+    setEditDivisi('');
+    setEditJabatan('');
+  }
+
+  async function saveEdit(employeeId: string) {
+    setMutError(null);
+    setMutMsg(null);
+    setSavingMut(true);
+    try {
+      await api.put(`/admin/employees/${employeeId}`, {
+        divisi: editDivisi,
+        jabatan: editJabatan,
+      });
+      setMutMsg(
+        `Mutasi ${employeeId} tersimpan. Peran baru berlaku saat karyawan login/refresh berikutnya.`,
+      );
+      cancelEdit();
+      await loadCreds();
+    } catch (err) {
+      setMutError(errorMessage(err));
+    } finally {
+      setSavingMut(false);
     }
   }
 
@@ -159,7 +207,6 @@ export default function AdminEmployeesPage() {
             <strong>wajib mengganti password saat login berikutnya</strong>.
           </p>
         </div>
-        {credError && <div className="alert alertError">{credError}</div>}
         {resetMsg && <div className="alert alertSuccess">{resetMsg}</div>}
         <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
           <select
@@ -191,56 +238,39 @@ export default function AdminEmployeesPage() {
             {resetting ? 'Menyetel...' : 'Setel Password Sementara'}
           </button>
         </div>
-
-        {creds && creds.length > 0 && (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Nama</th>
-                  <th>Punya Password</th>
-                  <th>Wajib Ganti</th>
-                  <th>Terakhir Ganti</th>
-                </tr>
-              </thead>
-              <tbody>
-                {creds.map((c) => (
-                  <tr key={c.employee_id}>
-                    <td>{c.employee_id}</td>
-                    <td>{c.nama}</td>
-                    <td>
-                      <span className={`badge badge-${c.has_password ? 'green' : 'red'}`}>
-                        {c.has_password ? 'Ya' : 'Belum'}
-                      </span>
-                    </td>
-                    <td>
-                      {c.must_change_password ? (
-                        <span className="badge badge-orange">Wajib ganti</span>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
-                    </td>
-                    <td>
-                      {c.password_changed_at
-                        ? new Date(c.password_changed_at).toLocaleDateString('id-ID')
-                        : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </section>
 
-      <section className="card">
-        {loading && <p className="muted">Memuat...</p>}
-        {error && <div className="alert alertError">{error}</div>}
-        {!loading && !error && employees && employees.length === 0 && (
-          <div className="emptyState">Belum ada data karyawan.</div>
+      <section className="card stack">
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+          <div>
+            <h2>Direktori karyawan</h2>
+            <p className="muted">
+              Cari karyawan berdasarkan nama, ID, atau email.
+              {canMutate && ' Gunakan “Mutasi” untuk memindahkan divisi/jabatan.'}
+            </p>
+          </div>
+          <input
+            className="input"
+            type="search"
+            autoComplete="off"
+            placeholder="Cari nama karyawan…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            style={{ maxWidth: 280 }}
+          />
+        </div>
+
+        {credError && <div className="alert alertError">{credError}</div>}
+        {mutError && <div className="alert alertError">{mutError}</div>}
+        {mutMsg && <div className="alert alertSuccess">{mutMsg}</div>}
+
+        {!creds && !credError && <p className="muted">Memuat...</p>}
+        {creds && creds.length === 0 && <div className="emptyState">Belum ada data karyawan.</div>}
+        {creds && creds.length > 0 && filtered.length === 0 && (
+          <div className="emptyState">Tidak ada karyawan yang cocok dengan “{query}”.</div>
         )}
-        {!loading && !error && employees && employees.length > 0 && (
+
+        {creds && filtered.length > 0 && (
           <div className="table-wrap">
             <table className="table">
               <thead>
@@ -250,27 +280,87 @@ export default function AdminEmployeesPage() {
                   <th>Email</th>
                   <th>Divisi</th>
                   <th>Jabatan</th>
-                  <th>Status</th>
+                  <th>Punya Password</th>
+                  <th>Wajib Ganti</th>
+                  <th>Terakhir Ganti</th>
+                  {canMutate && <th>Aksi</th>}
                 </tr>
               </thead>
               <tbody>
-                {employees.map((emp) => (
-                  <tr key={emp.employee_id} className={emp.flagged ? 'flaggedRow' : ''}>
-                    <td>{emp.employee_id}</td>
-                    <td>{emp.nama}</td>
-                    <td>{emp.email}</td>
-                    <td>{emp.divisi}</td>
-                    <td>{emp.jabatan}</td>
-                    <td>
-                      <span className={`badge badge-${emp.status_aktif ? 'green' : 'darkgray'}`}>
-                        {emp.status_aktif ? 'Aktif' : 'Nonaktif'}
-                      </span>
-                      {emp.flagged && (
-                        <span className="badge badge-red" style={{ marginLeft: 6 }}>Ditandai</span>
+                {filtered.map((c) => {
+                  const editing = editId === c.employee_id;
+                  return (
+                    <tr key={c.employee_id}>
+                      <td>{c.employee_id}</td>
+                      <td>{c.nama}</td>
+                      <td>{c.email}</td>
+                      <td>
+                        {editing ? (
+                          <input
+                            className="input"
+                            value={editDivisi}
+                            onChange={(e) => setEditDivisi(e.target.value)}
+                            placeholder="Divisi"
+                          />
+                        ) : (
+                          c.divisi
+                        )}
+                      </td>
+                      <td>
+                        {editing ? (
+                          <input
+                            className="input"
+                            value={editJabatan}
+                            onChange={(e) => setEditJabatan(e.target.value)}
+                            placeholder="Jabatan"
+                          />
+                        ) : (
+                          c.jabatan
+                        )}
+                      </td>
+                      <td>
+                        <span className={`badge badge-${c.has_password ? 'green' : 'red'}`}>
+                          {c.has_password ? 'Ya' : 'Belum'}
+                        </span>
+                      </td>
+                      <td>
+                        {c.must_change_password ? (
+                          <span className="badge badge-orange">Wajib ganti</span>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                      <td>
+                        {c.password_changed_at
+                          ? new Date(c.password_changed_at).toLocaleDateString('id-ID')
+                          : '—'}
+                      </td>
+                      {canMutate && (
+                        <td>
+                          {editing ? (
+                            <div className="row" style={{ gap: 6 }}>
+                              <button
+                                type="button"
+                                className="btn btnPrimary"
+                                disabled={savingMut || editDivisi.trim() === '' || editJabatan.trim() === ''}
+                                onClick={() => saveEdit(c.employee_id)}
+                              >
+                                {savingMut ? 'Menyimpan...' : 'Simpan'}
+                              </button>
+                              <button type="button" className="btn" disabled={savingMut} onClick={cancelEdit}>
+                                Batal
+                              </button>
+                            </div>
+                          ) : (
+                            <button type="button" className="btn" onClick={() => startEdit(c)}>
+                              Mutasi
+                            </button>
+                          )}
+                        </td>
                       )}
-                    </td>
-                  </tr>
-                ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
