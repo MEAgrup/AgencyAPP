@@ -5,23 +5,23 @@
 
 ## 0. CARA MELANJUTKAN DI CHAT BARU — baca ini dulu
 
-### 0.0 Posisi branch (persis, per akhir sesi 19→20)
+### 0.0 Posisi branch (persis, per akhir sesi 19→20 — SUDAH MERGE)
 
 | Hal | Nilai |
 |---|---|
 | **Repo** | `MEAgrup/AgencyAPP` |
-| **`main` (default)** | memuat **B-00…B-05 + M6A A-00…A-13d**. **B-06 belum di `main`** sampai PR **#121** merge; **B-07 belum di `main`** (ditumpuk di atas B-06 — lihat ⚠️ di bawah) |
-| **Branch kerja sesi ini** | `claude/handoff-m6abc-sesi19-l35gzg` — memuat **B-07 penutupan transaksional** **DI ATAS** commit B-06 (PR #121), bukan di atas `main` |
-| **PR MASIH TERBUKA** | **#121** — B-06 realisasi hybrid (menunggu merge). **#115** — M6A A-11 (`/s/{token}`) + X-16/X-17 (keputusan pemilik) |
-| **Branch untuk B-08** | Tunggu B-06 (#121) + B-07 merge ke `main`, lalu: `git fetch origin main && git checkout -B claude/b-08-carry-over origin/main` |
+| **`main` (default)** | memuat **B-00…B-07 + M6A A-00…A-13d + #123 admin/employees**. **B-06 + B-07 SUDAH di `main`** lewat merge commit **`05608a4`** (PR **#124**). **MULAI B-08 DARI SINI.** |
+| **PR ter-merge** | **#124** — B-06 realisasi hybrid + B-07 penutupan transaksional (di-rebase bersih ke `main` terkini lalu di-merge bersama). Branch kerja `claude/handoff-m6abc-sesi19-l35gzg` sudah merge, boleh dihapus |
+| **PR ditutup** | **#121** — B-06 lama (jadi *dirty* setelah #123); digantikan #124 |
+| **PR MASIH TERBUKA** | **#115** — M6A A-11 (`/s/{token}`) + X-16/X-17 (keputusan pemilik) |
+| **Branch untuk B-08** | Buat BARU dari `main`: `git fetch origin main && git checkout -B claude/b-08-carry-over origin/main` |
 
-> ⚠️ **B-07 ditumpuk di atas B-06 karena B-06 (#121) belum merge.** SESI19 §0.0
-> mengarahkan B-07 dibuat dari `main` **setelah** #121 merge; karena #121 masih
-> terbuka saat sesi ini mulai, B-07 dibangun di atas tip branch B-06 supaya
-> kodenya benar & teruji (close bergantung pada realisasi B-06). **Urutan merge
-> yang benar: #121 (B-06) dulu, lalu B-07.** Setelah #121 masuk `main`, rebase
-> branch ini ke `main` (fast-forward — B-07 = B-06 + commit B-07). Jangan merge
-> B-07 sebelum B-06.
+> ⚠️ **Catatan riwayat (sudah selesai, tak perlu tindakan):** B-07 semula ditumpuk
+> di atas B-06 karena #121 belum merge saat sesi 19→20 mulai; lalu #123
+> (admin/employees, keputusan final pemilik untuk halaman karyawan) masuk `main`
+> dan membuat #121 *dirty*. B-06 + B-07 di-rebase bersih ke `main` terkini
+> (konflik HANYA `docs/DECISIONS.md` — kedua baris #123 dipertahankan) dan
+> di-merge sebagai satu PR #124. Tidak ada sisa yang menggantung.
 
 ### 0.1 DB lokal — WAJIB, dan Postgres MATI SENDIRI
 
@@ -144,7 +144,7 @@ scripts/db-rebuild.sh --yes                                    # 76 migrasi, gat
 DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/cdps" \
   npx vitest run src/plan.test.ts src/plan.reals.test.ts --root packages/domain   # 97 hijau (90 + 7)
 
-# lalu mulai B-08 (setelah B-06 #121 + B-07 merge ke main):
+# lalu mulai B-08 (B-06 + B-07 sudah di main via #124):
 git fetch origin main && git checkout -B claude/b-08-carry-over origin/main
 ```
 
