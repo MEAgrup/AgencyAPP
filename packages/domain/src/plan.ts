@@ -27,12 +27,20 @@
  * *their own rows* is an RLS arm on `plan_row`, not a whole-Plan grant.
  */
 
-import { ident, permission } from '@cdps/core';
-import { executors, type Queryable, type TransactionSql } from '@cdps/db';
+import { ident, permission, statemachine } from '@cdps/core';
+import {
+  executors,
+  withTransaction,
+  type Queryable,
+  type Sql,
+  type TransactionSql,
+} from '@cdps/db';
 import {
   ACCOUNT_DIVISION,
+  ConflictError,
   ForbiddenError,
   NotFoundError,
+  ValidationError,
   type Actor,
 } from './account';
 
@@ -48,6 +56,15 @@ export const MSG_PLAN_FORBIDDEN = '[anda tidak memiliki akses untuk melihat peri
 export const MSG_CLIENT_NOT_FOUND = '[klien tidak ditemukan]';
 /** The contract id does not resolve. */
 export const MSG_CONTRACT_NOT_FOUND = '[kontrak tidak ditemukan]';
+/** Approve / return of period 1 is SPV / Head of Account authority (Rule 3). */
+export const MSG_PLAN_APPROVE_FORBIDDEN =
+  '[anda tidak memiliki akses untuk menyetujui atau mengembalikan periode Plan]';
+/** Rule 3 — returning period 1 requires a written note. */
+export const MSG_PLAN_RETURN_NOTES_REQUIRED =
+  '[catatan wajib diisi saat mengembalikan periode Plan]';
+/** PA-7 — the opening note is mandatory before a period may be submitted. */
+export const MSG_PLAN_CATATAN_PEMBUKA_REQUIRED =
+  '[catatan pembuka wajib diisi sebelum periode Plan diajukan]';
 
 // ---------------------------------------------------------------------------
 // Shape — one interface per table, camelCase (the wire boundary snake_cases)
@@ -631,4 +648,183 @@ export async function generatePlanPeriods(
     ids.push(id);
   }
   return ids;
+}
+
+// ---------------------------------------------------------------------------
+// B-03 — lifecycle (machine #16): the transition gates
+// ---------------------------------------------------------------------------
+//
+// B-01 registered the machine's edges (STATE_MACHINES §6d): the machine knows
+// *which* status moves are legal. B-03 adds the domain layer around it — *who*
+// may press *which* button, and *when* — the part `sm_edges` cannot express:
+//
+//   * Period 1 alone walks the human review loop `Draft → Diajukan →
+//     (Aktif | Draft)` (Rule 3). Its `Diajukan → Aktif` / `Diajukan → Draft`
+//     edges are `require_lead` in the DB, so `sm_transition` already refuses a
+//     non-lead — the domain gate narrows that to the *Account* division (an Ads
+//     lead is a lead too, but not the SPV / Head of Account Rule 3 means).
+//   * Periods 2..n never enter that loop; they auto-activate `Terjadwal → Aktif`
+//     at 00:00 WIB (Rule 4). That edge is deliberately NOT `require_lead`: the
+//     activation is run by a service-role job (B-09), not a person. The
+//     `Menunggu Persetujuan` hold for a pending `Turun >10%` adjustment (Rule
+//     4/9) is wired in B-04, which owns the adjustment record; until then a
+//     `Terjadwal` period activates straight through.
+//
+// Notifications (`plan_periode_aktif`, …) are NOT emitted here: the catalog has
+// no M6B plan events yet (they await PA-8 / O55 sign-off). Emitting an
+// unregistered event would fail `notify_emit`; the events land with their
+// ticket, and emission with them.
+
+/** The status column moves ONLY through `sm_transition` on machine #16. */
+const MACHINE_PLAN = 'plan';
+const ENTITY_PLAN = 'plan';
+
+const PLAN_DRAFT = 'Draft';
+const PLAN_DIAJUKAN = 'Diajukan';
+const PLAN_AKTIF = 'Aktif';
+
+/** transitionError maps an engine rejection to the shared error taxonomy. */
+function transitionError(res: statemachine.TransitionResult & { ok: false }): Error {
+  if (res.code === 'not_found') return new NotFoundError(MSG_PLAN_NOT_FOUND);
+  if (res.code === 'role_denied') return new ForbiddenError(res.message);
+  // 'blocked' (illegal edge, incl. the machine's BI block message) and anything
+  // else the engine can return are conflicts on the current state.
+  return new ConflictError(res.message);
+}
+
+/**
+ * transitionPlan is the single wrapper every Plan status move goes through — the
+ * `strategi.ts` transition pattern applied to machine #16. It forces the move
+ * through `sm_transition` (row lock + edge check + `require_lead` gate + the
+ * immutable audit row, one transaction) and maps a rejection onto the domain
+ * error taxonomy. The division-specific gates live in the named operations that
+ * call it; this is the low-level path they (and B-04…B-09) share.
+ *
+ * Runs inside the caller's transaction so any sibling write (persisting the
+ * opening note, appending the return note) commits or rolls back with the move.
+ */
+export async function transitionPlan(
+  tx: TransactionSql,
+  actor: Actor,
+  planId: string,
+  to: PlanStatus,
+): Promise<void> {
+  const ex = executors(tx);
+  const res = await statemachine.transition(ex.sm, {
+    machine: MACHINE_PLAN,
+    entityType: ENTITY_PLAN,
+    table: 'plan',
+    entityId: planId,
+    to,
+    actor,
+  });
+  if (!res.ok) throw transitionError(res);
+}
+
+/** Load a period FOR UPDATE — locks the row so the gate check cannot race the move. */
+async function loadPlanForUpdate(tx: TransactionSql, id: string): Promise<Plan> {
+  const rows = await tx<PlanRowDb[]>`select * from plan where id = ${id} for update`;
+  if (rows.length === 0) throw new NotFoundError(MSG_PLAN_NOT_FOUND);
+  return rowToPlan(rows[0]);
+}
+
+/** canApprovePlan: SPV / Head of Account (Rule 3). The period-1 approval gate. */
+export function canApprovePlan(actor: Actor): boolean {
+  return permission.isLead(actor, ACCOUNT_DIVISION);
+}
+
+/**
+ * submitPlanPeriode drives period 1 `Draft → Diajukan` (Flow step 2): the owning
+ * AM hands the filled period to the SPV. The opening note PA-7 is mandatory at
+ * submit — the one completeness field the schema carries today; the row/week
+ * completeness checks land with their tickets (B-04…B-08) and extend this gate.
+ *
+ * Only period 1 is ever in `Draft` (generation seeds it there; 2..n start
+ * `Terjadwal`), so the machine confines this to period 1 without a separate
+ * guard — a `Terjadwal` period has no `→ Diajukan` edge and the engine blocks it.
+ */
+export async function submitPlanPeriode(sql: Sql, actor: Actor, planId: string): Promise<Plan> {
+  return withTransaction(sql, async (tx) => {
+    const plan = await loadPlanForUpdate(tx, planId);
+    const ownerAm = await ownerAmOfClient(tx, plan.clientId);
+    if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+    if ((plan.catatanPembuka ?? '').trim() === '') {
+      throw new ValidationError(MSG_PLAN_CATATAN_PEMBUKA_REQUIRED);
+    }
+    await transitionPlan(tx, actor, planId, PLAN_DIAJUKAN);
+    return loadPlan(tx, planId);
+  });
+}
+
+/**
+ * approvePlanPeriode drives period 1 `Diajukan → Aktif` (Rule 3) — the SPV's
+ * approval, which is what switches the Plan mechanism on for the whole contract.
+ * The `require_lead` edge already refuses a non-lead; this narrows it to the
+ * Account division (Rule 3's SPV / Head of Account, not any division's lead).
+ */
+export async function approvePlanPeriode(sql: Sql, actor: Actor, planId: string): Promise<Plan> {
+  if (!canApprovePlan(actor)) throw new ForbiddenError(MSG_PLAN_APPROVE_FORBIDDEN);
+  return withTransaction(sql, async (tx) => {
+    await loadPlanForUpdate(tx, planId); // lock + 404 before the move
+    await transitionPlan(tx, actor, planId, PLAN_AKTIF);
+    return loadPlan(tx, planId);
+  });
+}
+
+/**
+ * returnPlanPeriode drives period 1 `Diajukan → Draft` (Rule 3): the SPV sends it
+ * back with a MANDATORY note. There is no `catatan_reviewer` column on `plan`
+ * (B-01 gave it only PA-7's `catatan_pembuka`), so the note lives where Rule 19
+ * puts every approval decision — the immutable audit log — as a `dikembalikan`
+ * row alongside the `transition:` row `sm_transition` writes.
+ */
+export async function returnPlanPeriode(
+  sql: Sql,
+  actor: Actor,
+  planId: string,
+  catatan: string,
+): Promise<Plan> {
+  const note = (catatan ?? '').trim();
+  if (note === '') throw new ValidationError(MSG_PLAN_RETURN_NOTES_REQUIRED);
+  if (!canApprovePlan(actor)) throw new ForbiddenError(MSG_PLAN_APPROVE_FORBIDDEN);
+  return withTransaction(sql, async (tx) => {
+    const plan = await loadPlanForUpdate(tx, planId);
+    await transitionPlan(tx, actor, planId, PLAN_DRAFT);
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'dikembalikan',
+      beforeJson: { status: plan.status },
+      afterJson: { status: PLAN_DRAFT, catatan: note },
+      createdBy: actor.employeeId,
+    });
+    return loadPlan(tx, planId);
+  });
+}
+
+/**
+ * activatePlanPeriode drives a scheduled period `Terjadwal → Aktif` (Rule 4) —
+ * the auto-activation the 00:00 WIB job (B-09) calls for every period whose start
+ * date is today. It is NOT lead-gated (the edge carries no `require_lead`,
+ * matching the service-role job that runs it); the guard here is only that the
+ * caller has Plan write scope, so the function cannot be driven by an unrelated
+ * account.
+ *
+ * Rule 5 (one `Aktif` per chain) is held by the partial unique index
+ * `uq_plan_aktif_*`: activating period n+1 while period n is still `Aktif` is
+ * refused by the DB. The job force-closes the overdue predecessor first (B-09).
+ * The `Menunggu Persetujuan` hold for a pending `Turun >10%` adjustment (Rule
+ * 4/9) is wired in B-04, which owns that record; until then this activates
+ * straight through on the original Strategi target.
+ */
+export async function activatePlanPeriode(sql: Sql, actor: Actor, planId: string): Promise<Plan> {
+  return withTransaction(sql, async (tx) => {
+    const plan = await loadPlanForUpdate(tx, planId);
+    const ownerAm = await ownerAmOfClient(tx, plan.clientId);
+    if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+    await transitionPlan(tx, actor, planId, PLAN_AKTIF);
+    return loadPlan(tx, planId);
+  });
 }
