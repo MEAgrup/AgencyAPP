@@ -26,21 +26,34 @@ import { createClient, type Sql } from '@cdps/db';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from './account';
 import { createStrategi } from './strategi';
 import {
+  DOWNWARD_APPROVAL_THRESHOLD_PCT,
+  MSG_PLAN_ADJUST_ALASAN_REQUIRED,
+  MSG_PLAN_ADJUST_BUKTI_REQUIRED,
+  MSG_PLAN_ADJUST_NILAI_INVALID,
+  MSG_PLAN_ADJUST_NOT_PENDING,
+  MSG_PLAN_ADJUST_REJECT_NOTES_REQUIRED,
+  MSG_PLAN_ADJUST_STATUS,
   MSG_PLAN_APPROVE_FORBIDDEN,
   MSG_PLAN_CATATAN_PEMBUKA_REQUIRED,
   MSG_PLAN_FORBIDDEN,
   MSG_PLAN_NOT_FOUND,
   MSG_PLAN_RETURN_NOTES_REQUIRED,
+  MSG_PLAN_TARGET_NOT_FOUND,
   activatePlanPeriode,
+  adjustPlanTarget,
   approvePlanPeriode,
+  approveTargetAdjustment,
   canApprovePlan,
   canReadPlan,
   canWritePlan,
+  classifyAdjustment,
   computePeriods,
+  contractDeficit,
   generatePlanPeriods,
   getPlan,
   getPlanDetail,
   listPlansForContract,
+  rejectTargetAdjustment,
   returnPlanPeriode,
   submitPlanPeriode,
 } from './plan';
@@ -131,6 +144,53 @@ describe('computePeriods', () => {
   it('rejects a bad cycle-start and a non-positive count', () => {
     expect(() => computePeriods('2026-8-1', 3)).toThrow();
     expect(() => computePeriods('2026-08-12', 0)).toThrow();
+  });
+});
+
+describe('classifyAdjustment (Rule 9, pure)', () => {
+  it('treats an unchanged figure as tetap with no guardrails', () => {
+    expect(classifyAdjustment(200, 200)).toEqual({
+      arah: 'tetap',
+      persenPerubahan: 0,
+      requiresReason: false,
+      requiresBukti: false,
+      requiresApproval: false,
+    });
+  });
+
+  it('lets any upward move through free', () => {
+    const up = classifyAdjustment(200, 250);
+    expect(up.arah).toBe('naik');
+    expect(up.persenPerubahan).toBe(25);
+    expect(up.requiresReason).toBe(false);
+    expect(up.requiresApproval).toBe(false);
+  });
+
+  it('requires a reason for a small downward move but no approval', () => {
+    // 210 → 200 is −4.76%: reason mandatory, still activates immediately.
+    const down = classifyAdjustment(210, 200);
+    expect(down.arah).toBe('turun');
+    expect(down.persenPerubahan).toBe(4.76);
+    expect(down.requiresReason).toBe(true);
+    expect(down.requiresBukti).toBe(false);
+    expect(down.requiresApproval).toBe(false);
+  });
+
+  it('requires evidence + approval past the threshold, and holds exactly at it', () => {
+    // Exactly 10% is NOT "> 10%": still auto (the boundary is deliberate).
+    const at = classifyAdjustment(200, 180);
+    expect(at.persenPerubahan).toBe(DOWNWARD_APPROVAL_THRESHOLD_PCT);
+    expect(at.requiresApproval).toBe(false);
+    // 200 → 150 is −25%: evidence + SPV approval.
+    const over = classifyAdjustment(200, 150);
+    expect(over.arah).toBe('turun');
+    expect(over.persenPerubahan).toBe(25);
+    expect(over.requiresBukti).toBe(true);
+    expect(over.requiresApproval).toBe(true);
+  });
+
+  it('renders a zero anchor as 0% rather than dividing by zero (house rule #7)', () => {
+    expect(classifyAdjustment(0, 500)).toMatchObject({ arah: 'naik', persenPerubahan: 0 });
   });
 });
 
@@ -619,5 +679,226 @@ describeDb('activatePlanPeriode (Terjadwal → Aktif, periods 2..n)', () => {
     const p2 = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
     await expect(activatePlanPeriode(sql, otherAm(), p2)).rejects.toThrow(MSG_PLAN_FORBIDDEN);
     expect(await statusOf(p2)).toBe('Terjadwal');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-04 — Rule 9 asymmetric target adjustment + defisit_terbawa
+// ---------------------------------------------------------------------------
+
+/** Seed one GMV target on a period (the shape the B-02 generator prefills). */
+async function seedTarget(
+  planId: string,
+  opts: { channel?: string; metric?: string; nilaiStrategi?: number } = {},
+): Promise<void> {
+  const v = opts.nilaiStrategi ?? 200000000;
+  await sql`
+    insert into plan_target (plan_id, channel, metric, nilai_strategi, nilai_dipakai, created_by)
+    values (${planId}, ${opts.channel ?? 'Shopee'}, ${opts.metric ?? 'gmv'}, ${v}, ${v}, 'ZZ-AM')`;
+}
+
+async function targetOf(planId: string, channel = 'Shopee', metric = 'gmv') {
+  const r = await sql<
+    { nilai_dipakai: string | number; arah: string; persen_perubahan: string | number; status_persetujuan: string | null }[]
+  >`select nilai_dipakai, arah, persen_perubahan, status_persetujuan
+      from plan_target where plan_id = ${planId} and channel = ${channel} and metric = ${metric}`;
+  return r[0];
+}
+
+describeDb('adjustPlanTarget (Rule 9 write path)', () => {
+  it('applies an upward move immediately, no reason, period stays scheduled', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    await seedTarget(p, { nilaiStrategi: 200000000 });
+    const t = await adjustPlanTarget(sql, am(), p, 'Shopee', 'gmv', 250000000);
+    expect(t.arah).toBe('naik');
+    expect(t.nilaiDipakai).toBe(250000000);
+    expect(t.statusPersetujuan).toBeNull();
+    expect(await statusOf(p)).toBe('Terjadwal');
+  });
+
+  it('requires a reason for a downward ≤10% move, then applies it and notifies (seam)', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    await seedTarget(p, { nilaiStrategi: 210000000 });
+    // No reason → rejected before the write.
+    await expect(adjustPlanTarget(sql, am(), p, 'Shopee', 'gmv', 200000000)).rejects.toThrow(
+      MSG_PLAN_ADJUST_ALASAN_REQUIRED,
+    );
+    const t = await adjustPlanTarget(sql, am(), p, 'Shopee', 'gmv', 200000000, {
+      alasan: 'Kompetitor agresif, target dikoreksi',
+    });
+    expect(t.arah).toBe('turun');
+    expect(t.persenPerubahan).toBe(4.76);
+    expect(t.statusPersetujuan).toBeNull();
+    // ≤10% activates immediately — no hold.
+    expect(await statusOf(p)).toBe('Terjadwal');
+    // The adjustment is in the immutable log (Rule 19).
+    const audit = await sql<{ n: string }[]>`
+      select count(*)::text as n from audit_log
+       where entity_id = ${p} and action = 'penyesuaian_target'`;
+    expect(audit[0].n).toBe('1');
+  });
+
+  it('holds a scheduled period at Menunggu Persetujuan for a downward >10% move', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    await seedTarget(p, { nilaiStrategi: 200000000 });
+    // >10% needs BOTH reason and evidence.
+    await expect(
+      adjustPlanTarget(sql, am(), p, 'Shopee', 'gmv', 150000000, { alasan: 'x' }),
+    ).rejects.toThrow(MSG_PLAN_ADJUST_BUKTI_REQUIRED);
+    const t = await adjustPlanTarget(sql, am(), p, 'Shopee', 'gmv', 150000000, {
+      alasan: 'Penurunan permintaan',
+      buktiFile: 's3://bukti.png',
+    });
+    expect(t.statusPersetujuan).toBe('Menunggu Persetujuan');
+    expect(await statusOf(p)).toBe('Menunggu Persetujuan');
+  });
+
+  it('does NOT hold period 1 (Draft) — its own SPV loop covers the >10% figure', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 1, status: 'Draft' });
+    await seedTarget(p, { nilaiStrategi: 200000000 });
+    const t = await adjustPlanTarget(sql, am(), p, 'Shopee', 'gmv', 150000000, {
+      alasan: 'Penurunan permintaan',
+      buktiFile: 's3://bukti.png',
+    });
+    expect(t.arah).toBe('turun');
+    expect(t.statusPersetujuan).toBeNull();
+    expect(await statusOf(p)).toBe('Draft');
+  });
+
+  it('refuses to adjust an active period, an unrelated AM, a missing target, and a negative figure', async () => {
+    const f = await seedContractStrategi();
+    const active = await seedPeriod(f, { periodeNo: 1, status: 'Aktif' });
+    await seedTarget(active, {});
+    await expect(adjustPlanTarget(sql, am(), active, 'Shopee', 'gmv', 190000000, { alasan: 'x' })).rejects.toThrow(
+      MSG_PLAN_ADJUST_STATUS,
+    );
+    const p = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    await seedTarget(p, {});
+    await expect(adjustPlanTarget(sql, otherAm(), p, 'Shopee', 'gmv', 190000000, { alasan: 'x' })).rejects.toThrow(
+      MSG_PLAN_FORBIDDEN,
+    );
+    await expect(adjustPlanTarget(sql, am(), p, 'Tokopedia', 'gmv', 190000000, { alasan: 'x' })).rejects.toThrow(
+      MSG_PLAN_TARGET_NOT_FOUND,
+    );
+    await expect(adjustPlanTarget(sql, am(), p, 'Shopee', 'gmv', -1, { alasan: 'x' })).rejects.toThrow(
+      MSG_PLAN_ADJUST_NILAI_INVALID,
+    );
+  });
+});
+
+describeDb('approve / reject target adjustment (SPV, PH-3)', () => {
+  async function heldPeriod() {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    await seedTarget(p, { nilaiStrategi: 200000000 });
+    await adjustPlanTarget(sql, am(), p, 'Shopee', 'gmv', 150000000, {
+      alasan: 'Penurunan permintaan',
+      buktiFile: 's3://bukti.png',
+    });
+    return { f, p };
+  }
+
+  it('lets the SPV approve — the reduced figure stands, activation stays with the job', async () => {
+    const { p } = await heldPeriod();
+    const t = await approveTargetAdjustment(sql, spv(), p, 'Shopee', 'gmv');
+    expect(t.statusPersetujuan).toBe('Disetujui');
+    expect(t.nilaiDipakai).toBe(150000000);
+    // Approval does not activate — the period still waits for the 00:00 WIB job.
+    expect(await statusOf(p)).toBe('Menunggu Persetujuan');
+  });
+
+  it('reverts to the Strategi figure on rejection, with a mandatory note in the log', async () => {
+    const { p } = await heldPeriod();
+    await expect(rejectTargetAdjustment(sql, spv(), p, 'Shopee', 'gmv', '  ')).rejects.toThrow(
+      MSG_PLAN_ADJUST_REJECT_NOTES_REQUIRED,
+    );
+    const t = await rejectTargetAdjustment(sql, spv(), p, 'Shopee', 'gmv', 'Bukti kurang meyakinkan');
+    expect(t.statusPersetujuan).toBe('Ditolak');
+    expect(t.nilaiDipakai).toBe(200000000);
+    expect(t.arah).toBe('tetap');
+    const audit = await sql<{ after_json: { catatan?: string } }[]>`
+      select after_json from audit_log where entity_id = ${p} and action = 'penyesuaian_ditolak'`;
+    expect(audit[0].after_json.catatan).toBe('Bukti kurang meyakinkan');
+  });
+
+  it('refuses a non-lead and 409s when nothing is pending', async () => {
+    const { p } = await heldPeriod();
+    await expect(approveTargetAdjustment(sql, am(), p, 'Shopee', 'gmv')).rejects.toThrow(
+      MSG_PLAN_APPROVE_FORBIDDEN,
+    );
+    await approveTargetAdjustment(sql, spv(), p, 'Shopee', 'gmv');
+    // Second approve: no longer pending.
+    await expect(approveTargetAdjustment(sql, spv(), p, 'Shopee', 'gmv')).rejects.toThrow(
+      MSG_PLAN_ADJUST_NOT_PENDING,
+    );
+  });
+});
+
+describeDb('activatePlanPeriode resolves a held period (Rule 4)', () => {
+  it('expires an unanswered >10% request and activates on the ORIGINAL target', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    await seedTarget(p, { nilaiStrategi: 200000000 });
+    await adjustPlanTarget(sql, am(), p, 'Shopee', 'gmv', 150000000, {
+      alasan: 'Penurunan permintaan',
+      buktiFile: 's3://bukti.png',
+    });
+    expect(await statusOf(p)).toBe('Menunggu Persetujuan');
+    const plan = await activatePlanPeriode(sql, am(), p);
+    expect(plan.status).toBe('Aktif');
+    const t = await targetOf(p);
+    expect(Number(t.nilai_dipakai)).toBe(200000000); // reverted to original
+    expect(t.arah).toBe('tetap');
+    expect(t.status_persetujuan).toBe('Kedaluwarsa');
+  });
+
+  it('keeps an APPROVED reduced target when the period activates', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    await seedTarget(p, { nilaiStrategi: 200000000 });
+    await adjustPlanTarget(sql, am(), p, 'Shopee', 'gmv', 150000000, {
+      alasan: 'Penurunan permintaan',
+      buktiFile: 's3://bukti.png',
+    });
+    await approveTargetAdjustment(sql, spv(), p, 'Shopee', 'gmv');
+    const plan = await activatePlanPeriode(sql, am(), p);
+    expect(plan.status).toBe('Aktif');
+    const t = await targetOf(p);
+    expect(Number(t.nilai_dipakai)).toBe(150000000); // approved figure stands
+    expect(t.status_persetujuan).toBe('Disetujui');
+  });
+});
+
+describeDb('defisit_terbawa (Rule 9 / PA-6, computed)', () => {
+  it('carries a committed shortfall forward but never a pending one', async () => {
+    const f = await seedContractStrategi();
+    const p1 = await seedPeriod(f, { periodeNo: 1, status: 'Terjadwal' });
+    await seedTarget(p1, { nilaiStrategi: 200000000 });
+    // Period 1 dropped 200 → 190 (−5%, committed): Rp 10jt shortfall.
+    await adjustPlanTarget(sql, am(), p1, 'Shopee', 'gmv', 190000000, { alasan: 'koreksi' });
+
+    const p2 = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    await seedTarget(p2, { nilaiStrategi: 200000000 });
+
+    // PA-6 on period 2 = the shortfall carried from period 1; period 1 itself
+    // has nothing before it.
+    expect((await getPlanDetail(sql, am(), p2)).defisitTerbawa).toBe(10000000);
+    expect((await getPlanDetail(sql, am(), p1)).defisitTerbawa).toBe(0);
+    // Contract rollup = sum across the whole chain.
+    expect(await contractDeficit(sql, am(), f.contractId)).toBe(10000000);
+
+    // A pending >10% request on period 2 does NOT count until it takes effect.
+    await adjustPlanTarget(sql, am(), p2, 'Shopee', 'gmv', 150000000, {
+      alasan: 'Penurunan permintaan',
+      buktiFile: 's3://b.png',
+    });
+    expect(await contractDeficit(sql, am(), f.contractId)).toBe(10000000);
+    // Once approved, its Rp 50jt joins the deficit.
+    await approveTargetAdjustment(sql, spv(), p2, 'Shopee', 'gmv');
+    expect(await contractDeficit(sql, am(), f.contractId)).toBe(60000000);
   });
 });
