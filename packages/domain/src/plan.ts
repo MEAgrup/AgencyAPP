@@ -102,6 +102,49 @@ export const MSG_PLAN_WEEK_NO_INVALID =
 export const MSG_PLAN_WEEK_STATUS =
   '[distribusi mingguan hanya dapat diubah saat periode aktif]';
 
+// --- B-06: hybrid actuals (Rule 10/11, Section P-E) ----------------------
+
+/** Only GMV is entered manually (PE-1 / Rule 10); every other metric is auto. */
+export const MSG_ACTUAL_METRIC_NOT_MANUAL =
+  '[metrik ini bukan metrik manual — hanya GMV aktual yang diinput manual]';
+/** PE-2 — a manual GMV entry must carry its source attachment and capture date. */
+export const MSG_ACTUAL_BUKTI_REQUIRED =
+  '[lampiran sumber dan tanggal ambil data wajib untuk realisasi GMV manual]';
+/** A negative actual figure. */
+export const MSG_ACTUAL_NILAI_INVALID = '[nilai realisasi tidak boleh negatif]';
+/** The actual row (plan_id, channel, metric) does not resolve. */
+export const MSG_ACTUAL_NOT_FOUND = '[data realisasi tidak ditemukan]';
+/** PE-6 — a Sengketa Angka only makes sense against an auto metric. */
+export const MSG_SENGKETA_NOT_AUTO =
+  '[sengketa angka hanya dapat diajukan atas metrik otomatis]';
+/** PE-6 — the dispute needs a written reason (it is the whole point of the note). */
+export const MSG_SENGKETA_ALASAN_REQUIRED = '[alasan sengketa wajib diisi]';
+
+// --- B-07: transactional period close (Rule 15) --------------------------
+
+/** A period may only be closed (manual or forced) while it is Aktif. */
+export const MSG_CLOSE_STATUS = '[periode hanya dapat ditutup saat berstatus Aktif]';
+/** Rule 15 — close is refused until every channel has its manual GMV entered. */
+export const MSG_CLOSE_GMV_INCOMPLETE =
+  '[penutupan periode dibatalkan: GMV manual belum diisi untuk semua channel]';
+/** Rule 15 — close is refused while a row is not in a terminal state (with reason). */
+export const MSG_CLOSE_ROWS_NOT_TERMINAL =
+  '[penutupan periode dibatalkan: semua baris kerja harus berstatus akhir (Selesai/Sebagian/Tidak Dikerjakan) dengan alasan]';
+/** Rule 15 — close is refused until the P-F review is complete. */
+export const MSG_CLOSE_REVIEW_INCOMPLETE =
+  '[penutupan periode dibatalkan: review penutup periode (P-F) belum lengkap]';
+/** PC-14 — the supplied row status is not one of the five allowed values. */
+export const MSG_ROW_STATUS_INVALID = '[status baris tidak valid]';
+/** PC-14 — a `Sebagian` / `Tidak Dikerjakan` row needs a written reason. */
+export const MSG_ROW_STATUS_ALASAN_REQUIRED =
+  '[alasan wajib diisi untuk baris Sebagian atau Tidak Dikerjakan]';
+/** PC-14 — row status may only be set while the period is Aktif. */
+export const MSG_ROW_STATUS_PERIOD = '[status baris hanya dapat diubah saat periode aktif]';
+/** P-F — the review may only be filled while the period is Aktif. */
+export const MSG_REVIEW_PERIOD = '[review periode hanya dapat diisi saat periode aktif]';
+/** PF-3 — an out-of-vocabulary Diagnosa Gap value. */
+export const MSG_REVIEW_DIAGNOSA_INVALID = '[diagnosa gap tidak valid]';
+
 // ---------------------------------------------------------------------------
 // Shape — one interface per table, camelCase (the wire boundary snake_cases)
 // ---------------------------------------------------------------------------
@@ -804,6 +847,22 @@ const PLAN_DIAJUKAN = 'Diajukan';
 const PLAN_AKTIF = 'Aktif';
 const PLAN_TERJADWAL = 'Terjadwal';
 const PLAN_MENUNGGU = 'Menunggu Persetujuan';
+const PLAN_DITUTUP = 'Ditutup';
+const PLAN_DITUTUP_OTOMATIS = 'Ditutup Otomatis';
+
+/** A closed period (either terminal state of machine #16). */
+const PLAN_TERMINAL: readonly PlanStatus[] = [PLAN_DITUTUP, PLAN_DITUTUP_OTOMATIS];
+
+/**
+ * B-06 / X-08 — the metrics an AM enters by hand, as a SINGLE explicit source of
+ * truth (X-08: the manual list must be explicit, never silently mixed with the
+ * auto ones). PE-1 / Rule 10 names exactly one: GMV per channel. `jam_live` is a
+ * *conditional* candidate (PA-4: if the live-stream vendor reports hours outside
+ * the system it becomes manual) — deliberately NOT added here without Hans/owner
+ * resolving X-08/PA-4, because widening it silently is the very mixing X-08
+ * warns against. Everything not in this set is auto and read-only to the AM.
+ */
+export const MANUAL_METRICS: readonly string[] = ['gmv'];
 
 /** status_persetujuan values (PH-3) — the > 10% approval flow. */
 const ADJ_PENDING = 'Menunggu Persetujuan';
@@ -1432,5 +1491,640 @@ export async function setWeeklyDistribution(
       mingguNo: num(w.minggu_no),
       kuota: num(w.kuota),
     }));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// B-06 — hybrid actuals (Rule 10/11, Section P-E)
+// ---------------------------------------------------------------------------
+//
+// Actuals are HYBRID (P5): GMV per channel is entered manually by the owning AM
+// with a source attachment + capture date (PE-1/PE-2); every other metric is
+// pulled from the execution modules by the system and is read-only to the AM
+// (PE-3). The AM cannot overwrite an auto metric — Rule 10 — they can only file
+// a `Sengketa Angka` note against it (PE-6), which is meant to route to the SPV
+// (the notification is deferred until the catalog is raised — PA-8/O55, so this
+// records the dispute but emits nothing yet, exactly like B-03…B-05).
+//
+// The AM-cannot-write-auto rule is a FROZEN INVARIANT enforced in three agreeing
+// places (`plan.reals.test.ts` proves they don't diverge): this TS write path,
+// the RLS `WITH CHECK`, and the `trg_plan_actual_no_manual_auto` trigger. The TS
+// side simply offers NO path for an actor to set an `otomatis` value: the manual
+// path below is `sumber='manual'` only, and disputing is a note, not a rewrite.
+// Auto ingestion is a system path (`recordAutoActual`, no Actor — service-role,
+// used by B-09 / the execution modules).
+//
+// Close does NOT lock (X-07 deviation, owner 2026-08-07): a manual GMV entered
+// after the period closed is accepted and recorded as an AMENDMENT in the
+// immutable log (Rule 11 "post-close correction creates an audit-logged
+// amendment visible on the period view"), rather than blocked — blocking a late
+// number does not make it exist, it only loses it forever (house rule #3). The
+// lateness *signal* (the "bad performance log point" X-07 wants, and the +5-day
+// `plan_realisasi_belum_lengkap` warning) is the B-09 job's, not this write's —
+// and it may not claim a KPI weight until X-12 gives it one.
+
+function rowToPlanActual(a: PlanActualDbRow): PlanActual {
+  return {
+    planId: a.plan_id,
+    channel: a.channel,
+    metric: a.metric,
+    sumber: a.sumber,
+    nilai: num(a.nilai),
+    fileBukti: a.file_bukti,
+    tanggalAmbil: optDate(a.tanggal_ambil),
+    sengketa: a.sengketa,
+  };
+}
+
+interface PlanActualDbRow {
+  plan_id: string;
+  channel: string;
+  metric: string;
+  sumber: 'manual' | 'otomatis';
+  nilai: string | number;
+  file_bukti: string | null;
+  tanggal_ambil: string | Date | null;
+  sengketa: string | null;
+}
+
+/** Load one actual FOR UPDATE — locks it so a dispute/write cannot race. */
+async function loadActualForUpdate(
+  tx: TransactionSql,
+  planId: string,
+  channel: string,
+  metric: string,
+): Promise<PlanActualDbRow> {
+  const rows = await tx<PlanActualDbRow[]>`
+    select * from plan_actual
+     where plan_id = ${planId} and channel = ${channel} and metric = ${metric}
+     for update`;
+  if (rows.length === 0) throw new NotFoundError(MSG_ACTUAL_NOT_FOUND);
+  return rows[0];
+}
+
+/**
+ * recordManualActual is the single write path for a manual actual (PE-1/PE-2):
+ * the owning AM sets GMV for one channel, with a source attachment + capture
+ * date. `metric` must be a MANUAL_METRICS member (GMV only, X-08) — an attempt
+ * to enter an auto metric by hand is rejected here, before it can reach the DB.
+ * Idempotent per (plan, channel, metric): a re-entry overwrites the prior manual
+ * figure (a correction), and every write appends to the immutable log.
+ *
+ * Not status-gated (X-07): a figure entered after the period closed is accepted
+ * and logged as an amendment (`action='realisasi_amandemen'`), not blocked.
+ */
+export async function recordManualActual(
+  sql: Sql,
+  actor: Actor,
+  planId: string,
+  channel: string,
+  metric: string,
+  nilai: number,
+  opts: { fileBukti: string; tanggalAmbil: string },
+): Promise<PlanActual> {
+  if (!MANUAL_METRICS.includes(metric)) {
+    throw new ValidationError(MSG_ACTUAL_METRIC_NOT_MANUAL);
+  }
+  if (!Number.isFinite(nilai) || nilai < 0) {
+    throw new ValidationError(MSG_ACTUAL_NILAI_INVALID);
+  }
+  const fileBukti = (opts.fileBukti ?? '').trim();
+  const tanggalAmbil = (opts.tanggalAmbil ?? '').trim();
+  if (fileBukti === '' || tanggalAmbil === '') {
+    throw new ValidationError(MSG_ACTUAL_BUKTI_REQUIRED);
+  }
+  return withTransaction(sql, async (tx) => {
+    const plan = await loadPlanForUpdate(tx, planId);
+    const ownerAm = await ownerAmOfClient(tx, plan.clientId);
+    if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+
+    const isAmendment = PLAN_TERMINAL.includes(plan.status);
+    const before = await tx<PlanActualDbRow[]>`
+      select * from plan_actual
+       where plan_id = ${planId} and channel = ${channel} and metric = ${metric}
+       for update`;
+
+    await tx`
+      insert into plan_actual
+        (plan_id, channel, metric, sumber, nilai, file_bukti, tanggal_ambil, created_by)
+      values (${planId}, ${channel}, ${metric}, 'manual', ${nilai},
+              ${fileBukti}, ${tanggalAmbil}, ${actor.employeeId})
+      on conflict (plan_id, channel, metric) do update
+        set sumber = 'manual', nilai = excluded.nilai,
+            file_bukti = excluded.file_bukti, tanggal_ambil = excluded.tanggal_ambil`;
+
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      // Rule 11 — a post-close correction is an amendment, and the log says so.
+      action: isAmendment ? 'realisasi_amandemen' : 'realisasi_manual',
+      beforeJson:
+        before.length === 0
+          ? { channel, metric }
+          : { channel, metric, nilai: num(before[0].nilai) },
+      afterJson: {
+        channel,
+        metric,
+        nilai,
+        file_bukti: fileBukti,
+        tanggal_ambil: tanggalAmbil,
+        periode_status: plan.status,
+      },
+      createdBy: actor.employeeId,
+    });
+
+    const after = await loadActualForUpdate(tx, planId, channel, metric);
+    return rowToPlanActual(after);
+  });
+}
+
+/**
+ * fileSengketa records the AM's `Sengketa Angka` (PE-6): a written challenge to
+ * an AUTO metric they believe is wrong. It sets only the `sengketa` note on the
+ * existing auto row — it never touches the value (that is the source module's,
+ * Rule 10). The dispute is meant to route to the SPV; the notification waits on
+ * the catalog (PA-8/O55), so this logs the dispute and emits nothing yet.
+ */
+export async function fileSengketa(
+  sql: Sql,
+  actor: Actor,
+  planId: string,
+  channel: string,
+  metric: string,
+  alasan: string,
+): Promise<PlanActual> {
+  const note = (alasan ?? '').trim();
+  if (note === '') throw new ValidationError(MSG_SENGKETA_ALASAN_REQUIRED);
+  return withTransaction(sql, async (tx) => {
+    const plan = await loadPlanForUpdate(tx, planId);
+    const ownerAm = await ownerAmOfClient(tx, plan.clientId);
+    if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+
+    const before = await loadActualForUpdate(tx, planId, channel, metric);
+    if (before.sumber !== 'otomatis') throw new ConflictError(MSG_SENGKETA_NOT_AUTO);
+
+    await tx`
+      update plan_actual set sengketa = ${note}
+       where plan_id = ${planId} and channel = ${channel} and metric = ${metric}`;
+
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'sengketa_angka',
+      beforeJson: { channel, metric, sengketa: before.sengketa },
+      afterJson: { channel, metric, nilai: num(before.nilai), sengketa: note },
+      createdBy: actor.employeeId,
+    });
+
+    const after = await loadActualForUpdate(tx, planId, channel, metric);
+    return rowToPlanActual(after);
+  });
+}
+
+/**
+ * recordAutoActual is the SYSTEM ingestion path for an auto metric (PE-3): the
+ * execution modules / the B-09 close job push a computed figure in. It takes no
+ * Actor because it is never a human action — it runs service-role, where the
+ * DB guard trigger sees no JWT actor and lets the auto write through. Kept here
+ * as the counterpart to the AM block so B-09 has one place to write auto rows;
+ * `createdBy` is the system/job identity the caller supplies.
+ */
+export async function recordAutoActual(
+  sql: Sql,
+  planId: string,
+  channel: string,
+  metric: string,
+  nilai: number,
+  createdBy: string,
+): Promise<PlanActual> {
+  if (!Number.isFinite(nilai) || nilai < 0) {
+    throw new ValidationError(MSG_ACTUAL_NILAI_INVALID);
+  }
+  return withTransaction(sql, async (tx) => {
+    await tx`
+      insert into plan_actual (plan_id, channel, metric, sumber, nilai, created_by)
+      values (${planId}, ${channel}, ${metric}, 'otomatis', ${nilai}, ${createdBy})
+      on conflict (plan_id, channel, metric) do update
+        set sumber = 'otomatis', nilai = excluded.nilai`;
+    const after = await loadActualForUpdate(tx, planId, channel, metric);
+    return rowToPlanActual(after);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// B-07 — transactional period close (Rule 15)
+// ---------------------------------------------------------------------------
+//
+// "Period close is a real step, not a date." Rule 15 / §266: closing a period is
+// a TRANSACTION with three preconditions that must ALL hold, or nothing moves —
+// partial close is not a state:
+//
+//   1. manual GMV entered per channel (PE-1);
+//   2. every work-row in a terminal state — `Selesai` / `Sebagian` /
+//      `Tidak Dikerjakan`, the last two with a reason (PC-14);
+//   3. the P-F review complete — the Diagnosa Gap (PF-3) is required only when
+//      the period missed target (variance negative).
+//
+// Two close paths, from the machine's two Aktif→terminal edges:
+//   * `closePlanPeriode`  — the AM's `Aktif → Ditutup`. Enforces 1–3; refuses
+//     with the exact BI message for the first unmet precondition.
+//   * `forceClosePlanPeriode` — the system's `Aktif → Ditutup Otomatis` (the
+//     00:00 WIB job, B-09, schedules WHEN). It does NOT enforce 1–3; instead it
+//     coerces every non-terminal row to `Tidak Dikerjakan — tanpa keterangan`
+//     (deliberately ugly in reports, Rule 15) and closes. It touches NO actual:
+//     X-07 (owner 2026-08-07) removed the close LOCK, so a late GMV is still
+//     accepted after either close and logged as an amendment (B-06), never lost.
+//
+// PF-4 (assumption status) writes `strategi_assumption`, and PF-5 (carry-over)
+// writes `plan_row.terbawa` — neither is a `plan_review` column, so neither is a
+// close precondition here. PF-5's carry-over MECHANISM (moving unfinished rows
+// into the next period) is B-08; this ticket closes the period, it does not
+// carry rows forward. Notifications (`plan_periode_ditutup`) are NOT emitted —
+// the M6B catalog is unregistered (PA-8/O55), same seam as B-03…B-06.
+
+/** The five PC-14 row statuses. */
+const ROW_STATUSES: readonly PlanRow['statusBaris'][] = [
+  'Rencana',
+  'Jalan',
+  'Selesai',
+  'Sebagian',
+  'Tidak Dikerjakan',
+];
+
+/** The terminal (closeable) PC-14 row statuses — a row must reach one to close. */
+export const ROW_TERMINAL_STATUSES: readonly PlanRow['statusBaris'][] = [
+  'Selesai',
+  'Sebagian',
+  'Tidak Dikerjakan',
+];
+
+/** GMV is the one currency metric; targets/actuals key it exactly this way. */
+const GMV_METRIC = 'gmv';
+
+/**
+ * Force-close reason marker (Rule 15). A row the AM never resolved becomes
+ * `Tidak Dikerjakan` with this reason — meant to read `Tidak Dikerjakan — tanpa
+ * keterangan` in reports, deliberately ugly so an abandoned period is visible.
+ */
+export const FORCE_CLOSE_ALASAN = 'tanpa keterangan';
+
+/** A row is terminal AND, for `Sebagian` / `Tidak Dikerjakan`, carries a reason. */
+function rowClosed(status: PlanRow['statusBaris'], alasan: string | null): boolean {
+  if (status === 'Selesai') return true;
+  if (status === 'Sebagian' || status === 'Tidak Dikerjakan') return (alasan ?? '').trim() !== '';
+  return false; // Rencana / Jalan are not terminal
+}
+
+/** The P-F review carries every own W field, with Diagnosa Gap only when required. */
+function reviewComplete(review: PlanReview | null, requireDiagnosa: boolean): boolean {
+  if (review === null) return false;
+  const filled = (s: string | null): boolean => (s ?? '').trim() !== '';
+  if (
+    !filled(review.yangJalan) ||
+    !filled(review.yangTidakJalan) ||
+    !filled(review.rekomendasi) ||
+    !filled(review.materiKlien)
+  ) {
+    return false;
+  }
+  if (review.perluRevisi === null) return false; // PF-7 — a false answer is still an answer
+  if (requireDiagnosa) {
+    // PF-3 — "W (kalau variance negatif)": the enum AND its cited PE-8 evidence.
+    if (review.diagnosaGap === null || !filled(review.diagnosaGapBukti)) return false;
+  }
+  return true;
+}
+
+/** The three Rule 15 close preconditions, plus the variance flag that drove PF-3. */
+export interface CloseReadiness {
+  /** Manual GMV present for every channel that carries a GMV target (PE-1). */
+  gmvComplete: boolean;
+  /** Every work-row terminal, with a reason where PC-14 needs one. */
+  rowsTerminal: boolean;
+  /** The P-F review complete (diagnosa required only when variance negative). */
+  reviewComplete: boolean;
+  /** Σ manual GMV actual < Σ used GMV target — makes PF-3 mandatory. */
+  varianceNegative: boolean;
+  /** All three preconditions hold. */
+  ready: boolean;
+}
+
+/**
+ * checkCloseReadiness is the pure Rule 15 gate, computed from the period's child
+ * rows alone — so it is unit-testable without a database and single-sources the
+ * definition of "closeable". `closePlanPeriode` reads the rows and calls it.
+ */
+export function checkCloseReadiness(input: {
+  targets: Pick<PlanTarget, 'channel' | 'metric' | 'nilaiDipakai'>[];
+  actuals: Pick<PlanActual, 'channel' | 'metric' | 'sumber' | 'nilai'>[];
+  rows: Pick<PlanRow, 'statusBaris' | 'statusBarisAlasan'>[];
+  review: PlanReview | null;
+}): CloseReadiness {
+  // 1. Manual GMV per channel: every channel with a GMV target has a manual GMV
+  //    actual. A period with no GMV target is vacuously complete.
+  const gmvTargetChannels = new Set(
+    input.targets.filter((t) => t.metric === GMV_METRIC).map((t) => t.channel),
+  );
+  const manualGmvChannels = new Set(
+    input.actuals
+      .filter((a) => a.metric === GMV_METRIC && a.sumber === 'manual')
+      .map((a) => a.channel),
+  );
+  const gmvComplete = [...gmvTargetChannels].every((c) => manualGmvChannels.has(c));
+
+  // 2. Every work-row terminal (reason where PC-14 needs it).
+  const rowsTerminal = input.rows.every((r) => rowClosed(r.statusBaris, r.statusBarisAlasan));
+
+  // 3. Variance vs used target (PE-4): drives whether PF-3 is mandatory.
+  const targetGmv = input.targets
+    .filter((t) => t.metric === GMV_METRIC)
+    .reduce((s, t) => s + t.nilaiDipakai, 0);
+  const actualGmv = input.actuals
+    .filter((a) => a.metric === GMV_METRIC && a.sumber === 'manual')
+    .reduce((s, a) => s + a.nilai, 0);
+  const varianceNegative = actualGmv < targetGmv;
+
+  const reviewOk = reviewComplete(input.review, varianceNegative);
+
+  return {
+    gmvComplete,
+    rowsTerminal,
+    reviewComplete: reviewOk,
+    varianceNegative,
+    ready: gmvComplete && rowsTerminal && reviewOk,
+  };
+}
+
+interface PlanReviewDbRow {
+  plan_id: string;
+  yang_jalan: string | null;
+  yang_tidak_jalan: string | null;
+  diagnosa_gap: 'strategi_salah' | 'eksekusi_tidak_jalan' | null;
+  diagnosa_gap_bukti: string | null;
+  rekomendasi: string | null;
+  perlu_revisi: boolean | null;
+  materi_klien: string | null;
+}
+
+function rowToPlanReview(r: PlanReviewDbRow): PlanReview {
+  return {
+    planId: r.plan_id,
+    yangJalan: r.yang_jalan,
+    yangTidakJalan: r.yang_tidak_jalan,
+    diagnosaGap: r.diagnosa_gap,
+    diagnosaGapBukti: r.diagnosa_gap_bukti,
+    rekomendasi: r.rekomendasi,
+    perluRevisi: r.perlu_revisi,
+    materiKlien: r.materi_klien,
+  };
+}
+
+/** Read the child rows a close check needs, inside the caller's transaction. */
+async function loadCloseReadiness(tx: TransactionSql, planId: string): Promise<CloseReadiness> {
+  const targets = await tx<{ channel: string; metric: string; nilai_dipakai: string | number }[]>`
+    select channel, metric, nilai_dipakai from plan_target where plan_id = ${planId}`;
+  const actuals = await tx<
+    { channel: string; metric: string; sumber: 'manual' | 'otomatis'; nilai: string | number }[]
+  >`select channel, metric, sumber, nilai from plan_actual where plan_id = ${planId}`;
+  const rows = await tx<
+    { status_baris: PlanRow['statusBaris']; status_baris_alasan: string | null }[]
+  >`select status_baris, status_baris_alasan from plan_row where plan_id = ${planId}`;
+  const review = await tx<PlanReviewDbRow[]>`select * from plan_review where plan_id = ${planId}`;
+  return checkCloseReadiness({
+    targets: targets.map((t) => ({
+      channel: t.channel,
+      metric: t.metric,
+      nilaiDipakai: num(t.nilai_dipakai),
+    })),
+    actuals: actuals.map((a) => ({
+      channel: a.channel,
+      metric: a.metric,
+      sumber: a.sumber,
+      nilai: num(a.nilai),
+    })),
+    rows: rows.map((r) => ({ statusBaris: r.status_baris, statusBarisAlasan: r.status_baris_alasan })),
+    review: review.length === 0 ? null : rowToPlanReview(review[0]),
+  });
+}
+
+/** Load one work-row by id (post-write read of the whole shape). */
+async function loadPlanRow(tx: TransactionSql, planRowId: number): Promise<PlanRow> {
+  const rows = await tx<Record<string, unknown>[]>`select * from plan_row where id = ${planRowId}`;
+  if (rows.length === 0) throw new NotFoundError(MSG_PLAN_ROW_NOT_FOUND);
+  return rowToPlanRow(rows[0]);
+}
+
+/**
+ * setRowStatus sets a work-row's PC-14 status (`W (saat tutup)`). It is the write
+ * path the AM uses to mark each row terminal before closing — `Sebagian` /
+ * `Tidak Dikerjakan` carry a mandatory reason; the reason is cleared for the
+ * non-terminal / `Selesai` states (a stale reason from an earlier status must not
+ * linger). AM/lead write scope, and only while the period is `Aktif` — the window
+ * in which rows are executed and resolved.
+ */
+export async function setRowStatus(
+  sql: Sql,
+  actor: Actor,
+  planRowId: number,
+  status: PlanRow['statusBaris'],
+  alasan?: string,
+): Promise<PlanRow> {
+  if (!ROW_STATUSES.includes(status)) throw new ValidationError(MSG_ROW_STATUS_INVALID);
+  const note = (alasan ?? '').trim() || null;
+  const needsReason = status === 'Sebagian' || status === 'Tidak Dikerjakan';
+  if (needsReason && note === null) throw new ValidationError(MSG_ROW_STATUS_ALASAN_REQUIRED);
+  return withTransaction(sql, async (tx) => {
+    const rr = await tx<{ plan_id: string; status_baris: PlanRow['statusBaris'] }[]>`
+      select plan_id, status_baris from plan_row where id = ${planRowId} for update`;
+    if (rr.length === 0) throw new NotFoundError(MSG_PLAN_ROW_NOT_FOUND);
+    const planId = rr[0].plan_id;
+
+    const plan = await loadPlanForUpdate(tx, planId);
+    const ownerAm = await ownerAmOfClient(tx, plan.clientId);
+    if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+    if (plan.status !== PLAN_AKTIF) throw new ConflictError(MSG_ROW_STATUS_PERIOD);
+
+    const storedAlasan = needsReason ? note : null;
+    await tx`
+      update plan_row set status_baris = ${status}, status_baris_alasan = ${storedAlasan}
+       where id = ${planRowId}`;
+
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'status_baris',
+      beforeJson: { plan_row_id: planRowId, status_baris: rr[0].status_baris },
+      afterJson: { plan_row_id: planRowId, status_baris: status, alasan: storedAlasan },
+      createdBy: actor.employeeId,
+    });
+
+    return loadPlanRow(tx, planRowId);
+  });
+}
+
+/** The P-F fields an AM fills before closing (a full replace, autosave-friendly). */
+export interface PlanReviewInput {
+  yangJalan?: string | null;
+  yangTidakJalan?: string | null;
+  diagnosaGap?: 'strategi_salah' | 'eksekusi_tidak_jalan' | null;
+  diagnosaGapBukti?: string | null;
+  rekomendasi?: string | null;
+  perluRevisi?: boolean | null;
+  materiKlien?: string | null;
+}
+
+/** Normalize a text field: undefined/empty → null, else trimmed. */
+const optText = (v: string | null | undefined): string | null => {
+  const t = (v ?? '').trim();
+  return t === '' ? null : t;
+};
+
+/**
+ * savePlanReview upserts the P-F review (Section P-F). It is a FULL replace of the
+ * `plan_review` row — the P-F form submits the whole review, so an omitted field
+ * is stored as `null` (an unfilled answer), never silently merged. Completeness
+ * is NOT enforced here: the review is filled progressively while the period runs
+ * (§7 autosave), and the Rule 15 completeness gate lives in `closePlanPeriode`.
+ * AM/lead write scope; only while `Aktif` (the review is a closing artifact).
+ */
+export async function savePlanReview(
+  sql: Sql,
+  actor: Actor,
+  planId: string,
+  input: PlanReviewInput,
+): Promise<PlanReview> {
+  const diagnosa = input.diagnosaGap ?? null;
+  if (diagnosa !== null && diagnosa !== 'strategi_salah' && diagnosa !== 'eksekusi_tidak_jalan') {
+    throw new ValidationError(MSG_REVIEW_DIAGNOSA_INVALID);
+  }
+  const perluRevisi = input.perluRevisi ?? null;
+  const fields = {
+    yang_jalan: optText(input.yangJalan),
+    yang_tidak_jalan: optText(input.yangTidakJalan),
+    diagnosa_gap: diagnosa,
+    diagnosa_gap_bukti: optText(input.diagnosaGapBukti),
+    rekomendasi: optText(input.rekomendasi),
+    perlu_revisi: perluRevisi,
+    materi_klien: optText(input.materiKlien),
+  };
+  return withTransaction(sql, async (tx) => {
+    const plan = await loadPlanForUpdate(tx, planId);
+    const ownerAm = await ownerAmOfClient(tx, plan.clientId);
+    if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+    if (plan.status !== PLAN_AKTIF) throw new ConflictError(MSG_REVIEW_PERIOD);
+
+    const before = await tx<PlanReviewDbRow[]>`select * from plan_review where plan_id = ${planId}`;
+    await tx`
+      insert into plan_review
+        (plan_id, yang_jalan, yang_tidak_jalan, diagnosa_gap, diagnosa_gap_bukti,
+         rekomendasi, perlu_revisi, materi_klien, created_by)
+      values
+        (${planId}, ${fields.yang_jalan}, ${fields.yang_tidak_jalan}, ${fields.diagnosa_gap},
+         ${fields.diagnosa_gap_bukti}, ${fields.rekomendasi}, ${fields.perlu_revisi},
+         ${fields.materi_klien}, ${actor.employeeId})
+      on conflict (plan_id) do update
+        set yang_jalan = excluded.yang_jalan,
+            yang_tidak_jalan = excluded.yang_tidak_jalan,
+            diagnosa_gap = excluded.diagnosa_gap,
+            diagnosa_gap_bukti = excluded.diagnosa_gap_bukti,
+            rekomendasi = excluded.rekomendasi,
+            perlu_revisi = excluded.perlu_revisi,
+            materi_klien = excluded.materi_klien`;
+
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'review_disimpan',
+      beforeJson: before.length === 0 ? null : { review: rowToPlanReview(before[0]) },
+      afterJson: { review: fields },
+      createdBy: actor.employeeId,
+    });
+
+    const after = await tx<PlanReviewDbRow[]>`select * from plan_review where plan_id = ${planId}`;
+    return rowToPlanReview(after[0]);
+  });
+}
+
+/**
+ * closePlanPeriode drives the AM's transactional `Aktif → Ditutup` (Rule 15). It
+ * enforces the three preconditions atomically — manual GMV per channel, every row
+ * terminal, the P-F review complete — refusing with the exact BI message for the
+ * first unmet one. Because the whole thing runs in one transaction, a period is
+ * never left half-closed. AM/lead write scope; the period must be `Aktif`.
+ */
+export async function closePlanPeriode(sql: Sql, actor: Actor, planId: string): Promise<Plan> {
+  return withTransaction(sql, async (tx) => {
+    const plan = await loadPlanForUpdate(tx, planId);
+    const ownerAm = await ownerAmOfClient(tx, plan.clientId);
+    if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+    if (plan.status !== PLAN_AKTIF) throw new ConflictError(MSG_CLOSE_STATUS);
+
+    const r = await loadCloseReadiness(tx, planId);
+    if (!r.gmvComplete) throw new ValidationError(MSG_CLOSE_GMV_INCOMPLETE);
+    if (!r.rowsTerminal) throw new ValidationError(MSG_CLOSE_ROWS_NOT_TERMINAL);
+    if (!r.reviewComplete) throw new ValidationError(MSG_CLOSE_REVIEW_INCOMPLETE);
+
+    await transitionPlan(tx, actor, planId, PLAN_DITUTUP);
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'ditutup',
+      beforeJson: { status: plan.status },
+      afterJson: { status: PLAN_DITUTUP, variance_negatif: r.varianceNegative },
+      createdBy: actor.employeeId,
+    });
+    return loadPlan(tx, planId);
+  });
+}
+
+/**
+ * forceClosePlanPeriode drives the system's `Aktif → Ditutup Otomatis` (Rule 5/15)
+ * — the force-close the 00:00 WIB overrun job (B-09) schedules. Unlike the AM
+ * close it enforces NONE of the three preconditions; instead it coerces every
+ * still-non-terminal row to `Tidak Dikerjakan` with the reason `tanpa keterangan`
+ * (deliberately ugly in reports) and closes. Already-terminal rows keep the AM's
+ * real status. It touches NO actual row — X-07 removed the close lock, so a late
+ * GMV is still accepted afterward and logged as an amendment (B-06), not lost.
+ *
+ * Like `activatePlanPeriode` (the other job-driven transition) it is not
+ * lead-gated but requires Plan write scope, so it cannot be driven by an
+ * unrelated account; which actor the B-09 job runs as is that ticket's decision.
+ */
+export async function forceClosePlanPeriode(sql: Sql, actor: Actor, planId: string): Promise<Plan> {
+  return withTransaction(sql, async (tx) => {
+    const plan = await loadPlanForUpdate(tx, planId);
+    const ownerAm = await ownerAmOfClient(tx, plan.clientId);
+    if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+    if (plan.status !== PLAN_AKTIF) throw new ConflictError(MSG_CLOSE_STATUS);
+
+    const coerced = await tx<{ id: string | number }[]>`
+      update plan_row
+         set status_baris = 'Tidak Dikerjakan', status_baris_alasan = ${FORCE_CLOSE_ALASAN}
+       where plan_id = ${planId}
+         and status_baris not in ('Selesai', 'Sebagian', 'Tidak Dikerjakan')
+       returning id`;
+
+    await transitionPlan(tx, actor, planId, PLAN_DITUTUP_OTOMATIS);
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'ditutup_otomatis',
+      beforeJson: { status: plan.status },
+      afterJson: { status: PLAN_DITUTUP_OTOMATIS, baris_dipaksa: coerced.length },
+      createdBy: actor.employeeId,
+    });
+    return loadPlan(tx, planId);
   });
 }

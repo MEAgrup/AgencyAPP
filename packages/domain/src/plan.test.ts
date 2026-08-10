@@ -41,9 +41,27 @@ import {
   MSG_PLAN_RETURN_NOTES_REQUIRED,
   MSG_PLAN_ROW_NOT_FOUND,
   MSG_PLAN_TARGET_NOT_FOUND,
+  MSG_ACTUAL_BUKTI_REQUIRED,
+  MSG_ACTUAL_METRIC_NOT_MANUAL,
+  MSG_ACTUAL_NILAI_INVALID,
+  MSG_ACTUAL_NOT_FOUND,
   MSG_PLAN_WEEK_NO_INVALID,
   MSG_PLAN_WEEK_STATUS,
   MSG_PLAN_WEEK_SUM_MISMATCH,
+  MSG_SENGKETA_ALASAN_REQUIRED,
+  MSG_SENGKETA_NOT_AUTO,
+  MSG_CLOSE_STATUS,
+  MSG_CLOSE_GMV_INCOMPLETE,
+  MSG_CLOSE_ROWS_NOT_TERMINAL,
+  MSG_CLOSE_REVIEW_INCOMPLETE,
+  MSG_ROW_STATUS_INVALID,
+  MSG_ROW_STATUS_ALASAN_REQUIRED,
+  MSG_ROW_STATUS_PERIOD,
+  MSG_REVIEW_PERIOD,
+  MSG_REVIEW_DIAGNOSA_INVALID,
+  MANUAL_METRICS,
+  FORCE_CLOSE_ALASAN,
+  ROW_TERMINAL_STATUSES,
   activatePlanPeriode,
   adjustPlanTarget,
   approvePlanPeriode,
@@ -51,16 +69,24 @@ import {
   canApprovePlan,
   canReadPlan,
   canWritePlan,
+  checkCloseReadiness,
   classifyAdjustment,
+  closePlanPeriode,
   computePeriods,
   contractDeficit,
   distributeWeeks,
+  fileSengketa,
+  forceClosePlanPeriode,
   generatePlanPeriods,
   getPlan,
   getPlanDetail,
   listPlansForContract,
+  recordAutoActual,
+  recordManualActual,
   rejectTargetAdjustment,
   returnPlanPeriode,
+  savePlanReview,
+  setRowStatus,
   setWeeklyDistribution,
   submitPlanPeriode,
 } from './plan';
@@ -230,6 +256,96 @@ describe('distributeWeeks (Rule 7, pure)', () => {
   it('rejects a non-positive week count', () => {
     expect(() => distributeWeeks(100, 0)).toThrow();
     expect(() => distributeWeeks(100, 2.5)).toThrow();
+  });
+});
+
+describe('checkCloseReadiness (Rule 15, pure)', () => {
+  const okReview = {
+    planId: 'P',
+    yangJalan: 'iklan Shopee naik',
+    yangTidakJalan: 'live vendor telat',
+    diagnosaGap: null,
+    diagnosaGapBukti: null,
+    rekomendasi: 'geser budget ke konten',
+    perluRevisi: false,
+    materiKlien: 'ROAS 4.6, GMV 200jt',
+  } as const;
+  const target = (channel: string, nilaiDipakai: number) => ({ channel, metric: 'gmv', nilaiDipakai });
+  const manual = (channel: string, nilai: number) =>
+    ({ channel, metric: 'gmv', sumber: 'manual', nilai }) as const;
+  const terminalRow = { statusBaris: 'Selesai', statusBarisAlasan: null } as const;
+
+  it('is ready when GMV is in for every channel, all rows terminal, review complete', () => {
+    const r = checkCloseReadiness({
+      targets: [target('Shopee', 100), target('TikTok Shop', 50)],
+      actuals: [manual('Shopee', 120), manual('TikTok Shop', 60)],
+      rows: [terminalRow],
+      review: okReview,
+    });
+    expect(r).toMatchObject({ gmvComplete: true, rowsTerminal: true, reviewComplete: true, ready: true });
+    expect(r.varianceNegative).toBe(false); // actual 180 > target 150
+  });
+
+  it('is not ready when a channel with a GMV target has no manual GMV', () => {
+    const r = checkCloseReadiness({
+      targets: [target('Shopee', 100), target('TikTok Shop', 50)],
+      actuals: [manual('Shopee', 120)], // TikTok Shop missing
+      rows: [terminalRow],
+      review: okReview,
+    });
+    expect(r.gmvComplete).toBe(false);
+    expect(r.ready).toBe(false);
+  });
+
+  it('does not count an AUTO gmv row as the manual entry', () => {
+    const r = checkCloseReadiness({
+      targets: [target('Shopee', 100)],
+      actuals: [{ channel: 'Shopee', metric: 'gmv', sumber: 'otomatis', nilai: 120 }],
+      rows: [terminalRow],
+      review: okReview,
+    });
+    expect(r.gmvComplete).toBe(false);
+  });
+
+  it('rejects a non-terminal row, and a Sebagian/Tidak Dikerjakan row without a reason', () => {
+    const base = { targets: [target('Shopee', 100)], actuals: [manual('Shopee', 120)], review: okReview };
+    expect(checkCloseReadiness({ ...base, rows: [{ statusBaris: 'Jalan', statusBarisAlasan: null }] }).rowsTerminal).toBe(false);
+    expect(checkCloseReadiness({ ...base, rows: [{ statusBaris: 'Sebagian', statusBarisAlasan: null }] }).rowsTerminal).toBe(false);
+    expect(checkCloseReadiness({ ...base, rows: [{ statusBaris: 'Sebagian', statusBarisAlasan: 'stok telat' }] }).rowsTerminal).toBe(true);
+    // 'Selesai' needs no reason.
+    expect(checkCloseReadiness({ ...base, rows: [terminalRow] }).rowsTerminal).toBe(true);
+  });
+
+  it('requires the Diagnosa Gap (+ evidence) ONLY when variance is negative (PF-3)', () => {
+    const shortfall = { targets: [target('Shopee', 200)], actuals: [manual('Shopee', 150)], rows: [terminalRow] };
+    expect(checkCloseReadiness({ ...shortfall, review: okReview }).varianceNegative).toBe(true);
+    // no diagnosa → not complete when short
+    expect(checkCloseReadiness({ ...shortfall, review: okReview }).reviewComplete).toBe(false);
+    // diagnosa enum but no evidence → still not complete
+    expect(
+      checkCloseReadiness({ ...shortfall, review: { ...okReview, diagnosaGap: 'eksekusi_tidak_jalan', diagnosaGapBukti: null } }).reviewComplete,
+    ).toBe(false);
+    // diagnosa + evidence → complete
+    expect(
+      checkCloseReadiness({ ...shortfall, review: { ...okReview, diagnosaGap: 'eksekusi_tidak_jalan', diagnosaGapBukti: '71% baris Selesai (PE-8)' } }).reviewComplete,
+    ).toBe(true);
+  });
+
+  it('treats a null review, or one missing any W field, as incomplete', () => {
+    const base = { targets: [target('Shopee', 100)], actuals: [manual('Shopee', 120)], rows: [terminalRow] };
+    expect(checkCloseReadiness({ ...base, review: null }).reviewComplete).toBe(false);
+    expect(checkCloseReadiness({ ...base, review: { ...okReview, rekomendasi: '  ' } }).reviewComplete).toBe(false);
+    expect(checkCloseReadiness({ ...base, review: { ...okReview, perluRevisi: null } }).reviewComplete).toBe(false);
+    expect(checkCloseReadiness({ ...base, review: { ...okReview, materiKlien: null } }).reviewComplete).toBe(false);
+  });
+
+  it('a period with no GMV target is vacuously GMV-complete', () => {
+    const r = checkCloseReadiness({ targets: [], actuals: [], rows: [terminalRow], review: okReview });
+    expect(r.gmvComplete).toBe(true);
+  });
+
+  it('exposes the terminal PC-14 statuses (the closeable set)', () => {
+    expect([...ROW_TERMINAL_STATUSES].sort()).toEqual(['Sebagian', 'Selesai', 'Tidak Dikerjakan']);
   });
 });
 
@@ -1091,5 +1207,339 @@ describeDb('setWeeklyDistribution (AM re-drag, Rule 7/18)', () => {
       MSG_PLAN_ROW_NOT_FOUND,
     );
     expect(p).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-06 — hybrid actuals (Rule 10/11, Section P-E)
+// ---------------------------------------------------------------------------
+
+describe('MANUAL_METRICS (X-08 — explicit, not silently mixed)', () => {
+  it('names exactly GMV, and not the auto metrics', () => {
+    expect(MANUAL_METRICS).toEqual(['gmv']);
+    expect(MANUAL_METRICS).not.toContain('roas_min');
+    expect(MANUAL_METRICS).not.toContain('jam_live'); // conditional (PA-4/X-08), not yet
+  });
+});
+
+describeDb('recordManualActual (PE-1/PE-2, Rule 10/11)', () => {
+  const BUKTI = { fileBukti: 'export-shopee.pdf', tanggalAmbil: '2026-09-12' };
+
+  it('writes a manual GMV row with its proof, and is idempotent (a correction)', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { status: 'Aktif' });
+    const a = await recordManualActual(sql, am(), p, 'Shopee', 'gmv', 188000000, BUKTI);
+    expect(a.sumber).toBe('manual');
+    expect(a.nilai).toBe(188000000);
+    expect(a.fileBukti).toBe('export-shopee.pdf');
+    expect(a.tanggalAmbil).toBe('2026-09-12');
+    // A re-entry overwrites the figure (no second row).
+    const a2 = await recordManualActual(sql, am(), p, 'Shopee', 'gmv', 190000000, BUKTI);
+    expect(a2.nilai).toBe(190000000);
+    const detail = await getPlanDetail(sql, am(), p);
+    expect(detail.actuals.filter((x) => x.metric === 'gmv')).toHaveLength(1);
+  });
+
+  it('rejects a non-manual metric, missing proof, a negative figure, and an unrelated AM', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { status: 'Aktif' });
+    await expect(
+      recordManualActual(sql, am(), p, 'Shopee', 'roas_min', 4.6, BUKTI),
+    ).rejects.toThrow(MSG_ACTUAL_METRIC_NOT_MANUAL);
+    await expect(
+      recordManualActual(sql, am(), p, 'Shopee', 'gmv', 1, { fileBukti: '', tanggalAmbil: '2026-09-12' }),
+    ).rejects.toThrow(MSG_ACTUAL_BUKTI_REQUIRED);
+    await expect(
+      recordManualActual(sql, am(), p, 'Shopee', 'gmv', -1, BUKTI),
+    ).rejects.toThrow(MSG_ACTUAL_NILAI_INVALID);
+    await expect(
+      recordManualActual(sql, otherAm(), p, 'Shopee', 'gmv', 1, BUKTI),
+    ).rejects.toThrow(MSG_PLAN_FORBIDDEN);
+  });
+
+  it('accepts a post-close entry and logs it as an amendment (X-07: no lock)', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { status: 'Ditutup' });
+    const a = await recordManualActual(sql, am(), p, 'Shopee', 'gmv', 188000000, BUKTI);
+    expect(a.nilai).toBe(188000000);
+    const log = await sql<{ action: string }[]>`
+      select action from audit_log where entity_id = ${p} order by id desc limit 1`;
+    expect(log[0].action).toBe('realisasi_amandemen');
+  });
+
+  it('logs a within-period entry as an ordinary realisasi', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { status: 'Aktif' });
+    await recordManualActual(sql, am(), p, 'Shopee', 'gmv', 188000000, BUKTI);
+    const log = await sql<{ action: string }[]>`
+      select action from audit_log where entity_id = ${p} order by id desc limit 1`;
+    expect(log[0].action).toBe('realisasi_manual');
+  });
+});
+
+describeDb('fileSengketa (PE-6 — dispute an auto metric)', () => {
+  async function seedAuto(planId: string, metric = 'roas_min', nilai = 4.6): Promise<void> {
+    await sql`insert into plan_actual (plan_id, channel, metric, sumber, nilai, created_by)
+              values (${planId}, 'Shopee', ${metric}, 'otomatis', ${nilai}, 'SYSTEM')`;
+  }
+
+  it('records the note on an auto row without touching its value', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { status: 'Aktif' });
+    await seedAuto(p);
+    const a = await fileSengketa(sql, am(), p, 'Shopee', 'roas_min', 'tidak cocok dashboard iklan');
+    expect(a.sengketa).toBe('tidak cocok dashboard iklan');
+    expect(a.nilai).toBe(4.6);
+    expect(a.sumber).toBe('otomatis');
+  });
+
+  it('refuses a dispute on a manual metric, an empty reason, and a missing row', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { status: 'Aktif' });
+    await recordManualActual(sql, am(), p, 'Shopee', 'gmv', 1, {
+      fileBukti: 'x.pdf',
+      tanggalAmbil: '2026-09-12',
+    });
+    await expect(fileSengketa(sql, am(), p, 'Shopee', 'gmv', 'alasan')).rejects.toThrow(
+      MSG_SENGKETA_NOT_AUTO,
+    );
+    await seedAuto(p, 'jumlah_video', 11);
+    await expect(fileSengketa(sql, am(), p, 'Shopee', 'jumlah_video', '  ')).rejects.toThrow(
+      MSG_SENGKETA_ALASAN_REQUIRED,
+    );
+    await expect(fileSengketa(sql, am(), p, 'TikTok Shop', 'roas_min', 'alasan')).rejects.toThrow(
+      MSG_ACTUAL_NOT_FOUND,
+    );
+  });
+});
+
+describeDb('recordAutoActual (system ingestion, PE-3)', () => {
+  it('writes an auto row that reads back through getPlanDetail', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { status: 'Aktif' });
+    const a = await recordAutoActual(sql, p, 'Shopee', 'roas_min', 4.6, 'SYSTEM');
+    expect(a.sumber).toBe('otomatis');
+    expect(a.nilai).toBe(4.6);
+    const detail = await getPlanDetail(sql, am(), p);
+    expect(detail.actuals.find((x) => x.metric === 'roas_min')?.sumber).toBe('otomatis');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-07 — transactional period close (Rule 15)
+// ---------------------------------------------------------------------------
+
+const BUKTI_CLOSE = { fileBukti: 'export.pdf', tanggalAmbil: '2026-09-12' };
+const REVIEW_OK = {
+  yangJalan: 'iklan Shopee naik',
+  yangTidakJalan: 'live vendor telat',
+  rekomendasi: 'geser budget ke konten',
+  perluRevisi: false,
+  materiKlien: 'ROAS 4.6, GMV di atas target',
+};
+
+describeDb('setRowStatus (PC-14, W saat tutup)', () => {
+  async function activeRow() {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 1, status: 'Aktif' });
+    const rid = await seedRow(p, 100);
+    return { f, p, rid };
+  }
+
+  it('marks a row Selesai (no reason needed) and reads it back', async () => {
+    const { rid } = await activeRow();
+    const row = await setRowStatus(sql, am(), rid, 'Selesai');
+    expect(row.statusBaris).toBe('Selesai');
+    expect(row.statusBarisAlasan).toBeNull();
+  });
+
+  it('requires a reason for Sebagian / Tidak Dikerjakan, and stores it', async () => {
+    const { rid } = await activeRow();
+    await expect(setRowStatus(sql, am(), rid, 'Sebagian')).rejects.toThrow(MSG_ROW_STATUS_ALASAN_REQUIRED);
+    const row = await setRowStatus(sql, am(), rid, 'Tidak Dikerjakan', 'aset dari klien tak kunjung datang');
+    expect(row.statusBaris).toBe('Tidak Dikerjakan');
+    expect(row.statusBarisAlasan).toContain('aset');
+  });
+
+  it('clears a stale reason when moving back to a non-terminal / Selesai status', async () => {
+    const { rid } = await activeRow();
+    await setRowStatus(sql, am(), rid, 'Sebagian', 'separuh jalan');
+    const row = await setRowStatus(sql, am(), rid, 'Selesai');
+    expect(row.statusBarisAlasan).toBeNull();
+  });
+
+  it('rejects an invalid status, an unrelated AM, and a non-active period', async () => {
+    const { p, rid } = await activeRow();
+    await expect(
+      setRowStatus(sql, am(), rid, 'Beres' as unknown as 'Selesai'),
+    ).rejects.toThrow(MSG_ROW_STATUS_INVALID);
+    await expect(setRowStatus(sql, otherAm(), rid, 'Selesai')).rejects.toThrow(MSG_PLAN_FORBIDDEN);
+    // a Terjadwal period's row cannot be moved (weeks/execution only exist Aktif)
+    const f2 = await seedContractStrategi();
+    const sched = await seedPeriod(f2, { periodeNo: 2, status: 'Terjadwal' });
+    const rid2 = await seedRow(sched, 10);
+    await expect(setRowStatus(sql, am(), rid2, 'Selesai')).rejects.toThrow(MSG_ROW_STATUS_PERIOD);
+    expect(p).toBeTruthy();
+  });
+
+  it('404s a missing row', async () => {
+    await expect(setRowStatus(sql, am(), 999999999, 'Selesai')).rejects.toThrow(MSG_PLAN_ROW_NOT_FOUND);
+  });
+});
+
+describeDb('savePlanReview (Section P-F)', () => {
+  async function activePeriod() {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 1, status: 'Aktif' });
+    return { f, p };
+  }
+
+  it('upserts the review and reads it back through getPlanDetail', async () => {
+    const { p } = await activePeriod();
+    const r = await savePlanReview(sql, am(), p, REVIEW_OK);
+    expect(r.yangJalan).toContain('Shopee');
+    expect(r.perluRevisi).toBe(false);
+    const detail = await getPlanDetail(sql, am(), p);
+    expect(detail.review?.rekomendasi).toContain('budget');
+  });
+
+  it('is a full replace — an omitted field is stored null, not merged', async () => {
+    const { p } = await activePeriod();
+    await savePlanReview(sql, am(), p, { ...REVIEW_OK, materiKlien: 'draft satu' });
+    const r2 = await savePlanReview(sql, am(), p, { yangJalan: 'revisi' });
+    expect(r2.yangJalan).toBe('revisi');
+    expect(r2.materiKlien).toBeNull(); // the earlier value is not retained
+  });
+
+  it('rejects an invalid diagnosa, an unrelated AM, and a non-active period', async () => {
+    const { p } = await activePeriod();
+    await expect(
+      savePlanReview(sql, am(), p, { diagnosaGap: 'salah' as unknown as 'strategi_salah' }),
+    ).rejects.toThrow(MSG_REVIEW_DIAGNOSA_INVALID);
+    await expect(savePlanReview(sql, otherAm(), p, REVIEW_OK)).rejects.toThrow(MSG_PLAN_FORBIDDEN);
+    const f2 = await seedContractStrategi();
+    const sched = await seedPeriod(f2, { periodeNo: 2, status: 'Terjadwal' });
+    await expect(savePlanReview(sql, am(), sched, REVIEW_OK)).rejects.toThrow(MSG_REVIEW_PERIOD);
+  });
+});
+
+describeDb('closePlanPeriode (Aktif → Ditutup, transactional Rule 15)', () => {
+  /** Build an Aktif period that satisfies all three close preconditions. */
+  async function closeable(opts: { targetGmv?: number; actualGmv?: number } = {}) {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 1, status: 'Aktif' });
+    const rid = await seedRow(p, 100);
+    await seedTarget(p, { nilaiStrategi: opts.targetGmv ?? 100000000 });
+    await setRowStatus(sql, am(), rid, 'Selesai');
+    await recordManualActual(sql, am(), p, 'Shopee', 'gmv', opts.actualGmv ?? 120000000, BUKTI_CLOSE);
+    await savePlanReview(sql, am(), p, REVIEW_OK);
+    return { f, p, rid };
+  }
+
+  it('closes when every precondition holds', async () => {
+    const { p } = await closeable();
+    const plan = await closePlanPeriode(sql, am(), p);
+    expect(plan.status).toBe('Ditutup');
+  });
+
+  it('refuses (nothing moves) when a channel is missing its manual GMV', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 1, status: 'Aktif' });
+    const rid = await seedRow(p, 100);
+    await seedTarget(p, { nilaiStrategi: 100000000 });
+    await setRowStatus(sql, am(), rid, 'Selesai');
+    await savePlanReview(sql, am(), p, REVIEW_OK);
+    await expect(closePlanPeriode(sql, am(), p)).rejects.toThrow(MSG_CLOSE_GMV_INCOMPLETE);
+    expect(await statusOf(p)).toBe('Aktif'); // still open — partial close is not a state
+  });
+
+  it('refuses when a row is not terminal', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 1, status: 'Aktif' });
+    await seedRow(p, 100); // left at 'Rencana'
+    await seedTarget(p, { nilaiStrategi: 100000000 });
+    await recordManualActual(sql, am(), p, 'Shopee', 'gmv', 120000000, BUKTI_CLOSE);
+    await savePlanReview(sql, am(), p, REVIEW_OK);
+    await expect(closePlanPeriode(sql, am(), p)).rejects.toThrow(MSG_CLOSE_ROWS_NOT_TERMINAL);
+    expect(await statusOf(p)).toBe('Aktif');
+  });
+
+  it('refuses when the review is incomplete, and when variance is negative without a diagnosa', async () => {
+    // review absent entirely
+    const a = await closeable();
+    await sql`delete from plan_review where plan_id = ${a.p}`;
+    await expect(closePlanPeriode(sql, am(), a.p)).rejects.toThrow(MSG_CLOSE_REVIEW_INCOMPLETE);
+    // variance negative (actual < target) → PF-3 diagnosa becomes mandatory
+    const b = await closeable({ targetGmv: 200000000, actualGmv: 150000000 });
+    await expect(closePlanPeriode(sql, am(), b.p)).rejects.toThrow(MSG_CLOSE_REVIEW_INCOMPLETE);
+    // supplying the diagnosa + evidence unblocks it
+    await savePlanReview(sql, am(), b.p, {
+      ...REVIEW_OK,
+      diagnosaGap: 'eksekusi_tidak_jalan',
+      diagnosaGapBukti: '71% baris Selesai (PE-8)',
+    });
+    const plan = await closePlanPeriode(sql, am(), b.p);
+    expect(plan.status).toBe('Ditutup');
+  });
+
+  it('refuses an unrelated AM and a period that is not Aktif', async () => {
+    const { p } = await closeable();
+    await expect(closePlanPeriode(sql, otherAm(), p)).rejects.toThrow(MSG_PLAN_FORBIDDEN);
+    const f2 = await seedContractStrategi();
+    const sched = await seedPeriod(f2, { periodeNo: 2, status: 'Terjadwal' });
+    await expect(closePlanPeriode(sql, am(), sched)).rejects.toThrow(MSG_CLOSE_STATUS);
+  });
+
+  it('accepts a late GMV amendment AFTER close (X-07 — close does not lock)', async () => {
+    const { p } = await closeable();
+    await closePlanPeriode(sql, am(), p);
+    // recordManualActual is not status-gated: a post-close correction is logged
+    // as an amendment (B-06), not blocked.
+    const a = await recordManualActual(sql, am(), p, 'Shopee', 'gmv', 130000000, BUKTI_CLOSE);
+    expect(a.nilai).toBe(130000000);
+    expect(await statusOf(p)).toBe('Ditutup');
+  });
+});
+
+describeDb('forceClosePlanPeriode (Aktif → Ditutup Otomatis, Rule 5/15)', () => {
+  async function rowStatus(rid: number): Promise<{ status: string; alasan: string | null }> {
+    const r = await sql<{ status_baris: string; status_baris_alasan: string | null }[]>`
+      select status_baris, status_baris_alasan from plan_row where id = ${rid}`;
+    return { status: r[0].status_baris, alasan: r[0].status_baris_alasan };
+  }
+
+  it('closes regardless of preconditions, coercing non-terminal rows to the ugly marker', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 1, status: 'Aktif' });
+    const unresolved = await seedRow(p, 100); // stays 'Rencana'
+    const done = await seedRow(p, 50);
+    await setRowStatus(sql, am(), done, 'Selesai');
+    // No GMV, no review — the AM abandoned the loop.
+    const plan = await forceClosePlanPeriode(sql, am(), p);
+    expect(plan.status).toBe('Ditutup Otomatis');
+    // the unresolved row is forced; the resolved one keeps its real status
+    const u = await rowStatus(unresolved);
+    expect(u.status).toBe('Tidak Dikerjakan');
+    expect(u.alasan).toBe(FORCE_CLOSE_ALASAN);
+    expect((await rowStatus(done)).status).toBe('Selesai');
+  });
+
+  it('does not touch a real Sebagian reason already set by the AM', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 1, status: 'Aktif' });
+    const partial = await seedRow(p, 100);
+    await setRowStatus(sql, am(), partial, 'Sebagian', 'setengah kuota tercapai');
+    await forceClosePlanPeriode(sql, am(), p);
+    const s = await rowStatus(partial);
+    expect(s.status).toBe('Sebagian');
+    expect(s.alasan).toBe('setengah kuota tercapai'); // preserved, not overwritten
+  });
+
+  it('refuses an unrelated account and a non-active period', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 1, status: 'Aktif' });
+    await expect(forceClosePlanPeriode(sql, otherAm(), p)).rejects.toThrow(MSG_PLAN_FORBIDDEN);
+    const sched = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    await expect(forceClosePlanPeriode(sql, am(), sched)).rejects.toThrow(MSG_CLOSE_STATUS);
   });
 });
