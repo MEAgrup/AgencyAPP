@@ -66,6 +66,28 @@ export const MSG_PLAN_RETURN_NOTES_REQUIRED =
 export const MSG_PLAN_CATATAN_PEMBUKA_REQUIRED =
   '[catatan pembuka wajib diisi sebelum periode Plan diajukan]';
 
+// --- B-04: Rule 9 asymmetric target adjustment ---------------------------
+
+/** The target (plan_id, channel, metric) does not resolve. */
+export const MSG_PLAN_TARGET_NOT_FOUND = '[target periode Plan tidak ditemukan]';
+/** A target may only be adjusted while the period is Draft / Terjadwal (pre-activation). */
+export const MSG_PLAN_ADJUST_STATUS =
+  '[target hanya dapat disesuaikan sebelum periode aktif]';
+/** Rule 9 — a downward adjustment always needs a written reason (PB-4). */
+export const MSG_PLAN_ADJUST_ALASAN_REQUIRED =
+  '[alasan wajib diisi untuk penurunan target]';
+/** Rule 9 / PB-5 — a downward adjustment > 10% needs supporting evidence. */
+export const MSG_PLAN_ADJUST_BUKTI_REQUIRED =
+  '[bukti pendukung wajib dilampirkan untuk penurunan target lebih dari 10%]';
+/** The used figure is negative. */
+export const MSG_PLAN_ADJUST_NILAI_INVALID = '[target dipakai tidak boleh negatif]';
+/** approve/reject called on a target with no pending > 10% request. */
+export const MSG_PLAN_ADJUST_NOT_PENDING =
+  '[tidak ada permintaan penyesuaian target yang menunggu persetujuan]';
+/** Rule 19 — rejecting a target adjustment requires a written note. */
+export const MSG_PLAN_ADJUST_REJECT_NOTES_REQUIRED =
+  '[catatan wajib diisi saat menolak penyesuaian target]';
+
 // ---------------------------------------------------------------------------
 // Shape — one interface per table, camelCase (the wire boundary snake_cases)
 // ---------------------------------------------------------------------------
@@ -187,6 +209,14 @@ export interface PlanDetail {
   actuals: PlanActual[];
   review: PlanReview | null;
   flags: PlanFlag[];
+  /**
+   * PA-6 `defisit_terbawa` — the Rp shortfall carried from every EARLIER period
+   * of this chain (Rule 9). Computed, never stored: Σ(`nilai_strategi` −
+   * `nilai_dipakai`) over committed downward GMV adjustments of periods before
+   * this one. A pending (`Menunggu Persetujuan`) or expired/rejected request
+   * contributes nothing — only an adjustment that actually took effect does.
+   */
+  defisitTerbawa: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -387,6 +417,8 @@ export async function getPlanDetail(
     }[]
   >`select * from plan_flag where plan_id = ${id} order by id`;
 
+  const defisitTerbawa = await priorPeriodDeficit(sql, plan);
+
   return {
     plan,
     targets: targets.map((t) => ({
@@ -440,7 +472,81 @@ export async function getPlanDetail(
       ackSpvOleh: f.ack_spv_oleh,
       ackSpvPada: optIso(f.ack_spv_pada),
     })),
+    defisitTerbawa,
   };
+}
+
+// ---------------------------------------------------------------------------
+// defisit_terbawa (Rule 9 / PA-6) — computed at the chain level, never stored
+// ---------------------------------------------------------------------------
+//
+// §3: a downward adjustment lowers the *period* target but never the contract's
+// cumulative expectation — the shortfall is carried, not absorbed. The deficit
+// is therefore a pure read over `plan_target`: Σ(nilai_strategi − nilai_dipakai)
+// for committed downward GMV adjustments. "Committed" excludes a still-pending
+// `Menunggu Persetujuan` request (nothing has taken effect yet); an expired /
+// rejected one already reverted to `arah='tetap'` (nilai_dipakai=nilai_strategi,
+// contribution 0), so filtering on `arah='turun'` alone would also exclude it —
+// the explicit pending guard is what keeps a live > 10% request out of the sum.
+// GMV only: PA-6 is a rupiah figure, and GMV is the one currency metric.
+
+const DEFICIT_METRIC = 'gmv';
+
+/** The Rp shortfall committed by downward GMV adjustments across a set of periods. */
+async function deficitOfChain(
+  sql: Queryable,
+  plan: Plan,
+  onlyBeforePeriodeNo: number | null,
+): Promise<number> {
+  // Scope to the chain: a full-management chain shares a contract; a Plan Satuan
+  // chain (`lingkup='klien'`, no contract) shares the client.
+  const scoped =
+    plan.contractId !== null
+      ? sql<{ d: string | number }[]>`
+          select coalesce(sum(pt.nilai_strategi - pt.nilai_dipakai), 0) as d
+            from plan p join plan_target pt on pt.plan_id = p.id
+           where p.contract_id = ${plan.contractId}
+             and pt.metric = ${DEFICIT_METRIC}
+             and pt.arah = 'turun'
+             and pt.status_persetujuan is distinct from 'Menunggu Persetujuan'
+             ${onlyBeforePeriodeNo === null ? sql`` : sql`and p.periode_no < ${onlyBeforePeriodeNo}`}`
+      : sql<{ d: string | number }[]>`
+          select coalesce(sum(pt.nilai_strategi - pt.nilai_dipakai), 0) as d
+            from plan p join plan_target pt on pt.plan_id = p.id
+           where p.client_id = ${plan.clientId} and p.lingkup = 'klien'
+             and pt.metric = ${DEFICIT_METRIC}
+             and pt.arah = 'turun'
+             and pt.status_persetujuan is distinct from 'Menunggu Persetujuan'
+             ${onlyBeforePeriodeNo === null ? sql`` : sql`and p.periode_no < ${onlyBeforePeriodeNo}`}`;
+  const rows = await scoped;
+  return num(rows[0].d);
+}
+
+/** PA-6 for a period: the deficit accumulated from every period BEFORE it. */
+async function priorPeriodDeficit(sql: Queryable, plan: Plan): Promise<number> {
+  return deficitOfChain(sql, plan, plan.periodeNo);
+}
+
+/**
+ * contractDeficit is the chain-level `defisit_terbawa` for the contract rollup
+ * (§3: "shows on … the contract-level view") — the sum across ALL periods, not
+ * only those before a given one. Read-scoped like the period reads.
+ */
+export async function contractDeficit(
+  sql: Queryable,
+  actor: Actor,
+  contractId: string,
+): Promise<number> {
+  const ctr = await sql<{ client_id: string }[]>`
+    select client_id from contracts where id = ${contractId}`;
+  if (ctr.length === 0) throw new NotFoundError(MSG_CONTRACT_NOT_FOUND);
+  const ownerAm = await ownerAmOfClient(sql, ctr[0].client_id);
+  if (!canReadPlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+  // Any period of the contract carries the scope keys the aggregate needs.
+  const anyPeriod = await sql<PlanRowDb[]>`
+    select * from plan where contract_id = ${contractId} order by periode_no limit 1`;
+  if (anyPeriod.length === 0) return 0;
+  return deficitOfChain(sql, rowToPlan(anyPeriod[0]), null);
 }
 
 function rowToPlanRow(r: Record<string, unknown>): PlanRow {
@@ -682,6 +788,21 @@ const ENTITY_PLAN = 'plan';
 const PLAN_DRAFT = 'Draft';
 const PLAN_DIAJUKAN = 'Diajukan';
 const PLAN_AKTIF = 'Aktif';
+const PLAN_TERJADWAL = 'Terjadwal';
+const PLAN_MENUNGGU = 'Menunggu Persetujuan';
+
+/** status_persetujuan values (PH-3) — the > 10% approval flow. */
+const ADJ_PENDING = 'Menunggu Persetujuan';
+const ADJ_APPROVED = 'Disetujui';
+const ADJ_REJECTED = 'Ditolak';
+const ADJ_EXPIRED = 'Kedaluwarsa';
+
+/**
+ * The downward threshold above which an adjustment needs SPV approval + evidence
+ * (PA-1: "cheap to tune, worth a deliberate choice" — so it lives here, in one
+ * place, not hardcoded in a DB CHECK). Percent of the Strategi figure.
+ */
+export const DOWNWARD_APPROVAL_THRESHOLD_PCT = 10;
 
 /** transitionError maps an engine rejection to the shared error taxonomy. */
 function transitionError(res: statemachine.TransitionResult & { ok: false }): Error {
@@ -815,16 +936,319 @@ export async function returnPlanPeriode(
  * Rule 5 (one `Aktif` per chain) is held by the partial unique index
  * `uq_plan_aktif_*`: activating period n+1 while period n is still `Aktif` is
  * refused by the DB. The job force-closes the overdue predecessor first (B-09).
- * The `Menunggu Persetujuan` hold for a pending `Turun >10%` adjustment (Rule
- * 4/9) is wired in B-04, which owns that record; until then this activates
- * straight through on the original Strategi target.
+ *
+ * **The `Menunggu Persetujuan` hold (Rule 4/9).** A period reaches this function
+ * in one of two states. `Terjadwal` → activate straight through. `Menunggu
+ * Persetujuan` means a `Turun >10%` request was still pending at the start date:
+ * Rule 4 says the period then activates on the **original** Strategi target and
+ * the request is marked `Kedaluwarsa`. So before the move, any target still
+ * `Menunggu Persetujuan` is reverted to its Strategi figure and expired (an
+ * already-`Disetujui` request keeps its reduced figure; a `Ditolak` one already
+ * reverted). Execution is never blocked by an unanswered approval.
  */
 export async function activatePlanPeriode(sql: Sql, actor: Actor, planId: string): Promise<Plan> {
   return withTransaction(sql, async (tx) => {
     const plan = await loadPlanForUpdate(tx, planId);
     const ownerAm = await ownerAmOfClient(tx, plan.clientId);
     if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+    if (plan.status === PLAN_MENUNGGU) {
+      await expirePendingAdjustments(tx, actor, planId);
+    }
     await transitionPlan(tx, actor, planId, PLAN_AKTIF);
     return loadPlan(tx, planId);
   });
+}
+
+// ---------------------------------------------------------------------------
+// B-04 — Rule 9 asymmetric target adjustment + defisit_terbawa
+// ---------------------------------------------------------------------------
+//
+// §3 names the hole this closes: periods 2..n activate with no approval AND the
+// AM can edit the period target, so nothing stops an AM re-baselining a month
+// down to what is already achievable. The guardrail is asymmetric (§3 table):
+//
+//   * Upward           → free (reason optional), applies immediately.
+//   * Downward ≤ 10%   → mandatory reason, notifies SPV, applies immediately.
+//   * Downward > 10%   → mandatory reason + evidence, and HOLDS the period in
+//                        `Menunggu Persetujuan` until an SPV resolves it (Rule 4).
+//   * Any downward     → the shortfall is carried (defisit_terbawa), not deleted.
+//
+// nilai_strategi is never touched (the frozen PE-5 anchor); only nilai_dipakai
+// and its adjustment trail (arah / persen / alasan / bukti / status_persetujuan)
+// move. Notifications are NOT emitted — the M6B catalog is not registered yet
+// (same seam as B-03); the SPV-notify / approval-request events land with it.
+
+/** The classification of a proposed adjustment — pure, so it is unit-testable. */
+export interface AdjustmentClass {
+  arah: 'naik' | 'turun' | 'tetap';
+  /** Absolute magnitude of the change, percent of nilai_strategi, 2 dp. */
+  persenPerubahan: number;
+  /** Downward adjustments require a written reason (PB-4). */
+  requiresReason: boolean;
+  /** Downward > 10% requires supporting evidence (PB-5). */
+  requiresBukti: boolean;
+  /** Downward > 10% requires SPV approval and holds the period (Rule 4/9). */
+  requiresApproval: boolean;
+}
+
+/**
+ * classifyAdjustment decides direction, magnitude, and which guardrails apply,
+ * from the two figures alone. The threshold is `DOWNWARD_APPROVAL_THRESHOLD_PCT`.
+ * When nilai_strategi is 0 an upward move has no defined percentage (division by
+ * zero → 0, rendered `—` upstream per house rule #7); a downward move from 0 is
+ * impossible (the non-negative CHECK forbids it).
+ */
+export function classifyAdjustment(nilaiStrategi: number, nilaiDipakai: number): AdjustmentClass {
+  if (nilaiDipakai === nilaiStrategi) {
+    return { arah: 'tetap', persenPerubahan: 0, requiresReason: false, requiresBukti: false, requiresApproval: false };
+  }
+  const pct =
+    nilaiStrategi === 0
+      ? 0
+      : Math.round((Math.abs(nilaiDipakai - nilaiStrategi) / nilaiStrategi) * 10000) / 100;
+  if (nilaiDipakai > nilaiStrategi) {
+    return { arah: 'naik', persenPerubahan: pct, requiresReason: false, requiresBukti: false, requiresApproval: false };
+  }
+  const big = pct > DOWNWARD_APPROVAL_THRESHOLD_PCT;
+  return { arah: 'turun', persenPerubahan: pct, requiresReason: true, requiresBukti: big, requiresApproval: big };
+}
+
+interface PlanTargetDbRow {
+  plan_id: string;
+  channel: string;
+  metric: string;
+  nilai_strategi: string | number;
+  nilai_dipakai: string | number;
+  arah: 'naik' | 'turun' | 'tetap';
+  persen_perubahan: string | number;
+  alasan: string | null;
+  bukti_file: string | null;
+  status_persetujuan: string | null;
+}
+
+function rowToPlanTarget(t: PlanTargetDbRow): PlanTarget {
+  return {
+    planId: t.plan_id,
+    channel: t.channel,
+    metric: t.metric,
+    nilaiStrategi: num(t.nilai_strategi),
+    nilaiDipakai: num(t.nilai_dipakai),
+    arah: t.arah,
+    persenPerubahan: num(t.persen_perubahan),
+    alasan: t.alasan,
+    buktiFile: t.bukti_file,
+    statusPersetujuan: t.status_persetujuan,
+  };
+}
+
+/** Load one target FOR UPDATE — locks it so the classify/write cannot race. */
+async function loadTargetForUpdate(
+  tx: TransactionSql,
+  planId: string,
+  channel: string,
+  metric: string,
+): Promise<PlanTargetDbRow> {
+  const rows = await tx<PlanTargetDbRow[]>`
+    select * from plan_target
+     where plan_id = ${planId} and channel = ${channel} and metric = ${metric}
+     for update`;
+  if (rows.length === 0) throw new NotFoundError(MSG_PLAN_TARGET_NOT_FOUND);
+  return rows[0];
+}
+
+/**
+ * adjustPlanTarget is the single Rule 9 write path (PB-2..PB-5). The owning AM
+ * sets `nilaiDipakai` for one channel×metric; direction and guardrails follow
+ * from `classifyAdjustment`. Allowed only while the period is `Draft` (period 1)
+ * or `Terjadwal` (2..n) — a period that is `Aktif`/held/closed is past the point
+ * where its target may move.
+ *
+ * A downward > 10% adjustment on a *scheduled* period (`Terjadwal`) also holds
+ * the period: it files the request as `Menunggu Persetujuan` and moves the period
+ * to that state (Rule 4). On period 1 (`Draft`) there is no separate hold — the
+ * whole period already goes to the SPV via `submitPlanPeriode`/`approvePlanPeriode`,
+ * so the > 10% figure just needs its reason + evidence and rides that approval.
+ */
+export async function adjustPlanTarget(
+  sql: Sql,
+  actor: Actor,
+  planId: string,
+  channel: string,
+  metric: string,
+  nilaiDipakai: number,
+  opts: { alasan?: string; buktiFile?: string } = {},
+): Promise<PlanTarget> {
+  if (!Number.isFinite(nilaiDipakai) || nilaiDipakai < 0) {
+    throw new ValidationError(MSG_PLAN_ADJUST_NILAI_INVALID);
+  }
+  return withTransaction(sql, async (tx) => {
+    const plan = await loadPlanForUpdate(tx, planId);
+    const ownerAm = await ownerAmOfClient(tx, plan.clientId);
+    if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+    if (plan.status !== PLAN_DRAFT && plan.status !== PLAN_TERJADWAL) {
+      throw new ConflictError(MSG_PLAN_ADJUST_STATUS);
+    }
+    const before = await loadTargetForUpdate(tx, planId, channel, metric);
+    const nilaiStrategi = num(before.nilai_strategi);
+    const cls = classifyAdjustment(nilaiStrategi, nilaiDipakai);
+
+    const alasan = (opts.alasan ?? '').trim() || null;
+    const buktiFile = (opts.buktiFile ?? '').trim() || null;
+    if (cls.requiresReason && alasan === null) {
+      throw new ValidationError(MSG_PLAN_ADJUST_ALASAN_REQUIRED);
+    }
+    if (cls.requiresBukti && buktiFile === null) {
+      throw new ValidationError(MSG_PLAN_ADJUST_BUKTI_REQUIRED);
+    }
+
+    // A > 10% downward request on a scheduled period is the only case that holds
+    // the period; period 1 rides its own SPV loop, so it is not marked pending.
+    const holds = cls.requiresApproval && plan.status === PLAN_TERJADWAL;
+    const statusPersetujuan = holds ? ADJ_PENDING : null;
+
+    await tx`
+      update plan_target
+         set nilai_dipakai = ${nilaiDipakai},
+             arah = ${cls.arah},
+             persen_perubahan = ${cls.persenPerubahan},
+             alasan = ${alasan},
+             bukti_file = ${cls.arah === 'turun' ? buktiFile : null},
+             status_persetujuan = ${statusPersetujuan}
+       where plan_id = ${planId} and channel = ${channel} and metric = ${metric}`;
+
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'penyesuaian_target',
+      beforeJson: {
+        channel,
+        metric,
+        nilai_dipakai: num(before.nilai_dipakai),
+        arah: before.arah,
+      },
+      afterJson: {
+        channel,
+        metric,
+        nilai_strategi: nilaiStrategi,
+        nilai_dipakai: nilaiDipakai,
+        arah: cls.arah,
+        persen_perubahan: cls.persenPerubahan,
+        alasan,
+        status_persetujuan: statusPersetujuan,
+      },
+      createdBy: actor.employeeId,
+    });
+
+    if (holds) await transitionPlan(tx, actor, planId, PLAN_MENUNGGU);
+
+    const after = await loadTargetForUpdate(tx, planId, channel, metric);
+    return rowToPlanTarget(after);
+  });
+}
+
+/**
+ * approveTargetAdjustment records the SPV's approval of a pending `Turun >10%`
+ * request (PH-3): the reduced figure stands. It does NOT activate the period —
+ * activation is the 00:00 WIB job's job (B-09); a period whose request is settled
+ * simply keeps its `Disetujui` figure when that job runs. SPV / Head of Account
+ * only (the same gate as period-1 approval).
+ */
+export async function approveTargetAdjustment(
+  sql: Sql,
+  actor: Actor,
+  planId: string,
+  channel: string,
+  metric: string,
+): Promise<PlanTarget> {
+  if (!canApprovePlan(actor)) throw new ForbiddenError(MSG_PLAN_APPROVE_FORBIDDEN);
+  return withTransaction(sql, async (tx) => {
+    await loadPlanForUpdate(tx, planId); // lock + 404
+    const t = await loadTargetForUpdate(tx, planId, channel, metric);
+    if (t.status_persetujuan !== ADJ_PENDING) throw new ConflictError(MSG_PLAN_ADJUST_NOT_PENDING);
+    await tx`
+      update plan_target set status_persetujuan = ${ADJ_APPROVED}
+       where plan_id = ${planId} and channel = ${channel} and metric = ${metric}`;
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'penyesuaian_disetujui',
+      beforeJson: { channel, metric, status_persetujuan: ADJ_PENDING },
+      afterJson: { channel, metric, status_persetujuan: ADJ_APPROVED, nilai_dipakai: num(t.nilai_dipakai) },
+      createdBy: actor.employeeId,
+    });
+    const after = await loadTargetForUpdate(tx, planId, channel, metric);
+    return rowToPlanTarget(after);
+  });
+}
+
+/**
+ * rejectTargetAdjustment records the SPV's rejection of a pending `Turun >10%`
+ * request: the target reverts to its original Strategi figure (`arah='tetap'`),
+ * with a mandatory note in the immutable log (Rule 19). Like approval it does
+ * not move the period — the start-date job activates it on the restored figure.
+ */
+export async function rejectTargetAdjustment(
+  sql: Sql,
+  actor: Actor,
+  planId: string,
+  channel: string,
+  metric: string,
+  catatan: string,
+): Promise<PlanTarget> {
+  const note = (catatan ?? '').trim();
+  if (note === '') throw new ValidationError(MSG_PLAN_ADJUST_REJECT_NOTES_REQUIRED);
+  if (!canApprovePlan(actor)) throw new ForbiddenError(MSG_PLAN_APPROVE_FORBIDDEN);
+  return withTransaction(sql, async (tx) => {
+    await loadPlanForUpdate(tx, planId);
+    const t = await loadTargetForUpdate(tx, planId, channel, metric);
+    if (t.status_persetujuan !== ADJ_PENDING) throw new ConflictError(MSG_PLAN_ADJUST_NOT_PENDING);
+    await tx`
+      update plan_target
+         set nilai_dipakai = nilai_strategi, arah = 'tetap', persen_perubahan = 0,
+             status_persetujuan = ${ADJ_REJECTED}
+       where plan_id = ${planId} and channel = ${channel} and metric = ${metric}`;
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'penyesuaian_ditolak',
+      beforeJson: { channel, metric, nilai_dipakai: num(t.nilai_dipakai), status_persetujuan: ADJ_PENDING },
+      afterJson: { channel, metric, nilai_dipakai: num(t.nilai_strategi), status_persetujuan: ADJ_REJECTED, catatan: note },
+      createdBy: actor.employeeId,
+    });
+    const after = await loadTargetForUpdate(tx, planId, channel, metric);
+    return rowToPlanTarget(after);
+  });
+}
+
+/**
+ * expirePendingAdjustments reverts every still-pending `Turun >10%` request on a
+ * held period to its Strategi figure and marks it `Kedaluwarsa` (Rule 4: an
+ * unanswered request expires and the period activates on the original target).
+ * Runs inside `activatePlanPeriode`'s transaction, just before the move.
+ */
+async function expirePendingAdjustments(tx: TransactionSql, actor: Actor, planId: string): Promise<void> {
+  const expired = await tx<{ channel: string; metric: string; nilai_dipakai: string | number; nilai_strategi: string | number }[]>`
+    update plan_target
+       set nilai_dipakai = nilai_strategi, arah = 'tetap', persen_perubahan = 0,
+           status_persetujuan = ${ADJ_EXPIRED}
+     where plan_id = ${planId} and status_persetujuan = ${ADJ_PENDING}
+     returning channel, metric, nilai_dipakai, nilai_strategi`;
+  const ex = executors(tx);
+  for (const e of expired) {
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'penyesuaian_kedaluwarsa',
+      beforeJson: { channel: e.channel, metric: e.metric, status_persetujuan: ADJ_PENDING },
+      afterJson: { channel: e.channel, metric: e.metric, nilai_dipakai: num(e.nilai_strategi), status_persetujuan: ADJ_EXPIRED },
+      createdBy: actor.employeeId,
+    });
+  }
 }
