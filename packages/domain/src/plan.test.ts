@@ -26,6 +26,7 @@ import { createClient, type Sql } from '@cdps/db';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from './account';
 import { createStrategi } from './strategi';
 import {
+  BIG_DATE_WEIGHT,
   DOWNWARD_APPROVAL_THRESHOLD_PCT,
   MSG_PLAN_ADJUST_ALASAN_REQUIRED,
   MSG_PLAN_ADJUST_BUKTI_REQUIRED,
@@ -38,7 +39,11 @@ import {
   MSG_PLAN_FORBIDDEN,
   MSG_PLAN_NOT_FOUND,
   MSG_PLAN_RETURN_NOTES_REQUIRED,
+  MSG_PLAN_ROW_NOT_FOUND,
   MSG_PLAN_TARGET_NOT_FOUND,
+  MSG_PLAN_WEEK_NO_INVALID,
+  MSG_PLAN_WEEK_STATUS,
+  MSG_PLAN_WEEK_SUM_MISMATCH,
   activatePlanPeriode,
   adjustPlanTarget,
   approvePlanPeriode,
@@ -49,12 +54,14 @@ import {
   classifyAdjustment,
   computePeriods,
   contractDeficit,
+  distributeWeeks,
   generatePlanPeriods,
   getPlan,
   getPlanDetail,
   listPlansForContract,
   rejectTargetAdjustment,
   returnPlanPeriode,
+  setWeeklyDistribution,
   submitPlanPeriode,
 } from './plan';
 
@@ -191,6 +198,38 @@ describe('classifyAdjustment (Rule 9, pure)', () => {
 
   it('renders a zero anchor as 0% rather than dividing by zero (house rule #7)', () => {
     expect(classifyAdjustment(0, 500)).toMatchObject({ arah: 'naik', persenPerubahan: 0 });
+  });
+});
+
+describe('distributeWeeks (Rule 7, pure)', () => {
+  const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
+
+  it('splits evenly and always sums back to the quota', () => {
+    expect(distributeWeeks(100, 5)).toEqual([20, 20, 20, 20, 20]);
+    // 100 / 3 does not divide: remainder lands on the last weeks, sum preserved.
+    const three = distributeWeeks(100, 3);
+    expect(sum(three)).toBe(100);
+    expect(three).toEqual([33.33, 33.33, 33.34]);
+  });
+
+  it('re-weights toward a big-date week (heavier share) and still balances', () => {
+    // Week 3 emphasized → carries ~2× a plain week.
+    const d = distributeWeeks(100, 5, [3]);
+    expect(sum(d)).toBe(100);
+    const max = Math.max(...d);
+    expect(d[2]).toBe(max); // the big-date week is the heaviest
+    // A plain week ≈ 100/6, the big-date week ≈ 2×; ratio reflects BIG_DATE_WEIGHT.
+    expect(Math.round(d[2] / d[0])).toBe(BIG_DATE_WEIGHT);
+  });
+
+  it('keeps two-decimal quotas exact (no float drift)', () => {
+    expect(sum(distributeWeeks(100.01, 4)).toFixed(2)).toBe('100.01');
+    expect(sum(distributeWeeks(0, 5))).toBe(0);
+  });
+
+  it('rejects a non-positive week count', () => {
+    expect(() => distributeWeeks(100, 0)).toThrow();
+    expect(() => distributeWeeks(100, 2.5)).toThrow();
   });
 });
 
@@ -900,5 +939,157 @@ describeDb('defisit_terbawa (Rule 9 / PA-6, computed)', () => {
     // Once approved, its Rp 50jt joins the deficit.
     await approveTargetAdjustment(sql, spv(), p2, 'Shopee', 'gmv');
     expect(await contractDeficit(sql, am(), f.contractId)).toBe(60000000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-05 — derived weekly distribution (Rule 7)
+// ---------------------------------------------------------------------------
+
+/** Seed one monthly work-row (the shape Briefs are created from). */
+async function seedRow(planId: string, kuota = 100): Promise<number> {
+  const r = await sql<{ id: string | number }[]>`
+    insert into plan_row
+      (plan_id, channel, pilar, kuota, satuan, divisi_pic, hasil_diharapkan,
+       di_luar_service, di_luar_alasan, created_by)
+    values (${planId}, 'Shopee', 'iklan', ${kuota}, 'kampanye', 'Ads', 'ACOS <= 18%',
+            true, 'uji', 'ZZ-AM')
+    returning id`;
+  return Number(r[0].id);
+}
+
+async function weeksOf(rowId: number) {
+  return sql<{ minggu_no: number; kuota: string | number }[]>`
+    select minggu_no, kuota from plan_row_week where plan_row_id = ${rowId} order by minggu_no`;
+}
+
+describeDb('plan_row_week sum trigger (Rule 7, DB-enforced)', () => {
+  it('rejects weeks that do not sum to the monthly quota, naming the row + delta', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    const rid = await seedRow(p, 100);
+    // One 50-week against a 100 quota: the deferred trigger fires at commit.
+    await expect(
+      sql`insert into plan_row_week (plan_row_id, minggu_no, kuota, created_by)
+          values (${rid}, 1, 50, 'ZZ-AM')`,
+    ).rejects.toThrow(/distribusi mingguan baris .* selisih/);
+  });
+
+  it('accepts a balanced distribution written in one transaction', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    const rid = await seedRow(p, 100);
+    await sql.begin(async (tx) => {
+      await tx`insert into plan_row_week (plan_row_id, minggu_no, kuota, created_by) values (${rid}, 1, 60, 'ZZ-AM')`;
+      await tx`insert into plan_row_week (plan_row_id, minggu_no, kuota, created_by) values (${rid}, 2, 40, 'ZZ-AM')`;
+    });
+    expect((await weeksOf(rid)).map((w) => Number(w.kuota))).toEqual([60, 40]);
+  });
+
+  it('a row with no weeks yet is valid (pre-distribution)', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    const rid = await seedRow(p, 100);
+    expect(await weeksOf(rid)).toHaveLength(0);
+  });
+
+  it('re-checks when the monthly quota moves under existing weeks', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    const rid = await seedRow(p, 100);
+    await sql.begin(async (tx) => {
+      await tx`insert into plan_row_week (plan_row_id, minggu_no, kuota, created_by) values (${rid}, 1, 60, 'ZZ-AM')`;
+      await tx`insert into plan_row_week (plan_row_id, minggu_no, kuota, created_by) values (${rid}, 2, 40, 'ZZ-AM')`;
+    });
+    // Lowering the quota to 90 leaves the weeks summing to 100 → rejected.
+    await expect(sql`update plan_row set kuota = 90 where id = ${rid}`).rejects.toThrow(
+      /distribusi mingguan/,
+    );
+  });
+});
+
+describeDb('deriveWeeklyDistribution (on activation)', () => {
+  it('splits every monthly row across the weeks on activation, summing to quota', async () => {
+    const f = await seedContractStrategi();
+    // Big date in week 3 of the period (2026-08-12 start, 5 weeks).
+    await sql`insert into strategi_tanggal_besar (strategi_id, tanggal, nama, peran, created_by)
+              values (${f.strategiId}, '2026-08-26', '9.9', 'puncak kampanye', 'ZZ-AM')`;
+    const p = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    const rid = await seedRow(p, 100);
+    const plan = await activatePlanPeriode(sql, am(), p);
+    expect(plan.status).toBe('Aktif');
+    const w = await weeksOf(rid);
+    expect(w).toHaveLength(5);
+    expect(w.reduce((a, x) => a + Number(x.kuota), 0)).toBe(100);
+    // The big-date week (no. 3) carries the heaviest share (Rule 7 re-weight).
+    const kuotas = w.map((x) => Number(x.kuota));
+    expect(kuotas[2]).toBe(Math.max(...kuotas));
+  });
+
+  it('is idempotent — a row already split is left untouched by a re-run', async () => {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    const rid = await seedRow(p, 100);
+    await activatePlanPeriode(sql, am(), p); // first split
+    const before = await weeksOf(rid);
+    // A hand re-drag; a second derivation must NOT overwrite it.
+    await setWeeklyDistribution(sql, am(), rid, [
+      { mingguNo: 1, kuota: 100 },
+      { mingguNo: 2, kuota: 0 },
+      { mingguNo: 3, kuota: 0 },
+      { mingguNo: 4, kuota: 0 },
+      { mingguNo: 5, kuota: 0 },
+    ]);
+    // getPlanDetail bundles the weeks — prove the re-drag stuck.
+    const detail = await getPlanDetail(sql, am(), p);
+    const forRow = detail.weeks.filter((x) => x.planRowId === rid);
+    expect(forRow.find((x) => x.mingguNo === 1)?.kuota).toBe(100);
+    expect(before).toHaveLength(5);
+  });
+});
+
+describeDb('setWeeklyDistribution (AM re-drag, Rule 7/18)', () => {
+  async function activePeriodWithRow(kuota = 100) {
+    const f = await seedContractStrategi();
+    const p = await seedPeriod(f, { periodeNo: 1, status: 'Aktif' });
+    const rid = await seedRow(p, kuota);
+    return { f, p, rid };
+  }
+
+  it('replaces the split when the AM re-drags, and it must sum to the quota', async () => {
+    const { rid } = await activePeriodWithRow(100);
+    const weeks = await setWeeklyDistribution(sql, am(), rid, [
+      { mingguNo: 1, kuota: 70 },
+      { mingguNo: 2, kuota: 30 },
+    ]);
+    expect(weeks.map((w) => w.kuota)).toEqual([70, 30]);
+    // A short split is rejected with a clean message (before the DB trigger).
+    await expect(
+      setWeeklyDistribution(sql, am(), rid, [
+        { mingguNo: 1, kuota: 70 },
+        { mingguNo: 2, kuota: 20 },
+      ]),
+    ).rejects.toThrow(MSG_PLAN_WEEK_SUM_MISMATCH);
+  });
+
+  it('refuses a week outside the period, a non-active period, an unrelated AM, a missing row', async () => {
+    const { f, p, rid } = await activePeriodWithRow(100);
+    // Period has 5 weeks → week 9 is out of range.
+    await expect(
+      setWeeklyDistribution(sql, am(), rid, [{ mingguNo: 9, kuota: 100 }]),
+    ).rejects.toThrow(MSG_PLAN_WEEK_NO_INVALID);
+    await expect(setWeeklyDistribution(sql, otherAm(), rid, [{ mingguNo: 1, kuota: 100 }])).rejects.toThrow(
+      MSG_PLAN_FORBIDDEN,
+    );
+    // A scheduled (not yet active) period cannot be re-dragged.
+    const sched = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
+    const rid2 = await seedRow(sched, 50);
+    await expect(setWeeklyDistribution(sql, am(), rid2, [{ mingguNo: 1, kuota: 50 }])).rejects.toThrow(
+      MSG_PLAN_WEEK_STATUS,
+    );
+    await expect(setWeeklyDistribution(sql, am(), 99999999, [{ mingguNo: 1, kuota: 1 }])).rejects.toThrow(
+      MSG_PLAN_ROW_NOT_FOUND,
+    );
+    expect(p).toBeTruthy();
   });
 });

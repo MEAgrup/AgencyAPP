@@ -88,6 +88,20 @@ export const MSG_PLAN_ADJUST_NOT_PENDING =
 export const MSG_PLAN_ADJUST_REJECT_NOTES_REQUIRED =
   '[catatan wajib diisi saat menolak penyesuaian target]';
 
+// --- B-05: derived weekly distribution (Rule 7) --------------------------
+
+/** The work-row (`plan_row`) does not resolve. */
+export const MSG_PLAN_ROW_NOT_FOUND = '[baris rencana kerja tidak ditemukan]';
+/** Rule 7 — a re-drag whose weekly quotas do not sum to the monthly quota. */
+export const MSG_PLAN_WEEK_SUM_MISMATCH =
+  '[distribusi mingguan harus berjumlah sama dengan kuota bulanan baris]';
+/** A weekly row references a week outside the period (1..jumlah_minggu). */
+export const MSG_PLAN_WEEK_NO_INVALID =
+  '[nomor minggu di luar rentang periode]';
+/** Re-drag is only possible once the period is active (weeks exist). */
+export const MSG_PLAN_WEEK_STATUS =
+  '[distribusi mingguan hanya dapat diubah saat periode aktif]';
+
 // ---------------------------------------------------------------------------
 // Shape — one interface per table, camelCase (the wire boundary snake_cases)
 // ---------------------------------------------------------------------------
@@ -955,6 +969,9 @@ export async function activatePlanPeriode(sql: Sql, actor: Actor, planId: string
       await expirePendingAdjustments(tx, actor, planId);
     }
     await transitionPlan(tx, actor, planId, PLAN_AKTIF);
+    // Rule 7 (P1): on activation the monthly rows are split across the period's
+    // weeks. B-05 derivation — no-op for a period with no rows yet.
+    await deriveWeeklyDistribution(tx, actor, plan);
     return loadPlan(tx, planId);
   });
 }
@@ -1251,4 +1268,169 @@ async function expirePendingAdjustments(tx: TransactionSql, actor: Actor, planId
       createdBy: actor.employeeId,
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// B-05 — derived weekly distribution (Rule 7 / P1)
+// ---------------------------------------------------------------------------
+//
+// Weekly rows are DERIVED, never typed. On activation each monthly `plan_row` is
+// split across the period's weeks; the split is even, then re-weighted toward
+// weeks that contain a Strategi G-2 big date (those weeks carry heavier load).
+// The AM may re-drag afterwards (`setWeeklyDistribution`), but the weekly total
+// must always equal the monthly quota — enforced by the deferred constraint
+// trigger `trg_plan_row_week_sum`, with this TS layer giving a clean message
+// before the DB does. A weekly row can never exist without its monthly parent
+// (FK), so "no orphan week" needs no separate guard.
+
+/** A big-date week carries this many times a plain week's share (Rule 7 re-weight). */
+export const BIG_DATE_WEIGHT = 2;
+
+/**
+ * distributeWeeks splits `kuota` across `weeks` weeks, summing back to `kuota`
+ * EXACTLY (worked in integer cents so 2-dp quotas never drift). Weeks listed in
+ * `emphasize` (1-based) get `BIG_DATE_WEIGHT`× the share of a plain week; the
+ * rounding remainder lands on the emphasized weeks first, else the last weeks
+ * (which already absorb the period's 8-10 day tail, B-02) — never a stub week.
+ */
+export function distributeWeeks(kuota: number, weeks: number, emphasize: number[] = []): number[] {
+  if (!Number.isInteger(weeks) || weeks < 1) {
+    throw new Error(`distributeWeeks: weeks harus bilangan bulat >= 1: ${weeks}`);
+  }
+  if (!Number.isFinite(kuota) || kuota < 0) {
+    throw new Error(`distributeWeeks: kuota harus >= 0: ${kuota}`);
+  }
+  const emphasized = new Set(emphasize.filter((w) => w >= 1 && w <= weeks));
+  const weights = Array.from({ length: weeks }, (_, i) =>
+    emphasized.has(i + 1) ? BIG_DATE_WEIGHT : 1,
+  );
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+  const cents = Math.round(kuota * 100);
+  const raw = weights.map((w) => Math.floor((cents * w) / totalWeight));
+  let rem = cents - raw.reduce((a, b) => a + b, 0);
+  // Remainder cents: emphasized weeks first (in order), then the last weeks back
+  // to front. Deterministic, and it keeps the extra where the load belongs.
+  const order = [
+    ...[...emphasized].sort((a, b) => a - b).map((w) => w - 1),
+    ...Array.from({ length: weeks }, (_, i) => weeks - 1 - i).filter((i) => !emphasized.has(i + 1)),
+  ];
+  for (let k = 0; rem > 0; k += 1, rem -= 1) raw[order[k % order.length]] += 1;
+  return raw.map((c) => c / 100);
+}
+
+/** The week (1..jumlahMinggu) that a date falls in, clamped to the period. */
+function weekOfDate(dateStr: string, periodeMulai: string, jumlahMinggu: number): number {
+  const offset = daysInclusive(periodeMulai, dateStr) - 1; // 0-based day offset
+  if (offset < 0) return 1;
+  return Math.min(jumlahMinggu, Math.floor(offset / 7) + 1);
+}
+
+/**
+ * deriveWeeklyDistribution lays down the weekly rows for every monthly row of a
+ * period that has none yet (idempotent — a row already split is left alone, so a
+ * re-run never doubles or overwrites an AM's re-drag). Big-date weeks come from
+ * the parent Strategi's G-2 dates that fall inside the period; a Plan Satuan
+ * period (no Strategi) simply splits evenly. Runs inside the activation tx.
+ */
+export async function deriveWeeklyDistribution(
+  tx: TransactionSql,
+  actor: Actor,
+  plan: Plan,
+): Promise<void> {
+  const rows = await tx<{ id: string | number; kuota: string | number }[]>`
+    select pr.id, pr.kuota from plan_row pr
+     where pr.plan_id = ${plan.id}
+       and not exists (select 1 from plan_row_week w where w.plan_row_id = pr.id)`;
+  if (rows.length === 0) return;
+
+  // Which weeks of THIS period contain a Strategi G-2 big date.
+  const emphasize: number[] = [];
+  if (plan.strategiId !== null) {
+    const bigDates = await tx<{ tanggal: string | Date }[]>`
+      select tanggal from strategi_tanggal_besar
+       where strategi_id = ${plan.strategiId}
+         and tanggal between ${plan.tanggalMulai} and ${plan.tanggalAkhir}`;
+    for (const b of bigDates) {
+      emphasize.push(weekOfDate(isoDate(b.tanggal), plan.tanggalMulai, plan.jumlahMinggu));
+    }
+  }
+
+  for (const r of rows) {
+    const per = distributeWeeks(num(r.kuota), plan.jumlahMinggu, emphasize);
+    for (let i = 0; i < per.length; i += 1) {
+      await tx`
+        insert into plan_row_week (plan_row_id, minggu_no, kuota, created_by)
+        values (${r.id}, ${i + 1}, ${per[i]}, ${actor.employeeId})`;
+    }
+  }
+}
+
+/**
+ * setWeeklyDistribution replaces a work-row's weekly split with an AM-supplied
+ * one (Rule 7 "the AM can re-drag"). AM-only authorship (Rule 18); the period
+ * must be `Aktif` (weeks only exist after activation). Each week must be inside
+ * the period and appear once, and the quotas must sum to the monthly quota — the
+ * deferred trigger is the final word, this gives the friendly message first.
+ */
+export async function setWeeklyDistribution(
+  sql: Sql,
+  actor: Actor,
+  planRowId: number,
+  perWeek: { mingguNo: number; kuota: number }[],
+): Promise<PlanRowWeek[]> {
+  return withTransaction(sql, async (tx) => {
+    const rowRes = await tx<{ id: string | number; plan_id: string; kuota: string | number }[]>`
+      select id, plan_id, kuota from plan_row where id = ${planRowId} for update`;
+    if (rowRes.length === 0) throw new NotFoundError(MSG_PLAN_ROW_NOT_FOUND);
+    const planId = rowRes[0].plan_id;
+    const kuota = num(rowRes[0].kuota);
+
+    const plan = await loadPlanForUpdate(tx, planId);
+    const ownerAm = await ownerAmOfClient(tx, plan.clientId);
+    if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+    if (plan.status !== PLAN_AKTIF) throw new ConflictError(MSG_PLAN_WEEK_STATUS);
+
+    const seen = new Set<number>();
+    for (const w of perWeek) {
+      if (!Number.isInteger(w.mingguNo) || w.mingguNo < 1 || w.mingguNo > plan.jumlahMinggu) {
+        throw new ValidationError(MSG_PLAN_WEEK_NO_INVALID);
+      }
+      if (seen.has(w.mingguNo)) throw new ValidationError(MSG_PLAN_WEEK_NO_INVALID);
+      seen.add(w.mingguNo);
+      if (!Number.isFinite(w.kuota) || w.kuota < 0) throw new ValidationError(MSG_PLAN_WEEK_SUM_MISMATCH);
+    }
+    const sum = perWeek.reduce((a, w) => a + w.kuota, 0);
+    // Compare in cents so 2-dp quotas do not fail on a float epsilon.
+    if (Math.round(sum * 100) !== Math.round(kuota * 100)) {
+      throw new ValidationError(MSG_PLAN_WEEK_SUM_MISMATCH);
+    }
+
+    await tx`delete from plan_row_week where plan_row_id = ${planRowId}`;
+    for (const w of perWeek) {
+      await tx`
+        insert into plan_row_week (plan_row_id, minggu_no, kuota, created_by)
+        values (${planRowId}, ${w.mingguNo}, ${w.kuota}, ${actor.employeeId})`;
+    }
+
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'distribusi_mingguan',
+      beforeJson: { plan_row_id: planRowId },
+      afterJson: { plan_row_id: planRowId, minggu: perWeek },
+      createdBy: actor.employeeId,
+    });
+
+    const out = await tx<{ id: string | number; plan_row_id: string | number; minggu_no: number; kuota: string | number }[]>`
+      select id, plan_row_id, minggu_no, kuota from plan_row_week
+       where plan_row_id = ${planRowId} order by minggu_no`;
+    return out.map((w) => ({
+      id: num(w.id),
+      planRowId: num(w.plan_row_id),
+      mingguNo: num(w.minggu_no),
+      kuota: num(w.kuota),
+    }));
+  });
 }
