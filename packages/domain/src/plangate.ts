@@ -48,6 +48,7 @@ import {
   ValidationError,
   type Actor,
 } from './account';
+import { getPlanSatuan, openOrJoinPlanSatuanTx } from './plan';
 import {
   DECISION_BUTUH_PLAN,
   DECISION_TANPA_PLAN,
@@ -290,8 +291,9 @@ export interface GateContext {
   unit: string | null;
   minQty: number | null;
   category: string | null;
-  /** GA-7: Plan Satuan status. `belum_tersedia` until Module 6B lands. */
-  planSatuanStatus: 'belum_tersedia';
+  /** GA-7: the client's Plan Satuan chain status (Rule 6/8). `belum_ada` (no
+   *  chain), `aktif` (open), or `dorman` (idle, will reactivate on a new service). */
+  planSatuanStatus: 'belum_ada' | 'aktif' | 'dorman';
   /** GA-8: does the client hold an active full-management contract? (§4b) */
   adaKontrakFullManagement: boolean;
   config: GateConfig;
@@ -397,6 +399,11 @@ export async function gateContext(sql: Sql, actor: Actor, serviceId: string): Pr
      where client_id = ${svc.clientId} and plan_tier = ${TIER_PLAN_WAJIB}
        and status <> '[Voided]'`;
 
+  // GA-7: the client's Plan Satuan chain, now that Rule 6 opens it.
+  const chain = await getPlanSatuan(sql, svc.clientId);
+  const planSatuanStatus: GateContext['planSatuanStatus'] =
+    chain === null ? 'belum_ada' : chain.statusDormansi === 'Dorman' ? 'dorman' : 'aktif';
+
   return {
     serviceId,
     serviceName: svc.name,
@@ -408,7 +415,7 @@ export async function gateContext(sql: Sql, actor: Actor, serviceId: string): Pr
     unit: svc.unit,
     minQty: svc.minQty,
     category: svc.category,
-    planSatuanStatus: 'belum_tersedia',
+    planSatuanStatus,
     adaKontrakFullManagement: fm[0].n > 0,
     config: cfg,
     gate,
@@ -583,6 +590,15 @@ export async function decideGate(
       createdBy: actor.employeeId,
     });
 
+    // Rule 6 (M6C §7): a `butuh_plan` outcome OPENS the client's Plan Satuan — or
+    // joins the current period / reactivates a dormant chain — and links this
+    // determination to the period it landed in. This is what makes the gate more
+    // than a record: the Plan actually exists afterward.
+    if (input.keputusanAm === DECISION_BUTUH_PLAN) {
+      const r = await openOrJoinPlanSatuanTx(tx, actor, svc.clientId, todayWib());
+      await tx`update service_plan_gate set plan_id = ${r.planId} where service_id = ${serviceId}`;
+    }
+
     const saved = await loadGate(tx, serviceId);
     if (!saved) throw new ConflictError(MSG_GATE_MISSING);
     void now;
@@ -673,6 +689,17 @@ export async function redecideGate(
       afterJson: { keputusan_am: keputusan, kesesuaian: fit, alasan: reason },
       createdBy: actor.employeeId,
     });
+
+    // Escalation (`tanpa_plan → butuh_plan`, Rule 11) opens/joins the Plan Satuan
+    // just like a first-pass `butuh_plan` determination, and links it. It is
+    // forward-only — the join lands in the CURRENT period, past work is not
+    // backfilled. De-escalation is left to record the decision only: closing the
+    // existing Plan rows with a reason (Flow step 9) is a heavier write than the
+    // determination flip and is not part of this ticket.
+    if (!deescalating && existing.planId === null) {
+      const r = await openOrJoinPlanSatuanTx(tx, actor, svc.clientId, todayWib());
+      await tx`update service_plan_gate set plan_id = ${r.planId} where service_id = ${serviceId}`;
+    }
 
     const saved = await loadGate(tx, serviceId);
     if (!saved) throw new ConflictError(MSG_GATE_MISSING);

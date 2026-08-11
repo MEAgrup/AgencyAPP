@@ -142,7 +142,20 @@ All else blocked: `[transisi status tidak diizinkan]`.
 - `Disetujui`/`Dikembalikan` di PRD §8 **bukan state** — PA-5 tidak memuat keduanya; itu cara §8 menuliskan aksi "SPV setuju ⇒ `Aktif`" / "SPV kembalikan ⇒ `Draft`".
 - **Hanya satu periode `Aktif` per rantai** (Rule 5) ditegakkan index parsial `uq_plan_aktif_kontrak`/`uq_plan_aktif_klien`, bukan oleh mesin.
 - **Edge = data (B-01); GERBANG = domain (B-03, MENDARAT).** Mesin ini mendaftar transisi MANA yang sah; SIAPA yang boleh menekan tombol mana adalah `packages/domain/src/plan.ts`: `submitPlanPeriode` (`Draft → Diajukan`, AM pemilik + PA-7 wajib), `approvePlanPeriode`/`returnPlanPeriode` (periode 1, gerbang `isLead(Account)`, catatan wajib saat kembali), `activatePlanPeriode` (`Terjadwal → Aktif`, service-role, bukan lead). Semua lewat `transitionPlan` — pembungkus tunggal atas `sm_transition`. **Masih tiketnya:** KAPAN `Terjadwal` harus lewat `Menunggu Persetujuan` (penyesuaian `Turun >10%`) = B-04; job aktivasi/force-close 00:00 WIB = B-09.
-- **Dormansi Plan Satuan = mesin #17** (`Aktif ⇄ Dorman`, M6C §7), properti RANTAI periode bukan satu periode. Menyusul di B-10; belum didaftarkan. Periode-nya sendiri tetap memakai mesin #16 ini apa adanya.
+- **Dormansi Plan Satuan = mesin #17** — MENDARAT (B-10), lihat §6e. Periode-nya sendiri tetap memakai mesin #16 ini apa adanya.
+
+## 6e. Plan Satuan dormansi — mesin #17 (M6C §7, B-10)
+
+`Aktif ⇄ Dorman`. Bukan status sebuah periode melainkan status **rantai** Plan Satuan per klien: ia hidup di kolom `plan_satuan.status_dormansi` (tabel rantai, PK `client_id`), bukan di `plan` — dormansi adalah fakta rantai, dan menaruhnya di tiap baris periode = n salinan (anti-pola `defisit_terbawa`). Digerakkan `sm_transition(machine='plan_satuan', id_col='client_id', status_col='status_dormansi')`.
+
+| From | To | Who | Effect |
+|---|---|---|---|
+| `Aktif` | `Dorman` | sistem (job §10c) | Semua service satuan berakhir ⇒ periode berhenti tumbuh. `markPlanSatuanDormant` menolak selagi ada periode non-terminal (`[Plan Satuan tidak dapat didormankan selagi ada periode berjalan]`) |
+| `Dorman` | `Aktif` | sistem/AM (via gate) | Service Plan-gated baru MEREAKTIVASI rantai yang SAMA (Rule 8, "keeps one continuous history") + membuka periode segar (`periode_no` lanjut, `Terjadwal`) |
+
+- **BUKAN terminal.** `Dorman` bisa bangun lagi — mendaftarkannya terminal berarti satu-satunya jalan keluar adalah UPDATE mentah (langgar aturan rumah #2). Karena itu `sm_terminal_states` untuk `plan_satuan` KOSONG.
+- Kedua edge `require_lead = false`: dormansi dijalankan job service-role; reaktivasi dijalankan saat AM menentukan service baru butuh Plan (gerbang kepemilikan di `plangate.decideGate`/`openOrJoinPlanSatuanTx`, bukan lead).
+- **Rule 6 (buka/gabung)** bukan mesin ini: membuka rantai (baris `plan_satuan` + periode 1 `Draft`), menggabung (link ke periode berjalan), dan reaktivasi dijalankan `openOrJoinPlanSatuanTx`, dipanggil di transaksi `decideGate` saat `keputusan_am='butuh_plan'`. Hanya transisi `Aktif ⇄ Dorman` yang lewat mesin #17.
 
 ## 7. Brief `BRF-` (M6) — also the canonical Task machine (M12) applied to AST / BKG / BRF-as-task
 `[To Do]` → `[In Progress]` → `[Submitted]` → `[In Review]` → `[Approved]` (terminal)
