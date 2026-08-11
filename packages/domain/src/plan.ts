@@ -27,7 +27,7 @@
  * *their own rows* is an RLS arm on `plan_row`, not a whole-Plan grant.
  */
 
-import { ident, permission, statemachine } from '@cdps/core';
+import { ident, notification, permission, statemachine } from '@cdps/core';
 import {
   executors,
   withTransaction,
@@ -1050,15 +1050,27 @@ export async function activatePlanPeriode(sql: Sql, actor: Actor, planId: string
     const plan = await loadPlanForUpdate(tx, planId);
     const ownerAm = await ownerAmOfClient(tx, plan.clientId);
     if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
-    if (plan.status === PLAN_MENUNGGU) {
-      await expirePendingAdjustments(tx, actor, planId);
-    }
-    await transitionPlan(tx, actor, planId, PLAN_AKTIF);
-    // Rule 7 (P1): on activation the monthly rows are split across the period's
-    // weeks. B-05 derivation — no-op for a period with no rows yet.
-    await deriveWeeklyDistribution(tx, actor, plan);
+    await activatePlanPeriodeTx(tx, actor, plan);
     return loadPlan(tx, planId);
   });
+}
+
+/**
+ * activatePlanPeriodeTx is the post-lock body of `activatePlanPeriode`, shared
+ * with the 00:00 WIB sweep (B-09) which drives the same `Terjadwal → Aktif` move
+ * as the SYSTEM actor. The public function adds the AM/lead ownership gate; the
+ * sweep is system-authoritative (the edge is `require_lead=false` precisely
+ * because a job, not a lead, drives it) so it skips that gate. The caller has
+ * already locked `plan` FOR UPDATE.
+ */
+async function activatePlanPeriodeTx(tx: TransactionSql, actor: Actor, plan: Plan): Promise<void> {
+  if (plan.status === PLAN_MENUNGGU) {
+    await expirePendingAdjustments(tx, actor, plan.id);
+  }
+  await transitionPlan(tx, actor, plan.id, PLAN_AKTIF);
+  // Rule 7 (P1): on activation the monthly rows are split across the period's
+  // weeks. B-05 derivation — no-op for a period with no rows yet.
+  await deriveWeeklyDistribution(tx, actor, plan);
 }
 
 // ---------------------------------------------------------------------------
@@ -2132,27 +2144,38 @@ export async function forceClosePlanPeriode(sql: Sql, actor: Actor, planId: stri
     const ownerAm = await ownerAmOfClient(tx, plan.clientId);
     if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
     if (plan.status !== PLAN_AKTIF) throw new ConflictError(MSG_CLOSE_STATUS);
-
-    const coerced = await tx<{ id: string | number }[]>`
-      update plan_row
-         set status_baris = 'Tidak Dikerjakan', status_baris_alasan = ${FORCE_CLOSE_ALASAN}
-       where plan_id = ${planId}
-         and status_baris not in ('Selesai', 'Sebagian', 'Tidak Dikerjakan')
-       returning id`;
-
-    await transitionPlan(tx, actor, planId, PLAN_DITUTUP_OTOMATIS);
-    const ex = executors(tx);
-    await ex.audit.insertAudit({
-      entityType: ENTITY_PLAN,
-      entityId: planId,
-      actorEmployeeId: actor.employeeId,
-      action: 'ditutup_otomatis',
-      beforeJson: { status: plan.status },
-      afterJson: { status: PLAN_DITUTUP_OTOMATIS, baris_dipaksa: coerced.length },
-      createdBy: actor.employeeId,
-    });
+    await forceClosePlanPeriodeTx(tx, actor, plan);
     return loadPlan(tx, planId);
   });
+}
+
+/**
+ * forceClosePlanPeriodeTx is the post-lock body of `forceClosePlanPeriode`,
+ * shared with the 00:00 WIB overrun sweep (B-09). Caller has locked `plan` and
+ * confirmed it is `Aktif`. Returns the number of rows coerced to `Tidak
+ * Dikerjakan`. Like the activation body it enforces no ownership gate — the
+ * sweep runs as the SYSTEM actor.
+ */
+async function forceClosePlanPeriodeTx(tx: TransactionSql, actor: Actor, plan: Plan): Promise<number> {
+  const coerced = await tx<{ id: string | number }[]>`
+    update plan_row
+       set status_baris = 'Tidak Dikerjakan', status_baris_alasan = ${FORCE_CLOSE_ALASAN}
+     where plan_id = ${plan.id}
+       and status_baris not in ('Selesai', 'Sebagian', 'Tidak Dikerjakan')
+     returning id`;
+
+  await transitionPlan(tx, actor, plan.id, PLAN_DITUTUP_OTOMATIS);
+  const ex = executors(tx);
+  await ex.audit.insertAudit({
+    entityType: ENTITY_PLAN,
+    entityId: plan.id,
+    actorEmployeeId: actor.employeeId,
+    action: 'ditutup_otomatis',
+    beforeJson: { status: plan.status },
+    afterJson: { status: PLAN_DITUTUP_OTOMATIS, baris_dipaksa: coerced.length },
+    createdBy: actor.employeeId,
+  });
+  return coerced.length;
 }
 
 // ---------------------------------------------------------------------------
@@ -2380,4 +2403,243 @@ export async function listCarryOverPending(
        and keputusan_carryover is null
      order by id`;
   return rows.map(rowToPlanRow);
+}
+
+// ---------------------------------------------------------------------------
+// B-09 — scheduled jobs (Rule 4 / 5 / 15, M6B §9 "Scheduled jobs")
+// ---------------------------------------------------------------------------
+//
+// Three sweeps, all idempotent, all keyed on a WIB calendar date the CALLER
+// supplies (`today`) — the domain stays pure and `Date.now()`-free; the endpoint
+// computes the date via `@cdps/core` tz (`WIB_OFFSET_HOURS=7`).
+//
+//   (a) sweepPeriodeTransitions — force-close every `Aktif` period whose window
+//       has ended (`tanggal_akhir < today`), then activate every current-window
+//       `Terjadwal`/`Menunggu Persetujuan` period (`tanggal_mulai <= today <=
+//       tanggal_akhir`) that has no `Aktif` sibling. Order matters: closing the
+//       overdue predecessor first frees the Rule-5 "one Aktif per chain" slot for
+//       its successor. Both moves reuse the SAME bodies as the AM-driven
+//       functions (`activatePlanPeriodeTx`/`forceClosePlanPeriodeTx`) so the job
+//       and a human take the identical path; the job runs as the SYSTEM actor and
+//       skips only the ownership gate.
+//
+//   (b) sweepBelumDieksekusi — at a period's midpoint, every row still `Rencana`
+//       (not executed) raises a `plan_flag('belum_dieksekusi')` and, the first
+//       time a period raises any, one `plan_baris_belum_dieksekusi` notice to the
+//       AM + SPV. The flag row IS the idempotency key: a row already flagged is
+//       skipped, and a period that already has flags does not re-notify.
+//       NOTE: the PRD frames this as "rows with no Brief". The Brief↔plan_row
+//       link is M7/M12 and does not exist yet, so the grounded signal is the row
+//       execution status `Rencana` — which is exactly what `plan_flag.jenis`
+//       already models as `belum_dieksekusi`. No linkage is invented (X-19).
+//
+//   (c) sweepRealisasiBelumLengkap — a period closed 5+ days ago (WIB date of its
+//       close transition) with manual GMV still missing for any GMV-target
+//       channel raises one `plan_realisasi_belum_lengkap` notice to AM + SPV. The
+//       idempotency key is an append-only `audit_log` marker
+//       (`action='realisasi_belum_lengkap'`); once written the period never
+//       re-notifies. X-07 kept the close unlocked, so a late GMV can still arrive
+//       and clear the condition — this only nudges.
+
+/** The SYSTEM identity the scheduled sweeps act as. Not a JWT actor and never an
+ * employee row — it only labels audit/notification provenance (same shape as the
+ * `createdBy` string `recordAutoActual` accepts). */
+export const PLAN_JOB_ACTOR_ID = 'SISTEM';
+const PLAN_JOB_ACTOR: Actor = {
+  employeeId: PLAN_JOB_ACTOR_ID,
+  role: { division: '', level: '', od: false, director: false },
+};
+
+/** [tick] the supplied date is not YYYY-MM-DD. */
+export const MSG_PLAN_TICK_TANGGAL_INVALID = '[tanggal tick tidak valid]';
+
+/** addDaysStr adds `k` calendar days to a YYYY-MM-DD string (UTC math, pure). */
+function addDaysStr(dateStr: string, k: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d) + k * 86400000);
+  return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`;
+}
+
+/** midpointDate is the WIB date at which 50% of [mulai, akhir] has elapsed. */
+export function midpointDate(mulai: string, akhir: string): string {
+  return addDaysStr(mulai, Math.floor(daysInclusive(mulai, akhir) / 2));
+}
+
+/** The outcome of one `runPlanTick`, per sweep — plan ids acted on. */
+export interface PlanTickResult {
+  today: string;
+  diaktifkan: string[];
+  ditutupOtomatis: string[];
+  belumDieksekusi: string[];
+  realisasiBelumLengkap: string[];
+}
+
+/** chainHasAktif reports whether the plan's chain already holds an `Aktif`
+ * period other than `plan` (Rule 5). A full-mgmt chain shares a contract; a Plan
+ * Satuan chain shares the client. */
+async function chainHasAktif(tx: TransactionSql, plan: Plan): Promise<boolean> {
+  const rows =
+    plan.contractId !== null
+      ? await tx<{ one: number }[]>`
+          select 1 as one from plan
+           where contract_id = ${plan.contractId} and status = ${PLAN_AKTIF} and id <> ${plan.id}
+           limit 1`
+      : await tx<{ one: number }[]>`
+          select 1 as one from plan
+           where lingkup = 'klien' and client_id = ${plan.clientId}
+             and status = ${PLAN_AKTIF} and id <> ${plan.id}
+           limit 1`;
+  return rows.length > 0;
+}
+
+/** (a) Force-close overdue `Aktif` periods, then activate current-window due ones. */
+export async function sweepPeriodeTransitions(sql: Sql, today: string, res: PlanTickResult): Promise<void> {
+  const overdue = await sql<{ id: string }[]>`
+    select id from plan where status = ${PLAN_AKTIF} and tanggal_akhir < ${today}
+     order by periode_no, id`;
+  for (const { id } of overdue) {
+    const done = await withTransaction(sql, async (tx) => {
+      const plan = await loadPlanForUpdate(tx, id);
+      if (plan.status !== PLAN_AKTIF || plan.tanggalAkhir >= today) return false;
+      await forceClosePlanPeriodeTx(tx, PLAN_JOB_ACTOR, plan);
+      return true;
+    });
+    if (done) res.ditutupOtomatis.push(id);
+  }
+
+  const due = await sql<{ id: string }[]>`
+    select id from plan
+     where status in (${PLAN_TERJADWAL}, ${PLAN_MENUNGGU})
+       and tanggal_mulai <= ${today} and tanggal_akhir >= ${today}
+     order by periode_no, id`;
+  for (const { id } of due) {
+    const done = await withTransaction(sql, async (tx) => {
+      const plan = await loadPlanForUpdate(tx, id);
+      if (plan.status !== PLAN_TERJADWAL && plan.status !== PLAN_MENUNGGU) return false;
+      if (plan.tanggalMulai > today || plan.tanggalAkhir < today) return false;
+      if (await chainHasAktif(tx, plan)) return false;
+      await activatePlanPeriodeTx(tx, PLAN_JOB_ACTOR, plan);
+      return true;
+    });
+    if (done) res.diaktifkan.push(id);
+  }
+}
+
+/** (b) Midpoint `Baris Belum Dieksekusi` — flag `Rencana` rows, notify once/period. */
+export async function sweepBelumDieksekusi(sql: Sql, today: string, res: PlanTickResult): Promise<void> {
+  const periods = await sql<{ id: string; tanggal_mulai: string; tanggal_akhir: string; client_id: string }[]>`
+    select id, tanggal_mulai::text as tanggal_mulai, tanggal_akhir::text as tanggal_akhir, client_id
+      from plan where status = ${PLAN_AKTIF}`;
+  for (const p of periods) {
+    if (today < midpointDate(p.tanggal_mulai, p.tanggal_akhir)) continue;
+    const done = await withTransaction(sql, async (tx) => {
+      const before = await tx<{ n: number }[]>`
+        select count(*)::int as n from plan_flag
+         where plan_id = ${p.id} and jenis = 'belum_dieksekusi'`;
+      const rows = await tx<{ id: string }[]>`
+        select pr.id from plan_row pr
+         where pr.plan_id = ${p.id} and pr.status_baris = 'Rencana'
+           and not exists (
+             select 1 from plan_flag f
+              where f.plan_row_id = pr.id and f.jenis = 'belum_dieksekusi')`;
+      if (rows.length === 0) return false;
+      for (const r of rows) {
+        await tx`
+          insert into plan_flag (plan_id, plan_row_id, jenis, created_by)
+          values (${p.id}, ${r.id}, 'belum_dieksekusi', ${PLAN_JOB_ACTOR_ID})`;
+      }
+      if (before[0].n > 0) return false; // this period has already notified
+      const ownerAm = await ownerAmOfClient(tx, p.client_id);
+      const ex = executors(tx);
+      await notification.emit(ex.notify, {
+        event: notification.EVENTS.PlanBarisBelumDieksekusi,
+        entityType: ENTITY_PLAN,
+        entityId: p.id,
+        actor: PLAN_JOB_ACTOR_ID,
+        deepLink: `/account/plan/${p.id}`,
+        division: ACCOUNT_DIVISION,
+        explicitRecipients: ownerAm === null ? [] : [ownerAm],
+      });
+      return true;
+    });
+    if (done) res.belumDieksekusi.push(p.id);
+  }
+}
+
+/** (c) Close + 5 days, manual GMV missing → `plan_realisasi_belum_lengkap`. */
+export async function sweepRealisasiBelumLengkap(sql: Sql, today: string, res: PlanTickResult): Promise<void> {
+  const periods = await sql<{ id: string; client_id: string; ditutup_wib: string | null }[]>`
+    select p.id, p.client_id,
+           (select max((a.created_at at time zone 'Asia/Jakarta')::date)::text
+              from audit_log a
+             where a.entity_type = ${ENTITY_PLAN} and a.entity_id = p.id
+               and a.action in ('transition:Aktif->Ditutup', 'transition:Aktif->Ditutup Otomatis')
+           ) as ditutup_wib
+      from plan p
+     where p.status in (${PLAN_DITUTUP}, ${PLAN_DITUTUP_OTOMATIS})`;
+  for (const p of periods) {
+    if (p.ditutup_wib === null) continue;
+    if (today < addDaysStr(p.ditutup_wib, 5)) continue;
+    const done = await withTransaction(sql, async (tx) => {
+      const marked = await tx<{ one: number }[]>`
+        select 1 as one from audit_log
+         where entity_type = ${ENTITY_PLAN} and entity_id = ${p.id}
+           and action = 'realisasi_belum_lengkap' limit 1`;
+      if (marked.length > 0) return false;
+      const missing = await tx<{ c: number }[]>`
+        select count(*)::int as c from plan_target t
+         where t.plan_id = ${p.id} and t.metric = 'gmv'
+           and not exists (
+             select 1 from plan_actual a
+              where a.plan_id = t.plan_id and a.channel = t.channel
+                and a.metric = 'gmv' and a.sumber = 'manual')`;
+      if (missing[0].c === 0) return false;
+      const ownerAm = await ownerAmOfClient(tx, p.client_id);
+      const ex = executors(tx);
+      await notification.emit(ex.notify, {
+        event: notification.EVENTS.PlanRealisasiBelumLengkap,
+        entityType: ENTITY_PLAN,
+        entityId: p.id,
+        actor: PLAN_JOB_ACTOR_ID,
+        deepLink: `/account/plan/${p.id}`,
+        division: ACCOUNT_DIVISION,
+        explicitRecipients: ownerAm === null ? [] : [ownerAm],
+      });
+      await ex.audit.insertAudit({
+        entityType: ENTITY_PLAN,
+        entityId: p.id,
+        actorEmployeeId: PLAN_JOB_ACTOR_ID,
+        action: 'realisasi_belum_lengkap',
+        beforeJson: {},
+        afterJson: { channel_gmv_kosong: missing[0].c },
+        createdBy: PLAN_JOB_ACTOR_ID,
+      });
+      return true;
+    });
+    if (done) res.realisasiBelumLengkap.push(p.id);
+  }
+}
+
+/**
+ * runPlanTick is the single entry point the 00:00 WIB cron endpoint calls. It
+ * runs the three sweeps in order (transitions first — a period that closes this
+ * tick can then be assessed for realisasi in a later tick) for the WIB date
+ * `today`, and returns what it did. Idempotent: a second call for the same date
+ * with no state change acts on nothing.
+ */
+export async function runPlanTick(sql: Sql, today: string): Promise<PlanTickResult> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) {
+    throw new ValidationError(MSG_PLAN_TICK_TANGGAL_INVALID);
+  }
+  const res: PlanTickResult = {
+    today,
+    diaktifkan: [],
+    ditutupOtomatis: [],
+    belumDieksekusi: [],
+    realisasiBelumLengkap: [],
+  };
+  await sweepPeriodeTransitions(sql, today, res);
+  await sweepBelumDieksekusi(sql, today, res);
+  await sweepRealisasiBelumLengkap(sql, today, res);
+  return res;
 }
