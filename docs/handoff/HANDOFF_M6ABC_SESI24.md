@@ -10,12 +10,10 @@
 | Hal | Nilai |
 |---|---|
 | **Repo** | `MEAgrup/AgencyAPP` |
-| **`main` (default)** | memuat **B-00…B-09 + M6A A-00…A-13d + X-17/O59-b (#127)**. PR #128 (B-09) **sudah merge**. |
-| **Sesi ini mengerjakan** | **B-10 Plan Satuan + mesin #17 — SELESAI**, di branch di bawah. |
-| **Branch B-10** | `claude/handoff-m6abc-sesi23-b10-vq2ulz` — dicabang dari `origin/main` (post-#128). |
-| **PR B-10** | dibuat sesi ini (lihat GitHub) — base `main`. Merge saat hijau. |
+| **`main` (default)** | memuat **B-00…B-10 + M6A A-00…A-13d + X-17/O59-b**. **PR #129 (B-10) sudah MERGE** (merge commit `e408130`); #128 (B-09) & #127 sudah merge sebelumnya. |
+| **Sesi ini mengerjakan** | **B-10 Plan Satuan + mesin #17 — SELESAI & MERGED** (PR #129, semua 5 job CI hijau + Vercel). |
 | **PR MASIH TERBUKA (lama)** | **#115** — M6A A-11 (`/s/{token}`). X-16 FINAL ⇒ tinggal **diff J-4** + review pemilik. |
-| **Branch tugas berikutnya** | Setelah PR B-10 merge: `git fetch origin main && git checkout -B <branch-baru> origin/main`. |
+| **Branch tugas berikutnya** | Cabang baru dari `main` yang sudah memuat B-10: `git fetch origin main && git checkout -B <branch-baru> origin/main`. |
 
 ### 0.1 DB lokal — WAJIB, Postgres MATI SENDIRI
 
@@ -35,7 +33,7 @@ DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/cdps" \
 | Migrasi | **78 berkas** · gerbang tabel **90** · prefix 31 · mesin **18** · event 34 · `CATALOG_VERSION` 4 |
 | Test | domain **1084** hijau (+1 skip) · api **344** · web-internal **191** · typecheck 5 paket bersih · `KNOWN_GAPS` kosong |
 | Migrasi baru | `20260811000000_m6b_plan_satuan.sql` — tabel `plan_satuan` + mesin #17 + FK `service_plan_gate.plan_id` + `plan_flag` jenis `di_luar_service` |
-| Menggantung | Kode B-10: **NOL**. Seam terdokumentasi (bukan bug): generasi periode berjalan bulanan + sweep dormansi otomatis = job (§10c); baris `plan_row` diisi lewat form. Open baru: tidak ada. |
+| Menggantung | Kode B-10: **NOL** (SUDAH di `main` via #129). Seam terdokumentasi (bukan bug): generasi periode berjalan bulanan + sweep dormansi otomatis = job (§10c); baris `plan_row` diisi lewat form. Open baru: tidak ada. |
 
 ## 1. Apa yang berubah sesi ini — B-10 Plan Satuan (M6C §7)
 
