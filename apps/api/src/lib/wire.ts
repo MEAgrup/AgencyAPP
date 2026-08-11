@@ -6,7 +6,8 @@
  * other way inline in each route (`toInput`).
  */
 import { money, tz } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, campaign, client, contract, creative, demo, directory, finance, health, kol, leads, livestream, marketing, msl, notification, performance, plangate, portal, sales, strategi, task, vendor } from '@cdps/domain';
+import type { interview as ivcore } from '@cdps/core';
+import type { account, activity, admin, ads, audit, auth, board, campaign, client, contract, creative, demo, directory, finance, health, interview, kol, leads, livestream, marketing, msl, notification, performance, plangate, portal, sales, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -4405,5 +4406,249 @@ export function strategiDiagnosaFromWire(v: unknown): strategi.DiagnosaPayload {
       deadline: strOrNull(p.deadline),
       urutan: numOrNull(p.urutan) ?? i,
     })),
+  };
+}
+
+// ===========================================================================
+// Modul Interview ("Kelola Klien" tab 1) — langkah 6
+// ===========================================================================
+//
+// The domain read-models speak camelCase; web-internal consumes snake_case.
+// Missing keys are more dangerous than nulls (O43: a blank page behind a 200),
+// so every field is emitted explicitly — `null`, never omitted.
+
+export interface InterviewWire {
+  id: string;
+  client_id: string;
+  contract_id: string | null;
+  service_id: string | null;
+  am_pengisi_id: string;
+  acting_for_am_id: string | null;
+  sales_closing_id: string | null;
+  status: string;
+  versi_no: number;
+  interview_induk_id: string | null;
+  versi_sebelumnya_id: string | null;
+  interview_profile: string;
+  retroaktif: boolean;
+  alasan_kekosongan: string | null;
+  alasan_pembatalan: string | null;
+  created_at: string;
+  created_by: string;
+}
+
+export interface InterviewJadwalWire {
+  tanggal_waktu: string | null;
+  durasi_menit: number | null;
+  format: string | null;
+  lokasi_link: string | null;
+  peserta_klien: unknown;
+  peserta_mea: unknown;
+  catatan_persiapan: string | null;
+  data_diminta: unknown;
+}
+
+export interface InterviewKualifikasiWire {
+  skor_kualifikasi: number;
+  skor_per_blok: unknown;
+  verdict_kualifikasi: string;
+  hambatan_mendasar: unknown;
+  prasyarat_status: string;
+  margin_bersih: number | null;
+  margin_bersih_basis: string;
+  margin_kotor: number | null;
+  margin_derivasi_input: unknown;
+  kualitas_data: string;
+  bep_roas: number | null;
+  rasio_target: number | null;
+  dihitung_pada: string;
+}
+
+export interface InterviewAnswerWire {
+  section: string;
+  field_key: string;
+  nilai_teks: string | null;
+  nilai_angka: number | null;
+  nilai_uang: string | null;
+  nilai_bool: boolean | null;
+  nilai_enum: string | null;
+  nilai_jsonb: unknown;
+  sumber_angka: string | null;
+  dasar_estimasi: string | null;
+}
+
+export interface InterviewDetailWire {
+  interview: InterviewWire;
+  jadwal: InterviewJadwalWire | null;
+  kualifikasi: InterviewKualifikasiWire | null;
+  answers: InterviewAnswerWire[];
+}
+
+/** verdict + prasyarat ONLY — the Sales-facing surface. */
+export interface InterviewVerdictWire {
+  interview_id: string;
+  verdict: string;
+  prasyarat_status: string;
+}
+
+export function interviewToWire(i: interview.Interview): InterviewWire {
+  return {
+    id: i.id,
+    client_id: i.clientId,
+    contract_id: i.contractId,
+    service_id: i.serviceId,
+    am_pengisi_id: i.amPengisiId,
+    acting_for_am_id: i.actingForAmId,
+    sales_closing_id: i.salesClosingId,
+    status: i.status,
+    versi_no: i.versiNo,
+    interview_induk_id: i.interviewIndukId,
+    versi_sebelumnya_id: i.versiSebelumnyaId,
+    interview_profile: i.interviewProfile,
+    retroaktif: i.retroaktif,
+    alasan_kekosongan: i.alasanKekosongan,
+    alasan_pembatalan: i.alasanPembatalan,
+    created_at: i.createdAt,
+    created_by: i.createdBy,
+  };
+}
+
+function interviewKualifikasiToWire(k: interview.Kualifikasi): InterviewKualifikasiWire {
+  return {
+    skor_kualifikasi: k.skorKualifikasi,
+    skor_per_blok: k.skorPerBlok,
+    verdict_kualifikasi: k.verdictKualifikasi,
+    hambatan_mendasar: k.hambatanMendasar,
+    prasyarat_status: k.prasyaratStatus,
+    margin_bersih: k.marginBersih,
+    margin_bersih_basis: k.marginBersihBasis,
+    margin_kotor: k.marginKotor,
+    margin_derivasi_input: k.marginDerivasiInput,
+    kualitas_data: k.kualitasData,
+    bep_roas: k.bepRoas,
+    rasio_target: k.rasioTarget,
+    dihitung_pada: k.dihitungPada,
+  };
+}
+
+export function interviewDetailToWire(d: interview.InterviewDetail): InterviewDetailWire {
+  return {
+    interview: interviewToWire(d.interview),
+    jadwal: d.jadwal
+      ? {
+          tanggal_waktu: d.jadwal.tanggalWaktu,
+          durasi_menit: d.jadwal.durasiMenit,
+          format: d.jadwal.format,
+          lokasi_link: d.jadwal.lokasiLink,
+          peserta_klien: d.jadwal.pesertaKlien,
+          peserta_mea: d.jadwal.pesertaMea,
+          catatan_persiapan: d.jadwal.catatanPersiapan,
+          data_diminta: d.jadwal.dataDiminta,
+        }
+      : null,
+    kualifikasi: d.kualifikasi ? interviewKualifikasiToWire(d.kualifikasi) : null,
+    answers: d.answers.map((a) => ({
+      section: a.section,
+      field_key: a.fieldKey,
+      nilai_teks: a.nilaiTeks,
+      nilai_angka: a.nilaiAngka,
+      nilai_uang: a.nilaiUang,
+      nilai_bool: a.nilaiBool,
+      nilai_enum: a.nilaiEnum,
+      nilai_jsonb: a.nilaiJsonb,
+      sumber_angka: a.sumberAngka,
+      dasar_estimasi: a.dasarEstimasi,
+    })),
+  };
+}
+
+export function interviewKualifikasiResultToWire(k: interview.Kualifikasi): InterviewKualifikasiWire {
+  return interviewKualifikasiToWire(k);
+}
+
+export function interviewVerdictToWire(v: interview.InterviewVerdict): InterviewVerdictWire {
+  return { interview_id: v.interviewId, verdict: v.verdict, prasyarat_status: v.prasyaratStatus };
+}
+
+// --- request-body mappers (snake_case wire → camelCase domain input) ---------
+
+export function interviewCreateFromWire(v: unknown): interview.CreateInterviewInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    clientId: String(b.client_id ?? ''),
+    contractId: strOrNull(b.contract_id),
+    serviceId: strOrNull(b.service_id),
+    actingForAmId: strOrNull(b.acting_for_am_id),
+    salesClosingId: strOrNull(b.sales_closing_id),
+    interviewProfile: b.interview_profile === undefined || b.interview_profile === null ? undefined : String(b.interview_profile),
+    retroaktif: b.retroaktif === true,
+  };
+}
+
+export function interviewJadwalFromWire(v: unknown): interview.JadwalInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    tanggalWaktu: strOrNull(b.tanggal_waktu),
+    durasiMenit: numOrNull(b.durasi_menit),
+    format: strOrNull(b.format),
+    lokasiLink: strOrNull(b.lokasi_link),
+    catatanPersiapan: strOrNull(b.catatan_persiapan),
+  };
+}
+
+export function interviewAnswersFromWire(v: unknown): interview.AnswerInput[] {
+  return asRecords((v as Record<string, unknown>)?.answers ?? v).map((a) => ({
+    section: String(a.section ?? ''),
+    fieldKey: String(a.field_key ?? ''),
+    nilaiTeks: strOrNull(a.nilai_teks),
+    nilaiAngka: numOrNull(a.nilai_angka),
+    nilaiUang: a.nilai_uang === undefined || a.nilai_uang === null ? null : BigInt(String(a.nilai_uang)),
+    nilaiBool: typeof a.nilai_bool === 'boolean' ? a.nilai_bool : null,
+    nilaiEnum: strOrNull(a.nilai_enum),
+    nilaiJsonb: a.nilai_jsonb ?? null,
+    sumberAngka: strOrNull(a.sumber_angka),
+    dasarEstimasi: strOrNull(a.dasar_estimasi),
+    wajibKosong: a.wajib_kosong === true,
+  }));
+}
+
+/** Builds the core KualifikasiInput from a wire body. Money fields are minor-unit
+ *  integer strings → bigint; enums are the canonical codes; percentages plain. */
+export function interviewScoreFromWire(v: unknown): ivcore.KualifikasiInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  const bigOrNull = (x: unknown): bigint | null => (x === undefined || x === null || x === '' ? null : BigInt(String(x)));
+  const big = (x: unknown): bigint => bigOrNull(x) ?? 0n;
+  const reset = b.reset_ekspektasi_tertulis as Record<string, unknown> | null | undefined;
+  return {
+    marginBersih: numOrNull(b.margin_bersih),
+    marginBersihSumber: (strOrNull(b.margin_bersih_sumber) as ivcore.SumberAngka | null) ?? null,
+    marginBersihDasarEstimasi: strOrNull(b.margin_bersih_dasar_estimasi),
+    marginKotor: numOrNull(b.margin_kotor),
+    komisiPlatformPersen: numOrNull(b.komisi_platform_persen),
+    ongkirPersen: numOrNull(b.ongkir_persen),
+    ongkirPerPesanan: bigOrNull(b.ongkir_per_pesanan),
+    aov: big(b.aov),
+    aovSumber: (strOrNull(b.aov_sumber) as ivcore.SumberAngka | null) ?? undefined,
+    ruangHarga: String(b.ruang_harga ?? '') as ivcore.RuangHarga,
+    modelBisnis: String(b.model_bisnis ?? '') as ivcore.ModelBisnis,
+    kesanggupanLonjakan: String(b.kesanggupan_lonjakan ?? '') as ivcore.KesanggupanLonjakan,
+    siklusBeliUlang: String(b.siklus_beli_ulang ?? '') as ivcore.SiklusBeliUlang,
+    pembedaProduk: String(b.pembeda_produk ?? '') as ivcore.PembedaProduk,
+    skuSiap: Number(b.sku_siap ?? 0),
+    skuSiapSumber: (strOrNull(b.sku_siap_sumber) as ivcore.SumberAngka | null) ?? undefined,
+    penangananChat: String(b.penanganan_chat ?? '') as ivcore.PenangananChat,
+    kecepatanApproval: String(b.kecepatan_approval ?? '') as ivcore.KecepatanApproval,
+    kesiapanAkses: String(b.kesiapan_akses ?? '') as ivcore.KesiapanAkses,
+    omzet: big(b.omzet),
+    omzetSumber: (strOrNull(b.omzet_sumber) as ivcore.SumberAngka | null) ?? undefined,
+    targetOmzet: big(b.target_omzet),
+    targetOmzetSumber: (strOrNull(b.target_omzet_sumber) as ivcore.SumberAngka | null) ?? undefined,
+    dayaTahanBudget: String(b.daya_tahan_budget ?? '') as ivcore.DayaTahanBudget,
+    resetEkspektasiTertulis:
+      reset && reset.target_baru != null
+        ? { targetBaru: big(reset.target_baru), disetujuiOleh: String(reset.disetujui_oleh ?? ''), disetujuiPada: String(reset.disetujui_pada ?? '') }
+        : null,
+    defaultKomisiPlatformPersen: numOrNull(b.default_komisi_platform_persen),
+    defaultOngkirPersen: numOrNull(b.default_ongkir_persen),
   };
 }
