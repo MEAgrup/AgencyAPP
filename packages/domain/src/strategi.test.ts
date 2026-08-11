@@ -122,6 +122,8 @@ import {
   getShareLinkStatus,
   resolveShareLink,
   MSG_SHARE_NO_ACTIVE_VERSION,
+  strategiDiff,
+  clientVisibleDiff,
   saveKalender,
   saveTriggerRevisi,
   saveHandoff,
@@ -3414,5 +3416,70 @@ describeDb('A-11 — client share link /s/{token} (§7 D20, RA-3, RA-7)', () => 
 
   it('renders an unknown token as the same neutral inactive page', async () => {
     expect((await resolveShareLink(sql, 'tidak-pernah-ada')).aktif).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// J-4 — auto-diff vs the previous version (§4 J-4)
+// ---------------------------------------------------------------------------
+describeDb('J-4 — auto-diff vs previous version', () => {
+  it('version 1 has no comparison (adaPerbandingan = false)', async () => {
+    const { strategiId } = await seedSubmittable();
+    const diff = await strategiDiff(sql, am(), strategiId);
+    expect(diff.adaPerbandingan).toBe(false);
+    expect(diff.versiSebelumnyaId).toBeNull();
+    expect(diff.entri).toEqual([]);
+  });
+
+  it('summarises scalar + collection changes, and the client filter drops hard-internal rows', async () => {
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    const v2 = await openRevision(sql, am(), strategiId, {
+      triggerRevisi: ['pencapaian_di_bawah_target'],
+      alasanRevisi: 'target perlu ditinjau ulang',
+      asumsiGugur: ['A1'],
+    });
+
+    // Scalar changes: A-3 margin (default_internal) and A-10 riwayat (hard-internal).
+    await saveKonteks(sql, am(), v2.id, {
+      ...KONTEKS,
+      marginKotorPersen: 30,
+      riwayatAgensi: 'cerita agensi lama diganti pada revisi',
+    });
+    // Collection change: bump the gmv stretch target (D-2, default_shareable).
+    await saveTargets(sql, am(), v2.id, [
+      { channel: 'Shopee', monthIndex: 1, metric: 'gmv', nilaiFloor: '400000000.00', nilaiStretch: '470000000.00' },
+      { channel: 'Shopee', monthIndex: 1, metric: 'cr', nilaiFloor: null, nilaiStretch: '2.80' },
+    ]);
+
+    const diff = await strategiDiff(sql, am(), v2.id);
+    expect(diff.adaPerbandingan).toBe(true);
+    expect(diff.versiNo).toBe(2);
+    expect(diff.versiSebelumnyaNo).toBe(1);
+
+    const margin = diff.entri.find((e) => e.label === 'Ruang margin (%)');
+    expect(margin).toMatchObject({ jenis: 'skalar', fieldId: 'A-3', seksi: 'A', sebelum: '38', sesudah: '30' });
+
+    const riwayat = diff.entri.find((e) => e.fieldId === 'A-10');
+    expect(riwayat?.jenis).toBe('skalar');
+
+    const target = diff.entri.find((e) => e.fieldId === 'D-2');
+    expect(target).toMatchObject({ jenis: 'koleksi', diubah: 1 });
+    expect((target as { ditambah: string[]; dihapus: string[] }).ditambah).toEqual([]);
+    expect((target as { ditambah: string[]; dihapus: string[] }).dihapus).toEqual([]);
+
+    // X-16: the client-facing filter drops hard-internal (A-10) and default-internal
+    // (A-3) rows, keeps the default-shareable one (D-2). J-4 is not rendered
+    // client-side (RA-7), but the generator must still be able to do this.
+    const filtered = clientVisibleDiff(diff);
+    expect(filtered.entri.some((e) => e.fieldId === 'A-10')).toBe(false);
+    expect(filtered.entri.some((e) => e.fieldId === 'A-3')).toBe(false);
+    expect(filtered.entri.some((e) => e.fieldId === 'D-2')).toBe(true);
+  });
+
+  it('refuses a reader with no access to the Strategi', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(strategiDiff(sql, otherAm(), strategiId)).rejects.toThrow(ForbiddenError);
   });
 });

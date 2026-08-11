@@ -99,6 +99,7 @@ import SectionH, {
   type TriggerDraft,
 } from '@/components/strategi/SectionH';
 import SectionI, { handoffDraftOf, type HandoffDraft } from '@/components/strategi/SectionI';
+import SectionJ from '@/components/strategi/SectionJ';
 import VisibilitasPanel from '@/components/strategi/VisibilitasPanel';
 import ShareLinkPanel from '@/components/strategi/ShareLinkPanel';
 import {
@@ -162,7 +163,11 @@ import {
 } from '@/lib/strategi-target';
 
 /** All sections are now wired (A-13 + A-13b complete). */
-const WIRED: SectionKey[] = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'];
+// Sections that have a UI. J is read-only (no form) but still "wired": it has a
+// panel, so it must not fall through to "belum dibuat", and its J-1/J-4
+// visibility toggles are reachable (VisibilitasPanel). `saveActive` has no J
+// branch, so autosave is a no-op there.
+const WIRED: SectionKey[] = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
 
 interface Drafts {
   konteks: KonteksDraft;
@@ -694,6 +699,7 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                   disabled={!editable}
                 />
               )}
+              {active === 'J' && <SectionJ strategiId={id} detail={detail} />}
               {!WIRED.includes(active) && (
                 <p className="muted">Form seksi ini belum dibuat.</p>
               )}
