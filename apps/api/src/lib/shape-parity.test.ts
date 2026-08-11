@@ -172,7 +172,7 @@ const wire = parseInterfaces(readFileSync(WIRE_TS, 'utf8'));
  */
 const FE_FILES = [
   'account.ts', 'ads.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'contract.ts', 'creative.ts',
-  'finance.ts', 'health.ts', 'kol.ts', 'leads.ts', 'livestream.ts', 'marketing.ts',
+  'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'livestream.ts', 'marketing.ts',
   'performance.ts', 'portal.ts', 'sales.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
 ];
 
@@ -456,6 +456,13 @@ const WIRE_TO_FE: Record<string, string> = {
   // J-4 — auto-diff vs the previous version.
   StrategiDiffWire: 'strategi.ts::StrategiDiff',
   StrategiDiffEntryWire: 'strategi.ts::StrategiDiffEntry',
+  // Modul Interview ("Kelola Klien" tab 1) — langkah 6.
+  InterviewWire: 'interview.ts::Interview',
+  InterviewJadwalWire: 'interview.ts::InterviewJadwal',
+  InterviewKualifikasiWire: 'interview.ts::InterviewKualifikasi',
+  InterviewAnswerWire: 'interview.ts::InterviewAnswer',
+  InterviewDetailWire: 'interview.ts::InterviewDetail',
+  InterviewVerdictWire: 'interview.ts::InterviewVerdict',
   BriefWire: 'account.ts::Brief',
   ComplaintWire: 'account.ts::Complaint',
   // M7 creative
