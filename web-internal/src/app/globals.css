@@ -350,3 +350,36 @@ table {
 .flaggedRow {
   background: var(--color-danger-bg) !important;
 }
+
+/* ---------- Print (Modul Interview "Kelola Klien" print views) ----------
+   A print section is hidden on screen and shown only while printing. The page
+   renders exactly one at a time and adds `printHideOnPrint` to the live UI, so
+   the printout carries only the chosen view (internal, or client = prasyarat
+   only) with no app chrome. */
+.printSection {
+  display: none;
+}
+
+@media print {
+  .printHideOnPrint {
+    display: none !important;
+  }
+  .printSection {
+    display: block;
+    color: #000;
+  }
+  .printSection table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .printSection th,
+  .printSection td {
+    border: 1px solid #ccc;
+    padding: 4px 8px;
+    text-align: left;
+    font-size: 12px;
+  }
+  @page {
+    margin: 16mm;
+  }
+}
