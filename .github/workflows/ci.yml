@@ -148,21 +148,24 @@ jobs:
       # target, DECISIONS 2026-08-08 A-08). Keep in step with the
       # CATALOG in packages/core/src/notification.ts — notification.test.ts is
       # the other half of this gate.
-      # 18 machines = the 14 ported from Go + `vendor` and `strategi` (mesin #15),
+      # 19 machines = the 14 ported from Go + `vendor` and `strategi` (mesin #15),
       # keduanya dari migrasi M6A 20260806063000/064000, + `plan` (mesin #16,
       # 20260810000000_m6b_plan.sql, B-01) + `plan_satuan` (mesin #17 dormansi,
-      # 20260811000000_m6b_plan_satuan.sql, B-10).
+      # 20260811000000_m6b_plan_satuan.sql, B-10) + `interview` (mesin #19,
+      # 20260811030000_interview.sql, Modul Interview / Kelola Klien tab 1).
       #
-      # The literal 34 below is a convenience, NOT the invariant. The invariant is
+      # 43 events = 34 (v1..v4) + 9 (v5: Interview / Kelola Klien tab 1,
+      # 20260811020000_notif_catalog_v5_interview.sql, DECISIONS 2026-08-11).
+      # The literal 43 below is a convenience, NOT the invariant. The invariant is
       # the second check: count(notif_events) must equal SUM(event_count) over
       # notif_catalog_versions. That is what O55 bought — an event added without a
       # registered version fails even if someone also bumps the literal.
-      - name: Verify migration seed counts (18 machines, 34 events, catalog registry consistent)
+      - name: Verify migration seed counts (19 machines, 43 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
-               if (select count(*) from sm_machines) <> 18 then raise exception 'expected 18 machines'; end if;
-               if (select count(*) from notif_events) <> 34 then raise exception 'expected 34 events'; end if;
+               if (select count(*) from sm_machines) <> 19 then raise exception 'expected 19 machines'; end if;
+               if (select count(*) from notif_events) <> 43 then raise exception 'expected 43 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
                  then raise exception 'notif_events does not match the registered catalog versions'; end if;
@@ -185,6 +188,11 @@ jobs:
       # green while CI failed on `expected 14 machines`. Adding a table or a
       # machine means editing BOTH, in the same commit.
       #
+      # 103 = 92 + 11 tabel Modul Interview (20260811030000_interview.sql):
+      #       interview · interview_jadwal · interview_jadwal_riwayat ·
+      #       interview_answer · interview_kualifikasi · interview_kategori_blok ·
+      #       kualifikasi_config · margin_deduksi_config · interview_flag ·
+      #       interview_outcome · interview_version.
       # 92 = 91 + plan_satuan (20260811000000, M6C §7/B-10: rantai Plan Satuan
       #      per klien — rumah `status_dormansi` (mesin #17) + `tanggal_mulai_siklus`.
       #      Ia TABEL, bukan kolom `plan`: dormansi properti RANTAI, bukan satu
@@ -221,23 +229,23 @@ jobs:
       #         + plan_gate_config + service_plan_gate (20260806061000, M6C §10).
       #      55 = 54 + prospect_activities (20260806050000, keputusan pemilik 2026-08-06).
       #      54 = 53 + lead_delete_requests (20260729162101, DECISIONS 2026-07-29).
-      - name: Verify table count (expect 92)
+      - name: Verify table count (expect 103)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 92
+          test "$n" -eq 103
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
-      # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57). The TS half (PREFIXES in
-      # packages/core/src/ident.ts) is asserted against this table by
-      # packages/db/src/ident.registry.test.ts, which also scans every
+      # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
+      # half (PREFIXES in packages/core/src/ident.ts) is asserted against this
+      # table by packages/db/src/ident.registry.test.ts, which also scans every
       # ID-minting call site. A count gate here catches a migration that lands
       # without its registry row.
-      - name: Verify entity_prefix registry (expect 31)
+      - name: Verify entity_prefix registry (expect 32)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc "select count(*) from entity_prefix;")
           echo "entity_prefix rows: $n"
-          test "$n" -eq 31
+          test "$n" -eq 32
       - name: Invariant — ID generator (gap-free, WIB period)
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/ident_checks.sql
       - name: Invariant — append-only history (immutability)
