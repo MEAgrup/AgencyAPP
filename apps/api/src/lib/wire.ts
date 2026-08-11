@@ -3523,6 +3523,34 @@ export function strategiFieldVisibilityToWire(
   };
 }
 
+/** A-11 — the share link's status, secret never included. */
+export interface ShareLinkStatusWire {
+  status: 'none' | 'aktif' | 'dicabut';
+  tanggal_kedaluwarsa: string | null;
+  created_at: string | null;
+  created_by: string | null;
+  dicabut_pada: string | null;
+}
+
+export function shareLinkStatusToWire(s: strategi.ShareLinkStatus): ShareLinkStatusWire {
+  return {
+    status: s.status,
+    tanggal_kedaluwarsa: s.tanggalKedaluwarsa,
+    created_at: s.createdAt,
+    created_by: s.createdBy,
+    dicabut_pada: s.dicabutPada,
+  };
+}
+
+/** A-11 — the create response, carrying the plaintext token exactly once. */
+export interface ShareTokenCreatedWire extends ShareLinkStatusWire {
+  token: string;
+}
+
+export function shareTokenCreatedToWire(s: strategi.ShareTokenCreated): ShareTokenCreatedWire {
+  return { ...shareLinkStatusToWire(s), token: s.token };
+}
+
 export interface StrategiEventWire {
   versi_no: number;
   peristiwa: string;

@@ -100,6 +100,7 @@ import SectionH, {
 } from '@/components/strategi/SectionH';
 import SectionI, { handoffDraftOf, type HandoffDraft } from '@/components/strategi/SectionI';
 import VisibilitasPanel from '@/components/strategi/VisibilitasPanel';
+import ShareLinkPanel from '@/components/strategi/ShareLinkPanel';
 import {
   STRATEGI_SECTIONS,
   groupKekurangan,
@@ -919,6 +920,16 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
               // away every unsaved edit the moment someone flips a switch.
               setDetail((d) => (d === null ? d : { ...d, visibilitas: rows }))
             }
+          />
+
+          {/* A-11 (§7 D20) — the client link. Sits with the visibility panel
+              because both answer "what does the client get"; this one is the
+              delivery mechanism, that one is the filter. Minting needs an active
+              version, so it is inert until approval. */}
+          <ShareLinkPanel
+            strategiId={id}
+            active={detail.status === 'Aktif'}
+            canManage={canWrite || canApprove}
           />
         </div>
       </div>

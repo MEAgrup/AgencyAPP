@@ -94,7 +94,7 @@ SELECT set_config('request.jwt.claims',
 DO $$
 DECLARE t text; denied boolean;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['sessions','employee_credentials','id_sequences','sm_edges','role_mappings'] LOOP
+  FOREACH t IN ARRAY ARRAY['sessions','employee_credentials','id_sequences','sm_edges','role_mappings','strategi_share_token','strategi_share_access_log'] LOOP
     denied := false;
     BEGIN
       EXECUTE format('SELECT 1 FROM public.%I LIMIT 1', t);
