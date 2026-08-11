@@ -13,7 +13,7 @@
 | **`main` (default)** | memuat **B-00…B-09 + M6A A-00…A-13d + X-17/O59-b (#127)**. PR #126 (B-08) & #127 (X-17/O59-b) **sudah merge**. |
 | **Sesi ini mengerjakan** | **B-09 scheduled jobs — SELESAI**, + PR untuk itu. |
 | **Branch B-09** | `claude/b-09-scheduled-jobs` — dicabang dari `origin/main` (post-#127). |
-| **PR B-09** | **#___** (lihat GitHub) — base `main`. Merge saat hijau. |
+| **PR B-09** | **#128** (lihat GitHub) — base `main`. Merge saat hijau. |
 | **PR MASIH TERBUKA (lama)** | **#115** — M6A A-11 (`/s/{token}`). **X-16 kini FINAL** ⇒ #115 tidak lagi terblokir tier; tinggal **diff J-4** (filter per-field) + review pemilik. |
 | **Branch tugas berikutnya** | Setelah PR B-09 merge: `git fetch origin main && git checkout -B <branch-baru> origin/main`. |
 
