@@ -11,9 +11,9 @@
 |---|---|
 | **Repo** | `MEAgrup/AgencyAPP` |
 | **`main` (default)** | memuat **B-00…B-10 + M6A A-00…A-13d + X-17/O59-b**. PR #129 (B-10) & #130 (handoff SESI24) sudah MERGE. |
-| **Sesi ini mengerjakan** | **B-11 integritas §4(b) — SELESAI**. Branch `claude/b-11-plan-satuan-fns96c`, PR draft dibuat. **MENUTUP M6B (kini 100%).** |
-| **PR MASIH TERBUKA (lama)** | **#115** — M6A A-11 (`/s/{token}`). X-16 FINAL ⇒ tinggal **diff J-4** + review pemilik. |
-| **Branch tugas berikutnya** | Cabang baru dari `main` yang memuat B-11: `git fetch origin main && git checkout -B <branch-baru> origin/main`. |
+| **Sesi ini mengerjakan** | **B-11 integritas §4(b) — SELESAI & PUSHED**. Branch `claude/b-11-plan-satuan-fns96c` → **PR #131 (draft), SEMUA 5 job CI hijau** (`db-and-migrations` + `core-engines` + `backend` + `web-internal` + `api`) + Vercel Ready. Sedang di-watch (check-in per jam). **MENUTUP M6B (kini 100%).** Tinggal review pemilik + un-draft + merge. |
+| **PR MASIH TERBUKA** | **#131** — B-11 (draft, CI hijau, menunggu review/merge). **#115** — M6A A-11 (`/s/{token}`); X-16 FINAL ⇒ tinggal **diff J-4** + review pemilik. |
+| **Branch tugas berikutnya** | Cabang baru dari `main` **setelah #131 merge** (agar memuat B-11): `git fetch origin main && git checkout -B <branch-baru> origin/main`. |
 
 ### 0.1 DB lokal — WAJIB, Postgres MATI SENDIRI
 
@@ -33,7 +33,7 @@ DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/cdps" \
 | Migrasi | **79 berkas** · gerbang tabel **90** · prefix 31 · mesin **18** · event 34 · `CATALOG_VERSION` 4 |
 | Test | domain **1088** hijau (+1 skip) · api **344** · web-internal **191** · typecheck 5 paket bersih · `KNOWN_GAPS` kosong |
 | Migrasi baru | `20260811010000_m6b_plan_gate_integrity.sql` — trigger `trg_spg_service_single_plan` (§4b; **nol tabel/mesin baru**) |
-| Menggantung | Kode B-11: **NOL** (di branch, PR draft). Open baru: tidak ada. |
+| Menggantung | Kode B-11: **NOL** (PR #131 draft, semua CI hijau — tinggal review + merge). Open baru: tidak ada. |
 
 ## 1. Apa yang berubah sesi ini — B-11 integritas §4(b) (MENUTUP M6B)
 
