@@ -100,6 +100,13 @@ export const EVENTS = {
   KualifikasiTurun: 'kualifikasi_turun', // -> SPV + Head of Account
   InterviewVersiBaru: 'interview_versi_baru', // -> AM + SPV
 
+  // ----- catalog v6 (Interview bagian 2 — eskalasi prasyarat) — 1 event -----
+  // Owner decision 2026-08-11: an AM with >= 2 hanging `bersyarat` prerequisites
+  // (unfinished, past the 7-day mark) escalates to the AM's superiors. Its own
+  // version (O55) — v5 was the Interview surface; this is the escalation the
+  // owner added after that surface shipped.
+  KualifikasiPrasyaratMenggantung: 'kualifikasi_prasyarat_menggantung', // -> SPV + Head of Account
+
 } as const;
 
 /** A cataloged event type. */
@@ -152,6 +159,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
       'Interview / Kelola Klien tab 1 — 9 event (jadwal, pengingat, terlewat, butuh data, kekosongan, selesai, kualifikasi tidak siap/turun, versi baru). Semua advisory; kualifikasi_tidak_siap informasional (verdict tidak pernah memblok).',
     eventCount: 9,
     decisionRef: 'docs/DECISIONS.md 2026-08-11 (Interview — verdict advisory non-blocking)',
+  },
+  {
+    version: 6,
+    description:
+      'Interview bagian 2 — eskalasi prasyarat menggantung: 1 event (kualifikasi_prasyarat_menggantung, >= 2 per AM). Advisory; verdict tetap tidak memblok.',
+    eventCount: 1,
+    decisionRef: 'docs/DECISIONS.md 2026-08-11 (Interview — bagian 2: resolusi + eskalasi N=2)',
   },
 ] as const;
 
@@ -249,6 +263,9 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
   [EVENTS.KualifikasiTidakSiap]: { description: 'Verdict tidak_siap (informasional, tidak memblok apa pun) — ke SPV + Head of Account', resolver: 'leadsOfDivision', version: 5 },
   [EVENTS.KualifikasiTurun]: { description: 'Re-interview menurunkan verdict pada kontrak berjalan — ke SPV + Head of Account', resolver: 'leadsOfDivision', version: 5 },
   [EVENTS.InterviewVersiBaru]: { description: 'Versi re-interview disetujui dengan perubahan field ter-mapping — ke AM + SPV', resolver: 'explicitOrLeads', version: 5 },
+
+  // --- v6 (Interview bagian 2) — resolver must match the migration seed ---
+  [EVENTS.KualifikasiPrasyaratMenggantung]: { description: '>= 2 prasyarat bersyarat menggantung pada satu AM (belum selesai, lewat hari-7) — eskalasi ke SPV + Head of Account', resolver: 'leadsOfDivision', version: 6 },
 
 };
 

@@ -279,6 +279,65 @@ d('interview_daily_tick — prasyarat bersyarat overdue', () => {
   });
 });
 
+d('interview_daily_tick — prasyarat hanging escalation (N=2, re-armable)', () => {
+  // Insert a bersyarat qualification + the overdue flag directly (fixture): the
+  // escalation only reads verdict/prasyarat_status + the flag, so this is enough.
+  async function seedBersyaratOverdue(tx: TransactionSql, id: string): Promise<void> {
+    await tx`
+      insert into interview_kualifikasi
+        (interview_id, skor_kualifikasi, skor_per_blok, verdict_kualifikasi,
+         margin_bersih_basis, kualitas_data, config_snapshot, dihitung_oleh, prasyarat_status, dihitung_pada)
+      values (${id}, 70, '{}'::jsonb, 'bersyarat', 'bersih_klien', 'terverifikasi', '{}'::jsonb, ${AM}, 'jalan', '2026-05-01'::timestamptz)`;
+    await tx`insert into interview_flag (interview_id, kode) values (${id}, 'prasyarat_bersyarat_terlambat')`;
+  }
+  const EVENT = 'kualifikasi_prasyarat_menggantung';
+  const escCount = (tx: TransactionSql) =>
+    tx<{ n: number }[]>`select count(*)::int as n from notifications where event_type = ${EVENT}`.then((r) => r[0].n);
+  const armed = (tx: TransactionSql) =>
+    tx<{ e: boolean }[]>`select ter_eskalasi as e from interview_prasyarat_eskalasi where am_pengisi_id = ${AM}`.then(
+      (r) => r[0]?.e ?? null,
+    );
+
+  it('escalates once at >= 2, holds on a same-day re-run, and re-arms when it drops below 2', async () => {
+    const out = await inRollback(async (tx) => {
+      // Ensure a lead recipient exists so the emit resolves someone.
+      await tx`insert into employees (employee_id, nama, email, divisi, jabatan)
+               values ('EMP-ESK-LEAD', 'Lead', 'lead@esk.example', 'Account', 'ESKLEAD') on conflict do nothing`;
+      await tx`insert into role_mappings (divisi, jabatan, division, level, created_by)
+               values ('Account', 'ESKLEAD', 'Account', 'lead', ${AM}) on conflict do nothing`;
+
+      const a = await seedInterview(tx, { status: 'Selesai', tanggalWaktu: null });
+      await seedBersyaratOverdue(tx, a);
+      // One hanging prerequisite → no escalation yet.
+      await tx`select interview_daily_tick(${day('2026-08-05')})`;
+      const afterOne = { notif: await escCount(tx), armed: await armed(tx) };
+
+      // A second one under the same AM → escalate exactly once.
+      const b = await seedInterview(tx, { status: 'Selesai', tanggalWaktu: null });
+      await seedBersyaratOverdue(tx, b);
+      await tx`select interview_daily_tick(${day('2026-08-06')})`;
+      const afterTwo = await escCount(tx);
+      await tx`select interview_daily_tick(${day('2026-08-06')})`; // same day re-run: no new episode
+      const afterRerun = await escCount(tx);
+      const armedAfterTwo = await armed(tx);
+
+      // Resolve one prerequisite → count drops to 1 → re-arm (no new notif).
+      await itv.markPrasyaratSelesai(tx, { interviewId: a, oleh: AM });
+      await tx`select interview_daily_tick(${day('2026-08-07')})`;
+      const afterResolve = { notif: await escCount(tx), armed: await armed(tx) };
+
+      return { afterOne, afterTwo, afterRerun, armedAfterTwo, afterResolve };
+    });
+    expect(out.afterOne.notif).toBe(0); // one hanging: nothing
+    expect(out.afterOne.armed).toBeNull(); // no state row created for a sub-threshold AM
+    expect(out.afterTwo).toBeGreaterThanOrEqual(1); // escalated to the Account lead(s)
+    expect(out.afterRerun).toBe(out.afterTwo); // same-day re-run adds nothing
+    expect(out.armedAfterTwo).toBe(true);
+    expect(out.afterResolve.notif).toBe(out.afterTwo); // re-arm sends no new notification
+    expect(out.afterResolve.armed).toBe(false); // episode closed
+  });
+});
+
 d('interview_jadwal reschedule reset', () => {
   it('resets the reminder markers when tanggal_waktu changes, and leaves them when it does not', async () => {
     const out = await inRollback(async (tx) => {

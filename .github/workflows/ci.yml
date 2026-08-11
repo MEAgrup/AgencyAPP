@@ -160,12 +160,16 @@ jobs:
       # the second check: count(notif_events) must equal SUM(event_count) over
       # notif_catalog_versions. That is what O55 bought — an event added without a
       # registered version fails even if someone also bumps the literal.
-      - name: Verify migration seed counts (19 machines, 43 events, catalog registry consistent)
+      # 44 events = 43 + 1 (v6: kualifikasi_prasyarat_menggantung, eskalasi prasyarat
+      # menggantung >= 2 per AM, 20260811080000_interview_prasyarat_eskalasi.sql,
+      # DECISIONS 2026-08-11 Interview bagian 2). Sama seperti v5: literal 44 hanya
+      # kenyamanan — invariant sebenarnya adalah kesamaan dengan SUM(event_count).
+      - name: Verify migration seed counts (19 machines, 44 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
                if (select count(*) from sm_machines) <> 19 then raise exception 'expected 19 machines'; end if;
-               if (select count(*) from notif_events) <> 43 then raise exception 'expected 43 events'; end if;
+               if (select count(*) from notif_events) <> 44 then raise exception 'expected 44 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
                  then raise exception 'notif_events does not match the registered catalog versions'; end if;
@@ -188,6 +192,11 @@ jobs:
       # green while CI failed on `expected 14 machines`. Adding a table or a
       # machine means editing BOTH, in the same commit.
       #
+      # 104 = 103 + interview_prasyarat_eskalasi (20260811080000_interview_prasyarat_eskalasi.sql,
+      #       Interview bagian 2: rumah STATE per-AM untuk eskalasi re-armable —
+      #       "banyak prasyarat menggantung" properti ANTREAN AM, bukan satu interview,
+      #       tak ada marker per-AM sebelumnya. Mutable state, bukan riwayat. DECISIONS
+      #       2026-08-11 Interview bagian 2).
       # 103 = 92 + 11 tabel Modul Interview (20260811030000_interview.sql):
       #       interview · interview_jadwal · interview_jadwal_riwayat ·
       #       interview_answer · interview_kualifikasi · interview_kategori_blok ·
@@ -229,12 +238,12 @@ jobs:
       #         + plan_gate_config + service_plan_gate (20260806061000, M6C §10).
       #      55 = 54 + prospect_activities (20260806050000, keputusan pemilik 2026-08-06).
       #      54 = 53 + lead_delete_requests (20260729162101, DECISIONS 2026-07-29).
-      - name: Verify table count (expect 103)
+      - name: Verify table count (expect 104)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 103
+          test "$n" -eq 104
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this

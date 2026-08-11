@@ -34,9 +34,9 @@ describe('frozen catalog', () => {
     }
   });
 
-  it('is at version 5, and the versions are registered in order with no gaps', () => {
-    expect(CATALOG_VERSION).toBe(5);
-    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5]);
+  it('is at version 6, and the versions are registered in order with no gaps', () => {
+    expect(CATALOG_VERSION).toBe(6);
+    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6]);
     // A registry row with no decision reference is how an un-signed-off
     // amendment would sneak in looking legitimate.
     for (const v of CATALOG_VERSIONS) {
@@ -172,6 +172,14 @@ describe('frozen catalog', () => {
     // The verdict never blocks: `kualifikasi_tidak_siap` is informational.
     expect(CATALOG[EVENTS.KualifikasiTidakSiap].version).toBe(5);
     expect(CATALOG[EVENTS.KualifikasiTidakSiap].resolver).toBe('leadsOfDivision');
+  });
+
+  it('carries exactly the 1 v6 event — prasyarat hanging escalation', () => {
+    // Owner decision 2026-08-11 (bagian 2): >= 2 hanging bersyarat prerequisites
+    // under one AM escalate to the AM's superiors. Its own version, like v3/v4/v5.
+    expect(eventsOfVersion(6)).toEqual(['kualifikasi_prasyarat_menggantung']);
+    expect(CATALOG[EVENTS.KualifikasiPrasyaratMenggantung].version).toBe(6);
+    expect(CATALOG[EVENTS.KualifikasiPrasyaratMenggantung].resolver).toBe('leadsOfDivision');
   });
 
   it('every event carries a description and a valid resolver', () => {

@@ -69,7 +69,16 @@ const created: string[] = [];
 
 afterAll(async () => {
   if (!sql) return;
-  for (const id of created) await sql`delete from interview where id = ${id}`;
+  // interview_flag is append-only (trg_flag_frozen blocks UPDATE/DELETE), and it
+  // is ON DELETE CASCADE from interview — so deleting a flagged interview needs
+  // the freeze lifted for teardown only (resolvePrasyarat leaves a completion flag).
+  await sql`alter table interview_flag disable trigger trg_flag_frozen`;
+  try {
+    // Delete by client_id (not just tracked ids) so the teardown is self-healing.
+    await sql`delete from interview where client_id = ${CLI}`;
+  } finally {
+    await sql`alter table interview_flag enable trigger trg_flag_frozen`;
+  }
   await sql`delete from clients where id = ${CLI}`;
   await sql.end();
 });
@@ -121,5 +130,51 @@ dDb('interview write path (integration)', () => {
 
   it('refuses a non-owner Account staff from opening an interview', async () => {
     await expect(interview.createInterview(sql, NONOWNER, { clientId: CLI })).rejects.toThrow(/akses/);
+  });
+
+  it('resolvePrasyarat flips prasyarat to selesai (AM only; Sales/non-owner forbidden)', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI, salesClosingId: 'EMP-0006' });
+    created.push(detail.interview.id);
+    // A bersyarat-scoring input (55..74, no deal-breaker): total 70. prasyarat starts 'jalan'.
+    const input: iv.KualifikasiInput = {
+      marginBersih: 40,
+      marginBersihSumber: iv.SUMBER_ANGKA.KlienHitung,
+      aov: 20_000_000n,
+      ruangHarga: iv.RUANG_HARGA.TidakAda,
+      modelBisnis: iv.MODEL_BISNIS.DistributorResmi,
+      kesanggupanLonjakan: iv.KESANGGUPAN_LONJAKAN.Sanggup,
+      siklusBeliUlang: iv.SIKLUS_BELI_ULANG.HabisPakai,
+      pembedaProduk: iv.PEMBEDA_PRODUK.ProdukUmum,
+      skuSiap: 40,
+      penangananChat: iv.PENANGANAN_CHAT.TimKhusus,
+      kecepatanApproval: iv.KECEPATAN_APPROVAL.BelumJelas,
+      kesiapanAkses: iv.KESIAPAN_AKSES.Belum,
+      omzet: 100_000_000n,
+      targetOmzet: 200_000_000n,
+      dayaTahanBudget: iv.DAYA_TAHAN_BUDGET.Enam,
+    };
+    const k = await interview.scoreInterview(sql, OWNER, detail.interview.id, input, { prasyaratStatus: 'jalan' });
+    expect(k.verdictKualifikasi).toBe('bersyarat');
+    expect(k.prasyaratStatus).toBe('jalan');
+
+    // Sales and a non-owner Account staff cannot resolve it (write gate).
+    await expect(interview.resolvePrasyarat(sql, SALES, detail.interview.id)).rejects.toThrow(/akses/);
+    await expect(interview.resolvePrasyarat(sql, NONOWNER, detail.interview.id)).rejects.toThrow(/akses/);
+
+    // The AM resolves it; the verdict surface now reports selesai, and the
+    // immutable completion flag was appended (the duration anchor).
+    const v = await interview.resolvePrasyarat(sql, OWNER, detail.interview.id);
+    expect(v?.prasyaratStatus).toBe('selesai');
+    const flags = await sql<{ n: number }[]>`
+      select count(*)::int as n from interview_flag
+       where interview_id = ${detail.interview.id} and kode = 'prasyarat_selesai'`;
+    expect(flags[0].n).toBe(1);
+
+    // Idempotent: resolving again appends no second completion flag.
+    await interview.resolvePrasyarat(sql, OWNER, detail.interview.id);
+    const flags2 = await sql<{ n: number }[]>`
+      select count(*)::int as n from interview_flag
+       where interview_id = ${detail.interview.id} and kode = 'prasyarat_selesai'`;
+    expect(flags2[0].n).toBe(1);
   });
 });

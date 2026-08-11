@@ -468,6 +468,25 @@ export async function scoreInterview(
   });
 }
 
+/**
+ * resolvePrasyarat marks the client-side prerequisite done (owner decision
+ * 2026-08-11, bagian 2). It is the write behind the "tandai prasyarat selesai"
+ * button: the assigned AM (or an Account lead/Director) flips `prasyarat_status`
+ * to 'selesai', which stops the daily overdue flag and drops the AM out of the
+ * hanging-prerequisite escalation count. The completion is logged as an immutable
+ * `prasyarat_selesai` flag (its timestamp is the duration anchor). Idempotent and
+ * advisory — nothing about the verdict is touched or blocked. Returns the updated
+ * verdict (verdict + prasyarat_status), or null when no qualification exists yet.
+ */
+export async function resolvePrasyarat(sql: Sql, actor: Actor, id: string): Promise<InterviewVerdict | null> {
+  return withTransaction(sql, async (tx) => {
+    const { ownerAm } = await loadScope(tx, id);
+    if (!canWriteInterview(actor, ownerAm)) throw new ForbiddenError(MSG_FORBIDDEN);
+    await dbi.markPrasyaratSelesai(tx, { interviewId: id, oleh: actor.employeeId });
+    return getInterviewVerdict(tx, actor, id);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Schedule (Blok A) + lifecycle transitions
 // ---------------------------------------------------------------------------
