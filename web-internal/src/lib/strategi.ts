@@ -1250,3 +1250,37 @@ export function createStrategiShareLink(id: string): Promise<ShareTokenCreated> 
 export function revokeStrategiShareLink(id: string): Promise<ShareLinkStatus> {
   return api.delete<ShareLinkStatus>(`/strategi/${id}/share-link`);
 }
+
+// ---------------------------------------------------------------------------
+// J-4 — auto-diff vs the previous version (§4 J-4, "Ringkasan perubahan").
+// ---------------------------------------------------------------------------
+//
+// Derived (computed on read, never stored). Version 1 answers `ada_perbandingan:
+// false`. INTERNAL only — RA-7 keeps every diff off the client link. Keys are the
+// wire shape (`StrategiDiffWire` / `StrategiDiffEntryWire`); `jenis` says which
+// half of each entry is meaningful (scalar → `sebelum`/`sesudah`, collection →
+// `ditambah`/`dihapus`/`diubah`).
+
+export interface StrategiDiffEntry {
+  jenis: 'skalar' | 'koleksi';
+  field_id: string;
+  seksi: string;
+  label: string;
+  sebelum: string | null;
+  sesudah: string | null;
+  ditambah: string[];
+  dihapus: string[];
+  diubah: number;
+}
+
+export interface StrategiDiff {
+  versi_no: number;
+  versi_sebelumnya_id: string | null;
+  versi_sebelumnya_no: number | null;
+  ada_perbandingan: boolean;
+  entri: StrategiDiffEntry[];
+}
+
+export function getStrategiDiff(id: string): Promise<StrategiDiff> {
+  return api.get<StrategiDiff>(`/strategi/${id}/diff`);
+}

@@ -3562,6 +3562,54 @@ export interface StrategiEventWire {
   created_at: string;
 }
 
+/**
+ * J-4 — one changed field in the auto-diff. Flat (not a discriminated union) so
+ * the response-shape guard checks it as one interface: `jenis` says which half
+ * is meaningful — scalar rows carry `sebelum`/`sesudah` (collections leave them
+ * null), collection rows carry `ditambah`/`dihapus`/`diubah` (scalars leave them
+ * empty/0). Every key is always present (never `omitempty`): a missing key is the
+ * O43 blank-page defect, so the inactive half is sent explicitly.
+ */
+export interface StrategiDiffEntryWire {
+  jenis: 'skalar' | 'koleksi';
+  field_id: string;
+  seksi: string;
+  label: string;
+  sebelum: string | null;
+  sesudah: string | null;
+  ditambah: string[];
+  dihapus: string[];
+  diubah: number;
+}
+
+export interface StrategiDiffWire {
+  versi_no: number;
+  versi_sebelumnya_id: string | null;
+  versi_sebelumnya_no: number | null;
+  ada_perbandingan: boolean;
+  entri: StrategiDiffEntryWire[];
+}
+
+export function strategiDiffToWire(d: strategi.StrategiDiff): StrategiDiffWire {
+  return {
+    versi_no: d.versiNo,
+    versi_sebelumnya_id: d.versiSebelumnyaId,
+    versi_sebelumnya_no: d.versiSebelumnyaNo,
+    ada_perbandingan: d.adaPerbandingan,
+    entri: d.entri.map((e) => ({
+      jenis: e.jenis,
+      field_id: e.fieldId,
+      seksi: e.seksi,
+      label: e.label,
+      sebelum: e.jenis === 'skalar' ? e.sebelum : null,
+      sesudah: e.jenis === 'skalar' ? e.sesudah : null,
+      ditambah: e.jenis === 'koleksi' ? e.ditambah : [],
+      dihapus: e.jenis === 'koleksi' ? e.dihapus : [],
+      diubah: e.jenis === 'koleksi' ? e.diubah : 0,
+    })),
+  };
+}
+
 /** The whole record as the Section A→J form loads it. */
 export interface StrategiDetailWire extends StrategiWire {
   channels: StrategiChannelWire[];

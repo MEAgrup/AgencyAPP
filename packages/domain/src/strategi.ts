@@ -5110,6 +5110,373 @@ export interface Kekurangan {
   pesan: string;
 }
 
+// ---------------------------------------------------------------------------
+// J-4 — auto-diff vs the previous version (§4 J-4, "Ringkasan perubahan")
+// ---------------------------------------------------------------------------
+//
+// J-4 is an `Auto` field (Rule 4): derived, never typed, and recomputable from
+// the versions themselves — so it is COMPUTED on read here, never stored (no
+// migration, no column). It compares a version to the one it revised
+// (`versi_sebelumnya_id`); version 1 has no predecessor and returns an empty
+// diff (`adaPerbandingan = false`) rather than an error.
+//
+// Granularity (owner decision 2026-08-11): scalar fields render before→after
+// precisely; collections render a summary (added / removed identities + a count
+// of modified rows). That is what "Ringkasan perubahan" means — a summary an AM
+// reads at a glance, not a full record dump.
+//
+// ⚠️ RA-7 keeps every diff OFF the client link (`/s/{token}` renders the active
+// version only), so J-4 is INTERNAL-only in practice. But §4.1 / X-16 is
+// explicit that the diff generator must still be able to filter its own rows per
+// field — a shareable J-4 would otherwise render a change to a field that is
+// itself hard-internal (D-7, H-4, F-5), leaking it through the back door while
+// every per-field check passed. `clientVisibleDiff` is that filter, and
+// `strategi.diff.test.ts` proves it drops the hard-internal rows. Each entry
+// therefore carries the field ID it belongs to; where a collection spans several
+// field IDs of different tiers (resources = F-1…F-5), it is tagged with the
+// MOST restrictive member so the client filter errs safe.
+
+/** One changed scalar field: before → after, both already formatted for display. */
+export interface StrategiDiffScalar {
+  jenis: 'skalar';
+  fieldId: string;
+  seksi: string;
+  label: string;
+  sebelum: string | null;
+  sesudah: string | null;
+}
+
+/** One changed collection: which identities were added/removed, how many modified. */
+export interface StrategiDiffKoleksi {
+  jenis: 'koleksi';
+  fieldId: string;
+  seksi: string;
+  label: string;
+  ditambah: string[];
+  dihapus: string[];
+  diubah: number;
+}
+
+export type StrategiDiffEntry = StrategiDiffScalar | StrategiDiffKoleksi;
+
+export interface StrategiDiff {
+  versiNo: number;
+  versiSebelumnyaId: string | null;
+  versiSebelumnyaNo: number | null;
+  /** false for version 1 (no predecessor) — the caller renders "versi pertama". */
+  adaPerbandingan: boolean;
+  entri: StrategiDiffEntry[];
+}
+
+/** Blank/empty → null so "" and absent read the same; numbers/booleans to text. */
+function diffScalarValue(v: string | number | boolean | null | undefined): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'boolean') return v ? 'ya' : 'tidak';
+  if (typeof v === 'number') return String(v);
+  const t = v.trim();
+  return t === '' ? null : t;
+}
+
+interface ScalarSpec {
+  fieldId: string;
+  label: string;
+  val: (d: StrategiDetail) => string | number | boolean | null;
+}
+
+interface KoleksiSpec {
+  fieldId: string;
+  label: string;
+  rows: (d: StrategiDetail) => Record<string, unknown>[];
+  /** Stable identity ACROSS versions — never the row `id` (copyChildren re-mints it). */
+  key: (r: Record<string, unknown>) => string;
+  /** What the AM reads for an added/removed row. */
+  describe: (r: Record<string, unknown>) => string;
+  /** Canonical content for change detection; defaults to `key` (⇒ never "modified"). */
+  content?: (r: Record<string, unknown>) => string;
+}
+
+const seksiOf = (fieldId: string): string => fieldId.charAt(0).toUpperCase();
+
+/**
+ * Every scalar field a revision can carry, mapped to its §4 field ID. D-7
+ * (Sanggahan Target) is deliberately absent: `openRevision` does not carry it
+ * (it is a dated act against one version's floor), so a diff would always show
+ * it "removed" — noise, not a change the AM made.
+ */
+const SCALAR_DIFF_SPECS: readonly ScalarSpec[] = [
+  { fieldId: 'A-1', label: 'Nama brand', val: (d) => d.namaBrand },
+  { fieldId: 'A-1', label: 'Kategori utama', val: (d) => d.kategoriUtama },
+  { fieldId: 'A-2', label: 'Model bisnis', val: (d) => d.modelBisnis },
+  { fieldId: 'A-3', label: 'Ruang margin (%)', val: (d) => d.marginKotorPersen },
+  { fieldId: 'A-4', label: 'Posisi harga', val: (d) => d.posisiHarga },
+  { fieldId: 'A-6', label: 'Kapasitas stok', val: (d) => d.kapasitasStok },
+  { fieldId: 'A-6', label: 'Lead time restock (hari)', val: (d) => d.leadTimeRestockHari },
+  { fieldId: 'A-7', label: 'Plafon unit/bulan', val: (d) => d.plafonUnitPerBulan },
+  { fieldId: 'A-8', label: 'Titik kirim (kota)', val: (d) => d.titikKirimKota },
+  { fieldId: 'A-8', label: 'Titik kirim (detail)', val: (d) => d.titikKirimDetail },
+  { fieldId: 'A-9', label: 'Ekspektasi klien', val: (d) => d.ekspektasiKlien },
+  { fieldId: 'A-10', label: 'Riwayat agensi', val: (d) => d.riwayatAgensi },
+  { fieldId: 'A-13', label: 'SLA klien (jam)', val: (d) => d.slaKlienJam },
+  { fieldId: 'A-13', label: 'SLA klien (catatan)', val: (d) => d.slaKlienCatatan },
+  { fieldId: 'A-14', label: 'Aset (catatan)', val: (d) => d.asetCatatan },
+  { fieldId: 'D-5', label: 'Definisi berhasil 30 hari', val: (d) => d.definisiBerhasil30 },
+  { fieldId: 'D-5', label: 'Definisi berhasil 60 hari', val: (d) => d.definisiBerhasil60 },
+  { fieldId: 'D-5', label: 'Definisi berhasil 90 hari', val: (d) => d.definisiBerhasil90 },
+  { fieldId: 'E-1', label: 'Growth thesis', val: (d) => d.growthThesis },
+  { fieldId: 'E-13', label: 'Urutan eksekusi (alasan)', val: (d) => d.urutanEksekusiAlasan },
+  { fieldId: 'H-3', label: 'Skenario mundur', val: (d) => d.skenarioMundur },
+  { fieldId: 'H-4', label: 'Kondisi stop / ubah scope', val: (d) => d.kondisiStopScope },
+  { fieldId: 'F-7', label: 'Toleransi over-komitmen (%)', val: (d) => d.toleransiOverPersen },
+  { fieldId: 'G-0', label: 'Tanggal mulai siklus', val: (d) => d.tanggalMulaiSiklus },
+  { fieldId: 'G-3', label: 'Review klien (frekuensi)', val: (d) => d.reviewKlienFrekuensi },
+  { fieldId: 'G-3', label: 'Review klien (format)', val: (d) => d.reviewKlienFormat },
+  { fieldId: 'G-3', label: 'Review klien (PIC)', val: (d) => d.reviewKlienPic },
+  { fieldId: 'G-4', label: 'Review internal (frekuensi)', val: (d) => d.reviewInternalFrekuensi },
+];
+
+/** A short-string list treated as a set (usp, pantangan, …): identity IS the string. */
+function listSpec(fieldId: string, label: string, get: (d: StrategiDetail) => string[]): KoleksiSpec {
+  return {
+    fieldId,
+    label,
+    rows: (d) => get(d).map((s) => ({ v: s })),
+    key: (r) => String(r.v),
+    describe: (r) => String(r.v),
+  };
+}
+
+const KOLEKSI_DIFF_SPECS: readonly KoleksiSpec[] = [
+  listSpec('A-1', 'Sub-kategori', (d) => d.subKategori),
+  listSpec('A-5', 'USP produk', (d) => d.usp),
+  listSpec('A-11', 'Pantangan klien', (d) => d.pantanganKlien),
+  listSpec('A-14', 'Aset dari klien', (d) => d.asetDariKlien),
+  listSpec('D-6', 'Leading indicator', (d) => d.leadingIndicator),
+  listSpec('I-3', 'Metrik laporan klien', (d) => d.metrikLaporanKlien),
+  {
+    fieldId: 'A-12',
+    label: 'Decision maker',
+    rows: (d) => d.decisionMaker as unknown as Record<string, unknown>[],
+    key: (r) => `${String(r.nama)}·${String(r.jabatan)}`,
+    describe: (r) => `${String(r.nama)} (${String(r.jabatan)})`,
+    content: (r) => `${r.berhakApprove}·${String(r.jalurEskalasi)}`,
+  },
+  {
+    fieldId: 'B-0.1',
+    label: 'Channel & baseline (Section B)',
+    rows: (d) => d.channels as unknown as Record<string, unknown>[],
+    key: (r) => `${String(r.channel)}·${String(r.channelLain ?? '')}`,
+    describe: (r) => String(r.channelLain ?? r.channel),
+    content: (r) => canonRow(r, ['id']),
+  },
+  {
+    fieldId: 'A-15',
+    label: 'Akses & hak per channel',
+    rows: (d) => d.akses as unknown as Record<string, unknown>[],
+    key: (r) => `${String(r.channel)}·${String(r.akses)}`,
+    describe: (r) => `${String(r.channel)} / ${String(r.akses)}`,
+    content: (r) => canonRow(r, ['id']),
+  },
+  {
+    fieldId: 'C-1',
+    label: 'Diagnosa per channel',
+    rows: (d) => d.diagnosa as unknown as Record<string, unknown>[],
+    key: (r) => String(r.channel),
+    describe: (r) => String(r.channel),
+    content: (r) => canonRow(r, ['id']),
+  },
+  {
+    fieldId: 'C-5',
+    label: 'Quick win',
+    rows: (d) => d.quickWins as unknown as Record<string, unknown>[],
+    key: (r) => `${String(r.channel)}·${String(r.aksi)}`,
+    describe: (r) => truncate(String(r.aksi)),
+    content: (r) => canonRow(r, ['id', 'urutan']),
+  },
+  {
+    fieldId: 'C-6',
+    label: 'Risiko struktural',
+    rows: (d) => d.risikoStruktural as unknown as Record<string, unknown>[],
+    key: (r) => String(r.risiko),
+    describe: (r) => truncate(String(r.risiko)),
+  },
+  {
+    fieldId: 'C-7',
+    label: 'Prasyarat klien',
+    rows: (d) => d.prasyaratKlien as unknown as Record<string, unknown>[],
+    key: (r) => String(r.item),
+    describe: (r) => truncate(String(r.item)),
+    content: (r) => canonRow(r, ['id', 'urutan']),
+  },
+  {
+    fieldId: 'D-2',
+    label: 'Target stretch (D-2)',
+    rows: (d) => d.targets as unknown as Record<string, unknown>[],
+    key: (r) => `${String(r.channel)}·${String(r.metric)}·M${String(r.monthIndex)}`,
+    describe: (r) => `${String(r.channel)} ${String(r.metric)} M${String(r.monthIndex)}`,
+    content: (r) => `${String(r.nilaiFloor)}·${String(r.nilaiStretch)}`,
+  },
+  {
+    fieldId: 'D-8',
+    label: 'Asumsi target (D-8)',
+    rows: (d) => d.assumptions as unknown as Record<string, unknown>[],
+    key: (r) => String(r.kode),
+    describe: (r) => String(r.kode),
+    content: (r) => `${String(r.asumsi)}·${String(r.pemilik)}·${String(r.status)}`,
+  },
+  {
+    fieldId: 'E-3',
+    label: 'Pilar strategi (Section E)',
+    rows: (d) => d.pillars as unknown as Record<string, unknown>[],
+    key: (r) => `${String(r.jenis)}·${String(r.channel ?? '')}·${String(r.sku ?? '')}·${String(r.urutan)}`,
+    describe: (r) => `${String(r.jenis)}${r.sku ? ` — ${String(r.sku)}` : ''}`,
+    content: (r) => canonRow(r, ['id']),
+  },
+  {
+    fieldId: 'F-5',
+    label: 'Komitmen resource (Section F)',
+    rows: (d) => d.resources as unknown as Record<string, unknown>[],
+    key: (r) => `${String(r.jenis)}·${String(r.channel ?? '')}·${String(r.divisi ?? '')}·${String(r.urutan ?? '')}`,
+    describe: (r) => `${String(r.jenis)}${r.divisi ? ` — ${String(r.divisi)}` : ''}`,
+    content: (r) => canonRow(r, ['id']),
+  },
+  {
+    fieldId: 'H-1',
+    label: 'Risk register (H-1)',
+    rows: (d) => d.risks as unknown as Record<string, unknown>[],
+    key: (r) => String(r.risiko),
+    describe: (r) => truncate(String(r.risiko)),
+    content: (r) => canonRow(r, ['id', 'urutan']),
+  },
+  {
+    fieldId: 'E-12',
+    label: 'Ketergantungan klien (E-12)',
+    rows: (d) => d.ketergantungan as unknown as Record<string, unknown>[],
+    key: (r) => String(r.item),
+    describe: (r) => truncate(String(r.item)),
+    content: (r) => canonRow(r, ['id', 'urutan']),
+  },
+  {
+    fieldId: 'G-1',
+    label: 'Fase kerja (G-1)',
+    rows: (d) => d.fase as unknown as Record<string, unknown>[],
+    key: (r) => String(r.nama),
+    describe: (r) => String(r.nama),
+    content: (r) => canonRow(r, ['id', 'urutan']),
+  },
+  {
+    fieldId: 'G-2',
+    label: 'Tanggal besar (G-2)',
+    rows: (d) => d.tanggalBesar as unknown as Record<string, unknown>[],
+    key: (r) => `${String(r.tanggal)}·${String(r.nama)}`,
+    describe: (r) => `${String(r.nama)} (${String(r.tanggal)})`,
+    content: (r) => canonRow(r, ['id', 'urutan']),
+  },
+  {
+    fieldId: 'H-2',
+    label: 'Trigger revisi (H-2)',
+    rows: (d) => d.triggerRevisi as unknown as Record<string, unknown>[],
+    key: (r) => String(r.kode),
+    describe: (r) => String(r.kode),
+    content: (r) => canonRow(r, ['id']),
+  },
+  {
+    fieldId: 'I-2',
+    label: 'Dispatch divisi (I-2)',
+    rows: (d) => d.dispatch as unknown as Record<string, unknown>[],
+    key: (r) => String(r.divisi),
+    describe: (r) => String(r.divisi),
+    content: (r) => canonRow(r, ['id', 'urutan']),
+  },
+];
+
+function truncate(s: string, n = 48): string {
+  const t = s.trim();
+  return t.length <= n ? t : `${t.slice(0, n - 1)}…`;
+}
+
+/** Stable JSON of a row with volatile keys dropped, keys sorted — for change detection. */
+function canonRow(r: Record<string, unknown>, omit: string[]): string {
+  const keys = Object.keys(r)
+    .filter((k) => !omit.includes(k))
+    .sort();
+  return JSON.stringify(keys.map((k) => [k, r[k]]));
+}
+
+function diffScalars(prev: StrategiDetail, curr: StrategiDetail): StrategiDiffScalar[] {
+  const out: StrategiDiffScalar[] = [];
+  for (const s of SCALAR_DIFF_SPECS) {
+    const before = diffScalarValue(s.val(prev));
+    const after = diffScalarValue(s.val(curr));
+    if (before !== after) {
+      out.push({ jenis: 'skalar', fieldId: s.fieldId, seksi: seksiOf(s.fieldId), label: s.label, sebelum: before, sesudah: after });
+    }
+  }
+  return out;
+}
+
+function diffKoleksi(prev: StrategiDetail, curr: StrategiDetail): StrategiDiffKoleksi[] {
+  const out: StrategiDiffKoleksi[] = [];
+  for (const spec of KOLEKSI_DIFF_SPECS) {
+    const contentOf = spec.content ?? spec.key;
+    const p = new Map(spec.rows(prev).map((r) => [spec.key(r), r] as const));
+    const c = new Map(spec.rows(curr).map((r) => [spec.key(r), r] as const));
+    const ditambah: string[] = [];
+    const dihapus: string[] = [];
+    let diubah = 0;
+    for (const [k, r] of c) {
+      if (!p.has(k)) ditambah.push(spec.describe(r));
+      else if (contentOf(r) !== contentOf(p.get(k)!)) diubah++;
+    }
+    for (const [k, r] of p) if (!c.has(k)) dihapus.push(spec.describe(r));
+    if (ditambah.length || dihapus.length || diubah) {
+      out.push({ jenis: 'koleksi', fieldId: spec.fieldId, seksi: seksiOf(spec.fieldId), label: spec.label, ditambah, dihapus, diubah });
+    }
+  }
+  return out;
+}
+
+/**
+ * strategiDiff computes J-4 for a version: the summary of what changed vs the
+ * version it revised. Read permission is the same gate as `getStrategi`.
+ */
+export async function strategiDiff(sql: Queryable, actor: Actor, id: string): Promise<StrategiDiff> {
+  const head = await loadStrategiRow(sql, id);
+  const ownerAm = await ownerAmOfContract(sql, head.contractId);
+  if (!canReadStrategi(actor, ownerAm)) {
+    throw new ForbiddenError(MSG_STRATEGI_FORBIDDEN);
+  }
+  if (head.versiSebelumnyaId === null) {
+    return { versiNo: head.versiNo, versiSebelumnyaId: null, versiSebelumnyaNo: null, adaPerbandingan: false, entri: [] };
+  }
+  const prevHead = await loadStrategiRow(sql, head.versiSebelumnyaId);
+  const [curr, prev] = await Promise.all([loadDetail(sql, head), loadDetail(sql, prevHead)]);
+  const entri: StrategiDiffEntry[] = [...diffScalars(prev, curr), ...diffKoleksi(prev, curr)];
+  return {
+    versiNo: head.versiNo,
+    versiSebelumnyaId: prevHead.id,
+    versiSebelumnyaNo: prevHead.versiNo,
+    adaPerbandingan: true,
+    entri,
+  };
+}
+
+/**
+ * clientVisibleDiff — the §4.1 / X-16 filter applied to J-4's own rows. Keeps
+ * only entries whose field ID a client may see under the Strategi's overlay;
+ * hard-internal rows (A-10, H-4, F-5, …) are dropped unconditionally. J-4 is not
+ * rendered client-side today (RA-7), so this is the guard that keeps it safe IF
+ * it ever is — never a hard-internal change leaks through a shareable diff.
+ */
+export function clientVisibleDiff(
+  diff: StrategiDiff,
+  overlay: Readonly<Record<string, visibility.Visibility>> = {},
+): StrategiDiff {
+  return {
+    ...diff,
+    entri: diff.entri.filter((e) => visibility.shareableFields([e.fieldId], overlay).length > 0),
+  };
+}
+
 /**
  * checkCompleteness returns everything blocking submit, rather than the first
  * failure.

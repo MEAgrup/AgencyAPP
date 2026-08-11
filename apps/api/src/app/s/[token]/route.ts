@@ -27,24 +27,39 @@ function esc(s: string): string {
 }
 
 const PAGE_CSS = `
-  :root { color-scheme: light dark; }
-  body { font: 15px/1.55 system-ui, sans-serif; margin: 0; background: #f6f7f9; color: #1a1a1a; }
-  .wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 64px; }
-  header { border-bottom: 2px solid #d8dce2; padding-bottom: 16px; margin-bottom: 24px; }
-  h1 { font-size: 22px; margin: 0 0 4px; }
-  .meta { color: #6b7280; font-size: 13px; }
-  section { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px 18px; margin: 0 0 16px; }
-  h2 { font-size: 15px; margin: 0 0 10px; color: #374151; }
-  .row { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; border-top: 1px solid #f0f1f3; }
+  :root {
+    color-scheme: light dark;
+    --bg: #f4f5f7; --card: #ffffff; --border: #e5e7eb; --hair: #eef0f3;
+    --ink: #111827; --ink2: #374151; --muted: #6b7280; --accent: #0f766e;
+  }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.6 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: var(--bg); color: var(--ink); }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 40px 20px 72px; }
+  header { display: flex; align-items: flex-start; gap: 14px; border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 28px; }
+  .mono { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 9px; background: var(--accent); color: #fff; font-weight: 700; font-size: 15px; letter-spacing: .5px; display: flex; align-items: center; justify-content: center; }
+  .htext { min-width: 0; }
+  .eyebrow { text-transform: uppercase; letter-spacing: .08em; font-size: 11px; font-weight: 600; color: var(--accent); margin: 2px 0 2px; }
+  h1 { font-size: 22px; margin: 0 0 4px; line-height: 1.2; }
+  .meta { color: var(--muted); font-size: 13px; }
+  section { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 6px 20px; margin: 0 0 16px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; margin: 16px 0 6px; color: var(--muted); }
+  .row { display: flex; justify-content: space-between; gap: 20px; padding: 9px 0; border-top: 1px solid var(--hair); }
   .row:first-of-type { border-top: 0; }
-  .label { color: #374151; }
-  .value { color: #111827; font-weight: 600; text-align: right; white-space: pre-wrap; }
-  .neutral { text-align: center; padding: 96px 20px; color: #6b7280; }
+  .label { color: var(--ink2); flex: 0 1 auto; }
+  .value { color: var(--ink); font-weight: 600; text-align: right; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .field { padding: 10px 0; border-top: 1px solid var(--hair); }
+  .field:first-of-type { border-top: 0; }
+  .field .label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; font-weight: 400; }
+  .field .value { display: block; text-align: left; font-weight: 500; }
+  footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; line-height: 1.5; }
+  .neutral { text-align: center; padding: 104px 20px; color: var(--muted); }
+  .neutral h1 { color: var(--ink); }
   @media (prefers-color-scheme: dark) {
-    body { background: #0f1115; color: #e5e7eb; }
-    section { background: #171a21; border-color: #262b34; }
-    header { border-color: #262b34; }
-    .row { border-color: #21252d; } h2, .label { color: #9aa4b2; } .value { color: #f3f4f6; }
+    :root {
+      --bg: #0e1014; --card: #171a21; --border: #262b34; --hair: #21252d;
+      --ink: #f3f4f6; --ink2: #cbd2dc; --muted: #9aa4b2; --accent: #2dd4bf;
+    }
+    .mono { color: #06231f; }
   }
 `;
 
@@ -65,25 +80,33 @@ function neutralPage(): string {
   );
 }
 
+/** Long or multi-line values read as a stacked block; short scalars stay inline. */
+function fieldRow(label: string, value: string): string {
+  const long = value.length > 56 || value.includes('\n');
+  const cls = long ? 'field' : 'row';
+  return `<div class="${cls}"><span class="label">${esc(label)}</span><span class="value">${esc(value)}</span></div>`;
+}
+
 function activePage(view: strategi.ShareLinkResolved): string {
   const approved = view.disetujuiPada ? new Date(view.disetujuiPada).toISOString().slice(0, 10) : '—';
   const sections = (view.sections ?? [])
     .map((s) => {
-      const rows = s.fields
-        .map(
-          (f) =>
-            `<div class="row"><span class="label">${esc(f.label)}</span>` +
-            `<span class="value">${esc(f.value)}</span></div>`,
-        )
-        .join('');
+      const rows = s.fields.map((f) => fieldRow(f.label, f.value)).join('');
       return `<section><h2>${esc(s.seksi)}</h2>${rows}</section>`;
     })
     .join('');
   return shell(
     `Strategi — Versi ${view.versiNo ?? ''}`,
-    `<header><h1>Strategi</h1>
-       <div class="meta">Versi ${view.versiNo ?? '—'} · disetujui ${esc(approved)}</div>
-     </header>${sections || '<section><p>Belum ada bagian yang dibagikan.</p></section>'}`,
+    `<header>
+       <div class="mono">MEA</div>
+       <div class="htext">
+         <div class="eyebrow">Dokumen Strategi</div>
+         <h1>Rencana Kerja Akun</h1>
+         <div class="meta">Versi ${view.versiNo ?? '—'} · disetujui ${esc(approved)}</div>
+       </div>
+     </header>${sections || '<section><p>Belum ada bagian yang dibagikan.</p></section>'}
+     <footer>Dokumen ini disiapkan oleh MEA Agency untuk Anda dan bersifat rahasia.
+     Menampilkan versi aktif; hubungi Account Manager Anda untuk pertanyaan.</footer>`,
   );
 }
 
