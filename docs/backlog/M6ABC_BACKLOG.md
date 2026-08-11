@@ -21,14 +21,15 @@ Hitungan tiket, bukan effort — A-13 sendirian lebih besar dari A-05…A-07 dig
 | Bagian | Selesai | Total | % |
 |---|---|---|---|
 | **M6A Strategi** | A-00…A-07 = **8** | 14 | **57%** |
-| **M6B Plan** | B-00, **B-01, B-02** = **3** | 12 | **25%** |
-| M6C Plan Gate | C-01…C-07 = 7 | 8 (B-10 menutup Rule 6) | 88% |
-| **M6A+M6B gabungan** | **11** | 26 | **42%** |
+| **M6B Plan** | B-00…B-10 = **11** | 12 | **92%** |
+| M6C Plan Gate | C-01…C-07 + **B-10 (Rule 6)** = 8 | 8 | **100%** |
+| **M6A+M6B gabungan** | **19** | 26 | **73%** |
 
-> **Delta 2026-08-10:** baris M6A di atas adalah snapshot 2026-08-07 dan sudah
+> **Delta 2026-08-11:** baris M6A di atas adalah snapshot 2026-08-07 dan sudah
 > basi — A-08…A-13d mendarat setelahnya (lihat `HANDOFF_M6ABC_SESI13.md`). Yang
-> berubah tabel ini hari ini: **M6B B-01 + B-02 selesai** (bentuk `PLAN` + 6 anak
-> + mesin #16; lalu generasi periode saat approval). B-03…B-11 tersisa.
+> berubah hari ini: **B-10 selesai** — Plan Satuan + mesin #17 dormansi, MENUTUP
+> Rule 6 M6C (kini 100%). **M6B tinggal B-11** (index integritas §4b, kecil).
+> M6B B-01…B-09 sudah mendarat sebelum ini.
 
 Yang membuat angka M6A menyesatkan kalau dibaca sendirian:
 
@@ -171,7 +172,7 @@ diimplementasi sebelum ini mendarat, jadi ia masuk batch migrasi yang SAMA denga
 | ~~B-07~~ | ~~Penutupan periode transaksional~~ | ✅ **SELESAI 2026-08-10** — NOL migrasi (perilaku atas kolom B-01; gerbang tetap 89/31/17/34, migrasi tetap 76). `closePlanPeriode` (AM, `Aktif → Ditutup`) menegakkan TIGA precondition Rule 15 dalam SATU transaksi — GMV manual per channel + semua baris terminal (`Selesai`/`Sebagian`/`Tidak Dikerjakan` + alasan) + review P-F lengkap — atau tidak sama sekali (partial close bukan state; gagal → `ValidationError` pesan BI precondition pertama, nol perubahan). `forceClosePlanPeriode` (sistem, `Aktif → Ditutup Otomatis`) memaksa baris non-terminal → `Tidak Dikerjakan — tanpa keterangan` (sengaja jelek), tak menegakkan precondition, tak menyentuh `plan_actual` (X-07: tak mengunci). Gerbang murni `checkCloseReadiness` (teruji tanpa DB, satu-sumber). Jalur tulis pendukung: `setRowStatus` (PC-14) + `savePlanReview` (P-F full-replace). **PF-3 wajib HANYA saat variance negatif.** **PF-4 (asumsi → `strategi_assumption`) & PF-5 (carry-over → `plan_row.terbawa`) bukan precondition di sini** — carry-over mekanisme = B-08. Domain **1035** hijau (+25). DECISIONS 2026-08-10. Notif tunda PA-8/O55 |
 | ~~B-08~~ | ~~Carry-over eksplisit~~ | ✅ **SELESAI 2026-08-10** — migrasi `20260810030000_m6b_carry_over.sql`: SATU kolom `plan_row.keputusan_carryover` + CHECK `IN ('dibawa','dibatalkan','revisi')` (nol tabel; gerbang tetap 89/31/17/34, migrasi **76 → 77**). `decideCarryOver` (AM/lead, per baris `Sebagian`/`Tidak Dikerjakan` di periode **yang sudah ditutup**) mencap keputusan di baris asal + `audit_log` immutable; `dibawa` menyalin baris ke periode berikutnya (`terbawa=true` + `periode_asal_id`, reset `Rencana`), `dibatalkan`/`revisi` mencatat saja. `listCarryOverPending` = baris tak-selesai belum diputuskan. **`kuota` disalin apa adanya (tanpa hitung "sisa" — model tak simpan pencapaian per baris).** **Satu keputusan per baris; `dibawa` ditolak bila tak ada periode berikutnya penerima.** **Komponen §263 "Σ negative variance chosen to carry" pada `defisit_terbawa` DITUNDA → X-18** (tak cukup dispesifikasi; deficit tetap = Σ penyesuaian turun B-04; karena dihitung, menambahnya kelak nol-migrasi). jsonb lewat `tx.json` (pola `::jsonb` double-encode di jalur ini). Domain **1060** hijau (+16). DECISIONS 2026-08-10 |
 | ~~B-09~~ | ~~Scheduled jobs~~ | ✅ **SELESAI 2026-08-11** — NOL migrasi. Runtime = cron eksternal → `POST /api/v1/internal/plan/tick` ber-secret `PLAN_TICK_SECRET` (tak diset ⇒ tertutup). Domain `runPlanTick(sql, today)` murni terhadap jam (tanggal WIB disuplai endpoint): **(a)** `sweepPeriodeTransitions` (force-close `Aktif` lewat `tanggal_akhir` LALU aktifkan `Terjadwal`/`Menunggu` jendela-berjalan tanpa `Aktif` sesaudara — Rule 5; badan `activate`/`forceClose` diekstrak, aktor `SISTEM`); **(b)** `sweepBelumDieksekusi` (titik-tengah, baris `Rencana` → `plan_flag('belum_dieksekusi')` + notif `plan_baris_belum_dieksekusi` sekali/periode; "tanpa Brief" ditunda X-19 — tautan Brief↔baris M7/M12 belum ada); **(c)** `sweepRealisasiBelumLengkap` (tutup+5 hari WIB dari audit `transition:Aktif->Ditutup*`, GMV manual kosong → notif `plan_realisasi_belum_lengkap`; idempotensi via penanda `audit_log` `realisasi_belum_lengkap`). Notif M6B kini **BENAR-BENAR diemisikan** (katalog v2 sudah terdaftar — koreksi PA-8). X-12 dihormati (nol klaim KPI). 8 test domain + 4 test gerbang-secret. DECISIONS 2026-08-11 |
-| B-10 | Plan Satuan (M6C §7) | `lingkup='klien'`, parent = Service, `Di Luar Service` menggantikan `Di Luar Strategi`, review 4 field (bukan 8), dormansi mesin #17. **Menutup Rule 6 M6C** |
+| ~~B-10~~ | ~~Plan Satuan (M6C §7)~~ | ✅ **SELESAI 2026-08-11** — migrasi `20260811000000_m6b_plan_satuan.sql` (tabel **89 → 90**, mesin **17 → 18**). Tabel rantai `plan_satuan` (PK `client_id`, S2) rumah `tanggal_mulai_siklus` + `status_dormansi`; **mesin #17** (`Aktif ⇄ Dorman`, non-terminal, STATE_MACHINES §6e). **Menutup Rule 6:** `openOrJoinPlanSatuanTx` di transaksi `decideGate`/`redecideGate` (saat `butuh_plan`) MEMBUKA/MENGGABUNG/MEREAKTIVASI + isi `service_plan_gate.plan_id` (FK-nya juga B-10). `plan_flag` jenis `di_luar_service` (§7.9). Review tutup 4-field untuk `lingkup='klien'` (tanpa diagnosa/rekomendasi). `markPlanSatuanDormant` (§10 job c, tolak selagi ada periode berjalan). **DEVIASI:** `status_dormansi`=TABEL bukan kolom `plan` (dormansi properti RANTAI — n salinan = anti-pola; DECISIONS 2026-08-11 B-10). Buka TIDAK menyemai baris (never-invent, seperti B-02); generasi periode berjalan + sweep dormansi otomatis = seam job. Domain 1084 hijau, api 344, web-internal 191, KNOWN_GAPS kosong. |
 | B-11 | Constraint integritas §4(b) | Partial unique index: satu service ⇒ paling banyak satu Plan; service dalam kontrak full-management tidak boleh menunjuk Plan `lingkup='klien'` |
 
 ## 4. TERBLOKIR — bukan pekerjaan kode

@@ -336,6 +336,10 @@ afterEach(async () => {
   // here — every test seeds a UNIQUE service id and its assertions filter on it.
   // Following the account.test.ts precedent rather than fighting the invariant.
   await sql`delete from service_plan_gate where created_by like 'ZZ-%'`;
+  // A `butuh_plan` determination now opens a Plan Satuan (Rule 6) — clean the
+  // period + chain it leaves so the client delete below does not hit their FK.
+  await sql`delete from plan where created_by like 'ZZ-%'`;
+  await sql`delete from plan_satuan where created_by like 'ZZ-%'`;
   await sql`delete from briefs where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;

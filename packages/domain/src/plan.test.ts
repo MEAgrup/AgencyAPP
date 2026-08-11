@@ -22,7 +22,7 @@
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { permission } from '@cdps/core';
-import { createClient, type Sql } from '@cdps/db';
+import { createClient, withTransaction, type Sql } from '@cdps/db';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from './account';
 import { createStrategi } from './strategi';
 import {
@@ -64,9 +64,14 @@ import {
   MSG_CARRYOVER_ROW_STATUS,
   MSG_CARRYOVER_ALREADY_DECIDED,
   MSG_CARRYOVER_NO_TARGET,
+  MSG_PLAN_SATUAN_ACTIVE_PERIOD,
+  MSG_PLAN_SATUAN_NOT_FOUND,
   MANUAL_METRICS,
   FORCE_CLOSE_ALASAN,
   ROW_TERMINAL_STATUSES,
+  getPlanSatuan,
+  markPlanSatuanDormant,
+  openOrJoinPlanSatuanTx,
   activatePlanPeriode,
   decideCarryOver,
   listCarryOverPending,
@@ -359,6 +364,54 @@ describe('checkCloseReadiness (Rule 15, pure)', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// B-10 — reduced P-F review for Plan Satuan (M6C §7, pure)
+// ---------------------------------------------------------------------------
+
+describe('checkCloseReadiness — reduced review (Plan Satuan, M6C §7)', () => {
+  const target = (channel: string, nilaiDipakai: number) => ({ channel, metric: 'gmv', nilaiDipakai });
+  const manual = (channel: string, nilai: number) =>
+    ({ channel, metric: 'gmv', sumber: 'manual', nilai }) as const;
+  const terminalRow = { statusBaris: 'Selesai', statusBarisAlasan: null } as const;
+
+  // The four-field cut: what worked, what didn't, client talking points — and
+  // carry-over (which is the per-row B-08 mechanism, not a review column). NO
+  // recommendation (PF-6), revise-flag (PF-7), or diagnosis (PF-3).
+  const reducedReview = {
+    planId: 'P',
+    yangJalan: 'iklan Shopee naik',
+    yangTidakJalan: 'live vendor telat',
+    diagnosaGap: null,
+    diagnosaGapBukti: null,
+    rekomendasi: null,
+    perluRevisi: null,
+    materiKlien: 'ROAS 4.6, GMV 200jt',
+  } as const;
+
+  const base = { targets: [target('Shopee', 200)], actuals: [manual('Shopee', 150)], rows: [terminalRow] };
+
+  it('accepts the three text fields with NO diagnosis, even when variance is negative', () => {
+    const r = checkCloseReadiness({ ...base, review: reducedReview, reducedReview: true });
+    expect(r.varianceNegative).toBe(true); // 150 < 200
+    expect(r.reviewComplete).toBe(true);
+    expect(r.ready).toBe(true);
+  });
+
+  it('the SAME review fails the full (contract) gate — it is missing rekomendasi (PF-6)', () => {
+    const r = checkCloseReadiness({ ...base, review: reducedReview, reducedReview: false });
+    expect(r.reviewComplete).toBe(false);
+  });
+
+  it('still requires its three fields — a missing client talking-points is incomplete', () => {
+    const r = checkCloseReadiness({
+      ...base,
+      review: { ...reducedReview, materiKlien: '  ' },
+      reducedReview: true,
+    });
+    expect(r.reviewComplete).toBe(false);
+  });
+});
+
 const URL = process.env.DATABASE_URL;
 const describeDb = describe.skipIf(!URL);
 
@@ -374,6 +427,7 @@ afterAll(async () => {
 afterEach(async () => {
   if (!sql) return;
   await sql`delete from plan where created_by like 'ZZ-%'`;
+  await sql`delete from plan_satuan where created_by like 'ZZ-%'`;
   await sql`truncate strategi_version`;
   await sql`delete from strategi where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
@@ -1892,5 +1946,161 @@ describeDb('B-09 scheduled jobs (§9)', () => {
     const r = await runPlanTick(sql, '2026-09-10');
     expect(r.realisasiBelumLengkap).not.toContain(id);
     expect(await notifCount('ZZ-AM', id, 'plan_realisasi_belum_lengkap')).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-10 — Plan Satuan (M6C §7): open / join / dormancy machine #17
+// ---------------------------------------------------------------------------
+
+/** Insert one Plan Satuan period directly (lingkup=klien, no contract/strategi). */
+async function seedKlienPeriod(
+  clientId: string,
+  opts: { periodeNo?: number; status?: string } = {},
+): Promise<string> {
+  return seedPeriod({ clientId, contractId: null, strategiId: null }, {
+    lingkup: 'klien',
+    periodeNo: opts.periodeNo ?? 1,
+    status: opts.status ?? 'Aktif',
+  });
+}
+
+describeDb('machine #17 (plan_satuan dormancy)', () => {
+  it('is registered Aktif ⇄ Dorman, and is deliberately NOT terminal', async () => {
+    const m = await sql<{ initial_state: string }[]>`
+      select initial_state from sm_machines where name = 'plan_satuan'`;
+    expect(m[0]?.initial_state).toBe('Aktif');
+    const term = await sql<{ state: string }[]>`
+      select state from sm_terminal_states where machine = 'plan_satuan'`;
+    expect(term).toHaveLength(0); // Dorman can wake again — never terminal
+    const edges = await sql<{ from_state: string; to_state: string }[]>`
+      select from_state, to_state from sm_edges where machine = 'plan_satuan'
+       order by from_state`;
+    expect(edges).toEqual([
+      { from_state: 'Aktif', to_state: 'Dorman' },
+      { from_state: 'Dorman', to_state: 'Aktif' },
+    ]);
+  });
+
+  it('carries the di_luar_service flag jenis (M6C §7.9 analogue)', async () => {
+    // A klien period can flag a scope-creep row as di_luar_service.
+    const clientId = await seedClient();
+    const p = await seedKlienPeriod(clientId, { status: 'Aktif' });
+    await expect(
+      sql`insert into plan_flag (plan_id, jenis, detail, created_by)
+          values (${p}, 'di_luar_service', 'baris tak memetakan ke service', 'ZZ-AM')`,
+    ).resolves.toBeDefined();
+  });
+});
+
+describeDb('Plan Satuan — open / join / reactivate (Rule 6/8)', () => {
+  const today = '2026-08-12';
+  const open = (clientId: string) =>
+    withTransaction(sql, (tx) => openOrJoinPlanSatuanTx(tx, am(), clientId, today));
+
+  it('opens the chain on the first butuh_plan service (Rule 6): period 1 Draft, klien, no parent', async () => {
+    const clientId = await seedClient();
+    const r = await open(clientId);
+    expect(r.action).toBe('dibuka');
+
+    const chain = await getPlanSatuan(sql, clientId);
+    expect(chain).not.toBeNull();
+    expect(chain!.statusDormansi).toBe('Aktif');
+    expect(chain!.tanggalMulaiSiklus).toBe(today);
+
+    const p = await getPlan(sql, director(), r.planId);
+    expect(p.lingkup).toBe('klien');
+    expect(p.contractId).toBeNull();
+    expect(p.strategiId).toBeNull();
+    expect(p.periodeNo).toBe(1);
+    expect(p.status).toBe('Draft'); // period 1 alone needs SPV approval (Rule 10)
+  });
+
+  it('a second service JOINS the current period — one Plan per client, never a second (S2)', async () => {
+    const clientId = await seedClient();
+    const first = await open(clientId);
+    const second = await open(clientId);
+    expect(second.action).toBe('digabung');
+    expect(second.planId).toBe(first.planId); // same period, not a new one
+
+    const chains = await sql<{ n: number }[]>`
+      select count(*)::int as n from plan_satuan where client_id = ${clientId}`;
+    expect(chains[0].n).toBe(1);
+    const periods = await sql<{ n: number }[]>`
+      select count(*)::int as n from plan where client_id = ${clientId} and lingkup = 'klien'`;
+    expect(periods[0].n).toBe(1);
+  });
+
+  it('reactivates a Dorman chain with a fresh LATER period (Rule 8), keeping one continuous history', async () => {
+    const clientId = await seedClient();
+    await sql`insert into plan_satuan (client_id, tanggal_mulai_siklus, status_dormansi, created_by)
+              values (${clientId}, ${today}, 'Dorman', 'ZZ-AM')`;
+    await seedKlienPeriod(clientId, { periodeNo: 1, status: 'Ditutup' }); // the closed history
+
+    const r = await open(clientId);
+    expect(r.action).toBe('direaktivasi');
+    expect((await getPlanSatuan(sql, clientId))!.statusDormansi).toBe('Aktif');
+
+    const p = await getPlan(sql, director(), r.planId);
+    expect(p.periodeNo).toBe(2); // continues the chain, not a new one
+    expect(p.status).toBe('Terjadwal'); // a later period auto-activates (Rule 10 / B-09)
+  });
+});
+
+describeDb('markPlanSatuanDormant (machine #17 Aktif → Dorman, §10 job c)', () => {
+  const today = '2026-08-12';
+
+  it('refuses while a period is still running, then flips once all are closed', async () => {
+    const clientId = await seedClient();
+    await sql`insert into plan_satuan (client_id, tanggal_mulai_siklus, status_dormansi, created_by)
+              values (${clientId}, ${today}, 'Aktif', 'ZZ-AM')`;
+    const p = await seedKlienPeriod(clientId, { periodeNo: 1, status: 'Aktif' });
+
+    await expect(markPlanSatuanDormant(sql, am(), clientId)).rejects.toThrow(
+      MSG_PLAN_SATUAN_ACTIVE_PERIOD,
+    );
+
+    // Close the period (raw, as the DB state after a real close) → now it may sleep.
+    await sql`update plan set status = 'Ditutup' where id = ${p}`;
+    const chain = await markPlanSatuanDormant(sql, am(), clientId);
+    expect(chain.statusDormansi).toBe('Dorman');
+  });
+
+  it('is a not-found for a client with no Plan Satuan chain', async () => {
+    const clientId = await seedClient();
+    await expect(markPlanSatuanDormant(sql, am(), clientId)).rejects.toThrow(
+      MSG_PLAN_SATUAN_NOT_FOUND,
+    );
+  });
+});
+
+describeDb('closePlanPeriode — reduced review for Plan Satuan (M6C §7)', () => {
+  it('closes a klien period on the four-field review — no rekomendasi/diagnosa required', async () => {
+    const clientId = await seedClient();
+    const p = await seedKlienPeriod(clientId, { periodeNo: 1, status: 'Aktif' });
+    const rid = await seedRow(p, 100);
+    await seedTarget(p, { nilaiStrategi: 100000000 });
+    await setRowStatus(sql, am(), rid, 'Selesai');
+    await recordManualActual(sql, am(), p, 'Shopee', 'gmv', 120000000, BUKTI_CLOSE);
+    // Only the three reduced fields — a contract review would reject this.
+    await savePlanReview(sql, am(), p, {
+      yangJalan: 'kampanye jalan',
+      yangTidakJalan: 'kreator telat',
+      materiKlien: 'ROAS 4.6',
+    });
+    const plan = await closePlanPeriode(sql, am(), p);
+    expect(plan.status).toBe('Ditutup');
+  });
+
+  it('still requires the three reduced fields — a missing client talking-points blocks close', async () => {
+    const clientId = await seedClient();
+    const p = await seedKlienPeriod(clientId, { periodeNo: 1, status: 'Aktif' });
+    const rid = await seedRow(p, 100);
+    await seedTarget(p, { nilaiStrategi: 100000000 });
+    await setRowStatus(sql, am(), rid, 'Selesai');
+    await recordManualActual(sql, am(), p, 'Shopee', 'gmv', 120000000, BUKTI_CLOSE);
+    await savePlanReview(sql, am(), p, { yangJalan: 'x', yangTidakJalan: 'y' }); // no materiKlien
+    await expect(closePlanPeriode(sql, am(), p)).rejects.toThrow(MSG_CLOSE_REVIEW_INCOMPLETE);
+    expect(await statusOf(p)).toBe('Aktif');
   });
 });

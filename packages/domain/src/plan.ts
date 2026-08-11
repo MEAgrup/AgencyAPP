@@ -162,6 +162,14 @@ export const MSG_CARRYOVER_ALREADY_DECIDED =
 export const MSG_CARRYOVER_NO_TARGET =
   '[tidak ada periode berikutnya yang dapat menerima baris terbawa]';
 
+// --- B-10: Plan Satuan (M6C §7) -----------------------------------------
+
+/** The client has no Plan Satuan chain on record. */
+export const MSG_PLAN_SATUAN_NOT_FOUND = '[Plan Satuan klien tidak ditemukan]';
+/** Dormancy (machine #17) cannot be entered while a period is still running. */
+export const MSG_PLAN_SATUAN_ACTIVE_PERIOD =
+  '[Plan Satuan tidak dapat didormankan selagi ada periode berjalan]';
+
 // ---------------------------------------------------------------------------
 // Shape — one interface per table, camelCase (the wire boundary snake_cases)
 // ---------------------------------------------------------------------------
@@ -1817,10 +1825,28 @@ function rowClosed(status: PlanRow['statusBaris'], alasan: string | null): boole
   return false; // Rencana / Jalan are not terminal
 }
 
-/** The P-F review carries every own W field, with Diagnosa Gap only when required. */
-function reviewComplete(review: PlanReview | null, requireDiagnosa: boolean): boolean {
+/**
+ * The P-F review carries every own W field, with Diagnosa Gap only when required.
+ *
+ * **`reduced` (Plan Satuan, M6C §7).** A `lingkup='klien'` Plan has no Strategi,
+ * so its review is the four-field cut: what worked (PF-1), what didn't (PF-2),
+ * carry-over, client talking points (PF-8) — and NO strategy-vs-execution
+ * diagnosis (PF-3), because there is no strategy to blame. Carry-over is the
+ * per-row B-08 mechanism (decided post-close), not a review column, so the three
+ * enforceable text fields are `yangJalan`, `yangTidakJalan`, `materiKlien`. The
+ * strategy-facing PF-6/PF-7 (recommendation + revise-flag) are dropped with the
+ * diagnosis — they only make sense against a Strategi.
+ */
+function reviewComplete(
+  review: PlanReview | null,
+  requireDiagnosa: boolean,
+  reduced: boolean,
+): boolean {
   if (review === null) return false;
   const filled = (s: string | null): boolean => (s ?? '').trim() !== '';
+  if (reduced) {
+    return filled(review.yangJalan) && filled(review.yangTidakJalan) && filled(review.materiKlien);
+  }
   if (
     !filled(review.yangJalan) ||
     !filled(review.yangTidakJalan) ||
@@ -1861,6 +1887,8 @@ export function checkCloseReadiness(input: {
   actuals: Pick<PlanActual, 'channel' | 'metric' | 'sumber' | 'nilai'>[];
   rows: Pick<PlanRow, 'statusBaris' | 'statusBarisAlasan'>[];
   review: PlanReview | null;
+  /** Plan Satuan (`lingkup='klien'`): the reduced four-field P-F (M6C §7). */
+  reducedReview?: boolean;
 }): CloseReadiness {
   // 1. Manual GMV per channel: every channel with a GMV target has a manual GMV
   //    actual. A period with no GMV target is vacuously complete.
@@ -1886,7 +1914,7 @@ export function checkCloseReadiness(input: {
     .reduce((s, a) => s + a.nilai, 0);
   const varianceNegative = actualGmv < targetGmv;
 
-  const reviewOk = reviewComplete(input.review, varianceNegative);
+  const reviewOk = reviewComplete(input.review, varianceNegative, input.reducedReview ?? false);
 
   return {
     gmvComplete,
@@ -1922,7 +1950,11 @@ function rowToPlanReview(r: PlanReviewDbRow): PlanReview {
 }
 
 /** Read the child rows a close check needs, inside the caller's transaction. */
-async function loadCloseReadiness(tx: TransactionSql, planId: string): Promise<CloseReadiness> {
+async function loadCloseReadiness(
+  tx: TransactionSql,
+  planId: string,
+  reducedReview: boolean,
+): Promise<CloseReadiness> {
   const targets = await tx<{ channel: string; metric: string; nilai_dipakai: string | number }[]>`
     select channel, metric, nilai_dipakai from plan_target where plan_id = ${planId}`;
   const actuals = await tx<
@@ -1946,6 +1978,7 @@ async function loadCloseReadiness(tx: TransactionSql, planId: string): Promise<C
     })),
     rows: rows.map((r) => ({ statusBaris: r.status_baris, statusBarisAlasan: r.status_baris_alasan })),
     review: review.length === 0 ? null : rowToPlanReview(review[0]),
+    reducedReview,
   });
 }
 
@@ -2105,7 +2138,8 @@ export async function closePlanPeriode(sql: Sql, actor: Actor, planId: string): 
     if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
     if (plan.status !== PLAN_AKTIF) throw new ConflictError(MSG_CLOSE_STATUS);
 
-    const r = await loadCloseReadiness(tx, planId);
+    // Plan Satuan (`lingkup='klien'`) closes against the reduced four-field P-F.
+    const r = await loadCloseReadiness(tx, planId, plan.lingkup === 'klien');
     if (!r.gmvComplete) throw new ValidationError(MSG_CLOSE_GMV_INCOMPLETE);
     if (!r.rowsTerminal) throw new ValidationError(MSG_CLOSE_ROWS_NOT_TERMINAL);
     if (!r.reviewComplete) throw new ValidationError(MSG_CLOSE_REVIEW_INCOMPLETE);
@@ -2642,4 +2676,287 @@ export async function runPlanTick(sql: Sql, today: string): Promise<PlanTickResu
   await sweepBelumDieksekusi(sql, today, res);
   await sweepRealisasiBelumLengkap(sql, today, res);
   return res;
+}
+
+// ---------------------------------------------------------------------------
+// B-10 — Plan Satuan (M6C §7): the client-scoped Plan and its dormancy machine
+// ---------------------------------------------------------------------------
+//
+// A `ditentukan_am` service the AM decides needs a Plan does NOT get a Strategi
+// (S1) — it joins a single, continuous, per-client `PLAN` chain (`lingkup='klien'`,
+// `contract_id`/`strategi_id` NULL). Rule 6: the first such service OPENS the
+// chain; every later one JOINS the current open period, never a second Plan.
+//
+// Dormancy is a property of the CHAIN, not of any one period (that is why it does
+// not live on `plan`: a per-period `status_dormansi` would be n copies of one
+// fact, and there is no active period to carry it when the chain sleeps). It
+// lives on `plan_satuan` (PK client_id) and moves only through machine #17
+// (`Aktif ⇄ Dorman`) — the same `sm_transition` contract the period machine #16
+// uses, on a different table + status column.
+//
+// Deliberately deferred (documented seams, matching how B-01..B-09 split work):
+//   * Ongoing monthly period generation for an active chain — B-10 opens period 1
+//     at open and one fresh period at reactivation; the rolling cadence is a job.
+//   * The daily dormancy sweep (§10 job c) — `markPlanSatuanDormant` is the write
+//     path; the automatic "last service ended" trigger is the job's, like B-09.
+//   * `plan_row` seeding — channel/pilar are not in the gate, so inventing them is
+//     the same "never invent" trap B-02 avoided; rows are filled via the form.
+
+const MACHINE_PLAN_SATUAN = 'plan_satuan';
+const PLAN_SATUAN_AKTIF = 'Aktif';
+const PLAN_SATUAN_DORMAN = 'Dorman';
+
+export type PlanSatuanStatus = 'Aktif' | 'Dorman';
+
+export interface PlanSatuan {
+  clientId: string;
+  tanggalMulaiSiklus: string;
+  statusDormansi: PlanSatuanStatus;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+}
+
+interface PlanSatuanDbRow {
+  client_id: string;
+  tanggal_mulai_siklus: string | Date;
+  status_dormansi: PlanSatuanStatus;
+  created_at: string | Date;
+  updated_at: string | Date;
+  created_by: string;
+}
+
+function rowToPlanSatuan(r: PlanSatuanDbRow): PlanSatuan {
+  return {
+    clientId: r.client_id,
+    tanggalMulaiSiklus: isoDate(r.tanggal_mulai_siklus),
+    statusDormansi: r.status_dormansi,
+    createdAt: iso(r.created_at),
+    updatedAt: iso(r.updated_at),
+    createdBy: r.created_by,
+  };
+}
+
+/** getPlanSatuan reads a client's Plan Satuan chain header, or null if none. */
+export async function getPlanSatuan(sql: Queryable, clientId: string): Promise<PlanSatuan | null> {
+  const rows = await sql<PlanSatuanDbRow[]>`select * from plan_satuan where client_id = ${clientId}`;
+  return rows.length === 0 ? null : rowToPlanSatuan(rows[0]);
+}
+
+/** The start date of the k-th anniversary month, recomputed from the frozen
+ *  cycle anchor (same clamp math as `computePeriods`, Rule 17). */
+function anniversaryStart(cycleStart: string, k: number): string {
+  const [cy, cm, cd] = cycleStart.split('-').map(Number);
+  const monthZero = cm - 1 + k;
+  const y = cy + Math.floor(monthZero / 12);
+  const m = (((monthZero % 12) + 12) % 12) + 1;
+  const d = Math.min(cd, daysInMonth(y, m));
+  return fmt(y, m, d);
+}
+
+/**
+ * anniversaryWindowContaining returns the anniversary-month window that `today`
+ * falls in, anchored on `cycleStart`. A Plan Satuan can sleep for months, so its
+ * fresh period on reactivation is not "cycleStart + 1 month" — it is the current
+ * anniversary window, keeping the frozen cadence (Rule 7/17) instead of drifting
+ * the anchor to the reactivation date.
+ */
+function anniversaryWindowContaining(
+  cycleStart: string,
+  today: string,
+): { tanggalMulai: string; tanggalAkhir: string; jumlahMinggu: number } {
+  for (let k = 0; k < 1200; k += 1) {
+    const start = anniversaryStart(cycleStart, k);
+    const nextStart = anniversaryStart(cycleStart, k + 1);
+    if (today < nextStart) {
+      // today is within window k (today >= cycleStart on every real call). String
+      // comparison is chronological for zero-padded YYYY-MM-DD.
+      const tanggalAkhir = dayBefore(nextStart);
+      const days = daysInclusive(start, tanggalAkhir);
+      const jumlahMinggu = Math.min(6, Math.max(4, Math.floor(days / 7)));
+      return { tanggalMulai: start, tanggalAkhir, jumlahMinggu };
+    }
+  }
+  throw new Error(`anniversaryWindowContaining: today ${today} terlalu jauh dari ${cycleStart}`);
+}
+
+/** The result of opening / joining / reactivating a Plan Satuan (Rule 6/8). */
+export interface OpenOrJoinResult {
+  /** The period the service is now attached to (`service_plan_gate.plan_id`). */
+  planId: string;
+  action: 'dibuka' | 'digabung' | 'direaktivasi';
+}
+
+/** Insert one Plan Satuan period. Period 1 is born `Draft` (SPV approval, Rule
+ *  10); a reactivation period is a *later* period and is born `Terjadwal`
+ *  (auto-activated by the B-09 job when its window is current). */
+async function openPlanSatuanPeriodeTx(
+  tx: TransactionSql,
+  actor: Actor,
+  clientId: string,
+  cycleStart: string,
+  periodeNo: number,
+  today: string,
+): Promise<string> {
+  const w = anniversaryWindowContaining(cycleStart, today);
+  const status = periodeNo === 1 ? PLAN_DRAFT : PLAN_TERJADWAL;
+  const ex = executors(tx);
+  const id = await ident.nextId(ex.ident, 'PLAN', new Date(`${today}T00:00:00Z`));
+  await tx`
+    insert into plan
+      (id, lingkup, contract_id, client_id, strategi_id, periode_no,
+       tanggal_mulai, tanggal_akhir, jumlah_minggu, status, created_by)
+    values
+      (${id}, 'klien', null, ${clientId}, null, ${periodeNo},
+       ${w.tanggalMulai}, ${w.tanggalAkhir}, ${w.jumlahMinggu}, ${status}, ${actor.employeeId})`;
+  await ex.audit.insertAudit({
+    entityType: ENTITY_PLAN,
+    entityId: id,
+    actorEmployeeId: actor.employeeId,
+    action: 'generate',
+    beforeJson: null,
+    afterJson: {
+      lingkup: 'klien',
+      client_id: clientId,
+      periode_no: periodeNo,
+      tanggal_mulai: w.tanggalMulai,
+      tanggal_akhir: w.tanggalAkhir,
+      status,
+    },
+    createdBy: actor.employeeId,
+  });
+  return id;
+}
+
+/**
+ * openOrJoinPlanSatuanTx closes Rule 6, inside the caller's transaction (the gate
+ * decision). Given a client and the joining service, it:
+ *   - opens the chain if the client has none (`plan_satuan` row + period 1);
+ *   - reactivates a `Dorman` chain (machine #17 `Dorman → Aktif`) with a fresh
+ *     period;
+ *   - otherwise joins the current open period — never a second Plan (S2).
+ *
+ * Returns the period the service attaches to; the gate writes it to
+ * `service_plan_gate.plan_id`. The `plan_satuan` row is locked FOR UPDATE so two
+ * concurrent determinations for one client cannot each "open" a chain.
+ */
+export async function openOrJoinPlanSatuanTx(
+  tx: TransactionSql,
+  actor: Actor,
+  clientId: string,
+  today: string,
+): Promise<OpenOrJoinResult> {
+  const chainRows = await tx<PlanSatuanDbRow[]>`
+    select * from plan_satuan where client_id = ${clientId} for update`;
+
+  // No chain yet → open it (Rule 6, S2). Cycle anchor = today (Flow step 5).
+  if (chainRows.length === 0) {
+    await tx`
+      insert into plan_satuan (client_id, tanggal_mulai_siklus, status_dormansi, created_by)
+      values (${clientId}, ${today}, ${PLAN_SATUAN_AKTIF}, ${actor.employeeId})`;
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: 'plan_satuan',
+      entityId: clientId,
+      actorEmployeeId: actor.employeeId,
+      action: 'buka',
+      beforeJson: null,
+      afterJson: { tanggal_mulai_siklus: today, status_dormansi: PLAN_SATUAN_AKTIF },
+      createdBy: actor.employeeId,
+    });
+    const planId = await openPlanSatuanPeriodeTx(tx, actor, clientId, today, 1, today);
+    return { planId, action: 'dibuka' };
+  }
+
+  const chain = rowToPlanSatuan(chainRows[0]);
+  const maxRows = await tx<{ max: number | null }[]>`
+    select max(periode_no)::int as max from plan
+     where client_id = ${clientId} and lingkup = 'klien'`;
+  const nextPeriodeNo = (maxRows[0].max ?? 0) + 1;
+
+  // Dormant → reactivate the SAME chain (Rule 8) with a fresh later period.
+  if (chain.statusDormansi === PLAN_SATUAN_DORMAN) {
+    const res = await statemachine.transition(executors(tx).sm, {
+      machine: MACHINE_PLAN_SATUAN,
+      entityType: 'plan_satuan',
+      table: 'plan_satuan',
+      idColumn: 'client_id',
+      statusColumn: 'status_dormansi',
+      entityId: clientId,
+      to: PLAN_SATUAN_AKTIF,
+      actor,
+    });
+    if (!res.ok) throw new ConflictError(res.message);
+    const planId = await openPlanSatuanPeriodeTx(
+      tx,
+      actor,
+      clientId,
+      chain.tanggalMulaiSiklus,
+      nextPeriodeNo,
+      today,
+    );
+    return { planId, action: 'direaktivasi' };
+  }
+
+  // Active → join the current open (non-terminal) period. Defensive fallback: an
+  // active chain with every period already closed opens a fresh one rather than
+  // leaving the service unattached.
+  const openRows = await tx<{ id: string }[]>`
+    select id from plan
+     where client_id = ${clientId} and lingkup = 'klien'
+       and status not in ('Ditutup', 'Ditutup Otomatis')
+     order by periode_no desc limit 1`;
+  if (openRows.length > 0) {
+    return { planId: openRows[0].id, action: 'digabung' };
+  }
+  const planId = await openPlanSatuanPeriodeTx(
+    tx,
+    actor,
+    clientId,
+    chain.tanggalMulaiSiklus,
+    nextPeriodeNo,
+    today,
+  );
+  return { planId, action: 'dibuka' };
+}
+
+/**
+ * markPlanSatuanDormant drives the chain `Aktif → Dorman` (machine #17, §10 job
+ * c) — the write path the daily "last service ended" sweep calls. It refuses
+ * while any period is still running (`Aktif`/`Draft`/`Diajukan`/`Menunggu`/
+ * `Terjadwal`): a chain cannot sleep with live work, and dormancy exists exactly
+ * for the state where there is none. Detecting that the last service ended is the
+ * job's job; this enforces the safe precondition.
+ */
+export async function markPlanSatuanDormant(
+  sql: Sql,
+  actor: Actor,
+  clientId: string,
+): Promise<PlanSatuan> {
+  return withTransaction(sql, async (tx) => {
+    const rows = await tx<PlanSatuanDbRow[]>`
+      select * from plan_satuan where client_id = ${clientId} for update`;
+    if (rows.length === 0) throw new NotFoundError(MSG_PLAN_SATUAN_NOT_FOUND);
+
+    const running = await tx<{ n: number }[]>`
+      select count(*)::int as n from plan
+       where client_id = ${clientId} and lingkup = 'klien'
+         and status not in ('Ditutup', 'Ditutup Otomatis')`;
+    if (running[0].n > 0) throw new ConflictError(MSG_PLAN_SATUAN_ACTIVE_PERIOD);
+
+    const res = await statemachine.transition(executors(tx).sm, {
+      machine: MACHINE_PLAN_SATUAN,
+      entityType: 'plan_satuan',
+      table: 'plan_satuan',
+      idColumn: 'client_id',
+      statusColumn: 'status_dormansi',
+      entityId: clientId,
+      to: PLAN_SATUAN_DORMAN,
+      actor,
+    });
+    if (!res.ok) throw new ConflictError(res.message);
+
+    const after = await tx<PlanSatuanDbRow[]>`select * from plan_satuan where client_id = ${clientId}`;
+    return rowToPlanSatuan(after[0]);
+  });
 }
