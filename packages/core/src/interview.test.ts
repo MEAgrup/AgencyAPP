@@ -19,6 +19,7 @@ import {
   STRATEGI_FLAG,
   VERDICT,
   FLAG,
+  buildStrategiPrefill,
   handoffKeStrategi,
   hitungBepRoas,
   hitungKualifikasi,
@@ -420,6 +421,47 @@ describe('prefill mapping never touches the Strategi Section B numeric baseline'
   });
   it('B2-8 (gross margin) maps to A-3, and net margin B2-7 is not a prefill source', () => {
     expect(PREFILL_MAPPING.find((e) => e.strategiField === 'A-3')?.interviewField).toBe('B2-8');
+  });
+});
+
+describe('buildStrategiPrefill — Section A only, baseline never touched', () => {
+  it('projects answered fields onto their mapped Strategi target', () => {
+    const out = buildStrategiPrefill([
+      { fieldKey: 'B2-8', value: 35 }, // -> A-3 (gross margin)
+      { fieldKey: 'B6-2', value: 'Naik kelas ke top 3 kategori' }, // -> A-9 verbatim
+    ]);
+    const a3 = out.find((r) => r.strategiField === 'A-3');
+    expect(a3?.value).toBe(35);
+    expect(a3?.interviewField).toBe('B2-8');
+    expect(a3?.catatan).toBe('margin KOTOR (not net)');
+    expect(out.find((r) => r.strategiField === 'A-9')?.value).toBe('Naik kelas ke top 3 kategori');
+  });
+
+  it('never emits a Strategi Section B numeric baseline target for ANY answer set', () => {
+    // Feed an answer for every interview field the mapping knows about — the
+    // output must still contain zero baseline (B-1..B-8) targets.
+    const answers = PREFILL_MAPPING.map((e) => ({ fieldKey: e.interviewField, value: 'x' }));
+    const out = buildStrategiPrefill(answers);
+    for (const r of out) {
+      expect(isStrategiBaselineForbidden(r.strategiField)).toBe(false);
+    }
+  });
+
+  it('skips blank/absent answers (no empty-string prefill)', () => {
+    const out = buildStrategiPrefill([
+      { fieldKey: 'B2-8', value: null },
+      { fieldKey: 'B6-2', value: undefined },
+    ]);
+    expect(out).toHaveLength(0);
+  });
+
+  it('one Strategi field can gather several answered sources (A-10 <- B1-9 + B10-1)', () => {
+    const out = buildStrategiPrefill([
+      { fieldKey: 'B1-9', value: 'pernah dengan agensi X' },
+      { fieldKey: 'B10-1', value: 'kontrak berakhir 2025' },
+    ]);
+    const a10 = out.filter((r) => r.strategiField === 'A-10');
+    expect(a10.map((r) => r.interviewField).sort()).toEqual(['B1-9', 'B10-1']);
   });
 });
 

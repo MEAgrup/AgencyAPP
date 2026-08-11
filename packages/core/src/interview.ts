@@ -978,3 +978,55 @@ export function handoffKeStrategi(verdict: Verdict): HandoffKeStrategi {
       };
   }
 }
+
+/** One answered Interview field offered to the Strategi form. */
+export interface PrefillAnswer {
+  fieldKey: string;
+  value: unknown;
+}
+
+/** One prefill suggestion for a Strategi field, drawn from an Interview answer. */
+export interface PrefillResult {
+  interviewField: string;
+  strategiField: string;
+  value: unknown;
+  catatan?: string;
+}
+
+/**
+ * buildStrategiPrefill projects Interview answers onto the Strategi fields
+ * `PREFILL_MAPPING` says they may seed. It is the READ the Strategi form uses to
+ * pre-populate a Draft; the AM still reviews and autosaves, and nothing here
+ * writes the numeric Section B baseline — that guard is the point of this
+ * function existing rather than the FE walking `PREFILL_MAPPING` itself:
+ *
+ *  1. `isStrategiBaselineForbidden` filters any target that is a Section B
+ *     baseline (`B-1`…`B-8`). `PREFILL_MAPPING` never names one, so this is
+ *     belt-and-suspenders — but it is the belt a future mapping edit trips over.
+ *  2. Only fields the Interview actually answered produce a suggestion; a blank
+ *     answer yields nothing (never an empty-string prefill masquerading as data).
+ *
+ * Multiple Interview fields may target one Strategi field (`A-10` ← `B1-9`+`B10-1`,
+ * `A-11` ← `B8-1`…`B8-6`); each answered source yields its own row and the form
+ * merges them. `A-3` is the GROSS margin (`B2-8`), never net (`B2-7`) — see the
+ * `catatan` carried through from `PREFILL_MAPPING`.
+ */
+export function buildStrategiPrefill(answers: readonly PrefillAnswer[]): PrefillResult[] {
+  const byField = new Map<string, unknown>();
+  for (const a of answers) {
+    if (a.value === null || a.value === undefined) continue;
+    if (!byField.has(a.fieldKey)) byField.set(a.fieldKey, a.value);
+  }
+  const out: PrefillResult[] = [];
+  for (const e of PREFILL_MAPPING) {
+    if (isStrategiBaselineForbidden(e.strategiField)) continue;
+    if (!byField.has(e.interviewField)) continue;
+    out.push({
+      interviewField: e.interviewField,
+      strategiField: e.strategiField,
+      value: byField.get(e.interviewField),
+      ...(e.catatan ? { catatan: e.catatan } : {}),
+    });
+  }
+  return out;
+}

@@ -3145,6 +3145,11 @@ export interface StrategiWire {
   catatan_reviewer: string | null;
   created_by: string;
   created_at: string;
+  // Blok D handoff (Interview langkah 8) — provenance + advisory flags.
+  sumber: string;
+  interview_id: string | null;
+  interview_version: number | null;
+  blok_d_flags: string[];
   // Section A — Konteks Klien & Bisnis (A-05). Nullable because the record is
   // born `Draft` and the form autosaves; presence is a submit-gate concern.
   nama_brand: string | null;
@@ -3224,6 +3229,10 @@ export function strategiToWire(s: strategi.Strategi): StrategiWire {
     catatan_reviewer: s.catatanReviewer,
     created_by: s.createdBy,
     created_at: s.createdAt,
+    sumber: s.sumber,
+    interview_id: s.interviewId,
+    interview_version: s.interviewVersion,
+    blok_d_flags: s.blokDFlags,
     nama_brand: s.namaBrand,
     kategori_utama: s.kategoriUtama,
     sub_kategori: s.subKategori,
@@ -3959,6 +3968,12 @@ export function strategiHeaderFromWire(v: unknown): strategi.StrategiHeaderInput
       b.toleransi_over_persen === undefined || b.toleransi_over_persen === null
         ? null
         : Number(b.toleransi_over_persen),
+    // Blok D handoff (Interview langkah 8) — optional; when the create body names
+    // an Interview the row is stamped with its provenance + advisory flags.
+    interviewId:
+      b.interview_id === undefined || b.interview_id === null || b.interview_id === ''
+        ? null
+        : String(b.interview_id),
   };
 }
 

@@ -117,3 +117,65 @@ BEGIN
                     'EMP-0001');
     END IF;
 END $$;
+
+-- ============================================================================
+-- 6) Klien Alpha Digital + Interview "Kelola Klien" terskoring (Modul Interview
+--    langkah 9). Klien via ident_next('CLI'), Interview via ident_next('ITV');
+--    dua-duanya guarded (idempoten, seed 2× konvergen). Klien dipegang Sinta
+--    (EMP-0002, Account Manager), closing oleh Budi (EMP-0001, Sales).
+--
+--    Kualifikasi di-seed dengan angka DARI kontrak core: klien "perfect" pada
+--    packages/core/src/interview.test.ts ("perfect client → growth_ready at 100")
+--    — {A:30,B:20,C:20,D:15,E:15} = 100, verdict growth_ready, tanpa deal-breaker,
+--    kualitas terverifikasi. BUKAN skor karangan: ia mencerminkan hasil scorer
+--    yang SATU itu (aturan rumah #4). Verdict advisory (Blok D): tidak ada gate.
+-- ============================================================================
+DO $$
+DECLARE
+    v_client text;
+    v_itv    text;
+BEGIN
+    -- Klien — guard per nama toko.
+    SELECT id INTO v_client FROM clients WHERE toko = 'Alpha Digital';
+    IF v_client IS NULL THEN
+        v_client := ident_next('CLI', now());
+        INSERT INTO clients
+            (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
+             total_sales, sales_pic_id, commission_payment_pic_id, assigned_am_id,
+             released_to_account_at, created_by)
+            VALUES (v_client, 'Rani', 'Alpha Digital', 'Bandung',
+                    'https://shopee.co.id/alpha', 'Home Living', 0, 0, 0,
+                    'EMP-0001', 'EMP-0001', 'EMP-0002', now(), 'EMP-0002');
+        INSERT INTO audit_log (entity_type, entity_id, actor_employee_id, action, after_json, created_by)
+            VALUES ('client', v_client, 'EMP-0002', 'create',
+                    jsonb_build_object('toko', 'Alpha Digital', 'assigned_am_id', 'EMP-0002'),
+                    'EMP-0002');
+    END IF;
+
+    -- Interview — guard per klien (satu interview fixture cukup).
+    IF NOT EXISTS (SELECT 1 FROM interview WHERE client_id = v_client) THEN
+        v_itv := ident_next('ITV', now());
+        INSERT INTO interview
+            (id, client_id, am_pengisi_id, sales_closing_id, status, versi_no,
+             interview_profile, created_by)
+            VALUES (v_itv, v_client, 'EMP-0002', 'EMP-0001', 'Selesai', 1,
+                    'full_management', 'EMP-0002');
+        -- Kualifikasi (growth_ready @ 100) — angka mengikuti fixture core.
+        INSERT INTO interview_kualifikasi
+            (interview_id, skor_kualifikasi, skor_per_blok, verdict_kualifikasi,
+             hambatan_mendasar, prasyarat_status, margin_bersih, margin_bersih_basis,
+             margin_kotor, kualitas_data, bep_roas, rasio_target, config_snapshot,
+             dihitung_oleh)
+            VALUES (v_itv, 100,
+                    jsonb_build_object('A', 30, 'B', 20, 'C', 20, 'D', 15, 'E', 15),
+                    'growth_ready', '[]'::jsonb, 'selesai', 35.00, 'bersih_klien',
+                    45.00, 'terverifikasi', 2.86, 2.00,
+                    jsonb_build_object('seed', true, 'source', 'core perfect-client fixture'),
+                    'EMP-0002');
+        INSERT INTO audit_log (entity_type, entity_id, actor_employee_id, action, after_json, created_by)
+            VALUES ('interview', v_itv, 'EMP-0002', 'create',
+                    jsonb_build_object('client_id', v_client, 'versi_no', 1, 'status', 'Selesai',
+                                       'verdict_kualifikasi', 'growth_ready'),
+                    'EMP-0002');
+    END IF;
+END $$;

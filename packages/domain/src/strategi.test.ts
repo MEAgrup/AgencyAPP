@@ -21,9 +21,10 @@
  * ids unique per RUN — a fixed id would make "exactly these events" assertions
  * depend on run history (the trap HANDOFF_M6ABC_SESI1 §5 warns about).
  */
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { ident, permission, visibility } from '@cdps/core';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { ident, interview as iv, permission, visibility } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
+import * as interview from './interview';
 import { ALLOWED_DIVISIONS, ConflictError, ForbiddenError, ValidationError } from './account';
 import {
   MSG_AKSES_BLOCKER_DATE,
@@ -43,6 +44,8 @@ import {
   MSG_DIAGNOSA_INVALID_FIELD_ID,
   MSG_DIAGNOSA_MISSING,
   MSG_INCOMPLETE,
+  MSG_INTERVIEW_CLIENT_MISMATCH,
+  MSG_INTERVIEW_NOT_FOUND,
   MSG_KOMPETITOR_REQUIRED,
   MSG_LEADING_INDICATOR_MAX,
   MSG_LEADING_INDICATOR_REQUIRED,
@@ -269,6 +272,16 @@ afterEach(async () => {
   await sql`delete from strategi where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
+  // Interviews (Blok D handoff fixtures) are deleted AFTER strategi — a Strategi
+  // FK-references the interview it came from — and BEFORE clients, which the
+  // interview FK-references. interview_flag is append-only + ON DELETE CASCADE, so
+  // lift its freeze for teardown in case a fixture ever leaves one.
+  await sql`alter table interview_flag disable trigger trg_flag_frozen`;
+  try {
+    await sql`delete from interview where created_by like 'ZZ-%'`;
+  } finally {
+    await sql`alter table interview_flag enable trigger trg_flag_frozen`;
+  }
   await sql`delete from clients where created_by like 'ZZ-%'`;
 });
 
@@ -667,6 +680,129 @@ describeDb('createStrategi — Rule 1', () => {
     await expect(
       createStrategi(sql, am(), serviceId, { ...HEADER, tanggalAkhirKontrak: '2026-08-01' }),
     ).rejects.toThrow(ValidationError);
+  });
+});
+
+/**
+ * Blok D handoff (Interview langkah 8). The two rules the ticket names:
+ *  (a) the Section B numeric baseline is NEVER prefilled, and
+ *  (b) a `tidak_siap` verdict still opens a Strategi, carrying its flags.
+ * Plus the provenance stamping and the two ways a bad interviewId is refused.
+ */
+describeDb('createStrategi — Blok D handoff (Interview langkah 8)', () => {
+  // The interview FK-references real employees (am_pengisi_id, sales_closing_id);
+  // the Strategi fixtures only ever used ZZ-* as opaque strings, so seed the two
+  // the handoff needs. Cleaned in afterAll (interviews are gone by afterEach).
+  beforeAll(async () => {
+    if (!sql) return;
+    await sql`
+      insert into employees (employee_id, nama, email, divisi, jabatan, created_by)
+      values ('ZZ-AM', 'ZZ AM', 'zz-am@t.example', 'Account', 'Account Manager', 'ZZ-AM'),
+             ('ZZ-SALES', 'ZZ Sales', 'zz-sales@t.example', 'Sales', 'Sales', 'ZZ-AM')
+      on conflict (employee_id) do nothing`;
+  });
+  afterAll(async () => {
+    if (!sql) return;
+    await sql`delete from employees where employee_id like 'ZZ-%'`;
+  });
+
+  // A dropship business model is a deal-breaker → `tidak_siap`, the verdict that
+  // carries the most flags. Mirrors the interview.test fixture.
+  const dropshipInput = (): iv.KualifikasiInput => ({
+    marginBersih: 40,
+    marginBersihSumber: iv.SUMBER_ANGKA.KlienHitung,
+    aov: 20_000_000n,
+    ruangHarga: iv.RUANG_HARGA.MasihAdaRuang,
+    modelBisnis: iv.MODEL_BISNIS.Dropship,
+    kesanggupanLonjakan: iv.KESANGGUPAN_LONJAKAN.Sanggup,
+    siklusBeliUlang: iv.SIKLUS_BELI_ULANG.HabisPakai,
+    pembedaProduk: iv.PEMBEDA_PRODUK.PembedaJelas,
+    skuSiap: 40,
+    penangananChat: iv.PENANGANAN_CHAT.TimKhusus,
+    kecepatanApproval: iv.KECEPATAN_APPROVAL.SatuOrangJelas,
+    kesiapanAkses: iv.KESIAPAN_AKSES.Penuh,
+    omzet: 100_000_000n,
+    targetOmzet: 200_000_000n,
+    dayaTahanBudget: iv.DAYA_TAHAN_BUDGET.Enam,
+  });
+
+  async function clientOf(serviceId: string): Promise<string> {
+    const r = await sql<{ client_id: string }[]>`select client_id from services where id = ${serviceId}`;
+    return r[0].client_id;
+  }
+
+  /** Creates + scores a `tidak_siap` interview for a client; returns its id. */
+  async function scoredTidakSiap(clientId: string): Promise<string> {
+    const detail = await interview.createInterview(sql, am(), { clientId, salesClosingId: 'ZZ-SALES' });
+    const k = await interview.scoreInterview(sql, am(), detail.interview.id, dropshipInput());
+    expect(k.verdictKualifikasi).toBe('tidak_siap');
+    return detail.interview.id;
+  }
+
+  it('(b) a tidak_siap interview still opens a Strategi and carries its conservative flags', async () => {
+    const serviceId = await seedService();
+    const interviewId = await scoredTidakSiap(await clientOf(serviceId));
+
+    const s = await createStrategi(sql, am(), serviceId, { ...HEADER, interviewId });
+
+    // No verdict gate: the Strategi is born `Draft` like any other.
+    expect(s.status).toBe(STRATEGI_DRAFT);
+    expect(s.sumber).toBe('interview');
+    expect(s.interviewId).toBe(interviewId);
+    expect(s.interviewVersion).toBe(1);
+    // Flags are the SAME core contract the scorer uses — never re-decided here.
+    expect(new Set(s.blokDFlags)).toEqual(new Set(iv.handoffKeStrategi(iv.VERDICT.TidakSiap).flags));
+    expect(s.blokDFlags).toContain('sasaran_konservatif');
+    expect(s.blokDFlags).toContain('hambatan_mendasar_tercatat');
+
+    // The stamp survives a reload (persisted, not just returned).
+    const reloaded = await getStrategi(sql, am(), s.id);
+    expect(reloaded.sumber).toBe('interview');
+    expect(reloaded.blokDFlags).toContain('hambatan_mendasar_tercatat');
+  });
+
+  it('(a) the handoff never prefills the Section B numeric baseline', async () => {
+    const serviceId = await seedService();
+    const interviewId = await scoredTidakSiap(await clientOf(serviceId));
+
+    const s = await createStrategi(sql, am(), serviceId, { ...HEADER, interviewId });
+    const detail = await getStrategi(sql, am(), s.id);
+
+    // The handoff writes provenance + flags ONLY: no channel/baseline is
+    // auto-created and Section A stays null. The mapping-level guarantee lives in
+    // core (`buildStrategiPrefill` filters `isStrategiBaselineForbidden`), asserted
+    // here against every field the mapping can touch.
+    expect(detail.channels).toEqual([]);
+    expect(detail.namaBrand).toBeNull();
+    const answers = iv.PREFILL_MAPPING.map((e) => ({ fieldKey: e.interviewField, value: 'x' }));
+    for (const r of iv.buildStrategiPrefill(answers)) {
+      expect(iv.isStrategiBaselineForbidden(r.strategiField)).toBe(false);
+    }
+  });
+
+  it('stamps manual provenance when no interview is named', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    expect(s.sumber).toBe('manual');
+    expect(s.interviewId).toBeNull();
+    expect(s.interviewVersion).toBeNull();
+    expect(s.blokDFlags).toEqual([]);
+  });
+
+  it('refuses an interview that belongs to another client', async () => {
+    const serviceA = await seedService();
+    const serviceB = await seedService();
+    const interviewB = await scoredTidakSiap(await clientOf(serviceB));
+    await expect(
+      createStrategi(sql, am(), serviceA, { ...HEADER, interviewId: interviewB }),
+    ).rejects.toThrow(MSG_INTERVIEW_CLIENT_MISMATCH);
+  });
+
+  it('refuses an unknown interview id', async () => {
+    const serviceId = await seedService();
+    await expect(
+      createStrategi(sql, am(), serviceId, { ...HEADER, interviewId: 'ITV-000000-9999' }),
+    ).rejects.toThrow(MSG_INTERVIEW_NOT_FOUND);
   });
 });
 

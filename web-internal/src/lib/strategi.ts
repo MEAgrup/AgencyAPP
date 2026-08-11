@@ -457,6 +457,14 @@ export interface Strategi {
   catatan_reviewer: string | null;
   created_by: string;
   created_at: string;
+  // Blok D handoff (Interview langkah 8) — provenance + advisory flags. `sumber`
+  // is `manual` or `interview`; `blok_d_flags` is a subset of
+  // sasaran_konservatif / hambatan_mendasar_tercatat / risiko_tinggi. Advisory:
+  // nothing here blocks — a `tidak_siap` Interview opens a Strategi like any other.
+  sumber: string;
+  interview_id: string | null;
+  interview_version: number | null;
+  blok_d_flags: string[];
   // Section A — Konteks Klien & Bisnis (A-05). Nullable: the record is born
   // `Draft`, the form autosaves, and the submit gate is what requires the 16
   // answers (`strategiKekurangan` returns which ones are still missing).

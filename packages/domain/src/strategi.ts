@@ -46,7 +46,7 @@
  * Reference: docs/prd/CDPS_Module6A_Strategi.md.
  */
 
-import { ident, money, notification, permission, statemachine, visibility } from '@cdps/core';
+import { ident, interview as iv, money, notification, permission, statemachine, visibility } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import {
   ACCOUNT_DIVISION,
@@ -413,6 +413,11 @@ export const MSG_APPROVE_FORBIDDEN =
 export const MSG_NOT_PLAN_GATED = '[layanan ini tidak memerlukan Strategi]';
 /** Rule 2 + the in-flight partial index. */
 export const MSG_STRATEGI_EXISTS = '[Strategi untuk layanan ini sudah ada]';
+/** Blok D handoff — the referenced Interview does not exist. */
+export const MSG_INTERVIEW_NOT_FOUND = '[Interview tidak ditemukan]';
+/** Blok D handoff — the Interview belongs to a different client than this Service. */
+export const MSG_INTERVIEW_CLIENT_MISMATCH =
+  '[Interview ini bukan milik klien layanan ini]';
 /** Edits are Draft-only (§7 permissions: AM writes A–I on Draft / Draft Revisi). */
 export const MSG_NOT_DRAFT = '[Strategi hanya dapat diubah saat berstatus Draft atau Draft Revisi]';
 /** Rule 12 — returning requires a written note. */
@@ -888,6 +893,19 @@ export interface Strategi extends StrategiKonteks {
   catatanReviewer: string | null;
   createdBy: string;
   createdAt: string;
+
+  // --- Blok D handoff (Interview langkah 8). Provenance + advisory flags stamped
+  // once at creation from the qualified Interview, and carried forward to each
+  // revision (Rule 13). ADVISORY: `blokDFlags` never blocks — `tidak_siap` opens a
+  // Strategi like any other verdict (DECISIONS 2026-08-11, "Verdict ADVISORY").
+  /** `manual` or `interview`. */
+  sumber: string;
+  /** The Interview that seeded this Strategi, or null when authored manually. */
+  interviewId: string | null;
+  /** Interview version at handoff time — frozen (Rule 13). */
+  interviewVersion: number | null;
+  /** Conservative flags from `handoffKeStrategi(verdict)` (core `STRATEGI_FLAG`). */
+  blokDFlags: iv.StrategiFlag[];
 
   // --- Section D header fields (A-08). D-1/D-2/D-4 live in `targets`, D-8/D-9
   // in `assumptions`, and D-3 is DERIVED (`komposisiKontribusi`, X-11) — so what
@@ -1378,6 +1396,13 @@ export interface StrategiHeaderInput {
   tanggalAkhirKontrak: string;
   tanggalMulaiSiklus?: string | null;
   toleransiOverPersen?: number | null;
+  /**
+   * Blok D handoff (Interview langkah 8) — the qualified Interview this Strategi
+   * is opened from. Optional: a manually-authored Strategi omits it. When present,
+   * `createStrategi` stamps provenance + `handoffKeStrategi` flags; it NEVER gates
+   * on the verdict (a `tidak_siap` Interview opens a Strategi like any other).
+   */
+  interviewId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1428,6 +1453,11 @@ interface StrategiRow {
   catatan_reviewer: string | null;
   created_by: string;
   created_at: string | Date;
+  // Blok D handoff (Interview langkah 8).
+  sumber: string;
+  interview_id: string | null;
+  interview_version: number | null;
+  blok_d_flags: unknown;
   // Section A (A-05). `numeric` arrives as a string from postgres.js.
   nama_brand: string | null;
   kategori_utama: string | null;
@@ -1507,6 +1537,11 @@ function rowToStrategi(r: StrategiRow): Strategi {
     catatanReviewer: r.catatan_reviewer,
     createdBy: r.created_by,
     createdAt: new Date(r.created_at).toISOString(),
+    // Blok D handoff (Interview langkah 8)
+    sumber: r.sumber,
+    interviewId: r.interview_id,
+    interviewVersion: r.interview_version,
+    blokDFlags: strArray(r.blok_d_flags) as iv.StrategiFlag[],
     // Section A
     namaBrand: r.nama_brand,
     kategoriUtama: r.kategori_utama,
@@ -2362,7 +2397,7 @@ export async function activeStrategi(sql: Queryable, serviceId: string): Promise
 // Header validation
 // ---------------------------------------------------------------------------
 
-function normalizeHeader(input: StrategiHeaderInput): Required<StrategiHeaderInput> {
+function normalizeHeader(input: StrategiHeaderInput): Omit<Required<StrategiHeaderInput>, 'interviewId'> {
   const mulai = (input.tanggalMulaiKontrak ?? '').trim();
   const akhir = (input.tanggalAkhirKontrak ?? '').trim();
   const siklus = (input.tanggalMulaiSiklus ?? '')?.toString().trim() ?? '';
@@ -2406,6 +2441,45 @@ function normalizeHeader(input: StrategiHeaderInput): Required<StrategiHeaderInp
 // Writes — header
 // ---------------------------------------------------------------------------
 
+/** What the Blok D handoff stamps on a new Strategi row. */
+interface BlokDHandoff {
+  interviewId: string;
+  interviewVersion: number;
+  flags: iv.StrategiFlag[];
+}
+
+/**
+ * resolveBlokDHandoff loads the Interview named at creation and derives the
+ * provenance + advisory flags for the Strategi (Interview langkah 8).
+ *
+ * The verdict drives `handoffKeStrategi` — the SAME core contract the Interview
+ * scorer uses — so the flag set is never re-decided here. It is NOT a gate: an
+ * unscored Interview still links (flags empty), and every verdict, `tidak_siap`
+ * included, returns `unlocked: true`. What this DOES enforce is that the Interview
+ * exists and belongs to the Service's client — a Strategi must not claim
+ * provenance from another client's Interview.
+ */
+async function resolveBlokDHandoff(
+  tx: TransactionSql,
+  interviewId: string,
+  clientId: string,
+): Promise<BlokDHandoff> {
+  const rows = await tx<{ client_id: string; versi_no: number; verdict_kualifikasi: string | null }[]>`
+    select i.client_id, i.versi_no, k.verdict_kualifikasi
+      from interview i
+      left join interview_kualifikasi k on k.interview_id = i.id
+     where i.id = ${interviewId}`;
+  if (rows.length === 0) throw new NotFoundError(MSG_INTERVIEW_NOT_FOUND);
+  const r = rows[0];
+  if (r.client_id !== clientId) throw new ValidationError(MSG_INTERVIEW_CLIENT_MISMATCH);
+  // No verdict yet ⇒ provenance link with no flags. A scored verdict ⇒ the core
+  // handoff decides the flags. Nothing here blocks on the verdict value.
+  const flags = r.verdict_kualifikasi
+    ? iv.handoffKeStrategi(r.verdict_kualifikasi as iv.Verdict).flags
+    : [];
+  return { interviewId, interviewVersion: r.versi_no, flags };
+}
+
 /**
  * createStrategi opens version 1 in `Draft` for a plan-gated Service (Rule 1).
  *
@@ -2413,6 +2487,10 @@ function normalizeHeader(input: StrategiHeaderInput): Required<StrategiHeaderInp
  * reading a boolean: for the middle tier the effective answer is the AM's
  * recorded G-B decision, and duplicating that precedence here would create the
  * second copy M6C exists to prevent.
+ *
+ * When `input.interviewId` is set (Blok D handoff, Interview langkah 8) the row
+ * is stamped with its provenance and the advisory `handoffKeStrategi` flags. The
+ * handoff never gates: a `tidak_siap` Interview opens a Strategi like any other.
  */
 export async function createStrategi(
   sql: Sql,
@@ -2464,14 +2542,24 @@ export async function createStrategi(
       throw new ConflictError(MSG_STRATEGI_EXISTS);
     }
 
+    // Blok D handoff (Interview langkah 8): resolve provenance + advisory flags
+    // BEFORE the insert so the row is born with them. Absent an interviewId this
+    // is a manual Strategi and the columns keep their `manual` / null / [] default.
+    const handoff = input.interviewId
+      ? await resolveBlokDHandoff(tx, input.interviewId, svc.clientId)
+      : null;
+    const sumber = handoff ? 'interview' : 'manual';
+
     const id = await ident.nextId(ex.ident, 'STRG', now);
     await tx`
       insert into strategi
         (id, contract_id, client_id, versi_no, status, tanggal_mulai_siklus,
-         toleransi_over_persen, created_by)
+         toleransi_over_persen, sumber, interview_id, interview_version, blok_d_flags, created_by)
       values
         (${id}, ${contractId}, ${svc.clientId}, 1, ${STRATEGI_DRAFT}, ${head.tanggalMulaiSiklus},
-         ${head.toleransiOverPersen}, ${actor.employeeId})`;
+         ${head.toleransiOverPersen}, ${sumber}, ${handoff?.interviewId ?? null},
+         ${handoff?.interviewVersion ?? null}, to_jsonb(${handoff?.flags ?? []}::text[]),
+         ${actor.employeeId})`;
 
     // A-10 / §7 — the overlay is seeded with the §4.1 defaults at creation, so
     // the document carries its own visibility rather than borrowing today's
@@ -2485,7 +2573,16 @@ export async function createStrategi(
       actorEmployeeId: actor.employeeId,
       action: 'create',
       beforeJson: null,
-      afterJson: { contract_id: contractId, service_id: serviceId, versi_no: 1, status: STRATEGI_DRAFT },
+      afterJson: {
+        contract_id: contractId,
+        service_id: serviceId,
+        versi_no: 1,
+        status: STRATEGI_DRAFT,
+        sumber,
+        interview_id: handoff?.interviewId ?? null,
+        interview_version: handoff?.interviewVersion ?? null,
+        blok_d_flags: handoff?.flags ?? [],
+      },
       createdBy: actor.employeeId,
     });
 
@@ -6212,6 +6309,7 @@ export async function openRevision(
       insert into strategi
         (id, contract_id, client_id, versi_no, strategi_induk_id, versi_sebelumnya_id, status,
          tanggal_mulai_siklus, siklus_terkunci, toleransi_over_persen, created_by,
+         sumber, interview_id, interview_version, blok_d_flags,
          nama_brand, kategori_utama, sub_kategori, model_bisnis, margin_kotor_persen,
          posisi_harga, usp, kapasitas_stok, lead_time_restock_hari, plafon_unit_per_bulan,
          titik_kirim_kota, titik_kirim_detail, ekspektasi_klien, riwayat_agensi,
@@ -6224,6 +6322,7 @@ export async function openRevision(
       select ${newId}, contract_id, client_id, versi_no + 1, ${induk}, id,
              ${STRATEGI_DRAFT_REVISI}, tanggal_mulai_siklus, siklus_terkunci,
              toleransi_over_persen, ${actor.employeeId},
+             sumber, interview_id, interview_version, blok_d_flags,
              nama_brand, kategori_utama, sub_kategori, model_bisnis, margin_kotor_persen,
              posisi_harga, usp, kapasitas_stok, lead_time_restock_hari, plafon_unit_per_bulan,
              titik_kirim_kota, titik_kirim_detail, ekspektasi_klien, riwayat_agensi,
