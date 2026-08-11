@@ -321,6 +321,39 @@ export async function persistKualifikasi(
 }
 
 /**
+ * markPrasyaratSelesai records that the client-side prerequisite is done: it flips
+ * `prasyarat_status` to 'selesai' (stopping the daily overdue flag + escalation)
+ * and appends an immutable `prasyarat_selesai` flag whose `created_at` is the
+ * completion anchor — the duration metric ("berapa lama task selesai") is derived
+ * at read from `created_at − dihitung_pada`, never stored (Rule 4). The convenience
+ * `hari_penyelesaian` in the flag detail is that count at completion time.
+ *
+ * Idempotent: acts only while unresolved (the CTE returns no row when already
+ * 'selesai', so no duplicate flag is appended). Returns true when it flipped.
+ */
+export async function markPrasyaratSelesai(
+  sql: Queryable,
+  args: { interviewId: string; oleh: string },
+): Promise<boolean> {
+  const rows = await sql<{ ok: number }[]>`
+    with upd as (
+      update interview_kualifikasi
+         set prasyarat_status = 'selesai'
+       where interview_id = ${args.interviewId}
+         and prasyarat_status <> 'selesai'
+      returning dihitung_pada
+    )
+    insert into interview_flag (interview_id, kode, detail, created_by)
+    select ${args.interviewId}, 'prasyarat_selesai',
+           jsonb_build_object('hari_penyelesaian',
+                              greatest(0, wib_date(now()) - wib_date(dihitung_pada))),
+           ${args.oleh}
+      from upd
+    returning 1 as ok`;
+  return rows.length > 0;
+}
+
+/**
  * appendSanggahan appends one entry to `catatan_sanggahan` — the append-only
  * pressure-release valve (I). It grows the array and touches nothing else; the
  * DB trigger blocks a shrink, a rewrite of an earlier element, or a verdict

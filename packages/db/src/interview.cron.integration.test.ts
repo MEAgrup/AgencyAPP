@@ -179,7 +179,7 @@ d('interview_daily_tick — SLA flags', () => {
 });
 
 d('interview_daily_tick — prasyarat bersyarat overdue', () => {
-  it('flags a bersyarat interview whose prasyarat is unfinished inside the 60-day window', async () => {
+  it('flags a bersyarat interview whose prasyarat is unfinished once it is >= 7 days overdue', async () => {
     const out = await inRollback(async (tx) => {
       const id = await seedInterview(tx, { status: 'Selesai', tanggalWaktu: null });
       // A bersyarat-scoring input (55..74, no deal-breaker): total 70.
@@ -201,9 +201,9 @@ d('interview_daily_tick — prasyarat bersyarat overdue', () => {
         dayaTahanBudget: iv.DAYA_TAHAN_BUDGET.Enam,
       };
       const { hasil } = await itv.persistKualifikasi(tx, { interviewId: id, input, dihitungOleh: AM });
-      // Pin dihitung_pada so the window arithmetic is deterministic (no wall clock).
+      // Pin dihitung_pada so the day arithmetic is deterministic (no wall clock).
       await tx`update interview_kualifikasi set dihitung_pada = '2026-07-25'::timestamptz where interview_id = ${id}`;
-      // 2026-08-05 is 11 days later → within [7, 60].
+      // 2026-08-05 is 11 days later → >= 7, so it flags.
       await tx`select interview_daily_tick(${day('2026-08-05')})`;
       await tx`select interview_daily_tick(${day('2026-08-05')})`; // re-run stays once
       const flags = (await tx<{ n: number }[]>`
@@ -212,6 +212,129 @@ d('interview_daily_tick — prasyarat bersyarat overdue', () => {
     });
     expect(out.verdict).toBe(iv.VERDICT.Bersyarat);
     expect(out.flags).toBe(1);
+  });
+
+  it('still flags past 60 days — the flag persists (no upper window; owner 2026-08-11)', async () => {
+    const out = await inRollback(async (tx) => {
+      const id = await seedInterview(tx, { status: 'Selesai', tanggalWaktu: null });
+      // A bersyarat-scoring input (55..74, no deal-breaker): total 70.
+      const input: iv.KualifikasiInput = {
+        marginBersih: 40,
+        marginBersihSumber: iv.SUMBER_ANGKA.KlienHitung,
+        aov: 20_000_000n,
+        ruangHarga: iv.RUANG_HARGA.TidakAda,
+        modelBisnis: iv.MODEL_BISNIS.DistributorResmi,
+        kesanggupanLonjakan: iv.KESANGGUPAN_LONJAKAN.Sanggup,
+        siklusBeliUlang: iv.SIKLUS_BELI_ULANG.HabisPakai,
+        pembedaProduk: iv.PEMBEDA_PRODUK.ProdukUmum,
+        skuSiap: 40,
+        penangananChat: iv.PENANGANAN_CHAT.TimKhusus,
+        kecepatanApproval: iv.KECEPATAN_APPROVAL.BelumJelas,
+        kesiapanAkses: iv.KESIAPAN_AKSES.Belum,
+        omzet: 100_000_000n,
+        targetOmzet: 200_000_000n,
+        dayaTahanBudget: iv.DAYA_TAHAN_BUDGET.Enam,
+      };
+      await itv.persistKualifikasi(tx, { interviewId: id, input, dihitungOleh: AM });
+      await tx`update interview_kualifikasi set dihitung_pada = '2026-05-01'::timestamptz where interview_id = ${id}`;
+      // 2026-08-05 is ~96 days later → old code (<= 60) would NOT flag; new code does.
+      await tx`select interview_daily_tick(${day('2026-08-05')})`;
+      await tx`select interview_daily_tick(${day('2026-08-05')})`; // re-run stays once
+      const flags = (await tx<{ n: number }[]>`
+        select count(*)::int as n from interview_flag where interview_id = ${id} and kode = 'prasyarat_bersyarat_terlambat'`)[0].n;
+      return { flags };
+    });
+    expect(out.flags).toBe(1);
+  });
+
+  it('does not flag while still inside the 0–6 day grace window', async () => {
+    const out = await inRollback(async (tx) => {
+      const id = await seedInterview(tx, { status: 'Selesai', tanggalWaktu: null });
+      const input: iv.KualifikasiInput = {
+        marginBersih: 40,
+        marginBersihSumber: iv.SUMBER_ANGKA.KlienHitung,
+        aov: 20_000_000n,
+        ruangHarga: iv.RUANG_HARGA.TidakAda,
+        modelBisnis: iv.MODEL_BISNIS.DistributorResmi,
+        kesanggupanLonjakan: iv.KESANGGUPAN_LONJAKAN.Sanggup,
+        siklusBeliUlang: iv.SIKLUS_BELI_ULANG.HabisPakai,
+        pembedaProduk: iv.PEMBEDA_PRODUK.ProdukUmum,
+        skuSiap: 40,
+        penangananChat: iv.PENANGANAN_CHAT.TimKhusus,
+        kecepatanApproval: iv.KECEPATAN_APPROVAL.BelumJelas,
+        kesiapanAkses: iv.KESIAPAN_AKSES.Belum,
+        omzet: 100_000_000n,
+        targetOmzet: 200_000_000n,
+        dayaTahanBudget: iv.DAYA_TAHAN_BUDGET.Enam,
+      };
+      await itv.persistKualifikasi(tx, { interviewId: id, input, dihitungOleh: AM });
+      await tx`update interview_kualifikasi set dihitung_pada = '2026-08-01'::timestamptz where interview_id = ${id}`;
+      // 2026-08-05 is 4 days later → still inside 0–6 grace, no flag.
+      await tx`select interview_daily_tick(${day('2026-08-05')})`;
+      const flags = (await tx<{ n: number }[]>`
+        select count(*)::int as n from interview_flag where interview_id = ${id} and kode = 'prasyarat_bersyarat_terlambat'`)[0].n;
+      return { flags };
+    });
+    expect(out.flags).toBe(0);
+  });
+});
+
+d('interview_daily_tick — prasyarat hanging escalation (N=2, re-armable)', () => {
+  // Insert a bersyarat qualification + the overdue flag directly (fixture): the
+  // escalation only reads verdict/prasyarat_status + the flag, so this is enough.
+  async function seedBersyaratOverdue(tx: TransactionSql, id: string): Promise<void> {
+    await tx`
+      insert into interview_kualifikasi
+        (interview_id, skor_kualifikasi, skor_per_blok, verdict_kualifikasi,
+         margin_bersih_basis, kualitas_data, config_snapshot, dihitung_oleh, prasyarat_status, dihitung_pada)
+      values (${id}, 70, '{}'::jsonb, 'bersyarat', 'bersih_klien', 'terverifikasi', '{}'::jsonb, ${AM}, 'jalan', '2026-05-01'::timestamptz)`;
+    await tx`insert into interview_flag (interview_id, kode) values (${id}, 'prasyarat_bersyarat_terlambat')`;
+  }
+  const EVENT = 'kualifikasi_prasyarat_menggantung';
+  const escCount = (tx: TransactionSql) =>
+    tx<{ n: number }[]>`select count(*)::int as n from notifications where event_type = ${EVENT}`.then((r) => r[0].n);
+  const armed = (tx: TransactionSql) =>
+    tx<{ e: boolean }[]>`select ter_eskalasi as e from interview_prasyarat_eskalasi where am_pengisi_id = ${AM}`.then(
+      (r) => r[0]?.e ?? null,
+    );
+
+  it('escalates once at >= 2, holds on a same-day re-run, and re-arms when it drops below 2', async () => {
+    const out = await inRollback(async (tx) => {
+      // Ensure a lead recipient exists so the emit resolves someone.
+      await tx`insert into employees (employee_id, nama, email, divisi, jabatan)
+               values ('EMP-ESK-LEAD', 'Lead', 'lead@esk.example', 'Account', 'ESKLEAD') on conflict do nothing`;
+      await tx`insert into role_mappings (divisi, jabatan, division, level, created_by)
+               values ('Account', 'ESKLEAD', 'Account', 'lead', ${AM}) on conflict do nothing`;
+
+      const a = await seedInterview(tx, { status: 'Selesai', tanggalWaktu: null });
+      await seedBersyaratOverdue(tx, a);
+      // One hanging prerequisite → no escalation yet.
+      await tx`select interview_daily_tick(${day('2026-08-05')})`;
+      const afterOne = { notif: await escCount(tx), armed: await armed(tx) };
+
+      // A second one under the same AM → escalate exactly once.
+      const b = await seedInterview(tx, { status: 'Selesai', tanggalWaktu: null });
+      await seedBersyaratOverdue(tx, b);
+      await tx`select interview_daily_tick(${day('2026-08-06')})`;
+      const afterTwo = await escCount(tx);
+      await tx`select interview_daily_tick(${day('2026-08-06')})`; // same day re-run: no new episode
+      const afterRerun = await escCount(tx);
+      const armedAfterTwo = await armed(tx);
+
+      // Resolve one prerequisite → count drops to 1 → re-arm (no new notif).
+      await itv.markPrasyaratSelesai(tx, { interviewId: a, oleh: AM });
+      await tx`select interview_daily_tick(${day('2026-08-07')})`;
+      const afterResolve = { notif: await escCount(tx), armed: await armed(tx) };
+
+      return { afterOne, afterTwo, afterRerun, armedAfterTwo, afterResolve };
+    });
+    expect(out.afterOne.notif).toBe(0); // one hanging: nothing
+    expect(out.afterOne.armed).toBeNull(); // no state row created for a sub-threshold AM
+    expect(out.afterTwo).toBeGreaterThanOrEqual(1); // escalated to the Account lead(s)
+    expect(out.afterRerun).toBe(out.afterTwo); // same-day re-run adds nothing
+    expect(out.armedAfterTwo).toBe(true);
+    expect(out.afterResolve.notif).toBe(out.afterTwo); // re-arm sends no new notification
+    expect(out.afterResolve.armed).toBe(false); // episode closed
   });
 });
 

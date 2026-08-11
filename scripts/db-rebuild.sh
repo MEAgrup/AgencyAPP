@@ -140,12 +140,15 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "103"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "104"
 check "entity_prefix"    "select count(*) from entity_prefix"    "32"
 check "sm_machines"      "select count(*) from sm_machines"      "19"
-check "notif_events"     "select count(*) from notif_events"     "43"
+check "notif_events"     "select count(*) from notif_events"     "44"
+# 104 = 103 + interview_prasyarat_eskalasi (20260811080000, Interview bagian 2:
+#       rumah state per-AM untuk eskalasi re-armable — antrean AM, bukan interview).
 # 103 = 92 + 11 tabel Modul Interview (20260811030000). 32 = 31 + ITV. 19 = 18 + mesin `interview`.
-# 43 = 34 (v1..v4) + 9 (v5 Interview, 20260811020000). Angka ini TIDAK boleh dinaikkan sendirian: ia
+# 44 = 43 + 1 (v6: kualifikasi_prasyarat_menggantung, 20260811080000). 43 = 34 (v1..v4)
+# + 9 (v5 Interview, 20260811020000). Angka ini TIDAK boleh dinaikkan sendirian: ia
 # harus sama dengan SUM(event_count) di notif_catalog_versions, dan gate di
 # bawah yang memaksanya. Menambah event tanpa mendaftarkan versinya = merah.
 check "notif_katalog_sesuai" "select case when (select count(*) from notif_events) = (select coalesce(sum(event_count),0) from notif_catalog_versions) then 1 else 0 end" "1"
