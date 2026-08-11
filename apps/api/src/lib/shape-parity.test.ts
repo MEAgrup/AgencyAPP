@@ -450,6 +450,9 @@ const WIRE_TO_FE: Record<string, string> = {
   StrategiTriggerRevisiWire: 'strategi.ts::StrategiTriggerRevisi',
   StrategiDispatchWire: 'strategi.ts::StrategiDispatch',
   StrategiFieldVisibilityWire: 'strategi.ts::StrategiFieldVisibility',
+  // A-11 — the client share link `/s/{token}`.
+  ShareLinkStatusWire: 'strategi.ts::ShareLinkStatus',
+  ShareTokenCreatedWire: 'strategi.ts::ShareTokenCreated',
   BriefWire: 'account.ts::Brief',
   ComplaintWire: 'account.ts::Complaint',
   // M7 creative

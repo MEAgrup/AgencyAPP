@@ -185,14 +185,16 @@ jobs:
       # green while CI failed on `expected 14 machines`. Adding a table or a
       # machine means editing BOTH, in the same commit.
       #
-      # 90 = 89 + plan_satuan (20260811000000, M6C §7/B-10: rantai Plan Satuan
+      # 92 = 91 + plan_satuan (20260811000000, M6C §7/B-10: rantai Plan Satuan
       #      per klien — rumah `status_dormansi` (mesin #17) + `tanggal_mulai_siklus`.
       #      Ia TABEL, bukan kolom `plan`: dormansi properti RANTAI, bukan satu
       #      periode — n salinan di tiap baris `plan` = anti-pola `defisit_terbawa`.
       #      Deviasi dari dugaan komentar lama, DECISIONS 2026-08-11 B-10).
-      # 89 = 82 + plan + 6 tabel anaknya (20260810000000, M6B B-01: entitas PLAN-):
+      # 91 = 84 + plan + 6 tabel anaknya (20260810000000, M6B B-01: entitas PLAN-):
       #      plan · plan_target · plan_row · plan_row_week · plan_actual ·
       #      plan_review · plan_flag.
+      # 84 = 82 + strategi_share_token + strategi_share_access_log
+      #      (20260809010000, M6A A-11: tautan klien read-only /s/{token}, §7 D20).
       # 82 = 81 + strategi_field_visibility (20260809000000, M6A A-10 bagian 2:
       #      overlay visibilitas per field ID, §7 STRG_FIELD_VISIBILITY).
       # 81 = 76 + strategi_ketergantungan_klien · strategi_fase ·
@@ -219,12 +221,12 @@ jobs:
       #         + plan_gate_config + service_plan_gate (20260806061000, M6C §10).
       #      55 = 54 + prospect_activities (20260806050000, keputusan pemilik 2026-08-06).
       #      54 = 53 + lead_delete_requests (20260729162101, DECISIONS 2026-07-29).
-      - name: Verify table count (expect 90)
+      - name: Verify table count (expect 92)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 90
+          test "$n" -eq 92
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57). The TS half (PREFIXES in
       # packages/core/src/ident.ts) is asserted against this table by

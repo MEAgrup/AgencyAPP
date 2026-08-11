@@ -90,9 +90,18 @@ export const STRATEGI_DEFAULT_INTERNAL: readonly string[] = [
 ];
 
 /**
- * ⚠️ **PROVISIONAL — awaiting an owner decision (X-16).**
+ * ✅ **FINAL — owner decision 2026-08-11 (X-16); values unchanged from the
+ * provisional set below.** The owner confirmed all six tiers exactly as written
+ * here: I-4 `hard_internal` permanent; A-15/A-16/I-1/J-1 `default_internal` (the
+ * client sees less, the AM may switch each on per Strategi); J-4 `default_internal`
+ * with the diff generator required to filter its own rows per field. The const is
+ * kept named `…_PROVISIONAL` so the `visibility.test.ts` invariant that pins it
+ * member-by-member does not churn; only this note changes. See `docs/DECISIONS.md`
+ * 2026-08-11 (X-16 FINAL), which supersedes the earlier 2026-08-09 proposal that
+ * had A-15/A-16/I-1/J-1 shareable.
  *
- * §4.1 describes its third row as "everything else" and then ENUMERATES what
+ * _Historical rationale for the provisional values (still the reason they are
+ * right):_ §4.1 describes its third row as "everything else" and then ENUMERATES what
  * that means. The two do not agree: six field IDs appear in §4 but in none of
  * the three rows. That is the PRD contradicting the PRD, which the house rule
  * says to flag rather than quietly resolve.

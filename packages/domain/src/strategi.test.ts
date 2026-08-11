@@ -117,6 +117,11 @@ import {
   MSG_VISIBILITAS_TERKUNCI,
   setFieldVisibility,
   shareableFieldIds,
+  createShareToken,
+  revokeShareToken,
+  getShareLinkStatus,
+  resolveShareLink,
+  MSG_SHARE_NO_ACTIVE_VERSION,
   saveKalender,
   saveTriggerRevisi,
   saveHandoff,
@@ -255,6 +260,10 @@ afterEach(async () => {
   // (the `client_health_snapshots` precedent in health.test.ts); the table is
   // M6A-only, so nothing else depends on its contents.
   await sql`truncate strategi_version`;
+  // A-11 share tokens + access log are append-only too (forbid_mutation), and the
+  // access log cascades from `strategi`/token — so a plain DELETE below would fire
+  // the row trigger. TRUNCATE both first, bypassing it, before the strategi delete.
+  await sql`truncate strategi_share_access_log, strategi_share_token`;
   await sql`delete from strategi where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
@@ -3283,5 +3292,127 @@ describeDb('A-10 — a revision inherits the sharing decisions (Rule 13 + 16(c))
       visibilitas: visibility.VISIBILITY_SHAREABLE,
       diubahOleh: null,
     });
+  });
+});
+
+describeDb('A-11 — client share link /s/{token} (§7 D20, RA-3, RA-7)', () => {
+  async function seedAktif(): Promise<string> {
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    return strategiId;
+  }
+
+  it('mints a link, renders the active version, and logs every open', async () => {
+    const id = await seedAktif();
+    const made = await createShareToken(sql, am(), id);
+    expect(made.token).toMatch(/^[A-Za-z0-9_-]{20,}$/);
+    expect(made.status).toBe('aktif');
+
+    const view = await resolveShareLink(sql, made.token, { ip: '1.2.3.4', userAgent: 'jest' });
+    expect(view.aktif).toBe(true);
+    expect(view.versiNo).toBe(1);
+    expect(view.sections?.length).toBeGreaterThan(0);
+
+    // §7 access log: one row, pinned to the version actually rendered.
+    const log = await sql<{ n: number; versi_no: number }[]>`
+      select count(*)::int as n, max(versi_no) as versi_no from strategi_share_access_log`;
+    expect(log[0].n).toBe(1);
+    expect(log[0].versi_no).toBe(1);
+  });
+
+  it('renders ONLY shareable field IDs — never a hard-internal one', async () => {
+    const id = await seedAktif();
+    const made = await createShareToken(sql, am(), id);
+    const view = await resolveShareLink(sql, made.token);
+    const shareable = new Set(await shareableFieldIds(sql, id));
+    const hard = new Set(visibility.hardInternalFieldIds());
+    const rendered = (view.sections ?? []).flatMap((s) => s.fields.map((f) => f.fieldId));
+    expect(rendered.length).toBeGreaterThan(0);
+    for (const fieldId of rendered) {
+      expect(shareable.has(fieldId)).toBe(true);
+      expect(hard.has(fieldId)).toBe(false);
+    }
+  });
+
+  it('drops a section the AM switched to Internal', async () => {
+    const id = await seedAktif();
+    const made = await createShareToken(sql, am(), id);
+    const before = await resolveShareLink(sql, made.token);
+    expect(before.sections?.some((s) => s.seksi === 'Target')).toBe(true);
+
+    // Toggle D-2 (the target matrix) off — the same overlay a client is served from.
+    await setFieldVisibility(sql, am(), id, 'D-2', visibility.VISIBILITY_INTERNAL);
+    const after = await resolveShareLink(sql, made.token);
+    expect(after.aktif).toBe(true);
+    expect(after.sections?.some((s) => s.seksi === 'Target')).toBe(false);
+    for (const s of after.sections ?? []) for (const f of s.fields) expect(f.fieldId).not.toBe('D-2');
+  });
+
+  it('rotates: a second mint kills the first, and only one token is Aktif', async () => {
+    const id = await seedAktif();
+    const first = await createShareToken(sql, am(), id);
+    const second = await createShareToken(sql, am(), id);
+    expect((await resolveShareLink(sql, first.token)).aktif).toBe(false);
+    expect((await resolveShareLink(sql, second.token)).aktif).toBe(true);
+
+    const head = await getStrategi(sql, am(), id);
+    const active = await sql<{ n: number }[]>`
+      select count(*)::int as n from strategi_share_token
+       where contract_id = ${head.contractId} and status = 'Aktif'`;
+    expect(active[0].n).toBe(1);
+  });
+
+  it('revoke kills the link immediately, and the page goes neutral', async () => {
+    const id = await seedAktif();
+    const made = await createShareToken(sql, am(), id);
+    const status = await revokeShareToken(sql, am(), id);
+    expect(status.status).toBe('dicabut');
+    expect((await resolveShareLink(sql, made.token)).aktif).toBe(false);
+    expect((await getShareLinkStatus(sql, am(), id)).status).toBe('dicabut');
+  });
+
+  it('treats an expired token as inactive', async () => {
+    const id = await seedAktif();
+    const made = await createShareToken(sql, am(), id);
+    await sql`update strategi_share_token set tanggal_kedaluwarsa = '2000-01-01' where status = 'Aktif'`;
+    expect((await resolveShareLink(sql, made.token)).aktif).toBe(false);
+  });
+
+  it('follows the active version across a revision — RA-7: no history in the payload', async () => {
+    const id = await seedAktif();
+    const made = await createShareToken(sql, am(), id);
+    const v2 = await openRevision(sql, am(), id, {
+      triggerRevisi: ['pencapaian_di_bawah_target'],
+      alasanRevisi: 'target perlu ditinjau ulang',
+      asumsiGugur: ['A1'],
+    });
+    await submitStrategi(sql, am(), v2.id);
+    await approveStrategi(sql, spv(), v2.id);
+
+    // Same token, now pinned to v2. The payload has a single version — no diff,
+    // no history field anywhere (RA-7 / X-06).
+    const view = await resolveShareLink(sql, made.token);
+    expect(view.aktif).toBe(true);
+    expect(view.versiNo).toBe(2);
+    expect(view).not.toHaveProperty('riwayat');
+    expect(view).not.toHaveProperty('versiSebelumnya');
+  });
+
+  it('refuses to mint before there is an approved active version', async () => {
+    const { strategiId } = await seedSubmittable(); // Draft, never approved
+    await expect(createShareToken(sql, am(), strategiId)).rejects.toThrow(MSG_SHARE_NO_ACTIVE_VERSION);
+  });
+
+  it('refuses an AM who does not own the account, and an OD (read-only)', async () => {
+    const id = await seedAktif();
+    await expect(createShareToken(sql, otherAm(), id)).rejects.toThrow(ForbiddenError);
+    await expect(createShareToken(sql, od(), id)).rejects.toThrow(ForbiddenError);
+    // …but an OD may still read the link's status (read-all).
+    expect((await getShareLinkStatus(sql, od(), id)).status).toBe('none');
+  });
+
+  it('renders an unknown token as the same neutral inactive page', async () => {
+    expect((await resolveShareLink(sql, 'tidak-pernah-ada')).aktif).toBe(false);
   });
 });

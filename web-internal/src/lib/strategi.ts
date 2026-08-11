@@ -1217,3 +1217,36 @@ export function openStrategiRevision(
 export function expireStrategi(id: string): Promise<Strategi> {
   return api.post<Strategi>(`/strategi/${id}/expire`);
 }
+
+/**
+ * A-11 (§7 D20) — the client share link `/s/{token}`.
+ *
+ * `status` only ever describes the CURRENT link; the 32-byte secret is returned
+ * exactly once, by `createShareLink`, and never readable again. Keys are the wire
+ * shape (`ShareLinkStatusWire` / `ShareTokenCreatedWire`).
+ */
+export interface ShareLinkStatus {
+  status: 'none' | 'aktif' | 'dicabut';
+  tanggal_kedaluwarsa: string | null;
+  created_at: string | null;
+  created_by: string | null;
+  dicabut_pada: string | null;
+}
+
+export interface ShareTokenCreated extends ShareLinkStatus {
+  /** Plaintext token, shown once — build the URL as `/s/{token}` and copy it now. */
+  token: string;
+}
+
+export function getStrategiShareLink(id: string): Promise<ShareLinkStatus> {
+  return api.get<ShareLinkStatus>(`/strategi/${id}/share-link`);
+}
+
+/** Mint or ROTATE the link — rotating revokes the previous one immediately (§7). */
+export function createStrategiShareLink(id: string): Promise<ShareTokenCreated> {
+  return api.post<ShareTokenCreated>(`/strategi/${id}/share-link`);
+}
+
+export function revokeStrategiShareLink(id: string): Promise<ShareLinkStatus> {
+  return api.delete<ShareLinkStatus>(`/strategi/${id}/share-link`);
+}
