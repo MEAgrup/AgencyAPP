@@ -34,9 +34,9 @@ describe('frozen catalog', () => {
     }
   });
 
-  it('is at version 4, and the versions are registered in order with no gaps', () => {
-    expect(CATALOG_VERSION).toBe(4);
-    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4]);
+  it('is at version 5, and the versions are registered in order with no gaps', () => {
+    expect(CATALOG_VERSION).toBe(5);
+    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5]);
     // A registry row with no decision reference is how an un-signed-off
     // amendment would sneak in looking legitimate.
     for (const v of CATALOG_VERSIONS) {
@@ -151,6 +151,27 @@ describe('frozen catalog', () => {
     // resolves from `division`, Head of Sales has to come in as `explicit`.
     // `leadsOfDivision` can only ever resolve one of the two.
     expect(CATALOG[EVENTS.StrategiSanggahanTarget].resolver).toBe('explicitOrLeads');
+  });
+
+  it('carries exactly the 9 v5 Interview events', () => {
+    // Interview / Kelola Klien tab 1. Its own version — like v3/v4 — because it
+    // is a distinct amendment (DECISIONS 2026-08-11). Names verbatim from the
+    // Interview spec's notification table; the plain (non-dotted) style matches
+    // the v2 `strategi_*` rule: the spec wrote the identifiers.
+    expect(eventsOfVersion(5).sort()).toEqual([
+      'interview_butuh_data_klien',
+      'interview_diajukan_dengan_kekosongan',
+      'interview_dijadwalkan',
+      'interview_pengingat',
+      'interview_selesai',
+      'interview_terlewat',
+      'interview_versi_baru',
+      'kualifikasi_tidak_siap',
+      'kualifikasi_turun',
+    ]);
+    // The verdict never blocks: `kualifikasi_tidak_siap` is informational.
+    expect(CATALOG[EVENTS.KualifikasiTidakSiap].version).toBe(5);
+    expect(CATALOG[EVENTS.KualifikasiTidakSiap].resolver).toBe('leadsOfDivision');
   });
 
   it('every event carries a description and a valid resolver', () => {

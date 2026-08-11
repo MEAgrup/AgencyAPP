@@ -85,6 +85,21 @@ export const EVENTS = {
   // exactly like `m6.client.assigned` (O53).
   StrategiSanggahanTarget: 'm6a.strategi.sanggahan_target', // -> SPV Account + Head of Sales
 
+  // ----- catalog v5 (Interview / Kelola Klien tab 1) — 9 events -----
+  // Names verbatim from the Interview spec's notification table. All advisory:
+  // `kualifikasi_tidak_siap` is INFORMATIONAL and blocks nothing (the verdict
+  // never gates). Dotted `mN` convention is NOT used because — like the v2
+  // `strategi_*` names — the spec spelled these identifiers itself.
+  InterviewDijadwalkan: 'interview_dijadwalkan', // -> AM + SPV
+  InterviewPengingat: 'interview_pengingat', // -> AM (H-1 08:00, H-day 07:00 WIB)
+  InterviewTerlewat: 'interview_terlewat', // -> AM, then SPV escalation at 7
+  InterviewButuhDataKlien: 'interview_butuh_data_klien', // -> AM (3-day nudge, max 5)
+  InterviewDiajukanDenganKekosongan: 'interview_diajukan_dengan_kekosongan', // -> SPV (approval)
+  InterviewSelesai: 'interview_selesai', // -> AM + SPV + Head of Account
+  KualifikasiTidakSiap: 'kualifikasi_tidak_siap', // -> SPV + Head of Account (info only)
+  KualifikasiTurun: 'kualifikasi_turun', // -> SPV + Head of Account
+  InterviewVersiBaru: 'interview_versi_baru', // -> AM + SPV
+
 } as const;
 
 /** A cataloged event type. */
@@ -130,6 +145,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
       'M6A §4 D-7 — sanggahan target memberi tahu SPV Account + Head of Sales: 1 event Strategi',
     eventCount: 1,
     decisionRef: 'docs/DECISIONS.md 2026-08-08 (A-08 — §4 vs §7 D12)',
+  },
+  {
+    version: 5,
+    description:
+      'Interview / Kelola Klien tab 1 — 9 event (jadwal, pengingat, terlewat, butuh data, kekosongan, selesai, kualifikasi tidak siap/turun, versi baru). Semua advisory; kualifikasi_tidak_siap informasional (verdict tidak pernah memblok).',
+    eventCount: 9,
+    decisionRef: 'docs/DECISIONS.md 2026-08-11 (Interview — verdict advisory non-blocking)',
   },
 ] as const;
 
@@ -213,6 +235,20 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
 
   // --- v4 (A-08) — description and resolver must match the migration seed ---
   [EVENTS.StrategiSanggahanTarget]: { description: 'AM mengajukan Sanggahan Target (D-7, advisory) — ke SPV Account + Head of Sales', resolver: 'explicitOrLeads', version: 4 },
+
+  // --- v5 (Interview) — descriptions and resolvers must match the migration seed ---
+  // Resolver rule (per notif_catalog_v2 header): single explicit recipient ->
+  // explicit; only lead/SPV of a division -> leadsOfDivision; explicit AND
+  // lead/SPV -> explicitOrLeads.
+  [EVENTS.InterviewDijadwalkan]: { description: 'Jadwal interview diset/diubah (IA-3) — ke AM + SPV', resolver: 'explicitOrLeads', version: 5 },
+  [EVENTS.InterviewPengingat]: { description: 'Pengingat interview H-1 08:00 & H-hari 07:00 WIB — ke AM', resolver: 'explicit', version: 5 },
+  [EVENTS.InterviewTerlewat]: { description: 'Interview terlewat (harian, maks 7) lalu eskalasi SPV — ke AM, lalu SPV', resolver: 'explicitOrLeads', version: 5 },
+  [EVENTS.InterviewButuhDataKlien]: { description: 'Status Butuh Data Klien — nudge tiap 3 hari (maks 5) — ke AM', resolver: 'explicit', version: 5 },
+  [EVENTS.InterviewDiajukanDenganKekosongan]: { description: 'Blok B diajukan dengan kekosongan (I11) — permintaan persetujuan ke SPV', resolver: 'leadsOfDivision', version: 5 },
+  [EVENTS.InterviewSelesai]: { description: 'Interview Selesai / Selesai Dengan Catatan — ke AM + SPV + Head of Account', resolver: 'explicitOrLeads', version: 5 },
+  [EVENTS.KualifikasiTidakSiap]: { description: 'Verdict tidak_siap (informasional, tidak memblok apa pun) — ke SPV + Head of Account', resolver: 'leadsOfDivision', version: 5 },
+  [EVENTS.KualifikasiTurun]: { description: 'Re-interview menurunkan verdict pada kontrak berjalan — ke SPV + Head of Account', resolver: 'leadsOfDivision', version: 5 },
+  [EVENTS.InterviewVersiBaru]: { description: 'Versi re-interview disetujui dengan perubahan field ter-mapping — ke AM + SPV', resolver: 'explicitOrLeads', version: 5 },
 
 };
 
