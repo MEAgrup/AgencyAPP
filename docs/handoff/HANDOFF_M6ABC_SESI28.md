@@ -102,12 +102,22 @@ dan fondasi dari SESI27).
    string minor-unit → bigint, enum = kode kanonik). UI kirim shape itu ke `/score`.
 8. **Money = minor units**; format `Rp. X.XXX.XXX,00`; div-by-zero → `—` (BEP ROAS sudah begitu).
 
-### 🔶 Dua interpretasi menunggu konfirmasi pemilik (dicatat DECISIONS 2026-08-11)
+### ✅ Dua interpretasi SUDAH di-RESOLVE pemilik (2026-08-11, dicatat DECISIONS baris teratas)
 
-- **Ambang flag prasyarat `bersyarat`** (langkah 5): dipakai anchor `dihitung_pada` + jendela
-  `[7,60]` hari kalender, advisory flag-only. Koreksi fungsi `interview_daily_tick` bila spec beda.
-- **Scope Sales pada verdict-view** (langkah 6): dipakai *sales closing* ATAU *Sales lead*
-  (cermin `sales.ts`). Ubah view `interview_verdict` + `canReadVerdict` bila maksudnya Sales luas.
+- **Scope Sales verdict-view** (langkah 6): **SEMPIT dikonfirmasi** — *sales closing* + *Sales lead*
+  (cermin `sales.ts`). **Nol perubahan kode** (`canReadVerdict` + view sudah persis begitu).
+- **Ambang flag prasyarat `bersyarat`** (langkah 5): **spec DIREVISI pemilik** → koreksi diperlukan.
+  Jendela normal hari **0–6**; flag di hari **≥7** (`>= 7`, bukan `BETWEEN 7 AND 60`); **HAPUS cap 60**
+  (flag persisten sampai resolve). Tambah: **aksi "tandai prasyarat selesai"** (set `prasyarat_status='selesai'`;
+  resolusi = event append, flag frozen), **catat durasi** (turunan `selesai_at − dihitung_pada`, Rule 4),
+  **eskalasi ke Account lead/SPV** bila **≥ 2 interview** per AM punya prasyarat overdue belum selesai
+  (**N=2 dikonfirmasi**), sekali per AM per episode, re-arm bila turun < 2.
+  - **Bagian 1 (SUDAH dikerjakan sesi ini): hapus cap 60** — migrasi BARU `20260811070000_interview_prasyarat_flag_persist.sql`
+    (`CREATE OR REPLACE interview_daily_tick`, predikat `>= 7`, tanpa batas atas). JANGAN edit `20260811040000`
+    (merged; drift O38). Test cron diperbarui: flag TETAP dipasang > 60 hari + tetap sekali.
+  - **Bagian 2 (langkah 7/8, belum): eskalasi N=2 + tombol-selesai + durasi.** Eskalasi per-AM re-armable butuh
+    rumah state (tak ada marker per-AM sekarang) dan definisi "selesai" bergantung tombol-selesai — dibangun
+    bareng di langkah 7/8 (UI + domain/api), bukan setengah-jadi di cron.
 
 ## 2. Tugas berikutnya (urut; tiap langkah PR kecil)
 

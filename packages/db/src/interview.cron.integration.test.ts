@@ -179,7 +179,7 @@ d('interview_daily_tick — SLA flags', () => {
 });
 
 d('interview_daily_tick — prasyarat bersyarat overdue', () => {
-  it('flags a bersyarat interview whose prasyarat is unfinished inside the 60-day window', async () => {
+  it('flags a bersyarat interview whose prasyarat is unfinished once it is >= 7 days overdue', async () => {
     const out = await inRollback(async (tx) => {
       const id = await seedInterview(tx, { status: 'Selesai', tanggalWaktu: null });
       // A bersyarat-scoring input (55..74, no deal-breaker): total 70.
@@ -201,9 +201,9 @@ d('interview_daily_tick — prasyarat bersyarat overdue', () => {
         dayaTahanBudget: iv.DAYA_TAHAN_BUDGET.Enam,
       };
       const { hasil } = await itv.persistKualifikasi(tx, { interviewId: id, input, dihitungOleh: AM });
-      // Pin dihitung_pada so the window arithmetic is deterministic (no wall clock).
+      // Pin dihitung_pada so the day arithmetic is deterministic (no wall clock).
       await tx`update interview_kualifikasi set dihitung_pada = '2026-07-25'::timestamptz where interview_id = ${id}`;
-      // 2026-08-05 is 11 days later → within [7, 60].
+      // 2026-08-05 is 11 days later → >= 7, so it flags.
       await tx`select interview_daily_tick(${day('2026-08-05')})`;
       await tx`select interview_daily_tick(${day('2026-08-05')})`; // re-run stays once
       const flags = (await tx<{ n: number }[]>`
@@ -212,6 +212,70 @@ d('interview_daily_tick — prasyarat bersyarat overdue', () => {
     });
     expect(out.verdict).toBe(iv.VERDICT.Bersyarat);
     expect(out.flags).toBe(1);
+  });
+
+  it('still flags past 60 days — the flag persists (no upper window; owner 2026-08-11)', async () => {
+    const out = await inRollback(async (tx) => {
+      const id = await seedInterview(tx, { status: 'Selesai', tanggalWaktu: null });
+      // A bersyarat-scoring input (55..74, no deal-breaker): total 70.
+      const input: iv.KualifikasiInput = {
+        marginBersih: 40,
+        marginBersihSumber: iv.SUMBER_ANGKA.KlienHitung,
+        aov: 20_000_000n,
+        ruangHarga: iv.RUANG_HARGA.TidakAda,
+        modelBisnis: iv.MODEL_BISNIS.DistributorResmi,
+        kesanggupanLonjakan: iv.KESANGGUPAN_LONJAKAN.Sanggup,
+        siklusBeliUlang: iv.SIKLUS_BELI_ULANG.HabisPakai,
+        pembedaProduk: iv.PEMBEDA_PRODUK.ProdukUmum,
+        skuSiap: 40,
+        penangananChat: iv.PENANGANAN_CHAT.TimKhusus,
+        kecepatanApproval: iv.KECEPATAN_APPROVAL.BelumJelas,
+        kesiapanAkses: iv.KESIAPAN_AKSES.Belum,
+        omzet: 100_000_000n,
+        targetOmzet: 200_000_000n,
+        dayaTahanBudget: iv.DAYA_TAHAN_BUDGET.Enam,
+      };
+      await itv.persistKualifikasi(tx, { interviewId: id, input, dihitungOleh: AM });
+      await tx`update interview_kualifikasi set dihitung_pada = '2026-05-01'::timestamptz where interview_id = ${id}`;
+      // 2026-08-05 is ~96 days later → old code (<= 60) would NOT flag; new code does.
+      await tx`select interview_daily_tick(${day('2026-08-05')})`;
+      await tx`select interview_daily_tick(${day('2026-08-05')})`; // re-run stays once
+      const flags = (await tx<{ n: number }[]>`
+        select count(*)::int as n from interview_flag where interview_id = ${id} and kode = 'prasyarat_bersyarat_terlambat'`)[0].n;
+      return { flags };
+    });
+    expect(out.flags).toBe(1);
+  });
+
+  it('does not flag while still inside the 0–6 day grace window', async () => {
+    const out = await inRollback(async (tx) => {
+      const id = await seedInterview(tx, { status: 'Selesai', tanggalWaktu: null });
+      const input: iv.KualifikasiInput = {
+        marginBersih: 40,
+        marginBersihSumber: iv.SUMBER_ANGKA.KlienHitung,
+        aov: 20_000_000n,
+        ruangHarga: iv.RUANG_HARGA.TidakAda,
+        modelBisnis: iv.MODEL_BISNIS.DistributorResmi,
+        kesanggupanLonjakan: iv.KESANGGUPAN_LONJAKAN.Sanggup,
+        siklusBeliUlang: iv.SIKLUS_BELI_ULANG.HabisPakai,
+        pembedaProduk: iv.PEMBEDA_PRODUK.ProdukUmum,
+        skuSiap: 40,
+        penangananChat: iv.PENANGANAN_CHAT.TimKhusus,
+        kecepatanApproval: iv.KECEPATAN_APPROVAL.BelumJelas,
+        kesiapanAkses: iv.KESIAPAN_AKSES.Belum,
+        omzet: 100_000_000n,
+        targetOmzet: 200_000_000n,
+        dayaTahanBudget: iv.DAYA_TAHAN_BUDGET.Enam,
+      };
+      await itv.persistKualifikasi(tx, { interviewId: id, input, dihitungOleh: AM });
+      await tx`update interview_kualifikasi set dihitung_pada = '2026-08-01'::timestamptz where interview_id = ${id}`;
+      // 2026-08-05 is 4 days later → still inside 0–6 grace, no flag.
+      await tx`select interview_daily_tick(${day('2026-08-05')})`;
+      const flags = (await tx<{ n: number }[]>`
+        select count(*)::int as n from interview_flag where interview_id = ${id} and kode = 'prasyarat_bersyarat_terlambat'`)[0].n;
+      return { flags };
+    });
+    expect(out.flags).toBe(0);
   });
 });
 
