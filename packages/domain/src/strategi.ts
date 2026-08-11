@@ -467,6 +467,16 @@ export const MSG_SANGGAHAN_INCOMPLETE =
 export const MSG_ASSUMPTION_STATUS_INVALID = '[status asumsi tidak dikenal]';
 /** D-8 — the code does not name an assumption on this Strategi. */
 export const MSG_ASSUMPTION_NOT_FOUND = '[asumsi tidak ditemukan pada Strategi ini]';
+/**
+ * X-17 (owner decision 2026-08-11) — an assumption's status cannot be flipped on
+ * a version whose visibility is already history (`Diarsipkan` / `Kedaluwarsa`),
+ * mirroring `MSG_VISIBILITAS_TERKUNCI`. Rule 13: an archived or expired version
+ * is immutable and still readable — flipping an assumption to `Gugur` there would
+ * fire `strategi_revisi_disarankan` against a version already superseded, a
+ * suggestion with no correct action for its recipient.
+ */
+export const MSG_ASSUMPTION_STATUS_TERKUNCI =
+  '[status asumsi tidak dapat diubah pada versi Strategi yang sudah diarsipkan atau kedaluwarsa]';
 /** E-1 — the thesis the whole of Section E hangs off. */
 export const MSG_GROWTH_THESIS_REQUIRED = '[growth thesis wajib diisi]';
 /** E-13 — the order is stored on the pillars; the reason is not. */
@@ -3945,6 +3955,14 @@ export async function setAssumptionStatus(
     // an assumption stopped holding.
     if (!canWriteStrategi(actor, ownerAm) && !canApproveStrategi(actor)) {
       throw new ForbiddenError(MSG_NOT_OWNER_AM);
+    }
+    // X-17 (owner decision 2026-08-11) — reject the flip on a version whose
+    // visibility is settled history (`Diarsipkan`/`Kedaluwarsa`), same precondition
+    // `setFieldVisibility` enforces. The UI already disables the control there
+    // (`canFlipAsumsi`); the domain refuses it too so a service-role or direct API
+    // caller cannot fire `strategi_revisi_disarankan` on a superseded version.
+    if (head.status === STRATEGI_DIARSIPKAN || head.status === STRATEGI_KEDALUWARSA) {
+      throw new ConflictError(MSG_ASSUMPTION_STATUS_TERKUNCI);
     }
 
     const rows = await tx<{ status: string }[]>`
