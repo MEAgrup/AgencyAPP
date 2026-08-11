@@ -87,6 +87,14 @@ export const MSG_DETERMINATION_REQUIRED =
   '[penentuan kebutuhan Plan wajib diselesaikan sebelum Brief dapat dibuat]';
 /** GA-3: at least one executing division must be confirmed. */
 export const MSG_DIVISION_REQUIRED = '[divisi terlibat wajib dipilih minimal satu]';
+/**
+ * §4(b): a service inside a Full-Management contract (its contract carries a
+ * Strategi) is covered by that contract's own Plan and can never enter the Plan
+ * Satuan. Frozen invariant — mirrors the DB trigger `trg_spg_service_single_plan`
+ * (migration 20260811010000); the TS predicate and the DB check must not diverge.
+ */
+export const MSG_FULL_MGMT_PLAN =
+  '[layanan dalam kontrak full management tidak masuk Plan Satuan, sudah tercakup Plan kontraknya]';
 
 // ---------------------------------------------------------------------------
 // The recommendation engine (Rule 3) — pure, so it is unit-testable without a

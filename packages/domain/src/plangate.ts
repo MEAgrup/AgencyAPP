@@ -59,6 +59,7 @@ import {
   MSG_DEESCALATION_FORBIDDEN,
   MSG_DIVISION_REQUIRED,
   MSG_ESCALATION_REASON_REQUIRED,
+  MSG_FULL_MGMT_PLAN,
   MSG_GATE_EXISTS,
   MSG_GATE_FORBIDDEN,
   MSG_GATE_MISSING,
@@ -372,6 +373,24 @@ async function loadGate(sql: Queryable, serviceId: string): Promise<Gate | null>
 }
 
 /**
+ * §4(b): a service belongs to a Full-Management contract when its contract carries
+ * a Strategi (DATA_MODEL "Strategi (Full Store Management)"). Such a service is
+ * covered by that contract's own Plan and must never enter the Plan Satuan — the
+ * TS mirror of the DB trigger `trg_spg_service_single_plan` (frozen invariant, the
+ * two must not diverge). Scope is the service's CONTRACT, not its client: a client
+ * that holds a Full-Management contract may still put stand-alone satuan services
+ * into the Plan Satuan.
+ */
+async function serviceInFullMgmtContract(sql: Queryable, serviceId: string): Promise<boolean> {
+  const rows = await sql<{ n: number }[]>`
+    select count(*)::int as n
+      from services sv
+      join strategi st on st.contract_id = sv.contract_id
+     where sv.id = ${serviceId} and sv.contract_id is not null`;
+  return rows[0].n > 0;
+}
+
+/**
  * gateContext assembles Section G-A for one Service and returns the recorded
  * determination if there is one. Read permission mirrors `canDecideGate` plus
  * the execution-division read arm in §10 — a division lead should be able to see
@@ -595,6 +614,11 @@ export async function decideGate(
     // determination to the period it landed in. This is what makes the gate more
     // than a record: the Plan actually exists afterward.
     if (input.keputusanAm === DECISION_BUTUH_PLAN) {
+      // §4(b): a service inside a Full-Management contract is covered by that
+      // contract's Plan and never joins the Plan Satuan. Mirrors the DB trigger.
+      if (await serviceInFullMgmtContract(tx, serviceId)) {
+        throw new ConflictError(MSG_FULL_MGMT_PLAN);
+      }
       const r = await openOrJoinPlanSatuanTx(tx, actor, svc.clientId, todayWib());
       await tx`update service_plan_gate set plan_id = ${r.planId} where service_id = ${serviceId}`;
     }
@@ -697,6 +721,11 @@ export async function redecideGate(
     // existing Plan rows with a reason (Flow step 9) is a heavier write than the
     // determination flip and is not part of this ticket.
     if (!deescalating && existing.planId === null) {
+      // §4(b): same guard as decideGate — an escalation cannot pull a
+      // Full-Management-contract service into the Plan Satuan either.
+      if (await serviceInFullMgmtContract(tx, serviceId)) {
+        throw new ConflictError(MSG_FULL_MGMT_PLAN);
+      }
       const r = await openOrJoinPlanSatuanTx(tx, actor, svc.clientId, todayWib());
       await tx`update service_plan_gate set plan_id = ${r.planId} where service_id = ${serviceId}`;
     }

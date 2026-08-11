@@ -15,6 +15,7 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import { ForbiddenError, ValidationError, ConflictError, guardBriefCreation, getService } from './account';
+import { createStrategi } from './strategi';
 import {
   DECISION_BUTUH_PLAN,
   DECISION_TANPA_PLAN,
@@ -22,6 +23,7 @@ import {
   FIT_TAMBAH_PLAN,
   FIT_TOLAK_PLAN,
   MSG_DEESCALATION_FORBIDDEN,
+  MSG_FULL_MGMT_PLAN,
   MSG_MONITORING_REQUIRED,
   MSG_REASON_REQUIRED,
   MSG_SUMMARY_REQUIRED,
@@ -341,6 +343,11 @@ afterEach(async () => {
   await sql`delete from plan where created_by like 'ZZ-%'`;
   await sql`delete from plan_satuan where created_by like 'ZZ-%'`;
   await sql`delete from briefs where created_by like 'ZZ-%'`;
+  // §4(b) tests mint a Contract + Strategi (createStrategi). strategi_version is
+  // append-only (delete trigger), and a Strategi delete cascades into it — truncate
+  // it first (the plan.test.ts precedent), then clear the Strategi before its Contract.
+  await sql`truncate strategi_version`;
+  await sql`delete from strategi where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -499,5 +506,123 @@ describeDb('redecideGate — Rules 11 & 12 are not symmetric', () => {
     await expect(
       redecideGate(sql, am(), serviceId, DECISION_BUTUH_PLAN, 'apa pun'),
     ).rejects.toThrow(ConflictError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §4(b) — a service inside a Full-Management contract never enters the Plan
+// Satuan (B-11). The contract has a Strategi, so the service is covered by that
+// contract's own Plan; joining the Plan Satuan too would put it in two Plans.
+// ---------------------------------------------------------------------------
+const FM_HEADER = {
+  durasiKontrakBulan: 6,
+  tanggalMulaiKontrak: '2026-08-12',
+  tanggalAkhirKontrak: '2027-02-11',
+  tanggalMulaiSiklus: '2026-08-12',
+};
+
+async function seedClientRow(): Promise<string> {
+  seq += 1;
+  const clientId = `ZZ-CLI-${RUN}-${seq}`;
+  await sql`
+    insert into clients
+      (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv, total_sales,
+       sales_pic_id, commission_payment_pic_id, assigned_am_id, released_to_account_at, created_by)
+    values (${clientId}, 'Rani', 'Sini Store', 'Bandung', 'https://shopee.co.id/sinistore',
+            'Home Living', 0, 0, 0, 'ZZ-SALES', 'ZZ-SALES', 'ZZ-AM', now(), 'ZZ-AM')`;
+  return clientId;
+}
+
+async function seedServiceRow(
+  clientId: string,
+  opts: { tier: string; contractId?: string; name?: string },
+): Promise<string> {
+  seq += 1;
+  const serviceId = `ZZ-SVC-${RUN}-${seq}`;
+  const msv = await sql<{ service_id: string; version_no: number }[]>`
+    select service_id, version_no from master_service_versions
+     where name = 'Ads Management' order by version_no desc limit 1`;
+  await sql`
+    insert into services
+      (id, client_id, contract_id, master_service_id, master_version_no, name, standard_price,
+       commission_rule, status, requires_strategy_plan, plan_tier, created_by)
+    values (${serviceId}, ${clientId}, ${opts.contractId ?? null}, ${msv[0].service_id}, ${msv[0].version_no},
+            ${opts.name ?? 'Ads Management'}, '12000000.00', '10%', '[Awaiting Onboarding]',
+            ${opts.tier === TIER_PLAN_WAJIB}, ${opts.tier}, 'ZZ-AM')`;
+  return serviceId;
+}
+
+/**
+ * A client that holds a Full-Management contract (a plan_wajib anchor + Strategi)
+ * plus a `ditentukan_am` add-on ATTACHED TO THE SAME CONTRACT — the §4(b) case.
+ */
+async function seedFullMgmtWithAddon(): Promise<{ clientId: string; addonId: string }> {
+  const clientId = await seedClientRow();
+  const anchorId = await seedServiceRow(clientId, { tier: TIER_PLAN_WAJIB, name: 'Full Store Management' });
+  const strg = await createStrategi(sql, am(), anchorId, FM_HEADER);
+  const addonId = await seedServiceRow(clientId, { tier: TIER_DITENTUKAN_AM, contractId: strg.contractId });
+  return { clientId, addonId };
+}
+
+describeDb('§4(b) — a Full-Management-contract service never joins the Plan Satuan (B-11)', () => {
+  it('decideGate refuses a butuh_plan determination and opens no Plan Satuan (TS mirror)', async () => {
+    const { clientId, addonId } = await seedFullMgmtWithAddon();
+    await expect(decideGate(sql, am(), addonId, baseInput({ durasiBulan: 3 }))).rejects.toThrow(
+      MSG_FULL_MGMT_PLAN,
+    );
+    // The determination transaction rolls back whole: no gate row, no chain.
+    const gate = await sql<{ n: number }[]>`
+      select count(*)::int as n from service_plan_gate where service_id = ${addonId}`;
+    expect(gate[0].n).toBe(0);
+    const chain = await sql<{ n: number }[]>`
+      select count(*)::int as n from plan_satuan where client_id = ${clientId}`;
+    expect(chain[0].n).toBe(0);
+  });
+
+  it('escalation cannot pull the add-on into the Plan Satuan either (Rule 11 + §4b)', async () => {
+    const { addonId } = await seedFullMgmtWithAddon();
+    // A tanpa_plan determination is allowed — it never joins the Plan Satuan.
+    await decideGate(sql, am(), addonId, baseInput({
+      keputusanAm: DECISION_TANPA_PLAN,
+      ringkasanPenugasan: {
+        deliverable: '3 kampanye', deadline: '2026-09-30', divisiPic: 'Ads', hasilDiharapkan: 'ROAS 5.0',
+      },
+    }));
+    // Escalating it to butuh_plan hits the same §4(b) guard the first pass would.
+    await expect(
+      redecideGate(sql, am(), addonId, DECISION_BUTUH_PLAN, 'klien menambah target'),
+    ).rejects.toThrow(MSG_FULL_MGMT_PLAN);
+  });
+
+  it('the DB trigger refuses the link even when the TS guard is bypassed (frozen invariant)', async () => {
+    const { clientId, addonId } = await seedFullMgmtWithAddon();
+    // Record a tanpa_plan gate for the add-on (plan_id NULL) — the shape a raw
+    // write would exploit.
+    await decideGate(sql, am(), addonId, baseInput({
+      keputusanAm: DECISION_TANPA_PLAN,
+      ringkasanPenugasan: {
+        deliverable: '3 kampanye', deadline: '2026-09-30', divisiPic: 'Ads', hasilDiharapkan: 'ROAS 5.0',
+      },
+    }));
+    // A stand-alone satuan service opens a real Plan Satuan for the SAME client.
+    const soloId = await seedServiceRow(clientId, { tier: TIER_DITENTUKAN_AM });
+    const solo = await decideGate(sql, am(), soloId, baseInput({ durasiBulan: 3 }));
+    expect(solo.planId).not.toBeNull();
+    // Forcing the add-on's gate to point at that Plan Satuan is refused by the DB,
+    // not the TS layer — the two enforce the identical invariant.
+    await expect(
+      sql`update service_plan_gate set plan_id = ${solo.planId} where service_id = ${addonId}`,
+    ).rejects.toThrow(/full management/);
+  });
+
+  it('a stand-alone satuan service for the same client still joins the Plan Satuan (contract-scoped, not client-scoped)', async () => {
+    const { clientId } = await seedFullMgmtWithAddon();
+    const soloId = await seedServiceRow(clientId, { tier: TIER_DITENTUKAN_AM });
+    const gate = await decideGate(sql, am(), soloId, baseInput({ durasiBulan: 3 }));
+    expect(gate.keputusanAm).toBe(DECISION_BUTUH_PLAN);
+    expect(gate.planId).not.toBeNull();
+    const chain = await sql<{ status_dormansi: string }[]>`
+      select status_dormansi from plan_satuan where client_id = ${clientId}`;
+    expect(chain[0]?.status_dormansi).toBe('Aktif');
   });
 });
