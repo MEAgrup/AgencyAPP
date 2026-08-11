@@ -2,9 +2,11 @@
 
 import { use, useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { isAccountLead, isAccountStaff } from '@/lib/account';
+import { createInterview } from '@/lib/interview';
 import {
   EDITABLE_FIELDS,
   PAYMENT_INTENT_OPTIONS,
@@ -26,12 +28,19 @@ function formatDate(value: string | null | undefined) {
 
 export default function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const { role } = useAuth();
   // The Service hub (§4/§5) is an Account-division page — `account.getService`
   // admits the owning AM, Account lead, OD and Director. Sales/Finance read this
   // client record too, and a link that 403s for them is worse than no link.
   const canOpenServiceHub =
     isAccountStaff(role) || isAccountLead(role) || !!role?.od || !!role?.director;
+  // "Kelola Klien" (Interview) is a write action: only the assigned AM, an
+  // Account lead, or a Director may open an interview (mirrors canWriteInterview).
+  const canManageInterview = isAccountStaff(role) || isAccountLead(role) || !!role?.director;
+
+  const [creatingInterview, setCreatingInterview] = useState(false);
+  const [interviewError, setInterviewError] = useState<string | null>(null);
 
   const [client, setClient] = useState<Client | null>(null);
   const [loading, setLoading] = useState(true);
@@ -126,6 +135,21 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       setCorrectionError(errorMessage(err));
     } finally {
       setCorrectionSubmitting(false);
+    }
+  }
+
+  async function handleOpenInterview() {
+    if (!window.confirm('Buat interview baru untuk klien ini dan buka halaman Kelola Klien?')) {
+      return;
+    }
+    setInterviewError(null);
+    setCreatingInterview(true);
+    try {
+      const detail = await createInterview({ client_id: id });
+      router.push(`/account/interview/${detail.interview.id}`);
+    } catch (err) {
+      setInterviewError(errorMessage(err));
+      setCreatingInterview(false);
     }
   }
 
@@ -352,6 +376,22 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           </div>
         )}
       </section>
+
+      {canManageInterview && (
+        <section className="card">
+          <div className="cardHeader">
+            <h2>Kelola Klien · Interview &amp; Kualifikasi</h2>
+          </div>
+          {interviewError && <div className="alert alertError" role="alert">{interviewError}</div>}
+          <p className="muted" style={{ fontSize: 13 }}>
+            Buka halaman Interview untuk mengisi Blok A–B, menghitung kualifikasi (skor & verdict
+            advisory), dan menandai prasyarat klien.
+          </p>
+          <button type="button" className="btn btnPrimary" disabled={creatingInterview} onClick={handleOpenInterview}>
+            {creatingInterview ? 'Membuka…' : 'Buat & buka interview'}
+          </button>
+        </section>
+      )}
 
       <section className="card">
         <div className="cardHeader">

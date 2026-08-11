@@ -9,6 +9,9 @@
  * the parity gate exists to catch.
  */
 
+import { api } from './api';
+import type { AnswerWire, ScoreWire } from './interview-fields';
+
 /** The interview record. */
 export interface Interview {
   id: string;
@@ -87,3 +90,217 @@ export interface InterviewVerdict {
   verdict: string;
   prasyarat_status: string;
 }
+
+// ===========================================================================
+// API client — every path here is served by apps/api (route-parity KNOWN_GAPS
+// must stay empty). The score/prasyarat writes are advisory: they never block.
+// ===========================================================================
+
+/** Optional args for scoreInterview (config version + prerequisite status). */
+export interface ScoreExtra {
+  config_version?: number;
+  prasyarat_status?: string;
+}
+
+export interface JadwalWire {
+  tanggal_waktu: string | null;
+  durasi_menit: number | null;
+  format: string | null;
+  lokasi_link: string | null;
+  catatan_persiapan: string | null;
+}
+
+/** POST /interview request body (named so the body-parity scanner can read it). */
+export interface CreateInterviewBody {
+  client_id: string;
+  contract_id?: string | null;
+  service_id?: string | null;
+  acting_for_am_id?: string | null;
+  sales_closing_id?: string | null;
+  interview_profile?: string;
+  retroaktif?: boolean;
+}
+
+export function createInterview(body: CreateInterviewBody): Promise<InterviewDetail> {
+  return api.post<InterviewDetail>('/interview', body);
+}
+
+export function getInterview(id: string): Promise<InterviewDetail> {
+  return api.get<InterviewDetail>(`/interview/${id}`);
+}
+
+export function saveInterviewAnswers(id: string, answers: AnswerWire[]): Promise<InterviewDetail> {
+  return api.put<InterviewDetail>(`/interview/${id}/answers`, { answers });
+}
+
+/** POST /interview/{id}/score — computes + PERSISTS the qualification (advisory). */
+export function scoreInterview(id: string, body: ScoreWire, extra: ScoreExtra = {}): Promise<InterviewKualifikasi> {
+  return api.post<InterviewKualifikasi>(`/interview/${id}/score`, { ...body, ...extra });
+}
+
+export function getInterviewVerdict(id: string): Promise<InterviewVerdict | null> {
+  return api.get<InterviewVerdict | null>(`/interview/${id}/verdict`);
+}
+
+/** POST /interview/{id}/prasyarat — "tandai prasyarat selesai" (advisory). */
+export function resolveInterviewPrasyarat(id: string): Promise<InterviewVerdict | null> {
+  return api.post<InterviewVerdict | null>(`/interview/${id}/prasyarat`);
+}
+
+export function scheduleInterview(id: string, body: JadwalWire): Promise<InterviewDetail> {
+  return api.put<InterviewDetail>(`/interview/${id}/jadwal`, body);
+}
+
+export function transitionInterview(id: string, to: string, alasanPembatalan?: string): Promise<InterviewDetail> {
+  return api.post<InterviewDetail>(`/interview/${id}/transition`, {
+    to,
+    alasan_pembatalan: alasanPembatalan ?? null,
+  });
+}
+
+// ===========================================================================
+// State machine (machine `interview`) — MIRRORS the sm_edges seed. The server
+// (sm_transition) is the authority; this only decides which buttons to render.
+// ===========================================================================
+
+export const INTERVIEW_STATUS = {
+  BelumDijadwalkan: 'Belum Dijadwalkan',
+  Terjadwal: 'Terjadwal',
+  DijadwalkanUlang: 'Dijadwalkan Ulang',
+  SedangBerlangsung: 'Sedang Berlangsung',
+  DraftIsian: 'Draft Isian',
+  ButuhDataKlien: 'Butuh Data Klien',
+  Diajukan: 'Diajukan',
+  Selesai: 'Selesai',
+  SelesaiDenganCatatan: 'Selesai Dengan Catatan',
+  Dikembalikan: 'Dikembalikan',
+  Dibatalkan: 'Dibatalkan',
+} as const;
+
+export interface InterviewEdge {
+  from: string;
+  to: string;
+  /** Reviewer edges + cancellation gate an Account lead/Director. */
+  requireLead: boolean;
+  /** `Dibatalkan` requires a written reason (DB CHECK). */
+  requireReason: boolean;
+}
+
+/** Verbatim from the migration's sm_edges seed for machine `interview`. */
+export const INTERVIEW_EDGES: InterviewEdge[] = [
+  { from: 'Belum Dijadwalkan', to: 'Terjadwal', requireLead: false, requireReason: false },
+  { from: 'Terjadwal', to: 'Sedang Berlangsung', requireLead: false, requireReason: false },
+  { from: 'Terjadwal', to: 'Dijadwalkan Ulang', requireLead: false, requireReason: false },
+  { from: 'Dijadwalkan Ulang', to: 'Terjadwal', requireLead: false, requireReason: false },
+  { from: 'Sedang Berlangsung', to: 'Draft Isian', requireLead: false, requireReason: false },
+  { from: 'Draft Isian', to: 'Diajukan', requireLead: false, requireReason: false },
+  { from: 'Draft Isian', to: 'Butuh Data Klien', requireLead: false, requireReason: false },
+  { from: 'Butuh Data Klien', to: 'Draft Isian', requireLead: false, requireReason: false },
+  { from: 'Diajukan', to: 'Selesai', requireLead: false, requireReason: false },
+  { from: 'Diajukan', to: 'Selesai Dengan Catatan', requireLead: true, requireReason: false },
+  { from: 'Diajukan', to: 'Dikembalikan', requireLead: true, requireReason: false },
+  { from: 'Dikembalikan', to: 'Draft Isian', requireLead: false, requireReason: false },
+  { from: 'Belum Dijadwalkan', to: 'Dibatalkan', requireLead: true, requireReason: true },
+  { from: 'Terjadwal', to: 'Dibatalkan', requireLead: true, requireReason: true },
+  { from: 'Dijadwalkan Ulang', to: 'Dibatalkan', requireLead: true, requireReason: true },
+  { from: 'Sedang Berlangsung', to: 'Dibatalkan', requireLead: true, requireReason: true },
+  { from: 'Draft Isian', to: 'Dibatalkan', requireLead: true, requireReason: true },
+  { from: 'Butuh Data Klien', to: 'Dibatalkan', requireLead: true, requireReason: true },
+  { from: 'Diajukan', to: 'Dibatalkan', requireLead: true, requireReason: true },
+];
+
+/**
+ * The transitions a role can take from `status`, EXCLUDING moves to `Terjadwal`
+ * (those are driven by the schedule form, which writes the jadwal in the same
+ * step — offering a bare "Terjadwal" button would move the state with no
+ * schedule behind it).
+ */
+export function availableTransitions(status: string, canLead: boolean): InterviewEdge[] {
+  return INTERVIEW_EDGES.filter(
+    (e) => e.from === status && e.to !== 'Terjadwal' && (!e.requireLead || canLead),
+  );
+}
+
+/** States in which Blok B answers + scoring may be written. */
+export const ANSWER_EDITABLE_STATES: readonly string[] = [
+  INTERVIEW_STATUS.SedangBerlangsung,
+  INTERVIEW_STATUS.DraftIsian,
+  INTERVIEW_STATUS.ButuhDataKlien,
+  INTERVIEW_STATUS.Dikembalikan,
+];
+
+export function isAnswerEditable(status: string): boolean {
+  return ANSWER_EDITABLE_STATES.includes(status);
+}
+
+/** Badge tone for an interview status (the shared heuristic buckets most to gray). */
+export function interviewStatusTone(status: string): string {
+  switch (status) {
+    case INTERVIEW_STATUS.BelumDijadwalkan:
+      return 'gray';
+    case INTERVIEW_STATUS.Terjadwal:
+    case INTERVIEW_STATUS.SedangBerlangsung:
+      return 'blue';
+    case INTERVIEW_STATUS.DijadwalkanUlang:
+    case INTERVIEW_STATUS.DraftIsian:
+    case INTERVIEW_STATUS.ButuhDataKlien:
+      return 'amber';
+    case INTERVIEW_STATUS.Diajukan:
+      return 'purple';
+    case INTERVIEW_STATUS.Selesai:
+    case INTERVIEW_STATUS.SelesaiDenganCatatan:
+      return 'green';
+    case INTERVIEW_STATUS.Dikembalikan:
+      return 'red';
+    case INTERVIEW_STATUS.Dibatalkan:
+      return 'darkgray';
+    default:
+      return 'gray';
+  }
+}
+
+// ===========================================================================
+// Verdict + prasyarat display
+// ===========================================================================
+
+export const VERDICT_LABELS: Record<string, string> = {
+  growth_ready: 'Growth Ready',
+  bersyarat: 'Bersyarat',
+  risiko_tinggi: 'Risiko Tinggi',
+  tidak_siap: 'Tidak Siap',
+};
+
+export function verdictTone(verdict: string): string {
+  switch (verdict) {
+    case 'growth_ready':
+      return 'green';
+    case 'bersyarat':
+      return 'amber';
+    case 'risiko_tinggi':
+      return 'red';
+    case 'tidak_siap':
+      return 'darkgray';
+    default:
+      return 'gray';
+  }
+}
+
+export const PRASYARAT_LABELS: Record<string, string> = {
+  belum: 'Belum',
+  jalan: 'Sedang berjalan',
+  selesai: 'Selesai',
+};
+
+export const KUALITAS_DATA_LABELS: Record<string, string> = {
+  terverifikasi: 'Terverifikasi',
+  sebagian_estimasi: 'Sebagian estimasi',
+  mayoritas_estimasi: 'Mayoritas estimasi',
+};
+
+/** Deal-breaker code → BI label (for the sidebar + prints). */
+export const HAMBATAN_LABELS: Record<string, string> = {
+  margin_di_bawah_minimum: 'Margin bersih di bawah minimum',
+  dropship: 'Model bisnis dropship',
+  rasio_target_terlalu_tinggi: 'Rasio target terlalu tinggi (> 5x)',
+  daya_tahan_budget_terlalu_pendek: 'Daya tahan budget terlalu pendek (≤ 1 bulan)',
+};
