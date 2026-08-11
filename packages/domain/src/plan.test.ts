@@ -88,6 +88,9 @@ import {
   getPlan,
   getPlanDetail,
   listPlansForContract,
+  midpointDate,
+  runPlanTick,
+  PLAN_JOB_ACTOR_ID,
   recordAutoActual,
   recordManualActual,
   rejectTargetAdjustment,
@@ -1749,5 +1752,145 @@ describeDb('listCarryOverPending (rows awaiting a decision)', () => {
   it('honours read scope', async () => {
     const { p1 } = await closedChainWithRow('Sebagian');
     await expect(listCarryOverPending(sql, otherAm(), p1)).rejects.toThrow(MSG_PLAN_FORBIDDEN);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-09 — scheduled jobs (§9): activation / force-close / belum_dieksekusi /
+// realisasi belum lengkap. The caller supplies the WIB date, so these run
+// against fixed calendar strings with no clock dependence.
+// ---------------------------------------------------------------------------
+
+describeDb('B-09 scheduled jobs (§9)', () => {
+  async function seedPeriodOn(
+    f: { clientId: string; contractId: string | null; strategiId: string | null },
+    opts: { periodeNo: number; status: string; mulai: string; akhir: string; lingkup?: string },
+  ): Promise<string> {
+    seq += 1;
+    const id = `ZZ-PLAN-${RUN}-${seq}`;
+    await sql`
+      insert into plan (id, lingkup, contract_id, client_id, strategi_id, periode_no,
+        tanggal_mulai, tanggal_akhir, jumlah_minggu, status, created_by)
+      values (${id}, ${opts.lingkup ?? 'kontrak'}, ${f.contractId}, ${f.clientId},
+        ${f.strategiId}, ${opts.periodeNo}, ${opts.mulai}, ${opts.akhir}, 5, ${opts.status}, 'ZZ-AM')`;
+    return id;
+  }
+
+  const statusOf = async (id: string): Promise<string> =>
+    (await sql<{ status: string }[]>`select status from plan where id = ${id}`)[0].status;
+
+  const notifCount = async (recipient: string, entityId: string, event: string): Promise<number> =>
+    (
+      await sql<{ n: number }[]>`
+        select count(*)::int as n from notifications
+         where recipient_employee_id = ${recipient} and entity_id = ${entityId}
+           and event_type = ${event}`
+    )[0].n;
+
+  it('midpointDate is 50% through the inclusive window (pure)', () => {
+    expect(midpointDate('2026-08-01', '2026-08-31')).toBe('2026-08-16'); // 31 days → +15
+    expect(midpointDate('2026-08-01', '2026-08-10')).toBe('2026-08-06'); // 10 days → +5
+  });
+
+  it('SYSTEM actor id is stable', () => {
+    expect(PLAN_JOB_ACTOR_ID).toBe('SISTEM');
+  });
+
+  it('(a) activates a due Terjadwal period, and is idempotent', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriodOn(f, { periodeNo: 1, status: 'Terjadwal', mulai: '2026-09-01', akhir: '2026-09-30' });
+    const r1 = await runPlanTick(sql, '2026-09-01');
+    expect(r1.diaktifkan).toContain(id);
+    expect(await statusOf(id)).toBe('Aktif');
+    // Second tick: already Aktif, not due — no re-activation.
+    const r2 = await runPlanTick(sql, '2026-09-02');
+    expect(r2.diaktifkan).not.toContain(id);
+    expect(await statusOf(id)).toBe('Aktif');
+  });
+
+  it('(a) does not activate a period whose window has not started', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriodOn(f, { periodeNo: 1, status: 'Terjadwal', mulai: '2026-09-10', akhir: '2026-10-09' });
+    const r = await runPlanTick(sql, '2026-09-01');
+    expect(r.diaktifkan).not.toContain(id);
+    expect(await statusOf(id)).toBe('Terjadwal');
+  });
+
+  it('(a) force-closes an overdue Aktif period and activates its successor (Rule 5)', async () => {
+    const f = await seedContractStrategi();
+    const p1 = await seedPeriodOn(f, { periodeNo: 1, status: 'Aktif', mulai: '2026-08-01', akhir: '2026-08-31' });
+    const p2 = await seedPeriodOn(f, { periodeNo: 2, status: 'Terjadwal', mulai: '2026-09-01', akhir: '2026-09-30' });
+    const r = await runPlanTick(sql, '2026-09-01');
+    expect(r.ditutupOtomatis).toContain(p1);
+    expect(r.diaktifkan).toContain(p2);
+    expect(await statusOf(p1)).toBe('Ditutup Otomatis');
+    expect(await statusOf(p2)).toBe('Aktif');
+  });
+
+  it('(b) flags Rencana rows at midpoint and notifies the AM exactly once', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriodOn(f, { periodeNo: 1, status: 'Aktif', mulai: '2026-08-01', akhir: '2026-08-31' });
+    // one not-started row (Rencana) + one already executing (Jalan).
+    await sql`insert into plan_row (plan_id, channel, pilar, kuota, divisi_pic, di_luar_strategi, di_luar_alasan, status_baris, created_by)
+              values (${id}, 'Shopee', 'iklan', 3, 'Ads', true, 'scope', 'Rencana', 'ZZ-AM')`;
+    await sql`insert into plan_row (plan_id, channel, pilar, kuota, divisi_pic, di_luar_strategi, di_luar_alasan, status_baris, created_by)
+              values (${id}, 'Shopee', 'iklan', 3, 'Ads', true, 'scope', 'Jalan', 'ZZ-AM')`;
+
+    // Before midpoint (window 08-01..08-31, midpoint 08-16): nothing.
+    const early = await runPlanTick(sql, '2026-08-10');
+    expect(early.belumDieksekusi).not.toContain(id);
+
+    // At/after midpoint: the Rencana row is flagged, one notice to the AM.
+    const r = await runPlanTick(sql, '2026-08-16');
+    expect(r.belumDieksekusi).toContain(id);
+    const flags = await sql<{ n: number }[]>`select count(*)::int as n from plan_flag where plan_id = ${id} and jenis = 'belum_dieksekusi'`;
+    expect(flags[0].n).toBe(1); // only the Rencana row
+    expect(await notifCount('ZZ-AM', id, 'plan_baris_belum_dieksekusi')).toBe(1);
+
+    // Idempotent: a second run raises no new flag and no second notice.
+    const again = await runPlanTick(sql, '2026-08-17');
+    expect(again.belumDieksekusi).not.toContain(id);
+    const flags2 = await sql<{ n: number }[]>`select count(*)::int as n from plan_flag where plan_id = ${id} and jenis = 'belum_dieksekusi'`;
+    expect(flags2[0].n).toBe(1);
+    expect(await notifCount('ZZ-AM', id, 'plan_baris_belum_dieksekusi')).toBe(1);
+  });
+
+  it('(c) notifies realisasi belum lengkap 5 days after close when manual GMV is missing, once', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriodOn(f, { periodeNo: 1, status: 'Ditutup', mulai: '2026-08-01', akhir: '2026-08-31' });
+    // a GMV-target channel with no manual actual.
+    await sql`insert into plan_target (plan_id, channel, metric, nilai_strategi, nilai_dipakai, created_by)
+              values (${id}, 'Shopee', 'gmv', 100000000, 100000000, 'ZZ-AM')`;
+    // the close happened on WIB 2026-09-01 (created_at 06:00Z → 13:00 WIB same day).
+    await sql`insert into audit_log (entity_type, entity_id, actor_employee_id, action, before_json, after_json, created_by, created_at)
+              values ('plan', ${id}, 'ZZ-AM', 'transition:Aktif->Ditutup', '{}'::jsonb, '{}'::jsonb, 'ZZ-AM', '2026-09-01T06:00:00Z')`;
+
+    // 4 days after close (09-05 < 09-01+5=09-06): nothing yet.
+    const early = await runPlanTick(sql, '2026-09-05');
+    expect(early.realisasiBelumLengkap).not.toContain(id);
+
+    // 5+ days after close: one notice + an idempotency marker.
+    const r = await runPlanTick(sql, '2026-09-07');
+    expect(r.realisasiBelumLengkap).toContain(id);
+    expect(await notifCount('ZZ-AM', id, 'plan_realisasi_belum_lengkap')).toBe(1);
+
+    // Idempotent: re-running does not notify twice.
+    const again = await runPlanTick(sql, '2026-09-08');
+    expect(again.realisasiBelumLengkap).not.toContain(id);
+    expect(await notifCount('ZZ-AM', id, 'plan_realisasi_belum_lengkap')).toBe(1);
+  });
+
+  it('(c) stays silent when the manual GMV is present', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriodOn(f, { periodeNo: 1, status: 'Ditutup', mulai: '2026-08-01', akhir: '2026-08-31' });
+    await sql`insert into plan_target (plan_id, channel, metric, nilai_strategi, nilai_dipakai, created_by)
+              values (${id}, 'Shopee', 'gmv', 100000000, 100000000, 'ZZ-AM')`;
+    await sql`insert into plan_actual (plan_id, channel, metric, sumber, nilai, file_bukti, tanggal_ambil, created_by)
+              values (${id}, 'Shopee', 'gmv', 'manual', 95000000, 'export.pdf', '2026-09-01', 'ZZ-AM')`;
+    await sql`insert into audit_log (entity_type, entity_id, actor_employee_id, action, before_json, after_json, created_by, created_at)
+              values ('plan', ${id}, 'ZZ-AM', 'transition:Aktif->Ditutup', '{}'::jsonb, '{}'::jsonb, 'ZZ-AM', '2026-09-01T06:00:00Z')`;
+    const r = await runPlanTick(sql, '2026-09-10');
+    expect(r.realisasiBelumLengkap).not.toContain(id);
+    expect(await notifCount('ZZ-AM', id, 'plan_realisasi_belum_lengkap')).toBe(0);
   });
 });
