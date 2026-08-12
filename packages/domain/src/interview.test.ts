@@ -132,18 +132,29 @@ dDb('interview write path (integration)', () => {
     await expect(interview.createInterview(sql, NONOWNER, { clientId: CLI })).rejects.toThrow(/akses/);
   });
 
-  it('lists the client interview log (Account-scope; Sales/non-owner denied; missing client 404)', async () => {
-    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
-    created.push(detail.interview.id);
+  it('logs only scheduled/progressed interviews (blank Belum Dijadwalkan hidden); Account-scope; missing client 404', async () => {
+    // A freshly created interview is 'Belum Dijadwalkan' — a blank attempt — and
+    // must NOT clutter the log.
+    const blank = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(blank.interview.id);
+    // A scheduled one SHOULD appear.
+    const sched = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(sched.interview.id);
+    await interview.scheduleInterview(sql, OWNER, sched.interview.id, {
+      tanggalWaktu: '2026-08-20T04:00:00.000Z',
+      durasiMenit: 30,
+    });
 
     const rows = await interview.listInterviewsByClient(sql, OWNER, CLI);
-    expect(rows.some((r) => r.id === detail.interview.id)).toBe(true);
+    expect(rows.some((r) => r.id === sched.interview.id)).toBe(true);
+    expect(rows.some((r) => r.id === blank.interview.id)).toBe(false);
+    expect(rows.every((r) => r.status !== iv.INTERVIEW_STATES.BelumDijadwalkan)).toBe(true);
     // Newest first (created_at desc).
     for (let i = 1; i < rows.length; i++) {
       expect(rows[i - 1].createdAt >= rows[i].createdAt).toBe(true);
     }
 
-    // The full log is Account-scope: Sales and a non-owner Account staff are denied.
+    // The log is Account-scope: Sales and a non-owner Account staff are denied.
     await expect(interview.listInterviewsByClient(sql, SALES, CLI)).rejects.toThrow(/akses/);
     await expect(interview.listInterviewsByClient(sql, NONOWNER, CLI)).rejects.toThrow(/akses/);
 

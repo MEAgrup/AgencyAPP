@@ -353,13 +353,17 @@ export interface InterviewListRow {
 }
 
 /**
- * listInterviewsByClient returns every interview for a client (newest first),
- * with the qualification verdict/score joined in once scored. Account-scope —
- * the SAME read gate as getInterview (Sales denied; the scope is per-client, so
- * checked once against the client's assigned AM). This is the "Riwayat
- * Interview" log the Client Record renders: without it a saved interview has no
- * navigation back except its raw ITV URL, and re-opening means accidentally
- * creating a duplicate.
+ * listInterviewsByClient returns the client's interview LOG (newest first), with
+ * the qualification verdict/score joined in once scored. Account-scope — the SAME
+ * read gate as getInterview (Sales denied; the scope is per-client, so checked
+ * once against the client's assigned AM).
+ *
+ * Interviews still at `Belum Dijadwalkan` are EXCLUDED (QA 2026-08-12): opening
+ * the Kelola Klien page mints an ITV before anything is entered, so a client
+ * accumulates blank never-scheduled attempts. The log is meant to record work
+ * that was actually saved — a schedule set, an interview started/submitted, or a
+ * cancellation — not those empty drafts. Every non-`Belum Dijadwalkan` state is
+ * kept (Terjadwal … Selesai, plus Dibatalkan as a deliberate audited outcome).
  */
 export async function listInterviewsByClient(sql: Queryable, actor: Actor, clientId: string): Promise<InterviewListRow[]> {
   const clientRows = await sql<{ assigned_am_id: string | null }[]>`
@@ -373,6 +377,7 @@ export async function listInterviewsByClient(sql: Queryable, actor: Actor, clien
       from interview i
       left join interview_kualifikasi k on k.interview_id = i.id
      where i.client_id = ${clientId}
+       and i.status <> ${iv.INTERVIEW_STATES.BelumDijadwalkan}
      order by i.created_at desc, i.id desc`;
   return rows.map((r) => ({
     id: r.id as string,
