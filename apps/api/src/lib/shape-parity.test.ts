@@ -463,6 +463,7 @@ const WIRE_TO_FE: Record<string, string> = {
   InterviewAnswerWire: 'interview.ts::InterviewAnswer',
   InterviewDetailWire: 'interview.ts::InterviewDetail',
   InterviewVerdictWire: 'interview.ts::InterviewVerdict',
+  InterviewListRowWire: 'interview.ts::InterviewListRow',
   BriefWire: 'account.ts::Brief',
   ComplaintWire: 'account.ts::Complaint',
   // M7 creative

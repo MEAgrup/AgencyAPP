@@ -91,6 +91,21 @@ export interface InterviewVerdict {
   prasyarat_status: string;
 }
 
+/** One row of the client's interview log (the "Riwayat Interview" list). */
+export interface InterviewListRow {
+  id: string;
+  client_id: string;
+  service_id: string | null;
+  status: string;
+  versi_no: number;
+  interview_profile: string;
+  retroaktif: boolean;
+  verdict: string | null;
+  prasyarat_status: string | null;
+  skor_kualifikasi: number | null;
+  created_at: string;
+}
+
 // ===========================================================================
 // API client — every path here is served by apps/api (route-parity KNOWN_GAPS
 // must stay empty). The score/prasyarat writes are advisory: they never block.
@@ -123,6 +138,11 @@ export interface CreateInterviewBody {
 
 export function createInterview(body: CreateInterviewBody): Promise<InterviewDetail> {
   return api.post<InterviewDetail>('/interview', body);
+}
+
+/** GET /interview?client_id=… — the client's interview log (newest first). */
+export function listInterviewsByClient(clientId: string): Promise<{ data: InterviewListRow[] }> {
+  return api.get<{ data: InterviewListRow[] }>(`/interview?client_id=${encodeURIComponent(clientId)}`);
 }
 
 export function getInterview(id: string): Promise<InterviewDetail> {

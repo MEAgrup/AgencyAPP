@@ -132,6 +132,25 @@ dDb('interview write path (integration)', () => {
     await expect(interview.createInterview(sql, NONOWNER, { clientId: CLI })).rejects.toThrow(/akses/);
   });
 
+  it('lists the client interview log (Account-scope; Sales/non-owner denied; missing client 404)', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+
+    const rows = await interview.listInterviewsByClient(sql, OWNER, CLI);
+    expect(rows.some((r) => r.id === detail.interview.id)).toBe(true);
+    // Newest first (created_at desc).
+    for (let i = 1; i < rows.length; i++) {
+      expect(rows[i - 1].createdAt >= rows[i].createdAt).toBe(true);
+    }
+
+    // The full log is Account-scope: Sales and a non-owner Account staff are denied.
+    await expect(interview.listInterviewsByClient(sql, SALES, CLI)).rejects.toThrow(/akses/);
+    await expect(interview.listInterviewsByClient(sql, NONOWNER, CLI)).rejects.toThrow(/akses/);
+
+    // A client that does not exist is a 404, not an empty list.
+    await expect(interview.listInterviewsByClient(sql, OWNER, 'CLI-ZZI-9999')).rejects.toThrow(interview.MSG_NOT_FOUND);
+  });
+
   it('rejects an out-of-set schedule format with a BI message (not a 500), and accepts a valid one', async () => {
     const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
     created.push(detail.interview.id);
