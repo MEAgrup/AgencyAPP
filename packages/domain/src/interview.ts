@@ -337,6 +337,58 @@ export async function getInterviewVerdict(sql: Queryable, actor: Actor, id: stri
   return { interviewId: id, verdict: rows[0].verdict_kualifikasi, prasyaratStatus: rows[0].prasyarat_status };
 }
 
+/** One row of the client's interview log (list surface). */
+export interface InterviewListRow {
+  id: string;
+  clientId: string;
+  serviceId: string | null;
+  status: string;
+  versiNo: number;
+  interviewProfile: string;
+  retroaktif: boolean;
+  verdict: string | null;
+  prasyaratStatus: string | null;
+  skorKualifikasi: number | null;
+  createdAt: string;
+}
+
+/**
+ * listInterviewsByClient returns every interview for a client (newest first),
+ * with the qualification verdict/score joined in once scored. Account-scope —
+ * the SAME read gate as getInterview (Sales denied; the scope is per-client, so
+ * checked once against the client's assigned AM). This is the "Riwayat
+ * Interview" log the Client Record renders: without it a saved interview has no
+ * navigation back except its raw ITV URL, and re-opening means accidentally
+ * creating a duplicate.
+ */
+export async function listInterviewsByClient(sql: Queryable, actor: Actor, clientId: string): Promise<InterviewListRow[]> {
+  const clientRows = await sql<{ assigned_am_id: string | null }[]>`
+    select assigned_am_id from clients where id = ${clientId}`;
+  if (clientRows.length === 0) throw new NotFoundError(MSG_NOT_FOUND);
+  if (!canReadInterview(actor, clientRows[0].assigned_am_id)) throw new ForbiddenError(MSG_FORBIDDEN);
+
+  const rows = await sql<Record<string, unknown>[]>`
+    select i.id, i.client_id, i.service_id, i.status, i.versi_no, i.interview_profile, i.retroaktif, i.created_at,
+           k.verdict_kualifikasi, k.prasyarat_status, k.skor_kualifikasi
+      from interview i
+      left join interview_kualifikasi k on k.interview_id = i.id
+     where i.client_id = ${clientId}
+     order by i.created_at desc, i.id desc`;
+  return rows.map((r) => ({
+    id: r.id as string,
+    clientId: r.client_id as string,
+    serviceId: (r.service_id as string | null) ?? null,
+    status: r.status as string,
+    versiNo: Number(r.versi_no),
+    interviewProfile: r.interview_profile as string,
+    retroaktif: r.retroaktif as boolean,
+    verdict: (r.verdict_kualifikasi as string | null) ?? null,
+    prasyaratStatus: (r.prasyarat_status as string | null) ?? null,
+    skorKualifikasi: r.skor_kualifikasi == null ? null : Number(r.skor_kualifikasi),
+    createdAt: iso(r.created_at as string | Date)!,
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Create
 // ---------------------------------------------------------------------------

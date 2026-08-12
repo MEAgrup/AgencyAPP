@@ -6,7 +6,15 @@ import { useRouter } from 'next/navigation';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { isAccountLead, isAccountStaff } from '@/lib/account';
-import { createInterview } from '@/lib/interview';
+import {
+  PRASYARAT_LABELS,
+  VERDICT_LABELS,
+  createInterview,
+  interviewStatusTone,
+  listInterviewsByClient,
+  verdictTone,
+  type InterviewListRow,
+} from '@/lib/interview';
 import {
   EDITABLE_FIELDS,
   PAYMENT_INTENT_OPTIONS,
@@ -41,6 +49,10 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
 
   const [creatingInterview, setCreatingInterview] = useState(false);
   const [interviewError, setInterviewError] = useState<string | null>(null);
+  // The client's interview log — so a saved interview can be reopened instead of
+  // only ever created anew (which would duplicate it). Account-scope read.
+  const [interviews, setInterviews] = useState<InterviewListRow[]>([]);
+  const [interviewsError, setInterviewsError] = useState<string | null>(null);
 
   const [client, setClient] = useState<Client | null>(null);
   const [loading, setLoading] = useState(true);
@@ -80,9 +92,24 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     }
   }, [id]);
 
+  // The interview log is Account-scope; a Sales/Finance viewer of this record is
+  // denied (403). Load it separately so that denial never blanks the whole page —
+  // the log simply stays empty for roles that may not read it.
+  const loadInterviews = useCallback(async () => {
+    if (!canManageInterview) return;
+    setInterviewsError(null);
+    try {
+      const res = await listInterviewsByClient(id);
+      setInterviews(res.data);
+    } catch (err) {
+      setInterviewsError(errorMessage(err));
+    }
+  }, [id, canManageInterview]);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadInterviews();
+  }, [load, loadInterviews]);
 
   async function handleVoid(serviceId: string, serviceName: string) {
     if (!window.confirm(`Yakin ingin void service "${serviceName}"? Brief non-Approved akan ikut dibatalkan.`)) {
@@ -383,12 +410,61 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             <h2>Kelola Klien · Interview &amp; Kualifikasi</h2>
           </div>
           {interviewError && <div className="alert alertError" role="alert">{interviewError}</div>}
-          <p className="muted" style={{ fontSize: 13 }}>
-            Buka halaman Interview untuk mengisi Blok A–B, menghitung kualifikasi (skor & verdict
-            advisory), dan menandai prasyarat klien.
-          </p>
+          {interviewsError && <div className="alert alertError" role="alert">{interviewsError}</div>}
+
+          {/* Riwayat Interview — the log of interviews already done for this
+              client, so a saved one can be REOPENED instead of duplicated. */}
+          {interviews.length > 0 ? (
+            <div className="table-wrap" style={{ marginBottom: 12 }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Interview ID</th>
+                    <th>Status</th>
+                    <th>Verdict</th>
+                    <th>Prasyarat</th>
+                    <th>Dibuat</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {interviews.map((iv) => (
+                    <tr key={iv.id}>
+                      <td>
+                        <Link href={`/account/interview/${iv.id}`}>{iv.id}</Link>
+                        {iv.versi_no > 1 && (
+                          <span className="muted" style={{ fontSize: 12 }}> · v{iv.versi_no}</span>
+                        )}
+                      </td>
+                      <td>
+                        <span className={`badge badge-${interviewStatusTone(iv.status)}`}>{iv.status}</span>
+                      </td>
+                      <td>
+                        {iv.verdict ? (
+                          <span className={`badge badge-${verdictTone(iv.verdict)}`}>
+                            {VERDICT_LABELS[iv.verdict] ?? iv.verdict}
+                          </span>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                      <td>
+                        {iv.prasyarat_status ? (PRASYARAT_LABELS[iv.prasyarat_status] ?? iv.prasyarat_status) : '—'}
+                      </td>
+                      <td>{formatDate(iv.created_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="muted" style={{ fontSize: 13 }}>
+              Belum ada interview untuk klien ini. Buka halaman Interview untuk mengisi Blok A–B, menghitung
+              kualifikasi (skor &amp; verdict advisory), dan menandai prasyarat klien.
+            </p>
+          )}
+
           <button type="button" className="btn btnPrimary" disabled={creatingInterview} onClick={handleOpenInterview}>
-            {creatingInterview ? 'Membuka…' : 'Buat & buka interview'}
+            {creatingInterview ? 'Membuka…' : 'Buat & buka interview baru'}
           </button>
         </section>
       )}

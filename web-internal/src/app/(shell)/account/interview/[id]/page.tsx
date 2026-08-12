@@ -241,10 +241,24 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
   return (
     <>
       <div className={printMode ? 'printHideOnPrint stack' : 'stack'}>
-        <div>
+        <div className="row" style={{ alignItems: 'center' }}>
           <Link href={`/clients/${iv.client_id}`} className="muted">
             &larr; Klien {iv.client_id}
           </Link>
+          <span style={{ flex: 1 }} />
+          {/* Forward nav: after the interview the next task is Strategi & Plan,
+              which lives on the Service hub. Link straight there when the
+              interview is tied to a service; otherwise send the AM to the client
+              record where the services (and their hubs) are listed. */}
+          {iv.service_id ? (
+            <Link href={`/account/services/${encodeURIComponent(iv.service_id)}`} className="btn btnSecondary btnSm">
+              Lanjut ke Strategi &amp; Plan (layanan {iv.service_id}) &rarr;
+            </Link>
+          ) : (
+            <Link href={`/clients/${iv.client_id}`} className="btn btnSecondary btnSm">
+              Lanjut ke layanan klien &rarr;
+            </Link>
+          )}
         </div>
 
         {/* Header + tabs */}

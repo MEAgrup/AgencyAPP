@@ -4491,6 +4491,37 @@ export interface InterviewVerdictWire {
   prasyarat_status: string;
 }
 
+/** One row of the client's interview log (list surface). */
+export interface InterviewListRowWire {
+  id: string;
+  client_id: string;
+  service_id: string | null;
+  status: string;
+  versi_no: number;
+  interview_profile: string;
+  retroaktif: boolean;
+  verdict: string | null;
+  prasyarat_status: string | null;
+  skor_kualifikasi: number | null;
+  created_at: string;
+}
+
+export function interviewListToWire(rows: interview.InterviewListRow[]): InterviewListRowWire[] {
+  return rows.map((r) => ({
+    id: r.id,
+    client_id: r.clientId,
+    service_id: r.serviceId,
+    status: r.status,
+    versi_no: r.versiNo,
+    interview_profile: r.interviewProfile,
+    retroaktif: r.retroaktif,
+    verdict: r.verdict,
+    prasyarat_status: r.prasyaratStatus,
+    skor_kualifikasi: r.skorKualifikasi,
+    created_at: r.createdAt,
+  }));
+}
+
 export function interviewToWire(i: interview.Interview): InterviewWire {
   return {
     id: i.id,
