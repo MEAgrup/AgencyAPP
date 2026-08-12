@@ -30,6 +30,7 @@ import {
   listStrategies,
   nextOnboardingStep,
   setStrategyRequirement,
+  submitStrategy,
   type Brief,
   type DivisionTask,
   type ServiceQueueRow,
@@ -100,6 +101,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   const [sEnd, setSEnd] = useState('');
   const [sSubmitting, setSSubmitting] = useState(false);
   const [sError, setSError] = useState<string | null>(null);
+  const [sMessage, setSMessage] = useState<string | null>(null);
 
   // GMV approval (SPV/Head Account/Director clears an out-of-tolerance adjustment).
   const [gmvApproving, setGmvApproving] = useState(false);
@@ -227,6 +229,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   async function handleCreateStrategy(e: FormEvent) {
     e.preventDefault();
     setSError(null);
+    setSMessage(null);
     setSSubmitting(true);
     try {
       const res = await createStrategy(id, {
@@ -244,6 +247,20 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         timeline_end: sEnd,
       });
       setStrategy(res);
+      // Saving IS submitting (QA revisi): the AM no longer clicks a separate
+      // "Ajukan" button. The one exception is an out-of-tolerance GMV adjustment,
+      // which the submit gate blocks until Head/SPV ACCs it — there the Plan stays
+      // a draft and the AM is told why, rather than firing a submit the server
+      // would reject with [penyesuaian target GMV … menunggu persetujuan Head/SPV].
+      if (res.gmv_adjustment_status === GMV_ADJ_PENDING) {
+        setSMessage(
+          `Strategy & Plan ${res.id} disimpan sebagai draft. Penyesuaian target GMV di luar ±20% ` +
+            'menunggu ACC Head/SPV — setelah di-ACC, ajukan dari halaman Strategy & Plan.',
+        );
+      } else {
+        await submitStrategy(res.id);
+        setSMessage(`Strategy & Plan ${res.id} disimpan dan diajukan untuk persetujuan.`);
+      }
       await loadStrategy();
     } catch (err) {
       setSError(errorMessage(err));
@@ -615,10 +632,12 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
           </div>
           <p className="muted" style={{ fontSize: 13 }}>
             Layanan ini plan-gated: Plan wajib dibuat, diajukan, dan disetujui SPV sebelum Brief bisa dibuat
-            (M6 §4 Rule 5).
+            (M6 §4 Rule 5). Menyimpan Plan otomatis mengajukannya untuk persetujuan &mdash; tidak perlu langkah
+            &ldquo;ajukan&rdquo; terpisah.
           </p>
           <form className="form" onSubmit={handleCreateStrategy}>
             {sError && <div className="alert alertError" role="alert">{sError}</div>}
+            {sMessage && <div className="alert alertSuccess" role="status">{sMessage}</div>}
             <div className="field">
               <label htmlFor="cs-objective">Objective</label>
               <textarea id="cs-objective" required value={sObjective} onChange={(e) => setSObjective(e.target.value)} />
@@ -750,7 +769,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
             </div>
             <div>
               <button type="submit" className="btn btnPrimary" disabled={sSubmitting}>
-                {sSubmitting ? 'Menyimpan...' : 'Buat Strategy & Plan'}
+                {sSubmitting ? 'Menyimpan & mengajukan...' : 'Simpan & Ajukan Strategy & Plan'}
               </button>
             </div>
           </form>
