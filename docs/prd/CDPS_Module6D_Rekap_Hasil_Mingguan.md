@@ -12,9 +12,10 @@
 5. Form structure — Section RM-A → RM-F
 6. Flow
 7. Example — Alpha Digital, minggu 3
-8. System Requirements
-9. Open Assumptions
-10. Success Metrics
+8. **Integrasi ke Client Health Report (M13) — the summary surface**
+9. System Requirements
+10. Open Assumptions
+11. Success Metrics
 
 ---
 
@@ -66,7 +67,7 @@ So the recap can show "GMV is trending up this week" without ever becoming a com
    - **Live Stream (Module 10):** count of Sessions reaching `[Completed]`/`[Reconciled]` in the week — the **# live** figure (M10 §6.3).
    - **Ads (Module 8):** count of active Ad Campaigns with a Metric Entry logged in the week, plus optimization actions (M8 `OPT-`).
    An AM cannot type these counts. They may file a `Sengketa Angka` note against any auto figure (Rule 7), which routes to SPV — the same escape hatch as M6B PE-6.
-4. **Consolidated metrics come from the owning module first, manual only where nothing owns them (R3).** Per the ownership matrix (§8):
+4. **Consolidated metrics come from the owning module first, manual only where nothing owns them (R3).** Per the ownership matrix (§9):
    - **GMV** → `GMV Eksekusi (interim)`, auto, per §3.
    - **ROAS** → auto from Ads (`GMV from Ads ÷ Total Spend`, M8 §5 Rule 3). Displayed as the Ads-channel ROAS; a blended whole-client ROAS is **not** invented (there is no agreed denominator across organic + live + paid — see Open Assumption RM-3).
    - **CTR / CVR** → auto from Ads Metric Entries where the platform provided them (M8 §9.4, "optional / where platform provides"); otherwise `—`. Cross-division CTR/CVR is **not** modelled — manual entry with source, or `—`.
@@ -77,7 +78,7 @@ So the recap can show "GMV is trending up this week" without ever becoming a com
 8. **Confirm is a real step, not a date.** Closing a recap (`Terbuka` → `Ditutup`) requires: every auto figure present or explicitly `—`, every manual fallback either filled-with-source or explicitly marked "tidak tersedia", and the RM-D narrative (RM-D1 + RM-D3) completed. Force-close on overrun sets an incomplete flag, deliberately visible in reports.
 9. **The recap is internal.** It is not a client-facing surface — client-facing results remain the external `mea-client-reporting` embed (Module 15 / Phase 0 OA-11). What the client sees is prepared from RM-D5 ("bahan untuk klien") and, monthly, from Module 6B PF-8. Nothing in this module is exposed through the Client Portal's allow-list (Module 15 §6.1).
 10. **Immutable audit log** on every field change, manual entry, `Sengketa Angka`, confirm, and close (actor + WIB timestamp + before/after). No UPDATE/DELETE path on a closed recap; a post-close correction is an audit-logged amendment, visible on the recap view.
-11. **No new grade.** The recap introduces **no** new score. It is a consolidation and hand-off layer; the graded numbers stay in Module 13 (Health) and Module 14 (Performance), which continue to read from the same execution-module and Plan sources they already read (this module adds no input to either).
+11. **No new grade, but it *is* surfaced on the Health Report.** The recap introduces **no** new scored component: Module 13's seven components and their confirmed weights (M13 Rule 3) are untouched, and Module 14 is untouched. What the recap does is **feed the Client Health Report view as its progress-and-results summary** — the health page is where "semua report, progress, ada komplain atau tidak, dan hasil" come together, and the weekly recap is the progress/results half of that summary. Full contract in §8. The distinction is load-bearing: the recap changes **what the health page shows**, never **how the score is computed**.
 
 ---
 
@@ -179,7 +180,45 @@ Per §4 / §3. Each metric shows its `Sumber` = `otomatis` (owning module) or `m
 
 ---
 
-## 8. System Requirements
+## 8. Integrasi ke Client Health Report (M13) — the summary surface
+
+**Owner requirement (2026-08-12).** `/health` is the place where everything about a client comes together: *"summary dari semua report, progress, ada komplain atau tidak, dan hasil."* The weekly recap must connect there. This section is the contract.
+
+### 8.1 What `/health` shows today vs what it must show
+
+The implemented health view (`web-internal/src/app/(shell)/health/[clientId]`) currently renders **the score's arithmetic**: score + band, the 7-component breakdown (raw/capped/base weight/effective weight), the snapshot trend, and the ROAS toggle. That is faithful to M13 §5 — but it is *not yet* the summary the owner describes, and it is also short of **Phase 0 v2 Diagram 3**, which already specified the Client Health Dashboard as: Health Score, GMV Growth % MoM, Tasks Completion, Satisfaction, **Alerts (issue count)**, **per-platform Project Status (platform / service / progress / deadline)**, **Performance Metrics (ROAS, CPC, Conversion, CPM)**, and Upcoming Milestones. The progress/results/complaint halves of that dashboard were never built.
+
+The weekly recap is what makes them buildable, because it is the layer that already consolidates production and metrics per client per week.
+
+### 8.2 The four summary blocks the health view gains
+
+Added to the client health view, **read-only, below the existing score/band header** (the score stays the headline — this is summary, not replacement):
+
+| Block | Content | Source |
+|---|---|---|
+| **H-1 Hasil & Progress Mingguan** | Latest **closed** week's recap: production per division (**# video** Creative · **# live** Live Stream · **# creator** KOL · # campaign/optimasi Ads) + consolidated metrics (total view, GMV eksekusi interim, CTR, CVR, ROAS, spend) + delta vs the week before, and the AM/CRO narrative headline (RM-D1 "Yang Bergerak" / RM-D2 "Yang Tertahan") | M6D `WRR-` (this module) |
+| **H-2 Status Laporan** | Recap freshness & discipline: is the current week's recap `Terbuka` / `Ditutup` / `Ditutup Otomatis`; how many of the last 4 weeks were AM-closed vs auto-closed; count of open `Sengketa Angka`. **Displayed, not scored** | M6D `WRR-` status |
+| **H-3 Komplain** | Open/active complaints for this client with severity + status — answering "ada komplain atau tidak" directly on the page, instead of only as a −5/−15/−30 number inside the Complaints component | M6 `CPL-` (`listClientComplaints`) |
+| **H-4 Kesiapan Klien (Interview)** | *Optional context block.* Latest interview verdict (`siap` / `bersyarat` / `tidak_siap`) + `prasyarat_status`, as onboarding-readiness context for a low score. **Advisory only** — the verdict never gates anything (Interview v5 decision) and never enters the score | Interview module (`getInterviewVerdict` / `listInterviewsByClient`) |
+
+### 8.3 Rules for the integration (the part that keeps it honest)
+
+1. **The score is untouched.** No component is added, no weight is redistributed, no source is swapped. M13 Rules 2–5 and the confirmed weight table stand exactly as they are. Whether recap discipline should ever *become* a scored component is an owner decision that requires re-weighting — logged as Open Assumption RM-9, deliberately **not** taken here.
+2. **Two GMV figures appear on one page, so they must be labelled unambiguously.** The health score's GMV Growth reads **client GMV from Module 4** (the official monthly figure, ultimately the AM's manual entry under M6B Rule 11). The recap's figure is **`GMV Eksekusi (interim)`** — execution-sourced (Ads + Live + affiliate), weekly, read-only. The view renders them with those exact labels and never sums them together. This is the §3 single-source guardrail carried onto the display layer, where it is easiest to violate.
+3. **Same for ROAS.** H-1 shows the **Ads-channel ROAS** (M8). The score's **ROAS Attainment** is `Current Period ROAS ÷ Target ROAS`, capped, and subject to the per-client ROAS toggle (M13 Rule 13). Different numbers, different purposes, both labelled.
+4. **Drill-down, not duplication.** Each summary block links to the owning surface (weekly recap detail, complaint record, interview record, Plan period) rather than re-implementing it. The health view stores nothing — it reads, exactly as M13 §1 intends ("purely an aggregation and scoring layer — introduces no new raw data").
+5. **Permissions are the intersection, degraded per block.** The health view keeps its own gate (`canView`: assigned AM / Account lead / OD / Director). Each block additionally respects its own source's scope, and a block the actor may not read **renders as absent, never as an error that blanks the page** — the failure mode already learned in this codebase (a joined read that 404s a whole page, O52). In particular H-4 must respect the interview verdict's narrower scope (Account + sales closing + Sales lead) and simply not render for actors outside it.
+6. **Nothing here is client-facing.** The recap is internal (Rule 9) and M13 itself is not client-facing (M13 Rule 11). Client-facing health remains **band-only** through Module 15's allow-list ("On Track" / "Needs Attention" / "Action Needed"), and none of H-1…H-4 is exposed there.
+7. **The monthly snapshot stays immutable.** These blocks are a **live read** beside the snapshot, not part of it. A `CHR-` snapshot is never rewritten to embed recap data (M13 Rule 9); reopening an old period shows that period's recaps read from the recap chain, labelled with their own weeks.
+8. **Portfolio view.** The `/health` landing page — today just a scan button plus a link to the client list — becomes the portfolio scan M13 Rule 12 / M15 Rule 11 already imply: one row per active client with band, month-over-month band-drop flag, **open-complaint count**, and **recap freshness** (last closed week). This is the one screen where management sees who needs attention, and recap freshness belongs on it because a client with no recap for three weeks is unmanaged whether or not the score has caught up yet.
+
+### 8.4 Why this direction and not the alternative
+
+The tempting alternative is to make the recap an eighth scored component ("did the AM keep the client's results updated?"). Rejected for now: it would require redistributing the confirmed weights, and — more importantly — it grades the **AM's form-filling**, not the **client's health**, which is a Module 14 (Team Performance) question wearing a Module 13 costume. Recap discipline as a *visible* signal (H-2) gets the management value without corrupting what the Health Score means. If the owner wants it scored, RM-9 is the door, and M14 is probably the better room.
+
+---
+
+## 9. System Requirements
 
 **Entities.** `WRR-YYYYMM-NNNN` (weekly recap; register `WRR` in `entity_prefix` and `packages/core/src/ident.ts::PREFIXES` — both, per M6A §7). Children:
 - `WRR_DIVISI` — one row per division touched (RM-B), all figures read-only/auto.
@@ -236,7 +275,7 @@ CPL and impressions remain unmodelled system-wide (not introduced here) — see 
 
 ---
 
-## 9. Open Assumptions
+## 10. Open Assumptions
 
 | ID | Assumption | Owner |
 |---|---|---|
@@ -248,10 +287,13 @@ CPL and impressions remain unmodelled system-wide (not introduced here) — see 
 | RM-6 | Carried from 6A/6B/6C: the notification-catalog invariant test asserts a literal count; it is now v3 = 31 events and still needs the sign-off that was pending at M6B PA-8 before any of these modules ship notifications | Hans |
 | RM-7 | Organic video "views" have no tracked source in CDPS today, so RM-C3's organic component is manual-with-source or `—`. If a platform export becomes routinely available, it can graduate from manual to auto without changing the recap's shape | Hans / SPV Creative |
 | RM-8 | Division note (RM-D6) is optional. If management wants divisions to *owe* a weekly note (the literal Phase 0 "divisions send weekly reports" step), it becomes a mandatory field with its own reminder — a scope choice, not a code one | Yohan |
+| RM-9 | **Recap discipline is displayed (H-2), not scored.** Making it an eighth Health component would require redistributing M13's confirmed weights and would grade AM form-filling inside a client-health number (§8.4). If it should be graded, the recommendation is a Module 14 (Team Performance) component for the AM role, not a Module 13 one | Yohan / Nerissa |
+| RM-10 | H-4 (interview verdict on the health view) is assumed useful as onboarding-readiness context and is **advisory only**. If the verdict should not appear on the health page at all, dropping H-4 costs nothing else in this module | Yohan |
+| RM-11 | Phase 0 Diagram 3 also lists **CPC / CPM** and **Upcoming Milestones** on the Client Health Dashboard. CPC/CPM are not modelled anywhere in CDPS today (same class as CPL/impressions, RM-4) and milestones have no entity; both are therefore **out of H-1's scope** until their sources exist | Hans / SPV Ads |
 
 ---
 
-## 10. Success Metrics
+## 11. Success Metrics
 
 **Activation event.** First weekly recap **closed by an AM** (not `Ditutup Otomatis`) with complete auto figures and a written narrative — not "recap created" (creation is automatic and therefore meaningless as a signal).
 
@@ -264,5 +306,6 @@ CPL and impressions remain unmodelled system-wide (not introduced here) — see 
 | Median hours from week close → recap confirmed | A weekly cadence only works if it is timely | ≤ 48 h |
 | % recaps with a substantive RM-D narrative (not just "aman") | The recap is worthless as pure number-echo; the narrative is the point | reviewed, not scored |
 | `Sengketa Angka` rate per division | High rate = an execution module's auto figure is mistrusted → fix the source, not the recap | tracked per division |
+| % active clients whose health view shows a recap ≤ 7 days old (H-2) | The integration's own test: `/health` is only a real summary if the results half is current | ≥ 90% |
 
 **Anti-vanity guard.** Do not headline "recaps created" or "recaps closed on time" — the first is automatic, the second rises when an AM rubber-stamps. Pair the close rate with the no-Plan coverage rate and the narrative-substance review, which cannot be moved by clicking confirm.

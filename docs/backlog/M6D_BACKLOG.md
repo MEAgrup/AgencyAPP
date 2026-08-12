@@ -32,13 +32,19 @@
 | **D-08** | Rollup ke Plan | Rekap `Ditutup` memasok PE-3/PE-8 periode `Aktif` tertaut (M6B). Klien `Tanpa Plan` → rekap berdiri sendiri. | Rollup, bukan pengganti (R1). |
 | **D-09** | Domain + API + wire | `recap.ts` (read own-clients / SPV all; write RM-A6/RM-C manual/RM-D/`Sengketa`/tutup). Route baca + tutup + `sengketa`. Wire `*ToWire` (null eksplisit, bukan omitempty — hindari O43); daftar ke shape-parity. | `route-parity` `KNOWN_GAPS` tetap kosong. |
 | **D-10** | UI internal | Halaman rekap mingguan per klien (desktop-first tutup; mobile read-only minggu berjalan). **Bukan** permukaan klien (Rule 9 — nol paparan Client Portal allow-list). | Picker karyawan/format mengikuti pola yang sudah ada bila perlu. |
+| **D-11** | **Integrasi Health — blok ringkasan** (M6D §8, M13 §8) | Tambah 4 blok read-only ke `web-internal/src/app/(shell)/health/[clientId]`: **H-1** hasil & progress mingguan (# video/# live/# creator/# campaign + view/GMV interim/CTR/CVR/ROAS/spend + delta + headline narasi), **H-2** status laporan (freshness, AM-closed vs `Ditutup Otomatis` 4 minggu, `Sengketa Angka` terbuka), **H-3** komplain aktif (`listClientComplaints`, sudah ada di `account.ts:2247`), **H-4** verdict Interview (opsional, advisory). | **Skor TIDAK disentuh** — nol perubahan `packages/domain/src/health.ts` scoring (7 komponen + bobot tetap). Dua GMV di satu halaman **wajib berlabel beda**: `GMV Growth` (klien, M4) vs `GMV Eksekusi (interim)` (M6D) — jangan dijumlahkan. Idem ROAS (Ads vs ROAS Attainment ber-toggle). |
+| **D-12** | **Integrasi Health — portfolio landing** | `web-internal/src/app/(shell)/health/page.tsx` sekarang hanya tombol scan + link ke `/clients`. Jadikan tabel portfolio: satu baris per klien aktif — band, flag band-drop (M13 Rule 12), jumlah komplain terbuka, **freshness rekap** (minggu terakhir `Ditutup`). | Butuh endpoint list (belum ada — `health.ts` hanya punya per-klien + scan). Gate baca = `canScope`/`canView` yang sudah ada; jangan melebarkan RLS demi tabel ini tanpa entri O48. |
+| **D-13** | Degradasi per-blok | Tiap blok H-1…H-4 menghormati scope sumbernya dan **absen (bukan error)** bila aktor tak berhak — khususnya H-4 (`canReadVerdict` lebih sempit: Account + sales closing + Sales lead). | Kelas O52: join/read yang gagal jangan mem-blank seluruh halaman. Pola yang sudah dipakai: load terpisah per blok (preseden "Riwayat Interview" 2026-08-12). |
 
 ## 2. Definition of Done (tiap tiket)
 
 Sama seperti CLAUDE.md: validasi server-side + pesan BI `[...]`; tes izin per-role (incl. layered OD/Director); tes immutability (rekap `Ditutup` tak punya jalur UPDATE/DELETE, koreksi = amendment audit-logged); derived/auto recomputable-from-log; seed fixture Alpha Digital lolos; event notif terdaftar. **Tambahan M6D:** tes single-source GMV (rekap tak pernah menulis PE-1); tes cakupan klien `Tanpa Plan` (rekap tetap terbentuk tanpa `plan_id`).
 
-## 3. Open questions (dari PRD §9 — perlu jawaban pemilik sebelum/ saat implementasi)
+## 3. Open questions (dari PRD §10 — perlu jawaban pemilik sebelum/ saat implementasi)
 
 - **RM-3** — apakah perlu ROAS blend seluruh klien? Kalau ya, definisikan denominator (spend mana yang dihitung) dulu.
 - **RM-5** — jendela force-close/`belum dikonfirmasi` N hari (M6B pakai 5 hari utk bulanan; mingguan kemungkinan 1–2 hari).
 - **RM-8** — apakah catatan divisi (RM-D6) wajib (divisi *harus* lapor mingguan) atau tetap opsional?
+- **RM-9** — apakah disiplin rekap perlu **dinilai** (bukan cuma ditampilkan di H-2)? Rekomendasi: kalau ya, taruh di **M14 Team Performance** peran AM, BUKAN komponen ke-8 M13 (butuh re-weight + menilai form-filling AM di dalam angka kesehatan klien).
+- **RM-10** — apakah blok H-4 (verdict Interview) memang diinginkan di halaman health? Menghapusnya nol biaya bagi modul lain.
+- **RM-11** — CPC/CPM + Upcoming Milestones (Phase 0 Diagram 3) belum dimodelkan di mana pun ⇒ di luar cakupan H-1 sampai sumbernya ada.
