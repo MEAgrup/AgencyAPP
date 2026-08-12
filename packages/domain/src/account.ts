@@ -35,7 +35,7 @@
  */
 
 import { bi, notification, permission, statemachine } from '@cdps/core';
-import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
+import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import { onBriefReachedTerminal, validateBriefApproval } from './board';
 import {
   effectiveGate,
@@ -369,6 +369,51 @@ const MACHINE_SERVICE = 'service';
  */
 export const ALLOWED_DIVISIONS = ['Creative', 'Ads', 'KOL', 'Live Stream'] as const;
 
+/**
+ * QA revisi 2026-08-12 — the ±20% tolerance band the AM may adjust the client's
+ * target GMV within before Head/SPV sign-off is required (DECISIONS.md
+ * 2026-08-12). Measured against `clients.target_gmv`, the expectation Sales
+ * captured at intake.
+ */
+export const GMV_TOLERANCE = 0.2;
+
+/** The three states of the GMV adjustment gate (mirrors the DB CHECK). */
+export const GMV_ADJ_IN_TOLERANCE = 'dalam_toleransi';
+export const GMV_ADJ_PENDING = 'menunggu_persetujuan';
+export const GMV_ADJ_APPROVED = 'disetujui';
+
+/**
+ * The fixed per-division task-satuan catalog (QA revisi 2026-08-12). Each
+ * involved division commits to unit-of-work quotas that the AM later turns into
+ * Briefs (M6B P3: Briefs are created manually from the plan). `money: true`
+ * marks a Rupiah amount (Ads spend) rather than a plain count.
+ */
+export const TASK_CATALOG: Record<
+  string,
+  { readonly jenis: string; readonly label: string; readonly money?: boolean }[]
+> = {
+  Creative: [
+    { jenis: 'video_seller', label: 'Jumlah video seller' },
+    { jenis: 'sku_optimize', label: 'Jumlah SKU optimize' },
+  ],
+  KOL: [
+    { jenis: 'video_creator', label: 'Jumlah video creator' },
+    { jenis: 'live_stream_creator', label: 'Jumlah live stream creator' },
+  ],
+  Ads: [{ jenis: 'ads_spent', label: 'Ads spent (Rp)', money: true }],
+  'Live Stream': [{ jenis: 'live_stream', label: 'Jumlah live stream' }],
+};
+
+/** One planned unit-of-work quota for a division (jumlah is exact numeric-as-string). */
+export interface DivisionTask {
+  divisi: string;
+  jenis: string;
+  jumlah: string;
+}
+
+/** The value type postgres.js `sql.json` accepts (jsonb serializer) — see plan.ts. */
+type JsonParam = Parameters<TransactionSql['json']>[0];
+
 // --- Verbatim BI messages (M6 §2/§4). Each mirrors a Go sentinel 1:1. ---
 
 /** The referenced Service does not exist. */
@@ -410,15 +455,44 @@ export const MSG_OVERRIDE_REASON_REQUIRED = '[alasan perubahan kebutuhan Strateg
 /** The plan-flag may only be overridden while the Service is [Awaiting Onboarding]. */
 export const MSG_OVERRIDE_NOT_AWAITING =
   '[kebutuhan Strategy & Plan hanya dapat diubah saat layanan berstatus Awaiting Onboarding]';
+/** A structured Target KPI value (GMV/ROAS/CTR/CVR) or a task quota is not a valid number. */
+export const MSG_INVALID_KPI = '[nilai Target KPI tidak valid]';
+/** A division task-satuan references a division/jenis outside TASK_CATALOG. */
+export const MSG_INVALID_TASK = '[task satuan divisi tidak valid]';
+/** A task-satuan targets a division not in Divisi Terlibat. */
+export const MSG_TASK_DIVISION_NOT_INVOLVED = '[task satuan hanya untuk divisi yang terlibat]';
+/** Adjusting target GMV beyond ±20% of the client's figure needs a written reason. */
+export const MSG_GMV_ADJUSTMENT_REASON_REQUIRED =
+  '[penyesuaian target GMV di luar toleransi 20% wajib disertai alasan]';
+/** A Plan with a pending (out-of-tolerance) GMV adjustment cannot be submitted yet (§ QA revisi). */
+export const MSG_GMV_ADJUSTMENT_PENDING =
+  '[penyesuaian target GMV di luar toleransi 20% menunggu persetujuan Head/SPV]';
+/** approveGmvAdjustment on a Plan whose GMV is not awaiting approval. */
+export const MSG_GMV_ADJUSTMENT_NOT_PENDING =
+  '[tidak ada penyesuaian target GMV yang menunggu persetujuan]';
+/** Actor may not approve a GMV adjustment (not Account lead / Director). */
+export const MSG_GMV_APPROVE_FORBIDDEN =
+  '[anda tidak memiliki akses untuk menyetujui penyesuaian target GMV]';
 
 const RE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 // --- Types ---
 
-/** The mandatory Strategy & Plan content fields (M6 §9.3). */
+/**
+ * The Strategy & Plan content fields (M6 §9.3 + QA revisi 2026-08-12).
+ * `targetKpi` is now an optional free-text catatan; the mandatory KPI is the four
+ * structured points below. `targetGmv` defaults to the client's `target_gmv` when
+ * omitted; adjusting it beyond ±20% requires `gmvAdjustmentReason`.
+ */
 export interface StrategyInput {
   objective: string;
-  targetKpi: string;
+  targetKpi?: string;
+  targetGmv?: string | null;
+  targetRoas?: string | null;
+  targetCtr?: string | null;
+  targetCvr?: string | null;
+  gmvAdjustmentReason?: string | null;
+  divisionTasks?: DivisionTask[];
   divisionsInvolved: string[];
   plannedBriefOutline: string;
   timelineStart: string; // YYYY-MM-DD
@@ -431,6 +505,17 @@ export interface Strategy {
   serviceId: string;
   objective: string;
   targetKpi: string;
+  /** Structured Target KPI (QA revisi). GMV is Rp; the rest are ratios/percents. */
+  targetGmv: string | null;
+  targetRoas: string | null;
+  targetCtr: string | null;
+  targetCvr: string | null;
+  /** The client's target GMV snapshot the ±20% band is measured against. */
+  clientTargetGmv: string | null;
+  gmvAdjustmentStatus: string;
+  gmvAdjustmentReason: string | null;
+  gmvAdjustmentApprovedBy: string | null;
+  divisionTasks: DivisionTask[];
   divisionsInvolved: string[];
   plannedBriefOutline: string;
   timelineStart: string;
@@ -469,20 +554,84 @@ export function canApproveStrategy(a: Actor): boolean {
 
 // --- Input validation ---
 
+/** The normalized, validated content of a Strategy submission. */
+interface NormalizedStrategy {
+  /** ", "-joined canonical divisions string, as stored. */
+  divisions: string;
+  /** the involved-division set, for task-scope validation. */
+  involved: Set<string>;
+  kpi: { gmv: string | null; roas: string | null; ctr: string | null; cvr: string | null };
+  tasks: DivisionTask[];
+}
+
+/** parseKpiNum trims and validates a non-negative numeric string, or null when blank. */
+function parseKpiNum(v: string | null | undefined): string | null {
+  const s = (v ?? '').toString().trim();
+  if (s === '') return null;
+  if (!/^\d+(\.\d+)?$/.test(s)) {
+    throw new ValidationError(MSG_INVALID_KPI);
+  }
+  return s;
+}
+
 /**
- * normalizeAndValidate checks mandatory fields, validates the timeline as a
- * valid date range (start <= end), and canonicalizes Divisions Involved against
- * ALLOWED_DIVISIONS (dedup, canonical order). Returns the ", "-joined string.
- * Throws ValidationError (incomplete) or ValidationError (invalid divisions).
+ * normalizeTasks validates each division task against TASK_CATALOG, rejects any
+ * division not in `involved` (Divisi Terlibat), dedups, and returns the list in
+ * canonical (division, then catalog) order. Blank rows are dropped, not rejected,
+ * so the form can send an empty row per catalog slot without failing.
  */
-function normalizeAndValidate(input: StrategyInput): string {
+function normalizeTasks(raw: DivisionTask[], involved: Set<string>): DivisionTask[] {
+  const out: DivisionTask[] = [];
+  const seen = new Set<string>();
+  for (const t of raw) {
+    const divisi = (t?.divisi ?? '').trim();
+    const jenis = (t?.jenis ?? '').trim();
+    const jumlah = (t?.jumlah ?? '').toString().trim();
+    if (divisi === '' && jenis === '' && jumlah === '') continue;
+    const catalog = TASK_CATALOG[divisi];
+    if (!catalog || !catalog.some((c) => c.jenis === jenis)) {
+      throw new ValidationError(MSG_INVALID_TASK);
+    }
+    if (!involved.has(divisi)) {
+      throw new ValidationError(MSG_TASK_DIVISION_NOT_INVOLVED);
+    }
+    if (!/^\d+(\.\d+)?$/.test(jumlah)) {
+      throw new ValidationError(MSG_INVALID_TASK);
+    }
+    const key = `${divisi}|${jenis}`;
+    if (seen.has(key)) {
+      throw new ValidationError(MSG_INVALID_TASK);
+    }
+    seen.add(key);
+    out.push({ divisi, jenis, jumlah });
+  }
+  out.sort((a, b) => {
+    const dd =
+      ALLOWED_DIVISIONS.indexOf(a.divisi as (typeof ALLOWED_DIVISIONS)[number]) -
+      ALLOWED_DIVISIONS.indexOf(b.divisi as (typeof ALLOWED_DIVISIONS)[number]);
+    if (dd !== 0) return dd;
+    return (
+      TASK_CATALOG[a.divisi].findIndex((c) => c.jenis === a.jenis) -
+      TASK_CATALOG[b.divisi].findIndex((c) => c.jenis === b.jenis)
+    );
+  });
+  return out;
+}
+
+/**
+ * normalizeAndValidate checks mandatory fields, validates the timeline as a valid
+ * date range (start <= end), canonicalizes Divisions Involved against
+ * ALLOWED_DIVISIONS (dedup, canonical order), parses the four structured KPI
+ * points, and validates the per-division task-satuan. `targetKpi` is no longer
+ * mandatory (QA revisi): the structured GMV/ROAS/CTR/CVR replace it as the KPI.
+ */
+function normalizeAndValidate(input: StrategyInput): NormalizedStrategy {
   const objective = (input.objective ?? '').trim();
-  const targetKpi = (input.targetKpi ?? '').trim();
   const outline = (input.plannedBriefOutline ?? '').trim();
   const start = (input.timelineStart ?? '').trim();
   const end = (input.timelineEnd ?? '').trim();
   if (
-    objective === '' || targetKpi === '' || outline === '' || start === '' || end === '' ||
+    objective === '' || outline === '' || start === '' || end === '' ||
     (input.divisionsInvolved ?? []).length === 0
   ) {
     throw new ValidationError(bi.INCOMPLETE_DATA);
@@ -505,7 +654,54 @@ function normalizeAndValidate(input: StrategyInput): string {
     }
     want.add(d);
   }
-  return ALLOWED_DIVISIONS.filter((d) => want.has(d)).join(', ');
+  const divisions = ALLOWED_DIVISIONS.filter((d) => want.has(d)).join(', ');
+  const kpi = {
+    gmv: parseKpiNum(input.targetGmv),
+    roas: parseKpiNum(input.targetRoas),
+    ctr: parseKpiNum(input.targetCtr),
+    cvr: parseKpiNum(input.targetCvr),
+  };
+  const tasks = normalizeTasks(input.divisionTasks ?? [], want);
+  return { divisions, involved: want, kpi, tasks };
+}
+
+/**
+ * gmvGate resolves the ±20% tolerance status of the AM's `targetGmv` against the
+ * client's expectation (`clientTargetGmv`). A client target of 0/null means Sales
+ * recorded no expectation, so there is no baseline and any figure is in tolerance
+ * (no gate — division-by-zero is never surfaced, house rule #7). Out of tolerance
+ * requires a reason, thrown here when absent.
+ */
+function gmvGate(
+  targetGmv: string | null,
+  clientTargetGmv: string | null,
+  reason: string,
+): { status: string; reason: string | null } {
+  const client = clientTargetGmv === null ? 0 : Number(clientTargetGmv);
+  const target = targetGmv === null ? client : Number(targetGmv);
+  if (!(client > 0)) {
+    return { status: GMV_ADJ_IN_TOLERANCE, reason: null };
+  }
+  const deviation = Math.abs(target - client) / client;
+  if (deviation <= GMV_TOLERANCE + 1e-9) {
+    return { status: GMV_ADJ_IN_TOLERANCE, reason: null };
+  }
+  const why = (reason ?? '').trim();
+  if (why === '') {
+    throw new ValidationError(MSG_GMV_ADJUSTMENT_REASON_REQUIRED);
+  }
+  return { status: GMV_ADJ_PENDING, reason: why };
+}
+
+/** parseTasks tolerates postgres.js returning a jsonb column parsed or as text. */
+function parseTasks(v: unknown): DivisionTask[] {
+  const arr = typeof v === 'string' ? (JSON.parse(v || '[]') as unknown) : v;
+  return Array.isArray(arr) ? (arr as DivisionTask[]) : [];
+}
+
+/** numOrNull normalizes a postgres numeric (string|null) to string|null. */
+function numOrNull(v: string | number | null | undefined): string | null {
+  return v === null || v === undefined ? null : String(v);
 }
 
 /** splitDivisions parses a stored ", "-joined divisions string back to a list. */
@@ -582,15 +778,19 @@ export async function createStrategy(
   serviceId: string,
   input: StrategyInput,
 ): Promise<Strategy> {
-  const divisions = normalizeAndValidate(input);
+  const norm = normalizeAndValidate(input);
   const now = new Date();
 
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
     const rows = await tx<
-      { status: string; requires_strategy_plan: boolean; requires_strategy_plan_override: boolean | null; assigned_am_id: string | null }[]
+      {
+        status: string; requires_strategy_plan: boolean; requires_strategy_plan_override: boolean | null;
+        assigned_am_id: string | null; target_gmv: string | null;
+      }[]
     >`
-      select sv.status, sv.requires_strategy_plan, sv.requires_strategy_plan_override, c.assigned_am_id
+      select sv.status, sv.requires_strategy_plan, sv.requires_strategy_plan_override,
+             c.assigned_am_id, c.target_gmv
         from services sv join clients c on c.id = sv.client_id
        where sv.id = ${serviceId} for update`;
     if (rows.length === 0) {
@@ -612,22 +812,40 @@ export async function createStrategy(
       throw new ConflictError(MSG_STRATEGY_EXISTS);
     }
 
+    // GMV anchors on the client's expectation Sales captured at intake; the AM's
+    // figure defaults to it and may move within ±20% freely (Rule QA revisi).
+    const clientTargetGmv = numOrNull(svc.target_gmv);
+    const targetGmv = norm.kpi.gmv ?? clientTargetGmv;
+    const gate = gmvGate(targetGmv, clientTargetGmv, input.gmvAdjustmentReason ?? '');
+    const targetKpi = (input.targetKpi ?? '').trim();
+
     const id = await ex.ident.identNext('STR', now);
     await tx`
       insert into strategy_plans
         (id, service_id, objective, target_kpi, divisions_involved, planned_brief_outline,
-         timeline_start, timeline_end, status, created_by)
-      values (${id}, ${serviceId}, ${input.objective.trim()}, ${input.targetKpi.trim()}, ${divisions},
+         timeline_start, timeline_end, status, created_by,
+         target_gmv, target_roas, target_ctr, target_cvr, client_target_gmv,
+         gmv_adjustment_status, gmv_adjustment_reason, division_tasks)
+      values (${id}, ${serviceId}, ${input.objective.trim()}, ${targetKpi}, ${norm.divisions},
         ${input.plannedBriefOutline.trim()}, ${input.timelineStart.trim()}, ${input.timelineEnd.trim()},
-        ${STRATEGY_STATUS_DRAFTING}, ${actor.employeeId})`;
+        ${STRATEGY_STATUS_DRAFTING}, ${actor.employeeId},
+        ${targetGmv}, ${norm.kpi.roas}, ${norm.kpi.ctr}, ${norm.kpi.cvr}, ${clientTargetGmv},
+        ${gate.status}, ${gate.reason}, ${tx.json(norm.tasks as unknown as JsonParam)})`;
     await ex.audit.insertAudit({
       entityType: 'strategy_plan', entityId: id, actorEmployeeId: actor.employeeId, action: 'create',
-      beforeJson: null, afterJson: { status: STRATEGY_STATUS_DRAFTING, service_id: serviceId },
+      beforeJson: null,
+      afterJson: {
+        status: STRATEGY_STATUS_DRAFTING, service_id: serviceId,
+        target_gmv: targetGmv, client_target_gmv: clientTargetGmv, gmv_adjustment_status: gate.status,
+      },
       createdBy: actor.employeeId,
     });
     return {
-      id, serviceId, objective: input.objective.trim(), targetKpi: input.targetKpi.trim(),
-      divisionsInvolved: splitDivisions(divisions), plannedBriefOutline: input.plannedBriefOutline.trim(),
+      id, serviceId, objective: input.objective.trim(), targetKpi,
+      targetGmv, targetRoas: norm.kpi.roas, targetCtr: norm.kpi.ctr, targetCvr: norm.kpi.cvr,
+      clientTargetGmv, gmvAdjustmentStatus: gate.status, gmvAdjustmentReason: gate.reason,
+      gmvAdjustmentApprovedBy: null, divisionTasks: norm.tasks,
+      divisionsInvolved: splitDivisions(norm.divisions), plannedBriefOutline: input.plannedBriefOutline.trim(),
       timelineStart: input.timelineStart.trim(), timelineEnd: input.timelineEnd.trim(),
       status: STRATEGY_STATUS_DRAFTING, approvedBy: '', revisionNotes: '', revisionCount: 0,
       createdBy: actor.employeeId, createdAt: now,
@@ -640,7 +858,7 @@ export async function createStrategy(
  * owning AM (or Director), only in [Strategy Drafting].
  */
 export async function updateDraft(sql: Sql, actor: Actor, strategyId: string, input: StrategyInput): Promise<void> {
-  const divisions = normalizeAndValidate(input);
+  const norm = normalizeAndValidate(input);
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
     const locked = await lockStrategy(tx, strategyId);
@@ -650,14 +868,29 @@ export async function updateDraft(sql: Sql, actor: Actor, strategyId: string, in
     if (locked.status !== STRATEGY_STATUS_DRAFTING) {
       throw new ConflictError(MSG_NOT_DRAFT);
     }
+    // The ±20% baseline is the snapshot taken at draft time, not a re-read of the
+    // client (the client's figure could drift; the yardstick must not). Any draft
+    // edit re-opens the gate — `gmv_adjustment_approved_by` is cleared, so an
+    // out-of-tolerance figure needs Head/SPV sign-off again.
+    const targetGmv = norm.kpi.gmv ?? locked.clientTargetGmv;
+    const gate = gmvGate(targetGmv, locked.clientTargetGmv, input.gmvAdjustmentReason ?? '');
+    const targetKpi = (input.targetKpi ?? '').trim();
     await tx`
-      update strategy_plans set objective=${input.objective.trim()}, target_kpi=${input.targetKpi.trim()},
-        divisions_involved=${divisions}, planned_brief_outline=${input.plannedBriefOutline.trim()},
-        timeline_start=${input.timelineStart.trim()}, timeline_end=${input.timelineEnd.trim()}
+      update strategy_plans set objective=${input.objective.trim()}, target_kpi=${targetKpi},
+        divisions_involved=${norm.divisions}, planned_brief_outline=${input.plannedBriefOutline.trim()},
+        timeline_start=${input.timelineStart.trim()}, timeline_end=${input.timelineEnd.trim()},
+        target_gmv=${targetGmv}, target_roas=${norm.kpi.roas}, target_ctr=${norm.kpi.ctr},
+        target_cvr=${norm.kpi.cvr}, gmv_adjustment_status=${gate.status},
+        gmv_adjustment_reason=${gate.reason}, gmv_adjustment_approved_by=null,
+        division_tasks=${tx.json(norm.tasks as unknown as JsonParam)}
        where id=${strategyId}`;
     await ex.audit.insertAudit({
       entityType: 'strategy_plan', entityId: strategyId, actorEmployeeId: actor.employeeId, action: 'update_draft',
-      beforeJson: null, afterJson: { objective: input.objective.trim(), divisions_involved: divisions },
+      beforeJson: null,
+      afterJson: {
+        objective: input.objective.trim(), divisions_involved: norm.divisions,
+        target_gmv: targetGmv, gmv_adjustment_status: gate.status,
+      },
       createdBy: actor.employeeId,
     });
   });
@@ -682,9 +915,45 @@ export async function submitStrategy(
     if (!actor.role.director && locked.ownerAm !== actor.employeeId) {
       throw new ForbiddenError(MSG_NOT_OWNER_AM);
     }
+    // QA revisi: an out-of-tolerance GMV adjustment must be cleared by Head/SPV
+    // before the Plan can be submitted — the gate blocks here, not the machine.
+    if (locked.gmvAdjustmentStatus === GMV_ADJ_PENDING) {
+      throw new ConflictError(MSG_GMV_ADJUSTMENT_PENDING);
+    }
     return statemachine.transition(ex.sm, {
       machine: MACHINE_STRATEGY_PLAN, entityType: 'strategy_plan', table: 'strategy_plans',
       entityId: strategyId, to: STRATEGY_STATUS_SUBMITTED, actor,
+    });
+  });
+}
+
+/**
+ * approveGmvAdjustment clears a pending (out-of-tolerance) GMV adjustment (QA
+ * revisi). Account lead (SPV / Head of Account) or Director only — the "ACC
+ * Head/SPV" gate. The before→after edit is audit-logged (the "ada lognya"
+ * requirement); no new notification event is minted (the catalog is a frozen
+ * invariant pending sign-off), the SPV sees the pending status on the queue.
+ */
+export async function approveGmvAdjustment(sql: Sql, actor: Actor, strategyId: string): Promise<void> {
+  if (!canApproveStrategy(actor)) {
+    throw new ForbiddenError(MSG_GMV_APPROVE_FORBIDDEN);
+  }
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const locked = await lockStrategy(tx, strategyId);
+    if (locked.gmvAdjustmentStatus !== GMV_ADJ_PENDING) {
+      throw new ConflictError(MSG_GMV_ADJUSTMENT_NOT_PENDING);
+    }
+    await tx`
+      update strategy_plans
+         set gmv_adjustment_status=${GMV_ADJ_APPROVED}, gmv_adjustment_approved_by=${actor.employeeId}
+       where id=${strategyId}`;
+    await ex.audit.insertAudit({
+      entityType: 'strategy_plan', entityId: strategyId, actorEmployeeId: actor.employeeId,
+      action: 'gmv_adjustment_approved',
+      beforeJson: { gmv_adjustment_status: GMV_ADJ_PENDING },
+      afterJson: { gmv_adjustment_status: GMV_ADJ_APPROVED, approved_by: actor.employeeId },
+      createdBy: actor.employeeId,
     });
   });
 }
@@ -783,10 +1052,7 @@ export async function getStrategy(sql: Queryable, actor: Actor, strategyId: stri
  * they own; anyone else is forbidden.
  */
 export async function listStrategies(sql: Queryable, actor: Actor): Promise<Strategy[]> {
-  const cols = sql`sp.id, sp.service_id, sp.objective, sp.target_kpi, sp.divisions_involved,
-    sp.planned_brief_outline, sp.timeline_start, sp.timeline_end, sp.status,
-    coalesce(sp.approved_by,'') as approved_by, coalesce(sp.revision_notes,'') as revision_notes,
-    sp.created_by, sp.created_at`;
+  const cols = strategyCols(sql);
   let rows: StrategyRow[];
   if (permission.canReadDivision(actor, ACCOUNT_DIVISION)) {
     rows = await sql<StrategyRow[]>`select ${cols} from strategy_plans sp order by sp.id desc`;
@@ -855,6 +1121,8 @@ export interface ServiceQueueRow {
   strategyId: string | null;
   strategyStatus: string | null;
   briefCount: number;
+  /** the client's target GMV — the anchor + ±20% baseline for a new Strategy (QA revisi). */
+  clientTargetGmv: string | null;
   releasedToAccountAt: Date | null;
 }
 
@@ -873,6 +1141,7 @@ interface ServiceQueueDbRow {
   strategy_id: string | null;
   strategy_status: string | null;
   brief_count: string;
+  client_target_gmv: string | null;
   released_to_account_at: Date | null;
 }
 
@@ -898,6 +1167,7 @@ function rowToServiceQueue(r: ServiceQueueDbRow): ServiceQueueRow {
     strategyId: r.strategy_id,
     strategyStatus: r.strategy_status,
     briefCount: Number(r.brief_count),
+    clientTargetGmv: numOrNull(r.client_target_gmv),
     releasedToAccountAt: r.released_to_account_at,
   };
 }
@@ -910,6 +1180,7 @@ function serviceQueueCols(sql: Queryable) {
     c.assigned_am_id,
     sp.id as strategy_id, sp.status as strategy_status,
     (select count(*) from briefs b where b.service_id = sv.id) as brief_count,
+    c.target_gmv as client_target_gmv,
     c.released_to_account_at`;
 }
 
@@ -1117,11 +1388,25 @@ interface StrategyRow {
   revision_notes: string;
   created_by: string;
   created_at: Date;
+  target_gmv: string | null;
+  target_roas: string | null;
+  target_ctr: string | null;
+  target_cvr: string | null;
+  client_target_gmv: string | null;
+  gmv_adjustment_status: string;
+  gmv_adjustment_reason: string | null;
+  gmv_adjustment_approved_by: string | null;
+  division_tasks: unknown;
 }
 
 function rowToStrategy(r: StrategyRow): Strategy {
   return {
-    id: r.id, serviceId: r.service_id, objective: r.objective, targetKpi: r.target_kpi,
+    id: r.id, serviceId: r.service_id, objective: r.objective, targetKpi: r.target_kpi ?? '',
+    targetGmv: numOrNull(r.target_gmv), targetRoas: numOrNull(r.target_roas),
+    targetCtr: numOrNull(r.target_ctr), targetCvr: numOrNull(r.target_cvr),
+    clientTargetGmv: numOrNull(r.client_target_gmv), gmvAdjustmentStatus: r.gmv_adjustment_status,
+    gmvAdjustmentReason: r.gmv_adjustment_reason ?? null,
+    gmvAdjustmentApprovedBy: r.gmv_adjustment_approved_by ?? null, divisionTasks: parseTasks(r.division_tasks),
     divisionsInvolved: splitDivisions(r.divisions_involved), plannedBriefOutline: r.planned_brief_outline,
     timelineStart: dateStr(r.timeline_start), timelineEnd: dateStr(r.timeline_end), status: r.status,
     approvedBy: r.approved_by, revisionNotes: r.revision_notes, revisionCount: 0,
@@ -1129,16 +1414,33 @@ function rowToStrategy(r: StrategyRow): Strategy {
   };
 }
 
+/** The full projection for a Strategy read — shared by loadStrategy and listStrategies. */
+function strategyCols(sql: Queryable) {
+  return sql`sp.id, sp.service_id, sp.objective, sp.target_kpi, sp.divisions_involved,
+    sp.planned_brief_outline, sp.timeline_start, sp.timeline_end, sp.status,
+    coalesce(sp.approved_by,'') as approved_by, coalesce(sp.revision_notes,'') as revision_notes,
+    sp.created_by, sp.created_at,
+    sp.target_gmv, sp.target_roas, sp.target_ctr, sp.target_cvr, sp.client_target_gmv,
+    sp.gmv_adjustment_status, sp.gmv_adjustment_reason, sp.gmv_adjustment_approved_by, sp.division_tasks`;
+}
+
 interface LockedStrategy {
   status: string;
   ownerAm: string | null;
   serviceId: string;
+  clientTargetGmv: string | null;
+  gmvAdjustmentStatus: string;
 }
 
-/** lockStrategy takes the row lock and returns (status, owning-AM, service_id). */
+/** lockStrategy takes the row lock and returns the fields the write gates need. */
 async function lockStrategy(tx: Queryable, strategyId: string): Promise<LockedStrategy> {
-  const rows = await tx<{ status: string; service_id: string; assigned_am_id: string | null }[]>`
-    select sp.status, sp.service_id, c.assigned_am_id
+  const rows = await tx<
+    {
+      status: string; service_id: string; assigned_am_id: string | null;
+      client_target_gmv: string | null; gmv_adjustment_status: string;
+    }[]
+  >`
+    select sp.status, sp.service_id, c.assigned_am_id, sp.client_target_gmv, sp.gmv_adjustment_status
       from strategy_plans sp
       join services sv on sv.id = sp.service_id
       join clients c on c.id = sv.client_id
@@ -1146,16 +1448,16 @@ async function lockStrategy(tx: Queryable, strategyId: string): Promise<LockedSt
   if (rows.length === 0) {
     throw new NotFoundError(MSG_STRATEGY_NOT_FOUND);
   }
-  return { status: rows[0].status, ownerAm: rows[0].assigned_am_id, serviceId: rows[0].service_id };
+  return {
+    status: rows[0].status, ownerAm: rows[0].assigned_am_id, serviceId: rows[0].service_id,
+    clientTargetGmv: numOrNull(rows[0].client_target_gmv), gmvAdjustmentStatus: rows[0].gmv_adjustment_status,
+  };
 }
 
 /** loadStrategy reads one Strategy (no lock) plus its owning AM, for the read path. */
 async function loadStrategy(sql: Queryable, strategyId: string): Promise<{ strategy: Strategy; ownerAm: string | null }> {
   const rows = await sql<(StrategyRow & { assigned_am_id: string | null })[]>`
-    select sp.id, sp.service_id, sp.objective, sp.target_kpi, sp.divisions_involved,
-           sp.planned_brief_outline, sp.timeline_start, sp.timeline_end, sp.status,
-           coalesce(sp.approved_by,'') as approved_by, coalesce(sp.revision_notes,'') as revision_notes,
-           sp.created_by, sp.created_at, c.assigned_am_id
+    select ${strategyCols(sql)}, c.assigned_am_id
       from strategy_plans sp
       join services sv on sv.id = sp.service_id
       join clients c on c.id = sv.client_id

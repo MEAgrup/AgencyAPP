@@ -218,12 +218,20 @@ describe('M6 account wire mappers', () => {
   it('strategyToWire maps a Strategy; omits empty approved_by/revision_notes', () => {
     const s: account.Strategy = {
       id: 'STR-202607-0001', serviceId: 'SVC-1', objective: 'grow', targetKpi: 'GMV +30%',
+      targetGmv: '26000000.00', targetRoas: '5.00', targetCtr: '2.500', targetCvr: '3.100',
+      clientTargetGmv: '25000000.00', gmvAdjustmentStatus: 'dalam_toleransi', gmvAdjustmentReason: null,
+      gmvAdjustmentApprovedBy: null,
+      divisionTasks: [{ divisi: 'Creative', jenis: 'video_seller', jumlah: '12' }],
       divisionsInvolved: ['Creative', 'Ads'], plannedBriefOutline: '12 videos', timelineStart: '2026-07-01',
       timelineEnd: '2026-08-30', status: '[Strategy Drafting]', approvedBy: '', revisionNotes: '',
       revisionCount: 0, createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
     };
     expect(strategyToWire(s)).toEqual({
       id: 'STR-202607-0001', service_id: 'SVC-1', objective: 'grow', target_kpi: 'GMV +30%',
+      target_gmv: '26000000.00', target_roas: '5.00', target_ctr: '2.500', target_cvr: '3.100',
+      client_target_gmv: '25000000.00', gmv_adjustment_status: 'dalam_toleransi', gmv_adjustment_reason: null,
+      gmv_adjustment_approved_by: null,
+      division_tasks: [{ divisi: 'Creative', jenis: 'video_seller', jumlah: '12' }],
       divisions_involved: ['Creative', 'Ads'], planned_brief_outline: '12 videos', timeline_start: '2026-07-01',
       timeline_end: '2026-08-30', status: '[Strategy Drafting]', revision_count: 0, created_by: 'EMP-SINTA',
       created_at: '2026-07-01T00:00:00.000Z',
@@ -232,7 +240,9 @@ describe('M6 account wire mappers', () => {
 
   it('strategyToWire includes approved_by/revision_notes when set', () => {
     const s: account.Strategy = {
-      id: 'STR-1', serviceId: 'SVC-1', objective: 'o', targetKpi: 'k', divisionsInvolved: [],
+      id: 'STR-1', serviceId: 'SVC-1', objective: 'o', targetKpi: 'k', targetGmv: null, targetRoas: null,
+      targetCtr: null, targetCvr: null, clientTargetGmv: null, gmvAdjustmentStatus: 'dalam_toleransi',
+      gmvAdjustmentReason: null, gmvAdjustmentApprovedBy: null, divisionTasks: [], divisionsInvolved: [],
       plannedBriefOutline: 'p', timelineStart: '2026-07-01', timelineEnd: '2026-07-02',
       status: '[Strategy Approved]', approvedBy: 'EMP-ALEAD', revisionNotes: 'fix kpi', revisionCount: 1,
       createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
@@ -241,6 +251,8 @@ describe('M6 account wire mappers', () => {
     expect(w.approved_by).toBe('EMP-ALEAD');
     expect(w.revision_notes).toBe('fix kpi');
     expect(w.revision_count).toBe(1);
+    expect(w.target_gmv).toBeNull();
+    expect(w.division_tasks).toEqual([]);
   });
 
   it('strategyRequirementToWire maps the M6-OA-1 override outcome', () => {
@@ -256,9 +268,21 @@ describe('M6 account wire mappers', () => {
 
   it('toStrategyInput maps snake_case body → camelCase StrategyInput (defaults)', () => {
     expect(toStrategyInput({ objective: 'o', target_kpi: 'k', divisions_involved: ['Ads'] })).toEqual({
-      objective: 'o', targetKpi: 'k', divisionsInvolved: ['Ads'],
+      objective: 'o', targetKpi: 'k', targetGmv: null, targetRoas: null, targetCtr: null, targetCvr: null,
+      gmvAdjustmentReason: null, divisionTasks: [], divisionsInvolved: ['Ads'],
       plannedBriefOutline: '', timelineStart: '', timelineEnd: '',
     });
+  });
+
+  it('toStrategyInput maps structured KPI + division_tasks', () => {
+    const got = toStrategyInput({
+      objective: 'o', target_gmv: '30000000', target_roas: '5', target_ctr: '2.5', target_cvr: '3',
+      gmv_adjustment_reason: 'klien minta agresif', divisions_involved: ['Creative'],
+      division_tasks: [{ divisi: 'Creative', jenis: 'sku_optimize', jumlah: '7' }],
+    });
+    expect(got.targetGmv).toBe('30000000');
+    expect(got.gmvAdjustmentReason).toBe('klien minta agresif');
+    expect(got.divisionTasks).toEqual([{ divisi: 'Creative', jenis: 'sku_optimize', jumlah: '7' }]);
   });
 
   it('briefToWire maps a Brief; omits empty path-dependent + recurring fields', () => {

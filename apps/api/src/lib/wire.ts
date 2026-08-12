@@ -233,12 +233,33 @@ export function assignmentToWire(a: account.Assignment): AssignmentWire {
 
 // --- M6 Account & Service, Cluster 2 (Strategy & Plan) ---
 
-/** module6_account.Strategy — a Strategy & Plan record (approved_by/revision_notes omitempty). */
+/** module6_account.DivisionTask — one per-division task-satuan quota (QA revisi). */
+export interface DivisionTaskWire {
+  divisi: string;
+  jenis: string;
+  jumlah: string;
+}
+
+/**
+ * module6_account.Strategy — a Strategy & Plan record (approved_by/revision_notes
+ * omitempty). The structured KPI + GMV-gate + task-satuan keys (QA revisi
+ * 2026-08-12) are ALWAYS present — nullable numbers are sent as explicit `null`,
+ * never omitted, because a MISSING key blanks the form (O43 failure mode).
+ */
 export interface StrategyWire {
   id: string;
   service_id: string;
   objective: string;
   target_kpi: string;
+  target_gmv: string | null;
+  target_roas: string | null;
+  target_ctr: string | null;
+  target_cvr: string | null;
+  client_target_gmv: string | null;
+  gmv_adjustment_status: string;
+  gmv_adjustment_reason: string | null;
+  gmv_adjustment_approved_by: string | null;
+  division_tasks: DivisionTaskWire[];
   divisions_involved: string[];
   planned_brief_outline: string;
   timeline_start: string;
@@ -257,6 +278,15 @@ export function strategyToWire(s: account.Strategy): StrategyWire {
     service_id: s.serviceId,
     objective: s.objective,
     target_kpi: s.targetKpi,
+    target_gmv: s.targetGmv,
+    target_roas: s.targetRoas,
+    target_ctr: s.targetCtr,
+    target_cvr: s.targetCvr,
+    client_target_gmv: s.clientTargetGmv,
+    gmv_adjustment_status: s.gmvAdjustmentStatus,
+    gmv_adjustment_reason: s.gmvAdjustmentReason,
+    gmv_adjustment_approved_by: s.gmvAdjustmentApprovedBy,
+    division_tasks: s.divisionTasks.map((t) => ({ divisi: t.divisi, jenis: t.jenis, jumlah: t.jumlah })),
     divisions_involved: s.divisionsInvolved,
     planned_brief_outline: s.plannedBriefOutline,
     timeline_start: s.timelineStart,
@@ -318,6 +348,8 @@ export interface ServiceQueueRowWire {
   strategy_id: string | null;
   strategy_status: string | null;
   brief_count: number;
+  /** the client's target GMV — anchor + ±20% baseline for a new Strategy (QA revisi). */
+  client_target_gmv: string | null;
   released_to_account_at: string | null;
 }
 
@@ -339,6 +371,7 @@ export function serviceQueueRowToWire(r: account.ServiceQueueRow): ServiceQueueR
     strategy_id: r.strategyId,
     strategy_status: r.strategyStatus,
     brief_count: r.briefCount,
+    client_target_gmv: r.clientTargetGmv,
     released_to_account_at: r.releasedToAccountAt ? r.releasedToAccountAt.toISOString() : null,
   };
 }
@@ -347,6 +380,12 @@ export function serviceQueueRowToWire(r: account.ServiceQueueRow): ServiceQueueR
 export function toStrategyInput(b: {
   objective?: string;
   target_kpi?: string;
+  target_gmv?: string | null;
+  target_roas?: string | null;
+  target_ctr?: string | null;
+  target_cvr?: string | null;
+  gmv_adjustment_reason?: string | null;
+  division_tasks?: { divisi?: string; jenis?: string; jumlah?: string }[];
   divisions_involved?: string[];
   planned_brief_outline?: string;
   timeline_start?: string;
@@ -355,6 +394,14 @@ export function toStrategyInput(b: {
   return {
     objective: b.objective ?? '',
     targetKpi: b.target_kpi ?? '',
+    targetGmv: b.target_gmv ?? null,
+    targetRoas: b.target_roas ?? null,
+    targetCtr: b.target_ctr ?? null,
+    targetCvr: b.target_cvr ?? null,
+    gmvAdjustmentReason: b.gmv_adjustment_reason ?? null,
+    divisionTasks: (b.division_tasks ?? []).map((t) => ({
+      divisi: t.divisi ?? '', jenis: t.jenis ?? '', jumlah: t.jumlah ?? '',
+    })),
     divisionsInvolved: b.divisions_involved ?? [],
     plannedBriefOutline: b.planned_brief_outline ?? '',
     timelineStart: b.timeline_start ?? '',
