@@ -37,6 +37,7 @@ import { formatIDR } from '@/lib/money';
 import { AUTOSAVE_MS, useAutosave } from '@/lib/use-autosave';
 import {
   HAMBATAN_LABELS,
+  JADWAL_FORMATS,
   VERDICT_LABELS,
   availableTransitions,
   getInterview,
@@ -301,6 +302,7 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
                   <input
                     id="jw-durasi"
                     type="number"
+                    min={1}
                     value={jadwal.durasi_menit}
                     disabled={!scheduleEditable}
                     onChange={(e) => setJadwal({ ...jadwal, durasi_menit: e.target.value })}
@@ -308,13 +310,21 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
                 </div>
                 <div className="field">
                   <label htmlFor="jw-format">Format</label>
-                  <input
+                  {/* Closed set (ck_jadwal_format): a free-text value like "online"
+                      trips the DB CHECK and surfaces as a 500. */}
+                  <select
                     id="jw-format"
-                    placeholder="Online / Onsite"
                     value={jadwal.format}
                     disabled={!scheduleEditable}
                     onChange={(e) => setJadwal({ ...jadwal, format: e.target.value })}
-                  />
+                  >
+                    <option value="">— pilih format —</option>
+                    {JADWAL_FORMATS.map((f) => (
+                      <option key={f} value={f}>
+                        {f}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="field">
                   <label htmlFor="jw-lokasi">Lokasi / link</label>

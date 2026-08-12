@@ -49,6 +49,17 @@ export const MSG_INCOMPLETE = '[data tidak lengkap, silahkan lengkapi semua pert
 export const MSG_FORBIDDEN = '[Anda tidak memiliki akses ke interview ini.]';
 export const MSG_NOT_FOUND = '[interview tidak ditemukan]';
 export const MSG_CANCEL_REASON = '[alasan pembatalan wajib diisi]';
+export const MSG_INVALID_FORMAT = '[format interview tidak valid]';
+export const MSG_INVALID_DURASI = '[durasi interview tidak valid]';
+
+/**
+ * The closed set of jadwal formats (IA-5). MIRRORS the `ck_jadwal_format` CHECK
+ * in `20260811030000_interview.sql`; validating here turns a would-be opaque 500
+ * (a raw constraint violation) into a 400 with the exact BI message. The
+ * "Kelola Klien" schedule form renders these as a <select>, so a real request can
+ * never send anything else — this guard covers direct API callers.
+ */
+export const JADWAL_FORMATS = ['Onsite', 'Video Call', 'Telepon', 'Chat'] as const;
 
 // ---------------------------------------------------------------------------
 // Permission predicates — the TS half of the 7-role scope (mirrors RLS)
@@ -509,10 +520,20 @@ export async function scheduleInterview(sql: Sql, actor: Actor, id: string, jadw
     const { ownerAm, interview } = await loadScope(tx, id);
     if (!canWriteInterview(actor, ownerAm)) throw new ForbiddenError(MSG_FORBIDDEN);
     if (!jadwal.tanggalWaktu) throw new ValidationError(MSG_INCOMPLETE);
+    // Guard the two DB CHECKs (ck_jadwal_format / ck_jadwal_durasi) BEFORE the
+    // insert so an out-of-set value returns 400 with a BI message instead of a
+    // raw constraint violation surfacing as a 500.
+    const fmt = jadwal.format?.trim() ?? '';
+    if (fmt !== '' && !(JADWAL_FORMATS as readonly string[]).includes(fmt)) {
+      throw new ValidationError(MSG_INVALID_FORMAT);
+    }
+    if (jadwal.durasiMenit != null && !(Number.isInteger(jadwal.durasiMenit) && jadwal.durasiMenit > 0)) {
+      throw new ValidationError(MSG_INVALID_DURASI);
+    }
 
     await tx`
       insert into interview_jadwal (interview_id, tanggal_waktu, durasi_menit, format, lokasi_link, catatan_persiapan, updated_at)
-      values (${id}, ${jadwal.tanggalWaktu}, ${jadwal.durasiMenit ?? null}, ${jadwal.format ?? null},
+      values (${id}, ${jadwal.tanggalWaktu}, ${jadwal.durasiMenit ?? null}, ${fmt === '' ? null : fmt},
               ${jadwal.lokasiLink ?? null}, ${jadwal.catatanPersiapan ?? null}, now())
       on conflict (interview_id) do update set
         tanggal_waktu = excluded.tanggal_waktu,

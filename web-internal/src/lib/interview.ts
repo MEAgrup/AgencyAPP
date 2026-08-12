@@ -33,6 +33,14 @@ export interface Interview {
   created_by: string;
 }
 
+/**
+ * The closed set of Blok A jadwal formats (IA-5). MIRRORS the `ck_jadwal_format`
+ * DB CHECK and `JADWAL_FORMATS` in `@cdps/domain` — the schedule form renders
+ * these as a <select> so a free-typed value (which the DB rejects with a 500)
+ * can no longer be sent.
+ */
+export const JADWAL_FORMATS = ['Onsite', 'Video Call', 'Telepon', 'Chat'] as const;
+
 /** Blok A schedule. */
 export interface InterviewJadwal {
   tanggal_waktu: string | null;
