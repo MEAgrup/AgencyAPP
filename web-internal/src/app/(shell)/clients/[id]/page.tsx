@@ -378,7 +378,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       </section>
 
       {canManageInterview && (
-        <section className="card">
+        <section className="card" id="interview">
           <div className="cardHeader">
             <h2>Kelola Klien · Interview &amp; Kualifikasi</h2>
           </div>
