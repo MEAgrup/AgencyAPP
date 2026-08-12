@@ -40,6 +40,7 @@ function svc(over: Partial<ServiceQueueRow> = {}): ServiceQueueRow {
     strategy_id: null,
     strategy_status: null,
     brief_count: 0,
+    client_target_gmv: '20000000.00',
     released_to_account_at: '2026-08-01T00:00:00Z',
     ...over,
   };

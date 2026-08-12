@@ -398,6 +398,7 @@ const WIRE_TO_FE: Record<string, string> = {
   AMWorkloadWire: 'account.ts::AMWorkload',
   AssignmentWire: 'account.ts::Assignment',
   StrategyWire: 'account.ts::Strategy',
+  DivisionTaskWire: 'account.ts::DivisionTask',
   StrategyRequirementWire: 'account.ts::StrategyRequirement',
   ServiceQueueRowWire: 'account.ts::ServiceQueueRow',
   // M6C plan gate
