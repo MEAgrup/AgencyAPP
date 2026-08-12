@@ -30,6 +30,7 @@ import {
   listStrategies,
   nextOnboardingStep,
   setStrategyRequirement,
+  submitStrategy,
   type Brief,
   type DivisionTask,
   type ServiceQueueRow,
@@ -100,6 +101,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   const [sEnd, setSEnd] = useState('');
   const [sSubmitting, setSSubmitting] = useState(false);
   const [sError, setSError] = useState<string | null>(null);
+  const [sMessage, setSMessage] = useState<string | null>(null);
 
   // GMV approval (SPV/Head Account/Director clears an out-of-tolerance adjustment).
   const [gmvApproving, setGmvApproving] = useState(false);
@@ -227,6 +229,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   async function handleCreateStrategy(e: FormEvent) {
     e.preventDefault();
     setSError(null);
+    setSMessage(null);
     setSSubmitting(true);
     try {
       const res = await createStrategy(id, {
@@ -244,6 +247,20 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         timeline_end: sEnd,
       });
       setStrategy(res);
+      // Saving IS submitting (QA revisi): the AM no longer clicks a separate
+      // "Ajukan" button. The one exception is an out-of-tolerance GMV adjustment,
+      // which the submit gate blocks until Head/SPV ACCs it — there the Plan stays
+      // a draft and the AM is told why, rather than firing a submit the server
+      // would reject with [penyesuaian target GMV … menunggu persetujuan Head/SPV].
+      if (res.gmv_adjustment_status === GMV_ADJ_PENDING) {
+        setSMessage(
+          `Strategy & Plan ${res.id} disimpan sebagai draft. Penyesuaian target GMV di luar ±20% ` +
+            'menunggu ACC Head/SPV — setelah di-ACC, ajukan dari halaman Strategy & Plan.',
+        );
+      } else {
+        await submitStrategy(res.id);
+        setSMessage(`Strategy & Plan ${res.id} disimpan dan diajukan untuk persetujuan.`);
+      }
       await loadStrategy();
     } catch (err) {
       setSError(errorMessage(err));
@@ -317,6 +334,27 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
       setInterviewError(errorMessage(err));
       setCreatingInterview(false);
     }
+  }
+
+  /**
+   * Prefill the Brief form from one approved-Plan task-satuan (QA revisi). The AM
+   * should not re-type quotas the Plan already committed to — clicking a task loads
+   * its division, a sensible title, the deliverable, and the target quantity, and
+   * the AM only completes what the Plan does not carry (due date, PIC, priority,
+   * instructions). Changing the division clears the PIC (a Creative staffer is not
+   * a valid PIC for an Ads Brief, §5 Rule 1), same as the division <select> does.
+   */
+  function prefillBriefFromTask(t: DivisionTask) {
+    const label = taskLabel(t.divisi, t.jenis);
+    setBDivision(t.divisi);
+    setBPic('');
+    setBTitle(`${t.divisi} — ${label}`);
+    setBDeliverable(label);
+    setBQty(t.jumlah);
+    setBError(null);
+    setBMessage(
+      `Form terisi dari Strategy & Plan (${t.divisi} · ${label}). Lengkapi due date, PIC, dan detail lain, lalu buat Brief.`,
+    );
   }
 
   async function handleCreateBrief(e: FormEvent) {
@@ -615,10 +653,12 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
           </div>
           <p className="muted" style={{ fontSize: 13 }}>
             Layanan ini plan-gated: Plan wajib dibuat, diajukan, dan disetujui SPV sebelum Brief bisa dibuat
-            (M6 §4 Rule 5).
+            (M6 §4 Rule 5). Menyimpan Plan otomatis mengajukannya untuk persetujuan &mdash; tidak perlu langkah
+            &ldquo;ajukan&rdquo; terpisah.
           </p>
           <form className="form" onSubmit={handleCreateStrategy}>
             {sError && <div className="alert alertError" role="alert">{sError}</div>}
+            {sMessage && <div className="alert alertSuccess" role="status">{sMessage}</div>}
             <div className="field">
               <label htmlFor="cs-objective">Objective</label>
               <textarea id="cs-objective" required value={sObjective} onChange={(e) => setSObjective(e.target.value)} />
@@ -750,7 +790,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
             </div>
             <div>
               <button type="submit" className="btn btnPrimary" disabled={sSubmitting}>
-                {sSubmitting ? 'Menyimpan...' : 'Buat Strategy & Plan'}
+                {sSubmitting ? 'Menyimpan & mengajukan...' : 'Simpan & Ajukan Strategy & Plan'}
               </button>
             </div>
           </form>
@@ -799,6 +839,48 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
               Layanan plan-gated: Brief baru bisa dibuat setelah Strategy &amp; Plan disetujui SPV/Head Account
               (M6 §4 Rule 5).
               {!strategy && ' Mulai dari "Buat Strategy & Plan" di atas.'}
+            </div>
+          )}
+
+          {/* Isi cepat dari Plan yang disetujui (QA revisi): setiap task satuan di
+              Strategy & Plan bisa dipakai untuk mengisi form Brief, agar AM tidak
+              mengetik ulang kuota yang sudah ditetapkan. */}
+          {approvedStrategy && approvedStrategy.division_tasks.length > 0 && (
+            <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                Isi cepat dari Strategy &amp; Plan &middot;{' '}
+                <Link href={`/account/strategies/${approvedStrategy.id}`}>{approvedStrategy.id}</Link>
+              </div>
+              <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+                Task satuan per divisi dari Plan yang disetujui. Klik <strong>Gunakan</strong> untuk mengisi
+                Divisi, Judul, Deliverable, dan Target &mdash; Anda tinggal melengkapi due date, PIC, prioritas,
+                dan detail lainnya.
+              </p>
+              <div className="stack" style={{ gap: 6 }}>
+                {approvedStrategy.division_tasks.map((t) => {
+                  const label = taskLabel(t.divisi, t.jenis);
+                  const money = taskIsMoney(t.divisi, t.jenis);
+                  return (
+                    <div
+                      key={`${t.divisi}::${t.jenis}`}
+                      className="row"
+                      style={{ justifyContent: 'space-between', gap: 8, alignItems: 'center' }}
+                    >
+                      <div style={{ fontSize: 13 }}>
+                        {t.divisi} &middot; {label}:{' '}
+                        <strong>{money ? formatIDR(t.jumlah) : t.jumlah}</strong>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btnSecondary btnSm"
+                        onClick={() => prefillBriefFromTask(t)}
+                      >
+                        Gunakan
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
           <form className="form" onSubmit={handleCreateBrief}>
