@@ -978,3 +978,151 @@ export function handoffKeStrategi(verdict: Verdict): HandoffKeStrategi {
       };
   }
 }
+
+// ===========================================================================
+// Blok D — buildStrategiPrefill (Interview answers → Strategi Section A)
+// ===========================================================================
+
+/**
+ * The subset of an `interview_answer` row `buildStrategiPrefill` reads. The
+ * domain `Answer` (packages/domain/src/interview.ts) is structurally a superset
+ * of this, so it passes straight in — core stays free of the domain/db types.
+ * Values are the six-way typed union of `interview_answer`; which one is
+ * populated depends on the field's type.
+ */
+export interface InterviewAnswerLike {
+  fieldKey: string;
+  nilaiTeks: string | null;
+  nilaiAngka: number | null;
+  nilaiUang: number | null;
+  nilaiBool: boolean | null;
+  nilaiEnum: string | null;
+  nilaiJsonb: unknown;
+}
+
+/**
+ * What a handoff can seed into Strategi Section A. Keys are the camelCase
+ * `StrategiKonteks` field names (packages/domain/src/strategi.ts); the domain
+ * maps them straight to columns. Every value is AM-editable after handoff — this
+ * is a starting draft, never a lock.
+ *
+ * **DELIBERATELY PARTIAL.** Only the `PREFILL_MAPPING` targets whose value is a
+ * safe single drop-in live here. The structured / child-row targets are NOT
+ * prefilled by v1 and stay the AM's manual work in the form (see
+ * DECISIONS 2026-08-12):
+ *   - A-12 decisionMaker  — struct list; the B7-5 answer shape is not assertable.
+ *   - A-15 / A-16 akses    — the channel×akses×status matrix (child rows).
+ *   - C-7 prasyarat        — child rows; the `copyPrasyaratKeC7` copy is deferred.
+ *   - E-4 floor price       — Section E, and only a "candidate — suggestion only".
+ */
+export interface StrategiPrefill {
+  namaBrand?: string;
+  modelBisnis?: string;
+  marginKotorPersen?: number;
+  posisiHarga?: string;
+  usp?: string[];
+  kapasitasStok?: string;
+  plafonUnitPerBulan?: number;
+  titikKirimKota?: string;
+  ekspektasiKlien?: string;
+  riwayatAgensi?: string;
+  pantanganKlien?: string[];
+}
+
+/**
+ * Target enum vocabularies, mirrored from the strategi Section A CHECK
+ * constraints (20260806065000_m6a_section_a.sql). A prefill carries an enum
+ * across ONLY when the Interview value is already a member; an out-of-vocab
+ * value is DROPPED, never forwarded, so a handoff can never fail a strategi
+ * CHECK on create. Kept small and stable on purpose — the strategi domain stays
+ * the enforcing authority; this is a best-effort filter, not a second gate.
+ */
+const PREFILL_MODEL_BISNIS: readonly string[] = ['produsen', 'brand_owner', 'distributor', 'reseller'];
+const PREFILL_POSISI_HARGA: readonly string[] = ['premium', 'mid', 'budget', 'price_fighter'];
+const PREFILL_KAPASITAS_STOK: readonly string[] = ['ready_stock', 'produksi_per_order'];
+
+/**
+ * buildStrategiPrefill maps a completed Interview's answers onto a Strategi
+ * Section A draft, following `PREFILL_MAPPING`. It is pure, best-effort, and
+ * never throws: a missing, blank, or wrong-typed answer simply yields no key, so
+ * the Strategi is born with that field empty and the AM fills it. The Section B
+ * numeric baseline is never touched (`STRATEGI_BASELINE_FORBIDDEN_PREFILL`) —
+ * that stays mandatory manual entry with attached exports.
+ */
+export function buildStrategiPrefill(answers: readonly InterviewAnswerLike[]): StrategiPrefill {
+  const byKey = new Map<string, InterviewAnswerLike>();
+  for (const a of answers) byKey.set(a.fieldKey, a);
+
+  const text = (code: string): string | undefined => {
+    const v = byKey.get(code)?.nilaiTeks;
+    return v != null && v.trim() !== '' ? v : undefined;
+  };
+  const num = (code: string): number | undefined => {
+    const v = byKey.get(code)?.nilaiAngka;
+    return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+  };
+  const enumIn = (code: string, vocab: readonly string[]): string | undefined => {
+    const v = byKey.get(code)?.nilaiEnum;
+    return v != null && vocab.includes(v) ? v : undefined;
+  };
+  // A list answer may arrive as a jsonb array of strings, as a JSON string of
+  // that array (postgres.js hands jsonb back as text on the pooler path), or as
+  // a single text answer. All three collapse to string[], with blanks dropped.
+  const stringsFrom = (a: InterviewAnswerLike | undefined): string[] => {
+    if (!a) return [];
+    let j = a.nilaiJsonb;
+    if (typeof j === 'string') {
+      try {
+        j = JSON.parse(j);
+      } catch {
+        j = null;
+      }
+    }
+    if (Array.isArray(j)) {
+      return j.filter((x): x is string => typeof x === 'string' && x.trim() !== '');
+    }
+    if (a.nilaiTeks != null && a.nilaiTeks.trim() !== '') return [a.nilaiTeks];
+    return [];
+  };
+
+  const out: StrategiPrefill = {};
+
+  const namaBrand = text('B2-1'); // A-1
+  if (namaBrand !== undefined) out.namaBrand = namaBrand;
+
+  const modelBisnis = enumIn('B1-4', PREFILL_MODEL_BISNIS); // A-2
+  if (modelBisnis !== undefined) out.modelBisnis = modelBisnis;
+
+  const margin = num('B2-8'); // A-3 (margin KOTOR, not net)
+  if (margin !== undefined && margin >= 0 && margin <= 100) out.marginKotorPersen = margin;
+
+  const posisiHarga = enumIn('B3-2', PREFILL_POSISI_HARGA); // A-4
+  if (posisiHarga !== undefined) out.posisiHarga = posisiHarga;
+
+  const usp = stringsFrom(byKey.get('B3-1')); // A-5
+  if (usp.length > 0) out.usp = usp;
+
+  const kapasitas = enumIn('B2-12', PREFILL_KAPASITAS_STOK); // A-6
+  if (kapasitas !== undefined) out.kapasitasStok = kapasitas;
+
+  const plafon = num('B2-14'); // A-7
+  if (plafon !== undefined && plafon >= 0) out.plafonUnitPerBulan = Math.trunc(plafon);
+
+  const titikKirim = text('B1-8'); // A-8
+  if (titikKirim !== undefined) out.titikKirimKota = titikKirim;
+
+  const ekspektasi = text('B6-2'); // A-9 (verbatim client definition of success)
+  if (ekspektasi !== undefined) out.ekspektasiKlien = ekspektasi;
+
+  const riwayat = text('B1-9') ?? text('B10-1'); // A-10 (primary B1-9, fallback B10-1)
+  if (riwayat !== undefined) out.riwayatAgensi = riwayat;
+
+  // A-11 pantangan — the mapping fans B8-1..B8-6 into one list.
+  const pantangan: string[] = [];
+  for (const code of ['B8-1', 'B8-2', 'B8-3', 'B8-4', 'B8-5', 'B8-6']) {
+    pantangan.push(...stringsFrom(byKey.get(code)));
+  }
+  if (pantangan.length > 0) out.pantanganKlien = pantangan;
+
+  return out;
+}

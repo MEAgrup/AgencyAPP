@@ -3145,6 +3145,13 @@ export interface StrategiWire {
   catatan_reviewer: string | null;
   created_by: string;
   created_at: string;
+  // M6A langkah 8 — Interview → Strategi handoff (Blok D). `sumber = 'manual'` ⇒
+  // the other three are empty. `blok_d_flags` is advisory (never blocks); the FE
+  // renders it as a badge on the Strategi header.
+  sumber: 'manual' | 'interview';
+  interview_id: string | null;
+  interview_version: number | null;
+  blok_d_flags: string[];
   // Section A — Konteks Klien & Bisnis (A-05). Nullable because the record is
   // born `Draft` and the form autosaves; presence is a submit-gate concern.
   nama_brand: string | null;
@@ -3224,6 +3231,10 @@ export function strategiToWire(s: strategi.Strategi): StrategiWire {
     catatan_reviewer: s.catatanReviewer,
     created_by: s.createdBy,
     created_at: s.createdAt,
+    sumber: s.sumber,
+    interview_id: s.interviewId,
+    interview_version: s.interviewVersion,
+    blok_d_flags: s.blokDFlags,
     nama_brand: s.namaBrand,
     kategori_utama: s.kategoriUtama,
     sub_kategori: s.subKategori,
@@ -3959,6 +3970,13 @@ export function strategiHeaderFromWire(v: unknown): strategi.StrategiHeaderInput
       b.toleransi_over_persen === undefined || b.toleransi_over_persen === null
         ? null
         : Number(b.toleransi_over_persen),
+    // M6A langkah 8 — handoff from Kelola Klien. Present only when the AM opened
+    // the Strategi via "Buka Strategi" on an Interview; the domain resolves the
+    // link, flags and Section A prefill. Absent ⇒ a manual Strategi (unchanged).
+    interviewId:
+      b.interview_id === undefined || b.interview_id === null || b.interview_id === ''
+        ? null
+        : String(b.interview_id),
   };
 }
 

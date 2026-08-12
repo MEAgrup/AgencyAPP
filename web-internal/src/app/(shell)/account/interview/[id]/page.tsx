@@ -64,6 +64,7 @@ import {
 import FieldInput from '@/components/interview/FieldInput';
 import ScoringSidebar from '@/components/interview/ScoringSidebar';
 import PrasyaratPanel from '@/components/interview/PrasyaratPanel';
+import StrategiHandoffCard from '@/components/interview/StrategiHandoffCard';
 
 const MIN_WIDTH = 1280;
 
@@ -89,6 +90,7 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
   const [narrow, setNarrow] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [printMode, setPrintMode] = useState<'internal' | 'klien' | null>(null);
+  const [tab, setTab] = useState<'interview' | 'strategi'>('interview');
 
   const [jadwal, setJadwal] = useState({
     tanggal_waktu: '',
@@ -257,14 +259,28 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
             </button>
           </div>
           <div className="row" style={{ gap: 6, marginTop: 12 }}>
-            <span className="btn btnSecondary btnSm" aria-current="page">
+            <button
+              type="button"
+              className={`btn btnSm ${tab === 'interview' ? 'btnSecondary' : 'btnGhost'}`}
+              aria-current={tab === 'interview' ? 'page' : undefined}
+              onClick={() => setTab('interview')}
+            >
               1 · Interview / Kualifikasi
-            </span>
-            <span className="btn btnGhost btnSm" style={{ opacity: 0.5 }} title="Belum tersedia">
+            </button>
+            <button
+              type="button"
+              className={`btn btnSm ${tab === 'strategi' ? 'btnSecondary' : 'btnGhost'}`}
+              aria-current={tab === 'strategi' ? 'page' : undefined}
+              onClick={() => setTab('strategi')}
+            >
               2 · Strategi
-            </span>
+            </button>
           </div>
         </div>
+
+        {tab === 'strategi' && (
+          <StrategiHandoffCard interviewId={iv.id} serviceId={iv.service_id} canCreate={canWrite} />
+        )}
 
         {narrow && (
           <div className="alert alertInfo">
@@ -279,6 +295,7 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
           </div>
         )}
 
+        {tab === 'interview' && (
         <div className="row" style={{ alignItems: 'flex-start', gap: 16 }}>
           {/* LEFT: form */}
           <div className="stack" style={{ flex: 1, minWidth: 0 }}>
@@ -496,6 +513,7 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
             />
           </div>
         </div>
+        )}
       </div>
 
       {/* Print views (hidden on screen; one is rendered while printing) */}

@@ -457,6 +457,13 @@ export interface Strategi {
   catatan_reviewer: string | null;
   created_by: string;
   created_at: string;
+  // M6A langkah 8 — Interview → Strategi handoff (Blok D). `sumber = 'manual'`
+  // ⇒ the other three are empty. `blok_d_flags` is ADVISORY — it drives the
+  // header badge and never blocks anything.
+  sumber: 'manual' | 'interview';
+  interview_id: string | null;
+  interview_version: number | null;
+  blok_d_flags: string[];
   // Section A — Konteks Klien & Bisnis (A-05). Nullable: the record is born
   // `Draft`, the form autosaves, and the submit gate is what requires the 16
   // answers (`strategiKekurangan` returns which ones are still missing).
@@ -889,6 +896,12 @@ export interface StrategiHeaderBody {
   tanggal_akhir_kontrak: string;
   tanggal_mulai_siklus?: string | null;
   toleransi_over_persen?: number | null;
+  /**
+   * M6A langkah 8 — set by the "Buka Strategi" handoff on the Kelola Klien page.
+   * When present, the API links the Strategi to this Interview, carries its Blok
+   * D advisory flags, and prefills Section A. Omit for a manual Strategi.
+   */
+  interview_id?: string | null;
 }
 
 export function listStrategi(serviceId: string): Promise<Strategi[]> {

@@ -169,6 +169,15 @@ import {
 // branch, so autosave is a no-op there.
 const WIRED: SectionKey[] = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
 
+// M6A langkah 8 — Blok D advisory flags carried from the Interview verdict. They
+// never block; they render as amber badges on the header so the AM sees the
+// verdict's caution while writing. Keys mirror `STRATEGI_FLAG` in @cdps/core.
+const BLOK_D_FLAG_LABELS: Record<string, string> = {
+  sasaran_konservatif: 'Sasaran konservatif',
+  hambatan_mendasar_tercatat: 'Hambatan mendasar tercatat',
+  risiko_tinggi: 'Risiko tinggi',
+};
+
 interface Drafts {
   konteks: KonteksDraft;
   channels: ChannelDraft[];
@@ -510,6 +519,23 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
           Kontrak {detail.contract_id} · {detail.tanggal_mulai_kontrak} →{' '}
           {detail.tanggal_akhir_kontrak} ({detail.durasi_kontrak_bulan} bulan)
         </p>
+        {detail.sumber === 'interview' && detail.interview_id && (
+          <div className="row" style={{ alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+            <span className="muted" style={{ fontSize: 12 }}>
+              Dibuka dari{' '}
+              <Link href={`/account/interview/${encodeURIComponent(detail.interview_id)}`}>
+                Interview {detail.interview_id}
+              </Link>
+              {detail.interview_version != null && ` (versi ${detail.interview_version})`}
+              {' · Section A pra-isi. Baseline (Section B) tetap manual.'}
+            </span>
+            {detail.blok_d_flags.map((f) => (
+              <span key={f} className="badge badge-amber" title="Catatan advisory dari verdict Interview — tidak memblok apa pun.">
+                {BLOK_D_FLAG_LABELS[f] ?? f}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {error && <div className="alert alertError">{error}</div>}

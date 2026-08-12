@@ -97,6 +97,8 @@ import {
   DISPATCH_DIVISIONS,
   LAPORAN_METRICS,
   TRIGGER_REVISI_CODES,
+  MSG_INTERVIEW_NOT_FOUND,
+  MSG_INTERVIEW_CLIENT_MISMATCH,
   MSG_PRIORITAS_INVALID,
   MSG_KETERGANTUNGAN_INCOMPLETE,
   MSG_FASE_RENTANG,
@@ -267,6 +269,11 @@ afterEach(async () => {
   // the row trigger. TRUNCATE both first, bypassing it, before the strategi delete.
   await sql`truncate strategi_share_access_log, strategi_share_token`;
   await sql`delete from strategi where created_by like 'ZZ-%'`;
+  // M6A langkah 8 handoff fixtures. `interview` FKs to services/contracts/clients,
+  // so it must be cleared before them (and after `strategi`, which FKs to it).
+  await sql`delete from interview_answer where interview_id in (select id from interview where client_id like 'ZZ-%')`;
+  await sql`delete from interview_kualifikasi where interview_id in (select id from interview where client_id like 'ZZ-%')`;
+  await sql`delete from interview where client_id like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -305,6 +312,56 @@ const HEADER = {
   tanggalAkhirKontrak: '2027-02-11',
   tanggalMulaiSiklus: '2026-08-12',
 };
+
+/** The client_id behind a seeded Service (handoff must match on it). */
+async function clientOf(serviceId: string): Promise<string> {
+  const rows = await sql<{ client_id: string }[]>`select client_id from services where id = ${serviceId}`;
+  return rows[0].client_id;
+}
+
+interface AnswerSeed {
+  code: string;
+  teks?: string;
+  angka?: number;
+  enumv?: string;
+  jsonb?: unknown;
+}
+
+/**
+ * Seeds an Interview for a ZZ client so the M6A langkah 8 handoff is exercisable
+ * end-to-end. `verdict` null ⇒ an unscored Interview (no kualifikasi row, so the
+ * handoff carries no flags). `margin_bersih_basis = 'bersih_klien'` sidesteps the
+ * derivasi/estimasi CHECKs — this fixture only needs a valid verdict to read.
+ */
+async function seedInterview(
+  clientId: string,
+  opts: {
+    verdict?: 'growth_ready' | 'bersyarat' | 'risiko_tinggi' | 'tidak_siap' | null;
+    answers?: AnswerSeed[];
+  } = {},
+): Promise<string> {
+  seq += 1;
+  const iid = `ZZ-ITV-${RUN}-${seq}`;
+  await sql`insert into interview (id, client_id, am_pengisi_id, created_by)
+            values (${iid}, ${clientId}, 'EMP-0001', 'EMP-0001')`;
+  if (opts.verdict != null) {
+    await sql`
+      insert into interview_kualifikasi
+        (interview_id, skor_kualifikasi, skor_per_blok, verdict_kualifikasi,
+         margin_bersih_basis, kualitas_data, config_snapshot, dihitung_oleh)
+      values (${iid}, 42, '{"A":1}'::jsonb, ${opts.verdict},
+              'bersih_klien', 'terverifikasi', '{}'::jsonb, 'EMP-0001')`;
+  }
+  for (const a of opts.answers ?? []) {
+    const section = a.code.split('-')[0];
+    await sql`
+      insert into interview_answer
+        (interview_id, section, field_key, nilai_teks, nilai_angka, nilai_enum, nilai_jsonb, updated_by)
+      values (${iid}, ${section}, ${a.code}, ${a.teks ?? null}, ${a.angka ?? null}, ${a.enumv ?? null},
+              ${a.jsonb === undefined ? null : JSON.stringify(a.jsonb)}::jsonb, 'EMP-0001')`;
+  }
+  return iid;
+}
 
 /**
  * Section B for Shopee, straight out of the M6A §6 Alpha Digital excerpt.
@@ -667,6 +724,107 @@ describeDb('createStrategi — Rule 1', () => {
     await expect(
       createStrategi(sql, am(), serviceId, { ...HEADER, tanggalAkhirKontrak: '2026-08-01' }),
     ).rejects.toThrow(ValidationError);
+  });
+
+  it('a manual Strategi (no interviewId) is born sumber=manual with no link and no flags', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    expect(s.sumber).toBe('manual');
+    expect(s.interviewId).toBeNull();
+    expect(s.interviewVersion).toBeNull();
+    expect(s.blokDFlags).toEqual([]);
+  });
+});
+
+describeDb('createStrategi — M6A langkah 8 handoff from Interview', () => {
+  it('links the Interview and prefills Section A, without touching the Section B baseline', async () => {
+    const serviceId = await seedService();
+    const clientId = await clientOf(serviceId);
+    const interviewId = await seedInterview(clientId, {
+      verdict: null, // unscored: linkage + prefill only, no flags
+      answers: [
+        { code: 'B2-1', teks: 'Rak Serbaguna' }, // A-1 namaBrand
+        { code: 'B1-4', enumv: 'brand_owner' }, // A-2 modelBisnis
+        { code: 'B2-8', angka: 38 }, // A-3 marginKotorPersen (gross)
+        { code: 'B3-2', enumv: 'mid' }, // A-4 posisiHarga
+        { code: 'B3-1', jsonb: ['awet', 'murah', 'garansi'] }, // A-5 usp
+        { code: 'B2-14', angka: 8000 }, // A-7 plafon
+        { code: 'B1-8', teks: 'Bandung' }, // A-8 titikKirimKota
+        { code: 'B6-2', teks: 'omzet naik 2x dan gak rugi di iklan' }, // A-9 verbatim
+        { code: 'B8-1', teks: 'harga tak boleh di bawah 79rb' }, // A-11 pantangan
+      ],
+    });
+
+    const s = await createStrategi(sql, am(), serviceId, { ...HEADER, interviewId });
+
+    expect(s.sumber).toBe('interview');
+    expect(s.interviewId).toBe(interviewId);
+    expect(s.interviewVersion).toBe(1);
+    expect(s.blokDFlags).toEqual([]);
+
+    // Section A carries the mapped answers, and it survives a reload.
+    const detail = await getStrategi(sql, am(), s.id);
+    expect(detail.namaBrand).toBe('Rak Serbaguna');
+    expect(detail.modelBisnis).toBe('brand_owner');
+    expect(detail.marginKotorPersen).toBe(38);
+    expect(detail.posisiHarga).toBe('mid');
+    expect(detail.usp).toEqual(['awet', 'murah', 'garansi']);
+    expect(detail.plafonUnitPerBulan).toBe(8000);
+    expect(detail.titikKirimKota).toBe('Bandung');
+    expect(detail.ekspektasiKlien).toBe('omzet naik 2x dan gak rugi di iklan');
+    expect(detail.pantanganKlien).toEqual(['harga tak boleh di bawah 79rb']);
+
+    // Section B numeric baseline stays manual — the handoff never seeds a channel.
+    expect(detail.channels).toEqual([]);
+  });
+
+  it('drops an out-of-vocab enum instead of failing the create', async () => {
+    const serviceId = await seedService();
+    const clientId = await clientOf(serviceId);
+    const interviewId = await seedInterview(clientId, {
+      verdict: null,
+      answers: [{ code: 'B1-4', enumv: 'franchise' }], // not a strategi model_bisnis value
+    });
+    const s = await createStrategi(sql, am(), serviceId, { ...HEADER, interviewId });
+    expect(s.sumber).toBe('interview');
+    const detail = await getStrategi(sql, am(), s.id);
+    expect(detail.modelBisnis).toBeNull();
+  });
+
+  it('attaches the verdict flags (tidak_siap → conservative + hambatan tercatat)', async () => {
+    const serviceId = await seedService();
+    const clientId = await clientOf(serviceId);
+    const interviewId = await seedInterview(clientId, { verdict: 'tidak_siap' });
+    const s = await createStrategi(sql, am(), serviceId, { ...HEADER, interviewId });
+    expect(s.blokDFlags.sort()).toEqual(['hambatan_mendasar_tercatat', 'sasaran_konservatif']);
+  });
+
+  it('bersyarat attaches only the conservative flag; growth_ready attaches none', async () => {
+    const svcA = await seedService();
+    const iA = await seedInterview(await clientOf(svcA), { verdict: 'bersyarat' });
+    const sA = await createStrategi(sql, am(), svcA, { ...HEADER, interviewId: iA });
+    expect(sA.blokDFlags).toEqual(['sasaran_konservatif']);
+
+    const svcB = await seedService();
+    const iB = await seedInterview(await clientOf(svcB), { verdict: 'growth_ready' });
+    const sB = await createStrategi(sql, am(), svcB, { ...HEADER, interviewId: iB });
+    expect(sB.blokDFlags).toEqual([]);
+  });
+
+  it('refuses an interview_id that does not exist', async () => {
+    const serviceId = await seedService();
+    await expect(
+      createStrategi(sql, am(), serviceId, { ...HEADER, interviewId: 'ZZ-ITV-nope' }),
+    ).rejects.toThrow(MSG_INTERVIEW_NOT_FOUND);
+  });
+
+  it('refuses an interview that belongs to a different client', async () => {
+    const serviceId = await seedService();
+    const otherService = await seedService();
+    const otherInterview = await seedInterview(await clientOf(otherService), { verdict: null });
+    await expect(
+      createStrategi(sql, am(), serviceId, { ...HEADER, interviewId: otherInterview }),
+    ).rejects.toThrow(MSG_INTERVIEW_CLIENT_MISMATCH);
   });
 });
 

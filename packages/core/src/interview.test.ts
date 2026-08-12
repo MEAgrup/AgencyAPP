@@ -13,6 +13,8 @@ import {
   PEMBEDA_PRODUK,
   PENANGANAN_CHAT,
   PREFILL_MAPPING,
+  buildStrategiPrefill,
+  type InterviewAnswerLike,
   RUANG_HARGA,
   SIKLUS_BELI_ULANG,
   SUMBER_ANGKA,
@@ -420,6 +422,95 @@ describe('prefill mapping never touches the Strategi Section B numeric baseline'
   });
   it('B2-8 (gross margin) maps to A-3, and net margin B2-7 is not a prefill source', () => {
     expect(PREFILL_MAPPING.find((e) => e.strategiField === 'A-3')?.interviewField).toBe('B2-8');
+  });
+});
+
+describe('buildStrategiPrefill — Interview answers → Strategi Section A', () => {
+  const ans = (fieldKey: string, v: Partial<InterviewAnswerLike>): InterviewAnswerLike => ({
+    fieldKey,
+    nilaiTeks: null,
+    nilaiAngka: null,
+    nilaiUang: null,
+    nilaiBool: null,
+    nilaiEnum: null,
+    nilaiJsonb: null,
+    ...v,
+  });
+
+  it('empty answers yield an empty prefill (never throws)', () => {
+    expect(buildStrategiPrefill([])).toEqual({});
+  });
+
+  it('maps the 1:1 scalar/text drop-ins', () => {
+    const p = buildStrategiPrefill([
+      ans('B2-1', { nilaiTeks: 'Rak Serbaguna' }), // A-1
+      ans('B2-8', { nilaiAngka: 38 }), // A-3 gross margin
+      ans('B2-14', { nilaiAngka: 8000.9 }), // A-7 plafon (truncated to int)
+      ans('B1-8', { nilaiTeks: 'Bandung' }), // A-8
+      ans('B6-2', { nilaiTeks: 'omzet naik 2x dan gak rugi di iklan' }), // A-9 verbatim
+      ans('B1-9', { nilaiTeks: 'agensi lama hanya jalankan iklan' }), // A-10
+    ]);
+    expect(p.namaBrand).toBe('Rak Serbaguna');
+    expect(p.marginKotorPersen).toBe(38);
+    expect(p.plafonUnitPerBulan).toBe(8000);
+    expect(p.titikKirimKota).toBe('Bandung');
+    expect(p.ekspektasiKlien).toBe('omzet naik 2x dan gak rugi di iklan');
+    expect(p.riwayatAgensi).toBe('agensi lama hanya jalankan iklan');
+  });
+
+  it('carries an enum only when it is in the target vocabulary', () => {
+    expect(buildStrategiPrefill([ans('B1-4', { nilaiEnum: 'brand_owner' })]).modelBisnis).toBe('brand_owner');
+    expect(buildStrategiPrefill([ans('B3-2', { nilaiEnum: 'mid' })]).posisiHarga).toBe('mid');
+    expect(buildStrategiPrefill([ans('B2-12', { nilaiEnum: 'ready_stock' })]).kapasitasStok).toBe('ready_stock');
+    // Out-of-vocab enum is DROPPED, so it can never fail a strategi CHECK on create.
+    expect(buildStrategiPrefill([ans('B1-4', { nilaiEnum: 'franchise' })].concat()).modelBisnis).toBeUndefined();
+    expect(buildStrategiPrefill([ans('B3-2', { nilaiEnum: 'luxury' })]).posisiHarga).toBeUndefined();
+  });
+
+  it('drops a gross margin outside 0..100', () => {
+    expect(buildStrategiPrefill([ans('B2-8', { nilaiAngka: 140 })]).marginKotorPersen).toBeUndefined();
+    expect(buildStrategiPrefill([ans('B2-8', { nilaiAngka: -3 })]).marginKotorPersen).toBeUndefined();
+  });
+
+  it('USP (A-5): a jsonb string array is used verbatim; a single text becomes a one-item list', () => {
+    expect(buildStrategiPrefill([ans('B3-1', { nilaiJsonb: ['awet', 'murah', 'garansi'] })]).usp).toEqual([
+      'awet',
+      'murah',
+      'garansi',
+    ]);
+    expect(buildStrategiPrefill([ans('B3-1', { nilaiTeks: 'satu keunggulan' })]).usp).toEqual(['satu keunggulan']);
+    expect(buildStrategiPrefill([ans('B3-1', { nilaiJsonb: [] })]).usp).toBeUndefined();
+  });
+
+  it('USP (A-5): a jsonb value delivered as a JSON string (pooler path) is parsed', () => {
+    expect(buildStrategiPrefill([ans('B3-1', { nilaiJsonb: '["awet","murah"]' })]).usp).toEqual(['awet', 'murah']);
+    // A non-array / unparseable string is not a list — falls through, yields nothing.
+    expect(buildStrategiPrefill([ans('B3-1', { nilaiJsonb: 'not json' })]).usp).toBeUndefined();
+  });
+
+  it('pantangan (A-11) fans B8-1..B8-6 into one list, blanks dropped', () => {
+    const p = buildStrategiPrefill([
+      ans('B8-1', { nilaiTeks: 'harga tak boleh di bawah 79rb' }),
+      ans('B8-3', { nilaiJsonb: ['tanpa klaim medis', ''] }),
+      ans('B8-5', { nilaiTeks: '   ' }), // blank → dropped
+    ]);
+    expect(p.pantanganKlien).toEqual(['harga tak boleh di bawah 79rb', 'tanpa klaim medis']);
+  });
+
+  it('A-10 falls back to B10-1 when B1-9 is absent', () => {
+    expect(buildStrategiPrefill([ans('B10-1', { nilaiTeks: 'tim in-house sebelumnya' })]).riwayatAgensi).toBe(
+      'tim in-house sebelumnya',
+    );
+  });
+
+  it('never emits a Strategi Section B numeric baseline key', () => {
+    const p = buildStrategiPrefill([
+      ans('B2-1', { nilaiTeks: 'Brand' }),
+      ans('B1-1', { nilaiUang: 999n as unknown as number }),
+    ]);
+    for (const forbidden of ['B-1', 'B-2', 'B-3', 'B-4', 'B-5', 'B-6', 'B-7', 'B-8']) {
+      expect(Object.prototype.hasOwnProperty.call(p, forbidden)).toBe(false);
+    }
   });
 });
 
