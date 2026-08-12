@@ -37,7 +37,7 @@ import { formatIDR } from '@/lib/money';
 import { AUTOSAVE_MS, useAutosave } from '@/lib/use-autosave';
 import {
   HAMBATAN_LABELS,
-  JADWAL_FORMATS,
+  INTERVIEW_STATUS,
   VERDICT_LABELS,
   availableTransitions,
   getInterview,
@@ -91,10 +91,11 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
   const [cancelReason, setCancelReason] = useState('');
   const [printMode, setPrintMode] = useState<'internal' | 'klien' | null>(null);
 
+  // Format is intentionally NOT collected: the location/link already conveys the
+  // channel (QA 2026-08-12), so every schedule is written with format = null.
   const [jadwal, setJadwal] = useState({
     tanggal_waktu: '',
     durasi_menit: '',
-    format: '',
     lokasi_link: '',
     catatan_persiapan: '',
   });
@@ -110,7 +111,6 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
       setJadwal({
         tanggal_waktu: d.jadwal?.tanggal_waktu ? toLocalInput(d.jadwal.tanggal_waktu) : '',
         durasi_menit: d.jadwal?.durasi_menit != null ? String(d.jadwal.durasi_menit) : '',
-        format: d.jadwal?.format ?? '',
         lokasi_link: d.jadwal?.lokasi_link ?? '',
         catatan_persiapan: d.jadwal?.catatan_persiapan ?? '',
       });
@@ -201,11 +201,16 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
       scheduleInterview(id, {
         tanggal_waktu: jadwal.tanggal_waktu ? jadwal.tanggal_waktu : null,
         durasi_menit: jadwal.durasi_menit.trim() === '' ? null : Number(jadwal.durasi_menit),
-        format: jadwal.format.trim() === '' ? null : jadwal.format.trim(),
+        format: null, // no longer collected — location/link is enough (QA 2026-08-12)
         lokasi_link: jadwal.lokasi_link.trim() === '' ? null : jadwal.lokasi_link.trim(),
         catatan_persiapan: jadwal.catatan_persiapan.trim() === '' ? null : jadwal.catatan_persiapan.trim(),
       }),
     );
+
+  // "Mulai interview" — jump straight to Sedang Berlangsung without a fixed
+  // schedule (SM edges added 20260812000000). Client schedules shift
+  // unpredictably, so starting must not depend on the jadwal being locked first.
+  const startInterview = () => act(() => transitionInterview(id, INTERVIEW_STATUS.SedangBerlangsung));
 
   const hitungSimpan = () => {
     if (!draft) return;
@@ -309,27 +314,10 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
                   />
                 </div>
                 <div className="field">
-                  <label htmlFor="jw-format">Format</label>
-                  {/* Closed set (ck_jadwal_format): a free-text value like "online"
-                      trips the DB CHECK and surfaces as a 500. */}
-                  <select
-                    id="jw-format"
-                    value={jadwal.format}
-                    disabled={!scheduleEditable}
-                    onChange={(e) => setJadwal({ ...jadwal, format: e.target.value })}
-                  >
-                    <option value="">— pilih format —</option>
-                    {JADWAL_FORMATS.map((f) => (
-                      <option key={f} value={f}>
-                        {f}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="field">
                   <label htmlFor="jw-lokasi">Lokasi / link</label>
                   <input
                     id="jw-lokasi"
+                    placeholder="Alamat atau link (mis. gmeet.com/…)"
                     value={jadwal.lokasi_link}
                     disabled={!scheduleEditable}
                     onChange={(e) => setJadwal({ ...jadwal, lokasi_link: e.target.value })}
@@ -347,7 +335,7 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
                 />
               </div>
               {scheduleEditable && (
-                <div style={{ marginTop: 12 }}>
+                <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                   <button
                     type="button"
                     className="btn btnPrimary btnSm"
@@ -355,6 +343,17 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
                     onClick={saveSchedule}
                   >
                     Simpan jadwal (→ Terjadwal)
+                  </button>
+                  {/* Start now, no fixed schedule needed — schedules shift a lot
+                      and the interview should not be blocked on locking one. */}
+                  <button
+                    type="button"
+                    className="btn btnSecondary btnSm"
+                    disabled={acting}
+                    title="Mulai interview sekarang tanpa menunggu jadwal terpaku"
+                    onClick={startInterview}
+                  >
+                    Mulai interview (→ Sedang Berlangsung)
                   </button>
                 </div>
               )}
