@@ -189,9 +189,13 @@ export interface InterviewEdge {
 /** Verbatim from the migration's sm_edges seed for machine `interview`. */
 export const INTERVIEW_EDGES: InterviewEdge[] = [
   { from: 'Belum Dijadwalkan', to: 'Terjadwal', requireLead: false, requireReason: false },
+  // Direct "mulai interview" from any pre-interview state (20260812000000) — the
+  // schedule is often unpredictable, so starting must not require a fixed jadwal.
+  { from: 'Belum Dijadwalkan', to: 'Sedang Berlangsung', requireLead: false, requireReason: false },
   { from: 'Terjadwal', to: 'Sedang Berlangsung', requireLead: false, requireReason: false },
   { from: 'Terjadwal', to: 'Dijadwalkan Ulang', requireLead: false, requireReason: false },
   { from: 'Dijadwalkan Ulang', to: 'Terjadwal', requireLead: false, requireReason: false },
+  { from: 'Dijadwalkan Ulang', to: 'Sedang Berlangsung', requireLead: false, requireReason: false },
   { from: 'Sedang Berlangsung', to: 'Draft Isian', requireLead: false, requireReason: false },
   { from: 'Draft Isian', to: 'Diajukan', requireLead: false, requireReason: false },
   { from: 'Draft Isian', to: 'Butuh Data Klien', requireLead: false, requireReason: false },
@@ -211,13 +215,18 @@ export const INTERVIEW_EDGES: InterviewEdge[] = [
 
 /**
  * The transitions a role can take from `status`, EXCLUDING moves to `Terjadwal`
- * (those are driven by the schedule form, which writes the jadwal in the same
- * step — offering a bare "Terjadwal" button would move the state with no
- * schedule behind it).
+ * and `Sedang Berlangsung`. Both are driven from the Blok A schedule card: the
+ * former by the schedule form (it writes the jadwal in the same step), the
+ * latter by the explicit "Mulai interview" button (start now, no fixed jadwal
+ * required). Offering either here would duplicate those controls.
  */
 export function availableTransitions(status: string, canLead: boolean): InterviewEdge[] {
   return INTERVIEW_EDGES.filter(
-    (e) => e.from === status && e.to !== 'Terjadwal' && (!e.requireLead || canLead),
+    (e) =>
+      e.from === status &&
+      e.to !== 'Terjadwal' &&
+      e.to !== 'Sedang Berlangsung' &&
+      (!e.requireLead || canLead),
   );
 }
 

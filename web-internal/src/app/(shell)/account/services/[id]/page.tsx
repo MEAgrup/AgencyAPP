@@ -2,7 +2,9 @@
 
 import { use, useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { errorMessage } from '@/lib/api';
+import { createInterview } from '@/lib/interview';
 import { useAuth } from '@/lib/auth-context';
 import { LEVEL_STAFF, useAssignableEmployees } from '@/lib/directory';
 import EmployeePicker from '@/components/EmployeePicker';
@@ -32,6 +34,7 @@ import { listStrategi, type Strategi } from '@/lib/strategi';
 
 export default function ServiceHubPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const { role } = useAuth();
   const readOnly = isReadOnlyOD(role);
   // Write forms (create Strategy/Brief, requirement override) belong to the
@@ -76,6 +79,11 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   const [reqSubmitting, setReqSubmitting] = useState(false);
   const [reqError, setReqError] = useState<string | null>(null);
   const [reqMessage, setReqMessage] = useState<string | null>(null);
+
+  // Interview ("Kelola Klien") launch — a write action for the same Account
+  // door as the Brief/Strategy forms (mirrors canWriteInterview server-side).
+  const [creatingInterview, setCreatingInterview] = useState(false);
+  const [interviewError, setInterviewError] = useState<string | null>(null);
 
   // Create Brief form
   const [bTitle, setBTitle] = useState('');
@@ -218,6 +226,24 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   const awaitingOnboarding = service ? service.status === SERVICE_AWAITING_ONBOARDING : true;
   const step = service ? nextOnboardingStep(service) : null;
 
+  async function handleOpenInterview() {
+    if (!service) return;
+    if (!window.confirm('Buat interview baru untuk klien layanan ini dan buka halaman Kelola Klien?')) {
+      return;
+    }
+    setInterviewError(null);
+    setCreatingInterview(true);
+    try {
+      // Link the interview to this Service (and its client). Only client_id +
+      // service_id are set; the contract is not required to open one.
+      const detail = await createInterview({ client_id: service.client_id, service_id: id });
+      router.push(`/account/interview/${detail.interview.id}`);
+    } catch (err) {
+      setInterviewError(errorMessage(err));
+      setCreatingInterview(false);
+    }
+  }
+
   async function handleCreateBrief(e: FormEvent) {
     e.preventDefault();
     setBError(null);
@@ -344,6 +370,31 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
               dibuat setelah Plan disetujui.
             </p>
           )}
+        </section>
+      )}
+
+      {/* Interview / Kelola Klien launch. The interview qualifies the client and
+          feeds the Strategy that follows, so its entry point belongs on the
+          Service hub too — not only on the Client Record. Without a door here the
+          page reads as "view only" for a step the AM actually starts from here. */}
+      {service && canWrite && (
+        <section className="card">
+          <div className="cardHeader">
+            <h2>Kelola Klien · Interview &amp; Kualifikasi</h2>
+          </div>
+          {interviewError && <div className="alert alertError" role="alert">{interviewError}</div>}
+          <p className="muted" style={{ fontSize: 13 }}>
+            Buka halaman Interview untuk mengisi Blok A–B, menghitung kualifikasi (skor &amp; verdict
+            advisory), dan menandai prasyarat klien. Interview ditautkan ke layanan ini.
+          </p>
+          <button
+            type="button"
+            className="btn btnPrimary"
+            disabled={creatingInterview}
+            onClick={handleOpenInterview}
+          >
+            {creatingInterview ? 'Membuka…' : 'Buat & buka interview'}
+          </button>
         </section>
       )}
 

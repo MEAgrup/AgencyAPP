@@ -132,6 +132,61 @@ dDb('interview write path (integration)', () => {
     await expect(interview.createInterview(sql, NONOWNER, { clientId: CLI })).rejects.toThrow(/akses/);
   });
 
+  it('rejects an out-of-set schedule format with a BI message (not a 500), and accepts a valid one', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+    const when = '2026-08-20T04:00:00.000Z';
+
+    // A free-typed value like "online" trips ck_jadwal_format at the DB; the
+    // domain guard turns that into a ValidationError (→400) BEFORE the insert.
+    await expect(
+      interview.scheduleInterview(sql, OWNER, id, { tanggalWaktu: when, format: 'online' }),
+    ).rejects.toThrow(interview.MSG_INVALID_FORMAT);
+    // A non-positive duration is likewise a 400, not a 500 (ck_jadwal_durasi).
+    await expect(
+      interview.scheduleInterview(sql, OWNER, id, { tanggalWaktu: when, durasiMenit: 0 }),
+    ).rejects.toThrow(interview.MSG_INVALID_DURASI);
+    // Neither rejected attempt moved the state.
+    const still = await interview.getInterview(sql, OWNER, id);
+    expect(still.interview.status).toBe(iv.INTERVIEW_STATES.BelumDijadwalkan);
+    expect(still.jadwal).toBeNull();
+
+    // A valid schedule persists and moves the interview to Terjadwal (format is
+    // no longer collected by the UI, but the guard/column still accept a value).
+    const ok = await interview.scheduleInterview(sql, OWNER, id, {
+      tanggalWaktu: when,
+      durasiMenit: 40,
+      lokasiLink: 'https://meet.example/abc',
+    });
+    expect(ok.interview.status).toBe(iv.INTERVIEW_STATES.Terjadwal);
+    expect(ok.jadwal?.lokasiLink).toBe('https://meet.example/abc');
+    expect(ok.jadwal?.durasiMenit).toBe(40);
+  });
+
+  it('starts an interview directly (Belum Dijadwalkan → Sedang Berlangsung) with no schedule', async () => {
+    // Client schedules shift unpredictably, so the AM must be able to start the
+    // interview without first locking a jadwal (edges added 20260812000000).
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    expect(detail.interview.status).toBe(iv.INTERVIEW_STATES.BelumDijadwalkan);
+
+    const started = await interview.transitionInterview(
+      sql,
+      OWNER,
+      detail.interview.id,
+      iv.INTERVIEW_STATES.SedangBerlangsung,
+    );
+    expect(started.interview.status).toBe(iv.INTERVIEW_STATES.SedangBerlangsung);
+    expect(started.jadwal).toBeNull(); // never scheduled
+
+    // Blok B answers are now editable (the point of starting early).
+    const saved = await interview.saveAnswers(sql, OWNER, detail.interview.id, [
+      { section: 'B2', fieldKey: 'B2-7', nilaiAngka: 40, sumberAngka: iv.SUMBER_ANGKA.KlienHitung },
+    ]);
+    expect(saved.answers.some((a) => a.fieldKey === 'B2-7')).toBe(true);
+  });
+
   it('resolvePrasyarat flips prasyarat to selesai (AM only; Sales/non-owner forbidden)', async () => {
     const detail = await interview.createInterview(sql, OWNER, { clientId: CLI, salesClosingId: 'EMP-0006' });
     created.push(detail.interview.id);
