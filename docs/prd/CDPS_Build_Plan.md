@@ -18,6 +18,7 @@
 | 4 | `CDPS_Module4_Client_Record_v2.md` | **v2 — updated** (adds Commission & Payment PIC + Sales Allocation per OD-1; module-number refs fixed). Supersedes the v1 file. |
 | 5 | `CDPS_Module5_Admin_Finance.md` | Final, unchanged |
 | 6 | `CDPS_Module6_Account_Service.md` | Final, unchanged |
+| 6D | `CDPS_Module6D_Rekap_Hasil_Mingguan.md` | **New — added 2026-08-12** (Weekly Result Update: AM/CRO consolidates per-division production + view/GMV/CTR/CVR/ROAS weekly, rolls up into M6B P-E). Owner request, `docs/DECISIONS.md` 2026-08-12. |
 | 7 | `CDPS_Module7_Creative.md` | Final, unchanged |
 | 8 | `CDPS_Module8_Ads.md` | Final, unchanged |
 | 9 | `CDPS_Module9_KOL.md` | Final, unchanged |
@@ -79,6 +80,7 @@ Lead → close → payment gate. Everything downstream depends on this.
 
 ### Wave 2 — Delivery engine (Epics: M6, M7, M8, M9, M10, M12)
 - **M6 Account & Service:** AM assignment (manual SPV), Strategy & Plan gate, Service→Brief fan-out, Brief Kanban, complaint door (AM/WhatsApp + Sales source), revision routing.
+- **M6D Rekap Hasil Mingguan (Weekly Result Update)** — built **at the end of this wave, after M7/M8/M9/M10 expose their metrics** (same dependency shape as M6B P-E auto metrics). Auto-generated weekly per active client; consolidates per-division production (Creative # video, KOL # creator, Live Stream # live) and movement metrics (total view, GMV, CTR, CVR, ROAS) from the owning modules, manual fallback where the system owns nothing. Rolls up into the monthly M6B P-E realisasi — never replaces it (single-source GMV guardrail). Covers **all active clients incl. Direct/`Tanpa Plan`**, closing the gap that non-plan services have no periodic results record. State machine #18; catalog v3 (+3 events). Owner request, `docs/DECISIONS.md` 2026-08-12.
 - **M12 Task Execution** built **early in this wave**, not last — M7/M8/M9 all plug into its canonical machine, turnaround/speed/revision computation, `[Blocked]` SPV-only permission, block-request queue.
 - **M7 Creative** (Asset fan-out, revision loop, Daily Output), **M8 Ads** (Ad Campaign/Metric Entry/Optimization Log, Creative-asset launch guardrail, attribution feedback), **M9 KOL** (Booking lifecycle, QC/escalation, Creator Payment Request → Finance), **M10 Live Stream** (vendor tracker, reconciliation, GMV confidence tier).
 
