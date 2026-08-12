@@ -412,8 +412,9 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           {interviewError && <div className="alert alertError" role="alert">{interviewError}</div>}
           {interviewsError && <div className="alert alertError" role="alert">{interviewsError}</div>}
 
-          {/* Riwayat Interview — the log of interviews already done for this
-              client, so a saved one can be REOPENED instead of duplicated. */}
+          {/* Riwayat Interview — the log of interviews already scheduled or
+              progressed for this client (blank Belum Dijadwalkan attempts are
+              filtered server-side), so a saved one can be REOPENED not duplicated. */}
           {interviews.length > 0 ? (
             <div className="table-wrap" style={{ marginBottom: 12 }}>
               <table className="table">
@@ -458,8 +459,8 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             </div>
           ) : (
             <p className="muted" style={{ fontSize: 13 }}>
-              Belum ada interview untuk klien ini. Buka halaman Interview untuk mengisi Blok A–B, menghitung
-              kualifikasi (skor &amp; verdict advisory), dan menandai prasyarat klien.
+              Belum ada interview terjadwal atau selesai untuk klien ini. Gunakan tombol di bawah untuk membuat
+              interview, lalu isi jadwal (Blok A) atau mulai interview agar tercatat di sini.
             </p>
           )}
 
