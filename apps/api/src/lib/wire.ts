@@ -4524,8 +4524,25 @@ export interface InterviewAnswerWire {
   dasar_estimasi: string | null;
 }
 
+/**
+ * Riset Awal — langkah 1 of "Kelola Klien". `durasi_menit` is DERIVED server-side
+ * from the two anchors (there is no duration column); it stays `null` while the
+ * work is running, which the UI renders as `—`.
+ */
+export interface InterviewRisetAwalWire {
+  interview_id: string;
+  status: string;
+  dimulai_pada: string;
+  dimulai_oleh: string;
+  disubmit_pada: string | null;
+  disubmit_oleh: string | null;
+  durasi_menit: number | null;
+  retroaktif: boolean;
+}
+
 export interface InterviewDetailWire {
   interview: InterviewWire;
+  riset_awal: InterviewRisetAwalWire | null;
   jadwal: InterviewJadwalWire | null;
   kualifikasi: InterviewKualifikasiWire | null;
   answers: InterviewAnswerWire[];
@@ -4550,6 +4567,10 @@ export interface InterviewListRowWire {
   verdict: string | null;
   prasyarat_status: string | null;
   skor_kualifikasi: number | null;
+  riset_awal_status: string | null;
+  riset_awal_dimulai_pada: string | null;
+  riset_awal_disubmit_pada: string | null;
+  riset_awal_durasi_menit: number | null;
   created_at: string;
 }
 
@@ -4565,8 +4586,83 @@ export function interviewListToWire(rows: interview.InterviewListRow[]): Intervi
     verdict: r.verdict,
     prasyarat_status: r.prasyaratStatus,
     skor_kualifikasi: r.skorKualifikasi,
+    riset_awal_status: r.risetAwalStatus,
+    riset_awal_dimulai_pada: r.risetAwalDimulaiPada,
+    riset_awal_disubmit_pada: r.risetAwalDisubmitPada,
+    riset_awal_durasi_menit: r.risetAwalDurasiMenit,
     created_at: r.createdAt,
   }));
+}
+
+/**
+ * One measured step of the Kelola Klien timeline. `hari_kerja` is working days
+ * (Mon–Fri minus `hari_libur`) computed server-side — `null` while the step has
+ * not started, which the UI renders as `—`.
+ */
+export interface TimelineStepWire {
+  langkah: number;
+  nama: string;
+  mulai_pada: string | null;
+  selesai_pada: string | null;
+  hari_kerja: number | null;
+  target_hari: number;
+  batas_hari: number;
+  status: string;
+  selesai: boolean;
+}
+
+export interface KelolaKlienTimelineWire {
+  interview_id: string;
+  config_version: number;
+  langkah: TimelineStepWire[];
+}
+
+export function kelolaKlienTimelineToWire(t: interview.KelolaKlienTimeline): KelolaKlienTimelineWire {
+  return {
+    interview_id: t.interviewId,
+    config_version: t.configVersion,
+    langkah: t.langkah.map((s) => ({
+      langkah: s.langkah,
+      nama: s.nama,
+      mulai_pada: s.mulaiPada,
+      selesai_pada: s.selesaiPada,
+      hari_kerja: s.hariKerja,
+      target_hari: s.targetHari,
+      batas_hari: s.batasHari,
+      status: s.status,
+      selesai: s.selesai,
+    })),
+  };
+}
+
+/** One row of the national-holiday calendar (admin plane). */
+export interface HariLiburWire {
+  tanggal: string;
+  keterangan: string;
+  created_at: string;
+  created_by: string;
+}
+
+export function hariLiburToWire(h: admin.HariLibur): HariLiburWire {
+  return {
+    tanggal: h.tanggal,
+    keterangan: h.keterangan,
+    created_at: h.createdAt,
+    created_by: h.createdBy,
+  };
+}
+
+export function interviewRisetAwalToWire(r: interview.RisetAwal): InterviewRisetAwalWire {
+  return {
+    interview_id: r.interviewId,
+    status: r.status,
+    dimulai_pada: r.dimulaiPada,
+    dimulai_oleh: r.dimulaiOleh,
+    disubmit_pada: r.disubmitPada,
+    disubmit_oleh: r.disubmitOleh,
+    durasi_menit: r.durasiMenit,
+    retroaktif: r.retroaktif,
+  };
 }
 
 export function interviewToWire(i: interview.Interview): InterviewWire {
@@ -4612,6 +4708,7 @@ function interviewKualifikasiToWire(k: interview.Kualifikasi): InterviewKualifik
 export function interviewDetailToWire(d: interview.InterviewDetail): InterviewDetailWire {
   return {
     interview: interviewToWire(d.interview),
+    riset_awal: d.risetAwal ? interviewRisetAwalToWire(d.risetAwal) : null,
     jadwal: d.jadwal
       ? {
           tanggal_waktu: d.jadwal.tanggalWaktu,

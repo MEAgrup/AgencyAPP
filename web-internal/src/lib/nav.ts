@@ -199,6 +199,13 @@ const ADMIN_LINKS: NavItem[] = [
     label: 'Role Mapping',
     access: (role) => Boolean(role.director || role.od),
   },
+  // The holiday calendar behind every "hari kerja" count (Kelola Klien SLA).
+  // Same gate as the rest of the admin plane: Director writes, OD reads.
+  {
+    href: '/admin/hari-libur',
+    label: 'Hari Libur',
+    access: (role) => Boolean(role.director || role.od),
+  },
 ];
 
 /** The full navigation model, before role filtering. */

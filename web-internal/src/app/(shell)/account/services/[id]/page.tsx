@@ -320,7 +320,9 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
 
   async function handleOpenInterview() {
     if (!service) return;
-    if (!window.confirm('Buat interview baru untuk klien layanan ini dan buka halaman Kelola Klien?')) {
+    // Opening Kelola Klien STARTS riset awal (langkah 1); the call resumes this
+    // service's open session if there is one, so the clock is never reset.
+    if (!window.confirm('Buka Kelola Klien untuk layanan ini? Riset awal mulai terhitung sejak sekarang.')) {
       return;
     }
     setInterviewError(null);
@@ -493,12 +495,14 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
       {service && canWrite && (
         <section className="card">
           <div className="cardHeader">
-            <h2>Kelola Klien · Interview &amp; Kualifikasi</h2>
+            <h2>Kelola Klien · Riset Awal, Interview &amp; Kualifikasi</h2>
           </div>
           {interviewError && <div className="alert alertError" role="alert">{interviewError}</div>}
           <p className="muted" style={{ fontSize: 13 }}>
-            Buka halaman Interview untuk mengisi Blok A–B, menghitung kualifikasi (skor &amp; verdict
-            advisory), dan menandai prasyarat klien. Interview ditautkan ke layanan ini.
+            Tiga langkah: <strong>riset awal</strong> (login toko klien &amp; catat data baseline),
+            <strong>interview</strong> (Blok A–B, kualifikasi — skor &amp; verdict advisory), lalu
+            <strong>strategi</strong>. Waktu riset awal mulai terhitung begitu halaman dibuka. Sesi
+            ditautkan ke layanan ini.
           </p>
           <button
             type="button"
@@ -506,7 +510,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
             disabled={creatingInterview}
             onClick={handleOpenInterview}
           >
-            {creatingInterview ? 'Membuka…' : 'Buat & buka interview'}
+            {creatingInterview ? 'Membuka…' : 'Kelola Klien (mulai riset awal)'}
           </button>
         </section>
       )}

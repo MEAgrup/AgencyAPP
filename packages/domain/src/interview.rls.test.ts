@@ -79,6 +79,10 @@ beforeAll(async () => {
     values (${ITV}, 60, '{"A":20,"B":15,"C":14,"D":6,"E":5}'::jsonb, 'bersyarat', '[]'::jsonb,
             'bersih_klien', 'terverifikasi', '{}'::jsonb, 'SYSTEM')
     on conflict (interview_id) do nothing`;
+  await sql`
+    insert into interview_riset_awal (interview_id, dimulai_oleh)
+    values (${ITV}, ${OWNER_AM})
+    on conflict (interview_id) do nothing`;
 });
 
 afterAll(async () => {
@@ -115,5 +119,33 @@ dDb('interview_verdict view scope: TS predicate == RLS', () => {
     for (const forbidden of ['skor_kualifikasi', 'skor_per_blok', 'margin_bersih', 'hambatan_mendasar']) {
       expect(names).not.toContain(forbidden);
     }
+  });
+});
+
+/**
+ * Riset Awal carries the client's store baseline — the same hard-internal class
+ * as Blok B, NOT the verdict surface. Its policy must therefore track
+ * `canReadInterview` (Account scope), which in particular means the closing
+ * salesperson does NOT see it even though they do see the verdict.
+ */
+dDb('interview_riset_awal scope: TS predicate == RLS (Account-only, never Sales)', () => {
+  it.each(ROLES)('$name', async ({ claim }) => {
+    const tsAllows = interview.canReadInterview(actor(claim), OWNER_AM);
+    const rlsRows = await withClaims(sql, claims(claim), (tx) =>
+      tx<{ interview_id: string }[]>`select interview_id from interview_riset_awal where interview_id = ${ITV}`,
+    );
+    expect(rlsRows.length > 0).toBe(tsAllows);
+  });
+
+  it('is invisible to the closing salesperson, who can still read the verdict', async () => {
+    const salesClaim = { employeeId: SALES_CLOSING, division: 'Sales', level: 'staff' };
+    const riset = await withClaims(sql, claims(salesClaim), (tx) =>
+      tx<{ interview_id: string }[]>`select interview_id from interview_riset_awal where interview_id = ${ITV}`,
+    );
+    const verdict = await withClaims(sql, claims(salesClaim), (tx) =>
+      tx<{ interview_id: string }[]>`select interview_id from interview_verdict where interview_id = ${ITV}`,
+    );
+    expect(riset.length).toBe(0);
+    expect(verdict.length).toBe(1);
   });
 });

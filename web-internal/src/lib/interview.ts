@@ -33,6 +33,45 @@ export interface Interview {
   created_by: string;
 }
 
+/**
+ * Riset Awal — langkah 1 of "Kelola Klien". `durasi_menit` is computed by the
+ * server from the two anchors; it is `null` while the research is still running
+ * (render `—`, never `0`).
+ */
+export interface InterviewRisetAwal {
+  interview_id: string;
+  status: string;
+  dimulai_pada: string;
+  dimulai_oleh: string;
+  disubmit_pada: string | null;
+  disubmit_oleh: string | null;
+  durasi_menit: number | null;
+  retroaktif: boolean;
+}
+
+/**
+ * One measured step of the Kelola Klien timeline (owner decision 2026-08-13).
+ * `hari_kerja` is working days computed server-side — `null` before the step
+ * starts, rendered `—`.
+ */
+export interface TimelineStep {
+  langkah: number;
+  nama: string;
+  mulai_pada: string | null;
+  selesai_pada: string | null;
+  hari_kerja: number | null;
+  target_hari: number;
+  batas_hari: number;
+  status: string;
+  selesai: boolean;
+}
+
+export interface KelolaKlienTimeline {
+  interview_id: string;
+  config_version: number;
+  langkah: TimelineStep[];
+}
+
 /** Blok A schedule. */
 export interface InterviewJadwal {
   tanggal_waktu: string | null;
@@ -79,6 +118,7 @@ export interface InterviewAnswer {
 /** The full record the internal detail page loads at once. */
 export interface InterviewDetail {
   interview: Interview;
+  riset_awal: InterviewRisetAwal | null;
   jadwal: InterviewJadwal | null;
   kualifikasi: InterviewKualifikasi | null;
   answers: InterviewAnswer[];
@@ -103,6 +143,10 @@ export interface InterviewListRow {
   verdict: string | null;
   prasyarat_status: string | null;
   skor_kualifikasi: number | null;
+  riset_awal_status: string | null;
+  riset_awal_dimulai_pada: string | null;
+  riset_awal_disubmit_pada: string | null;
+  riset_awal_durasi_menit: number | null;
   created_at: string;
 }
 
@@ -165,6 +209,20 @@ export function getInterviewVerdict(id: string): Promise<InterviewVerdict | null
 /** POST /interview/{id}/prasyarat — "tandai prasyarat selesai" (advisory). */
 export function resolveInterviewPrasyarat(id: string): Promise<InterviewVerdict | null> {
   return api.post<InterviewVerdict | null>(`/interview/${id}/prasyarat`);
+}
+
+/**
+ * POST /interview/{id}/riset-awal — submit langkah 1. The start was recorded when
+ * this page was opened; this closes the measurement. A second submit is rejected
+ * (409) by the server, so the button disappears once it is done.
+ */
+export function submitRisetAwal(id: string): Promise<InterviewRisetAwal> {
+  return api.post<InterviewRisetAwal>(`/interview/${id}/riset-awal`);
+}
+
+/** GET /interview/{id}/timeline — the three-step SLA (working days, server-computed). */
+export function getKelolaKlienTimeline(id: string): Promise<KelolaKlienTimeline> {
+  return api.get<KelolaKlienTimeline>(`/interview/${id}/timeline`);
 }
 
 export function scheduleInterview(id: string, body: JadwalWire): Promise<InterviewDetail> {
@@ -286,6 +344,106 @@ export function interviewStatusTone(status: string): string {
     default:
       return 'gray';
   }
+}
+
+// ===========================================================================
+// Riset Awal (langkah 1) — machine mirror + duration display
+// ===========================================================================
+
+/** Mirrors the `riset_awal` sm_edges seed (mesin #20). Two states, no re-open. */
+export const RISET_AWAL_STATUS = {
+  Berjalan: 'Berjalan',
+  Selesai: 'Selesai',
+} as const;
+
+export function risetAwalStatusTone(status: string | null): string {
+  switch (status) {
+    case RISET_AWAL_STATUS.Berjalan:
+      return 'blue';
+    case RISET_AWAL_STATUS.Selesai:
+      return 'green';
+    default:
+      return 'gray';
+  }
+}
+
+/**
+ * formatDurasiMenit renders a duration the way the timeline is read: whole
+ * minutes below an hour, hours + minutes below a day, days + hours above it.
+ * `null` (still running, or unknowable) renders `—` per house rule #7 — never
+ * `0 menit`, which would read as work that took no time.
+ */
+export function formatDurasiMenit(menit: number | null | undefined): string {
+  if (menit == null || !Number.isFinite(menit) || menit < 0) return '—';
+  const m = Math.floor(menit);
+  if (m < 60) return `${m} menit`;
+  const jam = Math.floor(m / 60);
+  if (jam < 24) {
+    const sisaMenit = m % 60;
+    return sisaMenit === 0 ? `${jam} jam` : `${jam} jam ${sisaMenit} menit`;
+  }
+  const hari = Math.floor(jam / 24);
+  const sisaJam = jam % 24;
+  return sisaJam === 0 ? `${hari} hari` : `${hari} hari ${sisaJam} jam`;
+}
+
+/** Whole minutes elapsed since `dimulaiPada` — the live counter while running. */
+export function menitBerjalanSejak(dimulaiPada: string | null | undefined, sekarang: Date = new Date()): number | null {
+  if (!dimulaiPada) return null;
+  const mulai = Date.parse(dimulaiPada);
+  if (Number.isNaN(mulai)) return null;
+  const selisih = sekarang.getTime() - mulai;
+  return selisih < 0 ? null : Math.floor(selisih / 60_000);
+}
+
+// ===========================================================================
+// Timeline SLA (langkah 1–3) — display only; the judgement is made server-side
+// ===========================================================================
+//
+// The status string arrives already decided by `@cdps/core`'s `statusSla`, run
+// over holiday-aware working days. Nothing here re-decides it: a second opinion
+// on the FE is how a page ends up calling an AM late while the flag job does not.
+
+export const SLA_STATUS = {
+  BelumMulai: 'belum_mulai',
+  TepatWaktu: 'tepat_waktu',
+  MendekatiBatas: 'mendekati_batas',
+  Terlambat: 'terlambat',
+  TidakBerlaku: 'tidak_berlaku',
+} as const;
+
+export const SLA_STATUS_LABEL: Record<string, string> = {
+  belum_mulai: 'Belum mulai',
+  tepat_waktu: 'Tepat waktu',
+  mendekati_batas: 'Mendekati batas',
+  terlambat: 'Terlambat',
+  tidak_berlaku: 'Tidak berlaku',
+};
+
+export function slaStatusTone(status: string): string {
+  switch (status) {
+    case SLA_STATUS.TepatWaktu:
+      return 'green';
+    case SLA_STATUS.MendekatiBatas:
+      return 'amber';
+    case SLA_STATUS.Terlambat:
+      return 'red';
+    default:
+      return 'gray';
+  }
+}
+
+/** "2–3 hari kerja" — the step's own target/limit, shown beside its elapsed count. */
+export function formatAmbang(targetHari: number, batasHari: number): string {
+  return targetHari === batasHari
+    ? `${targetHari} hari kerja`
+    : `${targetHari}–${batasHari} hari kerja`;
+}
+
+/** Elapsed working days as text; `—` when the step has not started. */
+export function formatHariKerja(hariKerja: number | null | undefined): string {
+  if (hariKerja == null || !Number.isFinite(hariKerja) || hariKerja < 0) return '—';
+  return `${Math.floor(hariKerja)} hari kerja`;
 }
 
 // ===========================================================================

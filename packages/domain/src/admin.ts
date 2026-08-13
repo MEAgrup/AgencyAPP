@@ -597,3 +597,117 @@ export async function setLayeredRole(
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// hari_libur — the national-holiday calendar behind every "hari kerja" count
+// ---------------------------------------------------------------------------
+//
+// The Kelola Klien SLA is measured in working days, and the owner asked for
+// national holidays to be excluded (2026-08-13). Working days are computed by the
+// SQL helper `working_days_between`, which reads THIS table — so the calendar is
+// operational data an operator maintains, not a list baked into a migration.
+// Indonesian holiday dates are set by joint decree and move every year; a hard
+// coded list would be a business fact invented by code and silently wrong the
+// next January.
+//
+// The table starts EMPTY, which behaves exactly like weekends-only until someone
+// fills it. That is a visible, honest default rather than a wrong one.
+
+export const MSG_HARI_LIBUR_DENIED = '[hanya Director yang dapat mengelola hari libur]';
+export const MSG_HARI_LIBUR_TANGGAL = '[tanggal libur tidak valid, gunakan format YYYY-MM-DD]';
+export const MSG_HARI_LIBUR_KETERANGAN = '[keterangan hari libur wajib diisi]';
+export const MSG_HARI_LIBUR_ADA = '[tanggal itu sudah terdaftar sebagai hari libur]';
+export const MSG_HARI_LIBUR_NOT_FOUND = '[hari libur tidak ditemukan]';
+
+export interface HariLibur {
+  tanggal: string;
+  keterangan: string;
+  createdAt: string;
+  createdBy: string;
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function rowToHariLibur(r: Record<string, unknown>): HariLibur {
+  const t = r.tanggal;
+  return {
+    // `date` comes back as a JS Date from the driver; the wire wants the civil
+    // date, so it is formatted here rather than passed through an ISO instant
+    // (which would shift the day for anyone east of UTC).
+    tanggal: t instanceof Date ? t.toISOString().slice(0, 10) : String(t),
+    keterangan: r.keterangan as string,
+    createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+    createdBy: r.created_by as string,
+  };
+}
+
+/** listHariLibur returns the calendar, newest date first. Director/OD read. */
+export async function listHariLibur(sql: Queryable, actor: Actor): Promise<HariLibur[]> {
+  if (!canReadAdmin(actor)) throw new ForbiddenError(MSG_ADMIN_READ_DENIED);
+  const rows = await sql<Record<string, unknown>[]>`
+    select tanggal, keterangan, created_at, created_by from hari_libur order by tanggal desc`;
+  return rows.map(rowToHariLibur);
+}
+
+/**
+ * addHariLibur registers one holiday. Director only — the calendar changes what
+ * "late" means for every AM, so it sits behind the same gate as the role matrix.
+ */
+export async function addHariLibur(
+  sql: Sql,
+  actor: Actor,
+  input: { tanggal: string; keterangan: string },
+): Promise<HariLibur> {
+  if (!canWriteAdmin(actor)) throw new ForbiddenError(MSG_HARI_LIBUR_DENIED);
+  const tanggal = (input.tanggal ?? '').trim();
+  const keterangan = (input.keterangan ?? '').trim();
+  if (!ISO_DATE.test(tanggal) || Number.isNaN(Date.parse(tanggal))) {
+    throw new ValidationError(MSG_HARI_LIBUR_TANGGAL);
+  }
+  if (keterangan === '') throw new ValidationError(MSG_HARI_LIBUR_KETERANGAN);
+
+  return withTransaction(sql, async (tx) => {
+    const inserted = await tx<Record<string, unknown>[]>`
+      insert into hari_libur (tanggal, keterangan, created_by)
+      values (${tanggal}, ${keterangan}, ${actor.employeeId})
+      on conflict (tanggal) do nothing
+      returning tanggal, keterangan, created_at, created_by`;
+    if (inserted.length === 0) throw new ConflictError(MSG_HARI_LIBUR_ADA);
+    await executors(tx).audit.insertAudit({
+      entityType: 'hari_libur',
+      entityId: tanggal,
+      actorEmployeeId: actor.employeeId,
+      action: 'create',
+      beforeJson: null,
+      afterJson: { tanggal, keterangan },
+      createdBy: actor.employeeId,
+    });
+    return rowToHariLibur(inserted[0]);
+  });
+}
+
+/**
+ * removeHariLibur deletes one holiday. A DELETE is correct here — this is a
+ * config calendar, not history; a mistyped date must be removable, and the audit
+ * row records that it was.
+ */
+export async function removeHariLibur(sql: Sql, actor: Actor, tanggal: string): Promise<void> {
+  if (!canWriteAdmin(actor)) throw new ForbiddenError(MSG_HARI_LIBUR_DENIED);
+  const t = (tanggal ?? '').trim();
+  if (!ISO_DATE.test(t)) throw new ValidationError(MSG_HARI_LIBUR_TANGGAL);
+
+  await withTransaction(sql, async (tx) => {
+    const gone = await tx<Record<string, unknown>[]>`
+      delete from hari_libur where tanggal = ${t} returning tanggal, keterangan, created_at, created_by`;
+    if (gone.length === 0) throw new NotFoundError(MSG_HARI_LIBUR_NOT_FOUND);
+    await executors(tx).audit.insertAudit({
+      entityType: 'hari_libur',
+      entityId: t,
+      actorEmployeeId: actor.employeeId,
+      action: 'delete',
+      beforeJson: { tanggal: t, keterangan: gone[0].keterangan },
+      afterJson: null,
+      createdBy: actor.employeeId,
+    });
+  });
+}

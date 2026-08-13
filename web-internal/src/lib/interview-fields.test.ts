@@ -120,6 +120,7 @@ describe('draftFromDetail', () => {
   it('rebuilds the form from loaded answers (money minor → rupiah)', () => {
     const detail: InterviewDetail = {
       interview: { id: 'ITV-202608-0001', status: 'Draft Isian' } as InterviewDetail['interview'],
+      riset_awal: null,
       jadwal: null,
       kualifikasi: null,
       answers: [
