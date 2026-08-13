@@ -1003,6 +1003,14 @@ RESET ROLE;
 --     `plan_row_week` mewarisinya lewat EXISTS, jadi keduanya lolos detektor.
 --     O60 (jika dikerjakan) akan menghapus keempatnya bersama kesebelas
 --     `strategi_*` sekaligus.
+--     Empat baris `wrr_*` (divisi/metrik/catatan/catatan_divisi) adalah kelas
+--     yang SAMA: predikatnya `private.jwt_can_read_recap()`, cermin persis
+--     `weekly_result_recap_select` — termasuk arm `jwt_is_lead() AND
+--     jwt_division() = 'Account'` (DECISIONS 2026-08-13 "M6D D-01 — empat tabel
+--     anak Rekap Mingguan masuk ledger O48"). Induk `weekly_result_recap_select`
+--     membawa arm-nya inline jadi TIDAK di sini. Lead DIVISI (non-Account)
+--     sengaja belum punya arm di D-01 — baca rekap divisi menyusul bersama jalur
+--     tulis RM-D6 (D-09), tak dilebarkan spekulatif (O48).
 --     Membuat detektor menembus satu tingkat indireksi akan MENGHAPUS
 --     kesebelasnya sekaligus — diusulkan sebagai **O60**, sengaja tidak
 --     dikerjakan di dalam tiket fitur: mengubah semantik invariant bersama
@@ -1031,7 +1039,8 @@ DECLARE
     'strategi_prasyarat_klien_select','strategi_quick_win_select',
     'strategi_risiko_struktural_select','strategi_risk_select',
     'strategi_tanggal_besar_select','strategi_target_select',
-    'strategi_trigger_revisi_select','strategi_version_select','vendors_select'
+    'strategi_trigger_revisi_select','strategi_version_select','vendors_select',
+    'wrr_catatan_divisi_select','wrr_catatan_select','wrr_divisi_select','wrr_metrik_select'
   ];
   gained text[];
   lost   text[];
