@@ -21,10 +21,10 @@ Semua yang mendarat adalah dokumen: jawaban pemilik atas RM-1…RM-11 dari SESI1
 | **Deliverable sesi ini** | Dokumen saja (di bawah) |
 
 Berkas yang berubah SESI2:
-- `docs/prd/CDPS_Module6D_Rekap_Hasil_Mingguan.md` — §4 Rule 1 (kecuali hold), Rule 8 + RM-D6 (catatan divisi wajib), §9 (katalog v7=48), **§10 ditulis ulang** (status resolusi) + **§10.1 baru** (klarifikasi force-close, "dimodelkan", katalog)
-- `docs/backlog/M6D_BACKLOG.md` — D-06/D-07 diperbarui, §3 jadi status resolusi, **tiket baru D-14** (M14 disiplin)
-- `docs/prd/CDPS_Module14_Team_Performance.md` — **§9 baru** (komponen disiplin rekap, butuh sign-off)
-- `docs/STATE_MACHINES.md` §15 — force-close N=2 hari kerja
+- `docs/prd/CDPS_Module6D_Rekap_Hasil_Mingguan.md` — §4 Rule 1 (kecuali hold), Rule 8 (catatan divisi wajib + Head buka-kembali), RM-D6 (wajib), **RM-C9 baru** (teks-only), §9 (mesin #18 + `pernah_ditutup_otomatis` + katalog v7=48), **§10 ditulis ulang** + **§10.1 baru** (force-close + buka-kembali, "dimodelkan" + teks-only, katalog)
+- `docs/backlog/M6D_BACKLOG.md` — D-02 (edge buka-kembali Head), D-04 (RM-C9 teks), D-06/D-07 diperbarui, §3 status, **tiket baru D-14** (M14 disiplin)
+- `docs/prd/CDPS_Module14_Team_Performance.md` — **§9 baru** (komponen disiplin rekap = flag `pernah_ditutup_otomatis`, butuh sign-off)
+- `docs/STATE_MACHINES.md` §15 — force-close N=2 hari kerja + **edge `Ditutup Otomatis→Terbuka` (Head)** + flag permanen
 - `docs/DECISIONS.md` — 1 entri 2026-08-13 (resolusi RM-1…RM-11)
 - `docs/handoff/HANDOFF_M6D_SESI2.md` — ini
 
@@ -37,19 +37,21 @@ Berkas yang berubah SESI2:
 | RM-1 | ✅ decided | Minggu ISO Sen–Min WIB **benar**. Tak berubah |
 | RM-2 | ✅ decided | Klien aktif = **≥1 Service non-terminal, KECUALI semua-hold/paused dikecualikan**. Filter di job Senin (D-03/D-06) |
 | RM-3 | ✅ decided | **Tak ada ROAS blend — ROAS = kanal Ads saja**. RM-C2 tetap `GMV Ads ÷ Spend`. Tertutup permanen |
-| RM-4 | ⏳ clarified | CPL/impressions **tidak dimodelkan** di M6D (default R3, tampil `—`). Bangun di M8 dulu kalau mau. Arti "dimodelkan" → PRD §10.1-B |
-| RM-5 | ✅ default set | Jendela force-close **N = 2 hari kerja** (owner-tunable). Contoh kerja → PRD §10.1-A |
-| RM-6 | ⏳ sign-off | Premis "v3=31" **basi**. Katalog live **v6=44**; M6D → **v7=48**. Daftar penuh utk tanda tangan → **§Katalog di bawah** |
-| RM-7 | ⏳ clarified | View organik = manual/`—` (sama kelas RM-4). Naik auto hanya kalau ada export platform rutin di M7 |
+| RM-4 | ✅ decided | **Tidak dimodelkan**, tapi ada field **teks-only RM-C9** "Catatan Metrik Tambahan" (owner 2026-08-13: *"text only untuk pencatatan"*). Bukan metrik — tak masuk delta/rollup/skor. Arti "dimodelkan" → PRD §10.1-B |
+| RM-5 | ✅ decided | Force-close **N = 2 hari kerja** + **Head boleh buka-kembali** rekap `Ditutup Otomatis` (`→ Terbuka`, alasan wajib). `pernah_ditutup_otomatis` **permanen** — nilai AM tetap tercatat walau datanya diselamatkan. Alur → PRD §10.1-A |
+| RM-6 | ⏳ **sign-off** | Premis "v3=31" **basi**. Katalog live **v6=44**; M6D → **v7=48**. Daftar penuh utk tanda tangan → **§Katalog di bawah** |
+| RM-7 | ⏳ **perlu pemilik** | View organik = manual/`—`/teks RM-C9 (sama kelas RM-4). Naik auto hanya kalau ada export platform rutin di M7 |
 | RM-8 | ✅ decided | Catatan divisi **WAJIB** (divisi berutang laporan mingguan). Reminder `catatan_divisi_belum_diisi`. **Tak memblok tutup AM** |
 | RM-9 | ✅ decided | Disiplin **ditampilkan (H-2) DAN dinilai** — nilainya di **M14, bukan komponen ke-8 M13**. Butuh re-weight profil AM ⇒ **sign-off** (RM-9a / D-14) |
 | RM-10 | ✅ decided | **H-4 verdict Interview tetap** di halaman health (advisory) |
-| RM-11 | ⏳ clarified | CPC/CPM + Upcoming Milestones **di luar cakupan** sampai sumbernya ada (sama kelas RM-4) |
+| RM-11 | ⏳ **perlu pemilik** | CPC/CPM + Upcoming Milestones **di luar cakupan** sampai sumbernya ada (sama kelas RM-4; boleh dicatat di teks RM-C9) |
 
-**Tiga hal yang MASIH butuh pemilik sebelum/saat implementasi:**
-1. **RM-4/7/11** — go/no-go: mau kami bangun sumber CPL/impressions/CPC/CPM/view-organik di M8/M7, atau biarkan `—`? (Default: biarkan `—`.)
-2. **RM-6** — tanda tangan katalog v7=48 (§Katalog). Gate M6B PA-8 masih berlaku: nol modul kirim notifikasi sebelum ini ditandatangani.
-3. **RM-9a** — bobot komponen disiplin di M14 (rekomendasi 45/22.5/22.5/10 utk profil AM). Mengubah profil terkonfirmasi butuh sign-off.
+**⚠️ Pertanyaan yang BELUM terjawab — jawab di chat berikutnya SEBELUM/SAAT build:**
+1. **RM-6 — tanda tangan katalog `v7 = 48`** (daftar penuh §Katalog). **Gate keras M6B PA-8:** nol modul boleh mengirim notifikasi sebelum katalog ini ditandatangani. Ini blocker paling awal untuk D-07.
+2. **RM-9a — bobot komponen disiplin di M14.** Rekomendasi carve 10–15% dari profil AM terkonfirmasi (mis. **45 / 22.5 / 22.5 / 10**), + slice kepatuhan-catatan di profil tiap divisi. Mengubah profil terkonfirmasi (M14 §7 #6) butuh tanda tangan pemilik. Blocker untuk D-14, bukan D-01…D-13.
+3. **RM-7 / RM-11 — go/no-go pemodelan.** Mau kami bangun sumber **view organik** (M7) / **CPC/CPM/impressions** (M8) supaya jadi metrik auto, atau cukup `—` + catatan teks RM-C9? Default = cukup `—`+teks; ini TIDAK memblok D-01…D-13, hanya menambah pekerjaan di modul pemilik kalau "ya".
+
+Tidak ada lagi RM yang menunggu di luar tiga ini — RM-1/2/3/4/5/8/9/10 semuanya sudah decided.
 
 ---
 
@@ -148,9 +150,11 @@ degradasi per-blok O52, `pg_cron` butuh guard `IF EXISTS pg_available_extensions
 read-only.
 
 Tambahan:
+- **D-02** kini: + edge **`Ditutup Otomatis→Terbuka` (Head, alasan wajib)**; terminal sejati hanya `Ditutup`; kolom `pernah_ditutup_otomatis` (set saat force-close, trigger jaga tak pernah dicabut).
+- **D-04** kini: + field **teks-only RM-C9** "Catatan Metrik Tambahan" (bukan metrik).
 - **D-06** kini: job (b) N=2 hari kerja, (c) event `catatan_divisi_belum_diisi`.
 - **D-07** kini: **v7 = 48**, bukan v3=31 (4 event, termasuk `catatan_divisi_belum_diisi`).
-- **D-14 (baru)** — M14: komponen **Disiplin Rekap** (peran AM) + **Kepatuhan Catatan** (peran divisi). **Butuh sign-off bobot** (RM-9a). M6D suplai sinyal mentah; M14 hitung skor. Diurut bareng/sesudah M6D.
+- **D-14 (baru)** — M14: komponen **Disiplin Rekap** (peran AM, hitung `pernah_ditutup_otomatis`) + **Kepatuhan Catatan** (peran divisi). **Butuh sign-off bobot** (RM-9a). M6D suplai sinyal mentah; M14 hitung skor. Diurut bareng/sesudah M6D.
 
 ---
 
