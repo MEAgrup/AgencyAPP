@@ -75,7 +75,7 @@ So the recap can show "GMV is trending up this week" without ever becoming a com
 5. **Auto metrics are UPDATE-blocked for the AM at the DB level** (belt-and-braces with RLS — TS predicate and RLS must not diverge, frozen invariant), exactly as M6B PE-3 `otomatis` rows. Only manual fields (§4 fallbacks) and the narrative (RM-D) are AM-writable.
 6. **The recap rolls up into the monthly Plan, it does not replace it (R1).** For a client with an `Aktif` Plan period (Full-Management M6B or Plan Satuan M6C), each week's recap is linked to that period. At period close, the period's weekly recaps supply Module 6B **PE-3** (auto metrics) and **PE-8** (execution-vs-plan) — they are the weekly evidence behind the monthly numbers. The recap **never** writes PE-1 (manual GMV). For a client with **no** Plan, the recap stands alone: it is that client's only periodic results record, and it is not blocked by the absence of a Plan.
 7. **`Sengketa Angka` on an auto figure** routes to SPV and is logged; it never blocks the recap close and never mutates the auto figure in place (M6B PE-6 pattern).
-8. **Confirm is a real step, not a date.** Closing a recap (`Terbuka` → `Ditutup`) requires: every auto figure present or explicitly `—`, every manual fallback either filled-with-source or explicitly marked "tidak tersedia", and the RM-D narrative (RM-D1 + RM-D3) completed. Force-close on overrun sets an incomplete flag, deliberately visible in reports. The **force-close window is N = 2 working days** after the week closes (owner decision 2026-08-13, RM-5 — owner-tunable, §10.1-A).
+8. **Confirm is a real step, not a date.** Closing a recap (`Terbuka` → `Ditutup`) requires: every auto figure present or explicitly `—`, every manual fallback either filled-with-source or explicitly marked "tidak tersedia", and the RM-D narrative (RM-D1 + RM-D3) completed. Force-close on overrun sets an incomplete flag, deliberately visible in reports. The **force-close window is N = 2 working days** after the week closes (owner decision 2026-08-13, RM-5 — owner-tunable, §10.1-A). An auto-closed recap is **not the end of the road**: the **Head of Account** (the AM's superior, *not* the AM) may **reopen** it (`Ditutup Otomatis → Terbuka`) so the AM can complete it — but reopening leaves `pernah_ditutup_otomatis = true` permanently, so the non-performance is still on record (RM-5, §10.1-A).
    - **Division weekly note is now mandatory (RM-8, owner 2026-08-13: *"divisi wajib buat report mingguan"*).** Each division that touched the client this week **owes** a weekly note (RM-D6). A division that has not filed by close is flagged and fires `catatan_divisi_belum_diisi` (to the division lead + AM). **This obligation is on the division, not on the AM** — a missing division note does **not** block the AM's `Terbuka → Ditutup` (an AM cannot type another team's note), it is tracked as the division's own discipline signal and feeds that division's M14 score (RM-9a). The AM close requirements above are unchanged.
 9. **The recap is internal.** It is not a client-facing surface — client-facing results remain the external `mea-client-reporting` embed (Module 15 / Phase 0 OA-11). What the client sees is prepared from RM-D5 ("bahan untuk klien") and, monthly, from Module 6B PF-8. Nothing in this module is exposed through the Client Portal's allow-list (Module 15 §6.1).
 10. **Immutable audit log** on every field change, manual entry, `Sengketa Angka`, confirm, and close (actor + WIB timestamp + before/after). No UPDATE/DELETE path on a closed recap; a post-close correction is an audit-logged amendment, visible on the recap view.
@@ -122,6 +122,7 @@ Per §4 / §3. Each metric shows its `Sumber` = `otomatis` (owning module) or `m
 | RM-C6 | Ad Spend | Total Spend minggu ini (M8) | Otomatis | A |
 | RM-C7 | Sumber & Tanggal (manual) | Untuk tiap angka `manual` di RM-C: lampiran export/screenshot + tanggal ambil data | File + date | W (kondisional) |
 | RM-C8 | Delta vs Minggu Lalu | Auto: arah & besaran tiap metrik vs rekap minggu sebelumnya (klien yang sama) | Auto | A |
+| RM-C9 | Catatan Metrik Tambahan (teks) | **Teks-bebas untuk pencatatan** metrik yang belum dimodelkan (CPL, impressions, CPC/CPM, view organik, dsb) — owner 2026-08-13 (RM-4): *"tidak perlu dimodelkan, tapi bisa dibuat text-only untuk pencatatan."* **Bukan angka terhitung**, tak masuk delta/rollup/skor, tak pernah dibaca sebagai metrik — murni catatan agar AM bisa menuliskannya di satu tempat. Tidak menggantikan pemodelan (kalau kelak dimodelkan di M8/M7, ia berhenti jadi teks) | Long text | O |
 
 ### SECTION RM-D — Narasi, Blocker & Hand-off
 | ID | Label | Content | Type | Req |
@@ -221,7 +222,7 @@ The tempting alternative is to make the recap an eighth scored component ("did t
 
 ## 9. System Requirements
 
-**Entities.** `WRR-YYYYMM-NNNN` (weekly recap; register `WRR` in `entity_prefix` and `packages/core/src/ident.ts::PREFIXES` — both, per M6A §7). Children:
+**Entities.** `WRR-YYYYMM-NNNN` (weekly recap; register `WRR` in `entity_prefix` and `packages/core/src/ident.ts::PREFIXES` — both, per M6A §7). Own columns include `pernah_ditutup_otomatis` (boolean, default false; set true at force-close, **never** reset — the permanent non-performance signal the M14 discipline score reads, RM-5/RM-9). Children:
 - `WRR_DIVISI` — one row per division touched (RM-B), all figures read-only/auto.
 - `WRR_METRIK` — one row per consolidated metric (RM-C), columns `nilai`, `sumber` ∈ `otomatis` / `manual` / `tidak_tersedia`, `file_bukti`, `tanggal_ambil`, `nilai_minggu_lalu` (for RM-C8 delta). DB check: `file_bukti` + `tanggal_ambil` NOT NULL when `sumber = 'manual'`.
 - `WRR_CATATAN` — the RM-D narrative fields + `WRR_CATATAN_DIVISI` thread (RM-D6), append-only.
@@ -243,7 +244,7 @@ The tempting alternative is to make the recap an eighth scored component ("did t
 
 CPL and impressions remain unmodelled system-wide (not introduced here) — see Open Assumption RM-4.
 
-**State machine (machine #18 — weekly recap).** `Terjadwal` → `Terbuka` (auto, Monday 00:00 WIB) → `Ditutup` (AM confirm, Rule 8) | `Ditutup Otomatis` (system force-close). Terminal: `Ditutup`, `Ditutup Otomatis`. All transitions via `sm_transition` only. Auto figures continue to accrue while `Terbuka`; on either terminal state they are frozen as-of close. See `docs/STATE_MACHINES.md` §15.
+**State machine (machine #18 — weekly recap).** `Terjadwal` → `Terbuka` (auto, Monday 00:00 WIB) → `Ditutup` (AM confirm, Rule 8) | `Ditutup Otomatis` (system force-close) → (Head reopen) `Terbuka`. Terminal: only `Ditutup`; `Ditutup Otomatis` is **quasi-terminal** — a dead end for the AM, but the **Head of Account** may reopen it (owner decision 2026-08-13, RM-5). All transitions via `sm_transition` only. Auto figures continue to accrue while `Terbuka`; on close they are frozen as-of close, and thaw again if a Head reopens. Force-close sets **`pernah_ditutup_otomatis = true` permanently** — reopening never clears it (it rescues the *data*, not the AM's *record*); the M14 discipline score and H-2 count this flag, not the final status. See `docs/STATE_MACHINES.md` §15.
 
 **Scheduled jobs.** (a) Monday 00:00 WIB — open the week's recap per active client (excluding held/paused, RM-2), and force-close the prior week's recaps still `Terbuka` (→ `Ditutup Otomatis`, incomplete flag); (b) week-close + **N = 2 working days** (RM-5, resolved 2026-08-13) — emit `rekap_mingguan_belum_dikonfirmasi`; (c) at close — for any division that owes a mandatory note (RM-8) and hasn't filed, emit `catatan_divisi_belum_diisi`. Jobs idempotent, WIB, using the shared `working_days_between` helper.
 
@@ -288,14 +289,14 @@ CPL and impressions remain unmodelled system-wide (not introduced here) — see 
 | RM-1 | Cadence is the ISO week (Mon–Sun) in WIB. If the agency's operational week or the client check-in rhythm differs, this is the one knob to change | Yohan / Nerissa | ✅ **Confirmed.** ISO week (Mon–Sun) WIB is correct; no change |
 | RM-2 | "Active client" (Rule 1) = a client with ≥1 non-terminal Service. If clients in a payment-hold or paused state should be excluded, that filter belongs here | Yohan | ✅ **Decided: active = ≥1 non-terminal Service AND *exclude* payment-hold / paused clients.** Owner: *"definisi klien aktif ≥1 service, kalau hold dikecualikan."* Rule 1 amended below; the exclusion is a `WHERE` filter on the Monday job (D-03), pinned to the Service machine's hold/paused states |
 | RM-3 | No **blended whole-client ROAS** is computed — only the Ads-channel ROAS is shown — because there is no agreed denominator spanning organic + live + paid spend | Yohan / SPV Ads | ✅ **Decided: no blend. ROAS is Ads-channel only.** Owner: *"roas hanya dari iklan."* RM-C2 stays `GMV from Ads ÷ Total Spend`; no blended-ROAS denominator is invented. Closes RM-3 permanently |
-| RM-4 | CPL and impressions stay unmodelled (they exist nowhere in CDPS today) | Hans / SPV Ads | ⏳ **Clarified (§10.1-B).** Owner asked what *"dimodelkan"* (modelled) means. Default holds: **not modelled here** (R3) — shown as `—`; if wanted, the source is added in **M8 first**, never fabricated in M6D |
-| RM-5 | Force-close / `belum dikonfirmasi` warning window = N days after week close | Yulianti | ✅ **Clarified + default set (§10.1-A): N = 2 hari kerja** (working days) after week close, owner-tunable exactly like M6B's 5-day window. Worked example in §10.1-A |
+| RM-4 | CPL and impressions stay unmodelled (they exist nowhere in CDPS today) | Hans / SPV Ads | ✅ **Decided (2026-08-13): NOT modelled, but a text-only record field is added.** Owner: *"tidak perlu dimodelkan, tapi apa bisa dibuat text-only untuk pencatatan."* ⇒ new form field **RM-C9 "Catatan Metrik Tambahan (teks)"** — free text, never a computed metric, never in delta/rollup/score. CPL/impressions/CPC/CPM/organic views live there as notes until (if ever) modelled in M8/M7. §10.1-B explains "modelled" |
+| RM-5 | Force-close / `belum dikonfirmasi` warning window = N days after week close | Yulianti | ✅ **Decided (2026-08-13): N = 2 hari kerja**, owner-tunable; **+ a Head can reopen an auto-closed recap** (`Ditutup Otomatis → Terbuka`), which rescues the data but leaves `pernah_ditutup_otomatis = true` permanently (the AM's non-performance stays on record, feeds M14). Worked example + reopen flow in §10.1-A |
 | RM-6 | Notification-catalog sign-off, carried from M6B PA-8 | Hans | ⏳ **Premise corrected + full list for sign-off (§10.1-C).** The SESI1 spec said "v2=28 → v3=31" — **stale**. The live catalog is already **v6 = 44 events**; M6D's events make it **v7 = 48** (3 recap events + 1 for RM-8's mandatory division note), not 31. Full enumeration in §10.1-C awaits owner sign-off |
-| RM-7 | Organic video "views" have no tracked source in CDPS today, so RM-C3's organic component is manual-with-source or `—` | Hans / SPV Creative | ⏳ **Clarified (§10.1-B).** Same class as RM-4: manual+source or `—` today; auto only if/when a platform export becomes routine — a graduation in the owning module (M7), not an M6D invention |
+| RM-7 | Organic video "views" have no tracked source in CDPS today, so RM-C3's organic component is manual-with-source or `—` | Hans / SPV Creative | ⏳ **Clarified (§10.1-B).** Same class as RM-4: manual+source or `—` today, or a text note in **RM-C9**; auto only if/when a platform export becomes routine — a graduation in the owning module (M7), not an M6D invention |
 | RM-8 | Division note (RM-D6) is optional | Yohan | ✅ **Decided: MANDATORY.** Owner: *"divisi wajib buat report mingguan."* RM-D6 becomes a required weekly note **owed by each division that touched the client this week**, with its own reminder (the literal Phase 0 "divisions send weekly reports" step). Rule 8 + form amended below; new advisory event `catatan_divisi_belum_diisi` (part of the v7 catalog, §10.1-C) |
 | RM-9 | **Recap discipline is displayed (H-2), not scored.** | Yohan / Nerissa | ✅ **Decided: displayed AND scored.** Owner: *"disiplin perlu [dari] RM-8 dinilai dan ditampilkan."* Displayed stays H-2 (unchanged). **Scored** lands in **M14 Team Performance — NOT an eighth M13 component** (§8.4 guardrail holds: no re-weight of M13's confirmed weights, no grading AM form-filling inside a client-health number). Discipline measured = the RM-8 obligation: AM recap closed-on-time + divisions' mandatory weekly notes filed. Requires an M14 amendment that re-weights the confirmed AM KPI Profile (50/25/25) — flagged for M14 sign-off, see M14 amendment note + RM-9a below |
 | RM-10 | H-4 (interview verdict on the health view) is assumed useful and **advisory only** | Yohan | ✅ **Decided: keep H-4.** Owner: *"verdict interview ditampilkan di halaman health."* H-4 stays, advisory-only (never gates), respecting the narrower `canReadVerdict` scope (§8.3 Rule 5). Closes RM-10 |
-| RM-11 | Phase 0 Diagram 3 also lists **CPC / CPM** and **Upcoming Milestones** | Hans / SPV Ads | ⏳ **Clarified (§10.1-B).** Same class as RM-4/RM-7: CPC/CPM unmodelled system-wide, milestones have no entity ⇒ out of H-1 scope until their sources exist in the owning module |
+| RM-11 | Phase 0 Diagram 3 also lists **CPC / CPM** and **Upcoming Milestones** | Hans / SPV Ads | ⏳ **Clarified (§10.1-B).** Same class as RM-4/RM-7: CPC/CPM unmodelled system-wide (may be jotted in **RM-C9** text), milestones have no entity ⇒ out of H-1 scope until their sources exist in the owning module |
 
 ### RM-9a (new, needs sign-off) — how discipline is scored in M14
 
@@ -338,6 +339,21 @@ burn the window; it reuses the same `working_days_between` helper the Kelola-Kli
 > If 2 working days proves too tight (or too loose) in practice, changing N is a one-line config change, not a
 > schema or code change — exactly the M6B precedent.
 
+**Reopen after force-close (owner decision 2026-08-13).** An auto-closed recap is a dead end for the AM, but
+**not** for her superior. The **Head of Account** — explicitly *not* the AM herself — may **reopen** a
+`Ditutup Otomatis` recap (`Ditutup Otomatis → Terbuka`, with a mandatory reason logged) so the week's real
+result is not lost to a missed deadline. The crucial part the owner asked for: **reopening rescues the data,
+not the AM's record.** The recap carries a permanent flag `pernah_ditutup_otomatis` that is set at force-close
+and **never** cleared — so even after the Head reopens it and Sinta completes and closes it properly, that week
+still counts as a force-close against her in H-2 and in the M14 discipline score (RM-9/RM-9a). The Head cannot
+launder a missed week into a clean one; they can only make sure the numbers survive.
+
+> **Continuing the example.** Sinta's week-3 recap auto-closed on 8 Sep. On 9 Sep her Head reopens it (reason:
+> *"data live minggu 3 penting untuk periode Plan"*). It goes back to `Terbuka`, auto figures thaw, Sinta fills
+> the narrative and closes it 10 Sep → `Ditutup`. The recap is now complete **and** `pernah_ditutup_otomatis`
+> is still `true`: the Plan rollup (RM-E) gets the real numbers, and Sinta's M14 discipline still records one
+> force-closed week. Only the **Head** could do this; the AM has no reopen button.
+
 #### B. RM-4 / RM-7 / RM-11 — what "perlu dimodelkan" (modelled) actually means, with an example
 
 "Modelling a metric" in CDPS means giving it a **real, owned, recomputable source** so the number is
@@ -364,6 +380,14 @@ burn the window; it reuses the same `working_days_between` helper the Kelola-Kli
 > The same reading applies to **impressions, CPC/CPM (RM-11), and organic video views (RM-7)** — all four are
 > in the identical position: no owned source today, so either commission the source in the owning module or
 > show `—`. M6D deliberately builds **none** of these auto-pipelines itself.
+
+**Owner decision 2026-08-13 (RM-4): don't model them — but give a text-only place to note them.** The owner
+chose neither (a) nor a fake number, but a third, honest option: a **free-text field, RM-C9 "Catatan Metrik
+Tambahan"**, where the AM can *write down* CPL / impressions / CPC / CPM / organic views as prose for the
+record. This is not option (a) in disguise — it is explicitly **not a metric**: it never enters a delta, a
+rollup, a chart, or a score, and the system never parses a number out of it. It is a notepad, so a figure the
+AM has in hand from a platform dashboard is not lost, while the metric column itself honestly stays `—` until
+the source is really modelled. If CPL is later modelled in M8, RM-C9 stops being where it lives.
 
 #### C. RM-6 — the notification catalog for sign-off (premise corrected)
 

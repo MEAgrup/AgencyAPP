@@ -139,8 +139,10 @@ H-2) *and scored* — and that the scoring belongs **here in M14, not as an eigh
 
 Concretely, this proposes:
 - **AM role:** a new **Weekly-Recap Discipline** component = *% of the AM's active clients whose current-week
-  recap was AM-closed on time (not `Ditutup Otomatis`)*. Normalized/capped like the other raw-value components
-  (Rule 2).
+  recap was AM-closed on time and **never force-closed** (`pernah_ditutup_otomatis = false`)*. Normalized/capped
+  like the other raw-value components (Rule 2). **Counts the permanent flag, not the final status** — a recap a
+  Head reopened after auto-close (M6D RM-5) still carries `pernah_ditutup_otomatis = true`, so it counts against
+  the AM even once completed; the Head's mercy rescues the data, not the score.
 - **Division roles (Creative / Ads / KOL / Live):** a **Weekly-Note Compliance** component = *did the division
   file its now-mandatory weekly note (M6D RM-8) for the clients it touched*.
 
