@@ -188,6 +188,13 @@ export interface RisetAwal {
   disubmitPada: string | null;
   disubmitOleh: string | null;
   durasiMenit: number | null;
+  /**
+   * Recorded after the fact rather than measured live — the sessions that already
+   * existed when this step was introduced. Their duration is shown but NEVER
+   * judged: an AM cannot be late for a step that did not exist while they worked.
+   * Mirrors `interview.retroaktif` (I19).
+   */
+  retroaktif: boolean;
 }
 
 export interface InterviewDetail {
@@ -299,6 +306,7 @@ function rowToRisetAwal(r: Record<string, unknown>): RisetAwal {
     disubmitPada,
     disubmitOleh: (r.disubmit_oleh as string | null) ?? null,
     durasiMenit: iv.durasiRisetAwalMenit(dimulaiPada, disubmitPada),
+    retroaktif: r.retroaktif === true,
   };
 }
 
@@ -332,7 +340,7 @@ export async function getInterview(sql: Queryable, actor: Actor, id: string): Pr
   if (!canReadInterview(actor, ownerAm)) throw new ForbiddenError(MSG_FORBIDDEN);
 
   const risetRows = await sql<Record<string, unknown>[]>`
-    select interview_id, status, dimulai_pada, dimulai_oleh, disubmit_pada, disubmit_oleh
+    select interview_id, status, dimulai_pada, dimulai_oleh, disubmit_pada, disubmit_oleh, retroaktif
       from interview_riset_awal where interview_id = ${id}`;
   const jadwalRows = await sql<Record<string, unknown>[]>`
     select tanggal_waktu, durasi_menit, format, lokasi_link, peserta_klien, peserta_mea,
@@ -438,7 +446,7 @@ export async function getKelolaKlienTimeline(
            cfg.riset_awal_target_hari, cfg.riset_awal_batas_hari,
            cfg.meeting_target_hari,    cfg.meeting_batas_hari,
            cfg.strategi_target_hari,   cfg.strategi_batas_hari,
-           ra.dimulai_pada, ra.disubmit_pada,
+           ra.dimulai_pada, ra.disubmit_pada, ra.retroaktif as riset_retroaktif,
            i.meeting_diamankan_pada, i.selesai_pada,
            kelola_klien_strategi_berlaku(i.id)       as strategi_berlaku,
            kelola_klien_strategi_diajukan_pada(i.id) as strategi_diajukan_pada,
@@ -463,6 +471,8 @@ export async function getKelolaKlienTimeline(
   const num = (v: unknown): number => Number(v);
   const hk = (v: unknown): number | null => (v == null ? null : Number(v));
   const strategiBerlaku = r.strategi_berlaku !== false;
+  // A backfilled (pre-feature) riset awal is shown but not judged — see RisetAwal.
+  const risetBerlaku = r.riset_retroaktif !== true;
   const strategiDiajukan = iso(r.strategi_diajukan_pada as string | Date | null);
 
   const step = (
@@ -494,6 +504,7 @@ export async function getKelolaKlienTimeline(
         iso(r.disubmit_pada as string | Date | null),
         hk(r.hk_riset),
         { targetHari: num(r.riset_awal_target_hari), batasHari: num(r.riset_awal_batas_hari) },
+        risetBerlaku,
       ),
       step(
         iv.KELOLA_KLIEN_LANGKAH.InterviewMeeting,
@@ -920,7 +931,7 @@ export async function submitRisetAwal(sql: Sql, actor: Actor, id: string): Promi
     }
 
     const after = await tx<Record<string, unknown>[]>`
-      select interview_id, status, dimulai_pada, dimulai_oleh, disubmit_pada, disubmit_oleh
+      select interview_id, status, dimulai_pada, dimulai_oleh, disubmit_pada, disubmit_oleh, retroaktif
         from interview_riset_awal where interview_id = ${id}`;
     return rowToRisetAwal(after[0]);
   });

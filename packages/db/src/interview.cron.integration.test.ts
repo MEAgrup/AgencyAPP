@@ -254,6 +254,25 @@ d('interview_daily_tick — SLA flags (timeline tiga langkah)', () => {
     expect(kodes).not.toContain('sla_belum_selesai');
   });
 
+  it('never flags a BACKFILLED (retroaktif) riset awal — no deadline existed then', async () => {
+    const kodes = await inRollback(async (tx) => {
+      const id = await seedInterview(tx, { status: 'Belum Dijadwalkan', tanggalWaktu: null });
+      // Exactly what migration 20260812100000 §4 writes for a session that already
+      // existed when the step was introduced.
+      await tx`
+        insert into interview_riset_awal (interview_id, dimulai_pada, dimulai_oleh, retroaktif)
+        values (${id}, '2026-07-20'::timestamptz, ${AM}, true)
+        on conflict (interview_id) do update set
+          dimulai_pada = excluded.dimulai_pada, retroaktif = true`;
+      await tx`select interview_daily_tick(${day('2026-07-31')})`;
+      return (await tx<{ kode: string }[]>`select kode from interview_flag where interview_id = ${id}`)
+        .map((f) => f.kode);
+    });
+    // 9 working days past a 3-day limit, and still silent: the AM was never asked
+    // to do this step while they were working on that session.
+    expect(kodes).toEqual([]);
+  });
+
   it('counts WORKING days: a registered holiday can keep a step inside its limit', async () => {
     const kodes = await inRollback(async (tx) => {
       const id = await seedInterview(tx, { status: 'Belum Dijadwalkan', tanggalWaktu: null });

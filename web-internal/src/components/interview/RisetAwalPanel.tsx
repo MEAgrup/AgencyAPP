@@ -89,6 +89,16 @@ export default function RisetAwalPanel({
         Klien dibuka — tekan <strong>Submit riset awal</strong> begitu pencatatan selesai.
       </p>
 
+      {/* A session opened before this step existed. Its clock was backfilled from
+          the interview's creation, so showing it is fine but JUDGING it is not —
+          nobody was asked to do this step while they were working. */}
+      {risetAwal.retroaktif && (
+        <div className="alert alertInfo" style={{ fontSize: 13 }}>
+          Sesi ini dibuka sebelum langkah Riset Awal ada. Waktunya dihitung mundur dari pembuatan interview
+          dan <strong>tidak dipakai menilai SLA</strong>.
+        </div>
+      )}
+
       <div className="grid2" style={{ marginTop: 12 }}>
         <div className="field">
           <label>Dimulai</label>

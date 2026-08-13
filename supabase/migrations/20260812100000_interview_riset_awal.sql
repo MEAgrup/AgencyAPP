@@ -53,6 +53,12 @@ CREATE TABLE interview_riset_awal (
     disubmit_pada  timestamptz  NULL,
     disubmit_oleh  varchar(64)  NULL,
 
+    -- Dicatat SETELAH kejadian, bukan diukur berjalan: interview yang sudah ada
+    -- sebelum langkah ini lahir (backfill §4). Cermin `interview.retroaktif`
+    -- (I19, "dikecualikan SLA"): durasinya boleh dilihat, tapi TIDAK PERNAH
+    -- dipakai menuduh AM terlambat pada langkah yang belum ada saat ia bekerja.
+    retroaktif     boolean      NOT NULL DEFAULT false,
+
     created_at     timestamptz  NOT NULL DEFAULT now(),
     updated_at     timestamptz  NOT NULL DEFAULT now(),
 
@@ -133,9 +139,16 @@ INSERT INTO sm_edges (machine, from_state, to_state, require_lead) VALUES
 -- 4. Backfill — setiap interview yang sudah ada mendapat riset awal berjangkar
 --    pada saat interview itu dibuat (itulah kapan "Kelola Klien" diklik).
 --    Idempoten: LEFT JOIN anti-semi, jadi apply ulang tak menggandakan.
+--
+--    DITANDAI `retroaktif = true`. Sesi-sesi ini dikerjakan SEBELUM langkah riset
+--    awal ada, jadi AM-nya tak pernah diminta melakukannya: barisnya dibuat
+--    supaya sesi lama tetap bisa dibuka & dilanjutkan, TAPI jamnya tidak boleh
+--    dipakai menghakimi. Tanpa penanda ini, hari pertama KPI hidup akan
+--    menandai belasan sesi riil "terlambat" atas pekerjaan yang tak pernah
+--    diminta — cara tercepat membuat sebuah ukuran tidak dipercaya.
 -- ===========================================================================
-INSERT INTO interview_riset_awal (interview_id, dimulai_pada, dimulai_oleh, created_at)
-SELECT i.id, i.created_at, i.am_pengisi_id, i.created_at
+INSERT INTO interview_riset_awal (interview_id, dimulai_pada, dimulai_oleh, retroaktif, created_at)
+SELECT i.id, i.created_at, i.am_pengisi_id, true, i.created_at
   FROM interview i
   LEFT JOIN interview_riset_awal r ON r.interview_id = i.id
  WHERE r.interview_id IS NULL;

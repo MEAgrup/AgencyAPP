@@ -4537,6 +4537,7 @@ export interface InterviewRisetAwalWire {
   disubmit_pada: string | null;
   disubmit_oleh: string | null;
   durasi_menit: number | null;
+  retroaktif: boolean;
 }
 
 export interface InterviewDetailWire {
@@ -4660,6 +4661,7 @@ export function interviewRisetAwalToWire(r: interview.RisetAwal): InterviewRiset
     disubmit_pada: r.disubmitPada,
     disubmit_oleh: r.disubmitOleh,
     durasi_menit: r.durasiMenit,
+    retroaktif: r.retroaktif,
   };
 }
 

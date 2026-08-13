@@ -64,7 +64,7 @@ DB direklaim saat idle — kalau `psql` bilang "Connection refused", `pg_ctl …
 |---|---|
 | Migrasi | **88 berkas** (+ `20260812100000_interview_riset_awal`, `20260813000000_kelola_klien_sla`) |
 | Gate CI (ci.yml + db-rebuild.sh) | tabel **107** · mesin **20** · event **44** · prefix **32** — tabel 104→105 (`interview_riset_awal`) →107 (`hari_libur`, `kelola_klien_sla_config`), mesin 19→20 (`riset_awal`). **DINAIKKAN DI KEDUA BERKAS** (gate kembar). Prefix & event TIDAK berubah: nol ID baru, nol event notifikasi baru |
-| Test | core **219** · db **47** · domain **1160** (+1 skip) · api **345** · web-internal **238** — semua hijau lokal (PG16), DB dibangun ulang dari nol |
+| Test | core **219** · db **48** · domain **1161** (+1 skip) · api **345** · web-internal **238** — semua hijau lokal (PG16), DB dibangun ulang dari nol |
 | Typecheck | `@cdps/core\|db\|domain\|api` + `web-internal` bersih; `web-internal` lint + `next build` hijau |
 | Invariant SQL | `auth_claims`/`ident`/`immutability`/`rls_checks` (O48) **PASS** — ledger O48 TIDAK tumbuh (policy baru punya arm lead/divisi inline) |
 | `KNOWN_GAPS` (route-parity) | tetap **kosong** |
@@ -179,6 +179,10 @@ Mekanika yang penting:
   tetap 44; menambah event butuh baris versi (O55) + tanda tangan pemilik.
 - Baca: `GET /interview/{id}/timeline` (terpisah dari detail — detail di-refetch tiap autosave,
   dan aritmetika hari kerja + lookup strategi tak pantas ada di jalur itu).
+- **`interview_riset_awal.retroaktif`** — diisi `true` HANYA oleh backfill (sesi yang lahir sebelum
+  langkah ini ada). Blok (c1) melewatkannya dan timeline menampilkannya `tidak_berlaku`. Tanpa ini,
+  hari pertama KPI hidup menuduh belasan sesi riil "terlambat" atas pekerjaan yang tak pernah diminta.
+  **Jangan pernah menyetel kolom ini dari route/UI** — ia penanda asal-usul data, bukan tombol maaf.
 
 ## 2. Gotcha (baca sebelum lanjut)
 

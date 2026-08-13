@@ -46,6 +46,7 @@ export interface InterviewRisetAwal {
   disubmit_pada: string | null;
   disubmit_oleh: string | null;
   durasi_menit: number | null;
+  retroaktif: boolean;
 }
 
 /**

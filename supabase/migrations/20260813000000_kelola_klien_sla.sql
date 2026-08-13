@@ -368,6 +368,7 @@ BEGIN
       FROM interview_riset_awal ra
       JOIN interview i ON i.id = ra.interview_id
      WHERE i.retroaktif = false
+       AND ra.retroaktif = false   -- sesi pra-fitur: dicatat, tidak dihakimi
        AND i.status <> 'Dibatalkan'
        AND ra.status = 'Berjalan'
        AND working_days_between(wib_date(ra.dimulai_pada), v_today) > v_cfg.riset_awal_batas_hari

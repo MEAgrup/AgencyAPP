@@ -39,7 +39,13 @@ function waktu(iso: string | null): string {
  * button recorded the meeting).
  */
 function keterangan(step: TimelineStep): string {
-  if (step.status === SLA_STATUS.TidakBerlaku) return 'Layanan ini tidak butuh strategi (plan gate).';
+  if (step.status === SLA_STATUS.TidakBerlaku) {
+    // Two different reasons a step can be out of scope — say which one, because
+    // "tidak berlaku" with no reason reads like the measurement is broken.
+    return step.langkah === 1
+      ? 'Sesi dibuka sebelum langkah ini ada — dicatat, tidak dinilai.'
+      : 'Layanan ini tidak butuh strategi (plan gate).';
+  }
   if (step.status === SLA_STATUS.BelumMulai) return 'Menunggu langkah sebelumnya selesai.';
   if (step.langkah === 2 && !step.selesai) return 'Ditutup oleh "Simpan jadwal" ATAU "Mulai interview".';
   return step.selesai ? 'Selesai' : 'Masih berjalan';

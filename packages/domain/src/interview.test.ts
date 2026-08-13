@@ -574,6 +574,28 @@ dDb('timeline kelola klien (langkah 1–3)', () => {
     expect(t.langkah[0].status).toBe(iv.SLA_STATUS.Terlambat);
   });
 
+  it('marks a BACKFILLED riset awal tidak_berlaku — shown, never judged', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+
+    // Re-create the row the way migration 20260812100000 §4 backfills a session
+    // that predates the step: long-running AND retroaktif.
+    await sql`delete from interview_riset_awal where interview_id = ${id}`;
+    await sql`
+      insert into interview_riset_awal (interview_id, dimulai_pada, dimulai_oleh, retroaktif)
+      values (${id}, now() - interval '30 days', ${OWNER.employeeId}, true)`;
+
+    const t = await interview.getKelolaKlienTimeline(sql, OWNER, id);
+    // Without the retroaktif marker this would read `terlambat` — a deadline the
+    // AM was never given.
+    expect(t.langkah[0].status).toBe(iv.SLA_STATUS.TidakBerlaku);
+    expect(t.langkah[0].hariKerja).toBeNull();
+
+    const d = await interview.getInterview(sql, OWNER, id);
+    expect(d.risetAwal?.retroaktif).toBe(true);
+  });
+
   it('is Account-scope: Sales and a non-owner AM cannot read how fast the AM worked', async () => {
     const detail = await interview.createInterview(sql, OWNER, { clientId: CLI, salesClosingId: 'EMP-0006' });
     created.push(detail.interview.id);
