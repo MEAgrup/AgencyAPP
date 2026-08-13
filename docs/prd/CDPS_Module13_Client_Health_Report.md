@@ -151,4 +151,30 @@ A simple per-Client boolean, settable by AM/SPV. Default = `true` if Client has 
 
 ---
 
+## 8. Amendment — the Health view as the client summary surface (added 2026-08-12)
+
+> **Cross-module amendment, owner request 2026-08-12** (`docs/DECISIONS.md`). Scope: **the view only.** The Health *Score* — its seven components (Rule 2), its confirmed weights (Rule 3 / §6 #1), its redistribution (Rule 4), normalization (Rule 5), bands (Rule 7) and immutable snapshots (Rule 9) — is **unchanged by this amendment.** Nothing below adds, removes, or re-weights a component.
+
+**The requirement.** `/health` is expected to be the one page that summarises a client: *"summary dari semua report, progress, ada komplain atau tidak, dan hasil."* Today the view renders the score's arithmetic (score + band + 7-component breakdown + trend + ROAS toggle) — faithful to §5, but short of both that expectation and **Phase 0 v2 Diagram 3**, which specified this dashboard as including Alerts/issue count, per-platform project status, and performance metrics. Those halves were never built because no layer consolidated them per client. **Module 6D (Rekap Hasil Mingguan)** is that layer.
+
+**What the view gains** (read-only blocks below the existing score/band header — full contract in **M6D §8**):
+
+| Block | Content | Source |
+|---|---|---|
+| H-1 Hasil & Progress Mingguan | Latest closed week: # video (M7) · # live (M10) · # creator (M9) · # campaign/optimasi (M8) + total view, `GMV Eksekusi (interim)`, CTR, CVR, ROAS, spend + delta vs prior week + AM/CRO narrative headline | M6D `WRR-` |
+| H-2 Status Laporan | Recap freshness/discipline: current week's status, AM-closed vs `Ditutup Otomatis` over last 4 weeks, open `Sengketa Angka`. **Displayed, never scored** | M6D `WRR-` |
+| H-3 Komplain | Open/active complaints with severity + status — "ada komplain atau tidak" answered directly, not only as the Complaints sub-score | M6 `CPL-` |
+| H-4 Kesiapan Klien (Interview) | Optional context: latest interview verdict + `prasyarat_status`, advisory only (the verdict gates nothing — Interview v5) | Interview module |
+
+**Invariants this amendment must not break.**
+1. **Two GMV figures now appear on one page and must be labelled distinctly:** the score's GMV Growth reads **client GMV (Module 4)** — the official monthly figure; H-1 shows **`GMV Eksekusi (interim)`** — weekly, execution-sourced (Ads + Live + affiliate), read-only. They are never summed. Same discipline for ROAS: H-1's Ads-channel ROAS vs the score's capped, toggle-governed **ROAS Attainment** (Rule 13).
+2. **Still an aggregation layer** (§1): the view stores nothing, and no `CHR-` snapshot is rewritten to embed recap data (Rule 9). H-1…H-4 are a live read *beside* the immutable snapshot.
+3. **Still not client-facing** (Rule 11): client-facing health stays band-only through Module 15's allow-list. None of H-1…H-4 is exposed there.
+4. **Per-block permission degradation:** the view keeps its own gate; each block respects its source's scope and renders as *absent* rather than erroring the page (notably H-4's narrower interview-verdict scope).
+5. **Portfolio landing page** gains one row per active client: band, band-drop flag (Rule 12), open-complaint count, and recap freshness — the management triage screen Rule 12 and Module 15 Rule 11 already imply.
+
+**Deliberately not done:** recap discipline as an eighth scored component. It would force a re-weight and would grade AM form-filling inside a client-health number; if it is to be graded at all, Module 14 (Team Performance, AM role) is the correct home. Owner decision open as **M6D RM-9**. Also out of scope until their sources exist: **CPC / CPM** and **Upcoming Milestones** from Diagram 3 (unmodelled — M6D RM-11).
+
+---
+
 **Next:** Module 14 — Team Performance.

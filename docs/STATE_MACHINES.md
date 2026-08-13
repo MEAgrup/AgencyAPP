@@ -157,6 +157,42 @@ All else blocked: `[transisi status tidak diizinkan]`.
 - Kedua edge `require_lead = false`: dormansi dijalankan job service-role; reaktivasi dijalankan saat AM menentukan service baru butuh Plan (gerbang kepemilikan di `plangate.decideGate`/`openOrJoinPlanSatuanTx`, bukan lead).
 - **Rule 6 (buka/gabung)** bukan mesin ini: membuka rantai (baris `plan_satuan` + periode 1 `Draft`), menggabung (link ke periode berjalan), dan reaktivasi dijalankan `openOrJoinPlanSatuanTx`, dipanggil di transaksi `decideGate` saat `keputusan_am='butuh_plan'`. Hanya transisi `Aktif ⇄ Dorman` yang lewat mesin #17.
 
+## 6f. Riset Awal — mesin #20 (langkah 1 "Kelola Klien", QA pemilik 2026-08-12)
+
+`Berjalan → Selesai` (Selesai terminal). Hidup di `interview_riset_awal.status`, tabel anak 1:1 dari `interview`
+(PK `interview_id`, tanpa prefix ID sendiri), digerakkan `sm_transition(machine='riset_awal', table='interview_riset_awal', id_col='interview_id')`.
+
+| From | To | Who | Effect |
+|---|---|---|---|
+| *(baris lahir)* | `Berjalan` | AM (otomatis) | Baris dibuat di transaksi yang SAMA dengan `interview` saat AM klik "Kelola Klien". `dimulai_pada` = jangkar mulai. **Tidak ada tombol "mulai"** — membuka halaman ITU mulainya |
+| `Berjalan` | `Selesai` | AM pemegang klien / Account lead / Director | `submitRisetAwal`: tulis `disubmit_pada`/`disubmit_oleh` lalu transisi di satu transaksi. Submit kedua = `ConflictError` `[riset awal sudah disubmit]`, bukan no-op |
+
+- **Nol edge buka-kembali.** Kembali ke `Berjalan` akan memindahkan jangkar yang justru jadi alasan langkah ini ada; kalau revisi memang dibutuhkan, itu keputusan pemilik dulu (belum ada).
+- **Durasi bukan kolom.** Ia diturunkan saat baca (`disubmit_pada − dimulai_pada`) oleh satu fungsi core `durasiRisetAwalMenit`, dan `null`/`—` selama berjalan — bukan 0 (aturan rumah #4 & #7).
+- Jangkar dibekukan trigger `trg_riset_awal_jangkar`: mengubah `dimulai_pada`, menimpa `disubmit_pada`, atau membalik dari `Selesai` ditolak DB — termasuk lewat service-role.
+### Timeline SLA tiga langkah (keputusan pemilik 2026-08-13) — BUKAN mesin
+
+Ukuran waktu, bukan status: tidak ada state baru dan tidak ada edge. Angkanya data
+(`kelola_klien_sla_config` v1), semuanya **hari kerja** (Sen–Jum minus `hari_libur`,
+dihitung `working_days_between`):
+
+| Langkah | Target–batas | Jangkar mulai | Jangkar selesai |
+|---|---|---|---|
+| 1 · Riset Awal | 2–3 hk | `interview_riset_awal.dimulai_pada` (klik Kelola Klien) | `disubmit_pada` |
+| 2 · Interview Meeting | 1–2 hk | `interview_riset_awal.disubmit_pada` | `interview.meeting_diamankan_pada` — mana yang lebih dulu antara `→ Terjadwal` dan `→ Sedang Berlangsung` |
+| 3 · Brand Strategy | 5–7 hk | `interview.selesai_pada` (`→ Selesai` / `Selesai Dengan Catatan`) | `strategi.diajukan_pada` ATAU `strategy_plans.diajukan_pada` (AM mengajukan) |
+
+- Jangkar langkah 2 & 3 di-stamp **trigger** `trg_interview_stamp_timeline`, bukan kode TS:
+  `sm_transition` satu-satunya penulis kolom status, jadi trigger menangkap setiap jalur —
+  termasuk yang belum ditulis. Sekali terisi, **beku**.
+- Lewat batas ⇒ baris `interview_flag` dari `interview_daily_tick`
+  (`sla_riset_awal_terlambat` / `sla_meeting_terlambat` / `sla_strategi_terlambat`), sekali
+  per interview, `retroaktif` dikecualikan. Ini **menggantikan** `sla_belum_dijadwalkan` &
+  `sla_belum_selesai` yang lama — satu sumber angka, bukan dua.
+- Langkah 3 `tidak_berlaku` hanya kalau plan gate service-nya memutus `tanpa_plan`.
+
+- Mesin `interview` sendiri (#19, `Belum Dijadwalkan … Selesai/Dibatalkan`) belum punya bagian di dokumen ini; sumbernya `supabase/migrations/20260811030000_interview.sql` §12 dan `INTERVIEW_EDGES` di `web-internal/src/lib/interview.ts`.
+
 ## 7. Brief `BRF-` (M6) — also the canonical Task machine (M12) applied to AST / BKG / BRF-as-task
 `[To Do]` → `[In Progress]` → `[Submitted]` → `[In Review]` → `[Approved]` (terminal)
 - `[In Review]` → `[Revision Requested]` → `[In Progress]` (loop; Revision Count +1; turnaround does NOT reset).
@@ -201,3 +237,22 @@ The Ad Campaign is a **living** record that **outlives** its setup Brief (M8 §2
 - The `[Paused]↔[Active]` edges are **not** `requireLead` at the engine level — the Advertiser optimizes freely (§6 Rule 3). The Launch dependency (Brief + Assets `[Approved]`) is a **code guard** on the `[Paused]→[Active]` edge (mirrors the Void-Service / Direct-breakdown code guards), because the engine cannot see the parent Brief's or linked Assets' statuses.
 - Metric Entries (`MTR-`) and Optimization Log entries (`OPT-`) are **append-only child rows** (M8 §5/§6), not state machines: they carry no status and never transition. Total Spend / Total GMV / ROAS and each Asset's Attributed GMV are **derived** from these immutable rows (house rules 3/4), never stored as mutable running columns.
 - **Recurring strategy cycles (M8-OA-6):** a new setup `BRF-` is created each cycle, but the **same `ADC-` continues uninterrupted** — the campaign is never restarted; only the Brief above it is new.
+
+## 15. Rekap Hasil Mingguan `WRR-` (M6D) — mesin #18, rekap mingguan per klien
+
+`Terjadwal` → `Terbuka` (auto, Senin 00:00 WIB) → `Ditutup` (konfirmasi AM) | `Ditutup Otomatis` (force-close sistem) → (dibuka lagi oleh Head) `Terbuka`.
+
+| From | To | Who | Effect |
+|---|---|---|---|
+| `Terjadwal` | `Terbuka` | sistem (job Senin 00:00 WIB) | Rekap dibuka untuk tiap klien aktif; angka otomatis mulai terakumulasi sepanjang minggu (M6D Rule 1). Service-role, bukan lead |
+| `Terbuka` | `Ditutup` | AM/CRO pemilik | Konfirmasi mingguan (M6D Rule 8) — semua angka otomatis teratasi + fallback manual terisi/`—` + narasi RM-D1/RM-D3 lengkap, transaksional. Angka otomatis dibekukan as-of penutupan |
+| `Terbuka` | `Ditutup Otomatis` | sistem | Force-close saat lewat jendela **N=2 hari kerja** (RM-5 diputus 2026-08-13, owner-tunable) + tanda tidak lengkap. **Menyetel `pernah_ditutup_otomatis=true` permanen** (sinyal non-performa AM, tak pernah dicabut) |
+| `Ditutup Otomatis` | `Terbuka` | **Head of Account** (atasan AM, BUKAN AM pemilik) | **Buka kembali** (RM-5 diputus 2026-08-13) — Head memberi AM kesempatan melengkapi. Angka otomatis mencair lagi (accrue) sampai ditutup ulang. **`pernah_ditutup_otomatis` TETAP true** — buka-kembali TIDAK menghapus catatan bahwa AM tak perform; ia hanya menyelamatkan datanya. Butuh alasan (audit) |
+
+- **Terminal:** hanya `Ditutup`. `Ditutup Otomatis` **quasi-terminal** — buntu bagi AM, tapi Head bisa membukanya kembali (satu-satunya edge keluar).
+- **`pernah_ditutup_otomatis`** (boolean, default false) di-set true saat force-close dan **tak pernah** kembali false — bahkan setelah Head buka-kembali dan AM menutup dengan benar (`Ditutup`). Skor disiplin M14 (RM-9/RM-9a) & H-2 menghitung **flag ini**, bukan status akhir: rekap yang pernah dipaksa-tutup tetap merugikan AM walau akhirnya rapi. Buka-kembali menyelamatkan **data**, bukan **nilai AM**.
+- Satu rekap per klien per minggu ISO (index parsial `(client_id, iso_year, iso_week)`), bukan ditegakkan mesin.
+- **Aggregation-only, bukan pemilik data:** angka RM-B/RM-C dibaca dari modul eksekusi (M7/M8/M9/M10) + M6B; baris `otomatis` di `WRR_DIVISI`/`WRR_METRIK` **UPDATE-blocked** untuk aktor JWT (AM) di DB + RLS (invariant beku, bentuk sama `plan_actual` M6B). Hanya fallback manual (RM-C) + narasi (RM-D) yang AM-writable.
+- **GMV single-source (M6D §3):** `GMV Eksekusi (interim)` di rekap adalah Σ sumber yang sudah memiliki GMV (Ads/Live/affiliate), read-only, **bukan** GMV resmi. GMV bulanan otoritatif tetap entry manual AM di M6B P-E (Rule 11) — rekap tak pernah menulisnya.
+- **Rollup, bukan pengganti:** rekap `Ditutup` memasok PE-3/PE-8 periode Plan yang tertaut (M6B); untuk klien `Tanpa Plan` rekap berdiri sendiri sebagai satu-satunya catatan hasil periodik. Tak ada `PLAN-` yang wajib.
+- Menambah **nol grade baru** (M6D Rule 11): Health (M13) & Performance (M14) tetap membaca sumber yang sama seperti sebelumnya.

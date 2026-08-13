@@ -109,6 +109,18 @@ export interface RoleMapping {
   level: string;
 }
 
+/**
+ * One row of the national-holiday calendar. It is what makes "hari kerja" in the
+ * Kelola Klien SLA mean working days rather than calendar days; empty calendar =
+ * only weekends are excluded.
+ */
+export interface HariLibur {
+  tanggal: string;
+  keterangan: string;
+  created_at: string;
+  created_by: string;
+}
+
 export interface LayeredRole {
   employee_id: string;
   role: 'od' | 'director';

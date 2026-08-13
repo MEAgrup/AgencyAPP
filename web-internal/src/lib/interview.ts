@@ -1,0 +1,493 @@
+/**
+ * FE mirror types for Modul Interview ("Kelola Klien" tab 1) — the snake_case
+ * shapes the API serves (apps/api `wire.ts` interviewToWire / …DetailToWire /
+ * …VerdictToWire). These are the O43 contract the shape-parity gate checks the
+ * wire mappers against; the "Kelola Klien" UI (langkah 7) renders from them.
+ *
+ * Keep in lock-step with `apps/api/src/lib/wire.ts` — a key here that the wire
+ * mapper does not emit (or vice-versa) is exactly the blank-page class of bug
+ * the parity gate exists to catch.
+ */
+
+import { api } from './api';
+import type { AnswerWire, ScoreWire } from './interview-fields';
+
+/** The interview record. */
+export interface Interview {
+  id: string;
+  client_id: string;
+  contract_id: string | null;
+  service_id: string | null;
+  am_pengisi_id: string;
+  acting_for_am_id: string | null;
+  sales_closing_id: string | null;
+  status: string;
+  versi_no: number;
+  interview_induk_id: string | null;
+  versi_sebelumnya_id: string | null;
+  interview_profile: string;
+  retroaktif: boolean;
+  alasan_kekosongan: string | null;
+  alasan_pembatalan: string | null;
+  created_at: string;
+  created_by: string;
+}
+
+/**
+ * Riset Awal — langkah 1 of "Kelola Klien". `durasi_menit` is computed by the
+ * server from the two anchors; it is `null` while the research is still running
+ * (render `—`, never `0`).
+ */
+export interface InterviewRisetAwal {
+  interview_id: string;
+  status: string;
+  dimulai_pada: string;
+  dimulai_oleh: string;
+  disubmit_pada: string | null;
+  disubmit_oleh: string | null;
+  durasi_menit: number | null;
+  retroaktif: boolean;
+}
+
+/**
+ * One measured step of the Kelola Klien timeline (owner decision 2026-08-13).
+ * `hari_kerja` is working days computed server-side — `null` before the step
+ * starts, rendered `—`.
+ */
+export interface TimelineStep {
+  langkah: number;
+  nama: string;
+  mulai_pada: string | null;
+  selesai_pada: string | null;
+  hari_kerja: number | null;
+  target_hari: number;
+  batas_hari: number;
+  status: string;
+  selesai: boolean;
+}
+
+export interface KelolaKlienTimeline {
+  interview_id: string;
+  config_version: number;
+  langkah: TimelineStep[];
+}
+
+/** Blok A schedule. */
+export interface InterviewJadwal {
+  tanggal_waktu: string | null;
+  durasi_menit: number | null;
+  format: string | null;
+  lokasi_link: string | null;
+  peserta_klien: unknown;
+  peserta_mea: unknown;
+  catatan_persiapan: string | null;
+  data_diminta: unknown;
+}
+
+/** Blok C qualification output (internal — never shown client-side). */
+export interface InterviewKualifikasi {
+  skor_kualifikasi: number;
+  skor_per_blok: unknown;
+  verdict_kualifikasi: string;
+  hambatan_mendasar: unknown;
+  prasyarat_status: string;
+  margin_bersih: number | null;
+  margin_bersih_basis: string;
+  margin_kotor: number | null;
+  margin_derivasi_input: unknown;
+  kualitas_data: string;
+  bep_roas: number | null;
+  rasio_target: number | null;
+  dihitung_pada: string;
+}
+
+/** One Blok B answer (row per section/field). */
+export interface InterviewAnswer {
+  section: string;
+  field_key: string;
+  nilai_teks: string | null;
+  nilai_angka: number | null;
+  nilai_uang: string | null;
+  nilai_bool: boolean | null;
+  nilai_enum: string | null;
+  nilai_jsonb: unknown;
+  sumber_angka: string | null;
+  dasar_estimasi: string | null;
+}
+
+/** The full record the internal detail page loads at once. */
+export interface InterviewDetail {
+  interview: Interview;
+  riset_awal: InterviewRisetAwal | null;
+  jadwal: InterviewJadwal | null;
+  kualifikasi: InterviewKualifikasi | null;
+  answers: InterviewAnswer[];
+}
+
+/** verdict + prasyarat ONLY — the Sales-facing surface. */
+export interface InterviewVerdict {
+  interview_id: string;
+  verdict: string;
+  prasyarat_status: string;
+}
+
+/** One row of the client's interview log (the "Riwayat Interview" list). */
+export interface InterviewListRow {
+  id: string;
+  client_id: string;
+  service_id: string | null;
+  status: string;
+  versi_no: number;
+  interview_profile: string;
+  retroaktif: boolean;
+  verdict: string | null;
+  prasyarat_status: string | null;
+  skor_kualifikasi: number | null;
+  riset_awal_status: string | null;
+  riset_awal_dimulai_pada: string | null;
+  riset_awal_disubmit_pada: string | null;
+  riset_awal_durasi_menit: number | null;
+  created_at: string;
+}
+
+// ===========================================================================
+// API client — every path here is served by apps/api (route-parity KNOWN_GAPS
+// must stay empty). The score/prasyarat writes are advisory: they never block.
+// ===========================================================================
+
+/** Optional args for scoreInterview (config version + prerequisite status). */
+export interface ScoreExtra {
+  config_version?: number;
+  prasyarat_status?: string;
+}
+
+export interface JadwalWire {
+  tanggal_waktu: string | null;
+  durasi_menit: number | null;
+  format: string | null;
+  lokasi_link: string | null;
+  catatan_persiapan: string | null;
+}
+
+/** POST /interview request body (named so the body-parity scanner can read it). */
+export interface CreateInterviewBody {
+  client_id: string;
+  contract_id?: string | null;
+  service_id?: string | null;
+  acting_for_am_id?: string | null;
+  sales_closing_id?: string | null;
+  interview_profile?: string;
+  retroaktif?: boolean;
+}
+
+export function createInterview(body: CreateInterviewBody): Promise<InterviewDetail> {
+  return api.post<InterviewDetail>('/interview', body);
+}
+
+/** GET /interview?client_id=… — the client's interview log (newest first). */
+export function listInterviewsByClient(clientId: string): Promise<{ data: InterviewListRow[] }> {
+  return api.get<{ data: InterviewListRow[] }>(`/interview?client_id=${encodeURIComponent(clientId)}`);
+}
+
+export function getInterview(id: string): Promise<InterviewDetail> {
+  return api.get<InterviewDetail>(`/interview/${id}`);
+}
+
+export function saveInterviewAnswers(id: string, answers: AnswerWire[]): Promise<InterviewDetail> {
+  return api.put<InterviewDetail>(`/interview/${id}/answers`, { answers });
+}
+
+/** POST /interview/{id}/score — computes + PERSISTS the qualification (advisory). */
+export function scoreInterview(id: string, body: ScoreWire, extra: ScoreExtra = {}): Promise<InterviewKualifikasi> {
+  return api.post<InterviewKualifikasi>(`/interview/${id}/score`, { ...body, ...extra });
+}
+
+export function getInterviewVerdict(id: string): Promise<InterviewVerdict | null> {
+  return api.get<InterviewVerdict | null>(`/interview/${id}/verdict`);
+}
+
+/** POST /interview/{id}/prasyarat — "tandai prasyarat selesai" (advisory). */
+export function resolveInterviewPrasyarat(id: string): Promise<InterviewVerdict | null> {
+  return api.post<InterviewVerdict | null>(`/interview/${id}/prasyarat`);
+}
+
+/**
+ * POST /interview/{id}/riset-awal — submit langkah 1. The start was recorded when
+ * this page was opened; this closes the measurement. A second submit is rejected
+ * (409) by the server, so the button disappears once it is done.
+ */
+export function submitRisetAwal(id: string): Promise<InterviewRisetAwal> {
+  return api.post<InterviewRisetAwal>(`/interview/${id}/riset-awal`);
+}
+
+/** GET /interview/{id}/timeline — the three-step SLA (working days, server-computed). */
+export function getKelolaKlienTimeline(id: string): Promise<KelolaKlienTimeline> {
+  return api.get<KelolaKlienTimeline>(`/interview/${id}/timeline`);
+}
+
+export function scheduleInterview(id: string, body: JadwalWire): Promise<InterviewDetail> {
+  return api.put<InterviewDetail>(`/interview/${id}/jadwal`, body);
+}
+
+export function transitionInterview(id: string, to: string, alasanPembatalan?: string): Promise<InterviewDetail> {
+  return api.post<InterviewDetail>(`/interview/${id}/transition`, {
+    to,
+    alasan_pembatalan: alasanPembatalan ?? null,
+  });
+}
+
+// ===========================================================================
+// State machine (machine `interview`) — MIRRORS the sm_edges seed. The server
+// (sm_transition) is the authority; this only decides which buttons to render.
+// ===========================================================================
+
+export const INTERVIEW_STATUS = {
+  BelumDijadwalkan: 'Belum Dijadwalkan',
+  Terjadwal: 'Terjadwal',
+  DijadwalkanUlang: 'Dijadwalkan Ulang',
+  SedangBerlangsung: 'Sedang Berlangsung',
+  DraftIsian: 'Draft Isian',
+  ButuhDataKlien: 'Butuh Data Klien',
+  Diajukan: 'Diajukan',
+  Selesai: 'Selesai',
+  SelesaiDenganCatatan: 'Selesai Dengan Catatan',
+  Dikembalikan: 'Dikembalikan',
+  Dibatalkan: 'Dibatalkan',
+} as const;
+
+export interface InterviewEdge {
+  from: string;
+  to: string;
+  /** Reviewer edges + cancellation gate an Account lead/Director. */
+  requireLead: boolean;
+  /** `Dibatalkan` requires a written reason (DB CHECK). */
+  requireReason: boolean;
+}
+
+/** Verbatim from the migration's sm_edges seed for machine `interview`. */
+export const INTERVIEW_EDGES: InterviewEdge[] = [
+  { from: 'Belum Dijadwalkan', to: 'Terjadwal', requireLead: false, requireReason: false },
+  // Direct "mulai interview" from any pre-interview state (20260812000000) — the
+  // schedule is often unpredictable, so starting must not require a fixed jadwal.
+  { from: 'Belum Dijadwalkan', to: 'Sedang Berlangsung', requireLead: false, requireReason: false },
+  { from: 'Terjadwal', to: 'Sedang Berlangsung', requireLead: false, requireReason: false },
+  { from: 'Terjadwal', to: 'Dijadwalkan Ulang', requireLead: false, requireReason: false },
+  { from: 'Dijadwalkan Ulang', to: 'Terjadwal', requireLead: false, requireReason: false },
+  { from: 'Dijadwalkan Ulang', to: 'Sedang Berlangsung', requireLead: false, requireReason: false },
+  { from: 'Sedang Berlangsung', to: 'Draft Isian', requireLead: false, requireReason: false },
+  { from: 'Draft Isian', to: 'Diajukan', requireLead: false, requireReason: false },
+  { from: 'Draft Isian', to: 'Butuh Data Klien', requireLead: false, requireReason: false },
+  { from: 'Butuh Data Klien', to: 'Draft Isian', requireLead: false, requireReason: false },
+  { from: 'Diajukan', to: 'Selesai', requireLead: false, requireReason: false },
+  { from: 'Diajukan', to: 'Selesai Dengan Catatan', requireLead: true, requireReason: false },
+  { from: 'Diajukan', to: 'Dikembalikan', requireLead: true, requireReason: false },
+  { from: 'Dikembalikan', to: 'Draft Isian', requireLead: false, requireReason: false },
+  { from: 'Belum Dijadwalkan', to: 'Dibatalkan', requireLead: true, requireReason: true },
+  { from: 'Terjadwal', to: 'Dibatalkan', requireLead: true, requireReason: true },
+  { from: 'Dijadwalkan Ulang', to: 'Dibatalkan', requireLead: true, requireReason: true },
+  { from: 'Sedang Berlangsung', to: 'Dibatalkan', requireLead: true, requireReason: true },
+  { from: 'Draft Isian', to: 'Dibatalkan', requireLead: true, requireReason: true },
+  { from: 'Butuh Data Klien', to: 'Dibatalkan', requireLead: true, requireReason: true },
+  { from: 'Diajukan', to: 'Dibatalkan', requireLead: true, requireReason: true },
+];
+
+/**
+ * The transitions a role can take from `status`, EXCLUDING moves to `Terjadwal`
+ * and `Sedang Berlangsung`. Both are driven from the Blok A schedule card: the
+ * former by the schedule form (it writes the jadwal in the same step), the
+ * latter by the explicit "Mulai interview" button (start now, no fixed jadwal
+ * required). Offering either here would duplicate those controls.
+ */
+export function availableTransitions(status: string, canLead: boolean): InterviewEdge[] {
+  return INTERVIEW_EDGES.filter(
+    (e) =>
+      e.from === status &&
+      e.to !== 'Terjadwal' &&
+      e.to !== 'Sedang Berlangsung' &&
+      (!e.requireLead || canLead),
+  );
+}
+
+/** States in which Blok B answers + scoring may be written. */
+export const ANSWER_EDITABLE_STATES: readonly string[] = [
+  INTERVIEW_STATUS.SedangBerlangsung,
+  INTERVIEW_STATUS.DraftIsian,
+  INTERVIEW_STATUS.ButuhDataKlien,
+  INTERVIEW_STATUS.Dikembalikan,
+];
+
+export function isAnswerEditable(status: string): boolean {
+  return ANSWER_EDITABLE_STATES.includes(status);
+}
+
+/** Badge tone for an interview status (the shared heuristic buckets most to gray). */
+export function interviewStatusTone(status: string): string {
+  switch (status) {
+    case INTERVIEW_STATUS.BelumDijadwalkan:
+      return 'gray';
+    case INTERVIEW_STATUS.Terjadwal:
+    case INTERVIEW_STATUS.SedangBerlangsung:
+      return 'blue';
+    case INTERVIEW_STATUS.DijadwalkanUlang:
+    case INTERVIEW_STATUS.DraftIsian:
+    case INTERVIEW_STATUS.ButuhDataKlien:
+      return 'amber';
+    case INTERVIEW_STATUS.Diajukan:
+      return 'purple';
+    case INTERVIEW_STATUS.Selesai:
+    case INTERVIEW_STATUS.SelesaiDenganCatatan:
+      return 'green';
+    case INTERVIEW_STATUS.Dikembalikan:
+      return 'red';
+    case INTERVIEW_STATUS.Dibatalkan:
+      return 'darkgray';
+    default:
+      return 'gray';
+  }
+}
+
+// ===========================================================================
+// Riset Awal (langkah 1) — machine mirror + duration display
+// ===========================================================================
+
+/** Mirrors the `riset_awal` sm_edges seed (mesin #20). Two states, no re-open. */
+export const RISET_AWAL_STATUS = {
+  Berjalan: 'Berjalan',
+  Selesai: 'Selesai',
+} as const;
+
+export function risetAwalStatusTone(status: string | null): string {
+  switch (status) {
+    case RISET_AWAL_STATUS.Berjalan:
+      return 'blue';
+    case RISET_AWAL_STATUS.Selesai:
+      return 'green';
+    default:
+      return 'gray';
+  }
+}
+
+/**
+ * formatDurasiMenit renders a duration the way the timeline is read: whole
+ * minutes below an hour, hours + minutes below a day, days + hours above it.
+ * `null` (still running, or unknowable) renders `—` per house rule #7 — never
+ * `0 menit`, which would read as work that took no time.
+ */
+export function formatDurasiMenit(menit: number | null | undefined): string {
+  if (menit == null || !Number.isFinite(menit) || menit < 0) return '—';
+  const m = Math.floor(menit);
+  if (m < 60) return `${m} menit`;
+  const jam = Math.floor(m / 60);
+  if (jam < 24) {
+    const sisaMenit = m % 60;
+    return sisaMenit === 0 ? `${jam} jam` : `${jam} jam ${sisaMenit} menit`;
+  }
+  const hari = Math.floor(jam / 24);
+  const sisaJam = jam % 24;
+  return sisaJam === 0 ? `${hari} hari` : `${hari} hari ${sisaJam} jam`;
+}
+
+/** Whole minutes elapsed since `dimulaiPada` — the live counter while running. */
+export function menitBerjalanSejak(dimulaiPada: string | null | undefined, sekarang: Date = new Date()): number | null {
+  if (!dimulaiPada) return null;
+  const mulai = Date.parse(dimulaiPada);
+  if (Number.isNaN(mulai)) return null;
+  const selisih = sekarang.getTime() - mulai;
+  return selisih < 0 ? null : Math.floor(selisih / 60_000);
+}
+
+// ===========================================================================
+// Timeline SLA (langkah 1–3) — display only; the judgement is made server-side
+// ===========================================================================
+//
+// The status string arrives already decided by `@cdps/core`'s `statusSla`, run
+// over holiday-aware working days. Nothing here re-decides it: a second opinion
+// on the FE is how a page ends up calling an AM late while the flag job does not.
+
+export const SLA_STATUS = {
+  BelumMulai: 'belum_mulai',
+  TepatWaktu: 'tepat_waktu',
+  MendekatiBatas: 'mendekati_batas',
+  Terlambat: 'terlambat',
+  TidakBerlaku: 'tidak_berlaku',
+} as const;
+
+export const SLA_STATUS_LABEL: Record<string, string> = {
+  belum_mulai: 'Belum mulai',
+  tepat_waktu: 'Tepat waktu',
+  mendekati_batas: 'Mendekati batas',
+  terlambat: 'Terlambat',
+  tidak_berlaku: 'Tidak berlaku',
+};
+
+export function slaStatusTone(status: string): string {
+  switch (status) {
+    case SLA_STATUS.TepatWaktu:
+      return 'green';
+    case SLA_STATUS.MendekatiBatas:
+      return 'amber';
+    case SLA_STATUS.Terlambat:
+      return 'red';
+    default:
+      return 'gray';
+  }
+}
+
+/** "2–3 hari kerja" — the step's own target/limit, shown beside its elapsed count. */
+export function formatAmbang(targetHari: number, batasHari: number): string {
+  return targetHari === batasHari
+    ? `${targetHari} hari kerja`
+    : `${targetHari}–${batasHari} hari kerja`;
+}
+
+/** Elapsed working days as text; `—` when the step has not started. */
+export function formatHariKerja(hariKerja: number | null | undefined): string {
+  if (hariKerja == null || !Number.isFinite(hariKerja) || hariKerja < 0) return '—';
+  return `${Math.floor(hariKerja)} hari kerja`;
+}
+
+// ===========================================================================
+// Verdict + prasyarat display
+// ===========================================================================
+
+export const VERDICT_LABELS: Record<string, string> = {
+  growth_ready: 'Growth Ready',
+  bersyarat: 'Bersyarat',
+  risiko_tinggi: 'Risiko Tinggi',
+  tidak_siap: 'Tidak Siap',
+};
+
+export function verdictTone(verdict: string): string {
+  switch (verdict) {
+    case 'growth_ready':
+      return 'green';
+    case 'bersyarat':
+      return 'amber';
+    case 'risiko_tinggi':
+      return 'red';
+    case 'tidak_siap':
+      return 'darkgray';
+    default:
+      return 'gray';
+  }
+}
+
+export const PRASYARAT_LABELS: Record<string, string> = {
+  belum: 'Belum',
+  jalan: 'Sedang berjalan',
+  selesai: 'Selesai',
+};
+
+export const KUALITAS_DATA_LABELS: Record<string, string> = {
+  terverifikasi: 'Terverifikasi',
+  sebagian_estimasi: 'Sebagian estimasi',
+  mayoritas_estimasi: 'Mayoritas estimasi',
+};
+
+/** Deal-breaker code → BI label (for the sidebar + prints). */
+export const HAMBATAN_LABELS: Record<string, string> = {
+  margin_di_bawah_minimum: 'Margin bersih di bawah minimum',
+  dropship: 'Model bisnis dropship',
+  rasio_target_terlalu_tinggi: 'Rasio target terlalu tinggi (> 5x)',
+  daya_tahan_budget_terlalu_pendek: 'Daya tahan budget terlalu pendek (≤ 1 bulan)',
+};

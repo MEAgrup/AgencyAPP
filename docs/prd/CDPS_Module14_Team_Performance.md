@@ -21,10 +21,10 @@ Module 14 closes both gaps: (1) a per-staff, per-role rollup of KPIs that alread
 
    | Role | Components (confirmed weights) |
    |---|---|
-   | **Creative** (Editor/Designer/Copywriter) | Speed Score (M12) 30%, Output Quantity (Approved Assets/period, M7) 25%, GMV Impact (M7§7/M8§7) 25%, Revision Count (M12, inverse) 20% |
-   | **Ads** (Advertiser) | Speed Score (M12) 25%, ROAS Attainment (own managed Ad Campaigns, M8) 30%, GMV Impact (M8) 25%, Optimization Activity (M8) 20% |
-   | **KOL Coordinator** | **Creator Count** (Bookings reaching `[QC Passed]` in the period, vs. target — confirmed as the lead metric per Yohan: "what matters most for KOL is the number of creators") 30%, QC Pass Rate (M9 Monthly Report) 25%, Speed Score (M12, combined Sourcing+Delivery Turnaround vs SLA) 20%, Escalation Rate (inverse, M9) 25%. Sourcing Turnaround (M9) is still shown on the staff's own breakdown as a **reported diagnostic**, not weighted — it's largely already reflected inside the combined Speed Score. |
-   | **Account Manager (AM)** | average Client Health Score across portfolio (M13) 50%, Complaint Resolution Speed (M6) 25%, Revision Escalation Rate across their Clients' Briefs (M6/M12) 25% |
+   | **Creative** (Editor/Designer/Copywriter) | Speed Score (M12) 28.5%, Output Quantity (Approved Assets/period, M7) 23.75%, GMV Impact (M7§7/M8§7) 23.75%, Revision Count (M12, inverse) 19%, **Weekly-Note Compliance (M6D RM-8, inverse) 5%** |
+   | **Ads** (Advertiser) | Speed Score (M12) 23.75%, ROAS Attainment (own managed Ad Campaigns, M8) 28.5%, GMV Impact (M8) 23.75%, Optimization Activity (M8) 19%, **Weekly-Note Compliance (M6D RM-8, inverse) 5%** |
+   | **KOL Coordinator** | **Creator Count** (Bookings reaching `[QC Passed]` in the period, vs. target — confirmed as the lead metric per Yohan: "what matters most for KOL is the number of creators") 28.5%, QC Pass Rate (M9 Monthly Report) 23.75%, Speed Score (M12, combined Sourcing+Delivery Turnaround vs SLA) 19%, Escalation Rate (inverse, M9) 23.75%, **Weekly-Note Compliance (M6D RM-8, inverse) 5%**. Sourcing Turnaround (M9) is still shown on the staff's own breakdown as a **reported diagnostic**, not weighted — it's largely already reflected inside the combined Speed Score. |
+   | **Account Manager (AM)** | average Client Health Score across portfolio (M13) 45%, Complaint Resolution Speed (M6) 22.5%, Revision Escalation Rate across their Clients' Briefs (M6/M12) 22.5%, **Weekly-Recap Discipline (M6D RM-9) 10%** |
 
 3. **Cross-division Client-Outcome Modifier**: for Creative/Ads/KOL roles, a small additional modifier is layered on top of the core KPI Profile — the average of the Module 13 Health Score sub-component(s) most attributable to that division, across the Clients that staff member actually touched that month (e.g. an Advertiser's modifier draws from the average ROAS Attainment sub-score of their Clients; a Creative's modifier draws from the average Revision Burden sub-score of their Clients). **Capped at ±10 points** on the final 0–100 score — enough to matter, not enough to override the core KPI Profile.
 4. **Final Individual Score** = weighted KPI Profile (Rule 2) + Client-Outcome Modifier (Rule 3, capped ±10), bounded 0–100 overall.
@@ -109,7 +109,7 @@ Every score must be shown to its owner with a full component breakdown (Rule 8/F
 | 3 | Client-Outcome Modifier formula | ✅ `clamp((avg relevant sub-score − 80) ÷ 2, −10, +10)`. |
 | 4 | Role→Health-component mapping for the Modifier | ✅ Creative → Revision Burden, Ads → ROAS Attainment, KOL Coordinator → Task Completion Rate. KOL's core KPI Profile also now leads with **Creator Count** (Rule 2) per Yohan's emphasis on creator volume. |
 | 5 | KPI Profile weights configurability | ✅ Admin UI. |
-| 6 | AM KPI Profile split | ✅ Confirmed as drafted (50% Health Score / 25% Complaint Resolution Speed / 25% Revision Escalation Rate). |
+| 6 | AM KPI Profile split | ✅ Originally confirmed 50 / 25 / 25 (Health Score / Complaint Resolution Speed / Revision Escalation Rate). **Re-weighted 2026-08-13 (RM-9a, owner signed off)** to carve a 10% Weekly-Recap Discipline slice proportionally → **45 / 22.5 / 22.5 / 10** (Health Score / Complaint Resolution Speed / Revision Escalation Rate / **Weekly-Recap Discipline, M6D RM-9**). See §9. |
 | 7 | New-hire grace period | ✅ Not needed — new staff are scored from month one like everyone else. |
 | 8 | Team-level rollup weighting | ✅ Simple average (not volume-weighted) for v1. |
 
@@ -125,7 +125,49 @@ Every score must be shown to its owner with a full component breakdown (Rule 8/F
 
 ## 8. Closing Module 13's deferred question (AM-level rollup)
 
-Module 13 (§6, OA-8) deferred the question of whether an AM's average Client Health Score should feed Module 14. The answer, now that Module 14's structure exists: **yes — it's the single largest component of the AM's own KPI Profile (50%, Rule 2)**, not just a side-rollup. This makes sense structurally: an AM doesn't execute Tasks the way Creative/Ads/KOL do (Module 12), so an AM's performance is, by the nature of the role, mostly a reflection of how healthy their Client portfolio is. The remaining 50% (Complaint Resolution Speed + Revision Escalation Rate) covers the parts of the AM's day-to-day that aren't already baked into the Health Score itself, to avoid double-counting the same signal twice.
+Module 13 (§6, OA-8) deferred the question of whether an AM's average Client Health Score should feed Module 14. The answer, now that Module 14's structure exists: **yes — it's the single largest component of the AM's own KPI Profile (45% after the RM-9a re-weight, Rule 2 / §6 #6)**, not just a side-rollup. This makes sense structurally: an AM doesn't execute Tasks the way Creative/Ads/KOL do (Module 12), so an AM's performance is, by the nature of the role, mostly a reflection of how healthy their Client portfolio is. The remaining 55% (Complaint Resolution Speed 22.5 + Revision Escalation Rate 22.5 + Weekly-Recap Discipline 10) covers the parts of the AM's day-to-day that aren't already baked into the Health Score itself — including the M6D recap discipline (§9) — to avoid double-counting the same signal twice.
+
+---
+
+## 9. Amendment note — Weekly-Recap Discipline component (M6D RM-9, owner 2026-08-13, **✅ signed off 2026-08-13**)
+
+Module 6D (Rekap Hasil Mingguan) added a weekly cross-division recap the AM/CRO owns. The owner decided
+(`DECISIONS.md` 2026-08-13, RM-9) that recap **discipline** must be *both displayed* (on the health page, M6D
+H-2) *and scored* — and that the scoring belongs **here in M14, not as an eighth Module 13 health component**
+(scoring it inside M13 would re-weight the confirmed health weights and grade AM form-filling inside a
+*client-health* number — M6D §8.4).
+
+Concretely, this proposes:
+- **AM role:** a new **Weekly-Recap Discipline** component = *% of the AM's active clients whose current-week
+  recap was AM-closed on time and **never force-closed** (`pernah_ditutup_otomatis = false`)*. Normalized/capped
+  like the other raw-value components (Rule 2). **Counts the permanent flag, not the final status** — a recap a
+  Head reopened after auto-close (M6D RM-5) still carries `pernah_ditutup_otomatis = true`, so it counts against
+  the AM even once completed; the Head's mercy rescues the data, not the score.
+- **Division roles (Creative / Ads / KOL / Live):** a **Weekly-Note Compliance** component = *did the division
+  file its now-mandatory weekly note (M6D RM-8) for the clients it touched*.
+
+**Signed off (RM-9a, owner 2026-08-13).** The owner approved re-weighting the **confirmed** AM KPI Profile
+(was 50/25/25, §6 #6 / §7) by carving a **10% Weekly-Recap Discipline** slice **proportionally** from the
+existing three → **45 / 22.5 / 22.5 / 10** (Health Score / Complaint Resolution Speed / Revision Escalation
+Rate / Weekly-Recap Discipline). For the **division roles** (Creative / Ads / KOL), the owner approved a
+**5% Weekly-Note Compliance** slice, also carved **proportionally** from each profile's existing components:
+
+| Role | Component weights after RM-9a (2026-08-13) |
+|---|---|
+| **AM** | Health Score **45** · Complaint Resolution Speed **22.5** · Revision Escalation Rate **22.5** · **Weekly-Recap Discipline 10** |
+| **Creative** | Speed Score **28.5** · Output Quantity **23.75** · GMV Impact **23.75** · Revision Count (inv) **19** · **Weekly-Note Compliance 5** |
+| **Ads** | Speed Score **23.75** · ROAS Attainment **28.5** · GMV Impact **23.75** · Optimization Activity **19** · **Weekly-Note Compliance 5** |
+| **KOL Coordinator** | Creator Count **28.5** · QC Pass Rate **23.75** · Speed Score **19** · Escalation Rate (inv) **23.75** · **Weekly-Note Compliance 5** |
+
+Each profile still sums to 100. **Normalization (Rule 2):** Weekly-Recap Discipline = *% of the AM's active
+clients whose current-week recap was AM-closed on time and never force-closed (`pernah_ditutup_otomatis =
+false`)* — already a 0–100 percentage, capped at 100, no target-ratio needed. Weekly-Note Compliance = *% of
+the clients the division touched that week for which it filed its now-mandatory weekly note (M6D RM-8)* —
+likewise a 0–100 percentage. Both obey the missing-component redistribution rule (Rule 6): an AM/division with
+no active clients that period has the component excluded and its weight redistributed, never scored 0.
+M6D supplies the raw signal (recap close status + `pernah_ditutup_otomatis` flag + division-note presence);
+M14 computes the grade. Live-stream is a vendor, not an M14-scored staff role — its note obligation is tracked
+in M6D but carries no M14 weight. Tracked as **D-14** in `docs/backlog/M6D_BACKLOG.md`.
 
 ---
 

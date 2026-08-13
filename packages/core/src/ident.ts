@@ -77,6 +77,12 @@ export const PREFIXES = {
   // M5-OA-7 — a Finance-filed request to change a transaction's payment scheme,
   // applied only on Director ACC. Minted after validation passes (house rule #1).
   TCR: { entity: 'Transaction Change Request', module: 'M5' },
+  // Interview (tab 1 "Kelola Klien"). `ITV` was free in the registry; the PRD's
+  // `ITV-YYYY-NNNNN` form is NOT used — same decision as STRG/PLAN/VND
+  // (DECISIONS.md 2026-08-06): `ident_next` only produces the house
+  // PREFIX-YYYYMM-NNNN, and forking the ID engine for one entity is the larger
+  // evil. Logged in DECISIONS.md 2026-08-11.
+  ITV: { entity: 'Interview (Kualifikasi Klien)', module: 'M6-Interview' },
 } as const satisfies Record<string, PrefixInfo>;
 
 /** A registered prefix string (e.g. 'CLI', 'TRX'). */

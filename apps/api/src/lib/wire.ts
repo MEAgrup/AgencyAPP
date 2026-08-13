@@ -6,7 +6,8 @@
  * other way inline in each route (`toInput`).
  */
 import { money, tz } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, campaign, client, contract, creative, demo, directory, finance, health, kol, leads, livestream, marketing, msl, notification, performance, plangate, portal, sales, strategi, task, vendor } from '@cdps/domain';
+import type { interview as ivcore } from '@cdps/core';
+import type { account, activity, admin, ads, audit, auth, board, campaign, client, contract, creative, demo, directory, finance, health, interview, kol, leads, livestream, marketing, msl, notification, performance, plangate, portal, sales, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -232,12 +233,33 @@ export function assignmentToWire(a: account.Assignment): AssignmentWire {
 
 // --- M6 Account & Service, Cluster 2 (Strategy & Plan) ---
 
-/** module6_account.Strategy — a Strategy & Plan record (approved_by/revision_notes omitempty). */
+/** module6_account.DivisionTask — one per-division task-satuan quota (QA revisi). */
+export interface DivisionTaskWire {
+  divisi: string;
+  jenis: string;
+  jumlah: string;
+}
+
+/**
+ * module6_account.Strategy — a Strategy & Plan record (approved_by/revision_notes
+ * omitempty). The structured KPI + GMV-gate + task-satuan keys (QA revisi
+ * 2026-08-12) are ALWAYS present — nullable numbers are sent as explicit `null`,
+ * never omitted, because a MISSING key blanks the form (O43 failure mode).
+ */
 export interface StrategyWire {
   id: string;
   service_id: string;
   objective: string;
   target_kpi: string;
+  target_gmv: string | null;
+  target_roas: string | null;
+  target_ctr: string | null;
+  target_cvr: string | null;
+  client_target_gmv: string | null;
+  gmv_adjustment_status: string;
+  gmv_adjustment_reason: string | null;
+  gmv_adjustment_approved_by: string | null;
+  division_tasks: DivisionTaskWire[];
   divisions_involved: string[];
   planned_brief_outline: string;
   timeline_start: string;
@@ -256,6 +278,15 @@ export function strategyToWire(s: account.Strategy): StrategyWire {
     service_id: s.serviceId,
     objective: s.objective,
     target_kpi: s.targetKpi,
+    target_gmv: s.targetGmv,
+    target_roas: s.targetRoas,
+    target_ctr: s.targetCtr,
+    target_cvr: s.targetCvr,
+    client_target_gmv: s.clientTargetGmv,
+    gmv_adjustment_status: s.gmvAdjustmentStatus,
+    gmv_adjustment_reason: s.gmvAdjustmentReason,
+    gmv_adjustment_approved_by: s.gmvAdjustmentApprovedBy,
+    division_tasks: s.divisionTasks.map((t) => ({ divisi: t.divisi, jenis: t.jenis, jumlah: t.jumlah })),
     divisions_involved: s.divisionsInvolved,
     planned_brief_outline: s.plannedBriefOutline,
     timeline_start: s.timelineStart,
@@ -317,6 +348,8 @@ export interface ServiceQueueRowWire {
   strategy_id: string | null;
   strategy_status: string | null;
   brief_count: number;
+  /** the client's target GMV — anchor + ±20% baseline for a new Strategy (QA revisi). */
+  client_target_gmv: string | null;
   released_to_account_at: string | null;
 }
 
@@ -338,6 +371,7 @@ export function serviceQueueRowToWire(r: account.ServiceQueueRow): ServiceQueueR
     strategy_id: r.strategyId,
     strategy_status: r.strategyStatus,
     brief_count: r.briefCount,
+    client_target_gmv: r.clientTargetGmv,
     released_to_account_at: r.releasedToAccountAt ? r.releasedToAccountAt.toISOString() : null,
   };
 }
@@ -346,6 +380,12 @@ export function serviceQueueRowToWire(r: account.ServiceQueueRow): ServiceQueueR
 export function toStrategyInput(b: {
   objective?: string;
   target_kpi?: string;
+  target_gmv?: string | null;
+  target_roas?: string | null;
+  target_ctr?: string | null;
+  target_cvr?: string | null;
+  gmv_adjustment_reason?: string | null;
+  division_tasks?: { divisi?: string; jenis?: string; jumlah?: string }[];
   divisions_involved?: string[];
   planned_brief_outline?: string;
   timeline_start?: string;
@@ -354,6 +394,14 @@ export function toStrategyInput(b: {
   return {
     objective: b.objective ?? '',
     targetKpi: b.target_kpi ?? '',
+    targetGmv: b.target_gmv ?? null,
+    targetRoas: b.target_roas ?? null,
+    targetCtr: b.target_ctr ?? null,
+    targetCvr: b.target_cvr ?? null,
+    gmvAdjustmentReason: b.gmv_adjustment_reason ?? null,
+    divisionTasks: (b.division_tasks ?? []).map((t) => ({
+      divisi: t.divisi ?? '', jenis: t.jenis ?? '', jumlah: t.jumlah ?? '',
+    })),
     divisionsInvolved: b.divisions_involved ?? [],
     plannedBriefOutline: b.planned_brief_outline ?? '',
     timelineStart: b.timeline_start ?? '',
@@ -4405,5 +4453,377 @@ export function strategiDiagnosaFromWire(v: unknown): strategi.DiagnosaPayload {
       deadline: strOrNull(p.deadline),
       urutan: numOrNull(p.urutan) ?? i,
     })),
+  };
+}
+
+// ===========================================================================
+// Modul Interview ("Kelola Klien" tab 1) — langkah 6
+// ===========================================================================
+//
+// The domain read-models speak camelCase; web-internal consumes snake_case.
+// Missing keys are more dangerous than nulls (O43: a blank page behind a 200),
+// so every field is emitted explicitly — `null`, never omitted.
+
+export interface InterviewWire {
+  id: string;
+  client_id: string;
+  contract_id: string | null;
+  service_id: string | null;
+  am_pengisi_id: string;
+  acting_for_am_id: string | null;
+  sales_closing_id: string | null;
+  status: string;
+  versi_no: number;
+  interview_induk_id: string | null;
+  versi_sebelumnya_id: string | null;
+  interview_profile: string;
+  retroaktif: boolean;
+  alasan_kekosongan: string | null;
+  alasan_pembatalan: string | null;
+  created_at: string;
+  created_by: string;
+}
+
+export interface InterviewJadwalWire {
+  tanggal_waktu: string | null;
+  durasi_menit: number | null;
+  format: string | null;
+  lokasi_link: string | null;
+  peserta_klien: unknown;
+  peserta_mea: unknown;
+  catatan_persiapan: string | null;
+  data_diminta: unknown;
+}
+
+export interface InterviewKualifikasiWire {
+  skor_kualifikasi: number;
+  skor_per_blok: unknown;
+  verdict_kualifikasi: string;
+  hambatan_mendasar: unknown;
+  prasyarat_status: string;
+  margin_bersih: number | null;
+  margin_bersih_basis: string;
+  margin_kotor: number | null;
+  margin_derivasi_input: unknown;
+  kualitas_data: string;
+  bep_roas: number | null;
+  rasio_target: number | null;
+  dihitung_pada: string;
+}
+
+export interface InterviewAnswerWire {
+  section: string;
+  field_key: string;
+  nilai_teks: string | null;
+  nilai_angka: number | null;
+  nilai_uang: string | null;
+  nilai_bool: boolean | null;
+  nilai_enum: string | null;
+  nilai_jsonb: unknown;
+  sumber_angka: string | null;
+  dasar_estimasi: string | null;
+}
+
+/**
+ * Riset Awal — langkah 1 of "Kelola Klien". `durasi_menit` is DERIVED server-side
+ * from the two anchors (there is no duration column); it stays `null` while the
+ * work is running, which the UI renders as `—`.
+ */
+export interface InterviewRisetAwalWire {
+  interview_id: string;
+  status: string;
+  dimulai_pada: string;
+  dimulai_oleh: string;
+  disubmit_pada: string | null;
+  disubmit_oleh: string | null;
+  durasi_menit: number | null;
+  retroaktif: boolean;
+}
+
+export interface InterviewDetailWire {
+  interview: InterviewWire;
+  riset_awal: InterviewRisetAwalWire | null;
+  jadwal: InterviewJadwalWire | null;
+  kualifikasi: InterviewKualifikasiWire | null;
+  answers: InterviewAnswerWire[];
+}
+
+/** verdict + prasyarat ONLY — the Sales-facing surface. */
+export interface InterviewVerdictWire {
+  interview_id: string;
+  verdict: string;
+  prasyarat_status: string;
+}
+
+/** One row of the client's interview log (list surface). */
+export interface InterviewListRowWire {
+  id: string;
+  client_id: string;
+  service_id: string | null;
+  status: string;
+  versi_no: number;
+  interview_profile: string;
+  retroaktif: boolean;
+  verdict: string | null;
+  prasyarat_status: string | null;
+  skor_kualifikasi: number | null;
+  riset_awal_status: string | null;
+  riset_awal_dimulai_pada: string | null;
+  riset_awal_disubmit_pada: string | null;
+  riset_awal_durasi_menit: number | null;
+  created_at: string;
+}
+
+export function interviewListToWire(rows: interview.InterviewListRow[]): InterviewListRowWire[] {
+  return rows.map((r) => ({
+    id: r.id,
+    client_id: r.clientId,
+    service_id: r.serviceId,
+    status: r.status,
+    versi_no: r.versiNo,
+    interview_profile: r.interviewProfile,
+    retroaktif: r.retroaktif,
+    verdict: r.verdict,
+    prasyarat_status: r.prasyaratStatus,
+    skor_kualifikasi: r.skorKualifikasi,
+    riset_awal_status: r.risetAwalStatus,
+    riset_awal_dimulai_pada: r.risetAwalDimulaiPada,
+    riset_awal_disubmit_pada: r.risetAwalDisubmitPada,
+    riset_awal_durasi_menit: r.risetAwalDurasiMenit,
+    created_at: r.createdAt,
+  }));
+}
+
+/**
+ * One measured step of the Kelola Klien timeline. `hari_kerja` is working days
+ * (Mon–Fri minus `hari_libur`) computed server-side — `null` while the step has
+ * not started, which the UI renders as `—`.
+ */
+export interface TimelineStepWire {
+  langkah: number;
+  nama: string;
+  mulai_pada: string | null;
+  selesai_pada: string | null;
+  hari_kerja: number | null;
+  target_hari: number;
+  batas_hari: number;
+  status: string;
+  selesai: boolean;
+}
+
+export interface KelolaKlienTimelineWire {
+  interview_id: string;
+  config_version: number;
+  langkah: TimelineStepWire[];
+}
+
+export function kelolaKlienTimelineToWire(t: interview.KelolaKlienTimeline): KelolaKlienTimelineWire {
+  return {
+    interview_id: t.interviewId,
+    config_version: t.configVersion,
+    langkah: t.langkah.map((s) => ({
+      langkah: s.langkah,
+      nama: s.nama,
+      mulai_pada: s.mulaiPada,
+      selesai_pada: s.selesaiPada,
+      hari_kerja: s.hariKerja,
+      target_hari: s.targetHari,
+      batas_hari: s.batasHari,
+      status: s.status,
+      selesai: s.selesai,
+    })),
+  };
+}
+
+/** One row of the national-holiday calendar (admin plane). */
+export interface HariLiburWire {
+  tanggal: string;
+  keterangan: string;
+  created_at: string;
+  created_by: string;
+}
+
+export function hariLiburToWire(h: admin.HariLibur): HariLiburWire {
+  return {
+    tanggal: h.tanggal,
+    keterangan: h.keterangan,
+    created_at: h.createdAt,
+    created_by: h.createdBy,
+  };
+}
+
+export function interviewRisetAwalToWire(r: interview.RisetAwal): InterviewRisetAwalWire {
+  return {
+    interview_id: r.interviewId,
+    status: r.status,
+    dimulai_pada: r.dimulaiPada,
+    dimulai_oleh: r.dimulaiOleh,
+    disubmit_pada: r.disubmitPada,
+    disubmit_oleh: r.disubmitOleh,
+    durasi_menit: r.durasiMenit,
+    retroaktif: r.retroaktif,
+  };
+}
+
+export function interviewToWire(i: interview.Interview): InterviewWire {
+  return {
+    id: i.id,
+    client_id: i.clientId,
+    contract_id: i.contractId,
+    service_id: i.serviceId,
+    am_pengisi_id: i.amPengisiId,
+    acting_for_am_id: i.actingForAmId,
+    sales_closing_id: i.salesClosingId,
+    status: i.status,
+    versi_no: i.versiNo,
+    interview_induk_id: i.interviewIndukId,
+    versi_sebelumnya_id: i.versiSebelumnyaId,
+    interview_profile: i.interviewProfile,
+    retroaktif: i.retroaktif,
+    alasan_kekosongan: i.alasanKekosongan,
+    alasan_pembatalan: i.alasanPembatalan,
+    created_at: i.createdAt,
+    created_by: i.createdBy,
+  };
+}
+
+function interviewKualifikasiToWire(k: interview.Kualifikasi): InterviewKualifikasiWire {
+  return {
+    skor_kualifikasi: k.skorKualifikasi,
+    skor_per_blok: k.skorPerBlok,
+    verdict_kualifikasi: k.verdictKualifikasi,
+    hambatan_mendasar: k.hambatanMendasar,
+    prasyarat_status: k.prasyaratStatus,
+    margin_bersih: k.marginBersih,
+    margin_bersih_basis: k.marginBersihBasis,
+    margin_kotor: k.marginKotor,
+    margin_derivasi_input: k.marginDerivasiInput,
+    kualitas_data: k.kualitasData,
+    bep_roas: k.bepRoas,
+    rasio_target: k.rasioTarget,
+    dihitung_pada: k.dihitungPada,
+  };
+}
+
+export function interviewDetailToWire(d: interview.InterviewDetail): InterviewDetailWire {
+  return {
+    interview: interviewToWire(d.interview),
+    riset_awal: d.risetAwal ? interviewRisetAwalToWire(d.risetAwal) : null,
+    jadwal: d.jadwal
+      ? {
+          tanggal_waktu: d.jadwal.tanggalWaktu,
+          durasi_menit: d.jadwal.durasiMenit,
+          format: d.jadwal.format,
+          lokasi_link: d.jadwal.lokasiLink,
+          peserta_klien: d.jadwal.pesertaKlien,
+          peserta_mea: d.jadwal.pesertaMea,
+          catatan_persiapan: d.jadwal.catatanPersiapan,
+          data_diminta: d.jadwal.dataDiminta,
+        }
+      : null,
+    kualifikasi: d.kualifikasi ? interviewKualifikasiToWire(d.kualifikasi) : null,
+    answers: d.answers.map((a) => ({
+      section: a.section,
+      field_key: a.fieldKey,
+      nilai_teks: a.nilaiTeks,
+      nilai_angka: a.nilaiAngka,
+      nilai_uang: a.nilaiUang,
+      nilai_bool: a.nilaiBool,
+      nilai_enum: a.nilaiEnum,
+      nilai_jsonb: a.nilaiJsonb,
+      sumber_angka: a.sumberAngka,
+      dasar_estimasi: a.dasarEstimasi,
+    })),
+  };
+}
+
+export function interviewKualifikasiResultToWire(k: interview.Kualifikasi): InterviewKualifikasiWire {
+  return interviewKualifikasiToWire(k);
+}
+
+export function interviewVerdictToWire(v: interview.InterviewVerdict): InterviewVerdictWire {
+  return { interview_id: v.interviewId, verdict: v.verdict, prasyarat_status: v.prasyaratStatus };
+}
+
+// --- request-body mappers (snake_case wire → camelCase domain input) ---------
+
+export function interviewCreateFromWire(v: unknown): interview.CreateInterviewInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    clientId: String(b.client_id ?? ''),
+    contractId: strOrNull(b.contract_id),
+    serviceId: strOrNull(b.service_id),
+    actingForAmId: strOrNull(b.acting_for_am_id),
+    salesClosingId: strOrNull(b.sales_closing_id),
+    interviewProfile: b.interview_profile === undefined || b.interview_profile === null ? undefined : String(b.interview_profile),
+    retroaktif: b.retroaktif === true,
+  };
+}
+
+export function interviewJadwalFromWire(v: unknown): interview.JadwalInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    tanggalWaktu: strOrNull(b.tanggal_waktu),
+    durasiMenit: numOrNull(b.durasi_menit),
+    format: strOrNull(b.format),
+    lokasiLink: strOrNull(b.lokasi_link),
+    catatanPersiapan: strOrNull(b.catatan_persiapan),
+  };
+}
+
+export function interviewAnswersFromWire(v: unknown): interview.AnswerInput[] {
+  return asRecords((v as Record<string, unknown>)?.answers ?? v).map((a) => ({
+    section: String(a.section ?? ''),
+    fieldKey: String(a.field_key ?? ''),
+    nilaiTeks: strOrNull(a.nilai_teks),
+    nilaiAngka: numOrNull(a.nilai_angka),
+    nilaiUang: a.nilai_uang === undefined || a.nilai_uang === null ? null : BigInt(String(a.nilai_uang)),
+    nilaiBool: typeof a.nilai_bool === 'boolean' ? a.nilai_bool : null,
+    nilaiEnum: strOrNull(a.nilai_enum),
+    nilaiJsonb: a.nilai_jsonb ?? null,
+    sumberAngka: strOrNull(a.sumber_angka),
+    dasarEstimasi: strOrNull(a.dasar_estimasi),
+    wajibKosong: a.wajib_kosong === true,
+  }));
+}
+
+/** Builds the core KualifikasiInput from a wire body. Money fields are minor-unit
+ *  integer strings → bigint; enums are the canonical codes; percentages plain. */
+export function interviewScoreFromWire(v: unknown): ivcore.KualifikasiInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  const bigOrNull = (x: unknown): bigint | null => (x === undefined || x === null || x === '' ? null : BigInt(String(x)));
+  const big = (x: unknown): bigint => bigOrNull(x) ?? 0n;
+  const reset = b.reset_ekspektasi_tertulis as Record<string, unknown> | null | undefined;
+  return {
+    marginBersih: numOrNull(b.margin_bersih),
+    marginBersihSumber: (strOrNull(b.margin_bersih_sumber) as ivcore.SumberAngka | null) ?? null,
+    marginBersihDasarEstimasi: strOrNull(b.margin_bersih_dasar_estimasi),
+    marginKotor: numOrNull(b.margin_kotor),
+    komisiPlatformPersen: numOrNull(b.komisi_platform_persen),
+    ongkirPersen: numOrNull(b.ongkir_persen),
+    ongkirPerPesanan: bigOrNull(b.ongkir_per_pesanan),
+    aov: big(b.aov),
+    aovSumber: (strOrNull(b.aov_sumber) as ivcore.SumberAngka | null) ?? undefined,
+    ruangHarga: String(b.ruang_harga ?? '') as ivcore.RuangHarga,
+    modelBisnis: String(b.model_bisnis ?? '') as ivcore.ModelBisnis,
+    kesanggupanLonjakan: String(b.kesanggupan_lonjakan ?? '') as ivcore.KesanggupanLonjakan,
+    siklusBeliUlang: String(b.siklus_beli_ulang ?? '') as ivcore.SiklusBeliUlang,
+    pembedaProduk: String(b.pembeda_produk ?? '') as ivcore.PembedaProduk,
+    skuSiap: Number(b.sku_siap ?? 0),
+    skuSiapSumber: (strOrNull(b.sku_siap_sumber) as ivcore.SumberAngka | null) ?? undefined,
+    penangananChat: String(b.penanganan_chat ?? '') as ivcore.PenangananChat,
+    kecepatanApproval: String(b.kecepatan_approval ?? '') as ivcore.KecepatanApproval,
+    kesiapanAkses: String(b.kesiapan_akses ?? '') as ivcore.KesiapanAkses,
+    omzet: big(b.omzet),
+    omzetSumber: (strOrNull(b.omzet_sumber) as ivcore.SumberAngka | null) ?? undefined,
+    targetOmzet: big(b.target_omzet),
+    targetOmzetSumber: (strOrNull(b.target_omzet_sumber) as ivcore.SumberAngka | null) ?? undefined,
+    dayaTahanBudget: String(b.daya_tahan_budget ?? '') as ivcore.DayaTahanBudget,
+    resetEkspektasiTertulis:
+      reset && reset.target_baru != null
+        ? { targetBaru: big(reset.target_baru), disetujuiOleh: String(reset.disetujui_oleh ?? ''), disetujuiPada: String(reset.disetujui_pada ?? '') }
+        : null,
+    defaultKomisiPlatformPersen: numOrNull(b.default_komisi_platform_persen),
+    defaultOngkirPersen: numOrNull(b.default_ongkir_persen),
   };
 }
