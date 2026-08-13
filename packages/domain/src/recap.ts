@@ -78,6 +78,23 @@ export function canReopenRecap(actor: Actor): boolean {
   return permission.isLead(actor, ACCOUNT_DIVISION);
 }
 
+/**
+ * canWriteRecap: the write-scope predicate for a recap's AM-writable fields
+ * (RM-A6, the RM-C manual fallbacks, the RM-D narrative, and the `Sengketa
+ * Angka` note on an auto figure). The owning AM/CRO, or an Account lead/Head
+ * (Director covered by `isLead`); OD is read-only (Role Matrix §9). This is the
+ * exact TS twin of the RLS helper `private.jwt_can_write_recap` — the D-03
+ * frozen invariant is that the two must not diverge (asserted in
+ * `recap.reals.test.ts`), mirroring `canWritePlan` ≡ `jwt_can_write_plan` (M6B
+ * B-06). It scopes WHO may write; the column-level rule that an `otomatis` row's
+ * value is immutable (only its `sengketa` may move) is the DB trigger's half —
+ * RLS `WITH CHECK` cannot compare OLD to NEW.
+ */
+export function canWriteRecap(actor: Actor, ownerAm: string | null): boolean {
+  if (permission.isLead(actor, ACCOUNT_DIVISION)) return true;
+  return ownerAm !== null && ownerAm === actor.employeeId;
+}
+
 // ---------------------------------------------------------------------------
 // Transition wrapper
 // ---------------------------------------------------------------------------
