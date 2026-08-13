@@ -30,10 +30,18 @@ function waktu(iso: string | null): string {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('id-ID');
 }
 
-/** What the elapsed figure MEANS for this step, so a number is never bare. */
+/**
+ * What the elapsed figure MEANS for this step, so a number is never bare.
+ *
+ * Step 2 spells out its closing rule because it is the one that surprises people:
+ * "Simpan jadwal" and "Mulai interview" close it EQUALLY (owner confirmation
+ * 2026-08-13 — what matters is the interview answers getting filled, not which
+ * button recorded the meeting).
+ */
 function keterangan(step: TimelineStep): string {
   if (step.status === SLA_STATUS.TidakBerlaku) return 'Layanan ini tidak butuh strategi (plan gate).';
   if (step.status === SLA_STATUS.BelumMulai) return 'Menunggu langkah sebelumnya selesai.';
+  if (step.langkah === 2 && !step.selesai) return 'Ditutup oleh "Simpan jadwal" ATAU "Mulai interview".';
   return step.selesai ? 'Selesai' : 'Masih berjalan';
 }
 

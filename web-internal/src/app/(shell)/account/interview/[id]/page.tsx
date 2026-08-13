@@ -451,6 +451,13 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
                   >
                     Mulai interview (→ Sedang Berlangsung)
                   </button>
+                  {/* Owner confirmation 2026-08-13: the two buttons are EQUAL for
+                      the timeline. Saying so here stops an AM from filling a
+                      schedule they do not need just to look punctual. */}
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    Keduanya sama-sama menutup langkah 2 (Interview Meeting) — yang dinilai adalah hasil
+                    pengisian jawaban interview, bukan tombol mana yang dipakai.
+                  </span>
                 </div>
               )}
             </section>
