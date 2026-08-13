@@ -83,6 +83,12 @@ export const PREFIXES = {
   // PREFIX-YYYYMM-NNNN, and forking the ID engine for one entity is the larger
   // evil. Logged in DECISIONS.md 2026-08-11.
   ITV: { entity: 'Interview (Kualifikasi Klien)', module: 'M6-Interview' },
+  // M6D — Rekap Hasil Mingguan. One recap per active client per ISO week, auto-
+  // generated Monday 00:00 WIB (machine #18). Aggregation-and-narrative layer;
+  // owns no execution data. `WRR` was free in the registry; house form
+  // PREFIX-YYYYMM-NNNN via ident_next (same decision as STRG/PLAN/VND/ITV, not
+  // the PRD's own form). Registered in entity_prefix by the D-01 migration.
+  WRR: { entity: 'Rekap Hasil Mingguan', module: 'M6D' },
 } as const satisfies Record<string, PrefixInfo>;
 
 /** A registered prefix string (e.g. 'CLI', 'TRX'). */
