@@ -61,6 +61,12 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   // owner-AM check stays server-side (final authority, CLAUDE.md #6).
   const canWrite =
     !readOnly && (isAccountStaff(role) || isAccountLead(role) || !!role?.director);
+  // Interview ("Kelola Klien" tab 1) is managed per-CLIENT, not per-service — the
+  // create/open entry point lives on the client page (mirrors its canManageInterview
+  // gate: assigned AM / Account lead / Director). This page only offers a shortcut
+  // there, so a reader who lands on the Service hub can reach the interview without
+  // navigating back to the client. No new API path — route-parity KNOWN_GAPS stays empty.
+  const canManageInterview = isAccountStaff(role) || isAccountLead(role) || !!role?.director;
   // Clearing an out-of-tolerance GMV adjustment is the SPV/Head Account/Director
   // "ACC" gate (QA revisi) — the same authority level as Strategy approval.
   const canApproveGmv = !readOnly && (isAccountLead(role) || !!role?.director);
@@ -647,6 +653,29 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
           </div>
         )}
       </section>
+
+      {/* Interview ("Kelola Klien") shortcut. Interview is a per-CLIENT record
+          (M6 Interview §I1), so the create/open door stays on the client page;
+          this is only a deep-link there so the Service hub is not a dead end for
+          someone who needs the client's qualification. */}
+      {service && canManageInterview && (
+        <section className="card">
+          <div className="cardHeader">
+            <h2>Kelola Klien &middot; Interview &amp; Kualifikasi</h2>
+          </div>
+          <p className="muted" style={{ fontSize: 13 }}>
+            Interview &amp; kualifikasi dikelola di tingkat klien (bukan per layanan). Buka halaman
+            klien untuk membuat / melanjutkan interview, menghitung skor &amp; verdict advisory, dan
+            menandai prasyarat.
+          </p>
+          <Link
+            href={`/clients/${encodeURIComponent(service.client_id)}#interview`}
+            className="btn btnPrimary btnSm"
+          >
+            Buka Kelola Klien
+          </Link>
+        </section>
+      )}
 
       {/* §4 Rule 1/6 + createStrategy's own gates: plan-gated only, no Plan yet,
           Service still [Awaiting Onboarding]. A Direct service has no Plan, ever. */}
