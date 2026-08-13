@@ -38,6 +38,14 @@ import {
   MSG_LAYERED_ROLE_DENIED,
   MSG_ROLE_MAPPING_DENIED,
   NotFoundError,
+  addHariLibur,
+  listHariLibur,
+  MSG_HARI_LIBUR_ADA,
+  MSG_HARI_LIBUR_DENIED,
+  MSG_HARI_LIBUR_KETERANGAN,
+  MSG_HARI_LIBUR_NOT_FOUND,
+  MSG_HARI_LIBUR_TANGGAL,
+  removeHariLibur,
   setLayeredRole,
   updateEmployeeAssignment,
   upsertRoleMapping,
@@ -541,5 +549,98 @@ describe('BI messages are the exact ported strings', () => {
     expect(MSG_EMPLOYEE_NOT_FOUND).toBe('[karyawan tidak ditemukan]');
     expect(MSG_EMPLOYEE_ADD_DENIED).toBe('[hanya Director atau Lead HR yang dapat menambah karyawan]');
     expect(MSG_EMPLOYEE_EXISTS).toBe('[karyawan dengan ID atau email itu sudah terdaftar]');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// hari_libur — the calendar that makes "hari kerja" mean working days
+// ---------------------------------------------------------------------------
+//
+// This is not cosmetic admin CRUD: `working_days_between` reads this table, so a
+// row added here changes whether an AM is late on the Kelola Klien SLA. That is
+// exactly why the write gate is Director-only, and why the tests below check the
+// gate as carefully as the CRUD.
+
+describe('hari libur permission matrix', () => {
+  it('is the admin-plane gate: Director writes, OD reads only', () => {
+    expect(canWriteAdmin(director())).toBe(true);
+    expect(canWriteAdmin(od())).toBe(false);
+    expect(canReadAdmin(od())).toBe(true);
+    expect(canReadAdmin(salesLead())).toBe(false);
+  });
+
+  it('keeps the BI messages exact', () => {
+    expect(MSG_HARI_LIBUR_DENIED).toBe('[hanya Director yang dapat mengelola hari libur]');
+    expect(MSG_HARI_LIBUR_TANGGAL).toBe('[tanggal libur tidak valid, gunakan format YYYY-MM-DD]');
+    expect(MSG_HARI_LIBUR_KETERANGAN).toBe('[keterangan hari libur wajib diisi]');
+    expect(MSG_HARI_LIBUR_ADA).toBe('[tanggal itu sudah terdaftar sebagai hari libur]');
+    expect(MSG_HARI_LIBUR_NOT_FOUND).toBe('[hari libur tidak ditemukan]');
+  });
+});
+
+describeDb('hari libur (integration)', () => {
+  // A far-future date so the fixture can never collide with a real entry an
+  // operator adds, nor with another test's working-day arithmetic.
+  const TANGGAL = '2099-12-25';
+
+  afterEach(async () => {
+    if (sql) await sql`delete from hari_libur where tanggal = ${TANGGAL}`;
+  });
+
+  it('adds, lists, and removes — each write audited', async () => {
+    const added = await addHariLibur(sql, director(), { tanggal: TANGGAL, keterangan: 'Natal (uji)' });
+    expect(added.tanggal).toBe(TANGGAL); // civil date, not shifted by timezone
+    expect(added.keterangan).toBe('Natal (uji)');
+
+    const rows = await listHariLibur(sql, od()); // OD may read
+    expect(rows.some((r) => r.tanggal === TANGGAL)).toBe(true);
+
+    // The calendar drives who counts as late, so both directions are logged.
+    const auditAdd = await sql<{ n: number }[]>`
+      select count(*)::int as n from audit_log
+       where entity_type = 'hari_libur' and entity_id = ${TANGGAL} and action = 'create'`;
+    expect(auditAdd[0].n).toBe(1);
+
+    await removeHariLibur(sql, director(), TANGGAL);
+    expect((await listHariLibur(sql, director())).some((r) => r.tanggal === TANGGAL)).toBe(false);
+    const auditDel = await sql<{ n: number }[]>`
+      select count(*)::int as n from audit_log
+       where entity_type = 'hari_libur' and entity_id = ${TANGGAL} and action = 'delete'`;
+    expect(auditDel[0].n).toBe(1);
+  });
+
+  it('refuses a duplicate date, an unknown date, and a bad payload', async () => {
+    await addHariLibur(sql, director(), { tanggal: TANGGAL, keterangan: 'Natal (uji)' });
+    await expect(
+      addHariLibur(sql, director(), { tanggal: TANGGAL, keterangan: 'Duplikat' }),
+    ).rejects.toThrow(MSG_HARI_LIBUR_ADA);
+    await expect(removeHariLibur(sql, director(), '2099-12-24')).rejects.toThrow(MSG_HARI_LIBUR_NOT_FOUND);
+    await expect(
+      addHariLibur(sql, director(), { tanggal: '25-12-2099', keterangan: 'Format salah' }),
+    ).rejects.toThrow(MSG_HARI_LIBUR_TANGGAL);
+    await expect(
+      addHariLibur(sql, director(), { tanggal: '2099-12-24', keterangan: '   ' }),
+    ).rejects.toThrow(MSG_HARI_LIBUR_KETERANGAN);
+  });
+
+  it('never lets a non-Director change what counts as a working day', async () => {
+    for (const actor of [od(), salesLead(), salesStaff(), hrLead()]) {
+      await expect(
+        addHariLibur(sql, actor, { tanggal: TANGGAL, keterangan: 'Percobaan' }),
+      ).rejects.toThrow(MSG_HARI_LIBUR_DENIED);
+      await expect(removeHariLibur(sql, actor, TANGGAL)).rejects.toThrow(MSG_HARI_LIBUR_DENIED);
+    }
+    // Even the HR lead — who MAY move an employee between divisions — cannot.
+    expect((await listHariLibur(sql, director())).some((r) => r.tanggal === TANGGAL)).toBe(false);
+  });
+
+  it('actually changes the working-day arithmetic (the reason the table exists)', async () => {
+    // 2099-12-24 is a Thursday, 2099-12-25 a Friday. (24, 25] = one working day.
+    const before = await sql<{ n: number }[]>`select working_days_between('2099-12-24','2099-12-25') as n`;
+    expect(Number(before[0].n)).toBe(1);
+
+    await addHariLibur(sql, director(), { tanggal: TANGGAL, keterangan: 'Natal (uji)' });
+    const after = await sql<{ n: number }[]>`select working_days_between('2099-12-24','2099-12-25') as n`;
+    expect(Number(after[0].n)).toBe(0);
   });
 });

@@ -459,6 +459,10 @@ const WIRE_TO_FE: Record<string, string> = {
   StrategiDiffEntryWire: 'strategi.ts::StrategiDiffEntry',
   // Modul Interview ("Kelola Klien" tab 1) — langkah 6.
   InterviewWire: 'interview.ts::Interview',
+  InterviewRisetAwalWire: 'interview.ts::InterviewRisetAwal',
+  TimelineStepWire: 'interview.ts::TimelineStep',
+  KelolaKlienTimelineWire: 'interview.ts::KelolaKlienTimeline',
+  HariLiburWire: 'types.ts::HariLibur',
   InterviewJadwalWire: 'interview.ts::InterviewJadwal',
   InterviewKualifikasiWire: 'interview.ts::InterviewKualifikasi',
   InterviewAnswerWire: 'interview.ts::InterviewAnswer',

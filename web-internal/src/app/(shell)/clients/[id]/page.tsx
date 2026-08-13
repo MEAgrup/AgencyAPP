@@ -10,8 +10,10 @@ import {
   PRASYARAT_LABELS,
   VERDICT_LABELS,
   createInterview,
+  formatDurasiMenit,
   interviewStatusTone,
   listInterviewsByClient,
+  risetAwalStatusTone,
   verdictTone,
   type InterviewListRow,
 } from '@/lib/interview';
@@ -166,7 +168,10 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   }
 
   async function handleOpenInterview() {
-    if (!window.confirm('Buat interview baru untuk klien ini dan buka halaman Kelola Klien?')) {
+    // Opening Kelola Klien STARTS riset awal (langkah 1) — the server stamps the
+    // clock. The call resumes an already-open session rather than starting a
+    // second one, so coming back here does not reset that clock.
+    if (!window.confirm('Buka Kelola Klien untuk klien ini? Riset awal mulai terhitung sejak sekarang.')) {
       return;
     }
     setInterviewError(null);
@@ -412,9 +417,10 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           {interviewError && <div className="alert alertError" role="alert">{interviewError}</div>}
           {interviewsError && <div className="alert alertError" role="alert">{interviewsError}</div>}
 
-          {/* Riwayat Interview — the log of interviews already scheduled or
-              progressed for this client (blank Belum Dijadwalkan attempts are
-              filtered server-side), so a saved one can be REOPENED not duplicated. */}
+          {/* Riwayat Kelola Klien — sessions with saved work: a submitted riset
+              awal, a schedule, a started/submitted interview, or a cancellation
+              (blank never-touched attempts are filtered server-side). A running
+              riset awal is reached through the button below, which resumes. */}
           {interviews.length > 0 ? (
             <div className="table-wrap" style={{ marginBottom: 12 }}>
               <table className="table">
@@ -422,6 +428,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                   <tr>
                     <th>Interview ID</th>
                     <th>Status</th>
+                    <th>Riset awal</th>
                     <th>Verdict</th>
                     <th>Prasyarat</th>
                     <th>Dibuat</th>
@@ -438,6 +445,22 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                       </td>
                       <td>
                         <span className={`badge badge-${interviewStatusTone(iv.status)}`}>{iv.status}</span>
+                      </td>
+                      {/* Langkah 1 — the measured research step. `—` while it is
+                          still running: an unfinished step has no duration yet. */}
+                      <td>
+                        {iv.riset_awal_status ? (
+                          <>
+                            <span className={`badge badge-${risetAwalStatusTone(iv.riset_awal_status)}`}>
+                              {iv.riset_awal_status}
+                            </span>{' '}
+                            <span className="muted" style={{ fontSize: 12 }}>
+                              {formatDurasiMenit(iv.riset_awal_durasi_menit)}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
                       </td>
                       <td>
                         {iv.verdict ? (
@@ -459,13 +482,14 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             </div>
           ) : (
             <p className="muted" style={{ fontSize: 13 }}>
-              Belum ada interview terjadwal atau selesai untuk klien ini. Gunakan tombol di bawah untuk membuat
-              interview, lalu isi jadwal (Blok A) atau mulai interview agar tercatat di sini.
+              Belum ada sesi Kelola Klien yang tercatat untuk klien ini. Gunakan tombol di bawah untuk
+              membukanya — riset awal langsung mulai terhitung, dan sesi muncul di sini begitu riset awal
+              disubmit, jadwal diisi, atau interview dimulai.
             </p>
           )}
 
           <button type="button" className="btn btnPrimary" disabled={creatingInterview} onClick={handleOpenInterview}>
-            {creatingInterview ? 'Membuka…' : 'Buat & buka interview baru'}
+            {creatingInterview ? 'Membuka…' : 'Kelola Klien (mulai riset awal)'}
           </button>
         </section>
       )}
