@@ -280,9 +280,10 @@ CPL and impressions remain unmodelled system-wide (not introduced here) — see 
 
 ## 10. Open Assumptions
 
-> **Owner answered 2026-08-13** (`DECISIONS.md`). Six assumptions are now **decided** (✅);
-> three metric-modelling questions and the catalog sign-off were **clarified back to the
-> owner** (⏳ — detail in §10.1). No assumption is left silently guessed.
+> **Owner answered 2026-08-13** (`DECISIONS.md`). **All of RM-1…RM-11 are now decided (✅).** The final three
+> — the catalog sign-off (RM-6), the M14 discipline weights (RM-9a), and the metric-modelling go/no-go
+> (RM-7/RM-11) — were **signed off/closed by the owner on 2026-08-13** (see the two 2026-08-13 rows in
+> `DECISIONS.md`; detail in §10.1). No assumption is left silently guessed and none is left open.
 
 | ID | Assumption (as raised at SESI1) | Owner | Status / Resolusi (2026-08-13) |
 |---|---|---|---|
@@ -291,24 +292,28 @@ CPL and impressions remain unmodelled system-wide (not introduced here) — see 
 | RM-3 | No **blended whole-client ROAS** is computed — only the Ads-channel ROAS is shown — because there is no agreed denominator spanning organic + live + paid spend | Yohan / SPV Ads | ✅ **Decided: no blend. ROAS is Ads-channel only.** Owner: *"roas hanya dari iklan."* RM-C2 stays `GMV from Ads ÷ Total Spend`; no blended-ROAS denominator is invented. Closes RM-3 permanently |
 | RM-4 | CPL and impressions stay unmodelled (they exist nowhere in CDPS today) | Hans / SPV Ads | ✅ **Decided (2026-08-13): NOT modelled, but a text-only record field is added.** Owner: *"tidak perlu dimodelkan, tapi apa bisa dibuat text-only untuk pencatatan."* ⇒ new form field **RM-C9 "Catatan Metrik Tambahan (teks)"** — free text, never a computed metric, never in delta/rollup/score. CPL/impressions/CPC/CPM/organic views live there as notes until (if ever) modelled in M8/M7. §10.1-B explains "modelled" |
 | RM-5 | Force-close / `belum dikonfirmasi` warning window = N days after week close | Yulianti | ✅ **Decided (2026-08-13): N = 2 hari kerja**, owner-tunable; **+ a Head can reopen an auto-closed recap** (`Ditutup Otomatis → Terbuka`), which rescues the data but leaves `pernah_ditutup_otomatis = true` permanently (the AM's non-performance stays on record, feeds M14). Worked example + reopen flow in §10.1-A |
-| RM-6 | Notification-catalog sign-off, carried from M6B PA-8 | Hans | ⏳ **Premise corrected + full list for sign-off (§10.1-C).** The SESI1 spec said "v2=28 → v3=31" — **stale**. The live catalog is already **v6 = 44 events**; M6D's events make it **v7 = 48** (3 recap events + 1 for RM-8's mandatory division note), not 31. Full enumeration in §10.1-C awaits owner sign-off |
-| RM-7 | Organic video "views" have no tracked source in CDPS today, so RM-C3's organic component is manual-with-source or `—` | Hans / SPV Creative | ⏳ **Clarified (§10.1-B).** Same class as RM-4: manual+source or `—` today, or a text note in **RM-C9**; auto only if/when a platform export becomes routine — a graduation in the owning module (M7), not an M6D invention |
+| RM-6 | Notification-catalog sign-off, carried from M6B PA-8 | Hans | ✅ **Signed off 2026-08-13.** Owner: *"Iya ini benar."* The catalog **v7 = 48** (44 live v1–v6 + 4 M6D events) is approved, so the **M6B PA-8 gate is cleared** — modules may ship notifications; D-07 is unblocked. Registration is one `notif_catalog_versions` row (`eventCount: 4`), not a literal (O55). Premise history + full enumeration in §10.1-C |
+| RM-7 | Organic video "views" have no tracked source in CDPS today, so RM-C3's organic component is manual-with-source or `—` | Hans / SPV Creative | ✅ **Decided 2026-08-13: not modelled now (default b).** Owner: *"tidak perlu bangun dulu, buat saja kolom dengan text only, saat ini belum dibutuhkan."* Organic views stay `—` in the metric column; the figure may be jotted in the text-only **RM-C9** field (same class as RM-4). Auto only if/when the source is built in the owning module (M7). §10.1-B |
 | RM-8 | Division note (RM-D6) is optional | Yohan | ✅ **Decided: MANDATORY.** Owner: *"divisi wajib buat report mingguan."* RM-D6 becomes a required weekly note **owed by each division that touched the client this week**, with its own reminder (the literal Phase 0 "divisions send weekly reports" step). Rule 8 + form amended below; new advisory event `catatan_divisi_belum_diisi` (part of the v7 catalog, §10.1-C) |
 | RM-9 | **Recap discipline is displayed (H-2), not scored.** | Yohan / Nerissa | ✅ **Decided: displayed AND scored.** Owner: *"disiplin perlu [dari] RM-8 dinilai dan ditampilkan."* Displayed stays H-2 (unchanged). **Scored** lands in **M14 Team Performance — NOT an eighth M13 component** (§8.4 guardrail holds: no re-weight of M13's confirmed weights, no grading AM form-filling inside a client-health number). Discipline measured = the RM-8 obligation: AM recap closed-on-time + divisions' mandatory weekly notes filed. Requires an M14 amendment that re-weights the confirmed AM KPI Profile (50/25/25) — flagged for M14 sign-off, see M14 amendment note + RM-9a below |
 | RM-10 | H-4 (interview verdict on the health view) is assumed useful and **advisory only** | Yohan | ✅ **Decided: keep H-4.** Owner: *"verdict interview ditampilkan di halaman health."* H-4 stays, advisory-only (never gates), respecting the narrower `canReadVerdict` scope (§8.3 Rule 5). Closes RM-10 |
-| RM-11 | Phase 0 Diagram 3 also lists **CPC / CPM** and **Upcoming Milestones** | Hans / SPV Ads | ⏳ **Clarified (§10.1-B).** Same class as RM-4/RM-7: CPC/CPM unmodelled system-wide (may be jotted in **RM-C9** text), milestones have no entity ⇒ out of H-1 scope until their sources exist in the owning module |
+| RM-11 | Phase 0 Diagram 3 also lists **CPC / CPM** and **Upcoming Milestones** | Hans / SPV Ads | ✅ **Decided 2026-08-13: not modelled now (default b).** Owner: *"tidak perlu bangun dulu, buat saja kolom dengan text only, saat ini belum dibutuhkan."* Same class as RM-4/RM-7: CPC/CPM unmodelled system-wide (may be jotted in **RM-C9** text), milestones have no entity ⇒ out of H-1 scope until their sources are built in the owning module (M8). §10.1-B |
 
-### RM-9a (new, needs sign-off) — how discipline is scored in M14
+### RM-9a (✅ signed off 2026-08-13) — how discipline is scored in M14
 
-RM-9's "score it" opens exactly one downstream question the owner must still settle: **the M14 re-weight.**
-The AM KPI Profile today is confirmed at **50% avg Client Health Score / 25% Complaint Resolution Speed /
-25% Revision Escalation Rate** (M14 §7 #6). Adding a **Weekly-Recap Discipline** component means those
-three no longer sum to 100. The recommendation logged for sign-off: a **10–15% Weekly-Recap Discipline**
-slice carved proportionally from the existing three (e.g. 45 / 22.5 / 22.5 / 10), measuring *% of the AM's
-active clients whose current-week recap was AM-closed on time (not `Ditutup Otomatis`)*. The **division**
-side of RM-8 (did the division file its mandatory note) belongs to that **division role's** M14 profile, not
-the AM's. This is an M14 change, tracked as an M14 amendment; M6D only supplies the raw signal (recap
-close status + division-note presence), it does not compute the grade.
+RM-9's "score it" opened exactly one downstream question: **the M14 re-weight**, now settled. The AM KPI
+Profile was confirmed at **50 / 25 / 25** (avg Client Health Score / Complaint Resolution Speed / Revision
+Escalation Rate, M14 §6 #6). Adding a **Weekly-Recap Discipline** component means those three no longer sum
+to 100. **Owner decision 2026-08-13** (*"jalankan Rekomendasi carve 10–15%… mis. 45 / 22.5 / 22.5 / 10, +
+slice kepatuhan-catatan di profil tiap divisi"*): carve a **10%** Weekly-Recap Discipline slice
+**proportionally** from the existing three → **45 / 22.5 / 22.5 / 10**, where Weekly-Recap Discipline = *% of
+the AM's active clients whose current-week recap was AM-closed on time and never force-closed
+(`pernah_ditutup_otomatis = false`)*. The **division** side of RM-8 (did the division file its mandatory
+note) is a **5% Weekly-Note Compliance** slice, carved **proportionally** from each **division role's** M14
+profile (Creative 28.5/23.75/23.75/19/**5**, Ads 23.75/28.5/23.75/19/**5**, KOL 28.5/23.75/19/23.75/**5**) —
+not the AM's. Live-stream is a vendor, not an M14-scored role. The full amendment lives in **M14 §9** (with the
+weight table); M6D only supplies the raw signal (recap close status + `pernah_ditutup_otomatis` flag +
+division-note presence), it does not compute the grade. Tracked as **D-14**.
 
 ### 10.1 Clarifications requested by the owner (2026-08-13)
 
@@ -416,10 +421,12 @@ it is **4 events, → v7 = 48**:
 | 47 | `rekap_sengketa_angka` | AM files `Sengketa Angka` on an auto figure | SPV |
 | 48 | `catatan_divisi_belum_diisi` | A division owing a mandatory weekly note (RM-8) hasn't filed by close | Division lead + AM |
 
-**The full 44 live events are enumerated for sign-off in `docs/handoff/HANDOFF_M6D_SESI2.md` §Katalog.**
-Sign-off is still the single gate that has been pending since M6B PA-8: no module ships notifications until the
-owner signs the catalog. What M6D needs signed is **v7 = 48** (44 live + these 4), registered as one
-`notif_catalog_versions` row in the D-07 migration.
+**The full 44 live events are enumerated in `docs/handoff/HANDOFF_M6D_SESI2.md` §Katalog.**
+Sign-off was the single gate pending since M6B PA-8: no module ships notifications until the owner signs the
+catalog. **The owner signed off `v7 = 48` on 2026-08-13** (*"Iya ini benar."*, `DECISIONS.md`), so the PA-8
+gate is now **cleared** and D-07 is unblocked. It is registered as one `notif_catalog_versions` row
+(`eventCount: 4`) in the D-07 migration — the invariant test counts `registeredEventCount()` from the registry,
+so **do not** hardcode the literal 48 (O55).
 
 ---
 
