@@ -142,12 +142,14 @@ check() { # nama · sql · harapan
 }
 check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "112"
 check "entity_prefix"    "select count(*) from entity_prefix"    "33"
-check "sm_machines"      "select count(*) from sm_machines"      "20"
+check "sm_machines"      "select count(*) from sm_machines"      "21"
 check "notif_events"     "select count(*) from notif_events"     "44"
+# 21 = 20 + mesin #18 `weekly_result_recap` (Modul 6D D-02, 20260813020000:
+#      Terjadwal→Terbuka→Ditutup|Ditutup Otomatis→(Head)Terbuka). notif_events
+#      TETAP 44 (v7 menyusul D-07); nol tabel/prefix baru di D-02.
 # 112 = 107 + 5 tabel Modul 6D D-01 (20260813010000: weekly_result_recap +
 #       wrr_divisi/wrr_metrik/wrr_catatan/wrr_catatan_divisi). 33 = 32 + WRR.
-#       sm_machines TETAP 20 (mesin #18 menyusul D-02); notif_events TETAP 44
-#       (v7 menyusul D-07). D-01 = skema + prefix saja.
+#       D-01 = skema + prefix saja.
 # 107 = 105 + hari_libur + kelola_klien_sla_config (20260813000000, SLA timeline
 #       tiga langkah — kalender libur nasional + ambang berversi). Mesin/prefix/
 #       event TIDAK berubah: nol mesin baru, nol ID baru, nol event notifikasi baru.
