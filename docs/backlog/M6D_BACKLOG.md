@@ -27,8 +27,8 @@
 | **D-03** | Agregasi auto (read-only) | Job/fungsi yang mengisi `WRR_DIVISI` (# video/# creator/# live + Brief bergerak) & `WRR_METRIK` `otomatis` (GMV interim, ROAS Ads, Spend, CTR/CVR bila ada, view) dari M7/M8/M9/M10 by client + window minggu. | Baris `otomatis` **UPDATE-blocked** utk aktor JWT (AM) di DB (trigger) **+** RLS `WITH CHECK` — TS predikat & RLS tak boleh divergen (invariant beku, bentuk sama `plan_actual`). |
 | **D-04** | Entry manual + `—` | Fallback RM-C (view organik, CTR/CVR non-Ads): `sumber ∈ otomatis/manual/tidak_tersedia`; DB check `file_bukti`+`tanggal_ambil` NOT NULL saat `manual`. Bagi-nol ROAS/CTR/CVR → `—` (house #7). | Nol pipeline auto baru untuk CTR/view/CPL (R3). CPL/impressions tetap tak dimodelkan (RM-4). |
 | **D-05** | Narasi + `Sengketa Angka` | RM-D (RM-D1/RM-D3 wajib saat tutup); `Sengketa Angka` → notif SPV, tak memblok tutup, tak mengubah angka auto (pola M6B PE-6). `WRR_CATATAN_DIVISI` append-only. | GMV single-source: rekap **tak pernah** menulis M6B PE-1 (guardrail §3). |
-| **D-06** | Job terjadwal | (a) Senin 00:00 WIB — buka rekap per klien aktif + force-close minggu lalu yang masih `Terbuka`; (b) tutup+N hari — `rekap_mingguan_belum_dikonfirmasi`. Idempoten, WIB. | Terima "sekarang" sbg argumen (idempotensi teruji tanpa jam dinding, pola `interview_*_tick`). pg_cron dibungkus guard `IF EXISTS pg_available_extensions` (absen di Postgres polos CI). |
-| **D-07** | Notif v3 | +3 event → total 31 (`rekap_mingguan_terbuka`, `rekap_mingguan_belum_dikonfirmasi`, `rekap_sengketa_angka`). Satu migrasi. | Re-baseline invariant katalog; sign-off M6B PA-8 masih terbuka (RM-6). |
+| **D-06** | Job terjadwal | (a) Senin 00:00 WIB — buka rekap per klien aktif (**kecuali hold/paused**, RM-2) + force-close minggu lalu yang masih `Terbuka`; (b) tutup + **N=2 hari kerja** (RM-5) — `rekap_mingguan_belum_dikonfirmasi`; (c) saat tutup — divisi yang berutang catatan wajib (RM-8) belum isi → `catatan_divisi_belum_diisi`. Idempoten, WIB, pakai `working_days_between`. | Terima "sekarang" sbg argumen (idempotensi teruji tanpa jam dinding, pola `interview_*_tick`). pg_cron dibungkus guard `IF EXISTS pg_available_extensions` (absen di Postgres polos CI). |
+| **D-07** | Notif **v7** | ⚠️ Premis SESI1 basi ("v2=28→v3=31"). Katalog live sudah **v6=44** (registry O55). M6D daftar **versi baru v7 = +4 event → 48**: `rekap_mingguan_terbuka`, `rekap_mingguan_belum_dikonfirmasi`, `rekap_sengketa_angka`, **`catatan_divisi_belum_diisi`** (RM-8). Satu migrasi + satu baris `notif_catalog_versions` (eventCount: 4). | Re-baseline lewat baris versi, **bukan** literal. Sign-off katalog M6B PA-8 masih gate (RM-6) — daftar penuh v1→v6 di HANDOFF_M6D_SESI2 §Katalog. |
 | **D-08** | Rollup ke Plan | Rekap `Ditutup` memasok PE-3/PE-8 periode `Aktif` tertaut (M6B). Klien `Tanpa Plan` → rekap berdiri sendiri. | Rollup, bukan pengganti (R1). |
 | **D-09** | Domain + API + wire | `recap.ts` (read own-clients / SPV all; write RM-A6/RM-C manual/RM-D/`Sengketa`/tutup). Route baca + tutup + `sengketa`. Wire `*ToWire` (null eksplisit, bukan omitempty — hindari O43); daftar ke shape-parity. | `route-parity` `KNOWN_GAPS` tetap kosong. |
 | **D-10** | UI internal | Halaman rekap mingguan per klien (desktop-first tutup; mobile read-only minggu berjalan). **Bukan** permukaan klien (Rule 9 — nol paparan Client Portal allow-list). | Picker karyawan/format mengikuti pola yang sudah ada bila perlu. |
@@ -40,11 +40,23 @@
 
 Sama seperti CLAUDE.md: validasi server-side + pesan BI `[...]`; tes izin per-role (incl. layered OD/Director); tes immutability (rekap `Ditutup` tak punya jalur UPDATE/DELETE, koreksi = amendment audit-logged); derived/auto recomputable-from-log; seed fixture Alpha Digital lolos; event notif terdaftar. **Tambahan M6D:** tes single-source GMV (rekap tak pernah menulis PE-1); tes cakupan klien `Tanpa Plan` (rekap tetap terbentuk tanpa `plan_id`).
 
-## 3. Open questions (dari PRD §10 — perlu jawaban pemilik sebelum/ saat implementasi)
+## 3. Open questions — **dijawab pemilik 2026-08-13** (detail: PRD §10 + `DECISIONS.md` 2026-08-13)
 
-- **RM-3** — apakah perlu ROAS blend seluruh klien? Kalau ya, definisikan denominator (spend mana yang dihitung) dulu.
-- **RM-5** — jendela force-close/`belum dikonfirmasi` N hari (M6B pakai 5 hari utk bulanan; mingguan kemungkinan 1–2 hari).
-- **RM-8** — apakah catatan divisi (RM-D6) wajib (divisi *harus* lapor mingguan) atau tetap opsional?
-- **RM-9** — apakah disiplin rekap perlu **dinilai** (bukan cuma ditampilkan di H-2)? Rekomendasi: kalau ya, taruh di **M14 Team Performance** peran AM, BUKAN komponen ke-8 M13 (butuh re-weight + menilai form-filling AM di dalam angka kesehatan klien).
-- **RM-10** — apakah blok H-4 (verdict Interview) memang diinginkan di halaman health? Menghapusnya nol biaya bagi modul lain.
-- **RM-11** — CPC/CPM + Upcoming Milestones (Phase 0 Diagram 3) belum dimodelkan di mana pun ⇒ di luar cakupan H-1 sampai sumbernya ada.
+**✅ Terputus (decided):**
+- **RM-1** — minggu ISO Sen–Min WIB **benar**, tak berubah.
+- **RM-2** — klien aktif = **≥1 service non-terminal, kecuali yang semua service-nya hold/paused** ⇒ filter di job D-06/D-03.
+- **RM-3** — **tidak ada ROAS blend. ROAS = kanal Ads saja** (RM-C2 tetap `GMV Ads ÷ Spend`). Tertutup permanen.
+- **RM-8** — catatan divisi **WAJIB** (divisi berutang laporan mingguan) ⇒ RM-D6 wajib + reminder `catatan_divisi_belum_diisi`; **tak memblok tutup rekap AM** (kewajiban di divisi).
+- **RM-9** — disiplin **ditampilkan (H-2) DAN dinilai**. Nilai lands di **M14** (peran AM utk tutup rekap tepat waktu; peran divisi utk catatan wajib) — **BUKAN** komponen ke-8 M13. Butuh amandemen M14 (re-weight profil AM 50/25/25). Lihat **D-14** + PRD §10 RM-9a.
+- **RM-10** — H-4 verdict Interview **tetap** di halaman health (advisory).
+
+**⏳ Diklarifikasi balik ke pemilik (default berlaku, tunggu go/no-go):**
+- **RM-4 / RM-7 / RM-11** — CPL, impressions, CPC/CPM, view organik, Upcoming Milestones: penjelasan "dimodelkan" ada di PRD §10.1-B. Default = **tidak dimodelkan di M6D** (R3, tampil `—`); kalau mau, tambah sumbernya di modul pemilik (M8/M7) **dulu**.
+- **RM-5** — jendela force-close **default N = 2 hari kerja** (owner-tunable). Contoh kerja di PRD §10.1-A.
+- **RM-6** — sign-off katalog: premis basi dikoreksi (live **v6=44**, M6D → **v7=48**). Daftar penuh utk tanda tangan di HANDOFF_M6D_SESI2 §Katalog.
+
+## 4. Tiket baru dari resolusi 2026-08-13
+
+| # | Tiket | Isi | Catatan |
+|---|---|---|---|
+| **D-14** | **M14 — komponen disiplin rekap (RM-9)** | Amandemen M14: tambah komponen KPI **Disiplin Rekap Mingguan** ke profil peran **AM** (% klien aktif AM yang rekap minggu berjalan-nya ditutup AM tepat waktu, bukan `Ditutup Otomatis`) + komponen **catatan mingguan** ke profil peran **divisi**. Re-weight profil AM terkonfirmasi (50/25/25) — rekomendasi slice 10–15% dari ketiganya (mis. 45/22.5/22.5/10). **Bukan** komponen ke-8 M13. | **Butuh sign-off pemilik** utk angka bobot (mengubah profil terkonfirmasi M14 §7 #6). M6D hanya menyuplai sinyal mentah (status tutup rekap + ada/tidak catatan divisi); M14 yang menghitung. Diurut **bareng/ sesudah** implementasi M6D. |

@@ -246,7 +246,7 @@ The Ad Campaign is a **living** record that **outlives** its setup Brief (M8 §2
 |---|---|---|---|
 | `Terjadwal` | `Terbuka` | sistem (job Senin 00:00 WIB) | Rekap dibuka untuk tiap klien aktif; angka otomatis mulai terakumulasi sepanjang minggu (M6D Rule 1). Service-role, bukan lead |
 | `Terbuka` | `Ditutup` | AM/CRO pemilik | Konfirmasi mingguan (M6D Rule 8) — semua angka otomatis teratasi + fallback manual terisi/`—` + narasi RM-D1/RM-D3 lengkap, transaksional. Angka otomatis dibekukan as-of penutupan |
-| `Terbuka` | `Ditutup Otomatis` | sistem | Force-close saat lewat jendela (Open Assumption RM-5) + tanda tidak lengkap. Terminal |
+| `Terbuka` | `Ditutup Otomatis` | sistem | Force-close saat lewat jendela **N=2 hari kerja** (RM-5 diputus 2026-08-13, owner-tunable) + tanda tidak lengkap. Terminal |
 
 - **Terminal:** `Ditutup`, `Ditutup Otomatis`.
 - Satu rekap per klien per minggu ISO (index parsial `(client_id, iso_year, iso_week)`), bukan ditegakkan mesin.
