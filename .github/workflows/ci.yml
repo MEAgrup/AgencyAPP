@@ -167,14 +167,18 @@ jobs:
       # DECISIONS 2026-08-11 Interview bagian 2). Sama seperti v5: literal 44 hanya
       # kenyamanan — invariant sebenarnya adalah kesamaan dengan SUM(event_count).
       # 21 = 20 + mesin #18 weekly_result_recap (Modul 6D D-02, 20260813020000:
-      #      Terjadwal→Terbuka→Ditutup|Ditutup Otomatis→(Head)Terbuka). notif_events
-      #      TETAP 44 — v7 (48) menyusul D-07, bukan D-02.
-      - name: Verify migration seed counts (21 machines, 44 events, catalog registry consistent)
+      #      Terjadwal→Terbuka→Ditutup|Ditutup Otomatis→(Head)Terbuka).
+      # 48 = 44 + 4 (v7: M6D Rekap Hasil Mingguan — rekap_mingguan_terbuka,
+      #      rekap_mingguan_belum_dikonfirmasi, rekap_sengketa_angka,
+      #      catatan_divisi_belum_diisi wajib RM-8; 20260813070000_m6d_notif_v7.sql,
+      #      DECISIONS 2026-08-13 RM-6 sign-off). Literal 48 hanya kenyamanan —
+      #      invariant sebenarnya adalah kesamaan dengan SUM(event_count).
+      - name: Verify migration seed counts (21 machines, 48 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
                if (select count(*) from sm_machines) <> 21 then raise exception 'expected 21 machines'; end if;
-               if (select count(*) from notif_events) <> 44 then raise exception 'expected 44 events'; end if;
+               if (select count(*) from notif_events) <> 48 then raise exception 'expected 48 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
                  then raise exception 'notif_events does not match the registered catalog versions'; end if;

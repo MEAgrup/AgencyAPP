@@ -107,6 +107,18 @@ export const EVENTS = {
   // owner added after that surface shipped.
   KualifikasiPrasyaratMenggantung: 'kualifikasi_prasyarat_menggantung', // -> SPV + Head of Account
 
+  // ----- catalog v7 (M6D Rekap Hasil Mingguan) — 4 events -----
+  // Owner signed off v7=48 on 2026-08-13 ("Iya ini benar."), clearing the M6B
+  // PA-8 catalog gate. Names verbatim from PRD §9/§10.1-C. Plain snake_case (not
+  // dotted) because the PRD wrote the identifiers itself — same rule as the v2
+  // `strategi_*` / v5 `interview_*` names. Emission lands in D-06 (the Monday job:
+  // rekap_mingguan_terbuka + belum_dikonfirmasi + catatan_divisi_belum_diisi at
+  // force-close) and D-09 (AM close: rekap_sengketa_angka + catatan_divisi).
+  RekapMingguanTerbuka: 'rekap_mingguan_terbuka', // -> AM/CRO owning the client
+  RekapMingguanBelumDikonfirmasi: 'rekap_mingguan_belum_dikonfirmasi', // -> AM/CRO + SPV
+  RekapSengketaAngka: 'rekap_sengketa_angka', // -> SPV
+  CatatanDivisiBelumDiisi: 'catatan_divisi_belum_diisi', // -> division lead + AM
+
 } as const;
 
 /** A cataloged event type. */
@@ -166,6 +178,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
       'Interview bagian 2 — eskalasi prasyarat menggantung: 1 event (kualifikasi_prasyarat_menggantung, >= 2 per AM). Advisory; verdict tetap tidak memblok.',
     eventCount: 1,
     decisionRef: 'docs/DECISIONS.md 2026-08-11 (Interview — bagian 2: resolusi + eskalasi N=2)',
+  },
+  {
+    version: 7,
+    description:
+      'M6D Rekap Hasil Mingguan — 4 event (rekap_mingguan_terbuka, rekap_mingguan_belum_dikonfirmasi, rekap_sengketa_angka, catatan_divisi_belum_diisi wajib RM-8)',
+    eventCount: 4,
+    decisionRef: 'docs/DECISIONS.md 2026-08-13 (RM-6 sign-off v7=48; RM-8 catatan divisi wajib)',
   },
 ] as const;
 
@@ -266,6 +285,15 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
 
   // --- v6 (Interview bagian 2) — resolver must match the migration seed ---
   [EVENTS.KualifikasiPrasyaratMenggantung]: { description: '>= 2 prasyarat bersyarat menggantung pada satu AM (belum selesai, lewat hari-7) — eskalasi ke SPV + Head of Account', resolver: 'leadsOfDivision', version: 6 },
+
+  // --- v7 (M6D Rekap Hasil Mingguan) — descriptions and resolvers must match the migration seed ---
+  // Resolver rule (per notif_catalog_v2 header): single explicit recipient ->
+  // explicit; only lead/SPV of a division -> leadsOfDivision; explicit AND
+  // lead/SPV -> explicitOrLeads.
+  [EVENTS.RekapMingguanTerbuka]: { description: 'Rekap hasil mingguan dibuka (job Senin 00:00 WIB) — ke AM/CRO pemilik klien', resolver: 'explicit', version: 7 },
+  [EVENTS.RekapMingguanBelumDikonfirmasi]: { description: 'Rekap belum dikonfirmasi N=2 hari kerja setelah minggu tutup — ke AM/CRO + SPV', resolver: 'explicitOrLeads', version: 7 },
+  [EVENTS.RekapSengketaAngka]: { description: 'AM mengajukan Sengketa Angka atas angka otomatis (RM-B6/RM-C) — ke SPV', resolver: 'leadsOfDivision', version: 7 },
+  [EVENTS.CatatanDivisiBelumDiisi]: { description: 'Divisi berutang catatan mingguan wajib (RM-8) belum mengisi saat rekap tutup — ke lead divisi + AM', resolver: 'explicitOrLeads', version: 7 },
 
 };
 

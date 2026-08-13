@@ -34,9 +34,9 @@ describe('frozen catalog', () => {
     }
   });
 
-  it('is at version 6, and the versions are registered in order with no gaps', () => {
-    expect(CATALOG_VERSION).toBe(6);
-    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6]);
+  it('is at version 7, and the versions are registered in order with no gaps', () => {
+    expect(CATALOG_VERSION).toBe(7);
+    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
     // A registry row with no decision reference is how an un-signed-off
     // amendment would sneak in looking legitimate.
     for (const v of CATALOG_VERSIONS) {
@@ -180,6 +180,21 @@ describe('frozen catalog', () => {
     expect(eventsOfVersion(6)).toEqual(['kualifikasi_prasyarat_menggantung']);
     expect(CATALOG[EVENTS.KualifikasiPrasyaratMenggantung].version).toBe(6);
     expect(CATALOG[EVENTS.KualifikasiPrasyaratMenggantung].resolver).toBe('leadsOfDivision');
+  });
+
+  it('carries exactly the 4 v7 events — M6D Rekap Hasil Mingguan', () => {
+    // Owner sign-off 2026-08-13 (RM-6, "Iya ini benar."): v7 = 48. The 3 recap
+    // events + catatan_divisi_belum_diisi (RM-8 mandatory division note).
+    expect(eventsOfVersion(7)).toEqual([
+      'rekap_mingguan_terbuka',
+      'rekap_mingguan_belum_dikonfirmasi',
+      'rekap_sengketa_angka',
+      'catatan_divisi_belum_diisi',
+    ]);
+    expect(CATALOG[EVENTS.RekapMingguanTerbuka].resolver).toBe('explicit');
+    expect(CATALOG[EVENTS.RekapMingguanBelumDikonfirmasi].resolver).toBe('explicitOrLeads');
+    expect(CATALOG[EVENTS.RekapSengketaAngka].resolver).toBe('leadsOfDivision');
+    expect(CATALOG[EVENTS.CatatanDivisiBelumDiisi].resolver).toBe('explicitOrLeads');
   });
 
   it('every event carries a description and a valid resolver', () => {
