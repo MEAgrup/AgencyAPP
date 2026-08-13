@@ -39,23 +39,24 @@ Berkas yang berubah SESI2:
 | RM-3 | ✅ decided | **Tak ada ROAS blend — ROAS = kanal Ads saja**. RM-C2 tetap `GMV Ads ÷ Spend`. Tertutup permanen |
 | RM-4 | ✅ decided | **Tidak dimodelkan**, tapi ada field **teks-only RM-C9** "Catatan Metrik Tambahan" (owner 2026-08-13: *"text only untuk pencatatan"*). Bukan metrik — tak masuk delta/rollup/skor. Arti "dimodelkan" → PRD §10.1-B |
 | RM-5 | ✅ decided | Force-close **N = 2 hari kerja** + **Head boleh buka-kembali** rekap `Ditutup Otomatis` (`→ Terbuka`, alasan wajib). `pernah_ditutup_otomatis` **permanen** — nilai AM tetap tercatat walau datanya diselamatkan. Alur → PRD §10.1-A |
-| RM-6 | ⏳ **sign-off** | Premis "v3=31" **basi**. Katalog live **v6=44**; M6D → **v7=48**. Daftar penuh utk tanda tangan → **§Katalog di bawah** |
-| RM-7 | ⏳ **perlu pemilik** | View organik = manual/`—`/teks RM-C9 (sama kelas RM-4). Naik auto hanya kalau ada export platform rutin di M7 |
+| RM-6 | ✅ **signed off 2026-08-13** | Pemilik: *"Iya ini benar."* Katalog **v7=48** disetujui (44 live v1–v6 + 4 M6D). **Gate M6B PA-8 LULUS** — D-07 tak lagi terblokir. Daftar penuh → **§Katalog di bawah** |
+| RM-7 | ✅ **decided 2026-08-13** | Pemilik: *"tidak perlu bangun dulu, buat saja kolom dengan text only, saat ini belum dibutuhkan."* View organik **tidak dimodelkan** sekarang → `—` / teks RM-C9. Auto hanya kalau sumbernya dibangun di M7 |
 | RM-8 | ✅ decided | Catatan divisi **WAJIB** (divisi berutang laporan mingguan). Reminder `catatan_divisi_belum_diisi`. **Tak memblok tutup AM** |
-| RM-9 | ✅ decided | Disiplin **ditampilkan (H-2) DAN dinilai** — nilainya di **M14, bukan komponen ke-8 M13**. Butuh re-weight profil AM ⇒ **sign-off** (RM-9a / D-14) |
+| RM-9 | ✅ decided | Disiplin **ditampilkan (H-2) DAN dinilai** — nilainya di **M14, bukan komponen ke-8 M13**. Re-weight profil AM ⇒ RM-9a (di bawah, **signed off**) / D-14 |
+| RM-9a | ✅ **signed off 2026-08-13** | Pemilik: *"jalankan Rekomendasi… 45/22.5/22.5/10… + slice kepatuhan-catatan di profil tiap divisi."* Profil AM **45/22.5/22.5/10**; profil divisi Creative/Ads/KOL **+5% proporsional** Kepatuhan Catatan. **D-14 tak lagi terblokir.** Detail → M14 §9 |
 | RM-10 | ✅ decided | **H-4 verdict Interview tetap** di halaman health (advisory) |
-| RM-11 | ⏳ **perlu pemilik** | CPC/CPM + Upcoming Milestones **di luar cakupan** sampai sumbernya ada (sama kelas RM-4; boleh dicatat di teks RM-C9) |
+| RM-11 | ✅ **decided 2026-08-13** | Pemilik: *"tidak perlu bangun dulu, buat saja kolom dengan text only, saat ini belum dibutuhkan."* CPC/CPM + Upcoming Milestones **tidak dimodelkan** sekarang → teks RM-C9; auto hanya kalau sumbernya dibangun di M8 |
 
-**⚠️ Pertanyaan yang BELUM terjawab — jawab di chat berikutnya SEBELUM/SAAT build:**
-1. **RM-6 — tanda tangan katalog `v7 = 48`** (daftar penuh §Katalog). **Gate keras M6B PA-8:** nol modul boleh mengirim notifikasi sebelum katalog ini ditandatangani. Ini blocker paling awal untuk D-07.
-2. **RM-9a — bobot komponen disiplin di M14.** Rekomendasi carve 10–15% dari profil AM terkonfirmasi (mis. **45 / 22.5 / 22.5 / 10**), + slice kepatuhan-catatan di profil tiap divisi. Mengubah profil terkonfirmasi (M14 §7 #6) butuh tanda tangan pemilik. Blocker untuk D-14, bukan D-01…D-13.
-3. **RM-7 / RM-11 — go/no-go pemodelan.** Mau kami bangun sumber **view organik** (M7) / **CPC/CPM/impressions** (M8) supaya jadi metrik auto, atau cukup `—` + catatan teks RM-C9? Default = cukup `—`+teks; ini TIDAK memblok D-01…D-13, hanya menambah pekerjaan di modul pemilik kalau "ya".
+**✅ Pertanyaan yang tadinya terbuka — semuanya SUDAH DIJAWAB pemilik 2026-08-13 (lihat `DECISIONS.md` baris 2026-08-13 teratas):**
+1. **RM-6 — tanda tangan katalog `v7 = 48`.** ✅ **Ditandatangani** (*"Iya ini benar."*). Gate M6B PA-8 kini LULUS; D-07 bebas berjalan.
+2. **RM-9a — bobot komponen disiplin di M14.** ✅ **Ditandatangani:** profil AM **45 / 22.5 / 22.5 / 10** (carve 10% proporsional); profil divisi Creative/Ads/KOL di-carve **5% proporsional** untuk Kepatuhan Catatan (28.5/23.75/23.75/19/5, 23.75/28.5/23.75/19/5, 28.5/23.75/19/23.75/5). D-14 bebas berjalan. Bobot final → M14 §9.
+3. **RM-7 / RM-11 — go/no-go pemodelan.** ✅ **Diputuskan: default (b)** — *tidak* dibangun sekarang. View organik / CPC / CPM / impressions / Upcoming Milestones tetap `—` + catatan teks RM-C9; auto hanya jika kelak sumbernya dibangun di M7/M8. TIDAK memblok D-01…D-13.
 
-Tidak ada lagi RM yang menunggu di luar tiga ini — RM-1/2/3/4/5/8/9/10 semuanya sudah decided.
+**Seluruh RM-1…RM-11 (+ RM-9a) kini decided/ditandatangani — tidak ada lagi pertanyaan pemilik yang menggantung untuk M6D.**
 
 ---
 
-## 2. §Katalog — 44 event live untuk sign-off (RM-6)
+## 2. §Katalog — 44 event live (RM-6, ✅ **ditandatangani 2026-08-13** → v7=48)
 
 Diambil verbatim dari `packages/core/src/notification.ts` (`EVENTS` + `CATALOG` + `CATALOG_VERSIONS`).
 Invarian sekarang = `registeredEventCount()` (jumlah versi teregistrasi), **bukan** literal (O55).
@@ -130,7 +131,7 @@ Invarian sekarang = `registeredEventCount()` (jumlah versi teregistrasi), **buka
 
 **→ Total live = 44.**
 
-### v7 — 4 (M6D, BARU, butuh sign-off bersama v1–v6)
+### v7 — 4 (M6D, BARU, ✅ **ditandatangani 2026-08-13** bersama v1–v6)
 | # | Event | Memicu | Penerima |
 |---|---|---|---|
 | 45 | `rekap_mingguan_terbuka` | Rekap mingguan dibuka (job Senin) | AM/CRO pemilik klien |
@@ -154,7 +155,7 @@ Tambahan:
 - **D-04** kini: + field **teks-only RM-C9** "Catatan Metrik Tambahan" (bukan metrik).
 - **D-06** kini: job (b) N=2 hari kerja, (c) event `catatan_divisi_belum_diisi`.
 - **D-07** kini: **v7 = 48**, bukan v3=31 (4 event, termasuk `catatan_divisi_belum_diisi`).
-- **D-14 (baru)** — M14: komponen **Disiplin Rekap** (peran AM, hitung `pernah_ditutup_otomatis`) + **Kepatuhan Catatan** (peran divisi). **Butuh sign-off bobot** (RM-9a). M6D suplai sinyal mentah; M14 hitung skor. Diurut bareng/sesudah M6D.
+- **D-14 (baru)** — M14: komponen **Disiplin Rekap** (peran AM, hitung `pernah_ditutup_otomatis`) + **Kepatuhan Catatan** (peran divisi). **Bobot ✅ ditandatangani 2026-08-13 (RM-9a):** AM 45/22.5/22.5/10; divisi Creative/Ads/KOL +5% proporsional. M6D suplai sinyal mentah; M14 hitung skor. Diurut bareng/sesudah M6D.
 
 ---
 
