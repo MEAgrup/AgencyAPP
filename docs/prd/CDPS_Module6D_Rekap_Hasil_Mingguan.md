@@ -59,7 +59,7 @@ So the recap can show "GMV is trending up this week" without ever becoming a com
 
 ## 4. Rules
 
-1. **One recap per client per ISO week.** The system auto-generates a `Rekap Hasil Mingguan` (`WRR-…`) for **every active client** at 00:00 WIB every Monday. "Active" = a client with at least one non-terminal Service (any path). Dormant clients get none.
+1. **One recap per client per ISO week.** The system auto-generates a `Rekap Hasil Mingguan` (`WRR-…`) for **every active client** at 00:00 WIB every Monday. **"Active" = a client with at least one non-terminal Service (any path), *excluding* clients whose services are all in a payment-hold / paused state** (owner decision 2026-08-13, RM-2: *"klien aktif ≥1 service, kalau hold dikecualikan"*). A held/paused client is not being executed on this week, so a recap for it would only ever auto-close empty and distort the coverage metric. Dormant and fully-held clients get none; the exclusion is a `WHERE` filter on the Monday job (D-03), pinned to the Service machine's hold/paused states.
 2. **The recap is client-level and cross-division (R2).** It consolidates Creative, Ads, KOL, and Live Stream for that client for that week, regardless of whether any Service is plan-gated. A client with only Direct-path / `Tanpa Plan` services still gets a full weekly recap — this is the record those services otherwise lack.
 3. **Production counts are auto-pulled, read-only.** For the ISO week:
    - **Creative (Module 7):** count of Assets reaching `[Approved]` in the week, broken down by Asset Type — the headline being **# video**. Source: Daily Output → Approved-Asset count (M7 §8 Rule 2).
@@ -75,7 +75,8 @@ So the recap can show "GMV is trending up this week" without ever becoming a com
 5. **Auto metrics are UPDATE-blocked for the AM at the DB level** (belt-and-braces with RLS — TS predicate and RLS must not diverge, frozen invariant), exactly as M6B PE-3 `otomatis` rows. Only manual fields (§4 fallbacks) and the narrative (RM-D) are AM-writable.
 6. **The recap rolls up into the monthly Plan, it does not replace it (R1).** For a client with an `Aktif` Plan period (Full-Management M6B or Plan Satuan M6C), each week's recap is linked to that period. At period close, the period's weekly recaps supply Module 6B **PE-3** (auto metrics) and **PE-8** (execution-vs-plan) — they are the weekly evidence behind the monthly numbers. The recap **never** writes PE-1 (manual GMV). For a client with **no** Plan, the recap stands alone: it is that client's only periodic results record, and it is not blocked by the absence of a Plan.
 7. **`Sengketa Angka` on an auto figure** routes to SPV and is logged; it never blocks the recap close and never mutates the auto figure in place (M6B PE-6 pattern).
-8. **Confirm is a real step, not a date.** Closing a recap (`Terbuka` → `Ditutup`) requires: every auto figure present or explicitly `—`, every manual fallback either filled-with-source or explicitly marked "tidak tersedia", and the RM-D narrative (RM-D1 + RM-D3) completed. Force-close on overrun sets an incomplete flag, deliberately visible in reports.
+8. **Confirm is a real step, not a date.** Closing a recap (`Terbuka` → `Ditutup`) requires: every auto figure present or explicitly `—`, every manual fallback either filled-with-source or explicitly marked "tidak tersedia", and the RM-D narrative (RM-D1 + RM-D3) completed. Force-close on overrun sets an incomplete flag, deliberately visible in reports. The **force-close window is N = 2 working days** after the week closes (owner decision 2026-08-13, RM-5 — owner-tunable, §10.1-A).
+   - **Division weekly note is now mandatory (RM-8, owner 2026-08-13: *"divisi wajib buat report mingguan"*).** Each division that touched the client this week **owes** a weekly note (RM-D6). A division that has not filed by close is flagged and fires `catatan_divisi_belum_diisi` (to the division lead + AM). **This obligation is on the division, not on the AM** — a missing division note does **not** block the AM's `Terbuka → Ditutup` (an AM cannot type another team's note), it is tracked as the division's own discipline signal and feeds that division's M14 score (RM-9a). The AM close requirements above are unchanged.
 9. **The recap is internal.** It is not a client-facing surface — client-facing results remain the external `mea-client-reporting` embed (Module 15 / Phase 0 OA-11). What the client sees is prepared from RM-D5 ("bahan untuk klien") and, monthly, from Module 6B PF-8. Nothing in this module is exposed through the Client Portal's allow-list (Module 15 §6.1).
 10. **Immutable audit log** on every field change, manual entry, `Sengketa Angka`, confirm, and close (actor + WIB timestamp + before/after). No UPDATE/DELETE path on a closed recap; a post-close correction is an audit-logged amendment, visible on the recap view.
 11. **No new grade, but it *is* surfaced on the Health Report.** The recap introduces **no** new scored component: Module 13's seven components and their confirmed weights (M13 Rule 3) are untouched, and Module 14 is untouched. What the recap does is **feed the Client Health Report view as its progress-and-results summary** — the health page is where "semua report, progress, ada komplain atau tidak, dan hasil" come together, and the weekly recap is the progress/results half of that summary. Full contract in §8. The distinction is load-bearing: the recap changes **what the health page shows**, never **how the score is computed**.
@@ -130,7 +131,7 @@ Per §4 / §3. Each metric shows its `Sumber` = `otomatis` (owning module) or `m
 | RM-D3 | Fokus Minggu Depan | Apa yang harus dikejar/diubah minggu berikutnya | Long text | W |
 | RM-D4 | Keluhan Terkait | `CPL-…` klien ini yang aktif minggu ini (auto) + status | Auto | A |
 | RM-D5 | Bahan untuk Klien | Poin yang akan disampaikan ke klien di check-in mingguan | Long text | O |
-| RM-D6 | Catatan Divisi | Komentar opsional lead divisi (read-only untuk AM, tak bisa dihapus) — realisasi "divisi lapor ke Account" (Phase 0) tanpa entry ganda | Thread | O |
+| RM-D6 | Catatan Divisi | **Wajib** (owner 2026-08-13, RM-8): tiap divisi yang menyentuh klien minggu ini **berutang** satu catatan mingguan (read-only untuk AM, tak bisa dihapus) — realisasi literal "divisi lapor ke Account" (Phase 0) tanpa entry ganda. Divisi yang belum mengisi saat tutup → flag + event `catatan_divisi_belum_diisi`. **Tidak memblok tutup rekap milik AM** (kewajiban ada pada divisi, bukan AM); masuk skor disiplin divisi (M14, RM-9a) | Thread | **W** (per divisi terlibat) |
 
 ### SECTION RM-E — Rollup ke Plan (auto, read-only)
 | ID | Content |
@@ -244,17 +245,18 @@ CPL and impressions remain unmodelled system-wide (not introduced here) — see 
 
 **State machine (machine #18 — weekly recap).** `Terjadwal` → `Terbuka` (auto, Monday 00:00 WIB) → `Ditutup` (AM confirm, Rule 8) | `Ditutup Otomatis` (system force-close). Terminal: `Ditutup`, `Ditutup Otomatis`. All transitions via `sm_transition` only. Auto figures continue to accrue while `Terbuka`; on either terminal state they are frozen as-of close. See `docs/STATE_MACHINES.md` §15.
 
-**Scheduled jobs.** (a) Monday 00:00 WIB — open the week's recap per active client, and force-close the prior week's recaps still `Terbuka` (→ `Ditutup Otomatis`, incomplete flag); (b) week-close + N days (Open Assumption RM-5) — emit `rekap_mingguan_belum_dikonfirmasi`. Jobs idempotent, WIB.
+**Scheduled jobs.** (a) Monday 00:00 WIB — open the week's recap per active client (excluding held/paused, RM-2), and force-close the prior week's recaps still `Terbuka` (→ `Ditutup Otomatis`, incomplete flag); (b) week-close + **N = 2 working days** (RM-5, resolved 2026-08-13) — emit `rekap_mingguan_belum_dikonfirmasi`; (c) at close — for any division that owes a mandatory note (RM-8) and hasn't filed, emit `catatan_divisi_belum_diisi`. Jobs idempotent, WIB, using the shared `working_days_between` helper.
 
-**Notification catalog — amendment (v3).** Current catalog is v2 = 28 events (base 15 + 4 Strategi + 6 Plan + 3 Gate; see M6B §8). This module adds **3 events → catalog v3 = 31**. One migration.
+**Notification catalog — amendment (NEW version v7). ⚠️ Premise corrected 2026-08-13.** The SESI1 draft said "current = v2 = 28 → this adds 3 = v3 = 31" — that is **stale**. The catalog is now asserted against a **version registry** (O55, `notif_catalog_versions`), not a literal, and the live catalog in `packages/core/src/notification.ts` is already **v6 = 44 events** (v1=17, v2=14, v3=2, v4=1, v5=9, v6=1). M6D therefore registers a **new version v7** — **4 events → v7 = 48** (the 3 recap events + 1 for RM-8's mandatory division note). One migration, one `notif_catalog_versions` row.
 
-| Event | Fires when | Recipients |
-|---|---|---|
-| `rekap_mingguan_terbuka` | Weekly recap opens (Monday job) | AM/CRO owning the client |
-| `rekap_mingguan_belum_dikonfirmasi` | Not confirmed N days after week close | AM/CRO + SPV |
-| `rekap_sengketa_angka` | AM files `Sengketa Angka` on an auto figure | SPV |
+| # | Event | Fires when | Recipients |
+|---|---|---|---|
+| 45 | `rekap_mingguan_terbuka` | Weekly recap opens (Monday job) | AM/CRO owning the client |
+| 46 | `rekap_mingguan_belum_dikonfirmasi` | Not confirmed N (=2) working days after week close | AM/CRO + SPV |
+| 47 | `rekap_sengketa_angka` | AM files `Sengketa Angka` on an auto figure | SPV |
+| 48 | `catatan_divisi_belum_diisi` | A division owing a mandatory weekly note (RM-8) hasn't filed by close | Division lead + AM |
 
-(The existing `== 15` / v2 catalog invariant test must be re-baselined to 31 with the same sign-off still pending from M6B PA-8 — see Open Assumption RM-6.)
+(The catalog-version invariant test — `registeredEventCount()` against the `notif_catalog_versions` rows — is re-baselined by **adding the v7 row (eventCount: 4)**, not by editing a literal. The **catalog sign-off** pending since M6B PA-8 is still the one gate before any of these modules ship notifications — the full v1→v6 enumeration for that sign-off is in `docs/handoff/HANDOFF_M6D_SESI2.md`. See Open Assumption RM-6 / §10.1-C.)
 
 **Permissions.**
 | Role | Read | Write |
@@ -277,19 +279,123 @@ CPL and impressions remain unmodelled system-wide (not introduced here) — see 
 
 ## 10. Open Assumptions
 
-| ID | Assumption | Owner |
-|---|---|---|
-| RM-1 | Cadence is the ISO week (Mon–Sun) in WIB. If the agency's operational week or the client check-in rhythm differs, this is the one knob to change | Yohan / Nerissa |
-| RM-2 | "Active client" (Rule 1) = a client with ≥1 non-terminal Service. If clients in a payment-hold or paused state should be excluded, that filter belongs here | Yohan |
-| RM-3 | No **blended whole-client ROAS** is computed — only the Ads-channel ROAS is shown — because there is no agreed denominator spanning organic + live + paid spend. If management wants a single blended ROAS, the denominator must be defined first (which spends count) | Yohan / SPV Ads |
-| RM-4 | CPL and impressions stay unmodelled (they exist nowhere in CDPS today). If the weekly recap must show CPL, the metric and its source have to be added in the owning module (M8) first — it is deliberately **not** invented here (R3) | Hans / SPV Ads |
-| RM-5 | Force-close / `belum dikonfirmasi` warning window = N days after week close. Starting value to tune from real behaviour (M6B used 5 days for monthly GMV — weekly should likely be shorter, 1–2 days) | Yulianti |
-| RM-6 | Carried from 6A/6B/6C: the notification-catalog invariant test asserts a literal count; it is now v3 = 31 events and still needs the sign-off that was pending at M6B PA-8 before any of these modules ship notifications | Hans |
-| RM-7 | Organic video "views" have no tracked source in CDPS today, so RM-C3's organic component is manual-with-source or `—`. If a platform export becomes routinely available, it can graduate from manual to auto without changing the recap's shape | Hans / SPV Creative |
-| RM-8 | Division note (RM-D6) is optional. If management wants divisions to *owe* a weekly note (the literal Phase 0 "divisions send weekly reports" step), it becomes a mandatory field with its own reminder — a scope choice, not a code one | Yohan |
-| RM-9 | **Recap discipline is displayed (H-2), not scored.** Making it an eighth Health component would require redistributing M13's confirmed weights and would grade AM form-filling inside a client-health number (§8.4). If it should be graded, the recommendation is a Module 14 (Team Performance) component for the AM role, not a Module 13 one | Yohan / Nerissa |
-| RM-10 | H-4 (interview verdict on the health view) is assumed useful as onboarding-readiness context and is **advisory only**. If the verdict should not appear on the health page at all, dropping H-4 costs nothing else in this module | Yohan |
-| RM-11 | Phase 0 Diagram 3 also lists **CPC / CPM** and **Upcoming Milestones** on the Client Health Dashboard. CPC/CPM are not modelled anywhere in CDPS today (same class as CPL/impressions, RM-4) and milestones have no entity; both are therefore **out of H-1's scope** until their sources exist | Hans / SPV Ads |
+> **Owner answered 2026-08-13** (`DECISIONS.md`). Six assumptions are now **decided** (✅);
+> three metric-modelling questions and the catalog sign-off were **clarified back to the
+> owner** (⏳ — detail in §10.1). No assumption is left silently guessed.
+
+| ID | Assumption (as raised at SESI1) | Owner | Status / Resolusi (2026-08-13) |
+|---|---|---|---|
+| RM-1 | Cadence is the ISO week (Mon–Sun) in WIB. If the agency's operational week or the client check-in rhythm differs, this is the one knob to change | Yohan / Nerissa | ✅ **Confirmed.** ISO week (Mon–Sun) WIB is correct; no change |
+| RM-2 | "Active client" (Rule 1) = a client with ≥1 non-terminal Service. If clients in a payment-hold or paused state should be excluded, that filter belongs here | Yohan | ✅ **Decided: active = ≥1 non-terminal Service AND *exclude* payment-hold / paused clients.** Owner: *"definisi klien aktif ≥1 service, kalau hold dikecualikan."* Rule 1 amended below; the exclusion is a `WHERE` filter on the Monday job (D-03), pinned to the Service machine's hold/paused states |
+| RM-3 | No **blended whole-client ROAS** is computed — only the Ads-channel ROAS is shown — because there is no agreed denominator spanning organic + live + paid spend | Yohan / SPV Ads | ✅ **Decided: no blend. ROAS is Ads-channel only.** Owner: *"roas hanya dari iklan."* RM-C2 stays `GMV from Ads ÷ Total Spend`; no blended-ROAS denominator is invented. Closes RM-3 permanently |
+| RM-4 | CPL and impressions stay unmodelled (they exist nowhere in CDPS today) | Hans / SPV Ads | ⏳ **Clarified (§10.1-B).** Owner asked what *"dimodelkan"* (modelled) means. Default holds: **not modelled here** (R3) — shown as `—`; if wanted, the source is added in **M8 first**, never fabricated in M6D |
+| RM-5 | Force-close / `belum dikonfirmasi` warning window = N days after week close | Yulianti | ✅ **Clarified + default set (§10.1-A): N = 2 hari kerja** (working days) after week close, owner-tunable exactly like M6B's 5-day window. Worked example in §10.1-A |
+| RM-6 | Notification-catalog sign-off, carried from M6B PA-8 | Hans | ⏳ **Premise corrected + full list for sign-off (§10.1-C).** The SESI1 spec said "v2=28 → v3=31" — **stale**. The live catalog is already **v6 = 44 events**; M6D's events make it **v7 = 48** (3 recap events + 1 for RM-8's mandatory division note), not 31. Full enumeration in §10.1-C awaits owner sign-off |
+| RM-7 | Organic video "views" have no tracked source in CDPS today, so RM-C3's organic component is manual-with-source or `—` | Hans / SPV Creative | ⏳ **Clarified (§10.1-B).** Same class as RM-4: manual+source or `—` today; auto only if/when a platform export becomes routine — a graduation in the owning module (M7), not an M6D invention |
+| RM-8 | Division note (RM-D6) is optional | Yohan | ✅ **Decided: MANDATORY.** Owner: *"divisi wajib buat report mingguan."* RM-D6 becomes a required weekly note **owed by each division that touched the client this week**, with its own reminder (the literal Phase 0 "divisions send weekly reports" step). Rule 8 + form amended below; new advisory event `catatan_divisi_belum_diisi` (part of the v7 catalog, §10.1-C) |
+| RM-9 | **Recap discipline is displayed (H-2), not scored.** | Yohan / Nerissa | ✅ **Decided: displayed AND scored.** Owner: *"disiplin perlu [dari] RM-8 dinilai dan ditampilkan."* Displayed stays H-2 (unchanged). **Scored** lands in **M14 Team Performance — NOT an eighth M13 component** (§8.4 guardrail holds: no re-weight of M13's confirmed weights, no grading AM form-filling inside a client-health number). Discipline measured = the RM-8 obligation: AM recap closed-on-time + divisions' mandatory weekly notes filed. Requires an M14 amendment that re-weights the confirmed AM KPI Profile (50/25/25) — flagged for M14 sign-off, see M14 amendment note + RM-9a below |
+| RM-10 | H-4 (interview verdict on the health view) is assumed useful and **advisory only** | Yohan | ✅ **Decided: keep H-4.** Owner: *"verdict interview ditampilkan di halaman health."* H-4 stays, advisory-only (never gates), respecting the narrower `canReadVerdict` scope (§8.3 Rule 5). Closes RM-10 |
+| RM-11 | Phase 0 Diagram 3 also lists **CPC / CPM** and **Upcoming Milestones** | Hans / SPV Ads | ⏳ **Clarified (§10.1-B).** Same class as RM-4/RM-7: CPC/CPM unmodelled system-wide, milestones have no entity ⇒ out of H-1 scope until their sources exist in the owning module |
+
+### RM-9a (new, needs sign-off) — how discipline is scored in M14
+
+RM-9's "score it" opens exactly one downstream question the owner must still settle: **the M14 re-weight.**
+The AM KPI Profile today is confirmed at **50% avg Client Health Score / 25% Complaint Resolution Speed /
+25% Revision Escalation Rate** (M14 §7 #6). Adding a **Weekly-Recap Discipline** component means those
+three no longer sum to 100. The recommendation logged for sign-off: a **10–15% Weekly-Recap Discipline**
+slice carved proportionally from the existing three (e.g. 45 / 22.5 / 22.5 / 10), measuring *% of the AM's
+active clients whose current-week recap was AM-closed on time (not `Ditutup Otomatis`)*. The **division**
+side of RM-8 (did the division file its mandatory note) belongs to that **division role's** M14 profile, not
+the AM's. This is an M14 change, tracked as an M14 amendment; M6D only supplies the raw signal (recap
+close status + division-note presence), it does not compute the grade.
+
+### 10.1 Clarifications requested by the owner (2026-08-13)
+
+#### A. RM-5 — what the "force-close window" is, with an example
+
+The recap opens automatically every Monday and the AM is meant to **confirm** it (`Terbuka → Ditutup`) after
+the week ends. The **force-close window** is the grace period *after the week closes* during which the AM can
+still confirm before the system gives up and stamps the recap `Ditutup Otomatis` (auto-closed, flagged
+incomplete). It exists so an un-confirmed recap cannot sit `Terbuka` forever, silently, hiding that the weekly
+review never happened.
+
+Two clocks hang off the same window value **N**:
+- a **reminder** at week-close + N days → event `rekap_mingguan_belum_dikonfirmasi` (to the AM + SPV);
+- a **force-close** by the Monday job when the prior week's recap is still `Terbuka` past the window.
+
+**Decided default: N = 2 hari kerja (working days), owner-tunable** — the same way M6B's monthly window was
+set to 5 days and left adjustable. Working days (not calendar days) so a weekend or national holiday does not
+burn the window; it reuses the same `working_days_between` helper the Kelola-Klien SLA already uses.
+
+> **Worked example (N = 2).** ISO week 3 ends **Sunday 1 Sep 23:59 WIB**. Monday 2 Sep the next week's recap
+> opens as normal. AM Sinta has until **end of Wednesday 4 Sep** (Mon + Tue = 2 working days) to confirm
+> week 3's recap.
+> - Confirms Tuesday 3 Sep → `Ditutup`, clean. ✅
+> - Hasn't confirmed by Wednesday morning → reminder fires to Sinta + her SPV.
+> - Still `Terbuka` at the next Monday job (8 Sep) → `Ditutup Otomatis`, flagged incomplete, and that
+>   auto-close is what H-2 on the health page shows and what the RM-9 M14 discipline score counts against her.
+>
+> If 2 working days proves too tight (or too loose) in practice, changing N is a one-line config change, not a
+> schema or code change — exactly the M6B precedent.
+
+#### B. RM-4 / RM-7 / RM-11 — what "perlu dimodelkan" (modelled) actually means, with an example
+
+"Modelling a metric" in CDPS means giving it a **real, owned, recomputable source** so the number is
+*auto-calculated and read-only* (house rule #4) — not typed by a human. A metric is "modelled" only when
+**four** things exist:
+
+1. a **column/entity** that stores its raw inputs (e.g. `MTR-` Metric Entry rows for Ads),
+2. an **owning module** that writes those inputs as a side-effect of real work (Ads staff logging a Metric Entry),
+3. a **formula** the system computes from them (`ROAS = GMV from Ads ÷ Total Spend`), and
+4. a **recompute-from-log** guarantee (the number can always be rebuilt from the immutable rows — house rule #3/#4).
+
+> **Example — ROAS *is* modelled, CPL is *not*.**
+> ROAS is modelled: an Advertiser logs a weekly `MTR-` entry with Spend and GMV-from-Ads; the system computes
+> ROAS and it is read-only; delete-and-recompute always reproduces it. **M6D just reads it.**
+> **CPL (cost per lead)** is *not* modelled: nowhere in CDPS today stores "spend attributable to a lead" per
+> week — there is no `MTR-`-like row for it, no module that writes it, no formula wired up. So for M6D to
+> "show CPL" one of two things is true: (a) somebody **types** it every week (a manual number that can lie and
+> isn't recomputable — banned by R3 / house rule #4), or (b) CPL is **first modelled in its owning module
+> (M8)** — add the input to the Metric Entry, define `CPL = eligible spend ÷ leads`, make it read-only — and
+> *then* M6D reads it like ROAS.
+>
+> So "perlu dimodelkan?" = *"do you want us to go build a real tracked source for this in M8/M7 first (a),
+> or leave it as `—` until someone does (b)?"* The M6D default (R3) is **(b): leave it `—`, don't fake it.**
+> The same reading applies to **impressions, CPC/CPM (RM-11), and organic video views (RM-7)** — all four are
+> in the identical position: no owned source today, so either commission the source in the owning module or
+> show `—`. M6D deliberately builds **none** of these auto-pipelines itself.
+
+#### C. RM-6 — the notification catalog for sign-off (premise corrected)
+
+The SESI1 spec (and the owner's question) assumed the catalog is **"v3 = 31 events."** That snapshot is
+**out of date.** Since M6B PA-8 was written, the catalog grew through several owner-approved versions and the
+count is asserted against a **version registry** (O55), not a literal. The live catalog in
+`packages/core/src/notification.ts` is:
+
+| Version | Introduced | +events | Running total |
+|---|---|---|---|
+| v1 | Phase 0 v2 §9 (15 frozen) + 2 lead-delete (2026-07-29) | 17 | 17 |
+| v2 | M6A §7 D12 (4 Strategi) + M6B §9 (6 Plan) + M6C §10 (3 Gate) + `m6.client.assigned` (O53) | 14 | 31 |
+| v3 | M5-OA-7 — 2 Finance (transaction-change ACC) | 2 | 33 |
+| v4 | M6A §4 D-7 — 1 Strategi (Sanggahan Target) | 1 | 34 |
+| v5 | Interview / Kelola Klien tab 1 — 9 events | 9 | 43 |
+| v6 | Interview part 2 — 1 event (prasyarat menggantung) | 1 | **44** |
+
+So **the catalog is at v6 = 44 today**, not 31. (The "31" the owner saw is the running total *at the end of
+v2* — which is where the M6B-era note froze.) **M6D adds a new version v7** — and with RM-8 now mandatory,
+it is **4 events, → v7 = 48**:
+
+| # | Event | Fires when | Recipients |
+|---|---|---|---|
+| 45 | `rekap_mingguan_terbuka` | Weekly recap opens (Monday job) | AM/CRO owning the client |
+| 46 | `rekap_mingguan_belum_dikonfirmasi` | Not confirmed N (=2) working days after week close | AM/CRO + SPV |
+| 47 | `rekap_sengketa_angka` | AM files `Sengketa Angka` on an auto figure | SPV |
+| 48 | `catatan_divisi_belum_diisi` | A division owing a mandatory weekly note (RM-8) hasn't filed by close | Division lead + AM |
+
+**The full 44 live events are enumerated for sign-off in `docs/handoff/HANDOFF_M6D_SESI2.md` §Katalog.**
+Sign-off is still the single gate that has been pending since M6B PA-8: no module ships notifications until the
+owner signs the catalog. What M6D needs signed is **v7 = 48** (44 live + these 4), registered as one
+`notif_catalog_versions` row in the D-07 migration.
 
 ---
 
