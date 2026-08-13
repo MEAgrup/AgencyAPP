@@ -38,8 +38,8 @@ Berkas #152: `DECISIONS.md` (1 baris) · M14 PRD §2/§6/§8/§9 · M6D PRD §10
 |---|---|---|
 | **#152** | Sign-off M6D/M14 (docs) | ✅ **MERGED** ke main (`850daea`) |
 | **#149** | Client roster search di board (FE, 1 berkas) | ✅ **MERGED** (`8ebbfba`). **CATATAN:** ke-merge tepat sebelum pemilik bilang *"abaikan 149, sedang dikerjakan team lain"*. Pemilik lalu memilih **biarkan ter-merge** (bukan revert). Tim lain lanjut di atas base ini |
-| **#143** | Shortcut Interview di Service hub (FE, 2 berkas) | 🟡 **Konflik diresolve + di-push** (`4758dd7`), **menunggu CI hijau lalu merge**. Konflik = 1 tempat di `services/[id]/page.tsx` (`canManageInterview` #143 vs `canApproveGmv` main) → **kedua const dipertahankan**, keduanya terpakai |
-| **#135** | Seam job Plan Satuan (M6C §7/§10) | 🟡 **Konflik diresolve + di-push** (`db0e584`), **menunggu CI hijau lalu merge**. Konflik hanya di docs (DECISIONS.md tabel + add/add HANDOFF_M6ABC_SESI27). `plan.ts`/`plan.test.ts` auto-merge bersih; **main tak menyentuh `plan.ts` sejak base** cdcf470 (nol risiko semantik). Handoff SESI27 add/add → dipertahankan **versi main** (kanonik; versi #135 orphan-paralel). **Bawa Open X-20** (ratifikasi sinyal dormansi = lifecycle service) |
+| **#143** | Shortcut Interview di Service hub (FE, 2 berkas) | ✅ **MERGED** (`bc1b702`, CI run 1015 hijau). Konflik = 1 tempat di `services/[id]/page.tsx` (`canManageInterview` #143 vs `canApproveGmv` main) → **kedua const dipertahankan**, keduanya terpakai |
+| **#135** | Seam job Plan Satuan (M6C §7/§10) | ✅ **MERGED** (`9ede9eb`, CI run 1017 hijau). Konflik hanya di docs (DECISIONS.md tabel + add/add HANDOFF_M6ABC_SESI27). `plan.ts`/`plan.test.ts` auto-merge bersih; **main tak menyentuh `plan.ts` sejak base** cdcf470 (nol risiko semantik). Handoff SESI27 add/add → dipertahankan **versi main** (kanonik; versi #135 orphan-paralel). **Bawa Open X-20** (ratifikasi sinyal dormansi = lifecycle service — masih perlu ratifikasi pemilik) |
 | **#141** | Interview→Strategi handoff **langkah 8+9** (+ migrasi `20260811090000` + fixture Alpha Digital) | ⛔ **DITUNDA — butuh keputusan pemilik.** Duplikat fitur dengan #142 |
 | **#142** | Interview→Strategi handoff **langkah 8** (+ FE `StrategiHandoffCard` + migrasi `20260812000000`) | ⛔ **DITUNDA — butuh keputusan pemilik.** Duplikat fitur dengan #141 |
 | **#140** | docs handoff SESI30 | ⛔ **DITUNDA** — masih **draft** |
@@ -68,7 +68,7 @@ Ranjau repo tetap sama (SESI1 §5 / CLAUDE.md): migrasi lewat `supabase/migratio
 ## 4. Titik mulai sesi berikutnya
 
 1. **PUTUSKAN #141 vs #142** (blocker — §2 di atas). Ini yang paling mahal kalau dibiarkan menggantung.
-2. **Cek hasil CI #143 & #135** — kalau sudah hijau dan ke-merge, tutup; kalau CI merah, perbaiki (konflik sudah diresolve, tinggal isu gate kalau ada).
+2. ~~Cek hasil CI #143 & #135~~ — ✅ **selesai: keduanya CI hijau + MERGED** (#143 `bc1b702`, #135 `9ede9eb`). Tidak ada sisa.
 3. **#140** — keluarkan dari draft atau tutup (isinya handoff SESI30, mungkin sudah usang).
 4. Implementasi M6D tetap menunggu Wave 2 (M7–M10) — bukan pekerjaan sekarang.
 
