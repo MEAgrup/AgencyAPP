@@ -237,3 +237,22 @@ The Ad Campaign is a **living** record that **outlives** its setup Brief (M8 §2
 - The `[Paused]↔[Active]` edges are **not** `requireLead` at the engine level — the Advertiser optimizes freely (§6 Rule 3). The Launch dependency (Brief + Assets `[Approved]`) is a **code guard** on the `[Paused]→[Active]` edge (mirrors the Void-Service / Direct-breakdown code guards), because the engine cannot see the parent Brief's or linked Assets' statuses.
 - Metric Entries (`MTR-`) and Optimization Log entries (`OPT-`) are **append-only child rows** (M8 §5/§6), not state machines: they carry no status and never transition. Total Spend / Total GMV / ROAS and each Asset's Attributed GMV are **derived** from these immutable rows (house rules 3/4), never stored as mutable running columns.
 - **Recurring strategy cycles (M8-OA-6):** a new setup `BRF-` is created each cycle, but the **same `ADC-` continues uninterrupted** — the campaign is never restarted; only the Brief above it is new.
+
+## 15. Rekap Hasil Mingguan `WRR-` (M6D) — mesin #18, rekap mingguan per klien
+
+`Terjadwal` → `Terbuka` (auto, Senin 00:00 WIB) → `Ditutup` (konfirmasi AM) | `Ditutup Otomatis` (force-close sistem) → (dibuka lagi oleh Head) `Terbuka`.
+
+| From | To | Who | Effect |
+|---|---|---|---|
+| `Terjadwal` | `Terbuka` | sistem (job Senin 00:00 WIB) | Rekap dibuka untuk tiap klien aktif; angka otomatis mulai terakumulasi sepanjang minggu (M6D Rule 1). Service-role, bukan lead |
+| `Terbuka` | `Ditutup` | AM/CRO pemilik | Konfirmasi mingguan (M6D Rule 8) — semua angka otomatis teratasi + fallback manual terisi/`—` + narasi RM-D1/RM-D3 lengkap, transaksional. Angka otomatis dibekukan as-of penutupan |
+| `Terbuka` | `Ditutup Otomatis` | sistem | Force-close saat lewat jendela **N=2 hari kerja** (RM-5 diputus 2026-08-13, owner-tunable) + tanda tidak lengkap. **Menyetel `pernah_ditutup_otomatis=true` permanen** (sinyal non-performa AM, tak pernah dicabut) |
+| `Ditutup Otomatis` | `Terbuka` | **Head of Account** (atasan AM, BUKAN AM pemilik) | **Buka kembali** (RM-5 diputus 2026-08-13) — Head memberi AM kesempatan melengkapi. Angka otomatis mencair lagi (accrue) sampai ditutup ulang. **`pernah_ditutup_otomatis` TETAP true** — buka-kembali TIDAK menghapus catatan bahwa AM tak perform; ia hanya menyelamatkan datanya. Butuh alasan (audit) |
+
+- **Terminal:** hanya `Ditutup`. `Ditutup Otomatis` **quasi-terminal** — buntu bagi AM, tapi Head bisa membukanya kembali (satu-satunya edge keluar).
+- **`pernah_ditutup_otomatis`** (boolean, default false) di-set true saat force-close dan **tak pernah** kembali false — bahkan setelah Head buka-kembali dan AM menutup dengan benar (`Ditutup`). Skor disiplin M14 (RM-9/RM-9a) & H-2 menghitung **flag ini**, bukan status akhir: rekap yang pernah dipaksa-tutup tetap merugikan AM walau akhirnya rapi. Buka-kembali menyelamatkan **data**, bukan **nilai AM**.
+- Satu rekap per klien per minggu ISO (index parsial `(client_id, iso_year, iso_week)`), bukan ditegakkan mesin.
+- **Aggregation-only, bukan pemilik data:** angka RM-B/RM-C dibaca dari modul eksekusi (M7/M8/M9/M10) + M6B; baris `otomatis` di `WRR_DIVISI`/`WRR_METRIK` **UPDATE-blocked** untuk aktor JWT (AM) di DB + RLS (invariant beku, bentuk sama `plan_actual` M6B). Hanya fallback manual (RM-C) + narasi (RM-D) yang AM-writable.
+- **GMV single-source (M6D §3):** `GMV Eksekusi (interim)` di rekap adalah Σ sumber yang sudah memiliki GMV (Ads/Live/affiliate), read-only, **bukan** GMV resmi. GMV bulanan otoritatif tetap entry manual AM di M6B P-E (Rule 11) — rekap tak pernah menulisnya.
+- **Rollup, bukan pengganti:** rekap `Ditutup` memasok PE-3/PE-8 periode Plan yang tertaut (M6B); untuk klien `Tanpa Plan` rekap berdiri sendiri sebagai satu-satunya catatan hasil periodik. Tak ada `PLAN-` yang wajib.
+- Menambah **nol grade baru** (M6D Rule 11): Health (M13) & Performance (M14) tetap membaca sumber yang sama seperti sebelumnya.

@@ -129,4 +129,30 @@ Module 13 (§6, OA-8) deferred the question of whether an AM's average Client He
 
 ---
 
+## 9. Amendment note — Weekly-Recap Discipline component (M6D RM-9, owner 2026-08-13, **needs sign-off**)
+
+Module 6D (Rekap Hasil Mingguan) added a weekly cross-division recap the AM/CRO owns. The owner decided
+(`DECISIONS.md` 2026-08-13, RM-9) that recap **discipline** must be *both displayed* (on the health page, M6D
+H-2) *and scored* — and that the scoring belongs **here in M14, not as an eighth Module 13 health component**
+(scoring it inside M13 would re-weight the confirmed health weights and grade AM form-filling inside a
+*client-health* number — M6D §8.4).
+
+Concretely, this proposes:
+- **AM role:** a new **Weekly-Recap Discipline** component = *% of the AM's active clients whose current-week
+  recap was AM-closed on time and **never force-closed** (`pernah_ditutup_otomatis = false`)*. Normalized/capped
+  like the other raw-value components (Rule 2). **Counts the permanent flag, not the final status** — a recap a
+  Head reopened after auto-close (M6D RM-5) still carries `pernah_ditutup_otomatis = true`, so it counts against
+  the AM even once completed; the Head's mercy rescues the data, not the score.
+- **Division roles (Creative / Ads / KOL / Live):** a **Weekly-Note Compliance** component = *did the division
+  file its now-mandatory weekly note (M6D RM-8) for the clients it touched*.
+
+**Open for sign-off (RM-9a):** adding a component to the **confirmed** AM KPI Profile (50/25/25, §6 #6 / §7)
+means re-weighting it. Recommendation on the table: carve a **10–15%** Weekly-Recap Discipline slice
+proportionally from the existing three (e.g. **45 / 22.5 / 22.5 / 10**). The exact weights — and the division
+profiles' new slice — need the owner's confirmation before build, exactly like the original 50/25/25 was
+confirmed. M6D supplies the raw signal (recap close status + division-note presence); M14 computes the grade.
+Tracked as **D-14** in `docs/backlog/M6D_BACKLOG.md`.
+
+---
+
 **Next:** Module 15 — Client Portal + Team Portal.
