@@ -6,7 +6,17 @@
  * and rendering "0 menit" would report finished work that has not finished.
  */
 import { describe, expect, it } from 'vitest';
-import { RISET_AWAL_STATUS, formatDurasiMenit, menitBerjalanSejak, risetAwalStatusTone } from './interview';
+import {
+  RISET_AWAL_STATUS,
+  SLA_STATUS,
+  SLA_STATUS_LABEL,
+  formatAmbang,
+  formatDurasiMenit,
+  formatHariKerja,
+  menitBerjalanSejak,
+  risetAwalStatusTone,
+  slaStatusTone,
+} from './interview';
 
 describe('formatDurasiMenit', () => {
   it('renders minutes below an hour', () => {
@@ -55,5 +65,34 @@ describe('risetAwalStatusTone', () => {
     expect(risetAwalStatusTone(RISET_AWAL_STATUS.Berjalan)).toBe('blue');
     expect(risetAwalStatusTone(RISET_AWAL_STATUS.Selesai)).toBe('green');
     expect(risetAwalStatusTone(null)).toBe('gray');
+  });
+});
+
+describe('timeline SLA display', () => {
+  it('renders a range, and collapses it when target equals the limit', () => {
+    expect(formatAmbang(2, 3)).toBe('2–3 hari kerja');
+    expect(formatAmbang(5, 7)).toBe('5–7 hari kerja');
+    expect(formatAmbang(1, 1)).toBe('1 hari kerja');
+  });
+
+  it('renders elapsed working days, and — when the step has not started', () => {
+    expect(formatHariKerja(0)).toBe('0 hari kerja');
+    expect(formatHariKerja(4)).toBe('4 hari kerja');
+    expect(formatHariKerja(null)).toBe('—');
+    expect(formatHariKerja(undefined)).toBe('—');
+  });
+
+  it('tones only the three decided statuses; unstarted and N/A stay neutral', () => {
+    expect(slaStatusTone(SLA_STATUS.TepatWaktu)).toBe('green');
+    expect(slaStatusTone(SLA_STATUS.MendekatiBatas)).toBe('amber');
+    expect(slaStatusTone(SLA_STATUS.Terlambat)).toBe('red');
+    expect(slaStatusTone(SLA_STATUS.BelumMulai)).toBe('gray');
+    expect(slaStatusTone(SLA_STATUS.TidakBerlaku)).toBe('gray');
+  });
+
+  it('labels every status the server can send — no raw enum reaches the screen', () => {
+    for (const status of Object.values(SLA_STATUS)) {
+      expect(SLA_STATUS_LABEL[status]).toBeTruthy();
+    }
   });
 });

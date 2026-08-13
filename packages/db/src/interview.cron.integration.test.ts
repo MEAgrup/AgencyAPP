@@ -161,20 +161,116 @@ d('interview_daily_tick — Butuh Data Klien nudge', () => {
   });
 });
 
-d('interview_daily_tick — SLA flags', () => {
-  it('flags an interview unscheduled > 3 working days and incomplete > 7 working days, once each, skipping Retroaktif', async () => {
+/**
+ * SLA flags — the three-step Kelola Klien timeline (owner decision 2026-08-13):
+ * Riset Awal 2–3, Interview Meeting 1–2, Brand Strategy 5–7 WORKING days.
+ *
+ * These REPLACED the two older flags (`sla_belum_dijadwalkan` >3 hk,
+ * `sla_belum_selesai` >7 hk, both anchored on the interview's creation): the
+ * owner chose one set of numbers over two overlapping ones, so the old codes must
+ * no longer be raised at all.
+ */
+d('interview_daily_tick — SLA flags (timeline tiga langkah)', () => {
+  it('flags a riset awal left running past its limit, once, skipping Retroaktif', async () => {
     const out = await inRollback(async (tx) => {
-      // Created 2026-07-20 (Mon); by 2026-07-31 that is 9 working days.
-      const id = await seedInterview(tx, { status: 'Belum Dijadwalkan', tanggalWaktu: null, createdAt: '2026-07-20' });
-      const retro = await seedInterview(tx, { status: 'Belum Dijadwalkan', tanggalWaktu: null, createdAt: '2026-07-20', retroaktif: true });
+      // Riset awal opened 2026-07-20 (Mon); by 2026-07-31 that is 9 working days,
+      // far past the 3-day limit.
+      const id = await seedInterview(tx, { status: 'Belum Dijadwalkan', tanggalWaktu: null });
+      const retro = await seedInterview(tx, { status: 'Belum Dijadwalkan', tanggalWaktu: null, retroaktif: true });
+      for (const target of [id, retro]) {
+        await tx`
+          insert into interview_riset_awal (interview_id, dimulai_pada, dimulai_oleh)
+          values (${target}, '2026-07-20'::timestamptz, ${AM})
+          on conflict (interview_id) do update set dimulai_pada = excluded.dimulai_pada`;
+      }
       await tx`select interview_daily_tick(${day('2026-07-31')})`;
-      await tx`select interview_daily_tick(${day('2026-07-31')})`; // re-run: NOT EXISTS keeps it once
-      const flags = await tx<{ kode: string }[]>`select kode from interview_flag where interview_id = ${id} order by kode`;
+      await tx`select interview_daily_tick(${day('2026-07-31')})`; // re-run stays once
+      const flags = await tx<{ kode: string; detail: Record<string, unknown> }[]>`
+        select kode, detail from interview_flag where interview_id = ${id} order by kode`;
       const retroFlags = (await tx<{ n: number }[]>`select count(*)::int as n from interview_flag where interview_id = ${retro}`)[0].n;
-      return { kodes: flags.map((f) => f.kode), retroFlags };
+      return { flags, retroFlags };
     });
-    expect(out.kodes).toEqual(['sla_belum_dijadwalkan', 'sla_belum_selesai']);
+    expect(out.flags.map((f) => f.kode)).toEqual(['sla_riset_awal_terlambat']);
+    expect(out.flags[0].detail.batas).toBe(3);
+    expect(Number(out.flags[0].detail.hari_kerja)).toBeGreaterThan(3);
     expect(out.retroFlags).toBe(0); // Retroaktif is excluded from SLA (I19)
+  });
+
+  it('flags a meeting never secured after riset awal was submitted', async () => {
+    const kodes = await inRollback(async (tx) => {
+      const id = await seedInterview(tx, { status: 'Belum Dijadwalkan', tanggalWaktu: null });
+      // Riset awal DONE on 2026-07-20 — so step 2's clock starts there and step 1
+      // must not be flagged.
+      await tx`
+        insert into interview_riset_awal (interview_id, status, dimulai_pada, disubmit_pada, dimulai_oleh, disubmit_oleh)
+        values (${id}, 'Selesai', '2026-07-20'::timestamptz, '2026-07-20'::timestamptz, ${AM}, ${AM})
+        on conflict (interview_id) do update set
+          status = 'Selesai', disubmit_pada = excluded.disubmit_pada, disubmit_oleh = excluded.disubmit_oleh`;
+      await tx`select interview_daily_tick(${day('2026-07-31')})`;
+      return (await tx<{ kode: string }[]>`select kode from interview_flag where interview_id = ${id} order by kode`)
+        .map((f) => f.kode);
+    });
+    expect(kodes).toEqual(['sla_meeting_terlambat']);
+  });
+
+  it('flags a finished interview whose brand strategy was never submitted', async () => {
+    const out = await inRollback(async (tx) => {
+      // Seeded NOT-yet-finished: forcing the status to Selesai first would make
+      // the trigger stamp `selesai_pada = now()`, and that anchor is then frozen
+      // — the fixture would be fighting the very guarantee under test. So status
+      // and both anchors move in ONE statement, while they are still null.
+      const id = await seedInterview(tx, { status: 'Belum Dijadwalkan', tanggalWaktu: null });
+      await tx`
+        insert into interview_riset_awal (interview_id, status, dimulai_pada, disubmit_pada, dimulai_oleh, disubmit_oleh)
+        values (${id}, 'Selesai', '2026-07-20'::timestamptz, '2026-07-20'::timestamptz, ${AM}, ${AM})
+        on conflict (interview_id) do update set status = 'Selesai', disubmit_pada = excluded.disubmit_pada`;
+      await tx`
+        update interview
+           set status = 'Selesai',
+               meeting_diamankan_pada = '2026-07-20'::timestamptz,
+               selesai_pada = '2026-07-20'::timestamptz
+         where id = ${id}`;
+      await tx`select interview_daily_tick(${day('2026-07-31')})`;
+      const flags = await tx<{ kode: string; detail: Record<string, unknown> }[]>`
+        select kode, detail from interview_flag where interview_id = ${id} order by kode`;
+      return flags;
+    });
+    expect(out.map((f) => f.kode)).toEqual(['sla_strategi_terlambat']);
+    expect(out[0].detail.batas).toBe(7);
+  });
+
+  it('never raises the two REPLACED flag codes any more', async () => {
+    const kodes = await inRollback(async (tx) => {
+      const id = await seedInterview(tx, { status: 'Belum Dijadwalkan', tanggalWaktu: null });
+      await tx`
+        insert into interview_riset_awal (interview_id, dimulai_pada, dimulai_oleh)
+        values (${id}, '2026-07-20'::timestamptz, ${AM})
+        on conflict (interview_id) do update set dimulai_pada = excluded.dimulai_pada`;
+      await tx`select interview_daily_tick(${day('2026-07-31')})`;
+      return (await tx<{ kode: string }[]>`select kode from interview_flag where interview_id = ${id}`)
+        .map((f) => f.kode);
+    });
+    expect(kodes).not.toContain('sla_belum_dijadwalkan');
+    expect(kodes).not.toContain('sla_belum_selesai');
+  });
+
+  it('counts WORKING days: a registered holiday can keep a step inside its limit', async () => {
+    const kodes = await inRollback(async (tx) => {
+      const id = await seedInterview(tx, { status: 'Belum Dijadwalkan', tanggalWaktu: null });
+      // Mon 2026-07-27 → Fri 2026-07-31 is 4 working days: past the 3-day limit.
+      await tx`
+        insert into interview_riset_awal (interview_id, dimulai_pada, dimulai_oleh)
+        values (${id}, '2026-07-27'::timestamptz, ${AM})
+        on conflict (interview_id) do update set dimulai_pada = excluded.dimulai_pada`;
+      // Declaring two of those days national holidays brings it back to 2.
+      await tx`
+        insert into hari_libur (tanggal, keterangan, created_by) values
+          ('2026-07-29', 'uji', 'CI'), ('2026-07-30', 'uji', 'CI')`;
+      await tx`select interview_daily_tick(${day('2026-07-31')})`;
+      return (await tx<{ kode: string }[]>`select kode from interview_flag where interview_id = ${id}`)
+        .map((f) => f.kode);
+    });
+    expect(kodes).toEqual([]); // no flag — the holidays were not working days
   });
 });
 

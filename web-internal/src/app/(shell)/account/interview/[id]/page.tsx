@@ -50,6 +50,7 @@ import {
   availableTransitions,
   formatDurasiMenit,
   getInterview,
+  getKelolaKlienTimeline,
   interviewStatusTone,
   isAnswerEditable,
   resolveInterviewPrasyarat,
@@ -60,6 +61,7 @@ import {
   submitRisetAwal,
   transitionInterview,
   type InterviewDetail,
+  type KelolaKlienTimeline,
 } from '@/lib/interview';
 import {
   INTERVIEW_SECTIONS,
@@ -77,6 +79,7 @@ import FieldInput from '@/components/interview/FieldInput';
 import ScoringSidebar from '@/components/interview/ScoringSidebar';
 import PrasyaratPanel from '@/components/interview/PrasyaratPanel';
 import RisetAwalPanel from '@/components/interview/RisetAwalPanel';
+import TimelinePanel from '@/components/interview/TimelinePanel';
 
 const MIN_WIDTH = 1280;
 
@@ -91,6 +94,7 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
   const canLead = !readOnly && (isAccountLead(role) || !!role?.director);
 
   const [detail, setDetail] = useState<InterviewDetail | null>(null);
+  const [timeline, setTimeline] = useState<KelolaKlienTimeline | null>(null);
   const [draft, setDraft] = useState<InterviewDraft | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -126,6 +130,12 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
       const d = await getInterview(id);
       setDetail(d);
       setDraft(draftFromDetail(d));
+      // The timeline is a second call on purpose (holiday-aware working days +
+      // a strategy lookup). A failure there must not blank the page the AM came
+      // to work in, so it degrades to "no timeline shown".
+      getKelolaKlienTimeline(id)
+        .then(setTimeline)
+        .catch(() => setTimeline(null));
       setTab((t) => t ?? (d.riset_awal?.status === RISET_AWAL_STATUS.Berjalan ? 'riset' : 'interview'));
       setDirty(false);
       setJadwal({
@@ -347,6 +357,8 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
             )}
           </div>
         </div>
+
+        <TimelinePanel timeline={timeline} />
 
         {narrow && activeTab === 'interview' && (
           <div className="alert alertInfo">

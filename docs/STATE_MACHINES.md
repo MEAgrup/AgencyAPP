@@ -170,6 +170,27 @@ All else blocked: `[transisi status tidak diizinkan]`.
 - **Nol edge buka-kembali.** Kembali ke `Berjalan` akan memindahkan jangkar yang justru jadi alasan langkah ini ada; kalau revisi memang dibutuhkan, itu keputusan pemilik dulu (belum ada).
 - **Durasi bukan kolom.** Ia diturunkan saat baca (`disubmit_pada − dimulai_pada`) oleh satu fungsi core `durasiRisetAwalMenit`, dan `null`/`—` selama berjalan — bukan 0 (aturan rumah #4 & #7).
 - Jangkar dibekukan trigger `trg_riset_awal_jangkar`: mengubah `dimulai_pada`, menimpa `disubmit_pada`, atau membalik dari `Selesai` ditolak DB — termasuk lewat service-role.
+### Timeline SLA tiga langkah (keputusan pemilik 2026-08-13) — BUKAN mesin
+
+Ukuran waktu, bukan status: tidak ada state baru dan tidak ada edge. Angkanya data
+(`kelola_klien_sla_config` v1), semuanya **hari kerja** (Sen–Jum minus `hari_libur`,
+dihitung `working_days_between`):
+
+| Langkah | Target–batas | Jangkar mulai | Jangkar selesai |
+|---|---|---|---|
+| 1 · Riset Awal | 2–3 hk | `interview_riset_awal.dimulai_pada` (klik Kelola Klien) | `disubmit_pada` |
+| 2 · Interview Meeting | 1–2 hk | `interview_riset_awal.disubmit_pada` | `interview.meeting_diamankan_pada` — mana yang lebih dulu antara `→ Terjadwal` dan `→ Sedang Berlangsung` |
+| 3 · Brand Strategy | 5–7 hk | `interview.selesai_pada` (`→ Selesai` / `Selesai Dengan Catatan`) | `strategi.diajukan_pada` ATAU `strategy_plans.diajukan_pada` (AM mengajukan) |
+
+- Jangkar langkah 2 & 3 di-stamp **trigger** `trg_interview_stamp_timeline`, bukan kode TS:
+  `sm_transition` satu-satunya penulis kolom status, jadi trigger menangkap setiap jalur —
+  termasuk yang belum ditulis. Sekali terisi, **beku**.
+- Lewat batas ⇒ baris `interview_flag` dari `interview_daily_tick`
+  (`sla_riset_awal_terlambat` / `sla_meeting_terlambat` / `sla_strategi_terlambat`), sekali
+  per interview, `retroaktif` dikecualikan. Ini **menggantikan** `sla_belum_dijadwalkan` &
+  `sla_belum_selesai` yang lama — satu sumber angka, bukan dua.
+- Langkah 3 `tidak_berlaku` hanya kalau plan gate service-nya memutus `tanpa_plan`.
+
 - Mesin `interview` sendiri (#19, `Belum Dijadwalkan … Selesai/Dibatalkan`) belum punya bagian di dokumen ini; sumbernya `supabase/migrations/20260811030000_interview.sql` §12 dan `INTERVIEW_EDGES` di `web-internal/src/lib/interview.ts`.
 
 ## 7. Brief `BRF-` (M6) — also the canonical Task machine (M12) applied to AST / BKG / BRF-as-task

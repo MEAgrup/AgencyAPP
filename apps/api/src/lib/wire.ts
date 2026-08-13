@@ -4593,6 +4593,64 @@ export function interviewListToWire(rows: interview.InterviewListRow[]): Intervi
   }));
 }
 
+/**
+ * One measured step of the Kelola Klien timeline. `hari_kerja` is working days
+ * (Mon–Fri minus `hari_libur`) computed server-side — `null` while the step has
+ * not started, which the UI renders as `—`.
+ */
+export interface TimelineStepWire {
+  langkah: number;
+  nama: string;
+  mulai_pada: string | null;
+  selesai_pada: string | null;
+  hari_kerja: number | null;
+  target_hari: number;
+  batas_hari: number;
+  status: string;
+  selesai: boolean;
+}
+
+export interface KelolaKlienTimelineWire {
+  interview_id: string;
+  config_version: number;
+  langkah: TimelineStepWire[];
+}
+
+export function kelolaKlienTimelineToWire(t: interview.KelolaKlienTimeline): KelolaKlienTimelineWire {
+  return {
+    interview_id: t.interviewId,
+    config_version: t.configVersion,
+    langkah: t.langkah.map((s) => ({
+      langkah: s.langkah,
+      nama: s.nama,
+      mulai_pada: s.mulaiPada,
+      selesai_pada: s.selesaiPada,
+      hari_kerja: s.hariKerja,
+      target_hari: s.targetHari,
+      batas_hari: s.batasHari,
+      status: s.status,
+      selesai: s.selesai,
+    })),
+  };
+}
+
+/** One row of the national-holiday calendar (admin plane). */
+export interface HariLiburWire {
+  tanggal: string;
+  keterangan: string;
+  created_at: string;
+  created_by: string;
+}
+
+export function hariLiburToWire(h: admin.HariLibur): HariLiburWire {
+  return {
+    tanggal: h.tanggal,
+    keterangan: h.keterangan,
+    created_at: h.createdAt,
+    created_by: h.createdBy,
+  };
+}
+
 export function interviewRisetAwalToWire(r: interview.RisetAwal): InterviewRisetAwalWire {
   return {
     interview_id: r.interviewId,

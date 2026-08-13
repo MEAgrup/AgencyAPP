@@ -198,6 +198,34 @@ export interface InterviewDetail {
   answers: Answer[];
 }
 
+/**
+ * One measured step of the "Kelola Klien" timeline (owner decision 2026-08-13).
+ *
+ * `hariKerja` is working days (Mon–Fri minus `hari_libur`) from `mulaiPada` to
+ * `selesaiPada` — or to today while the step is still running, which is what makes
+ * a step that has already blown its limit read as late before it finishes.
+ * `null` means the step has not started; the UI renders `—`.
+ */
+export interface TimelineStep {
+  langkah: number;
+  nama: string;
+  mulaiPada: string | null;
+  selesaiPada: string | null;
+  hariKerja: number | null;
+  targetHari: number;
+  batasHari: number;
+  status: string;
+  /** True once the step's end anchor exists — the duration is final. */
+  selesai: boolean;
+}
+
+/** The whole three-step timeline for one Kelola Klien session. */
+export interface KelolaKlienTimeline {
+  interviewId: string;
+  configVersion: number;
+  langkah: TimelineStep[];
+}
+
 /** The Sales-facing surface — verdict + prasyarat only, nothing else. */
 export interface InterviewVerdict {
   interviewId: string;
@@ -382,6 +410,108 @@ export async function getInterviewVerdict(sql: Queryable, actor: Actor, id: stri
     select verdict_kualifikasi, prasyarat_status from interview_kualifikasi where interview_id = ${id}`;
   if (rows.length === 0) return null;
   return { interviewId: id, verdict: rows[0].verdict_kualifikasi, prasyaratStatus: rows[0].prasyarat_status };
+}
+
+/**
+ * getKelolaKlienTimeline computes the three-step SLA for one session.
+ *
+ * All of the arithmetic — working days, holiday exclusion, which strategy
+ * document applies — runs in SQL, on purpose: the holiday calendar is a table and
+ * the applicable-strategy rule is a function the daily flag job uses too. A TS
+ * copy of either would be a second definition that drifts from the one the flags
+ * are raised on, and then the page and the flag would disagree about whether an
+ * AM is late.
+ *
+ * Read scope = the full record's scope (Account only). The timeline exposes how
+ * fast an AM worked, which is the same hard-internal class as Blok B.
+ */
+export async function getKelolaKlienTimeline(
+  sql: Queryable,
+  actor: Actor,
+  id: string,
+): Promise<KelolaKlienTimeline> {
+  const { ownerAm } = await loadScope(sql, id);
+  if (!canReadInterview(actor, ownerAm)) throw new ForbiddenError(MSG_FORBIDDEN);
+
+  const rows = await sql<Record<string, unknown>[]>`
+    select cfg.version,
+           cfg.riset_awal_target_hari, cfg.riset_awal_batas_hari,
+           cfg.meeting_target_hari,    cfg.meeting_batas_hari,
+           cfg.strategi_target_hari,   cfg.strategi_batas_hari,
+           ra.dimulai_pada, ra.disubmit_pada,
+           i.meeting_diamankan_pada, i.selesai_pada,
+           kelola_klien_strategi_berlaku(i.id)       as strategi_berlaku,
+           kelola_klien_strategi_diajukan_pada(i.id) as strategi_diajukan_pada,
+           case when ra.dimulai_pada is null then null else
+             working_days_between(wib_date(ra.dimulai_pada),
+                                  wib_date(coalesce(ra.disubmit_pada, now()))) end as hk_riset,
+           case when ra.disubmit_pada is null then null else
+             working_days_between(wib_date(ra.disubmit_pada),
+                                  wib_date(coalesce(i.meeting_diamankan_pada, now()))) end as hk_meeting,
+           case when i.selesai_pada is null then null else
+             working_days_between(wib_date(i.selesai_pada),
+                                  wib_date(coalesce(kelola_klien_strategi_diajukan_pada(i.id), now()))) end as hk_strategi
+      from interview i
+      left join interview_riset_awal ra on ra.interview_id = i.id
+      cross join lateral (
+        select * from kelola_klien_sla_config where aktif = true order by version desc limit 1
+      ) cfg
+     where i.id = ${id}`;
+  if (rows.length === 0) throw new NotFoundError(MSG_NOT_FOUND);
+  const r = rows[0];
+
+  const num = (v: unknown): number => Number(v);
+  const hk = (v: unknown): number | null => (v == null ? null : Number(v));
+  const strategiBerlaku = r.strategi_berlaku !== false;
+  const strategiDiajukan = iso(r.strategi_diajukan_pada as string | Date | null);
+
+  const step = (
+    langkah: number,
+    mulaiPada: string | null,
+    selesaiPada: string | null,
+    hariKerja: number | null,
+    ambang: iv.SlaAmbang,
+    berlaku = true,
+  ): TimelineStep => ({
+    langkah,
+    nama: iv.KELOLA_KLIEN_LANGKAH_LABEL[langkah as iv.KelolaKlienLangkah],
+    mulaiPada,
+    selesaiPada,
+    hariKerja: berlaku ? hariKerja : null,
+    targetHari: ambang.targetHari,
+    batasHari: ambang.batasHari,
+    status: berlaku ? iv.statusSla(hariKerja, ambang) : iv.SLA_STATUS.TidakBerlaku,
+    selesai: berlaku && selesaiPada !== null,
+  });
+
+  return {
+    interviewId: id,
+    configVersion: num(r.version),
+    langkah: [
+      step(
+        iv.KELOLA_KLIEN_LANGKAH.RisetAwal,
+        iso(r.dimulai_pada as string | Date | null),
+        iso(r.disubmit_pada as string | Date | null),
+        hk(r.hk_riset),
+        { targetHari: num(r.riset_awal_target_hari), batasHari: num(r.riset_awal_batas_hari) },
+      ),
+      step(
+        iv.KELOLA_KLIEN_LANGKAH.InterviewMeeting,
+        iso(r.disubmit_pada as string | Date | null),
+        iso(r.meeting_diamankan_pada as string | Date | null),
+        hk(r.hk_meeting),
+        { targetHari: num(r.meeting_target_hari), batasHari: num(r.meeting_batas_hari) },
+      ),
+      step(
+        iv.KELOLA_KLIEN_LANGKAH.BrandStrategy,
+        iso(r.selesai_pada as string | Date | null),
+        strategiDiajukan,
+        hk(r.hk_strategi),
+        { targetHari: num(r.strategi_target_hari), batasHari: num(r.strategi_batas_hari) },
+        strategiBerlaku,
+      ),
+    ],
+  };
 }
 
 /** One row of the client's interview log (list surface). */

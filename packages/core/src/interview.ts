@@ -163,6 +163,107 @@ function toEpochMs(v: string | Date | null | undefined): number | null {
 }
 
 // ===========================================================================
+// Timeline "Kelola Klien" — the three-step SLA (owner decision 2026-08-13)
+// ===========================================================================
+//
+// The owner's numbers (working days), answering open question RA-1:
+//
+//   1. Riset Awal        — 2–3 working days from opening Kelola Klien
+//   2. Interview Meeting — 1–2 working days, "harus sudah didapatkan"
+//   3. Brand Strategy    — 5–7 working days after the interview
+//
+// A range is read as `target`..`batas`: at or under the target is on time, past
+// the target but within the limit is still tolerated, past the limit is late.
+// The numbers themselves are DATA (`kelola_klien_sla_config`), never literals
+// here — moving 3 to 4 must be a config version, not a deploy. What lives here is
+// the SHAPE of the judgement, so every layer bands a duration the same way.
+//
+// Working days (Mon–Fri minus `hari_libur`) are counted by the SQL helper
+// `working_days_between`, deliberately NOT reimplemented in TS: the holiday
+// calendar is a table, and a second copy of this arithmetic would drift from it.
+
+/** The three steps, in order. The numbers are the owner's own numbering. */
+export const KELOLA_KLIEN_LANGKAH = {
+  RisetAwal: 1,
+  InterviewMeeting: 2,
+  BrandStrategy: 3,
+} as const;
+
+export type KelolaKlienLangkah = (typeof KELOLA_KLIEN_LANGKAH)[keyof typeof KELOLA_KLIEN_LANGKAH];
+
+/** BI labels — the step names the owner used, single-sourced for UI + prints. */
+export const KELOLA_KLIEN_LANGKAH_LABEL: Record<KelolaKlienLangkah, string> = {
+  1: 'Riset Awal',
+  2: 'Interview Meeting',
+  3: 'Brand Strategy',
+};
+
+export const SLA_STATUS = {
+  /** The step's clock has not started (its start anchor does not exist yet). */
+  BelumMulai: 'belum_mulai',
+  /** Within target. */
+  TepatWaktu: 'tepat_waktu',
+  /** Past target, still within the tolerated limit. */
+  MendekatiBatas: 'mendekati_batas',
+  /** Past the limit. */
+  Terlambat: 'terlambat',
+  /** The step does not apply to this session at all (e.g. a service the plan
+   *  gate decided needs no strategy). Never a failure. */
+  TidakBerlaku: 'tidak_berlaku',
+} as const;
+
+export type SlaStatus = (typeof SLA_STATUS)[keyof typeof SLA_STATUS];
+
+/** The thresholds for one step, as loaded from `kelola_klien_sla_config`. */
+export interface SlaAmbang {
+  targetHari: number;
+  batasHari: number;
+}
+
+/** The three steps' thresholds — the TS mirror of one config row. */
+export interface KelolaKlienSlaConfig {
+  version: number;
+  risetAwal: SlaAmbang;
+  meeting: SlaAmbang;
+  strategi: SlaAmbang;
+}
+
+/**
+ * The owner's numbers as of 2026-08-13. This is a FALLBACK for tests and for a
+ * read that runs before any config row exists — the live values come from
+ * `kelola_klien_sla_config`, which is what an operator edits.
+ */
+export const DEFAULT_KELOLA_KLIEN_SLA: KelolaKlienSlaConfig = {
+  version: 1,
+  risetAwal: { targetHari: 2, batasHari: 3 },
+  meeting: { targetHari: 1, batasHari: 2 },
+  strategi: { targetHari: 5, batasHari: 7 },
+};
+
+/**
+ * statusSla bands an elapsed working-day count against one step's thresholds.
+ *
+ * `hariKerja == null` means the clock has not started — `belum_mulai`, NOT
+ * on-time: a step that has not begun has earned no verdict either way.
+ *
+ * The judgement is identical whether the step has finished or is still running.
+ * A step running past its limit IS late — waiting for it to finish before saying
+ * so would hide exactly the case the owner asked to catch ("timeline tidak
+ * terlewatkan"), and would let an unfinished step sit green indefinitely.
+ */
+export function statusSla(hariKerja: number | null | undefined, ambang: SlaAmbang): SlaStatus {
+  if (hariKerja == null || !Number.isFinite(hariKerja) || hariKerja < 0) return SLA_STATUS.BelumMulai;
+  if (hariKerja <= ambang.targetHari) return SLA_STATUS.TepatWaktu;
+  if (hariKerja <= ambang.batasHari) return SLA_STATUS.MendekatiBatas;
+  return SLA_STATUS.Terlambat;
+}
+
+/** True for the one status that means the step actually breached its limit. */
+export function isSlaTerlambat(status: string): boolean {
+  return status === SLA_STATUS.Terlambat;
+}
+
+// ===========================================================================
 // Per-field number source (I3) and margin basis (I21)
 // ===========================================================================
 

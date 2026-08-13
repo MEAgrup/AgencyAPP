@@ -240,14 +240,17 @@ jobs:
       #         + plan_gate_config + service_plan_gate (20260806061000, M6C §10).
       #      55 = 54 + prospect_activities (20260806050000, keputusan pemilik 2026-08-06).
       #      54 = 53 + lead_delete_requests (20260729162101, DECISIONS 2026-07-29).
+      # 107 = 105 + hari_libur + kelola_klien_sla_config (20260813000000, SLA
+      #       timeline tiga langkah: kalender libur nasional yang diisi admin +
+      #       ambang berversi 2-3 / 1-2 / 5-7 hari kerja).
       # 105 = 104 + interview_riset_awal (20260812100000, langkah 1 "Kelola Klien":
       #       jangkar mulai/submit riset awal — nol kolom durasi).
-      - name: Verify table count (expect 105)
+      - name: Verify table count (expect 107)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 105
+          test "$n" -eq 107
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this

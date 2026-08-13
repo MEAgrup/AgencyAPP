@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_KELOLA_KLIEN_SLA,
+  KELOLA_KLIEN_LANGKAH,
+  KELOLA_KLIEN_LANGKAH_LABEL,
+  SLA_STATUS,
+  isSlaTerlambat,
+  statusSla,
   RISET_AWAL_MACHINE,
   RISET_AWAL_STATES,
   durasiBerjalanMenit,
@@ -549,5 +555,57 @@ describe('durasiRisetAwalMenit', () => {
   it('durasiBerjalanMenit measures the running step by the SAME rule', () => {
     expect(durasiBerjalanMenit(mulai, new Date('2026-08-12T03:20:30.000Z'))).toBe(140);
     expect(durasiBerjalanMenit(null, new Date('2026-08-12T03:20:00.000Z'))).toBeNull();
+  });
+});
+
+// ===========================================================================
+// Timeline SLA — the owner's three-step numbers (2026-08-13)
+// ===========================================================================
+
+describe('kelola klien SLA — the owner numbers and the banding rule', () => {
+  it('carries the owner numbers as the fallback config: 2–3, 1–2, 5–7', () => {
+    expect(DEFAULT_KELOLA_KLIEN_SLA.risetAwal).toEqual({ targetHari: 2, batasHari: 3 });
+    expect(DEFAULT_KELOLA_KLIEN_SLA.meeting).toEqual({ targetHari: 1, batasHari: 2 });
+    expect(DEFAULT_KELOLA_KLIEN_SLA.strategi).toEqual({ targetHari: 5, batasHari: 7 });
+  });
+
+  it('names the three steps in the owner order', () => {
+    expect(KELOLA_KLIEN_LANGKAH).toEqual({ RisetAwal: 1, InterviewMeeting: 2, BrandStrategy: 3 });
+    expect(KELOLA_KLIEN_LANGKAH_LABEL[1]).toBe('Riset Awal');
+    expect(KELOLA_KLIEN_LANGKAH_LABEL[2]).toBe('Interview Meeting');
+    expect(KELOLA_KLIEN_LANGKAH_LABEL[3]).toBe('Brand Strategy');
+  });
+
+  const risetAwal = DEFAULT_KELOLA_KLIEN_SLA.risetAwal; // 2–3
+
+  it('bands at the boundaries: <=target on time, <=batas tolerated, past batas late', () => {
+    expect(statusSla(0, risetAwal)).toBe(SLA_STATUS.TepatWaktu);
+    expect(statusSla(2, risetAwal)).toBe(SLA_STATUS.TepatWaktu); // exactly the target
+    expect(statusSla(3, risetAwal)).toBe(SLA_STATUS.MendekatiBatas); // exactly the limit
+    expect(statusSla(4, risetAwal)).toBe(SLA_STATUS.Terlambat);
+    expect(isSlaTerlambat(statusSla(4, risetAwal))).toBe(true);
+    expect(isSlaTerlambat(statusSla(3, risetAwal))).toBe(false);
+  });
+
+  it('a step that has not started is belum_mulai — NOT on time', () => {
+    // On-time would be a verdict the step has not earned, and would let an
+    // unstarted step count as a success in any rollup built on this.
+    expect(statusSla(null, risetAwal)).toBe(SLA_STATUS.BelumMulai);
+    expect(statusSla(undefined, risetAwal)).toBe(SLA_STATUS.BelumMulai);
+    expect(statusSla(Number.NaN, risetAwal)).toBe(SLA_STATUS.BelumMulai);
+    expect(statusSla(-1, risetAwal)).toBe(SLA_STATUS.BelumMulai);
+  });
+
+  it('judges a RUNNING step by the same rule — late is late before it finishes', () => {
+    // 6 working days into a 5–7 step: not late yet. 8: late, even though the AM
+    // has not submitted anything and could still claim to be "working on it".
+    expect(statusSla(6, DEFAULT_KELOLA_KLIEN_SLA.strategi)).toBe(SLA_STATUS.MendekatiBatas);
+    expect(statusSla(8, DEFAULT_KELOLA_KLIEN_SLA.strategi)).toBe(SLA_STATUS.Terlambat);
+  });
+
+  it('works for a step whose target equals its limit (a config with no tolerance)', () => {
+    const ketat = { targetHari: 1, batasHari: 1 };
+    expect(statusSla(1, ketat)).toBe(SLA_STATUS.TepatWaktu);
+    expect(statusSla(2, ketat)).toBe(SLA_STATUS.Terlambat);
   });
 });

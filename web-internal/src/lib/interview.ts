@@ -48,6 +48,29 @@ export interface InterviewRisetAwal {
   durasi_menit: number | null;
 }
 
+/**
+ * One measured step of the Kelola Klien timeline (owner decision 2026-08-13).
+ * `hari_kerja` is working days computed server-side — `null` before the step
+ * starts, rendered `—`.
+ */
+export interface TimelineStep {
+  langkah: number;
+  nama: string;
+  mulai_pada: string | null;
+  selesai_pada: string | null;
+  hari_kerja: number | null;
+  target_hari: number;
+  batas_hari: number;
+  status: string;
+  selesai: boolean;
+}
+
+export interface KelolaKlienTimeline {
+  interview_id: string;
+  config_version: number;
+  langkah: TimelineStep[];
+}
+
 /** Blok A schedule. */
 export interface InterviewJadwal {
   tanggal_waktu: string | null;
@@ -194,6 +217,11 @@ export function resolveInterviewPrasyarat(id: string): Promise<InterviewVerdict 
  */
 export function submitRisetAwal(id: string): Promise<InterviewRisetAwal> {
   return api.post<InterviewRisetAwal>(`/interview/${id}/riset-awal`);
+}
+
+/** GET /interview/{id}/timeline — the three-step SLA (working days, server-computed). */
+export function getKelolaKlienTimeline(id: string): Promise<KelolaKlienTimeline> {
+  return api.get<KelolaKlienTimeline>(`/interview/${id}/timeline`);
 }
 
 export function scheduleInterview(id: string, body: JadwalWire): Promise<InterviewDetail> {
@@ -365,6 +393,56 @@ export function menitBerjalanSejak(dimulaiPada: string | null | undefined, sekar
   if (Number.isNaN(mulai)) return null;
   const selisih = sekarang.getTime() - mulai;
   return selisih < 0 ? null : Math.floor(selisih / 60_000);
+}
+
+// ===========================================================================
+// Timeline SLA (langkah 1–3) — display only; the judgement is made server-side
+// ===========================================================================
+//
+// The status string arrives already decided by `@cdps/core`'s `statusSla`, run
+// over holiday-aware working days. Nothing here re-decides it: a second opinion
+// on the FE is how a page ends up calling an AM late while the flag job does not.
+
+export const SLA_STATUS = {
+  BelumMulai: 'belum_mulai',
+  TepatWaktu: 'tepat_waktu',
+  MendekatiBatas: 'mendekati_batas',
+  Terlambat: 'terlambat',
+  TidakBerlaku: 'tidak_berlaku',
+} as const;
+
+export const SLA_STATUS_LABEL: Record<string, string> = {
+  belum_mulai: 'Belum mulai',
+  tepat_waktu: 'Tepat waktu',
+  mendekati_batas: 'Mendekati batas',
+  terlambat: 'Terlambat',
+  tidak_berlaku: 'Tidak berlaku',
+};
+
+export function slaStatusTone(status: string): string {
+  switch (status) {
+    case SLA_STATUS.TepatWaktu:
+      return 'green';
+    case SLA_STATUS.MendekatiBatas:
+      return 'amber';
+    case SLA_STATUS.Terlambat:
+      return 'red';
+    default:
+      return 'gray';
+  }
+}
+
+/** "2–3 hari kerja" — the step's own target/limit, shown beside its elapsed count. */
+export function formatAmbang(targetHari: number, batasHari: number): string {
+  return targetHari === batasHari
+    ? `${targetHari} hari kerja`
+    : `${targetHari}–${batasHari} hari kerja`;
+}
+
+/** Elapsed working days as text; `—` when the step has not started. */
+export function formatHariKerja(hariKerja: number | null | undefined): string {
+  if (hariKerja == null || !Number.isFinite(hariKerja) || hariKerja < 0) return '—';
+  return `${Math.floor(hariKerja)} hari kerja`;
 }
 
 // ===========================================================================

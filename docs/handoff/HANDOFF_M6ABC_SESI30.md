@@ -1,11 +1,12 @@
-# HANDOFF — "Kelola Klien" langkah 1 **Riset Awal** (bagian 1: pengukuran waktu) — Sesi 30
+# HANDOFF — "Kelola Klien": langkah **Riset Awal** + **timeline SLA 3 langkah** — Sesi 30
 
 > Rantai: … → SESI28 (langkah 4–6, #137) → SESI29 (prasyarat bagian 2) → **SESI30 (ini, terbaru)**.
 > Baca yang bernomor tertinggi lebih dulu; sesi sebelumnya hanya konteks sejarah.
 >
-> SESI30 menutup temuan QA pemilik 2026-08-12: **alur "Kelola Klien" kehilangan satu langkah**.
-> Yang dikerjakan = **bagian 1 dari 2** yang pemilik minta (pengukuran waktu). **Bagian 2
-> (kolom isian riset awal) BELUM dikerjakan** — spesifikasinya di §3.
+> SESI30 menutup temuan QA pemilik 2026-08-12: **alur "Kelola Klien" kehilangan satu langkah**,
+> LALU memasang timeline SLA-nya setelah pemilik memberi angkanya (2026-08-13).
+> Yang dikerjakan: **bagian 1 dari 2** (pengukuran waktu riset awal) **+ SLA tiga langkah**.
+> **Bagian 2 (kolom isian riset awal) BELUM dikerjakan** — spesifikasinya di §3.
 
 ## 0. CARA MELANJUTKAN DI CHAT BARU — baca ini dulu
 
@@ -61,9 +62,9 @@ DB direklaim saat idle — kalau `psql` bilang "Connection refused", `pg_ctl …
 
 | | |
 |---|---|
-| Migrasi | **87 berkas** (+ `20260812100000_interview_riset_awal`) |
-| Gate CI (ci.yml + db-rebuild.sh) | tabel **105** · mesin **20** · event **44** · prefix **32** — tabel 104→105 (`interview_riset_awal`) dan mesin 19→20 (`riset_awal`) **DINAIKKAN DI KEDUA BERKAS** (gate kembar). Prefix & event TIDAK berubah: riset awal anak `interview` (nol ID baru), nol event notifikasi baru |
-| Test | core **213** · db **43** · domain **1148** (+1 skip) · api **345** · web-internal **234** — semua hijau lokal (PG16) |
+| Migrasi | **88 berkas** (+ `20260812100000_interview_riset_awal`, `20260813000000_kelola_klien_sla`) |
+| Gate CI (ci.yml + db-rebuild.sh) | tabel **107** · mesin **20** · event **44** · prefix **32** — tabel 104→105 (`interview_riset_awal`) →107 (`hari_libur`, `kelola_klien_sla_config`), mesin 19→20 (`riset_awal`). **DINAIKKAN DI KEDUA BERKAS** (gate kembar). Prefix & event TIDAK berubah: nol ID baru, nol event notifikasi baru |
+| Test | core **219** · db **47** · domain **1160** (+1 skip) · api **345** · web-internal **238** — semua hijau lokal (PG16), DB dibangun ulang dari nol |
 | Typecheck | `@cdps/core\|db\|domain\|api` + `web-internal` bersih; `web-internal` lint + `next build` hijau |
 | Invariant SQL | `auth_claims`/`ident`/`immutability`/`rls_checks` (O48) **PASS** — ledger O48 TIDAK tumbuh (policy baru punya arm lead/divisi inline) |
 | `KNOWN_GAPS` (route-parity) | tetap **kosong** |
@@ -129,16 +130,70 @@ melanjutkan tadi.
 | `apps/api` | `POST /api/v1/interview/{id}/riset-awal`; `InterviewRisetAwalWire` (+ terdaftar di `WIRE_TO_FE`), `riset_awal` di `InterviewDetailWire`, 4 kolom `riset_awal_*` di `InterviewListRowWire` |
 | `web-internal` | Tab "Kelola Klien" jadi **3**: `1 · Riset Awal` (panel baru `RisetAwalPanel`, penghitung berjalan + tombol submit), `2 · Interview / Kualifikasi`, `3 · Strategi & Plan →`. Halaman mendarat di tab 1 selama riset awal berjalan. Kolom "Riset awal" di Riwayat halaman Klien; teks tombol/konfirmasi di halaman Klien & Service menyebut riset awal mulai terhitung |
 
+Tambahan dari SLA (2026-08-13):
+
+| Lapis | Perubahan |
+|---|---|
+| `packages/core/src/interview.ts` | `KELOLA_KLIEN_LANGKAH(_LABEL)`, `SLA_STATUS`, `SlaAmbang`, `statusSla`, `DEFAULT_KELOLA_KLIEN_SLA` (fallback, bukan sumber angka) |
+| `packages/domain/src/interview.ts` | `getKelolaKlienTimeline` (semua aritmetika di SQL) + tipe `TimelineStep`/`KelolaKlienTimeline` |
+| `packages/domain/src/admin.ts` | `listHariLibur` / `addHariLibur` / `removeHariLibur` + `MSG_HARI_LIBUR_*` (Direksi tulis, OD baca) |
+| `apps/api` | `GET /interview/{id}/timeline`; `GET|POST /admin/hari-libur`, `DELETE /admin/hari-libur/{tanggal}`; wire `TimelineStepWire`/`KelolaKlienTimelineWire`/`HariLiburWire` |
+| `web-internal` | `TimelinePanel` (tabel 3 langkah di atas tab), halaman `/admin/hari-libur` + item nav "Hari Libur", helper `slaStatusTone`/`formatAmbang`/`formatHariKerja` |
+
+## 1b. Timeline SLA tiga langkah (angka pemilik 2026-08-13)
+
+Pemilik memberi angkanya, menutup pertanyaan terbuka RA-1:
+
+| Langkah | Target-batas | Jangkar mulai | Jangkar selesai |
+|---|---|---|---|
+| 1 - Riset Awal | **2-3 hari kerja** | `interview_riset_awal.dimulai_pada` | `disubmit_pada` |
+| 2 - Interview Meeting | **1-2 hari kerja** | `interview_riset_awal.disubmit_pada` | `interview.meeting_diamankan_pada` |
+| 3 - Brand Strategy | **5-7 hari kerja** | `interview.selesai_pada` | `strategi.diajukan_pada` / `strategy_plans.diajukan_pada` |
+
+Empat jawaban pemilik yang menentukan bentuknya (jangan diubah tanpa keputusan baru):
+
+1. **Jangkar langkah 2** = riset awal disubmit -> jadwal terisi. Karena jalur "mulai interview
+   tanpa jadwal" ada, jangkar akhirnya = **yang lebih dulu** antara `-> Terjadwal` dan
+   `-> Sedang Berlangsung` — meeting yang benar-benar terjadi tak boleh dihitung terlambat
+   hanya karena kolom jadwal kosong.
+2. **Langkah 3** = dokumen strategi **mana pun** yang berlaku, berhenti saat **AM mengajukan**
+   (bukan saat disetujui — waktu tunggu SPV bukan beban AM). `strategy_plans` dapat kolom
+   `diajukan_pada` baru supaya kedua dokumen sebentuk; di-backfill dari `audit_log`.
+3. **Dua flag SLA lama DICABUT** (`sla_belum_dijadwalkan`, `sla_belum_selesai`) — diganti
+   `sla_riset_awal_terlambat` / `sla_meeting_terlambat` / `sla_strategi_terlambat`.
+4. **Hari kerja ikut membuang libur nasional** => tabel `hari_libur` + halaman
+   `/admin/hari-libur` (Direksi tulis, OD baca). **Mulai KOSONG** — selama kosong hasilnya
+   identik "Sen-Jum saja", dan halaman adminnya mengatakan itu terang-terangan.
+
+Mekanika yang penting:
+
+- **Ambang = data berversi** `kelola_klien_sla_config` (v1: 2/3, 1/2, 5/7). Menggeser angka =
+  baris versi baru, **bukan deploy**, dan bukan edit kode.
+- **`working_days_between` = SATU helper hari kerja** untuk seluruh sistem (Sen-Jum minus
+  `hari_libur`). **STABLE, bukan IMMUTABLE** — ia membaca tabel; IMMUTABLE yang membaca tabel
+  adalah bug diam. `interview_working_days_between` sekarang delegasi tipis ke sana.
+- **Jangkar langkah 2 & 3 di-stamp trigger** (`trg_interview_stamp_timeline`), bukan kode TS —
+  `sm_transition` satu-satunya penulis status, jadi trigger menangkap SETIAP jalur. Beku
+  setelah terisi (fixture tes pun harus menulis status + jangkar dalam SATU statement).
+- **Nol event notifikasi baru** — flag advisory saja, mengikuti preseden SLA lama. Katalog
+  tetap 44; menambah event butuh baris versi (O55) + tanda tangan pemilik.
+- Baca: `GET /interview/{id}/timeline` (terpisah dari detail — detail di-refetch tiap autosave,
+  dan aritmetika hari kerja + lookup strategi tak pantas ada di jalur itu).
+
 ## 2. Gotcha (baca sebelum lanjut)
 
 1. **Jangan tambah kolom durasi.** Setiap layer menurunkannya dari dua jangkar lewat fungsi
    core yang sama. Menyimpannya = angka yang bisa berbohong terhadap jangkarnya.
 2. **Jangan tambah edge `Selesai → Berjalan`** tanpa keputusan pemilik: itu memindahkan
    jangkar yang jadi alasan langkah ini ada.
-3. **Belum ada ambang SLA** (berapa lama riset awal boleh berjalan) — fakta bisnis yang
-   belum diberikan pemilik. Tercatat sebagai pertanyaan terbuka **RA-1** di `DECISIONS.md`.
-   Kalau angkanya turun: config berversi (pola `kualifikasi_config`) + flag harian (pola
-   `prasyarat_bersyarat_terlambat`), **bukan** literal di kode.
+3. **Ambang SLA sudah ada** (RA-1 ditutup 2026-08-13) dan hidup di `kelola_klien_sla_config`.
+   Jangan menulis 2/3/5/7 sebagai literal di mana pun — baca confignya.
+6. **`hari_libur` kosong = SLA menghitung libur nasional sebagai hari kerja.** Itu bukan bug,
+   itu kalender yang belum diisi. Kalau pemilik merasa angkanya "terlalu ketat" di sekitar
+   Lebaran/Natal, periksa `/admin/hari-libur` DULU sebelum menyentuh ambangnya.
+7. **Jangan hitung hari kerja di TypeScript.** Kalendernya tabel; salinan kedua aritmetika ini
+   akan berbeda dari flag hariannya, lalu halaman dan flag saling bertentangan soal siapa yang
+   terlambat.
 4. **Sales tidak boleh melihat riset awal.** RLS-nya cermin `interview_jadwal` (scope
    Account) — data baseline toko klien sekelas Blok B, bukan permukaan verdict. Ada tesnya
    di `interview.rls.test.ts` (sales closing melihat verdict, TIDAK melihat riset awal).
