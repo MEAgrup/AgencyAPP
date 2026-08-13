@@ -6,7 +6,17 @@ import { useRouter } from 'next/navigation';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { isAccountLead, isAccountStaff } from '@/lib/account';
-import { createInterview } from '@/lib/interview';
+import {
+  PRASYARAT_LABELS,
+  VERDICT_LABELS,
+  createInterview,
+  formatDurasiMenit,
+  interviewStatusTone,
+  listInterviewsByClient,
+  risetAwalStatusTone,
+  verdictTone,
+  type InterviewListRow,
+} from '@/lib/interview';
 import {
   EDITABLE_FIELDS,
   PAYMENT_INTENT_OPTIONS,
@@ -41,6 +51,10 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
 
   const [creatingInterview, setCreatingInterview] = useState(false);
   const [interviewError, setInterviewError] = useState<string | null>(null);
+  // The client's interview log — so a saved interview can be reopened instead of
+  // only ever created anew (which would duplicate it). Account-scope read.
+  const [interviews, setInterviews] = useState<InterviewListRow[]>([]);
+  const [interviewsError, setInterviewsError] = useState<string | null>(null);
 
   const [client, setClient] = useState<Client | null>(null);
   const [loading, setLoading] = useState(true);
@@ -80,9 +94,24 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     }
   }, [id]);
 
+  // The interview log is Account-scope; a Sales/Finance viewer of this record is
+  // denied (403). Load it separately so that denial never blanks the whole page —
+  // the log simply stays empty for roles that may not read it.
+  const loadInterviews = useCallback(async () => {
+    if (!canManageInterview) return;
+    setInterviewsError(null);
+    try {
+      const res = await listInterviewsByClient(id);
+      setInterviews(res.data);
+    } catch (err) {
+      setInterviewsError(errorMessage(err));
+    }
+  }, [id, canManageInterview]);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadInterviews();
+  }, [load, loadInterviews]);
 
   async function handleVoid(serviceId: string, serviceName: string) {
     if (!window.confirm(`Yakin ingin void service "${serviceName}"? Brief non-Approved akan ikut dibatalkan.`)) {
@@ -139,7 +168,10 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   }
 
   async function handleOpenInterview() {
-    if (!window.confirm('Buat interview baru untuk klien ini dan buka halaman Kelola Klien?')) {
+    // Opening Kelola Klien STARTS riset awal (langkah 1) — the server stamps the
+    // clock. The call resumes an already-open session rather than starting a
+    // second one, so coming back here does not reset that clock.
+    if (!window.confirm('Buka Kelola Klien untuk klien ini? Riset awal mulai terhitung sejak sekarang.')) {
       return;
     }
     setInterviewError(null);
@@ -383,12 +415,81 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             <h2>Kelola Klien · Interview &amp; Kualifikasi</h2>
           </div>
           {interviewError && <div className="alert alertError" role="alert">{interviewError}</div>}
-          <p className="muted" style={{ fontSize: 13 }}>
-            Buka halaman Interview untuk mengisi Blok A–B, menghitung kualifikasi (skor & verdict
-            advisory), dan menandai prasyarat klien.
-          </p>
+          {interviewsError && <div className="alert alertError" role="alert">{interviewsError}</div>}
+
+          {/* Riwayat Kelola Klien — sessions with saved work: a submitted riset
+              awal, a schedule, a started/submitted interview, or a cancellation
+              (blank never-touched attempts are filtered server-side). A running
+              riset awal is reached through the button below, which resumes. */}
+          {interviews.length > 0 ? (
+            <div className="table-wrap" style={{ marginBottom: 12 }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Interview ID</th>
+                    <th>Status</th>
+                    <th>Riset awal</th>
+                    <th>Verdict</th>
+                    <th>Prasyarat</th>
+                    <th>Dibuat</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {interviews.map((iv) => (
+                    <tr key={iv.id}>
+                      <td>
+                        <Link href={`/account/interview/${iv.id}`}>{iv.id}</Link>
+                        {iv.versi_no > 1 && (
+                          <span className="muted" style={{ fontSize: 12 }}> · v{iv.versi_no}</span>
+                        )}
+                      </td>
+                      <td>
+                        <span className={`badge badge-${interviewStatusTone(iv.status)}`}>{iv.status}</span>
+                      </td>
+                      {/* Langkah 1 — the measured research step. `—` while it is
+                          still running: an unfinished step has no duration yet. */}
+                      <td>
+                        {iv.riset_awal_status ? (
+                          <>
+                            <span className={`badge badge-${risetAwalStatusTone(iv.riset_awal_status)}`}>
+                              {iv.riset_awal_status}
+                            </span>{' '}
+                            <span className="muted" style={{ fontSize: 12 }}>
+                              {formatDurasiMenit(iv.riset_awal_durasi_menit)}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                      <td>
+                        {iv.verdict ? (
+                          <span className={`badge badge-${verdictTone(iv.verdict)}`}>
+                            {VERDICT_LABELS[iv.verdict] ?? iv.verdict}
+                          </span>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                      <td>
+                        {iv.prasyarat_status ? (PRASYARAT_LABELS[iv.prasyarat_status] ?? iv.prasyarat_status) : '—'}
+                      </td>
+                      <td>{formatDate(iv.created_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="muted" style={{ fontSize: 13 }}>
+              Belum ada sesi Kelola Klien yang tercatat untuk klien ini. Gunakan tombol di bawah untuk
+              membukanya — riset awal langsung mulai terhitung, dan sesi muncul di sini begitu riset awal
+              disubmit, jadwal diisi, atau interview dimulai.
+            </p>
+          )}
+
           <button type="button" className="btn btnPrimary" disabled={creatingInterview} onClick={handleOpenInterview}>
-            {creatingInterview ? 'Membuka…' : 'Buat & buka interview'}
+            {creatingInterview ? 'Membuka…' : 'Kelola Klien (mulai riset awal)'}
           </button>
         </section>
       )}

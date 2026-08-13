@@ -398,6 +398,7 @@ const WIRE_TO_FE: Record<string, string> = {
   AMWorkloadWire: 'account.ts::AMWorkload',
   AssignmentWire: 'account.ts::Assignment',
   StrategyWire: 'account.ts::Strategy',
+  DivisionTaskWire: 'account.ts::DivisionTask',
   StrategyRequirementWire: 'account.ts::StrategyRequirement',
   ServiceQueueRowWire: 'account.ts::ServiceQueueRow',
   // M6C plan gate
@@ -458,11 +459,16 @@ const WIRE_TO_FE: Record<string, string> = {
   StrategiDiffEntryWire: 'strategi.ts::StrategiDiffEntry',
   // Modul Interview ("Kelola Klien" tab 1) — langkah 6.
   InterviewWire: 'interview.ts::Interview',
+  InterviewRisetAwalWire: 'interview.ts::InterviewRisetAwal',
+  TimelineStepWire: 'interview.ts::TimelineStep',
+  KelolaKlienTimelineWire: 'interview.ts::KelolaKlienTimeline',
+  HariLiburWire: 'types.ts::HariLibur',
   InterviewJadwalWire: 'interview.ts::InterviewJadwal',
   InterviewKualifikasiWire: 'interview.ts::InterviewKualifikasi',
   InterviewAnswerWire: 'interview.ts::InterviewAnswer',
   InterviewDetailWire: 'interview.ts::InterviewDetail',
   InterviewVerdictWire: 'interview.ts::InterviewVerdict',
+  InterviewListRowWire: 'interview.ts::InterviewListRow',
   BriefWire: 'account.ts::Brief',
   ComplaintWire: 'account.ts::Complaint',
   // M7 creative

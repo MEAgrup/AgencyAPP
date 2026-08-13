@@ -1,17 +1,25 @@
 'use client';
 
 /**
- * Modul Interview — the "Kelola Klien" page (langkah 7). Interview is tab 1 and
- * the default; later tabs (Strategi, …) hang off the same shell but are not wired
- * here.
+ * Modul Interview — the "Kelola Klien" page (langkah 7).
+ *
+ * ## Three steps, not two (owner QA 2026-08-12)
+ *
+ * "Kelola Klien" is **Riset Awal → Interview → Strategi**. Step 1 — the AM logs
+ * into the client's store and records the baseline — was missing from CDPS
+ * entirely, and every step is measured so a timeline cannot slip unnoticed. Tab 1
+ * is now Riset Awal and it is where the page lands while that step is still
+ * running; once it is submitted the page opens on the Interview tab, which is
+ * where the work continues.
  *
  * ## What this page is responsible for
  *
- * The shell for one interview: load the record, run the Blok A schedule, chapter
- * Blok B into its sections with progressive disclosure, autosave the draft every
- * 20s (§7, `PUT /answers`), run the lifecycle transitions, and drive a PINNED
- * live-scoring sidebar. Two print views hang off it — internal (everything) and
- * client (prasyarat only, score/verdict stripped).
+ * The shell for one interview: measure Riset Awal (start stamped server-side when
+ * this page's interview was opened, submit recorded here), load the record, run
+ * the Blok A schedule, chapter Blok B into its sections with progressive
+ * disclosure, autosave the draft every 20s (§7, `PUT /answers`), run the lifecycle
+ * transitions, and drive a PINNED live-scoring sidebar. Two print views hang off
+ * it — internal (everything) and client (prasyarat only, score/verdict stripped).
  *
  * ## The scoring invariant (preview = submit)
  *
@@ -37,17 +45,23 @@ import { formatIDR } from '@/lib/money';
 import { AUTOSAVE_MS, useAutosave } from '@/lib/use-autosave';
 import {
   HAMBATAN_LABELS,
+  INTERVIEW_STATUS,
   VERDICT_LABELS,
   availableTransitions,
+  formatDurasiMenit,
   getInterview,
+  getKelolaKlienTimeline,
   interviewStatusTone,
   isAnswerEditable,
   resolveInterviewPrasyarat,
+  RISET_AWAL_STATUS,
   saveInterviewAnswers,
   scheduleInterview,
   scoreInterview,
+  submitRisetAwal,
   transitionInterview,
   type InterviewDetail,
+  type KelolaKlienTimeline,
 } from '@/lib/interview';
 import {
   INTERVIEW_SECTIONS,
@@ -64,8 +78,13 @@ import {
 import FieldInput from '@/components/interview/FieldInput';
 import ScoringSidebar from '@/components/interview/ScoringSidebar';
 import PrasyaratPanel from '@/components/interview/PrasyaratPanel';
+import RisetAwalPanel from '@/components/interview/RisetAwalPanel';
+import TimelinePanel from '@/components/interview/TimelinePanel';
 
 const MIN_WIDTH = 1280;
+
+/** The two tabs this page owns. Step 3 (Strategi) lives on the Service hub. */
+type Tab = 'riset' | 'interview';
 
 export default function KelolaKlienPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -75,6 +94,7 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
   const canLead = !readOnly && (isAccountLead(role) || !!role?.director);
 
   const [detail, setDetail] = useState<InterviewDetail | null>(null);
+  const [timeline, setTimeline] = useState<KelolaKlienTimeline | null>(null);
   const [draft, setDraft] = useState<InterviewDraft | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -87,13 +107,18 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
 
   const [open, setOpen] = useState<Set<string>>(new Set(['B1', 'B2']));
   const [narrow, setNarrow] = useState(false);
+  // Which step the page opens on. `null` until the record loads, then resolved
+  // once from the riset awal status — an unsubmitted step 1 is what the AM came
+  // back for. After that it follows the AM's clicks, never snapping back.
+  const [tab, setTab] = useState<Tab | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const [printMode, setPrintMode] = useState<'internal' | 'klien' | null>(null);
 
+  // Format is intentionally NOT collected: the location/link already conveys the
+  // channel (QA 2026-08-12), so every schedule is written with format = null.
   const [jadwal, setJadwal] = useState({
     tanggal_waktu: '',
     durasi_menit: '',
-    format: '',
     lokasi_link: '',
     catatan_persiapan: '',
   });
@@ -105,11 +130,17 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
       const d = await getInterview(id);
       setDetail(d);
       setDraft(draftFromDetail(d));
+      // The timeline is a second call on purpose (holiday-aware working days +
+      // a strategy lookup). A failure there must not blank the page the AM came
+      // to work in, so it degrades to "no timeline shown".
+      getKelolaKlienTimeline(id)
+        .then(setTimeline)
+        .catch(() => setTimeline(null));
+      setTab((t) => t ?? (d.riset_awal?.status === RISET_AWAL_STATUS.Berjalan ? 'riset' : 'interview'));
       setDirty(false);
       setJadwal({
         tanggal_waktu: d.jadwal?.tanggal_waktu ? toLocalInput(d.jadwal.tanggal_waktu) : '',
         durasi_menit: d.jadwal?.durasi_menit != null ? String(d.jadwal.durasi_menit) : '',
-        format: d.jadwal?.format ?? '',
         lokasi_link: d.jadwal?.lokasi_link ?? '',
         catatan_persiapan: d.jadwal?.catatan_persiapan ?? '',
       });
@@ -200,11 +231,24 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
       scheduleInterview(id, {
         tanggal_waktu: jadwal.tanggal_waktu ? jadwal.tanggal_waktu : null,
         durasi_menit: jadwal.durasi_menit.trim() === '' ? null : Number(jadwal.durasi_menit),
-        format: jadwal.format.trim() === '' ? null : jadwal.format.trim(),
+        format: null, // no longer collected — location/link is enough (QA 2026-08-12)
         lokasi_link: jadwal.lokasi_link.trim() === '' ? null : jadwal.lokasi_link.trim(),
         catatan_persiapan: jadwal.catatan_persiapan.trim() === '' ? null : jadwal.catatan_persiapan.trim(),
       }),
     );
+
+  // "Mulai interview" — jump straight to Sedang Berlangsung without a fixed
+  // schedule (SM edges added 20260812000000). Client schedules shift
+  // unpredictably, so starting must not depend on the jadwal being locked first.
+  const startInterview = () => act(() => transitionInterview(id, INTERVIEW_STATUS.SedangBerlangsung));
+
+  // Step 1 submit. On success the page moves the AM on to step 2 — that is the
+  // next thing to do, and leaving them on a finished step reads as a dead end.
+  const submitRiset = () =>
+    act(async () => {
+      await submitRisetAwal(id);
+      setTab('interview');
+    });
 
   const hitungSimpan = () => {
     if (!draft) return;
@@ -225,7 +269,11 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
   if (!detail || !draft || !preview) return <div className="alert alertError">[Interview tidak ditemukan]</div>;
 
   const iv = detail.interview;
+  const risetAwal = detail.riset_awal;
   const kualifikasi = detail.kualifikasi;
+  // Before the first load resolves the step, show the interview tab rather than
+  // an empty page — `tab` is only null for that one render.
+  const activeTab: Tab = tab ?? 'interview';
   const transitions = availableTransitions(iv.status, canLead);
   const scheduleEditable =
     canWrite && ['Belum Dijadwalkan', 'Terjadwal', 'Dijadwalkan Ulang'].includes(iv.status);
@@ -235,10 +283,24 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
   return (
     <>
       <div className={printMode ? 'printHideOnPrint stack' : 'stack'}>
-        <div>
+        <div className="row" style={{ alignItems: 'center' }}>
           <Link href={`/clients/${iv.client_id}`} className="muted">
             &larr; Klien {iv.client_id}
           </Link>
+          <span style={{ flex: 1 }} />
+          {/* Forward nav: after the interview the next task is Strategi & Plan,
+              which lives on the Service hub. Link straight there when the
+              interview is tied to a service; otherwise send the AM to the client
+              record where the services (and their hubs) are listed. */}
+          {iv.service_id ? (
+            <Link href={`/account/services/${encodeURIComponent(iv.service_id)}`} className="btn btnSecondary btnSm">
+              Lanjut ke Strategi &amp; Plan (layanan {iv.service_id}) &rarr;
+            </Link>
+          ) : (
+            <Link href={`/clients/${iv.client_id}`} className="btn btnSecondary btnSm">
+              Lanjut ke layanan klien &rarr;
+            </Link>
+          )}
         </div>
 
         {/* Header + tabs */}
@@ -256,29 +318,69 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
               Cetak (klien)
             </button>
           </div>
+          {/* The three steps of Kelola Klien. Step 3 is not a panel here — the
+              Strategi & Plan form lives on the Service hub — so it renders as the
+              same forward link the header carries, not a dead chip. */}
           <div className="row" style={{ gap: 6, marginTop: 12 }}>
-            <span className="btn btnSecondary btnSm" aria-current="page">
-              1 · Interview / Kualifikasi
-            </span>
-            <span className="btn btnGhost btnSm" style={{ opacity: 0.5 }} title="Belum tersedia">
-              2 · Strategi
-            </span>
+            <button
+              type="button"
+              className={`btn btnSm ${activeTab === 'riset' ? 'btnSecondary' : 'btnGhost'}`}
+              aria-current={activeTab === 'riset' ? 'page' : undefined}
+              onClick={() => setTab('riset')}
+            >
+              1 · Riset Awal
+              {risetAwal && risetAwal.status !== RISET_AWAL_STATUS.Selesai && (
+                <span className="badge badge-blue" style={{ marginLeft: 6 }}>
+                  berjalan
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              className={`btn btnSm ${activeTab === 'interview' ? 'btnSecondary' : 'btnGhost'}`}
+              aria-current={activeTab === 'interview' ? 'page' : undefined}
+              onClick={() => setTab('interview')}
+            >
+              2 · Interview / Kualifikasi
+            </button>
+            {iv.service_id ? (
+              <Link
+                href={`/account/services/${encodeURIComponent(iv.service_id)}`}
+                className="btn btnGhost btnSm"
+              >
+                3 · Strategi &amp; Plan &rarr;
+              </Link>
+            ) : (
+              <Link href={`/clients/${iv.client_id}`} className="btn btnGhost btnSm">
+                3 · Strategi &amp; Plan &rarr;
+              </Link>
+            )}
           </div>
         </div>
 
-        {narrow && (
+        <TimelinePanel timeline={timeline} />
+
+        {narrow && activeTab === 'interview' && (
           <div className="alert alertInfo">
             Halaman ini dioptimalkan untuk layar ≥ {MIN_WIDTH}px (desktop). Tata letak dua kolom + sidebar
             skoring mungkin sempit di layar ini.
           </div>
         )}
         {error && <div className="alert alertError">{error}</div>}
-        {estimasiIssues.length > 0 && editable && (
+        {estimasiIssues.length > 0 && editable && activeTab === 'interview' && (
           <div className="alert alertInfo" style={{ fontSize: 13 }}>
             Estimasi AM belum diberi dasar tertulis (belum tersimpan): {estimasiIssues.join(', ')}.
           </div>
         )}
 
+        {/* STEP 1 — Riset Awal. Single column: it is a measurement card, not a
+            form (the isian arrives in part 2), so the scoring sidebar would only
+            be noise beside it. */}
+        {activeTab === 'riset' && (
+          <RisetAwalPanel risetAwal={risetAwal} canWrite={canWrite} busy={acting} onSubmit={submitRiset} />
+        )}
+
+        {activeTab === 'interview' && (
         <div className="row" style={{ alignItems: 'flex-start', gap: 16 }}>
           {/* LEFT: form */}
           <div className="stack" style={{ flex: 1, minWidth: 0 }}>
@@ -301,25 +403,17 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
                   <input
                     id="jw-durasi"
                     type="number"
+                    min={1}
                     value={jadwal.durasi_menit}
                     disabled={!scheduleEditable}
                     onChange={(e) => setJadwal({ ...jadwal, durasi_menit: e.target.value })}
                   />
                 </div>
                 <div className="field">
-                  <label htmlFor="jw-format">Format</label>
-                  <input
-                    id="jw-format"
-                    placeholder="Online / Onsite"
-                    value={jadwal.format}
-                    disabled={!scheduleEditable}
-                    onChange={(e) => setJadwal({ ...jadwal, format: e.target.value })}
-                  />
-                </div>
-                <div className="field">
                   <label htmlFor="jw-lokasi">Lokasi / link</label>
                   <input
                     id="jw-lokasi"
+                    placeholder="Alamat atau link (mis. gmeet.com/…)"
                     value={jadwal.lokasi_link}
                     disabled={!scheduleEditable}
                     onChange={(e) => setJadwal({ ...jadwal, lokasi_link: e.target.value })}
@@ -337,7 +431,7 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
                 />
               </div>
               {scheduleEditable && (
-                <div style={{ marginTop: 12 }}>
+                <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                   <button
                     type="button"
                     className="btn btnPrimary btnSm"
@@ -346,6 +440,24 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
                   >
                     Simpan jadwal (→ Terjadwal)
                   </button>
+                  {/* Start now, no fixed schedule needed — schedules shift a lot
+                      and the interview should not be blocked on locking one. */}
+                  <button
+                    type="button"
+                    className="btn btnSecondary btnSm"
+                    disabled={acting}
+                    title="Mulai interview sekarang tanpa menunggu jadwal terpaku"
+                    onClick={startInterview}
+                  >
+                    Mulai interview (→ Sedang Berlangsung)
+                  </button>
+                  {/* Owner confirmation 2026-08-13: the two buttons are EQUAL for
+                      the timeline. Saying so here stops an AM from filling a
+                      schedule they do not need just to look punctual. */}
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    Keduanya sama-sama menutup langkah 2 (Interview Meeting) — yang dinilai adalah hasil
+                    pengisian jawaban interview, bukan tombol mana yang dipakai.
+                  </span>
                 </div>
               )}
             </section>
@@ -496,6 +608,7 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
             />
           </div>
         </div>
+        )}
       </div>
 
       {/* Print views (hidden on screen; one is rendered while printing) */}
@@ -518,6 +631,12 @@ function PrintInternal({ detail }: { detail: InterviewDetail }) {
       <p>
         Klien {iv.client_id} · Status {iv.status} · Versi {iv.versi_no}
       </p>
+      {detail.riset_awal && (
+        <p>
+          Riset awal: {detail.riset_awal.status} · lama pengerjaan{' '}
+          {formatDurasiMenit(detail.riset_awal.durasi_menit)}
+        </p>
+      )}
       {k ? (
         <>
           <h2>Blok C — Kualifikasi (INTERNAL)</h2>

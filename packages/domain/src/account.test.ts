@@ -19,6 +19,7 @@ import {
   canApproveStrategy,
   canManageAssignment,
   canManageComplaint,
+  approveGmvAdjustment,
   canReadIntake,
   canSeeBrief,
   closeComplaint,
@@ -26,6 +27,9 @@ import {
   createBrief,
   createStrategy,
   ForbiddenError,
+  GMV_ADJ_APPROVED,
+  GMV_ADJ_IN_TOLERANCE,
+  GMV_ADJ_PENDING,
   getBrief,
   getComplaint,
   getService,
@@ -495,6 +499,112 @@ describeDb('createStrategy (§4 Rules 1, 6)', () => {
     await expect(createStrategy(sql, accountStaff(amId), svcId, reversed)).rejects.toBeInstanceOf(ValidationError);
     const n = await sql<{ n: string }[]>`select count(*) as n from strategy_plans where service_id = ${svcId}`;
     expect(Number(n[0].n)).toBe(0);
+  });
+});
+
+describeDb('Strategy KPI terstruktur + gate GMV ±20% + task satuan (QA revisi)', () => {
+  // insertClient seeds target_gmv = Rp 20.000.000, so ±20% band is Rp 16jt–24jt.
+  it('GMV defaults to the client target; structured KPI + tasks persist; dalam toleransi', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    const st = await createStrategy(sql, accountStaff(amId), svcId, {
+      ...goodInput(),
+      targetRoas: '5', targetCtr: '2.5', targetCvr: '3',
+      divisionsInvolved: ['Creative', 'KOL'],
+      divisionTasks: [
+        { divisi: 'KOL', jenis: 'live_stream_creator', jumlah: '4' },
+        { divisi: 'Creative', jenis: 'video_seller', jumlah: '12' },
+      ],
+    });
+    expect(st.targetGmv).toBe('20000000.00'); // pulled from the client's expectation
+    expect(st.clientTargetGmv).toBe('20000000.00');
+    expect(st.gmvAdjustmentStatus).toBe(GMV_ADJ_IN_TOLERANCE);
+    // The create response echoes the raw input; a DB read normalizes the numeric.
+    expect(st.targetRoas).toBe('5');
+    // canonical order: Creative before KOL, regardless of input order.
+    expect(st.divisionTasks).toEqual([
+      { divisi: 'Creative', jenis: 'video_seller', jumlah: '12' },
+      { divisi: 'KOL', jenis: 'live_stream_creator', jumlah: '4' },
+    ]);
+    const got = await getStrategy(sql, accountStaff(amId), st.id);
+    expect(got.targetRoas).toBe('5.00');
+    expect(got.targetCtr).toBe('2.500');
+    expect(got.divisionTasks.length).toBe(2);
+    expect(got.gmvAdjustmentStatus).toBe(GMV_ADJ_IN_TOLERANCE);
+  });
+
+  it('adjusting GMV within ±20% stays dalam toleransi, no reason needed', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    const st = await createStrategy(sql, accountStaff(amId), svcId, { ...goodInput(), targetGmv: '24000000' });
+    expect(st.gmvAdjustmentStatus).toBe(GMV_ADJ_IN_TOLERANCE);
+    expect(st.targetGmv).toBe('24000000'); // create echoes raw input; a DB read normalizes to .00
+    expect((await getStrategy(sql, accountStaff(amId), st.id)).targetGmv).toBe('24000000.00');
+  });
+
+  it('adjusting GMV beyond ±20% needs a reason (else rejected, nothing written)', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    await expect(
+      createStrategy(sql, accountStaff(amId), svcId, { ...goodInput(), targetGmv: '30000000' }),
+    ).rejects.toBeInstanceOf(ValidationError);
+    const n = await sql<{ n: string }[]>`select count(*) as n from strategy_plans where service_id = ${svcId}`;
+    expect(Number(n[0].n)).toBe(0);
+
+    const st = await createStrategy(sql, accountStaff(amId), svcId, {
+      ...goodInput(), targetGmv: '30000000', gmvAdjustmentReason: 'klien minta agresif',
+    });
+    expect(st.gmvAdjustmentStatus).toBe(GMV_ADJ_PENDING);
+    expect(st.gmvAdjustmentReason).toBe('klien minta agresif');
+  });
+
+  it('a pending GMV adjustment blocks submit until Head/SPV ACC (audited), then submit works', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    const st = await createStrategy(sql, accountStaff(amId), svcId, {
+      ...goodInput(), targetGmv: '30000000', gmvAdjustmentReason: 'stretch',
+    });
+    await expect(submitStrategy(sql, accountStaff(amId), st.id)).rejects.toBeInstanceOf(ConflictError);
+    // the "ACC Head/SPV" gate: an AM cannot clear their own adjustment.
+    await expect(approveGmvAdjustment(sql, accountStaff(amId), st.id)).rejects.toBeInstanceOf(ForbiddenError);
+    await approveGmvAdjustment(sql, accountLead(), st.id);
+    const got = await getStrategy(sql, accountLead(), st.id);
+    expect(got.gmvAdjustmentStatus).toBe(GMV_ADJ_APPROVED);
+    expect(got.gmvAdjustmentApprovedBy).toBe('ZZ-ALEAD');
+    const res = await submitStrategy(sql, accountStaff(amId), st.id);
+    expect(res.ok).toBe(true);
+    const actions = (await sql<{ action: string }[]>`
+      select action from audit_log where entity_type='strategy_plan' and entity_id=${st.id}`).map((r) => r.action);
+    expect(actions).toContain('gmv_adjustment_approved');
+  });
+
+  it('approveGmvAdjustment on a non-pending Plan is a conflict', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    const st = await createDrafted(svcId, amId); // in tolerance
+    await expect(approveGmvAdjustment(sql, accountLead(), st.id)).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it('rejects a task with an unknown jenis, or a division not in Divisi Terlibat', async () => {
+    const { clientId } = await planGatedFixture();
+    const s1 = nextSvcId();
+    await insertService(s1, clientId, true, '[Awaiting Onboarding]');
+    await expect(createStrategy(sql, accountStaff('ZZ-SINTA'), s1, {
+      ...goodInput(), divisionsInvolved: ['Creative'],
+      divisionTasks: [{ divisi: 'Creative', jenis: 'nope', jumlah: '1' }],
+    })).rejects.toBeInstanceOf(ValidationError);
+    const s2 = nextSvcId();
+    await insertService(s2, clientId, true, '[Awaiting Onboarding]');
+    await expect(createStrategy(sql, accountStaff('ZZ-SINTA'), s2, {
+      ...goodInput(), divisionsInvolved: ['Creative'],
+      divisionTasks: [{ divisi: 'Ads', jenis: 'ads_spent', jumlah: '1000000' }],
+    })).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('updateDraft re-runs the gate and can move a Plan into pending', async () => {
+    const { svcId, amId } = await planGatedFixture();
+    const st = await createDrafted(svcId, amId); // in tolerance
+    await updateDraft(sql, accountStaff(amId), st.id, {
+      ...goodInput(), targetGmv: '30000000', gmvAdjustmentReason: 'revisi target',
+    });
+    const got = await getStrategy(sql, accountStaff(amId), st.id);
+    expect(got.gmvAdjustmentStatus).toBe(GMV_ADJ_PENDING);
+    expect(got.targetGmv).toBe('30000000.00');
   });
 });
 

@@ -85,6 +85,185 @@ export function isInterviewComplete(state: string): boolean {
 }
 
 // ===========================================================================
+// Riset Awal — langkah 1 of "Kelola Klien" (owner QA 2026-08-12)
+// ===========================================================================
+//
+// "Kelola Klien" is three steps, not two: **Riset Awal** (the AM logs into the
+// client's store and records the baseline), then Interview, then Strategi. Every
+// step is measured so a timeline cannot slip unnoticed. Step 1 was missing.
+//
+// What this module owns is only the MEASUREMENT contract: the machine name/states
+// the migration seeds, and the ONE pure duration function every layer derives
+// from. There is deliberately no stored duration column anywhere — a number that
+// can be typed is a number that can lie about its own anchors (house rule #4).
+
+/** The state-machine name registered in `sm_machines` (mesin #20). */
+export const RISET_AWAL_MACHINE = 'riset_awal';
+
+/**
+ * Riset Awal lifecycle. Two states, matching what is actually observable: it
+ * starts when the AM opens "Kelola Klien" and ends when they submit. There is no
+ * re-open edge — re-opening would move an anchor the whole metric rests on.
+ */
+export const RISET_AWAL_STATES = {
+  Berjalan: 'Berjalan',
+  Selesai: 'Selesai',
+} as const;
+
+export type RisetAwalState = (typeof RISET_AWAL_STATES)[keyof typeof RISET_AWAL_STATES];
+
+/** True once the riset awal has been submitted (its duration is final). */
+export function isRisetAwalSelesai(state: string): boolean {
+  return state === RISET_AWAL_STATES.Selesai;
+}
+
+const MS_PER_MINUTE = 60_000;
+
+/**
+ * durasiRisetAwalMenit — the ONE derivation of "berapa lama riset awal
+ * dikerjakan", in whole minutes, floored.
+ *
+ * Returns `null` when it is not yet knowable (no submit anchor) or when the
+ * inputs are unusable (unparseable, or submit before start — which the DB CHECK
+ * `ck_riset_awal_urutan` already refuses to store). `null` is the caller's cue to
+ * render `—` (house rule #7), never `0` and never an error: a riset awal still in
+ * progress has no duration yet, and pretending it is zero would flatter the
+ * timeline metric this step exists to protect.
+ *
+ * Floor, not round: elapsed time answers "how much has passed", and rounding 90
+ * seconds up to 2 minutes reports time that has not happened.
+ */
+export function durasiRisetAwalMenit(
+  dimulaiPada: string | Date | null | undefined,
+  disubmitPada: string | Date | null | undefined,
+): number | null {
+  const mulai = toEpochMs(dimulaiPada);
+  const submit = toEpochMs(disubmitPada);
+  if (mulai === null || submit === null) return null;
+  if (submit < mulai) return null;
+  return Math.floor((submit - mulai) / MS_PER_MINUTE);
+}
+
+/**
+ * durasiBerjalanMenit — elapsed minutes for a riset awal still running, measured
+ * against `sekarang`. Same flooring and same `null` contract as the final
+ * duration, so an in-progress card and a finished one read from one rule.
+ */
+export function durasiBerjalanMenit(
+  dimulaiPada: string | Date | null | undefined,
+  sekarang: Date,
+): number | null {
+  return durasiRisetAwalMenit(dimulaiPada, sekarang);
+}
+
+function toEpochMs(v: string | Date | null | undefined): number | null {
+  if (v == null) return null;
+  const ms = v instanceof Date ? v.getTime() : Date.parse(v);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+// ===========================================================================
+// Timeline "Kelola Klien" — the three-step SLA (owner decision 2026-08-13)
+// ===========================================================================
+//
+// The owner's numbers (working days), answering open question RA-1:
+//
+//   1. Riset Awal        — 2–3 working days from opening Kelola Klien
+//   2. Interview Meeting — 1–2 working days, "harus sudah didapatkan"
+//   3. Brand Strategy    — 5–7 working days after the interview
+//
+// A range is read as `target`..`batas`: at or under the target is on time, past
+// the target but within the limit is still tolerated, past the limit is late.
+// The numbers themselves are DATA (`kelola_klien_sla_config`), never literals
+// here — moving 3 to 4 must be a config version, not a deploy. What lives here is
+// the SHAPE of the judgement, so every layer bands a duration the same way.
+//
+// Working days (Mon–Fri minus `hari_libur`) are counted by the SQL helper
+// `working_days_between`, deliberately NOT reimplemented in TS: the holiday
+// calendar is a table, and a second copy of this arithmetic would drift from it.
+
+/** The three steps, in order. The numbers are the owner's own numbering. */
+export const KELOLA_KLIEN_LANGKAH = {
+  RisetAwal: 1,
+  InterviewMeeting: 2,
+  BrandStrategy: 3,
+} as const;
+
+export type KelolaKlienLangkah = (typeof KELOLA_KLIEN_LANGKAH)[keyof typeof KELOLA_KLIEN_LANGKAH];
+
+/** BI labels — the step names the owner used, single-sourced for UI + prints. */
+export const KELOLA_KLIEN_LANGKAH_LABEL: Record<KelolaKlienLangkah, string> = {
+  1: 'Riset Awal',
+  2: 'Interview Meeting',
+  3: 'Brand Strategy',
+};
+
+export const SLA_STATUS = {
+  /** The step's clock has not started (its start anchor does not exist yet). */
+  BelumMulai: 'belum_mulai',
+  /** Within target. */
+  TepatWaktu: 'tepat_waktu',
+  /** Past target, still within the tolerated limit. */
+  MendekatiBatas: 'mendekati_batas',
+  /** Past the limit. */
+  Terlambat: 'terlambat',
+  /** The step does not apply to this session at all (e.g. a service the plan
+   *  gate decided needs no strategy). Never a failure. */
+  TidakBerlaku: 'tidak_berlaku',
+} as const;
+
+export type SlaStatus = (typeof SLA_STATUS)[keyof typeof SLA_STATUS];
+
+/** The thresholds for one step, as loaded from `kelola_klien_sla_config`. */
+export interface SlaAmbang {
+  targetHari: number;
+  batasHari: number;
+}
+
+/** The three steps' thresholds — the TS mirror of one config row. */
+export interface KelolaKlienSlaConfig {
+  version: number;
+  risetAwal: SlaAmbang;
+  meeting: SlaAmbang;
+  strategi: SlaAmbang;
+}
+
+/**
+ * The owner's numbers as of 2026-08-13. This is a FALLBACK for tests and for a
+ * read that runs before any config row exists — the live values come from
+ * `kelola_klien_sla_config`, which is what an operator edits.
+ */
+export const DEFAULT_KELOLA_KLIEN_SLA: KelolaKlienSlaConfig = {
+  version: 1,
+  risetAwal: { targetHari: 2, batasHari: 3 },
+  meeting: { targetHari: 1, batasHari: 2 },
+  strategi: { targetHari: 5, batasHari: 7 },
+};
+
+/**
+ * statusSla bands an elapsed working-day count against one step's thresholds.
+ *
+ * `hariKerja == null` means the clock has not started — `belum_mulai`, NOT
+ * on-time: a step that has not begun has earned no verdict either way.
+ *
+ * The judgement is identical whether the step has finished or is still running.
+ * A step running past its limit IS late — waiting for it to finish before saying
+ * so would hide exactly the case the owner asked to catch ("timeline tidak
+ * terlewatkan"), and would let an unfinished step sit green indefinitely.
+ */
+export function statusSla(hariKerja: number | null | undefined, ambang: SlaAmbang): SlaStatus {
+  if (hariKerja == null || !Number.isFinite(hariKerja) || hariKerja < 0) return SLA_STATUS.BelumMulai;
+  if (hariKerja <= ambang.targetHari) return SLA_STATUS.TepatWaktu;
+  if (hariKerja <= ambang.batasHari) return SLA_STATUS.MendekatiBatas;
+  return SLA_STATUS.Terlambat;
+}
+
+/** True for the one status that means the step actually breached its limit. */
+export function isSlaTerlambat(status: string): boolean {
+  return status === SLA_STATUS.Terlambat;
+}
+
+// ===========================================================================
 // Per-field number source (I3) and margin basis (I21)
 // ===========================================================================
 

@@ -93,6 +93,55 @@ export async function createInterview(sql: Queryable, args: CreateInterviewArgs)
 }
 
 // ===========================================================================
+// interview_riset_awal — langkah 1 "Kelola Klien" (the measured research step)
+// ===========================================================================
+
+/**
+ * startRisetAwal opens the Riset Awal row for a freshly minted interview. It is
+ * called in the SAME transaction as `createInterview`, because opening "Kelola
+ * Klien" IS the start of the research — there is no separate "mulai" button to
+ * press, and a start that waits for a click is a start that can be backdated.
+ *
+ * `dimulai_pada` defaults to `now()` in the DB; `at` is accepted so the caller
+ * can anchor it to the same instant the ITV was minted.
+ */
+export async function startRisetAwal(
+  sql: Queryable,
+  args: { interviewId: string; dimulaiOleh: string; at?: Date },
+): Promise<void> {
+  await sql`
+    insert into interview_riset_awal (interview_id, dimulai_pada, dimulai_oleh)
+    values (${args.interviewId}, ${args.at ?? new Date()}, ${args.dimulaiOleh})
+    on conflict (interview_id) do nothing`;
+}
+
+/**
+ * stampRisetAwalSubmit writes the submit anchors while the row is still
+ * `Berjalan`. The status move to `Selesai` is a SEPARATE `sm_transition` call the
+ * domain makes right after, in the same transaction — that ordering is what
+ * `ck_riset_awal_selesai` expects (the same shape as `alasan_pembatalan` on
+ * `interview`).
+ *
+ * Returns false when there was nothing to stamp (already submitted, or no row) —
+ * the guard against a second submit silently moving the finish line. The DB
+ * trigger `trg_riset_awal_jangkar` is the second lock: it refuses to overwrite an
+ * existing `disubmit_pada` even on a direct service-role UPDATE.
+ */
+export async function stampRisetAwalSubmit(
+  sql: Queryable,
+  args: { interviewId: string; oleh: string; at?: Date },
+): Promise<boolean> {
+  const rows = await sql<{ interview_id: string }[]>`
+    update interview_riset_awal
+       set disubmit_pada = ${args.at ?? new Date()},
+           disubmit_oleh = ${args.oleh}
+     where interview_id = ${args.interviewId}
+       and disubmit_pada is null
+    returning interview_id`;
+  return rows.length > 0;
+}
+
+// ===========================================================================
 // interview_answer — one row per (interview, section, field), upserted
 // ===========================================================================
 

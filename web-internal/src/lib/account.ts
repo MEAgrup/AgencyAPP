@@ -48,11 +48,29 @@ export interface Assignment {
 // Cluster 2 — Strategy & Plan (strategy.go)
 // ---------------------------------------------------------------------------
 
+/** One planned per-division task-satuan quota (QA revisi 2026-08-12). */
+export interface DivisionTask {
+  divisi: string;
+  jenis: string;
+  jumlah: string;
+}
+
 export interface Strategy {
   id: string;
   service_id: string;
   objective: string;
   target_kpi: string;
+  /** Structured Target KPI (QA revisi). GMV is Rp; the rest ratios/percents; null when unset. */
+  target_gmv: string | null;
+  target_roas: string | null;
+  target_ctr: string | null;
+  target_cvr: string | null;
+  /** The client's target GMV the ±20% band is measured against. */
+  client_target_gmv: string | null;
+  gmv_adjustment_status: string;
+  gmv_adjustment_reason: string | null;
+  gmv_adjustment_approved_by: string | null;
+  division_tasks: DivisionTask[];
   divisions_involved: string[];
   planned_brief_outline: string;
   timeline_start: string; // YYYY-MM-DD
@@ -67,12 +85,44 @@ export interface Strategy {
 
 export interface StrategyInput {
   objective: string;
-  target_kpi: string;
+  target_kpi?: string;
+  target_gmv?: string | null;
+  target_roas?: string | null;
+  target_ctr?: string | null;
+  target_cvr?: string | null;
+  gmv_adjustment_reason?: string | null;
+  division_tasks?: DivisionTask[];
   divisions_involved: string[];
   planned_brief_outline: string;
   timeline_start: string; // YYYY-MM-DD
   timeline_end: string; // YYYY-MM-DD
 }
+
+/** GMV adjustment gate states (mirror of the domain constants). */
+export const GMV_ADJ_IN_TOLERANCE = 'dalam_toleransi';
+export const GMV_ADJ_PENDING = 'menunggu_persetujuan';
+export const GMV_ADJ_APPROVED = 'disetujui';
+
+/** The ±20% tolerance band the AM may adjust the client's target GMV within. */
+export const GMV_TOLERANCE = 0.2;
+
+/**
+ * Fixed per-division task-satuan catalog (QA revisi). Mirrors the domain
+ * TASK_CATALOG — the form renders one input per (division, jenis) for each
+ * involved division. `money` marks a Rupiah amount (Ads spend).
+ */
+export const TASK_CATALOG: Record<string, { jenis: string; label: string; money?: boolean }[]> = {
+  Creative: [
+    { jenis: 'video_seller', label: 'Jumlah video seller' },
+    { jenis: 'sku_optimize', label: 'Jumlah SKU optimize' },
+  ],
+  KOL: [
+    { jenis: 'video_creator', label: 'Jumlah video creator' },
+    { jenis: 'live_stream_creator', label: 'Jumlah live stream creator' },
+  ],
+  Ads: [{ jenis: 'ads_spent', label: 'Ads spent (Rp)', money: true }],
+  'Live Stream': [{ jenis: 'live_stream', label: 'Jumlah live stream' }],
+};
 
 export interface StrategyRequirement {
   service_id: string;
@@ -109,6 +159,8 @@ export interface ServiceQueueRow {
   strategy_id: string | null;
   strategy_status: string | null;
   brief_count: number;
+  /** the client's target GMV — anchor + ±20% baseline for a new Strategy (QA revisi). */
+  client_target_gmv: string | null;
   released_to_account_at: string | null;
 }
 
@@ -416,6 +468,11 @@ export function submitStrategy(id: string): Promise<TransitionResult> {
 
 export function approveStrategy(id: string): Promise<{ id: string; status: string }> {
   return api.post<{ id: string; status: string }>(`/strategies/${id}/approve`);
+}
+
+/** Clear a pending (out-of-tolerance) GMV adjustment — SPV/Head Account/Director (QA revisi). */
+export function approveGmvAdjustment(id: string): Promise<{ id: string; gmv_adjustment_status: string }> {
+  return api.post<{ id: string; gmv_adjustment_status: string }>(`/strategies/${id}/approve-gmv`);
 }
 
 export function requestStrategyRevision(id: string, notes: string): Promise<{ id: string; status: string }> {

@@ -65,6 +65,10 @@ let sql: Sql;
 if (URL) sql = createClient(URL);
 
 const CLI = 'CLI-ZZI-0001';
+// A second fixture client, used ONLY by the resume test: `openKelolaKlien`
+// deliberately returns the client's open session, so a test about "the next click
+// opens a fresh one" cannot share a client with tests that leave sessions open.
+const CLI_RESUME = 'CLI-ZZI-0002';
 const created: string[] = [];
 
 afterAll(async () => {
@@ -75,11 +79,11 @@ afterAll(async () => {
   await sql`alter table interview_flag disable trigger trg_flag_frozen`;
   try {
     // Delete by client_id (not just tracked ids) so the teardown is self-healing.
-    await sql`delete from interview where client_id = ${CLI}`;
+    await sql`delete from interview where client_id in (${CLI}, ${CLI_RESUME})`;
   } finally {
     await sql`alter table interview_flag enable trigger trg_flag_frozen`;
   }
-  await sql`delete from clients where id = ${CLI}`;
+  await sql`delete from clients where id in (${CLI}, ${CLI_RESUME})`;
   await sql.end();
 });
 
@@ -132,6 +136,91 @@ dDb('interview write path (integration)', () => {
     await expect(interview.createInterview(sql, NONOWNER, { clientId: CLI })).rejects.toThrow(/akses/);
   });
 
+  it('logs only scheduled/progressed interviews (blank Belum Dijadwalkan hidden); Account-scope; missing client 404', async () => {
+    // A freshly created interview is 'Belum Dijadwalkan' — a blank attempt — and
+    // must NOT clutter the log.
+    const blank = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(blank.interview.id);
+    // A scheduled one SHOULD appear.
+    const sched = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(sched.interview.id);
+    await interview.scheduleInterview(sql, OWNER, sched.interview.id, {
+      tanggalWaktu: '2026-08-20T04:00:00.000Z',
+      durasiMenit: 30,
+    });
+
+    const rows = await interview.listInterviewsByClient(sql, OWNER, CLI);
+    expect(rows.some((r) => r.id === sched.interview.id)).toBe(true);
+    expect(rows.some((r) => r.id === blank.interview.id)).toBe(false);
+    expect(rows.every((r) => r.status !== iv.INTERVIEW_STATES.BelumDijadwalkan)).toBe(true);
+    // Newest first (created_at desc).
+    for (let i = 1; i < rows.length; i++) {
+      expect(rows[i - 1].createdAt >= rows[i].createdAt).toBe(true);
+    }
+
+    // The log is Account-scope: Sales and a non-owner Account staff are denied.
+    await expect(interview.listInterviewsByClient(sql, SALES, CLI)).rejects.toThrow(/akses/);
+    await expect(interview.listInterviewsByClient(sql, NONOWNER, CLI)).rejects.toThrow(/akses/);
+
+    // A client that does not exist is a 404, not an empty list.
+    await expect(interview.listInterviewsByClient(sql, OWNER, 'CLI-ZZI-9999')).rejects.toThrow(interview.MSG_NOT_FOUND);
+  });
+
+  it('rejects an out-of-set schedule format with a BI message (not a 500), and accepts a valid one', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+    const when = '2026-08-20T04:00:00.000Z';
+
+    // A free-typed value like "online" trips ck_jadwal_format at the DB; the
+    // domain guard turns that into a ValidationError (→400) BEFORE the insert.
+    await expect(
+      interview.scheduleInterview(sql, OWNER, id, { tanggalWaktu: when, format: 'online' }),
+    ).rejects.toThrow(interview.MSG_INVALID_FORMAT);
+    // A non-positive duration is likewise a 400, not a 500 (ck_jadwal_durasi).
+    await expect(
+      interview.scheduleInterview(sql, OWNER, id, { tanggalWaktu: when, durasiMenit: 0 }),
+    ).rejects.toThrow(interview.MSG_INVALID_DURASI);
+    // Neither rejected attempt moved the state.
+    const still = await interview.getInterview(sql, OWNER, id);
+    expect(still.interview.status).toBe(iv.INTERVIEW_STATES.BelumDijadwalkan);
+    expect(still.jadwal).toBeNull();
+
+    // A valid schedule persists and moves the interview to Terjadwal (format is
+    // no longer collected by the UI, but the guard/column still accept a value).
+    const ok = await interview.scheduleInterview(sql, OWNER, id, {
+      tanggalWaktu: when,
+      durasiMenit: 40,
+      lokasiLink: 'https://meet.example/abc',
+    });
+    expect(ok.interview.status).toBe(iv.INTERVIEW_STATES.Terjadwal);
+    expect(ok.jadwal?.lokasiLink).toBe('https://meet.example/abc');
+    expect(ok.jadwal?.durasiMenit).toBe(40);
+  });
+
+  it('starts an interview directly (Belum Dijadwalkan → Sedang Berlangsung) with no schedule', async () => {
+    // Client schedules shift unpredictably, so the AM must be able to start the
+    // interview without first locking a jadwal (edges added 20260812000000).
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    expect(detail.interview.status).toBe(iv.INTERVIEW_STATES.BelumDijadwalkan);
+
+    const started = await interview.transitionInterview(
+      sql,
+      OWNER,
+      detail.interview.id,
+      iv.INTERVIEW_STATES.SedangBerlangsung,
+    );
+    expect(started.interview.status).toBe(iv.INTERVIEW_STATES.SedangBerlangsung);
+    expect(started.jadwal).toBeNull(); // never scheduled
+
+    // Blok B answers are now editable (the point of starting early).
+    const saved = await interview.saveAnswers(sql, OWNER, detail.interview.id, [
+      { section: 'B2', fieldKey: 'B2-7', nilaiAngka: 40, sumberAngka: iv.SUMBER_ANGKA.KlienHitung },
+    ]);
+    expect(saved.answers.some((a) => a.fieldKey === 'B2-7')).toBe(true);
+  });
+
   it('resolvePrasyarat flips prasyarat to selesai (AM only; Sales/non-owner forbidden)', async () => {
     const detail = await interview.createInterview(sql, OWNER, { clientId: CLI, salesClosingId: 'EMP-0006' });
     created.push(detail.interview.id);
@@ -176,5 +265,345 @@ dDb('interview write path (integration)', () => {
       select count(*)::int as n from interview_flag
        where interview_id = ${detail.interview.id} and kode = 'prasyarat_selesai'`;
     expect(flags2[0].n).toBe(1);
+  });
+});
+
+// ===========================================================================
+// Riset Awal — langkah 1 "Kelola Klien" (owner QA 2026-08-12)
+// ===========================================================================
+//
+// The step exists to be MEASURED, so the tests are about the measurement being
+// hard to fake: the clock starts with the session (not with a button), the
+// anchors cannot be rewritten, the finish line cannot move, and the duration is
+// derived — reproducible from the audit log alone.
+
+dDb('riset awal (langkah 1)', () => {
+  it('starts with the session: opening Kelola Klien anchors it, duration is null until submit', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+
+    const ra = detail.risetAwal;
+    expect(ra).not.toBeNull();
+    expect(ra!.status).toBe(iv.RISET_AWAL_STATES.Berjalan);
+    expect(ra!.dimulaiOleh).toBe(OWNER.employeeId);
+    expect(ra!.disubmitPada).toBeNull();
+    // Unfinished work has NO duration — not zero, which would flatter the metric.
+    expect(ra!.durasiMenit).toBeNull();
+    // The start anchor is the session's own creation instant, not a later click.
+    expect(Math.abs(Date.parse(ra!.dimulaiPada) - Date.parse(detail.interview.createdAt))).toBeLessThan(2000);
+  });
+
+  it('submit closes the measurement and derives the duration from the two anchors', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+
+    const done = await interview.submitRisetAwal(sql, OWNER, id);
+    expect(done.status).toBe(iv.RISET_AWAL_STATES.Selesai);
+    expect(done.disubmitPada).not.toBeNull();
+    expect(done.disubmitOleh).toBe(OWNER.employeeId);
+    expect(done.durasiMenit).toBe(iv.durasiRisetAwalMenit(done.dimulaiPada, done.disubmitPada));
+    expect(done.durasiMenit).toBeGreaterThanOrEqual(0);
+
+    // The same figure is served by the detail read — one derivation, not two.
+    const reread = await interview.getInterview(sql, OWNER, id);
+    expect(reread.risetAwal?.durasiMenit).toBe(done.durasiMenit);
+    expect(reread.risetAwal?.disubmitPada).toBe(done.disubmitPada);
+  });
+
+  it('is recomputable from the audit log alone (house rule #4)', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+    const done = await interview.submitRisetAwal(sql, OWNER, id);
+
+    const rows = await sql<{ action: string; created_at: Date }[]>`
+      select action, created_at from audit_log
+       where entity_type = 'riset_awal' and entity_id = ${id}
+       order by created_at asc, id asc`;
+    const mulai = rows.find((r) => r.action === 'mulai');
+    const submit = rows.find((r) => r.action === `transition:Berjalan->${iv.RISET_AWAL_STATES.Selesai}`);
+    expect(mulai).toBeDefined();
+    expect(submit).toBeDefined();
+    // Throw the stored anchors away and rebuild the number from the log.
+    expect(iv.durasiRisetAwalMenit(mulai!.created_at, submit!.created_at)).toBe(done.durasiMenit);
+  });
+
+  it('refuses a second submit — the finish line does not move', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+    const first = await interview.submitRisetAwal(sql, OWNER, id);
+
+    await expect(interview.submitRisetAwal(sql, OWNER, id)).rejects.toThrow(
+      interview.MSG_RISET_AWAL_SUDAH_SUBMIT,
+    );
+    // The rejected attempt changed nothing.
+    const after = await interview.getInterview(sql, OWNER, id);
+    expect(after.risetAwal?.disubmitPada).toBe(first.disubmitPada);
+  });
+
+  it('write gate: assigned AM, Account lead and Director may submit; non-owner/Sales/OD may not', async () => {
+    const mine = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(mine.interview.id);
+    for (const denied of [NONOWNER, SALES, OD, OTHER]) {
+      await expect(interview.submitRisetAwal(sql, denied, mine.interview.id)).rejects.toThrow(/akses/);
+    }
+    // Still running — no rejected caller left a mark.
+    const untouched = await interview.getInterview(sql, OWNER, mine.interview.id);
+    expect(untouched.risetAwal?.status).toBe(iv.RISET_AWAL_STATES.Berjalan);
+
+    // The Account lead acts for the AM; a Director may too (separate sessions,
+    // since submit is once-only).
+    const byLead = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(byLead.interview.id);
+    expect((await interview.submitRisetAwal(sql, ACC_LEAD, byLead.interview.id)).disubmitOleh).toBe(
+      ACC_LEAD.employeeId,
+    );
+
+    const byDirector = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(byDirector.interview.id);
+    expect((await interview.submitRisetAwal(sql, DIRECTOR, byDirector.interview.id)).status).toBe(
+      iv.RISET_AWAL_STATES.Selesai,
+    );
+  });
+
+  it('anchors are immutable at the DB, even on a direct service-role UPDATE', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+
+    // Moving the start would silently shorten every duration derived from it.
+    await expect(
+      sql`update interview_riset_awal set dimulai_pada = now() - interval '5 days' where interview_id = ${id}`,
+    ).rejects.toThrow(/dimulai_pada beku/);
+
+    await interview.submitRisetAwal(sql, OWNER, id);
+
+    await expect(
+      sql`update interview_riset_awal set disubmit_pada = now() + interval '2 days' where interview_id = ${id}`,
+    ).rejects.toThrow(/disubmit_pada beku/);
+    // Selesai is terminal: it cannot be walked back to restart the clock.
+    await expect(
+      sql`update interview_riset_awal set status = 'Berjalan' where interview_id = ${id}`,
+    ).rejects.toThrow(/terminal/);
+  });
+
+  it('a submitted riset awal makes the session visible in the log, with its duration', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+
+    // Still blank + running: hidden, exactly as before this step existed.
+    const before = await interview.listInterviewsByClient(sql, OWNER, CLI);
+    expect(before.some((r) => r.id === id)).toBe(false);
+
+    const done = await interview.submitRisetAwal(sql, OWNER, id);
+    const after = await interview.listInterviewsByClient(sql, OWNER, CLI);
+    const row = after.find((r) => r.id === id);
+    // Submitting IS saved work, so the session now appears even though the
+    // interview itself has not been scheduled yet.
+    expect(row).toBeDefined();
+    expect(row!.status).toBe(iv.INTERVIEW_STATES.BelumDijadwalkan);
+    expect(row!.risetAwalStatus).toBe(iv.RISET_AWAL_STATES.Selesai);
+    expect(row!.risetAwalDurasiMenit).toBe(done.durasiMenit);
+  });
+
+  it('openKelolaKlien resumes the open session instead of restarting the clock', async () => {
+    await sql`
+      insert into clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, assigned_am_id, created_by)
+      values (${CLI_RESUME}, 'PIC', 'Toko 2', 'Jakarta', 'https://t2.example', 'Fashion', 0, 0,
+              'EMP-0006', 'EMP-0006', 'EMP-0001', 'EMP-0001')
+      on conflict (id) do nothing`;
+
+    const first = await interview.openKelolaKlien(sql, OWNER, { clientId: CLI_RESUME, serviceId: null });
+    created.push(first.interview.id);
+
+    // Clicking "Kelola Klien" again lands on the SAME session with the SAME start
+    // anchor — otherwise the AM who comes back after two days of research would
+    // have their work recorded as having taken seconds.
+    const again = await interview.openKelolaKlien(sql, OWNER, { clientId: CLI_RESUME, serviceId: null });
+    expect(again.interview.id).toBe(first.interview.id);
+    expect(again.risetAwal?.dimulaiPada).toBe(first.risetAwal?.dimulaiPada);
+
+    // Once the session is closed out, the next click opens a fresh one.
+    await interview.transitionInterview(sql, ACC_LEAD, first.interview.id, iv.INTERVIEW_STATES.Dibatalkan, {
+      alasanPembatalan: 'klien menunda',
+    });
+    const fresh = await interview.openKelolaKlien(sql, OWNER, { clientId: CLI_RESUME, serviceId: null });
+    created.push(fresh.interview.id);
+    expect(fresh.interview.id).not.toBe(first.interview.id);
+    expect(fresh.risetAwal?.status).toBe(iv.RISET_AWAL_STATES.Berjalan);
+
+    // Same write gate as createInterview.
+    await expect(interview.openKelolaKlien(sql, NONOWNER, { clientId: CLI_RESUME })).rejects.toThrow(/akses/);
+  });
+});
+
+// ===========================================================================
+// Timeline SLA tiga langkah (keputusan pemilik 2026-08-13)
+// ===========================================================================
+//
+// The owner's numbers: Riset Awal 2–3, Interview Meeting 1–2, Brand Strategy 5–7
+// WORKING days. What matters here is that the anchors are the ones the owner
+// named, that a step nobody has reached is `belum_mulai` rather than on time, and
+// that the anchors cannot be nudged afterwards.
+
+dDb('timeline kelola klien (langkah 1–3)', () => {
+  it('reports three steps with the owner thresholds, all unstarted on a fresh session', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+
+    const t = await interview.getKelolaKlienTimeline(sql, OWNER, detail.interview.id);
+    expect(t.langkah.map((s) => [s.langkah, s.nama, s.targetHari, s.batasHari])).toEqual([
+      [1, 'Riset Awal', 2, 3],
+      [2, 'Interview Meeting', 1, 2],
+      [3, 'Brand Strategy', 5, 7],
+    ]);
+    // Step 1's clock is already running (it started with the session); 2 and 3
+    // have not been reached, so they are `belum_mulai` — not a passing grade.
+    expect(t.langkah[0].status).toBe(iv.SLA_STATUS.TepatWaktu);
+    expect(t.langkah[0].selesai).toBe(false);
+    expect(t.langkah[1].status).toBe(iv.SLA_STATUS.BelumMulai);
+    expect(t.langkah[1].hariKerja).toBeNull();
+    expect(t.langkah[2].status).toBe(iv.SLA_STATUS.BelumMulai);
+  });
+
+  it('walks the anchors: riset awal submit starts step 2, starting the interview closes it', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+
+    await interview.submitRisetAwal(sql, OWNER, id);
+    const afterRiset = await interview.getKelolaKlienTimeline(sql, OWNER, id);
+    expect(afterRiset.langkah[0].selesai).toBe(true);
+    // Step 2's clock now runs from the riset awal submit — the owner's anchor.
+    expect(afterRiset.langkah[1].mulaiPada).toBe(afterRiset.langkah[0].selesaiPada);
+    expect(afterRiset.langkah[1].selesai).toBe(false);
+
+    // "Meeting didapatkan" — here via the start-without-a-schedule path, which is
+    // still a secured meeting and must not be counted as a missed one.
+    await interview.transitionInterview(sql, OWNER, id, iv.INTERVIEW_STATES.SedangBerlangsung);
+    const afterStart = await interview.getKelolaKlienTimeline(sql, OWNER, id);
+    expect(afterStart.langkah[1].selesai).toBe(true);
+    expect(afterStart.langkah[1].selesaiPada).not.toBeNull();
+    expect(afterStart.langkah[1].status).toBe(iv.SLA_STATUS.TepatWaktu);
+    // Step 3 still has not started: the interview is not finished.
+    expect(afterStart.langkah[2].status).toBe(iv.SLA_STATUS.BelumMulai);
+  });
+
+  it('starts step 3 when the interview completes, and its anchors are frozen', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+
+    await interview.submitRisetAwal(sql, OWNER, id);
+    await interview.transitionInterview(sql, OWNER, id, iv.INTERVIEW_STATES.SedangBerlangsung);
+    await interview.transitionInterview(sql, OWNER, id, iv.INTERVIEW_STATES.DraftIsian);
+    await interview.transitionInterview(sql, OWNER, id, iv.INTERVIEW_STATES.Diajukan);
+    await interview.transitionInterview(sql, OWNER, id, iv.INTERVIEW_STATES.Selesai);
+
+    const t = await interview.getKelolaKlienTimeline(sql, OWNER, id);
+    expect(t.langkah[2].mulaiPada).not.toBeNull(); // interview selesai_pada
+    expect(t.langkah[2].selesai).toBe(false); // no strategy submitted yet
+    expect(t.langkah[2].status).toBe(iv.SLA_STATUS.TepatWaktu); // day 0 of 5–7
+
+    // Both anchors are frozen at the DB, so a later edit cannot make a late
+    // session look punctual.
+    await expect(
+      sql`update interview set selesai_pada = now() - interval '9 days' where id = ${id}`,
+    ).rejects.toThrow(/selesai_pada beku/);
+    await expect(
+      sql`update interview set meeting_diamankan_pada = now() where id = ${id}`,
+    ).rejects.toThrow(/meeting_diamankan_pada beku/);
+  });
+
+  it('counts WORKING days: a registered national holiday does not count against the AM', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+
+    // Backdate the start anchor by raw SQL BEFORE it is frozen (a fresh row has
+    // no submit anchor, and `dimulai_pada` is immutable — so this fixture is set
+    // up by re-inserting rather than updating).
+    await sql`delete from interview_riset_awal where interview_id = ${id}`;
+    await sql`
+      insert into interview_riset_awal (interview_id, dimulai_pada, dimulai_oleh)
+      values (${id}, now() - interval '7 days', ${OWNER.employeeId})`;
+
+    const before = await interview.getKelolaKlienTimeline(sql, OWNER, id);
+    const hariKerjaAwal = before.langkah[0].hariKerja!;
+    expect(hariKerjaAwal).toBeGreaterThan(0);
+
+    // Register every one of the last 7 calendar days as a holiday: the elapsed
+    // working-day count must collapse to zero.
+    await sql`
+      insert into hari_libur (tanggal, keterangan, created_by)
+      select d::date, 'CI libur', 'CI'
+        from generate_series(current_date - interval '8 days', current_date, interval '1 day') g(d)
+      on conflict (tanggal) do nothing`;
+    try {
+      const after = await interview.getKelolaKlienTimeline(sql, OWNER, id);
+      expect(after.langkah[0].hariKerja).toBe(0);
+      expect(after.langkah[0].status).toBe(iv.SLA_STATUS.TepatWaktu);
+    } finally {
+      await sql`delete from hari_libur where created_by = 'CI'`;
+    }
+    // Calendar restored ⇒ the original count is back. The holiday table is the
+    // only thing that moved, never the anchors.
+    const restored = await interview.getKelolaKlienTimeline(sql, OWNER, id);
+    expect(restored.langkah[0].hariKerja).toBe(hariKerjaAwal);
+  });
+
+  it('flags a genuinely overdue step as terlambat while it is still running', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+
+    // 20 calendar days back is at least 3 working days under any calendar, so the
+    // 2–3 day step is past its limit — without the AM ever submitting.
+    await sql`delete from interview_riset_awal where interview_id = ${id}`;
+    await sql`
+      insert into interview_riset_awal (interview_id, dimulai_pada, dimulai_oleh)
+      values (${id}, now() - interval '20 days', ${OWNER.employeeId})`;
+
+    const t = await interview.getKelolaKlienTimeline(sql, OWNER, id);
+    expect(t.langkah[0].selesai).toBe(false);
+    expect(t.langkah[0].hariKerja).toBeGreaterThan(3);
+    expect(t.langkah[0].status).toBe(iv.SLA_STATUS.Terlambat);
+  });
+
+  it('marks a BACKFILLED riset awal tidak_berlaku — shown, never judged', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+
+    // Re-create the row the way migration 20260812100000 §4 backfills a session
+    // that predates the step: long-running AND retroaktif.
+    await sql`delete from interview_riset_awal where interview_id = ${id}`;
+    await sql`
+      insert into interview_riset_awal (interview_id, dimulai_pada, dimulai_oleh, retroaktif)
+      values (${id}, now() - interval '30 days', ${OWNER.employeeId}, true)`;
+
+    const t = await interview.getKelolaKlienTimeline(sql, OWNER, id);
+    // Without the retroaktif marker this would read `terlambat` — a deadline the
+    // AM was never given.
+    expect(t.langkah[0].status).toBe(iv.SLA_STATUS.TidakBerlaku);
+    expect(t.langkah[0].hariKerja).toBeNull();
+
+    const d = await interview.getInterview(sql, OWNER, id);
+    expect(d.risetAwal?.retroaktif).toBe(true);
+  });
+
+  it('is Account-scope: Sales and a non-owner AM cannot read how fast the AM worked', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI, salesClosingId: 'EMP-0006' });
+    created.push(detail.interview.id);
+    for (const denied of [SALES, NONOWNER, OTHER]) {
+      await expect(interview.getKelolaKlienTimeline(sql, denied, detail.interview.id)).rejects.toThrow(/akses/);
+    }
+    // OD reads everything; the Account lead too.
+    expect((await interview.getKelolaKlienTimeline(sql, OD, detail.interview.id)).langkah).toHaveLength(3);
+    expect((await interview.getKelolaKlienTimeline(sql, ACC_LEAD, detail.interview.id)).langkah).toHaveLength(3);
   });
 });

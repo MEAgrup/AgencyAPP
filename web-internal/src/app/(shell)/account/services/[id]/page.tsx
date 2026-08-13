@@ -2,17 +2,24 @@
 
 import { use, useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { errorMessage } from '@/lib/api';
+import { createInterview } from '@/lib/interview';
 import { useAuth } from '@/lib/auth-context';
 import { LEVEL_STAFF, useAssignableEmployees } from '@/lib/directory';
 import EmployeePicker from '@/components/EmployeePicker';
 import PlanGatePanel from '@/components/PlanGatePanel';
 import {
   BRIEF_DIVISIONS,
+  GMV_ADJ_APPROVED,
+  GMV_ADJ_PENDING,
+  GMV_TOLERANCE,
   PRIORITIES,
   SERVICE_AWAITING_ONBOARDING,
   STRATEGY_APPROVED,
+  TASK_CATALOG,
   TIER_LABELS,
+  approveGmvAdjustment,
   createBrief,
   createStrategy,
   getService,
@@ -23,15 +30,29 @@ import {
   listStrategies,
   nextOnboardingStep,
   setStrategyRequirement,
+  submitStrategy,
   type Brief,
+  type DivisionTask,
   type ServiceQueueRow,
   type Strategy,
 } from '@/lib/account';
 import StatusBadge from '@/components/StatusBadge';
+import { formatIDR } from '@/lib/money';
 import { listStrategi, type Strategi } from '@/lib/strategi';
+
+/** The human label for a stored task-satuan (divisi, jenis), or the raw jenis. */
+function taskLabel(divisi: string, jenis: string): string {
+  return (TASK_CATALOG[divisi] ?? []).find((t) => t.jenis === jenis)?.label ?? jenis;
+}
+
+/** Whether a task-satuan quota is a Rupiah amount (Ads spend) rather than a count. */
+function taskIsMoney(divisi: string, jenis: string): boolean {
+  return (TASK_CATALOG[divisi] ?? []).find((t) => t.jenis === jenis)?.money ?? false;
+}
 
 export default function ServiceHubPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const { role } = useAuth();
   const readOnly = isReadOnlyOD(role);
   // Write forms (create Strategy/Brief, requirement override) belong to the
@@ -46,6 +67,9 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   // there, so a reader who lands on the Service hub can reach the interview without
   // navigating back to the client. No new API path — route-parity KNOWN_GAPS stays empty.
   const canManageInterview = isAccountStaff(role) || isAccountLead(role) || !!role?.director;
+  // Clearing an out-of-tolerance GMV adjustment is the SPV/Head Account/Director
+  // "ACC" gate (QA revisi) — the same authority level as Strategy approval.
+  const canApproveGmv = !readOnly && (isAccountLead(role) || !!role?.director);
 
   const [briefs, setBriefs] = useState<Brief[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,13 +92,26 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
 
   // Create Strategy form
   const [sObjective, setSObjective] = useState('');
-  const [sKpi, setSKpi] = useState('');
+  // Structured Target KPI (QA revisi): GMV (auto from client), ROAS, CTR, CVR.
+  const [sGmv, setSGmv] = useState('');
+  const [sRoas, setSRoas] = useState('');
+  const [sCtr, setSCtr] = useState('');
+  const [sCvr, setSCvr] = useState('');
+  const [sGmvReason, setSGmvReason] = useState('');
+  const [sKpiNote, setSKpiNote] = useState('');
+  // Task-satuan quotas keyed `${divisi}::${jenis}` (QA revisi).
+  const [sTasks, setSTasks] = useState<Record<string, string>>({});
   const [sDivisions, setSDivisions] = useState<string[]>([]);
   const [sOutline, setSOutline] = useState('');
   const [sStart, setSStart] = useState('');
   const [sEnd, setSEnd] = useState('');
   const [sSubmitting, setSSubmitting] = useState(false);
   const [sError, setSError] = useState<string | null>(null);
+  const [sMessage, setSMessage] = useState<string | null>(null);
+
+  // GMV approval (SPV/Head Account/Director clears an out-of-tolerance adjustment).
+  const [gmvApproving, setGmvApproving] = useState(false);
+  const [gmvApproveError, setGmvApproveError] = useState<string | null>(null);
 
   // Strategy requirement override
   const [reqValue, setReqValue] = useState(false);
@@ -82,6 +119,11 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   const [reqSubmitting, setReqSubmitting] = useState(false);
   const [reqError, setReqError] = useState<string | null>(null);
   const [reqMessage, setReqMessage] = useState<string | null>(null);
+
+  // Interview ("Kelola Klien") launch — a write action for the same Account
+  // door as the Brief/Strategy forms (mirrors canWriteInterview server-side).
+  const [creatingInterview, setCreatingInterview] = useState(false);
+  const [interviewError, setInterviewError] = useState<string | null>(null);
 
   // Create Brief form
   const [bTitle, setBTitle] = useState('');
@@ -132,6 +174,11 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
       // The override control shows the CURRENT effective requirement, so the AM
       // sees what they are changing instead of a checkbox that always reads "no".
       setReqValue(svc.requires_strategy_plan);
+      // Target GMV flows down from the client's expectation (QA revisi). Prefill
+      // it only while untouched, so a value the AM already typed is never clobbered.
+      if (svc.client_target_gmv) {
+        setSGmv((prev) => (prev === '' ? svc.client_target_gmv ?? '' : prev));
+      }
     } catch (err) {
       setServiceError(errorMessage(err));
     }
@@ -167,25 +214,78 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
     setSDivisions((prev) => (prev.includes(div) ? prev.filter((d) => d !== div) : [...prev, div]));
   }
 
+  // The client's expectation and the AM's deviation from it, for the ±20% gate UI.
+  const clientGmv = service?.client_target_gmv ? Number(service.client_target_gmv) : 0;
+  const gmvNum = sGmv.trim() === '' ? clientGmv : Number(sGmv);
+  const gmvDeviation = clientGmv > 0 && !Number.isNaN(gmvNum) ? (gmvNum - clientGmv) / clientGmv : 0;
+  const gmvOutOfTolerance = clientGmv > 0 && Math.abs(gmvDeviation) > GMV_TOLERANCE + 1e-9;
+
+  /** Build division_tasks from the selected divisions' non-empty quota inputs. */
+  function collectTasks(): DivisionTask[] {
+    const tasks: DivisionTask[] = [];
+    for (const divisi of sDivisions) {
+      for (const t of TASK_CATALOG[divisi] ?? []) {
+        const jumlah = (sTasks[`${divisi}::${t.jenis}`] ?? '').trim();
+        if (jumlah !== '') tasks.push({ divisi, jenis: t.jenis, jumlah });
+      }
+    }
+    return tasks;
+  }
+
   async function handleCreateStrategy(e: FormEvent) {
     e.preventDefault();
     setSError(null);
+    setSMessage(null);
     setSSubmitting(true);
     try {
       const res = await createStrategy(id, {
         objective: sObjective,
-        target_kpi: sKpi,
+        target_kpi: sKpiNote,
+        target_gmv: sGmv.trim() === '' ? null : sGmv.trim(),
+        target_roas: sRoas.trim() === '' ? null : sRoas.trim(),
+        target_ctr: sCtr.trim() === '' ? null : sCtr.trim(),
+        target_cvr: sCvr.trim() === '' ? null : sCvr.trim(),
+        gmv_adjustment_reason: sGmvReason.trim() === '' ? null : sGmvReason.trim(),
+        division_tasks: collectTasks(),
         divisions_involved: sDivisions,
         planned_brief_outline: sOutline,
         timeline_start: sStart,
         timeline_end: sEnd,
       });
       setStrategy(res);
+      // Saving IS submitting (QA revisi): the AM no longer clicks a separate
+      // "Ajukan" button. The one exception is an out-of-tolerance GMV adjustment,
+      // which the submit gate blocks until Head/SPV ACCs it — there the Plan stays
+      // a draft and the AM is told why, rather than firing a submit the server
+      // would reject with [penyesuaian target GMV … menunggu persetujuan Head/SPV].
+      if (res.gmv_adjustment_status === GMV_ADJ_PENDING) {
+        setSMessage(
+          `Strategy & Plan ${res.id} disimpan sebagai draft. Penyesuaian target GMV di luar ±20% ` +
+            'menunggu ACC Head/SPV — setelah di-ACC, ajukan dari halaman Strategy & Plan.',
+        );
+      } else {
+        await submitStrategy(res.id);
+        setSMessage(`Strategy & Plan ${res.id} disimpan dan diajukan untuk persetujuan.`);
+      }
       await loadStrategy();
     } catch (err) {
       setSError(errorMessage(err));
     } finally {
       setSSubmitting(false);
+    }
+  }
+
+  async function handleApproveGmv() {
+    if (!strategy) return;
+    setGmvApproveError(null);
+    setGmvApproving(true);
+    try {
+      await approveGmvAdjustment(strategy.id);
+      await loadStrategy();
+    } catch (err) {
+      setGmvApproveError(errorMessage(err));
+    } finally {
+      setGmvApproving(false);
     }
   }
 
@@ -223,6 +323,47 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   // answer — hiding a control that would have worked is the worse failure.
   const awaitingOnboarding = service ? service.status === SERVICE_AWAITING_ONBOARDING : true;
   const step = service ? nextOnboardingStep(service) : null;
+
+  async function handleOpenInterview() {
+    if (!service) return;
+    // Opening Kelola Klien STARTS riset awal (langkah 1); the call resumes this
+    // service's open session if there is one, so the clock is never reset.
+    if (!window.confirm('Buka Kelola Klien untuk layanan ini? Riset awal mulai terhitung sejak sekarang.')) {
+      return;
+    }
+    setInterviewError(null);
+    setCreatingInterview(true);
+    try {
+      // Link the interview to this Service (and its client). Only client_id +
+      // service_id are set; the contract is not required to open one.
+      const detail = await createInterview({ client_id: service.client_id, service_id: id });
+      router.push(`/account/interview/${detail.interview.id}`);
+    } catch (err) {
+      setInterviewError(errorMessage(err));
+      setCreatingInterview(false);
+    }
+  }
+
+  /**
+   * Prefill the Brief form from one approved-Plan task-satuan (QA revisi). The AM
+   * should not re-type quotas the Plan already committed to — clicking a task loads
+   * its division, a sensible title, the deliverable, and the target quantity, and
+   * the AM only completes what the Plan does not carry (due date, PIC, priority,
+   * instructions). Changing the division clears the PIC (a Creative staffer is not
+   * a valid PIC for an Ads Brief, §5 Rule 1), same as the division <select> does.
+   */
+  function prefillBriefFromTask(t: DivisionTask) {
+    const label = taskLabel(t.divisi, t.jenis);
+    setBDivision(t.divisi);
+    setBPic('');
+    setBTitle(`${t.divisi} — ${label}`);
+    setBDeliverable(label);
+    setBQty(t.jumlah);
+    setBError(null);
+    setBMessage(
+      `Form terisi dari Strategy & Plan (${t.divisi} · ${label}). Lengkapi due date, PIC, dan detail lain, lalu buat Brief.`,
+    );
+  }
 
   async function handleCreateBrief(e: FormEvent) {
     e.preventDefault();
@@ -353,6 +494,33 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         </section>
       )}
 
+      {/* Interview / Kelola Klien launch. The interview qualifies the client and
+          feeds the Strategy that follows, so its entry point belongs on the
+          Service hub too — not only on the Client Record. Without a door here the
+          page reads as "view only" for a step the AM actually starts from here. */}
+      {service && canWrite && (
+        <section className="card">
+          <div className="cardHeader">
+            <h2>Kelola Klien · Riset Awal, Interview &amp; Kualifikasi</h2>
+          </div>
+          {interviewError && <div className="alert alertError" role="alert">{interviewError}</div>}
+          <p className="muted" style={{ fontSize: 13 }}>
+            Tiga langkah: <strong>riset awal</strong> (login toko klien &amp; catat data baseline),
+            <strong>interview</strong> (Blok A–B, kualifikasi — skor &amp; verdict advisory), lalu
+            <strong>strategi</strong>. Waktu riset awal mulai terhitung begitu halaman dibuka. Sesi
+            ditautkan ke layanan ini.
+          </p>
+          <button
+            type="button"
+            className="btn btnPrimary"
+            disabled={creatingInterview}
+            onClick={handleOpenInterview}
+          >
+            {creatingInterview ? 'Membuka…' : 'Kelola Klien (mulai riset awal)'}
+          </button>
+        </section>
+      )}
+
       {/* M6C — the plan-gate determination. Mounted ABOVE Strategy & Plan because
           it is the gate that decides whether a Strategy is needed at all. Shown
           for every tier (read-only on the two locked ones) so the AM can see why
@@ -377,12 +545,79 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         </div>
         {strategyError && <div className="alert alertError" role="alert">{strategyError}</div>}
         {strategy ? (
-          <div className="row" style={{ justifyContent: 'space-between' }}>
-            <div>
-              <Link href={`/account/strategies/${strategy.id}`}>{strategy.id}</Link>
-              <div className="muted" style={{ fontSize: 12 }}>{strategy.objective || '—'}</div>
+          <div className="stack" style={{ gap: 10 }}>
+            <div className="row" style={{ justifyContent: 'space-between' }}>
+              <div>
+                <Link href={`/account/strategies/${strategy.id}`}>{strategy.id}</Link>
+                <div className="muted" style={{ fontSize: 12 }}>{strategy.objective || '—'}</div>
+              </div>
+              <StatusBadge status={strategy.status} />
             </div>
-            <StatusBadge status={strategy.status} />
+
+            {/* Structured Target KPI (QA revisi) — the four fixed points. */}
+            <div className="grid2">
+              <div>
+                <div className="muted" style={{ fontSize: 12 }}>Target GMV</div>
+                <div>{formatIDR(strategy.target_gmv)}</div>
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: 12 }}>Target ROAS</div>
+                <div>{strategy.target_roas ?? '—'}</div>
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: 12 }}>Target CTR (%)</div>
+                <div>{strategy.target_ctr ?? '—'}</div>
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: 12 }}>Target CVR (%)</div>
+                <div>{strategy.target_cvr ?? '—'}</div>
+              </div>
+            </div>
+
+            {/* GMV adjustment gate (±20% vs the client's expectation). */}
+            {strategy.gmv_adjustment_status !== 'dalam_toleransi' && (
+              <div
+                className={`alert ${strategy.gmv_adjustment_status === GMV_ADJ_APPROVED ? 'alertSuccess' : 'alertInfo'}`}
+                role="status"
+              >
+                <div>
+                  Penyesuaian target GMV di luar toleransi 20% (klien: {formatIDR(strategy.client_target_gmv)}) &mdash;{' '}
+                  {strategy.gmv_adjustment_status === GMV_ADJ_APPROVED
+                    ? `disetujui oleh ${strategy.gmv_adjustment_approved_by || 'Head/SPV'}.`
+                    : 'menunggu ACC Head/SPV. Plan belum bisa diajukan.'}
+                </div>
+                {strategy.gmv_adjustment_reason && (
+                  <div className="muted" style={{ fontSize: 12 }}>Alasan: {strategy.gmv_adjustment_reason}</div>
+                )}
+                {gmvApproveError && <div className="alert alertError" role="alert">{gmvApproveError}</div>}
+                {canApproveGmv && strategy.gmv_adjustment_status === GMV_ADJ_PENDING && (
+                  <button
+                    type="button"
+                    className="btn btnSecondary"
+                    disabled={gmvApproving}
+                    onClick={handleApproveGmv}
+                    style={{ marginTop: 6 }}
+                  >
+                    {gmvApproving ? 'Menyetujui…' : 'ACC penyesuaian GMV (Head/SPV)'}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Task-satuan per division — what the AM turns into Briefs (M6B P3). */}
+            {strategy.division_tasks.length > 0 && (
+              <div>
+                <div className="muted" style={{ fontSize: 12 }}>Strategi &mdash; task satuan per divisi</div>
+                <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 13 }}>
+                  {strategy.division_tasks.map((t) => (
+                    <li key={`${t.divisi}::${t.jenis}`}>
+                      {t.divisi} &middot; {taskLabel(t.divisi, t.jenis)}:{' '}
+                      <strong>{taskIsMoney(t.divisi, t.jenis) ? formatIDR(t.jumlah) : t.jumlah}</strong>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         ) : (
           <p className="muted">Belum ada Strategy &amp; Plan untuk layanan ini.</p>
@@ -451,18 +686,82 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
           </div>
           <p className="muted" style={{ fontSize: 13 }}>
             Layanan ini plan-gated: Plan wajib dibuat, diajukan, dan disetujui SPV sebelum Brief bisa dibuat
-            (M6 §4 Rule 5).
+            (M6 §4 Rule 5). Menyimpan Plan otomatis mengajukannya untuk persetujuan &mdash; tidak perlu langkah
+            &ldquo;ajukan&rdquo; terpisah.
           </p>
           <form className="form" onSubmit={handleCreateStrategy}>
             {sError && <div className="alert alertError" role="alert">{sError}</div>}
+            {sMessage && <div className="alert alertSuccess" role="status">{sMessage}</div>}
             <div className="field">
               <label htmlFor="cs-objective">Objective</label>
               <textarea id="cs-objective" required value={sObjective} onChange={(e) => setSObjective(e.target.value)} />
             </div>
-            <div className="field">
-              <label htmlFor="cs-kpi">Target KPI</label>
-              <textarea id="cs-kpi" required value={sKpi} onChange={(e) => setSKpi(e.target.value)} />
-            </div>
+
+            {/* Target KPI — the four fixed points (QA revisi). GMV anchors on the
+                client's expectation and may move within ±20% freely. */}
+            <fieldset style={{ border: '1px solid var(--border, #ddd)', padding: 12 }}>
+              <legend style={{ fontSize: 13 }}>Target KPI</legend>
+              <div className="formRow">
+                <div className="field">
+                  <label htmlFor="cs-gmv">Target GMV (Rp)</label>
+                  <input
+                    id="cs-gmv"
+                    type="number"
+                    min="0"
+                    step="1"
+                    required
+                    value={sGmv}
+                    onChange={(e) => setSGmv(e.target.value)}
+                  />
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    {clientGmv > 0
+                      ? `Target klien (dari Sales): ${formatIDR(service?.client_target_gmv ?? null)}`
+                      : 'Klien belum menetapkan target GMV — tidak ada batas toleransi.'}
+                  </span>
+                </div>
+                <div className="field">
+                  <label htmlFor="cs-roas">Target ROAS</label>
+                  <input id="cs-roas" type="number" min="0" step="0.01" value={sRoas} onChange={(e) => setSRoas(e.target.value)} />
+                </div>
+              </div>
+              <div className="formRow">
+                <div className="field">
+                  <label htmlFor="cs-ctr">Target CTR (%)</label>
+                  <input id="cs-ctr" type="number" min="0" step="0.001" value={sCtr} onChange={(e) => setSCtr(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label htmlFor="cs-cvr">Target CVR (%)</label>
+                  <input id="cs-cvr" type="number" min="0" step="0.001" value={sCvr} onChange={(e) => setSCvr(e.target.value)} />
+                </div>
+              </div>
+              {clientGmv > 0 && sGmv.trim() !== '' && (
+                <p className="muted" style={{ fontSize: 12 }}>
+                  Penyesuaian GMV: {gmvDeviation >= 0 ? '+' : ''}
+                  {(gmvDeviation * 100).toFixed(1)}% dari target klien.
+                </p>
+              )}
+              {gmvOutOfTolerance && (
+                <div className="field">
+                  <label htmlFor="cs-gmv-reason">
+                    Alasan penyesuaian GMV di luar ±20% (wajib — perlu ACC Head/SPV)
+                  </label>
+                  <textarea
+                    id="cs-gmv-reason"
+                    required
+                    value={sGmvReason}
+                    onChange={(e) => setSGmvReason(e.target.value)}
+                  />
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    Di luar toleransi 20%: Plan tidak bisa diajukan sampai Head/SPV meng-ACC. Semua tercatat di log.
+                  </span>
+                </div>
+              )}
+              <div className="field">
+                <label htmlFor="cs-kpi-note">Catatan KPI (opsional)</label>
+                <textarea id="cs-kpi-note" value={sKpiNote} onChange={(e) => setSKpiNote(e.target.value)} />
+              </div>
+            </fieldset>
+
             <div className="field">
               <label>Divisi Terlibat (min. 1)</label>
               <div className="stack" style={{ gap: 6 }}>
@@ -474,6 +773,40 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
                 ))}
               </div>
             </div>
+
+            {/* Strategi — task satuan per involved division (QA revisi). These
+                become Briefs to the execution side (M6B P3). */}
+            {sDivisions.some((d) => (TASK_CATALOG[d] ?? []).length > 0) && (
+              <fieldset style={{ border: '1px solid var(--border, #ddd)', padding: 12 }}>
+                <legend style={{ fontSize: 13 }}>Strategi &mdash; Task Satuan per Divisi</legend>
+                {sDivisions.map((divisi) =>
+                  (TASK_CATALOG[divisi] ?? []).length === 0 ? null : (
+                    <div key={divisi} className="stack" style={{ gap: 6, marginBottom: 8 }}>
+                      <div className="muted" style={{ fontSize: 12 }}>{divisi}</div>
+                      <div className="formRow">
+                        {(TASK_CATALOG[divisi] ?? []).map((t) => {
+                          const key = `${divisi}::${t.jenis}`;
+                          return (
+                            <div key={key} className="field">
+                              <label htmlFor={`cs-task-${key}`}>{t.label}</label>
+                              <input
+                                id={`cs-task-${key}`}
+                                type="number"
+                                min="0"
+                                step={t.money ? '1' : '1'}
+                                value={sTasks[key] ?? ''}
+                                onChange={(e) => setSTasks((prev) => ({ ...prev, [key]: e.target.value }))}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ),
+                )}
+              </fieldset>
+            )}
+
             <div className="field">
               <label htmlFor="cs-outline">Outline Brief Terencana</label>
               <textarea id="cs-outline" required value={sOutline} onChange={(e) => setSOutline(e.target.value)} />
@@ -490,7 +823,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
             </div>
             <div>
               <button type="submit" className="btn btnPrimary" disabled={sSubmitting}>
-                {sSubmitting ? 'Menyimpan...' : 'Buat Strategy & Plan'}
+                {sSubmitting ? 'Menyimpan & mengajukan...' : 'Simpan & Ajukan Strategy & Plan'}
               </button>
             </div>
           </form>
@@ -539,6 +872,48 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
               Layanan plan-gated: Brief baru bisa dibuat setelah Strategy &amp; Plan disetujui SPV/Head Account
               (M6 §4 Rule 5).
               {!strategy && ' Mulai dari "Buat Strategy & Plan" di atas.'}
+            </div>
+          )}
+
+          {/* Isi cepat dari Plan yang disetujui (QA revisi): setiap task satuan di
+              Strategy & Plan bisa dipakai untuk mengisi form Brief, agar AM tidak
+              mengetik ulang kuota yang sudah ditetapkan. */}
+          {approvedStrategy && approvedStrategy.division_tasks.length > 0 && (
+            <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                Isi cepat dari Strategy &amp; Plan &middot;{' '}
+                <Link href={`/account/strategies/${approvedStrategy.id}`}>{approvedStrategy.id}</Link>
+              </div>
+              <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+                Task satuan per divisi dari Plan yang disetujui. Klik <strong>Gunakan</strong> untuk mengisi
+                Divisi, Judul, Deliverable, dan Target &mdash; Anda tinggal melengkapi due date, PIC, prioritas,
+                dan detail lainnya.
+              </p>
+              <div className="stack" style={{ gap: 6 }}>
+                {approvedStrategy.division_tasks.map((t) => {
+                  const label = taskLabel(t.divisi, t.jenis);
+                  const money = taskIsMoney(t.divisi, t.jenis);
+                  return (
+                    <div
+                      key={`${t.divisi}::${t.jenis}`}
+                      className="row"
+                      style={{ justifyContent: 'space-between', gap: 8, alignItems: 'center' }}
+                    >
+                      <div style={{ fontSize: 13 }}>
+                        {t.divisi} &middot; {label}:{' '}
+                        <strong>{money ? formatIDR(t.jumlah) : t.jumlah}</strong>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btnSecondary btnSm"
+                        onClick={() => prefillBriefFromTask(t)}
+                      >
+                        Gunakan
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
           <form className="form" onSubmit={handleCreateBrief}>
