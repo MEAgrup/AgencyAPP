@@ -184,6 +184,10 @@ describeDb('machine #18 (weekly_result_recap)', () => {
     const open = await smTransition(id, 'Terbuka');
     expect(open[0].r.ok).toBe(true);
     expect(open[0].r.to).toBe('Terbuka');
+    // D-05 narrative gate: RM-D1 + RM-D3 must be present before Terbuka → Ditutup.
+    // (This test proves the edge; the gate itself is covered in recap.close.test.ts.)
+    await sql`insert into wrr_catatan (recap_id, yang_bergerak, fokus_minggu_depan, created_by)
+              values (${id}, 'ROAS bertahan 4,6', 'kejar sisa video', 'ZZ-AM')`;
     const close = await smTransition(id, 'Ditutup');
     expect(close[0].r.ok).toBe(true);
     // Terjadwal → Ditutup is not an edge.
