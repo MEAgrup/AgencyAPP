@@ -426,7 +426,9 @@ afterAll(async () => {
 
 afterEach(async () => {
   if (!sql) return;
-  await sql`delete from plan where created_by like 'ZZ-%'`;
+  await sql`delete from service_plan_gate where created_by like 'ZZ-%'`;
+  // Also catch periods the tick job (`SISTEM`) generated for a test client.
+  await sql`delete from plan where created_by like 'ZZ-%' or client_id like 'ZZ-CLI-%'`;
   await sql`delete from plan_satuan where created_by like 'ZZ-%'`;
   await sql`truncate strategi_version`;
   await sql`delete from strategi where created_by like 'ZZ-%'`;
@@ -2071,6 +2073,115 @@ describeDb('markPlanSatuanDormant (machine #17 Aktif → Dorman, §10 job c)', (
     await expect(markPlanSatuanDormant(sql, am(), clientId)).rejects.toThrow(
       MSG_PLAN_SATUAN_NOT_FOUND,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Plan Satuan seam jobs (runPlanTick) — #1 rolling period generation + #2
+// automatic dormancy (M6C §7 / §10 job c). "Still working" is read from the
+// Service lifecycle: a chain with ≥1 attached Service NOT in a terminal status
+// grows a fresh current-window period; one whose last Service ended (and whose
+// periods are all closed) is put to sleep instead of growing empty periods.
+// ---------------------------------------------------------------------------
+
+describeDb('Plan Satuan seam jobs (runPlanTick #1 generasi + #2 dormansi)', () => {
+  // Anchored 2026-06-15 → anniversary windows Jun15, Jul15, Aug15, … The tick
+  // runs on 2026-08-20, which sits in the Aug15–Sep14 window.
+  const CYCLE = '2026-06-15';
+  const TICK = '2026-08-20';
+
+  async function seedChain(clientId: string, status = 'Aktif'): Promise<void> {
+    await sql`insert into plan_satuan (client_id, tanggal_mulai_siklus, status_dormansi, created_by)
+              values (${clientId}, ${CYCLE}, ${status}, 'ZZ-AM')`;
+  }
+
+  /** Attach a Service to a klien period via a minimal valid gate row (the shape
+   *  a real `decideGate` writes: butuh_plan/sesuai, no reason needed). */
+  async function linkService(serviceId: string, planId: string): Promise<void> {
+    await sql`
+      insert into service_plan_gate
+        (service_id, tier_katalog, divisi_terlibat, deliverable, berulang,
+         sequence_dependency, laporan_periodik, pemicu_keras, pemicu_lunak,
+         config_version_no, rekomendasi, keputusan_am, kesesuaian,
+         tanggal_tinjau_ulang, plan_id, decided_by, created_by)
+      values
+        (${serviceId}, 'ditentukan_am', 'Ads', 'kampanye', true,
+         false, false, '{}'::jsonb, '{}'::jsonb,
+         1, 'butuh_plan', 'butuh_plan', 'sesuai',
+         '2026-12-31', ${planId}, 'ZZ-AM', 'ZZ-AM')`;
+  }
+
+  const chainStatus = async (clientId: string): Promise<string> =>
+    (await getPlanSatuan(sql, clientId))!.statusDormansi;
+
+  const klienPeriodCount = async (clientId: string): Promise<number> =>
+    (
+      await sql<{ n: number }[]>`
+        select count(*)::int as n from plan where client_id = ${clientId} and lingkup = 'klien'`
+    )[0].n;
+
+  it('#1 generates the current-window period for an active chain with a live service, once', async () => {
+    const clientId = await seedClient();
+    await seedChain(clientId);
+    const p1 = await seedKlienPeriod(clientId, { periodeNo: 1, status: 'Ditutup' });
+    const svc = await seedService(clientId); // born [Awaiting Onboarding] = live
+    await linkService(svc, p1);
+
+    const r = await runPlanTick(sql, TICK);
+    expect(r.periodeSatuanDibuat).toHaveLength(1);
+    const np = await getPlan(sql, director(), r.periodeSatuanDibuat[0]);
+    expect(np.lingkup).toBe('klien');
+    expect(np.periodeNo).toBe(2); // continues the chain
+    expect(np.tanggalMulai).toBe('2026-08-15'); // the CURRENT anniversary window
+    expect(await chainStatus(clientId)).toBe('Aktif'); // a working chain never sleeps
+
+    // Idempotent: a second tick in the same window grows nothing new.
+    const r2 = await runPlanTick(sql, '2026-08-21');
+    expect(r2.periodeSatuanDibuat).toHaveLength(0);
+    expect(await klienPeriodCount(clientId)).toBe(2);
+  });
+
+  it('#2 sleeps an active chain once its last service ended and every period is closed — and #1 grows nothing for it', async () => {
+    const clientId = await seedClient();
+    await seedChain(clientId);
+    const p1 = await seedKlienPeriod(clientId, { periodeNo: 1, status: 'Ditutup' });
+    const svc = await seedService(clientId);
+    await linkService(svc, p1);
+    await sql`update services set status = 'Done' where id = ${svc}`; // last service ended
+
+    const r = await runPlanTick(sql, TICK);
+    expect(r.didormankan).toContain(clientId);
+    expect(await chainStatus(clientId)).toBe('Dorman');
+    expect(r.periodeSatuanDibuat).toHaveLength(0); // no empty period for a done chain
+    expect(await klienPeriodCount(clientId)).toBe(1);
+
+    // Idempotent: a Dorman chain is not swept again.
+    const r2 = await runPlanTick(sql, '2026-08-21');
+    expect(r2.didormankan).not.toContain(clientId);
+  });
+
+  it('#2 does NOT sleep a chain that still has a running period, even with no live service', async () => {
+    const clientId = await seedClient();
+    await seedChain(clientId);
+    // A non-terminal period, no service attached. Sweep (a) activates it this
+    // tick (its default window contains TICK); the chain still cannot sleep.
+    await seedKlienPeriod(clientId, { periodeNo: 1, status: 'Terjadwal' });
+
+    const r = await runPlanTick(sql, TICK);
+    expect(r.didormankan).not.toContain(clientId);
+    expect(await chainStatus(clientId)).toBe('Aktif');
+    expect(r.periodeSatuanDibuat).toHaveLength(0); // no live service ⇒ #1 stays its hand
+  });
+
+  it('a Dorman chain is untouched by both jobs (only reactivation wakes it)', async () => {
+    const clientId = await seedClient();
+    await seedChain(clientId, 'Dorman');
+    await seedKlienPeriod(clientId, { periodeNo: 1, status: 'Ditutup' });
+
+    const r = await runPlanTick(sql, TICK);
+    expect(r.periodeSatuanDibuat).toHaveLength(0);
+    expect(r.didormankan).not.toContain(clientId);
+    expect(await chainStatus(clientId)).toBe('Dorman');
   });
 });
 

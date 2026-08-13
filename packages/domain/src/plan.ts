@@ -2506,6 +2506,10 @@ export interface PlanTickResult {
   ditutupOtomatis: string[];
   belumDieksekusi: string[];
   realisasiBelumLengkap: string[];
+  /** Plan Satuan periods generated for the current anniversary window (ids). */
+  periodeSatuanDibuat: string[];
+  /** Plan Satuan chains put to sleep this tick (client ids). */
+  didormankan: string[];
 }
 
 /** chainHasAktif reports whether the plan's chain already holds an `Aktif`
@@ -2656,10 +2660,23 @@ export async function sweepRealisasiBelumLengkap(sql: Sql, today: string, res: P
 
 /**
  * runPlanTick is the single entry point the 00:00 WIB cron endpoint calls. It
- * runs the three sweeps in order (transitions first — a period that closes this
- * tick can then be assessed for realisasi in a later tick) for the WIB date
- * `today`, and returns what it did. Idempotent: a second call for the same date
- * with no state change acts on nothing.
+ * runs the sweeps in a deliberate order for the WIB date `today`, and returns
+ * what it did. Idempotent: a second call for the same date with no state change
+ * acts on nothing.
+ *
+ * Order matters, and it is chosen so a Plan Satuan chain reaches its correct
+ * resting state in ONE tick, not two:
+ *   1. `sweepPlanSatuanPeriodeBerjalan` — generate the current-window period for
+ *      every still-working Plan Satuan chain FIRST, so that…
+ *   2. `sweepPeriodeTransitions` (a) — …the transition sweep can force-close the
+ *      chain's overdue period AND activate the freshly-generated current one in
+ *      the same pass (its `chainHasAktif` guard needs the overdue one closed
+ *      first, which this loop does before it activates).
+ *   3. `sweepPlanSatuanDormansi` (§10 job c) — AFTER (a), because a period
+ *      force-closed this tick now counts as terminal, so a chain whose last
+ *      service just ended can sleep immediately instead of one tick late.
+ *   4/5. `sweepBelumDieksekusi` (b) / `sweepRealisasiBelumLengkap` (c) — the
+ *      full-management midpoint/close-follow-up sweeps, unchanged.
  */
 export async function runPlanTick(sql: Sql, today: string): Promise<PlanTickResult> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) {
@@ -2671,8 +2688,12 @@ export async function runPlanTick(sql: Sql, today: string): Promise<PlanTickResu
     ditutupOtomatis: [],
     belumDieksekusi: [],
     realisasiBelumLengkap: [],
+    periodeSatuanDibuat: [],
+    didormankan: [],
   };
+  await sweepPlanSatuanPeriodeBerjalan(sql, today, res);
   await sweepPeriodeTransitions(sql, today, res);
+  await sweepPlanSatuanDormansi(sql, today, res);
   await sweepBelumDieksekusi(sql, today, res);
   await sweepRealisasiBelumLengkap(sql, today, res);
   return res;
@@ -2705,6 +2726,14 @@ export async function runPlanTick(sql: Sql, today: string): Promise<PlanTickResu
 const MACHINE_PLAN_SATUAN = 'plan_satuan';
 const PLAN_SATUAN_AKTIF = 'Aktif';
 const PLAN_SATUAN_DORMAN = 'Dorman';
+
+// Terminal Service lifecycle statuses (mirror of `client.ts` — the same truth
+// used to decide a Service can no longer be voided). The Plan Satuan jobs read
+// them to answer "does this chain still have live work?" from real data instead
+// of guessing: a chain still working is one with ≥1 attached Service NOT in one
+// of these states.
+const SERVICE_DONE = 'Done';
+const SERVICE_VOIDED = '[Cancelled — Service Voided]';
 
 export type PlanSatuanStatus = 'Aktif' | 'Dorman';
 
@@ -2959,4 +2988,107 @@ export async function markPlanSatuanDormant(
     const after = await tx<PlanSatuanDbRow[]>`select * from plan_satuan where client_id = ${clientId}`;
     return rowToPlanSatuan(after[0]);
   });
+}
+
+/** planSatuanHasLiveService reports whether a chain still has any attached
+ *  Service (via `service_plan_gate.plan_id` → a klien period of this client)
+ *  whose lifecycle status is non-terminal. This is the "chain still working"
+ *  signal both Plan Satuan jobs pivot on. */
+async function planSatuanHasLiveService(sql: Queryable, clientId: string): Promise<boolean> {
+  const rows = await sql<{ one: number }[]>`
+    select 1 as one from service_plan_gate spg
+      join services s on s.id = spg.service_id
+      join plan p on p.id = spg.plan_id
+     where p.lingkup = 'klien' and p.client_id = ${clientId}
+       and s.status not in (${SERVICE_DONE}, ${SERVICE_VOIDED})
+     limit 1`;
+  return rows.length > 0;
+}
+
+/**
+ * (Plan Satuan job #1, M6C §7 seam) Generate the current anniversary-month
+ * period for every ACTIVE chain that still has live service work. B-10 opens
+ * period 1 at chain open and one fresh period at reactivation; the rolling
+ * monthly cadence is this job.
+ *
+ * A chain grows a new period ONLY while it still has work: the "empty period
+ * forever" trap is avoided by gating generation on `planSatuanHasLiveService`.
+ * A chain whose last service has ended grows nothing here — the dormancy sweep
+ * (#2) puts it to sleep instead. Idempotent: a chain that already has a period
+ * for the current window is skipped. The `plan_satuan` row is locked FOR UPDATE
+ * (same order `openOrJoinPlanSatuanTx` takes) so a concurrent gate determination
+ * cannot race a duplicate current-window period into existence.
+ */
+export async function sweepPlanSatuanPeriodeBerjalan(
+  sql: Sql,
+  today: string,
+  res: PlanTickResult,
+): Promise<void> {
+  const chains = await sql<{ client_id: string; cycle_start: string }[]>`
+    select client_id, tanggal_mulai_siklus::text as cycle_start
+      from plan_satuan
+     where status_dormansi = ${PLAN_SATUAN_AKTIF}`;
+  for (const c of chains) {
+    if (today < c.cycle_start) continue; // cycle has not begun — nothing to roll
+    const w = anniversaryWindowContaining(c.cycle_start, today);
+    const created = await withTransaction(sql, async (tx) => {
+      const locked = await tx<{ status_dormansi: PlanSatuanStatus }[]>`
+        select status_dormansi from plan_satuan where client_id = ${c.client_id} for update`;
+      if (locked.length === 0 || locked[0].status_dormansi !== PLAN_SATUAN_AKTIF) return null;
+      if (!(await planSatuanHasLiveService(tx, c.client_id))) return null;
+      // Idempotent: the current-window period may already exist.
+      const exists = await tx<{ one: number }[]>`
+        select 1 as one from plan
+         where client_id = ${c.client_id} and lingkup = 'klien'
+           and tanggal_mulai = ${w.tanggalMulai}
+         limit 1`;
+      if (exists.length > 0) return null;
+      const maxRows = await tx<{ max: number | null }[]>`
+        select max(periode_no)::int as max from plan
+         where client_id = ${c.client_id} and lingkup = 'klien'`;
+      const nextPeriodeNo = (maxRows[0].max ?? 0) + 1;
+      return openPlanSatuanPeriodeTx(
+        tx,
+        PLAN_JOB_ACTOR,
+        c.client_id,
+        c.cycle_start,
+        nextPeriodeNo,
+        today,
+      );
+    });
+    if (created !== null) res.periodeSatuanDibuat.push(created);
+  }
+}
+
+/**
+ * (Plan Satuan job #2, M6C §10 job c) Put an ACTIVE chain to sleep once its last
+ * service has ended AND no period is still running. `markPlanSatuanDormant` is
+ * the write path; this job is the "last service ended" trigger it was waiting
+ * for. Both preconditions are checked here so we never call into the write
+ * path's own guard (it refuses while a non-terminal period exists). The write
+ * re-verifies under a row lock, so a chain revived between this check and the
+ * write is refused there and skipped — never mis-slept.
+ */
+export async function sweepPlanSatuanDormansi(
+  sql: Sql,
+  today: string,
+  res: PlanTickResult,
+): Promise<void> {
+  const chains = await sql<{ client_id: string }[]>`
+    select client_id from plan_satuan where status_dormansi = ${PLAN_SATUAN_AKTIF}`;
+  for (const c of chains) {
+    if (await planSatuanHasLiveService(sql, c.client_id)) continue; // still working
+    const running = await sql<{ n: number }[]>`
+      select count(*)::int as n from plan
+       where client_id = ${c.client_id} and lingkup = 'klien'
+         and status not in (${PLAN_DITUTUP}, ${PLAN_DITUTUP_OTOMATIS})`;
+    if (running[0].n > 0) continue; // a period is live — cannot sleep yet
+    try {
+      await markPlanSatuanDormant(sql, PLAN_JOB_ACTOR, c.client_id);
+      res.didormankan.push(c.client_id);
+    } catch (e) {
+      if (e instanceof ConflictError) continue; // raced back to work — leave Aktif
+      throw e;
+    }
+  }
 }
