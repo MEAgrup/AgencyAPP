@@ -85,6 +85,84 @@ export function isInterviewComplete(state: string): boolean {
 }
 
 // ===========================================================================
+// Riset Awal — langkah 1 of "Kelola Klien" (owner QA 2026-08-12)
+// ===========================================================================
+//
+// "Kelola Klien" is three steps, not two: **Riset Awal** (the AM logs into the
+// client's store and records the baseline), then Interview, then Strategi. Every
+// step is measured so a timeline cannot slip unnoticed. Step 1 was missing.
+//
+// What this module owns is only the MEASUREMENT contract: the machine name/states
+// the migration seeds, and the ONE pure duration function every layer derives
+// from. There is deliberately no stored duration column anywhere — a number that
+// can be typed is a number that can lie about its own anchors (house rule #4).
+
+/** The state-machine name registered in `sm_machines` (mesin #20). */
+export const RISET_AWAL_MACHINE = 'riset_awal';
+
+/**
+ * Riset Awal lifecycle. Two states, matching what is actually observable: it
+ * starts when the AM opens "Kelola Klien" and ends when they submit. There is no
+ * re-open edge — re-opening would move an anchor the whole metric rests on.
+ */
+export const RISET_AWAL_STATES = {
+  Berjalan: 'Berjalan',
+  Selesai: 'Selesai',
+} as const;
+
+export type RisetAwalState = (typeof RISET_AWAL_STATES)[keyof typeof RISET_AWAL_STATES];
+
+/** True once the riset awal has been submitted (its duration is final). */
+export function isRisetAwalSelesai(state: string): boolean {
+  return state === RISET_AWAL_STATES.Selesai;
+}
+
+const MS_PER_MINUTE = 60_000;
+
+/**
+ * durasiRisetAwalMenit — the ONE derivation of "berapa lama riset awal
+ * dikerjakan", in whole minutes, floored.
+ *
+ * Returns `null` when it is not yet knowable (no submit anchor) or when the
+ * inputs are unusable (unparseable, or submit before start — which the DB CHECK
+ * `ck_riset_awal_urutan` already refuses to store). `null` is the caller's cue to
+ * render `—` (house rule #7), never `0` and never an error: a riset awal still in
+ * progress has no duration yet, and pretending it is zero would flatter the
+ * timeline metric this step exists to protect.
+ *
+ * Floor, not round: elapsed time answers "how much has passed", and rounding 90
+ * seconds up to 2 minutes reports time that has not happened.
+ */
+export function durasiRisetAwalMenit(
+  dimulaiPada: string | Date | null | undefined,
+  disubmitPada: string | Date | null | undefined,
+): number | null {
+  const mulai = toEpochMs(dimulaiPada);
+  const submit = toEpochMs(disubmitPada);
+  if (mulai === null || submit === null) return null;
+  if (submit < mulai) return null;
+  return Math.floor((submit - mulai) / MS_PER_MINUTE);
+}
+
+/**
+ * durasiBerjalanMenit — elapsed minutes for a riset awal still running, measured
+ * against `sekarang`. Same flooring and same `null` contract as the final
+ * duration, so an in-progress card and a finished one read from one rule.
+ */
+export function durasiBerjalanMenit(
+  dimulaiPada: string | Date | null | undefined,
+  sekarang: Date,
+): number | null {
+  return durasiRisetAwalMenit(dimulaiPada, sekarang);
+}
+
+function toEpochMs(v: string | Date | null | undefined): number | null {
+  if (v == null) return null;
+  const ms = v instanceof Date ? v.getTime() : Date.parse(v);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+// ===========================================================================
 // Per-field number source (I3) and margin basis (I21)
 // ===========================================================================
 

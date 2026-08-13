@@ -40,6 +40,8 @@ export { ConflictError, ForbiddenError, NotFoundError, ValidationError };
 
 const SALES_DIVISION = 'Sales';
 const ENTITY = 'interview';
+/** Audit `entity_type` for langkah 1. Its `entity_id` is the ITV it belongs to. */
+const RISET_AWAL_ENTITY = 'riset_awal';
 
 // ---------------------------------------------------------------------------
 // BI messages (exact strings; CLAUDE.md §5)
@@ -51,6 +53,8 @@ export const MSG_NOT_FOUND = '[interview tidak ditemukan]';
 export const MSG_CANCEL_REASON = '[alasan pembatalan wajib diisi]';
 export const MSG_INVALID_FORMAT = '[format interview tidak valid]';
 export const MSG_INVALID_DURASI = '[durasi interview tidak valid]';
+export const MSG_RISET_AWAL_NOT_FOUND = '[riset awal tidak ditemukan]';
+export const MSG_RISET_AWAL_SUDAH_SUBMIT = '[riset awal sudah disubmit]';
 
 /**
  * The closed set of jadwal formats (IA-5). MIRRORS the `ck_jadwal_format` CHECK
@@ -167,8 +171,28 @@ export interface Answer {
   dasarEstimasi: string | null;
 }
 
+/**
+ * Riset Awal — langkah 1 of "Kelola Klien" (owner QA 2026-08-12). The AM logs
+ * into the client's store and records the baseline; the system's job in this
+ * first part is to measure how long that took.
+ *
+ * `durasiMenit` is DERIVED at read from the two anchors by the one core helper —
+ * there is no duration column. It is `null` while the work is still running (the
+ * UI renders `—`, house rule #7), never `0`.
+ */
+export interface RisetAwal {
+  interviewId: string;
+  status: string;
+  dimulaiPada: string;
+  dimulaiOleh: string;
+  disubmitPada: string | null;
+  disubmitOleh: string | null;
+  durasiMenit: number | null;
+}
+
 export interface InterviewDetail {
   interview: Interview;
+  risetAwal: RisetAwal | null;
   jadwal: Jadwal | null;
   kualifikasi: Kualifikasi | null;
   answers: Answer[];
@@ -231,6 +255,25 @@ function rowToInterview(r: InterviewRow): Interview {
 
 const numOrNull = (v: string | number | null): number | null => (v == null ? null : Number(v));
 
+/**
+ * rowToRisetAwal maps the 1:1 Riset Awal row and DERIVES the duration from its
+ * two anchors — the only place the wire value is produced, and never a stored
+ * column (house rule #4: recomputable from the log at any time).
+ */
+function rowToRisetAwal(r: Record<string, unknown>): RisetAwal {
+  const dimulaiPada = iso(r.dimulai_pada as string | Date)!;
+  const disubmitPada = iso(r.disubmit_pada as string | Date | null);
+  return {
+    interviewId: r.interview_id as string,
+    status: r.status as string,
+    dimulaiPada,
+    dimulaiOleh: r.dimulai_oleh as string,
+    disubmitPada,
+    disubmitOleh: (r.disubmit_oleh as string | null) ?? null,
+    durasiMenit: iv.durasiRisetAwalMenit(dimulaiPada, disubmitPada),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Scope loader (owner AM + closing sales) — the permission inputs
 // ---------------------------------------------------------------------------
@@ -260,6 +303,9 @@ export async function getInterview(sql: Queryable, actor: Actor, id: string): Pr
   const { interview, ownerAm } = await loadScope(sql, id);
   if (!canReadInterview(actor, ownerAm)) throw new ForbiddenError(MSG_FORBIDDEN);
 
+  const risetRows = await sql<Record<string, unknown>[]>`
+    select interview_id, status, dimulai_pada, dimulai_oleh, disubmit_pada, disubmit_oleh
+      from interview_riset_awal where interview_id = ${id}`;
   const jadwalRows = await sql<Record<string, unknown>[]>`
     select tanggal_waktu, durasi_menit, format, lokasi_link, peserta_klien, peserta_mea,
            catatan_persiapan, data_diminta
@@ -279,6 +325,7 @@ export async function getInterview(sql: Queryable, actor: Actor, id: string): Pr
   const k = kualRows[0];
   return {
     interview,
+    risetAwal: risetRows.length > 0 ? rowToRisetAwal(risetRows[0]) : null,
     jadwal: j
       ? {
           tanggalWaktu: iso(j.tanggal_waktu as string | Date | null),
@@ -349,6 +396,11 @@ export interface InterviewListRow {
   verdict: string | null;
   prasyaratStatus: string | null;
   skorKualifikasi: number | null;
+  /** Langkah 1 — status + derived duration, so the log shows the whole timeline. */
+  risetAwalStatus: string | null;
+  risetAwalDimulaiPada: string | null;
+  risetAwalDisubmitPada: string | null;
+  risetAwalDurasiMenit: number | null;
   createdAt: string;
 }
 
@@ -364,6 +416,13 @@ export interface InterviewListRow {
  * that was actually saved — a schedule set, an interview started/submitted, or a
  * cancellation — not those empty drafts. Every non-`Belum Dijadwalkan` state is
  * kept (Terjadwal … Selesai, plus Dibatalkan as a deliberate audited outcome).
+ *
+ * A SUBMITTED Riset Awal (langkah 1) counts as work actually saved, so such a row
+ * shows even while the interview itself is still `Belum Dijadwalkan` — otherwise
+ * the very step this log is supposed to make visible would be the one it hides.
+ * A riset awal still running stays hidden by the same rule as before; the AM
+ * returns to it through "Kelola Klien", which resumes rather than re-opens
+ * (`openKelolaKlien`).
  */
 export async function listInterviewsByClient(sql: Queryable, actor: Actor, clientId: string): Promise<InterviewListRow[]> {
   const clientRows = await sql<{ assigned_am_id: string | null }[]>`
@@ -373,25 +432,35 @@ export async function listInterviewsByClient(sql: Queryable, actor: Actor, clien
 
   const rows = await sql<Record<string, unknown>[]>`
     select i.id, i.client_id, i.service_id, i.status, i.versi_no, i.interview_profile, i.retroaktif, i.created_at,
-           k.verdict_kualifikasi, k.prasyarat_status, k.skor_kualifikasi
+           k.verdict_kualifikasi, k.prasyarat_status, k.skor_kualifikasi,
+           ra.status as riset_awal_status, ra.dimulai_pada, ra.disubmit_pada
       from interview i
       left join interview_kualifikasi k on k.interview_id = i.id
+      left join interview_riset_awal ra on ra.interview_id = i.id
      where i.client_id = ${clientId}
-       and i.status <> ${iv.INTERVIEW_STATES.BelumDijadwalkan}
+       and (i.status <> ${iv.INTERVIEW_STATES.BelumDijadwalkan} or ra.disubmit_pada is not null)
      order by i.created_at desc, i.id desc`;
-  return rows.map((r) => ({
-    id: r.id as string,
-    clientId: r.client_id as string,
-    serviceId: (r.service_id as string | null) ?? null,
-    status: r.status as string,
-    versiNo: Number(r.versi_no),
-    interviewProfile: r.interview_profile as string,
-    retroaktif: r.retroaktif as boolean,
-    verdict: (r.verdict_kualifikasi as string | null) ?? null,
-    prasyaratStatus: (r.prasyarat_status as string | null) ?? null,
-    skorKualifikasi: r.skor_kualifikasi == null ? null : Number(r.skor_kualifikasi),
-    createdAt: iso(r.created_at as string | Date)!,
-  }));
+  return rows.map((r) => {
+    const dimulaiPada = iso(r.dimulai_pada as string | Date | null);
+    const disubmitPada = iso(r.disubmit_pada as string | Date | null);
+    return {
+      id: r.id as string,
+      clientId: r.client_id as string,
+      serviceId: (r.service_id as string | null) ?? null,
+      status: r.status as string,
+      versiNo: Number(r.versi_no),
+      interviewProfile: r.interview_profile as string,
+      retroaktif: r.retroaktif as boolean,
+      verdict: (r.verdict_kualifikasi as string | null) ?? null,
+      prasyaratStatus: (r.prasyarat_status as string | null) ?? null,
+      skorKualifikasi: r.skor_kualifikasi == null ? null : Number(r.skor_kualifikasi),
+      risetAwalStatus: (r.riset_awal_status as string | null) ?? null,
+      risetAwalDimulaiPada: dimulaiPada,
+      risetAwalDisubmitPada: disubmitPada,
+      risetAwalDurasiMenit: iv.durasiRisetAwalMenit(dimulaiPada, disubmitPada),
+      createdAt: iso(r.created_at as string | Date)!,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -413,6 +482,11 @@ export interface CreateInterviewInput {
  * actor (the assigned AM, or a lead/SPV acting for them — recorded in
  * `actingForAmId`). Only the client's assigned AM, an Account lead, or a Director
  * may open one.
+ *
+ * It also opens **Riset Awal** (langkah 1) in the same transaction, anchored to
+ * the same instant: opening "Kelola Klien" IS the start of the research, so the
+ * start anchor cannot be a later, separate click. Rolling back the interview
+ * rolls back its riset awal with it.
  */
 export async function createInterview(sql: Sql, actor: Actor, input: CreateInterviewInput): Promise<InterviewDetail> {
   if (!input.clientId || input.clientId.trim() === '') throw new ValidationError(MSG_INCOMPLETE);
@@ -437,6 +511,7 @@ export async function createInterview(sql: Sql, actor: Actor, input: CreateInter
       createdBy: actor.employeeId,
       at: now,
     });
+    await dbi.startRisetAwal(tx, { interviewId: newId, dimulaiOleh: actor.employeeId, at: now });
     await executors(tx).audit.insertAudit({
       entityType: ENTITY,
       entityId: newId,
@@ -446,10 +521,58 @@ export async function createInterview(sql: Sql, actor: Actor, input: CreateInter
       afterJson: { client_id: input.clientId, versi_no: 1, status: iv.INTERVIEW_STATES.BelumDijadwalkan },
       createdBy: actor.employeeId,
     });
+    await executors(tx).audit.insertAudit({
+      entityType: RISET_AWAL_ENTITY,
+      entityId: newId,
+      actorEmployeeId: actor.employeeId,
+      action: 'mulai',
+      beforeJson: null,
+      afterJson: { status: iv.RISET_AWAL_STATES.Berjalan, dimulai_pada: now.toISOString() },
+      createdBy: actor.employeeId,
+    });
     return newId;
   });
 
   return getInterview(sql, actor, id);
+}
+
+/**
+ * openKelolaKlien is what the "Kelola Klien" button calls: it RESUMES the
+ * client's open session when there is one, and only mints a new ITV when there is
+ * not.
+ *
+ * This is a requirement of the measurement, not a convenience. Riset Awal starts
+ * the moment the page is opened; if a second click minted a second interview, the
+ * AM who comes back after doing the actual research — logging into the client's
+ * store takes hours or days — would land on a fresh row with a fresh start anchor,
+ * and the recorded duration would be the time spent walking back to the page. It
+ * also stops the blank-ITV accumulation that made the log filter necessary in the
+ * first place.
+ *
+ * "Open" = a non-terminal interview for the same client and the same service
+ * (`serviceId` null and a specific service are different sessions; a client can
+ * have one per service). Newest wins if history left more than one.
+ */
+export async function openKelolaKlien(sql: Sql, actor: Actor, input: CreateInterviewInput): Promise<InterviewDetail> {
+  if (!input.clientId || input.clientId.trim() === '') throw new ValidationError(MSG_INCOMPLETE);
+
+  const clientRows = await sql<{ assigned_am_id: string | null }[]>`
+    select assigned_am_id from clients where id = ${input.clientId}`;
+  if (clientRows.length === 0) throw new NotFoundError(MSG_NOT_FOUND);
+  if (!canWriteInterview(actor, clientRows[0].assigned_am_id)) throw new ForbiddenError(MSG_FORBIDDEN);
+
+  const serviceId = input.serviceId ?? null;
+  const open = await sql<{ id: string }[]>`
+    select id from interview
+     where client_id = ${input.clientId}
+       and service_id is not distinct from ${serviceId}
+       and status not in (${iv.INTERVIEW_STATES.Selesai}, ${iv.INTERVIEW_STATES.SelesaiDenganCatatan},
+                          ${iv.INTERVIEW_STATES.Dibatalkan})
+     order by created_at desc, id desc
+     limit 1`;
+  if (open.length > 0) return getInterview(sql, actor, open[0].id);
+
+  return createInterview(sql, actor, input);
 }
 
 // ---------------------------------------------------------------------------
@@ -623,6 +746,54 @@ async function runTransition(sql: Queryable, actor: Actor, id: string, to: strin
   if (!res.ok) {
     throw res.code === 'role_denied' ? new ForbiddenError(res.message) : new ConflictError(res.message);
   }
+}
+
+/**
+ * submitRisetAwal closes langkah 1: it stamps the submit anchors and moves the
+ * riset awal to `Selesai` through `sm_transition`, in one transaction. The
+ * transition row in `audit_log` carries the completion timestamp, so the duration
+ * is reconstructible from the log alone — the stored anchors are the fast path,
+ * not the only record (house rules #3/#4).
+ *
+ * Not idempotent by design: a second submit is a `ConflictError`, not a silent
+ * no-op, because the second click would otherwise look like it moved the finish
+ * line. The DB trigger `trg_riset_awal_jangkar` refuses the overwrite as well.
+ *
+ * Note this runs on the `riset_awal` machine over a table keyed by
+ * `interview_id` — `sm_transition` takes the id column as a parameter, so no
+ * surrogate key is invented just to satisfy the engine.
+ */
+export async function submitRisetAwal(sql: Sql, actor: Actor, id: string): Promise<RisetAwal> {
+  return withTransaction(sql, async (tx) => {
+    const { ownerAm } = await loadScope(tx, id);
+    if (!canWriteInterview(actor, ownerAm)) throw new ForbiddenError(MSG_FORBIDDEN);
+
+    const rows = await tx<{ status: string }[]>`
+      select status from interview_riset_awal where interview_id = ${id} for update`;
+    if (rows.length === 0) throw new NotFoundError(MSG_RISET_AWAL_NOT_FOUND);
+    if (rows[0].status === iv.RISET_AWAL_STATES.Selesai) throw new ConflictError(MSG_RISET_AWAL_SUDAH_SUBMIT);
+
+    const stamped = await dbi.stampRisetAwalSubmit(tx, { interviewId: id, oleh: actor.employeeId });
+    if (!stamped) throw new ConflictError(MSG_RISET_AWAL_SUDAH_SUBMIT);
+
+    const res = await statemachine.transition(executors(tx).sm, {
+      machine: iv.RISET_AWAL_MACHINE,
+      entityType: RISET_AWAL_ENTITY,
+      table: 'interview_riset_awal',
+      idColumn: 'interview_id',
+      entityId: id,
+      to: iv.RISET_AWAL_STATES.Selesai,
+      actor,
+    });
+    if (!res.ok) {
+      throw res.code === 'role_denied' ? new ForbiddenError(res.message) : new ConflictError(res.message);
+    }
+
+    const after = await tx<Record<string, unknown>[]>`
+      select interview_id, status, dimulai_pada, dimulai_oleh, disubmit_pada, disubmit_oleh
+        from interview_riset_awal where interview_id = ${id}`;
+    return rowToRisetAwal(after[0]);
+  });
 }
 
 /**

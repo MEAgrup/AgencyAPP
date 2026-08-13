@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  RISET_AWAL_MACHINE,
+  RISET_AWAL_STATES,
+  durasiBerjalanMenit,
+  durasiRisetAwalMenit,
+  isRisetAwalSelesai,
   DAYA_TAHAN_BUDGET,
   DEFAULT_KUALIFIKASI_CONFIG,
   HAMBATAN,
@@ -487,5 +492,62 @@ describe('six fixture clients spanning all four verdicts', () => {
     const r = hitungKualifikasi({ ...perfect(), marginBersih: 10 });
     expect(r.verdict).toBe(VERDICT.TidakSiap);
     expect(r.hambatanMendasar.map((h) => h.kode)).toContain(HAMBATAN.MarginDiBawahMinimum);
+  });
+});
+
+// ===========================================================================
+// Riset Awal (langkah 1 "Kelola Klien") — the duration derivation
+// ===========================================================================
+//
+// This is the whole of what part 1 promises: how long the research took, derived
+// from two anchors and never stored. The tests below pin the three answers that
+// decide whether the metric can be trusted — floor (not round), `null` (not 0)
+// while it is unfinished, and `null` on anchors that could only come from a bug.
+
+describe('riset awal — machine mirror', () => {
+  it('names the machine and states the migration seeds', () => {
+    expect(RISET_AWAL_MACHINE).toBe('riset_awal');
+    expect(RISET_AWAL_STATES.Berjalan).toBe('Berjalan');
+    expect(RISET_AWAL_STATES.Selesai).toBe('Selesai');
+    expect(isRisetAwalSelesai('Selesai')).toBe(true);
+    expect(isRisetAwalSelesai('Berjalan')).toBe(false);
+  });
+});
+
+describe('durasiRisetAwalMenit', () => {
+  const mulai = '2026-08-12T01:00:00.000Z';
+
+  it('counts whole minutes between the two anchors', () => {
+    expect(durasiRisetAwalMenit(mulai, '2026-08-12T01:45:00.000Z')).toBe(45);
+    expect(durasiRisetAwalMenit(mulai, '2026-08-12T04:00:00.000Z')).toBe(180);
+    // Research spanning days is the normal case, not an outlier.
+    expect(durasiRisetAwalMenit(mulai, '2026-08-14T01:00:00.000Z')).toBe(2880);
+  });
+
+  it('FLOORS the remainder — never reports time that has not passed', () => {
+    expect(durasiRisetAwalMenit(mulai, '2026-08-12T01:01:59.000Z')).toBe(1);
+    expect(durasiRisetAwalMenit(mulai, '2026-08-12T01:00:59.000Z')).toBe(0);
+  });
+
+  it('is null while unfinished — an unsubmitted step has no duration, not zero', () => {
+    expect(durasiRisetAwalMenit(mulai, null)).toBeNull();
+    expect(durasiRisetAwalMenit(mulai, undefined)).toBeNull();
+    expect(durasiRisetAwalMenit(null, null)).toBeNull();
+  });
+
+  it('is null on unusable anchors (submit before start, unparseable input)', () => {
+    expect(durasiRisetAwalMenit(mulai, '2026-08-12T00:59:00.000Z')).toBeNull();
+    expect(durasiRisetAwalMenit('bukan tanggal', '2026-08-12T02:00:00.000Z')).toBeNull();
+    expect(durasiRisetAwalMenit(mulai, 'bukan tanggal')).toBeNull();
+  });
+
+  it('accepts Date and ISO string interchangeably (driver returns Date)', () => {
+    expect(durasiRisetAwalMenit(new Date(mulai), new Date('2026-08-12T02:30:00.000Z'))).toBe(90);
+    expect(durasiRisetAwalMenit(mulai, new Date('2026-08-12T02:30:00.000Z'))).toBe(90);
+  });
+
+  it('durasiBerjalanMenit measures the running step by the SAME rule', () => {
+    expect(durasiBerjalanMenit(mulai, new Date('2026-08-12T03:20:30.000Z'))).toBe(140);
+    expect(durasiBerjalanMenit(null, new Date('2026-08-12T03:20:00.000Z'))).toBeNull();
   });
 });

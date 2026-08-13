@@ -148,11 +148,13 @@ jobs:
       # target, DECISIONS 2026-08-08 A-08). Keep in step with the
       # CATALOG in packages/core/src/notification.ts — notification.test.ts is
       # the other half of this gate.
-      # 19 machines = the 14 ported from Go + `vendor` and `strategi` (mesin #15),
+      # 20 machines = the 14 ported from Go + `vendor` and `strategi` (mesin #15),
       # keduanya dari migrasi M6A 20260806063000/064000, + `plan` (mesin #16,
       # 20260810000000_m6b_plan.sql, B-01) + `plan_satuan` (mesin #17 dormansi,
       # 20260811000000_m6b_plan_satuan.sql, B-10) + `interview` (mesin #19,
-      # 20260811030000_interview.sql, Modul Interview / Kelola Klien tab 1).
+      # 20260811030000_interview.sql, Modul Interview / Kelola Klien tab 1)
+      # + `riset_awal` (mesin #20, 20260812100000_interview_riset_awal.sql — langkah 1
+      # "Kelola Klien": Berjalan -> Selesai, QA pemilik 2026-08-12).
       #
       # 43 events = 34 (v1..v4) + 9 (v5: Interview / Kelola Klien tab 1,
       # 20260811020000_notif_catalog_v5_interview.sql, DECISIONS 2026-08-11).
@@ -164,11 +166,11 @@ jobs:
       # menggantung >= 2 per AM, 20260811080000_interview_prasyarat_eskalasi.sql,
       # DECISIONS 2026-08-11 Interview bagian 2). Sama seperti v5: literal 44 hanya
       # kenyamanan — invariant sebenarnya adalah kesamaan dengan SUM(event_count).
-      - name: Verify migration seed counts (19 machines, 44 events, catalog registry consistent)
+      - name: Verify migration seed counts (20 machines, 44 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
-               if (select count(*) from sm_machines) <> 19 then raise exception 'expected 19 machines'; end if;
+               if (select count(*) from sm_machines) <> 20 then raise exception 'expected 20 machines'; end if;
                if (select count(*) from notif_events) <> 44 then raise exception 'expected 44 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
@@ -238,12 +240,14 @@ jobs:
       #         + plan_gate_config + service_plan_gate (20260806061000, M6C §10).
       #      55 = 54 + prospect_activities (20260806050000, keputusan pemilik 2026-08-06).
       #      54 = 53 + lead_delete_requests (20260729162101, DECISIONS 2026-07-29).
-      - name: Verify table count (expect 104)
+      # 105 = 104 + interview_riset_awal (20260812100000, langkah 1 "Kelola Klien":
+      #       jangkar mulai/submit riset awal — nol kolom durasi).
+      - name: Verify table count (expect 105)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 104
+          test "$n" -eq 105
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this

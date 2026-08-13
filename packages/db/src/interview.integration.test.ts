@@ -365,3 +365,61 @@ d('interview_flag + interview_outcome', () => {
     expect(outcome.hasil).toBe('perpanjang');
   });
 });
+
+/**
+ * Riset Awal (langkah 1 "Kelola Klien") — the two executors behind the measured
+ * research step. Both are written to be safe against a double call, because both
+ * sit behind a button a user can click twice.
+ */
+d('interview_riset_awal executors', () => {
+  it('startRisetAwal opens the row Berjalan at the given instant, and is idempotent', async () => {
+    const rows = await inRollback(async (tx) => {
+      const clientId = await seedClient(tx);
+      const id = await itv.createInterview(tx, { clientId, amPengisiId: AM, createdBy: AM, at: AT });
+      await itv.startRisetAwal(tx, { interviewId: id, dimulaiOleh: AM, at: AT });
+      // A second open must NOT move the start anchor — that is the number the
+      // whole step is measured against.
+      await itv.startRisetAwal(tx, { interviewId: id, dimulaiOleh: AM, at: new Date(Date.UTC(2026, 7, 5)) });
+      return tx<{ status: string; dimulai_pada: Date; disubmit_pada: Date | null }[]>`
+        select status, dimulai_pada, disubmit_pada from interview_riset_awal where interview_id = ${id}`;
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe(iv.RISET_AWAL_STATES.Berjalan);
+    expect(rows[0].dimulai_pada.toISOString()).toBe(AT.toISOString());
+    expect(rows[0].disubmit_pada).toBeNull();
+  });
+
+  it('stampRisetAwalSubmit writes the submit anchors once, then reports nothing to do', async () => {
+    const { first, second, row } = await inRollback(async (tx) => {
+      const clientId = await seedClient(tx);
+      const id = await itv.createInterview(tx, { clientId, amPengisiId: AM, createdBy: AM, at: AT });
+      await itv.startRisetAwal(tx, { interviewId: id, dimulaiOleh: AM, at: AT });
+      const submitAt = new Date(AT.getTime() + 95 * 60_000); // 1h35m later
+      const first = await itv.stampRisetAwalSubmit(tx, { interviewId: id, oleh: AM, at: submitAt });
+      const second = await itv.stampRisetAwalSubmit(tx, { interviewId: id, oleh: AM, at: new Date() });
+      const row = (
+        await tx<{ dimulai_pada: Date; disubmit_pada: Date; disubmit_oleh: string }[]>`
+          select dimulai_pada, disubmit_pada, disubmit_oleh from interview_riset_awal where interview_id = ${id}`
+      )[0];
+      return { first, second, row };
+    });
+    expect(first).toBe(true);
+    expect(second).toBe(false); // the finish line was already set
+    expect(row.disubmit_oleh).toBe(AM);
+    // The duration the read layer will derive from these anchors.
+    expect(iv.durasiRisetAwalMenit(row.dimulai_pada, row.disubmit_pada)).toBe(95);
+  });
+
+  it('the DB refuses Selesai without submit anchors (ck_riset_awal_selesai)', async () => {
+    await expect(
+      inRollback(async (tx) => {
+        const clientId = await seedClient(tx);
+        const id = await itv.createInterview(tx, { clientId, amPengisiId: AM, createdBy: AM, at: AT });
+        await itv.startRisetAwal(tx, { interviewId: id, dimulaiOleh: AM, at: AT });
+        // Marking it done without recording WHEN would leave a step that claims
+        // completion but can never state its duration.
+        await tx`update interview_riset_awal set status = 'Selesai' where interview_id = ${id}`;
+      }),
+    ).rejects.toThrow(/ck_riset_awal_selesai/);
+  });
+});

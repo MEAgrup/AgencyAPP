@@ -140,10 +140,14 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "104"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "105"
 check "entity_prefix"    "select count(*) from entity_prefix"    "32"
-check "sm_machines"      "select count(*) from sm_machines"      "19"
+check "sm_machines"      "select count(*) from sm_machines"      "20"
 check "notif_events"     "select count(*) from notif_events"     "44"
+# 105 = 104 + interview_riset_awal (20260812100000, langkah 1 "Kelola Klien":
+#       riset awal — jangkar mulai/submit, nol kolom durasi). 20 = 19 + mesin
+#       `riset_awal` (Berjalan -> Selesai). entity_prefix TETAP 32: riset awal
+#       anak interview (PK interview_id), tanpa ID sendiri.
 # 104 = 103 + interview_prasyarat_eskalasi (20260811080000, Interview bagian 2:
 #       rumah state per-AM untuk eskalasi re-armable — antrean AM, bukan interview).
 # 103 = 92 + 11 tabel Modul Interview (20260811030000). 32 = 31 + ITV. 19 = 18 + mesin `interview`.

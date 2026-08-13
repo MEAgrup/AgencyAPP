@@ -65,6 +65,10 @@ let sql: Sql;
 if (URL) sql = createClient(URL);
 
 const CLI = 'CLI-ZZI-0001';
+// A second fixture client, used ONLY by the resume test: `openKelolaKlien`
+// deliberately returns the client's open session, so a test about "the next click
+// opens a fresh one" cannot share a client with tests that leave sessions open.
+const CLI_RESUME = 'CLI-ZZI-0002';
 const created: string[] = [];
 
 afterAll(async () => {
@@ -75,11 +79,11 @@ afterAll(async () => {
   await sql`alter table interview_flag disable trigger trg_flag_frozen`;
   try {
     // Delete by client_id (not just tracked ids) so the teardown is self-healing.
-    await sql`delete from interview where client_id = ${CLI}`;
+    await sql`delete from interview where client_id in (${CLI}, ${CLI_RESUME})`;
   } finally {
     await sql`alter table interview_flag enable trigger trg_flag_frozen`;
   }
-  await sql`delete from clients where id = ${CLI}`;
+  await sql`delete from clients where id in (${CLI}, ${CLI_RESUME})`;
   await sql.end();
 });
 
@@ -261,5 +265,178 @@ dDb('interview write path (integration)', () => {
       select count(*)::int as n from interview_flag
        where interview_id = ${detail.interview.id} and kode = 'prasyarat_selesai'`;
     expect(flags2[0].n).toBe(1);
+  });
+});
+
+// ===========================================================================
+// Riset Awal — langkah 1 "Kelola Klien" (owner QA 2026-08-12)
+// ===========================================================================
+//
+// The step exists to be MEASURED, so the tests are about the measurement being
+// hard to fake: the clock starts with the session (not with a button), the
+// anchors cannot be rewritten, the finish line cannot move, and the duration is
+// derived — reproducible from the audit log alone.
+
+dDb('riset awal (langkah 1)', () => {
+  it('starts with the session: opening Kelola Klien anchors it, duration is null until submit', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+
+    const ra = detail.risetAwal;
+    expect(ra).not.toBeNull();
+    expect(ra!.status).toBe(iv.RISET_AWAL_STATES.Berjalan);
+    expect(ra!.dimulaiOleh).toBe(OWNER.employeeId);
+    expect(ra!.disubmitPada).toBeNull();
+    // Unfinished work has NO duration — not zero, which would flatter the metric.
+    expect(ra!.durasiMenit).toBeNull();
+    // The start anchor is the session's own creation instant, not a later click.
+    expect(Math.abs(Date.parse(ra!.dimulaiPada) - Date.parse(detail.interview.createdAt))).toBeLessThan(2000);
+  });
+
+  it('submit closes the measurement and derives the duration from the two anchors', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+
+    const done = await interview.submitRisetAwal(sql, OWNER, id);
+    expect(done.status).toBe(iv.RISET_AWAL_STATES.Selesai);
+    expect(done.disubmitPada).not.toBeNull();
+    expect(done.disubmitOleh).toBe(OWNER.employeeId);
+    expect(done.durasiMenit).toBe(iv.durasiRisetAwalMenit(done.dimulaiPada, done.disubmitPada));
+    expect(done.durasiMenit).toBeGreaterThanOrEqual(0);
+
+    // The same figure is served by the detail read — one derivation, not two.
+    const reread = await interview.getInterview(sql, OWNER, id);
+    expect(reread.risetAwal?.durasiMenit).toBe(done.durasiMenit);
+    expect(reread.risetAwal?.disubmitPada).toBe(done.disubmitPada);
+  });
+
+  it('is recomputable from the audit log alone (house rule #4)', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+    const done = await interview.submitRisetAwal(sql, OWNER, id);
+
+    const rows = await sql<{ action: string; created_at: Date }[]>`
+      select action, created_at from audit_log
+       where entity_type = 'riset_awal' and entity_id = ${id}
+       order by created_at asc, id asc`;
+    const mulai = rows.find((r) => r.action === 'mulai');
+    const submit = rows.find((r) => r.action === `transition:Berjalan->${iv.RISET_AWAL_STATES.Selesai}`);
+    expect(mulai).toBeDefined();
+    expect(submit).toBeDefined();
+    // Throw the stored anchors away and rebuild the number from the log.
+    expect(iv.durasiRisetAwalMenit(mulai!.created_at, submit!.created_at)).toBe(done.durasiMenit);
+  });
+
+  it('refuses a second submit — the finish line does not move', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+    const first = await interview.submitRisetAwal(sql, OWNER, id);
+
+    await expect(interview.submitRisetAwal(sql, OWNER, id)).rejects.toThrow(
+      interview.MSG_RISET_AWAL_SUDAH_SUBMIT,
+    );
+    // The rejected attempt changed nothing.
+    const after = await interview.getInterview(sql, OWNER, id);
+    expect(after.risetAwal?.disubmitPada).toBe(first.disubmitPada);
+  });
+
+  it('write gate: assigned AM, Account lead and Director may submit; non-owner/Sales/OD may not', async () => {
+    const mine = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(mine.interview.id);
+    for (const denied of [NONOWNER, SALES, OD, OTHER]) {
+      await expect(interview.submitRisetAwal(sql, denied, mine.interview.id)).rejects.toThrow(/akses/);
+    }
+    // Still running — no rejected caller left a mark.
+    const untouched = await interview.getInterview(sql, OWNER, mine.interview.id);
+    expect(untouched.risetAwal?.status).toBe(iv.RISET_AWAL_STATES.Berjalan);
+
+    // The Account lead acts for the AM; a Director may too (separate sessions,
+    // since submit is once-only).
+    const byLead = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(byLead.interview.id);
+    expect((await interview.submitRisetAwal(sql, ACC_LEAD, byLead.interview.id)).disubmitOleh).toBe(
+      ACC_LEAD.employeeId,
+    );
+
+    const byDirector = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(byDirector.interview.id);
+    expect((await interview.submitRisetAwal(sql, DIRECTOR, byDirector.interview.id)).status).toBe(
+      iv.RISET_AWAL_STATES.Selesai,
+    );
+  });
+
+  it('anchors are immutable at the DB, even on a direct service-role UPDATE', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+
+    // Moving the start would silently shorten every duration derived from it.
+    await expect(
+      sql`update interview_riset_awal set dimulai_pada = now() - interval '5 days' where interview_id = ${id}`,
+    ).rejects.toThrow(/dimulai_pada beku/);
+
+    await interview.submitRisetAwal(sql, OWNER, id);
+
+    await expect(
+      sql`update interview_riset_awal set disubmit_pada = now() + interval '2 days' where interview_id = ${id}`,
+    ).rejects.toThrow(/disubmit_pada beku/);
+    // Selesai is terminal: it cannot be walked back to restart the clock.
+    await expect(
+      sql`update interview_riset_awal set status = 'Berjalan' where interview_id = ${id}`,
+    ).rejects.toThrow(/terminal/);
+  });
+
+  it('a submitted riset awal makes the session visible in the log, with its duration', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+
+    // Still blank + running: hidden, exactly as before this step existed.
+    const before = await interview.listInterviewsByClient(sql, OWNER, CLI);
+    expect(before.some((r) => r.id === id)).toBe(false);
+
+    const done = await interview.submitRisetAwal(sql, OWNER, id);
+    const after = await interview.listInterviewsByClient(sql, OWNER, CLI);
+    const row = after.find((r) => r.id === id);
+    // Submitting IS saved work, so the session now appears even though the
+    // interview itself has not been scheduled yet.
+    expect(row).toBeDefined();
+    expect(row!.status).toBe(iv.INTERVIEW_STATES.BelumDijadwalkan);
+    expect(row!.risetAwalStatus).toBe(iv.RISET_AWAL_STATES.Selesai);
+    expect(row!.risetAwalDurasiMenit).toBe(done.durasiMenit);
+  });
+
+  it('openKelolaKlien resumes the open session instead of restarting the clock', async () => {
+    await sql`
+      insert into clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, assigned_am_id, created_by)
+      values (${CLI_RESUME}, 'PIC', 'Toko 2', 'Jakarta', 'https://t2.example', 'Fashion', 0, 0,
+              'EMP-0006', 'EMP-0006', 'EMP-0001', 'EMP-0001')
+      on conflict (id) do nothing`;
+
+    const first = await interview.openKelolaKlien(sql, OWNER, { clientId: CLI_RESUME, serviceId: null });
+    created.push(first.interview.id);
+
+    // Clicking "Kelola Klien" again lands on the SAME session with the SAME start
+    // anchor — otherwise the AM who comes back after two days of research would
+    // have their work recorded as having taken seconds.
+    const again = await interview.openKelolaKlien(sql, OWNER, { clientId: CLI_RESUME, serviceId: null });
+    expect(again.interview.id).toBe(first.interview.id);
+    expect(again.risetAwal?.dimulaiPada).toBe(first.risetAwal?.dimulaiPada);
+
+    // Once the session is closed out, the next click opens a fresh one.
+    await interview.transitionInterview(sql, ACC_LEAD, first.interview.id, iv.INTERVIEW_STATES.Dibatalkan, {
+      alasanPembatalan: 'klien menunda',
+    });
+    const fresh = await interview.openKelolaKlien(sql, OWNER, { clientId: CLI_RESUME, serviceId: null });
+    created.push(fresh.interview.id);
+    expect(fresh.interview.id).not.toBe(first.interview.id);
+    expect(fresh.risetAwal?.status).toBe(iv.RISET_AWAL_STATES.Berjalan);
+
+    // Same write gate as createInterview.
+    await expect(interview.openKelolaKlien(sql, NONOWNER, { clientId: CLI_RESUME })).rejects.toThrow(/akses/);
   });
 });
