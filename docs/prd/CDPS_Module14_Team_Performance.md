@@ -169,6 +169,16 @@ M6D supplies the raw signal (recap close status + `pernah_ditutup_otomatis` flag
 M14 computes the grade. Live-stream is a vendor, not an M14-scored staff role — its note obligation is tracked
 in M6D but carries no M14 weight. Tracked as **D-14** in `docs/backlog/M6D_BACKLOG.md`.
 
+**✅ IMPLEMENTED (D-14, 2026-08-14).** Migration `20260814010000_m14_d14_recap_discipline_weights.sql`
+re-weights `perf_kpi_weights` to the table above (each role still Σ=100) and the two new components compute in
+`packages/domain/src/performance.ts` (`amRecapDisciplineCandidate` / `divisionNoteComplianceCandidate`). Both are
+0–100 percentages (no target row) and obey Rule 6 redistribution. **Weekly-Note Compliance is a division-wide
+signal** shared by every staff member of the division — the RM-8 note is filed per division, not per staff (§9
+"did the *division* file"), so it cannot be attributed to an individual editor. The recap/note window for a
+monthly snapshot is the recaps whose ISO-week Monday (`minggu_mulai`) falls in that month. Because the RM-9a
+carve is **proportional**, when the M6D signal is absent the redistribution restores the pre-D-14 profile exactly
+— the §4 Kenny worked example (86.4) is unchanged. See `docs/DECISIONS.md` 2026-08-14.
+
 ---
 
 **Next:** Module 15 — Client Portal + Team Portal.

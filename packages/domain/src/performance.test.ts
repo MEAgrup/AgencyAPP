@@ -30,10 +30,13 @@ import {
   COMP_ROAS_ATTAINMENT,
   COMP_SOURCING_TURNAROUND,
   COMP_SPEED_SCORE,
+  COMP_WEEKLY_NOTE_COMPLIANCE,
+  COMP_WEEKLY_RECAP_DISCIPLINE,
   ForbiddenError,
   getSnapshot,
   NotFoundError,
   ROLE_ADS,
+  ROLE_AM,
   runScan,
   runSnapshotJob,
   scoreDisplay,
@@ -246,6 +249,29 @@ async function setTargetRow(roleType: string, comp: string, periodStart: string,
     values (${roleType}, ${comp}, ${periodStart}, ${target}, ${placeholder}, 'ZZ-TEST')
     on conflict (role_type, component, period_start) do update set target_value = excluded.target_value, is_placeholder = excluded.is_placeholder, updated_by = 'ZZ-TEST'`;
 }
+/**
+ * A WRR recap for a client in a given June week. `status`/`pernah` are set directly
+ * (the D-14 discipline signal reads them; the machine is exercised elsewhere).
+ * minggu_mulai (the ISO-week Monday) is what places the recap in a snapshot month.
+ */
+async function insRecap(
+  id: string, clientId: string, isoWeek: number, mingguMulai: string, mingguAkhir: string,
+  status: string, pernah: boolean,
+): Promise<void> {
+  await sql`insert into weekly_result_recap
+      (id, client_id, iso_year, iso_week, minggu_mulai, minggu_akhir, status, pernah_ditutup_otomatis, created_by)
+    values (${id}, ${clientId}, 2026, ${isoWeek}, ${mingguMulai}, ${mingguAkhir}, ${status}, ${pernah}, 'ZZ-TEST')`;
+}
+/** A wrr_divisi production row = the division TOUCHED the client that week (owes a note). */
+async function insWrrDivisi(recapId: string, divisi: string): Promise<void> {
+  await sql`insert into wrr_divisi (recap_id, divisi, jumlah_produksi, created_by)
+    values (${recapId}, ${divisi}, 1, 'ZZ-TEST')`;
+}
+/** A wrr_catatan_divisi row = the division FILED its mandatory weekly note (RM-8). */
+async function insWrrCatatan(recapId: string, divisi: string): Promise<void> {
+  await sql`insert into wrr_catatan_divisi (recap_id, divisi, catatan, created_by)
+    values (${recapId}, ${divisi}, 'catatan mingguan', 'ZZ-TEST')`;
+}
 
 /** Builds the §4 Kenny worked example under a unique staff id; returns that id + its client. */
 async function kennyFixture(): Promise<{ kenny: string; client: string }> {
@@ -294,6 +320,12 @@ afterEach(async () => {
   await sql`delete from complaints where created_by like 'ZZ-%'`;
   await sql`delete from assets where created_by like 'ZZ-%'`;
   await sql`delete from briefs where created_by like 'ZZ-%'`;
+  // WRR (D-14 recap-discipline / note-compliance signals). wrr_catatan_divisi is
+  // append-only (no-delete trigger) → TRUNCATE bypasses the row guard (same as the
+  // recap suites); then delete children + parent (recaps FK clients, so precede it).
+  await sql`truncate wrr_catatan_divisi`;
+  await sql`delete from wrr_divisi where created_by like 'ZZ-%'`;
+  await sql`delete from weekly_result_recap where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -382,6 +414,89 @@ describeDb('AM profile (avg CHR 50%) + redistribution', () => {
     expect(snap.profileScore).toBeCloseTo(85, 2);
     expect(snap.modifier.present).toBe(false); // AM: no Client-Outcome Modifier (Rule 3)
     expect(snap.finalScore).toBeCloseTo(85, 2);
+  });
+});
+
+describeDb('D-14 Weekly-Recap Discipline (AM, M6D RM-9 / §9)', () => {
+  it('counts the permanent force-close flag, not the final status: 2 of 4 clean → 50', async () => {
+    const am = uid('EMP-AMD');
+    await insEmployee(am, 'Account', 'ZZ-AM-Jab');
+    await insRoleMapping('Account', 'ZZ-AM-Jab', 'Account', 'staff');
+    const clients = [uid('CLI-D1'), uid('CLI-D2'), uid('CLI-D3'), uid('CLI-D4')];
+    for (const c of clients) {
+      await insClient(c, am);
+      await insCHRSnapshot(uid('CHR'), c, 80, '[]'); // keep the AM profile valid
+    }
+    // Two clean (AM-closed on time, never force-closed).
+    await insRecap(uid('WRR'), clients[0], 23, '2026-06-01', '2026-06-07', 'Ditutup', false);
+    await insRecap(uid('WRR'), clients[1], 23, '2026-06-01', '2026-06-07', 'Ditutup', false);
+    // Force-closed (still `Ditutup Otomatis`).
+    await insRecap(uid('WRR'), clients[2], 23, '2026-06-01', '2026-06-07', 'Ditutup Otomatis', true);
+    // Head-reopened then AM-closed: final `Ditutup` but flag stays true → counts AGAINST.
+    await insRecap(uid('WRR'), clients[3], 23, '2026-06-01', '2026-06-07', 'Ditutup', true);
+
+    await runSnapshotJob(sql, nowJul);
+    const snap = await getSnapshot(sql, director(), am, JUNE);
+    expect(snap.roleType).toBe(ROLE_AM);
+    const disc = compByName(snap.components, COMP_WEEKLY_RECAP_DISCIPLINE)!;
+    expect(disc.included).toBe(true);
+    expect(disc.raw).toBeCloseTo(50, 3); // 2 clean / 4 recaps × 100
+  });
+
+  it('no recaps in the period → excluded + weight redistributed (Rule 6), never scored 0', async () => {
+    const am = uid('EMP-AMN');
+    await insEmployee(am, 'Account', 'ZZ-AM-Jab');
+    await insRoleMapping('Account', 'ZZ-AM-Jab', 'Account', 'staff');
+    const c = uid('CLI-N1');
+    await insClient(c, am);
+    await insCHRSnapshot(uid('CHR'), c, 80, '[]');
+
+    await runSnapshotJob(sql, nowJul);
+    const snap = await getSnapshot(sql, director(), am, JUNE);
+    const disc = compByName(snap.components, COMP_WEEKLY_RECAP_DISCIPLINE)!;
+    expect(disc.included).toBe(false);
+    expect(disc.raw).toBeNull();
+    // Redistribution restores the pre-D-14 result: CHR alone → profile = avg CHR.
+    expect(snap.profileScore).toBeCloseTo(80, 2);
+  });
+});
+
+describeDb('D-14 Weekly-Note Compliance (division, M6D RM-8 / §9)', () => {
+  it('division-wide over touched clients: 2 of 3 filed → 66.67', async () => {
+    const ed = uid('EMP-CRE');
+    await insEmployee(ed, 'Creative', 'ZZ-Cre-Jab');
+    await insRoleMapping('Creative', 'ZZ-Cre-Jab', 'Creative', 'staff');
+    await insEmployee('ZZ-AM-NC', 'Account', 'ZZ-AM-Jab');
+    const clients = [uid('CLI-C1'), uid('CLI-C2'), uid('CLI-C3')];
+    const recaps: string[] = [];
+    for (const c of clients) {
+      await insClient(c, 'ZZ-AM-NC');
+      const r = uid('WRR');
+      recaps.push(r);
+      await insRecap(r, c, 24, '2026-06-08', '2026-06-14', 'Ditutup', false);
+      await insWrrDivisi(r, 'Creative'); // Creative touched all three (all owe a note)
+    }
+    await insWrrCatatan(recaps[0], 'Creative'); // filed
+    await insWrrCatatan(recaps[1], 'Creative'); // filed; recaps[2] left unfiled
+
+    await runSnapshotJob(sql, nowJul);
+    const snap = await getSnapshot(sql, director(), ed, JUNE);
+    expect(snap.roleType).toBe('Creative');
+    const nc = compByName(snap.components, COMP_WEEKLY_NOTE_COMPLIANCE)!;
+    expect(nc.included).toBe(true);
+    expect(nc.raw).toBeCloseTo((2 / 3) * 100, 3);
+  });
+
+  it('a division that touched no client that period → excluded + redistributed', async () => {
+    const koko = uid('EMP-KOLN');
+    await insEmployee(koko, 'KOL', 'ZZ-Kol-Jab');
+    await insRoleMapping('KOL', 'ZZ-Kol-Jab', 'KOL', 'staff');
+
+    await runSnapshotJob(sql, nowJul);
+    const snap = await getSnapshot(sql, director(), koko, JUNE);
+    const nc = compByName(snap.components, COMP_WEEKLY_NOTE_COMPLIANCE)!;
+    expect(nc.included).toBe(false);
+    expect(nc.raw).toBeNull();
   });
 });
 
