@@ -38,6 +38,21 @@ export interface ScanResult {
   band_drops_flagged: number;
 }
 
+// One row of the /health portfolio landing (D-12). Mirrors wire.ts
+// HealthPortfolioRowWire exactly (snake_case, keys identical) — every figure
+// computed server-side, rendered read-only.
+export interface HealthPortfolioRow {
+  client_id: string;
+  toko: string;
+  owner_am: string;
+  band: string; // '' when the client has no snapshot yet
+  score_display: string; // "74.60" or "—"
+  band_drop: boolean; // latest band strictly below the prior snapshot (Rule 12)
+  open_complaints: number; // [Open] + [In Progress]
+  last_closed_recap_week: string | null; // "2026-W33" of the most recent Ditutup recap
+  last_closed_recap_end: string | null; // YYYY-MM-DD of that week's Sunday
+}
+
 export interface ROASToggle {
   client_id: string;
   override: boolean | null;
@@ -89,6 +104,11 @@ export function canManageHealth(role: Role | null): boolean {
 
 export function getTriggerScan(): Promise<ScanResult> {
   return api.post<ScanResult>('/health/snapshots/scan');
+}
+
+/** D-12 portfolio landing — one row per active client the actor may view. */
+export function getHealthPortfolio(): Promise<{ data: HealthPortfolioRow[] }> {
+  return api.get<{ data: HealthPortfolioRow[] }>('/health/portfolio');
 }
 
 export function getSnapshot(clientId: string, period?: string): Promise<Snapshot> {

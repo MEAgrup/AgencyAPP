@@ -506,6 +506,7 @@ const WIRE_TO_FE: Record<string, string> = {
   HealthSnapshotWire: 'health.ts::Snapshot',
   RoasToggleWire: 'health.ts::ROASToggle',
   HealthScanResultWire: 'health.ts::ScanResult',
+  HealthPortfolioRowWire: 'health.ts::HealthPortfolioRow',
   // M14 team performance
   PerfComponentWire: 'performance.ts::SnapshotComponent',
   PerfModifierWire: 'performance.ts::PerformanceModifier',

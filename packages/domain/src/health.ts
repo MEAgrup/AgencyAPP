@@ -754,6 +754,100 @@ export async function preview(sql: Queryable, actor: Actor, clientId: string, no
   };
 }
 
+// ---------------------------------------------------------------------------
+// Portfolio landing (D-12) — one row per active client, read-only summary.
+// ---------------------------------------------------------------------------
+
+/**
+ * PortfolioRow — one active client's at-a-glance health line for the `/health`
+ * landing table: latest band + score, a Rule-12 band-drop flag, open-complaint
+ * count, and weekly-recap freshness (the most recent AM/auto-closed week). Purely
+ * a read projection beside the snapshots — it stores nothing and every figure is
+ * recomputable from its source module (M13 §1 / M6D §8.3 Rule 4).
+ */
+export interface PortfolioRow {
+  clientId: string;
+  toko: string;
+  ownerAm: string;
+  band: string; // latest stored snapshot's band, '' when the client has none yet
+  scoreDisplay: string; // latest snapshot score ("74.60") or "—"
+  bandDrop: boolean; // latest band strictly lower than the prior snapshot (Rule 12)
+  openComplaints: number; // count of [Open] + [In Progress] complaints (M6 CPL-)
+  lastClosedRecapWeek: string | null; // "2026-W33" of the most recent `Ditutup` recap
+  lastClosedRecapEnd: string | null; // YYYY-MM-DD of that week's Sunday, or null
+}
+
+interface PortfolioRawRow {
+  client_id: string;
+  toko: string;
+  owner_am: string;
+  band: string | null;
+  final_score: string | null;
+  prev_band: string | null;
+  open_complaints: string | number;
+  last_closed_recap_week: string | null;
+  last_closed_recap_end: string | null;
+}
+
+/**
+ * portfolio lists every ACTIVE client (RM-2: ≥1 non-terminal service) the actor
+ * may view. Same gate as the per-client view — canScope to enter, then each row
+ * kept only when canView admits it (owner-AM / Account-lead / OD / Director) — so
+ * the table never widens the M13 read scope: the row filter IS the canView
+ * predicate the detail page already applies, no RLS change (M6D D-12 / DECISIONS
+ * O48). Read via a plain connection like the recap reads (multi sub-table read; a
+ * spurious RLS blank on a sub-select would drop rows, not raise), gated in TS.
+ */
+export async function portfolio(sql: Queryable, actor: Actor): Promise<PortfolioRow[]> {
+  if (!canScope(actor)) {
+    throw new ForbiddenError();
+  }
+  const rows = await sql<PortfolioRawRow[]>`
+    select
+      c.id as client_id,
+      coalesce(c.toko, '') as toko,
+      coalesce(c.assigned_am_id, '') as owner_am,
+      (select s.band from client_health_snapshots s
+         where s.client_id = c.id order by s.period_start desc limit 1) as band,
+      (select s.final_health_score from client_health_snapshots s
+         where s.client_id = c.id order by s.period_start desc limit 1) as final_score,
+      (select s.band from client_health_snapshots s
+         where s.client_id = c.id order by s.period_start desc offset 1 limit 1) as prev_band,
+      (select count(*) from complaints k
+         where k.client_id = c.id and k.status in ('[Open]', '[In Progress]')) as open_complaints,
+      (select w.iso_year || '-W' || lpad(w.iso_week::text, 2, '0')
+         from weekly_result_recap w
+         where w.client_id = c.id and w.status = 'Ditutup'
+         order by w.iso_year desc, w.iso_week desc limit 1) as last_closed_recap_week,
+      (select to_char(max(w.minggu_akhir), 'YYYY-MM-DD')
+         from weekly_result_recap w
+         where w.client_id = c.id and w.status = 'Ditutup') as last_closed_recap_end
+    from clients c
+    where exists (
+      select 1 from services s
+       where s.client_id = c.id
+         and s.status not in ('Done', '[Cancelled — Service Voided]'))
+    order by c.toko asc, c.id asc`;
+  return rows
+    .filter((r) => canView(actor, r.owner_am))
+    .map((r) => {
+      const band = r.band ?? '';
+      const prev = r.prev_band ?? '';
+      const final = r.final_score === null ? null : Number(r.final_score);
+      return {
+        clientId: r.client_id,
+        toko: r.toko,
+        ownerAm: r.owner_am,
+        band,
+        scoreDisplay: scoreDisplay(final),
+        bandDrop: band !== '' && prev !== '' && bandRank(band) < bandRank(prev),
+        openComplaints: Number(r.open_complaints),
+        lastClosedRecapWeek: r.last_closed_recap_week,
+        lastClosedRecapEnd: r.last_closed_recap_end,
+      };
+    });
+}
+
 interface SnapshotRow {
   id: string;
   client_id: string;
