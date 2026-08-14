@@ -58,7 +58,7 @@ export const MSG_BRIEF_NOT_ASSETABLE = '[aset tidak dapat dibuat untuk brief pad
 export const MSG_INVALID_SEQUENCE = '[nomor urut aset harus antara 1 dan jumlah target brief]';
 export const MSG_DUPLICATE_SEQUENCE = '[nomor urut aset sudah digunakan pada brief ini]';
 /** Fan-out by quantity (§3 Rule 4): each assignment line needs a whole positive count. */
-export const MSG_INVALID_QUANTITY = '[jumlah aset yang di-assign harus bilangan bulat lebih dari 0]';
+export const MSG_INVALID_QUANTITY = '[jumlah aset yang di-assign harus lebih dari 0]';
 /** The batch asks for more units than the Brief's Quantity/Target still has free (§9.3). */
 export const MSG_QUANTITY_EXCEEDS_TARGET = '[jumlah aset melebihi sisa target brief]';
 export const MSG_INVALID_PIC = '[PIC tidak valid: harus staff divisi Creative yang aktif]';

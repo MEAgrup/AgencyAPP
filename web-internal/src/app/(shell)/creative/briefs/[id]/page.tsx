@@ -20,21 +20,25 @@ import {
 import StatusBadge from '@/components/StatusBadge';
 
 /**
- * Fan-out is an ASSIGNMENT door (M7 §3 Rule 4): one line per PIC saying how many
- * units of the Brief they take — "10 video ke Rian, 10 ke Dita", or all 30 to one
- * person. The Sequence # is not asked for: it is the position within the Brief's
+ * "Assign Team untuk Creative Production" — the Brief breakdown of M7 §3 Rule 4 as
+ * the work is actually handed out: one line per PIC saying how many units of the
+ * Brief they take ("10 video ke Rian, 10 ke Dita", or all 30 to one person). The
+ * Sequence # is not asked for: it is the position within the Brief's
  * Quantity/Target (§9.3), allocated server-side from the free slots, because
  * whoever hands out 10 videos is not choosing WHICH ten.
+ *
+ * PIC per line stays a human choice by the Team Leader (owner 2026-08-14);
+ * M7-OA-1's auto-assign by availability/workload is not built.
  */
-const FANOUT_MAX_ROWS = 10;
+const ASSIGN_MAX_ROWS = 10;
 
-interface FanoutRow {
+interface AssignRow {
   key: number;
   assigned_pic: string;
   quantity: string; // integer string ("" => baris dilewati)
 }
 
-function emptyFanoutRow(key: number): FanoutRow {
+function emptyAssignRow(key: number): AssignRow {
   return { key, assigned_pic: '', quantity: '' };
 }
 
@@ -47,8 +51,8 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Fan-out: assign sejumlah unit Brief ke tiap PIC (satu submit, satu transaksi)
-  const [fanoutRows, setFanoutRows] = useState<FanoutRow[]>(() => [emptyFanoutRow(0), emptyFanoutRow(1)]);
+  // Assign team: sejumlah unit Brief ke tiap PIC (satu submit, satu transaksi)
+  const [assignRows, setAssignRows] = useState<AssignRow[]>(() => [emptyAssignRow(0), emptyAssignRow(1)]);
   const [rowErrors, setRowErrors] = useState<Record<number, string>>({});
   const rowKeyCounter = useRef(2);
   const [createSubmitting, setCreateSubmitting] = useState(false);
@@ -84,18 +88,18 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
     error: picError,
   } = useAssignableEmployees(CREATIVE_DIVISION, LEVEL_STAFF, canCreateAsset);
 
-  function updateRow(key: number, patch: Partial<FanoutRow>) {
-    setFanoutRows((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  function updateRow(key: number, patch: Partial<AssignRow>) {
+    setAssignRows((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   }
 
   function addRow() {
-    setFanoutRows((rows) =>
-      rows.length >= FANOUT_MAX_ROWS ? rows : [...rows, emptyFanoutRow(rowKeyCounter.current++)],
+    setAssignRows((rows) =>
+      rows.length >= ASSIGN_MAX_ROWS ? rows : [...rows, emptyAssignRow(rowKeyCounter.current++)],
     );
   }
 
   function removeRow(key: number) {
-    setFanoutRows((rows) => (rows.length <= 1 ? rows : rows.filter((r) => r.key !== key)));
+    setAssignRows((rows) => (rows.length <= 1 ? rows : rows.filter((r) => r.key !== key)));
     setRowErrors((prev) => {
       const next = { ...prev };
       delete next[key];
@@ -110,7 +114,7 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
     setRowErrors({});
 
     // Baris yang benar-benar kosong dilewati tanpa error (pola batch M9).
-    const intended = fanoutRows.filter((r) => !(r.quantity.trim() === '' && r.assigned_pic === ''));
+    const intended = assignRows.filter((r) => !(r.quantity.trim() === '' && r.assigned_pic === ''));
     if (intended.length === 0) {
       setCreateError('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
       return;
@@ -119,7 +123,7 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
     for (const r of intended) {
       const qty = Number(r.quantity);
       if (r.quantity.trim() === '' || !Number.isInteger(qty) || qty <= 0) {
-        errors[r.key] = '[jumlah aset yang di-assign harus bilangan bulat lebih dari 0]';
+        errors[r.key] = '[jumlah aset yang di-assign harus lebih dari 0]';
       }
     }
     if (Object.keys(errors).length > 0) {
@@ -143,7 +147,7 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
       setCreateMessage(
         `${created.length} Asset dibuat (${created[0]?.id ?? '—'}${created.length > 1 ? ` s/d ${created[created.length - 1].id}` : ''}).`,
       );
-      setFanoutRows([emptyFanoutRow(rowKeyCounter.current++), emptyFanoutRow(rowKeyCounter.current++)]);
+      setAssignRows([emptyAssignRow(rowKeyCounter.current++), emptyAssignRow(rowKeyCounter.current++)]);
       await load();
     } catch (err) {
       setCreateError(errorMessage(err));
@@ -168,7 +172,7 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
   // Advisory only — the server re-derives both under the Brief's row lock and
   // rejects an overrun batch wholesale (§9.3 Sequence # unique per Brief).
   const remainingSlots = Math.max(0, brief.quantity_target - createdCount);
-  const plannedTotal = fanoutRows.reduce((sum, r) => {
+  const plannedTotal = assignRows.reduce((sum, r) => {
     const n = Number(r.quantity);
     return sum + (Number.isInteger(n) && n > 0 ? n : 0);
   }, 0);
@@ -289,7 +293,7 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
       {canCreateAsset && (
         <section className="card">
           <div className="cardHeader">
-            <h2>Assign Asset ke PIC</h2>
+            <h2>Assign Team untuk Creative Production</h2>
           </div>
           <p className="muted" style={{ fontSize: 13 }}>
             Tentukan <strong>berapa unit</strong> yang dikerjakan tiap orang — mis. 10 video ke A, 10 ke
@@ -313,7 +317,7 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
                   </tr>
                 </thead>
                 <tbody>
-                  {fanoutRows.map((r, idx) => (
+                  {assignRows.map((r, idx) => (
                     <Fragment key={r.key}>
                       <tr>
                         <td className="muted">{idx + 1}</td>
@@ -346,7 +350,7 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
                             className="btn btnSecondary btnSm"
                             aria-label={`Hapus baris ${idx + 1}`}
                             onClick={() => removeRow(r.key)}
-                            disabled={fanoutRows.length <= 1}
+                            disabled={assignRows.length <= 1}
                           >
                             ✕
                           </button>
@@ -371,9 +375,9 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
                 type="button"
                 className="btn btnSecondary btnSm"
                 onClick={addRow}
-                disabled={fanoutRows.length >= FANOUT_MAX_ROWS}
+                disabled={assignRows.length >= ASSIGN_MAX_ROWS}
               >
-                + Tambah PIC ({fanoutRows.length}/{FANOUT_MAX_ROWS})
+                + Tambah PIC ({assignRows.length}/{ASSIGN_MAX_ROWS})
               </button>
               <div className="row" style={{ gap: 12, alignItems: 'center' }}>
                 <span className="muted" style={{ fontSize: 13 }}>
