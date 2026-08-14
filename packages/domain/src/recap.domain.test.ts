@@ -169,6 +169,26 @@ describeDb('AM writes (D-09)', () => {
     await expect(recordRecapMetrikManual(sql, actorAm, recap, 'total_view', { nilai: 1 })).rejects.toThrow(/Sengketa Angka/);
   });
 
+  it('T-4a: view_organik is manual-eligible (platform figure) and kept separate from paid total_view', async () => {
+    const { recap } = await seedOpenRecap();
+    // Paid total_view auto-written by the aggregator (M10 live viewers).
+    await sql`insert into wrr_metrik (recap_id, metrik, sumber, nilai, created_by)
+              values (${recap}, 'total_view', 'otomatis', 20000, 'SISTEM')`;
+    // Organic view is the AM's manual platform figure — needs evidence.
+    await recordRecapMetrikManual(sql, actorAm, recap, 'view_organik',
+      { nilai: 5000, fileBukti: 'organik.pdf', tanggalAmbil: '2026-08-16' });
+    const d = await getRecapDetail(sql, actorAm, recap);
+    const byKey = Object.fromEntries(d.metrik.map((m) => [m.metrik, m]));
+    // Two separate rows — paid and organic never merged into one figure.
+    expect(byKey.total_view.sumber).toBe('otomatis');
+    expect(byKey.total_view.nilai).toBe(20000);
+    expect(byKey.view_organik.sumber).toBe('manual');
+    expect(byKey.view_organik.nilai).toBe(5000);
+    // Organic entered without evidence is refused (same bukti gate as ctr/cvr).
+    await expect(recordRecapMetrikManual(sql, actorAm, recap, 'view_organik', { nilai: 100 }))
+      .rejects.toThrow(/lampiran/);
+  });
+
   it('fileRecapSengketaMetrik sets the dispute on an otomatis figure and never mutates it', async () => {
     const { recap } = await seedOpenRecap();
     await sql`insert into wrr_metrik (recap_id, metrik, sumber, nilai, created_by)

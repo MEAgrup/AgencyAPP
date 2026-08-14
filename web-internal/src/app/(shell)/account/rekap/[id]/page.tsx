@@ -35,6 +35,7 @@ import {
   reopenRecap,
   saveRecapNarasi,
   saveRecapPembuka,
+  VIEW_BLENDED_LABEL,
   type PlanRekapRollup,
   type RecapDetail,
   type RecapMetrik,
@@ -318,6 +319,25 @@ export default function RekapDetailPage({ params }: { params: Promise<{ id: stri
                 </td>
               </tr>
             ))}
+            {/* T-4a: derived blended-view summary = paid (total_view) + organik
+                (view_organik). Read-time derivation (house #4), shown only when at
+                least one side has a value. */}
+            {(() => {
+              const paid = detail.metrik.find((m) => m.metrik === 'total_view')?.nilai ?? null;
+              const organik = detail.metrik.find((m) => m.metrik === 'view_organik')?.nilai ?? null;
+              if (paid === null && organik === null) return null;
+              const blended = (paid ?? 0) + (organik ?? 0);
+              return (
+                <tr>
+                  <td><strong>{VIEW_BLENDED_LABEL}</strong></td>
+                  <td><strong>{blended.toLocaleString('id-ID')}</strong></td>
+                  <td>—</td>
+                  <td>—</td>
+                  <td className="muted">turunan</td>
+                  <td />
+                </tr>
+              );
+            })()}
           </tbody>
         </table>
         {canEdit && <ManualMetrikForm id={id} detail={detail} busy={busy} run={run} />}
