@@ -130,6 +130,15 @@ export default function HealthPage() {
                   <tr key={r.client_id}>
                     <td>
                       <strong>{r.toko || r.client_id}</strong>
+                      {r.on_hold && (
+                        <span
+                          className="badge badge-amber"
+                          style={{ marginLeft: '6px' }}
+                          title="Semua layanan klien ini sedang On Hold (RM-2) — tetap dipantau, rekap mingguan dijeda"
+                        >
+                          On Hold
+                        </span>
+                      )}
                       <div style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--color-text-muted)' }}>
                         {r.client_id}
                       </div>

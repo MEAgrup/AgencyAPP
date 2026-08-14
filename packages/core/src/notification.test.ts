@@ -34,9 +34,9 @@ describe('frozen catalog', () => {
     }
   });
 
-  it('is at version 7, and the versions are registered in order with no gaps', () => {
-    expect(CATALOG_VERSION).toBe(7);
-    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  it('is at version 8, and the versions are registered in order with no gaps', () => {
+    expect(CATALOG_VERSION).toBe(8);
+    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     // A registry row with no decision reference is how an un-signed-off
     // amendment would sneak in looking legitimate.
     for (const v of CATALOG_VERSIONS) {
@@ -195,6 +195,20 @@ describe('frozen catalog', () => {
     expect(CATALOG[EVENTS.RekapMingguanBelumDikonfirmasi].resolver).toBe('explicitOrLeads');
     expect(CATALOG[EVENTS.RekapSengketaAngka].resolver).toBe('leadsOfDivision');
     expect(CATALOG[EVENTS.CatatanDivisiBelumDiisi].resolver).toBe('explicitOrLeads');
+  });
+
+  it('carries exactly the 4 v8 events — T-2c Hold Service two-step', () => {
+    expect(eventsOfVersion(8)).toEqual([
+      'service_hold_requested',
+      'service_held',
+      'service_hold_rejected',
+      'service_resumed',
+    ]);
+    // Request → Head of Account (leadsOfDivision); the rest → owning AM (explicit).
+    expect(CATALOG[EVENTS.ServiceHoldRequested].resolver).toBe('leadsOfDivision');
+    expect(CATALOG[EVENTS.ServiceHeld].resolver).toBe('explicit');
+    expect(CATALOG[EVENTS.ServiceHoldRejected].resolver).toBe('explicit');
+    expect(CATALOG[EVENTS.ServiceResumed].resolver).toBe('explicit');
   });
 
   it('every event carries a description and a valid resolver', () => {

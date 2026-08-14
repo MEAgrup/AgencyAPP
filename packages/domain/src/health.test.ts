@@ -436,6 +436,31 @@ describeDb('portfolio landing (D-12)', () => {
     expect(a!.lastClosedRecapWeek).toBe('2026-W30'); // the Ditutup week, not the Terbuka one
   });
 
+  it('T-2 (RM-2): all-hold client STAYS in the report, flagged onHold; a mixed client is not flagged', async () => {
+    const insSvcStatus = async (id: string, clientId: string, status: string): Promise<void> => {
+      await sql`insert into services (id, client_id, master_service_id, master_version_no, name,
+          standard_price, commission_rule, status, requires_strategy_plan, created_by)
+        values (${id}, ${clientId}, 'MSV-X', 1, 'Full Mgmt', '10000000.00', 'rule', ${status}, false, 'ZZ-TEST')`;
+    };
+    // held: its only service is On Hold ⇒ still active (On Hold is non-terminal), flagged.
+    const held = `CLI-HELD-${uniq()}`;
+    await insClient(held, 'ZZ-AM', '50000000.00', '80000000.00', '62000000.00', new Date(Date.UTC(2026, 3, 1)));
+    await insSvcStatus(`SVC-H-${uniq()}`, held, '[On Hold]');
+    // mixed: one live + one held ⇒ NOT all-hold.
+    const mixed = `CLI-MIX-${uniq()}`;
+    await insClient(mixed, 'ZZ-AM', '50000000.00', '80000000.00', '62000000.00', new Date(Date.UTC(2026, 3, 1)));
+    await insService(`SVC-MX1-${uniq()}`, mixed); // [In Execution]
+    await insSvcStatus(`SVC-MX2-${uniq()}`, mixed, '[On Hold]');
+
+    const rows = await portfolio(sql, director());
+    const h = rows.find((r) => r.clientId === held);
+    expect(h).toBeDefined(); // owner decision 2026-08-14: kept in Health report, not skipped
+    expect(h!.onHold).toBe(true);
+    const m = rows.find((r) => r.clientId === mixed);
+    expect(m).toBeDefined();
+    expect(m!.onHold).toBe(false); // has a live non-held service
+  });
+
   it('canScope gate: Account staff sees only own clients; creative forbidden', async () => {
     const mine = `CLI-MINE-${uniq()}`;
     const theirs = `CLI-THEIRS-${uniq()}`;

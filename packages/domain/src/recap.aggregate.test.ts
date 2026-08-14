@@ -7,7 +7,9 @@
  * asserts the aggregator fills the read-only auto figures exactly per §4/§9:
  *
  *   RM-C  gmv_interim = Σ GMV Ads + GMV Live + affiliate ; ad_spend ; roas_ads
- *         (= GMV Ads ÷ spend) ; total_view (= Σ M10 viewers) — and NOT ctr/cvr.
+ *         (= GMV Ads ÷ spend) ; total_view (= Σ M10 viewers) ; and (T-3) the
+ *         blended ctr/cvr/cpc/cpm from Σ raw clicks/impressions/conversions,
+ *         `—` (NULL) when the denominator is 0/absent.
  *   RM-B  one production row per engaged division with the headline count +
  *         a rincian breakdown + brief movement.
  *
@@ -110,8 +112,12 @@ async function seed(): Promise<void> {
   await sql`insert into ad_campaigns (id, brief_id, client_id, platform, objective, budget, start_date, end_date, target_kpi, created_by)
             values (${ADC}, ${BRF.ads}, ${CLI}, 'TikTok', 'Sales', '10000000', '2026-08-01', '2026-09-01', 'ROAS', ${OWNER})
             on conflict (id) do nothing`;
-  await sql`insert into metric_entries (id, campaign_id, period_start, period_end, spend, gmv, entry_method, entered_by, created_by)
-            values (${`ZZG-MTR-${RUN}`}, ${ADC}, '2026-08-24', '2026-08-30', '6100000', '28000000', 'Manual', ${OWNER}, ${OWNER})
+  // T-3: raw platform counts on the entry so the blended CTR/CVR/CPC/CPM compute.
+  //   clicks 1000, impressions 50000, conversions 100.
+  await sql`insert into metric_entries (id, campaign_id, period_start, period_end, spend, gmv,
+              clicks, impressions, conversions, entry_method, entered_by, created_by)
+            values (${`ZZG-MTR-${RUN}`}, ${ADC}, '2026-08-24', '2026-08-30', '6100000', '28000000',
+              1000, 50000, 100, 'Manual', ${OWNER}, ${OWNER})
             on conflict (id) do nothing`;
   await sql`insert into optimization_logs (id, campaign_id, change_type, before_value, after_value, reason, actor, created_by, created_at)
             values (${`ZZG-OPT-${RUN}`}, ${ADC}, 'Budget', '1', '2', 'scale', ${OWNER}, ${OWNER}, ${IN_WEEK})
@@ -169,9 +175,16 @@ describeDb('wrr_aggregate — auto figures from M7/M8/M9/M10 (D-03)', () => {
     expect(Number(m.roas_ads.nilai)).toBeCloseTo(4.59, 2);
     // total_view = Σ M10 viewers.
     expect(Number(m.total_view.nilai)).toBe(20000);
-    // ctr / cvr are deliberately NOT auto-written (no clean consolidation).
-    expect(m.ctr).toBeUndefined();
-    expect(m.cvr).toBeUndefined();
+    // T-3: blended CTR/CVR/CPC/CPM from Σ raw counts (clicks 1000, impr 50000, conv 100).
+    //   CTR = 1000/50000×100 = 2.00 ; CVR = 100/1000×100 = 10.00
+    //   CPC = 6.1jt/1000 = 6100.00 ; CPM = 6.1jt/50000×1000 = 122000.00
+    expect(Number(m.ctr.nilai)).toBeCloseTo(2.0, 2);
+    expect(m.ctr.sumber).toBe('otomatis');
+    expect(Number(m.cvr.nilai)).toBeCloseTo(10.0, 2);
+    expect(Number(m.cpc.nilai)).toBeCloseTo(6100, 2);
+    expect(Number(m.cpm.nilai)).toBeCloseTo(122000, 2);
+    // T-4b: CPL blended = Σspend/Σconversions = 6.1jt/100 = 61000.00.
+    expect(Number(m.cpl.nilai)).toBeCloseTo(61000, 2);
   });
 
   it('renders ROAS as `—` (NULL) on zero spend, never a divide error (house #7)', async () => {
@@ -196,6 +209,12 @@ describeDb('wrr_aggregate — auto figures from M7/M8/M9/M10 (D-03)', () => {
       select nilai, sumber from wrr_metrik where recap_id = ${R2} and metrik = 'roas_ads'`;
     expect(rows[0].nilai).toBeNull();
     expect(rows[0].sumber).toBe('otomatis');
+    // T-3: no clicks/impressions/conversions on the entry ⇒ CTR/CVR/CPC/CPM = `—`
+    // (NULL otomatis), never a divide error (house #7).
+    const ratios = await sql<{ metrik: string; nilai: string | null }[]>`
+      select metrik, nilai from wrr_metrik where recap_id = ${R2} and metrik in ('ctr','cvr','cpc','cpm','cpl')`;
+    expect(ratios).toHaveLength(5);
+    for (const r of ratios) expect(r.nilai).toBeNull();
     await sql`delete from metric_entries where campaign_id = ${A2}`;
     await sql`delete from ad_campaigns where id = ${A2}`;
     await sql`delete from wrr_metrik where recap_id = ${R2}`;

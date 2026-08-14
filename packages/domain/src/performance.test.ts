@@ -241,10 +241,10 @@ async function insCHRSnapshot(id: string, clientId: string, final: number, compo
   await sql`insert into client_health_snapshots (id, client_id, period_start, period_end, final_health_score, band, roas_toggle_state, components_json, computed_by)
     values (${id}, ${clientId}, '2026-06-01', '2026-06-30', ${final}, 'Watch', true, ${componentsJson}::jsonb, 'system')`;
 }
-async function setTargetRow(roleType: string, comp: string, periodStart: string, target: number, placeholder: boolean): Promise<void> {
-  await sql`insert into perf_period_targets (role_type, component, period_start, target_value, is_placeholder, updated_by)
-    values (${roleType}, ${comp}, ${periodStart}, ${target}, ${placeholder}, 'ZZ-TEST')
-    on conflict (role_type, component, period_start) do update set target_value = excluded.target_value, is_placeholder = excluded.is_placeholder, updated_by = 'ZZ-TEST'`;
+async function setTargetRow(roleType: string, comp: string, periodStart: string, target: number, placeholder: boolean, staffId = '*'): Promise<void> {
+  await sql`insert into perf_period_targets (role_type, component, staff_id, period_start, target_value, is_placeholder, updated_by)
+    values (${roleType}, ${comp}, ${staffId}, ${periodStart}, ${target}, ${placeholder}, 'ZZ-TEST')
+    on conflict (role_type, component, staff_id, period_start) do update set target_value = excluded.target_value, is_placeholder = excluded.is_placeholder, updated_by = 'ZZ-TEST'`;
 }
 
 /** Builds the §4 Kenny worked example under a unique staff id; returns that id + its client. */
@@ -324,6 +324,49 @@ describeDb('§4 worked example end to end', () => {
     expect(snap.modifier.sourceClients).toHaveLength(1);
     // Real (non-placeholder) targets used → flag false.
     expect(snap.targetsPlaceholder).toBe(false);
+  });
+});
+
+describeDb('T-1 (O9): per-staff target overrides role default', () => {
+  // Kenny (Ads) logs 15 optimizations in June. The role-default June target is 20
+  // → optimization_activity = 15/20×100 = 75 (the §4 baseline). A per-staff row
+  // must win over that role default, component by component.
+  it('exact-staff + exact-period beats role-default: optimization_activity 75 → 100', async () => {
+    const { kenny } = await kennyFixture();
+    // Per-staff override: Kenny's June optimization target = 15 → 15/15×100 = 100.
+    await setTargetRow(ROLE_ADS, COMP_OPTIMIZATION_ACTIVITY, '2026-06-01', 15, false, kenny);
+    await runSnapshotJob(sql, nowJul);
+
+    const snap = await getSnapshot(sql, director(), kenny, JUNE);
+    const opt = compByName(snap.components, COMP_OPTIMIZATION_ACTIVITY)!;
+    expect(opt.included).toBe(true);
+    expect(opt.raw).toBeCloseTo(100, 2);
+    // GMV Impact still resolves to the role default (unchanged) → 80.
+    expect(compByName(snap.components, COMP_GMV_IMPACT)!.raw).toBeCloseTo(80, 2);
+  });
+
+  // Staff outranks period: a staff-specific target for "all periods" (sentinel)
+  // must beat a role-default target for the exact month.
+  it('exact-staff + default-period beats role-default + exact-period', async () => {
+    const { kenny } = await kennyFixture();
+    // Kenny sentinel-period optimization target = 30 → 15/30×100 = 50; the role
+    // default June-exact target (20 → 75) must NOT win.
+    await setTargetRow(ROLE_ADS, COMP_OPTIMIZATION_ACTIVITY, '0001-01-01', 30, false, kenny);
+    await runSnapshotJob(sql, nowJul);
+
+    const snap = await getSnapshot(sql, director(), kenny, JUNE);
+    expect(compByName(snap.components, COMP_OPTIMIZATION_ACTIVITY)!.raw).toBeCloseTo(50, 2);
+  });
+
+  // A per-staff placeholder target still flags the snapshot (targets_placeholder),
+  // exactly as a role-default placeholder does.
+  it('per-staff placeholder target flags targets_placeholder', async () => {
+    const { kenny } = await kennyFixture();
+    await setTargetRow(ROLE_ADS, COMP_OPTIMIZATION_ACTIVITY, '2026-06-01', 15, true, kenny);
+    await runSnapshotJob(sql, nowJul);
+
+    const snap = await getSnapshot(sql, director(), kenny, JUNE);
+    expect(snap.targetsPlaceholder).toBe(true);
   });
 });
 

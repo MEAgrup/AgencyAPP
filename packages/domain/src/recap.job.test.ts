@@ -157,6 +157,27 @@ describeDb('wrr_monday_job — open (D-06 a)', () => {
     expect(r[0].r.iso_week).toBe(35);
   });
 
+  it('skips a client whose only service is [On Hold] (all-hold not active, RM-2 / T-2)', async () => {
+    const cli = await seedClient({ serviceStatus: '[On Hold]' });
+    const r = await mondayJob();
+    const rows = await sql`select id from weekly_result_recap where client_id = ${cli}`;
+    expect(rows).toHaveLength(0); // all-hold ⇒ no recap opened
+    expect(r[0].r.iso_week).toBe(35);
+  });
+
+  it('still opens for a client with one [On Hold] AND one live service (not all-hold)', async () => {
+    const cli = await seedClient({ serviceStatus: '[On Hold]' });
+    seq += 1; // add a live service alongside the held one
+    await sql`
+      insert into services (id, client_id, master_service_id, master_version_no, name,
+                            standard_price, commission_rule, status, created_by)
+      values (${`ZZJ-SVC-${RUN}-${seq}`}, ${cli}, 'MSV-ZZJ', 1, 'Live Svc',
+              0, 'rule', '[In Execution]', 'ZZJ-AM')`;
+    await mondayJob();
+    const rows = await sql`select id from weekly_result_recap where client_id = ${cli}`;
+    expect(rows).toHaveLength(1); // has a live service ⇒ still active
+  });
+
   it('emits rekap_mingguan_terbuka to the owning AM on open', async () => {
     const cli = await seedClient({ am: 'ZZJ-AM-NOTIF', serviceStatus: '[Briefed]' });
     await mondayJob();
