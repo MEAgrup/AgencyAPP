@@ -134,12 +134,11 @@ export interface BlockRequest {
   created_at: string;
 }
 
-// statemachine.Result has NO json tags -> capitalised keys on the wire.
-// Used by review/approve/request-revision/start/submit/rework/resume.
-export interface TransitionResult {
-  From: string;
-  To: string;
-}
+// Transition bodies are `{ok, from, to}` (apps/api http.ts transitionResponse).
+// Used by review/approve/request-revision/start/submit/rework/resume; read them
+// through lib/transition.ts, which also tolerates the retired Go casing.
+import type { TransitionResult } from '@/lib/transition';
+export type { TransitionResult };
 
 export interface HoursResult {
   id: string;

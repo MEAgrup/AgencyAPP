@@ -17,6 +17,7 @@ import {
   type Brief,
 } from '@/lib/account';
 import StatusBadge from '@/components/StatusBadge';
+import { transitionTo } from '@/lib/transition';
 
 export default function BriefDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -54,7 +55,7 @@ export default function BriefDetailPage({ params }: { params: Promise<{ id: stri
     setActionSubmitting(true);
     try {
       const res = await reviewBrief(id);
-      setActionMessage(`Status berpindah ke ${res.To}.`);
+      setActionMessage(`Status berpindah ke ${transitionTo(res)}.`);
       await load();
     } catch (err) {
       setActionError(errorMessage(err));
@@ -70,7 +71,7 @@ export default function BriefDetailPage({ params }: { params: Promise<{ id: stri
     setActionSubmitting(true);
     try {
       const res = await approveBrief(id);
-      setActionMessage(`Status berpindah ke ${res.To}.`);
+      setActionMessage(`Status berpindah ke ${transitionTo(res)}.`);
       await load();
     } catch (err) {
       setActionError(errorMessage(err));
@@ -87,7 +88,7 @@ export default function BriefDetailPage({ params }: { params: Promise<{ id: stri
     setActionSubmitting(true);
     try {
       const res = await requestBriefRevision(id, feedback);
-      setActionMessage(`Status berpindah ke ${res.To}.`);
+      setActionMessage(`Status berpindah ke ${transitionTo(res)}.`);
       await load();
     } catch (err) {
       setActionError(errorMessage(err));

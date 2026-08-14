@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -11,6 +12,12 @@ import {
   listAdsBriefQueue,
   type AdsBrief,
 } from '@/lib/ads';
+import { BRIEF_TODO, gateHint, partitionAdsBriefs } from '@/lib/ads-brief-gate';
+// The [To Do] → [In Progress] edge belongs to M12 (POST /tasks/{id}/start); the
+// /ads page borrows it rather than growing a second copy of the brief_task
+// engine, exactly as it already borrows the M6/M12 division brief-queue read.
+import { startTask } from '@/lib/tasks';
+import { transitionLabel } from '@/lib/transition';
 
 export default function AdsWorkspacePage() {
   const { role } = useAuth();
@@ -42,6 +49,12 @@ export default function AdsWorkspacePage() {
   const [targetKpi, setTargetKpi] = useState('');
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  // Mulai brief ([To Do] → [In Progress]) — the prerequisite for creating a
+  // campaign. Per-row submitting state so only the clicked button spins.
+  const [startingId, setStartingId] = useState<string | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [startMessage, setStartMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -87,8 +100,32 @@ export default function AdsWorkspacePage() {
     }
   }
 
-  // Campaigns can only be created while the parent Brief is [In Progress] (§1.1).
-  const inProgressBriefs = briefs ? briefs.filter((b) => b.status === '[In Progress]') : [];
+  // Mulai brief: the M12 §3 start edge. The server is the authority on who may
+  // drive it (PIC / division staff-lead / Director) — a 403 arrives as the verbatim
+  // BI message, so nothing is pre-judged here beyond the canManage section gate.
+  // On success the brief becomes selectable, so pre-select it for the form.
+  async function handleStartBrief(id: string) {
+    setStartError(null);
+    setStartMessage(null);
+    setStartingId(id);
+    try {
+      const res = await startTask('brief', id);
+      setStartMessage(`${id}: ${transitionLabel(res)}`);
+      setBriefId(id);
+      await load();
+    } catch (err) {
+      setStartError(errorMessage(err));
+    } finally {
+      setStartingId(null);
+    }
+  }
+
+  // Campaigns can only be created while the parent Brief is [In Progress] (§4 Rule 1);
+  // a brief still [To Do] is one start edge away, and the hint says so instead of
+  // leaving an empty dropdown to explain itself.
+  const gate = useMemo(() => partitionAdsBriefs(briefs), [briefs]);
+  const inProgressBriefs = gate.selectable;
+  const hint = gateHint(gate);
 
   return (
     <div className="stack">
@@ -134,13 +171,43 @@ export default function AdsWorkspacePage() {
           <p className="muted" style={{ fontSize: 13 }}>
             Kampanye hanya dapat dibuat saat brief divisi Ads berstatus [In Progress].
           </p>
+          {!loading && hint && (
+            <div className="alert" role="status">
+              {hint}
+              {gate.startable.length > 0 && (
+                <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                  {gate.startable.map((b) => (
+                    <button
+                      key={b.id}
+                      type="button"
+                      className="btn btnPrimary btnSm"
+                      disabled={startingId !== null}
+                      onClick={() => handleStartBrief(b.id)}
+                    >
+                      {startingId === b.id ? 'Memulai...' : `Mulai ${b.id}`}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {startError && <div className="alert alertError" role="alert">{startError}</div>}
+          {startMessage && <div className="alert alertSuccess" role="status">Brief dimulai &mdash; {startMessage}</div>}
           <form className="form" onSubmit={handleCreate}>
             {createError && <div className="alert alertError" role="alert">{createError}</div>}
             <div className="formRow">
               <div className="field">
                 <label htmlFor="create-brief">Brief (Ads, [In Progress])</label>
-                <select id="create-brief" required value={briefId} onChange={(e) => setBriefId(e.target.value)}>
-                  <option value="">Pilih brief...</option>
+                <select
+                  id="create-brief"
+                  required
+                  disabled={inProgressBriefs.length === 0}
+                  value={briefId}
+                  onChange={(e) => setBriefId(e.target.value)}
+                >
+                  <option value="">
+                    {inProgressBriefs.length === 0 ? 'Belum ada brief [In Progress]' : 'Pilih brief...'}
+                  </option>
                   {inProgressBriefs.map((b) => (
                     <option key={b.id} value={b.id}>
                       {b.id} &mdash; {b.title}
@@ -196,7 +263,11 @@ export default function AdsWorkspacePage() {
               />
             </div>
             <div>
-              <button type="submit" className="btn btnPrimary" disabled={createSubmitting}>
+              <button
+                type="submit"
+                className="btn btnPrimary"
+                disabled={createSubmitting || inProgressBriefs.length === 0}
+              >
                 {createSubmitting ? 'Menyimpan...' : 'Buat Kampanye'}
               </button>
             </div>
@@ -208,6 +279,11 @@ export default function AdsWorkspacePage() {
         <div className="cardHeader">
           <h2>Brief Divisi Ads</h2>
         </div>
+        <p className="muted" style={{ fontSize: 13 }}>
+          Urutannya: brief <strong>[To Do]</strong> &rarr; <em>Mulai</em> &rarr; <strong>[In Progress]</strong>{' '}
+          (baru bisa menampung kampanye) &rarr; kampanye dibuat &amp; aset creative ditautkan &rarr; brief
+          di-<em>submit</em> &rarr; AM approve &rarr; kampanye baru boleh di-<em>Launch</em>.
+        </p>
         {loading && <p className="muted">Memuat...</p>}
         {error && <div className="alert alertError" role="alert">{error}</div>}
         {!loading && !error && briefs && briefs.length === 0 && (
@@ -224,17 +300,32 @@ export default function AdsWorkspacePage() {
                   <th>Jatuh Tempo</th>
                   <th>Prioritas</th>
                   <th>Status</th>
+                  <th>Aksi</th>
                 </tr>
               </thead>
               <tbody>
                 {briefs.map((b) => (
                   <tr key={b.id}>
-                    <td>{b.id}</td>
+                    <td><Link href={`/tasks/${b.id}`}>{b.id}</Link></td>
                     <td>{b.title}</td>
                     <td>{b.assigned_pic || '—'}</td>
                     <td>{b.due_date || '—'}</td>
                     <td>{b.priority || '—'}</td>
                     <td><StatusBadge status={b.status} /></td>
+                    <td>
+                      {canManage && b.status === BRIEF_TODO ? (
+                        <button
+                          type="button"
+                          className="btn btnSecondary btnSm"
+                          disabled={startingId !== null}
+                          onClick={() => handleStartBrief(b.id)}
+                        >
+                          {startingId === b.id ? 'Memulai...' : 'Mulai'}
+                        </button>
+                      ) : (
+                        <Link href={`/tasks/${b.id}`} className="btn btnSecondary btnSm">Buka</Link>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
