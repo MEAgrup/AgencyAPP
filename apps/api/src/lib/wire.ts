@@ -7,7 +7,7 @@
  */
 import { money, tz } from '@cdps/core';
 import type { interview as ivcore } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, campaign, client, contract, creative, demo, directory, finance, health, interview, kol, leads, livestream, marketing, msl, notification, performance, plangate, portal, sales, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, audit, auth, board, campaign, client, contract, creative, demo, directory, finance, health, interview, kol, leads, livestream, marketing, msl, notification, performance, plangate, portal, recap, sales, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -4825,5 +4825,183 @@ export function interviewScoreFromWire(v: unknown): ivcore.KualifikasiInput {
         : null,
     defaultKomisiPlatformPersen: numOrNull(b.default_komisi_platform_persen),
     defaultOngkirPersen: numOrNull(b.default_ongkir_persen),
+  };
+}
+
+// --- M6D Rekap Hasil Mingguan (Weekly Result Recap, WRR-) — D-09b -----------
+//
+// Machine #18 (`weekly_result_recap`). The domain read-models are camelCase
+// (@cdps/domain recap.ts); these mappers emit the snake_case shapes
+// `web-internal/src/lib/recap.ts` consumes. Nullable fields are emitted as an
+// explicit `null`, NEVER omitted — a MISSING key blanks the page harder than a
+// null one (O43). Serves the D-10 UI.
+
+/** recap.Recap → RecapWire (the recap header). */
+export interface RecapWire {
+  id: string;
+  client_id: string;
+  plan_id: string | null;
+  iso_year: number;
+  iso_week: number;
+  minggu_mulai: string;
+  minggu_akhir: string;
+  status: string;
+  pernah_ditutup_otomatis: boolean;
+  catatan_pembuka: string | null;
+  ditutup_pada: string | null;
+  ditutup_oleh: string | null;
+  created_at: string;
+  created_by: string;
+}
+
+/** recap.RecapDivisi → RecapDivisiWire (RM-B per-division production headline). */
+export interface RecapDivisiWire {
+  recap_id: string;
+  divisi: string;
+  jumlah_produksi: number;
+  rincian: Record<string, unknown>;
+  sengketa: string | null;
+}
+
+/** recap.RecapMetrik → RecapMetrikWire (RM-C metric row: auto / manual / `—`). */
+export interface RecapMetrikWire {
+  recap_id: string;
+  metrik: string;
+  nilai: number | null;
+  sumber: string;
+  file_bukti: string | null;
+  tanggal_ambil: string | null;
+  nilai_minggu_lalu: number | null;
+  sengketa: string | null;
+}
+
+/** recap.RecapCatatan → RecapCatatanWire (RM-D narrative + RM-C9 text-only note). */
+export interface RecapCatatanWire {
+  recap_id: string;
+  yang_bergerak: string | null;
+  yang_tertahan: string | null;
+  fokus_minggu_depan: string | null;
+  bahan_untuk_klien: string | null;
+  catatan_metrik_tambahan: string | null;
+}
+
+/** recap.RecapCatatanDivisi → RecapCatatanDivisiWire (RM-D6 append-only note). */
+export interface RecapCatatanDivisiWire {
+  id: number;
+  recap_id: string;
+  divisi: string;
+  catatan: string;
+  created_at: string;
+  created_by: string;
+}
+
+/** recap.RecapDetail → RecapDetailWire (the whole recap bundle for the detail page). */
+export interface RecapDetailWire {
+  recap: RecapWire;
+  divisi: RecapDivisiWire[];
+  metrik: RecapMetrikWire[];
+  catatan: RecapCatatanWire | null;
+  catatan_divisi: RecapCatatanDivisiWire[];
+}
+
+/** Maps a domain Recap (camelCase) to the RecapWire shape. */
+export function recapToWire(r: recap.Recap): RecapWire {
+  return {
+    id: r.id,
+    client_id: r.clientId,
+    plan_id: r.planId,
+    iso_year: r.isoYear,
+    iso_week: r.isoWeek,
+    minggu_mulai: r.mingguMulai,
+    minggu_akhir: r.mingguAkhir,
+    status: r.status,
+    pernah_ditutup_otomatis: r.pernahDitutupOtomatis,
+    catatan_pembuka: r.catatanPembuka,
+    ditutup_pada: r.ditutupPada,
+    ditutup_oleh: r.ditutupOleh,
+    created_at: r.createdAt,
+    created_by: r.createdBy,
+  };
+}
+
+/** Maps a domain RecapDivisi to the RecapDivisiWire shape. */
+export function recapDivisiToWire(d: recap.RecapDivisi): RecapDivisiWire {
+  return {
+    recap_id: d.recapId,
+    divisi: d.divisi,
+    jumlah_produksi: d.jumlahProduksi,
+    rincian: d.rincian,
+    sengketa: d.sengketa,
+  };
+}
+
+/** Maps a domain RecapMetrik to the RecapMetrikWire shape. */
+export function recapMetrikToWire(m: recap.RecapMetrik): RecapMetrikWire {
+  return {
+    recap_id: m.recapId,
+    metrik: m.metrik,
+    nilai: m.nilai,
+    sumber: m.sumber,
+    file_bukti: m.fileBukti,
+    tanggal_ambil: m.tanggalAmbil,
+    nilai_minggu_lalu: m.nilaiMingguLalu,
+    sengketa: m.sengketa,
+  };
+}
+
+/** Maps a domain RecapCatatan to the RecapCatatanWire shape. */
+export function recapCatatanToWire(c: recap.RecapCatatan): RecapCatatanWire {
+  return {
+    recap_id: c.recapId,
+    yang_bergerak: c.yangBergerak,
+    yang_tertahan: c.yangTertahan,
+    fokus_minggu_depan: c.fokusMingguDepan,
+    bahan_untuk_klien: c.bahanUntukKlien,
+    catatan_metrik_tambahan: c.catatanMetrikTambahan,
+  };
+}
+
+/** Maps a domain RecapCatatanDivisi to the RecapCatatanDivisiWire shape. */
+export function recapCatatanDivisiToWire(c: recap.RecapCatatanDivisi): RecapCatatanDivisiWire {
+  return {
+    id: c.id,
+    recap_id: c.recapId,
+    divisi: c.divisi,
+    catatan: c.catatan,
+    created_at: c.createdAt,
+    created_by: c.createdBy,
+  };
+}
+
+/** Maps a domain RecapDetail bundle to the RecapDetailWire shape. */
+export function recapDetailToWire(d: recap.RecapDetail): RecapDetailWire {
+  return {
+    recap: recapToWire(d.recap),
+    divisi: d.divisi.map(recapDivisiToWire),
+    metrik: d.metrik.map(recapMetrikToWire),
+    catatan: d.catatan === null ? null : recapCatatanToWire(d.catatan),
+    catatan_divisi: d.catatanDivisi.map(recapCatatanDivisiToWire),
+  };
+}
+
+/** Builds the RM-D narrative input from a wire body (full-replace: omitted → null). */
+export function recapNarasiFromWire(v: unknown): recap.RecapNarasiInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    yangBergerak: strOrNull(b.yang_bergerak),
+    yangTertahan: strOrNull(b.yang_tertahan),
+    fokusMingguDepan: strOrNull(b.fokus_minggu_depan),
+    bahanUntukKlien: strOrNull(b.bahan_untuk_klien),
+    catatanMetrikTambahan: strOrNull(b.catatan_metrik_tambahan),
+  };
+}
+
+/** Builds the RM-C manual-metric input from a wire body (`nilai: null` → `—`). */
+export function recapMetrikManualFromWire(v: unknown): recap.RecapMetrikManualInput {
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  return {
+    nilai: numOrNull(b.nilai),
+    fileBukti: b.file_bukti === undefined || b.file_bukti === null ? undefined : String(b.file_bukti),
+    tanggalAmbil: b.tanggal_ambil === undefined || b.tanggal_ambil === null ? undefined : String(b.tanggal_ambil),
   };
 }
