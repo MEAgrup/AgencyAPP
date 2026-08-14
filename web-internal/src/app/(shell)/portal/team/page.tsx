@@ -167,7 +167,7 @@ export default function TeamPortalPage() {
                         <td><Link href={`/clients/${c.client_id}`}>{c.client_id}</Link></td>
                         <td>{c.client_name}</td>
                         <td>{c.assigned_am || '—'}</td>
-                        <td><Link href="/board">Client Board &rarr;</Link></td>
+                        <td><Link href={`/clients/${c.client_id}#board`}>Client Board &rarr;</Link></td>
                       </tr>
                     ))}
                   </tbody>
