@@ -129,6 +129,8 @@ export const METRIK_LABELS: Record<string, string> = {
   total_view: 'Total View',
   ctr: 'CTR',
   cvr: 'CVR',
+  cpc: 'CPC',
+  cpm: 'CPM',
 };
 
 export function getMetrikLabel(key: string): string {

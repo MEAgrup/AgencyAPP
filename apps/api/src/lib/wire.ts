@@ -846,11 +846,14 @@ export function toCampaignInput(b: {
 
 /** Request body → MetricInput. */
 export function toMetricInput(b: {
-  period_start?: string; period_end?: string; spend?: string; gmv?: string; ctr?: number | null; cvr?: number | null; entry_method?: string;
+  period_start?: string; period_end?: string; spend?: string; gmv?: string; ctr?: number | null; cvr?: number | null;
+  clicks?: number | null; impressions?: number | null; conversions?: number | null; entry_method?: string;
 }): ads.MetricInput {
   return {
     periodStart: b.period_start ?? '', periodEnd: b.period_end ?? '', spend: b.spend ?? '', gmv: b.gmv ?? '',
-    ctr: b.ctr ?? null, cvr: b.cvr ?? null, entryMethod: b.entry_method ?? '',
+    ctr: b.ctr ?? null, cvr: b.cvr ?? null,
+    clicks: b.clicks ?? null, impressions: b.impressions ?? null, conversions: b.conversions ?? null,
+    entryMethod: b.entry_method ?? '',
   };
 }
 

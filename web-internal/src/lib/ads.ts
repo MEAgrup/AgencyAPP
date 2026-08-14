@@ -206,6 +206,11 @@ export interface MetricInput {
   gmv: string; // decimal string
   ctr: number | null; // optional; sent null when omitted (never read back)
   cvr: number | null; // optional; sent null when omitted (never read back)
+  // T-3: raw platform counts (optional). The weekly recap blends CTR/CVR/CPC/CPM
+  // from Σ of these; sent null when omitted (never read back on the entry).
+  clicks: number | null;
+  impressions: number | null;
+  conversions: number | null;
   entry_method: string;
 }
 

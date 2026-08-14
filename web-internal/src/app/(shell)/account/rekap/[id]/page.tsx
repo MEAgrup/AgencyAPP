@@ -40,7 +40,8 @@ import {
   type RecapMetrik,
 } from '@/lib/recap';
 
-const MONEY_METRICS = new Set(['gmv_interim', 'ad_spend']);
+// T-3: CPC (Rp/klik) & CPM (Rp/1000 impresi) are money; CTR/CVR are percentages.
+const MONEY_METRICS = new Set(['gmv_interim', 'ad_spend', 'cpc', 'cpm']);
 
 /** Render a metric value read-only: `—` when unavailable, Rp for money, else plain. */
 function metrikNilai(m: RecapMetrik): string {
