@@ -30,6 +30,7 @@ import {
   disciplineSummary,
   getTask,
   listTasks,
+  runReminderTick,
   startTask,
   type Actor,
 } from './internaltask';
@@ -343,6 +344,88 @@ describeDb('immutability — the DB refuses to let lateness be edited away', () 
     const t = await mk();
     await expect(sql`update audit_log set action = 'x' where entity_id = ${t.id}`).rejects.toThrow();
     await expect(sql`delete from audit_log where entity_id = ${t.id}`).rejects.toThrow();
+  });
+});
+
+describeDb('notifikasi jatuh tempo (penugasan_reminder_tick) — katalog v10', () => {
+  /** Recipients of one event on one task, sorted. */
+  async function recipients(taskId: string, event: string): Promise<string[]> {
+    const rows = await sql<{ recipient_employee_id: string }[]>`
+      select recipient_employee_id from notifications
+       where entity_id = ${taskId} and event_type = ${event}
+       order by recipient_employee_id`;
+    return rows.map((r) => r.recipient_employee_id);
+  }
+
+  it('H-1 goes to the PIC ALONE, and only once however often the job runs', async () => {
+    const t = await mk('2026-08-21'); // NOW is 2026-08-20 WIB → due tomorrow
+
+    const first = await runReminderTick(sql, NOW);
+    expect(first.h1).toBeGreaterThanOrEqual(1);
+    // The PIC and nobody else: a reminder copied to the boss is a report, and
+    // nothing is late yet.
+    expect(await recipients(t.id, 'penugasan_mendekati_jatuh_tempo')).toEqual([CRE_STAFF]);
+
+    // Re-running the same day (or any later day) must not re-notify — the marker
+    // column is what stops a daily job from becoming daily noise.
+    const second = await runReminderTick(sql, NOW);
+    expect(second.h1).toBe(0);
+    expect(await recipients(t.id, 'penugasan_mendekati_jatuh_tempo')).toEqual([CRE_STAFF]);
+  });
+
+  it('past due reaches PIC + pemberi tugas + lead divisi, once', async () => {
+    const t = await mk(DUE_PAST);
+
+    const first = await runReminderTick(sql, NOW);
+    expect(first.jatuhTempo).toBeGreaterThanOrEqual(1);
+    // explicitOrLeads: the two explicit recipients plus the Creative lead, who
+    // is resolved from the row's frozen `assignee_division`.
+    expect(await recipients(t.id, 'penugasan_jatuh_tempo')).toEqual([CRE_LEAD, CRE_STAFF]);
+
+    const second = await runReminderTick(sql, NOW);
+    expect(second.jatuhTempo).toBe(0);
+  });
+
+  it('a task created already overdue skips H-1 and goes straight to past-due', async () => {
+    const t = await mk(DUE_PAST);
+    await runReminderTick(sql, NOW);
+    // Nothing to warn about regarding "tomorrow" when tomorrow was yesterday.
+    expect(await recipients(t.id, 'penugasan_mendekati_jatuh_tempo')).toEqual([]);
+    expect(await recipients(t.id, 'penugasan_jatuh_tempo')).not.toEqual([]);
+  });
+
+  it('finished and cancelled tasks are never chased', async () => {
+    const done = await mk(DUE_PAST);
+    await startTask(sql, creStaff(), done.id, NOW);
+    await completeTask(sql, creStaff(), done.id, 'https://drive/x', NOW);
+
+    const cancelled = await mk(DUE_PAST);
+    await cancelTask(sql, creLead(), cancelled.id, 'ditarik', NOW);
+
+    await runReminderTick(sql, NOW);
+    expect(await recipients(done.id, 'penugasan_jatuh_tempo')).toEqual([]);
+    expect(await recipients(cancelled.id, 'penugasan_jatuh_tempo')).toEqual([]);
+  });
+
+  it('the idempotency markers cannot be reset (DB, not just the job)', async () => {
+    // One task per marker: an already-overdue task never gets the H-1 marker
+    // set, so false→false there is a no-op and would prove nothing.
+    const late = await mk(DUE_PAST);
+    const soon = await mk('2026-08-21');
+    await runReminderTick(sql, NOW);
+
+    // Resetting a marker would re-send the same notice — exactly the noise the
+    // marker exists to prevent, so the trigger refuses it.
+    await expect(sql`update internal_tasks set jatuh_tempo_terkirim = false where id = ${late.id}`)
+      .rejects.toThrow(/jatuh_tempo_terkirim searah/);
+    await expect(sql`update internal_tasks set pengingat_h1_terkirim = false where id = ${soon.id}`)
+      .rejects.toThrow(/pengingat_h1_terkirim searah/);
+  });
+
+  it('cancelling notifies the PIC — otherwise they keep working on withdrawn work', async () => {
+    const t = await mk(DUE_FUTURE);
+    await cancelTask(sql, creLead(), t.id, 'prioritas berubah', NOW);
+    expect(await recipients(t.id, 'penugasan_dibatalkan')).toEqual([CRE_STAFF]);
   });
 });
 

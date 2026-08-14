@@ -34,9 +34,9 @@ describe('frozen catalog', () => {
     }
   });
 
-  it('is at version 9, and the versions are registered in order with no gaps', () => {
-    expect(CATALOG_VERSION).toBe(9);
-    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  it('is at version 10, and the versions are registered in order with no gaps', () => {
+    expect(CATALOG_VERSION).toBe(10);
+    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     // A registry row with no decision reference is how an un-signed-off
     // amendment would sneak in looking legitimate.
     for (const v of CATALOG_VERSIONS) {
@@ -209,6 +209,32 @@ describe('frozen catalog', () => {
     expect(CATALOG[EVENTS.ServiceHeld].resolver).toBe('explicit');
     expect(CATALOG[EVENTS.ServiceHoldRejected].resolver).toBe('explicit');
     expect(CATALOG[EVENTS.ServiceResumed].resolver).toBe('explicit');
+  });
+
+  it('carries exactly the 2 v9 events — Penugasan Internal', () => {
+    expect(eventsOfVersion(9)).toEqual([
+      'penugasan_ditugaskan',
+      'penugasan_selesai',
+    ]);
+    // Both point at ONE person each — the assignee, then the assigner — so
+    // `explicit`. Neither is a division-wide announcement.
+    expect(CATALOG[EVENTS.PenugasanDitugaskan].resolver).toBe('explicit');
+    expect(CATALOG[EVENTS.PenugasanSelesai].resolver).toBe('explicit');
+  });
+
+  it('carries exactly the 3 v10 events — Penugasan Internal jatuh tempo + pembatalan', () => {
+    expect(eventsOfVersion(10)).toEqual([
+      'penugasan_mendekati_jatuh_tempo',
+      'penugasan_jatuh_tempo',
+      'penugasan_dibatalkan',
+    ]);
+    // The resolver split IS the design decision, so it is pinned here: H-1 and
+    // cancellation reach the PIC alone (a reminder copied to the boss stops
+    // being a reminder), while PAST DUE is the one that legitimately widens to
+    // the assigner + the division lead.
+    expect(CATALOG[EVENTS.PenugasanMendekatiJatuhTempo].resolver).toBe('explicit');
+    expect(CATALOG[EVENTS.PenugasanJatuhTempo].resolver).toBe('explicitOrLeads');
+    expect(CATALOG[EVENTS.PenugasanDibatalkan].resolver).toBe('explicit');
   });
 
   it('every event carries a description and a valid resolver', () => {

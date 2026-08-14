@@ -178,12 +178,16 @@ jobs:
       #      20260814110000_penugasan_internal.sql, DECISIONS 2026-08-14).
       # 23 = 22 + mesin #21 `internal_task` (Penugasan Internal:
       #      [Ditugaskan]→[Dikerjakan]→[Selesai] | →[Dibatalkan]).
-      - name: Verify migration seed counts (23 machines, 54 events, catalog registry consistent)
+      # 57 = 54 + 3 (v10: Penugasan Internal jatuh tempo & pembatalan —
+      #      penugasan_mendekati_jatuh_tempo, penugasan_jatuh_tempo,
+      #      penugasan_dibatalkan; 20260814120000). Nol mesin/tabel baru (dua
+      #      KOLOM penanda idempotensi) ⇒ 23 mesin TETAP.
+      - name: Verify migration seed counts (23 machines, 57 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
                if (select count(*) from sm_machines) <> 23 then raise exception 'expected 23 machines'; end if;
-               if (select count(*) from notif_events) <> 54 then raise exception 'expected 54 events'; end if;
+               if (select count(*) from notif_events) <> 57 then raise exception 'expected 57 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
                  then raise exception 'notif_events does not match the registered catalog versions'; end if;

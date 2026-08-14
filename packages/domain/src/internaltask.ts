@@ -571,12 +571,55 @@ export async function cancelTask(
       afterJson: { status: STATUS_DIBATALKAN, alasan: why }, createdBy: actor.employeeId,
     });
 
+    // The PIC has to be told, or they keep working on something that was
+    // withdrawn. Emitted from the domain rather than the daily job because the
+    // trigger here is an action, not the passing of time.
+    await notification.emit(ex.notify, {
+      event: notification.EVENTS.PenugasanDibatalkan,
+      entityType: ENTITY_TYPE, entityId: id, actor: actor.employeeId,
+      division: t.assigneeDivision, explicitRecipients: [t.assigneeId],
+    });
+
     const rows = await tx<Row[]>`select id, judul, deskripsi, assignee_id, assignee_division, due_date,
            lampiran_link, link_hasil, status, dimulai_pada, selesai_pada,
            dibatalkan_pada, alasan_pembatalan, created_at, created_by
       from internal_tasks where id = ${id}`;
     return toTask(rows[0], now);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Daily reminder job
+// ---------------------------------------------------------------------------
+
+/** What one `penugasan_reminder_tick` pass emitted. */
+export interface ReminderTickResult {
+  /** H-1 reminders sent (due tomorrow, not finished). */
+  h1: number;
+  /** Past-due notices sent (due date passed, not finished). */
+  jatuhTempo: number;
+}
+
+/**
+ * runReminderTick drives the daily due-date sweep.
+ *
+ * The work itself lives in the SQL function `penugasan_reminder_tick` (migration
+ * 20260814120000), NOT here — deliberately, and for the same reason the recap
+ * job does: pg_cron calls the SQL directly on Supabase, so a second copy of the
+ * selection rule in TypeScript would be a rule that can disagree with the one
+ * that actually runs in production. This is the manual/external-cron entry
+ * point over the identical function.
+ *
+ * Idempotent: each task is notified at most once per branch, guarded by the
+ * `pengingat_h1_terkirim` / `jatuh_tempo_terkirim` marker columns, so calling it
+ * twice in a day is a no-op the second time. `now` is a parameter so tests can
+ * pin the WIB day without touching the wall clock.
+ */
+export async function runReminderTick(sql: Sql, now?: Date): Promise<ReminderTickResult> {
+  const rows = now === undefined
+    ? await sql<{ r: { h1: number; jatuh_tempo: number } }[]>`select penugasan_reminder_tick() as r`
+    : await sql<{ r: { h1: number; jatuh_tempo: number } }[]>`select penugasan_reminder_tick(${now}) as r`;
+  return { h1: rows[0].r.h1, jatuhTempo: rows[0].r.jatuh_tempo };
 }
 
 // ---------------------------------------------------------------------------
