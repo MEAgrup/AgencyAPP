@@ -190,6 +190,14 @@ const VISIBILITY_LINKS: NavItem[] = [
   // lives inside the Client Record (`/clients/[id]#board`), reached by the roles
   // that already hold `/clients` access. See DECISIONS 2026-08-14 (board merge).
   { href: '/board/my-tasks', label: 'Tugas Saya' },
+  // Penugasan Internal — atasan menugaskan anggota timnya, di luar rantai
+  // Klien→Service→Brief. UNGATED on purpose: every employee in every division
+  // can be given one, and the read scope is purely row-level (own rows / own
+  // division / everywhere), enforced by `internal_tasks_select` + the domain
+  // gate. Trimming this by division would hide it from exactly the people
+  // (Finance, Sales, Marketing) M12 has no room for — the whole reason it exists.
+  // The create form inside is role-gated; the page itself is not.
+  { href: '/penugasan', label: 'Penugasan Internal' },
   // M13 `health.canScope`: Account (any level) + OD/Director.
   { href: '/health', label: 'Client Health', access: ownedBy(ACCOUNT) },
   // M14: every staff sees their own score with full breakdown. Universal.

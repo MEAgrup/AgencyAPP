@@ -103,6 +103,9 @@ export * as kol from './kol';
 export * as performance from './performance';
 export * as health from './health';
 export * as milestone from './milestone';
+// Penugasan Internal — a SECOND, standalone task entity. Deliberately not part
+// of `task` (M12), whose Task is frozen to Asset | Booking | Brief-as-task.
+export * as internaltask from './internaltask';
 export * as board from './board';
 export * as livestream from './livestream';
 export * as campaign from './campaign';

@@ -125,6 +125,12 @@ export const EVENTS = {
   ServiceHoldRejected: 'service_hold_rejected', // -> owning AM
   ServiceResumed: 'service_resumed', // -> owning AM
 
+  // v9 — Penugasan Internal. `penugasan_jatuh_tempo` is deliberately NOT here:
+  // its emitter is a daily cron job that does not exist yet, and cataloging an
+  // event nobody emits only makes the catalog lie.
+  PenugasanDitugaskan: 'penugasan_ditugaskan', // -> the assigned employee
+  PenugasanSelesai: 'penugasan_selesai', // -> the assigner (atasan)
+
 } as const;
 
 /** A cataloged event type. */
@@ -198,6 +204,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
       'T-2c Hold Service two-step — 4 event (service_hold_requested → Head of Account; service_held / service_hold_rejected / service_resumed → AM pemilik)',
     eventCount: 4,
     decisionRef: 'docs/DECISIONS.md 2026-08-14 (T-2b/T-2c — hold dua-langkah + notif, keputusan pemilik)',
+  },
+  {
+    version: 9,
+    description:
+      'Penugasan Internal — 2 event (penugasan_ditugaskan → karyawan yang ditugaskan; penugasan_selesai → pemberi tugas). Notifikasi jatuh tempo BELUM didaftarkan: emitter cron-nya belum ada.',
+    eventCount: 2,
+    decisionRef: 'docs/DECISIONS.md 2026-08-14 (Penugasan Internal — permintaan pemilik)',
   },
 ] as const;
 
@@ -314,6 +327,11 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
   [EVENTS.ServiceHeld]: { description: 'Hold Service disetujui Head of Account — ke AM pemilik', resolver: 'explicit', version: 8 },
   [EVENTS.ServiceHoldRejected]: { description: 'Hold Service ditolak Head of Account — ke AM pemilik', resolver: 'explicit', version: 8 },
   [EVENTS.ServiceResumed]: { description: 'Service dilanjutkan dari On Hold — ke AM pemilik', resolver: 'explicit', version: 8 },
+
+  // --- v9 — Penugasan Internal. Descriptions/resolvers must match the migration
+  // seed (20260814110000_penugasan_internal.sql). ---
+  [EVENTS.PenugasanDitugaskan]: { description: 'Penugasan internal baru diberikan — ke karyawan yang ditugaskan', resolver: 'explicit', version: 9 },
+  [EVENTS.PenugasanSelesai]: { description: 'Penugasan internal ditandai selesai PIC — ke pemberi tugas', resolver: 'explicit', version: 9 },
 };
 
 /** All registered event types (introspection / tests). */

@@ -140,13 +140,19 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "113"
-check "entity_prefix"    "select count(*) from entity_prefix"    "34"
-check "sm_machines"      "select count(*) from sm_machines"      "22"
-check "notif_events"     "select count(*) from notif_events"     "52"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "114"
+check "entity_prefix"    "select count(*) from entity_prefix"    "35"
+check "sm_machines"      "select count(*) from sm_machines"      "23"
+check "notif_events"     "select count(*) from notif_events"     "54"
 # 21 = 20 + mesin #18 `weekly_result_recap` (Modul 6D D-02, 20260813020000:
 #      Terjadwal→Terbuka→Ditutup|Ditutup Otomatis→(Head)Terbuka). nol tabel/prefix
 #      baru di D-02.
+# 114 = 113 + internal_tasks (Penugasan Internal, 20260814110000: tugas atasan→tim
+#       di luar rantai Klien→Service→Brief). 35 = 34 + TSK. 23 = 22 + mesin #21
+#       `internal_task` ([Ditugaskan]→[Dikerjakan]→[Selesai] | →[Dibatalkan]).
+# 54 = 52 + 2 (v9: Penugasan Internal — penugasan_ditugaskan, penugasan_selesai;
+#      20260814110000, DECISIONS 2026-08-14). Notifikasi jatuh tempo BELUM ada:
+#      emitter cron-nya belum dibangun, jadi event-nya sengaja tak didaftarkan.
 # 52 = 48 + 4 (v8: T-2c Hold Service two-step — service_hold_requested,
 #      service_held, service_hold_rejected, service_resumed; 20260814080000).
 # 48 = 44 + 4 (v7: M6D Rekap Hasil Mingguan — rekap_mingguan_terbuka,

@@ -959,6 +959,80 @@ END $$;
 RESET ROLE;
 
 -- ---------------------------------------------------------------------------
+-- 43. Penugasan Internal (`internal_tasks`, migrasi 20260814110000).
+--
+--     Policy `internal_tasks_select` punya EMPAT arm, dan ketiga arm sempitnya
+--     harus dibuktikan TERPISAH — sebuah policy yang "jalan" karena satu arm
+--     kelewat lebar terlihat persis sama dengan yang benar dari sisi pemakai
+--     yang berhak. Yang dicek di sini:
+--
+--       (a) PIC membaca tugasnya sendiri;
+--       (b) pemberi tugas tetap membacanya walau ia BUKAN PIC dan BUKAN lead
+--           divisi tujuan — arm `created_by`, satu-satunya yang menjaga tugas
+--           tidak hilang dari mata pembuatnya saat ia pindah divisi;
+--       (c) lead divisi membaca tugas divisinya;
+--       (d) KONTROL NEGATIF: staff divisi lain, dan lead divisi lain, membaca
+--           NOL. Tanpa (d) ketiga check di atas juga lolos pada policy
+--           `USING (true)`.
+--
+--     Arm divisi memakai kolom beku `assignee_division`, bukan join ke
+--     `role_mappings` — pelajaran O52: policy yang men-join tabel lain membuang
+--     barisnya, dan di sini artinya SPV kehilangan tugas timnya sendiri.
+-- ---------------------------------------------------------------------------
+
+-- Fixture (superuser). Pemberi tugas = lead SALES, penerima = staff CREATIVE:
+-- sengaja lintas divisi supaya arm `created_by` dan arm divisi tidak bisa
+-- saling menutupi kegagalan.
+INSERT INTO internal_tasks (id, judul, assignee_id, assignee_division, due_date, status, created_by)
+VALUES ('TSK-RLS-0001', 'rls penugasan', 'EMP-RLS-CRE1', 'Creative', current_date, '[Ditugaskan]', 'EMP-RLS-SLSLEAD');
+
+SET LOCAL ROLE authenticated;
+
+-- (a) PIC.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRE1","division":"Creative","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM internal_tasks WHERE id='TSK-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS internal_tasks: PIC must read their own assignment'; END IF;
+END $$;
+
+-- (b) Pemberi tugas — lead SALES, sedangkan tugasnya milik divisi CREATIVE.
+--     Kalau arm `created_by` dicabut, check ini merah dan tidak ada arm lain
+--     yang menyelamatkannya.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLSLEAD","division":"Sales","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM internal_tasks WHERE id='TSK-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS internal_tasks: the assigner must keep reading what they assigned'; END IF;
+END $$;
+
+-- (c) Lead divisi tujuan.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRELEAD","division":"Creative","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM internal_tasks WHERE id='TSK-RLS-0001') <> 1
+  THEN RAISE EXCEPTION 'RLS internal_tasks: division lead must read their team assignment'; END IF;
+END $$;
+
+-- (d) KONTROL NEGATIF — staff divisi lain, lalu lead divisi lain yang juga
+--     bukan pemberi tugas. Keduanya harus NOL.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLS1","division":"Sales","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM internal_tasks WHERE id='TSK-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS internal_tasks: an unrelated staff member must read ZERO'; END IF;
+END $$;
+
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-SLSLEAD2","division":"Sales","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM internal_tasks WHERE id='TSK-RLS-0001') <> 0
+  THEN RAISE EXCEPTION 'RLS internal_tasks: a lead of ANOTHER division must read ZERO'; END IF;
+END $$;
+
+RESET ROLE;
+
+-- ---------------------------------------------------------------------------
 -- 42. O48 — LEDGER policy SELECT yang BELUM punya arm lead/divisi.
 --
 --     Keputusan pemilik 2026-08-07: pilihan **(b)** — perbaiki per tabel sesuai

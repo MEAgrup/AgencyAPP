@@ -87,6 +87,15 @@ export default function TasksListPage() {
           Workspace eksekusi task (M12) &mdash; Brief-as-task (Ads) &amp; Creative Asset. Filter status
           di sisi klien; tidak ada satu endpoint gabungan.
         </p>
+        {/* The question that sent people here by mistake: "di mana atasan memberi
+            task ke tim?". M12 executes CLIENT work that already exists, so the
+            answer is a different module entirely — say so at the top, not in a
+            doc nobody opens. */}
+        <p className="muted">
+          Mencari tempat <strong>memberi tugas ke anggota tim</strong> (di luar pekerjaan klien)?
+          Itu di <Link href="/penugasan">Penugasan Internal</Link>. Halaman ini hanya mengeksekusi
+          task yang lahir dari Brief klien.
+        </p>
       </div>
 
       {showOnboardingPointer && (
