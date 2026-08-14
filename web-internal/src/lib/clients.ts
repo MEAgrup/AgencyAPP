@@ -97,12 +97,22 @@ export function voidService(serviceId: string): Promise<VoidResult> {
   return api.post<VoidResult>(`/services/${serviceId}/void`);
 }
 
-/** T-2 / RM-2: Hold a running Service ([In Execution] → [On Hold]). Head of Account only; reason wajib. */
-export function holdService(serviceId: string, reason: string): Promise<{ ok: boolean }> {
+/** T-2b: AM MENGAJUKAN hold ([In Execution] → [Hold Requested]); reason wajib. Head lalu ACC/tolak. */
+export function requestHoldService(serviceId: string, reason: string): Promise<{ ok: boolean }> {
   return api.post<{ ok: boolean }>(`/services/${serviceId}/hold`, { reason });
 }
 
-/** T-2 / RM-2: Resume a held Service ([On Hold] → [In Execution]). Head of Account only. */
+/** T-2b: Head of Account MENYETUJUI hold ([Hold Requested] → [On Hold]). */
+export function approveHoldService(serviceId: string): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/services/${serviceId}/hold/approve`);
+}
+
+/** T-2b: Head of Account MENOLAK hold ([Hold Requested] → [In Execution]); reason opsional. */
+export function rejectHoldService(serviceId: string, reason?: string): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/services/${serviceId}/hold/reject`, { reason: reason ?? '' });
+}
+
+/** T-2b: Head of Account RESUME service ([On Hold] → [In Execution]). */
 export function resumeService(serviceId: string, reason?: string): Promise<{ ok: boolean }> {
   return api.post<{ ok: boolean }>(`/services/${serviceId}/resume`, { reason: reason ?? '' });
 }

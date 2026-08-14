@@ -143,10 +143,12 @@ check() { # nama · sql · harapan
 check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "113"
 check "entity_prefix"    "select count(*) from entity_prefix"    "34"
 check "sm_machines"      "select count(*) from sm_machines"      "22"
-check "notif_events"     "select count(*) from notif_events"     "48"
+check "notif_events"     "select count(*) from notif_events"     "52"
 # 21 = 20 + mesin #18 `weekly_result_recap` (Modul 6D D-02, 20260813020000:
 #      Terjadwal→Terbuka→Ditutup|Ditutup Otomatis→(Head)Terbuka). nol tabel/prefix
 #      baru di D-02.
+# 52 = 48 + 4 (v8: T-2c Hold Service two-step — service_hold_requested,
+#      service_held, service_hold_rejected, service_resumed; 20260814080000).
 # 48 = 44 + 4 (v7: M6D Rekap Hasil Mingguan — rekap_mingguan_terbuka,
 #      rekap_mingguan_belum_dikonfirmasi, rekap_sengketa_angka,
 #      catatan_divisi_belum_diisi wajib RM-8; 20260813070000_m6d_notif_v7.sql,

@@ -22,7 +22,9 @@ import {
   PAYMENT_INTENT_OPTIONS,
   editClient,
   getClient,
-  holdService,
+  requestHoldService,
+  approveHoldService,
+  rejectHoldService,
   resumeService,
   setPaymentIntent,
   voidService,
@@ -42,6 +44,7 @@ import {
 
 const VOIDED_STATUS = '[Cancelled — Service Voided]';
 const ON_HOLD_STATUS = '[On Hold]';
+const HOLD_REQUESTED_STATUS = '[Hold Requested]';
 const IN_EXECUTION_STATUS = '[In Execution]';
 
 function formatDate(value: string | null | undefined) {
@@ -78,8 +81,11 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const [voidError, setVoidError] = useState<string | null>(null);
   const [voidMessage, setVoidMessage] = useState<string | null>(null);
 
-  // Hold / Resume Service (T-2 / RM-2) — Head of Account (Account lead) or Director.
-  const canHoldService = isAccountLead(role) || !!role?.director;
+  // Hold Service two-step (T-2b / RM-2). AM (owner) / lead / Director may REQUEST;
+  // Head of Account (lead) / Director APPROVE / REJECT / RESUME. Server is final
+  // (owner check for a requesting staff AM happens there).
+  const canRequestHold = isAccountStaff(role) || isAccountLead(role) || !!role?.director;
+  const canApproveHold = isAccountLead(role) || !!role?.director;
   const [holdPendingId, setHoldPendingId] = useState<string | null>(null);
 
   // Payment Intent
@@ -150,19 +156,13 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     }
   }
 
-  async function handleHold(serviceId: string, serviceName: string) {
-    const reason = window.prompt(`Alasan hold service "${serviceName}"? (wajib)`);
-    if (reason === null) return; // cancelled
-    if (reason.trim() === '') {
-      setVoidError('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
-      return;
-    }
+  async function runHold(serviceId: string, fn: () => Promise<unknown>, ok: string) {
     setVoidError(null);
     setVoidMessage(null);
     setHoldPendingId(serviceId);
     try {
-      await holdService(serviceId, reason);
-      setVoidMessage(`Service "${serviceName}" berhasil di-hold.`);
+      await fn();
+      setVoidMessage(ok);
       await load();
     } catch (err) {
       setVoidError(errorMessage(err));
@@ -171,20 +171,30 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     }
   }
 
+  async function handleRequestHold(serviceId: string, serviceName: string) {
+    const reason = window.prompt(`Alasan ajukan hold service "${serviceName}"? (wajib)`);
+    if (reason === null) return; // cancelled
+    if (reason.trim() === '') {
+      setVoidError('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
+      return;
+    }
+    await runHold(serviceId, () => requestHoldService(serviceId, reason), `Pengajuan hold "${serviceName}" dikirim — menunggu ACC Head of Account.`);
+  }
+
+  async function handleApproveHold(serviceId: string, serviceName: string) {
+    if (!window.confirm(`Setujui pengajuan hold service "${serviceName}"?`)) return;
+    await runHold(serviceId, () => approveHoldService(serviceId), `Hold "${serviceName}" disetujui (On Hold).`);
+  }
+
+  async function handleRejectHold(serviceId: string, serviceName: string) {
+    const reason = window.prompt(`Alasan tolak hold "${serviceName}"? (opsional)`);
+    if (reason === null) return; // cancelled
+    await runHold(serviceId, () => rejectHoldService(serviceId, reason), `Pengajuan hold "${serviceName}" ditolak (kembali In Execution).`);
+  }
+
   async function handleResume(serviceId: string, serviceName: string) {
     if (!window.confirm(`Lanjutkan (resume) service "${serviceName}" dari On Hold?`)) return;
-    setVoidError(null);
-    setVoidMessage(null);
-    setHoldPendingId(serviceId);
-    try {
-      await resumeService(serviceId);
-      setVoidMessage(`Service "${serviceName}" dilanjutkan (In Execution).`);
-      await load();
-    } catch (err) {
-      setVoidError(errorMessage(err));
-    } finally {
-      setHoldPendingId(null);
-    }
+    await runHold(serviceId, () => resumeService(serviceId), `Service "${serviceName}" dilanjutkan (In Execution).`);
   }
 
   async function handleSetIntent(e: FormEvent) {
@@ -443,17 +453,42 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                             Onboarding &amp; Brief
                           </Link>
                         )}
-                        {canHoldService && s.status === IN_EXECUTION_STATUS && (
+                        {canRequestHold && s.status === IN_EXECUTION_STATUS && (
                           <button
                             type="button"
                             className="btn btnSecondary btnSm"
                             disabled={holdPendingId !== null}
-                            onClick={() => handleHold(s.id, s.name)}
+                            onClick={() => handleRequestHold(s.id, s.name)}
                           >
-                            {holdPendingId === s.id ? 'Memproses...' : 'Hold Service'}
+                            {holdPendingId === s.id ? 'Memproses...' : 'Ajukan Hold'}
                           </button>
                         )}
-                        {canHoldService && s.status === ON_HOLD_STATUS && (
+                        {s.status === HOLD_REQUESTED_STATUS && (
+                          <>
+                            <span className="badge badge-amber" title="Menunggu ACC Head of Account">Menunggu ACC</span>
+                            {canApproveHold && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="btn btnPrimary btnSm"
+                                  disabled={holdPendingId !== null}
+                                  onClick={() => handleApproveHold(s.id, s.name)}
+                                >
+                                  {holdPendingId === s.id ? '...' : 'Setujui Hold'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btnGhost btnSm"
+                                  disabled={holdPendingId !== null}
+                                  onClick={() => handleRejectHold(s.id, s.name)}
+                                >
+                                  {holdPendingId === s.id ? '...' : 'Tolak'}
+                                </button>
+                              </>
+                            )}
+                          </>
+                        )}
+                        {canApproveHold && s.status === ON_HOLD_STATUS && (
                           <button
                             type="button"
                             className="btn btnPrimary btnSm"
@@ -648,7 +683,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       </section>
 
       {/* T-4c (RM-11) — Upcoming Milestones terstruktur */}
-      <MilestonesSection clientId={id} canManage={canHoldService || isAccountStaff(role)} />
+      <MilestonesSection clientId={id} canManage={canRequestHold} />
     </div>
   );
 }

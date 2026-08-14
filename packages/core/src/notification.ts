@@ -119,6 +119,12 @@ export const EVENTS = {
   RekapSengketaAngka: 'rekap_sengketa_angka', // -> SPV
   CatatanDivisiBelumDiisi: 'catatan_divisi_belum_diisi', // -> division lead + AM
 
+  // v8 (T-2c) — Hold Service two-step approval flow.
+  ServiceHoldRequested: 'service_hold_requested', // -> Head of Account (Account leads)
+  ServiceHeld: 'service_held', // -> owning AM
+  ServiceHoldRejected: 'service_hold_rejected', // -> owning AM
+  ServiceResumed: 'service_resumed', // -> owning AM
+
 } as const;
 
 /** A cataloged event type. */
@@ -185,6 +191,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
       'M6D Rekap Hasil Mingguan — 4 event (rekap_mingguan_terbuka, rekap_mingguan_belum_dikonfirmasi, rekap_sengketa_angka, catatan_divisi_belum_diisi wajib RM-8)',
     eventCount: 4,
     decisionRef: 'docs/DECISIONS.md 2026-08-13 (RM-6 sign-off v7=48; RM-8 catatan divisi wajib)',
+  },
+  {
+    version: 8,
+    description:
+      'T-2c Hold Service two-step — 4 event (service_hold_requested → Head of Account; service_held / service_hold_rejected / service_resumed → AM pemilik)',
+    eventCount: 4,
+    decisionRef: 'docs/DECISIONS.md 2026-08-14 (T-2b/T-2c — hold dua-langkah + notif, keputusan pemilik)',
   },
 ] as const;
 
@@ -295,6 +308,12 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
   [EVENTS.RekapSengketaAngka]: { description: 'AM mengajukan Sengketa Angka atas angka otomatis (RM-B6/RM-C) — ke SPV', resolver: 'leadsOfDivision', version: 7 },
   [EVENTS.CatatanDivisiBelumDiisi]: { description: 'Divisi berutang catatan mingguan wajib (RM-8) belum mengisi saat rekap tutup — ke lead divisi + AM', resolver: 'explicitOrLeads', version: 7 },
 
+  // --- v8 (T-2c) — Hold Service two-step. Descriptions/resolvers must match the
+  // migration seed (20260814080000_t2b_hold_twostep.sql). ---
+  [EVENTS.ServiceHoldRequested]: { description: 'AM mengajukan Hold Service — ke Head of Account', resolver: 'leadsOfDivision', version: 8 },
+  [EVENTS.ServiceHeld]: { description: 'Hold Service disetujui Head of Account — ke AM pemilik', resolver: 'explicit', version: 8 },
+  [EVENTS.ServiceHoldRejected]: { description: 'Hold Service ditolak Head of Account — ke AM pemilik', resolver: 'explicit', version: 8 },
+  [EVENTS.ServiceResumed]: { description: 'Service dilanjutkan dari On Hold — ke AM pemilik', resolver: 'explicit', version: 8 },
 };
 
 /** All registered event types (introspection / tests). */

@@ -1,9 +1,7 @@
 /**
- * POST /api/v1/services/{id}/hold — T-2b / RM-2: the AM REQUESTS a hold
- * ([In Execution] → [Hold Requested]). Owning AM / Account lead / Director,
- * reason mandatory. Head of Account then approves/rejects (separate endpoints).
- * Notifies Head of Account. Incomplete → 400, Forbidden → 403, NotFound → 404,
- * wrong state → 409.
+ * POST /api/v1/services/{id}/hold/reject — T-2b: Head of Account REJECTS a hold
+ * request ([Hold Requested] → [In Execution]). Account lead / Director. Notifies
+ * the owning AM. Forbidden → 403, NotFound → 404, wrong state → 409.
  */
 import { client } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
@@ -15,7 +13,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     const actor = requireActor(request);
     const { id } = await ctx.params;
     const b = await readJson<{ reason?: string }>(request);
-    await client.requestHold(db(), actor, id, b.reason ?? '');
+    await client.rejectHold(db(), actor, id, b.reason ?? '');
     return json({ ok: true });
   });
 }
