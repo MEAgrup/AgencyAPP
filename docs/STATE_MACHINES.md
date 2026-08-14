@@ -257,3 +257,13 @@ The Ad Campaign is a **living** record that **outlives** its setup Brief (M8 §2
 - **GMV single-source (M6D §3):** `GMV Eksekusi (interim)` di rekap adalah Σ sumber yang sudah memiliki GMV (Ads/Live/affiliate), read-only, **bukan** GMV resmi. GMV bulanan otoritatif tetap entry manual AM di M6B P-E (Rule 11) — rekap tak pernah menulisnya.
 - **Rollup, bukan pengganti:** rekap `Ditutup` memasok PE-3/PE-8 periode Plan yang tertaut (M6B); untuk klien `Tanpa Plan` rekap berdiri sendiri sebagai satu-satunya catatan hasil periodik. Tak ada `PLAN-` yang wajib.
 - Menambah **nol grade baru** (M6D Rule 11): Health (M13) & Performance (M14) tetap membaca sumber yang sama seperti sebelumnya.
+
+## 16. Client Milestone `MLS-` (M6D / RM-11) — mesin baru (T-4c, sm_machines 21→22), Upcoming Milestones terstruktur
+`[Upcoming]` → `[Done]` | `[Cancelled]` (dua edge, keduanya terminal, `require_lead=false`).
+| From | To | Who (gate domain) | Effect |
+|---|---|---|---|
+| `[Upcoming]` | `[Done]` | Account (AM pemilik / lead) atau Director (`milestone.canManage`) | Tonggak tercapai |
+| `[Upcoming]` | `[Cancelled]` | idem | Tonggak dibatalkan |
+- Entitas per-klien (T-4c, keputusan pemilik 2026-08-14 "milestone terstruktur"): judul + tanggal target + status. Menggantikan catatan teks bebas RM-C9 untuk milestones.
+- Gerbang SIAPA di domain (`packages/domain/src/milestone.ts`), status **hanya** via `sm_transition` (house rule #2); riwayat immutable di `audit_log`. Baca via service-role + gate TS (`canView`: AM pemilik / Account lead / OD / Director), RLS `client_milestones_select` = kunci kedua (cermin `client_health_snapshots`).
+- Ditampilkan: halaman klien (kelola: tambah / selesai / batalkan) + blok read-only "Upcoming Milestones" di rekap mingguan (yang masih `[Upcoming]`, target terdekat dulu). Prefix `MLS-YYYYMM-NNNN` (registry). Migrasi `20260814070000_t4c_milestones.sql`.

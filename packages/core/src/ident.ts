@@ -89,6 +89,10 @@ export const PREFIXES = {
   // PREFIX-YYYYMM-NNNN via ident_next (same decision as STRG/PLAN/VND/ITV, not
   // the PRD's own form). Registered in entity_prefix by the D-01 migration.
   WRR: { entity: 'Rekap Hasil Mingguan', module: 'M6D' },
+  // T-4c — Upcoming Milestones terstruktur (RM-11). One per client tonggak, machine
+  // `client_milestone` ([Upcoming]→[Done]|[Cancelled]). Registered in entity_prefix
+  // by 20260814070000_t4c_milestones.sql. House form PREFIX-YYYYMM-NNNN.
+  MLS: { entity: 'Client Milestone (Upcoming Milestones)', module: 'M6D' },
 } as const satisfies Record<string, PrefixInfo>;
 
 /** A registered prefix string (e.g. 'CLI', 'TRX'). */

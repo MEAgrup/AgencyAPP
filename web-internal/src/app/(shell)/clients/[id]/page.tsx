@@ -30,6 +30,15 @@ import {
   type FieldChange,
 } from '@/lib/clients';
 import StatusBadge from '@/components/StatusBadge';
+import {
+  createMilestone,
+  listMilestones,
+  transitionMilestone,
+  MILESTONE_UPCOMING,
+  MILESTONE_DONE,
+  MILESTONE_CANCELLED,
+  type Milestone,
+} from '@/lib/milestone';
 
 const VOIDED_STATUS = '[Cancelled — Service Voided]';
 const ON_HOLD_STATUS = '[On Hold]';
@@ -637,6 +646,151 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           </div>
         </form>
       </section>
+
+      {/* T-4c (RM-11) — Upcoming Milestones terstruktur */}
+      <MilestonesSection clientId={id} canManage={canHoldService || isAccountStaff(role)} />
     </div>
+  );
+}
+
+/**
+ * MilestonesSection — T-4c / RM-11 Upcoming Milestones. Self-contained (fetches
+ * its own list) so it never complicates the client page's main load. canManage
+ * mirrors the server gate (Account any level / Director); OD is read-only.
+ */
+function MilestonesSection({ clientId, canManage }: { clientId: string; canManage: boolean }) {
+  const [rows, setRows] = useState<Milestone[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [title, setTitle] = useState('');
+  const [targetDate, setTargetDate] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const res = await listMilestones(clientId);
+      setRows(res.data);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }, [clientId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function add(e: FormEvent) {
+    e.preventDefault();
+    if (title.trim() === '' || targetDate === '') {
+      setError('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await createMilestone(clientId, title.trim(), targetDate);
+      setTitle('');
+      setTargetDate('');
+      await load();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function move(id: string, to: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await transitionMilestone(id, to);
+      await load();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card">
+      <h2>Upcoming Milestones</h2>
+      <p className="muted" style={{ marginBottom: '12px' }}>
+        Tonggak yang akan datang untuk klien ini (judul + tanggal target). Ditandai selesai atau dibatalkan.
+      </p>
+      {error && <div className="alert alertError" role="alert">{error}</div>}
+
+      {rows === null ? (
+        <p className="muted">Memuat...</p>
+      ) : rows.length === 0 ? (
+        <p className="muted">Belum ada milestone.</p>
+      ) : (
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Tonggak</th>
+                <th>Tanggal Target</th>
+                <th>Status</th>
+                {canManage && <th style={{ textAlign: 'center' }}>Aksi</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((m) => (
+                <tr key={m.id}>
+                  <td>{m.title}</td>
+                  <td>{m.target_date}</td>
+                  <td>
+                    <span
+                      className={`badge ${
+                        m.status === MILESTONE_DONE ? 'badge-green' : m.status === MILESTONE_CANCELLED ? 'badge-red' : 'badge-amber'
+                      }`}
+                    >
+                      {m.status}
+                    </span>
+                  </td>
+                  {canManage && (
+                    <td style={{ textAlign: 'center' }}>
+                      {m.status === MILESTONE_UPCOMING ? (
+                        <div className="row" style={{ gap: 6, justifyContent: 'center' }}>
+                          <button className="btn btnPrimary btnSm" disabled={busy} onClick={() => move(m.id, MILESTONE_DONE)}>
+                            Selesai
+                          </button>
+                          <button className="btn btnGhost btnSm" disabled={busy} onClick={() => move(m.id, MILESTONE_CANCELLED)}>
+                            Batalkan
+                          </button>
+                        </div>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {canManage && (
+        <form onSubmit={add} className="form" style={{ marginTop: '16px' }}>
+          <div className="formRow">
+            <div className="field">
+              <label htmlFor="mls-title">Tonggak baru</label>
+              <input id="mls-title" type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="mis. Launch campaign Ramadhan" />
+            </div>
+            <div className="field">
+              <label htmlFor="mls-date">Tanggal Target</label>
+              <input id="mls-date" type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <button type="submit" className="btn btnPrimary" disabled={busy}>
+              {busy ? 'Menyimpan...' : 'Tambah Milestone'}
+            </button>
+          </div>
+        </form>
+      )}
+    </section>
   );
 }

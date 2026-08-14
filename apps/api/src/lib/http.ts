@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { account, activity, admin, ads, auth, board, campaign, client, creative, demo, directory, finance, health, kol, leads, livestream, marketing, msl, notification, performance, portal, sales, task } from '@cdps/domain';
+import { account, activity, admin, ads, auth, board, campaign, client, creative, demo, directory, finance, health, kol, leads, livestream, marketing, milestone, msl, notification, performance, portal, sales, task } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -72,6 +72,7 @@ export function mapError(err: unknown): Response {
     err instanceof livestream.ValidationError ||
     err instanceof campaign.ValidationError ||
     err instanceof marketing.ValidationError ||
+    err instanceof milestone.ValidationError ||
     err instanceof notification.ValidationError ||
     err instanceof admin.ValidationError ||
     err instanceof auth.PasswordPolicyError
@@ -96,6 +97,7 @@ export function mapError(err: unknown): Response {
     err instanceof livestream.NotFoundError ||
     err instanceof campaign.NotFoundError ||
     err instanceof marketing.NotFoundError ||
+    err instanceof milestone.NotFoundError ||
     err instanceof admin.NotFoundError ||
     err instanceof auth.EmployeeNotFoundError
   ) {
@@ -119,6 +121,7 @@ export function mapError(err: unknown): Response {
     err instanceof livestream.ForbiddenError ||
     err instanceof campaign.ForbiddenError ||
     err instanceof marketing.ForbiddenError ||
+    err instanceof milestone.ForbiddenError ||
     err instanceof portal.ForbiddenError ||
     err instanceof admin.ForbiddenError ||
     err instanceof directory.ForbiddenError ||
@@ -149,6 +152,7 @@ export function mapError(err: unknown): Response {
     err instanceof board.ConflictError ||
     err instanceof livestream.ConflictError ||
     err instanceof marketing.DuplicateError ||
+    err instanceof milestone.ConflictError ||
     err instanceof admin.ConflictError
   ) {
     // Lifecycle conflicts: a dedup block, an un-closable attempt, a lead whose

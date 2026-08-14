@@ -177,7 +177,7 @@ jobs:
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
-               if (select count(*) from sm_machines) <> 21 then raise exception 'expected 21 machines'; end if;
+               if (select count(*) from sm_machines) <> 22 then raise exception 'expected 22 machines'; end if;
                if (select count(*) from notif_events) <> 48 then raise exception 'expected 48 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
@@ -254,12 +254,12 @@ jobs:
       #       jangkar mulai/submit riset awal — nol kolom durasi).
       # 112 = 107 + 5 tabel Modul 6D D-01 (20260813010000): weekly_result_recap +
       #       wrr_divisi + wrr_metrik + wrr_catatan + wrr_catatan_divisi.
-      - name: Verify table count (expect 112)
+      - name: Verify table count (expect 113)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 112
+          test "$n" -eq 113
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this
@@ -267,11 +267,11 @@ jobs:
       # ID-minting call site. A count gate here catches a migration that lands
       # without its registry row.
       # 33 = 32 + WRR (Modul 6D D-01, 20260813010000: Rekap Hasil Mingguan).
-      - name: Verify entity_prefix registry (expect 33)
+      - name: Verify entity_prefix registry (expect 34)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc "select count(*) from entity_prefix;")
           echo "entity_prefix rows: $n"
-          test "$n" -eq 33
+          test "$n" -eq 34
       - name: Invariant — ID generator (gap-free, WIB period)
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/ident_checks.sql
       - name: Invariant — append-only history (immutability)

@@ -40,6 +40,7 @@ import {
   type RecapDetail,
   type RecapMetrik,
 } from '@/lib/recap';
+import { listMilestones, MILESTONE_UPCOMING, type Milestone } from '@/lib/milestone';
 
 // T-3/T-4b: CPC (Rp/klik), CPM (Rp/1000 impresi), CPL (Rp/lead) are money; CTR/CVR are %.
 const MONEY_METRICS = new Set(['gmv_interim', 'ad_spend', 'cpc', 'cpm', 'cpl']);
@@ -343,6 +344,9 @@ export default function RekapDetailPage({ params }: { params: Promise<{ id: stri
         {canEdit && <ManualMetrikForm id={id} detail={detail} busy={busy} run={run} />}
       </section>
 
+      {/* RM-11 (T-4c) — Upcoming Milestones (read-only di rekap; kelola di halaman klien) */}
+      <RecapUpcomingMilestones clientId={detail.recap.client_id} />
+
       {/* RM-D + RM-C9 — Narasi */}
       <section>
         <h2>Narasi Mingguan</h2>
@@ -491,5 +495,49 @@ function ManualMetrikForm({
       )}
       <button type="submit" className="btn" disabled={busy}>Simpan</button>
     </form>
+  );
+}
+
+/**
+ * RecapUpcomingMilestones — T-4c / RM-11 read-only block in the weekly recap.
+ * Shows the client's still-[Upcoming] milestones, soonest first. Management
+ * (add / mark done / cancel) lives on the client page; the recap only surfaces
+ * what's coming. Self-contained fetch so it never blocks the recap's main load.
+ */
+function RecapUpcomingMilestones({ clientId }: { clientId: string }) {
+  const [rows, setRows] = useState<Milestone[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    listMilestones(clientId)
+      .then((res) => {
+        if (alive) setRows(res.data.filter((m) => m.status === MILESTONE_UPCOMING));
+      })
+      .catch(() => {
+        if (alive) setRows([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [clientId]);
+
+  if (rows === null || rows.length === 0) return null;
+  return (
+    <section>
+      <h2>Upcoming Milestones</h2>
+      <table className="table">
+        <thead>
+          <tr><th>Tonggak</th><th>Tanggal Target</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((m) => (
+            <tr key={m.id}>
+              <td>{m.title}</td>
+              <td>{m.target_date}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
   );
 }
