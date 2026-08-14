@@ -132,6 +132,7 @@ export const METRIK_LABELS: Record<string, string> = {
   cvr: 'CVR',
   cpc: 'CPC',
   cpm: 'CPM',
+  cpl: 'CPL',
 };
 
 /** T-4a: label for the derived blended view summary (paid total_view + organik). */

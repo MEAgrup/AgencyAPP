@@ -183,6 +183,8 @@ describeDb('wrr_aggregate — auto figures from M7/M8/M9/M10 (D-03)', () => {
     expect(Number(m.cvr.nilai)).toBeCloseTo(10.0, 2);
     expect(Number(m.cpc.nilai)).toBeCloseTo(6100, 2);
     expect(Number(m.cpm.nilai)).toBeCloseTo(122000, 2);
+    // T-4b: CPL blended = Σspend/Σconversions = 6.1jt/100 = 61000.00.
+    expect(Number(m.cpl.nilai)).toBeCloseTo(61000, 2);
   });
 
   it('renders ROAS as `—` (NULL) on zero spend, never a divide error (house #7)', async () => {
@@ -210,8 +212,8 @@ describeDb('wrr_aggregate — auto figures from M7/M8/M9/M10 (D-03)', () => {
     // T-3: no clicks/impressions/conversions on the entry ⇒ CTR/CVR/CPC/CPM = `—`
     // (NULL otomatis), never a divide error (house #7).
     const ratios = await sql<{ metrik: string; nilai: string | null }[]>`
-      select metrik, nilai from wrr_metrik where recap_id = ${R2} and metrik in ('ctr','cvr','cpc','cpm')`;
-    expect(ratios).toHaveLength(4);
+      select metrik, nilai from wrr_metrik where recap_id = ${R2} and metrik in ('ctr','cvr','cpc','cpm','cpl')`;
+    expect(ratios).toHaveLength(5);
     for (const r of ratios) expect(r.nilai).toBeNull();
     await sql`delete from metric_entries where campaign_id = ${A2}`;
     await sql`delete from ad_campaigns where id = ${A2}`;
