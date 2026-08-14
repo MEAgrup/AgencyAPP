@@ -57,6 +57,10 @@ export const MSG_ASSET_CREATE_FORBIDDEN = '[anda tidak memiliki akses untuk memb
 export const MSG_BRIEF_NOT_ASSETABLE = '[aset tidak dapat dibuat untuk brief pada status ini]';
 export const MSG_INVALID_SEQUENCE = '[nomor urut aset harus antara 1 dan jumlah target brief]';
 export const MSG_DUPLICATE_SEQUENCE = '[nomor urut aset sudah digunakan pada brief ini]';
+/** Fan-out by quantity (§3 Rule 4): each assignment line needs a whole positive count. */
+export const MSG_INVALID_QUANTITY = '[jumlah aset yang di-assign harus bilangan bulat lebih dari 0]';
+/** The batch asks for more units than the Brief's Quantity/Target still has free (§9.3). */
+export const MSG_QUANTITY_EXCEEDS_TARGET = '[jumlah aset melebihi sisa target brief]';
 export const MSG_INVALID_PIC = '[PIC tidak valid: harus staff divisi Creative yang aktif]';
 export const MSG_REVIEW_FORBIDDEN = '[hanya Account Manager pemilik klien yang dapat mereview aset ini]';
 export const MSG_REVISION_FEEDBACK_REQUIRED = '[feedback revisi wajib diisi]';
@@ -104,6 +108,19 @@ export class ConflictError extends Error {
 export interface AssetInput {
   sequenceNo: number;
   assignedPic?: string;
+}
+
+/**
+ * One line of a fan-out batch: HOW MANY units of the Brief go to WHICH PIC
+ * (M7 §3 Rule 4 — "a 12-video Brief split between two Videographers"). The
+ * Sequence #s are allocated by the server from the Brief's free slots, because
+ * the position within the Quantity/Target is bookkeeping, not an assignment
+ * decision — nobody assigning 10 videos to Rian is choosing which ten.
+ * An empty `assignedPic` keeps the §4 Flow 1 self-claim behaviour.
+ */
+export interface AssetAssignment {
+  assignedPic?: string;
+  quantity: number;
 }
 
 /** One Asset record (AST-). */
@@ -199,60 +216,149 @@ async function validateCreativeStaff(tx: Queryable, picId: string): Promise<void
 export async function createAsset(sql: Sql, actor: Actor, briefId: string, input: AssetInput): Promise<Asset> {
   const now = new Date();
   return withTransaction(sql, async (tx) => {
-    const ex = executors(tx);
-    const briefRows = await tx<{ assigned_division: string; status: string; deliverable_type: string; quantity_target: number }[]>`
-      select assigned_division, status, deliverable_type, quantity_target from briefs where id = ${briefId} for update`;
-    if (briefRows.length === 0) {
-      throw new NotFoundError(MSG_BRIEF_NOT_FOUND);
-    }
-    const brief = briefRows[0];
-    if (brief.assigned_division !== CREATIVE_DIVISION) {
-      throw new ConflictError(MSG_NOT_CREATIVE_BRIEF);
-    }
-    if (brief.status === STATUS_APPROVED || brief.status === SERVICE_VOIDED) {
-      throw new ConflictError(MSG_BRIEF_NOT_ASSETABLE);
-    }
-    if (!canCreateAsset(actor)) {
-      throw new ForbiddenError(MSG_ASSET_CREATE_FORBIDDEN);
-    }
+    const brief = await lockAssetableBrief(tx, actor, briefId);
     // §9.3 Sequence # mandatory, within 1..Quantity/Target.
     if ((input.sequenceNo ?? 0) <= 0) {
       throw new ValidationError(bi.INCOMPLETE_DATA);
     }
-    if (input.sequenceNo > brief.quantity_target) {
+    if (input.sequenceNo > brief.quantityTarget) {
       throw new ValidationError(MSG_INVALID_SEQUENCE);
     }
     const dup = await tx<{ id: string }[]>`select id from assets where brief_id = ${briefId} and sequence_no = ${input.sequenceNo}`;
     if (dup.length > 0) {
       throw new ConflictError(MSG_DUPLICATE_SEQUENCE);
     }
-
-    // Resolve the PIC: explicit value validated; a self-claiming staff member
-    // defaults to themselves; a lead may leave it unassigned.
-    let picId = (input.assignedPic ?? '').trim();
-    if (picId === '' && actor.role.division === CREATIVE_DIVISION && actor.role.level === permission.LevelStaff) {
-      picId = actor.employeeId; // self-claim (§4 Flow 1)
-    }
-    if (picId !== '') {
-      await validateCreativeStaff(tx, picId);
-    }
-
-    const id = await ex.ident.identNext('AST', now);
-    await tx`
-      insert into assets (id, brief_id, asset_type, sequence_no, assigned_pic, status, created_by)
-      values (${id}, ${briefId}, ${brief.deliverable_type}, ${input.sequenceNo}, ${picId || null}, ${STATUS_TODO}, ${actor.employeeId})`;
-    await ex.audit.insertAudit({
-      entityType: 'asset', entityId: id, actorEmployeeId: actor.employeeId, action: 'create',
-      beforeJson: null,
-      afterJson: { status: STATUS_TODO, brief_id: briefId, sequence_no: input.sequenceNo, asset_type: brief.deliverable_type },
-      createdBy: actor.employeeId,
-    });
-    return {
-      id, briefId, assetType: brief.deliverable_type, sequenceNo: input.sequenceNo, assignedPic: picId,
-      outputLink: '', status: STATUS_TODO, slaTargetHours: null, revisionSlaHours: null, hoursLogged: null,
-      attributedGmv: null, revisionCount: 0, revisionFlagged: false, createdBy: actor.employeeId, createdAt: now,
-    };
+    const picId = await resolveAssetPic(tx, actor, input.assignedPic);
+    return insertAsset(tx, actor, briefId, brief.deliverableType, input.sequenceNo, picId, now);
   });
+}
+
+/**
+ * createAssetBatch is the fan-out door as the work is actually handed out (M7 §3
+ * Rule 4): one line per PIC saying HOW MANY units they take — "10 videos to Rian,
+ * 10 to Dita" or all 30 to one person — instead of one submit per Sequence #.
+ *
+ * The Sequence #s come from the Brief's still-free slots in ascending order, so
+ * §9.3's mandatory, unique-per-Brief Sequence # holds without anyone typing it.
+ * Everything happens in ONE transaction under the Brief's row lock: two leads
+ * fanning out the same Brief concurrently cannot be handed the same slot, and a
+ * batch that overruns the Quantity/Target creates nothing at all.
+ *
+ * A line with an empty PIC keeps §4 Flow 1's self-claim (a Creative staffer
+ * becomes the PIC of their own rows); a lead may leave it unassigned for the
+ * general queue.
+ */
+export async function createAssetBatch(sql: Sql, actor: Actor, briefId: string, lines: AssetAssignment[]): Promise<Asset[]> {
+  const now = new Date();
+  if (lines.length === 0) {
+    throw new ValidationError(bi.INCOMPLETE_DATA);
+  }
+  for (const line of lines) {
+    if (!Number.isInteger(line.quantity) || line.quantity <= 0) {
+      throw new ValidationError(MSG_INVALID_QUANTITY);
+    }
+  }
+  return withTransaction(sql, async (tx) => {
+    const brief = await lockAssetableBrief(tx, actor, briefId);
+    // The free slots of 1..Quantity/Target — Assets are created incrementally
+    // (§4 Rule 1 / M7-OA-6), so earlier batches have already taken some.
+    const taken = await tx<{ sequence_no: number }[]>`select sequence_no from assets where brief_id = ${briefId}`;
+    const used = new Set(taken.map((r) => Number(r.sequence_no)));
+    const free: number[] = [];
+    for (let n = 1; n <= brief.quantityTarget; n += 1) {
+      if (!used.has(n)) {
+        free.push(n);
+      }
+    }
+    const total = lines.reduce((sum, line) => sum + line.quantity, 0);
+    if (total > free.length) {
+      throw new ValidationError(MSG_QUANTITY_EXCEEDS_TARGET);
+    }
+
+    const out: Asset[] = [];
+    let next = 0;
+    for (const line of lines) {
+      // Validated once per line, not once per unit: same PIC, same answer.
+      const picId = await resolveAssetPic(tx, actor, line.assignedPic);
+      for (let i = 0; i < line.quantity; i += 1) {
+        out.push(await insertAsset(tx, actor, briefId, brief.deliverableType, free[next], picId, now));
+        next += 1;
+      }
+    }
+    return out;
+  });
+}
+
+/** The Brief fields both Asset-creation doors need, read under a row lock. */
+interface AssetableBrief {
+  deliverableType: string;
+  quantityTarget: number;
+}
+
+/**
+ * lockAssetableBrief row-locks the parent Brief and enforces the shared §4 gate:
+ * the Brief exists, belongs to Creative, is not already closed out, and the actor
+ * may break it down. The lock is what makes Sequence # allocation safe.
+ */
+async function lockAssetableBrief(tx: Queryable, actor: Actor, briefId: string): Promise<AssetableBrief> {
+  const rows = await tx<{ assigned_division: string; status: string; deliverable_type: string; quantity_target: number }[]>`
+    select assigned_division, status, deliverable_type, quantity_target from briefs where id = ${briefId} for update`;
+  if (rows.length === 0) {
+    throw new NotFoundError(MSG_BRIEF_NOT_FOUND);
+  }
+  const brief = rows[0];
+  if (brief.assigned_division !== CREATIVE_DIVISION) {
+    throw new ConflictError(MSG_NOT_CREATIVE_BRIEF);
+  }
+  if (brief.status === STATUS_APPROVED || brief.status === SERVICE_VOIDED) {
+    throw new ConflictError(MSG_BRIEF_NOT_ASSETABLE);
+  }
+  if (!canCreateAsset(actor)) {
+    throw new ForbiddenError(MSG_ASSET_CREATE_FORBIDDEN);
+  }
+  return { deliverableType: brief.deliverable_type, quantityTarget: Number(brief.quantity_target) };
+}
+
+/**
+ * resolveAssetPic resolves one assignment target: an explicit value is validated
+ * as active Creative staff; a self-claiming staff member defaults to themselves
+ * (§4 Flow 1); a lead may leave it unassigned ('' → NULL, general queue).
+ */
+async function resolveAssetPic(tx: Queryable, actor: Actor, assignedPic?: string): Promise<string> {
+  let picId = (assignedPic ?? '').trim();
+  if (picId === '' && actor.role.division === CREATIVE_DIVISION && actor.role.level === permission.LevelStaff) {
+    picId = actor.employeeId; // self-claim (§4 Flow 1)
+  }
+  if (picId !== '') {
+    await validateCreativeStaff(tx, picId);
+  }
+  return picId;
+}
+
+/**
+ * insertAsset mints the AST- id (house rule 1: only after validation passes),
+ * writes the row born `[To Do]` (a creation, not a transition — house rule 2) and
+ * appends its immutable creation audit line (house rule 3).
+ */
+async function insertAsset(
+  tx: Queryable, actor: Actor, briefId: string, assetType: string, sequenceNo: number, picId: string, now: Date,
+): Promise<Asset> {
+  const ex = executors(tx);
+  const id = await ex.ident.identNext('AST', now);
+  await tx`
+    insert into assets (id, brief_id, asset_type, sequence_no, assigned_pic, status, created_by)
+    values (${id}, ${briefId}, ${assetType}, ${sequenceNo}, ${picId || null}, ${STATUS_TODO}, ${actor.employeeId})`;
+  await ex.audit.insertAudit({
+    entityType: 'asset', entityId: id, actorEmployeeId: actor.employeeId, action: 'create',
+    beforeJson: null,
+    afterJson: { status: STATUS_TODO, brief_id: briefId, sequence_no: sequenceNo, asset_type: assetType },
+    createdBy: actor.employeeId,
+  });
+  return {
+    id, briefId, assetType, sequenceNo, assignedPic: picId,
+    outputLink: '', status: STATUS_TODO, slaTargetHours: null, revisionSlaHours: null, hoursLogged: null,
+    attributedGmv: null, revisionCount: 0, revisionFlagged: false, createdBy: actor.employeeId, createdAt: now,
+  };
 }
 
 // --- AM-side review edges (§4 Flow 3 / §6) ---

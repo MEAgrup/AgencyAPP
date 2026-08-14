@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useCallback, useEffect, useState, type FormEvent } from 'react';
+import { Fragment, use, useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -8,7 +8,7 @@ import { LEVEL_STAFF, useAssignableEmployees } from '@/lib/directory';
 import EmployeePicker from '@/components/EmployeePicker';
 import {
   CREATIVE_DIVISION,
-  createAsset,
+  createAssetBatch,
   getBrief,
   isCreativeDivision,
   isDirector,
@@ -19,6 +19,25 @@ import {
 } from '@/lib/creative';
 import StatusBadge from '@/components/StatusBadge';
 
+/**
+ * Fan-out is an ASSIGNMENT door (M7 §3 Rule 4): one line per PIC saying how many
+ * units of the Brief they take — "10 video ke Rian, 10 ke Dita", or all 30 to one
+ * person. The Sequence # is not asked for: it is the position within the Brief's
+ * Quantity/Target (§9.3), allocated server-side from the free slots, because
+ * whoever hands out 10 videos is not choosing WHICH ten.
+ */
+const FANOUT_MAX_ROWS = 10;
+
+interface FanoutRow {
+  key: number;
+  assigned_pic: string;
+  quantity: string; // integer string ("" => baris dilewati)
+}
+
+function emptyFanoutRow(key: number): FanoutRow {
+  return { key, assigned_pic: '', quantity: '' };
+}
+
 export default function CreativeBriefDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { role } = useAuth();
@@ -28,9 +47,10 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Fan-out: buat Asset baru
-  const [sequenceNo, setSequenceNo] = useState('');
-  const [assignedPic, setAssignedPic] = useState('');
+  // Fan-out: assign sejumlah unit Brief ke tiap PIC (satu submit, satu transaksi)
+  const [fanoutRows, setFanoutRows] = useState<FanoutRow[]>(() => [emptyFanoutRow(0), emptyFanoutRow(1)]);
+  const [rowErrors, setRowErrors] = useState<Record<number, string>>({});
+  const rowKeyCounter = useRef(2);
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createMessage, setCreateMessage] = useState<string | null>(null);
@@ -64,20 +84,66 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
     error: picError,
   } = useAssignableEmployees(CREATIVE_DIVISION, LEVEL_STAFF, canCreateAsset);
 
-  async function handleCreateAsset(e: FormEvent) {
+  function updateRow(key: number, patch: Partial<FanoutRow>) {
+    setFanoutRows((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  }
+
+  function addRow() {
+    setFanoutRows((rows) =>
+      rows.length >= FANOUT_MAX_ROWS ? rows : [...rows, emptyFanoutRow(rowKeyCounter.current++)],
+    );
+  }
+
+  function removeRow(key: number) {
+    setFanoutRows((rows) => (rows.length <= 1 ? rows : rows.filter((r) => r.key !== key)));
+    setRowErrors((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
+  async function handleCreateAssets(e: FormEvent) {
     e.preventDefault();
     setCreateError(null);
     setCreateMessage(null);
+    setRowErrors({});
+
+    // Baris yang benar-benar kosong dilewati tanpa error (pola batch M9).
+    const intended = fanoutRows.filter((r) => !(r.quantity.trim() === '' && r.assigned_pic === ''));
+    if (intended.length === 0) {
+      setCreateError('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
+      return;
+    }
+    const errors: Record<number, string> = {};
+    for (const r of intended) {
+      const qty = Number(r.quantity);
+      if (r.quantity.trim() === '' || !Number.isInteger(qty) || qty <= 0) {
+        errors[r.key] = '[jumlah aset yang di-assign harus bilangan bulat lebih dari 0]';
+      }
+    }
+    if (Object.keys(errors).length > 0) {
+      setRowErrors(errors);
+      setCreateError('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
+      return;
+    }
+
     setCreateSubmitting(true);
     try {
-      const seq = Number(sequenceNo);
-      const asset = await createAsset(id, {
-        sequence_no: seq,
-        assigned_pic: assignedPic || undefined,
-      });
-      setCreateMessage(`Asset ${asset.id} berhasil dibuat (urutan #${asset.sequence_no}).`);
-      setSequenceNo('');
-      setAssignedPic('');
+      // Satu POST untuk seluruh batch: Sequence # dialokasikan server-side dan
+      // seluruh batch gagal bersama kalau melebihi sisa target Brief.
+      const res = await createAssetBatch(
+        id,
+        intended.map((r) => ({
+          assigned_pic: r.assigned_pic || undefined,
+          quantity: Number(r.quantity),
+        })),
+      );
+      const created = res.data;
+      setCreateMessage(
+        `${created.length} Asset dibuat (${created[0]?.id ?? '—'}${created.length > 1 ? ` s/d ${created[created.length - 1].id}` : ''}).`,
+      );
+      setFanoutRows([emptyFanoutRow(rowKeyCounter.current++), emptyFanoutRow(rowKeyCounter.current++)]);
       await load();
     } catch (err) {
       setCreateError(errorMessage(err));
@@ -99,6 +165,13 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
 
   const isOtherDivision = brief.assigned_division !== CREATIVE_DIVISION;
   const createdCount = assets?.length ?? 0;
+  // Advisory only — the server re-derives both under the Brief's row lock and
+  // rejects an overrun batch wholesale (§9.3 Sequence # unique per Brief).
+  const remainingSlots = Math.max(0, brief.quantity_target - createdCount);
+  const plannedTotal = fanoutRows.reduce((sum, r) => {
+    const n = Number(r.quantity);
+    return sum + (Number.isInteger(n) && n > 0 ? n : 0);
+  }, 0);
 
   return (
     <div className="stack">
@@ -216,45 +289,107 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
       {canCreateAsset && (
         <section className="card">
           <div className="cardHeader">
-            <h2>Fan-out Asset Baru</h2>
+            <h2>Assign Asset ke PIC</h2>
           </div>
           <p className="muted" style={{ fontSize: 13 }}>
-            Kosongkan PIC untuk self-claim (staff Creative). Lead boleh menetapkan PIC eksplisit.
+            Tentukan <strong>berapa unit</strong> yang dikerjakan tiap orang — mis. 10 video ke A, 10 ke
+            B, atau seluruhnya ke satu orang. Nomor urut Asset ditetapkan otomatis dari slot yang masih
+            kosong (bukan diisi manual). Kosongkan PIC untuk self-claim (staff Creative) atau untuk
+            melempar ke queue umum Creative (Lead). Sisa slot Brief:{' '}
+            <strong>{remainingSlots}</strong> dari {brief.quantity_target}.
           </p>
-          <form className="form" onSubmit={handleCreateAsset}>
+          <form className="form" onSubmit={handleCreateAssets}>
             {createError && <div className="alert alertError" role="alert">{createError}</div>}
             {createMessage && <div className="alert alertSuccess" role="status">{createMessage}</div>}
-            <div className="formRow">
-              <div className="field">
-                <label htmlFor="asset-sequence">Nomor Urut (1 s/d {brief.quantity_target})</label>
-                <input
-                  id="asset-sequence"
-                  type="number"
-                  min="1"
-                  max={brief.quantity_target}
-                  required
-                  value={sequenceNo}
-                  onChange={(e) => setSequenceNo(e.target.value)}
-                />
-              </div>
-              {/* Left empty by a Creative staffer = self-claim (§4 Flow 1), which
-                  is why this stays optional and the hint says so. */}
-              <EmployeePicker
-                id="asset-pic"
-                label="PIC (kosongkan untuk self-claim)"
-                employees={picCandidates}
-                loading={picLoading}
-                error={picError}
-                value={assignedPic}
-                onChange={setAssignedPic}
-                emptyHint="Belum ada staff Creative aktif. Biarkan kosong — staff yang membuat Asset otomatis menjadi PIC-nya."
-              />
+
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th style={{ width: '4%' }}>#</th>
+                    <th>PIC (kosongkan untuk self-claim)</th>
+                    <th style={{ width: '22%' }}>Jumlah Asset *</th>
+                    <th style={{ width: '4%' }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fanoutRows.map((r, idx) => (
+                    <Fragment key={r.key}>
+                      <tr>
+                        <td className="muted">{idx + 1}</td>
+                        <td>
+                          <EmployeePicker
+                            id={`asset-pic-${r.key}`}
+                            label={`PIC baris ${idx + 1}`}
+                            employees={picCandidates}
+                            loading={picLoading}
+                            error={picError}
+                            value={r.assigned_pic}
+                            onChange={(v) => updateRow(r.key, { assigned_pic: v })}
+                            emptyHint="Belum ada staff Creative aktif. Biarkan kosong — staff yang membuat Asset otomatis menjadi PIC-nya."
+                          />
+                        </td>
+                        <td>
+                          <input
+                            aria-label={`Jumlah Asset baris ${idx + 1}`}
+                            type="number"
+                            min="1"
+                            step="1"
+                            max={remainingSlots}
+                            value={r.quantity}
+                            onChange={(e) => updateRow(r.key, { quantity: e.target.value })}
+                          />
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btnSecondary btnSm"
+                            aria-label={`Hapus baris ${idx + 1}`}
+                            onClick={() => removeRow(r.key)}
+                            disabled={fanoutRows.length <= 1}
+                          >
+                            ✕
+                          </button>
+                        </td>
+                      </tr>
+                      {rowErrors[r.key] && (
+                        <tr>
+                          <td></td>
+                          <td colSpan={3} style={{ color: 'var(--color-danger, #c0392b)', fontSize: 12 }}>
+                            {rowErrors[r.key]}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            <div>
-              <button type="submit" className="btn btnPrimary" disabled={createSubmitting}>
-                {createSubmitting ? 'Menyimpan...' : 'Buat Asset'}
+
+            <div className="row" style={{ gap: 8, justifyContent: 'space-between', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btnSecondary btnSm"
+                onClick={addRow}
+                disabled={fanoutRows.length >= FANOUT_MAX_ROWS}
+              >
+                + Tambah PIC ({fanoutRows.length}/{FANOUT_MAX_ROWS})
               </button>
+              <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+                <span className="muted" style={{ fontSize: 13 }}>
+                  Total di-assign: <strong>{plannedTotal}</strong>
+                  {plannedTotal > remainingSlots && ' — melebihi sisa slot'}
+                </span>
+                <button type="submit" className="btn btnPrimary" disabled={createSubmitting || remainingSlots === 0}>
+                  {createSubmitting ? 'Menyimpan...' : 'Assign & Buat Asset'}
+                </button>
+              </div>
             </div>
+            {remainingSlots === 0 && (
+              <p className="muted" style={{ fontSize: 12 }}>
+                Semua {brief.quantity_target} unit Brief ini sudah dibuat sebagai Asset.
+              </p>
+            )}
           </form>
         </section>
       )}
