@@ -82,7 +82,8 @@ export default function CreativeWorkspacePage() {
         <div>
           <h1>Creative</h1>
           <p className="muted">
-            Workspace Creative (M7) &mdash; fan-out asset per brief, loop revisi, dan Daily Output.
+            Workspace Creative (M7) &mdash; assign team untuk creative production per brief, loop
+            revisi, dan Daily Output.
           </p>
         </div>
         <Link href="/creative/daily-output" className="btn btnSecondary">
