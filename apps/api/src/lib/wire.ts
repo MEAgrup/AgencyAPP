@@ -7,7 +7,7 @@
  */
 import { money, tz } from '@cdps/core';
 import type { interview as ivcore } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, campaign, client, contract, creative, demo, directory, finance, health, interview, kol, leads, livestream, marketing, msl, notification, performance, plangate, portal, recap, sales, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, audit, auth, board, campaign, client, contract, creative, demo, directory, finance, health, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plangate, portal, recap, sales, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -846,11 +846,14 @@ export function toCampaignInput(b: {
 
 /** Request body → MetricInput. */
 export function toMetricInput(b: {
-  period_start?: string; period_end?: string; spend?: string; gmv?: string; ctr?: number | null; cvr?: number | null; entry_method?: string;
+  period_start?: string; period_end?: string; spend?: string; gmv?: string; ctr?: number | null; cvr?: number | null;
+  clicks?: number | null; impressions?: number | null; conversions?: number | null; entry_method?: string;
 }): ads.MetricInput {
   return {
     periodStart: b.period_start ?? '', periodEnd: b.period_end ?? '', spend: b.spend ?? '', gmv: b.gmv ?? '',
-    ctr: b.ctr ?? null, cvr: b.cvr ?? null, entryMethod: b.entry_method ?? '',
+    ctr: b.ctr ?? null, cvr: b.cvr ?? null,
+    clicks: b.clicks ?? null, impressions: b.impressions ?? null, conversions: b.conversions ?? null,
+    entryMethod: b.entry_method ?? '',
   };
 }
 
@@ -1132,6 +1135,7 @@ export function perfWeightToWire(w: performance.KPIWeight): PerfWeightWire {
 export interface PerfTargetWire {
   role_type: string;
   component: string;
+  staff_id: string;
   period_start: string;
   target_value: number;
   is_placeholder: boolean;
@@ -1143,6 +1147,7 @@ export function perfTargetToWire(t: performance.PeriodTarget): PerfTargetWire {
   return {
     role_type: t.roleType,
     component: t.component,
+    staff_id: t.staffId,
     period_start: t.periodStart,
     target_value: t.targetValue,
     is_placeholder: t.isPlaceholder,
@@ -1235,6 +1240,7 @@ export interface HealthPortfolioRowWire {
   open_complaints: number;
   last_closed_recap_week: string | null;
   last_closed_recap_end: string | null;
+  on_hold: boolean;
 }
 
 export function healthPortfolioRowToWire(r: health.PortfolioRow): HealthPortfolioRowWire {
@@ -1242,6 +1248,28 @@ export function healthPortfolioRowToWire(r: health.PortfolioRow): HealthPortfoli
     client_id: r.clientId, toko: r.toko, owner_am: r.ownerAm, band: r.band,
     score_display: r.scoreDisplay, band_drop: r.bandDrop, open_complaints: r.openComplaints,
     last_closed_recap_week: r.lastClosedRecapWeek, last_closed_recap_end: r.lastClosedRecapEnd,
+    on_hold: r.onHold,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// T-4c — Client Milestone (Upcoming Milestones, RM-11).
+// ---------------------------------------------------------------------------
+
+export interface MilestoneWire {
+  id: string;
+  client_id: string;
+  title: string;
+  target_date: string;
+  status: string;
+  created_at: string;
+  created_by: string;
+}
+
+export function milestoneToWire(m: milestone.Milestone): MilestoneWire {
+  return {
+    id: m.id, client_id: m.clientId, title: m.title, target_date: m.targetDate,
+    status: m.status, created_at: m.createdAt.toISOString(), created_by: m.createdBy,
   };
 }
 

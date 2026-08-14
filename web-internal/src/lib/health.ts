@@ -51,6 +51,7 @@ export interface HealthPortfolioRow {
   open_complaints: number; // [Open] + [In Progress]
   last_closed_recap_week: string | null; // "2026-W33" of the most recent Ditutup recap
   last_closed_recap_end: string | null; // YYYY-MM-DD of that week's Sunday
+  on_hold: boolean; // T-2 / RM-2: semua service klien [On Hold] — tetap tampil, diberi keterangan
 }
 
 export interface ROASToggle {

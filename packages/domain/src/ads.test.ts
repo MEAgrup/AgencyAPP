@@ -267,6 +267,33 @@ describeDb('metrics (§5) + attribution (§7) + ROAS', () => {
       .rejects.toBeInstanceOf(ValidationError);
   });
 
+  it('T-3: stores raw clicks/impressions/conversions; rejects a negative/fractional count', async () => {
+    const { briefId } = await adsBrief();
+    const c = await createCampaign(sql, adsStaff(), briefId, goodInput());
+    const m = await logMetricEntry(sql, adsStaff(), c.id, {
+      periodStart: '2026-07-01', periodEnd: '2026-07-07', spend: '1000000', gmv: '4000000',
+      clicks: 1000, impressions: 50000, conversions: 100, entryMethod: 'Manual',
+    });
+    const row = await sql<{ clicks: string | null; impressions: string | null; conversions: string | null }[]>`
+      select clicks, impressions, conversions from metric_entries where id = ${m.id}`;
+    expect(Number(row[0].clicks)).toBe(1000);
+    expect(Number(row[0].impressions)).toBe(50000);
+    expect(Number(row[0].conversions)).toBe(100);
+    // Counts are optional — omitting them stores NULL.
+    const m2 = await logMetricEntry(sql, adsStaff(), c.id, {
+      periodStart: '2026-07-08', periodEnd: '2026-07-14', spend: '1', gmv: '1', entryMethod: 'Manual',
+    });
+    const row2 = await sql<{ clicks: string | null }[]>`select clicks from metric_entries where id = ${m2.id}`;
+    expect(row2[0].clicks).toBeNull();
+    // A negative or fractional count is rejected.
+    await expect(logMetricEntry(sql, adsStaff(), c.id, {
+      periodStart: '2026-07-01', periodEnd: '2026-07-07', spend: '1', gmv: '1', clicks: -5, entryMethod: 'Manual',
+    })).rejects.toBeInstanceOf(ValidationError);
+    await expect(logMetricEntry(sql, adsStaff(), c.id, {
+      periodStart: '2026-07-01', periodEnd: '2026-07-07', spend: '1', gmv: '1', impressions: 3.5, entryMethod: 'Manual',
+    })).rejects.toBeInstanceOf(ValidationError);
+  });
+
   it('escalation streak: consecutive under-target ROAS periods flag (§8 Rule 4)', async () => {
     const { briefId } = await adsBrief();
     const c = await createCampaign(sql, adsStaff(), briefId, goodInput()); // target ROAS 4

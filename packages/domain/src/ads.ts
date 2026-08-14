@@ -74,6 +74,7 @@ export const MSG_CAMPAIGN_ENDED = '[ad campaign sudah berakhir, metric entry tid
 export const MSG_INVALID_CHANGE_TYPE = '[jenis perubahan tidak valid]';
 export const MSG_BUDGET_APPROVAL_REQUIRED = '[penyesuaian budget lebih dari 50% memerlukan persetujuan AM/SPV Ads]';
 export const MSG_BAD_AMOUNT = '[nilai uang tidak valid]';
+export const MSG_BAD_COUNT = '[nilai clicks/impressions/conversions harus bilangan bulat ≥ 0]';
 
 // --- Errors (ads-scoped; mapped in apps/api http.ts). ---
 
@@ -191,6 +192,12 @@ export interface MetricInput {
   gmv: string;
   ctr?: number | null;
   cvr?: number | null;
+  // T-3: raw counts from the platform report (optional). The blended
+  // CTR/CVR/CPC/CPM the weekly recap shows are Σ-derived from these, so entering
+  // them lets the recap compute the ratios instead of falling to `—`.
+  clicks?: number | null;
+  impressions?: number | null;
+  conversions?: number | null;
   entryMethod: string;
 }
 
@@ -568,13 +575,20 @@ export async function logMetricEntry(sql: Sql, actor: Actor, campaignId: string,
     if (spend < 0n || gmv < 0n) {
       throw new ValidationError(MSG_NEGATIVE_AMOUNT);
     }
+    // T-3: raw platform counts are optional but, when present, must be
+    // non-negative whole numbers (they are Σ-summed into blended CTR/CVR/CPC/CPM).
+    const clicks = validCount(input.clicks);
+    const impressions = validCount(input.impressions);
+    const conversions = validCount(input.conversions);
     const [pStart, pEnd] = parsePeriod(input.periodStart, input.periodEnd);
 
     const id = await ex.ident.identNext('MTR', now);
     await tx`
-      insert into metric_entries (id, campaign_id, period_start, period_end, spend, gmv, ctr, cvr, entry_method, entered_by, created_by)
+      insert into metric_entries (id, campaign_id, period_start, period_end, spend, gmv, ctr, cvr,
+        clicks, impressions, conversions, entry_method, entered_by, created_by)
       values (${id}, ${campaignId}, ${pStart}, ${pEnd}, ${money.decimal(spend)}, ${money.decimal(gmv)},
-        ${input.ctr ?? null}, ${input.cvr ?? null}, ${method}, ${actor.employeeId}, ${actor.employeeId})`;
+        ${input.ctr ?? null}, ${input.cvr ?? null},
+        ${clicks}, ${impressions}, ${conversions}, ${method}, ${actor.employeeId}, ${actor.employeeId})`;
     // §7 Flow 1: snapshot the linked Assets at this moment (Creative-Swap-safe basis).
     const linked = await currentlyLinkedAssets(tx, campaignId);
     for (const assetId of linked) {
@@ -843,6 +857,21 @@ function parseDateRange(startStr: string, endStr: string): [string, string] {
 }
 
 /** parsePeriod validates a metric period (YYYY-MM-DD each) with end >= start (→ InvalidPeriod). */
+/**
+ * validCount normalises an optional raw platform count (clicks/impressions/
+ * conversions, T-3). undefined/null → null (absent). A present value must be a
+ * finite non-negative integer, else MSG_BAD_COUNT.
+ */
+function validCount(v: number | null | undefined): number | null {
+  if (v === undefined || v === null) {
+    return null;
+  }
+  if (!Number.isFinite(v) || !Number.isInteger(v) || v < 0) {
+    throw new ValidationError(MSG_BAD_COUNT);
+  }
+  return v;
+}
+
 function parsePeriod(startStr: string, endStr: string): [string, string] {
   const start = (startStr ?? '').trim();
   const end = (endStr ?? '').trim();

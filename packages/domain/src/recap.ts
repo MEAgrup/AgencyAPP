@@ -176,8 +176,13 @@ export const MSG_DIVISI_NOT_TOUCHED = '[divisi ini tidak menyentuh klien pada mi
 /** Reopen requires a reason (RM-5). */
 export const MSG_REOPEN_REASON = '[alasan buka-kembali wajib diisi]';
 
-/** RM-C metrics an AM may fill manually (isi atau `—`): the non-auto fallbacks. */
-export const MANUAL_ELIGIBLE_METRICS: readonly string[] = ['total_view', 'ctr', 'cvr'];
+/**
+ * RM-C metrics an AM may fill manually (isi atau `—`): the non-auto fallbacks.
+ * `view_organik` (T-4a) is manual-only — organic reach comes from the platform
+ * report, entered per week; it is NEVER auto-written (kept separate from the paid
+ * `total_view`, which IS auto from M10 live viewers).
+ */
+export const MANUAL_ELIGIBLE_METRICS: readonly string[] = ['total_view', 'view_organik', 'ctr', 'cvr'];
 /** RM-C metrics that must be present (filled or `—`) before a recap closes (Rule 8). */
 export const REQUIRED_AT_CLOSE_METRICS: readonly string[] = ['total_view', 'ctr', 'cvr'];
 /** Valid division names for a division note (RM-D6). */

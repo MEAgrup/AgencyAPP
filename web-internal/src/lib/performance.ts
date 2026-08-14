@@ -91,12 +91,16 @@ export interface KPIWeight {
 export interface PeriodTarget {
   role_type: string;
   component: string;
+  staff_id: string; // "*" = default role (semua staff); selain itu = staff spesifik (T-1)
   period_start: string; // YYYY-MM-DD atau "" untuk sentinel (semua periode)
   target_value: number;
   is_placeholder: boolean;
   updated_at: string; // RFC3339
   updated_by: string;
 }
+
+/** Sentinel staff_id "role default" — target berlaku untuk semua staff role itu. */
+export const TARGET_STAFF_ALL = '*';
 
 // Scan result
 export interface ScanResult {
@@ -183,7 +187,8 @@ export function getTargetsConfig(): Promise<{ data: PeriodTarget[] }> {
 /**
  * PUT /api/v1/performance/config/targets
  * Upsert satu baris period target.
- * Request body: { role_type, component, period_start, target_value, is_placeholder }
+ * Request body: { role_type, component, staff_id, period_start, target_value, is_placeholder }
+ * staff_id: "" / "*" → default role (semua staff); selain itu = staff spesifik (T-1).
  * period_start: YYYY-MM-DD atau "" (sentinel untuk semua periode — backend translate ke "0001-01-01").
  * Director only.
  */
@@ -192,11 +197,13 @@ export function updateTargetsConfig(
   component: string,
   targetValue: number,
   isPlaceholder: boolean,
-  periodStart?: string
+  periodStart?: string,
+  staffId?: string
 ): Promise<{ ok: boolean }> {
   return api.put<{ ok: boolean }>('/performance/config/targets', {
     role_type: roleType,
     component,
+    staff_id: staffId || '',
     period_start: periodStart || '',
     target_value: targetValue,
     is_placeholder: isPlaceholder,

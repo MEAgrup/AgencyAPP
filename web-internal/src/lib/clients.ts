@@ -97,6 +97,26 @@ export function voidService(serviceId: string): Promise<VoidResult> {
   return api.post<VoidResult>(`/services/${serviceId}/void`);
 }
 
+/** T-2b: AM MENGAJUKAN hold ([In Execution] → [Hold Requested]); reason wajib. Head lalu ACC/tolak. */
+export function requestHoldService(serviceId: string, reason: string): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/services/${serviceId}/hold`, { reason });
+}
+
+/** T-2b: Head of Account MENYETUJUI hold ([Hold Requested] → [On Hold]). */
+export function approveHoldService(serviceId: string): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/services/${serviceId}/hold/approve`);
+}
+
+/** T-2b: Head of Account MENOLAK hold ([Hold Requested] → [In Execution]); reason opsional. */
+export function rejectHoldService(serviceId: string, reason?: string): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/services/${serviceId}/hold/reject`, { reason: reason ?? '' });
+}
+
+/** T-2b: Head of Account RESUME service ([On Hold] → [In Execution]). */
+export function resumeService(serviceId: string, reason?: string): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/services/${serviceId}/resume`, { reason: reason ?? '' });
+}
+
 export function setPaymentIntent(clientId: string, paymentIntent: string): Promise<{ client: Client }> {
   return api.post<{ client: Client }>(`/clients/${clientId}/payment-intent`, {
     payment_intent: paymentIntent,

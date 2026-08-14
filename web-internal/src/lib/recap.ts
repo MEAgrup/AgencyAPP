@@ -116,8 +116,8 @@ export const WRR_TERBUKA = 'Terbuka';
 export const WRR_DITUTUP = 'Ditutup';
 export const WRR_DITUTUP_OTOMATIS = 'Ditutup Otomatis';
 
-/** RM-C metrics an AM may fill manually (isi atau `—`). */
-export const MANUAL_ELIGIBLE_METRICS = ['total_view', 'ctr', 'cvr'] as const;
+/** RM-C metrics an AM may fill manually (isi atau `—`). view_organik = T-4a. */
+export const MANUAL_ELIGIBLE_METRICS = ['total_view', 'view_organik', 'ctr', 'cvr'] as const;
 /** The four divisions that may owe a weekly note (RM-D6). */
 export const DIVISIONS = ['Creative', 'Ads', 'KOL', 'Live Stream'] as const;
 
@@ -126,10 +126,17 @@ export const METRIK_LABELS: Record<string, string> = {
   gmv_interim: 'GMV Eksekusi (interim)',
   ad_spend: 'Ad Spend',
   roas_ads: 'ROAS (Ads)',
-  total_view: 'Total View',
+  total_view: 'Total View (Berbayar/Live)',
+  view_organik: 'View Organik',
   ctr: 'CTR',
   cvr: 'CVR',
+  cpc: 'CPC',
+  cpm: 'CPM',
+  cpl: 'CPL',
 };
+
+/** T-4a: label for the derived blended view summary (paid total_view + organik). */
+export const VIEW_BLENDED_LABEL = 'Total View (Blended)';
 
 export function getMetrikLabel(key: string): string {
   return METRIK_LABELS[key] ?? key;

@@ -864,13 +864,21 @@ export async function listBriefBookings(sql: Queryable, actor: Actor, briefId: s
     throw new ForbiddenError(MSG_BOOKING_VIEW_FORBIDDEN);
   }
   const rows = await sql<BookingDbRow[]>`${bookingSelect(sql)} where bk.brief_id = ${briefId} order by bk.id asc`;
-  const out: Booking[] = [];
-  for (const row of rows) {
-    const b = rowToBooking(row);
-    b.revisionCount = await deriveRevisionCount(sql, b.id);
-    b.paymentStatus = await paymentReflection(sql, b.id);
-    out.push(b);
-  }
+  // P-1: the two derived reads per booking used to run strictly one after another,
+  // so N bookings cost 2N sequential round-trips. They are independent read-only
+  // lookups — issue them together and let the driver pipeline them. Order and
+  // values are unchanged.
+  const out = rows.map(rowToBooking);
+  await Promise.all(
+    out.map(async (b) => {
+      const [revisionCount, paymentStatus] = await Promise.all([
+        deriveRevisionCount(sql, b.id),
+        paymentReflection(sql, b.id),
+      ]);
+      b.revisionCount = revisionCount;
+      b.paymentStatus = paymentStatus;
+    }),
+  );
   return out;
 }
 

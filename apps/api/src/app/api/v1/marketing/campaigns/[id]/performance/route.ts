@@ -18,8 +18,16 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   return handle(async () => {
     const actor = requireActor(request);
     const { id } = await ctx.params;
-    const record = performanceRecordToWire(await readAsActor(actor, (sql) => marketing.getRecord(sql, actor, id)));
-    const metrics = marketingMetricsToWire(await readAsActor(actor, (sql) => marketing.metrics(sql, actor, id)));
-    return json({ record, metrics });
+    // P-1: ONE claim-scoped transaction for both reads. Two readAsActor calls meant
+    // two full BEGIN → set_config → SET ROLE → … → COMMIT cycles back to back —
+    // the claim envelope paid for twice on a single GET. Same reads, same gates.
+    const { record, metrics } = await readAsActor(actor, async (sql) => {
+      const [rec, met] = await Promise.all([
+        marketing.getRecord(sql, actor, id),
+        marketing.metrics(sql, actor, id),
+      ]);
+      return { record: rec, metrics: met };
+    });
+    return json({ record: performanceRecordToWire(record), metrics: marketingMetricsToWire(metrics) });
   });
 }

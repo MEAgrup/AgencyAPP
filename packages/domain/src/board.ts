@@ -332,20 +332,30 @@ export async function listDependencies(
        and (${tgt === ''} or target_id = ${tgt})
      order by id asc`;
 
-  const out: Dependency[] = [];
-  const allow = new Map<string, boolean>();
-  for (const row of rows) {
-    const d = rowToDependency(row);
-    if (!allow.has(d.clientId)) {
-      allow.set(d.clientId, await canSeeClient(sql, actor, d.clientId));
-    }
-    if (!allow.get(d.clientId)) {
-      continue;
-    }
-    d.status = derivedStatus(await briefStatusOf(sql, d.sourceId), d.type);
-    out.push(d);
+  // P-1: the visibility check and the source-Brief status lookup used to run one
+  // after another PER ROW, so a board with 40 dependencies cost ~80 sequential
+  // round-trips. Both are independent read-only lookups, so resolve each DISTINCT
+  // client / source brief once, concurrently — the driver pipelines them onto the
+  // caller's connection. Same gate, same rows, same order.
+  const deps = rows.map(rowToDependency);
+
+  const clientIds = [...new Set(deps.map((d) => d.clientId))];
+  const allowPairs = await Promise.all(
+    clientIds.map(async (cid) => [cid, await canSeeClient(sql, actor, cid)] as const),
+  );
+  const allow = new Map(allowPairs);
+
+  const visible = deps.filter((d) => allow.get(d.clientId));
+  const sourceIds = [...new Set(visible.map((d) => d.sourceId))];
+  const statusPairs = await Promise.all(
+    sourceIds.map(async (sid) => [sid, await briefStatusOf(sql, sid)] as const),
+  );
+  const status = new Map(statusPairs);
+
+  for (const d of visible) {
+    d.status = derivedStatus(status.get(d.sourceId)!, d.type);
   }
-  return out;
+  return visible;
 }
 
 interface DepRow {

@@ -102,6 +102,7 @@ export * as ads from './ads';
 export * as kol from './kol';
 export * as performance from './performance';
 export * as health from './health';
+export * as milestone from './milestone';
 export * as board from './board';
 export * as livestream from './livestream';
 export * as campaign from './campaign';

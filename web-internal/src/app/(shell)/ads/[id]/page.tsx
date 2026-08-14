@@ -84,6 +84,9 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
   const [mGmv, setMGmv] = useState('');
   const [mCtr, setMCtr] = useState('');
   const [mCvr, setMCvr] = useState('');
+  const [mClicks, setMClicks] = useState('');
+  const [mImpressions, setMImpressions] = useState('');
+  const [mConversions, setMConversions] = useState('');
   const [mEntryMethod, setMEntryMethod] = useState<string>(ENTRY_METHOD_OPTIONS[0]);
   const [metricSubmitting, setMetricSubmitting] = useState(false);
   const [metricError, setMetricError] = useState<string | null>(null);
@@ -202,6 +205,9 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
         gmv: mGmv,
         ctr: mCtr.trim() === '' ? null : Number(mCtr),
         cvr: mCvr.trim() === '' ? null : Number(mCvr),
+        clicks: mClicks.trim() === '' ? null : Number(mClicks),
+        impressions: mImpressions.trim() === '' ? null : Number(mImpressions),
+        conversions: mConversions.trim() === '' ? null : Number(mConversions),
         entry_method: mEntryMethod,
       });
       setMetricMessage('Metric entry berhasil dicatat.');
@@ -209,6 +215,9 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
       setMGmv('');
       setMCtr('');
       setMCvr('');
+      setMClicks('');
+      setMImpressions('');
+      setMConversions('');
       await load();
       await loadMetrics();
     } catch (err) {
@@ -531,6 +540,22 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
                     <option key={m} value={m}>{m}</option>
                   ))}
                 </select>
+              </div>
+            </div>
+            {/* T-3: hitungan mentah dari report platform. CTR/CVR/CPC/CPM di rekap
+                mingguan di-blended dari Σ ini; kosongkan bila tak tersedia. */}
+            <div className="formRow">
+              <div className="field">
+                <label htmlFor="m-clicks">Clicks (opsional)</label>
+                <input id="m-clicks" type="number" min="0" step="1" value={mClicks} onChange={(e) => setMClicks(e.target.value)} />
+              </div>
+              <div className="field">
+                <label htmlFor="m-impressions">Impressions (opsional)</label>
+                <input id="m-impressions" type="number" min="0" step="1" value={mImpressions} onChange={(e) => setMImpressions(e.target.value)} />
+              </div>
+              <div className="field">
+                <label htmlFor="m-conversions">Conversions (opsional)</label>
+                <input id="m-conversions" type="number" min="0" step="1" value={mConversions} onChange={(e) => setMConversions(e.target.value)} />
               </div>
             </div>
             <div>

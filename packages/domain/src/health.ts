@@ -16,7 +16,8 @@
 import { money, notification, permission, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { parseRoasTarget } from './ads';
-import { computeMetrics, type Transition } from './task';
+import { computeMetrics } from './task';
+import { loadTransitions, transitionsOf } from './transitions';
 
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;
@@ -418,13 +419,19 @@ async function taskCandidates(sql: Queryable, clientId: string, per: Period): Pr
     ...briefs.map((r) => ({ entityType: 'brief' as const, id: r.id, sla: r.sla_target_hours === null ? null : Number(r.sla_target_hours) })),
   ];
 
+  // P-1: two batched reads (one per entity type) instead of one per task. The
+  // per-task lists are byte-identical to the old per-task query — same filter,
+  // same 'created_at asc, id asc' ordering.
+  const assetLog = await loadTransitions(sql, 'asset', assets.map((r) => r.id), 'created_at');
+  const briefLog = await loadTransitions(sql, 'brief', briefs.map((r) => r.id), 'created_at');
+
   let approvedInPeriod = 0; // denominator for Revision Burden
   let slaJudged = 0; // denominator for Task Completion (has SLA)
   let withinSLA = 0; // numerator for Task Completion
   let revisionSum = 0;
 
   for (const tr of tasks) {
-    const transitions = await taskTransitions(sql, tr.entityType, tr.id);
+    const transitions = transitionsOf(tr.entityType === 'asset' ? assetLog : briefLog, tr.id);
     const m = computeMetrics(transitions, tr.sla);
     if (m.approvedPeriodWib !== per.approvedTag) {
       continue; // not closed in this period
@@ -452,32 +459,6 @@ async function taskCandidates(sql: Queryable, clientId: string, per: Period): Pr
       : { name: COMP_REVISION_BURDEN, included: true, raw: 100 - Math.min((revisionSum / approvedInPeriod) * 20, 100) };
 
   return { taskCand, revCand };
-}
-
-/** taskTransitions reads a canonical Task's immutable transition log ASCENDING (destination label + timestamp). */
-async function taskTransitions(sql: Queryable, entityType: 'asset' | 'brief', id: string): Promise<Transition[]> {
-  const rows = await sql<{ action: string; created_at: Date }[]>`
-    select action, created_at from audit_log
-     where entity_type = ${entityType} and entity_id = ${id} and action like 'transition:%'
-     order by created_at asc, id asc`;
-  const out: Transition[] = [];
-  for (const r of rows) {
-    const to = transitionTarget(r.action);
-    if (to !== null) {
-      out.push({ to, at: r.created_at });
-    }
-  }
-  return out;
-}
-
-/** transitionTarget extracts B from a "transition:A->B" audit action. */
-function transitionTarget(action: string): string | null {
-  const prefix = 'transition:';
-  if (!action.startsWith(prefix)) {
-    return null;
-  }
-  const idx = action.indexOf('->');
-  return idx < 0 ? null : action.slice(idx + 2);
 }
 
 /** Complaints (Rule 5): 100 − Σ severity penalty (the [0,100] cap floors it). Always available. */
@@ -508,9 +489,11 @@ async function paymentCandidate(sql: Queryable, clientId: string, per: Period): 
     return { name: COMP_PAYMENT_TIMELINESS, included: false, raw: 0,
       reason: 'tidak ada tagihan jatuh tempo pada periode — dikecualikan + bobot didistribusi ulang' };
   }
+  // P-1: one batched read for the whole due-set instead of one per installment.
+  const everOverdue = await installmentsEverOverdue(sql, rows.map((r) => r.id));
   let overdue = 0;
   for (const r of rows) {
-    if (await installmentEverOverdue(sql, r.id)) {
+    if (everOverdue.has(r.id)) {
       overdue++;
     }
   }
@@ -518,13 +501,20 @@ async function paymentCandidate(sql: Queryable, clientId: string, per: Period): 
   return { name: COMP_PAYMENT_TIMELINESS, included: true, raw: (timely / rows.length) * 100 };
 }
 
-/** installmentEverOverdue reports whether an installment ever transitioned INTO [Jatuh Tempo]. */
-async function installmentEverOverdue(sql: Queryable, instId: string): Promise<boolean> {
-  const rows = await sql<{ n: string }[]>`
-    select count(*)::int as n from audit_log
-     where entity_type = 'installment' and entity_id = ${instId}
+/**
+ * installmentsEverOverdue returns the subset of `ids` that ever transitioned INTO
+ * [Jatuh Tempo] — the same predicate as the old per-installment count query, asked
+ * once for the whole set.
+ */
+async function installmentsEverOverdue(sql: Queryable, ids: string[]): Promise<Set<string>> {
+  if (ids.length === 0) {
+    return new Set();
+  }
+  const rows = await sql<{ entity_id: string }[]>`
+    select distinct entity_id from audit_log
+     where entity_type = 'installment' and entity_id = any(${[...new Set(ids)]})
        and action = ${`transition:[Belum Jatuh Tempo]->${INSTALLMENT_OVERDUE}`}`;
-  return Number(rows[0].n) > 0;
+  return new Set(rows.map((r) => r.entity_id));
 }
 
 // ---------------------------------------------------------------------------
@@ -775,6 +765,7 @@ export interface PortfolioRow {
   openComplaints: number; // count of [Open] + [In Progress] complaints (M6 CPL-)
   lastClosedRecapWeek: string | null; // "2026-W33" of the most recent `Ditutup` recap
   lastClosedRecapEnd: string | null; // YYYY-MM-DD of that week's Sunday, or null
+  onHold: boolean; // T-2 / RM-2: every live service is [On Hold] — kept in report, flagged
 }
 
 interface PortfolioRawRow {
@@ -787,6 +778,7 @@ interface PortfolioRawRow {
   open_complaints: string | number;
   last_closed_recap_week: string | null;
   last_closed_recap_end: string | null;
+  all_services_on_hold: boolean;
 }
 
 /**
@@ -821,7 +813,17 @@ export async function portfolio(sql: Queryable, actor: Actor): Promise<Portfolio
          order by w.iso_year desc, w.iso_week desc limit 1) as last_closed_recap_week,
       (select to_char(max(w.minggu_akhir), 'YYYY-MM-DD')
          from weekly_result_recap w
-         where w.client_id = c.id and w.status = 'Ditutup') as last_closed_recap_end
+         where w.client_id = c.id and w.status = 'Ditutup') as last_closed_recap_end,
+      -- T-2 (RM-2): keterangan status hold. The client STAYS in the Health report
+      -- even when every live service is On Hold (owner decision 2026-08-14) — this
+      -- flag lets the report say so. True = has ≥1 [On Hold] service AND no service
+      -- that is active-and-not-held (i.e. delivery is fully paused).
+      (exists (select 1 from services s
+                where s.client_id = c.id and s.status = '[On Hold]')
+       and not exists (select 1 from services s
+                        where s.client_id = c.id
+                          and s.status not in ('Done', '[Cancelled — Service Voided]', '[On Hold]'))
+      ) as all_services_on_hold
     from clients c
     where exists (
       select 1 from services s
@@ -844,6 +846,7 @@ export async function portfolio(sql: Queryable, actor: Actor): Promise<Portfolio
         openComplaints: Number(r.open_complaints),
         lastClosedRecapWeek: r.last_closed_recap_week,
         lastClosedRecapEnd: r.last_closed_recap_end,
+        onHold: r.all_services_on_hold,
       };
     });
 }

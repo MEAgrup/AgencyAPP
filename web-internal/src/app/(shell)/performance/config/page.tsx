@@ -7,6 +7,8 @@ import { useAuth } from '@/lib/auth-context';
 import {
   COMPONENT_LABELS,
   ROLE_TYPES,
+  TARGET_STAFF_ALL,
+  divisionOfRole,
   getTargetsConfig,
   getWeightsConfig,
   updateTargetsConfig,
@@ -14,6 +16,9 @@ import {
   type KPIWeight,
   type PeriodTarget,
 } from '@/lib/performance';
+import { listAssignableEmployees } from '@/lib/directory';
+import { employeeLabel } from '@/lib/employee-picker';
+import type { AssignableEmployee } from '@/lib/types';
 
 export default function PerformanceConfigPage() {
   const { role } = useAuth();
@@ -128,7 +133,7 @@ export default function PerformanceConfigPage() {
   }
 
   function startEditTarget(target: PeriodTarget) {
-    setEditingTargetId(`${target.role_type}|${target.component}|${target.period_start}`);
+    setEditingTargetId(`${target.role_type}|${target.component}|${target.staff_id}|${target.period_start}`);
     setEditTargetValue(target.target_value.toString());
     setEditTargetPlaceholder(target.is_placeholder);
     setEditTargetPeriod(target.period_start);
@@ -148,7 +153,8 @@ export default function PerformanceConfigPage() {
         target.component,
         parseFloat(editTargetValue) || 0,
         editTargetPlaceholder,
-        editTargetPeriod || ''
+        editTargetPeriod || '',
+        target.staff_id
       );
       setTargetUpdateMessage(
         `Target untuk ${target.role_type}/${COMPONENT_LABELS[target.component] || target.component} telah disimpan.`
@@ -309,6 +315,7 @@ export default function PerformanceConfigPage() {
                 <tr>
                   <th>Role</th>
                   <th>Komponen</th>
+                  <th>Staff</th>
                   <th>Periode</th>
                   <th style={{ textAlign: 'right' }}>Target Value</th>
                   <th>Placeholder</th>
@@ -317,13 +324,22 @@ export default function PerformanceConfigPage() {
               </thead>
               <tbody>
                 {targets.map((target) => {
-                  const editId = `${target.role_type}|${target.component}|${target.period_start}`;
+                  const editId = `${target.role_type}|${target.component}|${target.staff_id}|${target.period_start}`;
                   const isEditing = editingTargetId === editId;
 
                   return (
                     <tr key={editId}>
                       <td>{target.role_type}</td>
                       <td>{COMPONENT_LABELS[target.component] || target.component}</td>
+                      <td>
+                        {/* '*' = default role (berlaku untuk semua staff role ini);
+                            selain itu = target khusus satu staff (T-1). */}
+                        {target.staff_id === TARGET_STAFF_ALL ? (
+                          <span className="muted">Semua Staff</span>
+                        ) : (
+                          <code>{target.staff_id}</code>
+                        )}
+                      </td>
                       <td>
                         {/* PUT targets = UPSERT keyed (role_type, component, period_start) —
                             periode dikunci saat mengubah baris agar tidak membuat baris baru. */}
@@ -390,7 +406,178 @@ export default function PerformanceConfigPage() {
 
         {targetUpdateError && <div className="alert alertError" role="alert" style={{ marginTop: '16px' }}>{targetUpdateError}</div>}
         {targetUpdateMessage && <div className="alert alertSuccess" role="status" style={{ marginTop: '16px' }}>{targetUpdateMessage}</div>}
+
+        {isDirector && weights && (
+          <AddStaffTargetForm weights={weights} onSaved={loadTargets} />
+        )}
       </section>
+    </div>
+  );
+}
+
+/**
+ * AddStaffTargetForm — Director-only form to set a target for ONE specific staff
+ * member (T-1 / O9). Role-level targets already exist as seed rows edited inline
+ * above; this form is the only way to create a per-staff override row. Omitting
+ * the staff leaves the role default untouched — that is what the inline editor is
+ * for — so the staff picker is required here.
+ */
+function AddStaffTargetForm({ weights, onSaved }: { weights: KPIWeight[]; onSaved: () => Promise<void> }) {
+  const [roleType, setRoleType] = useState<string>(ROLE_TYPES[0]);
+  const [component, setComponent] = useState<string>('');
+  const [staffId, setStaffId] = useState<string>('');
+  const [period, setPeriod] = useState<string>(''); // "YYYY-MM"; "" = default (semua periode)
+  const [value, setValue] = useState<string>('');
+  const [placeholder, setPlaceholder] = useState<boolean>(false);
+  const [staff, setStaff] = useState<AssignableEmployee[] | null>(null);
+  const [staffError, setStaffError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const components = weights
+    .filter((w) => w.role_type === roleType)
+    .map((w) => w.component);
+
+  // Default the component to the role's first once the role (or weights) resolve.
+  useEffect(() => {
+    if (components.length > 0 && !components.includes(component)) {
+      setComponent(components[0]);
+    }
+  }, [roleType, components, component]);
+
+  // Load the assignable staff for the selected role's division. Re-fetch on role
+  // change; reset the chosen staff so a stale id from another division never sticks.
+  useEffect(() => {
+    let alive = true;
+    setStaff(null);
+    setStaffError(null);
+    setStaffId('');
+    listAssignableEmployees(divisionOfRole(roleType))
+      .then((res) => {
+        if (alive) setStaff(res.data);
+      })
+      .catch((err) => {
+        if (alive) setStaffError(errorMessage(err));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [roleType]);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setMessage(null);
+    if (!component) {
+      setError('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
+      return;
+    }
+    if (!staffId) {
+      setError('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      // "YYYY-MM" → "YYYY-MM-01" (first-of-month, matching the period sentinel scheme).
+      const periodStart = period ? `${period}-01` : '';
+      await updateTargetsConfig(roleType, component, parseFloat(value) || 0, placeholder, periodStart, staffId);
+      setMessage(`Target per-staff untuk ${staffId} telah disimpan.`);
+      setValue('');
+      await onSaved();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: '24px', borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
+      <h3>Tambah Target Per-Staff</h3>
+      <p className="muted" style={{ marginBottom: '12px' }}>
+        Target khusus satu staff menimpa target default role-nya untuk komponen &amp; periode itu (T-1).
+        Kosongkan periode agar berlaku untuk semua bulan.
+      </p>
+      <form onSubmit={submit} className="form">
+        {error && <div className="alert alertError" role="alert">{error}</div>}
+        {message && <div className="alert alertSuccess" role="status">{message}</div>}
+
+        <div className="field">
+          <label htmlFor="add-target-role">Role</label>
+          <select id="add-target-role" value={roleType} onChange={(e) => setRoleType(e.target.value)}>
+            {ROLE_TYPES.map((r) => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="field">
+          <label htmlFor="add-target-component">Komponen</label>
+          <select id="add-target-component" value={component} onChange={(e) => setComponent(e.target.value)}>
+            {components.map((c) => (
+              <option key={c} value={c}>{COMPONENT_LABELS[c] || c}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="field">
+          <label htmlFor="add-target-staff">Staff</label>
+          {staffError ? (
+            <div className="alert alertError" role="alert">{staffError}</div>
+          ) : (
+            <select
+              id="add-target-staff"
+              value={staffId}
+              onChange={(e) => setStaffId(e.target.value)}
+              disabled={staff === null}
+            >
+              <option value="">{staff === null ? 'Memuat...' : '— pilih staff —'}</option>
+              {(staff || []).map((emp) => (
+                <option key={emp.employee_id} value={emp.employee_id}>{employeeLabel(emp)}</option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        <div className="field">
+          <label htmlFor="add-target-period">Periode (bulan)</label>
+          <input
+            id="add-target-period"
+            type="month"
+            value={period}
+            onChange={(e) => setPeriod(e.target.value)}
+          />
+        </div>
+
+        <div className="field">
+          <label htmlFor="add-target-value">Target Value</label>
+          <input
+            id="add-target-value"
+            type="number"
+            step="0.1"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+          />
+        </div>
+
+        <div className="field">
+          <label style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+            <input
+              type="checkbox"
+              checked={placeholder}
+              onChange={(e) => setPlaceholder(e.target.checked)}
+            />
+            Tandai sebagai placeholder (belum dikonfirmasi)
+          </label>
+        </div>
+
+        <div style={{ marginTop: '12px' }}>
+          <button type="submit" className="btn btnPrimary" disabled={submitting}>
+            {submitting ? 'Menyimpan...' : 'Simpan Target Per-Staff'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

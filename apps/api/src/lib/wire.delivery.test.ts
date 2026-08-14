@@ -1174,13 +1174,14 @@ describe('M14 perfWeightToWire (admin KPI-weight row)', () => {
 describe('M14 perfTargetToWire (O9 normalisation target)', () => {
   it('maps every PeriodTarget field to its snake_case wire key', () => {
     const t: performance.PeriodTarget = {
-      roleType: 'Ads', component: 'roas_attainment', periodStart: '2026-07-01',
+      roleType: 'Ads', component: 'roas_attainment', staffId: '*', periodStart: '2026-07-01',
       targetValue: 4, isPlaceholder: true,
       updatedAt: new Date('2026-07-19T02:00:00Z'), updatedBy: '2409230411',
     };
     expect(perfTargetToWire(t)).toEqual({
       role_type: 'Ads',
       component: 'roas_attainment',
+      staff_id: '*',
       period_start: '2026-07-01',
       target_value: 4,
       is_placeholder: true,
