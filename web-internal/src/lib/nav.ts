@@ -147,6 +147,11 @@ const DELIVERY_LINKS: NavItem[] = [
   // (`account.listStrategies` has an AM arm), Account lead through the
   // unassigned Intake queue (`account.canReadIntake`).
   { href: '/account', label: 'Account & Service', access: ownedBy(ACCOUNT) },
+  // M6D Rekap Hasil Mingguan: readable by Account (any level) + OD/Director
+  // (`recap.canReadRecap` own-AM / Account-lead / read-all arm); division leads
+  // reach a specific recap through its notification deep-link. Row scope (which
+  // client's recaps) is the server's job — the menu only trims by division.
+  { href: '/account/rekap', label: 'Rekap Mingguan', access: ownedBy(ACCOUNT) },
   // M12: `/my-tasks` is own-scoped, and Task PICs are staff of the four
   // execution divisions (`account.ALLOWED_DIVISIONS`); the AM sees the tasks of
   // clients they own (`task.canViewTask`). Sales/Marketing/Finance are never

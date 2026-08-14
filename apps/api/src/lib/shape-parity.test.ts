@@ -173,7 +173,7 @@ const wire = parseInterfaces(readFileSync(WIRE_TS, 'utf8'));
 const FE_FILES = [
   'account.ts', 'ads.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'contract.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'livestream.ts', 'marketing.ts',
-  'performance.ts', 'portal.ts', 'sales.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
+  'performance.ts', 'portal.ts', 'recap.ts', 'sales.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
 ];
 
 const fe = new Map<string, Parsed>();
@@ -471,6 +471,13 @@ const WIRE_TO_FE: Record<string, string> = {
   InterviewListRowWire: 'interview.ts::InterviewListRow',
   BriefWire: 'account.ts::Brief',
   ComplaintWire: 'account.ts::Complaint',
+  // M6D rekap hasil mingguan (WRR-) — D-09b
+  RecapWire: 'recap.ts::Recap',
+  RecapDivisiWire: 'recap.ts::RecapDivisi',
+  RecapMetrikWire: 'recap.ts::RecapMetrik',
+  RecapCatatanWire: 'recap.ts::RecapCatatan',
+  RecapCatatanDivisiWire: 'recap.ts::RecapCatatanDivisi',
+  RecapDetailWire: 'recap.ts::RecapDetail',
   // M7 creative
   AssetWire: 'creative.ts::Asset',
   OutputEntryWire: 'creative.ts::DailyOutputEntry',
