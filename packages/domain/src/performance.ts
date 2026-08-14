@@ -29,6 +29,7 @@
 import { money, notification, permission, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { computeMetrics, type Transition } from './task';
+import { loadTransitions, transitionsOf } from './transitions';
 import { computeBookingMetrics, BKG_QC_FAILED, BKG_ESCALATED } from './kol';
 import { parseRoasTarget } from './ads';
 
@@ -515,20 +516,68 @@ async function targetFor(
   roleType: string,
   component: string,
   periodStartDate: string,
+  pt?: PlaceholderTracker,
 ): Promise<{ target: number; placeholder: boolean; ok: boolean }> {
-  const exact = await q<{ target_value: string; is_placeholder: boolean }[]>`
-    select target_value, is_placeholder from perf_period_targets
-     where role_type = ${roleType} and component = ${component} and period_start = ${periodStartDate}`;
-  if (exact.length > 0) {
-    return { target: Number(exact[0].target_value), placeholder: exact[0].is_placeholder, ok: true };
+  const resolved = await targetsForRole(q, roleType, periodStartDate, pt);
+  const hit = resolved.get(component);
+  if (hit === undefined) {
+    return { target: 0, placeholder: false, ok: false };
   }
-  const def = await q<{ target_value: string; is_placeholder: boolean }[]>`
-    select target_value, is_placeholder from perf_period_targets
-     where role_type = ${roleType} and component = ${component} and period_start = ${DEFAULT_TARGET_DATE}`;
-  if (def.length > 0) {
-    return { target: Number(def[0].target_value), placeholder: def[0].is_placeholder, ok: true };
+  return { target: hit.value, placeholder: hit.placeholder, ok: true };
+}
+
+/**
+ * targetsForRole resolves EVERY configured component target for one (role_type,
+ * period) pair in a single round trip — P-1. The exact period row still wins over
+ * the sentinel default, component by component, exactly as the old two-query
+ * per-component lookup did; a component with neither row is simply absent.
+ *
+ * When `pt` is supplied the result is memoised on it, so a gather that normalises
+ * four components pays for one query instead of up to eight.
+ */
+async function targetsForRole(
+  q: Queryable,
+  roleType: string,
+  periodStartDate: string,
+  pt?: PlaceholderTracker,
+): Promise<Map<string, ResolvedTarget>> {
+  const key = `${roleType}|${periodStartDate}`;
+  const memo = pt?.targets?.get(key);
+  if (memo !== undefined) {
+    return memo;
   }
-  return { target: 0, placeholder: false, ok: false };
+  // POSTGRES decides which row is the exact-period one, not the client. Comparing
+  // the returned `date` in JS would route through toISOString(); postgres.js
+  // happens to decode `date` at UTC midnight so that is correct today (verified
+  // under UTC, Asia/Jakarta and America/Los_Angeles), but it makes the
+  // exact-beats-sentinel precedence depend on driver decoding behaviour, and the
+  // failure mode is silent — an exact target quietly demoted to the placeholder
+  // default rather than an error. Asking the DB costs nothing extra.
+  const rows = await q<{ component: string; is_exact: boolean; target_value: string; is_placeholder: boolean }[]>`
+    select component, (period_start = ${periodStartDate}::date) as is_exact, target_value, is_placeholder
+      from perf_period_targets
+     where role_type = ${roleType} and period_start in (${periodStartDate}::date, ${DEFAULT_TARGET_DATE}::date)`;
+  const out = new Map<string, ResolvedTarget>();
+  const exactSeen = new Set<string>();
+  for (const r of rows) {
+    const isExact = r.is_exact;
+    if (!isExact && exactSeen.has(r.component)) {
+      continue; // the exact period row already won
+    }
+    if (isExact) {
+      exactSeen.add(r.component);
+    } else if (out.has(r.component)) {
+      continue; // keep the first sentinel row, as `limit`-free SELECT + [0] did
+    }
+    out.set(r.component, { value: Number(r.target_value), placeholder: r.is_placeholder });
+  }
+  if (pt !== undefined) {
+    if (pt.targets === undefined) {
+      pt.targets = new Map();
+    }
+    pt.targets.set(key, out);
+  }
+  return out;
 }
 
 /** listTargets returns every configured target, newest-period first. Read-gated by canScope. */
@@ -608,11 +657,15 @@ async function computeModifier(q: Queryable, staffID: string, roleType: string, 
   }
   const clients = await touchedClients(q, staffID, roleType);
 
+  // P-1: one CHR read for every touched client (was one per client). The fold
+  // still walks `clients` in its original order so the result is identical.
+  const subScores = await chrSubScores(q, clients, per, comp);
+
   let sum = 0;
   const used: string[] = [];
   for (const cid of clients) {
-    const sub = await chrSubScore(q, cid, per, comp);
-    if (sub === null) {
+    const sub = subScores.get(cid);
+    if (sub === undefined) {
       continue;
     }
     sum += sub;
@@ -627,23 +680,34 @@ async function computeModifier(q: Queryable, staffID: string, roleType: string, 
 }
 
 /**
- * chrSubScore reads the CHR snapshot for (client, period) and returns the CAPPED
- * sub-score of the requested component. null when there is no snapshot for the
- * period, or the component is absent/excluded in it.
+ * chrSubScores reads the CHR snapshots for MANY clients in the period and returns
+ * clientId → CAPPED sub-score of the requested component. A client is absent from
+ * the map when it has no snapshot for the period, or the component is
+ * absent/excluded in it — the same two null cases the per-client read had.
  */
-async function chrSubScore(q: Queryable, clientID: string, per: Period, comp: string): Promise<number | null> {
-  const rows = await q<{ components_json: unknown }[]>`
-    select components_json from client_health_snapshots where client_id = ${clientID} and period_start = ${per.startDate}`;
-  if (rows.length === 0) {
-    return null;
+async function chrSubScores(
+  q: Queryable,
+  clientIDs: string[],
+  per: Period,
+  comp: string,
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (clientIDs.length === 0) {
+    return out;
   }
-  const comps = parseJsonb<ChrComponent[]>(rows[0].components_json) ?? [];
-  for (const c of comps) {
-    if (c.name === comp && c.included && c.capped !== null && c.capped !== undefined) {
-      return c.capped;
+  const rows = await q<{ client_id: string; components_json: unknown }[]>`
+    select client_id, components_json from client_health_snapshots
+     where client_id = any(${[...new Set(clientIDs)]}) and period_start = ${per.startDate}`;
+  for (const r of rows) {
+    const comps = parseJsonb<ChrComponent[]>(r.components_json) ?? [];
+    for (const c of comps) {
+      if (c.name === comp && c.included && c.capped !== null && c.capped !== undefined) {
+        out.set(r.client_id, c.capped);
+        break;
+      }
     }
   }
-  return null;
+  return out;
 }
 
 /**
@@ -694,6 +758,19 @@ const REVISION_INVERSE_FACTOR = 20;
 /** placeholderTracker records whether any target lookup returned a placeholder. */
 interface PlaceholderTracker {
   used: boolean;
+  /**
+   * P-1 memo: resolved targets for one (role_type, period) pair, loaded on the
+   * first targetFor call of a gather and reused by the rest. One gather only ever
+   * asks about a single role type and period, so this is a per-request cache with
+   * no cross-role leakage — it is keyed by both anyway.
+   */
+  targets?: Map<string, Map<string, ResolvedTarget>>;
+}
+
+/** A target row as targetFor resolves it (exact period row wins over the sentinel). */
+interface ResolvedTarget {
+  value: number;
+  placeholder: boolean;
 }
 
 /**
@@ -747,7 +824,7 @@ async function normalized(
   if (!hasActual) {
     return cand({ name: comp, included: false, reason: absentReason });
   }
-  const { target, placeholder, ok } = await targetFor(q, roleType, comp, per.startDate);
+  const { target, placeholder, ok } = await targetFor(q, roleType, comp, per.startDate, pt);
   if (!ok || target === 0) {
     return cand({
       name: comp, included: false,
@@ -766,6 +843,9 @@ async function creativeCandidates(q: Queryable, staffID: string, per: Period, pt
   const assets = await q<{ id: string; sla_target_hours: string | null; attributed_gmv: string | null }[]>`
     select id, sla_target_hours, attributed_gmv from assets where assigned_pic = ${staffID}`;
 
+  // P-1: one batched transition read for the whole asset set (was one per asset).
+  const assetLog = await loadTransitions(q, 'asset', assets.map((r) => r.id));
+
   let approvedInPeriod = 0;
   let slaJudged = 0;
   let speedSum = 0;
@@ -773,7 +853,7 @@ async function creativeCandidates(q: Queryable, staffID: string, per: Period, pt
   let gmvSum = 0;
   for (const ar of assets) {
     const sla = ar.sla_target_hours === null ? null : Number(ar.sla_target_hours);
-    const m = await assetMetrics(q, ar.id, sla);
+    const m = computeMetrics(transitionsOf(assetLog, ar.id), sla);
     if (m.approvedPeriodWib !== per.approvedTag) {
       continue;
     }
@@ -805,11 +885,14 @@ async function adsCandidates(q: Queryable, staffID: string, per: Period, pt: Pla
   const briefs = await q<{ id: string; sla_target_hours: string | null }[]>`
     select id, sla_target_hours from briefs where assigned_pic = ${staffID} and assigned_division = ${ADS_BRIEF_DIVISION}`;
 
+  // P-1: one batched transition read for the whole brief set (was one per brief).
+  const briefLog = await loadTransitions(q, 'brief', briefs.map((r) => r.id));
+
   let slaJudged = 0;
   let speedSum = 0;
   for (const br of briefs) {
     const sla = br.sla_target_hours === null ? null : Number(br.sla_target_hours);
-    const m = await briefMetrics(q, br.id, sla);
+    const m = computeMetrics(transitionsOf(briefLog, br.id), sla);
     if (m.approvedPeriodWib !== per.approvedTag || m.speedScorePct === null) {
       continue;
     }
@@ -863,11 +946,15 @@ async function adsCampaignMetrics(
     return { roasRaw: 0, hasROAS: false, gmvSum: 0, hasCampaigns: false };
   }
 
+  // P-1: fold every managed campaign's period spend/GMV in ONE grouped query
+  // instead of one per campaign.
+  const periodTotals = await campaignsPeriodSpendGMV(q, camps.map((c) => c.id), per);
+
   let gmvSum = 0;
   let ratioSum = 0;
   let ratioN = 0;
   for (const c of camps) {
-    const { spend, gmv, hasData } = await campaignPeriodSpendGMV(q, c.id, per);
+    const { spend, gmv, hasData } = periodTotals.get(c.id) ?? { spend: 0, gmv: 0, hasData: false };
     if (hasData) {
       gmvSum += gmv; // rupiah
     }
@@ -888,24 +975,43 @@ async function adsCampaignMetrics(
   return { roasRaw: 0, hasROAS: false, gmvSum, hasCampaigns: true };
 }
 
+/** One campaign's Σ spend / Σ gmv (rupiah) for the snapshot month. */
+interface PeriodSpendGMV {
+  spend: number;
+  gmv: number;
+  hasData: boolean;
+}
+
 /**
- * campaignPeriodSpendGMV = Σ spend / Σ gmv (rupiah) over the campaign's Metric
- * Entries whose period_start falls in the snapshot month. hasData=false when the
- * campaign has no metric row in the period.
+ * campaignsPeriodSpendGMV = Σ spend / Σ gmv (rupiah) per campaign over the Metric
+ * Entries whose period_start falls in the snapshot month, for MANY campaigns in one
+ * round trip. A campaign absent from the map (no metric row in the period, or a
+ * NULL Σ) is hasData=false — exactly what the per-campaign query returned.
  */
-async function campaignPeriodSpendGMV(
+async function campaignsPeriodSpendGMV(
   q: Queryable,
-  campaignID: string,
+  campaignIDs: string[],
   per: Period,
-): Promise<{ spend: number; gmv: number; hasData: boolean }> {
-  const rows = await q<{ spend: string | null; gmv: string | null }[]>`
-    select sum(spend) as spend, sum(gmv) as gmv from metric_entries
-     where campaign_id = ${campaignID} and period_start between ${per.startDate} and ${per.endDate}`;
-  const r = rows[0];
-  if (!r || r.spend === null || r.gmv === null) {
-    return { spend: 0, gmv: 0, hasData: false };
+): Promise<Map<string, PeriodSpendGMV>> {
+  const out = new Map<string, PeriodSpendGMV>();
+  if (campaignIDs.length === 0) {
+    return out;
   }
-  return { spend: Number(money.parse(r.spend)) / 100, gmv: Number(money.parse(r.gmv)) / 100, hasData: true };
+  const rows = await q<{ campaign_id: string; spend: string | null; gmv: string | null }[]>`
+    select campaign_id, sum(spend) as spend, sum(gmv) as gmv from metric_entries
+     where campaign_id = any(${campaignIDs}) and period_start between ${per.startDate} and ${per.endDate}
+     group by campaign_id`;
+  for (const r of rows) {
+    if (r.spend === null || r.gmv === null) {
+      continue; // hasData=false, same as the per-campaign NULL-Σ branch
+    }
+    out.set(r.campaign_id, {
+      spend: Number(money.parse(r.spend)) / 100,
+      gmv: Number(money.parse(r.gmv)) / 100,
+      hasData: true,
+    });
+  }
+  return out;
 }
 
 // ---- KOL (staff = creator_bookings.assigned_coordinator) ----
@@ -922,8 +1028,10 @@ async function kolCandidates(q: Queryable, staffID: string, per: Period, pt: Pla
   let speedN = 0;
   let sourcingSum = 0;
   let sourcingN = 0;
+  // P-1: one batched transition read for the whole booking set.
+  const bookingLog = await loadTransitions(q, 'creator_booking', bookings.map((r) => r.id));
   for (const b of bookings) {
-    const evs = await transitionsFor(q, 'creator_booking', b.id);
+    const evs = transitionsOf(bookingLog, b.id);
     const sla = b.sla_target_hours === null ? null : Number(b.sla_target_hours);
     const m = computeBookingMetrics(b.id, b.status, b.created_at, sla, evs);
     // QC-passed in period: Creator Count + Speed Score + terminal activity.
@@ -991,17 +1099,20 @@ async function amCandidates(q: Queryable, staffID: string, per: Period, pt: Plac
 
   // CHR Average (M13 §8/OA-6): mean final_health_score over the portfolio's CHR
   // snapshots for the SAME period.
+  // P-1: one query for the whole portfolio (was one per client). UNIQUE
+  // (client_id, period_start) on client_health_snapshots means at most one row per
+  // client here, so this folds exactly what the per-client loop folded.
   let chrSum = 0;
   let chrN = 0;
-  for (const cid of clientIDs) {
-    const rows = await q<{ final_health_score: string | null }[]>`
-      select final_health_score from client_health_snapshots where client_id = ${cid} and period_start = ${per.startDate}`;
-    if (rows.length === 0) {
-      continue;
-    }
-    if (rows[0].final_health_score !== null) {
-      chrSum += Number(rows[0].final_health_score);
-      chrN++;
+  if (clientIDs.length > 0) {
+    const chrRows = await q<{ final_health_score: string | null }[]>`
+      select final_health_score from client_health_snapshots
+       where client_id = any(${clientIDs}) and period_start = ${per.startDate}`;
+    for (const r of chrRows) {
+      if (r.final_health_score !== null) {
+        chrSum += Number(r.final_health_score);
+        chrN++;
+      }
     }
   }
   if (chrN === 0) {
@@ -1042,7 +1153,7 @@ async function complaintResolutionCandidate(
       reason: 'tidak ada komplain yang selesai [Resolved] pada periode — dikecualikan + bobot didistribusi ulang',
     });
   }
-  const { target, placeholder, ok } = await targetFor(q, ROLE_AM, COMP_COMPLAINT_RESOLUTION_SPEED, per.startDate);
+  const { target, placeholder, ok } = await targetFor(q, ROLE_AM, COMP_COMPLAINT_RESOLUTION_SPEED, per.startDate, pt);
   if (!ok || target === 0) {
     return cand({
       name: COMP_COMPLAINT_RESOLUTION_SPEED, included: false,
@@ -1065,10 +1176,13 @@ async function amResolutionHours(q: Queryable, staffID: string, per: Period): Pr
   const cpls = await q<{ id: string; created_at: Date }[]>`
     select id, created_at from complaints where assigned_to = ${staffID}`;
 
+  // P-1: one batched transition read for the AM's complaint set.
+  const complaintLog = await loadTransitions(q, 'complaint', cpls.map((r) => r.id));
+
   let sum = 0;
   let n = 0;
   for (const c of cpls) {
-    const evs = await transitionsFor(q, 'complaint', c.id);
+    const evs = transitionsOf(complaintLog, c.id);
     const resolvedAt = firstTransitionInto(evs, '[Resolved]');
     if (resolvedAt === null || resolvedAt.getTime() < per.startUTC.getTime() || resolvedAt.getTime() >= per.endUTC.getTime()) {
       continue;
@@ -1090,32 +1204,30 @@ async function amResolutionHours(q: Queryable, staffID: string, per: Period): Pr
 async function amRevisionEscalation(q: Queryable, clientIDs: string[], per: Period): Promise<Candidate> {
   let approved = 0;
   let flagged = 0;
-  for (const cid of clientIDs) {
-    // Creative Assets.
+  if (clientIDs.length > 0) {
+    // P-1: the whole portfolio in four round-trips (assets, briefs, and one batched
+    // transition read each) instead of O(clients × tasks). Client ids are primary
+    // keys of the AM's own portfolio, so `any(...)` covers exactly the same rows
+    // the per-client loop did — no cross-scope widening.
     const assets = await q<{ id: string; sla_target_hours: string | null }[]>`
       select a.id, a.sla_target_hours
         from assets a join briefs b on b.id = a.brief_id
         join services sv on sv.id = b.service_id
-       where sv.client_id = ${cid}`;
-    for (const t of assets) {
-      const sla = t.sla_target_hours === null ? null : Number(t.sla_target_hours);
-      const m = await assetMetrics(q, t.id, sla);
-      if (m.approvedPeriodWib !== per.approvedTag) {
-        continue;
-      }
-      approved++;
-      if (m.revisionFlagged) {
-        flagged++;
-      }
-    }
-    // Ads Briefs-as-task.
+       where sv.client_id = any(${clientIDs})`;
     const briefs = await q<{ id: string; sla_target_hours: string | null }[]>`
       select b.id, b.sla_target_hours
         from briefs b join services sv on sv.id = b.service_id
-       where sv.client_id = ${cid} and b.assigned_division = ${ADS_BRIEF_DIVISION}`;
-    for (const t of briefs) {
-      const sla = t.sla_target_hours === null ? null : Number(t.sla_target_hours);
-      const m = await briefMetrics(q, t.id, sla);
+       where sv.client_id = any(${clientIDs}) and b.assigned_division = ${ADS_BRIEF_DIVISION}`;
+    const assetLog = await loadTransitions(q, 'asset', assets.map((r) => r.id));
+    const briefLog = await loadTransitions(q, 'brief', briefs.map((r) => r.id));
+
+    const tasks: { log: Map<string, Transition[]>; id: string; sla: string | null }[] = [
+      ...assets.map((t) => ({ log: assetLog, id: t.id, sla: t.sla_target_hours })),
+      ...briefs.map((t) => ({ log: briefLog, id: t.id, sla: t.sla_target_hours })),
+    ];
+    for (const t of tasks) {
+      const sla = t.sla === null ? null : Number(t.sla);
+      const m = computeMetrics(transitionsOf(t.log, t.id), sla);
       if (m.approvedPeriodWib !== per.approvedTag) {
         continue;
       }
@@ -1168,42 +1280,8 @@ function revisionCandidate(revisionSum: number, approved: number): Candidate {
 }
 
 // ---- task-metric helpers (recompute from the immutable log, house rule 4) ----
-
-/** Metrics subset both task sources expose that M14 consumes. */
-interface TaskMetrics {
-  speedScorePct: number | null;
-  revisionCount: number;
-  revisionFlagged: boolean;
-  approvedPeriodWib: string;
-}
-
-async function assetMetrics(q: Queryable, id: string, sla: number | null): Promise<TaskMetrics> {
-  const evs = await transitionsFor(q, 'asset', id);
-  return computeMetrics(evs, sla);
-}
-
-async function briefMetrics(q: Queryable, id: string, sla: number | null): Promise<TaskMetrics> {
-  const evs = await transitionsFor(q, 'brief', id);
-  return computeMetrics(evs, sla);
-}
-
-/**
- * transitionsFor reads a canonical entity's immutable transition log ASCENDING and
- * maps it to {to, at}. Shared by the task (asset/brief), KOL booking, and complaint
- * gatherers (mirrors module13_health.taskTransitions).
- */
-async function transitionsFor(q: Queryable, entityType: string, id: string): Promise<Transition[]> {
-  const entries = await q<{ action: string; created_at: Date }[]>`
-    select action, created_at from audit_log where entity_type = ${entityType} and entity_id = ${id} order by id asc`;
-  const out: Transition[] = [];
-  for (const e of entries) {
-    const to = transitionTarget(e.action);
-    if (to !== null) {
-      out.push({ to, at: e.created_at });
-    }
-  }
-  return out;
-}
+// The per-entity log readers live in ./transitions now (batched, P-1); what is
+// left here is the pure folding over an already-loaded transition list.
 
 /** transitionCountInPeriod counts transitions INTO `to` whose timestamp falls in the WIB period window. */
 function transitionCountInPeriod(evs: Transition[], to: string, per: Period): number {
@@ -1224,16 +1302,6 @@ function firstTransitionInto(evs: Transition[], to: string): Date | null {
     }
   }
   return null;
-}
-
-/** transitionTarget extracts B from a "transition:A->B" audit action. */
-function transitionTarget(action: string): string | null {
-  const prefix = 'transition:';
-  if (!action.startsWith(prefix)) {
-    return null;
-  }
-  const idx = action.indexOf('->', prefix.length);
-  return idx < 0 ? null : action.slice(idx + 2);
 }
 
 // ---------------------------------------------------------------------------

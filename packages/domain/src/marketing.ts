@@ -436,12 +436,13 @@ export async function dashboard(sql: Queryable, actor: Actor): Promise<Metrics[]
   } catch (e) {
     mapCampaignErr(e);
   }
-  const out: Metrics[] = [];
-  for (const c of campaigns) {
-    const budget = await budgetFor(sql, c.id);
-    out.push(await computeMetrics(sql, c, budget));
-  }
-  return out;
+  // P-1: each campaign's metric bundle is ~5 independent reads, and they used to
+  // run campaign-after-campaign — 5N sequential round-trips for a dashboard that
+  // shows them all at once. Compute the campaigns concurrently (read-only, no
+  // shared state); the driver pipelines the queries. `campaigns` order is kept.
+  return Promise.all(
+    campaigns.map(async (c) => computeMetrics(sql, c, await budgetFor(sql, c.id))),
+  );
 }
 
 /** budgetFor loads the campaign's record budget, or null when no record exists yet. */

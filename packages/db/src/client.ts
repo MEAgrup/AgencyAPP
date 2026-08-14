@@ -38,8 +38,27 @@ export interface CreateClientOptions {
 export function createClient(connectionString: string, opts: CreateClientOptions = {}): Sql {
   return postgres(connectionString, {
     prepare: false,
+    // P-1 pool sizing. The API runs as many short-lived serverless instances, each
+    // with its OWN postgres.js pool, all sharing one Supabase pooler. A large
+    // per-instance pool therefore buys nothing and starves the pooler under fan-out,
+    // so keep it small and let idle sockets go back quickly. Both are overridable
+    // per-environment without a code change.
+    max: intEnv('CDPS_PG_MAX', 5),
+    idle_timeout: intEnv('CDPS_PG_IDLE_TIMEOUT', 20),
+    // Fail fast instead of hanging a request behind an exhausted pooler.
+    connect_timeout: intEnv('CDPS_PG_CONNECT_TIMEOUT', 10),
     ...opts.overrides,
   });
+}
+
+/** intEnv reads a positive integer env override, falling back to `fallback`. */
+function intEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') {
+    return fallback;
+  }
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
 }
 
 /**
@@ -79,9 +98,15 @@ export async function withClaims<T>(
   fn: (tx: TransactionSql) => Promise<T>,
 ): Promise<T> {
   return withTransaction(sql, async (tx) => {
-    await tx`SELECT set_config('request.jwt.claims', ${claimsJson}, true)`;
+    // P-1: both preamble statements are ISSUED before either is awaited, so
+    // postgres.js pipelines them into one round trip instead of two. postgres.js
+    // keeps per-connection FIFO order, so the claims are still published before
+    // the role is dropped, and both still land before anything `fn` issues —
+    // the transaction is never non-privileged-but-unidentified.
+    const claims = tx`SELECT set_config('request.jwt.claims', ${claimsJson}, true)`;
     // Role name is a fixed constant — SET ROLE takes no bind parameters.
-    await tx.unsafe(`SET LOCAL ROLE ${READ_ROLE}`);
+    const role = tx.unsafe(`SET LOCAL ROLE ${READ_ROLE}`);
+    await Promise.all([claims, role]);
     return fn(tx);
   });
 }
