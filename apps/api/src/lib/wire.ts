@@ -1217,6 +1217,27 @@ export function healthScanResultToWire(r: health.ScanResult): HealthScanResultWi
   return { period: r.period, snapshots_made: r.snapshotsMade, band_drops_flagged: r.bandDropsFlagged };
 }
 
+/** module13_health.PortfolioRow — one active client's line on the /health landing (D-12). */
+export interface HealthPortfolioRowWire {
+  client_id: string;
+  toko: string;
+  owner_am: string;
+  band: string;
+  score_display: string;
+  band_drop: boolean;
+  open_complaints: number;
+  last_closed_recap_week: string | null;
+  last_closed_recap_end: string | null;
+}
+
+export function healthPortfolioRowToWire(r: health.PortfolioRow): HealthPortfolioRowWire {
+  return {
+    client_id: r.clientId, toko: r.toko, owner_am: r.ownerAm, band: r.band,
+    score_display: r.scoreDisplay, band_drop: r.bandDrop, open_complaints: r.openComplaints,
+    last_closed_recap_week: r.lastClosedRecapWeek, last_closed_recap_end: r.lastClosedRecapEnd,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // M11 Board — Dependency (DEP-) + Client Board / My Tasks cards.
 // ---------------------------------------------------------------------------

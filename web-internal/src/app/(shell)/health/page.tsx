@@ -1,10 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { errorMessage } from '@/lib/api';
-import { getTriggerScan, type ScanResult } from '@/lib/health';
+import { getTriggerScan, getHealthPortfolio, type ScanResult, type HealthPortfolioRow } from '@/lib/health';
+
+function getBandColor(band: string): string {
+  if (band === 'Healthy') return 'badge-green';
+  if (band === 'Watch') return 'badge-amber';
+  if (band === 'At Risk') return 'badge-red';
+  return 'badge-gray';
+}
 
 export default function HealthPage() {
   const { role } = useAuth();
@@ -12,10 +19,32 @@ export default function HealthPage() {
   const [scanError, setScanError] = useState<string | null>(null);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
 
-  // canRunScan backend (service.go:76-81): Director menang dulu, lalu Account staff/lead.
-  // OD layered hanya memblokir jalur non-Director; division dari /me berkapital 'Account'.
+  // Portfolio table (D-12) — one row per active client the actor may view.
+  const [rows, setRows] = useState<HealthPortfolioRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // canRunScan backend (health.ts canRunScan): Director menang dulu, lalu Account
+  // staff/lead. OD layered hanya memblokir jalur non-Director; division 'Account'.
   const isAccount = role && role.division === 'Account' && (role.level === 'staff' || role.level === 'lead');
   const canScan = role?.director || (isAccount && !role?.od);
+
+  const loadPortfolio = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const res = await getHealthPortfolio();
+      setRows(res.data);
+    } catch (err) {
+      setLoadError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPortfolio();
+  }, [loadPortfolio]);
 
   async function handleScan() {
     if (!window.confirm('Jalankan pemindaian skor kesehatan klien untuk bulan tertutup terakhir?')) {
@@ -27,6 +56,8 @@ export default function HealthPage() {
     try {
       const res = await getTriggerScan();
       setScanResult(res);
+      // A sweep may have written new snapshots / band drops — refresh the table.
+      await loadPortfolio();
     } catch (err) {
       setScanError(errorMessage(err));
     } finally {
@@ -38,7 +69,10 @@ export default function HealthPage() {
     <div className="stack">
       <div>
         <h1>Client Health</h1>
-        <p className="muted">Laporan kesehatan klien — skor bulanan, band, dan breakdown komponen (M13).</p>
+        <p className="muted">
+          Portofolio kesehatan klien aktif — band terbaru, penurunan band, komplain terbuka, dan
+          kesegaran rekap mingguan (M13 + M6D §8).
+        </p>
       </div>
 
       {canScan && (
@@ -67,11 +101,77 @@ export default function HealthPage() {
       )}
 
       <section className="card">
-        <h2>Lihat Laporan Klien</h2>
-        <p className="muted">Pilih klien untuk melihat skor kesehatan, breakdown komponen, trend, dan kontrol toggle ROAS.</p>
-        <Link href="/clients" className="btn btnSecondary">
-          Daftar Klien →
-        </Link>
+        <div className="cardHeader">
+          <h2>Portofolio Klien Aktif</h2>
+          <Link href="/clients" className="btn btnSecondary btnSm">Daftar Klien →</Link>
+        </div>
+
+        {loading && <p className="muted">Memuat portofolio...</p>}
+        {loadError && !loading && <div className="alert alertError" role="alert">{loadError}</div>}
+        {!loading && !loadError && rows.length === 0 && (
+          <p className="muted">Tidak ada klien aktif dalam cakupan Anda.</p>
+        )}
+
+        {!loading && !loadError && rows.length > 0 && (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Klien</th>
+                  <th>Skor</th>
+                  <th>Band</th>
+                  <th>Komplain Terbuka</th>
+                  <th>Rekap Terakhir (Ditutup)</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.client_id}>
+                    <td>
+                      <strong>{r.toko || r.client_id}</strong>
+                      <div style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--color-text-muted)' }}>
+                        {r.client_id}
+                      </div>
+                    </td>
+                    <td>{r.score_display}</td>
+                    <td>
+                      {r.band ? (
+                        <span className={`badge ${getBandColor(r.band)}`}>{r.band}</span>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                      {r.band_drop && (
+                        <span className="badge badge-red" style={{ marginLeft: '6px' }} title="Band turun dari snapshot sebelumnya (M13 Rule 12)">
+                          ↓ Band Drop
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      {r.open_complaints > 0 ? (
+                        <span className="badge badge-amber">{r.open_complaints}</span>
+                      ) : (
+                        <span className="muted">0</span>
+                      )}
+                    </td>
+                    <td>
+                      {r.last_closed_recap_week ? (
+                        <span title={r.last_closed_recap_end ?? undefined}>{r.last_closed_recap_week}</span>
+                      ) : (
+                        <span className="muted" title="Belum ada rekap mingguan yang ditutup">Belum ada</span>
+                      )}
+                    </td>
+                    <td>
+                      <Link href={`/health/${encodeURIComponent(r.client_id)}`} className="btn btnSecondary btnSm">
+                        Detail →
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
     </div>
   );

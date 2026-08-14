@@ -30,6 +30,7 @@ import {
   getRoasToggle,
   getSnapshot,
   NotFoundError,
+  portfolio,
   preview,
   runScan,
   runSnapshotJob,
@@ -251,6 +252,7 @@ afterAll(async () => {
 afterEach(async () => {
   if (!sql) return;
   await sql`truncate client_health_snapshots`; // append-only; TRUNCATE bypasses the no-DELETE trigger. M13-only table.
+  await sql`delete from weekly_result_recap where created_by like 'ZZ-%'`; // D-12 portfolio fixtures (FK → clients)
   await sql`delete from complaints where created_by like 'ZZ-%'`;
   await sql`delete from metric_entries where created_by like 'ZZ-%'`;
   await sql`delete from ad_campaigns where created_by like 'ZZ-%'`;
@@ -392,5 +394,64 @@ describeDb('visibility (Rule 11) + scan gate', () => {
     await expect(runScan(sql, director(), nowJul)).resolves.toBeDefined();
     await expect(runScan(sql, od(), nowJul)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(runScan(sql, creativeStaff(), nowJul)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+});
+
+// D-12 portfolio landing — one row per ACTIVE client, canScope+canView gated.
+async function insRecap(id: string, clientId: string, isoWeek: number, status: string, autoFlag = false): Promise<void> {
+  const mon = new Date(Date.UTC(2026, 0, 5) + (isoWeek - 1) * 7 * 86_400_000); // Mon 2026-01-05 + weeks
+  const monday = mon.toISOString().slice(0, 10);
+  const sunday = new Date(mon.getTime() + 6 * 86_400_000).toISOString().slice(0, 10);
+  await sql`
+    insert into weekly_result_recap (id, client_id, iso_year, iso_week, minggu_mulai, minggu_akhir,
+      status, pernah_ditutup_otomatis, created_by)
+    values (${id}, ${clientId}, 2026, ${isoWeek}, ${monday}::date, ${sunday}::date, ${status}, ${autoFlag}, 'ZZ-TEST')`;
+}
+
+describeDb('portfolio landing (D-12)', () => {
+  it('lists only active clients, with band, open-complaint count and last closed-recap week', async () => {
+    const active = `CLI-ACT-${uniq()}`;
+    const inactive = `CLI-INACT-${uniq()}`;
+    await insClient(active, 'ZZ-AM', '50000000.00', '80000000.00', '62000000.00', new Date(Date.UTC(2026, 3, 1)));
+    await insService(`SVC-A-${uniq()}`, active); // [In Execution] ⇒ active
+    // inactive: only a Done service ⇒ excluded by RM-2.
+    await insClient(inactive, 'ZZ-AM', '50000000.00', '80000000.00', '62000000.00', new Date(Date.UTC(2026, 3, 1)));
+    const svcDone = `SVC-D-${uniq()}`;
+    await sql`
+      insert into services (id, client_id, master_service_id, master_version_no, name,
+        standard_price, commission_rule, status, requires_strategy_plan, created_by)
+      values (${svcDone}, ${inactive}, 'MSV-X', 1, 'Full Mgmt', '10000000.00', 'rule', 'Done', false, 'ZZ-TEST')`;
+
+    await insComplaint(`CPL-O-${uniq()}`, active, 'High', new Date(Date.UTC(2026, 7, 1))); // [Open]
+    await insRecap(`WRR-C-${uniq()}`.slice(0, 24), active, 30, 'Ditutup');
+    await insRecap(`WRR-O-${uniq()}`.slice(0, 24), active, 31, 'Terbuka'); // newer, not closed
+    await runSnapshotJob(sql, nowJul); // gives `active` a June snapshot/band
+
+    const rows = await portfolio(sql, director());
+    const a = rows.find((r) => r.clientId === active);
+    expect(a).toBeDefined();
+    expect(rows.find((r) => r.clientId === inactive)).toBeUndefined(); // RM-2 excludes all-Done
+    expect(a!.band).not.toBe(''); // snapshot exists
+    expect(a!.openComplaints).toBe(1);
+    expect(a!.lastClosedRecapWeek).toBe('2026-W30'); // the Ditutup week, not the Terbuka one
+  });
+
+  it('canScope gate: Account staff sees only own clients; creative forbidden', async () => {
+    const mine = `CLI-MINE-${uniq()}`;
+    const theirs = `CLI-THEIRS-${uniq()}`;
+    await insClient(mine, 'ZZ-AM', '50000000.00', '80000000.00', '62000000.00', new Date(Date.UTC(2026, 3, 1)));
+    await insService(`SVC-M-${uniq()}`, mine);
+    await insClient(theirs, 'ZZ-OTHER', '50000000.00', '80000000.00', '62000000.00', new Date(Date.UTC(2026, 3, 1)));
+    await insService(`SVC-T-${uniq()}`, theirs);
+
+    const staffRows = await portfolio(sql, amActor('ZZ-AM'));
+    expect(staffRows.some((r) => r.clientId === mine)).toBe(true);
+    expect(staffRows.some((r) => r.clientId === theirs)).toBe(false); // canView: staff sees own AM only
+    // Account lead sees both.
+    const leadRows = await portfolio(sql, accountLead());
+    expect(leadRows.some((r) => r.clientId === mine)).toBe(true);
+    expect(leadRows.some((r) => r.clientId === theirs)).toBe(true);
+    // Non-Account has no scope.
+    await expect(portfolio(sql, creativeStaff())).rejects.toBeInstanceOf(ForbiddenError);
   });
 });
