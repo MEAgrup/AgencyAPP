@@ -14,8 +14,10 @@
 //   module12_task.BlockRequest  (block.go)
 //   module12_task.PendingBlockRequest (block.go)
 //   module15_portal.TeamPortal  (portal.go)
-//   statemachine.Result         (statemachine.go)  <- NOTE: NO json tags -> keys
-//                                                      come out as "From"/"To"
+//   statemachine TransitionResult                  <- NOTE: the TS API answers
+//                                                      {ok, from, to} (lowercase);
+//                                                      the Go build's capitalized
+//                                                      "From"/"To" is retired.
 // No invented fields. Money-ish raw floats (attributed_gmv) are formatted in the
 // page via lib/money.ts; nothing here is pre-formatted by the backend.
 
@@ -146,11 +148,10 @@ export interface TeamPortal {
   block_queue: PendingBlockRequest[];
 }
 
-// statemachine.Result has NO json tags -> capitalised keys on the wire.
-export interface TransitionResult {
-  From: string;
-  To: string;
-}
+// Transition bodies are `{ok, from, to}` (apps/api http.ts transitionResponse).
+// Read them through lib/transition.ts — it also tolerates the retired Go casing.
+import type { TransitionResult } from '@/lib/transition';
+export type { TransitionResult };
 
 export interface AssignPICResult {
   id: string;

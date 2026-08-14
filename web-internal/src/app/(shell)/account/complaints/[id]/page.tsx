@@ -18,6 +18,7 @@ import {
   type Complaint,
 } from '@/lib/account';
 import StatusBadge from '@/components/StatusBadge';
+import { transitionTo } from '@/lib/transition';
 
 function relatedRefHref(ref: string): string {
   if (ref.startsWith('BRF-')) return `/account/briefs/${ref}`;
@@ -68,7 +69,7 @@ export default function ComplaintDetailPage({ params }: { params: Promise<{ id: 
     setActionSubmitting(true);
     try {
       const res = await startComplaint(id);
-      setActionMessage(`Status berpindah ke ${res.To}.`);
+      setActionMessage(`Status berpindah ke ${transitionTo(res)}.`);
       await load();
     } catch (err) {
       setActionError(errorMessage(err));
@@ -84,7 +85,7 @@ export default function ComplaintDetailPage({ params }: { params: Promise<{ id: 
     setActionSubmitting(true);
     try {
       const res = await resolveComplaint(id, resolutionNotes);
-      setActionMessage(`Status berpindah ke ${res.To}.`);
+      setActionMessage(`Status berpindah ke ${transitionTo(res)}.`);
       setResolutionNotes('');
       await load();
     } catch (err) {
@@ -101,7 +102,7 @@ export default function ComplaintDetailPage({ params }: { params: Promise<{ id: 
     setActionSubmitting(true);
     try {
       const res = await closeComplaint(id);
-      setActionMessage(`Status berpindah ke ${res.To}.`);
+      setActionMessage(`Status berpindah ke ${transitionTo(res)}.`);
       await load();
     } catch (err) {
       setActionError(errorMessage(err));

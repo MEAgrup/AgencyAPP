@@ -26,6 +26,7 @@ import {
   type TaskSource,
 } from '@/lib/tasks';
 import StatusBadge from '@/components/StatusBadge';
+import { transitionLabel, type TransitionResult } from '@/lib/transition';
 
 // Live Stream briefs skip the M12 engine (dispatched to vendor) — their native
 // status; no execution edge ever succeeds for them.
@@ -179,7 +180,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   } = useAssignableEmployees(taskDivision, LEVEL_STAFF, canDecideBlock && taskDivision !== '');
 
   async function runTransition(
-    fn: () => Promise<{ From: string; To: string }>,
+    fn: () => Promise<TransitionResult>,
     okLabel: string,
   ) {
     setTransitionError(null);
@@ -187,7 +188,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
     setTransitionSubmitting(true);
     try {
       const res = await fn();
-      setTransitionMessage(`${okLabel}: ${res.From} → ${res.To}`);
+      setTransitionMessage(`${okLabel}: ${transitionLabel(res)}`);
       await load();
       await loadMetrics();
     } catch (err) {

@@ -7,8 +7,9 @@
 //  - List endpoints return {"data": [...]}; single-item GETs return the object
 //    directly (no wrapper). See per-function return generics below.
 //  - Transition endpoints (submit/review/approve/start/resolve/close) return
-//    statemachine.Result which marshals with EXPORTED Go field names (no json
-//    tags) => {"From": "...", "To": "..."} — see TransitionResult.
+//    {"ok": true, "from": "...", "to": "..."} (apps/api http.ts
+//    transitionResponse). The Go build's capitalized {"From","To"} is retired —
+//    see lib/transition.ts, which reads both.
 //  - Many fields use omitempty => the JSON key may be ABSENT (not null) when
 //    empty; every such field is typed optional here.
 //  - No PATCH is needed by this module (strategy edit uses PUT), so we do not
@@ -234,11 +235,10 @@ export interface ComplaintInput {
   related_ref: string; // optional; "" when none
 }
 
-// Result of a statemachine transition (From/To, no json tags => capitalized keys).
-export interface TransitionResult {
-  From: string;
-  To: string;
-}
+// Result of a statemachine transition — `{ok, from, to}` on the wire (apps/api
+// http.ts transitionResponse). Read via lib/transition.ts.
+import type { TransitionResult } from '@/lib/transition';
+export type { TransitionResult };
 
 // ---------------------------------------------------------------------------
 // Const option lists — verbatim BI strings from the PRD / brief. Do not rename.
