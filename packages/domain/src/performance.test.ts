@@ -26,7 +26,9 @@ import {
   COMP_CHR_AVERAGE,
   COMP_CREATOR_COUNT,
   COMP_GMV_IMPACT,
+  COMP_NOTE_COMPLIANCE,
   COMP_OPTIMIZATION_ACTIVITY,
+  COMP_RECAP_DISCIPLINE,
   COMP_ROAS_ATTAINMENT,
   COMP_SOURCING_TURNAROUND,
   COMP_SPEED_SCORE,
@@ -172,6 +174,51 @@ describe('pure scoring core', () => {
     expect(diag.raw).toBe(12.5);
     expect(diag.capped).toBeNull(); // no sub-score
   });
+
+  // D-14 (RM-9a): the 5% Weekly-Note Compliance slice was carved PROPORTIONALLY.
+  // The invariant that keeps the change safe: when the new component is EXCLUDED
+  // (an AM/division with no recap that period), Rule-6 redistribution renormalises
+  // the survivors back to EXACTLY the pre-carve proportions — so a period with no
+  // recap data scores identically to before D-14.
+  it('D-14: proportional carve — excluding the new component restores pre-carve proportions', () => {
+    // Ads after RM-9a: 23.75/28.5/23.75/19 + note_compliance 5.
+    const w = { speed_score: 23.75, roas_attainment: 28.5, gmv_impact: 23.75, optimization_activity: 19, note_compliance: 5 };
+    const cands = [
+      { name: COMP_SPEED_SCORE, included: true, raw: transformSpeed(95), reason: '', diagnostic: false },
+      { name: COMP_ROAS_ATTAINMENT, included: true, raw: 88, reason: '', diagnostic: false },
+      { name: COMP_GMV_IMPACT, included: true, raw: 80, reason: '', diagnostic: false },
+      { name: COMP_OPTIMIZATION_ACTIVITY, included: true, raw: 75, reason: '', diagnostic: false },
+      { name: COMP_NOTE_COMPLIANCE, included: false, raw: 0, reason: 'no recap', diagnostic: false },
+    ];
+    const { comps, profile } = scoreProfile(w, cands);
+    const eff = Object.fromEntries(comps.map((c) => [c.name, c.effectiveWeight]));
+    // Renormalised survivors == the pre-carve 25/30/25/20 exactly.
+    expect(eff[COMP_SPEED_SCORE]).toBeCloseTo(25, 6);
+    expect(eff[COMP_ROAS_ATTAINMENT]).toBeCloseTo(30, 6);
+    expect(eff[COMP_GMV_IMPACT]).toBeCloseTo(25, 6);
+    expect(eff[COMP_OPTIMIZATION_ACTIVITY]).toBeCloseTo(20, 6);
+    expect(eff[COMP_NOTE_COMPLIANCE]).toBe(0); // excluded
+    // …and therefore the profile is identical to the pre-D-14 §4 Kenny value.
+    expect(profile).toBeCloseTo(86.4, 3);
+  });
+
+  // When the new component IS present it carries its 5% (division) / 10% (AM) with
+  // no redistribution — the ordinary weighted case.
+  it('D-14: recap_discipline weighted at 10% when present (AM profile)', () => {
+    const w = { chr_average: 45, complaint_resolution_speed: 22.5, revision_escalation_rate: 22.5, recap_discipline: 10 };
+    const { comps, profile, profileOk } = scoreProfile(w, [
+      { name: COMP_CHR_AVERAGE, included: true, raw: 80, reason: '', diagnostic: false },
+      { name: 'complaint_resolution_speed', included: true, raw: 100, reason: '', diagnostic: false },
+      { name: 'revision_escalation_rate', included: true, raw: 100, reason: '', diagnostic: false },
+      { name: COMP_RECAP_DISCIPLINE, included: true, raw: 50, reason: '', diagnostic: false },
+    ]);
+    expect(profileOk).toBe(true);
+    // 0.45×80 + 0.225×100 + 0.225×100 + 0.10×50 = 36 + 22.5 + 22.5 + 5 = 86.
+    expect(profile).toBeCloseTo(86, 3);
+    const rd = compByName(comps, COMP_RECAP_DISCIPLINE)!;
+    expect(rd.baseWeight).toBe(10);
+    expect(rd.effectiveWeight).toBeCloseTo(10, 6);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -241,6 +288,22 @@ async function insCHRSnapshot(id: string, clientId: string, final: number, compo
   await sql`insert into client_health_snapshots (id, client_id, period_start, period_end, final_health_score, band, roas_toggle_state, components_json, computed_by)
     values (${id}, ${clientId}, '2026-06-01', '2026-06-30', ${final}, 'Watch', true, ${componentsJson}::jsonb, 'system')`;
 }
+/** A weekly recap for `clientId`, week beginning `monday` (WIB), with a chosen close state (D-14). */
+async function insRecap(
+  id: string, clientId: string, monday: string, isoWeek: number, status: string, forced: boolean,
+): Promise<void> {
+  await sql`insert into weekly_result_recap
+      (id, client_id, iso_year, iso_week, minggu_mulai, minggu_akhir, status, pernah_ditutup_otomatis, created_by)
+    values (${id}, ${clientId}, 2026, ${isoWeek}, ${monday}, ${monday}::date + 6, ${status}, ${forced}, 'ZZ-TEST')`;
+}
+/** Record that `divisi` touched a recap that week (a wrr_divisi row — "owes a note"). */
+async function insWrrDivisi(recapId: string, divisi: string): Promise<void> {
+  await sql`insert into wrr_divisi (recap_id, divisi, created_by) values (${recapId}, ${divisi}, 'ZZ-TEST')`;
+}
+/** Record that `divisi` filed its mandatory weekly note (RM-8) for a recap. */
+async function insCatatanDivisi(recapId: string, divisi: string): Promise<void> {
+  await sql`insert into wrr_catatan_divisi (recap_id, divisi, catatan, created_by) values (${recapId}, ${divisi}, 'ok', 'ZZ-TEST')`;
+}
 async function setTargetRow(roleType: string, comp: string, periodStart: string, target: number, placeholder: boolean, staffId = '*'): Promise<void> {
   await sql`insert into perf_period_targets (role_type, component, staff_id, period_start, target_value, is_placeholder, updated_by)
     values (${roleType}, ${comp}, ${staffId}, ${periodStart}, ${target}, ${placeholder}, 'ZZ-TEST')
@@ -296,6 +359,11 @@ afterEach(async () => {
   await sql`delete from briefs where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
+  // D-14 recap fixtures: wrr_catatan_divisi is append-only (no-delete guard) so
+  // TRUNCATE bypasses it; then the ZZ recaps delete-cascades wrr_divisi/metrik/
+  // catatan. Both before `clients` (weekly_result_recap FK-references clients).
+  await sql`truncate table wrr_catatan_divisi`;
+  await sql`delete from weekly_result_recap where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
   await sql`delete from employees where created_by like 'ZZ-%'`;
   await sql`delete from role_mappings where created_by like 'ZZ-%'`;
@@ -425,6 +493,99 @@ describeDb('AM profile (avg CHR 50%) + redistribution', () => {
     expect(snap.profileScore).toBeCloseTo(85, 2);
     expect(snap.modifier.present).toBe(false); // AM: no Client-Outcome Modifier (Rule 3)
     expect(snap.finalScore).toBeCloseTo(85, 2);
+  });
+});
+
+describeDb('D-14: AM Weekly-Recap Discipline (M14 §9 / M6D RM-9)', () => {
+  it('counts on-time AM-closed recaps; force-closed & Head-reopened count against (permanent flag)', async () => {
+    const am = uid('EMP-AMD');
+    const client = uid('CLI-AMD');
+    await insEmployee(am, 'Account', 'ZZ-AM-Jab');
+    await insRoleMapping('Account', 'ZZ-AM-Jab', 'Account', 'staff');
+    await insClient(client, am);
+    // Four June weeks, one recap each:
+    await insRecap(uid('WRR'), client, '2026-06-01', 23, 'Ditutup', false);          // AM-closed on time → numerator
+    await insRecap(uid('WRR'), client, '2026-06-08', 24, 'Ditutup Otomatis', true);   // force-closed → against
+    await insRecap(uid('WRR'), client, '2026-06-15', 25, 'Ditutup', true);            // force-closed then Head-reopened & AM-closed → still against (permanent flag)
+    await insRecap(uid('WRR'), client, '2026-06-22', 26, 'Terbuka', false);           // never closed → against
+
+    await runSnapshotJob(sql, nowJul);
+    const snap = await getSnapshot(sql, director(), am, JUNE);
+    const rd = compByName(snap.components, COMP_RECAP_DISCIPLINE)!;
+    expect(rd.included).toBe(true);
+    expect(rd.raw).toBeCloseTo(25, 6); // 1 of 4 recaps properly closed → 25%
+  });
+
+  it('excludes + redistributes when the AM has no recap in the period (Rule 6)', async () => {
+    const am = uid('EMP-AMN');
+    const client = uid('CLI-AMN');
+    await insEmployee(am, 'Account', 'ZZ-AM-Jab');
+    await insRoleMapping('Account', 'ZZ-AM-Jab', 'Account', 'staff');
+    await insClient(client, am);
+    await insCHRSnapshot(uid('CHR'), client, 88, '[]'); // only CHR present
+
+    await runSnapshotJob(sql, nowJul);
+    const snap = await getSnapshot(sql, director(), am, JUNE);
+    const rd = compByName(snap.components, COMP_RECAP_DISCIPLINE)!;
+    expect(rd.included).toBe(false); // no recap → excluded
+    // CHR is the only survivor → redistributed to 100% → profile = 88.
+    expect(snap.profileScore).toBeCloseTo(88, 2);
+  });
+
+  it('a client whose recaps are absent (all-hold, RM-2) never enters the denominator', async () => {
+    // The denominator is set by which recaps EXIST; wrr_monday_job only opens recaps
+    // for active clients (excluding all-hold, RM-2). Modelled here directly: an AM
+    // with one active client (1 recap, on time) and one all-hold client (NO recap)
+    // scores 100 — the hold client does not dilute discipline.
+    const am = uid('EMP-AMH');
+    const active = uid('CLI-ACT');
+    const held = uid('CLI-HLD');
+    await insEmployee(am, 'Account', 'ZZ-AM-Jab');
+    await insRoleMapping('Account', 'ZZ-AM-Jab', 'Account', 'staff');
+    await insClient(active, am);
+    await insClient(held, am);
+    await insRecap(uid('WRR'), active, '2026-06-01', 23, 'Ditutup', false); // only the active client has a recap
+    await runSnapshotJob(sql, nowJul);
+    const snap = await getSnapshot(sql, director(), am, JUNE);
+    const rd = compByName(snap.components, COMP_RECAP_DISCIPLINE)!;
+    expect(rd.included).toBe(true);
+    expect(rd.raw).toBeCloseTo(100, 6); // 1/1 — the held client contributes no recap
+  });
+});
+
+describeDb('D-14: Division Weekly-Note Compliance (M14 §9 / M6D RM-8)', () => {
+  it('scores % of division-touched recaps that filed the mandatory weekly note', async () => {
+    const cre = uid('EMP-CREN');
+    const client = uid('CLI-CREN');
+    await insEmployee(cre, 'Creative', 'ZZ-Cre-Jab');
+    await insRoleMapping('Creative', 'ZZ-Cre-Jab', 'Creative', 'staff');
+    await insEmployee('ZZ-AM-CREN', 'Account', 'ZZ-AM-Jab');
+    await insClient(client, 'ZZ-AM-CREN');
+    // Two June recaps Creative touched; a note filed for only one → 50%.
+    const r1 = uid('WRR');
+    const r2 = uid('WRR');
+    await insRecap(r1, client, '2026-06-01', 23, 'Ditutup', false);
+    await insRecap(r2, client, '2026-06-08', 24, 'Ditutup', false);
+    await insWrrDivisi(r1, 'Creative');
+    await insWrrDivisi(r2, 'Creative');
+    await insCatatanDivisi(r1, 'Creative'); // only r1 has the note
+
+    await runSnapshotJob(sql, nowJul);
+    const snap = await getSnapshot(sql, director(), cre, JUNE);
+    const nc = compByName(snap.components, COMP_NOTE_COMPLIANCE)!;
+    expect(nc.included).toBe(true);
+    expect(nc.raw).toBeCloseTo(50, 6); // 1 of 2 touched recaps got a note
+    expect(nc.baseWeight).toBeCloseTo(5, 6); // the carved 5% division slice
+  });
+
+  it('excludes + redistributes when the division touched no recap that period (Rule 6)', async () => {
+    const cre = uid('EMP-CREZ');
+    await insEmployee(cre, 'Creative', 'ZZ-Cre-Jab');
+    await insRoleMapping('Creative', 'ZZ-Cre-Jab', 'Creative', 'staff');
+    await runSnapshotJob(sql, nowJul);
+    const snap = await getSnapshot(sql, director(), cre, JUNE);
+    const nc = compByName(snap.components, COMP_NOTE_COMPLIANCE)!;
+    expect(nc.included).toBe(false); // no division-touched recap → excluded
   });
 });
 
