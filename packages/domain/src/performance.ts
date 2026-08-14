@@ -546,13 +546,21 @@ async function targetsForRole(
   if (memo !== undefined) {
     return memo;
   }
-  const rows = await q<{ component: string; period_start: string | Date; target_value: string; is_placeholder: boolean }[]>`
-    select component, period_start, target_value, is_placeholder from perf_period_targets
-     where role_type = ${roleType} and period_start in (${periodStartDate}, ${DEFAULT_TARGET_DATE})`;
+  // POSTGRES decides which row is the exact-period one, not the client. Comparing
+  // the returned `date` in JS would route through toISOString(); postgres.js
+  // happens to decode `date` at UTC midnight so that is correct today (verified
+  // under UTC, Asia/Jakarta and America/Los_Angeles), but it makes the
+  // exact-beats-sentinel precedence depend on driver decoding behaviour, and the
+  // failure mode is silent — an exact target quietly demoted to the placeholder
+  // default rather than an error. Asking the DB costs nothing extra.
+  const rows = await q<{ component: string; is_exact: boolean; target_value: string; is_placeholder: boolean }[]>`
+    select component, (period_start = ${periodStartDate}::date) as is_exact, target_value, is_placeholder
+      from perf_period_targets
+     where role_type = ${roleType} and period_start in (${periodStartDate}::date, ${DEFAULT_TARGET_DATE}::date)`;
   const out = new Map<string, ResolvedTarget>();
   const exactSeen = new Set<string>();
   for (const r of rows) {
-    const isExact = dateStr(r.period_start) === periodStartDate;
+    const isExact = r.is_exact;
     if (!isExact && exactSeen.has(r.component)) {
       continue; // the exact period row already won
     }
