@@ -1326,9 +1326,20 @@ function revisionCandidate(revisionSum: number, approved: number): Candidate {
 // ---- M6D RM-9a discipline / compliance candidates (D-14) ----
 
 /**
- * amWeeklyRecapDiscipline = % of the AM's clients for which ALL weekly recaps
- * whose minggu_mulai falls within the scored month were AM-confirmed (status =
- * 'Ditutup') AND never force-closed (pernah_ditutup_otomatis = false).
+ * amWeeklyRecapDiscipline = *% of the AM's active clients* whose weekly recap was
+ * AM-closed on time and never force-closed (M14 §9 / M6D RM-9a). The denominator
+ * is CLIENTS (one vote per client), not recaps — the PRD reads "% of the AM's
+ * active clients whose current-week recap was AM-closed … never force-closed".
+ *
+ * Monthly aggregation of the per-week PRD wording: a client counts as compliant
+ * iff EVERY recap it had in the scored month is `Ditutup` AND none carries the
+ * permanent `pernah_ditutup_otomatis` flag (any force-close in the month, even if
+ * a Head later reopened and the AM completed it, is non-performance on record —
+ * §9 "counts the permanent flag, not the final status"). Interpretation logged in
+ * DECISIONS.md 2026-08-14 (D-14 weekly→monthly aggregation).
+ *
+ * On-hold clients are excluded structurally: the Monday job (D-03, RM-2) opens no
+ * recap for a payment-hold/paused client, so they never enter the denominator.
  *
  * Self-normalised 0..100 — no target row (RM-9a). Excluded (redistributed) when
  * the AM has no active clients or none had a recap opened in the period.
@@ -1342,27 +1353,28 @@ async function amWeeklyRecapDiscipline(q: Queryable, clientIDs: string[], per: P
   }
 
   // P-1: one grouped read for the whole portfolio, not one per client.
-  const rows = await q<{ status: string; pernah_ditutup_otomatis: boolean }[]>`
-    select status, pernah_ditutup_otomatis from weekly_result_recap
+  const rows = await q<{ client_id: string; status: string; pernah_ditutup_otomatis: boolean }[]>`
+    select client_id, status, pernah_ditutup_otomatis from weekly_result_recap
      where client_id = any(${clientIDs})
        and minggu_mulai >= ${per.startDate}
        and minggu_mulai <= ${per.endDate}`;
-  let total = 0;
-  let compliant = 0;
+
+  // Fold to one verdict per client: compliant until any recap breaks discipline.
+  const compliantByClient = new Map<string, boolean>();
   for (const r of rows) {
-    total++;
-    if (r.status === 'Ditutup' && !r.pernah_ditutup_otomatis) {
-      compliant++;
-    }
+    const ok = r.status === 'Ditutup' && !r.pernah_ditutup_otomatis;
+    compliantByClient.set(r.client_id, (compliantByClient.get(r.client_id) ?? true) && ok);
   }
 
-  if (total === 0) {
+  const clientsWithRecaps = compliantByClient.size;
+  if (clientsWithRecaps === 0) {
     return cand({
       name: COMP_WEEKLY_RECAP_DISCIPLINE, included: false,
       reason: 'tidak ada rekap mingguan yang dibuka pada periode ini — dikecualikan + bobot didistribusi ulang',
     });
   }
-  return cand({ name: COMP_WEEKLY_RECAP_DISCIPLINE, included: true, raw: (compliant / total) * 100 });
+  const compliant = [...compliantByClient.values()].filter(Boolean).length;
+  return cand({ name: COMP_WEEKLY_RECAP_DISCIPLINE, included: true, raw: (compliant / clientsWithRecaps) * 100 });
 }
 
 /**

@@ -523,6 +523,25 @@ describeDb('AM weekly-recap discipline (D-14 / RM-9a)', () => {
     expect(snap.modifier.present).toBe(false); // AM: no Client-Outcome Modifier (Rule 3)
   });
 
+  it('per-CLIENT denominator: one client, two recaps, one force-closed → client non-compliant → raw 0', async () => {
+    // PRD reads "% of the AM's active CLIENTS", not % of recaps. A single client
+    // with a clean week AND a force-closed week is one non-compliant client (0%),
+    // not 50% (which a per-recap count would give).
+    const am = uid('EMP-AMP');
+    const c1 = uid('CLI-P1');
+    await insEmployee(am, 'Account', 'ZZ-AM-Jab');
+    await insRoleMapping('Account', 'ZZ-AM-Jab', 'Account', 'staff');
+    await insClient(c1, am);
+    await insRecap(uid('WRR-P1'), c1, 24, '2026-06-08', '2026-06-14', 'Ditutup', false); // clean week
+    await insRecap(uid('WRR-P2'), c1, 25, '2026-06-15', '2026-06-21', 'Ditutup', true);  // force-closed week
+
+    await runSnapshotJob(sql, nowJul);
+    const snap = await getSnapshot(sql, director(), am, JUNE);
+    const disc = compByName(snap.components, COMP_WEEKLY_RECAP_DISCIPLINE)!;
+    expect(disc.included).toBe(true);
+    expect(disc.raw).toBeCloseTo(0, 2); // 0 of 1 client compliant (per-recap would be 50)
+  });
+
   it('AM with no recaps in period → discipline excluded, weight redistributed (Rule 6)', async () => {
     const am = uid('EMP-AMN');
     const c1 = uid('CLI-N1');
