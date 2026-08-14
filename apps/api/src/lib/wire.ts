@@ -1125,6 +1125,7 @@ export function perfWeightToWire(w: performance.KPIWeight): PerfWeightWire {
 export interface PerfTargetWire {
   role_type: string;
   component: string;
+  staff_id: string;
   period_start: string;
   target_value: number;
   is_placeholder: boolean;
@@ -1136,6 +1137,7 @@ export function perfTargetToWire(t: performance.PeriodTarget): PerfTargetWire {
   return {
     role_type: t.roleType,
     component: t.component,
+    staff_id: t.staffId,
     period_start: t.periodStart,
     target_value: t.targetValue,
     is_placeholder: t.isPlaceholder,

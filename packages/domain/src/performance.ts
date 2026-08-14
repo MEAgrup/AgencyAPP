@@ -421,6 +421,13 @@ function closedMonthPeriod(now: Date): Period {
 /** The sentinel period_start meaning "applies to every period unless a period-specific override exists". */
 const DEFAULT_TARGET_DATE = '0001-01-01';
 
+/**
+ * The sentinel staff_id meaning "role default" — a target that applies to every
+ * staff of the role unless a staff-specific row overrides it (T-1 / O9). Mirrors
+ * DEFAULT_TARGET_DATE: a value, not NULL, because it is part of the primary key.
+ */
+const DEFAULT_TARGET_STAFF = '*';
+
 /** The closed set a config write may target. */
 const validRoleTypes = new Set([ROLE_CREATIVE, ROLE_ADS, ROLE_KOL, ROLE_AM]);
 
@@ -437,6 +444,7 @@ export interface KPIWeight {
 export interface PeriodTarget {
   roleType: string;
   component: string;
+  staffId: string; // DEFAULT_TARGET_STAFF ('*') = role default; else a specific staff (T-1)
   periodStart: string; // "YYYY-MM-DD"; DEFAULT_TARGET_DATE = applies to all periods
   targetValue: number;
   isPlaceholder: boolean; // O9: true = illustrative seed, NOT a confirmed target
@@ -514,11 +522,12 @@ export async function setWeights(sql: Sql, actor: Actor, roleType: string, weigh
 async function targetFor(
   q: Queryable,
   roleType: string,
+  staffID: string,
   component: string,
   periodStartDate: string,
   pt?: PlaceholderTracker,
 ): Promise<{ target: number; placeholder: boolean; ok: boolean }> {
-  const resolved = await targetsForRole(q, roleType, periodStartDate, pt);
+  const resolved = await targetsForRole(q, roleType, staffID, periodStartDate, pt);
   const hit = resolved.get(component);
   if (hit === undefined) {
     return { target: 0, placeholder: false, ok: false };
@@ -528,47 +537,56 @@ async function targetFor(
 
 /**
  * targetsForRole resolves EVERY configured component target for one (role_type,
- * period) pair in a single round trip — P-1. The exact period row still wins over
- * the sentinel default, component by component, exactly as the old two-query
- * per-component lookup did; a component with neither row is simply absent.
+ * staff, period) triple in a single round trip — P-1. Precedence is applied
+ * component by component, most specific first (T-1):
+ *   staff-exact + period-exact
+ *     > staff-exact + period-default
+ *       > role-default (staff '*') + period-exact
+ *         > role-default + period-default
+ * i.e. the staff dimension outranks the period dimension. A component with no row
+ * at any of the four levels is simply absent.
  *
  * When `pt` is supplied the result is memoised on it, so a gather that normalises
- * four components pays for one query instead of up to eight.
+ * four components pays for one query instead of up to eight. A gather only ever
+ * asks about one (role, staff, period), so the memo is keyed by all three.
  */
 async function targetsForRole(
   q: Queryable,
   roleType: string,
+  staffID: string,
   periodStartDate: string,
   pt?: PlaceholderTracker,
 ): Promise<Map<string, ResolvedTarget>> {
-  const key = `${roleType}|${periodStartDate}`;
+  const key = `${roleType}|${staffID}|${periodStartDate}`;
   const memo = pt?.targets?.get(key);
   if (memo !== undefined) {
     return memo;
   }
-  // POSTGRES decides which row is the exact-period one, not the client. Comparing
-  // the returned `date` in JS would route through toISOString(); postgres.js
-  // happens to decode `date` at UTC midnight so that is correct today (verified
-  // under UTC, Asia/Jakarta and America/Los_Angeles), but it makes the
-  // exact-beats-sentinel precedence depend on driver decoding behaviour, and the
-  // failure mode is silent — an exact target quietly demoted to the placeholder
-  // default rather than an error. Asking the DB costs nothing extra.
-  const rows = await q<{ component: string; is_exact: boolean; target_value: string; is_placeholder: boolean }[]>`
-    select component, (period_start = ${periodStartDate}::date) as is_exact, target_value, is_placeholder
+  // POSTGRES decides staff-exactness and period-exactness, not the client.
+  // Comparing the returned `date` in JS would route through toISOString();
+  // asking the DB is exact and costs nothing extra (see the pre-T-1 note that
+  // used to live here). staff_id filter is the SAME sentinel-or-exact pattern.
+  const rows = await q<{ component: string; staff_exact: boolean; period_exact: boolean; target_value: string; is_placeholder: boolean }[]>`
+    select component,
+           (staff_id = ${staffID}) as staff_exact,
+           (period_start = ${periodStartDate}::date) as period_exact,
+           target_value, is_placeholder
       from perf_period_targets
-     where role_type = ${roleType} and period_start in (${periodStartDate}::date, ${DEFAULT_TARGET_DATE}::date)`;
+     where role_type = ${roleType}
+       and staff_id in (${staffID}, ${DEFAULT_TARGET_STAFF})
+       and period_start in (${periodStartDate}::date, ${DEFAULT_TARGET_DATE}::date)`;
+  // rank: staff beats period. staff-exact = +2, period-exact = +1 → the ordering
+  // in the doc comment above. Keep the highest-ranked row per component; ties are
+  // impossible because (role, staff, period) is the primary key.
   const out = new Map<string, ResolvedTarget>();
-  const exactSeen = new Set<string>();
+  const rankSeen = new Map<string, number>();
   for (const r of rows) {
-    const isExact = r.is_exact;
-    if (!isExact && exactSeen.has(r.component)) {
-      continue; // the exact period row already won
+    const rank = (r.staff_exact ? 2 : 0) + (r.period_exact ? 1 : 0);
+    const prev = rankSeen.get(r.component);
+    if (prev !== undefined && prev >= rank) {
+      continue; // a more (or equally) specific row already won
     }
-    if (isExact) {
-      exactSeen.add(r.component);
-    } else if (out.has(r.component)) {
-      continue; // keep the first sentinel row, as `limit`-free SELECT + [0] did
-    }
+    rankSeen.set(r.component, rank);
     out.set(r.component, { value: Number(r.target_value), placeholder: r.is_placeholder });
   }
   if (pt !== undefined) {
@@ -586,12 +604,12 @@ export async function listTargets(sql: Queryable, actor: Actor): Promise<PeriodT
     throw new ForbiddenError();
   }
   const rows = await sql<
-    { role_type: string; component: string; period_start: string | Date; target_value: string; is_placeholder: boolean; updated_at: Date; updated_by: string }[]
+    { role_type: string; component: string; staff_id: string; period_start: string | Date; target_value: string; is_placeholder: boolean; updated_at: Date; updated_by: string }[]
   >`
-    select role_type, component, period_start, target_value, is_placeholder, updated_at, updated_by
-      from perf_period_targets order by role_type, component, period_start desc`;
+    select role_type, component, staff_id, period_start, target_value, is_placeholder, updated_at, updated_by
+      from perf_period_targets order by role_type, component, staff_id, period_start desc`;
   return rows.map((r) => ({
-    roleType: r.role_type, component: r.component, periodStart: dateStr(r.period_start),
+    roleType: r.role_type, component: r.component, staffId: r.staff_id, periodStart: dateStr(r.period_start),
     targetValue: Number(r.target_value), isPlaceholder: r.is_placeholder, updatedAt: r.updated_at, updatedBy: r.updated_by,
   }));
 }
@@ -600,6 +618,7 @@ export async function listTargets(sql: Queryable, actor: Actor): Promise<PeriodT
 export interface SetTargetInput {
   roleType: string;
   component: string;
+  staffId?: string; // "" / undefined defaults to the role-default sentinel (T-1)
   periodStart: string; // "" defaults to the sentinel (applies to every period)
   targetValue: number;
   isPlaceholder: boolean;
@@ -608,8 +627,10 @@ export interface SetTargetInput {
 /**
  * setTarget upserts one normalisation target (§2 Rule 2 / O9). Director only. When
  * a real target is entered the caller sets isPlaceholder=false; the seed rows stay
- * flagged placeholder until then. periodStart "" defaults to the sentinel. Appended
- * to the immutable audit_log (before→after).
+ * flagged placeholder until then. periodStart "" defaults to the sentinel; staffId
+ * "" / undefined defaults to the role-default sentinel ('*'), so callers that never
+ * set a staff keep writing role-level targets exactly as before (T-1). Appended to
+ * the immutable audit_log (before→after).
  */
 export async function setTarget(sql: Sql, actor: Actor, t: SetTargetInput): Promise<void> {
   if (!canManageConfig(actor)) {
@@ -619,17 +640,18 @@ export async function setTarget(sql: Sql, actor: Actor, t: SetTargetInput): Prom
     throw new ValidationError(MSG_BAD_ROLE_TYPE);
   }
   const periodStart = t.periodStart === '' ? DEFAULT_TARGET_DATE : t.periodStart;
+  const staffId = !t.staffId ? DEFAULT_TARGET_STAFF : t.staffId;
   await withTransaction(sql, async (tx) => {
     const ex = executors(tx);
     await tx`
-      insert into perf_period_targets (role_type, component, period_start, target_value, is_placeholder, updated_by)
-      values (${t.roleType}, ${t.component}, ${periodStart}, ${t.targetValue}, ${t.isPlaceholder}, ${actor.employeeId})
-      on conflict (role_type, component, period_start)
+      insert into perf_period_targets (role_type, component, staff_id, period_start, target_value, is_placeholder, updated_by)
+      values (${t.roleType}, ${t.component}, ${staffId}, ${periodStart}, ${t.targetValue}, ${t.isPlaceholder}, ${actor.employeeId})
+      on conflict (role_type, component, staff_id, period_start)
       do update set target_value = excluded.target_value, is_placeholder = excluded.is_placeholder, updated_by = excluded.updated_by`;
     await ex.audit.insertAudit({
-      entityType: 'perf_period_targets', entityId: `${t.roleType}/${t.component}/${periodStart}`,
+      entityType: 'perf_period_targets', entityId: `${t.roleType}/${t.component}/${staffId}/${periodStart}`,
       actorEmployeeId: actor.employeeId, action: 'target_set',
-      beforeJson: null, afterJson: { target_value: t.targetValue, is_placeholder: t.isPlaceholder }, createdBy: actor.employeeId,
+      beforeJson: null, afterJson: { staff_id: staffId, target_value: t.targetValue, is_placeholder: t.isPlaceholder }, createdBy: actor.employeeId,
     });
   });
 }
@@ -814,6 +836,7 @@ async function gatherProfile(
 async function normalized(
   q: Queryable,
   roleType: string,
+  staffID: string,
   comp: string,
   per: Period,
   actual: number,
@@ -824,7 +847,7 @@ async function normalized(
   if (!hasActual) {
     return cand({ name: comp, included: false, reason: absentReason });
   }
-  const { target, placeholder, ok } = await targetFor(q, roleType, comp, per.startDate, pt);
+  const { target, placeholder, ok } = await targetFor(q, roleType, staffID, comp, per.startDate, pt);
   if (!ok || target === 0) {
     return cand({
       name: comp, included: false,
@@ -870,9 +893,9 @@ async function creativeCandidates(q: Queryable, staffID: string, per: Period, pt
 
   const cands: Candidate[] = [];
   cands.push(speedCandidate(speedSum, slaJudged));
-  cands.push(await normalized(q, ROLE_CREATIVE, COMP_OUTPUT_QUANTITY, per, approvedInPeriod, true, '', pt));
+  cands.push(await normalized(q, ROLE_CREATIVE, staffID, COMP_OUTPUT_QUANTITY, per, approvedInPeriod, true, '', pt));
   cands.push(
-    await normalized(q, ROLE_CREATIVE, COMP_GMV_IMPACT, per, gmvSum, approvedInPeriod > 0,
+    await normalized(q, ROLE_CREATIVE, staffID, COMP_GMV_IMPACT, per, gmvSum, approvedInPeriod > 0,
       'tidak ada Asset [Approved] pada periode — GMV Impact dikecualikan + bobot didistribusi ulang', pt),
   );
   cands.push(revisionCandidate(revisionSum, approvedInPeriod));
@@ -919,10 +942,10 @@ async function adsCandidates(q: Queryable, staffID: string, per: Period, pt: Pla
     }));
   }
   cands.push(
-    await normalized(q, ROLE_ADS, COMP_GMV_IMPACT, per, camp.gmvSum, camp.hasCampaigns,
+    await normalized(q, ROLE_ADS, staffID, COMP_GMV_IMPACT, per, camp.gmvSum, camp.hasCampaigns,
       'tidak ada campaign yang dikelola pada periode — GMV Impact dikecualikan + bobot didistribusi ulang', pt),
   );
-  cands.push(await normalized(q, ROLE_ADS, COMP_OPTIMIZATION_ACTIVITY, per, optCount, true, '', pt));
+  cands.push(await normalized(q, ROLE_ADS, staffID, COMP_OPTIMIZATION_ACTIVITY, per, optCount, true, '', pt));
   return cands;
 }
 
@@ -1059,7 +1082,7 @@ async function kolCandidates(q: Queryable, staffID: string, per: Period, pt: Pla
   }
 
   const cands: Candidate[] = [];
-  cands.push(await normalized(q, ROLE_KOL, COMP_CREATOR_COUNT, per, passedInPeriod, true, '', pt));
+  cands.push(await normalized(q, ROLE_KOL, staffID, COMP_CREATOR_COUNT, per, passedInPeriod, true, '', pt));
   if (qcActivity === 0) {
     cands.push(cand({
       name: COMP_QC_PASS_RATE, included: false,
@@ -1127,7 +1150,7 @@ async function amCandidates(q: Queryable, staffID: string, per: Period, pt: Plac
   // Complaint Resolution Speed: avg resolution hours over complaints assigned to
   // the AM that reached [Resolved] in the period, transformed OA-1.
   const res = await amResolutionHours(q, staffID, per);
-  cands.push(await complaintResolutionCandidate(q, res.avgHours, res.hasRes, per, pt));
+  cands.push(await complaintResolutionCandidate(q, staffID, res.avgHours, res.hasRes, per, pt));
 
   // Revision Escalation Rate (inverse): fraction of the portfolio's period-approved
   // Tasks that were revision-flagged (≥3 revisions, M12 Rule 15).
@@ -1142,6 +1165,7 @@ async function amCandidates(q: Queryable, staffID: string, per: Period, pt: Plac
  */
 async function complaintResolutionCandidate(
   q: Queryable,
+  staffID: string,
   avgHours: number,
   hasRes: boolean,
   per: Period,
@@ -1153,7 +1177,7 @@ async function complaintResolutionCandidate(
       reason: 'tidak ada komplain yang selesai [Resolved] pada periode — dikecualikan + bobot didistribusi ulang',
     });
   }
-  const { target, placeholder, ok } = await targetFor(q, ROLE_AM, COMP_COMPLAINT_RESOLUTION_SPEED, per.startDate, pt);
+  const { target, placeholder, ok } = await targetFor(q, ROLE_AM, staffID, COMP_COMPLAINT_RESOLUTION_SPEED, per.startDate, pt);
   if (!ok || target === 0) {
     return cand({
       name: COMP_COMPLAINT_RESOLUTION_SPEED, included: false,

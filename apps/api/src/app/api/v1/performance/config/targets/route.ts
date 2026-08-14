@@ -29,6 +29,7 @@ export async function PUT(request: Request): Promise<Response> {
     const b = await readJson<{
       role_type?: string;
       component?: string;
+      staff_id?: string;
       period_start?: string;
       target_value?: number;
       is_placeholder?: boolean;
@@ -36,6 +37,7 @@ export async function PUT(request: Request): Promise<Response> {
     await performance.setTarget(db(), actor, {
       roleType: b.role_type ?? '',
       component: b.component ?? '',
+      staffId: b.staff_id ?? '',
       periodStart: b.period_start ?? '',
       targetValue: b.target_value ?? 0,
       isPlaceholder: b.is_placeholder ?? false,
