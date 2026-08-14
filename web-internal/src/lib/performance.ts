@@ -18,6 +18,8 @@ export const KPI_COMPONENTS = [
   'chr_average',
   'complaint_resolution_speed',
   'revision_escalation_rate',
+  'recap_discipline', // D-14: Disiplin Rekap Mingguan (AM)
+  'note_compliance', // D-14: Kepatuhan Catatan Mingguan (Creative/Ads/KOL)
   'sourcing_turnaround', // diagnostic only untuk KOL
 ] as const;
 
@@ -269,5 +271,7 @@ export const COMPONENT_LABELS: Record<string, string> = {
   chr_average: 'CHR Average',
   complaint_resolution_speed: 'Complaint Resolution Speed',
   revision_escalation_rate: 'Revision Escalation Rate',
+  recap_discipline: 'Disiplin Rekap Mingguan', // D-14 (AM)
+  note_compliance: 'Kepatuhan Catatan Mingguan', // D-14 (Creative/Ads/KOL)
   sourcing_turnaround: 'Sourcing Turnaround', // diagnostic
 };

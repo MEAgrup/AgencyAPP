@@ -68,21 +68,20 @@ export const COMP_ESCALATION_RATE = 'escalation_rate';
 export const COMP_CHR_AVERAGE = 'chr_average';
 export const COMP_COMPLAINT_RESOLUTION_SPEED = 'complaint_resolution_speed';
 export const COMP_REVISION_ESCALATION_RATE = 'revision_escalation_rate';
+/**
+ * D-14 (M6D RM-9 / M14 §9, owner 2026-08-13). AM Weekly-Recap Discipline: % of the
+ * AM's active-client weekly recaps in the period the AM closed on time and never
+ * force-closed. A raw 0..100 percentage — carries NO period target.
+ */
+export const COMP_RECAP_DISCIPLINE = 'recap_discipline';
+/**
+ * D-14 (M6D RM-8/RM-9 / M14 §9). Division (Creative/Ads/KOL) Weekly-Note
+ * Compliance: % of the recaps the division touched that period for which it filed
+ * its now-mandatory weekly note. A raw 0..100 percentage — carries NO period target.
+ */
+export const COMP_NOTE_COMPLIANCE = 'note_compliance';
 /** Diagnostic (reported, NEVER weighted — §2 Rule 2 KOL row). */
 export const COMP_SOURCING_TURNAROUND = 'sourcing_turnaround';
-/**
- * M6D RM-9a (2026-08-13): % of the AM's active clients whose weekly recap in
- * the period was AM-closed on time and never force-closed
- * (pernah_ditutup_otomatis = false). Self-normalised 0..100 %, no target row.
- */
-export const COMP_WEEKLY_RECAP_DISCIPLINE = 'weekly_recap_discipline';
-/**
- * M6D RM-9a (2026-08-13): % of (client, week) pairs in the period where a
- * division that touched a client (wrr_divisi) also filed its mandatory division
- * note (wrr_catatan_divisi). Applies to Creative / Ads / KOL roles.
- * Self-normalised 0..100 %, no target row. Live-stream is vendor, not scored.
- */
-export const COMP_WEEKLY_NOTE_COMPLIANCE = 'weekly_note_compliance';
 
 /**
  * modifierComponent maps a role type to the Module 13 Health-Score sub-component
@@ -912,7 +911,7 @@ async function creativeCandidates(q: Queryable, staffID: string, per: Period, pt
       'tidak ada Asset [Approved] pada periode — GMV Impact dikecualikan + bobot didistribusi ulang', pt),
   );
   cands.push(revisionCandidate(revisionSum, approvedInPeriod));
-  cands.push(await divisionWeeklyNoteCompliance(q, CREATIVE_DIVISION, per));
+  cands.push(await divisionNoteCompliance(q, CREATIVE_DIVISION, per));
   return cands;
 }
 
@@ -960,7 +959,7 @@ async function adsCandidates(q: Queryable, staffID: string, per: Period, pt: Pla
       'tidak ada campaign yang dikelola pada periode — GMV Impact dikecualikan + bobot didistribusi ulang', pt),
   );
   cands.push(await normalized(q, ROLE_ADS, staffID, COMP_OPTIMIZATION_ACTIVITY, per, optCount, true, '', pt));
-  cands.push(await divisionWeeklyNoteCompliance(q, ADS_DIVISION, per));
+  cands.push(await divisionNoteCompliance(q, ADS_DIVISION, per));
   return cands;
 }
 
@@ -1124,7 +1123,7 @@ async function kolCandidates(q: Queryable, staffID: string, per: Period, pt: Pla
   } else {
     cands.push(cand({ name: COMP_SOURCING_TURNAROUND, diagnostic: true, included: true, raw: sourcingSum / sourcingN }));
   }
-  cands.push(await divisionWeeklyNoteCompliance(q, KOL_DIVISION, per));
+  cands.push(await divisionNoteCompliance(q, KOL_DIVISION, per));
   return cands;
 }
 
@@ -1172,10 +1171,60 @@ async function amCandidates(q: Queryable, staffID: string, per: Period, pt: Plac
   // Tasks that were revision-flagged (≥3 revisions, M12 Rule 15).
   cands.push(await amRevisionEscalation(q, clientIDs, per));
 
-  // Weekly-Recap Discipline (D-14 / RM-9a): % of AM's clients whose weekly
-  // recaps in the period were AM-confirmed on time and never force-closed.
-  cands.push(await amWeeklyRecapDiscipline(q, clientIDs, per));
+  // Weekly-Recap Discipline (D-14 / M14 §9): % of the AM's active-client weekly
+  // recaps in the period the AM closed on time and never force-closed.
+  cands.push(await amRecapDiscipline(q, staffID, per));
   return cands;
+}
+
+/**
+ * amRecapDiscipline (D-14 / M6D RM-9 / M14 §9, owner 2026-08-13) builds the AM
+ * Weekly-Recap Discipline candidate = % of the AM's active-client weekly recaps in
+ * the period that the AM closed and never force-closed (status 'Ditutup' AND
+ * `pernah_ditutup_otomatis = false`). It COUNTS THE PERMANENT FLAG, not the final
+ * status — a recap force-closed then Head-reopened still carries the flag, so it
+ * counts against the AM even once completed (§9). The denominator inherits the
+ * active-client filter for free: recaps are only ever opened for active clients by
+ * wrr_monday_job, which already excludes clients whose Services are all `[On Hold]`
+ * (RM-2), so all-hold clients never enter it. Already a 0..100 percentage — no
+ * period target (Rule 2). Excluded + redistributed (Rule 6) when the AM has no
+ * recap in the period. One set-based query (P-1): constant regardless of portfolio.
+ */
+async function amRecapDiscipline(q: Queryable, staffID: string, per: Period): Promise<Candidate> {
+  const rows = await q<{ total: string; ontime: string }[]>`
+    select total, ontime from private.am_recap_discipline(${staffID}, ${per.startDate}, ${per.endDate})`;
+  const total = Number(rows[0].total);
+  if (total === 0) {
+    return cand({
+      name: COMP_RECAP_DISCIPLINE, included: false,
+      reason: 'tidak ada rekap mingguan klien aktif pada periode — dikecualikan + bobot didistribusi ulang',
+    });
+  }
+  return cand({ name: COMP_RECAP_DISCIPLINE, included: true, raw: (Number(rows[0].ontime) / total) * 100 });
+}
+
+/**
+ * divisionNoteCompliance (D-14 / M6D RM-8/RM-9 / M14 §9) builds the Weekly-Note
+ * Compliance candidate for a division (Creative/Ads/KOL) = % of the recaps the
+ * division TOUCHED in the period (has a wrr_divisi row — same "owes a note"
+ * definition wrr_monday_job job (c) uses) for which it ALSO filed its now-mandatory
+ * weekly note (wrr_catatan_divisi). The signal is per-DIVISION, not per-staff (the
+ * recap tables are keyed by divisi, not individual), so every staff member of a
+ * division shares its note-discipline score. Already a 0..100 percentage — no
+ * period target (Rule 2). Excluded + redistributed (Rule 6) when the division
+ * touched no recap in the period. One set-based query (P-1).
+ */
+async function divisionNoteCompliance(q: Queryable, divisi: string, per: Period): Promise<Candidate> {
+  const rows = await q<{ total: string; filed: string }[]>`
+    select total, filed from private.division_note_compliance(${divisi}, ${per.startDate}, ${per.endDate})`;
+  const total = Number(rows[0].total);
+  if (total === 0) {
+    return cand({
+      name: COMP_NOTE_COMPLIANCE, included: false,
+      reason: 'tidak ada klien yang disentuh divisi pada rekap periode — dikecualikan + bobot didistribusi ulang',
+    });
+  }
+  return cand({ name: COMP_NOTE_COMPLIANCE, included: true, raw: (Number(rows[0].filed) / total) * 100 });
 }
 
 /**
@@ -1321,97 +1370,6 @@ function revisionCandidate(revisionSum: number, approved: number): Candidate {
   const avg = revisionSum / approved;
   const burden = 100 - Math.min(avg * REVISION_INVERSE_FACTOR, 100);
   return cand({ name: COMP_REVISION_COUNT, included: true, raw: burden });
-}
-
-// ---- M6D RM-9a discipline / compliance candidates (D-14) ----
-
-/**
- * amWeeklyRecapDiscipline = *% of the AM's active clients* whose weekly recap was
- * AM-closed on time and never force-closed (M14 §9 / M6D RM-9a). The denominator
- * is CLIENTS (one vote per client), not recaps — the PRD reads "% of the AM's
- * active clients whose current-week recap was AM-closed … never force-closed".
- *
- * Monthly aggregation of the per-week PRD wording: a client counts as compliant
- * iff EVERY recap it had in the scored month is `Ditutup` AND none carries the
- * permanent `pernah_ditutup_otomatis` flag (any force-close in the month, even if
- * a Head later reopened and the AM completed it, is non-performance on record —
- * §9 "counts the permanent flag, not the final status"). Interpretation logged in
- * DECISIONS.md 2026-08-14 (D-14 weekly→monthly aggregation).
- *
- * On-hold clients are excluded structurally: the Monday job (D-03, RM-2) opens no
- * recap for a payment-hold/paused client, so they never enter the denominator.
- *
- * Self-normalised 0..100 — no target row (RM-9a). Excluded (redistributed) when
- * the AM has no active clients or none had a recap opened in the period.
- */
-async function amWeeklyRecapDiscipline(q: Queryable, clientIDs: string[], per: Period): Promise<Candidate> {
-  if (clientIDs.length === 0) {
-    return cand({
-      name: COMP_WEEKLY_RECAP_DISCIPLINE, included: false,
-      reason: 'tidak ada klien aktif yang ditangani AM — dikecualikan + bobot didistribusi ulang',
-    });
-  }
-
-  // P-1: one grouped read for the whole portfolio, not one per client.
-  const rows = await q<{ client_id: string; status: string; pernah_ditutup_otomatis: boolean }[]>`
-    select client_id, status, pernah_ditutup_otomatis from weekly_result_recap
-     where client_id = any(${clientIDs})
-       and minggu_mulai >= ${per.startDate}
-       and minggu_mulai <= ${per.endDate}`;
-
-  // Fold to one verdict per client: compliant until any recap breaks discipline.
-  const compliantByClient = new Map<string, boolean>();
-  for (const r of rows) {
-    const ok = r.status === 'Ditutup' && !r.pernah_ditutup_otomatis;
-    compliantByClient.set(r.client_id, (compliantByClient.get(r.client_id) ?? true) && ok);
-  }
-
-  const clientsWithRecaps = compliantByClient.size;
-  if (clientsWithRecaps === 0) {
-    return cand({
-      name: COMP_WEEKLY_RECAP_DISCIPLINE, included: false,
-      reason: 'tidak ada rekap mingguan yang dibuka pada periode ini — dikecualikan + bobot didistribusi ulang',
-    });
-  }
-  const compliant = [...compliantByClient.values()].filter(Boolean).length;
-  return cand({ name: COMP_WEEKLY_RECAP_DISCIPLINE, included: true, raw: (compliant / clientsWithRecaps) * 100 });
-}
-
-/**
- * divisionWeeklyNoteCompliance = % of (recap, divisi) pairs in the period where
- * the division's mandatory weekly note (wrr_catatan_divisi, RM-D6/RM-8) was filed.
- * The denominator is every recap that has a wrr_divisi entry for this division
- * (i.e. the division "touched" that client that week). The numerator is the subset
- * that also has ≥1 wrr_catatan_divisi row.
- *
- * Division-level metric (same for all staff of a given division) — consistent with
- * M14 §9 which grades the division's collective obligation, not an individual staffer.
- * Self-normalised 0..100 — no target row (RM-9a). Excluded (redistributed) when the
- * division had no activity with recaps in the period.
- */
-async function divisionWeeklyNoteCompliance(q: Queryable, divisi: string, per: Period): Promise<Candidate> {
-  // P-1: one query — each touched (recap, divisi) with a note-present flag. The
-  // denominator is one row per wrr_divisi entry (pk = recap_id, divisi).
-  const rows = await q<{ has_note: boolean }[]>`
-    select exists (
-             select 1 from wrr_catatan_divisi c
-              where c.recap_id = d.recap_id and c.divisi = d.divisi
-           ) as has_note
-      from wrr_divisi d
-      join weekly_result_recap r on r.id = d.recap_id
-     where d.divisi = ${divisi}
-       and r.minggu_mulai >= ${per.startDate}
-       and r.minggu_mulai <= ${per.endDate}`;
-
-  if (rows.length === 0) {
-    return cand({
-      name: COMP_WEEKLY_NOTE_COMPLIANCE, included: false,
-      reason: 'tidak ada rekap yang disentuh divisi pada periode — dikecualikan + bobot didistribusi ulang',
-    });
-  }
-
-  const noted = rows.filter((r) => r.has_note).length;
-  return cand({ name: COMP_WEEKLY_NOTE_COMPLIANCE, included: true, raw: (noted / rows.length) * 100 });
 }
 
 // ---- task-metric helpers (recompute from the immutable log, house rule 4) ----
