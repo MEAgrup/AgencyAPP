@@ -885,6 +885,8 @@ export interface BookingWire {
   hours_logged?: number;
   assigned_coordinator?: string;
   attributed_gmv?: number;
+  qty_video: number;
+  qty_live: number;
   revision_count: number;
   payment_status: string;
   created_by: string;
@@ -903,6 +905,7 @@ export function bookingToWire(b: kol.Booking): BookingWire {
     ...(b.hoursLogged !== null ? { hours_logged: b.hoursLogged } : {}),
     ...(b.assignedCoordinator ? { assigned_coordinator: b.assignedCoordinator } : {}),
     ...(b.attributedGmv !== null ? { attributed_gmv: b.attributedGmv } : {}),
+    qty_video: b.qtyVideo, qty_live: b.qtyLive,
     revision_count: b.revisionCount, payment_status: b.paymentStatus, created_by: b.createdBy,
     created_at: b.createdAt.toISOString(),
   };
@@ -979,11 +982,15 @@ export function creatorListToWire(c: kol.CreatorList): CreatorListWire {
 export function toBookingInput(b: {
   creator_name?: string; creator_handle?: string; platform?: string; niche?: string;
   source_pool?: string; pool_reference?: string; agreed_rate?: string; assigned_coordinator?: string;
+  qty_video?: number | string; qty_live?: number | string;
 }): kol.BookingInput {
+  const toQty = (v: number | string | undefined): number | undefined =>
+    v === undefined || v === null || v === '' ? undefined : Number(v);
   return {
     creatorName: b.creator_name ?? '', creatorHandle: b.creator_handle ?? '', platform: b.platform ?? '',
     niche: b.niche ?? '', sourcePool: b.source_pool ?? '', poolReference: b.pool_reference ?? '',
     agreedRate: b.agreed_rate ?? '', assignedCoordinator: b.assigned_coordinator ?? '',
+    qtyVideo: toQty(b.qty_video), qtyLive: toQty(b.qty_live),
   };
 }
 

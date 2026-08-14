@@ -464,10 +464,13 @@ describe('M9 kol wire mappers', () => {
       niche: '', sourcePool: 'MCN MEA Roster', poolReference: '', agreedRate: 1500000,
       agreedRateDisplay: 'Rp. 1.500.000,00', status: '[Sourcing]', contentLink: '', qcNotes: '',
       slaTargetHours: null, hoursLogged: null, assignedCoordinator: 'ZZ-COORD', attributedGmv: null,
+      qtyVideo: 0, qtyLive: 0,
       revisionCount: 0, paymentStatus: '', createdBy: 'ZZ-COORD', createdAt: new Date('2026-07-01T00:00:00.000Z'),
     };
     const w = bookingToWire(b);
     expect(w.agreed_rate_display).toBe('Rp. 1.500.000,00');
+    expect(w.qty_video).toBe(0);
+    expect(w.qty_live).toBe(0);
     expect(w.assigned_coordinator).toBe('ZZ-COORD');
     expect(w).not.toHaveProperty('sla_target_hours');
     expect(w).not.toHaveProperty('content_link');

@@ -70,6 +70,7 @@ export const MSG_BRIEF_NOT_FOUND = '[brief tidak ditemukan]';
 export const MSG_NOT_KOL_BRIEF = '[brief ini bukan brief divisi KOL]';
 export const MSG_BRIEF_NOT_BOOKABLE = '[booking tidak dapat dibuat untuk brief pada status ini]';
 export const MSG_INVALID_SOURCE_POOL = '[source pool tidak valid]';
+export const MSG_INVALID_QTY = '[jumlah video/live harus bilangan bulat tidak negatif]';
 export const MSG_BOOKING_NOT_FOUND = '[booking tidak ditemukan]';
 export const MSG_BOOKING_VIEW_FORBIDDEN = '[anda tidak memiliki akses ke booking ini]';
 export const MSG_EXEC_FORBIDDEN = '[anda tidak memiliki akses untuk mengerjakan booking ini]';
@@ -259,6 +260,8 @@ export interface BookingInput {
   poolReference?: string;
   agreedRate: string; // decimal string
   assignedCoordinator?: string;
+  qtyVideo?: number; // per-creator video deliverables (>= 0 integer); absent => 0
+  qtyLive?: number; // per-creator live-session deliverables (>= 0 integer); absent => 0
 }
 
 /** One Creator Booking (BKG-) with its derived read-only fields. */
@@ -280,6 +283,8 @@ export interface Booking {
   hoursLogged: number | null;
   assignedCoordinator: string;
   attributedGmv: number | null;
+  qtyVideo: number; // per-creator video deliverables (>= 0)
+  qtyLive: number; // per-creator live-session deliverables (>= 0)
   revisionCount: number;
   paymentStatus: string; // reflection of the linked CPR (§8 Rule 4); "" if none
   createdBy: string;
@@ -344,6 +349,8 @@ export async function createBooking(sql: Sql, actor: Actor, briefId: string, inp
     if (rate <= 0n) {
       throw new ValidationError(bi.INCOMPLETE_DATA);
     }
+    const qtyVideo = normQty(input.qtyVideo);
+    const qtyLive = normQty(input.qtyLive);
     let coord = (input.assignedCoordinator ?? '').trim();
     if (coord === '' && actor.role.division === KOL_DIVISION && actor.role.level === permission.LevelStaff) {
       coord = actor.employeeId; // self-claim (§3)
@@ -355,9 +362,10 @@ export async function createBooking(sql: Sql, actor: Actor, briefId: string, inp
     const id = await ex.ident.identNext('BKG', now);
     await tx`
       insert into creator_bookings (id, brief_id, creator_name, creator_handle, platform, niche, source_pool,
-        pool_reference, agreed_rate, status, assigned_coordinator, created_by)
+        pool_reference, agreed_rate, status, assigned_coordinator, qty_video, qty_live, created_by)
       values (${id}, ${briefId}, ${creatorName}, ${orNull(input.creatorHandle)}, ${platform}, ${orNull(input.niche)},
-        ${pool}, ${orNull(input.poolReference)}, ${money.decimal(rate)}, ${BKG_SOURCING}, ${coord || null}, ${actor.employeeId})`;
+        ${pool}, ${orNull(input.poolReference)}, ${money.decimal(rate)}, ${BKG_SOURCING}, ${coord || null},
+        ${qtyVideo}, ${qtyLive}, ${actor.employeeId})`;
     await ex.audit.insertAudit({
       entityType: 'creator_booking', entityId: id, actorEmployeeId: actor.employeeId, action: 'create',
       beforeJson: null, afterJson: { status: BKG_SOURCING, brief_id: briefId, source_pool: pool, agreed_rate: money.decimal(rate) },
@@ -368,7 +376,7 @@ export async function createBooking(sql: Sql, actor: Actor, briefId: string, inp
       niche: (input.niche ?? '').trim(), sourcePool: pool, poolReference: (input.poolReference ?? '').trim(),
       agreedRate: Number(rate) / 100, agreedRateDisplay: money.format(rate), status: BKG_SOURCING,
       contentLink: '', qcNotes: '', slaTargetHours: null, hoursLogged: null, assignedCoordinator: coord,
-      attributedGmv: null, revisionCount: 0, paymentStatus: '', createdBy: actor.employeeId, createdAt: now,
+      attributedGmv: null, qtyVideo, qtyLive, revisionCount: 0, paymentStatus: '', createdBy: actor.employeeId, createdAt: now,
     };
   });
 }
@@ -1173,6 +1181,8 @@ interface BookingDbRow {
   hours_logged: string | null;
   assigned_coordinator: string | null;
   attributed_gmv: string | null;
+  qty_video: number | string | null;
+  qty_live: number | string | null;
   created_by: string;
   created_at: Date;
   assigned_division: string;
@@ -1183,7 +1193,8 @@ function bookingSelect(sql: Queryable) {
   return sql`
     select bk.id, bk.brief_id, bk.creator_name, bk.creator_handle, bk.platform, bk.niche, bk.source_pool,
            bk.pool_reference, bk.agreed_rate, bk.status, bk.content_link, bk.qc_notes, bk.sla_target_hours,
-           bk.hours_logged, bk.assigned_coordinator, bk.attributed_gmv, bk.created_by, bk.created_at,
+           bk.hours_logged, bk.assigned_coordinator, bk.attributed_gmv, bk.qty_video, bk.qty_live,
+           bk.created_by, bk.created_at,
            b.assigned_division, private.brief_owner_am(bk.brief_id) as assigned_am_id
       from creator_bookings bk
       join briefs b on b.id = bk.brief_id`;
@@ -1199,13 +1210,25 @@ function rowToBooking(r: BookingDbRow): Booking {
     agreedRate: Number(rate) / 100, agreedRateDisplay: money.format(rate), status: r.status,
     contentLink: r.content_link ?? '', qcNotes: r.qc_notes ?? '', slaTargetHours: numOrNull(r.sla_target_hours),
     hoursLogged: numOrNull(r.hours_logged), assignedCoordinator: r.assigned_coordinator ?? '',
-    attributedGmv: numOrNull(r.attributed_gmv), revisionCount: 0, paymentStatus: '',
+    attributedGmv: numOrNull(r.attributed_gmv), qtyVideo: Number(r.qty_video ?? 0), qtyLive: Number(r.qty_live ?? 0),
+    revisionCount: 0, paymentStatus: '',
     createdBy: r.created_by, createdAt: r.created_at,
   };
 }
 
 function orNull(s: string | undefined): string | null {
   return s && s.trim() !== '' ? s.trim() : null;
+}
+
+/** normQty coerces an optional deliverable count to a non-negative integer (absent => 0). */
+function normQty(v: number | undefined): number {
+  if (v === undefined || v === null) {
+    return 0;
+  }
+  if (!Number.isInteger(v) || v < 0) {
+    throw new ValidationError(MSG_INVALID_QTY);
+  }
+  return v;
 }
 
 function transitionError(res: statemachine.TransitionResult & { ok: false }): Error {

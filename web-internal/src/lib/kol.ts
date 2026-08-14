@@ -82,6 +82,8 @@ export interface Booking {
   hours_logged?: number;
   assigned_coordinator?: string;
   attributed_gmv?: number; // present (incl. 0) once recorded; absent = never recorded
+  qty_video: number; // per-creator video deliverables (>= 0); always present (DB default 0)
+  qty_live: number; // per-creator live-session deliverables (>= 0); always present (DB default 0)
   revision_count: number; // COMPUTED — derived from audit log, never editable
   payment_status: string; // COMPUTED — reflection of latest CPR, "" if none
   created_by: string;
@@ -351,6 +353,8 @@ export interface CreateBookingInput {
   pool_reference?: string;
   agreed_rate: string; // decimal string, e.g. "1500000" or "1500000.00"
   assigned_coordinator?: string; // omit for staff self-claim
+  qty_video?: number; // per-creator video deliverables (>= 0 integer); omit => 0
+  qty_live?: number; // per-creator live-session deliverables (>= 0 integer); omit => 0
 }
 
 // POST /briefs/{id}/bookings -> Booking (object directly).

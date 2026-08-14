@@ -661,6 +661,8 @@ describe('M9 bookingToWire (Creator Booking + derived fields)', () => {
     hoursLogged: 10,
     assignedCoordinator: '2409230432',
     attributedGmv: 4000000,
+    qtyVideo: 3,
+    qtyLive: 1,
     revisionCount: 0,
     paymentStatus: '[Paid]',
     createdBy: '2409230432',
@@ -686,6 +688,8 @@ describe('M9 bookingToWire (Creator Booking + derived fields)', () => {
       hours_logged: 10,
       assigned_coordinator: '2409230432',
       attributed_gmv: 4000000,
+      qty_video: 3,
+      qty_live: 1,
       revision_count: 0,
       payment_status: '[Paid]',
       created_by: '2409230432',
@@ -710,6 +714,9 @@ describe('M9 bookingToWire (Creator Booking + derived fields)', () => {
     expect('payment_status' in wire).toBe(true);
     expect(wire.payment_status).toBe('');
     expect(wire.revision_count).toBe(0);
+    // qty_video/qty_live carry a DB default (0) — always present, never omitempty.
+    expect('qty_video' in wire).toBe(true);
+    expect('qty_live' in wire).toBe(true);
   });
 });
 
