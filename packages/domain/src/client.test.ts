@@ -17,11 +17,13 @@ import {
   canEditAccountRevisable,
   canEditBaseline,
   canEditProfile,
+  canHoldService,
   canReassignPic,
   canSetPaymentIntent,
   canVoidService,
   editableFields,
   ForbiddenError,
+  holdService,
   IncompleteError,
   INTENT_DI_BELAKANG,
   INTENT_LUNAS,
@@ -33,6 +35,8 @@ import {
   LockedFieldError,
   MSG_INTENT_LOCKED,
   NotFoundError,
+  resumeService,
+  ServiceStateError,
   setPaymentIntent,
   type Actor,
   type ClientPatch,
@@ -90,6 +94,12 @@ describe('lock-matrix predicates', () => {
     expect(canVoidService(director())).toBe(true);
     expect(canVoidService(accountStaff())).toBe(false);
     expect(canVoidService(budi())).toBe(false);
+  });
+  it('Hold Service (T-2): Head of Account (Account Lead) / Director only', () => {
+    expect(canHoldService(accountLead())).toBe(true);
+    expect(canHoldService(director())).toBe(true);
+    expect(canHoldService(accountStaff())).toBe(false); // AM staff cannot approve a hold
+    expect(canHoldService(budi())).toBe(false); // Sales cannot
   });
 });
 
@@ -428,6 +438,66 @@ describeDb('voidService (M4-OA-5)', () => {
 
   it('404s on an unknown service', async () => {
     await expect(voidService(sql, accountLead(), 'SVC-000000-0000', 'x')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describeDb('holdService / resumeService (T-2 / RM-2)', () => {
+  const serviceOf = async (clientId: string): Promise<string> =>
+    (await sql<{ id: string }[]>`select id from services where client_id = ${clientId} limit 1`)[0].id;
+
+  /** A fresh service already at [In Execution] on the given client. */
+  async function inExecService(clientId: string): Promise<string> {
+    const id = `SVC-HOLD-${seq++}`;
+    await sql`insert into services (id, client_id, master_service_id, master_version_no, name,
+        standard_price, commission_rule, status, requires_strategy_plan, created_by)
+      values (${id}, ${clientId}, 'MSV-X', 1, 'Full Mgmt', '10000000.00', 'rule', '[In Execution]', false, 'ZZ-ADMIN')`;
+    return id;
+  }
+
+  it('holds an [In Execution] service: Head-of-Account gate + mandatory reason + audit', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId);
+    // Gate: Sales and AM staff cannot hold (only Head of Account / Director).
+    await expect(holdService(sql, budi(), svc, 'klien minta jeda')).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(holdService(sql, accountStaff(), svc, 'x')).rejects.toBeInstanceOf(ForbiddenError);
+    // Reason mandatory.
+    await expect(holdService(sql, accountLead(), svc, '   ')).rejects.toBeInstanceOf(IncompleteError);
+
+    await holdService(sql, accountLead(), svc, 'klien minta jeda');
+    const row = await sql<{ status: string }[]>`select status from services where id = ${svc}`;
+    expect(row[0].status).toBe('[On Hold]');
+    const audit = await sql<{ after_json: { reason: string; status: string } }[]>`
+      select after_json from audit_log where entity_id = ${svc} and action = 'service_held' order by id desc limit 1`;
+    expect(audit[0].after_json.status).toBe('[On Hold]');
+    expect(audit[0].after_json.reason).toBe('klien minta jeda');
+  });
+
+  it('rejects hold from a service that is not [In Execution] (409 ServiceStateError)', async () => {
+    const clientId = await closedClient();
+    const svc = await serviceOf(clientId); // fresh service = [Awaiting Onboarding]
+    await expect(holdService(sql, accountLead(), svc, 'x')).rejects.toBeInstanceOf(ServiceStateError);
+  });
+
+  it('resume returns a held service to [In Execution]; resuming a non-held one is rejected', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId);
+    // Resume from [In Execution] (not held) is a wrong-state error.
+    await expect(resumeService(sql, accountLead(), svc, '')).rejects.toBeInstanceOf(ServiceStateError);
+    await holdService(sql, accountLead(), svc, 'jeda');
+    await resumeService(sql, director(), svc, '');
+    const row = await sql<{ status: string }[]>`select status from services where id = ${svc}`;
+    expect(row[0].status).toBe('[In Execution]');
+  });
+
+  it('hold does NOT cascade to child Briefs (only stops recap/scoring obligation)', async () => {
+    const clientId = await closedClient();
+    const svc = await inExecService(clientId);
+    const brief = `BRF-HOLD-${seq++}`;
+    await sql`insert into briefs (id, service_id, title, status, created_by)
+      values (${brief}, ${svc}, 'Brief hold', '[To Do]', 'ZZ-ADMIN')`;
+    await holdService(sql, accountLead(), svc, 'jeda');
+    const b = await sql<{ status: string }[]>`select status from briefs where id = ${brief}`;
+    expect(b[0].status).toBe('[To Do]'); // untouched by the hold
   });
 });
 

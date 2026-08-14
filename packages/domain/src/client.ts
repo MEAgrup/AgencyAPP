@@ -99,6 +99,19 @@ export class LockedFieldError extends Error {
 }
 
 /**
+ * A Service state transition was requested from a state that does not allow it —
+ * e.g. Hold from a Service that is not [In Execution], or Resume from one that is
+ * not [On Hold] (verbatim BI, → 409). Distinct from LockedFieldError so the
+ * message names the real problem (a bad transition, not a locked field).
+ */
+export class ServiceStateError extends Error {
+  constructor(message = bi.TRANSITION_NOT_ALLOWED) {
+    super(message);
+    this.name = 'ServiceStateError';
+  }
+}
+
+/**
  * The payment-intent handoff has already passed out of Sales' control — Finance
  * recorded a verification, or the Transaction left `[Menunggu Verifikasi]`
  * (verbatim BI, → 409). Distinct from LockedFieldError: this one points the
@@ -497,6 +510,100 @@ export async function voidService(sql: Sql, actor: Actor, serviceId: string, rea
       createdBy: actor.employeeId,
     });
     return { serviceId, voidedBriefs, skippedApprovedBriefs };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Hold Service (T-2 / RM-2). A running Service can be paused ("On Hold") when a
+// client asks to suspend delivery. The whole point of the state is RM-2: a Client
+// whose services are ALL On Hold is no longer "active", so the weekly-recap job
+// (D-06, `wrr_monday_job`) stops opening recaps for it — the exclusion lives in
+// that SQL job. A held Service does NOT cascade to its child Briefs/Assets/
+// Campaigns: hold only suspends the recap/scoring obligation, it does not force
+// terminal transitions on in-flight work (that would destroy real progress).
+//
+// Approval sits with the Head of Account (Account Lead / Director), mirroring the
+// Void-Service gate (M4-OA-5): the engine edge is require_lead, and this
+// division-specific gate is the stricter code guard on top. Reason is mandatory
+// on hold (an audit trail for why delivery was suspended); resume needs none.
+// ---------------------------------------------------------------------------
+
+export const SERVICE_ON_HOLD = '[On Hold]';
+export const SERVICE_IN_EXECUTION = '[In Execution]';
+
+/** canHoldService: Head of Account (Account Lead) or Director (mirrors canVoidService). */
+export function canHoldService(actor: Actor): boolean {
+  return actor.role.director ||
+    (actor.role.division === ACCOUNT_DIVISION && actor.role.level === permission.LevelLead);
+}
+
+/**
+ * holdService moves a Service [In Execution] → [On Hold] (T-2). Head of Account /
+ * Director only, reason mandatory, fully audited. No cascade to child entities.
+ * A Service not [In Execution] is rejected (ServiceStateError → 409).
+ */
+export async function holdService(sql: Sql, actor: Actor, serviceId: string, reason: string): Promise<void> {
+  if (!canHoldService(actor)) {
+    throw new ForbiddenError(bi.TRANSITION_ROLE_DENIED);
+  }
+  const why = (reason ?? '').trim();
+  if (why === '') {
+    throw new IncompleteError();
+  }
+  await withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const svc = await tx<{ id: string; status: string }[]>`
+      select id, status from services where id = ${serviceId} for update`;
+    if (svc.length === 0) {
+      throw new NotFoundError('service not found');
+    }
+    if (svc[0].status !== SERVICE_IN_EXECUTION) {
+      throw new ServiceStateError(); // only a running Service can be held
+    }
+    const sres = await statemachine.transition(ex.sm, {
+      machine: 'service', entityType: 'service', table: 'services', entityId: serviceId, to: SERVICE_ON_HOLD, actor,
+    });
+    if (!sres.ok) {
+      throw new ServiceStateError();
+    }
+    await ex.audit.insertAudit({
+      entityType: 'service', entityId: serviceId, actorEmployeeId: actor.employeeId,
+      action: 'service_held', beforeJson: { status: svc[0].status },
+      afterJson: { status: SERVICE_ON_HOLD, reason: why }, createdBy: actor.employeeId,
+    });
+  });
+}
+
+/**
+ * resumeService moves a Service [On Hold] → [In Execution] (T-2). Same gate as
+ * holdService. A Service not [On Hold] is rejected (ServiceStateError → 409).
+ */
+export async function resumeService(sql: Sql, actor: Actor, serviceId: string, reason: string): Promise<void> {
+  if (!canHoldService(actor)) {
+    throw new ForbiddenError(bi.TRANSITION_ROLE_DENIED);
+  }
+  const why = (reason ?? '').trim();
+  await withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const svc = await tx<{ id: string; status: string }[]>`
+      select id, status from services where id = ${serviceId} for update`;
+    if (svc.length === 0) {
+      throw new NotFoundError('service not found');
+    }
+    if (svc[0].status !== SERVICE_ON_HOLD) {
+      throw new ServiceStateError(); // only a held Service can resume
+    }
+    const sres = await statemachine.transition(ex.sm, {
+      machine: 'service', entityType: 'service', table: 'services', entityId: serviceId, to: SERVICE_IN_EXECUTION, actor,
+    });
+    if (!sres.ok) {
+      throw new ServiceStateError();
+    }
+    await ex.audit.insertAudit({
+      entityType: 'service', entityId: serviceId, actorEmployeeId: actor.employeeId,
+      action: 'service_resumed', beforeJson: { status: svc[0].status },
+      afterJson: { status: SERVICE_IN_EXECUTION, reason: why === '' ? null : why }, createdBy: actor.employeeId,
+    });
   });
 }
 

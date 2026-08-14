@@ -1230,6 +1230,7 @@ export interface HealthPortfolioRowWire {
   open_complaints: number;
   last_closed_recap_week: string | null;
   last_closed_recap_end: string | null;
+  on_hold: boolean;
 }
 
 export function healthPortfolioRowToWire(r: health.PortfolioRow): HealthPortfolioRowWire {
@@ -1237,6 +1238,7 @@ export function healthPortfolioRowToWire(r: health.PortfolioRow): HealthPortfoli
     client_id: r.clientId, toko: r.toko, owner_am: r.ownerAm, band: r.band,
     score_display: r.scoreDisplay, band_drop: r.bandDrop, open_complaints: r.openComplaints,
     last_closed_recap_week: r.lastClosedRecapWeek, last_closed_recap_end: r.lastClosedRecapEnd,
+    on_hold: r.onHold,
   };
 }
 

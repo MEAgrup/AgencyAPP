@@ -140,6 +140,7 @@ export function mapError(err: unknown): Response {
     err instanceof finance.ChangeDecidedError ||
     err instanceof client.LockedFieldError ||
     err instanceof client.IntentLockedError ||
+    err instanceof client.ServiceStateError ||
     err instanceof account.ConflictError ||
     err instanceof task.ConflictError ||
     err instanceof creative.ConflictError ||

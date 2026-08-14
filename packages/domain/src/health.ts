@@ -765,6 +765,7 @@ export interface PortfolioRow {
   openComplaints: number; // count of [Open] + [In Progress] complaints (M6 CPL-)
   lastClosedRecapWeek: string | null; // "2026-W33" of the most recent `Ditutup` recap
   lastClosedRecapEnd: string | null; // YYYY-MM-DD of that week's Sunday, or null
+  onHold: boolean; // T-2 / RM-2: every live service is [On Hold] — kept in report, flagged
 }
 
 interface PortfolioRawRow {
@@ -777,6 +778,7 @@ interface PortfolioRawRow {
   open_complaints: string | number;
   last_closed_recap_week: string | null;
   last_closed_recap_end: string | null;
+  all_services_on_hold: boolean;
 }
 
 /**
@@ -811,7 +813,17 @@ export async function portfolio(sql: Queryable, actor: Actor): Promise<Portfolio
          order by w.iso_year desc, w.iso_week desc limit 1) as last_closed_recap_week,
       (select to_char(max(w.minggu_akhir), 'YYYY-MM-DD')
          from weekly_result_recap w
-         where w.client_id = c.id and w.status = 'Ditutup') as last_closed_recap_end
+         where w.client_id = c.id and w.status = 'Ditutup') as last_closed_recap_end,
+      -- T-2 (RM-2): keterangan status hold. The client STAYS in the Health report
+      -- even when every live service is On Hold (owner decision 2026-08-14) — this
+      -- flag lets the report say so. True = has ≥1 [On Hold] service AND no service
+      -- that is active-and-not-held (i.e. delivery is fully paused).
+      (exists (select 1 from services s
+                where s.client_id = c.id and s.status = '[On Hold]')
+       and not exists (select 1 from services s
+                        where s.client_id = c.id
+                          and s.status not in ('Done', '[Cancelled — Service Voided]', '[On Hold]'))
+      ) as all_services_on_hold
     from clients c
     where exists (
       select 1 from services s
@@ -834,6 +846,7 @@ export async function portfolio(sql: Queryable, actor: Actor): Promise<Portfolio
         openComplaints: Number(r.open_complaints),
         lastClosedRecapWeek: r.last_closed_recap_week,
         lastClosedRecapEnd: r.last_closed_recap_end,
+        onHold: r.all_services_on_hold,
       };
     });
 }

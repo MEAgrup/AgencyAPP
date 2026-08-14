@@ -22,6 +22,8 @@ import {
   PAYMENT_INTENT_OPTIONS,
   editClient,
   getClient,
+  holdService,
+  resumeService,
   setPaymentIntent,
   voidService,
   type Client,
@@ -30,6 +32,8 @@ import {
 import StatusBadge from '@/components/StatusBadge';
 
 const VOIDED_STATUS = '[Cancelled — Service Voided]';
+const ON_HOLD_STATUS = '[On Hold]';
+const IN_EXECUTION_STATUS = '[In Execution]';
 
 function formatDate(value: string | null | undefined) {
   if (!value) return '—';
@@ -64,6 +68,10 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const [voidPendingId, setVoidPendingId] = useState<string | null>(null);
   const [voidError, setVoidError] = useState<string | null>(null);
   const [voidMessage, setVoidMessage] = useState<string | null>(null);
+
+  // Hold / Resume Service (T-2 / RM-2) — Head of Account (Account lead) or Director.
+  const canHoldService = isAccountLead(role) || !!role?.director;
+  const [holdPendingId, setHoldPendingId] = useState<string | null>(null);
 
   // Payment Intent
   const [intentChoice, setIntentChoice] = useState<string>('');
@@ -130,6 +138,43 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       setVoidError(errorMessage(err));
     } finally {
       setVoidPendingId(null);
+    }
+  }
+
+  async function handleHold(serviceId: string, serviceName: string) {
+    const reason = window.prompt(`Alasan hold service "${serviceName}"? (wajib)`);
+    if (reason === null) return; // cancelled
+    if (reason.trim() === '') {
+      setVoidError('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
+      return;
+    }
+    setVoidError(null);
+    setVoidMessage(null);
+    setHoldPendingId(serviceId);
+    try {
+      await holdService(serviceId, reason);
+      setVoidMessage(`Service "${serviceName}" berhasil di-hold.`);
+      await load();
+    } catch (err) {
+      setVoidError(errorMessage(err));
+    } finally {
+      setHoldPendingId(null);
+    }
+  }
+
+  async function handleResume(serviceId: string, serviceName: string) {
+    if (!window.confirm(`Lanjutkan (resume) service "${serviceName}" dari On Hold?`)) return;
+    setVoidError(null);
+    setVoidMessage(null);
+    setHoldPendingId(serviceId);
+    try {
+      await resumeService(serviceId);
+      setVoidMessage(`Service "${serviceName}" dilanjutkan (In Execution).`);
+      await load();
+    } catch (err) {
+      setVoidError(errorMessage(err));
+    } finally {
+      setHoldPendingId(null);
     }
   }
 
@@ -388,6 +433,26 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                           >
                             Onboarding &amp; Brief
                           </Link>
+                        )}
+                        {canHoldService && s.status === IN_EXECUTION_STATUS && (
+                          <button
+                            type="button"
+                            className="btn btnSecondary btnSm"
+                            disabled={holdPendingId !== null}
+                            onClick={() => handleHold(s.id, s.name)}
+                          >
+                            {holdPendingId === s.id ? 'Memproses...' : 'Hold Service'}
+                          </button>
+                        )}
+                        {canHoldService && s.status === ON_HOLD_STATUS && (
+                          <button
+                            type="button"
+                            className="btn btnPrimary btnSm"
+                            disabled={holdPendingId !== null}
+                            onClick={() => handleResume(s.id, s.name)}
+                          >
+                            {holdPendingId === s.id ? 'Memproses...' : 'Resume Service'}
+                          </button>
                         )}
                         {s.status !== VOIDED_STATUS && (
                           <button

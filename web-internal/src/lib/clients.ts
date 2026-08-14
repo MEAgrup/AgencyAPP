@@ -97,6 +97,16 @@ export function voidService(serviceId: string): Promise<VoidResult> {
   return api.post<VoidResult>(`/services/${serviceId}/void`);
 }
 
+/** T-2 / RM-2: Hold a running Service ([In Execution] → [On Hold]). Head of Account only; reason wajib. */
+export function holdService(serviceId: string, reason: string): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/services/${serviceId}/hold`, { reason });
+}
+
+/** T-2 / RM-2: Resume a held Service ([On Hold] → [In Execution]). Head of Account only. */
+export function resumeService(serviceId: string, reason?: string): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/services/${serviceId}/resume`, { reason: reason ?? '' });
+}
+
 export function setPaymentIntent(clientId: string, paymentIntent: string): Promise<{ client: Client }> {
   return api.post<{ client: Client }>(`/clients/${clientId}/payment-intent`, {
     payment_intent: paymentIntent,
