@@ -75,7 +75,7 @@ export default function MyTasksPage() {
   return (
     <div className="stack">
       <div>
-        <Link href="/board" className="muted">&larr; Kembali ke Board</Link>
+        <Link href="/" className="muted">&larr; Kembali ke Dashboard</Link>
       </div>
 
       <div>

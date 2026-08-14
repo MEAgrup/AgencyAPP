@@ -41,6 +41,8 @@ import {
   MILESTONE_CANCELLED,
   type Milestone,
 } from '@/lib/milestone';
+import { getBoard, UNIVERSAL_COLUMNS, type Card } from '@/lib/board';
+import BoardCard from '../../board/BoardCard';
 
 const VOIDED_STATUS = '[Cancelled — Service Voided]';
 const ON_HOLD_STATUS = '[On Hold]';
@@ -279,6 +281,12 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           <span className="badge badge-amber">Menunggu Finance</span>
         )}
       </div>
+
+      {/* M11 Unified Board, folded into the Client Record (DECISIONS 2026-08-14).
+          Placed high so this page reads project-first: one client → its full
+          cross-division board plus the M4 record below. Self-fetching so a board
+          error never blanks the record. */}
+      <ClientBoardSection clientId={id} />
 
       <section className="card">
         <div className="cardHeader">
@@ -825,6 +833,143 @@ function MilestonesSection({ clientId, canManage }: { clientId: string; canManag
             </button>
           </div>
         </form>
+      )}
+    </section>
+  );
+}
+
+/**
+ * ClientBoardSection — M11 Unified Board, folded into the Client Record
+ * (DECISIONS 2026-08-14 "board merge"). The standalone /board picker page is
+ * retired: its only job was resolving a Client id, which the roster already
+ * does, so the board now renders here with the client already in context.
+ *
+ * Self-fetching (like MilestonesSection) so a board error never blanks the
+ * record. Division/PIC/overdue filters are client-side — backend GET /board
+ * accepts only `client=` (M11 brief §5 "TIDAK TERSEDIA"), so they narrow the
+ * already-fetched set, mirroring the retired board page's behaviour exactly.
+ */
+function ClientBoardSection({ clientId }: { clientId: string }) {
+  const [cards, setCards] = useState<Card[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [filterDivision, setFilterDivision] = useState('');
+  const [filterPic, setFilterPic] = useState('');
+  const [filterOverdueOnly, setFilterOverdueOnly] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await getBoard(clientId);
+      setCards(res.data);
+    } catch (err) {
+      setError(errorMessage(err));
+      setCards(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [clientId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const filteredCards = cards
+    ? cards.filter((c) => {
+        if (filterDivision && c.division !== filterDivision) return false;
+        if (filterPic && !(c.pic ?? '').toLowerCase().includes(filterPic.trim().toLowerCase())) return false;
+        if (filterOverdueOnly && !c.overdue) return false;
+        return true;
+      })
+    : null;
+
+  const knownColumns: readonly string[] = UNIVERSAL_COLUMNS;
+  const extraColumns = filteredCards
+    ? Array.from(new Set(filteredCards.map((c) => c.universal_column))).filter((c) => !knownColumns.includes(c))
+    : [];
+  const columns = [...UNIVERSAL_COLUMNS, ...extraColumns];
+  const divisionOptions = cards ? Array.from(new Set(cards.map((c) => c.division))).sort() : [];
+
+  return (
+    <section className="card" id="board">
+      <div className="cardHeader">
+        <h2>Unified Board &middot; Proyek Lintas Divisi</h2>
+        <button type="button" className="btn btnSecondary btnSm" disabled={loading} onClick={() => load()}>
+          {loading ? 'Memuat...' : 'Refresh'}
+        </button>
+      </div>
+      <p className="muted" style={{ marginBottom: 12 }}>
+        Semua Brief/Asset/Booking/Session klien ini (M11), dipetakan ke Universal Column dari status native
+        tiap modul (Creative/Ads/KOL/Live Stream).
+      </p>
+
+      {cards && cards.length > 0 && (
+        <div className="formRow">
+          <div className="field">
+            <label htmlFor="cb-filter-division">Divisi</label>
+            <select id="cb-filter-division" value={filterDivision} onChange={(e) => setFilterDivision(e.target.value)}>
+              <option value="">Semua Divisi</option>
+              {divisionOptions.map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="cb-filter-pic">PIC</label>
+            <input
+              id="cb-filter-pic"
+              placeholder="Filter PIC..."
+              value={filterPic}
+              onChange={(e) => setFilterPic(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="cb-filter-overdue">Overdue</label>
+            <label className="row" style={{ gap: 6, fontSize: 13 }}>
+              <input
+                id="cb-filter-overdue"
+                type="checkbox"
+                checked={filterOverdueOnly}
+                onChange={(e) => setFilterOverdueOnly(e.target.checked)}
+              />
+              Hanya yang overdue
+            </label>
+          </div>
+        </div>
+      )}
+
+      {loading && <p className="muted">Memuat board...</p>}
+      {error && <div className="alert alertError" role="alert">{error}</div>}
+      {!loading && !error && filteredCards && filteredCards.length === 0 && (
+        <div className="emptyState">
+          {cards && cards.length > 0
+            ? 'Tidak ada Brief yang cocok dengan filter ini.'
+            : 'Belum ada Brief untuk klien ini.'}
+        </div>
+      )}
+      {!loading && !error && filteredCards && filteredCards.length > 0 && (
+        <div className="table-wrap" style={{ display: 'flex', gap: 12, padding: 12, alignItems: 'flex-start' }}>
+          {columns.map((col) => {
+            const colCards = filteredCards.filter((c) => c.universal_column === col);
+            return (
+              <div key={col} style={{ flex: '0 0 260px', minWidth: 260 }}>
+                <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+                  <strong style={{ fontSize: 13 }}>{col}</strong>
+                  <span className="muted" style={{ fontSize: 12 }}>{colCards.length}</span>
+                </div>
+                <div className="stack" style={{ gap: 8 }}>
+                  {colCards.length === 0 ? (
+                    <div className="muted" style={{ fontSize: 12 }}>&mdash;</div>
+                  ) : (
+                    colCards.map((c) => <BoardCard key={`${c.type}-${c.id}`} card={c} />)
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
     </section>
   );

@@ -170,9 +170,12 @@ const DELIVERY_LINKS: NavItem[] = [
 
 // Wave 3 — visibilitas & skoring (M11, M13, M14)
 const VISIBILITY_LINKS: NavItem[] = [
-  // M11 Board: row-scoped — staff see the Clients where they are a PIC, so any
-  // division may have cards. Universal.
-  { href: '/board', label: 'Unified Board' },
+  // M11 My Tasks — the personal, cross-Client work view (§10: "Staff lihat punya
+  // sendiri"). Universal: every division has its own tasks. The per-Client
+  // "Client Board" (M11 §10: AM/SPV/OD/Director) no longer has its own page — it
+  // lives inside the Client Record (`/clients/[id]#board`), reached by the roles
+  // that already hold `/clients` access. See DECISIONS 2026-08-14 (board merge).
+  { href: '/board/my-tasks', label: 'Tugas Saya' },
   // M13 `health.canScope`: Account (any level) + OD/Director.
   { href: '/health', label: 'Client Health', access: ownedBy(ACCOUNT) },
   // M14: every staff sees their own score with full breakdown. Universal.

@@ -29,7 +29,10 @@ const UNIVERSAL = [
   '/demo-tasks',
   '/notifications',
   '/master-services',
-  '/board',
+  // M11 My Tasks is the universal cross-Client work view; the per-Client Client
+  // Board moved into the Client Record (DECISIONS 2026-08-14), so `/board`
+  // itself is no longer a nav destination.
+  '/board/my-tasks',
   '/performance',
   '/portal',
 ];
