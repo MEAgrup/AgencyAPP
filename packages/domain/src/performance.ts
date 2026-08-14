@@ -69,6 +69,19 @@ export const COMP_COMPLAINT_RESOLUTION_SPEED = 'complaint_resolution_speed';
 export const COMP_REVISION_ESCALATION_RATE = 'revision_escalation_rate';
 /** Diagnostic (reported, NEVER weighted — §2 Rule 2 KOL row). */
 export const COMP_SOURCING_TURNAROUND = 'sourcing_turnaround';
+/**
+ * M6D RM-9a (2026-08-13): % of the AM's active clients whose weekly recap in
+ * the period was AM-closed on time and never force-closed
+ * (pernah_ditutup_otomatis = false). Self-normalised 0..100 %, no target row.
+ */
+export const COMP_WEEKLY_RECAP_DISCIPLINE = 'weekly_recap_discipline';
+/**
+ * M6D RM-9a (2026-08-13): % of (client, week) pairs in the period where a
+ * division that touched a client (wrr_divisi) also filed its mandatory division
+ * note (wrr_catatan_divisi). Applies to Creative / Ads / KOL roles.
+ * Self-normalised 0..100 %, no target row. Live-stream is vendor, not scored.
+ */
+export const COMP_WEEKLY_NOTE_COMPLIANCE = 'weekly_note_compliance';
 
 /**
  * modifierComponent maps a role type to the Module 13 Health-Score sub-component
@@ -796,6 +809,7 @@ async function creativeCandidates(q: Queryable, staffID: string, per: Period, pt
       'tidak ada Asset [Approved] pada periode — GMV Impact dikecualikan + bobot didistribusi ulang', pt),
   );
   cands.push(revisionCandidate(revisionSum, approvedInPeriod));
+  cands.push(await divisionWeeklyNoteCompliance(q, CREATIVE_DIVISION, per));
   return cands;
 }
 
@@ -840,6 +854,7 @@ async function adsCandidates(q: Queryable, staffID: string, per: Period, pt: Pla
       'tidak ada campaign yang dikelola pada periode — GMV Impact dikecualikan + bobot didistribusi ulang', pt),
   );
   cands.push(await normalized(q, ROLE_ADS, COMP_OPTIMIZATION_ACTIVITY, per, optCount, true, '', pt));
+  cands.push(await divisionWeeklyNoteCompliance(q, ADS_DIVISION, per));
   return cands;
 }
 
@@ -978,6 +993,7 @@ async function kolCandidates(q: Queryable, staffID: string, per: Period, pt: Pla
   } else {
     cands.push(cand({ name: COMP_SOURCING_TURNAROUND, diagnostic: true, included: true, raw: sourcingSum / sourcingN }));
   }
+  cands.push(await divisionWeeklyNoteCompliance(q, KOL_DIVISION, per));
   return cands;
 }
 
@@ -1021,6 +1037,10 @@ async function amCandidates(q: Queryable, staffID: string, per: Period, pt: Plac
   // Revision Escalation Rate (inverse): fraction of the portfolio's period-approved
   // Tasks that were revision-flagged (≥3 revisions, M12 Rule 15).
   cands.push(await amRevisionEscalation(q, clientIDs, per));
+
+  // Weekly-Recap Discipline (D-14 / RM-9a): % of AM's clients whose weekly
+  // recaps in the period were AM-confirmed on time and never force-closed.
+  cands.push(await amWeeklyRecapDiscipline(q, clientIDs, per));
   return cands;
 }
 
@@ -1165,6 +1185,89 @@ function revisionCandidate(revisionSum: number, approved: number): Candidate {
   const avg = revisionSum / approved;
   const burden = 100 - Math.min(avg * REVISION_INVERSE_FACTOR, 100);
   return cand({ name: COMP_REVISION_COUNT, included: true, raw: burden });
+}
+
+// ---- M6D RM-9a discipline / compliance candidates (D-14) ----
+
+/**
+ * amWeeklyRecapDiscipline = % of the AM's clients for which ALL weekly recaps
+ * whose minggu_mulai falls within the scored month were AM-confirmed (status =
+ * 'Ditutup') AND never force-closed (pernah_ditutup_otomatis = false).
+ *
+ * Self-normalised 0..100 — no target row (RM-9a). Excluded (redistributed) when
+ * the AM has no active clients or none had a recap opened in the period.
+ */
+async function amWeeklyRecapDiscipline(q: Queryable, clientIDs: string[], per: Period): Promise<Candidate> {
+  if (clientIDs.length === 0) {
+    return cand({
+      name: COMP_WEEKLY_RECAP_DISCIPLINE, included: false,
+      reason: 'tidak ada klien aktif yang ditangani AM — dikecualikan + bobot didistribusi ulang',
+    });
+  }
+
+  let total = 0;
+  let compliant = 0;
+  for (const cid of clientIDs) {
+    const rows = await q<{ status: string; pernah_ditutup_otomatis: boolean }[]>`
+      select status, pernah_ditutup_otomatis from weekly_result_recap
+       where client_id = ${cid}
+         and minggu_mulai >= ${per.startDate}
+         and minggu_mulai <= ${per.endDate}`;
+    for (const r of rows) {
+      total++;
+      if (r.status === 'Ditutup' && !r.pernah_ditutup_otomatis) {
+        compliant++;
+      }
+    }
+  }
+
+  if (total === 0) {
+    return cand({
+      name: COMP_WEEKLY_RECAP_DISCIPLINE, included: false,
+      reason: 'tidak ada rekap mingguan yang dibuka pada periode ini — dikecualikan + bobot didistribusi ulang',
+    });
+  }
+  return cand({ name: COMP_WEEKLY_RECAP_DISCIPLINE, included: true, raw: (compliant / total) * 100 });
+}
+
+/**
+ * divisionWeeklyNoteCompliance = % of (recap, divisi) pairs in the period where
+ * the division's mandatory weekly note (wrr_catatan_divisi, RM-D6/RM-8) was filed.
+ * The denominator is every recap that has a wrr_divisi entry for this division
+ * (i.e. the division "touched" that client that week). The numerator is the subset
+ * that also has ≥1 wrr_catatan_divisi row.
+ *
+ * Division-level metric (same for all staff of a given division) — consistent with
+ * M14 §9 which grades the division's collective obligation, not an individual staffer.
+ * Self-normalised 0..100 — no target row (RM-9a). Excluded (redistributed) when the
+ * division had no activity with recaps in the period.
+ */
+async function divisionWeeklyNoteCompliance(q: Queryable, divisi: string, per: Period): Promise<Candidate> {
+  const touched = await q<{ recap_id: string }[]>`
+    select d.recap_id
+      from wrr_divisi d
+      join weekly_result_recap r on r.id = d.recap_id
+     where d.divisi = ${divisi}
+       and r.minggu_mulai >= ${per.startDate}
+       and r.minggu_mulai <= ${per.endDate}`;
+
+  if (touched.length === 0) {
+    return cand({
+      name: COMP_WEEKLY_NOTE_COMPLIANCE, included: false,
+      reason: 'tidak ada rekap yang disentuh divisi pada periode — dikecualikan + bobot didistribusi ulang',
+    });
+  }
+
+  let noted = 0;
+  for (const t of touched) {
+    const noteRows = await q<{ n: string }[]>`
+      select count(*) as n from wrr_catatan_divisi
+       where recap_id = ${t.recap_id} and divisi = ${divisi}`;
+    if (Number(noteRows[0].n) > 0) {
+      noted++;
+    }
+  }
+  return cand({ name: COMP_WEEKLY_NOTE_COMPLIANCE, included: true, raw: (noted / touched.length) * 100 });
 }
 
 // ---- task-metric helpers (recompute from the immutable log, house rule 4) ----
