@@ -1,20 +1,22 @@
-# Handoff — Metrik Terbuka T-1…T-4 SELESAI (SESI 3) + task berikutnya
+# Handoff — Metrik Terbuka T-1…T-4 SELESAI & MERGED (SESI 3) + task berikutnya
 
-**Tanggal:** 2026-08-14 · **PR:** #163 (`claude/handoff-optimasi-metrik-tk5yd0`)
+**Tanggal:** 2026-08-14 · **PR:** #163 ✅ **MERGED** (merge commit `95aa0c0`)
 **Pendahulu:** `HANDOFF_OPTIMASI_DAN_METRIK_SESI1.md` (rencana) + `SESI2.md` (P-1 mendarat).
 Baca ini paling akhir — ia menutup T-1…T-4.
 
-> **Ringkas:** Keempat task terbuka SESI1/2 (T-1…T-4) **SELESAI & sudah di PR #163**,
-> termasuk putaran lanjutan yang ditandatangani pemilik (T-2 dua-langkah + notif,
-> T-4b CPL, T-4c milestones). P-1 (kecepatan) sudah mendarat di PR #161. Semua
-> keputusan pemilik tercatat di `docs/DECISIONS.md` (blok Decided 2026-08-14).
+> **Ringkas:** Keempat task terbuka SESI1/2 (T-1…T-4) **SELESAI & sudah MERGED ke
+> `main`** lewat PR #163, termasuk putaran lanjutan yang ditandatangani pemilik
+> (T-2 dua-langkah + notif, T-4b CPL, T-4c milestones). P-1 (kecepatan) sudah
+> mendarat di PR #161. Semua keputusan pemilik tercatat di `docs/DECISIONS.md`
+> (blok Decided 2026-08-14).
 
 ---
 
 ## 0. MULAI DARI SINI
 
-1. PR #163 memuat 6 commit fitur (T-2, T-3, T-4a, T-4b, T-4c, T-2b/T-2c) di atas
-   P-1. Kalau belum di-merge, verifikasi CI hijau lalu merge.
+1. PR #163 sudah **MERGED** ke `main` (merge commit `95aa0c0`, CI penuh hijau:
+   core-engines / db-and-migrations / api / web-internal / backend). Tidak ada
+   sisa pekerjaan T-1…T-4.
 2. Task berikutnya yang **nyata dan sudah tidak terblokir** ada di §3 — prioritas
    #1 adalah **D-14 (komponen Disiplin Rekap M14)**: bobotnya sudah ditandatangani
    pemilik 2026-08-13 tapi **skoringnya belum dibangun**.
