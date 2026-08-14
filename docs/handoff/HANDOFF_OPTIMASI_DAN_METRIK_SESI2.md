@@ -1,13 +1,50 @@
-# Handoff — Optimasi Kecepatan (SESI 2 / **P-1 SELESAI**) + status T-1…T-4
+# Handoff — Optimasi Kecepatan (SESI 2 / **P-1 SELESAI & MERGED**) + status T-1…T-4
 
-**Tanggal:** 2026-08-14 · **Branch:** `claude/website-speed-optimization-je9w5q`
+**Tanggal:** 2026-08-14 · **Mendarat:** PR #161, merge commit `e23e937`
 **Pendahulu:** `HANDOFF_OPTIMASI_DAN_METRIK_SESI1.md` (rencana). Baca ini dulu — ia
 menggantikan §P-1 di sana.
 
-> **Ringkas:** P-1 dikerjakan penuh dan mendarat. Akar yang didiagnosis SESI1 (N+1,
-> latency-bound) **terkonfirmasi dengan pengukuran**, bukan hanya dibaca: satu
+> **Ringkas:** P-1 dikerjakan penuh dan sudah di `main`. Akar yang didiagnosis SESI1
+> (N+1, latency-bound) **terkonfirmasi dengan pengukuran**, bukan hanya dibaca: satu
 > pembacaan performa AM menembak **679 query**; sekarang **10**. T-1…T-4 **tidak**
 > disentuh — keempatnya masih menunggu KEPUTUSAN PEMILIK (daftar di §5).
+
+## 0. MULAI DARI SINI (sesi berikutnya)
+
+Urutan yang benar untuk sesi berikutnya:
+
+1. **Tanyakan empat keputusan di §5 lebih dulu.** Tidak ada satu pun dari T-1…T-4
+   yang bisa dikerjakan tanpa jawabannya, dan menebak salah satunya berarti menulis
+   aturan bisnis kedua untuk hal yang sama.
+2. Kalau pemilik menjawab sebagian, kerjakan yang terjawab saja — **T-3 CTR/CPC/CPM
+   bisa jalan lebih dulu tanpa menunggu definisi CVR** (hanya butuh clicks +
+   impressions), jadi itu jalur tersempit yang produktif kalau jawabannya belum
+   lengkap.
+3. Jangan lompat ke §4 (tuas kecepatan sisa) kecuali pemilik memintanya — P-1 sudah
+   memenuhi permintaan aslinya, dan tuas terbesar yang tersisa (§4 poin 1) adalah
+   keputusan keamanan, bukan tuning.
+
+### ⚠️ Drift dengan sesi FE yang berjalan paralel
+
+PR #161 menyentuh **tiga** berkas `web-internal`. Kalau ada sesi lain sedang
+mengerjakan FE, ia WAJIB `git pull origin main` sebelum melanjutkan, atau ketiganya
+akan konflik:
+
+- `web-internal/src/lib/auth-context.tsx` — ditulis ulang (cache sesi + revalidasi)
+- `web-internal/src/lib/use-unread-count.ts` — polling berhenti saat tab tersembunyi
+- `web-internal/src/app/(shell)/tasks/[id]/page.tsx` — dua fetch cabang brief → `Promise.all`
+
+Berkas FE lain tidak disentuh sama sekali.
+
+## 0.1 Keputusan pemilik 2026-08-14 (sesudah P-1 mendarat)
+
+Tiga hal yang di-flag PR #161 sudah dijawab pemilik — **jangan buka ulang**:
+
+| # | Pertanyaan | Keputusan |
+|---|---|---|
+| 1 | Cache sesi `sessionStorage` di FE — pertahankan atau cabut? | ✅ **Pertahankan.** Tidak perlu varian yang lebih ketat. |
+| 2 | Siapa mengukur p95 produksi? | ✅ **Pemilik mengukur sendiri.** Jangan pasang Speed Insights / instrumentasi baru tanpa diminta. |
+| 3 | Cabut hop proxy `web-internal → apps/api`? | 🟡 **Ditunda** — *"nanti kita coba"*. Belum ditolak, belum disetujui. Butuh keputusan CORS/cookie sebelum dikerjakan (§4 poin 1). |
 
 ---
 
@@ -182,14 +219,26 @@ supaya jelas query mana yang berlipat.
 
 Diurut menurut dampak yang diperkirakan.
 
-1. 🔴 **Rewrite proxy `web-internal` → `apps/api` menambah satu hop penuh ke
-   SETIAP panggilan API.** `next.config.ts` mem-proxy `/api/v1/*` ke deployment
-   `apps/api` yang terpisah, jadi tiap permintaan menempuh
-   `browser → Vercel(web-internal) → Vercel(apps/api) → pooler`. Menghapus hop itu
-   (panggil `apps/api` langsung) butuh CORS + cookie lintas-situs — **keputusan
-   keamanan**, bukan tuning, jadi ia butuh entri `DECISIONS.md` dan tanda tangan
-   pemilik. Tidak diambil sendiri. Ini kemungkinan besar tuas terbesar yang
-   tersisa.
+1. 🟡 **Rewrite proxy `web-internal` → `apps/api` menambah satu hop penuh ke
+   SETIAP panggilan API.** Status: **ditunda pemilik, "nanti kita coba"** (§0.1).
+   `next.config.ts` mem-proxy `/api/v1/*` ke deployment `apps/api` yang terpisah,
+   jadi tiap permintaan menempuh `browser → Vercel(web-internal) → Vercel(apps/api)
+   → pooler`; hop tengah itu murni relay, nol pekerjaan, tapi membayar TLS +
+   jaringan + kemungkinan cold start setiap kali.
+
+   **Langkah pertama saat ini dibuka kembali: UKUR, jangan langsung refactor.**
+   Bandingkan di Network tab waktu `/api/v1/me` lewat proxy vs
+   `agency-app-api.vercel.app/api/v1/healthz` langsung. Selisih 20 ms ⇒ bukan
+   prioritas; 150 ms ⇒ prioritas utama.
+
+   **Kalau layak, JANGAN ambil jalan naifnya.** `*.vercel.app` ada di Public Suffix
+   List, jadi `web-internal-mea.vercel.app` dan `agency-app-api.vercel.app` adalah
+   **dua situs berbeda** bagi browser ⇒ memanggil langsung memaksa
+   `SameSite=None; Secure` dan **membuang proteksi CSRF bawaan**. Jalan yang benar
+   adalah memindahkan keduanya ke satu domain MEA (`app.` + `api.meagency.co.id`,
+   cookie `Domain=.meagency.co.id`): keduanya jadi **same-site**, `SameSite=Lax`
+   tetap berlaku, proteksi CSRF utuh, dan yang tersisa hanya CORS dengan allowlist
+   satu origin. Tetap butuh entri `DECISIONS.md`.
 2. 🟡 **Refresh pasca-mutasi berurutan di FE.** ±40 tempat berpola
    `await load(); await loadMetrics();` — dua pembacaan independen dijalankan
    satu per satu, jadi jeda setelah tiap aksi dua kali lebih panjang dari
@@ -227,9 +276,11 @@ pertanyaannya utuh, tak berubah dari SESI1 §Daftar KEPUTUSAN PEMILIK:
 
 - **p95 produksi belum diukur.** Tidak ada akses ke deployment live dari sesi ini.
   Angka di §1 adalah jumlah round-trip + wall-clock terhadap Postgres lokal.
-  Proyeksi "±10 s → ±0,15 s" adalah aritmetika round-trip × RTT, **bukan**
-  pengukuran produksi. Untuk angka sungguhan: Vercel Analytics + Supabase
-  `query_logs` pada deployment sebenarnya, sesudah rilis ini mendarat.
+  Proyeksi "±10 s → ±0,15 s" adalah aritmetika round-trip × RTT (asumsi 15 ms;
+  pada 8 ms jadi 5,4 s → 0,08 s, pada 40 ms jadi 27 s → 0,4 s), **bukan**
+  pengukuran produksi. **Pemilik mengukur sendiri** (§0.1 poin 2) lewat Vercel
+  Analytics + Supabase `query_logs` — sesi berikutnya jangan memasang instrumentasi
+  baru untuk ini kecuali diminta.
 - **Sapuan N+1 belum menyeluruh.** Yang disapu adalah jalur baca panas yang
   disebut SESI1 plus temuan sendiri (§2.1). Jalur tulis (§4 poin 4) tidak
   disentuh.
