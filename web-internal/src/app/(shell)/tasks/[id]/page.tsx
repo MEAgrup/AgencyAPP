@@ -108,15 +108,15 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           setParentBrief(null);
         }
       } else {
-        const b = await getBrief(id);
+        // Both reads are keyed on the same id, so fire them together instead of
+        // one-after-the-other (P-1). Creative briefs break down into Assets;
+        // Ads/single-unit briefs return [].
+        const [b, res] = await Promise.all([
+          getBrief(id),
+          listBriefAssets(id).catch(() => null),
+        ]);
         setBrief(b);
-        // Creative briefs break down into Assets; Ads/single-unit briefs return [].
-        try {
-          const res = await listBriefAssets(id);
-          setAssets(res.data);
-        } catch {
-          setAssets([]);
-        }
+        setAssets(res === null ? [] : res.data);
       }
     } catch (err) {
       setLoadError(errorMessage(err));

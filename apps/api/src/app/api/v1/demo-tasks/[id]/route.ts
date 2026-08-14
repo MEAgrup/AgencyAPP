@@ -19,11 +19,13 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
     const { id } = await ctx.params;
     const detail = await readAsActor(actor, async (sql) => {
       const task = await demo.get(sql, id);
-      return {
-        task,
-        allowed: await engine.allowedTransitions(sql, demo.DEMO_MACHINE, task.status),
-        trail: await audit.auditTrail(sql, { entityType: 'demo_task', entityId: id }),
-      };
+      // P-1: the allowed-edge lookup and the audit trail do not depend on each
+      // other, only on `task` — issue them together (pipelined) instead of serially.
+      const [allowed, trail] = await Promise.all([
+        engine.allowedTransitions(sql, demo.DEMO_MACHINE, task.status),
+        audit.auditTrail(sql, { entityType: 'demo_task', entityId: id }),
+      ]);
+      return { task, allowed, trail };
     });
     return json(demoTaskDetailToWire(detail.task, detail.allowed, detail.trail));
   });

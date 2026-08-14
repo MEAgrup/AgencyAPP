@@ -23,10 +23,15 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   return handle(async () => {
     const actor = requireActor(request);
     const { id } = await ctx.params;
-    const { rows, effort } = await readAsActor(actor, async (sql) => ({
-      rows: await activity.listByAttempt(sql, id),
-      effort: await activity.effortByAttempt(sql, id),
-    }));
+    // P-1: independent reads — issue them together so the driver pipelines them
+    // instead of paying two sequential round-trips.
+    const { rows, effort } = await readAsActor(actor, async (sql) => {
+      const [r, e] = await Promise.all([
+        activity.listByAttempt(sql, id),
+        activity.effortByAttempt(sql, id),
+      ]);
+      return { rows: r, effort: e };
+    });
     return json({ data: rows.map(activityToWire), effort: effortToWire(effort) });
   });
 }
