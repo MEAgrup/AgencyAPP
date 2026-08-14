@@ -360,7 +360,10 @@ afterEach(async () => {
   await sql`delete from briefs where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
-  // WRR parents before clients (FK); wrr_divisi + wrr_catatan_divisi cascade.
+  // WRR: wrr_catatan_divisi is append-only, so a cascading DELETE from the parent
+  // fires its no-delete guard — TRUNCATE bypasses the row trigger (pattern from
+  // recap.close.test.ts). Then delete recaps (parents) before clients (FK).
+  await sql`truncate wrr_catatan_divisi`;
   await sql`delete from weekly_result_recap where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
   await sql`delete from employees where created_by like 'ZZ-%'`;

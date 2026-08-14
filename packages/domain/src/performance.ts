@@ -1341,19 +1341,18 @@ async function amWeeklyRecapDiscipline(q: Queryable, clientIDs: string[], per: P
     });
   }
 
+  // P-1: one grouped read for the whole portfolio, not one per client.
+  const rows = await q<{ status: string; pernah_ditutup_otomatis: boolean }[]>`
+    select status, pernah_ditutup_otomatis from weekly_result_recap
+     where client_id = any(${clientIDs})
+       and minggu_mulai >= ${per.startDate}
+       and minggu_mulai <= ${per.endDate}`;
   let total = 0;
   let compliant = 0;
-  for (const cid of clientIDs) {
-    const rows = await q<{ status: string; pernah_ditutup_otomatis: boolean }[]>`
-      select status, pernah_ditutup_otomatis from weekly_result_recap
-       where client_id = ${cid}
-         and minggu_mulai >= ${per.startDate}
-         and minggu_mulai <= ${per.endDate}`;
-    for (const r of rows) {
-      total++;
-      if (r.status === 'Ditutup' && !r.pernah_ditutup_otomatis) {
-        compliant++;
-      }
+  for (const r of rows) {
+    total++;
+    if (r.status === 'Ditutup' && !r.pernah_ditutup_otomatis) {
+      compliant++;
     }
   }
 
@@ -1379,31 +1378,28 @@ async function amWeeklyRecapDiscipline(q: Queryable, clientIDs: string[], per: P
  * division had no activity with recaps in the period.
  */
 async function divisionWeeklyNoteCompliance(q: Queryable, divisi: string, per: Period): Promise<Candidate> {
-  const touched = await q<{ recap_id: string }[]>`
-    select d.recap_id
+  // P-1: one query — each touched (recap, divisi) with a note-present flag. The
+  // denominator is one row per wrr_divisi entry (pk = recap_id, divisi).
+  const rows = await q<{ has_note: boolean }[]>`
+    select exists (
+             select 1 from wrr_catatan_divisi c
+              where c.recap_id = d.recap_id and c.divisi = d.divisi
+           ) as has_note
       from wrr_divisi d
       join weekly_result_recap r on r.id = d.recap_id
      where d.divisi = ${divisi}
        and r.minggu_mulai >= ${per.startDate}
        and r.minggu_mulai <= ${per.endDate}`;
 
-  if (touched.length === 0) {
+  if (rows.length === 0) {
     return cand({
       name: COMP_WEEKLY_NOTE_COMPLIANCE, included: false,
       reason: 'tidak ada rekap yang disentuh divisi pada periode — dikecualikan + bobot didistribusi ulang',
     });
   }
 
-  let noted = 0;
-  for (const t of touched) {
-    const noteRows = await q<{ n: string }[]>`
-      select count(*) as n from wrr_catatan_divisi
-       where recap_id = ${t.recap_id} and divisi = ${divisi}`;
-    if (Number(noteRows[0].n) > 0) {
-      noted++;
-    }
-  }
-  return cand({ name: COMP_WEEKLY_NOTE_COMPLIANCE, included: true, raw: (noted / touched.length) * 100 });
+  const noted = rows.filter((r) => r.has_note).length;
+  return cand({ name: COMP_WEEKLY_NOTE_COMPLIANCE, included: true, raw: (noted / rows.length) * 100 });
 }
 
 // ---- task-metric helpers (recompute from the immutable log, house rule 4) ----
