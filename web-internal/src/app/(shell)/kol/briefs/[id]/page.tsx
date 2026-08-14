@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useCallback, useEffect, useState, type FormEvent } from 'react';
+import { Fragment, use, useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -28,6 +28,53 @@ function formatDateTime(value: string | null | undefined) {
   return new Date(value).toLocaleString('id-ID');
 }
 
+// Batch creator entry (M9 §4): one brief = one platform + one source pool + one
+// coordinator; up to 20 creators per submit, each with its own rate + qty.
+const BATCH_MAX = 20;
+
+interface CreatorRow {
+  key: number;
+  creator_name: string;
+  creator_handle: string;
+  niche: string;
+  agreed_rate: string; // decimal string
+  qty_video: string; // integer string ("" => 0)
+  qty_live: string; // integer string ("" => 0)
+}
+
+function emptyRow(key: number): CreatorRow {
+  return { key, creator_name: '', creator_handle: '', niche: '', agreed_rate: '', qty_video: '', qty_live: '' };
+}
+
+/** A row with nothing typed is skipped silently at submit (not an error). */
+function isRowBlank(r: CreatorRow): boolean {
+  return (
+    r.creator_name.trim() === '' &&
+    r.creator_handle.trim() === '' &&
+    r.niche.trim() === '' &&
+    r.agreed_rate.trim() === '' &&
+    r.qty_video.trim() === '' &&
+    r.qty_live.trim() === ''
+  );
+}
+
+/** Client-side validation of one intended row; returns a BI-style message or null. */
+function validateRow(r: CreatorRow): string | null {
+  if (r.creator_name.trim() === '') return '[nama creator wajib diisi]';
+  const rate = Number(r.agreed_rate);
+  if (r.agreed_rate.trim() === '' || !Number.isFinite(rate) || rate <= 0) return '[agreed rate wajib diisi & lebih dari 0]';
+  for (const q of [r.qty_video, r.qty_live]) {
+    if (q.trim() === '') continue;
+    const n = Number(q);
+    if (!Number.isInteger(n) || n < 0) return '[jumlah video/live harus bilangan bulat tidak negatif]';
+  }
+  return null;
+}
+
+function qtyOrUndefined(v: string): number | undefined {
+  return v.trim() === '' ? undefined : Number(v);
+}
+
 export default function KolBriefDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { role } = useAuth();
@@ -45,15 +92,15 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
   const [clSubmitError, setClSubmitError] = useState<string | null>(null);
   const [clMessage, setClMessage] = useState<string | null>(null);
 
-  // Buat booking baru
-  const [creatorName, setCreatorName] = useState('');
-  const [creatorHandle, setCreatorHandle] = useState('');
+  // Buat booking baru — batch entry (one platform / source pool / coordinator
+  // per brief; many creators, one POST per row on a single submit).
   const [platform, setPlatform] = useState('');
-  const [niche, setNiche] = useState('');
   const [sourcePool, setSourcePool] = useState<string>(SOURCE_POOL_OPTIONS[0]);
   const [poolReference, setPoolReference] = useState('');
-  const [agreedRate, setAgreedRate] = useState('');
   const [assignedCoordinator, setAssignedCoordinator] = useState('');
+  const [creatorRows, setCreatorRows] = useState<CreatorRow[]>(() => [emptyRow(0), emptyRow(1), emptyRow(2)]);
+  const [rowErrors, setRowErrors] = useState<Record<number, string>>({});
+  const rowKeyCounter = useRef(3);
 
   // Coordinator candidates = active KOL STAFF (`kol.validateKolStaff`). Declared
   // here, above the loading early-return, because hooks must run every render.
@@ -96,35 +143,91 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
     loadCreatorList();
   }, [load, loadCreatorList]);
 
+  function updateRow(key: number, patch: Partial<CreatorRow>) {
+    setCreatorRows((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  }
+  function addRow() {
+    setCreatorRows((rows) => (rows.length >= BATCH_MAX ? rows : [...rows, emptyRow(rowKeyCounter.current++)]));
+  }
+  function removeRow(key: number) {
+    setCreatorRows((rows) => (rows.length <= 1 ? rows : rows.filter((r) => r.key !== key)));
+    setRowErrors((errs) => {
+      if (!(key in errs)) return errs;
+      const rest = { ...errs };
+      delete rest[key];
+      return rest;
+    });
+  }
+
   async function handleCreateBooking(e: FormEvent) {
     e.preventDefault();
     setCreateError(null);
     setCreateMessage(null);
+
+    if (platform.trim() === '') {
+      setCreateError('[platform brief wajib diisi]');
+      return;
+    }
+    const intended = creatorRows.filter((r) => !isRowBlank(r));
+    if (intended.length === 0) {
+      setCreateError('Tambahkan minimal satu creator.');
+      return;
+    }
+    // Client-side validation first — surface every bad row at once, submit none.
+    const preErrors: Record<number, string> = {};
+    for (const r of intended) {
+      const msg = validateRow(r);
+      if (msg) preErrors[r.key] = msg;
+    }
+    if (Object.keys(preErrors).length > 0) {
+      setRowErrors(preErrors);
+      setCreateError('Perbaiki baris yang ditandai sebelum menyimpan.');
+      return;
+    }
+
+    setRowErrors({});
     setCreateSubmitting(true);
-    try {
-      const booking = await createBooking(id, {
-        creator_name: creatorName,
-        creator_handle: creatorHandle.trim() || undefined,
-        platform,
-        niche: niche.trim() || undefined,
-        source_pool: sourcePool,
-        pool_reference: poolReference.trim() || undefined,
-        agreed_rate: agreedRate,
-        assigned_coordinator: assignedCoordinator || undefined,
-      });
-      setCreateMessage(`Booking ${booking.id} berhasil dibuat untuk ${booking.creator_name}.`);
-      setCreatorName('');
-      setCreatorHandle('');
-      setPlatform('');
-      setNiche('');
-      setPoolReference('');
-      setAgreedRate('');
-      setAssignedCoordinator('');
+    const succeeded: number[] = [];
+    const failed: Record<number, string> = {};
+    let okCount = 0;
+    // One POST per row (no batch endpoint); the coordinator is the same for all.
+    for (const r of intended) {
+      try {
+        await createBooking(id, {
+          creator_name: r.creator_name.trim(),
+          creator_handle: r.creator_handle.trim() || undefined,
+          platform: platform.trim(),
+          niche: r.niche.trim() || undefined,
+          source_pool: sourcePool,
+          pool_reference: poolReference.trim() || undefined,
+          agreed_rate: r.agreed_rate.trim(),
+          assigned_coordinator: assignedCoordinator || undefined,
+          qty_video: qtyOrUndefined(r.qty_video),
+          qty_live: qtyOrUndefined(r.qty_live),
+        });
+        succeeded.push(r.key);
+        okCount += 1;
+      } catch (err) {
+        failed[r.key] = errorMessage(err);
+      }
+    }
+
+    // Keep only rows that failed (with their errors) plus any untouched blank rows.
+    setCreatorRows((rows) => {
+      const kept = rows.filter((r) => !succeeded.includes(r.key));
+      return kept.length === 0 ? [emptyRow(rowKeyCounter.current++)] : kept;
+    });
+    setRowErrors(failed);
+    const failCount = Object.keys(failed).length;
+    if (okCount > 0) {
+      setCreateMessage(`${okCount} booking berhasil dibuat${failCount > 0 ? `, ${failCount} gagal — perbaiki baris yang tersisa.` : '.'}`);
+    }
+    if (failCount > 0 && okCount === 0) {
+      setCreateError('Semua baris gagal disimpan — periksa pesan per baris.');
+    }
+    setCreateSubmitting(false);
+    if (okCount > 0) {
       await load();
-    } catch (err) {
-      setCreateError(errorMessage(err));
-    } finally {
-      setCreateSubmitting(false);
     }
   }
 
@@ -239,6 +342,7 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
                   <th>Platform</th>
                   <th>Source Pool</th>
                   <th>Agreed Rate</th>
+                  <th>Video / Live</th>
                   <th>Status</th>
                   <th>Payment Status</th>
                   <th>Revisi</th>
@@ -255,6 +359,7 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
                     <td>{b.platform}</td>
                     <td>{b.source_pool}</td>
                     <td>{b.agreed_rate_display}</td>
+                    <td>{b.qty_video} / {b.qty_live}</td>
                     <td><span className={`badge badge-${bookingBadgeTone(b.status)}`}>{b.status}</span></td>
                     <td>{b.payment_status ? <StatusBadge status={b.payment_status} /> : '—'}</td>
                     <td>{b.revision_count}</td>
@@ -272,26 +377,19 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
             <h2>Buat Booking Baru</h2>
           </div>
           <p className="muted" style={{ fontSize: 13 }}>
-            Kosongkan Coordinator untuk self-claim (staff KOL). Team Leader boleh menetapkan
-            Coordinator eksplisit. Urutan prioritas sourcing: MCN MEA Roster &rarr; KOL External Pool
-            &rarr; Ad-hoc New (last resort).
+            Satu brief = satu <strong>Platform</strong> + satu <strong>Source Pool</strong> + satu{' '}
+            <strong>Coordinator</strong> (otomatis Anda; Team Leader boleh menetapkan lain). Isi banyak
+            creator sekaligus (maks {BATCH_MAX} baris) lalu simpan sekali. Urutan prioritas sourcing:
+            MCN MEA Roster &rarr; KOL External Pool &rarr; Ad-hoc New (last resort).
           </p>
           <form className="form" onSubmit={handleCreateBooking}>
             {createError && <div className="alert alertError" role="alert">{createError}</div>}
             {createMessage && <div className="alert alertSuccess" role="status">{createMessage}</div>}
+
+            {/* Batch-level — berlaku untuk semua baris creator di bawah. */}
             <div className="formRow">
               <div className="field">
-                <label htmlFor="creator-name">Nama Creator</label>
-                <input id="creator-name" required value={creatorName} onChange={(e) => setCreatorName(e.target.value)} />
-              </div>
-              <div className="field">
-                <label htmlFor="creator-handle">Handle (opsional)</label>
-                <input id="creator-handle" value={creatorHandle} onChange={(e) => setCreatorHandle(e.target.value)} />
-              </div>
-            </div>
-            <div className="formRow">
-              <div className="field">
-                <label htmlFor="platform">Platform</label>
+                <label htmlFor="platform">Platform (berlaku untuk semua)</label>
                 <input
                   id="platform"
                   required
@@ -301,21 +399,17 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
                 />
               </div>
               <div className="field">
-                <label htmlFor="niche">Niche (opsional)</label>
-                <input id="niche" value={niche} onChange={(e) => setNiche(e.target.value)} />
-              </div>
-            </div>
-            <div className="formRow">
-              <div className="field">
-                <label htmlFor="source-pool">Source Pool</label>
+                <label htmlFor="source-pool">Source Pool (berlaku untuk semua)</label>
                 <select id="source-pool" value={sourcePool} onChange={(e) => setSourcePool(e.target.value)}>
                   {SOURCE_POOL_OPTIONS.map((p) => (
                     <option key={p} value={p}>{p}</option>
                   ))}
                 </select>
               </div>
+            </div>
+            <div className="formRow">
               <div className="field">
-                <label htmlFor="pool-reference">Pool Reference</label>
+                <label htmlFor="pool-reference">Pool Reference (opsional)</label>
                 <input
                   id="pool-reference"
                   placeholder="Link/ID roster acuan"
@@ -323,24 +417,10 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
                   onChange={(e) => setPoolReference(e.target.value)}
                 />
               </div>
-            </div>
-            <div className="formRow">
-              <div className="field">
-                <label htmlFor="agreed-rate">Agreed Rate (Rp)</label>
-                <input
-                  id="agreed-rate"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  required
-                  value={agreedRate}
-                  onChange={(e) => setAgreedRate(e.target.value)}
-                />
-              </div>
-              {/* Left empty by a KOL staffer = self-claim, so this stays optional. */}
+              {/* Kosong = self-claim ke staff KOL yang submit; TL boleh override untuk seluruh batch. */}
               <EmployeePicker
                 id="assigned-coordinator"
-                label="Coordinator (kosongkan untuk self-claim)"
+                label="Coordinator (kosongkan = otomatis Anda)"
                 employees={coordCandidates}
                 loading={coordLoading}
                 error={coordError}
@@ -349,7 +429,74 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
                 emptyHint="Belum ada staff KOL aktif. Biarkan kosong — staff yang membuat Booking menjadi Coordinator-nya."
               />
             </div>
-            <div>
+
+            {/* Per-creator rows — Nama & Agreed Rate wajib; qty & lainnya opsional. */}
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th style={{ width: '3%' }}>#</th>
+                    <th>Nama Creator *</th>
+                    <th>Handle</th>
+                    <th>Niche</th>
+                    <th style={{ width: '16%' }}>Agreed Rate (Rp) *</th>
+                    <th style={{ width: '9%' }}>Qty Video</th>
+                    <th style={{ width: '9%' }}>Qty Live</th>
+                    <th style={{ width: '3%' }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {creatorRows.map((r, idx) => (
+                    <Fragment key={r.key}>
+                      <tr>
+                        <td className="muted">{idx + 1}</td>
+                        <td>
+                          <input aria-label={`Nama Creator baris ${idx + 1}`} value={r.creator_name}
+                            onChange={(e) => updateRow(r.key, { creator_name: e.target.value })} />
+                        </td>
+                        <td>
+                          <input aria-label={`Handle baris ${idx + 1}`} value={r.creator_handle}
+                            onChange={(e) => updateRow(r.key, { creator_handle: e.target.value })} />
+                        </td>
+                        <td>
+                          <input aria-label={`Niche baris ${idx + 1}`} value={r.niche}
+                            onChange={(e) => updateRow(r.key, { niche: e.target.value })} />
+                        </td>
+                        <td>
+                          <input aria-label={`Agreed Rate baris ${idx + 1}`} type="number" min="0" step="0.01"
+                            value={r.agreed_rate} onChange={(e) => updateRow(r.key, { agreed_rate: e.target.value })} />
+                        </td>
+                        <td>
+                          <input aria-label={`Qty Video baris ${idx + 1}`} type="number" min="0" step="1"
+                            value={r.qty_video} onChange={(e) => updateRow(r.key, { qty_video: e.target.value })} />
+                        </td>
+                        <td>
+                          <input aria-label={`Qty Live baris ${idx + 1}`} type="number" min="0" step="1"
+                            value={r.qty_live} onChange={(e) => updateRow(r.key, { qty_live: e.target.value })} />
+                        </td>
+                        <td>
+                          <button type="button" className="btn btnSecondary btnSm" aria-label={`Hapus baris ${idx + 1}`}
+                            onClick={() => removeRow(r.key)} disabled={creatorRows.length <= 1}>✕</button>
+                        </td>
+                      </tr>
+                      {rowErrors[r.key] && (
+                        <tr>
+                          <td></td>
+                          <td colSpan={7} style={{ color: 'var(--color-danger, #c0392b)', fontSize: 12 }}>
+                            {rowErrors[r.key]}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="row" style={{ gap: 8, justifyContent: 'space-between', flexWrap: 'wrap' }}>
+              <button type="button" className="btn btnSecondary btnSm" onClick={addRow} disabled={creatorRows.length >= BATCH_MAX}>
+                + Tambah Baris ({creatorRows.length}/{BATCH_MAX})
+              </button>
               <button type="submit" className="btn btnPrimary" disabled={createSubmitting}>
                 {createSubmitting ? 'Menyimpan...' : 'Buat Booking'}
               </button>

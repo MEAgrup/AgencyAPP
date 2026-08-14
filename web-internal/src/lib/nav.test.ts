@@ -170,6 +170,35 @@ describe('visibleNav — Account', () => {
   });
 });
 
+describe('visibleNav — Rekap Mingguan (M6D two-party access)', () => {
+  it('Account staff and lead see the weekly recap worklist', () => {
+    expect(hrefs(role('Account', 'staff'))).toContain('/account/rekap');
+    expect(hrefs(role('Account', 'lead'))).toContain('/account/rekap');
+  });
+
+  it('a lead of a touching execution division sees it (fills their division note)', () => {
+    for (const division of ['Creative', 'Ads', 'KOL', 'Live Stream']) {
+      expect(hrefs(role(division, 'lead')), `${division} lead should see /account/rekap`).toContain('/account/rekap');
+    }
+  });
+
+  it('execution-division STAFF do NOT see it (RM-D6 note is lead-scoped)', () => {
+    for (const division of ['Creative', 'Ads', 'KOL', 'Live Stream']) {
+      expect(hrefs(role(division, 'staff')), `${division} staff must not see /account/rekap`).not.toContain('/account/rekap');
+    }
+  });
+
+  it('Sales / Marketing / Finance leads never see it (not a touching division)', () => {
+    for (const division of ['Sales', 'Marketing', 'Finance']) {
+      expect(hrefs(role(division, 'lead')), `${division} lead must not see /account/rekap`).not.toContain('/account/rekap');
+    }
+  });
+
+  it('OD (read-everywhere) sees it', () => {
+    expect(hrefs(role('Sales', 'staff', { od: true }))).toContain('/account/rekap');
+  });
+});
+
 describe('visibleNav — Marketing & Finance', () => {
   it('Marketing staff sees campaigns + Leads, not the Sales workspace', () => {
     const seen = hrefs(role('Marketing', 'staff'));

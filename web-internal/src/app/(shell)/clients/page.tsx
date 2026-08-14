@@ -46,6 +46,7 @@ export default function ClientsPage() {
               <thead>
                 <tr>
                   <th>Client ID</th>
+                  <th>Nama Klien</th>
                   <th>Toko</th>
                   <th>Kota</th>
                   <th>Kategori</th>
@@ -60,6 +61,7 @@ export default function ClientsPage() {
                     <td>
                       <Link href={`/clients/${c.id}`}>{c.id}</Link>
                     </td>
+                    <td>{c.nama_pic || '—'}</td>
                     <td>{c.toko}</td>
                     <td>{c.kota}</td>
                     <td>{c.kategori}</td>

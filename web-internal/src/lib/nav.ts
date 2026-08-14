@@ -147,11 +147,25 @@ const DELIVERY_LINKS: NavItem[] = [
   // (`account.listStrategies` has an AM arm), Account lead through the
   // unassigned Intake queue (`account.canReadIntake`).
   { href: '/account', label: 'Account & Service', access: ownedBy(ACCOUNT) },
-  // M6D Rekap Hasil Mingguan: readable by Account (any level) + OD/Director
-  // (`recap.canReadRecap` own-AM / Account-lead / read-all arm); division leads
-  // reach a specific recap through its notification deep-link. Row scope (which
-  // client's recaps) is the server's job — the menu only trims by division.
-  { href: '/account/rekap', label: 'Rekap Mingguan', access: ownedBy(ACCOUNT) },
+  // M6D Rekap Hasil Mingguan: the AM's weekly worklist. Readable by Account (any
+  // level) + OD/Director (`recap.canReadRecap` own-AM / Account-lead / read-all
+  // arm). The lead of a touching execution division also reaches recaps of the
+  // clients they worked that week (D-09 RLS division-lead read arm + RM-D6
+  // `canWriteDivisiNote`), so they can fill their division note without waiting
+  // for the notification deep-link. Row scope (which client's recaps) stays the
+  // server's job — the menu only trims by division. The worklist page itself is
+  // role-aware: an AM gets the portfolio worklist, a division lead the
+  // open-by-client fallback (their portfolio is empty server-side).
+  {
+    href: '/account/rekap',
+    label: 'Rekap Mingguan',
+    access: (role) =>
+      ownedBy(ACCOUNT)(role) ||
+      isLead(role, CREATIVE) ||
+      isLead(role, ADS) ||
+      isLead(role, KOL) ||
+      isLead(role, LIVE_STREAM),
+  },
   // M12: `/my-tasks` is own-scoped, and Task PICs are staff of the four
   // execution divisions (`account.ALLOWED_DIVISIONS`); the AM sees the tasks of
   // clients they own (`task.canViewTask`). Sales/Marketing/Finance are never

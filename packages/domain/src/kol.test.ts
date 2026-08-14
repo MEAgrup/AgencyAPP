@@ -207,6 +207,22 @@ describeDb('createBooking (§4)', () => {
     expect(b.agreedRate).toBe(1500000);
     expect(b.agreedRateDisplay).toBe('Rp. 1.500.000,00');
     expect(b.id).toMatch(/^BKG-\d{6}-\d{4}$/);
+    // qty omitted => 0/0, both on the returned object and when read back.
+    expect(b.qtyVideo).toBe(0);
+    expect(b.qtyLive).toBe(0);
+    const read = await getBooking(sql, kolStaff('ZZ-COORD'), b.id);
+    expect(read.qtyVideo).toBe(0);
+    expect(read.qtyLive).toBe(0);
+  });
+  it('persists qty_video/qty_live and rejects invalid quantities', async () => {
+    const { briefId } = await kolBrief();
+    const b = await createBooking(sql, kolStaff('ZZ-COORD'), briefId, { ...goodInput(), qtyVideo: 3, qtyLive: 1 });
+    expect(b.qtyVideo).toBe(3);
+    expect(b.qtyLive).toBe(1);
+    expect((await getBooking(sql, kolStaff('ZZ-COORD'), b.id)).qtyVideo).toBe(3);
+    expect((await getBooking(sql, kolStaff('ZZ-COORD'), b.id)).qtyLive).toBe(1);
+    await expect(createBooking(sql, kolStaff('ZZ-COORD'), briefId, { ...goodInput(), qtyVideo: -1 })).rejects.toBeInstanceOf(ValidationError);
+    await expect(createBooking(sql, kolStaff('ZZ-COORD'), briefId, { ...goodInput(), qtyLive: 2.5 })).rejects.toBeInstanceOf(ValidationError);
   });
   it('gates: non-KOL brief, invalid source pool, permission', async () => {
     const { briefId } = await kolBrief();
