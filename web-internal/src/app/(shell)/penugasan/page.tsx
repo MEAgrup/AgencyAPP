@@ -63,7 +63,12 @@ export default function PenugasanPage() {
   );
 
   // --- List ------------------------------------------------------------------
-  const [tab, setTab] = useState<'saya' | 'diberikan' | 'semua'>('saya');
+  // Someone who can assign lands on what they GAVE, not on their own inbox:
+  // a Director has no tasks of their own, so defaulting to "Tugas Saya" made the
+  // list read "Tidak ada penugasan" immediately after they created one — the
+  // success message and the table contradicting each other. Everyone else still
+  // lands on their own work, which is what they came for.
+  const [tab, setTab] = useState<'saya' | 'diberikan' | 'semua'>(canAssign ? 'diberikan' : 'saya');
   const [statusFilter, setStatusFilter] = useState('');
   const [onlyLate, setOnlyLate] = useState(false);
   const [rows, setRows] = useState<Penugasan[] | null>(null);
