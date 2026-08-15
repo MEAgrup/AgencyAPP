@@ -25,6 +25,7 @@ import {
 } from '@/lib/account';
 import StatusBadge from '@/components/StatusBadge';
 import { formatIDR } from '@/lib/money';
+import { transitionTo } from '@/lib/transition';
 
 /** The human label for a stored task-satuan (divisi, jenis), or the raw jenis. */
 function taskLabel(divisi: string, jenis: string): string {
@@ -181,7 +182,7 @@ export default function StrategyDetailPage({ params }: { params: Promise<{ id: s
     setSubmitSubmitting(true);
     try {
       const res = await submitStrategy(id);
-      setSubmitMessage(`Status berpindah ke ${res.To}.`);
+      setSubmitMessage(`Status berpindah ke ${transitionTo(res)}.`);
       await load();
     } catch (err) {
       setSubmitError(errorMessage(err));

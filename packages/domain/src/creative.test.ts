@@ -21,11 +21,15 @@ import {
   canSeeDailyOutput,
   ConflictError,
   createAsset,
+  createAssetBatch,
   dailyOutput,
   ForbiddenError,
   getAsset,
   listBriefAssets,
   logHours,
+  MSG_INVALID_PIC,
+  MSG_INVALID_QUANTITY,
+  MSG_QUANTITY_EXCEEDS_TARGET,
   NotFoundError,
   requestAssetRevision,
   reviewAsset,
@@ -203,6 +207,90 @@ describeDb('createAsset (§4)', () => {
     await expect(createAsset(sql, adsStaff(), briefId, { sequenceNo: 2 })).rejects.toBeInstanceOf(ForbiddenError);
     // Missing brief → not found.
     await expect(createAsset(sql, staff, 'BRF-GHOST-0', { sequenceNo: 1 })).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describeDb('createAssetBatch — fan-out by quantity per PIC (§3 Rule 4)', () => {
+  it('splits a 12-unit Brief between two PICs; Sequence #s allocated 1..12 in order', async () => {
+    const { briefId } = await creativeBrief(12);
+    await registerStaff('ZZ-CLEAD', 'Creative', 'lead');
+    await registerStaff('ZZ-RIAN', 'Creative', 'staff');
+    await registerStaff('ZZ-DITA', 'Creative', 'staff');
+    const created = await createAssetBatch(sql, creativeLead(), briefId, [
+      { assignedPic: 'ZZ-RIAN', quantity: 8 },
+      { assignedPic: 'ZZ-DITA', quantity: 4 },
+    ]);
+    expect(created).toHaveLength(12);
+    expect(created.map((a) => a.sequenceNo)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(created.filter((a) => a.assignedPic === 'ZZ-RIAN').map((a) => a.sequenceNo)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(created.filter((a) => a.assignedPic === 'ZZ-DITA').map((a) => a.sequenceNo)).toEqual([9, 10, 11, 12]);
+    expect(created.every((a) => a.status === '[To Do]' && a.assetType === 'Product Video')).toBe(true);
+    // House rule 3: one immutable create line per Asset, nothing else.
+    const audits = await sql<{ n: string }[]>`
+      select count(*) as n from audit_log where entity_type='asset' and action='create'
+        and entity_id = any(${created.map((a) => a.id)})`;
+    expect(Number(audits[0].n)).toBe(12);
+  });
+
+  it('all units to one PIC, and a second batch takes only the still-free slots', async () => {
+    const { briefId } = await creativeBrief(5);
+    await registerStaff('ZZ-CLEAD', 'Creative', 'lead');
+    await registerStaff('ZZ-RIAN', 'Creative', 'staff');
+    const lead = creativeLead();
+    const first = await createAssetBatch(sql, lead, briefId, [{ assignedPic: 'ZZ-RIAN', quantity: 3 }]);
+    expect(first.map((a) => a.sequenceNo)).toEqual([1, 2, 3]);
+    const second = await createAssetBatch(sql, lead, briefId, [{ assignedPic: 'ZZ-RIAN', quantity: 2 }]);
+    expect(second.map((a) => a.sequenceNo)).toEqual([4, 5]); // continues, never reuses
+    // Target exhausted → the next unit is refused.
+    await expect(createAssetBatch(sql, lead, briefId, [{ assignedPic: 'ZZ-RIAN', quantity: 1 }]))
+      .rejects.toThrow(MSG_QUANTITY_EXCEEDS_TARGET);
+  });
+
+  it('reuses the freed slot of a sequence gap rather than overrunning the target', async () => {
+    const { briefId } = await creativeBrief(3);
+    await registerStaff('ZZ-C', 'Creative', 'staff');
+    const staff = creativeStaff('ZZ-C');
+    await createAsset(sql, staff, briefId, { sequenceNo: 2 }); // single door left 1 and 3 free
+    const rest = await createAssetBatch(sql, staff, briefId, [{ quantity: 2 }]);
+    expect(rest.map((a) => a.sequenceNo)).toEqual([1, 3]);
+    expect(rest.every((a) => a.assignedPic === 'ZZ-C')).toBe(true); // self-claim (§4 Flow 1)
+  });
+
+  it('an overrun batch creates NOTHING (one transaction), and bad quantities are refused', async () => {
+    const { briefId } = await creativeBrief(4);
+    await registerStaff('ZZ-CLEAD', 'Creative', 'lead');
+    await registerStaff('ZZ-RIAN', 'Creative', 'staff');
+    const lead = creativeLead();
+    await expect(createAssetBatch(sql, lead, briefId, [
+      { assignedPic: 'ZZ-RIAN', quantity: 3 },
+      { assignedPic: 'ZZ-RIAN', quantity: 3 }, // 6 > 4 free
+    ])).rejects.toThrow(MSG_QUANTITY_EXCEEDS_TARGET);
+    expect((await listBriefAssets(sql, lead, briefId))).toEqual([]); // all-or-nothing
+    // Quantity must be a whole positive number; an empty batch is incomplete data.
+    for (const bad of [0, -2, 1.5, Number.NaN]) {
+      await expect(createAssetBatch(sql, lead, briefId, [{ assignedPic: 'ZZ-RIAN', quantity: bad }]))
+        .rejects.toThrow(MSG_INVALID_QUANTITY);
+    }
+    await expect(createAssetBatch(sql, lead, briefId, [])).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('carries the same gates as the single door: PIC validity, division, permission, existence', async () => {
+    const { briefId } = await creativeBrief(4);
+    await registerStaff('ZZ-CLEAD', 'Creative', 'lead');
+    await registerStaff('ZZ-A', 'Ads', 'staff');
+    const lead = creativeLead();
+    // Non-Creative / unknown PIC → invalid PIC, nothing created.
+    await expect(createAssetBatch(sql, lead, briefId, [{ assignedPic: 'ZZ-A', quantity: 2 }]))
+      .rejects.toThrow(MSG_INVALID_PIC);
+    await expect(createAssetBatch(sql, lead, briefId, [{ assignedPic: 'ZZ-GHOST', quantity: 2 }]))
+      .rejects.toThrow(MSG_INVALID_PIC);
+    expect(await listBriefAssets(sql, lead, briefId)).toEqual([]);
+    // AM / other division cannot fan out; a non-Creative Brief cannot be fanned out.
+    await expect(createAssetBatch(sql, am(), briefId, [{ quantity: 1 }])).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(createAssetBatch(sql, adsStaff(), briefId, [{ quantity: 1 }])).rejects.toBeInstanceOf(ForbiddenError);
+    const ads = await creativeBrief(2, 'Ads');
+    await expect(createAssetBatch(sql, lead, ads.briefId, [{ quantity: 1 }])).rejects.toBeInstanceOf(ConflictError);
+    await expect(createAssetBatch(sql, lead, 'BRF-GHOST-0', [{ quantity: 1 }])).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 

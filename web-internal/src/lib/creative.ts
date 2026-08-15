@@ -134,12 +134,11 @@ export interface BlockRequest {
   created_at: string;
 }
 
-// statemachine.Result has NO json tags -> capitalised keys on the wire.
-// Used by review/approve/request-revision/start/submit/rework/resume.
-export interface TransitionResult {
-  From: string;
-  To: string;
-}
+// Transition bodies are `{ok, from, to}` (apps/api http.ts transitionResponse).
+// Used by review/approve/request-revision/start/submit/rework/resume; read them
+// through lib/transition.ts, which also tolerates the retired Go casing.
+import type { TransitionResult } from '@/lib/transition';
+export type { TransitionResult };
 
 export interface HoursResult {
   id: string;
@@ -233,13 +232,22 @@ export function isAccountRole(role: Role | null): boolean {
 // module7_creative — Asset entity + AM review + Hours + Daily Output + reminders
 // ---------------------------------------------------------------------------
 
-export interface CreateAssetInput {
-  sequence_no: number;
+/**
+ * One fan-out line: how many units of the Brief go to which PIC (M7 §3 Rule 4).
+ * `assigned_pic` omitted = self-claim for Creative staff / general queue for a lead.
+ */
+export interface AssetAssignmentInput {
   assigned_pic?: string;
+  quantity: number;
 }
 
-export function createAsset(briefId: string, input: CreateAssetInput): Promise<Asset> {
-  return api.post<Asset>(`/briefs/${briefId}/assets`, input);
+/**
+ * Fan out a Brief by quantity per PIC — "10 video ke A, 10 ke B", or all of them
+ * to one person. Sequence #s are allocated server-side from the Brief's free
+ * slots, and the batch is all-or-nothing.
+ */
+export function createAssetBatch(briefId: string, rows: AssetAssignmentInput[]): Promise<{ data: Asset[] }> {
+  return api.post<{ data: Asset[] }>(`/briefs/${briefId}/assets/batch`, { rows });
 }
 
 export function listBriefAssets(briefId: string): Promise<{ data: Asset[] }> {

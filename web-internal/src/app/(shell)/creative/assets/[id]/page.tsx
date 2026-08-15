@@ -42,6 +42,7 @@ import {
   type PendingAssetBlockRequest,
 } from '@/lib/creative';
 import StatusBadge from '@/components/StatusBadge';
+import { transitionLabel, type TransitionResult } from '@/lib/transition';
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return '—';
@@ -199,13 +200,13 @@ export default function CreativeAssetDetailPage({ params }: { params: Promise<{ 
     error: picLoadError,
   } = useAssignableEmployees(CREATIVE_DIVISION, LEVEL_STAFF, canManage);
 
-  async function runExec(fn: () => Promise<{ From: string; To: string }>, okLabel: string) {
+  async function runExec(fn: () => Promise<TransitionResult>, okLabel: string) {
     setExecError(null);
     setExecMessage(null);
     setExecSubmitting(true);
     try {
       const res = await fn();
-      setExecMessage(`${okLabel}: ${res.From} → ${res.To}`);
+      setExecMessage(`${okLabel}: ${transitionLabel(res)}`);
       await load();
       await loadMetrics();
       await loadAudit();
@@ -235,13 +236,13 @@ export default function CreativeAssetDetailPage({ params }: { params: Promise<{ 
     runExec(() => resumeAsset(id), 'Asset dilanjutkan');
   }
 
-  async function runReview(fn: () => Promise<{ From: string; To: string }>, okLabel: string) {
+  async function runReview(fn: () => Promise<TransitionResult>, okLabel: string) {
     setReviewError(null);
     setReviewMessage(null);
     setReviewSubmitting(true);
     try {
       const res = await fn();
-      setReviewMessage(`${okLabel}: ${res.From} → ${res.To}`);
+      setReviewMessage(`${okLabel}: ${transitionLabel(res)}`);
       await load();
       await loadMetrics();
       await loadAudit();

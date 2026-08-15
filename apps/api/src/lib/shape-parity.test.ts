@@ -481,6 +481,9 @@ const WIRE_TO_FE: Record<string, string> = {
   RecapDetailWire: 'recap.ts::RecapDetail',
   // M7 creative
   AssetWire: 'creative.ts::Asset',
+  // A REQUEST body (same reasoning as ProposalLineBody above): the fan-out batch
+  // line the FE sends per PIC, mapped by `toAssetAssignments`.
+  AssetAssignmentWire: 'creative.ts::AssetAssignmentInput',
   OutputEntryWire: 'creative.ts::DailyOutputEntry',
   DailyOutputDayWire: 'creative.ts::DailyOutputDay',
   ScanHoursReminderResultWire: 'creative.ts::ReminderScanResult',

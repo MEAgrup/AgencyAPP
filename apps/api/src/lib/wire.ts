@@ -753,6 +753,21 @@ export function toAssetInput(b: { sequence_no?: number; assigned_pic?: string })
   return { sequenceNo: b.sequence_no ?? 0, assignedPic: b.assigned_pic ?? '' };
 }
 
+/** One fan-out line on the wire: how many units to which PIC (M7 §3 Rule 4). */
+export interface AssetAssignmentWire {
+  assigned_pic?: string;
+  quantity?: number;
+}
+
+/**
+ * Request body → AssetAssignment[] (fan-out batch). A missing/garbage quantity is
+ * carried through as NaN so the domain answers its own BI message rather than
+ * having the shape silently degrade into a valid, differently-sized request.
+ */
+export function toAssetAssignments(rows: AssetAssignmentWire[] | undefined): creative.AssetAssignment[] {
+  return (rows ?? []).map((r) => ({ assignedPic: r.assigned_pic ?? '', quantity: Number(r.quantity ?? NaN) }));
+}
+
 // --- M8 Ads ---
 
 /** module8_ads.Campaign — an Ad Campaign with its derived §5 performance view. */
