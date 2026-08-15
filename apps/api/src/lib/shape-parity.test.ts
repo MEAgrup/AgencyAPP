@@ -173,7 +173,7 @@ const wire = parseInterfaces(readFileSync(WIRE_TS, 'utf8'));
 const FE_FILES = [
   'account.ts', 'ads.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'contract.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
-  'livestream.ts',
+  'livestream.ts', 'penugasan.ts',
   'performance.ts', 'portal.ts', 'recap.ts', 'sales.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
 ];
 
@@ -513,6 +513,9 @@ const WIRE_TO_FE: Record<string, string> = {
   HealthPortfolioRowWire: 'health.ts::HealthPortfolioRow',
   // T-4c client milestones
   MilestoneWire: 'milestone.ts::Milestone',
+  // Penugasan Internal (TSK-)
+  InternalTaskWire: 'penugasan.ts::Penugasan',
+  DisciplineRowWire: 'penugasan.ts::RekapDisiplin',
   // M14 team performance
   PerfComponentWire: 'performance.ts::SnapshotComponent',
   PerfModifierWire: 'performance.ts::PerformanceModifier',

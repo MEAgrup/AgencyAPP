@@ -93,6 +93,12 @@ export const PREFIXES = {
   // `client_milestone` ([Upcoming]→[Done]|[Cancelled]). Registered in entity_prefix
   // by 20260814070000_t4c_milestones.sql. House form PREFIX-YYYYMM-NNNN.
   MLS: { entity: 'Client Milestone (Upcoming Milestones)', module: 'M6D' },
+  // Penugasan Internal — tugas yang atasan berikan ke anggota timnya, di luar
+  // rantai Klien→Service→Brief. DELIBERATELY NOT an M12 Task: M12 §2 Rule 1
+  // freezes Task = Asset | Creator Booking | Brief-as-task, all three anchored
+  // to a paying client. `TSK` was free in the registry. Machine `internal_task`;
+  // registered in entity_prefix by 20260814110000_penugasan_internal.sql.
+  TSK: { entity: 'Penugasan Internal (internal task)', module: 'Penugasan' },
 } as const satisfies Record<string, PrefixInfo>;
 
 /** A registered prefix string (e.g. 'CLI', 'TRX'). */

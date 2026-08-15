@@ -7,7 +7,7 @@
  */
 import { money, tz } from '@cdps/core';
 import type { interview as ivcore } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, campaign, client, contract, creative, demo, directory, finance, health, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plangate, portal, recap, sales, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, audit, auth, board, campaign, client, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plangate, portal, recap, sales, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -1285,6 +1285,83 @@ export function milestoneToWire(m: milestone.Milestone): MilestoneWire {
   return {
     id: m.id, client_id: m.clientId, title: m.title, target_date: m.targetDate,
     status: m.status, created_at: m.createdAt.toISOString(), created_by: m.createdBy,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Penugasan Internal (TSK-) — atasan → anggota tim, di luar rantai klien.
+//
+// The three lateness keys are DERIVED server-side and sent explicitly. They are
+// deliberately not left for the page to compute: "am I late" would then have two
+// implementations that disagree the moment one of them forgets that the
+// comparison is in WIB, and the one the staff member sees would not be the one
+// the discipline report counts.
+// ---------------------------------------------------------------------------
+
+export interface InternalTaskWire {
+  id: string;
+  judul: string;
+  deskripsi: string;
+  assignee_id: string;
+  assignee_division: string;
+  due_date: string;
+  lampiran_link: string;
+  link_hasil: string;
+  status: string;
+  dimulai_pada: string | null;
+  selesai_pada: string | null;
+  dibatalkan_pada: string | null;
+  alasan_pembatalan: string;
+  created_at: string;
+  created_by: string;
+  terlambat_berjalan: boolean;
+  selesai_terlambat: boolean;
+  hari_terlambat: number;
+}
+
+export function internalTaskToWire(t: internaltask.InternalTask): InternalTaskWire {
+  return {
+    id: t.id, judul: t.judul, deskripsi: t.deskripsi,
+    assignee_id: t.assigneeId, assignee_division: t.assigneeDivision,
+    due_date: t.dueDate, lampiran_link: t.lampiranLink, link_hasil: t.linkHasil,
+    status: t.status,
+    // Explicit null, never omitted: a MISSING key blanks a page far more
+    // confusingly than a null one (CLAUDE.md, wire boundary).
+    dimulai_pada: t.dimulaiPada ? t.dimulaiPada.toISOString() : null,
+    selesai_pada: t.selesaiPada ? t.selesaiPada.toISOString() : null,
+    dibatalkan_pada: t.dibatalkanPada ? t.dibatalkanPada.toISOString() : null,
+    alasan_pembatalan: t.alasanPembatalan,
+    created_at: t.createdAt.toISOString(), created_by: t.createdBy,
+    terlambat_berjalan: t.terlambatBerjalan,
+    selesai_terlambat: t.selesaiTerlambat,
+    hari_terlambat: t.hariTerlambat,
+  };
+}
+
+export interface DisciplineRowWire {
+  assignee_id: string;
+  assignee_division: string;
+  total: number;
+  selesai_tepat_waktu: number;
+  selesai_terlambat: number;
+  terlambat_berjalan: number;
+  berjalan: number;
+  dibatalkan: number;
+  ketepatan_pct: number | null;
+  ketepatan_display: string;
+  total_hari_terlambat: number;
+}
+
+export function disciplineRowToWire(r: internaltask.DisciplineRow): DisciplineRowWire {
+  return {
+    assignee_id: r.assigneeId, assignee_division: r.assigneeDivision, total: r.total,
+    selesai_tepat_waktu: r.selesaiTepatWaktu, selesai_terlambat: r.selesaiTerlambat,
+    terlambat_berjalan: r.terlambatBerjalan, berjalan: r.berjalan, dibatalkan: r.dibatalkan,
+    // Both forms travel: the raw ratio for sorting/graphing, the pre-formatted
+    // string for rendering ("—" on a zero denominator, house rule #7). The page
+    // renders `ketepatan_display` VERBATIM and never reformats it.
+    ketepatan_pct: r.ketepatanPct, ketepatan_display: r.ketepatanDisplay,
+    total_hari_terlambat: r.totalHariTerlambat,
   };
 }
 

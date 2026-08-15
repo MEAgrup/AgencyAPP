@@ -125,6 +125,18 @@ export const EVENTS = {
   ServiceHoldRejected: 'service_hold_rejected', // -> owning AM
   ServiceResumed: 'service_resumed', // -> owning AM
 
+  // v9 — Penugasan Internal.
+  PenugasanDitugaskan: 'penugasan_ditugaskan', // -> the assigned employee
+  PenugasanSelesai: 'penugasan_selesai', // -> the assigner (atasan)
+
+  // v10 — Penugasan Internal, due-date + cancellation. The first two are emitted
+  // by the daily job `penugasan_reminder_tick` (once each, guarded by a marker
+  // column); the third from the domain, because its trigger is an action rather
+  // than the passing of time.
+  PenugasanMendekatiJatuhTempo: 'penugasan_mendekati_jatuh_tempo', // -> PIC (H-1)
+  PenugasanJatuhTempo: 'penugasan_jatuh_tempo', // -> PIC + assigner + division lead
+  PenugasanDibatalkan: 'penugasan_dibatalkan', // -> PIC
+
 } as const;
 
 /** A cataloged event type. */
@@ -198,6 +210,20 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
       'T-2c Hold Service two-step — 4 event (service_hold_requested → Head of Account; service_held / service_hold_rejected / service_resumed → AM pemilik)',
     eventCount: 4,
     decisionRef: 'docs/DECISIONS.md 2026-08-14 (T-2b/T-2c — hold dua-langkah + notif, keputusan pemilik)',
+  },
+  {
+    version: 9,
+    description:
+      'Penugasan Internal — 2 event (penugasan_ditugaskan → karyawan yang ditugaskan; penugasan_selesai → pemberi tugas). Notifikasi jatuh tempo BELUM didaftarkan: emitter cron-nya belum ada.',
+    eventCount: 2,
+    decisionRef: 'docs/DECISIONS.md 2026-08-14 (Penugasan Internal — permintaan pemilik)',
+  },
+  {
+    version: 10,
+    description:
+      'Penugasan Internal — 3 event jatuh tempo & pembatalan (penugasan_mendekati_jatuh_tempo H-1 → PIC; penugasan_jatuh_tempo → PIC + pemberi tugas + lead divisi; penugasan_dibatalkan → PIC). Menutup lubang yang dicatat v9: emitter-nya job harian `penugasan_reminder_tick`.',
+    eventCount: 3,
+    decisionRef: 'docs/DECISIONS.md 2026-08-14 (Penugasan Internal — notifikasi tambahan, permintaan pemilik)',
   },
 ] as const;
 
@@ -314,6 +340,21 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
   [EVENTS.ServiceHeld]: { description: 'Hold Service disetujui Head of Account — ke AM pemilik', resolver: 'explicit', version: 8 },
   [EVENTS.ServiceHoldRejected]: { description: 'Hold Service ditolak Head of Account — ke AM pemilik', resolver: 'explicit', version: 8 },
   [EVENTS.ServiceResumed]: { description: 'Service dilanjutkan dari On Hold — ke AM pemilik', resolver: 'explicit', version: 8 },
+
+  // --- v9 — Penugasan Internal. Descriptions/resolvers must match the migration
+  // seed (20260814110000_penugasan_internal.sql). ---
+  [EVENTS.PenugasanDitugaskan]: { description: 'Penugasan internal baru diberikan — ke karyawan yang ditugaskan', resolver: 'explicit', version: 9 },
+  [EVENTS.PenugasanSelesai]: { description: 'Penugasan internal ditandai selesai PIC — ke pemberi tugas', resolver: 'explicit', version: 9 },
+
+  // --- v10 — Penugasan Internal jatuh tempo + pembatalan. Descriptions/resolvers
+  // must match the migration seed (20260814120000_penugasan_notif_jatuh_tempo.sql). ---
+  // H-1 goes to the PIC ALONE on purpose: a reminder copied to the boss stops
+  // being a reminder and becomes a report, and nobody is late yet.
+  [EVENTS.PenugasanMendekatiJatuhTempo]: { description: 'Penugasan internal jatuh tempo besok (H-1) — ke karyawan yang ditugaskan', resolver: 'explicit', version: 10 },
+  // Past due is where the atasan legitimately needs to know: PIC + assigner
+  // explicit, division lead resolved from `division`.
+  [EVENTS.PenugasanJatuhTempo]: { description: 'Penugasan internal lewat jatuh tempo & belum selesai — ke PIC, pemberi tugas, lead divisi', resolver: 'explicitOrLeads', version: 10 },
+  [EVENTS.PenugasanDibatalkan]: { description: 'Penugasan internal dibatalkan atasan — ke karyawan yang ditugaskan', resolver: 'explicit', version: 10 },
 };
 
 /** All registered event types (introspection / tests). */

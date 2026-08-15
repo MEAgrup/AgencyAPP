@@ -272,6 +272,16 @@ table {
   border-color: #cfdcfb;
 }
 
+/* A recorded problem that is no longer actionable — e.g. a Penugasan Internal
+   that WAS finished, but finished late. Neither an error (nothing is broken now)
+   nor info (it counts against the team's discipline figure), so it reuses the
+   amber badge palette rather than borrowing one of the other two tones. */
+.alertWarning {
+  background: var(--badge-amber-bg);
+  color: var(--badge-amber-fg);
+  border-color: #f2dda6;
+}
+
 /* ---------- Badges ---------- */
 
 .badge {

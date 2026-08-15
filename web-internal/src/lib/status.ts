@@ -18,6 +18,14 @@ const EXACT_MAP: Record<string, BadgeTone> = {
   // jadi tanpa baris ini `[Deleted]` jatuh ke 'gray' dan terlihat seperti
   // `[To Do]` — state terminal harus terbaca sebagai terminal.
   '[Deleted]': 'darkgray',
+  // Penugasan Internal (machine `internal_task`). Explicit for the same reason
+  // as `[Deleted]`: the Indonesian labels share no substring with the heuristic
+  // below, so without these rows `[Selesai]` and `[Dibatalkan]` would both read
+  // gray — indistinguishable from a task nobody has touched yet.
+  '[Ditugaskan]': 'gray',
+  '[Dikerjakan]': 'blue',
+  '[Selesai]': 'green',
+  '[Dibatalkan]': 'darkgray',
 };
 
 export function badgeTone(status: string): BadgeTone {

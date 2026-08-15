@@ -33,6 +33,9 @@ const UNIVERSAL = [
   // Board moved into the Client Record (DECISIONS 2026-08-14), so `/board`
   // itself is no longer a nav destination.
   '/board/my-tasks',
+  // Penugasan Internal: anyone in any division can be assigned one, and the
+  // scope is row-level (RLS + domain gate), not division-level.
+  '/penugasan',
   '/performance',
   '/portal',
 ];
