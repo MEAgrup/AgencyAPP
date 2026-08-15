@@ -140,7 +140,7 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "113"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "115"
 check "entity_prefix"    "select count(*) from entity_prefix"    "34"
 check "sm_machines"      "select count(*) from sm_machines"      "22"
 check "notif_events"     "select count(*) from notif_events"     "52"
@@ -154,6 +154,11 @@ check "notif_events"     "select count(*) from notif_events"     "52"
 #      catatan_divisi_belum_diisi wajib RM-8; 20260813070000_m6d_notif_v7.sql,
 #      DECISIONS 2026-08-13). Sama seperti v5/v6: literal hanya kenyamanan —
 #      invariant sebenarnya SUM(event_count) di gate notif_katalog_sesuai.
+# 115 = 113 + ads_brief_targets + ads_weekly_reports (20260814100000, M8: enam
+#       target metrik per Brief-as-task Ads + laporan mingguan Advertiser;
+#       keputusan pemilik 2026-08-14). Nol prefix/mesin/event baru → 34/22/52
+#       TETAP: laporan ber-PK (brief_id, iso_year, iso_week) tanpa ID sendiri
+#       (preseden interview_riset_awal), tanpa status, tanpa event katalog.
 # 113 = 112 + client_milestones (T-4c, 20260814070000: Upcoming Milestones
 #       terstruktur RM-11). 34 = 33 + MLS. 22 = 21 + mesin client_milestone
 #       ([Upcoming]→[Done]|[Cancelled]).

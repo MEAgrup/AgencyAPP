@@ -69,8 +69,13 @@ BEGIN
     -- snapshot: ia log effort sales yang metrik "berapa banyak effort sampai
     -- closing" dihitung darinya, jadi satu baris yang bisa diedit atau dihapus
     -- membuat angka itu tidak lagi bisa direkonstruksi (aturan rumah #3/#4).
+    -- `ads_weekly_reports` (20260814100000) juga bukan tabel snapshot: ia
+    -- laporan mingguan Advertiser (analisa performa + saran perbaikan) yang
+    -- menjadi jejak akuntabilitas minggu itu. Boleh diedit = boleh menulis ulang
+    -- sejarah setelah angkanya diketahui, jadi UPDATE/DELETE ditutup dan koreksi
+    -- ditulis sebagai laporan minggu berikutnya (aturan rumah #3).
     FOREACH t IN ARRAY ARRAY['client_health_snapshots', 'performance_snapshots',
-                             'prospect_activities'] LOOP
+                             'prospect_activities', 'ads_weekly_reports'] LOOP
         ASSERT (
             SELECT count(*) FROM information_schema.triggers
             WHERE event_object_table = t AND action_statement LIKE '%forbid_mutation%'

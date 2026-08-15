@@ -882,6 +882,153 @@ export function toOptimizationInput(b: {
   };
 }
 
+// --- M8 target metrik per Brief-as-task + laporan mingguan (pemilik 2026-08-14) ---
+
+/** The six targets of one Ads Brief. Every numeric field ships with its display twin. */
+export interface AdsBriefTargetsWire {
+  brief_id: string;
+  ditetapkan: boolean;
+  target_spend: number | null;
+  target_spend_display: string;
+  target_gmv: number | null;
+  target_gmv_display: string;
+  target_roas: number | null;
+  target_roas_display: string;
+  target_view: number | null;
+  target_view_display: string;
+  target_ctr: number | null;
+  target_ctr_display: string;
+  target_cvr: number | null;
+  target_cvr_display: string;
+  catatan: string;
+  updated_by: string;
+  updated_at: string | null;
+}
+
+export function adsBriefTargetsToWire(t: ads.BriefTargets): AdsBriefTargetsWire {
+  return {
+    brief_id: t.briefId, ditetapkan: t.ditetapkan,
+    target_spend: t.targetSpend, target_spend_display: t.targetSpendDisplay,
+    target_gmv: t.targetGmv, target_gmv_display: t.targetGmvDisplay,
+    target_roas: t.targetRoas, target_roas_display: t.targetRoasDisplay,
+    target_view: t.targetView, target_view_display: t.targetViewDisplay,
+    target_ctr: t.targetCtr, target_ctr_display: t.targetCtrDisplay,
+    target_cvr: t.targetCvr, target_cvr_display: t.targetCvrDisplay,
+    catatan: t.catatan, updated_by: t.updatedBy,
+    updated_at: t.updatedAt === null ? null : t.updatedAt.toISOString(),
+  };
+}
+
+/** What the system already knows, offered to pre-fill the form (never auto-saved). */
+export interface AdsTargetSuggestionWire {
+  target_spend: number | null;
+  target_gmv: number | null;
+  target_roas: number | null;
+  target_view: number | null;
+  target_ctr: number | null;
+  target_cvr: number | null;
+  sumber: string;
+}
+
+export interface AdsBriefTargetsViewWire {
+  targets: AdsBriefTargetsWire;
+  saran: AdsTargetSuggestionWire;
+}
+
+export function adsBriefTargetsViewToWire(v: ads.BriefTargetsView): AdsBriefTargetsViewWire {
+  return {
+    targets: adsBriefTargetsToWire(v.targets),
+    saran: {
+      target_spend: v.saran.targetSpend, target_gmv: v.saran.targetGmv, target_roas: v.saran.targetRoas,
+      target_view: v.saran.targetView, target_ctr: v.saran.targetCtr, target_cvr: v.saran.targetCvr,
+      sumber: v.saran.sumber,
+    },
+  };
+}
+
+/** One metric's target vs. realisasi inside a weekly row. */
+export interface AdsWeeklyMetricWire {
+  key: string;
+  label: string;
+  sifat: string;
+  target: number | null;
+  target_display: string;
+  realisasi: number | null;
+  realisasi_display: string;
+  rasio: number | null;
+  rasio_display: string;
+}
+
+/** One ISO week of an Ads Brief: derived numbers + the Advertiser's narrative. */
+export interface AdsWeeklyReportWire {
+  brief_id: string;
+  iso_year: number;
+  iso_week: number;
+  minggu_mulai: string;
+  minggu_akhir: string;
+  metrik: AdsWeeklyMetricWire[];
+  berjalan: boolean;
+  terisi: boolean;
+  terlambat: boolean;
+  analisa: string;
+  saran: string;
+  kendala: string;
+  diisi_oleh: string;
+  diisi_pada: string | null;
+}
+
+export function adsWeeklyReportToWire(r: ads.WeeklyReportRow): AdsWeeklyReportWire {
+  return {
+    brief_id: r.briefId, iso_year: r.isoYear, iso_week: r.isoWeek,
+    minggu_mulai: r.mingguMulai, minggu_akhir: r.mingguAkhir,
+    metrik: r.metrik.map((m) => ({
+      key: m.key, label: m.label, sifat: m.sifat,
+      target: m.target, target_display: m.targetDisplay,
+      realisasi: m.realisasi, realisasi_display: m.realisasiDisplay,
+      rasio: m.rasio, rasio_display: m.rasioDisplay,
+    })),
+    berjalan: r.berjalan, terisi: r.terisi, terlambat: r.terlambat,
+    analisa: r.analisa, saran: r.saran, kendala: r.kendala,
+    diisi_oleh: r.diisiOleh, diisi_pada: r.diisiPada === null ? null : r.diisiPada.toISOString(),
+  };
+}
+
+export interface AdsWeeklyReportViewWire {
+  brief_id: string;
+  targets: AdsBriefTargetsWire;
+  minggu: AdsWeeklyReportWire[];
+  belum_diisi: number;
+  dipotong: boolean;
+}
+
+export function adsWeeklyReportViewToWire(v: ads.WeeklyReportView): AdsWeeklyReportViewWire {
+  return {
+    brief_id: v.briefId, targets: adsBriefTargetsToWire(v.targets),
+    minggu: v.minggu.map(adsWeeklyReportToWire), belum_diisi: v.belumDiisi, dipotong: v.dipotong,
+  };
+}
+
+/** Request body → BriefTargetInput (every field a string; "" = no target). */
+export function toAdsTargetInput(b: {
+  target_spend?: string; target_gmv?: string; target_roas?: string; target_view?: string;
+  target_ctr?: string; target_cvr?: string; catatan?: string;
+}): ads.BriefTargetInput {
+  return {
+    targetSpend: b.target_spend ?? '', targetGmv: b.target_gmv ?? '', targetRoas: b.target_roas ?? '',
+    targetView: b.target_view ?? '', targetCtr: b.target_ctr ?? '', targetCvr: b.target_cvr ?? '',
+    catatan: b.catatan ?? '',
+  };
+}
+
+/** Request body → WeeklyReportInput. */
+export function toAdsWeeklyReportInput(b: {
+  minggu_mulai?: string; analisa?: string; saran?: string; kendala?: string;
+}): ads.WeeklyReportInput {
+  return {
+    mingguMulai: b.minggu_mulai ?? '', analisa: b.analisa ?? '', saran: b.saran ?? '', kendala: b.kendala ?? '',
+  };
+}
+
 // --- M9 KOL ---
 
 /** module9_kol.Booking — a Creator Booking with its derived fields. */

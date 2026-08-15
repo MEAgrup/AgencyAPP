@@ -171,7 +171,7 @@ const wire = parseInterfaces(readFileSync(WIRE_TS, 'utf8'));
  * any route).
  */
 const FE_FILES = [
-  'account.ts', 'ads.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'contract.ts', 'creative.ts',
+  'account.ts', 'ads.ts', 'ads-targets.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'contract.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts',
   'performance.ts', 'portal.ts', 'recap.ts', 'sales.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
@@ -491,6 +491,14 @@ const WIRE_TO_FE: Record<string, string> = {
   CampaignWire: 'ads.ts::Campaign',
   MetricEntryWire: 'ads.ts::MetricEntry',
   OptimizationWire: 'ads.ts::Optimization',
+  // M8 — target metrik per Brief-as-task + laporan mingguan Advertiser
+  // (keputusan pemilik 2026-08-14).
+  AdsBriefTargetsWire: 'ads-targets.ts::AdsBriefTargets',
+  AdsTargetSuggestionWire: 'ads-targets.ts::AdsTargetSuggestion',
+  AdsBriefTargetsViewWire: 'ads-targets.ts::AdsBriefTargetsView',
+  AdsWeeklyMetricWire: 'ads-targets.ts::AdsWeeklyMetric',
+  AdsWeeklyReportWire: 'ads-targets.ts::AdsWeeklyReport',
+  AdsWeeklyReportViewWire: 'ads-targets.ts::AdsWeeklyReportView',
   // M9 KOL
   BookingWire: 'kol.ts::Booking',
   PaymentRequestWire: 'kol.ts::PaymentRequest',

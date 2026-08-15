@@ -1011,8 +1011,15 @@ RESET ROLE;
 --     membawa arm-nya inline jadi TIDAK di sini. Lead DIVISI (non-Account)
 --     sengaja belum punya arm di D-01 — baca rekap divisi menyusul bersama jalur
 --     tulis RM-D6 (D-09), tak dilebarkan spekulatif (O48).
+--     Dua baris `ads_*` (ads_brief_targets/ads_weekly_reports, 20260814100000)
+--     adalah kelas yang SAMA: predikatnya `private.jwt_can_read_brief()`, cermin
+--     persis `briefs_select` — termasuk arm `jwt_is_lead() AND assigned_division
+--     = jwt_division()` (DECISIONS 2026-08-14 "M8 — dua tabel anak Brief Ads
+--     masuk ledger O48"). Induk `briefs_select` membawa arm-nya inline jadi
+--     TIDAK di sini. Lingkupnya tak melebar sedikit pun dari induknya: siapa yang
+--     boleh melihat brief-nya, boleh melihat target & laporan mingguannya.
 --     Membuat detektor menembus satu tingkat indireksi akan MENGHAPUS
---     kesebelasnya sekaligus — diusulkan sebagai **O60**, sengaja tidak
+--     ketigabelasnya sekaligus — diusulkan sebagai **O60**, sengaja tidak
 --     dikerjakan di dalam tiket fitur: mengubah semantik invariant bersama
 --     supaya tiket sendiri hijau adalah cara paling mudah kehilangan gerbang.
 -- ---------------------------------------------------------------------------
@@ -1021,7 +1028,8 @@ DO $$
 DECLARE
   actual text[];
   expected text[] := ARRAY[
-    'ad_campaign_assets_select','ad_campaigns_select','campaigns_select',
+    'ad_campaign_assets_select','ad_campaigns_select',
+    'ads_brief_targets_select','ads_weekly_reports_select','campaigns_select',
     'client_platforms_select','client_sales_allocations_select','complaints_select',
     'creator_bookings_select','creator_lists_select','creator_payment_requests_select',
     'dependencies_select','employees_select','live_stream_sessions_select',

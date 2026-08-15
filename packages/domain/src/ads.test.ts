@@ -31,6 +31,12 @@ import {
   pauseCampaign,
   unlinkAsset,
   ValidationError,
+  canFileWeeklyReport,
+  canSetBriefTargets,
+  fileWeeklyReport,
+  getBriefTargets,
+  listWeeklyReports,
+  setBriefTargets,
   type Actor,
   type CampaignInput,
 } from './ads';
@@ -150,6 +156,11 @@ afterAll(async () => {
 });
 afterEach(async () => {
   if (!sql) return;
+  // Both FK the briefs deleted below. `ads_weekly_reports` is append-only (a
+  // no-delete guard), so it is TRUNCATEd — the same bypass recap.close.test.ts
+  // uses for wrr_catatan_divisi; the guard is asserted directly further down.
+  await sql`truncate table ads_weekly_reports`;
+  await sql`delete from ads_brief_targets where brief_id in (select id from briefs where created_by like 'ZZ-%')`;
   await sql`delete from metric_entry_assets where metric_entry_id in (select id from metric_entries where created_by like 'ZZ-%')`;
   await sql`delete from metric_entries where created_by like 'ZZ-%'`;
   await sql`delete from optimization_logs where created_by like 'ZZ-%'`;
@@ -157,6 +168,7 @@ afterEach(async () => {
   await sql`delete from ad_campaigns where created_by like 'ZZ-%'`;
   await sql`delete from assets where created_by like 'ZZ-%'`;
   await sql`delete from briefs where created_by like 'ZZ-%'`;
+  await sql`delete from strategy_plans where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -353,5 +365,279 @@ describeDb('submit guard (§4 Rule 3) + reads', () => {
     await expect(getCampaign(sql, creativeStaff(), c.id)).rejects.toBeInstanceOf(ForbiddenError);
     expect((await listMetricEntries(sql, adsStaff(), c.id)).length).toBe(1);
     await expect(getCampaign(sql, adsStaff(), 'ADC-GHOST-0')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Target metrik per Brief-as-task + Laporan Mingguan (keputusan pemilik 2026-08-14)
+// ---------------------------------------------------------------------------
+
+describe('ads brief-target / weekly-report predicates', () => {
+  it('canSetBriefTargets: SPV/Lead Ads or Director — never the Advertiser (M8-OA-4)', () => {
+    expect(canSetBriefTargets(adsLead())).toBe(true);
+    expect(canSetBriefTargets(director())).toBe(true);
+    expect(canSetBriefTargets(adsStaff())).toBe(false);
+    expect(canSetBriefTargets(am())).toBe(false);
+    expect(canSetBriefTargets(od())).toBe(false);
+  });
+  it('canFileWeeklyReport: the brief PIC, Ads lead, or Director', () => {
+    expect(canFileWeeklyReport(adsStaff('ZZ-PIC'), 'ZZ-PIC')).toBe(true);
+    expect(canFileWeeklyReport(adsStaff('ZZ-OTHER'), 'ZZ-PIC')).toBe(false);
+    expect(canFileWeeklyReport(adsLead(), 'ZZ-PIC')).toBe(true);
+    expect(canFileWeeklyReport(director(), 'ZZ-PIC')).toBe(true);
+    expect(canFileWeeklyReport(creativeStaff(), 'ZZ-PIC')).toBe(false);
+    // An unassigned brief must not make everyone its PIC.
+    expect(canFileWeeklyReport(adsStaff('ZZ-ANY'), '')).toBe(false);
+  });
+});
+
+/** Mark a brief as having entered [In Progress] at `at` (the M12 transition log). */
+async function markStarted(briefId: string, at: Date): Promise<void> {
+  await sql`
+    insert into audit_log (entity_type, entity_id, actor_employee_id, action, created_at, created_by)
+    values ('brief', ${briefId}, 'ZZ-ADV', 'transition:[To Do]->[In Progress]', ${at}, 'ZZ-ADV')`;
+}
+
+/** One weekly Metric Entry on a campaign (raw platform counts included). */
+async function metricWeek(
+  campaignId: string,
+  periodStart: string,
+  periodEnd: string,
+  spend: string,
+  gmv: string,
+  clicks: number,
+  impressions: number,
+  conversions: number,
+): Promise<void> {
+  await sql`
+    insert into metric_entries (id, campaign_id, period_start, period_end, spend, gmv,
+      clicks, impressions, conversions, entry_method, entered_by, created_by)
+    values (${uid('MTR')}, ${campaignId}, ${periodStart}, ${periodEnd}, ${spend}, ${gmv},
+      ${clicks}, ${impressions}, ${conversions}, 'Manual', 'ZZ-ADV', 'ZZ-ADV')`;
+}
+
+describeDb('setBriefTargets / getBriefTargets (M8-OA-4)', () => {
+  it('SPV/Lead Ads sets the six targets; the Advertiser cannot set their own', async () => {
+    const { briefId } = await adsBrief();
+    await expect(
+      setBriefTargets(sql, adsStaff(), briefId, { targetSpend: '30000000' }),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+
+    const t = await setBriefTargets(sql, adsLead(), briefId, {
+      targetSpend: '30000000', targetGmv: '120000000', targetRoas: '4',
+      targetView: '1000000', targetCtr: '1.5', targetCvr: '2.25', catatan: 'kuartal 3',
+    });
+    expect(t.ditetapkan).toBe(true);
+    expect(t.targetSpendDisplay).toBe('Rp. 30.000.000,00');
+    expect(t.targetGmvDisplay).toBe('Rp. 120.000.000,00');
+    expect(t.targetRoasDisplay).toBe('4x');
+    expect(t.targetViewDisplay).toBe('1.000.000');
+    expect(t.targetCtrDisplay).toBe('1,50%');
+    expect(t.targetCvrDisplay).toBe('2,25%');
+    expect(t.catatan).toBe('kuartal 3');
+  });
+
+  it('an unset brief reads as belum ditetapkan with every display "—" (house rule 7)', async () => {
+    const { briefId } = await adsBrief();
+    const { targets } = await getBriefTargets(sql, adsStaff(), briefId);
+    expect(targets.ditetapkan).toBe(false);
+    expect(targets.targetSpendDisplay).toBe('—');
+    expect(targets.targetRoasDisplay).toBe('—');
+    expect(targets.targetCvrDisplay).toBe('—');
+  });
+
+  it('validates: all-empty, non-numeric, negative, and CTR/CVR above 100', async () => {
+    const { briefId } = await adsBrief();
+    await expect(setBriefTargets(sql, adsLead(), briefId, {})).rejects.toBeInstanceOf(ValidationError);
+    await expect(setBriefTargets(sql, adsLead(), briefId, { targetRoas: 'empat' })).rejects.toBeInstanceOf(ValidationError);
+    await expect(setBriefTargets(sql, adsLead(), briefId, { targetRoas: '-1' })).rejects.toBeInstanceOf(ValidationError);
+    await expect(setBriefTargets(sql, adsLead(), briefId, { targetView: '1.5' })).rejects.toBeInstanceOf(ValidationError);
+    await expect(setBriefTargets(sql, adsLead(), briefId, { targetCtr: '150' })).rejects.toBeInstanceOf(ValidationError);
+    // Nothing was written by any of the rejected calls.
+    expect((await getBriefTargets(sql, adsLead(), briefId)).targets.ditetapkan).toBe(false);
+  });
+
+  it('rejects a non-Ads brief and an unknown brief', async () => {
+    const svcId = uid('SVC');
+    const clientId = uid('CLI');
+    const briefId = uid('BRF');
+    await insertClient(clientId, 'ZZ-SINTA');
+    await insertService(svcId, clientId);
+    await insertBrief(briefId, svcId, 'Creative', '[In Progress]');
+    await expect(setBriefTargets(sql, adsLead(), briefId, { targetRoas: '4' })).rejects.toBeInstanceOf(ConflictError);
+    await expect(getBriefTargets(sql, adsLead(), 'BRF-GHOST-0')).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('rewrites keep an audit before→after trail (house rule 3 — no second history table)', async () => {
+    const { briefId } = await adsBrief();
+    await setBriefTargets(sql, adsLead(), briefId, { targetRoas: '4' });
+    const t = await setBriefTargets(sql, adsLead(), briefId, { targetRoas: '3' });
+    expect(t.targetRoas).toBe(3);
+    const rows = await sql<{ action: string; before_json: { target_roas: number } | null; after_json: { target_roas: number } }[]>`
+      select action, before_json, after_json from audit_log
+       where entity_type = 'brief' and entity_id = ${briefId} and action like 'ads_target%' order by id`;
+    expect(rows.map((r) => r.action)).toEqual(['ads_target_set', 'ads_target_update']);
+    expect(rows[0].before_json).toBeNull();
+    expect(Number(rows[1].before_json?.target_roas)).toBe(4);
+    expect(Number(rows[1].after_json.target_roas)).toBe(3);
+  });
+
+  it('suggests targets from the brief Quantity Target + the Strategy KPI, without saving them', async () => {
+    const clientId = uid('CLI');
+    const svcId = uid('SVC');
+    const strId = uid('STRG');
+    const briefId = uid('BRF');
+    await insertClient(clientId, 'ZZ-SINTA');
+    await insertService(svcId, clientId);
+    await sql`
+      insert into strategy_plans (id, service_id, objective, divisions_involved, planned_brief_outline,
+        timeline_start, timeline_end, status, target_gmv, target_roas, target_ctr, target_cvr, created_by)
+      values (${strId}, ${svcId}, 'obj', 'Ads', 'outline', '2026-08-01', '2026-10-31', 'Approved',
+        '120000000.00', '4.00', '1.500', '2.250', 'ZZ-TEST')`;
+    await sql`
+      insert into briefs (id, service_id, strategy_id, title, status, assigned_division, deliverable_type,
+        quantity_target, priority, recurring, created_by)
+      values (${briefId}, ${svcId}, ${strId}, 'Ads — Ads spent (Rp)', '[In Progress]', 'Ads', 'Ads spent (Rp)',
+        30000000, 'Medium', false, 'ZZ-TEST')`;
+
+    const { targets, saran } = await getBriefTargets(sql, adsLead(), briefId);
+    expect(targets.ditetapkan).toBe(false); // suggestion is never auto-saved (M8-OA-4)
+    expect(saran.targetSpend).toBe(30000000);
+    expect(saran.targetGmv).toBe(120000000);
+    expect(saran.targetRoas).toBe(4);
+    expect(saran.targetCtr).toBe(1.5);
+    expect(saran.targetCvr).toBe(2.25);
+    expect(saran.targetView).toBeNull(); // M6 never modelled it — typed by hand
+    expect(saran.sumber).toContain('Target Kuantitas brief');
+    expect(saran.sumber).toContain(strId);
+  });
+});
+
+describeDb('listWeeklyReports / fileWeeklyReport', () => {
+  it('a brief that never started has no weeks (no invented unfiled obligations)', async () => {
+    const { briefId } = await adsBrief();
+    const v = await listWeeklyReports(sql, adsStaff(), briefId);
+    expect(v.minggu).toEqual([]);
+    expect(v.belumDiisi).toBe(0);
+  });
+
+  it('recomputes each week from metric entries and marks finished weeks without a report', async () => {
+    const { briefId } = await adsBrief();
+    const c = await createCampaign(sql, adsStaff(), briefId, goodInput());
+    await setBriefTargets(sql, adsLead(), briefId, {
+      targetSpend: '4000000', targetGmv: '20000000', targetRoas: '4',
+      targetView: '200000', targetCtr: '2', targetCvr: '5',
+    });
+    // Week A: Mon 2026-08-03 .. Sun 2026-08-09 (ISO 2026-W32).
+    await markStarted(briefId, new Date('2026-08-03T02:00:00Z'));
+    await metricWeek(c.id, '2026-08-03', '2026-08-09', '2000000', '9500000', 2000, 100000, 100);
+    // "now" inside week B, so week A is finished and week B is running.
+    const now = new Date('2026-08-12T05:00:00Z');
+    const v = await listWeeklyReports(sql, adsStaff(), briefId, now);
+
+    expect(v.minggu.length).toBe(2);
+    const a = v.minggu[0];
+    expect([a.isoYear, a.isoWeek]).toEqual([2026, 32]);
+    expect(a.mingguMulai).toBe('2026-08-03');
+    expect(a.mingguAkhir).toBe('2026-08-09');
+    const by = (k: string) => a.metrik.find((m) => m.key === k)!;
+    expect(by('ads_spent').realisasiDisplay).toBe('Rp. 2.000.000,00');
+    expect(by('gmv').realisasiDisplay).toBe('Rp. 9.500.000,00');
+    expect(by('roas').realisasi).toBeCloseTo(4.75, 6);
+    expect(by('view').realisasiDisplay).toBe('100.000');
+    expect(by('ctr').realisasiDisplay).toBe('2,00%'); // 2000 / 100000
+    expect(by('cvr').realisasiDisplay).toBe('5,00%'); // 100 / 2000
+    expect(by('ads_spent').sifat).toBe('serapan');    // spend is consumed, not "achieved"
+    expect(by('roas').rasioDisplay).toBe('118.75%');
+    // Week A is over and unreported; week B is still running, so it is not late.
+    expect(a.terlambat).toBe(true);
+    expect(v.minggu[1].berjalan).toBe(true);
+    expect(v.minggu[1].terlambat).toBe(false);
+    expect(v.belumDiisi).toBe(1);
+    // A week with no metric entry at all renders "—", never 0 (house rule 7).
+    const b = v.minggu[1].metrik.find((m) => m.key === 'roas')!;
+    expect(b.realisasiDisplay).toBe('—');
+    expect(b.rasioDisplay).toBe('—');
+  });
+
+  it('the PIC files a week; it then reads back as terisi and no longer late', async () => {
+    const { briefId } = await adsBrief();
+    await sql`update briefs set assigned_pic = 'ZZ-ADV' where id = ${briefId}`;
+    await markStarted(briefId, new Date('2026-08-03T02:00:00Z'));
+    const now = new Date('2026-08-12T05:00:00Z');
+
+    const r = await fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, {
+      mingguMulai: '2026-08-03',
+      analisa: 'ROAS 4,75x di atas target; spend terserap 50%.',
+      saran: 'Naikkan budget di kampanye Shopee, matikan ad group CTR terendah.',
+      kendala: 'Aset video baru belum turun.',
+    }, now);
+    expect([r.isoYear, r.isoWeek]).toEqual([2026, 32]);
+    expect(r.terisi).toBe(true);
+
+    const v = await listWeeklyReports(sql, adsStaff(), briefId, now);
+    expect(v.minggu[0].terisi).toBe(true);
+    expect(v.minggu[0].terlambat).toBe(false);
+    expect(v.minggu[0].saran).toContain('Naikkan budget');
+    expect(v.minggu[0].diisiOleh).toBe('ZZ-ADV');
+    expect(v.belumDiisi).toBe(0);
+  });
+
+  it('gates: non-PIC, blank narrative, duplicate week, future week, week before work started', async () => {
+    const { briefId } = await adsBrief();
+    await sql`update briefs set assigned_pic = 'ZZ-ADV' where id = ${briefId}`;
+    await markStarted(briefId, new Date('2026-08-03T02:00:00Z'));
+    const now = new Date('2026-08-12T05:00:00Z');
+    const ok = { mingguMulai: '2026-08-03', analisa: 'a', saran: 's' };
+
+    await expect(fileWeeklyReport(sql, creativeStaff(), briefId, ok, now)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(fileWeeklyReport(sql, adsStaff('ZZ-OTHER'), briefId, ok, now)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(
+      fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, { ...ok, saran: '   ' }, now),
+    ).rejects.toBeInstanceOf(ValidationError);
+    // Not a Monday / not a date at all.
+    await expect(
+      fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, { ...ok, mingguMulai: '2026-08-05' }, now),
+    ).rejects.toBeInstanceOf(ValidationError);
+    await expect(
+      fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, { ...ok, mingguMulai: 'minggu lalu' }, now),
+    ).rejects.toBeInstanceOf(ValidationError);
+    // A week that has not started yet.
+    await expect(
+      fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, { ...ok, mingguMulai: '2026-08-17' }, now),
+    ).rejects.toBeInstanceOf(ValidationError);
+    // A week before the brief was ever worked on.
+    await expect(
+      fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, { ...ok, mingguMulai: '2026-07-27' }, now),
+    ).rejects.toBeInstanceOf(ConflictError);
+
+    await fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, ok, now);
+    await expect(fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, ok, now)).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it('a filed report is append-only: UPDATE and DELETE are refused at the DB', async () => {
+    const { briefId } = await adsBrief();
+    await sql`update briefs set assigned_pic = 'ZZ-ADV' where id = ${briefId}`;
+    await markStarted(briefId, new Date('2026-08-03T02:00:00Z'));
+    await fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, {
+      mingguMulai: '2026-08-03', analisa: 'a', saran: 's',
+    }, new Date('2026-08-12T05:00:00Z'));
+
+    await expect(
+      sql`update ads_weekly_reports set saran = 'diubah' where brief_id = ${briefId}`,
+    ).rejects.toThrow();
+    await expect(
+      sql`delete from ads_weekly_reports where brief_id = ${briefId}`,
+    ).rejects.toThrow();
+  });
+
+  it('an Ads lead may file on the PIC own behalf; unrelated divisions cannot even read', async () => {
+    const { briefId } = await adsBrief();
+    await sql`update briefs set assigned_pic = 'ZZ-ADV' where id = ${briefId}`;
+    await markStarted(briefId, new Date('2026-08-03T02:00:00Z'));
+    const now = new Date('2026-08-12T05:00:00Z');
+    await fileWeeklyReport(sql, adsLead(), briefId, { mingguMulai: '2026-08-03', analisa: 'a', saran: 's' }, now);
+    expect((await listWeeklyReports(sql, adsLead(), briefId, now)).minggu[0].diisiOleh).toBe('ZZ-ADSLEAD');
+    await expect(listWeeklyReports(sql, creativeStaff(), briefId, now)).rejects.toBeInstanceOf(ForbiddenError);
   });
 });
