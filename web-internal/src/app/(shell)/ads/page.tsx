@@ -12,6 +12,7 @@ import {
   listAdsBriefQueue,
   type AdsBrief,
 } from '@/lib/ads';
+import { getAdsBriefDiscipline, type AdsBriefDiscipline } from '@/lib/ads-targets';
 import { BRIEF_TODO, gateHint, partitionAdsBriefs } from '@/lib/ads-brief-gate';
 // The [To Do] → [In Progress] edge belongs to M12 (POST /tasks/{id}/start); the
 // /ads page borrows it rather than growing a second copy of the brief_task
@@ -35,6 +36,11 @@ export default function AdsWorkspacePage() {
   const [briefs, setBriefs] = useState<AdsBrief[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Discipline nudge lists (brief tanpa target / laporan telat). Loaded on its
+  // own so a failure here never blanks the brief queue below it.
+  const [discipline, setDiscipline] = useState<AdsBriefDiscipline[] | null>(null);
+  const [disciplineError, setDisciplineError] = useState<string | null>(null);
 
   // Buka kampanye by id
   const [lookupId, setLookupId] = useState('');
@@ -69,9 +75,33 @@ export default function AdsWorkspacePage() {
     }
   }, []);
 
+  const loadDiscipline = useCallback(async () => {
+    setDisciplineError(null);
+    try {
+      const res = await getAdsBriefDiscipline();
+      setDiscipline(res.data);
+    } catch (err) {
+      setDisciplineError(errorMessage(err));
+    }
+  }, []);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadDiscipline();
+  }, [load, loadDiscipline]);
+
+  // "Brief tanpa target": a brief that has an owner or has started work but still
+  // carries no metric target. A brand-new [To Do] brief with no PIC yet is not
+  // nagged — targets are set when the PIC is (the exact gap the owner reported).
+  const needsTarget = useMemo(
+    () => (discipline ?? []).filter((d) => !d.has_targets && (d.started || d.assigned_pic !== '')),
+    [discipline],
+  );
+  // "Laporan telat": at least one finished ISO week with no weekly report filed.
+  const lateReports = useMemo(
+    () => (discipline ?? []).filter((d) => d.overdue_weeks > 0),
+    [discipline],
+  );
 
   function handleLookup(e: FormEvent) {
     e.preventDefault();
@@ -113,6 +143,7 @@ export default function AdsWorkspacePage() {
       setStartMessage(`${id}: ${transitionLabel(res)}`);
       setBriefId(id);
       await load();
+      await loadDiscipline();
     } catch (err) {
       setStartError(errorMessage(err));
     } finally {
@@ -136,6 +167,89 @@ export default function AdsWorkspacePage() {
           untuk input metrik &amp; optimasi.
         </p>
       </div>
+
+      {(needsTarget.length > 0 || lateReports.length > 0 || disciplineError) && (
+        <section className="card">
+          <div className="cardHeader">
+            <h2>Perlu Perhatian</h2>
+          </div>
+          {disciplineError && <div className="alert alertError" role="alert">{disciplineError}</div>}
+
+          {needsTarget.length > 0 && (
+            <div style={{ marginBottom: lateReports.length > 0 ? 18 : 0 }}>
+              <p className="muted" style={{ fontSize: 13 }}>
+                <strong>Brief tanpa target</strong> &mdash; sudah punya PIC atau sedang dikerjakan,
+                tetapi belum ada target metrik. Target ditetapkan SPV/Lead Ads di halaman brief
+                (bagian &ldquo;Target Metrik Ads&rdquo;).
+              </p>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Brief</th>
+                      <th>Judul</th>
+                      <th>PIC</th>
+                      <th>Status</th>
+                      <th>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {needsTarget.map((d) => (
+                      <tr key={d.brief_id}>
+                        <td><Link href={`/tasks/${d.brief_id}`}>{d.brief_id}</Link></td>
+                        <td>{d.title}</td>
+                        <td>{d.assigned_pic || '—'}</td>
+                        <td><StatusBadge status={d.status} /></td>
+                        <td><Link href={`/tasks/${d.brief_id}`} className="btn btnPrimary btnSm">Tetapkan Target</Link></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {lateReports.length > 0 && (
+            <div>
+              <p className="muted" style={{ fontSize: 13 }}>
+                <strong>Laporan mingguan telat</strong> &mdash; ada minggu yang sudah selesai tetapi
+                belum ada analisa performa &amp; saran perbaikannya. Laporan diisi PIC di halaman
+                brief (bagian &ldquo;Laporan Mingguan Ads&rdquo;).
+              </p>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Brief</th>
+                      <th>Judul</th>
+                      <th>PIC</th>
+                      <th>Minggu Telat</th>
+                      <th>Laporan Terakhir</th>
+                      <th>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lateReports.map((d) => (
+                      <tr key={d.brief_id}>
+                        <td><Link href={`/tasks/${d.brief_id}`}>{d.brief_id}</Link></td>
+                        <td>{d.title}</td>
+                        <td>{d.assigned_pic || '—'}</td>
+                        <td>
+                          <span className="badge badge-purple">
+                            {d.overdue_weeks} minggu
+                          </span>
+                        </td>
+                        <td>{d.latest_reported_week || '—'}</td>
+                        <td><Link href={`/tasks/${d.brief_id}`} className="btn btnPrimary btnSm">Isi Laporan</Link></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="card">
         <div className="cardHeader">

@@ -1029,6 +1029,28 @@ export function toAdsWeeklyReportInput(b: {
   };
 }
 
+/** One Ads Brief-as-task's discipline row for the /ads workspace nudge lists. */
+export interface AdsBriefDisciplineWire {
+  brief_id: string;
+  title: string;
+  status: string;
+  assigned_pic: string;
+  due_date: string | null;
+  priority: string;
+  has_targets: boolean;
+  started: boolean;
+  overdue_weeks: number;
+  latest_reported_week: string | null;
+}
+
+export function adsBriefDisciplineToWire(d: ads.AdsBriefDiscipline): AdsBriefDisciplineWire {
+  return {
+    brief_id: d.briefId, title: d.title, status: d.status, assigned_pic: d.assignedPic,
+    due_date: d.dueDate, priority: d.priority, has_targets: d.hasTargets, started: d.started,
+    overdue_weeks: d.overdueWeeks, latest_reported_week: d.latestReportedWeek,
+  };
+}
+
 // --- M9 KOL ---
 
 /** module9_kol.Booking — a Creator Booking with its derived fields. */

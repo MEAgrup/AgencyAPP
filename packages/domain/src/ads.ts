@@ -39,6 +39,9 @@ export const STATUS_ENDED = '[Ended]';
 
 const BRIEF_STATUS_IN_PROGRESS = '[In Progress]';
 const BRIEF_STATUS_APPROVED = '[Approved]';
+// The void-cascade terminal (STATE_MACHINES §7 / M4-OA-5) — a cancelled brief
+// owes neither a target nor a weekly report, so the discipline read skips it.
+const BRIEF_STATUS_CANCELLED = '[Cancelled — Service Voided]';
 const ASSET_STATUS_APPROVED = '[Approved]';
 const MACHINE_AD_CAMPAIGN = 'ad_campaign';
 
@@ -1064,6 +1067,28 @@ export interface WeeklyReportInput {
 const MAX_MINGGU = 26;
 
 /**
+ * One Ads Brief-as-task's discipline summary for the /ads workspace — the
+ * two-list nudge the owner asked for: which briefs still lack a metric target,
+ * and which are behind on their weekly report. Derived, never stored.
+ */
+export interface AdsBriefDiscipline {
+  briefId: string;
+  title: string;
+  status: string;
+  assignedPic: string;
+  dueDate: string | null;
+  priority: string;
+  /** false → no `ads_brief_targets` row: the "brief tanpa target" list. */
+  hasTargets: boolean;
+  /** false → the brief never entered [In Progress] (nothing owed yet). */
+  started: boolean;
+  /** Finished ISO weeks with no filed report — the "laporan telat" list. */
+  overdueWeeks: number;
+  /** Monday (YYYY-MM-DD) of the most recent filed report, or null. */
+  latestReportedWeek: string | null;
+}
+
+/**
  * canSetBriefTargets — M8-OA-4 write gate: SPV/Lead Ads or Director. Deliberately
  * NOT the Advertiser: "Advertisers never self-set targets from platform
  * benchmarks alone" (M8 §4 Rule 1). Mirrored by the RLS policy
@@ -1320,7 +1345,6 @@ export async function listWeeklyReports(
   const thisWeek = tz.isoWeekOf(now);
   const today = tz.dateString(now);
 
-  let belumDiisi = 0;
   const minggu = shown.map((w) => {
     const key = weekKey(w.isoYear, w.isoWeek);
     const r = realisasi.get(key) ?? emptyRealisasi();
@@ -1328,9 +1352,6 @@ export async function listWeeklyReports(
     const berjalan = w.isoYear === thisWeek.isoYear && w.isoWeek === thisWeek.isoWeek;
     const selesai = w.sundayDate < today;
     const terlambat = selesai && f === null;
-    if (terlambat) {
-      belumDiisi++;
-    }
     return {
       briefId, isoYear: w.isoYear, isoWeek: w.isoWeek, mingguMulai: w.mondayDate, mingguAkhir: w.sundayDate,
       metrik: metricRows(targets, r),
@@ -1339,7 +1360,104 @@ export async function listWeeklyReports(
       diisiOleh: f?.createdBy ?? '', diisiPada: f?.createdAt ?? null,
     };
   });
+  // belumDiisi counts EVERY finished-but-unreported week, not just the ones the
+  // MAX_MINGGU window renders — so a brief with overdue weeks older than the
+  // window still reports the true backlog (the /ads discipline list reads the
+  // identical count via the same helper, so the two surfaces never disagree).
+  const belumDiisi = countOverdueWeeks(start, now, new Set(filed.keys()));
   return { briefId, targets, minggu, belumDiisi, dipotong };
+}
+
+/**
+ * adsBriefDiscipline returns the discipline summary for every Ads Brief-as-task
+ * the actor may see — the data behind the /ads workspace's two nudge lists
+ * ("brief tanpa target", "laporan telat"). One row per non-cancelled Ads brief:
+ * whether it has a metric target, and how many finished weeks are missing a
+ * report.
+ *
+ * Visibility mirrors `canViewCampaign` set-wise (the per-brief gate the reads
+ * use), evaluated as one SQL predicate so a LIST cannot leak a brief a
+ * per-id GET would refuse: OD/Director + Account-lead + any Ads staff/lead see
+ * the whole division; an owning AM sees only their own clients' briefs. Runs on
+ * the service-role connection (like the other M8 reads) — the audit-log start
+ * anchor and the child rows are read in full, avoiding the audit_log RLS
+ * under-count a per-actor connection would hit for a lead viewing a staff's
+ * brief.
+ *
+ * Batched, not N+1: one query for the briefs, one for every start timestamp, one
+ * for every filed report (P-1).
+ */
+export async function adsBriefDiscipline(
+  sql: Queryable,
+  actor: Actor,
+  now: Date = new Date(),
+): Promise<AdsBriefDiscipline[]> {
+  const broad =
+    permission.canReadAll(actor) ||
+    permission.canReadDivision(actor, ACCOUNT_DIVISION) ||
+    (actor.role.division === ADS_DIVISION &&
+      (actor.role.level === permission.LevelStaff || actor.role.level === permission.LevelLead));
+
+  const briefs = await sql<
+    { id: string; title: string; status: string; assigned_pic: string | null;
+      due_date: string | Date | null; priority: string; has_targets: boolean }[]
+  >`
+    select b.id, b.title, b.status, b.assigned_pic, b.due_date, b.priority,
+           (t.brief_id is not null) as has_targets
+      from briefs b
+      join services sv on sv.id = b.service_id
+      join clients cl on cl.id = sv.client_id
+      left join ads_brief_targets t on t.brief_id = b.id
+     where b.assigned_division = ${ADS_DIVISION}
+       and b.status <> ${BRIEF_STATUS_CANCELLED}
+       and (${broad} or cl.assigned_am_id = ${actor.employeeId})
+     order by b.created_at`;
+  if (briefs.length === 0) {
+    return [];
+  }
+  const ids = briefs.map((b) => b.id);
+
+  // First [In Progress] per brief — the report-obligation start anchor, from the
+  // same immutable transition log M12's turnaround derives from.
+  const starts = await sql<{ entity_id: string; started_at: Date }[]>`
+    select entity_id, min(created_at) as started_at
+      from audit_log
+     where entity_type = 'brief' and entity_id = any(${ids})
+       and action like ${`transition:%->${BRIEF_STATUS_IN_PROGRESS}`}
+     group by entity_id`;
+  const startMap = new Map(starts.map((s) => [s.entity_id, s.started_at]));
+
+  // Every filed report week per brief (for the overdue count + the latest date).
+  const reports = await sql<
+    { brief_id: string; iso_year: number | string; iso_week: number | string; minggu_mulai: string | Date }[]
+  >`
+    select brief_id, iso_year, iso_week, minggu_mulai
+      from ads_weekly_reports where brief_id = any(${ids})`;
+  const filedByBrief = new Map<string, Set<string>>();
+  const latestByBrief = new Map<string, string>();
+  for (const r of reports) {
+    const key = weekKey(Number(r.iso_year), Number(r.iso_week));
+    const set = filedByBrief.get(r.brief_id) ?? new Set<string>();
+    set.add(key);
+    filedByBrief.set(r.brief_id, set);
+    const monday = dateStr(r.minggu_mulai);
+    const prev = latestByBrief.get(r.brief_id);
+    if (prev === undefined || monday > prev) {
+      latestByBrief.set(r.brief_id, monday);
+    }
+  }
+
+  return briefs.map((b) => {
+    const start = startMap.get(b.id) ?? null;
+    const filed = filedByBrief.get(b.id) ?? new Set<string>();
+    return {
+      briefId: b.id, title: b.title, status: b.status, assignedPic: b.assigned_pic ?? '',
+      dueDate: b.due_date === null ? null : dateStr(b.due_date), priority: b.priority,
+      hasTargets: b.has_targets, started: start !== null,
+      overdueWeeks: start === null ? 0 : countOverdueWeeks(start, now, filed),
+      latestReportedWeek: latestByBrief.get(b.id) ?? null,
+    };
+  });
 }
 
 /**
@@ -1467,6 +1585,24 @@ async function firstInProgressAt(sql: Queryable, briefId: string): Promise<Date 
        and action like ${`transition:%->${BRIEF_STATUS_IN_PROGRESS}`}
      order by id asc limit 1`;
   return rows.length === 0 ? null : rows[0].created_at;
+}
+
+/**
+ * countOverdueWeeks — how many FINISHED ISO weeks since `start` carry no filed
+ * report. The RUNNING week is never counted (it is owed but not yet late). This
+ * is the single definition of "laporan telat": `listWeeklyReports.belumDiisi`
+ * (the per-brief panel) and `adsBriefDiscipline.overdueWeeks` (the /ads list)
+ * both read it, so a brief's backlog count is identical on both surfaces.
+ */
+function countOverdueWeeks(start: Date, now: Date, filedKeys: Set<string>): number {
+  const today = tz.dateString(now);
+  let n = 0;
+  for (const w of weeksBetween(start, now)) {
+    if (w.sundayDate < today && !filedKeys.has(weekKey(w.isoYear, w.isoWeek))) {
+      n++;
+    }
+  }
+  return n;
 }
 
 /** weeksBetween lists every ISO week from `from` through the week containing `to`. */

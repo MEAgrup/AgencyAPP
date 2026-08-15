@@ -106,6 +106,24 @@ export interface AdsWeeklyReportPayload {
   kendala: string;
 }
 
+/** One Ads brief's discipline row for the /ads workspace nudge lists. */
+export interface AdsBriefDiscipline {
+  brief_id: string;
+  title: string;
+  status: string;
+  assigned_pic: string;
+  due_date: string | null;
+  priority: string;
+  has_targets: boolean;
+  started: boolean;
+  overdue_weeks: number;
+  latest_reported_week: string | null;
+}
+
+export function getAdsBriefDiscipline(): Promise<{ data: AdsBriefDiscipline[] }> {
+  return api.get<{ data: AdsBriefDiscipline[] }>(`/ads/brief-discipline`);
+}
+
 export function getAdsTargets(briefId: string): Promise<AdsBriefTargetsView> {
   return api.get<AdsBriefTargetsView>(`/briefs/${briefId}/ads-targets`);
 }

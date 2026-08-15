@@ -31,6 +31,7 @@ import {
   pauseCampaign,
   unlinkAsset,
   ValidationError,
+  adsBriefDiscipline,
   canFileWeeklyReport,
   canSetBriefTargets,
   fileWeeklyReport,
@@ -639,5 +640,86 @@ describeDb('listWeeklyReports / fileWeeklyReport', () => {
     await fileWeeklyReport(sql, adsLead(), briefId, { mingguMulai: '2026-08-03', analisa: 'a', saran: 's' }, now);
     expect((await listWeeklyReports(sql, adsLead(), briefId, now)).minggu[0].diisiOleh).toBe('ZZ-ADSLEAD');
     await expect(listWeeklyReports(sql, creativeStaff(), briefId, now)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+});
+
+describeDb('adsBriefDiscipline (nudge lists /ads)', () => {
+  it('flags a started brief with no target, and one that is behind on reports', async () => {
+    // Brief A: started, PIC assigned, NO target → "brief tanpa target".
+    const a = await adsBrief();
+    await sql`update briefs set assigned_pic = 'ZZ-ADV' where id = ${a.briefId}`;
+    await markStarted(a.briefId, new Date('2026-08-03T02:00:00Z'));
+
+    // Brief B: started, HAS a target, one finished week unreported → "laporan telat".
+    const b = await adsBrief();
+    await sql`update briefs set assigned_pic = 'ZZ-ADV2' where id = ${b.briefId}`;
+    await setBriefTargets(sql, adsLead(), b.briefId, { targetRoas: '4' });
+    await markStarted(b.briefId, new Date('2026-08-03T02:00:00Z'));
+
+    const now = new Date('2026-08-12T05:00:00Z'); // week 33; week 32 (3–9 Aug) is finished
+    const rows = await adsBriefDiscipline(sql, adsLead(), now);
+    const byId = new Map(rows.map((r) => [r.briefId, r]));
+
+    const ra = byId.get(a.briefId)!;
+    expect(ra.hasTargets).toBe(false);
+    expect(ra.started).toBe(true);
+    expect(ra.overdueWeeks).toBe(1); // week 32 unreported
+
+    const rb = byId.get(b.briefId)!;
+    expect(rb.hasTargets).toBe(true);
+    expect(rb.overdueWeeks).toBe(1);
+    expect(rb.latestReportedWeek).toBeNull();
+  });
+
+  it('a filed report clears the overdue count; the running week is never counted', async () => {
+    const { briefId } = await adsBrief();
+    await sql`update briefs set assigned_pic = 'ZZ-ADV' where id = ${briefId}`;
+    await setBriefTargets(sql, adsLead(), briefId, { targetRoas: '4' });
+    await markStarted(briefId, new Date('2026-08-03T02:00:00Z'));
+    const now = new Date('2026-08-12T05:00:00Z');
+
+    // Before filing: week 32 overdue.
+    let rows = await adsBriefDiscipline(sql, adsStaff(), now);
+    expect(rows.find((r) => r.briefId === briefId)!.overdueWeeks).toBe(1);
+
+    await fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, {
+      mingguMulai: '2026-08-03', analisa: 'a', saran: 's',
+    }, now);
+
+    rows = await adsBriefDiscipline(sql, adsStaff(), now);
+    const r = rows.find((x) => x.briefId === briefId)!;
+    expect(r.overdueWeeks).toBe(0); // week 32 now reported; week 33 is running, not late
+    expect(r.latestReportedWeek).toBe('2026-08-03');
+  });
+
+  it('overdueWeeks matches listWeeklyReports.belumDiisi for the same brief', async () => {
+    const { briefId } = await adsBrief();
+    await sql`update briefs set assigned_pic = 'ZZ-ADV' where id = ${briefId}`;
+    await markStarted(briefId, new Date('2026-07-20T02:00:00Z')); // several weeks back
+    const now = new Date('2026-08-12T05:00:00Z');
+
+    const disc = (await adsBriefDiscipline(sql, adsStaff(), now)).find((r) => r.briefId === briefId)!;
+    const detail = await listWeeklyReports(sql, adsStaff(), briefId, now);
+    expect(disc.overdueWeeks).toBe(detail.belumDiisi);
+    expect(disc.overdueWeeks).toBeGreaterThan(1);
+  });
+
+  it('a brief that never started owes nothing; a cancelled brief is excluded', async () => {
+    const notStarted = await adsBrief();
+    const cancelled = await adsBrief();
+    await sql`update briefs set status = '[Cancelled — Service Voided]' where id = ${cancelled.briefId}`;
+
+    const rows = await adsBriefDiscipline(sql, adsLead(), new Date('2026-08-12T05:00:00Z'));
+    const ns = rows.find((r) => r.briefId === notStarted.briefId)!;
+    expect(ns.started).toBe(false);
+    expect(ns.overdueWeeks).toBe(0);
+    expect(rows.some((r) => r.briefId === cancelled.briefId)).toBe(false);
+  });
+
+  it('an unrelated division sees none of the Ads briefs', async () => {
+    const { briefId } = await adsBrief();
+    await markStarted(briefId, new Date('2026-08-03T02:00:00Z'));
+    const rows = await adsBriefDiscipline(sql, creativeStaff(), new Date('2026-08-12T05:00:00Z'));
+    expect(rows.some((r) => r.briefId === briefId)).toBe(false);
   });
 });

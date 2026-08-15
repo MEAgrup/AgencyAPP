@@ -499,6 +499,7 @@ const WIRE_TO_FE: Record<string, string> = {
   AdsWeeklyMetricWire: 'ads-targets.ts::AdsWeeklyMetric',
   AdsWeeklyReportWire: 'ads-targets.ts::AdsWeeklyReport',
   AdsWeeklyReportViewWire: 'ads-targets.ts::AdsWeeklyReportView',
+  AdsBriefDisciplineWire: 'ads-targets.ts::AdsBriefDiscipline',
   // M9 KOL
   BookingWire: 'kol.ts::Booking',
   PaymentRequestWire: 'kol.ts::PaymentRequest',
