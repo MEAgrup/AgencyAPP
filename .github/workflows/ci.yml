@@ -135,6 +135,33 @@ jobs:
           node-version: '22'
       - name: Install workspace (root)
         run: npm ci
+      # Tiru DEFAULT PRIVILEGES Supabase SEBELUM migrasi — berpasangan dengan
+      # `scripts/db-rebuild.sh` dan dengan gerbang `rls_checks` §44.
+      #
+      # Proyek Supabase memasang `ALTER DEFAULT PRIVILEGES IN SCHEMA public
+      # GRANT ALL ON TABLES/FUNCTIONS TO anon, authenticated, service_role`.
+      # Postgres polos TIDAK. Selisih itu membuat satu kelas cacat STRUKTURAL
+      # tak terlihat di sini: sebuah migrasi menulis `REVOKE EXECUTE ... FROM
+      # PUBLIC` (yang tidak menyentuh hibah eksplisit per-role), CI hijau, dan
+      # di produksi fungsi SECURITY DEFINER-nya bisa dipanggil `anon`. Persis
+      # yang terjadi pada wrr_monday_job / wrr_reminder_tick /
+      # penugasan_reminder_tick — ketahuan hanya karena seseorang membaca
+      # `proacl` live (DECISIONS 2026-08-14).
+      #
+      # Role dibuat lebih dulu karena ALTER DEFAULT PRIVILEGES menuntutnya ada;
+      # `20260723064438_rls_baseline.sql` membuat role yang sama dengan
+      # IF NOT EXISTS, jadi ia melewatinya tanpa keluhan.
+      - name: Mirror Supabase default privileges (makes rls_checks §44 meaningful)
+        run: |
+          psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q <<'SQL'
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='anon') THEN CREATE ROLE anon NOLOGIN; END IF;
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF;
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='service_role') THEN CREATE ROLE service_role NOLOGIN BYPASSRLS; END IF;
+          END $$;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES    TO anon, authenticated, service_role;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated, service_role;
+          SQL
       - name: Apply all migrations in order
         run: |
           for f in $(ls supabase/migrations/*.sql | sort); do
