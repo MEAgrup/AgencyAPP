@@ -54,6 +54,15 @@ export default function DemoTasksPage() {
       <div>
         <h1>Demo Tasks</h1>
         <p className="muted">Contoh state machine &amp; audit trail Sprint 0.</p>
+        {/* This page is a Sprint 0 harness, not a work tool: `demo_tasks` has no
+            PIC, no due date and no link column. It reads like a task manager,
+            which is exactly why people land here looking for one. */}
+        <p className="muted">
+          <strong>Ini harness demo, bukan alat kerja</strong> &mdash; tidak ada penerima tugas,
+          jatuh tempo, maupun link hasil. Untuk memberi tugas ke anggota tim, gunakan{' '}
+          <Link href="/penugasan">Penugasan Internal</Link>; untuk eksekusi pekerjaan klien,{' '}
+          <Link href="/tasks">Task Execution</Link>.
+        </p>
       </div>
 
       <section className="card">

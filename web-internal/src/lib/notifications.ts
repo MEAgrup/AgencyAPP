@@ -52,6 +52,10 @@ const ENTITY_ROUTES: Record<string, string | null> = {
   brief: '/tasks/{}',
   asset: '/tasks/{}',
   demo_task: '/demo-tasks/{}',
+  // Penugasan Internal — a SECOND task entity, and a separate page from `/tasks`
+  // (M12). Without this row every penugasan notification renders unclickable,
+  // which is the same dead end as the 404 logged on 2026-08-05.
+  internal_task: '/penugasan/{}',
   // M10 Live Stream.
   live_stream_session: '/livestream/sessions/{}',
   // M13 / M14 snapshots.
@@ -97,6 +101,14 @@ const EVENT_LABELS: Record<string, string> = {
   'm7.hours_logged.reminder': 'Pengingat Hours Logged',
   'm1.lead.delete_requested': 'Permintaan hapus lead diajukan',
   'm1.lead.delete_decided': 'Permintaan hapus lead diputuskan',
+  // Penugasan Internal (katalog v9 + v10). The raw identifiers read as
+  // machine strings in an inbox, and this is the one module whose notifications
+  // go to people who never touch a Brief.
+  penugasan_ditugaskan: 'Anda mendapat penugasan baru',
+  penugasan_selesai: 'Penugasan ditandai selesai',
+  penugasan_mendekati_jatuh_tempo: 'Penugasan jatuh tempo besok',
+  penugasan_jatuh_tempo: 'Penugasan lewat jatuh tempo',
+  penugasan_dibatalkan: 'Penugasan dibatalkan',
 };
 
 /**

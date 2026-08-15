@@ -24,6 +24,9 @@ describe('notificationHref — entity-keyed pages', () => {
     expect(notificationHref(n('brief', 'BRF-202608-0001'))).toBe('/tasks/BRF-202608-0001');
     expect(notificationHref(n('asset', 'AST-202608-0001'))).toBe('/tasks/AST-202608-0001');
     expect(notificationHref(n('demo_task', 'DEMO-1'))).toBe('/demo-tasks/DEMO-1');
+    // Penugasan Internal is its OWN page, not `/tasks/{}` (M12) — routing it
+    // there would open a Brief/Asset detail that cannot resolve a TSK- id.
+    expect(notificationHref(n('internal_task', 'TSK-202608-0001'))).toBe('/penugasan/TSK-202608-0001');
     expect(notificationHref(n('live_stream_session', 'LSS-202608-0001'))).toBe(
       '/livestream/sessions/LSS-202608-0001',
     );
