@@ -1141,6 +1141,78 @@ BEGIN
   END IF;
 END $$;
 
+-- ---------------------------------------------------------------------------
+-- 44. PERMUKAAN EXECUTE fungsi SECURITY DEFINER.
+--
+--     Kelas cacat yang ini menutup (DECISIONS 2026-08-14): sebuah migrasi
+--     menulis `REVOKE EXECUTE ... FROM PUBLIC`, yang TERLIHAT benar, tapi
+--     Supabase memasang `ALTER DEFAULT PRIVILEGES ... GRANT EXECUTE ON
+--     FUNCTIONS TO anon, authenticated` — hibah EKSPLISIT per-role yang tidak
+--     tersentuh oleh pencabutan PUBLIC. Akibatnya tiga fungsi job SECURITY
+--     DEFINER yang MENULIS bisa dipanggil `anon` di produksi, termasuk
+--     `wrr_monday_job` yang menyalakan `pernah_ditutup_otomatis` permanen dan
+--     karenanya MENURUNKAN skor M14 seseorang.
+--
+--     Gerbang ini hanya bergigi kalau lingkungannya setia: `scripts/db-rebuild.sh`
+--     dan `.github/workflows/ci.yml` kini MENIRU default privileges itu sebelum
+--     menerapkan migrasi. Tanpa tiruan itu check di bawah lolos dengan sendirinya
+--     dan tidak membuktikan apa pun — itulah sebabnya keduanya berpasangan.
+--
+--     Aturannya:
+--       * NOL fungsi SECURITY DEFINER boleh dieksekusi `anon`. Tanpa kecuali:
+--         `anon` tidak pernah mengevaluasi policy `TO authenticated`, jadi tidak
+--         ada helper predikat pun yang membutuhkannya.
+--       * `authenticated` hanya boleh mengeksekusi HELPER PREDIKAT RLS, yang
+--         didaftar eksplisit di bawah. Menambah nama ke daftar itu = keputusan
+--         visibility dan butuh entri DECISIONS, bukan suntingan diam-diam.
+-- ---------------------------------------------------------------------------
+RESET ROLE;
+DO $$
+DECLARE
+  bocor_anon text;
+  bocor_auth text;
+  -- Helper predikat yang DIPANGGIL DARI DALAM ekspresi policy `TO authenticated`.
+  -- Mencabut EXECUTE-nya akan membuat setiap baca yang bergantung pada policy
+  -- itu gagal — jadi mereka WAJIB terbuka, dan didaftar supaya "wajib" itu
+  -- terbaca sebagai keputusan, bukan kelalaian.
+  helper_policy text[] := ARRAY[
+    'jwt_owns_client',      -- 20260723064438 §9 / 20260723064826
+    'jwt_owns_transaction',
+    'jwt_owns_lead',
+    'jwt_owns_client_am',   -- 20260811030000 (Interview) — 2 policy
+    'jwt_owns_interview_am' -- 20260811030000 (Interview) — 8 policy
+  ];
+BEGIN
+  SELECT string_agg(p.proname, ', ' ORDER BY p.proname) INTO bocor_anon
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname = 'public' AND p.prosecdef
+     AND has_function_privilege('anon', p.oid, 'EXECUTE');
+  IF bocor_anon IS NOT NULL THEN
+    RAISE EXCEPTION 'SECURITY DEFINER dapat dieksekusi anon: %. `REVOKE ... FROM PUBLIC` TIDAK cukup di Supabase — sebut rolenya: FROM public, anon, authenticated.', bocor_anon;
+  END IF;
+
+  SELECT string_agg(p.proname, ', ' ORDER BY p.proname) INTO bocor_auth
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname = 'public' AND p.prosecdef
+     AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
+     AND p.proname <> ALL (helper_policy);
+  IF bocor_auth IS NOT NULL THEN
+    RAISE EXCEPTION 'SECURITY DEFINER dapat dieksekusi authenticated di luar daftar helper policy: %. Kunci ke service_role, atau daftarkan + tulis entri DECISIONS.', bocor_auth;
+  END IF;
+
+  -- Arah sebaliknya: kelima helper policy HARUS tetap bisa dieksekusi
+  -- authenticated. Tanpa assert ini, sebuah sweep yang kelewat bersemangat bisa
+  -- mematikan baca Interview/Klien sambil membuat check di atas tetap hijau.
+  SELECT string_agg(h, ', ' ORDER BY h) INTO bocor_auth
+    FROM unnest(helper_policy) h
+    JOIN pg_proc p ON p.proname = h
+    JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'public'
+   WHERE NOT has_function_privilege('authenticated', p.oid, 'EXECUTE');
+  IF bocor_auth IS NOT NULL THEN
+    RAISE EXCEPTION 'Helper predikat RLS KEHILANGAN EXECUTE untuk authenticated (baca yang bergantung padanya akan mati): %', bocor_auth;
+  END IF;
+END $$;
+
 ROLLBACK;
 
 \echo 'rls_checks: PASS'
