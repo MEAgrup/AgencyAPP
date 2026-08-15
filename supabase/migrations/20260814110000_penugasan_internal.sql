@@ -246,16 +246,22 @@ GRANT SELECT ON public.internal_tasks TO authenticated;
 
 REVOKE ALL ON public.internal_tasks FROM anon;
 
--- --- Perbaikan sejalur: client_milestones (T-4c) punya cacat yang SAMA -------
--- `20260814070000_t4c_milestones.sql` menulis `client_milestones_select ... TO
--- authenticated` tetapi tidak pernah GRANT SELECT, jadi halaman Upcoming
--- Milestones (RM-11) gagal untuk setiap pembaca hari ini — `GET /clients/{id}/
--- milestones` juga lewat `readAsActor`. Ditemukan saat memverifikasi migrasi ini
--- lewat query "tabel ber-RLS tanpa grant authenticated".
+-- --- Kesetaraan lingkungan: client_milestones (T-4c) ------------------------
+-- ⚠️ KOREKSI (2026-08-14, sesudah apply ke CDPS SG). Komentar versi pertama
+-- berkas ini menyatakan halaman Upcoming Milestones "gagal untuk setiap pembaca
+-- hari ini". **Itu SALAH untuk produksi**, dan koreksinya dicatat di DECISIONS.
 --
--- Diperbaiki di sini, bukan ditinggal sebagai temuan, karena ia satu baris dan
--- membiarkan halaman mati yang perbaikannya sudah di depan mata lebih buruk
--- daripada memperluas tiket sedikit. Dicatat di DECISIONS 2026-08-14.
+-- Yang benar: `20260814070000_t4c_milestones.sql` memang tidak pernah GRANT
+-- SELECT, tapi proyek Supabase memasang `ALTER DEFAULT PRIVILEGES IN SCHEMA
+-- public GRANT ALL ON TABLES TO authenticated`, jadi di produksi tabel itu
+-- SUDAH punya hibah (`authenticated=arwdDxtm`) dan halamannya jalan normal.
+-- Yang benar-benar rusak adalah Postgres POLOS — CI dan `scripts/db-rebuild.sh`
+-- — yang tidak punya default privileges itu.
+--
+-- GRANT di bawah karena itu bukan perbaikan bug produksi melainkan penyetaraan
+-- lingkungan: ia membuat migrasi berdiri sendiri, sehingga DB yang dibangun dari
+-- berkas repo berperilaku sama dengan live. Di produksi ia no-op (hibah sudah
+-- ada dan lebih luas). Tetap dipertahankan justru karena itu.
 --
 -- Tabel lain yang muncul di query itu (sm_edges, role_mappings,
 -- employee_credentials, id_sequences, …) TIDAK disentuh: semuanya memang
