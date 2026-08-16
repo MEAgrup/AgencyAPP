@@ -439,6 +439,16 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
           )}
           {' '}&mdash; Strategy &amp; Plan dan Brief untuk layanan ini (M6 §4/§5).
         </p>
+        {/* Pintu QA sementara: halaman ini menampilkan DUA entitas strategi
+            (`STR-` M6 §4 dan `STRG-` M6A) sebagai dua kartu, dan hanya yang
+            pertama punya tombol buat. Tautan ini menaruh keduanya berdampingan
+            supaya pemilik bisa memilih satu — dan dibuang bersama halamannya
+            begitu keputusan itu masuk DECISIONS.md. */}
+        <p className="muted" style={{ fontSize: 12 }}>
+          <Link href={`/account/services/${encodeURIComponent(id)}/qa-jalur-plan`}>
+            QA · bandingkan jalur Strategy &amp; Plan (STR-) vs Strategi M6A (STRG-)
+          </Link>
+        </p>
       </div>
 
       {serviceError && <div className="alert alertError" role="alert">{serviceError}</div>}
