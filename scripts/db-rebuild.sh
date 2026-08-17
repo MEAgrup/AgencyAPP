@@ -140,13 +140,17 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "114"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "118"
 check "entity_prefix"    "select count(*) from entity_prefix"    "35"
 check "sm_machines"      "select count(*) from sm_machines"      "23"
 check "notif_events"     "select count(*) from notif_events"     "57"
 # 21 = 20 + mesin #18 `weekly_result_recap` (Modul 6D D-02, 20260813020000:
 #      Terjadwal→Terbuka→Ditutup|Ditutup Otomatis→(Head)Terbuka). nol tabel/prefix
 #      baru di D-02.
+# 118 = 114 + 4 tabel Riset Awal Baseline (RAB-01, 20260817000000): riset_awal_analisa
+#       + riset_awal_sumber_berkas + interview_riset_awal_isian + riset_awal_benchmark.
+#       Semua bigint IDENTITY / kunci alami / versi integer ⇒ 35 (entity_prefix) TETAP;
+#       nol mesin baru ⇒ 23 TETAP; nol event baru ⇒ 57 TETAP.
 # 114 = 113 + internal_tasks (Penugasan Internal, 20260814110000: tugas atasan→tim
 #       di luar rantai Klien→Service→Brief). 35 = 34 + TSK. 23 = 22 + mesin #21
 #       `internal_task` ([Ditugaskan]→[Dikerjakan]→[Selesai] | →[Dibatalkan]).
