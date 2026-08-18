@@ -40,8 +40,17 @@ export interface RisetAwalIsian {
   dikonfirmasi: boolean;
 }
 
+/** One active client_platforms row → one sub-section in the panel (RAB-04). */
+export interface RisetAwalPlatform {
+  client_platform_id: number;
+  platform: string;
+  metode: 'analisa_penuh' | 'analisa_tipis' | 'manual';
+  store_link: string | null;
+}
+
 export interface RisetAwalBaseline {
   interview_id: string;
+  platforms: RisetAwalPlatform[];
   analisa: RisetAwalAnalisa[];
   isian: RisetAwalIsian[];
   semua_terkonfirmasi: boolean;

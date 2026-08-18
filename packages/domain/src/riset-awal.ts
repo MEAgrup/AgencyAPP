@@ -256,8 +256,25 @@ export interface IsianRow {
   dikonfirmasi: boolean;
 }
 
+/**
+ * One active `client_platforms` row the AM must produce a baseline for (RAB-04:
+ * "sub-bagian diturunkan dari client_platforms aktif"). Emitted for EVERY active
+ * platform — even before it has a `riset_awal_analisa` row — so the panel can
+ * render one sub-section per platform and know which method (engine vs manual)
+ * each one takes, without a second round-trip or a platform-picker. `metode` is
+ * derived server-side from the platform name (single source: `metodeForPlatform`).
+ */
+export interface PlatformSlot {
+  clientPlatformId: number;
+  platform: string;
+  metode: MetodeBaseline;
+  storeLink: string | null;
+}
+
 export interface BaselineView {
   interviewId: string;
+  /** Every active store of the client — the sub-sections the panel renders. */
+  platforms: PlatformSlot[];
   analisa: AnalisaRow[];
   isian: IsianRow[];
   /** Every scored field confirmed? (submit gate, keputusan 1.) */
@@ -512,6 +529,22 @@ export async function getBaseline(sql: Queryable, actor: Actor, id: string): Pro
 }
 
 async function readBaseline(sql: Queryable, id: string): Promise<BaselineView> {
+  // The sub-sections the panel renders come from the client's ACTIVE platforms,
+  // not from what has already been submitted — an unsubmitted platform still needs
+  // a slot (RAB-04). Joined through the interview so the read stays keyed by id.
+  const platRows = await sql<Record<string, unknown>[]>`
+    select cp.id, cp.platform, cp.store_link
+      from client_platforms cp
+      join interview i on i.client_id = cp.client_id
+     where i.id = ${id} and cp.active = true
+     order by cp.id`;
+  const platforms: PlatformSlot[] = platRows.map((r) => ({
+    clientPlatformId: Number(r.id),
+    platform: r.platform as string,
+    metode: metodeForPlatform(r.platform as string),
+    storeLink: (r.store_link as string | null) ?? null,
+  }));
+
   const analisa = await sql<Record<string, unknown>[]>`
     select id, client_platform_id, platform, metode_baseline, kondisi_toko, skor,
            benchmark_versi, parser_versi, cakupan_riwayat, created_at
@@ -535,6 +568,7 @@ async function readBaseline(sql: Queryable, id: string): Promise<BaselineView> {
 
   return {
     interviewId: id,
+    platforms,
     analisa: analisa.map((r) => ({
       id: Number(r.id),
       clientPlatformId: Number(r.client_platform_id),

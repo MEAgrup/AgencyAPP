@@ -188,6 +188,20 @@ dDb('submitBaseline — per-platform baseline + auto-fill', () => {
     expect(platformIds).not.toContain(inactiveId);
   });
 
+  it('platforms slots come from ACTIVE client_platforms with a derived method (RAB-04 UI)', async () => {
+    const view = await getBaseline(sql, owner, ITV);
+    // Sub-sections the panel renders are the ACTIVE platforms — the inactive Lazada
+    // store never gets a slot, so the AM is never asked to baseline a dead store.
+    const slotIds = view.platforms.map((p) => p.clientPlatformId).sort();
+    expect(slotIds).toEqual([tiktokId, shopeeId].sort());
+    expect(slotIds).not.toContain(inactiveId);
+    // Method is derived server-side (single source metodeForPlatform): TikTok Shop
+    // gets the 5-pillar engine, Shopee falls back to minimal manual entry.
+    expect(view.platforms.find((p) => p.clientPlatformId === tiktokId)?.metode).toBe('analisa_penuh');
+    expect(view.platforms.find((p) => p.clientPlatformId === shopeeId)?.metode).toBe('manual');
+    expect(view.platforms.find((p) => p.clientPlatformId === tiktokId)?.storeLink).toBe('https://tt.example');
+  });
+
   it('an ambiguous own-vs-affiliate file is rejected until the AM confirms its type', async () => {
     const fresh = await sql<{ id: number }[]>`
       insert into client_platforms (client_id, platform, active, created_by)

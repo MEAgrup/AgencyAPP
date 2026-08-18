@@ -472,6 +472,7 @@ const WIRE_TO_FE: Record<string, string> = {
   InterviewListRowWire: 'interview.ts::InterviewListRow',
   // Riset Awal Baseline (RAB-04/RAB-05) — the per-platform baseline read-model.
   RisetAwalBaselineWire: 'riset-awal.ts::RisetAwalBaseline',
+  RisetAwalPlatformWire: 'riset-awal.ts::RisetAwalPlatform',
   RisetAwalAnalisaWire: 'riset-awal.ts::RisetAwalAnalisa',
   RisetAwalIsianWire: 'riset-awal.ts::RisetAwalIsian',
   BriefWire: 'account.ts::Brief',
