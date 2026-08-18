@@ -157,20 +157,55 @@ export interface FieldSpec {
   hint?: string;
 }
 
-/** Blok B sections in PRD order. `wired` = this catalog renders fields for it. */
-export const INTERVIEW_SECTIONS: Array<{ key: string; label: string; wired: boolean }> = [
-  { key: 'B0', label: 'Konteks & Sumber Data', wired: false },
-  { key: 'B1', label: 'Model & Skala Bisnis', wired: true },
-  { key: 'B2', label: 'Produk, Margin & Suplai', wired: true },
-  { key: 'B3', label: 'Posisi Harga', wired: true },
-  { key: 'B4', label: 'Operasional & Layanan', wired: true },
-  { key: 'B5', label: 'Kompetisi', wired: false },
-  { key: 'B6', label: 'Ekspektasi & Budget', wired: true },
-  { key: 'B7', label: 'Kesiapan Kerja Sama', wired: true },
-  { key: 'B8', label: 'Harga & Penawaran', wired: false },
-  { key: 'B9', label: 'Kategori (config-driven)', wired: false },
-  { key: 'B10', label: 'Riwayat & Ekspektasi Lain', wired: false },
-  { key: 'B11', label: 'Catatan Internal', wired: false },
+/**
+ * The disposition of a Blok B section (RAB-10). A bare `wired: false` left the six
+ * descriptive sections hanging with no recorded reason; every section now carries
+ * an explicit status so "not built" reads as a decision, not an oversight. See
+ * `docs/DECISIONS.md` 2026-08-18 (RAB-09/RAB-10) and RAB-18 (the Interview PRD
+ * that will own the deferred sections' field catalog).
+ *
+ * - `wired` — this catalog renders scored/qualification fields for the section.
+ * - `ditunda_rab18` — DELIBERATELY out of scope until RAB-18. These sections are
+ *   free-text/descriptive; there is no server-side question catalog and the
+ *   Interview spec is a prompt, not a doc, so building inputs here would mean
+ *   inventing ~80 field keys the scorer never reads — CLAUDE.md forbids that
+ *   ("Never invent fields"). They stay collapsed with the reason shown.
+ * - `config_driven` — B9 is the category-specific set; it renders once a route
+ *   serves it (see interview-fields.ts header), not before.
+ */
+export type SectionStatus = 'wired' | 'ditunda_rab18' | 'config_driven';
+
+export interface SectionSpec {
+  key: string;
+  label: string;
+  status: SectionStatus;
+  /** `status === 'wired'` — the only sections the AM can open today. */
+  wired: boolean;
+  /** Why an un-wired section is not available, shown on the disabled toggle. */
+  catatan?: string;
+}
+
+const DITUNDA = 'Sengaja belum dibangun — menunggu PRD Interview (RAB-18) yang mendefinisikan pertanyaannya.';
+
+export const INTERVIEW_SECTIONS: SectionSpec[] = [
+  { key: 'B0', label: 'Konteks & Sumber Data', status: 'ditunda_rab18', wired: false, catatan: DITUNDA },
+  { key: 'B1', label: 'Model & Skala Bisnis', status: 'wired', wired: true },
+  { key: 'B2', label: 'Produk, Margin & Suplai', status: 'wired', wired: true },
+  { key: 'B3', label: 'Posisi Harga', status: 'wired', wired: true },
+  { key: 'B4', label: 'Operasional & Layanan', status: 'wired', wired: true },
+  { key: 'B5', label: 'Kompetisi', status: 'ditunda_rab18', wired: false, catatan: DITUNDA },
+  { key: 'B6', label: 'Ekspektasi & Budget', status: 'wired', wired: true },
+  { key: 'B7', label: 'Kesiapan Kerja Sama', status: 'wired', wired: true },
+  { key: 'B8', label: 'Harga & Penawaran', status: 'ditunda_rab18', wired: false, catatan: DITUNDA },
+  {
+    key: 'B9',
+    label: 'Kategori (config-driven)',
+    status: 'config_driven',
+    wired: false,
+    catatan: 'Set per kategori — muncul saat route config-driven melayaninya.',
+  },
+  { key: 'B10', label: 'Riwayat & Ekspektasi Lain', status: 'ditunda_rab18', wired: false, catatan: DITUNDA },
+  { key: 'B11', label: 'Catatan Internal', status: 'ditunda_rab18', wired: false, catatan: DITUNDA },
 ];
 
 /**

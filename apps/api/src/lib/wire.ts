@@ -4103,6 +4103,43 @@ export function strategiKekuranganToWire(k: strategi.Kekurangan): StrategiKekura
   return { kode: k.kode, pesan: k.pesan };
 }
 
+// --- Interview → Strategi prefill (RAB-09) ---------------------------------
+
+export interface StrategiPrefillItemWire {
+  interview_field: string;
+  strategi_field: string;
+  nilai: string;
+  catatan: string | null;
+}
+
+export interface StrategiPrefillWire {
+  interview_id: string;
+  verdict: string;
+  unlocked: boolean;
+  flags: string[];
+  copy_prasyarat_ke_c7: boolean;
+  wajib_catatan_mitigasi: boolean;
+  items: StrategiPrefillItemWire[];
+}
+
+export function strategiPrefillToWire(p: strategi.StrategiPrefill): StrategiPrefillWire {
+  return {
+    interview_id: p.interviewId,
+    verdict: p.verdict,
+    unlocked: p.unlocked,
+    flags: [...p.flags],
+    copy_prasyarat_ke_c7: p.copyPrasyaratKeC7,
+    wajib_catatan_mitigasi: p.wajibCatatanMitigasi,
+    items: p.items.map((i) => ({
+      interview_field: i.interviewField,
+      strategi_field: i.strategiField,
+      nilai: i.nilai,
+      // Explicit null, never omitted (O43): a missing key blanks the page.
+      catatan: i.catatan ?? null,
+    })),
+  };
+}
+
 /**
  * Inbound: the vendor write body (snake_case) → the domain input (camelCase).
  *

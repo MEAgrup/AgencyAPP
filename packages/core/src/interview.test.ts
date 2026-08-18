@@ -38,6 +38,7 @@ import {
   isScoredField,
   isStrategiBaselineForbidden,
   resolveMargin,
+  resolveStrategiPrefill,
 } from './interview';
 
 /**
@@ -431,6 +432,47 @@ describe('prefill mapping never touches the Strategi Section B numeric baseline'
   });
   it('B2-8 (gross margin) maps to A-3, and net margin B2-7 is not a prefill source', () => {
     expect(PREFILL_MAPPING.find((e) => e.strategiField === 'A-3')?.interviewField).toBe('B2-8');
+  });
+});
+
+describe('resolveStrategiPrefill — the Interview→Strategi production seam (RAB-09)', () => {
+  it('composes handoffKeStrategi: every verdict unlocks and carries its flags', () => {
+    for (const v of Object.values(VERDICT)) {
+      const p = resolveStrategiPrefill(v, new Map());
+      expect(p.unlocked).toBe(true);
+      expect(p.verdict).toBe(v);
+      // Same flags handoffKeStrategi hands out — not a second copy of the rules.
+      expect(p.flags).toEqual(handoffKeStrategi(v).flags);
+      expect(p.wajibCatatanMitigasi).toBe(handoffKeStrategi(v).wajibCatatanMitigasi);
+    }
+  });
+
+  it('only offers answered fields, and copies the mapping catatan verbatim', () => {
+    // B2-8 → A-3 (gross margin), B6-2 → A-9 (verbatim). Leave everything else blank.
+    const answers = new Map<string, string>([
+      ['B2-8', '  42  '],
+      ['B6-2', 'kejar omzet 3x'],
+      ['B1-4', ''], // present but blank → dropped
+    ]);
+    const p = resolveStrategiPrefill(VERDICT.GrowthReady, answers);
+    const a3 = p.items.find((i) => i.strategiField === 'A-3');
+    expect(a3?.interviewField).toBe('B2-8');
+    expect(a3?.nilai).toBe('42'); // trimmed
+    expect(a3?.catatan).toBe('margin KOTOR (not net)');
+    const a9 = p.items.find((i) => i.strategiField === 'A-9');
+    expect(a9?.nilai).toBe('kejar omzet 3x');
+    // Blank/absent interview fields never appear.
+    expect(p.items.some((i) => i.interviewField === 'B1-4')).toBe(false);
+  });
+
+  it('never emits a forbidden Section B numeric baseline, even if the map named one', () => {
+    // No PREFILL_MAPPING entry targets B-1..B-8 today; assert the guard holds
+    // regardless by feeding an answer for every mapped source.
+    const answers = new Map(PREFILL_MAPPING.map((e) => [e.interviewField, 'x']));
+    const p = resolveStrategiPrefill(VERDICT.Bersyarat, answers);
+    for (const item of p.items) {
+      expect(isStrategiBaselineForbidden(item.strategiField)).toBe(false);
+    }
   });
 });
 

@@ -428,6 +428,9 @@ const WIRE_TO_FE: Record<string, string> = {
   StrategiRiskWire: 'strategi.ts::StrategiRisk',
   StrategiEventWire: 'strategi.ts::StrategiEvent',
   StrategiKekuranganWire: 'strategi.ts::StrategiKekurangan',
+  // RAB-09 — Interview → Strategi prefill (Blok D handoff + suggestions).
+  StrategiPrefillWire: 'strategi.ts::StrategiPrefill',
+  StrategiPrefillItemWire: 'strategi.ts::StrategiPrefillItem',
   // A-05 Section A + A-15/A-16, and the repeatable structs A-06 stores as jsonb.
   // They are named interfaces rather than anonymous bags precisely so this guard
   // descends into them — a struct typed `Record<string, unknown>[]` is a shape

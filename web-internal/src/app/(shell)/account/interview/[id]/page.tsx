@@ -588,7 +588,7 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
                         style={{ width: '100%', justifyContent: 'space-between' }}
                         onClick={() => s.wired && toggleSection(s.key)}
                         disabled={!s.wired}
-                        title={s.wired ? undefined : 'Belum tersedia (config-driven / langkah lanjutan)'}
+                        title={s.wired ? undefined : s.catatan}
                       >
                         <span style={{ opacity: s.wired ? 1 : 0.5 }}>
                           {s.key} · {s.label}
@@ -596,6 +596,12 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
                             <span className="muted" style={{ fontWeight: 400 }}>
                               {' '}
                               ({fields.length})
+                            </span>
+                          )}
+                          {!s.wired && (
+                            <span className="muted" style={{ fontWeight: 400 }}>
+                              {' '}
+                              — {s.status === 'config_driven' ? 'config-driven' : 'menunggu PRD Interview (RAB-18)'}
                             </span>
                           )}
                         </span>

@@ -1157,3 +1157,52 @@ export function handoffKeStrategi(verdict: Verdict): HandoffKeStrategi {
       };
   }
 }
+
+// ===========================================================================
+// Blok D — Interview → Strategi bridge (RAB-09)
+// ===========================================================================
+
+/** One prefill suggestion: an interview answer offered to a Strategi field. */
+export interface StrategiPrefillItem extends PrefillEntry {
+  /** The interview answer, as stored (enum code / rupiah minor / plain text). */
+  nilai: string;
+}
+
+/**
+ * What a completed Interview hands to the Strategi it unlocks: the verdict-driven
+ * handoff (flags / prasyarat copy / mitigation requirement) PLUS the concrete
+ * prefill suggestions the AM may accept into Section A/C/E.
+ */
+export interface StrategiPrefill extends HandoffKeStrategi {
+  verdict: Verdict;
+  items: StrategiPrefillItem[];
+}
+
+/**
+ * resolveStrategiPrefill composes the two building blocks this module already
+ * owns — `handoffKeStrategi(verdict)` and `PREFILL_MAPPING` — into the single
+ * value the Interview→Strategi seam carries. It is the production entry point
+ * RAB-09 was missing: nothing here re-derives the mapping or the verdict rules.
+ *
+ * `answers` is a field_key → stored-value map (missing/blank keys are simply not
+ * offered — most descriptive prefill sources live in Blok B sections that are not
+ * collected yet, RAB-10). An entry is DROPPED, never emitted, if its target is a
+ * Section B numeric baseline (`isStrategiBaselineForbidden`): those stay manual
+ * with attached exports and must never be prefilled from Interview, even if a
+ * future mapping edit slipped one in. Suggestions only — the AM types/confirms
+ * the value, mirroring the M6A "usulan → konfirmasi" rule; nothing is written.
+ */
+export function resolveStrategiPrefill(
+  verdict: Verdict,
+  answers: ReadonlyMap<string, string>,
+): StrategiPrefill {
+  const handoff = handoffKeStrategi(verdict);
+  const items: StrategiPrefillItem[] = [];
+  for (const entry of PREFILL_MAPPING) {
+    if (isStrategiBaselineForbidden(entry.strategiField)) continue;
+    const nilai = answers.get(entry.interviewField);
+    if (nilai === undefined || nilai === null || nilai.trim() === '') continue;
+    items.push({ ...entry, nilai: nilai.trim() });
+  }
+  return { ...handoff, verdict, items };
+}
