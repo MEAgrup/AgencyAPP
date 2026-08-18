@@ -78,6 +78,7 @@ import {
   checkCompleteness,
   createStrategi,
   expireStrategi,
+  getBaselinePrefill,
   getStrategi,
   getStrategiPrefill,
   listStrategiForService,
@@ -269,9 +270,14 @@ afterEach(async () => {
   // the row trigger. TRUNCATE both first, bypassing it, before the strategi delete.
   await sql`truncate strategi_share_access_log, strategi_share_token`;
   await sql`delete from strategi where created_by like 'ZZ-%'`;
-  // Interviews (+ their answers/kualifikasi, which cascade) seeded by the RAB-09
-  // prefill test — remove before their client/service/contract go.
+  // Interviews (+ their answers/kualifikasi, and — via interview_riset_awal — the
+  // riset_awal_analisa/sumber_berkas rows, all ON DELETE CASCADE) seeded by the
+  // RAB-09/RAB-11 prefill tests. Remove before their client/service/contract go.
   await sql`delete from interview where created_by like 'ZZ-%'`;
+  // client_platforms (seeded by the RAB-11 baseline test) do NOT cascade from
+  // clients and are referenced by riset_awal_analisa — so they go AFTER the
+  // interview delete (which removed those analisa rows) and BEFORE clients.
+  await sql`delete from client_platforms where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -3573,5 +3579,220 @@ describeDb('getStrategiPrefill — Interview → Strategi bridge (RAB-09)', () =
     const serviceId = await seedService();
     const s = await createStrategi(sql, am(), serviceId, HEADER);
     await expect(getStrategiPrefill(sql, otherAm(), s.id)).rejects.toThrow(ForbiddenError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RAB-11 / RAB-12 — getBaselinePrefill (riset awal baseline → Section B)
+// ---------------------------------------------------------------------------
+
+/**
+ * Seeds riset-awal analysis rows for `interviewId` (already created + Selesai by
+ * `seedScoredInterview`): a scored TikTok Shop store with a <3-month window and a
+ * gmv_mix, plus a Shopee manual entry. Returns the platform ids.
+ */
+async function seedRisetAwalBaseline(
+  interviewId: string,
+  clientId: string,
+): Promise<{ tiktokId: number; shopeeId: number }> {
+  // The analysis + provenance children FK to interview_riset_awal (the M6A step).
+  await sql`
+    insert into interview_riset_awal (interview_id, dimulai_oleh)
+    values (${interviewId}, 'ZZ-AM')
+    on conflict (interview_id) do nothing`;
+
+  const tt = await sql<{ id: number }[]>`
+    insert into client_platforms (client_id, platform, store_link, active, created_by)
+    values (${clientId}, 'TikTok Shop', 'https://tt.example', true, 'ZZ-AM') returning id`;
+  const tiktokId = Number(tt[0].id);
+  const sh = await sql<{ id: number }[]>`
+    insert into client_platforms (client_id, platform, store_link, active, created_by)
+    values (${clientId}, 'Shopee', 'https://sh.example', true, 'ZZ-AM') returning id`;
+  const shopeeId = Number(sh[0].id);
+
+  // TikTok Shop: analisa_penuh, scored, a 2-month (kurang) window, gmv_mix present.
+  const ttPayload = {
+    schema: 'cdps.baseline.tiktok.v1',
+    gmv_baseline: {
+      median_6m: 95_000_000,
+      runrate_3m: 96_000_000,
+      bulan_terisi: 2,
+      cakupan_riwayat: 'kurang',
+      riwayat: [
+        { bulan: '2026-07', label: 'Jul 2026', gmv: 90_000_000, order: 900, tanda: 'normal' },
+        { bulan: '2026-08', label: 'Agu 2026', gmv: 100_000_000, order: 1000, tanda: 'normal' },
+      ],
+    },
+    // RAB-12: attribution WITHIN the platform — must never become a channel.
+    gmv_mix: {
+      video_afiliasi: 15_000_000,
+      live_afiliasi: 0,
+      video_toko: 12_000_000,
+      live_toko: 0,
+      kartu_produk_dan_lain: 73_000_000,
+    },
+    toko: { aov: 100_000 },
+    iklan: { belanja: 8_000_000, roas: 3.5 },
+  };
+  await sql`
+    insert into riset_awal_analisa
+      (interview_id, client_platform_id, platform, metode_baseline, payload,
+       kondisi_toko, skor, benchmark_versi, parser_versi, cakupan_riwayat, created_by)
+    values
+      (${interviewId}, ${tiktokId}, 'TikTok Shop', 'analisa_penuh', ${sql.json(ttPayload)},
+       'mesin_sebagian', 70, 1, 'cdps-baseline-v1', 'kurang', 'ZZ-AM')`;
+  await sql`
+    insert into riset_awal_sumber_berkas
+      (interview_id, platform, nama_berkas, sha256, ukuran_bytes, tipe_terdeteksi, tanggal_ambil, created_by)
+    values
+      (${interviewId}, 'TikTok Shop', 'toko-agustus.xlsx', ${'a'.repeat(64)}, 2048, 'shop_tt', '2026-08-18', 'ZZ-AM')`;
+
+  // Shopee: manual — belum_dapat_diukur, null score, no gmv_mix.
+  await sql`
+    insert into riset_awal_analisa
+      (interview_id, client_platform_id, platform, metode_baseline, payload,
+       kondisi_toko, skor, cakupan_riwayat, created_by)
+    values
+      (${interviewId}, ${shopeeId}, 'Shopee', 'manual',
+       ${sql.json({ schema: 'cdps.baseline.manual.v1', manual: { gmv_bulan: 5_000_000 } })},
+       'belum_dapat_diukur', null, null, 'ZZ-AM')`;
+
+  return { tiktokId, shopeeId };
+}
+
+describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB-12)', () => {
+  it('proposes one channel suggestion per analysed platform, with provenance + months', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    const { tiktokId, shopeeId } = await seedRisetAwalBaseline(interviewId, clientId);
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+
+    const prefill = await getBaselinePrefill(sql, am(), s.id);
+    expect(prefill).not.toBeNull();
+    expect(prefill!.interviewId).toBe(interviewId);
+    // One suggestion per analysed platform — never per gmv_mix category (RAB-12).
+    expect(prefill!.channels).toHaveLength(2);
+
+    const tt = prefill!.channels.find((c) => c.clientPlatformId === tiktokId)!;
+    expect(tt.channel).toBe('TikTok Shop');
+    expect(tt.metodeBaseline).toBe('analisa_penuh');
+    expect(tt.periodeBaselineBulan).toBe(2);
+    expect(tt.cakupanRiwayat).toBe('kurang');
+    // RAB-11 DoD surfaced to the UI: <3-month window ⇒ reason required.
+    expect(tt.alasanPeriodePendekWajib).toBe(true);
+    // Provenance (Rule 5) composed from the uploaded source file.
+    expect(tt.sumberData).toContain('toko-agustus.xlsx');
+    expect(tt.tanggalAmbilData).toBe('2026-08-18');
+    // Per-month rows come straight from gmv_baseline.riwayat (gmv + orders only).
+    expect(tt.baselineBulan).toHaveLength(2);
+    expect(tt.baselineBulan[1].gmv).toBe('100000000');
+    expect(tt.baselineBulan[1].jumlahPesanan).toBe(1000);
+    expect(tt.baselineBulan[1].label).toBe('Agu 2026');
+    // Aggregate figures offered at channel level, not fabricated per month.
+    expect(tt.roas).toBe(3.5);
+    expect(tt.adSpend).toBe('8000000');
+    expect(tt.aov).toBe('100000');
+
+    const sh = prefill!.channels.find((c) => c.clientPlatformId === shopeeId)!;
+    expect(sh.channel).toBe('Shopee');
+    expect(sh.metodeBaseline).toBe('manual');
+    expect(sh.gmvMix).toBeNull();
+  });
+
+  it('carries gmv_mix as a rincian INSIDE the TikTok Shop channel, never as a channel (RAB-12)', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    await seedRisetAwalBaseline(interviewId, clientId);
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+
+    const prefill = await getBaselinePrefill(sql, am(), s.id);
+    const tt = prefill!.channels.find((c) => c.channel === 'TikTok Shop')!;
+    expect(tt.gmvMix).not.toBeNull();
+    expect(tt.gmvMix!.videoAfiliasi).toBe(15_000_000);
+    expect(tt.gmvMix!.kartuProdukDanLain).toBe(73_000_000);
+    // No channel is one of the gmv_mix categories — the mix stays a rincian.
+    const mixNames = ['video_afiliasi', 'live_afiliasi', 'video_toko', 'live_toko', 'kartu_produk_dan_lain'];
+    for (const c of prefill!.channels) {
+      expect(mixNames).not.toContain(c.channel);
+      expect(mixNames).not.toContain(c.platform.toLowerCase().replace(/ /g, '_'));
+    }
+    // Every channel maps onto the real D1 taxonomy.
+    for (const c of prefill!.channels) {
+      expect(['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Website', 'Lainnya']).toContain(c.channel);
+    }
+  });
+
+  it('returns null when the client has no riset awal analysis', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    // A scored interview but no riset_awal_analisa rows.
+    await seedScoredInterview(clientId);
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    expect(await getBaselinePrefill(sql, am(), s.id)).toBeNull();
+  });
+
+  it('is suggestion-only: reading the prefill writes no channel row', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    await seedRisetAwalBaseline(interviewId, clientId);
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+
+    await getBaselinePrefill(sql, am(), s.id);
+    const [{ count }] = await sql<{ count: string }[]>`
+      select count(*)::text as count from strategi_channel where strategi_id = ${s.id}`;
+    expect(count).toBe('0');
+  });
+
+  it('refuses a non-owner AM (same read gate as getStrategi)', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(getBaselinePrefill(sql, otherAm(), s.id)).rejects.toThrow(ForbiddenError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RAB-11 DoD + RAB-13 — the baseline ACC gate is the EXISTING one (machine #15).
+// ---------------------------------------------------------------------------
+describeDb('baseline gate — no second gate (RAB-11 DoD / RAB-13)', () => {
+  it('DB rejects an Eksisting channel <3 months with no alasan_periode_pendek (RAB-11 DoD)', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const [{ id: sid }] = await sql<{ id: string }[]>`select id from strategi where id = ${s.id}`;
+    // All Rule 5 provenance present, window = 2 months, but the reason is missing:
+    // ck_strch_alasan_pendek must bite even on a raw service-role insert.
+    await expect(
+      sql`
+        insert into strategi_channel
+          (strategi_id, channel, status_channel, nama_toko, url_toko,
+           sumber_data, tanggal_ambil_data, lampiran,
+           periode_baseline_bulan, periode_mulai, periode_akhir, created_by)
+        values
+          (${sid}, 'TikTok Shop', 'Eksisting', 'Alpha', 'https://t.example',
+           'export', '2026-08-18', 'toko.xlsx', 2, '2026-07-01', '2026-08-31', 'ZZ-AM')`,
+    ).rejects.toThrow(/ck_strch_alasan_pendek/);
+  });
+
+  it('the acceptance of baseline data is machine #15 (strategi) — there is no second gate machine', async () => {
+    // RAB-13: the baseline flows into the Strategi Draft and is accepted through the
+    // EXISTING strategi machine (#15) — its Diajukan → Aktif edge IS the ACC gate.
+    const accEdge = await sql<{ from_state: string; to_state: string }[]>`
+      select from_state, to_state from sm_edges
+       where machine = 'strategi' and from_state = 'Diajukan' and to_state = 'Aktif'`;
+    expect(accEdge).toHaveLength(1);
+    // No SEPARATE approval/acceptance machine for the baseline was created. (The
+    // pre-existing `riset_awal` machine governs the riset-awal STEP timing, not
+    // strategi acceptance, so it is deliberately excluded here.)
+    const secondGate = await sql<{ name: string }[]>`
+      select name from sm_machines
+       where name ilike '%baseline%' or name ilike '%acc%'
+          or name ilike 'riset_awal_%' or name ilike '%_acc'`;
+    expect(secondGate).toEqual([]);
   });
 });

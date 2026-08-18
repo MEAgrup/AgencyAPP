@@ -903,6 +903,51 @@ export interface StrategiPrefill {
   items: StrategiPrefillItem[];
 }
 
+// Riset awal baseline → Section B channel prefill (RAB-11 / RAB-12). Suggestions
+// the AM may accept into Section B; keys are snake_case — the wire body verbatim.
+export interface StrategiBaselineMonthSuggestion {
+  month_index: number;
+  label: string | null;
+  gmv: string | null;
+  jumlah_pesanan: number | null;
+}
+
+// RAB-12 — attribution WITHIN the TikTok Shop platform, shown as a rincian under
+// the TikTok Shop channel; never its own channel row.
+export interface StrategiGmvMixRincian {
+  video_afiliasi: number | null;
+  live_afiliasi: number | null;
+  video_toko: number | null;
+  live_toko: number | null;
+  kartu_produk_dan_lain: number | null;
+}
+
+export interface StrategiChannelBaselineSuggestion {
+  client_platform_id: number;
+  platform: string;
+  channel: string;
+  channel_lain: string | null;
+  metode_baseline: string;
+  kondisi_toko: string;
+  skor: number | null;
+  periode_baseline_bulan: number | null;
+  cakupan_riwayat: string | null;
+  alasan_periode_pendek_wajib: boolean;
+  sumber_data: string | null;
+  tanggal_ambil_data: string | null;
+  lampiran: string | null;
+  roas: number | null;
+  ad_spend: string | null;
+  aov: string | null;
+  baseline_bulan: StrategiBaselineMonthSuggestion[];
+  gmv_mix: StrategiGmvMixRincian | null;
+}
+
+export interface StrategiBaselinePrefill {
+  interview_id: string;
+  channels: StrategiChannelBaselineSuggestion[];
+}
+
 export interface StrategiHeaderBody {
   durasi_kontrak_bulan: number;
   tanggal_mulai_kontrak: string;
@@ -1214,6 +1259,12 @@ export function saveStrategiHandoff(
  *  completed interview yet. */
 export function getStrategiPrefill(id: string): Promise<StrategiPrefill | null> {
   return api.get<StrategiPrefill | null>(`/strategi/${id}/prefill`);
+}
+
+/** Riset awal baseline → Section B prefill (RAB-11/RAB-12). `null` when the client
+ *  has no scored interview / no analysis rows. Suggestion-only. */
+export function getBaselinePrefill(id: string): Promise<StrategiBaselinePrefill | null> {
+  return api.get<StrategiBaselinePrefill | null>(`/strategi/${id}/baseline-prefill`);
 }
 
 export function strategiKekurangan(id: string): Promise<StrategiKekurangan[]> {

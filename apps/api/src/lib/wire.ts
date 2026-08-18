@@ -4140,6 +4140,93 @@ export function strategiPrefillToWire(p: strategi.StrategiPrefill): StrategiPref
   };
 }
 
+// --- Riset awal baseline → Section B channel prefill (RAB-11 / RAB-12) ------
+
+export interface StrategiBaselineMonthSuggestionWire {
+  month_index: number;
+  label: string | null;
+  gmv: string | null;
+  jumlah_pesanan: number | null;
+}
+
+/** RAB-12 — attribution WITHIN the TikTok Shop platform, never a channel of its own. */
+export interface StrategiGmvMixRincianWire {
+  video_afiliasi: number | null;
+  live_afiliasi: number | null;
+  video_toko: number | null;
+  live_toko: number | null;
+  kartu_produk_dan_lain: number | null;
+}
+
+export interface StrategiChannelBaselineSuggestionWire {
+  client_platform_id: number;
+  platform: string;
+  channel: string;
+  channel_lain: string | null;
+  metode_baseline: string;
+  kondisi_toko: string;
+  skor: number | null;
+  periode_baseline_bulan: number | null;
+  cakupan_riwayat: string | null;
+  alasan_periode_pendek_wajib: boolean;
+  sumber_data: string | null;
+  tanggal_ambil_data: string | null;
+  lampiran: string | null;
+  roas: number | null;
+  ad_spend: string | null;
+  aov: string | null;
+  baseline_bulan: StrategiBaselineMonthSuggestionWire[];
+  gmv_mix: StrategiGmvMixRincianWire | null;
+}
+
+export interface StrategiBaselinePrefillWire {
+  interview_id: string;
+  channels: StrategiChannelBaselineSuggestionWire[];
+}
+
+export function strategiBaselinePrefillToWire(
+  p: strategi.StrategiBaselinePrefill,
+): StrategiBaselinePrefillWire {
+  return {
+    interview_id: p.interviewId,
+    channels: p.channels.map((c) => ({
+      client_platform_id: c.clientPlatformId,
+      platform: c.platform,
+      channel: c.channel,
+      // Explicit null everywhere, never omitted (O43): a missing key blanks the page.
+      channel_lain: c.channelLain ?? null,
+      metode_baseline: c.metodeBaseline,
+      kondisi_toko: c.kondisiToko,
+      skor: c.skor ?? null,
+      periode_baseline_bulan: c.periodeBaselineBulan ?? null,
+      cakupan_riwayat: c.cakupanRiwayat ?? null,
+      alasan_periode_pendek_wajib: c.alasanPeriodePendekWajib,
+      sumber_data: c.sumberData ?? null,
+      tanggal_ambil_data: c.tanggalAmbilData ?? null,
+      lampiran: c.lampiran ?? null,
+      roas: c.roas ?? null,
+      ad_spend: c.adSpend ?? null,
+      aov: c.aov ?? null,
+      baseline_bulan: c.baselineBulan.map((m) => ({
+        month_index: m.monthIndex,
+        label: m.label ?? null,
+        gmv: m.gmv ?? null,
+        jumlah_pesanan: m.jumlahPesanan ?? null,
+      })),
+      gmv_mix:
+        c.gmvMix === null
+          ? null
+          : {
+              video_afiliasi: c.gmvMix.videoAfiliasi ?? null,
+              live_afiliasi: c.gmvMix.liveAfiliasi ?? null,
+              video_toko: c.gmvMix.videoToko ?? null,
+              live_toko: c.gmvMix.liveToko ?? null,
+              kartu_produk_dan_lain: c.gmvMix.kartuProdukDanLain ?? null,
+            },
+    })),
+  };
+}
+
 /**
  * Inbound: the vendor write body (snake_case) → the domain input (camelCase).
  *
