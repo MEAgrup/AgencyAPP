@@ -357,6 +357,55 @@ describeDb('metrics (§5) + attribution (§7) + ROAS', () => {
     expect(got.underperformingStreak).toBe(2);
     expect(got.escalationFlagged).toBe(true);
   });
+
+  it('C4: emits m8.ads.roas_underperforming once at the 2nd consecutive under-target period → owning AM + SPV Ads', async () => {
+    // An active Ads lead ≠ the actor so `leadsOfDivision` resolves SPV Ads.
+    await sql`insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+      values ('ZZ-ADSLEAD', 'Ads Lead', 'adslead@mea.id', 'Ads', 'ZZ-ADS-LEAD-JAB', true, 'ZZ-TEST')
+      on conflict (employee_id) do nothing`;
+    await sql`insert into role_mappings (divisi, jabatan, division, level, created_by)
+      values ('Ads', 'ZZ-ADS-LEAD-JAB', 'Ads', 'lead', 'ZZ-TEST') on conflict (divisi, jabatan) do nothing`;
+
+    const { briefId } = await adsBrief(); // owner AM = ZZ-SINTA
+    const c = await createCampaign(sql, adsStaff(), briefId, goodInput()); // target ROAS 4
+    const EVT = 'm8.ads.roas_underperforming';
+    const recips = async (): Promise<string[]> =>
+      (await sql<{ recipient_employee_id: string }[]>`
+        select recipient_employee_id from notifications
+         where entity_id = ${c.id} and event_type = ${EVT} order by id`).map((r) => r.recipient_employee_id);
+
+    // P1 ROAS 2 (< 4): streak 1 — nothing fires yet.
+    await logMetricEntry(sql, adsStaff(), c.id, { periodStart: '2026-07-01', periodEnd: '2026-07-07', spend: '1000000', gmv: '2000000', entryMethod: 'Manual' });
+    expect(await recips()).toEqual([]);
+    // P2 ROAS 1: streak 2 — fires ONCE, to the owning AM + SPV Ads.
+    await logMetricEntry(sql, adsStaff(), c.id, { periodStart: '2026-07-08', periodEnd: '2026-07-14', spend: '1000000', gmv: '1000000', entryMethod: 'Manual' });
+    expect([...new Set(await recips())].sort()).toEqual(['ZZ-ADSLEAD', 'ZZ-SINTA']);
+    const afterEpisode1 = (await recips()).length;
+    expect(afterEpisode1).toBe(2);
+    // P3 ROAS 1.5: streak 3 — does NOT re-emit (only the transition to exactly 2 fires).
+    await logMetricEntry(sql, adsStaff(), c.id, { periodStart: '2026-07-15', periodEnd: '2026-07-21', spend: '1000000', gmv: '1500000', entryMethod: 'Manual' });
+    expect((await recips()).length).toBe(2);
+    // P4 ROAS 5 (>= 4): streak resets to 0 — still no new emit.
+    await logMetricEntry(sql, adsStaff(), c.id, { periodStart: '2026-07-22', periodEnd: '2026-07-28', spend: '1000000', gmv: '5000000', entryMethod: 'Manual' });
+    expect((await recips()).length).toBe(2);
+    // P5 ROAS 2: streak 1 again.
+    await logMetricEntry(sql, adsStaff(), c.id, { periodStart: '2026-07-29', periodEnd: '2026-08-04', spend: '1000000', gmv: '2000000', entryMethod: 'Manual' });
+    expect((await recips()).length).toBe(2);
+    // P6 ROAS 1: streak 2 again — a fresh episode re-fires.
+    await logMetricEntry(sql, adsStaff(), c.id, { periodStart: '2026-08-05', periodEnd: '2026-08-11', spend: '1000000', gmv: '1000000', entryMethod: 'Manual' });
+    expect((await recips()).length).toBe(4);
+  });
+
+  it('C4: a non-ROAS target never escalates (streak stays 0, no notification)', async () => {
+    const { briefId } = await adsBrief();
+    // Spend-cap target — parseRoasTarget returns null, so no ROAS streak is tracked.
+    const c = await createCampaign(sql, adsStaff(), briefId, { ...goodInput(), targetKpi: 'Spend ≤ Rp 8.000.000' });
+    await logMetricEntry(sql, adsStaff(), c.id, { periodStart: '2026-07-01', periodEnd: '2026-07-07', spend: '1000000', gmv: '100000', entryMethod: 'Manual' });
+    await logMetricEntry(sql, adsStaff(), c.id, { periodStart: '2026-07-08', periodEnd: '2026-07-14', spend: '1000000', gmv: '100000', entryMethod: 'Manual' });
+    const n = await sql<{ n: string }[]>`
+      select count(*) as n from notifications where entity_id = ${c.id} and event_type = 'm8.ads.roas_underperforming'`;
+    expect(Number(n[0].n)).toBe(0);
+  });
 });
 
 describeDb('optimization log (§6)', () => {

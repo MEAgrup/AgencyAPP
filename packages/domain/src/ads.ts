@@ -23,7 +23,7 @@
  * Reference: backend/internal/module8_ads/{ads,lifecycle,linkage,optimization,metrics,read}.go.
  */
 
-import { bi, money, permission, statemachine } from '@cdps/core';
+import { bi, money, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 
 /** Authenticated employee + resolved role. */
@@ -675,6 +675,19 @@ export async function logMetricEntry(sql: Sql, actor: Actor, campaignId: string,
     for (const assetId of linked) {
       await recomputeAssetAttribution(tx, assetId);
     }
+    // §8 Rule 4 / M8-OA-5 (C4): escalate when ROAS falls below target for 2
+    // consecutive periods. Emit exactly at the transition to a streak of 2 — the
+    // entry just inserted is what moved it there — so this fires once per episode
+    // without a marker column (a 3rd under-target period keeps streak >= 3 and
+    // does not re-emit; a good period resets it, and a fresh 2-streak re-fires).
+    if (await computeUnderTargetStreak(tx, campaignId, r.targetKpi) === 2) {
+      await notification.emit(ex.notify, {
+        event: notification.EVENTS.AdsRoasUnderperforming,
+        entityType: 'ad_campaign', entityId: campaignId, actor: actor.employeeId,
+        division: ADS_DIVISION,
+        explicitRecipients: r.ownerAm ? [r.ownerAm] : [],
+      });
+    }
     return {
       id, campaignId, periodStart: pStart, periodEnd: pEnd, spend: Number(spend) / 100, gmv: Number(gmv) / 100,
       entryMethod: method, enteredBy: actor.employeeId, createdAt: now,
@@ -807,6 +820,27 @@ async function fillDerived(sql: Queryable, campaignId: string, targetKpi: string
     linkedAssetIds, metricEntryCount: entries.length, optimizationCount: optCount,
     underperformingStreak, escalationFlagged: underperformingStreak >= 2,
   };
+}
+
+/**
+ * computeUnderTargetStreak reads a campaign's Metric Entries in period order and
+ * returns the trailing count of consecutive periods with ROAS below its ROAS
+ * target (§8 Rule 4). Zero when the target is not ROAS-typed (no escalation for a
+ * Spend-cap / non-ROAS target). Reuses the exact series + trailing logic fillDerived
+ * uses for the read-side `escalationFlagged`, so the emit and the flag agree.
+ */
+async function computeUnderTargetStreak(sql: Queryable, campaignId: string, targetKpi: string): Promise<number> {
+  const target = parseRoasTarget(targetKpi);
+  if (target === null) {
+    return 0;
+  }
+  const entries = await sql<{ spend: string; gmv: string }[]>`
+    select spend, gmv from metric_entries where campaign_id = ${campaignId} order by period_start, id`;
+  const series = entries.map((e) => {
+    const spend = money.parse(e.spend);
+    return spend === 0n ? 0 : Number(money.parse(e.gmv)) / Number(spend);
+  });
+  return trailingUnderTarget(series, target);
 }
 
 /** trailingUnderTarget counts the most-recent consecutive periods with ROAS below target (§8 Rule 4). */

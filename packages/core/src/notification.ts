@@ -137,6 +137,13 @@ export const EVENTS = {
   PenugasanJatuhTempo: 'penugasan_jatuh_tempo', // -> PIC + assigner + division lead
   PenugasanDibatalkan: 'penugasan_dibatalkan', // -> PIC
 
+  // ----- catalog v11 (M8 Ads — C4) — 1 event -----
+  // Owner decision 2026-08-18: opened the frozen catalog for ONE event so a
+  // campaign whose ROAS is below target for 2 consecutive periods (§8 Rule 4 /
+  // M8-OA-5) escalates instead of only lighting a passive read-flag. Dotted `mN`
+  // convention (the PRD never spelled an identifier for it) — like m6.client.assigned.
+  AdsRoasUnderperforming: 'm8.ads.roas_underperforming', // -> owning AM + SPV Ads
+
 } as const;
 
 /** A cataloged event type. */
@@ -224,6 +231,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
       'Penugasan Internal — 3 event jatuh tempo & pembatalan (penugasan_mendekati_jatuh_tempo H-1 → PIC; penugasan_jatuh_tempo → PIC + pemberi tugas + lead divisi; penugasan_dibatalkan → PIC). Menutup lubang yang dicatat v9: emitter-nya job harian `penugasan_reminder_tick`.',
     eventCount: 3,
     decisionRef: 'docs/DECISIONS.md 2026-08-14 (Penugasan Internal — notifikasi tambahan, permintaan pemilik)',
+  },
+  {
+    version: 11,
+    description:
+      'M8 Ads eskalasi ROAS underperforming — 1 event (m8.ads.roas_underperforming: ROAS < target 2 periode berturut → AM pemilik + SPV Ads)',
+    eventCount: 1,
+    decisionRef: 'docs/DECISIONS.md 2026-08-18 (C4 — pemilik setuju membuka satu event katalog)',
   },
 ] as const;
 
@@ -355,6 +369,10 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
   // explicit, division lead resolved from `division`.
   [EVENTS.PenugasanJatuhTempo]: { description: 'Penugasan internal lewat jatuh tempo & belum selesai — ke PIC, pemberi tugas, lead divisi', resolver: 'explicitOrLeads', version: 10 },
   [EVENTS.PenugasanDibatalkan]: { description: 'Penugasan internal dibatalkan atasan — ke karyawan yang ditugaskan', resolver: 'explicit', version: 10 },
+
+  // --- v11 (M8 Ads — C4). Description/resolver must match the migration seed
+  // (20260818040000_m8_roas_underperforming_notif.sql). ---
+  [EVENTS.AdsRoasUnderperforming]: { description: 'ROAS di bawah target 2 periode berturut (§8 Rule 4 / M8-OA-5) — ke AM pemilik + SPV Ads', resolver: 'explicitOrLeads', version: 11 },
 };
 
 /** All registered event types (introspection / tests). */

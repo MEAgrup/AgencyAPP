@@ -34,9 +34,9 @@ describe('frozen catalog', () => {
     }
   });
 
-  it('is at version 10, and the versions are registered in order with no gaps', () => {
-    expect(CATALOG_VERSION).toBe(10);
-    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  it('is at version 11, and the versions are registered in order with no gaps', () => {
+    expect(CATALOG_VERSION).toBe(11);
+    expect(CATALOG_VERSIONS.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     // A registry row with no decision reference is how an un-signed-off
     // amendment would sneak in looking legitimate.
     for (const v of CATALOG_VERSIONS) {
@@ -235,6 +235,14 @@ describe('frozen catalog', () => {
     expect(CATALOG[EVENTS.PenugasanMendekatiJatuhTempo].resolver).toBe('explicit');
     expect(CATALOG[EVENTS.PenugasanJatuhTempo].resolver).toBe('explicitOrLeads');
     expect(CATALOG[EVENTS.PenugasanDibatalkan].resolver).toBe('explicit');
+  });
+
+  it('registers catalog v11 — M8 ROAS underperforming (C4), owning AM + SPV Ads', () => {
+    expect(eventsOfVersion(11)).toEqual(['m8.ads.roas_underperforming']);
+    expect(EVENTS.AdsRoasUnderperforming).toBe('m8.ads.roas_underperforming');
+    // Owning AM (explicit) + SPV Ads (lead of the Ads division) → explicitOrLeads.
+    expect(CATALOG[EVENTS.AdsRoasUnderperforming].resolver).toBe('explicitOrLeads');
+    expect(CATALOG[EVENTS.AdsRoasUnderperforming].version).toBe(11);
   });
 
   it('every event carries a description and a valid resolver', () => {
