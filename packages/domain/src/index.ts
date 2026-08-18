@@ -94,6 +94,7 @@ export * as contract from './contract';
 export * as vendor from './vendor';
 export * as strategi from './strategi';
 export * as interview from './interview';
+export * as risetAwal from './riset-awal';
 export * as plan from './plan';
 export * as recap from './recap';
 export * as task from './task';

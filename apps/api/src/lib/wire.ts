@@ -7,7 +7,7 @@
  */
 import { money, tz } from '@cdps/core';
 import type { interview as ivcore } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, campaign, client, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plangate, portal, recap, sales, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, audit, auth, board, campaign, client, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plangate, portal, recap, risetAwal, sales, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -5151,5 +5151,70 @@ export function recapMetrikManualFromWire(v: unknown): recap.RecapMetrikManualIn
     nilai: numOrNull(b.nilai),
     fileBukti: b.file_bukti === undefined || b.file_bukti === null ? undefined : String(b.file_bukti),
     tanggalAmbil: b.tanggal_ambil === undefined || b.tanggal_ambil === null ? undefined : String(b.tanggal_ambil),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Riset Awal Baseline (RAB-04/RAB-05) — the per-platform baseline read-model.
+// Wire body is snake_case; missing keys are more dangerous than null, so every
+// optional field is emitted as explicit null (house convention, wire.ts).
+// ---------------------------------------------------------------------------
+export interface RisetAwalAnalisaWire {
+  id: number;
+  client_platform_id: number;
+  platform: string;
+  metode_baseline: string;
+  kondisi_toko: string;
+  skor: number | null;
+  benchmark_versi: number | null;
+  parser_versi: string | null;
+  cakupan_riwayat: string | null;
+  created_at: string;
+}
+
+export interface RisetAwalIsianWire {
+  section: string;
+  field_key: string;
+  sumber: string;
+  nilai_teks: string | null;
+  nilai_angka: number | null;
+  nilai_uang: string | null;
+  nilai_usulan: unknown;
+  dikonfirmasi: boolean;
+}
+
+export interface RisetAwalBaselineWire {
+  interview_id: string;
+  analisa: RisetAwalAnalisaWire[];
+  isian: RisetAwalIsianWire[];
+  semua_terkonfirmasi: boolean;
+}
+
+export function risetAwalBaselineToWire(v: risetAwal.BaselineView): RisetAwalBaselineWire {
+  return {
+    interview_id: v.interviewId,
+    analisa: v.analisa.map((a) => ({
+      id: a.id,
+      client_platform_id: a.clientPlatformId,
+      platform: a.platform,
+      metode_baseline: a.metodeBaseline,
+      kondisi_toko: a.kondisiToko,
+      skor: a.skor,
+      benchmark_versi: a.benchmarkVersi,
+      parser_versi: a.parserVersi,
+      cakupan_riwayat: a.cakupanRiwayat,
+      created_at: a.createdAt,
+    })),
+    isian: v.isian.map((f) => ({
+      section: f.section,
+      field_key: f.fieldKey,
+      sumber: f.sumber,
+      nilai_teks: f.nilaiTeks,
+      nilai_angka: f.nilaiAngka,
+      nilai_uang: f.nilaiUang,
+      nilai_usulan: f.nilaiUsulan ?? null,
+      dikonfirmasi: f.dikonfirmasi,
+    })),
+    semua_terkonfirmasi: v.semuaTerkonfirmasi,
   };
 }
