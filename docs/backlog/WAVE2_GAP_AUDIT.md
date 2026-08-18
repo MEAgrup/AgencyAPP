@@ -32,10 +32,10 @@
 | C1 | M10 | GMV live reconciled → sinyal GMV klien untuk Health Score (§6.2 #5, §5 Rule 1) belum terpasang. | **Lintas-sistem**: `clients.total_sales` tak ditulis apa pun di seluruh proyek; jalur Ads yang mesti ditiru pun belum ada. Desain lintas-modul (M10+M13). Oracle Go sama. |
 | C2 | M9 | Attributed GMV diketik manual oleh Coordinator (`recordAttributedGmv`), bukan dari affiliate-link tracking (§10.3 "read-only, populated via trackable link, never estimated"). | Tema sama C1/C3: pipeline tracking link belum dibangun. Kontras M8 yang derive dari metric rows immutable. |
 | C3 | M7 | Monthly review-and-lock Attributed GMV (§8 Rule 3 / M7-OA-4 — provisional s.d. lock bulanan). | Scope M8/M13; sebagian tercakup deferral W2-M7-C1. |
-| C4 | M8 | Eskalasi ROAS < target 2 periode berturut (§8 Rule 4 / M8-OA-5) hanya **flag pasif** di read, tak ada notif/log. | Katalog notifikasi beku (oracle `ads.go:168-172` "emits NOTHING"). Butuh event baru bila ditegakkan. |
-| C5 | M7 | Antrean Asset pribadi per-PIC lintas Brief (§3 Rule 2 / §9.1 "own Asset queue") — tak ada read/route. | Read baru + rute; tak melanggar invariant (MINOR). Tak tercakup deferral. |
-| C6 | M9 | (a) Flag sourcing-stall dini (§4 Rule 4, Booking lewat separuh window). (b) Baris "total spend = Σ Agreed Rate" di laporan KOL bulanan (§9). | (a) butuh tick/flag baru. (b) komponen M14 sudah ada; hanya baris spend + surface standalone belum. |
-| C7 | M6D | Field display auto RM-A5 (Service Aktif Minggu Ini) & RM-D4 (Keluhan Terkait) belum di read-model `getRecapDetail`. | Display-only; tambah ke read-model + wire + FE. |
+| C4 | M8 | Eskalasi ROAS < target 2 periode berturut (§8 Rule 4 / M8-OA-5) hanya **flag pasif** di read, tak ada notif/log. | ✅ **SELESAI SESI43** (DECISIONS 2026-08-18 C4): event baru `m8.ads.roas_underperforming` (katalog v11, pemilik ACC), emit idempoten saat streak=2 → AM + SPV Ads. |
+| C5 | M7 | Antrean Asset pribadi per-PIC lintas Brief (§3 Rule 2 / §9.1 "own Asset queue") — tak ada read/route. | ✅ **SELESAI SESI43** (DECISIONS 2026-08-18 C5): `listMyAssets` + `GET /assets/mine` + panel FE. |
+| C6 | M9 | (a) Flag sourcing-stall dini (§4 Rule 4, Booking lewat separuh window). (b) Baris "total spend = Σ Agreed Rate" di laporan KOL bulanan (§9). | ✅ **SELESAI SESI43** (DECISIONS 2026-08-18 C6): (a) `sourcingStallFlagged` derived read-only + banner FE; (b) `monthlyKolReport` + `GET /kol/monthly-report` + section FE. |
+| C7 | M6D | Field display auto RM-A5 (Service Aktif Minggu Ini) & RM-D4 (Keluhan Terkait) belum di read-model `getRecapDetail`. | ✅ **SELESAI SESI43** (DECISIONS 2026-08-18 C5+C7): diturunkan live di `getRecapDetail` + wire + FE. |
 
 ## Yang TIDAK dikerjakan di PR Kelas A
 - Semua Kelas B & C (menunggu keputusan pemilik / tiket tersendiri).
