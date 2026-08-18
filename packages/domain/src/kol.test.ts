@@ -251,10 +251,10 @@ describeDb('native lifecycle drives the Brief roll-up (§2)', () => {
     expect(await briefStatus(briefId)).toBe('[Approved]'); // all bookings resolved
   });
 
-  it('QC fail respects the 1-revision cap then forces escalation; escalate needs KOL lead', async () => {
+  it('QC fail respects the 1-revision cap then forces escalation; assigned Coordinator may escalate (§10.1 / B2)', async () => {
     const { briefId } = await kolBrief(1);
     const b = await createBooking(sql, kolStaff('ZZ-COORD'), briefId, goodInput());
-    const c = kolStaff('ZZ-COORD');
+    const c = kolStaff('ZZ-COORD'); // the self-claimed assigned Coordinator
     await book(sql, c, b.id);
     await startContent(sql, c, b.id);
     await submitContent(sql, c, b.id, 'https://x');
@@ -266,12 +266,37 @@ describeDb('native lifecycle drives the Brief roll-up (§2)', () => {
     await sendToQCReview(sql, c, b.id);
     // Cap reached: a 2nd fail is blocked, only escalation remains.
     await expect(failQC(sql, c, b.id, 'masih buruk')).rejects.toBeInstanceOf(ConflictError);
-    await expect(escalate(sql, c, b.id, 'kreator hilang')).rejects.toBeInstanceOf(ForbiddenError); // staff cannot escalate
-    await escalate(sql, kolLead(), b.id, 'kreator hilang');
+    // B2: a KOL staff who is NOT the assigned Coordinator still cannot escalate.
+    await expect(escalate(sql, kolStaff('ZZ-OTHER'), b.id, 'x')).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(escalate(sql, c, b.id, '  ')).rejects.toBeInstanceOf(ValidationError); // notes mandatory
+    // B2 / §10.1: the assigned Coordinator MAY escalate — it surfaces to the SPV.
+    await escalate(sql, c, b.id, 'kreator hilang');
     expect(await bkgStatus(b.id)).toBe('[Escalated - Creator Unresponsive]');
+    // The escalation tier is captured in the immutable log (Coordinator → SPV).
+    const esc = await sql<{ after_json: { escalated_to: string } }[]>`
+      select after_json from audit_log
+       where entity_type = 'creator_booking' and entity_id = ${b.id} and action = 'escalated'
+       order by id desc limit 1`;
+    expect(esc[0].after_json.escalated_to).toBe('SPV');
     // Continue from escalation (AM proxy) keeps the existing content link.
     await continueFromEscalation(sql, am(), b.id, '');
     expect(await bkgStatus(b.id)).toBe('[Content Submitted]');
+  });
+
+  it('a Lead escalation is tiered to the Director (§10.1 / M9-OA-6 / B2)', async () => {
+    const { briefId } = await kolBrief(1);
+    const b = await createBooking(sql, kolLead(), briefId, goodInput()); // lead creates, unassigned
+    const c = kolLead();
+    await book(sql, c, b.id);
+    await startContent(sql, c, b.id);
+    await submitContent(sql, c, b.id, 'https://x');
+    await sendToQCReview(sql, c, b.id);
+    await escalate(sql, c, b.id, 'kreator hilang');
+    const esc = await sql<{ after_json: { escalated_to: string } }[]>`
+      select after_json from audit_log
+       where entity_type = 'creator_booking' and entity_id = ${b.id} and action = 'escalated'
+       order by id desc limit 1`;
+    expect(esc[0].after_json.escalated_to).toBe('Director');
   });
 
   it('drop is KOL-lead/Account-lead/Director only, reason mandatory', async () => {
@@ -282,6 +307,25 @@ describeDb('native lifecycle drives the Brief roll-up (§2)', () => {
     await expect(drop(sql, kolLead(), b.id, '  ')).rejects.toBeInstanceOf(ValidationError);
     await drop(sql, kolLead(), b.id, 'kreator batal');
     expect(await bkgStatus(b.id)).toBe('[Dropped]');
+  });
+
+  it('an unresponsive creator can be dropped straight from [Content In Progress] (B1)', async () => {
+    const { briefId } = await kolBrief(1);
+    const b = await createBooking(sql, kolStaff('ZZ-COORD'), briefId, goodInput());
+    const c = kolStaff('ZZ-COORD');
+    await book(sql, c, b.id);
+    await startContent(sql, c, b.id);
+    expect(await bkgStatus(b.id)).toBe('[Content In Progress]');
+    // Still lead-gated + reason mandatory (drop is a lead decision, not the Coordinator's).
+    await expect(drop(sql, c, b.id, 'kreator hilang')).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(drop(sql, kolLead(), b.id, '  ')).rejects.toBeInstanceOf(ValidationError);
+    await drop(sql, kolLead(), b.id, 'kreator hilang, masuk blacklist');
+    expect(await bkgStatus(b.id)).toBe('[Dropped]');
+    const dr = await sql<{ after_json: { reason: string } }[]>`
+      select after_json from audit_log
+       where entity_type = 'creator_booking' and entity_id = ${b.id} and action = 'drop_reason'
+       order by id desc limit 1`;
+    expect(dr[0].after_json.reason).toBe('kreator hilang, masuk blacklist');
   });
 });
 

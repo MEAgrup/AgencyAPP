@@ -287,15 +287,19 @@ export function canExecuteBooking(role: Role | null, employeeId: string | undefi
   return !!employeeId && employeeId === booking.assigned_coordinator;
 }
 
-/** canEscalate (lifecycle.go:93): KOL Team Leader or Director ONLY — staff
- * Coordinators cannot escalate even though PRD §10.1 prose suggests otherwise
- * (m9 brief GOTCHA — code wins, flagged as a potential PRD/code gap). */
-export function canEscalateBooking(role: Role | null): boolean {
-  return isDirector(role) || isKolLead(role);
+/** canEscalate (§10.1): the assigned Coordinator, KOL Team Leader, or Director.
+ * B2 (DECISIONS 2026-08-18) resolved the old PRD/code gap in favour of §10.1 —
+ * the Coordinator may "escalate when needed" — so this now mirrors
+ * canExecuteBooking (the claim/QC gate) instead of the old lead-only rule. */
+export function canEscalateBooking(role: Role | null, employeeId: string | undefined, booking: Booking): boolean {
+  return canExecuteBooking(role, employeeId, booking);
 }
 
-/** canDrop (lifecycle.go:99): KOL Team Leader, Account lead (tie-breaker), or Director.
- * Valid only from [Sourcing]/[Booked]/[Escalated - Creator Unresponsive] (gotcha #11). */
+/** canDrop: KOL Team Leader, Account lead (tie-breaker), or Director.
+ * Valid from [Sourcing]/[Booked]/[Content In Progress]/[Escalated - Creator
+ * Unresponsive]. The [Content In Progress] state was added B1 (DECISIONS
+ * 2026-08-18) so an unresponsive creator who never submits content can still
+ * be dropped instead of leaving the Booking stuck. */
 export function canDropBooking(role: Role | null): boolean {
   return isDirector(role) || isKolLead(role) || isAccountLead(role);
 }

@@ -41,10 +41,11 @@ Expected outcome: one shared, auditable definition of "how fast was this task, r
 1. Task is created (Asset row from Brief breakdown, Booking row, or the Brief itself for single-unit divisions) → status `[To Do]`, SLA Target inherited from parent Brief →
 2. PIC starts work → `[In Progress]` → Turnaround clock starts →
 3. PIC submits → `[Submitted]` → `[In Review]` →
-4. Reviewer decides:
+4. Reviewer decides (from `[In Review]`):
    - `[Approved]` → clock stops, Speed Score computed, Revision Count finalized →
    - `[Revision Requested]` → clock keeps running (Rule 5); a fresh Revision Turnaround sub-timer starts →
-   - `[Blocked]` → clock pauses (Rule 7) →
+   - ⟳ **B3 (DECISIONS 2026-08-18):** `[Blocked]` is **not** a reviewer verdict here. The superseded original listed `[Blocked]` as a third outcome of step 4 (i.e. reachable from `[In Review]`), but that contradicts Rules 2/7/8 and STATE_MACHINES §7, which enter `[Blocked]` **only from `[In Progress]`** (an external dependency stalls the PIC mid-work, not the reviewer). The engine has no `[In Review]→[Blocked]` edge; blocking happens at step 4b below.
+4b. `[Blocked]` (entered **from `[In Progress]`**, Rule 2): when an external dependency stalls the PIC mid-work, an SPV/Lead sets `[Blocked]` (Rule 8 — staff/AM may only request it) → the Turnaround clock pauses (Rule 7). A Task waiting on review is never "blocked in review"; if the reviewer needs a change it returns via `[Revision Requested]` (step 4), after which it can be blocked from `[In Progress]` if a dependency then stalls it.
 5. From `[Revision Requested]`: PIC reworks → `[In Progress]` → `[Submitted]` again → loop until `[Approved]` →
 6. From `[Blocked]`: external dependency resolves (may tie to Module 11's Dependency entity) → back to `[In Progress]`, clock resumes →
 7. On `[Approved]`: system finalizes Turnaround Time, Speed Score, and Revision Count — all roll up into Daily Output / staff KPI (Module 7 pattern), then onward to Module 14.

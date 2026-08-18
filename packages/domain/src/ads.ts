@@ -73,6 +73,8 @@ export const MSG_INVALID_PERIOD = '[periode metrik tidak valid]';
 export const MSG_CAMPAIGN_ENDED = '[ad campaign sudah berakhir, metric entry tidak bisa dicatat]';
 export const MSG_INVALID_CHANGE_TYPE = '[jenis perubahan tidak valid]';
 export const MSG_BUDGET_APPROVAL_REQUIRED = '[penyesuaian budget lebih dari 50% memerlukan persetujuan AM/SPV Ads]';
+export const MSG_KPI_BELOW_STANDARD =
+  '[target KPI GMV di bawah standar minimum (pertumbuhan 20% per kuartal dari baseline), perlu persetujuan SPV Ads]';
 export const MSG_BAD_AMOUNT = '[nilai uang tidak valid]';
 export const MSG_BAD_COUNT = '[nilai clicks/impressions/conversions harus bilangan bulat ≥ 0]';
 
@@ -142,6 +144,67 @@ export function hasBudgetSignOff(actor: Actor, ownerAm: string): boolean {
     return true;
   }
   return actor.role.division === ADS_DIVISION && actor.role.level === permission.LevelLead;
+}
+
+/**
+ * hasKpiSignOff (M8 §4 Rule 1 / M8-OA-4 / B4): the owning AM, the Ads lead
+ * (SPV Ads), or Director may set ANY Target KPI — including a GMV target below
+ * the ≥20%/quarter-from-baseline minimum. Same authority set as the budget
+ * sign-off; an Advertiser (Ads staff) alone can only self-set a target that
+ * already clears the standard.
+ */
+export function hasKpiSignOff(actor: Actor, ownerAm: string): boolean {
+  return hasBudgetSignOff(actor, ownerAm);
+}
+
+// §4 Rule 1 / B4: the minimum Target KPI standard is ≥20% growth per quarter over
+// the client's gmv_baseline. 1.20 = 6/5, kept as an integer ratio for exact math.
+const KPI_MIN_GROWTH_NUM = 6n;
+const KPI_MIN_GROWTH_DEN = 5n;
+
+/**
+ * parseGmvTarget extracts the whole-rupiah amount from a GMV-typed Target KPI
+ * string (e.g. "GMV ≥ Rp 20.000.000") as Money (minor units). Returns null when
+ * the string is not GMV-typed (no "gmv" keyword) or carries no digits. GMV
+ * targets are whole rupiah; '.'/','/space in the number are read as grouping,
+ * not decimals (so a GMV target must be written as an explicit rupiah figure,
+ * not "20jt").
+ */
+export function parseGmvTarget(target: string): money.Money | null {
+  const low = (target ?? '').toLowerCase();
+  if (!low.includes('gmv')) {
+    return null;
+  }
+  const m = low.match(/\d[\d.,\s]*/); // first run starting at a digit
+  if (!m) {
+    return null;
+  }
+  const digits = m[0].replace(/[^\d]/g, '');
+  if (digits === '') {
+    return null;
+  }
+  return BigInt(digits) * 100n;
+}
+
+/**
+ * gmvTargetBelowStandard reports whether a GMV-type Target KPI falls below the
+ * §4 Rule 1 / B4 floor (≥20% growth per quarter over gmv_baseline). NON-GMV
+ * targets (ROAS, Spend cap, no "GMV" keyword) are out of scope → false. A
+ * GMV-typed target with no parseable number is treated as below standard (it
+ * cannot be shown to clear the floor → needs sign-off). A missing/zero baseline
+ * leaves the growth rule unenforceable → false (the advertiser may self-set).
+ */
+export function gmvTargetBelowStandard(targetKpi: string, gmvBaseline: money.Money): boolean {
+  const target = parseGmvTarget(targetKpi);
+  if (target === null) {
+    // Not GMV-typed → rule does not apply; GMV-typed but unparseable → gate.
+    return (targetKpi ?? '').toLowerCase().includes('gmv');
+  }
+  if (gmvBaseline <= 0n) {
+    return false; // no baseline → cannot compute a growth floor
+  }
+  // below iff target < baseline * 6/5  ⇔  5*target < 6*baseline
+  return KPI_MIN_GROWTH_DEN * target < KPI_MIN_GROWTH_NUM * gmvBaseline;
 }
 
 // --- Types ---
@@ -247,9 +310,11 @@ export async function createCampaign(sql: Sql, actor: Actor, briefId: string, in
   const now = new Date();
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
-    const briefRows = await tx<{ assigned_division: string; status: string; client_id: string }[]>`
-      select b.assigned_division, b.status, sv.client_id
-        from briefs b join services sv on sv.id = b.service_id
+    const briefRows = await tx<{ assigned_division: string; status: string; client_id: string; assigned_am_id: string | null; gmv_baseline: string }[]>`
+      select b.assigned_division, b.status, sv.client_id, cl.assigned_am_id, cl.gmv_baseline
+        from briefs b
+        join services sv on sv.id = b.service_id
+        join clients cl on cl.id = sv.client_id
        where b.id = ${briefId} for update`;
     if (briefRows.length === 0) {
       throw new NotFoundError(MSG_BRIEF_NOT_FOUND);
@@ -284,6 +349,13 @@ export async function createCampaign(sql: Sql, actor: Actor, briefId: string, in
       throw new ValidationError(bi.INCOMPLETE_DATA);
     }
     const [start, end] = parseDateRange(input.startDate, input.endDate);
+    // §4 Rule 1 / M8-OA-4 / B4: an Advertiser (Ads staff) may self-set a Target
+    // KPI only when a GMV target already clears the ≥20%/quarter-from-baseline
+    // minimum; a below-standard GMV target needs SPV Ads / owning AM / Director
+    // sign-off. Non-GMV targets (ROAS / Spend cap) are unaffected by this gate.
+    if (!hasKpiSignOff(actor, brief.assigned_am_id ?? '') && gmvTargetBelowStandard(targetKpi, money.parse(brief.gmv_baseline))) {
+      throw new ForbiddenError(MSG_KPI_BELOW_STANDARD);
+    }
 
     const id = await ex.ident.identNext('ADC', now);
     await tx`

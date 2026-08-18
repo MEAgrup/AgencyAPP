@@ -165,9 +165,21 @@ export function canExecute(actor: Actor, r: { division: string; coordinator: str
   return true;
 }
 
-/** canEscalate: the KOL Team Leader or Director (§5 Rule 3). */
-export function canEscalate(actor: Actor): boolean {
-  return permission.isLead(actor, KOL_DIVISION);
+/**
+ * canEscalate is the §10.1 escalate gate: the assigned Coordinator, the KOL
+ * Team Leader, or Director (B2, DECISIONS 2026-08-18). §10.1 gives the
+ * Coordinator "escalate when needed" — this is exactly `canExecute` (the
+ * claim/QC gate), so escalate reuses it directly rather than the old lead-only
+ * predicate.
+ */
+export function canEscalate(actor: Actor, r: { division: string; coordinator: string }): boolean {
+  return canExecute(actor, r);
+}
+
+/** escalationTier annotates who an escalation surfaces to (audit-only, §10.1 / M9-OA-6):
+ * a Coordinator escalates to the SPV (KOL Team Leader); a Lead/Director takes it to the Director. */
+function escalationTier(actor: Actor): string {
+  return permission.isLead(actor, KOL_DIVISION) || actor.role.director ? 'Director' : 'SPV';
 }
 
 /** canDrop: KOL Team Leader, Account lead (SPV tie-breaker, M9-OA-6), or Director. */
@@ -426,13 +438,25 @@ export function failQC(sql: Sql, actor: Actor, id: string, qcNotes: string): Pro
   });
 }
 
-/** escalate: [QC Review] → [Escalated] (§5 Rule 3). KOL Team Leader/Director; notes mandatory. */
+/**
+ * escalate: [QC Review] → [Escalated] (§5 Rule 3 / §10.1). The assigned
+ * Coordinator, KOL Team Leader, or Director; notes mandatory. Per B2
+ * (DECISIONS 2026-08-18) the Coordinator — not only the lead — may escalate
+ * "when needed" (§10.1): a Coordinator's escalation surfaces to the SPV (KOL
+ * Team Leader), who under M9-OA-6 may take it up to the Director. The tier is
+ * written to the immutable audit log (companion `escalated` row) so both the
+ * escalation and its later resolution (continue / drop) are reviewable.
+ */
 export function escalate(sql: Sql, actor: Actor, id: string, qcNotes: string): Promise<statemachine.TransitionResult> {
   return edge(sql, actor, id, BKG_QC_REVIEW, BKG_ESCALATED, canEscalate, MSG_ESCALATE_FORBIDDEN, async (tx) => {
     if ((qcNotes ?? '').trim() === '') {
       throw new ValidationError(MSG_QC_NOTES_REQUIRED);
     }
     await setQcNotes(tx, id, qcNotes);
+    await executors(tx).audit.insertAudit({
+      entityType: 'creator_booking', entityId: id, actorEmployeeId: actor.employeeId, action: 'escalated',
+      beforeJson: null, afterJson: { escalated_to: escalationTier(actor), notes: qcNotes.trim() }, createdBy: actor.employeeId,
+    });
   });
 }
 
@@ -442,8 +466,14 @@ export function continueFromEscalation(sql: Sql, actor: Actor, id: string, conte
 }
 
 /**
- * drop terminally excludes a Booking (§5 Rule 4). Valid from [Escalated] / [Booked]
- * / [Sourcing]. KOL lead / Account lead / Director; reason mandatory (logged).
+ * drop terminally excludes a Booking (§5 Rule 4). Valid from [Escalated] /
+ * [Content In Progress] / [Booked] / [Sourcing]. KOL lead / Account lead /
+ * Director; reason mandatory (logged). The [Content In Progress] path (B1,
+ * DECISIONS 2026-08-18) unblocks a creator who goes unresponsive AFTER terms
+ * are agreed but BEFORE ever submitting content — otherwise the Booking is
+ * stuck (it can reach neither [QC Review] nor [Escalated]). A dropped-for-
+ * unresponsiveness creator is recorded to the blacklist (manual Google-Sheet
+ * for now — no CDPS table yet); the drop reason stays in the immutable log.
  */
 export async function drop(sql: Sql, actor: Actor, id: string, reason: string): Promise<statemachine.TransitionResult> {
   return withTransaction(sql, async (tx) => {
@@ -452,7 +482,7 @@ export async function drop(sql: Sql, actor: Actor, id: string, reason: string): 
     if (!canDrop(actor)) {
       throw new ForbiddenError(MSG_DROP_FORBIDDEN);
     }
-    if (r.status !== BKG_ESCALATED && r.status !== BKG_BOOKED && r.status !== BKG_SOURCING) {
+    if (r.status !== BKG_ESCALATED && r.status !== BKG_CONTENT_IN_PROG && r.status !== BKG_BOOKED && r.status !== BKG_SOURCING) {
       throw new ConflictError(bi.TRANSITION_NOT_ALLOWED);
     }
     if ((reason ?? '').trim() === '') {

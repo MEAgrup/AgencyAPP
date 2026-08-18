@@ -1,0 +1,34 @@
+-- CDPS — M9 (KOL) B1: izinkan DROP kreator dari [Content In Progress]
+-- (keputusan pemilik 2026-08-18, DECISIONS.md — Wave 2 gap audit Kelas B1).
+--
+-- ---------------------------------------------------------------------------
+-- KENAPA
+-- ---------------------------------------------------------------------------
+-- Mesin creator_booking (STATE_MACHINES §8) hanya membiarkan sebuah Booking
+-- di-`[Dropped]` dari [Sourcing]/[Booked]/[Escalated - Creator Unresponsive].
+-- Tapi kreator yang menghilang SETELAH terms disepakati berdiam di
+-- [Content In Progress]: ia belum pernah submit konten, jadi tak bisa masuk
+-- [QC Review] (satu-satunya jalan ke [Escalated]) — dan tanpa edge ini juga
+-- tak bisa di-drop. Booking-nya BUNTU, persis kasus "kreator hilang" yang
+-- modul M9 justru ada untuk menanganinya (M9 §5 Rule 4 / §1 "the person doing
+-- the work might not show up").
+--
+-- Pemilik memutuskan: kreator unresponsif di [Content In Progress] boleh
+-- LANGSUNG di-drop (lalu di-re-source lewat Booking baru), dan dicatat sebagai
+-- kreator blacklist. Registry blacklist BELUM punya tabel di CDPS — untuk
+-- sementara dicatat manual ke Google Sheets; alasan drop tetap tersimpan
+-- immutable di audit_log (M9 `drop_reason`).
+--
+--   [Content In Progress] → [Dropped]   (require_lead = true)
+--
+-- require_lead = true: sama dengan edge drop lain — drop adalah KEPUTUSAN
+-- lead (gate domain `canDrop`: KOL Team Leader / Account lead tie-breaker
+-- M9-OA-6 / Director), bukan aksi Coordinator biasa. Coordinator yang melihat
+-- kreator hilang mengeskalasi (B2); lead yang memutus drop.
+--
+-- Nol tabel/mesin/event/prefix baru — `sm_edges` tidak dihitung gate.
+-- sm_transition tetap satu-satunya penulis kolom status; ini hanya menambah
+-- satu edge sah ke tabel yang ia baca.
+
+INSERT INTO sm_edges (machine, from_state, to_state, require_lead) VALUES
+    ('creator_booking', '[Content In Progress]', '[Dropped]', true);
