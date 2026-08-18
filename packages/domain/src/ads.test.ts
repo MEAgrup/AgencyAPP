@@ -9,7 +9,7 @@
  *   (creative-swap-safe), the setup-Brief submit guard, and the reads.
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { permission } from '@cdps/core';
+import { money, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import {
   canManageCampaign,
@@ -19,14 +19,18 @@ import {
   endCampaign,
   ForbiddenError,
   getCampaign,
+  gmvTargetBelowStandard,
   hasBudgetSignOff,
+  hasKpiSignOff,
   launchCampaign,
   linkAsset,
   listMetricEntries,
   listOptimizations,
   logMetricEntry,
   logOptimization,
+  MSG_KPI_BELOW_STANDARD,
   NotFoundError,
+  parseGmvTarget,
   parseRoasTarget,
   pauseCampaign,
   unlinkAsset,
@@ -73,6 +77,27 @@ describe('ads predicates', () => {
     expect(parseRoasTarget('ROAS 3.5')).toBe(3.5);
     expect(parseRoasTarget('GMV 10jt')).toBeNull();
     expect(parseRoasTarget('ROAS target')).toBeNull();
+  });
+  it('hasKpiSignOff (B4): same authority as budget sign-off — Ads lead, owning AM, Director', () => {
+    expect(hasKpiSignOff(adsLead(), 'ZZ-SINTA')).toBe(true);
+    expect(hasKpiSignOff(am(), 'ZZ-SINTA')).toBe(true);
+    expect(hasKpiSignOff(director(), 'ZZ-SINTA')).toBe(true);
+    expect(hasKpiSignOff(adsStaff(), 'ZZ-SINTA')).toBe(false);
+  });
+  it('parseGmvTarget (B4): whole-rupiah amount from a GMV-typed target, null otherwise', () => {
+    expect(parseGmvTarget('GMV ≥ Rp 20.000.000')).toBe(2_000_000_000n); // 20jt in minor units
+    expect(parseGmvTarget('GMV 12000000')).toBe(1_200_000_000n);
+    expect(parseGmvTarget('ROAS ≥ 4x')).toBeNull(); // not GMV-typed
+    expect(parseGmvTarget('GMV target naik')).toBeNull(); // no digits
+  });
+  it('gmvTargetBelowStandard (B4): ≥20%/quarter over gmv_baseline; non-GMV & no-baseline exempt', () => {
+    const base = money.parse('10000000.00'); // baseline 10jt → floor = 12jt
+    expect(gmvTargetBelowStandard('GMV ≥ Rp 10.000.000', base)).toBe(true); // 10jt < 12jt
+    expect(gmvTargetBelowStandard('GMV ≥ Rp 12.000.000', base)).toBe(false); // exactly at floor
+    expect(gmvTargetBelowStandard('GMV ≥ Rp 15.000.000', base)).toBe(false); // above floor
+    expect(gmvTargetBelowStandard('ROAS ≥ 4x', base)).toBe(false); // not GMV-typed → exempt
+    expect(gmvTargetBelowStandard('GMV naik banyak', base)).toBe(true); // GMV-typed, unparseable → gate
+    expect(gmvTargetBelowStandard('GMV ≥ Rp 5.000.000', 0n)).toBe(false); // no baseline → unenforceable
   });
 });
 
@@ -188,6 +213,34 @@ describeDb('createCampaign (§4 Rule 1)', () => {
     await insertBrief(cr, svc, 'Creative', '[In Progress]');
     await expect(createCampaign(sql, adsStaff(), cr, goodInput())).rejects.toBeInstanceOf(ConflictError);
     await expect(createCampaign(sql, adsStaff(), 'BRF-GHOST-0', goodInput())).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('B4: an Advertiser cannot self-set a GMV Target KPI below the 20%/quarter-from-baseline floor', async () => {
+    const { briefId } = await adsBrief(); // client gmv_baseline = 10jt → floor 12jt
+    // Below the floor → blocked with the SPV-Ads sign-off message.
+    await expect(createCampaign(sql, adsStaff(), briefId, { ...goodInput(), targetKpi: 'GMV ≥ Rp 10.000.000' }))
+      .rejects.toThrow(MSG_KPI_BELOW_STANDARD);
+    // GMV-typed but unparseable → cannot prove it clears the floor → also blocked.
+    await expect(createCampaign(sql, adsStaff(), briefId, { ...goodInput(), targetKpi: 'GMV naik banyak' }))
+      .rejects.toBeInstanceOf(ForbiddenError);
+    // At/above the floor → the Advertiser may self-set it.
+    const ok = await createCampaign(sql, adsStaff(), briefId, { ...goodInput(), targetKpi: 'GMV ≥ Rp 15.000.000' });
+    expect(ok.targetKpi).toBe('GMV ≥ Rp 15.000.000');
+  });
+
+  it('B4: SPV Ads (lead) / Director may sign off a below-standard GMV Target KPI', async () => {
+    const { briefId } = await adsBrief();
+    const belowStd = { ...goodInput(), targetKpi: 'GMV ≥ Rp 8.000.000' }; // < 12jt floor
+    const c = await createCampaign(sql, adsLead(), briefId, belowStd);
+    expect(c.targetKpi).toBe('GMV ≥ Rp 8.000.000');
+    const { briefId: b2 } = await adsBrief();
+    await createCampaign(sql, director(), b2, belowStd); // Director too
+  });
+
+  it('B4: a ROAS Target KPI is not subject to the growth floor (Advertiser self-sets)', async () => {
+    const { briefId } = await adsBrief();
+    const c = await createCampaign(sql, adsStaff(), briefId, goodInput()); // ROAS ≥ 4x
+    expect(c.targetKpi).toBe('ROAS ≥ 4x');
   });
 });
 
