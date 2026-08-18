@@ -71,14 +71,20 @@ import {
   draftFromDetail,
   estimasiTanpaDasar,
   fieldsOfSection,
+  minorToRupiah,
   previewKualifikasi,
   toScoreWire,
   type InterviewDraft,
 } from '@/lib/interview-fields';
+import { getRisetAwalBaseline, type RisetAwalBaseline } from '@/lib/riset-awal';
+import { getClient, type Client } from '@/lib/clients';
+import { computeDedup, type DedupResult } from '@/lib/interview-dedup';
 import FieldInput from '@/components/interview/FieldInput';
 import ScoringSidebar from '@/components/interview/ScoringSidebar';
 import PrasyaratPanel from '@/components/interview/PrasyaratPanel';
 import RisetAwalPanel from '@/components/interview/RisetAwalPanel';
+import DedupField from '@/components/interview/DedupField';
+import SalesContextCard from '@/components/interview/SalesContextCard';
 import TimelinePanel from '@/components/interview/TimelinePanel';
 
 const MIN_WIDTH = 1280;
@@ -96,6 +102,10 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
   const [detail, setDetail] = useState<InterviewDetail | null>(null);
   const [timeline, setTimeline] = useState<KelolaKlienTimeline | null>(null);
   const [draft, setDraft] = useState<InterviewDraft | null>(null);
+  // Riset awal baseline + the client's sales record — the two upstream sources
+  // the Interview door reads so it never re-asks what is already known (RAB-08).
+  const [baseline, setBaseline] = useState<RisetAwalBaseline | null>(null);
+  const [client, setClient] = useState<Client | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -136,6 +146,15 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
       getKelolaKlienTimeline(id)
         .then(setTimeline)
         .catch(() => setTimeline(null));
+      // Riset awal baseline (RAB-04 panel + RAB-08 dedup) and the client's sales
+      // record (RAB-08 context). Both degrade to null on failure — neither is
+      // allowed to blank the interview page.
+      getRisetAwalBaseline(id)
+        .then(setBaseline)
+        .catch(() => setBaseline(null));
+      getClient(d.interview.client_id)
+        .then((r) => setClient(r.client))
+        .catch(() => setClient(null));
       setTab((t) => t ?? (d.riset_awal?.status === RISET_AWAL_STATUS.Berjalan ? 'riset' : 'interview'));
       setDirty(false);
       setJadwal({
@@ -154,6 +173,40 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
   useEffect(() => {
     load();
   }, [load]);
+
+  // Refetch ONLY the baseline after a per-platform submit / confirm write, so the
+  // panel updates without the full-page loading spinner blanking the AM's work.
+  const reloadBaseline = useCallback(async () => {
+    try {
+      setBaseline(await getRisetAwalBaseline(id));
+    } catch {
+      /* leave the last-good baseline in place */
+    }
+  }, [id]);
+
+  // RAB-08: seed the two riset-awal-answered scored fields (B2-9 AOV, B2-3 SKU)
+  // into the draft so the local score preview stays complete even though their
+  // Blok B inputs are hidden (DedupField). Never clobbers a value the AM typed —
+  // only fills an empty field, and the seeded value matches what the scorer uses
+  // server-side (RAB-06), so preview = submit still holds.
+  useEffect(() => {
+    if (!baseline) return;
+    setDraft((d) => {
+      if (!d) return d;
+      let changed = false;
+      const next = { ...d };
+      for (const f of baseline.isian) {
+        if (f.field_key !== 'B2-9' && f.field_key !== 'B2-3') continue;
+        const cur = next[f.field_key];
+        if (!cur || cur.raw.trim() !== '') continue;
+        const raw = f.field_key === 'B2-9' ? minorToRupiah(f.nilai_uang) : f.nilai_angka == null ? '' : String(f.nilai_angka);
+        if (raw === '') continue;
+        next[f.field_key] = { ...cur, raw };
+        changed = true;
+      }
+      return changed ? next : d;
+    });
+  }, [baseline]);
 
   useEffect(() => {
     const check = () => setNarrow(window.innerWidth < MIN_WIDTH);
@@ -280,6 +333,16 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
   const estimasiIssues = estimasiTanpaDasar(draft);
   const scoreReady = preview.ready;
 
+  // RAB-08 — what the Interview door already knows from upstream (riset awal
+  // isian + the client's sales record), so Blok B does not re-ask it. Plain call
+  // (not a hook): this runs after the early returns above. Cheap — two fields.
+  const dedup: DedupResult = computeDedup(baseline);
+  // RAB-07 gate, mirrored client-side: the interview cannot START until riset
+  // awal is submitted. The per-platform/confirm checks are enforced inside the
+  // panel (it will not let the AM submit the timing early), so once the step is
+  // Selesai those are already satisfied — gating on the status keeps this simple.
+  const risetAwalSelesai = risetAwal?.status === RISET_AWAL_STATUS.Selesai;
+
   return (
     <>
       <div className={printMode ? 'printHideOnPrint stack' : 'stack'}>
@@ -377,13 +440,34 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
             form (the isian arrives in part 2), so the scoring sidebar would only
             be noise beside it. */}
         {activeTab === 'riset' && (
-          <RisetAwalPanel risetAwal={risetAwal} canWrite={canWrite} busy={acting} onSubmit={submitRiset} />
+          <RisetAwalPanel
+            risetAwal={risetAwal}
+            baseline={baseline}
+            canWrite={canWrite}
+            busy={acting}
+            onSubmit={submitRiset}
+            onReload={reloadBaseline}
+          />
+        )}
+
+        {activeTab === 'interview' && !risetAwalSelesai && risetAwal && (
+          <div className="alert alertInfo" style={{ fontSize: 13 }}>
+            Riset Awal (langkah 1) belum disubmit — jadwal & mulai interview terkunci sampai selesai (gerbang
+            RAB-07).{' '}
+            <button type="button" className="btn btnGhost btnSm" onClick={() => setTab('riset')}>
+              Buka Riset Awal
+            </button>
+          </div>
         )}
 
         {activeTab === 'interview' && (
         <div className="row" style={{ alignItems: 'flex-start', gap: 16 }}>
           {/* LEFT: form */}
           <div className="stack" style={{ flex: 1, minWidth: 0 }}>
+            {/* RAB-08 — what sales already told us. The interview never re-asks the
+                store identity/baseline; it shows it, with a link to correct it at
+                the source (the client record) rather than a duplicate input here. */}
+            <SalesContextCard client={client} />
             {/* Blok A — schedule */}
             <section className="card">
               <div className="cardHeader">Blok A · Jadwal</div>
@@ -432,10 +516,15 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
               </div>
               {scheduleEditable && (
                 <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {/* RAB-07 gate: neither scheduling nor starting is allowed until
+                      Riset Awal is submitted. The server blocks it regardless
+                      (MSG_RISET_AWAL_BELUM_LENGKAP); disabling here points the AM
+                      back to langkah 1 instead of letting them hit the wall. */}
                   <button
                     type="button"
                     className="btn btnPrimary btnSm"
-                    disabled={acting || jadwal.tanggal_waktu.trim() === ''}
+                    disabled={acting || jadwal.tanggal_waktu.trim() === '' || !risetAwalSelesai}
+                    title={risetAwalSelesai ? undefined : 'Selesaikan & submit Riset Awal (langkah 1) dulu'}
                     onClick={saveSchedule}
                   >
                     Simpan jadwal (→ Terjadwal)
@@ -445,8 +534,8 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
                   <button
                     type="button"
                     className="btn btnSecondary btnSm"
-                    disabled={acting}
-                    title="Mulai interview sekarang tanpa menunggu jadwal terpaku"
+                    disabled={acting || !risetAwalSelesai}
+                    title={risetAwalSelesai ? 'Mulai interview sekarang tanpa menunggu jadwal terpaku' : 'Selesaikan & submit Riset Awal (langkah 1) dulu'}
                     onClick={startInterview}
                   >
                     Mulai interview (→ Sedang Berlangsung)
@@ -514,15 +603,22 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
                       </button>
                       {s.wired && isOpen && (
                         <div className="grid2" style={{ padding: 14, borderTop: '1px solid var(--color-border)' }}>
-                          {fields.map((f) => (
-                            <FieldInput
-                              key={f.fieldKey}
-                              spec={f}
-                              value={draft[f.fieldKey]}
-                              onChange={(v) => patchField(f.fieldKey, v)}
-                              disabled={!editable}
-                            />
-                          ))}
+                          {fields.map((f) => {
+                            // RAB-08: a field Riset Awal already answered is shown
+                            // as a locked chip, not a re-entry box.
+                            const info = dedup.byField.get(f.fieldKey);
+                            return info ? (
+                              <DedupField key={f.fieldKey} info={info} onCorrect={() => setTab('riset')} />
+                            ) : (
+                              <FieldInput
+                                key={f.fieldKey}
+                                spec={f}
+                                value={draft[f.fieldKey]}
+                                onChange={(v) => patchField(f.fieldKey, v)}
+                                disabled={!editable}
+                              />
+                            );
+                          })}
                         </div>
                       )}
                     </div>

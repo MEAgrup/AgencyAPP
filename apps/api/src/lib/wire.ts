@@ -5183,8 +5183,16 @@ export interface RisetAwalIsianWire {
   dikonfirmasi: boolean;
 }
 
+export interface RisetAwalPlatformWire {
+  client_platform_id: number;
+  platform: string;
+  metode: string;
+  store_link: string | null;
+}
+
 export interface RisetAwalBaselineWire {
   interview_id: string;
+  platforms: RisetAwalPlatformWire[];
   analisa: RisetAwalAnalisaWire[];
   isian: RisetAwalIsianWire[];
   semua_terkonfirmasi: boolean;
@@ -5193,6 +5201,12 @@ export interface RisetAwalBaselineWire {
 export function risetAwalBaselineToWire(v: risetAwal.BaselineView): RisetAwalBaselineWire {
   return {
     interview_id: v.interviewId,
+    platforms: v.platforms.map((p) => ({
+      client_platform_id: p.clientPlatformId,
+      platform: p.platform,
+      metode: p.metode,
+      store_link: p.storeLink,
+    })),
     analisa: v.analisa.map((a) => ({
       id: a.id,
       client_platform_id: a.clientPlatformId,
