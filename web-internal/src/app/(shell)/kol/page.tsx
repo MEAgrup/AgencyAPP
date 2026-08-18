@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { listKolBriefQueue, type Brief } from '@/lib/kol';
+import { getMonthlyKolReport, listKolBriefQueue, type Brief, type MonthlyKolReport } from '@/lib/kol';
 import StatusBadge from '@/components/StatusBadge';
 
 export default function KolWorkspacePage() {
@@ -50,6 +50,35 @@ export default function KolWorkspacePage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Monthly KOL Report (§9). Coordinator sees own; lead/OD/Director may enter any
+  // Coordinator id. year/month default to the current month.
+  const now = new Date();
+  const [reportCoord, setReportCoord] = useState('');
+  const [reportYear, setReportYear] = useState(now.getUTCFullYear());
+  const [reportMonth, setReportMonth] = useState(now.getUTCMonth() + 1);
+  const [report, setReport] = useState<MonthlyKolReport | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+
+  async function loadReport(e: FormEvent) {
+    e.preventDefault();
+    setReportLoading(true);
+    setReportError(null);
+    setReport(null);
+    try {
+      const r = await getMonthlyKolReport({
+        coordinator: reportCoord.trim() || undefined,
+        year: reportYear,
+        month: reportMonth,
+      });
+      setReport(r);
+    } catch (err) {
+      setReportError(errorMessage(err));
+    } finally {
+      setReportLoading(false);
+    }
+  }
 
   function handleBookingJump(e: FormEvent) {
     e.preventDefault();
@@ -112,6 +141,53 @@ export default function KolWorkspacePage() {
             </div>
           </form>
         </div>
+      </section>
+
+      <section className="card">
+        <div className="cardHeader">
+          <h2>Laporan Bulanan KOL</h2>
+        </div>
+        <p className="muted" style={{ fontSize: 13 }}>
+          Rollup §9 per Coordinator: total booking, QC pass rate, rata-rata waktu sourcing,
+          total spend (Σ Agreed Rate), dan jumlah eskalasi. Kosongkan Coordinator untuk laporan
+          Anda sendiri.
+        </p>
+        <form className="formRow" onSubmit={loadReport}>
+          <div className="field">
+            <label htmlFor="report-coord">Coordinator (opsional)</label>
+            <input
+              id="report-coord"
+              placeholder="EMP-... (kosong = Anda)"
+              value={reportCoord}
+              onChange={(e) => setReportCoord(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="report-year">Tahun</label>
+            <input id="report-year" type="number" value={reportYear} onChange={(e) => setReportYear(Number(e.target.value))} />
+          </div>
+          <div className="field">
+            <label htmlFor="report-month">Bulan</label>
+            <input id="report-month" type="number" min={1} max={12} value={reportMonth} onChange={(e) => setReportMonth(Number(e.target.value))} />
+          </div>
+          <div className="field" style={{ alignSelf: 'flex-end' }}>
+            <button type="submit" className="btn btnPrimary btnSm" disabled={reportLoading}>
+              {reportLoading ? 'Memuat...' : 'Muat Laporan'}
+            </button>
+          </div>
+        </form>
+        {reportError && <div className="alert alertError" role="alert">{reportError}</div>}
+        {report && (
+          <div className="grid2" style={{ marginTop: 8 }}>
+            <div><div className="muted" style={{ fontSize: 12 }}>Coordinator</div><div>{report.coordinator_id}</div></div>
+            <div><div className="muted" style={{ fontSize: 12 }}>Periode</div><div>{report.year}-{String(report.month).padStart(2, '0')}</div></div>
+            <div><div className="muted" style={{ fontSize: 12 }}>Total Booking</div><div>{report.total_bookings}</div></div>
+            <div><div className="muted" style={{ fontSize: 12 }}>QC Pass Rate</div><div>{report.qc_pass_rate_display} ({report.qc_passed_count}/{report.total_bookings})</div></div>
+            <div><div className="muted" style={{ fontSize: 12 }}>Rata-rata Sourcing</div><div>{report.average_sourcing_display}</div></div>
+            <div><div className="muted" style={{ fontSize: 12 }}>Total Spend (Σ Agreed Rate)</div><div>{report.total_spend_display}</div></div>
+            <div><div className="muted" style={{ fontSize: 12 }}>Jumlah Eskalasi</div><div>{report.escalation_count}</div></div>
+          </div>
+        )}
       </section>
 
       <section className="card">

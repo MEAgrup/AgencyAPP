@@ -420,6 +420,13 @@ export default function KolBookingDetailPage({ params }: { params: Promise<{ id:
 
       {readOnlyNote}
 
+      {booking.sourcing_stall_flagged && (
+        <div className="alert alertWarning" role="status">
+          Sourcing tertahan &mdash; booking ini masih di <strong>[Sourcing]</strong> melewati separuh
+          window Brief menuju jatuh tempo (§4 Rule 4). Segera lanjutkan negosiasi atau eskalasi.
+        </div>
+      )}
+
       {/* Detail booking */}
       <section className="card">
         <div className="cardHeader">

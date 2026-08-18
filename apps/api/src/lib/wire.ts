@@ -944,6 +944,7 @@ export interface BookingWire {
   qty_live: number;
   revision_count: number;
   payment_status: string;
+  sourcing_stall_flagged: boolean;
   created_by: string;
   created_at: string;
 }
@@ -961,8 +962,42 @@ export function bookingToWire(b: kol.Booking): BookingWire {
     ...(b.assignedCoordinator ? { assigned_coordinator: b.assignedCoordinator } : {}),
     ...(b.attributedGmv !== null ? { attributed_gmv: b.attributedGmv } : {}),
     qty_video: b.qtyVideo, qty_live: b.qtyLive,
-    revision_count: b.revisionCount, payment_status: b.paymentStatus, created_by: b.createdBy,
+    revision_count: b.revisionCount, payment_status: b.paymentStatus,
+    sourcing_stall_flagged: b.sourcingStallFlagged, created_by: b.createdBy,
     created_at: b.createdAt.toISOString(),
+  };
+}
+
+/** kol.MonthlyKolReport → wire (§9 Monthly KOL Report rollup). */
+export interface MonthlyKolReportWire {
+  coordinator_id: string;
+  year: number;
+  month: number;
+  total_bookings: number;
+  qc_passed_count: number;
+  qc_pass_rate: number | null;
+  qc_pass_rate_display: string;
+  average_sourcing_hours: number | null;
+  average_sourcing_display: string;
+  total_spend: number;
+  total_spend_display: string;
+  escalation_count: number;
+}
+
+export function monthlyKolReportToWire(r: kol.MonthlyKolReport): MonthlyKolReportWire {
+  return {
+    coordinator_id: r.coordinatorId,
+    year: r.year,
+    month: r.month,
+    total_bookings: r.totalBookings,
+    qc_passed_count: r.qcPassedCount,
+    qc_pass_rate: r.qcPassRate,
+    qc_pass_rate_display: r.qcPassRateDisplay,
+    average_sourcing_hours: r.averageSourcingHours,
+    average_sourcing_display: r.averageSourcingDisplay,
+    total_spend: r.totalSpend,
+    total_spend_display: r.totalSpendDisplay,
+    escalation_count: r.escalationCount,
   };
 }
 

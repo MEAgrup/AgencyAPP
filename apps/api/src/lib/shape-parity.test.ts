@@ -518,6 +518,7 @@ const WIRE_TO_FE: Record<string, string> = {
   OptimizationWire: 'ads.ts::Optimization',
   // M9 KOL
   BookingWire: 'kol.ts::Booking',
+  MonthlyKolReportWire: 'kol.ts::MonthlyKolReport',
   PaymentRequestWire: 'kol.ts::PaymentRequest',
   BookingMetricsWire: 'kol.ts::BookingMetrics',
   CreatorListWire: 'kol.ts::CreatorList',

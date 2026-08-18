@@ -34,8 +34,10 @@ import {
   listBriefBookings,
   logHours,
   markPaid,
+  monthlyKolReport,
   NotFoundError,
   passQC,
+  sourcingStallFlagged,
   receiveByFinance,
   recordAttributedGmv,
   reject,
@@ -60,6 +62,24 @@ const director = (): Actor => ({ employeeId: 'ZZ-DIR', divisi: 'Management', rol
 // Unit.
 // ---------------------------------------------------------------------------
 const t = (h: number): Date => new Date(Date.UTC(2026, 6, 1, h, 0, 0));
+
+describe('sourcingStallFlagged (§4 Rule 4 / C6a)', () => {
+  const created = new Date(Date.UTC(2026, 5, 1, 0, 0, 0)); // 2026-06-01
+  const due = '2026-06-11'; // 10 days later ⇒ half-window at 2026-06-06
+  it('true only for [Sourcing] past the half-window; other states/no due never flag', () => {
+    // Before the halfway point → not yet stalled.
+    expect(sourcingStallFlagged('[Sourcing]', created, due, new Date(Date.UTC(2026, 5, 5)))).toBe(false);
+    // At/after the halfway point → flagged.
+    expect(sourcingStallFlagged('[Sourcing]', created, due, new Date(Date.UTC(2026, 5, 6)))).toBe(true);
+    expect(sourcingStallFlagged('[Sourcing]', created, due, new Date(Date.UTC(2026, 5, 9)))).toBe(true);
+    // A Booking that has moved past [Sourcing] never stalls, regardless of time.
+    expect(sourcingStallFlagged('[Booked]', created, due, new Date(Date.UTC(2026, 5, 9)))).toBe(false);
+    // No Brief due date ⇒ no window ⇒ never flags.
+    expect(sourcingStallFlagged('[Sourcing]', created, null, new Date(Date.UTC(2027, 0, 1)))).toBe(false);
+    // Created on/after the due date (no remaining time) ⇒ flags immediately.
+    expect(sourcingStallFlagged('[Sourcing]', created, '2026-05-01', created)).toBe(true);
+  });
+});
 
 describe('kol predicates', () => {
   it('canExecute: KOL staff/lead or the assigned Coordinator; AM/Finance denied', () => {
@@ -426,5 +446,67 @@ describeDb('payment request (§8) + attributed GMV + creator list (§6)', () => 
     expect((await bookingMetrics(sql, kolStaff('ZZ-COORD'), id)).status).toBe('[QC Passed]');
     expect((await listBriefBookings(sql, accountLead(), briefId)).length).toBe(1);
     await expect(getBooking(sql, finance(), id)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+});
+
+describeDb('sourcing-stall flag on reads (§4 Rule 4 / C6a)', () => {
+  it('getBooking flags a [Sourcing] booking past the Brief half-window; a fresh/future one is not', async () => {
+    const stale = await kolBrief(1);
+    await sql`update briefs set due_date = '2020-01-01' where id = ${stale.briefId}`; // long past
+    const bStale = await createBooking(sql, kolStaff('ZZ-COORD'), stale.briefId, goodInput());
+    expect((await getBooking(sql, kolStaff('ZZ-COORD'), bStale.id)).sourcingStallFlagged).toBe(true);
+
+    const fresh = await kolBrief(1);
+    await sql`update briefs set due_date = '2099-01-01' where id = ${fresh.briefId}`; // far future
+    const bFresh = await createBooking(sql, kolStaff('ZZ-COORD'), fresh.briefId, goodInput());
+    expect((await getBooking(sql, kolStaff('ZZ-COORD'), bFresh.id)).sourcingStallFlagged).toBe(false);
+    // Once it leaves [Sourcing] the flag clears even with a past due date.
+    await book(sql, kolStaff('ZZ-COORD'), bStale.id);
+    expect((await getBooking(sql, kolStaff('ZZ-COORD'), bStale.id)).sourcingStallFlagged).toBe(false);
+  });
+});
+
+describeDb('monthlyKolReport (§9 / C6b)', () => {
+  it('rolls up total bookings, QC pass rate, total spend (Σ Agreed Rate) and escalations for the WIB month', async () => {
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const month = now.getUTCMonth() + 1;
+    const c = kolStaff('ZZ-COORD');
+
+    // Three bookings this month for ZZ-COORD (each Agreed Rate Rp 1.500.000):
+    //  #1 → [QC Passed], #2 → [Escalated], #3 stays [Sourcing].
+    const passed = await toQcPassed((await kolBrief(1)).briefId);
+    void passed;
+    const esc = await kolBrief(1);
+    const b2 = await createBooking(sql, c, esc.briefId, goodInput());
+    await book(sql, c, b2.id);
+    await startContent(sql, c, b2.id);
+    await submitContent(sql, c, b2.id, 'https://tiktok/e');
+    await sendToQCReview(sql, c, b2.id);
+    await escalate(sql, c, b2.id, 'kreator hilang');
+    const sourcing = await kolBrief(1);
+    await createBooking(sql, c, sourcing.briefId, goodInput());
+
+    const rep = await monthlyKolReport(sql, c, 'ZZ-COORD', year, month);
+    expect(rep.totalBookings).toBe(3);
+    expect(rep.qcPassedCount).toBe(1);
+    expect(rep.qcPassRate).toBeCloseTo(1 / 3, 5);
+    expect(rep.qcPassRateDisplay).toBe('33.33%');
+    expect(rep.escalationCount).toBe(1);
+    expect(rep.totalSpend).toBe(4_500_000); // 3 × Rp 1.500.000
+    expect(rep.totalSpendDisplay).toContain('4.500.000');
+    // #1 and #2 both reached [Booked], so average sourcing time is present (>= 0).
+    expect(rep.averageSourcingHours).not.toBeNull();
+
+    // Gate: another coordinator cannot read ZZ-COORD's report; a KOL lead can.
+    await expect(monthlyKolReport(sql, kolStaff('ZZ-OTHER'), 'ZZ-COORD', year, month))
+      .rejects.toBeInstanceOf(ForbiddenError);
+    expect((await monthlyKolReport(sql, kolLead('ZZ-KLEAD'), 'ZZ-COORD', year, month)).totalBookings).toBe(3);
+
+    // An empty month renders '—' for pass rate, never a divide error.
+    const empty = await monthlyKolReport(sql, c, 'ZZ-COORD', 2099, 1);
+    expect(empty.totalBookings).toBe(0);
+    expect(empty.qcPassRate).toBeNull();
+    expect(empty.qcPassRateDisplay).toBe('—');
   });
 });

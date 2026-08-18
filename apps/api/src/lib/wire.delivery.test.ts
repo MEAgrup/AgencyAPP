@@ -665,6 +665,7 @@ describe('M9 bookingToWire (Creator Booking + derived fields)', () => {
     qtyLive: 1,
     revisionCount: 0,
     paymentStatus: '[Paid]',
+    sourcingStallFlagged: false,
     createdBy: '2409230432',
     createdAt: new Date('2026-07-19T02:00:00Z'),
   };
@@ -692,6 +693,7 @@ describe('M9 bookingToWire (Creator Booking + derived fields)', () => {
       qty_live: 1,
       revision_count: 0,
       payment_status: '[Paid]',
+      sourcing_stall_flagged: false,
       created_by: '2409230432',
       created_at: '2026-07-19T02:00:00.000Z',
     });
@@ -717,6 +719,8 @@ describe('M9 bookingToWire (Creator Booking + derived fields)', () => {
     // qty_video/qty_live carry a DB default (0) — always present, never omitempty.
     expect('qty_video' in wire).toBe(true);
     expect('qty_live' in wire).toBe(true);
+    // sourcing_stall_flagged is a derived bool — always present (C6a).
+    expect('sourcing_stall_flagged' in wire).toBe(true);
   });
 });
 

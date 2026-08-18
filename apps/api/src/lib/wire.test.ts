@@ -465,10 +465,12 @@ describe('M9 kol wire mappers', () => {
       agreedRateDisplay: 'Rp. 1.500.000,00', status: '[Sourcing]', contentLink: '', qcNotes: '',
       slaTargetHours: null, hoursLogged: null, assignedCoordinator: 'ZZ-COORD', attributedGmv: null,
       qtyVideo: 0, qtyLive: 0,
-      revisionCount: 0, paymentStatus: '', createdBy: 'ZZ-COORD', createdAt: new Date('2026-07-01T00:00:00.000Z'),
+      revisionCount: 0, paymentStatus: '', sourcingStallFlagged: false,
+      createdBy: 'ZZ-COORD', createdAt: new Date('2026-07-01T00:00:00.000Z'),
     };
     const w = bookingToWire(b);
     expect(w.agreed_rate_display).toBe('Rp. 1.500.000,00');
+    expect(w.sourcing_stall_flagged).toBe(false);
     expect(w.qty_video).toBe(0);
     expect(w.qty_live).toBe(0);
     expect(w.assigned_coordinator).toBe('ZZ-COORD');
