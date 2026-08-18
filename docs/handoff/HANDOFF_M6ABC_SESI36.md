@@ -16,7 +16,7 @@
 |---|---|
 | **Repo** | `MEAgrup/AgencyAPP` |
 | **Branch sesi ini** | `claude/rab-9-10-tasks-qgpjiz` |
-| **PR sesi ini** | **#PR_PLACEHOLDER** (base `main`) — RAB-09 + RAB-10. |
+| **PR sesi ini** | **#177** (base `main`) — RAB-09 + RAB-10. |
 | **RAB-04 UI + RAB-08** | PR **#176** — **MERGE** ke `main`. |
 | **RAB-06/07** #175 · **RAB-03/04/05** #174 · **RAB-01/02** #173 — semua MERGE. |
 | **Base saat kerja** | `main` (e98e58f, hasil merge #176). Branch di-restart dari `main`. |
