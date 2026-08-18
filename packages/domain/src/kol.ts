@@ -25,7 +25,7 @@
  * Reference: backend/internal/module9_kol/*.go.
  */
 
-import { bi, money, permission, statemachine } from '@cdps/core';
+import { bi, money, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { onBriefLeavesToDo } from './account';
 import { onBriefReachedTerminal, validateBriefApproval } from './board';
@@ -423,7 +423,7 @@ export function failQC(sql: Sql, actor: Actor, id: string, qcNotes: string): Pro
     }
     await setQcNotes(tx, id, qcNotes);
     void r;
-  });
+  }, (_tx, ex) => emitQcFailedOrEscalated(ex, actor, id));
 }
 
 /** escalate: [QC Review] → [Escalated] (§5 Rule 3). KOL Team Leader/Director; notes mandatory. */
@@ -433,6 +433,20 @@ export function escalate(sql: Sql, actor: Actor, id: string, qcNotes: string): P
       throw new ValidationError(MSG_QC_NOTES_REQUIRED);
     }
     await setQcNotes(tx, id, qcNotes);
+  }, (_tx, ex) => emitQcFailedOrEscalated(ex, actor, id));
+}
+
+/**
+ * emitQcFailedOrEscalated alerts the KOL Lead when a Booking is sent back for a
+ * revision or escalated (§5 Rule 2/3; catalog `m9.kol.qc_failed_or_escalated`,
+ * resolver `leadsOfDivision`). Emitted inside the transition's transaction, atomic
+ * with the status move — the same pattern as M10 `flagDiscrepancy`.
+ */
+async function emitQcFailedOrEscalated(ex: ReturnType<typeof executors>, actor: Actor, id: string): Promise<void> {
+  await notification.emit(ex.notify, {
+    event: notification.EVENTS.KOLQCFailedOrEscalated,
+    entityType: 'creator_booking', entityId: id, actor: actor.employeeId,
+    division: KOL_DIVISION, notifyActor: false,
   });
 }
 
@@ -489,6 +503,7 @@ async function edge(
   gate: (a: Actor, r: BookingRow) => boolean,
   forbiddenMsg: string,
   mutate?: (tx: Queryable, r: BookingRow) => Promise<void>,
+  after?: (tx: Queryable, ex: ReturnType<typeof executors>, r: BookingRow) => Promise<void>,
 ): Promise<statemachine.TransitionResult> {
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
@@ -509,6 +524,9 @@ async function edge(
       throw transitionError(res);
     }
     await recomputeBriefRollup(tx, actor, r.briefId);
+    if (after) {
+      await after(tx, ex, r);
+    }
     return res;
   });
 }

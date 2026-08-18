@@ -283,6 +283,40 @@ describeDb('native lifecycle drives the Brief roll-up (§2)', () => {
     await drop(sql, kolLead(), b.id, 'kreator batal');
     expect(await bkgStatus(b.id)).toBe('[Dropped]');
   });
+
+  it('failQC and escalate alert the KOL lead (§5 Rule 2/3, m9.kol.qc_failed_or_escalated)', async () => {
+    // An active KOL lead ≠ the actor, so `leadsOfDivision` resolves a recipient.
+    await sql`insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+      values ('ZZ-KLEAD', 'KOL Lead', 'klead@mea.id', 'KOL', 'ZZ-KOL-LEAD-JAB', true, 'ZZ-TEST')
+      on conflict (employee_id) do nothing`;
+    await sql`insert into role_mappings (divisi, jabatan, division, level, created_by)
+      values ('KOL', 'ZZ-KOL-LEAD-JAB', 'KOL', 'lead', 'ZZ-TEST') on conflict (divisi, jabatan) do nothing`;
+
+    const { briefId } = await kolBrief(1);
+    const c = kolStaff('ZZ-COORD');
+    const b = await createBooking(sql, c, briefId, goodInput());
+    await book(sql, c, b.id);
+    await startContent(sql, c, b.id);
+    await submitContent(sql, c, b.id, 'https://x');
+    await sendToQCReview(sql, c, b.id);
+
+    // failQC (by the coordinator) → the KOL lead is notified.
+    await failQC(sql, c, b.id, 'audio buruk');
+    const afterFail = await sql<{ event_type: string; recipient_employee_id: string }[]>`
+      select event_type, recipient_employee_id from notifications where entity_id = ${b.id}`;
+    expect(afterFail.some((n) => n.event_type === 'm9.kol.qc_failed_or_escalated'
+      && n.recipient_employee_id === 'ZZ-KLEAD')).toBe(true);
+
+    // escalate (by the Director, so notifyActor:false does not exclude the lead)
+    // → a second alert to the KOL lead.
+    await resubmit(sql, c, b.id, 'https://x2');
+    await sendToQCReview(sql, c, b.id);
+    await escalate(sql, director(), b.id, 'kreator hilang');
+    const afterEsc = await sql<{ recipient_employee_id: string }[]>`
+      select recipient_employee_id from notifications
+       where entity_id = ${b.id} and event_type = 'm9.kol.qc_failed_or_escalated'`;
+    expect(afterEsc.filter((n) => n.recipient_employee_id === 'ZZ-KLEAD').length).toBe(2);
+  });
 });
 
 describeDb('coordinator / SLA / hours (§3 / §7)', () => {
