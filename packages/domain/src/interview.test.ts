@@ -12,6 +12,7 @@ import { interview as iv, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import { afterAll, describe, expect, it } from 'vitest';
 import * as interview from './interview';
+import { confirmIsian, getBaseline, submitBaseline } from './riset-awal';
 import type { Actor } from './account';
 
 const actor = (employeeId: string, division: string, level: string, extra: { od?: boolean; director?: boolean } = {}): Actor => ({
@@ -69,6 +70,9 @@ const CLI = 'CLI-ZZI-0001';
 // deliberately returns the client's open session, so a test about "the next click
 // opens a fresh one" cannot share a client with tests that leave sessions open.
 const CLI_RESUME = 'CLI-ZZI-0002';
+// A Shopee-only client for the RAB-07 anti-deadlock case (no analysis engine).
+const CLI_SHOPEE = 'CLI-ZZI-0003';
+const ALL_CLI = [CLI, CLI_RESUME, CLI_SHOPEE];
 const created: string[] = [];
 
 afterAll(async () => {
@@ -79,13 +83,74 @@ afterAll(async () => {
   await sql`alter table interview_flag disable trigger trg_flag_frozen`;
   try {
     // Delete by client_id (not just tracked ids) so the teardown is self-healing.
-    await sql`delete from interview where client_id in (${CLI}, ${CLI_RESUME})`;
+    // Interview deletion cascades to interview_riset_awal → riset_awal_analisa /
+    // interview_riset_awal_isian, which must go before client_platforms (analisa
+    // FKs a platform row with no cascade of its own).
+    await sql`delete from interview where client_id in ${sql(ALL_CLI)}`;
   } finally {
     await sql`alter table interview_flag enable trigger trg_flag_frozen`;
   }
-  await sql`delete from clients where id in (${CLI}, ${CLI_RESUME})`;
+  await sql`delete from client_platforms where client_id in ${sql(ALL_CLI)}`;
+  await sql`delete from clients where id in ${sql(ALL_CLI)}`;
   await sql.end();
 });
+
+/**
+ * seedManualBaseline records a MANUAL baseline for every active platform of the
+ * client (creating a Shopee platform if the client has none), leaving the
+ * auto-filled isian UNCONFIRMED. Manual works for any marketplace, so a
+ * Shopee-only client is served without a TikTok analysis (anti-deadlock, RAB-07).
+ */
+async function seedManualBaseline(a: Actor, interviewId: string, clientId: string): Promise<void> {
+  const plats = await sql<{ id: number }[]>`
+    select id from client_platforms where client_id = ${clientId} and active = true order by id`;
+  let ids = plats.map((p) => Number(p.id));
+  if (ids.length === 0) {
+    const ins = await sql<{ id: number }[]>`
+      insert into client_platforms (client_id, platform, active, created_by)
+      values (${clientId}, 'Shopee', true, ${a.employeeId}) returning id`;
+    ids = [Number(ins[0].id)];
+  }
+  for (const pid of ids) {
+    const has = await sql`select 1 from riset_awal_analisa where interview_id = ${interviewId} and client_platform_id = ${pid}`;
+    if (has.length === 0) {
+      await submitBaseline(sql, a, interviewId, {
+        clientPlatformId: pid,
+        manual: { gmvBulan: 5_000_000, order: 120, aov: 41_666, skuTotal: 15, belanjaIklan: 500_000, roas: 3.2 },
+      });
+    }
+  }
+}
+
+/**
+ * completeRisetAwal makes an interview satisfy the RAB-07 start gate: it seeds a
+ * manual baseline for every active platform, confirms the auto-filled isian, and —
+ * when `submit` is set — submits the riset awal step. Split from the timeline tests
+ * so those can drive their own `submitRisetAwal` for the SLA anchor.
+ */
+async function completeRisetAwal(
+  a: Actor,
+  interviewId: string,
+  clientId: string,
+  opts: { submit?: boolean } = {},
+): Promise<void> {
+  await seedManualBaseline(a, interviewId, clientId);
+  const view = await getBaseline(sql, a, interviewId);
+  await confirmIsian(
+    sql,
+    a,
+    interviewId,
+    view.isian.map((f) => ({
+      section: f.section,
+      fieldKey: f.fieldKey,
+      nilaiTeks: f.nilaiTeks,
+      nilaiAngka: f.nilaiAngka,
+      nilaiUang: f.nilaiUang,
+      dikonfirmasi: true,
+    })),
+  );
+  if (opts.submit) await interview.submitRisetAwal(sql, a, interviewId);
+}
 
 dDb('interview write path (integration)', () => {
   it('creates, saves answers, scores tidak_siap on a deal-breaker, and exposes the verdict', async () => {
@@ -141,9 +206,11 @@ dDb('interview write path (integration)', () => {
     // must NOT clutter the log.
     const blank = await interview.createInterview(sql, OWNER, { clientId: CLI });
     created.push(blank.interview.id);
-    // A scheduled one SHOULD appear.
+    // A scheduled one SHOULD appear. Scheduling now requires riset awal complete
+    // (RAB-07), so finish it first.
     const sched = await interview.createInterview(sql, OWNER, { clientId: CLI });
     created.push(sched.interview.id);
+    await completeRisetAwal(OWNER, sched.interview.id, CLI, { submit: true });
     await interview.scheduleInterview(sql, OWNER, sched.interview.id, {
       tanggalWaktu: '2026-08-20T04:00:00.000Z',
       durasiMenit: 30,
@@ -188,6 +255,8 @@ dDb('interview write path (integration)', () => {
 
     // A valid schedule persists and moves the interview to Terjadwal (format is
     // no longer collected by the UI, but the guard/column still accept a value).
+    // Moving off Belum Dijadwalkan now needs riset awal complete (RAB-07).
+    await completeRisetAwal(OWNER, id, CLI, { submit: true });
     const ok = await interview.scheduleInterview(sql, OWNER, id, {
       tanggalWaktu: when,
       durasiMenit: 40,
@@ -205,6 +274,9 @@ dDb('interview write path (integration)', () => {
     created.push(detail.interview.id);
     expect(detail.interview.status).toBe(iv.INTERVIEW_STATES.BelumDijadwalkan);
 
+    // Starting the meeting still needs riset awal complete first (RAB-07), but no
+    // jadwal — the direct-start path stays available once the prerequisite is met.
+    await completeRisetAwal(OWNER, detail.interview.id, CLI, { submit: true });
     const started = await interview.transitionInterview(
       sql,
       OWNER,
@@ -475,6 +547,9 @@ dDb('timeline kelola klien (langkah 1–3)', () => {
     created.push(detail.interview.id);
     const id = detail.interview.id;
 
+    // Baseline + confirm so the start gate (RAB-07) passes; the test drives the
+    // riset awal timing submit itself, since that is the SLA anchor under test.
+    await completeRisetAwal(OWNER, id, CLI);
     await interview.submitRisetAwal(sql, OWNER, id);
     const afterRiset = await interview.getKelolaKlienTimeline(sql, OWNER, id);
     expect(afterRiset.langkah[0].selesai).toBe(true);
@@ -498,6 +573,7 @@ dDb('timeline kelola klien (langkah 1–3)', () => {
     created.push(detail.interview.id);
     const id = detail.interview.id;
 
+    await completeRisetAwal(OWNER, id, CLI); // RAB-07 gate before the meeting can start
     await interview.submitRisetAwal(sql, OWNER, id);
     await interview.transitionInterview(sql, OWNER, id, iv.INTERVIEW_STATES.SedangBerlangsung);
     await interview.transitionInterview(sql, OWNER, id, iv.INTERVIEW_STATES.DraftIsian);
@@ -605,5 +681,163 @@ dDb('timeline kelola klien (langkah 1–3)', () => {
     // OD reads everything; the Account lead too.
     expect((await interview.getKelolaKlienTimeline(sql, OD, detail.interview.id)).langkah).toHaveLength(3);
     expect((await interview.getKelolaKlienTimeline(sql, ACC_LEAD, detail.interview.id)).langkah).toHaveLength(3);
+  });
+});
+
+// ===========================================================================
+// RAB-06 — riset awal scored inputs are server-authoritative
+// ===========================================================================
+//
+// B2-9 (AOV) and B2-3 (SKU siap) enter the Blok C score. Once the AM confirms the
+// riset-awal isian for them, the CONFIRMED number — not the value posted to
+// /score — is what scores. This closes the provenance leak: a hand-posted AOV/SKU
+// cannot move the verdict away from the baseline the AM signed off on. The core
+// scorer and SCORED_FIELD_KEYS are untouched; only the SOURCE of two inputs moves.
+
+/** A clean, deal-breaker-free scoring body with AOV/SKU parameterised. */
+function baseScoreInput(o: { aov: bigint; skuSiap: number }): iv.KualifikasiInput {
+  return {
+    marginBersih: 40,
+    marginBersihSumber: iv.SUMBER_ANGKA.KlienHitung,
+    aov: o.aov,
+    ruangHarga: iv.RUANG_HARGA.MasihAdaRuang,
+    modelBisnis: iv.MODEL_BISNIS.DistributorResmi,
+    kesanggupanLonjakan: iv.KESANGGUPAN_LONJAKAN.Sanggup,
+    siklusBeliUlang: iv.SIKLUS_BELI_ULANG.HabisPakai,
+    pembedaProduk: iv.PEMBEDA_PRODUK.PembedaJelas,
+    skuSiap: o.skuSiap,
+    penangananChat: iv.PENANGANAN_CHAT.TimKhusus,
+    kecepatanApproval: iv.KECEPATAN_APPROVAL.SatuOrangJelas,
+    kesiapanAkses: iv.KESIAPAN_AKSES.Penuh,
+    omzet: 100_000_000n,
+    targetOmzet: 150_000_000n,
+    dayaTahanBudget: iv.DAYA_TAHAN_BUDGET.Enam,
+  };
+}
+
+dDb('RAB-06 — riset awal scored inputs are server-authoritative', () => {
+  const mkInterview = async (): Promise<string> => {
+    const d = await interview.createInterview(sql, OWNER, { clientId: CLI, salesClosingId: 'EMP-0006' });
+    created.push(d.interview.id);
+    return d.interview.id;
+  };
+
+  it('confirmed B2-9/B2-3 override a divergent score body (the provenance leak is closed)', async () => {
+    // I1 — baseline auto-fills B2-9/B2-3; confirm them to STRONG values.
+    const i1 = await mkInterview();
+    await seedManualBaseline(OWNER, i1, CLI);
+    await confirmIsian(sql, OWNER, i1, [
+      { section: 'B2', fieldKey: 'B2-9', nilaiUang: '20000000', dikonfirmasi: true }, // Rp200k → top AOV band
+      { section: 'B2', fieldKey: 'B2-3', nilaiAngka: 40, dikonfirmasi: true }, // 40 SKU → top band
+    ]);
+    // Score I1 with a body carrying WEAK aov/sku — the merge must ignore them.
+    const k1 = await interview.scoreInterview(sql, OWNER, i1, baseScoreInput({ aov: 1n, skuSiap: 0 }));
+
+    // I2 — no isian; body carries the SAME strong values as I1's confirmed isian.
+    const i2 = await mkInterview();
+    const k2 = await interview.scoreInterview(sql, OWNER, i2, baseScoreInput({ aov: 20_000_000n, skuSiap: 40 }));
+
+    // I3 — no isian; body carries the WEAK values.
+    const i3 = await mkInterview();
+    const k3 = await interview.scoreInterview(sql, OWNER, i3, baseScoreInput({ aov: 1n, skuSiap: 0 }));
+
+    // I1 scored on the CONFIRMED strong values, not the weak body → identical to I2.
+    expect(k1.skorKualifikasi).toBe(k2.skorKualifikasi);
+    expect(k1.skorPerBlok).toEqual(k2.skorPerBlok);
+    expect(k1.verdictKualifikasi).toBe(k2.verdictKualifikasi);
+    // …and genuinely different from the weak-body result, proving the body was ignored.
+    expect(k1.skorKualifikasi).not.toBe(k3.skorKualifikasi);
+  });
+
+  it('an UNCONFIRMED proposal never overrides the body — only a confirmed one wins', async () => {
+    // I4 — baseline auto-fills B2-9/B2-3 but they stay UNCONFIRMED (no confirmIsian).
+    const i4 = await mkInterview();
+    await seedManualBaseline(OWNER, i4, CLI);
+    const k4 = await interview.scoreInterview(sql, OWNER, i4, baseScoreInput({ aov: 20_000_000n, skuSiap: 40 }));
+
+    // I5 — no isian at all; same strong body.
+    const i5 = await mkInterview();
+    const k5 = await interview.scoreInterview(sql, OWNER, i5, baseScoreInput({ aov: 20_000_000n, skuSiap: 40 }));
+
+    // Unconfirmed proposals do not touch the score, so I4 == I5 (body authoritative).
+    // This is also the "no riset awal ⇒ fixture unchanged" guarantee (Alpha Digital).
+    expect(k4.skorKualifikasi).toBe(k5.skorKualifikasi);
+    expect(k4.skorPerBlok).toEqual(k5.skorPerBlok);
+    expect(k4.verdictKualifikasi).toBe(k5.verdictKualifikasi);
+  });
+});
+
+// ===========================================================================
+// RAB-07 — riset awal is a prerequisite for starting the interview
+// ===========================================================================
+//
+// The gate is per-PLATFORM: every active client_platforms row needs a baseline
+// (analisa OR manual), every auto-filled isian must be confirmed, and riset awal
+// must be submitted. The critical case is anti-deadlock — a Shopee-only client
+// (Shopee has no analysis engine) must be able to finish via a MANUAL baseline and
+// start the interview; at seed Shopee outnumbers TikTok 156×:16×.
+
+dDb('RAB-07 — prerequisite gate (interview needs riset awal)', () => {
+  it('anti-deadlock: a Shopee-only client finishes manual riset awal and starts the interview', async () => {
+    await sql`
+      insert into clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, assigned_am_id, created_by)
+      values (${CLI_SHOPEE}, 'PIC', 'Toko Shopee', 'Jakarta', 'https://s.example', 'Fashion', 0, 0,
+              'EMP-0006', 'EMP-0006', 'EMP-0001', 'EMP-0001')
+      on conflict (id) do nothing`;
+    const sh = await sql<{ id: number }[]>`
+      insert into client_platforms (client_id, platform, store_link, active, created_by)
+      values (${CLI_SHOPEE}, 'Shopee', 'https://s.example', true, 'EMP-0001') returning id`;
+    const shopeeId = Number(sh[0].id);
+
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI_SHOPEE, salesClosingId: 'EMP-0006' });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+
+    // Before riset awal: the meeting cannot start (direct start OR schedule).
+    await expect(
+      interview.transitionInterview(sql, OWNER, id, iv.INTERVIEW_STATES.SedangBerlangsung),
+    ).rejects.toThrow(interview.MSG_RISET_AWAL_BELUM_LENGKAP);
+    await expect(
+      interview.scheduleInterview(sql, OWNER, id, { tanggalWaktu: '2026-08-20T04:00:00.000Z', durasiMenit: 30 }),
+    ).rejects.toThrow(interview.MSG_RISET_AWAL_BELUM_LENGKAP);
+    // The blocked attempts moved nothing.
+    expect((await interview.getInterview(sql, OWNER, id)).interview.status).toBe(iv.INTERVIEW_STATES.BelumDijadwalkan);
+
+    // Manual baseline (Shopee has no engine) → belum_dapat_diukur, no score.
+    await submitBaseline(sql, OWNER, id, {
+      clientPlatformId: shopeeId,
+      manual: { gmvBulan: 5_000_000, order: 120, aov: 41_666, skuTotal: 15, belanjaIklan: 500_000, roas: 3.2 },
+    });
+
+    // Confirmed-but-not-submitted is still not enough: riset awal must be submitted.
+    const view = await getBaseline(sql, OWNER, id);
+    await confirmIsian(
+      sql,
+      OWNER,
+      id,
+      view.isian.map((f) => ({ section: f.section, fieldKey: f.fieldKey, nilaiTeks: f.nilaiTeks, nilaiAngka: f.nilaiAngka, nilaiUang: f.nilaiUang, dikonfirmasi: true })),
+    );
+    await expect(
+      interview.transitionInterview(sql, OWNER, id, iv.INTERVIEW_STATES.SedangBerlangsung),
+    ).rejects.toThrow(interview.MSG_RISET_AWAL_BELUM_LENGKAP);
+
+    // Submit riset awal → the gate now passes and the interview can start.
+    await interview.submitRisetAwal(sql, OWNER, id);
+    const started = await interview.transitionInterview(sql, OWNER, id, iv.INTERVIEW_STATES.SedangBerlangsung);
+    expect(started.interview.status).toBe(iv.INTERVIEW_STATES.SedangBerlangsung);
+  });
+
+  it('an unconfirmed isian blocks the start even after riset awal is submitted', async () => {
+    const detail = await interview.createInterview(sql, OWNER, { clientId: CLI_SHOPEE, salesClosingId: 'EMP-0006' });
+    created.push(detail.interview.id);
+    const id = detail.interview.id;
+
+    await seedManualBaseline(OWNER, id, CLI_SHOPEE); // proposals left UNCONFIRMED
+    await interview.submitRisetAwal(sql, OWNER, id);
+    // Baseline present + submitted, but a number the AM never confirmed still blocks.
+    await expect(
+      interview.transitionInterview(sql, OWNER, id, iv.INTERVIEW_STATES.SedangBerlangsung),
+    ).rejects.toThrow(interview.MSG_RISET_AWAL_BELUM_LENGKAP);
   });
 });
