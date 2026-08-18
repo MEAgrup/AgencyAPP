@@ -156,6 +156,21 @@ describeDb('M6D close gate — narrative required (D-05)', () => {
     expect(Number(rows[0].nilai)).toBe(4.6); // dispute never mutates the figure
     expect(rows[0].sengketa).toContain('tak cocok');
   });
+
+  it('re-aggregates the non-disputed auto figures at close (freeze-as-of-close)', async () => {
+    const id = await seedOpenRecap();
+    await seedNarasi(id, { bergerak: 'ROAS bertahan 4,6', fokus: 'kejar sisa video' });
+    // A stale auto figure left over from the empty week-open aggregate: no
+    // dispute, so close must REFRESH it from the (here productionless) window → 0.
+    // This is the other half of Rule 7: only a filed Sengketa freezes a figure.
+    await sql`insert into wrr_metrik (recap_id, metrik, sumber, nilai, created_by)
+              values (${id}, 'gmv_interim', 'otomatis', 999000000, 'SYSTEM')`;
+    const res = await smTransition(id, 'Ditutup');
+    expect(res[0].r.ok).toBe(true);
+    const rows = await sql<{ nilai: string }[]>`
+      select nilai from wrr_metrik where recap_id = ${id} and metrik = 'gmv_interim'`;
+    expect(Number(rows[0].nilai)).toBe(0); // refreshed from the real window, not frozen stale
+  });
 });
 
 describeDb('M6D wrr_catatan_divisi is append-only (D-05 / RM-D6)', () => {
