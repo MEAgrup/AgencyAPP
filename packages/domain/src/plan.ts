@@ -92,6 +92,30 @@ export const MSG_PLAN_ADJUST_REJECT_NOTES_REQUIRED =
 
 /** The work-row (`plan_row`) does not resolve. */
 export const MSG_PLAN_ROW_NOT_FOUND = '[baris rencana kerja tidak ditemukan]';
+
+// --- B-01/PC: create a Section P-C work-row ------------------------------
+
+/** PC-1/2/6/8 — a mandatory field on a new work-row is missing. */
+export const MSG_PLAN_ROW_INCOMPLETE = '[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]';
+/** PC-2 — the pillar is not one of the eight Strategi-pillar vocabulary values. */
+export const MSG_PLAN_ROW_PILAR_INVALID = '[pilar baris rencana tidak valid]';
+/** PC-10 — the priority is not one of the three allowed values. */
+export const MSG_PLAN_ROW_PRIORITAS_INVALID = '[prioritas baris rencana tidak valid]';
+/** PC-17 — the visibility is not one of the two allowed values. */
+export const MSG_PLAN_ROW_VISIBILITAS_INVALID = '[visibilitas baris rencana tidak valid]';
+/** PC-6/7 — a negative quota or budget. */
+export const MSG_PLAN_ROW_KUOTA_INVALID = '[kuota dan budget baris rencana tidak boleh negatif]';
+/** PC-3 (ck_plan_row_asal_tunggal) — a row must have EXACTLY one origin: a
+ *  Strategi pillar, a service, or a `Di Luar Strategi`/`Di Luar Service` flag. */
+export const MSG_PLAN_ROW_ASAL_INVALID =
+  '[baris rencana harus berasal dari tepat satu sumber: pilar Strategi, service, atau ditandai Di Luar]';
+/** PC-3 (ck_plan_row_di_luar_alasan) — a `Di Luar` row needs a written reason. */
+export const MSG_PLAN_ROW_DILUAR_ALASAN_REQUIRED =
+  '[alasan wajib diisi untuk baris yang ditandai Di Luar Strategi/Service]';
+/** A new work-row may only be added while the period is Draft or Aktif (P-C write
+ *  scope, §8 Permissions: AM writes P-A…P-F on `Draft`/`Aktif`). */
+export const MSG_PLAN_ROW_CREATE_STATUS =
+  '[baris rencana hanya dapat ditambah saat periode berstatus Draft atau Aktif]';
 /** Rule 7 — a re-drag whose weekly quotas do not sum to the monthly quota. */
 export const MSG_PLAN_WEEK_SUM_MISMATCH =
   '[distribusi mingguan harus berjumlah sama dengan kuota bulanan baris]';
@@ -1987,6 +2011,168 @@ async function loadPlanRow(tx: TransactionSql, planRowId: number): Promise<PlanR
   const rows = await tx<Record<string, unknown>[]>`select * from plan_row where id = ${planRowId}`;
   if (rows.length === 0) throw new NotFoundError(MSG_PLAN_ROW_NOT_FOUND);
   return rowToPlanRow(rows[0]);
+}
+
+/** PC-2 pillar vocabulary (mirrors `ck_plan_row_pilar`; the eight Strategi
+ *  pillars, without the pillar-status-only `tidak_dikerjakan`). */
+const PLAN_ROW_PILAR: readonly string[] = [
+  'sku',
+  'harga',
+  'iklan',
+  'konten',
+  'affiliate',
+  'live',
+  'retensi',
+  'operasional',
+];
+/** PC-10 priorities (mirrors `ck_plan_row_prioritas`). */
+const PLAN_ROW_PRIORITAS: readonly PlanRow['prioritas'][] = ['Wajib', 'Penting', 'Kalau Sempat'];
+/** PC-17 visibilities (mirrors `ck_plan_row_visibilitas`). */
+const PLAN_ROW_VISIBILITAS: readonly PlanRow['visibilitas'][] = ['Bagikan ke Klien', 'Internal Saja'];
+
+/**
+ * The Section P-C fields an AM supplies for a NEW work-row. Origin (PC-3) is
+ * exactly one of: `strategiPillarId`, `serviceId`, `diLuarStrategi`, or
+ * `diLuarService` — the same one-of that `ck_plan_row_asal_tunggal` enforces in
+ * the DB. Auto/read-only columns (PC-13 status Brief, PC-14 status baris, PC-15
+ * catatan divisi, PC-16 keberatan, carry-over) are NOT settable here: a fresh row
+ * always starts `Rencana`, un-carried, with no division comment or objection.
+ */
+export interface CreatePlanRowInput {
+  channel: string; // PC-1
+  pilar: string; // PC-2
+  strategiPillarId?: number | null; // PC-3
+  serviceId?: string | null; // PC-3
+  diLuarStrategi?: boolean; // PC-3
+  diLuarService?: boolean; // PC-3
+  diLuarAlasan?: string | null; // PC-3
+  aksi?: string; // PC-4
+  skuSasaran?: unknown[]; // PC-5
+  kuota: number; // PC-6
+  satuan?: string; // PC-6 unit
+  budget?: number | null; // PC-7
+  divisiPic: string; // PC-8
+  mingguSasaran?: number[]; // PC-9
+  prioritas?: PlanRow['prioritas']; // PC-10
+  hasilDiharapkan?: string; // PC-11
+  prasyarat?: string | null; // PC-12
+  visibilitas?: PlanRow['visibilitas']; // PC-17
+}
+
+/**
+ * createPlanRow inserts one Section P-C work-row (RAB-14). It is the only write
+ * path for `plan_row`: before this the table was reachable only through the raw
+ * SQL in `plan.test.ts`. The gates it applies mirror the DB CHECKs so the caller
+ * gets an exact BI `[...]` message instead of a raw constraint error, and the
+ * writes still ride the same DB CHECKs as a backstop (`ck_plan_row_asal_tunggal`,
+ * `ck_plan_row_di_luar_alasan`, `ck_plan_row_pilar`, …).
+ *
+ * Write scope is the owning AM / Account lead / Director (`canWritePlan`); the
+ * period must be `Draft` or `Aktif` (§8 Permissions: AM writes P-A…P-F on those
+ * two states). Every insert appends an immutable `baris_dibuat` audit row
+ * (CLAUDE.md #3). Auto columns are never accepted from the caller: a row is born
+ * `Rencana`, un-carried, no division comment.
+ */
+export async function createPlanRow(
+  sql: Sql,
+  actor: Actor,
+  planId: string,
+  input: CreatePlanRowInput,
+): Promise<PlanRow> {
+  const channel = (input.channel ?? '').trim();
+  const pilar = (input.pilar ?? '').trim();
+  const divisiPic = (input.divisiPic ?? '').trim();
+  if (channel === '' || pilar === '' || divisiPic === '' || input.kuota == null) {
+    throw new ValidationError(MSG_PLAN_ROW_INCOMPLETE);
+  }
+  if (!PLAN_ROW_PILAR.includes(pilar)) throw new ValidationError(MSG_PLAN_ROW_PILAR_INVALID);
+
+  const prioritas = input.prioritas ?? 'Penting';
+  if (!PLAN_ROW_PRIORITAS.includes(prioritas)) {
+    throw new ValidationError(MSG_PLAN_ROW_PRIORITAS_INVALID);
+  }
+  const visibilitas = input.visibilitas ?? 'Bagikan ke Klien';
+  if (!PLAN_ROW_VISIBILITAS.includes(visibilitas)) {
+    throw new ValidationError(MSG_PLAN_ROW_VISIBILITAS_INVALID);
+  }
+
+  const kuota = Number(input.kuota);
+  const budget = input.budget == null ? null : Number(input.budget);
+  if (!Number.isFinite(kuota) || kuota < 0 || (budget !== null && (!Number.isFinite(budget) || budget < 0))) {
+    throw new ValidationError(MSG_PLAN_ROW_KUOTA_INVALID);
+  }
+
+  // PC-3: exactly one origin (mirrors ck_plan_row_asal_tunggal).
+  const strategiPillarId = input.strategiPillarId ?? null;
+  const serviceId = (input.serviceId ?? null) || null;
+  const diLuarStrategi = input.diLuarStrategi === true;
+  const diLuarService = input.diLuarService === true;
+  const originCount =
+    (strategiPillarId !== null ? 1 : 0) +
+    (serviceId !== null ? 1 : 0) +
+    (diLuarStrategi ? 1 : 0) +
+    (diLuarService ? 1 : 0);
+  if (originCount !== 1) throw new ValidationError(MSG_PLAN_ROW_ASAL_INVALID);
+
+  const diLuarAlasan = (input.diLuarAlasan ?? '').trim() || null;
+  if ((diLuarStrategi || diLuarService) && diLuarAlasan === null) {
+    throw new ValidationError(MSG_PLAN_ROW_DILUAR_ALASAN_REQUIRED);
+  }
+
+  const aksi = input.aksi ?? '';
+  const satuan = input.satuan ?? '';
+  const hasilDiharapkan = input.hasilDiharapkan ?? '';
+  const prasyarat = (input.prasyarat ?? '').trim() || null;
+  const skuSasaran = input.skuSasaran ?? [];
+  const mingguSasaran = input.mingguSasaran ?? [];
+
+  return withTransaction(sql, async (tx) => {
+    const plan = await loadPlanForUpdate(tx, planId);
+    const ownerAm = await ownerAmOfClient(tx, plan.clientId);
+    if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+    if (plan.status !== PLAN_DRAFT && plan.status !== PLAN_AKTIF) {
+      throw new ConflictError(MSG_PLAN_ROW_CREATE_STATUS);
+    }
+
+    const inserted = await tx<{ id: string | number }[]>`
+      insert into plan_row (
+        plan_id, channel, pilar,
+        strategi_pillar_id, service_id, di_luar_strategi, di_luar_service, di_luar_alasan,
+        aksi, sku_sasaran, kuota, satuan, budget, divisi_pic, minggu_sasaran,
+        prioritas, hasil_diharapkan, prasyarat, visibilitas, created_by)
+      values (
+        ${planId}, ${channel}, ${pilar},
+        ${strategiPillarId}, ${serviceId}, ${diLuarStrategi}, ${diLuarService}, ${diLuarAlasan},
+        ${aksi}, ${tx.json(skuSasaran as JsonParam)}, ${kuota}, ${satuan}, ${budget}, ${divisiPic}, ${tx.json(mingguSasaran as JsonParam)},
+        ${prioritas}, ${hasilDiharapkan}, ${prasyarat}, ${visibilitas}, ${actor.employeeId})
+      returning id`;
+    const newId = num(inserted[0].id);
+
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'baris_dibuat',
+      beforeJson: null,
+      afterJson: {
+        plan_row_id: newId,
+        channel,
+        pilar,
+        strategi_pillar_id: strategiPillarId,
+        service_id: serviceId,
+        di_luar_strategi: diLuarStrategi,
+        di_luar_service: diLuarService,
+        kuota,
+        divisi_pic: divisiPic,
+        prioritas,
+        visibilitas,
+      },
+      createdBy: actor.employeeId,
+    });
+
+    return loadPlanRow(tx, newId);
+  });
 }
 
 /**

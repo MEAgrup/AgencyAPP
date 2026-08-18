@@ -40,6 +40,12 @@ import {
   MSG_PLAN_NOT_FOUND,
   MSG_PLAN_RETURN_NOTES_REQUIRED,
   MSG_PLAN_ROW_NOT_FOUND,
+  MSG_PLAN_ROW_INCOMPLETE,
+  MSG_PLAN_ROW_PILAR_INVALID,
+  MSG_PLAN_ROW_KUOTA_INVALID,
+  MSG_PLAN_ROW_ASAL_INVALID,
+  MSG_PLAN_ROW_DILUAR_ALASAN_REQUIRED,
+  MSG_PLAN_ROW_CREATE_STATUS,
   MSG_PLAN_TARGET_NOT_FOUND,
   MSG_ACTUAL_BUKTI_REQUIRED,
   MSG_ACTUAL_METRIC_NOT_MANUAL,
@@ -86,6 +92,7 @@ import {
   closePlanPeriode,
   computePeriods,
   contractDeficit,
+  createPlanRow,
   distributeWeeks,
   fileSengketa,
   forceClosePlanPeriode,
@@ -666,6 +673,94 @@ describeDb('plan_row & plan_actual shape', () => {
     // a well-formed manual GMV row → accepted.
     await sql`insert into plan_actual (plan_id, channel, metric, sumber, nilai, file_bukti, tanggal_ambil, created_by)
               values (${id}, 'Shopee', 'gmv', 'manual', 188000000, 'export.pdf', '2026-09-12', 'ZZ-AM')`;
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createPlanRow (RAB-14 — the only write path into plan_row)
+// ---------------------------------------------------------------------------
+
+describeDb('createPlanRow (RAB-14, Section P-C)', () => {
+  it('inserts a Di-Luar-Strategi row on a Draft period, audits it, and bundles it in the detail', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriod(f, { status: 'Draft' });
+    const row = await createPlanRow(sql, am(), id, {
+      channel: 'Shopee',
+      pilar: 'iklan',
+      diLuarStrategi: true,
+      diLuarAlasan: 'scope creep disepakati klien',
+      aksi: 'boost 7 SKU Pareto',
+      kuota: 40,
+      satuan: 'kampanye',
+      divisiPic: 'Ads',
+      hasilDiharapkan: 'ACOS <= 18%',
+    });
+    expect(row.id).toBeGreaterThan(0);
+    expect(row.planId).toBe(id);
+    expect(row.diLuarStrategi).toBe(true);
+    expect(row.kuota).toBe(40);
+    // A fresh row is born Rencana, un-carried, not settable by the caller (PC-14).
+    expect(row.statusBaris).toBe('Rencana');
+    expect(row.terbawa).toBe(false);
+    // Immutable audit trail (CLAUDE.md #3).
+    const audit = await sql<{ after_json: { plan_row_id?: number; channel?: string } }[]>`
+      select after_json from audit_log
+       where entity_type = 'plan' and entity_id = ${id} and action = 'baris_dibuat'`;
+    expect(audit).toHaveLength(1);
+    expect(audit[0].after_json.plan_row_id).toBe(row.id);
+    // getPlanDetail bundles it.
+    const detail = await getPlanDetail(sql, am(), id);
+    expect(detail.rows).toHaveLength(1);
+    expect(detail.rows[0].id).toBe(row.id);
+  });
+
+  it('demands exactly one origin (PC-3 / ck_plan_row_asal_tunggal), before the DB CHECK', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriod(f, { status: 'Draft' });
+    const base = { channel: 'Shopee', pilar: 'iklan', kuota: 3, divisiPic: 'Ads' };
+    // Zero origins.
+    await expect(createPlanRow(sql, am(), id, base)).rejects.toThrow(MSG_PLAN_ROW_ASAL_INVALID);
+    // Two origins (service + di-luar).
+    await expect(
+      createPlanRow(sql, am(), id, { ...base, serviceId: 'ZZ-SVC-x', diLuarStrategi: true, diLuarAlasan: 'x' }),
+    ).rejects.toThrow(MSG_PLAN_ROW_ASAL_INVALID);
+  });
+
+  it('requires a reason on a Di-Luar row (PC-3 / ck_plan_row_di_luar_alasan)', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriod(f, { status: 'Draft' });
+    await expect(
+      createPlanRow(sql, am(), id, { channel: 'Shopee', pilar: 'iklan', kuota: 3, divisiPic: 'Ads', diLuarService: true }),
+    ).rejects.toThrow(MSG_PLAN_ROW_DILUAR_ALASAN_REQUIRED);
+  });
+
+  it('rejects a bad pilar, a negative quota, and a missing mandatory field', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriod(f, { status: 'Draft' });
+    const ok = { channel: 'Shopee', kuota: 3, divisiPic: 'Ads', diLuarStrategi: true, diLuarAlasan: 'x' };
+    await expect(createPlanRow(sql, am(), id, { ...ok, pilar: 'tidak_dikerjakan' })).rejects.toThrow(
+      MSG_PLAN_ROW_PILAR_INVALID,
+    );
+    await expect(createPlanRow(sql, am(), id, { ...ok, pilar: 'iklan', kuota: -1 })).rejects.toThrow(
+      MSG_PLAN_ROW_KUOTA_INVALID,
+    );
+    await expect(createPlanRow(sql, am(), id, { ...ok, pilar: 'iklan', channel: '  ' })).rejects.toThrow(
+      MSG_PLAN_ROW_INCOMPLETE,
+    );
+  });
+
+  it('is write-scoped (an unrelated AM is forbidden) and only on Draft/Aktif', async () => {
+    const f = await seedContractStrategi();
+    const good = { channel: 'Shopee', pilar: 'iklan', kuota: 3, divisiPic: 'Ads', diLuarStrategi: true, diLuarAlasan: 'x' };
+    const draft = await seedPeriod(f, { status: 'Draft' });
+    await expect(createPlanRow(sql, otherAm(), draft, good)).rejects.toThrow(MSG_PLAN_FORBIDDEN);
+    // Terjadwal / Diajukan are outside the P-C write window.
+    const terjadwal = await seedPeriod(f, { status: 'Terjadwal', periodeNo: 2 });
+    await expect(createPlanRow(sql, am(), terjadwal, good)).rejects.toThrow(MSG_PLAN_ROW_CREATE_STATUS);
+    // Aktif is inside it.
+    const aktif = await seedPeriod(f, { status: 'Aktif', periodeNo: 3 });
+    const row = await createPlanRow(sql, am(), aktif, good);
+    expect(row.statusBaris).toBe('Rencana');
   });
 });
 
