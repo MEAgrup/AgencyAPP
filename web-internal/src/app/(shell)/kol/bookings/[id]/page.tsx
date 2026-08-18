@@ -387,8 +387,8 @@ export default function KolBookingDetailPage({ params }: { params: Promise<{ id:
   const isDropped = status === '[Dropped]';
 
   const canExecute = canExecuteBooking(role, employeeId, booking);
-  const canEscalate = canEscalateBooking(role);
-  const canDrop = canDropBooking(role) && (isSourcing || isBooked || isEscalated);
+  const canEscalate = canEscalateBooking(role, employeeId, booking);
+  const canDrop = canDropBooking(role) && (isSourcing || isBooked || isContentInProgress || isEscalated);
   const canManage = canManageBooking(role);
   const canLogHoursSelf = canLogHoursBooking(role, employeeId, booking);
   const canContinue = canContinueEscalation(role, employeeId, booking);

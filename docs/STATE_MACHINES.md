@@ -218,6 +218,8 @@ dihitung `working_days_between`):
 
 ## 8. Creator Booking `BKG-` (M9)
 `[Sourcing]` → `[Booked]` → `[Content In Progress]` → `[Content Submitted]` (content link mandatory) → `[QC Review]` → { `[QC Passed]` (terminal) | `[QC Failed - Revision Requested]` (→ creator fixes → `[Content Submitted]`, counter +1, cap per M9) | `[Escalated - Creator Unresponsive]` (AM/Lead decide; SPV/Head Account final call on disagreement) | `[Dropped]` (terminal; excluded from Speed Score entirely) }.
+- **`[Dropped]` is reachable from `[Sourcing]` / `[Booked]` / `[Content In Progress]` / `[Escalated]`** — all lead-gated (`canDrop`). The `[Content In Progress]→[Dropped]` edge (B1, `DECISIONS.md` 2026-08-18) unblocks a creator who goes unresponsive after terms are agreed but before ever submitting content; without it the Booking could reach neither `[QC Review]` nor `[Escalated]` and sat stuck.
+- **`[QC Review]→[Escalated]` is NOT lead-only:** the assigned Coordinator may escalate (M9 §10.1 "escalate when needed"; B2, `DECISIONS.md` 2026-08-18). Gate `canExecute` = assigned Coordinator / KOL Lead / Director; the escalation surfaces to the SPV (KOL Team Leader), who under M9-OA-6 may take it to the Director. Both the escalation and its resolution are in the immutable audit log.
 - M12 mapping: Sourcing/Booked/Content In Progress ⇒ In Progress bucket; Content Submitted/QC Review ⇒ Submitted/In Review; QC Passed ⇒ Approved; Escalated ⇒ Blocked-equivalent; Dropped ⇒ excluded.
 
 ## 9. Creator Payment Request `CPR-` (M9)
