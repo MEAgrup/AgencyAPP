@@ -55,6 +55,8 @@ export const MSG_INVALID_FORMAT = '[format interview tidak valid]';
 export const MSG_INVALID_DURASI = '[durasi interview tidak valid]';
 export const MSG_RISET_AWAL_NOT_FOUND = '[riset awal tidak ditemukan]';
 export const MSG_RISET_AWAL_SUDAH_SUBMIT = '[riset awal sudah disubmit]';
+export const MSG_RISET_AWAL_BELUM_LENGKAP =
+  '[riset awal belum selesai — setiap platform aktif wajib punya baseline yang terkonfirmasi dan riset awal disubmit sebelum interview dimulai]';
 
 /**
  * The closed set of jadwal formats (IA-5). MIRRORS the `ck_jadwal_format` CHECK
@@ -740,9 +742,49 @@ export async function saveAnswers(sql: Sql, actor: Actor, id: string, answers: A
 // ---------------------------------------------------------------------------
 
 /**
+ * The riset-awal isian keys that also feed the Blok C score (RAB-06). Each names
+ * the `KualifikasiInput` field it is the authoritative source for ONCE the AM has
+ * confirmed it: B2-9 (AOV, money → `aov`) and B2-3 (SKU siap, count → `skuSiap`).
+ * The score/verdict itself lives entirely in the ONE core scorer — this list only
+ * decides where those two inputs are read FROM.
+ */
+export const RISET_AWAL_SCORED_KEYS = ['B2-9', 'B2-3'] as const;
+
+/**
+ * mergeRisetAwalScoredInputs closes the provenance leak (RAB-06). B2-9/B2-3 enter
+ * qualification, and once the AM has CONFIRMED the riset-awal isian for them, that
+ * confirmed number is the source of truth — the value the caller put in the score
+ * body for the same key is ignored, so a hand-posted AOV/SKU cannot move the
+ * verdict away from the baseline the AM signed off on. Keys with no confirmed
+ * isian fall through to the body unchanged, so an interview without riset awal
+ * (e.g. the Alpha Digital fixture) scores exactly as before.
+ */
+async function mergeRisetAwalScoredInputs(
+  sql: Queryable,
+  id: string,
+  input: iv.KualifikasiInput,
+): Promise<iv.KualifikasiInput> {
+  const rows = await sql<{ field_key: string; nilai_angka: string | number | null; nilai_uang: string | null }[]>`
+    select field_key, nilai_angka, nilai_uang
+      from interview_riset_awal_isian
+     where interview_id = ${id} and dikonfirmasi = true
+       and field_key = any(${[...RISET_AWAL_SCORED_KEYS]})`;
+  if (rows.length === 0) return input;
+  const merged: iv.KualifikasiInput = { ...input };
+  for (const r of rows) {
+    if (r.field_key === 'B2-9' && r.nilai_uang != null) merged.aov = BigInt(r.nilai_uang);
+    if (r.field_key === 'B2-3' && r.nilai_angka != null) merged.skuSiap = Number(r.nilai_angka);
+  }
+  return merged;
+}
+
+/**
  * scoreInterview computes and persists the qualification (via the ONE core
  * scorer inside `@cdps/db`), then — because the verdict is advisory — pings
  * SPV/Head of Account when it is `tidak_siap`. Nothing blocks.
+ *
+ * The riset-awal-derived inputs (B2-9/B2-3) are server-merged from the confirmed
+ * isian before scoring (RAB-06) — the request body cannot override them.
  */
 export async function scoreInterview(
   sql: Sql,
@@ -755,9 +797,10 @@ export async function scoreInterview(
     const { ownerAm } = await loadScope(tx, id);
     if (!canWriteInterview(actor, ownerAm)) throw new ForbiddenError(MSG_FORBIDDEN);
 
+    const merged = await mergeRisetAwalScoredInputs(tx, id, input);
     const { hasil } = await dbi.persistKualifikasi(tx, {
       interviewId: id,
-      input,
+      input: merged,
       dihitungOleh: actor.employeeId,
       configVersion: opts.configVersion,
       prasyaratStatus: opts.prasyaratStatus,
@@ -867,10 +910,61 @@ export async function scheduleInterview(sql: Sql, actor: Actor, id: string, jadw
     // Only move to Terjadwal from a pre-scheduled state; a reschedule of an
     // already-Terjadwal interview keeps its status (the jadwal update stands).
     if (interview.status === iv.INTERVIEW_STATES.BelumDijadwalkan || interview.status === iv.INTERVIEW_STATES.DijadwalkanUlang) {
+      // RAB-07 prerequisite: riset awal must be complete before the interview starts.
+      await assertRisetAwalGate(tx, id, interview.clientId);
       await runTransition(tx, actor, id, iv.INTERVIEW_STATES.Terjadwal);
     }
     return getInterview(tx, actor, id);
   });
+}
+
+/**
+ * assertRisetAwalGate blocks starting the interview until riset awal is genuinely
+ * done (RAB-07 · prasyarat). "Done" is per-PLATFORM, never per-analysis: EVERY
+ * active `client_platforms` row of the client must carry a baseline (analisa OR
+ * manual), every auto-filled isian must be confirmed (`semua_terkonfirmasi`), and
+ * the riset awal step itself must be submitted (its timing anchor closed).
+ *
+ * The per-platform rule is what makes the gate deadlock-free: a Shopee-only client
+ * (Shopee has no analysis engine → manual baseline) can satisfy it, so the gate
+ * never waits on a TikTok analysis it can't produce. Tying it to TikTok analysis
+ * would lock out the majority of clients (Shopee 156× vs TikTok 16× at seed) —
+ * that is the anti-deadlock case the RAB-07 DoD tests.
+ *
+ * `submitBaseline`/`confirmIsian`/`submitRisetAwal` are all independent of the
+ * interview status, so a blocked AM is never stuck: they finish riset awal, then
+ * the same start transition passes.
+ */
+async function assertRisetAwalGate(sql: Queryable, id: string, clientId: string): Promise<void> {
+  // (1) the riset awal step is submitted — the timing anchor is closed (langkah 1).
+  const ra = await sql<{ status: string }[]>`
+    select status from interview_riset_awal where interview_id = ${id}`;
+  const submitted = ra.length > 0 && ra[0].status === iv.RISET_AWAL_STATES.Selesai;
+
+  // (2) every ACTIVE platform of the client has a baseline row for this interview.
+  const cov = await sql<{ aktif: string; tertutup: string }[]>`
+    select
+      count(*) filter (where cp.active) as aktif,
+      count(*) filter (where cp.active and a.id is not null) as tertutup
+    from client_platforms cp
+    left join riset_awal_analisa a
+      on a.client_platform_id = cp.id and a.interview_id = ${id}
+    where cp.client_id = ${clientId}`;
+  const aktif = Number(cov[0]?.aktif ?? 0);
+  const tertutup = Number(cov[0]?.tertutup ?? 0);
+  const semuaPlatform = aktif > 0 && aktif === tertutup;
+
+  // (3) every auto-filled isian confirmed (the getBaseline().semua_terkonfirmasi gate).
+  const isian = await sql<{ total: string; konfirmasi: string }[]>`
+    select count(*) as total, count(*) filter (where dikonfirmasi) as konfirmasi
+      from interview_riset_awal_isian where interview_id = ${id}`;
+  const total = Number(isian[0]?.total ?? 0);
+  const konfirmasi = Number(isian[0]?.konfirmasi ?? 0);
+  const semuaTerkonfirmasi = total > 0 && total === konfirmasi;
+
+  if (!(submitted && semuaPlatform && semuaTerkonfirmasi)) {
+    throw new ValidationError(MSG_RISET_AWAL_BELUM_LENGKAP);
+  }
 }
 
 /** runTransition applies an edge via `sm_transition`, mapping a rejection to the
@@ -951,13 +1045,18 @@ export async function transitionInterview(
   opts: { alasanPembatalan?: string } = {},
 ): Promise<InterviewDetail> {
   return withTransaction(sql, async (tx) => {
-    const { ownerAm } = await loadScope(tx, id);
+    const { ownerAm, interview } = await loadScope(tx, id);
     if (!canWriteInterview(actor, ownerAm)) throw new ForbiddenError(MSG_FORBIDDEN);
 
     if (to === iv.INTERVIEW_STATES.Dibatalkan) {
       const reason = (opts.alasanPembatalan ?? '').trim();
       if (reason === '') throw new ValidationError(MSG_CANCEL_REASON);
       await tx`update interview set alasan_pembatalan = ${reason} where id = ${id}`;
+    }
+    // RAB-07 prerequisite: the meeting cannot start (direct start, or start after a
+    // schedule) until riset awal is complete for every active platform.
+    if (to === iv.INTERVIEW_STATES.SedangBerlangsung) {
+      await assertRisetAwalGate(tx, id, interview.clientId);
     }
     await runTransition(tx, actor, id, to);
     return getInterview(tx, actor, id);
