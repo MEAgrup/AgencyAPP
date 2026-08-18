@@ -399,7 +399,7 @@ export function canReadPlan(actor: Actor, ownerAm: string | null): boolean {
 // Reads
 // ---------------------------------------------------------------------------
 
-async function ownerAmOfClient(sql: Queryable, clientId: string): Promise<string | null> {
+export async function ownerAmOfClient(sql: Queryable, clientId: string): Promise<string | null> {
   const rows = await sql<{ assigned_am_id: string | null }[]>`
     select assigned_am_id from clients where id = ${clientId}`;
   if (rows.length === 0) throw new NotFoundError(MSG_CLIENT_NOT_FOUND);
@@ -902,7 +902,7 @@ const ENTITY_PLAN = 'plan';
 
 const PLAN_DRAFT = 'Draft';
 const PLAN_DIAJUKAN = 'Diajukan';
-const PLAN_AKTIF = 'Aktif';
+export const PLAN_AKTIF = 'Aktif';
 const PLAN_TERJADWAL = 'Terjadwal';
 const PLAN_MENUNGGU = 'Menunggu Persetujuan';
 const PLAN_DITUTUP = 'Ditutup';
@@ -974,7 +974,7 @@ export async function transitionPlan(
 }
 
 /** Load a period FOR UPDATE — locks the row so the gate check cannot race the move. */
-async function loadPlanForUpdate(tx: TransactionSql, id: string): Promise<Plan> {
+export async function loadPlanForUpdate(tx: TransactionSql, id: string): Promise<Plan> {
   const rows = await tx<PlanRowDb[]>`select * from plan where id = ${id} for update`;
   if (rows.length === 0) throw new NotFoundError(MSG_PLAN_NOT_FOUND);
   return rowToPlan(rows[0]);
@@ -2011,6 +2011,17 @@ async function loadPlanRow(tx: TransactionSql, planRowId: number): Promise<PlanR
   const rows = await tx<Record<string, unknown>[]>`select * from plan_row where id = ${planRowId}`;
   if (rows.length === 0) throw new NotFoundError(MSG_PLAN_ROW_NOT_FOUND);
   return rowToPlanRow(rows[0]);
+}
+
+/**
+ * listPlanRows returns every Section P-C work-row of one period, id-ordered. The
+ * read path behind RAB-16 one-click inheritance (`brief-inherit.ts`), which needs
+ * the whole set to derive a Brief per row inside the plan's own transaction.
+ */
+export async function listPlanRows(sql: Queryable, planId: string): Promise<PlanRow[]> {
+  const rows = await sql<Record<string, unknown>[]>`
+    select * from plan_row where plan_id = ${planId} order by id asc`;
+  return rows.map(rowToPlanRow);
 }
 
 /** PC-2 pillar vocabulary (mirrors `ck_plan_row_pilar`; the eight Strategi

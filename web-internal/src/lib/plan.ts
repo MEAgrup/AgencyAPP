@@ -11,6 +11,7 @@
 // boundary lives in `apps/api/src/lib/wire.ts` and nowhere else.
 
 import { api } from './api';
+import type { Brief } from '@/lib/account';
 
 // ---------------------------------------------------------------------------
 // Shapes (mirror `apps/api/src/lib/wire.ts` Plan* wire interfaces exactly).
@@ -102,6 +103,21 @@ export interface PlanActual {
 /** Contract-level carried deficit (Rule 9 / PA-6). */
 export interface PlanDeficit {
   defisit_terbawa: number;
+}
+
+/** RAB-16 — one row NOT briefed by the one-click inherit, and why. `reason` is a
+ *  machine code (di_luar / service_ambigu / tanpa_jadwal / sudah_diwarisi /
+ *  service_tidak_ditemukan / service_tidak_briefable / divisi_pic_tidak_valid /
+ *  kuota_nol) the page maps to its own friendly text. */
+export interface BriefInheritSkip {
+  plan_row_id: number;
+  reason: string;
+}
+
+/** RAB-16 — the result of one "warisi semua" click: Briefs created + rows skipped. */
+export interface BriefInheritResult {
+  created: Brief[];
+  skipped: BriefInheritSkip[];
 }
 
 // ---------------------------------------------------------------------------
@@ -202,4 +218,13 @@ export function fileSengketa(
 
 export function getContractDeficit(contractId: string): Promise<PlanDeficit> {
   return api.get<PlanDeficit>(`/contracts/${contractId}/plan-deficit`);
+}
+
+/** RAB-16 — one-click "warisi semua": AM supplies { plan_row_id, due_date,
+ *  priority } per row; the server briefs every eligible row and reports skips. */
+export function inheritBriefsFromPlan(
+  id: string,
+  fills: { plan_row_id: number; due_date: string; priority: string }[],
+): Promise<BriefInheritResult> {
+  return api.post<BriefInheritResult>(`/plan/${id}/briefs`, { fills });
 }

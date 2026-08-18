@@ -13,7 +13,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { plan } from '@cdps/domain';
+import type { briefInherit } from '@cdps/domain';
 import {
+  briefInheritResultToWire,
   planActualToWire,
   planRowToWire,
   planRowWeekToWire,
@@ -163,5 +165,47 @@ describe('planRowWeekToWire (Section P-D) & planActualToWire (Section P-E)', () 
       tanggal_ambil: '2026-09-12',
       sengketa: null,
     });
+  });
+});
+
+describe('briefInheritResultToWire (RAB-16 — one-click inheritance)', () => {
+  it('maps created Briefs via briefToWire and skipped rows to snake_case', () => {
+    const result: briefInherit.BriefInheritResult = {
+      created: [
+        {
+          id: 'BRF-202608-0001',
+          serviceId: 'SVC-202608-0001',
+          strategyId: '',
+          assignedDivision: 'Ads',
+          assignedPic: '',
+          deliverableType: 'video',
+          quantityTarget: 30,
+          dueDate: '2026-09-30',
+          priority: 'High',
+          recurring: false,
+          recurringFrequency: '',
+          recurringCount: 0,
+          recurringEndDate: '',
+          instructions: 'Kanal: TikTok Shop',
+          referenceAttachments: '',
+          title: 'ROAS >= 8',
+          status: '[To Do]',
+          revisionCount: 0,
+          revisionFlagged: false,
+          createdBy: 'EMP-1',
+          createdAt: new Date('2026-08-18T00:00:00Z'),
+        },
+      ],
+      skipped: [{ planRowId: 7, reason: 'di_luar' }],
+    };
+    const w = briefInheritResultToWire(result);
+    noCamel(w);
+    expect(w.created).toHaveLength(1);
+    expect(w.created[0].service_id).toBe('SVC-202608-0001');
+    expect(w.created[0].quantity_target).toBe(30);
+    // skipped is a snake_case row-id + machine reason code.
+    expect(w.skipped).toEqual([{ plan_row_id: 7, reason: 'di_luar' }]);
+    w.created.forEach(noCamel);
+    w.skipped.forEach(noCamel);
   });
 });

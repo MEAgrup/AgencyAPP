@@ -96,6 +96,7 @@ export * as strategi from './strategi';
 export * as interview from './interview';
 export * as risetAwal from './riset-awal';
 export * as plan from './plan';
+export * as briefInherit from './brief-inherit';
 export * as recap from './recap';
 export * as task from './task';
 export * as creative from './creative';
