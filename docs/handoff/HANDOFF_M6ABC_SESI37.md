@@ -15,7 +15,7 @@
 |---|---|
 | **Repo** | `MEAgrup/AgencyAPP` |
 | **Branch sesi ini** | `claude/rab-11-13-handoff-axr4po` |
-| **PR sesi ini** | **#<ISI setelah dibuat>** (base `main`) — RAB-11 + RAB-12 + RAB-13. |
+| **PR sesi ini** | **#178** (base `main`) — RAB-11 + RAB-12 + RAB-13. |
 | **Base saat kerja** | `main` (1801941, hasil merge #177). Branch di-restart dari `main`. |
 
 **Cek status merge dulu sebelum lanjut RAB-14:**
