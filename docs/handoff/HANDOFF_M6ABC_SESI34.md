@@ -16,7 +16,7 @@
 |---|---|
 | **Repo** | `MEAgrup/AgencyAPP` |
 | **Branch sesi ini** | `claude/handoff-m6abc-sesi33-rch9k5` |
-| **PR RAB-06/07** | **#<ISI SETELAH DIBUAT>** (base `main`). |
+| **PR RAB-06/07** | **#175** (base `main`). |
 | **RAB-03/04/05** | PR **#174** — sudah **MERGE** ke `main`. |
 | **RAB-01/02** | PR **#173** — sudah **MERGE** ke `main`. |
 | **Base saat kerja** | `main` (59364ad). Branch di-restart dari `main` karena #173 & #174 sudah merge. |
