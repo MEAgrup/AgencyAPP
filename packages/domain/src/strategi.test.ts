@@ -22,7 +22,8 @@
  * depend on run history (the trap HANDOFF_M6ABC_SESI1 §5 warns about).
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { ident, permission, visibility } from '@cdps/core';
+import { ident, interview as iv, permission, visibility } from '@cdps/core';
+import * as interview from './interview';
 import { createClient, type Sql } from '@cdps/db';
 import { ALLOWED_DIVISIONS, ConflictError, ForbiddenError, ValidationError } from './account';
 import {
@@ -78,6 +79,7 @@ import {
   createStrategi,
   expireStrategi,
   getStrategi,
+  getStrategiPrefill,
   listStrategiForService,
   openRevision,
   returnStrategi,
@@ -267,9 +269,15 @@ afterEach(async () => {
   // the row trigger. TRUNCATE both first, bypassing it, before the strategi delete.
   await sql`truncate strategi_share_access_log, strategi_share_token`;
   await sql`delete from strategi where created_by like 'ZZ-%'`;
+  // Interviews (+ their answers/kualifikasi, which cascade) seeded by the RAB-09
+  // prefill test — remove before their client/service/contract go.
+  await sql`delete from interview where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
+  // The ZZ-AM employee the RAB-09 prefill test seeds (interview FK) — after the
+  // interviews that reference it are gone.
+  await sql`delete from employees where employee_id like 'ZZ-%'`;
 });
 
 const RUN = Date.now().toString(36).slice(-6);
@@ -3481,5 +3489,89 @@ describeDb('J-4 — auto-diff vs previous version', () => {
   it('refuses a reader with no access to the Strategi', async () => {
     const { strategiId } = await seedSubmittable();
     await expect(strategiDiff(sql, otherAm(), strategiId)).rejects.toThrow(ForbiddenError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RAB-09 — getStrategiPrefill (Interview → Strategi bridge)
+// ---------------------------------------------------------------------------
+
+/** A scored + completed interview for `clientId`, with two mapped answers. */
+async function seedScoredInterview(clientId: string): Promise<{ interviewId: string; verdict: string }> {
+  // interview.am_pengisi_id has an FK to employees (clients/services do not), so
+  // the AM must be a real row here.
+  await sql`
+    insert into employees (employee_id, nama, email, divisi, jabatan)
+    values ('ZZ-AM', 'ZZ AM', 'zz-am@example.test', 'Account', 'Account Manager')
+    on conflict (employee_id) do nothing`;
+  const detail = await interview.createInterview(sql, am(), { clientId });
+  await interview.saveAnswers(sql, am(), detail.interview.id, [
+    // B2-8 (gross margin) → Strategi A-3; B6-2 (verbatim) → A-9.
+    { section: 'B2', fieldKey: 'B2-8', nilaiAngka: 55 },
+    { section: 'B6', fieldKey: 'B6-2', nilaiTeks: 'kejar omzet 3x dalam 3 bulan' },
+  ]);
+  const input: iv.KualifikasiInput = {
+    marginBersih: 40,
+    marginBersihSumber: iv.SUMBER_ANGKA.KlienHitung,
+    aov: 20_000_000n,
+    ruangHarga: iv.RUANG_HARGA.MasihAdaRuang,
+    modelBisnis: iv.MODEL_BISNIS.BrandOwner,
+    kesanggupanLonjakan: iv.KESANGGUPAN_LONJAKAN.Sanggup,
+    siklusBeliUlang: iv.SIKLUS_BELI_ULANG.HabisPakai,
+    pembedaProduk: iv.PEMBEDA_PRODUK.PembedaJelas,
+    skuSiap: 40,
+    penangananChat: iv.PENANGANAN_CHAT.TimKhusus,
+    kecepatanApproval: iv.KECEPATAN_APPROVAL.SatuOrangJelas,
+    kesiapanAkses: iv.KESIAPAN_AKSES.Penuh,
+    omzet: 100_000_000n,
+    targetOmzet: 200_000_000n,
+    dayaTahanBudget: iv.DAYA_TAHAN_BUDGET.Enam,
+  };
+  const k = await interview.scoreInterview(sql, am(), detail.interview.id, input);
+  // Fixture: mark the interview complete (sm_transition drives this in prod; a
+  // raw update is the seedService-style test shortcut, same as inserting a
+  // service row directly). Completion is what unlocks the Blok D handoff.
+  await sql`update interview set status = 'Selesai' where id = ${detail.interview.id}`;
+  return { interviewId: detail.interview.id, verdict: k.verdictKualifikasi };
+}
+
+describeDb('getStrategiPrefill — Interview → Strategi bridge (RAB-09)', () => {
+  it('returns the verdict handoff + mapped suggestions from the completed interview', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId, verdict } = await seedScoredInterview(clientId);
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+
+    const prefill = await getStrategiPrefill(sql, am(), s.id);
+    expect(prefill).not.toBeNull();
+    expect(prefill!.interviewId).toBe(interviewId);
+    expect(prefill!.verdict).toBe(verdict);
+    expect(prefill!.unlocked).toBe(true);
+    // Flags come from the ONE core rule, not a second copy.
+    expect(prefill!.flags).toEqual(iv.handoffKeStrategi(verdict as iv.Verdict).flags);
+
+    const a3 = prefill!.items.find((i) => i.strategiField === 'A-3');
+    expect(a3?.interviewField).toBe('B2-8');
+    expect(a3?.nilai).toBe('55');
+    expect(a3?.catatan).toBe('margin KOTOR (not net)');
+    const a9 = prefill!.items.find((i) => i.strategiField === 'A-9');
+    expect(a9?.nilai).toBe('kejar omzet 3x dalam 3 bulan');
+    // No mapped suggestion ever targets a Section B numeric baseline.
+    for (const item of prefill!.items) {
+      expect(['B-1', 'B-2', 'B-3', 'B-4', 'B-5', 'B-6', 'B-7', 'B-8']).not.toContain(item.strategiField);
+    }
+  });
+
+  it('returns null when the client has no completed interview', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    expect(await getStrategiPrefill(sql, am(), s.id)).toBeNull();
+  });
+
+  it('refuses a non-owner AM (same read gate as getStrategi)', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(getStrategiPrefill(sql, otherAm(), s.id)).rejects.toThrow(ForbiddenError);
   });
 });

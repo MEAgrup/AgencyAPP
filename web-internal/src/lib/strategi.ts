@@ -883,6 +883,26 @@ export interface StrategiKekurangan {
   pesan: string;
 }
 
+// Interview → Strategi prefill (RAB-09). Suggestions the AM may accept into
+// Section A/C/E; the value is the interview answer as stored (enum code / rupiah
+// minor / plain text). Keys are snake_case — they are the wire body verbatim.
+export interface StrategiPrefillItem {
+  interview_field: string;
+  strategi_field: string;
+  nilai: string;
+  catatan: string | null;
+}
+
+export interface StrategiPrefill {
+  interview_id: string;
+  verdict: string;
+  unlocked: boolean;
+  flags: string[];
+  copy_prasyarat_ke_c7: boolean;
+  wajib_catatan_mitigasi: boolean;
+  items: StrategiPrefillItem[];
+}
+
 export interface StrategiHeaderBody {
   durasi_kontrak_bulan: number;
   tanggal_mulai_kontrak: string;
@@ -1190,6 +1210,12 @@ export function saveStrategiHandoff(
 }
 
 /** The live "what is still missing" list the submit button reads (§5 step 5). */
+/** Interview→Strategi prefill (RAB-09). `null` when the client has no scored,
+ *  completed interview yet. */
+export function getStrategiPrefill(id: string): Promise<StrategiPrefill | null> {
+  return api.get<StrategiPrefill | null>(`/strategi/${id}/prefill`);
+}
+
 export function strategiKekurangan(id: string): Promise<StrategiKekurangan[]> {
   return api.get<StrategiKekurangan[]>(`/strategi/${id}/kekurangan`);
 }

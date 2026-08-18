@@ -128,6 +128,7 @@ import { AUTOSAVE_MS, useAutosave } from '@/lib/use-autosave';
 import {
   approveStrategi,
   getStrategi,
+  getStrategiPrefill,
   openStrategiRevision,
   raiseStrategiSanggahan,
   returnStrategi,
@@ -153,7 +154,9 @@ import {
   updateStrategiHeader,
   type AssumptionState,
   type StrategiDetail,
+  type StrategiPrefill,
 } from '@/lib/strategi';
+import InterviewPrefillPanel from '@/components/strategi/InterviewPrefillPanel';
 import {
   assumptionsToBody,
   gmvCellsToBody,
@@ -214,6 +217,7 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
 
   const [detail, setDetail] = useState<StrategiDetail | null>(null);
   const [kekurangan, setKekurangan] = useState<Kekurangan[]>([]);
+  const [prefill, setPrefill] = useState<StrategiPrefill | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -238,6 +242,11 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
       setDrafts(draftsOf(d));
       setKekurangan(k);
       setDirty(false);
+      // Advisory Interview→Strategi handoff (RAB-09) — never blocks the form, so
+      // a failure here must not fail the load. Null when there is no interview.
+      getStrategiPrefill(id)
+        .then(setPrefill)
+        .catch(() => setPrefill(null));
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -596,12 +605,15 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
 
             <div style={{ marginTop: 12 }}>
               {active === 'A' && (
-                <SectionA
-                  detail={detail}
-                  draft={drafts.konteks}
-                  onChange={(p) => patch('konteks', { ...drafts.konteks, ...p })}
-                  disabled={!editable}
-                />
+                <>
+                  {prefill && <InterviewPrefillPanel prefill={prefill} />}
+                  <SectionA
+                    detail={detail}
+                    draft={drafts.konteks}
+                    onChange={(p) => patch('konteks', { ...drafts.konteks, ...p })}
+                    disabled={!editable}
+                  />
+                </>
               )}
               {active === 'B' && (
                 <SectionB

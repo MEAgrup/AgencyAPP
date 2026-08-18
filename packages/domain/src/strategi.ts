@@ -46,7 +46,7 @@
  * Reference: docs/prd/CDPS_Module6A_Strategi.md.
  */
 
-import { ident, money, notification, permission, statemachine, visibility } from '@cdps/core';
+import { ident, interview as iv, money, notification, permission, statemachine, visibility } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import {
   ACCOUNT_DIVISION,
@@ -57,6 +57,7 @@ import {
   type Actor,
 } from './account';
 import * as contract from './contract';
+import { getInterview, listInterviewsByClient, type Answer } from './interview';
 import { generatePlanPeriods } from './plan';
 import { effectiveGate, type PlanTier } from './plangate_rules';
 import { createHash, randomBytes } from 'node:crypto';
@@ -1782,6 +1783,76 @@ export async function getStrategi(sql: Queryable, actor: Actor, id: string): Pro
     throw new ForbiddenError(MSG_STRATEGI_FORBIDDEN);
   }
   return loadDetail(sql, head);
+}
+
+// ---------------------------------------------------------------------------
+// Interview → Strategi prefill (RAB-09)
+// ---------------------------------------------------------------------------
+
+/**
+ * What the client's completed Interview hands to this Strategi: the verdict-driven
+ * handoff and the concrete prefill suggestions, both computed by the ONE core
+ * bridge (`iv.resolveStrategiPrefill`) — this domain layer only resolves *which*
+ * interview and reads its answers, it never re-derives the mapping or the flags.
+ */
+export interface StrategiPrefill extends iv.StrategiPrefill {
+  /** The interview these suggestions came from, so the UI can link back to it. */
+  interviewId: string;
+}
+
+/** One stored answer flattened to a display string, or null when unanswered. */
+function answerValue(a: Answer): string | null {
+  if (a.nilaiEnum != null && a.nilaiEnum !== '') return a.nilaiEnum;
+  if (a.nilaiTeks != null && a.nilaiTeks !== '') return a.nilaiTeks;
+  if (a.nilaiUang != null && a.nilaiUang !== '') return a.nilaiUang;
+  if (a.nilaiAngka != null) return String(a.nilaiAngka);
+  if (a.nilaiBool != null) return a.nilaiBool ? 'true' : 'false';
+  return null;
+}
+
+/**
+ * getStrategiPrefill is the production caller RAB-09 was missing for the two pure
+ * Blok D functions. It reads the Strategi (same read gate as `getStrategi`),
+ * finds the client's most recent completed Interview, and returns the handoff +
+ * prefill suggestions. Returns `null` when the client has no scored, completed
+ * interview yet — the page then shows nothing, never an error.
+ *
+ * Suggestions only: nothing is written to Section A/C/E here. The AM accepts each
+ * value through the normal Section editors, which is the M6A "usulan → konfirmasi"
+ * rule and the reason no interview-provenance column is needed on `strategi`.
+ */
+export async function getStrategiPrefill(
+  sql: Queryable,
+  actor: Actor,
+  id: string,
+): Promise<StrategiPrefill | null> {
+  const head = await loadStrategiRow(sql, id);
+  const ownerAm = await ownerAmOfContract(sql, head.contractId);
+  if (!canReadStrategi(actor, ownerAm)) {
+    throw new ForbiddenError(MSG_STRATEGI_FORBIDDEN);
+  }
+
+  // The qualification is client-level (interview.service_id is usually null), so
+  // pick the client's latest completed interview that has been scored. The list
+  // is newest-first by created_at (listInterviewsByClient), so the first match
+  // wins.
+  const candidates = await listInterviewsByClient(sql, actor, head.clientId);
+  const chosen = candidates.find((c) => iv.isInterviewComplete(c.status) && c.verdict != null);
+  if (!chosen) return null;
+
+  const detail = await getInterview(sql, actor, chosen.id);
+  if (!detail.kualifikasi) return null;
+
+  const answers = new Map<string, string>();
+  for (const a of detail.answers) {
+    const v = answerValue(a);
+    if (v != null) answers.set(a.fieldKey, v);
+  }
+  const prefill = iv.resolveStrategiPrefill(
+    detail.kualifikasi.verdictKualifikasi as iv.Verdict,
+    answers,
+  );
+  return { ...prefill, interviewId: chosen.id };
 }
 
 async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetail> {
