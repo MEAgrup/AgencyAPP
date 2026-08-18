@@ -127,6 +127,7 @@ import { TRIGGER_REVISI_LABELS } from '@/lib/strategi';
 import { AUTOSAVE_MS, useAutosave } from '@/lib/use-autosave';
 import {
   approveStrategi,
+  getBaselinePrefill,
   getStrategi,
   getStrategiPrefill,
   openStrategiRevision,
@@ -153,10 +154,12 @@ import {
   submitStrategi,
   updateStrategiHeader,
   type AssumptionState,
+  type StrategiBaselinePrefill,
   type StrategiDetail,
   type StrategiPrefill,
 } from '@/lib/strategi';
 import InterviewPrefillPanel from '@/components/strategi/InterviewPrefillPanel';
+import BaselinePrefillPanel from '@/components/strategi/BaselinePrefillPanel';
 import {
   assumptionsToBody,
   gmvCellsToBody,
@@ -218,6 +221,7 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
   const [detail, setDetail] = useState<StrategiDetail | null>(null);
   const [kekurangan, setKekurangan] = useState<Kekurangan[]>([]);
   const [prefill, setPrefill] = useState<StrategiPrefill | null>(null);
+  const [baselinePrefill, setBaselinePrefill] = useState<StrategiBaselinePrefill | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -247,6 +251,11 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
       getStrategiPrefill(id)
         .then(setPrefill)
         .catch(() => setPrefill(null));
+      // RAB-11/RAB-12 — Section B baseline suggestions from riset awal. Advisory,
+      // same as above: a failure must not fail the load. Null when no analysis.
+      getBaselinePrefill(id)
+        .then(setBaselinePrefill)
+        .catch(() => setBaselinePrefill(null));
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -616,12 +625,15 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                 </>
               )}
               {active === 'B' && (
-                <SectionB
-                  detail={detail}
-                  draft={drafts.channels}
-                  onChange={(channels) => patch('channels', channels)}
-                  disabled={!editable}
-                />
+                <>
+                  {baselinePrefill && <BaselinePrefillPanel prefill={baselinePrefill} />}
+                  <SectionB
+                    detail={detail}
+                    draft={drafts.channels}
+                    onChange={(channels) => patch('channels', channels)}
+                    disabled={!editable}
+                  />
+                </>
               )}
               {active === 'C' && (
                 <SectionC

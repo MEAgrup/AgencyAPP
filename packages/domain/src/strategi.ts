@@ -57,7 +57,7 @@ import {
   type Actor,
 } from './account';
 import * as contract from './contract';
-import { getInterview, listInterviewsByClient, type Answer } from './interview';
+import { getInterview, listInterviewsByClient, type Answer, type InterviewListRow } from './interview';
 import { generatePlanPeriods } from './plan';
 import { effectiveGate, type PlanTier } from './plangate_rules';
 import { createHash, randomBytes } from 'node:crypto';
@@ -1811,6 +1811,22 @@ function answerValue(a: Answer): string | null {
 }
 
 /**
+ * The client's most recent completed + scored interview, or null. Qualification is
+ * client-level (interview.service_id is usually null), so both the Blok D handoff
+ * (RAB-09) and the Section B baseline flow (RAB-11) resolve the SAME interview this
+ * way — one helper so a change to "which interview" can never drift between them.
+ * `listInterviewsByClient` is newest-first by created_at, so the first match wins.
+ */
+async function latestScoredInterview(
+  sql: Queryable,
+  actor: Actor,
+  clientId: string,
+): Promise<InterviewListRow | null> {
+  const candidates = await listInterviewsByClient(sql, actor, clientId);
+  return candidates.find((c) => iv.isInterviewComplete(c.status) && c.verdict != null) ?? null;
+}
+
+/**
  * getStrategiPrefill is the production caller RAB-09 was missing for the two pure
  * Blok D functions. It reads the Strategi (same read gate as `getStrategi`),
  * finds the client's most recent completed Interview, and returns the handoff +
@@ -1832,12 +1848,7 @@ export async function getStrategiPrefill(
     throw new ForbiddenError(MSG_STRATEGI_FORBIDDEN);
   }
 
-  // The qualification is client-level (interview.service_id is usually null), so
-  // pick the client's latest completed interview that has been scored. The list
-  // is newest-first by created_at (listInterviewsByClient), so the first match
-  // wins.
-  const candidates = await listInterviewsByClient(sql, actor, head.clientId);
-  const chosen = candidates.find((c) => iv.isInterviewComplete(c.status) && c.verdict != null);
+  const chosen = await latestScoredInterview(sql, actor, head.clientId);
   if (!chosen) return null;
 
   const detail = await getInterview(sql, actor, chosen.id);
@@ -1853,6 +1864,235 @@ export async function getStrategiPrefill(
     answers,
   );
   return { ...prefill, interviewId: chosen.id };
+}
+
+// ---------------------------------------------------------------------------
+// Riset awal baseline → Section B channel prefill (RAB-11 / RAB-12)
+// ---------------------------------------------------------------------------
+
+/**
+ * One month of a channel's baseline, proposed from the riset-awal payload's
+ * `gmv_baseline.riwayat`. Only `gmv` and `jumlahPesanan` are proposed — those are
+ * the two the riwayat carries per month. Ad spend / ROAS / ACOS / cancel-rate are
+ * period AGGREGATES in the payload, never per-month, so they are deliberately NOT
+ * proposed here: fabricating a per-month figure the export never carried is the
+ * "absent ≠ zero" mistake the baseline engine (RAB-02 fix #2) exists to avoid. The
+ * AM types those six-per-month figures into the Section B editor, where Rule 5
+ * (`saveBaseline`) then requires each one.
+ */
+export interface BaselineMonthSuggestion {
+  monthIndex: number;
+  /** e.g. "Agu 2026" — so the AM sees which month each row is. */
+  label: string | null;
+  /** Rupiah (major, 2dp scale), the same unit `strategi_baseline_bulan.gmv` stores. */
+  gmv: string | null;
+  jumlahPesanan: number | null;
+}
+
+/**
+ * RAB-12 — `gmv_mix` is attribution WITHIN the TikTok Shop platform (video/LIVE ×
+ * afiliasi/toko + kartu produk), NOT a per-marketplace channel. It rides along the
+ * TikTok Shop channel suggestion as a rincian so the AM can read where that
+ * platform's GMV comes from; it is never emitted as its own `ChannelBaselineSuggestion`.
+ * Mapping a mix category to `strategi_channel` would split one platform's baseline
+ * across five phantom channels and double-count its GMV.
+ */
+export interface GmvMixRincian {
+  videoAfiliasi: number | null;
+  liveAfiliasi: number | null;
+  videoToko: number | null;
+  liveToko: number | null;
+  kartuProdukDanLain: number | null;
+}
+
+/**
+ * One channel's Section B baseline, proposed from that platform's riset-awal
+ * analysis. Suggestion-only (same contract as RAB-09): nothing is written to
+ * `strategi_channel` here — the AM reviews each figure in the Section B editor and
+ * `saveChannels`/`saveBaseline` is the write. That is also why there is no
+ * `sumber='riset_awal'` provenance column on `strategi_channel`.
+ */
+export interface ChannelBaselineSuggestion {
+  clientPlatformId: number;
+  platform: string;
+  /** The platform mapped onto the D1 channel taxonomy. */
+  channel: Channel;
+  channelLain: string | null;
+  metodeBaseline: string;
+  kondisiToko: string;
+  skor: number | null;
+  /** Suggested window length (months filled, capped at the 1–6 the DB allows). */
+  periodeBaselineBulan: number | null;
+  /** 'cukup' (≥3 months) | 'kurang' (<3) | null when there is no analysis engine. */
+  cakupanRiwayat: string | null;
+  /**
+   * RAB-11 DoD surfaced to the UI: when the window is under three months the DB
+   * CHECK `ck_strch_alasan_pendek` (and `validateChannel`) REJECT the save unless
+   * `alasan_periode_pendek` is filled. The AM sees this before saving, not after a
+   * server rejection.
+   */
+  alasanPeriodePendekWajib: boolean;
+  /** Rule 5 provenance, composed from `riset_awal_sumber_berkas` for this platform. */
+  sumberData: string | null;
+  tanggalAmbilData: string | null;
+  lampiran: string | null;
+  /** Period-aggregate figures offered at channel level (not per-month — see above). */
+  roas: number | null;
+  adSpend: string | null;
+  aov: string | null;
+  baselineBulan: BaselineMonthSuggestion[];
+  /** RAB-12 — only for the analysed TikTok Shop store; null for every other channel. */
+  gmvMix: GmvMixRincian | null;
+}
+
+export interface StrategiBaselinePrefill {
+  interviewId: string;
+  channels: ChannelBaselineSuggestion[];
+}
+
+/** D1 channel taxonomy for a client_platforms platform name. */
+function platformToChannel(platform: string): { channel: Channel; channelLain: string | null } {
+  const match = CHANNELS.find((c) => c !== 'Lainnya' && c.toLowerCase() === platform.trim().toLowerCase());
+  if (match) return { channel: match, channelLain: null };
+  return { channel: 'Lainnya', channelLain: platform.trim() };
+}
+
+function numOrNullLoose(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * getBaselinePrefill is the RAB-11 flow the backlog §3 calls for: the baseline
+ * numbers + provenance the client's riset awal produced, shaped as Section B
+ * channel suggestions. This is the path RAB-09 deliberately did NOT prefill — the
+ * Section B numerics (`isStrategiBaselineForbidden`) live here instead.
+ *
+ * One `ChannelBaselineSuggestion` per analysed platform (one `riset_awal_analisa`
+ * row). `gmv_mix` never becomes a channel of its own (RAB-12): it rides the TikTok
+ * Shop suggestion as `gmvMix`. Returns `null` when the client has no scored
+ * interview, or its riset awal produced no analysis rows.
+ *
+ * Read gate = `getStrategi`. Acceptance is NOT gated here (RAB-13): the baseline
+ * becomes authoritative only when the AM saves it into the Draft and the Strategi
+ * clears the existing submit → approve gate (machine #15) — there is no second gate.
+ */
+export async function getBaselinePrefill(
+  sql: Queryable,
+  actor: Actor,
+  id: string,
+): Promise<StrategiBaselinePrefill | null> {
+  const head = await loadStrategiRow(sql, id);
+  const ownerAm = await ownerAmOfContract(sql, head.contractId);
+  if (!canReadStrategi(actor, ownerAm)) {
+    throw new ForbiddenError(MSG_STRATEGI_FORBIDDEN);
+  }
+
+  const chosen = await latestScoredInterview(sql, actor, head.clientId);
+  if (!chosen) return null;
+
+  const analisa = await sql<
+    {
+      client_platform_id: string;
+      platform: string;
+      metode_baseline: string;
+      kondisi_toko: string;
+      skor: string | number | null;
+      cakupan_riwayat: string | null;
+      payload: Record<string, unknown> | null;
+    }[]
+  >`
+    select client_platform_id, platform, metode_baseline, kondisi_toko, skor,
+           cakupan_riwayat, payload
+      from riset_awal_analisa
+     where interview_id = ${chosen.id}
+     order by client_platform_id`;
+  if (analisa.length === 0) return null;
+
+  // Provenance rows for the whole interview, grouped by platform: the source
+  // files the AM uploaded are what legitimately fills Rule 5's sumber/lampiran.
+  const berkas = await sql<
+    { platform: string; nama_berkas: string; tanggal_ambil: string | Date | null }[]
+  >`
+    select platform, nama_berkas, tanggal_ambil
+      from riset_awal_sumber_berkas
+     where interview_id = ${chosen.id}
+     order by platform, id`;
+  const berkasByPlatform = new Map<string, { nama: string[]; tanggal: string | null }>();
+  for (const b of berkas) {
+    const key = b.platform;
+    const g = berkasByPlatform.get(key) ?? { nama: [], tanggal: null };
+    g.nama.push(b.nama_berkas);
+    const t = dateOrNull(b.tanggal_ambil);
+    if (t !== null && (g.tanggal === null || t > g.tanggal)) g.tanggal = t;
+    berkasByPlatform.set(key, g);
+  }
+
+  const channels: ChannelBaselineSuggestion[] = analisa.map((a) => {
+    const payload = (a.payload ?? {}) as {
+      gmv_baseline?: { bulan_terisi?: unknown; cakupan_riwayat?: unknown; riwayat?: unknown[] } | null;
+      gmv_mix?: Record<string, unknown> | null;
+      toko?: { aov?: unknown } | null;
+      iklan?: { belanja?: unknown; roas?: unknown } | null;
+    };
+    const gb = payload.gmv_baseline ?? null;
+    const bulanTerisi = numOrNullLoose(gb?.bulan_terisi);
+    const periodeBaselineBulan =
+      bulanTerisi !== null && bulanTerisi >= 1 ? Math.min(bulanTerisi, 6) : null;
+    // <3 months ⇒ Rule 5a reason required. Read from cakupan_riwayat when present
+    // ('kurang'), else from the month count — the two agree by construction.
+    const alasanPeriodePendekWajib =
+      a.cakupan_riwayat === 'kurang' || (periodeBaselineBulan !== null && periodeBaselineBulan < 3);
+
+    const riwayat = Array.isArray(gb?.riwayat) ? (gb!.riwayat as Record<string, unknown>[]) : [];
+    const baselineBulan: BaselineMonthSuggestion[] = riwayat.slice(0, 6).map((h, i) => ({
+      monthIndex: i + 1,
+      label: (h.label as string | null) ?? null,
+      gmv: numOrNullLoose(h.gmv) === null ? null : String(numOrNullLoose(h.gmv)),
+      jumlahPesanan: numOrNullLoose(h.order),
+    }));
+
+    const mix = payload.gmv_mix ?? null;
+    const gmvMix: GmvMixRincian | null =
+      a.metode_baseline === 'analisa_penuh' && mix
+        ? {
+            videoAfiliasi: numOrNullLoose(mix.video_afiliasi),
+            liveAfiliasi: numOrNullLoose(mix.live_afiliasi),
+            videoToko: numOrNullLoose(mix.video_toko),
+            liveToko: numOrNullLoose(mix.live_toko),
+            kartuProdukDanLain: numOrNullLoose(mix.kartu_produk_dan_lain),
+          }
+        : null;
+
+    const prov = berkasByPlatform.get(a.platform) ?? null;
+    const aovNum = numOrNullLoose(payload.toko?.aov);
+    const adSpendNum = numOrNullLoose(payload.iklan?.belanja);
+    const { channel, channelLain } = platformToChannel(a.platform);
+
+    return {
+      clientPlatformId: Number(a.client_platform_id),
+      platform: a.platform,
+      channel,
+      channelLain,
+      metodeBaseline: a.metode_baseline,
+      kondisiToko: a.kondisi_toko,
+      skor: numOrNullLoose(a.skor),
+      periodeBaselineBulan,
+      cakupanRiwayat: a.cakupan_riwayat,
+      alasanPeriodePendekWajib,
+      sumberData: prov && prov.nama.length > 0 ? prov.nama.join(', ') : null,
+      tanggalAmbilData: prov?.tanggal ?? null,
+      lampiran: prov && prov.nama.length > 0 ? prov.nama.join(', ') : null,
+      roas: numOrNullLoose(payload.iklan?.roas),
+      adSpend: adSpendNum === null ? null : String(adSpendNum),
+      aov: aovNum === null ? null : String(aovNum),
+      baselineBulan,
+      gmvMix,
+    };
+  });
+
+  return { interviewId: chosen.id, channels };
 }
 
 async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetail> {
