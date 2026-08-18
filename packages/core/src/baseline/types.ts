@@ -91,6 +91,42 @@ export type KondisiToko =
   | 'mesin_belum_terbangun'
   | 'belum_dapat_diukur';
 
+/**
+ * Runtime list of the five Kondisi Toko values, in DB-CHECK order (RAB-03). This
+ * exists so the vocabulary-firewall test can read the enum from source at runtime
+ * and prove its intersection with the Blok C verdict enum is empty — a name clash
+ * would let `if (verdict === 'risiko_tinggi')` be silently wrong. The two guards
+ * below make the array error at compile time if the type gains or loses a value,
+ * so the runtime list can never drift from the type.
+ */
+export const ALL_KONDISI_TOKO = [
+  'mesin_jalan',
+  'mesin_sebagian',
+  'fondasi_perlu_dibenahi',
+  'mesin_belum_terbangun',
+  'belum_dapat_diukur',
+] as const;
+
+// Constraint fires a compile error if T is anything other than `never`.
+type _AssertNever<T extends never> = T;
+// Every listed value is a real KondisiToko (no stray strings)…
+type _KondisiTokoNoExtras = _AssertNever<Exclude<(typeof ALL_KONDISI_TOKO)[number], KondisiToko>>;
+// …and every KondisiToko is listed (no missing values).
+type _KondisiTokoNoMissing = _AssertNever<Exclude<KondisiToko, (typeof ALL_KONDISI_TOKO)[number]>>;
+export type { _KondisiTokoNoExtras, _KondisiTokoNoMissing };
+
+/**
+ * The four Kondisi Toko values the analysis engine can COMPUTE from a score
+ * (`kondisiTokoFromScore`). `belum_dapat_diukur` is deliberately absent: it is
+ * caller-set for platforms with no analysis engine and never carries findings.
+ */
+export const COMPUTED_KONDISI_TOKO = [
+  'mesin_jalan',
+  'mesin_sebagian',
+  'fondasi_perlu_dibenahi',
+  'mesin_belum_terbangun',
+] as const satisfies readonly Exclude<KondisiToko, 'belum_dapat_diukur'>[];
+
 /** A finding: severity level + text. Levels order = tantangan → perhatian → catatan → modal. */
 export interface Finding {
   lv: 'tantangan' | 'perhatian' | 'catatan' | 'modal';
