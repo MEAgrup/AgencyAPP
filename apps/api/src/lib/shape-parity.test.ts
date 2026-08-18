@@ -173,7 +173,7 @@ const wire = parseInterfaces(readFileSync(WIRE_TS, 'utf8'));
 const FE_FILES = [
   'account.ts', 'ads.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'contract.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
-  'livestream.ts', 'penugasan.ts',
+  'livestream.ts', 'penugasan.ts', 'plan.ts',
   'performance.ts', 'portal.ts', 'recap.ts', 'riset-awal.ts', 'sales.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
 ];
 
@@ -409,6 +409,12 @@ const WIRE_TO_FE: Record<string, string> = {
   PlanGateConfigWire: 'account.ts::PlanGateConfig',
   PlanGateContextWire: 'account.ts::PlanGateContext',
   PlanGateRecommendationWire: 'account.ts::GateRecommendation',
+  // M6B plan (PLAN-) route surface — RAB-14/15.
+  PlanWire: 'plan.ts::Plan',
+  PlanTargetWire: 'plan.ts::PlanTarget',
+  PlanRowWire: 'plan.ts::PlanRow',
+  PlanRowWeekWire: 'plan.ts::PlanRowWeek',
+  PlanActualWire: 'plan.ts::PlanActual',
   // M6A — Vendor (VND-) and Strategi (STRG-). The Section A→J form is backlog
   // A-05…A-09; the FE types exist now because a converter with no declared FE
   // type is a converter this guard cannot check.

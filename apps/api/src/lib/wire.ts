@@ -7,7 +7,7 @@
  */
 import { money, tz } from '@cdps/core';
 import type { interview as ivcore } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, campaign, client, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plangate, portal, recap, risetAwal, sales, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, audit, auth, board, campaign, client, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, risetAwal, sales, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -3116,6 +3116,187 @@ export function assignmentSummaryFromWire(
     deadline: r.deadline ?? '',
     divisiPic: r.divisi_pic ?? '',
     hasilDiharapkan: r.hasil_diharapkan ?? '',
+  };
+}
+
+// ===========================================================================
+// Module 6B — Plan (PLAN-) — RAB-14/15 route surface.
+// ===========================================================================
+//
+// The M6B domain (`plan.ts`) shipped its write functions before any HTTP surface
+// (RAB-15). Every route that returns a domain object crosses the camelCase→wire
+// boundary HERE — a route emitting a raw `Plan`/`PlanRow` is the O43 blank-page
+// bug (200 with keys the FE cannot read). Each converter names its FE counterpart
+// in `web-internal/src/lib/plan.ts`; shape-parity pairs the two mechanically.
+
+/** The PLAN- period header (Section P-A). Serves `plan.ts::Plan`. */
+export interface PlanWire {
+  id: string;
+  lingkup: string;
+  contract_id: string | null;
+  client_id: string;
+  strategi_id: string | null;
+  periode_no: number;
+  tanggal_mulai: string;
+  tanggal_akhir: string;
+  jumlah_minggu: number;
+  status: string;
+  catatan_pembuka: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string;
+}
+
+export function planToWire(p: plan.Plan): PlanWire {
+  return {
+    id: p.id,
+    lingkup: p.lingkup,
+    contract_id: p.contractId,
+    client_id: p.clientId,
+    strategi_id: p.strategiId,
+    periode_no: p.periodeNo,
+    tanggal_mulai: p.tanggalMulai,
+    tanggal_akhir: p.tanggalAkhir,
+    jumlah_minggu: p.jumlahMinggu,
+    status: p.status,
+    catatan_pembuka: p.catatanPembuka,
+    created_at: p.createdAt,
+    updated_at: p.updatedAt,
+    created_by: p.createdBy,
+  };
+}
+
+/** A per-channel target (Section P-B / Rule 9). Serves `plan.ts::PlanTarget`. */
+export interface PlanTargetWire {
+  plan_id: string;
+  channel: string;
+  metric: string;
+  nilai_strategi: number;
+  nilai_dipakai: number;
+  arah: string;
+  persen_perubahan: number;
+  alasan: string | null;
+  bukti_file: string | null;
+  status_persetujuan: string | null;
+}
+
+export function planTargetToWire(t: plan.PlanTarget): PlanTargetWire {
+  return {
+    plan_id: t.planId,
+    channel: t.channel,
+    metric: t.metric,
+    nilai_strategi: t.nilaiStrategi,
+    nilai_dipakai: t.nilaiDipakai,
+    arah: t.arah,
+    persen_perubahan: t.persenPerubahan,
+    alasan: t.alasan,
+    bukti_file: t.buktiFile,
+    status_persetujuan: t.statusPersetujuan,
+  };
+}
+
+/** One work-row (Section P-C). Serves `plan.ts::PlanRow`. */
+export interface PlanRowWire {
+  id: number;
+  plan_id: string;
+  channel: string;
+  pilar: string;
+  strategi_pillar_id: number | null;
+  service_id: string | null;
+  di_luar_strategi: boolean;
+  di_luar_service: boolean;
+  di_luar_alasan: string | null;
+  aksi: string;
+  sku_sasaran: unknown[];
+  kuota: number;
+  satuan: string;
+  budget: number | null;
+  divisi_pic: string;
+  minggu_sasaran: number[];
+  prioritas: string;
+  hasil_diharapkan: string;
+  prasyarat: string | null;
+  status_baris: string;
+  status_baris_alasan: string | null;
+  visibilitas: string;
+  keberatan_kapasitas: boolean;
+  keberatan_alasan: string | null;
+  terbawa: boolean;
+  periode_asal_id: string | null;
+  keputusan_carryover: string | null;
+}
+
+export function planRowToWire(r: plan.PlanRow): PlanRowWire {
+  return {
+    id: r.id,
+    plan_id: r.planId,
+    channel: r.channel,
+    pilar: r.pilar,
+    strategi_pillar_id: r.strategiPillarId,
+    service_id: r.serviceId,
+    di_luar_strategi: r.diLuarStrategi,
+    di_luar_service: r.diLuarService,
+    di_luar_alasan: r.diLuarAlasan,
+    aksi: r.aksi,
+    sku_sasaran: r.skuSasaran,
+    kuota: r.kuota,
+    satuan: r.satuan,
+    budget: r.budget,
+    divisi_pic: r.divisiPic,
+    minggu_sasaran: r.mingguSasaran,
+    prioritas: r.prioritas,
+    hasil_diharapkan: r.hasilDiharapkan,
+    prasyarat: r.prasyarat,
+    status_baris: r.statusBaris,
+    status_baris_alasan: r.statusBarisAlasan,
+    visibilitas: r.visibilitas,
+    keberatan_kapasitas: r.keberatanKapasitas,
+    keberatan_alasan: r.keberatanAlasan,
+    terbawa: r.terbawa,
+    periode_asal_id: r.periodeAsalId,
+    keputusan_carryover: r.keputusanCarryover,
+  };
+}
+
+/** One weekly-distribution cell (Section P-D). Serves `plan.ts::PlanRowWeek`. */
+export interface PlanRowWeekWire {
+  id: number;
+  plan_row_id: number;
+  minggu_no: number;
+  kuota: number;
+}
+
+export function planRowWeekToWire(w: plan.PlanRowWeek): PlanRowWeekWire {
+  return {
+    id: w.id,
+    plan_row_id: w.planRowId,
+    minggu_no: w.mingguNo,
+    kuota: w.kuota,
+  };
+}
+
+/** A per-channel actual (Section P-E, hybrid). Serves `plan.ts::PlanActual`. */
+export interface PlanActualWire {
+  plan_id: string;
+  channel: string;
+  metric: string;
+  sumber: string;
+  nilai: number;
+  file_bukti: string | null;
+  tanggal_ambil: string | null;
+  sengketa: string | null;
+}
+
+export function planActualToWire(a: plan.PlanActual): PlanActualWire {
+  return {
+    plan_id: a.planId,
+    channel: a.channel,
+    metric: a.metric,
+    sumber: a.sumber,
+    nilai: a.nilai,
+    file_bukti: a.fileBukti,
+    tanggal_ambil: a.tanggalAmbil,
+    sengketa: a.sengketa,
   };
 }
 
