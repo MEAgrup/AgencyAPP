@@ -1,11 +1,11 @@
 # HANDOFF — Wave 2 Gap Audit (Kelas B selesai) + peta Kelas C & residual — Sesi 42
 
-> Rantai: … → SESI40 (RAB-19/20, PR **#181 MERGE**) → SESI41 (Wave 2 gap audit Kelas A, **PR #182 — MASIH OPEN**)
-> → **SESI42 (ini, terbaru — Wave 2 gap audit Kelas B, PR #183).**
+> Rantai: … → SESI40 (RAB-19/20, PR **#181 MERGE**) → SESI41 (Kelas A, PR **#182 MERGE**)
+> → **SESI42 (ini, terbaru — Kelas B, PR #183 MERGE + resolusi konflik #182).**
 > Baca yang bernomor tertinggi lebih dulu.
 >
-> **Status: Kelas A (PR #182) BELUM merge. Kelas B (PR #183) selesai & di-merge sesi ini.**
-> **Kelas C (7 item) + residual B (3) BELUM — menunggu keputusan / desain lintas-modul.**
+> **Status: Kelas A (#182) + Kelas B (#183) DUA-DUANYA MERGE ke `main` sesi ini. Konflik `kol.ts` sudah diselesaikan (simpan KEDUA: notif A2 + gate/tier B2). TIDAK ADA yang menggantung.**
+> **Sisa Wave 2 = Kelas C (7 item) + residual B (3) — siap dibangun; lihat §2 (contoh kasus + rekomendasi) & §3.**
 
 ---
 
@@ -15,16 +15,11 @@
 | Hal | Nilai |
 |---|---|
 | **Repo** | `MEAgrup/AgencyAPP` |
-| **PR #183** | Wave 2 gap audit **Kelas B** (B1–B4). Branch `claude/wave2-gap-audit-kelas-b-f8e4m7`. Di-merge ke `main` sesi ini. |
-| **PR #182** | Wave 2 gap audit **Kelas A** (M6D freeze-on-close + M9 notif). Branch `claude/wave2-gap-audit-classA`. **MASIH OPEN — belum merge ke `main`.** |
-| **Branch berikutnya** | Restart dari `main` terbaru: `git fetch origin main && git checkout -B <branch-baru> origin/main`. |
+| **PR #183** | Wave 2 gap audit **Kelas B** (B1–B4). **MERGE ke `main`.** |
+| **PR #182** | Wave 2 gap audit **Kelas A** (M6D freeze-on-close + M9 notif QC-fail/escalate). **MERGE ke `main`** (setelah `main` di-merge ke branch-nya & konflik `kol.ts`/`kol.test.ts`/`DECISIONS.md` diselesaikan). |
+| **Branch berikutnya** | Restart dari `main` terbaru: `git fetch origin main && git checkout -B <branch-baru> origin/main`. **`main` kini punya A+B lengkap (117 migrasi).** |
 
-> ⚠️ **KONFLIK MERGE #182 ↔ #183 (WAJIB dibaca).** Keduanya di-cabang dari `main` yang SAMA (`5f5cf28`) dan **dua-duanya mengedit `packages/domain/src/kol.ts` fungsi `escalate`/`edge`**:
-> - **#182 (Kelas A/A2)** menambah param `after` ke helper `edge` dan membuat `failQC`/`escalate` **mengemit notifikasi** `KOLQCFailedOrEscalated` (`m9.kol.qc_failed_or_escalated`) ke KOL Lead.
-> - **#183 (Kelas B/B2)** mengganti gate `escalate` dari `canEscalate` (lead-only) ke `canExecute` (Coordinator boleh) + menulis baris audit `escalated` bertier (SPV/Director).
->
-> Karena #183 sudah merge duluan, **saat me-merge #182 akan bentrok di `kol.ts`**. **Resolusi = simpan KEDUA perubahan** (escalate harus: gate `canExecute` + emit notif via `after` + tulis audit tier). Keduanya kompatibel — A2 soal *notifikasi*, B2 soal *otoritas + log tier*. Jangan buang salah satu.
-> Alternatif lebih bersih: rebase branch #182 ke `main` pasca-#183, selesaikan konflik `kol.ts` sekali, lalu merge. **Pemilik perlu memutuskan apakah #182 tetap dilanjutkan** (isinya A1 M6D freeze-on-close + A2 M9 notif — keduanya perbaikan nyata yang belum ada di `main`).
+> ✅ **KONFLIK #182 ↔ #183 SUDAH DISELESAIKAN (arsip — tak perlu aksi).** Keduanya mengedit `packages/domain/src/kol.ts` fungsi `escalate`. Resolusi: `escalate` sekarang **menyimpan KEDUA** perubahan — gate `canExecute` (B2, Coordinator boleh) + tulis baris audit `escalated` bertier SPV/Director (B2) **DAN** emit notifikasi `KOLQCFailedOrEscalated` ke KOL Lead via callback `after` (A2). `failQC` juga tetap emit (A2). `kol.test.ts` menyimpan keempat tes (2 escalate B2 + 1 drop-from-Content-In-Progress B1 + 1 notif A2); `DECISIONS.md` menyimpan kelima baris (Kelas A + B1–B4). Diverifikasi: **domain 1391 hijau (117 migrasi), api 351, web-internal 257, typecheck bersih.**
 
 ### 0.1 Aturan main (tak berubah)
 - Migrasi HANYA lewat `supabase/migrations/**` + `apply_migration`. DB lokal HANYA lewat `scripts/db-rebuild.sh`.
@@ -62,9 +57,9 @@ Audit paritas Kelas B — 4 gap yang butuh keputusan pemilik. Pemilik menjawab; 
 core/domain/api/web-internal + lint FE bersih. DB dibangun dari **116 migrasi**, semua gate & invariant lolos.
 `sm_edges` tidak dihitung gate; nol tabel/mesin/prefix/event baru.
 
-> ⚠️ **Kelas A (#182) TIDAK ada di base `main` sesi ini** — handoff SESI41 mengklaim #182 merge, tapi `main`
-> masih 114 migrasi tanpa `wrr_freeze` dan `kol.ts` belum punya infra `after`-param. Kelas B dibangun di atas
-> `main` NYATA. Lihat §0.0 soal konflik.
+> ℹ️ **Kelas A (#182)** semula belum ada di `main` saat Kelas B dibangun (SESI41 salah klaim merge). Kelas B
+> dibangun di atas `main` NYATA, lalu **#182 di-merge belakangan** dengan resolusi konflik `kol.ts` (§0.0).
+> `main` sekarang lengkap A+B.
 
 ---
 
@@ -153,8 +148,8 @@ menutup paritas PRD↔kode.
 
 | Bucket | Status |
 |---|---|
-| **Kelas A** (A1 M6D freeze-on-close, A2 M9 QC-fail/escalate notif) | **PR #182 OPEN — belum merge.** Perlu keputusan pemilik + resolusi konflik `kol.ts` (§0.0). |
-| **Kelas B** (B1–B4) | ✅ **PR #183 — selesai & merge sesi ini.** |
+| **Kelas A** (A1 M6D freeze-on-close, A2 M9 QC-fail/escalate notif) | ✅ **PR #182 — MERGE** (konflik `kol.ts` diselesaikan, §0.0). |
+| **Kelas B** (B1–B4) | ✅ **PR #183 — MERGE.** |
 | **Kelas C1/C2/C3** (GMV→Health/attribution) | ❌ Satu tiket desain lintas-modul; **setelah** fitur manajemen toko klien + reporting. |
 | **Kelas C4** (notif eskalasi ROAS) | ❌ Butuh ACC pemilik menambah event katalog. |
 | **Kelas C5** (antrean Asset per-PIC) | ❌ Kecil, standalone — pickup pertama. |
@@ -164,18 +159,18 @@ menutup paritas PRD↔kode.
 **Exit Wave 2** (Build Plan §4): semua gap di atas tertutup / disepakati ditunda + kriteria exit Wave 2 lolos →
 baru **Wave 3** (M2, M3, M11, M13, M14, M15 — Client Portal terakhir, pasca-spek keamanan).
 
-**Rekomendasi urutan sesi berikutnya:**
-1. **Putuskan nasib #182** (merge + resolusi konflik `kol.ts`, atau tutup) — jangan biarkan menggantung; ia perbaikan nyata.
-2. **C5 + C7** (kecil, berdiri sendiri, nol risiko) sebagai quick win.
-3. **C4** bila pemilik setuju membuka satu event katalog; **C6** menyusul.
-4. **C1+C2+C3+B4-residual** sebagai satu desain besar — mulai HANYA setelah fitur manajemen toko klien + reporting engine ada (pemilik yang menentukan kapan).
+**Rekomendasi urutan sesi berikutnya (A & B sudah beres — langsung build Kelas C):**
+1. **C5 + C7** (kecil, berdiri sendiri, nol risiko invariant) sebagai quick win pembuka — §2.3.
+2. **C4** bila pemilik setuju membuka satu event katalog notifikasi; **C6** menyusul (§2.2 & §2.4).
+3. **C1+C2+C3+B4-residual** sebagai satu desain besar "GMV→Health/attribution" — mulai HANYA setelah fitur manajemen toko klien + reporting engine ada (pemilik yang menentukan kapan; §2.1).
+4. **B1-residual / B2-residual** (§2.5) hanya bila dibutuhkan.
 
 ---
 
 ## 4. Jebakan yang MASIH relevan
 1. Tes domain WAJIB serial; rebuild DB sebelum suite penuh & setelah migrasi baru.
 2. web-internal app Next MANDIRI — `cd web-internal && npm install` terpisah; jangan salin `@cdps/core` ke browser.
-3. **#182 belum di `main`** — jangan asumsikan infra Kelas A (notif `after`-param, migrasi freeze) ada. Cek dulu.
+3. **`main` kini lengkap A+B (117 migrasi).** `escalate` melakukan DUA hal (audit tier B2 + emit notif A2) via `edge(..., mutate, after)`; jangan buang salah satu saat menyentuh `kol.ts` lagi.
 4. B4 `target_kpi` free-text: angka GMV dibaca whole-rupiah ('.'/','=grouping); error parse bias ke arah "minta ACC SPV" (aman).
 5. `clients.total_sales` = penulis tunggal (engine reporting) — jangan tulis dari M8/M9/M10 langsung.
 6. Jangan tulis `clients.total_sales`/atribusi tanpa jalur report — itu C1, bukan tambal.
@@ -186,6 +181,6 @@ baru **Wave 3** (M2, M3, M11, M13, M14, M15 — Client Portal terakhir, pasca-sp
   `supabase/migrations/20260818030000_m9_coordinator_escalate.sql`,
   `web-internal/src/lib/kol.ts` + `web-internal/src/app/(shell)/kol/bookings/[id]/page.tsx`,
   `docs/STATE_MACHINES.md` §8, `docs/prd/CDPS_Module12_Task_Execution.md` Flow.
-- `docs/DECISIONS.md` 2026-08-18 (4 baris teratas: B1/B2/B3/B4).
-- **Gap register terperinci:** `docs/backlog/WAVE2_GAP_AUDIT.md` — **ada di branch `claude/wave2-gap-audit-classA` (PR #182), belum di `main`.** Baca lewat PR #182 sampai ia merge.
+- `docs/DECISIONS.md` 2026-08-18 (5 baris teratas: Kelas A + B1/B2/B3/B4).
+- **Gap register terperinci Kelas B/C:** `docs/backlog/WAVE2_GAP_AUDIT.md` (kini di `main` via #182).
 - `CLAUDE.md` aturan rumah #1–#8 + build order.
