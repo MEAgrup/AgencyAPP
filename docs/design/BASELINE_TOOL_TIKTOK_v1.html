@@ -1,0 +1,1321 @@
+<!DOCTYPE html>
+<!--
+  ARSIP DESAIN — CDPS Baseline Riset Toko (TikTok Shop), revisi ke-2 pemilik, 2026-08-17.
+  RUJUKAN SATU ARAH: diport ke packages/core/src/baseline/ lewat tiket RAB-02.
+  JANGAN dipelihara paralel sesudah port. Baca docs/design/README.md dan
+  docs/handoff/HANDOFF_M6ABC_SESI31.md §2.2 (daftar yang harus diperbaiki saat porting).
+-->
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280">
+<title>CDPS · Baseline Riset Toko — TikTok Shop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --ink:#0B1622; --ink2:#16283A; --slate:#5A7184; --mute:#8697A6;
+  --line:#DAE2EA; --line2:#EDF1F5; --canvas:#EDF1F5; --paper:#FFFFFF;
+  --signal:#FF5C28; --teal:#0E8F82; --amber:#C98A00; --red:#C62828; --violet:#5B4B8A;
+  --disp:'Barlow Condensed',Impact,system-ui,sans-serif;
+  --body:'Inter',system-ui,-apple-system,Segoe UI,sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --r:3px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--canvas);color:var(--ink);font-family:var(--body);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px 96px}
+h1,h2,h3,h4{margin:0;font-weight:600}
+a{color:var(--ink)}
+button{font-family:var(--body);cursor:pointer}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ── masthead ── */
+.mast{background:var(--ink);color:#fff;padding:20px 0 18px;margin-bottom:22px;border-bottom:3px solid var(--signal)}
+.mast .wrap{padding-bottom:0}
+.mast-row{display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
+.brandmark{font-family:var(--disp);font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--signal);font-weight:600}
+.mast h1{font-family:var(--disp);font-size:34px;line-height:1;letter-spacing:.01em;text-transform:uppercase;margin-top:5px;font-weight:700}
+.mast p{margin:7px 0 0;color:#9FB2C2;font-size:12px;max-width:600px}
+.mast-meta{text-align:right;font-family:var(--mono);font-size:11px;color:#7E93A5;line-height:1.7}
+.mast-meta b{color:#fff;font-weight:500}
+
+/* ── steps ── */
+.step{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);margin-bottom:18px}
+.step-hd{display:flex;align-items:center;gap:12px;padding:13px 18px;border-bottom:1px solid var(--line2)}
+.step-no{font-family:var(--mono);font-size:11px;font-weight:600;background:var(--ink);color:#fff;width:22px;height:22px;display:grid;place-items:center;border-radius:2px;flex:none}
+.step-hd h2{font-family:var(--disp);font-size:19px;text-transform:uppercase;letter-spacing:.04em}
+.step-hd .hint{margin-left:auto;color:var(--mute);font-size:11.5px}
+.step-bd{padding:18px}
+
+/* ── forms ── */
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(2,1fr)} .g3{grid-template-columns:repeat(3,1fr)}
+.g4{grid-template-columns:repeat(4,1fr)} .g5{grid-template-columns:repeat(5,1fr)} .g6{grid-template-columns:repeat(6,1fr)}
+label.f{display:block}
+label.f span{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--slate);font-weight:600;margin-bottom:4px}
+input[type=text],input[type=number],select,textarea{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:2px;font-family:var(--body);font-size:13px;background:#fff;color:var(--ink)}
+input.mono,td input{font-family:var(--mono);font-variant-numeric:tabular-nums}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--signal);outline-offset:-1px}
+.btn{border:1px solid var(--ink);background:var(--ink);color:#fff;padding:8px 15px;border-radius:2px;font-size:12.5px;font-weight:600;letter-spacing:.01em}
+.btn:hover{background:var(--ink2)}
+.btn.ghost{background:transparent;color:var(--ink)}
+.btn.ghost:hover{background:var(--line2)}
+.btn.sig{background:var(--signal);border-color:var(--signal)}
+.btn.sig:hover{filter:brightness(.93)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.sm{padding:5px 10px;font-size:11.5px}
+
+/* ── drop zone ── */
+.drop{border:2px dashed var(--line);border-radius:var(--r);padding:26px;text-align:center;background:#FAFCFD;transition:.15s}
+.drop.hot{border-color:var(--signal);background:#FFF6F2}
+.drop h3{font-family:var(--disp);font-size:18px;text-transform:uppercase;letter-spacing:.04em}
+.drop p{margin:5px 0 12px;color:var(--slate);font-size:12px}
+
+/* ── tables ── */
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--slate);font-weight:600;text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap;background:#F7F9FB}
+td{padding:7px 8px;border-bottom:1px solid var(--line2);vertical-align:middle}
+td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+tr.tot td{font-weight:700;background:#F7F9FB;border-top:2px solid var(--ink)}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r)}
+.tbl-wrap table{font-size:12px} .tbl-wrap th:first-child,.tbl-wrap td:first-child{padding-left:12px}
+.ttl{max-width:390px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── file chips ── */
+.chip{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:2px;background:#fff;margin-bottom:6px;font-size:12px}
+.chip .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono);font-size:11px;color:var(--slate)}
+.chip select{width:auto;min-width:190px;font-size:11.5px;padding:4px 6px}
+.chip .rows{font-family:var(--mono);font-size:11px;color:var(--mute);white-space:nowrap}
+.chip.bad{border-color:var(--red);background:#FEF6F6}
+.chip.off{opacity:.5;background:#F7F9FB}
+.chip.dup{border-color:var(--amber);background:#FFFBEF}
+.chip .mini{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;border-radius:2px;white-space:nowrap}
+.mini-off{background:var(--line2);color:var(--slate)}
+.mini-dup{background:#FCF3DC;color:var(--amber)}
+.err{background:#FEF6F6;border:1px solid #EFC0C0;border-radius:2px;padding:10px 12px;font-size:12px;color:#8C2020;line-height:1.5;margin-bottom:8px;font-family:var(--mono);font-size:11.5px}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--teal)}
+.dot.warn{background:var(--amber)} .dot.bad{background:var(--red)}
+
+/* ── KPI ── */
+.kpi{border:1px solid var(--line);border-radius:var(--r);padding:12px 13px;background:#fff}
+.kpi .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--slate);font-weight:600}
+.kpi .v{font-family:var(--mono);font-size:22px;font-weight:600;letter-spacing:-.02em;margin-top:5px;line-height:1.1}
+.kpi .s{font-size:11px;color:var(--mute);margin-top:3px}
+.kpi.hi{background:var(--ink);border-color:var(--ink)}
+.kpi.hi .k{color:#8FA6B8} .kpi.hi .v{color:#fff} .kpi.hi .s{color:#7E93A5}
+.up{color:var(--teal)} .down{color:var(--red)} .flat{color:var(--slate)}
+
+/* ── meter (signature: setiap metrik dibanding benchmark) ── */
+.meter{margin:9px 0 13px}
+.meter-lb{display:flex;justify-content:space-between;align-items:baseline;font-size:11.5px;margin-bottom:5px}
+.meter-lb b{font-family:var(--mono);font-size:12.5px;font-weight:600}
+.meter-lb span{color:var(--slate)}
+.track{position:relative;height:8px;background:var(--line2);border-radius:0}
+.fill{position:absolute;left:0;top:0;bottom:0;background:var(--ink)}
+.fill.ok{background:var(--teal)} .fill.mid{background:var(--amber)} .fill.bad{background:var(--red)}
+.tick{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--ink)}
+.tick:after{content:attr(data-t);position:absolute;top:-14px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:9px;color:var(--slate);white-space:nowrap}
+
+/* ── verdict stamp ── */
+.dossier{display:grid;grid-template-columns:1fr 250px;gap:0;border:1px solid var(--line);border-radius:var(--r);background:#fff;overflow:hidden;margin-bottom:18px}
+.dossier-l{padding:20px 22px}
+.dossier-r{background:var(--ink);color:#fff;padding:20px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}
+.eyebrow{font-family:var(--disp);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--signal);font-weight:600}
+.dossier h2{font-family:var(--disp);font-size:27px;text-transform:uppercase;letter-spacing:.02em;margin-top:4px;line-height:1.05}
+.dossier .sub{color:var(--slate);font-size:12px;margin-top:6px}
+.stamp{border:3px solid;border-radius:4px;padding:10px 14px;transform:rotate(-4deg);font-family:var(--disp);text-transform:uppercase;letter-spacing:.06em;line-height:1}
+.stamp .sc{font-size:38px;font-weight:700;font-family:var(--mono);letter-spacing:-.03em}
+.stamp .vd{font-size:14px;font-weight:600;margin-top:2px}
+.stamp.s-ok{border-color:#3FD9C4;color:#3FD9C4} .stamp.s-mid{border-color:#F2C14E;color:#F2C14E}
+.stamp.s-low{border-color:#FF9066;color:#FF9066} .stamp.s-bad{border-color:#FF6B6B;color:#FF6B6B}
+.stamp-note{font-size:10px;color:#7E93A5;margin-top:12px;line-height:1.4;max-width:190px}
+
+/* ── sections ── */
+.sec{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);margin-bottom:16px}
+.sec-hd{display:flex;align-items:center;gap:11px;padding:12px 18px;border-bottom:1px solid var(--line2);background:#FAFCFD}
+.sec-hd .tag{font-family:var(--mono);font-size:10px;font-weight:600;color:#fff;background:var(--slate);padding:3px 6px;border-radius:2px;letter-spacing:.04em}
+.sec-hd h3{font-family:var(--disp);font-size:18px;text-transform:uppercase;letter-spacing:.04em}
+.sec-hd .pill{margin-left:auto}
+.sec-bd{padding:18px}
+.pill{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;padding:3px 8px;border-radius:20px;border:1px solid;white-space:nowrap}
+.p-ok{color:var(--teal);border-color:#A9DDD7;background:#F0FAF8}
+.p-mid{color:var(--amber);border-color:#EBD79B;background:#FDF9EE}
+.p-bad{color:var(--red);border-color:#EFC0C0;background:#FDF4F4}
+.p-off{color:var(--slate);border-color:var(--line);background:#F7F9FB}
+
+.h4{font-family:var(--disp);font-size:14px;text-transform:uppercase;letter-spacing:.07em;color:var(--ink);margin:0 0 9px;padding-bottom:5px;border-bottom:1px solid var(--line2)}
+.note{font-size:11.5px;color:var(--slate);margin-top:9px;padding-left:9px;border-left:2px solid var(--line)}
+.finding{display:flex;gap:9px;padding:9px 0;border-bottom:1px dotted var(--line);font-size:12.5px;align-items:flex-start}
+.finding:last-child{border:0}
+.finding .ic{font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 5px;border-radius:2px;flex:none;margin-top:1px}
+.ic-tantangan{background:#FDE8E8;color:var(--red)} .ic-perhatian{background:#FCF3DC;color:var(--amber)}
+.ic-modal{background:#E4F6F3;color:var(--teal)} .ic-catatan{background:var(--line2);color:var(--slate)}
+.finding b{font-weight:600}
+
+.quad{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}
+.qc{background:#fff;padding:12px}
+.qc .qn{font-family:var(--mono);font-size:20px;font-weight:600}
+.qc .ql{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--slate);font-weight:600;margin-bottom:3px}
+.qc .qd{font-size:11px;color:var(--mute);margin-top:3px}
+.qc.win{background:#F0FAF8} .qc.lose{background:#FDF4F4}
+
+.bars{margin-top:4px}
+.bar-row{display:grid;grid-template-columns:150px 1fr 108px;gap:10px;align-items:center;padding:5px 0;font-size:12px}
+.bar-tr{height:14px;background:var(--line2);position:relative}
+.bar-fl{position:absolute;left:0;top:0;bottom:0}
+.bar-row .bv{font-family:var(--mono);font-size:11.5px;text-align:right}
+
+.split{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.split3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px}
+.empty{padding:16px;text-align:center;color:var(--mute);font-size:12px;background:#FAFCFD;border:1px dashed var(--line);border-radius:2px}
+
+.outbar{position:sticky;bottom:0;background:var(--ink);color:#fff;padding:12px 24px;display:flex;gap:10px;align-items:center;z-index:40;border-top:3px solid var(--signal)}
+.outbar .lb{font-family:var(--disp);font-size:13px;text-transform:uppercase;letter-spacing:.1em;color:#8FA6B8;margin-right:auto}
+.outbar .btn.ghost{color:#fff;border-color:#3C5468}
+.outbar .btn.ghost:hover{background:#1E3446}
+#payload{width:100%;height:220px;font-family:var(--mono);font-size:10.5px;white-space:pre;background:#0B1622;color:#B8E5DE;border:0;padding:12px}
+.hidden{display:none!important}
+.toast{position:fixed;bottom:78px;left:50%;transform:translateX(-50%);background:var(--teal);color:#fff;padding:9px 16px;border-radius:2px;font-size:12.5px;font-weight:600;z-index:99}
+@media print{.outbar,.step,.no-print{display:none!important}body{background:#fff}.sec,.dossier{break-inside:avoid;page-break-inside:avoid}}
+</style>
+</head>
+<body>
+
+<div class="mast">
+  <div class="wrap">
+    <div class="mast-row">
+      <div>
+        <div class="brandmark">MEA Agency · CDPS Module 0</div>
+        <h1>Baseline Riset Toko Klien</h1>
+        <p>Ambil kondisi awal toko klien dari export TikTok Shop Seller Center &amp; Ads Manager. Output-nya jadi angka baseline dan bahan mentah kolom Strategi &amp; Plan — bukan laporan klien.</p>
+      </div>
+      <div class="mast-meta">
+        <div>TikTok Shop · Tokopedia · Affiliate · Ads</div>
+        <div>v1.0 · <b id="todayLbl">—</b></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+
+<!-- STEP 1 : IDENTITAS -->
+<div class="step no-print">
+  <div class="step-hd"><div class="step-no">1</div><h2>Identitas Klien</h2><div class="hint">Ikut ke payload CDPS</div></div>
+  <div class="step-bd">
+    <div class="grid g4">
+      <label class="f"><span>Nama Klien / PT</span><input type="text" id="fKlien" placeholder="PT Avita Sejahtera"></label>
+      <label class="f"><span>Nama Toko</span><input type="text" id="fToko" placeholder="Avitaskin Official"></label>
+      <label class="f"><span>Akun TikTok Toko</span><input type="text" id="fAkun" placeholder="avitaskin_official"></label>
+      <label class="f"><span>Account Manager</span><input type="text" id="fAM" placeholder="Nama AM"></label>
+      <label class="f"><span>Kategori Produk</span><select id="fKat">
+        <option>Beauty &amp; Personal Care</option><option>Fashion</option><option>Home Living</option>
+        <option>Food &amp; Beverage</option><option>Elektronik</option><option>Kesehatan / Herbal</option>
+        <option>Ibu &amp; Bayi</option><option>Lainnya</option></select></label>
+      <label class="f"><span>Umur Toko (bulan)</span><input type="number" id="fUmur" class="mono" placeholder="24" min="0"></label>
+      <label class="f"><span>Bulan Referensi (file)</span><input type="text" id="fPeriode" class="mono" placeholder="auto dari file" readonly></label>
+      <label class="f"><span>Definisi GMV Baseline</span><select id="fGmvDef">
+        <option value="gross">GMV (kotor, sebelum retur) — default TikTok</option>
+        <option value="net">GMV bersih (GMV − pengembalian dana)</option>
+      </select></label>
+    </div>
+    <div class="note"><b>Standar MEA = GMV Bersih</b> (GMV dikurangi retur). Angka ini langsung masuk target kontrak, jadi jangan diubah tanpa alasan yang dicatat. Kalau klien ngotot pakai GMV kotor, diskusi dulu dengan Head Account sebelum mengubah pilihan.</div>
+  </div>
+</div>
+
+<!-- STEP 2 : RIWAYAT GMV -->
+<div class="step no-print">
+  <div class="step-hd"><div class="step-no">2</div><h2>Riwayat GMV 6 Bulan</h2><div class="hint">Export cuma bisa bulanan → isi manual, sistem yang hitung rata-rata</div></div>
+  <div class="step-bd">
+    <div class="split" style="grid-template-columns:1.35fr 1fr">
+      <div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th style="width:120px">Bulan</th><th class="num">GMV (Rp)</th><th class="num">Order</th><th style="width:132px">Tanda</th></tr></thead>
+            <tbody id="histBody"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:9px;display:flex;gap:8px;align-items:center">
+          <button class="btn ghost sm" id="btnPrefill">Isi bulan referensi dari file</button>
+          <button class="btn ghost sm" id="btnClearHist">Kosongkan</button>
+          <span class="hint" style="color:var(--mute);font-size:11px">Minimal 3 bulan terisi supaya baseline dianggap valid.</span>
+        </div>
+      </div>
+      <div id="histOut"></div>
+    </div>
+  </div>
+</div>
+
+<!-- STEP 3 : UPLOAD -->
+<div class="step no-print">
+  <div class="step-hd"><div class="step-no">3</div><h2>Upload Export Bulan Referensi</h2><div class="hint">Deteksi otomatis · bisa override</div></div>
+  <div class="step-bd">
+    <div class="drop" id="drop">
+      <h3>Tarik file .xlsx ke sini</h3>
+      <p>Boleh sekaligus. Tool baca header di dalam file, bukan nama file — jadi nama file hasil download apa adanya nggak masalah.</p>
+      <button class="btn sig" id="btnPick">Pilih file</button>
+      <input type="file" id="fileInput" multiple accept=".xlsx,.xls,.csv" class="hidden">
+    </div>
+    <div id="fileList" style="margin-top:14px"></div>
+    <div id="needList" style="margin-top:12px"></div>
+    <div style="margin-top:14px;display:flex;gap:9px;align-items:center">
+      <button class="btn sig" id="btnRun" disabled>Hitung baseline</button>
+      <button class="btn ghost sm" id="btnBench">Benchmark MEA</button>
+      <button class="btn ghost sm" id="btnReset">Reset semua</button>
+    </div>
+    <div id="benchPanel" class="hidden" style="margin-top:14px;border:1px solid var(--line);border-radius:2px;padding:14px;background:#FAFCFD">
+      <div class="h4">Benchmark MEA — dipakai jadi garis pembanding</div>
+      <div class="grid g4" id="benchGrid"></div>
+      <div class="note">Angka default ini standar internal MEA untuk toko full store management. Ubah hanya kalau kategori klien memang beda karakter, dan catat alasannya di kolom Strategi.</div>
+    </div>
+  </div>
+</div>
+
+<div id="result"></div>
+
+</div>
+
+<div class="outbar no-print hidden" id="outbar">
+  <div class="lb">Output baseline</div>
+  <button class="btn ghost" id="btnJson">Lihat payload CDPS</button>
+  <button class="btn ghost" id="btnCopyJson">Copy JSON</button>
+  <button class="btn ghost" id="btnCopyTxt">Copy ringkasan</button>
+  <button class="btn ghost" id="btnDlJson">Download .json</button>
+  <button class="btn sig" onclick="window.print()">Cetak / PDF</button>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════
+   MEA CDPS · BASELINE RISET TOKO — engine
+   Semua hitungan di browser. Tidak ada data yang keluar dari device.
+   ══════════════════════════════════════════════════════════════ */
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const MON=['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+document.getElementById('todayLbl').textContent=new Date().toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'});
+
+/* ── angka ──────────────────────────────────────────────────────
+   Seller Center: string "Rp10.945.407" / "5,37%"  → titik = ribuan
+   Ads Manager  : float asli 335164.77             → titik = desimal
+   Makanya parsing dibedakan per sumber lewat flag `raw`.        */
+function n(v,raw){
+  if(v==null||v==='')return 0;
+  if(typeof v==='number')return isFinite(v)?v:0;
+  let s=String(v).trim();
+  if(s==='-'||s==='—'||s==='N/A')return 0;
+  s=s.replace(/rp/ig,'').replace(/\s|\u00a0/g,'');
+  const pct=s.includes('%'); s=s.replace('%','');
+  if(raw){ s=s.replace(/,/g,''); }
+  else{
+    const hasC=s.includes(','), hasD=s.includes('.');
+    if(hasC&&hasD) s=s.replace(/\./g,'').replace(',','.');
+    else if(hasC) s=s.replace(',','.');
+    else if(hasD){ const p=s.split('.'); if(p.length>1&&p.slice(1).every(x=>x.length===3)) s=p.join(''); }
+  }
+  const f=parseFloat(s); if(!isFinite(f))return 0;
+  return pct?f/100:f;
+}
+const DASH='—';
+const nil=v=>v==null||typeof v!=='number'||!isFinite(v);
+/* format rupiah rumah MEA: Rp. 10.945.407,00 — dipakai untuk SEMUA angka yang dibaca sebagai nilai */
+const rp=v=>nil(v)?DASH:'Rp. '+Math.round(v).toLocaleString('id-ID')+',00';
+/* singkatan HANYA untuk label batang grafik, bukan untuk KPI/tabel/ringkasan */
+const rpS=v=>{if(nil(v))return DASH;const a=Math.abs(v);if(a>=1e9)return 'Rp'+(v/1e9).toFixed(2)+'M';if(a>=1e6)return 'Rp'+(v/1e6).toFixed(1)+'jt';if(a>=1e3)return 'Rp'+Math.round(v/1e3)+'rb';return 'Rp'+Math.round(v);};
+const num=v=>nil(v)?DASH:Math.round(v).toLocaleString('id-ID');
+const dec=(v,d=1)=>nil(v)?DASH:v.toLocaleString('id-ID',{minimumFractionDigits:d,maximumFractionDigits:d});
+const pct=(v,d=1)=>nil(v)?DASH:dec(v*100,d)+'%';
+/* penyebut 0 = tidak ada dasar hitung, bukan nol. null supaya tampil — bukan 0% */
+const div=(a,b)=>b?a/b:null;
+const mul=(v,k)=>v==null?null:v*k;
+const fx=(v,d)=>nil(v)?null:+v.toFixed(d);
+const median=a=>{const s=a.filter(x=>isFinite(x)).sort((x,y)=>x-y);if(!s.length)return 0;const m=s.length>>1;return s.length%2?s[m]:(s[m-1]+s[m])/2;};
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+/* ── benchmark MEA (editable) ─────────────────────────────── */
+const BENCH=[
+ {k:'cr',           l:'Persentase konversi toko',      v:1.0,   u:'%'},
+ {k:'refund',       l:'Refund rate maksimal',          v:5.0,   u:'%'},
+ {k:'vidPostToko',  l:'Video toko / bulan',            v:30,    u:'video'},
+ {k:'vidSalesToko', l:'Video toko ada penjualan',      v:8.0,   u:'%'},
+ {k:'vidSalesAff',  l:'Video afiliasi ada penjualan',  v:8.0,   u:'%'},
+ {k:'gpmToko',      l:'GPM median video toko',         v:100000,u:'Rp'},
+ {k:'liveSesi',     l:'Sesi LIVE toko / bulan',        v:20,    u:'sesi'},
+ {k:'liveJam',      l:'Jam LIVE toko / bulan',         v:60,    u:'jam'},
+ {k:'liveGmvJam',   l:'GMV per jam LIVE',              v:300000,u:'Rp'},
+ {k:'liveCtor',     l:'CTOR LIVE',                     v:1.5,   u:'%'},
+ {k:'krSales',      l:'Kreator posting yg ada penjualan',v:40, u:'%'},
+ {k:'krKonsen',     l:'Konsentrasi GMV top-5 kreator', v:60,    u:'% maks'},
+ {k:'skuSales',     l:'SKU ada penjualan',             v:30,    u:'%'},
+ {k:'roas',         l:'ROAS iklan minimal',            v:6,     u:'x'},
+ {k:'adsDep',       l:'Ketergantungan iklan maksimal', v:60,    u:'% maks'},
+ {k:'spikeFlag',    l:'Ambang bulan campaign-driven',  v:1.8,   u:'x median'}
+];
+const B={}; BENCH.forEach(b=>B[b.k]=b.v);
+function renderBench(){
+  $('#benchGrid').innerHTML=BENCH.map(b=>`<label class="f"><span>${b.l} (${b.u})</span>
+    <input type="number" class="mono" data-bk="${b.k}" value="${b.v}" step="any"></label>`).join('');
+  $$('#benchGrid input').forEach(i=>i.onchange=()=>{B[i.dataset.bk]=parseFloat(i.value)||0;if(STATE.done)run();});
+}
+renderBench();
+$('#btnBench').onclick=()=>$('#benchPanel').classList.toggle('hidden');
+
+/* ── riwayat GMV 6 bulan ──────────────────────────────────── */
+const HIST=[];
+(function initHist(){
+  const d=new Date(); d.setDate(1);
+  for(let i=6;i>=1;i--){const x=new Date(d.getFullYear(),d.getMonth()-i,1);
+    HIST.push({key:x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0'),label:MON[x.getMonth()]+' '+x.getFullYear(),gmv:'',order:'',flag:'normal'});}
+  $('#histBody').innerHTML=HIST.map((h,i)=>`<tr>
+    <td><b>${h.label}</b></td>
+    <td class="num"><input type="text" class="mono" data-h="${i}" data-f="gmv" placeholder="0" style="text-align:right"></td>
+    <td class="num"><input type="text" class="mono" data-h="${i}" data-f="order" placeholder="0" style="text-align:right"></td>
+    <td><select data-h="${i}" data-f="flag" style="font-size:11.5px;padding:4px">
+      <option value="normal">Normal</option><option value="campaign">Bulan campaign</option>
+      <option value="belum">Belum jadi klien</option><option value="masalah">Toko kena masalah</option>
+    </select></td></tr>`).join('');
+  $$('#histBody input,#histBody select').forEach(el=>el.addEventListener('input',()=>{
+    HIST[+el.dataset.h][el.dataset.f]=el.value; histCalc(); if(STATE.done)run();
+  }));
+  histCalc();
+})();
+$('#btnClearHist').onclick=()=>{HIST.forEach(h=>{h.gmv='';h.order='';h.flag='normal';});
+  $$('#histBody input').forEach(i=>i.value=''); $$('#histBody select').forEach(s=>s.value='normal'); histCalc(); if(STATE.done)run();};
+
+function histStats(){
+  const rows=HIST.map(h=>({...h,g:n(h.gmv),o:n(h.order)})).filter(r=>r.flag!=='belum');
+  const filled=rows.filter(r=>r.g>0);
+  const gs=filled.map(r=>r.g);
+  const med=median(gs), avg6=gs.length?gs.reduce((a,b)=>a+b,0)/gs.length:0;
+  const seq=HIST.filter(h=>h.flag!=='belum'&&n(h.gmv)>0);
+  const last3=seq.slice(-3).map(r=>n(r.gmv)), prev3=seq.slice(-6,-3).map(r=>n(r.gmv));
+  const rr=last3.length?last3.reduce((a,b)=>a+b,0)/last3.length:0;
+  const pr=prev3.length?prev3.reduce((a,b)=>a+b,0)/prev3.length:0;
+  const trend=pr?(rr-pr)/pr:null;
+  const peak=Math.max(0,...gs);
+  const spike=med>0&&peak>=med*B.spikeFlag;
+  const peakRow=filled.find(r=>r.g===peak);
+  return {rows,filled,med,avg6,rr,pr,trend,peak,peakRow,spike,months:filled.length,
+    cakupan:filled.length>=3?'cukup':'kurang'};
+}
+function histCalc(){
+  const s=histStats();
+  const tClass=s.trend==null?'flat':s.trend>0.05?'up':s.trend<-0.05?'down':'flat';
+  const tTxt=s.trend==null?'—':(s.trend>0?'+':'')+pct(s.trend,1);
+  $('#histOut').innerHTML=`
+  <div class="grid" style="gap:9px">
+    <div class="kpi hi"><div class="k">GMV Baseline · median</div><div class="v">${rp(s.med)}</div>
+      <div class="s">Jangkar target kontrak · ${s.months} bulan terpakai</div></div>
+    <div class="grid g2" style="gap:9px">
+      <div class="kpi"><div class="k">Run-rate 3 bln</div><div class="v" style="font-size:17px">${rp(s.rr)}</div><div class="s">kondisi terkini</div></div>
+      <div class="kpi"><div class="k">Trend 3v3</div><div class="v ${tClass}" style="font-size:17px">${tTxt}</div><div class="s">${s.pr?'vs '+rp(s.pr):'butuh 6 bulan'}</div></div>
+    </div>
+    ${s.cakupan==='kurang'?`<div class="finding"><span class="ic ic-perhatian">DATA</span><div>Baru <b>${s.months} bulan</b> terisi. Cakupan riwayat ditandai <b>kurang</b> — target kontrak harus pakai estimasi + alasan, jangan pakai angka ini mentah.</div></div>`:''}
+    ${s.spike?`<div class="finding"><span class="ic ic-perhatian">SPIKE</span><div><b>${esc(s.peakRow?s.peakRow.label:'')}</b> = ${rp(s.peak)}, ${dec(div(s.peak,s.med),1)}× median. Ditandai <b>campaign-driven</b>. Baseline pakai median, bukan rata-rata, biar target nggak ketarik bulan puncak.</div></div>`:''}
+    ${s.months>=3&&!s.spike?`<div class="finding"><span class="ic ic-modal">OK</span><div>Sebaran GMV wajar, median dan run-rate bisa dipakai langsung.</div></div>`:''}
+  </div>`;
+}
+
+/* ── katalog file ─────────────────────────────────────────── */
+const TYPES={
+  shop_tt:  {l:'Analitik Toko — TikTok',       req:1, sig:d=>has(d,'GMV')&&has(d,'GMV dari LIVE kreator')&&has(d,'Pengunjung')&&!has(d,'ID Produk')&&!has(d,'ID')},
+  shop_tp:  {l:'Analitik Toko — Tokopedia',    req:0, sig:d=>has(d,'GMV')&&has(d,'Pendapatan bruto')&&has(d,'Pengunjung')&&!has(d,'GMV dari LIVE kreator')&&!has(d,'ID Produk')},
+  prod_tt:  {l:'Analitik Produk — TikTok',     req:1, sig:d=>has(d,'ID Produk')&&has(d,'GMV dari kreator')&&has(d,'Klik produk')},
+  prod_tp:  {l:'Analitik Produk — Tokopedia',  req:0, sig:d=>has(d,'GMV tab Toko')&&has(d,'GMV dari kartu produk')&&has(d,'Produk')},
+  vid_toko: {l:'Video — Toko Sendiri',         req:1, sig:d=>has(d,'Informasi Video')&&has(d,'GPM (Rp)')},
+  vid_aff:  {l:'Video — Kreator Afiliasi',     req:1, sig:d=>has(d,'Informasi Video')&&has(d,'GPM (Rp)')},
+  live_toko:{l:'LIVE — Toko Sendiri',          req:1, sig:d=>has(d,'GMV dari LIVE (Rp)')&&has(d,'Waktu Live')},
+  live_aff: {l:'LIVE — Kreator Afiliasi',      req:1, sig:d=>has(d,'GMV dari LIVE (Rp)')&&has(d,'Waktu Live')},
+  aff_kr:   {l:'Afiliasi — Daftar Kreator',    req:1, sig:d=>has(d,'Creator name')&&has(d,'GMV dari kreator')},
+  aff_pr:   {l:'Afiliasi — Daftar Produk',     req:0, sig:d=>has(d,'Product name')&&has(d,'Video dengan penjualan')},
+  ads_prod: {l:'Ads Manager — Produk/GMV Max', req:0, sig:d=>has(d,'Jenis materi iklan')&&has(d,'Nama kampanye')},
+  ads_live: {l:'Ads Manager — LIVE',           req:0, sig:d=>has(d,'Nama LIVE')&&has(d,'Tayangan LIVE')}
+};
+const has=(d,c)=>d.cols.includes(c);
+const STATE={files:[],done:false,slots:{}};
+
+/* baca sheet: cari baris header di 6 baris pertama */
+function readSheet(ab,fname){
+  const wb=XLSX.read(ab,{type:'array'});
+  const ws=wb.Sheets[wb.SheetNames[0]];
+  const aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null,blankrows:false});
+  // sel "mirip label": teks pendek yang bukan nilai (bukan Rp…, bukan angka/persen/tanggal)
+  const labelLike=x=>{
+    if(typeof x!=='string')return false;
+    const s=x.trim();
+    if(s.length<2||s.length>70)return false;
+    if(/^rp/i.test(s))return false;
+    if(/^[\d]/.test(s))return false;
+    if(/^[\d.,%+\-\s]+$/.test(s))return false;
+    return true;
+  };
+  const cnt=[];
+  for(let i=0;i<Math.min(8,aoa.length);i++){
+    // label UNIK: baris filter ("Semua","Semua",…) punya banyak sel tapi sedikit label unik
+    cnt.push(new Set((aoa[i]||[]).filter(labelLike).map(x=>x.trim())).size);
+  }
+  const mx=Math.max(...cnt,0);
+  if(mx<2)return null;
+  // baris header PALING AWAL yang jumlah labelnya mendekati maksimum —
+  // penting karena Analitik Toko punya header kedua (Data harian) di bawah
+  let hi=cnt.findIndex(c=>c>=mx*0.9&&c>=2);
+  if(hi<0) return null;
+  const cols=(aoa[hi]||[]).map((x,j)=>x==null||String(x).trim()===''?'__c'+j:String(x).trim());
+  const rows=[];
+  for(let i=hi+1;i<aoa.length;i++){
+    const r=aoa[i]||[]; if(!r.some(x=>x!=null&&x!==''))continue;
+    const o={}; cols.forEach((c,j)=>{ if(o[c]===undefined)o[c]=r[j]; else o[c+'#'+j]=r[j]; }); rows.push(o);
+  }
+  // header meta (baris pertama biasanya rentang tanggal)
+  const meta=(aoa[0]||[]).map(x=>x==null?'':String(x)).join(' ');
+  return {file:fname,cols,rows,meta,headerRow:hi};
+}
+/* buang baris keterangan/tooltip: kalau kolom angka utama isinya teks panjang */
+function cleanRows(d,numCol){
+  if(!numCol||!has(d,numCol))return d;
+  d.rows=d.rows.filter(r=>{const v=r[numCol];
+    if(v==null||v==='')return true;
+    if(typeof v==='number')return true;
+    const s=String(v); return s.length<40||/^[\dRp.,%\-\s]+$/.test(s);});
+  return d;
+}
+function detect(d){
+  const cand=Object.keys(TYPES).filter(k=>TYPES[k].sig(d));
+  if(!cand.length)return null;
+  // pisahkan toko vs afiliasi berdasar jumlah akun unik
+  if(cand.includes('vid_toko')){
+    const u=new Set(d.rows.map(r=>String(r['Nama Kreator']||'').trim()).filter(Boolean));
+    return u.size<=2?'vid_toko':'vid_aff';
+  }
+  if(cand.includes('live_toko')){
+    const u=new Set(d.rows.map(r=>String(r['Kreator']||'').trim()).filter(Boolean));
+    return u.size<=2?'live_toko':'live_aff';
+  }
+  return cand[0];
+}
+/* ── upload ───────────────────────────────────────────────── */
+const drop=$('#drop'), fi=$('#fileInput');
+$('#btnPick').onclick=()=>fi.click();
+fi.onchange=e=>ingest([...e.target.files]);
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('hot');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('hot');}));
+drop.addEventListener('drop',e=>ingest([...e.dataTransfer.files]));
+$('#btnReset').onclick=()=>location.reload();
+
+async function ingest(files){
+  for(const f of files){
+    if(!/\.(xlsx|xls|csv)$/i.test(f.name)){STATE.files.push({file:f.name,type:null,
+      err:'[bukan file excel atau csv, pakai hasil export .xlsx dari seller centre]'});continue;}
+    try{
+      const d=readSheet(await f.arrayBuffer(),f.name);
+      if(!d){STATE.files.push({file:f.name,type:null,
+        err:'[header tidak terbaca, pastikan file adalah export asli dari seller centre dan barisnya belum diedit atau difilter]'});continue;}
+      const t=detect(d);
+      if(!t){STATE.files.push({file:f.name,type:null,cols:d.cols.length,
+        err:'[tipe file tidak dikenali, tidak ada kolom kunci seperti "GMV", "GMV dari LIVE kreator", "GPM (Rp)", "Creator name", atau "Jenis materi iklan" — cek apakah file ini di-export dari menu yang benar]'});continue;}
+      d.type=t; d.periode=periodeOf(d.meta);
+      STATE.files.push(d);
+    }catch(err){STATE.files.push({file:f.name,type:null,
+      err:'[file gagal dibaca ('+err.message+'), coba download ulang dari seller centre tanpa dibuka-simpan ulang di excel]'});}
+  }
+  renderFiles();
+}
+/* tipe yang dikenali tapi belum masuk perhitungan baseline */
+const UNUSED=['prod_tp','aff_pr'];
+function renderFiles(){
+  const opts=t=>Object.keys(TYPES).map(k=>`<option value="${k}"${k===t?' selected':''}>${TYPES[k].l}</option>`).join('');
+  // kelompokkan per tipe untuk deteksi duplikat
+  const byType={}; STATE.files.forEach((d,i)=>{if(d.type)(byType[d.type]=byType[d.type]||[]).push(i);});
+  const aktif=t=>byType[t].filter(i=>STATE.files[i].use!==false);
+  const dupTypes=Object.keys(byType).filter(t=>byType[t].length>1);
+  const bentrok=dupTypes.filter(t=>aktif(t).length>1);
+
+  $('#fileList').innerHTML=STATE.files.map((d,i)=>{
+    if(d.type===null)
+      return `<div class="chip bad"><span class="dot bad"></span><span class="nm">${esc(d.file)}</span>
+        <b style="color:var(--red);font-size:11px">${esc(d.err)}</b></div>`;
+    const off=d.use===false, isDup=byType[d.type].length>1, unused=UNUSED.includes(d.type);
+    return `<div class="chip${off?' off':isDup?' dup':''}">
+      <span class="dot${off?' bad':isDup?' warn':''}"></span>
+      <span class="nm">${esc(d.file)}</span>
+      <select data-fi="${i}"><option value="">— abaikan file ini —</option>${opts(d.type)}</select>
+      ${unused?'<span class="mini mini-off" title="Tipe file ini dikenali dan tersimpan, tapi belum masuk ke perhitungan baseline v1">diterima, belum dipakai</span>':''}
+      ${isDup?(off?`<button class="btn ghost sm" data-use="${i}">Pakai ini</button>`
+                  :`<span class="mini mini-dup">dipakai</span><button class="btn ghost sm" data-off="${i}">Jangan pakai</button>`):''}
+      <span class="rows">${num(d.rows.length)} baris${d.periode?' · '+d.periode:''}</span></div>`;
+  }).join('');
+  $$('#fileList select').forEach(el=>el.onchange=()=>{STATE.files[+el.dataset.fi].type=el.value||null;renderFiles();if(STATE.done)run();});
+  $$('#fileList [data-use]').forEach(b=>b.onclick=()=>{const i=+b.dataset.use;const t=STATE.files[i].type;
+    byType[t].forEach(j=>STATE.files[j].use=(j===i));renderFiles();if(STATE.done)run();});
+  $$('#fileList [data-off]').forEach(b=>b.onclick=()=>{STATE.files[+b.dataset.off].use=false;renderFiles();if(STATE.done)run();});
+
+  // slot hanya dari file aktif & tidak bentrok
+  STATE.slots={};
+  Object.keys(byType).forEach(t=>{const a=aktif(t); if(a.length===1)STATE.slots[t]=STATE.files[a[0]];});
+
+  // ── konsistensi periode antar file
+  const per=[]; STATE.files.forEach(d=>{if(d.type&&d.use!==false&&d.periode)per.push({f:d.file,p:d.periode});});
+  const setPer=[...new Set(per.map(x=>x.p))];
+  const periodeBeda=setPer.length>1;
+
+  const miss=Object.keys(TYPES).filter(k=>TYPES[k].req&&!STATE.slots[k]);
+  const opt =Object.keys(TYPES).filter(k=>!TYPES[k].req&&!STATE.slots[k]);
+  const msg=[];
+  if(periodeBeda){
+    const hit={}; per.forEach(x=>hit[x.p]=(hit[x.p]||0)+1);
+    const dom=Object.keys(hit).sort((a,b)=>hit[b]-hit[a])[0];
+    const beda=per.filter(x=>x.p!==dom);
+    msg.push(`<div class="err">[periode file tidak sama: mayoritas ${dom} (${hit[dom]} file), tapi
+      ${beda.map(x=>esc(x.f)+' = '+x.p).join('; ')} — ganti file itu dengan export bulan ${dom}]</div>`);
+  }
+  if(bentrok.length)msg.push(`<div class="err">[dua file bertipe sama diunggah: ${bentrok.map(t=>
+    TYPES[t].l+' ('+aktif(t).map(i=>esc(STATE.files[i].file)).join(' dan ')+')').join('; ')}
+    — pilih satu lewat tombol "Jangan pakai" pada file yang tidak dipakai]</div>`);
+  $('#needList').innerHTML=(STATE.files.length?msg.join('')+`
+    ${miss.length?`<div class="finding"><span class="ic ic-perhatian">KURANG</span><div>[belum ada file: ${miss.map(k=>TYPES[k].l).join(' · ')} — bagian itu ditandai tanpa data di hasil baseline]</div></div>`:
+      `<div class="finding"><span class="ic ic-modal">LENGKAP</span><div>Semua file inti sudah masuk.</div></div>`}
+    ${opt.length?`<div class="finding"><span class="ic ic-catatan">OPSIONAL</span><div>Belum ada: ${opt.map(k=>TYPES[k].l).join(' · ')} — wajar kalau klien nggak pakai.</div></div>`:''}`:'');
+
+  const pRef=STATE.slots.shop_tt?STATE.slots.shop_tt.periode:'';
+  if(pRef)$('#fPeriode').value=pRef;
+  const siap=!!STATE.slots.shop_tt&&!periodeBeda&&!bentrok.length;
+  $('#btnRun').disabled=!siap;
+  $('#btnRun').textContent=bentrok.length?'Ada file bertipe sama, pilih satu'
+    :periodeBeda?'Periode file tidak sama'
+    :!STATE.slots.shop_tt?'Butuh file Analitik Toko TikTok'
+    :'Hitung baseline';
+}
+$('#btnPrefill').onclick=()=>{
+  const s=STATE.slots.shop_tt; if(!s){toast('Upload Analitik Toko dulu');return;}
+  const m=C.toko(s); const p=(s.periode||'').split(' ');
+  let idx=HIST.findIndex(h=>h.label===s.periode);
+  if(idx<0)idx=HIST.length-1;
+  HIST[idx].gmv=String(Math.round(m.gmvBase)); HIST[idx].order=String(Math.round(m.pesanan));
+  $$(`#histBody input[data-h="${idx}"]`).forEach(el=>el.value=HIST[idx][el.dataset.f]);
+  histCalc(); toast('Bulan '+(s.periode||HIST[idx].label)+' terisi'); if(STATE.done)run();
+};
+
+function periodeOf(meta){
+  const m=String(meta).match(/(\d{4})[-/](\d{2})[-/](\d{2})\s*[~–-]/)||String(meta).match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if(!m)return '';
+  if(m[0].includes('/')&&m[3]&&m[3].length===4) return MON[+m[2]-1]+' '+m[3];
+  return MON[+m[2]-1]+' '+m[1];
+}
+const netMode=()=>$('#fGmvDef').value==='net';
+
+/* ══════════ MODUL HITUNG ══════════ */
+const C={};
+
+C.toko=d=>{
+  const lab=r=>String(r['__c0']==null?'':r['__c0']).trim();
+  const tot=d.rows.find(r=>/^Total nilai/i.test(lab(r)))||{};
+  const chg=d.rows.find(r=>/^Perubahan/i.test(lab(r)))||{};
+  const g=c=>n(tot[c]), ch=c=>chg[c]==null||chg[c]==='-'?null:n(chg[c]);
+  const gmv=g('GMV'), refund=g('Pengembalian dana');
+  const daily=d.rows.filter(r=>/^\d{2}\/\d{2}\/\d{4}$/.test(lab(r))).map(r=>({t:lab(r),g:n(r['GMV']),o:n(r['Pesanan'])}));
+  const dg=daily.map(x=>x.g), peak=Math.max(0,...dg);
+  const liveAff=g('GMV dari LIVE kreator');
+  const liveToko=Math.max(g('GMV dari LIVE akun tertaut'),g('GMV LIVE penjual')+g('GMV tidak langsung dari LIVE penjual'));
+  const vidAff=g('GMV dari video afiliasi'), vidToko=g('GMV dari video akun tertaut');
+  const other=Math.max(0,gmv-liveAff-liveToko-vidAff-vidToko);
+  return {gmv,refund,gmvNet:gmv-refund,gmvBase:netMode()?gmv-refund:gmv,
+    pesanan:g('Pesanan'),pembeli:g('Pembeli'),terjual:g('Produk terjual'),bruto:g('Pendapatan bruto'),
+    pv:g('Tayangan halaman'),visitor:g('Pengunjung'),cr:g('Persentase konversi'),
+    impresi:g('Impresi produk'),klik:g('Klik produk'),aov:g('AOV'),
+    refundRate:div(refund,gmv),
+    chGmv:ch('GMV'),chVisitor:ch('Pengunjung'),chOrder:ch('Pesanan'),chRefund:ch('Pengembalian dana'),
+    mix:[{k:'Video afiliasi (kreator)',v:vidAff,c:'var(--signal)'},{k:'LIVE afiliasi (kreator)',v:liveAff,c:'var(--violet)'},
+         {k:'Video toko sendiri',v:vidToko,c:'var(--teal)'},{k:'LIVE toko sendiri',v:liveToko,c:'#4C9EE0'},
+         {k:'Kartu produk / Shop tab / search',v:other,c:'var(--slate)'}],
+    liveAff,liveToko,vidAff,vidToko,other,
+    daily,hariAktif:daily.filter(x=>x.g>0).length,hariTotal:daily.length,
+    peakDay:peak,peakShare:div(peak,gmv),periode:d.periode};
+};
+
+C.tp=d=>{const lab=r=>String(r['__c0']==null?'':r['__c0']).trim();
+  const tot=d.rows.find(r=>/^Total nilai/i.test(lab(r)))||{};
+  return {gmv:n(tot['GMV']),pesanan:n(tot['Pesanan']),visitor:n(tot['Pengunjung']),cr:n(tot['Persentase konversi'])};};
+
+const hashCount=s=>(String(s).match(/#[^\s#]+/g)||[]).length;
+const capsWords=s=>(String(s).replace(/#[^\s]+/g,'').match(/\b[A-Z]{3,}\b/g)||[]).length;
+const titleOf=r=>String(r['Informasi Video']||'').replace(/\s+/g,' ').trim();
+
+C.video=(d,periode)=>{
+  const R=d.rows.filter(r=>r['ID Video']!=null||r['Informasi Video']!=null).map(r=>{
+    const t=titleOf(r);
+    return {kreator:String(r['Nama Kreator']||'').trim(),judul:t,id:String(r['ID Video']||''),
+      waktu:String(r['Waktu']||''),gmv:n(r['GMV dari video (Rp)']),gpm:n(r['GPM (Rp)']),
+      vv:n(r['VV']),like:n(r['Likes']),kom:n(r['Komentar']),share:n(r['Dibagikan']),
+      klik:n(r['Klik Produk']),ctr:n(r['Rasio klik tayang (Video)']),ctor:n(r['CTOR (pesanan SKU)']),
+      finish:n(r['Persentase Video yang Ditonton Hingga Selesai']),toLive:n(r['Rasio Video ke LIVE']),
+      terjual:n(r['Produk yang terjual melalui video']),len:t.replace(/#[^\s]+/g,'').trim().length,
+      tag:hashCount(t),caps:capsWords(t),tanya:/\?/.test(t)};
+  });
+  const S=R.filter(v=>v.gmv>0), N=R.filter(v=>v.gmv<=0);
+  const pm=/(\d{4})[-/](\d{2})/.exec(periode2key(periode)||'')||null;
+  const inPeriod=R.filter(v=>pm&&v.waktu.startsWith(pm[1]+'/'+pm[2]));
+  const mvv=median(R.map(v=>v.vv));
+  const quad={win:0,niche:0,viral:0,dead:0};
+  R.forEach(v=>{const hi=v.vv>=mvv, s=v.gmv>0;
+    if(hi&&s)quad.win++; else if(!hi&&s)quad.niche++; else if(hi&&!s)quad.viral++; else quad.dead++;});
+  const coh=a=>({n:a.length,vv:median(a.map(v=>v.vv)),finish:median(a.map(v=>v.finish)),ctr:median(a.map(v=>v.ctr)),
+    len:median(a.map(v=>v.len)),tag:median(a.map(v=>v.tag)),tanya:div(a.filter(v=>v.tanya).length,a.length),
+    caps:div(a.filter(v=>v.caps>=2).length,a.length)});
+  return {rows:R,sales:S,total:R.length,withSales:S.length,rate:div(S.length,R.length),
+    gmv:R.reduce((a,v)=>a+v.gmv,0),vv:R.reduce((a,v)=>a+v.vv,0),
+    like:R.reduce((a,v)=>a+v.like,0),kom:R.reduce((a,v)=>a+v.kom,0),share:R.reduce((a,v)=>a+v.share,0),
+    gpmMed:S.length?median(S.map(v=>v.gpm)):null,gmvPerVid:div(R.reduce((a,v)=>a+v.gmv,0),R.length),
+    posted:inPeriod.length,kreator:new Set(R.map(v=>v.kreator).filter(Boolean)).size,
+    mvv,quad,cohS:coh(S),cohN:coh(N),
+    topGmv:[...S].sort((a,b)=>b.gmv-a.gmv).slice(0,10),
+    topGpm:[...S].filter(v=>v.vv>=200).sort((a,b)=>b.gpm-a.gpm).slice(0,5),
+    viralFail:[...N].sort((a,b)=>b.vv-a.vv).slice(0,5)};
+};
+function periode2key(p){ if(!p)return ''; const [m,y]=String(p).split(' '); const i=MON.indexOf(m);
+  return i<0?'':y+'-'+String(i+1).padStart(2,'0'); }
+
+const durH=s=>{const m=String(s).match(/(\d+)\s*h/),k=String(s).match(/(\d+)\s*min/);
+  return (m?+m[1]:0)+(k?+k[1]:0)/60;};
+C.live=d=>{
+  const R=d.rows.filter(r=>r['Waktu Live']!=null).map(r=>({
+    kreator:String(r['Kreator']||r['Nama panggilan']||'').trim(),waktu:String(r['Waktu Live']||''),
+    jam:durH(r['Durasi']),gmv:n(r['GMV dari LIVE (Rp)']),penonton:n(r['Penonton']),
+    views:n(r['Live Stream Dilihat']),avgWatch:n(r['Durasi menonton rata-rata (Siaran LIVE)']),
+    ctor:n(r['CTOR']),ctr:n(r['CTR']),klik:n(r['Klik Produk']),terjual:n(r['Produk Terjual']),
+    komentar:n(r['Komentar']),follow:n(r['Pengikut baru (Video kreator)']),
+    hour:(String(r['Waktu Live']||'').match(/(\d{1,2}):\d{2}/)||[0,-1])[1]|0 }));
+  const S=R.filter(x=>x.gmv>0);
+  const jam=R.reduce((a,x)=>a+x.jam,0), gmv=R.reduce((a,x)=>a+x.gmv,0);
+  const hrs={}; R.forEach(x=>{if(x.hour>=0)hrs[x.hour]=(hrs[x.hour]||0)+1;});
+  const prime=R.filter(x=>x.hour>=18&&x.hour<=22).length;
+  return {rows:R,sesi:R.length,withSales:S.length,rate:div(S.length,R.length),jam,gmv,
+    gmvPerJam:div(gmv,jam),jamPerSesi:div(jam,R.length),
+    penonton:R.reduce((a,x)=>a+x.penonton,0),views:R.reduce((a,x)=>a+x.views,0),
+    ccv:div(R.reduce((a,x)=>a+x.penonton,0),R.length),
+    ctorMed:median(R.map(x=>x.ctor)),avgWatch:median(R.map(x=>x.avgWatch)),
+    kreator:new Set(R.map(x=>x.kreator).filter(Boolean)).size,hrs,prime,primeShare:div(prime,R.length),
+    top:[...S].sort((a,b)=>b.gmv-a.gmv).slice(0,8)};
+};
+
+C.aff=d=>{
+  const R=d.rows.map(r=>({nama:String(r['Creator name']||'').trim(),gmv:n(r['GMV dari kreator']),
+    live:n(r['GMV dari LIVE kreator']),vid:n(r['GMV dari video afiliasi']),
+    nVid:n(r['Video']),nLive:n(r['Siaran LIVE']),sampel:n(r['Sampel terkirim']),
+    order:n(r['Pesanan teratribusi']),komisi:n(r['Perkiraan komisi'])}))
+    .filter(r=>r.nama&&r.nama.length<60);
+  const tot=R.reduce((a,r)=>a+r.gmv,0);
+  const S=R.filter(r=>r.gmv>0), posted=R.filter(r=>r.nVid+r.nLive>0);
+  const postedSales=posted.filter(r=>r.gmv>0), nempel=posted.filter(r=>r.gmv<=0);
+  const top=[...S].sort((a,b)=>b.gmv-a.gmv);
+  const smp=R.filter(r=>r.sampel>0);
+  return {rows:R,total:R.length,withSales:S.length,rate:div(S.length,R.length),gmv:tot,
+    rateAktif:div(postedSales.length,posted.length||1),postedSales:postedSales.length,posted:posted.length,nempel:nempel.length,nempelRate:div(nempel.length,posted.length||1),
+    top5Share:div(top.slice(0,5).reduce((a,r)=>a+r.gmv,0),tot),top1Share:div(top[0]?top[0].gmv:0,tot),
+    top:top.slice(0,10),sampel:R.reduce((a,r)=>a+r.sampel,0),
+    sampelKreator:smp.length,sampelSukses:smp.filter(r=>r.gmv>0).length,
+    sampelGmv:smp.reduce((a,r)=>a+r.gmv,0),komisi:R.reduce((a,r)=>a+r.komisi,0)};
+};
+
+C.prod=d=>{
+  const R=d.rows.map(r=>({nama:String(r['Nama']||'').trim(),gmv:n(r['GMV']),
+    klik:n(r['Klik produk']),impresi:n(r['Impresi produk']),ctr:n(r['CTR']),
+    ctor:n(r['CTOR (pesanan SKU)']),terjual:n(r['Produk terjual']),
+    aov:n(r['AOV (pesanan SKU)']),status:String(r['Status daftar produk']||''),
+    fromAff:n(r['GMV dari kreator']),refund:n(r['Pengembalian dana'])}))
+    .filter(r=>r.nama&&r.nama.length<160);
+  const tot=R.reduce((a,r)=>a+r.gmv,0);
+  const S=R.filter(r=>r.gmv>0).sort((a,b)=>b.gmv-a.gmv);
+  const mk=median(R.map(r=>r.klik)), mc=median(S.map(r=>r.ctor));
+  return {rows:R,total:R.length,withSales:S.length,rate:div(S.length,R.length),gmv:tot,
+    top3Share:div(S.slice(0,3).reduce((a,r)=>a+r.gmv,0),tot),top:S.slice(0,10),
+    mk,mc,affShare:div(R.reduce((a,r)=>a+r.fromAff,0),tot),
+    quad:{star:S.filter(r=>r.klik>=mk&&r.ctor>=mc).length,traffic:R.filter(r=>r.klik>=mk&&r.ctor<mc).length,
+      niche:S.filter(r=>r.klik<mk&&r.ctor>=mc).length,cold:R.filter(r=>r.klik<mk&&r.ctor<mc&&r.gmv<=0).length}};
+};
+
+C.ads=(dp,dl)=>{
+  const rowsP=dp?dp.rows.filter(r=>r['Nama kampanye']):[];
+  const rowsL=dl?dl.rows.filter(r=>r['Nama LIVE']):[];
+  const sum=(a,c)=>a.reduce((x,r)=>x+n(r[c],true),0);
+  const spendP=sum(rowsP,'Biaya'), revP=sum(rowsP,'Pendapatan kotor'), ordP=sum(rowsP,'Pesanan SKU');
+  const spendL=sum(rowsL,'Biaya'), revL=sum(rowsL,'Pendapatan kotor'), ordL=sum(rowsL,'Pesanan SKU');
+  const byMat={}; rowsP.forEach(r=>{const k=String(r['Jenis materi iklan']||'Lainnya');
+    byMat[k]=byMat[k]||{spend:0,rev:0,ord:0,n:0};
+    byMat[k].spend+=n(r['Biaya'],true); byMat[k].rev+=n(r['Pendapatan kotor'],true);
+    byMat[k].ord+=n(r['Pesanan SKU'],true); byMat[k].n++;});
+  const byCamp={}; rowsP.forEach(r=>{const k=String(r['Nama kampanye']||'-');
+    byCamp[k]=byCamp[k]||{spend:0,rev:0}; byCamp[k].spend+=n(r['Biaya'],true); byCamp[k].rev+=n(r['Pendapatan kotor'],true);});
+  const topVid=rowsP.filter(r=>String(r['Jenis materi iklan'])==='Video'&&n(r['Pendapatan kotor'],true)>0)
+    .map(r=>({judul:String(r['Judul video']||'-').replace(/\s+/g,' ').trim(),akun:String(r['Akun TikTok']||''),
+      spend:n(r['Biaya'],true),rev:n(r['Pendapatan kotor'],true),ord:n(r['Pesanan SKU'],true),
+      cvr:n(r['Rasio konversi iklan'],true),hold2:n(r['Rasio tayang video iklan 2 detik'],true),
+      hold100:n(r['Rasio tayang video iklan 100%'],true)}))
+    .sort((a,b)=>b.rev-a.rev).slice(0,10);
+  return {ada:!!(rowsP.length||rowsL.length),nCreative:rowsP.length,nLive:rowsL.length,
+    spend:spendP+spendL,rev:revP+revL,ord:ordP+ordL,roas:div(revP+revL,spendP+spendL),
+    spendP,revP,roasP:div(revP,spendP),spendL,revL,roasL:div(revL,spendL),
+    byMat,byCamp,topVid,cpo:div(spendP+spendL,ordP+ordL)};
+};
+
+/* ══════════ RENDER HELPERS ══════════ */
+const kpi=(k,v,s,hi)=>`<div class="kpi${hi?' hi':''}"><div class="k">${k}</div><div class="v">${v}</div>${s?`<div class="s">${s}</div>`:''}</div>`;
+function meter(label,val,target,fmt,invert){
+  if(val==null||!isFinite(val))return '';
+  const over=val>target;
+  const fill=over?100:clamp(div(val,target)*100,1.5,100);
+  const tick=over?clamp(div(target,val)*100,2,98):100;
+  const ratio=div(val,target);
+  const cls=invert?(ratio<=1?'ok':ratio<=1.5?'mid':'bad'):(ratio>=1?'ok':ratio>=0.6?'mid':'bad');
+  return `<div class="meter"><div class="meter-lb"><span>${label}</span><b>${fmt(val)}</b></div>
+    <div class="track"><div class="fill ${cls}" style="width:${fill}%"></div>
+    <div class="tick" data-t="target ${fmt(target)}" style="left:${tick}%"></div></div></div>`;
+}
+const bar=(l,v,max,c,lbl)=>`<div class="bar-row"><span>${l}</span>
+  <span class="bar-tr"><span class="bar-fl" style="width:${clamp(div(v,max)*100,0,100)}%;background:${c}"></span></span>
+  <span class="bv">${lbl}</span></div>`;
+const pill=(t,c)=>`<span class="pill p-${c}">${t}</span>`;
+const sec=(tag,title,pillHtml,body)=>`<div class="sec"><div class="sec-hd"><span class="tag">${tag}</span><h3>${title}</h3>
+  ${pillHtml?`<span class="pill-wrap pill-holder" style="margin-left:auto">${pillHtml}</span>`:''}</div><div class="sec-bd">${body}</div></div>`;
+const noData=t=>`<div class="empty">Tidak ada data — file <b>${t}</b> belum diupload.</div>`;
+function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2200);}
+
+/* ══════════ RUN ══════════ */
+let PAY=null;
+$('#btnRun').onclick=run;
+function run(){
+  const S=STATE.slots;
+  const M={
+    toko:S.shop_tt?C.toko(S.shop_tt):null,
+    tp:S.shop_tp?C.tp(S.shop_tp):null,
+    vT:S.vid_toko?C.video(S.vid_toko,(S.shop_tt||S.vid_toko).periode):null,
+    vA:S.vid_aff?C.video(S.vid_aff,(S.shop_tt||S.vid_aff).periode):null,
+    lT:S.live_toko?C.live(S.live_toko):null,
+    lA:S.live_aff?C.live(S.live_aff):null,
+    aff:S.aff_kr?C.aff(S.aff_kr):null,
+    prod:S.prod_tt?C.prod(S.prod_tt):null,
+    ads:(S.ads_prod||S.ads_live)?C.ads(S.ads_prod,S.ads_live):null
+  };
+  const H=histStats();
+  const sc=score(M,H), fnd=findings(M,H,sc);
+  render(M,H,sc,fnd);
+  PAY=payload(M,H,sc,fnd);
+  $('#outbar').classList.remove('hidden'); STATE.done=true;
+  $('#result').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+/* ── skor 5 pilar ── */
+function sub(val,target,invert,w){
+  if(val==null)return null;
+  let r=invert?(val<=target?1:target/val):(target?val/target:0);
+  return {r:clamp(r,0,1),w};
+}
+function score(M,H){
+  const P=[];
+  // 1 GMV & pertumbuhan
+  let g=[];
+  g.push(sub(H.months,6,false,8));
+  g.push(M.toko?sub(M.toko.cr*100,B.cr,false,9):null);
+  g.push(M.toko?sub(mul(M.toko.refundRate,100),B.refund,true,4):null);
+  g.push(H.trend==null?null:{r:clamp((H.trend+0.2)/0.4,0,1),w:4});
+  P.push({k:'gmv',l:'GMV & Pertumbuhan',parts:g});
+  // 2 konten video
+  let v=[];
+  if(M.vT){v.push(sub(M.vT.posted||M.vT.total,B.vidPostToko,false,5));
+    v.push(sub(mul(M.vT.rate,100),B.vidSalesToko,false,10));
+    v.push(sub(M.vT.gpmMed,B.gpmToko,false,3));}
+  if(M.vA)v.push(sub(mul(M.vA.rate,100),B.vidSalesAff,false,7));
+  P.push({k:'video',l:'Konten Video',parts:v.length?v:[null]});
+  // 3 live
+  let l=[];
+  if(M.lT){l.push(sub(M.lT.sesi,B.liveSesi,false,7));l.push(sub(M.lT.jam,B.liveJam,false,5));
+    l.push(sub(M.lT.gmvPerJam,B.liveGmvJam,false,5));l.push(sub(mul(M.lT.ctorMed,100),B.liveCtor,false,3));}
+  P.push({k:'live',l:'LIVE Toko',parts:l.length?l:[null]});
+  // 4 affiliate
+  let a=[];
+  if(M.aff){a.push(sub(mul(M.aff.rateAktif,100),B.krSales,false,7));
+    a.push(sub(mul(M.aff.nempelRate,100),40,true,4));
+    a.push(sub(mul(M.aff.top5Share,100),B.krKonsen,true,5));}
+  if(M.vA)a.push(sub(mul(M.vA.rate,100),B.vidSalesAff,false,4));
+  P.push({k:'aff',l:'Mesin Afiliasi',parts:a.length?a:[null]});
+  // 5 produk & ads
+  let p=[];
+  if(M.prod)p.push(sub(mul(M.prod.rate,100),B.skuSales,false,5));
+  if(M.ads&&M.ads.spend>0){p.push(sub(M.ads.roas,B.roas,false,3));
+    if(M.toko)p.push(sub(mul(div(M.ads.rev,M.toko.gmv),100),B.adsDep,true,2));}
+  P.push({k:'prod',l:'Produk & Iklan',parts:p.length?p:[null]});
+
+  P.forEach(pl=>{
+    const ok=pl.parts.filter(Boolean);
+    pl.w=ok.reduce((a,x)=>a+x.w,0);
+    pl.score=pl.w?clamp(ok.reduce((a,x)=>a+x.r*x.w,0)/pl.w*100,0,100):null;
+    pl.ada=!!pl.w;
+  });
+  const wsum=P.filter(p=>p.ada).reduce((a,p)=>a+p.w,0);
+  const total=wsum?Math.round(P.filter(p=>p.ada).reduce((a,p)=>a+p.score*p.w,0)/wsum):null;
+  const vd=total==null?[DASH,'off']:total>=75?['Mesin Jalan','ok']:total>=60?['Mesin Sebagian','mid']
+    :total>=45?['Fondasi Perlu Dibenahi','low']:['Mesin Belum Terbangun','bad'];
+  return {P,total,verdict:vd[0],vclass:vd[1],coverage:div(wsum,P.reduce((a,p)=>a+(p.w||0),0))};
+}
+
+/* ── temuan otomatis ── */
+function findings(M,H,sc){
+  const F=[];
+  const add=(lv,t)=>F.push({lv,t});
+  if(H.cakupan==='kurang')add('perhatian',`Riwayat GMV baru <b>${H.months} bulan</b>. Baseline belum kuat dipakai jadi angka target kontrak — pakai estimasi dan catat alasannya.`);
+  if(H.spike)add('perhatian',`<b>${esc(H.peakRow?H.peakRow.label:'Satu bulan')}</b> ${dec(div(H.peak,H.med),1)}× median → bulan campaign. Target jangan pakai rata-rata mentah.`);
+  if(H.trend!=null&&H.trend<-0.1)add('tantangan',`GMV turun <b>${pct(Math.abs(H.trend))}</b> (3 bulan terakhir vs 3 bulan sebelumnya). Toko masuk dalam kondisi menurun, bukan stagnan.`);
+  if(H.trend!=null&&H.trend>0.15)add('modal',`GMV naik <b>${pct(H.trend)}</b> antar kuartal — momentum ada, tinggal diarahkan.`);
+  const T=M.toko;
+  if(T){
+    if(T.cr*100<B.cr)add('perhatian',`Konversi toko <b>${pct(T.cr,2)}</b>, di bawah benchmark ${B.cr}%. Traffic masuk tapi nggak closing — cek harga, foto utama, review, dan ongkir.`);
+    if(T.refundRate!=null&&T.refundRate*100>B.refund)add('tantangan',`Refund <b>${pct(T.refundRate)}</b> dari GMV (${rp(T.refund)}), di atas batas ${B.refund}%. Ini gerus margin dan skor toko.`);
+    if(T.hariTotal&&T.hariAktif<T.hariTotal*0.8)add('perhatian',`Cuma <b>${T.hariAktif}/${T.hariTotal} hari</b> ada transaksi. Penjualan nggak harian, masih nunggu momen.`);
+    if(T.peakShare!=null&&T.peakShare>0.25)add('perhatian',`Satu hari nyumbang <b>${pct(T.peakShare)}</b> GMV bulan itu. Toko ini hidup dari spike, bukan dari arus harian.`);
+    const affTot=div(T.vidAff+T.liveAff,T.gmv);
+    if(affTot!=null&&affTot>0.6)add('catatan',`<b>${pct(affTot)}</b> GMV datang dari kreator afiliasi. Nasib toko nempel di orang lain — tangan sendiri (video toko + LIVE toko) masih kecil.`);
+    if(div(T.other,T.gmv)!=null&&div(T.other,T.gmv)>0.45)add('catatan',`<b>${pct(div(T.other,T.gmv))}</b> GMV dari kartu produk / Shop tab / search — artinya demand pencarian sudah ada, konten cuma jadi pelengkap.`);
+  }
+  if(M.vT){
+    if(M.vT.rate!=null&&M.vT.rate*100<B.vidSalesToko)add('perhatian',`Video toko: <b>${M.vT.withSales} dari ${M.vT.total}</b> yang ada penjualan (${pct(M.vT.rate)}), target ${B.vidSalesToko}%. Produksi jalan, closing-nya nggak.`);
+    if((M.vT.posted||0)<B.vidPostToko)add('perhatian',`Cuma <b>${M.vT.posted} video</b> diposting di bulan referensi (target ${B.vidPostToko}). Frekuensi konten toko di bawah standar.`);
+    const actT=M.vT.rows.filter(v=>v.vv>0), sT=actT.filter(v=>v.gmv>0);
+    const thrT=Math.round(sT.length>=3?median(sT.map(v=>v.vv)):median(actT.map(v=>v.vv)));
+    const failT=actT.filter(v=>v.vv>=thrT&&v.gmv<=0).length;
+    if(failT>=5&&failT>sT.length)add('catatan',`<b>${failT} video toko</b> sudah dapat tayangan di level yang biasanya jual (≥${num(thrT)} VV) tapi GMV nol. Masalahnya bukan reach, tapi kontennya nggak ngarah ke produk.`);
+  }
+  if(M.lT){
+    if(M.lT.sesi===0)add('tantangan',`<b>LIVE toko nol sesi</b> di bulan referensi. Satu kanal penjualan terbesar TikTok Shop nggak dipakai sama sekali.`);
+    else if(M.lT.sesi<B.liveSesi)add('tantangan',`LIVE toko cuma <b>${M.lT.sesi} sesi / ${dec(M.lT.jam)} jam</b> (target ${B.liveSesi} sesi & ${B.liveJam} jam). Masih coba-coba, belum jadi kanal.`);
+    if(M.lT.sesi>0&&M.lT.gmv===0)add('tantangan',`LIVE toko jalan ${dec(M.lT.jam)} jam dengan GMV <b>${rp(0)}</b> dan ${num(M.lT.penonton)} penonton. Bukan soal jam tayang — sesi ini nggak ada yang nonton.`);
+    else if(M.lT.sesi>0&&M.lT.gmvPerJam!=null&&M.lT.gmvPerJam<B.liveGmvJam)add('perhatian',`GMV per jam LIVE toko <b>${rp(M.lT.gmvPerJam)}</b>, target ${rp(B.liveGmvJam)}. Host/skrip/penawaran perlu dibongkar.`);
+  }
+  if(M.lA&&M.lT&&M.lA.gmv>M.lT.gmv*3&&M.lA.gmv>0)
+    add('catatan',`LIVE kreator hasilkan <b>${rp(M.lA.gmv)}</b> dari ${M.lA.sesi} sesi, LIVE toko <b>${rp(M.lT.gmv)}</b>. Buktinya produk ini <i>bisa</i> laku di LIVE — yang belum ada mesin LIVE toko sendiri.`);
+  if(M.aff){
+    if(M.aff.rateAktif!=null&&M.aff.rateAktif*100<B.krSales)add('perhatian',`Dari <b>${num(M.aff.posted)} kreator</b> yang posting di periode ini, cuma <b>${M.aff.postedSales}</b> yang menghasilkan GMV (${pct(M.aff.rateAktif)}, target ${B.krSales}%). Total kreator terdaftar ${num(M.aff.total)}, yang aktif posting cuma ${pct(div(M.aff.posted,M.aff.total))}.`);
+    if(M.aff.nempel>0)add('catatan',`<b>${M.aff.nempel} kreator</b> posting konten tapi GMV nol — kandidat pembinaan atau dilepas.`);
+    if(M.aff.top5Share!=null&&M.aff.top5Share*100>B.krKonsen)add('tantangan',`Top-5 kreator pegang <b>${pct(M.aff.top5Share)}</b> GMV afiliasi. Kalau satu pindah, GMV toko langsung jeblok.`);
+    if(M.aff.sampel>0&&M.aff.sampelSukses===0)add('perhatian',`<b>${num(M.aff.sampel)} sampel</b> terkirim, belum ada yang balik jadi GMV. Seleksi penerima sampel perlu dirapikan.`);
+  }
+  if(M.prod){
+    if(M.prod.rate!=null&&M.prod.rate*100<B.skuSales)add('perhatian',`Cuma <b>${M.prod.withSales}/${M.prod.total} SKU</b> yang jalan (${pct(M.prod.rate)}). Katalog gemuk, mesin cuma di sebagian kecil.`);
+    if(M.prod.top3Share!=null&&M.prod.top3Share>0.6)add('catatan',`Top-3 SKU = <b>${pct(M.prod.top3Share)}</b> GMV. Fokus jelas, tapi rapuh kalau salah satu stok habis atau kena hold.`);
+    if(M.prod.quad.traffic>0)add('catatan',`<b>${M.prod.quad.traffic} SKU</b> klik tinggi konversi rendah — perbaikan halaman produk bisa naikin GMV tanpa nambah traffic.`);
+  }
+  if(M.ads&&M.ads.spend>0&&M.toko){
+    const dep=div(M.ads.rev,M.toko.gmv);
+    if(M.ads.roas!=null&&M.ads.roas<B.roas)add('perhatian',`ROAS iklan <b>${dec(M.ads.roas,2)}×</b>, di bawah target ${B.roas}×. Belanja ${rp(M.ads.spend)} balik ${rp(M.ads.rev)}.`);
+    else add('modal',`ROAS iklan <b>${dec(M.ads.roas,2)}×</b> (belanja ${rp(M.ads.spend)}). Kanal ini sudah efisien, tinggal diskalakan hati-hati.`);
+    if(dep!=null&&dep>B.adsDep/100)add('perhatian',`Pendapatan teratribusi iklan setara <b>${pct(dep)}</b> GMV toko. Ketergantungan iklan tinggi — kalau budget stop, GMV ikut turun.`);
+  }
+  if(!M.ads||!M.ads.ada)add('catatan',`Tidak ada data Ads Manager. Baseline ini murni organik + GMV Max yang nggak kelihatan — konfirmasi ke klien apakah memang nggak beriklan.`);
+  const order={tantangan:0,perhatian:1,catatan:2,modal:3};
+  return F.sort((a,b)=>order[a.lv]-order[b.lv]);
+}
+
+/* ── arah strategi (bukan eksekusi) ── */
+function arah(M,sc){
+  const gaps=[];
+  sc.P.filter(p=>p.ada).forEach(p=>gaps.push({k:p.k,l:p.l,def:(100-p.score)*p.w}));
+  gaps.sort((a,b)=>b.def-a.def);
+  const map={
+    live:'Bangun kanal LIVE toko sendiri sebagai prioritas pertama — ini gap terbesar dan satu-satunya kanal yang bisa MEA kendalikan penuh tanpa nunggu kreator.',
+    video:'Geser fokus konten dari jumlah ke daya jual: tiru pola video yang terbukti closing di bagian B, hentikan format yang cuma nyari views.',
+    aff:'Rapikan mesin afiliasi: kurangi ketergantungan pada segelintir kreator, dan ubah kreator "posting doang" jadi produktif lewat brief + sampel yang terarah.',
+    gmv:'Perbaiki fondasi konversi toko dulu (halaman produk, harga, review, refund) sebelum nambah traffic — nambah trafik di atas konversi bocor cuma bakar biaya.',
+    prod:'Fokuskan katalog dan belanja iklan ke SKU yang sudah terbukti, dan angkat SKU klik-tinggi-konversi-rendah lewat perbaikan halaman produk.'};
+  return gaps.slice(0,4).map(g=>map[g.k]).filter(Boolean);
+}
+
+/* ══════════ RENDER ══════════ */
+function render(M,H,sc,F){
+  const T=M.toko, out=[];
+  const nm=$('#fKlien').value||'(klien belum diisi)', tk=$('#fToko').value||'(toko belum diisi)';
+  const per=T&&T.periode?T.periode:'—';
+  const ch=v=>v==null?'':`<span class="${v>0?'up':v<0?'down':'flat'}">${v>0?'▲':v<0?'▼':'■'} ${pct(Math.abs(v))} MoM</span>`;
+
+  /* dossier */
+  out.push(`<div class="dossier">
+   <div class="dossier-l">
+     <div class="eyebrow">Baseline riset awal · ${esc(per)}</div>
+     <h2>${esc(tk)}</h2>
+     <div class="sub">${esc(nm)} · ${esc($('#fKat').value)} · AM ${esc($('#fAM').value||'—')}
+       ${$('#fUmur').value?' · umur toko '+esc($('#fUmur').value)+' bulan':''}
+       · definisi GMV: <b>${netMode()?'<span style="color:var(--teal)">bersih ✓ Standar MEA</span>':'<span style="color:var(--amber)">⚠ kotor — non-standar</span>'}</b></div>
+     <div class="grid g4" style="margin-top:16px">
+       ${kpi('GMV Baseline (median)',rp(H.med),H.months+' bulan · cakupan riwayat '+H.cakupan)}
+       ${kpi('Run-rate 3 bulan',rp(H.rr),H.trend==null?'trend belum bisa':(H.trend>0?'+':'')+pct(H.trend)+' vs 3 bln sebelumnya')}
+       ${kpi('GMV bulan referensi',rp(T?T.gmvBase:0),T?ch(T.chGmv):'')}
+       ${kpi('Skor Kondisi Toko',sc.total==null?DASH:sc.total,'cakupan data '+pct(sc.coverage,0))}
+     </div>
+   </div>
+   <div class="dossier-r">
+     <div class="stamp s-${sc.vclass}"><div class="sc">${sc.total==null?DASH:sc.total}</div><div class="vd">${esc(sc.verdict)}</div></div>
+     <div class="stamp-note">Skor ini foto kondisi awal, bukan penilaian kelayakan klien. Skor rendah tidak memblokir apapun di CDPS — dia cuma nentuin dari mana Strategi harus mulai.</div>
+   </div>
+  </div>`);
+
+  /* A · GMV */
+  if(T){
+    const mixMax=Math.max(...T.mix.map(m=>m.v));
+    out.push(sec('A','GMV & Sumber Penjualan',
+      pill(T.cr*100>=B.cr?'Konversi sehat':'Konversi di bawah standar',T.cr*100>=B.cr?'ok':'bad'),`
+      <div class="grid g6">
+        ${kpi('GMV',rp(T.gmvBase),ch(T.chGmv),1)}
+        ${kpi('Pesanan',num(T.pesanan),ch(T.chOrder))}
+        ${kpi('AOV',rp(T.aov),num(T.pembeli)+' pembeli')}
+        ${kpi('Pengunjung',num(T.visitor),ch(T.chVisitor))}
+        ${kpi('Konversi',pct(T.cr,2),'target '+B.cr+'%')}
+        ${kpi('Refund',pct(T.refundRate),rp(T.refund))}
+      </div>
+      <div class="split" style="margin-top:18px">
+        <div>
+          <div class="h4">Sumber GMV — dari mana uangnya datang</div>
+          <div class="bars">${T.mix.map(m=>bar(m.k,m.v,mixMax,m.c,rpS(m.v)+' · '+pct(div(m.v,T.gmv),0))).join('')}</div>
+          <div class="note">Angka ini dari kolom atribusi Analitik Toko, jadi ini pembagian resmi TikTok — bukan hasil jumlah manual antar file.</div>
+        </div>
+        <div>
+          <div class="h4">Kesehatan arus harian</div>
+          <div class="grid g2" style="gap:9px">
+            ${kpi('Hari ada transaksi',T.hariAktif+' / '+T.hariTotal,pct(div(T.hariAktif,T.hariTotal||1),0)+' hari aktif')}
+            ${kpi('Hari terbesar',pct(T.peakShare,0),rp(T.peakDay)+' dalam 1 hari')}
+          </div>
+          ${meter('Persentase konversi',T.cr*100,B.cr,v=>dec(v,2)+'%')}
+          ${meter('Refund rate (makin kecil makin baik)',T.refundRate*100,B.refund,v=>dec(v,1)+'%',true)}
+          ${M.tp?`<div class="note">Tokopedia: GMV ${rp(M.tp.gmv)} · ${num(M.tp.pesanan)} pesanan · konversi ${pct(M.tp.cr,2)}. Kanal ini kecil dibanding TikTok, tapi tetap dicatat di baseline.</div>`:''}
+        </div>
+      </div>`));
+  }
+
+  /* B · VIDEO */
+  const allV=[...(M.vT?M.vT.rows.map(r=>({...r,src:'Toko'})):[]),...(M.vA?M.vA.rows.map(r=>({...r,src:'Afiliasi'})):[])];
+  if(allV.length){
+    const S=allV.filter(v=>v.gmv>0), N=allV.filter(v=>v.gmv<=0);
+    // hanya video yang benar-benar dapat tayangan di periode ini yang dibandingkan —
+    // baris dengan VV 0 cuma sisa histori, bukan konten yang diuji pasar
+    const act=allV.filter(v=>v.vv>0), aS=act.filter(v=>v.gmv>0), aN=act.filter(v=>v.gmv<=0);
+    // ambang tayangan = level VV yang selama ini terbukti menghasilkan penjualan
+    const thr=Math.round(aS.length>=3?median(aS.map(v=>v.vv)):median(act.map(v=>v.vv)));
+    const q={win:0,niche:0,viral:0,dead:0};
+    act.forEach(v=>{const hi=v.vv>=thr,sl=v.gmv>0;if(hi&&sl)q.win++;else if(!hi&&sl)q.niche++;else if(hi&&!sl)q.viral++;else q.dead++;});
+    const co=a=>({vv:median(a.map(v=>v.vv)),fin:median(a.map(v=>v.finish)),ctr:median(a.map(v=>v.ctr)),
+      ctor:median(a.map(v=>v.ctor)),len:median(a.map(v=>v.len)),tag:median(a.map(v=>v.tag)),
+      tanya:div(a.filter(v=>v.tanya).length,a.length),caps:div(a.filter(v=>v.caps>=2).length,a.length),
+      live:div(a.filter(v=>v.toLive>0).length,a.length)});
+    const cs=co(aS), cn=co(aN);
+    const cmp=(a,b,f,inv)=>{const d=b?((a-b)/b):null;
+      return `<td class="num">${f(a)}</td><td class="num" style="color:var(--mute)">${f(b)}</td>
+        <td class="num"><b class="${d==null?'flat':(inv?d<0:d>0)?'up':'down'}">${d==null?'—':(d>0?'+':'')+dec(d*100,0)+'%'}</b></td>`;};
+    const top=[...S].sort((a,b)=>b.gmv-a.gmv).slice(0,10);
+    const vf=[...N].sort((a,b)=>b.vv-a.vv).slice(0,5);
+    out.push(sec('B','Konten Video — apa yang benar-benar menjual',
+      pill(S.length+' dari '+allV.length+' video ada penjualan',mul(div(S.length,allV.length),100)>=B.vidSalesAff?'mid':'bad'),`
+      <div class="grid g4">
+        ${M.vT?kpi('Video toko sendiri',num(M.vT.total),M.vT.withSales+' ada penjualan · '+pct(M.vT.rate)):''}
+        ${M.vT?kpi('Diposting bulan ini',num(M.vT.posted),'target '+B.vidPostToko+' video'):''}
+        ${M.vA?kpi('Video kreator afiliasi',num(M.vA.total),M.vA.withSales+' ada penjualan · '+pct(M.vA.rate)):''}
+        ${M.vA?kpi('Kreator yang posting',num(M.vA.kreator),'GMV '+rp(M.vA.gmv)):''}
+      </div>
+      <div class="split" style="margin-top:18px">
+        <div>
+          <div class="h4">Pola video yang menjual vs yang nggak</div>
+          <div class="tbl-wrap"><table>
+            <thead><tr><th>Ciri video (median)</th><th class="num">Ada penjualan<br>(${aS.length})</th><th class="num">Tanpa penjualan<br>(${aN.length})</th><th class="num">Selisih</th></tr></thead>
+            <tbody>
+              <tr><td>Tayangan (VV)</td>${cmp(cs.vv,cn.vv,num)}</tr>
+              <tr><td>Ditonton sampai habis</td>${cmp(cs.fin,cn.fin,v=>pct(v,2))}</tr>
+              <tr><td>CTR ke produk</td>${cmp(cs.ctr,cn.ctr,v=>pct(v,2))}</tr>
+              <tr><td>Panjang judul (karakter)</td>${cmp(cs.len,cn.len,v=>num(v))}</tr>
+              <tr><td>Jumlah hashtag</td>${cmp(cs.tag,cn.tag,v=>dec(v,0))}</tr>
+              <tr><td>Judul pakai pertanyaan</td>${cmp(cs.tanya,cn.tanya,v=>pct(v,0))}</tr>
+              <tr><td>Judul pakai HURUF BESAR</td>${cmp(cs.caps,cn.caps,v=>pct(v,0))}</tr>
+              <tr><td>Ada arahan ke LIVE</td>${cmp(cs.live,cn.live,v=>pct(v,0))}</tr>
+            </tbody></table></div>
+          <div class="note">Pembanding cuma memakai ${num(act.length)} video yang dapat tayangan di periode ini (${allV.length-act.length} baris sisa histori dibuang). Kolom selisih nunjukkin ciri mana yang beda nyata antara video yang closing dan yang nggak — ciri dengan selisih besar itu yang layak jadi aturan produksi konten di kolom Plan, bukan selera.</div>
+        </div>
+        <div>
+          <div class="h4">Sebaran video · ambang tayangan ${num(thr)} VV</div>
+          <div class="quad">
+            <div class="qc win"><div class="ql">Menang</div><div class="qn">${q.win}</div><div class="qd">tayangan cukup + ada penjualan → format ini yang digandakan</div></div>
+            <div class="qc"><div class="ql">Kecil tapi closing</div><div class="qn">${q.niche}</div><div class="qd">tayangan di bawah ambang tapi jual → kontennya benar, distribusinya kurang</div></div>
+            <div class="qc lose"><div class="ql">Cukup rame, nol jualan</div><div class="qn">${q.viral}</div><div class="qd">tayangan sudah di level yang biasanya jual, tapi GMV nol → kontennya nggak ngarah ke produk</div></div>
+            <div class="qc"><div class="ql">Sepi &amp; nggak jual</div><div class="qn">${q.dead}</div><div class="qd">tidak perlu diteruskan</div></div>
+          </div>
+          <div class="h4" style="margin-top:16px">Video rame tapi nol penjualan</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Judul</th><th class="num">VV</th><th class="num">CTR</th></tr></thead><tbody>
+            ${vf.map(v=>`<tr><td class="ttl" title="${esc(v.judul)}">${esc(v.judul||'(tanpa judul)')}</td><td class="num">${num(v.vv)}</td><td class="num">${pct(v.ctr,2)}</td></tr>`).join('')||'<tr><td colspan="3" style="color:var(--mute)">—</td></tr>'}
+          </tbody></table></div>
+        </div>
+      </div>
+      <div class="h4" style="margin-top:18px">10 video penjualan terbesar</div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Judul</th><th>Sumber / akun</th><th class="num">GMV</th><th class="num">GPM</th><th class="num">VV</th><th class="num">Tuntas</th><th class="num">CTR</th></tr></thead>
+        <tbody>${top.map(v=>`<tr><td class="ttl" title="${esc(v.judul)}">${esc(v.judul||'(tanpa judul)')}</td>
+          <td style="font-size:11px;color:var(--slate)">${v.src} · ${esc(v.kreator)}</td>
+          <td class="num"><b>${rp(v.gmv)}</b></td><td class="num">${rp(v.gpm)}</td><td class="num">${num(v.vv)}</td>
+          <td class="num">${pct(v.finish,2)}</td><td class="num">${pct(v.ctr,2)}</td></tr>`).join('')}</tbody></table></div>
+      <div class="note">GPM = GMV per 1.000 tayangan. Video dengan GPM tinggi tapi VV kecil adalah kandidat paling murah buat didorong iklan — kontennya sudah terbukti closing, cuma kurang orang yang nonton.</div>`));
+  } else out.push(sec('B','Konten Video',null,noData('Video — Toko Sendiri / Kreator Afiliasi')));
+
+  /* C · LIVE */
+  if(M.lT||M.lA){
+    const t=M.lT, a=M.lA;
+    const hrAll={}; [t,a].forEach(x=>x&&Object.entries(x.hrs).forEach(([h,c])=>hrAll[h]=(hrAll[h]||0)+c));
+    const hmax=Math.max(1,...Object.values(hrAll));
+    const hoursHtml=Object.keys(hrAll).map(Number).sort((x,y)=>x-y)
+      .map(h=>bar(String(h).padStart(2,'0')+':00',hrAll[h],hmax,h>=18&&h<=22?'var(--signal)':'var(--slate)',num(hrAll[h])+' sesi')).join('');
+    out.push(sec('C','Kondisi LIVE',
+      pill(!t||t.sesi===0?'LIVE toko tidak jalan':t.sesi<B.liveSesi?'LIVE toko belum jadi kanal':'LIVE toko rutin',
+        !t||t.sesi===0?'bad':t.sesi<B.liveSesi?'mid':'ok'),`
+      <div class="split">
+        <div>
+          <div class="h4">LIVE toko sendiri</div>
+          ${t?`<div class="grid g3" style="gap:9px">
+            ${kpi('Sesi',num(t.sesi),'target '+B.liveSesi+' / bulan')}
+            ${kpi('Jam tayang',dec(t.jam,1),dec(t.jamPerSesi,1)+' jam/sesi')}
+            ${kpi('GMV',rp(t.gmv),t.withSales+' sesi ada penjualan')}
+          </div>
+          ${meter('Sesi per bulan',t.sesi,B.liveSesi,v=>num(v)+' sesi')}
+          ${meter('Jam tayang per bulan',t.jam,B.liveJam,v=>dec(v,1)+' jam')}
+          ${meter('GMV per jam LIVE',t.gmvPerJam,B.liveGmvJam,rp)}
+          ${meter('CTOR LIVE',t.ctorMed*100,B.liveCtor,v=>dec(v,2)+'%')}
+          <div class="note">Penonton total ${num(t.penonton)} · rata-rata ${num(t.ccv)} penonton per sesi · durasi tonton ${num(t.avgWatch)} detik.</div>`
+          :noData('LIVE — Toko Sendiri')}
+        </div>
+        <div>
+          <div class="h4">LIVE kreator afiliasi</div>
+          ${a?`<div class="grid g3" style="gap:9px">
+            ${kpi('Sesi',num(a.sesi),a.kreator+' kreator')}
+            ${kpi('Jam tayang',dec(a.jam,1),dec(a.jamPerSesi,1)+' jam/sesi')}
+            ${kpi('GMV',rp(a.gmv),a.withSales+' sesi ada penjualan')}
+          </div>
+          <div class="grid g3" style="gap:9px;margin-top:9px">
+            ${kpi('GMV / jam',rp(a.gmvPerJam),'pembanding wajar')}
+            ${kpi('Penonton',num(a.penonton),num(a.ccv)+' per sesi')}
+            ${kpi('CTOR median',pct(a.ctorMed,2),'target '+B.liveCtor+'%')}
+          </div>
+          <div class="note">Angka kreator dipakai sebagai <b>bukti pasar</b>: kalau kreator bisa jual di LIVE dengan produk yang sama, berarti tantangannya di eksekusi LIVE toko — bukan di produk.</div>`
+          :noData('LIVE — Kreator Afiliasi')}
+        </div>
+      </div>
+      ${hoursHtml?`<div class="h4" style="margin-top:18px">Jam tayang LIVE (semua sesi) — oranye = prime time 18:00–22:00</div><div class="bars">${hoursHtml}</div>`:''}
+      ${t&&t.top.length?`<div class="h4" style="margin-top:16px">Sesi LIVE toko terbaik</div>
+      <div class="tbl-wrap"><table><thead><tr><th>Waktu</th><th class="num">Durasi</th><th class="num">Penonton</th><th class="num">GMV</th><th class="num">CTOR</th></tr></thead>
+      <tbody>${t.top.map(s=>`<tr><td class="mono" style="font-size:11.5px">${esc(s.waktu)}</td><td class="num">${dec(s.jam,1)} j</td>
+        <td class="num">${num(s.penonton)}</td><td class="num"><b>${rp(s.gmv)}</b></td><td class="num">${pct(s.ctor,2)}</td></tr>`).join('')}</tbody></table></div>`:''}`));
+  } else out.push(sec('C','Kondisi LIVE',null,noData('LIVE — Toko Sendiri / Kreator Afiliasi')));
+
+  /* D · AFFILIATE */
+  if(M.aff){
+    const A=M.aff;
+    out.push(sec('D','Mesin Afiliasi',
+      pill(A.top5Share!=null&&A.top5Share*100>B.krKonsen?'GMV terkonsentrasi':'Sebaran kreator wajar',A.top5Share!=null&&A.top5Share*100>B.krKonsen?'bad':'ok'),`
+      <div class="grid g5">
+        ${kpi('Kreator terdaftar',num(A.total),'')}
+        ${kpi('Ada penjualan',num(A.withSales),num(A.postedSales)+' dari '+num(A.posted)+' yang posting ('+pct(A.rateAktif)+')')}
+        ${kpi('Posting tapi GMV 0',num(A.nempel),'dari '+num(A.posted)+' yang posting')}
+        ${kpi('Top-5 pegang',pct(A.top5Share),'batas '+B.krKonsen+'%')}
+        ${kpi('Perkiraan komisi',rp(A.komisi),'bukan angka dibayar')}
+      </div>
+      <div class="split" style="margin-top:18px">
+        <div>
+          <div class="h4">10 kreator penyumbang terbesar</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Kreator</th><th class="num">GMV</th><th class="num">Share</th><th class="num">Video</th><th class="num">LIVE</th></tr></thead>
+          <tbody>${A.top.map(r=>`<tr><td>${esc(r.nama)}</td><td class="num"><b>${rp(r.gmv)}</b></td>
+            <td class="num">${pct(div(r.gmv,A.gmv),0)}</td><td class="num">${num(r.nVid)}</td><td class="num">${num(r.nLive)}</td></tr>`).join('')}</tbody>
+          <tr class="tot"><td>Total afiliasi</td><td class="num">${rp(A.gmv)}</td><td class="num">100%</td><td class="num">—</td><td class="num">—</td></tr></table></div>
+        </div>
+        <div>
+          <div class="h4">Efisiensi sampel</div>
+          <div class="grid g3" style="gap:9px">
+            ${kpi('Sampel terkirim',num(A.sampel),'')}
+            ${kpi('Kreator dikirim',num(A.sampelKreator),A.sampelSukses+' ada penjualan')}
+            ${kpi('GMV dari penerima',rp(A.sampelGmv),A.sampel?rp(div(A.sampelGmv,A.sampel))+' / sampel':'—')}
+          </div>
+          ${meter('Kreator posting yang ada penjualan',A.rateAktif*100,B.krSales,v=>dec(v,1)+'%')}
+          ${meter('Konsentrasi top-5 (makin kecil makin sehat)',A.top5Share*100,B.krKonsen,v=>dec(v,0)+'%',true)}
+          <div class="note">Kreator "posting tapi GMV 0" bukan otomatis jelek — ini daftar kerja pertama Creator Manager: brief ulang, ganti angle, atau lepas.</div>
+        </div>
+      </div>`));
+  } else out.push(sec('D','Mesin Afiliasi',null,noData('Afiliasi — Daftar Kreator')));
+
+  /* E · PRODUK */
+  if(M.prod){
+    const P=M.prod;
+    out.push(sec('E','Portofolio Produk',
+      pill(P.rate!=null&&P.rate*100>=B.skuSales?'Katalog produktif':'Katalog banyak yang diam',P.rate!=null&&P.rate*100>=B.skuSales?'ok':'mid'),`
+      <div class="grid g5">
+        ${kpi('SKU terdaftar',num(P.total),'')}
+        ${kpi('SKU ada penjualan',num(P.withSales),pct(P.rate)+' · target '+B.skuSales+'%')}
+        ${kpi('Top-3 pegang',pct(P.top3Share),'GMV terkonsentrasi')}
+        ${kpi('Dari kreator',pct(P.affShare),'porsi GMV afiliasi')}
+        ${kpi('Median klik / SKU',num(P.mk),'garis pembagi kuadran')}
+      </div>
+      <div class="split" style="margin-top:18px">
+        <div>
+          <div class="h4">Kuadran produk — traffic vs closing</div>
+          <div class="quad">
+            <div class="qc win"><div class="ql">Bintang</div><div class="qn">${P.quad.star}</div><div class="qd">klik &amp; konversi di atas median → tumpuan iklan</div></div>
+            <div class="qc lose"><div class="ql">Boros traffic</div><div class="qn">${P.quad.traffic}</div><div class="qd">klik tinggi, konversi rendah → perbaiki halaman produk</div></div>
+            <div class="qc"><div class="ql">Tersembunyi</div><div class="qn">${P.quad.niche}</div><div class="qd">konversi bagus, klik sedikit → butuh traffic</div></div>
+            <div class="qc"><div class="ql">Dingin</div><div class="qn">${P.quad.cold}</div><div class="qd">klik rendah &amp; belum jual</div></div>
+          </div>
+          ${meter('SKU ada penjualan',P.rate*100,B.skuSales,v=>dec(v,0)+'%')}
+        </div>
+        <div>
+          <div class="h4">10 SKU penyumbang terbesar</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Produk</th><th class="num">GMV</th><th class="num">Klik</th><th class="num">CTOR</th></tr></thead>
+          <tbody>${P.top.map(r=>`<tr><td class="ttl" title="${esc(r.nama)}">${esc(r.nama)}</td><td class="num"><b>${rp(r.gmv)}</b></td>
+            <td class="num">${num(r.klik)}</td><td class="num">${pct(r.ctor,2)}</td></tr>`).join('')}</tbody></table></div>
+        </div>
+      </div>`));
+  } else out.push(sec('E','Portofolio Produk',null,noData('Analitik Produk — TikTok')));
+
+  /* F · ADS */
+  if(M.ads&&M.ads.ada){
+    const A=M.ads, dep=T?div(A.rev,T.gmv):null;
+    const mats=Object.entries(A.byMat).sort((a,b)=>b[1].rev-a[1].rev);
+    out.push(sec('F','Iklan (Ads Manager)',
+      pill(A.roas!=null&&A.roas>=B.roas?'ROAS di atas target':'ROAS di bawah target',A.roas!=null&&A.roas>=B.roas?'ok':'bad'),`
+      <div class="grid g5">
+        ${kpi('Belanja iklan',rp(A.spend),num(A.nCreative)+' materi')}
+        ${kpi('Pendapatan teratribusi',rp(A.rev),'')}
+        ${kpi('ROAS',dec(A.roas,2)+'×','target '+B.roas+'×')}
+        ${kpi('Biaya / pesanan',rp(A.cpo),num(A.ord)+' pesanan SKU')}
+        ${kpi('Setara % GMV toko',dep==null?'—':pct(dep),'batas '+B.adsDep+'%')}
+      </div>
+      <div class="split" style="margin-top:18px">
+        <div>
+          <div class="h4">Per jenis materi iklan</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Materi</th><th class="num">Materi</th><th class="num">Belanja</th><th class="num">Pendapatan</th><th class="num">ROAS</th></tr></thead>
+          <tbody>${mats.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${num(v.n)}</td><td class="num">${rp(v.spend)}</td>
+            <td class="num">${rp(v.rev)}</td><td class="num"><b>${dec(div(v.rev,v.spend),2)}×</b></td></tr>`).join('')}
+          <tr class="tot"><td>Total</td><td class="num">${num(A.nCreative)}</td><td class="num">${rp(A.spendP)}</td><td class="num">${rp(A.revP)}</td><td class="num">${dec(A.roasP,2)}×</td></tr></tbody></table></div>
+          ${A.nLive?`<div class="note">Iklan LIVE: belanja ${rp(A.spendL)} → ${rp(A.revL)} (ROAS ${dec(A.roasL,2)}×) dari ${num(A.nLive)} sesi.</div>`
+            :`<div class="note">Tidak ada iklan LIVE yang jalan di periode ini.</div>`}
+          <div class="note"><b>Jangan dijumlah dengan GMV.</b> Pendapatan teratribusi iklan tumpang tindih dengan GMV afiliasi dan organik — dia dibaca sebagai lapisan di atas GMV, bukan tambahan.</div>
+        </div>
+        <div>
+          <div class="h4">Materi video paling berhasil dibiayai</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Judul</th><th class="num">Belanja</th><th class="num">Pendapatan</th><th class="num">ROAS</th><th class="num">Tuntas</th></tr></thead>
+          <tbody>${A.topVid.map(v=>`<tr><td class="ttl" title="${esc(v.judul)}">${esc(v.judul)}</td><td class="num">${rp(v.spend)}</td>
+            <td class="num"><b>${rp(v.rev)}</b></td><td class="num">${dec(div(v.rev,v.spend),1)}×</td><td class="num">${pct(v.hold100,1)}</td></tr>`).join('')||'<tr><td colspan="5" style="color:var(--mute)">—</td></tr>'}</tbody></table></div>
+        </div>
+      </div>`));
+  } else out.push(sec('F','Iklan (Ads Manager)',pill('Tanpa data','off'),noData('Ads Manager — Produk / LIVE')));
+
+  /* G · TEMUAN */
+  const lvl={tantangan:['ic-tantangan','TANTANGAN'],perhatian:['ic-perhatian','PERHATIAN'],
+    catatan:['ic-catatan','CATATAN'],modal:['ic-modal','MODAL']};
+  out.push(sec('G','Temuan &amp; Arah Strategi',pill(F.filter(f=>f.lv==='tantangan').length+' tantangan utama',F.some(f=>f.lv==='tantangan')?'bad':'ok'),`
+    <div class="split" style="grid-template-columns:1.25fr 1fr">
+      <div>
+        <div class="h4">Temuan baseline</div>
+        ${F.map(f=>`<div class="finding"><span class="ic ${lvl[f.lv][0]}">${lvl[f.lv][1]}</span><div>${f.t}</div></div>`).join('')}
+      </div>
+      <div>
+        <div class="h4">Skor Kondisi Toko per pilar</div>
+        ${sc.P.map(p=>p.ada
+          ?`<div class="meter"><div class="meter-lb"><span>${p.l}</span><b>${Math.round(p.score)}</b></div>
+             <div class="track"><div class="fill ${p.score>=75?'ok':p.score>=50?'mid':'bad'}" style="width:${clamp(p.score,2,100)}%"></div></div></div>`
+          :`<div class="meter"><div class="meter-lb"><span>${p.l}</span><b style="color:var(--mute)">tanpa data</b></div>
+             <div class="track"></div></div>`).join('')}
+        <div class="h4" style="margin-top:16px">Arah untuk kolom Strategi</div>
+        ${arah(M,sc).map((a,i)=>`<div class="finding"><span class="ic ic-catatan">${i+1}</span><div>${a}</div></div>`).join('')}
+        <div class="note">Ini arah, bukan rencana eksekusi. Breakdown bulanan dan mingguan tetap disusun AM di kolom Plan.</div>
+      </div>
+    </div>`));
+
+  out.push(`<div class="sec no-print" id="payWrap" style="display:none"><div class="sec-hd"><span class="tag">JSON</span><h3>Payload untuk CDPS</h3></div>
+    <div class="sec-bd" style="padding:0"><textarea id="payload" readonly></textarea></div></div>`);
+  $('#result').innerHTML=out.join('');
+}
+
+/* ══════════ PAYLOAD CDPS ══════════ */
+function payload(M,H,sc,F){
+  const T=M.toko;
+  const r=v=>nil(v)?null:Math.round(v);
+  const p={
+    schema:'cdps.baseline.tiktok.v1',
+    generated_at:new Date().toISOString(),
+    sumber:'MEA CDPS Baseline Tool v1.0 — export TikTok Shop Seller Center & Ads Manager',
+    klien:{nama:$('#fKlien').value||null,toko:$('#fToko').value||null,akun_tiktok:$('#fAkun').value||null,
+      kategori:$('#fKat').value,umur_toko_bulan:n($('#fUmur').value)||null,account_manager:$('#fAM').value||null,
+      periode_referensi:T?T.periode:null,definisi_gmv:netMode()?'net':'gross'},
+    gmv_baseline:{median_6m:r(H.med),runrate_3m:r(H.rr),avg_terisi:r(H.avg6),trend_3v3:H.trend==null?null:fx(H.trend,4),
+      bulan_terisi:H.months,cakupan_riwayat:H.cakupan,campaign_driven:H.spike,bulan_puncak:H.peakRow?H.peakRow.label:null,
+      riwayat:HIST.map(h=>({bulan:h.key,label:h.label,gmv:r(n(h.gmv)),order:r(n(h.order)),tanda:h.flag}))},
+    toko:T?{gmv:r(T.gmvBase),gmv_kotor:r(T.gmv),refund:r(T.refund),refund_rate:fx(T.refundRate,4),
+      pesanan:r(T.pesanan),pembeli:r(T.pembeli),aov:r(T.aov),pengunjung:r(T.visitor),
+      konversi:fx(T.cr,5),hari_aktif:T.hariAktif,hari_total:T.hariTotal,share_hari_terbesar:fx(T.peakShare,4),
+      mom:{gmv:T.chGmv,pengunjung:T.chVisitor,pesanan:T.chOrder}}:null,
+    gmv_mix:T?{video_afiliasi:r(T.vidAff),live_afiliasi:r(T.liveAff),video_toko:r(T.vidToko),
+      live_toko:r(T.liveToko),kartu_produk_dan_lain:r(T.other)}:null,
+    video:{toko:M.vT?{aktif:M.vT.total,diposting_periode:M.vT.posted,ada_penjualan:M.vT.withSales,
+        rate:fx(M.vT.rate,4),gmv:r(M.vT.gmv),gpm_median:r(M.vT.gpmMed),vv:r(M.vT.vv)}:null,
+      afiliasi:M.vA?{aktif:M.vA.total,ada_penjualan:M.vA.withSales,rate:fx(M.vA.rate,4),
+        gmv:r(M.vA.gmv),gpm_median:r(M.vA.gpmMed),vv:r(M.vA.vv),kreator_posting:M.vA.kreator}:null,
+      top_video:[...(M.vT?M.vT.sales:[]),...(M.vA?M.vA.sales:[])].sort((a,b)=>b.gmv-a.gmv).slice(0,10)
+        .map(v=>({judul:v.judul,akun:v.kreator,gmv:r(v.gmv),gpm:r(v.gpm),vv:r(v.vv),
+          tuntas:fx(v.finish,4),ctr:fx(v.ctr,4)}))},
+    live:{toko:M.lT?{sesi:M.lT.sesi,jam:fx(M.lT.jam,2),gmv:r(M.lT.gmv),gmv_per_jam:r(M.lT.gmvPerJam),
+        sesi_ada_penjualan:M.lT.withSales,penonton:r(M.lT.penonton),ctor_median:fx(M.lT.ctorMed,4),
+        share_prime_time:fx(M.lT.primeShare,4)}:null,
+      afiliasi:M.lA?{sesi:M.lA.sesi,jam:fx(M.lA.jam,2),gmv:r(M.lA.gmv),gmv_per_jam:r(M.lA.gmvPerJam),
+        kreator:M.lA.kreator,penonton:r(M.lA.penonton)}:null},
+    afiliasi:M.aff?{kreator_total:M.aff.total,kreator_posting:M.aff.posted,posting_dan_ada_penjualan:M.aff.postedSales,ada_penjualan:M.aff.withSales,rate:fx(M.aff.rate,4),rate_dari_posting:fx(M.aff.rateAktif,4),
+      posting_tanpa_penjualan:M.aff.nempel,gmv:r(M.aff.gmv),top5_share:fx(M.aff.top5Share,4),
+      sampel_terkirim:r(M.aff.sampel),sampel_berhasil:M.aff.sampelSukses,
+      top_kreator:M.aff.top.slice(0,5).map(k=>({nama:k.nama,gmv:r(k.gmv),video:r(k.nVid),live:r(k.nLive)}))}:null,
+    produk:M.prod?{sku_total:M.prod.total,sku_ada_penjualan:M.prod.withSales,rate:fx(M.prod.rate,4),
+      top3_share:fx(M.prod.top3Share,4),kuadran:M.prod.quad,
+      top_sku:M.prod.top.slice(0,5).map(s=>({nama:s.nama,gmv:r(s.gmv),klik:r(s.klik),ctor:fx(s.ctor,4)}))}:null,
+    iklan:M.ads&&M.ads.ada?{belanja:r(M.ads.spend),pendapatan_teratribusi:r(M.ads.rev),roas:fx(M.ads.roas,2),
+      biaya_per_pesanan:r(M.ads.cpo),setara_persen_gmv:T?fx(div(M.ads.rev,T.gmv),4):null,
+      catatan:'pendapatan teratribusi tumpang tindih dengan GMV afiliasi/organik, jangan dijumlah'}:null,
+    skor:{total:sc.total,verdict:sc.verdict,cakupan_data:fx(sc.coverage,2),
+      pilar:Object.fromEntries(sc.P.map(p=>[p.k,p.ada?Math.round(p.score):null]))},
+    benchmark_dipakai:{...B},
+    temuan:F.map(f=>({level:f.lv,teks:f.t.replace(/<[^>]+>/g,'')})),
+    arah_strategi:arah(M,sc),
+    kelengkapan_file:Object.fromEntries(Object.keys(TYPES).map(k=>[k,!!STATE.slots[k]]))
+  };
+  $('#payload').value=JSON.stringify(p,null,2);
+  return p;
+}
+function ringkasan(){
+  if(!PAY)return '';
+  const p=PAY, L=[];
+  L.push(`BASELINE TOKO — ${p.klien.toko||'-'} (${p.klien.periode_referensi||'-'})`);
+  L.push(`Klien: ${p.klien.nama||'-'} · Kategori: ${p.klien.kategori} · AM: ${p.klien.account_manager||'-'}`);
+  L.push('');
+  L.push(`GMV baseline (median ${p.gmv_baseline.bulan_terisi} bulan): ${rp(p.gmv_baseline.median_6m)} cakupan riwayat: ${p.gmv_baseline.cakupan_riwayat}`);
+  L.push(`Run-rate 3 bulan: ${rp(p.gmv_baseline.runrate_3m)} · Trend 3v3: ${p.gmv_baseline.trend_3v3==null?'-':pct(p.gmv_baseline.trend_3v3)}`);
+  if(p.toko)L.push(`Bulan referensi: GMV ${rp(p.toko.gmv)} · ${num(p.toko.pesanan)} order · AOV ${rp(p.toko.aov)} · konversi ${pct(p.toko.konversi,2)} · refund ${pct(p.toko.refund_rate)}`);
+  if(p.gmv_mix)L.push(`Sumber GMV: video afiliasi ${rp(p.gmv_mix.video_afiliasi)} · LIVE afiliasi ${rp(p.gmv_mix.live_afiliasi)} · video toko ${rp(p.gmv_mix.video_toko)} · LIVE toko ${rp(p.gmv_mix.live_toko)} · kartu produk/lain ${rp(p.gmv_mix.kartu_produk_dan_lain)}`);
+  if(p.video.toko)L.push(`Video toko: ${p.video.toko.aktif} aktif, ${p.video.toko.diposting_periode} diposting, ${p.video.toko.ada_penjualan} ada penjualan (${pct(p.video.toko.rate)})`);
+  if(p.video.afiliasi)L.push(`Video afiliasi: ${p.video.afiliasi.aktif} aktif, ${p.video.afiliasi.ada_penjualan} ada penjualan (${pct(p.video.afiliasi.rate)}) dari ${p.video.afiliasi.kreator_posting} kreator`);
+  if(p.live.toko)L.push(`LIVE toko: ${p.live.toko.sesi} sesi / ${dec(p.live.toko.jam)} jam · GMV ${rp(p.live.toko.gmv)} · ${rp(p.live.toko.gmv_per_jam)}/jam`);
+  if(p.live.afiliasi)L.push(`LIVE afiliasi: ${p.live.afiliasi.sesi} sesi · GMV ${rp(p.live.afiliasi.gmv)}`);
+  if(p.afiliasi)L.push(`Afiliasi: ${p.afiliasi.kreator_total} kreator terdaftar, ${p.afiliasi.kreator_posting} posting, ${p.afiliasi.ada_penjualan} produktif (${pct(p.afiliasi.rate_dari_posting)} dari yang posting), top-5 pegang ${pct(p.afiliasi.top5_share)}`);
+  if(p.iklan)L.push(`Iklan: belanja ${rp(p.iklan.belanja)} → ${rp(p.iklan.pendapatan_teratribusi)} (ROAS ${dec(p.iklan.roas,2)}x)`);
+  L.push('');
+  L.push(`SKOR ${p.skor.total} — ${p.skor.verdict}`);
+  L.push('TEMUAN:'); p.temuan.forEach(t=>L.push(`- [${t.level.toUpperCase()}] ${t.teks}`));
+  L.push('ARAH STRATEGI:'); p.arah_strategi.forEach((a,i)=>L.push(`${i+1}. ${a}`));
+  return L.join('\n');
+}
+const cp=(t,m)=>{navigator.clipboard.writeText(t).then(()=>toast(m),()=>toast('Gagal copy — blok manual'));};
+$('#btnJson').onclick=()=>{const w=$('#payWrap');w.style.display=w.style.display==='none'?'block':'none';if(w.style.display==='block')w.scrollIntoView({behavior:'smooth'});};
+$('#btnCopyJson').onclick=()=>cp(JSON.stringify(PAY,null,2),'Payload JSON tercopy');
+$('#btnCopyTxt').onclick=()=>cp(ringkasan(),'Ringkasan tercopy');
+$('#btnDlJson').onclick=()=>{const b=new Blob([JSON.stringify(PAY,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(b);
+  a.download='baseline_'+(($('#fToko').value||'toko').replace(/\W+/g,'_'))+'_'+(PAY.klien.periode_referensi||'').replace(/\s/g,'')+'.json';a.click();};
+['fKlien','fToko','fAkun','fAM','fKat','fUmur','fGmvDef'].forEach(id=>$('#'+id).addEventListener('change',()=>{if(STATE.done)run();}));
+</script>
+</body>
+</html>

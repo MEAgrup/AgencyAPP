@@ -33,3 +33,4 @@ export * as audit from './audit';
 export * as notification from './notification';
 export * as visibility from './visibility';
 export * as interview from './interview';
+export * as baseline from './baseline';
