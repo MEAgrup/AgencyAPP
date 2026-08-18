@@ -34,7 +34,7 @@
 |---|---|---|
 | P1 | Granularity | **Monthly mandatory**, weekly rows **auto-generated** from monthly |
 | P2 | Approval | **Period 1 only.** Periods 2…n activate automatically |
-| P3 | Plan row → Brief | AM creates Briefs **manually** from Plan rows (no auto-Brief) |
+| P3 | Plan row → Brief | **⟳ RAB-19 (DECISIONS 2026-08-18) — original is OBSOLETE.** RAB-16 built **"satu klik, warisi semua"**: when the Plan period is `Aktif`, each qualifying `plan_row` inherits **one Brief** to its PIC division (`POST /plan/{id}/briefs`, `inheritBriefsFromPlan`); the AM only fills **due date + priority** per row, everything else is inherited. The manual STR- path (`createBrief`) still works (RAB-17), but "no auto-Brief" no longer holds. Superseded original: "AM creates Briefs manually from Plan rows (no auto-Brief)". |
 | P4 | Period targets | Auto-pulled from Strategi D-2, **AM may adjust with a written reason** |
 | P5 | Actuals | **Hybrid** — GMV entered manually by AM; other metrics auto from execution modules |
 | P6 | Who fills it | **AM alone.** Divisions do not fill Plan rows |

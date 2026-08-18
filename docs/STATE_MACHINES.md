@@ -171,6 +171,20 @@ All else blocked: `[transisi status tidak diizinkan]`.
 - **Nol edge buka-kembali.** Kembali ke `Berjalan` akan memindahkan jangkar yang justru jadi alasan langkah ini ada; kalau revisi memang dibutuhkan, itu keputusan pemilik dulu (belum ada).
 - **Durasi bukan kolom.** Ia diturunkan saat baca (`disubmit_pada − dimulai_pada`) oleh satu fungsi core `durasiRisetAwalMenit`, dan `null`/`—` selama berjalan — bukan 0 (aturan rumah #4 & #7).
 - Jangkar dibekukan trigger `trg_riset_awal_jangkar`: mengubah `dimulai_pada`, menimpa `disubmit_pada`, atau membalik dari `Selesai` ditolak DB — termasuk lewat service-role.
+
+### Gerbang prasyarat — `assertRisetAwalGate` (RAB-07 · prasyarat; dicatat RAB-20)
+
+Bukan edge mesin #20, melainkan **gerbang yang mesin #19 (`interview`) lewati saat MULAI**. `assertRisetAwalGate(sql, interviewId, clientId)` (`packages/domain/src/interview.ts`) dipanggil di **dua transisi mulai** interview: `scheduleInterview → Terjadwal` dan `transitionInterview → Sedang Berlangsung`. Ia menolak interview dimulai sampai riset awal **benar-benar** selesai, dengan tiga syarat yang harus terpenuhi bersama:
+
+1. **Langkah riset awal disubmit** — `interview_riset_awal.status = Selesai` (jangkar waktu langkah 1 tertutup).
+2. **Setiap platform AKTIF punya baseline** — tiap baris `client_platforms` `active` milik klien wajib punya baris `riset_awal_analisa` untuk interview ini (`aktif > 0 AND aktif === tertutup`). Baseline boleh `analisa` ATAU `manual` — bukan wajib analisa.
+3. **Setiap isian auto-fill terkonfirmasi** — `interview_riset_awal_isian`: `total > 0 AND total === dikonfirmasi` (cermin `getBaseline().semua_terkonfirmasi`, usulan→konfirmasi per angka).
+
+Gagal salah satu ⇒ `ValidationError` `[riset awal belum selesai — setiap platform aktif wajib punya baseline yang terkonfirmasi dan riset awal disubmit sebelum interview dimulai]`.
+
+- **Per-PLATFORM, bukan per-analisa — inilah yang membuatnya bebas-deadlock.** Klien Shopee-saja (Shopee tak punya mesin analisa → baseline `manual`) tetap bisa lolos; gerbang tak pernah menunggu analisa TikTok yang tak bisa diproduksi. Mengikatnya ke analisa TikTok akan mengunci mayoritas klien (Shopee 156× vs TikTok 16× di seed) — persis kasus anti-deadlock yang diuji DoD RAB-07.
+- **AM yang terblokir tak pernah buntu:** `submitBaseline`/`confirmIsian`/`submitRisetAwal` independen dari status interview, jadi AM menyelesaikan riset awal dulu lalu transisi mulai yang sama lolos.
+
 ### Timeline SLA tiga langkah (keputusan pemilik 2026-08-13) — BUKAN mesin
 
 Ukuran waktu, bukan status: tidak ada state baru dan tidak ada edge. Angkanya data

@@ -35,7 +35,7 @@
 | D2 | Validity period | One Strategi per contract (3 / 6 / 12 months), revisable |
 | D3 | Strategi vs Plan | **Strategi** = baseline analysis + direction + targets. **Plan** = monthly/weekly execution breakdown derived from it |
 | D4 | Multi-channel structure | One parent Strategi + **mandatory sub-block per active channel** |
-| D5 | Baseline data | **Mandatory manual numeric entry per channel** (no free-text substitute) |
+| D5 | Baseline data | **⟳ RAB-19 (DECISIONS 2026-08-18):** numbers may be **sourced from the Riset Awal analysis engine** (proposed), but every figure is **mandatory per-figure AM confirmation** (usulan→konfirmasi) — not free-text, and never left blank. Superseded original: "mandatory manual numeric entry per channel". |
 | D6 | Approval | Internal only — SPV / Head of Account. No client sign-off required |
 | D7 | Resource commitment | Mandatory to fill, but **soft reference** — Briefs may exceed it with a recorded reason (warning, not block) |
 | D8 | Targets | Contract target = **floor**; AM sets a **stretch target** above it |
@@ -48,7 +48,7 @@
 | D15 | Live Stream | **Vendor mode** (results tracker), same as MSDPS — no internal host assignment |
 | D16 | Over-commitment tolerance | 20% default before SPV escalation |
 | D17 | Visibility | Strategi **is shared with the client**, but selected fields are `Internal Saja` and stripped from the client export |
-| D18 | Baseline source | Manual entry. No auto-pull from report engines (not now, not designed here) |
+| D18 | Baseline source | **⟳ RAB-19 (DECISIONS 2026-08-18):** the legitimate source set grows — **seller-centre exports the AM pulls themselves** (parsed by the Riset Awal engine) are now a sanctioned baseline source, alongside manual entry. Still **no auto-pull from report-engine APIs**. Superseded original: "Manual entry. No auto-pull from report engines". |
 | D19 | Vendor entity | Does not exist in CDPS yet — **`VND-` entity to be created** as a prerequisite for E-8 |
 | D20 | Client-facing delivery | **Read-only web link**, not PDF — token-based, version-pinned, revocable |
 | D21 | Client acknowledgement of assumptions | Not recorded. D-8 stays a one-way presentation (keeps D6 intact) |
@@ -61,7 +61,7 @@
 2. Exactly **one active Strategi per Contract**. Multiple contracts for the same client = multiple Strategi records.
 3. **Channel sub-blocks are driven by the contract**, not by AM choice: every channel listed in the contract scope generates a mandatory sub-block. The AM cannot submit while any contracted channel's sub-block is incomplete.
 4. A channel may be marked `Belum Aktif` (not yet live) — this **skips the historical baseline fields** but still requires the launch-plan fields (Section B, group B-0).
-5. **Baseline is numeric and sourced.** Every baseline group requires: the figure, the period it covers, and a source (attached export/screenshot + capture date). Strategi cannot be submitted with baseline fields left blank; `0` is a valid answer, blank is not.
+5. **Baseline is numeric and sourced.** Every baseline group requires: the figure, the period it covers, and a source (attached export/screenshot + capture date). Strategi cannot be submitted with baseline fields left blank; `0` is a valid answer, blank is not. **⟳ RAB-19 (DECISIONS 2026-08-18): this rule is NOT loosened by D5/D18/OA-9 — it is finally *satisfied*.** The Riset Awal engine proposes the figure + period + provenance from the AM-pulled export; the AM confirms each. "Sourced" now has a real pipeline (`riset_awal_analisa` + `riset_awal_sumber_berkas`, `sha256` + capture date) instead of an unfilled requirement.
 5a. **The baseline window is declared by the AM per contract, per channel** (field B-0.7) — there is no globally fixed 3-month rule, because contracts differ (new store, seasonal category, post-freeze store). Allowed range 1–6 months, default 3. A window shorter than 3 months requires a written reason. Once the Strategi is approved the window is locked; changing it is a revision (Rule 13), so later performance is always compared against the same yardstick.
 6. **Diagnosis must cite baseline.** Each root-cause entry in Section C must reference at least one baseline field ID. A diagnosis with no numeric reference fails validation.
 7. **Target floor is read-only.** The contract target is pulled from the Contract record (Module 4) and cannot be edited in Strategi. The stretch target must be `>=` floor; if the AM believes the floor is unachievable, they raise `Sanggahan Target` (Section D-7) which routes to SPV — it does not lower the floor.
@@ -432,7 +432,7 @@ Relation: `STRG_PILLAR` (type `live`) → `VND` (FK, nullable until vendor selec
 | OA-6 | Live Stream mode | Vendor tracker, same as MSDPS; excluded from internal capacity (Rule 18) |
 | OA-7 | Over-commitment tolerance | 20% default (F-7) |
 | OA-8 | Client visibility | Strategi is shared with the client; two visibility tiers with a hard-internal list (§4.1, Rule 16) |
-| OA-9 | Baseline auto-population | Manual entry. Report-engine auto-pull explicitly out of scope for this version |
+| OA-9 | Baseline auto-population | **⟳ RAB-19 (DECISIONS 2026-08-18):** now **in scope** via the usulan→konfirmasi model — the Riset Awal engine proposes figures from AM-pulled exports, the AM confirms each per Rule 5. Superseded original: "auto-population explicitly out of scope for this version". |
 
 ### 8.2 Residual — resolved (round 2)
 | ID | Question | Decision |
