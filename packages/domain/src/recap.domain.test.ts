@@ -116,6 +116,10 @@ afterEach(async () => {
   await sql`delete from wrr_divisi where recap_id in (select id from weekly_result_recap where client_id like 'ZZD-CLI-%')`;
   await sql`delete from wrr_catatan where recap_id in (select id from weekly_result_recap where client_id like 'ZZD-CLI-%')`;
   await sql`delete from weekly_result_recap where client_id like 'ZZD-CLI-%'`;
+  // C7 children (FK to clients) — must go before the client delete.
+  await sql`delete from complaints where client_id like 'ZZD-CLI-%'`;
+  await sql`delete from briefs where service_id in (select id from services where client_id like 'ZZD-CLI-%')`;
+  await sql`delete from services where client_id like 'ZZD-CLI-%'`;
   await sql`delete from clients where id like 'ZZD-CLI-%'`;
 });
 afterAll(async () => { if (sql) await sql.end(); });
@@ -135,6 +139,90 @@ describeDb('reads (D-09)', () => {
               values (${recap}, 'Creative', 4, '{}'::jsonb, 'SISTEM')`;
     const d = await getRecapDetail(sql, actorCreativeLead, recap);
     expect(d.divisi.map((x) => x.divisi)).toContain('Creative');
+  });
+});
+
+describeDb('RM-A5 Service Aktif + RM-D4 Keluhan Terkait (C7)', () => {
+  // The seeded recap window is [2026-08-10, 2026-08-16]. Local id counter — must
+  // NOT touch the module-level `seq` (it feeds iso_week = 33 + seq, capped at 53).
+  let c7seq = 0;
+  async function seedService(client: string, name: string): Promise<string> {
+    c7seq += 1;
+    const svc = `ZZD-SVC-${RUN}-${c7seq}`;
+    await sql`
+      insert into services (id, client_id, master_service_id, master_version_no, name,
+        standard_price, commission_rule, status, requires_strategy_plan, created_by)
+      values (${svc}, ${client}, 'MSV-X', 1, ${name}, 0, 'rule', '[Briefed]', false, 'SISTEM')`;
+    return svc;
+  }
+  async function seedBrief(svc: string, division: string, createdAt: string): Promise<string> {
+    c7seq += 1;
+    const brief = `ZZD-BRF-${RUN}-${c7seq}`;
+    await sql`
+      insert into briefs (id, service_id, title, status, assigned_division, deliverable_type,
+        quantity_target, priority, recurring, created_at, created_by)
+      values (${brief}, ${svc}, 'B', '[To Do]', ${division}, 'Video', 1, 'High', false, ${createdAt}, 'SISTEM')`;
+    return brief;
+  }
+  async function seedTransition(entityType: string, entityId: string, to: string, at: string): Promise<void> {
+    await sql`insert into audit_log (entity_type, entity_id, actor_employee_id, action, created_at, created_by)
+              values (${entityType}, ${entityId}, 'SISTEM', ${`transition:[X]->${to}`}, ${at}, 'SISTEM')`;
+  }
+  async function seedComplaint(client: string, status: string, createdAt: string): Promise<string> {
+    c7seq += 1;
+    const cpl = `ZZD-CPL-${RUN}-${c7seq}`;
+    await sql`
+      insert into complaints (id, client_id, source, description, severity, status, created_at, created_by)
+      values (${cpl}, ${client}, 'WhatsApp (AM-logged)', 'keluhan', 'High', ${status}, ${createdAt}, 'SISTEM')`;
+    return cpl;
+  }
+
+  it('RM-A5: lists services with a Brief created in — or transitioned within — the week, with divisions', async () => {
+    const { recap, client } = await seedOpenRecap();
+    // S1: two Briefs created inside the window → listed once with both divisions (sorted).
+    const s1 = await seedService(client, 'Paket Konten');
+    await seedBrief(s1, 'KOL', '2026-08-12T03:00:00Z');
+    await seedBrief(s1, 'Creative', '2026-08-11T03:00:00Z');
+    // S2: only a Brief created BEFORE the window, no transition this week → excluded.
+    const s2 = await seedService(client, 'Paket Lama');
+    await seedBrief(s2, 'Ads', '2026-07-01T03:00:00Z');
+    // S3: Brief created before the window BUT with a transition inside it → included (audit arm).
+    const s3 = await seedService(client, 'Paket Aktif');
+    const b3 = await seedBrief(s3, 'Live Stream', '2026-07-01T03:00:00Z');
+    await seedTransition('brief', b3, '[Submitted]', '2026-08-13T03:00:00Z');
+
+    const d = await getRecapDetail(sql, actorAm, recap);
+    const byId = Object.fromEntries(d.serviceAktif.map((s) => [s.serviceId, s]));
+    expect(Object.keys(byId).sort()).toEqual([s1, s3].sort());
+    expect(byId[s1].divisions).toEqual(['Creative', 'KOL']);
+    expect(byId[s1].serviceName).toBe('Paket Konten');
+    expect(byId[s3].divisions).toEqual(['Live Stream']);
+    expect(byId[s2]).toBeUndefined();
+  });
+
+  it('RM-D4: lists complaints active during the week with their current status; excludes pre-week-closed and future', async () => {
+    const { recap, client } = await seedOpenRecap();
+    // A: created inside window, [Open] → included.
+    const a = await seedComplaint(client, '[Open]', '2026-08-12T03:00:00Z');
+    // B: created before window, still [In Progress] → included (active during week).
+    const b = await seedComplaint(client, '[In Progress]', '2026-08-01T03:00:00Z');
+    // C: created before window, closed BEFORE week start → excluded.
+    const c = await seedComplaint(client, '[Closed]', '2026-08-01T03:00:00Z');
+    await seedTransition('complaint', c, '[Closed]', '2026-08-05T03:00:00Z');
+    // D: created AFTER the window → excluded.
+    await seedComplaint(client, '[Open]', '2026-08-20T03:00:00Z');
+    // E: created before window, closed DURING the week → included (was active at week start).
+    const e = await seedComplaint(client, '[Closed]', '2026-08-01T03:00:00Z');
+    await seedTransition('complaint', e, '[Closed]', '2026-08-14T03:00:00Z');
+
+    const d = await getRecapDetail(sql, actorAm, recap);
+    const byId = Object.fromEntries(d.keluhanTerkait.map((k) => [k.id, k]));
+    expect(Object.keys(byId).sort()).toEqual([a, b, e].sort());
+    expect(byId[a].status).toBe('[Open]');
+    expect(byId[b].status).toBe('[In Progress]');
+    expect(byId[e].status).toBe('[Closed]'); // current status shown even though included
+    expect(byId[a].severity).toBe('High');
+    expect(byId[a].source).toBe('WhatsApp (AM-logged)');
   });
 });
 

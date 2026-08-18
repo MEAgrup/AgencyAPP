@@ -518,6 +518,93 @@ export async function listBriefAssets(sql: Queryable, actor: Actor, briefId: str
   return rows.map(rowToAsset);
 }
 
+// ---------------------------------------------------------------------------
+// Personal Asset queue (M7 §3 Rule 2 / §9.1 — "own Asset queue").
+//
+// §3 Rule 2 verbatim: "Each Creative staff member sees a personal queue: all
+// Assets assigned to them, across all Briefs/clients, sorted by due date." Until
+// now M7 had no cross-Brief read for this — the FE workspace even said so ("M7
+// tidak punya endpoint agregat lintas-Brief untuk personal queue") — so a PIC had
+// to open each Brief to find their own work. listMyAssets closes that gap.
+//
+// SELF-SCOPED, so it does NOT reuse assetSelect's `private.brief_owner_am` door:
+// the caller only ever sees rows where `assigned_pic = actor.employeeId`, and the
+// display needs the client shop name (`clients.toko`) + Brief context. Joining
+// `services`/`clients` under RLS would erase the PIC's own rows (the O52 trap —
+// neither policy has an execution-division arm). The route therefore runs this on
+// the service-role client (RLS bypassed), exactly like recap.getRecapDetail: the
+// hard `assigned_pic = ${actor.employeeId}` filter is the scope, so no row the
+// caller may not see is ever returned. No new gate is needed — there is no target
+// parameter, so a caller can only ever read their OWN queue (empty for non-PICs).
+// ---------------------------------------------------------------------------
+
+/** One row of a PIC's personal Asset queue (§3 Rule 2) — the Asset plus the Brief/client context the queue view needs. */
+export interface MyAssetQueueItem {
+  id: string; // AST-
+  briefId: string;
+  briefTitle: string;
+  serviceId: string; // SVC-
+  clientId: string; // CLI-
+  clientName: string; // clients.toko (the store name shown to staff)
+  assetType: string;
+  sequenceNo: number;
+  status: string;
+  priority: string; // Brief priority (High/Medium/Low, free-text per M6)
+  dueDate: string | null; // Brief Due Date (SLA), YYYY-MM-DD or null
+  slaTargetHours: number | null;
+  revisionSlaHours: number | null;
+  createdAt: Date;
+}
+
+interface MyAssetQueueRow {
+  id: string;
+  brief_id: string;
+  brief_title: string;
+  service_id: string;
+  client_id: string;
+  client_name: string;
+  asset_type: string;
+  sequence_no: number;
+  status: string;
+  priority: string;
+  due_date: string | Date | null;
+  sla_target_hours: string | null;
+  revision_sla_target_hours: string | null;
+  created_at: Date;
+}
+
+/**
+ * listMyAssets returns every Asset assigned to `actor`, across all Briefs/clients,
+ * sorted by the Brief's Due Date (§3 Rule 2). No status filter — the PRD says "all
+ * Assets assigned to them", so a done ([Approved]) Asset still appears (its status
+ * badge tells the PIC it is finished). Due-date NULLs sort last; ties break by
+ * creation order then Sequence #.
+ *
+ * MUST be given the service-role client (see the section header): the query is
+ * hard-scoped to the caller's own `assigned_pic`, so service-role is safe and
+ * avoids the O52 client-join row erasure that RLS would cause for Creative staff.
+ */
+export async function listMyAssets(sql: Queryable, actor: Actor): Promise<MyAssetQueueItem[]> {
+  const rows = await sql<MyAssetQueueRow[]>`
+    select a.id, a.brief_id, b.title as brief_title, sv.id as service_id, sv.client_id,
+           c.toko as client_name, a.asset_type, a.sequence_no, a.status, b.priority, b.due_date,
+           a.sla_target_hours, a.revision_sla_target_hours, a.created_at
+      from assets a
+      join briefs b on b.id = a.brief_id
+      join services sv on sv.id = b.service_id
+      join clients c on c.id = sv.client_id
+     where a.assigned_pic = ${actor.employeeId}
+     order by (b.due_date is null) asc, b.due_date asc, a.created_at asc, a.sequence_no asc`;
+  return rows.map((r) => ({
+    id: r.id, briefId: r.brief_id, briefTitle: r.brief_title, serviceId: r.service_id,
+    clientId: r.client_id, clientName: r.client_name, assetType: r.asset_type, sequenceNo: r.sequence_no,
+    status: r.status, priority: r.priority,
+    dueDate: r.due_date === null ? null : (r.due_date instanceof Date ? r.due_date.toISOString().slice(0, 10) : String(r.due_date).slice(0, 10)),
+    slaTargetHours: numOrNull(r.sla_target_hours), revisionSlaHours: numOrNull(r.revision_sla_target_hours),
+    createdAt: r.created_at,
+  }));
+}
+
 // --- Helpers ---
 
 interface AssetRow {

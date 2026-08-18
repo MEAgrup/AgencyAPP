@@ -728,6 +728,43 @@ export interface AssetWire {
   created_at: string;
 }
 
+/** creative.MyAssetQueueItem → wire (M7 §3 Rule 2 personal Asset queue). */
+export interface MyAssetQueueItemWire {
+  id: string;
+  brief_id: string;
+  brief_title: string;
+  service_id: string;
+  client_id: string;
+  client_name: string;
+  asset_type: string;
+  sequence_no: number;
+  status: string;
+  priority: string;
+  due_date: string | null;
+  sla_target_hours: number | null;
+  revision_sla_target_hours: number | null;
+  created_at: string;
+}
+
+export function myAssetQueueItemToWire(a: creative.MyAssetQueueItem): MyAssetQueueItemWire {
+  return {
+    id: a.id,
+    brief_id: a.briefId,
+    brief_title: a.briefTitle,
+    service_id: a.serviceId,
+    client_id: a.clientId,
+    client_name: a.clientName,
+    asset_type: a.assetType,
+    sequence_no: a.sequenceNo,
+    status: a.status,
+    priority: a.priority,
+    due_date: a.dueDate,
+    sla_target_hours: a.slaTargetHours,
+    revision_sla_target_hours: a.revisionSlaHours,
+    created_at: a.createdAt.toISOString(),
+  };
+}
+
 export function assetToWire(a: creative.Asset): AssetWire {
   return {
     id: a.id,
@@ -5368,6 +5405,23 @@ export interface RecapCatatanDivisiWire {
   created_by: string;
 }
 
+/** recap.RecapServiceAktif → wire (RM-A5 Service Aktif Minggu Ini). */
+export interface RecapServiceAktifWire {
+  service_id: string;
+  service_name: string;
+  divisions: string[];
+}
+
+/** recap.RecapKeluhanTerkait → wire (RM-D4 Keluhan Terkait). */
+export interface RecapKeluhanTerkaitWire {
+  id: string;
+  source: string;
+  severity: string;
+  status: string;
+  related_ref: string | null;
+  created_at: string;
+}
+
 /** recap.RecapDetail → RecapDetailWire (the whole recap bundle for the detail page). */
 export interface RecapDetailWire {
   recap: RecapWire;
@@ -5375,6 +5429,8 @@ export interface RecapDetailWire {
   metrik: RecapMetrikWire[];
   catatan: RecapCatatanWire | null;
   catatan_divisi: RecapCatatanDivisiWire[];
+  service_aktif: RecapServiceAktifWire[];
+  keluhan_terkait: RecapKeluhanTerkaitWire[];
 }
 
 /** Maps a domain Recap (camelCase) to the RecapWire shape. */
@@ -5446,6 +5502,27 @@ export function recapCatatanDivisiToWire(c: recap.RecapCatatanDivisi): RecapCata
   };
 }
 
+/** Maps a domain RecapServiceAktif to the RecapServiceAktifWire shape. */
+export function recapServiceAktifToWire(s: recap.RecapServiceAktif): RecapServiceAktifWire {
+  return {
+    service_id: s.serviceId,
+    service_name: s.serviceName,
+    divisions: s.divisions,
+  };
+}
+
+/** Maps a domain RecapKeluhanTerkait to the RecapKeluhanTerkaitWire shape. */
+export function recapKeluhanTerkaitToWire(k: recap.RecapKeluhanTerkait): RecapKeluhanTerkaitWire {
+  return {
+    id: k.id,
+    source: k.source,
+    severity: k.severity,
+    status: k.status,
+    related_ref: k.relatedRef,
+    created_at: k.createdAt,
+  };
+}
+
 /** Maps a domain RecapDetail bundle to the RecapDetailWire shape. */
 export function recapDetailToWire(d: recap.RecapDetail): RecapDetailWire {
   return {
@@ -5454,6 +5531,8 @@ export function recapDetailToWire(d: recap.RecapDetail): RecapDetailWire {
     metrik: d.metrik.map(recapMetrikToWire),
     catatan: d.catatan === null ? null : recapCatatanToWire(d.catatan),
     catatan_divisi: d.catatanDivisi.map(recapCatatanDivisiToWire),
+    service_aktif: d.serviceAktif.map(recapServiceAktifToWire),
+    keluhan_terkait: d.keluhanTerkait.map(recapKeluhanTerkaitToWire),
   };
 }
 

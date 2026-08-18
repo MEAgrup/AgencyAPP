@@ -254,6 +254,35 @@ export function listBriefAssets(briefId: string): Promise<{ data: Asset[] }> {
   return api.get<{ data: Asset[] }>(`/briefs/${briefId}/assets`);
 }
 
+// module7_creative.MyAssetQueueItem — the personal Asset queue (M7 §3 Rule 2:
+// "all Assets assigned to them, across all Briefs/clients, sorted by due date").
+// due_date / sla_* arrive as JSON `null` when unset (not omitted) — this is a
+// list read-model, not the Asset entity's omitempty shape.
+export interface MyAssetQueueItem {
+  id: string;
+  brief_id: string;
+  brief_title: string;
+  service_id: string;
+  client_id: string;
+  client_name: string;
+  asset_type: string;
+  sequence_no: number;
+  status: string;
+  priority: string;
+  due_date: string | null;
+  sla_target_hours: number | null;
+  revision_sla_target_hours: number | null;
+  created_at: string;
+}
+
+/**
+ * The caller's personal Asset queue across every Brief/client (M7 §3 Rule 2).
+ * Self-scoped server-side — always returns only the logged-in PIC's own Assets.
+ */
+export function listMyAssets(): Promise<{ data: MyAssetQueueItem[] }> {
+  return api.get<{ data: MyAssetQueueItem[] }>('/assets/mine');
+}
+
 export function getAsset(id: string): Promise<Asset> {
   return api.get<Asset>(`/assets/${id}`);
 }

@@ -26,6 +26,7 @@ import {
   ForbiddenError,
   getAsset,
   listBriefAssets,
+  listMyAssets,
   logHours,
   MSG_INVALID_PIC,
   MSG_INVALID_QUANTITY,
@@ -414,6 +415,47 @@ describeDb('Asset block workflow', () => {
     const req = await submitAssetBlockRequest(sql, staff, a.id, 'menunggu brief tambahan');
     await approveAssetBlockRequest(sql, creativeLead(), a.id, req.id);
     expect(await assetStatus(a.id)).toBe('[Blocked]');
+  });
+});
+
+describeDb('listMyAssets — personal Asset queue (§3 Rule 2)', () => {
+  it('returns only the caller\'s Assets, across Briefs/clients, sorted by due date (NULLs last)', async () => {
+    await registerStaff('ZZ-RIAN', 'Creative', 'staff');
+    await registerStaff('ZZ-DITA', 'Creative', 'staff');
+    const rian = creativeStaff('ZZ-RIAN');
+
+    // Two Briefs on two clients, with different Due Dates; one Brief left with no Due Date.
+    const early = await creativeBrief(2); // due 2026-09-01
+    const late = await creativeBrief(2); // due 2026-09-20
+    const undated = await creativeBrief(1); // no due_date
+    await sql`update briefs set due_date = '2026-09-01' where id = ${early.briefId}`;
+    await sql`update briefs set due_date = '2026-09-20' where id = ${late.briefId}`;
+
+    // Rian self-claims one Asset in each Brief; Dita takes one in `late` (must NOT appear for Rian).
+    const aLate = await createAsset(sql, rian, late.briefId, { sequenceNo: 1 });
+    const aEarly = await createAsset(sql, rian, early.briefId, { sequenceNo: 1 });
+    const aUndated = await createAsset(sql, rian, undated.briefId, { sequenceNo: 1 });
+    await createAsset(sql, creativeStaff('ZZ-DITA'), late.briefId, { sequenceNo: 2 });
+
+    const queue = await listMyAssets(sql, rian);
+    // Cross-brief, own-only, sorted by due date ascending with NULLs last.
+    expect(queue.map((q) => q.id)).toEqual([aEarly.id, aLate.id, aUndated.id]);
+    expect(queue.every((q) => q.status === '[To Do]')).toBe(true);
+    // Carries the Brief/client context the queue view needs.
+    const first = queue[0];
+    expect(first.id).toBe(aEarly.id);
+    expect(first.dueDate).toBe('2026-09-01');
+    expect(first.priority).toBe('High');
+    expect(first.clientName).toBe(first.clientId); // fixture sets clients.toko = client id
+    expect(first.clientId).toMatch(/^CLI-/);
+    expect(first.serviceId).toMatch(/^SVC-/);
+    expect(queue.find((q) => q.id === aUndated.id)?.dueDate).toBeNull();
+
+    // Dita sees only her own; a non-PIC (AM) sees an empty queue.
+    const dita = await listMyAssets(sql, creativeStaff('ZZ-DITA'));
+    expect(dita.map((q) => q.id)).toEqual([expect.any(String)]);
+    expect(dita.every((q) => q.id !== aEarly.id && q.id !== aLate.id && q.id !== aUndated.id)).toBe(true);
+    expect(await listMyAssets(sql, am())).toEqual([]);
   });
 });
 

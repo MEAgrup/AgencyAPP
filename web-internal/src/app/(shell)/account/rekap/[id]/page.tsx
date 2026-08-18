@@ -235,6 +235,25 @@ export default function RekapDetailPage({ params }: { params: Promise<{ id: stri
       {actionError && <p className="error">{actionError}</p>}
       {actionMessage && <p className="success">{actionMessage}</p>}
 
+      {/* RM-A5 — Service Aktif Minggu Ini (auto) */}
+      <section>
+        <h2>Service Aktif Minggu Ini</h2>
+        {detail.service_aktif.length === 0 ? (
+          <p><em>Tidak ada service dengan Brief berjalan minggu ini.</em></p>
+        ) : (
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {detail.service_aktif.map((s) => (
+              <li key={s.service_id}>
+                <strong>{s.service_name}</strong> <span style={{ fontSize: 13, color: 'var(--muted, #666)' }}>({s.service_id})</span>
+                {s.divisions.length > 0 && (
+                  <> — {s.divisions.join(', ')}</>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       {/* RM-A6 — Catatan Pembuka */}
       <section>
         <h2>Catatan Pembuka</h2>
@@ -377,6 +396,30 @@ export default function RekapDetailPage({ params }: { params: Promise<{ id: stri
             <dt>Bahan untuk Klien</dt><dd>{detail.catatan?.bahan_untuk_klien ?? '—'}</dd>
             <dt>Catatan Metrik Tambahan</dt><dd>{detail.catatan?.catatan_metrik_tambahan ?? '—'}</dd>
           </dl>
+        )}
+      </section>
+
+      {/* RM-D4 — Keluhan Terkait (auto) */}
+      <section>
+        <h2>Keluhan Terkait</h2>
+        {detail.keluhan_terkait.length === 0 ? (
+          <p><em>Tidak ada keluhan aktif minggu ini.</em></p>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr><th>ID</th><th>Sumber</th><th>Severity</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              {detail.keluhan_terkait.map((k) => (
+                <tr key={k.id}>
+                  <td>{k.id}</td>
+                  <td>{k.source}</td>
+                  <td>{k.severity}</td>
+                  <td><StatusBadge status={k.status} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </section>
 
