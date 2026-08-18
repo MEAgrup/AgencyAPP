@@ -1511,6 +1511,20 @@ export const BRIEF_STATUS_REVISION_REQ = '[Revision Requested]';
 const SERVICE_STATUS_BRIEFED = '[Briefed]';
 const SERVICE_STATUS_IN_EXECUTION = '[In Execution]';
 
+/**
+ * isServiceBriefable — a Brief may only be born on the live path (§5). Terminal
+ * Services ([Done] / [Voided]) reject. One definition shared by `createBrief` and
+ * M6B one-click inheritance so both agree on which Services can still be briefed.
+ */
+export function isServiceBriefable(status: string): boolean {
+  return (
+    status === SERVICE_STATUS_AWAITING_ONBOARDING ||
+    status === SERVICE_STATUS_STRATEGY_APPROVED ||
+    status === SERVICE_STATUS_BRIEFED ||
+    status === SERVICE_STATUS_IN_EXECUTION
+  );
+}
+
 /** The outsourced-vendor division (§6 Rule 2). */
 export const DIVISION_LIVE_STREAM = 'Live Stream';
 /** §7 Rule 4 / M6-OA-3: a Brief crossing 3 revisions is surfaced for SPV visibility. */
@@ -1518,7 +1532,7 @@ const BRIEF_REVISION_FLAG_THRESHOLD = 3;
 
 const MACHINE_BRIEF_TASK = 'brief_task';
 
-const ALLOWED_PRIORITIES = new Set(['Low', 'Medium', 'High']);
+export const ALLOWED_PRIORITIES = new Set(['Low', 'Medium', 'High']);
 
 // --- Verbatim BI messages (M6 §5/§6/§7). Each mirrors a Go sentinel 1:1. ---
 
@@ -1626,6 +1640,91 @@ function orNull(s: string | undefined): string | null {
 }
 
 /**
+ * insertBrief is the single place a Brief ROW is born (§5 / M6-OA). Both the
+ * manual STR- path (`createBrief`) and the M6B one-click inheritance
+ * (`brief-inherit.ts::inheritBriefsFromPlan`) mint the BRF- id, insert the row,
+ * and append the immutable `create` audit here — so a Brief can never be born two
+ * subtly different ways (the O43 "second version of the same rule" class). The
+ * caller has already run its own gate (STR- strategy gate, or the Plan-active
+ * gate) and resolved `serviceId` / `strategyId` / `planRowId`; this helper does
+ * NOT gate and assumes `input` is already validated (see `validateBrief`).
+ *
+ * `strategyId` (STR-, `strategy_plans`) and `planRowId` (M6B, `plan_row`) are the
+ * two mutually-exclusive origins of a Brief: a manual Brief carries a strategy_id
+ * or NULL, an inherited Brief carries a plan_row_id. See the migration
+ * 20260818000000 for why they are separate columns.
+ */
+export async function insertBrief(
+  tx: Queryable,
+  actor: Actor,
+  args: { serviceId: string; strategyId: string | null; planRowId: number | null; input: BriefInput; now: Date },
+): Promise<Brief> {
+  const ex = executors(tx);
+  const { serviceId, strategyId, planRowId, input, now } = args;
+  const id = await ex.ident.identNext('BRF', now);
+  const birth = input.assignedDivision === DIVISION_LIVE_STREAM ? BRIEF_STATUS_VENDOR_DISPATCHED : BRIEF_STATUS_TODO;
+  const recurring = input.recurring === true;
+  const recCount = recurring && (input.recurringCount ?? 0) > 0 ? input.recurringCount! : null;
+
+  await tx`
+    insert into briefs
+      (id, service_id, strategy_id, plan_row_id, assigned_division, assigned_pic, deliverable_type,
+       quantity_target, due_date, priority, recurring, recurring_frequency, recurring_count,
+       recurring_end_date, instructions, reference_attachments, title, status, created_by)
+    values (${id}, ${serviceId}, ${strategyId}, ${planRowId}, ${input.assignedDivision}, ${orNull(input.assignedPic)},
+      ${input.deliverableType}, ${input.quantityTarget}, ${input.dueDate.trim()}, ${input.priority}, ${recurring},
+      ${orNull(input.recurringFrequency)}, ${recCount}, ${orNull(input.recurringEndDate)},
+      ${orNull(input.instructions)}, ${orNull(input.referenceAttachments)}, ${input.title.trim()}, ${birth},
+      ${actor.employeeId})`;
+  await ex.audit.insertAudit({
+    entityType: 'brief', entityId: id, actorEmployeeId: actor.employeeId, action: 'create',
+    beforeJson: null,
+    afterJson: {
+      status: birth, service_id: serviceId, assigned_division: input.assignedDivision,
+      ...(planRowId !== null ? { plan_row_id: planRowId } : {}),
+    },
+    createdBy: actor.employeeId,
+  });
+
+  return {
+    id, serviceId, strategyId: strategyId ?? '', assignedDivision: input.assignedDivision,
+    assignedPic: (input.assignedPic ?? '').trim(), deliverableType: input.deliverableType,
+    quantityTarget: input.quantityTarget, dueDate: input.dueDate.trim(), priority: input.priority,
+    recurring, recurringFrequency: (input.recurringFrequency ?? '').trim(), recurringCount: recCount ?? 0,
+    recurringEndDate: (input.recurringEndDate ?? '').trim(), instructions: (input.instructions ?? '').trim(),
+    referenceAttachments: (input.referenceAttachments ?? '').trim(), title: input.title.trim(), status: birth,
+    revisionCount: 0, revisionFlagged: false, createdBy: actor.employeeId, createdAt: now,
+  };
+}
+
+/**
+ * advanceServiceToBriefed drives a Service [Awaiting Onboarding] / [Strategy
+ * Approved] → [Briefed] when its first Brief is created (§5 Flow 2). Idempotent:
+ * a Service already [Briefed] / [In Execution] (or terminal) is a no-op, so it is
+ * safe to call once per inherited row that shares a Service. Shared by M6B
+ * one-click inheritance (`brief-inherit.ts`); `createBrief` inlines the same edge
+ * off its already-locked Service row.
+ */
+export async function advanceServiceToBriefed(tx: Queryable, actor: Actor, serviceId: string): Promise<void> {
+  const rows = await tx<{ status: string }[]>`select status from services where id = ${serviceId} for update`;
+  if (rows.length === 0) {
+    throw new NotFoundError(MSG_SERVICE_NOT_FOUND);
+  }
+  const status = rows[0].status;
+  if (status !== SERVICE_STATUS_AWAITING_ONBOARDING && status !== SERVICE_STATUS_STRATEGY_APPROVED) {
+    return;
+  }
+  const ex = executors(tx);
+  const res = await statemachine.transition(ex.sm, {
+    machine: MACHINE_SERVICE, entityType: 'service', table: 'services',
+    entityId: serviceId, to: SERVICE_STATUS_BRIEFED, actor,
+  });
+  if (!res.ok) {
+    throw transitionError(res);
+  }
+}
+
+/**
  * createBrief breaks a Service down into one Brief for a target division (§5).
  * Owning AM (or Director) only; the Strategy gate is enforced by guardBriefCreation.
  * The first Brief advances the Service to [Briefed] in the same transaction. A
@@ -1651,10 +1750,7 @@ export async function createBrief(sql: Sql, actor: Actor, serviceId: string, inp
       throw new ForbiddenError(MSG_BRIEF_CREATE_FORBIDDEN);
     }
     // Briefable only on the live path; terminal Services (Done / Voided) reject.
-    if (
-      svc.status !== SERVICE_STATUS_AWAITING_ONBOARDING && svc.status !== SERVICE_STATUS_STRATEGY_APPROVED &&
-      svc.status !== SERVICE_STATUS_BRIEFED && svc.status !== SERVICE_STATUS_IN_EXECUTION
-    ) {
+    if (!isServiceBriefable(svc.status)) {
       throw new ConflictError(MSG_SERVICE_NOT_BRIEFABLE);
     }
     // §5 Rule 5 gate: plan-gated + still [Awaiting Onboarding] is rejected.
@@ -1663,26 +1759,10 @@ export async function createBrief(sql: Sql, actor: Actor, serviceId: string, inp
     const planGated = effectiveRequiresPlan(svc.requires_strategy_plan, svc.requires_strategy_plan_override);
     const strategyId = await resolveBriefStrategy(tx, serviceId, planGated, (input.strategyId ?? '').trim());
 
-    const id = await ex.ident.identNext('BRF', now);
-    const birth = input.assignedDivision === DIVISION_LIVE_STREAM ? BRIEF_STATUS_VENDOR_DISPATCHED : BRIEF_STATUS_TODO;
-    const recurring = input.recurring === true;
-    const recCount = recurring && (input.recurringCount ?? 0) > 0 ? input.recurringCount! : null;
-
-    await tx`
-      insert into briefs
-        (id, service_id, strategy_id, assigned_division, assigned_pic, deliverable_type,
-         quantity_target, due_date, priority, recurring, recurring_frequency, recurring_count,
-         recurring_end_date, instructions, reference_attachments, title, status, created_by)
-      values (${id}, ${serviceId}, ${strategyId}, ${input.assignedDivision}, ${orNull(input.assignedPic)},
-        ${input.deliverableType}, ${input.quantityTarget}, ${input.dueDate.trim()}, ${input.priority}, ${recurring},
-        ${orNull(input.recurringFrequency)}, ${recCount}, ${orNull(input.recurringEndDate)},
-        ${orNull(input.instructions)}, ${orNull(input.referenceAttachments)}, ${input.title.trim()}, ${birth},
-        ${actor.employeeId})`;
-    await ex.audit.insertAudit({
-      entityType: 'brief', entityId: id, actorEmployeeId: actor.employeeId, action: 'create',
-      beforeJson: null, afterJson: { status: birth, service_id: serviceId, assigned_division: input.assignedDivision },
-      createdBy: actor.employeeId,
-    });
+    // Brief-birth (id + insert + create-audit) lives in the shared `insertBrief`;
+    // the manual STR- path carries a strategy_id and no plan_row link.
+    const brief = await insertBrief(tx, actor, { serviceId, strategyId, planRowId: null, input, now });
+    const id = brief.id;
 
     // §5 Flow 2: the FIRST Brief advances the Service to [Briefed].
     if (svc.status === SERVICE_STATUS_AWAITING_ONBOARDING || svc.status === SERVICE_STATUS_STRATEGY_APPROVED) {
@@ -1702,15 +1782,7 @@ export async function createBrief(sql: Sql, actor: Actor, serviceId: string, inp
       });
     }
 
-    return {
-      id, serviceId, strategyId: strategyId ?? '', assignedDivision: input.assignedDivision,
-      assignedPic: (input.assignedPic ?? '').trim(), deliverableType: input.deliverableType,
-      quantityTarget: input.quantityTarget, dueDate: input.dueDate.trim(), priority: input.priority,
-      recurring, recurringFrequency: (input.recurringFrequency ?? '').trim(), recurringCount: recCount ?? 0,
-      recurringEndDate: (input.recurringEndDate ?? '').trim(), instructions: (input.instructions ?? '').trim(),
-      referenceAttachments: (input.referenceAttachments ?? '').trim(), title: input.title.trim(), status: birth,
-      revisionCount: 0, revisionFlagged: false, createdBy: actor.employeeId, createdAt: now,
-    };
+    return brief;
   });
 }
 

@@ -7,7 +7,7 @@
  */
 import { money, tz } from '@cdps/core';
 import type { interview as ivcore } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, campaign, client, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, risetAwal, sales, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, risetAwal, sales, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -3297,6 +3297,26 @@ export function planActualToWire(a: plan.PlanActual): PlanActualWire {
     file_bukti: a.fileBukti,
     tanggal_ambil: a.tanggalAmbil,
     sengketa: a.sengketa,
+  };
+}
+
+// RAB-16 — one-click Brief inheritance result. `created` reuses `briefToWire`
+// (a Brief born from a plan_row is a Brief like any other); `skipped` reports
+// every row NOT briefed, with a machine reason code the page renders itself.
+export interface BriefInheritSkipWire {
+  plan_row_id: number;
+  reason: string;
+}
+
+export interface BriefInheritResultWire {
+  created: BriefWire[];
+  skipped: BriefInheritSkipWire[];
+}
+
+export function briefInheritResultToWire(r: briefInherit.BriefInheritResult): BriefInheritResultWire {
+  return {
+    created: r.created.map(briefToWire),
+    skipped: r.skipped.map((s) => ({ plan_row_id: s.planRowId, reason: s.reason })),
   };
 }
 

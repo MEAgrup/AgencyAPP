@@ -415,6 +415,9 @@ const WIRE_TO_FE: Record<string, string> = {
   PlanRowWire: 'plan.ts::PlanRow',
   PlanRowWeekWire: 'plan.ts::PlanRowWeek',
   PlanActualWire: 'plan.ts::PlanActual',
+  // RAB-16 — one-click Brief inheritance result (created Briefs + skipped rows).
+  BriefInheritResultWire: 'plan.ts::BriefInheritResult',
+  BriefInheritSkipWire: 'plan.ts::BriefInheritSkip',
   // M6A — Vendor (VND-) and Strategi (STRG-). The Section A→J form is backlog
   // A-05…A-09; the FE types exist now because a converter with no declared FE
   // type is a converter this guard cannot check.
