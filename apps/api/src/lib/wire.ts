@@ -1851,6 +1851,7 @@ export interface MgmtRowWire {
   client_id: string;
   client_name: string;
   assigned_am: string;
+  board_ref: string;
   snapshot_id: string;
   period: string;
   score_display: string;
@@ -1864,6 +1865,7 @@ export interface MgmtRowWire {
 export interface ManagementDashboardWire {
   filter_band: string;
   filter_am: string;
+  filter_division: string;
   sort: string;
   rows: MgmtRowWire[];
 }
@@ -1872,9 +1874,10 @@ export function managementDashboardToWire(d: portal.ManagementDashboard): Manage
   return {
     filter_band: d.filterBand,
     filter_am: d.filterAm,
+    filter_division: d.filterDivision,
     sort: d.sort,
     rows: d.rows.map((r) => ({
-      client_id: r.clientId, client_name: r.clientName, assigned_am: r.assignedAm,
+      client_id: r.clientId, client_name: r.clientName, assigned_am: r.assignedAm, board_ref: r.boardRef,
       snapshot_id: r.snapshotId, period: r.period, score_display: r.scoreDisplay, band: r.band,
       trend_direction: r.trendDirection, dragging_component: r.draggingComponent, dragging_capped: r.draggingCapped,
     })),

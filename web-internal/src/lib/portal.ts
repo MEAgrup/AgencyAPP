@@ -43,6 +43,7 @@ export interface MgmtRow {
   client_id: string;
   client_name: string;
   assigned_am: string;
+  board_ref: string; // deep-link hint ke Client Board (M11) — drill-through §6.3 (M15-G2)
   snapshot_id: string; // "" saat belum ada snapshot
   period: string; // "YYYY-MM-DD" snapshot terbaru; "" saat belum ada
   score_display: string; // sudah diformat server (house #7: "—" saat kosong)
@@ -56,6 +57,7 @@ export interface MgmtRow {
 export interface ManagementDashboard {
   filter_band: string;
   filter_am: string;
+  filter_division: string; // "" = seluruh basis klien (§6.3 "by division mix", M15-G1)
   sort: string;
   rows: MgmtRow[];
 }
@@ -82,15 +84,17 @@ export function getTeamPortalFull(division?: string, period?: string): Promise<T
   return api.get<TeamPortalFull>(`/portal/team${qs ? `?${qs}` : ''}`);
 }
 
-// GET /portal/management[?band=&am=&sort=am] — Director + OD SAJA (Rule 11/§6.3).
+// GET /portal/management[?band=&am=&division=&sort=am] — Director + OD SAJA (Rule 11/§6.3).
 export function getManagementDashboard(opts?: {
   band?: string;
   am?: string;
+  division?: string;
   sort?: 'band' | 'am';
 }): Promise<ManagementDashboard> {
   const q = new URLSearchParams();
   if (opts?.band) q.set('band', opts.band);
   if (opts?.am) q.set('am', opts.am);
+  if (opts?.division) q.set('division', opts.division);
   if (opts?.sort) q.set('sort', opts.sort);
   const qs = q.toString();
   return api.get<ManagementDashboard>(`/portal/management${qs ? `?${qs}` : ''}`);

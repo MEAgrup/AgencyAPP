@@ -214,7 +214,17 @@ const RE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 // Authorization predicates (M3 §5 / §6.1).
 // ---------------------------------------------------------------------------
 
-/** §6.1 create gate: Marketing staff/lead, or Director (Director may own). OD read-only. */
+/**
+ * §6.1 create gate: Marketing staff/lead, or Director (Director may own). OD read-only.
+ *
+ * M3-G4 (logged, DECISIONS 2026-08-19): §6.1's Roles table lists "Create" only under
+ * Marketing Staff, so a Marketing Lead creating a campaign is a deliberate broadening,
+ * NOT restricted. Rationale: the same Lead already manages every campaign division-wide
+ * (canManageCampaign — transition, reassign, and now updateCampaign), so barring only
+ * create would be an internally inconsistent authority model; and it matches the Go
+ * oracle (module3_campaign) while that remains the parity source (avoids an O43 break).
+ * A newly created campaign is owned by the creating Lead — reassignable as usual.
+ */
 export function canCreate(a: Actor): boolean {
   if (a.role.director) {
     return true;
@@ -322,6 +332,56 @@ export async function createCampaign(sql: Sql, actor: Actor, input: CampaignInpu
       id, name, channel, online, offline, startDate: startStr, endDate: null,
       owner: actor.employeeId, status: STATUS_DRAFT, createdBy: actor.employeeId, createdAt: now,
     };
+  });
+}
+
+/**
+ * updateCampaign edits a Campaign's §6.3 mandatory fields — Name, Channel,
+ * Online/Offline (≥1), Start Date — the "edit own campaigns" half of §6.1 that had no
+ * TS (nor Go) home before (M3-G1's sibling gap M3-G2). Owner and Status are NOT here:
+ * ownership moves only through reassignCampaign, status only through the engine
+ * (transitionCampaign); End Date is a Closed data-column effect, never hand-edited.
+ *
+ * Gate: canManageCampaign (owning staff, any Marketing lead/head division-wide, or a
+ * Director) — the SAME authority that drives the lifecycle, since an edit is a manage
+ * action of the same weight. Validation mirrors createCampaign exactly (all four
+ * mandatory, valid date), rejected BEFORE any write. The before→after change is one
+ * immutable audit row (house rule 3); the auto rollups are untouched (still derived).
+ */
+export async function updateCampaign(sql: Sql, actor: Actor, campaignId: string, input: CampaignInput): Promise<Campaign> {
+  const name = (input.name ?? '').trim();
+  const channel = (input.channel ?? '').trim();
+  const startStr = (input.startDate ?? '').trim();
+  const online = input.online === true;
+  const offline = input.offline === true;
+  if (name === '' || channel === '' || startStr === '' || !(online || offline)) {
+    throw new ValidationError(MSG_INCOMPLETE);
+  }
+  if (!RE_DATE.test(startStr) || Number.isNaN(Date.parse(`${startStr}T00:00:00Z`))) {
+    throw new ValidationError(MSG_INCOMPLETE);
+  }
+
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const rows = await tx<CampaignRow[]>`${selectCampaign(tx)} where id = ${campaignId} for update`;
+    if (rows.length === 0) {
+      throw new NotFoundError();
+    }
+    const cur = rowToCampaign(rows[0]);
+    if (!canManageCampaign(actor, cur.owner)) {
+      throw new ForbiddenError(MSG_FORBIDDEN);
+    }
+    await tx`
+      update campaigns
+         set name = ${name}, channel = ${channel}, is_online = ${online}, is_offline = ${offline}, start_date = ${startStr}
+       where id = ${campaignId}`;
+    await ex.audit.insertAudit({
+      entityType: 'campaign', entityId: campaignId, actorEmployeeId: actor.employeeId, action: 'edit',
+      beforeJson: { name: cur.name, channel: cur.channel, is_online: cur.online, is_offline: cur.offline, start_date: cur.startDate },
+      afterJson: { name, channel, is_online: online, is_offline: offline, start_date: startStr },
+      createdBy: actor.employeeId,
+    });
+    return { ...cur, name, channel, online, offline, startDate: startStr };
   });
 }
 

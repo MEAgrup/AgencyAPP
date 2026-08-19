@@ -215,6 +215,10 @@ export interface MgmtRow {
   clientId: string;
   clientName: string;
   assignedAm: string;
+  /** Deep-link hint into the Client Board (M11) — §6.3 "drill-through into the relevant
+   *  Client Board" (M15-G2). Always present (a board exists per client), mirroring
+   *  ClientShortcut.boardRef; snapshotId is the sibling M13 drill-through. */
+  boardRef: string;
   snapshotId: string; // "" when the Client has no snapshot yet
   period: string; // "YYYY-MM-DD" of the latest snapshot; "" when none
   scoreDisplay: string;
@@ -228,6 +232,8 @@ export interface MgmtRow {
 export interface ManagementDashboard {
   filterBand: string;
   filterAm: string;
+  /** Division-mix filter (§6.3 "by division mix"); "" = whole client base (M15-G1). */
+  filterDivision: string;
   sort: string;
   rows: MgmtRow[];
 }
@@ -243,17 +249,26 @@ export async function managementDashboard(
   actor: Actor,
   filterBand: string,
   filterAm: string,
+  filterDivision: string,
   sortBy: string,
 ): Promise<ManagementDashboard> {
   if (!(actor.role.director || actor.role.od)) {
     throw new ForbiddenError();
   }
-  const out: ManagementDashboard = { filterBand, filterAm, sort: sortBy, rows: [] };
+  const out: ManagementDashboard = { filterBand, filterAm, filterDivision, sort: sortBy, rows: [] };
 
   const clients = await sql<{ id: string; toko: string; assigned_am_id: string | null }[]>`
     select id, toko, coalesce(assigned_am_id, '') as assigned_am_id from clients order by id`;
 
+  // M15-G1: division-mix filter. When set, restrict to Clients whose execution work
+  // touches that division (≥1 Brief assigned there) — the SAME division scope as
+  // teamClients, so the two portal surfaces agree on what "in a division" means.
+  const divisionSet = filterDivision === '' ? null : await clientIdsInDivision(sql, filterDivision);
+
   for (const c of clients) {
+    if (divisionSet !== null && !divisionSet.has(c.id)) {
+      continue;
+    }
     const am = c.assigned_am_id ?? '';
     if (filterAm !== '' && am !== filterAm) {
       continue;
@@ -269,13 +284,32 @@ export async function managementDashboard(
 }
 
 /**
+ * clientIdsInDivision returns the Clients whose work touches `division`, mirroring
+ * teamClients' scope: an Account filter spans the whole client book (every released
+ * Client has an AM); any other division = Clients with ≥1 Brief assigned there.
+ */
+async function clientIdsInDivision(sql: Queryable, division: string): Promise<Set<string>> {
+  const rows =
+    division === ACCOUNT_DIVISION
+      ? await sql<{ id: string }[]>`select id from clients`
+      : await sql<{ id: string }[]>`
+          select distinct c.id
+            from clients c
+            join services sv on sv.client_id = c.id
+            join briefs b on b.service_id = sv.id
+           where b.assigned_division = ${division}`;
+  return new Set(rows.map((r) => r.id));
+}
+
+/**
  * mgmtRowFor loads one Client's latest + previous snapshot and derives the band, trend
  * direction and dragging component. A Client with no snapshot yet is rendered with an
  * empty band / "—" score (house rule 7) and flat trend.
  */
 async function mgmtRowFor(sql: Queryable, clientId: string, name: string, am: string): Promise<MgmtRow> {
   const row: MgmtRow = {
-    clientId, clientName: name, assignedAm: am, snapshotId: '', period: '', scoreDisplay: '—',
+    clientId, clientName: name, assignedAm: am, boardRef: `/api/v1/board?client=${clientId}`,
+    snapshotId: '', period: '', scoreDisplay: '—',
     band: '', trendDirection: TREND_FLAT, draggingComponent: '', draggingCapped: null,
   };
 

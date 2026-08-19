@@ -20,6 +20,10 @@ import {
   ForbiddenError,
   getRecord,
   metrics,
+  MSG_DUPLICATE,
+  MSG_FORBIDDEN,
+  MSG_INCOMPLETE,
+  MSG_NOT_FOUND,
   NotFoundError,
   updateBudget,
   ValidationError,
@@ -212,6 +216,52 @@ describeDb('getRecord visibility (§5)', () => {
     await expect(getRecord(sql, mktStaff('ZZ-DINA'), cid)).rejects.toThrow(ForbiddenError);
     const empty = await mustCampaign('ZZ-LIA');
     await expect(getRecord(sql, mktStaff('ZZ-LIA'), empty)).rejects.toThrow(NotFoundError);
+  });
+});
+
+describeDb('M2-G5 — verbatim BI messages on every error path', () => {
+  // The BI constants are byte-exact (§3 Rule 4 / house rule 5); this pins the actual
+  // `err.message` each path throws, not just its error class (M2-G5).
+  const msg = async (p: Promise<unknown>): Promise<string> => {
+    try {
+      await p;
+      return '<no throw>';
+    } catch (e) {
+      return (e as Error).message;
+    }
+  };
+  it('incomplete / forbidden / not-found / duplicate carry the exact bracketed strings', async () => {
+    const cid = await mustCampaign('ZZ-LIA');
+    expect(await msg(createRecord(sql, mktStaff('ZZ-LIA'), cid, '0'))).toBe(MSG_INCOMPLETE);
+    expect(await msg(createRecord(sql, mktStaff('ZZ-DINA'), cid, '5000000'))).toBe(MSG_FORBIDDEN);
+    expect(await msg(createRecord(sql, mktStaff('ZZ-LIA'), 'CMP-000000-9999', '5000000'))).toBe(MSG_NOT_FOUND);
+    await createRecord(sql, mktStaff('ZZ-LIA'), cid, '5000000');
+    expect(await msg(createRecord(sql, mktStaff('ZZ-LIA'), cid, '9000000'))).toBe(MSG_DUPLICATE);
+    // getRecord: visible campaign without a record → not-found; non-owner staff → forbidden.
+    const empty = await mustCampaign('ZZ-LIA');
+    expect(await msg(getRecord(sql, mktStaff('ZZ-LIA'), empty))).toBe(MSG_NOT_FOUND);
+    expect(await msg(getRecord(sql, mktStaff('ZZ-DINA'), cid))).toBe(MSG_FORBIDDEN);
+    // updateBudget: bad budget → incomplete; non-owning lead → forbidden.
+    expect(await msg(updateBudget(sql, mktStaff('ZZ-LIA'), cid, '-1'))).toBe(MSG_INCOMPLETE);
+    expect(await msg(updateBudget(sql, mktLead('ZZ-MHEAD'), cid, '9000000'))).toBe(MSG_FORBIDDEN);
+  });
+});
+
+describeDb('M2-G6 — audit history is immutable at the DB (not just append-only)', () => {
+  // The append-only tests above prove no code PATH mutates history; this proves the DB
+  // itself rejects an UPDATE/DELETE on the audit row, via the house-wide forbid_mutation()
+  // trigger (init.sql audit_log_no_update / _no_delete). Belt to the code's suspenders.
+  it('UPDATE and DELETE on a marketing-record audit row are rejected by forbid_mutation()', async () => {
+    const cid = await mustCampaign('ZZ-LIA');
+    await createRecord(sql, mktStaff('ZZ-LIA'), cid, '5000000');
+    const row = await sql<{ id: string }[]>`
+      select id from audit_log where entity_type='marketing_performance_record' and entity_id=${cid} limit 1`;
+    expect(row.length).toBe(1);
+    await expect(sql`update audit_log set action='tampered' where id=${row[0].id}`).rejects.toThrow(/append-only\/immutable/);
+    await expect(sql`delete from audit_log where id=${row[0].id}`).rejects.toThrow(/append-only\/immutable/);
+    // The row is still there, unchanged.
+    const still = await sql<{ action: string }[]>`select action from audit_log where id=${row[0].id}`;
+    expect(still[0].action).toBe('create');
   });
 });
 

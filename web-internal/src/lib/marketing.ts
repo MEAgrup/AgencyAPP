@@ -222,6 +222,13 @@ export function getCampaign(id: string): Promise<Campaign> {
   return api.get<Campaign>(`/marketing/campaigns/${id}`);
 }
 
+// PATCH /marketing/campaigns/{id} → Campaign — edit the §6.3 mandatory fields (§6.1
+// "edit own"). Owner/Status/End Date are NOT editable here (reassign / transition /
+// Closed-effect respectively). Uses the local patch() helper (see updateBudget note).
+export function updateCampaign(id: string, input: CampaignInput): Promise<Campaign> {
+  return patch<Campaign>(`/marketing/campaigns/${id}`, input);
+}
+
 // GET /marketing/campaigns/{id}/rollup → Rollup (object directly).
 export function getCampaignRollup(id: string): Promise<Rollup> {
   return api.get<Rollup>(`/marketing/campaigns/${id}/rollup`);

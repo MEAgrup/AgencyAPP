@@ -10,7 +10,7 @@
  *   reassign target validation + append-only audit, and the derived rollups.
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { money, permission } from '@cdps/core';
+import { bi, money, permission } from '@cdps/core';
 import { createClient, withClaims, type Sql } from '@cdps/db';
 import {
   campaignClients,
@@ -34,6 +34,7 @@ import {
   STATUS_DRAFT,
   STATUS_PAUSED,
   transitionCampaign,
+  updateCampaign,
   ValidationError,
   type Actor,
   type CampaignInput,
@@ -195,6 +196,51 @@ describeDb('createCampaign', () => {
   });
 });
 
+describeDb('updateCampaign (M3-G2 — §6.1 "edit own" / §6.3 fields)', () => {
+  it('edits the mandatory fields, appends one before→after audit row, leaves owner/status/end_date', async () => {
+    const owner = mktStaff('ZZ-LIA');
+    const c = await createCampaign(sql, owner, validInput());
+    const edited = await updateCampaign(sql, owner, c.id, {
+      name: 'Promo Skilskul April', channel: 'IG', online: false, offline: true, startDate: '2026-04-01',
+    });
+    expect(edited).toMatchObject({
+      id: c.id, name: 'Promo Skilskul April', channel: 'IG', online: false, offline: true,
+      startDate: '2026-04-01', owner: 'ZZ-LIA', status: STATUS_DRAFT, endDate: null,
+    });
+    const audit = await sql<{ before_json: { name: string }; after_json: { name: string } }[]>`
+      select before_json, after_json from audit_log
+       where entity_type='campaign' and entity_id=${c.id} and action='edit'`;
+    expect(audit.length).toBe(1);
+    expect(audit[0].before_json.name).toBe('Promo Skilskul Maret');
+    expect(audit[0].after_json.name).toBe('Promo Skilskul April');
+  });
+
+  it('validates before writing: blank field / no online-offline / bad date → ValidationError, no change', async () => {
+    const owner = mktStaff('ZZ-LIA');
+    const c = await createCampaign(sql, owner, validInput());
+    for (const bad of [
+      { ...validInput(), name: '   ' },
+      { ...validInput(), online: false, offline: false },
+      { ...validInput(), startDate: '2026-13-40' },
+    ]) {
+      await expect(updateCampaign(sql, owner, c.id, bad)).rejects.toThrow(ValidationError);
+    }
+    const still = await getCampaign(sql, owner, c.id);
+    expect(still.name).toBe('Promo Skilskul Maret'); // untouched
+  });
+
+  it('authority mirrors canManageCampaign: other staff / Sales / OD denied; owner, lead, Director allowed; missing → NotFound', async () => {
+    const c = await createCampaign(sql, mktStaff('ZZ-LIA'), validInput());
+    await expect(updateCampaign(sql, mktStaff('ZZ-DINA'), c.id, validInput())).rejects.toThrow(ForbiddenError);
+    await expect(updateCampaign(sql, salesStaff('ZZ-SAL'), c.id, validInput())).rejects.toThrow(ForbiddenError);
+    await expect(updateCampaign(sql, od('ZZ-OD'), c.id, validInput())).rejects.toThrow(ForbiddenError);
+    await expect(updateCampaign(sql, mktLead('ZZ-MHEAD'), c.id, { ...validInput(), name: 'By Lead' })).resolves.toBeTruthy();
+    await expect(updateCampaign(sql, director('ZZ-DIR'), c.id, { ...validInput(), name: 'By Dir' })).resolves.toBeTruthy();
+    await expect(updateCampaign(sql, mktStaff('ZZ-LIA'), c.id, { ...validInput(), name: 'By Owner' })).resolves.toBeTruthy();
+    await expect(updateCampaign(sql, mktStaff('ZZ-LIA'), 'CMP-000000-9999', validInput())).rejects.toThrow(NotFoundError);
+  });
+});
+
 describeDb('lifecycle (§3)', () => {
   it('legal path Draft→Active→Paused→Active→Closed→Archived; Closed stamps end_date', async () => {
     const owner = mktStaff('ZZ-LIA');
@@ -213,6 +259,8 @@ describeDb('lifecycle (§3)', () => {
     const c = await createCampaign(sql, owner, validInput());
     let res = await transitionCampaign(sql, owner, c.id, STATUS_CLOSED);
     expect(res.ok).toBe(false); // Draft→Closed illegal
+    // M3-G3: the blocked edge carries the verbatim BI message (§6.4 / STATE_MACHINES §3).
+    if (!res.ok) expect(res.message).toBe(bi.TRANSITION_NOT_ALLOWED);
     await transitionCampaign(sql, owner, c.id, STATUS_ACTIVE);
     await transitionCampaign(sql, owner, c.id, STATUS_CLOSED);
     res = await transitionCampaign(sql, owner, c.id, STATUS_ACTIVE);
