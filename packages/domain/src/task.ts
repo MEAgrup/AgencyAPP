@@ -37,7 +37,7 @@ import { bi, notification, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { onBriefLeavesToDo } from './account';
 import { validateBriefSubmit } from './ads';
-import { onBriefReachedTerminal, validateBriefApproval } from './board';
+import { ConflictError as BoardConflictError, onBriefReachedTerminal, validateBriefApproval } from './board';
 
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;
@@ -757,10 +757,25 @@ export async function recomputeBriefRollup(tx: Queryable, actor: Actor, briefId:
   while (cur < tgt) {
     const from = ROLLUP_CHAIN[cur];
     const to = ROLLUP_CHAIN[cur + 1];
-    // M11 §6.3 Blocking gate on the final [Approved] edge (throws if a Blocking
-    // Dependency's Source is not yet terminal — aborts the whole roll-up tx).
+    // M11 §2 Rule 7 / §6.3 Blocking gate on the final [Approved] edge. On the
+    // roll-up path the gate DEFERS silently: while a Blocking Dependency's Source
+    // is not yet terminal, leave the Brief at [In Review] and let the triggering
+    // child Asset transition (already applied earlier in this tx) commit — the PIC
+    // may keep working the Brief; only the transition to the locked gate is refused
+    // (§2 Rule 7). Only the board ConflictError defers; any other error propagates.
+    // Mirrors the Go oracle (module12_task/rollup.go: errors.As(BlockedError) →
+    // return nil) and DECISIONS W3-M11-C1. The M6 AM explicit-approval path
+    // (account.ts) still throws, surfacing the gate to the AM. It resolves
+    // naturally on the next Asset event or the AM's approve once the Source closes.
     if (to === STATUS_APPROVED) {
-      await validateBriefApproval(tx, briefId);
+      try {
+        await validateBriefApproval(tx, briefId);
+      } catch (e) {
+        if (e instanceof BoardConflictError) {
+          return; // deferred — Brief stays [In Review]; the child transition stays committed.
+        }
+        throw e;
+      }
     }
     const res = await statemachine.transition(ex.sm, {
       machine: MACHINE_BRIEF_TASK, entityType: 'brief', table: 'briefs', entityId: briefId, to, actor,
