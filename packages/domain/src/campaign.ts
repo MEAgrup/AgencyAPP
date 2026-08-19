@@ -298,6 +298,10 @@ export async function createCampaign(sql: Sql, actor: Actor, input: CampaignInpu
   if (!canCreate(actor)) {
     throw new ForbiddenError(MSG_FORBIDDEN);
   }
+  // M3-G6: Campaign Name is "text only" (§6.3) = a free-text field, validated non-empty
+  // only. We deliberately do NOT reject digit-only names — the PRD gives no digit-exclusion
+  // rule, and enforcing one would reject legitimate labels like "11.11 Sale" or "2026 Q1".
+  // Matches the Go oracle (no name-charset check). Logged in DECISIONS 2026-08-19.
   const name = (input.name ?? '').trim();
   const channel = (input.channel ?? '').trim();
   const startStr = (input.startDate ?? '').trim();

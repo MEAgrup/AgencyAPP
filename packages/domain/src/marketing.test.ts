@@ -398,6 +398,13 @@ describeDb('dashboard split (§5)', () => {
     expect(leadList.length).toBeGreaterThanOrEqual(2);
     expect(leadList.map((m) => m.owner)).toEqual(expect.arrayContaining(['ZZ-LIA', 'ZZ-DINA']));
     expect((await dashboard(sql, od('ZZ-OD'))).length).toBeGreaterThanOrEqual(2);
+    // M2-G7: exercise the READ path (dashboard + metrics) for a Director — the layered
+    // Director role gets full, read-only breadth like OD/lead (§5 Rule 3 / house rule 6),
+    // which the read gate had asserted only on the write path (createRecord) before.
+    const dirList = await dashboard(sql, director('ZZ-DIR'));
+    expect(dirList.length).toBeGreaterThanOrEqual(2);
+    expect(dirList.map((m) => m.campaignId)).toEqual(expect.arrayContaining([lia]));
+    expect((await metrics(sql, director('ZZ-DIR'), lia)).owner).toBe('ZZ-LIA');
     await expect(dashboard(sql, salesStaff('ZZ-SAL'))).rejects.toThrow(ForbiddenError);
 
     const noRec = await createCampaign(sql, mktStaff('ZZ-LIA'), validInput());

@@ -19,14 +19,16 @@
 
 | Modul | Verdict port | Gap A | Gap B | Gap C | Highest-priority |
 |---|---|---|---|---|---|
-| **M2 Marketing** | Faithful, near line-for-line | 0 | G1✅,G3✅,G5✅,G6✅ | G2,G4,G7 | **M2 B-cluster HABIS** ✅ |
-| **M3 Campaign** | High-fidelity; linkage WRITE **ada** | 0 | G1✅,G2✅,G3✅,G4✅ | G5,G6 | **M3 B-cluster HABIS** ✅ |
-| **M11 Board** | Faithful **kecuali gate roll-up** | **M11-G1 ✅** | M11-G2,G3 ✅ | G4,G5 | **M11-G1+G3 SELESAI** |
-| **M13 Health** | Substansial, faithful | M13-G1* ✅ | — | G2,G3 | M13-G1 scheduler SELESAI (sesi 2) |
-| **M14 Team Perf** | Salah satu paling lengkap | 0 | M14-G1 ✅ | G2,G3,G4,G5 | M14-G1 scheduler SELESAI (sesi 2) |
-| **M15 Portal** | Team Portal lengkap; Client Portal ditunda | 0 | G1✅,G2✅ | G3–G7 | **M15 B-cluster (non-portal) HABIS** ✅ |
+| **M2 Marketing** | Faithful, near line-for-line | 0 | G1✅,G3✅,G5✅,G6✅ | G2✅,G4✅,G7✅ | **M2 HABIS** ✅ |
+| **M3 Campaign** | High-fidelity; linkage WRITE **ada** | 0 | G1✅,G2✅,G3✅,G4✅ | G5✅,G6✅ | **M3 HABIS** ✅ |
+| **M11 Board** | Faithful **kecuali gate roll-up** | **M11-G1 ✅** | M11-G2,G3 ✅ | G4✅,G5✅ | **M11 HABIS** ✅ |
+| **M13 Health** | Substansial, faithful | M13-G1* ✅ | — | G2✅,G3✅ | **M13 HABIS** ✅ |
+| **M14 Team Perf** | Salah satu paling lengkap | 0 | M14-G1 ✅ | G2✅,G3✅,G4✅,G5✅ | **M14 HABIS** ✅ |
+| **M15 Portal** | Team Portal lengkap; Client Portal ditunda | 0 | G1✅,G2✅ | G3–G7 ⏸️ | **Non-portal HABIS** ✅; Client Portal ditunda |
 
 \* M13-G1 borderline A/B (logika ada + manual-invokable; hanya scheduler yang hilang).
+> **Semua A + B + C ditutup KECUALI Client Portal (M15-G3..G7)** yang diblokir O4+O5 + ditunda
+> pemilik. Gap-audit Wave 3 non-portal = **SELESAI** (sesi 5).
 
 ---
 
@@ -67,6 +69,27 @@
   — verifikasi/log, bukan build. **Client Portal (M15 C-cluster) TETAP terakhir** (diblokir
   O4+O5 + ditunda pemilik).
 
+## STATUS SESI 5 — C OPEN (non-Client-Portal) DITUTUP
+
+- ✅ **M2-G7 (kode/tes)** — read-path Director kini diuji: "dashboard split (§5)" meng-assert
+  `dashboard(director)` melihat ≥2 campaign termasuk `lia`, dan `metrics(director, lia).owner`.
+  Sebelumnya read gate hanya diuji di write path (createRecord). Nol query/endpoint baru.
+- ✅ **M11-G4 (verifikasi+log)** — My-Tasks `dependencyBadge` selalu `''` = **by design, paritas
+  Go** (`scanUnitRows`/`scanChildUnitRows` di `views.go` tak set `DependencyNote`; badge dihitung
+  hanya di path Client Board `dependencyBadge()`). §5.4 "same card structure" TERPENUHI secara
+  struktur (bentuk Card identik) — hanya nilai badge berbeda per-surface. Komentar ditambah di
+  `makeUnitCard`. Tak diubah.
+- ✅ **M2-G4 (terima+log)** — CPRL floor `Rp. 416.666,00` (5M/12) vs contoh PRD `416.667`: floor
+  (truncate minor-unit) **byte-exact Go oracle** (`metrics.go` int64 div). Diterima; komentar
+  ditambah di `moneyDivCount`. Ubah-diam = fork kontrak derived-money (O43).
+- ✅ **M3-G6 (terima+log)** — Campaign Name "text only" = field free-text (validasi non-empty
+  saja), **tak** menolak digit-only: PRD tak beri aturan digit-exclusion; enforce akan menolak
+  label sah ("11.11 Sale", "2026 Q1"); paritas Go. Komentar ditambah di `createCampaign`.
+- ✅ **M13-G2/G3, M14-G2..G5, M15-G3..G7** — sudah ter-log/observasi (DECISIONS 298, W3-M14-C1,
+  W3-M15-C2 + bagian "Temuan per modul" di dokumen ini); dikonfirmasi tercatat, tak ada aksi baru.
+- **NOL migrasi baru.** Sisa Wave 3 = **hanya Client Portal (M15 C-cluster)** yang diblokir
+  O4+O5 + ditunda pemilik. Semua A+B+C non-portal HABIS.
+
 ---
 
 ## Temuan per modul
@@ -91,8 +114,11 @@
   (preseden `installmentToWire`); FE mirror `board.ts` `Card`/`Dependency` → `string | null`;
   dua tes `wire.delivery.test.ts` yang meng-assert absence kunci → assert null eksplisit.
   Shape-parity tetap seimbang (membandingkan SET kunci).
-- **M11-G4 — Severity C — OPEN.** My Tasks card `dependencyBadge` selalu `''` (paritas Go).
-  "Same card structure" (§5.4) secara teknis tak terpenuhi. Verifikasi intent → log 1 baris.
+- **M11-G4 — Severity C — ✅ DITUTUP-sbg-log (sesi 5).** My Tasks card `dependencyBadge` selalu
+  `''` = **by design, paritas Go** (`scanUnitRows`/`scanChildUnitRows` `views.go` tak set
+  `DependencyNote`; badge hanya di path Client Board). §5.4 "same card structure" TERPENUHI
+  secara struktur (bentuk Card identik); nilai badge beda per-surface (board vs to-do pribadi).
+  Komentar di `makeUnitCard`. Tak diubah.
 - **M11-G5 — Severity C — non-gap.** Pesan gate tak dalam `[...]` = sesuai STATE_MACHINES §12
   template verbatim; jangan "diperbaiki" jadi bracket.
 
@@ -150,10 +176,12 @@
   pada baris `audit_log` (entity `marketing_performance_record`) **ditolak DB** oleh trigger
   house-wide `forbid_mutation()` (`/append-only\/immutable/`), lalu baris tetap `action='create'`.
 - **M2-G2 — Severity C — ter-log (DECISIONS 296/153).** OKR OD di luar klaster M2 → M13.
-- **M2-G4 — Severity C — OPEN(low).** CPRL floor (`Rp. 416.666,00`) vs contoh PRD `416.667`
-  (rounding). Paritas Go. **Fix:** terima + log 1 baris "derived IDR ratio floor", jangan ubah
-  diam (memecah oracle O43).
-- **M2-G7 — Severity C — OPEN(low).** Director tak diuji di path read (metrics/dashboard).
+- **M2-G4 — Severity C — ✅ DITUTUP-sbg-terima (sesi 5).** CPRL floor (`Rp. 416.666,00`) vs
+  contoh PRD `416.667`: floor (truncate minor-unit) **byte-exact Go oracle** (`metrics.go` int64
+  div). Diterima; komentar di `moneyDivCount`. Ubah-diam = fork kontrak derived-money (O43).
+- **M2-G7 — Severity C — ✅ DITUTUP-sbg-tes (sesi 5).** Director kini diuji di read path:
+  "dashboard split (§5)" assert `dashboard(director)` ≥2 campaign incl `lia` + `metrics(director,
+  lia).owner`. Nol endpoint baru.
 
 ### M3 Campaign
 
@@ -181,7 +209,10 @@
   otoritas tak konsisten; dan sesuai oracle Go (hindari O43 break). Ter-log DECISIONS 2026-08-19 SESI4
   + komentar pada `canCreate`.
 - **M3-G5 — Severity C — ter-log (DECISIONS 2026-08-04).** `listSelectableCampaigns` semua status.
-- **M3-G6 — Severity C — OPEN(low).** Campaign Name "text only" tak di-enforce (digit-only lolos).
+- **M3-G6 — Severity C — ✅ DITUTUP-sbg-terima (sesi 5).** Campaign Name "text only" = field
+  free-text (validasi non-empty saja), **tak** menolak digit-only: PRD tak beri aturan
+  digit-exclusion; enforce akan menolak label sah ("11.11 Sale", "2026 Q1"); paritas Go.
+  Komentar di `createCampaign`.
 
 ### M15 Portal
 
@@ -212,9 +243,11 @@
 3. ✅ **M2-G1 / M3-G1 — SELESAI sesi 3** (compare-across-staff owner field, per-campaign
    won-client list + service-status drill-down). Nol migrasi baru.
 4. ✅ **Sisa B (M2-G3/G5/G6, M3-G2/G3/G4, M15-G1/G2) — SELESAI sesi 4.** Nol migrasi baru.
-5. **C yang OPEN → log keputusan / tes tambahan.** ← BERIKUTNYA
+5. ✅ **C yang OPEN → log keputusan / tes tambahan — SELESAI sesi 5.** M2-G7 (tes Director read),
+   M11-G4 / M2-G4 / M3-G6 (terima + komentar + log), M13-G2/G3 + M14-G2..G5 (dikonfirmasi
+   ter-log). Nol migrasi baru.
 6. **Client Portal (M15 C-cluster)** TERAKHIR — jangan mulai sebelum O4+O5 tutup (keputusan
-   pemilik + head dev). Bukan pekerjaan dev sekarang.
+   pemilik + head dev). Bukan pekerjaan dev sekarang. ← satu-satunya sisa Wave 3.
 
 ## Sumber kebenaran
 - PRD `docs/prd/CDPS_Module{2,3,11,13,14,15}_*.md` — spec menang.

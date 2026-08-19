@@ -465,7 +465,11 @@ async function budgetFor(sql: Queryable, campaignId: string): Promise<money.Mone
 
 /**
  * moneyDivCount renders budget / count as house IDR, or "—" when count is 0. The division
- * is exact in minor units (integer), then money.format drops cents for display.
+ * is exact in minor units (integer) and FLOORS — it truncates the minor-unit remainder
+ * rather than rounding. M2-G4: this yields CPRL "Rp. 416.666,00" for 5M/12 where the PRD
+ * example reads 416.667; we keep the floor to stay byte-exact with the Go oracle
+ * (backend module2_marketing/metrics.go: money.Money(int64(budget)/int64(count))). Changing
+ * it silently would fork the derived-money contract (class O43). Logged DECISIONS 2026-08-19.
  */
 function moneyDivCount(budget: money.Money, count: number): string {
   if (count <= 0) {
