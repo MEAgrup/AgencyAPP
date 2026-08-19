@@ -6,6 +6,7 @@ import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { LEVEL_STAFF, useAssignableEmployees } from '@/lib/directory';
 import EmployeePicker from '@/components/EmployeePicker';
+import WeeklyReportPanel from '@/components/WeeklyReportPanel';
 import {
   assignPIC,
   getAsset,
@@ -31,6 +32,8 @@ import { transitionLabel, type TransitionResult } from '@/lib/transition';
 // Live Stream briefs skip the M12 engine (dispatched to vendor) — their native
 // status; no execution edge ever succeeds for them.
 const DISPATCHED_STATUS = '[Dispatched to Vendor]';
+// 'Ads' verbatim from the domain (packages/domain/src/ads.ts ADS_DIVISION).
+const ADS_DIVISION = 'Ads';
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return '—';
@@ -53,7 +56,7 @@ function formatHours(hours: number | null | undefined) {
 export default function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const source: TaskSource = sourceOf(id);
-  const { role } = useAuth();
+  const { employee, role } = useAuth();
 
   const [brief, setBrief] = useState<Brief | null>(null);
   const [asset, setAsset] = useState<Asset | null>(null);
@@ -150,6 +153,9 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
     source === 'asset' ? parentBrief?.assigned_division ?? '' : brief?.assigned_division ?? '';
   // 'Live Stream' verbatim from backend (module10_livestream/livestream.go LiveStreamDivision).
   const isDispatched = status === DISPATCHED_STATUS || taskDivision === 'Live Stream';
+  // The weekly Advertiser report hangs off the Ads Brief-as-task only (M8 — an
+  // Asset row is Creative's unit of work and has no ad metrics of its own).
+  const isAdsBrief = source === 'brief' && taskDivision === ADS_DIVISION;
 
   // ---- Role gating (UX only — backend is final authority) ----
   const isDirector = Boolean(role?.director);
@@ -599,6 +605,15 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
             </form>
           )}
         </section>
+      )}
+
+      {/* Laporan Mingguan Advertiser (Brief-as-task divisi Ads) */}
+      {/* OD sees it too — read-only everywhere (Phase 0 §4); the report gate below stays false. */}
+      {isAdsBrief && (
+        <WeeklyReportPanel
+          briefId={id}
+          canReport={isDirector || isLeadOfDivision || (assignedPic !== '' && assignedPic === employee?.employee_id)}
+        />
       )}
 
       {/* Breakdown Asset (Creative Brief) */}

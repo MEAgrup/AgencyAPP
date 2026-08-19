@@ -33,6 +33,7 @@
 | Ad Campaign (client-facing paid media) | `ADC-` | BRF (setup) | M8 | Distinct from M3 `CMP-`; persists across recurring strategy cycles |
 | Metric Entry | `MTR-` | ADC | M8 | Periodic (weekly confirmed) manual metric input |
 | Optimization Log | `OPT-` | ADC | M8 | Each ongoing optimization action |
+| Laporan Mingguan Ads | — (PK `brief_id, iso_year, iso_week`) | BRF | M8 | **Follow-up PR #172, keputusan pemilik 2026-08-19.** `ads_weekly_reports` — laporan Advertiser (PIC) per brief per minggu ISO (batas WIB Sen–Min, kunci ISO disimpan eksplisit seperti `WRR`): `analisa` performa + `saran` perbaikan (keduanya wajib) + `kendala` opsional. **NOL angka disimpan** — realisasi mingguan (spend/GMV/ROAS/view/CTR/CVR) diturunkan saat baca dari `metric_entries` kampanye brief itu, definisi rasio identik agregat M6D. **Realisasi-saja**: target per-brief hidup di `strategy_plans`/`m6_strategy_kpi_tasks` (2026-08-12), tidak di sini. **Append-only** (`forbid_mutation` UPDATE+DELETE; koreksi = laporan minggu berikutnya). Bukan duplikat M6D RM-D6 (`wrr_catatan_divisi`): itu per KLIEN oleh LEAD ke rekap AM, ini per BRIEF oleh Advertiser — bahan mentahnya. Minggu selesai tanpa laporan ditandai `terlambat` saat baca; nol event notifikasi baru. Migrasi `20260819020000_m8_laporan_mingguan_advertiser.sql` |
 | Creator Booking (KOL unit of work) | `BKG-` | BRF | M9 | Per creator secured for a client campaign |
 | Creator Payment Request | `CPR-` | BKG | M9→M5 | After QC pass; Finance executes disbursement |
 | Live Stream Session | `LSS-` | BRF | M10 | AM requests a vendor session; one Brief → many Sessions |
@@ -130,5 +131,6 @@ Sumber seed kanonik: `backend/seed/msl_kalkulator.csv` (32 layanan dari sheet "K
 - **M2:** CPL, CPRL, Lead-Quality Rate, ROAS (booked), Collected-ROAS (verified amounts, M5), junk breakdown.
 - **M5:** Amount Verified/Outstanding, Transaction rollup (`[Lunas]` only when all INST `[Terverifikasi]`).
 - **M12:** turnaround_time (excludes `[Blocked]` intervals; revision rounds do NOT reset), revision_turnaround, speed_score (uncapped), revision_count (≥3 auto-flags Quality review).
+- **M8 (laporan mingguan Ads, 2026-08-19):** realisasi mingguan per Brief-as-task — Σ spend / Σ GMV / ROAS (Σgmv÷Σspend) / view (Σimpressions) / CTR (Σclicks÷Σimpressions) / CVR (Σconversions÷Σclicks), di-bucket per minggu ISO WIB atas `metric_entries.period_end`. Penyebut nol ⇒ `—`. Tak satu pun disimpan di `ads_weekly_reports` (yang menyimpan hanya narasi).
 - **M13:** 7 sub-scores (capped 0–100), weight redistribution for missing components, Health Score + band; monthly snapshot immutable; live preview never stored.
 - **M14:** role KPI Profiles (weights admin-configurable), raw components normalized `Actual÷Target×100` capped 100, Client-Outcome Modifier `clamp((avg−80)÷2, −10, +10)`, final bounded 0–100.

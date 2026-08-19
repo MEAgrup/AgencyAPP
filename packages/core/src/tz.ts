@@ -78,6 +78,72 @@ export function daysBetween(from: Date, to: Date): number {
   return Math.round((date(to).getTime() - date(from).getTime()) / DAY_MS);
 }
 
+/** One ISO week in WIB: its identity keys plus its Monday–Sunday calendar bounds. */
+export interface IsoWeek {
+  isoYear: number;
+  isoWeek: number; // 1..53
+  mondayDate: string; // "YYYY-MM-DD" (WIB Monday)
+  sundayDate: string; // "YYYY-MM-DD" (WIB Sunday)
+}
+
+/**
+ * isoWeekOf buckets an instant into the ISO week its WIB calendar date falls in
+ * (Monday–Sunday, per M6D R5 / M8-OA-2 weekly cadence).
+ *
+ * Must agree EXACTLY with the SQL side, which the Monday job computes as
+ * `extract(isoyear|week FROM wib_date(...) - (isodow - 1))`
+ * (20260813080000_m6d_wrr_job.sql) — Postgres' `week` IS the ISO week. Both
+ * therefore key a week the same way, so a week identified in TS and a week
+ * identified in SQL are never off by one at a year boundary (ISO week 1 is the
+ * week containing the first Thursday, which is why the year is read off the
+ * week's Thursday below, not off its Monday).
+ */
+export function isoWeekOf(t: Date): IsoWeek {
+  const { year, month, day } = wibParts(t);
+  const civil = Date.UTC(year, month - 1, day);
+  // getUTCDay(): 0=Sunday..6=Saturday → 0=Monday..6=Sunday.
+  const dow = (new Date(civil).getUTCDay() + 6) % 7;
+  const monday = civil - dow * DAY_MS;
+  const thursday = new Date(monday + 3 * DAY_MS);
+  const isoYear = thursday.getUTCFullYear();
+  const jan1 = Date.UTC(isoYear, 0, 1);
+  const isoWeek = Math.floor((thursday.getTime() - jan1) / (7 * DAY_MS)) + 1;
+  return {
+    isoYear,
+    isoWeek,
+    mondayDate: ymd(monday),
+    sundayDate: ymd(monday + 6 * DAY_MS),
+  };
+}
+
+/**
+ * isoWeekOfDate is isoWeekOf for a "YYYY-MM-DD" WIB calendar date (the form the
+ * DB hands back for `date` columns). Invalid input throws — callers validate the
+ * shape first and turn it into their own `[...]` message.
+ */
+export function isoWeekOfDate(ymdStr: string): IsoWeek {
+  const ms = Date.parse(`${ymdStr}T00:00:00Z`);
+  if (Number.isNaN(ms)) {
+    throw new RangeError(`invalid WIB date: ${ymdStr}`);
+  }
+  // Reconstruct the instant whose WIB civil date is exactly ymdStr.
+  return isoWeekOf(new Date(ms - OFFSET_MS));
+}
+
+/** addDaysToDate shifts a "YYYY-MM-DD" WIB calendar date by n whole days. */
+export function addDaysToDate(ymdStr: string, n: number): string {
+  const ms = Date.parse(`${ymdStr}T00:00:00Z`);
+  if (Number.isNaN(ms)) {
+    throw new RangeError(`invalid WIB date: ${ymdStr}`);
+  }
+  return ymd(ms + n * DAY_MS);
+}
+
+function ymd(ms: number): string {
+  const d = new Date(ms);
+  return `${pad(d.getUTCFullYear(), 4)}-${pad(d.getUTCMonth() + 1, 2)}-${pad(d.getUTCDate(), 2)}`;
+}
+
 function pad(n: number, width: number): string {
   return n.toString().padStart(width, '0');
 }
