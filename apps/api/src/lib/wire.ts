@@ -7,7 +7,7 @@
  */
 import { money, tz } from '@cdps/core';
 import type { interview as ivcore } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, risetAwal, sales, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, report, risetAwal, sales, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -2146,6 +2146,7 @@ export interface ServiceLineWire {
 
 /** client_platforms row — web-internal's `Platform` (lib/clients.ts). */
 export interface PlatformWire {
+  client_platform_id: number;
   platform: string;
   store_link?: string;
   managed_since: string | null;
@@ -2228,6 +2229,7 @@ export function clientDetailToWire(c: sales.ClientDetail): ClientDetailWire {
     payment_intent: c.paymentIntent ?? '',
     released_to_account_at: c.releasedToAccountAt ? c.releasedToAccountAt.toISOString() : null,
     platforms: c.platforms.map((p) => ({
+      client_platform_id: p.clientPlatformId,
       platform: p.platform,
       store_link: p.storeLink ?? undefined,
       managed_since: p.managedSince ? tz.dateString(p.managedSince) : null,
@@ -5669,5 +5671,93 @@ export function risetAwalBaselineToWire(v: risetAwal.BaselineView): RisetAwalBas
       dikonfirmasi: f.dikonfirmasi,
     })),
     semua_terkonfirmasi: v.semuaTerkonfirmasi,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// C1 — Mesin Laporan Klien (report.ts). snake_case wire; `null` explicit, never
+// omitempty; payload/kelengkapan_file are opaque jsonb passed through verbatim
+// (the renderer, not the FE, reads their shape).
+// ---------------------------------------------------------------------------
+export interface ClientReportSummaryWire {
+  id: number;
+  client_id: string;
+  client_platform_id: number;
+  platform: string;
+  periode_tipe: string;
+  periode_mulai: string;
+  periode_akhir: string;
+  hari_periode: number;
+  rentang_dari_berkas: boolean;
+  skor: number | null;
+  skor_label: string | null;
+  gmv_net: number;
+  gmv_kotor: number;
+  gmv_runrate_bulanan: number;
+  benchmark_versi: number;
+  engine_versi: string;
+  created_at: string;
+  created_by: string;
+}
+
+export interface ClientReportBerkasWire {
+  id: number;
+  nama_berkas: string;
+  sha256: string;
+  ukuran_bytes: number;
+  tipe_terdeteksi: string | null;
+  tipe_override: string | null;
+  jumlah_baris: number | null;
+  periode: unknown;
+}
+
+export interface ClientReportDetailWire extends ClientReportSummaryWire {
+  payload: unknown;
+  kelengkapan_file: unknown;
+  berkas: ClientReportBerkasWire[];
+}
+
+export function clientReportSummaryToWire(r: report.ReportSummary): ClientReportSummaryWire {
+  return {
+    id: r.id,
+    client_id: r.clientId,
+    client_platform_id: r.clientPlatformId,
+    platform: r.platform,
+    periode_tipe: r.periodeTipe,
+    periode_mulai: r.periodeMulai,
+    periode_akhir: r.periodeAkhir,
+    hari_periode: r.hariPeriode,
+    rentang_dari_berkas: r.rentangDariBerkas,
+    skor: r.skor,
+    skor_label: r.skorLabel,
+    gmv_net: r.gmvNet,
+    gmv_kotor: r.gmvKotor,
+    gmv_runrate_bulanan: r.gmvRunrateBulanan,
+    benchmark_versi: r.benchmarkVersi,
+    engine_versi: r.engineVersi,
+    created_at: r.createdAt,
+    created_by: r.createdBy,
+  };
+}
+
+export function clientReportBerkasToWire(b: report.ReportBerkas): ClientReportBerkasWire {
+  return {
+    id: b.id,
+    nama_berkas: b.namaBerkas,
+    sha256: b.sha256,
+    ukuran_bytes: b.ukuranBytes,
+    tipe_terdeteksi: b.tipeTerdeteksi,
+    tipe_override: b.tipeOverride,
+    jumlah_baris: b.jumlahBaris,
+    periode: b.periode ?? null,
+  };
+}
+
+export function clientReportDetailToWire(d: report.ReportDetail): ClientReportDetailWire {
+  return {
+    ...clientReportSummaryToWire(d),
+    payload: d.payload ?? null,
+    kelengkapan_file: d.kelengkapanFile ?? null,
+    berkas: d.berkas.map(clientReportBerkasToWire),
   };
 }

@@ -733,8 +733,8 @@ describe('M4 clientDetailToWire (O41 #1 — the Client Record contract)', () => 
     releasedToAccountAt: null,
     createdAt: new Date('2026-07-01T03:00:00.000Z'),
     platforms: [
-      { platform: 'Shopee', storeLink: 'https://shopee/alpha', managedSince: new Date('2026-05-01T00:00:00.000Z'), active: true },
-      { platform: 'TikTok Shop', storeLink: null, managedSince: null, active: false },
+      { clientPlatformId: 1, platform: 'Shopee', storeLink: 'https://shopee/alpha', managedSince: new Date('2026-05-01T00:00:00.000Z'), active: true },
+      { clientPlatformId: 2, platform: 'TikTok Shop', storeLink: null, managedSince: null, active: false },
     ],
     allocations: [{ salespersonId: 'EMP-BUDI', salespersonNama: 'Budi', basisPoints: 10000 }],
     services: [{
@@ -764,8 +764,8 @@ describe('M4 clientDetailToWire (O41 #1 — the Client Record contract)', () => 
       payment_intent: '[Termin]',
       released_to_account_at: null,
       platforms: [
-        { platform: 'Shopee', store_link: 'https://shopee/alpha', managed_since: '2026-05-01', active: true },
-        { platform: 'TikTok Shop', store_link: undefined, managed_since: null, active: false },
+        { client_platform_id: 1, platform: 'Shopee', store_link: 'https://shopee/alpha', managed_since: '2026-05-01', active: true },
+        { client_platform_id: 2, platform: 'TikTok Shop', store_link: undefined, managed_since: null, active: false },
       ],
       sales_allocation: [{ salesperson_id: 'EMP-BUDI', basis_points: 10000 }],
       services: [{

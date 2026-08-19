@@ -98,6 +98,7 @@ export * as risetAwal from './riset-awal';
 export * as plan from './plan';
 export * as briefInherit from './brief-inherit';
 export * as recap from './recap';
+export * as report from './report';
 export * as task from './task';
 export * as creative from './creative';
 export * as ads from './ads';
