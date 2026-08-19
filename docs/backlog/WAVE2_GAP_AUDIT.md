@@ -5,7 +5,7 @@
 > invariant inti (transition-engine only, audit append-only, derived-from-log, gate role) solid.
 > Metode: satu agent per modul memetakan tiap Rule/Flow/pesan-BI/permission ke kode, diverifikasi.
 >
-> **Status: Kelas A SELESAI** (PR Wave-2 gap audit). **Kelas B/C menunggu keputusan pemilik.**
+> **Status: Kelas A + B SELESAI; C4–C7 SELESAI (SESI43); C1 bagian 1 SELESAI (SESI44).** Sisa: C1 bagian 2 (domain+API+FE), lalu C2/C3 yang tetap menunggu pipeline affiliate-link tracking.
 
 ## Kelas A — perbaikan bersih (SELESAI, teruji)
 
@@ -29,7 +29,7 @@
 
 | # | Modul | Gap | Catatan |
 |---|---|---|---|
-| C1 | M10 | GMV live reconciled → sinyal GMV klien untuk Health Score (§6.2 #5, §5 Rule 1) belum terpasang. | **Lintas-sistem**: `clients.total_sales` tak ditulis apa pun di seluruh proyek; jalur Ads yang mesti ditiru pun belum ada. Desain lintas-modul (M10+M13). Oracle Go sama. |
+| C1 | M10 | GMV live reconciled → sinyal GMV klien untuk Health Score (§6.2 #5, §5 Rule 1) belum terpasang. | 🟡 **BAGIAN 1 SELESAI SESI44** (DECISIONS 2026-08-19): mesin laporan `@cdps/core/report` + 3 tabel (`report_benchmark`, `client_reports`, `client_report_berkas`) — tempat `clients.total_sales` akan lahir, dengan satuan run-rate bulanan yang ditegakkan di kolom. **BAGIAN 2 (belum):** `packages/domain/src/report.ts` (upload→parse→persist→tulis `clients.total_sales` + baris `audit_log`), rute API + wire, panel FE. Sampai bagian 2 mendarat, `clients.total_sales` masih nol penulis. |
 | C2 | M9 | Attributed GMV diketik manual oleh Coordinator (`recordAttributedGmv`), bukan dari affiliate-link tracking (§10.3 "read-only, populated via trackable link, never estimated"). | Tema sama C1/C3: pipeline tracking link belum dibangun. Kontras M8 yang derive dari metric rows immutable. |
 | C3 | M7 | Monthly review-and-lock Attributed GMV (§8 Rule 3 / M7-OA-4 — provisional s.d. lock bulanan). | Scope M8/M13; sebagian tercakup deferral W2-M7-C1. |
 | C4 | M8 | Eskalasi ROAS < target 2 periode berturut (§8 Rule 4 / M8-OA-5) hanya **flag pasif** di read, tak ada notif/log. | ✅ **SELESAI SESI43** (DECISIONS 2026-08-18 C4): event baru `m8.ads.roas_underperforming` (katalog v11, pemilik ACC), emit idempoten saat streak=2 → AM + SPV Ads. |

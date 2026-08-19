@@ -161,7 +161,9 @@ export function video(d: Sheet, periode?: string): VideoMetric {
 }
 
 // ── C.live (LIVE — toko / afiliasi) ─────────────────────────────────────────
-const durH = (s: unknown): number => {
+/** "1h 23min" → jam desimal. Diekspor: mesin report memakai parser yang SAMA
+ *  supaya jam LIVE di laporan bulanan tak pernah berbeda dari jam LIVE di baseline. */
+export const durH = (s: unknown): number => {
   const m = String(s).match(/(\d+)\s*h/), k = String(s).match(/(\d+)\s*min/);
   return (m ? +m[1] : 0) + (k ? +k[1] : 0) / 60;
 };
