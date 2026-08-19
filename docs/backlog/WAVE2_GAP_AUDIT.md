@@ -23,7 +23,7 @@
 | B1 | M9 | Kreator unresponsive di `[Content In Progress]` **buntu** — tak bisa escalate (butuh `[QC Review]`) maupun drop (hanya dari `[Escalated]`/`[Booked]`/`[Sourcing]`). Persis kasus "kreator hilang" yang modul ini ada untuknya. | State-machine spec-level (kode setia ke STATE_MACHINES §8). Butuh edge baru `[Content In Progress]→[Escalated]` + entri DECISIONS. |
 | B2 | M9 | §10.1 memberi **Coordinator** hak "escalate when needed", tapi `canEscalate` kunci ke KOL lead/Director saja. | Konflik PRD §10.1 vs pola SPV-minimum (M12 `[Blocked]`-lock). Pilih satu, catat. |
 | B3 | M12 | Flow step 4 menyebut `[Blocked]` sebagai salah satu keluaran reviewer dari `[In Review]`, tapi edge `[Blocked]` hanya ada dari `[In Progress]`. | Inkonsistensi **internal PRD** — Rules 2/7/8 + STATE_MACHINES §7 setuju dengan kode (blocked = pause saat In Progress). Kemungkinan koreksi PRD, bukan kode. |
-| B4 | M8 | Target KPI di-set Advertiser sebagai field bebas saat create, tanpa gate approval AM/SPV (§4 Rule 1 / M8-OA-4 "Advertisers never self-set targets"). | Aturan proses; sama persis dengan oracle Go (`ads.go:230`). Butuh model proposal→approval bila ditegakkan. |
+| B4 | M8 | Target KPI di-set Advertiser sebagai field bebas saat create, tanpa gate approval AM/SPV (§4 Rule 1 / M8-OA-4 "Advertisers never self-set targets"). | ✅ **SELESAI (#183, DECISIONS 2026-08-18):** gate KPI-GMV < baseline × 1.20 ⇒ ACC SPV Ads. **Residual (baseline hidup dari reporting) ✅ SELESAI 2026-08-19** (re-land dari PR#187 stale): baseline efektif = `effectiveGmvBaseline(gmv_baseline statis, total_sales hidup) = max` × 1.20, setelah C1 report engine memberi GMV hidup. |
 
 ## Kelas C — fitur/integrasi lintas-modul lebih besar (tiket tersendiri)
 
