@@ -12,6 +12,8 @@
  * - notification: 15 FROZEN events catalog + emit wrapper (SQL notify_emit) ✅
  * - visibility: M6A §4.1 / Rule 16 two-tier client visibility + FROZEN
  *   hard-internal set (mirrored by a DB CHECK — the two must not diverge) ✅
+ * - baseline: Skor Kondisi Toko dari export TikTok (riset awal, pra-onboarding) ✅
+ * - report: laporan performa klien mingguan/bulanan dari export yang sama ✅
  *
  * All implementations must maintain house-rule compliance (CLAUDE.md §Non-negotiable):
  * - State machines server-side enforced + exact Bahasa Indonesia [...] messages
@@ -34,3 +36,4 @@ export * as notification from './notification';
 export * as visibility from './visibility';
 export * as interview from './interview';
 export * as baseline from './baseline';
+export * as report from './report';

@@ -7,6 +7,7 @@
 import { api, ApiError } from '@/lib/api';
 
 export interface Platform {
+  client_platform_id: number;
   platform: string;
   store_link?: string;
   managed_since?: string | null;

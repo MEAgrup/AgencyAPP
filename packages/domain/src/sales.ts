@@ -1854,6 +1854,8 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
 
 /** One platform snapshot on a Client Record (M4). */
 export interface ClientPlatformRow {
+  /** The client_platforms surrogate id — the anchor a client report is built against (C1). */
+  clientPlatformId: number;
   platform: string;
   storeLink: string | null;
   managedSince: Date | null;
@@ -1962,9 +1964,9 @@ export async function getClient(sql: Queryable, id: string): Promise<ClientDetai
   const c = rows[0];
 
   const platRows = await sql<
-    { platform: string; store_link: string | null; managed_since: Date | null; active: boolean }[]
+    { id: string; platform: string; store_link: string | null; managed_since: Date | null; active: boolean }[]
   >`
-    select platform, store_link, managed_since, active
+    select id, platform, store_link, managed_since, active
     from client_platforms where client_id = ${id} order by id`;
 
   const allocRows = await sql<
@@ -2017,7 +2019,8 @@ export async function getClient(sql: Queryable, id: string): Promise<ClientDetai
     totalSales: c.total_sales, transactionId: c.transaction_id,
     releasedToAccountAt: c.released_to_account_at, createdAt: c.created_at,
     platforms: platRows.map((p) => ({
-      platform: p.platform, storeLink: p.store_link, managedSince: p.managed_since, active: p.active,
+      clientPlatformId: Number(p.id), platform: p.platform, storeLink: p.store_link,
+      managedSince: p.managed_since, active: p.active,
     })),
     allocations: allocRows.map((a) => ({
       salespersonId: a.salesperson_id, salespersonNama: a.salesperson_nama, basisPoints: a.basis_points,

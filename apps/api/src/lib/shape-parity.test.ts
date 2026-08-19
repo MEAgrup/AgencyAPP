@@ -174,7 +174,7 @@ const FE_FILES = [
   'account.ts', 'ads.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'contract.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts', 'penugasan.ts', 'plan.ts',
-  'performance.ts', 'portal.ts', 'recap.ts', 'riset-awal.ts', 'sales.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
+  'performance.ts', 'portal.ts', 'recap.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
 ];
 
 const fe = new Map<string, Parsed>();
@@ -492,6 +492,10 @@ const WIRE_TO_FE: Record<string, string> = {
   RisetAwalPlatformWire: 'riset-awal.ts::RisetAwalPlatform',
   RisetAwalAnalisaWire: 'riset-awal.ts::RisetAwalAnalisa',
   RisetAwalIsianWire: 'riset-awal.ts::RisetAwalIsian',
+  // C1 — Mesin Laporan Klien: the report read-models.
+  ClientReportSummaryWire: 'report.ts::ClientReportSummary',
+  ClientReportBerkasWire: 'report.ts::ClientReportBerkas',
+  ClientReportDetailWire: 'report.ts::ClientReportDetail',
   BriefWire: 'account.ts::Brief',
   ComplaintWire: 'account.ts::Complaint',
   // M6D rekap hasil mingguan (WRR-) — D-09b

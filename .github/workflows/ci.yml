@@ -270,6 +270,10 @@ jobs:
       # 114 = 113 + internal_tasks (20260814110000, Penugasan Internal: tugas
       #       atasan→tim di luar rantai Klien→Service→Brief). 20260814120000
       #       menambah dua KOLOM penanda idempotensi notifikasi, nol tabel.
+      # 121 = 118 + 3 tabel Mesin Laporan Klien (C1, 20260819000000):
+      #       report_benchmark + client_reports + client_report_berkas. Semua
+      #       bigint IDENTITY / versi integer ⇒ entity_prefix TETAP 35; nol mesin
+      #       baru ⇒ sm_machines TETAP 23; nol event ⇒ notif_events TETAP 58.
       # 118 = 114 + 4 tabel Riset Awal Baseline (RAB-01, 20260817000000):
       #       riset_awal_analisa + riset_awal_sumber_berkas +
       #       interview_riset_awal_isian + riset_awal_benchmark. Semua bigint
@@ -280,12 +284,12 @@ jobs:
       # `check "tabel public"` sendiri. Naikkan KEDUANYA dalam satu commit;
       # menaikkan salah satu saja membuat lokal hijau sementara CI merah (persis
       # yang terjadi pada PR #170).
-      - name: Verify table count (expect 118)
+      - name: Verify table count (expect 121)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 118
+          test "$n" -eq 121
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this

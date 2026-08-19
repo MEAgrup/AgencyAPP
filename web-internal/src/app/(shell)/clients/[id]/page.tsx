@@ -43,6 +43,7 @@ import {
 } from '@/lib/milestone';
 import { getBoard, UNIVERSAL_COLUMNS, type Card } from '@/lib/board';
 import BoardCard from '../../board/BoardCard';
+import ReportPanel from '@/components/clients/ReportPanel';
 
 const VOIDED_STATUS = '[Cancelled — Service Voided]';
 const ON_HOLD_STATUS = '[On Hold]';
@@ -381,6 +382,8 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           </div>
         )}
       </section>
+
+      <ReportPanel clientId={id} platforms={client.platforms} />
 
       <section className="card">
         <div className="cardHeader">
