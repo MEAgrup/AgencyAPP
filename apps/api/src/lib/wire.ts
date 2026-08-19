@@ -1701,6 +1701,30 @@ export function campaignRollupToWire(r: campaign.Rollup): CampaignRollupWire {
   };
 }
 
+/** module3_campaign.CampaignClientService — one Service of a won client (§4 Rule 4 drill-down). */
+export interface CampaignClientServiceWire {
+  service_id: string;
+  name: string;
+  status: string;
+}
+
+/** module3_campaign.CampaignClient — one won client + its Account service statuses (§4 Rule 4 / Flow 2). */
+export interface CampaignClientWire {
+  client_id: string;
+  toko: string;
+  nama_pic: string;
+  services: CampaignClientServiceWire[];
+}
+
+export function campaignClientToWire(c: campaign.CampaignClient): CampaignClientWire {
+  return {
+    client_id: c.clientId,
+    toko: c.toko,
+    nama_pic: c.namaPic,
+    services: c.services.map((s) => ({ service_id: s.serviceId, name: s.name, status: s.status })),
+  };
+}
+
 // --- M2 Marketing (performance record + auto-metrics): mirror the Go module2 JSON tags ---
 
 /** module2_marketing.Record — the stored performance record (budget + 1:1 Online/Offline). */
@@ -1733,6 +1757,8 @@ export interface JunkReasonWire {
 /** module2_marketing.Metrics — the read-only Auto-Metrics view (M2 §4). */
 export interface MarketingMetricsWire {
   campaign_id: string;
+  /** Campaign owner (§3 Rule 5) — lets the Lead dashboard compare across staff (§5 Rule 2). */
+  owner_employee_id: string;
   online: boolean;
   offline: boolean;
   budget: string;
@@ -1754,6 +1780,7 @@ export interface MarketingMetricsWire {
 export function marketingMetricsToWire(m: marketing.Metrics): MarketingMetricsWire {
   return {
     campaign_id: m.campaignId,
+    owner_employee_id: m.owner,
     online: m.online,
     offline: m.offline,
     budget: m.budget,
@@ -1824,6 +1851,7 @@ export interface MgmtRowWire {
   client_id: string;
   client_name: string;
   assigned_am: string;
+  board_ref: string;
   snapshot_id: string;
   period: string;
   score_display: string;
@@ -1837,6 +1865,7 @@ export interface MgmtRowWire {
 export interface ManagementDashboardWire {
   filter_band: string;
   filter_am: string;
+  filter_division: string;
   sort: string;
   rows: MgmtRowWire[];
 }
@@ -1845,9 +1874,10 @@ export function managementDashboardToWire(d: portal.ManagementDashboard): Manage
   return {
     filter_band: d.filterBand,
     filter_am: d.filterAm,
+    filter_division: d.filterDivision,
     sort: d.sort,
     rows: d.rows.map((r) => ({
-      client_id: r.clientId, client_name: r.clientName, assigned_am: r.assignedAm,
+      client_id: r.clientId, client_name: r.clientName, assigned_am: r.assignedAm, board_ref: r.boardRef,
       snapshot_id: r.snapshotId, period: r.period, score_display: r.scoreDisplay, band: r.band,
       trend_direction: r.trendDirection, dragging_component: r.draggingComponent, dragging_capped: r.draggingCapped,
     })),

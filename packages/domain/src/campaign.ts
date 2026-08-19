@@ -181,13 +181,50 @@ export interface Rollup {
   totalValueWonIdr: string;
 }
 
+/**
+ * One Service of a won client, as the Campaign's client-list drill-down surfaces it
+ * (M3 §4 Rule 4 "each client's current service status, read from Account"). Name +
+ * status are read verbatim from the Account `services` row; the id lets the UI open
+ * the Service hub (Flow 2 "jump to its Client record / service progress").
+ */
+export interface CampaignClientService {
+  serviceId: string;
+  name: string;
+  status: string;
+}
+
+/**
+ * One won client of a Campaign (§4 Rule 4 / Flow 2). Origin-Campaign lineage
+ * (first-touch, permanent) — the SAME basis as `Rollup.clientsWon`, so the list and
+ * the count always reconcile. Each carries its Account service statuses so the
+ * Marketing→Sales→Account→execution trace is followable from the campaign view;
+ * a client with no Service rows yet lists an empty `services`.
+ */
+export interface CampaignClient {
+  clientId: string;
+  /** Store name (the "Sini Store" of the §4 example). */
+  toko: string;
+  namaPic: string;
+  services: CampaignClientService[];
+}
+
 const RE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 // ---------------------------------------------------------------------------
 // Authorization predicates (M3 §5 / §6.1).
 // ---------------------------------------------------------------------------
 
-/** §6.1 create gate: Marketing staff/lead, or Director (Director may own). OD read-only. */
+/**
+ * §6.1 create gate: Marketing staff/lead, or Director (Director may own). OD read-only.
+ *
+ * M3-G4 (logged, DECISIONS 2026-08-19): §6.1's Roles table lists "Create" only under
+ * Marketing Staff, so a Marketing Lead creating a campaign is a deliberate broadening,
+ * NOT restricted. Rationale: the same Lead already manages every campaign division-wide
+ * (canManageCampaign — transition, reassign, and now updateCampaign), so barring only
+ * create would be an internally inconsistent authority model; and it matches the Go
+ * oracle (module3_campaign) while that remains the parity source (avoids an O43 break).
+ * A newly created campaign is owned by the creating Lead — reassignable as usual.
+ */
 export function canCreate(a: Actor): boolean {
   if (a.role.director) {
     return true;
@@ -295,6 +332,56 @@ export async function createCampaign(sql: Sql, actor: Actor, input: CampaignInpu
       id, name, channel, online, offline, startDate: startStr, endDate: null,
       owner: actor.employeeId, status: STATUS_DRAFT, createdBy: actor.employeeId, createdAt: now,
     };
+  });
+}
+
+/**
+ * updateCampaign edits a Campaign's §6.3 mandatory fields — Name, Channel,
+ * Online/Offline (≥1), Start Date — the "edit own campaigns" half of §6.1 that had no
+ * TS (nor Go) home before (M3-G1's sibling gap M3-G2). Owner and Status are NOT here:
+ * ownership moves only through reassignCampaign, status only through the engine
+ * (transitionCampaign); End Date is a Closed data-column effect, never hand-edited.
+ *
+ * Gate: canManageCampaign (owning staff, any Marketing lead/head division-wide, or a
+ * Director) — the SAME authority that drives the lifecycle, since an edit is a manage
+ * action of the same weight. Validation mirrors createCampaign exactly (all four
+ * mandatory, valid date), rejected BEFORE any write. The before→after change is one
+ * immutable audit row (house rule 3); the auto rollups are untouched (still derived).
+ */
+export async function updateCampaign(sql: Sql, actor: Actor, campaignId: string, input: CampaignInput): Promise<Campaign> {
+  const name = (input.name ?? '').trim();
+  const channel = (input.channel ?? '').trim();
+  const startStr = (input.startDate ?? '').trim();
+  const online = input.online === true;
+  const offline = input.offline === true;
+  if (name === '' || channel === '' || startStr === '' || !(online || offline)) {
+    throw new ValidationError(MSG_INCOMPLETE);
+  }
+  if (!RE_DATE.test(startStr) || Number.isNaN(Date.parse(`${startStr}T00:00:00Z`))) {
+    throw new ValidationError(MSG_INCOMPLETE);
+  }
+
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const rows = await tx<CampaignRow[]>`${selectCampaign(tx)} where id = ${campaignId} for update`;
+    if (rows.length === 0) {
+      throw new NotFoundError();
+    }
+    const cur = rowToCampaign(rows[0]);
+    if (!canManageCampaign(actor, cur.owner)) {
+      throw new ForbiddenError(MSG_FORBIDDEN);
+    }
+    await tx`
+      update campaigns
+         set name = ${name}, channel = ${channel}, is_online = ${online}, is_offline = ${offline}, start_date = ${startStr}
+       where id = ${campaignId}`;
+    await ex.audit.insertAudit({
+      entityType: 'campaign', entityId: campaignId, actorEmployeeId: actor.employeeId, action: 'edit',
+      beforeJson: { name: cur.name, channel: cur.channel, is_online: cur.online, is_offline: cur.offline, start_date: cur.startDate },
+      afterJson: { name, channel, is_online: online, is_offline: offline, start_date: startStr },
+      createdBy: actor.employeeId,
+    });
+    return { ...cur, name, channel, online, offline, startDate: startStr };
   });
 }
 
@@ -499,6 +586,47 @@ export async function campaignRollup(sql: Queryable, actor: Actor, campaignId: s
   };
 }
 
+/**
+ * campaignClients returns the won-client list for a Campaign the actor may view (§4
+ * Rule 4 / Flow 2), each client with its current Account service status. Same §5
+ * read gate as campaignRollup (reused via getCampaign); NotFound/Forbidden propagate.
+ *
+ * The clients are exactly those whose Origin Campaign is this one (first-touch,
+ * `clients.origin_campaign_id` — the same set `Rollup.clientsWon` counts, so list and
+ * count reconcile by construction, §4 Rule 5). Service status is read from Account's
+ * `services` (name + status, verbatim); a client with no Service row yet lists an
+ * empty `services` array (LEFT JOIN — a won client whose services Finance has not
+ * released is still on the campaign's list, just with nothing to execute yet).
+ *
+ * Read-only and fully derived (house rule 4) — nothing here is stored on the Campaign.
+ * Ordered oldest client first (created_at, id), services by id, for a stable render.
+ */
+export async function campaignClients(sql: Queryable, actor: Actor, campaignId: string): Promise<CampaignClient[]> {
+  await getCampaign(sql, actor, campaignId); // §5 visibility gate (never a leaked list)
+
+  const rows = await sql<CampaignClientRow[]>`
+    select c.id as client_id, c.toko, c.nama_pic,
+           sv.id as service_id, sv.name as service_name, sv.status as service_status
+      from clients c
+      left join services sv on sv.client_id = c.id
+     where c.origin_campaign_id = ${campaignId}
+     order by c.created_at asc, c.id asc, sv.id asc`;
+
+  const byClient = new Map<string, CampaignClient>();
+  for (const r of rows) {
+    let client = byClient.get(r.client_id);
+    if (client === undefined) {
+      client = { clientId: r.client_id, toko: r.toko, namaPic: r.nama_pic, services: [] };
+      byClient.set(r.client_id, client);
+    }
+    // LEFT JOIN: a client with no Service yields one row whose service columns are NULL.
+    if (r.service_id !== null) {
+      client.services.push({ serviceId: r.service_id, name: r.service_name ?? '', status: r.service_status ?? '' });
+    }
+  }
+  return [...byClient.values()];
+}
+
 // ---------------------------------------------------------------------------
 // Helpers.
 // ---------------------------------------------------------------------------
@@ -532,6 +660,20 @@ interface SelectableRow {
   lead_by_dashboard: string | number;
   lead_real_by_sales: string | number;
   lead_not_qualified: string | number;
+}
+
+/**
+ * One row of the campaignClients join (see campaignClients). The client columns
+ * repeat per Service (or once with NULL service columns when the LEFT JOIN finds no
+ * Service yet); the caller groups them back by `client_id`.
+ */
+interface CampaignClientRow {
+  client_id: string;
+  toko: string;
+  nama_pic: string;
+  service_id: string | null;
+  service_name: string | null;
+  service_status: string | null;
 }
 
 /** selectCampaign is the shared Campaign column list (nested sql fragment). */

@@ -216,7 +216,7 @@ describeDb('management dashboard (Rule 11)', () => {
     // CLI-C: Watch, single snapshot → flat.
     await insCHR('ZZ-CHR-C1', 'ZZ-CLI-C', '2026-06-01', 65, 'Watch', '[{"name":"payment_timeliness","included":true,"capped":60}]');
 
-    const dash = await managementDashboard(sql, director(), '', '', '');
+    const dash = await managementDashboard(sql, director(), '', '', '', '');
     expect(dash.rows).toHaveLength(3);
     // Default sort: At Risk first, then Watch, then Healthy.
     expect(dash.rows.map((r) => r.clientId)).toEqual(['ZZ-CLI-A', 'ZZ-CLI-C', 'ZZ-CLI-B']);
@@ -226,16 +226,37 @@ describeDb('management dashboard (Rule 11)', () => {
     expect(a.draggingComponent).toBe('roas_attainment');
     expect(a.draggingCapped).toBe(40);
     expect(a.snapshotId).not.toBe('');
+    expect(a.boardRef).toBe('/api/v1/board?client=ZZ-CLI-A'); // M15-G2 Board drill-through
     expect(dash.rows[2].trendDirection).toBe(TREND_UP); // CLI-B
     expect(dash.rows[1].trendDirection).toBe(TREND_FLAT); // CLI-C single snapshot
 
     // Filter by band → only At Risk.
-    const only = await managementDashboard(sql, director(), 'At Risk', '', '');
+    const only = await managementDashboard(sql, director(), 'At Risk', '', '', '');
     expect(only.rows).toHaveLength(1);
     expect(only.rows[0].clientId).toBe('ZZ-CLI-A');
     // Filter by AM → CLI-A + CLI-C.
-    const byAM = await managementDashboard(sql, director(), '', 'ZZ-AM1', '');
+    const byAM = await managementDashboard(sql, director(), '', 'ZZ-AM1', '', '');
     expect(byAM.rows).toHaveLength(2);
+  });
+
+  it('M15-G1: filters by division mix — only Clients whose work touches that division', async () => {
+    await insClient('ZZ-CLI-A', 'ZZ-AM1');
+    await insClient('ZZ-CLI-B', 'ZZ-AM2');
+    await insCHR('ZZ-CHR-A1', 'ZZ-CLI-A', '2026-06-01', 60, 'Watch', '[]');
+    await insCHR('ZZ-CHR-B1', 'ZZ-CLI-B', '2026-06-01', 60, 'Watch', '[]');
+    // CLI-A has a Creative brief; CLI-B has an Ads brief.
+    await insService('ZZ-SVC-A', 'ZZ-CLI-A');
+    await insService('ZZ-SVC-B', 'ZZ-CLI-B');
+    await insBrief('ZZ-BRF-A', 'ZZ-SVC-A', 'Creative', 'ZZ-PIC', '[In Progress]', null);
+    await insBrief('ZZ-BRF-B', 'ZZ-SVC-B', 'Ads', 'ZZ-PIC', '[In Progress]', null);
+
+    const creative = await managementDashboard(sql, director(), '', '', 'Creative', '');
+    expect(creative.filterDivision).toBe('Creative');
+    expect(creative.rows.map((r) => r.clientId)).toEqual(['ZZ-CLI-A']);
+    const ads = await managementDashboard(sql, director(), '', '', 'Ads', '');
+    expect(ads.rows.map((r) => r.clientId)).toEqual(['ZZ-CLI-B']);
+    // No filter → both Clients (whole client base).
+    expect((await managementDashboard(sql, director(), '', '', '', '')).rows).toHaveLength(2);
   });
 
   it('gate: Director + OD only (incl. layered OD); staff and plain lead denied', async () => {
@@ -243,12 +264,12 @@ describeDb('management dashboard (Rule 11)', () => {
     await insCHR('ZZ-CHR-A1', 'ZZ-CLI-A', '2026-06-01', 55, 'At Risk', '[]');
 
     for (const a of [director(), odActor()]) {
-      await expect(managementDashboard(sql, a, '', '', '')).resolves.toBeDefined();
+      await expect(managementDashboard(sql, a, '', '', '', '')).resolves.toBeDefined();
     }
     const layeredOD: Actor = { employeeId: 'ZZ-OKFA', divisi: 'Account', role: permission.makeRole({ division: 'Account', level: 'staff', od: true }) };
-    await expect(managementDashboard(sql, layeredOD, '', '', '')).resolves.toBeDefined();
+    await expect(managementDashboard(sql, layeredOD, '', '', '', '')).resolves.toBeDefined();
 
-    await expect(managementDashboard(sql, adsStaff('ZZ-ADS'), '', '', '')).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(managementDashboard(sql, adsLead(), '', '', '')).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(managementDashboard(sql, adsStaff('ZZ-ADS'), '', '', '', '')).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(managementDashboard(sql, adsLead(), '', '', '', '')).rejects.toBeInstanceOf(ForbiddenError);
   });
 });

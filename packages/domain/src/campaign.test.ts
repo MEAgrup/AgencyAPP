@@ -10,9 +10,10 @@
  *   reassign target validation + append-only audit, and the derived rollups.
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { money, permission } from '@cdps/core';
+import { bi, money, permission } from '@cdps/core';
 import { createClient, withClaims, type Sql } from '@cdps/db';
 import {
+  campaignClients,
   campaignRollup,
   canCreate,
   canManageCampaign,
@@ -33,6 +34,7 @@ import {
   STATUS_DRAFT,
   STATUS_PAUSED,
   transitionCampaign,
+  updateCampaign,
   ValidationError,
   type Actor,
   type CampaignInput,
@@ -145,12 +147,18 @@ async function seedWonClient(clientId: string, trxId: string, originCmp: string,
     insert into transactions (id, client_id, payment_intent_scheme, total_agreed_value, payment_status, created_by)
     values (${trxId}, ${clientId}, '[Bayar Penuh (Lunas)]', ${totalDecimal}, '[Lunas]', 'ZZ-SAL')`;
 }
+async function seedService(id: string, clientId: string, name: string, status: string): Promise<void> {
+  await sql`
+    insert into services (id, client_id, master_service_id, master_version_no, name, standard_price, commission_rule, status, created_by)
+    values (${id}, ${clientId}, 'MSL-ZZ-1', 1, ${name}, '0.00', 'flat', ${status}, 'ZZ-SAL')`;
+}
 
 afterAll(async () => {
   if (sql) await sql.end();
 });
 afterEach(async () => {
   if (!sql) return;
+  await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from transactions where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -188,6 +196,51 @@ describeDb('createCampaign', () => {
   });
 });
 
+describeDb('updateCampaign (M3-G2 — §6.1 "edit own" / §6.3 fields)', () => {
+  it('edits the mandatory fields, appends one before→after audit row, leaves owner/status/end_date', async () => {
+    const owner = mktStaff('ZZ-LIA');
+    const c = await createCampaign(sql, owner, validInput());
+    const edited = await updateCampaign(sql, owner, c.id, {
+      name: 'Promo Skilskul April', channel: 'IG', online: false, offline: true, startDate: '2026-04-01',
+    });
+    expect(edited).toMatchObject({
+      id: c.id, name: 'Promo Skilskul April', channel: 'IG', online: false, offline: true,
+      startDate: '2026-04-01', owner: 'ZZ-LIA', status: STATUS_DRAFT, endDate: null,
+    });
+    const audit = await sql<{ before_json: { name: string }; after_json: { name: string } }[]>`
+      select before_json, after_json from audit_log
+       where entity_type='campaign' and entity_id=${c.id} and action='edit'`;
+    expect(audit.length).toBe(1);
+    expect(audit[0].before_json.name).toBe('Promo Skilskul Maret');
+    expect(audit[0].after_json.name).toBe('Promo Skilskul April');
+  });
+
+  it('validates before writing: blank field / no online-offline / bad date → ValidationError, no change', async () => {
+    const owner = mktStaff('ZZ-LIA');
+    const c = await createCampaign(sql, owner, validInput());
+    for (const bad of [
+      { ...validInput(), name: '   ' },
+      { ...validInput(), online: false, offline: false },
+      { ...validInput(), startDate: '2026-13-40' },
+    ]) {
+      await expect(updateCampaign(sql, owner, c.id, bad)).rejects.toThrow(ValidationError);
+    }
+    const still = await getCampaign(sql, owner, c.id);
+    expect(still.name).toBe('Promo Skilskul Maret'); // untouched
+  });
+
+  it('authority mirrors canManageCampaign: other staff / Sales / OD denied; owner, lead, Director allowed; missing → NotFound', async () => {
+    const c = await createCampaign(sql, mktStaff('ZZ-LIA'), validInput());
+    await expect(updateCampaign(sql, mktStaff('ZZ-DINA'), c.id, validInput())).rejects.toThrow(ForbiddenError);
+    await expect(updateCampaign(sql, salesStaff('ZZ-SAL'), c.id, validInput())).rejects.toThrow(ForbiddenError);
+    await expect(updateCampaign(sql, od('ZZ-OD'), c.id, validInput())).rejects.toThrow(ForbiddenError);
+    await expect(updateCampaign(sql, mktLead('ZZ-MHEAD'), c.id, { ...validInput(), name: 'By Lead' })).resolves.toBeTruthy();
+    await expect(updateCampaign(sql, director('ZZ-DIR'), c.id, { ...validInput(), name: 'By Dir' })).resolves.toBeTruthy();
+    await expect(updateCampaign(sql, mktStaff('ZZ-LIA'), c.id, { ...validInput(), name: 'By Owner' })).resolves.toBeTruthy();
+    await expect(updateCampaign(sql, mktStaff('ZZ-LIA'), 'CMP-000000-9999', validInput())).rejects.toThrow(NotFoundError);
+  });
+});
+
 describeDb('lifecycle (§3)', () => {
   it('legal path Draft→Active→Paused→Active→Closed→Archived; Closed stamps end_date', async () => {
     const owner = mktStaff('ZZ-LIA');
@@ -206,6 +259,8 @@ describeDb('lifecycle (§3)', () => {
     const c = await createCampaign(sql, owner, validInput());
     let res = await transitionCampaign(sql, owner, c.id, STATUS_CLOSED);
     expect(res.ok).toBe(false); // Draft→Closed illegal
+    // M3-G3: the blocked edge carries the verbatim BI message (§6.4 / STATE_MACHINES §3).
+    if (!res.ok) expect(res.message).toBe(bi.TRANSITION_NOT_ALLOWED);
     await transitionCampaign(sql, owner, c.id, STATUS_ACTIVE);
     await transitionCampaign(sql, owner, c.id, STATUS_CLOSED);
     res = await transitionCampaign(sql, owner, c.id, STATUS_ACTIVE);
@@ -459,5 +514,58 @@ describeDb('rollup (§4 Rule 4 / §6.3)', () => {
     await expect(campaignRollup(sql, mktStaff('ZZ-DINA'), cmp.id)).rejects.toThrow(ForbiddenError);
     await expect(campaignRollup(sql, mktStaff('ZZ-LIA'), 'CMP-999999-9999')).rejects.toThrow(NotFoundError);
     await expect(campaignRollup(sql, od('ZZ-OD'), cmp.id)).resolves.toBeTruthy();
+  });
+});
+
+describeDb('campaignClients (M3-G1 — §4 Rule 4 / Flow 2 drill-down)', () => {
+  it('lists own-origin won clients with Account service statuses; excludes other campaigns', async () => {
+    const cmp = await createCampaign(sql, mktStaff('ZZ-LIA'), validInput());
+    const other = await createCampaign(sql, mktStaff('ZZ-LIA'), validInput());
+    const leadA = 'ZZ-LEAD-A';
+    const leadB = 'ZZ-LEAD-B';
+    const leadX = 'ZZ-LEAD-X';
+    await seedLead(leadA, '0811000001', cmp.id);
+    await seedLead(leadB, '0811000002', cmp.id);
+    await seedLead(leadX, '0811000009', other.id);
+    // Origin-campaign lineage is set at closing; seedWonClient stamps origin_campaign_id.
+    await seedWonClient('ZZ-CLI-A', 'ZZ-TRX-A', cmp.id, '21900000.00');
+    await seedWonClient('ZZ-CLI-B', 'ZZ-TRX-B', cmp.id, '5000000.00');
+    await seedWonClient('ZZ-CLI-X', 'ZZ-TRX-X', other.id, '9999999.00');
+    // Client A has two services; B has one; X (other campaign) must never appear.
+    await seedService('ZZ-SVC-A1', 'ZZ-CLI-A', 'TikTok Ads', '[In Execution]');
+    await seedService('ZZ-SVC-A2', 'ZZ-CLI-A', 'KOL', '[Briefed]');
+    await seedService('ZZ-SVC-B1', 'ZZ-CLI-B', 'Creative', '[Awaiting Onboarding]');
+    await seedService('ZZ-SVC-X1', 'ZZ-CLI-X', 'Ads', '[In Execution]');
+
+    const list = await campaignClients(sql, mktStaff('ZZ-LIA'), cmp.id);
+    // Same basis as Rollup.clientsWon → exactly the two origin clients, oldest first.
+    expect(list.map((c) => c.clientId)).toEqual(['ZZ-CLI-A', 'ZZ-CLI-B']);
+    const a = list[0];
+    expect(a.services.map((s) => s.serviceId)).toEqual(['ZZ-SVC-A1', 'ZZ-SVC-A2']);
+    expect(a.services.map((s) => s.status)).toEqual(['[In Execution]', '[Briefed]']);
+    expect(a.services.map((s) => s.name)).toEqual(['TikTok Ads', 'KOL']);
+    expect(list[1].services.map((s) => s.status)).toEqual(['[Awaiting Onboarding]']);
+  });
+
+  it('a won client with no Service row yet lists an empty services array (LEFT JOIN)', async () => {
+    const cmp = await createCampaign(sql, mktStaff('ZZ-LIA'), validInput());
+    await seedLead('ZZ-LEAD-N', '0811000003', cmp.id);
+    await seedWonClient('ZZ-CLI-N', 'ZZ-TRX-N', cmp.id, '1000000.00');
+
+    const list = await campaignClients(sql, mktStaff('ZZ-LIA'), cmp.id);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ clientId: 'ZZ-CLI-N', services: [] });
+  });
+
+  it('empty campaign yields an empty list', async () => {
+    const cmp = await createCampaign(sql, mktStaff('ZZ-LIA'), validInput());
+    expect(await campaignClients(sql, mktStaff('ZZ-LIA'), cmp.id)).toEqual([]);
+  });
+
+  it('reuses the §5 read gate: non-owner staff forbidden, missing not-found, OD may read', async () => {
+    const cmp = await createCampaign(sql, mktStaff('ZZ-LIA'), validInput());
+    await expect(campaignClients(sql, mktStaff('ZZ-DINA'), cmp.id)).rejects.toThrow(ForbiddenError);
+    await expect(campaignClients(sql, mktStaff('ZZ-LIA'), 'CMP-999999-9999')).rejects.toThrow(NotFoundError);
+    await expect(campaignClients(sql, od('ZZ-OD'), cmp.id)).resolves.toBeTruthy();
   });
 });

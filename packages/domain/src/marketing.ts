@@ -114,6 +114,13 @@ export interface JunkReason {
 /** The read-only Auto-Metrics view for one Campaign (§4 / §6.3). */
 export interface Metrics {
   campaignId: string;
+  /**
+   * The owning Marketing employee (Campaign owner, §3 Rule 5). Carried so the
+   * Lead/Head dashboard can "compare … across staff" (§5 Rule 2) without a second
+   * round-trip to `GET /marketing/campaigns` — it is the Campaign's `owner`, already
+   * fetched by the §5 read gate, never a new query and never editable (house rule 4).
+   */
+  owner: string;
   online: boolean;
   offline: boolean;
   /** Budget input; "" + budgetIdr "—" when the campaign has no record yet. */
@@ -320,7 +327,7 @@ export async function metrics(sql: Queryable, actor: Actor, campaignId: string):
  */
 async function computeMetrics(sql: Queryable, c: Campaign, budget: money.Money | null): Promise<Metrics> {
   const m: Metrics = {
-    campaignId: c.id, online: c.online, offline: c.offline,
+    campaignId: c.id, owner: c.owner, online: c.online, offline: c.offline,
     budget: budget === null ? '' : money.decimal(budget),
     budgetIdr: budget === null ? EM_DASH : money.format(budget),
     leadByDashboard: 0, leadRealBySales: 0, leadQualityRate: EM_DASH,
