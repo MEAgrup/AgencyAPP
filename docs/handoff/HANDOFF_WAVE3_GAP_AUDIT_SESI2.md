@@ -14,11 +14,14 @@
 | Hal | Nilai |
 |---|---|
 | **Repo** | `MEAgrup/AgencyAPP` |
-| **Branch** | `claude/wave-3-handoff-lanjutan-f8dbcx` (lanjutan dari `…-thc14e` + merge #188 M11-G1). |
+| **PR SESI2** | **#189 SUDAH MERGED ke `main`** (merge commit `d333eba`). Isi SESI2 kini ada di `main`. |
+| **Mulai dari mana (chat berikutnya)** | Karena #189 sudah merged, **JANGAN** tumpuk commit di atasnya — mulai fresh: `git fetch origin main && git checkout -B <branch-tujuan> origin/main`, lalu buka PR BARU. |
 | **Migrasi** | **119** (NOL migrasi baru — M13/M14 murni rute API, M11-G3 murni wire+FE+test). |
 | **Gate** | `tabel public` 121 · `entity_prefix` 35 / `sm_machines` 23 / `notif_events` 58 **TETAP**. |
 | **Backlog audit** | `docs/backlog/WAVE3_GAP_AUDIT.md` (STATUS SESI 2 + 3 temuan ditandai ✅). |
 | **Keputusan** | `docs/DECISIONS.md` **2026-08-19** baris teratas ("Wave 3 gap-audit SESI2"). |
+
+> **CI #189 saat merge:** api / web-internal / core-engines / db-and-migrations / backend semua ✅ (Go oracle hijau — diff tak menyentuh `backend/`). Nol konflik, single commit.
 
 ### 0.1 Aturan main (tak berubah) — CLAUDE.md + SESI1 §0.1
 - Tes domain WAJIB serial (`--no-file-parallelism`); `npm ci` sebelum test; rebuild DB setelah migrasi baru.
