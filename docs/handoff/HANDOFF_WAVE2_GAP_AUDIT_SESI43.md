@@ -4,21 +4,22 @@
 > → **SESI43 (ini, terbaru — Kelas C4 + C5 + C6 + C7).**
 > Baca yang bernomor tertinggi lebih dulu.
 >
-> **Status: C5, C7, C4, C6 SELESAI & teruji di branch `claude/wave2-gap-audit-sesi42-o4y034`
-> (3 commit di atas `main` 066fdab). Sisa Wave 2 = C1/C2/C3 (satu desain lintas-modul GMV→Health/attribution)
-> + residual B1/B2/B4 — SEMUA menunggu fitur manajemen toko klien + reporting engine.**
+> **Status: C5, C7, C4, C6 SELESAI & teruji — PR #184 MERGE ke `main`. Sisa Wave 2 = C1/C2/C3 (satu desain
+> lintas-modul GMV→Health/attribution) + residual B1/B2/B4 — SEMUA menunggu fitur manajemen toko klien +
+> reporting engine.**
 
 ---
 
 ## 0. CARA MELANJUTKAN
 
-### 0.0 Posisi branch & commit
+### 0.0 Posisi branch & PR
 | Hal | Nilai |
 |---|---|
 | **Repo** | `MEAgrup/AgencyAPP` |
-| **Branch** | `claude/wave2-gap-audit-sesi42-o4y034` (belum ada PR; 3 commit di atas `main`). |
-| **Commit** | `2d9f273` C5+C7 · `1cc4705` C4 · `7cde9f9` C6 (di atas `066fdab` = `main` A+B). |
-| **Migrasi** | **119** total (satu baru sesi ini: `20260818040000_m8_roas_underperforming_notif.sql`, katalog v11). |
+| **PR #184** | Wave 2 gap audit **Kelas C4–C7**. **MERGE ke `main`.** |
+| **Branch berikutnya** | Restart dari `main` terbaru: `git fetch origin main && git checkout -B <branch-baru> origin/main`. **`main` kini punya A+B + C4–C7 (119 migrasi).** |
+| **Commit (arsip)** | `2d9f273` C5+C7 · `1cc4705` C4 · `7cde9f9` C6 · `3e57281` handoff (di atas `066fdab` = `main` A+B). |
+| **Migrasi** | **119** total (satu baru: `20260818040000_m8_roas_underperforming_notif.sql`, katalog v11). |
 | **Gate** | `notif_events` 57→**58** (v11), dinaikkan di `ci.yml` + `db-rebuild.sh`. Mesin 23 / prefix 35 TETAP. |
 
 ### 0.1 Aturan main (tak berubah) — lihat SESI42 §0.1 + `CLAUDE.md`
