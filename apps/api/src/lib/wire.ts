@@ -1449,7 +1449,10 @@ export interface DependencyWire {
   target_type: string;
   target_id: string;
   type: string;
-  note?: string;
+  // Go tags `note` omitempty; here it is emitted explicitly as `null` when empty.
+  // A MISSING key is what blanks a page (O43's lesson); `null` does not. House
+  // rule: send `null` explicit, never omitempty. Never "simplify" back to omitting.
+  note: string | null;
   client_id: string;
   status: string;
   created_by: string;
@@ -1459,7 +1462,7 @@ export interface DependencyWire {
 export function dependencyToWire(d: board.Dependency): DependencyWire {
   return {
     id: d.id, source_type: d.sourceType, source_id: d.sourceId, target_type: d.targetType,
-    target_id: d.targetId, type: d.type, ...(d.note ? { note: d.note } : {}), client_id: d.clientId,
+    target_id: d.targetId, type: d.type, note: d.note ? d.note : null, client_id: d.clientId,
     status: d.status, created_by: d.createdBy, created_at: d.createdAt.toISOString(),
   };
 }
@@ -1471,22 +1474,26 @@ export interface CardWire {
   division: string;
   client_id: string;
   brief_id: string;
-  pic?: string;
+  // Go tags pic/due_date/dependency_badge/created_at omitempty; here every key is
+  // emitted explicitly as `null` when empty. A MISSING key is what blanks a page
+  // (O43's lesson); `null` does not. House rule: send `null` explicit, never
+  // omitempty. `overdue` has no omitempty and is always present, even when false.
+  pic: string | null;
   native_status: string;
   universal_column: string;
-  due_date?: string;
+  due_date: string | null;
   overdue: boolean;
-  dependency_badge?: string;
-  created_at?: string;
+  dependency_badge: string | null;
+  created_at: string | null;
 }
 
 export function cardToWire(c: board.Card): CardWire {
   return {
     id: c.id, type: c.type, division: c.division, client_id: c.clientId, brief_id: c.briefId,
-    ...(c.pic ? { pic: c.pic } : {}), native_status: c.nativeStatus, universal_column: c.universalColumn,
-    ...(c.dueDate ? { due_date: c.dueDate } : {}), overdue: c.overdue,
-    ...(c.dependencyBadge ? { dependency_badge: c.dependencyBadge } : {}),
-    ...(c.createdAt ? { created_at: c.createdAt.toISOString() } : {}),
+    pic: c.pic ? c.pic : null, native_status: c.nativeStatus, universal_column: c.universalColumn,
+    due_date: c.dueDate ? c.dueDate : null, overdue: c.overdue,
+    dependency_badge: c.dependencyBadge ? c.dependencyBadge : null,
+    created_at: c.createdAt ? c.createdAt.toISOString() : null,
   };
 }
 

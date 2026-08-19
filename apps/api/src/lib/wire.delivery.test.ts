@@ -106,10 +106,10 @@ describe('M11 cardToWire (Client Board / My Tasks card)', () => {
     expectNoCamelKeys(cardToWire(full));
   });
 
-  it('omits the four omitempty keys when empty, but ALWAYS sends overdue', () => {
-    // Go marks pic/due_date/dependency_badge/created_at omitempty, and the FE
-    // types them optional (`x?`) — a missing key reads as "none". overdue has
-    // no omitempty (views.go) and the FE declares it required, so it must be
+  it('emits the four formerly-omitempty keys as explicit null when empty (M11-G3), never dropping them', () => {
+    // M11-G3: Go marks pic/due_date/dependency_badge/created_at omitempty, but the
+    // house rule forbids omitempty — a MISSING key is what blanks a page (O43), so
+    // each is emitted explicitly as `null`. overdue has no omitempty and is always
     // present even when false.
     const bare: board.Card = {
       id: 'AST-202607-0001', type: 'asset', division: 'Creative',
@@ -118,10 +118,14 @@ describe('M11 cardToWire (Client Board / My Tasks card)', () => {
       dueDate: '', overdue: false, dependencyBadge: '', createdAt: null,
     };
     const wire = cardToWire(bare) as unknown as Record<string, unknown>;
-    expect('pic' in wire).toBe(false);
-    expect('due_date' in wire).toBe(false);
-    expect('dependency_badge' in wire).toBe(false);
-    expect('created_at' in wire).toBe(false);
+    expect('pic' in wire).toBe(true);
+    expect(wire.pic).toBeNull();
+    expect('due_date' in wire).toBe(true);
+    expect(wire.due_date).toBeNull();
+    expect('dependency_badge' in wire).toBe(true);
+    expect(wire.dependency_badge).toBeNull();
+    expect('created_at' in wire).toBe(true);
+    expect(wire.created_at).toBeNull();
     expect('overdue' in wire).toBe(true);
     expect(wire.overdue).toBe(false);
   });
@@ -159,9 +163,10 @@ describe('M11 dependencyToWire (DEP- row + derived status)', () => {
     expectNoCamelKeys(dependencyToWire(full));
   });
 
-  it('omits note when empty (Go omitempty; FE note?)', () => {
+  it('emits note as explicit null when empty (M11-G3), never dropping the key', () => {
     const wire = dependencyToWire({ ...full, note: '' }) as unknown as Record<string, unknown>;
-    expect('note' in wire).toBe(false);
+    expect('note' in wire).toBe(true);
+    expect(wire.note).toBeNull();
   });
 });
 

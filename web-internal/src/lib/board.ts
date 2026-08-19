@@ -32,14 +32,14 @@ export interface Card {
   division: string;
   client_id: string;
   brief_id: string;
-  pic?: string;
+  pic: string | null;
   native_status: string;
   universal_column: string;
-  due_date?: string; // "YYYY-MM-DD", NOT RFC3339 (views.go:245,447)
+  due_date: string | null; // "YYYY-MM-DD", NOT RFC3339 (views.go:245,447)
   overdue: boolean; // always present, never omitempty
-  /** Client Board only ("Menunggu Dependency" | "Informational (link ke BRF-...)"). Never present on My Tasks cards. */
-  dependency_badge?: string;
-  created_at?: string; // RFC3339
+  /** Client Board only ("Menunggu Dependency" | "Informational (link ke BRF-...)"). `null` on My Tasks cards. */
+  dependency_badge: string | null;
+  created_at: string | null; // RFC3339
 }
 
 export type DependencyType = 'Blocking' | 'Informational';
@@ -55,7 +55,7 @@ export interface Dependency {
   target_type: string;
   target_id: string;
   type: DependencyType;
-  note?: string;
+  note: string | null;
   client_id: string;
   status: DependencyStatus;
   created_by: string;
