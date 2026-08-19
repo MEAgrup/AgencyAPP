@@ -21,9 +21,9 @@
 |---|---|---|---|---|---|
 | **M2 Marketing** | Faithful, near line-for-line | 0 | M2-G1,G3,G5,G6 | G2,G4,G7 | M2-G1 owner di dashboard metrics |
 | **M3 Campaign** | High-fidelity; linkage WRITE **ada** | 0 | M3-G1,G2,G3,G4 | G5,G6 | M3-G1 per-campaign won-client list |
-| **M11 Board** | Faithful **kecuali gate roll-up** | **M11-G1** | M11-G2,G3 | G4,G5 | **M11-G1 (SELESAI sesi 1)** |
-| **M13 Health** | Substansial, faithful | M13-G1* | — | G2,G3 | M13-G1 scheduler bulanan |
-| **M14 Team Perf** | Salah satu paling lengkap | 0 | M14-G1 | G2,G3,G4,G5 | M14-G1 scheduler bulanan |
+| **M11 Board** | Faithful **kecuali gate roll-up** | **M11-G1 ✅** | M11-G2,G3 ✅ | G4,G5 | **M11-G1+G3 SELESAI** |
+| **M13 Health** | Substansial, faithful | M13-G1* ✅ | — | G2,G3 | M13-G1 scheduler SELESAI (sesi 2) |
+| **M14 Team Perf** | Salah satu paling lengkap | 0 | M14-G1 ✅ | G2,G3,G4,G5 | M14-G1 scheduler SELESAI (sesi 2) |
 | **M15 Portal** | Team Portal lengkap; Client Portal ditunda | 0 | M15-G1,G2 | G3–G7 | M15-G1 filter division-mix |
 
 \* M13-G1 borderline A/B (logika ada + manual-invokable; hanya scheduler yang hilang).
@@ -32,8 +32,18 @@
 
 ## STATUS SESI 1
 
-- ✅ **M11-G1 SELESAI** (commit sesi ini) — gate roll-up kini DEFER, bukan throw.
-- ⏭️ Sisanya OPEN, prioritas berikut di bawah.
+- ✅ **M11-G1 SELESAI** (sesi 1) — gate roll-up kini DEFER, bukan throw.
+
+## STATUS SESI 2
+
+- ✅ **M13-G1 + M14-G1 SELESAI** — scheduler snapshot bulanan: rute `POST /internal/health/tick`
+  + `POST /internal/performance/tick` (Pattern A, shared-secret `PLAN_TICK_SECRET`, meniru
+  `internal/plan/tick`). Keputusan pemilik 2026-08-19: Pattern A (bukan pg_cron/manual) + wiring
+  provider cron (Vercel/GitHub Action) DITUNDA seperti plan/tick.
+- ✅ **M11-G3 SELESAI** — omitempty di `cardToWire`/`dependencyToWire` diganti `null` eksplisit
+  + FE mirror `board.ts` `string | null` + tes delivery di-update.
+- ⏭️ Berikut: **M2-G1 / M3-G1** (requirement produk PRD), lalu sisa B kecil, lalu C OPEN.
+  Client Portal (M15 C-cluster) TETAP terakhir (diblokir O4+O5 + ditunda pemilik).
 
 ---
 
@@ -52,10 +62,13 @@
   → `return` (DEFER diam), Brief tetap `[In Review]`, child commit; jalur AM eksplisit
   (`account.ts driveReviewEdge`) TETAP throw. **Tes (M11-G2):** `board.test.ts` "Blocking gate
   DEFERS on the roll-up path" (Creative + KOL), terbukti gagal tanpa fix.
-- **M11-G3 — Severity B — OPEN.** `cardToWire`/`dependencyToWire` (`wire.ts`) memakai
-  omitempty (drop key `pic`/`due_date`/`dependency_badge`/`created_at`/`note` saat kosong) —
-  langsung melanggar house rule "kirim `null` eksplisit, jangan omitempty" (kelas O43).
-  Risiko laten (belum ada consumer FE `/board`). **Fix:** emit `null`/`''` eksplisit.
+- **M11-G3 — Severity B — ✅ SELESAI (sesi 2).** `cardToWire`/`dependencyToWire` (`wire.ts`)
+  memakai omitempty (drop key `pic`/`due_date`/`dependency_badge`/`created_at`/`note` saat
+  kosong) — langsung melanggar house rule "kirim `null` eksplisit, jangan omitempty" (kelas
+  O43). **Fix:** interface field-field itu → `string | null`, mapper emit `cond ? v : null`
+  (preseden `installmentToWire`); FE mirror `board.ts` `Card`/`Dependency` → `string | null`;
+  dua tes `wire.delivery.test.ts` yang meng-assert absence kunci → assert null eksplisit.
+  Shape-parity tetap seimbang (membandingkan SET kunci).
 - **M11-G4 — Severity C — OPEN.** My Tasks card `dependencyBadge` selalu `''` (paritas Go).
   "Same card structure" (§5.4) secara teknis tak terpenuhi. Verifikasi intent → log 1 baris.
 - **M11-G5 — Severity C — non-gap.** Pesan gate tak dalam `[...]` = sesuai STATE_MACHINES §12
@@ -63,13 +76,14 @@
 
 ### M13 Client Health
 
-- **M13-G1 — Severity A/B — OPEN (kandidat berikutnya).** "Monthly batch job" (§5.2/OA-6)
+- **M13-G1 — Severity A/B — ✅ SELESAI (sesi 2).** "Monthly batch job" (§5.2/OA-6)
   **tak punya scheduler**. `runSnapshotJob` benar + idempotent tapi satu-satunya entry =
   `POST /health/snapshots/scan` (actor-gated Director). Tak ada `pg_cron` maupun rute
   `internal/health/tick`. Tanpa scan manual: dashboard band kosong, trend berlubang permanen
-  (tanpa backfill, DECISIONS 298). **Fix:** rute `internal/health/tick` (pola
-  `internal/plan/tick`, shared-secret) + cron eksternal bulanan. **Catatan:** sistemik —
-  M14-G1 identik. Pertimbangkan satu keputusan pemilik untuk kedua sweep.
+  (tanpa backfill, DECISIONS 298). **Fix:** rute BARU `POST /internal/health/tick` (pola
+  `internal/plan/tick`, shared-secret `PLAN_TICK_SECRET`, unset⇒closed, body `{waktu}` override)
+  → `health.runSnapshotJob(db(), when)`; +4 tes secret-gate. Wiring cron eksternal (provider)
+  DITUNDA seperti plan/tick (keputusan pemilik 2026-08-19: Pattern A).
 - **M13-G2 — Severity C — ter-log (DECISIONS 298).** GMV Growth baca `clients.total_sales`
   (kolom mutable point-in-time), jadi tak period-accurate / tak recompute-from-log. Snapshot
   membekukan nilai → trend stabil. Diperparah G1 (sweep telat baca run-rate periode lain).
@@ -79,10 +93,11 @@
 
 ### M14 Team Performance
 
-- **M14-G1 — Severity B — OPEN.** Sama seperti M13-G1: snapshot bulanan hanya jalan lewat
-  POST Director manual (`snapshots/scan`), tak ada cron. **Fix:** `cron.schedule` guarded
-  ATAU rute `internal/performance/tick`, dipasangkan dengan M13. ATAU log keputusan
-  "month-end operator-triggered by design".
+- **M14-G1 — Severity B — ✅ SELESAI (sesi 2).** Sama seperti M13-G1: snapshot bulanan hanya
+  jalan lewat POST Director manual (`snapshots/scan`), tak ada cron. **Fix:** rute BARU
+  `POST /internal/performance/tick` (pola sama, dipasangkan dengan M13-G1) →
+  `performance.runSnapshotJob(db(), when)`; +4 tes secret-gate. Provider cron ditunda seperti
+  plan/tick (keputusan pemilik 2026-08-19: Pattern A HTTP tick).
 - **M14-G2 — Severity C — ter-log (W3-M14-C1).** `touchedClients` PIC linkage tak
   period-scoped; dibatasi hilir oleh syarat CHR snapshot periode sama + clamp ±10.
 - **M14-G3/G4 — Severity C — benar/ter-log.** O9 target configurable + `is_placeholder`
@@ -141,11 +156,11 @@
 
 ## Urutan tutup yang disarankan (sesudah M11-G1)
 
-1. **M13-G1 + M14-G1 (scheduler bulanan)** — sistemik, satu pola (`internal/*/tick` + cron),
-   menyalakan exit-criteria Wave 3 (dashboard band terisi, trend jalan). Butuh 1 keputusan
-   pemilik soal cara cron (Vercel Cron / GitHub Action) — bawa ke Nerissa/head dev.
-2. **M11-G3** (omitempty wire) — kecil, house-rule non-negotiable, cegat O43 sebelum FE board.
-3. **M2-G1 / M3-G1** — requirement produk PRD (compare-across-staff, drill-down client list).
+1. ✅ **M13-G1 + M14-G1 (scheduler bulanan) — SELESAI sesi 2.** Rute `internal/{health,performance}/tick`
+   (Pattern A, shared-secret). Keputusan pemilik 2026-08-19: Pattern A + wiring provider ditunda
+   seperti plan/tick. Sisa: wiring cron eksternal aktual saat deploy (Vercel Cron / GitHub Action).
+2. ✅ **M11-G3 (omitempty wire) — SELESAI sesi 2.** Explicit null di `cardToWire`/`dependencyToWire`.
+3. **M2-G1 / M3-G1** — requirement produk PRD (compare-across-staff, drill-down client list). ← BERIKUTNYA
 4. Sisa B (M2-G3/G5/G6, M3-G2/G3/G4, M15-G1/G2) — cluster kecil.
 5. C yang OPEN → log keputusan / tes tambahan.
 6. **Client Portal (M15 C-cluster)** TERAKHIR — jangan mulai sebelum O4+O5 tutup (keputusan
