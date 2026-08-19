@@ -231,6 +231,7 @@ describeDb('Auto-Metrics (§4) recompute-from-log', () => {
     await seedWonClient(uid('CLI'), uid('TRX'), leadIds[2], cid, '6000000.00', win);
 
     const m = await metrics(sql, mktStaff('ZZ-LIA'), cid);
+    expect(m.owner).toBe('ZZ-LIA'); // M2-G1: dashboard can compare across staff (§5 Rule 2)
     expect(m.leadByDashboard).toBe(46);
     expect(m.leadRealBySales).toBe(12);
     expect(m.leadQualityRate).toBe('26%'); // 12/46 = 26.08 → 26%
@@ -341,7 +342,11 @@ describeDb('dashboard split (§5)', () => {
 
     const liaList = await dashboard(sql, mktStaff('ZZ-LIA'));
     expect(liaList.map((m) => m.campaignId)).toEqual([lia]);
-    expect((await dashboard(sql, mktLead('ZZ-MHEAD'))).length).toBeGreaterThanOrEqual(2);
+    expect(liaList[0].owner).toBe('ZZ-LIA');
+    // M2-G1: the Lead board carries each campaign's owner, so it can compare across staff (§5 Rule 2).
+    const leadList = await dashboard(sql, mktLead('ZZ-MHEAD'));
+    expect(leadList.length).toBeGreaterThanOrEqual(2);
+    expect(leadList.map((m) => m.owner)).toEqual(expect.arrayContaining(['ZZ-LIA', 'ZZ-DINA']));
     expect((await dashboard(sql, od('ZZ-OD'))).length).toBeGreaterThanOrEqual(2);
     await expect(dashboard(sql, salesStaff('ZZ-SAL'))).rejects.toThrow(ForbiddenError);
 

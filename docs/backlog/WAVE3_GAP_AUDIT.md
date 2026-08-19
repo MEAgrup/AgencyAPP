@@ -19,8 +19,8 @@
 
 | Modul | Verdict port | Gap A | Gap B | Gap C | Highest-priority |
 |---|---|---|---|---|---|
-| **M2 Marketing** | Faithful, near line-for-line | 0 | M2-G1,G3,G5,G6 | G2,G4,G7 | M2-G1 owner di dashboard metrics |
-| **M3 Campaign** | High-fidelity; linkage WRITE **ada** | 0 | M3-G1,G2,G3,G4 | G5,G6 | M3-G1 per-campaign won-client list |
+| **M2 Marketing** | Faithful, near line-for-line | 0 | M2-G1 ✅,G3,G5,G6 | G2,G4,G7 | M2-G1 owner di dashboard metrics ✅ |
+| **M3 Campaign** | High-fidelity; linkage WRITE **ada** | 0 | M3-G1 ✅,G2,G3,G4 | G5,G6 | M3-G1 per-campaign won-client list ✅ |
 | **M11 Board** | Faithful **kecuali gate roll-up** | **M11-G1 ✅** | M11-G2,G3 ✅ | G4,G5 | **M11-G1+G3 SELESAI** |
 | **M13 Health** | Substansial, faithful | M13-G1* ✅ | — | G2,G3 | M13-G1 scheduler SELESAI (sesi 2) |
 | **M14 Team Perf** | Salah satu paling lengkap | 0 | M14-G1 ✅ | G2,G3,G4,G5 | M14-G1 scheduler SELESAI (sesi 2) |
@@ -43,6 +43,18 @@
 - ✅ **M11-G3 SELESAI** — omitempty di `cardToWire`/`dependencyToWire` diganti `null` eksplisit
   + FE mirror `board.ts` `string | null` + tes delivery di-update.
 - ⏭️ Berikut: **M2-G1 / M3-G1** (requirement produk PRD), lalu sisa B kecil, lalu C OPEN.
+  Client Portal (M15 C-cluster) TETAP terakhir (diblokir O4+O5 + ditunda pemilik).
+
+## STATUS SESI 3
+
+- ✅ **M2-G1 SELESAI** — dashboard compare-across-staff: field `owner` ditambahkan ke
+  `marketing.Metrics` (= `Campaign.owner`, nol query baru — sudah di-fetch gate §5),
+  wire `owner_employee_id` di `MarketingMetricsWire`, mirror FE `marketing.ts::Metrics`.
+- ✅ **M3-G1 SELESAI** — per-campaign won-client list + service-status drill-down:
+  `campaignClients(sql, actor, id)` (reuse gate §5, origin-campaign basis = `clientsWon`,
+  LEFT JOIN `services`), rute `GET /marketing/campaigns/{id}/clients`, wire
+  `CampaignClientWire`/`CampaignClientServiceWire` + FE `CampaignClient`/`getCampaignClients`.
+- ⏭️ Berikut: sisa B kecil (M2-G3/G5/G6, M3-G2/G3/G4, M15-G1/G2), lalu C OPEN.
   Client Portal (M15 C-cluster) TETAP terakhir (diblokir O4+O5 + ditunda pemilik).
 
 ---
@@ -107,10 +119,12 @@
 
 ### M2 Marketing
 
-- **M2-G1 — Severity B — OPEN (highest M2).** Dashboard Lead tak bisa "compare across staff"
-  (§5 Rule 2): `Metrics`/wire tak bawa field owner/staff. **Fix:** tambah `owner`
-  (campaign owner employeeId) ke `Metrics`/`MarketingMetricsWire`, isi dari Campaign yang
-  sudah di-fetch (nol query baru). Atau log bahwa FE korelasi via `GET /marketing/campaigns`.
+- **M2-G1 — Severity B — ✅ SELESAI (sesi 3).** Dashboard Lead tak bisa "compare across staff"
+  (§5 Rule 2): `Metrics`/wire tak bawa field owner/staff. **Fix (dieksekusi):** tambah `owner`
+  (campaign owner employeeId) ke `marketing.Metrics`, isi dari Campaign yang sudah di-fetch gate
+  §5 (**nol query baru**); wire `owner_employee_id` di `MarketingMetricsWire`; mirror FE
+  `web-internal/src/lib/marketing.ts::Metrics`. Read-only (house rule 4). Tes: `m.owner` di
+  worked-example + list Lead memuat owner ≥2 staff berbeda; wire mapper `.toEqual`.
 - **M2-G3 — Severity B — OPEN.** Dashboard tak sort/flag low-ROAS/low-quality (§5 Rule 2).
   Butuh threshold OKR (lihat M2-G2). Defer bareng G2 atau tandai FE-owned.
 - **M2-G5 — Severity B — OPEN.** Konstanta BI byte-exact tapi tes hanya assert error class,
@@ -125,10 +139,16 @@
 
 ### M3 Campaign
 
-- **M3-G1 — Severity B — OPEN (highest M3).** Per-campaign **client list + service-status
-  drill-down** (§4 Rule 4 / Flow 2) tak ada di TS maupun Go. Rollup cuma 4 angka. **Fix:**
-  `campaignClients(sql, actor, id)` (reuse gate §5) join `clients.origin_campaign_id=id` →
-  Account service-status; rute `GET /marketing/campaigns/{id}/clients`.
+- **M3-G1 — Severity B — ✅ SELESAI (sesi 3).** Per-campaign **client list + service-status
+  drill-down** (§4 Rule 4 / Flow 2) tak ada di TS maupun Go. Rollup cuma 4 angka. **Fix
+  (dieksekusi):** `campaignClients(sql, actor, id)` (reuse gate §5 via `getCampaign`, sama
+  seperti `campaignRollup`) — clients di mana `origin_campaign_id=id` (first-touch, **basis
+  identik `Rollup.clientsWon`** ⇒ list & count rekonsiliasi, §4 Rule 5) LEFT JOIN `services`
+  → name+status Account verbatim per Service; client tanpa Service → `services: []`. Rute
+  BARU `GET /marketing/campaigns/{id}/clients` (shell tipis, `readAsActor`, `{data}`). Wire
+  `CampaignClientWire`/`CampaignClientServiceWire` (named, bukan inline) + FE
+  `CampaignClient`/`CampaignClientService`/`getCampaignClients`. Tes: 4 (own vs other campaign
+  + service order, empty services LEFT JOIN, empty campaign, gate §5).
 - **M3-G2 — Severity B — OPEN.** Tak ada edit-field campaign (§6.1 "Create/edit/own").
   **Fix:** `updateCampaign` gated `canManageCampaign` + audit, PATCH route — atau log out-of-scope.
 - **M3-G3 — Severity B — OPEN.** Blocked-transition BI `[transisi status tidak diizinkan]`
@@ -160,8 +180,9 @@
    (Pattern A, shared-secret). Keputusan pemilik 2026-08-19: Pattern A + wiring provider ditunda
    seperti plan/tick. Sisa: wiring cron eksternal aktual saat deploy (Vercel Cron / GitHub Action).
 2. ✅ **M11-G3 (omitempty wire) — SELESAI sesi 2.** Explicit null di `cardToWire`/`dependencyToWire`.
-3. **M2-G1 / M3-G1** — requirement produk PRD (compare-across-staff, drill-down client list). ← BERIKUTNYA
-4. Sisa B (M2-G3/G5/G6, M3-G2/G3/G4, M15-G1/G2) — cluster kecil.
+3. ✅ **M2-G1 / M3-G1 — SELESAI sesi 3** (compare-across-staff owner field, per-campaign
+   won-client list + service-status drill-down). Nol migrasi baru.
+4. **Sisa B (M2-G3/G5/G6, M3-G2/G3/G4, M15-G1/G2) — cluster kecil.** ← BERIKUTNYA
 5. C yang OPEN → log keputusan / tes tambahan.
 6. **Client Portal (M15 C-cluster)** TERAKHIR — jangan mulai sebelum O4+O5 tutup (keputusan
    pemilik + head dev). Bukan pekerjaan dev sekarang.

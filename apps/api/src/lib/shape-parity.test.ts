@@ -376,6 +376,8 @@ const WIRE_TO_FE: Record<string, string> = {
   MarketingCampaignWire: 'marketing.ts::Campaign',
   SelectableCampaignWire: 'marketing.ts::SelectableCampaign',
   CampaignRollupWire: 'marketing.ts::Rollup',
+  CampaignClientWire: 'marketing.ts::CampaignClient',
+  CampaignClientServiceWire: 'marketing.ts::CampaignClientService',
   // M4 client record
   ServiceLineWire: 'clients.ts::ServiceLine',
   PlatformWire: 'clients.ts::Platform',

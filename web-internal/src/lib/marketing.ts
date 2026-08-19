@@ -69,6 +69,24 @@ export interface Rollup {
   total_value_won_idr: string; // "Rp. X.XXX.XXX,00"
 }
 
+// One Service of a won client, as the Campaign client-list drill-down surfaces it
+// (M3 §4 Rule 4). name + status are read verbatim from Account's services row.
+export interface CampaignClientService {
+  service_id: string;
+  name: string;
+  status: string; // Account service status, verbatim (e.g. "[In Execution]")
+}
+
+// One won client of a Campaign (§4 Rule 4 / Flow 2) — Origin-Campaign lineage, the
+// same basis as Rollup.clients_won. services is empty when Account has no Service row
+// for the client yet. Click a client → open its Client record / service progress.
+export interface CampaignClient {
+  client_id: string;
+  toko: string; // store name
+  nama_pic: string;
+  services: CampaignClientService[];
+}
+
 // module2_marketing performance Record. budget is the only writable field.
 export interface Record {
   campaign_id: string;
@@ -89,6 +107,7 @@ export interface JunkReason {
 // String metrics render "—" (U+2014) when their divisor is zero; render verbatim.
 export interface Metrics {
   campaign_id: string;
+  owner_employee_id: string; // Campaign owner — the Lead dashboard compares across staff (§5 Rule 2)
   online: boolean;
   offline: boolean;
   budget: string; // "" when no record yet
@@ -206,6 +225,13 @@ export function getCampaign(id: string): Promise<Campaign> {
 // GET /marketing/campaigns/{id}/rollup → Rollup (object directly).
 export function getCampaignRollup(id: string): Promise<Rollup> {
   return api.get<Rollup>(`/marketing/campaigns/${id}/rollup`);
+}
+
+// GET /marketing/campaigns/{id}/clients → {data: CampaignClient[]}: the won-client
+// list with each client's Account service status (M3 §4 Rule 4 drill-down). Same §5
+// read gate as the rollup; oldest client first.
+export function getCampaignClients(id: string): Promise<{ data: CampaignClient[] }> {
+  return api.get<{ data: CampaignClient[] }>(`/marketing/campaigns/${id}/clients`);
 }
 
 // POST /marketing/campaigns/{id}/transition {to} → statemachine.Result.

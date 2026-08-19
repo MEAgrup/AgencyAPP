@@ -599,7 +599,7 @@ describe('M2 marketing wire mappers', () => {
 
   it('marketingMetricsToWire maps every metric field incl. junk breakdown', () => {
     const m: marketing.Metrics = {
-      campaignId: 'CMP-1', online: true, offline: false, budget: '5000000.00', budgetIdr: 'Rp. 5.000.000,00',
+      campaignId: 'CMP-1', owner: 'EMP-LIA', online: true, offline: false, budget: '5000000.00', budgetIdr: 'Rp. 5.000.000,00',
       leadByDashboard: 46, leadRealBySales: 12, leadQualityRate: '26%',
       attributedSales: 'Rp. 21.900.000,00', attributedSalesDecimal: '21900000.00',
       costPerLead: 'Rp. 108.695,00', costPerRealLead: 'Rp. 416.666,00', roas: '4.38',
@@ -607,7 +607,7 @@ describe('M2 marketing wire mappers', () => {
       junkBreakdown: [{ reason: '[Bukan seller]', count: 2 }],
     };
     expect(marketingMetricsToWire(m)).toEqual({
-      campaign_id: 'CMP-1', online: true, offline: false, budget: '5000000.00', budget_idr: 'Rp. 5.000.000,00',
+      campaign_id: 'CMP-1', owner_employee_id: 'EMP-LIA', online: true, offline: false, budget: '5000000.00', budget_idr: 'Rp. 5.000.000,00',
       lead_by_dashboard: 46, lead_real_by_sales: 12, lead_quality_rate: '26%',
       attributed_sales: 'Rp. 21.900.000,00', attributed_sales_decimal: '21900000.00',
       cost_per_lead: 'Rp. 108.695,00', cost_per_real_lead: 'Rp. 416.666,00', roas: '4.38',
