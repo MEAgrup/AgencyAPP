@@ -1085,6 +1085,12 @@ RESET ROLE;
 --     membawa arm-nya inline jadi TIDAK di sini. Lead DIVISI (non-Account)
 --     sengaja belum punya arm di D-01 — baca rekap divisi menyusul bersama jalur
 --     tulis RM-D6 (D-09), tak dilebarkan spekulatif (O48).
+--     Baris `ads_weekly_reports_select` (20260819020000, follow-up PR #172) adalah
+--     kelas yang SAMA: predikatnya `private.jwt_can_read_brief()`, cermin persis
+--     `briefs_select` — termasuk arm `jwt_is_lead() AND assigned_division =
+--     jwt_division()`. Induk `briefs_select` membawa arm-nya inline jadi TIDAK di
+--     sini; lingkupnya tak melebar sedikit pun dari induknya (siapa boleh melihat
+--     brief-nya, boleh melihat laporan mingguannya).
 --     Membuat detektor menembus satu tingkat indireksi akan MENGHAPUS
 --     kesebelasnya sekaligus — diusulkan sebagai **O60**, sengaja tidak
 --     dikerjakan di dalam tiket fitur: mengubah semantik invariant bersama
@@ -1095,7 +1101,7 @@ DO $$
 DECLARE
   actual text[];
   expected text[] := ARRAY[
-    'ad_campaign_assets_select','ad_campaigns_select','campaigns_select',
+    'ad_campaign_assets_select','ad_campaigns_select','ads_weekly_reports_select','campaigns_select',
     'client_platforms_select','client_sales_allocations_select','complaints_select',
     'creator_bookings_select','creator_lists_select','creator_payment_requests_select',
     'dependencies_select','employees_select','live_stream_sessions_select',

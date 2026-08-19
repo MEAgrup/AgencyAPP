@@ -36,6 +36,9 @@ import {
   pauseCampaign,
   unlinkAsset,
   ValidationError,
+  canFileWeeklyReport,
+  fileWeeklyReport,
+  listWeeklyReports,
   type Actor,
   type CampaignInput,
 } from './ads';
@@ -185,6 +188,10 @@ afterAll(async () => {
 });
 afterEach(async () => {
   if (!sql) return;
+  // ads_weekly_reports is append-only (no-delete guard) and FKs the briefs
+  // deleted below, so it is TRUNCATEd — the guard itself is asserted directly in
+  // its own test. Must run before the briefs delete.
+  await sql`truncate table ads_weekly_reports`;
   await sql`delete from metric_entry_assets where metric_entry_id in (select id from metric_entries where created_by like 'ZZ-%')`;
   await sql`delete from metric_entries where created_by like 'ZZ-%'`;
   await sql`delete from optimization_logs where created_by like 'ZZ-%'`;
@@ -478,5 +485,171 @@ describeDb('submit guard (§4 Rule 3) + reads', () => {
     await expect(getCampaign(sql, creativeStaff(), c.id)).rejects.toBeInstanceOf(ForbiddenError);
     expect((await listMetricEntries(sql, adsStaff(), c.id)).length).toBe(1);
     await expect(getCampaign(sql, adsStaff(), 'ADC-GHOST-0')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Laporan Mingguan Advertiser (follow-up PR #172, pemilik 2026-08-19) — realisasi-only.
+// ---------------------------------------------------------------------------
+
+describe('weekly-report predicate', () => {
+  it('canFileWeeklyReport: the brief PIC, Ads lead, or Director', () => {
+    expect(canFileWeeklyReport(adsStaff('ZZ-PIC'), 'ZZ-PIC')).toBe(true);
+    expect(canFileWeeklyReport(adsStaff('ZZ-OTHER'), 'ZZ-PIC')).toBe(false);
+    expect(canFileWeeklyReport(adsLead(), 'ZZ-PIC')).toBe(true);
+    expect(canFileWeeklyReport(director(), 'ZZ-PIC')).toBe(true);
+    expect(canFileWeeklyReport(creativeStaff(), 'ZZ-PIC')).toBe(false);
+    // An unassigned brief must not make everyone its PIC.
+    expect(canFileWeeklyReport(adsStaff('ZZ-ANY'), '')).toBe(false);
+  });
+});
+
+/** Mark a brief as having entered [In Progress] at `at` (the M12 transition log). */
+async function markStarted(briefId: string, at: Date): Promise<void> {
+  await sql`
+    insert into audit_log (entity_type, entity_id, actor_employee_id, action, created_at, created_by)
+    values ('brief', ${briefId}, 'ZZ-ADV', 'transition:[To Do]->[In Progress]', ${at}, 'ZZ-ADV')`;
+}
+
+/** One weekly Metric Entry on a campaign (raw platform counts included). */
+async function metricWeek(
+  campaignId: string,
+  periodStart: string,
+  periodEnd: string,
+  spend: string,
+  gmv: string,
+  clicks: number,
+  impressions: number,
+  conversions: number,
+): Promise<void> {
+  await sql`
+    insert into metric_entries (id, campaign_id, period_start, period_end, spend, gmv,
+      clicks, impressions, conversions, entry_method, entered_by, created_by)
+    values (${uid('MTR')}, ${campaignId}, ${periodStart}, ${periodEnd}, ${spend}, ${gmv},
+      ${clicks}, ${impressions}, ${conversions}, 'Manual', 'ZZ-ADV', 'ZZ-ADV')`;
+}
+
+describeDb('listWeeklyReports / fileWeeklyReport', () => {
+  it('a brief that never started has no weeks (no invented unfiled obligations)', async () => {
+    const { briefId } = await adsBrief();
+    const v = await listWeeklyReports(sql, adsStaff(), briefId);
+    expect(v.minggu).toEqual([]);
+    expect(v.belumDiisi).toBe(0);
+  });
+
+  it('recomputes each week from metric entries and marks finished weeks without a report', async () => {
+    const { briefId } = await adsBrief();
+    const c = await createCampaign(sql, adsStaff(), briefId, goodInput());
+    // Week A: Mon 2026-08-03 .. Sun 2026-08-09 (ISO 2026-W32).
+    await markStarted(briefId, new Date('2026-08-03T02:00:00Z'));
+    await metricWeek(c.id, '2026-08-03', '2026-08-09', '2000000', '9500000', 2000, 100000, 100);
+    // "now" inside week B, so week A is finished and week B is running.
+    const now = new Date('2026-08-12T05:00:00Z');
+    const v = await listWeeklyReports(sql, adsStaff(), briefId, now);
+
+    expect(v.minggu.length).toBe(2);
+    const a = v.minggu[0];
+    expect([a.isoYear, a.isoWeek]).toEqual([2026, 32]);
+    expect(a.mingguMulai).toBe('2026-08-03');
+    expect(a.mingguAkhir).toBe('2026-08-09');
+    const by = (k: string) => a.metrik.find((m) => m.key === k)!;
+    expect(by('ads_spent').realisasiDisplay).toBe('Rp. 2.000.000,00');
+    expect(by('gmv').realisasiDisplay).toBe('Rp. 9.500.000,00');
+    expect(by('roas').realisasi).toBeCloseTo(4.75, 6);
+    expect(by('view').realisasiDisplay).toBe('100.000');
+    expect(by('ctr').realisasiDisplay).toBe('2,00%'); // 2000 / 100000
+    expect(by('cvr').realisasiDisplay).toBe('5,00%'); // 100 / 2000
+    expect(by('ads_spent').sifat).toBe('serapan');    // spend is consumed, not "achieved"
+    // Week A is over and unreported; week B is still running, so it is not late.
+    expect(a.terlambat).toBe(true);
+    expect(v.minggu[1].berjalan).toBe(true);
+    expect(v.minggu[1].terlambat).toBe(false);
+    expect(v.belumDiisi).toBe(1);
+    // A week with no metric entry at all renders "—", never 0 (house rule 7).
+    const b = v.minggu[1].metrik.find((m) => m.key === 'roas')!;
+    expect(b.realisasiDisplay).toBe('—');
+    expect(b.realisasi).toBeNull();
+  });
+
+  it('the PIC files a week; it then reads back as terisi and no longer late', async () => {
+    const { briefId } = await adsBrief();
+    await sql`update briefs set assigned_pic = 'ZZ-ADV' where id = ${briefId}`;
+    await markStarted(briefId, new Date('2026-08-03T02:00:00Z'));
+    const now = new Date('2026-08-12T05:00:00Z');
+
+    const r = await fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, {
+      mingguMulai: '2026-08-03',
+      analisa: 'ROAS 4,75x di atas ekspektasi; spend terserap 50%.',
+      saran: 'Naikkan budget di kampanye Shopee, matikan ad group CTR terendah.',
+      kendala: 'Aset video baru belum turun.',
+    }, now);
+    expect([r.isoYear, r.isoWeek]).toEqual([2026, 32]);
+    expect(r.terisi).toBe(true);
+
+    const v = await listWeeklyReports(sql, adsStaff(), briefId, now);
+    expect(v.minggu[0].terisi).toBe(true);
+    expect(v.minggu[0].terlambat).toBe(false);
+    expect(v.minggu[0].saran).toContain('Naikkan budget');
+    expect(v.minggu[0].diisiOleh).toBe('ZZ-ADV');
+    expect(v.belumDiisi).toBe(0);
+  });
+
+  it('gates: non-PIC, blank narrative, duplicate week, future week, week before work started', async () => {
+    const { briefId } = await adsBrief();
+    await sql`update briefs set assigned_pic = 'ZZ-ADV' where id = ${briefId}`;
+    await markStarted(briefId, new Date('2026-08-03T02:00:00Z'));
+    const now = new Date('2026-08-12T05:00:00Z');
+    const ok = { mingguMulai: '2026-08-03', analisa: 'a', saran: 's' };
+
+    await expect(fileWeeklyReport(sql, creativeStaff(), briefId, ok, now)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(fileWeeklyReport(sql, adsStaff('ZZ-OTHER'), briefId, ok, now)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(
+      fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, { ...ok, saran: '   ' }, now),
+    ).rejects.toBeInstanceOf(ValidationError);
+    // Not a Monday.
+    await expect(
+      fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, { ...ok, mingguMulai: '2026-08-05' }, now),
+    ).rejects.toBeInstanceOf(ValidationError);
+    // Not a date at all.
+    await expect(
+      fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, { ...ok, mingguMulai: 'minggu lalu' }, now),
+    ).rejects.toBeInstanceOf(ValidationError);
+    // A week that has not started yet.
+    await expect(
+      fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, { ...ok, mingguMulai: '2026-08-17' }, now),
+    ).rejects.toBeInstanceOf(ValidationError);
+    // A week before the brief was ever worked on.
+    await expect(
+      fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, { ...ok, mingguMulai: '2026-07-27' }, now),
+    ).rejects.toBeInstanceOf(ConflictError);
+
+    await fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, ok, now);
+    await expect(fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, ok, now)).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it('a filed report is append-only: UPDATE and DELETE are refused at the DB', async () => {
+    const { briefId } = await adsBrief();
+    await sql`update briefs set assigned_pic = 'ZZ-ADV' where id = ${briefId}`;
+    await markStarted(briefId, new Date('2026-08-03T02:00:00Z'));
+    await fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, {
+      mingguMulai: '2026-08-03', analisa: 'a', saran: 's',
+    }, new Date('2026-08-12T05:00:00Z'));
+
+    await expect(
+      sql`update ads_weekly_reports set saran = 'diubah' where brief_id = ${briefId}`,
+    ).rejects.toThrow();
+    await expect(
+      sql`delete from ads_weekly_reports where brief_id = ${briefId}`,
+    ).rejects.toThrow();
+  });
+
+  it('an Ads lead may file on the PIC own behalf; unrelated divisions cannot even read', async () => {
+    const { briefId } = await adsBrief();
+    await sql`update briefs set assigned_pic = 'ZZ-ADV' where id = ${briefId}`;
+    await markStarted(briefId, new Date('2026-08-03T02:00:00Z'));
+    const now = new Date('2026-08-12T05:00:00Z');
+    await fileWeeklyReport(sql, adsLead(), briefId, { mingguMulai: '2026-08-03', analisa: 'a', saran: 's' }, now);
+    expect((await listWeeklyReports(sql, adsLead(), briefId, now)).minggu[0].diisiOleh).toBe('ZZ-ADSLEAD');
+    await expect(listWeeklyReports(sql, creativeStaff(), briefId, now)).rejects.toBeInstanceOf(ForbiddenError);
   });
 });

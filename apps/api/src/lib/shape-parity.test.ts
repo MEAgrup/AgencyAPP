@@ -171,7 +171,7 @@ const wire = parseInterfaces(readFileSync(WIRE_TS, 'utf8'));
  * any route).
  */
 const FE_FILES = [
-  'account.ts', 'ads.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'contract.ts', 'creative.ts',
+  'account.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'contract.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts', 'penugasan.ts', 'plan.ts',
   'performance.ts', 'portal.ts', 'recap.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
@@ -522,6 +522,10 @@ const WIRE_TO_FE: Record<string, string> = {
   CampaignWire: 'ads.ts::Campaign',
   MetricEntryWire: 'ads.ts::MetricEntry',
   OptimizationWire: 'ads.ts::Optimization',
+  // M8 laporan mingguan Advertiser (follow-up PR #172, pemilik 2026-08-19)
+  AdsWeeklyMetricWire: 'ads-weekly.ts::AdsWeeklyMetric',
+  AdsWeeklyReportWire: 'ads-weekly.ts::AdsWeeklyReport',
+  AdsWeeklyReportViewWire: 'ads-weekly.ts::AdsWeeklyReportView',
   // M9 KOL
   BookingWire: 'kol.ts::Booking',
   MonthlyKolReportWire: 'kol.ts::MonthlyKolReport',

@@ -919,6 +919,72 @@ export function toOptimizationInput(b: {
   };
 }
 
+// --- M8 laporan mingguan Advertiser (follow-up PR #172, pemilik 2026-08-19) ---
+
+/** One recomputed metric inside a weekly row — realisasi only (no stored target). */
+export interface AdsWeeklyMetricWire {
+  key: string;
+  label: string;
+  sifat: string;
+  realisasi: number | null;
+  realisasi_display: string;
+}
+
+/** One ISO week of an Ads Brief: derived numbers + the Advertiser's narrative. */
+export interface AdsWeeklyReportWire {
+  brief_id: string;
+  iso_year: number;
+  iso_week: number;
+  minggu_mulai: string;
+  minggu_akhir: string;
+  metrik: AdsWeeklyMetricWire[];
+  berjalan: boolean;
+  terisi: boolean;
+  terlambat: boolean;
+  analisa: string;
+  saran: string;
+  kendala: string;
+  diisi_oleh: string;
+  diisi_pada: string | null;
+}
+
+export function adsWeeklyReportToWire(r: ads.WeeklyReportRow): AdsWeeklyReportWire {
+  return {
+    brief_id: r.briefId, iso_year: r.isoYear, iso_week: r.isoWeek,
+    minggu_mulai: r.mingguMulai, minggu_akhir: r.mingguAkhir,
+    metrik: r.metrik.map((m) => ({
+      key: m.key, label: m.label, sifat: m.sifat,
+      realisasi: m.realisasi, realisasi_display: m.realisasiDisplay,
+    })),
+    berjalan: r.berjalan, terisi: r.terisi, terlambat: r.terlambat,
+    analisa: r.analisa, saran: r.saran, kendala: r.kendala,
+    diisi_oleh: r.diisiOleh, diisi_pada: r.diisiPada === null ? null : r.diisiPada.toISOString(),
+  };
+}
+
+export interface AdsWeeklyReportViewWire {
+  brief_id: string;
+  minggu: AdsWeeklyReportWire[];
+  belum_diisi: number;
+  dipotong: boolean;
+}
+
+export function adsWeeklyReportViewToWire(v: ads.WeeklyReportView): AdsWeeklyReportViewWire {
+  return {
+    brief_id: v.briefId, minggu: v.minggu.map(adsWeeklyReportToWire),
+    belum_diisi: v.belumDiisi, dipotong: v.dipotong,
+  };
+}
+
+/** Request body → WeeklyReportInput. */
+export function toAdsWeeklyReportInput(b: {
+  minggu_mulai?: string; analisa?: string; saran?: string; kendala?: string;
+}): ads.WeeklyReportInput {
+  return {
+    mingguMulai: b.minggu_mulai ?? '', analisa: b.analisa ?? '', saran: b.saran ?? '', kendala: b.kendala ?? '',
+  };
+}
+
 // --- M9 KOL ---
 
 /** module9_kol.Booking — a Creator Booking with its derived fields. */

@@ -23,7 +23,7 @@
  * Reference: backend/internal/module8_ads/{ads,lifecycle,linkage,optimization,metrics,read}.go.
  */
 
-import { bi, money, notification, permission, statemachine } from '@cdps/core';
+import { bi, money, notification, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 
 /** Authenticated employee + resolved role. */
@@ -1016,4 +1016,448 @@ function parsePeriod(startStr: string, endStr: string): [string, string] {
 /** transitionError maps a rejected engine transition to the ads taxonomy (403 role / 409 else). */
 function transitionError(res: statemachine.TransitionResult & { ok: false }): Error {
   return res.code === 'role_denied' ? new ForbiddenError(res.message) : new ConflictError(res.message);
+}
+
+// ===========================================================================
+// Laporan Mingguan Advertiser per Brief-as-task
+// (follow-up PR #172 — keputusan pemilik 2026-08-19, migrasi 20260819020000)
+// ---------------------------------------------------------------------------
+// Laporan pemilik dari /tasks/BRF-202608-0002: "adv bertugas meningkatkan
+// performa dan memberikan saran perbaikan setiap minggunya". Advertiser (PIC)
+// mengisi narasi per brief per minggu ISO. TIDAK ada angka realisasi yang
+// disimpan — realisasi mingguan dihitung ulang dari `metric_entries` setiap
+// dibaca (aturan rumah #3/#4), jadi ia selalu cocok dengan sumbernya dan tak
+// pernah jadi ledger kedua. Sengaja REALISASI-SAJA: target per-brief hidup di
+// `strategy_plans`/`m6_strategy_kpi_tasks` (keputusan 2026-08-12), bukan di sini.
+// ===========================================================================
+
+/** Actor is neither the brief's PIC nor SPV/Lead Ads/Director. */
+export const MSG_LAPORAN_FORBIDDEN = '[laporan mingguan hanya dapat diisi oleh PIC brief ini atau SPV/Lead Ads]';
+/** Analisa/saran left blank — the two fields the report exists for. */
+export const MSG_LAPORAN_NARASI_WAJIB = '[analisa performa dan saran perbaikan wajib diisi]';
+/** One report per brief per ISO week (append-only — no rewrite path). */
+export const MSG_LAPORAN_SUDAH_ADA = '[laporan mingguan untuk minggu ini sudah diisi]';
+/** The supplied Monday is not a Monday / not a parseable WIB date. */
+export const MSG_LAPORAN_MINGGU_INVALID = '[minggu laporan tidak valid]';
+/** Reporting on a week that has not started yet. */
+export const MSG_LAPORAN_MINGGU_DEPAN = '[laporan mingguan hanya dapat diisi untuk minggu yang sudah berjalan]';
+/** Reporting on a week before the brief was ever worked on. */
+export const MSG_LAPORAN_SEBELUM_MULAI = '[laporan mingguan baru dapat diisi setelah brief mulai dikerjakan]';
+
+/**
+ * The six recomputed metrics, in display order. `sifat` says how the number
+ * reads: `serapan` = budget consumed (ads spend), `pencapaian` = performance
+ * (everything else — higher is better). The FE labels the row from this.
+ */
+export const ADS_WEEKLY_METRICS = [
+  { key: 'ads_spent', label: 'Ads spent (Rp)', sifat: 'serapan' },
+  { key: 'gmv', label: 'GMV dari Ads (Rp)', sifat: 'pencapaian' },
+  { key: 'roas', label: 'ROAS', sifat: 'pencapaian' },
+  { key: 'view', label: 'View / Impresi', sifat: 'pencapaian' },
+  { key: 'ctr', label: 'CTR (%)', sifat: 'pencapaian' },
+  { key: 'cvr', label: 'CVR (%)', sifat: 'pencapaian' },
+] as const;
+
+/** One recomputed metric of a weekly row — realisasi only (no stored target). */
+export interface WeeklyMetricRow {
+  key: string;
+  label: string;
+  sifat: string; // 'serapan' | 'pencapaian'
+  realisasi: number | null;
+  realisasiDisplay: string;
+}
+
+/** One ISO week of a brief: the derived numbers + the Advertiser's narrative. */
+export interface WeeklyReportRow {
+  briefId: string;
+  isoYear: number;
+  isoWeek: number;
+  mingguMulai: string;
+  mingguAkhir: string;
+  metrik: WeeklyMetricRow[];
+  /** true for the week that contains "now" — owed but not yet late. */
+  berjalan: boolean;
+  terisi: boolean;
+  /** A finished week with no report: the discipline signal the owner asked for. */
+  terlambat: boolean;
+  analisa: string;
+  saran: string;
+  kendala: string;
+  diisiOleh: string;
+  diisiPada: Date | null;
+}
+
+/** listWeeklyReports' payload. */
+export interface WeeklyReportView {
+  briefId: string;
+  minggu: WeeklyReportRow[];
+  /** Finished weeks still without a report (whole backlog, not just the window). */
+  belumDiisi: number;
+  /** true when older weeks were trimmed to the MAX_MINGGU window (never silent). */
+  dipotong: boolean;
+}
+
+/** The narrative the Advertiser files. Numbers are never accepted here. */
+export interface WeeklyReportInput {
+  /** Monday (YYYY-MM-DD, WIB) of the reported week. Empty = the current week. */
+  mingguMulai?: string;
+  analisa: string;
+  saran: string;
+  kendala?: string;
+}
+
+/**
+ * How many trailing ISO weeks a brief's report table shows. A brief that has run
+ * for half a year does not need its first weeks re-rendered on every page load;
+ * `dipotong` tells the reader older weeks exist, so the window is never silent.
+ */
+const MAX_MINGGU = 26;
+
+/**
+ * canFileWeeklyReport — the PIC of the brief writes their own week (that IS the
+ * obligation), with SPV/Lead Ads and Director able to file as an override.
+ * Mirrored by the RLS policy ads_weekly_reports_insert.
+ */
+export function canFileWeeklyReport(actor: Actor, assignedPic: string): boolean {
+  if (actor.role.director) {
+    return true;
+  }
+  if (assignedPic !== '' && actor.employeeId === assignedPic) {
+    return true;
+  }
+  return actor.role.division === ADS_DIVISION && actor.role.level === permission.LevelLead;
+}
+
+/** The parent-brief facts the weekly-report functions need. */
+interface AdsBriefRow {
+  assignedPic: string;
+  ownerAm: string;
+}
+
+async function loadAdsBrief(sql: Queryable, briefId: string): Promise<AdsBriefRow> {
+  const rows = await sql<
+    { assigned_division: string; assigned_pic: string | null; assigned_am_id: string | null }[]
+  >`
+    select b.assigned_division, b.assigned_pic, cl.assigned_am_id
+      from briefs b
+      join services sv on sv.id = b.service_id
+      join clients cl on cl.id = sv.client_id
+     where b.id = ${briefId}`;
+  if (rows.length === 0) {
+    throw new NotFoundError(MSG_BRIEF_NOT_FOUND);
+  }
+  const r = rows[0];
+  if (r.assigned_division !== ADS_DIVISION) {
+    throw new ConflictError(MSG_NOT_ADS_BRIEF);
+  }
+  return { assignedPic: r.assigned_pic ?? '', ownerAm: r.assigned_am_id ?? '' };
+}
+
+/**
+ * listWeeklyReports returns every ISO week from the week the brief first entered
+ * [In Progress] up to the current week, each carrying the six recomputed metrics
+ * and the Advertiser's narrative (or the "belum diisi" gap). A brief that never
+ * started has no weeks at all: there is nothing to report on yet, and inventing
+ * empty rows would read as unfiled obligations.
+ */
+export async function listWeeklyReports(
+  sql: Queryable,
+  actor: Actor,
+  briefId: string,
+  now: Date = new Date(),
+): Promise<WeeklyReportView> {
+  const brief = await loadAdsBrief(sql, briefId);
+  if (!canViewCampaign(actor, brief.ownerAm)) {
+    throw new ForbiddenError(MSG_CAMPAIGN_VIEW_FORBIDDEN);
+  }
+  const start = await firstInProgressAt(sql, briefId);
+  if (start === null) {
+    return { briefId, minggu: [], belumDiisi: 0, dipotong: false };
+  }
+
+  const weeks = weeksBetween(start, now);
+  const dipotong = weeks.length > MAX_MINGGU;
+  const shown = dipotong ? weeks.slice(weeks.length - MAX_MINGGU) : weeks;
+
+  const realisasi = await weeklyRealisasi(sql, briefId);
+  const filed = await readFiledReports(sql, briefId);
+  const thisWeek = tz.isoWeekOf(now);
+  const today = tz.dateString(now);
+
+  const minggu = shown.map((w) => {
+    const key = weekKey(w.isoYear, w.isoWeek);
+    const r = realisasi.get(key) ?? emptyRealisasi();
+    const f = filed.get(key) ?? null;
+    const berjalan = w.isoYear === thisWeek.isoYear && w.isoWeek === thisWeek.isoWeek;
+    const selesai = w.sundayDate < today;
+    const terlambat = selesai && f === null;
+    return {
+      briefId, isoYear: w.isoYear, isoWeek: w.isoWeek, mingguMulai: w.mondayDate, mingguAkhir: w.sundayDate,
+      metrik: metricRows(r),
+      berjalan, terisi: f !== null, terlambat,
+      analisa: f?.analisa ?? '', saran: f?.saran ?? '', kendala: f?.kendala ?? '',
+      diisiOleh: f?.createdBy ?? '', diisiPada: f?.createdAt ?? null,
+    };
+  });
+  // belumDiisi counts EVERY finished-but-unreported week, not just the ones the
+  // MAX_MINGGU window renders — so a brief with overdue weeks older than the
+  // window still reports the true backlog.
+  const belumDiisi = countOverdueWeeks(start, now, new Set(filed.keys()));
+  return { briefId, minggu, belumDiisi, dipotong };
+}
+
+/**
+ * fileWeeklyReport records one week's narrative. Append-only: a week already
+ * reported cannot be rewritten (the DB guard refuses UPDATE/DELETE too) — a
+ * correction is next week's report saying so.
+ */
+export async function fileWeeklyReport(
+  sql: Sql,
+  actor: Actor,
+  briefId: string,
+  input: WeeklyReportInput,
+  now: Date = new Date(),
+): Promise<WeeklyReportRow> {
+  return withTransaction(sql, async (tx) => {
+    const brief = await loadAdsBrief(tx, briefId);
+    if (!canFileWeeklyReport(actor, brief.assignedPic)) {
+      throw new ForbiddenError(MSG_LAPORAN_FORBIDDEN);
+    }
+    const analisa = (input.analisa ?? '').trim();
+    const saran = (input.saran ?? '').trim();
+    if (analisa === '' || saran === '') {
+      throw new ValidationError(MSG_LAPORAN_NARASI_WAJIB);
+    }
+    const kendala = (input.kendala ?? '').trim();
+
+    const raw = (input.mingguMulai ?? '').trim();
+    let week: tz.IsoWeek;
+    if (raw === '') {
+      week = tz.isoWeekOf(now);
+    } else {
+      if (!RE_DATE.test(raw)) {
+        throw new ValidationError(MSG_LAPORAN_MINGGU_INVALID);
+      }
+      let candidate: tz.IsoWeek;
+      try {
+        candidate = tz.isoWeekOfDate(raw);
+      } catch {
+        throw new ValidationError(MSG_LAPORAN_MINGGU_INVALID);
+      }
+      // The caller must name the week by its Monday — any other day would let two
+      // requests mean the same week while looking different in the audit trail.
+      if (candidate.mondayDate !== raw) {
+        throw new ValidationError(MSG_LAPORAN_MINGGU_INVALID);
+      }
+      week = candidate;
+    }
+    const thisWeek = tz.isoWeekOf(now);
+    if (week.mondayDate > thisWeek.mondayDate) {
+      throw new ValidationError(MSG_LAPORAN_MINGGU_DEPAN);
+    }
+    const start = await firstInProgressAt(tx, briefId);
+    if (start === null) {
+      throw new ConflictError(MSG_LAPORAN_SEBELUM_MULAI);
+    }
+    if (week.mondayDate < tz.isoWeekOf(start).mondayDate) {
+      throw new ConflictError(MSG_LAPORAN_SEBELUM_MULAI);
+    }
+
+    const dup = await tx<{ n: string }[]>`
+      select count(*) as n from ads_weekly_reports
+       where brief_id = ${briefId} and iso_year = ${week.isoYear} and iso_week = ${week.isoWeek}`;
+    if (Number(dup[0].n) > 0) {
+      throw new ConflictError(MSG_LAPORAN_SUDAH_ADA);
+    }
+
+    await tx`
+      insert into ads_weekly_reports
+        (brief_id, iso_year, iso_week, minggu_mulai, minggu_akhir, analisa, saran, kendala, created_by)
+      values
+        (${briefId}, ${week.isoYear}, ${week.isoWeek}, ${week.mondayDate}, ${week.sundayDate},
+         ${analisa}, ${saran}, ${kendala === '' ? null : kendala}, ${actor.employeeId})`;
+
+    await executors(tx).audit.insertAudit({
+      entityType: 'brief', entityId: briefId, actorEmployeeId: actor.employeeId,
+      action: 'ads_weekly_report',
+      beforeJson: null,
+      afterJson: { iso_year: week.isoYear, iso_week: week.isoWeek, minggu_mulai: week.mondayDate, kendala: kendala !== '' },
+      createdBy: actor.employeeId,
+    });
+
+    const realisasi = await weeklyRealisasi(tx, briefId);
+    const r = realisasi.get(weekKey(week.isoYear, week.isoWeek)) ?? emptyRealisasi();
+    return {
+      briefId, isoYear: week.isoYear, isoWeek: week.isoWeek,
+      mingguMulai: week.mondayDate, mingguAkhir: week.sundayDate,
+      metrik: metricRows(r),
+      berjalan: week.isoWeek === thisWeek.isoWeek && week.isoYear === thisWeek.isoYear,
+      terisi: true, terlambat: false,
+      analisa, saran, kendala, diisiOleh: actor.employeeId, diisiPada: now,
+    };
+  });
+}
+
+// --- Weekly helpers -------------------------------------------------------
+
+/** One week's Σ over the brief's Metric Entries. Money in minor units. */
+interface WeeklyRealisasi {
+  spend: bigint;
+  gmv: bigint;
+  clicks: number;
+  impressions: number;
+  conversions: number;
+}
+
+function emptyRealisasi(): WeeklyRealisasi {
+  return { spend: 0n, gmv: 0n, clicks: 0, impressions: 0, conversions: 0 };
+}
+
+function weekKey(isoYear: number, isoWeek: number): string {
+  return `${isoYear}-${isoWeek}`;
+}
+
+/**
+ * firstInProgressAt reads the moment the Brief-as-task FIRST entered
+ * [In Progress] out of the immutable transition log — the same log M12's
+ * turnaround is derived from, so "when did work start" has one answer in the
+ * system, not two. Null = never started.
+ */
+async function firstInProgressAt(sql: Queryable, briefId: string): Promise<Date | null> {
+  const rows = await sql<{ created_at: Date }[]>`
+    select created_at from audit_log
+     where entity_type = 'brief' and entity_id = ${briefId}
+       and action like ${`transition:%->${BRIEF_STATUS_IN_PROGRESS}`}
+     order by id asc limit 1`;
+  return rows.length === 0 ? null : rows[0].created_at;
+}
+
+/**
+ * countOverdueWeeks — how many FINISHED ISO weeks since `start` carry no filed
+ * report. The RUNNING week is never counted (it is owed but not yet late).
+ */
+function countOverdueWeeks(start: Date, now: Date, filedKeys: Set<string>): number {
+  const today = tz.dateString(now);
+  let n = 0;
+  for (const w of weeksBetween(start, now)) {
+    if (w.sundayDate < today && !filedKeys.has(weekKey(w.isoYear, w.isoWeek))) {
+      n++;
+    }
+  }
+  return n;
+}
+
+/** weeksBetween lists every ISO week from `from` through the week containing `to`. */
+function weeksBetween(from: Date, to: Date): tz.IsoWeek[] {
+  const first = tz.isoWeekOf(from);
+  const last = tz.isoWeekOf(to);
+  const weeks: tz.IsoWeek[] = [];
+  let cursor = first;
+  // Guard against a clock skew that puts `to` before `from` (never emit nothing
+  // for a brief that HAS started — the started week is always shown).
+  while (cursor.mondayDate <= last.mondayDate) {
+    weeks.push(cursor);
+    cursor = tz.isoWeekOfDate(tz.addDaysToDate(cursor.mondayDate, 7));
+  }
+  if (weeks.length === 0) {
+    weeks.push(first);
+  }
+  return weeks;
+}
+
+/**
+ * weeklyRealisasi buckets every Metric Entry of every Ad Campaign under the brief
+ * into the ISO week its period ENDS in — the same bucketing rule the weekly recap
+ * aggregate uses, so the two surfaces never disagree about which week a number
+ * belongs to.
+ */
+async function weeklyRealisasi(sql: Queryable, briefId: string): Promise<Map<string, WeeklyRealisasi>> {
+  const rows = await sql<
+    { period_end: string | Date; spend: string; gmv: string;
+      clicks: string | null; impressions: string | null; conversions: string | null }[]
+  >`
+    select me.period_end, me.spend, me.gmv, me.clicks, me.impressions, me.conversions
+      from metric_entries me
+      join ad_campaigns c on c.id = me.campaign_id
+     where c.brief_id = ${briefId}`;
+  const out = new Map<string, WeeklyRealisasi>();
+  for (const row of rows) {
+    const w = tz.isoWeekOfDate(dateStr(row.period_end));
+    const key = weekKey(w.isoYear, w.isoWeek);
+    const acc = out.get(key) ?? emptyRealisasi();
+    acc.spend += money.parse(row.spend);
+    acc.gmv += money.parse(row.gmv);
+    acc.clicks += Number(row.clicks ?? 0);
+    acc.impressions += Number(row.impressions ?? 0);
+    acc.conversions += Number(row.conversions ?? 0);
+    out.set(key, acc);
+  }
+  return out;
+}
+
+interface FiledReport {
+  analisa: string;
+  saran: string;
+  kendala: string;
+  createdBy: string;
+  createdAt: Date;
+}
+
+async function readFiledReports(sql: Queryable, briefId: string): Promise<Map<string, FiledReport>> {
+  const rows = await sql<
+    { iso_year: number | string; iso_week: number | string; analisa: string; saran: string;
+      kendala: string | null; created_by: string; created_at: Date }[]
+  >`
+    select iso_year, iso_week, analisa, saran, kendala, created_by, created_at
+      from ads_weekly_reports where brief_id = ${briefId}`;
+  const out = new Map<string, FiledReport>();
+  for (const r of rows) {
+    out.set(weekKey(Number(r.iso_year), Number(r.iso_week)), {
+      analisa: r.analisa, saran: r.saran, kendala: r.kendala ?? '',
+      createdBy: r.created_by, createdAt: r.created_at,
+    });
+  }
+  return out;
+}
+
+/**
+ * metricRows turns one week's Σ into the six display rows. Every derived ratio
+ * renders "—" when its denominator is absent or zero (aturan rumah #7); CTR =
+ * clicks ÷ impressions, CVR = conversions ÷ clicks, ROAS = GMV ÷ spend, View =
+ * impressions — the SAME definitions as the weekly recap, so an Advertiser's
+ * page and the AM's recap never quote different arithmetic.
+ */
+function metricRows(r: WeeklyRealisasi): WeeklyMetricRow[] {
+  const spend = Number(r.spend) / 100;
+  const gmv = Number(r.gmv) / 100;
+  const roas = r.spend === 0n ? null : Number(r.gmv) / Number(r.spend);
+  const view = r.impressions === 0 ? null : r.impressions;
+  const ctr = r.impressions === 0 ? null : (r.clicks / r.impressions) * 100;
+  const cvr = r.clicks === 0 ? null : (r.conversions / r.clicks) * 100;
+  return [
+    metricRow('ads_spent', spend, money.format(r.spend)),
+    metricRow('gmv', gmv, money.format(r.gmv)),
+    metricRow('roas', roas, roas === null ? '—' : formatRoas(roas)),
+    metricRow('view', view, view === null ? '—' : formatCount(view)),
+    metricRow('ctr', ctr, ctr === null ? '—' : formatPercent(ctr)),
+    metricRow('cvr', cvr, cvr === null ? '—' : formatPercent(cvr)),
+  ];
+}
+
+function metricRow(key: string, realisasi: number | null, realisasiDisplay: string): WeeklyMetricRow {
+  const def = ADS_WEEKLY_METRICS.find((m) => m.key === key);
+  return {
+    key, label: def?.label ?? key, sifat: def?.sifat ?? 'pencapaian',
+    realisasi, realisasiDisplay,
+  };
+}
+
+/** Thousands-separated count, id-ID style ("1.250.000"). */
+function formatCount(n: number): string {
+  return Math.round(n).toLocaleString('id-ID');
+}
+
+/** Percent with two decimals, id-ID decimal comma ("1,25%"). */
+function formatPercent(n: number): string {
+  return `${n.toFixed(2).replace('.', ',')}%`;
 }

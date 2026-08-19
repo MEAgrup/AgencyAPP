@@ -140,13 +140,17 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "121"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "122"
 check "entity_prefix"    "select count(*) from entity_prefix"    "35"
 check "sm_machines"      "select count(*) from sm_machines"      "23"
 check "notif_events"     "select count(*) from notif_events"     "58"
 # 21 = 20 + mesin #18 `weekly_result_recap` (Modul 6D D-02, 20260813020000:
 #      Terjadwal→Terbuka→Ditutup|Ditutup Otomatis→(Head)Terbuka). nol tabel/prefix
 #      baru di D-02.
+# 122 = 121 + ads_weekly_reports (20260819020000, M8: laporan mingguan Advertiser
+#       per brief per minggu ISO; follow-up PR #172, keputusan pemilik 2026-08-19).
+#       PK (brief_id, iso_year, iso_week) tanpa ID sendiri ⇒ entity_prefix TETAP
+#       35; nol status ⇒ 23 TETAP; nol event katalog ⇒ notif_events TETAP 58.
 # 121 = 118 + 3 tabel Mesin Laporan Klien (C1, 20260819000000): report_benchmark
 #       + client_reports + client_report_berkas. Semua bigint IDENTITY / versi
 #       integer ⇒ entity_prefix TETAP 35; nol mesin baru ⇒ 23 TETAP; nol event
