@@ -28,7 +28,7 @@
 import { bi, money, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { onBriefLeavesToDo } from './account';
-import { onBriefReachedTerminal, validateBriefApproval } from './board';
+import { ConflictError as BoardConflictError, onBriefReachedTerminal, validateBriefApproval } from './board';
 import { computeMetrics, STATUS_APPROVED, STATUS_BLOCKED, STATUS_IN_PROGRESS, STATUS_IN_REVIEW, STATUS_REVISION_REQ, STATUS_SUBMITTED, type Transition } from './task';
 
 /** Authenticated employee + resolved role. */
@@ -855,9 +855,23 @@ async function recomputeBriefRollup(tx: Queryable, actor: Actor, briefId: string
   while (cur < tgt) {
     const from = ROLLUP_CHAIN[cur];
     const to = ROLLUP_CHAIN[cur + 1];
-    // M11 §6.3 Blocking gate on the final [Approved] edge (aborts the roll-up tx if blocked).
+    // M11 §2 Rule 7 / §6.3 Blocking gate on the final [Approved] edge. On the
+    // roll-up path the gate DEFERS silently: while a Blocking Dependency's Source
+    // is not yet terminal, leave the Brief at [In Review] and let the triggering
+    // child Booking transition (already applied earlier in this tx) commit — only
+    // the transition to the locked gate is refused (§2 Rule 7). Only the board
+    // ConflictError defers; any other error propagates. Mirrors the Go oracle
+    // (module9_kol/rollup.go) and DECISIONS W3-M11-C1; the M6 AM explicit-approval
+    // path (account.ts) still throws, surfacing the gate to the AM.
     if (to === STATUS_APPROVED) {
-      await validateBriefApproval(tx, briefId);
+      try {
+        await validateBriefApproval(tx, briefId);
+      } catch (e) {
+        if (e instanceof BoardConflictError) {
+          return; // deferred — Brief stays [In Review]; the child transition stays committed.
+        }
+        throw e;
+      }
     }
     const res = await statemachine.transition(ex.sm, {
       machine: 'brief_task', entityType: 'brief', table: 'briefs', entityId: briefId, to, actor,

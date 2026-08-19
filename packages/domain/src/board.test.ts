@@ -12,7 +12,7 @@
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { permission, statemachine } from '@cdps/core';
 import { createClient, executors, type Sql } from '@cdps/db';
-import { account } from '.';
+import { account, creative, kol } from '.';
 import {
   canCreateDependency,
   ConflictError,
@@ -142,6 +142,10 @@ const setBriefStatus = async (id: string, status: string): Promise<void> => {
 };
 const briefStatus = async (id: string): Promise<string> =>
   (await sql<{ status: string }[]>`select status from briefs where id = ${id}`)[0].status;
+const assetStatus = async (id: string): Promise<string> =>
+  (await sql<{ status: string }[]>`select status from assets where id = ${id}`)[0].status;
+const bookingStatus = async (id: string): Promise<string> =>
+  (await sql<{ status: string }[]>`select status from creator_bookings where id = ${id}`)[0].status;
 const depNotifCount = async (recipient: string): Promise<number> =>
   Number(
     (
@@ -331,6 +335,52 @@ describeDb('Blocking gate + fire-once emission (through account.approveBrief)', 
     // Now the Target's approval proceeds.
     await account.approveBrief(sql, director(), 'BD-TGT');
     expect(await briefStatus('BD-TGT')).toBe('[Approved]');
+  });
+});
+
+describeDb('Blocking gate DEFERS on the roll-up path (M11 §2 Rule 7 / W3-M11-C1)', () => {
+  // Regression for M11-G1: the roll-up gate must DEFER silently (leave the Brief at
+  // [In Review], let the triggering child transition commit), NOT throw and roll the
+  // whole transaction back. Only the M6 AM explicit-approval path (tested above) throws.
+  it('Creative: approving the final Asset commits while a Blocking Source is unfinished; Brief parks at [In Review], recovers on AM approve', async () => {
+    const tgtPic = `ZZ-CTGT-${Date.now()}`; // unique per run — notifications are never deletable
+    await insertClient('BD-CLI-1', 'ZZ-AM');
+    await insertService('BD-SVC-1', 'BD-CLI-1');
+    // Source Brief (Ads) is left unfinished; Target Brief (Creative) has its lone Asset ready to approve.
+    await insertBrief('BD-SRC', 'BD-SVC-1', 'Ads', 'ZZ-SRC-PIC', '[In Review]');
+    await insertBrief('BD-TGT', 'BD-SVC-1', 'Creative', tgtPic, '[In Review]');
+    await insertAsset('BD-AST', 'BD-TGT', 1, 'ZZ-CED', '[In Review]');
+    const dep = await createDependency(sql, director(), { sourceId: 'BD-SRC', targetId: 'BD-TGT', type: TYPE_BLOCKING });
+
+    // Approve the final Asset. Pre-fix this threw a board ConflictError out of the
+    // roll-up and rolled back the Asset's own move; post-fix it defers.
+    await expect(creative.approveAsset(sql, director(), 'BD-AST')).resolves.toBeDefined();
+    expect(await assetStatus('BD-AST')).toBe('[Approved]'); // child transition COMMITTED
+    expect(await briefStatus('BD-TGT')).toBe('[In Review]'); // Brief parked, not advanced
+    expect(await depNotifCount(tgtPic)).toBe(0); // not yet satisfied — Source still open
+
+    // Recovery: approving the Source satisfies the Dependency (fires once), then the
+    // AM can drive the Target to [Approved].
+    await account.approveBrief(sql, director(), 'BD-SRC');
+    expect((await getDependency(sql, director(), dep.id)).status).toBe(STATUS_SATISFIED);
+    expect(await depNotifCount(tgtPic)).toBe(1);
+    await account.approveBrief(sql, director(), 'BD-TGT');
+    expect(await briefStatus('BD-TGT')).toBe('[Approved]');
+  });
+
+  it('KOL: passing QC on the final Booking commits while a Blocking Source is unfinished; Brief parks at [In Review]', async () => {
+    await insertClient('BD-CLI-1', 'ZZ-AM');
+    await insertService('BD-SVC-1', 'BD-CLI-1');
+    await insertBrief('BD-SRC', 'BD-SVC-1', 'Ads', 'ZZ-SRC-PIC', '[In Review]');
+    await insertBrief('BD-KTGT', 'BD-SVC-1', 'KOL', 'ZZ-KC', '[In Review]');
+    await insertBooking('BD-BKG', 'BD-KTGT', 'ZZ-KC', '[QC Review]');
+    await createDependency(sql, director(), { sourceId: 'BD-SRC', targetId: 'BD-KTGT', type: TYPE_BLOCKING });
+
+    // Pass QC on the lone Booking. Pre-fix threw out of the roll-up and rolled back
+    // the Booking's move to [QC Passed]; post-fix it defers.
+    await expect(kol.passQC(sql, director(), 'BD-BKG')).resolves.toBeDefined();
+    expect(await bookingStatus('BD-BKG')).toBe('[QC Passed]'); // child transition COMMITTED
+    expect(await briefStatus('BD-KTGT')).toBe('[In Review]'); // Brief parked, not advanced
   });
 });
 
