@@ -825,7 +825,14 @@ export async function myTasks(sql: Queryable, actor: Actor, forEmployee = ''): P
   return cards;
 }
 
-/** makeUnitCard builds a My-Tasks Card, computing overdue vs the Brief due date (WIB). */
+/**
+ * makeUnitCard builds a My-Tasks Card, computing overdue vs the Brief due date (WIB).
+ * dependencyBadge is intentionally '' here (M11-G4): the badge is a Client-Board surface
+ * affordance computed per Target Brief (see dependencyBadge() on the board path), whereas
+ * My Tasks is a personal to-do list. §5.4 "same card structure" is met structurally — the
+ * Card shape is identical — only the badge value differs by surface, matching the Go oracle
+ * (backend module11_board/views.go scanUnitRows never sets DependencyNote).
+ */
 function makeUnitCard(
   id: string, type: string, briefId: string, division: string, clientId: string,
   nativeStatus: string, universalColumn: string, dueDate: string | null, today: string,

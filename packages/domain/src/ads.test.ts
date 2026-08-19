@@ -16,6 +16,7 @@ import {
   canViewCampaign,
   ConflictError,
   createCampaign,
+  effectiveGmvBaseline,
   endCampaign,
   ForbiddenError,
   getCampaign,
@@ -99,6 +100,12 @@ describe('ads predicates', () => {
     expect(gmvTargetBelowStandard('GMV naik banyak', base)).toBe(true); // GMV-typed, unparseable → gate
     expect(gmvTargetBelowStandard('GMV ≥ Rp 5.000.000', 0n)).toBe(false); // no baseline → unenforceable
   });
+  it('effectiveGmvBaseline (B4-residual): the higher of the static onboarding baseline and the live run-rate', () => {
+    expect(effectiveGmvBaseline(5_000_000_00n, 10_000_000_00n)).toBe(10_000_000_00n); // live > static → live
+    expect(effectiveGmvBaseline(10_000_000_00n, 5_000_000_00n)).toBe(10_000_000_00n); // static > live → static
+    expect(effectiveGmvBaseline(10_000_000_00n, 0n)).toBe(10_000_000_00n); // no report yet → static (status quo)
+    expect(effectiveGmvBaseline(0n, 8_000_000_00n)).toBe(8_000_000_00n); // no baseline but live data → live
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -164,6 +171,9 @@ const goodInput = (): CampaignInput => ({
 
 const setBriefStatus = async (briefId: string, status: string): Promise<void> => {
   await sql`update briefs set status = ${status} where id = ${briefId}`;
+};
+const setTotalSales = async (clientId: string, decimal: string): Promise<void> => {
+  await sql`update clients set total_sales = ${decimal} where id = ${clientId}`;
 };
 const campaignStatus = async (id: string): Promise<string> =>
   (await sql<{ status: string }[]>`select status from ad_campaigns where id = ${id}`)[0].status;
@@ -241,6 +251,19 @@ describeDb('createCampaign (§4 Rule 1)', () => {
     const { briefId } = await adsBrief();
     const c = await createCampaign(sql, adsStaff(), briefId, goodInput()); // ROAS ≥ 4x
     expect(c.targetKpi).toBe('ROAS ≥ 4x');
+  });
+
+  it('B4-residual: a live run-rate above the static baseline raises the growth floor', async () => {
+    const { clientId, briefId } = await adsBrief(); // static gmv_baseline = 10jt → old floor 12jt
+    // The C1 report engine has since written a live monthly run-rate of 100jt.
+    await setTotalSales(clientId, '100000000.00');
+    // A 90jt GMV target clears the OLD static floor (12jt) but not the live floor
+    // (100jt × 1.20 = 120jt) → an Advertiser can no longer self-set it.
+    await expect(createCampaign(sql, adsStaff(), briefId, { ...goodInput(), targetKpi: 'GMV ≥ Rp 90.000.000' }))
+      .rejects.toThrow(MSG_KPI_BELOW_STANDARD);
+    // At/above the live floor → the Advertiser may self-set it.
+    const ok = await createCampaign(sql, adsStaff(), briefId, { ...goodInput(), targetKpi: 'GMV ≥ Rp 120.000.000' });
+    expect(ok.targetKpi).toBe('GMV ≥ Rp 120.000.000');
   });
 });
 

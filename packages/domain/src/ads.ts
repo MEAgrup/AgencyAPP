@@ -158,9 +158,26 @@ export function hasKpiSignOff(actor: Actor, ownerAm: string): boolean {
 }
 
 // §4 Rule 1 / B4: the minimum Target KPI standard is ≥20% growth per quarter over
-// the client's gmv_baseline. 1.20 = 6/5, kept as an integer ratio for exact math.
+// the client's baseline. 1.20 = 6/5, kept as an integer ratio for exact math.
 const KPI_MIN_GROWTH_NUM = 6n;
 const KPI_MIN_GROWTH_DEN = 5n;
+
+/**
+ * effectiveGmvBaseline (B4-residual): the baseline the ≥20%/quarter growth floor
+ * is measured against, now that a live GMV signal exists. C1 gave `clients.total_sales`
+ * a single writer (the report engine: Σ latest monthly run-rate per active store),
+ * so a client already selling far above its onboarding `gmv_baseline` is no longer
+ * measured against a stale number. The effective baseline is the HIGHER of the
+ * static onboarding baseline and the live run-rate (owner decision 2026-08-19):
+ * the floor never drops below what onboarding promised, but it rises with real
+ * performance — so an Advertiser can neither sandbag a target at onboarding nor
+ * quietly lower it after the store has grown. When no report exists yet,
+ * `total_sales` is 0 and this returns the static baseline (status quo). The
+ * growth on top (× 1.20) is applied by `gmvTargetBelowStandard`, not here.
+ */
+export function effectiveGmvBaseline(staticBaseline: money.Money, liveRunrate: money.Money): money.Money {
+  return liveRunrate > staticBaseline ? liveRunrate : staticBaseline;
+}
 
 /**
  * parseGmvTarget extracts the whole-rupiah amount from a GMV-typed Target KPI
@@ -310,8 +327,8 @@ export async function createCampaign(sql: Sql, actor: Actor, briefId: string, in
   const now = new Date();
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
-    const briefRows = await tx<{ assigned_division: string; status: string; client_id: string; assigned_am_id: string | null; gmv_baseline: string }[]>`
-      select b.assigned_division, b.status, sv.client_id, cl.assigned_am_id, cl.gmv_baseline
+    const briefRows = await tx<{ assigned_division: string; status: string; client_id: string; assigned_am_id: string | null; gmv_baseline: string; total_sales: string }[]>`
+      select b.assigned_division, b.status, sv.client_id, cl.assigned_am_id, cl.gmv_baseline, cl.total_sales
         from briefs b
         join services sv on sv.id = b.service_id
         join clients cl on cl.id = sv.client_id
@@ -349,11 +366,15 @@ export async function createCampaign(sql: Sql, actor: Actor, briefId: string, in
       throw new ValidationError(bi.INCOMPLETE_DATA);
     }
     const [start, end] = parseDateRange(input.startDate, input.endDate);
-    // §4 Rule 1 / M8-OA-4 / B4: an Advertiser (Ads staff) may self-set a Target
-    // KPI only when a GMV target already clears the ≥20%/quarter-from-baseline
-    // minimum; a below-standard GMV target needs SPV Ads / owning AM / Director
-    // sign-off. Non-GMV targets (ROAS / Spend cap) are unaffected by this gate.
-    if (!hasKpiSignOff(actor, brief.assigned_am_id ?? '') && gmvTargetBelowStandard(targetKpi, money.parse(brief.gmv_baseline))) {
+    // §4 Rule 1 / M8-OA-4 / B4 (+ B4-residual): an Advertiser (Ads staff) may
+    // self-set a Target KPI only when a GMV target already clears the
+    // ≥20%/quarter growth minimum; a below-standard GMV target needs SPV Ads /
+    // owning AM / Director sign-off. Non-GMV targets (ROAS / Spend cap) are
+    // unaffected. The baseline is the HIGHER of the static onboarding
+    // `gmv_baseline` and the live monthly run-rate (`total_sales`, written by the
+    // C1 report engine) — the floor tracks real performance, never below onboarding.
+    const baseline = effectiveGmvBaseline(money.parse(brief.gmv_baseline), money.parse(brief.total_sales));
+    if (!hasKpiSignOff(actor, brief.assigned_am_id ?? '') && gmvTargetBelowStandard(targetKpi, baseline)) {
       throw new ForbiddenError(MSG_KPI_BELOW_STANDARD);
     }
 
