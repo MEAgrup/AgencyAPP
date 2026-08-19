@@ -228,6 +228,22 @@ export function canSeeBooking(actor: Actor, ownerAm: string, division: string): 
     (actor.role.level === permission.LevelStaff || actor.role.level === permission.LevelLead);
 }
 
+/**
+ * canSeeMonthlyReport (§9 / §10.1): a Coordinator sees their OWN Monthly Report;
+ * the KOL Team Leader (division-wide), OD, and Director see any coordinator's.
+ * Not client-facing — an owning AM is NOT a viewer (unlike the per-Booking read).
+ */
+export function canSeeMonthlyReport(actor: Actor, coordinatorId: string): boolean {
+  if (permission.canReadAll(actor)) {
+    return true; // OD / Director
+  }
+  if (permission.isLead(actor, KOL_DIVISION)) {
+    return true; // KOL Team Leader / SPV
+  }
+  return actor.role.division === KOL_DIVISION &&
+    actor.role.level === permission.LevelStaff && actor.employeeId === coordinatorId; // own
+}
+
 /** canManageCreatorList: the Brief's KOL staff/lead, the owning AM, or Director (§6). */
 export function canManageCreatorList(actor: Actor, ownerAm: string): boolean {
   if (actor.role.director) {
@@ -298,6 +314,12 @@ export interface Booking {
   qtyVideo: number; // per-creator video deliverables (>= 0)
   qtyLive: number; // per-creator live-session deliverables (>= 0)
   revisionCount: number;
+  /**
+   * §4 Rule 4 (C6a): a Booking still in [Sourcing] past half the Brief's remaining
+   * time-to-due-date at creation. DERIVED at read (age vs Brief window), read-only,
+   * no notification — the same passive-flag pattern as Ads `escalationFlagged`.
+   */
+  sourcingStallFlagged: boolean;
   paymentStatus: string; // reflection of the linked CPR (§8 Rule 4); "" if none
   createdBy: string;
   createdAt: Date;
@@ -388,7 +410,9 @@ export async function createBooking(sql: Sql, actor: Actor, briefId: string, inp
       niche: (input.niche ?? '').trim(), sourcePool: pool, poolReference: (input.poolReference ?? '').trim(),
       agreedRate: Number(rate) / 100, agreedRateDisplay: money.format(rate), status: BKG_SOURCING,
       contentLink: '', qcNotes: '', slaTargetHours: null, hoursLogged: null, assignedCoordinator: coord,
-      attributedGmv: null, qtyVideo, qtyLive, revisionCount: 0, paymentStatus: '', createdBy: actor.employeeId, createdAt: now,
+      attributedGmv: null, qtyVideo, qtyLive, revisionCount: 0, paymentStatus: '',
+      sourcingStallFlagged: false, // just created — cannot have stalled yet
+      createdBy: actor.employeeId, createdAt: now,
     };
   });
 }
@@ -933,6 +957,105 @@ export async function listBriefBookings(sql: Queryable, actor: Actor, briefId: s
   return out;
 }
 
+// --- Monthly KOL Report (§9 / C6b) ---
+
+/**
+ * The auto-compiled Monthly KOL Report (§9): a read-only rollup across a
+ * Coordinator's Bookings created in one WIB month. All figures DERIVE from the
+ * immutable bookings + audit log (house rule #4) — nothing is stored.
+ */
+export interface MonthlyKolReport {
+  coordinatorId: string;
+  year: number;
+  month: number; // 1-12
+  totalBookings: number;
+  qcPassedCount: number; // Bookings that reached [QC Passed]
+  qcPassRate: number | null; // fraction 0..1; null when there are no Bookings (rendered '—')
+  qcPassRateDisplay: string; // "83.33%" | "—"
+  averageSourcingHours: number | null; // avg ([Booked] − created) over Booked Bookings; null if none Booked
+  averageSourcingDisplay: string; // "12.5 jam" | "—"
+  totalSpend: number; // Σ Agreed Rate, rupiah (major units)
+  totalSpendDisplay: string; // Σ Agreed Rate, IDR formatted
+  escalationCount: number; // Bookings that reached [Escalated - Creator Unresponsive]
+}
+
+/** monthNum validates a 1..12 month; year a plausible 4-digit year. */
+function monthWindow(year: number, month: number): { start: string; nextStart: string } {
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  const start = `${year}-${pad(month)}-01`;
+  const nextStart = month === 12 ? `${year + 1}-01-01` : `${year}-${pad(month + 1)}-01`;
+  return { start, nextStart };
+}
+
+/**
+ * monthlyKolReport compiles the §9 Monthly KOL Report for `coordinatorId` and the
+ * given WIB month: total Bookings, QC pass rate, average sourcing time, total spend
+ * (Σ Agreed Rate), and escalation count — over the cohort of Bookings CREATED that
+ * month. Scope-gated (canSeeMonthlyReport): own (Coordinator) / KOL lead / OD /
+ * Director. Division-by-zero renders '—' (house rule #7), never an error.
+ */
+export async function monthlyKolReport(sql: Queryable, actor: Actor, coordinatorId: string, year: number, month: number): Promise<MonthlyKolReport> {
+  const coord = (coordinatorId ?? '').trim();
+  if (coord === '' || !Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    throw new ValidationError(bi.INCOMPLETE_DATA);
+  }
+  if (!canSeeMonthlyReport(actor, coord)) {
+    throw new ForbiddenError(MSG_BOOKING_VIEW_FORBIDDEN);
+  }
+  const { start, nextStart } = monthWindow(year, month);
+
+  // Totals + QC pass + Σ Agreed Rate over the month's cohort (created this WIB month).
+  const totals = await sql<{ total: string; passed: string; total_spend: string }[]>`
+    select count(*) as total,
+           count(*) filter (where status = ${BKG_QC_PASSED}) as passed,
+           coalesce(sum(agreed_rate), 0) as total_spend
+      from creator_bookings
+     where assigned_coordinator = ${coord}
+       and public.wib_date(created_at) >= ${start} and public.wib_date(created_at) < ${nextStart}`;
+  const totalBookings = Number(totals[0].total);
+  const qcPassedCount = Number(totals[0].passed);
+  const spend = money.parse(totals[0].total_spend);
+
+  // Average Sourcing Turnaround (§7): mean of ([Booked] − created) hours over the
+  // cohort's Bookings that reached [Booked].
+  const avg = await sql<{ avg_hours: string | null }[]>`
+    select avg(extract(epoch from (bk_booked.booked_at - bk.created_at)) / 3600.0) as avg_hours
+      from creator_bookings bk
+      join lateral (
+        select min(al.created_at) as booked_at from audit_log al
+         where al.entity_type = 'creator_booking' and al.entity_id = bk.id
+           and al.action like ${'transition:%->' + BKG_BOOKED}
+      ) bk_booked on bk_booked.booked_at is not null
+     where bk.assigned_coordinator = ${coord}
+       and public.wib_date(bk.created_at) >= ${start} and public.wib_date(bk.created_at) < ${nextStart}`;
+  const averageSourcingHours = avg[0].avg_hours === null ? null : Number(avg[0].avg_hours);
+
+  // Escalation count: cohort Bookings that reached [Escalated - Creator Unresponsive].
+  const esc = await sql<{ n: string }[]>`
+    select count(distinct bk.id) as n
+      from creator_bookings bk
+     where bk.assigned_coordinator = ${coord}
+       and public.wib_date(bk.created_at) >= ${start} and public.wib_date(bk.created_at) < ${nextStart}
+       and exists (
+         select 1 from audit_log al
+          where al.entity_type = 'creator_booking' and al.entity_id = bk.id
+            and al.action like ${'transition:%->' + BKG_ESCALATED}
+       )`;
+
+  const qcPassRate = totalBookings === 0 ? null : qcPassedCount / totalBookings;
+  return {
+    coordinatorId: coord, year, month,
+    totalBookings, qcPassedCount,
+    qcPassRate,
+    qcPassRateDisplay: qcPassRate === null ? '—' : `${(qcPassRate * 100).toFixed(2)}%`,
+    averageSourcingHours,
+    averageSourcingDisplay: averageSourcingHours === null ? '—' : `${averageSourcingHours.toFixed(1)} jam`,
+    totalSpend: Number(spend) / 100,
+    totalSpendDisplay: money.format(spend),
+    escalationCount: Number(esc[0].n),
+  };
+}
+
 /** getPaymentRequest returns one CPR if the actor is Finance or may see the parent Booking. */
 export async function getPaymentRequest(sql: Queryable, actor: Actor, requestId: string): Promise<PaymentRequest> {
   const rows = await sql<
@@ -1246,6 +1369,7 @@ interface BookingDbRow {
   created_at: Date;
   assigned_division: string;
   assigned_am_id: string | null;
+  brief_due_date: string | Date | null;
 }
 
 function bookingSelect(sql: Queryable) {
@@ -1253,13 +1377,34 @@ function bookingSelect(sql: Queryable) {
     select bk.id, bk.brief_id, bk.creator_name, bk.creator_handle, bk.platform, bk.niche, bk.source_pool,
            bk.pool_reference, bk.agreed_rate, bk.status, bk.content_link, bk.qc_notes, bk.sla_target_hours,
            bk.hours_logged, bk.assigned_coordinator, bk.attributed_gmv, bk.qty_video, bk.qty_live,
-           bk.created_by, bk.created_at,
+           bk.created_by, bk.created_at, b.due_date as brief_due_date,
            b.assigned_division, private.brief_owner_am(bk.brief_id) as assigned_am_id
       from creator_bookings bk
       join briefs b on b.id = bk.brief_id`;
 }
 
 const numOrNull = (v: string | null): number | null => (v === null ? null : Number(v));
+
+/**
+ * sourcingStallFlagged (§4 Rule 4 / C6a): true when a Booking is still in
+ * [Sourcing] and `now` has passed the halfway point between its creation and the
+ * Brief's due date — "half the Brief's remaining time to due date" measured from
+ * when the Booking was created. Only [Sourcing] bookings can stall; a Booking with
+ * no Brief due date has no window and never flags. A Booking created on/after the
+ * due date (no remaining time) flags immediately — it is already late to source.
+ */
+export function sourcingStallFlagged(status: string, createdAt: Date, dueDate: string | Date | null, now: Date = new Date()): boolean {
+  if (status !== BKG_SOURCING || dueDate === null) {
+    return false;
+  }
+  const dueMs = dueDate instanceof Date ? dueDate.getTime() : Date.parse(`${String(dueDate).slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(dueMs)) {
+    return false;
+  }
+  const created = createdAt.getTime();
+  const threshold = created + (dueMs - created) / 2;
+  return now.getTime() >= threshold;
+}
 
 function rowToBooking(r: BookingDbRow): Booking {
   const rate = money.parse(r.agreed_rate);
@@ -1271,6 +1416,7 @@ function rowToBooking(r: BookingDbRow): Booking {
     hoursLogged: numOrNull(r.hours_logged), assignedCoordinator: r.assigned_coordinator ?? '',
     attributedGmv: numOrNull(r.attributed_gmv), qtyVideo: Number(r.qty_video ?? 0), qtyLive: Number(r.qty_live ?? 0),
     revisionCount: 0, paymentStatus: '',
+    sourcingStallFlagged: sourcingStallFlagged(r.status, r.created_at, r.brief_due_date),
     createdBy: r.created_by, createdAt: r.created_at,
   };
 }

@@ -501,8 +501,11 @@ const WIRE_TO_FE: Record<string, string> = {
   RecapCatatanWire: 'recap.ts::RecapCatatan',
   RecapCatatanDivisiWire: 'recap.ts::RecapCatatanDivisi',
   RecapDetailWire: 'recap.ts::RecapDetail',
+  RecapServiceAktifWire: 'recap.ts::RecapServiceAktif',
+  RecapKeluhanTerkaitWire: 'recap.ts::RecapKeluhanTerkait',
   // M7 creative
   AssetWire: 'creative.ts::Asset',
+  MyAssetQueueItemWire: 'creative.ts::MyAssetQueueItem',
   // A REQUEST body (same reasoning as ProposalLineBody above): the fan-out batch
   // line the FE sends per PIC, mapped by `toAssetAssignments`.
   AssetAssignmentWire: 'creative.ts::AssetAssignmentInput',
@@ -515,6 +518,7 @@ const WIRE_TO_FE: Record<string, string> = {
   OptimizationWire: 'ads.ts::Optimization',
   // M9 KOL
   BookingWire: 'kol.ts::Booking',
+  MonthlyKolReportWire: 'kol.ts::MonthlyKolReport',
   PaymentRequestWire: 'kol.ts::PaymentRequest',
   BookingMetricsWire: 'kol.ts::BookingMetrics',
   CreatorListWire: 'kol.ts::CreatorList',

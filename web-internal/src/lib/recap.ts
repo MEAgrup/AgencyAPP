@@ -71,12 +71,31 @@ export interface RecapCatatanDivisi {
   created_by: string;
 }
 
+// RM-A5 Service Aktif Minggu Ini (auto) — a service with a Brief running this week.
+export interface RecapServiceAktif {
+  service_id: string;
+  service_name: string;
+  divisions: string[];
+}
+
+// RM-D4 Keluhan Terkait (auto) — a CPL- of this client active this week + status.
+export interface RecapKeluhanTerkait {
+  id: string;
+  source: string;
+  severity: string;
+  status: string;
+  related_ref: string | null;
+  created_at: string;
+}
+
 export interface RecapDetail {
   recap: Recap;
   divisi: RecapDivisi[];
   metrik: RecapMetrik[];
   catatan: RecapCatatan | null;
   catatan_divisi: RecapCatatanDivisi[];
+  service_aktif: RecapServiceAktif[];
+  keluhan_terkait: RecapKeluhanTerkait[];
 }
 
 /** RM-E read-only rollup — the snake_case JSON `wrr_plan_rollup(plan_id)` builds.

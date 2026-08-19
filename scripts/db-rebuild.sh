@@ -143,7 +143,7 @@ check() { # nama · sql · harapan
 check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "118"
 check "entity_prefix"    "select count(*) from entity_prefix"    "35"
 check "sm_machines"      "select count(*) from sm_machines"      "23"
-check "notif_events"     "select count(*) from notif_events"     "57"
+check "notif_events"     "select count(*) from notif_events"     "58"
 # 21 = 20 + mesin #18 `weekly_result_recap` (Modul 6D D-02, 20260813020000:
 #      Terjadwal→Terbuka→Ditutup|Ditutup Otomatis→(Head)Terbuka). nol tabel/prefix
 #      baru di D-02.
@@ -154,6 +154,8 @@ check "notif_events"     "select count(*) from notif_events"     "57"
 # 114 = 113 + internal_tasks (Penugasan Internal, 20260814110000: tugas atasan→tim
 #       di luar rantai Klien→Service→Brief). 35 = 34 + TSK. 23 = 22 + mesin #21
 #       `internal_task` ([Ditugaskan]→[Dikerjakan]→[Selesai] | →[Dibatalkan]).
+# 58 = 57 + 1 (v11: M8 Ads eskalasi ROAS underperforming — m8.ads.roas_underperforming,
+#      20260818040000. Nol mesin/tabel/kolom/prefix baru ⇒ 23/35 TETAP).
 # 57 = 54 + 3 (v10: Penugasan Internal jatuh tempo & pembatalan —
 #      penugasan_mendekati_jatuh_tempo (H-1 ke PIC), penugasan_jatuh_tempo
 #      (ke PIC + pemberi tugas + lead divisi), penugasan_dibatalkan (ke PIC);

@@ -86,6 +86,7 @@ export interface Booking {
   qty_live: number; // per-creator live-session deliverables (>= 0); always present (DB default 0)
   revision_count: number; // COMPUTED — derived from audit log, never editable
   payment_status: string; // COMPUTED — reflection of latest CPR, "" if none
+  sourcing_stall_flagged: boolean; // COMPUTED (§4 Rule 4) — [Sourcing] past half the Brief window
   created_by: string;
   created_at: string; // RFC3339
 }
@@ -374,6 +375,35 @@ export function listBriefBookings(briefId: string): Promise<{ data: Booking[] }>
 // GET /bookings/{id} -> Booking (object directly).
 export function getBooking(id: string): Promise<Booking> {
   return api.get<Booking>(`/bookings/${id}`);
+}
+
+// module9_kol MonthlyKolReport (§9) — auto-compiled, read-only. qc_pass_rate /
+// average_sourcing_hours are null when there is nothing to divide (rendered '—');
+// the *_display strings are pre-formatted — render verbatim.
+export interface MonthlyKolReport {
+  coordinator_id: string;
+  year: number;
+  month: number;
+  total_bookings: number;
+  qc_passed_count: number;
+  qc_pass_rate: number | null;
+  qc_pass_rate_display: string;
+  average_sourcing_hours: number | null;
+  average_sourcing_display: string;
+  total_spend: number;
+  total_spend_display: string;
+  escalation_count: number;
+}
+
+// GET /kol/monthly-report?coordinator=&year=&month= -> MonthlyKolReport.
+// coordinator defaults server-side to the caller; year/month to the current month.
+export function getMonthlyKolReport(params?: { coordinator?: string; year?: number; month?: number }): Promise<MonthlyKolReport> {
+  const q = new URLSearchParams();
+  if (params?.coordinator) q.set('coordinator', params.coordinator);
+  if (params?.year) q.set('year', String(params.year));
+  if (params?.month) q.set('month', String(params.month));
+  const qs = q.toString();
+  return api.get<MonthlyKolReport>(`/kol/monthly-report${qs ? `?${qs}` : ''}`);
 }
 
 // GET /bookings/{id}/metrics -> BookingMetrics (object directly).

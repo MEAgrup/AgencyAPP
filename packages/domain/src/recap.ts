@@ -244,12 +244,37 @@ export interface RecapCatatanDivisi {
   createdBy: string;
 }
 
+/**
+ * RM-A5 "Service Aktif Minggu Ini" — one service of the recap's client that had a
+ * Brief running this week, with the divisions those Briefs target. Auto (read-only).
+ */
+export interface RecapServiceAktif {
+  serviceId: string; // SVC-
+  serviceName: string;
+  divisions: string[]; // distinct assigned_division of the qualifying Briefs
+}
+
+/**
+ * RM-D4 "Keluhan Terkait" — one CPL- of the recap's client that was active during
+ * this week, with its CURRENT status (the "+ status" cross-reference §9.5). Auto.
+ */
+export interface RecapKeluhanTerkait {
+  id: string; // CPL-
+  source: string;
+  severity: string;
+  status: string; // current status (live cross-reference)
+  relatedRef: string | null;
+  createdAt: string;
+}
+
 export interface RecapDetail {
   recap: Recap;
   divisi: RecapDivisi[];
   metrik: RecapMetrik[];
   catatan: RecapCatatan | null;
   catatanDivisi: RecapCatatanDivisi[];
+  serviceAktif: RecapServiceAktif[]; // RM-A5
+  keluhanTerkait: RecapKeluhanTerkait[]; // RM-D4
 }
 
 // --- Coercion helpers (numeric/date columns arrive as string|Date) ---------
@@ -343,6 +368,77 @@ async function touchedDivisions(sql: Queryable, recapId: string): Promise<string
   return rows.map((r) => r.divisi);
 }
 
+/**
+ * serviceAktifMingguIni derives RM-A5: the client's services that had a Brief
+ * "running this week" (created in, or with a status transition within, the recap's
+ * WIB week window [mingguMulai, mingguAkhir]) plus the divisions those Briefs
+ * target. Anchored entirely to immutable facts — a Brief's `created_at` and its
+ * append-only `audit_log` transitions — so a CLOSED recap's RM-A5 stays stable
+ * (the freeze-on-close spirit, without a stored column). The transition arm mirrors
+ * the aggregator's `wib_date(created_at) BETWEEN mulai AND akhir` window (D-03).
+ */
+async function serviceAktifMingguIni(sql: Queryable, clientId: string, mulai: string, akhir: string): Promise<RecapServiceAktif[]> {
+  const rows = await sql<{ service_id: string; service_name: string; assigned_division: string }[]>`
+    select sv.id as service_id, sv.name as service_name, b.assigned_division
+      from briefs b
+      join services sv on sv.id = b.service_id
+     where sv.client_id = ${clientId}
+       and (
+         public.wib_date(b.created_at) between ${mulai} and ${akhir}
+         or exists (
+           select 1 from audit_log al
+            where al.entity_type = 'brief' and al.entity_id = b.id
+              and al.action like 'transition:%'
+              and public.wib_date(al.created_at) between ${mulai} and ${akhir}
+         )
+       )
+     order by sv.id`;
+  const byService = new Map<string, RecapServiceAktif>();
+  for (const r of rows) {
+    let s = byService.get(r.service_id);
+    if (!s) {
+      s = { serviceId: r.service_id, serviceName: r.service_name, divisions: [] };
+      byService.set(r.service_id, s);
+    }
+    const div = (r.assigned_division ?? '').trim();
+    if (div !== '' && !s.divisions.includes(div)) {
+      s.divisions.push(div);
+    }
+  }
+  for (const s of byService.values()) {
+    s.divisions.sort();
+  }
+  return [...byService.values()];
+}
+
+/**
+ * keluhanTerkaitMingguIni derives RM-D4: the client's complaints (CPL-) that were
+ * active at some point during the recap week — those created (WIB) on or before
+ * `akhir` that had NOT already reached the terminal `[Closed]` state before the
+ * week started (`mulai`). Membership is immutable (created_at + append-only
+ * `transition:*->[Closed]` audit rows); the `status` returned is the CURRENT one —
+ * the PRD "+ status" is a live cross-reference, useful even on a closed recap.
+ * Interpretation logged: DECISIONS 2026-08-18 (C7).
+ */
+async function keluhanTerkaitMingguIni(sql: Queryable, clientId: string, mulai: string, akhir: string): Promise<RecapKeluhanTerkait[]> {
+  const rows = await sql<{ id: string; source: string; severity: string; status: string; related_ref: string | null; created_at: unknown }[]>`
+    select c.id, c.source, c.severity, c.status, c.related_ref, c.created_at
+      from complaints c
+     where c.client_id = ${clientId}
+       and public.wib_date(c.created_at) <= ${akhir}
+       and not exists (
+         select 1 from audit_log al
+          where al.entity_type = 'complaint' and al.entity_id = c.id
+            and al.action like 'transition:%->[Closed]'
+            and public.wib_date(al.created_at) < ${mulai}
+       )
+     order by c.created_at, c.id`;
+  return rows.map((r) => ({
+    id: r.id, source: r.source, severity: r.severity, status: r.status,
+    relatedRef: optStr(r.related_ref), createdAt: isoTs(r.created_at),
+  }));
+}
+
 /** getRecapDetail — the full recap bundle, scope-gated (canReadRecap). */
 export async function getRecapDetail(sql: Queryable, actor: Actor, id: string): Promise<RecapDetail> {
   const recap = await loadRecap(sql, id);
@@ -367,6 +463,10 @@ export async function getRecapDetail(sql: Queryable, actor: Actor, id: string): 
     select id, recap_id, divisi, catatan, created_at, created_by
       from wrr_catatan_divisi where recap_id = ${id} order by created_at`;
 
+  // RM-A5 + RM-D4 — auto display lists derived over the recap's WIB week window.
+  const serviceAktif = await serviceAktifMingguIni(sql, recap.clientId, recap.mingguMulai, recap.mingguAkhir);
+  const keluhanTerkait = await keluhanTerkaitMingguIni(sql, recap.clientId, recap.mingguMulai, recap.mingguAkhir);
+
   return {
     recap,
     divisi: divisiRows.map((d) => ({
@@ -390,6 +490,8 @@ export async function getRecapDetail(sql: Queryable, actor: Actor, id: string): 
       id: Number(c.id), recapId: c.recap_id, divisi: c.divisi, catatan: c.catatan,
       createdAt: isoTs(c.created_at), createdBy: c.created_by,
     })),
+    serviceAktif,
+    keluhanTerkait,
   };
 }
 

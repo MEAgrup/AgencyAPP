@@ -9,8 +9,10 @@ import {
   isCreativeDivision,
   isDirector,
   listCreativeBriefQueue,
+  listMyAssets,
   scanAssetReminders,
   type Brief,
+  type MyAssetQueueItem,
   type ReminderScanResult,
 } from '@/lib/creative';
 import StatusBadge from '@/components/StatusBadge';
@@ -23,6 +25,10 @@ export default function CreativeWorkspacePage() {
   const [briefs, setBriefs] = useState<Brief[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [myAssets, setMyAssets] = useState<MyAssetQueueItem[] | null>(null);
+  const [myAssetsLoading, setMyAssetsLoading] = useState(true);
+  const [myAssetsError, setMyAssetsError] = useState<string | null>(null);
 
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
@@ -44,9 +50,23 @@ export default function CreativeWorkspacePage() {
     }
   }, []);
 
+  const loadMyAssets = useCallback(async () => {
+    setMyAssetsLoading(true);
+    setMyAssetsError(null);
+    try {
+      const res = await listMyAssets();
+      setMyAssets(res.data);
+    } catch (err) {
+      setMyAssetsError(errorMessage(err));
+    } finally {
+      setMyAssetsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadMyAssets();
+  }, [load, loadMyAssets]);
 
   async function handleScan() {
     setScanError(null);
@@ -113,11 +133,54 @@ export default function CreativeWorkspacePage() {
 
       <section className="card">
         <div className="cardHeader">
+          <h2>Antrean Aset Saya</h2>
+        </div>
+        <p className="muted" style={{ fontSize: 13 }}>
+          Semua Asset yang ditugaskan ke Anda, lintas Brief/klien, urut jatuh tempo (M7 §3 Rule 2).
+        </p>
+        {myAssetsLoading && <p className="muted">Memuat...</p>}
+        {myAssetsError && <div className="alert alertError" role="alert">{myAssetsError}</div>}
+        {!myAssetsLoading && !myAssetsError && myAssets && myAssets.length === 0 && (
+          <div className="emptyState">Tidak ada Asset yang ditugaskan ke Anda.</div>
+        )}
+        {!myAssetsLoading && !myAssetsError && myAssets && myAssets.length > 0 && (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Tipe</th>
+                  <th>Klien</th>
+                  <th>Brief</th>
+                  <th>Prioritas</th>
+                  <th>Status</th>
+                  <th>Jatuh Tempo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {myAssets.map((a) => (
+                  <tr key={a.id}>
+                    <td><Link href={`/creative/assets/${a.id}`}>{a.id}</Link> <span className="muted">#{a.sequence_no}</span></td>
+                    <td>{a.asset_type}</td>
+                    <td>{a.client_name}</td>
+                    <td><Link href={`/creative/briefs/${a.brief_id}`}>{a.brief_title}</Link></td>
+                    <td>{a.priority || '—'}</td>
+                    <td><StatusBadge status={a.status} /></td>
+                    <td>{a.due_date || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="card">
+        <div className="cardHeader">
           <h2>Buka Langsung</h2>
         </div>
         <p className="muted" style={{ fontSize: 13 }}>
-          M7 tidak punya endpoint agregat lintas-Brief untuk personal queue (lihat catatan build) &mdash;
-          buka Brief atau Asset langsung dari ID-nya, atau pilih dari antrean di bawah.
+          Buka Brief atau Asset langsung dari ID-nya, atau pilih dari antrean di bawah.
         </p>
         <div className="formRow">
           <form className="field" onSubmit={handleBriefJump}>
