@@ -68,6 +68,7 @@ import SectionB, {
   baselineDraftToBody,
   type ChannelDraft,
 } from '@/components/strategi/SectionB';
+import { mergeBaselinePrefill } from '@/lib/strategi-baseline-inherit';
 import SectionC, {
   diagnosaDraftOf,
   diagnosaDraftToPayload,
@@ -160,6 +161,7 @@ import {
 } from '@/lib/strategi';
 import InterviewPrefillPanel from '@/components/strategi/InterviewPrefillPanel';
 import BaselinePrefillPanel from '@/components/strategi/BaselinePrefillPanel';
+import PlanPeriodsPanel from '@/components/strategi/PlanPeriodsPanel';
 import {
   assumptionsToBody,
   gmvCellsToBody,
@@ -207,6 +209,7 @@ function draftsOf(d: StrategiDetail): Drafts {
   };
 }
 
+
 export default function StrategiFormPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { role } = useAuth();
@@ -251,10 +254,19 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
       getStrategiPrefill(id)
         .then(setPrefill)
         .catch(() => setPrefill(null));
-      // RAB-11/RAB-12 — Section B baseline suggestions from riset awal. Advisory,
-      // same as above: a failure must not fail the load. Null when no analysis.
+      // RAB-11/RAB-12 — Section B baseline from riset awal. RAB-19 "warisi yang
+      // bersumber saja": on top of the reference panel, the sourced fields are
+      // seeded into the draft and rendered read-only by SectionB. Advisory: a
+      // failure must not fail the load. Null when no analysis.
       getBaselinePrefill(id)
-        .then(setBaselinePrefill)
+        .then((p) => {
+          setBaselinePrefill(p);
+          if (p) {
+            setDrafts((cur) =>
+              cur === null ? cur : { ...cur, channels: mergeBaselinePrefill(cur.channels, p) },
+            );
+          }
+        })
         .catch(() => setBaselinePrefill(null));
     } catch (err) {
       setLoadError(errorMessage(err));
@@ -632,6 +644,7 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                     draft={drafts.channels}
                     onChange={(channels) => patch('channels', channels)}
                     disabled={!editable}
+                    baselinePrefill={baselinePrefill}
                   />
                 </>
               )}
@@ -961,6 +974,11 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
             active={detail.status === 'Aktif'}
             canManage={canWrite || canApprove}
           />
+
+          {/* M6B bridge — the Plan periods this Strategi generated on approval.
+              Read-only list; each links into its period page where the target
+              becomes work rows (kuota) and Briefs. */}
+          <PlanPeriodsPanel contractId={detail.contract_id} />
         </div>
       </div>
     </div>

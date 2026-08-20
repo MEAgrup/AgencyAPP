@@ -105,6 +105,41 @@ export interface PlanDeficit {
   defisit_terbawa: number;
 }
 
+/** The period close review (Section P-F). */
+export interface PlanReview {
+  plan_id: string;
+  yang_jalan: string | null;
+  yang_tidak_jalan: string | null;
+  diagnosa_gap: string | null;
+  diagnosa_gap_bukti: string | null;
+  rekomendasi: string | null;
+  perlu_revisi: boolean | null;
+  materi_klien: string | null;
+}
+
+/** One auto-raised deviation flag (Section P-G). */
+export interface PlanFlag {
+  id: number;
+  plan_id: string;
+  plan_row_id: number | null;
+  jenis: string;
+  detail: string | null;
+  ack_spv_oleh: string | null;
+  ack_spv_pada: string | null;
+}
+
+/** The whole period bundle a Plan page renders in one load (Section P-A…P-G). */
+export interface PlanDetail {
+  plan: Plan;
+  targets: PlanTarget[];
+  rows: PlanRow[];
+  weeks: PlanRowWeek[];
+  actuals: PlanActual[];
+  review: PlanReview | null;
+  flags: PlanFlag[];
+  defisit_terbawa: number;
+}
+
 /** RAB-16 — one row NOT briefed by the one-click inherit, and why. `reason` is a
  *  machine code (di_luar / service_ambigu / tanpa_jadwal / sudah_diwarisi /
  *  service_tidak_ditemukan / service_tidak_briefable / divisi_pic_tidak_valid /
@@ -166,6 +201,16 @@ export interface ManualActualBody {
 // ---------------------------------------------------------------------------
 // Fetchers (RAB-15 — one per M6B route).
 // ---------------------------------------------------------------------------
+
+/** Loads one period with every child block (Section P-A…P-G) in one shot. */
+export function getPlanDetail(id: string): Promise<PlanDetail> {
+  return api.get<PlanDetail>(`/plan/${id}`);
+}
+
+/** Lists every Plan period of a contract, ordered by period number. */
+export function listPlansForContract(contractId: string): Promise<Plan[]> {
+  return api.get<Plan[]>(`/contracts/${contractId}/plans`);
+}
 
 export function submitPlanPeriode(id: string): Promise<Plan> {
   return api.post<Plan>(`/plan/${id}/submit`);
