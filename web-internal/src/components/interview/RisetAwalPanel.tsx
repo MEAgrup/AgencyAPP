@@ -79,6 +79,7 @@ function waktu(iso: string | null): string {
 export default function RisetAwalPanel({
   risetAwal,
   baseline,
+  baselineError,
   canWrite,
   busy,
   onSubmit,
@@ -87,6 +88,8 @@ export default function RisetAwalPanel({
   risetAwal: InterviewRisetAwal | null;
   /** The per-platform baseline read-model (null while it is still loading). */
   baseline: RisetAwalBaseline | null;
+  /** Why the baseline read-model is null, when the fetch failed (else null). */
+  baselineError?: string | null;
   canWrite: boolean;
   /** The page's action-in-flight flag (schedule/transition/submit-timing). */
   busy: boolean;
@@ -182,7 +185,18 @@ export default function RisetAwalPanel({
 
       {/* Analysis — one sub-section per active platform */}
       {!baseline ? (
-        <p className="muted" style={{ fontSize: 13 }}>Memuat baseline platform…</p>
+        baselineError ? (
+          <div className="alert alertError" style={{ fontSize: 13 }}>
+            Gagal memuat baseline platform: {baselineError}
+            <div style={{ marginTop: 8 }}>
+              <button type="button" className="btn btnSecondary btnSm" disabled={busy} onClick={() => void onReload()}>
+                Coba muat ulang
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="muted" style={{ fontSize: 13 }}>Memuat baseline platform…</p>
+        )
       ) : platforms.length === 0 ? (
         <div className="alert alertInfo" style={{ fontSize: 13 }}>
           Klien ini belum punya platform toko aktif — tidak ada baseline yang bisa dicatat.
@@ -230,7 +244,12 @@ export default function RisetAwalPanel({
               <div className="alert alertInfo" style={{ fontSize: 13 }}>
                 Sebelum submit (dan sebelum interview bisa dimulai — gerbang RAB-07):
                 <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
-                  {platforms.length === 0 && <li>belum ada platform aktif.</li>}
+                  {platforms.length === 0 &&
+                    (baselineError ? (
+                      <li>baseline platform gagal dimuat — muat ulang di atas dulu.</li>
+                    ) : (
+                      <li>belum ada platform aktif.</li>
+                    ))}
                   {platformBelum.length > 0 && (
                     <li>baseline belum lengkap: {platformBelum.map((p) => p.platform).join(', ')}.</li>
                   )}

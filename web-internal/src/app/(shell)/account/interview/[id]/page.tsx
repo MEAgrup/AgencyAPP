@@ -105,6 +105,11 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
   // Riset awal baseline + the client's sales record — the two upstream sources
   // the Interview door reads so it never re-asks what is already known (RAB-08).
   const [baseline, setBaseline] = useState<RisetAwalBaseline | null>(null);
+  // Why the baseline read-model is null, when it is. Without this a failed
+  // `GET /interview/{id}/baseline` (e.g. a missing table / 500) is swallowed and
+  // the panel sits on "Memuat baseline platform…" forever, reading as "no platform
+  // to pick" instead of "the baseline call broke". Surface it so it is diagnosable.
+  const [baselineError, setBaselineError] = useState<string | null>(null);
   const [client, setClient] = useState<Client | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -150,8 +155,14 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
       // record (RAB-08 context). Both degrade to null on failure — neither is
       // allowed to blank the interview page.
       getRisetAwalBaseline(id)
-        .then(setBaseline)
-        .catch(() => setBaseline(null));
+        .then((b) => {
+          setBaseline(b);
+          setBaselineError(null);
+        })
+        .catch((e) => {
+          setBaseline(null);
+          setBaselineError(errorMessage(e));
+        });
       getClient(d.interview.client_id)
         .then((r) => setClient(r.client))
         .catch(() => setClient(null));
@@ -179,8 +190,11 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
   const reloadBaseline = useCallback(async () => {
     try {
       setBaseline(await getRisetAwalBaseline(id));
-    } catch {
-      /* leave the last-good baseline in place */
+      setBaselineError(null);
+    } catch (e) {
+      // Leave the last-good baseline in place, but record why a refetch failed so
+      // the panel can offer a retry instead of silently keeping stale data.
+      setBaselineError(errorMessage(e));
     }
   }, [id]);
 
@@ -443,6 +457,7 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
           <RisetAwalPanel
             risetAwal={risetAwal}
             baseline={baseline}
+            baselineError={baselineError}
             canWrite={canWrite}
             busy={acting}
             onSubmit={submitRiset}
