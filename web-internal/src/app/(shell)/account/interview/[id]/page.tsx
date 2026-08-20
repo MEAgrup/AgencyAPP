@@ -78,7 +78,7 @@ import {
 } from '@/lib/interview-fields';
 import { getRisetAwalBaseline, type RisetAwalBaseline } from '@/lib/riset-awal';
 import { getClient, type Client } from '@/lib/clients';
-import { computeDedup, type DedupResult } from '@/lib/interview-dedup';
+import { computeDedup, DEDUP_FIELD_KEYS, type DedupResult } from '@/lib/interview-dedup';
 import FieldInput from '@/components/interview/FieldInput';
 import ScoringSidebar from '@/components/interview/ScoringSidebar';
 import PrasyaratPanel from '@/components/interview/PrasyaratPanel';
@@ -184,22 +184,25 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
     }
   }, [id]);
 
-  // RAB-08: seed the two riset-awal-answered scored fields (B2-9 AOV, B2-3 SKU)
-  // into the draft so the local score preview stays complete even though their
-  // Blok B inputs are hidden (DedupField). Never clobbers a value the AM typed —
-  // only fills an empty field, and the seeded value matches what the scorer uses
-  // server-side (RAB-06), so preview = submit still holds.
+  // RAB-08 (widened QA 2026-08-20): seed the riset-awal-answered scored fields
+  // (B2-9 AOV, B2-3 SKU, B1-5 omzet 3 bln, B6-3 target 3 bln) into the draft so the
+  // local score preview stays complete even though their Blok B inputs are hidden
+  // (DedupField). Never clobbers a value the AM typed — only fills an empty field,
+  // and the seeded value matches what the scorer uses server-side (RAB-06), so
+  // preview = submit still holds. Money fields (all but B2-3) read from nilai_uang.
   useEffect(() => {
     if (!baseline) return;
+    const moneyKeys = new Set(['B2-9', 'B1-5', 'B6-3']);
+    const seedable = new Set<string>(DEDUP_FIELD_KEYS);
     setDraft((d) => {
       if (!d) return d;
       let changed = false;
       const next = { ...d };
       for (const f of baseline.isian) {
-        if (f.field_key !== 'B2-9' && f.field_key !== 'B2-3') continue;
+        if (!seedable.has(f.field_key)) continue;
         const cur = next[f.field_key];
         if (!cur || cur.raw.trim() !== '') continue;
-        const raw = f.field_key === 'B2-9' ? minorToRupiah(f.nilai_uang) : f.nilai_angka == null ? '' : String(f.nilai_angka);
+        const raw = moneyKeys.has(f.field_key) ? minorToRupiah(f.nilai_uang) : f.nilai_angka == null ? '' : String(f.nilai_angka);
         if (raw === '') continue;
         next[f.field_key] = { ...cur, raw };
         changed = true;

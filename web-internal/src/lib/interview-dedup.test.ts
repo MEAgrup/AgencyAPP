@@ -52,13 +52,32 @@ describe('computeDedup (RAB-08)', () => {
     expect(info.confirmed).toBe(false);
   });
 
-  it('NEVER dedups fields outside the safe set (B1-5/B3-3/B7-3 stay interview questions)', () => {
+  it('folds B1-5 (omzet 3 bulan, Riset Awal) and B6-3 (target 3 bulan, client Target GMV)', () => {
     const b = baseline([
-      isian({ field_key: 'B1-5', nilai_uang: '99000000', dikonfirmasi: true }),
+      // B1-5 = runrate_3m × 3, already a 3-month total in minor units.
+      isian({ section: 'B1', field_key: 'B1-5', nilai_uang: '4500000000', sumber: 'analisa', dikonfirmasi: true }),
+      // B6-3 = target_gmv × 3, sumber=sales (client data, not the baseline upload).
+      isian({ section: 'B6', field_key: 'B6-3', nilai_uang: '30000000000', sumber: 'sales', dikonfirmasi: false }),
+    ]);
+    const { byField } = computeDedup(b);
+    const omzet = byField.get('B1-5')!;
+    expect(omzet.display).toBe('Rp. 45.000.000,00'); // 4.5jt/bln × 3 → Rp45jt
+    expect(omzet.source).toBe('Riset Awal (analisa)');
+    expect(omzet.confirmed).toBe(true);
+    const target = byField.get('B6-3')!;
+    expect(target.display).toBe('Rp. 300.000.000,00'); // 100jt/bln × 3 → Rp300jt
+    expect(target.source).toBe('Data Klien (Target GMV)');
+    expect(target.confirmed).toBe(false);
+  });
+
+  it('NEVER dedups fields outside the safe set (B3-3/B7-3 stay interview questions)', () => {
+    const b = baseline([
       isian({ field_key: 'B3-3', nilai_teks: 'terbatas', dikonfirmasi: true }),
+      isian({ field_key: 'B7-3', nilai_teks: 'penuh', dikonfirmasi: true }),
     ]);
     expect(computeDedup(b).byField.size).toBe(0);
-    // Guard the narrow set itself so a future widening is a deliberate edit.
-    expect([...DEDUP_FIELD_KEYS].sort()).toEqual(['B2-3', 'B2-9']);
+    // Guard the set itself so a future widening is a deliberate edit (QA 2026-08-20
+    // added B1-5 + B6-3 with their units resolved server-side).
+    expect([...DEDUP_FIELD_KEYS].sort()).toEqual(['B1-5', 'B2-3', 'B2-9', 'B6-3']);
   });
 });

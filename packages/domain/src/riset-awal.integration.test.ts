@@ -248,14 +248,21 @@ dDb('confirmIsian — per-number confirmation (keputusan 1)', () => {
     expect(before.semuaTerkonfirmasi).toBe(false);
     const usulanBefore = before.isian.find((f) => f.fieldKey === 'B2-9')!.nilaiUsulan;
 
+    // Confirm EVERY auto-filled number so the submit gate clears. Besides B2-9/B2-3,
+    // the Shopee manual baseline (gmvBulan Rp5jt) proposed B1-5 = Rp15jt (× 3);
+    // target_gmv is 0 in this seed so no B6-3 was proposed.
     const after = await confirmIsian(sql, owner, ITV, [
       { section: 'B2', fieldKey: 'B2-9', nilaiUang: '17500000', dikonfirmasi: true },
       { section: 'B2', fieldKey: 'B2-3', nilaiAngka: 40, dikonfirmasi: true },
+      { section: 'B1', fieldKey: 'B1-5', nilaiUang: '1500000000', dikonfirmasi: true },
     ]);
     const b29 = after.isian.find((f) => f.fieldKey === 'B2-9')!;
     expect(b29.dikonfirmasi).toBe(true);
     expect(b29.nilaiUang).toBe('17500000'); // corrected
     expect(b29.nilaiUsulan).toEqual(usulanBefore); // original proposal frozen
+    const b15 = after.isian.find((f) => f.fieldKey === 'B1-5')!;
+    expect(b15.sumber).toBe('manual');
+    expect(b15.nilaiUang).toBe('1500000000');
     expect(after.semuaTerkonfirmasi).toBe(true);
   });
 });

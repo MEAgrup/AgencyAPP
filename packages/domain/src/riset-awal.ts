@@ -73,23 +73,36 @@ export function metodeForPlatform(platform: string): MetodeBaseline {
 // RAB-05 — auto-filled interview fields
 // ---------------------------------------------------------------------------
 /**
- * One proposed interview field, derived from the baseline. `nilaiUsulan` is the
- * frozen original proposal (keputusan 1: a parser bug cannot shift a verdict
- * until a human confirms); the AM may correct `nilai*` before confirming.
+ * One proposed interview field, derived from the baseline (or, for B6-3, from the
+ * client's sales record). `nilaiUsulan` is the frozen original proposal (keputusan
+ * 1: a parser bug cannot shift a verdict until a human confirms); the AM may
+ * correct `nilai*` before confirming.
  *
- * ⚠️ Only the fields that map to a real INTERVIEW question are emitted here:
- *  - `toko.aov`        → **B2-9** (money, minor units)
- *  - `produk.sku_total`→ **B2-3** (count)
- * `median_6m`/`runrate_3m` (baseline GMV) and `roas` (baseline ROAS) are NOT
- * interview fields — they stay in the payload for the Strategi baseline (RAB-11).
+ * ⚠️ Only the fields that map to a real INTERVIEW question are emitted here, each
+ * with its unit resolved so the Blok C ratio stays dimensionless:
+ *  - `toko.aov`             → **B2-9** (money, minor units)
+ *  - `produk.sku_total`     → **B2-3** (count)
+ *  - `gmv_baseline.runrate_3m` → **B1-5** "Omzet 3 bulan terakhir" (money): the
+ *    baseline figures are MONTHLY (Rp/bulan, resolusi §5.2), and B1-5 is a 3-month
+ *    TOTAL, so it is `runrate_3m × 3` — the exact recipe §5.2 pre-authorised for
+ *    "kalau kelak di-prefill". `median_6m` is NEVER used for B1-5 (it is a 6-month
+ *    median, the Strategi baseline anchor, RAB-11).
+ *  - `clients.target_gmv`   → **B6-3** "Target omzet 3 bulan" (money, sumber=sales):
+ *    Target GMV is MONTHLY (PRD M0 §107 / M4 §65,§171 "IDR/month"), so B6-3 is
+ *    `target_gmv × 3`. Emitted by `deriveIsianFromClient` in `submitBaseline`.
+ * `roas` (baseline ROAS) stays in the payload for the Strategi baseline (RAB-11).
  * `B3-3` (ruang harga) and `B7-3` (kesiapan akses) are human judgement and stay
- * interview questions. `median_6m` is NEVER mapped to `B1-5` (unit mismatch ~3×,
- * resolusi §5.2).
+ * interview questions.
+ *
+ * Both B1-5 and B6-3 carry the SAME ×3 so the C-E1 ratio (target ÷ omzet) is
+ * unchanged in scale — putting a monthly figure on either side alone would inflate
+ * or deflate the ratio ~3× and could trip a false `rasio_target_terlalu_tinggi`
+ * deal-breaker (the exact risk §5.2 flagged). QA pemilik 2026-08-20.
  */
 export interface IsianUsulan {
   section: string;
   fieldKey: string;
-  sumber: 'analisa' | 'manual';
+  sumber: 'analisa' | 'manual' | 'sales';
   nilaiTeks: string | null;
   nilaiAngka: number | null;
   nilaiUang: bigint | null;
@@ -129,7 +142,36 @@ export function deriveIsianFromPayload(payload: BaselinePayloadLike): IsianUsula
       nilaiUsulan: { nilai_angka: sku },
     });
   }
+  // B1-5 "Omzet 3 bulan terakhir" = the 3-month TOTAL. runrate_3m is the MONTHLY
+  // average of the last 3 filled months (Rp/bulan, resolusi §5.2), so the total is
+  // runrate_3m × 3. Absent/zero history ⇒ not proposed (absent ≠ zero, fix #2).
+  const rr3 = payload.gmv_baseline?.runrate_3m;
+  if (isFiniteNumber(rr3) && rr3 > 0) {
+    const total3m = rr3 * 3;
+    const minor = rupiahToMinor(total3m);
+    out.push({
+      section: 'B1', fieldKey: 'B1-5', sumber: 'analisa',
+      nilaiTeks: null, nilaiAngka: null, nilaiUang: minor,
+      nilaiUsulan: { nilai_uang: minor.toString(), runrate_3m_rupiah: Math.round(rr3), rumus: 'omzet_3bln = runrate_3m × 3' },
+    });
+  }
   return out;
+}
+
+/**
+ * Derive B6-3 "Target omzet 3 bulan" from the client's Target GMV (sumber=sales).
+ * Target GMV is captured MONTHLY at intake (PRD "IDR/month"), so the 3-month target
+ * is `targetGmvBulan × 3` — the same ×3 B1-5 carries, keeping the C-E1 ratio scale-
+ * free. Returns [] when there is no positive target (AM then types B6-3 by hand).
+ */
+export function deriveIsianFromClient(targetGmvBulan: number | null): IsianUsulan[] {
+  if (!isFiniteNumber(targetGmvBulan) || targetGmvBulan <= 0) return [];
+  const minor = rupiahToMinor(targetGmvBulan * 3);
+  return [{
+    section: 'B6', fieldKey: 'B6-3', sumber: 'sales',
+    nilaiTeks: null, nilaiAngka: null, nilaiUang: minor,
+    nilaiUsulan: { nilai_uang: minor.toString(), target_gmv_bulan_rupiah: Math.round(targetGmvBulan), rumus: 'target_3bln = target_gmv × 3' },
+  }];
 }
 
 /** Derive the interview-field proposals from a minimal manual entry. */
@@ -148,6 +190,17 @@ export function deriveIsianFromManual(m: ManualBaselineInput): IsianUsulan[] {
       section: 'B2', fieldKey: 'B2-3', sumber: 'manual',
       nilaiTeks: null, nilaiAngka: m.skuTotal, nilaiUang: null,
       nilaiUsulan: { nilai_angka: m.skuTotal },
+    });
+  }
+  // B1-5 "Omzet 3 bulan terakhir" (3-month TOTAL). The manual entry captures GMV
+  // PER BULAN (`gmvBulan`), so the total is gmvBulan × 3 — the same conversion the
+  // analisa path applies to runrate_3m. Absent/zero ⇒ not proposed.
+  if (isFiniteNumber(m.gmvBulan) && m.gmvBulan > 0) {
+    const minor = rupiahToMinor(m.gmvBulan * 3);
+    out.push({
+      section: 'B1', fieldKey: 'B1-5', sumber: 'manual',
+      nilaiTeks: null, nilaiAngka: null, nilaiUang: minor,
+      nilaiUsulan: { nilai_uang: minor.toString(), gmv_bulan_rupiah: Math.round(m.gmvBulan), rumus: 'omzet_3bln = gmv_bulan × 3' },
     });
   }
   return out;
@@ -185,7 +238,7 @@ export interface BaselinePayloadLike {
   schema?: unknown;
   generated_at?: unknown;
   klien?: { periode_referensi?: string | null } | null;
-  gmv_baseline?: { cakupan_riwayat?: string | null } | null;
+  gmv_baseline?: { cakupan_riwayat?: string | null; runrate_3m?: number | null } | null;
   toko?: { aov?: number | null } | null;
   produk?: { sku_total?: number | null } | null;
   benchmark_versi?: number | null;
@@ -296,14 +349,19 @@ function numOrNull(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-async function loadInterviewScope(sql: Queryable, id: string): Promise<{ ownerAm: string | null; clientId: string }> {
-  const rows = await sql<{ assigned_am_id: string | null; client_id: string }[]>`
-    select c.assigned_am_id, i.client_id
+async function loadInterviewScope(
+  sql: Queryable,
+  id: string,
+): Promise<{ ownerAm: string | null; clientId: string; targetGmv: number | null }> {
+  // target_gmv (numeric IDR/month) rides along so submitBaseline can propose B6-3
+  // from the client's captured Target GMV without a second round-trip.
+  const rows = await sql<{ assigned_am_id: string | null; client_id: string; target_gmv: string | number | null }[]>`
+    select c.assigned_am_id, i.client_id, c.target_gmv
       from interview i
       join clients c on c.id = i.client_id
      where i.id = ${id}`;
   if (rows.length === 0) throw new NotFoundError(MSG_NOT_FOUND);
-  return { ownerAm: rows[0].assigned_am_id, clientId: rows[0].client_id };
+  return { ownerAm: rows[0].assigned_am_id, clientId: rows[0].client_id, targetGmv: numOrNull(rows[0].target_gmv) };
 }
 
 // ---------------------------------------------------------------------------
@@ -311,7 +369,7 @@ async function loadInterviewScope(sql: Queryable, id: string): Promise<{ ownerAm
 // ---------------------------------------------------------------------------
 export async function submitBaseline(sql: Sql, actor: Actor, id: string, input: SubmitBaselineInput): Promise<BaselineView> {
   return withTransaction(sql, async (tx) => {
-    const { ownerAm, clientId } = await loadInterviewScope(tx, id);
+    const { ownerAm, clientId, targetGmv } = await loadInterviewScope(tx, id);
     if (!canWriteInterview(actor, ownerAm)) throw new ForbiddenError(MSG_FORBIDDEN);
     if (!input.clientPlatformId) throw new ValidationError(MSG_INCOMPLETE);
 
@@ -442,6 +500,12 @@ export async function submitBaseline(sql: Sql, actor: Actor, id: string, input: 
       // A manual entry may still attach an export as provenance (Rule 5).
       berkasRows = input.sumberBerkas ?? [];
     }
+
+    // B6-3 "Target omzet 3 bulan" is CLIENT data (sumber=sales), not per-platform,
+    // so it is proposed once from the captured Target GMV regardless of method. The
+    // per-key UNIQUE + `on conflict do nothing` below means the first platform
+    // submit writes it and later submits leave it be — same as B2-9/B2-3.
+    isian = [...isian, ...deriveIsianFromClient(targetGmv)];
 
     // House invariant (DECISIONS 2026-08-20 — "buang raw, simpan hasil"): the raw
     // upload rows (`analisa.files[].aoa`) are TRANSIENT — read once to run the

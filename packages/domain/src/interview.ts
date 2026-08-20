@@ -742,22 +742,28 @@ export async function saveAnswers(sql: Sql, actor: Actor, id: string, answers: A
 // ---------------------------------------------------------------------------
 
 /**
- * The riset-awal isian keys that also feed the Blok C score (RAB-06). Each names
- * the `KualifikasiInput` field it is the authoritative source for ONCE the AM has
- * confirmed it: B2-9 (AOV, money → `aov`) and B2-3 (SKU siap, count → `skuSiap`).
+ * The riset-awal isian keys that also feed the Blok C score (RAB-06, extended by
+ * QA pemilik 2026-08-20). Each names the `KualifikasiInput` field it is the
+ * authoritative source for ONCE the AM has confirmed it:
+ *  - B2-9 (AOV, money → `aov`)
+ *  - B2-3 (SKU siap, count → `skuSiap`)
+ *  - B1-5 (omzet 3 bulan, money → `omzet`; C-A1 + denominator of C-E1)
+ *  - B6-3 (target omzet 3 bulan, money → `targetOmzet`; numerator of C-E1)
  * The score/verdict itself lives entirely in the ONE core scorer — this list only
- * decides where those two inputs are read FROM.
+ * decides where those inputs are read FROM. B1-5/B6-3 are auto-filled upstream
+ * (baseline runrate_3m×3 / client target_gmv×3, both resolved to a 3-month TOTAL in
+ * `riset-awal.ts`), so the value is already in the right unit when it lands here.
  */
-export const RISET_AWAL_SCORED_KEYS = ['B2-9', 'B2-3'] as const;
+export const RISET_AWAL_SCORED_KEYS = ['B2-9', 'B2-3', 'B1-5', 'B6-3'] as const;
 
 /**
- * mergeRisetAwalScoredInputs closes the provenance leak (RAB-06). B2-9/B2-3 enter
+ * mergeRisetAwalScoredInputs closes the provenance leak (RAB-06). These keys enter
  * qualification, and once the AM has CONFIRMED the riset-awal isian for them, that
  * confirmed number is the source of truth — the value the caller put in the score
- * body for the same key is ignored, so a hand-posted AOV/SKU cannot move the
- * verdict away from the baseline the AM signed off on. Keys with no confirmed
- * isian fall through to the body unchanged, so an interview without riset awal
- * (e.g. the Alpha Digital fixture) scores exactly as before.
+ * body for the same key is ignored, so a hand-posted AOV/SKU/omzet/target cannot
+ * move the verdict away from the baseline the AM signed off on. Keys with no
+ * confirmed isian fall through to the body unchanged, so an interview without riset
+ * awal (e.g. the Alpha Digital fixture) scores exactly as before.
  */
 async function mergeRisetAwalScoredInputs(
   sql: Queryable,
@@ -774,6 +780,8 @@ async function mergeRisetAwalScoredInputs(
   for (const r of rows) {
     if (r.field_key === 'B2-9' && r.nilai_uang != null) merged.aov = BigInt(r.nilai_uang);
     if (r.field_key === 'B2-3' && r.nilai_angka != null) merged.skuSiap = Number(r.nilai_angka);
+    if (r.field_key === 'B1-5' && r.nilai_uang != null) merged.omzet = BigInt(r.nilai_uang);
+    if (r.field_key === 'B6-3' && r.nilai_uang != null) merged.targetOmzet = BigInt(r.nilai_uang);
   }
   return merged;
 }
