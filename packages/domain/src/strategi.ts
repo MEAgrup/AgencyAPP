@@ -6009,14 +6009,12 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
     out.push({ kode: 'H-3', pesan: MSG_SKENARIO_MUNDUR_REQUIRED });
   }
 
-  // Rule 9 / E-11: the anti-scope-creep record. Empty is a validation error, by
-  // design — it is the answer the AM needs three months later.
-  const outOfScope = await sql<{ n: number }[]>`
-    select count(*)::int as n from strategi_pillar
-     where strategi_id = ${id} and jenis = 'tidak_dikerjakan'`;
-  if (outOfScope[0].n === 0) {
-    out.push({ kode: 'E-11', pesan: MSG_OUT_OF_SCOPE_REQUIRED });
-  }
+  // E-11 (out-of-scope, `strategi_pillar jenis='tidak_dikerjakan'`) is NO LONGER a
+  // submit requirement — owner QA decision 2026-08-20 (Fase 2), DECISIONS.md. This
+  // deviates from Rule 9 ("Out-of-scope must be explicit"): the owner found the
+  // mandatory entry produced boilerplate rather than the real anti-scope-creep note
+  // it was meant to capture, so E-11 stays editable in Section E but is optional. The
+  // gate push (and its `DOORS` row) are removed; the column and endpoint are kept.
 
   const risks = await sql<{ n: number }[]>`
     select count(*)::int as n from strategi_risk where strategi_id = ${id}`;
@@ -6086,11 +6084,12 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
     }
   }
 
-  const ketergantunganCount = await sql<{ n: number }[]>`
-    select count(*)::int as n from strategi_ketergantungan_klien where strategi_id = ${id}`;
-  if (ketergantunganCount[0].n === 0) {
-    out.push({ kode: 'E-12', pesan: MSG_KETERGANTUNGAN_REQUIRED });
-  }
+  // E-12 (ketergantungan klien) is NO LONGER a submit requirement — owner QA
+  // decision 2026-08-20 (Fase 2), DECISIONS.md. Same reasoning as E-11: the
+  // mandatory list produced filler, not the dependency-with-consequence it was for.
+  // Still editable in Section E and still shape-validated by `saveKetergantungan`
+  // (a row with an item must carry its consequence — MSG_KETERGANTUNGAN_INCOMPLETE);
+  // only the empty-list gate and its `DOORS` row are removed.
 
   // G-1: §4 writes "min 2" explicitly, so this has its own message rather than
   // the generic one — "you entered one of two" is a different problem from

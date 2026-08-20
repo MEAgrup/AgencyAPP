@@ -48,7 +48,6 @@ import {
   MSG_LEADING_INDICATOR_MAX,
   MSG_LEADING_INDICATOR_REQUIRED,
   MSG_NOT_PLAN_GATED,
-  MSG_OUT_OF_SCOPE_REQUIRED,
   MSG_PRASYARAT_KLIEN_REQUIRED,
   MSG_QUICK_WIN_MIN,
   MSG_REVIEW_NOTES_REQUIRED,
@@ -1379,7 +1378,9 @@ describeDb('checkCompleteness — every unmet rule, not the first one', () => {
     expect(codes).toContain('G-0'); // Rule 17
     expect(codes).toContain('B-0'); // Rule 3
     expect(codes).toContain('D-8'); // three assumptions
-    expect(codes).toContain('E-11'); // Rule 9
+    // E-11 (out-of-scope) retired as a gate — owner QA 2026-08-20 (Fase 2). It no
+    // longer appears here even on a wholly empty draft.
+    expect(codes).not.toContain('E-11');
     expect(codes).toContain('H-1'); // three risks
     // A-05: every Section A answer is required, and the kode names which one so
     // the form can jump to it rather than saying "something is missing".
@@ -1594,11 +1595,14 @@ describeDb('checkCompleteness — every unmet rule, not the first one', () => {
     expect(missing.map((m) => m.pesan)).toContain(MSG_TARGET_WITHOUT_ASSUMPTION);
   });
 
-  it('flags an empty out-of-scope record (Rule 9)', async () => {
+  it('does NOT gate an empty out-of-scope record — E-11 retired (owner QA 2026-08-20)', async () => {
+    // Previously this asserted Rule 9 fired MSG_OUT_OF_SCOPE_REQUIRED. The owner
+    // retired E-11 as a submit requirement in Fase 2 (DECISIONS.md); a Strategi
+    // with only non-`tidak_dikerjakan` pillars must now clear the gate.
     const { strategiId } = await seedSubmittable();
     await savePillars(sql, am(), strategiId, [{ jenis: 'konten', aksi: '40 video' }]);
     const missing = await checkCompleteness(sql, strategiId);
-    expect(missing.map((m) => m.pesan)).toContain(MSG_OUT_OF_SCOPE_REQUIRED);
+    expect(missing.map((m) => m.kode)).not.toContain('E-11');
   });
 
   it('flags a baseline shorter than the declared window (Rule 5)', async () => {
@@ -2758,17 +2762,22 @@ describeDb('Section E-12 ketergantungan klien (A-09b)', () => {
     expect(d.prasyaratKlien[0].item).toContain('Shopee Ads Manager');
   });
 
-  it('refuses a dependency with no consequence, and gates an empty list', async () => {
+  it('refuses a dependency with no consequence, but does NOT gate an empty list (E-12 retired)', async () => {
     const { strategiId } = await seedSubmittable();
+    // Row-shape validation stays: a dependency the AM typed still needs its
+    // consequence (the field cited when a target is missed).
     await expect(
       saveKetergantungan(sql, am(), strategiId, [
         { item: 'foto produk', kapan: 'H-7', konsekuensi: '  ' },
       ]),
     ).rejects.toThrow(MSG_KETERGANTUNGAN_INCOMPLETE);
 
+    // But an empty list no longer blocks submit — owner QA 2026-08-20 (Fase 2),
+    // DECISIONS.md. `seedSubmittable` seeds one row; clearing it must leave the
+    // Strategi submittable.
     await saveKetergantungan(sql, am(), strategiId, []);
     const kurang = await checkCompleteness(sql, strategiId);
-    expect(kurang.map((k) => k.kode)).toContain('E-12');
+    expect(kurang.map((k) => k.kode)).not.toContain('E-12');
   });
 });
 
