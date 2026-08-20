@@ -38,7 +38,22 @@ import {
 } from '@/lib/account';
 import StatusBadge from '@/components/StatusBadge';
 import { formatIDR } from '@/lib/money';
-import { listStrategi, type Strategi } from '@/lib/strategi';
+import { createStrategi, listStrategi, type Strategi } from '@/lib/strategi';
+
+/**
+ * QA(SESI31): the DECIDED delivery path is `STRG-` (M6A Strategi) + M6B (Plan),
+ * not the M6 §4 `STR-` "Strategy & Plan". The lookalike STR- controls are hidden
+ * from the Service hub so a QA user follows the 5-step flow (Riset Awal →
+ * Interview → Strategi STRG- → Plan → Brief) without picking the wrong-but-
+ * similar form.
+ *
+ * STR- is NOT retired (SESI31 keputusan #6, jebakan #7: "jangan matikan jalur
+ * STR- sebelum UI web-internal pindah"). Its code and Brief gate stay wired —
+ * flip this to `true` to expose the legacy STR- create/card/override controls
+ * again (e.g. to QA the manual Brief path on a service that already has an
+ * approved STR-). Retiring STR- for real is a separate DECISIONS.md entry.
+ */
+const SHOW_LEGACY_STR_PATH = false;
 
 /** The human label for a stored task-satuan (divisi, jenis), or the raw jenis. */
 function taskLabel(divisi: string, jenis: string): string {
@@ -89,6 +104,17 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   // ROWS, so a Service legitimately has several.
   const [strategiList, setStrategiList] = useState<Strategi[]>([]);
   const [strategiError, setStrategiError] = useState<string | null>(null);
+
+  // Create Strategi (STRG-) form — the canonical create door, promoted onto the
+  // Service hub from the QA compare page (SESI31 keputusan #6). Header fields
+  // only; Section A→J is filled on /account/strategi/{id} after creation.
+  const [stgDurasi, setStgDurasi] = useState('');
+  const [stgMulai, setStgMulai] = useState('');
+  const [stgAkhir, setStgAkhir] = useState('');
+  const [stgSiklus, setStgSiklus] = useState('');
+  const [stgToleransi, setStgToleransi] = useState('20');
+  const [stgSubmitting, setStgSubmitting] = useState(false);
+  const [stgError, setStgError] = useState<string | null>(null);
 
   // Create Strategy form
   const [sObjective, setSObjective] = useState('');
@@ -275,6 +301,29 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
     }
   }
 
+  async function handleCreateStrategi(e: FormEvent) {
+    e.preventDefault();
+    setStgError(null);
+    setStgSubmitting(true);
+    try {
+      // Prints STRG- (and, if the Service has no contract yet, a CTR- via
+      // ensureContractForService). Both are audit-logged, no delete path.
+      const res = await createStrategi(id, {
+        durasi_kontrak_bulan: Number(stgDurasi),
+        tanggal_mulai_kontrak: stgMulai,
+        tanggal_akhir_kontrak: stgAkhir,
+        tanggal_mulai_siklus: stgSiklus.trim() === '' ? null : stgSiklus,
+        toleransi_over_persen: stgToleransi.trim() === '' ? null : Number(stgToleransi),
+      });
+      await loadStrategi();
+      // Continue into Section A→J — the header alone is not a usable Strategi.
+      router.push(`/account/strategi/${res.id}`);
+    } catch (err) {
+      setStgError(errorMessage(err));
+      setStgSubmitting(false);
+    }
+  }
+
   async function handleApproveGmv() {
     if (!strategy) return;
     setGmvApproveError(null);
@@ -437,18 +486,26 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
           ) : (
             id
           )}
-          {' '}&mdash; Strategy &amp; Plan dan Brief untuk layanan ini (M6 §4/§5).
+          {' '}&mdash; Riset Awal, Strategi &amp; Brief untuk layanan ini.
         </p>
-        {/* Pintu QA sementara: halaman ini menampilkan DUA entitas strategi
-            (`STR-` M6 §4 dan `STRG-` M6A) sebagai dua kartu, dan hanya yang
-            pertama punya tombol buat. Tautan ini menaruh keduanya berdampingan
-            supaya pemilik bisa memilih satu — dan dibuang bersama halamannya
-            begitu keputusan itu masuk DECISIONS.md. */}
-        <p className="muted" style={{ fontSize: 12 }}>
-          <Link href={`/account/services/${encodeURIComponent(id)}/qa-jalur-plan`}>
-            QA · bandingkan jalur Strategy &amp; Plan (STR-) vs Strategi M6A (STRG-)
-          </Link>
-        </p>
+        {/* The QA compare page (STR- vs STRG-) stays reachable only while the
+            legacy STR- path is exposed — for everyone else it is noise that
+            invites picking the retired-in-practice entity. */}
+        {SHOW_LEGACY_STR_PATH && (
+          <p className="muted" style={{ fontSize: 12 }}>
+            <Link href={`/account/services/${encodeURIComponent(id)}/qa-jalur-plan`}>
+              QA · bandingkan jalur Strategy &amp; Plan (STR-) vs Strategi M6A (STRG-)
+            </Link>
+          </p>
+        )}
+      </div>
+
+      {/* Orientation: the decided delivery path (SESI31). Keeps a QA user on the
+          5-step flow instead of hunting for the right form. */}
+      <div className="alert alertInfo" role="status">
+        <strong>Alur layanan (5 langkah):</strong> Riset Awal → Interview → Strategi
+        (STRG-, perlu ACC Head/SPV) → Plan → Brief satu-klik. Mulai dari{' '}
+        <strong>&ldquo;Kelola Klien (mulai riset awal)&rdquo;</strong> di bawah.
       </div>
 
       {serviceError && <div className="alert alertError" role="alert">{serviceError}</div>}
@@ -549,6 +606,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         />
       )}
 
+      {SHOW_LEGACY_STR_PATH && (
       <section className="card">
         <div className="cardHeader">
           <h2>Strategy &amp; Plan</h2>
@@ -633,22 +691,20 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
           <p className="muted">Belum ada Strategy &amp; Plan untuk layanan ini.</p>
         )}
       </section>
+      )}
 
-      {/* M6A Strategi (STRG-) — the entity M6A §4 defines, and a DIFFERENT record
-          from "Strategy & Plan" above (M6 §4, `strategy_plan` / `STR-`). They are
-          shown as two cards rather than merged because merging them would imply
-          one supersedes the other, and nothing in either module says that.
-
-          Without this card the whole M6A form is unreachable: `/account/strategi/{id}`
-          has no other entry point, and a page nobody can navigate to reads as
-          "built" while being unusable. */}
+      {/* M6A Strategi (STRG-) — the DECIDED strategy entity (SESI31 keputusan #6).
+          This is the canonical card; the M6 §4 STR- "Strategy & Plan" card above
+          is hidden by default so the two lookalikes no longer compete. The create
+          door (below) was promoted here from the QA page — `/account/strategi/{id}`
+          has no other entry point. */}
       <section className="card">
         <div className="cardHeader">
-          <h2>Strategi M6A</h2>
+          <h2>Strategi (STRG-)</h2>
         </div>
         {strategiError && <div className="alert alertError" role="alert">{strategiError}</div>}
         {strategiList.length === 0 ? (
-          <p className="muted">Belum ada Strategi M6A untuk layanan ini.</p>
+          <p className="muted">Belum ada Strategi untuk layanan ini.</p>
         ) : (
           <div className="stack" style={{ gap: 6 }}>
             {strategiList.map((st) => (
@@ -662,6 +718,92 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
             ))}
           </div>
         )}
+
+        {/* Canonical create door (promoted from the QA page). Header fields only;
+            Section A→J is completed on the Strategi page after creation. Same
+            gates as STR- once did: plan-gated, no Strategi yet, still
+            [Awaiting Onboarding]. Direct services never get a Strategi. */}
+        {canWrite &&
+          planGated &&
+          awaitingOnboarding &&
+          strategiList.length === 0 &&
+          !service?.plan_determination_pending && (
+            <form className="form" onSubmit={handleCreateStrategi} style={{ marginTop: 12 }}>
+              <div className="alert alertInfo" role="status">
+                Membuat header Strategi (<code>STRG-</code>) untuk layanan ini
+                {' '}&mdash; kalau belum ada kontrak, satu <code>CTR-</code> ikut dibuat. Lanjutkan
+                Section A→J di halaman Strategi setelah ini. Perlu ACC Head/SPV sebelum aktif.
+              </div>
+              {stgError && <div className="alert alertError" role="alert">{stgError}</div>}
+              <div className="formRow">
+                <div className="field">
+                  <label htmlFor="stg-durasi">Durasi kontrak (bulan)</label>
+                  <input
+                    id="stg-durasi"
+                    type="number"
+                    min="1"
+                    required
+                    value={stgDurasi}
+                    onChange={(e) => setStgDurasi(e.target.value)}
+                  />
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    Menentukan berapa periode Plan lahir saat Strategi disetujui (M6B Rule 1).
+                  </span>
+                </div>
+                <div className="field">
+                  <label htmlFor="stg-toleransi">Toleransi over-komitmen (%)</label>
+                  <input
+                    id="stg-toleransi"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={stgToleransi}
+                    onChange={(e) => setStgToleransi(e.target.value)}
+                  />
+                  <span className="muted" style={{ fontSize: 12 }}>M6A D16 &mdash; default 20.</span>
+                </div>
+              </div>
+              <div className="formRow">
+                <div className="field">
+                  <label htmlFor="stg-mulai">Tanggal mulai kontrak</label>
+                  <input
+                    id="stg-mulai"
+                    type="date"
+                    required
+                    value={stgMulai}
+                    onChange={(e) => setStgMulai(e.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="stg-akhir">Tanggal akhir kontrak</label>
+                  <input
+                    id="stg-akhir"
+                    type="date"
+                    required
+                    value={stgAkhir}
+                    onChange={(e) => setStgAkhir(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="field">
+                <label htmlFor="stg-siklus">Tanggal mulai siklus (G-0, opsional)</label>
+                <input
+                  id="stg-siklus"
+                  type="date"
+                  value={stgSiklus}
+                  onChange={(e) => setStgSiklus(e.target.value)}
+                />
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Kosongkan untuk memakai tanggal mulai kontrak. Beku setelah periode 1 tutup (Rule 17).
+                </span>
+              </div>
+              <div>
+                <button type="submit" className="btn btnPrimary" disabled={stgSubmitting}>
+                  {stgSubmitting ? 'Membuat…' : 'Buat Strategi (STRG-)'}
+                </button>
+              </div>
+            </form>
+          )}
       </section>
 
       {/* Interview ("Kelola Klien") shortcut. Interview is a per-CLIENT record
@@ -688,8 +830,10 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
       )}
 
       {/* §4 Rule 1/6 + createStrategy's own gates: plan-gated only, no Plan yet,
-          Service still [Awaiting Onboarding]. A Direct service has no Plan, ever. */}
-      {!strategy && canWrite && planGated && awaitingOnboarding && !service?.plan_determination_pending && (
+          Service still [Awaiting Onboarding]. A Direct service has no Plan, ever.
+          Hidden by default (SESI31): the decided create door is Strategi (STRG-)
+          above; this legacy STR- form only shows with SHOW_LEGACY_STR_PATH on. */}
+      {SHOW_LEGACY_STR_PATH && !strategy && canWrite && planGated && awaitingOnboarding && !service?.plan_determination_pending && (
         <section className="card">
           <div className="cardHeader">
             <h2>Buat Strategy &amp; Plan</h2>
@@ -840,7 +984,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         </section>
       )}
 
-      {!strategy && canWrite && awaitingOnboarding && !service?.plan_determination_pending && (
+      {SHOW_LEGACY_STR_PATH && !strategy && canWrite && awaitingOnboarding && !service?.plan_determination_pending && (
         <section className="card">
           <div className="cardHeader">
             <h2>Override Kebutuhan Strategy &amp; Plan</h2>
@@ -879,9 +1023,11 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
           </div>
           {planGated && !approvedStrategy && (
             <div className="alert alertInfo" role="status">
-              Layanan plan-gated: Brief baru bisa dibuat setelah Strategy &amp; Plan disetujui SPV/Head Account
-              (M6 §4 Rule 5).
-              {!strategy && ' Mulai dari "Buat Strategy & Plan" di atas.'}
+              Layanan plan-gated: pada alur yang diputuskan, Brief <strong>diwarisi satu-klik dari
+              Plan</strong> setelah Strategi (STRG-) disetujui &amp; Plan diaktifkan (M6B). Mulai dari{' '}
+              <strong>Strategi (STRG-)</strong> di atas.
+              {SHOW_LEGACY_STR_PATH &&
+                ' (Jalur lama STR-: Brief manual baru bisa dibuat setelah Strategy & Plan disetujui SPV/Head Account, M6 §4 Rule 5.)'}
             </div>
           )}
 
