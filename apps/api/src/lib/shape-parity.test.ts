@@ -417,6 +417,10 @@ const WIRE_TO_FE: Record<string, string> = {
   PlanRowWire: 'plan.ts::PlanRow',
   PlanRowWeekWire: 'plan.ts::PlanRowWeek',
   PlanActualWire: 'plan.ts::PlanActual',
+  // Read surface — the period bundle a Plan page loads (P-A…P-G) + its children.
+  PlanReviewWire: 'plan.ts::PlanReview',
+  PlanFlagWire: 'plan.ts::PlanFlag',
+  PlanDetailWire: 'plan.ts::PlanDetail',
   // RAB-16 — one-click Brief inheritance result (created Briefs + skipped rows).
   BriefInheritResultWire: 'plan.ts::BriefInheritResult',
   BriefInheritSkipWire: 'plan.ts::BriefInheritSkip',

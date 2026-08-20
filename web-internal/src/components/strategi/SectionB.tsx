@@ -32,6 +32,8 @@ import {
   STUDIO_STATES,
   TOP_SKU_MAX,
   type Channel,
+  type StrategiBaselinePrefill,
+  type StrategiChannelBaselineSuggestion,
   type StrategiDetail,
 } from '@/lib/strategi';
 
@@ -590,16 +592,32 @@ const STUDIO_LABELS: Record<string, string> = {
 // Component
 // ---------------------------------------------------------------------------
 
+/** RAB-19 "warisi yang bersumber saja" — the fields Riset Awal is authoritative
+ *  for are rendered read-only with this chip, so the AM confirms them instead of
+ *  re-typing. A correction goes back to Riset Awal (the single source), not into a
+ *  second Strategi copy — the same rule as the interview dedup (M6 Interview §7).
+ *  The value itself is seeded into the draft by the page (`mergeBaselinePrefill`),
+ *  so a normal Section B save still persists it and the DB gate stays satisfied. */
+function InheritedChip() {
+  return (
+    <span className="badge badge-gray" style={{ fontWeight: 400, fontSize: 11 }} title="Nilai dari Riset Awal — perbaiki di Riset Awal, bukan di sini.">
+      terisi dari Riset Awal
+    </span>
+  );
+}
+
 export default function SectionB({
   detail,
   draft,
   onChange,
   disabled,
+  baselinePrefill,
 }: {
   detail: StrategiDetail;
   draft: ChannelDraft[];
   onChange: (channels: ChannelDraft[]) => void;
   disabled: boolean;
+  baselinePrefill: StrategiBaselinePrefill | null;
 }) {
   const [activeIdx, setActiveIdx] = useState(0);
 
@@ -625,6 +643,21 @@ export default function SectionB({
   const setCh = (patch: Partial<ChannelDraft>) => {
     onChange(draftWithDefaults.map((c, i) => (i === clampedIdx ? { ...c, ...patch } : c)));
   };
+
+  // RAB-19 "warisi yang bersumber saja" — the Riset Awal suggestion for THIS
+  // channel, if any. When present, the sourced fields (B-0.6 provenance, B-0.7
+  // window, B-1 per-month GMV + orders) are inherited read-only; every field
+  // Riset Awal has no source for (persen batal, ad spend, ROAS, ACOS, and all of
+  // B-2…B-9) stays editable.
+  const sugg: StrategiChannelBaselineSuggestion | null =
+    baselinePrefill?.channels.find(
+      (s) =>
+        s.channel === ch.channel &&
+        (ch.channel !== 'Lainnya' || (s.channel_lain ?? '') === (ch.channel_lain ?? '')),
+    ) ?? null;
+  const suggMonth = (i: number) => sugg?.baseline_bulan.find((m) => m.month_index === i) ?? null;
+  const provInherited = sugg !== null;
+  const periodeInherited = sugg !== null && sugg.periode_baseline_bulan != null;
 
   const isEksisting = ch.status_channel !== 'Belum Aktif';
 
@@ -816,31 +849,37 @@ export default function SectionB({
           </>
         )}
 
-        {/* Data provenance */}
+        {/* Data provenance (B-0.6) — inherited from Riset Awal when available. */}
         <div className="formRow" style={{ marginTop: 8 }}>
           <label className="field">
-            <span className="muted" style={{ fontSize: 12 }}>Sumber data (B-0.6)</span>
+            <span className="muted" style={{ fontSize: 12 }}>
+              Sumber data (B-0.6) {provInherited && <InheritedChip />}
+            </span>
             <input
               placeholder="Seller Center export, screenshot, dll."
               value={ch.sumber_data}
-              disabled={disabled}
+              disabled={disabled || provInherited}
               onChange={(e) => setCh({ sumber_data: e.target.value })}
             />
           </label>
           <label className="field">
-            <span className="muted" style={{ fontSize: 12 }}>Tanggal ambil data</span>
+            <span className="muted" style={{ fontSize: 12 }}>
+              Tanggal ambil data {provInherited && <InheritedChip />}
+            </span>
             <input
               type="date"
               value={ch.tanggal_ambil_data}
-              disabled={disabled}
+              disabled={disabled || provInherited}
               onChange={(e) => setCh({ tanggal_ambil_data: e.target.value })}
             />
           </label>
           <label className="field">
-            <span className="muted" style={{ fontSize: 12 }}>Lampiran (link/path)</span>
+            <span className="muted" style={{ fontSize: 12 }}>
+              Lampiran (link/path) {provInherited && <InheritedChip />}
+            </span>
             <input
               value={ch.lampiran}
-              disabled={disabled}
+              disabled={disabled || provInherited}
               onChange={(e) => setCh({ lampiran: e.target.value })}
             />
           </label>
@@ -854,13 +893,15 @@ export default function SectionB({
             </span>
             <div className="formRow">
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Jumlah bulan</span>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Jumlah bulan {periodeInherited && <InheritedChip />}
+                </span>
                 <input
                   type="number"
                   min={1}
                   max={12}
                   value={ch.periode_baseline_bulan}
-                  disabled={disabled}
+                  disabled={disabled || periodeInherited}
                   onChange={(e) => setCh({ periode_baseline_bulan: e.target.value })}
                 />
               </label>
@@ -953,6 +994,13 @@ export default function SectionB({
           <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
             Isi {nMonths} bulan dari yang paling lama ke paling baru (bulan 1 = tertua).
             AOV dihitung otomatis oleh server.
+            {sugg && sugg.baseline_bulan.length > 0 && (
+              <>
+                {' '}
+                <strong>GMV &amp; Pesanan</strong> terisi dari Riset Awal — % batal, ad spend, ROAS,
+                dan ACOS tetap diisi manual (Riset Awal hanya kasih angka agregat, bukan per bulan).
+              </>
+            )}
           </p>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ fontSize: 13, minWidth: 600 }}>
@@ -980,23 +1028,32 @@ export default function SectionB({
                         ['roas', 'number'] as const,
                         ['acos', 'number'] as const,
                       ] as [keyof BaselineMonthDraft, string][]
-                    ).map(([field, type]) => (
-                      <td key={field} style={{ paddingRight: 8 }}>
-                        <input
-                          type={type}
-                          min={type === 'number' ? 0 : undefined}
-                          value={m[field] as string}
-                          disabled={disabled}
-                          style={{ width: 100 }}
-                          onChange={(e) => {
-                            const nextBaseline = ensuredBaseline.map((row, ri) =>
-                              ri === i ? { ...row, [field]: e.target.value } : row,
-                            );
-                            setCh({ baseline: nextBaseline });
-                          }}
-                        />
-                      </td>
-                    ))}
+                    ).map(([field, type]) => {
+                      // GMV + Pesanan are inherited from Riset Awal when it has a
+                      // figure for this month; the rest stay editable.
+                      const sm = suggMonth(m.month_index);
+                      const inheritedCell =
+                        (field === 'gmv' && sm?.gmv != null) ||
+                        (field === 'jumlah_pesanan' && sm?.jumlah_pesanan != null);
+                      return (
+                        <td key={field} style={{ paddingRight: 8 }}>
+                          <input
+                            type={type}
+                            min={type === 'number' ? 0 : undefined}
+                            value={m[field] as string}
+                            disabled={disabled || inheritedCell}
+                            title={inheritedCell ? 'Terisi dari Riset Awal' : undefined}
+                            style={{ width: 100 }}
+                            onChange={(e) => {
+                              const nextBaseline = ensuredBaseline.map((row, ri) =>
+                                ri === i ? { ...row, [field]: e.target.value } : row,
+                              );
+                              setCh({ baseline: nextBaseline });
+                            }}
+                          />
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>

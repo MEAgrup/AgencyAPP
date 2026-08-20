@@ -17,6 +17,9 @@ import type { briefInherit } from '@cdps/domain';
 import {
   briefInheritResultToWire,
   planActualToWire,
+  planDetailToWire,
+  planFlagToWire,
+  planReviewToWire,
   planRowToWire,
   planRowWeekToWire,
   planTargetToWire,
@@ -165,6 +168,152 @@ describe('planRowWeekToWire (Section P-D) & planActualToWire (Section P-E)', () 
       tanggal_ambil: '2026-09-12',
       sengketa: null,
     });
+  });
+});
+
+describe('planReviewToWire (Section P-F) & planFlagToWire (Section P-G)', () => {
+  it('review → snake_case with explicit nulls', () => {
+    const r: plan.PlanReview = {
+      planId: 'PLAN-202608-0001',
+      yangJalan: 'listing rewrite converted',
+      yangTidakJalan: null,
+      diagnosaGap: 'eksekusi_tidak_jalan',
+      diagnosaGapBukti: 'akses affiliate telat',
+      rekomendasi: null,
+      perluRevisi: false,
+      materiKlien: null,
+    };
+    const w = planReviewToWire(r);
+    noCamel(w);
+    expect(w).toEqual({
+      plan_id: 'PLAN-202608-0001',
+      yang_jalan: 'listing rewrite converted',
+      yang_tidak_jalan: null,
+      diagnosa_gap: 'eksekusi_tidak_jalan',
+      diagnosa_gap_bukti: 'akses affiliate telat',
+      rekomendasi: null,
+      perlu_revisi: false,
+      materi_klien: null,
+    });
+  });
+
+  it('flag → snake_case with explicit nulls', () => {
+    const f: plan.PlanFlag = {
+      id: 9,
+      planId: 'PLAN-202608-0001',
+      planRowId: 42,
+      jenis: 'lewat_komitmen',
+      detail: 'over 20%',
+      ackSpvOleh: null,
+      ackSpvPada: null,
+    };
+    const w = planFlagToWire(f);
+    noCamel(w);
+    expect(w).toEqual({
+      id: 9,
+      plan_id: 'PLAN-202608-0001',
+      plan_row_id: 42,
+      jenis: 'lewat_komitmen',
+      detail: 'over 20%',
+      ack_spv_oleh: null,
+      ack_spv_pada: null,
+    });
+  });
+});
+
+describe('planDetailToWire (the P-A…P-G read bundle)', () => {
+  const plan0: plan.Plan = {
+    id: 'PLAN-202608-0001',
+    lingkup: 'kontrak',
+    contractId: 'CTR-202608-0001',
+    clientId: 'CLI-202608-0001',
+    strategiId: 'STRG-202608-0001',
+    periodeNo: 1,
+    tanggalMulai: '2026-08-12',
+    tanggalAkhir: '2026-09-11',
+    jumlahMinggu: 5,
+    status: 'Aktif',
+    catatanPembuka: 'fokus perbaikan listing',
+    createdAt: '2026-08-18T00:00:00.000Z',
+    updatedAt: '2026-08-18T00:00:00.000Z',
+    createdBy: 'AC-AM-0001',
+  };
+
+  it('composes header + every child through its own converter, defisit carried', () => {
+    const d: plan.PlanDetail = {
+      plan: plan0,
+      targets: [],
+      rows: [],
+      weeks: [],
+      actuals: [],
+      review: null,
+      flags: [],
+      defisitTerbawa: 10000000,
+    };
+    const w = planDetailToWire(d);
+    noCamel(w);
+    // header nested through planToWire (snake_case one level down)
+    expect(w.plan.contract_id).toBe('CTR-202608-0001');
+    noCamel(w.plan);
+    // PA-6 deficit carried under the snake_case key
+    expect(w.defisit_terbawa).toBe(10000000);
+    // empty child lists stay arrays, review stays null
+    expect(w.targets).toEqual([]);
+    expect(w.review).toBeNull();
+  });
+
+  it('maps a populated review and each child list element to snake_case', () => {
+    const d: plan.PlanDetail = {
+      plan: plan0,
+      targets: [
+        {
+          planId: 'PLAN-202608-0001',
+          channel: 'Shopee',
+          metric: 'jumlah_video',
+          nilaiStrategi: 40,
+          nilaiDipakai: 40,
+          arah: 'tetap',
+          persenPerubahan: 0,
+          alasan: null,
+          buktiFile: null,
+          statusPersetujuan: null,
+        },
+      ],
+      rows: [],
+      weeks: [{ id: 1, planRowId: 5, mingguNo: 1, kuota: 10 }],
+      actuals: [],
+      review: {
+        planId: 'PLAN-202608-0001',
+        yangJalan: 'ok',
+        yangTidakJalan: null,
+        diagnosaGap: null,
+        diagnosaGapBukti: null,
+        rekomendasi: null,
+        perluRevisi: null,
+        materiKlien: null,
+      },
+      flags: [
+        {
+          id: 3,
+          planId: 'PLAN-202608-0001',
+          planRowId: null,
+          jenis: 'di_luar_strategi',
+          detail: null,
+          ackSpvOleh: null,
+          ackSpvPada: null,
+        },
+      ],
+      defisitTerbawa: 0,
+    };
+    const w = planDetailToWire(d);
+    noCamel(w);
+    expect(w.targets[0].nilai_strategi).toBe(40);
+    w.targets.forEach(noCamel);
+    expect(w.weeks[0].plan_row_id).toBe(5);
+    w.weeks.forEach(noCamel);
+    expect(w.review?.yang_jalan).toBe('ok');
+    expect(w.flags[0].jenis).toBe('di_luar_strategi');
+    w.flags.forEach(noCamel);
   });
 });
 

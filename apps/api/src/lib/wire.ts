@@ -3497,6 +3497,84 @@ export function briefInheritResultToWire(r: briefInherit.BriefInheritResult): Br
   };
 }
 
+/** The period close review (Section P-F). Serves `plan.ts::PlanReview`. */
+export interface PlanReviewWire {
+  plan_id: string;
+  yang_jalan: string | null;
+  yang_tidak_jalan: string | null;
+  diagnosa_gap: string | null;
+  diagnosa_gap_bukti: string | null;
+  rekomendasi: string | null;
+  perlu_revisi: boolean | null;
+  materi_klien: string | null;
+}
+
+export function planReviewToWire(r: plan.PlanReview): PlanReviewWire {
+  return {
+    plan_id: r.planId,
+    yang_jalan: r.yangJalan,
+    yang_tidak_jalan: r.yangTidakJalan,
+    diagnosa_gap: r.diagnosaGap,
+    diagnosa_gap_bukti: r.diagnosaGapBukti,
+    rekomendasi: r.rekomendasi,
+    perlu_revisi: r.perluRevisi,
+    materi_klien: r.materiKlien,
+  };
+}
+
+/** One auto-raised deviation flag (Section P-G). Serves `plan.ts::PlanFlag`. */
+export interface PlanFlagWire {
+  id: number;
+  plan_id: string;
+  plan_row_id: number | null;
+  jenis: string;
+  detail: string | null;
+  ack_spv_oleh: string | null;
+  ack_spv_pada: string | null;
+}
+
+export function planFlagToWire(f: plan.PlanFlag): PlanFlagWire {
+  return {
+    id: f.id,
+    plan_id: f.planId,
+    plan_row_id: f.planRowId,
+    jenis: f.jenis,
+    detail: f.detail,
+    ack_spv_oleh: f.ackSpvOleh,
+    ack_spv_pada: f.ackSpvPada,
+  };
+}
+
+/**
+ * The whole period bundle a Plan page renders in one load (Section P-A…P-G).
+ * Serves `plan.ts::PlanDetail`. Every child list crosses its own named converter
+ * so shape-parity follows each nested interface — a raw domain child here would
+ * be the O43 blank-page bug one level down.
+ */
+export interface PlanDetailWire {
+  plan: PlanWire;
+  targets: PlanTargetWire[];
+  rows: PlanRowWire[];
+  weeks: PlanRowWeekWire[];
+  actuals: PlanActualWire[];
+  review: PlanReviewWire | null;
+  flags: PlanFlagWire[];
+  defisit_terbawa: number;
+}
+
+export function planDetailToWire(d: plan.PlanDetail): PlanDetailWire {
+  return {
+    plan: planToWire(d.plan),
+    targets: d.targets.map(planTargetToWire),
+    rows: d.rows.map(planRowToWire),
+    weeks: d.weeks.map(planRowWeekToWire),
+    actuals: d.actuals.map(planActualToWire),
+    review: d.review === null ? null : planReviewToWire(d.review),
+    flags: d.flags.map(planFlagToWire),
+    defisit_terbawa: d.defisitTerbawa,
+  };
+}
+
 // ===========================================================================
 // Module 6A — Vendor (VND-) and Strategi (STRG-).
 // ===========================================================================
