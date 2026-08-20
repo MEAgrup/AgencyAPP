@@ -307,6 +307,11 @@ export async function createReport(sql: Sql, actor: Actor, clientId: string, inp
     const gmvKotor = round2(result.M.kpi.gmvKotor);
     const runrate = round2(report.gmvRunRateBulanan(result.M.kpi.gmv, input.periodeTipe, hari));
 
+    // House invariant (DECISIONS 2026-08-20 — "buang raw, simpan hasil"): the raw
+    // upload rows (`input.files[].aoa`) are TRANSIENT — read once to run the engine,
+    // then dropped. We persist ONLY the derived `payload` + per-file provenance
+    // metadata (name/sha256/size/rows, never the bytes), so no analysis upload ever
+    // accumulates storage. Same rule as Riset Awal baseline (RAB-04).
     // INSERT the report. A duplicate (toko × tipe × rentang) is a conflict, never
     // a silent overwrite (the row is immutable — revision = a new row).
     let reportId: number;

@@ -22,7 +22,7 @@
  *     and only then lights the "Submit riset awal" button.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { errorMessage } from '@/lib/api';
 import {
   RISET_AWAL_STATUS,
@@ -691,34 +691,42 @@ function KonfirmasiGrid({
   canWrite: boolean;
   onReload: () => Promise<void>;
 }) {
-  // Rebuild the local draft whenever the server rows change (a fresh baseline
-  // submit adds new proposals). Keyed by section+field_key.
+  // Local draft, keyed by section+field_key. The PERSISTED truth is always the
+  // `isian` prop (server state); the draft is only the in-progress edit buffer.
   const [draft, setDraft] = useState<Record<string, DraftIsian>>({});
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false); // an unsaved value correction is pending
   const [err, setErr] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  // In-flight save guard: while a save runs we must NOT rebuild the draft from
+  // the server, or the reload our own save triggers would clobber a box the AM
+  // just ticked. A ref (not state) because the rebuild effect keys off `signature`.
+  const savingRef = useRef(0);
 
-  const signature = isian.map((f) => `${f.section}.${f.field_key}:${f.nilai_uang ?? ''}/${f.nilai_angka ?? ''}/${f.dikonfirmasi}`).join('|');
+  const signature = isian
+    .map((f) => `${f.section}.${f.field_key}:${f.nilai_uang ?? ''}/${f.nilai_angka ?? ''}/${f.dikonfirmasi}`)
+    .join('|');
+  // Rebuild the draft when the server rows change (a fresh baseline submit adds
+  // new proposals; our own save reloads them confirmed). Skipped mid-save so a
+  // reload cannot overwrite an in-progress tick.
   useEffect(() => {
+    if (savingRef.current > 0) return;
     const next: Record<string, DraftIsian> = {};
     for (const f of isian) {
       const raw = isMoneyIsian(f) ? minorToRupiah(f.nilai_uang) : f.nilai_angka == null ? '' : String(f.nilai_angka);
       next[`${f.section}.${f.field_key}`] = { raw, dikonfirmasi: f.dikonfirmasi };
     }
     setDraft(next);
+    setDirty(false);
     // signature captures the meaningful content of `isian`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature]);
 
-  const patch = (k: string, p: Partial<DraftIsian>) => setDraft((d) => ({ ...d, [k]: { ...d[k], ...p } }));
-
-  const save = async () => {
-    setSaving(true);
-    setErr(null);
-    try {
-      const items: ConfirmIsianItemWire[] = isian.map((f) => {
+  const buildItems = useCallback(
+    (source: Record<string, DraftIsian>): ConfirmIsianItemWire[] =>
+      isian.map((f) => {
         const k = `${f.section}.${f.field_key}`;
-        const d = draft[k] ?? { raw: '', dikonfirmasi: false };
+        const d = source[k] ?? { raw: '', dikonfirmasi: false };
         const money = isMoneyIsian(f);
         const minor = money ? rupiahToMinor(d.raw) : null;
         return {
@@ -729,30 +737,60 @@ function KonfirmasiGrid({
           nilai_uang: money ? (minor == null ? null : minor.toString()) : null,
           dikonfirmasi: d.dikonfirmasi,
         };
-      });
-      await confirmBaselineIsian(interviewId, items);
-      await onReload();
-      setSavedAt(new Date().toLocaleTimeString('id-ID'));
-    } catch (e) {
-      setErr(errorMessage(e));
-    } finally {
-      setSaving(false);
-    }
-  };
+      }),
+    [isian],
+  );
 
-  const allConfirmed = isian.every((f) => draft[`${f.section}.${f.field_key}`]?.dikonfirmasi);
+  // Persist the given draft. Confirmation now saves the instant the AM ticks a
+  // box (keputusan 1 still holds — the AM is the one confirming) so the submit
+  // gate, which reads the SERVER state, clears without a hidden second click.
+  // That two-step trap is the QA-2026-08-20 "sudah upload tapi tidak bisa submit".
+  const persist = useCallback(
+    async (source: Record<string, DraftIsian>) => {
+      savingRef.current += 1;
+      setSaving(true);
+      setErr(null);
+      try {
+        await confirmBaselineIsian(interviewId, buildItems(source));
+        setDirty(false);
+        setSavedAt(new Date().toLocaleTimeString('id-ID'));
+        await onReload();
+      } catch (e) {
+        setErr(errorMessage(e));
+      } finally {
+        savingRef.current -= 1;
+        setSaving(false);
+      }
+    },
+    [interviewId, buildItems, onReload],
+  );
+
+  const patch = (k: string, p: Partial<DraftIsian>) => setDraft((d) => ({ ...d, [k]: { ...d[k], ...p } }));
+
+  // The status reflects the SERVER-persisted state, never the unsaved draft —
+  // showing "semua terkonfirmasi" off the local draft is exactly what let the AM
+  // believe they could submit while the gate still saw unconfirmed rows.
+  const serverAllConfirmed = isian.length > 0 && isian.every((f) => f.dikonfirmasi);
+  const status = saving
+    ? 'menyimpan…'
+    : dirty
+      ? 'koreksi belum disimpan'
+      : serverAllConfirmed
+        ? 'semua terkonfirmasi'
+        : 'wajib dikonfirmasi sebelum submit';
 
   return (
     <div className="stack" style={{ gap: 8, marginTop: 14 }}>
       <div className="cardHeader" style={{ marginBottom: 0 }}>
         Konfirmasi angka terisi otomatis
         <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>
-          {allConfirmed ? 'semua terkonfirmasi' : 'wajib dikonfirmasi sebelum submit'}
+          {status}
         </span>
       </div>
       <p className="muted" style={{ fontSize: 12, margin: 0 }}>
         Angka usulan berasal dari baseline. Koreksi bila berbeda dari kenyataan, lalu centang untuk konfirmasi — bug
-        parser tidak boleh menggeser skor sampai manusia mengonfirmasi (keputusan 1).
+        parser tidak boleh menggeser skor sampai manusia mengonfirmasi (keputusan 1). Centangan langsung tersimpan;
+        koreksi angka tekan <strong>Simpan koreksi</strong>.
       </p>
       {err && <div className="alert alertError" style={{ fontSize: 13 }}>{err}</div>}
       <table className="table" style={{ fontSize: 13 }}>
@@ -784,7 +822,10 @@ function KonfirmasiGrid({
                     value={d.raw}
                     disabled={!canWrite || saving}
                     placeholder={money ? 'Rupiah' : ''}
-                    onChange={(e) => patch(k, { raw: e.target.value })}
+                    onChange={(e) => {
+                      patch(k, { raw: e.target.value });
+                      setDirty(true);
+                    }}
                     style={{ maxWidth: 160 }}
                   />
                 </td>
@@ -794,7 +835,13 @@ function KonfirmasiGrid({
                     type="checkbox"
                     checked={d.dikonfirmasi}
                     disabled={!canWrite || saving}
-                    onChange={(e) => patch(k, { dikonfirmasi: e.target.checked })}
+                    onChange={(e) => {
+                      // A tick includes any pending correction in the same row, so
+                      // the confirmed value is the corrected one — then persists at once.
+                      const next = { ...draft, [k]: { ...d, dikonfirmasi: e.target.checked } };
+                      setDraft(next);
+                      void persist(next);
+                    }}
                     aria-label={`Konfirmasi ${f.field_key}`}
                   />
                 </td>
@@ -805,10 +852,12 @@ function KonfirmasiGrid({
       </table>
       {canWrite && (
         <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-          <button type="button" className="btn btnSecondary btnSm" disabled={saving} onClick={save}>
-            {saving ? 'Menyimpan…' : 'Simpan konfirmasi'}
+          {/* Only needed for a value correction typed AFTER a box was already
+              ticked — a tick itself already saves. Disabled until there is something to save. */}
+          <button type="button" className="btn btnSecondary btnSm" disabled={saving || !dirty} onClick={() => void persist(draft)}>
+            {saving ? 'Menyimpan…' : 'Simpan koreksi'}
           </button>
-          {savedAt && <span className="muted" style={{ fontSize: 12 }}>Tersimpan {savedAt}</span>}
+          {savedAt && !dirty && !saving && <span className="muted" style={{ fontSize: 12 }}>Tersimpan {savedAt}</span>}
         </div>
       )}
     </div>

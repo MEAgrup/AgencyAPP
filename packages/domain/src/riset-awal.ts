@@ -443,6 +443,12 @@ export async function submitBaseline(sql: Sql, actor: Actor, id: string, input: 
       berkasRows = input.sumberBerkas ?? [];
     }
 
+    // House invariant (DECISIONS 2026-08-20 — "buang raw, simpan hasil"): the raw
+    // upload rows (`analisa.files[].aoa`) are TRANSIENT — read once to run the
+    // engine above, then dropped. We persist ONLY the derived engine `payload`
+    // plus per-file provenance metadata (name/sha256/size/rows, never the bytes),
+    // so no analysis upload ever accumulates storage. Applies to every
+    // analysis-upload flow (this + Laporan Klien C1).
     const inserted = await tx<{ id: number }[]>`
       insert into riset_awal_analisa
         (interview_id, client_platform_id, platform, metode_baseline, periode_referensi,
