@@ -72,7 +72,10 @@ const CLI = 'CLI-ZZI-0001';
 const CLI_RESUME = 'CLI-ZZI-0002';
 // A Shopee-only client for the RAB-07 anti-deadlock case (no analysis engine).
 const CLI_SHOPEE = 'CLI-ZZI-0003';
-const ALL_CLI = [CLI, CLI_RESUME, CLI_SHOPEE];
+// A client WITH a positive Target GMV, used only by the B1-5/B6-3 authority test
+// (QA 2026-08-20) — target_gmv > 0 is what makes B6-3 auto-fill from client data.
+const CLI_TARGET = 'CLI-ZZI-0004';
+const ALL_CLI = [CLI, CLI_RESUME, CLI_SHOPEE, CLI_TARGET];
 const created: string[] = [];
 
 afterAll(async () => {
@@ -764,6 +767,45 @@ dDb('RAB-06 — riset awal scored inputs are server-authoritative', () => {
     expect(k4.skorKualifikasi).toBe(k5.skorKualifikasi);
     expect(k4.skorPerBlok).toEqual(k5.skorPerBlok);
     expect(k4.verdictKualifikasi).toBe(k5.verdictKualifikasi);
+  });
+
+  it('confirmed B1-5/B6-3 (omzet + target 3 bulan) drive C-E1, overriding a divergent body (QA 2026-08-20)', async () => {
+    // A client whose Target GMV is Rp100jt/bln → B6-3 auto-fills to Rp300jt (× 3).
+    await sql`
+      insert into clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, assigned_am_id, created_by)
+      values (${CLI_TARGET}, 'PIC', 'Toko', 'Jakarta', 'https://t.example', 'Fashion', 0, 100000000,
+              'EMP-0006', 'EMP-0006', 'EMP-0001', 'EMP-0001')
+      on conflict (id) do update set target_gmv = excluded.target_gmv`;
+    const d = await interview.createInterview(sql, OWNER, { clientId: CLI_TARGET, salesClosingId: 'EMP-0006' });
+    created.push(d.interview.id);
+    const id = d.interview.id;
+
+    // seedManualBaseline (gmvBulan Rp5jt) proposes B1-5 = Rp15jt; the client's Target
+    // GMV proposes B6-3 = Rp300jt. Confirm BOTH to those baseline values.
+    await seedManualBaseline(OWNER, id, CLI_TARGET);
+    const view = await getBaseline(sql, OWNER, id);
+    const b15 = view.isian.find((f) => f.fieldKey === 'B1-5')!;
+    const b63 = view.isian.find((f) => f.fieldKey === 'B6-3')!;
+    expect(b15.nilaiUang).toBe('1500000000'); // Rp15jt (5jt × 3)
+    expect(b63.sumber).toBe('sales');
+    expect(b63.nilaiUang).toBe('30000000000'); // Rp300jt (100jt × 3)
+    await confirmIsian(sql, OWNER, id, [
+      { section: 'B2', fieldKey: 'B2-9', nilaiUang: '20000000', dikonfirmasi: true },
+      { section: 'B2', fieldKey: 'B2-3', nilaiAngka: 40, dikonfirmasi: true },
+      { section: 'B1', fieldKey: 'B1-5', nilaiUang: '1500000000', dikonfirmasi: true },
+      { section: 'B6', fieldKey: 'B6-3', nilaiUang: '30000000000', dikonfirmasi: true },
+    ]);
+
+    // Score with a body carrying a DIFFERENT, harmless-looking ratio (100jt→150jt =
+    // 1.5×). The confirmed baseline is 300jt / 15jt = 20× — far past the >5× deal-
+    // breaker line. If the body won, the verdict would not be tidak_siap; the merge
+    // makes the confirmed numbers win, so rasio_target_terlalu_tinggi fires.
+    const k = await interview.scoreInterview(sql, OWNER, id, baseScoreInput({ aov: 20_000_000n, skuSiap: 40 }));
+    expect(k.rasioTarget).toBe(20);
+    expect(k.verdictKualifikasi).toBe('tidak_siap');
+    expect(Array.isArray(k.hambatanMendasar)).toBe(true);
+    expect((k.hambatanMendasar as Array<{ kode: string }>).some((h) => h.kode === 'rasio_target_terlalu_tinggi')).toBe(true);
   });
 });
 

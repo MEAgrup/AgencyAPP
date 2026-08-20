@@ -670,9 +670,10 @@ interface DraftIsian {
   dikonfirmasi: boolean;
 }
 
-/** Is this an auto-filled money field? (B2-9 AOV.) Others are counts. */
+/** Is this an auto-filled money field? (B2-9 AOV, B1-5 omzet, B6-3 target.)
+ *  Others (B2-3 SKU) are counts. */
 function isMoneyIsian(f: RisetAwalIsian): boolean {
-  return f.nilai_uang != null || f.field_key === 'B2-9';
+  return f.nilai_uang != null || f.field_key === 'B2-9' || f.field_key === 'B1-5' || f.field_key === 'B6-3';
 }
 
 function isianDisplay(f: RisetAwalIsian): string {
