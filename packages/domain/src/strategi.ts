@@ -1863,7 +1863,28 @@ export async function getStrategiPrefill(
     detail.kualifikasi.verdictKualifikasi as iv.Verdict,
     answers,
   );
-  return { ...prefill, interviewId: chosen.id };
+
+  // A-1 kategori: the client record already carries `kategori`, entered by sales
+  // at intake, so offer it as an A-1 suggestion too — the owner's "jangan ketik
+  // ulang kategori" (QA 2026-08-20 §3.A). Sourced from `clients`, not the
+  // interview. Deduped: if the Interview's B2-1 (brand & kategori) already produced
+  // an A-1 suggestion, that richer answer wins and this fallback is not added, so
+  // the panel never shows two A-1 rows.
+  const items = [...prefill.items];
+  if (!items.some((it) => it.strategiField === 'A-1')) {
+    const client = await sql<{ kategori: string | null }[]>`
+      select kategori from clients where id = ${head.clientId}`;
+    const kategori = client[0]?.kategori?.trim();
+    if (kategori) {
+      items.push({
+        interviewField: 'klien.kategori',
+        strategiField: 'A-1',
+        catatan: 'kategori dari data klien (sales)',
+        nilai: kategori,
+      });
+    }
+  }
+  return { ...prefill, items, interviewId: chosen.id };
 }
 
 // ---------------------------------------------------------------------------

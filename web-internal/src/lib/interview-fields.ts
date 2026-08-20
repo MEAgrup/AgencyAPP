@@ -240,6 +240,21 @@ export const INTERVIEW_FIELDS: FieldSpec[] = [
   { section: 'B7', fieldKey: 'B7-3', label: 'Kesiapan akses (toko, iklan, dashboard)', tipe: 'enum', drives: 'C-D3', scored: true, enumOptions: KESIAPAN_AKSES_OPTIONS },
   { section: 'B7', fieldKey: 'B7-6', label: 'Kecepatan approval', tipe: 'enum', drives: 'C-D2', scored: true, enumOptions: KECEPATAN_APPROVAL_OPTIONS },
   { section: 'B7', fieldKey: 'B7-9', label: 'Prasyarat dari klien (mis. data, aset, akses)', tipe: 'teks', drives: 'Prasyarat · Strategi C-7', scored: false },
+
+  // --- Konteks Section A yang dipindah ke Interview (QA pemilik 2026-08-20 §3.A) ---
+  // Enam field deskriptif Section A Strategi kini DITANGKAP di sini, supaya AM tidak
+  // mengetik ulang di Strategi (jembatan `PREFILL_MAPPING` sudah memetakan tiap
+  // fieldKey → A-n; begitu diisi, `InterviewPrefillPanel` di Strategi memunculkannya).
+  // Semua NON-SCORED free-text: scorer/verdict tak membacanya. Tanpa migrasi —
+  // `interview_answer` menyimpan (section, field_key) apa pun. Bentuk read-only +
+  // pencabutan gerbang di sisi Strategi = PR lanjutan (butuh keputusan bentuk field
+  // USP/decision-maker + dampak snapshot). Lihat DECISIONS.md 2026-08-20 §3.A.
+  { section: 'B1', fieldKey: 'B1-8', label: 'Titik kirim / origin pengiriman (kota gudang) — A-8', tipe: 'teks', drives: 'Strategi A-8 (fulfillment)', scored: false, hint: 'Dasar hitung ongkir & subsidi platform. Ditarik ke Strategi Section A.' },
+  { section: 'B1', fieldKey: 'B1-9', label: 'Riwayat agensi sebelumnya — apa yang gagal & kenapa (A-10)', tipe: 'teks', drives: 'Strategi A-10 (hard-internal)', scored: false, hint: 'Hard-internal — tidak pernah dibagikan ke klien.' },
+  { section: 'B2', fieldKey: 'B2-1', label: 'Nama brand & kategori utama (A-1)', tipe: 'teks', drives: 'Strategi A-1', scored: false, hint: 'Kategori juga di-prefill dari data klien (sales).' },
+  { section: 'B3', fieldKey: 'B3-1', label: 'USP produk — alasan orang beli, bukan kompetitor (A-5)', tipe: 'teks', drives: 'Strategi A-5', scored: false, hint: 'Tulis minimal 3 alasan (satu per baris).' },
+  { section: 'B7', fieldKey: 'B7-1', label: 'Aset dari klien — foto, video, sampel, katalog, budget iklan, host live (A-14)', tipe: 'teks', drives: 'Strategi A-14', scored: false },
+  { section: 'B7', fieldKey: 'B7-5', label: 'Decision maker — nama, jabatan PIC, siapa yang berhak approve, jalur eskalasi (A-12)', tipe: 'teks', drives: 'Strategi A-12', scored: false },
 ];
 
 /** The client prerequisite question — surfaced on the client print view. */

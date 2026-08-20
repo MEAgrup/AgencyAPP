@@ -3589,6 +3589,48 @@ describeDb('getStrategiPrefill — Interview → Strategi bridge (RAB-09)', () =
     const s = await createStrategi(sql, am(), serviceId, HEADER);
     await expect(getStrategiPrefill(sql, otherAm(), s.id)).rejects.toThrow(ForbiddenError);
   });
+
+  // §3.A (owner QA 2026-08-20) — the six Section A descriptive fields are now
+  // captured in the Interview form (interview-fields.ts), so the bridge surfaces
+  // them mapped to A-1/A-5/A-8/A-10/A-12/A-14. This is the prerequisite that made
+  // "Section A → Interview" possible: before it, these keys were never collected.
+  it('surfaces the captured Section A fields, and A-1 wins over the client-kategori fallback', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    // Capture the moved Section A fields on that same interview.
+    await interview.saveAnswers(sql, am(), interviewId, [
+      { section: 'B2', fieldKey: 'B2-1', nilaiTeks: 'AlphaGlow · Home Living' },
+      { section: 'B3', fieldKey: 'B3-1', nilaiTeks: 'awet\ngaransi\nharga jujur' },
+      { section: 'B1', fieldKey: 'B1-8', nilaiTeks: 'Bandung' },
+      { section: 'B1', fieldKey: 'B1-9', nilaiTeks: 'agensi lama fokus iklan, listing tak pernah dibenahi' },
+      { section: 'B7', fieldKey: 'B7-1', nilaiTeks: 'foto produk, sampel, budget iklan' },
+      { section: 'B7', fieldKey: 'B7-5', nilaiTeks: 'Owner (Rani), approve sendiri, eskalasi ke owner' },
+    ]);
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const prefill = await getStrategiPrefill(sql, am(), s.id);
+    const by = (f: string) => prefill!.items.find((i) => i.strategiField === f);
+    expect(by('A-1')?.interviewField).toBe('B2-1'); // the interview answer, not the fallback
+    expect(by('A-1')?.nilai).toContain('AlphaGlow');
+    expect(by('A-5')?.nilai).toContain('garansi');
+    expect(by('A-8')?.nilai).toBe('Bandung');
+    expect(by('A-10')?.nilai).toContain('listing');
+    expect(by('A-14')?.nilai).toContain('sampel');
+    expect(by('A-12')?.nilai).toContain('Rani');
+  });
+
+  it('falls back to clients.kategori for A-1 when the interview has no B2-1', async () => {
+    const serviceId = await seedService(); // client kategori = 'Home Living'
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    await seedScoredInterview(clientId); // seeds B2-8/B6-2 only, no B2-1
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const prefill = await getStrategiPrefill(sql, am(), s.id);
+    const a1 = prefill!.items.find((i) => i.strategiField === 'A-1');
+    expect(a1?.interviewField).toBe('klien.kategori');
+    expect(a1?.nilai).toBe('Home Living');
+  });
 });
 
 // ---------------------------------------------------------------------------
