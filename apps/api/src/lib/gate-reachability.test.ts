@@ -70,19 +70,18 @@ const DOORS: Readonly<Record<string, string>> = {
   // except the A-15 access matrix, which is per channel and has its own table.
   // A-11 and A-14 are the O58 list-XOR-"tidak ada" pair; the flag rides the same
   // body as the list, so they share the door.
-  'A-1': 'saveStrategiKonteks',
+  // A-1, A-5, A-8, A-10, A-12 moved to the Interview form and are no longer gated
+  // in Strategi — owner QA 2026-08-20 (Fase 2 §3.A), DECISIONS.md. A-7 (plafon)
+  // retired earlier (same date). Their rows are removed so the "DOORS free of stale
+  // rows" guard stays green; `saveStrategiKonteks` stays open via the rows below.
   'A-2': 'saveStrategiKonteks',
   'A-3': 'saveStrategiKonteks',
   'A-4': 'saveStrategiKonteks',
-  'A-5': 'saveStrategiKonteks',
   'A-6': 'saveStrategiKonteks',
-  // A-7 (plafon) retired as a gated field — DECISIONS.md 2026-08-20.
-  'A-8': 'saveStrategiKonteks',
   'A-9': 'saveStrategiKonteks',
-  'A-10': 'saveStrategiKonteks',
   'A-11': 'saveStrategiKonteks',
-  'A-12': 'saveStrategiKonteks',
   'A-13': 'saveStrategiKonteks',
+  // A-14 (aset) stays gated — the owner kept it as the Strategi checklist.
   'A-14': 'saveStrategiKonteks',
   'A-15': 'saveStrategiAkses',
 

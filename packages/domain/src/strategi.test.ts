@@ -61,7 +61,6 @@ import {
   MSG_TOP_SKU_REQUIRED,
   MSG_URUTAN_EKSEKUSI_REQUIRED,
   MSG_TRAFFIC_MIX_SUM,
-  MSG_USP_MIN,
   FLOOR_DISETUJUI_HEAD,
   FLOOR_INPUT_AM,
   STRATEGI_AKTIF,
@@ -1382,13 +1381,14 @@ describeDb('checkCompleteness — every unmet rule, not the first one', () => {
     // longer appears here even on a wholly empty draft.
     expect(codes).not.toContain('E-11');
     expect(codes).toContain('H-1'); // three risks
-    // A-05: every Section A answer is required, and the kode names which one so
-    // the form can jump to it rather than saying "something is missing".
-    expect(codes).toContain('A-1');
+    // A-05: the Section A answers still gated name which one is missing. A-1, A-5,
+    // A-8, A-10, A-12 are NO LONGER gated — they moved to the Interview (owner QA
+    // 2026-08-20 §3.A), so they must not appear here.
     expect(codes).toContain('A-9');
-    expect(codes).toContain('A-12');
     expect(codes).toContain('A-13');
-    expect(missing.find((m) => m.kode === 'A-5')?.pesan).toBe(MSG_USP_MIN);
+    for (const moved of ['A-1', 'A-5', 'A-8', 'A-10', 'A-12']) {
+      expect(codes).not.toContain(moved);
+    }
     // A-07 Section C: zero channels → no C-1 per channel, but C-5/C-6/C-7 fire.
     expect(codes).toContain('C-5'); // no quick wins yet
     expect(codes).toContain('C-6'); // no structural risks yet
@@ -3594,14 +3594,14 @@ describeDb('getStrategiPrefill — Interview → Strategi bridge (RAB-09)', () =
   // captured in the Interview form (interview-fields.ts), so the bridge surfaces
   // them mapped to A-1/A-5/A-8/A-10/A-12/A-14. This is the prerequisite that made
   // "Section A → Interview" possible: before it, these keys were never collected.
-  it('surfaces the captured Section A fields, and A-1 wins over the client-kategori fallback', async () => {
-    const serviceId = await seedService();
+  it('surfaces the captured Section A fields, with A-1 carrying BOTH brand (B2-1) and client kategori', async () => {
+    const serviceId = await seedService(); // client kategori = 'Home Living'
     const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
       select client_id from services where id = ${serviceId}`;
     const { interviewId } = await seedScoredInterview(clientId);
     // Capture the moved Section A fields on that same interview.
     await interview.saveAnswers(sql, am(), interviewId, [
-      { section: 'B2', fieldKey: 'B2-1', nilaiTeks: 'AlphaGlow · Home Living' },
+      { section: 'B2', fieldKey: 'B2-1', nilaiTeks: 'AlphaGlow' },
       { section: 'B3', fieldKey: 'B3-1', nilaiTeks: 'awet\ngaransi\nharga jujur' },
       { section: 'B1', fieldKey: 'B1-8', nilaiTeks: 'Bandung' },
       { section: 'B1', fieldKey: 'B1-9', nilaiTeks: 'agensi lama fokus iklan, listing tak pernah dibenahi' },
@@ -3611,8 +3611,11 @@ describeDb('getStrategiPrefill — Interview → Strategi bridge (RAB-09)', () =
     const s = await createStrategi(sql, am(), serviceId, HEADER);
     const prefill = await getStrategiPrefill(sql, am(), s.id);
     const by = (f: string) => prefill!.items.find((i) => i.strategiField === f);
-    expect(by('A-1')?.interviewField).toBe('B2-1'); // the interview answer, not the fallback
-    expect(by('A-1')?.nilai).toContain('AlphaGlow');
+    // A-1 now rides two items: brand from B2-1, kategori from the client record.
+    const brand = prefill!.items.find((i) => i.strategiField === 'A-1' && i.interviewField === 'B2-1');
+    const kategori = prefill!.items.find((i) => i.strategiField === 'A-1' && i.interviewField === 'klien.kategori');
+    expect(brand?.nilai).toBe('AlphaGlow');
+    expect(kategori?.nilai).toBe('Home Living');
     expect(by('A-5')?.nilai).toContain('garansi');
     expect(by('A-8')?.nilai).toBe('Bandung');
     expect(by('A-10')?.nilai).toContain('listing');
@@ -3620,16 +3623,19 @@ describeDb('getStrategiPrefill — Interview → Strategi bridge (RAB-09)', () =
     expect(by('A-12')?.nilai).toContain('Rani');
   });
 
-  it('falls back to clients.kategori for A-1 when the interview has no B2-1', async () => {
+  it('always offers clients.kategori as an A-1 item (its own line, even with no B2-1)', async () => {
     const serviceId = await seedService(); // client kategori = 'Home Living'
     const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
       select client_id from services where id = ${serviceId}`;
     await seedScoredInterview(clientId); // seeds B2-8/B6-2 only, no B2-1
     const s = await createStrategi(sql, am(), serviceId, HEADER);
     const prefill = await getStrategiPrefill(sql, am(), s.id);
-    const a1 = prefill!.items.find((i) => i.strategiField === 'A-1');
-    expect(a1?.interviewField).toBe('klien.kategori');
-    expect(a1?.nilai).toBe('Home Living');
+    const kategori = prefill!.items.find(
+      (i) => i.strategiField === 'A-1' && i.interviewField === 'klien.kategori',
+    );
+    expect(kategori?.nilai).toBe('Home Living');
+    // No B2-1 answered → no brand A-1 item.
+    expect(prefill!.items.some((i) => i.strategiField === 'A-1' && i.interviewField === 'B2-1')).toBe(false);
   });
 });
 

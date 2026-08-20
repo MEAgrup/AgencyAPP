@@ -131,6 +131,8 @@ import {
   getBaselinePrefill,
   getStrategi,
   getStrategiPrefill,
+  inheritedKonteksOf,
+  INHERITED_KONTEKS_FIELDS,
   openStrategiRevision,
   raiseStrategiSanggahan,
   returnStrategi,
@@ -652,10 +654,23 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
             <div style={{ marginTop: 12 }}>
               {active === 'A' && (
                 <>
-                  {prefill && <InterviewPrefillPanel prefill={prefill} />}
+                  {/* The moved fields (A-1/A-5/A-8/A-10/A-12) render read-only in
+                      Section A itself; drop them from the advisory panel so it
+                      does not also tell the AM to "copy" what is now inherited. */}
+                  {prefill && (
+                    <InterviewPrefillPanel
+                      prefill={{
+                        ...prefill,
+                        items: prefill.items.filter(
+                          (it) => !INHERITED_KONTEKS_FIELDS.includes(it.strategi_field as never),
+                        ),
+                      }}
+                    />
+                  )}
                   <SectionA
                     detail={detail}
                     draft={drafts.konteks}
+                    inherited={inheritedKonteksOf(prefill)}
                     onChange={(p) => patch('konteks', { ...drafts.konteks, ...p })}
                     disabled={!editable}
                   />

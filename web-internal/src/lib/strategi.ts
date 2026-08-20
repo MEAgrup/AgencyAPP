@@ -925,6 +925,47 @@ export interface StrategiPrefill {
   items: StrategiPrefillItem[];
 }
 
+/**
+ * The five Section A fields that moved to the Interview form (QA §3.A 2026-08-20):
+ * A-1 (brand + kategori), A-5 (USP), A-8 (titik kirim), A-10 (riwayat agensi),
+ * A-12 (decision maker). Strategi shows them READ-ONLY; this is where the values
+ * come from — the Interview answers surfaced by `getStrategiPrefill`. `kategori`
+ * rides the `klien.kategori` item (client record), `namaBrand` the `B2-1` item;
+ * the rest map by their `strategi_field`. A-14 (aset) is NOT here — it stayed the
+ * editable Strategi checklist.
+ */
+export interface InheritedKonteks {
+  namaBrand: string | null;
+  kategori: string | null;
+  usp: string | null;
+  titikKirim: string | null;
+  riwayatAgensi: string | null;
+  decisionMaker: string | null;
+}
+
+/** Field IDs whose Strategi editor is now a read-only mirror of the Interview. */
+export const INHERITED_KONTEKS_FIELDS = ['A-1', 'A-5', 'A-8', 'A-10', 'A-12'] as const;
+
+/** Projects the prefill items into the read-only Section A values, or all-null. */
+export function inheritedKonteksOf(prefill: StrategiPrefill | null): InheritedKonteks {
+  const pick = (sf: string): string | null =>
+    prefill?.items.find((it) => it.strategi_field === sf)?.nilai ?? null;
+  const brand = prefill?.items.find(
+    (it) => it.strategi_field === 'A-1' && it.interview_field !== 'klien.kategori',
+  )?.nilai ?? null;
+  const kategori = prefill?.items.find(
+    (it) => it.strategi_field === 'A-1' && it.interview_field === 'klien.kategori',
+  )?.nilai ?? null;
+  return {
+    namaBrand: brand,
+    kategori,
+    usp: pick('A-5'),
+    titikKirim: pick('A-8'),
+    riwayatAgensi: pick('A-10'),
+    decisionMaker: pick('A-12'),
+  };
+}
+
 // Riset awal baseline → Section B channel prefill (RAB-11 / RAB-12). Suggestions
 // the AM may accept into Section B; keys are snake_case — the wire body verbatim.
 export interface StrategiBaselineMonthSuggestion {

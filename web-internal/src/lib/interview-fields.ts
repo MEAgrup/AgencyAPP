@@ -251,7 +251,7 @@ export const INTERVIEW_FIELDS: FieldSpec[] = [
   // USP/decision-maker + dampak snapshot). Lihat DECISIONS.md 2026-08-20 §3.A.
   { section: 'B1', fieldKey: 'B1-8', label: 'Titik kirim / origin pengiriman (kota gudang) — A-8', tipe: 'teks', drives: 'Strategi A-8 (fulfillment)', scored: false, hint: 'Dasar hitung ongkir & subsidi platform. Ditarik ke Strategi Section A.' },
   { section: 'B1', fieldKey: 'B1-9', label: 'Riwayat agensi sebelumnya — apa yang gagal & kenapa (A-10)', tipe: 'teks', drives: 'Strategi A-10 (hard-internal)', scored: false, hint: 'Hard-internal — tidak pernah dibagikan ke klien.' },
-  { section: 'B2', fieldKey: 'B2-1', label: 'Nama brand & kategori utama (A-1)', tipe: 'teks', drives: 'Strategi A-1', scored: false, hint: 'Kategori juga di-prefill dari data klien (sales).' },
+  { section: 'B2', fieldKey: 'B2-1', label: 'Nama brand (A-1)', tipe: 'teks', drives: 'Strategi A-1', scored: false, hint: 'Kategori otomatis dari data klien (sales) — cukup isi nama brand di sini.' },
   { section: 'B3', fieldKey: 'B3-1', label: 'USP produk — alasan orang beli, bukan kompetitor (A-5)', tipe: 'teks', drives: 'Strategi A-5', scored: false, hint: 'Tulis minimal 3 alasan (satu per baris).' },
   { section: 'B7', fieldKey: 'B7-1', label: 'Aset dari klien — foto, video, sampel, katalog, budget iklan, host live (A-14)', tipe: 'teks', drives: 'Strategi A-14', scored: false },
   { section: 'B7', fieldKey: 'B7-5', label: 'Decision maker — nama, jabatan PIC, siapa yang berhak approve, jalur eskalasi (A-12)', tipe: 'teks', drives: 'Strategi A-12', scored: false },

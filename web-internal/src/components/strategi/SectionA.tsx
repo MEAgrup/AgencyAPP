@@ -19,8 +19,15 @@
  * yet. The form offers a "tidak ada" checkbox as the explicit way to answer
  * "none exists". The submit gate (`checkCompleteness`) reads the flag, not the
  * list length.
+ *
+ * **A-1, A-5, A-8, A-10, A-12 are READ-ONLY here (QA §3.A 2026-08-20).** They
+ * moved to the Interview form; Strategi shows them read-only from the inherited
+ * values (`inherited`, derived from `getStrategiPrefill`) and no longer gates
+ * them. The AM edits them in the Interview, not here. A-14 (aset) deliberately
+ * stayed the editable checklist below — the owner kept it in Strategi.
  */
 
+import type { ReactNode } from 'react';
 import RepeatList from './RepeatList';
 import {
   ACCESS_KINDS,
@@ -28,12 +35,12 @@ import {
   BUSINESS_MODELS,
   PRICE_POSITIONS,
   STOCK_CAPACITIES,
-  USP_MIN,
   type AccessChannel,
   type AccessKind,
   type AccessState,
   type BusinessModel,
   type ClientAsset,
+  type InheritedKonteks,
   type PricePosition,
   type StockCapacity,
   type StrategiAkses,
@@ -229,17 +236,66 @@ const ACCESS_STATE_LABELS: Record<AccessState, string> = {
 
 // ---- Component ------------------------------------------------------------
 
+/**
+ * One read-only Section A field, mirrored from the Interview. Shows the inherited
+ * value (or a stored legacy value as fallback), or a muted "isi di Interview"
+ * prompt when neither exists. `badge` carries A-10's hard-internal marker.
+ */
+function InterviewMirror({
+  title,
+  value,
+  badge,
+}: {
+  title: ReactNode;
+  value: string | null;
+  badge?: ReactNode;
+}) {
+  return (
+    <div className="card">
+      <div className="cardHeader" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span>{title}</span>
+        {badge}
+        <span style={{ flex: 1 }} />
+        <span className="badge badge-gray" style={{ fontWeight: 400 }}>dari Interview</span>
+      </div>
+      {value && value.trim() !== '' ? (
+        <p style={{ whiteSpace: 'pre-wrap', margin: '4px 0 0', fontSize: 14 }}>{value}</p>
+      ) : (
+        <p className="muted" style={{ fontSize: 13, margin: '4px 0 0' }}>
+          Belum diisi — isi di modul Interview (lihat panel &ldquo;Dari Interview&rdquo; di atas).
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function SectionA({
   detail,
   draft,
+  inherited,
   onChange,
   disabled,
 }: {
   detail: StrategiDetail;
   draft: KonteksDraft;
+  /** Read-only A-1/A-5/A-8/A-10/A-12 values inherited from the Interview (§3.A). */
+  inherited: InheritedKonteks;
   onChange: (patch: Partial<KonteksDraft>) => void;
   disabled: boolean;
 }) {
+  // Legacy Strategi rows filled Section A before the fields moved; fall back to the
+  // stored value so their content still shows read-only when no interview supplies it.
+  const brand = inherited.namaBrand ?? (draft.nama_brand || null);
+  const kategori = inherited.kategori ?? (draft.kategori_utama || null);
+  const uspText = inherited.usp ?? (draft.usp.filter(Boolean).join('\n') || null);
+  const titikKirim = inherited.titikKirim ?? (draft.titik_kirim_kota || null);
+  const riwayat = inherited.riwayatAgensi ?? (draft.riwayat_agensi || null);
+  const decisionMaker =
+    inherited.decisionMaker ??
+    (draft.decision_maker
+      .map((d) => [d.nama, d.jabatan].filter(Boolean).join(' — '))
+      .filter(Boolean)
+      .join('; ') || null);
   // Channels that appear in the contract — the access matrix axis.
   const contractChannels = detail.channels.map((c) => c.channel);
 
@@ -281,45 +337,17 @@ export default function SectionA({
 
   return (
     <div className="stack">
-      {/* A-1 ---------------------------------------------------------------- */}
-      <div className="card">
-        <div className="cardHeader">A-1 · Brand &amp; Kategori</div>
-        <div className="formRow">
-          <label className="field">
-            <span className="muted" style={{ fontSize: 12 }}>Nama brand</span>
-            <input
-              value={draft.nama_brand}
-              disabled={disabled}
-              onChange={(e) => onChange({ nama_brand: e.target.value })}
-            />
-          </label>
-          <label className="field">
-            <span className="muted" style={{ fontSize: 12 }}>Kategori utama</span>
-            <input
-              value={draft.kategori_utama}
-              disabled={disabled}
-              onChange={(e) => onChange({ kategori_utama: e.target.value })}
-            />
-          </label>
-        </div>
-        <RepeatList<string>
-          label="Sub-kategori"
-          rows={draft.sub_kategori}
-          onChange={(rows) => onChange({ sub_kategori: rows })}
-          blank={() => ''}
-          disabled={disabled}
-          addLabel="Tambah sub-kategori"
-          empty="Belum ada sub-kategori."
-        >
-          {(row, set) => (
-            <input
-              value={row}
-              disabled={disabled}
-              onChange={(e) => set(e.target.value as unknown as Partial<string>)}
-            />
-          )}
-        </RepeatList>
-      </div>
+      {/* A-1 (read-only, dari Interview + kategori dari data klien) --------- */}
+      <InterviewMirror
+        title="A-1 · Brand & Kategori"
+        value={
+          brand || kategori
+            ? [brand ? `Brand: ${brand}` : null, kategori ? `Kategori: ${kategori}` : null]
+                .filter(Boolean)
+                .join('\n')
+            : null
+        }
+      />
 
       {/* A-2/A-4 ----------------------------------------------------------- */}
       <div className="card">
@@ -374,57 +402,8 @@ export default function SectionA({
         />
       </label>
 
-      {/* A-5 --------------------------------------------------------------- */}
-      <div className="field" style={{ display: 'block' }}>
-        <label style={{ fontWeight: 600 }}>
-          A-5 · USP Produk{' '}
-          <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>
-            (minimal {USP_MIN})
-          </span>
-        </label>
-        <p className="muted" style={{ fontSize: 12, margin: '2px 0 8px' }}>
-          Tiga alasan utama orang beli produk ini, bukan kompetitor.
-        </p>
-        <div className="stack" style={{ gap: 6 }}>
-          {draft.usp.map((u, i) => (
-            <div key={i} className="row" style={{ gap: 6 }}>
-              <input
-                value={u}
-                disabled={disabled}
-                onChange={(e) => {
-                  const updated = [...draft.usp];
-                  updated[i] = e.target.value;
-                  onChange({ usp: updated });
-                }}
-                style={{ flex: 1 }}
-              />
-              {!disabled && (
-                <button
-                  type="button"
-                  className="btn btnGhost btnSm"
-                  onClick={() => onChange({ usp: draft.usp.filter((_, x) => x !== i) })}
-                >
-                  Hapus
-                </button>
-              )}
-            </div>
-          ))}
-          {!disabled && (
-            <button
-              type="button"
-              className="btn btnSecondary btnSm"
-              onClick={() => onChange({ usp: [...draft.usp, ''] })}
-            >
-              Tambah USP
-            </button>
-          )}
-        </div>
-        {draft.usp.length < USP_MIN && (
-          <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-            Minimal {USP_MIN} — sekarang {draft.usp.length}.
-          </p>
-        )}
-      </div>
+      {/* A-5 (read-only, dari Interview) ----------------------------------- */}
+      <InterviewMirror title="A-5 · USP Produk" value={uspText} />
 
       {/* A-6 --------------------------------------------------------------- */}
       {/* A-7 (plafon unit/bulan) retired — see DECISIONS.md 2026-08-20. */}
@@ -458,28 +437,8 @@ export default function SectionA({
         </div>
       </div>
 
-      {/* A-8 --------------------------------------------------------------- */}
-      <div className="card">
-        <div className="cardHeader">A-8 · Titik Kirim</div>
-        <div className="formRow">
-          <label className="field">
-            <span className="muted" style={{ fontSize: 12 }}>Kota gudang / origin</span>
-            <input
-              value={draft.titik_kirim_kota}
-              disabled={disabled}
-              onChange={(e) => onChange({ titik_kirim_kota: e.target.value })}
-            />
-          </label>
-          <label className="field">
-            <span className="muted" style={{ fontSize: 12 }}>Alamat detail (opsional)</span>
-            <input
-              value={draft.titik_kirim_detail}
-              disabled={disabled}
-              onChange={(e) => onChange({ titik_kirim_detail: e.target.value })}
-            />
-          </label>
-        </div>
-      </div>
+      {/* A-8 (read-only, dari Interview — fulfillment) --------------------- */}
+      <InterviewMirror title="A-8 · Titik Kirim (kota gudang / origin)" value={titikKirim} />
 
       {/* A-9 --------------------------------------------------------------- */}
       <label className="field" style={{ display: 'block' }}>
@@ -495,22 +454,12 @@ export default function SectionA({
         />
       </label>
 
-      {/* A-10 -------------------------------------------------------------- */}
-      <label className="field" style={{ display: 'block' }}>
-        <span style={{ fontWeight: 600 }}>
-          A-10 · Riwayat Agensi <span className="badge badge-red">Hard-internal</span>
-        </span>
-        <span className="muted" style={{ fontSize: 12, display: 'block' }}>
-          Pernah pakai agensi/tim lain? Yang gagal &amp; kenapa? <strong>Tidak pernah
-          dibagikan ke klien.</strong>
-        </span>
-        <textarea
-          rows={3}
-          value={draft.riwayat_agensi}
-          disabled={disabled}
-          onChange={(e) => onChange({ riwayat_agensi: e.target.value })}
-        />
-      </label>
+      {/* A-10 (read-only, dari Interview — hard-internal) ------------------ */}
+      <InterviewMirror
+        title="A-10 · Riwayat Agensi"
+        badge={<span className="badge badge-red">Hard-internal</span>}
+        value={riwayat}
+      />
 
       {/* A-11 -------------------------------------------------------------- */}
       <div className="field" style={{ display: 'block' }}>
@@ -556,57 +505,8 @@ export default function SectionA({
         )}
       </div>
 
-      {/* A-12 -------------------------------------------------------------- */}
-      <RepeatList<DecisionMakerDraft>
-        label="A-12 · Decision Maker"
-        hint="Nama + jabatan PIC klien, siapa yang berhak approve, jalur eskalasi."
-        rows={draft.decision_maker}
-        onChange={(rows) => onChange({ decision_maker: rows })}
-        blank={() => ({ nama: '', jabatan: '', berhak_approve: false, jalur_eskalasi: '' })}
-        disabled={disabled}
-        addLabel="Tambah PIC"
-        empty="Belum ada PIC."
-      >
-        {(row, set) => (
-          <>
-            <div className="formRow">
-              <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Nama</span>
-                <input
-                  value={row.nama}
-                  disabled={disabled}
-                  onChange={(e) => set({ nama: e.target.value })}
-                />
-              </label>
-              <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Jabatan</span>
-                <input
-                  value={row.jabatan}
-                  disabled={disabled}
-                  onChange={(e) => set({ jabatan: e.target.value })}
-                />
-              </label>
-            </div>
-            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <input
-                type="checkbox"
-                checked={row.berhak_approve}
-                disabled={disabled}
-                onChange={(e) => set({ berhak_approve: e.target.checked })}
-              />
-              <span style={{ fontSize: 13 }}>Berhak approve</span>
-            </label>
-            <label className="field">
-              <span className="muted" style={{ fontSize: 12 }}>Jalur eskalasi</span>
-              <input
-                value={row.jalur_eskalasi}
-                disabled={disabled}
-                onChange={(e) => set({ jalur_eskalasi: e.target.value })}
-              />
-            </label>
-          </>
-        )}
-      </RepeatList>
+      {/* A-12 (read-only, dari Interview — teks bebas) --------------------- */}
+      <InterviewMirror title="A-12 · Decision Maker" value={decisionMaker} />
 
       {/* A-13 -------------------------------------------------------------- */}
       <div className="card">
