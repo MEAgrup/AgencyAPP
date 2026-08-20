@@ -76,7 +76,7 @@ const DOORS: Readonly<Record<string, string>> = {
   'A-4': 'saveStrategiKonteks',
   'A-5': 'saveStrategiKonteks',
   'A-6': 'saveStrategiKonteks',
-  'A-7': 'saveStrategiKonteks',
+  // A-7 (plafon) retired as a gated field — DECISIONS.md 2026-08-20.
   'A-8': 'saveStrategiKonteks',
   'A-9': 'saveStrategiKonteks',
   'A-10': 'saveStrategiKonteks',

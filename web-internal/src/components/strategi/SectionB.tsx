@@ -607,13 +607,11 @@ function InheritedChip() {
 }
 
 export default function SectionB({
-  detail,
   draft,
   onChange,
   disabled,
   baselinePrefill,
 }: {
-  detail: StrategiDetail;
   draft: ChannelDraft[];
   onChange: (channels: ChannelDraft[]) => void;
   disabled: boolean;
@@ -621,27 +619,50 @@ export default function SectionB({
 }) {
   const [activeIdx, setActiveIdx] = useState(0);
 
-  // Ensure every contracted channel has a draft row (in case channels were added
-  // to the contract after this section was first opened).
-  const contractChannels = detail.channels.map((c) => c.channel);
-  const draftWithDefaults: ChannelDraft[] = contractChannels.map((ch) => {
-    const existing = draft.find((d) => d.channel === ch);
-    return existing ?? blankChannel(ch);
-  });
+  // Section B is the ONLY place a channel block is created: `createStrategi`
+  // seeds none, and there is no contract-level channel list to inherit from (no
+  // `contract_channel` table exists). So the editable `draft` IS the source of
+  // truth — `channelsDraftOf(detail)` seeds it from whatever is already saved,
+  // and the AM adds/removes blocks here. Before this, the section rendered only
+  // `detail.channels` with no way to add the first row, so a fresh Strategi could
+  // never fill Section B at all (and C/D, which gate per channel, stayed blocked).
+  const channels = draft;
 
-  if (draftWithDefaults.length === 0) {
+  const addChannel = () => {
+    const used = new Set(channels.map((c) => c.channel));
+    // Offer the first channel not yet used; `Lainnya` is always allowed (it is
+    // disambiguated by `channel_lain`), so it is the fallback when all are taken.
+    const pick = CHANNELS.find((c) => c === 'Lainnya' || !used.has(c)) ?? 'Lainnya';
+    onChange([...channels, blankChannel(pick)]);
+    setActiveIdx(channels.length);
+  };
+
+  const removeChannel = (i: number) => {
+    onChange(channels.filter((_, x) => x !== i));
+    setActiveIdx((cur) => (cur >= i && cur > 0 ? cur - 1 : cur));
+  };
+
+  if (channels.length === 0) {
     return (
-      <div className="alert alertInfo" style={{ fontSize: 13 }}>
-        Belum ada channel terkontrak — channel ditambahkan melalui halaman kontrak layanan.
+      <div className="stack">
+        <div className="alert alertInfo" style={{ fontSize: 13 }}>
+          Belum ada channel. Tambahkan channel yang dikerjakan pada kontrak ini untuk mulai
+          mengisi baseline — Section C dan D memerlukan minimal satu channel.
+        </div>
+        {!disabled && (
+          <button type="button" className="btn btnPrimary btnSm" onClick={addChannel}>
+            Tambah channel
+          </button>
+        )}
       </div>
     );
   }
 
-  const clampedIdx = Math.min(activeIdx, draftWithDefaults.length - 1);
-  const ch = draftWithDefaults[clampedIdx];
+  const clampedIdx = Math.min(activeIdx, channels.length - 1);
+  const ch = channels[clampedIdx];
 
   const setCh = (patch: Partial<ChannelDraft>) => {
-    onChange(draftWithDefaults.map((c, i) => (i === clampedIdx ? { ...c, ...patch } : c)));
+    onChange(channels.map((c, i) => (i === clampedIdx ? { ...c, ...patch } : c)));
   };
 
   // RAB-19 "warisi yang bersumber saja" — the Riset Awal suggestion for THIS
@@ -696,10 +717,10 @@ export default function SectionB({
   return (
     <div className="stack">
       {/* Channel tabs */}
-      <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
-        {draftWithDefaults.map((c, i) => (
+      <div className="row" style={{ gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+        {channels.map((c, i) => (
           <button
-            key={c.channel}
+            key={i}
             type="button"
             className={i === clampedIdx ? 'btn btnSecondary btnSm' : 'btn btnGhost btnSm'}
             onClick={() => setActiveIdx(i)}
@@ -707,7 +728,25 @@ export default function SectionB({
             {c.channel === 'Lainnya' && c.channel_lain ? c.channel_lain : c.channel}
           </button>
         ))}
+        {!disabled && (
+          <button type="button" className="btn btnGhost btnSm" onClick={addChannel}>
+            + Tambah channel
+          </button>
+        )}
       </div>
+
+      {!disabled && (
+        <div className="row" style={{ justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            className="btn btnGhost btnSm"
+            onClick={() => removeChannel(clampedIdx)}
+            title="Hapus channel ini beserta seluruh isian baseline-nya"
+          >
+            Hapus channel “{ch.channel === 'Lainnya' && ch.channel_lain ? ch.channel_lain : ch.channel}”
+          </button>
+        </div>
+      )}
 
       {/* ------------------------------------------------------------------ */}
       {/* B-0 Identity & status                                               */}

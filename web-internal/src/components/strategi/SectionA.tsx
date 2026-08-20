@@ -71,7 +71,6 @@ export interface KonteksDraft {
   usp: string[];
   kapasitas_stok: StockCapacity | '';
   lead_time_restock_hari: string;
-  plafon_unit_per_bulan: string;
   titik_kirim_kota: string;
   titik_kirim_detail: string;
   ekspektasi_klien: string;
@@ -121,8 +120,6 @@ export function konteksDraftOf(d: StrategiDetail): KonteksDraft {
     kapasitas_stok: (d.kapasitas_stok as StockCapacity | null) ?? '',
     lead_time_restock_hari:
       d.lead_time_restock_hari !== null ? String(d.lead_time_restock_hari) : '',
-    plafon_unit_per_bulan:
-      d.plafon_unit_per_bulan !== null ? String(d.plafon_unit_per_bulan) : '',
     titik_kirim_kota: d.titik_kirim_kota ?? '',
     titik_kirim_detail: d.titik_kirim_detail ?? '',
     ekspektasi_klien: d.ekspektasi_klien ?? '',
@@ -157,7 +154,9 @@ export function konteksDraftToBody(draft: KonteksDraft): StrategiKonteksBody {
     usp: draft.usp.filter(Boolean),
     kapasitas_stok: (draft.kapasitas_stok as StockCapacity) || null,
     lead_time_restock_hari: numOrNull(draft.lead_time_restock_hari),
-    plafon_unit_per_bulan: numOrNull(draft.plafon_unit_per_bulan),
+    // A-7 (plafon) retired — see DECISIONS.md 2026-08-20. Sent as null so any
+    // legacy value is cleared on the next save; the DB column stays nullable.
+    plafon_unit_per_bulan: null,
     titik_kirim_kota: draft.titik_kirim_kota || null,
     titik_kirim_detail: draft.titik_kirim_detail || null,
     ekspektasi_klien: draft.ekspektasi_klien || null,
@@ -427,9 +426,10 @@ export default function SectionA({
         )}
       </div>
 
-      {/* A-6/A-7 ----------------------------------------------------------- */}
+      {/* A-6 --------------------------------------------------------------- */}
+      {/* A-7 (plafon unit/bulan) retired — see DECISIONS.md 2026-08-20. */}
       <div className="card">
-        <div className="cardHeader">A-6 / A-7 · Kapasitas Stok &amp; Plafon</div>
+        <div className="cardHeader">A-6 · Kapasitas Stok</div>
         <div className="formRow">
           <label className="field">
             <span className="muted" style={{ fontSize: 12 }}>Kapasitas stok (A-6)</span>
@@ -453,17 +453,6 @@ export default function SectionA({
               disabled={disabled}
               onChange={(e) => onChange({ lead_time_restock_hari: e.target.value })}
               style={{ width: 100 }}
-            />
-          </label>
-          <label className="field">
-            <span className="muted" style={{ fontSize: 12 }}>Plafon unit/bulan (A-7)</span>
-            <input
-              type="number"
-              min={0}
-              value={draft.plafon_unit_per_bulan}
-              disabled={disabled}
-              onChange={(e) => onChange({ plafon_unit_per_bulan: e.target.value })}
-              style={{ width: 140 }}
             />
           </label>
         </div>

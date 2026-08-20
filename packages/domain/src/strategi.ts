@@ -5814,7 +5814,9 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
     ['A-3', head.marginKotorPersen !== null],
     ['A-4', head.posisiHarga !== null],
     ['A-6', head.kapasitasStok !== null && head.leadTimeRestockHari !== null],
-    ['A-7', head.plafonUnitPerBulan !== null],
+    // A-7 (plafon unit/bulan) retired as a required field — owner decision,
+    // DECISIONS.md 2026-08-20. The column stays for legacy rows; it is no longer
+    // gated or written by the form.
     ['A-8', head.titikKirimKota !== null],
     ['A-9', head.ekspektasiKlien !== null],
     ['A-10', head.riwayatAgensi !== null],
