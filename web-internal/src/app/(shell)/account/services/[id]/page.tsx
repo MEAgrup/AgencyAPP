@@ -39,6 +39,7 @@ import {
 import StatusBadge from '@/components/StatusBadge';
 import { formatIDR } from '@/lib/money';
 import { createStrategi, listStrategi, type Strategi } from '@/lib/strategi';
+import { isEditable as isStrategiEditable } from '@/lib/strategi-sections';
 
 /**
  * QA(SESI31): the DECIDED delivery path is `STRG-` (M6A Strategi) + M6B (Plan),
@@ -718,15 +719,37 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
           <p className="muted">Belum ada Strategi untuk layanan ini.</p>
         ) : (
           <div className="stack" style={{ gap: 6 }}>
-            {strategiList.map((st) => (
-              <div key={st.id} className="row" style={{ justifyContent: 'space-between' }}>
-                <div>
-                  <Link href={`/account/strategi/${st.id}`}>{st.id}</Link>
-                  <div className="muted" style={{ fontSize: 12 }}>versi {st.versi_no}</div>
+            {strategiList.map((st) => {
+              // Draft / Draft Revisi still need Section A→J filled in and then
+              // submitted — the strategi ID link alone was too easy to miss (QA
+              // revisi: "masih draft dan tidak menemukan tombol untuk
+              // melanjutkan"). Give those an explicit call-to-action; other
+              // statuses just get "Buka". The status check mirrors the strategi
+              // form page's own `isEditable`, so the two never disagree about
+              // which statuses are still editable.
+              const stillDraft = isStrategiEditable(st.status);
+              return (
+                <div
+                  key={st.id}
+                  className="row"
+                  style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}
+                >
+                  <div>
+                    <Link href={`/account/strategi/${st.id}`}>{st.id}</Link>
+                    <div className="muted" style={{ fontSize: 12 }}>versi {st.versi_no}</div>
+                  </div>
+                  <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                    <StatusBadge status={st.status} />
+                    <Link
+                      href={`/account/strategi/${st.id}`}
+                      className={stillDraft ? 'btn btnPrimary btnSm' : 'btn btnSecondary btnSm'}
+                    >
+                      {stillDraft ? 'Lanjutkan pengisian' : 'Buka'}
+                    </Link>
+                  </div>
                 </div>
-                <StatusBadge status={st.status} />
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
