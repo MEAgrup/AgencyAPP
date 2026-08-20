@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  INTERVIEW_FIELDS,
   buildAnswersPayload,
   buildScoreInput,
   draftFromDetail,
   emptyDraft,
   estimasiTanpaDasar,
+  fieldsOfSection,
   minorToRupiah,
   previewKualifikasi,
   rupiahToMinor,
@@ -134,5 +136,47 @@ describe('draftFromDetail', () => {
     expect(d['B2-9'].sumber).toBe('klien_hitung');
     expect(d['B1-4'].raw).toBe('produsen');
     expect(d['B7-9'].raw).toBe('kirim katalog produk');
+  });
+});
+
+describe('Section A fields captured in the Interview form (QA §3.A 2026-08-20)', () => {
+  const MOVED = [
+    { key: 'B2-1', section: 'B2' }, // → A-1 brand & kategori
+    { key: 'B3-1', section: 'B3' }, // → A-5 USP
+    { key: 'B1-8', section: 'B1' }, // → A-8 titik kirim (fulfillment)
+    { key: 'B1-9', section: 'B1' }, // → A-10 riwayat agensi
+    { key: 'B7-1', section: 'B7' }, // → A-14 aset dari klien
+    { key: 'B7-5', section: 'B7' }, // → A-12 decision maker
+  ] as const;
+
+  it('registers all six moved fields, in wired sections, as non-scored free text', () => {
+    for (const { key, section } of MOVED) {
+      const f = INTERVIEW_FIELDS.find((x) => x.fieldKey === key);
+      expect(f, `missing ${key}`).toBeTruthy();
+      expect(f!.section).toBe(section);
+      expect(f!.scored).toBe(false); // must never enter the scorer
+      expect(f!.tipe).toBe('teks');
+      // Reachable from the section renderer the page uses.
+      expect(fieldsOfSection(section).some((x) => x.fieldKey === key)).toBe(true);
+    }
+  });
+
+  it('does not disturb the qualification score (fields are non-scored)', () => {
+    // A perfect draft still scores 100 even with the new fields present in the
+    // catalog: the scorer only reads SCORED_FIELD_KEYS.
+    const r = previewKualifikasi(perfectDraft());
+    expect(r.ready).toBe(true);
+    expect(r.hasil?.skorTotal).toBe(100);
+  });
+
+  it('sends each moved field as a teks answer row', () => {
+    const d = emptyDraft();
+    d['B2-1'] = { raw: 'AlphaGlow · Home Living' };
+    const payload = buildAnswersPayload(d);
+    const row = payload.find((p) => p.field_key === 'B2-1');
+    expect(row).toBeTruthy();
+    expect(row!.section).toBe('B2');
+    expect(row!.nilai_teks).toBe('AlphaGlow · Home Living');
+    expect(row!.nilai_angka).toBeNull();
   });
 });

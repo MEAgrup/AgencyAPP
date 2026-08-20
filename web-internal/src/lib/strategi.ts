@@ -145,6 +145,28 @@ export const METRIC_LABELS: { value: LeadingIndicator; label: string }[] = [
   { value: 'jumlah_video', label: 'Jumlah video' },
 ];
 
+/**
+ * The unit each D-4 supporting metric is counted in, plus a one-line hint of what
+ * the number means. FE-only presentation (owner QA 2026-08-20 §3.C: "tampilkan
+ * metrik angka jelas") — the stored value is still a plain `numeric` in
+ * `strategi_target.nilai_stretch`; nothing here changes the schema or the domain.
+ * `satuan` renders as the input suffix, `contoh` as its placeholder, so the AM
+ * knows a CR target is a percent and a ROAS target is a multiplier without
+ * guessing. Keyed by the same `TARGET_METRICS` vocabulary as the labels above.
+ */
+export const METRIC_UNITS: Record<LeadingIndicator, { satuan: string; contoh: string }> = {
+  gmv: { satuan: 'Rp', contoh: 'mis. 250.000.000' },
+  pengunjung: { satuan: 'orang/bln', contoh: 'mis. 120.000' },
+  cr: { satuan: '%', contoh: 'mis. 3,2' },
+  aov: { satuan: 'Rp', contoh: 'mis. 95.000' },
+  roas_min: { satuan: '× (kali)', contoh: 'mis. 5' },
+  acos_maks: { satuan: '%', contoh: 'mis. 18' },
+  sku_winner: { satuan: 'SKU', contoh: 'mis. 3' },
+  affiliate_aktif: { satuan: 'akun', contoh: 'mis. 60' },
+  jam_live: { satuan: 'jam/bln', contoh: 'mis. 36' },
+  jumlah_video: { satuan: 'video/bln', contoh: 'mis. 40' },
+};
+
 /** E-2 — the three channel roles §4 writes itself. */
 export const PRIORITAS_LABELS: { value: string; label: string }[] = [
   { value: 'engine_utama', label: 'Engine utama' },
@@ -901,6 +923,47 @@ export interface StrategiPrefill {
   copy_prasyarat_ke_c7: boolean;
   wajib_catatan_mitigasi: boolean;
   items: StrategiPrefillItem[];
+}
+
+/**
+ * The five Section A fields that moved to the Interview form (QA §3.A 2026-08-20):
+ * A-1 (brand + kategori), A-5 (USP), A-8 (titik kirim), A-10 (riwayat agensi),
+ * A-12 (decision maker). Strategi shows them READ-ONLY; this is where the values
+ * come from — the Interview answers surfaced by `getStrategiPrefill`. `kategori`
+ * rides the `klien.kategori` item (client record), `namaBrand` the `B2-1` item;
+ * the rest map by their `strategi_field`. A-14 (aset) is NOT here — it stayed the
+ * editable Strategi checklist.
+ */
+export interface InheritedKonteks {
+  namaBrand: string | null;
+  kategori: string | null;
+  usp: string | null;
+  titikKirim: string | null;
+  riwayatAgensi: string | null;
+  decisionMaker: string | null;
+}
+
+/** Field IDs whose Strategi editor is now a read-only mirror of the Interview. */
+export const INHERITED_KONTEKS_FIELDS = ['A-1', 'A-5', 'A-8', 'A-10', 'A-12'] as const;
+
+/** Projects the prefill items into the read-only Section A values, or all-null. */
+export function inheritedKonteksOf(prefill: StrategiPrefill | null): InheritedKonteks {
+  const pick = (sf: string): string | null =>
+    prefill?.items.find((it) => it.strategi_field === sf)?.nilai ?? null;
+  const brand = prefill?.items.find(
+    (it) => it.strategi_field === 'A-1' && it.interview_field !== 'klien.kategori',
+  )?.nilai ?? null;
+  const kategori = prefill?.items.find(
+    (it) => it.strategi_field === 'A-1' && it.interview_field === 'klien.kategori',
+  )?.nilai ?? null;
+  return {
+    namaBrand: brand,
+    kategori,
+    usp: pick('A-5'),
+    titikKirim: pick('A-8'),
+    riwayatAgensi: pick('A-10'),
+    decisionMaker: pick('A-12'),
+  };
 }
 
 // Riset awal baseline → Section B channel prefill (RAB-11 / RAB-12). Suggestions

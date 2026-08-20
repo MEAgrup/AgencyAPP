@@ -48,7 +48,6 @@ import {
   MSG_LEADING_INDICATOR_MAX,
   MSG_LEADING_INDICATOR_REQUIRED,
   MSG_NOT_PLAN_GATED,
-  MSG_OUT_OF_SCOPE_REQUIRED,
   MSG_PRASYARAT_KLIEN_REQUIRED,
   MSG_QUICK_WIN_MIN,
   MSG_REVIEW_NOTES_REQUIRED,
@@ -62,7 +61,6 @@ import {
   MSG_TOP_SKU_REQUIRED,
   MSG_URUTAN_EKSEKUSI_REQUIRED,
   MSG_TRAFFIC_MIX_SUM,
-  MSG_USP_MIN,
   FLOOR_DISETUJUI_HEAD,
   FLOOR_INPUT_AM,
   STRATEGI_AKTIF,
@@ -1379,15 +1377,18 @@ describeDb('checkCompleteness — every unmet rule, not the first one', () => {
     expect(codes).toContain('G-0'); // Rule 17
     expect(codes).toContain('B-0'); // Rule 3
     expect(codes).toContain('D-8'); // three assumptions
-    expect(codes).toContain('E-11'); // Rule 9
+    // E-11 (out-of-scope) retired as a gate — owner QA 2026-08-20 (Fase 2). It no
+    // longer appears here even on a wholly empty draft.
+    expect(codes).not.toContain('E-11');
     expect(codes).toContain('H-1'); // three risks
-    // A-05: every Section A answer is required, and the kode names which one so
-    // the form can jump to it rather than saying "something is missing".
-    expect(codes).toContain('A-1');
+    // A-05: the Section A answers still gated name which one is missing. A-1, A-5,
+    // A-8, A-10, A-12 are NO LONGER gated — they moved to the Interview (owner QA
+    // 2026-08-20 §3.A), so they must not appear here.
     expect(codes).toContain('A-9');
-    expect(codes).toContain('A-12');
     expect(codes).toContain('A-13');
-    expect(missing.find((m) => m.kode === 'A-5')?.pesan).toBe(MSG_USP_MIN);
+    for (const moved of ['A-1', 'A-5', 'A-8', 'A-10', 'A-12']) {
+      expect(codes).not.toContain(moved);
+    }
     // A-07 Section C: zero channels → no C-1 per channel, but C-5/C-6/C-7 fire.
     expect(codes).toContain('C-5'); // no quick wins yet
     expect(codes).toContain('C-6'); // no structural risks yet
@@ -1594,11 +1595,14 @@ describeDb('checkCompleteness — every unmet rule, not the first one', () => {
     expect(missing.map((m) => m.pesan)).toContain(MSG_TARGET_WITHOUT_ASSUMPTION);
   });
 
-  it('flags an empty out-of-scope record (Rule 9)', async () => {
+  it('does NOT gate an empty out-of-scope record — E-11 retired (owner QA 2026-08-20)', async () => {
+    // Previously this asserted Rule 9 fired MSG_OUT_OF_SCOPE_REQUIRED. The owner
+    // retired E-11 as a submit requirement in Fase 2 (DECISIONS.md); a Strategi
+    // with only non-`tidak_dikerjakan` pillars must now clear the gate.
     const { strategiId } = await seedSubmittable();
     await savePillars(sql, am(), strategiId, [{ jenis: 'konten', aksi: '40 video' }]);
     const missing = await checkCompleteness(sql, strategiId);
-    expect(missing.map((m) => m.pesan)).toContain(MSG_OUT_OF_SCOPE_REQUIRED);
+    expect(missing.map((m) => m.kode)).not.toContain('E-11');
   });
 
   it('flags a baseline shorter than the declared window (Rule 5)', async () => {
@@ -2758,17 +2762,22 @@ describeDb('Section E-12 ketergantungan klien (A-09b)', () => {
     expect(d.prasyaratKlien[0].item).toContain('Shopee Ads Manager');
   });
 
-  it('refuses a dependency with no consequence, and gates an empty list', async () => {
+  it('refuses a dependency with no consequence, but does NOT gate an empty list (E-12 retired)', async () => {
     const { strategiId } = await seedSubmittable();
+    // Row-shape validation stays: a dependency the AM typed still needs its
+    // consequence (the field cited when a target is missed).
     await expect(
       saveKetergantungan(sql, am(), strategiId, [
         { item: 'foto produk', kapan: 'H-7', konsekuensi: '  ' },
       ]),
     ).rejects.toThrow(MSG_KETERGANTUNGAN_INCOMPLETE);
 
+    // But an empty list no longer blocks submit — owner QA 2026-08-20 (Fase 2),
+    // DECISIONS.md. `seedSubmittable` seeds one row; clearing it must leave the
+    // Strategi submittable.
     await saveKetergantungan(sql, am(), strategiId, []);
     const kurang = await checkCompleteness(sql, strategiId);
-    expect(kurang.map((k) => k.kode)).toContain('E-12');
+    expect(kurang.map((k) => k.kode)).not.toContain('E-12');
   });
 });
 
@@ -3579,6 +3588,54 @@ describeDb('getStrategiPrefill — Interview → Strategi bridge (RAB-09)', () =
     const serviceId = await seedService();
     const s = await createStrategi(sql, am(), serviceId, HEADER);
     await expect(getStrategiPrefill(sql, otherAm(), s.id)).rejects.toThrow(ForbiddenError);
+  });
+
+  // §3.A (owner QA 2026-08-20) — the six Section A descriptive fields are now
+  // captured in the Interview form (interview-fields.ts), so the bridge surfaces
+  // them mapped to A-1/A-5/A-8/A-10/A-12/A-14. This is the prerequisite that made
+  // "Section A → Interview" possible: before it, these keys were never collected.
+  it('surfaces the captured Section A fields, with A-1 carrying BOTH brand (B2-1) and client kategori', async () => {
+    const serviceId = await seedService(); // client kategori = 'Home Living'
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    // Capture the moved Section A fields on that same interview.
+    await interview.saveAnswers(sql, am(), interviewId, [
+      { section: 'B2', fieldKey: 'B2-1', nilaiTeks: 'AlphaGlow' },
+      { section: 'B3', fieldKey: 'B3-1', nilaiTeks: 'awet\ngaransi\nharga jujur' },
+      { section: 'B1', fieldKey: 'B1-8', nilaiTeks: 'Bandung' },
+      { section: 'B1', fieldKey: 'B1-9', nilaiTeks: 'agensi lama fokus iklan, listing tak pernah dibenahi' },
+      { section: 'B7', fieldKey: 'B7-1', nilaiTeks: 'foto produk, sampel, budget iklan' },
+      { section: 'B7', fieldKey: 'B7-5', nilaiTeks: 'Owner (Rani), approve sendiri, eskalasi ke owner' },
+    ]);
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const prefill = await getStrategiPrefill(sql, am(), s.id);
+    const by = (f: string) => prefill!.items.find((i) => i.strategiField === f);
+    // A-1 now rides two items: brand from B2-1, kategori from the client record.
+    const brand = prefill!.items.find((i) => i.strategiField === 'A-1' && i.interviewField === 'B2-1');
+    const kategori = prefill!.items.find((i) => i.strategiField === 'A-1' && i.interviewField === 'klien.kategori');
+    expect(brand?.nilai).toBe('AlphaGlow');
+    expect(kategori?.nilai).toBe('Home Living');
+    expect(by('A-5')?.nilai).toContain('garansi');
+    expect(by('A-8')?.nilai).toBe('Bandung');
+    expect(by('A-10')?.nilai).toContain('listing');
+    expect(by('A-14')?.nilai).toContain('sampel');
+    expect(by('A-12')?.nilai).toContain('Rani');
+  });
+
+  it('always offers clients.kategori as an A-1 item (its own line, even with no B2-1)', async () => {
+    const serviceId = await seedService(); // client kategori = 'Home Living'
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    await seedScoredInterview(clientId); // seeds B2-8/B6-2 only, no B2-1
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const prefill = await getStrategiPrefill(sql, am(), s.id);
+    const kategori = prefill!.items.find(
+      (i) => i.strategiField === 'A-1' && i.interviewField === 'klien.kategori',
+    );
+    expect(kategori?.nilai).toBe('Home Living');
+    // No B2-1 answered → no brand A-1 item.
+    expect(prefill!.items.some((i) => i.strategiField === 'A-1' && i.interviewField === 'B2-1')).toBe(false);
   });
 });
 

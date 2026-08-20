@@ -1863,7 +1863,27 @@ export async function getStrategiPrefill(
     detail.kualifikasi.verdictKualifikasi as iv.Verdict,
     answers,
   );
-  return { ...prefill, interviewId: chosen.id };
+
+  // A-1 kategori: the client record already carries `kategori`, entered by sales
+  // at intake, so emit it as its own A-1 item — the owner's "jangan ketik ulang
+  // kategori" (QA 2026-08-20 §3.A). It rides ALONGSIDE the Interview's B2-1 (nama
+  // brand), not instead of it: Strategi's read-only A-1 shows brand (from B2-1) and
+  // kategori (from the client) as two distinct lines, so both sources are kept.
+  // `interviewField: 'klien.kategori'` is how the FE tells this item apart from the
+  // B2-1 brand item.
+  const items = [...prefill.items];
+  const client = await sql<{ kategori: string | null }[]>`
+    select kategori from clients where id = ${head.clientId}`;
+  const kategori = client[0]?.kategori?.trim();
+  if (kategori) {
+    items.push({
+      interviewField: 'klien.kategori',
+      strategiField: 'A-1',
+      catatan: 'kategori dari data klien (sales)',
+      nilai: kategori,
+    });
+  }
+  return { ...prefill, items, interviewId: chosen.id };
 }
 
 // ---------------------------------------------------------------------------
@@ -5808,27 +5828,23 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
 
   // Section A (A-05). Every field is `W`; the kode names which one so the form
   // can jump to it, and the count is what §5 step 5 puts on the submit button.
+  //
+  // A-1 (brand & kategori), A-5 (USP), A-8 (titik kirim), A-10 (riwayat agensi)
+  // and A-12 (decision maker) are NO LONGER gated here — owner QA 2026-08-20
+  // (Fase 2 §3.A), DECISIONS.md. Those five moved to the Interview form (captured
+  // there, shown read-only in Strategi Section A), so Strategi no longer requires
+  // them and their `DOORS` rows are removed. A-7 (plafon) retired earlier (same
+  // date). Everything else in §4 stays `W`. A-14 (aset) deliberately stays gated
+  // below — the owner kept it as the Strategi checklist, not moved to Interview.
   for (const [kode, isi] of [
-    ['A-1', head.namaBrand !== null && head.kategoriUtama !== null],
     ['A-2', head.modelBisnis !== null],
     ['A-3', head.marginKotorPersen !== null],
     ['A-4', head.posisiHarga !== null],
     ['A-6', head.kapasitasStok !== null && head.leadTimeRestockHari !== null],
-    // A-7 (plafon unit/bulan) retired as a required field — owner decision,
-    // DECISIONS.md 2026-08-20. The column stays for legacy rows; it is no longer
-    // gated or written by the form.
-    ['A-8', head.titikKirimKota !== null],
     ['A-9', head.ekspektasiKlien !== null],
-    ['A-10', head.riwayatAgensi !== null],
-    ['A-12', head.decisionMaker.length > 0],
     ['A-13', head.slaKlienJam !== null],
   ] as const) {
     if (!isi) out.push({ kode, pesan: MSG_KONTEKS_INCOMPLETE });
-  }
-  // A-5 has a stated minimum, so it gets its own message rather than the generic
-  // "Section A incomplete" — "you filled two of three" is a different problem.
-  if (head.usp.length < USP_MIN) {
-    out.push({ kode: 'A-5', pesan: MSG_USP_MIN });
   }
   // A-11 / A-14 — `W` list fields whose honest answer may be "none". Since O58
   // (owner decision 2026-08-07, option a) CDPS can SAY "none": each carries an
@@ -6009,14 +6025,12 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
     out.push({ kode: 'H-3', pesan: MSG_SKENARIO_MUNDUR_REQUIRED });
   }
 
-  // Rule 9 / E-11: the anti-scope-creep record. Empty is a validation error, by
-  // design — it is the answer the AM needs three months later.
-  const outOfScope = await sql<{ n: number }[]>`
-    select count(*)::int as n from strategi_pillar
-     where strategi_id = ${id} and jenis = 'tidak_dikerjakan'`;
-  if (outOfScope[0].n === 0) {
-    out.push({ kode: 'E-11', pesan: MSG_OUT_OF_SCOPE_REQUIRED });
-  }
+  // E-11 (out-of-scope, `strategi_pillar jenis='tidak_dikerjakan'`) is NO LONGER a
+  // submit requirement — owner QA decision 2026-08-20 (Fase 2), DECISIONS.md. This
+  // deviates from Rule 9 ("Out-of-scope must be explicit"): the owner found the
+  // mandatory entry produced boilerplate rather than the real anti-scope-creep note
+  // it was meant to capture, so E-11 stays editable in Section E but is optional. The
+  // gate push (and its `DOORS` row) are removed; the column and endpoint are kept.
 
   const risks = await sql<{ n: number }[]>`
     select count(*)::int as n from strategi_risk where strategi_id = ${id}`;
@@ -6086,11 +6100,12 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
     }
   }
 
-  const ketergantunganCount = await sql<{ n: number }[]>`
-    select count(*)::int as n from strategi_ketergantungan_klien where strategi_id = ${id}`;
-  if (ketergantunganCount[0].n === 0) {
-    out.push({ kode: 'E-12', pesan: MSG_KETERGANTUNGAN_REQUIRED });
-  }
+  // E-12 (ketergantungan klien) is NO LONGER a submit requirement — owner QA
+  // decision 2026-08-20 (Fase 2), DECISIONS.md. Same reasoning as E-11: the
+  // mandatory list produced filler, not the dependency-with-consequence it was for.
+  // Still editable in Section E and still shape-validated by `saveKetergantungan`
+  // (a row with an item must carry its consequence — MSG_KETERGANTUNGAN_INCOMPLETE);
+  // only the empty-list gate and its `DOORS` row are removed.
 
   // G-1: §4 writes "min 2" explicitly, so this has its own message rather than
   // the generic one — "you entered one of two" is a different problem from

@@ -49,7 +49,7 @@
 
 import { useMemo, useState } from 'react';
 import RepeatList from './RepeatList';
-import { LEADING_INDICATOR_MAX, METRIC_LABELS } from '@/lib/strategi';
+import { LEADING_INDICATOR_MAX, METRIC_LABELS, METRIC_UNITS } from '@/lib/strategi';
 import type { AssumptionState, LeadingIndicator, StrategiDetail } from '@/lib/strategi';
 import {
   SANGGAHAN_KOSONG,
@@ -123,6 +123,16 @@ export function targetDraftOf(d: StrategiDetail): TargetDraft {
 function targetLabel(key: string): string {
   const parsed = readTargetKey(key);
   return parsed === null ? key : `${parsed.channel} · M${parsed.month}`;
+}
+
+/**
+ * The unit + example for a D-4 metric, or null for a value outside the vocabulary
+ * (defensive — the metric dropdown only offers `TARGET_METRICS`). Drives the
+ * Target input's suffix and placeholder so each metric reads as the number it is
+ * (owner QA 2026-08-20 §3.C).
+ */
+function unitOf(metric: string): { satuan: string; contoh: string } | null {
+  return (METRIC_UNITS as Record<string, { satuan: string; contoh: string }>)[metric] ?? null;
 }
 
 export default function SectionD({
@@ -433,10 +443,15 @@ export default function SectionD({
               </select>
             </label>
             <label className="field">
-              <span className="muted" style={{ fontSize: 12 }}>Target</span>
+              <span className="muted" style={{ fontSize: 12 }}>
+                Target{unitOf(row.metric) ? ` (${unitOf(row.metric)!.satuan})` : ''}
+              </span>
               <input
                 value={row.nilai_stretch}
                 disabled={disabled}
+                inputMode="decimal"
+                placeholder={unitOf(row.metric)?.contoh ?? ''}
+                aria-label={`Target ${row.metric} ${row.channel} bulan ${row.month_index}`}
                 onChange={(e) => set({ nilai_stretch: e.target.value })}
               />
             </label>

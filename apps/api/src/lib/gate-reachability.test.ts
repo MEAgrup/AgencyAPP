@@ -70,19 +70,18 @@ const DOORS: Readonly<Record<string, string>> = {
   // except the A-15 access matrix, which is per channel and has its own table.
   // A-11 and A-14 are the O58 list-XOR-"tidak ada" pair; the flag rides the same
   // body as the list, so they share the door.
-  'A-1': 'saveStrategiKonteks',
+  // A-1, A-5, A-8, A-10, A-12 moved to the Interview form and are no longer gated
+  // in Strategi — owner QA 2026-08-20 (Fase 2 §3.A), DECISIONS.md. A-7 (plafon)
+  // retired earlier (same date). Their rows are removed so the "DOORS free of stale
+  // rows" guard stays green; `saveStrategiKonteks` stays open via the rows below.
   'A-2': 'saveStrategiKonteks',
   'A-3': 'saveStrategiKonteks',
   'A-4': 'saveStrategiKonteks',
-  'A-5': 'saveStrategiKonteks',
   'A-6': 'saveStrategiKonteks',
-  // A-7 (plafon) retired as a gated field — DECISIONS.md 2026-08-20.
-  'A-8': 'saveStrategiKonteks',
   'A-9': 'saveStrategiKonteks',
-  'A-10': 'saveStrategiKonteks',
   'A-11': 'saveStrategiKonteks',
-  'A-12': 'saveStrategiKonteks',
   'A-13': 'saveStrategiKonteks',
+  // A-14 (aset) stays gated — the owner kept it as the Strategi checklist.
   'A-14': 'saveStrategiKonteks',
   'A-15': 'saveStrategiAkses',
 
@@ -131,8 +130,12 @@ const DOORS: Readonly<Record<string, string>> = {
   // have its own table or its own endpoint (DECISIONS 2026-08-08, A-09b).
   'E-1': 'saveStrategiNarasi',
   'E-2': 'saveStrategiChannels',
-  'E-11': 'saveStrategiPillars',
-  'E-12': 'saveStrategiKetergantungan',
+  // E-11 (out-of-scope) and E-12 (ketergantungan klien) retired as submit gates —
+  // owner QA decision 2026-08-20 (Fase 2), DECISIONS.md. `checkCompleteness` no
+  // longer emits them, so their DOORS rows are removed to keep this list honest
+  // (the "keeps DOORS free of rows the gate no longer emits" guard). The editors
+  // and endpoints (`saveStrategiPillars`, `saveStrategiKetergantungan`) stay — the
+  // fields are optional now, not gone.
   'E-13': 'saveStrategiNarasi',
 
   // Section G. G-0 (`tanggal_mulai_siklus`) is on the header endpoint, not the
@@ -205,12 +208,14 @@ describe('submit-gate reachability', () => {
     // vacuously green — the failure mode that lets a guard rot unnoticed.
     expect(kodes.length).toBeGreaterThan(25);
     expect(callers.size).toBeGreaterThan(10);
-    // The three A-13c fields must be in scope by name: they are the reason this
-    // file exists, and a scan that stopped finding them would pass while the
-    // form regressed to exactly the state it was written to detect.
+    // The A-13c fields must be in scope by name: they are the reason this file
+    // exists, and a scan that stopped finding them would pass while the form
+    // regressed to exactly the state it was written to detect. E-12 was the third
+    // canary until owner QA 2026-08-20 (Fase 2) retired it as a gate (DECISIONS.md);
+    // D-4 replaces it here — still a per-channel Section D gate the scan must see.
     expect(kodes).toContain('D-2');
     expect(kodes).toContain('D-8');
-    expect(kodes).toContain('E-12');
+    expect(kodes).toContain('D-4');
   });
 
   it('has a declared door for every field the submit gate can report', () => {

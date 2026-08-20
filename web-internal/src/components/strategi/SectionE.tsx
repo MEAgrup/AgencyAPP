@@ -19,15 +19,16 @@
  *   A-13b; a summary is shown for context.
  *
  * - E-11 (out-of-scope list) is stored as pillars of type `tidak_dikerjakan`.
- *   Rule 9 requires at least one entry, so it is editable here.
+ *   Owner QA 2026-08-20 (Fase 2) retired it as a submit requirement — it is
+ *   OPTIONAL now, still editable here.
  *
  * - E-12 (client dependencies during execution) is edited HERE, not in Section
- *   G's UI as an earlier draft of this note claimed. It is a submit requirement,
- *   and `checkCompleteness` emits its gap as the kode `E-12`, which the nav files
- *   under Section E. An editor in Section G would put the box in a chapter the
- *   AM is never sent to — the badge would say E and the field would be under G.
- *   It is still saved by its own endpoint (`/ketergantungan`), never folded into
- *   `saveKalender`.
+ *   G's UI as an earlier draft of this note claimed. Owner QA 2026-08-20 (Fase 2)
+ *   retired it as a submit requirement too, so it is OPTIONAL; it stays under
+ *   Section E rather than Section G because that is where the AM edits it. It is
+ *   still saved by its own endpoint (`/ketergantungan`), never folded into
+ *   `saveKalender`, and each row it does carry is still shape-validated (an item
+ *   needs its consequence).
  */
 
 import RepeatList from './RepeatList';
@@ -187,14 +188,13 @@ export default function SectionE({
       {/* E-11 -------------------------------------------------------------- */}
       <RepeatList<OutOfScopeDraft>
         label="E-11 · Yang TIDAK Dikerjakan (out of scope eksplisit)"
-        hint="Minimal satu entri wajib ada (Rule 9). Ini catatan anti-scope-creep — yang klien minta tapi bukan bagian kontrak ini."
+        hint="Opsional — catatan anti-scope-creep: yang klien minta tapi bukan bagian kontrak ini. Isi kalau ada; tidak lagi menahan pengajuan."
         rows={draft.tidak_dikerjakan}
-        min={1}
         onChange={onTidakDikerjakan}
         blank={() => ({ item: '' })}
         disabled={disabled}
         addLabel="Tambah item out of scope"
-        empty="Belum ada — minimal satu wajib diisi."
+        empty="Belum ada item out of scope (opsional)."
       >
         {(row, set) => (
           <input
@@ -209,14 +209,13 @@ export default function SectionE({
       {/* E-12 -------------------------------------------------------------- */}
       <RepeatList<KetergantunganDraft>
         label="E-12 · Ketergantungan pada klien (selama eksekusi)"
-        hint="Apa yang klien harus sediakan, kapan, dan konsekuensinya kalau terlambat. Minimal satu wajib sebelum bisa diajukan. Beda dari C-7: C-7 adalah syarat SEBELUM eksekusi mulai, ini yang berjalan terus — dan `konsekuensi` adalah field yang nanti dikutip saat target meleset."
+        hint="Opsional — apa yang klien harus sediakan, kapan, dan konsekuensinya kalau terlambat. Tidak lagi menahan pengajuan, tapi kalau diisi: beda dari C-7 (syarat SEBELUM eksekusi mulai), ini yang berjalan terus, dan `konsekuensi` adalah field yang nanti dikutip saat target meleset — jadi tiap baris yang diisi tetap wajib punya konsekuensi."
         rows={draft.ketergantungan}
-        min={1}
         onChange={onKetergantungan}
         blank={() => ({ item: '', kapan: '', konsekuensi: '' })}
         disabled={disabled}
         addLabel="Tambah ketergantungan"
-        empty="Belum ada — minimal satu wajib diisi."
+        empty="Belum ada ketergantungan (opsional)."
       >
         {(row, set) => (
           <div className="formRow">
