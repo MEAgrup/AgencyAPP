@@ -55,6 +55,17 @@ import { createStrategi, listStrategi, type Strategi } from '@/lib/strategi';
  */
 const SHOW_LEGACY_STR_PATH = false;
 
+/**
+ * QA(SESI31): the Service hub carries TWO "Kelola Klien" cards — the primary one
+ * ("Riset Awal, Interview & Kualifikasi") actually STARTS the decided flow
+ * (langkah 2–3: opens the riset-awal/interview session tied to THIS service),
+ * while this second card is only a deep-link to the client page's interview tab
+ * (the older per-client model). Two same-named cards confuse QA, so the
+ * redundant shortcut is hidden. The client page stays reachable from the header
+ * client link and the nav — flip to `true` to restore the convenience shortcut.
+ */
+const SHOW_CLIENT_INTERVIEW_SHORTCUT = false;
+
 /** The human label for a stored task-satuan (divisi, jenis), or the raw jenis. */
 function taskLabel(divisi: string, jenis: string): string {
   return (TASK_CATALOG[divisi] ?? []).find((t) => t.jenis === jenis)?.label ?? jenis;
@@ -809,8 +820,9 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
       {/* Interview ("Kelola Klien") shortcut. Interview is a per-CLIENT record
           (M6 Interview §I1), so the create/open door stays on the client page;
           this is only a deep-link there so the Service hub is not a dead end for
-          someone who needs the client's qualification. */}
-      {service && canManageInterview && (
+          someone who needs the client's qualification. Hidden by default (SESI31)
+          as a duplicate of the primary "Kelola Klien" card above. */}
+      {SHOW_CLIENT_INTERVIEW_SHORTCUT && service && canManageInterview && (
         <section className="card">
           <div className="cardHeader">
             <h2>Kelola Klien &middot; Interview &amp; Kualifikasi</h2>
