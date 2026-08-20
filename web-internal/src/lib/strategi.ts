@@ -145,6 +145,28 @@ export const METRIC_LABELS: { value: LeadingIndicator; label: string }[] = [
   { value: 'jumlah_video', label: 'Jumlah video' },
 ];
 
+/**
+ * The unit each D-4 supporting metric is counted in, plus a one-line hint of what
+ * the number means. FE-only presentation (owner QA 2026-08-20 §3.C: "tampilkan
+ * metrik angka jelas") — the stored value is still a plain `numeric` in
+ * `strategi_target.nilai_stretch`; nothing here changes the schema or the domain.
+ * `satuan` renders as the input suffix, `contoh` as its placeholder, so the AM
+ * knows a CR target is a percent and a ROAS target is a multiplier without
+ * guessing. Keyed by the same `TARGET_METRICS` vocabulary as the labels above.
+ */
+export const METRIC_UNITS: Record<LeadingIndicator, { satuan: string; contoh: string }> = {
+  gmv: { satuan: 'Rp', contoh: 'mis. 250.000.000' },
+  pengunjung: { satuan: 'orang/bln', contoh: 'mis. 120.000' },
+  cr: { satuan: '%', contoh: 'mis. 3,2' },
+  aov: { satuan: 'Rp', contoh: 'mis. 95.000' },
+  roas_min: { satuan: '× (kali)', contoh: 'mis. 5' },
+  acos_maks: { satuan: '%', contoh: 'mis. 18' },
+  sku_winner: { satuan: 'SKU', contoh: 'mis. 3' },
+  affiliate_aktif: { satuan: 'akun', contoh: 'mis. 60' },
+  jam_live: { satuan: 'jam/bln', contoh: 'mis. 36' },
+  jumlah_video: { satuan: 'video/bln', contoh: 'mis. 40' },
+};
+
 /** E-2 — the three channel roles §4 writes itself. */
 export const PRIORITAS_LABELS: { value: string; label: string }[] = [
   { value: 'engine_utama', label: 'Engine utama' },
