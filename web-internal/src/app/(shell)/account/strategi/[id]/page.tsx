@@ -50,7 +50,7 @@
  * H reads from it and patches it through the same `patch('sectionE', ...)` path.
  */
 
-import { use, useCallback, useEffect, useMemo, useState } from 'react';
+import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -231,6 +231,14 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
   const [active, setActive] = useState<SectionKey>('A');
   const [drafts, setDrafts] = useState<Drafts | null>(null);
   const [dirty, setDirty] = useState(false);
+  // Monotonic edit counter, bumped by `patch` on every keystroke. `saveActive`
+  // snapshots it at the start of a save and, on success, only rebuilds the draft
+  // from the server echo when the counter has not moved — i.e. when the AM did
+  // NOT type anything while the request was in flight. Without this, a 20s
+  // autosave that lands mid-typing overwrites the words entered during its own
+  // round-trip (and `setDirty(false)` marks them clean), which is the "isi hilang
+  // sendiri saat pindah tab" the owner reported.
+  const editGen = useRef(0);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -295,6 +303,9 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
    */
   const saveActive = useCallback(async () => {
     if (!drafts || !editable || !detail) return;
+    // Snapshot the edit counter BEFORE the first await: anything the AM types
+    // after this point must survive the server echo below.
+    const genAtStart = editGen.current;
     setSaving(true);
     setError(null);
     try {
@@ -343,16 +354,24 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
       } else if (active === 'C') {
         next = await saveStrategiDiagnosa(id, diagnosaDraftToPayload(drafts.diagnosa));
       } else if (active === 'D') {
-        // THREE endpoints, and the ORDER is load-bearing — this is the same
-        // trap Section B has with channels-then-baseline.
+        // THREE endpoints. Two ordering rules apply:
         //
-        // `saveAssumptions` refuses any D-9 reference that does not name a real
-        // `strategi_target` row (`[asumsi menunjuk target yang tidak ada]`), and
-        // it refuses the WHOLE call for one bad key. So targets must land first,
-        // and the assumptions that follow must reference only what actually
-        // landed: half-filled GMV cells are skipped by `gmvCellsToBody` (the
-        // component says so on screen), and a D-9 tick pointing at one of them
-        // would otherwise block the save with no visible cause.
+        // 1. KPI (D-5 definisi berhasil, D-6 leading indicator) is a header slice
+        //    independent of targets and assumptions, and it is saved FIRST. It
+        //    used to run last, so a validation error in the target→assumption
+        //    chain below — easy to trigger while the GMV matrix is half-filled —
+        //    aborted the whole save before KPI ran, and the AM's D-5/D-6 answers
+        //    were silently never persisted ("kurang padahal sudah terisi").
+        // 2. Within the remaining chain the ORDER is still load-bearing — the
+        //    same trap Section B has with channels-then-baseline. `saveAssumptions`
+        //    refuses any D-9 reference that does not name a real `strategi_target`
+        //    row (`[asumsi menunjuk target yang tidak ada]`), and refuses the
+        //    WHOLE call for one bad key. So targets must land first, and the
+        //    assumptions that follow must reference only what actually landed:
+        //    half-filled GMV cells are skipped by `gmvCellsToBody`, and a D-9 tick
+        //    pointing at one of them would otherwise block the save with no
+        //    visible cause.
+        next = await saveStrategiKpi(id, drafts.kpi);
         const { rows: gmvRows } = gmvCellsToBody(drafts.targets.gmv);
         next = await saveStrategiTargets(id, [
           ...gmvRows,
@@ -365,7 +384,6 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
             offerableTargetKeys(drafts.targets.gmv),
           ),
         );
-        next = await saveStrategiKpi(id, drafts.kpi);
       } else if (active === 'E') {
         // E-1 / E-13 — same narasi endpoint as H-3 / H-4. The four fields are
         // always sent together so a Section E save never blanks H-3/H-4 and vice
@@ -460,8 +478,14 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
         return;
       }
       setDetail(next);
-      setDrafts(draftsOf(next));
-      setDirty(false);
+      // Only adopt the server echo as the new draft when the AM did not edit
+      // during the round-trip. If they did (`editGen` moved), keep their in-flight
+      // draft and leave `dirty` set so the next autosave persists it — rebuilding
+      // here would silently discard whatever they typed while this save ran.
+      if (editGen.current === genAtStart) {
+        setDrafts(draftsOf(next));
+        setDirty(false);
+      }
       setSavedAt(new Date().toLocaleTimeString('id-ID'));
       setKekurangan(await strategiKekurangan(id));
     } catch (err) {
@@ -478,6 +502,7 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
   const { flush } = useAutosave({ dirty, enabled: editable, save: saveActive });
 
   const patch = useCallback(<K extends keyof Drafts>(key: K, value: Drafts[K]) => {
+    editGen.current += 1;
     setDrafts((d) => (d === null ? d : { ...d, [key]: value }));
     setDirty(true);
   }, []);
@@ -640,7 +665,6 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                 <>
                   {baselinePrefill && <BaselinePrefillPanel prefill={baselinePrefill} />}
                   <SectionB
-                    detail={detail}
                     draft={drafts.channels}
                     onChange={(channels) => patch('channels', channels)}
                     disabled={!editable}
