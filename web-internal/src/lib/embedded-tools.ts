@@ -42,15 +42,24 @@ function inDivision(role: Role, ...names: string[]): boolean {
   return names.some((n) => n.toLowerCase() === d);
 }
 
+/** Read-everywhere layer — Director (full) / OD (read-only), Role Matrix §4. */
+function canReadAll(role: Role): boolean {
+  return Boolean(role.director || role.od);
+}
+
 /**
- * Creative & Account Service only — owner decision (2026-08-21): the baseline
- * research tool is for those two teams. Division membership ONLY: a layered
- * OD/Director does NOT get in through read-everywhere (that bypass is for data
- * pages, and this is a working tool, not a record to inspect) unless they are
- * themselves on the Creative or Account division.
+ * Creative & Account Service — the two teams this baseline-research tool is for
+ * (owner decision 2026-08-21) — PLUS the read-everywhere layer.
+ *
+ * The tool is division-scoped to Creative & Account, but a Director/OD is not
+ * bound by that: the Role Matrix (Phase 0 §4) makes Director full-access and OD
+ * read-everywhere, so they must be able to VIEW every division's pages — this
+ * embedded tool included — for oversight and QA (owner decision 2026-08-21,
+ * after a Director account could not open the tool to QA it). So the gate is
+ * "on Creative/Account, OR read-all". Any other division stays out.
  */
-export function creativeOrAccountOnly(role: Role): boolean {
-  return inDivision(role, 'Account', 'Creative');
+export function creativeAccountOrReadAll(role: Role): boolean {
+  return canReadAll(role) || inDivision(role, 'Account', 'Creative');
 }
 
 export interface EmbeddedTool {
@@ -81,9 +90,9 @@ export const EMBEDDED_TOOLS: Record<string, EmbeddedTool> = {
     title: 'AM - baseline riset',
     tagline:
       'Baseline · Papan · Tracker · Sheet — turunkan baseline channel (CDPS Section B) dari export TikTok Shop, cari video yang sudah menjual, tetapkan angka target tim Creative, ukur hasil produksi lewat hashtag, lalu keluarkan baris siap tempel ke Video Master.',
-    audience: 'Team Creative & Account Service',
+    audience: 'Team Creative & Account Service (Director/OD dapat melihat untuk oversight)',
     asset: '/tools/video-factory.html',
-    access: creativeOrAccountOnly,
+    access: creativeAccountOrReadAll,
   },
 };
 
