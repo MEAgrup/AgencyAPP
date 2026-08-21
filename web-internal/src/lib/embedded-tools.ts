@@ -47,8 +47,8 @@ export const EMBEDDED_TOOLS: Record<string, EmbeddedTool> = {
     slug: 'video-factory',
     title: 'MEA Video Factory',
     tagline:
-      'Papan · Tracker · Sheet — cari video yang sudah menjual, tetapkan angka target tim Creative, ukur hasil produksi lewat hashtag, lalu keluarkan baris siap tempel ke Video Master.',
-    audience: 'Account Manager (Papan) · CC / Leader Video (Tracker & Sheet)',
+      'Baseline · Papan · Tracker · Sheet — turunkan baseline channel (CDPS Section B) dari export TikTok Shop, cari video yang sudah menjual, tetapkan angka target tim Creative, ukur hasil produksi lewat hashtag, lalu keluarkan baris siap tempel ke Video Master.',
+    audience: 'Account Manager (Baseline & Papan) · CC / Leader Video (Tracker & Sheet)',
     asset: '/tools/video-factory.html',
   },
 };

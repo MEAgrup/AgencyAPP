@@ -189,8 +189,9 @@ const DELIVERY_LINKS: NavItem[] = [
 // memakainya (deep link tetap jalan untuk yang lain). Lihat DECISIONS.md
 // 2026-08-21 "Embed alat HTML AM di CDPS".
 const TOOLS_LINKS: NavItem[] = [
-  // Video Factory: AM memakai tab Papan (angka target Creative + sumber angle);
-  // CC / Leader Video memakai Tracker & Export sheet. Gate = Account + Creative
+  // Video Factory: AM memakai tab Baseline (turunkan CDPS Section B dari export
+  // TikTok Shop) + Papan (angka target Creative + sumber angle); CC / Leader
+  // Video memakai Tracker & Export sheet. Gate = Account + Creative
   // (+ OD/Director read-all via ownedBy).
   { href: '/tools/video-factory', label: 'Video Factory', access: ownedBy(ACCOUNT, CREATIVE) },
 ];

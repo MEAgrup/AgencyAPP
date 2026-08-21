@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MEA Video Factory — Papan · Tracker · Sheet</title>
+<title>MEA Video Factory — Baseline · Papan · Tracker · Sheet</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -110,7 +110,6 @@ tr.zero td{color:var(--red)}
 .kpi.hi{background:var(--ink);border-color:var(--ink)}
 .kpi.hi .k{color:#8FA6B8}.kpi.hi .v{color:#fff}.kpi.hi .s{color:#7E93A5}
 
-/* SIGNATURE: tangga lantai → target */
 .tgt-row{display:grid;grid-template-columns:168px 1fr;border-bottom:1px solid var(--line2)}
 .tgt-row:last-child{border-bottom:0}
 .tgt-lb{padding:13px 14px;background:#FAFCFD;border-right:1px solid var(--line2)}
@@ -160,7 +159,6 @@ tr.picked td{background:#F0FAF8}
 .pickbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 12px;background:#F0FAF8;border:1px solid #A9DDD7;border-radius:var(--r);margin-bottom:14px}
 .pickbar b{font-family:var(--mono)}
 
-/* papan banding tracker */
 .versus{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
 .vs{padding:16px 18px}
 .vs:first-child{background:#FFF6F2;border-right:1px solid var(--line)}
@@ -205,6 +203,15 @@ pre.box{background:var(--ink);color:#B8E5DE;border-radius:2px;padding:13px;overf
 .modal h3{font-family:var(--disp);font-size:20px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px}
 textarea.copybox{min-height:300px;font-family:var(--mono);font-size:11.5px;white-space:pre;line-height:1.55}
 .toast{position:fixed;bottom:78px;left:50%;transform:translateX(-50%);background:var(--teal);color:#fff;padding:9px 16px;border-radius:2px;font-size:12.5px;font-weight:600;z-index:99}
+
+/* ── modul Baseline (tambahan) ── */
+.bl-src{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--line);border-radius:2px;background:#fff;margin-bottom:6px;font-size:12px;flex-wrap:wrap}
+.bl-src .nm{flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono);font-size:11px;color:var(--slate)}
+.bl-src .miss{font-size:10px;color:var(--amber);font-family:var(--mono)}
+.blf td:first-child{font-weight:500}
+.blf .sub{font-size:10.5px;color:var(--mute);font-weight:400}
+.blf td .prov{font-size:10.5px;color:var(--mute);font-family:var(--mono)}
+.bl-manual{width:150px;padding:5px 7px}
 @media(max-width:860px){
   .g4,.g5,.g6{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:1fr}
   .tgt-row,.versus{grid-template-columns:1fr}
@@ -222,18 +229,20 @@ textarea.copybox{min-height:300px;font-family:var(--mono);font-size:11.5px;white
     <div class="mast-row">
       <div>
         <div class="brandmark">MEA Agency · Video Factory</div>
-        <h1>Papan · Tracker · Sheet</h1>
-        <p>Satu file, satu klien, satu library. Cari video yang sudah menjual, tetapkan angka target
-           tim Creative, ukur hasil produksi lewat hashtag, lalu keluarkan baris siap tempel ke Video Master.</p>
+        <h1>Baseline · Papan · Tracker · Sheet</h1>
+        <p>Satu file, satu klien, satu library. Tarik semua export TikTok Shop sekali — tool menurunkan
+           baseline channel (CDPS Section B), mencari video yang sudah menjual, menetapkan angka target
+           tim Creative, mengukur hasil produksi lewat hashtag, lalu mengeluarkan baris siap tempel ke Video Master.</p>
       </div>
       <div class="mast-meta">
         <div id="mKlien">klien belum diisi</div>
         <div id="mLib">library kosong</div>
-        <div>v3.0 · <b id="mDate">—</b></div>
+        <div>v4.0 · <b id="mDate">—</b></div>
       </div>
     </div>
     <div class="tabs" role="tablist" id="tabs">
-      <button role="tab" data-tab="papan" aria-selected="true">Papan<span class="n" id="nPapan"></span></button>
+      <button role="tab" data-tab="baseline" aria-selected="true">Baseline<span class="n" id="nBaseline"></span></button>
+      <button role="tab" data-tab="papan" aria-selected="false">Papan<span class="n" id="nPapan"></span></button>
       <button role="tab" data-tab="tracker" aria-selected="false">Tracker<span class="n" id="nTracker"></span></button>
       <button role="tab" data-tab="sheet" aria-selected="false">Export sheet</button>
     </div>
@@ -245,7 +254,7 @@ textarea.copybox{min-height:300px;font-family:var(--mono);font-size:11.5px;white
 <!-- ══ SETUP (dipakai semua tab) ══ -->
 <div class="step no-print">
   <div class="step-hd"><div class="step-no">1</div><h2>Klien</h2>
-    <div class="hint">Satu klien per sesi · ikut ke library, brief, dan sheet</div></div>
+    <div class="hint">Satu klien per sesi · ikut ke library, brief, baseline, dan sheet</div></div>
   <div class="step-bd">
     <div class="grid g5">
       <label class="f"><span>Nama klien / toko</span><input type="text" id="fKlien" placeholder="Bakoel Tas"></label>
@@ -269,8 +278,9 @@ textarea.copybox{min-height:300px;font-family:var(--mono);font-size:11.5px;white
   <div class="step-bd">
     <div class="drop" id="drop" tabindex="0" role="button">
       <h3>Tarik file ke sini</h3>
-      <p>Video Performance List (toko &amp; afiliasi, .xlsx/.csv) · payload baseline CDPS (.json) ·
-         Analitik Produk TikTok (.xlsx) · library (.json) · tautan mp4 dari extension (.json)</p>
+      <p>Video Performance List · Analitik/Transaction Product · Transaction Creator · product_list (katalog) ·
+         Shop Analytics Key metrics · Live Analysis · data kampanye iklan (product/live) ·
+         payload baseline CDPS (.json) · library (.json) · tautan mp4 dari extension (.json)</p>
       <button class="btn sig" id="btnPick">Pilih file</button>
       <input type="file" id="filein" multiple accept=".xlsx,.xls,.csv,.json" hidden>
     </div>
@@ -299,7 +309,7 @@ textarea.copybox{min-height:300px;font-family:var(--mono);font-size:11.5px;white
 
 <div class="step no-print">
   <div class="step-hd"><div class="step-no">4</div><h2>Saringan</h2>
-    <div class="hint">Berlaku untuk ketiga tab</div></div>
+    <div class="hint">Berlaku untuk tab Papan, Tracker, dan Sheet</div></div>
   <div class="step-bd">
     <div class="grid g4">
       <label class="f"><span>Sumber</span><select id="cSumber">
@@ -316,7 +326,8 @@ textarea.copybox{min-height:300px;font-family:var(--mono);font-size:11.5px;white
   </div>
 </div>
 
-<div id="paneA"></div>
+<div id="paneD"></div>
+<div id="paneA" hidden></div>
 <div id="paneB" hidden></div>
 <div id="paneC" hidden></div>
 
@@ -329,21 +340,18 @@ textarea.copybox{min-height:300px;font-family:var(--mono);font-size:11.5px;white
 
 <script>
 /* ═══════════════════════════════════════════════════════════════════════
-   MEA VIDEO FACTORY v3 — satu file, tiga fungsi
-   A. Papan   : angka target Creative + video sumber angle   (Account Manager)
-   B. Tracker : kinerja video produksi MEA lewat hashtag     (CC / Leader Video)
-   C. Sheet   : baris siap tempel ke Video Master            (CC)
+   MEA VIDEO FACTORY v4 — satu file, empat fungsi
+   D. Baseline: turunkan CDPS Section B dari export TikTok Shop  (AM / analis)
+   A. Papan   : angka target Creative + video sumber angle       (Account Manager)
+   B. Tracker : kinerja video produksi MEA lewat hashtag         (CC / Leader Video)
+   C. Sheet   : baris siap tempel ke Video Master                (CC)
 
-   Aturan angka (dipinjam dari CDPS Baseline Riset Toko supaya satu hal tidak
-   punya dua angka di dua tool):
+   Aturan angka (dipinjam dari CDPS Baseline Riset Toko):
    - populasi hitung = video dengan VV > 0. Baris VV 0 = sisa histori.
-   - ambang tayangan = median VV video yang menghasilkan pesanan. Dipakai
-     untuk peringkat GPM saja.
-   - angka target dihitung dari video jual dengan VV >= VV_BISING, karena
-     persentase dari video 9 views tidak bisa dipercaya (1 order / 9 views
-     = GPM Rp20 juta, kejadian nyata di data klien).
-   - durasi video TIDAK ADA di export TikTok Shop. Tidak diperkirakan,
-     tidak diproksikan.
+   - ambang tayangan = median VV video yang menghasilkan pesanan.
+   - angka target dihitung dari video jual dengan VV >= VV_BISING.
+   - durasi video TIDAK ADA di export TikTok Shop. Tidak diperkirakan.
+   - baseline: field yang tak ada di export ditandai jelas, tidak dikarang.
    ═══════════════════════════════════════════════════════════════════════ */
 const SCHEMA='mea.videofactory.v3';
 const $=(s,r=document)=>r.querySelector(s);
@@ -368,7 +376,6 @@ function num(v){
   }
   const n=parseFloat(s); return isFinite(n)?n:0;
 }
-/* persen dinormalkan ke skala persen: "3.10%" -> 3.10, 0.031 -> 3.1, 41.2 -> 41.2 */
 function pctNum(v){
   if(v===null||v===undefined||v==='')return 0;
   if(typeof v==='string'&&v.includes('%'))return num(v);
@@ -454,12 +461,10 @@ function produkList(raw){
   const nama=s.split(/\(\d{6,}\)\s*,\s*/)[0].replace(/\(\d{6,}\)\s*$/,'').trim();
   return {nama,ids};
 }
-/* tanggal "2026/07/19 16:18:40" -> "2026-07-19" */
 function tgl(w){
   const m=String(w||'').match(/(\d{4})[\/-](\d{2})[\/-](\d{2})/);
   return m?m[1]+'-'+m[2]+'-'+m[3]:'';
 }
-/* label periode untuk sheet: rentang <=8 hari jadi minggu ISO, sisanya bulan */
 function periodeLabel(periode){
   const m=String(periode||'').match(/(\d{4}-\d{2}-\d{2})\s*~\s*(\d{4}-\d{2}-\d{2})/);
   if(!m)return String(periode||'');
@@ -481,13 +486,6 @@ function periodeRange(periode){
 }
 
 /* ── parse Video Performance List ── */
-/* Deteksi sumber (toko vs afiliasi):
-   - Format lama: ada kolom "Negara kreator" → afiliasi
-   - Format baru (export 2026-08-10 dst): kolom identik untuk toko & aff.
-     Pembeda SATU-SATUNYA: toko memiliki 1 username unik (akun toko),
-     afiliasi memiliki banyak username (para kreator). Ambang ≤2 username
-     unik pada 30 baris pertama = toko. Tebakan ini ditampilkan ke AM lewat
-     chip file dan bisa di-override sebelum mergeStage. */
 function deteksiSumber(idx,rows,hi){
   if(idx.negara!==undefined)return{sumber:'aff',cara:'kolom'};
   const usernameIdx=idx.creator;
@@ -568,11 +566,6 @@ function parseProduk(rows,fileName){
   }
   return list.length?{kind:'produk',rows:list,fileName}:null;
 }
-/* hero SKU = SKU sampai 80% GMV kumulatif, maksimal 5 */
-/* Tampilkan sampai 10 SKU teratas. Badge "inti" menandai SKU yang masuk 80%
-   GMV kumulatif pertama — itu mesin utama. Sisanya tetap tampil (sampai 10)
-   supaya SKU satuan yang kepotong cutoff lama tetap kelihatan, terutama saat
-   hero teratas semua bundling. */
 function heroFrom(list){
   const sell=list.filter(x=>num(x.gmv)>0).sort((a,b)=>b.gmv-a.gmv);
   const tot=sell.reduce((a,x)=>a+x.gmv,0);
@@ -597,6 +590,188 @@ function parseBaselineJson(obj,fileName){
     sku_jalan:obj.produk?obj.produk.sku_ada_penjualan:null,
     hero:heroFrom(top.map(s=>({nama:s.nama,sku_id:'',gmv:num(s.gmv),klik:num(s.klik),ctor:pctNum(s.ctor)})))};
 }
+
+/* ═══════════ PARSER BASELINE (CDPS Section B) ═══════════ */
+/* Semua parser di bawah TOLERAN: cocokkan header lewat daftar alias (ID+EN),
+   dan laporkan kolom yang tak ketemu di panel Cakupan. File dari region/versi
+   TikTok Shop beda bisa beda header — override tipe tersedia di chip file. */
+function headerIndex(rows,aliasMap,scan){
+  scan=scan||20; let best=null;
+  for(let r=0;r<Math.min(rows.length,scan);r++){
+    const cells=(rows[r]||[]).map(norm);
+    if(cells.filter(Boolean).length<2)continue;
+    const idx={}; let hits=0;
+    for(const f in aliasMap){
+      let ci=-1;
+      for(const a of aliasMap[f]){ const j=cells.indexOf(norm(a)); if(j>-1){ci=j;break;} }
+      if(ci<0)for(const a of aliasMap[f]){ const na=norm(a);
+        if(na.length>=4){ const j=cells.findIndex(c=>c&&c.includes(na)); if(j>-1){ci=j;break;} } }
+      if(ci>-1&&!Object.values(idx).includes(ci)){ idx[f]=ci; hits++; }
+    }
+    if(!best||hits>best.hits)best={row:r,idx,hits};
+  }
+  if(!best||!best.hits)return null;
+  return {row:best.row,idx:best.idx,hits:best.hits,
+    found:Object.keys(best.idx),missing:Object.keys(aliasMap).filter(f=>!(f in best.idx))};
+}
+const gcell=(row,i)=>i===undefined?'':row[i];
+function flatTop(rows,n){ return rows.slice(0,n||20).map(r=>(r||[]).map(norm).join('|')).join(' '); }
+
+/* product_list: katalog SKU */
+const A_CATALOG={id:['ID Produk','Product ID','SKU ID','ID SKU','Kode Produk'],
+  nama:['Nama Produk','Product Name','Nama','Product'],
+  status:['Status','Status Produk','Product Status','Status Listing'],
+  harga:['Harga','Price','Harga Jual','Harga Satuan'],
+  stok:['Stok','Stock','Inventory','Kuantitas','Quantity','Sisa Stok'],
+  kategori:['Kategori','Category'],
+  komisi:['Komisi','Commission','Rate Komisi','Commission Rate','Tarif komisi','Komisi (%)']};
+function parseCatalog(rows,fileName){
+  const h=headerIndex(rows,A_CATALOG); if(!h)return null;
+  const flat=(rows[h.row]||[]).map(norm).join('|');
+  if(flat.includes('id video')||flat.includes('gmv')||flat.includes('roas'))return null;
+  if(!(('stok'in h.idx)||('harga'in h.idx))||!('nama'in h.idx))return null;
+  const out=[];
+  for(let r=h.row+1;r<rows.length;r++){
+    const row=rows[r]||[]; const nama=String(gcell(row,h.idx.nama)||'').trim();
+    if(!nama||nama.length>180)continue;
+    out.push({id:String(gcell(row,h.idx.id)||'').trim(),nama,
+      status:String(gcell(row,h.idx.status)||'').trim(),
+      harga:num(gcell(row,h.idx.harga)),stok:num(gcell(row,h.idx.stok)),
+      kategori:String(gcell(row,h.idx.kategori)||'').trim(),komisi:pctNum(gcell(row,h.idx.komisi))});
+  }
+  return out.length?{kind:'catalog',fileName,rows:out,coverage:h}:null;
+}
+
+/* Transaction Product List: SKU x GMV x terjual */
+const A_TXNPROD={nama:['Nama Produk','Product Name','Produk','Product','Nama'],
+  id:['ID Produk','Product ID','ID SKU'],
+  gmv:['GMV','Penjualan','Sales','GMV (Rp)','Revenue','Pendapatan'],
+  terjual:['Produk Terjual','Item Terjual','Items Sold','Units Sold','Terjual','Kuantitas terjual','Unit terjual'],
+  pesanan:['Pesanan','Orders','Jumlah Pesanan','Pesanan SKU'],
+  pembeli:['Pembeli','Buyers','Pelanggan','Pembeli unik']};
+function parseTxnProduct(rows,fileName){
+  if(flatTop(rows).includes('id video'))return null;
+  const h=headerIndex(rows,A_TXNPROD);
+  if(!h||!('nama'in h.idx)||!('gmv'in h.idx))return null;
+  const flat=(rows[h.row]||[]).map(norm).join('|');
+  if(flat.includes('kreator')||flat.includes('creator')||flat.includes('biaya')||flat.includes('roas'))return null;
+  const out=[];
+  for(let r=h.row+1;r<rows.length;r++){
+    const row=rows[r]||[]; const nama=String(gcell(row,h.idx.nama)||'').trim();
+    if(!nama||nama.length>180)continue;
+    out.push({nama,sku_id:String(gcell(row,h.idx.id)||'').trim(),gmv:num(gcell(row,h.idx.gmv)),
+      terjual:num(gcell(row,h.idx.terjual)),pesanan:num(gcell(row,h.idx.pesanan)),
+      pembeli:num(gcell(row,h.idx.pembeli))});
+  }
+  return out.length?{kind:'txn_product',fileName,rows:out,coverage:h}:null;
+}
+
+/* Transaction Creator List */
+const A_TXNCRE={nama:['Nama Kreator','Creator Name','Kreator','Creator','Nama Creator'],
+  id:['ID Kreator','Creator ID'],
+  gmv:['GMV','Penjualan','Sales','GMV (Rp)','Revenue'],
+  pesanan:['Pesanan','Orders','Item terjual','Produk terjual','Jumlah Pesanan'],
+  komisi:['Komisi','Commission','Estimasi komisi','Komisi kreator']};
+function parseTxnCreator(rows,fileName){
+  if(flatTop(rows).includes('id video'))return null;
+  const h=headerIndex(rows,A_TXNCRE);
+  if(!h||!('nama'in h.idx)||!('gmv'in h.idx))return null;
+  const flat=(rows[h.row]||[]).map(norm).join('|');
+  if(!(flat.includes('kreator')||flat.includes('creator')))return null;
+  const out=[];
+  for(let r=h.row+1;r<rows.length;r++){
+    const row=rows[r]||[]; const nama=String(gcell(row,h.idx.nama)||'').trim().replace(/^@/,'');
+    if(!nama||nama.length>120)continue;
+    out.push({nama,id:String(gcell(row,h.idx.id)||'').trim(),gmv:num(gcell(row,h.idx.gmv)),
+      pesanan:num(gcell(row,h.idx.pesanan)),komisi:num(gcell(row,h.idx.komisi))});
+  }
+  return out.length?{kind:'txn_creator',fileName,rows:out,coverage:h}:null;
+}
+
+/* Iklan: product campaigns & live campaigns */
+const A_ADS={kampanye:['Nama Kampanye','Campaign Name','Kampanye','Campaign','Nama Iklan','Ad Group','Grup Iklan','Materi','Creative','Kreatif','Nama Grup Iklan'],
+  biaya:['Biaya','Cost','Spend','Pengeluaran','Biaya Iklan','Total Biaya'],
+  gmv:['GMV','Penjualan','Sales','Gross Revenue','GMV Iklan','Pendapatan kotor','Total penjualan'],
+  roas:['ROAS','ROI'],
+  pesanan:['Pesanan','Orders','Konversi','Conversions','Pesanan dibayar'],
+  tayang:['Tayangan','Impresi','Impressions','Impression','Ditampilkan'],
+  klik:['Klik','Clicks','Click'],
+  keyword:['Kata Kunci','Keyword','Keywords','Audiens','Audience','Segmen']};
+function parseAds(rows,fileName){
+  if(flatTop(rows).includes('id video'))return null;
+  const h=headerIndex(rows,A_ADS);
+  if(!h||!('biaya'in h.idx))return null;
+  if(!(('roas'in h.idx)||('gmv'in h.idx)))return null;
+  const isLive=/live|siaran|stream/i.test(fileName);
+  const out=[];
+  for(let r=h.row+1;r<rows.length;r++){
+    const row=rows[r]||[];
+    const nm=String(gcell(row,h.idx.kampanye)||'').trim();
+    const biaya=num(gcell(row,h.idx.biaya));
+    if(!nm&&!biaya)continue;
+    out.push({kampanye:nm,biaya,gmv:num(gcell(row,h.idx.gmv)),roas:num(gcell(row,h.idx.roas)),
+      pesanan:num(gcell(row,h.idx.pesanan)),tayang:num(gcell(row,h.idx.tayang)),
+      klik:num(gcell(row,h.idx.klik)),keyword:String(gcell(row,h.idx.keyword)||'').trim()});
+  }
+  return out.length?{kind:'ads',fileName,jenis:isLive?'live':'produk',rows:out,coverage:h}:null;
+}
+
+/* Shop Analytics Key metrics & Live Analysis: scan label -> nilai */
+const METRIC_ALIAS={
+  gmv:['GMV','Penjualan','Total Penjualan','Sales','Revenue','Pendapatan','Omzet'],
+  pesanan:['Pesanan','Orders','Jumlah Pesanan','Total Pesanan','Pesanan dibuat','Pesanan dibayar'],
+  pengunjung:['Pengunjung','Visitors','Kunjungan','Visits','Pengunjung toko','Traffic','Total pengunjung'],
+  pembeli:['Pembeli','Buyers','Pelanggan','Pembeli unik','Customer'],
+  konversi:['Tingkat konversi','Conversion rate','Rasio konversi','CR','Konversi','Conversion'],
+  rating:['Rating toko','Shop rating','Penilaian toko','Rating','Skor toko'],
+  ulasan:['Jumlah ulasan','Ulasan','Reviews','Review','Jumlah penilaian'],
+  chatrate:['Tingkat respons chat','Chat response rate','Respons chat','Response rate','Tingkat balas chat'],
+  chattime:['Waktu respons','Response time','Waktu balas','Rata-rata waktu respons'],
+  terlambat:['Pesanan terlambat','Late dispatch','Keterlambatan','Late shipment','Terlambat kirim'],
+  penonton:['Penonton','Viewers','Total penonton','Penonton live','Total tayangan live'],
+  durasi:['Durasi','Duration','Durasi live','Lama live','Waktu tayang','Durasi siaran']
+};
+function scanMetrics(rows){
+  const got={},prov={};
+  for(let r=0;r<rows.length;r++){
+    const row=rows[r]||[];
+    for(let c=0;c<row.length;c++){
+      const raw=row[c],lab=norm(raw); if(!lab)continue;
+      for(const f in METRIC_ALIAS){
+        if(f in got)continue;
+        if(METRIC_ALIAS[f].some(a=>norm(a)===lab)){
+          let v=row[c+1]; if(v===''||v==null)v=(rows[r+1]||[])[c];
+          if(v!==''&&v!=null){
+            got[f]=/konversi|rate|terlambat/.test(f)?pctNum(v):num(v); prov[f]=String(raw);
+          }
+        }
+      }
+    }
+  }
+  const h=headerIndex(rows,METRIC_ALIAS);
+  if(h&&h.hits>=2){
+    const vrow=rows[h.row+1]||[];
+    for(const f of h.found){ if(f in got)continue;
+      const v=vrow[h.idx[f]];
+      if(v!==''&&v!=null){ got[f]=/konversi|rate|terlambat/.test(f)?pctNum(v):num(v);
+        prov[f]=String((rows[h.row]||[])[h.idx[f]]||f); }
+    }
+  }
+  return {metrics:got,prov,found:Object.keys(got)};
+}
+function parseShopMetrics(rows,fileName){
+  if(flatTop(rows).match(/id video|id produk|id kreator/))return null;
+  const m=scanMetrics(rows);
+  const shopKeys=['gmv','pesanan','pengunjung','pembeli','konversi','rating','ulasan','chatrate','terlambat'];
+  const hit=m.found.filter(f=>shopKeys.includes(f)).length;
+  const liveHit=m.found.filter(f=>['penonton','durasi'].includes(f)).length;
+  const isLive=/live|siaran|stream/i.test(fileName)||(liveHit>=1&&hit<2);
+  if(isLive){ if(liveHit<1&&!m.found.includes('gmv'))return null;
+    return {kind:'live',fileName,metrics:m.metrics,prov:m.prov,found:m.found}; }
+  if(hit<2)return null;
+  return {kind:'shop_metrics',fileName,metrics:m.metrics,prov:m.prov,found:m.found};
+}
+
 function readFile(file){
   return new Promise(res=>{
     const fr=new FileReader();
@@ -619,7 +794,13 @@ function readFile(file){
         const wb=XLSX.read(fr.result,{type:'array'});
         const ws=wb.Sheets[wb.SheetNames[0]];
         const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:''});
+        let r;
+        r=parseCatalog(rows,file.name); if(r)return res(r);
+        r=parseAds(rows,file.name); if(r)return res(r);
+        r=parseTxnCreator(rows,file.name); if(r)return res(r);
+        r=parseTxnProduct(rows,file.name); if(r)return res(r);
         const prod=parseProduk(rows,file.name); if(prod)return res(prod);
+        r=parseShopMetrics(rows,file.name); if(r)return res(r);
         const vid=parseVideo(rows,file.name); vid.fileName=file.name; res(vid);
       }catch(e){ res({error:'[file tidak bisa dibuka: '+e.message+']',fileName:file.name}); }
     };
@@ -628,15 +809,27 @@ function readFile(file){
 }
 
 /* ═══════════ LIBRARY ═══════════ */
-let LIB={schema:SCHEMA,klien:'',vertical:'',tag:'',updated_at:null,videos:{},hero:[],baseline_awal:null};
+let LIB={schema:SCHEMA,klien:'',vertical:'',tag:'',updated_at:null,videos:{},hero:[],baseline_awal:null,baseline_sources:{}};
 let STAGE=[];
 const snapKey=s=>[s.sumber,s.periode].join('|');
+const covOf=f=>f.coverage?{found:f.coverage.found,missing:f.coverage.missing}:null;
 
 function mergeStage(){
-  let rows=0,added=0,repl=0,heroSet=0,links=0;
+  LIB.baseline_sources=LIB.baseline_sources||{};
+  let rows=0,added=0,repl=0,heroSet=0,links=0,bl=0;
   STAGE.forEach(f=>{
     if(f.error)return;
-    if(f.kind==='produk'){ LIB.hero=heroFrom(f.rows); heroSet++; return; }
+    if(f.kind==='catalog'){ LIB.baseline_sources.catalog={file:f.fileName,rows:f.rows,coverage:covOf(f)}; bl++; return; }
+    if(f.kind==='txn_product'){ LIB.baseline_sources.txn_product={file:f.fileName,rows:f.rows,coverage:covOf(f)};
+      if(!(LIB.hero||[]).length)LIB.hero=heroFrom(f.rows.map(x=>({nama:x.nama,sku_id:x.sku_id,gmv:x.gmv,klik:0,ctor:0}))); bl++; return; }
+    if(f.kind==='txn_creator'){ LIB.baseline_sources.txn_creator={file:f.fileName,rows:f.rows,coverage:covOf(f)}; bl++; return; }
+    if(f.kind==='ads'){ (LIB.baseline_sources.ads=LIB.baseline_sources.ads||[]).push({file:f.fileName,jenis:f.jenis,rows:f.rows,coverage:covOf(f)}); bl++; return; }
+    if(f.kind==='shop_metrics'){ LIB.baseline_sources.shop_metrics={file:f.fileName,metrics:f.metrics,prov:f.prov,found:f.found}; bl++; return; }
+    if(f.kind==='live'){ (LIB.baseline_sources.live=LIB.baseline_sources.live||[]).push({file:f.fileName,metrics:f.metrics||{},prov:f.prov||{},found:f.found||[]}); bl++; return; }
+    if(f.kind==='produk'){ LIB.hero=heroFrom(f.rows); heroSet++;
+      LIB.baseline_sources.txn_product=LIB.baseline_sources.txn_product||{file:f.fileName,
+        rows:f.rows.map(x=>({nama:x.nama,sku_id:x.sku_id,gmv:x.gmv,terjual:x.terjual,pesanan:0,pembeli:0})),coverage:null};
+      return; }
     if(f.kind==='baseline'){
       LIB.baseline_awal={file:f.fileName,periode:f.periode,kategori:f.kategori,
         sku_total:f.sku_total,sku_jalan:f.sku_jalan};
@@ -682,6 +875,7 @@ function mergeStage(){
   if(rows)bits.push(int(rows)+' baris · '+int(added)+' video baru · '+int(repl)+' snapshot diperbarui');
   if(heroSet)bits.push('hero SKU diperbarui');
   if(links)bits.push(int(links)+' tautan mp4 masuk');
+  if(bl)bits.push(int(bl)+' sumber baseline masuk');
   toast(bits.join(' · ')||'Tidak ada data baru');
 }
 function rollup(v){
@@ -701,15 +895,8 @@ const libRows=()=>Object.values(LIB.videos).map(v=>({...v,agg:rollup(v)}));
 
 /* ═══════════ HERO SKU ═══════════ */
 const tokenize=s=>norm(s).replace(/[^\p{L}\p{N}\s]/gu,' ').split(/\s+/).filter(Boolean);
-/* kata isi: panjang >=4. angka: >=2 digit (ukuran 10/12/14/16 inci, 250ml) */
 const words=s=>tokenize(s).filter(w=>w.length>=4&&!/^\d+$/.test(w));
 const nums=s=>tokenize(s).filter(w=>/^\d{2,}$/.test(w));
-/* ── daftar produk yang benar-benar ada di library, beserta ID-nya ──
-   Kolom "Produk" di export membawa ID dalam tanda kurung, jadi pencocokan
-   hero SKU tidak perlu menebak nama: nama hero di-resolve SEKALI ke satu
-   produk (skor kata tertinggi, seri dipecah oleh GMV), lalu yang dipakai
-   mencocokkan video adalah ID-nya. Tanpa ini "Troli Cewek 14" ikut menarik
-   "Ransel Cewek 14" dan "Troli Tangkai Pita Cewek 14". */
 let PIDX=null, PIDX_SIG='';
 function prodIndex(){
   const sig=Object.keys(LIB.videos).length+'|'+(LIB.updated_at||'');
@@ -719,10 +906,6 @@ function prodIndex(){
     const key=norm(v.produk); if(!key)return;
     let e=m.get(key);
     if(!e){ e={nama:v.produk,ids:[],gmv:0,n:0}; m.set(key,e); }
-    /* HANYA id pertama: kolom Produk untuk video bundling berisi
-       "A(id1), B(id2)" — nama yang terbaca adalah A, jadi id milik nama itu
-       adalah id1. Menyerap id2 ke dalam nama A membuat satu hero SKU
-       menarik seluruh produk yang pernah dibundel bersamanya. */
     const first=(v.produk_ids||[])[0];
     if(first&&!e.ids.includes(String(first)))e.ids.push(String(first));
     e.gmv+=rollup(v).gmv; e.n++;
@@ -745,16 +928,11 @@ function resolveHero(h){
   if(best&&bs>=0.5&&best.ids.length)return {...h,ids:best.ids,cocok:best.nama,skor:bs};
   return {...h,ids:[],cocok:best&&bs>=0.5?best.nama:''};
 }
-/* hero yang AKTIF sebagai penanda (badge) — SKU di-exclude tetap di sini,
-   karena badge hero cuma soal "produk ini laris", bukan soal dipakai/tidak */
 function heroActive(){
   const manual=($('#fHeroManual').value||'').split(',').map(s=>s.trim()).filter(Boolean)
     .map(s=>({nama:s,sku_id:'',gmv:null,klik:null,ctor:null,manual:true}));
   return [...(LIB.hero||[]),...manual].map(resolveHero);
 }
-/* SKU yang di-exclude AM (tombol "Jangan pakai"). Video yang mempromosikan
-   SKU ini dibuang dari Papan (sumber angle + brief) SAJA — tetap ada di
-   Tracker, Export sheet, dan tetap dihitung di angka target/hit rate. */
 function heroExcluded(){ return (LIB.hero||[]).filter(h=>h.off===true).map(resolveHero); }
 function matchHero(v,h){
   const H=h.ids===undefined?resolveHero(h):h;
@@ -772,7 +950,7 @@ function renderHero(){
   const H=LIB.hero||[], rows=libRows();
   if(!H.length){
     $('#heroBox').innerHTML='<div class="empty"><b>Belum ada data hero SKU</b>'+
-      'Masukkan payload baseline CDPS (.json) atau export Analitik Produk TikTok di panel 2, '+
+      'Masukkan payload baseline CDPS (.json), export Analitik/Transaction Product TikTok, '+
       'atau ketik nama produknya di kolom bawah. Tanpa ini papan tetap jalan, tapi pemilihan angle '+
       'belum tentu jatuh di produk yang gampang dijual.</div>';
     return;
@@ -808,7 +986,7 @@ function renderHero(){
 }
 
 /* ═══════════ SELEKSI ═══════════ */
-let TAB='papan', RANK='gmv';
+let TAB='baseline', RANK='gmv';
 const F=()=>({sumber:$('#cSumber').value,periode:$('#cPeriode').value,
   pop:$('#cPop').value,hero:$('#cHero').value==='1'});
 function selection(){
@@ -826,7 +1004,6 @@ function selection(){
   });
   return out;
 }
-/* dua hit rate terpisah — keputusan CEO: tampilkan dua-duanya */
 function hitRates(rows){
   const act=rows.filter(r=>r.agg.vv>0);
   const post=act.filter(r=>r.posted);
@@ -967,7 +1144,6 @@ function paneBoard(rows,B){
     '<div id="pickbar"></div>'+
     '<div id="board" style="margin-top:16px"></div><div id="boardNote"></div></div></div>';
 }
-/* video terpilih untuk brief — disimpan lintas render selama sesi */
 let PICKED=new Set();
 function grade(val,B,key){
   if(val==null||!isFinite(val))return '';
@@ -979,7 +1155,6 @@ function grade(val,B,key){
 function renderBoard(){
   const box=$('#board'); if(!box)return;
   const B=window.__B;
-  /* Papan membuang video dari SKU yang di-exclude AM. Tracker & sheet tidak. */
   const rows=window.__rows.filter(r=>!r.excluded);
   const sell=rows.filter(r=>r.agg.gmv>0||r.agg.orders>=1);
   let list;
@@ -1076,7 +1251,6 @@ function bindSlots(){
   $$('[data-pick]').forEach(b=>b.addEventListener('change',()=>{
     const id=b.dataset.pick;
     if(b.checked)PICKED.add(id); else PICKED.delete(id);
-    /* update tampilan tanpa render ulang penuh: cukup toggle kelas + pickbar */
     const card=b.closest('.slot'); if(card)card.classList.toggle('picked',b.checked);
     const tr=b.closest('tr'); if(tr)tr.classList.toggle('picked',b.checked);
     renderPickbar();
@@ -1137,7 +1311,6 @@ function briefText(r,B){
    'AM             : '+($('#fAM').value||DASH)
   ].filter(x=>x!=='').join('\n');
 }
-/* ── file brief: satu baris per video, metadata + kolom kosong diisi CC ── */
 const BRIEF_HEAD=['no','klien','vertical','video_id','sumber','hero_sku','username','tautan_tonton',
   'produk','tayang','diposting_periode','vv','gmv','gpm','order','ctr_persen','ctor_persen',
   'tonton_selesai_persen','klik_ke_order_persen','diagnosis',
@@ -1156,7 +1329,7 @@ function briefRows(B){
       a.ctr==null?'':a.ctr.toFixed(2),a.ctor==null?'':a.ctor.toFixed(2),
       a.finish==null?'':a.finish.toFixed(2),a.klik_order==null?'':a.klik_order.toFixed(2),r.diagnosis||'',
       tgt('ctr'),tgt('ctor'),tgt('finish'),B.ambang,tag,agl,
-      '','','','','','',''];  // 7 kolom kosong: 4 isi-setelah-nonton + yang_diubah + deadline + pic
+      '','','','','','',''];
   });
 }
 function downloadBriefXlsx(){
@@ -1221,8 +1394,6 @@ function lev(a,b){
   }
   return d[m][n];
 }
-/* mirip = 4 karakter awal sama DAN jarak edit <=2; penjaga panjang mencegah
-   hashtag pendek yang tidak berhubungan ikut tertuduh salah tulis */
 function similarTag(t,b){
   if(t.length<7||b.length<7)return false;
   if(t.slice(0,4)!==b.slice(0,4))return false;
@@ -1258,7 +1429,6 @@ function paneTracker(rows){
     'untuk memakainya sebagai penanda tambahan.</div>';
   if(cloud.length)h+='<div style="margin-top:12px">'+cloud.map(([t,n])=>
     '<span class="tchip'+(tags.includes(t)?' on':'')+'" data-tag="'+esc(t)+'">'+esc(t)+' <b>'+n+'</b></span>').join('')+'</div>';
-  /* peringatan */
   const w=[];
   if(tags.length){
     const near=[...freq.keys()].filter(t=>!tags.includes(t)&&tags.some(b=>similarTag(t,b)));
@@ -1308,7 +1478,6 @@ function paneTracker(rows){
     ') atau konversi (CTOR '+pp(M.ctor)+' vs '+pp(L.ctor)+').');
   h+='<div class="note">'+D.join('<br><br>')+'</div></div></div>';
 
-  /* per angle */
   const pfx='#'+(($('#fAglPfx')&&$('#fAglPfx').value)||'agl').replace(/^#/,'').toLowerCase();
   const gm=new Map();
   mea.forEach(r=>{ const hit=(r.tags||[]).find(t=>t.startsWith(pfx)&&!tags.includes(t))||'(tanpa tag angle)';
@@ -1332,7 +1501,6 @@ function paneTracker(rows){
     '<div class="note">Ambang keputusan pola: di bawah 5 video data kurang · 5–19 kandidat · '+
     '20 atau lebih terbukti · 15 atau lebih dengan nol order berarti pola ditolak.</div></div></div>';
 
-  /* daftar + digest */
   const sorted=mea.slice().sort((a,b)=>b.agg.gmv-a.agg.gmv||b.agg.vv-a.agg.vv);
   h+='<div class="sec"><div class="sec-hd"><span class="tag">B4</span><h3>Daftar video MEA</h3>'+
     '<span class="pill p-off">'+int(mea.length)+' video</span></div><div class="sec-bd">'+
@@ -1454,284 +1622,446 @@ function paneSheet(){
     '</div></div>';
 }
 
-/* ═══════════ RENDER ═══════════ */
-function slug(s){ return String(s||'klien').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'klien'; }
+/* ═══════════ TAB D — BASELINE (CDPS Section B) ═══════════ */
+/* Input manual yang tidak ada di export mana pun. Disimpan di memori sesi. */
+const BLMAN={toko:'',kategori:'',prioritas:'',stokMin:'',months:'',periode:''};
+const SECT={'B-0':'Identitas channel','E-2':'Prioritas','B-2':'Trafik & konversi',
+  'B-3':'Produk & SKU','B-4':'Kesehatan toko','B-5':'Iklan berbayar',
+  'B-6':'Afiliasi & kreator','B-7':'Konten (video & live)','B-8':'Promo & program platform','B-9':'Kompetitor'};
+const ST_PILL={auto:['auto','p-ok'],partial:['parsial','p-mid'],manual:['manual','p-off'],na:['N/A','p-bad']};
+function blPill(s){ const p=ST_PILL[s]||ST_PILL.na; return '<span class="pill '+p[1]+'" style="margin:0">'+p[0]+'</span>'; }
+function baselineMonths(){
+  const set=new Set();
+  Object.values(LIB.videos).forEach(v=>v.snapshots.forEach(s=>{
+    const r=periodeRange(s.periode); if(r){ set.add(r.a.slice(0,7)); set.add(r.b.slice(0,7)); }
+  }));
+  return set;
+}
+function computeBaseline(){
+  const S=LIB.baseline_sources||{};
+  const shop=(S.shop_metrics&&S.shop_metrics.metrics)||null;
+  const shopProv=(S.shop_metrics&&S.shop_metrics.prov)||{};
+  const cat=(S.catalog&&S.catalog.rows)||null;
+  const catCov=(S.catalog&&S.catalog.coverage)||null;
+  const txnP=(S.txn_product&&S.txn_product.rows)||null;
+  const txnC=(S.txn_creator&&S.txn_creator.rows)||null;
+  const adsArr=S.ads||[]; const liveArr=S.live||[];
+  const vids=libRows();
+  const F=[]; const push=o=>F.push(Object.assign({prov:'',sub:'',disp:o.disp||(o.txt==null?'':esc(o.txt))},o));
+  const nsrc=Object.keys(S).length;
+
+  const txnGMV=txnP?txnP.reduce((a,x)=>a+num(x.gmv),0):0;
+  const videoGMV=vids.reduce((a,v)=>a+v.agg.gmv,0);
+  const videoViews=vids.reduce((a,v)=>a+v.agg.vv,0);
+  const videoActive=vids.filter(v=>v.agg.vv>0).length;
+  const affGMV=txnC?txnC.reduce((a,x)=>a+num(x.gmv),0):0;
+  const adsSpend=adsArr.reduce((a,g)=>a+g.rows.reduce((t,r)=>t+num(r.biaya),0),0);
+  const adsGMV=adsArr.reduce((a,g)=>a+g.rows.reduce((t,r)=>t+num(r.gmv),0),0);
+  const adsCount=adsArr.reduce((a,g)=>a+g.rows.length,0);
+  const adsTypes=[...new Set(adsArr.map(g=>g.jenis))];
+  const liveGMV=liveArr.reduce((a,l)=>a+num((l.metrics||{}).gmv),0);
+  const liveDur=liveArr.reduce((a,l)=>a+num((l.metrics||{}).durasi),0);
+  const liveHasDur=liveArr.some(l=>(l.found||[]).includes('durasi'));
+  const shopGMV=shop?num(shop.gmv):0;
+  const totalGMV=shopGMV||txnGMV||(videoGMV+liveGMV)||0;
+
+  const monthsSet=baselineMonths();
+  const months=(BLMAN.months?+BLMAN.months:0)||monthsSet.size||0;
+  const periodeRef=BLMAN.periode||[...monthsSet].sort().join(', ')||(LIB.baseline_awal&&LIB.baseline_awal.periode)||'';
+
+  const toko=BLMAN.toko||($('#fKlien').value||'').trim()||LIB.klien||'';
+  const kategori=BLMAN.kategori||$('#fVert').value||'';
+
+  /* ── B-0 ── */
+  push({sec:'B-0',label:'Channel',txt:'TikTok Shop',status:'auto'});
+  push({sec:'B-0',label:'Status channel',txt:'aktif (ada data transaksi/konten)',status:nsrc||vids.length?'auto':'na'});
+  push({sec:'B-0',label:'Nama toko',txt:toko||'(isi manual)',status:BLMAN.toko?'manual':(toko?'auto':'manual'),prov:BLMAN.toko?'':'dari kolom Klien'});
+  push({sec:'B-0',label:'Kategori utama',txt:kategori||'(isi manual)',status:BLMAN.kategori?'manual':'auto',prov:'dari kolom Vertical'});
+  push({sec:'B-0',label:'URL toko',txt:'tidak ada di export',status:'na'});
+  push({sec:'B-0',label:'Umur toko / tanggal buka',txt:'tidak ada di export',status:'na'});
+  push({sec:'B-0',label:'Badge / level toko',txt:'tidak ada di export',status:'na'});
+  const srcFiles=[]; if(shop)srcFiles.push(S.shop_metrics.file); if(cat)srcFiles.push(S.catalog.file);
+    if(txnP&&S.txn_product.file)srcFiles.push(S.txn_product.file); if(txnC)srcFiles.push(S.txn_creator.file);
+    adsArr.forEach(g=>srcFiles.push(g.file)); liveArr.forEach(l=>srcFiles.push(l.file));
+  push({sec:'B-0',label:'Sumber data',txt:srcFiles.length?srcFiles.join(' | '):'video library + '+int(nsrc)+' sumber',
+    disp:(srcFiles.length?srcFiles.map(esc).join('<br>'):'video library'),status:'auto'});
+  push({sec:'B-0',label:'Tanggal tarik data',txt:new Date().toISOString().slice(0,10),status:'auto'});
+  push({sec:'B-0.7',label:'Periode baseline',txt:periodeRef||'(tidak terdeteksi)',status:periodeRef?'auto':'na',
+    prov:months?(int(months)+' bulan terdeteksi'):'',sub:'diturunkan dari rentang tanggal export'});
+
+  /* ── E-2 ── */
+  push({sec:'E-2',label:'Prioritas channel',txt:BLMAN.prioritas||'(isi manual: utama / sekunder / uji coba)',
+    status:BLMAN.prioritas?'manual':'manual'});
+
+  /* ── B-2 ── */
+  push({sec:'B-2',label:'Pengunjung / bulan',txt:shop&&shop.pengunjung?int(shop.pengunjung):'tidak ada di export',
+    status:shop&&shop.pengunjung?'auto':'na',prov:shop?shopProv.pengunjung:''});
+  push({sec:'B-2',label:'Conversion rate',txt:shop&&shop.konversi?pp(shop.konversi):'tidak ada di export',
+    status:shop&&shop.konversi?'auto':'na',prov:shop?shopProv.konversi:''});
+  push({sec:'B-2',label:'Pembeli',txt:shop&&shop.pembeli?int(shop.pembeli):(txnP?'— (per-SKU, bukan toko)':'tidak ada'),
+    status:shop&&shop.pembeli?'auto':'na'});
+  const gmvMix=[]; if(videoGMV)gmvMix.push('video '+share(videoGMV,totalGMV)); if(liveGMV)gmvMix.push('live '+share(liveGMV,totalGMV));
+    if(affGMV)gmvMix.push('affiliate '+share(affGMV,totalGMV)); if(adsGMV)gmvMix.push('iklan '+share(adsGMV,totalGMV));
+  push({sec:'B-2.3',label:'Komposisi trafik (6 sumber resmi)',txt:'tidak ada di export',status:'na',
+    sub:'proxy sumber GMV: '+(gmvMix.length?gmvMix.join(' · '):'belum ada'),
+    disp:'<span style="color:var(--red)">tidak ada di export</span>'+(gmvMix.length?'<div class="sub">proxy sumber GMV — bukan trafik resmi: '+esc(gmvMix.join(' · '))+'</div>':'')});
+  push({sec:'B-2',label:'Entry point / halaman masuk',txt:'tidak ada di export',status:'na'});
+
+  /* ── B-3 ── */
+  let skuTotal=cat?cat.length:(txnP?txnP.length:null);
+  push({sec:'B-3',label:'SKU terdaftar',txt:skuTotal==null?'perlu product_list':int(skuTotal),
+    status:cat?'auto':(txnP?'partial':'na'),prov:cat?'katalog':(txnP?'dari transaksi (hanya yg pernah tampil)':'')});
+  let skuAktif=null;
+  if(cat&&catCov&&catCov.found.includes('status')){ skuAktif=cat.filter(r=>/aktif|active|live|tayang|jual/i.test(r.status)).length; }
+  push({sec:'B-3',label:'SKU aktif (listing live)',txt:skuAktif==null?'kolom status tidak ada':int(skuAktif),
+    status:skuAktif==null?'na':'auto'});
+  const skuJalan=txnP?txnP.filter(x=>num(x.gmv)>0).length:null;
+  push({sec:'B-3',label:'SKU ada penjualan',txt:skuJalan==null?'perlu transaksi produk':int(skuJalan),status:txnP?'auto':'na'});
+  let sku80=null;
+  if(txnP){ const sell=txnP.filter(x=>num(x.gmv)>0).sort((a,b)=>b.gmv-a.gmv); const tot=sell.reduce((a,x)=>a+x.gmv,0);
+    let cum=0,c=0; for(const x of sell){cum+=x.gmv;c++; if(tot&&cum/tot>=0.8)break;} sku80=tot?c:null; }
+  push({sec:'B-3.2',label:'SKU penyumbang 80% GMV',txt:sku80==null?'perlu transaksi produk':int(sku80)+' SKU',
+    status:txnP?'auto':'na',sub:skuJalan?('dari '+int(skuJalan)+' SKU yang jalan'):''});
+  let slow=null;
+  if(cat&&txnP){ const sellIds=new Set(),sellNames=new Set();
+    txnP.filter(x=>num(x.gmv)>0).forEach(x=>{ if(x.sku_id)sellIds.add(String(x.sku_id)); sellNames.add(norm(x.nama)); });
+    slow=cat.filter(r=>!((r.id&&sellIds.has(String(r.id)))||sellNames.has(norm(r.nama)))).length; }
+  push({sec:'B-3',label:'Slow movers (0 penjualan periode)',txt:slow==null?'perlu katalog + transaksi':int(slow),
+    status:(cat&&txnP)?'auto':'na'});
+  push({sec:'B-3.6',label:'Listing layak (%)',txt:'tidak bisa diturunkan (butuh audit listing)',status:'na'});
+  const top10=txnP?txnP.filter(x=>num(x.gmv)>0).sort((a,b)=>b.gmv-a.gmv).slice(0,10):[];
+  const top5=top10.slice(0,5);
+  push({sec:'B-3.3',label:'Top 5 SKU (GMV)',status:top5.length?'auto':'na',
+    txt:top5.length?top5.map((x,i)=>(i+1)+'. '+x.nama.slice(0,40)+' - '+rpS(x.gmv)).join(' | '):'perlu transaksi produk',
+    disp:top5.length?top5.map((x,i)=>(i+1)+'. '+esc(x.nama.slice(0,44))+' — <b class="mono">'+rpS(x.gmv)+'</b>').join('<br>'):'perlu transaksi produk'});
+  const stokMin=(BLMAN.stokMin!==''&&BLMAN.stokMin!=null)?+BLMAN.stokMin:5;
+  const hasStok=catCov?catCov.found.includes('stok'):false;
+  let kritis=null,kritisList=[];
+  if(cat&&hasStok){ kritisList=cat.filter(r=>r.stok<=stokMin).sort((a,b)=>a.stok-b.stok); kritis=kritisList.length; }
+  push({sec:'B-3.5',label:'Stok kritis (≤ '+stokMin+')',status:(cat&&hasStok)?'auto':'na',
+    txt:kritis==null?'kolom stok tidak ada':int(kritis)+' SKU',
+    disp:kritis==null?'kolom stok tidak ada':int(kritis)+' SKU'+(kritisList.length?'<div class="sub">'+kritisList.slice(0,5).map(r=>esc(r.nama.slice(0,32))+' ('+int(r.stok)+')').join(', ')+(kritisList.length>5?' …':'')+'</div>':'')});
+
+  /* ── B-4 ── */
+  const mget=(k,fmt)=>shop&&shop[k]!=null&&shop[k]!==0?{v:(fmt?fmt(shop[k]):int(shop[k])),s:'auto',p:shopProv[k]||''}:{v:'tidak ada di export',s:'na',p:''};
+  let m;
+  m=mget('rating',v=>dec(v,2)); push({sec:'B-4',label:'Rating toko',txt:m.v,status:m.s,prov:m.p});
+  m=mget('ulasan'); push({sec:'B-4',label:'Jumlah ulasan',txt:m.v,status:m.s,prov:m.p});
+  m=mget('chatrate',v=>pp(v)); push({sec:'B-4',label:'Chat response rate',txt:m.v,status:m.s,prov:m.p});
+  m=mget('chattime'); push({sec:'B-4',label:'Waktu respons chat',txt:shop&&shop.chattime?String(shop.chattime):'tidak ada di export',status:shop&&shop.chattime?'auto':'na'});
+  m=mget('terlambat',v=>pp(v)); push({sec:'B-4',label:'Pesanan terlambat',txt:m.v,status:m.s,prov:m.p});
+  push({sec:'B-4',label:'Poin penalti / pelanggaran',txt:'tidak ada di export',status:'na'});
+  push({sec:'B-4',label:'Tema keluhan utama',txt:'perlu baca manual ulasan/chat',status:'na'});
+
+  /* ── B-5 ── */
+  push({sec:'B-5',label:'Tipe kampanye aktif',txt:adsTypes.length?adsTypes.join(', '):'perlu data iklan',status:adsTypes.length?'auto':'na'});
+  push({sec:'B-5',label:'Jumlah kampanye/grup',txt:adsCount?int(adsCount):'perlu data iklan',status:adsCount?'auto':'na'});
+  push({sec:'B-5',label:'Total spend iklan',txt:adsSpend?rp(adsSpend):'perlu data iklan',status:adsSpend?'auto':'na'});
+  push({sec:'B-5',label:'GMV dari iklan',txt:adsGMV?rp(adsGMV):(adsCount?'kolom GMV tidak ada':'perlu data iklan'),status:adsGMV?'auto':(adsCount?'partial':'na')});
+  push({sec:'B-5',label:'ROAS blended',txt:adsSpend&&adsGMV?dec(adsGMV/adsSpend,2):'perlu spend+GMV',status:(adsSpend&&adsGMV)?'auto':'na'});
+  let topKw=null;{ const fk=new Map(); adsArr.forEach(g=>g.rows.forEach(r=>{ if(r.keyword)fk.set(r.keyword,(fk.get(r.keyword)||0)+num(r.gmv||r.biaya)); }));
+    const arr=[...fk.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5); if(arr.length)topKw=arr.map(x=>x[0]); }
+  push({sec:'B-5',label:'Top keyword/audiens',txt:topKw?topKw.join(', '):'kolom keyword tidak ada',status:topKw?'partial':'na'});
+  const boros=[]; adsArr.forEach(g=>g.rows.forEach(r=>{ if(num(r.biaya)>0&&num(r.pesanan)===0&&num(r.gmv)===0)boros.push({nm:r.kampanye||'(tanpa nama)',biaya:num(r.biaya)}); }));
+  boros.sort((a,b)=>b.biaya-a.biaya);
+  push({sec:'B-5',label:'Kampanye boros (spend, 0 order)',status:adsCount?(boros.length?'auto':'auto'):'na',
+    txt:adsCount?(boros.length?boros.length+' kampanye: '+boros.slice(0,5).map(b=>b.nm+' ('+rpS(b.biaya)+')').join(', '):'tidak ada'):'perlu data iklan',
+    disp:adsCount?(boros.length?'<b>'+int(boros.length)+'</b> kampanye<div class="sub">'+boros.slice(0,5).map(b=>esc(b.nm.slice(0,28))+' '+rpS(b.biaya)).join(', ')+(boros.length>5?' …':'')+'</div>':'tidak ada'):'perlu data iklan'});
+
+  /* ── B-6 ── */
+  const kreatorAktif=txnC?txnC.filter(x=>num(x.gmv)>0).length:null;
+  push({sec:'B-6',label:'Kreator aktif (ada penjualan)',txt:kreatorAktif==null?'perlu transaksi kreator':int(kreatorAktif),status:txnC?'auto':'na'});
+  push({sec:'B-6',label:'GMV dari affiliate',txt:txnC?rp(affGMV):'perlu transaksi kreator',status:txnC?'auto':'na'});
+  push({sec:'B-6',label:'% GMV dari affiliate',txt:(txnC&&totalGMV)?share(affGMV,totalGMV):'perlu total GMV',status:(txnC&&totalGMV)?'partial':'na',sub:totalGMV?'basis total GMV '+rpS(totalGMV):''});
+  let komisiAvg=null; if(cat&&catCov&&catCov.found.includes('komisi')){ const ks=cat.map(r=>r.komisi).filter(x=>x>0); if(ks.length)komisiAvg=ks.reduce((a,x)=>a+x,0)/ks.length; }
+  push({sec:'B-6',label:'Komisi rata-rata',txt:komisiAvg!=null?pp(komisiAvg):'kolom komisi tidak ada',status:komisiAvg!=null?'partial':'na'});
+  const topC=txnC?txnC.slice().sort((a,b)=>b.gmv-a.gmv).slice(0,5):[];
+  push({sec:'B-6',label:'Top 5 kreator (GMV)',status:topC.length?'auto':'na',
+    txt:topC.length?topC.map((x,i)=>(i+1)+'. '+x.nama+' - '+rpS(x.gmv)).join(' | '):'perlu transaksi kreator',
+    disp:topC.length?topC.map((x,i)=>(i+1)+'. @'+esc(x.nama.slice(0,28))+' — <b class="mono">'+rpS(x.gmv)+'</b>').join('<br>'):'perlu transaksi kreator'});
+  push({sec:'B-6',label:'Program sampel / gifting',txt:'tidak ada di export',status:'na'});
+
+  /* ── B-7 ── */
+  push({sec:'B-7',label:'Video bertayangan',txt:videoActive?int(videoActive):'perlu Video Performance List',status:videoActive?'auto':'na',
+    sub:months?('~'+dec(videoActive/months,1)+' video/bulan ('+int(months)+' bln)'):''});
+  push({sec:'B-7',label:'Total views video',txt:videoViews?int(videoViews):'perlu video',status:videoViews?'auto':'na'});
+  push({sec:'B-7',label:'GMV dari video',txt:videoGMV?rp(videoGMV):'perlu video',status:videoGMV?'auto':'na'});
+  push({sec:'B-7',label:'Jumlah sesi live',txt:liveArr.length?int(liveArr.length):'perlu Live Analysis',status:liveArr.length?'auto':'na'});
+  push({sec:'B-7',label:'GMV dari live',txt:liveArr.length?rp(liveGMV):'perlu Live Analysis',status:liveArr.length?'auto':'na'});
+  push({sec:'B-7',label:'Durasi live total',txt:liveHasDur?(int(liveDur)+' (satuan cek export)'):'kolom durasi tidak ada',status:liveHasDur?'partial':'na',sub:liveHasDur?'satuan menit/detik belum dipastikan':''});
+  push({sec:'B-7',label:'Host / studio',txt:'tidak ada di export',status:'na'});
+
+  /* ── B-8 / B-9 ── */
+  push({sec:'B-8',label:'Voucher / beban promo (%)',txt:'tidak ada di export',status:'na'});
+  push({sec:'B-8',label:'Program platform diikuti',txt:'tidak ada di export',status:'na'});
+  push({sec:'B-9',label:'Kompetitor & benchmark',txt:'riset manual (di luar export toko)',status:'na'});
+
+  const autoCount=F.filter(f=>f.status==='auto').length;
+  const naCount=F.filter(f=>f.status==='na').length;
+  return {fields:F,ready:(nsrc>0||vids.length>0),autoCount,naCount,nsrc,
+    sources:S,shop:!!shop,cat:!!cat,txnP:!!txnP,txnC:!!txnC,ads:adsArr.length,live:liveArr.length,video:videoActive,
+    klien:{toko,periode_referensi:periodeRef,kategori},
+    produk:{top_sku:top10.map(x=>({nama:x.nama,gmv:Math.round(x.gmv),klik:0,ctor:0})),
+      sku_total:skuTotal,sku_ada_penjualan:skuJalan}};
+}
+function paneBaseline(d){
+  if(!d.ready)
+    return '<div class="sec"><div class="sec-hd"><span class="tag">D</span><h3>Baseline channel — CDPS Section B</h3></div>'+
+      '<div class="sec-bd"><div class="empty"><b>Belum ada data untuk baseline</b>'+
+      'Tarik export TikTok Shop di panel 2: <b>product_list</b> (katalog), <b>Transaction Product/Creator</b>, '+
+      '<b>Shop Analytics Key metrics</b>, <b>Live Analysis</b>, <b>data kampanye iklan</b>, dan <b>Video Performance List</b>. '+
+      'Tool akan menurunkan sebanyak mungkin field Section B otomatis dan menandai yang tidak tersedia.</div></div></div>';
+  const want=[['shop','Shop Analytics Key metrics',d.shop],['catalog','product_list (katalog)',d.cat],
+    ['txn_product','Transaction Product',d.txnP],['txn_creator','Transaction Creator',d.txnC],
+    ['ads','Data iklan (product/live)',!!d.ads],['live','Live Analysis',!!d.live],['video','Video Performance List',!!d.video]];
+  let cov='<div class="sec"><div class="sec-hd"><span class="tag">D0</span><h3>Cakupan sumber data</h3>'+
+    '<span class="pill '+(d.naCount<d.fields.length/2?'p-ok':'p-mid')+'">'+int(d.autoCount)+' field auto · '+int(d.naCount)+' N/A</span></div><div class="sec-bd">';
+  cov+='<div class="grid g2">';
+  want.forEach(w=>{ const S=d.sources[w[0]];
+    let miss=''; if(w[0]==='catalog'&&S&&S.coverage)miss=S.coverage.missing.join(', ');
+      else if(w[0]==='txn_product'&&S&&S.coverage)miss=S.coverage.missing.join(', ');
+      else if(w[0]==='txn_creator'&&S&&S.coverage)miss=S.coverage.missing.join(', ');
+    cov+='<div class="bl-src"><span class="dot'+(w[2]?'':' bad')+'"></span>'+
+      '<span class="nm">'+esc(w[1])+'</span>'+
+      (w[2]?'<span class="mini toko" style="font-size:9.5px;padding:2px 6px;border-radius:2px">terbaca</span>'
+           :'<span class="miss">belum ada</span>')+
+      (miss?'<span class="miss" style="flex-basis:100%">kolom hilang: '+esc(miss)+'</span>':'')+'</div>';
+  });
+  cov+='</div>';
+  cov+='<div class="note">Field bertanda <b>N/A</b> memang tidak ada di export TikTok Shop mana pun — harus diisi manual '+
+    'atau lewat riset terpisah (mis. komposisi trafik resmi, umur toko, penalti, kompetitor). Tool tidak mengarang angka itu.</div>';
+  cov+='<div class="h4">Isian manual (yang tidak ada di export)</div><div class="grid g4">'+
+    '<label class="f"><span>Nama toko</span><input type="text" id="blToko" class="bl-manual" style="width:100%" value="'+esc(BLMAN.toko)+'" placeholder="'+esc(($('#fKlien').value||'').trim()||'nama toko')+'"></label>'+
+    '<label class="f"><span>Kategori utama</span><input type="text" id="blKat" style="width:100%" value="'+esc(BLMAN.kategori)+'" placeholder="'+esc($('#fVert').value)+'"></label>'+
+    '<label class="f"><span>Prioritas channel (E-2)</span><select id="blPrio" style="width:100%">'+
+      ['','utama','sekunder','uji coba'].map(o=>'<option value="'+o+'"'+(BLMAN.prioritas===o?' selected':'')+'>'+(o||'(pilih)')+'</option>').join('')+'</select></label>'+
+    '<label class="f"><span>Ambang stok kritis</span><input type="number" id="blStok" style="width:100%" value="'+esc(BLMAN.stokMin)+'" placeholder="5"></label>'+
+    '</div>';
+  cov+='</div></div>';
+
+  const order=['B-0','B-0.7','E-2','B-2','B-2.3','B-3','B-3.2','B-3.3','B-3.5','B-3.6','B-4','B-5','B-6','B-7','B-8','B-9'];
+  const groups={};
+  d.fields.forEach(f=>{ const g=f.sec.split('.')[0]; (groups[g]=groups[g]||[]).push(f); });
+  const seen=new Set(); let body='';
+  order.forEach(code=>{ const g=code.split('.')[0]; if(seen.has(g)||!groups[g])return; seen.add(g);
+    const rows=groups[g];
+    body+='<div class="sec"><div class="sec-hd"><span class="tag">'+esc(g)+'</span><h3>'+esc(SECT[g]||g)+'</h3></div>'+
+      '<div class="sec-bd"><div class="tbl-wrap"><table class="blf"><thead><tr><th>Field</th><th>Nilai</th><th style="text-align:right">Sumber</th></tr></thead><tbody>'+
+      rows.map(f=>'<tr><td>'+esc(f.label)+(f.sec.includes('.')?' <span class="mono" style="color:var(--mute);font-size:10px">'+esc(f.sec)+'</span>':'')+
+        (f.sub&&!f.disp.includes('class="sub"')?'<div class="sub">'+esc(f.sub)+'</div>':'')+'</td>'+
+        '<td>'+f.disp+(f.prov?'<div class="prov">'+esc(f.prov)+'</div>':'')+'</td>'+
+        '<td style="text-align:right">'+blPill(f.status)+'</td></tr>').join('')+
+      '</tbody></table></div></div></div>';
+  });
+  return cov+body;
+}
+function wireBaseline(){
+  const bind=(id,key,ev)=>{ const el=$('#'+id); if(!el)return;
+    el.addEventListener(ev||'input',()=>{ BLMAN[key]=el.value; $('#paneD').innerHTML=paneBaseline(computeBaseline()); wireBaseline(); }); };
+  bind('blToko','toko'); bind('blKat','kategori'); bind('blPrio','prioritas','change'); bind('blStok','stokMin');
+}
+function baselineText(d){
+  const T=['BASELINE CHANNEL — CDPS SECTION B','Channel: TikTok Shop · Toko: '+(d.klien.toko||'(isi)')+
+    ' · Periode: '+(d.klien.periode_referensi||'(tidak terdeteksi)'),
+    'Diturunkan otomatis oleh MEA Video Factory v4 dari export TikTok Shop. Field N/A = tidak ada di export.',''];
+  let cur='';
+  d.fields.forEach(f=>{ const g=f.sec.split('.')[0];
+    if(g!==cur){ cur=g; T.push(''); T.push('['+g+'] '+(SECT[g]||g)); }
+    const st=(ST_PILL[f.status]||ST_PILL.na)[0];
+    T.push('  - '+f.label+(f.sec.includes('.')?' ('+f.sec+')':'')+': '+f.txt+'  ['+st+']'+(f.prov?'  {'+f.prov+'}':''));
+  });
+  return T.join('\n');
+}
+function baselineExportObj(d){
+  const section_b={};
+  d.fields.forEach(f=>{ section_b[f.sec+' '+f.label]={nilai:f.txt,status:f.status,sumber:f.prov||''}; });
+  return {schema:'cdps.baseline.v1',generated_at:new Date().toISOString(),tool:'MEA Video Factory v4',
+    klien:{toko:d.klien.toko,periode_referensi:d.klien.periode_referensi,kategori:d.klien.kategori},
+    produk:{top_sku:d.produk.top_sku,sku_total:d.produk.sku_total,sku_ada_penjualan:d.produk.sku_ada_penjualan},
+    section_b};
+}
+function baselineCsv(d){
+  const rows=[['section','field','nilai','status','sumber']];
+  d.fields.forEach(f=>rows.push([f.sec,f.label,f.txt,(ST_PILL[f.status]||ST_PILL.na)[0],f.prov||'']));
+  return rows;
+}
+
+/* ═══════════ RENDER & WIRING ═══════════ */
+function slug(s){ return String(s||'klien').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'klien'; }
+function fileChip(f){
+  if(f.error)return '<div class="chip bad"><span class="dot bad"></span><span class="nm">'+esc(f.fileName||'file')+
+    '</span><span class="rows">'+esc(f.error)+'</span></div>';
+  const L={video:['Video Performance','toko'],produk:['Analitik Produk','toko'],catalog:['Katalog product_list','toko'],
+    txn_product:['Transaction Product','toko'],txn_creator:['Transaction Creator','aff'],
+    ads:['Iklan '+(f.jenis||''),'toko'],shop_metrics:['Shop Key metrics','toko'],live:['Live Analysis','toko'],
+    baseline:['Payload baseline','toko'],library:['Library','toko'],links:['Tautan mp4','toko']}[f.kind]||['file',''];
+  let cnt=''; if(f.rows)cnt=int(f.rows.length)+' baris'; else if(f.found)cnt=int(f.found.length)+' metrik';
+  const miss=(f.coverage&&f.coverage.missing&&f.coverage.missing.length)?' · tanpa: '+f.coverage.missing.slice(0,4).join(', '):'';
+  return '<div class="chip"><span class="dot"></span><span class="mini '+(L[1]==='aff'?'aff':'toko')+'">'+esc(L[0])+'</span>'+
+    '<span class="nm">'+esc(f.fileName||'')+miss+'</span><span class="rows">'+cnt+'</span></div>';
+}
 function renderFiles(){
   const box=$('#filelist');
-  if(!STAGE.length){ box.innerHTML=''; $('#btnMerge').disabled=true; $('#btnClearFiles').disabled=true; return; }
-  box.innerHTML=STAGE.map((f,i)=>{
-    if(f.error)return '<div class="chip bad"><span class="dot bad"></span><span class="nm">'+esc(f.fileName)+
-      '</span><b style="color:var(--red);font-size:11px">'+esc(f.error)+'</b>'+
-      '<button class="btn ghost sm" data-drop="'+i+'">Buang</button></div>';
-    let mini='',info='';
-    if(f.kind==='video'){
-      /* Tampilkan label deteksi + cara deteksi. Kalau cara='username', label bisa salah
-         → AM harus bisa override sebelum mergeStage. */
-      const det=f.deteksi||{sumber:f.sumber,cara:'?'};
-      const warn=det.cara==='username';
-      mini='<select class="mini" data-src="'+i+'" style="padding:2px 5px;font-size:10.5px;'+
-        (warn?'border:1px solid var(--amber);background:#FDF9EE':'')+'">'+
-        '<option value="aff"'+(f.sumber==='aff'?' selected':'')+'>Video afiliasi</option>'+
-        '<option value="toko"'+(f.sumber==='toko'?' selected':'')+'>Video toko</option></select>'+
-        (warn?'<span style="color:var(--amber);font-size:10px;font-family:var(--mono)">&#9888; tebakan — cek</span>':'');
-      info=int(f.rows.length)+' baris · '+int(f.rows.filter(r=>r.gmv>0).length)+' ada GMV'+
-        (f.periode?' · '+f.periode:'')+(det.hint?' · '+det.hint:'');
-    }
-    if(f.kind==='produk'){ mini='<span class="mini">Analitik Produk</span>'; info=int(f.rows.length)+' SKU → hero SKU'; }
-    if(f.kind==='baseline'){ mini='<span class="mini">Baseline CDPS</span>';
-      info=(f.hero.length?int(f.hero.length)+' hero SKU':'tanpa data SKU')+(f.periode?' · '+f.periode:''); }
-    if(f.kind==='links'){ mini='<span class="mini">Tautan mp4</span>'; info=int(f.rows.length)+' tautan'; }
-    return '<div class="chip"><span class="dot"></span><span class="nm">'+esc(f.fileName)+'</span>'+mini+
-      '<span class="rows">'+info+'</span><button class="btn ghost sm" data-drop="'+i+'">Buang</button></div>';
-  }).join('');
-  $$('#filelist [data-drop]').forEach(b=>b.addEventListener('click',()=>{
-    STAGE.splice(+b.dataset.drop,1); renderFiles(); }));
-  $$('#filelist [data-src]').forEach(sel=>sel.addEventListener('change',()=>{
-    const i=+sel.dataset.src; STAGE[i].sumber=sel.value;
-    if(STAGE[i].deteksi)STAGE[i].deteksi.override=true;
-    renderFiles();
-  }));
-  $('#btnClearFiles').disabled=false;
-  const usable=STAGE.some(f=>!f.error);
-  const needKlien=!($('#fKlien').value||'').trim();
-  $('#btnMerge').disabled=!usable||needKlien;
-  $('#btnMerge').textContent=needKlien?'Isi nama klien dulu':'Masukkan ke library';
+  box.innerHTML=STAGE.length?STAGE.map(fileChip).join(''):'';
+  $('#btnMerge').disabled=!STAGE.some(f=>!f.error);
+  $('#btnClearFiles').disabled=!STAGE.length;
 }
 function refreshPeriode(){
-  const all=libRows();
-  const per=[...new Set(all.flatMap(r=>r.agg.periode_list))].sort().reverse();
-  const sel=$('#cPeriode'), cur=sel.value;
-  sel.innerHTML='<option value="">Semua periode</option>'+
-    per.map(p=>'<option value="'+esc(p)+'">'+esc(p)+'</option>').join('');
-  if(per.includes(cur))sel.value=cur;
+  const sel=$('#cPeriode'); if(!sel)return; const cur=sel.value; const set=new Set();
+  Object.values(LIB.videos).forEach(v=>v.snapshots.forEach(s=>set.add(s.periode)));
+  const opts=['<option value="">Semua periode</option>'].concat([...set].sort()
+    .map(p=>'<option value="'+esc(p)+'">'+esc(periodeLabel(p))+'</option>'));
+  sel.innerHTML=opts.join(''); if([...set].includes(cur))sel.value=cur;
+}
+function applyTab(){
+  $('#paneD').hidden=TAB!=='baseline'; $('#paneA').hidden=TAB!=='papan';
+  $('#paneB').hidden=TAB!=='tracker'; $('#paneC').hidden=TAB!=='sheet';
+  $$('#tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===TAB?'true':'false'));
+}
+function popNote(rows){
+  const el=$('#popNote'); if(!el)return;
+  if(!Object.keys(LIB.videos).length){ el.innerHTML=''; return; }
+  el.innerHTML='<div class="note">'+int(rows.length)+' video lolos saringan · '+
+    int(rows.filter(r=>r.agg.vv>0).length)+' bertayangan · '+
+    int(rows.filter(r=>r.agg.orders>=1).length)+' ada order.</div>';
 }
 function renderAll(){
-  const k=($('#fKlien').value||'').trim();
-  $('#mKlien').textContent=k?k+' · '+$('#fVert').value:'klien belum diisi';
-  const all=libRows();
-  $('#mLib').textContent=all.length?int(all.length)+' video · '+
-    int(all.filter(r=>r.agg.orders>=1).length)+' ada order':'library kosong';
-  $('#btnSaveLib').disabled=!all.length;
-  $('#btnResetLib').disabled=!all.length&&!(LIB.hero||[]).length;
-  refreshPeriode(); renderHero();
-
-  if(!all.length){
-    ['#paneA','#paneB','#paneC'].forEach(s=>$(s).innerHTML=
-      '<div class="sec"><div class="sec-bd"><div class="empty"><b>Library masih kosong</b>'+
-      'Masukkan export Video Performance List di panel 2, atau muat file library klien ini.</div></div></div>');
-    $('#outbar').hidden=true; $('#popNote').innerHTML=''; return;
-  }
-  const rows=selection(), B=baseline(rows);
+  refreshPeriode();
+  const klien=($('#fKlien').value||'').trim();
+  $('#mKlien').textContent=klien?('klien: '+klien):'klien belum diisi';
+  const nv=Object.keys(LIB.videos).length, nsrc=Object.keys(LIB.baseline_sources||{}).length;
+  $('#mLib').textContent=nv?(int(nv)+' video di library'):(nsrc?(int(nsrc)+' sumber baseline'):'library kosong');
+  $('#btnSaveLib').disabled=!(nv||nsrc); $('#btnResetLib').disabled=!(nv||nsrc);
+  renderHero();
+  const rows=selection(); const B=baseline(rows);
   window.__rows=rows; window.__B=B;
-  const tags=tagList();
-  $('#nPapan').textContent=int(rows.length);
-  $('#nTracker').textContent=tags.length?int(splitMea(rows,tags).mea.length):'0';
-
-  const f=F();
-  $('#popNote').innerHTML='<div class="note">'+
-    (f.pop==='posted'
-      ? 'Populasi <b>diposting dalam periode</b>: '+int(rows.length)+' video. Ini yang menilai produksi baru.'
-      : 'Populasi <b>semua video bertayangan</b>: '+int(rows.length)+' video, '+
-        int(rows.filter(r=>r.posted).length)+' di antaranya diposting dalam periode. '+
-        'Video lama masih bisa narik order — jangan pakai angka ini untuk menilai kerja bulan ini.')+
-    '</div>';
-
-  $('#paneA').innerHTML=paneTarget(B)+paneFunnel(rows)+paneBoard(rows,B);
-  $('#paneB').innerHTML=paneTracker(rows);
-  $('#paneC').innerHTML=paneSheet();
-  wirePanes();
-  renderOutbar();
+  const meaN=splitMea(rows,tagList()).mea.length;
+  $('#nPapan').textContent=nv?int(rows.filter(r=>r.agg.orders>=1&&!r.excluded).length):'';
+  $('#nTracker').textContent=(nv&&tagList().length)?int(meaN):'';
+  const BL=computeBaseline(); window.__BL=BL;
+  $('#nBaseline').textContent=BL.ready?int(BL.autoCount):'';
+  $('#paneD').innerHTML=paneBaseline(BL);
+  if(!nv){
+    const e='<div class="sec"><div class="sec-bd"><div class="empty"><b>Belum ada video di library</b>'+
+      'Tab ini perlu Video Performance List. Baseline di tab pertama sudah bisa jalan dari katalog / transaksi.</div></div></div>';
+    $('#paneA').innerHTML=e; $('#paneB').innerHTML=e; $('#paneC').innerHTML=e;
+  } else {
+    $('#paneA').innerHTML=paneTarget(B)+paneFunnel(rows)+paneBoard(rows,B);
+    $('#paneB').innerHTML=paneTracker(rows);
+    $('#paneC').innerHTML=paneSheet();
+  }
+  popNote(rows);
+  applyTab(); wirePanes(); renderOutbar();
 }
 function wirePanes(){
-  if($('#cRank')){ $('#cRank').value=RANK;
-    $('#cRank').onchange=e=>{RANK=e.target.value;renderBoard();};
+  if($('#cRank')){
+    $('#cRank').value=RANK;
+    $('#cRank').onchange=()=>{ RANK=$('#cRank').value; renderBoard(); };
     $('#cTop').onchange=renderBoard; $('#cView').onchange=renderBoard;
     $('#btnPickAll').onclick=()=>{ (window.__shown||[]).forEach(r=>PICKED.add(r.video_id)); renderBoard(); };
-    $('#btnPickNone').onclick=()=>{ (window.__shown||[]).forEach(r=>PICKED.delete(r.video_id)); renderBoard(); };
+    $('#btnPickNone').onclick=()=>{ PICKED.clear(); renderBoard(); };
     renderBoard();
   }
-  $$('#paneB .tchip').forEach(c=>c.addEventListener('click',()=>{
-    const t=c.dataset.tag, cur=tagList();
-    $('#fTag').value=(cur.includes(t)?cur.filter(x=>x!==t):[...cur,t]).join(', ');
+  $$('#paneB [data-tag]').forEach(c=>c.onclick=()=>{
+    const t=c.dataset.tag.replace(/^#/,'');
+    const list=($('#fTag').value||'').split(',').map(s=>s.trim()).filter(Boolean);
+    const norm2=s=>s.toLowerCase().replace(/^#/,'');
+    if(list.map(norm2).includes(t))$('#fTag').value=list.filter(s=>norm2(s)!==t).join(', ');
+    else { list.push('#'+t); $('#fTag').value=list.join(', '); }
     renderAll();
-  }));
-  if($('#fAglPfx'))$('#fAglPfx').addEventListener('change',renderAll);
-  if($('#digestBox')){
-    const dg=digestText(window.__rows);
-    $('#digestBox').textContent=dg;
-    $('#btnDigest').onclick=()=>copy(dg,'Digest tersalin — tempel ke project MEA Video Factory, tulis "Mode 6"');
-    $('#btnCsvMea').onclick=()=>{
-      const mea=splitMea(window.__rows,tagList()).mea;
-      const head=['klien','video_id','tautan','sumber','username','caption','hashtag','produk','hero_sku','tayang',
-        'periode','vv','gmv','gpm','order','klik_produk','ctr','ctor','tonton_selesai','ada_order'];
-      const body=mea.slice().sort((a,b)=>b.agg.gmv-a.agg.gmv).map(r=>{const a=r.agg;
-        return [LIB.klien,r.video_id,watchUrl(r),r.sumber==='aff'?'afiliasi':'toko','@'+r.username,r.caption,
-          (r.tags||[]).join(' '),r.produk,r.hero?'ya':'tidak',r.tanggal,a.periode_list.join(' | '),a.vv,
-          Math.round(a.gmv),Math.round(a.gpm),a.orders,a.prod_click,
-          a.ctr==null?'':a.ctr.toFixed(2),a.ctor==null?'':a.ctor.toFixed(2),
-          a.finish==null?'':a.finish.toFixed(2),a.orders>=1?'ya':'tidak'];});
-      download('video-mea-'+slug(LIB.klien)+'.csv','﻿'+csv([head,...body]),'text/csv;charset=utf-8');
-    };
-  }
-  if($('#cScope')){
-    $('#cScope').onchange=()=>{ $('#paneC').innerHTML=paneSheet(); wirePanes(); };
-    const sc=()=>$('#cScope').value;
-    $('#btnTsvPerf').onclick=()=>copy(tsv([PERFORMA_HEAD,...performaRows(sc())]),'TSV PERFORMA tersalin — tempel di sel A1 tab PERFORMA');
-    $('#btnCsvPerf').onclick=()=>download('performa-'+slug(LIB.klien)+'.csv','﻿'+csv([PERFORMA_HEAD,...performaRows(sc())]),'text/csv;charset=utf-8');
-    $('#btnTsvLog').onclick=()=>copy(tsv([VIDEOLOG_HEAD,...videologRows(sc())]),'TSV VIDEO_LOG tersalin — tempel di sel A1 tab VIDEO_LOG');
-    $('#btnCsvLog').onclick=()=>download('videolog-'+slug(LIB.klien)+'.csv','﻿'+csv([VIDEOLOG_HEAD,...videologRows(sc())]),'text/csv;charset=utf-8');
-  }
+  });
+  if($('#fAglPfx'))$('#fAglPfx').oninput=()=>{ $('#paneB').innerHTML=paneTracker(window.__rows); wirePanes(); };
+  if($('#btnDigest'))$('#btnDigest').onclick=()=>{ const t=digestText(window.__rows); $('#digestBox').textContent=t; copy(t,'Digest tersalin'); };
+  if($('#btnCsvMea'))$('#btnCsvMea').onclick=()=>{
+    const mea=splitMea(window.__rows,tagList()).mea.slice().sort((a,b)=>b.agg.gmv-a.agg.gmv);
+    const head=['video_id','username','sumber','vv','gmv','orders','ctr','ctor','finish','tags','caption'];
+    const rows=mea.map(r=>[r.video_id,'@'+r.username,r.sumber,Math.round(r.agg.vv),Math.round(r.agg.gmv),r.agg.orders,
+      r.agg.ctr==null?'':r.agg.ctr.toFixed(2),r.agg.ctor==null?'':r.agg.ctor.toFixed(2),
+      r.agg.finish==null?'':r.agg.finish.toFixed(2),(r.tags||[]).join(' '),String(r.caption||'').replace(/\s+/g,' ')]);
+    download('video-mea-'+slug(LIB.klien)+'.csv','﻿'+csv([head,...rows]),'text/csv;charset=utf-8'); toast('CSV video MEA diunduh');
+  };
+  if($('#cScope'))$('#cScope').onchange=()=>{ $('#paneC').innerHTML=paneSheet(); wirePanes(); };
+  if($('#btnTsvPerf'))$('#btnTsvPerf').onclick=()=>copy(PERFORMA_HEAD.join('\t')+'\n'+tsv(performaRows($('#cScope').value)),'TSV PERFORMA tersalin');
+  if($('#btnCsvPerf'))$('#btnCsvPerf').onclick=()=>download('performa-'+slug(LIB.klien)+'.csv','﻿'+csv([PERFORMA_HEAD,...performaRows($('#cScope').value)]),'text/csv;charset=utf-8');
+  if($('#btnTsvLog'))$('#btnTsvLog').onclick=()=>copy(VIDEOLOG_HEAD.join('\t')+'\n'+tsv(videologRows($('#cScope').value)),'TSV VIDEO_LOG tersalin');
+  if($('#btnCsvLog'))$('#btnCsvLog').onclick=()=>download('videolog-'+slug(LIB.klien)+'.csv','﻿'+csv([VIDEOLOG_HEAD,...videologRows($('#cScope').value)]),'text/csv;charset=utf-8');
+  wireBaseline();
 }
 function renderOutbar(){
-  const bar=$('#outBtns'); $('#outbar').hidden=false;
-  const B=window.__B;
-  if(TAB==='papan'){
-    $('#outLb').textContent='Output papan';
-    bar.innerHTML='<button class="btn ghost" id="oTarget">Copy angka target</button>'+
-      '<button class="btn ghost" id="oCsv">CSV baris utama</button>'+
-      '<button class="btn ghost" id="oSnap">CSV snapshot</button>'+
-      '<button class="btn sig" id="oPayload">Payload JSON</button>';
-    $('#oTarget').onclick=()=>copy(targetText(B),'Angka target tersalin');
-    $('#oCsv').onclick=csvMain; $('#oSnap').onclick=csvSnap; $('#oPayload').onclick=payloadOut;
+  const bar=$('#outbar'), box=$('#outBtns');
+  const nv=Object.keys(LIB.videos).length, nsrc=Object.keys(LIB.baseline_sources||{}).length;
+  if(!nv&&!nsrc){ bar.hidden=true; return; } bar.hidden=false;
+  if(TAB==='baseline'){
+    $('#outLb').textContent='Baseline channel (CDPS Section B)';
+    box.innerHTML='<button class="btn sig sm" id="oBlCopy">Copy baseline (teks)</button>'+
+      '<button class="btn ghost sm" id="oBlJson">Unduh baseline (.json)</button>'+
+      '<button class="btn ghost sm" id="oBlCsv">Unduh baseline (.csv)</button>';
+    $('#oBlCopy').onclick=()=>copy(baselineText(window.__BL),'Baseline tersalin');
+    $('#oBlJson').onclick=()=>download('baseline-'+slug(LIB.klien)+'-'+new Date().toISOString().slice(0,10)+'.json',
+      JSON.stringify(baselineExportObj(window.__BL),null,2),'application/json');
+    $('#oBlCsv').onclick=()=>download('baseline-'+slug(LIB.klien)+'.csv','﻿'+csv(baselineCsv(window.__BL)),'text/csv;charset=utf-8');
+  } else if(TAB==='papan'){
+    $('#outLb').textContent='Angka target Creative';
+    box.innerHTML='<button class="btn sig sm" id="oTgt">Copy angka target</button>';
+    $('#oTgt').onclick=()=>copy(targetText(window.__B),'Angka target tersalin');
   } else if(TAB==='tracker'){
-    $('#outLb').textContent='Output tracker';
-    bar.innerHTML='<button class="btn sig" id="oDigest">Copy digest untuk chat</button>';
-    $('#oDigest').onclick=()=>copy(digestText(window.__rows),'Digest tersalin');
+    $('#outLb').textContent='Digest Creative';
+    box.innerHTML='<button class="btn sig sm" id="oDig">Copy digest</button>';
+    $('#oDig').onclick=()=>copy(digestText(window.__rows),'Digest tersalin');
   } else {
-    $('#outLb').textContent='Output sheet';
-    bar.innerHTML='<button class="btn sig" id="oTsv">Copy TSV PERFORMA</button>'+
-      '<button class="btn ghost" id="oTsv2">Copy TSV VIDEO_LOG</button>';
-    const sc=()=>($('#cScope')&&$('#cScope').value)||'mea';
-    $('#oTsv').onclick=()=>copy(tsv([PERFORMA_HEAD,...performaRows(sc())]),'TSV PERFORMA tersalin');
-    $('#oTsv2').onclick=()=>copy(tsv([VIDEOLOG_HEAD,...videologRows(sc())]),'TSV VIDEO_LOG tersalin');
+    $('#outLb').textContent='Export sheet';
+    box.innerHTML='<button class="btn sig sm" id="oPerf">Copy TSV PERFORMA</button>';
+    $('#oPerf').onclick=()=>copy(PERFORMA_HEAD.join('\t')+'\n'+tsv(performaRows(($('#cScope')&&$('#cScope').value)||'mea')),'TSV PERFORMA tersalin');
   }
 }
-function csvMain(){
-  const list=(window.__rows||[]).slice().sort((a,b)=>b.agg.gmv-a.agg.gmv);
-  const head=['klien','sumber','username','video_id','tautan_tonton','caption','hashtag','produk','produk_ids',
-    'hero_sku','tayang','diposting_dalam_periode','minggu_aktif','periode','vv','gmv','gpm','order','klik_produk',
-    'produk_dilihat','pembeli','ctr_persen','ctor_persen','tonton_selesai_persen','klik_ke_order_persen','diagnosis'];
-  const body=list.map(r=>{ const a=r.agg;
-    return [LIB.klien,r.sumber==='aff'?'afiliasi':'toko','@'+r.username,r.video_id,watchUrl(r),r.caption,
-      (r.tags||[]).join(' '),r.produk,(r.produk_ids||[]).join(' '),r.hero?'ya':'tidak',r.tanggal,
-      r.posted?'ya':'tidak',a.minggu,a.periode_list.join(' | '),a.vv,Math.round(a.gmv),Math.round(a.gpm),
-      a.orders,a.prod_click,a.prod_view,a.buyers,
-      a.ctr==null?'':a.ctr.toFixed(2),a.ctor==null?'':a.ctor.toFixed(2),
-      a.finish==null?'':a.finish.toFixed(2),a.klik_order==null?'':a.klik_order.toFixed(2),r.diagnosis];});
-  download('video-factory-'+slug(LIB.klien)+'-baris-utama.csv','﻿'+csv([head,...body]),'text/csv;charset=utf-8');
+function mergeLib(lib){
+  LIB.videos=lib.videos||LIB.videos||{};
+  LIB.hero=lib.hero&&lib.hero.length?lib.hero:(LIB.hero||[]);
+  LIB.baseline_awal=lib.baseline_awal||LIB.baseline_awal||null;
+  LIB.baseline_sources=lib.baseline_sources||LIB.baseline_sources||{};
+  if(lib.klien&&!($('#fKlien').value||'').trim())$('#fKlien').value=lib.klien;
+  if(lib.tag&&!($('#fTag').value||'').trim())$('#fTag').value=lib.tag;
+  if(lib.vertical)$('#fVert').value=lib.vertical;
+  LIB.klien=lib.klien||LIB.klien; LIB.tag=lib.tag||LIB.tag; LIB.vertical=lib.vertical||LIB.vertical;
+  renderAll(); toast('Library dimuat: '+int(Object.keys(LIB.videos).length)+' video');
 }
-function csvSnap(){
-  const head=['klien','sumber','periode','periode_sheet','username','video_id','tautan_tonton','vv','gmv',
-    'gpm_lapor','order','klik_produk','produk_dilihat','ctr_persen','ctor_persen','tonton_selesai_persen','file_sumber'];
-  const body=[];
-  (window.__rows||[]).forEach(r=>r.snapshots.forEach(s=>body.push([LIB.klien,
-    s.sumber==='aff'?'afiliasi':'toko',s.periode,periodeLabel(s.periode),'@'+r.username,r.video_id,watchUrl(r),
-    s.vv,Math.round(s.gmv),Math.round(s.gpm_lapor),s.orders,s.prod_click,s.prod_view,
-    s.ctr?s.ctr.toFixed(2):'',s.ctor?s.ctor.toFixed(2):'',s.finish?s.finish.toFixed(2):'',s.file])));
-  download('video-factory-'+slug(LIB.klien)+'-snapshot.csv','﻿'+csv([head,...body]),'text/csv;charset=utf-8');
-}
-function payloadOut(){
-  const rows=window.__rows||[], B=window.__B, tags=tagList();
-  const {mea}=splitMea(rows,tags);
-  const r2=v=>v==null||!isFinite(v)?null:+v.toFixed(2);
-  const out={
-    schema:SCHEMA, generated_at:new Date().toISOString(),
-    klien:{nama:LIB.klien||null,vertical:$('#fVert').value,tag_penanda:tags,
-      account_manager:($('#fAM').value||'').trim()||null},
-    filter:F(),
-    hero_sku:heroActive().map(h=>({nama:h.nama,sku_id:h.sku_id||null,
-      gmv:h.gmv==null?null:Math.round(h.gmv),ctor_persen:r2(h.ctor),manual:!!h.manual})),
-    baseline_awal:LIB.baseline_awal||null,
-    hit_rate:{semua_bertayangan:{n:B.hit.semua.n,jual:B.hit.semua.jual,rate:B.hit.semua.rate==null?null:+B.hit.semua.rate.toFixed(4)},
-      diposting_periode:{n:B.hit.diposting.n,jual:B.hit.diposting.jual,rate:B.hit.diposting.rate==null?null:+B.hit.diposting.rate.toFixed(4)}},
-    target_creative:{ambang_tayangan_vv:B.ambang,vv_minimum_target:VV_BISING,
-      dasar_target:B.dasar,video_toko_bertayangan:B.floor.n,
-      cukup_data:{lantai:B.floor.cukup,target:B.tgt.cukup,minimum:{lantai:MIN_FLOOR,target:MIN_TARGET}},
-      lantai_toko:{ctr_persen:r2(B.floor.ctr),ctor_persen:r2(B.floor.ctor),tonton_selesai_persen:r2(B.floor.finish)},
-      tengah:{ctr_persen:r2(B.tgt.ctr_med),ctor_persen:r2(B.tgt.ctor_med),tonton_selesai_persen:r2(B.tgt.finish_med)},
-      target_p75:{ctr_persen:r2(B.tgt.ctr_p75),ctor_persen:r2(B.tgt.ctor_p75),tonton_selesai_persen:r2(B.tgt.finish_p75)},
-      durasi:'tidak tersedia di export TikTok'},
-    video_mea:{n:mea.length,jual:mea.filter(r=>r.agg.orders>=1).length},
-    videos:rows.map(r=>({video_id:r.video_id,sumber:r.sumber,username:r.username,caption:r.caption,
-      hashtag:r.tags||[],produk:r.produk,hero_sku:r.hero,tayang:r.tanggal,
-      diposting_dalam_periode:r.posted,watch_url:watchUrl(r),
-      agregat:{vv:r.agg.vv,gmv:Math.round(r.agg.gmv),gpm:Math.round(r.agg.gpm),order:r.agg.orders,
-        klik_produk:r.agg.prod_click,ctr_persen:r2(r.agg.ctr),ctor_persen:r2(r.agg.ctor),
-        tonton_selesai_persen:r2(r.agg.finish),minggu_aktif:r.agg.minggu},
-      snapshots:r.snapshots.map(s=>({periode:s.periode,periode_sheet:periodeLabel(s.periode),
-        sumber:s.sumber,vv:s.vv,gmv:Math.round(s.gmv),order:s.orders}))}))
-  };
-  download('payload-'+SCHEMA+'-'+slug(LIB.klien)+'.json',JSON.stringify(out,null,2),'application/json');
+async function intake(files){
+  const arr=Array.from(files); if(!arr.length)return;
+  toast('Membaca '+int(arr.length)+' file…');
+  const results=await Promise.all(arr.map(readFile));
+  results.forEach(r=>{ if(r.kind==='library')mergeLib(r.lib); else STAGE.push(r); });
+  renderFiles();
+  const ok=results.filter(r=>!r.error&&r.kind!=='library').length, err=results.filter(r=>r.error).length;
+  toast(int(ok)+' file siap'+(err?', '+int(err)+' gagal':''));
 }
 
-/* ═══════════ WIRING ═══════════ */
-$$('#tabs button').forEach(b=>b.addEventListener('click',()=>{
-  TAB=b.dataset.tab;
-  $$('#tabs button').forEach(x=>x.setAttribute('aria-selected',String(x===b)));
-  $('#paneA').hidden=TAB!=='papan'; $('#paneB').hidden=TAB!=='tracker'; $('#paneC').hidden=TAB!=='sheet';
-  renderOutbar();
-  if(TAB==='papan'&&$('#cRank'))renderBoard();
-}));
-const drop=$('#drop'), filein=$('#filein');
-$('#btnPick').addEventListener('click',e=>{ e.stopPropagation(); filein.click(); });
-drop.addEventListener('click',()=>filein.click());
-drop.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); filein.click(); } });
-['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('hot');}));
-['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('hot');}));
-drop.addEventListener('drop',e=>intake(e.dataTransfer.files));
-filein.addEventListener('change',e=>{ intake(e.target.files); e.target.value=''; });
-async function intake(files){
-  for(const f of Array.from(files)){
-    const res=await readFile(f);
-    res.fileName=res.fileName||f.name;
-    if(res.kind==='library'){ mergeLib(res.lib); continue; }
-    STAGE.push(res);
-  }
-  renderFiles();
-}
-function mergeLib(inc){
-  if(!inc||!inc.videos)return toast('Bukan file library');
-  let add=0,mrg=0;
-  if(inc.klien&&!($('#fKlien').value||'').trim())$('#fKlien').value=inc.klien;
-  if(inc.tag&&!($('#fTag').value||'').trim())$('#fTag').value=inc.tag;
-  if(inc.vertical)$('#fVert').value=inc.vertical;
-  if(inc.hero&&inc.hero.length&&!(LIB.hero||[]).length)LIB.hero=inc.hero;
-  if(inc.baseline_awal&&!LIB.baseline_awal)LIB.baseline_awal=inc.baseline_awal;
-  Object.values(inc.videos).forEach(v=>{
-    const cur=LIB.videos[v.video_id];
-    if(!cur){ LIB.videos[v.video_id]=v; add++; return; }
-    (v.snapshots||[]).forEach(s=>{
-      const at=cur.snapshots.findIndex(x=>snapKey(x)===snapKey(s));
-      if(at>-1)cur.snapshots[at]=s; else cur.snapshots.push(s);
-    });
-    cur.play_url=cur.play_url||v.play_url||'';
-    mrg++;
-  });
-  LIB.klien=($('#fKlien').value||'').trim()||LIB.klien;
-  renderAll();
-  toast('Library dimuat · '+add+' video baru · '+mrg+' digabung');
-}
+/* listeners */
+const drop=$('#drop');
+['dragenter','dragover'].forEach(e=>drop.addEventListener(e,ev=>{ ev.preventDefault(); drop.classList.add('hot'); }));
+['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ ev.preventDefault(); drop.classList.remove('hot'); }));
+drop.addEventListener('drop',ev=>{ if(ev.dataTransfer&&ev.dataTransfer.files)intake(ev.dataTransfer.files); });
+drop.addEventListener('click',()=>$('#filein').click());
+drop.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); $('#filein').click(); } });
+$('#btnPick').addEventListener('click',e=>{ e.stopPropagation(); $('#filein').click(); });
+$('#filein').addEventListener('change',()=>{ intake($('#filein').files); $('#filein').value=''; });
 $('#btnMerge').addEventListener('click',mergeStage);
 $('#btnClearFiles').addEventListener('click',()=>{ STAGE=[]; renderFiles(); });
 $('#btnSaveLib').addEventListener('click',()=>{
-  LIB.klien=($('#fKlien').value||'').trim()||LIB.klien;
-  LIB.vertical=$('#fVert').value; LIB.tag=($('#fTag').value||'').trim();
-  LIB.updated_at=new Date().toISOString();
-  download('library-video-factory-'+slug(LIB.klien)+'-'+new Date().toISOString().slice(0,10)+'.json',
-    JSON.stringify(LIB),'application/json');
+  LIB.klien=($('#fKlien').value||'').trim()||LIB.klien; LIB.tag=($('#fTag').value||'').trim();
+  LIB.vertical=$('#fVert').value; LIB.updated_at=new Date().toISOString();
+  download('library-'+slug(LIB.klien)+'.json',JSON.stringify(LIB,null,2),'application/json'); toast('Library disimpan');
 });
 $('#btnResetLib').addEventListener('click',()=>{
-  if(!confirm('Kosongkan library di layar ini? File .json yang sudah tersimpan tidak terpengaruh.'))return;
-  LIB={schema:SCHEMA,klien:($('#fKlien').value||'').trim(),vertical:$('#fVert').value,
-    tag:($('#fTag').value||'').trim(),updated_at:null,videos:{},hero:[],baseline_awal:null};
-  renderAll(); toast('Library dikosongkan');
+  if(!confirm('Reset semua data library sesi ini? File yang sudah disimpan tidak terpengaruh.'))return;
+  LIB={schema:SCHEMA,klien:'',vertical:'',tag:'',updated_at:null,videos:{},hero:[],baseline_awal:null,baseline_sources:{}};
+  STAGE=[]; PICKED.clear(); renderFiles(); renderAll(); toast('Library direset');
 });
-let dT;
-['fKlien','fTag','fAM','fAgl','fHeroManual'].forEach(id=>$('#'+id).addEventListener('input',()=>{
-  clearTimeout(dT); dT=setTimeout(()=>{ renderFiles(); renderAll(); },320);
-}));
-$('#fVert').addEventListener('change',renderAll);
-['cSumber','cPeriode','cPop','cHero'].forEach(id=>$('#'+id).addEventListener('change',renderAll));
+$('#tabs').addEventListener('click',e=>{ const b=e.target.closest('button[data-tab]'); if(!b)return;
+  TAB=b.dataset.tab; applyTab(); renderOutbar(); if(TAB==='papan'&&$('#cRank'))renderBoard(); });
+['fKlien','fTag','fVert','fAM','fAgl','fHeroManual','cSumber','cPeriode','cPop','cHero'].forEach(id=>{
+  const el=$('#'+id); if(!el)return;
+  el.addEventListener(el.tagName==='SELECT'?'change':'input',renderAll);
+});
 
 renderAll();
 </script>
