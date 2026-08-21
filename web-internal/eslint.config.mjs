@@ -24,6 +24,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Static assets served as-is — not source. Includes vendored third-party
+    // bundles (e.g. the SheetJS build under public/tools/) whose minified code
+    // should never be linted.
+    "public/**",
   ]),
 ]);
 
