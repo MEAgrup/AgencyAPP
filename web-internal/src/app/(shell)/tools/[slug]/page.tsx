@@ -2,6 +2,7 @@
 
 import { use } from 'react';
 import Link from 'next/link';
+import { useAuth } from '@/lib/auth-context';
 import { getEmbeddedTool } from '@/lib/embedded-tools';
 
 /**
@@ -17,6 +18,7 @@ import { getEmbeddedTool } from '@/lib/embedded-tools';
  */
 export default function EmbeddedToolPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
+  const { role, loading } = useAuth();
   const tool = getEmbeddedTool(slug);
 
   if (!tool) {
@@ -25,6 +27,26 @@ export default function EmbeddedToolPage({ params }: { params: Promise<{ slug: s
         <h1>Alat tidak ditemukan</h1>
         <p>
           Tidak ada alat terdaftar dengan kode <code>{slug}</code>.{' '}
+          <Link href="/">Kembali ke dashboard</Link>.
+        </p>
+      </div>
+    );
+  }
+
+  // The tool has no server endpoint to gate (all math runs in the browser), so
+  // render time is the only place access can be enforced — mirror the exact
+  // predicate the nav uses (`tool.access`), never a second copy of it. A deep
+  // link from a role outside the tool's audience is refused here, not merely
+  // hidden from the menu. `loading` holds the gate until /me resolves.
+  if (loading) {
+    return <div className="pageLoading">Memuat...</div>;
+  }
+  if (!role || !tool.access(role)) {
+    return (
+      <div>
+        <h1>Akses ditolak</h1>
+        <p style={{ margin: '6px 0 0', color: '#5A7184', maxWidth: 640 }}>
+          Alat <b>{tool.title}</b> hanya bisa digunakan oleh Team Creative &amp; Account Service.{' '}
           <Link href="/">Kembali ke dashboard</Link>.
         </p>
       </div>
