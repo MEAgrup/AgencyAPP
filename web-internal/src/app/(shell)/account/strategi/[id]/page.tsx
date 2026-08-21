@@ -163,6 +163,7 @@ import {
 } from '@/lib/strategi';
 import InterviewPrefillPanel from '@/components/strategi/InterviewPrefillPanel';
 import BaselinePrefillPanel from '@/components/strategi/BaselinePrefillPanel';
+import VideoFactoryImportPanel from '@/components/strategi/VideoFactoryImportPanel';
 import PlanPeriodsPanel from '@/components/strategi/PlanPeriodsPanel';
 import {
   assumptionsToBody,
@@ -679,6 +680,11 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
               {active === 'B' && (
                 <>
                   {baselinePrefill && <BaselinePrefillPanel prefill={baselinePrefill} />}
+                  <VideoFactoryImportPanel
+                    channels={drafts.channels}
+                    onApply={(channels) => patch('channels', channels)}
+                    disabled={!editable}
+                  />
                   <SectionB
                     draft={drafts.channels}
                     onChange={(channels) => patch('channels', channels)}

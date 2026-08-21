@@ -184,7 +184,7 @@ export interface ChannelDraft {
 // Draft factory
 // ---------------------------------------------------------------------------
 
-function blankChannel(channel: string): ChannelDraft {
+export function blankChannel(channel: string): ChannelDraft {
   return {
     channel,
     channel_lain: '',

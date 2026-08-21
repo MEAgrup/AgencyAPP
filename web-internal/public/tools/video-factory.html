@@ -1798,11 +1798,60 @@ function computeBaseline(){
 
   const autoCount=F.filter(f=>f.status==='auto').length;
   const naCount=F.filter(f=>f.status==='na').length;
-  return {fields:F,ready:(nsrc>0||vids.length>0),autoCount,naCount,nsrc,
+
+  /* ── Prefill CDPS Section B ──────────────────────────────────────────────
+     Payload SIAP-PAKAI untuk mengisi Section B di halaman Strategi CDPS. Beda
+     dengan `baselineText`/`baselineExportObj` yang untuk mata manusia (nilai
+     terformat "Rp." / "%", key = label): di sini key = nama field ChannelDraft
+     CDPS dan nilai = MENTAH sesuai yang diharapkan form:
+       - uang  → string rupiah major polos, mis. "9000000"  (money.parse CDPS)
+       - persen→ angka persen 0..100 (bukan pecahan)
+       - hitung→ angka bulat
+     Hanya field yang benar-benar terbaca ('auto'/'partial') yang disertakan;
+     field N/A sengaja DIHILANGKAN supaya sisi CDPS hanya mengisi yang kosong
+     dan tidak menimpa apa pun dengan 0. Tool tidak mengarang angka. */
+  const mny=v=>String(Math.round(v));
+  const prefill={channel:'TikTok Shop',status_channel:(nsrc||vids.length)?'Eksisting':''};
+  if(toko)prefill.nama_toko=toko;
+  if(srcFiles.length)prefill.sumber_data=srcFiles.join(' | ');
+  prefill.tanggal_ambil_data=new Date().toISOString().slice(0,10);
+  if(months)prefill.periode_baseline_bulan=months;
+  if(shop&&shop.pengunjung)prefill.pengunjung_per_bulan=Math.round(shop.pengunjung);
+  if(shop&&shop.konversi)prefill.conversion_rate_persen=shop.konversi;
+  if(skuTotal!=null)prefill.sku_listed=skuTotal;
+  if(skuAktif!=null)prefill.sku_aktif=skuAktif;
+  if(sku80!=null)prefill.sku_pareto_80=sku80;
+  if(slow!=null)prefill.sku_slow_moving=slow;
+  if(top5.length)prefill.top_sku=top5.map(x=>({nama:x.nama,gmv:mny(x.gmv)}));
+  if(kritisList.length)prefill.sku_stok_kritis=kritisList.slice(0,10).map(r=>r.nama);
+  if(shop&&shop.rating)prefill.rating_toko=shop.rating;
+  if(shop&&shop.ulasan)prefill.jumlah_ulasan=Math.round(shop.ulasan);
+  if(shop&&shop.chatrate)prefill.chat_response_rate_persen=shop.chatrate;
+  if(shop&&shop.terlambat)prefill.pesanan_terlambat_persen=shop.terlambat;
+  if(adsCount)prefill.jumlah_kampanye_aktif=adsCount;
+  if(topKw&&topKw.length)prefill.top_keyword=topKw.map(k=>({keyword:k}));
+  if(kreatorAktif!=null)prefill.affiliate_aktif_30hari=kreatorAktif;
+  if(txnC)prefill.gmv_affiliate=mny(affGMV);
+  if(txnC&&totalGMV)prefill.gmv_affiliate_persen=+(affGMV/totalGMV*100).toFixed(1);
+  if(topC.length)prefill.top_kreator=topC.map(x=>({nama:x.nama,gmv:mny(x.gmv)}));
+  if(videoActive)prefill.jumlah_video_per_bulan=months?Math.round(videoActive/months):videoActive;
+  if(videoViews)prefill.total_views=Math.round(videoViews);
+  if(videoGMV)prefill.gmv_video=mny(videoGMV);
+  if(liveArr.length&&liveGMV)prefill.gmv_live=mny(liveGMV);
+
+  return {fields:F,ready:(nsrc>0||vids.length>0),autoCount,naCount,nsrc,prefill,
     sources:S,shop:!!shop,cat:!!cat,txnP:!!txnP,txnC:!!txnC,ads:adsArr.length,live:liveArr.length,video:videoActive,
     klien:{toko,periode_referensi:periodeRef,kategori},
     produk:{top_sku:top10.map(x=>({nama:x.nama,gmv:Math.round(x.gmv),klik:0,ctor:0})),
       sku_total:skuTotal,sku_ada_penjualan:skuJalan}};
+}
+/* Payload prefill Section B — schema versioned supaya sisi CDPS bisa menolak
+   payload asing / versi lama. `field_count` bantu AM cek "berapa yang keisi". */
+function sectionBPayload(d){
+  const p=(d&&d.prefill)||{channel:'TikTok Shop'};
+  return {schema:'cdps.section_b.v1',generated_at:new Date().toISOString(),
+    tool:'MEA Video Factory v4',channel:p,
+    field_count:Object.keys(p).filter(k=>k!=='channel'&&k!=='status_channel').length};
 }
 function paneBaseline(d){
   if(!d.ready)
@@ -1993,9 +2042,12 @@ function renderOutbar(){
   if(!nv&&!nsrc){ bar.hidden=true; return; } bar.hidden=false;
   if(TAB==='baseline'){
     $('#outLb').textContent='Baseline channel (CDPS Section B)';
-    box.innerHTML='<button class="btn sig sm" id="oBlCopy">Copy baseline (teks)</button>'+
+    box.innerHTML='<button class="btn sig sm" id="oBlSB">Copy untuk CDPS Section B</button>'+
+      '<button class="btn ghost sm" id="oBlCopy">Copy baseline (teks)</button>'+
       '<button class="btn ghost sm" id="oBlJson">Unduh baseline (.json)</button>'+
       '<button class="btn ghost sm" id="oBlCsv">Unduh baseline (.csv)</button>';
+    $('#oBlSB').onclick=()=>{ const pl=sectionBPayload(window.__BL);
+      copy(JSON.stringify(pl,null,2),int(pl.field_count)+' field siap tempel ke Section B'); };
     $('#oBlCopy').onclick=()=>copy(baselineText(window.__BL),'Baseline tersalin');
     $('#oBlJson').onclick=()=>download('baseline-'+slug(LIB.klien)+'-'+new Date().toISOString().slice(0,10)+'.json',
       JSON.stringify(baselineExportObj(window.__BL),null,2),'application/json');
