@@ -173,6 +173,30 @@ describe('visibleNav — Account', () => {
   });
 });
 
+describe('visibleNav — Alat (embedded HTML tools)', () => {
+  const VF = '/tools/video-factory';
+
+  it('Account and Creative staff see Video Factory (its two audiences)', () => {
+    expect(hrefs(role('Account', 'staff')), 'Account staff should see Video Factory').toContain(VF);
+    expect(hrefs(role('Creative', 'staff')), 'Creative staff should see Video Factory').toContain(VF);
+  });
+
+  it('the other divisions do not get Video Factory in their menu', () => {
+    for (const division of ['Sales', 'Marketing', 'Finance', 'Ads', 'KOL', 'Live Stream']) {
+      expect(hrefs(role(division, 'staff')), `${division} staff must not see Video Factory`).not.toContain(VF);
+    }
+  });
+
+  it('OD and Director (read-everywhere) see it', () => {
+    expect(hrefs(role('Sales', 'staff', { od: true }))).toContain(VF);
+    expect(hrefs(role('Sales', 'staff', { director: true }))).toContain(VF);
+  });
+
+  it('is hidden while the role is still loading (gated, not universal)', () => {
+    expect(hrefs(null)).not.toContain(VF);
+  });
+});
+
 describe('visibleNav — Rekap Mingguan (M6D two-party access)', () => {
   it('Account staff and lead see the weekly recap worklist', () => {
     expect(hrefs(role('Account', 'staff'))).toContain('/account/rekap');

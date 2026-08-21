@@ -182,6 +182,19 @@ const DELIVERY_LINKS: NavItem[] = [
   { href: '/livestream', label: 'Live Stream', access: divisionQueue(LIVE_STREAM) },
 ];
 
+// Alat mandiri — utilitas HTML self-contained yang di-embed via iframe
+// (`@/lib/embedded-tools` + `/tools/[slug]`). Ini BUKAN halaman ber-data CDPS:
+// tidak ada panggilan API di dalamnya, jadi tidak ada gerbang server untuk
+// di-mirror. Menu di-trim murni sebagai kenyamanan — daftarkan ke divisi yang
+// memakainya (deep link tetap jalan untuk yang lain). Lihat DECISIONS.md
+// 2026-08-21 "Embed alat HTML AM di CDPS".
+const TOOLS_LINKS: NavItem[] = [
+  // Video Factory: AM memakai tab Papan (angka target Creative + sumber angle);
+  // CC / Leader Video memakai Tracker & Export sheet. Gate = Account + Creative
+  // (+ OD/Director read-all via ownedBy).
+  { href: '/tools/video-factory', label: 'Video Factory', access: ownedBy(ACCOUNT, CREATIVE) },
+];
+
 // Wave 3 — visibilitas & skoring (M11, M13, M14)
 const VISIBILITY_LINKS: NavItem[] = [
   // M11 My Tasks — the personal, cross-Client work view (§10: "Staff lihat punya
@@ -243,6 +256,7 @@ export const NAV_SECTIONS: NavSection[] = [
   { title: null, items: MAIN_LINKS },
   { title: 'Akuisisi', items: ACQUISITION_LINKS },
   { title: 'Delivery', items: DELIVERY_LINKS },
+  { title: 'Alat', items: TOOLS_LINKS },
   { title: 'Visibilitas', items: VISIBILITY_LINKS },
   { title: 'Portal', items: PORTAL_LINKS },
   { title: 'Admin', items: ADMIN_LINKS },
