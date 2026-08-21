@@ -22,6 +22,7 @@
  * reach a record through a notification (e.g. the SPV Account who must vote on a
  * `[Bermasalah]` transaction, M5-OA-5, without owning the Finance queue).
  */
+import { EMBEDDED_TOOLS } from './embedded-tools';
 import type { Role } from './types';
 
 export interface NavItem {
@@ -189,11 +190,13 @@ const DELIVERY_LINKS: NavItem[] = [
 // memakainya (deep link tetap jalan untuk yang lain). Lihat DECISIONS.md
 // 2026-08-21 "Embed alat HTML AM di CDPS".
 const TOOLS_LINKS: NavItem[] = [
-  // Video Factory: AM memakai tab Baseline (turunkan CDPS Section B dari export
-  // TikTok Shop) + Papan (angka target Creative + sumber angle); CC / Leader
-  // Video memakai Tracker & Export sheet. Gate = Account + Creative
-  // (+ OD/Director read-all via ownedBy).
-  { href: '/tools/video-factory', label: 'Video Factory', access: ownedBy(ACCOUNT, CREATIVE) },
+  // "AM - baseline riset" (MEA Video Factory): AM memakai tab Baseline (turunkan
+  // CDPS Section B dari export TikTok Shop) + Papan; CC / Leader Video memakai
+  // Tracker & Export sheet. Gate = HANYA divisi Creative & Account Service
+  // (owner decision 2026-08-21) — bukan read-all, jadi OD/Director murni tidak
+  // melihatnya. Predikat-nya SATU sumber di `@/lib/embedded-tools` (dipakai juga
+  // oleh guard halaman `/tools/[slug]`), jadi menu dan halaman tak pernah drift.
+  { href: '/tools/video-factory', label: 'AM - baseline riset', access: EMBEDDED_TOOLS['video-factory'].access },
 ];
 
 // Wave 3 — visibilitas & skoring (M11, M13, M14)
