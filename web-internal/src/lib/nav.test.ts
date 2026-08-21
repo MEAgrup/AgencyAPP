@@ -174,9 +174,10 @@ describe('visibleNav — Account', () => {
 });
 
 describe('visibleNav — Alat (embedded HTML tools)', () => {
-  // "AM - baseline riset" (video-factory). Owner decision 2026-08-21: usable by
-  // Team Creative & Account Service ONLY — a working tool, not a record to
-  // inspect, so the OD/Director read-everywhere bypass does NOT apply.
+  // "AM - baseline riset" (video-factory). Owner decision 2026-08-21: the tool is
+  // for Team Creative & Account Service, PLUS the read-everywhere layer
+  // (Director full / OD read-only, Role Matrix §4) who may VIEW every division's
+  // pages for oversight/QA.
   const VF = '/tools/video-factory';
 
   it('Account and Creative staff (its two audiences) see it', () => {
@@ -186,20 +187,15 @@ describe('visibleNav — Alat (embedded HTML tools)', () => {
     expect(hrefs(role('Account', 'lead'))).toContain(VF);
   });
 
-  it('the other divisions do not get it in their menu', () => {
+  it('the other divisions (without read-all) do not get it in their menu', () => {
     for (const division of ['Sales', 'Marketing', 'Finance', 'Ads', 'KOL', 'Live Stream']) {
       expect(hrefs(role(division, 'staff')), `${division} staff must not see it`).not.toContain(VF);
     }
   });
 
-  it('a pure OD/Director (not on Creative/Account) does NOT see it', () => {
-    expect(hrefs(role('Sales', 'staff', { od: true })), 'read-all OD must not see it').not.toContain(VF);
-    expect(hrefs(role('Sales', 'staff', { director: true })), 'read-all Director must not see it').not.toContain(VF);
-  });
-
-  it('an OD/Director who is themselves on Creative/Account still sees it (division match)', () => {
-    expect(hrefs(role('Account', 'lead', { od: true }))).toContain(VF);
-    expect(hrefs(role('Creative', 'lead', { director: true }))).toContain(VF);
+  it('Director and OD (read-everywhere) see it — even outside Creative/Account', () => {
+    expect(hrefs(role('Sales', 'staff', { director: true })), 'Director must see it (full access)').toContain(VF);
+    expect(hrefs(role('Sales', 'staff', { od: true })), 'OD must see it (read-everywhere)').toContain(VF);
   });
 
   it('is hidden while the role is still loading (gated, not universal)', () => {
@@ -259,13 +255,11 @@ describe('visibleNav — Marketing & Finance', () => {
 });
 
 describe('visibleNav — layered OD / Director', () => {
-  it('Director sees every item except the Creative/Account-only tool', () => {
+  it('Director sees every item', () => {
     const seen = hrefs(role('Sales', 'staff', { director: true }));
-    // "AM - baseline riset" is the one item NOT read-everywhere: it is gated to
-    // the Creative & Account divisions only (owner decision 2026-08-21), so a
-    // Director outside those divisions does not see it. Everything else does.
-    const expected = ALL_HREFS.filter((h) => h !== '/tools/video-factory');
-    expect(seen.sort()).toEqual([...expected].sort());
+    // Director is full-access (Role Matrix §4): every page of every division,
+    // the embedded tool included (owner decision 2026-08-21).
+    expect(seen.sort()).toEqual([...ALL_HREFS].sort());
   });
 
   it('OD sees every division item and the read-only admin/management items', () => {

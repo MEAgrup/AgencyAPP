@@ -192,9 +192,10 @@ const DELIVERY_LINKS: NavItem[] = [
 const TOOLS_LINKS: NavItem[] = [
   // "AM - baseline riset" (MEA Video Factory): AM memakai tab Baseline (turunkan
   // CDPS Section B dari export TikTok Shop) + Papan; CC / Leader Video memakai
-  // Tracker & Export sheet. Gate = HANYA divisi Creative & Account Service
-  // (owner decision 2026-08-21) — bukan read-all, jadi OD/Director murni tidak
-  // melihatnya. Predikat-nya SATU sumber di `@/lib/embedded-tools` (dipakai juga
+  // Tracker & Export sheet. Gate = divisi Creative & Account Service, PLUS layer
+  // read-everywhere (Director full / OD read-only, Role Matrix §4) yang boleh
+  // melihat semua halaman divisi mana pun untuk oversight/QA (owner decision
+  // 2026-08-21). Predikat-nya SATU sumber di `@/lib/embedded-tools` (dipakai juga
   // oleh guard halaman `/tools/[slug]`), jadi menu dan halaman tak pernah drift.
   { href: '/tools/video-factory', label: 'AM - baseline riset', access: EMBEDDED_TOOLS['video-factory'].access },
 ];
