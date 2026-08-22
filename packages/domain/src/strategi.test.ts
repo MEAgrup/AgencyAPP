@@ -60,7 +60,6 @@ import {
   MSG_TIDAK_ADA_BELUM_DIJAWAB,
   MSG_TOP_SKU_REQUIRED,
   MSG_URUTAN_EKSEKUSI_REQUIRED,
-  MSG_TRAFFIC_MIX_SUM,
   FLOOR_DISETUJUI_HEAD,
   FLOOR_INPUT_AM,
   STRATEGI_AKTIF,
@@ -1289,16 +1288,31 @@ describeDb('Section B — A-06 (groups B-2 … B-9)', () => {
     expect(c.trenPersen).toBeCloseTo(4.65, 1);
   });
 
-  it('refuses a traffic mix that is partial or does not add up (§7)', async () => {
+  it('menerima komposisi trafik tumpang-tindih / parsial (B-2.3 revisi 2026-08-22)', async () => {
     const serviceId = await seedService();
     const s = await createStrategi(sql, am(), serviceId, HEADER);
-    // Five of six filled: a composition that cannot be summed at all.
+    // Parsial (lima dari enam) — dulu ditolak, kini diterima.
     await expect(
       saveChannels(sql, am(), s.id, [{ ...SHOPEE, trafikLuarPersen: null }]),
-    ).rejects.toThrow(MSG_TRAFFIC_MIX_SUM);
+    ).resolves.not.toThrow();
+    // Tumpang-tindih (jumlah jauh di atas 100, Iklan overlay >100%) — diterima.
     await expect(
-      saveChannels(sql, am(), s.id, [{ ...SHOPEE, trafikOrganikPersen: 20 }]),
-    ).rejects.toThrow(MSG_TRAFFIC_MIX_SUM);
+      saveChannels(sql, am(), s.id, [
+        {
+          ...SHOPEE,
+          trafikOrganikPersen: 31.11,
+          trafikIklanPersen: 128.97,
+          trafikAffiliatePersen: 46.73,
+          trafikLivePersen: 4.14,
+          trafikVideoPersen: 34,
+          trafikLuarPersen: 15.13,
+        },
+      ]),
+    ).resolves.not.toThrow();
+    // Share negatif tetap ditolak (tak bermakna).
+    await expect(
+      saveChannels(sql, am(), s.id, [{ ...SHOPEE, trafikOrganikPersen: -5 }]),
+    ).rejects.toThrow();
   });
 
   it('refuses out-of-range and self-contradicting figures', async () => {

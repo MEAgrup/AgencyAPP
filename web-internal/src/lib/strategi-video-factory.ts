@@ -20,8 +20,9 @@
 //      hitung = bilangan bulat). Tidak ada penghitungan ulang di sini — hanya
 //      pemetaan nama-field + guard tipe.
 //   3. Tool hanya menyertakan field yang benar-benar terbaca; field N/A (umur
-//      toko, komposisi trafik resmi, penalti, kompetitor, dst.) sengaja absen
-//      dan tetap manual di Section B.
+//      toko, penalti, kompetitor, dst.) sengaja absen dan tetap manual di
+//      Section B. Sejak 2026-08-22 komposisi trafik B-2.3 IKUT dikirim apa
+//      adanya (GMV-share platform, boleh tumpang-tindih / >100%).
 //
 // Tool bersifat TikTok-Shop-only, jadi payload selalu channel "TikTok Shop":
 // prefill menyasar channel TikTok Shop di draft, dan MEMBUATNYA bila belum ada.
@@ -57,6 +58,15 @@ export interface VideoFactoryChannel {
   periode_baseline_bulan?: number;
   pengunjung_per_bulan?: number;
   conversion_rate_persen?: number;
+  /** B-2.3 komposisi trafik = GMV-share platform (boleh tumpang-tindih, tidak
+   *  wajib 100% — DECISIONS 2026-08-22). `trafik_luar_persen` memuat bucket
+   *  "Kartu Produk". Semua opsional; hanya dikirim bila ada data komposisi. */
+  trafik_organik_persen?: number;
+  trafik_iklan_persen?: number;
+  trafik_affiliate_persen?: number;
+  trafik_live_persen?: number;
+  trafik_video_persen?: number;
+  trafik_luar_persen?: number;
   sku_listed?: number;
   sku_aktif?: number;
   sku_pareto_80?: number;
@@ -187,6 +197,14 @@ export function applyVideoFactoryPrefill(
   // B-2 trafik & konversi
   scalar('pengunjung_per_bulan', c.pengunjung_per_bulan);
   scalar('conversion_rate_persen', c.conversion_rate_persen);
+  // B-2.3 komposisi trafik (GMV-share, boleh tumpang-tindih). `trafik_luar_persen`
+  // memuat bucket "Kartu Produk". Sama seperti field lain: hanya isi bila kosong.
+  scalar('trafik_organik_persen', c.trafik_organik_persen);
+  scalar('trafik_iklan_persen', c.trafik_iklan_persen);
+  scalar('trafik_affiliate_persen', c.trafik_affiliate_persen);
+  scalar('trafik_live_persen', c.trafik_live_persen);
+  scalar('trafik_video_persen', c.trafik_video_persen);
+  scalar('trafik_luar_persen', c.trafik_luar_persen);
   // B-3 SKU
   scalar('sku_listed', c.sku_listed);
   scalar('sku_aktif', c.sku_aktif);
