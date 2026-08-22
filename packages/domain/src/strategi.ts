@@ -519,7 +519,9 @@ export const MSG_AKSES_DUPLICATE =
   '[akses yang sama tidak boleh dicatat dua kali untuk satu channel]';
 /** A-06 / Rule 5 — a baseline group on an `Eksisting` channel is still blank. */
 export const MSG_BASELINE_GROUP_INCOMPLETE = '[data baseline channel belum lengkap]';
-/** B-2.3 / §7 — the traffic composition must add up. */
+/** B-2.3 / §7 — DIPENSIUN (DECISIONS 2026-08-22). Komposisi trafik kini
+ *  GMV-share platform yang tumpang-tindih, tidak wajib berjumlah 100%. Konstanta
+ *  dipertahankan (tak lagi dilempar) demi kompatibilitas importir lama. */
 export const MSG_TRAFFIC_MIX_SUM = '[komposisi sumber trafik wajib berjumlah 100%]';
 /** B-3.3 — at least one hero-SKU row; E-3 has nothing to promote without it. */
 export const MSG_TOP_SKU_REQUIRED = '[minimal satu SKU teratas wajib diisi per channel]';
@@ -3748,26 +3750,24 @@ function validateChannelBaselineShape(c: ChannelInput): void {
     if (String(v.tipe ?? '').trim() === '') throw new ValidationError(MSG_INCOMPLETE);
   }
 
-  // B-2.3 / §7: the six shares are all present or all absent, and when present
-  // they sum to 100 ±0,5. Five of six filled is a composition that cannot be
-  // summed, and letting it through means Section C stands on a partial mix.
-  const mix = [
+  // B-2.3 (revisi DECISIONS 2026-08-22): komposisi trafik = GMV-share platform
+  // yang TUMPANG-TINDIH (satu order via video afiliasi terhitung di Video DAN
+  // Affiliate; Iklan overlay bisa >100%). Aturan lama "semua-atau-tidak &
+  // berjumlah 100 ±0,5" DICABUT — memaksanya berarti mengarang angka baseline
+  // supaya "pas" dan menghapus sinyal tumpang-tindih yang justru mau dilihat.
+  // Yang tersisa: tiap bucket, bila diisi, tak boleh negatif (share negatif tak
+  // bermakna). Cermin CHECK `ck_strch_persen_range` pasca-migrasi b23.
+  for (const v of [
     c.trafikOrganikPersen,
     c.trafikIklanPersen,
     c.trafikAffiliatePersen,
     c.trafikLivePersen,
     c.trafikVideoPersen,
     c.trafikLuarPersen,
-  ];
-  const terisi = mix.filter((v) => v !== null && v !== undefined);
-  if (terisi.length !== 0 && terisi.length !== mix.length) {
-    throw new ValidationError(MSG_TRAFFIC_MIX_SUM);
-  }
-  if (terisi.length === mix.length) {
-    const total = terisi.reduce((a, b) => Number(a) + Number(b), 0);
-    if (!(total >= 99.5 && total <= 100.5)) {
-      throw new ValidationError(MSG_TRAFFIC_MIX_SUM);
-    }
+  ]) {
+    if (v === null || v === undefined) continue;
+    const n = Number(v);
+    if (Number.isNaN(n) || n < 0) throw new ValidationError(MSG_INCOMPLETE);
   }
 }
 

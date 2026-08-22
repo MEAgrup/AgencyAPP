@@ -146,7 +146,7 @@ Design note: **D-8 (asumsi target) is deliberately shareable.** The assumptions 
 |---|---|---|---|
 | B-2.1 | Total pengunjung toko/bulan | Number | W |
 | B-2.2 | Conversion rate toko (%) | % | W |
-| B-2.3 | Komposisi sumber trafik: organik / iklan / affiliate / live / video / luar platform (%) — total 100% | Struct % | W |
+| B-2.3 | Komposisi sumber GMV/trafik: organik / iklan (overlay) / affiliate / live / video / kartu produk (%) — **GMV-share platform, boleh tumpang-tindih, TIDAK wajib 100%** (revisi 2026-08-22, lihat DECISIONS) | Struct % | W |
 | B-2.4 | Halaman/entry point terbesar (search, feed, live, keranjang, chat) | Enum + note | O |
 
 **B-3 · Portofolio SKU**
@@ -375,7 +375,7 @@ Migration: new `notification_catalog_version` row = 2, four Strategi events + si
 - `STR_ASSUMPTION.status` ∈ `Berlaku` / `Gugur` / `Terverifikasi`; flipping to `Gugur` fires `strategi_revisi_disarankan`.
 - Floor price stored per SKU in `STR_PILLAR` (type `harga`); Brief validation reads it.
 - Attachments: export/screenshot per channel baseline group, max 10MB/file, stored with capture date; retained for the contract period + 24 months.
-- Percentage composition fields (B-2.3, D-3): DB check that the block sums to 100 (±0.5 tolerance).
+- Percentage composition fields: **D-3** (kontribusi channel, DERIVED) sums to 100 by construction. **B-2.3** traffic/GMV-share is **NOT** required to sum to 100 (revisi 2026-08-22): the platform reports overlapping GMV-share (an affiliate video counts in both Affiliate and Video; Ads is an overlay that can exceed 100%), so the DB check that enforced Σ=100 was dropped — each bucket is only validated `>= 0`. Recorded as-is so the overlap is visible in the report. See DECISIONS 2026-08-22.
 - Field-ID references (C-2): stored as an array of baseline field IDs, validated to exist within the same Strategi.
 - `STRG_CHANNEL.periode_baseline_bulan` (int 1–6) + `periode_mulai` / `periode_akhir` dates. The monthly baseline columns (B-1, B-5) are stored as rows in a child table keyed by `(channel_id, month_index)` — **not** as fixed `m1/m2/m3` columns, since the window is variable (D11). A shorter window than 3 requires `alasan_periode_pendek` to be non-null (DB check).
 - `visibilitas` per field: stored as a `STRG_FIELD_VISIBILITY` overlay table (`strategi_id`, `field_id`, `visibilitas`, `diubah_oleh`, `diubah_pada`) seeded from the §4.1 defaults. Hard-internal field IDs live in a constant list in `packages/core` and are rejected at both the TS predicate and the DB check — the two must not diverge (frozen invariant).

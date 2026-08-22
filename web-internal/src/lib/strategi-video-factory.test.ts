@@ -170,6 +170,25 @@ describe('applyVideoFactoryPrefill', () => {
     expect(c.channels[0].tipe_kampanye).toEqual([]);
   });
 
+  it('B-2.3 komposisi trafik dipetakan apa adanya (boleh tumpang-tindih, kartu→luar)', () => {
+    const { channels } = applyVideoFactoryPrefill(
+      [],
+      payload({
+        trafik_organik_persen: 31.11,
+        trafik_iklan_persen: 128.97,
+        trafik_affiliate_persen: 46.73,
+        trafik_live_persen: 4.14,
+        trafik_video_persen: 34,
+        trafik_luar_persen: 15.13,
+      }),
+    );
+    expect(channels[0].trafik_organik_persen).toBe('31.11');
+    expect(channels[0].trafik_iklan_persen).toBe('128.97'); // overlay >100% tidak dipangkas
+    expect(channels[0].trafik_affiliate_persen).toBe('46.73');
+    expect(channels[0].trafik_video_persen).toBe('34');
+    expect(channels[0].trafik_luar_persen).toBe('15.13'); // bucket "Kartu Produk"
+  });
+
   it('B-7 jam_live_per_bulan + host_live dipetakan', () => {
     const { channels } = applyVideoFactoryPrefill(
       [],

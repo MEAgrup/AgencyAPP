@@ -2130,9 +2130,10 @@ function baselineCsv(d){
      - tipe kampanye → KEY form ('video_ads', 'gmv_max', …), bukan label
    Hanya field yang benar-benar terbaca yang disertakan; sisi CDPS hanya mengisi
    field KOSONG (SARAN, bukan paksa — kontrak `applyVideoFactoryPrefill`).
-   Komposisi trafik B-2.3 sengaja TIDAK dikirim: angka tool adalah GMV-share yang
-   saling tumpang-tindih (affiliate overlap video/live) dan tidak menjadi partisi
-   100% yang diminta form — biar AM isi manual supaya tidak salah kolom. */
+   Komposisi trafik B-2.3 (revisi 2026-08-22) DIKIRIM apa adanya: GMV-share
+   platform yang saling tumpang-tindih (afiliasi overlap video/live, Iklan overlay
+   bisa >100%). Form & DB kini menerima tanpa syarat berjumlah 100% (migrasi b23).
+   Bucket keenam `trafik_luar_persen` memuat "Kartu Produk". */
 const SB_ADSTYPE={'Video Ads':'video_ads','Live Ads':'live_ads','GMV Max':'gmv_max',
   'Manual keyword':'manual_keyword','Auto':'auto','Affiliate Ads':'affiliate_ads'};
 function sectionBPayload(d){
@@ -2151,10 +2152,23 @@ function sectionBPayload(d){
   if(srcFiles.length)p.sumber_data=[...new Set(srcFiles.filter(Boolean))].join(' | ');
   p.tanggal_ambil_data=new Date().toISOString().slice(0,10);
   if(d.klien.months)p.periode_baseline_bulan=d.klien.months;
-  /* B-2 (skalar; komposisi TIDAK dikirim — lihat catatan di atas) */
+  /* B-2 skalar */
   const shop=d.shop||{};
   if(shop.pengunjung)p.pengunjung_per_bulan=Math.round(shop.pengunjung);
   if(shop.konversi)p.conversion_rate_persen=+shop.konversi.toFixed(2);
+  /* B-2.3 komposisi trafik — apa adanya (GMV-share, boleh tumpang-tindih).
+     Kirim hanya bila ada data komposisi nyata (jangan penuhi form dengan 0).
+     kartu → trafik_luar_persen (bucket "Kartu Produk" di form). */
+  const cv=(d.comp&&d.comp.val)||{};
+  if(d.totGMV>0&&['organik','kartu','video','live','affiliate','iklan'].some(k=>(cv[k]||0)>0)){
+    const cp=k=>+(+(cv[k]||0)).toFixed(2);
+    p.trafik_organik_persen=cp('organik');
+    p.trafik_iklan_persen=cp('iklan');
+    p.trafik_affiliate_persen=cp('affiliate');
+    p.trafik_live_persen=cp('live');
+    p.trafik_video_persen=cp('video');
+    p.trafik_luar_persen=cp('kartu');
+  }
   /* B-3 */
   if(d.sku.terdaftar!=null)p.sku_listed=d.sku.terdaftar;
   if(d.sku.aktif!=null)p.sku_aktif=d.sku.aktif;

@@ -1134,20 +1134,20 @@ export default function SectionB({
               </label>
             </div>
 
-            {/* Traffic mix — 6 shares sum to 100 */}
+            {/* Traffic mix — GMV-share platform, boleh tumpang-tindih (DECISIONS 2026-08-22) */}
             <div style={{ marginTop: 8 }}>
               <span className="muted" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-                Komposisi trafik (B-2.3) — semua 6 harus diisi dan jumlahnya harus 100%
+                Komposisi trafik / GMV-share (B-2.3) — apa adanya dari platform, boleh tumpang-tindih (tidak wajib 100%)
               </span>
               <div className="formRow">
                 {(
                   [
                     ['trafik_organik_persen', 'Organik'],
-                    ['trafik_iklan_persen', 'Iklan'],
+                    ['trafik_iklan_persen', 'Iklan (overlay)'],
                     ['trafik_affiliate_persen', 'Affiliate'],
                     ['trafik_live_persen', 'Live'],
                     ['trafik_video_persen', 'Video'],
-                    ['trafik_luar_persen', 'Luar platform'],
+                    ['trafik_luar_persen', 'Kartu Produk'],
                   ] as [keyof ChannelDraft, string][]
                 ).map(([field, label]) => (
                   <label key={field} className="field">
@@ -1155,7 +1155,6 @@ export default function SectionB({
                     <input
                       type="number"
                       min={0}
-                      max={100}
                       step="0.1"
                       value={ch[field] as string}
                       disabled={disabled}
@@ -1164,9 +1163,10 @@ export default function SectionB({
                   </label>
                 ))}
               </div>
-              {trafikAllFilled && Math.abs(trafikSum - 100) > 0.5 && (
-                <div className="alert alertError" style={{ fontSize: 12, marginTop: 6 }}>
-                  Total trafik = {trafikSum.toFixed(1)}% — harus 100%.
+              {trafikAllFilled && (
+                <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                  Total = {trafikSum.toFixed(1)}%. GMV-share platform memang saling tumpang-tindih
+                  (afiliasi termasuk di Video/Live, Iklan overlay bisa &gt;100%) — angka ditampilkan apa adanya, tidak dipaksa 100%.
                 </div>
               )}
             </div>
