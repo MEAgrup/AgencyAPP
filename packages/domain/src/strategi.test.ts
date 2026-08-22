@@ -699,52 +699,72 @@ describeDb('Section B — Rules 4, 5 and 5a', () => {
     expect(saved.channels[0].prasyaratPembukaan).toEqual(['dokumen NIB', 'katalog']);
   });
 
-  it('refuses a Belum Aktif channel with no launch date (Rule 4)', async () => {
+  // Partial save (owner QA 2026-08-22): a Draft channel SAVES half-filled; the
+  // Rule 4/5/5a requiredness that used to throw here is now counted at submit.
+  it('saves a Belum Aktif channel with no launch date, reports B-0.5 at submit (Rule 4)', async () => {
     const serviceId = await seedService();
     const s = await createStrategi(sql, am(), serviceId, HEADER);
-    await expect(
-      saveChannels(sql, am(), s.id, [
-        {
-          channel: 'Tokopedia',
-          statusChannel: 'Belum Aktif',
-          namaToko: 'Alpha',
-          urlToko: 'https://tokopedia.com/alpha',
-        },
-      ]),
-    ).rejects.toThrow(ValidationError);
+    const saved = await saveChannels(sql, am(), s.id, [
+      {
+        channel: 'Tokopedia',
+        statusChannel: 'Belum Aktif',
+        namaToko: 'Alpha',
+        urlToko: 'https://tokopedia.com/alpha',
+      },
+    ]);
+    expect(saved.channels[0].targetTanggalLive).toBeNull();
+    const codes = (await checkCompleteness(sql, s.id)).map((m) => m.kode);
+    expect(codes).toContain('B-0.5/Tokopedia');
   });
 
-  it('refuses an Eksisting channel with no source attachment (Rule 5)', async () => {
+  it('saves an Eksisting channel with no source attachment, reports B-0.6 at submit (Rule 5)', async () => {
     const serviceId = await seedService();
     const s = await createStrategi(sql, am(), serviceId, HEADER);
-    await expect(
-      saveChannels(sql, am(), s.id, [{ ...SHOPEE, lampiran: null }]),
-    ).rejects.toThrow(ValidationError);
+    const saved = await saveChannels(sql, am(), s.id, [{ ...SHOPEE, lampiran: null }]);
+    expect(saved.channels[0].lampiran).toBeNull();
+    const codes = (await checkCompleteness(sql, s.id)).map((m) => m.kode);
+    expect(codes).toContain('B-0.6/Shopee');
   });
 
-  it('refuses a window under three months without a reason (Rule 5a)', async () => {
+  it('saves a bare channel (only type + status) and reports B-0.3 identity at submit', async () => {
     const serviceId = await seedService();
     const s = await createStrategi(sql, am(), serviceId, HEADER);
-    await expect(
-      saveChannels(sql, am(), s.id, [{ ...SHOPEE, periodeBaselineBulan: 1 }]),
-    ).rejects.toThrow(ValidationError);
-    const ok = await saveChannels(sql, am(), s.id, [
+    const saved = await saveChannels(sql, am(), s.id, [
+      { channel: 'Shopee', statusChannel: 'Eksisting', namaToko: '', urlToko: '' },
+    ]);
+    expect(saved.channels).toHaveLength(1);
+    const codes = (await checkCompleteness(sql, s.id)).map((m) => m.kode);
+    expect(codes).toContain('B-0.3/Shopee');
+  });
+
+  it('saves a window under three months without a reason, reports B-0.8 at submit (Rule 5a)', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const saved = await saveChannels(sql, am(), s.id, [{ ...SHOPEE, periodeBaselineBulan: 1 }]);
+    expect(saved.channels[0].periodeBaselineBulan).toBe(1);
+    let codes = (await checkCompleteness(sql, s.id)).map((m) => m.kode);
+    expect(codes).toContain('B-0.8/Shopee');
+    // With the reason supplied, B-0.8 clears (B-1 still wants the month rows).
+    await saveChannels(sql, am(), s.id, [
       { ...SHOPEE, periodeBaselineBulan: 1, alasanPeriodePendek: 'toko baru' },
     ]);
-    expect(ok.channels[0].periodeBaselineBulan).toBe(1);
+    codes = (await checkCompleteness(sql, s.id)).map((m) => m.kode);
+    expect(codes).not.toContain('B-0.8/Shopee');
   });
 
-  it('lets the DB refuse a short window with no reason, bypassing the domain', async () => {
+  it('the DB now accepts a half-filled Draft channel row (partial save)', async () => {
+    // The at-rest completeness CHECKs were dropped in b0_partial_save; a short
+    // window with no reason is a Draft-legal row, gated only at submit.
     const serviceId = await seedService();
     const s = await createStrategi(sql, am(), serviceId, HEADER);
-    await expect(
-      sql`insert into strategi_channel
+    await sql`insert into strategi_channel
             (strategi_id, channel, status_channel, nama_toko, url_toko, sumber_data,
              tanggal_ambil_data, lampiran, periode_baseline_bulan, periode_mulai,
              periode_akhir, created_by)
           values (${s.id}, 'Shopee', 'Eksisting', 'A', 'u', 'export', '2026-08-02', 'f.csv',
-                  1, '2026-07-01', '2026-07-31', 'ZZ-AM')`,
-    ).rejects.toThrow();
+                  1, '2026-07-01', '2026-07-31', 'ZZ-AM')`;
+    const codes = (await checkCompleteness(sql, s.id)).map((m) => m.kode);
+    expect(codes).toContain('B-0.8/Shopee');
   });
 
   it('stores 0 and rejects blank in the baseline (Rule 5)', async () => {
@@ -3832,22 +3852,24 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
 // RAB-11 DoD + RAB-13 — the baseline ACC gate is the EXISTING one (machine #15).
 // ---------------------------------------------------------------------------
 describeDb('baseline gate — no second gate (RAB-11 DoD / RAB-13)', () => {
-  it('DB rejects an Eksisting channel <3 months with no alasan_periode_pendek (RAB-11 DoD)', async () => {
+  it('the <3 month reason (Rule 5a) is a submit gate, not a save-time rejection (RAB-11 DoD)', async () => {
+    // Since owner QA 2026-08-22 a Draft may save a short window with the reason
+    // still blank (partial save); the requirement holds at submit instead —
+    // `checkCompleteness` reports `B-0.8/<channel>`. All other Rule 5 provenance
+    // present, window = 2 months, reason missing.
     const serviceId = await seedService();
     const s = await createStrategi(sql, am(), serviceId, HEADER);
     const [{ id: sid }] = await sql<{ id: string }[]>`select id from strategi where id = ${s.id}`;
-    // All Rule 5 provenance present, window = 2 months, but the reason is missing:
-    // ck_strch_alasan_pendek must bite even on a raw service-role insert.
-    await expect(
-      sql`
+    await sql`
         insert into strategi_channel
           (strategi_id, channel, status_channel, nama_toko, url_toko,
            sumber_data, tanggal_ambil_data, lampiran,
            periode_baseline_bulan, periode_mulai, periode_akhir, created_by)
         values
           (${sid}, 'TikTok Shop', 'Eksisting', 'Alpha', 'https://t.example',
-           'export', '2026-08-18', 'toko.xlsx', 2, '2026-07-01', '2026-08-31', 'ZZ-AM')`,
-    ).rejects.toThrow(/ck_strch_alasan_pendek/);
+           'export', '2026-08-18', 'toko.xlsx', 2, '2026-07-01', '2026-08-31', 'ZZ-AM')`;
+    const codes = (await checkCompleteness(sql, s.id)).map((m) => m.kode);
+    expect(codes).toContain('B-0.8/TikTok Shop');
   });
 
   it('the acceptance of baseline data is machine #15 (strategi) — there is no second gate machine', async () => {

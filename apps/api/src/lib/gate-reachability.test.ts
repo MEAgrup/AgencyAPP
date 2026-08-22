@@ -89,6 +89,14 @@ const DOORS: Readonly<Record<string, string>> = {
   // B-n.m group is the same endpoint; B-0 ("no channel at all") is answered by
   // declaring one.
   'B-0': 'saveStrategiChannels',
+  // B-0.3/0.5/0.6/0.8 — store identity, launch date, baseline window+source, and
+  // the short-window reason. Since owner QA 2026-08-22 these are gated at submit
+  // (a Draft may save them blank); all live on the channel row, so the AM answers
+  // them in Section B via `saveStrategiChannels`.
+  'B-0.3': 'saveStrategiChannels',
+  'B-0.5': 'saveStrategiChannels',
+  'B-0.6': 'saveStrategiChannels',
+  'B-0.8': 'saveStrategiChannels',
   'B-1': 'saveStrategiBaseline',
   'B-2': 'saveStrategiBaseline',
   'B-3': 'saveStrategiBaseline',

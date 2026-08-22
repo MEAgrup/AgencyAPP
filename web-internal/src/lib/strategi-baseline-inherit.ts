@@ -7,7 +7,8 @@
 //   1. Only EMPTY fields are filled — a value the AM already saved is never
 //      clobbered (a later correction goes back to Riset Awal, the single source).
 //   2. It writes into the ordinary draft, so the normal Section B save persists
-//      the values and the DB gate (`ck_strch_eksisting`, the B-1 count) stays met.
+//      the values and the submit gate (`checkCompleteness`: B-0.6 provenance +
+//      the B-1 count) stays met once the AM confirms them.
 // Everything Riset Awal has no source for (persen batal, ad spend, ROAS, ACOS,
 // and all of B-2…B-9) is left untouched here and stays manual.
 

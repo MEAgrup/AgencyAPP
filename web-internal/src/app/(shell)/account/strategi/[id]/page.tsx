@@ -351,7 +351,18 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
               }
             );
           });
-          current = await saveStrategiBaseline(id, saved.id, baselineDraftToBody(months));
+          // Partial-save (owner QA 2026-08-22): `saveBaseline` keeps Rule 5 — every
+          // figure of a row is required, `0` counts, blank does not — so a month
+          // still being typed would make the whole Section B save throw and lose
+          // the AM's other work. Send only the months that are FULLY filled; the
+          // rest wait, and the submit gate reports them as `B-1/<channel>`. A `0`
+          // is a real answer and stays included; only truly blank cells drop a row.
+          const complete = months.filter((m) =>
+            [m.gmv, m.jumlah_pesanan, m.persen_batal, m.ad_spend, m.roas, m.acos].every(
+              (v) => String(v).trim() !== '',
+            ),
+          );
+          current = await saveStrategiBaseline(id, saved.id, baselineDraftToBody(complete));
         }
         next = current;
       } else if (active === 'C') {
