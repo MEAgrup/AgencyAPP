@@ -189,13 +189,31 @@ describe('applyVideoFactoryPrefill', () => {
     expect(channels[0].trafik_luar_persen).toBe('15.13'); // bucket "Kartu Produk"
   });
 
-  it('B-7 jam_live_per_bulan + host_live dipetakan', () => {
+  it('B-7 jam_live_per_bulan dipetakan; nama host TIDAK masuk enum host_live', () => {
+    // host_live di CDPS adalah ENUM (internal_klien/vendor/tim_mea/belum_ada).
+    // Payload lama keliru mengirim NAMA host di sini; kalau dipetakan, validasi
+    // bentuk Section B menolaknya dan MENGGAGALKAN seluruh simpan (bug QA
+    // 2026-08-22, klien EVEBAG). Nama host free-text harus diabaikan di sini.
     const { channels } = applyVideoFactoryPrefill(
       [],
       payload({ jam_live_per_bulan: 50.8, host_live: 'EVEBAG INDONESIA, Robi Bois' }),
     );
     expect(channels[0].jam_live_per_bulan).toBe('50.8');
-    expect(channels[0].host_live).toBe('EVEBAG INDONESIA, Robi Bois');
+    expect(channels[0].host_live).toBe(''); // free-text names dropped, not enum
+  });
+
+  it('B-7 host_live diisi bila payload mengirim KEY enum yang sah', () => {
+    const { channels } = applyVideoFactoryPrefill([], payload({ host_live: 'vendor' }));
+    expect(channels[0].host_live).toBe('vendor');
+  });
+
+  it('B-7 nama host disimpan sebagai catatan bebas (studio_catatan), bukan enum', () => {
+    const { channels } = applyVideoFactoryPrefill(
+      [],
+      payload({ studio_catatan: 'Host live: EVEBAG INDONESIA, Robi Bois' }),
+    );
+    expect(channels[0].studio_catatan).toBe('Host live: EVEBAG INDONESIA, Robi Bois');
+    expect(channels[0].host_live).toBe('');
   });
 
   it('membiarkan channel lain (mis. Shopee) tak tersentuh', () => {

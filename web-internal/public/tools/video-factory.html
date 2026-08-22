@@ -2204,7 +2204,11 @@ function sectionBPayload(d){
     if(c.gmvVideo)p.gmv_video=mny(c.gmvVideo);
     if(c.liveHours)p.jam_live_per_bulan=months?+(c.liveHours/months).toFixed(1):+c.liveHours.toFixed(1);
     if(c.liveGmv)p.gmv_live=mny(c.liveGmv);
-    if(c.hosts&&c.hosts.length)p.host_live=c.hosts.slice(0,6).map(h=>h.nama).join(', ');
+    /* B-7 host_live di CDPS adalah ENUM (internal_klien/vendor/tim_mea/belum_ada),
+       BUKAN nama host. Menaruh nama di sana ditolak validasi bentuk Section B dan
+       menggagalkan seluruh simpan. Nama host tetap berguna → simpan sebagai catatan
+       bebas (studio_catatan); pemilihan enum host_live dilakukan manual oleh AM. */
+    if(c.hosts&&c.hosts.length)p.studio_catatan='Host live: '+c.hosts.slice(0,6).map(h=>h.nama).join(', ');
   }
   const field_count=Object.keys(p).filter(k=>k!=='channel'&&k!=='status_channel').length;
   return {schema:'cdps.section_b.v1',generated_at:new Date().toISOString(),

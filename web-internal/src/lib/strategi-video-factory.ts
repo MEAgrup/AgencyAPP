@@ -91,8 +91,17 @@ export interface VideoFactoryChannel {
   gmv_video?: string;
   jam_live_per_bulan?: number;
   gmv_live?: string;
+  /** B-7 host_live: ENUM (internal_klien/vendor/tim_mea/belum_ada). Payload lama
+   *  keliru mengisinya dengan NAMA host (free text) → ditolak validasi bentuk dan
+   *  menggagalkan simpan. Kini diabaikan kecuali berupa key enum yang sah. */
   host_live?: string;
+  /** B-7 catatan studio/live (free text). v5+ memuat "Host live: <nama-nama>". */
+  studio_catatan?: string;
 }
+
+/** B-7 host_live enum keys (cermin `LIVE_HOSTS` di packages/domain/strategi.ts).
+ *  Dipakai untuk menyaring nilai host_live dari payload lama yang berisi nama. */
+const LIVE_HOST_KEYS = ['internal_klien', 'vendor', 'tim_mea', 'belum_ada'];
 
 export interface VideoFactoryPayload {
   schema: string;
@@ -227,7 +236,12 @@ export function applyVideoFactoryPrefill(
   scalar('gmv_video', c.gmv_video);
   scalar('jam_live_per_bulan', c.jam_live_per_bulan);
   scalar('gmv_live', c.gmv_live);
-  scalar('host_live', c.host_live);
+  // host_live is an ENUM — only accept a valid key, never the free-text host
+  // names older payloads put here (which the domain rejects, failing the save).
+  if (typeof c.host_live === 'string' && LIVE_HOST_KEYS.includes(c.host_live)) {
+    scalar('host_live', c.host_live);
+  }
+  scalar('studio_catatan', c.studio_catatan);
 
   // B-5.3 tipe kampanye — isi hanya bila belum ditandai AM (tidak menimpa, dan
   // tidak menyentuh channel yang sudah ditandai "tidak ada kampanye").
