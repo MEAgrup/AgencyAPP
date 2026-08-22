@@ -519,6 +519,22 @@ export const MSG_AKSES_DUPLICATE =
   '[akses yang sama tidak boleh dicatat dua kali untuk satu channel]';
 /** A-06 / Rule 5 — a baseline group on an `Eksisting` channel is still blank. */
 export const MSG_BASELINE_GROUP_INCOMPLETE = '[data baseline channel belum lengkap]';
+/**
+ * B-0.3 — store identity (Rule 4). Required at submit; a Draft may save it blank
+ * (owner QA 2026-08-22), so this is reported by `checkCompleteness`, not thrown
+ * by `saveChannels`.
+ */
+export const MSG_CHANNEL_IDENTITY_REQUIRED =
+  '[nama toko dan URL toko wajib diisi untuk setiap channel]';
+/** B-0.5 / Rule 4 — a `Belum Aktif` channel needs its launch date to reach the calendar. */
+export const MSG_TARGET_LIVE_REQUIRED =
+  '[tanggal target live wajib diisi untuk channel Belum Aktif]';
+/** B-0.6/0.7 / Rule 5 — an `Eksisting` channel needs its baseline window and its source. */
+export const MSG_BASELINE_WINDOW_REQUIRED =
+  '[jendela baseline (periode, tanggal, sumber data, dan lampiran) wajib dilengkapi untuk channel Eksisting]';
+/** B-0.8 / Rule 5a — a window under three months needs a written reason. */
+export const MSG_ALASAN_PENDEK_REQUIRED =
+  '[jendela baseline kurang dari 3 bulan wajib menyertakan alasan]';
 /** B-2.3 / §7 — DIPENSIUN (DECISIONS 2026-08-22). Komposisi trafik kini
  *  GMV-share platform yang tumpang-tindih, tidak wajib berjumlah 100%. Konstanta
  *  dipertahankan (tak lagi dilempar) demi kompatibilitas importir lama. */
@@ -1948,10 +1964,11 @@ export interface ChannelBaselineSuggestion {
   /** 'cukup' (≥3 months) | 'kurang' (<3) | null when there is no analysis engine. */
   cakupanRiwayat: string | null;
   /**
-   * RAB-11 DoD surfaced to the UI: when the window is under three months the DB
-   * CHECK `ck_strch_alasan_pendek` (and `validateChannel`) REJECT the save unless
-   * `alasan_periode_pendek` is filled. The AM sees this before saving, not after a
-   * server rejection.
+   * RAB-11 DoD surfaced to the UI: a window under three months needs a written
+   * reason (Rule 5a). Since 2026-08-22 that is a SUBMIT gate (`checkCompleteness`
+   * → `B-0.8/<channel>`), not a save-time rejection — a Draft may save the short
+   * window without the reason. This flag lets the AM see the requirement while
+   * filling, so the reason is supplied before submit rather than discovered there.
    */
   alasanPeriodePendekWajib: boolean;
   /** Rule 5 provenance, composed from `riset_awal_sumber_berkas` for this platform. */
@@ -3529,7 +3546,7 @@ export async function saveChannels(
            created_by)
         values
           (${id}, ${c.channel}, ${nullIfBlank(c.channelLain)}, ${c.statusChannel},
-           ${c.namaToko.trim()}, ${c.urlToko.trim()}, ${c.umurTokoBulan ?? null},
+           ${(c.namaToko ?? '').trim()}, ${(c.urlToko ?? '').trim()}, ${c.umurTokoBulan ?? null},
            ${nullIfBlank(c.badge)}, ${nullIfBlank(c.targetTanggalLive)},
            ${(c.prasyaratPembukaan ?? []) as never},
            ${nullIfBlank(c.sumberData)}, ${nullIfBlank(c.tanggalAmbilData)},
@@ -3584,20 +3601,31 @@ export async function saveChannels(
   });
 }
 
+/**
+ * validateChannel checks SHAPE only. Requiredness (Rule 3/4/5/5a: store identity,
+ * the launch date, the baseline window and its source) moved to the submit gate
+ * (`checkCompleteness`, kodes B-0.3/0.5/0.6/0.8) — owner QA 2026-08-22, DECISIONS.
+ *
+ * A Section B channel carries dozens of fields and an AM rarely fills them in one
+ * pass; throwing on the first blank made autosave lose the work already entered.
+ * This is the exact split every other Section A/B field already uses: §7 wants a
+ * half-filled form to be SAVABLE, and §5 step 5 wants the gaps COUNTED, not thrown.
+ * The matching DB CHECKs (ck_strch_toko/belum_aktif/eksisting/alasan_pendek) are
+ * dropped in `20260822020000_b0_partial_save.sql`; what remains here — and in the
+ * surviving CHECKs — is shape: valid enums, a 1–6 window, well-formed dates.
+ */
 function validateChannel(c: ChannelInput): void {
   if (!CHANNELS.includes(c.channel) || !CHANNEL_STATES.includes(c.statusChannel)) {
     throw new ValidationError(MSG_INCOMPLETE);
   }
-  if ((c.namaToko ?? '').trim() === '' || (c.urlToko ?? '').trim() === '') {
-    throw new ValidationError(MSG_INCOMPLETE);
-  }
+  // channel_lain is part of the row's identity (the unique index keys on it), so
+  // the `Lainnya`⇔named consistency stays a save-time shape rule, mirroring the
+  // surviving `ck_strch_channel_lain` CHECK.
   if ((c.channel === 'Lainnya') !== ((c.channelLain ?? '').trim() !== '')) {
     throw new ValidationError(MSG_INCOMPLETE);
   }
   // E-2 shape only — an unknown role is refused now, a MISSING one is reported
-  // at submit. That split is the same one every Section A/B field uses: §7 wants
-  // a half-filled form to be savable, and §5 step 5 wants the gaps counted, not
-  // thrown.
+  // at submit.
   if (c.prioritas !== null && c.prioritas !== undefined && !CHANNEL_PRIORITAS.includes(c.prioritas)) {
     throw new ValidationError(MSG_PRIORITAS_INVALID);
   }
@@ -3605,31 +3633,19 @@ function validateChannel(c: ChannelInput): void {
   // *skips* the historical baseline, not that a figure supplied anyway may be
   // out of range. Whether those figures are REQUIRED is decided at submit.
   validateChannelBaselineShape(c);
-  if (c.statusChannel === 'Belum Aktif') {
-    // Rule 4: skipping the historical baseline does not skip the launch plan.
-    if (!RE_DATE.test((c.targetTanggalLive ?? '').trim())) {
+  // Window shape when supplied: a 1–6 month count and well-formed dates. The
+  // window's PRESENCE is a submit gate; only its wrongness is refused here.
+  if (c.periodeBaselineBulan !== null && c.periodeBaselineBulan !== undefined) {
+    const bulan = c.periodeBaselineBulan;
+    if (!Number.isInteger(bulan) || bulan < 1 || bulan > 6) {
       throw new ValidationError(MSG_INCOMPLETE);
     }
-    return;
   }
-  // Rule 5: an existing channel arrives with numbers, a window, and a source.
-  const bulan = c.periodeBaselineBulan ?? 0;
-  if (!Number.isInteger(bulan) || bulan < 1 || bulan > 6) {
-    throw new ValidationError(MSG_INCOMPLETE);
-  }
-  if (!RE_DATE.test((c.periodeMulai ?? '').trim()) || !RE_DATE.test((c.periodeAkhir ?? '').trim())) {
-    throw new ValidationError(MSG_INCOMPLETE);
-  }
-  if (
-    (c.sumberData ?? '').trim() === '' ||
-    !RE_DATE.test((c.tanggalAmbilData ?? '').trim()) ||
-    (c.lampiran ?? '').trim() === ''
-  ) {
-    throw new ValidationError(MSG_INCOMPLETE);
-  }
-  // Rule 5a: a window below three months is allowed, but never silently.
-  if (bulan < 3 && (c.alasanPeriodePendek ?? '').trim() === '') {
-    throw new ValidationError(MSG_INCOMPLETE);
+  for (const d of [c.targetTanggalLive, c.periodeMulai, c.periodeAkhir, c.tanggalAmbilData]) {
+    const s = (d ?? '').trim();
+    if (s !== '' && !RE_DATE.test(s)) {
+      throw new ValidationError(MSG_INCOMPLETE);
+    }
   }
 }
 
@@ -5864,7 +5880,18 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
       id: string;
       channel: string;
       status_channel: string;
+      // B-0 identity + baseline window (Rule 4/5/5a). Required at submit since
+      // 2026-08-22 (a Draft may now save them blank); reported below.
+      nama_toko: string | null;
+      url_toko: string | null;
+      target_tanggal_live: string | null;
       periode_baseline_bulan: number | null;
+      periode_mulai: string | null;
+      periode_akhir: string | null;
+      sumber_data: string | null;
+      tanggal_ambil_data: string | null;
+      lampiran: string | null;
+      alasan_periode_pendek: string | null;
       // E-2 (A-09b) — gated for EVERY channel, `Belum Aktif` included: a channel
       // with no history still has a role in the plan, which is exactly what a
       // launch channel needs declared.
@@ -5913,6 +5940,42 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
   >`select * from strategi_channel where strategi_id = ${id} order by id asc`;
   if (channels.length === 0) {
     out.push({ kode: 'B-0', pesan: MSG_NO_CHANNEL });
+  }
+
+  // B-0 identity + baseline window (Rule 4/5/5a). Since 2026-08-22 a Draft may
+  // save a channel half-filled (owner QA), so what used to be a save-time throw
+  // — and a DB CHECK — is counted here instead, one kode per unanswered piece so
+  // the form's "Kekurangan" panel can point the AM at the exact channel.
+  for (const c of channels) {
+    if ((c.nama_toko ?? '').trim() === '' || (c.url_toko ?? '').trim() === '') {
+      out.push({ kode: `B-0.3/${c.channel}`, pesan: MSG_CHANNEL_IDENTITY_REQUIRED });
+    }
+    if (c.status_channel === 'Belum Aktif') {
+      // Rule 4: skipping the historical baseline does not skip the launch plan.
+      if (c.target_tanggal_live === null) {
+        out.push({ kode: `B-0.5/${c.channel}`, pesan: MSG_TARGET_LIVE_REQUIRED });
+      }
+    } else if (c.status_channel === 'Eksisting') {
+      // Rule 5: an existing channel arrives with a window, a source, and a proof.
+      if (
+        c.periode_baseline_bulan === null ||
+        c.periode_mulai === null ||
+        c.periode_akhir === null ||
+        (c.sumber_data ?? '').trim() === '' ||
+        c.tanggal_ambil_data === null ||
+        (c.lampiran ?? '').trim() === ''
+      ) {
+        out.push({ kode: `B-0.6/${c.channel}`, pesan: MSG_BASELINE_WINDOW_REQUIRED });
+      }
+      // Rule 5a: a window below three months is allowed, but never silently.
+      if (
+        c.periode_baseline_bulan !== null &&
+        c.periode_baseline_bulan < 3 &&
+        (c.alasan_periode_pendek ?? '').trim() === ''
+      ) {
+        out.push({ kode: `B-0.8/${c.channel}`, pesan: MSG_ALASAN_PENDEK_REQUIRED });
+      }
+    }
   }
 
   // Rule 5: an `Eksisting` channel must carry one baseline row per declared
@@ -6224,9 +6287,15 @@ function kekuranganSectionB(c: {
     if (!lengkap) out.push({ kode: `${kode}/${c.channel}`, pesan: MSG_BASELINE_GROUP_INCOMPLETE });
   };
 
-  // B-2.3: one column stands for all six — `ck_strch_trafik_total` already makes
-  // "five of six" unstorable, so the presence of one proves the presence of all.
-  grup('B-2', ada(c.pengunjung_per_bulan, c.conversion_rate_persen, c.trafik_organik_persen));
+  // B-2: the two required baseline metrics are B-2.1 (visitors) and B-2.2 (CR).
+  // The traffic composition (B-2.3) is NO LONGER part of this gate: the b23
+  // decision (DECISIONS 2026-08-22) made it informational, overlapping GMV-share
+  // filled "apa adanya" and not required to be complete — so requiring a specific
+  // bucket (`trafik_organik_persen`) as a proxy is now wrong, because organik can
+  // legitimately be 0/blank while iklan or video carry the share. B-2.4 (entry
+  // point) is optional. `ck_strch_trafik_total` — the old all-or-nothing CHECK
+  // this proxy relied on — was dropped in the same migration.
+  grup('B-2', ada(c.pengunjung_per_bulan, c.conversion_rate_persen));
   grup(
     'B-3',
     ada(c.sku_listed, c.sku_aktif, c.sku_pareto_80, c.sku_slow_moving, c.listing_layak_persen),
