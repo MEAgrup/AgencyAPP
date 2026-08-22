@@ -208,15 +208,36 @@ textarea.copybox{min-height:300px;font-family:var(--mono);font-size:11.5px;white
 .bl-src{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--line);border-radius:2px;background:#fff;margin-bottom:6px;font-size:12px;flex-wrap:wrap}
 .bl-src .nm{flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono);font-size:11px;color:var(--slate)}
 .bl-src .miss{font-size:10px;color:var(--amber);font-family:var(--mono)}
+.bl-src select{width:auto;padding:3px 6px;font-size:11px}
 .blf td:first-child{font-weight:500}
 .blf .sub{font-size:10.5px;color:var(--mute);font-weight:400}
 .blf td .prov{font-size:10.5px;color:var(--mute);font-family:var(--mono)}
 .bl-manual{width:150px;padding:5px 7px}
+.chan-seg{display:inline-flex;border:1px solid var(--line);border-radius:2px;overflow:hidden;margin-left:auto}
+.chan-seg button{background:#fff;border:0;border-left:1px solid var(--line);padding:6px 13px;font-family:var(--disp);
+  font-size:14px;text-transform:uppercase;letter-spacing:.05em;color:var(--slate)}
+.chan-seg button:first-child{border-left:0}
+.chan-seg button.on{background:var(--ink);color:#fff}
+.comp-row{display:grid;grid-template-columns:150px 1fr 96px;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line2)}
+.comp-row:last-child{border-bottom:0}
+.comp-row .lb{font-size:12px}.comp-row .lb small{display:block;color:var(--mute);font-size:10px}
+.comp-bar{height:8px;background:var(--line2);border-radius:2px;overflow:hidden}
+.comp-bar i{display:block;height:100%;background:var(--signal)}
+.comp-row.overlay .comp-bar i{background:var(--violet)}
+.comp-row input{width:100%;text-align:right;font-family:var(--mono);padding:5px 7px}
+.comp-total{display:flex;justify-content:space-between;align-items:center;padding:9px 0 0;font-size:12px}
+.comp-total b{font-family:var(--mono);font-size:15px}
+.typechips{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.typechip{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:2px;padding:7px 11px;font-size:12px;cursor:pointer;background:#fff}
+.typechip.on{border-color:var(--teal);background:#F0FAF8;color:var(--teal);font-weight:600}
+.typechip.auto{border-color:var(--signal);background:#FFF6F2;color:var(--signal);font-weight:600}
+.typechip input{width:15px;height:15px;accent-color:var(--teal)}
 @media(max-width:860px){
   .g4,.g5,.g6{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:1fr}
   .tgt-row,.versus{grid-template-columns:1fr}
   .tgt-lb{border-right:0;border-bottom:1px solid var(--line2)}
   .vs:first-child{border-right:0;border-bottom:1px solid var(--line)}
+  .comp-row{grid-template-columns:110px 1fr 78px}
   .wrap{padding:0 14px 90px}
 }
 @media print{.step,.outbar,.no-print,.tabs{display:none!important}body{background:#fff}.sec{break-inside:avoid}}
@@ -230,14 +251,14 @@ textarea.copybox{min-height:300px;font-family:var(--mono);font-size:11.5px;white
       <div>
         <div class="brandmark">MEA Agency · Video Factory</div>
         <h1>Baseline · Papan · Tracker · Sheet</h1>
-        <p>Satu file, satu klien, satu library. Tarik semua export TikTok Shop sekali — tool menurunkan
+        <p>Satu file, satu klien, satu library. Tarik semua export TikTok Shop / Tokopedia sekali — tool menurunkan
            baseline channel (CDPS Section B), mencari video yang sudah menjual, menetapkan angka target
            tim Creative, mengukur hasil produksi lewat hashtag, lalu mengeluarkan baris siap tempel ke Video Master.</p>
       </div>
       <div class="mast-meta">
         <div id="mKlien">klien belum diisi</div>
         <div id="mLib">library kosong</div>
-        <div>v4.0 · <b id="mDate">—</b></div>
+        <div>v5.0 · <b id="mDate">—</b></div>
       </div>
     </div>
     <div class="tabs" role="tablist" id="tabs">
@@ -278,9 +299,9 @@ textarea.copybox{min-height:300px;font-family:var(--mono);font-size:11.5px;white
   <div class="step-bd">
     <div class="drop" id="drop" tabindex="0" role="button">
       <h3>Tarik file ke sini</h3>
-      <p>Video Performance List · Analitik/Transaction Product · Transaction Creator · product_list (katalog) ·
-         Shop Analytics Key metrics · Live Analysis · data kampanye iklan (product/live) ·
-         payload baseline CDPS (.json) · library (.json) · tautan mp4 dari extension (.json)</p>
+      <p>Video Performance List · Analitik/Transaction Product · Transaction Creator · product_list (katalog +
+         breakdown channel) · Shop Analytics Key metrics (TikTok / Tokopedia) · Live Analysis (per sesi) ·
+         data kampanye iklan (product/live) · payload baseline CDPS (.json) · library (.json) · tautan mp4 (.json)</p>
       <button class="btn sig" id="btnPick">Pilih file</button>
       <input type="file" id="filein" multiple accept=".xlsx,.xls,.csv,.json" hidden>
     </div>
@@ -340,18 +361,16 @@ textarea.copybox{min-height:300px;font-family:var(--mono);font-size:11.5px;white
 
 <script>
 /* ═══════════════════════════════════════════════════════════════════════
-   MEA VIDEO FACTORY v4 — satu file, empat fungsi
-   D. Baseline: turunkan CDPS Section B dari export TikTok Shop  (AM / analis)
+   MEA VIDEO FACTORY v5 — satu file, empat fungsi
+   D. Baseline: turunkan CDPS Section B dari export TikTok Shop / Tokopedia (AM / analis)
    A. Papan   : angka target Creative + video sumber angle       (Account Manager)
    B. Tracker : kinerja video produksi MEA lewat hashtag         (CC / Leader Video)
    C. Sheet   : baris siap tempel ke Video Master                (CC)
 
-   Aturan angka (dipinjam dari CDPS Baseline Riset Toko):
-   - populasi hitung = video dengan VV > 0. Baris VV 0 = sisa histori.
-   - ambang tayangan = median VV video yang menghasilkan pesanan.
-   - angka target dihitung dari video jual dengan VV >= VV_BISING.
-   - durasi video TIDAK ADA di export TikTok Shop. Tidak diperkirakan.
-   - baseline: field yang tak ada di export ditandai jelas, tidak dikarang.
+   v5 fokus: hitung otomatis B-2 (trafik/konversi + komposisi 6-bucket),
+   B-3 (portofolio SKU + top-5 dgn unit & harga), B-5 (iklan, filter per produk klien),
+   B-6 (affiliate aktif 30 hari), B-7 (konten & live: jam live, host, GMV).
+   Multi-channel: satu klien bisa punya TikTok Shop + Tokopedia.
    ═══════════════════════════════════════════════════════════════════════ */
 const SCHEMA='mea.videofactory.v3';
 const $=(s,r=document)=>r.querySelector(s);
@@ -374,6 +393,15 @@ function num(v){
     if((s.split('.').length-1)>1)s=s.replace(/\./g,'');
     else if((s.split('.')[1]||'').length===3)s=s.replace(/\./g,'');
   }
+  const n=parseFloat(s); return isFinite(n)?n:0;
+}
+/* numDot: untuk file export "en-US" (kampanye iklan) di mana titik = desimal
+   dan koma = ribuan. Contoh 773528.000 -> 773528 ; 4615921.725 -> 4615921.725 */
+function numDot(v){
+  if(v===null||v===undefined||v==='')return 0;
+  if(typeof v==='number')return isFinite(v)?v:0;
+  let s=String(v).trim().replace(/rp/ig,'').replace(/%/g,'').replace(/\s| /g,'').replace(/,/g,'');
+  if(s===''||s==='-'||s===DASH)return 0;
   const n=parseFloat(s); return isFinite(n)?n:0;
 }
 function pctNum(v){
@@ -428,7 +456,7 @@ function copyModal(text){
   const ta=m.querySelector('textarea'); ta.value=text; ta.focus(); ta.select();
 }
 
-/* ── kolom export ── */
+/* ── kolom export video ── */
 const COL={
   creator:['Nama Kreator'], creatorId:['ID Kreator'], caption:['Informasi Video'],
   videoId:['ID Video'], waktu:['Waktu'], negara:['Negara kreator'], produk:['Produk'],
@@ -592,9 +620,6 @@ function parseBaselineJson(obj,fileName){
 }
 
 /* ═══════════ PARSER BASELINE (CDPS Section B) ═══════════ */
-/* Semua parser di bawah TOLERAN: cocokkan header lewat daftar alias (ID+EN),
-   dan laporkan kolom yang tak ketemu di panel Cakupan. File dari region/versi
-   TikTok Shop beda bisa beda header — override tipe tersedia di chip file. */
 function headerIndex(rows,aliasMap,scan){
   scan=scan||20; let best=null;
   for(let r=0;r<Math.min(rows.length,scan);r++){
@@ -616,160 +641,213 @@ function headerIndex(rows,aliasMap,scan){
 }
 const gcell=(row,i)=>i===undefined?'':row[i];
 function flatTop(rows,n){ return rows.slice(0,n||20).map(r=>(r||[]).map(norm).join('|')).join(' '); }
-
-/* product_list: katalog SKU */
-const A_CATALOG={id:['ID Produk','Product ID','SKU ID','ID SKU','Kode Produk'],
-  nama:['Nama Produk','Product Name','Nama','Product'],
-  status:['Status','Status Produk','Product Status','Status Listing'],
-  harga:['Harga','Price','Harga Jual','Harga Satuan'],
-  stok:['Stok','Stock','Inventory','Kuantitas','Quantity','Sisa Stok'],
-  kategori:['Kategori','Category'],
-  komisi:['Komisi','Commission','Rate Komisi','Commission Rate','Tarif komisi','Komisi (%)']};
-function parseCatalog(rows,fileName){
-  const h=headerIndex(rows,A_CATALOG); if(!h)return null;
-  const flat=(rows[h.row]||[]).map(norm).join('|');
-  if(flat.includes('id video')||flat.includes('gmv')||flat.includes('roas'))return null;
-  if(!(('stok'in h.idx)||('harga'in h.idx))||!('nama'in h.idx))return null;
-  const out=[];
-  for(let r=h.row+1;r<rows.length;r++){
-    const row=rows[r]||[]; const nama=String(gcell(row,h.idx.nama)||'').trim();
-    if(!nama||nama.length>180)continue;
-    out.push({id:String(gcell(row,h.idx.id)||'').trim(),nama,
-      status:String(gcell(row,h.idx.status)||'').trim(),
-      harga:num(gcell(row,h.idx.harga)),stok:num(gcell(row,h.idx.stok)),
-      kategori:String(gcell(row,h.idx.kategori)||'').trim(),komisi:pctNum(gcell(row,h.idx.komisi))});
-  }
-  return out.length?{kind:'catalog',fileName,rows:out,coverage:h}:null;
+function guessChannel(fileName,fallback){
+  const f=String(fileName||'').toLowerCase();
+  if(/tokopedia|tokped|toko_?ped|_1_|\(1\)/.test(f))return 'tokopedia';
+  if(/tiktok|tts|_shop/.test(f))return 'tiktok';
+  return fallback||'tiktok';
 }
 
-/* Transaction Product List: SKU x GMV x terjual */
-const A_TXNPROD={nama:['Nama Produk','Product Name','Produk','Product','Nama'],
-  id:['ID Produk','Product ID','ID SKU'],
-  gmv:['GMV','Penjualan','Sales','GMV (Rp)','Revenue','Pendapatan'],
-  terjual:['Produk Terjual','Item Terjual','Items Sold','Units Sold','Terjual','Kuantitas terjual','Unit terjual'],
-  pesanan:['Pesanan','Orders','Jumlah Pesanan','Pesanan SKU'],
-  pembeli:['Pembeli','Buyers','Pelanggan','Pembeli unik']};
+/* Shop Analytics Key metrics — tabel transpose (baris "Total nilai") */
+const SHOPKEY={
+  gmv:['GMV'], pesanan:['Pesanan'], pembeli:['Pembeli'], terjual:['Produk terjual'],
+  pesanan_sku:['Pesanan SKU'], bruto:['Pendapatan bruto','Pendapatan kotor'],
+  tayangan:['Tayangan halaman'], pengunjung:['Pengunjung','Visitors','Kunjungan'],
+  konversi:['Persentase konversi','Conversion rate','Tingkat konversi'],
+  klik_produk:['Klik produk'], aov:['AOV']
+};
+function parseShopKey(rows,fileName){
+  let hi=-1,vi=-1;
+  for(let r=0;r<Math.min(rows.length,16);r++){
+    if(norm((rows[r]||[])[0])==='total nilai'){ vi=r; hi=r-1; break; }
+  }
+  if(hi<0)for(let r=0;r<Math.min(rows.length,16);r++){
+    if(norm((rows[r]||[])[0])==='ringkasan data'){ hi=r+1; vi=r+2; break; } }
+  if(hi<0||vi<0)return null;
+  const head=(rows[hi]||[]).map(c=>String(c==null?'':c));
+  const val=rows[vi]||[];
+  if(!head.some(h=>norm(h)==='gmv'))return null;
+  const metrics={},prov={};
+  for(const f in SHOPKEY){
+    let ci=-1;
+    for(const a of SHOPKEY[f]){ const j=head.findIndex(h=>norm(h)===norm(a)); if(j>-1){ci=j;break;} }
+    if(ci>-1){ metrics[f]=/konversi/.test(f)?pctNum(val[ci]):num(val[ci]); prov[f]=head[ci]; }
+  }
+  const chGmv={};
+  head.forEach((h,i)=>{ const n=norm(h); if(n.indexOf('gmv ')===0&&n!=='gmv'){ const v=num(val[i]); if(v)chGmv[h]=v; } });
+  const isTT=head.some(h=>/live kreator|video afiliasi|video kreator|akun tertaut|video penjual|live penjual/i.test(h));
+  return {kind:'shop_metrics',fileName,metrics,prov,chGmv,found:Object.keys(metrics),
+    channel:isTT?'tiktok':guessChannel(fileName,'tokopedia')};
+}
+
+/* product_list — dua mode: rich (2 baris header, 176 kol) & simpel (1 baris header) */
+function parseProductRich(rows,fileName){
+  if(flatTop(rows).includes('id video'))return null;
+  let si=-1;
+  for(let r=0;r<Math.min(rows.length,10);r++){
+    const sub=(rows[r]||[]).map(norm);
+    if(sub.includes('id produk')&&sub.includes('gmv')&&(sub.includes('produk terjual')||sub.includes('status daftar produk'))){ si=r; break; }
+  }
+  let hi=-1;
+  for(let r=0;r<Math.min(rows.length,10);r++){
+    const h=(rows[r]||[]).map(norm);
+    if(h[0]==='id'&&h.includes('produk')&&h.includes('gmv')&&h.includes('produk terjual')){ hi=r; break; }
+  }
+  let mode,hrow,grow=-1;
+  if(si>-1){ mode='rich'; hrow=si; grow=si-1; }
+  else if(hi>-1){ mode='simple'; hrow=hi; }
+  else return null;
+  const sub=(rows[hrow]||[]).map(c=>String(c==null?'':c)); const subN=sub.map(norm);
+  const grp=grow>-1?(rows[grow]||[]).map(c=>String(c==null?'':c)):[];
+  const at=name=>subN.indexOf(norm(name));
+  const iName=mode==='rich'?0:at('produk');
+  const iId=at('id produk')>-1?at('id produk'):subN.indexOf('id');
+  const iStatus=mode==='rich'?at('status daftar produk'):at('status');
+  let iGmv,iTerjual;
+  if(mode==='rich'){
+    iGmv=sub.findIndex((s,i)=>norm(s)==='gmv'&&(!grp[i]||norm(grp[i])==='semua'||norm(grp[i])===''));
+    if(iGmv<0)iGmv=at('gmv');
+    iTerjual=sub.findIndex((s,i)=>norm(s)==='produk terjual'&&(!grp[i]||norm(grp[i])==='semua'||norm(grp[i])===''));
+    if(iTerjual<0)iTerjual=at('produk terjual');
+  } else { iGmv=at('gmv'); iTerjual=at('produk terjual'); }
+  let ci;
+  if(mode==='rich'){
+    const grpFirst=g=>{ let i=sub.findIndex((s,k)=>norm(grp[k]||'')===norm(g)&&norm(s)==='perolehan gmv');
+      if(i<0)i=sub.findIndex((s,k)=>norm(grp[k]||'')===norm(g)&&norm(s)==='gmv'); return i; };
+    ci={live:grpFirst('LIVE penjual'),video:grpFirst('Video penjual'),
+        affiliate:grpFirst('Afiliasi'),kartu:grpFirst('Kartu produk penjual'),toko:at('gmv tab toko')};
+  } else {
+    ci={live:at('gmv dari live'),video:at('gmv dari video'),affiliate:-1,
+        kartu:at('gmv dari kartu produk'),toko:at('gmv tab toko')};
+  }
+  const chan={live:0,video:0,affiliate:0,kartu:0,toko:0}; const out=[];
+  for(let r=hrow+1;r<rows.length;r++){
+    const row=rows[r]||[]; const nama=String(row[iName]==null?'':row[iName]).trim();
+    if(!nama||nama==='nan'||nama.length>180)continue;
+    const g=num(row[iGmv]);
+    out.push({id:String(row[iId]||'').trim(),nama,status:iStatus>-1?String(row[iStatus]||'').trim():'',
+      gmv:g,terjual:iTerjual>-1?num(row[iTerjual]):0});
+    for(const k in chan){ if(ci[k]>-1)chan[k]+=num(row[ci[k]]); }
+  }
+  if(!out.length)return null;
+  const found=[mode+' header']; if(iStatus>-1)found.push('status'); if(iTerjual>-1)found.push('unit terjual');
+  const missing=[]; if(iStatus<0)missing.push('status'); if(ci.affiliate<0&&mode==='simple')missing.push('GMV afiliasi');
+  return {kind:'product',fileName,mode,rows:out,channelGmv:chan,
+    channel:guessChannel(fileName,mode==='rich'?'tiktok':'tokopedia'),coverage:{found,missing}};
+}
+
+/* Live Analysis — tabel per sesi (durasi "Xh Ymin", GMV, host) */
+function parseLiveTabular(rows,fileName){
+  let hi=-1;
+  for(let r=0;r<Math.min(rows.length,8);r++){
+    const h=(rows[r]||[]).map(norm);
+    if(h.includes('id kreator')&&h.includes('durasi')&&h.some(x=>x.indexOf('gmv dari live')===0)){ hi=r; break; }
+  }
+  if(hi<0)return null;
+  const head=(rows[hi]||[]).map(c=>String(c==null?'':c)); const hn=head.map(norm);
+  const at=n=>hn.indexOf(norm(n));
+  const iHost=at('kreator')>-1?at('kreator'):at('nama panggilan');
+  const iDur=at('durasi');
+  let iGmv=hn.findIndex(x=>x==='gmv dari live (rp)'); if(iGmv<0)iGmv=hn.findIndex(x=>x.indexOf('gmv dari live')===0);
+  const iId=at('id kreator'), iPenonton=at('penonton');
+  const iPesanan=at('pemesanan')>-1?at('pemesanan'):at('pesanan dibayar');
+  const dur2h=s=>{ s=String(s); const h=s.match(/(\d+)\s*h/); const m=s.match(/(\d+)\s*min/);
+    return (h?+h[1]:0)+(m?+m[1]:0)/60; };
+  const sess=[]; const hosts={};
+  for(let r=hi+1;r<rows.length;r++){
+    const row=rows[r]||[]; const id=String(row[iId]||'').trim();
+    if(!/^\d{6,}$/.test(id))continue;
+    const host=String(row[iHost]||'').trim();
+    const g=iGmv>-1?num(row[iGmv]):0, hrs=dur2h(row[iDur]);
+    sess.push({host,gmv:g,hours:hrs,penonton:iPenonton>-1?num(row[iPenonton]):0,
+      pesanan:iPesanan>-1?num(row[iPesanan]):0});
+    if(host){ hosts[host]=hosts[host]||{sesi:0,jam:0,gmv:0}; hosts[host].sesi++; hosts[host].jam+=hrs; hosts[host].gmv+=g; }
+  }
+  if(!sess.length)return null;
+  return {kind:'live',fileName,sessions:sess,sesN:sess.length,
+    hours:sess.reduce((a,s)=>a+s.hours,0),gmv:sess.reduce((a,s)=>a+s.gmv,0),hosts};
+}
+
+/* Transaction Product List (afiliasi per SKU) — buat hero + cadangan */
 function parseTxnProduct(rows,fileName){
   if(flatTop(rows).includes('id video'))return null;
-  const h=headerIndex(rows,A_TXNPROD);
-  if(!h||!('nama'in h.idx)||!('gmv'in h.idx))return null;
-  const flat=(rows[h.row]||[]).map(norm).join('|');
-  if(flat.includes('kreator')||flat.includes('creator')||flat.includes('biaya')||flat.includes('roas'))return null;
-  const out=[];
-  for(let r=h.row+1;r<rows.length;r++){
-    const row=rows[r]||[]; const nama=String(gcell(row,h.idx.nama)||'').trim();
-    if(!nama||nama.length>180)continue;
-    out.push({nama,sku_id:String(gcell(row,h.idx.id)||'').trim(),gmv:num(gcell(row,h.idx.gmv)),
-      terjual:num(gcell(row,h.idx.terjual)),pesanan:num(gcell(row,h.idx.pesanan)),
-      pembeli:num(gcell(row,h.idx.pembeli))});
+  let hi=-1;
+  for(let r=0;r<Math.min(rows.length,6);r++){
+    const h=(rows[r]||[]).map(norm);
+    if((h.includes('product name')||h.includes('nama produk'))&&h.some(x=>x.indexOf('gmv')===0)&&!h.includes('creator name')){ hi=r; break; }
   }
-  return out.length?{kind:'txn_product',fileName,rows:out,coverage:h}:null;
+  if(hi<0)return null;
+  const head=(rows[hi]||[]).map(c=>String(c==null?'':c)); const hn=head.map(norm);
+  const at=names=>{ for(const n of names){ const i=hn.indexOf(norm(n)); if(i>-1)return i; } return -1; };
+  const iN=at(['product name','nama produk']), iId=at(['product id','id produk']),
+    iG=at(['gmv dari kreator','gmv']), iS=at(['produk yang terjual dari kreator','produk terjual','item terjual']),
+    iP=at(['pesanan teratribusi','pesanan']), iB=at(['pembeli']);
+  if(iN<0||iG<0)return null;
+  const out=[];
+  for(let r=hi+1;r<rows.length;r++){
+    const row=rows[r]||[]; const nama=String(row[iN]==null?'':row[iN]).trim();
+    if(!nama||nama==='nan'||nama.length>180)continue;
+    out.push({nama,sku_id:iId>-1?String(row[iId]||'').trim():'',gmv:num(row[iG]),
+      terjual:iS>-1?num(row[iS]):0,pesanan:iP>-1?num(row[iP]):0,pembeli:iB>-1?num(row[iB]):0});
+  }
+  return out.length?{kind:'txn_product',fileName,rows:out,coverage:{found:['gmv'],missing:[]}}:null;
 }
-
-/* Transaction Creator List */
-const A_TXNCRE={nama:['Nama Kreator','Creator Name','Kreator','Creator','Nama Creator'],
-  id:['ID Kreator','Creator ID'],
-  gmv:['GMV','Penjualan','Sales','GMV (Rp)','Revenue'],
-  pesanan:['Pesanan','Orders','Item terjual','Produk terjual','Jumlah Pesanan'],
-  komisi:['Komisi','Commission','Estimasi komisi','Komisi kreator']};
+/* Transaction Creator List (afiliasi) — buat B-6 */
 function parseTxnCreator(rows,fileName){
   if(flatTop(rows).includes('id video'))return null;
-  const h=headerIndex(rows,A_TXNCRE);
-  if(!h||!('nama'in h.idx)||!('gmv'in h.idx))return null;
-  const flat=(rows[h.row]||[]).map(norm).join('|');
-  if(!(flat.includes('kreator')||flat.includes('creator')))return null;
-  const out=[];
-  for(let r=h.row+1;r<rows.length;r++){
-    const row=rows[r]||[]; const nama=String(gcell(row,h.idx.nama)||'').trim().replace(/^@/,'');
-    if(!nama||nama.length>120)continue;
-    out.push({nama,id:String(gcell(row,h.idx.id)||'').trim(),gmv:num(gcell(row,h.idx.gmv)),
-      pesanan:num(gcell(row,h.idx.pesanan)),komisi:num(gcell(row,h.idx.komisi))});
+  let hi=-1;
+  for(let r=0;r<Math.min(rows.length,6);r++){
+    const h=(rows[r]||[]).map(norm);
+    if((h.includes('creator name')||h.includes('nama kreator'))&&h.some(x=>x.indexOf('gmv')===0)){ hi=r; break; }
   }
-  return out.length?{kind:'txn_creator',fileName,rows:out,coverage:h}:null;
+  if(hi<0)return null;
+  const head=(rows[hi]||[]).map(c=>String(c==null?'':c)); const hn=head.map(norm);
+  const at=names=>{ for(const n of names){ const i=hn.indexOf(norm(n)); if(i>-1)return i; } return -1; };
+  const iN=at(['creator name','nama kreator']), iG=at(['gmv dari kreator','gmv']),
+    iP=at(['pesanan teratribusi','pesanan']), iV=at(['video']), iL=at(['siaran live']),
+    iK=at(['perkiraan komisi','komisi']);
+  if(iN<0||iG<0)return null;
+  const out=[];
+  for(let r=hi+1;r<rows.length;r++){
+    const row=rows[r]||[]; const nama=String(row[iN]==null?'':row[iN]).trim().replace(/^@/,'');
+    if(!nama||nama==='nan'||nama.length>120)continue;
+    out.push({nama,gmv:num(row[iG]),pesanan:iP>-1?num(row[iP]):0,
+      video:iV>-1?num(row[iV]):0,live:iL>-1?num(row[iL]):0,komisi:iK>-1?num(row[iK]):0});
+  }
+  return out.length?{kind:'txn_creator',fileName,rows:out,coverage:{found:['gmv'],missing:[]}}:null;
 }
 
-/* Iklan: product campaigns & live campaigns */
-const A_ADS={kampanye:['Nama Kampanye','Campaign Name','Kampanye','Campaign','Nama Iklan','Ad Group','Grup Iklan','Materi','Creative','Kreatif','Nama Grup Iklan'],
-  biaya:['Biaya','Cost','Spend','Pengeluaran','Biaya Iklan','Total Biaya'],
-  gmv:['GMV','Penjualan','Sales','Gross Revenue','GMV Iklan','Pendapatan kotor','Total penjualan'],
-  roas:['ROAS','ROI'],
-  pesanan:['Pesanan','Orders','Konversi','Conversions','Pesanan dibayar'],
-  tayang:['Tayangan','Impresi','Impressions','Impression','Ditampilkan'],
-  klik:['Klik','Clicks','Click'],
-  keyword:['Kata Kunci','Keyword','Keywords','Audiens','Audience','Segmen']};
+/* Kampanye iklan (product/live) — pakai numDot (format desimal titik) */
+const A_ADS2={kampanye:['Nama kampanye','Nama Kampanye','Campaign Name','Nama LIVE'],
+  pid:['ID produk','Product ID'], material:['Jenis materi iklan','Jenis materi'],
+  biaya:['Biaya','Cost','Spend'], gmv:['Pendapatan kotor','Penghasilan bruto (Toko saat ini)','GMV'],
+  pesanan:['Pesanan SKU','Pesanan','Orders'], roas:['ROI (Toko saat ini)','ROAS','ROI'],
+  impresi:['Impresi iklan produk','Tayangan LIVE','Impresi'], klik:['Jumlah klik iklan produk','Klik']};
 function parseAds(rows,fileName){
-  if(flatTop(rows).includes('id video'))return null;
-  const h=headerIndex(rows,A_ADS);
-  if(!h||!('biaya'in h.idx))return null;
-  if(!(('roas'in h.idx)||('gmv'in h.idx)))return null;
-  const isLive=/live|siaran|stream/i.test(fileName);
+  /* jangan pakai guard 'id video' di sini: file kampanye punya kolom "ID video".
+     Syarat header (nama kampanye/nama LIVE + biaya) sudah cukup membedakan dari Video Performance List. */
+  let hi=-1;
+  for(let r=0;r<Math.min(rows.length,6);r++){
+    const h=(rows[r]||[]).map(norm);
+    if((h.includes('nama kampanye')||h.includes('nama live'))&&h.includes('biaya')){ hi=r; break; }
+  }
+  if(hi<0)return null;
+  const head=(rows[hi]||[]).map(c=>String(c==null?'':c)); const hn=head.map(norm);
+  const at=names=>{ for(const n of names){ const i=hn.indexOf(norm(n)); if(i>-1)return i; } return -1; };
+  const idx={}; for(const f in A_ADS2)idx[f]=at(A_ADS2[f]);
+  if(idx.biaya<0)return null;
+  const isLive=/live|siaran|stream/i.test(fileName)||hn.includes('nama live');
   const out=[];
-  for(let r=h.row+1;r<rows.length;r++){
-    const row=rows[r]||[];
-    const nm=String(gcell(row,h.idx.kampanye)||'').trim();
-    const biaya=num(gcell(row,h.idx.biaya));
+  for(let r=hi+1;r<rows.length;r++){
+    const row=rows[r]||[]; const nm=String(row[idx.kampanye]||'').trim();
+    const biaya=numDot(row[idx.biaya]);
     if(!nm&&!biaya)continue;
-    out.push({kampanye:nm,biaya,gmv:num(gcell(row,h.idx.gmv)),roas:num(gcell(row,h.idx.roas)),
-      pesanan:num(gcell(row,h.idx.pesanan)),tayang:num(gcell(row,h.idx.tayang)),
-      klik:num(gcell(row,h.idx.klik)),keyword:String(gcell(row,h.idx.keyword)||'').trim()});
+    out.push({kampanye:nm,pid:idx.pid>-1?String(row[idx.pid]||'').trim():'',
+      material:idx.material>-1?String(row[idx.material]||'').trim():(isLive?'Live':''),
+      biaya,gmv:idx.gmv>-1?numDot(row[idx.gmv]):0,pesanan:idx.pesanan>-1?numDot(row[idx.pesanan]):0,
+      roas:idx.roas>-1?numDot(row[idx.roas]):0,impresi:idx.impresi>-1?numDot(row[idx.impresi]):0});
   }
-  return out.length?{kind:'ads',fileName,jenis:isLive?'live':'produk',rows:out,coverage:h}:null;
-}
-
-/* Shop Analytics Key metrics & Live Analysis: scan label -> nilai */
-const METRIC_ALIAS={
-  gmv:['GMV','Penjualan','Total Penjualan','Sales','Revenue','Pendapatan','Omzet'],
-  pesanan:['Pesanan','Orders','Jumlah Pesanan','Total Pesanan','Pesanan dibuat','Pesanan dibayar'],
-  pengunjung:['Pengunjung','Visitors','Kunjungan','Visits','Pengunjung toko','Traffic','Total pengunjung'],
-  pembeli:['Pembeli','Buyers','Pelanggan','Pembeli unik','Customer'],
-  konversi:['Tingkat konversi','Conversion rate','Rasio konversi','CR','Konversi','Conversion'],
-  rating:['Rating toko','Shop rating','Penilaian toko','Rating','Skor toko'],
-  ulasan:['Jumlah ulasan','Ulasan','Reviews','Review','Jumlah penilaian'],
-  chatrate:['Tingkat respons chat','Chat response rate','Respons chat','Response rate','Tingkat balas chat'],
-  chattime:['Waktu respons','Response time','Waktu balas','Rata-rata waktu respons'],
-  terlambat:['Pesanan terlambat','Late dispatch','Keterlambatan','Late shipment','Terlambat kirim'],
-  penonton:['Penonton','Viewers','Total penonton','Penonton live','Total tayangan live'],
-  durasi:['Durasi','Duration','Durasi live','Lama live','Waktu tayang','Durasi siaran']
-};
-function scanMetrics(rows){
-  const got={},prov={};
-  for(let r=0;r<rows.length;r++){
-    const row=rows[r]||[];
-    for(let c=0;c<row.length;c++){
-      const raw=row[c],lab=norm(raw); if(!lab)continue;
-      for(const f in METRIC_ALIAS){
-        if(f in got)continue;
-        if(METRIC_ALIAS[f].some(a=>norm(a)===lab)){
-          let v=row[c+1]; if(v===''||v==null)v=(rows[r+1]||[])[c];
-          if(v!==''&&v!=null){
-            got[f]=/konversi|rate|terlambat/.test(f)?pctNum(v):num(v); prov[f]=String(raw);
-          }
-        }
-      }
-    }
-  }
-  const h=headerIndex(rows,METRIC_ALIAS);
-  if(h&&h.hits>=2){
-    const vrow=rows[h.row+1]||[];
-    for(const f of h.found){ if(f in got)continue;
-      const v=vrow[h.idx[f]];
-      if(v!==''&&v!=null){ got[f]=/konversi|rate|terlambat/.test(f)?pctNum(v):num(v);
-        prov[f]=String((rows[h.row]||[])[h.idx[f]]||f); }
-    }
-  }
-  return {metrics:got,prov,found:Object.keys(got)};
-}
-function parseShopMetrics(rows,fileName){
-  if(flatTop(rows).match(/id video|id produk|id kreator/))return null;
-  const m=scanMetrics(rows);
-  const shopKeys=['gmv','pesanan','pengunjung','pembeli','konversi','rating','ulasan','chatrate','terlambat'];
-  const hit=m.found.filter(f=>shopKeys.includes(f)).length;
-  const liveHit=m.found.filter(f=>['penonton','durasi'].includes(f)).length;
-  const isLive=/live|siaran|stream/i.test(fileName)||(liveHit>=1&&hit<2);
-  if(isLive){ if(liveHit<1&&!m.found.includes('gmv'))return null;
-    return {kind:'live',fileName,metrics:m.metrics,prov:m.prov,found:m.found}; }
-  if(hit<2)return null;
-  return {kind:'shop_metrics',fileName,metrics:m.metrics,prov:m.prov,found:m.found};
+  return out.length?{kind:'ads',fileName,jenis:isLive?'live':'produk',rows:out}:null;
 }
 
 function readFile(file){
@@ -795,12 +873,13 @@ function readFile(file){
         const ws=wb.Sheets[wb.SheetNames[0]];
         const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:''});
         let r;
-        r=parseCatalog(rows,file.name); if(r)return res(r);
         r=parseAds(rows,file.name); if(r)return res(r);
         r=parseTxnCreator(rows,file.name); if(r)return res(r);
         r=parseTxnProduct(rows,file.name); if(r)return res(r);
+        r=parseProductRich(rows,file.name); if(r)return res(r);
+        r=parseLiveTabular(rows,file.name); if(r)return res(r);
+        r=parseShopKey(rows,file.name); if(r)return res(r);
         const prod=parseProduk(rows,file.name); if(prod)return res(prod);
-        r=parseShopMetrics(rows,file.name); if(r)return res(r);
         const vid=parseVideo(rows,file.name); vid.fileName=file.name; res(vid);
       }catch(e){ res({error:'[file tidak bisa dibuka: '+e.message+']',fileName:file.name}); }
     };
@@ -816,48 +895,46 @@ const covOf=f=>f.coverage?{found:f.coverage.found,missing:f.coverage.missing}:nu
 
 function mergeStage(){
   LIB.baseline_sources=LIB.baseline_sources||{};
+  const S=LIB.baseline_sources;
   let rows=0,added=0,repl=0,heroSet=0,links=0,bl=0;
   STAGE.forEach(f=>{
     if(f.error)return;
-    if(f.kind==='catalog'){ LIB.baseline_sources.catalog={file:f.fileName,rows:f.rows,coverage:covOf(f)}; bl++; return; }
-    if(f.kind==='txn_product'){ LIB.baseline_sources.txn_product={file:f.fileName,rows:f.rows,coverage:covOf(f)};
+    if(f.kind==='product'){ S.products=(S.products||[]).filter(p=>p.file!==f.fileName);
+      S.products.push({file:f.fileName,mode:f.mode,channel:f.channel,rows:f.rows,channelGmv:f.channelGmv,coverage:covOf(f)});
+      if(!(LIB.hero||[]).length&&f.channel==='tiktok')
+        LIB.hero=heroFrom(f.rows.map(x=>({nama:x.nama,sku_id:x.id,gmv:x.gmv,klik:0,ctor:0})));
+      bl++; return; }
+    if(f.kind==='shop_metrics'){ S.shop=(S.shop||[]).filter(s=>s.file!==f.fileName);
+      S.shop.push({file:f.fileName,channel:f.channel,metrics:f.metrics,prov:f.prov,chGmv:f.chGmv,found:f.found}); bl++; return; }
+    if(f.kind==='live'){ S.live=(S.live||[]).filter(l=>l.file!==f.fileName);
+      S.live.push({file:f.fileName,sesN:f.sesN,hours:f.hours,gmv:f.gmv,hosts:f.hosts}); bl++; return; }
+    if(f.kind==='ads'){ S.ads=(S.ads||[]).filter(a=>a.file!==f.fileName);
+      S.ads.push({file:f.fileName,jenis:f.jenis,rows:f.rows}); bl++; return; }
+    if(f.kind==='txn_product'){ S.txn_product={file:f.fileName,rows:f.rows,coverage:covOf(f)};
       if(!(LIB.hero||[]).length)LIB.hero=heroFrom(f.rows.map(x=>({nama:x.nama,sku_id:x.sku_id,gmv:x.gmv,klik:0,ctor:0}))); bl++; return; }
-    if(f.kind==='txn_creator'){ LIB.baseline_sources.txn_creator={file:f.fileName,rows:f.rows,coverage:covOf(f)}; bl++; return; }
-    if(f.kind==='ads'){ (LIB.baseline_sources.ads=LIB.baseline_sources.ads||[]).push({file:f.fileName,jenis:f.jenis,rows:f.rows,coverage:covOf(f)}); bl++; return; }
-    if(f.kind==='shop_metrics'){ LIB.baseline_sources.shop_metrics={file:f.fileName,metrics:f.metrics,prov:f.prov,found:f.found}; bl++; return; }
-    if(f.kind==='live'){ (LIB.baseline_sources.live=LIB.baseline_sources.live||[]).push({file:f.fileName,metrics:f.metrics||{},prov:f.prov||{},found:f.found||[]}); bl++; return; }
+    if(f.kind==='txn_creator'){ S.txn_creator={file:f.fileName,rows:f.rows,coverage:covOf(f)}; bl++; return; }
     if(f.kind==='produk'){ LIB.hero=heroFrom(f.rows); heroSet++;
-      LIB.baseline_sources.txn_product=LIB.baseline_sources.txn_product||{file:f.fileName,
-        rows:f.rows.map(x=>({nama:x.nama,sku_id:x.sku_id,gmv:x.gmv,terjual:x.terjual,pesanan:0,pembeli:0})),coverage:null};
+      S.txn_product=S.txn_product||{file:f.fileName,rows:f.rows.map(x=>({nama:x.nama,sku_id:x.sku_id,gmv:x.gmv,terjual:x.terjual,pesanan:0,pembeli:0})),coverage:null};
       return; }
     if(f.kind==='baseline'){
-      LIB.baseline_awal={file:f.fileName,periode:f.periode,kategori:f.kategori,
-        sku_total:f.sku_total,sku_jalan:f.sku_jalan};
+      LIB.baseline_awal={file:f.fileName,periode:f.periode,kategori:f.kategori,sku_total:f.sku_total,sku_jalan:f.sku_jalan};
       if(f.hero.length){ LIB.hero=f.hero; heroSet++; }
       if(!($('#fKlien').value||'').trim()&&f.klien)$('#fKlien').value=f.klien;
-      return;
-    }
-    if(f.kind==='links'){
-      f.rows.forEach(r=>{ const v=LIB.videos[String(r.video_id||'').trim()];
-        if(v&&r.play_url){ v.play_url=r.play_url; links++; } });
-      return;
-    }
+      return; }
+    if(f.kind==='links'){ f.rows.forEach(r=>{ const v=LIB.videos[String(r.video_id||'').trim()];
+        if(v&&r.play_url){ v.play_url=r.play_url; links++; } }); return; }
     if(f.kind!=='video')return;
     f.rows.forEach(r=>{
       rows++;
       let v=LIB.videos[r.video_id];
-      if(!v){
-        v={video_id:r.video_id,username:r.username,creator_id:r.creator_id,caption:r.caption,
+      if(!v){ v={video_id:r.video_id,username:r.username,creator_id:r.creator_id,caption:r.caption,
            tags:r.tags,waktu:r.waktu,produk:r.produk,produk_ids:r.produk_ids,sumber:f.sumber,
-           diagnosis:r.diagnosis,play_url:'',snapshots:[]};
-        added++;
-      }
+           diagnosis:r.diagnosis,play_url:'',snapshots:[]}; added++; }
       v.caption=r.caption||v.caption;
       v.tags=(r.tags&&r.tags.length)?r.tags:v.tags;
       v.produk=r.produk||v.produk;
       v.produk_ids=(r.produk_ids&&r.produk_ids.length)?r.produk_ids:v.produk_ids;
-      v.waktu=r.waktu||v.waktu; v.username=r.username||v.username;
-      v.diagnosis=r.diagnosis||v.diagnosis;
+      v.waktu=r.waktu||v.waktu; v.username=r.username||v.username; v.diagnosis=r.diagnosis||v.diagnosis;
       const snap={sumber:f.sumber,periode:f.periode||'(tanpa periode)',file:f.fileName,
         vv:r.vv,gmv:r.gmv,orders:r.orders,prod_view:r.prod_view,prod_click:r.prod_click,
         buyers:r.buyers,likes:r.likes,komentar:r.komentar,share:r.share,sold:r.sold,
@@ -1623,11 +1700,11 @@ function paneSheet(){
 }
 
 /* ═══════════ TAB D — BASELINE (CDPS Section B) ═══════════ */
-/* Input manual yang tidak ada di export mana pun. Disimpan di memori sesi. */
-const BLMAN={toko:'',kategori:'',prioritas:'',stokMin:'',months:'',periode:''};
+const BLMAN={channel:'',toko:'',kategori:'',prioritas:'',months:'',periode:'',
+  comp:{},adsManual:{'GMV Max':false,'Manual keyword':false,'Auto':false,'Affiliate Ads':false}};
 const SECT={'B-0':'Identitas channel','E-2':'Prioritas','B-2':'Trafik & konversi',
-  'B-3':'Produk & SKU','B-4':'Kesehatan toko','B-5':'Iklan berbayar',
-  'B-6':'Afiliasi & kreator','B-7':'Konten (video & live)','B-8':'Promo & program platform','B-9':'Kompetitor'};
+  'B-3':'Portofolio SKU','B-4':'Kesehatan toko','B-5':'Iklan (Ads)',
+  'B-6':'Affiliate','B-7':'Konten & Live','B-8':'Promo & program platform','B-9':'Kompetitor'};
 const ST_PILL={auto:['auto','p-ok'],partial:['parsial','p-mid'],manual:['manual','p-off'],na:['N/A','p-bad']};
 function blPill(s){ const p=ST_PILL[s]||ST_PILL.na; return '<span class="pill '+p[1]+'" style="margin:0">'+p[0]+'</span>'; }
 function baselineMonths(){
@@ -1635,304 +1712,489 @@ function baselineMonths(){
   Object.values(LIB.videos).forEach(v=>v.snapshots.forEach(s=>{
     const r=periodeRange(s.periode); if(r){ set.add(r.a.slice(0,7)); set.add(r.b.slice(0,7)); }
   }));
+  (LIB.baseline_sources.ads||[]).forEach(()=>{});
   return set;
+}
+function channelsPresent(){
+  const S=LIB.baseline_sources||{};
+  const set=new Set();
+  (S.shop||[]).forEach(x=>set.add(x.channel||'tiktok'));
+  (S.products||[]).forEach(x=>set.add(x.channel||'tiktok'));
+  if(!set.size)set.add('tiktok');
+  return [...set];
+}
+function chanLabel(c){ return c==='tokopedia'?'Tokopedia':c==='gabungan'?'Gabungan':'TikTok Shop'; }
+function shopFor(ch){
+  const arr=(LIB.baseline_sources.shop||[]);
+  if(!arr.length)return null;
+  if(ch==='gabungan'){
+    const m={}; ['gmv','pesanan','pembeli','terjual','pesanan_sku','tayangan','pengunjung','klik_produk','bruto']
+      .forEach(k=>{ m[k]=arr.reduce((a,s)=>a+num((s.metrics||{})[k]||0),0); });
+    m.konversi=m.pengunjung?(m.pesanan_sku||m.pesanan)/m.pengunjung*100:0;
+    const chg={}; arr.forEach(s=>{ for(const k in(s.chGmv||{}))chg[k]=(chg[k]||0)+s.chGmv[k]; });
+    return {metrics:m,chGmv:chg,prov:{}};
+  }
+  const s=arr.find(x=>(x.channel||'tiktok')===ch)||arr[0];
+  return {metrics:s.metrics||{},chGmv:s.chGmv||{},prov:s.prov||{}};
+}
+function productFor(ch){
+  const arr=(LIB.baseline_sources.products||[]);
+  if(!arr.length)return null;
+  if(ch==='gabungan'){
+    let rows=[]; const cg={live:0,video:0,affiliate:0,kartu:0,toko:0};
+    arr.forEach(p=>{ rows=rows.concat(p.rows||[]); for(const k in cg)cg[k]+=(p.channelGmv||{})[k]||0; });
+    return {rows,channelGmv:cg,mode:'gabungan'};
+  }
+  const p=arr.find(x=>(x.channel||'tiktok')===ch)||arr[0];
+  return {rows:p.rows||[],channelGmv:p.channelGmv||{},mode:p.mode};
 }
 function computeBaseline(){
   const S=LIB.baseline_sources||{};
-  const shop=(S.shop_metrics&&S.shop_metrics.metrics)||null;
-  const shopProv=(S.shop_metrics&&S.shop_metrics.prov)||{};
-  const cat=(S.catalog&&S.catalog.rows)||null;
-  const catCov=(S.catalog&&S.catalog.coverage)||null;
-  const txnP=(S.txn_product&&S.txn_product.rows)||null;
-  const txnC=(S.txn_creator&&S.txn_creator.rows)||null;
-  const adsArr=S.ads||[]; const liveArr=S.live||[];
+  const present=channelsPresent();
+  let chan=BLMAN.channel;
+  if(!chan||(chan!=='gabungan'&&!present.includes(chan)))chan=present.includes('tiktok')?'tiktok':present[0];
+  const allowGab=present.length>1;
+  const isTT=chan!=='tokopedia';
+
+  const shop=shopFor(chan), prod=productFor(chan);
+  const tc=(S.txn_creator&&S.txn_creator.rows)||[];
   const vids=libRows();
-  const F=[]; const push=o=>F.push(Object.assign({prov:'',sub:'',disp:o.disp||(o.txt==null?'':esc(o.txt))},o));
   const nsrc=Object.keys(S).length;
+  const ready=nsrc>0||vids.length>0;
 
-  const txnGMV=txnP?txnP.reduce((a,x)=>a+num(x.gmv),0):0;
-  const videoGMV=vids.reduce((a,v)=>a+v.agg.gmv,0);
-  const videoViews=vids.reduce((a,v)=>a+v.agg.vv,0);
-  const videoActive=vids.filter(v=>v.agg.vv>0).length;
-  const affGMV=txnC?txnC.reduce((a,x)=>a+num(x.gmv),0):0;
-  const adsSpend=adsArr.reduce((a,g)=>a+g.rows.reduce((t,r)=>t+num(r.biaya),0),0);
-  const adsGMV=adsArr.reduce((a,g)=>a+g.rows.reduce((t,r)=>t+num(r.gmv),0),0);
-  const adsCount=adsArr.reduce((a,g)=>a+g.rows.length,0);
-  const adsTypes=[...new Set(adsArr.map(g=>g.jenis))];
-  const liveGMV=liveArr.reduce((a,l)=>a+num((l.metrics||{}).gmv),0);
-  const liveDur=liveArr.reduce((a,l)=>a+num((l.metrics||{}).durasi),0);
-  const liveHasDur=liveArr.some(l=>(l.found||[]).includes('durasi'));
-  const shopGMV=shop?num(shop.gmv):0;
-  const totalGMV=shopGMV||txnGMV||(videoGMV+liveGMV)||0;
+  const shopGMV=shop?num(shop.metrics.gmv):0;
+  const prodGMV=prod?prod.rows.reduce((a,x)=>a+num(x.gmv),0):0;
+  const totGMV=shopGMV||prodGMV||0;
+  const cg=prod?prod.channelGmv:{live:0,video:0,affiliate:0,kartu:0,toko:0};
 
-  const monthsSet=baselineMonths();
-  const months=(BLMAN.months?+BLMAN.months:0)||monthsSet.size||0;
-  const periodeRef=BLMAN.periode||[...monthsSet].sort().join(', ')||(LIB.baseline_awal&&LIB.baseline_awal.periode)||'';
-
+  const months=(BLMAN.months?+BLMAN.months:0)||baselineMonths().size||1;
+  const periodeRef=BLMAN.periode||[...baselineMonths()].sort().join(', ')||(LIB.baseline_awal&&LIB.baseline_awal.periode)||'';
   const toko=BLMAN.toko||($('#fKlien').value||'').trim()||LIB.klien||'';
   const kategori=BLMAN.kategori||$('#fVert').value||'';
 
-  /* ── B-0 ── */
-  push({sec:'B-0',label:'Channel',txt:'TikTok Shop',status:'auto'});
-  push({sec:'B-0',label:'Status channel',txt:'aktif (ada data transaksi/konten)',status:nsrc||vids.length?'auto':'na'});
-  push({sec:'B-0',label:'Nama toko',txt:toko||'(isi manual)',status:BLMAN.toko?'manual':(toko?'auto':'manual'),prov:BLMAN.toko?'':'dari kolom Klien'});
-  push({sec:'B-0',label:'Kategori utama',txt:kategori||'(isi manual)',status:BLMAN.kategori?'manual':'auto',prov:'dari kolom Vertical'});
-  push({sec:'B-0',label:'URL toko',txt:'tidak ada di export',status:'na'});
-  push({sec:'B-0',label:'Umur toko / tanggal buka',txt:'tidak ada di export',status:'na'});
-  push({sec:'B-0',label:'Badge / level toko',txt:'tidak ada di export',status:'na'});
-  const srcFiles=[]; if(shop)srcFiles.push(S.shop_metrics.file); if(cat)srcFiles.push(S.catalog.file);
-    if(txnP&&S.txn_product.file)srcFiles.push(S.txn_product.file); if(txnC)srcFiles.push(S.txn_creator.file);
-    adsArr.forEach(g=>srcFiles.push(g.file)); liveArr.forEach(l=>srcFiles.push(l.file));
-  push({sec:'B-0',label:'Sumber data',txt:srcFiles.length?srcFiles.join(' | '):'video library + '+int(nsrc)+' sumber',
-    disp:(srcFiles.length?srcFiles.map(esc).join('<br>'):'video library'),status:'auto'});
-  push({sec:'B-0',label:'Tanggal tarik data',txt:new Date().toISOString().slice(0,10),status:'auto'});
-  push({sec:'B-0.7',label:'Periode baseline',txt:periodeRef||'(tidak terdeteksi)',status:periodeRef?'auto':'na',
-    prov:months?(int(months)+' bulan terdeteksi'):'',sub:'diturunkan dari rentang tanggal export'});
+  /* ── B-2 komposisi (6 bucket, GMV share; Iklan overlay) ── */
+  const adsPids=new Set((prod?prod.rows:[]).map(x=>String(x.id)).filter(Boolean));
+  let adSpend=0,adGmv=0,adOrders=0; const adCamp=new Set(),adTypes=new Set(); let liveAdsPresent=false;
+  (S.ads||[]).forEach(a=>{ (a.rows||[]).forEach(r=>{
+    if(a.jenis==='live'){ liveAdsPresent=true; if(isTT){ adSpend+=r.biaya;adGmv+=r.gmv;adOrders+=r.pesanan; if(r.kampanye)adCamp.add(r.kampanye); adTypes.add('Live Ads'); } return; }
+    if(!isTT)return;
+    if(adsPids.size&&r.pid&&!adsPids.has(r.pid))return;
+    adSpend+=r.biaya; adGmv+=r.gmv; adOrders+=r.pesanan; if(r.kampanye)adCamp.add(r.kampanye);
+    if(/video/i.test(r.material))adTypes.add('Video Ads'); else if(/kartu/i.test(r.material))adTypes.add('Kartu Produk Ads');
+  }); });
+  const pctOf=v=>totGMV?v/totGMV*100:0;
+  const compAuto={organik:pctOf(cg.toko),kartu:pctOf(cg.kartu),video:pctOf(cg.video),
+    live:pctOf(cg.live),affiliate:pctOf(cg.affiliate),iklan:pctOf(adGmv)};
+  const compVal={}; for(const k in compAuto)compVal[k]=(BLMAN.comp[chan]&&BLMAN.comp[chan][k]!=null)?BLMAN.comp[chan][k]:compAuto[k];
 
-  /* ── E-2 ── */
-  push({sec:'E-2',label:'Prioritas channel',txt:BLMAN.prioritas||'(isi manual: utama / sekunder / uji coba)',
-    status:BLMAN.prioritas?'manual':'manual'});
-
-  /* ── B-2 ── */
-  push({sec:'B-2',label:'Pengunjung / bulan',txt:shop&&shop.pengunjung?int(shop.pengunjung):'tidak ada di export',
-    status:shop&&shop.pengunjung?'auto':'na',prov:shop?shopProv.pengunjung:''});
-  push({sec:'B-2',label:'Conversion rate',txt:shop&&shop.konversi?pp(shop.konversi):'tidak ada di export',
-    status:shop&&shop.konversi?'auto':'na',prov:shop?shopProv.konversi:''});
-  push({sec:'B-2',label:'Pembeli',txt:shop&&shop.pembeli?int(shop.pembeli):(txnP?'— (per-SKU, bukan toko)':'tidak ada'),
-    status:shop&&shop.pembeli?'auto':'na'});
-  const gmvMix=[]; if(videoGMV)gmvMix.push('video '+share(videoGMV,totalGMV)); if(liveGMV)gmvMix.push('live '+share(liveGMV,totalGMV));
-    if(affGMV)gmvMix.push('affiliate '+share(affGMV,totalGMV)); if(adsGMV)gmvMix.push('iklan '+share(adsGMV,totalGMV));
-  push({sec:'B-2.3',label:'Komposisi trafik (6 sumber resmi)',txt:'tidak ada di export',status:'na',
-    sub:'proxy sumber GMV: '+(gmvMix.length?gmvMix.join(' · '):'belum ada'),
-    disp:'<span style="color:var(--red)">tidak ada di export</span>'+(gmvMix.length?'<div class="sub">proxy sumber GMV — bukan trafik resmi: '+esc(gmvMix.join(' · '))+'</div>':'')});
-  push({sec:'B-2',label:'Entry point / halaman masuk',txt:'tidak ada di export',status:'na'});
-
-  /* ── B-3 ── */
-  let skuTotal=cat?cat.length:(txnP?txnP.length:null);
-  push({sec:'B-3',label:'SKU terdaftar',txt:skuTotal==null?'perlu product_list':int(skuTotal),
-    status:cat?'auto':(txnP?'partial':'na'),prov:cat?'katalog':(txnP?'dari transaksi (hanya yg pernah tampil)':'')});
-  let skuAktif=null;
-  if(cat&&catCov&&catCov.found.includes('status')){ skuAktif=cat.filter(r=>/aktif|active|live|tayang|jual/i.test(r.status)).length; }
-  push({sec:'B-3',label:'SKU aktif (listing live)',txt:skuAktif==null?'kolom status tidak ada':int(skuAktif),
-    status:skuAktif==null?'na':'auto'});
-  const skuJalan=txnP?txnP.filter(x=>num(x.gmv)>0).length:null;
-  push({sec:'B-3',label:'SKU ada penjualan',txt:skuJalan==null?'perlu transaksi produk':int(skuJalan),status:txnP?'auto':'na'});
+  /* ── B-3 SKU ── */
+  const prows=prod?prod.rows:[];
+  const skuTerdaftar=prows.length||null;
+  const skuAktif=prows.length?prows.filter(r=>/aktif|active|live|tayang/i.test(r.status)).length:null;
+  const skuJalan=prows.length?prows.filter(r=>num(r.gmv)>0).length:null;
+  const skuSlow=prows.length?prows.filter(r=>num(r.gmv)===0).length:null;
   let sku80=null;
-  if(txnP){ const sell=txnP.filter(x=>num(x.gmv)>0).sort((a,b)=>b.gmv-a.gmv); const tot=sell.reduce((a,x)=>a+x.gmv,0);
-    let cum=0,c=0; for(const x of sell){cum+=x.gmv;c++; if(tot&&cum/tot>=0.8)break;} sku80=tot?c:null; }
-  push({sec:'B-3.2',label:'SKU penyumbang 80% GMV',txt:sku80==null?'perlu transaksi produk':int(sku80)+' SKU',
-    status:txnP?'auto':'na',sub:skuJalan?('dari '+int(skuJalan)+' SKU yang jalan'):''});
-  let slow=null;
-  if(cat&&txnP){ const sellIds=new Set(),sellNames=new Set();
-    txnP.filter(x=>num(x.gmv)>0).forEach(x=>{ if(x.sku_id)sellIds.add(String(x.sku_id)); sellNames.add(norm(x.nama)); });
-    slow=cat.filter(r=>!((r.id&&sellIds.has(String(r.id)))||sellNames.has(norm(r.nama)))).length; }
-  push({sec:'B-3',label:'Slow movers (0 penjualan periode)',txt:slow==null?'perlu katalog + transaksi':int(slow),
-    status:(cat&&txnP)?'auto':'na'});
-  push({sec:'B-3.6',label:'Listing layak (%)',txt:'tidak bisa diturunkan (butuh audit listing)',status:'na'});
-  const top10=txnP?txnP.filter(x=>num(x.gmv)>0).sort((a,b)=>b.gmv-a.gmv).slice(0,10):[];
-  const top5=top10.slice(0,5);
-  push({sec:'B-3.3',label:'Top 5 SKU (GMV)',status:top5.length?'auto':'na',
-    txt:top5.length?top5.map((x,i)=>(i+1)+'. '+x.nama.slice(0,40)+' - '+rpS(x.gmv)).join(' | '):'perlu transaksi produk',
-    disp:top5.length?top5.map((x,i)=>(i+1)+'. '+esc(x.nama.slice(0,44))+' — <b class="mono">'+rpS(x.gmv)+'</b>').join('<br>'):'perlu transaksi produk'});
-  const stokMin=(BLMAN.stokMin!==''&&BLMAN.stokMin!=null)?+BLMAN.stokMin:5;
-  const hasStok=catCov?catCov.found.includes('stok'):false;
-  let kritis=null,kritisList=[];
-  if(cat&&hasStok){ kritisList=cat.filter(r=>r.stok<=stokMin).sort((a,b)=>a.stok-b.stok); kritis=kritisList.length; }
-  push({sec:'B-3.5',label:'Stok kritis (≤ '+stokMin+')',status:(cat&&hasStok)?'auto':'na',
-    txt:kritis==null?'kolom stok tidak ada':int(kritis)+' SKU',
-    disp:kritis==null?'kolom stok tidak ada':int(kritis)+' SKU'+(kritisList.length?'<div class="sub">'+kritisList.slice(0,5).map(r=>esc(r.nama.slice(0,32))+' ('+int(r.stok)+')').join(', ')+(kritisList.length>5?' …':'')+'</div>':'')});
+  if(prows.length){ const sell=prows.filter(r=>num(r.gmv)>0).sort((a,b)=>b.gmv-a.gmv);
+    const t=sell.reduce((a,x)=>a+x.gmv,0); let cum=0,c=0;
+    for(const x of sell){ cum+=x.gmv; c++; if(t&&cum/t>=0.8)break; } sku80=t?c:null; }
+  const top5=(prows.filter(r=>num(r.gmv)>0).sort((a,b)=>b.gmv-a.gmv).slice(0,5))
+    .map(x=>({nama:x.nama,gmv:x.gmv,unit:x.terjual,harga:x.terjual?x.gmv/x.terjual:null}));
 
-  /* ── B-4 ── */
-  const mget=(k,fmt)=>shop&&shop[k]!=null&&shop[k]!==0?{v:(fmt?fmt(shop[k]):int(shop[k])),s:'auto',p:shopProv[k]||''}:{v:'tidak ada di export',s:'na',p:''};
-  let m;
-  m=mget('rating',v=>dec(v,2)); push({sec:'B-4',label:'Rating toko',txt:m.v,status:m.s,prov:m.p});
-  m=mget('ulasan'); push({sec:'B-4',label:'Jumlah ulasan',txt:m.v,status:m.s,prov:m.p});
-  m=mget('chatrate',v=>pp(v)); push({sec:'B-4',label:'Chat response rate',txt:m.v,status:m.s,prov:m.p});
-  m=mget('chattime'); push({sec:'B-4',label:'Waktu respons chat',txt:shop&&shop.chattime?String(shop.chattime):'tidak ada di export',status:shop&&shop.chattime?'auto':'na'});
-  m=mget('terlambat',v=>pp(v)); push({sec:'B-4',label:'Pesanan terlambat',txt:m.v,status:m.s,prov:m.p});
-  push({sec:'B-4',label:'Poin penalti / pelanggaran',txt:'tidak ada di export',status:'na'});
-  push({sec:'B-4',label:'Tema keluhan utama',txt:'perlu baca manual ulasan/chat',status:'na'});
+  /* ── B-6 affiliate (TT only) ── */
+  const affPosted=isTT?tc.length:null;
+  const affActive=isTT?tc.filter(x=>num(x.gmv)>0).length:null;
+  const affGmv=isTT?tc.reduce((a,x)=>a+num(x.gmv),0):null;
+  const affPct=(isTT&&totGMV)?affGmv/totGMV*100:null;
 
-  /* ── B-5 ── */
-  push({sec:'B-5',label:'Tipe kampanye aktif',txt:adsTypes.length?adsTypes.join(', '):'perlu data iklan',status:adsTypes.length?'auto':'na'});
-  push({sec:'B-5',label:'Jumlah kampanye/grup',txt:adsCount?int(adsCount):'perlu data iklan',status:adsCount?'auto':'na'});
-  push({sec:'B-5',label:'Total spend iklan',txt:adsSpend?rp(adsSpend):'perlu data iklan',status:adsSpend?'auto':'na'});
-  push({sec:'B-5',label:'GMV dari iklan',txt:adsGMV?rp(adsGMV):(adsCount?'kolom GMV tidak ada':'perlu data iklan'),status:adsGMV?'auto':(adsCount?'partial':'na')});
-  push({sec:'B-5',label:'ROAS blended',txt:adsSpend&&adsGMV?dec(adsGMV/adsSpend,2):'perlu spend+GMV',status:(adsSpend&&adsGMV)?'auto':'na'});
-  let topKw=null;{ const fk=new Map(); adsArr.forEach(g=>g.rows.forEach(r=>{ if(r.keyword)fk.set(r.keyword,(fk.get(r.keyword)||0)+num(r.gmv||r.biaya)); }));
-    const arr=[...fk.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5); if(arr.length)topKw=arr.map(x=>x[0]); }
-  push({sec:'B-5',label:'Top keyword/audiens',txt:topKw?topKw.join(', '):'kolom keyword tidak ada',status:topKw?'partial':'na'});
-  const boros=[]; adsArr.forEach(g=>g.rows.forEach(r=>{ if(num(r.biaya)>0&&num(r.pesanan)===0&&num(r.gmv)===0)boros.push({nm:r.kampanye||'(tanpa nama)',biaya:num(r.biaya)}); }));
-  boros.sort((a,b)=>b.biaya-a.biaya);
-  push({sec:'B-5',label:'Kampanye boros (spend, 0 order)',status:adsCount?(boros.length?'auto':'auto'):'na',
-    txt:adsCount?(boros.length?boros.length+' kampanye: '+boros.slice(0,5).map(b=>b.nm+' ('+rpS(b.biaya)+')').join(', '):'tidak ada'):'perlu data iklan',
-    disp:adsCount?(boros.length?'<b>'+int(boros.length)+'</b> kampanye<div class="sub">'+boros.slice(0,5).map(b=>esc(b.nm.slice(0,28))+' '+rpS(b.biaya)).join(', ')+(boros.length>5?' …':'')+'</div>':'tidak ada'):'perlu data iklan'});
+  /* ── B-7 konten & live (TT only) ── */
+  const videoN=isTT?vids.length:null;
+  const views=isTT?vids.reduce((a,v)=>a+v.agg.vv,0):null;
+  const gmvVideo=isTT?vids.reduce((a,v)=>a+v.agg.gmv,0):null;
+  const liveArr=isTT?(S.live||[]):[];
+  const liveN=liveArr.reduce((a,l)=>a+num(l.sesN),0);
+  const liveHours=liveArr.reduce((a,l)=>a+num(l.hours),0);
+  const liveGmv=liveArr.reduce((a,l)=>a+num(l.gmv),0);
+  const hostMap={}; liveArr.forEach(l=>{ for(const h in(l.hosts||{})){ hostMap[h]=hostMap[h]||{sesi:0,jam:0,gmv:0};
+    hostMap[h].sesi+=l.hosts[h].sesi; hostMap[h].jam+=l.hosts[h].jam; hostMap[h].gmv+=l.hosts[h].gmv; } });
+  const hosts=Object.entries(hostMap).map(([nama,v])=>({nama,...v})).sort((a,b)=>b.gmv-a.gmv||b.jam-a.jam);
 
-  /* ── B-6 ── */
-  const kreatorAktif=txnC?txnC.filter(x=>num(x.gmv)>0).length:null;
-  push({sec:'B-6',label:'Kreator aktif (ada penjualan)',txt:kreatorAktif==null?'perlu transaksi kreator':int(kreatorAktif),status:txnC?'auto':'na'});
-  push({sec:'B-6',label:'GMV dari affiliate',txt:txnC?rp(affGMV):'perlu transaksi kreator',status:txnC?'auto':'na'});
-  push({sec:'B-6',label:'% GMV dari affiliate',txt:(txnC&&totalGMV)?share(affGMV,totalGMV):'perlu total GMV',status:(txnC&&totalGMV)?'partial':'na',sub:totalGMV?'basis total GMV '+rpS(totalGMV):''});
-  let komisiAvg=null; if(cat&&catCov&&catCov.found.includes('komisi')){ const ks=cat.map(r=>r.komisi).filter(x=>x>0); if(ks.length)komisiAvg=ks.reduce((a,x)=>a+x,0)/ks.length; }
-  push({sec:'B-6',label:'Komisi rata-rata',txt:komisiAvg!=null?pp(komisiAvg):'kolom komisi tidak ada',status:komisiAvg!=null?'partial':'na'});
-  const topC=txnC?txnC.slice().sort((a,b)=>b.gmv-a.gmv).slice(0,5):[];
-  push({sec:'B-6',label:'Top 5 kreator (GMV)',status:topC.length?'auto':'na',
-    txt:topC.length?topC.map((x,i)=>(i+1)+'. '+x.nama+' - '+rpS(x.gmv)).join(' | '):'perlu transaksi kreator',
-    disp:topC.length?topC.map((x,i)=>(i+1)+'. @'+esc(x.nama.slice(0,28))+' — <b class="mono">'+rpS(x.gmv)+'</b>').join('<br>'):'perlu transaksi kreator'});
-  push({sec:'B-6',label:'Program sampel / gifting',txt:'tidak ada di export',status:'na'});
-
-  /* ── B-7 ── */
-  push({sec:'B-7',label:'Video bertayangan',txt:videoActive?int(videoActive):'perlu Video Performance List',status:videoActive?'auto':'na',
-    sub:months?('~'+dec(videoActive/months,1)+' video/bulan ('+int(months)+' bln)'):''});
-  push({sec:'B-7',label:'Total views video',txt:videoViews?int(videoViews):'perlu video',status:videoViews?'auto':'na'});
-  push({sec:'B-7',label:'GMV dari video',txt:videoGMV?rp(videoGMV):'perlu video',status:videoGMV?'auto':'na'});
-  push({sec:'B-7',label:'Jumlah sesi live',txt:liveArr.length?int(liveArr.length):'perlu Live Analysis',status:liveArr.length?'auto':'na'});
-  push({sec:'B-7',label:'GMV dari live',txt:liveArr.length?rp(liveGMV):'perlu Live Analysis',status:liveArr.length?'auto':'na'});
-  push({sec:'B-7',label:'Durasi live total',txt:liveHasDur?(int(liveDur)+' (satuan cek export)'):'kolom durasi tidak ada',status:liveHasDur?'partial':'na',sub:liveHasDur?'satuan menit/detik belum dipastikan':''});
-  push({sec:'B-7',label:'Host / studio',txt:'tidak ada di export',status:'na'});
-
-  /* ── B-8 / B-9 ── */
-  push({sec:'B-8',label:'Voucher / beban promo (%)',txt:'tidak ada di export',status:'na'});
+  /* ── generic fields (B-0, B-4, B-8, B-9) ── */
+  const F=[]; const push=o=>F.push(Object.assign({prov:'',disp:o.disp||(o.txt==null?'':esc(o.txt))},o));
+  push({sec:'B-0',label:'Channel',txt:chanLabel(chan),status:'auto'});
+  push({sec:'B-0',label:'Nama toko',txt:toko||'(isi manual)',status:BLMAN.toko?'manual':(toko?'auto':'manual')});
+  push({sec:'B-0',label:'Kategori utama',txt:kategori||'(isi manual)',status:BLMAN.kategori?'manual':'auto'});
+  push({sec:'B-0',label:'Periode baseline',txt:periodeRef||'(tidak terdeteksi)',status:periodeRef?'auto':'na',
+    prov:months?(int(months)+' bulan terdeteksi'):''});
+  push({sec:'B-0',label:'Total GMV channel',txt:totGMV?rp(totGMV):'perlu Shop Analytics / product_list',status:totGMV?'auto':'na'});
+  push({sec:'B-0',label:'Tanggal tarik data',txt:new Date().toISOString().slice(0,10),status:'auto'});
+  push({sec:'E-2',label:'Prioritas channel',txt:BLMAN.prioritas||'(isi manual: utama / sekunder / uji coba)',status:BLMAN.prioritas?'manual':'manual'});
+  // B-4
+  const m4=(k,fmt)=>shop&&shop.metrics[k]?{v:(fmt?fmt(shop.metrics[k]):int(shop.metrics[k])),s:'auto'}:{v:'tidak ada di export',s:'na'};
+  push({sec:'B-4',label:'AOV',txt:shop&&shop.metrics.aov?rp(shop.metrics.aov):(totGMV&&shop&&shop.metrics.pesanan?rp(totGMV/shop.metrics.pesanan):'tidak ada'),status:(shop&&(shop.metrics.aov||shop.metrics.pesanan))?'auto':'na'});
+  push({sec:'B-4',label:'Rating toko',txt:'tidak ada di export',status:'na'});
+  push({sec:'B-4',label:'Chat response rate',txt:'tidak ada di export',status:'na'});
+  push({sec:'B-4',label:'Pesanan terlambat / penalti',txt:'tidak ada di export',status:'na'});
+  push({sec:'B-8',label:'Voucher / beban promo',txt:'tidak ada di export',status:'na'});
   push({sec:'B-8',label:'Program platform diikuti',txt:'tidak ada di export',status:'na'});
   push({sec:'B-9',label:'Kompetitor & benchmark',txt:'riset manual (di luar export toko)',status:'na'});
 
-  const autoCount=F.filter(f=>f.status==='auto').length;
-  const naCount=F.filter(f=>f.status==='na').length;
-
-  /* ── Prefill CDPS Section B ──────────────────────────────────────────────
-     Payload SIAP-PAKAI untuk mengisi Section B di halaman Strategi CDPS. Beda
-     dengan `baselineText`/`baselineExportObj` yang untuk mata manusia (nilai
-     terformat "Rp." / "%", key = label): di sini key = nama field ChannelDraft
-     CDPS dan nilai = MENTAH sesuai yang diharapkan form:
-       - uang  → string rupiah major polos, mis. "9000000"  (money.parse CDPS)
-       - persen→ angka persen 0..100 (bukan pecahan)
-       - hitung→ angka bulat
-     Hanya field yang benar-benar terbaca ('auto'/'partial') yang disertakan;
-     field N/A sengaja DIHILANGKAN supaya sisi CDPS hanya mengisi yang kosong
-     dan tidak menimpa apa pun dengan 0. Tool tidak mengarang angka. */
-  const mny=v=>String(Math.round(v));
-  const prefill={channel:'TikTok Shop',status_channel:(nsrc||vids.length)?'Eksisting':''};
-  if(toko)prefill.nama_toko=toko;
-  if(srcFiles.length)prefill.sumber_data=srcFiles.join(' | ');
-  prefill.tanggal_ambil_data=new Date().toISOString().slice(0,10);
-  if(months)prefill.periode_baseline_bulan=months;
-  if(shop&&shop.pengunjung)prefill.pengunjung_per_bulan=Math.round(shop.pengunjung);
-  if(shop&&shop.konversi)prefill.conversion_rate_persen=shop.konversi;
-  if(skuTotal!=null)prefill.sku_listed=skuTotal;
-  if(skuAktif!=null)prefill.sku_aktif=skuAktif;
-  if(sku80!=null)prefill.sku_pareto_80=sku80;
-  if(slow!=null)prefill.sku_slow_moving=slow;
-  if(top5.length)prefill.top_sku=top5.map(x=>({nama:x.nama,gmv:mny(x.gmv)}));
-  if(kritisList.length)prefill.sku_stok_kritis=kritisList.slice(0,10).map(r=>r.nama);
-  if(shop&&shop.rating)prefill.rating_toko=shop.rating;
-  if(shop&&shop.ulasan)prefill.jumlah_ulasan=Math.round(shop.ulasan);
-  if(shop&&shop.chatrate)prefill.chat_response_rate_persen=shop.chatrate;
-  if(shop&&shop.terlambat)prefill.pesanan_terlambat_persen=shop.terlambat;
-  if(adsCount)prefill.jumlah_kampanye_aktif=adsCount;
-  if(topKw&&topKw.length)prefill.top_keyword=topKw.map(k=>({keyword:k}));
-  if(kreatorAktif!=null)prefill.affiliate_aktif_30hari=kreatorAktif;
-  if(txnC)prefill.gmv_affiliate=mny(affGMV);
-  if(txnC&&totalGMV)prefill.gmv_affiliate_persen=+(affGMV/totalGMV*100).toFixed(1);
-  if(topC.length)prefill.top_kreator=topC.map(x=>({nama:x.nama,gmv:mny(x.gmv)}));
-  if(videoActive)prefill.jumlah_video_per_bulan=months?Math.round(videoActive/months):videoActive;
-  if(videoViews)prefill.total_views=Math.round(videoViews);
-  if(videoGMV)prefill.gmv_video=mny(videoGMV);
-  if(liveArr.length&&liveGMV)prefill.gmv_live=mny(liveGMV);
-
-  return {fields:F,ready:(nsrc>0||vids.length>0),autoCount,naCount,nsrc,prefill,
-    sources:S,shop:!!shop,cat:!!cat,txnP:!!txnP,txnC:!!txnC,ads:adsArr.length,live:liveArr.length,video:videoActive,
-    klien:{toko,periode_referensi:periodeRef,kategori},
-    produk:{top_sku:top10.map(x=>({nama:x.nama,gmv:Math.round(x.gmv),klik:0,ctor:0})),
-      sku_total:skuTotal,sku_ada_penjualan:skuJalan}};
+  return {ready,present,chan,allowGab,isTT,nsrc,sources:S,
+    klien:{toko,periode_referensi:periodeRef,kategori,months},
+    shop:shop?shop.metrics:null,shopProv:shop?shop.prov:{},totGMV,
+    comp:{auto:compAuto,val:compVal},
+    sku:{terdaftar:skuTerdaftar,aktif:skuAktif,jalan:skuJalan,slow:skuSlow,sku80},top5,
+    ads:{spend:adSpend,gmv:adGmv,orders:adOrders,roas:adSpend?adGmv/adSpend:null,
+      camp:adCamp.size,types:[...adTypes],hasData:(S.ads||[]).length>0,overAttr:adGmv>totGMV&&totGMV>0,liveAdsPresent},
+    aff:{posted:affPosted,aktif:affActive,gmv:affGmv,pct:affPct,hasData:isTT&&tc.length>0},
+    content:{videoN,views,gmvVideo,liveN,liveHours,liveGmv,hosts,months},
+    fields:F,
+    produk:{top_sku:top5.map(x=>({nama:x.nama,gmv:Math.round(x.gmv),unit:x.unit,harga:x.harga?Math.round(x.harga):null})),
+      sku_total:skuTerdaftar,sku_ada_penjualan:skuJalan}};
 }
-/* Payload prefill Section B — schema versioned supaya sisi CDPS bisa menolak
-   payload asing / versi lama. `field_count` bantu AM cek "berapa yang keisi". */
-function sectionBPayload(d){
-  const p=(d&&d.prefill)||{channel:'TikTok Shop'};
-  return {schema:'cdps.section_b.v1',generated_at:new Date().toISOString(),
-    tool:'MEA Video Factory v4',channel:p,
-    field_count:Object.keys(p).filter(k=>k!=='channel'&&k!=='status_channel').length};
-}
+
+const COMPB=[['organik','Organik','Tab Toko / shop & search'],
+  ['kartu','Kartu Produk','klik kartu produk di feed'],
+  ['video','Video','video penjual (organik + boost)'],
+  ['live','Live','LIVE penjual'],
+  ['affiliate','Affiliate','GMV via kreator afiliasi'],
+  ['iklan','Iklan (Ads)','OVERLAY — nempel di video/live/kartu']];
+const ADS_TYPES_MANUAL=['GMV Max','Manual keyword','Auto','Affiliate Ads'];
+
 function paneBaseline(d){
   if(!d.ready)
     return '<div class="sec"><div class="sec-hd"><span class="tag">D</span><h3>Baseline channel — CDPS Section B</h3></div>'+
       '<div class="sec-bd"><div class="empty"><b>Belum ada data untuk baseline</b>'+
-      'Tarik export TikTok Shop di panel 2: <b>product_list</b> (katalog), <b>Transaction Product/Creator</b>, '+
-      '<b>Shop Analytics Key metrics</b>, <b>Live Analysis</b>, <b>data kampanye iklan</b>, dan <b>Video Performance List</b>. '+
-      'Tool akan menurunkan sebanyak mungkin field Section B otomatis dan menandai yang tidak tersedia.</div></div></div>';
-  const want=[['shop','Shop Analytics Key metrics',d.shop],['catalog','product_list (katalog)',d.cat],
-    ['txn_product','Transaction Product',d.txnP],['txn_creator','Transaction Creator',d.txnC],
-    ['ads','Data iklan (product/live)',!!d.ads],['live','Live Analysis',!!d.live],['video','Video Performance List',!!d.video]];
-  let cov='<div class="sec"><div class="sec-hd"><span class="tag">D0</span><h3>Cakupan sumber data</h3>'+
-    '<span class="pill '+(d.naCount<d.fields.length/2?'p-ok':'p-mid')+'">'+int(d.autoCount)+' field auto · '+int(d.naCount)+' N/A</span></div><div class="sec-bd">';
-  cov+='<div class="grid g2">';
-  want.forEach(w=>{ const S=d.sources[w[0]];
-    let miss=''; if(w[0]==='catalog'&&S&&S.coverage)miss=S.coverage.missing.join(', ');
-      else if(w[0]==='txn_product'&&S&&S.coverage)miss=S.coverage.missing.join(', ');
-      else if(w[0]==='txn_creator'&&S&&S.coverage)miss=S.coverage.missing.join(', ');
-    cov+='<div class="bl-src"><span class="dot'+(w[2]?'':' bad')+'"></span>'+
-      '<span class="nm">'+esc(w[1])+'</span>'+
-      (w[2]?'<span class="mini toko" style="font-size:9.5px;padding:2px 6px;border-radius:2px">terbaca</span>'
-           :'<span class="miss">belum ada</span>')+
-      (miss?'<span class="miss" style="flex-basis:100%">kolom hilang: '+esc(miss)+'</span>':'')+'</div>';
-  });
-  cov+='</div>';
-  cov+='<div class="note">Field bertanda <b>N/A</b> memang tidak ada di export TikTok Shop mana pun — harus diisi manual '+
-    'atau lewat riset terpisah (mis. komposisi trafik resmi, umur toko, penalti, kompetitor). Tool tidak mengarang angka itu.</div>';
-  cov+='<div class="h4">Isian manual (yang tidak ada di export)</div><div class="grid g4">'+
-    '<label class="f"><span>Nama toko</span><input type="text" id="blToko" class="bl-manual" style="width:100%" value="'+esc(BLMAN.toko)+'" placeholder="'+esc(($('#fKlien').value||'').trim()||'nama toko')+'"></label>'+
-    '<label class="f"><span>Kategori utama</span><input type="text" id="blKat" style="width:100%" value="'+esc(BLMAN.kategori)+'" placeholder="'+esc($('#fVert').value)+'"></label>'+
-    '<label class="f"><span>Prioritas channel (E-2)</span><select id="blPrio" style="width:100%">'+
-      ['','utama','sekunder','uji coba'].map(o=>'<option value="'+o+'"'+(BLMAN.prioritas===o?' selected':'')+'>'+(o||'(pilih)')+'</option>').join('')+'</select></label>'+
-    '<label class="f"><span>Ambang stok kritis</span><input type="number" id="blStok" style="width:100%" value="'+esc(BLMAN.stokMin)+'" placeholder="5"></label>'+
-    '</div>';
-  cov+='</div></div>';
+      'Tarik export di panel 2: <b>Shop Analytics Key metrics</b> (TikTok &amp; Tokopedia), <b>product_list</b> (katalog + breakdown), '+
+      '<b>Transaction Product/Creator</b>, <b>Live Analysis</b>, <b>kampanye iklan</b>, dan <b>Video Performance List</b>.</div></div></div>';
 
-  const order=['B-0','B-0.7','E-2','B-2','B-2.3','B-3','B-3.2','B-3.3','B-3.5','B-3.6','B-4','B-5','B-6','B-7','B-8','B-9'];
-  const groups={};
-  d.fields.forEach(f=>{ const g=f.sec.split('.')[0]; (groups[g]=groups[g]||[]).push(f); });
-  const seen=new Set(); let body='';
-  order.forEach(code=>{ const g=code.split('.')[0]; if(seen.has(g)||!groups[g])return; seen.add(g);
-    const rows=groups[g];
-    body+='<div class="sec"><div class="sec-hd"><span class="tag">'+esc(g)+'</span><h3>'+esc(SECT[g]||g)+'</h3></div>'+
-      '<div class="sec-bd"><div class="tbl-wrap"><table class="blf"><thead><tr><th>Field</th><th>Nilai</th><th style="text-align:right">Sumber</th></tr></thead><tbody>'+
-      rows.map(f=>'<tr><td>'+esc(f.label)+(f.sec.includes('.')?' <span class="mono" style="color:var(--mute);font-size:10px">'+esc(f.sec)+'</span>':'')+
-        (f.sub&&!f.disp.includes('class="sub"')?'<div class="sub">'+esc(f.sub)+'</div>':'')+'</td>'+
-        '<td>'+f.disp+(f.prov?'<div class="prov">'+esc(f.prov)+'</div>':'')+'</td>'+
-        '<td style="text-align:right">'+blPill(f.status)+'</td></tr>').join('')+
-      '</tbody></table></div></div></div>';
+  /* channel selector */
+  let head='<div class="sec"><div class="sec-hd"><span class="tag">D</span><h3>Baseline channel — CDPS Section B</h3>';
+  const chans=d.present.slice(); if(d.allowGab)chans.push('gabungan');
+  head+='<div class="chan-seg">'+chans.map(c=>'<button data-chan="'+c+'" class="'+(c===d.chan?'on':'')+'">'+chanLabel(c)+'</button>').join('')+'</div></div>';
+  head+='<div class="sec-bd"><div class="note">Channel aktif: <b>'+chanLabel(d.chan)+'</b> · Total GMV '+rp(d.totGMV)+
+    (d.chan==='gabungan'?' (dijumlah semua channel)':'')+'. '+
+    (d.chan==='tokopedia'?'Data video / live / iklan / affiliate cuma ada di TikTok Shop, jadi bagian itu N/A di Tokopedia.':'')+'</div>';
+
+  /* Cakupan + tagger channel + manual */
+  const S=d.sources;
+  let cov='<div class="h4">Cakupan sumber &amp; channel tiap file</div><div class="grid g2">';
+  const listSrc=(arr,kind)=>arr.forEach(x=>{
+    cov+='<div class="bl-src"><span class="dot"></span><span class="nm">'+esc(x.file)+'</span>'+
+      '<select data-filechan="'+esc(x.file)+'" data-filekind="'+kind+'">'+
+      ['tiktok','tokopedia'].map(c=>'<option value="'+c+'"'+((x.channel||'tiktok')===c?' selected':'')+'>'+chanLabel(c)+'</option>').join('')+
+      '</select></div>';
   });
-  return cov+body;
+  listSrc(S.shop||[],'shop'); listSrc(S.products||[],'product');
+  const other=[['txn_product','Transaction Product',!!S.txn_product],['txn_creator','Transaction Creator',!!S.txn_creator],
+    ['ads','Kampanye iklan',(S.ads||[]).length>0],['live','Live Analysis',(S.live||[]).length>0],
+    ['video','Video Performance',Object.keys(LIB.videos).length>0]];
+  other.forEach(o=>cov+='<div class="bl-src"><span class="dot'+(o[2]?'':' bad')+'"></span><span class="nm">'+esc(o[1])+'</span>'+
+    (o[2]?'<span class="mini toko" style="font-size:9.5px;padding:2px 6px;border-radius:2px">terbaca</span>':'<span class="miss">belum ada</span>')+'</div>');
+  cov+='</div>';
+  cov+='<div class="h4">Isian manual (tidak ada di export)</div><div class="grid g4">'+
+    '<label class="f"><span>Nama toko</span><input type="text" id="blToko" value="'+esc(BLMAN.toko)+'" placeholder="'+esc(($('#fKlien').value||'').trim()||'nama toko')+'"></label>'+
+    '<label class="f"><span>Kategori utama</span><input type="text" id="blKat" value="'+esc(BLMAN.kategori)+'" placeholder="'+esc($('#fVert').value)+'"></label>'+
+    '<label class="f"><span>Prioritas (E-2)</span><select id="blPrio">'+
+      ['','utama','sekunder','uji coba'].map(o=>'<option value="'+o+'"'+(BLMAN.prioritas===o?' selected':'')+'>'+(o||'(pilih)')+'</option>').join('')+'</select></label>'+
+    '<label class="f"><span>Jumlah bulan periode</span><input type="number" id="blMonths" value="'+esc(BLMAN.months)+'" placeholder="'+int(d.klien.months)+'"></label>'+
+    '</div>';
+  head+=cov+'</div></div>';
+
+  /* B-2 */
+  const s=d.shop||{}, p=d.shopProv||{};
+  let b2='<div class="sec"><div class="sec-hd"><span class="tag">B-2</span><h3>Trafik &amp; konversi</h3></div><div class="sec-bd">'+
+    '<div class="grid g3">'+
+      kpi('Pengunjung / bulan (B-2.1)',s.pengunjung?int(s.pengunjung):DASH,s.pengunjung?esc(p.pengunjung||''):'perlu Shop Analytics',1)+
+      kpi('Conversion rate (B-2.2)',s.konversi?pp(s.konversi):DASH,s.konversi?esc(p.konversi||''):'perlu Shop Analytics',1)+
+      kpi('Total pesanan',s.pesanan?int(s.pesanan):(s.pesanan_sku?int(s.pesanan_sku):DASH),'pesanan channel ini')+
+    '</div>';
+  // composition editable
+  b2+='<div class="h4">Komposisi trafik / GMV (B-2.3) — 6 bucket</div>';
+  const cv=d.comp.val;
+  b2+='<div>'+COMPB.map(([k,lb,sub])=>{
+    const v=cv[k]||0, overlay=k==='iklan';
+    return '<div class="comp-row'+(overlay?' overlay':'')+'"><div class="lb">'+lb+'<small>'+sub+'</small></div>'+
+      '<div class="comp-bar"><i style="width:'+clamp(v,0,100).toFixed(1)+'%"></i></div>'+
+      '<div><input type="number" step="0.1" data-comp="'+k+'" value="'+(v?v.toFixed(1):'0')+'"></div></div>';
+  }).join('')+'</div>';
+  const sumExcl=['organik','kartu','video','live','affiliate'].reduce((a,k)=>a+(cv[k]||0),0);
+  b2+='<div class="comp-total"><span>Jumlah 5 bucket eksklusif (tanpa Ads): <b>'+dec(sumExcl,1)+'%</b> '+
+    (Math.abs(sumExcl-100)<=1?'✓':'— belum 100%')+'</span>'+
+    '<button class="btn ghost sm" id="btnCompNorm">Normalisasi ke 100%</button></div>';
+  b2+='<div class="note warn"><b>Iklan (Ads) = overlay</b>, sengaja tidak masuk penjumlahan 100% karena iklan nempel di '+
+    'video/live/kartu (kalau dijumlah bakal double-count). '+(d.ads.overAttr?'GMV ads ('+rp(d.ads.gmv)+') malah lebih besar dari total GMV channel — ini over-attribution wajar dari platform iklan (klik 7 hari). ':'')+
+    'Angka auto diturunkan dari GMV per channel (product_list). Edit manual bila AM mau override, lalu Normalisasi.</div>';
+  b2+='</div></div>';
+
+  /* B-3 */
+  const sk=d.sku;
+  let b3='<div class="sec"><div class="sec-hd"><span class="tag">B-3</span><h3>Portofolio SKU</h3></div><div class="sec-bd">'+
+    '<div class="grid g4">'+
+      kpi('SKU terdaftar (B-3.1)',sk.terdaftar==null?DASH:int(sk.terdaftar),'perlu product_list')+
+      kpi('SKU aktif',sk.aktif==null?DASH:int(sk.aktif),'status listing = aktif')+
+      kpi('SKU 80% GMV (B-3.2)',sk.sku80==null?DASH:int(sk.sku80),sk.jalan?'dari '+int(sk.jalan)+' SKU jalan':'')+
+      kpi('SKU slow moving',sk.slow==null?DASH:int(sk.slow),'0 penjualan periode')+
+    '</div>';
+  b3+='<div class="h4">Top 5 SKU berdasarkan GMV (B-3.3)</div>';
+  if(d.top5.length){
+    b3+='<div class="tbl-wrap"><table><thead><tr><th>#</th><th>Nama SKU</th><th class="num">GMV</th>'+
+      '<th class="num">Unit terjual</th><th class="num">Harga jual*</th></tr></thead><tbody>'+
+      d.top5.map((x,i)=>'<tr'+(i===0?' class="hero"':'')+'><td class="num">'+(i+1)+'</td>'+
+        '<td class="ttl" title="'+esc(x.nama)+'">'+esc(x.nama)+'</td>'+
+        '<td class="num">'+rp(x.gmv)+'</td><td class="num">'+int(x.unit)+'</td>'+
+        '<td class="num">'+(x.harga==null?DASH:rp(x.harga))+'</td></tr>').join('')+'</tbody></table></div>'+
+      '<div class="note">*Harga jual = GMV ÷ unit terjual (harga rata-rata riil). Export TikTok/Tokopedia tidak memuat harga list; '+
+      'kalau butuh harga katalog, isi manual.</div>';
+  } else b3+='<div class="empty">Perlu product_list / Transaction Product untuk channel ini.</div>';
+  b3+='</div></div>';
+
+  /* B-5 ads (TT only) */
+  let b5='<div class="sec"><div class="sec-hd"><span class="tag">B-5</span><h3>Iklan (Ads)</h3>'+
+    '<span class="pill '+(d.ads.hasData&&d.isTT?'p-ok':'p-off')+'">'+(d.isTT?(d.ads.hasData?int(d.ads.camp)+' kampanye':'perlu data iklan'):'Tokopedia — N/A')+'</span></div><div class="sec-bd">';
+  if(!d.isTT){ b5+='<div class="empty">Data kampanye iklan yang di-upload berasal dari TikTok Shop. Pilih channel TikTok Shop untuk melihat B-5.</div>'; }
+  else if(!d.ads.hasData){ b5+='<div class="empty">Belum ada file kampanye iklan (creative_data / livestream_data).</div>'; }
+  else {
+    b5+='<div class="grid g4">'+
+      kpi('Total spend',rp(d.ads.spend),'sudah filter ID produk klien',1)+
+      kpi('GMV dari iklan',rp(d.ads.gmv),d.ads.overAttr?'over-attribution platform':'')+
+      kpi('ROAS',d.ads.roas==null?DASH:dec(d.ads.roas,2),'GMV ÷ spend')+
+      kpi('Pesanan dari iklan',int(d.ads.orders),'')+
+    '</div>';
+    b5+='<div class="h4">Tipe kampanye aktif (B-5.3)</div>';
+    b5+='<div class="typechips">';
+    d.ads.types.forEach(t=>b5+='<span class="typechip auto" title="terdeteksi dari data">✓ '+esc(t)+' <small>(auto)</small></span>');
+    ADS_TYPES_MANUAL.forEach(t=>{ const on=BLMAN.adsManual[t];
+      b5+='<label class="typechip'+(on?' on':'')+'"><input type="checkbox" data-adstype="'+esc(t)+'"'+(on?' checked':'')+'> '+esc(t)+'</label>'; });
+    b5+='</div>';
+    b5+='<div class="note">Tipe <b>auto</b> (Video Ads / Kartu Produk / Live Ads) terbaca dari kolom "Jenis materi iklan" + file live. '+
+      'GMV Max / Manual keyword / Auto / Affiliate Ads tidak ada di kolom export — centang manual sesuai setelan akun iklan.</div>';
+  }
+  b5+='</div></div>';
+
+  /* B-6 affiliate */
+  let b6='<div class="sec"><div class="sec-hd"><span class="tag">B-6</span><h3>Affiliate</h3>'+
+    '<span class="pill '+(d.aff.hasData?'p-ok':'p-off')+'">'+(d.isTT?(d.aff.hasData?'aktif':'perlu Transaction Creator'):'Tokopedia — N/A')+'</span></div><div class="sec-bd">';
+  if(!d.isTT)b6+='<div class="empty">Affiliate hanya ada di TikTok Shop pada data ini.</div>';
+  else if(!d.aff.hasData)b6+='<div class="empty">Perlu file Transaction Creator List.</div>';
+  else b6+='<div class="grid g4">'+
+    kpi('Affiliate aktif 30 hari (B-6.1)',int(d.aff.aktif),'kreator dgn penjualan',1)+
+    kpi('Affiliate posting konten',int(d.aff.posted),'total kreator di export')+
+    kpi('GMV dari affiliate',rp(d.aff.gmv),'')+
+    kpi('% GMV affiliate (B-6.2)',d.aff.pct==null?DASH:pp(d.aff.pct),'basis total GMV channel')+
+  '</div>'+
+  '<div class="note">"Aktif 30 hari" dihitung sebagai kreator dengan GMV &gt; 0 di periode export. Angka "posting konten" '+
+  '= semua kreator yang tampil di export (termasuk yang belum menghasilkan penjualan).</div>';
+  b6+='</div></div>';
+
+  /* B-7 konten & live */
+  const c=d.content;
+  let b7='<div class="sec"><div class="sec-hd"><span class="tag">B-7</span><h3>Konten &amp; Live</h3>'+
+    '<span class="pill '+((d.isTT&&(c.videoN||c.liveN))?'p-ok':'p-off')+'">'+(d.isTT?'':'Tokopedia — N/A')+'</span></div><div class="sec-bd">';
+  if(!d.isTT)b7+='<div class="empty">Video &amp; live cuma ada di TikTok Shop pada data ini.</div>';
+  else {
+    b7+='<div class="grid g3">'+
+      kpi('Video / bulan (B-7.1)',c.videoN==null?DASH:int(c.videoN),c.months?('~'+dec((c.videoN||0)/c.months,1)+'/bln · '+int(c.months)+' bln'):'')+
+      kpi('Total views video',c.views==null?DASH:int(c.views),'')+
+      kpi('GMV dari video',c.gmvVideo==null?DASH:rp(c.gmvVideo),'')+
+    '</div><div class="grid g3" style="margin-top:12px">'+
+      kpi('Jam live / bulan (B-7.2)',c.liveN?dec(c.liveHours,1)+' jam':DASH,c.months&&c.liveN?('~'+dec(c.liveHours/c.months,1)+' jam/bln · '+int(c.liveN)+' sesi'):'perlu Live Analysis')+
+      kpi('GMV dari live',c.liveN?rp(c.liveGmv):DASH,'')+
+      kpi('Jumlah host (B-7.3)',c.hosts.length?int(c.hosts.length):DASH,'')+
+    '</div>';
+    if(c.hosts.length){
+      b7+='<div class="h4">Host live (B-7.3)</div><div class="tbl-wrap"><table><thead><tr><th>Host</th>'+
+        '<th class="num">Sesi</th><th class="num">Jam</th><th class="num">GMV</th></tr></thead><tbody>'+
+        c.hosts.slice(0,12).map(h=>'<tr><td class="ttl">'+esc(h.nama)+'</td><td class="num">'+int(h.sesi)+'</td>'+
+          '<td class="num">'+dec(h.jam,1)+'</td><td class="num">'+rpS(h.gmv)+'</td></tr>').join('')+'</tbody></table></div>'+
+        (c.hosts.length>12?'<div class="note">'+int(c.hosts.length-12)+' host lain disembunyikan.</div>':'');
+    }
+  }
+  b7+='</div></div>';
+
+  /* generic (B-0, B-4, B-8, B-9) */
+  const order=['B-0','E-2','B-4','B-8','B-9'];
+  const groups={}; d.fields.forEach(f=>{ (groups[f.sec]=groups[f.sec]||[]).push(f); });
+  let gen='';
+  order.forEach(g=>{ if(!groups[g])return;
+    gen+='<div class="sec"><div class="sec-hd"><span class="tag">'+esc(g)+'</span><h3>'+esc(SECT[g]||g)+'</h3></div>'+
+      '<div class="sec-bd"><div class="tbl-wrap"><table class="blf"><thead><tr><th>Field</th><th>Nilai</th><th style="text-align:right">Sumber</th></tr></thead><tbody>'+
+      groups[g].map(f=>'<tr><td>'+esc(f.label)+'</td><td>'+f.disp+(f.prov?'<div class="prov">'+esc(f.prov)+'</div>':'')+'</td>'+
+        '<td style="text-align:right">'+blPill(f.status)+'</td></tr>').join('')+'</tbody></table></div></div></div>';
+  });
+
+  return head+b2+b3+b5+b6+b7+gen;
 }
 function wireBaseline(){
-  const bind=(id,key,ev)=>{ const el=$('#'+id); if(!el)return;
-    el.addEventListener(ev||'input',()=>{ BLMAN[key]=el.value; $('#paneD').innerHTML=paneBaseline(computeBaseline()); wireBaseline(); }); };
-  bind('blToko','toko'); bind('blKat','kategori'); bind('blPrio','prioritas','change'); bind('blStok','stokMin');
-}
-function baselineText(d){
-  const T=['BASELINE CHANNEL — CDPS SECTION B','Channel: TikTok Shop · Toko: '+(d.klien.toko||'(isi)')+
-    ' · Periode: '+(d.klien.periode_referensi||'(tidak terdeteksi)'),
-    'Diturunkan otomatis oleh MEA Video Factory v4 dari export TikTok Shop. Field N/A = tidak ada di export.',''];
-  let cur='';
-  d.fields.forEach(f=>{ const g=f.sec.split('.')[0];
-    if(g!==cur){ cur=g; T.push(''); T.push('['+g+'] '+(SECT[g]||g)); }
-    const st=(ST_PILL[f.status]||ST_PILL.na)[0];
-    T.push('  - '+f.label+(f.sec.includes('.')?' ('+f.sec+')':'')+': '+f.txt+'  ['+st+']'+(f.prov?'  {'+f.prov+'}':''));
+  $$('#paneD [data-chan]').forEach(b=>b.onclick=()=>{ BLMAN.channel=b.dataset.chan; rerenderBaseline(); });
+  $$('#paneD [data-filechan]').forEach(sel=>sel.onchange=()=>{
+    const file=sel.dataset.filechan, kind=sel.dataset.filekind, S=LIB.baseline_sources;
+    const arr=kind==='shop'?S.shop:S.products;
+    (arr||[]).forEach(x=>{ if(x.file===file)x.channel=sel.value; });
+    rerenderBaseline();
   });
+  $$('#paneD [data-comp]').forEach(inp=>inp.onchange=()=>{
+    const d=window.__BL, ch=d.chan;
+    BLMAN.comp[ch]=BLMAN.comp[ch]||{}; BLMAN.comp[ch][inp.dataset.comp]=num(inp.value); rerenderBaseline();
+  });
+  if($('#btnCompNorm'))$('#btnCompNorm').onclick=()=>{
+    const d=window.__BL, ch=d.chan, cv=d.comp.val;
+    const keys=['organik','kartu','video','live','affiliate'];
+    const sum=keys.reduce((a,k)=>a+(cv[k]||0),0)||1;
+    BLMAN.comp[ch]=BLMAN.comp[ch]||{};
+    keys.forEach(k=>BLMAN.comp[ch][k]=(cv[k]||0)/sum*100);
+    BLMAN.comp[ch].iklan=cv.iklan||0;
+    rerenderBaseline();
+  };
+  $$('#paneD [data-adstype]').forEach(cb=>cb.onchange=()=>{ BLMAN.adsManual[cb.dataset.adstype]=cb.checked; rerenderBaseline(); });
+  const bind=(id,key,ev)=>{ const el=$('#'+id); if(el)el.addEventListener(ev||'input',()=>{ BLMAN[key]=el.value; rerenderBaseline(); }); };
+  bind('blToko','toko'); bind('blKat','kategori'); bind('blPrio','prioritas','change'); bind('blMonths','months');
+}
+function rerenderBaseline(){ window.__BL=computeBaseline(); $('#paneD').innerHTML=paneBaseline(window.__BL); wireBaseline(); renderOutbar(); }
+
+function baselineText(d){
+  const T=['BASELINE CHANNEL — CDPS SECTION B','Channel: '+chanLabel(d.chan)+' · Toko: '+(d.klien.toko||'(isi)')+
+    ' · Periode: '+(d.klien.periode_referensi||'(tidak terdeteksi)')+' · Total GMV: '+rp(d.totGMV),
+    'Diturunkan MEA Video Factory v5. N/A = tidak ada di export.',''];
+  const s=d.shop||{};
+  T.push('[B-2] TRAFIK & KONVERSI');
+  T.push('  Pengunjung/bulan : '+(s.pengunjung?int(s.pengunjung):'N/A'));
+  T.push('  Conversion rate  : '+(s.konversi?pp(s.konversi):'N/A'));
+  T.push('  Komposisi (6 bucket, GMV share):');
+  COMPB.forEach(([k,lb])=>T.push('    - '+lb+': '+dec(d.comp.val[k]||0,1)+'%'+(k==='iklan'?' (overlay)':'')));
+  T.push('');
+  T.push('[B-3] PORTOFOLIO SKU');
+  T.push('  SKU terdaftar    : '+(d.sku.terdaftar==null?'N/A':int(d.sku.terdaftar)));
+  T.push('  SKU aktif        : '+(d.sku.aktif==null?'N/A':int(d.sku.aktif)));
+  T.push('  SKU 80% GMV      : '+(d.sku.sku80==null?'N/A':int(d.sku.sku80)));
+  T.push('  SKU slow moving  : '+(d.sku.slow==null?'N/A':int(d.sku.slow)));
+  T.push('  Top 5 SKU:');
+  d.top5.forEach((x,i)=>T.push('    '+(i+1)+'. '+x.nama.slice(0,44)+' | GMV '+int(x.gmv)+' | unit '+int(x.unit)+' | harga '+(x.harga?int(x.harga):'-')));
+  T.push('');
+  if(d.isTT){
+    T.push('[B-5] IKLAN'+(d.ads.hasData?'':' (perlu data iklan)'));
+    if(d.ads.hasData){ T.push('  Spend '+int(d.ads.spend)+' | GMV '+int(d.ads.gmv)+' | ROAS '+dec(d.ads.roas,2)+' | '+d.ads.camp+' kampanye');
+      T.push('  Tipe aktif: '+[...d.ads.types,...ADS_TYPES_MANUAL.filter(t=>BLMAN.adsManual[t])].join(', ')); }
+    T.push('');
+    T.push('[B-6] AFFILIATE'+(d.aff.hasData?'':' (perlu Transaction Creator)'));
+    if(d.aff.hasData){ T.push('  Aktif 30 hari '+int(d.aff.aktif)+' | posting '+int(d.aff.posted)+' | GMV '+int(d.aff.gmv)+' | %GMV '+pp(d.aff.pct)); }
+    T.push('');
+    T.push('[B-7] KONTEN & LIVE');
+    T.push('  Video/bulan '+(d.content.videoN==null?'N/A':int(d.content.videoN))+' | views '+int(d.content.views)+' | GMV video '+int(d.content.gmvVideo));
+    T.push('  Jam live '+dec(d.content.liveHours,1)+' | GMV live '+int(d.content.liveGmv)+' | host '+int(d.content.hosts.length));
+    d.content.hosts.slice(0,8).forEach(h=>T.push('    - '+h.nama+': '+int(h.sesi)+' sesi, '+dec(h.jam,1)+' jam, GMV '+int(h.gmv)));
+  }
   return T.join('\n');
 }
 function baselineExportObj(d){
-  const section_b={};
-  d.fields.forEach(f=>{ section_b[f.sec+' '+f.label]={nilai:f.txt,status:f.status,sumber:f.prov||''}; });
-  return {schema:'cdps.baseline.v1',generated_at:new Date().toISOString(),tool:'MEA Video Factory v4',
-    klien:{toko:d.klien.toko,periode_referensi:d.klien.periode_referensi,kategori:d.klien.kategori},
-    produk:{top_sku:d.produk.top_sku,sku_total:d.produk.sku_total,sku_ada_penjualan:d.produk.sku_ada_penjualan},
-    section_b};
+  return {schema:'cdps.baseline.v2',generated_at:new Date().toISOString(),tool:'MEA Video Factory v5',
+    klien:{toko:d.klien.toko,periode_referensi:d.klien.periode_referensi,kategori:d.klien.kategori,channel:d.chan},
+    b2:{pengunjung:d.shop?d.shop.pengunjung:null,conversion_rate:d.shop?d.shop.konversi:null,komposisi:d.comp.val},
+    b3:{sku_terdaftar:d.sku.terdaftar,sku_aktif:d.sku.aktif,sku_80pct:d.sku.sku80,sku_slow:d.sku.slow,top5:d.produk.top_sku},
+    b5:d.isTT?{spend:d.ads.spend,gmv:d.ads.gmv,roas:d.ads.roas,kampanye:d.ads.camp,
+      tipe_aktif:[...d.ads.types,...ADS_TYPES_MANUAL.filter(t=>BLMAN.adsManual[t])]}:null,
+    b6:d.isTT?{affiliate_aktif_30hari:d.aff.aktif,affiliate_posting:d.aff.posted,gmv_affiliate:d.aff.gmv,pct_gmv_affiliate:d.aff.pct}:null,
+    b7:d.isTT?{video_per_bulan:d.content.videoN,total_views:d.content.views,gmv_video:d.content.gmvVideo,
+      jam_live:d.content.liveHours,gmv_live:d.content.liveGmv,host:d.content.hosts.map(h=>({nama:h.nama,sesi:h.sesi,jam:h.jam,gmv:h.gmv}))}:null};
 }
 function baselineCsv(d){
-  const rows=[['section','field','nilai','status','sumber']];
-  d.fields.forEach(f=>rows.push([f.sec,f.label,f.txt,(ST_PILL[f.status]||ST_PILL.na)[0],f.prov||'']));
+  const rows=[['section','field','nilai','satuan']];
+  const s=d.shop||{};
+  rows.push(['B-2','Pengunjung per bulan',s.pengunjung||'','']);
+  rows.push(['B-2','Conversion rate',s.konversi?s.konversi.toFixed(2):'','%']);
+  COMPB.forEach(([k,lb])=>rows.push(['B-2.3','Komposisi '+lb,(d.comp.val[k]||0).toFixed(1),'%']));
+  rows.push(['B-3','SKU terdaftar',d.sku.terdaftar||'','']);
+  rows.push(['B-3','SKU aktif',d.sku.aktif||'','']);
+  rows.push(['B-3','SKU 80% GMV',d.sku.sku80||'','']);
+  rows.push(['B-3','SKU slow moving',d.sku.slow||'','']);
+  d.top5.forEach((x,i)=>rows.push(['B-3.3','Top SKU '+(i+1)+' '+x.nama.slice(0,40),Math.round(x.gmv),'GMV; unit '+int(x.unit)+'; harga '+(x.harga?int(x.harga):'-')]));
+  if(d.isTT&&d.ads.hasData){ rows.push(['B-5','Spend',Math.round(d.ads.spend),'']);
+    rows.push(['B-5','GMV ads',Math.round(d.ads.gmv),'']); rows.push(['B-5','ROAS',d.ads.roas?d.ads.roas.toFixed(2):'','']);
+    rows.push(['B-5.3','Tipe aktif',[...d.ads.types,...ADS_TYPES_MANUAL.filter(t=>BLMAN.adsManual[t])].join(' | '),'']); }
+  if(d.isTT&&d.aff.hasData){ rows.push(['B-6.1','Affiliate aktif 30 hari',d.aff.aktif,'']);
+    rows.push(['B-6','GMV affiliate',Math.round(d.aff.gmv),'']); rows.push(['B-6.2','% GMV affiliate',d.aff.pct?d.aff.pct.toFixed(1):'','%']); }
+  if(d.isTT){ rows.push(['B-7.1','Video per bulan',d.content.videoN||'','']);
+    rows.push(['B-7','Total views',d.content.views||'','']); rows.push(['B-7','GMV video',Math.round(d.content.gmvVideo||0),'']);
+    rows.push(['B-7.2','Jam live',d.content.liveHours?d.content.liveHours.toFixed(1):'','jam']);
+    rows.push(['B-7','GMV live',Math.round(d.content.liveGmv||0),'']);
+    d.content.hosts.forEach(h=>rows.push(['B-7.3','Host '+h.nama,Math.round(h.gmv),int(h.sesi)+' sesi; '+dec(h.jam,1)+' jam'])); }
   return rows;
+}
+
+/* ═══════════ PAYLOAD SECTION B (paste ke CDPS Strategi) ═══════════
+   Jembatan mesin ke halaman Strategi → Section B (baseline per channel).
+   Beda dengan baselineText/baselineExportObj yang untuk mata manusia: di sini
+   key = nama field ChannelDraft CDPS, nilai = MENTAH persis yang diharapkan form
+     - uang  → string rupiah major polos, mis. "9000000" (money.parse CDPS)
+     - persen→ angka 0..100 (bukan pecahan)
+     - hitung→ bilangan bulat
+     - tipe kampanye → KEY form ('video_ads', 'gmv_max', …), bukan label
+   Hanya field yang benar-benar terbaca yang disertakan; sisi CDPS hanya mengisi
+   field KOSONG (SARAN, bukan paksa — kontrak `applyVideoFactoryPrefill`).
+   Komposisi trafik B-2.3 sengaja TIDAK dikirim: angka tool adalah GMV-share yang
+   saling tumpang-tindih (affiliate overlap video/live) dan tidak menjadi partisi
+   100% yang diminta form — biar AM isi manual supaya tidak salah kolom. */
+const SB_ADSTYPE={'Video Ads':'video_ads','Live Ads':'live_ads','GMV Max':'gmv_max',
+  'Manual keyword':'manual_keyword','Auto':'auto','Affiliate Ads':'affiliate_ads'};
+function sectionBPayload(d){
+  const mny=v=>String(Math.round(v));
+  const isTT=d.isTT, S=d.sources||{};
+  const p={channel:d.chan==='tokopedia'?'Tokopedia':'TikTok Shop'};
+  p.status_channel=(d.nsrc||(d.content&&d.content.videoN))?'Eksisting':'';
+  if(d.klien.toko)p.nama_toko=d.klien.toko;
+  const srcFiles=[];
+  (S.shop||[]).forEach(x=>srcFiles.push(x.file));
+  (S.products||[]).forEach(x=>srcFiles.push(x.file));
+  if(S.txn_product&&S.txn_product.file)srcFiles.push(S.txn_product.file);
+  if(S.txn_creator&&S.txn_creator.file)srcFiles.push(S.txn_creator.file);
+  (S.ads||[]).forEach(x=>srcFiles.push(x.file));
+  (S.live||[]).forEach(x=>srcFiles.push(x.file));
+  if(srcFiles.length)p.sumber_data=[...new Set(srcFiles.filter(Boolean))].join(' | ');
+  p.tanggal_ambil_data=new Date().toISOString().slice(0,10);
+  if(d.klien.months)p.periode_baseline_bulan=d.klien.months;
+  /* B-2 (skalar; komposisi TIDAK dikirim — lihat catatan di atas) */
+  const shop=d.shop||{};
+  if(shop.pengunjung)p.pengunjung_per_bulan=Math.round(shop.pengunjung);
+  if(shop.konversi)p.conversion_rate_persen=+shop.konversi.toFixed(2);
+  /* B-3 */
+  if(d.sku.terdaftar!=null)p.sku_listed=d.sku.terdaftar;
+  if(d.sku.aktif!=null)p.sku_aktif=d.sku.aktif;
+  if(d.sku.sku80!=null)p.sku_pareto_80=d.sku.sku80;
+  if(d.sku.slow!=null)p.sku_slow_moving=d.sku.slow;
+  if(d.top5.length)p.top_sku=d.top5.map(x=>({nama:x.nama,gmv:mny(x.gmv),
+    unit_terjual:x.unit?String(Math.round(x.unit)):'',
+    harga_jual:x.harga==null?'':mny(x.harga)}));
+  /* B-5 (TikTok only) */
+  if(isTT&&d.ads.hasData){
+    if(d.ads.camp)p.jumlah_kampanye_aktif=d.ads.camp;
+    const keys=[];
+    const addKey=t=>{ const k=SB_ADSTYPE[t]; if(k&&!keys.includes(k))keys.push(k); };
+    (d.ads.types||[]).forEach(addKey);
+    ADS_TYPES_MANUAL.forEach(t=>{ if(BLMAN.adsManual[t])addKey(t); });
+    if(keys.length)p.tipe_kampanye=keys;
+  }
+  /* B-6 (TikTok only) — top_kreator dari Transaction Creator:
+     nama = NAMA KREATOR, gmv = RUPIAH. (v4 pernah tertukar; parser v5 sudah tepat.) */
+  if(isTT&&d.aff.hasData){
+    if(d.aff.aktif!=null)p.affiliate_aktif_30hari=d.aff.aktif;
+    if(d.aff.gmv)p.gmv_affiliate=mny(d.aff.gmv);
+    if(d.aff.pct!=null)p.gmv_affiliate_persen=+d.aff.pct.toFixed(1);
+    const tc=(S.txn_creator&&S.txn_creator.rows)||[];
+    const topC=tc.filter(x=>num(x.gmv)>0).slice().sort((a,b)=>num(b.gmv)-num(a.gmv)).slice(0,5);
+    if(topC.length)p.top_kreator=topC.map(x=>({nama:x.nama,gmv:mny(num(x.gmv))}));
+  }
+  /* B-7 (TikTok only) */
+  if(isTT){
+    const c=d.content, months=c.months||d.klien.months||0;
+    if(c.videoN)p.jumlah_video_per_bulan=months?Math.round(c.videoN/months):c.videoN;
+    if(c.views)p.total_views=Math.round(c.views);
+    if(c.gmvVideo)p.gmv_video=mny(c.gmvVideo);
+    if(c.liveHours)p.jam_live_per_bulan=months?+(c.liveHours/months).toFixed(1):+c.liveHours.toFixed(1);
+    if(c.liveGmv)p.gmv_live=mny(c.liveGmv);
+    if(c.hosts&&c.hosts.length)p.host_live=c.hosts.slice(0,6).map(h=>h.nama).join(', ');
+  }
+  const field_count=Object.keys(p).filter(k=>k!=='channel'&&k!=='status_channel').length;
+  return {schema:'cdps.section_b.v1',generated_at:new Date().toISOString(),
+    tool:'MEA Video Factory v5',channel:p,field_count};
 }
 
 /* ═══════════ RENDER & WIRING ═══════════ */
@@ -1940,14 +2202,19 @@ function slug(s){ return String(s||'klien').toLowerCase().replace(/[^a-z0-9]+/g,
 function fileChip(f){
   if(f.error)return '<div class="chip bad"><span class="dot bad"></span><span class="nm">'+esc(f.fileName||'file')+
     '</span><span class="rows">'+esc(f.error)+'</span></div>';
-  const L={video:['Video Performance','toko'],produk:['Analitik Produk','toko'],catalog:['Katalog product_list','toko'],
-    txn_product:['Transaction Product','toko'],txn_creator:['Transaction Creator','aff'],
-    ads:['Iklan '+(f.jenis||''),'toko'],shop_metrics:['Shop Key metrics','toko'],live:['Live Analysis','toko'],
-    baseline:['Payload baseline','toko'],library:['Library','toko'],links:['Tautan mp4','toko']}[f.kind]||['file',''];
-  let cnt=''; if(f.rows)cnt=int(f.rows.length)+' baris'; else if(f.found)cnt=int(f.found.length)+' metrik';
-  const miss=(f.coverage&&f.coverage.missing&&f.coverage.missing.length)?' · tanpa: '+f.coverage.missing.slice(0,4).join(', '):'';
+  const map={video:['Video Performance','toko'],produk:['Analitik Produk','toko'],
+    product:['product_list '+(f.mode||''),'toko'],txn_product:['Transaction Product','toko'],
+    txn_creator:['Transaction Creator','aff'],ads:['Iklan '+(f.jenis||''),'toko'],
+    shop_metrics:['Shop Key · '+chanLabel(f.channel||'tiktok'),'toko'],live:['Live Analysis','toko'],
+    baseline:['Payload baseline','toko'],library:['Library','toko'],links:['Tautan mp4','toko']};
+  const L=map[f.kind]||['file',''];
+  let cnt='';
+  if(f.kind==='live')cnt=int(f.sesN||0)+' sesi';
+  else if(f.rows)cnt=int(f.rows.length)+' baris';
+  else if(f.found)cnt=int(f.found.length)+' metrik';
+  const chan=(f.kind==='product'||f.kind==='shop_metrics')?' · '+chanLabel(f.channel||'tiktok'):'';
   return '<div class="chip"><span class="dot"></span><span class="mini '+(L[1]==='aff'?'aff':'toko')+'">'+esc(L[0])+'</span>'+
-    '<span class="nm">'+esc(f.fileName||'')+miss+'</span><span class="rows">'+cnt+'</span></div>';
+    '<span class="nm">'+esc(f.fileName||'')+chan+'</span><span class="rows">'+cnt+'</span></div>';
 }
 function renderFiles(){
   const box=$('#filelist');
@@ -1988,11 +2255,11 @@ function renderAll(){
   $('#nPapan').textContent=nv?int(rows.filter(r=>r.agg.orders>=1&&!r.excluded).length):'';
   $('#nTracker').textContent=(nv&&tagList().length)?int(meaN):'';
   const BL=computeBaseline(); window.__BL=BL;
-  $('#nBaseline').textContent=BL.ready?int(BL.autoCount):'';
-  $('#paneD').innerHTML=paneBaseline(BL);
+  $('#nBaseline').textContent=BL.ready?'●':'';
+  $('#paneD').innerHTML=paneBaseline(BL); wireBaseline();
   if(!nv){
     const e='<div class="sec"><div class="sec-bd"><div class="empty"><b>Belum ada video di library</b>'+
-      'Tab ini perlu Video Performance List. Baseline di tab pertama sudah bisa jalan dari katalog / transaksi.</div></div></div>';
+      'Tab ini perlu Video Performance List. Baseline di tab pertama sudah bisa jalan dari Shop Analytics / product_list.</div></div></div>';
     $('#paneA').innerHTML=e; $('#paneB').innerHTML=e; $('#paneC').innerHTML=e;
   } else {
     $('#paneA').innerHTML=paneTarget(B)+paneFunnel(rows)+paneBoard(rows,B);
@@ -2034,7 +2301,6 @@ function wirePanes(){
   if($('#btnCsvPerf'))$('#btnCsvPerf').onclick=()=>download('performa-'+slug(LIB.klien)+'.csv','﻿'+csv([PERFORMA_HEAD,...performaRows($('#cScope').value)]),'text/csv;charset=utf-8');
   if($('#btnTsvLog'))$('#btnTsvLog').onclick=()=>copy(VIDEOLOG_HEAD.join('\t')+'\n'+tsv(videologRows($('#cScope').value)),'TSV VIDEO_LOG tersalin');
   if($('#btnCsvLog'))$('#btnCsvLog').onclick=()=>download('videolog-'+slug(LIB.klien)+'.csv','﻿'+csv([VIDEOLOG_HEAD,...videologRows($('#cScope').value)]),'text/csv;charset=utf-8');
-  wireBaseline();
 }
 function renderOutbar(){
   const bar=$('#outbar'), box=$('#outBtns');
@@ -2049,9 +2315,9 @@ function renderOutbar(){
     $('#oBlSB').onclick=()=>{ const pl=sectionBPayload(window.__BL);
       copy(JSON.stringify(pl,null,2),int(pl.field_count)+' field siap tempel ke Section B'); };
     $('#oBlCopy').onclick=()=>copy(baselineText(window.__BL),'Baseline tersalin');
-    $('#oBlJson').onclick=()=>download('baseline-'+slug(LIB.klien)+'-'+new Date().toISOString().slice(0,10)+'.json',
+    $('#oBlJson').onclick=()=>download('baseline-'+slug(LIB.klien)+'-'+(window.__BL.chan||'')+'-'+new Date().toISOString().slice(0,10)+'.json',
       JSON.stringify(baselineExportObj(window.__BL),null,2),'application/json');
-    $('#oBlCsv').onclick=()=>download('baseline-'+slug(LIB.klien)+'.csv','﻿'+csv(baselineCsv(window.__BL)),'text/csv;charset=utf-8');
+    $('#oBlCsv').onclick=()=>download('baseline-'+slug(LIB.klien)+'-'+(window.__BL.chan||'')+'.csv','﻿'+csv(baselineCsv(window.__BL)),'text/csv;charset=utf-8');
   } else if(TAB==='papan'){
     $('#outLb').textContent='Angka target Creative';
     box.innerHTML='<button class="btn sig sm" id="oTgt">Copy angka target</button>';
@@ -2106,7 +2372,7 @@ $('#btnSaveLib').addEventListener('click',()=>{
 $('#btnResetLib').addEventListener('click',()=>{
   if(!confirm('Reset semua data library sesi ini? File yang sudah disimpan tidak terpengaruh.'))return;
   LIB={schema:SCHEMA,klien:'',vertical:'',tag:'',updated_at:null,videos:{},hero:[],baseline_awal:null,baseline_sources:{}};
-  STAGE=[]; PICKED.clear(); renderFiles(); renderAll(); toast('Library direset');
+  STAGE=[]; PICKED.clear(); BLMAN.comp={}; renderFiles(); renderAll(); toast('Library direset');
 });
 $('#tabs').addEventListener('click',e=>{ const b=e.target.closest('button[data-tab]'); if(!b)return;
   TAB=b.dataset.tab; applyTab(); renderOutbar(); if(TAB==='papan'&&$('#cRank'))renderBoard(); });

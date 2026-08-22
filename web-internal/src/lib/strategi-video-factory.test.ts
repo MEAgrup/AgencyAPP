@@ -121,6 +121,64 @@ describe('applyVideoFactoryPrefill', () => {
     expect(channels[0].sku_stok_kritis).toEqual(['SKU tipis']);
   });
 
+  it('top_kreator: nama = NAMA KREATOR, gmv = RUPIAH (bukan tertukar)', () => {
+    // Regresi bug v4: nilai GMV sempat masuk ke kolom nama kreator, dan
+    // hitungan (jumlah video) masuk ke kolom GMV. Payload v5 harus tepat.
+    const { channels } = applyVideoFactoryPrefill(
+      [],
+      payload({
+        top_kreator: [
+          { nama: 'EVEBAG INDONESIA', gmv: '8455428' },
+          { nama: 'Robi Bois', gmv: '6882640' },
+        ],
+      }),
+    );
+    expect(channels[0].top_kreator).toEqual([
+      { nama: 'EVEBAG INDONESIA', gmv: '8455428' },
+      { nama: 'Robi Bois', gmv: '6882640' },
+    ]);
+    // nama tidak boleh berupa string rupiah, gmv tidak boleh nama
+    expect(channels[0].top_kreator[0].nama).not.toMatch(/^Rp|^\d+$/);
+    expect(channels[0].top_kreator[0].gmv).toMatch(/^\d+$/);
+  });
+
+  it('top_sku membawa unit_terjual + harga_jual dari payload v5', () => {
+    const { channels } = applyVideoFactoryPrefill(
+      [],
+      payload({ top_sku: [{ nama: 'EVEBAG BM720', gmv: '26424580', unit_terjual: '91', harga_jual: '290380' }] }),
+    );
+    expect(channels[0].top_sku[0]).toEqual({
+      nama: 'EVEBAG BM720',
+      gmv: '26424580',
+      unit_terjual: '91',
+      harga_jual: '290380',
+      margin_persen: '',
+    });
+  });
+
+  it('B-5.3 tipe_kampanye diisi sebagai key bila kosong, tak ditimpa, dan dilewati bila "tidak ada"', () => {
+    // kosong → terisi
+    const a = applyVideoFactoryPrefill([], payload({ tipe_kampanye: ['video_ads', 'live_ads'] }));
+    expect(a.channels[0].tipe_kampanye).toEqual(['video_ads', 'live_ads']);
+    // sudah ada isi AM → dipertahankan
+    const existing: ChannelDraft = { ...blankChannel('TikTok Shop'), tipe_kampanye: ['gmv_max'] };
+    const b = applyVideoFactoryPrefill([existing], payload({ tipe_kampanye: ['video_ads'] }));
+    expect(b.channels[0].tipe_kampanye).toEqual(['gmv_max']);
+    // ditandai "tidak ada kampanye" → jangan diisi
+    const none: ChannelDraft = { ...blankChannel('TikTok Shop'), tipe_kampanye_tidak_ada: true };
+    const c = applyVideoFactoryPrefill([none], payload({ tipe_kampanye: ['video_ads'] }));
+    expect(c.channels[0].tipe_kampanye).toEqual([]);
+  });
+
+  it('B-7 jam_live_per_bulan + host_live dipetakan', () => {
+    const { channels } = applyVideoFactoryPrefill(
+      [],
+      payload({ jam_live_per_bulan: 50.8, host_live: 'EVEBAG INDONESIA, Robi Bois' }),
+    );
+    expect(channels[0].jam_live_per_bulan).toBe('50.8');
+    expect(channels[0].host_live).toBe('EVEBAG INDONESIA, Robi Bois');
+  });
+
   it('membiarkan channel lain (mis. Shopee) tak tersentuh', () => {
     const shopee = { ...blankChannel('Shopee'), nama_toko: 'Toko Shopee' };
     const { channels } = applyVideoFactoryPrefill([shopee], payload({ sku_listed: 50 }));
