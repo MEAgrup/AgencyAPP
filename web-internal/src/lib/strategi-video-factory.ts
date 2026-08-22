@@ -31,10 +31,19 @@ import { blankChannel, type ChannelDraft } from '@/components/strategi/SectionB'
 /** Skema payload yang di-emit `sectionBPayload()` di video-factory.html. */
 export const VIDEO_FACTORY_SCHEMA = 'cdps.section_b.v1';
 
-/** Satu SKU/kreator pada payload — hanya nama + gmv yang diturunkan tool. */
+/** Satu kreator pada payload — hanya nama + gmv yang diturunkan tool. */
 interface VfNamaGmv {
   nama: string;
   gmv: string;
+}
+
+/** Satu SKU pada payload. v5 juga menurunkan unit terjual + harga rata-rata
+ *  (GMV ÷ unit); keduanya opsional supaya payload lama (nama+gmv) tetap sah. */
+interface VfTopSku {
+  nama: string;
+  gmv: string;
+  unit_terjual?: string;
+  harga_jual?: string;
 }
 
 /** Blok `channel` di dalam payload. Semua field selain `channel` opsional:
@@ -52,13 +61,16 @@ export interface VideoFactoryChannel {
   sku_aktif?: number;
   sku_pareto_80?: number;
   sku_slow_moving?: number;
-  top_sku?: VfNamaGmv[];
+  top_sku?: VfTopSku[];
   sku_stok_kritis?: string[];
   rating_toko?: number;
   jumlah_ulasan?: number;
   chat_response_rate_persen?: number;
   pesanan_terlambat_persen?: number;
   jumlah_kampanye_aktif?: number;
+  /** B-5.3 — tipe kampanye aktif, sebagai KEY form (mis. 'video_ads',
+   *  'live_ads', 'gmv_max'), bukan label. */
+  tipe_kampanye?: string[];
   top_keyword?: { keyword: string }[];
   affiliate_aktif_30hari?: number;
   gmv_affiliate?: string;
@@ -67,7 +79,9 @@ export interface VideoFactoryChannel {
   jumlah_video_per_bulan?: number;
   total_views?: number;
   gmv_video?: string;
+  jam_live_per_bulan?: number;
   gmv_live?: string;
+  host_live?: string;
 }
 
 export interface VideoFactoryPayload {
@@ -193,13 +207,33 @@ export function applyVideoFactoryPrefill(
   scalar('jumlah_video_per_bulan', c.jumlah_video_per_bulan);
   scalar('total_views', c.total_views);
   scalar('gmv_video', c.gmv_video);
+  scalar('jam_live_per_bulan', c.jam_live_per_bulan);
   scalar('gmv_live', c.gmv_live);
+  scalar('host_live', c.host_live);
+
+  // B-5.3 tipe kampanye — isi hanya bila belum ditandai AM (tidak menimpa, dan
+  // tidak menyentuh channel yang sudah ditandai "tidak ada kampanye").
+  if (
+    Array.isArray(c.tipe_kampanye) &&
+    c.tipe_kampanye.length &&
+    next.tipe_kampanye.length === 0 &&
+    !next.tipe_kampanye_tidak_ada
+  ) {
+    next.tipe_kampanye = c.tipe_kampanye.filter((t) => typeof t === 'string' && t);
+    if (next.tipe_kampanye.length) filled++;
+  }
 
   // List — isi hanya jika list tujuan masih kosong (tidak menggabung/menimpa).
   if (Array.isArray(c.top_sku) && c.top_sku.length && next.top_sku.length === 0) {
     next.top_sku = c.top_sku
       .filter((s) => s && s.nama)
-      .map((s) => ({ nama: s.nama, gmv: s.gmv ?? '', unit_terjual: '', harga_jual: '', margin_persen: '' }));
+      .map((s) => ({
+        nama: s.nama,
+        gmv: s.gmv ?? '',
+        unit_terjual: s.unit_terjual ?? '',
+        harga_jual: s.harga_jual ?? '',
+        margin_persen: '',
+      }));
     if (next.top_sku.length) filled++;
   }
   if (Array.isArray(c.top_kreator) && c.top_kreator.length && next.top_kreator.length === 0) {
