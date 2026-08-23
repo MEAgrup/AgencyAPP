@@ -6227,6 +6227,19 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
 }
 
 /**
+ * baselineGroupMessage — the Section B group gap message, naming the exact empty
+ * columns (owner QA 2026-08-23). The panel renders `kode` + this `pesan`, so the
+ * AM who "filled everything" but still sees the group flagged is told which cell
+ * is actually blank (e.g. B-3.6 Listing layak %) instead of re-reading the group.
+ * Stays a single `[...]` BI message; falls back to the plain group string when no
+ * field label is available, so the constant is never emitted as an empty hint.
+ */
+function baselineGroupMessage(kosong: string[]): string {
+  if (kosong.length === 0) return MSG_BASELINE_GROUP_INCOMPLETE;
+  return `[data baseline channel belum lengkap — lengkapi: ${kosong.join(', ')}]`;
+}
+
+/**
  * Section B (A-06) completeness for ONE `Eksisting` channel — Rule 5, per group.
  *
  * Rule 5 draws its line at "blank is not allowed, `0` is", which is why every
@@ -6287,9 +6300,17 @@ function kekuranganSectionB(c: {
   celah_kompetitor: string | null;
 }): Kekurangan[] {
   const out: Kekurangan[] = [];
-  const ada = (...vals: (number | string | null)[]): boolean => vals.every((v) => v !== null);
-  const grup = (kode: string, lengkap: boolean): void => {
-    if (!lengkap) out.push({ kode: `${kode}/${c.channel}`, pesan: MSG_BASELINE_GROUP_INCOMPLETE });
+  // Each group names its fields as `[label, value]` pairs so the gap message can
+  // point at the EXACT empty column, not just the group. A field is empty when its
+  // value is `null` — the same test the old `ada(...)` used, one pair at a time.
+  // The label echoes what the AM sees in the Section B form (with its PRD code),
+  // so "which column is missing" is answerable from the Kekurangan panel alone
+  // (owner QA 2026-08-23) instead of re-scanning the whole group by hand.
+  const grup = (kode: string, fields: [string, number | string | null][]): void => {
+    const kosong = fields.filter(([, v]) => v === null).map(([label]) => label);
+    if (kosong.length > 0) {
+      out.push({ kode: `${kode}/${c.channel}`, pesan: baselineGroupMessage(kosong) });
+    }
   };
 
   // B-2: the two required baseline metrics are B-2.1 (visitors) and B-2.2 (CR).
@@ -6300,52 +6321,54 @@ function kekuranganSectionB(c: {
   // legitimately be 0/blank while iklan or video carry the share. B-2.4 (entry
   // point) is optional. `ck_strch_trafik_total` — the old all-or-nothing CHECK
   // this proxy relied on — was dropped in the same migration.
-  grup('B-2', ada(c.pengunjung_per_bulan, c.conversion_rate_persen));
-  grup(
-    'B-3',
-    ada(c.sku_listed, c.sku_aktif, c.sku_pareto_80, c.sku_slow_moving, c.listing_layak_persen),
-  );
-  grup(
-    'B-4',
-    ada(
-      c.rating_toko,
-      c.jumlah_ulasan,
-      c.chat_response_rate_persen,
-      c.chat_response_menit,
-      c.pesanan_terlambat_persen,
-      c.poin_penalti,
-    ),
-  );
+  grup('B-2', [
+    ['Pengunjung per bulan (B-2.1)', c.pengunjung_per_bulan],
+    ['Conversion rate % (B-2.2)', c.conversion_rate_persen],
+  ]);
+  grup('B-3', [
+    ['SKU terdaftar (B-3.1)', c.sku_listed],
+    ['SKU aktif', c.sku_aktif],
+    ['SKU penyumbang 80% GMV (B-3.2)', c.sku_pareto_80],
+    ['SKU slow moving', c.sku_slow_moving],
+    ['Listing layak % (B-3.6)', c.listing_layak_persen],
+  ]);
+  grup('B-4', [
+    ['Rating toko (B-4.1)', c.rating_toko],
+    ['Jumlah ulasan', c.jumlah_ulasan],
+    ['Chat response rate % (B-4.2)', c.chat_response_rate_persen],
+    ['Response time menit (B-4.2)', c.chat_response_menit],
+    ['Pesanan terlambat % (B-4.3)', c.pesanan_terlambat_persen],
+    ['Poin penalti (B-4.4)', c.poin_penalti],
+  ]);
   // B-5 / B-8 keep gating the companion NUMBER: a valid `0` proves the question
   // was reached, and that is a different proof path from the checkbox. O58 adds
   // the list side rather than replacing it — both are cheap, and either one
   // alone leaves a hole.
-  grup('B-5', ada(c.jumlah_kampanye_aktif));
-  grup(
-    'B-6',
-    ada(
-      c.affiliate_aktif_30hari,
-      c.gmv_affiliate,
-      c.gmv_affiliate_persen,
-      c.komisi_open_persen,
-      c.komisi_target_persen,
-      c.program_sampel,
-    ),
-  );
-  grup(
-    'B-7',
-    ada(
-      c.jumlah_video_per_bulan,
-      c.total_views,
-      c.gmv_video,
-      c.jam_live_per_bulan,
-      c.gmv_live,
-      c.host_live,
-      c.studio_live,
-    ),
-  );
-  grup('B-8', ada(c.beban_promo_persen));
-  grup('B-9', ada(c.celah_kompetitor) && strArray(c.kompetitor_lebih_baik).length > 0);
+  grup('B-5', [['Jumlah kampanye aktif (B-5.3)', c.jumlah_kampanye_aktif]]);
+  grup('B-6', [
+    ['Affiliate aktif 30 hari (B-6.1)', c.affiliate_aktif_30hari],
+    ['GMV dari affiliate', c.gmv_affiliate],
+    ['% GMV dari affiliate (B-6.2)', c.gmv_affiliate_persen],
+    ['Komisi open % (B-6.3)', c.komisi_open_persen],
+    ['Komisi target %', c.komisi_target_persen],
+    ['Program sampel / seeding (B-6.5)', c.program_sampel],
+  ]);
+  grup('B-7', [
+    ['Video per bulan (B-7.1)', c.jumlah_video_per_bulan],
+    ['Total views', c.total_views],
+    ['GMV dari video', c.gmv_video],
+    ['Jam live per bulan (B-7.2)', c.jam_live_per_bulan],
+    ['GMV dari live', c.gmv_live],
+    ['Host live (B-7.3)', c.host_live],
+    ['Studio (B-7.4)', c.studio_live],
+  ]);
+  grup('B-8', [['Beban promo % dari GMV (B-8.3)', c.beban_promo_persen]]);
+  // B-9 mixes a scalar (celah, B-9.3) with a multi-select (kompetitor_lebih_baik,
+  // B-9.2); an unchecked multi-select reads as empty, so name whichever is blank.
+  grup('B-9', [
+    ['Kompetitor lebih baik dalam hal (B-9.2)', strArray(c.kompetitor_lebih_baik).length > 0 ? '' : null],
+    ['Celah vs kompetitor (B-9.3)', c.celah_kompetitor],
+  ]);
 
   // O58 — filled list XOR "tidak ada". Each gets its own code so the AM is sent
   // to the one question that is actually unanswered, not to a whole group.

@@ -687,11 +687,16 @@ export default function SectionB({
     ? Math.max(1, Math.min(12, Math.round(Number(ch.periode_baseline_bulan))))
     : 0;
 
-  // Ensure the baseline array has exactly nMonths rows (adding empties, trimming extras).
+  // Ensure the baseline array has exactly nMonths rows (adding empties, trimming
+  // extras). month_index is 1-based end to end — the DB CHECK is `BETWEEN 1 AND 6`,
+  // `normalizeBaseline` refuses `< 1`, and the server (getStrategi + prefill) emits
+  // 1-based indices. Row `i` (0-based array slot) is month `i + 1`; using `i`
+  // directly made every baseline save throw `[data tidak lengkap …]`.
   const ensuredBaseline: BaselineMonthDraft[] = Array.from({ length: nMonths }, (_, i) => {
+    const monthIndex = i + 1;
     return (
-      ch.baseline.find((m) => m.month_index === i) ?? {
-        month_index: i,
+      ch.baseline.find((m) => m.month_index === monthIndex) ?? {
+        month_index: monthIndex,
         gmv: '',
         jumlah_pesanan: '',
         persen_batal: '',
@@ -1057,7 +1062,7 @@ export default function SectionB({
               <tbody>
                 {ensuredBaseline.map((m, i) => (
                   <tr key={m.month_index}>
-                    <td style={{ paddingRight: 8 }}>Bulan {m.month_index + 1}</td>
+                    <td style={{ paddingRight: 8 }}>Bulan {m.month_index}</td>
                     {(
                       [
                         ['gmv', 'text'] as const,
