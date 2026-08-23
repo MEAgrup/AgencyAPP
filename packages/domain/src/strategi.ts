@@ -3683,13 +3683,18 @@ function validateChannelBaselineShape(c: ChannelInput): void {
     c.listingLayakPersen,
     c.chatResponseRatePersen,
     c.pesananTerlambatPersen,
-    c.gmvAffiliatePersen,
     c.bebanPromoPersen,
     c.komisiOpenPersen,
     c.komisiTargetPersen,
   ]) {
     pct(v);
   }
+  // B-6.2 (revisi DECISIONS 2026-08-23): % GMV affiliate = GMV-share lintas-export
+  // yang TUMPANG-TINDIH (affGmv Transaction Creator / totGMV toko). Untuk seller
+  // berat-afiliasi rasionya wajar >100% (over-attribution) — sama seperti komposisi
+  // trafik B-2.3. Batas atas 100 dilepas; yang tersisa hanya `>= 0` (share negatif
+  // tak bermakna). Cermin CHECK `ck_strch_persen_range` pasca-migrasi b6-overlap.
+  nonNeg(c.gmvAffiliatePersen);
   for (const v of [
     c.pengunjungPerBulan,
     c.skuListed,

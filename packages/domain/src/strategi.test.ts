@@ -1354,6 +1354,21 @@ describeDb('Section B — A-06 (groups B-2 … B-9)', () => {
     ).rejects.toThrow(ValidationError);
   });
 
+  it('B-6.2: accepts %GMV affiliate over 100 (GMV-share overlaps, over-attribution)', async () => {
+    // affGmv (Transaction Creator export) and totGMV (shop export) attribute the
+    // same affiliate order twice, so the ratio legitimately exceeds 100% for an
+    // affiliate-heavy seller — same overlap the B-2.3 traffic buckets carry
+    // (DECISIONS 2026-08-23). A Draft must save it, not throw the whole Section B.
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const saved = await saveChannels(sql, am(), s.id, [{ ...SHOPEE, gmvAffiliatePersen: 128.9 }]);
+    expect(saved.channels[0].gmvAffiliatePersen).toBe(128.9);
+    // Non-overlap percentages stay bounded 0–100 (a >100 there is a real typo).
+    await expect(
+      saveChannels(sql, am(), s.id, [{ ...SHOPEE, conversionRatePersen: 128.9 }]),
+    ).rejects.toThrow(ValidationError);
+  });
+
   it('caps the counts the PRD writes in brackets, and allows a shorter list', async () => {
     const serviceId = await seedService();
     const s = await createStrategi(sql, am(), serviceId, HEADER);
