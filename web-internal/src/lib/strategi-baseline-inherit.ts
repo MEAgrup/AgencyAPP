@@ -42,8 +42,14 @@ export function mergeBaselinePrefill(
         ? Math.max(1, Math.min(12, Math.round(Number(next.periode_baseline_bulan))))
         : 0;
       next.baseline = Array.from({ length: nMonths }, (_, i): BaselineMonthDraft => {
-        const existing = next.baseline.find((m) => m.month_index === i) ?? {
-          month_index: i,
+        // month_index is 1-based end to end — the DB CHECK is `BETWEEN 1 AND 6`,
+        // `normalizeBaseline` refuses `< 1`, and the server prefill emits `i + 1`
+        // (see strategi.ts getBaselinePrefill). Row `i` of the window is month
+        // `i + 1`; a 0-based value here would be rejected on save with
+        // `[data tidak lengkap …]` and would also miss its own prefill cell.
+        const monthIndex = i + 1;
+        const existing = next.baseline.find((m) => m.month_index === monthIndex) ?? {
+          month_index: monthIndex,
           gmv: '',
           jumlah_pesanan: '',
           persen_batal: '',
@@ -51,7 +57,7 @@ export function mergeBaselinePrefill(
           roas: '',
           acos: '',
         };
-        const sm = s.baseline_bulan.find((m) => m.month_index === i);
+        const sm = s.baseline_bulan.find((m) => m.month_index === monthIndex);
         return {
           ...existing,
           gmv: existing.gmv.trim() ? existing.gmv : (sm?.gmv ?? ''),

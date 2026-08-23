@@ -106,10 +106,12 @@ function prefill(over: Partial<StrategiBaselinePrefill['channels'][number]>): St
         roas: 4.1,
         ad_spend: '41000000',
         aov: '87800',
+        // 1-based, exactly as the server emits (getBaselinePrefill: `i + 1`) and
+        // as the DB stores it (`ck_strbl_month` BETWEEN 1 AND 6). Month 1 = oldest.
         baseline_bulan: [
-          { month_index: 0, label: 'M-1', gmv: '172000000', jumlah_pesanan: 1900 },
-          { month_index: 1, label: 'M-2', gmv: '165000000', jumlah_pesanan: 1820 },
-          { month_index: 2, label: 'M-3', gmv: '180000000', jumlah_pesanan: 2050 },
+          { month_index: 1, label: 'M-1', gmv: '172000000', jumlah_pesanan: 1900 },
+          { month_index: 2, label: 'M-2', gmv: '165000000', jumlah_pesanan: 1820 },
+          { month_index: 3, label: 'M-3', gmv: '180000000', jumlah_pesanan: 2050 },
         ],
         gmv_mix: null,
         ...over,
@@ -126,6 +128,9 @@ describe('mergeBaselinePrefill (RAB-19 warisi yang bersumber saja)', () => {
     expect(ch.lampiran).toBe('ra/tiktok.xlsx');
     expect(ch.periode_baseline_bulan).toBe('3');
     expect(ch.baseline).toHaveLength(3);
+    // month_index is 1-based end to end (DB CHECK BETWEEN 1 AND 6). A 0-based
+    // value here would be rejected on save with `[data tidak lengkap …]`.
+    expect(ch.baseline.map((m) => m.month_index)).toEqual([1, 2, 3]);
     expect(ch.baseline[2]).toMatchObject({ gmv: '180000000', jumlah_pesanan: '2050' });
     // The non-sourced per-month cells stay blank — Riset Awal has no per-month
     // figure for them; the AM fills these.
@@ -139,7 +144,7 @@ describe('mergeBaselinePrefill (RAB-19 warisi yang bersumber saja)', () => {
       ...blank('TikTok Shop'),
       sumber_data: 'ketikan AM',
       periode_baseline_bulan: '2',
-      baseline: [{ month_index: 0, gmv: '99', jumlah_pesanan: '9', persen_batal: '', ad_spend: '', roas: '', acos: '' }],
+      baseline: [{ month_index: 1, gmv: '99', jumlah_pesanan: '9', persen_batal: '', ad_spend: '', roas: '', acos: '' }],
     };
     const [ch] = mergeBaselinePrefill([edited], prefill({}));
     expect(ch.sumber_data).toBe('ketikan AM');

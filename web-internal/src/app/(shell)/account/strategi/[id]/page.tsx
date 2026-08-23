@@ -338,10 +338,14 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
           if (!saved) continue;
           // Ensure the baseline array covers exactly nMonths rows (same logic as
           // the component's ensuredBaseline — the component only manages display).
+          // month_index is 1-based (DB CHECK `BETWEEN 1 AND 6`, `normalizeBaseline`
+          // refuses `< 1`): row `i` is month `i + 1`. Sending 0-based here made the
+          // whole Section B save throw `[data tidak lengkap …]`.
           const months = Array.from({ length: nMonths }, (_, i) => {
+            const monthIndex = i + 1;
             return (
-              ch.baseline.find((m) => m.month_index === i) ?? {
-                month_index: i,
+              ch.baseline.find((m) => m.month_index === monthIndex) ?? {
+                month_index: monthIndex,
                 gmv: '',
                 jumlah_pesanan: '',
                 persen_batal: '',

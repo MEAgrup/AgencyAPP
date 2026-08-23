@@ -105,9 +105,10 @@ const blank = (s: string): boolean => s.trim() === '';
  * rendered whether or not it has a value. A grid that only showed saved rows
  * would open empty on a fresh Strategi and give the AM nothing to type into.
  *
- * Months run 1…`durasi`, matching `ck_strtg_month` — NOT 0-based like
- * `strategi_baseline_bulan`. The two really do differ: a baseline month is an
- * offset into a past window, a target month is contract month M1.
+ * Months run 1…`durasi`, matching `ck_strtg_month`. Both this target grid and
+ * `strategi_baseline_bulan` are 1-based (`ck_strbl_month` is `BETWEEN 1 AND 6`);
+ * they differ only in meaning — a baseline month is an offset into a past window
+ * (month 1 = oldest), a target month is contract month M1.
  */
 export function gmvGridOf(
   channels: readonly { channel: string }[],
