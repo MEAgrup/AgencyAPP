@@ -181,7 +181,7 @@ Design note: **D-8 (asumsi target) is deliberately shareable.** The assumptions 
 | ID | Question | Type | Req |
 |---|---|---|---|
 | B-6.1 | Jumlah affiliate/kreator aktif 30 hari terakhir | Number | W |
-| B-6.2 | GMV dari affiliate (Rp & % dari total) | Currency + % | W |
+| B-6.2 | GMV dari affiliate (Rp & % dari total) | Currency + % | W | <!-- % = GMV-share tumpang-tindih lintas-export (affGmv ÷ totGMV); boleh >100% karena over-attribution, tidak dipangkas — sejajar B-2.3, DECISIONS 2026-08-23 -->
 | B-6.3 | Komisi rate saat ini (open plan & target plan) | % × 2 | W |
 | B-6.4 | Top 5 kreator penyumbang GMV | Repeatable struct | O |
 | B-6.5 | Program sampel/seeding yang jalan? Biaya ditanggung siapa? | Enum + note | W |
