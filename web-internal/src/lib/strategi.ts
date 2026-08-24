@@ -824,8 +824,8 @@ export interface StrategiDiagnosa {
   id: number;
   channel: string;
   bottleneck: string;
-  /** Rule 6: baseline field-ID references (e.g. "B-2.2"). Min 1 required. */
-  field_ids: string[];
+  /** Rule 6: free-text reason/evidence for the bottleneck. Required, non-empty. */
+  alasan: string;
   akar_masalah: string | null;
   gap_kompetitor: string | null;
 }
@@ -1092,8 +1092,8 @@ export function saveStrategiAkses(id: string, akses: StrategiAksesBody[]): Promi
 export interface StrategiDiagnosaBody {
   channel: string;
   bottleneck: string;
-  /** Rule 6: baseline field-ID references, min 1 required. */
-  field_ids: string[];
+  /** Rule 6: free-text reason/evidence, required non-empty. */
+  alasan: string;
   akar_masalah?: string | null;
   gap_kompetitor?: string | null;
 }

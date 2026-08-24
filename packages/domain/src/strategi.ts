@@ -616,103 +616,21 @@ export const BOTTLENECK_KINDS = [
 ] as const;
 export type BottleneckKind = (typeof BOTTLENECK_KINDS)[number];
 
-/**
- * C-2 Rule 6 — closed set of valid baseline field-IDs that a diagnosa may
- * cite as evidence. This is the set of all W + A field IDs from Section A
- * (A-1 through A-16) and Section B (B-0.1 through B-9.3).
- *
- * The DB cannot enforce this set with a CHECK (subqueries inside CHECKs are
- * forbidden). Domain validates membership here at save time (not at submit),
- * so an invalid ID is caught when the AM types it rather than at the gate.
- */
-export const VALID_BASELINE_FIELD_IDS: ReadonlySet<string> = new Set([
-  // Section A
-  'A-1',
-  'A-2',
-  'A-3',
-  'A-4',
-  'A-5',
-  'A-6',
-  'A-7',
-  'A-8',
-  'A-9',
-  'A-10',
-  'A-11',
-  'A-12',
-  'A-13',
-  'A-14',
-  'A-15',
-  'A-16',
-  // Section B — B-0 (channel identity)
-  'B-0.1',
-  'B-0.2',
-  'B-0.3',
-  'B-0.4',
-  'B-0.5',
-  'B-0.6',
-  'B-0.7',
-  'B-0.8',
-  // B-1 (penjualan)
-  'B-1.1',
-  'B-1.2',
-  'B-1.3',
-  'B-1.4',
-  'B-1.5',
-  // B-2 (trafik & konversi)
-  'B-2.1',
-  'B-2.2',
-  'B-2.3',
-  'B-2.4',
-  // B-3 (portofolio SKU)
-  'B-3.1',
-  'B-3.2',
-  'B-3.3',
-  'B-3.4',
-  'B-3.5',
-  'B-3.6',
-  // B-4 (kesehatan toko)
-  'B-4.1',
-  'B-4.2',
-  'B-4.3',
-  'B-4.4',
-  'B-4.5',
-  // B-5 (iklan)
-  'B-5.1',
-  'B-5.2',
-  'B-5.3',
-  'B-5.4',
-  'B-5.5',
-  // B-6 (affiliate / KOL)
-  'B-6.1',
-  'B-6.2',
-  'B-6.3',
-  'B-6.4',
-  'B-6.5',
-  // B-7 (konten & live)
-  'B-7.1',
-  'B-7.2',
-  'B-7.3',
-  'B-7.4',
-  // B-8 (promo & program platform)
-  'B-8.1',
-  'B-8.2',
-  'B-8.3',
-  // B-9 (kompetitor)
-  'B-9.1',
-  'B-9.2',
-  'B-9.3',
-]);
-
 /** Minimum quick wins required at submit (C-5). */
 export const QUICK_WIN_MIN = 3;
 
-/** C-2: each diagnosa must cite ≥1 baseline field-ID (Rule 6). */
-export const MSG_DIAGNOSA_FIELD_ID_REQUIRED =
-  '[setiap diagnosa wajib mencantumkan minimal satu field-ID baseline sebagai bukti]';
-
-/** C-2: the cited field-ID does not exist in VALID_BASELINE_FIELD_IDS. */
-export const MSG_DIAGNOSA_INVALID_FIELD_ID =
-  '[field-ID baseline tidak valid — gunakan ID yang terdaftar seperti B-2.2 atau A-5]';
+/**
+ * C-2 Rule 6 — each diagnosa must state its reasoning as free text.
+ *
+ * ⟳ 2026-08-24 (DECISIONS): C-2 used to require ≥1 field-ID citation from a
+ * closed set of baseline field IDs (`VALID_BASELINE_FIELD_IDS`, since
+ * removed). QA feedback on STRG-202608-0001: AMs had no lookup UI for the
+ * 50+ valid IDs, so the requirement was a lookup burden, not useful
+ * evidence. PRD amended (`docs/prd/CDPS_Module6A_Strategi.md` Rule 6, C-2)
+ * to require a free-text reason instead.
+ */
+export const MSG_DIAGNOSA_ALASAN_REQUIRED =
+  '[setiap diagnosa wajib mencantumkan alasan/bukti bottleneck]';
 
 /** C-1/C-3: each contracted channel must have a diagnosa row. */
 export const MSG_DIAGNOSA_MISSING =
@@ -1259,18 +1177,15 @@ export interface StrategiRisk {
 
 /**
  * C-1/C-2/C-3/C-4 — one diagnosa row per contracted channel.
- * Rule 6: `fieldIds` must have ≥1 entry from VALID_BASELINE_FIELD_IDS.
+ * Rule 6: `alasan` must be non-empty free text.
  */
 export interface StrategiDiagnosa {
   id: number;
   channel: string;
   /** C-1 — main bottleneck type for this channel. */
   bottleneck: BottleneckKind;
-  /**
-   * C-2 — baseline field-ID references that prove the bottleneck diagnosis.
-   * Example: ["B-2.2", "B-3.6"]. Min 1, validated against VALID_BASELINE_FIELD_IDS.
-   */
-  fieldIds: string[];
+  /** C-2 — free-text reason/evidence for why this bottleneck was chosen. */
+  alasan: string;
   /** C-3 — root cause (not symptom). NULLable (autosave); gated at submit. */
   akarMasalah: string | null;
   /** C-4 — most decisive gap vs competitors. NULLable; gated at submit. */
@@ -2400,11 +2315,11 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
       id: string;
       channel: string;
       bottleneck: string;
-      field_ids: unknown;
+      alasan: string;
       akar_masalah: string | null;
       gap_kompetitor: string | null;
     }[]
-  >`select id, channel, bottleneck, field_ids, akar_masalah, gap_kompetitor
+  >`select id, channel, bottleneck, alasan, akar_masalah, gap_kompetitor
       from strategi_diagnosa where strategi_id = ${id}
      order by channel asc`;
 
@@ -2582,7 +2497,7 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
       id: Number(d.id),
       channel: d.channel,
       bottleneck: d.bottleneck as BottleneckKind,
-      fieldIds: strArray(d.field_ids),
+      alasan: d.alasan,
       akarMasalah: d.akar_masalah,
       gapKompetitor: d.gap_kompetitor,
     })),
@@ -3394,8 +3309,8 @@ export interface ChannelInput {
 export interface DiagnosaInput {
   channel: string;
   bottleneck: BottleneckKind;
-  /** Rule 6: at least one entry from VALID_BASELINE_FIELD_IDS. */
-  fieldIds: string[];
+  /** Rule 6: non-empty free-text reason/evidence for the bottleneck. */
+  alasan: string;
   akarMasalah?: string | null;
   gapKompetitor?: string | null;
 }
@@ -3431,15 +3346,15 @@ export interface DiagnosaPayload {
  * saveDiagnosa replaces Section C (all four sub-sections) atomically.
  *
  * Validation rules enforced here:
- * - Rule 6 (§4): each diagnosa row must cite ≥1 field-ID from
- *   VALID_BASELINE_FIELD_IDS. This is validated at save time (not at submit)
- *   so the AM gets immediate feedback rather than discovering the problem
- *   only when they hit the submit button.
+ * - Rule 6 (§4): each diagnosa row must state a non-empty free-text `alasan`.
+ *   This is validated at save time (not at submit) so the AM gets immediate
+ *   feedback rather than discovering the problem only when they hit the
+ *   submit button.
  * - Each diagnosa channel must be a channel registered in this Strategi
  *   (prevents dangling references if a channel is removed).
  * - No duplicate channel in the diagnosa list.
  *
- * All fields other than `bottleneck` + `fieldIds` are NULLable here because
+ * All fields other than `bottleneck` + `alasan` are NULLable here because
  * §7 requires autosave every 20 s; completeness is checked at submit via
  * `checkCompleteness`.
  */
@@ -3472,35 +3387,21 @@ export async function saveDiagnosa(
       }
       seenDiagnosaChannels.add(d.channel);
 
-      // Rule 6: at least one valid baseline field-ID.
-      if (d.fieldIds.length === 0) {
-        throw new ValidationError(MSG_DIAGNOSA_FIELD_ID_REQUIRED);
-      }
-      for (const fid of d.fieldIds) {
-        if (!VALID_BASELINE_FIELD_IDS.has(fid)) {
-          throw new ValidationError(MSG_DIAGNOSA_INVALID_FIELD_ID);
-        }
+      // Rule 6: non-empty free-text reason.
+      if (!d.alasan || d.alasan.trim() === '') {
+        throw new ValidationError(MSG_DIAGNOSA_ALASAN_REQUIRED);
       }
     }
 
     // Replace diagnosa — UPSERT on (strategi_id, channel).
-    //
-    // `field_ids` is written `to_jsonb(<array>::text[])`, deliberately NOT the
-    // interpolate-a-JSON-string-and-cast form. postgres.js binds a parameter
-    // that a jsonb column receives AS jsonb, so handing it an already-
-    // JSON.stringify'd string makes it encode that string a second time: the
-    // column ends up holding the jsonb *string* "[\"A-1\"]" instead of the
-    // array ["A-1"], and `ck_strdiag_field_ids_array` (jsonb_typeof = 'array')
-    // rejects every row. Passing a real JS array and letting Postgres build the
-    // array server-side has no such ambiguity.
     await tx`delete from strategi_diagnosa where strategi_id = ${id}`;
     for (const d of payload.diagnosa) {
       await tx`
         insert into strategi_diagnosa
-          (strategi_id, channel, bottleneck, field_ids, akar_masalah, gap_kompetitor, created_by)
+          (strategi_id, channel, bottleneck, alasan, akar_masalah, gap_kompetitor, created_by)
         values (
           ${id}, ${d.channel}, ${d.bottleneck},
-          to_jsonb(${d.fieldIds}::text[]),
+          ${d.alasan.trim()},
           ${nullIfBlank(d.akarMasalah)},
           ${nullIfBlank(d.gapKompetitor)},
           ${actor.employeeId}
@@ -6228,9 +6129,9 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
   // -----------------------------------------------------------------------
   // C-1..C-4: every contracted channel must have a diagnosa row, and each
   // diagnosa must have an akar_masalah (C-3) and gap_kompetitor (C-4) filled.
-  // The Rule 6 field-ID check happens at save time (saveDiagnosa), not here —
-  // an invalid field-ID cannot be stored, so if a diagnosa row exists its
-  // field_ids are already valid.
+  // The Rule 6 alasan check happens at save time (saveDiagnosa), not here —
+  // an empty alasan cannot be stored, so if a diagnosa row exists its alasan
+  // is already non-empty.
   const diagnosaRows = await sql<
     { channel: string; akar_masalah: string | null; gap_kompetitor: string | null }[]
   >`select channel, akar_masalah, gap_kompetitor from strategi_diagnosa
@@ -7006,8 +6907,8 @@ async function copyChildren(
   // re-typing content the AM may not want to change.
   await tx`
     insert into strategi_diagnosa
-      (strategi_id, channel, bottleneck, field_ids, akar_masalah, gap_kompetitor, created_by)
-    select ${toId}, channel, bottleneck, field_ids, akar_masalah, gap_kompetitor, ${actorId}
+      (strategi_id, channel, bottleneck, alasan, akar_masalah, gap_kompetitor, created_by)
+    select ${toId}, channel, bottleneck, alasan, akar_masalah, gap_kompetitor, ${actorId}
       from strategi_diagnosa where strategi_id = ${fromId}`;
 
   await tx`

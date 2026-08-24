@@ -63,7 +63,7 @@
 4. A channel may be marked `Belum Aktif` (not yet live) — this **skips the historical baseline fields** but still requires the launch-plan fields (Section B, group B-0).
 5. **Baseline is numeric and sourced.** Every baseline group requires: the figure, the period it covers, and a source (attached export/screenshot + capture date). Strategi cannot be submitted with baseline fields left blank; `0` is a valid answer, blank is not. **⟳ RAB-19 (DECISIONS 2026-08-18): this rule is NOT loosened by D5/D18/OA-9 — it is finally *satisfied*.** The Riset Awal engine proposes the figure + period + provenance from the AM-pulled export; the AM confirms each. "Sourced" now has a real pipeline (`riset_awal_analisa` + `riset_awal_sumber_berkas`, `sha256` + capture date) instead of an unfilled requirement.
 5a. **The baseline window is declared by the AM per contract, per channel** (field B-0.7) — there is no globally fixed 3-month rule, because contracts differ (new store, seasonal category, post-freeze store). Allowed range 1–6 months, default 3. A window shorter than 3 months requires a written reason. Once the Strategi is approved the window is locked; changing it is a revision (Rule 13), so later performance is always compared against the same yardstick.
-6. **Diagnosis must cite baseline.** Each root-cause entry in Section C must reference at least one baseline field ID. A diagnosis with no numeric reference fails validation.
+6. **⟳ 2026-08-24 (DECISIONS): Diagnosis must state its reasoning in free text (C-2).** An empty C-2 fails validation. Superseded original: "Diagnosis must cite baseline. Each root-cause entry in Section C must reference at least one baseline field ID. A diagnosis with no numeric reference fails validation." — the field-ID citation requirement is dropped because AMs had no lookup UI for the 50+ valid field IDs, making the requirement a lookup burden rather than useful evidence.
 7. **Target floor is read-only.** The contract target is pulled from the Contract record (Module 4) and cannot be edited in Strategi. The stretch target must be `>=` floor; if the AM believes the floor is unachievable, they raise `Sanggahan Target` (Section D-7) which routes to SPV — it does not lower the floor.
 8. **Every target carries an assumption.** Each monthly stretch figure must be tied to at least one assumption in Section D-8. Assumptions are the objects that later justify a revision (Rule 13).
 9. **Out-of-scope must be explicit.** Section E-9 (`Tidak Dikerjakan`) requires at least one entry. Empty = validation error. This is the anti-scope-creep record used when the client later asks for extras.
@@ -209,12 +209,12 @@ Design note: **D-8 (asumsi target) is deliberately shareable.** The assumptions 
 | B-9.3 | Celah yang belum diisi kompetitor | Long text | W |
 
 ### SECTION C — Diagnosa & Akar Masalah
-*Purpose: force the AM to name the bottleneck and prove it with baseline field IDs (Rule 6).*
+*Purpose: force the AM to name the bottleneck and explain why, in their own words (Rule 6). **⟳ 2026-08-24 (DECISIONS):** previously required a baseline field-ID citation; dropped — see C-2, Rule 6.*
 
 | ID | Question | Type | Req |
 |---|---|---|---|
 | C-1 | Bottleneck utama per channel: trafik / konversi / AOV / repeat order / margin / operasional / konten / harga / listing | Enum ↻ per channel | W |
-| C-2 | Bukti angka: field baseline mana yang mendasari diagnosa ini? | Field-ID reference (min 1) | W |
+| C-2 | **⟳ 2026-08-24 (DECISIONS):** Alasan/bukti bottleneck ini dipilih — uraian bebas, bukan rujukan field-ID (field-ID baseline sulit dicari AM tanpa daftar kode di tangan, menyulitkan pengisian tanpa memberi nilai sebanding). Superseded original: "Bukti angka: field baseline mana yang mendasari diagnosa ini?" — type was "Field-ID reference (min 1)". | Long text | W |
 | C-3 | Akar masalah (bukan gejala) — kenapa bottleneck itu terjadi | Long text ↻ | W |
 | C-4 | Gap vs kompetitor yang paling menentukan | Long text | W |
 | C-5 | Quick win 14 hari pertama (perbaikan yang tak butuh budget baru) | Repeatable struct: aksi, channel, PIC divisi, dampak diharapkan | W (min 3) |
@@ -376,7 +376,7 @@ Migration: new `notification_catalog_version` row = 2, four Strategi events + si
 - Floor price stored per SKU in `STR_PILLAR` (type `harga`); Brief validation reads it.
 - Attachments: export/screenshot per channel baseline group, max 10MB/file, stored with capture date; retained for the contract period + 24 months.
 - Percentage composition fields: **D-3** (kontribusi channel, DERIVED) sums to 100 by construction. **B-2.3** traffic/GMV-share is **NOT** required to sum to 100 (revisi 2026-08-22): the platform reports overlapping GMV-share (an affiliate video counts in both Affiliate and Video; Ads is an overlay that can exceed 100%), so the DB check that enforced Σ=100 was dropped — each bucket is only validated `>= 0`. Recorded as-is so the overlap is visible in the report. See DECISIONS 2026-08-22.
-- Field-ID references (C-2): stored as an array of baseline field IDs, validated to exist within the same Strategi.
+- **⟳ 2026-08-24 (DECISIONS):** C-2 stored as free text (`alasan`, `NOT NULL`, non-empty). Superseded original: "Field-ID references (C-2): stored as an array of baseline field IDs, validated to exist within the same Strategi."
 - `STRG_CHANNEL.periode_baseline_bulan` (int 1–6) + `periode_mulai` / `periode_akhir` dates. The monthly baseline columns (B-1, B-5) are stored as rows in a child table keyed by `(channel_id, month_index)` — **not** as fixed `m1/m2/m3` columns, since the window is variable (D11). A shorter window than 3 requires `alasan_periode_pendek` to be non-null (DB check).
 - `visibilitas` per field: stored as a `STRG_FIELD_VISIBILITY` overlay table (`strategi_id`, `field_id`, `visibilitas`, `diubah_oleh`, `diubah_pada`) seeded from the §4.1 defaults. Hard-internal field IDs live in a constant list in `packages/core` and are rejected at both the TS predicate and the DB check — the two must not diverge (frozen invariant).
 - **Client view — read-only web link (D20).** Not a file. Server-rendered page at `/s/{token}`, shareable fields only.

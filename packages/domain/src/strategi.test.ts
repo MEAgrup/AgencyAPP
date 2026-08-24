@@ -41,8 +41,7 @@ import {
   MSG_CYCLE_LOCKED,
   MSG_DEFINISI_BERHASIL_REQUIRED,
   MSG_GROWTH_THESIS_REQUIRED,
-  MSG_DIAGNOSA_FIELD_ID_REQUIRED,
-  MSG_DIAGNOSA_INVALID_FIELD_ID,
+  MSG_DIAGNOSA_ALASAN_REQUIRED,
   MSG_DIAGNOSA_MISSING,
   MSG_INCOMPLETE,
   MSG_KOMPETITOR_REQUIRED,
@@ -465,7 +464,7 @@ const DIAGNOSA_PAYLOAD = {
     {
       channel: 'Shopee',
       bottleneck: 'konversi' as const,
-      fieldIds: ['B-2.2', 'B-3.6'],
+      alasan: 'CvR jauh di bawah benchmark platform (B-2.2) dan AOV turun sejak bundling hilang (B-3.6)',
       akarMasalah: 'CvR 1,3% vs benchmark platform 2,8%; nilai AOV turun karena bundling hilang',
       gapKompetitor: 'Kompetitor A CvR 2,6% dengan bundling 3-pcs di flash sale',
     },
@@ -2143,7 +2142,7 @@ describeDb('Section C — A-07 (Diagnosa & Akar Masalah)', () => {
     const d = detail.diagnosa[0];
     expect(d.channel).toBe('Shopee');
     expect(d.bottleneck).toBe('konversi');
-    expect(d.fieldIds).toEqual(['B-2.2', 'B-3.6']);
+    expect(d.alasan).toContain('B-2.2');
     expect(d.akarMasalah).toContain('CvR');
     expect(d.gapKompetitor).toContain('Kompetitor');
 
@@ -2159,39 +2158,40 @@ describeDb('Section C — A-07 (Diagnosa & Akar Masalah)', () => {
     expect(detail.prasyaratKlien[0].deadline).toBe('2026-08-15');
   });
 
-  it('Rule 6 — rejects an empty fieldIds list', async () => {
+  it('Rule 6 — rejects an empty alasan', async () => {
     const serviceId = await seedService();
     const s = await createStrategi(sql, am(), serviceId, HEADER);
     await saveChannels(sql, am(), s.id, [SHOPEE]);
     await expect(
       saveDiagnosa(sql, am(), s.id, {
         ...DIAGNOSA_PAYLOAD,
-        diagnosa: [{ ...DIAGNOSA_PAYLOAD.diagnosa[0], fieldIds: [] }],
+        diagnosa: [{ ...DIAGNOSA_PAYLOAD.diagnosa[0], alasan: '' }],
       }),
-    ).rejects.toThrow(MSG_DIAGNOSA_FIELD_ID_REQUIRED);
+    ).rejects.toThrow(MSG_DIAGNOSA_ALASAN_REQUIRED);
   });
 
-  it('Rule 6 — rejects a field-ID that is not in VALID_BASELINE_FIELD_IDS', async () => {
+  it('Rule 6 — rejects a whitespace-only alasan', async () => {
     const serviceId = await seedService();
     const s = await createStrategi(sql, am(), serviceId, HEADER);
     await saveChannels(sql, am(), s.id, [SHOPEE]);
     await expect(
       saveDiagnosa(sql, am(), s.id, {
         ...DIAGNOSA_PAYLOAD,
-        diagnosa: [{ ...DIAGNOSA_PAYLOAD.diagnosa[0], fieldIds: ['X-99', 'B-2.2'] }],
+        diagnosa: [{ ...DIAGNOSA_PAYLOAD.diagnosa[0], alasan: '   ' }],
       }),
-    ).rejects.toThrow(MSG_DIAGNOSA_INVALID_FIELD_ID);
+    ).rejects.toThrow(MSG_DIAGNOSA_ALASAN_REQUIRED);
   });
 
-  it('Rule 6 — accepts every boundary ID in VALID_BASELINE_FIELD_IDS (A-1 and B-9.3)', async () => {
+  it('Rule 6 — accepts free-text alasan without any field-ID reference', async () => {
     const serviceId = await seedService();
     const s = await createStrategi(sql, am(), serviceId, HEADER);
     await saveChannels(sql, am(), s.id, [SHOPEE]);
-    // A-1 is the first A-section field; B-9.3 is the last B-section field.
     await expect(
       saveDiagnosa(sql, am(), s.id, {
         ...DIAGNOSA_PAYLOAD,
-        diagnosa: [{ ...DIAGNOSA_PAYLOAD.diagnosa[0], fieldIds: ['A-1', 'B-9.3'] }],
+        diagnosa: [
+          { ...DIAGNOSA_PAYLOAD.diagnosa[0], alasan: 'CvR turun tajam sejak promo kompetitor mulai' },
+        ],
       }),
     ).resolves.not.toThrow();
   });
@@ -2231,7 +2231,7 @@ describeDb('Section C — A-07 (Diagnosa & Akar Masalah)', () => {
         {
           channel: 'Shopee',
           bottleneck: 'trafik' as const,
-          fieldIds: ['B-2.1', 'A-5'],
+          alasan: 'Organic traffic turun tajam sejak algoritma platform berubah',
           akarMasalah: 'organic traffic turun 30% pasca-algo update',
           gapKompetitor: 'Kompetitor dominasi top search dengan video',
         },
