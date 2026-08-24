@@ -238,7 +238,7 @@ textarea.copybox{min-height:280px;font-family:var(--mono);font-size:11.5px;white
     <button class="btn sig sm" id="btnTsv">Copy baris Sheet (TSV)</button>
     <button class="btn ghost sm" id="btnMd">Copy blok tracker</button>
     <button class="btn ghost sm" id="btnM6d">Copy bahan M6D</button>
-    <button class="btn ghost sm" id="btnSave">Simpan state (.json)</button>
+    <button class="btn ghost sm" id="btnSave">Unduh JSON</button>
   </div>
 </div>
 
@@ -1104,7 +1104,13 @@ function paneOutBaru(){
     'mempercepat pengisian form — AM tetap memverifikasi tiap field, mengisi bagian yang ditandai '+
     '"(isi..." atau "(belum diisi...", dan menempelnya manual ke CDPS.</div>'+
     '<pre class="box">'+esc(strgDraftText())+'</pre>'+
-    '<div class="btnrow" style="margin-top:12px"><button class="btn sig sm" id="btnStrgCopy2">Copy Draft STRG</button></div>'+
+    '<div class="note"><b>Untuk mengisi Section C/D/E di CDPS:</b> tekan <b>"Unduh JSON"</b> di bawah lalu '+
+    'tempel/unggah file itu di panel "Tempel / unggah dari MEA AM Cockpit" pada halaman STRG. '+
+    '"Copy Draft STRG" hanya teks untuk dibaca manusia — panel CDPS tidak bisa membacanya.</div>'+
+    '<div class="btnrow" style="margin-top:12px">'+
+    '<button class="btn sig sm" id="btnStrgCopy2">Copy Draft STRG</button>'+
+    '<button class="btn sig sm" id="btnStrgJson2">Unduh JSON → untuk CDPS Section C/D/E</button>'+
+    '</div>'+
     '</div></div>';
 }
 
@@ -1245,13 +1251,13 @@ function renderOutbar(){
   $('#outLb').textContent=baru?'Keluaran — draft STRG':'Keluaran mingguan';
   $('#outBtns').innerHTML=baru?
     '<button class="btn sig sm" id="btnStrgCopy">Copy Draft STRG</button>'+
-    '<button class="btn ghost sm" id="btnMulaiEksekusi">Mulai eksekusi \u2192 pindah ke Klien Berjalan</button>'+
-    '<button class="btn ghost sm" id="btnSave">Simpan state (.json)</button>'
+    '<button class="btn sig sm" id="btnSave">Unduh JSON \u2192 untuk CDPS Section C/D/E</button>'+
+    '<button class="btn ghost sm" id="btnMulaiEksekusi">Mulai eksekusi \u2192 pindah ke Klien Berjalan</button>'
     :
     '<button class="btn sig sm" id="btnTsv2b">Copy baris Sheet (TSV)</button>'+
     '<button class="btn ghost sm" id="btnMd2b">Copy blok tracker</button>'+
     '<button class="btn ghost sm" id="btnM6d2b">Copy bahan M6D</button>'+
-    '<button class="btn ghost sm" id="btnSave">Simpan state (.json)</button>';
+    '<button class="btn ghost sm" id="btnSave">Unduh JSON</button>';
   if($('#btnStrgCopy'))$('#btnStrgCopy').onclick=()=>copy(strgDraftText(),'Draft STRG tersalin');
   if($('#btnMulaiEksekusi'))$('#btnMulaiEksekusi').onclick=()=>{
     ST.mode='berjalan';
@@ -1263,7 +1269,7 @@ function renderOutbar(){
   if($('#btnM6d2b'))$('#btnM6d2b').onclick=()=>copy(m6dText(),'Bahan M6D tersalin');
   if($('#btnSave'))$('#btnSave').onclick=()=>{pullForm();
     download('cockpit-'+slug(ST.klien)+'-'+(ST.mode==='baru'?'rancang':(ST.minggu||'mgg'))+'.json',JSON.stringify(ST,null,2));
-    toast('State disimpan');};
+    toast('JSON diunduh — tempel/unggah di panel CDPS');};
 }
 function wire(){
   $$('[data-on]').forEach(c=>c.onchange=()=>{
@@ -1286,6 +1292,9 @@ function wire(){
   };
   if($('#btnStrgCopy'))$('#btnStrgCopy').onclick=()=>copy(strgDraftText(),'Draft STRG tersalin');
   if($('#btnStrgCopy2'))$('#btnStrgCopy2').onclick=()=>copy(strgDraftText(),'Draft STRG tersalin');
+  if($('#btnStrgJson2'))$('#btnStrgJson2').onclick=()=>{pullForm();
+    download('cockpit-'+slug(ST.klien)+'-'+(ST.mode==='baru'?'rancang':(ST.minggu||'mgg'))+'.json',JSON.stringify(ST,null,2));
+    toast('JSON diunduh — tempel/unggah di panel CDPS');};
 }
 function arsip(){
   pullForm();
