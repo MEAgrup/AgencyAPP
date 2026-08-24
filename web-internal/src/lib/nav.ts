@@ -198,6 +198,10 @@ const TOOLS_LINKS: NavItem[] = [
   // 2026-08-21). Predikat-nya SATU sumber di `@/lib/embedded-tools` (dipakai juga
   // oleh guard halaman `/tools/[slug]`), jadi menu dan halaman tak pernah drift.
   { href: '/tools/video-factory', label: 'AM - baseline riset', access: EMBEDDED_TOOLS['video-factory'].access },
+  // "AM Co-Pilot" (MEA AM Cockpit): diagnosa bottleneck + rancang pilar dari
+  // export Strategi, keluarkan draft/JSON siap tempel ke Section C/D/E. Sama
+  // audiens & predikat dengan "AM - baseline riset" di atas.
+  { href: '/tools/am-copilot', label: 'AM Co-Pilot', access: EMBEDDED_TOOLS['am-copilot'].access },
 ];
 
 // Wave 3 — visibilitas & skoring (M11, M13, M14)
