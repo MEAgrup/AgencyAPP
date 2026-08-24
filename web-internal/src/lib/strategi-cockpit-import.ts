@@ -74,7 +74,7 @@ export interface CockpitBaseline {
   marginTertimbang?: number | null;
   acosMax?: number | null;
   roasMin?: number | null;
-  /** Current running ROAS (not the D-4 target) — cited as C-2 evidence. */
+  /** Current running ROAS (not the D-4 target) — cited in the C-2 alasan text. */
   roas?: number | null;
   top1GMV?: number | null;
   totalGMVExplicit?: number | null;
@@ -295,13 +295,27 @@ export function applyCockpitToDiagnosa(
       }
     }
 
-    if (!next.field_ids_raw.trim()) {
-      const ids: string[] = [];
-      if (mFail) ids.push('B-3.3');
-      if (kFail) ids.push('B-6.4');
-      if (b?.roas != null) ids.push('B-5.4');
-      if (ids.length) {
-        next = { ...next, field_ids_raw: ids.join(' ') };
+    if (!next.alasan.trim()) {
+      const parts: string[] = [];
+      if (mFail) {
+        parts.push(
+          b?.marginTertimbang != null
+            ? `Margin tertimbang ${fmt1(b.marginTertimbang)}% di bawah ambang 40% [B-3.3]`
+            : 'Margin tertimbang di bawah ambang 40% [B-3.3]',
+        );
+      }
+      if (kFail) {
+        parts.push(
+          kPct != null
+            ? `Konsentrasi kreator ${fmt1(kPct)}% di atas ambang 30% [B-6.4]`
+            : 'Konsentrasi kreator di atas ambang 30% [B-6.4]',
+        );
+      }
+      if (b?.roas != null) {
+        parts.push(`ROAS berjalan ${fmt1(b.roas)} [B-5.4]`);
+      }
+      if (parts.length) {
+        next = { ...next, alasan: parts.join('; ') };
         filled += 1;
       }
     }

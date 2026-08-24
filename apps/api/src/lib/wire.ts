@@ -3737,8 +3737,8 @@ export interface StrategiDiagnosaWire {
   id: number;
   channel: string;
   bottleneck: string;
-  /** Rule 6: array of baseline field-ID strings, min 1. */
-  field_ids: string[];
+  /** Rule 6: non-empty free-text reason/evidence for the bottleneck. */
+  alasan: string;
   akar_masalah: string | null;
   gap_kompetitor: string | null;
 }
@@ -4412,7 +4412,7 @@ export function strategiDetailToWire(d: strategi.StrategiDetail): StrategiDetail
       id: diag.id,
       channel: diag.channel,
       bottleneck: diag.bottleneck,
-      field_ids: diag.fieldIds,
+      alasan: diag.alasan,
       akar_masalah: diag.akarMasalah,
       gap_kompetitor: diag.gapKompetitor,
     })),
@@ -5160,7 +5160,7 @@ export function strategiDiagnosaFromWire(v: unknown): strategi.DiagnosaPayload {
     diagnosa: asRecords(b.diagnosa).map((d) => ({
       channel: str(d.channel),
       bottleneck: str(d.bottleneck) as strategi.BottleneckKind,
-      fieldIds: Array.isArray(d.field_ids) ? d.field_ids.map((f) => String(f)) : [],
+      alasan: str(d.alasan),
       akarMasalah: strOrNull(d.akar_masalah),
       gapKompetitor: strOrNull(d.gap_kompetitor),
     })),

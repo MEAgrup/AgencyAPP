@@ -25,7 +25,7 @@ function payload(over: Partial<CockpitPayload> = {}): CockpitPayload {
 
 function blankDiagnosa(channel = CHANNEL): DiagnosaDraftAll {
   return {
-    diagnosa: [{ channel, bottleneck: '', field_ids_raw: '', akar_masalah: '', gap_kompetitor: '' }],
+    diagnosa: [{ channel, bottleneck: '', alasan: '', akar_masalah: '', gap_kompetitor: '' }],
     quick_wins: [],
     risiko_struktural: [],
     prasyarat_klien: [],
@@ -102,11 +102,13 @@ describe('selectedAksi', () => {
 });
 
 describe('applyCockpitToDiagnosa', () => {
-  it('mengisi bottleneck margin & field_ids_raw kalau margin tertimbang di bawah 40%', () => {
+  it('mengisi bottleneck margin & alasan kalau margin tertimbang di bawah 40%', () => {
     const p = payload({ baseline: { marginTertimbang: 25.3, roas: 5 } as never });
     const { draft, filled } = applyCockpitToDiagnosa(blankDiagnosa(), p);
     expect(draft.diagnosa[0].bottleneck).toBe('margin');
-    expect(draft.diagnosa[0].field_ids_raw).toBe('B-3.3 B-5.4');
+    expect(draft.diagnosa[0].alasan).toBe(
+      'Margin tertimbang 25.3% di bawah ambang 40% [B-3.3]; ROAS berjalan 5 [B-5.4]',
+    );
     expect(filled).toBeGreaterThan(0);
   });
 
@@ -123,7 +125,7 @@ describe('applyCockpitToDiagnosa', () => {
     const p = payload({ channel: CHANNEL, baseline: { marginTertimbang: 25.3 } as never });
     const { draft: next } = applyCockpitToDiagnosa(draft, p);
     expect(next.diagnosa[0].bottleneck).toBe('');
-    expect(next.diagnosa[0].field_ids_raw).toBe('');
+    expect(next.diagnosa[0].alasan).toBe('');
   });
 
   it('mengisi C-5 quick win hanya dari aksi qw:true yang dipilih, dan tidak menambah kalau list sudah terisi', () => {

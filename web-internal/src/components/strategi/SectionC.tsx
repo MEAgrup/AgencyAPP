@@ -3,11 +3,11 @@
 /**
  * A-13b — Section C (Diagnosa & Akar Masalah).
  *
- * §4 Rule 6: every diagnosa must cite at least one baseline field-ID as
- * evidence. The form shows a free-text input, and the API rejects invalid IDs
- * on save — the validation lives server-side because the set of valid IDs (50+)
- * is too large to usefully police in a text field, and the AM knows what they
- * mean to type. What the form does is show valid examples and the constraint.
+ * §4 Rule 6: every diagnosa must state a non-empty free-text reason (C-2) for
+ * the chosen bottleneck. ⟳ 2026-08-24 (DECISIONS): C-2 used to require ≥1
+ * baseline field-ID citation from a closed set of 50+ IDs with no lookup UI —
+ * dropped because it made AMs hunt for codes instead of writing useful
+ * evidence. The API still rejects an empty C-2 on save.
  *
  * Saved atomically via `saveStrategiDiagnosa` (one request replaces all four
  * parts together), so leaving C-5/C-6/C-7 incomplete never blocks C-1/C-3/C-4
@@ -27,8 +27,8 @@ import {
 export interface DiagnosaDraft {
   channel: string;
   bottleneck: string;
-  /** Rule 6: space-separated or comma-separated field-ID refs, e.g. "B-2.2 B-3.6". */
-  field_ids_raw: string;
+  /** Rule 6: free-text reason/evidence for the chosen bottleneck. Required, non-empty. */
+  alasan: string;
   akar_masalah: string;
   gap_kompetitor: string;
 }
@@ -62,7 +62,7 @@ export function diagnosaDraftOf(d: StrategiDetail): DiagnosaDraftAll {
     diagnosa: d.diagnosa.map((r) => ({
       channel: r.channel,
       bottleneck: r.bottleneck,
-      field_ids_raw: r.field_ids.join(' '),
+      alasan: r.alasan,
       akar_masalah: r.akar_masalah ?? '',
       gap_kompetitor: r.gap_kompetitor ?? '',
     })),
@@ -90,10 +90,7 @@ export function diagnosaDraftToPayload(draft: DiagnosaDraftAll): StrategiDiagnos
       .map((d) => ({
         channel: d.channel,
         bottleneck: d.bottleneck,
-        field_ids: d.field_ids_raw
-          .split(/[\s,]+/)
-          .map((s) => s.trim())
-          .filter(Boolean),
+        alasan: d.alasan.trim(),
         akar_masalah: d.akar_masalah || null,
         gap_kompetitor: d.gap_kompetitor || null,
       })),
@@ -158,7 +155,7 @@ export default function SectionC({
       .map((ch) => ({
         channel: ch,
         bottleneck: '',
-        field_ids_raw: '',
+        alasan: '',
         akar_masalah: '',
         gap_kompetitor: '',
       }));
@@ -181,8 +178,7 @@ export default function SectionC({
       <div className="card">
         <div className="cardHeader">C-1 / C-3 / C-4 · Diagnosa per Channel</div>
         <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-          Bottleneck utama, bukti baseline, akar masalah, dan gap vs kompetitor.
-          Field-ID baseline contoh: B-2.2, B-3.6, B-4.1. Minimal satu field-ID (Rule 6).
+          Bottleneck utama, alasan/bukti, akar masalah, dan gap vs kompetitor.
         </p>
         {contractChannels.length === 0 && (
           <p className="muted" style={{ fontSize: 13 }}>
@@ -214,18 +210,19 @@ export default function SectionC({
                     ))}
                   </select>
                 </label>
-                <label className="field">
-                  <span className="muted" style={{ fontSize: 12 }}>
-                    Field-ID baseline sebagai bukti (C-2, min 1, pisah spasi)
-                  </span>
-                  <input
-                    value={d.field_ids_raw}
-                    disabled={disabled}
-                    placeholder="B-2.2 B-3.6"
-                    onChange={(e) => setDiagnosa(d.channel, { field_ids_raw: e.target.value })}
-                  />
-                </label>
               </div>
+              <label className="field" style={{ display: 'block', marginTop: 6 }}>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Alasan/bukti bottleneck ini dipilih (C-2)
+                </span>
+                <textarea
+                  rows={2}
+                  value={d.alasan}
+                  disabled={disabled}
+                  placeholder="Mis. CvR jauh di bawah benchmark platform, AOV turun sejak bundling hilang"
+                  onChange={(e) => setDiagnosa(d.channel, { alasan: e.target.value })}
+                />
+              </label>
               <label className="field" style={{ display: 'block', marginTop: 6 }}>
                 <span className="muted" style={{ fontSize: 12 }}>Akar masalah — kenapa bottleneck terjadi (C-3)</span>
                 <textarea
