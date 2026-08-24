@@ -94,6 +94,19 @@ export const EMBEDDED_TOOLS: Record<string, EmbeddedTool> = {
     asset: '/tools/video-factory.html',
     access: creativeAccountOrReadAll,
   },
+  // MEA AM Cockpit (owner request 2026-08-24, langsung setelah "Salin/Unduh
+  // JSON" ditambahkan di halaman Strategi). Sama audiens dengan video-factory —
+  // Creative & Account Service, PLUS read-everywhere — jadi memakai predikat
+  // yang sama, satu sumber, bukan salinan kedua.
+  'am-copilot': {
+    slug: 'am-copilot',
+    title: 'AM Co-Pilot',
+    tagline:
+      'Baca export Strategi (tombol "Salin/Unduh JSON" di halaman Strategi) atau payload baseline, diagnosa bottleneck (margin/ROAS/konsentrasi kreator), rancang pilar aksi bulan pertama, lalu keluarkan draft siap tempel ke Section C/D/E — atau file "Unduh JSON" yang bisa langsung ditempel/diunggah di panel Cockpit pada Section C.',
+    audience: 'Team Creative & Account Service (Director/OD dapat melihat untuk oversight)',
+    asset: '/tools/am-copilot.html',
+    access: creativeAccountOrReadAll,
+  },
 };
 
 /** Resolve one tool by slug, or `undefined` if the slug is not registered. */

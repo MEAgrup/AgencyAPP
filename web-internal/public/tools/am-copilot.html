@@ -1,0 +1,1328 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MEA AM Cockpit — Papan Aksi Mingguan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#0B1622; --ink2:#16283A; --slate:#5A7184; --mute:#8697A6;
+  --line:#DAE2EA; --line2:#EDF1F5; --canvas:#EDF1F5; --paper:#FFFFFF;
+  --signal:#FF5C28; --teal:#0E8F82; --amber:#C98A00; --red:#C62828; --violet:#5B4B8A;
+  --disp:'Barlow Condensed',Impact,system-ui,sans-serif;
+  --body:'Inter',system-ui,-apple-system,Segoe UI,sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --r:3px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--canvas);color:var(--ink);font-family:var(--body);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px 96px}
+h1,h2,h3{margin:0;font-weight:600}
+button{font-family:var(--body);cursor:pointer}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+[hidden]{display:none!important}
+
+.mast{background:var(--ink);color:#fff;padding:20px 0 0;border-bottom:3px solid var(--signal)}
+.mast .wrap{padding-bottom:0}
+.mast-row{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;flex-wrap:wrap}
+.brandmark{font-family:var(--disp);font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--signal);font-weight:600}
+.mast h1{font-family:var(--disp);font-size:33px;line-height:1;text-transform:uppercase;margin-top:5px;font-weight:700}
+.mast p{margin:7px 0 0;color:#9FB2C2;font-size:12px;max-width:660px}
+.mast-meta{text-align:right;font-family:var(--mono);font-size:11px;color:#7E93A5;line-height:1.7}
+.mast-meta b{color:#fff;font-weight:500}
+.tabs{display:flex;gap:2px;margin-top:16px;flex-wrap:wrap}
+.tabs button{background:transparent;border:0;border-bottom:3px solid transparent;color:#9FB2C2;
+  font-family:var(--disp);font-size:16px;text-transform:uppercase;letter-spacing:.06em;padding:10px 16px}
+.tabs button:hover{color:#fff}
+.tabs button[aria-selected=true]{color:#fff;border-bottom-color:var(--signal)}
+.tabs button .n{font-family:var(--mono);font-size:11px;letter-spacing:0;color:#5A7184;margin-left:6px}
+
+.step,.sec{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);margin-bottom:18px}
+.step-hd{display:flex;align-items:center;gap:12px;padding:13px 18px;border-bottom:1px solid var(--line2);flex-wrap:wrap}
+.step-no{font-family:var(--mono);font-size:11px;font-weight:600;background:var(--ink);color:#fff;width:22px;height:22px;display:grid;place-items:center;border-radius:2px;flex:none}
+.step-hd h2{font-family:var(--disp);font-size:19px;text-transform:uppercase;letter-spacing:.04em}
+.step-hd .hint{margin-left:auto;color:var(--mute);font-size:11.5px}
+.step-bd,.sec-bd{padding:18px}
+.sec-hd{display:flex;align-items:center;gap:11px;padding:12px 18px;border-bottom:1px solid var(--line2);background:#FAFCFD;flex-wrap:wrap}
+.sec-hd .tag{font-family:var(--mono);font-size:10px;font-weight:600;color:#fff;background:var(--slate);padding:3px 6px;border-radius:2px}
+.sec-hd h3{font-family:var(--disp);font-size:18px;text-transform:uppercase;letter-spacing:.04em}
+
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:repeat(3,1fr)}
+.g4{grid-template-columns:repeat(4,1fr)}.g5{grid-template-columns:repeat(5,1fr)}
+label.f{display:block}
+label.f span{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--slate);font-weight:600;margin-bottom:4px}
+input[type=text],input[type=number],input[type=date],select,textarea{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:2px;font-family:var(--body);font-size:13px;background:#fff;color:var(--ink)}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--signal);outline-offset:-1px}
+.btn{border:1px solid var(--ink);background:var(--ink);color:#fff;padding:8px 15px;border-radius:2px;font-size:12.5px;font-weight:600}
+.btn:hover{background:var(--ink2)}
+.btn.ghost{background:transparent;color:var(--ink)}
+.btn.ghost:hover{background:var(--line2)}
+.btn.sig{background:var(--signal);border-color:var(--signal)}
+.btn.sig:hover{filter:brightness(.93)}
+.btn.sm{padding:5px 10px;font-size:11.5px}
+.btnrow{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+
+.drop{border:2px dashed var(--line);border-radius:var(--r);padding:20px;text-align:center;background:#FAFCFD;cursor:pointer;transition:.15s}
+.drop.hot{border-color:var(--signal);background:#FFF6F2}
+.drop h3{font-family:var(--disp);font-size:17px;text-transform:uppercase}
+.drop p{margin:5px 0 10px;color:var(--slate);font-size:12px}
+
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--slate);font-weight:600;text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap;background:#F7F9FB}
+td{padding:7px 8px;border-bottom:1px solid var(--line2);vertical-align:middle}
+td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r)}
+
+.kpi{border:1px solid var(--line);border-radius:var(--r);padding:12px 13px;background:#fff}
+.kpi .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--slate);font-weight:600}
+.kpi .v{font-family:var(--mono);font-size:20px;font-weight:600;margin-top:5px;line-height:1.1}
+.kpi .s{font-size:11px;color:var(--mute);margin-top:3px}
+.kpi.hi{background:var(--ink);border-color:var(--ink)}
+.kpi.hi .k{color:#8FA6B8}.kpi.hi .v{color:#fff}.kpi.hi .s{color:#7E93A5}
+
+.pill{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;padding:3px 8px;border-radius:20px;border:1px solid;white-space:nowrap;display:inline-block}
+.p-ok{color:var(--teal);border-color:#A9DDD7;background:#F0FAF8}
+.p-mid{color:var(--amber);border-color:#EBD79B;background:#FDF9EE}
+.p-bad{color:var(--red);border-color:#EFC0C0;background:#FDF4F4}
+.p-off{color:var(--slate);border-color:var(--line);background:#F7F9FB}
+.p-vio{color:var(--violet);border-color:#C9BFE0;background:#F5F2FB}
+
+.pilar{border:1px solid var(--line);border-radius:var(--r);margin-bottom:12px;overflow:hidden}
+.pilar-hd{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#FAFCFD;border-bottom:1px solid var(--line2)}
+.pilar-hd b{font-family:var(--disp);font-size:17px;text-transform:uppercase;letter-spacing:.05em}
+.pilar-hd .cnt{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--mute)}
+.aksi{border-bottom:1px solid var(--line2);padding:10px 14px}
+.aksi:last-child{border-bottom:0}
+.aksi.on{background:#FFF9F6}
+.aksi-top{display:flex;align-items:flex-start;gap:10px}
+.aksi-top input[type=checkbox]{width:17px;height:17px;margin-top:2px;accent-color:var(--signal);cursor:pointer;flex:none}
+.aksi-nm{flex:1;min-width:0}
+.aksi-nm b{font-size:13px;display:block}
+.aksi-nm span{font-size:11px;color:var(--mute);display:block;margin-top:2px}
+.aksi-code{font-family:var(--mono);font-size:10px;color:#fff;background:var(--slate);padding:2px 5px;border-radius:2px;flex:none}
+.aksi-bd{margin-top:10px;padding-left:27px;display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.aksi-bd .vd{grid-column:1/-1}
+.jmb{font-size:11px;color:var(--slate);background:#F7F9FB;border-left:2px solid var(--line);padding:6px 9px;margin-top:8px;margin-left:27px}
+.jmb b{color:var(--ink);font-family:var(--mono)}
+.jmb.auto{border-left-color:var(--teal)}
+
+.note{font-size:11.5px;color:var(--slate);margin-top:9px;padding-left:9px;border-left:2px solid var(--line)}
+.note b{color:var(--ink)}
+.note.warn{border-left-color:var(--amber)}
+.note.bad{border-left-color:var(--red)}
+.empty{padding:22px;text-align:center;color:var(--mute);font-size:12.5px;background:#FAFCFD;border:1px dashed var(--line);border-radius:2px}
+.empty b{display:block;color:var(--ink);font-size:14px;margin-bottom:5px}
+pre.box{background:var(--ink);color:#B8E5DE;border-radius:2px;padding:13px;overflow-x:auto;
+  font-family:var(--mono);font-size:11px;line-height:1.55;white-space:pre;margin:0;max-height:360px}
+.outbar{position:sticky;bottom:0;background:var(--ink);color:#fff;padding:12px 24px;display:flex;gap:10px;align-items:center;z-index:40;border-top:3px solid var(--signal);flex-wrap:wrap}
+.outbar .lb{font-family:var(--disp);font-size:13px;text-transform:uppercase;letter-spacing:.1em;color:#8FA6B8;margin-right:auto}
+.outbar .btn.ghost{color:#fff;border-color:#3C5468}
+.outbar .btn.ghost:hover{background:#1E3446}
+.toast{position:fixed;bottom:78px;left:50%;transform:translateX(-50%);background:var(--teal);color:#fff;padding:9px 16px;border-radius:2px;font-size:12.5px;font-weight:600;z-index:99}
+.modal{position:fixed;inset:0;background:rgba(11,22,34,.72);display:grid;place-items:center;padding:20px;z-index:60}
+.modal .card{background:#fff;border-radius:var(--r);max-width:680px;width:100%;max-height:84vh;overflow:auto;padding:18px}
+textarea.copybox{min-height:280px;font-family:var(--mono);font-size:11.5px;white-space:pre}
+@media(max-width:860px){
+  .g4,.g5{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:1fr}
+  .aksi-bd{grid-template-columns:repeat(2,1fr)}
+  .wrap{padding:0 14px 90px}
+}
+</style>
+</head>
+<body>
+
+<div class="mast">
+  <div class="wrap">
+    <div class="mast-row">
+      <div>
+        <div class="brandmark">MEA Agency · AM Cockpit</div>
+        <h1>Papan Aksi Mingguan</h1>
+        <p>AM memilih <b>apa yang dikerjakan tim MEA</b> minggu ini di empat pilar — Video, Live,
+           Affiliate, Ads. Tool menarik <b>angka jembatannya</b> dari baseline, memberi verdict,
+           lalu mengeluarkan satu baris untuk Sheet portofolio, blok tracker, dan bahan M6D.
+           AM tidak mengetik angka yang sudah ada di tool.</p>
+      </div>
+      <div class="mast-meta">
+        <div id="mKlien">klien belum diisi</div>
+        <div id="mMinggu">minggu belum diisi</div>
+        <div>v1.1 · <b id="mDate">—</b></div>
+      </div>
+    </div>
+    <div class="btnrow" style="margin-top:14px">
+      <span style="font-family:var(--disp);font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#7E93A5">Mode:</span>
+      <button class="btn sm" id="mBerjalan" style="background:var(--signal);border-color:var(--signal)">Klien Berjalan</button>
+      <button class="btn ghost sm" id="mBaru" style="color:#fff;border-color:#3C5468">Klien Baru — belum ada aksi</button>
+      <span id="modeHint" style="font-size:11px;color:#7E93A5;margin-left:6px"></span>
+    </div>
+    <div class="tabs" role="tablist" id="tabs">
+      <button role="tab" data-tab="aksi" aria-selected="true">Papan Aksi<span class="n" id="nAksi"></span></button>
+      <button role="tab" data-tab="skor" aria-selected="false">Papan Skor</button>
+      <button role="tab" data-tab="out" aria-selected="false">Keluaran</button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+
+<div class="step">
+  <div class="step-hd"><div class="step-no">1</div><h2>Klien &amp; minggu</h2>
+    <div class="hint">Satu file per klien · bertambah tiap minggu</div></div>
+  <div class="step-bd">
+    <div class="grid g5">
+      <label class="f"><span>Klien / toko</span><input type="text" id="fKlien" placeholder="Bakoel Tas"></label>
+      <label class="f"><span>Account Manager</span><input type="text" id="fAM" placeholder="nama AM"></label>
+      <label class="f"><span>Channel</span><select id="fCh">
+        <option>TikTok Shop</option><option>Shopee</option></select></label>
+      <label class="f"><span>Floor GMV / bulan (D-1)</span><input type="number" id="fFloor" placeholder="450000000"></label>
+      <label class="f"><span>Tier</span><select id="fTier">
+        <option value="A">A — dalam (mingguan penuh)</option>
+        <option value="B" selected>B — sedang (aksi + skor)</option>
+        <option value="C">C — ringan (skor saja)</option></select></label>
+    </div>
+    <div class="grid g5" style="margin-top:12px" id="rowMingguan">
+      <label class="f"><span>Minggu ke- (kontrak)</span><input type="text" id="fMg" class="mono" placeholder="M1-W3"></label>
+      <label class="f"><span>Periode mulai</span><input type="date" id="fD1"></label>
+      <label class="f"><span>Periode akhir</span><input type="date" id="fD2"></label>
+      <label class="f"><span>GMV minggu ini (Rp)</span><input type="number" id="fGmvW" placeholder="96800000"></label>
+      <label class="f"><span>GMV bulan berjalan / MTD (Rp)</span><input type="number" id="fGmvM" placeholder="237300000"></label>
+    </div>
+    <div class="grid g3" style="margin-top:12px" id="rowBaru" hidden>
+      <label class="f"><span>Stretch GMV / bulan (D-2)</span><input type="number" id="fStretch" placeholder="600000000"></label>
+      <label class="f"><span>Durasi kontrak (bulan)</span><input type="number" id="fDurasi" placeholder="3"></label>
+      <label class="f"><span>Budget iklan / bulan (F-1)</span><input type="number" id="fBudget" placeholder="15000000"></label>
+    </div>
+    <div class="note">Tier menentukan kedalaman kerja, bukan kualitas klien. Dengan 200 klien,
+      memberi kedalaman yang sama ke semuanya berarti semuanya dapat perhatian dangkal.
+      Tier naik otomatis ke <b>A</b> kalau run-rate berstatus MELESET dua minggu berturut.</div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-hd"><div class="step-no">2</div><h2>Muat data</h2>
+    <div class="hint">Baseline dari Video Factory v4 · atau state minggu lalu</div></div>
+  <div class="step-bd">
+    <div class="drop" id="drop" tabindex="0" role="button">
+      <h3>Tarik file ke sini</h3>
+      <p><b>baseline-*.json</b> / payload <span class="mono">cdps.section_b.v1</span> (Video Factory v5)
+         · <span class="mono">cdps.baseline.v1</span> (v4) · <b>cockpit-*.json</b> state minggu lalu</p>
+      <button class="btn sig" id="btnPick">Pilih file</button>
+      <input type="file" id="filein" multiple accept=".json,.txt" hidden>
+    </div>
+    <div style="margin-top:14px">
+      <label class="f"><span>…atau tempel payload hasil Copy dari Video Factory</span>
+        <textarea id="fPaste" rows="4" class="mono" style="font-size:11px"
+          placeholder='{ "schema": "cdps.section_b.v1", "channel": { … } }'></textarea></label>
+      <div class="btnrow" style="margin-top:9px">
+        <button class="btn sig sm" id="btnPaste">Baca payload yang ditempel</button>
+        <button class="btn ghost sm" id="btnPasteClear">Kosongkan</button>
+      </div>
+    </div>
+    <div id="loadInfo" style="margin-top:12px"></div>
+  </div>
+</div>
+
+<div id="paneA"></div>
+<div id="paneB" hidden></div>
+<div id="paneC" hidden></div>
+
+</div>
+
+<div class="outbar" id="outbar">
+  <div class="lb" id="outLb">Keluaran mingguan</div>
+  <div class="btnrow" id="outBtns">
+    <button class="btn sig sm" id="btnTsv">Copy baris Sheet (TSV)</button>
+    <button class="btn ghost sm" id="btnMd">Copy blok tracker</button>
+    <button class="btn ghost sm" id="btnM6d">Copy bahan M6D</button>
+    <button class="btn ghost sm" id="btnSave">Simpan state (.json)</button>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════
+   MEA AM COCKPIT v1 — Papan Aksi Mingguan
+   Pembagian kerja: AM memberi tahu APA YANG DIKERJAKAN.
+   Tool menghitung APA YANG TERJADI (metrik jembatan dari baseline).
+   Verdict mengikuti aturan skill mea-am-client-tracker:
+     - minimal 2 minggu data sebelum BERHASIL/GAGAL
+     - eksekusi < 50% rencana  →  TIDAK DIKERJAKAN (bukan GAGAL)
+   ═══════════════════════════════════════════════════════════ */
+const $=(s,r=document)=>r.querySelector(s);
+const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+const DASH='\u2014';
+$('#mDate').textContent=new Date().toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'});
+
+const num=v=>{const n=parseFloat(String(v==null?'':v).replace(/[^\d.-]/g,''));return isFinite(n)?n:0;};
+const int=v=>(v==null||!isFinite(v))?DASH:Math.round(v).toLocaleString('id-ID');
+const rp=v=>(v==null||!isFinite(v))?DASH:'Rp'+Math.round(v).toLocaleString('id-ID');
+const rpS=v=>{if(v==null||!isFinite(v))return DASH;const a=Math.abs(v);
+  if(a>=1e9)return 'Rp'+(v/1e9).toFixed(2)+'M';if(a>=1e6)return 'Rp'+(v/1e6).toFixed(1)+'jt';
+  if(a>=1e3)return 'Rp'+Math.round(v/1e3)+'rb';return 'Rp'+Math.round(v);};
+const dec=(v,d=1)=>(v==null||!isFinite(v))?DASH:v.toLocaleString('id-ID',{minimumFractionDigits:d,maximumFractionDigits:d});
+const pct=(v,d=1)=>(v==null||!isFinite(v))?DASH:dec(v,d)+'%';
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const slug=s=>String(s||'klien').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'klien';
+let toastT;
+function toast(m){const o=$('.toast');if(o)o.remove();const e=document.createElement('div');
+  e.className='toast';e.textContent=m;document.body.appendChild(e);
+  clearTimeout(toastT);toastT=setTimeout(()=>e.remove(),2400);}
+function download(name,text,mime='application/json'){
+  const url=URL.createObjectURL(new Blob([text],{type:mime}));
+  const a=document.createElement('a');a.href=url;a.download=name;
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);}
+async function copy(t,l='Tersalin'){try{await navigator.clipboard.writeText(t);toast(l);}catch{copyModal(t);}}
+function copyModal(text){
+  const m=document.createElement('div');m.className='modal';
+  m.innerHTML='<div class="card"><h3 style="font-family:var(--disp);font-size:20px;text-transform:uppercase">Salin manual</h3>'+
+    '<textarea class="copybox" readonly></textarea>'+
+    '<div class="btnrow" style="margin-top:12px;justify-content:flex-end"><button class="btn sig" data-close>Tutup</button></div></div>';
+  document.body.appendChild(m);
+  const ta=m.querySelector('textarea');ta.value=text;ta.focus();ta.select();
+  m.addEventListener('click',e=>{if(e.target===m||e.target.dataset.close!==undefined)m.remove();});}
+
+/* ── KATALOG AKSI: 4 pilar × aksi × metrik jembatan ──
+   arah:'naik' = jembatan harus naik untuk berhasil; 'turun' = harus turun.
+   src = kunci pengambilan otomatis dari baseline (kalau ada). */
+const KATALOG=[
+ {pilar:'VIDEO',kode:'V',warna:'p-vio',divisi:'Creative',aksi:[
+  {k:'V1',n:'Hook baru / 3 hook baku',d:'Pola pembukaan diseragamkan dari video ber-order',j:'Median VV video toko',u:'VV',arah:'naik',src:'medVV|vvRata',mgg:3,fid:'B-7.1',qw:false},
+  {k:'V2',n:'Naikkan kuota video',d:'Menambah jumlah produksi per minggu',j:'Video bertayangan / bulan',u:'video',arah:'naik',src:'videoAktif',mgg:4,fid:'B-7.1',qw:false},
+  {k:'V3',n:'Replika video menjual',d:'Brief dari Papan Video Factory, angle terbukti',j:'Hit rate video baru',u:'%',arah:'naik',src:null,mgg:3,fid:'B-7.1',qw:false},
+  {k:'V4',n:'Audit / perbaikan akun official',d:'Jam posting, kategori, riwayat teguran',j:'Median VV akun toko',u:'VV',arah:'naik',src:'medVV|vvRata',mgg:4,fid:'B-2.2',qw:false},
+  {k:'V5',n:'Perbaikan listing hero SKU',d:'Foto utama, deskripsi, varian',j:'CTOR hero SKU',u:'%',arah:'naik',src:null,mgg:2,fid:'B-3.6',qw:true},
+  {k:'V6',n:'Pindah kuota ke SKU margin besar',d:'Konten dialihkan ke SKU lain',j:'Porsi GMV SKU sasaran',u:'%',arah:'naik',src:null,mgg:4,fid:'B-3.3',qw:false}]},
+ {pilar:'LIVE',kode:'L',warna:'p-mid',divisi:'Live Stream',aksi:[
+  {k:'L1',n:'Mulai / tambah jam live',d:'Menaikkan frekuensi atau durasi sesi',j:'Jam live / minggu',u:'jam',arah:'naik',src:'liveJam',mgg:4,fid:'B-7.2',qw:false},
+  {k:'L2',n:'Ganti / latih host',d:'Host baru atau pelatihan host lama',j:'GMV per jam live',u:'Rp',arah:'naik',src:'gmvPerJam',mgg:4,fid:'B-7.4',qw:false},
+  {k:'L3',n:'Rombak rundown & urutan produk',d:'Urutan SKU, blok waktu, pinning',j:'GMV per jam live',u:'Rp',arah:'naik',src:'gmvPerJam',mgg:3,fid:'B-7.4',qw:true},
+  {k:'L4',n:'Flash deal terjadwal',d:'Penawaran waktu terbatas di sesi live',j:'GMV live / minggu',u:'Rp',arah:'naik',src:'liveGMV',mgg:2,fid:'B-7.2',qw:true}]},
+ {pilar:'AFFILIATE',kode:'A',warna:'p-ok',divisi:'KOL',aksi:[
+  {k:'A1',n:'Naikkan komisi terbuka',d:'Komisi hero SKU dinaikkan',j:'Kreator posting / minggu',u:'kreator',arah:'naik',src:'kreatorAktif',mgg:3,fid:'B-6.3',qw:false},
+  {k:'A2',n:'Aktivasi kreator terdaftar',d:'Hubungi yang sudah join tapi belum posting',j:'Kreator posting / minggu',u:'kreator',arah:'naik',src:'kreatorAktif',mgg:3,fid:'B-6.1',qw:true},
+  {k:'A3',n:'Rekrut lapis kedua (MCN/MEAGO)',d:'Menurunkan ketergantungan kreator utama',j:'Porsi GMV kreator terbesar',u:'%',arah:'turun',src:'konsentrasi',mgg:6,fid:'B-6.4',qw:false},
+  {k:'A4',n:'Program sampel / seeding',d:'Pengiriman produk ke kreator',j:'Kreator posting / minggu',u:'kreator',arah:'naik',src:'kreatorAktif',mgg:4,fid:'B-6.5',qw:false},
+  {k:'A5',n:'Campaign terarah ke kreator tertentu',d:'Brief & target khusus kreator terpilih',j:'GMV affiliate',u:'Rp',arah:'naik',src:'affGMV',mgg:3,fid:'B-6.2',qw:false}]},
+ {pilar:'ADS',kode:'D',warna:'p-bad',divisi:'Ads',aksi:[
+  {k:'D1',n:'Seleksi kreatif pakai CTR klik produk',d:'Aturan terkunci K2 — bukan hook/hold',j:'% spend kreatif 0 order',u:'%',arah:'turun',src:'spendNol',mgg:2,fid:'B-5.5',qw:true},
+  {k:'D2',n:'Aturan mati: 2× CPA tanpa order',d:'Penghentian kampanye rugi terjadwal',j:'Rp spend terbuang / minggu',u:'Rp',arah:'turun',src:'spendBoros',mgg:2,fid:'B-5.5',qw:true},
+  {k:'D3',n:'Rombak struktur kampanye',d:'Pecah/gabung grup iklan, ganti target',j:'ROAS blended',u:'x',arah:'naik',src:'roas',mgg:3,fid:'B-5.4',qw:false},
+  {k:'D4',n:'Ubah budget harian',d:'Naik atau turun budget',j:'ROAS blended',u:'x',arah:'naik',src:'roas',mgg:3,fid:'B-5.1',qw:false},
+  {k:'D5',n:'GMV Max dinyalakan / dimatikan',d:'Perubahan mode kampanye',j:'ROAS blended',u:'x',arah:'naik',src:'roas',mgg:3,fid:'B-5.4',qw:false}]}
+];
+function srcVal(key){
+  const B=ST.baseline; if(!B||!key)return null;
+  for(const k of String(key).split('|')){ if(B[k]!=null&&isFinite(B[k]))return B[k]; }
+  return null;
+}
+const AKSI_BY=(()=>{const m={};KATALOG.forEach(p=>p.aksi.forEach(a=>m[a.k]={...a,pilar:p.pilar,divisi:p.divisi}));return m;})();
+
+/* ── STATE ──
+   MODE menentukan bagaimana ST.aksi[k] dibaca & dirender, bukan struktur datanya sendiri —
+   field yang sama (grup/rencana/target/mulai/real/sebelum/sekarang) dipakai di kedua mode,
+   supaya saat klien pindah dari 'baru' ke 'berjalan', rencana & target yang sudah diisi tetap
+   ada dan AM tinggal menambahkan realisasi. Tidak ada data yang dibuang saat pindah mode. */
+let ST={schema:'mea.cockpit.v1',mode:'berjalan',klien:'',am:'',channel:'TikTok Shop',floor:0,stretch:0,
+  durasiBulan:'',budgetIklan:0,tier:'B',minggu:'',d1:'',d2:'',gmvW:0,gmvM:0,aksi:{},riwayat:[],
+  baseline:null,baselinePrev:null,thesis:'',pilarNama:['','',''],pilarAlasan:''};
+let TAB='aksi';
+
+/* ── ADAPTER PAYLOAD: menerima beberapa skema, toleran terhadap versi baru ──
+   Didukung:
+     cdps.section_b.v1  (Video Factory v5) — objek datar di .channel
+     cdps.baseline.v1   (Video Factory v4) — objek berkunci di .section_b
+     tak dikenal        — pemindaian dalam berdasarkan nama field
+   Semua turunan (rata-rata VV, GMV/jam live, konsentrasi kreator) dihitung di sini,
+   bukan diminta ke AM. */
+function num2(v){
+  if(v==null||v==='')return null;
+  if(typeof v==='number')return isFinite(v)?v:null;
+  let s=String(v).replace(/rp/ig,'').replace(/%/g,'').replace(/\s|\u00a0/g,'');
+  const ld=s.lastIndexOf('.'),lc=s.lastIndexOf(',');
+  if(ld>-1&&lc>-1){ if(lc>ld)s=s.replace(/\./g,'').replace(',','.'); else s=s.replace(/,/g,''); }
+  else if(lc>-1){ s=(s.split(',')[1]||'').length===3?s.replace(/,/g,''):s.replace(',','.'); }
+  else if(ld>-1){ if((s.split('.').length-1)>1||(s.split('.')[1]||'').length===3)s=s.replace(/\./g,''); }
+  const n=parseFloat(s);return isFinite(n)?n:null;
+}
+/* cari field di mana pun dalam objek, berdasarkan daftar nama */
+function deepFind(obj,names,depth){
+  depth=depth||0; if(!obj||typeof obj!=='object'||depth>4)return null;
+  for(const nm of names){ if(obj[nm]!=null&&typeof obj[nm]!=='object')return obj[nm]; }
+  for(const k in obj){ if(obj[k]&&typeof obj[k]==='object'&&!Array.isArray(obj[k])){
+    const r=deepFind(obj[k],names,depth+1); if(r!=null)return r; } }
+  return null;
+}
+function deepArr(obj,names,depth){
+  depth=depth||0; if(!obj||typeof obj!=='object'||depth>4)return null;
+  for(const nm of names){ if(Array.isArray(obj[nm])&&obj[nm].length)return obj[nm]; }
+  for(const k in obj){ if(obj[k]&&typeof obj[k]==='object'&&!Array.isArray(obj[k])){
+    const r=deepArr(obj[k],names,depth+1); if(r)return r; } }
+  return null;
+}
+const ALIAS={
+  videoAktif:['jumlah_video_per_bulan','video_bertayangan','jumlah_video'],
+  videoViews:['total_views','total_views_video','views'],
+  videoGMV:['gmv_video','gmv_dari_video'],
+  liveGMV:['gmv_live','gmv_dari_live'],
+  liveJam:['jam_live_per_bulan','durasi_live_total','jam_live'],
+  liveSesi:['jumlah_sesi_live','sesi_live'],
+  kreatorAktif:['affiliate_aktif_30hari','kreator_aktif','affiliate_aktif'],
+  affGMV:['gmv_affiliate','gmv_dari_affiliate'],
+  affPct:['gmv_affiliate_persen'],
+  spend:['total_spend_iklan','spend_iklan','biaya_iklan'],
+  adsGMV:['gmv_iklan','gmv_dari_iklan'],
+  roas:['roas_blended','roas'],
+  spendNol:['spend_kampanye_nol_order','spend_kreatif_nol_order','persen_spend_nol_order'],
+  medVV:['median_vv_video','median_vv'],
+  pengunjung:['pengunjung_per_bulan','pengunjung'],
+  cr:['conversion_rate_persen','conversion_rate','tingkat_konversi'],
+  skuTotal:['sku_listed','sku_terdaftar','sku_total'],
+  skuAktif:['sku_aktif'],
+  skuPareto:['sku_pareto_80','sku_penyumbang_80'],
+  skuSlow:['sku_slow_moving','slow_movers'],
+  kampanye:['jumlah_kampanye_aktif','jumlah_kampanye'],
+  bulan:['periode_baseline_bulan','periode_bulan']
+};
+/* legacy v4: section_b berkunci "B-7.1 Video bertayangan" */
+function fromV4(obj){
+  const sb=obj.section_b; if(!sb)return null;
+  const grab=re=>{for(const k in sb)if(re.test(k))return sb[k];return null;};
+  const val=re=>{const f=grab(re);return f&&f.status!=='na'?num2(f.nilai):null;};
+  return {videoAktif:val(/Video bertayangan/i),videoViews:val(/Total views video/i),
+    videoGMV:val(/GMV dari video/i),liveGMV:val(/GMV dari live/i),liveJam:val(/Durasi live total/i),
+    liveSesi:val(/Jumlah sesi live/i),kreatorAktif:val(/Kreator aktif/i),affGMV:val(/GMV dari affiliate/i),
+    spend:val(/Total spend iklan/i),adsGMV:val(/GMV dari iklan/i),roas:val(/ROAS blended/i),
+    pengunjung:val(/Pengunjung/i),cr:val(/Conversion rate/i),skuTotal:val(/SKU terdaftar/i),
+    skuPareto:val(/SKU penyumbang/i)};
+}
+function normalizePayload(obj){
+  const sch=String(obj.schema||'');
+  if(sch.indexOf('mea.cockpit')===0)return null;
+  let m={};
+  if(sch.indexOf('cdps.baseline')===0&&obj.section_b){ m=fromV4(obj)||{}; m._sch='cdps.baseline.v1'; }
+  else { for(const f in ALIAS)m[f]=num2(deepFind(obj,ALIAS[f])); m._sch=obj._isSTRG?'STRG export':(sch||'tidak berlabel'); }
+  /* root dipakai untuk memindai field trafik_X_persen dan gmv_X_persen. obj.channel pada payload v5
+     adalah OBJEK; pada payload STRG, obj.channel adalah STRING nama channel ("TikTok Shop") — kalau
+     tidak diperiksa tipenya, string itu akan lolos sebagai root dan for..in di bawah membaca karakternya. */
+  const root=(obj.channel&&typeof obj.channel==='object')?obj.channel:obj;
+  m.toko=deepFind(obj,['toko','nama_toko','klien'])||'';
+  m.channel=(obj._isSTRG&&typeof obj.channel==='string')?obj.channel:(deepFind(obj,['channel'])||'');
+  m.periode=deepFind(obj,['periode_referensi','tanggal_ambil_data'])||'';
+  m.hosts=deepFind(obj,['studio_catatan'])||'';
+  m.topKreator=deepArr(obj,['top_kreator'])||[];
+  m.topSku=deepArr(obj,['top_sku'])||[];
+
+  /* ── field khusus STRG: histori bulanan + margin per SKU + kesehatan toko ──
+     Field ini datang dari export CDPS (data.channels[i]), berbeda dari payload Video Factory. */
+  if(obj._isSTRG){
+    const blArr=deepArr(obj,['baseline'])||[];
+    if(blArr.length){
+      const last=blArr[blArr.length-1];
+      m.blBulan=last.month_index;
+      m.spend=num2(last.ad_spend); m.roas=num2(last.roas); m.acos=num2(last.acos);
+      m.aovExplicit=num2(last.aov); m.pesananBaseline=num2(last.jumlah_pesanan);
+      m.gmvBaseline=num2(last.gmv);
+      if(blArr.length>=2){ m.acosPrev=num2(blArr[blArr.length-2].acos); m.gmvPrev=num2(blArr[blArr.length-2].gmv); }
+    }
+    if(m.topSku.length){
+      let sg=0,sw=0,ada=false;
+      m.topSku.forEach(x=>{const g=num2(x.gmv),mg=x.margin_persen;
+        if(g!=null&&mg!=null){sg+=g;sw+=g*mg;ada=true;}});
+      if(ada&&sg>0)m.marginTertimbang=sw/sg;
+      m.sumTopSku=m.topSku.reduce((a,x)=>a+(num2(x.gmv)||0),0);
+    }
+    m.komisiTarget=num2(deepFind(obj,['komisi_target_persen']));
+    m.komisiOpen=num2(deepFind(obj,['komisi_open_persen']));
+    m.marginKotorRoot=obj._kontrak?num2(obj._kontrak.margin_kotor_persen):null;
+    m.durasiKontrakBulan=obj._kontrak?num2(obj._kontrak.durasi_kontrak_bulan):null;
+    m.rating=num2(deepFind(obj,['rating_toko']));
+    m.chatRate=num2(deepFind(obj,['chat_response_rate_persen']));
+    m.terlambatPct=num2(deepFind(obj,['pesanan_terlambat_persen']));
+    m.skuKritisArr=deepArr(obj,['sku_stok_kritis'])||[];
+    m.skuSlow=num2(deepFind(obj,['sku_slow_moving']));
+  }
+
+  /* ── turunan ── */
+  m.vvRata=(m.videoViews&&m.videoAktif)?m.videoViews/m.videoAktif:null;
+  m.gmvPerJam=(m.liveGMV&&m.liveJam)?m.liveGMV/m.liveJam:null;
+  m.gmvPerVideo=(m.videoGMV&&m.videoAktif)?m.videoGMV/m.videoAktif:null;
+  m.gpm=(m.videoGMV&&m.videoViews)?m.videoGMV/m.videoViews*1000:null;
+  /* Total GMV TIDAK boleh diturunkan dari persentase atribusi — atribusi tumpang tindih
+     (GMV Max mencatat satu transaksi di ads sekaligus organik), jadi pembaginya bukan satu keseluruhan.
+     Urutan sumber: field eksplisit → input GMV bulanan dari AM → tidak ada. */
+  m.totalGMVExplicit=(m.gmvBaseline!=null)?m.gmvBaseline:num2(deepFind(obj,['gmv_total','total_gmv','omzet','gmv_bulan','gmv_toko']));
+  m.totalGMV=m.totalGMVExplicit;
+  m.totalSrc=m.totalGMVExplicit!=null?(m.gmvBaseline!=null?'baseline bulanan (payload)':'payload'):null;
+  if(m.topKreator.length&&m.affGMV){
+    const t=num2(m.topKreator[0].gmv);
+    m.top1GMV=t; m.konsentrasiAff=t?t/m.affGMV*100:null;
+  }
+  m.pesanan=(m.pengunjung&&m.cr)?m.pengunjung*(m.cr/100):null;
+  m.aov=(m.pesanan&&m.totalGMV)?m.totalGMV/m.pesanan:null;
+
+  /* ── pemisahan porsi eksklusif vs atribusi tumpang tindih ── */
+  m._warn=[]; m._info=[];
+  const tr={};let sum=0,ada=0,lebih=[];
+  for(const k in root){ if(/_persen$/.test(k)&&/^trafik_|^gmv_.*_persen$/.test(k)){
+    const v=num2(root[k]); if(v!=null){tr[k]=v;sum+=v;ada++;if(v>100)lebih.push(k);} } }
+  if(ada>=2){
+    m._trafik=tr; m._trafikSum=sum;
+    m._info.push('Enam field atribusi berjumlah <b>'+dec(sum,1)+'%</b>. Ini <b>wajar</b> — laporan '+
+      'GMV Max mencatat satu transaksi di lebih dari satu sumber (mis. ads sekaligus organik), jadi '+
+      'angkanya tumpang tindih dan memang tidak berjumlah 100%. Dipakai untuk <b>membandingkan besaran '+
+      'kontribusi antar sumber</b>, bukan sebagai komposisi.');
+  }
+  lebih.forEach(k=>m._warn.push('<b class="mono">'+k+'</b> = <b>'+dec(tr[k],2)+'%</b> \u2014 di atas 100%, '+
+    '<b>dikecualikan dari baseline</b>. Boleh dibaca sebagai atribusi, tapi tidak boleh masuk B-2.3 '+
+    'komposisi trafik maupun komposisi GMV, dan tidak boleh disebut ke klien sebagai porsi.'));
+  m._exclude=lebih;
+  if(m.totalGMV==null)
+    m._warn.push('Total GMV tidak ada di payload dan <b>tidak diturunkan dari persentase atribusi</b> '+
+      '(pembaginya tumpang tindih, hasilnya akan salah). Isi <b>GMV bulan berjalan</b> di panel 1 — '+
+      'itu yang dipakai sebagai basis konsentrasi kreator dan AOV.');
+  if(m.spend==null&&m.roas==null)
+    m._warn.push('Payload tidak memuat <b class="mono">spend</b>, <b class="mono">roas</b>, maupun '+
+      '<b class="mono">% spend kampanye 0 order</b> \u2014 seluruh jembatan pilar <b>ADS</b> (D1\u2013D5) terpaksa manual.');
+  if(m.medVV==null&&m.vvRata!=null)
+    m._warn.push('Median VV tidak ada di payload. Tool memakai <b>rata-rata VV/video</b> ('+int(m.vvRata)+
+      ') sebagai pengganti \u2014 rata-rata condong ke atas karena ditarik video viral, jadi jangan dibaca sebagai VV tipikal.');
+
+  /* ── K1: margin tertimbang vs ambang 40% (terkunci) ── */
+  if(m.marginTertimbang!=null){
+    const biayaPlatform=9; /* perkiraan tengah 8-10%, [KB: tts-biaya-001] -- verifikasi tarif berlaku */
+    const komisi=m.komisiTarget!=null?m.komisiTarget:(m.komisiOpen||0);
+    const ruang=m.marginTertimbang-komisi-biayaPlatform;
+    m.ruangEkonomi=ruang;
+    m.acosMax=ruang>0?ruang*0.7:null;   /* buffer profit 30% */
+    m.roasMin=m.acosMax?100/m.acosMax:null;
+    if(m.marginTertimbang<40)
+      m._warn.push('<b>Margin tertimbang '+dec(m.marginTertimbang,1)+'%</b> \u2014 di bawah ambang K1 (40%). Ruang '+
+        'sebelum iklan (setelah komisi '+dec(komisi,1)+'% + perkiraan biaya platform '+biayaPlatform+'%) = <b>'+
+        dec(ruang,1)+'%</b>.'+(ruang<=0?' <b>Negatif \u2014 setiap order rugi sebelum iklan dihitung.</b>':'')+
+        ' Arketipe <b>A12</b>: jangan susun target GMV baru sebelum margin diperbaiki \u2014 naikkan ke SPV.');
+    else
+      m._info.push('Margin tertimbang '+dec(m.marginTertimbang,1)+'% \u2014 di atas ambang K1 (40%). Ruang sebelum iklan '+dec(ruang,1)+'%.');
+    if(m.marginKotorRoot!=null&&Math.abs(m.marginKotorRoot-m.marginTertimbang)>=8)
+      m._warn.push('Margin yang diisi manual di kontrak ('+dec(m.marginKotorRoot,1)+'%) berbeda jauh dari margin '+
+        'tertimbang top SKU ('+dec(m.marginTertimbang,1)+'%). Margin tertimbang lebih bisa dipercaya karena dihitung per SKU.');
+  }
+  /* ── total GMV vs jumlah top SKU: lima SKU tidak mungkin melebihi seluruh toko ── */
+  if(m.totalGMV!=null&&m.sumTopSku&&m.sumTopSku>m.totalGMV*1.05)
+    m._warn.push('Jumlah GMV top SKU ('+rpS(m.sumTopSku)+') <b>melebihi</b> total GMV baseline ('+rpS(m.totalGMV)+
+      '). Ini bukan atribusi tumpang tindih (K3) \u2014 SKU tidak mungkin menjual lebih dari seluruh toko. '+
+      'Periksa periode dan sumber angka sebelum dipakai.');
+  /* ── pesanan & AOV ── */
+  if(m.pesananBaseline!=null&&m.pesanan!=null&&m.pesananBaseline>0){
+    const rasio=m.pesanan/m.pesananBaseline;
+    if(rasio<0.6||rasio>1.6)
+      m._warn.push('Pesanan dari pengunjung\u00d7CR ('+int(m.pesanan)+') berbeda jauh dari pesanan di baseline '+
+        'bulanan ('+int(m.pesananBaseline)+'). Periksa periode datanya sebelum dipakai sebagai jembatan.');
+  }
+  if(m.aovExplicit!=null&&m.topSku&&m.topSku.length){
+    const harga=m.topSku.map(x=>num2(x.harga_jual)).filter(x=>x!=null);
+    if(harga.length){
+      const lo=Math.min(...harga),hi=Math.max(...harga);
+      if(m.aovExplicit<lo*0.4||m.aovExplicit>hi*1.8)
+        m._warn.push('AOV tertulis ('+rp(m.aovExplicit)+') jauh di luar rentang harga hero SKU ('+rp(lo)+'\u2013'+rp(hi)+
+          '). AOV ini jadi pembagi hampir semua target D-4 \u2014 perbaiki dulu sebelum dipakai.');
+    }
+  }
+  /* ── ROAS vs ACOS ── */
+  if(m.roas!=null&&m.acos){
+    const implied=100/m.acos;
+    if(Math.abs(m.roas-implied)/Math.max(m.roas,implied)>0.2)
+      m._warn.push('ROAS tertulis ('+dec(m.roas,2)+'\u00d7) tidak konsisten dengan ACOS ('+dec(m.acos,1)+'% \u2192 '+
+        'seharusnya '+dec(implied,2)+'\u00d7). ACOS biasanya lebih baru \u2014 pakai versi yang dihitung ulang platform.');
+  }
+  return m;
+}
+const fromBaseline=normalizePayload;
+
+/* ── verdict ── */
+function mingguJalan(a){
+  if(!a.mulai||!ST.d2)return 0;
+  const t1=new Date(a.mulai+'T00:00:00Z'),t2=new Date(ST.d2+'T00:00:00Z');
+  if(isNaN(t1)||isNaN(t2))return 0;
+  return Math.max(0,Math.floor((t2-t1)/604800000));
+}
+function verdict(k){
+  const a=ST.aksi[k]; if(!a||!a.on)return null;
+  const K=AKSI_BY[k];
+  const mg=mingguJalan(a);
+  const rencana=num(a.rencana), real=num(a.real);
+  const rasio=rencana>0?real/rencana:(real>0?1:0);
+  if(rencana>0&&rasio<0.5)
+    return {v:'TIDAK DIKERJAKAN',c:'p-bad',why:'eksekusi '+Math.round(rasio*100)+'% dari rencana ('+int(real)+'/'+int(rencana)+') — taktiknya belum diuji, ini kegagalan eksekusi'};
+  if(mg<2)
+    return {v:'JALAN',c:'p-off',why:'baru '+mg+' minggu berjalan · dinilai setelah 2 minggu'};
+  const b=num2(a.sebelum), s=num2(a.sekarang), t=num2(a.target);
+  if(b==null||s==null)
+    return {v:'BELUM CUKUP DATA',c:'p-off',why:'angka jembatan belum lengkap'};
+  const naik=K.arah==='naik';
+  const lulus=t!=null?(naik?s>=t:s<=t):null;
+  const gerak=naik?(s-b):(b-s);
+  const geraPct=b?Math.abs(gerak/b*100):0;
+  if(lulus===true)return {v:'BERHASIL',c:'p-ok',why:'jembatan melewati target ('+dec(b,1)+' → '+dec(s,1)+')'};
+  if(gerak>0&&geraPct>=15)return {v:'BERHASIL SEBAGIAN',c:'p-mid',why:'bergerak '+pct(geraPct)+' ke arah benar tapi belum sampai target'};
+  if(gerak<=0||geraPct<5)return {v:'GAGAL',c:'p-bad',why:'jembatan tidak bergerak dalam '+mg+' minggu ('+dec(b,1)+' → '+dec(s,1)+') — arketipe kemungkinan salah'};
+  return {v:'BELUM CUKUP DATA',c:'p-off',why:'gerakan '+pct(geraPct)+' belum meyakinkan'};
+}
+
+/* ── skor GMV ── */
+function skor(){
+  const d1=ST.d1?new Date(ST.d1+'T00:00:00Z'):null, d2=ST.d2?new Date(ST.d2+'T00:00:00Z'):null;
+  let hari=0,dlm=30;
+  if(d2){dlm=new Date(Date.UTC(d2.getUTCFullYear(),d2.getUTCMonth()+1,0)).getUTCDate();hari=d2.getUTCDate();}
+  const run=hari?ST.gmvM/hari*dlm:null;
+  const vs=(run!=null&&ST.floor)?run/ST.floor*100:null;
+  let st='—',c='p-off';
+  if(vs!=null){ if(vs>=95){st='AMAN';c='p-ok';} else if(vs>=75){st='TIPIS';c='p-mid';} else {st='MELESET';c='p-bad';} }
+  return {run,vs,st,c,hari,dlm};
+}
+
+/* ── RENDER: Papan Aksi ── */
+function paneAksi(){
+  return ST.mode==='baru'?paneAksiBaru():paneAksiBerjalan();
+}
+function paneAksiBerjalan(){
+  let h=paneCakupan();
+  const B=ST.baseline;
+  h+='<div class="sec"><div class="sec-hd"><span class="tag">A</span><h3>Apa yang dikerjakan tim MEA minggu ini</h3>'+
+     '<span class="pill '+(dipilih().length?'p-ok':'p-mid')+'" style="margin-left:auto">'+
+     (dipilih().length?int(dipilih().length)+' aksi aktif':'belum ada aksi dipilih')+'</span></div><div class="sec-bd">'+
+     '<div class="note">Centang aksi yang <b>benar dijalankan</b>, bukan yang direncanakan. Isi '+
+     '<b>rencana</b> dan <b>realisasi</b> — selisih keduanya yang membedakan <b>GAGAL</b> dari '+
+     '<b>TIDAK DIKERJAKAN</b>, dan itu pembedaan terpenting di seluruh tool ini. '+
+     'Angka jembatan bertanda <b style="color:var(--teal)">otomatis</b> diambil dari baseline; sisanya diisi manual.</div>';
+  KATALOG.forEach(p=>{
+    const aktif=p.aksi.filter(a=>ST.aksi[a.k]&&ST.aksi[a.k].on).length;
+    h+='<div class="pilar"><div class="pilar-hd"><span class="pill '+p.warna+'" style="margin:0">'+p.kode+'</span>'+
+       '<b>'+p.pilar+'</b><span class="cnt">'+aktif+' / '+p.aksi.length+' aksi</span></div>';
+    p.aksi.forEach(a=>{
+      const s=ST.aksi[a.k]||{};
+      const on=!!s.on;
+      const av=srcVal(a.src); const auto=av!=null;
+      h+='<div class="aksi'+(on?' on':'')+'"><div class="aksi-top">'+
+         '<input type="checkbox" data-on="'+a.k+'"'+(on?' checked':'')+'>'+
+         '<span class="aksi-code">'+a.k+'</span>'+
+         '<span class="aksi-nm"><b>'+esc(a.n)+'</b><span>'+esc(a.d)+' · jembatan: '+esc(a.j)+' ('+a.u+', harus '+a.arah+')'+
+         (s.grup?' · <span style="color:var(--signal)">Pilar '+s.grup+'</span>':'')+'</span></span>';
+      if(on){const v=verdict(a.k); if(v)h+='<span class="pill '+v.c+'">'+v.v+'</span>';}
+      h+='</div>';
+      if(on){
+        h+='<div class="aksi-bd">'+
+          fld(a.k,'mulai','Tanggal mulai','date',s.mulai||'')+
+          fld(a.k,'rencana','Rencana ('+a.u+')','number',s.rencana||'')+
+          fld(a.k,'real','Realisasi ('+a.u+')','number',s.real||'')+
+          fld(a.k,'sebelum','Jembatan sebelum','text',s.sebelum||'')+
+          fld(a.k,'sekarang','Jembatan sekarang'+(auto?' ⟳':''),'text',
+            (auto&&(s.sekarang===''||s.sekarang==null))?String(Math.round(av*100)/100):(s.sekarang||''))+
+          '<label class="f" style="grid-column:1/3"><span>Target jembatan</span>'+
+            '<input type="text" data-f="'+a.k+'|target" value="'+esc(s.target||'')+'"></label>'+
+          '<label class="f" style="grid-column:3/-1"><span>Catatan (opsional)</span>'+
+            '<input type="text" data-f="'+a.k+'|catatan" value="'+esc(s.catatan||'')+'" placeholder="hambatan, PIC, konteks"></label>'+
+          '</div>';
+        const v=verdict(a.k);
+        if(v)h+='<div class="jmb'+(auto?' auto':'')+'">'+esc(v.why)+
+          (auto?' · <b>angka sekarang otomatis dari baseline</b>':'')+'</div>';
+      }
+      h+='</div>';
+    });
+    h+='</div>';
+  });
+  h+='</div></div>';
+  return h;
+}
+
+/* ── MODE "KLIEN BARU": rancang pilar sebelum ada satu pun aksi berjalan ──
+   Tidak ada verdict (belum ada histori untuk dinilai). Yang dikerjakan AM di sini:
+   1) pilih aksi bulan pertama, 2) kelompokkan ke maks 3 pilar, 3) tetapkan target jembatan
+   awal (dipakai lagi sebagai target verdict begitu klien pindah ke mode Berjalan),
+   4) tulis growth thesis. Keluarannya draft STRG untuk ditempel ke CDPS — CDPS tetap
+   sumber/tempat resmi strategi disimpan, tool ini hanya mempercepat penyusunan draftnya. */
+function paneAksiBaru(){
+  let h=paneCakupan();
+  const D=dipilihBaru();
+  h+='<div class="sec"><div class="sec-hd"><span class="tag">A</span><h3>Rancang pilar bulan pertama</h3>'+
+    '<span class="pill '+(D.length?'p-ok':'p-mid')+'" style="margin-left:auto">'+
+    (D.length?int(D.length)+' aksi dipilih':'belum ada aksi dipilih')+'</span></div><div class="sec-bd">'+
+    '<div class="note">Belum ada histori untuk dinilai, jadi tidak ada verdict di sini. '+
+    'Yang diisi: aksi mana yang jadi <b>rencana bulan pertama</b>, dikelompokkan ke <b>maksimal 3 pilar</b>, '+
+    'dan target jembatannya. Field yang sama ini <b>tetap dipakai</b> saat klien pindah ke mode '+
+    '<b>Klien Berjalan</b> — tidak perlu diisi ulang, tinggal tambahkan tanggal mulai & realisasi.</div>';
+  if(B0Rekomendasi())h+=B0Rekomendasi();
+  KATALOG.forEach(p=>{
+    const aktif=p.aksi.filter(a=>ST.aksi[a.k]&&ST.aksi[a.k].on).length;
+    h+='<div class="pilar"><div class="pilar-hd"><span class="pill '+p.warna+'" style="margin:0">'+p.kode+'</span>'+
+       '<b>'+p.pilar+'</b><span class="cnt">'+aktif+' / '+p.aksi.length+' aksi \u00b7 divisi '+p.divisi+'</span></div>';
+    p.aksi.forEach(a=>{
+      const s=ST.aksi[a.k]||{};
+      const on=!!s.on;
+      h+='<div class="aksi'+(on?' on':'')+'"><div class="aksi-top">'+
+         '<input type="checkbox" data-on="'+a.k+'"'+(on?' checked':'')+'>'+
+         '<span class="aksi-code">'+a.k+'</span>'+
+         '<span class="aksi-nm"><b>'+esc(a.n)+'</b><span>'+esc(a.d)+' \u00b7 jembatan: '+esc(a.j)+
+         (a.qw?' \u00b7 <span style="color:var(--teal)">quick win, tanpa budget baru</span>':' \u00b7 butuh \u2265'+a.mgg+' minggu terlihat hasilnya')+'</span></span>';
+      h+='</div>';
+      if(on){
+        h+='<div class="aksi-bd">'+
+          '<label class="f"><span>Kelompokkan ke pilar</span><select data-f="'+a.k+'|grup">'+
+            ['','1','2','3'].map(v=>'<option value="'+v+'"'+(String(s.grup||'')===v?' selected':'')+'>'+
+              (v?'Pilar '+v:'(belum dikelompokkan)')+'</option>').join('')+'</select></label>'+
+          fld(a.k,'rencana','Target bulan 1 ('+a.u+')','number',s.rencana||'')+
+          fld(a.k,'target','Target jembatan (dipakai nanti u/ verdict)','text',s.target||'')+
+          '<label class="f" style="grid-column:1/-1"><span>Alasan dipilih (opsional, jadi bahan C-3/C-4)</span>'+
+            '<input type="text" data-f="'+a.k+'|catatan" value="'+esc(s.catatan||'')+'" placeholder="mis. margin SKU ini 0%, hentikan dulu"></label>'+
+          '</div>';
+      }
+      h+='</div>';
+    });
+    h+='</div>';
+  });
+  h+='</div></div>';
+
+  h+='<div class="sec"><div class="sec-hd"><span class="tag">A2</span><h3>Nama pilar &amp; growth thesis (E-1)</h3></div><div class="sec-bd">';
+  h+='<div class="grid g3">'+[1,2,3].map(i=>
+    '<label class="f"><span>Nama Pilar '+i+' ('+int(D.filter(k=>String(ST.aksi[k].grup)===String(i)).length)+' aksi)</span>'+
+    '<input type="text" data-pilarnama="'+(i-1)+'" value="'+esc(ST.pilarNama[i-1]||'')+'" placeholder="mis. Perbaiki ekonomi dulu"></label>').join('')+'</div>';
+  h+='<label class="f" style="margin-top:12px"><span>Alasan urutan pilar (E-13)</span>'+
+    '<input type="text" id="fPilarAlasan" value="'+esc(ST.pilarAlasan||'')+'" placeholder="kenapa Pilar 1 didahulukan dari Pilar 2 dan 3"></label>';
+  h+='<label class="f" style="margin-top:12px"><span>Growth Thesis \u2014 "Toko ini tumbuh dengan cara X, karena Y, dan yang paling menentukan adalah Z."</span>'+
+    '<textarea id="fThesis" rows="3">'+esc(ST.thesis||'')+'</textarea></label>';
+  h+='<div class="note">Uji sebelum dipakai: ganti nama toko & angkanya \u2014 kalau thesis-nya masih benar, itu template, tulis ulang. '+
+    'Harus memuat angka toko ini, satu mesin utama (bukan tiga sekaligus), dan Z yang bisa gugur.</div>';
+  h+='</div></div>';
+  return h;
+}
+const dipilihBaru=()=>Object.keys(ST.aksi).filter(k=>ST.aksi[k]&&ST.aksi[k].on&&AKSI_BY[k]);
+function B0Rekomendasi(){
+  const B=ST.baseline; if(!B)return '';
+  if(B.marginTertimbang!=null&&B.marginTertimbang<40)
+    return '<div class="note bad"><b>Rekomendasi otomatis (dari panel Cakupan di atas):</b> margin tertimbang '+
+      pct(B.marginTertimbang,1)+' di bawah ambang 40%. Jadikan <b>Pilar 1</b> = perbaiki ekonomi dulu \u2014 pilih '+
+      '<b class="mono">D1, D2</b> (hentikan spend tanpa hasil) dan <b class="mono">V6</b> (pindah kuota ke SKU '+
+      'bermargin) sebelum menambah volume di pilar lain. Menambah volume di atas margin tipis memperbesar kerugian, bukan keuntungan.</div>';
+  const KK=konsentrasi();
+  if(KK&&KK.p>=30)
+    return '<div class="note warn"><b>Rekomendasi otomatis:</b> konsentrasi kreator '+pct(KK.p)+
+      ' sudah di atas ambang risiko 30% sejak awal. Pertimbangkan <b class="mono">A3</b> (rekrut lapis kedua) '+
+      'masuk salah satu pilar bulan pertama, bukan ditunda ke bulan berikutnya.</div>';
+  return '';
+}
+function totalBase(){
+  const B=ST.baseline;
+  if(B&&B.totalGMVExplicit!=null)return {v:B.totalGMVExplicit,src:'payload'};
+  if(ST.gmvM>0)return {v:ST.gmvM,src:'input AM (GMV bulan berjalan)'};
+  return {v:null,src:null};
+}
+function konsentrasi(){
+  const B=ST.baseline;if(!B||!B.top1GMV)return null;
+  const t=totalBase();
+  if(t.v)return {p:B.top1GMV/t.v*100,basis:'total GMV ('+t.src+')'};
+  if(B.konsentrasiAff!=null)return {p:B.konsentrasiAff,basis:'GMV affiliate — basis sementara, bukan total'};
+  return null;
+}
+function paneCakupan(){
+  const B=ST.baseline;
+  if(!B)return '<div class="sec"><div class="sec-bd"><div class="empty"><b>Belum ada payload baseline</b>'+
+    'Tarik file atau tempel payload di panel 2. Tanpa itu semua angka jembatan harus diisi manual.</div></div></div>';
+  let auto=0,man=0;
+  KATALOG.forEach(p=>p.aksi.forEach(a=>{ srcVal(a.src)!=null?auto++:man++; }));
+  let h='<div class="sec"><div class="sec-hd"><span class="tag">A0</span><h3>Cakupan payload &amp; pemeriksaan</h3>'+
+    '<span class="pill '+(auto>=10?'p-ok':'p-mid')+'" style="margin-left:auto">'+auto+' jembatan otomatis \u00b7 '+man+' manual</span></div><div class="sec-bd">';
+  h+='<div class="grid g4">'+
+    kpi('Skema terbaca',esc(B._sch||'?'),esc(B.periode||''))+
+    kpi('Total GMV',totalBase().v==null?DASH:rpS(totalBase().v),totalBase().src||'belum ada — isi di panel 1')+
+    kpi('Rata-rata VV / video',B.vvRata==null?DASH:int(B.vvRata),B.videoAktif?int(B.videoAktif)+' video · '+int(B.videoViews)+' views':'')+
+    kpi('GMV per jam live',B.gmvPerJam==null?DASH:rpS(B.gmvPerJam),B.liveJam?dec(B.liveJam,1)+' jam':'')+
+    '</div>';
+  h+='<div class="grid g4" style="margin-top:12px">'+
+    kpi('GPM video',B.gpm==null?DASH:rpS(B.gpm),'GMV per 1.000 views')+
+    kpi('Kreator aktif',B.kreatorAktif==null?DASH:int(B.kreatorAktif),B.affGMV?'GMV '+rpS(B.affGMV):'')+
+    kpi('Konsentrasi kreator #1',konsentrasi()==null?DASH:pct(konsentrasi().p),
+      konsentrasi()==null?'':'basis: '+konsentrasi().basis)+
+    kpi('Pesanan / bulan (turunan)',B.pesanan==null?DASH:int(B.pesanan),
+      B.pengunjung?int(B.pengunjung)+' pengunjung · CR '+pct(B.cr,2):'')+
+    '</div>';
+  const KK=konsentrasi();
+  if(KK)h+='<div class="note'+(KK.p>=30?' warn':'')+'"><b>Konsentrasi kreator '+pct(KK.p)+'</b> ('+esc(KK.basis)+') — '+
+    (KK.p>=30?'<b>di atas ambang risiko 30%</b>. Wajib masuk C-6 risiko struktural, dan aksi <b class="mono">A3</b> jadi prioritas.'
+             :'di bawah ambang risiko 30%. Aksi <b class="mono">A3</b> (rekrut lapis kedua) belum mendesak untuk klien ini.')+'</div>';
+
+  if(B.marginTertimbang!=null){
+    const amanAcos=(B.acosMax!=null&&B.acos!=null)?B.acos<=B.acosMax:null;
+    h+='<div class="h4" style="font-family:var(--disp);font-size:14px;text-transform:uppercase;letter-spacing:.07em;margin:18px 0 9px;padding-bottom:5px;border-bottom:1px solid var(--line2)">Ekonomi iklan — dari margin tertimbang (K1)</div>';
+    h+='<div class="grid g4">'+
+      kpi('Margin tertimbang',pct(B.marginTertimbang,1),B.marginTertimbang<40?'di bawah ambang 40%':'di atas ambang 40%')+
+      kpi('Ruang sebelum iklan',B.ruangEkonomi==null?DASH:pct(B.ruangEkonomi,1),'setelah komisi + perkiraan biaya platform 9%')+
+      kpi('ACOS maksimum',B.acosMax==null?DASH:pct(B.acosMax,1),'buffer profit 30%')+
+      kpi('ROAS minimum',B.roasMin==null?DASH:dec(B.roasMin,1)+'\u00d7','di bawah ini klien tidak untung')+
+      '</div>';
+    if(B.acos!=null)h+='<div class="note'+(amanAcos===false?' bad':'')+'">ACOS berjalan bulan ini '+
+      '<b>'+pct(B.acos,1)+'</b> vs maksimum <b>'+(B.acosMax==null?DASH:pct(B.acosMax,1))+'</b> — '+
+      (amanAcos===false?'<b>di atas batas, setiap order pada ACOS ini merugi.</b>':
+       amanAcos===true?'masih di dalam batas.':'bandingkan manual.')+'</div>';
+    if(B.roasMin!=null&&B.roasMin>15)
+      h+='<div class="note bad">ROAS minimum <b>'+dec(B.roasMin,1)+'\u00d7</b> tidak realistis di kategori mana pun. '+
+        'Ini bukan target yang gagal disusun \u2014 ini bukti aritmatika bahwa <b>iklan tidak boleh dinyalakan</b> pada '+
+        'struktur margin sekarang. Jalurnya D-7 Sanggahan Target, bukan menaikkan budget.</div>';
+  }
+  if(B._trafik){
+    const ks=Object.keys(B._trafik).sort((a,b)=>B._trafik[b]-B._trafik[a]);
+    h+='<div class="h4" style="font-family:var(--disp);font-size:14px;text-transform:uppercase;letter-spacing:.07em;margin:18px 0 9px;padding-bottom:5px;border-bottom:1px solid var(--line2)">Atribusi sumber — tumpang tindih, bukan komposisi</div>';
+    h+='<div class="tbl-wrap"><table><thead><tr><th>Sumber</th><th class="num">Atribusi</th>'+
+      '<th class="num">Peringkat relatif</th><th>Pakai di baseline?</th></tr></thead><tbody>'+
+      ks.map(k=>{const v=B._trafik[k],ex=B._exclude.indexOf(k)>-1;
+        return '<tr><td class="mono">'+esc(k.replace(/_persen$/,''))+'</td>'+
+          '<td class="num">'+dec(v,2)+'%</td>'+
+          '<td class="num">'+dec(v/B._trafikSum*100,1)+'%</td>'+
+          '<td><span class="pill '+(ex?'p-bad':'p-mid')+'" style="margin:0">'+
+          (ex?'jangan — di atas 100%':'diagnostik saja')+'</span></td></tr>';}).join('')+
+      '</tbody></table></div>'+
+      '<div class="note"><b>Peringkat relatif</b> = nilai ÷ jumlah semua atribusi. Ini hanya untuk melihat '+
+      'sumber mana yang paling besar kontribusinya — <b>bukan porsi</b>, dan tidak boleh ditulis di Section B '+
+      'maupun disebut ke klien sebagai persentase.</div>';
+  }
+  if(B._info&&B._info.length)B._info.forEach(w=>{h+='<div class="note">'+w+'</div>';});
+  if(B._warn&&B._warn.length){
+    h+='<div class="h4" style="font-family:var(--disp);font-size:14px;text-transform:uppercase;letter-spacing:.07em;margin:18px 0 9px;padding-bottom:5px;border-bottom:1px solid var(--line2)">Pemeriksaan payload — '+B._warn.length+' temuan</div>';
+    B._warn.forEach(w=>{h+='<div class="note warn">'+w+'</div>';});
+    h+='<div class="note">Aturan yang ditegakkan tool: <b>angka atribusi boleh melebihi 100%, angka baseline tidak boleh.</b> '+
+      'Field yang di atas 100% dikecualikan dari Section B dan dari materi klien, tapi tetap ditampilkan sebagai diagnostik.</div>';
+  }
+  const manList=[];
+  KATALOG.forEach(p=>p.aksi.forEach(a=>{ if(srcVal(a.src)==null)manList.push(a.k); }));
+  if(manList.length)h+='<div class="note">Jembatan yang masih diisi manual: <b class="mono">'+manList.join(' ')+
+    '</b>. Untuk mengotomatiskannya, payload perlu memuat: median VV, CTOR per SKU, dan % spend kampanye 0 order '+
+    '(D1/D2 \u2014 belum ada di skema mana pun yang didukung; ROAS/ACOS untuk D3\u2013D5 sudah otomatis kalau baseline bulanan tersedia).</div>';
+  h+='</div></div>';
+  return h;
+}
+function fld(k,f,lb,tp,val){
+  return '<label class="f"><span>'+esc(lb)+'</span><input type="'+tp+'" data-f="'+k+'|'+f+'" value="'+esc(val)+'"></label>';
+}
+const dipilih=()=>Object.keys(ST.aksi).filter(k=>ST.aksi[k]&&ST.aksi[k].on);
+
+/* ── RENDER: Papan Skor ── */
+function paneSkor(){
+  return ST.mode==='baru'?paneSkorBaru():paneSkorBerjalan();
+}
+function paneSkorBerjalan(){
+  const S=skor(), D=dipilih();
+  const byV={};D.forEach(k=>{const v=verdict(k);if(v)byV[v.v]=(byV[v.v]||0)+1;});
+  let h='<div class="sec"><div class="sec-hd"><span class="tag">B</span><h3>Papan skor GMV</h3>'+
+    '<span class="pill '+S.c+'" style="margin-left:auto">'+S.st+'</span></div><div class="sec-bd">'+
+    '<div class="grid g4">'+
+    kpi('GMV minggu ini',rpS(ST.gmvW),ST.minggu||'',1)+
+    kpi('GMV bulan berjalan',rpS(ST.gmvM),S.hari?S.hari+' dari '+S.dlm+' hari':'',1)+
+    kpi('Run-rate bulan',S.run==null?DASH:rpS(S.run),'MTD ÷ hari × '+S.dlm)+
+    kpi('vs Floor D-1',S.vs==null?DASH:pct(S.vs,0),ST.floor?rpS(ST.floor)+'/bln':'floor belum diisi')+
+    '</div>';
+  if(S.vs!=null){
+    const kurang=ST.floor-(S.run||0);
+    h+='<div class="note'+(S.st==='MELESET'?' bad':(S.st==='TIPIS'?' warn':''))+'">'+
+      (kurang>0?'Dengan laju sekarang, floor bulan ini <b>kurang '+rpS(kurang)+'</b>. ':'Laju sekarang <b>melewati floor</b>. ')+
+      'Ambang: ≥95% AMAN · 75–94% TIPIS · &lt;75% MELESET. '+
+      (S.st==='MELESET'?'<b>Tier klien ini naik ke A</b> kalau MELESET dua minggu berturut — artinya wajib review mendalam, bukan hanya centang aksi.':'')+
+      '</div>';
+  }
+  h+='</div></div>';
+
+  h+='<div class="sec"><div class="sec-hd"><span class="tag">B2</span><h3>Verdict aksi</h3></div><div class="sec-bd">';
+  if(!D.length){h+='<div class="empty"><b>Belum ada aksi dipilih</b>Buka tab Papan Aksi dan centang apa yang dikerjakan tim minggu ini.</div>';}
+  else{
+    h+='<div class="grid g5">'+
+      ['BERHASIL','BERHASIL SEBAGIAN','GAGAL','TIDAK DIKERJAKAN','JALAN'].map(v=>
+        kpi(v,int(byV[v]||0),'')).join('')+'</div>';
+    h+='<div class="tbl-wrap" style="margin-top:14px"><table><thead><tr><th>Kode</th><th>Pilar</th><th>Aksi</th>'+
+      '<th>Jembatan</th><th class="num">Sebelum</th><th class="num">Sekarang</th><th class="num">Target</th>'+
+      '<th class="num">Real/Rencana</th><th>Verdict</th></tr></thead><tbody>';
+    D.forEach(k=>{const a=ST.aksi[k],K=AKSI_BY[k],v=verdict(k);
+      h+='<tr><td class="mono">'+k+'</td><td>'+esc(K.pilar)+'</td><td>'+esc(K.n)+'</td>'+
+        '<td style="color:var(--slate)">'+esc(K.j)+'</td>'+
+        '<td class="num">'+esc(a.sebelum||DASH)+'</td><td class="num">'+esc(a.sekarang||DASH)+'</td>'+
+        '<td class="num">'+esc(a.target||DASH)+'</td>'+
+        '<td class="num">'+int(num(a.real))+'/'+int(num(a.rencana))+'</td>'+
+        '<td><span class="pill '+(v?v.c:'p-off')+'" style="margin:0">'+(v?v.v:DASH)+'</span></td></tr>';});
+    h+='</tbody></table></div>';
+    const td=D.filter(k=>{const v=verdict(k);return v&&v.v==='TIDAK DIKERJAKAN';});
+    if(td.length)h+='<div class="note bad"><b>'+int(td.length)+' aksi tidak dikerjakan</b> — ini bukan '+
+      'hipotesis yang gagal, taktiknya belum pernah diuji. Cari sebabnya di ketergantungan klien (E-12) '+
+      'atau kapasitas divisi. Mencatatnya sebagai gagal akan membuat tim membuang taktik yang mungkin bekerja.</div>';
+    const gg=D.filter(k=>{const v=verdict(k);return v&&v.v==='GAGAL';});
+    if(gg.length)h+='<div class="note warn"><b>'+int(gg.length)+' aksi gagal</b> walau eksekusinya jalan. '+
+      'Kalau dua atau lebih gagal di pilar yang sama, arketipe diagnosanya kemungkinan salah — '+
+      'kembali ke mode <b>CE</b> di Project AM Strategist dan ganti arketipe.</div>';
+  }
+  h+='</div></div>';
+
+  if(ST.riwayat.length){
+    h+='<div class="sec"><div class="sec-hd"><span class="tag">B3</span><h3>Riwayat minggu</h3></div><div class="sec-bd">'+
+      '<div class="tbl-wrap"><table><thead><tr><th>Minggu</th><th class="num">GMV minggu</th>'+
+      '<th class="num">Run-rate</th><th class="num">vs Floor</th><th>Status</th><th class="num">Aksi</th></tr></thead><tbody>'+
+      ST.riwayat.map(r=>'<tr><td class="mono">'+esc(r.minggu)+'</td><td class="num">'+rpS(r.gmvW)+'</td>'+
+        '<td class="num">'+rpS(r.run)+'</td><td class="num">'+pct(r.vs,0)+'</td>'+
+        '<td><span class="pill '+r.c+'" style="margin:0">'+r.st+'</span></td>'+
+        '<td class="num">'+int(r.nAksi)+'</td></tr>').join('')+'</tbody></table></div>'+
+      '<div class="btnrow" style="margin-top:12px"><button class="btn ghost sm" id="btnArsip">Arsipkan minggu ini &amp; mulai minggu baru</button></div>'+
+      '</div></div>';
+  } else {
+    h+='<div class="sec"><div class="sec-bd"><div class="btnrow">'+
+      '<button class="btn ghost sm" id="btnArsip">Arsipkan minggu ini &amp; mulai minggu baru</button></div>'+
+      '<div class="note">Arsip menyalin angka minggu ini ke riwayat, memindahkan '+
+      '<b>jembatan sekarang</b> jadi <b>jembatan sebelum</b>, dan mengosongkan realisasi — '+
+      'supaya minggu berikutnya tinggal isi yang berubah.</div></div></div>';
+  }
+  return h;
+}
+
+/* ── MODE "KLIEN BARU": Target Bulan 1 (D-1/D-2/D-4), bukan run-rate mingguan ── */
+function paneSkorBaru(){
+  const B=ST.baseline, D=dipilihBaru();
+  let h='<div class="sec"><div class="sec-hd"><span class="tag">B</span><h3>Target bulan pertama (D-1 / D-2)</h3></div><div class="sec-bd">';
+  h+='<div class="grid g4">'+
+    kpi('Floor kontrak (D-1)',ST.floor?rpS(ST.floor):DASH,'diisi di panel 1')+
+    kpi('Stretch target (D-2)',ST.stretch?rpS(ST.stretch):DASH,ST.stretch&&ST.floor&&ST.stretch<ST.floor?'\u26a0 harus \u2265 floor':'')+
+    kpi('GMV baseline sebelum MEA',totalBase().v==null?DASH:rpS(totalBase().v),totalBase().src||'')+
+    kpi('Selisih floor vs baseline',(ST.floor&&totalBase().v!=null)?rpS(ST.floor-totalBase().v):DASH,
+      (ST.floor&&totalBase().v)?pct((ST.floor/totalBase().v-1)*100,0)+' dari sekarang':'')+
+    '</div>';
+  if(ST.stretch&&ST.floor&&ST.stretch<ST.floor)
+    h+='<div class="note bad">Stretch (D-2) harus \u2265 floor (D-1) \u2014 ini ditegakkan database CDPS. Perbaiki salah satunya sebelum diajukan.</div>';
+  if(B&&B.marginTertimbang!=null&&B.roasMin!=null&&B.roasMin>15&&ST.floor&&totalBase().v&&ST.floor>totalBase().v*1.3)
+    h+='<div class="note bad">Floor yang diminta '+pct((ST.floor/totalBase().v-1)*100,0)+' di atas baseline, sementara ROAS minimum yang '+
+      'dibutuhkan ('+dec(B.roasMin,1)+'\u00d7) tidak realistis pada margin sekarang. Kemungkinan besar jalurnya <b>D-7 Sanggahan Target</b>, bukan menaikkan budget iklan untuk mengejarnya.</div>';
+  h+='</div></div>';
+
+  h+='<div class="sec"><div class="sec-hd"><span class="tag">B2</span><h3>Target metrik pendukung (D-4) \u2014 dihitung, bukan ditebak</h3></div><div class="sec-bd">';
+  if(B&&B.marginTertimbang!=null){
+    h+='<div class="grid g4">'+
+      kpi('Margin tertimbang',pct(B.marginTertimbang,1),'')+
+      kpi('ACOS maksimum',B.acosMax==null?DASH:pct(B.acosMax,1),'buffer profit 30%')+
+      kpi('ROAS minimum',B.roasMin==null?DASH:dec(B.roasMin,1)+'\u00d7','')+
+      kpi('Budget iklan/bulan (F-1)',ST.budgetIklan?rpS(ST.budgetIklan):DASH,'diisi di panel 1')+
+      '</div>';
+  } else {
+    h+='<div class="empty"><b>Margin belum bisa dihitung</b>Payload ini tidak memuat margin per SKU. '+
+      'Isi margin secara manual lewat interview klien sebelum D-4 disusun \u2014 tanpa itu, target ACOS/ROAS hanya tebakan.</div>';
+  }
+  h+='</div></div>';
+
+  h+='<div class="sec"><div class="sec-hd"><span class="tag">B3</span><h3>Ringkasan pilar yang dirancang</h3></div><div class="sec-bd">';
+  if(!D.length){h+='<div class="empty"><b>Belum ada aksi dipilih</b>Buka tab Rancang Pilar dan pilih aksi bulan pertama.</div>';}
+  else{
+    [1,2,3].forEach(i=>{
+      const aksi=D.filter(k=>String(ST.aksi[k].grup)===String(i));
+      if(!aksi.length)return;
+      const divisi=[...new Set(aksi.map(k=>AKSI_BY[k].divisi))];
+      h+='<div class="pilar"><div class="pilar-hd"><span class="pill p-vio" style="margin:0">P'+i+'</span>'+
+        '<b>'+esc(ST.pilarNama[i-1]||('Pilar '+i))+'</b><span class="cnt">'+aksi.length+' aksi \u00b7 '+divisi.join(', ')+'</span></div>';
+      aksi.forEach(k=>{const a=AKSI_BY[k],s=ST.aksi[k];
+        h+='<div class="aksi"><div class="aksi-top"><span class="aksi-code">'+k+'</span>'+
+          '<span class="aksi-nm"><b>'+esc(a.n)+'</b><span>target: '+esc(s.rencana||'?')+' '+a.u+
+          (s.target?' \u00b7 jembatan: '+esc(s.target):'')+'</span></span></div></div>';});
+      h+='</div>';
+    });
+    const belum=D.filter(k=>!ST.aksi[k].grup);
+    if(belum.length)h+='<div class="note warn">'+belum.length+' aksi dipilih tapi belum dikelompokkan ke pilar mana pun: '+
+      '<b class="mono">'+belum.join(' ')+'</b>. Kelompokkan di tab Rancang Pilar sebelum menyalin draft STRG.</div>';
+  }
+  h+='</div></div>';
+  return h;
+}
+
+function kpi(k,v,s,hi){return '<div class="kpi'+(hi?' hi':'')+'"><div class="k">'+esc(k)+'</div><div class="v">'+v+'</div>'+
+  (s?'<div class="s">'+esc(s)+'</div>':'')+'</div>';}
+
+/* ── KELUARAN ── */
+const SHEET_HEAD=['tanggal_update','klien','am','channel','tier','minggu','periode_mulai','periode_akhir',
+  'gmv_minggu','gmv_mtd','run_rate','floor','vs_floor_persen','status',
+  'n_aksi','n_berhasil','n_gagal','n_tidak_dikerjakan','aksi_kode',
+  'pilar_video','pilar_live','pilar_affiliate','pilar_ads','catatan_utama'];
+function sheetRow(){
+  const S=skor(),D=dipilih();
+  const cnt=v=>D.filter(k=>{const x=verdict(k);return x&&x.v===v;}).length;
+  const perPilar=p=>D.filter(k=>AKSI_BY[k].pilar===p).length;
+  const utama=D.map(k=>{const v=verdict(k);return v&&(v.v==='GAGAL'||v.v==='TIDAK DIKERJAKAN')?k+':'+v.v:null;}).filter(Boolean).join('; ');
+  return [new Date().toISOString().slice(0,10),ST.klien,ST.am,ST.channel,ST.tier,ST.minggu,ST.d1,ST.d2,
+    Math.round(ST.gmvW),Math.round(ST.gmvM),S.run==null?'':Math.round(S.run),Math.round(ST.floor),
+    S.vs==null?'':Math.round(S.vs),S.st,D.length,cnt('BERHASIL'),cnt('GAGAL'),cnt('TIDAK DIKERJAKAN'),
+    D.join(' '),perPilar('VIDEO'),perPilar('LIVE'),perPilar('AFFILIATE'),perPilar('ADS'),utama];
+}
+const tsv=r=>r.map(c=>String(c==null?'':c).replace(/\t/g,' ')).join('\t');
+function trackerMd(){
+  const S=skor(),D=dipilih();
+  const L=[];
+  L.push('### '+(ST.minggu||'minggu')+' · '+(ST.d1||'')+' → '+(ST.d2||''));
+  L.push('');
+  L.push('| Minggu | GMV minggu | GMV MTD | Run-rate | vs Floor | Status |');
+  L.push('|---|---|---|---|---|---|');
+  L.push('| '+(ST.minggu||'-')+' | '+rp(ST.gmvW)+' | '+rp(ST.gmvM)+' | '+(S.run==null?DASH:rp(S.run))+' | '+
+    (S.vs==null?DASH:Math.round(S.vs)+'%')+' | '+S.st+' |');
+  L.push('');
+  L.push('**Papan Aksi–Dampak**');
+  L.push('');
+  L.push('| # | Aksi | Pilar | Mulai | Jembatan | Sebelum | Target | Sekarang | Real/Rencana | Verdict |');
+  L.push('|---|---|---|---|---|---|---|---|---|---|');
+  D.forEach(k=>{const a=ST.aksi[k],K=AKSI_BY[k],v=verdict(k);
+    L.push('| '+k+' | '+K.n+' | '+K.pilar+' | '+(a.mulai||'-')+' | '+K.j+' | '+(a.sebelum||'-')+' | '+
+      (a.target||'-')+' | '+(a.sekarang||'-')+' | '+int(num(a.real))+'/'+int(num(a.rencana))+' | '+(v?v.v:'-')+' |');});
+  L.push('');
+  const notes=D.map(k=>{const v=verdict(k),a=ST.aksi[k];
+    return v&&(v.v==='GAGAL'||v.v==='TIDAK DIKERJAKAN')?'- **'+k+' '+v.v+'** — '+v.why+(a.catatan?' · '+a.catatan:''):null;}).filter(Boolean);
+  if(notes.length){L.push('**Catatan verdict**');L.push('');notes.forEach(n=>L.push(n));L.push('');}
+  return L.join('\n');
+}
+function m6dText(){
+  const S=skor(),D=dipilih();
+  const grp=p=>D.filter(k=>AKSI_BY[k].pilar===p).map(k=>{const v=verdict(k);
+    return '  - '+AKSI_BY[k].n+' → '+(v?v.v.toLowerCase():'jalan')+(v&&v.why?' ('+v.why+')':'');});
+  const L=[(ST.minggu||'Minggu')+' ('+(ST.d1||'')+'–'+(ST.d2||'')+') — '+(ST.klien||'klien')+' / '+ST.channel,
+    'GMV minggu '+rp(ST.gmvW)+' · MTD '+rp(ST.gmvM)+' · run-rate '+(S.run==null?DASH:rp(S.run))+
+      (S.vs==null?'':' ('+Math.round(S.vs)+'% floor, '+S.st+')'),''];
+  L.push('Yang dikerjakan tim MEA & hasilnya:');
+  ['VIDEO','LIVE','AFFILIATE','ADS'].forEach(p=>{const g=grp(p);
+    if(g.length){L.push('- '+p+':');g.forEach(x=>L.push(x));}});
+  const hamb=D.map(k=>{const v=verdict(k),a=ST.aksi[k];
+    return v&&v.v==='TIDAK DIKERJAKAN'?'- '+AKSI_BY[k].n+(a.catatan?': '+a.catatan:' — eksekusi di bawah rencana'):null;}).filter(Boolean);
+  if(hamb.length){L.push('');L.push('Hambatan:');hamb.forEach(x=>L.push(x));}
+  L.push('');L.push('Catatan: angka dari export platform via MEA Video Factory. Tidak ada GMV yang diatribusikan ke satu aksi.');
+  return L.join('\n');
+}
+function paneOut(){
+  return ST.mode==='baru'?paneOutBaru():paneOutBerjalan();
+}
+function paneOutBerjalan(){
+  return '<div class="sec"><div class="sec-hd"><span class="tag">C1</span><h3>Baris untuk Sheet portofolio</h3>'+
+    '<span class="pill p-off" style="margin-left:auto">1 baris / klien / minggu</span></div><div class="sec-bd">'+
+    '<pre class="box">'+esc(SHEET_HEAD.join('\t'))+'\n'+esc(tsv(sheetRow()))+'</pre>'+
+    '<div class="note">Inilah yang membuat 200 klien bisa dikelola: tiap klien menyumbang <b>satu baris</b> '+
+    'per minggu ke satu Sheet. SPV mengurutkan kolom <b class="mono">status</b> dan <b class="mono">vs_floor_persen</b> '+
+    'untuk melihat siapa yang perlu dibedah minggu ini. Kolom <b class="mono">aksi_kode</b> adalah bahan '+
+    'learning loop L2/L3 — pola lintas klien dihitung dari kolom itu, bukan dibaca satu-satu dari 200 file.</div>'+
+    '<div class="btnrow" style="margin-top:12px"><button class="btn sig sm" id="btnTsv2">Copy baris TSV</button>'+
+    '<button class="btn ghost sm" id="btnHead">Copy header (sekali saja, saat bikin Sheet)</button></div>'+
+    '</div></div>'+
+    '<div class="sec"><div class="sec-hd"><span class="tag">C2</span><h3>Blok tracker (markdown)</h3></div><div class="sec-bd">'+
+    '<pre class="box">'+esc(trackerMd())+'</pre>'+
+    '<div class="note">Tempel ke file <b class="mono">tracker-'+esc(slug(ST.klien))+'.md</b> di blok '+
+    '<b>3. Papan Aksi–Dampak</b>. Hanya untuk klien <b>Tier A</b> — tier B dan C cukup baris Sheet.</div>'+
+    '</div></div>'+
+    '<div class="sec"><div class="sec-hd"><span class="tag">C3</span><h3>Bahan M6D — Rekap Mingguan</h3>'+
+    '<span class="pill p-ok" style="margin-left:auto">bersih dari field internal</span></div><div class="sec-bd">'+
+    '<pre class="box">'+esc(m6dText())+'</pre>'+
+    '<div class="note">Tidak memuat margin, SLA klien, riwayat agensi, atau sanggahan target. '+
+    'Aman disalin ke CDPS.</div></div></div>';
+}
+
+/* ── MODE "KLIEN BARU": draft STRG siap tempel ke CDPS ──
+   CDPS tetap SUMBER RESMI tempat STRG dibuat & disimpan — draft ini hanya mempercepat
+   pengisian form, AM tetap yang menempel dan bertanggung jawab atas isinya. */
+function strgDraftText(){
+  const B=ST.baseline, D=dipilihBaru();
+  const L=[];
+  L.push('DRAFT STRG — '+(ST.klien||'(klien)')+' · '+ST.channel+' · rancang bulan pertama');
+  L.push('Dibuat oleh MEA AM Cockpit dari data baseline. Tempel per field ke form STRG di CDPS —');
+  L.push('AM tetap memverifikasi tiap field sebelum diajukan; ini draft, bukan pengganti CDPS.');
+  L.push('');
+  L.push('=== SECTION C — DIAGNOSA & AKAR MASALAH ===');
+  const marginFail=B&&B.marginTertimbang!=null&&B.marginTertimbang<40;
+  const konsFail=konsentrasi()&&konsentrasi().p>=30;
+  L.push('C-1 Bottleneck utama: '+(marginFail?'Margin':(konsFail?'Trafik (konsentrasi kreator)':'(pilih dari dropdown sesuai Pilar 1 di bawah)')));
+  if(B){
+    const bukti=[];
+    if(marginFail)bukti.push('B-3.3 margin tertimbang '+pct(B.marginTertimbang,1));
+    if(konsFail)bukti.push('B-6.4 konsentrasi kreator '+pct(konsentrasi().p));
+    if(B.roas!=null)bukti.push('B-5.4 ROAS berjalan '+dec(B.roas,2)+'\u00d7');
+    if(bukti.length)L.push('C-2 Field-ID bukti: '+bukti.join(' \u00b7 '));
+  }
+  L.push('C-3 Akar masalah: (isi dari catatan "alasan dipilih" tiap aksi di tab Rancang Pilar)');
+  D.forEach(k=>{const s=ST.aksi[k]; if(s.catatan)L.push('  - ['+k+'] '+s.catatan);});
+  L.push('C-5 Quick win 14 hari (tanpa budget baru):');
+  const qw=D.filter(k=>AKSI_BY[k].qw);
+  if(qw.length)qw.forEach(k=>L.push('  - '+k+' '+AKSI_BY[k].n+' ['+AKSI_BY[k].fid+']'));
+  else L.push('  - (belum ada aksi quick-win dipilih — cek katalog bertanda "quick win, tanpa budget baru")');
+  L.push('C-6 Risiko struktural:');
+  if(marginFail)L.push('  - Margin tertimbang '+pct(B.marginTertimbang,1)+' di bawah ambang 40% (K1) — tidak bisa dihilangkan tanpa klien mengubah harga/HPP [B-3.3]');
+  if(konsFail)L.push('  - Konsentrasi kreator '+pct(konsentrasi().p)+' di atas ambang 30% [B-6.4]');
+  if(B&&B.durasiKontrakBulan&&B.durasiKontrakBulan<=1)L.push('  - Kontrak '+B.durasiKontrakBulan+' bulan — terlalu pendek untuk pengungkit >4 minggu');
+  L.push('C-7 Prasyarat dari klien sebelum eksekusi:');
+  if(marginFail)L.push('  - Konfirmasi margin bersih riil per SKU sebelum target GMV disusun');
+  L.push('  - (tambahkan prasyarat akses/aset dari hasil interview)');
+  L.push('');
+  L.push('=== SECTION D — TARGET & KPI ===');
+  L.push('D-1 Floor kontrak: '+(ST.floor?rp(ST.floor):'(isi di panel 1)'));
+  L.push('D-2 Stretch target: '+(ST.stretch?rp(ST.stretch):'(isi di panel 1)'));
+  if(B&&B.marginTertimbang!=null){
+    L.push('D-4 Target metrik pendukung:');
+    L.push('  - ACOS maksimum: '+(B.acosMax==null?'?':pct(B.acosMax,1))+' (dari margin tertimbang '+pct(B.marginTertimbang,1)+', buffer profit 30%)');
+    L.push('  - ROAS minimum: '+(B.roasMin==null?'?':dec(B.roasMin,1)+'\u00d7'));
+    if(B.roasMin!=null&&B.roasMin>15)
+      L.push('    \u26a0 ROAS ini tidak realistis \u2014 pertimbangkan D-7 Sanggahan Target alih-alih memaksa budget iklan');
+  }
+  L.push('D-6 Leading indicator (maks 5, dari jembatan aksi terpilih):');
+  [...new Set(D.map(k=>AKSI_BY[k].j))].slice(0,5).forEach(j=>L.push('  - '+j));
+  L.push('D-8 Asumsi di balik target (minimal 3):');
+  if(marginFail)L.push('  - Klien bersedia menaikkan harga/memangkas HPP sampai margin \u2265 40% — pemilik: klien');
+  L.push('  - (tambahkan asumsi lain: akses, budget cair, stok, approval)');
+  L.push('');
+  L.push('=== SECTION E — STRATEGI INTI ===');
+  L.push('E-1 Growth Thesis:');
+  L.push('  '+(ST.thesis||'(belum diisi — lihat tab Target Bulan 1)'));
+  L.push('Pilar:');
+  [1,2,3].forEach(i=>{
+    const aksi=D.filter(k=>String(ST.aksi[k].grup)===String(i));
+    if(!aksi.length)return;
+    const divisi=[...new Set(aksi.map(k=>AKSI_BY[k].divisi))].join(', ');
+    L.push('  Pilar '+i+' \u2014 '+(ST.pilarNama[i-1]||'(belum dinamai)')+' ['+divisi+']');
+    aksi.forEach(k=>{const a=AKSI_BY[k],s=ST.aksi[k];
+      L.push('    - '+k+' '+a.n+' \u2014 target '+(s.rencana||'?')+' '+a.u+(s.target?', jembatan '+s.target:''));});
+  });
+  const belum=D.filter(k=>!ST.aksi[k].grup);
+  if(belum.length)L.push('  \u26a0 belum dikelompokkan: '+belum.join(' '));
+  L.push('E-13 Urutan eksekusi (alasan): '+(ST.pilarAlasan||'(belum diisi)'));
+  L.push('');
+  L.push('=== SECTION F — KOMITMEN RESOURCE ===');
+  L.push('F-1 Budget iklan/bulan: '+(ST.budgetIklan?rp(ST.budgetIklan):'(isi di panel 1)'));
+  const divCount={};D.forEach(k=>{const dv=AKSI_BY[k].divisi;divCount[dv]=(divCount[dv]||0)+1;});
+  L.push('F-5 Divisi & beban (hard-internal): '+Object.keys(divCount).map(d=>d+' ('+divCount[d]+' aksi)').join(' \u00b7 '));
+  L.push('');
+  L.push('Catatan: draft ini dihasilkan dari baseline + pilihan AM, bukan wawancara klien.');
+  L.push('Field bertanda "(isi ..." atau "(belum diisi..." WAJIB dilengkapi sebelum diajukan ke CDPS.');
+  return L.join('\n');
+}
+function paneOutBaru(){
+  const D=dipilihBaru();
+  const belum=D.filter(k=>!ST.aksi[k].grup);
+  return '<div class="sec"><div class="sec-hd"><span class="tag">C</span><h3>Draft STRG — siap tempel ke CDPS</h3>'+
+    '<span class="pill '+(belum.length?'p-mid':'p-ok')+'" style="margin-left:auto">'+
+    (belum.length?belum.length+' aksi belum dikelompokkan':'semua aksi sudah dikelompokkan')+'</span></div><div class="sec-bd">'+
+    '<div class="note">CDPS tetap <b>sumber resmi</b> tempat STRG dibuat dan disimpan. Draft ini hanya '+
+    'mempercepat pengisian form — AM tetap memverifikasi tiap field, mengisi bagian yang ditandai '+
+    '"(isi..." atau "(belum diisi...", dan menempelnya manual ke CDPS.</div>'+
+    '<pre class="box">'+esc(strgDraftText())+'</pre>'+
+    '<div class="btnrow" style="margin-top:12px"><button class="btn sig sm" id="btnStrgCopy2">Copy Draft STRG</button></div>'+
+    '</div></div>';
+}
+
+/* ── FILE ── */
+function readJson(file){
+  return new Promise(res=>{const fr=new FileReader();
+    fr.onerror=()=>res({err:'gagal dibaca',nm:file.name});
+    fr.onload=()=>{try{res({obj:JSON.parse(fr.result),nm:file.name});}catch(e){res({err:'JSON rusak',nm:file.name});}};
+    fr.readAsText(file);});
+}
+function intakeObj(o,nm){ return intakeResults([{obj:o,nm:nm}]); }
+async function intake(files){
+  const arr=Array.from(files);if(!arr.length)return;
+  const rs=await Promise.all(arr.map(readJson));
+  intakeResults(rs);
+}
+/* ── deteksi ekspor STRG (CDPS): { data: { channels:[...], durasi_kontrak_bulan, ... } } ──
+   Beda dari payload Video Factory: channel-nya jamak (array), dan sebagian field kontrak
+   (margin_kotor_persen, durasi_kontrak_bulan, growth_thesis) ada di root data, bukan per channel. */
+function detectSTRG(o){
+  if(o&&o.data&&Array.isArray(o.data.channels)&&o.data.channels.length)return o.data;
+  if(o&&Array.isArray(o.channels)&&o.channels.length&&(o.strategi_id||o.contract_id||o.durasi_kontrak_bulan!=null))return o;
+  return null;
+}
+function buildSTRGChannelPayload(dataRoot,ch){
+  return Object.assign({},ch,{
+    _isSTRG:true,
+    _kontrak:{durasi_kontrak_bulan:dataRoot.durasi_kontrak_bulan,margin_kotor_persen:dataRoot.margin_kotor_persen,
+      nama_brand:dataRoot.nama_brand,growth_thesis:dataRoot.growth_thesis,sla_klien_jam:dataRoot.sla_klien_jam,
+      dispatch:dataRoot.dispatch}
+  });
+}
+function finalizeLoad(m,nm,info){
+  ST.baselinePrev=ST.baseline;ST.baseline=m;
+  if(!ST.klien&&m.toko){ST.klien=m.toko;$('#fKlien').value=m.toko;}
+  let auto=0;KATALOG.forEach(p=>p.aksi.forEach(a=>{if(srcVal(a.src)!=null)auto++;}));
+  info.push('<div class="note"><b>'+esc(nm)+'</b> — skema <span class="mono">'+esc(m._sch)+
+    '</span> terbaca · '+int(auto)+' dari 20 jembatan terisi otomatis · periode '+esc(m.periode||'?')+
+    ((m._warn&&m._warn.length)?' · <b style="color:var(--amber)">'+m._warn.length+' temuan pemeriksaan</b>':'')+'</div>');
+}
+function intakeResults(rs){
+  const info=[];
+  ST._pendingSTRG=null;
+  rs.forEach(r=>{
+    if(r.err){info.push('<div class="note bad"><b>'+esc(r.nm)+'</b> — '+esc(r.err)+'</div>');return;}
+    const o=r.obj;
+    if(String(o.schema||'')==='mea.cockpit.v1'){
+      ST=Object.assign(ST,o);syncForm();
+      info.push('<div class="note"><b>'+esc(r.nm)+'</b> — state cockpit dimuat · '+int((o.riwayat||[]).length)+' minggu di riwayat</div>');
+      return;
+    }
+    const strg=detectSTRG(o);
+    if(strg){
+      if(strg.channels.length===1){
+        const m=normalizePayload(buildSTRGChannelPayload(strg,strg.channels[0]));
+        finalizeLoad(m,r.nm,info);
+      } else {
+        ST._pendingSTRG={data:strg,nm:r.nm};
+        info.push('<div class="note warn"><b>'+esc(r.nm)+'</b> — ekspor ini memuat <b>'+strg.channels.length+
+          ' channel</b>. Pilih salah satu di bawah untuk dianalisa minggu ini; channel lain butuh tab Cockpit terpisah.</div>'+
+          '<div class="btnrow">'+strg.channels.map((c,i)=>'<button class="btn ghost sm" data-pick-ch="'+i+'">'+
+            esc(c.channel||'channel '+(i+1))+' \u2014 '+esc(c.nama_toko||'')+'</button>').join('')+'</div>');
+      }
+      return;
+    }
+    const m=normalizePayload(o);
+    if(m&&Object.keys(m).some(k=>k[0]!=='_'&&typeof m[k]==='number'&&isFinite(m[k]))){
+      finalizeLoad(m,r.nm,info);
+      return;
+    }
+    info.push('<div class="note warn"><b>'+esc(r.nm)+'</b> — tidak ada satu pun field yang dikenali. '+
+      'Didukung: ekspor STRG (CDPS), cdps.section_b.v1, cdps.baseline.v1, atau JSON apa pun yang memuat '+
+      'nama field seperti <span class="mono">jumlah_video_per_bulan</span>, <span class="mono">gmv_affiliate</span>.</div>');
+  });
+  $('#loadInfo').innerHTML=info.join('');
+  $$('[data-pick-ch]').forEach(b=>b.addEventListener('click',()=>{
+    if(!ST._pendingSTRG)return;
+    const idx=+b.dataset.pickCh, strg=ST._pendingSTRG.data, nm=ST._pendingSTRG.nm;
+    const m=normalizePayload(buildSTRGChannelPayload(strg,strg.channels[idx]));
+    const info2=[]; finalizeLoad(m,nm,info2);
+    ST._pendingSTRG=null; $('#loadInfo').innerHTML=info2.join(''); render();
+  }));
+  render();
+}
+
+/* ── WIRING ── */
+function syncForm(){
+  $('#fKlien').value=ST.klien||'';$('#fAM').value=ST.am||'';$('#fCh').value=ST.channel||'TikTok Shop';
+  $('#fFloor').value=ST.floor||'';$('#fTier').value=ST.tier||'B';$('#fMg').value=ST.minggu||'';
+  $('#fD1').value=ST.d1||'';$('#fD2').value=ST.d2||'';
+  $('#fGmvW').value=ST.gmvW||'';$('#fGmvM').value=ST.gmvM||'';
+  $('#fStretch').value=ST.stretch||'';$('#fDurasi').value=ST.durasiBulan||'';$('#fBudget').value=ST.budgetIklan||'';
+  applyMode();
+}
+function pullForm(){
+  ST.klien=$('#fKlien').value.trim();ST.am=$('#fAM').value.trim();ST.channel=$('#fCh').value;
+  ST.floor=num($('#fFloor').value);ST.tier=$('#fTier').value;ST.minggu=$('#fMg').value.trim();
+  ST.d1=$('#fD1').value;ST.d2=$('#fD2').value;
+  ST.gmvW=num($('#fGmvW').value);ST.gmvM=num($('#fGmvM').value);
+  if($('#fStretch'))ST.stretch=num($('#fStretch').value);
+  if($('#fDurasi'))ST.durasiBulan=$('#fDurasi').value;
+  if($('#fBudget'))ST.budgetIklan=num($('#fBudget').value);
+  if($('#fThesis'))ST.thesis=$('#fThesis').value;
+  if($('#fPilarAlasan'))ST.pilarAlasan=$('#fPilarAlasan').value;
+}
+function applyMode(){
+  const baru=ST.mode==='baru';
+  $('#rowMingguan').hidden=baru; $('#rowBaru').hidden=!baru;
+  $('#mBaru').style.background=baru?'var(--signal)':'transparent';
+  $('#mBaru').style.borderColor=baru?'var(--signal)':'#3C5468';
+  $('#mBerjalan').style.background=baru?'transparent':'var(--signal)';
+  $('#mBerjalan').style.borderColor=baru?'#3C5468':'var(--signal)';
+  $('#modeHint').textContent=baru
+    ?'Belum ada aksi berjalan — keluaran berupa draft STRG untuk CDPS, bukan laporan mingguan.'
+    :'Ada histori aksi — keluaran berupa baris Sheet, blok tracker, dan bahan M6D.';
+}
+function applyTab(){
+  $('#paneA').hidden=TAB!=='aksi';$('#paneB').hidden=TAB!=='skor';$('#paneC').hidden=TAB!=='out';
+  $$('#tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===TAB?'true':'false'));
+  const t=$$('#tabs button');
+  if(t[0])t[0].firstChild.textContent=ST.mode==='baru'?'Rancang Pilar':'Papan Aksi';
+  if(t[1])t[1].textContent=ST.mode==='baru'?'Target Bulan 1':'Papan Skor';
+  if(t[2])t[2].textContent=ST.mode==='baru'?'Draft STRG':'Keluaran';
+}
+function render(){
+  pullForm();
+  $('#mKlien').textContent=ST.klien?('klien: '+ST.klien):'klien belum diisi';
+  $('#mMinggu').textContent=ST.mode==='baru'?'rancang awal — belum ada aksi berjalan':
+    (ST.minggu?(ST.minggu+' · tier '+ST.tier):'minggu belum diisi');
+  $('#nAksi').textContent=(ST.mode==='baru'?dipilihBaru():dipilih()).length||'';
+  $('#paneA').innerHTML=paneAksi();
+  $('#paneB').innerHTML=paneSkor();
+  $('#paneC').innerHTML=paneOut();
+  applyTab();wire();renderOutbar();
+}
+function renderOutbar(){
+  const baru=ST.mode==='baru';
+  $('#outLb').textContent=baru?'Keluaran — draft STRG':'Keluaran mingguan';
+  $('#outBtns').innerHTML=baru?
+    '<button class="btn sig sm" id="btnStrgCopy">Copy Draft STRG</button>'+
+    '<button class="btn ghost sm" id="btnMulaiEksekusi">Mulai eksekusi \u2192 pindah ke Klien Berjalan</button>'+
+    '<button class="btn ghost sm" id="btnSave">Simpan state (.json)</button>'
+    :
+    '<button class="btn sig sm" id="btnTsv2b">Copy baris Sheet (TSV)</button>'+
+    '<button class="btn ghost sm" id="btnMd2b">Copy blok tracker</button>'+
+    '<button class="btn ghost sm" id="btnM6d2b">Copy bahan M6D</button>'+
+    '<button class="btn ghost sm" id="btnSave">Simpan state (.json)</button>';
+  if($('#btnStrgCopy'))$('#btnStrgCopy').onclick=()=>copy(strgDraftText(),'Draft STRG tersalin');
+  if($('#btnMulaiEksekusi'))$('#btnMulaiEksekusi').onclick=()=>{
+    ST.mode='berjalan';
+    dipilihBaru().forEach(k=>{ if(!ST.aksi[k].mulai)ST.aksi[k].mulai=new Date().toISOString().slice(0,10); });
+    syncForm();render();toast('Pindah ke mode Klien Berjalan — rencana & target dari rancangan awal tetap dipakai');
+  };
+  if($('#btnTsv2b'))$('#btnTsv2b').onclick=()=>copy(tsv(sheetRow()),'Baris Sheet tersalin');
+  if($('#btnMd2b'))$('#btnMd2b').onclick=()=>copy(trackerMd(),'Blok tracker tersalin');
+  if($('#btnM6d2b'))$('#btnM6d2b').onclick=()=>copy(m6dText(),'Bahan M6D tersalin');
+  if($('#btnSave'))$('#btnSave').onclick=()=>{pullForm();
+    download('cockpit-'+slug(ST.klien)+'-'+(ST.mode==='baru'?'rancang':(ST.minggu||'mgg'))+'.json',JSON.stringify(ST,null,2));
+    toast('State disimpan');};
+}
+function wire(){
+  $$('[data-on]').forEach(c=>c.onchange=()=>{
+    const k=c.dataset.on;ST.aksi[k]=ST.aksi[k]||{};ST.aksi[k].on=c.checked;
+    if(c.checked&&ST.mode!=='baru'&&!ST.aksi[k].mulai)ST.aksi[k].mulai=ST.d1||'';
+    render();});
+  $$('[data-f]').forEach(i=>{
+    i.onchange=()=>{const[k,f]=i.dataset.f.split('|');ST.aksi[k]=ST.aksi[k]||{};ST.aksi[k][f]=i.value;render();};});
+  $$('[data-pilarnama]').forEach(i=>{
+    i.onchange=()=>{ST.pilarNama[+i.dataset.pilarnama]=i.value;render();};});
+  if($('#fThesis'))$('#fThesis').onchange=()=>{ST.thesis=$('#fThesis').value;};
+  if($('#fPilarAlasan'))$('#fPilarAlasan').onchange=()=>{ST.pilarAlasan=$('#fPilarAlasan').value;};
+  if($('#btnArsip'))$('#btnArsip').onclick=arsip;
+  if($('#btnTsv2'))$('#btnTsv2').onclick=()=>copy(tsv(sheetRow()),'Baris Sheet tersalin');
+  if($('#btnHead'))$('#btnHead').onclick=()=>copy(SHEET_HEAD.join('\t'),'Header tersalin');
+  if($('#btnMulaiEksekusi'))$('#btnMulaiEksekusi').onclick=()=>{
+    ST.mode='berjalan';
+    dipilihBaru().forEach(k=>{ if(!ST.aksi[k].mulai)ST.aksi[k].mulai=new Date().toISOString().slice(0,10); });
+    syncForm();render();toast('Pindah ke mode Klien Berjalan — rencana & target dari rancangan awal tetap dipakai');
+  };
+  if($('#btnStrgCopy'))$('#btnStrgCopy').onclick=()=>copy(strgDraftText(),'Draft STRG tersalin');
+  if($('#btnStrgCopy2'))$('#btnStrgCopy2').onclick=()=>copy(strgDraftText(),'Draft STRG tersalin');
+}
+function arsip(){
+  pullForm();
+  const S=skor();
+  ST.riwayat.push({minggu:ST.minggu||('minggu '+(ST.riwayat.length+1)),gmvW:ST.gmvW,gmvM:ST.gmvM,
+    run:S.run,vs:S.vs,st:S.st,c:S.c,nAksi:dipilih().length});
+  dipilih().forEach(k=>{const a=ST.aksi[k];
+    if(a.sekarang)a.sebelum=a.sekarang;
+    a.sekarang='';a.real='';});
+  ST.gmvW=0;ST.gmvM=0;ST.minggu='';
+  syncForm();render();toast('Minggu diarsipkan · jembatan sekarang → sebelum');
+}
+const drop=$('#drop');
+['dragenter','dragover'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add('hot');}));
+['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove('hot');}));
+drop.addEventListener('drop',ev=>{if(ev.dataTransfer&&ev.dataTransfer.files)intake(ev.dataTransfer.files);});
+drop.addEventListener('click',()=>$('#filein').click());
+$('#btnPick').addEventListener('click',e=>{e.stopPropagation();$('#filein').click();});
+$('#filein').addEventListener('change',()=>{intake($('#filein').files);$('#filein').value='';});
+$('#btnPaste').addEventListener('click',()=>{
+  const raw=($('#fPaste').value||'').trim();
+  if(!raw)return toast('Kotak tempel masih kosong');
+  let o;try{ o=JSON.parse(raw); }
+  catch(e){ const a=raw.indexOf('{'),b=raw.lastIndexOf('}');
+    if(a>-1&&b>a){ try{ o=JSON.parse(raw.slice(a,b+1)); }catch(e2){} } }
+  if(!o)return $('#loadInfo').innerHTML='<div class="note bad">JSON tidak bisa dibaca. Pastikan seluruh payload tersalin, dari <span class="mono">{</span> pertama sampai <span class="mono">}</span> terakhir.</div>';
+  intakeObj(o,'(tempel)');
+});
+$('#btnPasteClear').addEventListener('click',()=>{$('#fPaste').value='';$('#loadInfo').innerHTML='';});
+$('#tabs').addEventListener('click',e=>{const b=e.target.closest('button[data-tab]');if(!b)return;
+  TAB=b.dataset.tab;applyTab();});
+['fKlien','fAM','fCh','fFloor','fTier','fMg','fD1','fD2','fGmvW','fGmvM','fStretch','fDurasi','fBudget'].forEach(id=>{
+  const el=$('#'+id);if(el)el.addEventListener(el.tagName==='SELECT'?'change':'input',render);});
+$('#mBaru').addEventListener('click',()=>{ST.mode='baru';applyMode();render();});
+$('#mBerjalan').addEventListener('click',()=>{ST.mode='berjalan';applyMode();render();});
+
+render();
+</script>
+</body>
+</html>

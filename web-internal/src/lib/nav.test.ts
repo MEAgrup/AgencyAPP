@@ -201,6 +201,27 @@ describe('visibleNav — Alat (embedded HTML tools)', () => {
   it('is hidden while the role is still loading (gated, not universal)', () => {
     expect(hrefs(null)).not.toContain(VF);
   });
+
+  // "AM Co-Pilot" (MEA AM Cockpit) — same audience & predicate as video-factory
+  // above, so the same three checks apply.
+  const CP = '/tools/am-copilot';
+
+  it('AM Co-Pilot: Account and Creative staff see it, other divisions do not', () => {
+    expect(hrefs(role('Account', 'staff'))).toContain(CP);
+    expect(hrefs(role('Creative', 'staff'))).toContain(CP);
+    for (const division of ['Sales', 'Marketing', 'Finance', 'Ads', 'KOL', 'Live Stream']) {
+      expect(hrefs(role(division, 'staff')), `${division} staff must not see it`).not.toContain(CP);
+    }
+  });
+
+  it('AM Co-Pilot: Director and OD see it even outside Creative/Account', () => {
+    expect(hrefs(role('Sales', 'staff', { director: true }))).toContain(CP);
+    expect(hrefs(role('Sales', 'staff', { od: true }))).toContain(CP);
+  });
+
+  it('AM Co-Pilot: hidden while the role is still loading', () => {
+    expect(hrefs(null)).not.toContain(CP);
+  });
 });
 
 describe('visibleNav — Rekap Mingguan (M6D two-party access)', () => {
