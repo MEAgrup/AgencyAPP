@@ -29,7 +29,10 @@ interface RoleMappingBody {
 export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
     const actor = requireActor(request);
-    if (!admin.canReadAdmin(actor)) {
+    // Also readable by whoever can run a mutasi (Director OR HR-division Lead):
+    // the Karyawan page builds its divisi/jabatan picker from this list, so an
+    // HR Lead needs it to do their job, not just Director/OD.
+    if (!admin.canReadAdmin(actor) && !admin.canManageEmployeeAssignment(actor)) {
       return json({ error: admin.MSG_ADMIN_READ_DENIED }, 403);
     }
     const rows = await admin.listRoleMappings(db());

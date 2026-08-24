@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import type { CredentialInfo, EmployeeImportResult } from '@/lib/types';
+import type { CredentialInfo, EmployeeImportResult, RoleMapping } from '@/lib/types';
+import { pairKey, parsePairKey } from '@/lib/role-mapping-pairs';
 
 export default function AdminEmployeesPage() {
   const { role } = useAuth();
@@ -39,6 +40,27 @@ export default function AdminEmployeesPage() {
   const [savingMut, setSavingMut] = useState(false);
   const [mutError, setMutError] = useState<string | null>(null);
   const [mutMsg, setMutMsg] = useState<string | null>(null);
+
+  // Divisi/jabatan are CHOSEN from existing Role Mapping entries, never typed —
+  // a free-text pair that matches no mapping strands the employee with no CDPS
+  // division/level at all (silently, until someone notices they have no access).
+  // A position that doesn't exist yet must be created first at Admin › Role
+  // Mapping; this page only assigns employees to positions that already exist.
+  const [mappings, setMappings] = useState<RoleMapping[] | null>(null);
+  const [mappingsError, setMappingsError] = useState<string | null>(null);
+
+  const loadMappings = useCallback(async () => {
+    try {
+      const res = await api.get<{ data: RoleMapping[] }>('/admin/role-mappings');
+      setMappings(res.data);
+    } catch (err) {
+      setMappingsError(errorMessage(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (canMutate) loadMappings();
+  }, [canMutate, loadMappings]);
 
   // Tambah karyawan manual (bukan lewat CSV/sheet) — same gate as mutasi.
   const [addOpen, setAddOpen] = useState(false);
@@ -79,6 +101,46 @@ export default function AdminEmployeesPage() {
         c.email.toLowerCase().includes(q),
     );
   }, [creds, query]);
+
+  // Grouped by divisi for the <optgroup>s below; already ordered divisi/jabatan
+  // by the API, so groups and options within them come out sorted for free.
+  const mappingsByDivisi = useMemo(() => {
+    const groups = new Map<string, RoleMapping[]>();
+    for (const m of mappings ?? []) {
+      const list = groups.get(m.divisi) ?? [];
+      list.push(m);
+      groups.set(m.divisi, list);
+    }
+    return [...groups.entries()];
+  }, [mappings]);
+
+  const mappedKeys = useMemo(
+    () => new Set((mappings ?? []).map((m) => pairKey(m.divisi, m.jabatan))),
+    [mappings],
+  );
+
+  /** The <select> value for a divisi/jabatan pair — "" only when both are empty. */
+  function pairSelectValue(divisi: string, jabatan: string): string {
+    return divisi === '' && jabatan === '' ? '' : pairKey(divisi, jabatan);
+  }
+
+  /** One <select> of every mapped divisi+jabatan, grouped by divisi. */
+  function PositionOptions() {
+    return (
+      <>
+        <option value="">— pilih divisi + jabatan —</option>
+        {mappingsByDivisi.map(([divisi, list]) => (
+          <optgroup key={divisi} label={divisi}>
+            {list.map((m) => (
+              <option key={pairKey(m.divisi, m.jabatan)} value={pairKey(m.divisi, m.jabatan)}>
+                {m.jabatan} — {m.division}/{m.level}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </>
+    );
+  }
 
   async function handleReset() {
     setResetMsg(null);
@@ -201,8 +263,7 @@ export default function AdminEmployeesPage() {
     newEmp.employee_id.trim() !== '' &&
     newEmp.nama.trim() !== '' &&
     newEmp.email.trim() !== '' &&
-    newEmp.divisi.trim() !== '' &&
-    newEmp.jabatan.trim() !== '';
+    mappedKeys.has(pairKey(newEmp.divisi, newEmp.jabatan));
 
   return (
     <div className="stack">
@@ -337,8 +398,9 @@ export default function AdminEmployeesPage() {
               <p className="muted">
                 Menambah satu karyawan tanpa CSV. <strong>ID (NIK)</strong> diterbitkan HRIS —
                 masukkan apa adanya. Karyawan langsung bisa login dengan password sementara dan
-                wajib menggantinya saat login pertama. Divisi/Jabatan menentukan peran lewat Role
-                Mapping (petakan bila belum ada).
+                wajib menggantinya saat login pertama. Divisi + Jabatan dipilih dari posisi yang
+                sudah dipetakan di Role Mapping — kalau posisinya belum ada, buat dulu di Admin
+                &rsaquo; Role Mapping, baru kembali ke sini.
               </p>
             </div>
             <div className="grid2" style={{ gap: 12 }}>
@@ -368,23 +430,28 @@ export default function AdminEmployeesPage() {
                   onChange={(e) => setNewEmp({ ...newEmp, email: e.target.value })}
                 />
               </label>
-              <label className="stack" style={{ gap: 4 }}>
-                <span className="muted">Divisi *</span>
-                <input
+              <label className="stack" style={{ gap: 4, gridColumn: '1 / -1' }}>
+                <span className="muted">Divisi + Jabatan *</span>
+                <select
                   className="input"
-                  value={newEmp.divisi}
-                  onChange={(e) => setNewEmp({ ...newEmp, divisi: e.target.value })}
-                  placeholder="mis. ACCOUNT"
-                />
-              </label>
-              <label className="stack" style={{ gap: 4 }}>
-                <span className="muted">Jabatan *</span>
-                <input
-                  className="input"
-                  value={newEmp.jabatan}
-                  onChange={(e) => setNewEmp({ ...newEmp, jabatan: e.target.value })}
-                  placeholder="mis. ACCOUNT MANAGER"
-                />
+                  value={pairSelectValue(newEmp.divisi, newEmp.jabatan)}
+                  onChange={(e) => {
+                    const parsed = parsePairKey(e.target.value);
+                    setNewEmp({
+                      ...newEmp,
+                      divisi: parsed?.divisi ?? '',
+                      jabatan: parsed?.jabatan ?? '',
+                    });
+                  }}
+                >
+                  <PositionOptions />
+                </select>
+                {mappingsError && <span className="alert alertError" style={{ fontSize: 12 }}>{mappingsError}</span>}
+                {mappings && mappings.length === 0 && (
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    Belum ada Role Mapping. Buat posisinya dulu di Admin &rsaquo; Role Mapping.
+                  </span>
+                )}
               </label>
               <label className="stack" style={{ gap: 4 }}>
                 <span className="muted">Password sementara (opsional)</span>
@@ -454,30 +521,31 @@ export default function AdminEmployeesPage() {
                       <td>{c.employee_id}</td>
                       <td>{c.nama}</td>
                       <td>{c.email}</td>
-                      <td>
+                      <td colSpan={editing ? 2 : 1}>
                         {editing ? (
-                          <input
+                          <select
                             className="input"
-                            value={editDivisi}
-                            onChange={(e) => setEditDivisi(e.target.value)}
-                            placeholder="Divisi"
-                          />
+                            value={pairSelectValue(editDivisi, editJabatan)}
+                            onChange={(e) => {
+                              const parsed = parsePairKey(e.target.value);
+                              setEditDivisi(parsed?.divisi ?? '');
+                              setEditJabatan(parsed?.jabatan ?? '');
+                            }}
+                          >
+                            {editDivisi !== '' &&
+                              editJabatan !== '' &&
+                              !mappedKeys.has(pairKey(editDivisi, editJabatan)) && (
+                                <option value={pairKey(editDivisi, editJabatan)}>
+                                  (belum dipetakan) {editDivisi} &middot; {editJabatan}
+                                </option>
+                              )}
+                            <PositionOptions />
+                          </select>
                         ) : (
                           c.divisi
                         )}
                       </td>
-                      <td>
-                        {editing ? (
-                          <input
-                            className="input"
-                            value={editJabatan}
-                            onChange={(e) => setEditJabatan(e.target.value)}
-                            placeholder="Jabatan"
-                          />
-                        ) : (
-                          c.jabatan
-                        )}
-                      </td>
+                      {!editing && <td>{c.jabatan}</td>}
                       <td>
                         <span className={`badge badge-${c.has_password ? 'green' : 'red'}`}>
                           {c.has_password ? 'Ya' : 'Belum'}
@@ -502,7 +570,7 @@ export default function AdminEmployeesPage() {
                               <button
                                 type="button"
                                 className="btn btnPrimary"
-                                disabled={savingMut || editDivisi.trim() === '' || editJabatan.trim() === ''}
+                                disabled={savingMut || !mappedKeys.has(pairKey(editDivisi, editJabatan))}
                                 onClick={() => saveEdit(c.employee_id)}
                               >
                                 {savingMut ? 'Menyimpan...' : 'Simpan'}
