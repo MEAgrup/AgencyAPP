@@ -557,6 +557,32 @@ export const MSG_KOMPETITOR_REQUIRED = '[minimal satu kompetitor wajib diisi per
 export const MSG_TIDAK_ADA_BELUM_DIJAWAB =
   '[pertanyaan ini wajib dijawab — isi daftarnya atau centang "tidak ada"]';
 
+/**
+ * Section B shape-error messages (owner QA 2026-08-24, DECISIONS).
+ *
+ * `saveChannels` validates every field of every channel and throws on the FIRST
+ * bad value, which aborts the whole Section B save — so a single out-of-range or
+ * mistyped cell used to lose all of the AM's other work behind one generic
+ * `[data tidak lengkap …]`. The AM's report was exactly this: "sudah mengisi data
+ * lengkap tapi tidak bisa disimpan", with no clue which field. These builders name
+ * the offending field (and the rule it broke) so the failure is actionable. The
+ * PRD does not quote strings for shape errors, so they are coined here — same
+ * precedent as MSG_TIDAK_ADA_BELUM_DIJAWAB.
+ *
+ * Currency/number cells are free text (the money invariant keeps them as integer
+ * minor-unit strings), so an Indonesian-formatted "75.000" / "Rp 75.000" reaches
+ * `Number()` as NaN. Rather than silently reinterpret it (75 vs 75.000 is
+ * ambiguous, and guessing corrupts a baseline figure), the message tells the AM to
+ * enter digits only.
+ */
+export const msgFieldNotNumber = (label: string): string =>
+  `[${label} harus berupa angka tanpa titik, koma, atau teks lain (contoh: 26424580)]`;
+export const msgFieldRange = (label: string, min: number, max: number): string =>
+  `[${label} harus bernilai antara ${min} dan ${max}]`;
+export const msgFieldNegative = (label: string): string =>
+  `[${label} tidak boleh bernilai negatif]`;
+export const msgFieldInvalid = (label: string): string => `[${label} tidak valid]`;
+
 // ---------------------------------------------------------------------------
 // Section C — Diagnosa & Akar Masalah (A-07)
 // ---------------------------------------------------------------------------
@@ -2237,6 +2263,12 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
      where c.strategi_id = ${id}
      order by b.channel_id asc, b.month_index asc`;
 
+  // B-0.6 lampiran autofill (owner QA 2026-08-24): the form shows the sales-team
+  // store link as a default before the first save. This is display-only — the
+  // submit gate reads the raw row, and `saveChannels` is what actually persists
+  // the default, so a channel is never falsely counted complete on read.
+  const storeLinks = await clientStoreLinksByChannel(sql, head.clientId);
+
   const channels = channelRows.map((c) => {
     const baseline = baselineRows
       .filter((b) => Number(b.channel_id) === Number(c.id))
@@ -2263,7 +2295,7 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
       prasyaratPembukaan: strArray(c.prasyarat_pembukaan),
       sumberData: c.sumber_data,
       tanggalAmbilData: dateOrNull(c.tanggal_ambil_data),
-      lampiran: c.lampiran,
+      lampiran: (c.lampiran ?? '').trim() !== '' ? c.lampiran : lampiranDefaultFor(c.channel, storeLinks),
       periodeBaselineBulan: c.periode_baseline_bulan,
       periodeMulai: dateOrNull(c.periode_mulai),
       periodeAkhir: dateOrNull(c.periode_akhir),
@@ -3495,6 +3527,57 @@ export async function saveDiagnosa(
 }
 
 /**
+ * B-3.6 Listing layak % — DERIVED, read-only (owner QA 2026-08-24, DECISIONS).
+ *
+ * Redefined from the PRD's "% SKU dengan foto & deskripsi layak" (a manual
+ * observation) to `SKU aktif ÷ SKU terdaftar × 100`, an auto-calculated listing-
+ * health proxy the AM can never type — house rule #4. Division-by-zero renders as
+ * `null` (house rule #7: never an error), so an unfilled SKU count leaves it blank
+ * and the B-3 gate still asks for SKU terdaftar / SKU aktif themselves.
+ */
+export function computeListingLayak(
+  skuAktif: number | null | undefined,
+  skuListed: number | null | undefined,
+): number | null {
+  if (skuAktif === null || skuAktif === undefined) return null;
+  if (skuListed === null || skuListed === undefined || Number(skuListed) <= 0) return null;
+  return Math.round((Number(skuAktif) / Number(skuListed)) * 100);
+}
+
+/**
+ * B-0.6 Lampiran autofill — the store link the sales team recorded on the client
+ * (owner QA 2026-08-24, DECISIONS). Per-channel `client_platforms.store_link` wins
+ * (each platform has its own store URL); the client-level `clients.link_toko`
+ * ("Link Toko") is the fallback. Returned as a channel→link map so `saveChannels`
+ * can fill a blank lampiran and `loadDetail` can pre-fill the form. Editable: a
+ * lampiran the AM typed is never overwritten.
+ */
+async function clientStoreLinksByChannel(
+  sql: Queryable,
+  clientId: string,
+): Promise<{ byChannel: Map<string, string>; fallback: string | null }> {
+  const byChannel = new Map<string, string>();
+  const rows = await sql<{ platform: string; store_link: string | null }[]>`
+    select platform, store_link from client_platforms where client_id = ${clientId}`;
+  for (const r of rows) {
+    const link = (r.store_link ?? '').trim();
+    if (link !== '') byChannel.set(r.platform, link);
+  }
+  const cli = await sql<{ link_toko: string | null }[]>`
+    select link_toko from clients where id = ${clientId}`;
+  const fallback = (cli[0]?.link_toko ?? '').trim() || null;
+  return { byChannel, fallback };
+}
+
+/** The lampiran default for one channel: per-platform store link, else Link Toko. */
+function lampiranDefaultFor(
+  channel: string,
+  links: { byChannel: Map<string, string>; fallback: string | null },
+): string | null {
+  return links.byChannel.get(channel) ?? links.fallback;
+}
+
+/**
  * saveChannels replaces the Section B-0 blocks.
  *
  * Rule 4 and Rule 5/5a are validated here AND enforced by CHECK constraints. The
@@ -3509,15 +3592,22 @@ export async function saveChannels(
 ): Promise<StrategiDetail> {
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
-    await requireDraftAndWriter(tx, actor, id);
+    const head = await requireDraftAndWriter(tx, actor, id);
     for (const c of channels) {
       validateChannel(c);
     }
+    // B-0.6 lampiran autofill source — resolved once per save (owner QA 2026-08-24).
+    const storeLinks = await clientStoreLinksByChannel(tx, head.clientId);
     // Deleting the channel cascades its baseline months — intentional: a channel
     // that is no longer in scope must not leave orphan numbers that Section C
     // could still cite (Rule 6).
     await tx`delete from strategi_channel where strategi_id = ${id}`;
     for (const c of channels) {
+      // B-0.6: keep what the AM typed; only a BLANK lampiran falls back to the
+      // store link the sales team recorded (per-channel, else client Link Toko).
+      const lampiran = nullIfBlank(c.lampiran) ?? lampiranDefaultFor(c.channel, storeLinks);
+      // B-3.6: derived, never taken from the wire (see computeListingLayak).
+      const listingLayak = computeListingLayak(c.skuAktif, c.skuListed);
       await tx`
         insert into strategi_channel
           (strategi_id, channel, channel_lain, status_channel, nama_toko, url_toko,
@@ -3550,7 +3640,7 @@ export async function saveChannels(
            ${nullIfBlank(c.badge)}, ${nullIfBlank(c.targetTanggalLive)},
            ${(c.prasyaratPembukaan ?? []) as never},
            ${nullIfBlank(c.sumberData)}, ${nullIfBlank(c.tanggalAmbilData)},
-           ${nullIfBlank(c.lampiran)}, ${c.periodeBaselineBulan ?? null},
+           ${lampiran}, ${c.periodeBaselineBulan ?? null},
            ${nullIfBlank(c.periodeMulai)}, ${nullIfBlank(c.periodeAkhir)},
            ${nullIfBlank(c.alasanPeriodePendek)}, ${nullIfBlank(c.catatanPeriodePendek)},
            ${c.prioritas ?? null}, ${nullIfBlank(c.prioritasAlasan)},
@@ -3561,7 +3651,7 @@ export async function saveChannels(
            ${nullIfBlank(c.entryPointUtama)}, ${nullIfBlank(c.entryPointCatatan)},
            ${c.skuListed ?? null}, ${c.skuAktif ?? null}, ${c.skuPareto80 ?? null},
            ${(c.topSku ?? []).map(topSkuToJson) as never}, ${c.skuSlowMoving ?? null},
-           ${(c.skuStokKritis ?? []) as never}, ${c.listingLayakPersen ?? null},
+           ${(c.skuStokKritis ?? []) as never}, ${listingLayak},
            ${c.ratingToko ?? null}, ${c.jumlahUlasan ?? null},
            ${c.chatResponseRatePersen ?? null}, ${c.chatResponseMenit ?? null},
            ${c.pesananTerlambatPersen ?? null}, ${c.poinPenalti ?? null},
@@ -3633,18 +3723,24 @@ function validateChannel(c: ChannelInput): void {
   // *skips* the historical baseline, not that a figure supplied anyway may be
   // out of range. Whether those figures are REQUIRED is decided at submit.
   validateChannelBaselineShape(c);
-  // Window shape when supplied: a 1–6 month count and well-formed dates. The
-  // window's PRESENCE is a submit gate; only its wrongness is refused here.
+  // Window shape when supplied: a 1–6 month count (PRD B-0.7, DB CHECK) and
+  // well-formed dates. The window's PRESENCE is a submit gate; only its wrongness
+  // is refused here.
   if (c.periodeBaselineBulan !== null && c.periodeBaselineBulan !== undefined) {
     const bulan = c.periodeBaselineBulan;
     if (!Number.isInteger(bulan) || bulan < 1 || bulan > 6) {
-      throw new ValidationError(MSG_INCOMPLETE);
+      throw new ValidationError(msgFieldRange('Periode baseline (B-0.7)', 1, 6));
     }
   }
-  for (const d of [c.targetTanggalLive, c.periodeMulai, c.periodeAkhir, c.tanggalAmbilData]) {
+  for (const [d, label] of [
+    [c.targetTanggalLive, 'Tanggal target live (B-0.5)'],
+    [c.periodeMulai, 'Bulan mulai baseline (B-0.7)'],
+    [c.periodeAkhir, 'Bulan akhir baseline (B-0.7)'],
+    [c.tanggalAmbilData, 'Tanggal ambil data (B-0.6)'],
+  ] as const) {
     const s = (d ?? '').trim();
     if (s !== '' && !RE_DATE.test(s)) {
-      throw new ValidationError(MSG_INCOMPLETE);
+      throw new ValidationError(msgFieldInvalid(label));
     }
   }
 }
@@ -3658,68 +3754,69 @@ function validateChannel(c: ChannelInput): void {
  * service-role caller never passes through here), this is the BI message.
  */
 function validateChannelBaselineShape(c: ChannelInput): void {
-  const pct = (v: number | null | undefined): void => {
+  // Each helper NAMES the field it is checking, so a save that fails behind one
+  // bad cell tells the AM exactly which one (owner QA 2026-08-24): the old generic
+  // `[data tidak lengkap]` aborted the whole Section B save with no clue, which is
+  // the "sudah lengkap tapi tidak bisa disimpan" they reported.
+  const pct = (v: number | null | undefined, label: string): void => {
     if (v === null || v === undefined) return;
     const n = Number(v);
-    if (Number.isNaN(n) || n < 0 || n > 100) throw new ValidationError(MSG_INCOMPLETE);
+    if (Number.isNaN(n)) throw new ValidationError(msgFieldNotNumber(label));
+    if (n < 0 || n > 100) throw new ValidationError(msgFieldRange(label, 0, 100));
   };
-  const nonNeg = (v: number | null | string | undefined): void => {
+  const nonNeg = (v: number | null | string | undefined, label: string): void => {
     if (v === null || v === undefined || v === '') return;
     const n = Number(v);
-    if (Number.isNaN(n) || n < 0) throw new ValidationError(MSG_INCOMPLETE);
+    if (Number.isNaN(n)) throw new ValidationError(msgFieldNotNumber(label));
+    if (n < 0) throw new ValidationError(msgFieldNegative(label));
   };
-  const subset = (vals: string[] | undefined, set: readonly string[]): void => {
+  const subset = (vals: string[] | undefined, set: readonly string[], label: string): void => {
     for (const v of vals ?? []) {
-      if (!set.includes(v)) throw new ValidationError(MSG_INCOMPLETE);
+      if (!set.includes(v)) throw new ValidationError(msgFieldInvalid(label));
     }
   };
-  const enumOrNull = (v: string | null | undefined, set: readonly string[]): void => {
+  const enumOrNull = (v: string | null | undefined, set: readonly string[], label: string): void => {
     const s = (v ?? '').trim();
-    if (s !== '' && !set.includes(s)) throw new ValidationError(MSG_INCOMPLETE);
+    if (s !== '' && !set.includes(s)) throw new ValidationError(msgFieldInvalid(label));
   };
 
-  for (const v of [
-    c.conversionRatePersen,
-    c.listingLayakPersen,
-    c.chatResponseRatePersen,
-    c.pesananTerlambatPersen,
-    c.bebanPromoPersen,
-    c.komisiOpenPersen,
-    c.komisiTargetPersen,
-  ]) {
-    pct(v);
-  }
+  // B-3.6 (Listing layak %) is NOT validated here: since 2026-08-24 it is a
+  // read-only derived field (SKU aktif ÷ SKU terdaftar, computed in saveChannels),
+  // so any value the wire still carries is ignored, never gated.
+  pct(c.conversionRatePersen, 'Conversion rate % (B-2.2)');
+  pct(c.chatResponseRatePersen, 'Chat response rate % (B-4.2)');
+  pct(c.pesananTerlambatPersen, 'Pesanan terlambat % (B-4.3)');
+  pct(c.bebanPromoPersen, 'Beban promo % (B-8.3)');
+  pct(c.komisiOpenPersen, 'Komisi open % (B-6.3)');
+  pct(c.komisiTargetPersen, 'Komisi target %');
   // B-6.2 (revisi DECISIONS 2026-08-23): % GMV affiliate = GMV-share lintas-export
   // yang TUMPANG-TINDIH (affGmv Transaction Creator / totGMV toko). Untuk seller
   // berat-afiliasi rasionya wajar >100% (over-attribution) — sama seperti komposisi
   // trafik B-2.3. Batas atas 100 dilepas; yang tersisa hanya `>= 0` (share negatif
   // tak bermakna). Cermin CHECK `ck_strch_persen_range` pasca-migrasi b6-overlap.
-  nonNeg(c.gmvAffiliatePersen);
-  for (const v of [
-    c.pengunjungPerBulan,
-    c.skuListed,
-    c.skuAktif,
-    c.skuPareto80,
-    c.skuSlowMoving,
-    c.jumlahUlasan,
-    c.chatResponseMenit,
-    c.poinPenalti,
-    c.jumlahKampanyeAktif,
-    c.affiliateAktif30Hari,
-    c.jumlahVideoPerBulan,
-    c.totalViews,
-    c.jamLivePerBulan,
-  ]) {
-    nonNeg(v);
-  }
-  nonNeg(c.gmvAffiliate);
-  nonNeg(c.gmvVideo);
-  nonNeg(c.gmvLive);
+  nonNeg(c.gmvAffiliatePersen, '% GMV dari affiliate (B-6.2)');
+  nonNeg(c.pengunjungPerBulan, 'Pengunjung per bulan (B-2.1)');
+  nonNeg(c.skuListed, 'SKU terdaftar (B-3.1)');
+  nonNeg(c.skuAktif, 'SKU aktif');
+  nonNeg(c.skuPareto80, 'SKU penyumbang 80% GMV (B-3.2)');
+  nonNeg(c.skuSlowMoving, 'SKU slow moving');
+  nonNeg(c.jumlahUlasan, 'Jumlah ulasan');
+  nonNeg(c.chatResponseMenit, 'Response time menit (B-4.2)');
+  nonNeg(c.poinPenalti, 'Poin penalti (B-4.4)');
+  nonNeg(c.jumlahKampanyeAktif, 'Jumlah kampanye aktif (B-5.3)');
+  nonNeg(c.affiliateAktif30Hari, 'Affiliate aktif 30 hari (B-6.1)');
+  nonNeg(c.jumlahVideoPerBulan, 'Video per bulan (B-7.1)');
+  nonNeg(c.totalViews, 'Total views');
+  nonNeg(c.jamLivePerBulan, 'Jam live per bulan (B-7.2)');
+  nonNeg(c.gmvAffiliate, 'GMV dari affiliate');
+  nonNeg(c.gmvVideo, 'GMV dari video');
+  nonNeg(c.gmvLive, 'GMV dari live');
 
   // B-4.1: platform ratings are a 0–5 scale, not a percentage.
   if (c.ratingToko !== null && c.ratingToko !== undefined) {
     const r = Number(c.ratingToko);
-    if (Number.isNaN(r) || r < 0 || r > 5) throw new ValidationError(MSG_INCOMPLETE);
+    if (Number.isNaN(r)) throw new ValidationError(msgFieldNotNumber('Rating toko (B-4.1)'));
+    if (r < 0 || r > 5) throw new ValidationError(msgFieldRange('Rating toko (B-4.1)', 0, 5));
   }
   // B-3.1/B-3.2: active cannot exceed listed, and the Pareto count cannot exceed
   // active. A baseline that breaks this is a typo, and Section C will cite it.
@@ -3730,7 +3827,7 @@ function validateChannelBaselineShape(c: ChannelInput): void {
     c.skuAktif !== undefined &&
     Number(c.skuAktif) > Number(c.skuListed)
   ) {
-    throw new ValidationError(MSG_INCOMPLETE);
+    throw new ValidationError('[SKU aktif tidak boleh melebihi SKU terdaftar (B-3.1)]');
   }
   if (
     c.skuAktif !== null &&
@@ -3739,36 +3836,41 @@ function validateChannelBaselineShape(c: ChannelInput): void {
     c.skuPareto80 !== undefined &&
     Number(c.skuPareto80) > Number(c.skuAktif)
   ) {
-    throw new ValidationError(MSG_INCOMPLETE);
+    throw new ValidationError('[SKU penyumbang 80% GMV (B-3.2) tidak boleh melebihi SKU aktif]');
   }
 
-  enumOrNull(c.entryPointUtama, ENTRY_POINTS);
-  enumOrNull(c.programSampel, SAMPLE_PROGRAMS);
-  enumOrNull(c.hostLive, LIVE_HOSTS);
-  enumOrNull(c.studioLive, STUDIO_STATES);
-  subset(c.tipeKampanye, CAMPAIGN_TYPES);
-  subset(c.programPlatform, PLATFORM_PROGRAMS);
-  subset(c.kompetitorLebihBaik, COMPETITOR_EDGES);
+  enumOrNull(c.entryPointUtama, ENTRY_POINTS, 'Entry point utama (B-2.4)');
+  enumOrNull(c.programSampel, SAMPLE_PROGRAMS, 'Program sampel / seeding (B-6.5)');
+  enumOrNull(c.hostLive, LIVE_HOSTS, 'Host live (B-7.3)');
+  enumOrNull(c.studioLive, STUDIO_STATES, 'Studio (B-7.4)');
+  subset(c.tipeKampanye, CAMPAIGN_TYPES, 'Tipe kampanye (B-5.3)');
+  subset(c.programPlatform, PLATFORM_PROGRAMS, 'Program platform (B-8.2)');
+  subset(c.kompetitorLebihBaik, COMPETITOR_EDGES, 'Kompetitor lebih baik dalam hal (B-9.2)');
 
   // The parenthetical counts in B-3.3 ("(5)") and B-9.1 ("(3)") are read as
   // maximums — see TOP_SKU_MAX. Over the cap is a form that let the AM keep
   // adding rows; under it is an honest short list.
-  if ((c.topSku ?? []).length > TOP_SKU_MAX) throw new ValidationError(MSG_INCOMPLETE);
-  if ((c.kompetitor ?? []).length > KOMPETITOR_MAX) throw new ValidationError(MSG_INCOMPLETE);
+  if ((c.topSku ?? []).length > TOP_SKU_MAX)
+    throw new ValidationError(`[maksimal ${TOP_SKU_MAX} SKU teratas (B-3.3)]`);
+  if ((c.kompetitor ?? []).length > KOMPETITOR_MAX)
+    throw new ValidationError(`[maksimal ${KOMPETITOR_MAX} kompetitor (B-9.1)]`);
   for (const s of c.topSku ?? []) {
-    if (String(s.nama ?? '').trim() === '') throw new ValidationError(MSG_INCOMPLETE);
-    nonNeg(s.unitTerjual);
-    nonNeg(s.gmv);
-    nonNeg(s.hargaJual);
-    pct(s.marginPersen);
+    if (String(s.nama ?? '').trim() === '')
+      throw new ValidationError('[nama SKU wajib diisi pada setiap baris Top SKU (B-3.3)]');
+    nonNeg(s.unitTerjual, `Unit terjual SKU "${s.nama}" (B-3.3)`);
+    nonNeg(s.gmv, `GMV SKU "${s.nama}" (B-3.3)`);
+    nonNeg(s.hargaJual, `Harga jual SKU "${s.nama}" (B-3.3)`);
+    pct(s.marginPersen, `Margin % SKU "${s.nama}" (B-3.3)`);
   }
   for (const k of c.kompetitor ?? []) {
-    if (String(k.nama ?? '').trim() === '') throw new ValidationError(MSG_INCOMPLETE);
-    nonNeg(k.hargaSebanding);
-    nonNeg(k.estimasiPenjualanBulan);
+    if (String(k.nama ?? '').trim() === '')
+      throw new ValidationError('[nama kompetitor wajib diisi pada setiap baris (B-9.1)]');
+    nonNeg(k.hargaSebanding, `Harga produk sebanding kompetitor "${k.nama}" (B-9.1)`);
+    nonNeg(k.estimasiPenjualanBulan, `Estimasi penjualan/bulan kompetitor "${k.nama}" (B-9.1)`);
   }
   for (const v of c.voucherAktif ?? []) {
-    if (String(v.tipe ?? '').trim() === '') throw new ValidationError(MSG_INCOMPLETE);
+    if (String(v.tipe ?? '').trim() === '')
+      throw new ValidationError('[tipe voucher wajib diisi pada setiap baris (B-8.1)]');
   }
 
   // B-2.3 (revisi DECISIONS 2026-08-22): komposisi trafik = GMV-share platform
@@ -3778,18 +3880,12 @@ function validateChannelBaselineShape(c: ChannelInput): void {
   // supaya "pas" dan menghapus sinyal tumpang-tindih yang justru mau dilihat.
   // Yang tersisa: tiap bucket, bila diisi, tak boleh negatif (share negatif tak
   // bermakna). Cermin CHECK `ck_strch_persen_range` pasca-migrasi b23.
-  for (const v of [
-    c.trafikOrganikPersen,
-    c.trafikIklanPersen,
-    c.trafikAffiliatePersen,
-    c.trafikLivePersen,
-    c.trafikVideoPersen,
-    c.trafikLuarPersen,
-  ]) {
-    if (v === null || v === undefined) continue;
-    const n = Number(v);
-    if (Number.isNaN(n) || n < 0) throw new ValidationError(MSG_INCOMPLETE);
-  }
+  nonNeg(c.trafikOrganikPersen, 'Komposisi trafik Organik % (B-2.3)');
+  nonNeg(c.trafikIklanPersen, 'Komposisi trafik Iklan % (B-2.3)');
+  nonNeg(c.trafikAffiliatePersen, 'Komposisi trafik Affiliate % (B-2.3)');
+  nonNeg(c.trafikLivePersen, 'Komposisi trafik Live % (B-2.3)');
+  nonNeg(c.trafikVideoPersen, 'Komposisi trafik Video % (B-2.3)');
+  nonNeg(c.trafikLuarPersen, 'Komposisi trafik Kartu Produk % (B-2.3)');
 }
 
 /**
@@ -6325,12 +6421,15 @@ function kekuranganSectionB(c: {
     ['Pengunjung per bulan (B-2.1)', c.pengunjung_per_bulan],
     ['Conversion rate % (B-2.2)', c.conversion_rate_persen],
   ]);
+  // B-3.6 (Listing layak %) is NOT gated here: since 2026-08-24 it is derived from
+  // SKU aktif ÷ SKU terdaftar (read-only, computed in saveChannels), so requiring
+  // SKU terdaftar + SKU aktif already covers everything it needs — a separate gate
+  // on the derived value would ask the AM to fill a field they cannot type.
   grup('B-3', [
     ['SKU terdaftar (B-3.1)', c.sku_listed],
     ['SKU aktif', c.sku_aktif],
     ['SKU penyumbang 80% GMV (B-3.2)', c.sku_pareto_80],
     ['SKU slow moving', c.sku_slow_moving],
-    ['Listing layak % (B-3.6)', c.listing_layak_persen],
   ]);
   grup('B-4', [
     ['Rating toko (B-4.1)', c.rating_toko],

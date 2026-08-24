@@ -331,7 +331,7 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
         for (const ch of drafts.channels) {
           if (ch.status_channel === 'Belum Aktif') continue;
           const nMonths = ch.periode_baseline_bulan.trim()
-            ? Math.max(1, Math.min(12, Math.round(Number(ch.periode_baseline_bulan))))
+            ? Math.max(1, Math.min(6, Math.round(Number(ch.periode_baseline_bulan))))
             : 0;
           if (nMonths === 0) continue;
           const saved = channelResult.channels.find((c) => c.channel === ch.channel);

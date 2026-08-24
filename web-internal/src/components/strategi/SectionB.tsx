@@ -682,9 +682,23 @@ export default function SectionB({
 
   const isEksisting = ch.status_channel !== 'Belum Aktif';
 
-  // Derive baseline row count from the declared period length.
+  // B-3.6 Listing layak % — derived, read-only: SKU aktif ÷ SKU terdaftar × 100
+  // (owner QA 2026-08-24). Mirrors the server's `computeListingLayak`; blank SKU
+  // counts or a zero denominator render "—" (house rule #7), never an error.
+  const listingLayakDerived: number | null = (() => {
+    if (!ch.sku_listed.trim() || !ch.sku_aktif.trim()) return null;
+    const listed = Number(ch.sku_listed);
+    const aktif = Number(ch.sku_aktif);
+    if (!Number.isFinite(listed) || listed <= 0 || !Number.isFinite(aktif)) return null;
+    return Math.round((aktif / listed) * 100);
+  })();
+
+  // Derive baseline row count from the declared period length. PRD B-0.7 caps the
+  // window at 1–6 months (DB CHECK `BETWEEN 1 AND 6`); the frontend clamps to the
+  // same range so a 7–12 value can never be entered and then rejected wholesale by
+  // saveChannels (the old max=12 was the "tidak bisa disimpan" trap).
   const nMonths = ch.periode_baseline_bulan.trim()
-    ? Math.max(1, Math.min(12, Math.round(Number(ch.periode_baseline_bulan))))
+    ? Math.max(1, Math.min(6, Math.round(Number(ch.periode_baseline_bulan))))
     : 0;
 
   // Ensure the baseline array has exactly nMonths rows (adding empties, trimming
@@ -919,11 +933,12 @@ export default function SectionB({
           </label>
           <label className="field">
             <span className="muted" style={{ fontSize: 12 }}>
-              Lampiran (link/path) {provInherited && <InheritedChip />}
+              Lampiran (link/path)
             </span>
             <input
               value={ch.lampiran}
-              disabled={disabled || provInherited}
+              disabled={disabled}
+              placeholder="Otomatis dari Link Toko — bisa diganti"
               onChange={(e) => setCh({ lampiran: e.target.value })}
             />
           </label>
@@ -933,7 +948,7 @@ export default function SectionB({
         {isEksisting && (
           <div style={{ marginTop: 8 }}>
             <span className="muted" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-              Periode baseline (B-0.7) — berapa bulan data historis yang dikumpulkan (min 1, max 12)
+              Periode baseline (B-0.7) — berapa bulan data historis yang dikumpulkan (min 1, max 6)
             </span>
             <div className="formRow">
               <label className="field">
@@ -943,7 +958,7 @@ export default function SectionB({
                 <input
                   type="number"
                   min={1}
-                  max={12}
+                  max={6}
                   value={ch.periode_baseline_bulan}
                   disabled={disabled || periodeInherited}
                   onChange={(e) => setCh({ periode_baseline_bulan: e.target.value })}
@@ -1248,14 +1263,19 @@ export default function SectionB({
                 />
               </label>
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Listing layak % (B-3.6)</span>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Listing layak % (B-3.6) <span className="badge">otomatis</span>
+                </span>
+                {/* B-3.6 is derived, read-only: SKU aktif ÷ SKU terdaftar × 100
+                    (owner QA 2026-08-24). Division-by-zero renders "—", never an
+                    error (house rule #7). The server recomputes it on save; this
+                    is a live preview of the same formula. */}
                 <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={ch.listing_layak_persen}
-                  disabled={disabled}
-                  onChange={(e) => setCh({ listing_layak_persen: e.target.value })}
+                  type="text"
+                  readOnly
+                  value={listingLayakDerived === null ? '—' : `${listingLayakDerived}%`}
+                  title="Dihitung otomatis dari SKU aktif ÷ SKU terdaftar"
+                  style={{ background: 'var(--bg-muted, #f3f4f6)' }}
                 />
               </label>
             </div>

@@ -125,7 +125,10 @@ describe('mergeBaselinePrefill (RAB-19 warisi yang bersumber saja)', () => {
     const [ch] = mergeBaselinePrefill([blank('TikTok Shop')], prefill({}));
     expect(ch.sumber_data).toBe('TikTok Seller Center export');
     expect(ch.tanggal_ambil_data).toBe('2026-08-02');
-    expect(ch.lampiran).toBe('ra/tiktok.xlsx');
+    // B-0.6 lampiran is NO LONGER inherited from the export filename (owner QA
+    // 2026-08-24): it autofills from the client's Link Toko, server-side. The
+    // merge leaves it blank so that default can take effect.
+    expect(ch.lampiran).toBe('');
     expect(ch.periode_baseline_bulan).toBe('3');
     expect(ch.baseline).toHaveLength(3);
     // month_index is 1-based end to end (DB CHECK BETWEEN 1 AND 6). A 0-based
