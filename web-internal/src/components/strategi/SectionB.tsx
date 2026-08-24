@@ -965,18 +965,18 @@ export default function SectionB({
                 />
               </label>
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Bulan mulai (YYYY-MM)</span>
+                <span className="muted" style={{ fontSize: 12 }}>Tanggal mulai periode</span>
                 <input
-                  type="month"
+                  type="date"
                   value={ch.periode_mulai}
                   disabled={disabled}
                   onChange={(e) => setCh({ periode_mulai: e.target.value })}
                 />
               </label>
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Bulan akhir (YYYY-MM)</span>
+                <span className="muted" style={{ fontSize: 12 }}>Tanggal akhir periode</span>
                 <input
-                  type="month"
+                  type="date"
                   value={ch.periode_akhir}
                   disabled={disabled}
                   onChange={(e) => setCh({ periode_akhir: e.target.value })}

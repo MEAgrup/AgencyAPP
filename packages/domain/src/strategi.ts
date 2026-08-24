@@ -304,7 +304,15 @@ export const ACCESS_KINDS = [
 ] as const;
 export type AccessKind = (typeof ACCESS_KINDS)[number];
 
-export const ACCESS_STATES = ['sudah', 'pending', 'ditolak'] as const;
+/**
+ * A-15 status (owner QA 2026-08-24, DECISIONS): a 4th value `tidak_butuh`
+ * covers an access this channel never needs (e.g. Affiliate Center on a
+ * channel that sells nothing through affiliates) — without it, AMs picked
+ * `pending` for these, which never resolves and pollutes the SPV blocker
+ * dashboard with access that was never actually requested. Deviates from the
+ * PRD's 3-value list (§4 A-15); PRD annotated.
+ */
+export const ACCESS_STATES = ['sudah', 'pending', 'ditolak', 'tidak_butuh'] as const;
 export type AccessState = (typeof ACCESS_STATES)[number];
 
 /**
@@ -514,6 +522,13 @@ export const MSG_AKSES_MATRIX_REQUIRED =
 /** A-16 — a blocker without a target date is a complaint, not a work item. */
 export const MSG_AKSES_BLOCKER_DATE =
   '[blocker akses wajib menyertakan target tanggal beres]';
+/**
+ * A-16 (owner QA 2026-08-24) — only a REJECTED access can stall execution.
+ * `sudah`/`pending`/`tidak_butuh` never block the next step, so flagging one
+ * of them `memblokir` is refused here instead of quietly accepted.
+ */
+export const MSG_AKSES_BLOCKER_STATUS =
+  '[blocker akses (A-16) hanya berlaku untuk status "ditolak"]';
 /** A-15 — the matrix is a matrix: one row per (channel, akses). */
 export const MSG_AKSES_DUPLICATE =
   '[akses yang sama tidak boleh dicatat dua kali untuk satu channel]';
@@ -3191,8 +3206,11 @@ export interface AksesInput {
  * 1. A channel other than `Umum` must be one of THIS Strategi's contracted
  *    channels. An access row against a channel nobody sells on is a blocker
  *    nobody will ever clear, and §5 step 3 puts these rows on the SPV dashboard.
- * 2. A blocker (A-16) must carry a target date. Without one it is a complaint;
- *    with one it is a work item that can fall due.
+ * 2. A blocker (A-16) is only meaningful on a `ditolak` row and must carry a
+ *    target date (owner QA 2026-08-24): `sudah`/`pending`/`tidak_butuh` never
+ *    stop the AM from moving to the next step, so those may not be flagged
+ *    `memblokir`. Without a date a blocker is a complaint; with one it is a
+ *    work item that can fall due.
  */
 export async function saveAkses(
   sql: Sql,
@@ -3230,7 +3248,10 @@ export async function saveAkses(
       seen.add(key);
       const memblokir = r.memblokir === true;
       if (memblokir) {
-        if (r.status === 'sudah' || !RE_DATE.test((r.targetTanggalBeres ?? '').trim())) {
+        if (r.status !== 'ditolak') {
+          throw new ValidationError(MSG_AKSES_BLOCKER_STATUS);
+        }
+        if (!RE_DATE.test((r.targetTanggalBeres ?? '').trim())) {
           throw new ValidationError(MSG_AKSES_BLOCKER_DATE);
         }
       }

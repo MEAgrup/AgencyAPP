@@ -232,6 +232,7 @@ const ACCESS_STATE_LABELS: Record<AccessState, string> = {
   sudah: 'Sudah',
   pending: 'Pending',
   ditolak: 'Ditolak',
+  tidak_butuh: 'Tidak butuh akses',
 };
 
 // ---- Component ------------------------------------------------------------
@@ -589,8 +590,9 @@ export default function SectionA({
       <div className="card">
         <div className="cardHeader">A-15 / A-16 · Akses &amp; Hak per Channel</div>
         <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-          Status akses per channel. Akses yang memblokir eksekusi (A-16) wajib menyertakan target
-          tanggal beres.
+          Status akses per channel. Hanya akses berstatus <strong>Ditolak</strong> yang bisa
+          ditandai memblokir eksekusi (A-16) dan wajib menyertakan target tanggal beres — status
+          lain (Sudah/Pending/Tidak butuh akses) tidak menghentikan langkah berikutnya.
         </p>
         {contractChannels.length === 0 ? (
           <p className="muted" style={{ fontSize: 13 }}>
@@ -632,12 +634,17 @@ export default function SectionA({
                                   target_tanggal_beres: '',
                                   catatan: '',
                                 };
+                                const nextStatus = e.target.value as AccessState;
+                                // Only `ditolak` may block (A-16, owner QA 2026-08-24) — moving
+                                // away from it drops a blocker flag the checkbox can no longer
+                                // show, which would otherwise fail the save silently.
+                                const stillBlocks = nextStatus === 'ditolak' && existing.memblokir;
                                 setAksesCell(
                                   ch as AccessChannel,
                                   ak,
-                                  e.target.value as AccessState,
-                                  existing.memblokir,
-                                  existing.target_tanggal_beres,
+                                  nextStatus,
+                                  stillBlocks,
+                                  stillBlocks ? existing.target_tanggal_beres : '',
                                   existing.catatan,
                                 );
                               }}
@@ -647,7 +654,7 @@ export default function SectionA({
                                 <option key={s} value={s}>{ACCESS_STATE_LABELS[s]}</option>
                               ))}
                             </select>
-                            {row?.status && row.status !== 'sudah' && (
+                            {row?.status === 'ditolak' && (
                               <>
                                 <label style={{ display: 'flex', gap: 4, fontSize: 11, justifyContent: 'center' }}>
                                   <input
