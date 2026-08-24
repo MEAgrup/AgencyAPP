@@ -86,6 +86,15 @@ export const MSG_EMPLOYEE_ADD_DENIED =
   '[hanya Director atau Lead HR yang dapat menambah karyawan]';
 /** Manual add hit an existing employee_id or email (PK / uq_employees_email). */
 export const MSG_EMPLOYEE_EXISTS = '[karyawan dengan ID atau email itu sudah terdaftar]';
+/**
+ * The submitted divisi/jabatan does not match any `role_mappings` row. This is
+ * the server-side twin of the UI picker (web-internal builds its mutasi/add
+ * forms from `GET /admin/role-mappings`, not free text) — the real gate lives
+ * here, per house convention, so a direct API call cannot recreate the O42-style
+ * defect of an employee stranded with no resolvable CDPS division/level.
+ */
+export const MSG_UNMAPPED_POSITION =
+  '[divisi/jabatan tidak dikenali, pilih posisi yang sudah dipetakan di Role Mapping]';
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -254,6 +263,11 @@ export async function updateEmployeeAssignment(
     if (before.length === 0) {
       throw new NotFoundError(MSG_EMPLOYEE_NOT_FOUND);
     }
+    const mapped = await tx<{ id: string }[]>`
+      select id from role_mappings where divisi = ${d} and jabatan = ${j} limit 1`;
+    if (mapped.length === 0) {
+      throw new ValidationError(MSG_UNMAPPED_POSITION);
+    }
     const rows = await tx<
       {
         employee_id: string; nama: string; email: string; divisi: string; jabatan: string;
@@ -346,6 +360,11 @@ export async function addEmployeeManually(
        limit 1`;
     if (clash.length > 0) {
       throw new ConflictError(MSG_EMPLOYEE_EXISTS);
+    }
+    const mapped = await tx<{ id: string }[]>`
+      select id from role_mappings where divisi = ${emp.divisi} and jabatan = ${emp.jabatan} limit 1`;
+    if (mapped.length === 0) {
+      throw new ValidationError(MSG_UNMAPPED_POSITION);
     }
     // Reuse the tested import building blocks (NOT full — never touch other rows).
     const sync = await syncEmployees(tx, [emp], actor.employeeId, { full: false });
