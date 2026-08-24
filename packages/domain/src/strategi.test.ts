@@ -717,13 +717,28 @@ describeDb('Section B — Rules 4, 5 and 5a', () => {
     expect(codes).toContain('B-0.5/Tokopedia');
   });
 
-  it('saves an Eksisting channel with no source attachment, reports B-0.6 at submit (Rule 5)', async () => {
+  it('saves an Eksisting channel with no source data, reports B-0.6 at submit (Rule 5)', async () => {
     const serviceId = await seedService();
     const s = await createStrategi(sql, am(), serviceId, HEADER);
-    const saved = await saveChannels(sql, am(), s.id, [{ ...SHOPEE, lampiran: null }]);
-    expect(saved.channels[0].lampiran).toBeNull();
+    // `sumberData` is NOT autofilled, so a blank one still leaves the baseline
+    // window incomplete and B-0.6 fires. (`lampiran` blank no longer does this on
+    // its own — it autofills from the client Link Toko; see the next test.)
+    const saved = await saveChannels(sql, am(), s.id, [{ ...SHOPEE, sumberData: null }]);
+    expect(saved.channels[0].sumberData).toBeNull();
     const codes = (await checkCompleteness(sql, s.id)).map((m) => m.kode);
     expect(codes).toContain('B-0.6/Shopee');
+  });
+
+  it('B-0.6 lampiran autofills from the client Link Toko when left blank (owner QA 2026-08-24)', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    // The seed client's `link_toko` is https://shopee.co.id/alpha; a blank lampiran
+    // falls back to it (per-channel `client_platforms.store_link` would win first).
+    const saved = await saveChannels(sql, am(), s.id, [{ ...SHOPEE, lampiran: null }]);
+    expect(saved.channels[0].lampiran).toBe('https://shopee.co.id/alpha');
+    // A lampiran the AM typed is never overwritten by the default.
+    const typed = await saveChannels(sql, am(), s.id, [{ ...SHOPEE, lampiran: 'ss-export.png' }]);
+    expect(typed.channels[0].lampiran).toBe('ss-export.png');
   });
 
   it('saves a bare channel (only type + status) and reports B-0.3 identity at submit', async () => {
@@ -750,6 +765,53 @@ describeDb('Section B — Rules 4, 5 and 5a', () => {
     ]);
     codes = (await checkCompleteness(sql, s.id)).map((m) => m.kode);
     expect(codes).not.toContain('B-0.8/Shopee');
+  });
+
+  it('B-3.6 Listing layak % is derived from SKU aktif ÷ SKU terdaftar, not the wire (owner QA 2026-08-24)', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    // SHOPEE: skuAktif 178, skuListed 214 → round(178/214×100)=83. Whatever the
+    // wire carries in listingLayakPersen (54 in the fixture) is ignored.
+    const saved = await saveChannels(sql, am(), s.id, [SHOPEE]);
+    expect(saved.channels[0].listingLayakPersen).toBe(83);
+    // It is not a submit gate of its own — a channel with SKU counts but no other
+    // listing signal is not flagged B-3.6; B-3 only asks for the SKU counts.
+    const codes = (await checkCompleteness(sql, s.id)).map((m) => m.kode);
+    expect(codes.some((k) => k.startsWith('B-3.6'))).toBe(false);
+  });
+
+  it('B-3.6 renders null (not an error) when SKU terdaftar is absent or zero (house rule #7)', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const noListed = await saveChannels(sql, am(), s.id, [{ ...SHOPEE, skuListed: null }]);
+    expect(noListed.channels[0].listingLayakPersen).toBeNull();
+    const zeroListed = await saveChannels(sql, am(), s.id, [
+      { ...SHOPEE, skuListed: 0, skuAktif: 0, skuPareto80: 0 },
+    ]);
+    expect(zeroListed.channels[0].listingLayakPersen).toBeNull();
+  });
+
+  it('a mistyped Section B figure fails with a message that NAMES the field (owner QA 2026-08-24)', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    // A competitor price typed with a comma thousand separator reaches Number()
+    // as NaN. The old generic `[data tidak lengkap]` aborted the whole Section B
+    // save with no clue which cell; now the message names it so the AM fixes that
+    // one instead of losing the rest of the form.
+    await expect(
+      saveChannels(sql, am(), s.id, [
+        {
+          ...SHOPEE,
+          kompetitor: [
+            { nama: 'Toko B', url: 'x', hargaSebanding: '75,000', estimasiPenjualanBulan: '1000' },
+          ],
+        },
+      ]),
+    ).rejects.toThrow(/Harga produk sebanding kompetitor "Toko B"/);
+    // A rating on the wrong scale names the field and its 0–5 range.
+    await expect(
+      saveChannels(sql, am(), s.id, [{ ...SHOPEE, ratingToko: 48 }]),
+    ).rejects.toThrow(/Rating toko \(B-4\.1\) harus bernilai antara 0 dan 5/);
   });
 
   it('the DB now accepts a half-filled Draft channel row (partial save)', async () => {

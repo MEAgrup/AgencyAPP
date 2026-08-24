@@ -34,12 +34,16 @@ export function mergeBaselinePrefill(
     if (!next.sumber_data.trim() && s.sumber_data) next.sumber_data = s.sumber_data;
     if (!next.tanggal_ambil_data.trim() && s.tanggal_ambil_data)
       next.tanggal_ambil_data = s.tanggal_ambil_data;
-    if (!next.lampiran.trim() && s.lampiran) next.lampiran = s.lampiran;
+    // B-0.6 lampiran is NO LONGER inherited from the Riset Awal export filenames
+    // (owner QA 2026-08-24): it autofills from the client's Link Toko instead,
+    // filled server-side in loadDetail/saveChannels. The export filenames stay in
+    // `sumber_data`, which is where "sumber data baseline" belongs.
     if (!next.periode_baseline_bulan.trim() && s.periode_baseline_bulan != null)
       next.periode_baseline_bulan = String(s.periode_baseline_bulan);
     if (s.baseline_bulan.length > 0) {
+      // PRD B-0.7 window is 1–6 months (DB CHECK BETWEEN 1 AND 6).
       const nMonths = next.periode_baseline_bulan.trim()
-        ? Math.max(1, Math.min(12, Math.round(Number(next.periode_baseline_bulan))))
+        ? Math.max(1, Math.min(6, Math.round(Number(next.periode_baseline_bulan))))
         : 0;
       next.baseline = Array.from({ length: nMonths }, (_, i): BaselineMonthDraft => {
         // month_index is 1-based end to end — the DB CHECK is `BETWEEN 1 AND 6`,

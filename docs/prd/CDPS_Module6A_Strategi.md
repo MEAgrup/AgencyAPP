@@ -128,7 +128,7 @@ Design note: **D-8 (asumsi target) is deliberately shareable.** The assumptions 
 | B-0.3 | Nama toko + URL toko | Text + URL | W |
 | B-0.4 | Umur toko (bulan) & level/badge (Star Seller, Mall, dll) | Number + enum | W |
 | B-0.5 | *Jika Belum Aktif:* target tanggal live + prasyarat pembukaan (dokumen, katalog, akun) | Date + repeatable text | W (kondisional) |
-| B-0.6 | Sumber data baseline + tanggal ambil data + lampiran export/screenshot | File + date | W |
+| B-0.6 | Sumber data baseline + tanggal ambil data + lampiran export/screenshot. **⟳ 2026-08-24 (DECISIONS): lampiran autofill dari Link Toko klien (`client_platforms.store_link` → `clients.link_toko`) saat kosong; tetap bisa diganti.** | File + date | W |
 | B-0.7 | **Periode baseline** yang dipakai untuk channel ini: berapa bulan ke belakang (1–6, default 3) + tanggal mulai & akhir periode | Number + date range | W |
 | B-0.8 | *Jika periode < 3 bulan:* alasannya (toko baru, kategori musiman, toko baru lepas pembekuan, data tak tersedia) | Enum + text | W (kondisional) |
 
@@ -157,7 +157,7 @@ Design note: **D-8 (asumsi target) is deliberately shareable.** The assumptions 
 | B-3.3 | Top 5 SKU: nama, GMV, unit terjual, harga jual, margin % | Repeatable struct (5) | W |
 | B-3.4 | Jumlah SKU slow-moving / nol penjualan 60 hari | Number | W |
 | B-3.5 | SKU dengan stok kritis / sering habis | Repeatable text | O |
-| B-3.6 | Kualitas listing: SKU dengan foto & deskripsi layak (%) | % | W |
+| B-3.6 | Kualitas listing (%) — **⟳ revisi 2026-08-24 (DECISIONS): kini TURUNAN read-only = `SKU aktif ÷ SKU terdaftar × 100`, dihitung server, bukan lagi observasi manual "SKU dengan foto & deskripsi layak". Bagi-nol → `—`.** | Auto | A |
 
 **B-4 · Kesehatan Toko & Layanan**
 | ID | Question | Type | Req |
