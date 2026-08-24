@@ -37,6 +37,7 @@ import {
   MSG_INCOMPLETE,
   MSG_LAYERED_ROLE_DENIED,
   MSG_ROLE_MAPPING_DENIED,
+  MSG_UNMAPPED_POSITION,
   NotFoundError,
   addHariLibur,
   listHariLibur,
@@ -156,6 +157,19 @@ async function seedEmployee(
   await sql`
     insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
     values (${id}, ${'Nama ' + id}, ${id.toLowerCase() + '@zz.local'}, ${divisi}, ${jabatan}, true, 'ZZ-DIR')`;
+}
+
+/**
+ * Inserts one `role_mappings` row a test's divisi/jabatan pair resolves through —
+ * `updateEmployeeAssignment`/`addEmployeeManually` now reject a pair with no
+ * mapping (MSG_UNMAPPED_POSITION), mirroring the picker web-internal builds the
+ * mutasi/add forms from. `created_by` is `ZZ-`-prefixed so `afterEach` reaps it.
+ */
+async function seedMapping(divisi: string, jabatan: string, division: string, level: string): Promise<void> {
+  await sql`
+    insert into role_mappings (divisi, jabatan, division, level, created_by)
+    values (${divisi}, ${jabatan}, ${division}, ${level}, 'ZZ-DIR')
+    on conflict (divisi, jabatan) do update set division = excluded.division, level = excluded.level`;
 }
 
 describeDb('upsertRoleMapping', () => {
@@ -379,6 +393,7 @@ describeDb('listEmployees', () => {
 describeDb('updateEmployeeAssignment', () => {
   it('mutates divisi/jabatan and audits the before→after transfer', async () => {
     await seedEmployee('ZZ-EMP5', 'ACCOUNT', 'ADMIN A&S');
+    await seedMapping('CREATIVE', 'GRAPHIC DESIGNER', 'Creative', 'staff');
     const wm = await auditWatermark();
 
     const row = await updateEmployeeAssignment(sql, director(), 'ZZ-EMP5', 'CREATIVE', 'GRAPHIC DESIGNER');
@@ -406,6 +421,7 @@ describeDb('updateEmployeeAssignment', () => {
 
   it('trims input so a stray space cannot mint an unmatchable divisi', async () => {
     await seedEmployee('ZZ-EMP6', 'ACCOUNT', 'ADMIN A&S');
+    await seedMapping('CREATIVE', 'VIDEOGRAPHER', 'Creative', 'staff');
     const row = await updateEmployeeAssignment(sql, director(), 'ZZ-EMP6', '  CREATIVE  ', '  VIDEOGRAPHER  ');
     expect(row.divisi).toBe('CREATIVE');
     expect(row.jabatan).toBe('VIDEOGRAPHER');
@@ -413,6 +429,8 @@ describeDb('updateEmployeeAssignment', () => {
 
   it('lets an HR-division Lead mutate, but denies a Sales Lead, OD and staff', async () => {
     await seedEmployee('ZZ-EMP7', 'ACCOUNT', 'ADMIN A&S');
+    await seedMapping('CREATIVE', 'VIDEOGRAPHER', 'Creative', 'staff');
+    await seedMapping('KOL', 'KOL SPECIALIST', 'KOL', 'staff');
 
     // Denied paths write nothing and carry the verbatim BI message.
     for (const bad of [salesLead(), od(), salesStaff()]) {
@@ -447,10 +465,26 @@ describeDb('updateEmployeeAssignment', () => {
       updateEmployeeAssignment(sql, director(), 'ZZ-NOPE', 'CREATIVE', 'VIDEOGRAPHER'),
     ).rejects.toBeInstanceOf(NotFoundError);
   });
+
+  it('rejects a divisi/jabatan pair that matches no Role Mapping (the O42-class defect)', async () => {
+    // This is exactly the bug a free-text mutasi form used to allow: a pair that
+    // resolves to no CDPS division/level at all, silently, until someone notices
+    // the employee has no access to anything.
+    await seedEmployee('ZZ-EMP9', 'ACCOUNT', 'ADMIN A&S');
+    await expect(
+      updateEmployeeAssignment(sql, director(), 'ZZ-EMP9', 'Marketing', 'Ads'),
+    ).rejects.toThrow(MSG_UNMAPPED_POSITION);
+    await expect(
+      updateEmployeeAssignment(sql, director(), 'ZZ-EMP9', 'Marketing', 'Ads'),
+    ).rejects.toBeInstanceOf(ValidationError);
+    // The bad pair never landed — the employee's real assignment is untouched.
+    expect((await listEmployees(sql)).find((e) => e.employeeId === 'ZZ-EMP9')!.divisi).toBe('ACCOUNT');
+  });
 });
 
 describeDb('addEmployeeManually', () => {
   it('creates the employee, provisions a login credential, and audits create', async () => {
+    await seedMapping('ACCOUNT', 'ACCOUNT MANAGER', 'Account', 'staff');
     const wm = await auditWatermark();
     const res = await addEmployeeManually(sql, director(), {
       employeeId: 'ZZ-NEW1', nama: 'Baru Satu', email: 'zz-new1@zz.local',
@@ -518,11 +552,21 @@ describeDb('addEmployeeManually', () => {
       }),
     ).rejects.toThrow(MSG_INCOMPLETE);
 
+    await seedMapping('KOL', 'KOL SPECIALIST', 'KOL', 'staff');
     const res = await addEmployeeManually(sql, hrLead(), {
       employeeId: 'ZZ-NEW4', nama: 'HR Add', email: 'zz-new4@zz.local', divisi: 'KOL', jabatan: 'KOL SPECIALIST',
     });
     expect(res.provisioned).toBe(1);
     expect((await listEmployees(sql)).find((e) => e.employeeId === 'ZZ-NEW4')!.divisi).toBe('KOL');
+  });
+
+  it('rejects a divisi/jabatan pair that matches no Role Mapping', async () => {
+    await expect(
+      addEmployeeManually(sql, director(), {
+        employeeId: 'ZZ-NEW5', nama: 'x', email: 'zz-new5@zz.local', divisi: 'Marketing', jabatan: 'Ads',
+      }),
+    ).rejects.toThrow(MSG_UNMAPPED_POSITION);
+    expect((await listEmployees(sql)).filter((e) => e.employeeId === 'ZZ-NEW5')).toHaveLength(0);
   });
 });
 
@@ -549,6 +593,9 @@ describe('BI messages are the exact ported strings', () => {
     expect(MSG_EMPLOYEE_NOT_FOUND).toBe('[karyawan tidak ditemukan]');
     expect(MSG_EMPLOYEE_ADD_DENIED).toBe('[hanya Director atau Lead HR yang dapat menambah karyawan]');
     expect(MSG_EMPLOYEE_EXISTS).toBe('[karyawan dengan ID atau email itu sudah terdaftar]');
+    expect(MSG_UNMAPPED_POSITION).toBe(
+      '[divisi/jabatan tidak dikenali, pilih posisi yang sudah dipetakan di Role Mapping]',
+    );
   });
 });
 
