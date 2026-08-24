@@ -251,6 +251,22 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
   /** A-12 — the Rule 13 dialog. `null` while closed, so opening it always starts empty. */
   const [revisi, setRevisi] = useState<RevisiDraft | null>(null);
 
+  // Owner request 2026-08-24: before Section C exists to build on it, the AM
+  // needs to hand what is already filled (Section A/B, and whatever else is
+  // done) to an external AI tool for analysis. This is a read-only export of
+  // the record exactly as the server returned it — no separate shape to keep
+  // in sync, unlike the wire converters that exist for writes.
+  const [exportMsg, setExportMsg] = useState<string | null>(null);
+  const exportTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashExportMsg = useCallback((msg: string) => {
+    setExportMsg(msg);
+    if (exportTimer.current) clearTimeout(exportTimer.current);
+    exportTimer.current = setTimeout(() => setExportMsg(null), 3000);
+  }, []);
+  useEffect(() => () => {
+    if (exportTimer.current) clearTimeout(exportTimer.current);
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
@@ -545,6 +561,51 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
 
   const grouped = useMemo(() => groupKekurangan(kekurangan), [kekurangan]);
 
+  const buildExportJson = useCallback(() => {
+    if (!detail) return null;
+    return JSON.stringify(
+      {
+        strategi_id: detail.id,
+        versi_no: detail.versi_no,
+        status: detail.status,
+        exported_at: new Date().toISOString(),
+        data: detail,
+      },
+      null,
+      2,
+    );
+  }, [detail]);
+
+  const copyExportJson = useCallback(async () => {
+    const json = buildExportJson();
+    if (json === null) return;
+    if (typeof navigator === 'undefined' || !navigator.clipboard) {
+      flashExportMsg('Clipboard tidak tersedia — gunakan Unduh JSON.');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(json);
+      flashExportMsg('JSON disalin ke clipboard.');
+    } catch {
+      flashExportMsg('Gagal menyalin — gunakan Unduh JSON.');
+    }
+  }, [buildExportJson, flashExportMsg]);
+
+  const downloadExportJson = useCallback(() => {
+    const json = buildExportJson();
+    if (json === null || !detail) return;
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${detail.id}_v${detail.versi_no}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    flashExportMsg('File JSON diunduh.');
+  }, [buildExportJson, detail, flashExportMsg]);
+
   const act = useCallback(
     async (fn: () => Promise<unknown>) => {
       setActing(true);
@@ -575,6 +636,27 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
           <StatusBadge status={detail.status} />
           <span className="muted">versi {detail.versi_no}</span>
           <span style={{ flex: 1 }} />
+          {exportMsg && (
+            <span className="muted" style={{ fontSize: 12 }}>
+              {exportMsg}
+            </span>
+          )}
+          <button
+            type="button"
+            className="btn btnGhost btnSm"
+            onClick={() => void copyExportJson()}
+            title="Salin seluruh data Strategi (semua seksi yang sudah terisi) sebagai JSON"
+          >
+            Salin JSON
+          </button>
+          <button
+            type="button"
+            className="btn btnGhost btnSm"
+            onClick={downloadExportJson}
+            title="Unduh seluruh data Strategi (semua seksi yang sudah terisi) sebagai file JSON"
+          >
+            Unduh JSON
+          </button>
           <Link href={`/clients/${detail.client_id}`} className="btn btnGhost btnSm">
             Klien
           </Link>
@@ -582,6 +664,11 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
         <p className="muted" style={{ fontSize: 12, margin: '6px 0 0' }}>
           Kontrak {detail.contract_id} · {detail.tanggal_mulai_kontrak} →{' '}
           {detail.tanggal_akhir_kontrak} ({detail.durasi_kontrak_bulan} bulan)
+        </p>
+        <p className="muted" style={{ fontSize: 12, margin: '2px 0 0' }}>
+          Gunakan <strong>Salin JSON</strong> / <strong>Unduh JSON</strong> untuk membawa data
+          Seksi A &amp; B (dan seksi lain yang sudah terisi) ke tools AI eksternal sebelum
+          mengisi Seksi C dan seterusnya.
         </p>
       </div>
 
