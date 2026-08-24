@@ -164,6 +164,7 @@ import {
 import InterviewPrefillPanel from '@/components/strategi/InterviewPrefillPanel';
 import BaselinePrefillPanel from '@/components/strategi/BaselinePrefillPanel';
 import VideoFactoryImportPanel from '@/components/strategi/VideoFactoryImportPanel';
+import CockpitImportPanel from '@/components/strategi/CockpitImportPanel';
 import PlanPeriodsPanel from '@/components/strategi/PlanPeriodsPanel';
 import {
   assumptionsToBody,
@@ -172,6 +173,7 @@ import {
   pruneTargetTerkait,
   supportRowsToBody,
 } from '@/lib/strategi-target';
+import { mergeCockpitPillars, type CockpitPillarBody } from '@/lib/strategi-cockpit-import';
 
 /** All sections are now wired (A-13 + A-13b complete). */
 // Sections that have a UI. J is read-only (no form) but still "wired": it has a
@@ -622,6 +624,29 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
     [load],
   );
 
+  /**
+   * Section E pilar (E-3…E-10) has no draft editor yet (SectionE.tsx), so
+   * unlike every other Cockpit import target this writes straight to the
+   * server rather than patching `drafts`. Deliberately NOT routed through
+   * `act()`: that swallows its error into the page-level banner and always
+   * resolves, which would make `CockpitImportPanel` report "tersimpan" on a
+   * failed save. This rethrows instead, so the panel's own inline error
+   * (right next to the button that caused it) tells the truth.
+   */
+  const applyCockpitPillars = useCallback(
+    async (pillars: CockpitPillarBody[]) => {
+      if (!detail) return;
+      try {
+        const next = await saveStrategiPillars(id, mergeCockpitPillars(detail.pillars, pillars));
+        setDetail(next);
+        setKekurangan(await strategiKekurangan(id));
+      } catch (err) {
+        throw new Error(errorMessage(err));
+      }
+    },
+    [detail, id],
+  );
+
   if (loading) return <p className="pageLoading">Memuat…</p>;
   if (loadError) return <div className="alert alertError">{loadError}</div>;
   if (!detail || !drafts) return <div className="alert alertError">[Strategi tidak ditemukan]</div>;
@@ -796,12 +821,26 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                 </>
               )}
               {active === 'C' && (
-                <SectionC
-                  detail={detail}
-                  draft={drafts.diagnosa}
-                  onChange={(p) => patch('diagnosa', { ...drafts.diagnosa, ...p })}
-                  disabled={!editable}
-                />
+                <>
+                  <CockpitImportPanel
+                    diagnosa={drafts.diagnosa}
+                    onDiagnosa={(next) => patch('diagnosa', next)}
+                    kpi={drafts.kpi}
+                    onKpi={(next) => patch('kpi', next)}
+                    targets={drafts.targets}
+                    onTargets={(next) => patch('targets', next)}
+                    narasi={drafts.sectionE.narasi}
+                    onNarasi={(next) => patch('sectionE', { ...drafts.sectionE, narasi: next })}
+                    onApplyPillars={applyCockpitPillars}
+                    disabled={!editable}
+                  />
+                  <SectionC
+                    detail={detail}
+                    draft={drafts.diagnosa}
+                    onChange={(p) => patch('diagnosa', { ...drafts.diagnosa, ...p })}
+                    disabled={!editable}
+                  />
+                </>
               )}
               {active === 'D' && (
                 <SectionD
