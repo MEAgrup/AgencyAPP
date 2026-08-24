@@ -28,6 +28,7 @@ import { createClient, type Sql } from '@cdps/db';
 import { ALLOWED_DIVISIONS, ConflictError, ForbiddenError, ValidationError } from './account';
 import {
   MSG_AKSES_BLOCKER_DATE,
+  MSG_AKSES_BLOCKER_STATUS,
   MSG_AKSES_DUPLICATE,
   MSG_AKSES_MATRIX_REQUIRED,
   MSG_ASSUMPTION_NOT_FOUND,
@@ -430,17 +431,23 @@ const KONTEKS = {
   asetDariKlien: ['foto_produk', 'katalog', 'budget_iklan'],
 };
 
-/** A-15/A-16, from the same excerpt: Shopee granted, TikTok Affiliate pending. */
+/**
+ * A-15/A-16, from the same excerpt: Shopee granted, TikTok Affiliate ditolak.
+ *
+ * Status `ditolak` (not `pending`) here per the 2026-08-24 owner decision: only
+ * a rejected access may carry `memblokir` — `sudah`/`pending`/`tidak_butuh`
+ * never stall the AM's next step (PRD §6 annotated to match).
+ */
 const AKSES = [
   { channel: 'Shopee' as const, akses: 'seller_center' as const, status: 'sudah' as const },
   { channel: 'Shopee' as const, akses: 'ads_manager' as const, status: 'sudah' as const },
   {
     channel: 'Shopee' as const,
     akses: 'affiliate_center' as const,
-    status: 'pending' as const,
+    status: 'ditolak' as const,
     memblokir: true,
     targetTanggalBeres: '2026-08-11',
-    catatan: 'menunggu approval pemilik',
+    catatan: 'ditolak pemilik toko, diajukan ulang',
   },
   { channel: 'Umum' as const, akses: 'gudang_stok' as const, status: 'sudah' as const },
 ];
@@ -1283,7 +1290,7 @@ describeDb('A-15 / A-16 — the access matrix and its blockers', () => {
     expect(detail.akses).toHaveLength(4);
     const blocker = detail.akses.find((a) => a.memblokir);
     expect(blocker?.akses).toBe('affiliate_center');
-    expect(blocker?.status).toBe('pending');
+    expect(blocker?.status).toBe('ditolak');
     expect(blocker?.targetTanggalBeres).toBe('2026-08-11');
   });
 
@@ -1291,7 +1298,7 @@ describeDb('A-15 / A-16 — the access matrix and its blockers', () => {
     const { strategiId } = await seedSubmittable();
     await expect(
       saveAkses(sql, am(), strategiId, [
-        { channel: 'Shopee', akses: 'ads_manager', status: 'pending', memblokir: true },
+        { channel: 'Shopee', akses: 'ads_manager', status: 'ditolak', memblokir: true },
       ]),
     ).rejects.toThrow(MSG_AKSES_BLOCKER_DATE);
   });
@@ -1308,7 +1315,41 @@ describeDb('A-15 / A-16 — the access matrix and its blockers', () => {
           targetTanggalBeres: '2026-09-01',
         },
       ]),
-    ).rejects.toThrow(MSG_AKSES_BLOCKER_DATE);
+    ).rejects.toThrow(MSG_AKSES_BLOCKER_STATUS);
+  });
+
+  it('refuses a blocker on pending or tidak_butuh — only ditolak may stall the next step', async () => {
+    const { strategiId } = await seedSubmittable();
+    await expect(
+      saveAkses(sql, am(), strategiId, [
+        {
+          channel: 'Shopee',
+          akses: 'ads_manager',
+          status: 'pending',
+          memblokir: true,
+          targetTanggalBeres: '2026-09-01',
+        },
+      ]),
+    ).rejects.toThrow(MSG_AKSES_BLOCKER_STATUS);
+    await expect(
+      saveAkses(sql, am(), strategiId, [
+        {
+          channel: 'Shopee',
+          akses: 'ads_manager',
+          status: 'tidak_butuh',
+          memblokir: true,
+          targetTanggalBeres: '2026-09-01',
+        },
+      ]),
+    ).rejects.toThrow(MSG_AKSES_BLOCKER_STATUS);
+  });
+
+  it('accepts "tidak_butuh" as an ordinary A-15 status', async () => {
+    const { strategiId } = await seedSubmittable();
+    const ok = await saveAkses(sql, am(), strategiId, [
+      { channel: 'Umum', akses: 'gudang_stok', status: 'tidak_butuh' },
+    ]);
+    expect(ok.akses[0].status).toBe('tidak_butuh');
   });
 
   it('refuses a channel this Strategi does not contract, but accepts Umum', async () => {

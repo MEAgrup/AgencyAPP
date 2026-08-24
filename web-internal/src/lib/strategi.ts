@@ -273,7 +273,8 @@ export const ACCESS_KINDS = [
   'gudang_stok',
 ] as const;
 
-export const ACCESS_STATES = ['sudah', 'pending', 'ditolak'] as const;
+/** Owner QA 2026-08-24: 4th value `tidak_butuh` — see packages/domain ACCESS_STATES. */
+export const ACCESS_STATES = ['sudah', 'pending', 'ditolak', 'tidak_butuh'] as const;
 
 // --- Section B (A-06) ---
 
@@ -419,7 +420,7 @@ export type AccessKind =
   | 'affiliate_center'
   | 'akun_chat'
   | 'gudang_stok';
-export type AccessState = 'sudah' | 'pending' | 'ditolak';
+export type AccessState = 'sudah' | 'pending' | 'ditolak' | 'tidak_butuh';
 /** `Umum` is not a channel — it is where an access owned by none is recorded. */
 export type AccessChannel = Channel | 'Umum';
 
