@@ -251,7 +251,7 @@ export default function CockpitImportPanel({
                 <ul style={{ margin: '0 0 8px', paddingLeft: 18, fontSize: 12 }}>
                   {pillars.map((p, i) => (
                     <li key={i}>
-                      {p.peran} — {p.aksi} ({p.jenis})
+                      {typeof p.detail.pilar === 'string' ? p.detail.pilar : 'Pilar'} — {p.aksi} ({p.jenis})
                     </li>
                   ))}
                 </ul>

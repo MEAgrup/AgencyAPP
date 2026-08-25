@@ -262,19 +262,24 @@ describe('buildCockpitPillars', () => {
     });
     const pillars = buildCockpitPillars(p);
     expect(pillars).toHaveLength(2);
+    // `peran` is the DB's closed SKU-role enum (ck_strpil_peran) — the Cockpit
+    // never assigns one, so it must stay null (see buildCockpitPillars); the
+    // pilar grouping label travels in `detail.pilar` instead.
     expect(pillars[0]).toMatchObject({
       jenis: 'konten',
       channel: CHANNEL,
-      peran: 'Pilar 1 — Perbaiki konten',
+      peran: null,
       aksi: 'V2 Naikkan kuota video',
       target: '80 video, jembatan Video bertayangan / bulan',
     });
+    expect(pillars[0].detail).toMatchObject({ pilar: 'Pilar 1 — Perbaiki konten' });
     expect(pillars[1]).toMatchObject({
       jenis: 'affiliate',
-      peran: 'Pilar 2 — Naikkan affiliate',
+      peran: null,
       aksi: 'A2 Aktivasi kreator terdaftar',
       target: '15 kreator',
     });
+    expect(pillars[1].detail).toMatchObject({ pilar: 'Pilar 2 — Naikkan affiliate' });
   });
 });
 
@@ -304,7 +309,7 @@ describe('mergeCockpitPillars', () => {
       channel: CHANNEL,
       urutan: 2,
       sku: null,
-      peran: 'Pilar 1',
+      peran: null,
       aksi: 'V2 Naikkan kuota video',
       target: 'lama',
       harga_normal: null,
