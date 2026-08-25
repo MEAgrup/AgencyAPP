@@ -300,3 +300,105 @@ export function readTargetKey(key: string): { metric: string; channel: string; m
   if (!Number.isInteger(month)) return null;
   return { metric: key.slice(0, first), channel: key.slice(first + 1, last), month };
 }
+
+// ---------------------------------------------------------------------------
+// D-2, entered per quarter (owner QA 2026-08-25) — storage stays monthly
+// (`month_index`, `ck_strtg_month`, `ck_strtg_stretch_gmv` are unchanged), only
+// the AM's unit of entry changes: one figure per quarter of the contract
+// instead of one per month.
+// ---------------------------------------------------------------------------
+
+/** Q1 = M1–M3, Q2 = M4–M6, … A trailing partial block (e.g. M10–M11 of an
+ * 11-month contract) is still its own quarter, not folded into the one before. */
+export function quarterOf(monthIndex: number): number {
+  return Math.ceil(monthIndex / 3);
+}
+
+/** Number of quarters a contract of `durasi` months spans (0 if `durasi` is 0). */
+export function quarterCount(durasi: number): number {
+  const n = Number.isFinite(durasi) ? Math.max(0, Math.trunc(durasi)) : 0;
+  return Math.ceil(n / 3);
+}
+
+/** `Q1 (M1–M3)` — the trailing quarter of a non-multiple-of-3 contract reads `M10–M11`. */
+export function quarterLabel(quarter: number, durasi: number): string {
+  const first = (quarter - 1) * 3 + 1;
+  const last = Math.min(quarter * 3, Math.max(0, Math.trunc(durasi)));
+  return first === last ? `Q${quarter} (M${first})` : `Q${quarter} (M${first}–M${last})`;
+}
+
+/**
+ * Sets `nilai_stretch` for every month of one channel's quarter to the same
+ * figure. GMV per bulan is a monthly rate, not a quarterly total — so a
+ * quarter's target is copied to each of its months, never divided.
+ *
+ * Never touches `nilai_floor` — floor is a per-month contract question (D-1,
+ * Rule 7) this ticket does not change the grain of.
+ */
+export function setQuarterStretch(
+  cells: readonly GmvCell[],
+  channel: string,
+  quarter: number,
+  value: string,
+): GmvCell[] {
+  return cells.map((c) =>
+    c.channel === channel && quarterOf(c.month_index) === quarter
+      ? { ...c, nilai_stretch: value }
+      : c,
+  );
+}
+
+/**
+ * The figure to show in a quarter's input box: the first month's stretch value
+ * if every month in the quarter agrees, else blank (typing into the box then
+ * overwrites all of them uniformly, which is the correct fix for a quarter
+ * that drifted out of sync via per-month edits).
+ */
+export function quarterStretchValue(
+  cells: readonly GmvCell[],
+  channel: string,
+  quarter: number,
+): string {
+  const inQuarter = cells.filter((c) => c.channel === channel && quarterOf(c.month_index) === quarter);
+  if (!inQuarter.length) return '';
+  const first = inQuarter[0].nilai_stretch;
+  return inQuarter.every((c) => c.nilai_stretch === first) ? first : '';
+}
+
+/**
+ * D-2 stretch, auto-derived from Section B's own confirmed baseline GMV
+ * (owner QA 2026-08-25) — the AM no longer has to retype what the baseline
+ * already states.
+ *
+ * Base figure per channel is the most recent baseline month (baseline months
+ * are 1-based oldest → newest, so the highest `month_index` is the current
+ * run-rate). Growth compounds per quarter at `pctGrowth`: Q1 = base ×
+ * (1+pct), Q2 = Q1 × (1+pct), and so on — every month inside a quarter takes
+ * that quarter's figure unchanged (see `setQuarterStretch`).
+ *
+ * Only fills a cell whose `nilai_stretch` is still blank: this is a
+ * suggestion the AM can already see and override, same "usulan, never
+ * silently overwrite" contract the Cockpit import uses (RAB-19 baseline
+ * pattern) — never replaces a figure the AM already typed.
+ */
+export function computeBaselineStretchTargets(
+  channels: readonly { channel: string; baseline: readonly { month_index: number; gmv: string }[] }[],
+  cells: readonly GmvCell[],
+  pctGrowth: number,
+): GmvCell[] {
+  const baseGmv = new Map<string, number>();
+  for (const c of channels) {
+    if (!c.baseline.length) continue;
+    const latest = c.baseline.reduce((a, b) => (b.month_index > a.month_index ? b : a));
+    const n = Number(latest.gmv);
+    if (Number.isFinite(n) && n > 0) baseGmv.set(c.channel, n);
+  }
+  const factor = 1 + pctGrowth / 100;
+  return cells.map((cell) => {
+    if (cell.nilai_stretch.trim() !== '') return cell;
+    const base = baseGmv.get(cell.channel);
+    if (base == null) return cell;
+    const value = base * factor ** quarterOf(cell.month_index);
+    return { ...cell, nilai_stretch: String(Math.round(value)) };
+  });
+}

@@ -96,6 +96,11 @@ export interface CockpitPayload {
   gmvM?: number;
   aksi?: Record<string, CockpitAksiState>;
   baseline?: CockpitBaseline | null;
+  /** D-5 — `h30`/`h60`/`h90` in the tool, typed by the AM or filled by its own
+   * "Sarankan dari data" button (from the aksi/jembatan chosen in Pilar). */
+  h30?: string;
+  h60?: string;
+  h90?: string;
 }
 
 export type ParseResult =
@@ -458,7 +463,15 @@ export function applyCockpitToTargets(
   return { draft: { gmv, pendukung, assumptions }, filled };
 }
 
-/** D-6 leading indicator, restricted to `JEMBATAN_TO_METRIC`'s confident subset. */
+/**
+ * D-5 (`h30`/`h60`/`h90`) and D-6 leading indicator (restricted to
+ * `JEMBATAN_TO_METRIC`'s confident subset).
+ *
+ * D-5 was the one field on this header the tool never exported — it had no
+ * `h30`/`h60`/`h90` state at all, so there was nothing for an adapter to read
+ * (owner QA 2026-08-25). Filled the same way as everything else here: only
+ * when the draft's box is still blank.
+ */
 export function applyCockpitToKpi(
   draft: KpiDraft,
   payload: CockpitPayload,
@@ -473,7 +486,36 @@ export function applyCockpitToKpi(
       filled += 1;
     }
   }
-  return { draft: { ...draft, leading_indicator: [...set] }, filled };
+
+  let definisi_berhasil_30 = draft.definisi_berhasil_30;
+  let definisi_berhasil_60 = draft.definisi_berhasil_60;
+  let definisi_berhasil_90 = draft.definisi_berhasil_90;
+  const h30 = (payload.h30 ?? '').trim();
+  const h60 = (payload.h60 ?? '').trim();
+  const h90 = (payload.h90 ?? '').trim();
+  if (!definisi_berhasil_30.trim() && h30) {
+    definisi_berhasil_30 = h30;
+    filled += 1;
+  }
+  if (!definisi_berhasil_60.trim() && h60) {
+    definisi_berhasil_60 = h60;
+    filled += 1;
+  }
+  if (!definisi_berhasil_90.trim() && h90) {
+    definisi_berhasil_90 = h90;
+    filled += 1;
+  }
+
+  return {
+    draft: {
+      ...draft,
+      leading_indicator: [...set],
+      definisi_berhasil_30,
+      definisi_berhasil_60,
+      definisi_berhasil_90,
+    },
+    filled,
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -327,7 +327,12 @@ const AKSI_BY=(()=>{const m={};KATALOG.forEach(p=>p.aksi.forEach(a=>m[a.k]={...a
    ada dan AM tinggal menambahkan realisasi. Tidak ada data yang dibuang saat pindah mode. */
 let ST={schema:'mea.cockpit.v1',mode:'berjalan',klien:'',am:'',channel:'TikTok Shop',floor:0,stretch:0,
   durasiBulan:'',budgetIklan:0,tier:'B',minggu:'',d1:'',d2:'',gmvW:0,gmvM:0,aksi:{},riwayat:[],
-  baseline:null,baselinePrev:null,thesis:'',pilarNama:['','',''],pilarAlasan:''};
+  baseline:null,baselinePrev:null,thesis:'',pilarNama:['','',''],pilarAlasan:'',
+  /* D-5 (owner QA 2026-08-25) — definisi berhasil 30/60/90 hari. AM types these
+     directly, or "Sarankan dari data" (saranD5) fills a starting point from the
+     aksi/jembatan/target already chosen above; either way they travel in the
+     JSON export like every other field here. */
+  h30:'',h60:'',h90:''};
 let TAB='aksi';
 
 /* ── ADAPTER PAYLOAD: menerima beberapa skema, toleran terhadap versi baru ──
@@ -695,9 +700,37 @@ function paneAksiBaru(){
   h+='<div class="note">Uji sebelum dipakai: ganti nama toko & angkanya \u2014 kalau thesis-nya masih benar, itu template, tulis ulang. '+
     'Harus memuat angka toko ini, satu mesin utama (bukan tiga sekaligus), dan Z yang bisa gugur.</div>';
   h+='</div></div>';
+
+  h+='<div class="sec"><div class="sec-hd"><span class="tag">A3</span><h3>Definisi berhasil 30/60/90 hari (D-5)</h3></div><div class="sec-bd">';
+  h+='<div class="note">Apa yang harus terlihat di hari ke-30, ke-60, ke-90 supaya strategi ini disebut jalan. '+
+    '"Sarankan dari data" hanya mengisi kotak yang masih kosong \u2014 dari aksi/jembatan yang sudah dipilih di atas; '+
+    'AM tetap yang menulis ulang dan menajamkannya sebelum diajukan ke CDPS.</div>';
+  h+='<div class="btnrow" style="margin-bottom:9px"><button class="btn ghost sm" id="btnSaranD5">Sarankan dari data</button></div>';
+  h+=['30','60','90'].map(d=>
+    '<label class="f" style="margin-top:9px"><span>'+d+' hari</span>'+
+    '<textarea id="fH'+d+'" rows="2">'+esc(ST['h'+d]||'')+'</textarea></label>').join('');
+  h+='</div></div>';
   return h;
 }
 const dipilihBaru=()=>Object.keys(ST.aksi).filter(k=>ST.aksi[k]&&ST.aksi[k].on&&AKSI_BY[k]);
+/** D-5 suggestion, from the aksi/jembatan already chosen in Pilar (A) \u2014 never
+ * invents an aksi of its own, and `wire()` only uses this to fill a BLANK box. */
+function saranD5(){
+  const D=dipilihBaru();
+  const jembatan=[...new Set(D.map(k=>AKSI_BY[k].j))].slice(0,3);
+  const qw=D.filter(k=>AKSI_BY[k].qw).map(k=>AKSI_BY[k].n);
+  return {
+    h30:(qw.length?'Quick win jalan: '+qw.join(', ')+'. ':'')+
+      (jembatan.length?'Jembatan aksi mulai bergerak: '+jembatan.join(', ')+'.'
+        :'Aksi pilar bulan pertama sudah berjalan, baseline stabil.'),
+    h60:(jembatan.length
+      ?'Tren jembatan ('+jembatan.join(', ')+') naik konsisten \u2265 4 minggu berturut'
+      :'Aksi pilar menunjukkan hasil awal')+
+      '; GMV '+ST.channel+' mendekati floor '+(ST.floor?rp(ST.floor):'kontrak')+'.',
+    h90:'GMV '+ST.channel+' mencapai stretch '+(ST.stretch?rp(ST.stretch):'target D-2')+
+      '; leading indicator (D-6) stabil di jalur target.',
+  };
+}
 function B0Rekomendasi(){
   const B=ST.baseline; if(!B)return '';
   if(B.marginTertimbang!=null&&B.marginTertimbang<40)
@@ -1068,6 +1101,8 @@ function strgDraftText(){
   L.push('D-8 Asumsi di balik target (minimal 3):');
   if(marginFail)L.push('  - Klien bersedia menaikkan harga/memangkas HPP sampai margin \u2265 40% — pemilik: klien');
   L.push('  - (tambahkan asumsi lain: akses, budget cair, stok, approval)');
+  L.push('D-5 Definisi berhasil 30/60/90 hari:');
+  ['30','60','90'].forEach(d=>L.push('  '+d+' hari: '+(ST['h'+d]||'(isi di panel Rancang Pilar)')));
   L.push('');
   L.push('=== SECTION E — STRATEGI INTI ===');
   L.push('E-1 Growth Thesis:');
@@ -1215,6 +1250,7 @@ function pullForm(){
   if($('#fBudget'))ST.budgetIklan=num($('#fBudget').value);
   if($('#fThesis'))ST.thesis=$('#fThesis').value;
   if($('#fPilarAlasan'))ST.pilarAlasan=$('#fPilarAlasan').value;
+  ['30','60','90'].forEach(d=>{const el=$('#fH'+d);if(el)ST['h'+d]=el.value;});
 }
 function applyMode(){
   const baru=ST.mode==='baru';
@@ -1282,6 +1318,13 @@ function wire(){
     i.onchange=()=>{ST.pilarNama[+i.dataset.pilarnama]=i.value;render();};});
   if($('#fThesis'))$('#fThesis').onchange=()=>{ST.thesis=$('#fThesis').value;};
   if($('#fPilarAlasan'))$('#fPilarAlasan').onchange=()=>{ST.pilarAlasan=$('#fPilarAlasan').value;};
+  ['30','60','90'].forEach(d=>{const el=$('#fH'+d);if(el)el.onchange=()=>{ST['h'+d]=el.value;};});
+  if($('#btnSaranD5'))$('#btnSaranD5').onclick=()=>{
+    pullForm();
+    const s=saranD5();
+    if(!ST.h30)ST.h30=s.h30; if(!ST.h60)ST.h60=s.h60; if(!ST.h90)ST.h90=s.h90;
+    render();toast('D-5 terisi dari aksi/jembatan terpilih — tinjau dan tajamkan sebelum diajukan');
+  };
   if($('#btnArsip'))$('#btnArsip').onclick=arsip;
   if($('#btnTsv2'))$('#btnTsv2').onclick=()=>copy(tsv(sheetRow()),'Baris Sheet tersalin');
   if($('#btnHead'))$('#btnHead').onclick=()=>copy(SHEET_HEAD.join('\t'),'Header tersalin');

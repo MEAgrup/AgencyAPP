@@ -45,6 +45,17 @@
  * tests pinning it to the server's computation — the one place in this form where
  * a second copy of a server rule earns its keep, because the alternative is a gap
  * the AM cannot locate.
+ *
+ * ## D-2 is entered per quarter, but stored per month (owner QA 2026-08-25)
+ *
+ * `strategi_target` did not change grain — `month_index`, `ck_strtg_month` and
+ * `ck_strtg_stretch_gmv` are all still monthly, and D-9's `target_terkait` still
+ * points at one month. What changed is only how the AM fills the stretch column:
+ * one figure per quarter (`setQuarterStretch`), copied onto every month inside
+ * it, plus a "Hitung dari Baseline" suggestion that grows Section B's latest
+ * confirmed baseline GMV by an AM-set percentage (default 20%), compounding
+ * quarter over quarter (`computeBaselineStretchTargets`). Both only ever fill a
+ * blank `nilai_stretch` — a figure the AM already typed is never overwritten.
  */
 
 import { useMemo, useState } from 'react';
@@ -59,10 +70,15 @@ import {
 } from '@/lib/strategi-revisi';
 import {
   channelsMissingSupport,
+  computeBaselineStretchTargets,
   gmvGridOf,
   gmvCellsToBody,
   offerableTargetKeys,
+  quarterCount,
+  quarterLabel,
+  quarterStretchValue,
   readTargetKey,
+  setQuarterStretch,
   supportRowsOf,
   uncoveredTargetKeys,
   type AssumptionRow,
@@ -165,6 +181,11 @@ export default function SectionD({
   busy: boolean;
 }) {
   const [sanggahan, setSanggahan] = useState<SanggahanDraft>(SANGGAHAN_KOSONG);
+  // D-2 owner QA 2026-08-25: entered per quarter, and suggestable straight from
+  // Section B's own baseline GMV — see `computeBaselineStretchTargets`. This is
+  // the AM's growth assumption, not a stored field, so it lives in component
+  // state rather than the draft: closing and reopening the form is the reset.
+  const [pctGrowth, setPctGrowth] = useState(20);
   const toggleIndicator = (v: LeadingIndicator) => {
     const has = draft.leading_indicator.includes(v);
     if (!has && draft.leading_indicator.length >= LEADING_INDICATOR_MAX) return;
@@ -220,6 +241,25 @@ export default function SectionD({
     });
   };
 
+  /**
+   * D-2, per quarter — `setQuarterStretch` copies one figure onto every month
+   * in that quarter (for one channel). Storage is still monthly; this changes
+   * only what the AM has to type.
+   */
+  const setQuarter = (channel: string, quarter: number, value: string) => {
+    onTargets({ gmv: setQuarterStretch(targets.gmv, channel, quarter, value) });
+  };
+
+  /**
+   * Suggests D-2 stretch from Section B's own confirmed baseline GMV, grown
+   * `pctGrowth`% compounding per quarter. Fills blanks only — a figure the AM
+   * already typed (manually, or from a previous click at a different %) is
+   * never overwritten; clear the cell first to re-suggest it.
+   */
+  const applyBaselineStretch = () => {
+    onTargets({ gmv: computeBaselineStretchTargets(detail.channels, targets.gmv, pctGrowth) });
+  };
+
   const toggleTerkait = (index: number, key: string) => {
     onTargets({
       assumptions: targets.assumptions.map((a, i) => {
@@ -241,10 +281,44 @@ export default function SectionD({
       <div className="card">
         <div className="cardHeader">D-1 · Floor kontrak &amp; D-2 · Stretch target GMV</div>
         <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-          Per channel, per bulan kontrak (M1…M{months}). Stretch wajib{' '}
-          <strong>≥</strong> floor — itu ditegakkan database, dan kalau menurut Anda floor-nya
-          tidak realistis jalurnya adalah D-7 Sanggahan Target di bawah, bukan menurunkan angkanya.
+          Floor per bulan kontrak (M1…M{months}); stretch diisi <strong>per kuartal</strong> dan
+          berlaku sama untuk tiap bulan di kuartal itu. Stretch wajib <strong>≥</strong> floor —
+          itu ditegakkan database, dan kalau menurut Anda floor-nya tidak realistis jalurnya
+          adalah D-7 Sanggahan Target di bawah, bukan menurunkan angkanya.
         </p>
+
+        {detail.channels.length > 0 && months > 0 && (
+          <div
+            className="row"
+            style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}
+          >
+            <label className="field" style={{ maxWidth: 160 }}>
+              <span className="muted" style={{ fontSize: 12 }}>
+                Persentase kenaikan (AM)
+              </span>
+              <input
+                type="number"
+                inputMode="decimal"
+                value={pctGrowth}
+                disabled={disabled}
+                onChange={(e) => setPctGrowth(Number(e.target.value))}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn btnGhost btnSm"
+              disabled={disabled}
+              onClick={applyBaselineStretch}
+              title="Isi stretch yang masih kosong = GMV baseline terakhir (Section B) × (1+persentase), naik lagi per kuartal"
+            >
+              Hitung stretch dari Baseline (+{pctGrowth}%/kuartal)
+            </button>
+            <span className="muted" style={{ fontSize: 12 }}>
+              Q1 = baseline × (1+{pctGrowth}%), Q2 = Q1 × (1+{pctGrowth}%), dst. Hanya mengisi sel
+              yang masih kosong.
+            </span>
+          </div>
+        )}
 
         {detail.channels.length === 0 ? (
           <p className="muted" style={{ fontSize: 13 }}>
@@ -271,6 +345,27 @@ export default function SectionD({
                       Samakan semua bulan dengan M1
                     </button>
                   )}
+                </div>
+                <div className="row" style={{ flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                  {Array.from({ length: quarterCount(months) }, (_, i) => i + 1).map((q) => (
+                    <label
+                      key={q}
+                      className="field"
+                      style={{ maxWidth: 160 }}
+                      title={`Berlaku untuk seluruh bulan ${quarterLabel(q, months)}`}
+                    >
+                      <span className="muted" style={{ fontSize: 11 }}>
+                        Stretch {quarterLabel(q, months)}
+                      </span>
+                      <input
+                        placeholder="Rp."
+                        value={quarterStretchValue(targets.gmv, ch.channel, q)}
+                        disabled={disabled}
+                        aria-label={`Stretch ${ch.channel} ${quarterLabel(q, months)}`}
+                        onChange={(e) => setQuarter(ch.channel, q, e.target.value)}
+                      />
+                    </label>
+                  ))}
                 </div>
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ fontSize: 13 }}>

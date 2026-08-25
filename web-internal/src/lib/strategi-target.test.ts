@@ -2,11 +2,17 @@ import { describe, expect, it } from 'vitest';
 import {
   assumptionsToBody,
   channelsMissingSupport,
+  computeBaselineStretchTargets,
   gmvCellsToBody,
   gmvGridOf,
   offerableTargetKeys,
   pruneTargetTerkait,
+  quarterCount,
+  quarterLabel,
+  quarterOf,
+  quarterStretchValue,
   readTargetKey,
+  setQuarterStretch,
   supportRowsOf,
   supportRowsToBody,
   targetKey,
@@ -276,6 +282,107 @@ describe('pruneTargetTerkait', () => {
   it('leaves the rest of the assumption untouched', () => {
     const out = pruneTargetTerkait([asumsi('AS-1', ['nope'])], []);
     expect(out[0]).toEqual({ ...asumsi('AS-1'), target_terkait: [] });
+  });
+});
+
+describe('quarterOf / quarterCount / quarterLabel (D-2 entered per quarter)', () => {
+  it('groups months into blocks of 3', () => {
+    expect([1, 2, 3, 4, 5, 6, 7].map(quarterOf)).toEqual([1, 1, 1, 2, 2, 2, 3]);
+  });
+
+  it('counts a trailing partial block as its own quarter', () => {
+    expect(quarterCount(11)).toBe(4);
+    expect(quarterCount(6)).toBe(2);
+    expect(quarterCount(0)).toBe(0);
+  });
+
+  it('labels a full quarter as a month range', () => {
+    expect(quarterLabel(1, 12)).toBe('Q1 (M1–M3)');
+    expect(quarterLabel(2, 12)).toBe('Q2 (M4–M6)');
+  });
+
+  it('labels a trailing single-month quarter without a dash', () => {
+    expect(quarterLabel(4, 10)).toBe('Q4 (M10)');
+  });
+});
+
+describe('setQuarterStretch / quarterStretchValue', () => {
+  const cells = [
+    cell('Shopee', 1, '100', ''),
+    cell('Shopee', 2, '100', ''),
+    cell('Shopee', 3, '100', ''),
+    cell('Shopee', 4, '100', ''),
+    cell('TikTok Shop', 1, '50', '80'),
+  ];
+
+  it('writes one figure to every month of the quarter, for that channel only', () => {
+    const out = setQuarterStretch(cells, 'Shopee', 1, '999');
+    expect(out.filter((c) => c.channel === 'Shopee').map((c) => c.nilai_stretch)).toEqual([
+      '999',
+      '999',
+      '999',
+      '',
+    ]);
+    expect(out.find((c) => c.channel === 'TikTok Shop')!.nilai_stretch).toBe('80');
+  });
+
+  it('never touches nilai_floor — that is D-1, a different question', () => {
+    const out = setQuarterStretch(cells, 'Shopee', 1, '999');
+    expect(out[0].nilai_floor).toBe('100');
+  });
+
+  it('reads back the shared value when every month in the quarter agrees', () => {
+    const filled = setQuarterStretch(cells, 'Shopee', 1, '999');
+    expect(quarterStretchValue(filled, 'Shopee', 1)).toBe('999');
+  });
+
+  it('reads back blank when the quarter has drifted out of sync via per-month edits', () => {
+    const drifted = [cell('Shopee', 1, '100', '999'), cell('Shopee', 2, '100', '111'), cell('Shopee', 3, '100', '999')];
+    expect(quarterStretchValue(drifted, 'Shopee', 1)).toBe('');
+  });
+});
+
+describe('computeBaselineStretchTargets', () => {
+  const channels = [
+    {
+      channel: 'Shopee',
+      baseline: [
+        { month_index: 1, gmv: '150000000' },
+        { month_index: 2, gmv: '160000000' },
+        { month_index: 3, gmv: '180000000' },
+      ],
+    },
+    { channel: 'TikTok Shop', baseline: [] },
+  ];
+
+  it('grows the LATEST baseline month (highest month_index), not the first or an average', () => {
+    const out = computeBaselineStretchTargets(channels, gmvGridOf([{ channel: 'Shopee' }], 3, []), 20);
+    // Q1 (M1-3) = 180,000,000 * 1.2
+    expect(out.map((c) => c.nilai_stretch)).toEqual(['216000000', '216000000', '216000000']);
+  });
+
+  it('compounds quarter over quarter, not flat off the same baseline', () => {
+    const grid = gmvGridOf([{ channel: 'Shopee' }], 6, []);
+    const out = computeBaselineStretchTargets(channels, grid, 20);
+    const q1 = out.filter((c) => c.month_index <= 3).map((c) => c.nilai_stretch);
+    const q2 = out.filter((c) => c.month_index > 3).map((c) => c.nilai_stretch);
+    expect(q1).toEqual(['216000000', '216000000', '216000000']); // 180M * 1.2
+    expect(q2).toEqual(['259200000', '259200000', '259200000']); // 180M * 1.2^2
+  });
+
+  it('never overwrites a stretch figure the AM already typed', () => {
+    const grid = gmvGridOf([{ channel: 'Shopee' }], 3, [
+      { channel: 'Shopee', month_index: 2, metric: 'gmv', nilai_floor: '100', nilai_stretch: '123' },
+    ]);
+    const out = computeBaselineStretchTargets(channels, grid, 20);
+    expect(out.find((c) => c.month_index === 2)!.nilai_stretch).toBe('123');
+    expect(out.find((c) => c.month_index === 1)!.nilai_stretch).toBe('216000000');
+  });
+
+  it('leaves a channel with no baseline untouched — nothing to derive a suggestion from', () => {
+    const grid = gmvGridOf([{ channel: 'TikTok Shop' }], 2, []);
+    const out = computeBaselineStretchTargets(channels, grid, 20);
+    expect(out.every((c) => c.nilai_stretch === '')).toBe(true);
   });
 });
 
