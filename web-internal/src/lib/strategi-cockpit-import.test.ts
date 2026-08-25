@@ -206,6 +206,31 @@ describe('applyCockpitToKpi', () => {
     const { draft } = applyCockpitToKpi(kpi, p);
     expect(draft.leading_indicator).toEqual(['gmv', 'jumlah_video']);
   });
+
+  it('mengisi D-5 (30/60/90 hari) dari h30/h60/h90 saat kotak masih kosong', () => {
+    const p = payload({ h30: 'quick win jalan', h60: 'tren jembatan naik', h90: 'GMV capai stretch' });
+    const { draft, filled } = applyCockpitToKpi(blankKpi(), p);
+    expect(draft.definisi_berhasil_30).toBe('quick win jalan');
+    expect(draft.definisi_berhasil_60).toBe('tren jembatan naik');
+    expect(draft.definisi_berhasil_90).toBe('GMV capai stretch');
+    expect(filled).toBe(3);
+  });
+
+  it('tidak menimpa D-5 yang sudah diisi AM, per kotak', () => {
+    const kpi = { ...blankKpi(), definisi_berhasil_30: 'sudah ditulis AM' };
+    const p = payload({ h30: 'dari cockpit', h60: 'dari cockpit juga' });
+    const { draft, filled } = applyCockpitToKpi(kpi, p);
+    expect(draft.definisi_berhasil_30).toBe('sudah ditulis AM');
+    expect(draft.definisi_berhasil_60).toBe('dari cockpit juga');
+    expect(filled).toBe(1);
+  });
+
+  it('tidak mengisi D-5 kalau tool tidak mengirim h30/h60/h90 (payload lama)', () => {
+    const p = payload({});
+    const { draft, filled } = applyCockpitToKpi(blankKpi(), p);
+    expect(draft.definisi_berhasil_30).toBe('');
+    expect(filled).toBe(0);
+  });
 });
 
 describe('applyCockpitToNarasi', () => {
