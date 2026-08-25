@@ -315,10 +315,111 @@ const KATALOG=[
 ];
 function srcVal(key){
   const B=ST.baseline; if(!B||!key)return null;
-  for(const k of String(key).split('|')){ if(B[k]!=null&&isFinite(B[k]))return B[k]; }
+  for(const k of String(key).split('|')){
+    /* metrik turunan yang basisnya bergantung state (bukan field mentah di payload) */
+    if(k==='konsentrasi'){ const K=konsentrasi(); if(K&&isFinite(K.p))return K.p; continue; }
+    if(B[k]!=null&&isFinite(B[k]))return B[k];
+  }
   return null;
 }
 const AKSI_BY=(()=>{const m={};KATALOG.forEach(p=>p.aksi.forEach(a=>m[a.k]={...a,pilar:p.pilar,divisi:p.divisi}));return m;})();
+
+/* ═══════════ MESIN REKOMENDASI TARGET JEMBATAN ═══════════
+   AM tidak perlu mengarang angka target. Tool menghitungnya dari angka sekarang, dengan
+   ambisi yang diskalakan ke lama aksi terlihat hasilnya — aksi 2 minggu tidak dituntut
+   sama dengan aksi 6 minggu. Angka hasil hitungan ditulis ke state supaya verdict bisa
+   jalan; begitu AM mengedit, flag auto dilepas dan tool berhenti menimpanya. */
+function skalaAmbisi(mgg){
+  if(mgg<=2)return 15;   /* aksi cepat: pemborosan dipotong, hasil terlihat 2 minggu */
+  if(mgg<=3)return 25;
+  if(mgg<=4)return 30;
+  return 40;             /* aksi lambat (6 mgg): butuh lompatan lebih besar untuk disebut berhasil */
+}
+/* Aksi yang ambangnya sudah ditetapkan aturan MEA — ditawarkan berdampingan dengan
+   hitungan ±%, AM yang memilih. Keduanya sah: satu relatif ke toko, satu standar MEA. */
+const ATURAN_TERKUNCI={
+  D1:{nilai:15,label:'Aturan K2 — % spend kreatif 0 order maksimum 15%'},
+  A3:{nilai:30,label:'Ambang risiko struktural — porsi GMV kreator #1 maksimum 30%'}
+};
+function bulat(v){
+  if(v==null||!isFinite(v))return null;
+  const a=Math.abs(v);
+  if(a>=1e6)return Math.round(v/1e5)*1e5;
+  if(a>=1e5)return Math.round(v/1e4)*1e4;
+  if(a>=1e4)return Math.round(v/1e3)*1e3;
+  if(a>=1e3)return Math.round(v/50)*50;
+  if(a>=100)return Math.round(v/10)*10;
+  if(a>=10)return Math.round(v);
+  return Math.round(v*10)/10;
+}
+/* Angka sekarang: prioritas isian manual AM, lalu payload. Untuk ~10 aksi yang tidak ada
+   di payload mana pun (V3, V5, V6, D1, D2), AM mengisi manual sekali lalu tool menghitung. */
+function baselineAksi(k){
+  const s=ST.aksi[k]||{}, a=AKSI_BY[k];
+  const man=num2(s.sebelum);
+  /* label sumber ikut flag: kalau nilainya tool yang tulis dari payload, jangan diklaim "diisi AM" */
+  if(man!=null)return {v:man,src:s._sebelumAuto?'payload':'diisi AM'};
+  const av=srcVal(a.src);
+  if(av!=null)return {v:av,src:'payload'};
+  return {v:null,src:null};
+}
+function rekomTarget(k){
+  const a=AKSI_BY[k], b=baselineAksi(k), amb=skalaAmbisi(a.mgg);
+  const r={amb,baseline:b.v,src:b.src,nilai:null,terkunci:ATURAN_TERKUNCI[k]||null,arah:a.arah,mgg:a.mgg,terkunciSudahLewat:false};
+  if(b.v!=null)r.nilai=bulat(a.arah==='naik'?b.v*(1+amb/100):b.v*(1-amb/100));
+  /* Kalau angka sekarang sudah melewati standar MEA, standar itu jadi target yang MUNDUR —
+     jangan ditawarkan sebagai pilihan, cukup dilaporkan sebagai sudah terlampaui. */
+  if(r.terkunci&&b.v!=null){
+    const sudah=a.arah==='naik'?(b.v>=r.terkunci.nilai):(b.v<=r.terkunci.nilai);
+    if(sudah)r.terkunciSudahLewat=true;
+  }
+  return r;
+}
+/* Tulis rekomendasi ke state kalau target masih kosong atau masih hasil hitungan tool.
+   Begitu AM mengedit, _targetAuto dilepas dan angka AM tidak pernah ditimpa lagi. */
+function autoIsiTarget(){
+  Object.keys(ST.aksi).forEach(k=>{
+    const s=ST.aksi[k]; if(!s||!s.on||!AKSI_BY[k])return;
+    const av=srcVal(AKSI_BY[k].src);
+    if(av!=null&&(!s.sebelum||s._sebelumAuto)){ s.sebelum=String(bulat(av)); s._sebelumAuto=true; }
+    if(!s.target||s._targetAuto){
+      const r=rekomTarget(k);
+      if(r.nilai!=null){ s.target=String(r.nilai); s._targetAuto=true; }
+    }
+  });
+}
+/* Blok penjelasan di bawah tiap aksi — inilah yang menggantikan beban mengarang angka. */
+function rekomBlok(k){
+  const a=AKSI_BY[k], s=ST.aksi[k]||{}, r=rekomTarget(k);
+  const sat=a.u==='Rp'?'':' '+a.u;
+  const fmt=v=>a.u==='Rp'?rp(v):(dec(v,(Math.abs(v)<10?1:0))+sat);
+  if(r.baseline==null){
+    return '<div class="jmb warn" style="border-left-color:var(--amber)">'+
+      '<b>Isi "angka sekarang" dulu</b> — jembatan <b>'+esc(a.j)+'</b> tidak ada di payload, '+
+      'jadi tool belum bisa menghitung target. Ambil angkanya dari Seller Center / laporan klien, '+
+      'isi sekali di kolom sebelah, lalu rekomendasi target muncul otomatis.'+
+      (r.terkunci?'<br>Alternatif tanpa angka sekarang: pakai standar MEA — <b>'+fmt(r.terkunci.nilai)+
+        '</b> ('+esc(r.terkunci.label)+') <button class="btn ghost sm" data-apply="'+k+'|'+r.terkunci.nilai+'" style="margin-left:6px">Pakai ini</button>':'')+
+      '</div>';
+  }
+  const dari='dari angka sekarang <b>'+fmt(r.baseline)+'</b> ('+esc(r.src)+'), '+
+    (a.arah==='naik'?'+':'−')+r.amb+'% untuk aksi yang butuh ≈'+r.mgg+' minggu';
+  let h='<div class="jmb auto"><b>Angka jembatan rekomendasi: '+fmt(r.nilai)+'</b> — '+dari+'. '+
+    (s._targetAuto?'Sudah terisi otomatis di kolom target.':'Kolom target sudah Anda ubah manual — tool tidak menimpanya.')+
+    ' <button class="btn ghost sm" data-apply="'+k+'|'+r.nilai+'" style="margin-left:6px">Pakai '+fmt(r.nilai)+'</button>';
+  if(r.terkunci&&r.terkunciSudahLewat){
+    h+='<br><span style="color:var(--teal)">Standar MEA (<b>'+fmt(r.terkunci.nilai)+'</b> — '+esc(r.terkunci.label)+
+      ') <b>sudah terlampaui</b> di angka sekarang, jadi tidak ditawarkan sebagai target — memakainya '+
+      'berarti menargetkan kondisi yang lebih buruk dari sekarang.</span>';
+  } else if(r.terkunci){
+    h+='<br><b>Atau pakai standar MEA: '+fmt(r.terkunci.nilai)+'</b> — '+esc(r.terkunci.label)+'. '+
+      '<button class="btn ghost sm" data-apply="'+k+'|'+r.terkunci.nilai+'" style="margin-left:6px">Pakai '+fmt(r.terkunci.nilai)+'</button>'+
+      '<br><span style="color:var(--mute)">Keduanya sah: yang pertama relatif ke kondisi toko ini, yang kedua standar MEA lintas klien. '+
+      'Kalau angka sekarang masih jauh dari standar, pakai yang relatif dulu supaya targetnya masih bisa dicapai.</span>';
+  }
+  h+='</div>';
+  return h;
+}
 
 /* ── STATE ──
    MODE menentukan bagaimana ST.aksi[k] dibaca & dirender, bukan struktur datanya sendiri —
@@ -622,14 +723,15 @@ function paneAksiBerjalan(){
           fld(a.k,'mulai','Tanggal mulai','date',s.mulai||'')+
           fld(a.k,'rencana','Rencana ('+a.u+')','number',s.rencana||'')+
           fld(a.k,'real','Realisasi ('+a.u+')','number',s.real||'')+
-          fld(a.k,'sebelum','Jembatan sebelum','text',s.sebelum||'')+
+          fld(a.k,'sebelum','Jembatan sebelum'+(s._sebelumAuto?' ⟳':''),'text',s.sebelum||'')+
           fld(a.k,'sekarang','Jembatan sekarang'+(auto?' ⟳':''),'text',
             (auto&&(s.sekarang===''||s.sekarang==null))?String(Math.round(av*100)/100):(s.sekarang||''))+
-          '<label class="f" style="grid-column:1/3"><span>Target jembatan</span>'+
+          '<label class="f" style="grid-column:1/3"><span>Target jembatan'+(s._targetAuto?' (rekomendasi tool)':' (diubah AM)')+'</span>'+
             '<input type="text" data-f="'+a.k+'|target" value="'+esc(s.target||'')+'"></label>'+
           '<label class="f" style="grid-column:3/-1"><span>Catatan (opsional)</span>'+
             '<input type="text" data-f="'+a.k+'|catatan" value="'+esc(s.catatan||'')+'" placeholder="hambatan, PIC, konteks"></label>'+
           '</div>';
+        h+=rekomBlok(a.k);
         const v=verdict(a.k);
         if(v)h+='<div class="jmb'+(auto?' auto':'')+'">'+esc(v.why)+
           (auto?' · <b>angka sekarang otomatis dari baseline</b>':'')+'</div>';
@@ -657,7 +759,16 @@ function paneAksiBaru(){
     '<div class="note">Belum ada histori untuk dinilai, jadi tidak ada verdict di sini. '+
     'Yang diisi: aksi mana yang jadi <b>rencana bulan pertama</b>, dikelompokkan ke <b>maksimal 3 pilar</b>, '+
     'dan target jembatannya. Field yang sama ini <b>tetap dipakai</b> saat klien pindah ke mode '+
-    '<b>Klien Berjalan</b> — tidak perlu diisi ulang, tinggal tambahkan tanggal mulai & realisasi.</div>';
+    '<b>Klien Berjalan</b> — tidak perlu diisi ulang, tinggal tambahkan tanggal mulai & realisasi.</div>'+
+    '<div class="note" style="border-left-color:var(--teal)"><b>Apa itu "jembatan"?</b> '+
+    'Tiap aksi punya satu angka yang <b>hanya aksi itu yang menggerakkannya langsung</b> — bergerak '+
+    'lebih dulu dari GMV. Contoh: aksi "perbaikan listing" tidak langsung menaikkan GMV, tapi langsung '+
+    'menaikkan <b>CTOR</b>. CTOR itu jembatannya. GMV dipengaruhi banyak hal sekaligus (musim, harga '+
+    'kompetitor, stok), jadi tidak bisa dipakai menilai satu aksi. '+
+    '<b>Target jembatannya tidak perlu Anda karang</b> — tool menghitung dari angka sekarang, '+
+    'ambisi disesuaikan lama aksi terlihat hasilnya (2 minggu → 15%, 3 minggu → 25%, '+
+    '4 minggu → 30%, 6 minggu → 40%). Angka itu boleh Anda ganti kapan saja; begitu diganti, '+
+    'tool berhenti menimpanya.</div>';
   if(B0Rekomendasi())h+=B0Rekomendasi();
   KATALOG.forEach(p=>{
     const aktif=p.aksi.filter(a=>ST.aksi[a.k]&&ST.aksi[a.k].on).length;
@@ -673,15 +784,18 @@ function paneAksiBaru(){
          (a.qw?' \u00b7 <span style="color:var(--teal)">quick win, tanpa budget baru</span>':' \u00b7 butuh \u2265'+a.mgg+' minggu terlihat hasilnya')+'</span></span>';
       h+='</div>';
       if(on){
+        const r=rekomTarget(a.k);
         h+='<div class="aksi-bd">'+
           '<label class="f"><span>Kelompokkan ke pilar</span><select data-f="'+a.k+'|grup">'+
             ['','1','2','3'].map(v=>'<option value="'+v+'"'+(String(s.grup||'')===v?' selected':'')+'>'+
               (v?'Pilar '+v:'(belum dikelompokkan)')+'</option>').join('')+'</select></label>'+
           fld(a.k,'rencana','Target bulan 1 ('+a.u+')','number',s.rencana||'')+
-          fld(a.k,'target','Target jembatan (dipakai nanti u/ verdict)','text',s.target||'')+
+          fld(a.k,'sebelum','Angka sekarang: '+a.j+(s._sebelumAuto?' ⟳':''),'text',s.sebelum||'')+
+          fld(a.k,'target','Target jembatan'+(s._targetAuto?' (rekomendasi tool)':' (diubah AM)'),'text',s.target||'')+
           '<label class="f" style="grid-column:1/-1"><span>Alasan dipilih (opsional, jadi bahan C-3/C-4)</span>'+
             '<input type="text" data-f="'+a.k+'|catatan" value="'+esc(s.catatan||'')+'" placeholder="mis. margin SKU ini 0%, hentikan dulu"></label>'+
           '</div>';
+        h+=rekomBlok(a.k);
       }
       h+='</div>';
     });
@@ -1273,6 +1387,7 @@ function applyTab(){
 }
 function render(){
   pullForm();
+  autoIsiTarget();
   $('#mKlien').textContent=ST.klien?('klien: '+ST.klien):'klien belum diisi';
   $('#mMinggu').textContent=ST.mode==='baru'?'rancang awal — belum ada aksi berjalan':
     (ST.minggu?(ST.minggu+' · tier '+ST.tier):'minggu belum diisi');
@@ -1313,7 +1428,16 @@ function wire(){
     if(c.checked&&ST.mode!=='baru'&&!ST.aksi[k].mulai)ST.aksi[k].mulai=ST.d1||'';
     render();});
   $$('[data-f]').forEach(i=>{
-    i.onchange=()=>{const[k,f]=i.dataset.f.split('|');ST.aksi[k]=ST.aksi[k]||{};ST.aksi[k][f]=i.value;render();};});
+    i.onchange=()=>{const[k,f]=i.dataset.f.split('|');ST.aksi[k]=ST.aksi[k]||{};ST.aksi[k][f]=i.value;
+      /* begitu AM mengedit sendiri, tool berhenti menimpa angka itu */
+      if(f==='target')ST.aksi[k]._targetAuto=false;
+      if(f==='sebelum')ST.aksi[k]._sebelumAuto=false;
+      render();};});
+  $$('[data-apply]').forEach(b=>b.addEventListener('click',()=>{
+    const[k,v]=b.dataset.apply.split('|');
+    ST.aksi[k]=ST.aksi[k]||{}; ST.aksi[k].target=v; ST.aksi[k]._targetAuto=false;
+    render(); toast('Target '+k+' diset ke '+v);
+  }));
   $$('[data-pilarnama]').forEach(i=>{
     i.onchange=()=>{ST.pilarNama[+i.dataset.pilarnama]=i.value;render();};});
   if($('#fThesis'))$('#fThesis').onchange=()=>{ST.thesis=$('#fThesis').value;};
