@@ -513,6 +513,37 @@ export function channelDraftToBody(ch: ChannelDraft) {
 }
 
 /**
+ * Which baseline months are worth sending to `saveStrategiBaseline` — every
+ * month with at least one figure typed, whether by the AM or by a prefill
+ * tool (Riset Awal, AM Baseline / Video Factory, MEA AM Cockpit). A month
+ * left completely untouched is excluded — sending it would fabricate a "GMV
+ * = 0" data point for a month nobody looked at.
+ *
+ * This is deliberately NOT "every field filled". `baselineDraftToBody`
+ * already defaults a blank field to `0` (Rule 5: `0` is a real answer,
+ * `saveBaseline`'s own `normalizeBaseline` accepts it), so a month is ready
+ * to send the moment ANY of its six figures is typed — the rest arrive at
+ * the server as `0`, same as if the AM had typed it.
+ *
+ * The bug this replaced: filtering on `every` field non-blank meant a month
+ * the AM Baseline tool could only partially derive (e.g. `gmv` +
+ * `jumlah_pesanan` from a TikTok Shop export — `ad_spend`/`roas`/`acos` are
+ * Ads figures the tool has no export for, "field N/A ... tetap manual",
+ * `strategi-video-factory.ts`) was silently dropped from every save. The row
+ * never reached `strategi_baseline_bulan`, so `detail.channels[].baseline`
+ * stayed empty and D-2's "Hitung stretch dari Baseline" (`strategi-target.ts`
+ * `computeBaselineStretchTargets`) had nothing to compute from — the AM saw
+ * a blank baseline and had to retype it by hand (owner report, STRG-202608-0001).
+ */
+export function monthsWithData(months: BaselineMonthDraft[]): BaselineMonthDraft[] {
+  return months.filter((m) =>
+    [m.gmv, m.jumlah_pesanan, m.persen_batal, m.ad_spend, m.roas, m.acos].some(
+      (v) => String(v).trim() !== '',
+    ),
+  );
+}
+
+/**
  * Converts baseline month drafts to the body saveStrategiBaseline expects.
  * Months with no data are still sent (all-zero) so the server can compute tren.
  */

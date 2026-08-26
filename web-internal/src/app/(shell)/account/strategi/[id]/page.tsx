@@ -66,6 +66,7 @@ import SectionB, {
   channelsDraftOf,
   channelDraftToBody,
   baselineDraftToBody,
+  monthsWithData,
   type ChannelDraft,
 } from '@/components/strategi/SectionB';
 import { mergeBaselinePrefill } from '@/lib/strategi-baseline-inherit';
@@ -373,18 +374,25 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
               }
             );
           });
-          // Partial-save (owner QA 2026-08-22): `saveBaseline` keeps Rule 5 — every
-          // figure of a row is required, `0` counts, blank does not — so a month
-          // still being typed would make the whole Section B save throw and lose
-          // the AM's other work. Send only the months that are FULLY filled; the
-          // rest wait, and the submit gate reports them as `B-1/<channel>`. A `0`
-          // is a real answer and stays included; only truly blank cells drop a row.
-          const complete = months.filter((m) =>
-            [m.gmv, m.jumlah_pesanan, m.persen_batal, m.ad_spend, m.roas, m.acos].every(
-              (v) => String(v).trim() !== '',
-            ),
+          // Partial-save (owner QA 2026-08-22, corrected 2026-08-26 — see
+          // DECISIONS.md): a month left COMPLETELY untouched is held back
+          // rather than sent — the submit gate reports it as `B-1/<channel>`
+          // and the AM finishes it later. A month with at least one figure
+          // typed (by hand, or by a prefill tool — Riset Awal, AM Baseline /
+          // Video Factory, MEA AM Cockpit) IS sent: `baselineDraftToBody`
+          // already defaults every blank field to `0` on the wire, and Rule 5
+          // (`saveBaseline`) accepts that `0` as a real answer, same as if the
+          // AM had typed it. Gating on "every field filled" (the previous
+          // bug) silently dropped any month a prefill tool could only
+          // partially derive — e.g. `gmv` + `jumlah_pesanan` from a TikTok
+          // Shop export, with no `ad_spend`/`roas`/`acos` to offer — so the
+          // row never reached the server and D-2's "Hitung stretch dari
+          // Baseline" had nothing to compute from.
+          current = await saveStrategiBaseline(
+            id,
+            saved.id,
+            baselineDraftToBody(monthsWithData(months)),
           );
-          current = await saveStrategiBaseline(id, saved.id, baselineDraftToBody(complete));
         }
         next = current;
       } else if (active === 'C') {
