@@ -28,6 +28,18 @@ import {
 import { listStrategiQueue, type StrategiQueueRow } from '@/lib/strategi';
 import StatusBadge from '@/components/StatusBadge';
 
+/**
+ * QA (2026-08-26): the "Strategy & Plan" card below lists the legacy M6 §4
+ * `STR-` queue side by side with the decided `Strategi (STRG-)` queue right
+ * under it — two same-shaped "Semua / Menunggu Persetujuan" pickers on one
+ * page confused the AM team about which one to work from. Same fix as the
+ * Service hub (`SHOW_LEGACY_STR_PATH`, `/account/services/[id]/page.tsx`):
+ * hide the card, keep the code — STR- is NOT retired (SESI31 keputusan #6),
+ * flip this to `true` to bring the legacy queue back (e.g. to action an
+ * existing STR- record). See docs/DECISIONS.md 2026-08-26.
+ */
+const SHOW_LEGACY_STR_QUEUE = false;
+
 function formatDate(value: string | null | undefined) {
   if (!value) return '—';
   return new Date(value).toLocaleString('id-ID');
@@ -633,6 +645,7 @@ export default function AccountWorkspacePage() {
         </section>
       )}
 
+      {SHOW_LEGACY_STR_QUEUE && (
       <section className="card">
         <div className="cardHeader">
           <h2>Strategy &amp; Plan</h2>
@@ -700,6 +713,7 @@ export default function AccountWorkspacePage() {
           </div>
         )}
       </section>
+      )}
 
       {/* M6A — the STRG- queue (owner QA 2026-08-26). SPV/Head of Account
           approves a submitted version from `/account/strategi/{id}`, but until
