@@ -1024,6 +1024,30 @@ export function listStrategi(serviceId: string): Promise<Strategi[]> {
   return api.get<Strategi[]>(`/services/${serviceId}/strategi`);
 }
 
+/**
+ * One row of the SPV/Head of Account queue — every `STRG-` version visible to
+ * the actor, across all clients (not just one Service). Used by `/account`'s
+ * "Strategi (STRG-)" section so a submitted version can actually be found and
+ * opened for approval (owner QA 2026-08-26 — that page only listed the
+ * retired `STR-` `strategy_plans` queue).
+ */
+export interface StrategiQueueRow {
+  id: string;
+  contract_id: string;
+  client_id: string;
+  client_toko: string;
+  versi_no: number;
+  status: StrategiStatus;
+  growth_thesis: string | null;
+  tanggal_mulai_kontrak: string;
+  tanggal_akhir_kontrak: string;
+  diajukan_pada: string | null;
+}
+
+export function listStrategiQueue(): Promise<{ data: StrategiQueueRow[] }> {
+  return api.get<{ data: StrategiQueueRow[] }>('/strategi');
+}
+
 export function createStrategi(serviceId: string, body: StrategiHeaderBody): Promise<Strategi> {
   return api.post<Strategi>(`/services/${serviceId}/strategi`, body);
 }

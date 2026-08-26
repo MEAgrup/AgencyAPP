@@ -25,6 +25,7 @@ import {
   type ServiceQueueRow,
   type Strategy,
 } from '@/lib/account';
+import { listStrategiQueue, type StrategiQueueRow } from '@/lib/strategi';
 import StatusBadge from '@/components/StatusBadge';
 
 function formatDate(value: string | null | undefined) {
@@ -62,6 +63,14 @@ export default function AccountWorkspacePage() {
   const [strategiesLoading, setStrategiesLoading] = useState(true);
   const [strategiesError, setStrategiesError] = useState<string | null>(null);
   const [strategyFilter, setStrategyFilter] = useState<'all' | 'inbox'>('all');
+
+  // Strategi (STRG-) — the M6A queue, separate from the legacy STR- one above
+  // (owner QA 2026-08-26: a submitted STRG- version had nowhere for SPV/Head
+  // of Account to find and approve it from `/account`).
+  const [strategiQueue, setStrategiQueue] = useState<StrategiQueueRow[] | null>(null);
+  const [strategiQueueLoading, setStrategiQueueLoading] = useState(true);
+  const [strategiQueueError, setStrategiQueueError] = useState<string | null>(null);
+  const [strategiQueueFilter, setStrategiQueueFilter] = useState<'all' | 'inbox'>('all');
 
   // Assign AM (per-row → a panel with the AM picker; no more window.prompt)
   const [assignTarget, setAssignTarget] = useState<IntakeClient | null>(null);
@@ -148,12 +157,26 @@ export default function AccountWorkspacePage() {
     }
   }, []);
 
+  const loadStrategiQueue = useCallback(async () => {
+    setStrategiQueueLoading(true);
+    setStrategiQueueError(null);
+    try {
+      const res = await listStrategiQueue();
+      setStrategiQueue(res.data);
+    } catch (err) {
+      setStrategiQueueError(errorMessage(err));
+    } finally {
+      setStrategiQueueLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadIntake();
     loadWorkload();
     loadServices();
     loadStrategies();
-  }, [loadIntake, loadWorkload, loadServices, loadStrategies]);
+    loadStrategiQueue();
+  }, [loadIntake, loadWorkload, loadServices, loadStrategies, loadStrategiQueue]);
 
   /** Opens the assign panel for one intake row (nothing is sent yet). */
   function openAssign(client: IntakeClient) {
@@ -219,6 +242,11 @@ export default function AccountWorkspacePage() {
     strategies && strategyFilter === 'inbox'
       ? strategies.filter((s) => s.status === STRATEGY_SUBMITTED)
       : strategies;
+
+  const visibleStrategiQueue =
+    strategiQueue && strategiQueueFilter === 'inbox'
+      ? strategiQueue.filter((s) => s.status === 'Diajukan')
+      : strategiQueue;
 
   const visibleServices =
     services && serviceFilter === 'onboarding' ? services.filter(needsOnboarding) : services;
@@ -625,6 +653,11 @@ export default function AccountWorkspacePage() {
             </button>
           </div>
         </div>
+        <p className="muted" style={{ fontSize: 13 }}>
+          Jalur lama (<code>STR-</code>, M6 §4) — belum dipensiunkan (lihat <code>docs/DECISIONS.md</code>).
+          Untuk Strategi <code>STRG-</code> (form Section A→J, M6A), lihat bagian{' '}
+          <strong>Strategi (STRG-)</strong> di bawah.
+        </p>
         {strategiesLoading && <p className="muted">Memuat...</p>}
         {strategiesError && <div className="alert alertError" role="alert">{strategiesError}</div>}
         {!strategiesLoading && !strategiesError && visibleStrategies && visibleStrategies.length === 0 && (
@@ -658,6 +691,77 @@ export default function AccountWorkspacePage() {
                     <td>{s.objective || '—'}</td>
                     <td>
                       {s.timeline_start || '—'} &rarr; {s.timeline_end || '—'}
+                    </td>
+                    <td><StatusBadge status={s.status} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* M6A — the STRG- queue (owner QA 2026-08-26). SPV/Head of Account
+          approves a submitted version from `/account/strategi/{id}`, but until
+          this section existed the only way to reach one was already knowing its
+          ID: nothing on this page listed `Diajukan` STRG- versions. */}
+      <section className="card">
+        <div className="cardHeader">
+          <h2>Strategi (STRG-)</h2>
+          <div className="row" style={{ gap: 8 }}>
+            <button
+              type="button"
+              className={`btn btnSm ${strategiQueueFilter === 'all' ? 'btnPrimary' : 'btnSecondary'}`}
+              onClick={() => setStrategiQueueFilter('all')}
+            >
+              Semua
+            </button>
+            <button
+              type="button"
+              className={`btn btnSm ${strategiQueueFilter === 'inbox' ? 'btnPrimary' : 'btnSecondary'}`}
+              onClick={() => setStrategiQueueFilter('inbox')}
+            >
+              Menunggu Persetujuan
+            </button>
+          </div>
+        </div>
+        <p className="muted" style={{ fontSize: 13 }}>
+          Form Section A→J (M6A). AM mengajukan &rarr; status <code>Diajukan</code> &rarr; SPV / Head of
+          Account membuka baris di bawah untuk menyetujui atau mengembalikan.
+        </p>
+        {strategiQueueLoading && <p className="muted">Memuat...</p>}
+        {strategiQueueError && <div className="alert alertError" role="alert">{strategiQueueError}</div>}
+        {!strategiQueueLoading && !strategiQueueError && visibleStrategiQueue && visibleStrategiQueue.length === 0 && (
+          <div className="emptyState">
+            {strategiQueueFilter === 'inbox'
+              ? 'Tidak ada Strategi (STRG-) yang menunggu persetujuan.'
+              : 'Belum ada Strategi (STRG-) yang terlihat untuk peran Anda.'}
+          </div>
+        )}
+        {!strategiQueueLoading && !strategiQueueError && visibleStrategiQueue && visibleStrategiQueue.length > 0 && (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Strategi ID</th>
+                  <th>Klien</th>
+                  <th>Growth Thesis</th>
+                  <th>Timeline</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleStrategiQueue.map((s) => (
+                  <tr key={s.id}>
+                    <td>
+                      <Link href={`/account/strategi/${encodeURIComponent(s.id)}`}>{s.id}</Link>
+                    </td>
+                    <td>
+                      <Link href={`/clients/${encodeURIComponent(s.client_id)}`}>{s.client_toko}</Link>
+                    </td>
+                    <td>{s.growth_thesis || '—'}</td>
+                    <td>
+                      {s.tanggal_mulai_kontrak} &rarr; {s.tanggal_akhir_kontrak}
                     </td>
                     <td><StatusBadge status={s.status} /></td>
                   </tr>
