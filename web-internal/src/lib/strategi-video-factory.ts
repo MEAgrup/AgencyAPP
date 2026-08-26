@@ -27,7 +27,7 @@
 // Tool bersifat TikTok-Shop-only, jadi payload selalu channel "TikTok Shop":
 // prefill menyasar channel TikTok Shop di draft, dan MEMBUATNYA bila belum ada.
 
-import { blankChannel, type ChannelDraft } from '@/components/strategi/SectionB';
+import { blankChannel, type BaselineMonthDraft, type ChannelDraft } from '@/components/strategi/SectionB';
 
 /** Skema payload yang di-emit `sectionBPayload()` di video-factory.html. */
 export const VIDEO_FACTORY_SCHEMA = 'cdps.section_b.v1';
@@ -47,6 +47,20 @@ interface VfTopSku {
   harga_jual?: string;
 }
 
+/**
+ * One B-1 baseline month, as the tool computes it — an even split of ONE
+ * window total (the tool has no per-calendar-month breakdown, only the sum
+ * across `periode_baseline_bulan` months), same averaging the tool already
+ * does for `jumlah_video_per_bulan`/`jam_live_per_bulan`. `ad_spend`/`roas`/
+ * `acos`/`persen_batal` are never included — no window-total for those
+ * exists in the tool either, so they stay manual like every other N/A field.
+ */
+interface VfBaselineMonth {
+  month_index: number;
+  gmv?: string;
+  jumlah_pesanan?: number;
+}
+
 /** Blok `channel` di dalam payload. Semua field selain `channel` opsional:
  *  tool hanya menyertakan yang terbaca dari export. */
 export interface VideoFactoryChannel {
@@ -56,6 +70,8 @@ export interface VideoFactoryChannel {
   sumber_data?: string;
   tanggal_ambil_data?: string;
   periode_baseline_bulan?: number;
+  /** B-1 — one row per month of the baseline window (see `VfBaselineMonth`). */
+  baseline?: VfBaselineMonth[];
   pengunjung_per_bulan?: number;
   conversion_rate_persen?: number;
   /** B-2.3 komposisi trafik = GMV-share platform (boleh tumpang-tindih, tidak
@@ -162,6 +178,46 @@ function fillStr(
   return true;
 }
 
+/**
+ * Merges the tool's B-1 rows into the draft's baseline array. Same SARAN
+ * contract as everything else in this file, at the FIELD level: a month the
+ * tool has no row for is untouched, and a figure the AM already typed
+ * (`gmv`/`jumlah_pesanan` individually, not the whole row) is never
+ * overwritten — only a blank cell is filled. Rows are kept sorted by
+ * `month_index` since `SectionB.tsx`'s `ensuredBaseline` renders them in
+ * that order.
+ */
+function mergeBaselineMonths(
+  existing: readonly BaselineMonthDraft[],
+  incoming: readonly VfBaselineMonth[],
+): { rows: BaselineMonthDraft[]; filled: number } {
+  let filled = 0;
+  const blankMonth = (monthIndex: number): BaselineMonthDraft => ({
+    month_index: monthIndex,
+    gmv: '',
+    jumlah_pesanan: '',
+    persen_batal: '',
+    ad_spend: '',
+    roas: '',
+    acos: '',
+  });
+  const byMonth = new Map(existing.map((m) => [m.month_index, m]));
+  for (const inc of incoming) {
+    const cur = byMonth.get(inc.month_index) ?? blankMonth(inc.month_index);
+    let next = cur;
+    if (inc.gmv != null && inc.gmv !== '' && !cur.gmv.trim()) {
+      next = { ...next, gmv: inc.gmv };
+      filled++;
+    }
+    if (inc.jumlah_pesanan != null && !cur.jumlah_pesanan.trim()) {
+      next = { ...next, jumlah_pesanan: String(inc.jumlah_pesanan) };
+      filled++;
+    }
+    byMonth.set(inc.month_index, next);
+  }
+  return { rows: [...byMonth.values()].sort((a, b) => a.month_index - b.month_index), filled };
+}
+
 /** Deskripsi ringkas hasil penerapan, untuk ditampilkan panel ke AM. */
 export interface ApplySummary {
   channelLabel: string;
@@ -203,6 +259,15 @@ export function applyVideoFactoryPrefill(
   scalar('sumber_data', c.sumber_data);
   scalar('tanggal_ambil_data', c.tanggal_ambil_data);
   scalar('periode_baseline_bulan', c.periode_baseline_bulan);
+  // B-1 baseline bulanan (GMV + jumlah pesanan, rata-rata jendela — lihat
+  // `VfBaselineMonth`). Ini yang dibaca D-2 "Hitung stretch dari Baseline"
+  // (`computeBaselineStretchTargets`); tanpa baris ini, kolom Baseline di
+  // Section D tetap kosong walau field B-2..B-9 lain sudah terisi tool.
+  if (Array.isArray(c.baseline) && c.baseline.length) {
+    const merged = mergeBaselineMonths(next.baseline, c.baseline);
+    next.baseline = merged.rows;
+    filled += merged.filled;
+  }
   // B-2 trafik & konversi
   scalar('pengunjung_per_bulan', c.pengunjung_per_bulan);
   scalar('conversion_rate_persen', c.conversion_rate_persen);
