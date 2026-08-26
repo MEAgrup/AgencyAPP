@@ -217,7 +217,7 @@ Design note: **D-8 (asumsi target) is deliberately shareable.** The assumptions 
 | C-2 | **⟳ 2026-08-24 (DECISIONS):** Alasan/bukti bottleneck ini dipilih — uraian bebas, bukan rujukan field-ID (field-ID baseline sulit dicari AM tanpa daftar kode di tangan, menyulitkan pengisian tanpa memberi nilai sebanding). Superseded original: "Bukti angka: field baseline mana yang mendasari diagnosa ini?" — type was "Field-ID reference (min 1)". | Long text | W |
 | C-3 | Akar masalah (bukan gejala) — kenapa bottleneck itu terjadi | Long text ↻ | W |
 | C-4 | Gap vs kompetitor yang paling menentukan | Long text | W |
-| C-5 | Quick win 14 hari pertama (perbaikan yang tak butuh budget baru) | Repeatable struct: aksi, channel, PIC divisi, dampak diharapkan | W (min 3) |
+| C-5 | **⟳ 2026-08-26 (DECISIONS):** Quick win 14 hari pertama (perbaikan yang tak butuh budget baru). Superseded original: min 3 baris. | Repeatable struct: aksi, channel, PIC divisi, dampak diharapkan | W (min 1) |
 | C-6 | Risiko struktural yang tak bisa dihilangkan (margin tipis, kapasitas stok, kategori jenuh, klien lambat approve) | Repeatable text | W |
 | C-7 | Apa yang harus dibereskan klien sebelum eksekusi jalan (prasyarat) | Repeatable struct: item, PIC klien, deadline | W |
 
