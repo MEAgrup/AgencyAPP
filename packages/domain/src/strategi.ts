@@ -456,8 +456,10 @@ export const MSG_TARGET_WITHOUT_ASSUMPTION =
   '[setiap target GMV bulanan wajib terkait minimal satu asumsi]';
 /** Rule 9 / E-11 — the out-of-scope record cannot be empty. */
 export const MSG_OUT_OF_SCOPE_REQUIRED = '[minimal satu item Yang Tidak Dikerjakan wajib diisi]';
-/** H-1 — at least three risks. */
-export const MSG_RISK_MIN = '[minimal tiga risiko wajib diisi di risk register]';
+/** Minimum risk register rows required at submit (H-1). ⟳ 2026-08-26 (DECISIONS): was 3. */
+export const RISK_MIN = 1;
+/** H-1 — at least RISK_MIN risks. */
+export const MSG_RISK_MIN = `[minimal ${RISK_MIN} risiko wajib diisi di risk register]`;
 /** G-0 / Rule 17 — the Plan cycle start date is required before submit. */
 export const MSG_CYCLE_START_REQUIRED = '[tanggal mulai siklus Plan wajib diisi]';
 /** Rule 17 — the start date is frozen once Plan period 1 closes. */
@@ -6117,9 +6119,10 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
   // it was meant to capture, so E-11 stays editable in Section E but is optional. The
   // gate push (and its `DOORS` row) are removed; the column and endpoint are kept.
 
+  // H-1: at least RISK_MIN risk register rows (PRD says "W (min 1)").
   const risks = await sql<{ n: number }[]>`
     select count(*)::int as n from strategi_risk where strategi_id = ${id}`;
-  if (risks[0].n < 3) {
+  if (risks[0].n < RISK_MIN) {
     out.push({ kode: 'H-1', pesan: MSG_RISK_MIN });
   }
 

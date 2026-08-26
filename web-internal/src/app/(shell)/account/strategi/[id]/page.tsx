@@ -930,6 +930,7 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                   risks={drafts.risks}
                   triggers={drafts.triggers}
                   narasi={drafts.sectionE.narasi}
+                  channels={drafts.channels.map((c) => c.channel)}
                   onRisks={(rows) => patch('risks', rows)}
                   onTriggers={(rows) => patch('triggers', rows)}
                   onNarasi={(p) =>

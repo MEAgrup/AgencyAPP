@@ -18,12 +18,19 @@
  * ⚠️ **H-4 is hard-internal (§4.1).** It is collected here and must never reach
  * a client-facing view. The `/s/{token}` renderer (A-11) is a separate
  * serialiser precisely so it cannot inherit this form's shape.
+ *
+ * **H-1 suggestions (⟳ 2026-08-26 DECISIONS) are a picklist, not an
+ * autofill.** `getRiskSuggestions` only returns candidate rows keyed off the
+ * Strategi's contracted channels (D1); nothing is added to `risks` until the
+ * AM clicks one. Once added it is an ordinary draft row — PIC/mitigasi start
+ * prefilled but stay fully editable, same as any row the AM typed by hand.
  */
 
 import RepeatList from './RepeatList';
 import type { NarasiDraft } from './SectionE';
 import { RISK_LEVELS, TRIGGER_REVISI_LABELS } from '@/lib/strategi';
 import type { RiskLevel, StrategiDetail } from '@/lib/strategi';
+import { getRiskSuggestions } from '@/lib/strategi-risk-suggestions';
 
 export interface RiskDraft {
   risiko: string;
@@ -65,6 +72,7 @@ export default function SectionH({
   risks,
   triggers,
   narasi,
+  channels,
   onRisks,
   onTriggers,
   onNarasi,
@@ -73,11 +81,18 @@ export default function SectionH({
   risks: RiskDraft[];
   triggers: TriggerDraft[];
   narasi: NarasiDraft;
+  /** D1 channel names (`ChannelDraft.channel`) — picks which channel suggestions apply. */
+  channels: string[];
   onRisks: (rows: RiskDraft[]) => void;
   onTriggers: (rows: TriggerDraft[]) => void;
   onNarasi: (patch: Partial<NarasiDraft>) => void;
   disabled: boolean;
 }) {
+  const suggestions = getRiskSuggestions(channels, risks);
+
+  const addSuggestion = (s: (typeof suggestions)[number]) => {
+    onRisks([...risks, { risiko: s.risiko, dampak: s.dampak, kemungkinan: s.kemungkinan, mitigasi: s.mitigasi, pic: '' }]);
+  };
   // `lainnya` may repeat (what distinguishes two of them is the note), so it is
   // never treated as already-picked. The other six are single-select.
   const picked = new Set(triggers.map((t) => t.kode).filter((k) => k !== 'lainnya'));
@@ -100,11 +115,32 @@ export default function SectionH({
 
   return (
     <div className="stack">
+      {!disabled && suggestions.length > 0 && (
+        <div className="field" style={{ display: 'block' }}>
+          <span className="muted" style={{ fontSize: 12 }}>
+            Saran risiko dari channel yang dikontrak dan pola revisi umum — klik untuk
+            menambah, lalu sesuaikan mitigasi/PIC-nya. Bukan wajib dipakai.
+          </span>
+          <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+            {suggestions.map((s) => (
+              <button
+                key={s.risiko}
+                type="button"
+                className="btn btnGhost btnSm"
+                onClick={() => addSuggestion(s)}
+              >
+                + {s.risiko}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <RepeatList<RiskDraft>
         label="H-1 · Risk register"
-        hint="Risiko, dampak, kemungkinan, mitigasi, dan siapa PIC-nya. Minimal tiga."
+        hint="Risiko, dampak, kemungkinan, mitigasi, dan siapa PIC-nya. Minimal satu."
         rows={risks}
-        min={3}
+        min={1}
         onChange={onRisks}
         blank={() => ({ risiko: '', dampak: 'sedang', kemungkinan: 'sedang', mitigasi: '', pic: '' })}
         disabled={disabled}

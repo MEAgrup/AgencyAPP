@@ -278,7 +278,7 @@ Design note: **D-8 (asumsi target) is deliberately shareable.** The assumptions 
 ### SECTION H — Risiko & Trigger Revisi
 | ID | Question | Type | Req |
 |---|---|---|---|
-| H-1 | Risk register: risiko, dampak (rendah/sedang/tinggi), kemungkinan, mitigasi, PIC | Repeatable struct (min 3) | W |
+| H-1 | Risk register: risiko, dampak (rendah/sedang/tinggi), kemungkinan, mitigasi, PIC | Repeatable struct (min 1, **⟳ 2026-08-26 (DECISIONS)**: semula min 3) | W (min 1) |
 | H-2 | Trigger revisi yang dipilih untuk klien ini (enum, multi): pencapaian <X% target 2 bulan berturut / klien ubah lini produk / stok kosong >X hari / budget iklan dipotong / perubahan kebijakan platform / ganti PIC klien / lainnya | Multi-enum + threshold | W |
 | H-3 | Skenario mundur (fallback) jika strategi utama gagal di fase 1 | Long text | W |
 | H-4 | Kondisi yang membuat MEA menyarankan stop/ubah scope | Long text | O |
