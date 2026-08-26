@@ -18,7 +18,7 @@
  * test.
  *
  * **The minimum is shown, not enforced.** G-1 needs two phases and H-1 needs
- * three risks, but the remove button never refuses: the AM may legitimately be
+ * one risk, but the remove button never refuses: the AM may legitimately be
  * mid-edit with one row while they retype the others. The submit gate reports
  * the shortfall (§5 step 5) and the server refuses the submit — the same split
  * every other required field uses, and the reason `checkCompleteness` returns a

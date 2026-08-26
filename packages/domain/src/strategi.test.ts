@@ -53,6 +53,7 @@ import {
   MSG_REVIEW_NOTES_REQUIRED,
   MSG_REVISION_INCOMPLETE,
   MSG_RISIKO_STRUKTURAL_REQUIRED,
+  MSG_RISK_MIN,
   MSG_SANGGAHAN_INCOMPLETE,
   MSG_SKENARIO_MUNDUR_REQUIRED,
   MSG_STRATEGI_EXISTS,
@@ -2379,6 +2380,23 @@ describeDb('Section C — A-07 (Diagnosa & Akar Masalah)', () => {
     });
     const pesan = (await checkCompleteness(sql, s.id)).map((m) => m.pesan);
     expect(pesan).not.toContain(MSG_QUICK_WIN_MIN);
+  });
+
+  it('checkCompleteness — flags H-1 when no risks are recorded', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const pesan = (await checkCompleteness(sql, s.id)).map((m) => m.pesan);
+    expect(pesan).toContain(MSG_RISK_MIN);
+  });
+
+  it('checkCompleteness — one risk satisfies H-1', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveRisks(sql, am(), s.id, [
+      { risiko: 'stok kosong', dampak: 'sedang', kemungkinan: 'sedang', mitigasi: 'buffer stok', pic: 'ZZ-AM' },
+    ]);
+    const pesan = (await checkCompleteness(sql, s.id)).map((m) => m.pesan);
+    expect(pesan).not.toContain(MSG_RISK_MIN);
   });
 
   it('checkCompleteness — flags C-6 when risiko struktural is empty', async () => {
