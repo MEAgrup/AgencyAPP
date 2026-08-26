@@ -101,6 +101,26 @@ export interface BriefInheritResult {
 }
 
 /**
+ * PC-5 `sku_sasaran` is a free-form JSON array (a plain SKU string, or a struct
+ * with a `sku` key) — this renders it as a short human-readable list for the
+ * instructions trace. Never throws on odd shapes; unrecognisable entries are
+ * dropped rather than surfacing `[object Object]`.
+ */
+function formatSkuSasaran(items: unknown[]): string {
+  return items
+    .map((it) => {
+      if (typeof it === 'string') return it.trim();
+      if (it !== null && typeof it === 'object' && 'sku' in it) {
+        const sku = (it as { sku?: unknown }).sku;
+        return typeof sku === 'string' ? sku.trim() : '';
+      }
+      return '';
+    })
+    .filter((s) => s !== '')
+    .join(', ');
+}
+
+/**
  * planRowToBriefInput is THE single projection of a `plan_row` onto a Brief. Only
  * `dueDate` + `priority` come from the AM (`fill`); everything else is inherited.
  *
@@ -110,10 +130,16 @@ export interface BriefInheritResult {
  *   quantityTarget   ← kuota                           (PC-6; rounded to a count)
  *   deliverableType  ← satuan | aksi | pilar           (PC-6 unit; non-empty)
  *   title            ← hasilDiharapkan | "<pilar> — <channel>"   (PC-11)
- *   instructions     ← kanal / pilar / aksi / prasyarat trace
+ *   instructions     ← kanal / pilar / aksi / SKU sasaran / budget / prasyarat trace
  * klien + service are the Brief's parent Service (resolved by the caller); the
  * baseline / lampiran sumber four-level trace lives durably in `briefs.plan_row_id`
  * (§8), so the wire projection stays lossy-by-design while the row is the truth.
+ *
+ * QA (2026-08-26): SKU Sasaran (PC-5, e.g. hero SKU the row targets) and Budget
+ * (PC-7, e.g. ad spend that implies the ROAS/ACOS target) are AM-entered figures
+ * that live on the row already — dropping them here forced the division to go
+ * back to the AM (or the Plan page) for numbers the AM had already committed,
+ * exactly the "isi dari nol" complaint. Both now ride in the instructions trace.
  */
 export function planRowToBriefInput(row: PlanRow, fill: BriefInheritFill): BriefInput {
   const satuan = (row.satuan ?? '').trim();
@@ -121,10 +147,13 @@ export function planRowToBriefInput(row: PlanRow, fill: BriefInheritFill): Brief
   const hasil = (row.hasilDiharapkan ?? '').trim();
   const deliverableType = satuan || aksi || row.pilar;
   const title = hasil || `${row.pilar} — ${row.channel}`;
+  const skuSasaran = formatSkuSasaran(row.skuSasaran);
   const instructions = [
     `Kanal: ${row.channel}`,
     `Pilar: ${row.pilar}`,
     aksi ? `Aksi: ${aksi}` : '',
+    skuSasaran ? `SKU Sasaran: ${skuSasaran}` : '',
+    row.budget !== null ? `Budget: Rp ${row.budget.toLocaleString('id-ID')}` : '',
     row.prasyarat ? `Prasyarat: ${(row.prasyarat ?? '').trim()}` : '',
   ]
     .filter((s) => s !== '')

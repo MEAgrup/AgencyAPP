@@ -93,6 +93,24 @@ describe('planRowToBriefInput (pure projection)', () => {
     expect(b.quantityTarget).toBe(13);
     expect(b.instructions).toContain('Prasyarat: materi klien siap');
   });
+
+  it('carries SKU Sasaran (PC-5) and Budget (PC-7) into the trace instead of dropping them', () => {
+    const b = planRowToBriefInput(
+      planRow({
+        skuSasaran: ['SKU-001', { sku: 'SKU-002', peran: 'hero' }, { catatan: 'no sku key' }],
+        budget: 5_000_000,
+      }),
+      FILL,
+    );
+    expect(b.instructions).toContain('SKU Sasaran: SKU-001, SKU-002');
+    expect(b.instructions).toContain('Budget: Rp 5.000.000');
+  });
+
+  it('omits SKU Sasaran/Budget lines entirely when the row has neither', () => {
+    const b = planRowToBriefInput(planRow({ skuSasaran: [], budget: null }), FILL);
+    expect(b.instructions).not.toContain('SKU Sasaran');
+    expect(b.instructions).not.toContain('Budget');
+  });
 });
 
 // ---------------------------------------------------------------------------
