@@ -3,6 +3,7 @@ import {
   assumptionsToBody,
   channelsMissingSupport,
   computeBaselineStretchTargets,
+  DEFAULT_BASELINE_GROWTH_PCT,
   gmvCellsToBody,
   gmvGridOf,
   offerableTargetKeys,
@@ -13,6 +14,7 @@ import {
   quarterStretchValue,
   readTargetKey,
   setQuarterStretch,
+  suggestedBaselineGmv,
   supportRowsOf,
   supportRowsToBody,
   targetKey,
@@ -383,6 +385,50 @@ describe('computeBaselineStretchTargets', () => {
     const grid = gmvGridOf([{ channel: 'TikTok Shop' }], 2, []);
     const out = computeBaselineStretchTargets(channels, grid, 20);
     expect(out.every((c) => c.nilai_stretch === '')).toBe(true);
+  });
+});
+
+// Regression for the repeated "Section B baseline saved, D-2 still empty" report
+// (STRG-202608-0001, owner report x3, 2026-08-26): the wiring was always there,
+// behind SectionD's "Hitung stretch dari Baseline" button — page.tsx now runs
+// `suggestedBaselineGmv` automatically on load and after every save so the
+// suggestion appears without that click. `changed` decides whether page.tsx
+// marks the form dirty (the only thing that enables Simpan / arms autosave),
+// so getting it wrong either re-blocks Simpan on a real suggestion or falsely
+// dirties a form nothing actually changed in.
+describe('suggestedBaselineGmv', () => {
+  const channels = [
+    { channel: 'Shopee', baseline: [{ month_index: 1, gmv: '150000000' }] },
+    { channel: 'TikTok Shop', baseline: [] },
+  ];
+
+  it('fills blank stretch cells and reports changed:true', () => {
+    const grid = gmvGridOf([{ channel: 'Shopee' }], 3, []);
+    const { gmv, changed } = suggestedBaselineGmv(channels, grid);
+    expect(changed).toBe(true);
+    expect(gmv.every((c) => c.nilai_stretch !== '')).toBe(true);
+  });
+
+  it('defaults to DEFAULT_BASELINE_GROWTH_PCT when no percentage is passed', () => {
+    const grid = gmvGridOf([{ channel: 'Shopee' }], 3, []);
+    const withDefault = suggestedBaselineGmv(channels, grid);
+    const withExplicit = suggestedBaselineGmv(channels, grid, DEFAULT_BASELINE_GROWTH_PCT);
+    expect(withDefault.gmv).toEqual(withExplicit.gmv);
+  });
+
+  it('reports changed:false when every cell is already filled — nothing to mark dirty for', () => {
+    const grid = gmvGridOf([{ channel: 'Shopee' }], 1, [
+      { channel: 'Shopee', month_index: 1, metric: 'gmv', nilai_floor: '1', nilai_stretch: '999' },
+    ]);
+    const { gmv, changed } = suggestedBaselineGmv(channels, grid);
+    expect(changed).toBe(false);
+    expect(gmv).toEqual(grid); // same values, so page.tsx keeps `dirty` as it was
+  });
+
+  it('reports changed:false when no channel has baseline data to suggest from', () => {
+    const grid = gmvGridOf([{ channel: 'TikTok Shop' }], 2, []);
+    const { changed } = suggestedBaselineGmv(channels, grid);
+    expect(changed).toBe(false);
   });
 });
 

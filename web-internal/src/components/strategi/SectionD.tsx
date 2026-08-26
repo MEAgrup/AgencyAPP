@@ -71,6 +71,7 @@ import {
 import {
   channelsMissingSupport,
   computeBaselineStretchTargets,
+  DEFAULT_BASELINE_GROWTH_PCT,
   gmvGridOf,
   gmvCellsToBody,
   offerableTargetKeys,
@@ -185,7 +186,7 @@ export default function SectionD({
   // Section B's own baseline GMV — see `computeBaselineStretchTargets`. This is
   // the AM's growth assumption, not a stored field, so it lives in component
   // state rather than the draft: closing and reopening the form is the reset.
-  const [pctGrowth, setPctGrowth] = useState(20);
+  const [pctGrowth, setPctGrowth] = useState(DEFAULT_BASELINE_GROWTH_PCT);
   const toggleIndicator = (v: LeadingIndicator) => {
     const has = draft.leading_indicator.includes(v);
     if (!has && draft.leading_indicator.length >= LEADING_INDICATOR_MAX) return;
@@ -315,7 +316,9 @@ export default function SectionD({
             </button>
             <span className="muted" style={{ fontSize: 12 }}>
               Q1 = baseline × (1+{pctGrowth}%), Q2 = Q1 × (1+{pctGrowth}%), dst. Hanya mengisi sel
-              yang masih kosong.
+              yang masih kosong — ini sudah dicoba otomatis (asumsi +{DEFAULT_BASELINE_GROWTH_PCT}%)
+              begitu Section B punya baseline tersimpan; tombol ini untuk menghitung ulang dengan
+              persentase lain.
             </span>
           </div>
         )}

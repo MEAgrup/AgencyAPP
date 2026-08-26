@@ -172,6 +172,7 @@ import {
   gmvCellsToBody,
   offerableTargetKeys,
   pruneTargetTerkait,
+  suggestedBaselineGmv,
   supportRowsToBody,
 } from '@/lib/strategi-target';
 import { mergeCockpitPillars, type CockpitPillarBody } from '@/lib/strategi-cockpit-import';
@@ -214,6 +215,19 @@ function draftsOf(d: StrategiDetail): Drafts {
     handoff: handoffDraftOf(d),
   };
 }
+
+/**
+ * D-2 auto-suggest (owner report STRG-202608-0001, repeated 2026-08-26): three
+ * rounds of the same read — Section B baseline saves fine, D-2 "Baseline" still
+ * reads empty — turned out to mean the same thing every time: the wiring from
+ * baseline to D-2 stretch was always there, but only behind `SectionD`'s
+ * "Hitung stretch dari Baseline" button, and nothing told the AM a manual click
+ * was the missing step. `computeBaselineStretchTargets` already only fills a
+ * BLANK `nilai_stretch` — it never overwrites a figure the AM typed — so
+ * running it here, on load and after every save, is exactly as safe as the
+ * button and removes the click. The button stays, for re-suggesting at a
+ * different growth % after clearing a cell.
+ */
 
 
 export default function StrategiFormPage({ params }: { params: Promise<{ id: string }> }) {
@@ -276,9 +290,11 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
     try {
       const [d, k] = await Promise.all([getStrategi(id), strategiKekurangan(id)]);
       setDetail(d);
-      setDrafts(draftsOf(d));
+      const loadedDrafts = draftsOf(d);
+      const suggested = suggestedBaselineGmv(d.channels, loadedDrafts.targets.gmv);
+      setDrafts({ ...loadedDrafts, targets: { ...loadedDrafts.targets, gmv: suggested.gmv } });
       setKekurangan(k);
-      setDirty(false);
+      setDirty(suggested.changed);
       // Advisory Interview→Strategi handoff (RAB-09) — never blocks the form, so
       // a failure here must not fail the load. Null when there is no interview.
       getStrategiPrefill(id)
@@ -527,8 +543,10 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
       // draft and leave `dirty` set so the next autosave persists it — rebuilding
       // here would silently discard whatever they typed while this save ran.
       if (editGen.current === genAtStart) {
-        setDrafts(draftsOf(next));
-        setDirty(false);
+        const nextDrafts = draftsOf(next);
+        const suggested = suggestedBaselineGmv(next.channels, nextDrafts.targets.gmv);
+        setDrafts({ ...nextDrafts, targets: { ...nextDrafts.targets, gmv: suggested.gmv } });
+        setDirty(suggested.changed);
       }
       setSavedAt(new Date().toLocaleTimeString('id-ID'));
       setKekurangan(await strategiKekurangan(id));

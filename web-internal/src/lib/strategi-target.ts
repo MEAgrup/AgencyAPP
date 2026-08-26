@@ -402,3 +402,32 @@ export function computeBaselineStretchTargets(
     return { ...cell, nilai_stretch: String(Math.round(value)) };
   });
 }
+
+/**
+ * The growth SectionD's "Hitung stretch dari Baseline" button starts at, and
+ * the same figure `page.tsx` uses to auto-run the suggestion on load/save
+ * (`suggestedBaselineGmv`) — one constant so the two never drift apart.
+ */
+export const DEFAULT_BASELINE_GROWTH_PCT = 20;
+
+/**
+ * Wraps `computeBaselineStretchTargets` with a "did this actually fill
+ * anything" flag (owner report STRG-202608-0001, repeated 2026-08-26: Section
+ * B baseline saved fine three times running, D-2 stayed empty every time —
+ * the wiring was always there, just behind a button click nothing told the AM
+ * to make). `page.tsx` runs this automatically on load and after every save
+ * so the suggestion appears without that click, and uses `changed` to decide
+ * whether to mark the form dirty — `dirty` is the only thing that enables
+ * Simpan and arms the 20s autosave, so a suggestion that fills the draft
+ * without flipping it would sit on screen unsaved until the AM typed
+ * something else, then vanish the moment they left the tab.
+ */
+export function suggestedBaselineGmv(
+  channels: readonly { channel: string; baseline: readonly { month_index: number; gmv: string }[] }[],
+  cells: readonly GmvCell[],
+  pctGrowth: number = DEFAULT_BASELINE_GROWTH_PCT,
+): { gmv: GmvCell[]; changed: boolean } {
+  const next = computeBaselineStretchTargets(channels, cells, pctGrowth);
+  const changed = next.some((c, i) => c.nilai_stretch !== cells[i]?.nilai_stretch);
+  return changed ? { gmv: next, changed } : { gmv: [...cells], changed };
+}
