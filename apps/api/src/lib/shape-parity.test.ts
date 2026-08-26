@@ -432,6 +432,7 @@ const WIRE_TO_FE: Record<string, string> = {
   VendorWire: 'strategi.ts::Vendor',
   VendorDocumentWire: 'strategi.ts::VendorDocument',
   StrategiWire: 'strategi.ts::Strategi',
+  StrategiQueueRowWire: 'strategi.ts::StrategiQueueRow',
   StrategiDetailWire: 'strategi.ts::StrategiDetail',
   StrategiChannelWire: 'strategi.ts::StrategiChannel',
   StrategiBaselineMonthWire: 'strategi.ts::StrategiBaselineMonth',

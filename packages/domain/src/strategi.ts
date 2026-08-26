@@ -2672,6 +2672,92 @@ export async function activeStrategi(sql: Queryable, serviceId: string): Promise
   return rows.length === 0 ? null : rowToStrategi(rows[0]);
 }
 
+/**
+ * One row of `listStrategiQueue` — the STRG- counterpart of
+ * `account.listStrategies` (STR-, `strategy_plans`). Deliberately a separate,
+ * lighter shape rather than reusing `Strategi`: the queue is a client-facing
+ * list (owner QA 2026-08-26 — SPV/Head of Account had no page listing `STRG-`
+ * versions awaiting approval, only the retired `STR-` queue on `/account`),
+ * not a form payload, so it carries just enough to route to
+ * `GET /strategi/{id}` and to decide whether a row belongs in "Menunggu
+ * Persetujuan" (`status = 'Diajukan'`).
+ */
+export interface StrategiQueueRow {
+  id: string;
+  contractId: string;
+  clientId: string;
+  clientToko: string;
+  versiNo: number;
+  status: string;
+  /** E-1 — the closest STRG- has to the old `STR-` free-text `objective`. */
+  growthThesis: string | null;
+  tanggalMulaiKontrak: string;
+  tanggalAkhirKontrak: string;
+  diajukanPada: string | null;
+}
+
+interface StrategiQueueDbRow {
+  id: string;
+  contract_id: string;
+  client_id: string;
+  client_toko: string;
+  versi_no: number;
+  status: string;
+  growth_thesis: string | null;
+  tanggal_mulai_kontrak: string;
+  tanggal_akhir_kontrak: string;
+  diajukan_pada: string | null;
+}
+
+function rowToStrategiQueue(r: StrategiQueueDbRow): StrategiQueueRow {
+  return {
+    id: r.id,
+    contractId: r.contract_id,
+    clientId: r.client_id,
+    clientToko: r.client_toko,
+    versiNo: r.versi_no,
+    status: r.status,
+    growthThesis: r.growth_thesis,
+    tanggalMulaiKontrak: r.tanggal_mulai_kontrak,
+    tanggalAkhirKontrak: r.tanggal_akhir_kontrak,
+    diajukanPada: r.diajukan_pada,
+  };
+}
+
+/**
+ * listStrategiQueue returns every `strategi` version visible to the actor,
+ * across every client — the read model `/account` needs to show a "Strategi
+ * (STRG-)" queue next to the legacy "Strategy & Plan" one. Same visibility as
+ * `account.listStrategies`: Account lead / OD / Director see all; an
+ * Account-staff AM sees only the contracts they own.
+ */
+export async function listStrategiQueue(sql: Queryable, actor: Actor): Promise<StrategiQueueRow[]> {
+  if (permission.canReadDivision(actor, ACCOUNT_DIVISION)) {
+    const rows = await sql<StrategiQueueDbRow[]>`
+      select s.id, s.contract_id, s.client_id, c.toko as client_toko, s.versi_no, s.status,
+             s.growth_thesis, ct.tanggal_mulai as tanggal_mulai_kontrak,
+             ct.tanggal_akhir as tanggal_akhir_kontrak, s.diajukan_pada
+        from strategi s
+        join contracts ct on ct.id = s.contract_id
+        join clients c on c.id = s.client_id
+       order by s.id desc`;
+    return rows.map(rowToStrategiQueue);
+  }
+  if (actor.role.division === ACCOUNT_DIVISION && actor.role.level === permission.LevelStaff) {
+    const rows = await sql<StrategiQueueDbRow[]>`
+      select s.id, s.contract_id, s.client_id, c.toko as client_toko, s.versi_no, s.status,
+             s.growth_thesis, ct.tanggal_mulai as tanggal_mulai_kontrak,
+             ct.tanggal_akhir as tanggal_akhir_kontrak, s.diajukan_pada
+        from strategi s
+        join contracts ct on ct.id = s.contract_id
+        join clients c on c.id = s.client_id
+       where c.assigned_am_id = ${actor.employeeId}
+       order by s.id desc`;
+    return rows.map(rowToStrategiQueue);
+  }
+  throw new ForbiddenError(MSG_STRATEGI_FORBIDDEN);
+}
+
 // ---------------------------------------------------------------------------
 // Header validation
 // ---------------------------------------------------------------------------

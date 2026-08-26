@@ -79,6 +79,7 @@ import {
   getStrategi,
   getStrategiPrefill,
   listStrategiForService,
+  listStrategiQueue,
   openRevision,
   returnStrategi,
   saveAkses,
@@ -2176,6 +2177,50 @@ describeDb('reads', () => {
     await expect(getStrategi(sql, otherAm(), strategiId)).rejects.toThrow(ForbiddenError);
     expect((await getStrategi(sql, spv(), strategiId)).id).toBe(strategiId);
     expect((await getStrategi(sql, od(), strategiId)).id).toBe(strategiId);
+  });
+});
+
+/**
+ * listStrategiQueue — the STRG- counterpart of `account.listStrategies`
+ * (owner QA 2026-08-26): `/account` listed submitted `STR-` versions for
+ * SPV/Head of Account to approve, but nothing listed `STRG-` ones, so a
+ * submitted M6A Strategi had no page an SPV could find and open it from.
+ * Same visibility contract as `listStrategies` — same assertions, applied to
+ * the newer table.
+ */
+describeDb('listStrategiQueue', () => {
+  it('gives the SPV/OD every client, an AM only their own, and refuses anyone else', async () => {
+    const { strategiId } = await seedSubmittable();
+
+    const spvView = await listStrategiQueue(sql, spv());
+    expect(spvView.some((s) => s.id === strategiId)).toBe(true);
+    const odView = await listStrategiQueue(sql, od());
+    expect(odView.some((s) => s.id === strategiId)).toBe(true);
+
+    const ownerView = await listStrategiQueue(sql, am());
+    expect(ownerView.some((s) => s.id === strategiId)).toBe(true);
+    const foreignView = await listStrategiQueue(sql, otherAm());
+    expect(foreignView.some((s) => s.id === strategiId)).toBe(false);
+
+    await expect(listStrategiQueue(sql, creativeLead())).rejects.toThrow(ForbiddenError);
+  });
+
+  it('carries the client and contract-window facts the /account queue renders', async () => {
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+
+    const row = (await listStrategiQueue(sql, spv())).find((s) => s.id === strategiId);
+    expect(row).toBeDefined();
+    expect(row?.status).toBe('Diajukan');
+    expect(row?.clientToko).toBe('Alpha Digital');
+    // `date` columns round-trip through postgres.js as `Date`, not `string`
+    // (same as `Strategi.tanggalMulaiKontrak` elsewhere in this file) — compare
+    // by calendar day rather than assume a runtime type the wire layer doesn't
+    // actually guarantee.
+    expect(new Date(row!.tanggalMulaiKontrak).toISOString().slice(0, 10)).toBe(HEADER.tanggalMulaiKontrak);
+    expect(new Date(row!.tanggalAkhirKontrak).toISOString().slice(0, 10)).toBe(HEADER.tanggalAkhirKontrak);
+    expect(row?.growthThesis).toEqual(expect.any(String));
+    expect(row?.diajukanPada).not.toBeNull();
   });
 });
 

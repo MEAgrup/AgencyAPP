@@ -3923,6 +3923,35 @@ export function strategiToWire(s: strategi.Strategi): StrategiWire {
   };
 }
 
+/** One row of `GET /strategi` — the SPV/Head of Account queue (owner QA 2026-08-26). */
+export interface StrategiQueueRowWire {
+  id: string;
+  contract_id: string;
+  client_id: string;
+  client_toko: string;
+  versi_no: number;
+  status: string;
+  growth_thesis: string | null;
+  tanggal_mulai_kontrak: string;
+  tanggal_akhir_kontrak: string;
+  diajukan_pada: string | null;
+}
+
+export function strategiQueueRowToWire(r: strategi.StrategiQueueRow): StrategiQueueRowWire {
+  return {
+    id: r.id,
+    contract_id: r.contractId,
+    client_id: r.clientId,
+    client_toko: r.clientToko,
+    versi_no: r.versiNo,
+    status: r.status,
+    growth_thesis: r.growthThesis,
+    tanggal_mulai_kontrak: r.tanggalMulaiKontrak,
+    tanggal_akhir_kontrak: r.tanggalAkhirKontrak,
+    diajukan_pada: r.diajukanPada,
+  };
+}
+
 /** B-1 / B-5 — one row per month of the declared window (D11). */
 export interface StrategiBaselineMonthWire {
   month_index: number;
