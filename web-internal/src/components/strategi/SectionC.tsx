@@ -94,8 +94,17 @@ export function diagnosaDraftToPayload(draft: DiagnosaDraftAll): StrategiDiagnos
         akar_masalah: d.akar_masalah || null,
         gap_kompetitor: d.gap_kompetitor || null,
       })),
+    // Same partial-save pattern as Section B baseline / Section D GMV cells
+    // (page.tsx saveActive): `ck_strqw_isi` requires aksi/channel/pic_divisi/
+    // dampak_diharapkan ALL non-empty, so a row missing any one of them (e.g.
+    // a Cockpit-imported quick win with no `dampak_diharapkan` yet, or one the
+    // AM is still typing) is left out of the save entirely instead of
+    // reaching the DB half-filled — that CHECK violation is a raw Postgres
+    // error, not a domain ValidationError, so it surfaces as an unmapped 500
+    // ("internal server error") rather than a `[...]` message. The row waits;
+    // the submit gate (`checkCompleteness`) still reports it missing.
     quick_wins: draft.quick_wins
-      .filter((q) => q.aksi.trim())
+      .filter((q) => q.aksi.trim() && q.channel.trim() && q.pic_divisi.trim() && q.dampak_diharapkan.trim())
       .map((q, i) => ({
         aksi: q.aksi,
         channel: q.channel,
@@ -106,8 +115,11 @@ export function diagnosaDraftToPayload(draft: DiagnosaDraftAll): StrategiDiagnos
     risiko_struktural: draft.risiko_struktural
       .filter((r) => r.risiko.trim())
       .map((r, i) => ({ risiko: r.risiko, urutan: i + 1 })),
+    // Same reasoning as quick_wins above: `ck_strpreq_isi` requires item AND
+    // pic_klien both non-empty (e.g. a Cockpit-imported prasyarat has no
+    // `pic_klien` yet — the tool has no client-PIC data to suggest).
     prasyarat_klien: draft.prasyarat_klien
-      .filter((p) => p.item.trim())
+      .filter((p) => p.item.trim() && p.pic_klien.trim())
       .map((p, i) => ({
         item: p.item,
         pic_klien: p.pic_klien,
