@@ -36,6 +36,7 @@ import { isAccountLead, isAccountStaff, isReadOnlyOD } from '@/lib/account';
 import StatusBadge from '@/components/StatusBadge';
 import { formatIDR } from '@/lib/money';
 import { getStrategi, type StrategiPillar } from '@/lib/strategi';
+import { suggestRowFromPillar } from '@/lib/plan-row-suggest';
 import {
   activatePlanPeriode,
   approvePlanPeriode,
@@ -508,6 +509,53 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                 )}
               </label>
               <label className="field">
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Turunan pilar Strategi (PC-3) — kosongkan ⇒ Di Luar Strategi
+                </span>
+                <select
+                  value={rowDraft.strategi_pillar_id}
+                  onChange={(e) => {
+                    const pillarId = e.target.value;
+                    const pillar = pillars.find((p) => String(p.id) === pillarId);
+                    setRowDraft((d) => {
+                      if (!d) return d;
+                      if (!pillar) return { ...d, strategi_pillar_id: pillarId };
+                      const s = suggestRowFromPillar(pillar);
+                      return {
+                        ...d,
+                        strategi_pillar_id: pillarId,
+                        aksi: d.aksi.trim() ? d.aksi : s.aksi,
+                        kuota: d.kuota.trim() ? d.kuota : s.kuota,
+                        satuan: d.satuan.trim() ? d.satuan : s.satuan,
+                        divisi_pic: s.divisiPic ?? d.divisi_pic,
+                      };
+                    });
+                  }}
+                >
+                  <option value="">— Di Luar Strategi —</option>
+                  {pillars.map((p) => (
+                    <option key={p.id} value={String(p.id)}>
+                      #{p.id} {PILAR_LABEL[p.jenis] ?? p.jenis}
+                      {p.channel ? ` · ${p.channel}` : ''}
+                      {p.aksi ? ` · ${p.aksi.slice(0, 40)}` : ''}
+                    </option>
+                  ))}
+                </select>
+                <span className="muted" style={{ fontSize: 11 }}>
+                  Pilih dulu — Aksi, Kuota/Satuan &amp; Divisi PIC di bawah terisi otomatis dari
+                  Section E (bisa diubah).
+                </span>
+              </label>
+              {rowDraft.strategi_pillar_id.trim() === '' && (
+                <label className="field">
+                  <span className="muted" style={{ fontSize: 12 }}>Alasan di luar strategi</span>
+                  <input
+                    value={rowDraft.di_luar_alasan}
+                    onChange={(e) => setRowDraft({ ...rowDraft, di_luar_alasan: e.target.value })}
+                  />
+                </label>
+              )}
+              <label className="field">
                 <span className="muted" style={{ fontSize: 12 }}>Pilar (PC-2)</span>
                 <select
                   value={rowDraft.pilar}
@@ -613,37 +661,6 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                 onChange={(e) => setRowDraft({ ...rowDraft, hasil_diharapkan: e.target.value })}
               />
             </label>
-
-            {/* origin PC-3 */}
-            <div className="formRow">
-              <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>
-                  Turunan pilar Strategi (PC-3) — kosongkan ⇒ Di Luar Strategi
-                </span>
-                <select
-                  value={rowDraft.strategi_pillar_id}
-                  onChange={(e) => setRowDraft({ ...rowDraft, strategi_pillar_id: e.target.value })}
-                >
-                  <option value="">— Di Luar Strategi —</option>
-                  {pillars.map((p) => (
-                    <option key={p.id} value={String(p.id)}>
-                      #{p.id} {PILAR_LABEL[p.jenis] ?? p.jenis}
-                      {p.channel ? ` · ${p.channel}` : ''}
-                      {p.aksi ? ` · ${p.aksi.slice(0, 40)}` : ''}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {rowDraft.strategi_pillar_id.trim() === '' && (
-                <label className="field">
-                  <span className="muted" style={{ fontSize: 12 }}>Alasan di luar strategi</span>
-                  <input
-                    value={rowDraft.di_luar_alasan}
-                    onChange={(e) => setRowDraft({ ...rowDraft, di_luar_alasan: e.target.value })}
-                  />
-                </label>
-              )}
-            </div>
 
             <div className="row" style={{ gap: 8 }}>
               <button

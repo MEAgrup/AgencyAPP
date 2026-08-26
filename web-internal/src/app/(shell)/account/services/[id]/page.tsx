@@ -1130,6 +1130,14 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
               </div>
             </div>
           )}
+          {/* QA (2026-08-26): for a plan-gated service under the decided flow,
+              `approvedStrategy` (the legacy STR- entity) is always null — this
+              form's "Strategy ID" locks to it, so it can never actually submit
+              (button below is disabled) and only invites the AM to fill a dead
+              form instead of using the Plan panel above. Legacy STR- keeps its
+              escape hatch (SHOW_LEGACY_STR_PATH); everything else (Direct-path
+              services, which need no Strategy ID) is unaffected. */}
+          {(!planGated || approvedStrategy || SHOW_LEGACY_STR_PATH) && (
           <form className="form" onSubmit={handleCreateBrief}>
             {bError && <div className="alert alertError" role="alert">{bError}</div>}
             {bMessage && <div className="alert alertSuccess" role="status">{bMessage}</div>}
@@ -1252,6 +1260,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
               </button>
             </div>
           </form>
+          )}
         </section>
       )}
 
