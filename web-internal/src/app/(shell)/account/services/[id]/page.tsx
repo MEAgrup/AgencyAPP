@@ -40,6 +40,7 @@ import StatusBadge from '@/components/StatusBadge';
 import { formatIDR } from '@/lib/money';
 import { createStrategi, listStrategi, type Strategi } from '@/lib/strategi';
 import { isEditable as isStrategiEditable } from '@/lib/strategi-sections';
+import PlanPeriodsPanel from '@/components/strategi/PlanPeriodsPanel';
 
 /**
  * QA(SESI31): the DECIDED delivery path is `STRG-` (M6A Strategi) + M6B (Plan),
@@ -378,6 +379,11 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
   // Service), so the page degrades instead of mislabelling everything Direct.
   const planGated = service ? service.requires_strategy_plan : strategy !== null;
   const approvedStrategy = strategy?.status === STRATEGY_APPROVED ? strategy : null;
+  // The decided M6A/M6B bridge: once a Strategi (STRG-) is Aktif, its contract's
+  // Plan periods carry the one-click "warisi jadi Brief" door (RAB-16) — the
+  // AM never has to retype kuota/divisi/hasil that Plan already holds. Only an
+  // Aktif Strategi has generated periods, so this stays null until then.
+  const strgActiveContractId = strategiList.find((st) => st.status === 'Aktif')?.contract_id ?? null;
   // The two §4 write doors are only open at [Awaiting Onboarding] (createStrategy /
   // setStrategyRequirement both reject otherwise, MSG_SERVICE_NOT_AWAITING). When
   // the Service read is unavailable, fall back to permissive and let the server
@@ -1056,7 +1062,24 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
           <div className="cardHeader">
             <h2>Buat Brief</h2>
           </div>
-          {planGated && !approvedStrategy && (
+          {/* QA (2026-08-26): Strategi/Plan yang disetujui sebelumnya tidak punya
+              pintu langsung di sini — AM harus tahu untuk pindah ke halaman
+              Strategi lalu gulir ke panel Periode Plan. Pintasan ini menaruh
+              periode Plan (dan pintu "warisi satu-klik" di dalamnya) langsung di
+              kartu Buat Brief, supaya kuota/divisi/hasil yang sudah diisi di Plan
+              tidak perlu diketik ulang dari nol. */}
+          {strgActiveContractId && (
+            <div style={{ marginBottom: 12 }}>
+              <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+                Strategi (STRG-) sudah disetujui. Pilih periode Plan di bawah, lalu pakai{' '}
+                <strong>&ldquo;Warisi baris jadi Brief (satu klik)&rdquo;</strong> di halaman periode
+                &mdash; kuota, divisi PIC, dan hasil yang diharapkan per baris sudah terisi dari Plan;
+                Anda hanya melengkapi jatuh tempo &amp; prioritas.
+              </p>
+              <PlanPeriodsPanel contractId={strgActiveContractId} />
+            </div>
+          )}
+          {planGated && !approvedStrategy && !strgActiveContractId && (
             <div className="alert alertInfo" role="status">
               Layanan plan-gated: pada alur yang diputuskan, Brief <strong>diwarisi satu-klik dari
               Plan</strong> setelah Strategi (STRG-) disetujui &amp; Plan diaktifkan (M6B). Mulai dari{' '}

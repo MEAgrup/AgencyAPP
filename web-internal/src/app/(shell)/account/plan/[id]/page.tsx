@@ -672,15 +672,17 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
         <div className="card">
           <div className="cardHeader">Warisi baris jadi Brief (satu klik)</div>
           <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-            Isi jatuh tempo + prioritas per baris; sisanya (divisi, kuota, satuan, hasil) diwarisi
-            otomatis. Baris tanpa isian dilewati.
+            Isi jatuh tempo + prioritas per baris; sisanya (divisi, kuota, satuan, hasil, SKU
+            sasaran, budget) diwarisi otomatis ke instruksi Brief. Baris tanpa isian dilewati.
           </p>
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ fontSize: 13, minWidth: 620 }}>
+            <table style={{ fontSize: 13, minWidth: 760 }}>
               <thead>
                 <tr>
                   <th style={{ textAlign: 'left' }}>Baris</th>
                   <th style={{ textAlign: 'left' }}>Kuota</th>
+                  <th style={{ textAlign: 'left' }}>Hasil diharapkan</th>
+                  <th style={{ textAlign: 'left' }}>Budget</th>
                   <th style={{ textAlign: 'left' }}>Jatuh tempo</th>
                   <th style={{ textAlign: 'left' }}>Prioritas Brief</th>
                 </tr>
@@ -696,6 +698,8 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                       <td style={{ paddingRight: 8 }}>
                         {r.kuota} {r.satuan}
                       </td>
+                      <td style={{ paddingRight: 8 }}>{r.hasil_diharapkan || '—'}</td>
+                      <td style={{ paddingRight: 8 }}>{formatIDR(r.budget)}</td>
                       <td style={{ paddingRight: 8 }}>
                         <input
                           type="date"
