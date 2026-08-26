@@ -216,6 +216,60 @@ describe('applyVideoFactoryPrefill', () => {
     expect(channels[0].host_live).toBe('');
   });
 
+  // Regresi bug lanjutan STRG-202608-0001 (owner report 2026-08-26): AM
+  // tempel ulang payload Video Factory ("AM Baseline") ke Section B, tapi
+  // kolom Baseline di D-2 tetap kosong. Root cause SEBENARNYA: payload tool
+  // tidak pernah membawa baris B-1 (gmv/jumlah_pesanan per bulan) sama
+  // sekali — `applyVideoFactoryPrefill` tidak punya apa pun untuk ditulis ke
+  // `ChannelDraft.baseline`, terlepas dari perbaikan filter `.every`→`.some`
+  // di Section B (itu memperbaiki bug lain: bulan yang SUDAH terkirim
+  // sebagian tapi dibuang saat simpan — bukan bulan yang tidak pernah
+  // terkirim). Tool sekarang menyertakan `baseline` (rata-rata GMV/pesanan
+  // per bulan jendela); adapter ini harus menuliskannya ke `next.baseline`.
+  it('B-1 baseline bulanan: payload `baseline` (rata-rata GMV/pesanan per bulan) mengisi ChannelDraft.baseline yang masih kosong', () => {
+    const { channels, summary } = applyVideoFactoryPrefill(
+      [],
+      payload({
+        periode_baseline_bulan: 3,
+        baseline: [
+          { month_index: 1, gmv: '20000000', jumlah_pesanan: 1000 },
+          { month_index: 2, gmv: '20000000', jumlah_pesanan: 1000 },
+          { month_index: 3, gmv: '20000000', jumlah_pesanan: 1000 },
+        ],
+      }),
+    );
+    expect(channels[0].baseline).toEqual([
+      { month_index: 1, gmv: '20000000', jumlah_pesanan: '1000', persen_batal: '', ad_spend: '', roas: '', acos: '' },
+      { month_index: 2, gmv: '20000000', jumlah_pesanan: '1000', persen_batal: '', ad_spend: '', roas: '', acos: '' },
+      { month_index: 3, gmv: '20000000', jumlah_pesanan: '1000', persen_batal: '', ad_spend: '', roas: '', acos: '' },
+    ]);
+    expect(summary.fieldsFilled).toBeGreaterThanOrEqual(6); // 3 bulan × (gmv + jumlah_pesanan)
+  });
+
+  it('B-1 baseline bulanan: tidak menimpa bulan yang sudah diketik AM (per FIELD, bukan per baris)', () => {
+    const existing: ChannelDraft = {
+      ...blankChannel('TikTok Shop'),
+      baseline: [
+        {
+          month_index: 1,
+          gmv: '99000000', // AM sudah ketik — harus dipertahankan
+          jumlah_pesanan: '',
+          persen_batal: '',
+          ad_spend: '',
+          roas: '',
+          acos: '',
+        },
+      ],
+    };
+    const { channels } = applyVideoFactoryPrefill(
+      [existing],
+      payload({ baseline: [{ month_index: 1, gmv: '1', jumlah_pesanan: 500 }] }),
+    );
+    const m1 = channels[0].baseline.find((m) => m.month_index === 1)!;
+    expect(m1.gmv).toBe('99000000'); // dipertahankan
+    expect(m1.jumlah_pesanan).toBe('500'); // yang kosong terisi
+  });
+
   it('membiarkan channel lain (mis. Shopee) tak tersentuh', () => {
     const shopee = { ...blankChannel('Shopee'), nama_toko: 'Toko Shopee' };
     const { channels } = applyVideoFactoryPrefill([shopee], payload({ sku_listed: 50 }));

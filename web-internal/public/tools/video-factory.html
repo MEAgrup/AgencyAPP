@@ -2152,6 +2152,25 @@ function sectionBPayload(d){
   if(srcFiles.length)p.sumber_data=[...new Set(srcFiles.filter(Boolean))].join(' | ');
   p.tanggal_ambil_data=new Date().toISOString().slice(0,10);
   if(d.klien.months)p.periode_baseline_bulan=d.klien.months;
+  /* B-1 baseline bulanan — tool cuma tahu TOTAL GMV (dan total pesanan, dari Shop
+     Analytics) selama SATU jendela `d.klien.months` bulan, bukan rincian per
+     bulan kalender. Sama seperti B-7 (video/jam live per bulan) yang sudah
+     dibagi rata di atas, di sini GMV & pesanan dibagi rata ke tiap bulan
+     jendela sebagai titik awal yang wajar (owner report STRG-202608-0001,
+     2026-08-26) — AM tetap meninjau & boleh ubah tiap bulan sebelum simpan;
+     ad_spend/roas/acos/persen_batal TIDAK diisi (tool tak punya rincian
+     bulanannya), tetap manual seperti field N/A lainnya. */
+  if(d.totGMV>0&&d.klien.months){
+    const n=Math.max(1,Math.min(6,Math.round(d.klien.months)));
+    const avgGmv=d.totGMV/n;
+    const totOrders=(d.shop&&d.shop.metrics&&d.shop.metrics.pesanan)?d.shop.metrics.pesanan:null;
+    const avgOrders=totOrders!=null?Math.round(totOrders/n):null;
+    p.baseline=Array.from({length:n},(_,i)=>{
+      const row={month_index:i+1,gmv:mny(avgGmv)};
+      if(avgOrders!=null)row.jumlah_pesanan=avgOrders;
+      return row;
+    });
+  }
   /* B-2 skalar */
   const shop=d.shop||{};
   if(shop.pengunjung)p.pengunjung_per_bulan=Math.round(shop.pengunjung);
