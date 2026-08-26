@@ -581,7 +581,14 @@ export function buildCockpitPillars(payload: CockpitPayload): CockpitPillarBody[
     const keys = selected.filter((k) => String(aksiState[k]?.grup ?? '') === String(grup));
     if (!keys.length) continue;
     const nama = payload.pilarNama?.[grup - 1]?.trim();
-    const peran = nama ? `Pilar ${grup} — ${nama}` : `Pilar ${grup}`;
+    // Which of the tool's 3 pilar slots this row came from — NOT the DB
+    // `peran` column, which is a closed SKU-role enum ('hero'/'pendamping'/
+    // 'bundling'/'baru'/'dimatikan', `ck_strpil_peran`). The Cockpit never
+    // assigns a SKU role, so `peran` stays null and this label travels in
+    // `detail` instead — putting it in `peran` violates the CHECK constraint
+    // and `savePillars`'s INSERT throws an unmapped Postgres error (surfaces
+    // to the AM as "internal server error").
+    const pilarLabel = nama ? `Pilar ${grup} — ${nama}` : `Pilar ${grup}`;
 
     for (const k of keys) {
       const kat = KATALOG_BY_KODE.get(k);
@@ -594,7 +601,7 @@ export function buildCockpitPillars(payload: CockpitPayload): CockpitPillarBody[
         channel,
         urutan: urutan++,
         sku: null,
-        peran,
+        peran: null,
         aksi: `${k} ${kat.nama}`,
         target: `${rencana} ${kat.unit}${jembatan ? `, jembatan ${jembatan}` : ''}`.trim(),
         harga_normal: null,
@@ -604,7 +611,7 @@ export function buildCockpitPillars(payload: CockpitPayload): CockpitPillarBody[
         slot_jam: null,
         tarif: null,
         target_gmv_per_jam: null,
-        detail: { sumber: COCKPIT_SCHEMA, kode_aksi: k, field_id_bukti: kat.fieldId },
+        detail: { sumber: COCKPIT_SCHEMA, kode_aksi: k, field_id_bukti: kat.fieldId, pilar: pilarLabel },
       });
     }
   }
