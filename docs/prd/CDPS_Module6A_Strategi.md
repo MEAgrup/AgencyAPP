@@ -65,12 +65,12 @@
 5a. **The baseline window is declared by the AM per contract, per channel** (field B-0.7) — there is no globally fixed 3-month rule, because contracts differ (new store, seasonal category, post-freeze store). Allowed range 1–6 months, default 3. A window shorter than 3 months requires a written reason. Once the Strategi is approved the window is locked; changing it is a revision (Rule 13), so later performance is always compared against the same yardstick.
 6. **⟳ 2026-08-24 (DECISIONS): Diagnosis must state its reasoning in free text (C-2).** An empty C-2 fails validation. Superseded original: "Diagnosis must cite baseline. Each root-cause entry in Section C must reference at least one baseline field ID. A diagnosis with no numeric reference fails validation." — the field-ID citation requirement is dropped because AMs had no lookup UI for the 50+ valid field IDs, making the requirement a lookup burden rather than useful evidence.
 7. **Target floor is read-only.** The contract target is pulled from the Contract record (Module 4) and cannot be edited in Strategi. The stretch target must be `>=` floor; if the AM believes the floor is unachievable, they raise `Sanggahan Target` (Section D-7) which routes to SPV — it does not lower the floor.
-8. **Every target carries an assumption.** Each monthly stretch figure must be tied to at least one assumption in Section D-8. Assumptions are the objects that later justify a revision (Rule 13).
+8. **Every target should carry an assumption, but this is advisory, not a submit gate.** Each monthly stretch figure is meant to be tied to at least one assumption in Section D-8 — assumptions are the objects that later justify a revision (Rule 13) — but neither the D-8 minimum nor this per-target coverage check blocks `Diajukan`/`Disetujui` (**⟳ 2026-08-26 DECISIONS, STRG-202608-0001**: an AM starting a new engagement, or a store they have not yet run, usually cannot honestly name a falsifiable assumption before work starts — real ones surface during execution, and a hard floor here just produced boilerplate rows written to pass validation, same failure mode as C-5's old "min 3"). D-8 stays fully functional and the AM is expected to keep it current as understanding grows; Rule 13(c) still requires citing a broken assumption on revision, but only if this Strategi has any recorded at all.
 9. **Out-of-scope must be explicit.** Section E-9 (`Tidak Dikerjakan`) requires at least one entry. Empty = validation error. This is the anti-scope-creep record used when the client later asks for extras.
 10. **Resource commitment is soft.** Brief creation compares against Section F. Exceeding it raises a `Lewat Komitmen` warning on the Brief requiring a reason, visible on the SPV dashboard. It never blocks.
 11. **Floor price is a guardrail, not a suggestion.** Section E-3 records a minimum price per hero SKU. Any Brief or promo instruction below it is flagged `Di Bawah Floor` and requires SPV acknowledgement.
 12. **Approval is internal and two-outcome.** SPV / Head of Account either `Disetujui` or `Dikembalikan` with a written note. A returned Strategi goes back to `Draft` and keeps its version number.
-13. **Revision requires reason + trigger.** Editing an approved Strategi creates version `n+1` in `Draft Revisi`, and requires: (a) a trigger from the enumerated list, (b) a free-text reason, (c) which assumption(s) from D-8 broke. Version `n` becomes `Diarsipkan` (immutable, still readable) only when `n+1` is approved. The active version never disappears mid-revision.
+13. **Revision requires reason + trigger.** Editing an approved Strategi creates version `n+1` in `Draft Revisi`, and requires: (a) a trigger from the enumerated list, (b) a free-text reason, (c) which assumption(s) from D-8 broke — **waived only if this Strategi has zero D-8 rows recorded** (⟳ 2026-08-26 DECISIONS: since Rule 8 no longer forces D-8 to be filled, there can be nothing to cite; (a) and (b) are still always required). Version `n` becomes `Diarsipkan` (immutable, still readable) only when `n+1` is approved. The active version never disappears mid-revision.
 14. **Contract end closes the Strategi.** On contract end date the record moves to `Kedaluwarsa`. Renewal creates a new Strategi that may be initialised by copying the last approved version (fields carried over, baseline fields cleared and re-required).
 15. **Immutable audit log.** Every field change, submit, approval, return, and revision writes to the CDPS audit log with actor, timestamp (WIB), before/after value.
 16. **Two visibility tiers.** Every field carries `visibilitas` ∈ `Bagikan ke Klien` / `Internal Saja`. The client-facing export renders only shareable fields. Three sub-rules: (a) fields marked **hard-internal** (§4.1) can never be toggled shareable by an AM; (b) fields with a *default* of `Internal Saja` may be toggled to shareable by the AM, and the toggle is audit-logged; (c) the client view is served from the **approved active version only** — never from a Draft. Delivery is a read-only web link (D20), not a file, so a revoked link cannot keep circulating the way a downloaded PDF would.
@@ -233,7 +233,7 @@ Design note: **D-8 (asumsi target) is deliberately shareable.** The assumptions 
 | D-5 | Definisi berhasil di 30 / 60 / 90 hari | Struct × 3 | W |
 | D-6 | Leading indicator yang dipantau mingguan (maks 5) | Multi-enum (≤5) | W |
 | D-7 | Sanggahan Target (**advisory, internal saja**) — jika target kontrak dinilai tak realistis: alasan, angka pembanding, target yang menurut AM realistis. **Tidak mengubah floor kontrak** | Long text + number | O (notif SPV + Head of Sales) |
-| D-8 | **Asumsi di balik target** — hal yang harus benar agar target tercapai (mis. budget iklan cair tiap tgl 1, stok hero SKU aman 2.000 pcs/bln, klien approve konten ≤48 jam) | Repeatable struct: asumsi, pemilik, cara verifikasi | W (min 3) |
+| D-8 | **Asumsi di balik target** — hal yang harus benar agar target tercapai (mis. budget iklan cair tiap tgl 1, stok hero SKU aman 2.000 pcs/bln, klien approve konten ≤48 jam) | Repeatable struct: asumsi, pemilik, cara verifikasi | O — dianjurkan diisi begitu diketahui, tidak menggerbang submit (⟳ 2026-08-26 DECISIONS, semula "W (min 3)") |
 | D-9 | Konsekuensi jika asumsi gugur — target mana yang otomatis ditinjau | Mapping asumsi → target | W |
 
 ### SECTION E — Strategi Inti (arah eksekusi)
@@ -296,7 +296,7 @@ Design note: **D-8 (asumsi target) is deliberately shareable.** The assumptions 
 |---|---|---|---|
 | J-1 | Versi, status, tanggal submit, AM pengisi | Auto | A |
 | J-2 | Reviewer (SPV / Head of Account) + keputusan `Disetujui` / `Dikembalikan` + catatan | Struct | W (reviewer) |
-| J-3 | *Jika revisi:* trigger yang terpicu (dari H-2), alasan revisi, asumsi D-8 mana yang gugur | Struct | W (kondisional) |
+| J-3 | *Jika revisi:* trigger yang terpicu (dari H-2), alasan revisi, asumsi D-8 mana yang gugur | Struct | W (kondisional — trigger & alasan selalu; asumsi gugur hanya jika D-8 punya isi, Rule 13(c), ⟳ 2026-08-26 DECISIONS) |
 | J-4 | Ringkasan perubahan vs versi sebelumnya | Auto diff | A |
 
 ---
@@ -459,7 +459,7 @@ These are set so the build can proceed. Each is cheap to reverse before coding, 
 
 **Activation event.** First Strategi approved and its Plan skeleton generated — not "Strategi created".
 
-**North star.** % of active full-management contracts with an `Aktif`, non-expired Strategi whose assumptions have been verified in the last 30 days. Target ≥ 90%.
+**North star.** % of active full-management contracts with an `Aktif`, non-expired Strategi whose assumptions have been verified in the last 30 days. Target ≥ 90%. A Strategi with zero D-8 rows (allowed since ⟳ 2026-08-26 DECISIONS — D-8 is no longer a submit gate) counts against this metric the same as one whose assumptions are stale: the metric is meant to push the AM toward keeping D-8 current, not to be satisfied by never filling it in.
 
 **Leading indicators.**
 | Metric | Why | Target |
@@ -468,7 +468,7 @@ These are set so the build can proceed. Each is cheap to reverse before coding, 
 | Return rate (`Dikembalikan` / submitted) | High = AMs guessing; measured per AM to target coaching | < 30% after month 2 |
 | % Briefs traceable to a Strategi version | Detects execution bypassing the gate | 100% |
 | % Briefs flagged `Lewat Komitmen` | Soft limits should be roughly right, not routinely blown | < 15% |
-| % revisions with a declared trigger + broken assumption | Tests whether D-8 is real or filled to pass validation | 100% |
+| % revisions with a declared trigger + broken assumption | Tests whether D-8 is real or filled to pass validation. Since ⟳ 2026-08-26 (DECISIONS), a revision opened on a Strategi with zero D-8 rows ever recorded has nothing to cite (Rule 13(c) waiver) — exclude those from this metric's denominator rather than counting them as a miss | 100% (of revisions where D-8 has ≥1 row) |
 | % contracts hitting stretch vs floor | Reveals systematic sandbagging or fantasy targets | tracked, not targeted |
 
 **Anti-vanity guard.** Do not measure "number of Strategi created" or "form completion %". A fully-filled Strategi that never predicts anything is a worse outcome than a returned one — the return rate metric exists specifically to catch that.

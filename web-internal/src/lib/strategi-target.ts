@@ -5,9 +5,11 @@
  * The same split `strategi-sections.ts` uses, and for the same reason: what
  * decides whether the form works is not the JSX, it is (a) whether the target
  * key the form builds is byte-identical to the one the server builds, and (b)
- * whether the "which target has no assumption" answer the AM reads matches the
- * one Rule 8 will apply at submit. Both fail SILENTLY when they drift — the AM
- * sees a green panel and gets `[setiap target harus punya asumsi …]`.
+ * whether the "which target has no assumption" hint the AM reads matches what
+ * `checkCompleteness` would compute. (a) still fails SILENTLY when it drifts —
+ * a wrong key makes D-9 offer or accept the wrong checkbox. (b) is advisory
+ * only since ⟳ 2026-08-26 (DECISIONS) — Rule 8 no longer blocks submit, so a
+ * drift there is a misleading hint, not a submit the AM cannot explain.
  *
  * ## The one contract that must not drift: the target key
  *

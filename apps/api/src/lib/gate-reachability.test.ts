@@ -128,10 +128,12 @@ const DOORS: Readonly<Record<string, string>> = {
   'D-4': 'saveStrategiTargets',
   'D-5': 'saveStrategiKpi',
   'D-6': 'saveStrategiKpi',
-  'D-8': 'saveStrategiAssumptions',
-  // Rule 8 ("every target carries an assumption") is not a field — it is the
-  // D-9 mapping, which rides the assumptions endpoint.
-  'Rule 8': 'saveStrategiAssumptions',
+  // D-8 (min 3 assumptions) and Rule 8 (every target carries an assumption)
+  // retired as submit gates — owner QA decision 2026-08-26 (DECISIONS.md,
+  // STRG-202608-0001), same reasoning and same pattern as E-11/E-12 below.
+  // `checkCompleteness` no longer emits either kode, so their DOORS rows are
+  // removed to keep this list honest. `saveStrategiAssumptions` stays open —
+  // D-8 is optional now, not gone, and the AM still fills it in via SectionD.
 
   // Section E. E-2 is stored on the channel row and so is saved by Section B —
   // `saveChannels` does DELETE-then-INSERT, which is exactly why E-2 could not
@@ -220,9 +222,10 @@ describe('submit-gate reachability', () => {
     // exists, and a scan that stopped finding them would pass while the form
     // regressed to exactly the state it was written to detect. E-12 was the third
     // canary until owner QA 2026-08-20 (Fase 2) retired it as a gate (DECISIONS.md);
-    // D-4 replaces it here — still a per-channel Section D gate the scan must see.
+    // D-4 replaced it. D-8 was retired the same way on 2026-08-26 — it must NOT
+    // appear here any more (see the negative assertion in the retirement test
+    // below), so D-2 and D-4 alone are the canaries now.
     expect(kodes).toContain('D-2');
-    expect(kodes).toContain('D-8');
     expect(kodes).toContain('D-4');
   });
 

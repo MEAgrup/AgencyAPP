@@ -94,12 +94,17 @@ export function declaredTriggers(detail: StrategiDetail): string[] {
  * any combination. Splitting it here is not a second gate — the server still
  * decides — it is so the AM can see which of the three boxes is empty instead of
  * re-reading a sentence that lists all three every time.
+ *
+ * `asumsiCount` is the number of D-8 rows THIS Strategi has (`detail.assumptions.length`),
+ * not the draft's selection. Requirement (c) only binds when that is > 0 — since
+ * D-8 is no longer a submit gate (⟳ 2026-08-26 DECISIONS), a Strategi can reach
+ * `Aktif` with zero assumptions ever recorded, and there is nothing to cite.
  */
-export function revisiKekurangan(draft: RevisiDraft): string[] {
+export function revisiKekurangan(draft: RevisiDraft, asumsiCount: number): string[] {
   const out: string[] = [];
   if (draft.trigger_revisi.length === 0) out.push('trigger revisi (dari H-2)');
   if (draft.alasan_revisi.trim() === '') out.push('alasan revisi');
-  if (draft.asumsi_gugur.length === 0) out.push('asumsi mana yang gugur (D-8)');
+  if (asumsiCount > 0 && draft.asumsi_gugur.length === 0) out.push('asumsi mana yang gugur (D-8)');
   return out;
 }
 

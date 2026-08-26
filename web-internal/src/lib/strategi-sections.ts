@@ -55,21 +55,17 @@ const SECTION_KEYS: readonly string[] = STRATEGI_SECTIONS.map((s) => s.key);
 /**
  * Kodes that are not field IDs and therefore cannot be parsed for a section.
  *
- * `checkCompleteness` emits one: `Rule 8` ("every target carries an assumption"),
- * which is a cross-field rule over D-2 and D-9 and so has no field number of its
- * own. Left to the parser it lands in `lain`, where the page renders it as
- * "tidak dikenali seksinya — laporkan ke tim sistem". That message is right for a
- * kode nobody can act on and WRONG here: Rule 8 is fixed by ticking a D-9
- * checkbox, and telling the AM to file a bug report instead is how a fixable gap
- * becomes a permanent one.
+ * `checkCompleteness` used to emit one this way: `Rule 8` ("every target
+ * carries an assumption"), a cross-field rule over D-2 and D-9 with no field
+ * number of its own. Since ⟳ 2026-08-26 (DECISIONS) Rule 8 is advisory only —
+ * `checkCompleteness` no longer emits it at all — so this map is currently
+ * empty, but the mechanism stays for the next cross-field kode that needs it.
  *
  * This map is for kodes the server deliberately emits without a field ID. It is
  * NOT a place to paper over a kode that should have had one — a `Z-9` still goes
  * to `lain`, on purpose.
  */
-const KODE_SECTION_OVERRIDE: Readonly<Record<string, SectionKey>> = {
-  'Rule 8': 'D',
-};
+const KODE_SECTION_OVERRIDE: Readonly<Record<string, SectionKey>> = {};
 
 /**
  * sectionOf maps a kekurangan kode to its section.

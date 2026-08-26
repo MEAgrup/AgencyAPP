@@ -30,11 +30,11 @@ describe('sectionOf', () => {
     expect(sectionOf('')).toBe('lain');
   });
 
-  it('files `Rule 8` under D, where the D-9 checkbox that fixes it lives', () => {
-    // `checkCompleteness` emits this kode with no field ID. In `lain` the page
-    // tells the AM to report it to the systems team — for a gap they fix by
-    // ticking a box two cards up.
-    expect(sectionOf('Rule 8')).toBe('D');
+  it('sends `Rule 8` to `lain` now that it is retired as a gate (⟳ 2026-08-26)', () => {
+    // `checkCompleteness` no longer emits this kode at all (D-8 is advisory,
+    // not a submit gate), so there is nothing left mapping it to D — it falls
+    // through to the same "unrecognised" bucket any other stray kode would.
+    expect(sectionOf('Rule 8')).toBe('lain');
   });
 
   it('sends an unknown section letter to `lain` rather than dropping it', () => {

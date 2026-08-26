@@ -1092,6 +1092,7 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                 <div>
                   <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
                     Asumsi D-8 yang gugur
+                    {detail.assumptions.length === 0 && ' (tidak wajib — D-8 belum pernah diisi)'}
                   </div>
                   <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
                     {detail.assumptions.map((a) => {
@@ -1128,7 +1129,7 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                   <button
                     type="button"
                     className="btn btnPrimary"
-                    disabled={acting || revisiKekurangan(revisi).length > 0}
+                    disabled={acting || revisiKekurangan(revisi, detail.assumptions.length).length > 0}
                     onClick={() =>
                       void act(async () => {
                         await openStrategiRevision(id, revisiToBody(revisi));
@@ -1149,9 +1150,9 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                   {/* Names WHICH of Rule 13's three boxes is empty. The server
                       answers all three with one sentence, which is correct as a
                       gate and useless as a hint. */}
-                  {revisiKekurangan(revisi).length > 0 && (
+                  {revisiKekurangan(revisi, detail.assumptions.length).length > 0 && (
                     <span className="muted" style={{ fontSize: 12 }}>
-                      Masih kurang: {revisiKekurangan(revisi).join(', ')}
+                      Masih kurang: {revisiKekurangan(revisi, detail.assumptions.length).join(', ')}
                     </span>
                   )}
                 </div>
