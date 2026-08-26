@@ -37,14 +37,14 @@
  * computation — the only place in this form where a second copy of a server rule
  * earns its keep, because the alternative is a gap the AM cannot locate.
  *
- * ## Rule 8 is mirrored here, and that is also deliberate
+ * ## Rule 8 is mirrored here, and that is also deliberate — but it is advisory
  *
- * "Every target carries an assumption" is checked by `checkCompleteness` at
- * submit and would otherwise reach the AM as a single `Rule 8` line with no way
- * to tell WHICH month is bare. The mirror lives in `lib/strategi-target.ts` with
- * tests pinning it to the server's computation — the one place in this form where
- * a second copy of a server rule earns its keep, because the alternative is a gap
- * the AM cannot locate.
+ * "Every target carries an assumption" is no longer a submit gate (⟳ 2026-08-26
+ * DECISIONS: a store the AM has not yet run often cannot honestly get an
+ * assumption before work starts). The mirror in `lib/strategi-target.ts` still
+ * runs so the panel can nudge the AM toward WHICH month is bare, with tests
+ * pinning it to the server's own (non-blocking) computation — it is a hint now,
+ * not a gap the AM must close to submit.
  *
  * ## D-2 is entered per quarter, but stored per month (owner QA 2026-08-25)
  *
@@ -775,15 +775,16 @@ export default function SectionD({
           checklist yang kedua pihak sudah setujui.
         </p>
 
-        {/* Rule 8 — the reason this panel exists rather than a bare "min 3"
-            counter. `checkCompleteness` reports one line, `Rule 8`, for any
-            number of bare targets; without this the AM cannot tell which month
-            it means, and D-9 is where they fix it. */}
+        {/* Rule 8 — advisory only since ⟳ 2026-08-26 (DECISIONS): a genuine,
+            verifiable assumption often cannot be written honestly before the
+            store has been worked at all, so this no longer blocks Diajukan.
+            The panel stays as a nudge — without it the AM cannot tell which
+            month is bare, and D-9 is where they fix it if they choose to. */}
         {uncovered.length > 0 ? (
           <div className="alert alertInfo" style={{ fontSize: 12 }}>
-            <strong>Rule 8</strong> — {uncovered.length} target GMV belum ditutup asumsi mana pun.
-            Centang target ini di salah satu asumsi di bawah:{' '}
-            {uncovered.map(targetLabel).join(', ')}.
+            <strong>Rule 8 (opsional)</strong> — {uncovered.length} target GMV belum ditutup asumsi
+            mana pun. Bukan syarat untuk mengajukan; centang target ini di salah satu asumsi di
+            bawah kalau sudah ada yang bisa dicatat: {uncovered.map(targetLabel).join(', ')}.
           </div>
         ) : offerable.length > 0 ? (
           <div className="alert alertInfo" style={{ fontSize: 12 }}>
@@ -793,9 +794,8 @@ export default function SectionD({
 
         <RepeatList<AssumptionRow>
           label="Daftar asumsi"
-          hint="Minimal 3 (§4). Tiap asumsi butuh pemilik dan cara verifikasi — asumsi tanpa cara verifikasi tidak bisa dinyatakan gugur, dan asumsi yang gugur adalah yang nanti membenarkan revisi (Rule 13)."
+          hint="Dianjurkan minimal 3 (§4), tapi tidak wajib untuk mengajukan — kalau di awal pengerjaan toko belum cukup diketahui untuk menulis asumsi yang bisa diverifikasi, boleh dikosongkan dulu dan diisi begitu sudah ada yang pasti. Tiap asumsi butuh pemilik dan cara verifikasi — asumsi tanpa cara verifikasi tidak bisa dinyatakan gugur, dan asumsi yang gugur adalah yang nanti membenarkan revisi (Rule 13)."
           rows={targets.assumptions}
-          min={3}
           onChange={(rows) => onTargets({ assumptions: rows })}
           blank={() => ({
             kode: `AS-${targets.assumptions.length + 1}`,
@@ -806,7 +806,7 @@ export default function SectionD({
           })}
           disabled={disabled}
           addLabel="Tambah asumsi"
-          empty="Belum ada asumsi — minimal 3 wajib sebelum bisa diajukan."
+          empty="Belum ada asumsi — boleh diisi belakangan, begitu ada yang cukup pasti untuk dicatat."
         >
           {(row, set, index) => (
             <>

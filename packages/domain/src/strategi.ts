@@ -6085,19 +6085,18 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
   // advisory, and requiring one would turn "the floor looks unachievable" from
   // evidence into paperwork every AM fills to pass validation.
 
-  const assumptions = await sql<{ kode: string; target_terkait: unknown }[]>`
-    select kode, target_terkait from strategi_assumption where strategi_id = ${id}`;
-  if (assumptions.length < 3) {
-    out.push({ kode: 'D-8', pesan: MSG_ASSUMPTION_MIN });
-  }
-
-  // Rule 8: "Every target carries an assumption." Checked against GMV targets,
-  // which are the monthly stretch figures D-2 produces.
-  const covered = new Set(assumptions.flatMap((a) => strArray(a.target_terkait)));
-  const uncovered = targets.filter((t) => !covered.has(targetKey('gmv', t.channel, t.month_index)));
-  if (uncovered.length > 0) {
-    out.push({ kode: 'Rule 8', pesan: MSG_TARGET_WITHOUT_ASSUMPTION });
-  }
+  // D-8 (min 3) and Rule 8 (every GMV target covered by an assumption) are NO
+  // LONGER submit requirements — owner QA decision 2026-08-26 (DECISIONS.md,
+  // STRG-202608-0001). A brand-new engagement, or a store the AM has not yet
+  // run, usually cannot honestly name a falsifiable assumption before work
+  // starts: real assumptions surface DURING execution (the ad account behaves a
+  // certain way, the client is slow or fast to approve), not before it. Forcing
+  // a floor here produced the same failure mode C-5's "min 3" did — rows typed
+  // to pass validation, not evidence anyone would trust in a post-mortem.
+  // D-8 stays fully functional: the AM adds assumptions as they learn the
+  // store, and `openRevision` still asks a revision to cite one when this
+  // Strategi has any recorded (Rule 13(c)) — an empty D-8 just no longer blocks
+  // `Diajukan`/`Disetujui`. Same reasoning as E-11/E-12 (owner QA 2026-08-20).
 
   // Section E/H narrative (A-09a). Three of the four are `W`; H-4 is `O` and is
   // deliberately absent — see `saveNarasi`.
@@ -6574,7 +6573,14 @@ export interface RevisionInput {
   triggerRevisi: string[];
   /** (b) free text. */
   alasanRevisi: string;
-  /** (c) which D-8 assumption codes broke. */
+  /**
+   * (c) which D-8 assumption codes broke.
+   *
+   * Required only if the version being revised has at least one assumption
+   * recorded — since D-8 is no longer a submit gate (⟳ 2026-08-26 DECISIONS),
+   * a Strategi can reach `Aktif` with zero rows in `strategi_assumption`, and
+   * there is nothing to cite. May be empty in that case.
+   */
   asumsiGugur: string[];
 }
 
@@ -6595,7 +6601,15 @@ export async function openRevision(
   const alasan = (input.alasanRevisi ?? '').trim();
   const triggers = (input.triggerRevisi ?? []).map((t) => t.trim()).filter(Boolean);
   const gugur = (input.asumsiGugur ?? []).map((a) => a.trim()).filter(Boolean);
-  if (triggers.length === 0 || alasan === '' || gugur.length === 0) {
+  // Rule 13(c) only binds if there is something to cite. D-8 is no longer a
+  // submit gate (⟳ 2026-08-26 DECISIONS), so a Strategi may reach `Aktif` with
+  // zero assumptions ever recorded — demanding a broken one in that case would
+  // make the FIRST revision permanently unopenable, which is worse than the
+  // requirement it was meant to enforce.
+  const existingAssumptions = await sql<{ n: number }[]>`
+    select count(*)::int as n from strategi_assumption where strategi_id = ${id}`;
+  const asumsiRequired = existingAssumptions[0].n > 0;
+  if (triggers.length === 0 || alasan === '' || (asumsiRequired && gugur.length === 0)) {
     throw new ValidationError(MSG_REVISION_INCOMPLETE);
   }
   const now = new Date();

@@ -94,8 +94,8 @@ describe('declaredTriggers', () => {
 });
 
 describe('revisiKekurangan — Rule 13 (a), (b), (c)', () => {
-  it('names all three when the dialog just opened', () => {
-    expect(revisiKekurangan(REVISI_KOSONG)).toEqual([
+  it('names all three when the dialog just opened, and this Strategi has D-8 rows', () => {
+    expect(revisiKekurangan(REVISI_KOSONG, 3)).toEqual([
       'trigger revisi (dari H-2)',
       'alasan revisi',
       'asumsi mana yang gugur (D-8)',
@@ -104,21 +104,40 @@ describe('revisiKekurangan — Rule 13 (a), (b), (c)', () => {
 
   it('treats whitespace as empty, the way the server does', () => {
     expect(
-      revisiKekurangan({
-        trigger_revisi: ['pencapaian_di_bawah_target'],
-        alasan_revisi: '   ',
-        asumsi_gugur: ['A1'],
-      }),
+      revisiKekurangan(
+        {
+          trigger_revisi: ['pencapaian_di_bawah_target'],
+          alasan_revisi: '   ',
+          asumsi_gugur: ['A1'],
+        },
+        3,
+      ),
     ).toEqual(['alasan revisi']);
   });
 
   it('is empty once all three are answered', () => {
     expect(
-      revisiKekurangan({
-        trigger_revisi: ['pencapaian_di_bawah_target'],
-        alasan_revisi: 'GMV meleset dua bulan berturut',
-        asumsi_gugur: ['A1'],
-      }),
+      revisiKekurangan(
+        {
+          trigger_revisi: ['pencapaian_di_bawah_target'],
+          alasan_revisi: 'GMV meleset dua bulan berturut',
+          asumsi_gugur: ['A1'],
+        },
+        3,
+      ),
+    ).toEqual([]);
+  });
+
+  it('waives (c) when this Strategi has zero D-8 rows recorded (owner QA 2026-08-26)', () => {
+    expect(
+      revisiKekurangan(
+        {
+          trigger_revisi: ['pencapaian_di_bawah_target'],
+          alasan_revisi: 'GMV meleset, D-8 belum pernah diisi',
+          asumsi_gugur: [],
+        },
+        0,
+      ),
     ).toEqual([]);
   });
 });

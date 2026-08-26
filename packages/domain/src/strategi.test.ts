@@ -56,7 +56,6 @@ import {
   MSG_SANGGAHAN_INCOMPLETE,
   MSG_SKENARIO_MUNDUR_REQUIRED,
   MSG_STRATEGI_EXISTS,
-  MSG_TARGET_WITHOUT_ASSUMPTION,
   MSG_TIDAK_ADA_BELUM_DIJAWAB,
   MSG_TOP_SKU_REQUIRED,
   MSG_URUTAN_EKSEKUSI_REQUIRED,
@@ -1527,10 +1526,13 @@ describeDb('checkCompleteness — every unmet rule, not the first one', () => {
     const codes = missing.map((m) => m.kode);
     expect(codes).toContain('G-0'); // Rule 17
     expect(codes).toContain('B-0'); // Rule 3
-    expect(codes).toContain('D-8'); // three assumptions
     // E-11 (out-of-scope) retired as a gate — owner QA 2026-08-20 (Fase 2). It no
     // longer appears here even on a wholly empty draft.
     expect(codes).not.toContain('E-11');
+    // D-8 (min 3) and Rule 8 (target coverage) retired as gates — owner QA
+    // 2026-08-26 (DECISIONS.md). Neither appears here even on a wholly empty draft.
+    expect(codes).not.toContain('D-8');
+    expect(codes).not.toContain('Rule 8');
     expect(codes).toContain('H-1'); // three risks
     // A-05: the Section A answers still gated name which one is missing. A-1, A-5,
     // A-8, A-10, A-12 are NO LONGER gated — they moved to the Interview (owner QA
@@ -1728,7 +1730,12 @@ describeDb('checkCompleteness — every unmet rule, not the first one', () => {
     expect(codes).not.toContain('B-7/Shopee');
   });
 
-  it('flags a GMV target no assumption points at (Rule 8)', async () => {
+  it('does NOT gate a GMV target no assumption points at — Rule 8 retired (owner QA 2026-08-26)', async () => {
+    // Previously this asserted Rule 8 fired MSG_TARGET_WITHOUT_ASSUMPTION. The
+    // owner retired it as a submit requirement (DECISIONS.md, STRG-202608-0001):
+    // a real assumption often cannot be written before the store is worked, so
+    // an uncovered target — or even zero assumptions at all — must now clear
+    // the gate.
     const { strategiId } = await seedSubmittable();
     await saveAssumptions(
       sql,
@@ -1743,7 +1750,21 @@ describeDb('checkCompleteness — every unmet rule, not the first one', () => {
       })),
     );
     const missing = await checkCompleteness(sql, strategiId);
-    expect(missing.map((m) => m.pesan)).toContain(MSG_TARGET_WITHOUT_ASSUMPTION);
+    expect(missing.map((m) => m.kode)).not.toContain('Rule 8');
+  });
+
+  it('does NOT gate a Strategi with zero D-8 assumptions at all (owner QA 2026-08-26)', async () => {
+    const { strategiId } = await seedSubmittable();
+    await saveAssumptions(sql, am(), strategiId, []);
+    const missing = await checkCompleteness(sql, strategiId);
+    expect(missing.map((m) => m.kode)).not.toContain('D-8');
+    expect(missing.map((m) => m.kode)).not.toContain('Rule 8');
+    expect(missing).toEqual([]);
+    // The gate itself — not just checkCompleteness's report of it — must let a
+    // Strategi with zero assumptions all the way to Aktif.
+    await submitStrategi(sql, am(), strategiId);
+    const approved = await approveStrategi(sql, spv(), strategiId);
+    expect(approved.status).toBe(STRATEGI_AKTIF);
   });
 
   it('does NOT gate an empty out-of-scope record — E-11 retired (owner QA 2026-08-20)', async () => {
@@ -1873,6 +1894,35 @@ describeDb('Rule 13 — a revision is a new row, and n stays Aktif', () => {
         asumsiGugur: ['A1'],
       }),
     ).rejects.toThrow(MSG_REVISION_INCOMPLETE);
+  });
+
+  it('still refuses an empty broken-assumption list when this Strategi has assumptions recorded', async () => {
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    // seedSubmittable leaves three D-8 rows (A1/A2/A3), so Rule 13(c) still
+    // binds: the waiver below is for zero rows, not "AM did not pick one".
+    await expect(
+      openRevision(sql, am(), strategiId, {
+        triggerRevisi: ['stok_kosong'],
+        alasanRevisi: 'restock meleset',
+        asumsiGugur: [],
+      }),
+    ).rejects.toThrow(MSG_REVISION_INCOMPLETE);
+  });
+
+  it('waives the broken-assumption requirement when D-8 was never filled (owner QA 2026-08-26)', async () => {
+    const { strategiId } = await seedSubmittable();
+    await saveAssumptions(sql, am(), strategiId, []);
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    const v2 = await openRevision(sql, am(), strategiId, {
+      triggerRevisi: ['stok_kosong'],
+      alasanRevisi: 'restock meleset, D-8 belum pernah diisi',
+      asumsiGugur: [],
+    });
+    expect(v2.versiNo).toBe(2);
+    expect(v2.status).toBe(STRATEGI_DRAFT_REVISI);
   });
 
   it('refuses to revise anything that is not Aktif', async () => {
