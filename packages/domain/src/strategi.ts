@@ -616,8 +616,8 @@ export const BOTTLENECK_KINDS = [
 ] as const;
 export type BottleneckKind = (typeof BOTTLENECK_KINDS)[number];
 
-/** Minimum quick wins required at submit (C-5). */
-export const QUICK_WIN_MIN = 3;
+/** Minimum quick wins required at submit (C-5). ⟳ 2026-08-26 (DECISIONS): was 3. */
+export const QUICK_WIN_MIN = 1;
 
 /**
  * C-2 Rule 6 — each diagnosa must state its reasoning as free text.
@@ -6152,7 +6152,7 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
     }
   }
 
-  // C-5: at least QUICK_WIN_MIN quick wins (PRD says "W (min 3)").
+  // C-5: at least QUICK_WIN_MIN quick wins (PRD says "W (min 1)").
   const qwCount = await sql<{ n: number }[]>`
     select count(*)::int as n from strategi_quick_win where strategi_id = ${id}`;
   if (qwCount[0].n < QUICK_WIN_MIN) {

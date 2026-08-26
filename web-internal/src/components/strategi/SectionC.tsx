@@ -261,9 +261,9 @@ export default function SectionC({
       {/* C-5 --------------------------------------------------------------- */}
       <RepeatList<QuickWinDraft>
         label="C-5 · Quick Win 14 Hari Pertama"
-        hint="Perbaikan yang tidak butuh budget baru. Minimal 3."
+        hint="Perbaikan yang tidak butuh budget baru. Minimal 1."
         rows={draft.quick_wins}
-        min={3}
+        min={1}
         onChange={(rows) => onChange({ quick_wins: rows })}
         blank={() => ({ aksi: '', channel: '', pic_divisi: '', dampak_diharapkan: '' })}
         disabled={disabled}

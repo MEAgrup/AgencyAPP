@@ -2307,16 +2307,28 @@ describeDb('Section C — A-07 (Diagnosa & Akar Masalah)', () => {
     expect(codes).not.toContain('C-1/Shopee');
   });
 
-  it('checkCompleteness — flags C-5 when quick wins are fewer than 3', async () => {
+  it('checkCompleteness — flags C-5 when no quick wins are recorded', async () => {
     const serviceId = await seedService();
     const s = await createStrategi(sql, am(), serviceId, HEADER);
     await saveChannels(sql, am(), s.id, [SHOPEE]);
     await saveDiagnosa(sql, am(), s.id, {
       ...DIAGNOSA_PAYLOAD,
-      quickWins: DIAGNOSA_PAYLOAD.quickWins.slice(0, 2), // only 2 of 3
+      quickWins: [],
     });
     const pesan = (await checkCompleteness(sql, s.id)).map((m) => m.pesan);
     expect(pesan).toContain(MSG_QUICK_WIN_MIN);
+  });
+
+  it('checkCompleteness — one quick win satisfies C-5', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await saveChannels(sql, am(), s.id, [SHOPEE]);
+    await saveDiagnosa(sql, am(), s.id, {
+      ...DIAGNOSA_PAYLOAD,
+      quickWins: DIAGNOSA_PAYLOAD.quickWins.slice(0, 1),
+    });
+    const pesan = (await checkCompleteness(sql, s.id)).map((m) => m.pesan);
+    expect(pesan).not.toContain(MSG_QUICK_WIN_MIN);
   });
 
   it('checkCompleteness — flags C-6 when risiko struktural is empty', async () => {
