@@ -1324,6 +1324,7 @@ interface ApprovedLine {
   name: string;
   versionNo: number;
   requiresStrategyPlan: boolean;
+  planTier: string;
 }
 
 interface QualifiedFormRow {
@@ -1415,16 +1416,22 @@ export async function close(
     }
 
     // 4) Services (SVC- per line, born [Awaiting Onboarding]); inherit the pinned
-    //    MSL version's "Requires Strategy Plan" flag (M6 §2).
+    //    MSL version's "Requires Strategy Plan" flag AND plan_tier (M6 §2, M6C
+    //    S4). Both must travel together — a service pinned to the `ditentukan_am`
+    //    middle tier that only got `requires_strategy_plan` would silently fall
+    //    back to the `plan_tier` column default (`tanpa_plan`), skipping the G-B
+    //    determination gate entirely instead of leaving it pending (the exact
+    //    class of bug M6C Rule 1 warns about — see `nextOnboardingStep`).
     for (const l of lines) {
       const svcId = await ex.ident.identNext('SVC', now);
       await tx`
         insert into services
           (id, client_id, master_service_id, master_version_no, name, standard_price, commission_rule,
-           status, requires_strategy_plan, created_by)
+           status, requires_strategy_plan, plan_tier, created_by)
         values
           (${svcId}, ${clientId}, ${l.masterServiceId}, ${l.versionNo}, ${l.name}, ${l.proposedPrice},
-           ${l.commissionRule}, ${SERVICE_STATUS_AWAITING_ONBOARDING}, ${l.requiresStrategyPlan}, ${actor.employeeId})`;
+           ${l.commissionRule}, ${SERVICE_STATUS_AWAITING_ONBOARDING}, ${l.requiresStrategyPlan}, ${l.planTier},
+           ${actor.employeeId})`;
     }
 
     // 5) Transaction (TRX-) born awaiting Finance verification.
@@ -1520,14 +1527,15 @@ async function loadApprovedLines(tx: Queryable, attemptId: string): Promise<Appr
   const rows = await tx<
     {
       master_service_id: string; proposed_price: string; commission_rule: string;
-      name: string; master_version_no: number; requires_strategy_plan: boolean;
+      name: string; master_version_no: number; requires_strategy_plan: boolean; plan_tier: string;
     }[]
   >`
     select npl.master_service_id, npl.proposed_price, npl.commission_rule,
            coalesce(qfs.name, at_proposal.name, '') as name,
            coalesce(qfs.master_version_no, at_proposal.version_no, 0) as master_version_no,
            coalesce(pinned.requires_strategy_plan, at_proposal.requires_strategy_plan, false)
-             as requires_strategy_plan
+             as requires_strategy_plan,
+           coalesce(pinned.plan_tier, at_proposal.plan_tier, 'tanpa_plan') as plan_tier
     from negotiation_proposal_lines npl
     join negotiation_proposals np on np.id = npl.proposal_id
     left join qualified_form_services qfs
@@ -1535,7 +1543,7 @@ async function loadApprovedLines(tx: Queryable, attemptId: string): Promise<Appr
     left join master_service_versions pinned
            on pinned.service_id = npl.master_service_id and pinned.version_no = qfs.master_version_no
     left join lateral (
-      select msv.version_no, msv.name, msv.requires_strategy_plan
+      select msv.version_no, msv.name, msv.requires_strategy_plan, msv.plan_tier
       from master_service_versions msv
       where msv.service_id = npl.master_service_id
         and msv.effective_from <= (np.created_at at time zone 'Asia/Jakarta')::date
@@ -1548,6 +1556,7 @@ async function loadApprovedLines(tx: Queryable, attemptId: string): Promise<Appr
   return rows.map((r) => ({
     masterServiceId: r.master_service_id, proposedPrice: r.proposed_price, commissionRule: r.commission_rule,
     name: r.name, versionNo: r.master_version_no, requiresStrategyPlan: r.requires_strategy_plan,
+    planTier: r.plan_tier,
   }));
 }
 

@@ -670,6 +670,37 @@ describeDb('reviseServices — Edit Service sebelum closing', () => {
     expect(money.parse(trx[0].total_agreed_value)).toBe(money.parse('16000000'));
   });
 
+  it('a service pinned to the ditentukan_am middle tier is born pending determination, not silently Direct (production regression 2026-08-27)', async () => {
+    // Root cause of ITV-202608-0024 / SVC-202608-0011: close() copied
+    // requires_strategy_plan onto the new Service row but never copied
+    // plan_tier, so every ditentukan_am-tier service fell back to the
+    // `plan_tier` column default (`tanpa_plan`) — the AM's Interview forward-nav
+    // then correctly (per the now-correct data) offered "Buat Brief (Direct)"
+    // instead of the Strategi step, because the G-B gate was never actually
+    // answered by anyone; it was just skipped.
+    const svc = await seedService('SVC-ZZ-DITENTUKAN-AM');
+    await sql`update master_service_versions set plan_tier = 'ditentukan_am' where service_id = ${svc}`;
+    const attemptId = await autoApprovedAttempt(budi(), svc);
+
+    const closed = await close(sql, budi(), attemptId, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+
+    const [row] = await sql<{ id: string; plan_tier: string; requires_strategy_plan: boolean }[]>`
+      select id, plan_tier, requires_strategy_plan from services where client_id = ${closed.clientId}`;
+    expect(row.plan_tier).toBe('ditentukan_am');
+    // Consistent with ck_services_tier_matches_flag — the middle tier is never
+    // silently "requires plan" either; it stays undecided until G-B is answered.
+    expect(row.requires_strategy_plan).toBe(false);
+
+    // No service_plan_gate row exists yet — the AM has not answered G-B — so the
+    // Service must read as PENDING, not as a decided Direct-path service.
+    const gateRows = await sql<{ n: number }[]>`
+      select count(*)::int as n from service_plan_gate where service_id = ${row.id}`;
+    expect(gateRows[0].n).toBe(0);
+  });
+
   it('a custom price re-opens the superior approval (an approved deal is not silently re-priced)', async () => {
     const svc = await seedService('SVC-ZZ-REV-CUSTOM');
     const attemptId = await qualifiedAttempt(budi(), svc);
