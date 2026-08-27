@@ -283,6 +283,14 @@ export interface SubmitBaselineInput {
   manual?: ManualBaselineInput;
   /** Provenance for a manual entry (an export that backs the typed numbers). */
   sumberBerkas?: SumberBerkasInput[];
+  /** AM's deliberate opt-out of the engine on an analisa_penuh platform (owner QA
+   *  2026-08-27: "jalur pintas tanpa upload/skor") — submits `manual` instead of
+   *  `analisa` even though the platform has an engine. Ignored for a platform that
+   *  is already manual/analisa_tipis (nothing to opt out of). Ties `metode_baseline`
+   *  to 'manual' for this row: `kondisi_toko` becomes `belum_dapat_diukur`, no skor
+   *  — same DB contract as any other manual row (ck_analisa_skor_penuh), just
+   *  chosen instead of derived from the platform name. */
+  manualOverride?: boolean;
 }
 
 export interface AnalisaRow {
@@ -381,7 +389,10 @@ export async function submitBaseline(sql: Sql, actor: Actor, id: string, input: 
     if (plat.length === 0 || plat[0].client_id !== clientId) throw new NotFoundError(MSG_PLATFORM_NOT_FOUND);
     if (!plat[0].active) throw new ValidationError(MSG_PLATFORM_INACTIVE);
     const platform = plat[0].platform;
-    const metode = metodeForPlatform(platform);
+    const naturalMetode = metodeForPlatform(platform);
+    // manualOverride only ever demotes analisa_penuh → manual (an AM opting out
+    // of the engine); it can never promote a platform that has no engine.
+    const metode: MetodeBaseline = naturalMetode === 'analisa_penuh' && input.manualOverride === true ? 'manual' : naturalMetode;
 
     // One row per (interview × platform); re-analysis needs a re-open, so a
     // second submit is a conflict, never a silent overwrite (frozen trigger).

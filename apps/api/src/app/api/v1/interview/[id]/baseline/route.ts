@@ -62,6 +62,7 @@ interface SubmitWire {
   analisa?: AnalisaWire;
   manual?: ManualWire;
   sumber_berkas?: SumberBerkasWire[];
+  manual_override?: boolean;
 }
 
 function toSubmitInput(b: SubmitWire): risetAwal.SubmitBaselineInput {
@@ -105,6 +106,7 @@ function toSubmitInput(b: SubmitWire): risetAwal.SubmitBaselineInput {
       periode: s.periode ?? null,
       tanggalAmbil: s.tanggal_ambil ?? null,
     })),
+    manualOverride: b.manual_override === true,
   };
 }
 
