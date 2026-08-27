@@ -760,17 +760,36 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         )}
 
         {/* Canonical create door (promoted from the QA page). Header fields only;
-            Section A→J is completed on the Strategi page after creation. Same
-            gates as STR- once did: plan-gated, no Strategi yet, still
-            [Awaiting Onboarding]. Direct services never get a Strategi. */}
+            Section A→J is completed on the Strategi page after creation.
+            QA revisi 2026-08-27 (pemilik): show this door for EVERY Service that
+            is not conclusively no-Plan — plan-gated already, OR still undecided
+            (`ditentukan_am`, G-B never answered). Only a Service that genuinely
+            does not need Strategi & Plan (locked `tanpa_plan` with no
+            escalation, or already decided `tanpa_plan`) hides it. Clicking this
+            button IS the AM's decision to create a Plan for an undecided
+            Service — `createStrategi` (packages/domain/src/strategi.ts) records
+            that as an M6-OA-1 override the same way a manual one is recorded,
+            so no separate Penentuan Kebutuhan Plan form has to be filled first.
+            (`awaitingOnboarding` was dropped earlier the same day: a Service
+            that left [Awaiting Onboarding] before ever getting a Strategi
+            showed "Belum ada Strategi" with no way to open one — `createStrategi`
+            has no such status check server-side.) See `docs/DECISIONS.md`
+            2026-08-27. */}
         {canWrite &&
-          planGated &&
-          awaitingOnboarding &&
-          strategiList.length === 0 &&
-          !service?.plan_determination_pending && (
+          (planGated || service?.plan_determination_pending) &&
+          strategiList.length === 0 && (
             <form className="form" onSubmit={handleCreateStrategi} style={{ marginTop: 12 }}>
               <div className="alert alertInfo" role="status">
-                Membuat header Strategi (<code>STRG-</code>) untuk layanan ini
+                {service?.plan_determination_pending ? (
+                  <>
+                    Kebutuhan Plan untuk layanan ini belum pernah ditentukan &mdash; membuat Strategi
+                    di sini ADALAH keputusannya: layanan akan langsung tercatat <strong>Butuh
+                    Plan</strong>. Kalau ternyata layanan ini tidak perlu Plan, jangan tekan tombol
+                    ini &mdash; biarkan saja tanpa Strategi.
+                  </>
+                ) : (
+                  <>Membuat header Strategi (<code>STRG-</code>) untuk layanan ini</>
+                )}
                 {' '}&mdash; kalau belum ada kontrak, satu <code>CTR-</code> ikut dibuat. Lanjutkan
                 Section A→J di halaman Strategi setelah ini. Perlu ACC Head/SPV sebelum aktif.
               </div>
