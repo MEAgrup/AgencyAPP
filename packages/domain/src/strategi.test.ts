@@ -26,6 +26,7 @@ import { ident, interview as iv, permission, visibility } from '@cdps/core';
 import * as interview from './interview';
 import { createClient, type Sql } from '@cdps/db';
 import { ALLOWED_DIVISIONS, ConflictError, ForbiddenError, ValidationError } from './account';
+import { decideGate, DECISION_TANPA_PLAN } from './plangate';
 import {
   MSG_AKSES_BLOCKER_DATE,
   MSG_AKSES_BLOCKER_STATUS,
@@ -277,6 +278,9 @@ afterEach(async () => {
   // clients and are referenced by riset_awal_analisa — so they go AFTER the
   // interview delete (which removed those analisa rows) and BEFORE clients.
   await sql`delete from client_platforms where created_by like 'ZZ-%'`;
+  // service_plan_gate (seeded by the Rule 1a tests, which call `decideGate`
+  // directly) has an FK on `services` — go before it, same as plangate.test.ts.
+  await sql`delete from service_plan_gate where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -667,6 +671,57 @@ describeDb('createStrategi — Rule 1', () => {
 
   it('refuses a Service that is not plan-gated', async () => {
     const serviceId = await seedService('tanpa_plan');
+    await expect(createStrategi(sql, am(), serviceId, HEADER)).rejects.toThrow(MSG_NOT_PLAN_GATED);
+  });
+
+  // Rule 1a (QA revisi 2026-08-27, pemilik): the `ditentukan_am` middle tier
+  // with no G-B answer yet (M6C's `perluPenentuan`) is UNANSWERED, not
+  // conclusively no-Plan — creating a Strategi directly is itself the "Butuh
+  // Plan" answer, recorded as an M6-OA-1 override so `effectiveGate` reads
+  // `requiresPlan: true` from here on.
+  it('an undecided ditentukan_am Service is not rejected — creating one IS the decision (Rule 1a)', async () => {
+    const serviceId = await seedService('ditentukan_am');
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    expect(s.status).toBe(STRATEGI_DRAFT);
+
+    const svcRow = await sql<{ requires_strategy_plan_override: boolean | null }[]>`
+      select requires_strategy_plan_override from services where id = ${serviceId}`;
+    expect(svcRow[0].requires_strategy_plan_override).toBe(true);
+
+    const audit = await sql<{ n: number }[]>`
+      select count(*)::int as n from audit_log
+       where entity_type = 'service' and entity_id = ${serviceId}
+         and action = 'strategy_requirement_override'`;
+    expect(audit[0].n).toBe(1);
+
+    // A second Strategi still refuses for the ordinary reason (Rule 2) — the
+    // override recorded above does not loosen anything else.
+    await expect(createStrategi(sql, am(), serviceId, HEADER)).rejects.toThrow(MSG_STRATEGI_EXISTS);
+  });
+
+  it('still refuses a ditentukan_am Service that already answered Tanpa Plan', async () => {
+    const serviceId = await seedService('ditentukan_am');
+    await decideGate(sql, am(), serviceId, {
+      divisiTerlibat: ['Account'],
+      deliverable: 'Kelola listing bulanan',
+      berulang: false,
+      kuotaPerPeriode: null,
+      durasiBulan: null,
+      nilaiPerBulan: null,
+      targetJenis: null,
+      sequenceDependency: false,
+      laporanPeriodik: false,
+      keputusanAm: DECISION_TANPA_PLAN,
+      tanggalTinjauUlang: '2026-09-15',
+      ringkasanPenugasan: {
+        deliverable: 'Kelola listing bulanan',
+        deadline: '2026-09-05',
+        divisiPic: 'Account',
+        hasilDiharapkan: 'Listing rapi, tidak ada komplain klien',
+      },
+    });
+    // The middle tier already has an answer — perluPenentuan is false, so
+    // Rule 1a does not apply and this stays conclusively no-Plan.
     await expect(createStrategi(sql, am(), serviceId, HEADER)).rejects.toThrow(MSG_NOT_PLAN_GATED);
   });
 

@@ -2828,6 +2828,17 @@ function normalizeHeader(input: StrategiHeaderInput): Required<StrategiHeaderInp
  * reading a boolean: for the middle tier the effective answer is the AM's
  * recorded G-B decision, and duplicating that precedence here would create the
  * second copy M6C exists to prevent.
+ *
+ * QA revisi 2026-08-27 (pemilik): for the `ditentukan_am` tier with no G-B
+ * answer yet (`perluPenentuan`), the AM is no longer required to fill the
+ * separate Penentuan Kebutuhan Plan form BEFORE this door opens — deliberately
+ * creating a Strategi for a Service IS the "Butuh Plan" decision (M6-OA-1
+ * override, top of `effectiveGate`'s precedence), recorded here the same way
+ * `setStrategyRequirement` records a manual one. A Service that is CONCLUSIVELY
+ * no-Plan (`tanpa_plan` locked with no escalation, or already decided
+ * `tanpa_plan`) still rejects — see `MSG_NOT_PLAN_GATED` below; only the
+ * genuinely undecided case is auto-resolved. See `docs/DECISIONS.md`
+ * 2026-08-27 and `docs/prd/CDPS_Module6C_Plan_Gate_Satuan.md` Rule 1a.
  */
 export async function createStrategi(
   sql: Sql,
@@ -2850,7 +2861,31 @@ export async function createStrategi(
       keputusanAm: (svc.gateDecision as 'butuh_plan' | 'tanpa_plan' | null) ?? null,
     });
     if (!eff.requiresPlan) {
-      throw new ConflictError(MSG_NOT_PLAN_GATED);
+      // Conclusively no-Plan (locked `tanpa_plan` with no escalation, or an
+      // explicit `tanpa_plan` G-B decision already on record) — this Service
+      // really does not need a Strategi, Rule 1a does not apply.
+      if (!eff.perluPenentuan) {
+        throw new ConflictError(MSG_NOT_PLAN_GATED);
+      }
+      // `ditentukan_am`, never answered: the act of creating a Strategi is the
+      // decision. Record it exactly like a manual M6-OA-1 override so the
+      // audit trail names what happened and `effectiveGate` reads `butuh_plan`
+      // from here on — no `service_plan_gate` row is fabricated with guessed
+      // G-A attributes (divisions, deliverable, recommendation) nobody answered.
+      await tx`update services set requires_strategy_plan_override = true where id = ${serviceId}`;
+      await ex.audit.insertAudit({
+        entityType: 'service',
+        entityId: serviceId,
+        actorEmployeeId: actor.employeeId,
+        action: 'strategy_requirement_override',
+        beforeJson: { requires_strategy_plan: false },
+        afterJson: {
+          requires_strategy_plan: true,
+          set_by: actor.employeeId,
+          reason: 'AM membuat Strategi (STRG-) secara langsung untuk layanan ini — keputusan Butuh Plan tersirat dari tindakan tersebut (M6C Rule 1a, QA revisi 2026-08-27).',
+        },
+        createdBy: actor.employeeId,
+      });
     }
     // O57: the Strategi hangs off the agreement. A Service that has not been
     // grouped yet gets a 1:1 Contract minted here from the window the AM typed —
