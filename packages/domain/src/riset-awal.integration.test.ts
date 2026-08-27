@@ -202,6 +202,41 @@ dDb('submitBaseline — per-platform baseline + auto-fill', () => {
     expect(view.platforms.find((p) => p.clientPlatformId === tiktokId)?.storeLink).toBe('https://tt.example');
   });
 
+  it('TikTok Shop with manualOverride: opts out of the engine, treated as manual (owner QA 2026-08-27)', async () => {
+    const fresh = await sql<{ id: number }[]>`
+      insert into client_platforms (client_id, platform, active, created_by)
+      values (${CLI}, 'TikTok Shop', true, ${OWNER_AM}) returning id`;
+    const overrideId = Number(fresh[0].id);
+    // No files at all — an AM using the shortcut never uploads an export.
+    const view = await submitBaseline(sql, owner, ITV, {
+      clientPlatformId: overrideId,
+      manual: { gmvBulan: 5_000_000, order: 120, aov: 41_666, skuTotal: 15, belanjaIklan: 500_000, roas: 3.2 },
+      manualOverride: true,
+    });
+    const tt = view.analisa.find((a) => a.clientPlatformId === overrideId)!;
+    // Persisted as 'manual' (not 'analisa_penuh') even though the platform name
+    // would normally derive the engine — same DB contract as any manual row.
+    expect(tt.metodeBaseline).toBe('manual');
+    expect(tt.kondisiToko).toBe('belum_dapat_diukur');
+    expect(tt.skor).toBeNull();
+    // The slot itself still reports the platform's real capability (RAB-04 UI) —
+    // manualOverride is a per-submission choice, not a change to what TikTok Shop is.
+    expect(view.platforms.find((p) => p.clientPlatformId === overrideId)?.metode).toBe('analisa_penuh');
+  });
+
+  it('manualOverride is ignored for a platform that is already manual (nothing to opt out of)', async () => {
+    const fresh = await sql<{ id: number }[]>`
+      insert into client_platforms (client_id, platform, active, created_by)
+      values (${CLI}, 'Lazada', true, ${OWNER_AM}) returning id`;
+    const lazadaId = Number(fresh[0].id);
+    const view = await submitBaseline(sql, owner, ITV, {
+      clientPlatformId: lazadaId,
+      manual: { gmvBulan: 1_000_000, order: 10, aov: 100_000, skuTotal: 5, belanjaIklan: 0, roas: 0 },
+      manualOverride: true,
+    });
+    expect(view.analisa.find((a) => a.clientPlatformId === lazadaId)?.metodeBaseline).toBe('manual');
+  });
+
   it('an ambiguous own-vs-affiliate file is rejected until the AM confirms its type', async () => {
     const fresh = await sql<{ id: number }[]>`
       insert into client_platforms (client_id, platform, active, created_by)

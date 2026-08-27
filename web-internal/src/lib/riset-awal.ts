@@ -155,13 +155,24 @@ export function submitBaselineAnalisa(
   });
 }
 
-/** POST /interview/{id}/baseline — submit a non-TikTok platform's minimal manual entry. */
+/**
+ * POST /interview/{id}/baseline — submit a non-TikTok platform's minimal manual
+ * entry. `manualOverride: true` is the AM's deliberate opt-out of an engine
+ * platform (owner QA 2026-08-27, "jalur pintas tanpa upload/skor") — the row is
+ * persisted as `metode_baseline='manual'` (no skor) even though the platform has
+ * one; ignored server-side for a platform that is already manual/analisa_tipis.
+ */
 export function submitBaselineManual(
   id: string,
   clientPlatformId: number,
   manual: ManualBaselineWire,
+  opts: { manualOverride?: boolean } = {},
 ): Promise<RisetAwalBaseline> {
-  return api.post<RisetAwalBaseline>(`/interview/${id}/baseline`, { client_platform_id: clientPlatformId, manual });
+  return api.post<RisetAwalBaseline>(`/interview/${id}/baseline`, {
+    client_platform_id: clientPlatformId,
+    manual,
+    manual_override: opts.manualOverride ?? false,
+  });
 }
 
 /** POST /interview/{id}/baseline/confirm — the AM confirms/corrects fields per number. */

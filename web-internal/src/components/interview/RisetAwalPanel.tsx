@@ -317,6 +317,11 @@ function PlatformBaselineCard({
     : [];
   const [splitting, setSplitting] = useState(false);
   const [splitError, setSplitError] = useState<string | null>(null);
+  // Owner QA 2026-08-27 ("jalur pintas tanpa upload/skor"): an engine platform
+  // (TikTok Shop) can still opt OUT of the engine per submission and use the
+  // AM Baseline (Video Factory) shortcut instead — kondisi_toko becomes
+  // belum_dapat_diukur, no skor, same contract as any other manual platform.
+  const [useShortcut, setUseShortcut] = useState(false);
 
   async function handleSplit() {
     if (splitTokens.length < 2) return;
@@ -348,6 +353,7 @@ function PlatformBaselineCard({
       <div className="row" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <strong>{platform.platform}</strong>
         <span className="badge badge-gray" style={{ fontWeight: 400 }}>{metodeLabel}</span>
+        {!done && useShortcut && <span className="badge badge-amber" style={{ fontWeight: 400 }}>Jalur pintas AM Baseline</span>}
         {done && <span className="badge badge-green">Tersubmit</span>}
         <span style={{ flex: 1 }} />
         {platform.store_link && (
@@ -407,7 +413,37 @@ function PlatformBaselineCard({
           Belum ada baseline untuk platform ini.
         </p>
       ) : platform.metode === 'analisa_penuh' ? (
-        <AnalisaPenuhForm interviewId={interviewId} platform={platform} onReload={onReload} />
+        useShortcut ? (
+          <div className="stack" style={{ gap: 8, marginTop: 8 }}>
+            <div className="alert alertInfo" style={{ fontSize: 12 }}>
+              <div>
+                Jalur pintas AM Baseline — baseline platform ini akan tercatat <em>belum dapat diukur</em>, tanpa
+                skor mesin 5-pilar, sampai dianalisa ulang lewat upload export asli.
+              </div>
+              <button
+                type="button"
+                className="btn btnGhost btnSm"
+                style={{ marginTop: 8 }}
+                onClick={() => setUseShortcut(false)}
+              >
+                Kembali ke upload export asli
+              </button>
+            </div>
+            <ManualForm interviewId={interviewId} platform={platform} manualOverride onReload={onReload} />
+          </div>
+        ) : (
+          <div className="stack" style={{ gap: 8 }}>
+            <AnalisaPenuhForm interviewId={interviewId} platform={platform} onReload={onReload} />
+            <button
+              type="button"
+              className="btn btnGhost btnSm"
+              style={{ alignSelf: 'flex-start' }}
+              onClick={() => setUseShortcut(true)}
+            >
+              Belum ada file export? Pakai AM Baseline (tanpa skor)
+            </button>
+          </div>
+        )
       ) : (
         <ManualForm interviewId={interviewId} platform={platform} onReload={onReload} />
       )}
@@ -651,10 +687,15 @@ function numOrNull(raw: string): number | null {
 function ManualForm({
   interviewId,
   platform,
+  manualOverride,
   onReload,
 }: {
   interviewId: string;
   platform: RisetAwalPlatform;
+  /** True only when an engine platform (TikTok Shop) opts OUT of the engine via
+   *  the "AM Baseline" shortcut (owner QA 2026-08-27) — not for a platform that
+   *  is manual/analisa_tipis by nature (Shopee, Tokopedia, …). */
+  manualOverride?: boolean;
   onReload: () => Promise<void>;
 }) {
   const [m, setM] = useState<ManualFields>(EMPTY_MANUAL);
@@ -682,7 +723,7 @@ function ManualForm({
     setSaving(true);
     setErr(null);
     try {
-      await submitBaselineManual(interviewId, platform.client_platform_id, wire);
+      await submitBaselineManual(interviewId, platform.client_platform_id, wire, { manualOverride });
       await onReload();
     } catch (e) {
       setErr(errorMessage(e));
@@ -702,19 +743,27 @@ function ManualForm({
     <div className="stack" style={{ gap: 10, marginTop: 10 }}>
       {err && <div className="alert alertError" style={{ fontSize: 13 }}>{err}</div>}
       <p className="muted" style={{ fontSize: 12, margin: 0 }}>
-        Belum ada engine analisa untuk platform ini — isi entri manual minimal. Kondisi toko akan tercatat{' '}
-        <em>belum dapat diukur</em> (bukan penilaian jelek), tanpa skor.
+        {manualOverride ? (
+          <>
+            Jalur pintas AM Baseline — <em>tanpa</em> upload export & tanpa skor mesin. Kondisi toko akan tercatat{' '}
+            <em>belum dapat diukur</em> (bukan penilaian jelek), sampai baseline ini dianalisa ulang lewat upload
+            asli.
+          </>
+        ) : (
+          <>
+            Belum ada engine analisa untuk platform ini — isi entri manual minimal. Kondisi toko akan tercatat{' '}
+            <em>belum dapat diukur</em> (bukan penilaian jelek), tanpa skor.
+          </>
+        )}
       </p>
       {/* Video Factory hanya bisa membaca export TikTok Shop/Tokopedia (tool tak
-          punya parser platform lain) — TikTok Shop sendiri tidak pernah sampai ke
-          ManualForm ini (ia analisa_penuh → AnalisaPenuhForm), jadi di antara
-          platform manual, Tokopedia (analisa_tipis) satu-satunya yang tool ini
-          BISA isi. Untuk Shopee/Lazada/Others (belum ada engine sama sekali,
-          bukan cuma "belum diintegrasikan") panel ini hanya akan menampilkan
-          penolakan channel setiap kali dicoba — disembunyikan di sini, bukan
-          diam-diam gagal, supaya AM tidak dikira platform ini punya jalur
-          upload yang sesungguhnya tidak ada. */}
-      {platform.metode === 'analisa_tipis' && (
+          punya parser platform lain). Di antara platform yang benar-benar manual
+          (tanpa engine sama sekali), cuma Tokopedia (analisa_tipis) yang cocok;
+          untuk Shopee/Lazada/Others panel ini hanya akan menampilkan penolakan
+          channel — disembunyikan, bukan diam-diam gagal. manualOverride (TikTok
+          Shop lewat jalur pintas) juga selalu cocok, karena platform.platform
+          adalah 'TikTok Shop' sungguhan di jalur itu. */}
+      {(platform.metode === 'analisa_tipis' || manualOverride) && (
         <VideoFactoryBaselineImportPanel
           platformLabel={platform.platform}
           fields={m}
