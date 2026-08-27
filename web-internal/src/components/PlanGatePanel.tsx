@@ -159,8 +159,25 @@ export default function PlanGatePanel({
   // request from being overwritten by a slower earlier one.
   const seq = useRef(0);
   const needsForm = ctx?.tier_katalog === 'ditentukan_am';
+  // Rule 11's escape hatch: a Service locked to `tanpa_plan` by the catalog has
+  // no G-B form of its own (Rule 1), but can still be ESCALATED to Butuh Plan at
+  // any time — "either by catalog or by AM decision" is the PRD's own wording,
+  // and a service whose tier itself defaulted to no-Plan is exactly the
+  // "by catalog" half. Without this the AM has no door at all once a Service
+  // lands `tanpa_plan` and no `service_plan_gate` row exists yet to escalate
+  // FROM (the escalate button below only renders once a row exists).
+  const canEscalateLockedTier = ctx?.tier_katalog === 'tanpa_plan';
+  const showForm = needsForm || canEscalateLockedTier;
+  // The escalation doorway only ever asks ONE question — escalate or not — so
+  // the decision is fixed to `butuh_plan` the moment the form is for that,
+  // rather than reusing the neutral GB-3 picker that implies "either answer is
+  // a normal first pass" (it isn't; `tanpa_plan` here is the catalog default,
+  // not a choice being offered).
   useEffect(() => {
-    if (!needsForm || !canWrite) return;
+    if (canEscalateLockedTier && !needsForm) setKeputusan('butuh_plan');
+  }, [canEscalateLockedTier, needsForm]);
+  useEffect(() => {
+    if (!showForm || !canWrite) return;
     const mine = ++seq.current;
     const t = setTimeout(async () => {
       try {
@@ -174,7 +191,7 @@ export default function PlanGatePanel({
       }
     }, 350);
     return () => clearTimeout(t);
-  }, [serviceId, attrs, needsForm, canWrite]);
+  }, [serviceId, attrs, showForm, canWrite]);
 
   function toggleDivisi(d: string) {
     setDivisi((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
@@ -280,7 +297,9 @@ export default function PlanGatePanel({
         <p className="muted" style={{ fontSize: 13 }}>
           Tier katalog sudah menentukan: {ctx.tier_katalog === 'plan_wajib'
             ? 'layanan ini WAJIB punya Strategi & Plan, tidak ada penentuan manual.'
-            : 'layanan ini berjalan tanpa Plan. Masih bisa dieskalasi kalau pemicu keras muncul (Rule 11).'}
+            : canWrite
+              ? 'layanan ini berjalan tanpa Plan. Masih bisa dieskalasi kalau pemicu keras muncul (Rule 11) — isi form eskalasi di bawah.'
+              : 'layanan ini berjalan tanpa Plan. Masih bisa dieskalasi kalau pemicu keras muncul (Rule 11).'}
         </p>
       )}
 
@@ -363,11 +382,20 @@ export default function PlanGatePanel({
         </div>
       )}
 
-      {/* SECTION G-B — the form, only for the middle tier and only before an answer. */}
-      {needsForm && !gate && canWrite && (
+      {/* SECTION G-B — the form. For `ditentukan_am` this is the first-ever
+          determination; for a locked `tanpa_plan` Service with no gate row yet
+          it is the Rule 11 escalation doorway (decision fixed to Butuh Plan —
+          see `canEscalateLockedTier` above). */}
+      {showForm && !gate && canWrite && (
         <form className="form" onSubmit={handleSubmit}>
           {error && <div className="alert alertError" role="alert">{error}</div>}
           {message && <div className="alert alertSuccess" role="status">{message}</div>}
+          {canEscalateLockedTier && !needsForm && (
+            <div className="alert alertInfo" role="status">
+              Eskalasi Rule 11 — layanan ini terkunci <strong>Tanpa Plan</strong> oleh katalog. Lengkapi konteks di
+              bawah untuk membuka Strategi &amp; Plan untuk layanan ini.
+            </div>
+          )}
 
           <div className="formRow">
             <div className="field">
@@ -474,16 +502,23 @@ export default function PlanGatePanel({
 
           <div className="field">
             <label htmlFor="pg-keputusan">Keputusan AM (GB-3)</label>
-            <select
-              id="pg-keputusan"
-              required
-              value={keputusan}
-              onChange={(e) => setKeputusan(e.target.value as GateDecision | '')}
-            >
-              <option value="">Pilih...</option>
-              <option value="butuh_plan">Butuh Plan</option>
-              <option value="tanpa_plan">Tanpa Plan</option>
-            </select>
+            {canEscalateLockedTier && !needsForm ? (
+              // Rule 11 only ever asks ONE thing here — escalate to Butuh Plan
+              // or not submit at all. Offering "Tanpa Plan" would just re-state
+              // the catalog lock decideGate already enforces server-side.
+              <div id="pg-keputusan">Eskalasi ke Butuh Plan</div>
+            ) : (
+              <select
+                id="pg-keputusan"
+                required
+                value={keputusan}
+                onChange={(e) => setKeputusan(e.target.value as GateDecision | '')}
+              >
+                <option value="">Pilih...</option>
+                <option value="butuh_plan">Butuh Plan</option>
+                <option value="tanpa_plan">Tanpa Plan</option>
+              </select>
+            )}
             {fit && (
               <span className="muted" style={{ fontSize: 12 }}>
                 Kesesuaian: {FIT_LABELS[fit as keyof typeof FIT_LABELS]}
@@ -580,7 +615,11 @@ export default function PlanGatePanel({
 
           <div>
             <button type="submit" className="btn btnPrimary" disabled={submitting || keputusan === ''}>
-              {submitting ? 'Menyimpan...' : 'Simpan Keputusan'}
+              {submitting
+                ? 'Menyimpan...'
+                : canEscalateLockedTier && !needsForm
+                  ? 'Eskalasi jadi Butuh Plan'
+                  : 'Simpan Keputusan'}
             </button>
             <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
               Keputusan langsung berlaku &mdash; tidak ditahan persetujuan siapa pun (Rule 4).
