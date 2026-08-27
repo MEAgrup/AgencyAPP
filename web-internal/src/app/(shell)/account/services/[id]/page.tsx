@@ -760,12 +760,19 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         )}
 
         {/* Canonical create door (promoted from the QA page). Header fields only;
-            Section A→J is completed on the Strategi page after creation. Same
-            gates as STR- once did: plan-gated, no Strategi yet, still
-            [Awaiting Onboarding]. Direct services never get a Strategi. */}
+            Section A→J is completed on the Strategi page after creation.
+            QA revisi 2026-08-27: this used to also require `awaitingOnboarding`
+            (copied from the STR- gate), so a Service that left [Awaiting
+            Onboarding] before ever getting a Strategi — e.g. escalated to
+            `butuh_plan` after Brief creation started, M6C Rule 11 — showed
+            "Belum ada Strategi" with no way to open one, forever. `createStrategi`
+            (M6A) has no such status check server-side (only owner AM/Director,
+            plan-gated, and no existing active Strategi for the contract), so the
+            door only needs to mirror THAT: plan-gated, no Strategi yet, and the
+            gate decision itself not still pending. Direct services never get a
+            Strategi. */}
         {canWrite &&
           planGated &&
-          awaitingOnboarding &&
           strategiList.length === 0 &&
           !service?.plan_determination_pending && (
             <form className="form" onSubmit={handleCreateStrategi} style={{ marginTop: 12 }}>
