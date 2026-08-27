@@ -330,6 +330,12 @@ export function isReadOnlyOD(role: Role | null): boolean {
   return !!role?.od && !role?.director && !isAccountLead(role) && !isAccountStaff(role);
 }
 
+/** Client Record profile corrections, incl. Platform List (M4-OA-4/M4-OA-2):
+ *  Account Lead, OD, or Director — mirrors domain `client.canEditProfile`. */
+export function canEditClientProfile(role: Role | null): boolean {
+  return !!role?.director || !!role?.od || isAccountLead(role);
+}
+
 // ---------------------------------------------------------------------------
 // Cluster 1 — API functions
 // ---------------------------------------------------------------------------

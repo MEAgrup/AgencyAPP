@@ -947,4 +947,28 @@ describeDb('read models', () => {
   it('getClient 404s on an unknown client', async () => {
     await expect(getClient(sql, 'CLI-000000-0000')).rejects.toBeInstanceOf(NotFoundError);
   });
+
+  it('close splits a multi-platform checklist into one client_platforms row per platform (M4-OA-2)', async () => {
+    const svc = await seedService('SVC-ZZ-MULTIPLAT');
+    const actor = budi();
+    const attemptId = await contactedAttempt(actor);
+    await submitQualifiedForm(sql, actor, attemptId, {
+      namaPic: 'Ibu Beta', toko: 'Beta Store', kota: 'Jakarta', linkToko: 'https://shopee/beta',
+      kategori: 'Fashion', platform: 'TikTok Shop, Shopee, Tokopedia', gmvBaseline: '50000000', targetGmv: '80000000',
+      services: [{ masterServiceId: svc, quantity: 1 }],
+    });
+    await submitNegotiation(sql, actor, attemptId, [], true);
+    const res = await close(sql, actor, attemptId, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_TERMIN,
+      installments: [{ amount: '9000000', dueDate: '2026-08-01' }],
+    });
+
+    const client = await getClient(sql, res.clientId);
+    // Each platform must be its own row — a single "TikTok Shop, Shopee, Tokopedia"
+    // row never matches metodeForPlatform's exact 'tiktok shop'/'tokopedia' check,
+    // silently hiding the engine baseline UI for every client (the bug this fixes).
+    expect(client.platforms.map((p) => p.platform).sort()).toEqual(['Shopee', 'TikTok Shop', 'Tokopedia']);
+    expect(client.platforms.every((p) => p.active)).toBe(true);
+  });
 });

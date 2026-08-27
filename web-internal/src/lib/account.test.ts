@@ -17,10 +17,16 @@ import {
   STRATEGY_APPROVED,
   STRATEGY_DRAFTING,
   STRATEGY_SUBMITTED,
+  canEditClientProfile,
   needsOnboarding,
   nextOnboardingStep,
   type ServiceQueueRow,
 } from './account';
+import type { Role } from './types';
+
+function role(over: Partial<Role> = {}): Role {
+  return { division: 'Creative', level: 'staff', od: false, director: false, ...over };
+}
 
 function svc(over: Partial<ServiceQueueRow> = {}): ServiceQueueRow {
   return {
@@ -186,5 +192,18 @@ describe('plan-gate determination (M6C Rule 1)', () => {
         svc({ plan_tier: 'tanpa_plan', requires_strategy_plan: false, pinned_requires_strategy_plan: false }),
       ).kind,
     ).toBe('create_brief');
+  });
+});
+
+describe('canEditClientProfile (mirrors domain client.canEditProfile — M4-OA-4)', () => {
+  it('admits Account Lead, OD, and Director', () => {
+    expect(canEditClientProfile(role({ division: 'Account', level: 'lead' }))).toBe(true);
+    expect(canEditClientProfile(role({ od: true }))).toBe(true);
+    expect(canEditClientProfile(role({ director: true }))).toBe(true);
+  });
+
+  it('denies Account staff (non-lead) and null', () => {
+    expect(canEditClientProfile(role({ division: 'Account', level: 'staff' }))).toBe(false);
+    expect(canEditClientProfile(null)).toBe(false);
   });
 });

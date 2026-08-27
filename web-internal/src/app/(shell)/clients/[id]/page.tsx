@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { isAccountLead, isAccountStaff } from '@/lib/account';
+import { canEditClientProfile, isAccountLead, isAccountStaff } from '@/lib/account';
 import {
   PRASYARAT_LABELS,
   VERDICT_LABELS,
@@ -20,6 +20,8 @@ import {
 import {
   EDITABLE_FIELDS,
   PAYMENT_INTENT_OPTIONS,
+  PLATFORM_OPTIONS,
+  addPlatform,
   editClient,
   getClient,
   requestHoldService,
@@ -27,6 +29,7 @@ import {
   rejectHoldService,
   resumeService,
   setPaymentIntent,
+  updatePlatform,
   voidService,
   type Client,
   type FieldChange,
@@ -103,6 +106,17 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const [correctionSubmitting, setCorrectionSubmitting] = useState(false);
   const [correctionError, setCorrectionError] = useState<string | null>(null);
   const [correctionResult, setCorrectionResult] = useState<FieldChange[] | null>(null);
+
+  // Platform List (M4-OA-2) — add a platform, or deactivate one (removal from
+  // the list without deleting history). Account Lead / OD / Director only —
+  // canEditClientProfile mirrors domain client.canEditProfile.
+  const canEditPlatforms = canEditClientProfile(role);
+  const [platformName, setPlatformName] = useState<string>(PLATFORM_OPTIONS[0]);
+  const [platformStoreLink, setPlatformStoreLink] = useState('');
+  const [platformManagedSince, setPlatformManagedSince] = useState('');
+  const [platformSubmitting, setPlatformSubmitting] = useState(false);
+  const [platformError, setPlatformError] = useState<string | null>(null);
+  const [platformDeactivatingId, setPlatformDeactivatingId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -234,6 +248,42 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     }
   }
 
+  async function handleAddPlatform(e: FormEvent) {
+    e.preventDefault();
+    setPlatformError(null);
+    setPlatformSubmitting(true);
+    try {
+      await addPlatform(id, {
+        platform: platformName,
+        store_link: platformStoreLink.trim() || undefined,
+        managed_since: platformManagedSince || undefined,
+      });
+      setPlatformStoreLink('');
+      setPlatformManagedSince('');
+      await load();
+    } catch (err) {
+      setPlatformError(errorMessage(err));
+    } finally {
+      setPlatformSubmitting(false);
+    }
+  }
+
+  async function handleDeactivatePlatform(platformId: number, platformLabel: string) {
+    if (!window.confirm(`Nonaktifkan platform "${platformLabel}"? Baris tetap ada (riwayat), hanya dihapus dari daftar aktif.`)) {
+      return;
+    }
+    setPlatformError(null);
+    setPlatformDeactivatingId(platformId);
+    try {
+      await updatePlatform(id, platformId, { active: false });
+      await load();
+    } catch (err) {
+      setPlatformError(errorMessage(err));
+    } finally {
+      setPlatformDeactivatingId(null);
+    }
+  }
+
   async function handleOpenInterview() {
     // Opening Kelola Klien STARTS riset awal (langkah 1) — the server stamps the
     // clock. The call resumes an already-open session rather than starting a
@@ -355,6 +405,14 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
         <div className="cardHeader">
           <h2>Platform</h2>
         </div>
+        {platformError && <div className="alert alertError" role="alert">{platformError}</div>}
+        {client.platforms.some((p) => p.platform.includes(',')) && (
+          <div className="alert alertInfo" style={{ fontSize: 13 }}>
+            Baris platform di bawah berisi lebih dari satu nama (mis. &ldquo;TikTok Shop, Shopee&rdquo;) —
+            peninggalan sebelum closing menyimpan satu baris per platform (M4-OA-2). Baseline &amp; laporan per
+            platform butuh baris terpisah: tambahkan tiap platform di bawah, lalu nonaktifkan baris gabungan lama.
+          </div>
+        )}
         {client.platforms.length === 0 ? (
           <div className="emptyState">Belum ada platform.</div>
         ) : (
@@ -366,6 +424,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                   <th>Link Toko</th>
                   <th>Dikelola Sejak</th>
                   <th>Aktif</th>
+                  {canEditPlatforms && <th></th>}
                 </tr>
               </thead>
               <tbody>
@@ -375,11 +434,61 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                     <td>{p.store_link || '—'}</td>
                     <td>{formatDate(p.managed_since)}</td>
                     <td>{p.active ? 'Aktif' : 'Nonaktif'}</td>
+                    {canEditPlatforms && (
+                      <td>
+                        {p.active && (
+                          <button
+                            type="button"
+                            className="btn btnGhost btnSm"
+                            disabled={platformDeactivatingId === p.client_platform_id}
+                            onClick={() => handleDeactivatePlatform(p.client_platform_id, p.platform)}
+                          >
+                            {platformDeactivatingId === p.client_platform_id ? 'Menonaktifkan...' : 'Nonaktifkan'}
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+        )}
+        {canEditPlatforms && (
+          <form className="form" onSubmit={handleAddPlatform} style={{ marginTop: 12 }}>
+            <div className="formRow">
+              <div className="field">
+                <label htmlFor="platform-name">Platform</label>
+                <select id="platform-name" value={platformName} onChange={(e) => setPlatformName(e.target.value)}>
+                  {PLATFORM_OPTIONS.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="platform-store-link">Link Toko (opsional)</label>
+                <input
+                  id="platform-store-link"
+                  value={platformStoreLink}
+                  onChange={(e) => setPlatformStoreLink(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="platform-managed-since">Dikelola Sejak (opsional)</label>
+                <input
+                  id="platform-managed-since"
+                  type="date"
+                  value={platformManagedSince}
+                  onChange={(e) => setPlatformManagedSince(e.target.value)}
+                />
+              </div>
+            </div>
+            <div>
+              <button type="submit" className="btn btnSecondary btnSm" disabled={platformSubmitting}>
+                {platformSubmitting ? 'Menambahkan...' : '+ Tambah Platform'}
+              </button>
+            </div>
+          </form>
         )}
       </section>
 

@@ -448,6 +448,7 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
             baseline={baseline}
             canWrite={canWrite}
             busy={acting}
+            clientId={iv.client_id}
             onSubmit={submitRiset}
             onReload={reloadBaseline}
           />

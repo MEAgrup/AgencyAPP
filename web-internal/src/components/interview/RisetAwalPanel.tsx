@@ -82,6 +82,7 @@ export default function RisetAwalPanel({
   baseline,
   canWrite,
   busy,
+  clientId,
   onSubmit,
   onReload,
 }: {
@@ -91,6 +92,9 @@ export default function RisetAwalPanel({
   canWrite: boolean;
   /** The page's action-in-flight flag (schedule/transition/submit-timing). */
   busy: boolean;
+  /** The client behind this interview — links a compound-platform warning to
+   *  the Client Record's Platform List editor (M4-OA-2). */
+  clientId: string;
   /** Submit the TIMING half (records the finish time; RAB-07 then lets the interview start). */
   onSubmit: () => void;
   /** Refetch the baseline read-model after a baseline/confirm write. */
@@ -201,6 +205,7 @@ export default function RisetAwalPanel({
               key={p.client_platform_id}
               interviewId={risetAwal.interview_id ?? baseline.interview_id}
               platform={p}
+              clientId={clientId}
               analisa={analisaByPlatform.get(p.client_platform_id) ?? null}
               canWrite={canWrite && !selesai}
               onReload={onReload}
@@ -276,12 +281,14 @@ export default function RisetAwalPanel({
 function PlatformBaselineCard({
   interviewId,
   platform,
+  clientId,
   analisa,
   canWrite,
   onReload,
 }: {
   interviewId: string;
   platform: RisetAwalPlatform;
+  clientId: string;
   analisa: RisetAwalAnalisa | null;
   canWrite: boolean;
   onReload: () => Promise<void>;
@@ -289,6 +296,11 @@ function PlatformBaselineCard({
   const done = analisa !== null;
   const metodeLabel =
     platform.metode === 'analisa_penuh' ? 'Analisa penuh (engine)' : platform.metode === 'analisa_tipis' ? 'Analisa tipis' : 'Entri manual';
+  // A comma means this row is still the pre-split "Platform List" joined into
+  // one string (fixed for new clients — DECISIONS 2026-08-27 M4-OA-2 split —
+  // but existing rows need a one-time correction). It can never engine-match
+  // 'tiktok shop'/'tokopedia', so it silently loses the real upload form.
+  const isCompoundPlatform = platform.platform.includes(',');
 
   return (
     <div style={{ border: '1px solid var(--color-border)', borderRadius: 8, padding: 12 }}>
@@ -303,6 +315,14 @@ function PlatformBaselineCard({
           </a>
         )}
       </div>
+
+      {isCompoundPlatform && !done && (
+        <div className="alert alertInfo" style={{ fontSize: 12, marginTop: 8 }}>
+          Baris ini berisi lebih dari satu platform — hanya bisa entri manual, walau salah satunya TikTok Shop/
+          Tokopedia. <a href={`/clients/${clientId}`}>Perbaiki daftar platform klien</a> (pisahkan jadi satu baris
+          per platform), lalu muat ulang halaman ini untuk baseline yang benar per platform.
+        </div>
+      )}
 
       {done ? (
         <div className="grid2" style={{ marginTop: 8 }}>

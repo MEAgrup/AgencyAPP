@@ -41,11 +41,8 @@ import {
   type ServiceSelection,
 } from '@/lib/sales';
 import { ACTIVITY_TYPES, type ActivityRow, type EffortSummary } from '@/lib/leads';
+import { PLATFORM_OPTIONS } from '@/lib/clients';
 import StatusBadge from '@/components/StatusBadge';
-
-// Platform List checklist (M0 §4.3 — verbatim from the PRD, joined to a single
-// stored string on submit because the backend persists one platform column).
-const PLATFORMS = ['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Others'] as const;
 
 // Status literals mirrored from ATTEMPT_STATUSES (module0_sales/sales.go).
 const S_NEW = 'New Lead';
@@ -1197,7 +1194,7 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
               <div className="field">
                 <label>Platform List</label>
                 <div className="row" style={{ gap: 14, flexWrap: 'wrap' }}>
-                  {PLATFORMS.map((p) => (
+                  {PLATFORM_OPTIONS.map((p) => (
                     <label key={p} className="row" style={{ gap: 6, fontSize: 13 }}>
                       <input type="checkbox" checked={qPlatforms.includes(p)} onChange={() => togglePlatform(p)} />
                       {p}
