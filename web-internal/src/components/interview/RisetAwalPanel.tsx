@@ -47,6 +47,7 @@ import {
   type RisetAwalIsian,
   type RisetAwalPlatform,
 } from '@/lib/riset-awal';
+import VideoFactoryBaselineImportPanel from './VideoFactoryBaselineImportPanel';
 
 /** How often the running counter re-renders. Minute precision needs no faster. */
 const TICK_MS = 30_000;
@@ -626,6 +627,12 @@ function ManualForm({
         Belum ada engine analisa untuk platform ini — isi entri manual minimal. Kondisi toko akan tercatat{' '}
         <em>belum dapat diukur</em> (bukan penilaian jelek), tanpa skor.
       </p>
+      <VideoFactoryBaselineImportPanel
+        platformLabel={platform.platform}
+        fields={m}
+        onApply={setM}
+        disabled={saving}
+      />
       <div className="grid2">
         {numField('gmv_bulan', 'GMV / bulan (Rp)', 'Rupiah')}
         {numField('order', 'Jumlah order / bulan', '')}
