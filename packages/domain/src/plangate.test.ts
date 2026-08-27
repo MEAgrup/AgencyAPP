@@ -14,7 +14,9 @@
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
-import { ForbiddenError, ValidationError, ConflictError, guardBriefCreation, getService } from './account';
+import {
+  ForbiddenError, ValidationError, ConflictError, guardBriefCreation, getService, MSG_STRATEGY_REQUIRED,
+} from './account';
 import { createStrategi } from './strategi';
 import {
   DECISION_BUTUH_PLAN,
@@ -437,6 +439,44 @@ describeDb('decideGate', () => {
   it('refuses to run on a locked tier (Rule 1)', async () => {
     const serviceId = await seedService(TIER_PLAN_WAJIB);
     await expect(decideGate(sql, am(), serviceId, baseInput())).rejects.toThrow(MSG_TIER_LOCKED);
+  });
+
+  it('still refuses "deciding" Tanpa Plan on a locked tanpa_plan tier — that direction stays locked (Rule 1)', async () => {
+    // Only the ESCALATE direction (→ Butuh Plan) is the Rule 11 exception. A
+    // locked `tanpa_plan` Service "deciding" to stay Tanpa Plan would just be
+    // restating the catalog default through a door that should not exist.
+    const serviceId = await seedService(TIER_TANPA_PLAN);
+    await expect(
+      decideGate(sql, am(), serviceId, baseInput({ keputusanAm: DECISION_TANPA_PLAN })),
+    ).rejects.toThrow(MSG_TIER_LOCKED);
+  });
+
+  it('lets the AM escalate a locked tanpa_plan Service that never had a gate row (Rule 11 "either by catalog", production regression SVC-202608-0010/0011)', async () => {
+    // Root cause of the 2026-08-27 production bug: close() never wrote
+    // `plan_tier`, so services pinned to the `ditentukan_am` catalog tier were
+    // silently born `tanpa_plan` with zero `service_plan_gate` rows — nobody
+    // ever answered G-B. Before this fix there was NO way to reach Strategi
+    // for such a Service: `redecideGate` requires an existing gate row, and
+    // `decideGate` refused any locked tier outright. This is the escape
+    // hatch — the owner chose to leave the already-created Services as-is and
+    // rely on this door instead of a data correction.
+    const serviceId = await seedService(TIER_TANPA_PLAN);
+    const before = await getService(sql, am(), serviceId);
+    expect(before.planDeterminationPending).toBe(false); // it's locked, not pending — that's the bug
+    expect(before.requiresStrategyPlan).toBe(false);
+
+    const gate = await decideGate(sql, am(), serviceId, baseInput({ durasiBulan: 3, laporanPeriodik: true }));
+    expect(gate.tierKatalog).toBe(TIER_TANPA_PLAN);
+    expect(gate.keputusanAm).toBe(DECISION_BUTUH_PLAN);
+
+    const after = await getService(sql, am(), serviceId);
+    expect(after.requiresStrategyPlan).toBe(true);
+    expect(after.gateDecision).toBe(DECISION_BUTUH_PLAN);
+    // The whole point of escalating: Brief creation is now GATED on a Strategi
+    // & Plan existing, same as any other plan-gated Service (not blocked on the
+    // determination itself — that part is answered — but on the Strategi it
+    // now requires per M6 §4).
+    await expect(guardBriefCreation(sql, serviceId)).rejects.toThrow(MSG_STRATEGY_REQUIRED);
   });
 
   it('is refused to an AM who does not own the client', async () => {

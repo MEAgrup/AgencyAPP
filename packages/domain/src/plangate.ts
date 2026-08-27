@@ -56,6 +56,7 @@ import {
   FIT_TOLAK_PLAN,
   TIER_DITENTUKAN_AM,
   TIER_PLAN_WAJIB,
+  TIER_TANPA_PLAN,
   MSG_DEESCALATION_FORBIDDEN,
   MSG_DIVISION_REQUIRED,
   MSG_ESCALATION_REASON_REQUIRED,
@@ -534,7 +535,9 @@ function isCompleteSummary(s: AssignmentSummary | null | undefined): boolean {
 }
 
 /**
- * decideGate records the G-B determination for a `ditentukan_am` Service.
+ * decideGate records the G-B determination for a `ditentukan_am` Service, or
+ * — Rule 11's one exception — the first-ever escalation of a locked
+ * `tanpa_plan` Service to `butuh_plan` (see the tier check inside).
  *
  * Rule 4 is the load-bearing part: this NEVER blocks and is never held for
  * approval. A pending approval on this gate would stall delivery for a service
@@ -554,9 +557,19 @@ export async function decideGate(
     if (!canDecideGate(actor, svc.ownerAm)) {
       throw new ForbiddenError(MSG_GATE_FORBIDDEN);
     }
-    // Rule 1: the two locked tiers have no form. Offering one would invite an
-    // AM to "decide" something the catalog already settled.
-    if (svc.tier !== TIER_DITENTUKAN_AM) {
+    // Rule 1: the two locked tiers have no INITIAL form — the catalog already
+    // settled the default, so offering one would invite an AM to "decide"
+    // something that isn't theirs to decide. Rule 11 carves out exactly one
+    // exception to that lock: "a service running Tanpa Plan (either by catalog
+    // or by AM decision) can be escalated to Plan-gated at any time" — a locked
+    // `tanpa_plan` service escalating (never the reverse) is this doorway, and
+    // it is the ONLY way such a service gets its first `service_plan_gate` row
+    // when nobody ever answered a G-B form for it (there was none to answer).
+    // `plan_wajib` is already gated and never reaches here; an unanswered
+    // `ditentukan_am` service must still go through the ordinary form (Rule 1).
+    const isLockedTanpaPlanEscalation =
+      svc.tier === TIER_TANPA_PLAN && input.keputusanAm === DECISION_BUTUH_PLAN;
+    if (svc.tier !== TIER_DITENTUKAN_AM && !isLockedTanpaPlanEscalation) {
       throw new ConflictError(MSG_TIER_LOCKED);
     }
     if (await loadGate(tx, serviceId)) {
