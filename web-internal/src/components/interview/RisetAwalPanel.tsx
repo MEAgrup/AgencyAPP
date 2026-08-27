@@ -705,12 +705,23 @@ function ManualForm({
         Belum ada engine analisa untuk platform ini — isi entri manual minimal. Kondisi toko akan tercatat{' '}
         <em>belum dapat diukur</em> (bukan penilaian jelek), tanpa skor.
       </p>
-      <VideoFactoryBaselineImportPanel
-        platformLabel={platform.platform}
-        fields={m}
-        onApply={setM}
-        disabled={saving}
-      />
+      {/* Video Factory hanya bisa membaca export TikTok Shop/Tokopedia (tool tak
+          punya parser platform lain) — TikTok Shop sendiri tidak pernah sampai ke
+          ManualForm ini (ia analisa_penuh → AnalisaPenuhForm), jadi di antara
+          platform manual, Tokopedia (analisa_tipis) satu-satunya yang tool ini
+          BISA isi. Untuk Shopee/Lazada/Others (belum ada engine sama sekali,
+          bukan cuma "belum diintegrasikan") panel ini hanya akan menampilkan
+          penolakan channel setiap kali dicoba — disembunyikan di sini, bukan
+          diam-diam gagal, supaya AM tidak dikira platform ini punya jalur
+          upload yang sesungguhnya tidak ada. */}
+      {platform.metode === 'analisa_tipis' && (
+        <VideoFactoryBaselineImportPanel
+          platformLabel={platform.platform}
+          fields={m}
+          onApply={setM}
+          disabled={saving}
+        />
+      )}
       <div className="grid2">
         {numField('gmv_bulan', 'GMV / bulan (Rp)', 'Rupiah')}
         {numField('order', 'Jumlah order / bulan', '')}
