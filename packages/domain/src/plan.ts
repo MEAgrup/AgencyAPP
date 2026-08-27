@@ -2040,6 +2040,23 @@ const PLAN_ROW_PILAR: readonly string[] = [
 const PLAN_ROW_PRIORITAS: readonly PlanRow['prioritas'][] = ['Wajib', 'Penting', 'Kalau Sempat'];
 /** PC-17 visibilities (mirrors `ck_plan_row_visibilitas`). */
 const PLAN_ROW_VISIBILITAS: readonly PlanRow['visibilitas'][] = ['Bagikan ke Klien', 'Internal Saja'];
+/**
+ * PC-8 divisions §5 names — TS-only, no DB CHECK (same precedent as
+ * `briefs.assigned_division` / `BRIEF_ASSIGNABLE_DIVISIONS` in account.ts).
+ * Before this, `divisiPic` was only checked non-empty, so a typo or stray
+ * value would sail through `createPlanRow` and only surface later, silently,
+ * as a `divisi_pic_tidak_valid` skip when the row is inherited into a Brief.
+ */
+const PLAN_ROW_DIVISI_PIC: readonly string[] = [
+  'Creative',
+  'Ads',
+  'KOL',
+  'Live Stream',
+  'Account',
+  'Ops',
+];
+/** PC-8 — the division PIC is not one of the six §5 values. */
+export const MSG_PLAN_ROW_DIVISI_PIC_INVALID = '[divisi PIC baris rencana tidak valid]';
 
 /**
  * The Section P-C fields an AM supplies for a NEW work-row. Origin (PC-3) is
@@ -2097,6 +2114,7 @@ export async function createPlanRow(
     throw new ValidationError(MSG_PLAN_ROW_INCOMPLETE);
   }
   if (!PLAN_ROW_PILAR.includes(pilar)) throw new ValidationError(MSG_PLAN_ROW_PILAR_INVALID);
+  if (!PLAN_ROW_DIVISI_PIC.includes(divisiPic)) throw new ValidationError(MSG_PLAN_ROW_DIVISI_PIC_INVALID);
 
   const prioritas = input.prioritas ?? 'Penting';
   if (!PLAN_ROW_PRIORITAS.includes(prioritas)) {

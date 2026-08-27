@@ -656,6 +656,21 @@ export const MSG_PRIORITAS_CHANNEL_REQUIRED =
   '[prioritas channel dan alasannya wajib diisi untuk setiap channel]';
 export const MSG_PRIORITAS_INVALID = '[prioritas channel tidak dikenal]';
 
+/**
+ * E-3..E-10: at least one Section E pillar row overall. Without this, PC-3 in
+ * Plan (`strategi_pillar_id`) has nothing to reference and every Plan row
+ * silently degrades to `Di Luar Strategi` — exactly the symptom reported
+ * against STRG-202608-0001 (docs/DECISIONS.md 2026-08-27): a Strategi
+ * reached `Disetujui` with zero `strategi_pillar` rows because no minimum
+ * was ever gated here, unlike C-5/C-6/C-7/H-1. Checked overall, not per
+ * channel — `PillarInput.channel` is optional (a pillar such as `harga` or
+ * `tidak_dikerjakan` may span the whole Strategi rather than one channel),
+ * so a per-channel floor would misfire against rows that are legitimately
+ * channel-agnostic.
+ */
+export const PILLAR_MIN = 1;
+export const MSG_PILLAR_MIN = `[minimal ${PILLAR_MIN} pilar Strategi Section E wajib diisi]`;
+
 /** E-12. */
 export const MSG_KETERGANTUNGAN_REQUIRED =
   '[minimal satu ketergantungan pada klien wajib diisi]';
@@ -6272,6 +6287,13 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
     if (c.prioritas === null || c.prioritas_alasan === null) {
       out.push({ kode: `E-2/${c.channel}`, pesan: MSG_PRIORITAS_CHANNEL_REQUIRED });
     }
+  }
+
+  // E-3..E-10: at least PILLAR_MIN pillar rows overall (see MSG_PILLAR_MIN doc comment).
+  const pillarCount = await sql<{ n: number }[]>`
+    select count(*)::int as n from strategi_pillar where strategi_id = ${id}`;
+  if (pillarCount[0].n < PILLAR_MIN) {
+    out.push({ kode: 'E-3..E-10', pesan: MSG_PILLAR_MIN });
   }
 
   // E-12 (ketergantungan klien) is NO LONGER a submit requirement — owner QA

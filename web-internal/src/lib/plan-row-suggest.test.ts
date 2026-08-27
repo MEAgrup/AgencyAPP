@@ -57,4 +57,14 @@ describe('suggestRowFromPillar', () => {
     expect(s.kuota).toBe('7.5');
     expect(s.satuan).toBe('jam');
   });
+
+  it('suggests the pillar SKU (E-3/E-4) as a one-item SKU Sasaran (PC-5)', () => {
+    const s = suggestRowFromPillar(pillar({ jenis: 'harga', sku: 'RAK-A' }));
+    expect(s.skuSasaran).toEqual(['RAK-A']);
+  });
+
+  it('leaves SKU Sasaran empty when the pillar names no SKU', () => {
+    const s = suggestRowFromPillar(pillar({ sku: null }));
+    expect(s.skuSasaran).toEqual([]);
+  });
 });

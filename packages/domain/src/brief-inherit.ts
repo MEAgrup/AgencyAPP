@@ -38,8 +38,8 @@
 import { bi } from '@cdps/core';
 import { withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import {
-  ALLOWED_DIVISIONS,
   ALLOWED_PRIORITIES,
+  BRIEF_ASSIGNABLE_DIVISIONS,
   ConflictError,
   ForbiddenError,
   MSG_INVALID_PRIORITY,
@@ -87,7 +87,7 @@ export type BriefInheritSkipReason =
   | 'sudah_diwarisi' // this row already produced a Brief (idempotent)
   | 'service_tidak_ditemukan' // resolved Service id does not exist
   | 'service_tidak_briefable' // Service terminal ([Done]/[Voided])
-  | 'divisi_pic_tidak_valid' // divisi_pic not one of the four executing divisions
+  | 'divisi_pic_tidak_valid' // divisi_pic not one of the six PC-8 divisions (BRIEF_ASSIGNABLE_DIVISIONS)
   | 'kuota_nol'; // PC-6 quota is 0 — nothing to brief
 
 export interface BriefInheritSkip {
@@ -278,7 +278,7 @@ export async function inheritBriefsFromPlan(
         skip('di_luar');
         continue;
       }
-      if (!ALLOWED_DIVISIONS.includes(row.divisiPic as (typeof ALLOWED_DIVISIONS)[number])) {
+      if (!BRIEF_ASSIGNABLE_DIVISIONS.includes(row.divisiPic as (typeof BRIEF_ASSIGNABLE_DIVISIONS)[number])) {
         skip('divisi_pic_tidak_valid');
         continue;
       }

@@ -189,17 +189,21 @@ export const TASK_STATUSES = [
   '[Cancelled — Service Voided]',
 ] as const;
 
-// Divisions available for the division-queue filter — VERBATIM copy of the backend
-// allow-list (module6_account/strategy.go:51 allowedDivisions, enforced case-
-// sensitively by isAllowedDivision in brief.go for GET /divisions/{d}/brief-queue).
+// Divisions available for the division-queue filter — mirrors the domain allow-
+// list (`BRIEF_ASSIGNABLE_DIVISIONS` in packages/domain/src/account.ts, enforced
+// server-side by `listDivisionQueue` for GET /divisions/{d}/brief-queue).
 // Duplicated locally (per build convention) so this module stays self-contained.
 // Live Stream is excluded from the M12 execution engine (dispatched to vendor), so
 // its briefs never render action buttons — kept in the list for read visibility.
+// Account/Ops have no dedicated division board either — this generic queue is
+// the only place their Briefs are visible (owner decision, DECISIONS.md 2026-08-27).
 export const DIVISIONS = [
   'Creative',
   'Ads',
   'KOL',
   'Live Stream',
+  'Account',
+  'Ops',
 ] as const;
 
 // ---- Read functions (borrowed M6/M7/M11/M15 endpoints) ----

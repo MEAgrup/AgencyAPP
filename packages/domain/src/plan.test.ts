@@ -41,6 +41,7 @@ import {
   MSG_PLAN_RETURN_NOTES_REQUIRED,
   MSG_PLAN_ROW_NOT_FOUND,
   MSG_PLAN_ROW_INCOMPLETE,
+  MSG_PLAN_ROW_DIVISI_PIC_INVALID,
   MSG_PLAN_ROW_PILAR_INVALID,
   MSG_PLAN_ROW_KUOTA_INVALID,
   MSG_PLAN_ROW_ASAL_INVALID,
@@ -747,6 +748,18 @@ describeDb('createPlanRow (RAB-14, Section P-C)', () => {
     await expect(createPlanRow(sql, am(), id, { ...ok, pilar: 'iklan', channel: '  ' })).rejects.toThrow(
       MSG_PLAN_ROW_INCOMPLETE,
     );
+  });
+
+  it('rejects a divisi PIC outside the six PC-8 values (Creative/Ads/KOL/Live Stream/Account/Ops)', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriod(f, { status: 'Draft' });
+    const ok = { channel: 'Shopee', pilar: 'iklan', kuota: 3, diLuarStrategi: true, diLuarAlasan: 'x' };
+    await expect(createPlanRow(sql, am(), id, { ...ok, divisiPic: 'Finance' })).rejects.toThrow(
+      MSG_PLAN_ROW_DIVISI_PIC_INVALID,
+    );
+    for (const divisiPic of ['Creative', 'Ads', 'KOL', 'Live Stream', 'Account', 'Ops']) {
+      await expect(createPlanRow(sql, am(), id, { ...ok, divisiPic })).resolves.toMatchObject({ divisiPic });
+    }
   });
 
   it('is write-scoped (an unrelated AM is forbidden) and only on Draft/Aktif', async () => {
