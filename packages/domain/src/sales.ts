@@ -1394,10 +1394,18 @@ export async function close(
          ${qf.kategori}, ${qf.gmv_baseline}, ${qf.target_gmv}, ${qf.marketing_budget}, ${a.originCampaignId},
          ${primary}, ${pic}, ${actor.employeeId})`;
 
-    // 2) Primary platform snapshot.
-    await tx`
-      insert into client_platforms (client_id, platform, store_link, managed_since, created_by)
-      values (${clientId}, ${qf.platform}, ${qf.store_link}, ${nullDate(input.managedSince)}, ${actor.employeeId})`;
+    // 2) Platform snapshot — one client_platforms row PER selected platform
+    //    (M4-OA-2: "each entry carries its own sub-data"), not the Platform
+    //    List checklist joined into a single string (DECISIONS 2026-07-10
+    //    W1-11: that gap was deferred, not endorsed). qf.platform is Sales'
+    //    UI-side `join(', ')` of the checklist (sales page PLATFORMS); split it
+    //    back apart here so every platform gets its own row/method/baseline.
+    const platformNames = qf.platform.split(',').map((p) => p.trim()).filter((p) => p !== '');
+    for (const platformName of platformNames.length ? platformNames : [qf.platform]) {
+      await tx`
+        insert into client_platforms (client_id, platform, store_link, managed_since, created_by)
+        values (${clientId}, ${platformName}, ${qf.store_link}, ${nullDate(input.managedSince)}, ${actor.employeeId})`;
+    }
 
     // 3) Sales allocation (Σ = 100% = 10000 bp, read-only snapshot).
     for (const al of input.parties.allocations) {

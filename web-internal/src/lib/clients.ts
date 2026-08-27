@@ -86,6 +86,13 @@ export const PAYMENT_INTENT_OPTIONS = [
   '[Bayar di Belakang]',
 ] as const;
 
+/** Platform List checklist (M0 §4.3 — verbatim from the PRD). Shared by the Sales
+ *  Qualified Lead Form and the Client Record Platform List editor so the two
+ *  never drift. Each selection becomes its own `client_platforms` row (M4-OA-2:
+ *  "each entry carries its own sub-data") — `close()` now splits the Qualified
+ *  Lead Form's joined selection back into one row per platform. */
+export const PLATFORM_OPTIONS = ['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Others'] as const;
+
 export function listClients(): Promise<{ data: Client[] }> {
   return api.get<{ data: Client[] }>('/clients');
 }
@@ -167,4 +174,30 @@ async function patch<T>(path: string, data: unknown): Promise<T> {
 
 export function editClient(id: string, changes: Record<string, string>): Promise<{ changes: FieldChange[] }> {
   return patch<{ changes: FieldChange[] }>(`/clients/${id}`, changes);
+}
+
+/** Body of `POST /clients/{id}/platforms` — a named interface (not an inline
+ *  type) so `body-parity.test.ts` can statically resolve it against the route. */
+export interface AddPlatformInput {
+  platform: string;
+  store_link?: string;
+  managed_since?: string;
+}
+
+/** POST /clients/{id}/platforms — M4 §3/§4: add one platform to the Platform
+ *  List (Account Lead / OD / Director). Used both for a brand-new platform and
+ *  to correct a client closed before `close()` split the checklist per-row: add
+ *  each real platform here, then deactivate the old joined-string row. */
+export function addPlatform(clientId: string, input: AddPlatformInput): Promise<{ platform_id: number }> {
+  return api.post<{ platform_id: number }>(`/clients/${clientId}/platforms`, input);
+}
+
+/** PATCH /clients/{id}/platforms/{pid} — correct store link / managed-since, or
+ *  deactivate (active:false) a platform — removal from the list, never a delete. */
+export function updatePlatform(
+  clientId: string,
+  platformId: number,
+  patchInput: { store_link?: string; managed_since?: string; active?: boolean },
+): Promise<{ ok: boolean }> {
+  return patch<{ ok: boolean }>(`/clients/${clientId}/platforms/${platformId}`, patchInput);
 }
