@@ -366,8 +366,24 @@ const MACHINE_SERVICE = 'service';
 /**
  * The M6 §4 "Divisions Involved" multi-select set, in canonical order (used both
  * to validate input and to store it deterministically as a ", "-joined string).
+ * Kept to these four ONLY because `TASK_CATALOG` below has no `Account`/`Ops`
+ * entry — widening this set would crash `normalizeTasks`' sort comparator
+ * (`TASK_CATALOG[a.divisi].findIndex(...)`) on the legacy STR- path. Brief
+ * assignment (PC-8 has two more legitimate divisions, Account/Ops) uses
+ * `BRIEF_ASSIGNABLE_DIVISIONS` below instead — the two lists diverge on
+ * purpose, not by omission.
  */
 export const ALLOWED_DIVISIONS = ['Creative', 'Ads', 'KOL', 'Live Stream'] as const;
+
+/**
+ * Divisions a Brief may be assigned to (PC-8, both the manual STR- path and the
+ * M6B one-click inherit). Two more than `ALLOWED_DIVISIONS`: `Account`/`Ops` are
+ * legitimate Plan-row PIC divisions (Module 6B PC-8) that do their own internal
+ * work rather than the four with a TASK_CATALOG entry — a Brief assigned to
+ * either is read via the generic `/tasks` division queue, not a dedicated
+ * division board (owner decision, docs/DECISIONS.md 2026-08-27).
+ */
+export const BRIEF_ASSIGNABLE_DIVISIONS = ['Creative', 'Ads', 'KOL', 'Live Stream', 'Account', 'Ops'] as const;
 
 /**
  * QA revisi 2026-08-12 — the ±20% tolerance band the AM may adjust the client's
@@ -1609,7 +1625,7 @@ function validateBrief(input: BriefInput): void {
   if (title === '' || deliverable === '' || due === '' || (input.quantityTarget ?? 0) <= 0 || division === '') {
     throw new ValidationError(bi.INCOMPLETE_DATA);
   }
-  if (!ALLOWED_DIVISIONS.includes(division as (typeof ALLOWED_DIVISIONS)[number])) {
+  if (!BRIEF_ASSIGNABLE_DIVISIONS.includes(division as (typeof BRIEF_ASSIGNABLE_DIVISIONS)[number])) {
     throw new ValidationError(MSG_INVALID_DIVISION);
   }
   if (priority === '') {
@@ -1878,7 +1894,7 @@ export function canSeeBrief(actor: Actor, ownerAm: string | null, division: stri
  * dispatch, decision Nerissa 2026-07-12), and OD/Director.
  */
 export async function listDivisionQueue(sql: Queryable, actor: Actor, division: string): Promise<Brief[]> {
-  if (!ALLOWED_DIVISIONS.includes(division as (typeof ALLOWED_DIVISIONS)[number])) {
+  if (!BRIEF_ASSIGNABLE_DIVISIONS.includes(division as (typeof BRIEF_ASSIGNABLE_DIVISIONS)[number])) {
     throw new ValidationError(MSG_INVALID_DIVISION);
   }
   const allowed =

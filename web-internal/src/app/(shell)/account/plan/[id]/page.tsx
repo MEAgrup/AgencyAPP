@@ -64,9 +64,9 @@ const PILAR: { value: string; label: string }[] = [
 ];
 const PILAR_LABEL: Record<string, string> = Object.fromEntries(PILAR.map((p) => [p.value, p.label]));
 
-// The four executing divisions brief-inherit accepts (ALLOWED_DIVISIONS), plus
-// the two non-briefable owners a row may still carry (PC-8). A row whose PIC is
-// Account/Ops is valid but will be skipped by the one-click inherit.
+// All six PC-8 divisions (BRIEF_ASSIGNABLE_DIVISIONS in account.ts). Account/Ops
+// rows also inherit a Brief (owner decision, docs/DECISIONS.md 2026-08-27) —
+// read via the generic /tasks division queue, since neither has a dedicated board.
 const DIVISI_PIC = ['Creative', 'Ads', 'KOL', 'Live Stream', 'Account', 'Ops'];
 const ROW_PRIORITAS = ['Wajib', 'Penting', 'Kalau Sempat'];
 const BRIEF_PRIORITAS = ['Low', 'Medium', 'High'];
@@ -92,11 +92,13 @@ const SKIP_LABEL: Record<string, string> = {
   sudah_diwarisi: 'sudah punya Brief',
   service_tidak_ditemukan: 'service tak ditemukan',
   service_tidak_briefable: 'service tak bisa dibrief',
-  divisi_pic_tidak_valid: 'divisi PIC bukan divisi eksekusi',
+  divisi_pic_tidak_valid: 'divisi PIC tidak valid',
   kuota_nol: 'kuota 0',
 };
 
 // --- add-row draft ----------------------------------------------------------
+
+const ROW_VISIBILITAS = ['Bagikan ke Klien', 'Internal Saja'];
 
 interface RowDraft {
   channel: string;
@@ -109,6 +111,8 @@ interface RowDraft {
   minggu_sasaran: number[];
   prioritas: string;
   hasil_diharapkan: string;
+  /** PC-5 — comma-separated SKUs; parsed to an array at submit. */
+  sku_sasaran: string;
   prasyarat: string;
   visibilitas: string;
   /** Origin (PC-3): a Strategi pillar id, or empty ⇒ Di Luar Strategi. */
@@ -128,11 +132,19 @@ function blankRow(channel: string): RowDraft {
     minggu_sasaran: [],
     prioritas: 'Wajib',
     hasil_diharapkan: '',
+    sku_sasaran: '',
     prasyarat: '',
     visibilitas: 'Bagikan ke Klien',
     strategi_pillar_id: '',
     di_luar_alasan: '',
   };
+}
+
+function parseSkuSasaran(s: string): string[] {
+  return s
+    .split(',')
+    .map((sku) => sku.trim())
+    .filter((sku) => sku !== '');
 }
 
 function rowDraftToBody(d: RowDraft): CreatePlanRowBody {
@@ -152,6 +164,7 @@ function rowDraftToBody(d: RowDraft): CreatePlanRowBody {
     minggu_sasaran: d.minggu_sasaran,
     prioritas: d.prioritas,
     hasil_diharapkan: d.hasil_diharapkan.trim(),
+    sku_sasaran: parseSkuSasaran(d.sku_sasaran),
     prasyarat: d.prasyarat.trim() || null,
     visibilitas: d.visibilitas,
   };
@@ -528,6 +541,7 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                         kuota: d.kuota.trim() ? d.kuota : s.kuota,
                         satuan: d.satuan.trim() ? d.satuan : s.satuan,
                         divisi_pic: s.divisiPic ?? d.divisi_pic,
+                        sku_sasaran: d.sku_sasaran.trim() ? d.sku_sasaran : s.skuSasaran.join(', '),
                       };
                     });
                   }}
@@ -661,6 +675,36 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                 onChange={(e) => setRowDraft({ ...rowDraft, hasil_diharapkan: e.target.value })}
               />
             </label>
+
+            <div className="formRow">
+              <label className="field">
+                <span className="muted" style={{ fontSize: 12 }}>SKU Sasaran (PC-5, opsional)</span>
+                <input
+                  placeholder="RAK-A, RAK-B — pisahkan dengan koma"
+                  value={rowDraft.sku_sasaran}
+                  onChange={(e) => setRowDraft({ ...rowDraft, sku_sasaran: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <span className="muted" style={{ fontSize: 12 }}>Prasyarat (PC-12, opsional)</span>
+                <input
+                  placeholder="mis. akses Affiliate Center disetujui"
+                  value={rowDraft.prasyarat}
+                  onChange={(e) => setRowDraft({ ...rowDraft, prasyarat: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <span className="muted" style={{ fontSize: 12 }}>Visibilitas (PC-17)</span>
+                <select
+                  value={rowDraft.visibilitas}
+                  onChange={(e) => setRowDraft({ ...rowDraft, visibilitas: e.target.value })}
+                >
+                  {ROW_VISIBILITAS.map((v) => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
 
             <div className="row" style={{ gap: 8 }}>
               <button

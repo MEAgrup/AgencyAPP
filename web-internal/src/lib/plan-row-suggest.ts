@@ -29,14 +29,18 @@ export interface PlanRowSuggestion {
   kuota: string;
   satuan: string;
   divisiPic: string | null;
+  /** PC-5 — the pillar's own SKU (E-3/E-4), when it names exactly one. */
+  skuSasaran: string[];
 }
 
 export function suggestRowFromPillar(p: StrategiPillar): PlanRowSuggestion {
   const m = RE_TARGET_QTY.exec((p.target ?? '').trim());
+  const sku = (p.sku ?? '').trim();
   return {
     aksi: (p.aksi ?? '').trim(),
     kuota: m ? m[1].replace(',', '.') : '',
     satuan: m?.[2] ?? '',
     divisiPic: PILAR_TO_DIVISI[p.jenis] ?? null,
+    skuSasaran: sku ? [sku] : [],
   };
 }

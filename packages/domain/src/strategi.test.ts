@@ -48,6 +48,7 @@ import {
   MSG_LEADING_INDICATOR_MAX,
   MSG_LEADING_INDICATOR_REQUIRED,
   MSG_NOT_PLAN_GATED,
+  MSG_PILLAR_MIN,
   MSG_PRASYARAT_KLIEN_REQUIRED,
   MSG_QUICK_WIN_MIN,
   MSG_REVIEW_NOTES_REQUIRED,
@@ -2442,6 +2443,21 @@ describeDb('Section C — A-07 (Diagnosa & Akar Masalah)', () => {
     ]);
     const pesan = (await checkCompleteness(sql, s.id)).map((m) => m.pesan);
     expect(pesan).not.toContain(MSG_RISK_MIN);
+  });
+
+  it('checkCompleteness — flags E-3..E-10 when no Section E pillar is recorded', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const pesan = (await checkCompleteness(sql, s.id)).map((m) => m.pesan);
+    expect(pesan).toContain(MSG_PILLAR_MIN);
+  });
+
+  it('checkCompleteness — one Section E pillar satisfies E-3..E-10, even with no channel set', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await savePillars(sql, am(), s.id, [{ jenis: 'tidak_dikerjakan', aksi: 'tanpa reshoot foto di M1' }]);
+    const pesan = (await checkCompleteness(sql, s.id)).map((m) => m.pesan);
+    expect(pesan).not.toContain(MSG_PILLAR_MIN);
   });
 
   it('checkCompleteness — flags C-6 when risiko struktural is empty', async () => {
