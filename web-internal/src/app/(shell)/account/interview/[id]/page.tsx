@@ -40,7 +40,15 @@ import { use, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { canEditClientProfile, isAccountLead, isAccountStaff, isReadOnlyOD } from '@/lib/account';
+import {
+  canEditClientProfile,
+  getService,
+  isAccountLead,
+  isAccountStaff,
+  isReadOnlyOD,
+  nextOnboardingStep,
+  type ServiceQueueRow,
+} from '@/lib/account';
 import { formatIDR } from '@/lib/money';
 import { AUTOSAVE_MS, useAutosave } from '@/lib/use-autosave';
 import {
@@ -89,7 +97,8 @@ import TimelinePanel from '@/components/interview/TimelinePanel';
 
 const MIN_WIDTH = 1280;
 
-/** The two tabs this page owns. Step 3 (Strategi) lives on the Service hub. */
+/** The two tabs this page owns. Step 3 (Strategi, or Brief for a Direct-path
+ *  Service) lives on the Service hub. */
 type Tab = 'riset' | 'interview';
 
 export default function KelolaKlienPage({ params }: { params: Promise<{ id: string }> }) {
@@ -107,6 +116,12 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
   // the Interview door reads so it never re-asks what is already known (RAB-08).
   const [baseline, setBaseline] = useState<RisetAwalBaseline | null>(null);
   const [client, setClient] = useState<Client | null>(null);
+  // The Service's own onboarding step (M6C gate order) — the forward links below
+  // must not promise "Strategi & Plan" when the Service is Direct-path (no
+  // Strategi ever exists for it, §4 Rule 6): they show whatever `nextOnboardingStep`
+  // actually names, mirroring the Service hub so the AM is never sent to a page
+  // that has nothing for them to click (QA 2026-08-27, ITV-202608-0024).
+  const [serviceQueue, setServiceQueue] = useState<ServiceQueueRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -156,6 +171,16 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
       getClient(d.interview.client_id)
         .then((r) => setClient(r.client))
         .catch(() => setClient(null));
+      // Same degrade-to-null rule as baseline/client above — a failed lookup must
+      // not blank the page, it just falls back to the generic "Lanjut ke layanan"
+      // label instead of the specific next-step label.
+      if (d.interview.service_id) {
+        getService(d.interview.service_id)
+          .then(setServiceQueue)
+          .catch(() => setServiceQueue(null));
+      } else {
+        setServiceQueue(null);
+      }
       setTab((t) => t ?? (d.riset_awal?.status === RISET_AWAL_STATUS.Berjalan ? 'riset' : 'interview'));
       setDirty(false);
       setJadwal({
@@ -346,6 +371,12 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
   // panel (it will not let the AM submit the timing early), so once the step is
   // Selesai those are already satisfied — gating on the status keeps this simple.
   const risetAwalSelesai = risetAwal?.status === RISET_AWAL_STATUS.Selesai;
+  // What the Service hub will actually offer next — "Strategi & Plan" only when
+  // the Service is plan-gated; a Direct-path Service (plan_tier `tanpa_plan`)
+  // never gets a Strategi, so the label must say "Buat Brief" instead, or the
+  // forward link reads like a dead end once the AM lands on the hub.
+  const nextServiceStep = serviceQueue ? nextOnboardingStep(serviceQueue) : null;
+  const nextStepLabel = nextServiceStep?.label ?? 'Strategi & Plan';
 
   return (
     <>
@@ -355,13 +386,16 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
             &larr; Klien {iv.client_id}
           </Link>
           <span style={{ flex: 1 }} />
-          {/* Forward nav: after the interview the next task is Strategi & Plan,
-              which lives on the Service hub. Link straight there when the
+          {/* Forward nav: after the interview the next task lives on the Service
+              hub — Strategi & Plan for a plan-gated Service, straight to Brief for
+              a Direct-path one (§4 Rule 6: Direct never gets a Strategi). The
+              label mirrors the hub's own `nextOnboardingStep` so the AM is never
+              sent somewhere with nothing to click. Link straight there when the
               interview is tied to a service; otherwise send the AM to the client
               record where the services (and their hubs) are listed. */}
           {iv.service_id ? (
             <Link href={`/account/services/${encodeURIComponent(iv.service_id)}`} className="btn btnSecondary btnSm">
-              Lanjut ke Strategi &amp; Plan (layanan {iv.service_id}) &rarr;
+              Lanjut ke {nextStepLabel} (layanan {iv.service_id}) &rarr;
             </Link>
           ) : (
             <Link href={`/clients/${iv.client_id}`} className="btn btnSecondary btnSm">
@@ -385,9 +419,10 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
               Cetak (klien)
             </button>
           </div>
-          {/* The three steps of Kelola Klien. Step 3 is not a panel here — the
-              Strategi & Plan form lives on the Service hub — so it renders as the
-              same forward link the header carries, not a dead chip. */}
+          {/* The three steps of Kelola Klien. Step 3 is not a panel here — its
+              form (Strategi & Plan, or Buat Brief for a Direct-path Service)
+              lives on the Service hub — so it renders as the same forward link
+              the header carries, not a dead chip. */}
           <div className="row" style={{ gap: 6, marginTop: 12 }}>
             <button
               type="button"
@@ -415,7 +450,7 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
                 href={`/account/services/${encodeURIComponent(iv.service_id)}`}
                 className="btn btnGhost btnSm"
               >
-                3 · Strategi &amp; Plan &rarr;
+                3 &middot; {nextStepLabel} &rarr;
               </Link>
             ) : (
               <Link href={`/clients/${iv.client_id}`} className="btn btnGhost btnSm">
