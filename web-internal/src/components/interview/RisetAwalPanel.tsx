@@ -24,6 +24,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { errorMessage } from '@/lib/api';
+import { addPlatform, updatePlatform } from '@/lib/clients';
 import {
   RISET_AWAL_STATUS,
   formatDurasiMenit,
@@ -81,6 +82,7 @@ export default function RisetAwalPanel({
   risetAwal,
   baseline,
   canWrite,
+  canEditClientProfile,
   busy,
   clientId,
   onSubmit,
@@ -90,6 +92,9 @@ export default function RisetAwalPanel({
   /** The per-platform baseline read-model (null while it is still loading). */
   baseline: RisetAwalBaseline | null;
   canWrite: boolean;
+  /** Account Lead/OD/Director (mirrors `client.canEditProfile`) — gates the
+   *  in-place "Pisahkan platform" fix for a compound-platform row (M4-OA-2). */
+  canEditClientProfile: boolean;
   /** The page's action-in-flight flag (schedule/transition/submit-timing). */
   busy: boolean;
   /** The client behind this interview — links a compound-platform warning to
@@ -208,6 +213,7 @@ export default function RisetAwalPanel({
               clientId={clientId}
               analisa={analisaByPlatform.get(p.client_platform_id) ?? null}
               canWrite={canWrite && !selesai}
+              canEditClientProfile={canEditClientProfile}
               onReload={onReload}
             />
           ))}
@@ -284,6 +290,7 @@ function PlatformBaselineCard({
   clientId,
   analisa,
   canWrite,
+  canEditClientProfile,
   onReload,
 }: {
   interviewId: string;
@@ -291,6 +298,7 @@ function PlatformBaselineCard({
   clientId: string;
   analisa: RisetAwalAnalisa | null;
   canWrite: boolean;
+  canEditClientProfile: boolean;
   onReload: () => Promise<void>;
 }) {
   const done = analisa !== null;
@@ -301,6 +309,39 @@ function PlatformBaselineCard({
   // but existing rows need a one-time correction). It can never engine-match
   // 'tiktok shop'/'tokopedia', so it silently loses the real upload form.
   const isCompoundPlatform = platform.platform.includes(',');
+  const splitTokens = isCompoundPlatform
+    ? platform.platform
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
+  const [splitting, setSplitting] = useState(false);
+  const [splitError, setSplitError] = useState<string | null>(null);
+
+  async function handleSplit() {
+    if (splitTokens.length < 2) return;
+    if (
+      !window.confirm(
+        `Pisahkan baris "${platform.platform}" menjadi ${splitTokens.length} baris platform terpisah (${splitTokens.join(', ')})? ` +
+          'Baris gabungan lama akan dinonaktifkan (riwayat tetap ada, tidak dihapus).',
+      )
+    ) {
+      return;
+    }
+    setSplitting(true);
+    setSplitError(null);
+    try {
+      for (const token of splitTokens) {
+        await addPlatform(clientId, { platform: token, store_link: platform.store_link ?? undefined });
+      }
+      await updatePlatform(clientId, platform.client_platform_id, { active: false });
+      await onReload();
+    } catch (e) {
+      setSplitError(errorMessage(e));
+    } finally {
+      setSplitting(false);
+    }
+  }
 
   return (
     <div style={{ border: '1px solid var(--color-border)', borderRadius: 8, padding: 12 }}>
@@ -318,9 +359,26 @@ function PlatformBaselineCard({
 
       {isCompoundPlatform && !done && (
         <div className="alert alertInfo" style={{ fontSize: 12, marginTop: 8 }}>
-          Baris ini berisi lebih dari satu platform — hanya bisa entri manual, walau salah satunya TikTok Shop/
-          Tokopedia. <a href={`/clients/${clientId}`}>Perbaiki daftar platform klien</a> (pisahkan jadi satu baris
-          per platform), lalu muat ulang halaman ini untuk baseline yang benar per platform.
+          <div>
+            Baris ini berisi lebih dari satu platform — hanya bisa entri manual, walau salah satunya TikTok Shop/
+            Tokopedia. <a href={`/clients/${clientId}`}>Perbaiki daftar platform klien</a> (pisahkan jadi satu baris
+            per platform), lalu muat ulang halaman ini untuk baseline yang benar per platform.
+          </div>
+          {canEditClientProfile && (
+            <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+              <button type="button" className="btn btnSecondary btnSm" disabled={splitting} onClick={handleSplit}>
+                {splitting ? 'Memisahkan…' : `Pisahkan otomatis jadi ${splitTokens.length} platform`}
+              </button>
+              <span className="muted" style={{ fontSize: 11 }}>
+                Menambah {splitTokens.join(', ')} sebagai baris terpisah lalu menonaktifkan baris gabungan ini.
+              </span>
+            </div>
+          )}
+          {splitError && (
+            <div className="alert alertError" style={{ fontSize: 12, marginTop: 8 }}>
+              {splitError}
+            </div>
+          )}
         </div>
       )}
 

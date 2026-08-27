@@ -40,7 +40,7 @@ import { use, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { isAccountLead, isAccountStaff, isReadOnlyOD } from '@/lib/account';
+import { canEditClientProfile, isAccountLead, isAccountStaff, isReadOnlyOD } from '@/lib/account';
 import { formatIDR } from '@/lib/money';
 import { AUTOSAVE_MS, useAutosave } from '@/lib/use-autosave';
 import {
@@ -98,6 +98,7 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
   const readOnly = isReadOnlyOD(role);
   const canWrite = !readOnly && (isAccountStaff(role) || isAccountLead(role) || !!role?.director);
   const canLead = !readOnly && (isAccountLead(role) || !!role?.director);
+  const canFixPlatformList = !readOnly && canEditClientProfile(role);
 
   const [detail, setDetail] = useState<InterviewDetail | null>(null);
   const [timeline, setTimeline] = useState<KelolaKlienTimeline | null>(null);
@@ -447,6 +448,7 @@ export default function KelolaKlienPage({ params }: { params: Promise<{ id: stri
             risetAwal={risetAwal}
             baseline={baseline}
             canWrite={canWrite}
+            canEditClientProfile={canFixPlatformList}
             busy={acting}
             clientId={iv.client_id}
             onSubmit={submitRiset}
