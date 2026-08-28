@@ -125,14 +125,12 @@ All else blocked: `[transisi status tidak diizinkan]`.
 
 ## 6d. Plan `PLAN-` (M6B §8) — mesin #16, periode Plan
 
-`Terjadwal` → `Draft` (periode 1) → `Diajukan` → (`Aktif` | kembali `Draft`); `Terjadwal` → `Aktif` (auto, periode 2..n); `Terjadwal` → `Menunggu Persetujuan` → `Aktif`; `Aktif` → `Ditutup` | `Ditutup Otomatis`.
+`Terjadwal` → `Draft` (periode 1) → `Aktif` LANGSUNG (AM, tanpa persetujuan SPV — deviasi 2026-08-28); `Terjadwal` → `Aktif` (auto, periode 2..n); `Terjadwal` → `Menunggu Persetujuan` → `Aktif`; `Aktif` → `Ditutup` | `Ditutup Otomatis`.
 
 | From | To | Who | Effect |
 |---|---|---|---|
 | `Terjadwal` | `Draft` | sistem/AM | Periode 1 dibuka untuk diisi (Rule 2) |
-| `Draft` | `Diajukan` | AM pemilik | AM mengajukan periode 1 (Rule 3) |
-| `Diajukan` | `Aktif` | SPV / Head Account (requireLead) | Persetujuan periode 1 — yang mengaktifkan mekanisme Plan seluruh kontrak (Rule 3) |
-| `Diajukan` | `Draft` | SPV / Head Account (requireLead) | Dikembalikan, catatan WAJIB (Rule 3) |
+| `Draft` | `Aktif` | AM pemilik | **2026-08-28 (DEVIASI PRD DISETUJUI PEMILIK, `docs/DECISIONS.md`).** AM mengaktifkan periode 1 langsung — PA-7 (catatan pembuka) tidak lagi wajib, dan tidak ada lagi persetujuan SPV di antaranya |
 | `Terjadwal` | `Aktif` | sistem (job 00:00 WIB) | Periode 2..n auto-aktif di tanggal mulainya (Rule 4). BUKAN requireLead: dijalankan service-role, bukan seorang lead |
 | `Terjadwal` | `Menunggu Persetujuan` | sistem | Penyesuaian `Turun >10%` tertunda menahan aktivasi (Rule 4/9) |
 | `Menunggu Persetujuan` | `Aktif` | sistem/SPV | Penyesuaian diselesaikan, atau kedaluwarsa di tanggal mulai ⇒ aktif dengan target Strategi asli (Rule 4) |
@@ -140,9 +138,9 @@ All else blocked: `[transisi status tidak diizinkan]`.
 | `Aktif` | `Ditutup Otomatis` | sistem | Force-close saat lewat jendela (Rule 5/15). Terminal |
 
 - **Terminal:** `Ditutup`, `Ditutup Otomatis`.
-- `Disetujui`/`Dikembalikan` di PRD §8 **bukan state** — PA-5 tidak memuat keduanya; itu cara §8 menuliskan aksi "SPV setuju ⇒ `Aktif`" / "SPV kembalikan ⇒ `Draft`".
+- **Vestigial sejak 2026-08-28, TIDAK dihapus:** `Draft → Diajukan`, `Diajukan → Aktif` (requireLead), `Diajukan → Draft` (requireLead). PA-5 masih mendaftar `Diajukan` sebagai state yang sah, dan `approvePlanPeriode`/`returnPlanPeriode` masih kode yang berfungsi — tapi sejak `submitPlanPeriode` menargetkan `Aktif` langsung, tidak ada jalur normal manapun yang lagi menaruh periode ke `Diajukan`. `Disetujui`/`Dikembalikan` di PRD §8 **bukan state** — PA-5 tidak memuat keduanya; itu cara §8 (versi lama) menuliskan aksi "SPV setuju ⇒ `Aktif`" / "SPV kembalikan ⇒ `Draft`".
 - **Hanya satu periode `Aktif` per rantai** (Rule 5) ditegakkan index parsial `uq_plan_aktif_kontrak`/`uq_plan_aktif_klien`, bukan oleh mesin.
-- **Edge = data (B-01); GERBANG = domain (B-03, MENDARAT).** Mesin ini mendaftar transisi MANA yang sah; SIAPA yang boleh menekan tombol mana adalah `packages/domain/src/plan.ts`: `submitPlanPeriode` (`Draft → Diajukan`, AM pemilik + PA-7 wajib), `approvePlanPeriode`/`returnPlanPeriode` (periode 1, gerbang `isLead(Account)`, catatan wajib saat kembali), `activatePlanPeriode` (`Terjadwal → Aktif`, service-role, bukan lead). Semua lewat `transitionPlan` — pembungkus tunggal atas `sm_transition`. **Masih tiketnya:** KAPAN `Terjadwal` harus lewat `Menunggu Persetujuan` (penyesuaian `Turun >10%`) = B-04; job aktivasi/force-close 00:00 WIB = B-09.
+- **Edge = data (B-01); GERBANG = domain (B-03, MENDARAT).** Mesin ini mendaftar transisi MANA yang sah; SIAPA yang boleh menekan tombol mana adalah `packages/domain/src/plan.ts`: `submitPlanPeriode` (`Draft → Aktif` langsung sejak 2026-08-28, AM pemilik, guard status eksplisit karena edge `Terjadwal → Aktif` yang sama juga dipakai job auto-aktivasi), `approvePlanPeriode`/`returnPlanPeriode` (vestigial, periode 1, gerbang `isLead(Account)` + guard status `Diajukan` eksplisit — edge `Draft → Aktif` baru membuatnya tidak cukup mengandalkan mesin saja, catatan wajib saat kembali), `activatePlanPeriode` (`Terjadwal → Aktif`, service-role, bukan lead). Semua lewat `transitionPlan` — pembungkus tunggal atas `sm_transition`. **Masih tiketnya:** KAPAN `Terjadwal` harus lewat `Menunggu Persetujuan` (penyesuaian `Turun >10%`) = B-04; job aktivasi/force-close 00:00 WIB = B-09.
 - **Dormansi Plan Satuan = mesin #17** — MENDARAT (B-10), lihat §6e. Periode-nya sendiri tetap memakai mesin #16 ini apa adanya.
 
 ## 6e. Plan Satuan dormansi — mesin #17 (M6C §7, B-10)

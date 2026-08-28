@@ -334,7 +334,7 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
           <div style={{ marginTop: 8 }}>
             <textarea
               rows={2}
-              placeholder="Catatan pembuka (wajib sebelum periode ini diajukan)"
+              placeholder="Catatan pembuka (opsional)"
               value={pembuka}
               onChange={(e) => setPembuka(e.target.value)}
               disabled={acting}
@@ -371,7 +371,7 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                 disabled={acting}
                 onClick={() => void act(() => submitPlanPeriode(id))}
               >
-                Ajukan periode 1
+                Aktifkan periode 1
               </button>
             )}
             {canActivate && (

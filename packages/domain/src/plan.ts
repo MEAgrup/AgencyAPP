@@ -62,12 +62,17 @@ export const MSG_PLAN_APPROVE_FORBIDDEN =
 /** Rule 3 — returning period 1 requires a written note. */
 export const MSG_PLAN_RETURN_NOTES_REQUIRED =
   '[catatan wajib diisi saat mengembalikan periode Plan]';
-/** PA-7 — the opening note is mandatory before a period may be submitted. */
-export const MSG_PLAN_CATATAN_PEMBUKA_REQUIRED =
-  '[catatan pembuka wajib diisi sebelum periode Plan diajukan]';
-/** PA-7 is only ever editable on the Draft period 1, before it is submitted. */
+/**
+ * PA-7 is only ever editable on the Draft period 1, before it is submitted.
+ * PA-7 itself stopped gating submission on 2026-08-28 (docs/DECISIONS.md) —
+ * it is now an optional note, not a completeness requirement.
+ */
 export const MSG_PLAN_CATATAN_PEMBUKA_STATUS =
   '[catatan pembuka hanya dapat diubah selama periode masih Draft]';
+/** Period 1 is the only period `submitPlanPeriode` may move — it is Draft-only. */
+export const MSG_PLAN_SUBMIT_STATUS = '[periode ini sudah tidak berstatus Draft]';
+/** approvePlanPeriode only ever acts on a period actually `Diajukan`. */
+export const MSG_PLAN_APPROVE_STATUS = '[periode ini belum diajukan]';
 
 // --- B-04: Rule 9 asymmetric target adjustment ---------------------------
 
@@ -1022,38 +1027,56 @@ export async function saveCatatanPembuka(
 }
 
 /**
- * submitPlanPeriode drives period 1 `Draft → Diajukan` (Flow step 2): the owning
- * AM hands the filled period to the SPV. The opening note PA-7 is mandatory at
- * submit — the one completeness field the schema carries today; the row/week
- * completeness checks land with their tickets (B-04…B-08) and extend this gate.
+ * submitPlanPeriode drives period 1 `Draft → Aktif` DIRECTLY: the owning AM
+ * activates the period themselves, with no SPV approval step in between.
+ *
+ * **DEVIASI PRD DISETUJUI PEMILIK, 2026-08-28 (docs/DECISIONS.md).** Rule 3 /
+ * Flow step 2 originally routed period 1 through `Diajukan` for a mandatory
+ * SPV approval, gated on the PA-7 opening note being filled. The owner asked
+ * to remove both gates so a period (and the Briefs it unlocks) can go out to
+ * the team without waiting on a human review: PA-7 is now optional (still
+ * writable via `saveCatatanPembuka`, just never checked here), and this
+ * function targets `Aktif` on the new `Draft → Aktif` edge instead of
+ * `Diajukan`. `approvePlanPeriode`/`returnPlanPeriode` and the `Diajukan`
+ * edges are left in place (harmless, PA-5 still lists the state) but nothing
+ * routes a period into `Diajukan` anymore — they're vestigial unless a future
+ * decision reinstates the approval step.
  *
  * Only period 1 is ever in `Draft` (generation seeds it there; 2..n start
- * `Terjadwal`), so the machine confines this to period 1 without a separate
- * guard — a `Terjadwal` period has no `→ Diajukan` edge and the engine blocks it.
+ * `Terjadwal`), but `Terjadwal → Aktif` is ALSO a valid edge (period 2..n's
+ * auto-activation job) — so unlike before, the machine alone can't confine
+ * this to period 1. The explicit status guard below does that job now.
  */
 export async function submitPlanPeriode(sql: Sql, actor: Actor, planId: string): Promise<Plan> {
   return withTransaction(sql, async (tx) => {
     const plan = await loadPlanForUpdate(tx, planId);
     const ownerAm = await ownerAmOfClient(tx, plan.clientId);
     if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
-    if ((plan.catatanPembuka ?? '').trim() === '') {
-      throw new ValidationError(MSG_PLAN_CATATAN_PEMBUKA_REQUIRED);
-    }
-    await transitionPlan(tx, actor, planId, PLAN_DIAJUKAN);
+    if (plan.status !== PLAN_DRAFT) throw new ConflictError(MSG_PLAN_SUBMIT_STATUS);
+    await transitionPlan(tx, actor, planId, PLAN_AKTIF);
     return loadPlan(tx, planId);
   });
 }
 
 /**
  * approvePlanPeriode drives period 1 `Diajukan → Aktif` (Rule 3) — the SPV's
- * approval, which is what switches the Plan mechanism on for the whole contract.
+ * approval. Vestigial since the 2026-08-28 deviation (docs/DECISIONS.md):
+ * `submitPlanPeriode` no longer routes through `Diajukan`, so nothing puts a
+ * period here anymore, but the function is left working for a period that
+ * reaches `Diajukan` some other way.
+ *
  * The `require_lead` edge already refuses a non-lead; this narrows it to the
  * Account division (Rule 3's SPV / Head of Account, not any division's lead).
+ * The explicit status guard matters MORE now than before: the same 2026-08-28
+ * migration added a `Draft → Aktif` edge for `submitPlanPeriode`'s direct move,
+ * which the engine would otherwise also accept here — this function must only
+ * ever act on an actually-`Diajukan` period, never skip straight from `Draft`.
  */
 export async function approvePlanPeriode(sql: Sql, actor: Actor, planId: string): Promise<Plan> {
   if (!canApprovePlan(actor)) throw new ForbiddenError(MSG_PLAN_APPROVE_FORBIDDEN);
   return withTransaction(sql, async (tx) => {
-    await loadPlanForUpdate(tx, planId); // lock + 404 before the move
+    const plan = await loadPlanForUpdate(tx, planId); // lock + 404 before the move
+    if (plan.status !== PLAN_DIAJUKAN) throw new ConflictError(MSG_PLAN_APPROVE_STATUS);
     await transitionPlan(tx, actor, planId, PLAN_AKTIF);
     return loadPlan(tx, planId);
   });
