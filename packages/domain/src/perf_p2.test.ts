@@ -30,7 +30,8 @@
 import { describe, expect, it } from 'vitest';
 import { permission } from '@cdps/core';
 import type { Queryable } from '@cdps/db';
-import { checkCompleteness, getStrategi, type Actor } from './strategi';
+import type { Actor } from './account';
+import { checkCompleteness, getStrategi } from './strategi';
 
 const STRATEGI_ID = 'STRG-202608-9999';
 const AM = 'ZZ-P2-AM';
