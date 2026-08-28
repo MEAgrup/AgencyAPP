@@ -613,28 +613,32 @@ async function readBaseline(sql: Queryable, id: string): Promise<BaselineView> {
   // The sub-sections the panel renders come from the client's ACTIVE platforms,
   // not from what has already been submitted — an unsubmitted platform still needs
   // a slot (RAB-04). Joined through the interview so the read stays keyed by id.
-  const platRows = await sql<Record<string, unknown>[]>`
-    select cp.id, cp.platform, cp.store_link
-      from client_platforms cp
-      join interview i on i.client_id = cp.client_id
-     where i.id = ${id} and cp.active = true
-     order by cp.id`;
+  // P-2 (kecepatan loading): tiga read atas satu `interview_id` yang sama, tanpa
+  // ketergantungan data di antaranya — dikirim bersama, bukan berantai.
+  const [platRows, analisa, isianRows] = await Promise.all([
+    sql<Record<string, unknown>[]>`
+      select cp.id, cp.platform, cp.store_link
+        from client_platforms cp
+        join interview i on i.client_id = cp.client_id
+       where i.id = ${id} and cp.active = true
+       order by cp.id`,
+    sql<Record<string, unknown>[]>`
+      select id, client_platform_id, platform, metode_baseline, kondisi_toko, skor,
+             benchmark_versi, parser_versi, cakupan_riwayat, created_at
+        from riset_awal_analisa where interview_id = ${id} order by id`,
+    sql<Record<string, unknown>[]>`
+      select section, field_key, sumber, nilai_teks, nilai_angka, nilai_uang,
+             nilai_usulan, dikonfirmasi
+        from interview_riset_awal_isian where interview_id = ${id}
+        order by section, field_key`,
+  ]);
+
   const platforms: PlatformSlot[] = platRows.map((r) => ({
     clientPlatformId: Number(r.id),
     platform: r.platform as string,
     metode: metodeForPlatform(r.platform as string),
     storeLink: (r.store_link as string | null) ?? null,
   }));
-
-  const analisa = await sql<Record<string, unknown>[]>`
-    select id, client_platform_id, platform, metode_baseline, kondisi_toko, skor,
-           benchmark_versi, parser_versi, cakupan_riwayat, created_at
-      from riset_awal_analisa where interview_id = ${id} order by id`;
-  const isianRows = await sql<Record<string, unknown>[]>`
-    select section, field_key, sumber, nilai_teks, nilai_angka, nilai_uang,
-           nilai_usulan, dikonfirmasi
-      from interview_riset_awal_isian where interview_id = ${id}
-      order by section, field_key`;
 
   const isian: IsianRow[] = isianRows.map((r) => ({
     section: r.section as string,

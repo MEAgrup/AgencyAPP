@@ -2110,111 +2110,328 @@ export async function getBaselinePrefill(
 async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetail> {
   const id = head.id;
 
-  const channelRows = await sql<
-    {
-      id: string;
-      channel: string;
-      channel_lain: string | null;
-      status_channel: string;
-      nama_toko: string;
-      url_toko: string;
-      umur_toko_bulan: number | null;
-      badge: string | null;
-      target_tanggal_live: string | Date | null;
-      prasyarat_pembukaan: unknown;
-      sumber_data: string | null;
-      tanggal_ambil_data: string | Date | null;
-      lampiran: string | null;
-      periode_baseline_bulan: number | null;
-      periode_mulai: string | Date | null;
-      periode_akhir: string | Date | null;
-      alasan_periode_pendek: string | null;
-      prioritas: string | null;
-      prioritas_alasan: string | null;
-      catatan_periode_pendek: string | null;
-      // Section B groups B-2 … B-9 (A-06)
-      pengunjung_per_bulan: number | null;
-      conversion_rate_persen: string | null;
-      trafik_organik_persen: string | null;
-      trafik_iklan_persen: string | null;
-      trafik_affiliate_persen: string | null;
-      trafik_live_persen: string | null;
-      trafik_video_persen: string | null;
-      trafik_luar_persen: string | null;
-      entry_point_utama: string | null;
-      entry_point_catatan: string | null;
-      sku_listed: number | null;
-      sku_aktif: number | null;
-      sku_pareto_80: number | null;
-      top_sku: unknown;
-      sku_slow_moving: number | null;
-      sku_stok_kritis: unknown;
-      listing_layak_persen: string | null;
-      rating_toko: string | null;
-      jumlah_ulasan: number | null;
-      chat_response_rate_persen: string | null;
-      chat_response_menit: number | null;
-      pesanan_terlambat_persen: string | null;
-      poin_penalti: number | null;
-      catatan_penalti: string | null;
-      tema_keluhan: unknown;
-      tipe_kampanye: unknown;
-      tipe_kampanye_tidak_ada: boolean;
-      jumlah_kampanye_aktif: number | null;
-      top_keyword: unknown;
-      kampanye_boncos: unknown;
-      affiliate_aktif_30hari: number | null;
-      gmv_affiliate: string | null;
-      gmv_affiliate_persen: string | null;
-      komisi_open_persen: string | null;
-      komisi_target_persen: string | null;
-      top_kreator: unknown;
-      program_sampel: string | null;
-      program_sampel_catatan: string | null;
-      jumlah_video_per_bulan: number | null;
-      total_views: string | null;
-      gmv_video: string | null;
-      jam_live_per_bulan: string | null;
-      gmv_live: string | null;
-      gmv_per_jam_live: string | null;
-      host_live: string | null;
-      studio_live: string | null;
-      studio_catatan: string | null;
-      voucher_aktif: unknown;
-      voucher_aktif_tidak_ada: boolean;
-      program_platform: unknown;
-      program_platform_tidak_ada: boolean;
-      beban_promo_persen: string | null;
-      kompetitor: unknown;
-      kompetitor_lebih_baik: unknown;
-      kompetitor_catatan: string | null;
-      celah_kompetitor: string | null;
-    }[]
-  >`select * from strategi_channel where strategi_id = ${id} order by id asc`;
+  // P-2 (kecepatan loading) — SATU batch, bukan 20 round-trip berurutan.
+  //
+  // Setiap read di bawah ini di-key oleh `strategi_id` (atau `head.clientId`)
+  // yang SAMA dan tidak satu pun memakai baris hasil query lain: `channels`
+  // disusun di JS dari channelRows + baselineRows + storeLinks setelah ketiganya
+  // ada, dan `baselineRows` menemukan channel-nya lewat join, bukan lewat daftar
+  // id yang dipungut dari channelRows dulu. Dijalankan berurutan, biaya form ini
+  // adalah 20 × latensi — persis gejala yang dilaporkan QA ("makin banyak field,
+  // makin lama"): tiap section baru menambah satu round-trip penuh.
+  //
+  // postgres.js baru mengirim query saat `.then` dipanggil, jadi `Promise.all`
+  // menerbitkan kedua puluhnya sekaligus — di-pipeline pada satu koneksi di
+  // dalam transaksi (pola yang sama dengan `withClaims` di @cdps/db), atau
+  // tersebar di pool pada jalur non-transaksi. Anggaran §7 M6A ("full form load
+  // < 2s dengan 5 blok channel") dibelanjakan untuk kerja, bukan untuk latensi.
+  //
+  // Urutan destructuring HARUS sama dengan urutan array — itu satu-satunya
+  // kontrak di sini; bentuk dan isi tiap query tidak berubah sedikit pun.
+  const [
+    channelRows,
+    baselineRows,
+    storeLinks,
+    aksesRows,
+    diagnosaRows,
+    quickWinRows,
+    risikoStrukturalRows,
+    prasyaratRows,
+    targetRows,
+    assumptionRows,
+    pillarRows,
+    resourceRows,
+    riskRows,
+    ketergantunganRows,
+    faseRows,
+    tanggalBesarRows,
+    triggerRows,
+    dispatchRows,
+    visRows,
+    eventRows,
+  ] = await Promise.all([
+    sql<
+      {
+        id: string;
+        channel: string;
+        channel_lain: string | null;
+        status_channel: string;
+        nama_toko: string;
+        url_toko: string;
+        umur_toko_bulan: number | null;
+        badge: string | null;
+        target_tanggal_live: string | Date | null;
+        prasyarat_pembukaan: unknown;
+        sumber_data: string | null;
+        tanggal_ambil_data: string | Date | null;
+        lampiran: string | null;
+        periode_baseline_bulan: number | null;
+        periode_mulai: string | Date | null;
+        periode_akhir: string | Date | null;
+        alasan_periode_pendek: string | null;
+        prioritas: string | null;
+        prioritas_alasan: string | null;
+        catatan_periode_pendek: string | null;
+        // Section B groups B-2 … B-9 (A-06)
+        pengunjung_per_bulan: number | null;
+        conversion_rate_persen: string | null;
+        trafik_organik_persen: string | null;
+        trafik_iklan_persen: string | null;
+        trafik_affiliate_persen: string | null;
+        trafik_live_persen: string | null;
+        trafik_video_persen: string | null;
+        trafik_luar_persen: string | null;
+        entry_point_utama: string | null;
+        entry_point_catatan: string | null;
+        sku_listed: number | null;
+        sku_aktif: number | null;
+        sku_pareto_80: number | null;
+        top_sku: unknown;
+        sku_slow_moving: number | null;
+        sku_stok_kritis: unknown;
+        listing_layak_persen: string | null;
+        rating_toko: string | null;
+        jumlah_ulasan: number | null;
+        chat_response_rate_persen: string | null;
+        chat_response_menit: number | null;
+        pesanan_terlambat_persen: string | null;
+        poin_penalti: number | null;
+        catatan_penalti: string | null;
+        tema_keluhan: unknown;
+        tipe_kampanye: unknown;
+        tipe_kampanye_tidak_ada: boolean;
+        jumlah_kampanye_aktif: number | null;
+        top_keyword: unknown;
+        kampanye_boncos: unknown;
+        affiliate_aktif_30hari: number | null;
+        gmv_affiliate: string | null;
+        gmv_affiliate_persen: string | null;
+        komisi_open_persen: string | null;
+        komisi_target_persen: string | null;
+        top_kreator: unknown;
+        program_sampel: string | null;
+        program_sampel_catatan: string | null;
+        jumlah_video_per_bulan: number | null;
+        total_views: string | null;
+        gmv_video: string | null;
+        jam_live_per_bulan: string | null;
+        gmv_live: string | null;
+        gmv_per_jam_live: string | null;
+        host_live: string | null;
+        studio_live: string | null;
+        studio_catatan: string | null;
+        voucher_aktif: unknown;
+        voucher_aktif_tidak_ada: boolean;
+        program_platform: unknown;
+        program_platform_tidak_ada: boolean;
+        beban_promo_persen: string | null;
+        kompetitor: unknown;
+        kompetitor_lebih_baik: unknown;
+        kompetitor_catatan: string | null;
+        celah_kompetitor: string | null;
+      }[]
+    >`select * from strategi_channel where strategi_id = ${id} order by id asc`,
 
-  const baselineRows = await sql<
-    {
-      channel_id: string;
-      month_index: number;
-      gmv: string;
-      jumlah_pesanan: number;
-      persen_batal: string;
-      ad_spend: string;
-      roas: string;
-      acos: string;
-      aov: string | null;
-    }[]
-  >`
-    select b.* from strategi_baseline_bulan b
-      join strategi_channel c on c.id = b.channel_id
-     where c.strategi_id = ${id}
-     order by b.channel_id asc, b.month_index asc`;
+    sql<
+      {
+        channel_id: string;
+        month_index: number;
+        gmv: string;
+        jumlah_pesanan: number;
+        persen_batal: string;
+        ad_spend: string;
+        roas: string;
+        acos: string;
+        aov: string | null;
+      }[]
+    >`
+      select b.* from strategi_baseline_bulan b
+        join strategi_channel c on c.id = b.channel_id
+       where c.strategi_id = ${id}
+       order by b.channel_id asc, b.month_index asc`,
 
-  // B-0.6 lampiran autofill (owner QA 2026-08-24): the form shows the sales-team
-  // store link as a default before the first save. This is display-only — the
-  // submit gate reads the raw row, and `saveChannels` is what actually persists
-  // the default, so a channel is never falsely counted complete on read.
-  const storeLinks = await clientStoreLinksByChannel(sql, head.clientId);
+    // B-0.6 lampiran autofill (owner QA 2026-08-24): the form shows the sales-team
+    // store link as a default before the first save. This is display-only — the
+    // submit gate reads the raw row, and `saveChannels` is what actually persists
+    // the default, so a channel is never falsely counted complete on read.
+    clientStoreLinksByChannel(sql, head.clientId),
+
+    sql<
+      {
+        id: string;
+        channel: string;
+        akses: string;
+        status: string;
+        memblokir: boolean;
+        target_tanggal_beres: string | Date | null;
+        catatan: string;
+      }[]
+    >`select * from strategi_akses where strategi_id = ${id}
+       order by channel asc, akses asc`,
+
+    // Section C (A-07)
+    sql<
+      {
+        id: string;
+        channel: string;
+        bottleneck: string;
+        alasan: string;
+        akar_masalah: string | null;
+        gap_kompetitor: string | null;
+      }[]
+    >`select id, channel, bottleneck, alasan, akar_masalah, gap_kompetitor
+        from strategi_diagnosa where strategi_id = ${id}
+       order by channel asc`,
+
+    sql<
+      {
+        id: string;
+        aksi: string;
+        channel: string;
+        pic_divisi: string;
+        dampak_diharapkan: string;
+        urutan: number;
+      }[]
+    >`select id, aksi, channel, pic_divisi, dampak_diharapkan, urutan
+        from strategi_quick_win where strategi_id = ${id}
+       order by urutan asc, id asc`,
+
+    sql<
+      { id: string; risiko: string; urutan: number }[]
+    >`select id, risiko, urutan from strategi_risiko_struktural
+       where strategi_id = ${id} order by urutan asc, id asc`,
+
+    sql<
+      {
+        id: string;
+        item: string;
+        pic_klien: string;
+        deadline: string | Date | null;
+        urutan: number;
+      }[]
+    >`select id, item, pic_klien, deadline, urutan
+        from strategi_prasyarat_klien where strategi_id = ${id}
+       order by urutan asc, id asc`,
+
+    sql<
+      {
+        channel: string;
+        month_index: number;
+        metric: string;
+        nilai_floor: string | null;
+        nilai_stretch: string;
+        sumber_floor: string | null;
+      }[]
+    >`select * from strategi_target where strategi_id = ${id}
+       order by metric asc, channel asc, month_index asc`,
+
+    sql<
+      {
+        kode: string;
+        asumsi: string;
+        pemilik: string;
+        cara_verifikasi: string;
+        status: string;
+        target_terkait: unknown;
+      }[]
+    >`select * from strategi_assumption where strategi_id = ${id} order by kode asc`,
+
+    sql<
+      {
+        id: string;
+        jenis: string;
+        channel: string | null;
+        urutan: number;
+        sku: string | null;
+        peran: string | null;
+        aksi: string;
+        target: string;
+        harga_normal: string | null;
+        harga_promo: string | null;
+        floor_price: string | null;
+        vendor_id: string | null;
+        slot_jam: string | null;
+        tarif: string | null;
+        target_gmv_per_jam: string | null;
+        detail: unknown;
+      }[]
+    >`select * from strategi_pillar where strategi_id = ${id} order by urutan asc, id asc`,
+
+    sql<
+      {
+        id: string;
+        jenis: string;
+        channel: string | null;
+        divisi: string | null;
+        nilai: string | null;
+        jumlah: string | null;
+        satuan: string | null;
+        sumber_dana: string | null;
+        vendor_id: string | null;
+        skema_biaya: string | null;
+        catatan: string;
+      }[]
+    >`select * from strategi_resource where strategi_id = ${id} order by jenis asc, id asc`,
+
+    sql<
+      {
+        id: string;
+        risiko: string;
+        dampak: string;
+        kemungkinan: string;
+        mitigasi: string;
+        pic: string;
+        urutan: number;
+      }[]
+    >`select * from strategi_risk where strategi_id = ${id} order by urutan asc, id asc`,
+
+    // --- A-09b child rows -----------------------------------------------------
+    sql<
+      { id: string; item: string; kapan: string; konsekuensi: string; urutan: number }[]
+    >`select * from strategi_ketergantungan_klien where strategi_id = ${id}
+       order by urutan asc, id asc`,
+
+    sql<
+      {
+        id: string;
+        nama: string;
+        tanggal_mulai: string | Date;
+        tanggal_akhir: string | Date;
+        tujuan: string;
+        kriteria_lulus: string;
+        urutan: number;
+      }[]
+    >`select * from strategi_fase where strategi_id = ${id} order by urutan asc, id asc`,
+
+    sql<
+      { id: string; tanggal: string | Date; nama: string; peran: string; urutan: number }[]
+    >`select * from strategi_tanggal_besar where strategi_id = ${id}
+       order by tanggal asc, id asc`,
+
+    sql<
+      { id: string; kode: string; ambang: string | null; catatan: string | null; urutan: number }[]
+    >`select * from strategi_trigger_revisi where strategi_id = ${id}
+       order by urutan asc, id asc`,
+
+    sql<
+      { id: string; divisi: string; urutan: number; catatan: string | null }[]
+    >`select * from strategi_dispatch where strategi_id = ${id} order by urutan asc`,
+
+    loadFieldVisibility(sql, id),
+
+    sql<
+      {
+        versi_no: number;
+        peristiwa: string;
+        aktor: string;
+        catatan: string | null;
+        trigger_revisi: unknown;
+        alasan_revisi: string | null;
+        asumsi_gugur: unknown;
+        created_at: string | Date;
+      }[]
+    >`select * from strategi_version where strategi_id = ${id} order by id asc`,
+  ]);
 
   const channels = channelRows.map((c) => {
     const baseline = baselineRows
@@ -2313,75 +2530,6 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
     };
   });
 
-  const aksesRows = await sql<
-    {
-      id: string;
-      channel: string;
-      akses: string;
-      status: string;
-      memblokir: boolean;
-      target_tanggal_beres: string | Date | null;
-      catatan: string;
-    }[]
-  >`select * from strategi_akses where strategi_id = ${id}
-     order by channel asc, akses asc`;
-
-  // Section C (A-07)
-  const diagnosaRows = await sql<
-    {
-      id: string;
-      channel: string;
-      bottleneck: string;
-      alasan: string;
-      akar_masalah: string | null;
-      gap_kompetitor: string | null;
-    }[]
-  >`select id, channel, bottleneck, alasan, akar_masalah, gap_kompetitor
-      from strategi_diagnosa where strategi_id = ${id}
-     order by channel asc`;
-
-  const quickWinRows = await sql<
-    {
-      id: string;
-      aksi: string;
-      channel: string;
-      pic_divisi: string;
-      dampak_diharapkan: string;
-      urutan: number;
-    }[]
-  >`select id, aksi, channel, pic_divisi, dampak_diharapkan, urutan
-      from strategi_quick_win where strategi_id = ${id}
-     order by urutan asc, id asc`;
-
-  const risikoStrukturalRows = await sql<
-    { id: string; risiko: string; urutan: number }[]
-  >`select id, risiko, urutan from strategi_risiko_struktural
-     where strategi_id = ${id} order by urutan asc, id asc`;
-
-  const prasyaratRows = await sql<
-    {
-      id: string;
-      item: string;
-      pic_klien: string;
-      deadline: string | Date | null;
-      urutan: number;
-    }[]
-  >`select id, item, pic_klien, deadline, urutan
-      from strategi_prasyarat_klien where strategi_id = ${id}
-     order by urutan asc, id asc`;
-
-  const targetRows = await sql<
-    {
-      channel: string;
-      month_index: number;
-      metric: string;
-      nilai_floor: string | null;
-      nilai_stretch: string;
-      sumber_floor: string | null;
-    }[]
-  >`select * from strategi_target where strategi_id = ${id}
-     order by metric asc, channel asc, month_index asc`;
-
   const targets: StrategiTarget[] = targetRows.map((t) => ({
     channel: t.channel,
     monthIndex: t.month_index,
@@ -2390,113 +2538,6 @@ async function loadDetail(sql: Queryable, head: Strategi): Promise<StrategiDetai
     nilaiStretch: t.nilai_stretch,
     sumberFloor: t.sumber_floor as FloorSource | null,
   }));
-
-  const assumptionRows = await sql<
-    {
-      kode: string;
-      asumsi: string;
-      pemilik: string;
-      cara_verifikasi: string;
-      status: string;
-      target_terkait: unknown;
-    }[]
-  >`select * from strategi_assumption where strategi_id = ${id} order by kode asc`;
-
-  const pillarRows = await sql<
-    {
-      id: string;
-      jenis: string;
-      channel: string | null;
-      urutan: number;
-      sku: string | null;
-      peran: string | null;
-      aksi: string;
-      target: string;
-      harga_normal: string | null;
-      harga_promo: string | null;
-      floor_price: string | null;
-      vendor_id: string | null;
-      slot_jam: string | null;
-      tarif: string | null;
-      target_gmv_per_jam: string | null;
-      detail: unknown;
-    }[]
-  >`select * from strategi_pillar where strategi_id = ${id} order by urutan asc, id asc`;
-
-  const resourceRows = await sql<
-    {
-      id: string;
-      jenis: string;
-      channel: string | null;
-      divisi: string | null;
-      nilai: string | null;
-      jumlah: string | null;
-      satuan: string | null;
-      sumber_dana: string | null;
-      vendor_id: string | null;
-      skema_biaya: string | null;
-      catatan: string;
-    }[]
-  >`select * from strategi_resource where strategi_id = ${id} order by jenis asc, id asc`;
-
-  const riskRows = await sql<
-    {
-      id: string;
-      risiko: string;
-      dampak: string;
-      kemungkinan: string;
-      mitigasi: string;
-      pic: string;
-      urutan: number;
-    }[]
-  >`select * from strategi_risk where strategi_id = ${id} order by urutan asc, id asc`;
-
-  // --- A-09b child rows -----------------------------------------------------
-  const ketergantunganRows = await sql<
-    { id: string; item: string; kapan: string; konsekuensi: string; urutan: number }[]
-  >`select * from strategi_ketergantungan_klien where strategi_id = ${id}
-     order by urutan asc, id asc`;
-
-  const faseRows = await sql<
-    {
-      id: string;
-      nama: string;
-      tanggal_mulai: string | Date;
-      tanggal_akhir: string | Date;
-      tujuan: string;
-      kriteria_lulus: string;
-      urutan: number;
-    }[]
-  >`select * from strategi_fase where strategi_id = ${id} order by urutan asc, id asc`;
-
-  const tanggalBesarRows = await sql<
-    { id: string; tanggal: string | Date; nama: string; peran: string; urutan: number }[]
-  >`select * from strategi_tanggal_besar where strategi_id = ${id}
-     order by tanggal asc, id asc`;
-
-  const triggerRows = await sql<
-    { id: string; kode: string; ambang: string | null; catatan: string | null; urutan: number }[]
-  >`select * from strategi_trigger_revisi where strategi_id = ${id}
-     order by urutan asc, id asc`;
-
-  const dispatchRows = await sql<
-    { id: string; divisi: string; urutan: number; catatan: string | null }[]
-  >`select * from strategi_dispatch where strategi_id = ${id} order by urutan asc`;
-
-  const visRows = await loadFieldVisibility(sql, id);
-
-  const eventRows = await sql<
-    {
-      versi_no: number;
-      peristiwa: string;
-      aktor: string;
-      catatan: string | null;
-      trigger_revisi: unknown;
-      alasan_revisi: string | null;
-      asumsi_gugur: unknown;
-      created_at: string | Date;
-    }[]
-  >`select * from strategi_version where strategi_id = ${id} order by id asc`;
 
   return {
     ...head,
@@ -3617,14 +3658,19 @@ async function clientStoreLinksByChannel(
   clientId: string,
 ): Promise<{ byChannel: Map<string, string>; fallback: string | null }> {
   const byChannel = new Map<string, string>();
-  const rows = await sql<{ platform: string; store_link: string | null }[]>`
-    select platform, store_link from client_platforms where client_id = ${clientId}`;
+  // P-2: the per-platform links and the client-level fallback answer two
+  // independent questions about the same `clientId` — neither reads the other's
+  // rows — so they go out together rather than one after the other.
+  const [rows, cli] = await Promise.all([
+    sql<{ platform: string; store_link: string | null }[]>`
+      select platform, store_link from client_platforms where client_id = ${clientId}`,
+    sql<{ link_toko: string | null }[]>`
+      select link_toko from clients where id = ${clientId}`,
+  ]);
   for (const r of rows) {
     const link = (r.store_link ?? '').trim();
     if (link !== '') byChannel.set(r.platform, link);
   }
-  const cli = await sql<{ link_toko: string | null }[]>`
-    select link_toko from clients where id = ${clientId}`;
   const fallback = (cli[0]?.link_toko ?? '').trim() || null;
   return { byChannel, fallback };
 }
@@ -6036,69 +6082,145 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
     if (!terjawab) out.push({ kode, pesan: MSG_TIDAK_ADA_BELUM_DIJAWAB });
   }
 
-  const channels = await sql<
-    {
-      id: string;
-      channel: string;
-      status_channel: string;
-      // B-0 identity + baseline window (Rule 4/5/5a). Required at submit since
-      // 2026-08-22 (a Draft may now save them blank); reported below.
-      nama_toko: string | null;
-      url_toko: string | null;
-      target_tanggal_live: string | null;
-      periode_baseline_bulan: number | null;
-      periode_mulai: string | null;
-      periode_akhir: string | null;
-      sumber_data: string | null;
-      tanggal_ambil_data: string | null;
-      lampiran: string | null;
-      alasan_periode_pendek: string | null;
-      // E-2 (A-09b) — gated for EVERY channel, `Belum Aktif` included: a channel
-      // with no history still has a role in the plan, which is exactly what a
-      // launch channel needs declared.
-      prioritas: string | null;
-      prioritas_alasan: string | null;
-      pengunjung_per_bulan: number | null;
-      conversion_rate_persen: string | null;
-      trafik_organik_persen: string | null;
-      sku_listed: number | null;
-      sku_aktif: number | null;
-      sku_pareto_80: number | null;
-      top_sku: unknown;
-      sku_slow_moving: number | null;
-      listing_layak_persen: string | null;
-      rating_toko: string | null;
-      jumlah_ulasan: number | null;
-      chat_response_rate_persen: string | null;
-      chat_response_menit: number | null;
-      pesanan_terlambat_persen: string | null;
-      poin_penalti: number | null;
-      jumlah_kampanye_aktif: number | null;
-      affiliate_aktif_30hari: number | null;
-      gmv_affiliate: string | null;
-      gmv_affiliate_persen: string | null;
-      komisi_open_persen: string | null;
-      komisi_target_persen: string | null;
-      program_sampel: string | null;
-      jumlah_video_per_bulan: number | null;
-      total_views: string | null;
-      gmv_video: string | null;
-      jam_live_per_bulan: string | null;
-      gmv_live: string | null;
-      host_live: string | null;
-      studio_live: string | null;
-      beban_promo_persen: string | null;
-      tipe_kampanye: unknown;
-      tipe_kampanye_tidak_ada: boolean;
-      voucher_aktif: unknown;
-      voucher_aktif_tidak_ada: boolean;
-      program_platform: unknown;
-      program_platform_tidak_ada: boolean;
-      kompetitor: unknown;
-      kompetitor_lebih_baik: unknown;
-      celah_kompetitor: string | null;
-    }[]
-  >`select * from strategi_channel where strategi_id = ${id} order by id asc`;
+  // P-2 (kecepatan loading) — SATU batch untuk seluruh gerbang submit.
+  //
+  // §5 langkah 5 memanggil gerbang ini HIDUP (setiap autosave form), dan setiap
+  // read di bawah hanya butuh `id` yang sama — tak satu pun membaca baris hasil
+  // query lain. Dijalankan berurutan, "hitung kekurangan" membayar 13 round-trip
+  // plus satu per channel `Eksisting`; dikirim bersama, biayanya satu.
+  //
+  // Urutan destructuring HARUS sama dengan urutan array. Isi tiap query, dan
+  // urutan `out.push` di bawah, tidak berubah sama sekali.
+  const [
+    channels,
+    baselineCounts,
+    aksesRows,
+    allTargets,
+    risks,
+    diagnosaRows,
+    qwCount,
+    riskStrCount,
+    preqCount,
+    pillarCount,
+    faseCount,
+    tanggalBesarCount,
+    triggerCount,
+    dispatchCount,
+  ] = await Promise.all([
+    sql<
+      {
+        id: string;
+        channel: string;
+        status_channel: string;
+        // B-0 identity + baseline window (Rule 4/5/5a). Required at submit since
+        // 2026-08-22 (a Draft may now save them blank); reported below.
+        nama_toko: string | null;
+        url_toko: string | null;
+        target_tanggal_live: string | null;
+        periode_baseline_bulan: number | null;
+        periode_mulai: string | null;
+        periode_akhir: string | null;
+        sumber_data: string | null;
+        tanggal_ambil_data: string | null;
+        lampiran: string | null;
+        alasan_periode_pendek: string | null;
+        // E-2 (A-09b) — gated for EVERY channel, `Belum Aktif` included: a channel
+        // with no history still has a role in the plan, which is exactly what a
+        // launch channel needs declared.
+        prioritas: string | null;
+        prioritas_alasan: string | null;
+        pengunjung_per_bulan: number | null;
+        conversion_rate_persen: string | null;
+        trafik_organik_persen: string | null;
+        sku_listed: number | null;
+        sku_aktif: number | null;
+        sku_pareto_80: number | null;
+        top_sku: unknown;
+        sku_slow_moving: number | null;
+        listing_layak_persen: string | null;
+        rating_toko: string | null;
+        jumlah_ulasan: number | null;
+        chat_response_rate_persen: string | null;
+        chat_response_menit: number | null;
+        pesanan_terlambat_persen: string | null;
+        poin_penalti: number | null;
+        jumlah_kampanye_aktif: number | null;
+        affiliate_aktif_30hari: number | null;
+        gmv_affiliate: string | null;
+        gmv_affiliate_persen: string | null;
+        komisi_open_persen: string | null;
+        komisi_target_persen: string | null;
+        program_sampel: string | null;
+        jumlah_video_per_bulan: number | null;
+        total_views: string | null;
+        gmv_video: string | null;
+        jam_live_per_bulan: string | null;
+        gmv_live: string | null;
+        host_live: string | null;
+        studio_live: string | null;
+        beban_promo_persen: string | null;
+        tipe_kampanye: unknown;
+        tipe_kampanye_tidak_ada: boolean;
+        voucher_aktif: unknown;
+        voucher_aktif_tidak_ada: boolean;
+        program_platform: unknown;
+        program_platform_tidak_ada: boolean;
+        kompetitor: unknown;
+        kompetitor_lebih_baik: unknown;
+        celah_kompetitor: string | null;
+      }[]
+    >`select * from strategi_channel where strategi_id = ${id} order by id asc`,
+
+    // Rule 5 baseline coverage for EVERY channel in one grouped read. This used
+    // to be a `count(*)` per `Eksisting` channel issued from inside the loop
+    // below — an N+1 whose cost grew with exactly the thing §7 budgets for
+    // ("5 blok channel"). Channels with no baseline row simply do not appear
+    // here, which reads back as 0 — the same answer the per-channel count gave.
+    sql<{ channel_id: string; n: number }[]>`
+      select b.channel_id, count(*)::int as n
+        from strategi_baseline_bulan b
+        join strategi_channel c on c.id = b.channel_id
+       where c.strategi_id = ${id}
+       group by b.channel_id`,
+
+    sql<{ channel: string }[]>`
+      select distinct channel from strategi_akses where strategi_id = ${id}`,
+
+    sql<{ channel: string; month_index: number; metric: string }[]>`
+      select channel, month_index, metric from strategi_target where strategi_id = ${id}`,
+
+    sql<{ n: number }[]>`
+      select count(*)::int as n from strategi_risk where strategi_id = ${id}`,
+
+    sql<
+      { channel: string; akar_masalah: string | null; gap_kompetitor: string | null }[]
+    >`select channel, akar_masalah, gap_kompetitor from strategi_diagnosa
+       where strategi_id = ${id}`,
+
+    sql<{ n: number }[]>`
+      select count(*)::int as n from strategi_quick_win where strategi_id = ${id}`,
+
+    sql<{ n: number }[]>`
+      select count(*)::int as n from strategi_risiko_struktural where strategi_id = ${id}`,
+
+    sql<{ n: number }[]>`
+      select count(*)::int as n from strategi_prasyarat_klien where strategi_id = ${id}`,
+
+    sql<{ n: number }[]>`
+      select count(*)::int as n from strategi_pillar where strategi_id = ${id}`,
+
+    sql<{ n: number }[]>`
+      select count(*)::int as n from strategi_fase where strategi_id = ${id}`,
+
+    sql<{ n: number }[]>`
+      select count(*)::int as n from strategi_tanggal_besar where strategi_id = ${id}`,
+
+    sql<{ n: number }[]>`
+      select count(*)::int as n from strategi_trigger_revisi where strategi_id = ${id}`,
+
+    sql<{ n: number }[]>`
+      select count(*)::int as n from strategi_dispatch where strategi_id = ${id}`,
+  ]);
   if (channels.length === 0) {
     out.push({ kode: 'B-0', pesan: MSG_NO_CHANNEL });
   }
@@ -6141,12 +6263,16 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
 
   // Rule 5: an `Eksisting` channel must carry one baseline row per declared
   // month — a half-filled window is the shape Rule 5 exists to forbid.
+  //
+  // The counts come from the grouped read in the batch above, keyed by
+  // `channel_id`; a channel absent from that result has zero baseline rows,
+  // which is exactly what the old per-channel `count(*)` returned.
+  const baselineCountOf = new Map(baselineCounts.map((b) => [String(b.channel_id), b.n]));
   for (const c of channels) {
     if (c.status_channel !== 'Eksisting') continue;
     const want = c.periode_baseline_bulan ?? 0;
-    const got = await sql<{ n: number }[]>`
-      select count(*)::int as n from strategi_baseline_bulan where channel_id = ${c.id}`;
-    if (got[0].n !== want || want === 0) {
+    const got = baselineCountOf.get(String(c.id)) ?? 0;
+    if (got !== want || want === 0) {
       out.push({ kode: `B-1/${c.channel}`, pesan: MSG_BASELINE_INCOMPLETE });
     }
     out.push(...kekuranganSectionB(c));
@@ -6155,8 +6281,6 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
   // A-15: the checklist is per channel, and §5 step 3 makes its blockers the
   // first thing the SPV dashboard shows — a channel with no row has not been
   // asked the question at all. `Umum` rows do not substitute for a channel's own.
-  const aksesRows = await sql<{ channel: string }[]>`
-    select distinct channel from strategi_akses where strategi_id = ${id}`;
   const adaAkses = new Set(aksesRows.map((a) => a.channel));
   for (const c of channels) {
     if (!adaAkses.has(c.channel)) {
@@ -6167,8 +6291,6 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
   // Both D-2 and D-4 are read off this one query — D-2 is the `gmv` rows, D-4 is
   // everything else. Two queries would let the two gates disagree about what is
   // stored the moment one of them grows a filter the other does not.
-  const allTargets = await sql<{ channel: string; month_index: number; metric: string }[]>`
-    select channel, month_index, metric from strategi_target where strategi_id = ${id}`;
   const targets = allTargets.filter((t) => t.metric === 'gmv');
   for (const c of channels) {
     if (!targets.some((t) => t.channel === c.channel)) {
@@ -6256,8 +6378,6 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
   // gate push (and its `DOORS` row) are removed; the column and endpoint are kept.
 
   // H-1: at least RISK_MIN risk register rows (PRD says "W (min 1)").
-  const risks = await sql<{ n: number }[]>`
-    select count(*)::int as n from strategi_risk where strategi_id = ${id}`;
   if (risks[0].n < RISK_MIN) {
     out.push({ kode: 'H-1', pesan: MSG_RISK_MIN });
   }
@@ -6270,10 +6390,6 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
   // The Rule 6 alasan check happens at save time (saveDiagnosa), not here —
   // an empty alasan cannot be stored, so if a diagnosa row exists its alasan
   // is already non-empty.
-  const diagnosaRows = await sql<
-    { channel: string; akar_masalah: string | null; gap_kompetitor: string | null }[]
-  >`select channel, akar_masalah, gap_kompetitor from strategi_diagnosa
-     where strategi_id = ${id}`;
   const adaDiagnosa = new Map(diagnosaRows.map((d) => [d.channel, d]));
 
   for (const c of channels) {
@@ -6291,22 +6407,16 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
   }
 
   // C-5: at least QUICK_WIN_MIN quick wins (PRD says "W (min 1)").
-  const qwCount = await sql<{ n: number }[]>`
-    select count(*)::int as n from strategi_quick_win where strategi_id = ${id}`;
   if (qwCount[0].n < QUICK_WIN_MIN) {
     out.push({ kode: 'C-5', pesan: MSG_QUICK_WIN_MIN });
   }
 
   // C-6: at least one structural risk (W).
-  const riskStrCount = await sql<{ n: number }[]>`
-    select count(*)::int as n from strategi_risiko_struktural where strategi_id = ${id}`;
   if (riskStrCount[0].n === 0) {
     out.push({ kode: 'C-6', pesan: MSG_RISIKO_STRUKTURAL_REQUIRED });
   }
 
   // C-7: at least one client prerequisite (W).
-  const preqCount = await sql<{ n: number }[]>`
-    select count(*)::int as n from strategi_prasyarat_klien where strategi_id = ${id}`;
   if (preqCount[0].n === 0) {
     out.push({ kode: 'C-7', pesan: MSG_PRASYARAT_KLIEN_REQUIRED });
   }
@@ -6325,8 +6435,6 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
   }
 
   // E-3..E-10: at least PILLAR_MIN pillar rows overall (see MSG_PILLAR_MIN doc comment).
-  const pillarCount = await sql<{ n: number }[]>`
-    select count(*)::int as n from strategi_pillar where strategi_id = ${id}`;
   if (pillarCount[0].n < PILLAR_MIN) {
     out.push({ kode: 'E-3..E-10', pesan: MSG_PILLAR_MIN });
   }
@@ -6341,14 +6449,10 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
   // G-1: §4 writes "min 2" explicitly, so this has its own message rather than
   // the generic one — "you entered one of two" is a different problem from
   // "you entered none".
-  const faseCount = await sql<{ n: number }[]>`
-    select count(*)::int as n from strategi_fase where strategi_id = ${id}`;
   if (faseCount[0].n < FASE_MIN) {
     out.push({ kode: 'G-1', pesan: MSG_FASE_MIN });
   }
 
-  const tanggalBesarCount = await sql<{ n: number }[]>`
-    select count(*)::int as n from strategi_tanggal_besar where strategi_id = ${id}`;
   if (tanggalBesarCount[0].n === 0) {
     out.push({ kode: 'G-2', pesan: MSG_TANGGAL_BESAR_REQUIRED });
   }
@@ -6369,15 +6473,11 @@ export async function checkCompleteness(sql: Queryable, id: string): Promise<Kek
   // H-2 (W). This is also what makes the J-3 subset check in `openRevision`
   // reachable: Rule 13 can only demand a trigger "from H-2" if H-2 is
   // guaranteed non-empty on every approved version.
-  const triggerCount = await sql<{ n: number }[]>`
-    select count(*)::int as n from strategi_trigger_revisi where strategi_id = ${id}`;
   if (triggerCount[0].n === 0) {
     out.push({ kode: 'H-2', pesan: MSG_TRIGGER_REVISI_REQUIRED });
   }
   // H-4 is `O` and deliberately not gated (A-09a).
 
-  const dispatchCount = await sql<{ n: number }[]>`
-    select count(*)::int as n from strategi_dispatch where strategi_id = ${id}`;
   if (dispatchCount[0].n === 0) {
     out.push({ kode: 'I-2', pesan: MSG_DISPATCH_REQUIRED });
   }
