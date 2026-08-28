@@ -35,7 +35,7 @@ import { useAuth } from '@/lib/auth-context';
 import { isAccountLead, isAccountStaff, isReadOnlyOD } from '@/lib/account';
 import StatusBadge from '@/components/StatusBadge';
 import { formatIDR } from '@/lib/money';
-import { getStrategi, type StrategiPillar } from '@/lib/strategi';
+import { getStrategi, listStrategiQueue, type StrategiPillar } from '@/lib/strategi';
 import { getClient, type ServiceLine } from '@/lib/clients';
 import { suggestRowFromPillar } from '@/lib/plan-row-suggest';
 import {
@@ -116,16 +116,19 @@ interface RowDraft {
   sku_sasaran: string;
   prasyarat: string;
   visibilitas: string;
-  /** Origin (PC-3), Plan kontrak (Full Management): a Strategi pillar id, or
-   *  empty ⇒ Di Luar Strategi. */
+  /** Origin (PC-3): a Strategi pillar id (Plan kontrak — its own STRG; Plan
+   *  klien — any `Aktif` STRG belonging to the client), or empty ⇒ no pillar. */
   strategi_pillar_id: string;
-  /** Origin (PC-3), Plan klien (Satuan, M6C §7): a purchased Service id, or
-   *  empty ⇒ Di Luar Service. `lingkup` decides which of the two origin fields
-   *  is actually sent — a Plan Satuan has no `strategi_id` (see PA-2/`load`),
-   *  so the pillar dropdown would otherwise be permanently empty and every row
-   *  would default to Di Luar Strategi even when it belongs to the client's
-   *  purchased service (owner QA, SVC-202608-0008). */
+  /** Origin (PC-3), Plan klien (Satuan) only: a purchased Service id, or empty
+   *  ⇒ no service. Plan klien has no single Strategi to descend from (M6C
+   *  §7/§9), so its origin is either one of the client's Services or one of the
+   *  client's STRG pillars — the plain pillar dropdown alone would otherwise be
+   *  permanently empty and every row would silently default to Di Luar Strategi
+   *  (owner QA, SVC-202608-0008). */
   service_id: string;
+  /** Which "di luar" flag to send when NEITHER origin above is picked on a Plan
+   *  klien row (Plan kontrak always means Di Luar Strategi — no choice needed). */
+  di_luar_kind: 'strategi' | 'service';
   di_luar_alasan: string;
 }
 
@@ -146,6 +149,7 @@ function blankRow(channel: string): RowDraft {
     visibilitas: 'Bagikan ke Klien',
     strategi_pillar_id: '',
     service_id: '',
+    di_luar_kind: 'strategi',
     di_luar_alasan: '',
   };
 }
@@ -158,22 +162,28 @@ function parseSkuSasaran(s: string): string[] {
 }
 
 function rowDraftToBody(d: RowDraft, lingkup: string): CreatePlanRowBody {
-  // PC-3 exactly-one origin (`ck_plan_row_asal_tunggal`). Plan klien (Satuan)
-  // rows anchor on the purchased Service, never on a Strategi pillar — there is
-  // no Strategi to anchor to (M6C §7/§9). Plan kontrak (Full Management) rows
-  // keep the pillar reference. Sending the wrong pair here is what forced every
-  // Plan Satuan row into "Di Luar Strategi" (owner QA, SVC-202608-0008).
+  // PC-3 exactly-one origin (`ck_plan_row_asal_tunggal`). Plan kontrak (Full
+  // Management) rows only ever get a pillar from their own STRG, or Di Luar
+  // Strategi. Plan klien (Satuan) rows have two legitimate anchors — a Service,
+  // or a pillar borrowed from ANY `Aktif` STRG the client has (owner decision
+  // 2026-08-28, DECISIONS.md) — and only fall back to an explicit "di luar"
+  // flag (AM's choice of kind) when neither is picked. Forcing every Plan
+  // Satuan row into `di_luar_strategi` regardless of what the AM picked was the
+  // original bug (owner QA, SVC-202608-0008).
   const isKlien = lingkup === 'klien';
-  const pillarId = !isKlien && d.strategi_pillar_id.trim() ? Number(d.strategi_pillar_id) : null;
+  const pillarId = d.strategi_pillar_id.trim() ? Number(d.strategi_pillar_id) : null;
   const serviceId = isKlien && d.service_id.trim() ? d.service_id.trim() : null;
-  const diLuar = isKlien ? serviceId === null : pillarId === null;
+  const hasOrigin = pillarId !== null || serviceId !== null;
+  const diLuarStrategi = !hasOrigin && (!isKlien || d.di_luar_kind === 'strategi');
+  const diLuarService = !hasOrigin && isKlien && d.di_luar_kind === 'service';
+  const diLuar = diLuarStrategi || diLuarService;
   return {
     channel: d.channel,
     pilar: d.pilar,
     strategi_pillar_id: pillarId,
     service_id: serviceId,
-    di_luar_strategi: !isKlien && diLuar,
-    di_luar_service: isKlien && diLuar,
+    di_luar_strategi: diLuarStrategi,
+    di_luar_service: diLuarService,
     di_luar_alasan: diLuar ? d.di_luar_alasan.trim() || null : null,
     aksi: d.aksi.trim(),
     kuota: d.kuota.trim() ? Number(d.kuota) : 0,
@@ -199,6 +209,12 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
   const [detail, setDetail] = useState<PlanDetail | null>(null);
   const [pillars, setPillars] = useState<StrategiPillar[]>([]);
   const [clientServices, setClientServices] = useState<ServiceLine[]>([]);
+  // Plan klien (Satuan) origin, part 2 (owner decision 2026-08-28, DECISIONS.md):
+  // besides the client's Services, the AM may also tie a row to a pillar of ANY
+  // STRG- approved for that client (e.g. a past/parallel Full-Management
+  // contract) — flattened across every `Aktif` Strategi so the dropdown can
+  // show one merged list.
+  const [clientPillars, setClientPillars] = useState<{ strategiId: string; pillar: StrategiPillar }[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -232,6 +248,21 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
         getClient(d.plan.client_id)
           .then((c) => setClientServices(c.client.services))
           .catch(() => setClientServices([]));
+        listStrategiQueue()
+          .then(async ({ data }) => {
+            const approved = data.filter(
+              (s) => s.client_id === d.plan.client_id && s.status === 'Aktif',
+            );
+            const perStrategi = await Promise.all(
+              approved.map((s) =>
+                getStrategi(s.id)
+                  .then((det) => det.pillars.map((pillar) => ({ strategiId: s.id, pillar })))
+                  .catch(() => []),
+              ),
+            );
+            setClientPillars(perStrategi.flat());
+          })
+          .catch(() => setClientPillars([]));
       }
     } catch (err) {
       setLoadError(errorMessage(err));
@@ -555,30 +586,82 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                   />
                 )}
               </label>
-              {/* PC-3 origin. Plan klien (Satuan) has no Strategi to descend
-                  from (M6C §7/§9) — its origin is the client's purchased
-                  Service instead, else the pillar dropdown below would always
-                  be empty and every row would silently default to Di Luar
-                  Strategi (owner QA, SVC-202608-0008). */}
+              {/* PC-3 origin. Plan kontrak (Full Management) only ever has one
+                  STRG to descend from. Plan klien (Satuan) has none of its own
+                  (M6C §7/§9) — its origin is either one of the client's
+                  Services, or a pillar borrowed from any `Aktif` STRG the
+                  client has (owner decision 2026-08-28, DECISIONS.md) — never
+                  a bare fallback to Di Luar Strategi regardless of what the AM
+                  actually picked (owner QA, SVC-202608-0008). */}
               {plan.lingkup === 'klien' ? (
                 <label className="field">
                   <span className="muted" style={{ fontSize: 12 }}>
-                    Turunan dari Service (PC-3) — kosongkan ⇒ Di Luar Service
+                    Turunan (PC-3) — Service atau Strategi klien, kosongkan ⇒ di luar
                   </span>
                   <select
-                    value={rowDraft.service_id}
-                    onChange={(e) => setRowDraft({ ...rowDraft, service_id: e.target.value })}
+                    value={
+                      rowDraft.service_id.trim()
+                        ? `service:${rowDraft.service_id}`
+                        : rowDraft.strategi_pillar_id.trim()
+                          ? `pillar:${rowDraft.strategi_pillar_id}`
+                          : ''
+                    }
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val.startsWith('service:')) {
+                        const serviceId = val.slice('service:'.length);
+                        setRowDraft((d) => (d ? { ...d, service_id: serviceId, strategi_pillar_id: '' } : d));
+                        return;
+                      }
+                      if (val.startsWith('pillar:')) {
+                        const pillarId = val.slice('pillar:'.length);
+                        const found = clientPillars.find((cp) => String(cp.pillar.id) === pillarId);
+                        setRowDraft((d) => {
+                          if (!d) return d;
+                          if (!found) return { ...d, strategi_pillar_id: pillarId, service_id: '' };
+                          const s = suggestRowFromPillar(found.pillar);
+                          return {
+                            ...d,
+                            strategi_pillar_id: pillarId,
+                            service_id: '',
+                            aksi: d.aksi.trim() ? d.aksi : s.aksi,
+                            kuota: d.kuota.trim() ? d.kuota : s.kuota,
+                            satuan: d.satuan.trim() ? d.satuan : s.satuan,
+                            divisi_pic: s.divisiPic ?? d.divisi_pic,
+                            sku_sasaran: d.sku_sasaran.trim() ? d.sku_sasaran : s.skuSasaran.join(', '),
+                          };
+                        });
+                        return;
+                      }
+                      setRowDraft((d) => (d ? { ...d, service_id: '', strategi_pillar_id: '' } : d));
+                    }}
                   >
-                    <option value="">— Di Luar Service —</option>
-                    {clientServices.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.id} · {s.name}
-                      </option>
-                    ))}
+                    <option value="">— Di luar (pilih jenis di bawah) —</option>
+                    {clientServices.length > 0 && (
+                      <optgroup label="Service">
+                        {clientServices.map((s) => (
+                          <option key={s.id} value={`service:${s.id}`}>
+                            {s.id} · {s.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {clientPillars.length > 0 && (
+                      <optgroup label="Strategi (STRG milik klien)">
+                        {clientPillars.map(({ strategiId, pillar: p }) => (
+                          <option key={p.id} value={`pillar:${p.id}`}>
+                            {strategiId} · #{p.id} {PILAR_LABEL[p.jenis] ?? p.jenis}
+                            {p.channel ? ` · ${p.channel}` : ''}
+                            {p.aksi ? ` · ${p.aksi.slice(0, 40)}` : ''}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
                   <span className="muted" style={{ fontSize: 11 }}>
-                    Pilih service yang klien beli — baris ini masuk lingkup service tersebut,
-                    bukan penyimpangan.
+                    Pilih service yang klien beli, atau pilar dari STRG klien ini — baris ini
+                    masuk lingkup itu, bukan penyimpangan. Memilih pilar Strategi juga mengisi
+                    Aksi, Kuota/Satuan &amp; Divisi PIC di bawah (bisa diubah).
                   </span>
                 </label>
               ) : (
@@ -622,12 +705,33 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                   </span>
                 </label>
               )}
+              {plan.lingkup === 'klien' &&
+                rowDraft.service_id.trim() === '' &&
+                rowDraft.strategi_pillar_id.trim() === '' && (
+                  <label className="field">
+                    <span className="muted" style={{ fontSize: 12 }}>Jenis di luar</span>
+                    <select
+                      value={rowDraft.di_luar_kind}
+                      onChange={(e) =>
+                        setRowDraft({ ...rowDraft, di_luar_kind: e.target.value as 'strategi' | 'service' })
+                      }
+                    >
+                      <option value="strategi">Di Luar Strategi</option>
+                      <option value="service">Di Luar Service</option>
+                    </select>
+                  </label>
+                )}
               {(plan.lingkup === 'klien'
-                ? rowDraft.service_id.trim() === ''
+                ? rowDraft.service_id.trim() === '' && rowDraft.strategi_pillar_id.trim() === ''
                 : rowDraft.strategi_pillar_id.trim() === '') && (
                 <label className="field">
                   <span className="muted" style={{ fontSize: 12 }}>
-                    Alasan {plan.lingkup === 'klien' ? 'di luar service' : 'di luar strategi'}
+                    Alasan{' '}
+                    {plan.lingkup === 'klien'
+                      ? rowDraft.di_luar_kind === 'service'
+                        ? 'di luar service'
+                        : 'di luar strategi'
+                      : 'di luar strategi'}
                   </span>
                   <input
                     value={rowDraft.di_luar_alasan}
