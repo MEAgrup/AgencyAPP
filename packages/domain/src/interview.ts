@@ -341,23 +341,30 @@ export async function getInterview(sql: Queryable, actor: Actor, id: string): Pr
   const { interview, ownerAm } = await loadScope(sql, id);
   if (!canReadInterview(actor, ownerAm)) throw new ForbiddenError(MSG_FORBIDDEN);
 
-  const risetRows = await sql<Record<string, unknown>[]>`
-    select interview_id, status, dimulai_pada, dimulai_oleh, disubmit_pada, disubmit_oleh, retroaktif
-      from interview_riset_awal where interview_id = ${id}`;
-  const jadwalRows = await sql<Record<string, unknown>[]>`
-    select tanggal_waktu, durasi_menit, format, lokasi_link, peserta_klien, peserta_mea,
-           catatan_persiapan, data_diminta
-      from interview_jadwal where interview_id = ${id}`;
-  const kualRows = await sql<Record<string, unknown>[]>`
-    select skor_kualifikasi, skor_per_blok, verdict_kualifikasi, hambatan_mendasar, prasyarat_status,
-           margin_bersih, margin_bersih_basis, margin_kotor, margin_derivasi_input, kualitas_data,
-           bep_roas, rasio_target, dihitung_pada
-      from interview_kualifikasi where interview_id = ${id}`;
-  const answerRows = await sql<Record<string, unknown>[]>`
-    select section, field_key, nilai_teks, nilai_angka, nilai_uang, nilai_bool, nilai_enum,
-           nilai_jsonb, sumber_angka, dasar_estimasi
-      from interview_answer where interview_id = ${id}
-     order by section, field_key`;
+  // P-2 (kecepatan loading): empat tabel anak, satu kunci `interview_id` yang
+  // sama, nol ketergantungan data di antaranya — dikirim bersama, biayanya satu
+  // round-trip alih-alih empat. Jawaban (`interview_answer`) adalah yang paling
+  // besar dan tumbuh dengan jumlah field form; menaruhnya di ekor rantai serial
+  // adalah persis gejala "makin banyak field, makin lama".
+  const [risetRows, jadwalRows, kualRows, answerRows] = await Promise.all([
+    sql<Record<string, unknown>[]>`
+      select interview_id, status, dimulai_pada, dimulai_oleh, disubmit_pada, disubmit_oleh, retroaktif
+        from interview_riset_awal where interview_id = ${id}`,
+    sql<Record<string, unknown>[]>`
+      select tanggal_waktu, durasi_menit, format, lokasi_link, peserta_klien, peserta_mea,
+             catatan_persiapan, data_diminta
+        from interview_jadwal where interview_id = ${id}`,
+    sql<Record<string, unknown>[]>`
+      select skor_kualifikasi, skor_per_blok, verdict_kualifikasi, hambatan_mendasar, prasyarat_status,
+             margin_bersih, margin_bersih_basis, margin_kotor, margin_derivasi_input, kualitas_data,
+             bep_roas, rasio_target, dihitung_pada
+        from interview_kualifikasi where interview_id = ${id}`,
+    sql<Record<string, unknown>[]>`
+      select section, field_key, nilai_teks, nilai_angka, nilai_uang, nilai_bool, nilai_enum,
+             nilai_jsonb, sumber_angka, dasar_estimasi
+        from interview_answer where interview_id = ${id}
+       order by section, field_key`,
+  ]);
 
   const j = jadwalRows[0];
   const k = kualRows[0];
