@@ -45,6 +45,7 @@ import {
   getPlanDetail,
   inheritBriefsFromPlan,
   returnPlanPeriode,
+  saveCatatanPembuka,
   submitPlanPeriode,
   type CreatePlanRowBody,
   type PlanDetail,
@@ -222,6 +223,7 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
 
   const [returnNote, setReturnNote] = useState('');
   const [rowDraft, setRowDraft] = useState<RowDraft | null>(null);
+  const [pembuka, setPembuka] = useState('');
 
   // Brief one-click: per-row { due_date, priority } the AM fills before inheriting.
   const [fills, setFills] = useState<Record<number, { due_date: string; priority: string }>>({});
@@ -233,6 +235,7 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
     try {
       const d = await getPlanDetail(id);
       setDetail(d);
+      setPembuka(d.plan.catatan_pembuka ?? '');
       // Origin dropdown for new rows. Plan kontrak (Full Management): the
       // Strategi's pillars. Plan klien (Satuan, M6C §7/§9) has no Strategi at
       // all — its origin is the client's purchased Services instead, else every
@@ -323,6 +326,8 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
   const canActivate = canWrite && (status === 'Terjadwal' || status === 'Menunggu Persetujuan');
   const canInherit = canWrite && status === 'Aktif';
 
+  const savePembuka = () => act(() => saveCatatanPembuka(id, pembuka));
+
   const submitRow = async () => {
     if (!rowDraft) return;
     await act(async () => {
@@ -385,8 +390,31 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
           {plan.tanggal_mulai} → {plan.tanggal_akhir} · {plan.jumlah_minggu} minggu ·{' '}
           Defisit terbawa: {formatIDR(detail.defisit_terbawa)}
         </p>
-        {plan.catatan_pembuka && (
-          <p style={{ fontSize: 13, marginTop: 8 }}>{plan.catatan_pembuka}</p>
+        {canSubmit ? (
+          <div style={{ marginTop: 8 }}>
+            <textarea
+              rows={2}
+              placeholder="Catatan pembuka (opsional)"
+              value={pembuka}
+              onChange={(e) => setPembuka(e.target.value)}
+              disabled={acting}
+              style={{ width: '100%' }}
+            />
+            <div style={{ marginTop: 4 }}>
+              <button
+                type="button"
+                className="btn btnSm"
+                disabled={acting || pembuka.trim() === (plan.catatan_pembuka ?? '').trim()}
+                onClick={() => void savePembuka()}
+              >
+                Simpan catatan pembuka
+              </button>
+            </div>
+          </div>
+        ) : (
+          plan.catatan_pembuka && (
+            <p style={{ fontSize: 13, marginTop: 8 }}>{plan.catatan_pembuka}</p>
+          )
         )}
       </div>
 
@@ -403,7 +431,7 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                 disabled={acting}
                 onClick={() => void act(() => submitPlanPeriode(id))}
               >
-                Ajukan periode 1
+                Aktifkan periode 1
               </button>
             )}
             {canActivate && (

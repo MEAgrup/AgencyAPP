@@ -152,7 +152,7 @@ Any service appearing in two Plans is a data-integrity bug, enforced by a DB con
 | Phases / big-date weighting | Strategi G-1 / G-2 | Not used. Weekly split is even |
 | Assumption register | Strategi D-8 | Not used |
 | Actuals | GMV manual + metrics auto | Same hybrid. Delivery-based Plans: quota completion auto from Briefs, no manual GMV |
-| Approval | First period only | First period only. New service joining ≥ threshold → SPV notified, not gated |
+| Approval | ~~First period only~~ None — AM activates period 1 directly, no SPV step (DEVIASI PRD 2026-08-28, `docs/DECISIONS.md`, applies identically to both Plan variants) | Same. New service joining ≥ threshold → SPV notified, not gated |
 | Period review (P-F) | Full 8 fields | Reduced: what worked, what didn't, carry-over, client talking points. No strategy-vs-execution diagnosis (there is no strategy to blame) |
 | Client visibility | Via the Strategi read-only link | Own read-only link, same token model, shareable rows only |
 
@@ -167,7 +167,7 @@ Everything else in 6B — row structure P-C, weekly derivation P-D, carry-over R
 3. System computes triggers and shows the recommendation (GB-1, GB-2).
 4. AM decides (GB-3). If it matches the recommendation, done. If not: reason (GB-5) + alternative monitoring if declining a recommended Plan (GB-6), and SPV is notified. Either way, Brief creation unlocks immediately.
 5. `Butuh Plan` → if the client has no Plan Satuan, one is opened with `tanggal_mulai_siklus` = today, period 1 in `Draft`, seeded with rows from the service's deliverable quota. If a Plan Satuan already exists and is `Aktif`, the service joins the current period as rows tagged `Masuk Tengah Periode`. If `Dorman`, it reactivates with a fresh period.
-6. Period 1 → SPV approval (once per Plan, not per service). Later periods auto-activate. Everything downstream follows 6B.
+6. ~~Period 1 → SPV approval (once per Plan, not per service).~~ Period 1 → AM activates directly, no SPV approval (DEVIASI PRD 2026-08-28, `docs/DECISIONS.md`). Later periods auto-activate. Everything downstream follows 6B.
 7. `Tanpa Plan` → Briefs are created from GB-8 directly. At GB-7's review date, the system re-asks G-B once.
 8. If a hard trigger appears later (target added, second division pulled in), `Plan Sekarang Disarankan` fires → AM re-answers. Escalation is forward-only.
 9. De-escalation (turning a Plan off mid-service) → SPV approval required. Existing Plan rows are closed with a recorded reason, not deleted.
@@ -180,7 +180,7 @@ Everything else in 6B — row structure P-C, weekly derivation P-D, carry-over R
 
 **Service 1 — Ads Management, 3 months, Rp 12jt/month, ROAS target 5.0.** Catalog tier: `Plan Ditentukan AM`. Triggers: duration > 1 month ✅ (hard), numeric target ✅ (hard), single division, value below threshold, no sequence dependency, monthly report owed ✅ (soft). Two hard triggers → **system recommends Butuh Plan**. AM agrees. No reason needed.
 
-→ `PLAN-2026-00412` opened for Sini Store, cycle start 14 Aug, period 1 = 14 Aug–13 Sep, `Draft`. Rows seeded from the Ads deliverable: campaign restructure, keyword expansion, weekly optimisation. Target: ROAS 5.0 (numeric KPI exists, so variance is performance-based). Floor price left empty — not relevant to ads-only work. SPV approves period 1.
+→ `PLAN-2026-00412` opened for Sini Store, cycle start 14 Aug, period 1 = 14 Aug–13 Sep, `Draft`. Rows seeded from the Ads deliverable: campaign restructure, keyword expansion, weekly optimisation. Target: ROAS 5.0 (numeric KPI exists, so variance is performance-based). Floor price left empty — not relevant to ads-only work. AM activates period 1 directly (no SPV approval, 2026-08-28 deviation).
 
 **Service 2 — One-off product photo, 40 photos, 3 weeks, Rp 6jt.** Catalog tier: `Tanpa Plan`, locked. No form. AM fills GB-8: 40 photos, deadline 5 Sep, Creative, expected result "listing 12 SKU Pareto pakai foto baru". Briefs created directly. This service does **not** enter `PLAN-2026-00412`.
 
