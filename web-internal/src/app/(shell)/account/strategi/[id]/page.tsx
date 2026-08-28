@@ -821,6 +821,15 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                       }}
                     />
                   )}
+                  {/* Owner QA (STRG-202608-0001): "Tempel dari Video Factory" fills
+                      Section B fields, but the AM opens it while still on Section A
+                      (before channels exist) — moved here so it can be applied first,
+                      before switching to Section B to review the result. */}
+                  <VideoFactoryImportPanel
+                    channels={drafts.channels}
+                    onApply={(channels) => patch('channels', channels)}
+                    disabled={!editable}
+                  />
                   <SectionA
                     detail={detail}
                     draft={drafts.konteks}
@@ -833,11 +842,6 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
               {active === 'B' && (
                 <>
                   {baselinePrefill && <BaselinePrefillPanel prefill={baselinePrefill} />}
-                  <VideoFactoryImportPanel
-                    channels={drafts.channels}
-                    onApply={(channels) => patch('channels', channels)}
-                    disabled={!editable}
-                  />
                   <SectionB
                     draft={drafts.channels}
                     onChange={(channels) => patch('channels', channels)}
