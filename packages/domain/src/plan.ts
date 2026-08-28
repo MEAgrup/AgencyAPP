@@ -65,6 +65,9 @@ export const MSG_PLAN_RETURN_NOTES_REQUIRED =
 /** PA-7 — the opening note is mandatory before a period may be submitted. */
 export const MSG_PLAN_CATATAN_PEMBUKA_REQUIRED =
   '[catatan pembuka wajib diisi sebelum periode Plan diajukan]';
+/** PA-7 is only ever editable on the Draft period 1, before it is submitted. */
+export const MSG_PLAN_CATATAN_PEMBUKA_STATUS =
+  '[catatan pembuka hanya dapat diubah selama periode masih Draft]';
 
 // --- B-04: Rule 9 asymmetric target adjustment ---------------------------
 
@@ -983,6 +986,39 @@ export async function loadPlanForUpdate(tx: TransactionSql, id: string): Promise
 /** canApprovePlan: SPV / Head of Account (Rule 3). The period-1 approval gate. */
 export function canApprovePlan(actor: Actor): boolean {
   return permission.isLead(actor, ACCOUNT_DIVISION);
+}
+
+/**
+ * saveCatatanPembuka — PA-7, the AM's opening note for a period. Writable only
+ * while the period is `Draft` (only period 1 is ever `Draft`; generation seeds
+ * 2..n at `Terjadwal`), so this is period 1's pre-submit note, not a running
+ * log — same shape as Rekap's RM-A6 `saveRecapPembuka`.
+ */
+export async function saveCatatanPembuka(
+  sql: Sql,
+  actor: Actor,
+  planId: string,
+  catatanPembuka: string,
+): Promise<Plan> {
+  const teks = (catatanPembuka ?? '').trim();
+  return withTransaction(sql, async (tx) => {
+    const plan = await loadPlanForUpdate(tx, planId);
+    const ownerAm = await ownerAmOfClient(tx, plan.clientId);
+    if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+    if (plan.status !== PLAN_DRAFT) throw new ConflictError(MSG_PLAN_CATATAN_PEMBUKA_STATUS);
+    await tx`update plan set catatan_pembuka = ${teks === '' ? null : teks} where id = ${planId}`;
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'catatan_pembuka_disimpan',
+      beforeJson: { catatan_pembuka: plan.catatanPembuka },
+      afterJson: { catatan_pembuka: teks },
+      createdBy: actor.employeeId,
+    });
+    return loadPlan(tx, planId);
+  });
 }
 
 /**

@@ -212,6 +212,11 @@ export function listPlansForContract(contractId: string): Promise<Plan[]> {
   return api.get<Plan[]>(`/contracts/${contractId}/plans`);
 }
 
+/** PA-7 — save the AM's opening note. Only while the period is Draft. */
+export function saveCatatanPembuka(id: string, catatanPembuka: string): Promise<Plan> {
+  return api.put<Plan>(`/plan/${id}/pembuka`, { catatan_pembuka: catatanPembuka });
+}
+
 export function submitPlanPeriode(id: string): Promise<Plan> {
   return api.post<Plan>(`/plan/${id}/submit`);
 }
