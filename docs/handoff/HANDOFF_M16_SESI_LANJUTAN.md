@@ -1,11 +1,10 @@
 # HANDOFF — Mulai dari sini untuk melanjutkan M16/M17
 
 > **Baca dokumen ini SEBELUM menyentuh apa pun terkait M16/M17.** Ia adalah
-> ringkasan navigasi ke tiga dokumen yang sudah ada di repo — tidak
-> menduplikasi isinya, hanya memberi tahu urutan baca dan apa yang benar-benar
-> tersisa. Ditulis 2026-08-29 setelah PR #247 dan #248 merge ke `main`, dan
-> setelah dokumen konsolidasi (`RENCANA_INDUK_M16_M17.md`) sendiri sempat
-> ditulis dua kali karena kondisi berubah di tengah sesi (lihat §4).
+> ringkasan navigasi ke dokumen yang sudah ada di repo — tidak menduplikasi
+> isinya, hanya memberi tahu urutan baca, apa yang benar-benar tersisa, dan
+> (baru di revisi ini) **pertanyaan konkret yang menunggu jawaban pemilik**,
+> lengkap contoh dan rekomendasi supaya menjawabnya cepat.
 
 ---
 
@@ -13,58 +12,260 @@
 
 **M16 (Lead Time per Tahapan Divisi) dan M17 (AI Optimizer) sudah selesai
 dibangun, sudah di-review, sudah merge ke `main`, dan sudah di produksi
-(`CDPS SG`).** **Update sesi berikutnya (masih 2026-08-29): LT-60 (input
-tahapan Live oleh tim internal), O61 (back-port 2 migrasi hardening), dan O62
+(`CDPS SG`).** Tiga putaran kerja sesudahnya — **LT-60** (input tahapan Live
+oleh tim internal), **O61** (back-port 2 migrasi hardening keamanan), **O62**
 (verifikasi migrasi `m6a_section_d` — ternyata BUKAN duplikat, sudah
-direkonsiliasi 2026-08-08 lewat O59) SEMUANYA SELESAI juga** — lihat
-`docs/DECISIONS.md` baris terbaru "LT-60 SELESAI" dan "O61/O62 DITUTUP".
-Yang tersisa sekarang: 8 keputusan implementasi menunggu konfirmasi pemilik
-(`LT-4`..`LT-11`), bobot/daftar kerja divisi baru (`LT-1`/`LT-2`), halaman FE
-Ads/Permintaan, dan satu fase yang sengaja diblokir security spec (`LT-61`).
-Tidak ada satu pun dari sisa ini yang menghalangi fitur berjalan di produksi
-hari ini.
+direkonsiliasi 2026-08-08 lewat O59) — **semuanya selesai, merge lewat
+[PR #250](https://github.com/MEAgrup/AgencyAPP/pull/250) ke `main`.**
+
+**Tidak ada satu pun sisa pekerjaan M16/M17 yang berupa kode.** Yang tersisa
+murni menunggu keputusan Anda: **11 pertanyaan** (`LT-1`..`LT-11`, §2 di
+bawah) plus satu item terblokir spec keamanan (`LT-61`, jangan disentuh) dan
+satu item implementasi yang menunggu tim mulai memakai fiturnya (halaman FE
+Ads/Permintaan). Nol yang mendesak — semuanya punya default aman sudah
+berjalan di produksi hari ini.
 
 ---
 
-## 1. Urutan baca (tiga dokumen, sudah cukup)
+## 1. Urutan baca
 
-1. **`docs/handoff/RENCANA_INDUK_M16_M17.md`** — baca ini dulu, penuh.
-   Berisi: kenapa modul ini ada, temuan repo yang membentuk desainnya,
-   23 keputusan pemilik lengkap dengan rasional, kamus 12 tabrakan istilah,
-   desain teknis 5 blok, analisis latensi review AM, riwayat eksekusi
-   (bagaimana PR #247 dan #248 benar-benar terjadi), dan daftar sisa
-   pekerjaan (§6).
-2. **`docs/backlog/LEADTIME_BACKLOG.md`** — status tiket **otoritatif**.
-   Setiap baris ✅ menyebut nama migrasi dan nama test persis. Kalau Anda
-   ragu apakah sesuatu sudah dibangun, cek di sini, bukan menerka dari kode.
-3. **`docs/DECISIONS.md`, cari `M16`** — rasional penuh tiap keputusan,
-   termasuk 8 yang masih terbuka (`LT-4`..`LT-11`) dan dua temuan keamanan
-   yang sudah ditambal (baris `🔴 KEAMANAN` dan `db push`, keduanya
-   2026-08-29).
-
-Kalau ketiganya sudah dibaca, Anda tahu semua yang perlu diketahui — jangan
-membaca ulang seluruh riwayat chat sebelumnya.
+1. **§2 di dokumen ini** — 11 pertanyaan yang butuh jawaban Anda, dengan
+   contoh + rekomendasi. Baca ini dulu kalau tujuan Anda menjawab, bukan
+   membangun.
+2. **`docs/handoff/RENCANA_INDUK_M16_M17.md`** — konteks/desain lengkap kalau
+   Anda ingin tahu *kenapa* modul ini dirancang begini sebelum menjawab.
+3. **`docs/backlog/LEADTIME_BACKLOG.md`** — status tiket **otoritatif**.
+   Setiap baris ✅ menyebut nama migrasi dan nama test persis.
+4. **`docs/DECISIONS.md`, cari `M16`** — rasional penuh tiap keputusan
+   termasuk teks asli ke-11 pertanyaan di §2 (dicari dengan kode `LT-1`
+   dst. di bagian `## Open`), plus baris "LT-60 SELESAI" dan "O61/O62
+   DITUTUP" untuk kerja sesi ini.
 
 ---
 
-## 2. Sisa pekerjaan — dalam urutan yang masuk akal dikerjakan
+## 2. Pertanyaan yang butuh keputusan Anda (11, diurut dari paling penting)
 
-Semuanya **single-track** (satu sesi, tidak dipecah paralel — keputusan
-pemilik 2026-08-29, dicatat `DECISIONS.md`).
+Format tiap baris: **apa yang dipilih hari ini** (default aman, sudah
+berjalan) → **pertanyaannya** → **contoh konkret** → **rekomendasi saya**.
+Menjawab salah satu TIDAK memblokir yang lain — bisa dicicil.
 
-**Sudah selesai (jangan diulang):** LT-60 (`StageTimelinePanel` + tombol
-"Lanjutkan" di halaman detail Brief Live Stream, `getStageOverview.nextStages`
-baru), O61 (2 berkas back-port ditambahkan), O62 (diverifikasi bukan
-duplikat — sudah rekonsiliasi O59 sejak 2026-08-08). Detail lengkap:
-`docs/DECISIONS.md` baris "LT-60 SELESAI" dan "O61/O62 DITUTUP", keduanya
-2026-08-29.
+### LT-1 — Bobot skor AM/divisi baru (perlu COO)
+
+**Sekarang:** `kecepatan_review_am` (skor AM) dan `role_type` AI
+Optimizer + Store Operation semua berbobot **0** — lead time-nya sudah
+terukur dan terlihat, tapi belum menggerakkan skor siapa pun.
+
+**Pertanyaan:** Berapa bobot `kecepatan_review_am` di profil skor AM?
+(Profil AM sekarang: Health 45 / Complaint Resolution Speed 22,5 / Revision
+Escalation 22,5 / Weekly-Recap Discipline 10 — total 100.)
+
+**Contoh:** Kalau Kecepatan Review diberi bobot **15%**, profil AM jadi
+Health ~38 / Complaint Resolution ~19 / Revision Escalation ~19 /
+Weekly-Recap ~9 / Kecepatan Review 15 (proporsional, Σ=100 tetap ditegakkan
+server). Efeknya: AM yang Health-nya kuat tapi lambat membuka brief (mis.
+rata-rata 2 hari sebelum dibuka) skornya **turun**; AM dengan Health biasa
+tapi selalu membuka hari itu juga skornya **naik** — walau perilaku
+klien-nya sendiri tidak berubah.
+
+**Rekomendasi:** Mulai dari **10–15%**, mengikuti pola carve RM-9a
+sebelumnya (Weekly-Recap Discipline dapat 10% dari redistribusi
+proporsional). Angka lebih kecil dari komponen existing (bukan mengambil
+porsi besar dari Health) supaya perubahan rangking tim tidak drastis di
+gelombang pertama — bisa dinaikkan lagi setelah dilihat sebulan.
+
+---
+
+### LT-2 — Daftar & urutan kerja Store Operation
+
+**Sekarang:** Divisi terdaftar, brief bisa didispatch, tapi pipeline
+kosong (tanpa tahapan) — sudah disebut tanpa urutan: **Banding
+Pelanggaran**, **Setup Promo Toko**, **QC Konten Toko**.
+
+**Pertanyaan:** (a) Urutan ketiganya? (b) Target hari kerja tiap tahap?
+(c) Ada tahapan lain yang belum disebut?
+
+**Contoh:** Kalau urutannya `Terima Kasus → Banding Pelanggaran → Setup
+Promo Toko → QC Konten Toko → Selesai` dengan target 1 hk tiap tahap
+(pola sama Creative), itu **satu migrasi seed** `stage_pipeline` +
+`stage_definition` + `sm_edges` — nol kode TS berubah (sudah dibuktikan
+Rule 12 di M16).
+
+**Rekomendasi:** Kalau belum ada preferensi kuat, pakai pola Creative (1 hk
+per tahap, linear tanpa cabang) sebagai draf pertama — mudah diubah lewat
+migrasi susulan begitu ada pengalaman nyata dari tim Store Operation.
+
+---
+
+### LT-3 — Target 14 hk KOL: per-tahap atau gabungan?
+
+**Sekarang:** `Follow up Video Creator` DAN `QC & Approval Video Creator`
+masing-masing target **14 hk** (jadi total bisa sampai 28 hk kalau
+keduanya penuh).
+
+**Pertanyaan:** Apakah 14 hk itu untuk **masing-masing** tahap (sekarang),
+atau untuk **gabungan** kedua tahap itu?
+
+**Contoh:** Kalau maksudnya gabungan, Creator yang follow-up-nya makan 10
+hk hanya tersisa 4 hk untuk QC — beda jauh dari 14 hk penuh per tahap.
+
+**Rekomendasi:** 14 hk untuk QC internal terasa longgar dibanding QC lain
+(semua 1 hk) — kemungkinan besar maksudnya **jendela gabungan** menunggu
+Creator. Kalau benar, saya rekomendasikan ganti jadi 14 hk gabungan (satu
+angka di seed, nol perubahan desain).
+
+---
+
+### LT-4 — Brief yang dikembalikan ke AM: perlu jalur kirim-ulang otomatis?
+
+**Sekarang:** `Brief Dikembalikan ke AM` adalah dead-end — begitu masuk
+situ, Brief mandek permanen di tahap itu. Divisi tetap bisa menulis alasan
+penolakan (`brief_review`), AM tetap bisa lihat kenapa ditolak; hanya
+"kirim ulang otomatis ke divisi" yang belum ada.
+
+**Pertanyaan:** Kalau AM memperbaiki Brief yang dikembalikan, alurnya
+sekarang gimana secara bisnis? Buat Brief baru? Atau perlu tombol
+"kirim ulang" yang membawa Brief yang sama balik ke `Cek Brief AM`?
+
+**Contoh:** (a) AM buat Brief baru dengan referensi ke yang lama (nol kode
+tambahan, sudah bisa hari ini). (b) Edge baru `Brief Dikembalikan ke AM →
+Cek Brief AM` (satu migrasi `sm_edges`, Brief yang sama dipakai ulang).
+
+**Rekomendasi:** (b) — satu migrasi kecil, dan lebih intuitif bagi AM
+daripada harus membuat Brief baru untuk pekerjaan yang sama.
+
+---
+
+### LT-5 — Live Stream sengaja tanpa `Cek Brief AM`?
+
+**Sekarang:** Live Stream langsung mulai di `Terima Sampel`, tidak pernah
+melewati state `Cek Brief AM` — walau PRD menulis gerbang itu "wajib di
+semua divisi". `brief_review` (keputusan terima/tolak) tetap bisa diisi
+untuk Live Stream, hanya tidak menggerakkan mesin tahapan.
+
+**Pertanyaan:** Ini pengecualian yang disengaja (karena Live dikerjakan
+vendor, bukan tim internal), atau kelalaian tabel yang perlu ditambal?
+
+**Contoh:** Kalau perlu ditambal, tinggal tambah state `Cek Brief AM` di
+awal pipeline Live (`Cek Brief AM → Terima Sampel → Briefing Klien Live →
+Live Start`) — satu migrasi seed, nol kode TS.
+
+**Rekomendasi:** Biarkan seperti sekarang (pengecualian disengaja). Live
+dikerjakan vendor lewat tim internal yang menginput datanya (LT-60) —
+`Cek Brief AM` di kasus lain adalah keputusan divisi "terima/tolak kerja",
+dan itu kurang bermakna untuk sesi vendor yang sudah dijadwalkan lewat
+proses booking terpisah.
+
+---
+
+### LT-6 — Konfirmasi arti `gate_pihak='AM'`
+
+**Sekarang:** `gate_pihak='AM'` diperlakukan sebagai gerbang **peran**
+(hanya AM pemilik klien/Director yang boleh menjalankan transisi keluar
+dari tahap itu) — bukan pengecualian dari lead time. Contoh: tahap
+"Approve" AI Optimizer SKU tetap terhitung lead time-nya walau hanya AM
+yang bisa memindahkannya.
+
+**Pertanyaan:** Konfirmasi — betul begitu maksudnya, bukan "tahap ini
+tidak dihitung lead time seperti gate KLIEN"?
+
+**Rekomendasi:** Interpretasi konservatif (tetap terukur) sudah dipilih dan
+sudah aman — kalau salah, dampaknya cuma under-count (bukan over-count),
+jadi ini pertanyaan konfirmasi murni, bukan sesuatu yang perlu diubah
+segera kalaupun jawabannya "ya sudah benar".
+
+---
+
+### LT-7 — Label tampil tahap ≠ kode tahap?
+
+**Sekarang:** `stage_definition.label` (nama yang tampil di UI) diisi
+identik dengan `stage_code` (kode internal) — mis. "Script" tampil sebagai
+"Script".
+
+**Pertanyaan:** Ada tahap yang labelnya perlu beda dari kodenya untuk
+tampilan ke user (mis. bahasa lebih formal/panjang)?
+
+**Rekomendasi:** Putuskan **sebelum** divisi pertama benar-benar
+mengandalkan tahapan (sekarang masih awal) — mengubah `stage_code` setelah
+Brief berjalan lebih mahal (migrasi data) daripada mengubah `label` (nol
+biaya). Kalau tidak ada kebutuhan sekarang, aman dibiarkan — kosmetik.
+
+---
+
+### LT-8 — Alasan pengembalian brief untuk divisi tanpa daftar terstruktur
+
+**Sekarang:** Live Stream, AI Optimizer, Store Operation memakai satu kode
+umum **"Brief kurang jelas"** sebagai alasan penolakan (Creative punya 5
+pilihan, KOL punya 2).
+
+**Pertanyaan:** Perlu daftar alasan lebih spesifik untuk ketiga divisi
+itu?
+
+**Contoh:** Untuk Store Operation mungkin relevan: "Data pelanggaran tidak
+lengkap", "Bukti foto/video tidak ada", dll — mirip pola Creative.
+
+**Rekomendasi:** Tunggu sampai daftar kerja Store Operation (LT-2) selesai
+diputuskan — alasan penolakan biasanya mengikuti bentuk pekerjaannya.
+Jawab bersamaan dengan LT-2, bukan terpisah.
+
+---
+
+### LT-9 — Perluas skor AM ke portofolio AI Optimizer/Store Operation?
+
+**Sekarang:** `kecepatan_review_am` (bobot 0, LT-1) sengaja BELUM
+mencakup Brief AI Optimizer/Store Operation, walau keduanya sejak M16
+sudah lewat mesin approval yang sama.
+
+**Pertanyaan:** Setelah bobot LT-1 ditetapkan, apakah portofolio yang
+dinilai perlu diperluas ke dua divisi baru ini juga?
+
+**Rekomendasi:** Jawab bersamaan dengan LT-1 — memperluas portofolio
+mengubah komponen skor AM LAIN (`amRevisionEscalation`, bobot 22,5%
+existing) untuk setiap AM yang kliennya punya Brief AI Optimizer/Store
+Operation, jadi lebih aman diputuskan sekali bersama angka bobot LT-1,
+bukan dua keputusan terpisah di waktu berbeda.
+
+---
+
+### LT-10 — Ads Management Date: kolom + satuan hari
+
+**Sekarang:** Kolom BARU (bukan `end_date` `ADC-` lama), dan hitungannya
+pakai **hari KALENDER** (bukan hari kerja seperti lead time M16 lainnya).
+
+**Pertanyaan:** Konfirmasi satuannya — kalender atau hari kerja? (Kalau
+salah tebak, perbaikannya butuh migrasi DATA pada `additional_days`/
+`end_date` yang sudah terhitung — lebih mahal daripada mengubah sekarang.)
+
+**Contoh:** Iklan hold 3 hari (termasuk 1 akhir pekan) — kalender: End
+Date maju 3 hari; hari kerja: End Date maju 2 hari (akhir pekan tidak
+dihitung).
+
+**Rekomendasi:** Pertahankan kalender — iklan berjalan 24/7 termasuk
+akhir pekan (beda dari kerja tim internal yang memang Sen-Jum), jadi
+kalender lebih masuk akal untuk "berapa lama iklan idle".
+
+---
+
+### LT-11 — Routing Permintaan (`REQ-`) selalu ke AM?
+
+**Sekarang:** Ketiga jenis Permintaan (Top-up Saldo, Contract Creator,
+Creator Payment Approval) semuanya di-routing default ke AM pemilik
+klien.
+
+**Pertanyaan:** Apakah AM tepat untuk semua tiga jenis, atau ada yang
+perlu routing berbeda (mis. Contract Creator ke tim legal/procurement)?
+
+**Rekomendasi:** AM selalu punya akses baca/proses kliennya jadi default
+ini tidak pernah salah-403 — aman dibiarkan kalau tidak ada kebutuhan
+spesifik. Hanya perlu diubah kalau ada tim/role lain yang secara bisnis
+harus memproses salah satu jenis Permintaan itu.
+
+---
+
+## 3. Sisa pekerjaan non-keputusan
 
 | # | Isi | Butuh apa | Mendesak? |
 |---|---|---|---|
-| — | Sodorkan `LT-4`..`LT-11` ke pemilik untuk konfirmasi | Membaca 8 baris `DECISIONS.md` §Open, mengajukan lewat `AskUserQuestion` atau kanal lain | Tidak — nol yang memblokir fitur berjalan |
-| LT-1 | Bobot `perf_kpi_weights` final untuk `kecepatan_review_am` + divisi baru | Keputusan COO, satu tulisan config, nol deploy | Tidak — bobot 0 aman selamanya sampai diputuskan |
-| LT-2 | Daftar & urutan pekerjaan Store Operation | Keputusan pemilik, lalu satu migrasi seed `stage_pipeline` | Tidak — divisi berfungsi tanpa pipeline |
-| — | Halaman FE penuh untuk Ads/Permintaan | Implementasi baru — PR #247 baru bawa type declaration wire | Kalau tim mulai memakai fitur Ads/Permintaan |
+| — | Halaman FE penuh untuk Ads/Permintaan | Implementasi baru — PR #247 baru bawa type declaration wire, belum ada UI | Kalau tim mulai memakai fitur Ads/Permintaan |
 | LT-61 | Login vendor sendiri (realm auth eksternal) | 🔴 **Terblokir** — butuh spec keamanan client-portal-style yang belum ditulis | **Jangan mulai** sampai spec itu ada |
 
 **Kalau Anda ditugaskan modul CDPS lain (bukan M16/M17):** dokumen-dokumen
@@ -73,49 +274,44 @@ di atas tidak relevan untuk Anda — cek `docs/prd/CDPS_Build_Plan.md` dan
 
 ---
 
-## 3. Jebakan yang sudah ditemukan — jangan diulangi
+## 4. Jebakan yang sudah ditemukan — jangan diulangi
 
 1. **Jangan jalankan `npx vitest run` dari root repo.** Melewati
    `packages/domain/vitest.config.ts` (`fileParallelism: false`, sengaja
    menyerialkan test karena berbagi satu koneksi Postgres) → ratusan
    false-failure. Pakai `npm run test --workspaces --if-present` dari root,
    atau `cd packages/domain && npx vitest run`.
-2. **Sebelum push ke branch designated manapun, `git fetch` dan cek riwayat
-   remote lebih dulu.** Sesi ini sempat menulis ulang status build dua kali
-   karena PR #247 lalu #248 merge ke `main` **di tengah sesi**, oleh sesi
-   lain, tanpa notifikasi — `git log origin/main` adalah kebenaran, bukan
-   asumsi dari chat sebelumnya.
-3. **Cek `mcp__github__list_pull_requests` / nomor PR yang disebut pemilik**
-   sebelum mempercayai status "belum di-push ke live" dari dokumen mana pun
-   yang lebih dari beberapa jam umurnya — migrasi produksi bisa berubah
-   status cepat di repo yang aktif seperti ini.
-4. **Setelah `apply_migration` ke Supabase live, selalu jalankan
-   `mcp__Supabase__get_advisors` (security).** Preseden O61 dan temuan
-   `stage_overdue_tick`/`permintaan_reminder_tick` (2026-08-29): Supabase
-   memasang `ALTER DEFAULT PRIVILEGES` yang memberi `anon`/`authenticated`
-   EXECUTE pada setiap fungsi baru — `REVOKE ... FROM PUBLIC` saja **tidak**
-   mencabutnya, dan tidak ada test Postgres polos (CI/lokal) yang bisa
-   menangkap ini.
-
----
-
-## 4. Kenapa ada dua versi `RENCANA_INDUK_M16_M17.md`
-
-Untuk transparansi kalau Anda melihat commit yang tampak menulis ulang
-dokumen yang sama dua kali dalam waktu singkat: sesi yang menulisnya mulai
-dari asumsi "Fase 2–4 belum dikerjakan" (benar pada titik itu), lalu
-menemukan PR #247 sudah merge, menulis ulang jadi "sudah merge ke `main`,
-belum di-push ke live", lalu menemukan PR #248 **juga** sudah merge,
-menulis ulang lagi jadi "sudah di produksi". Ini bukan indikasi dokumen
-tidak stabil — ini bukti bahwa dokumen tersebut ditulis berdasarkan
-`git log origin/main` nyata di setiap titik, bukan diasumsikan. Versi yang
-ada di `main` sekarang adalah versi final yang sudah diverifikasi terhadap
-PR #248.
+2. **Menjalankan full suite berkali-kali di DB lokal yang sama (tanpa
+   rebuild) menghasilkan flaky palsu** — beberapa test (mis.
+   `client.test.ts`, `admin.test.ts`) meng-COUNT baris berdasar ID yang
+   dibuat `Date.now() % 100000` per proses; rerun cepat berturut-turut
+   bisa collide dengan sisa baris run sebelumnya. Kalau lihat kegagalan
+   count-mismatch, `./scripts/db-rebuild.sh --yes` dulu sebelum menyimpulkan
+   ada bug — jangan panik duluan.
+3. **Sebelum push ke branch designated manapun, `git fetch` dan cek riwayat
+   remote lebih dulu.** `git log origin/main` adalah kebenaran, bukan
+   asumsi dari chat sebelumnya — migrasi produksi bisa berubah status
+   cepat di repo yang aktif seperti ini.
+4. **Setelah `apply_migration` ke Supabase live ATAU menemukan drift
+   live-only (O61/O62-style), selalu jalankan `mcp__Supabase__get_advisors`
+   (security) dan baca `schema_migrations.statements` langsung — jangan
+   menerka dari nama migrasi.** O62 sesi sebelumnya salah diagnosis
+   ("duplikat") justru karena tidak membaca `statements`-nya sampai tuntas;
+   isinya ternyata dua migrasi BERBEDA yang sudah direkonsiliasi migrasi
+   lain (O59) yang sudah ada di repo.
+5. **Kalau back-port migrasi riwayat live-only, nama berkas HARUS
+   version+name persis dari `schema_migrations`** (query
+   `select version, name from supabase_migrations.schema_migrations`),
+   **BUKAN** timestamp "seharusnya" yang disebut di komentar migrasi asli.
+   Salah pilih nama membuat `supabase db push` mengira itu migrasi baru dan
+   meng-apply-nya kedua kali dengan version terpisah — persis kelas drift
+   yang back-port itu dimaksudkan menutup (lihat
+   `20260815094622_harden_job_execute_surface.sql` untuk contoh lengkap).
 
 ---
 
 ## 5. Kontak/otorisasi
 
 Pemilik: Nerissa (nerissa.arv@meagency.co.id) dan Yohan
-(yohanagustian@meagency.co.id, juga akun GitHub yang merge PR #247/#248).
-Keduanya berwenang menjawab `LT-4`..`LT-11` dan menetapkan bobot LT-1.
+(yohanagustian@meagency.co.id, juga akun GitHub yang merge PR #247/#248/#250).
+Keduanya berwenang menjawab §2 (`LT-1`..`LT-11`).
