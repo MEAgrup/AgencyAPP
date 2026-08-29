@@ -1,7 +1,11 @@
 # LEAD-TIME BACKLOG (M16 + M17)
 
+> **Konteks/keputusan/desain lengkap: `docs/handoff/RENCANA_INDUK_M16_M17.md`.**
+> Berkas ini tetap status tiket **otoritatif** (jangan diduplikasi ke
+> dokumen lain) — perbarui di sini setiap tiket baru selesai.
+>
 > Spec: `docs/prd/CDPS_Module16_Lead_Time.md`, `docs/prd/CDPS_Module17_AI_Optimizer.md`
-> Keputusan: `docs/DECISIONS.md` baris 2026-08-28 (6 baris Decided + LT-1/LT-2/LT-3 Open)
+> Keputusan: `docs/DECISIONS.md` baris 2026-08-28/29 (cari `M16`) — 7 baris Decided + LT-1/2/3 + LT-4..LT-12/LT-14 Open
 > Mesin: `docs/STATE_MACHINES.md` §18 (tahapan) + §19 (`REQ-`)
 
 ## 0. Status

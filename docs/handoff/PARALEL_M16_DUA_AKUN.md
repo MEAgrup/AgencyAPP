@@ -1,3 +1,20 @@
+# M16 / M17 — Eksekusi Paralel 2 Akun Claude — ✅ SELESAI DIPAKAI, jangan mulai kerja dari sini
+
+> **Pekerjaan yang direncanakan dokumen ini SUDAH DIEKSEKUSI, DIGABUNG, dan
+> MERGE ke `main`** lewat PR #247 (2026-08-29 08:13:54Z, commit `d231a71`).
+> Akun A benar-benar memakai branch `claude/m16-akun-a-tahapan-metrik`
+> (LT-20..LT-33); pekerjaan Akun B (LT-40..LT-55) masuk lewat commit
+> langsung ke branch integrasi. Satu keputusan tertunda (**LT-13**)
+> diputuskan pemilik di tengah jalan dan sudah masuk PR yang sama.
+>
+> **Untuk konteks/status M16/M17 sekarang, baca
+> `docs/handoff/RENCANA_INDUK_M16_M17.md` dan
+> `docs/backlog/LEADTIME_BACKLOG.md`** — dokumen ini dipertahankan hanya
+> sebagai catatan historis (rasional desain Tahap F di §0-§1 masih akurat).
+> **Jangan pakai dokumen ini untuk memulai pekerjaan baru** — keputusan
+> pemilik 2026-08-29: pekerjaan M16/M17 selanjutnya dikerjakan
+> single-track, tidak dipecah ke akun paralel lagi.
+
 # M16 / M17 — Eksekusi Paralel 2 Akun Claude
 
 > Spec: `docs/prd/CDPS_Module16_Lead_Time.md`, `CDPS_Module17_AI_Optimizer.md`
