@@ -62,6 +62,8 @@ export interface StageOverview {
   total_hari_kerja: number | null;
   tahap_aktif: string | null;
   intake: StageIntake;
+  /** States one `advanceStage` call away from `production_stage` — drives which buttons render. */
+  allowed_transitions: string[];
 }
 
 export function getBriefStage(briefId: string): Promise<StageOverview> {

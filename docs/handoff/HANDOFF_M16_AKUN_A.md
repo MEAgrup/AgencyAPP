@@ -176,7 +176,7 @@ untuk pemilik** saat langkah penggabungan / saat bobot mulai ditetapkan.
 - LT-25 ✅ `GET/POST .../briefs/{id}/stage[/review|/advance|/sla]`, wire di ANCHOR WIRE A, `StageOverviewWire`/`StageDefWire`/`StageLeadTimeRowWire` + FE mirror `web-internal/src/lib/stage.ts` (dibutuhkan `shape-parity.test.ts` — lihat §4 baru di bawah).
 - LT-26 ✅ `task.ts` `validateStageComplete` + `MSG_STAGE_NOT_COMPLETE`.
 - LT-27 ✅ `account.insertBrief` (brief_dispatched), `stage.reviewBrief` (diterima/dikembalikan), `stage.advanceStage` (butuh_aksi_am), `stage_overdue_tick` SQL (lewat_target) + `/internal/stage/tick` route + pg_cron 01:00 UTC.
-- LT-28 ✅ (sebagian) `web-internal/src/components/StageTimelinePanel.tsx` dipasang di `account/creative/kol` brief detail — timeline read-only + aksi Cek Brief AM. **Belum**: tombol `advanceStage` di FE (butuh route baca "edge berikutnya yang valid dari stage sekarang", belum ada endpoint untuk itu — `getStageOverview` tidak mengekspos `sm_edges`). Dicatat sebagai lanjutan, bukan diselesaikan diam-diam dengan menebak.
+- LT-28 ✅ **SELESAI PENUH** (lanjutan sesi ini). `web-internal/src/components/StageTimelinePanel.tsx` dipasang di `account/creative/kol` brief detail — timeline read-only + aksi Cek Brief AM + tombol `advanceStage` generik. Yang menutup celah "belum ada endpoint next-edges": `getStageOverview` sekarang mengembalikan `allowedTransitions` (`stage.ts`) lewat `engine.allowedTransitions` (`packages/domain/src/engine.ts`, LAMA — dipakai `sales.ts` untuk `AttemptDetail.allowedTransitions`, pola yang sama persis, nol helper baru) atas `private.sm_allowed_transitions` (SECURITY DEFINER, RLS-aman). Diwire ke `StageOverviewWire.allowed_transitions` (ANCHOR WIRE A) + FE mirror `stage.ts`. Panel merender satu tombol per edge yang dikembalikan — DB yang sama menolak `sm_transition` juga yang memutuskan tombol mana yang ada, jadi tombol dan guard tidak pernah berselisih. Gerbang render (bukan penegakan — server tetap final): `canReview` (staff/lead divisi eksekusi atau Director) untuk stage BUKAN `gate_pihak='AM'`; prop baru `isAmOrDirector` (dipasang di halaman `account/briefs/[id]` dari `isAMReviewer` yang sudah ada) untuk stage YANG `gate_pihak='AM'` (mis. `Approve` di `AI_OPT_SKU`) — populasi ini tidak tersedia di `creative`/`kol` sehingga defaultnya `false` di sana, aman karena pipeline mereka hari ini tidak punya stage gate AM. Tombol pada `Cek Brief AM` sengaja disembunyikan (aksi Terima/Kembalikan yang sudah ada yang menjalankannya, bukan tombol generik — dua jalur untuk transisi yang sama akan membingungkan).
 - LT-30 ✅ `task.ts` `turnaroundKerjaHours`/`waktuAmBelumBukaHours`/`waktuAmReviewHours`/`speedScoreKerjaPct` — `intervalMs` (generalisasi `blockedMs`, **bug ditemukan+diperbaiki saat menulis tes**: pencarian "state tujuan tertentu" salah mengaitkan siklus revisi; diganti "transisi berikutnya" apa pun state-nya).
 - LT-31 ✅ `creativeCandidates`/`adsCandidates`/`briefDivisionCandidates` memakai `speedScoreKerjaPct`. Periode berjalan otomatis ikut karena `previewCurrent` selalu menghitung ulang live; snapshot periode tertutup (`performance_snapshots`) fire-once + immutable, tidak tersentuh.
 - LT-32 ✅ `COMP_KECEPATAN_REVIEW_AM`, `amReviewSpeedCandidate` (berbagi gather `amPortfolioApprovedInPeriod` dengan `amRevisionEscalation`), seed bobot 0 `20260830040000_m16_perf_weights_zero.sql`.
@@ -211,6 +211,33 @@ Test suite penuh dengan `DATABASE_URL` diset ke DB itu:
   dengan endpoint + tipe FE baru terdaftar)
 - `web-internal` 374/374, `tsc --noEmit` bersih di kelima paket, `eslint`
   bersih untuk seluruh berkas yang disentuh.
+
+**Re-verifikasi sesi lanjutan (LT-28 `advanceStage` FE, lihat §3)** — ulang
+dari nol, `scripts/db-rebuild.sh --yes`: 132 migrasi, gate/invariant identik
+di atas lolos lagi. Test suite penuh:
+- `@cdps/core` 290/290, `@cdps/db` 53/53 (tidak disentuh sesi ini).
+- `@cdps/domain` **1517/1517** (1 e2e skip) — `stage.test.ts` 17→**18**
+  (assersi `allowedTransitions` ditambah ke test existing + satu test baru
+  untuk kasus `[]`: no-pipeline/terminal/`Brief Dikembalikan ke AM`).
+- `@cdps/api` 383/383 (`shape-parity`/`route-parity`/`body-parity` tetap
+  hijau dengan `StageOverviewWire.allowed_transitions` baru), `eslint -w
+  @cdps/api --max-warnings 0` bersih.
+- `web-internal` 374/374 (tidak ada test komponen baru — `StageTimelinePanel`
+  tidak pernah punya test unit sebelumnya, pola berkas ini konsisten dengan
+  `src/components/strategi/*.test.ts` yang hanya menguji helper murni, bukan
+  render), `tsc --noEmit` bersih, `eslint` bersih untuk berkas yang disentuh
+  (satu error pre-existing tak terkait di `admin/employees/page.tsx`,
+  diverifikasi ada juga sebelum perubahan sesi ini).
+
+Dua test domain (`admin.test.ts` "hari libur (integration)", `client.test.ts`
+"Hold Service two-step") sempat gagal saat suite dijalankan BERULANG kali
+tanpa `db-rebuild.sh` di antaranya (audit_log terakumulasi lintas run pada DB
+lokal yang sama) — bukan flake lintas-file paralel, dan bukan disebabkan
+perubahan sesi ini: direproduksi identik pada `git stash` (kode SEBELUM sesi
+ini) dengan DB yang sama, dan hilang total setelah `db-rebuild.sh --yes`
+ulang. Dicatat di sini supaya sesi berikutnya tidak salah menyimpulkan
+regresi — cukup rebuild DB sebelum re-run, jangan reuse DB lintas beberapa
+`npm test` berturut-turut untuk file yang menulis literal/tanggal tetap.
 
 Tidak ada tes existing yang assertion-nya diubah — hanya fixture yang
 diperluas field barunya (lihat §4).

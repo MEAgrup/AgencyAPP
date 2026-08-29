@@ -215,6 +215,7 @@ export default function BriefDetailPage({ params }: { params: Promise<{ id: stri
         briefId={brief.id}
         assignedDivision={brief.assigned_division}
         canReview={!readOnly && (role?.division === brief.assigned_division || !!role?.director)}
+        isAmOrDirector={isAMReviewer}
       />
 
       {isAMReviewer && (canReview || canDecide) && (

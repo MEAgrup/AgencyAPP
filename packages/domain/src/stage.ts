@@ -24,6 +24,7 @@
 
 import { division, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
+import { allowedTransitions } from './engine';
 import { computeStageLeadTime, type StageDef, type StageLeadTimeSummary } from './leadtime';
 import { loadTransitions, transitionsOf } from './transitions';
 
@@ -425,6 +426,17 @@ export interface StageOverview {
   productionStage: string | null;
   review: { keputusan: Keputusan; alasanKode: string | null; catatan: string; actorEmployeeId: string; createdAt: Date } | null;
   leadTime: StageLeadTimeSummary;
+  /**
+   * States reachable in one `advanceStage` call from the CURRENT `productionStage`
+   * (`engine.allowedTransitions`, the same edge table `sm_transition` enforces —
+   * LT-28 follow-up, HANDOFF_M16_AKUN_A.md §3). `[]` when there is no pipeline
+   * (Rule 12) or the current stage is terminal/dead-end (`Brief Dikembalikan ke
+   * AM`). This answers "is the EDGE legal", not "may THIS actor take it" — the
+   * `gate_pihak='AM'` role gate is still enforced by `advanceStage` itself, so
+   * the FE button can render optimistically and still get the exact BI message
+   * back on a 403.
+   */
+  allowedTransitions: string[];
 }
 
 /** getStageOverview is the GET-route composition: defs + review + full lead-time timeline. */
@@ -469,8 +481,14 @@ export async function getStageOverview(sql: Queryable, actor: Actor, briefId: st
     r.created_at, review?.createdAt ?? null,
   );
 
+  const nextEdges =
+    r.stage_pipeline_code === null || r.production_stage === null
+      ? []
+      : await allowedTransitions(sql, (await pipelineByCode(sql, r.stage_pipeline_code)).machineName, r.production_stage);
+
   return {
     briefId: r.id, stagePipelineCode: r.stage_pipeline_code, productionStage: r.production_stage, review, leadTime,
+    allowedTransitions: nextEdges,
   };
 }
 

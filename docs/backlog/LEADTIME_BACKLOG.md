@@ -56,7 +56,7 @@ Dua tes diubah, keduanya asersi keanggotaan daftar: `notification.test.ts` v11�
 | LT-25 | ✅ Route `apps/api` + `*ToWire` | `GET/POST .../briefs/{id}/stage[/review]`, ANCHOR WIRE A. `KNOWN_GAPS` tetap kosong |
 | LT-26 | ✅ Guard `task.submitTask` | `MSG_STAGE_NOT_COMPLETE`, satu arah lewat `sm_terminal_states` |
 | LT-27 | ✅ 5 event notifikasi + tick harian | `stage_overdue_tick` (`20260830030000`), idempoten lewat `notifications` (nol kolom/tabel penanda baru — HANDOFF §1.6) |
-| LT-28 | ✅ FE: `StageTimelinePanel` (account/creative/kol brief detail) | Read-only timeline + Cek Brief AM. `advanceStage` UI menyusul (belum ada route baca "next edges") |
+| LT-28 | ✅ FE: `StageTimelinePanel` (account/creative/kol brief detail) | Read-only timeline + Cek Brief AM + tombol `advanceStage` generik (per-edge, dari `allowedTransitions`/`engine.ts` — pola sama `sales.AttemptDetail`) |
 
 **Uji kunci:** `computeMetrics` untuk Brief yang sama wajib **identik** dengan sebelum fitur ini ada (bukti namespace `brief_stage` bekerja).
 

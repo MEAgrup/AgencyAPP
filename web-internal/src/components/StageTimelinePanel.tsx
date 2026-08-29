@@ -7,13 +7,15 @@
 // Read-only timeline (PRD §7 Success Metric 1: "AM bisa menyebutkan tanpa
 // bertanya ke divisi tahap mana yang sedang berjalan dan sudah berapa hari
 // kerja") + the Cek Brief AM intake decision (PRD §2 Rule 10) when the
-// caller says the viewer may act on it — `advanceStage` itself is NOT wired
-// here yet (needs the pipeline's possible next edges exposed by a read
-// route; left for a follow-up, noted in HANDOFF_M16_AKUN_A.md).
+// caller says the viewer may act on it, + a generic `advanceStage` button
+// for every OTHER edge (LT-28 follow-up: `allowed_transitions` now comes
+// from the server — `engine.allowedTransitions` over the same `sm_edges`
+// table `sm_transition` enforces, so a button never renders for an edge
+// the DB would refuse).
 
 import { useCallback, useEffect, useState } from 'react';
 import { errorMessage } from '@/lib/api';
-import { getBriefStage, reviewBriefStage, type StageOverview } from '@/lib/stage';
+import { advanceBriefStage, getBriefStage, reviewBriefStage, type StageOverview } from '@/lib/stage';
 
 const STATUS_BADGE: Record<string, string> = {
   belum_mulai: 'badge-gray',
@@ -49,12 +51,15 @@ export default function StageTimelinePanel({
   briefId,
   assignedDivision,
   canReview,
+  isAmOrDirector = false,
 }: {
   briefId: string;
   /** brief.assigned_division — picks the alasan_kode list for "Dikembalikan". */
   assignedDivision: string;
-  /** true when the viewer is division staff/lead (or Director) for this Brief — shows the Cek Brief AM actions. */
+  /** true when the viewer is division staff/lead (or Director) for this Brief — shows the Cek Brief AM actions AND the generic advance buttons for any stage that is not AM-gated. */
   canReview: boolean;
+  /** true when the viewer is the owning AM (or Director) — the only population `advanceStage` allows OUT of a `gate_pihak='AM'` stage (HANDOFF_M16_AKUN_A.md §1.3). Defaults false: hidden unless a page explicitly knows it is showing the AM their own Brief. */
+  isAmOrDirector?: boolean;
 }) {
   const [overview, setOverview] = useState<StageOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,6 +69,8 @@ export default function StageTimelinePanel({
   const [showReturnForm, setShowReturnForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [advancingTo, setAdvancingTo] = useState<string | null>(null);
+  const [advanceError, setAdvanceError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -91,6 +98,19 @@ export default function StageTimelinePanel({
       setActionError(errorMessage(err));
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleAdvance(to: string) {
+    setAdvanceError(null);
+    setAdvancingTo(to);
+    try {
+      await advanceBriefStage(briefId, to);
+      await load();
+    } catch (err) {
+      setAdvanceError(errorMessage(err));
+    } finally {
+      setAdvancingTo(null);
     }
   }
 
@@ -132,6 +152,14 @@ export default function StageTimelinePanel({
 
   const reasons = REASON_CODES[assignedDivision] ?? ['Brief kurang jelas'];
   const pendingReview = overview.review === null && overview.production_stage === 'Cek Brief AM';
+  // Cek Brief AM's own outgoing edges are driven by the review actions above,
+  // not this generic list — showing both would offer two competing ways to
+  // do the same thing. A gate_pihak='AM' current stage restricts the button
+  // to the owning AM/Director (server enforces regardless; this only decides
+  // whether to render it at all).
+  const currentStageGate = overview.stages.find((s) => s.stage_code === overview.tahap_aktif)?.gate_pihak ?? null;
+  const canAdvance = currentStageGate === 'AM' ? isAmOrDirector : canReview;
+  const showAdvance = canAdvance && overview.production_stage !== 'Cek Brief AM' && overview.allowed_transitions.length > 0;
 
   return (
     <section className="card">
@@ -193,6 +221,25 @@ export default function StageTimelinePanel({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {showAdvance && (
+        <div className="stack" style={{ gap: 8 }}>
+          {advanceError && <div className="alert alertError" role="alert">{advanceError}</div>}
+          <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+            {overview.allowed_transitions.map((to) => (
+              <button
+                key={to}
+                type="button"
+                className="btn btnSecondary"
+                disabled={advancingTo !== null}
+                onClick={() => handleAdvance(to)}
+              >
+                {advancingTo === to ? 'Memproses...' : `→ ${to}`}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

@@ -212,6 +212,10 @@ describeDb('advanceStage', () => {
     const { svcId, amId } = await fixture();
     const b = await createBrief(sql, accountStaff(amId), svcId, creativeBrief());
     await reviewBrief(sql, creativeStaff(), b.id, { keputusan: 'Diterima' }); // → Script
+    // `allowedTransitions` (LT-28 follow-up) is the SAME edge table the
+    // ConflictError below is enforced against — the button set and the guard
+    // can never drift apart.
+    expect((await getStageOverview(sql, accountStaff(amId), b.id)).allowedTransitions).toEqual(['QC internal']);
 
     await expect(advanceStage(sql, creativeStaff(), b.id, 'Jadwal Posting')).rejects.toBeInstanceOf(ConflictError); // Script → Jadwal Posting is not an edge
 
@@ -219,6 +223,25 @@ describeDb('advanceStage', () => {
     expect(res.ok).toBe(true);
     const overview = await getStageOverview(sql, accountStaff(amId), b.id);
     expect(overview.productionStage).toBe('QC internal');
+  });
+
+  it('allowedTransitions is [] at a Rule-12 no-pipeline Brief, at the pipeline terminal, and at the Brief Dikembalikan ke AM dead-end', async () => {
+    const { svcId, amId } = await fixture();
+
+    const bNoPipeline = await createBrief(sql, accountStaff(amId), svcId, storeOpsBrief());
+    await registerEmployee('ZZ-STG-SO4', 'Store Operation', 'ZZ-STG-SO4-JAB');
+    expect((await getStageOverview(sql, accountStaff(amId), bNoPipeline.id)).allowedTransitions).toEqual([]);
+
+    const bTerminal = await createBrief(sql, accountStaff(amId), svcId, creativeBrief());
+    await reviewBrief(sql, creativeStaff(), bTerminal.id, { keputusan: 'Diterima' });
+    for (const s of ['QC internal', 'Shooting', 'Edit', 'Jadwal Posting']) {
+      await advanceStage(sql, creativeStaff(), bTerminal.id, s);
+    }
+    expect((await getStageOverview(sql, accountStaff(amId), bTerminal.id)).allowedTransitions).toEqual([]);
+
+    const bReturned = await createBrief(sql, accountStaff(amId), svcId, creativeBrief());
+    await reviewBrief(sql, creativeStaff(), bReturned.id, { keputusan: 'Dikembalikan', alasanKode: 'Sampel belum diterima' });
+    expect((await getStageOverview(sql, accountStaff(amId), bReturned.id)).allowedTransitions).toEqual([]);
   });
 
   it("gate_pihak='AM' restricts the transition OUT of that stage to the owning AM or Director", async () => {

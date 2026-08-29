@@ -6065,6 +6065,8 @@ export interface StageOverviewWire {
   total_hari_kerja: number | null;
   tahap_aktif: string | null;
   intake: StageIntakeWire;
+  /** States one `advanceStage` call away from `production_stage` (LT-28 follow-up). Always an array, never null. */
+  allowed_transitions: string[];
 }
 
 export function stageOverviewToWire(o: stage.StageOverview): StageOverviewWire {
@@ -6101,6 +6103,7 @@ export function stageOverviewToWire(o: stage.StageOverview): StageOverviewWire {
       keluar_pada: o.leadTime.intake.keluarPada === null ? null : o.leadTime.intake.keluarPada.toISOString(),
       hari_kerja: o.leadTime.intake.hariKerja,
     },
+    allowed_transitions: o.allowedTransitions,
   };
 }
 
