@@ -74,6 +74,7 @@ describe('masterServiceToWire', () => {
       active: true,
       requiresStrategyPlan: false,
       planTier: 'ditentukan_am',
+      durasiJasa: 30,
       versionNo: 3,
       effectiveFrom: '2026-07-01',
     };
@@ -93,6 +94,7 @@ describe('masterServiceToWire', () => {
       active: true,
       requires_strategy_plan: false,
       plan_tier: 'ditentukan_am',
+      durasi_jasa: 30,
       version_no: 3,
       effective_from: '2026-07-01',
     });
@@ -425,7 +427,8 @@ describe('M8 ads wire mappers', () => {
     const c: ads.Campaign = {
       id: 'ADC-202607-0001', briefId: 'BRF-1', clientId: 'CLI-1', platform: 'Shopee Ads', objective: 'Sales',
       budget: 8000000, budgetDisplay: 'Rp. 8.000.000,00', startDate: '2026-07-01', endDate: '2026-08-31',
-      targetKpi: 'ROAS ≥ 4x', status: '[Active]', totalSpend: 1000000, totalSpendDisplay: 'Rp. 1.000.000,00',
+      targetKpi: 'ROAS ≥ 4x', status: '[Active]', tipeIklan: 'GMV Max Product', additionalDays: 0,
+      totalSpend: 1000000, totalSpendDisplay: 'Rp. 1.000.000,00',
       totalGmv: 4000000, totalGmvDisplay: 'Rp. 4.000.000,00', roas: 4, roasDisplay: '4x', linkedAssetIds: ['AST-1'],
       metricEntryCount: 1, optimizationCount: 0, underperformingStreak: 0, escalationFlagged: false,
       createdBy: 'ZZ-ADV', createdAt: new Date('2026-07-01T00:00:00.000Z'),
@@ -437,6 +440,8 @@ describe('M8 ads wire mappers', () => {
     expect(w.linked_asset_ids).toEqual(['AST-1']);
     expect(w.escalation_flagged).toBe(false);
     expect(w.created_at).toBe('2026-07-01T00:00:00.000Z');
+    expect(w.tipe_iklan).toBe('GMV Max Product');
+    expect(w.additional_days).toBe(0);
   });
 
   it('metricEntryToWire + optimizationToWire map their records', () => {

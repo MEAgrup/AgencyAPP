@@ -211,7 +211,7 @@ jobs:
             "do \$\$ begin
                if (select count(*) from employees) <> 10 then raise exception 'expected 10 employees'; end if;
                if (select count(*) from role_mappings) <> 12 then raise exception 'expected 12 role_mappings'; end if;
-               if (select count(*) from master_services) <> 4 then raise exception 'expected 4 master_services (3 seed + Komisi dari migrasi 20260806050000; seed not idempotent?)'; end if;
+               if (select count(*) from master_services) <> 6 then raise exception 'expected 6 master_services (3 seed + Komisi 20260806050000 + AI Video + Optimasi SKU 20260831070000 M17 LT-53; seed not idempotent?)'; end if;
                if (select count(*) from demo_tasks) <> 1 then raise exception 'expected 1 demo_task (seed not idempotent?)'; end if;
              end \$\$;"
       # KEEP IN STEP WITH `scripts/db-rebuild.sh` — the same gate lives in both

@@ -14,6 +14,7 @@ import { createClient, type Sql } from '@cdps/db';
 import {
   canManageCampaign,
   canViewCampaign,
+  computeAdsManagementEndDate,
   ConflictError,
   createCampaign,
   effectiveGmvBaseline,
@@ -34,6 +35,7 @@ import {
   parseGmvTarget,
   parseRoasTarget,
   pauseCampaign,
+  setAdditionalDays,
   unlinkAsset,
   ValidationError,
   canFileWeeklyReport,
@@ -169,7 +171,7 @@ async function adsBrief(): Promise<{ clientId: string; briefId: string }> {
 
 const goodInput = (): CampaignInput => ({
   platform: 'Shopee Ads', objective: 'Sales', budget: '8000000', startDate: '2026-07-01', endDate: '2026-08-31',
-  targetKpi: 'ROAS ≥ 4x',
+  targetKpi: 'ROAS ≥ 4x', tipeIklan: 'GMV Max Product',
 });
 
 const setBriefStatus = async (briefId: string, status: string): Promise<void> => {
@@ -205,14 +207,22 @@ afterEach(async () => {
 });
 
 describeDb('createCampaign (§4 Rule 1)', () => {
-  it('creates a campaign under an Ads Brief [In Progress], born [Paused] with IDR display', async () => {
+  it('creates a campaign under an Ads Brief [In Progress], born [Setting] with IDR display', async () => {
     const { briefId } = await adsBrief();
     const c = await createCampaign(sql, adsStaff(), briefId, goodInput());
-    expect(c.status).toBe('[Paused]');
+    expect(c.status).toBe('[Setting]'); // M16 LT-40 — new birth status, not [Paused]
+    expect(c.tipeIklan).toBe('GMV Max Product');
+    expect(c.additionalDays).toBe(0);
     expect(c.budget).toBe(8000000);
     expect(c.budgetDisplay).toBe('Rp. 8.000.000,00');
     expect(c.roasDisplay).toBe('—'); // no spend yet
     expect(c.id).toMatch(/^ADC-\d{6}-\d{4}$/);
+  });
+
+  it('rejects an invalid Tipe Iklan (M16 LT-41)', async () => {
+    const { briefId } = await adsBrief();
+    await expect(createCampaign(sql, adsStaff(), briefId, { ...goodInput(), tipeIklan: 'Boost Post' }))
+      .rejects.toBeInstanceOf(ValidationError);
   });
 
   it('gates: non-Ads brief, brief not in progress, permission, and field validation', async () => {
@@ -651,5 +661,123 @@ describeDb('listWeeklyReports / fileWeeklyReport', () => {
     await fileWeeklyReport(sql, adsLead(), briefId, { mingguMulai: '2026-08-03', analisa: 'a', saran: 's' }, now);
     expect((await listWeeklyReports(sql, adsLead(), briefId, now)).minggu[0].diisiOleh).toBe('ZZ-ADSLEAD');
     await expect(listWeeklyReports(sql, creativeStaff(), briefId, now)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('M16 LT-43: Mini/Monthly/Content Analysis coexist with Weekly for the SAME ISO week', async () => {
+    const { briefId } = await adsBrief();
+    await sql`update briefs set assigned_pic = 'ZZ-ADV' where id = ${briefId}`;
+    await markStarted(briefId, new Date('2026-08-03T02:00:00Z'));
+    const now = new Date('2026-08-12T05:00:00Z');
+    const week = { mingguMulai: '2026-08-03', analisa: 'a', saran: 's' };
+
+    await fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, week, now); // Weekly (default)
+    const monthly = await fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, { ...week, jenis: 'Monthly' }, now);
+    expect(monthly.jenis).toBe('Monthly');
+    // Same jenis, same week, twice → still append-only-once.
+    await expect(fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, { ...week, jenis: 'Monthly' }, now))
+      .rejects.toBeInstanceOf(ConflictError);
+    await expect(fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, week, now))
+      .rejects.toBeInstanceOf(ConflictError); // Weekly already filed above
+    await expect(fileWeeklyReport(sql, adsStaff('ZZ-ADV'), briefId, { ...week, jenis: 'Kuartalan' }, now))
+      .rejects.toBeInstanceOf(ValidationError);
+
+    // Each jenis reads back independently — Weekly's list does not show the
+    // Monthly row for the same week, and vice versa.
+    const weeklyView = await listWeeklyReports(sql, adsStaff(), briefId, now);
+    expect(weeklyView.minggu[0].jenis).toBe('Weekly');
+    expect(weeklyView.minggu[0].terisi).toBe(true);
+    const monthlyView = await listWeeklyReports(sql, adsStaff(), briefId, now, 'Monthly');
+    expect(monthlyView.minggu[0].jenis).toBe('Monthly');
+    expect(monthlyView.minggu[0].terisi).toBe(true);
+  });
+});
+
+describeDb('M16 LT-40/LT-41: state [Setting] + Tipe Iklan', () => {
+  it('rejects Setting -> Paused directly (no such edge) but allows Setting -> Ended (cancel before ever launching)', async () => {
+    const { briefId } = await adsBrief();
+    const c = await createCampaign(sql, adsStaff(), briefId, goodInput());
+    expect(c.status).toBe('[Setting]');
+    // Preserves the [Paused]->[Ended] precedent for [Setting] too — a campaign
+    // may be cancelled before ever launching.
+    expect((await endCampaign(sql, adsStaff(), c.id)).ok).toBe(true);
+  });
+
+  it('Setting -> Active still gated on Brief [Approved] + linked Assets [Approved] (same guard as Paused->Active)', async () => {
+    const { clientId, briefId } = await adsBrief();
+    const c = await createCampaign(sql, adsStaff(), briefId, goodInput());
+    await expect(launchCampaign(sql, adsStaff(), c.id)).rejects.toBeInstanceOf(ConflictError);
+    const asset = await approvedAsset(clientId);
+    await linkAsset(sql, adsStaff(), c.id, asset);
+    await sql`update briefs set status = '[Approved]' where id = ${briefId}`;
+    expect((await launchCampaign(sql, adsStaff(), c.id)).ok).toBe(true);
+    expect(await campaignStatus(c.id)).toBe('[Active]');
+  });
+});
+
+describeDb('M16 LT-42: Ads Management Date (end_date turunan)', () => {
+  async function seedMasterService(durasiJasaHari: number | null): Promise<string> {
+    const msvId = uid('MSV');
+    await sql`insert into master_services (id, created_by) values (${msvId}, 'ZZ-TEST')`;
+    await sql`
+      insert into master_service_versions
+        (service_id, version_no, name, standard_price, commission_rule, pricing_mode, durasi_jasa, effective_from, created_by)
+      values (${msvId}, 1, 'Ads Management', '5000000', 'flat', 'flat', ${durasiJasaHari}, '2026-01-01', 'ZZ-TEST')`;
+    return msvId;
+  }
+
+  it('end_date = start_date + durasi_jasa + additional_days + total_hari_hold, none of it stored', async () => {
+    const { briefId } = await adsBrief();
+    const msvId = await seedMasterService(30);
+    await sql`update services set master_service_id = ${msvId}, master_version_no = 1
+              where id = (select service_id from briefs where id = ${briefId})`;
+    const c = await createCampaign(sql, adsStaff(), briefId, goodInput()); // startDate 2026-07-01
+
+    let d = await computeAdsManagementEndDate(sql, adsStaff(), c.id);
+    expect(d.startDate).toBe('2026-07-01');
+    expect(d.durasiJasa).toBe(30);
+    expect(d.additionalDays).toBe(0);
+    expect(d.totalHariHold).toBe(0);
+    expect(d.endDate).toBe('2026-07-31'); // + 30 days
+
+    await setAdditionalDays(sql, adsStaff(), c.id, 5); // e.g. libur Lebaran
+    d = await computeAdsManagementEndDate(sql, adsStaff(), c.id);
+    expect(d.additionalDays).toBe(5);
+    expect(d.endDate).toBe('2026-08-05'); // + 30 + 5
+
+    // Hold 3 days then resume ⇒ end_date moves forward another 3 days. `audit_log`
+    // is append-only (no UPDATE path — asserted elsewhere), so the hold history is
+    // seeded directly as synthetic rows with controlled timestamps rather than by
+    // driving real transitions and rewriting them; `computeTotalHariHold` only
+    // ever reads this log, so this isolates the pairing math from the engine.
+    await sql`
+      insert into audit_log (entity_type, entity_id, actor_employee_id, action, created_at, created_by)
+      values ('ad_campaign', ${c.id}, 'ZZ-ADV', 'transition:[Active]->[Paused]', '2026-08-10T00:00:00Z', 'ZZ-ADV'),
+             ('ad_campaign', ${c.id}, 'ZZ-ADV', 'transition:[Paused]->[Active]', '2026-08-13T00:00:00Z', 'ZZ-ADV')`;
+    d = await computeAdsManagementEndDate(sql, adsStaff(), c.id);
+    expect(d.totalHariHold).toBe(3);
+    expect(d.endDate).toBe('2026-08-08'); // + 30 + 5 + 3
+
+    // A hold that has NOT yet resumed does not extend end_date yet (moves only
+    // "setiap iklan di-resume" — at resume time, not while still held).
+    await sql`
+      insert into audit_log (entity_type, entity_id, actor_employee_id, action, created_at, created_by)
+      values ('ad_campaign', ${c.id}, 'ZZ-ADV', 'transition:[Active]->[Paused]', '2026-08-20T00:00:00Z', 'ZZ-ADV')`;
+    d = await computeAdsManagementEndDate(sql, adsStaff(), c.id);
+    expect(d.totalHariHold).toBe(3); // unchanged — the second hold is still open
+  });
+
+  it('a NULL durasi_jasa reads as 0 (no MSL pin, or an unset durasi_jasa)', async () => {
+    const { briefId } = await adsBrief(); // insertService pins a nonexistent MSV-X — no match
+    const c = await createCampaign(sql, adsStaff(), briefId, goodInput());
+    const d = await computeAdsManagementEndDate(sql, adsStaff(), c.id);
+    expect(d.durasiJasa).toBe(0);
+    expect(d.endDate).toBe(d.startDate);
+  });
+
+  it('setAdditionalDays rejects negative values and a non-Ads actor', async () => {
+    const { briefId } = await adsBrief();
+    const c = await createCampaign(sql, adsStaff(), briefId, goodInput());
+    await expect(setAdditionalDays(sql, adsStaff(), c.id, -1)).rejects.toBeInstanceOf(ValidationError);
+    await expect(setAdditionalDays(sql, creativeStaff(), c.id, 3)).rejects.toBeInstanceOf(ForbiddenError);
   });
 });

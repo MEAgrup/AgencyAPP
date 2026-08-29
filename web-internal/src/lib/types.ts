@@ -158,6 +158,8 @@ export interface MasterService {
   requires_strategy_plan: boolean;
   /** Catalog tier — set by Sales Head in the MSL admin (O54). */
   plan_tier: PlanTier;
+  /** M16 LT-42 / M17 §5.4 — hari kalender. null = tidak berlaku untuk layanan ini. */
+  durasi_jasa: number | null;
   version_no: number;
   effective_from: string;
 }

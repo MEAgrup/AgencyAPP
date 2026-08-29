@@ -262,4 +262,48 @@ describeDb('wrr_aggregate — auto figures from M7/M8/M9/M10 (D-03)', () => {
     expect(cre[0].jumlah_produksi).toBe(1);
     expect(cre[0].sengketa).toContain('2 video');
   });
+
+  // M17 §5.2/§5.3 (LT-52/LT-55) — AI Optimizer's own division row + the
+  // asset_type extension (`AI Video` / `Optimasi SKU`) on the SAME CTE the
+  // Creative row above reads (`ca`, assets reaching [Approved] this week) —
+  // confirms the extension doesn't leak into Creative's own counts either.
+  it('AI Optimizer: SKU dioptimasi + AI video selesai count separately from Creative (M17 LT-52/LT-55)', async () => {
+    const C3 = `ZZG-CLI3-${RUN}`, S3 = `ZZG-SVC3-${RUN}`, B3 = `ZZG-BAI-${RUN}`;
+    const A1 = `ZZG-AAI1-${RUN}`, A2v = `ZZG-AAI2-${RUN}`, R3 = `ZZG-WRR3-${RUN}`;
+    await sql`insert into clients (id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                sales_pic_id, commission_payment_pic_id, assigned_am_id, released_to_account_at, created_by)
+              values (${C3}, 'AI Opt Fixture', 'R', 'B', 'K', 'https://s/zzg3', '0', '0', ${OWNER}, ${OWNER}, ${AM}, now(), ${OWNER})`;
+    await sql`insert into services (id, client_id, master_service_id, master_version_no, name, standard_price, commission_rule, status, created_by)
+              values (${S3}, ${C3}, 'MSV-ZZG', 1, 's', '0', 'r', 'Ongoing', ${OWNER})`;
+    await sql`insert into briefs (id, service_id, title, status, assigned_division, created_by)
+              values (${B3}, ${S3}, 'ai optimizer brief', '[Draft]', 'AI Optimizer', ${OWNER})`;
+    // One Optimasi SKU asset + one AI Video asset, both reaching [Approved] this week.
+    await sql`insert into assets (id, brief_id, asset_type, sequence_no, created_by)
+              values (${A1}, ${B3}, 'Optimasi SKU', 1, ${OWNER})`;
+    await sql`insert into assets (id, brief_id, asset_type, sequence_no, created_by)
+              values (${A2v}, ${B3}, 'AI Video', 2, ${OWNER})`;
+    await audit('asset', A1, '[Approved]');
+    await audit('asset', A2v, '[Approved]');
+    await sql`insert into weekly_result_recap (id, client_id, plan_id, iso_year, iso_week, minggu_mulai, minggu_akhir, status, created_by)
+              values (${R3}, ${C3}, null, 2026, 35, '2026-08-24', '2026-08-30', 'Terbuka', 'SYSTEM')`;
+
+    await sql`select wrr_aggregate(${R3})`;
+    const rows = await sql<{ divisi: string; jumlah_produksi: number; rincian: Record<string, unknown> }[]>`
+      select divisi, jumlah_produksi, rincian from wrr_divisi where recap_id = ${R3}`;
+    const aiOpt = rows.find((r) => r.divisi === 'AI Optimizer');
+    expect(aiOpt).toBeDefined();
+    expect(aiOpt!.jumlah_produksi).toBe(2); // 1 SKU + 1 AI Video
+    expect((aiOpt!.rincian as { sku_dioptimasi: number }).sku_dioptimasi).toBe(1);
+    expect((aiOpt!.rincian as { ai_video_selesai: number }).ai_video_selesai).toBe(1);
+    // No Creative row for a client that never had a Creative-division brief —
+    // and the two new asset_type values must not leak into ANY Creative rincian.
+    expect(rows.find((r) => r.divisi === 'Creative')).toBeUndefined();
+
+    await sql`delete from assets where brief_id = ${B3}`;
+    await sql`delete from wrr_divisi where recap_id = ${R3}`;
+    await sql`delete from weekly_result_recap where id = ${R3}`;
+    await sql`delete from briefs where service_id = ${S3}`;
+    await sql`delete from services where id = ${S3}`;
+    await sql`delete from clients where id = ${C3}`;
+  });
 });

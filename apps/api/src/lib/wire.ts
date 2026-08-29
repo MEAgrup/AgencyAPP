@@ -7,7 +7,7 @@
  */
 import { money, tz } from '@cdps/core';
 import type { interview as ivcore } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, report, risetAwal, sales, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, report, req, risetAwal, sales, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -26,6 +26,8 @@ export interface MasterServiceWire {
   active: boolean;
   requires_strategy_plan: boolean;
   plan_tier: string;
+  /** M16 LT-42 / M17 §5.4 — hari kalender, null = tidak berlaku. */
+  durasi_jasa: number | null;
   version_no: number;
   effective_from: string;
 }
@@ -48,6 +50,7 @@ export function masterServiceToWire(v: msl.ServiceView): MasterServiceWire {
     active: v.active,
     requires_strategy_plan: v.requiresStrategyPlan,
     plan_tier: v.planTier,
+    durasi_jasa: v.durasiJasa,
     version_no: v.versionNo,
     effective_from: v.effectiveFrom,
   };
@@ -820,6 +823,10 @@ export interface CampaignWire {
   end_date: string;
   target_kpi: string;
   status: string;
+  /** M16 LT-41 — GMV Max Product | GMV Max Live | TTAM. */
+  tipe_iklan: string;
+  /** M16 LT-42 (Ads Management Date) — hari tambahan manual. */
+  additional_days: number;
   total_spend: number;
   total_spend_display: string;
   total_gmv: number;
@@ -839,11 +846,28 @@ export function campaignToWire(c: ads.Campaign): CampaignWire {
   return {
     id: c.id, brief_id: c.briefId, client_id: c.clientId, platform: c.platform, objective: c.objective,
     budget: c.budget, budget_display: c.budgetDisplay, start_date: c.startDate, end_date: c.endDate,
-    target_kpi: c.targetKpi, status: c.status, total_spend: c.totalSpend, total_spend_display: c.totalSpendDisplay,
+    target_kpi: c.targetKpi, status: c.status, tipe_iklan: c.tipeIklan, additional_days: c.additionalDays,
+    total_spend: c.totalSpend, total_spend_display: c.totalSpendDisplay,
     total_gmv: c.totalGmv, total_gmv_display: c.totalGmvDisplay, roas: c.roas, roas_display: c.roasDisplay,
     linked_asset_ids: c.linkedAssetIds, metric_entry_count: c.metricEntryCount, optimization_count: c.optimizationCount,
     underperforming_streak: c.underperformingStreak, escalation_flagged: c.escalationFlagged,
     created_by: c.createdBy, created_at: c.createdAt.toISOString(),
+  };
+}
+
+/** module16_ads.AdsManagementDate — Ads Management Date, LT-42 (end_date turunan). */
+export interface AdsManagementDateWire {
+  start_date: string;
+  durasi_jasa: number;
+  additional_days: number;
+  total_hari_hold: number;
+  end_date: string;
+}
+
+export function adsManagementDateToWire(d: ads.AdsManagementDate): AdsManagementDateWire {
+  return {
+    start_date: d.startDate, durasi_jasa: d.durasiJasa, additional_days: d.additionalDays,
+    total_hari_hold: d.totalHariHold, end_date: d.endDate,
   };
 }
 
@@ -889,10 +913,12 @@ export function optimizationToWire(o: ads.Optimization): OptimizationWire {
 /** Request body → CampaignInput. */
 export function toCampaignInput(b: {
   platform?: string; objective?: string; budget?: string; start_date?: string; end_date?: string; target_kpi?: string;
+  tipe_iklan?: string;
 }): ads.CampaignInput {
   return {
     platform: b.platform ?? '', objective: b.objective ?? '', budget: b.budget ?? '',
     startDate: b.start_date ?? '', endDate: b.end_date ?? '', targetKpi: b.target_kpi ?? '',
+    tipeIklan: b.tipe_iklan ?? '',
   };
 }
 
@@ -941,6 +967,8 @@ export interface AdsWeeklyReportWire {
   berjalan: boolean;
   terisi: boolean;
   terlambat: boolean;
+  /** M16 LT-43 — Weekly (default) | Mini | Monthly | Content Analysis. */
+  jenis: string;
   analisa: string;
   saran: string;
   kendala: string;
@@ -956,7 +984,7 @@ export function adsWeeklyReportToWire(r: ads.WeeklyReportRow): AdsWeeklyReportWi
       key: m.key, label: m.label, sifat: m.sifat,
       realisasi: m.realisasi, realisasi_display: m.realisasiDisplay,
     })),
-    berjalan: r.berjalan, terisi: r.terisi, terlambat: r.terlambat,
+    berjalan: r.berjalan, terisi: r.terisi, terlambat: r.terlambat, jenis: r.jenis,
     analisa: r.analisa, saran: r.saran, kendala: r.kendala,
     diisi_oleh: r.diisiOleh, diisi_pada: r.diisiPada === null ? null : r.diisiPada.toISOString(),
   };
@@ -978,10 +1006,11 @@ export function adsWeeklyReportViewToWire(v: ads.WeeklyReportView): AdsWeeklyRep
 
 /** Request body → WeeklyReportInput. */
 export function toAdsWeeklyReportInput(b: {
-  minggu_mulai?: string; analisa?: string; saran?: string; kendala?: string;
+  minggu_mulai?: string; analisa?: string; saran?: string; kendala?: string; jenis?: string;
 }): ads.WeeklyReportInput {
   return {
     mingguMulai: b.minggu_mulai ?? '', analisa: b.analisa ?? '', saran: b.saran ?? '', kendala: b.kendala ?? '',
+    jenis: b.jenis ?? '',
   };
 }
 
@@ -5994,3 +6023,59 @@ export function clientReportDetailToWire(d: report.ReportDetail): ClientReportDe
 // bawah baris ini dan TIDAK menyentuh blok A. Aturan snake_case / `null`
 // eksplisit yang sama berlaku.
 // ===========================================================================
+
+/** module16_req.Permintaan (REQ-) — M16 §5.5. */
+export interface PermintaanWire {
+  id: string;
+  jenis: string;
+  judul: string;
+  deskripsi: string;
+  brief_id: string | null;
+  service_id: string | null;
+  client_id: string;
+  cpr_id: string | null;
+  diajukan_oleh: string;
+  diajukan_divisi: string;
+  tujuan_divisi: string;
+  tujuan_employee_id: string | null;
+  due_date: string;
+  status: string;
+  diproses_pada: string | null;
+  selesai_pada: string | null;
+  ditolak_pada: string | null;
+  alasan_ditolak: string;
+  catatan_proses: string;
+  terlambat_berjalan: boolean;
+  selesai_terlambat: boolean;
+  hari_terlambat: number;
+  created_by: string;
+  created_at: string;
+}
+
+export function permintaanToWire(p: req.Permintaan): PermintaanWire {
+  return {
+    id: p.id, jenis: p.jenis, judul: p.judul, deskripsi: p.deskripsi,
+    brief_id: p.briefId, service_id: p.serviceId, client_id: p.clientId, cpr_id: p.cprId,
+    diajukan_oleh: p.diajukanOleh, diajukan_divisi: p.diajukanDivisi,
+    tujuan_divisi: p.tujuanDivisi, tujuan_employee_id: p.tujuanEmployeeId,
+    due_date: p.dueDate, status: p.status,
+    diproses_pada: p.diprosesPada === null ? null : p.diprosesPada.toISOString(),
+    selesai_pada: p.selesaiPada === null ? null : p.selesaiPada.toISOString(),
+    ditolak_pada: p.ditolakPada === null ? null : p.ditolakPada.toISOString(),
+    alasan_ditolak: p.alasanDitolak, catatan_proses: p.catatanProses,
+    terlambat_berjalan: p.terlambatBerjalan, selesai_terlambat: p.selesaiTerlambat, hari_terlambat: p.hariTerlambat,
+    created_by: p.createdBy, created_at: p.createdAt.toISOString(),
+  };
+}
+
+/** Request body → PermintaanInput. */
+export function toPermintaanInput(b: {
+  jenis?: string; judul?: string; deskripsi?: string; brief_id?: string; service_id?: string;
+  cpr_id?: string; tujuan_employee_id?: string;
+}): req.PermintaanInput {
+  return {
+    jenis: b.jenis ?? '', judul: b.judul ?? '', deskripsi: b.deskripsi ?? '',
+    briefId: b.brief_id ?? '', serviceId: b.service_id ?? '',
+    cprId: b.cpr_id ?? '', tujuanEmployeeId: b.tujuan_employee_id ?? '',
+  };
+}

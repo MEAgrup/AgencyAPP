@@ -10,10 +10,10 @@
 |---|---|---|
 | 0 | Spec + keputusan | ✅ SELESAI |
 | 1 | Registry divisi (Tahap F) | ✅ SELESAI |
-| 2 | Pipeline tahapan + lead time | ⬜ |
-| 2b | Metrik kecepatan + skor AM | ⬜ |
-| 3 | Ads | ⬜ |
-| 4 | `REQ-` + AI Optimizer | ⬜ |
+| 2 | Pipeline tahapan + lead time | ⬜ (Akun A) |
+| 2b | Metrik kecepatan + skor AM | ⬜ (Akun A) |
+| 3 | Ads | ✅ SELESAI (Akun B) |
+| 4 | `REQ-` + AI Optimizer | ✅ SELESAI (Akun B) |
 | 5 | Portal vendor Live | ⬜ (b) TERBLOKIR |
 
 ---
@@ -77,25 +77,28 @@ Dua tes diubah, keduanya asersi keanggotaan daftar: `notification.test.ts` v11�
 
 ## Fase 3 — Ads
 
-| # | Isi | Catatan |
-|---|---|---|
-| LT-40 | State `Setting` pada mesin `ADC-` | State awal baru |
-| LT-41 | Tipe Iklan | GMV Max Product / GMV Max Live / TTAM |
-| LT-42 | Ads Management Date | `end_date` turunan = `start + durasi_jasa + additional_days + total_hari_hold` |
-| LT-43 | Mini / Monthly / Content Analysis report | Di atas mekanisme `ads_weekly_reports` yang sudah ada |
+| # | Isi | Status | Catatan |
+|---|---|---|---|
+| LT-40 | State `Setting` pada mesin `ADC-` | ✅ | Migrasi `20260831010000` |
+| LT-41 | Tipe Iklan | ✅ | GMV Max Product / GMV Max Live / TTAM — migrasi `20260831020000` |
+| LT-42 | Ads Management Date | ✅ | `end_date` turunan (fungsi baru, nol kolom) — lihat `HANDOFF_M16_AKUN_B.md` untuk keputusan kolom+satuan yang perlu konfirmasi pemilik |
+| LT-43 | Mini / Monthly / Content Analysis report | ✅ | Di atas mekanisme `ads_weekly_reports` — migrasi `20260831030000` |
 
 ---
 
 ## Fase 4 — `REQ-` + AI Optimizer
 
-| # | Isi | Catatan |
-|---|---|---|
-| LT-50 | Entitas `REQ-` + 3 jenis + prefix registry | Deadline 1 hari kerja; keterlambatan turunan; `due_date` beku |
-| LT-51 | Seed divisi `AI_OPT` + 2 pipeline + `role_mappings` | |
-| LT-52 | `asset_type` `AI Video` + `Optimasi SKU` | ⚠️ **wajib** perluas 3 fungsi agregat SQL — lihat di bawah |
-| LT-53 | Item MSL `AI Video` + `Optimasi SKU` | |
-| LT-54 | Sinkron SKU balik ke STRG | **Revisi bernomor** lewat mesin `STRG-`; tidak menembus freeze/approval |
-| LT-55 | Baris `wrr_divisi` AI Optimizer | |
+| # | Isi | Status | Catatan |
+|---|---|---|---|
+| LT-50 | Entitas `REQ-` + 3 jenis + prefix registry | ✅ | `packages/domain/src/req.ts` baru — migrasi `20260831040000`+`050000` |
+| LT-51 | Seed divisi `AI_OPT` + 2 pipeline + `role_mappings` | ✅ | **Nol kode** — `role_mappings` sudah generik admin-managed sejak sebelum M16; pipeline milik Akun A |
+| LT-52 | `asset_type` `AI Video` + `Optimasi SKU` | ✅ | Migrasi `20260831060000` — lihat HANDOFF untuk temuan "3 fungsi = 1 fungsi diredefinisi 3x" |
+| LT-53 | Item MSL `AI Video` + `Optimasi SKU` | ✅ | Migrasi `20260831070000` |
+| LT-54 | Sinkron SKU balik ke STRG | ✅ | `strategi.ts syncAiOptimizerSkuRevision` — **lihat HANDOFF untuk gap signifikan** (Rule 13(c) `asumsiGugur` membuat sync defer untuk klien dengan D-8) |
+| LT-55 | Baris `wrr_divisi` AI Optimizer | ✅ | Migrasi `20260831060000` (sama dengan LT-52) |
+
+Detail lengkap tiap tiket (keputusan implementasi, temuan, kontrak lintas-stream
+untuk `stage.ts`): `docs/handoff/HANDOFF_M16_AKUN_B.md`.
 
 > ⚠️ **LT-52 jebakan:** `asset_type` di-hardcode sebagai `count(*) FILTER (WHERE asset_type = …)` di
 > `20260813040000_m6d_wrr_aggregate.sql`, `20260814040000_t3_ad_metrics.sql`,
