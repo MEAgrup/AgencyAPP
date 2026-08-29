@@ -9,7 +9,7 @@
 | Fase | Isi | Status |
 |---|---|---|
 | 0 | Spec + keputusan | ✅ SELESAI |
-| 1 | Registry divisi | ⬜ |
+| 1 | Registry divisi (Tahap F) | ✅ SELESAI |
 | 2 | Pipeline tahapan + lead time | ⬜ |
 | 2b | Metrik kecepatan + skor AM | ⬜ |
 | 3 | Ads | ⬜ |
@@ -33,11 +33,14 @@
 
 | # | Isi | Catatan |
 |---|---|---|
-| LT-10 | Migrasi `division_registry` + seed | 6 divisi existing + AI Optimizer + Store Operation. `nama` = label lama apa adanya ⇒ **nol migrasi data** |
-| LT-11 | `packages/core/src/division.ts` + registry test | Pola `packages/db/src/ident.registry.test.ts` — DB ≡ konstanta TS |
-| LT-12 | Ganti 8 array hardcode | `strategi.ts:250`, `account.ts:376`/`:386`, `recap.ts:189`, `plan.ts:2051`, `board.ts:719`, `performance.ts:43-50`, `web-internal/src/lib/penugasan.ts:36`, `tasks.ts:201` |
+| LT-10 | ✅ Migrasi `division_registry` + seed | 6 divisi existing + AI Optimizer + Store Operation. `nama` = label lama apa adanya ⇒ **nol migrasi data** |
+| LT-11 | ✅ `packages/core/src/division.ts` + registry test | `division.registry.test.ts` (set-equal SELURUH flag) + `division.test.ts` (pasangan kuota ↔ `TASK_CATALOG`) |
+| LT-12 | ✅ Ganti 8 daftar duplikat | 5 backend (`account`×2, `strategi`, `recap`, `plan`) + 3 `web-internal` lewat modul baru `divisions.ts`. **`board.ts`/`performance.ts` TIDAK termasuk** — bukan daftar duplikat |
+| F-4..F-7 | ✅ Choke point paralel | Katalog notif v12 (7 event, satu bump untuk kedua stream), prefix `REQ`, gate `db-rebuild.sh` + `ci.yml` (122→123 / 35→36 / 58→65), dua anchor `wire.ts` |
 
-**Exit criteria:** seluruh suite existing lulus **tanpa perubahan** — bukti refactor nol-perilaku.
+**Terverifikasi dengan DB nyata** (bukan skip): db-rebuild 128 migrasi + semua gate lolos; core 290/290, db 53/53, domain 1484/1485 (1 e2e skip), api 383/383, web-internal 374/374.
+
+Dua tes diubah, keduanya asersi keanggotaan daftar: `notification.test.ts` v11→v12, dan `strategi.test.ts` "I-2 identik" → "setiap divisi ber-kuota wajib bisa dipilih di I-2" (Store Operation adalah tujuan dispatch sah tanpa `TASK_CATALOG`).
 
 ---
 
