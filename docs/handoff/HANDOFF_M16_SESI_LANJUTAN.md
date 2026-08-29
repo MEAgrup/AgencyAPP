@@ -25,16 +25,19 @@ satu item implementasi yang menunggu tim mulai memakai fiturnya (halaman FE
 Ads/Permintaan). Nol yang mendesak — semuanya punya default aman sudah
 berjalan di produksi hari ini.
 
-> ### ✅ Pembaruan 2026-08-29 — LT-1 (sebagian), LT-3, LT-4 SUDAH DIJAWAB & DIPASANG
+> ### ✅ Pembaruan 2026-08-29 (dua putaran) — 7 dari 11 pertanyaan SUDAH DIJAWAB & DIPASANG
 >
-> Pemilik menjawab tiga dari sebelas pertanyaan; ketiganya sudah diimplementasi
-> sebagai migrasi data (`20260901010000`, `20260901020000`, `20260901030000`)
-> + satu prop FE, dengan test dan entri `DECISIONS.md` masing-masing. **§2 di
-> bawah dipertahankan apa adanya sebagai teks pertanyaan aslinya** — status
-> tiap baris ada di kepala baris itu. Yang benar-benar masih menunggu Anda:
-> **LT-2** ("akan saya berikan menyusul"), **LT-5..LT-11**, plus dua sisa
-> LT-1: konfirmasi angka target 24 jam dan bobot `role_type` AI Optimizer +
-> Store Operation. Status tiket otoritatif: `docs/backlog/LEADTIME_BACKLOG.md`
+> Pemilik menjawab **LT-1 (sebagian), LT-3, LT-4, LT-5, LT-6, LT-7, LT-9**
+> lewat dua putaran percakapan sesi ini; semuanya sudah diimplementasi —
+> migrasi data untuk LT-1/3/4/5 (`20260901010000`..`20260901040000`), satu
+> perubahan kode TS untuk LT-9 (`performance.ts`, portofolio skor AM), dan
+> LT-6/LT-7 murni konfirmasi tertulis (nol kode). Semua disertai test +
+> entri `DECISIONS.md` masing-masing. **§2 di bawah dipertahankan apa adanya
+> sebagai teks pertanyaan aslinya** — status tiap baris ada di kepala baris
+> itu. Yang benar-benar masih menunggu Anda: **LT-2 & LT-8** ("menyusul",
+> sengaja dijawab bersamaan), **LT-10, LT-11**, plus dua sisa LT-1:
+> konfirmasi angka target 24 jam dan bobot `role_type` AI Optimizer + Store
+> Operation. Status tiket otoritatif: `docs/backlog/LEADTIME_BACKLOG.md`
 > Fase 6.
 
 ---
@@ -173,6 +176,13 @@ daripada harus membuat Brief baru untuk pekerjaan yang sama.
 
 ### LT-5 — Live Stream sengaja tanpa `Cek Brief AM`?
 
+> ✅ **DIJAWAB & SELESAI 2026-08-29** — "Live Stream buat Cek Brief AM /
+> Terima Brief AM (nama baru yg lebih relevan)". Terpasang: checkpoint
+> pertama Live tetap `stage_code='Cek Brief AM'` (supaya mesinnya digerakkan
+> lewat kontrak `reviewBrief` yang sama, nol kode TS), tapi tampil sebagai
+> **"Terima Brief AM"** — kasus pertama label berbeda dari kode (LT-7).
+> Edge kirim-ulang LT-4 ikut dipasang untuk Live juga.
+
 **Sekarang:** Live Stream langsung mulai di `Terima Sampel`, tidak pernah
 melewati state `Cek Brief AM` — walau PRD menulis gerbang itu "wajib di
 semua divisi". `brief_review` (keputusan terima/tolak) tetap bisa diisi
@@ -195,6 +205,10 @@ proses booking terpisah.
 
 ### LT-6 — Konfirmasi arti `gate_pihak='AM'`
 
+> ✅ **DIKONFIRMASI 2026-08-29** — "jalankan rekomendasi" (rekomendasinya
+> sendiri murni konfirmasi). Betul: gerbang PERAN, tahap TETAP terhitung
+> lead time. Nol kode berubah, didokumentasikan di `STATE_MACHINES.md` §18.
+
 **Sekarang:** `gate_pihak='AM'` diperlakukan sebagai gerbang **peran**
 (hanya AM pemilik klien/Director yang boleh menjalankan transisi keluar
 dari tahap itu) — bukan pengecualian dari lead time. Contoh: tahap
@@ -212,6 +226,11 @@ segera kalaupun jawabannya "ya sudah benar".
 ---
 
 ### LT-7 — Label tampil tahap ≠ kode tahap?
+
+> ✅ **DIKONFIRMASI 2026-08-29** — "aman dibiarkan kosmetik". Tetap identik
+> di mana pun, kecuali SATU pengecualian yang kini benar-benar memakainya:
+> checkpoint intake Live Stream (LT-5), kode `Cek Brief AM` / label
+> `Terima Brief AM`.
 
 **Sekarang:** `stage_definition.label` (nama yang tampil di UI) diisi
 identik dengan `stage_code` (kode internal) — mis. "Script" tampil sebagai
@@ -246,6 +265,12 @@ Jawab bersamaan dengan LT-2, bukan terpisah.
 ---
 
 ### LT-9 — Perluas skor AM ke portofolio AI Optimizer/Store Operation?
+
+> ✅ **DIJAWAB & SELESAI 2026-08-29** — "Ya perlu diperluas". Portofolio
+> `amPortfolioApprovedInPeriod` (dipakai `revision_escalation_rate` DAN
+> `kecepatan_review_am`) sekarang mencakup Brief Ads + AI Optimizer + Store
+> Operation. KOL dan Live Stream tetap di luar (entitas/mesin berbeda). Ini
+> perubahan KODE (bukan migrasi data) — lihat `performance.ts`.
 
 > ⏳ **MASIH MENUNGGU ANDA** — LT-1 sudah dijawab tetapi ini tidak disinggung,
 > jadi cakupan portofolio dibiarkan apa adanya. Taruhannya kini lebih besar:

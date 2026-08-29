@@ -426,9 +426,16 @@ describeDb('getStageOverview.nextStages (LT-60)', () => {
     const liveStaff: Actor = { employeeId: 'ZZ-STG-LIVE', divisi: 'Live Stream', role: permission.makeRole({ division: 'Live Stream', level: 'staff' }) };
     const b = await createBrief(sql, accountStaff(amId), svcId, liveStreamBrief());
 
-    // Live Stream never has a 'Cek Brief AM' state (HANDOFF §1.2) — born
-    // straight onto the pipeline's initial_state.
+    // LT-5 (pemilik 2026-08-29): Live Stream now gets the same intake gate as
+    // every other pipeline — born at 'Cek Brief AM' (displayed as "Terima
+    // Brief AM", LT-7), 'Brief Dikembalikan ke AM' filtered out of nextStages
+    // exactly like every other pipeline's intake state.
     let overview = await getStageOverview(sql, accountStaff(amId), b.id);
+    expect(overview.productionStage).toBe('Cek Brief AM');
+    expect(overview.nextStages).toEqual([{ stageCode: 'Terima Sampel', label: 'Terima Sampel' }]);
+
+    await reviewBrief(sql, liveStaff, b.id, { keputusan: 'Diterima' }); // → Terima Sampel
+    overview = await getStageOverview(sql, accountStaff(amId), b.id);
     expect(overview.productionStage).toBe('Terima Sampel');
     expect(overview.nextStages).toEqual([{ stageCode: 'Briefing Klien Live', label: 'Briefing Klien Live' }]);
 
@@ -440,6 +447,38 @@ describeDb('getStageOverview.nextStages (LT-60)', () => {
     overview = await getStageOverview(sql, accountStaff(amId), b.id);
     expect(overview.productionStage).toBe('Live Start'); // pipeline terminal
     expect(overview.nextStages).toEqual([]);
+  });
+
+  // LT-5: the label the pemilik asked for ("Terima Brief AM") is cosmetic
+  // (LT-7) — the underlying stage_code stays the literal 'Cek Brief AM' that
+  // reviewBrief's STAGE_CEK_BRIEF_AM constant hardcodes, so the machine drives
+  // exactly like every other pipeline's intake gate.
+  it('LT-5: Live Stream intake is labelled "Terima Brief AM" but keyed on the same Cek Brief AM state', async () => {
+    const { svcId, amId } = await fixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, liveStreamBrief());
+    const overview = await getStageOverview(sql, accountStaff(amId), b.id);
+    const row = overview.leadTime.stages.find((r) => r.stageCode === 'Cek Brief AM')!;
+    expect(row).toBeDefined();
+    expect(row.label).toBe('Terima Brief AM');
+  });
+
+  // LT-5 + LT-4 symmetry: Live Stream's returned Brief resends the same way
+  // the other four pipelines' do, driven by the owning AM.
+  it('LT-5: a rejected Live Stream Brief resends to Cek Brief AM through the same AM gate as LT-4', async () => {
+    const { svcId, amId } = await fixture();
+    await registerEmployee('ZZ-STG-LIVE2', 'Live Stream', 'ZZ-STG-LIVE2-JAB');
+    const liveStaff: Actor = { employeeId: 'ZZ-STG-LIVE2', divisi: 'Live Stream', role: permission.makeRole({ division: 'Live Stream', level: 'staff' }) };
+    const b = await createBrief(sql, accountStaff(amId), svcId, liveStreamBrief());
+    await reviewBrief(sql, liveStaff, b.id, { keputusan: 'Dikembalikan', alasanKode: 'Brief kurang jelas' });
+
+    let overview = await getStageOverview(sql, accountStaff(amId), b.id);
+    expect(overview.productionStage).toBe(STAGE_RETURNED);
+    expect(overview.nextStages).toEqual([{ stageCode: 'Cek Brief AM', label: 'Terima Brief AM' }]);
+
+    await expect(advanceStage(sql, liveStaff, b.id, 'Cek Brief AM')).rejects.toBeInstanceOf(ForbiddenError);
+    await advanceStage(sql, accountStaff(amId), b.id, 'Cek Brief AM');
+    overview = await getStageOverview(sql, accountStaff(amId), b.id);
+    expect(overview.productionStage).toBe('Cek Brief AM');
   });
 
   it("never includes 'Brief Dikembalikan ke AM' — that edge belongs to reviewBrief, not advanceStage", async () => {

@@ -855,3 +855,65 @@ describeDb('LT-32: kecepatan_review_am wiring (AM)', () => {
     expect(rev.raw).toBe(100); // one approved Task, zero revision-flagged
   });
 });
+
+// ---------------------------------------------------------------------------
+// LT-9 — AM portfolio extended to AI Optimizer / Store Operation Briefs.
+// ---------------------------------------------------------------------------
+describeDb('LT-9: AM portfolio includes AI Optimizer / Store Operation Briefs', () => {
+  it.each(['AI Optimizer', 'Store Operation'])(
+    "%s Briefs now fold into the owning AM's portfolio (revision_escalation_rate + kecepatan_review_am)",
+    async (division) => {
+      const am = uid('EMP-AMLT9');
+      const client = uid('CLI-AMLT9');
+      const svc = uid('SVC-AMLT9');
+      const brief = uid('BRF-AMLT9');
+      await insEmployee(am, 'Account', 'ZZ-AM-Jab');
+      await insRoleMapping('Account', 'ZZ-AM-Jab', 'Account', 'staff');
+      await insClient(client, am);
+      await insService(svc, client);
+      // A SINGLE Brief in this division, no Ads Brief at all — before LT-9,
+      // `amPortfolioApprovedInPeriod` only looked at 'Ads', so this portfolio
+      // would have been empty and both components excluded. It is the only
+      // Task in the AM's portfolio, so its inclusion IS the regression test.
+      await sql`insert into briefs (id, service_id, title, status, assigned_division, assigned_pic, sla_target_hours, created_by)
+        values (${brief}, ${svc}, 'B', '[Approved]', ${division}, 'ZZ-PIC-AMLT9', 24, 'ZZ-TEST')`;
+      await insAudit('brief', brief, 'transition:[To Do]->[In Progress]', new Date('2026-06-01T02:00:00Z'));
+      await insAudit('brief', brief, 'transition:[In Progress]->[Submitted]', new Date('2026-06-02T02:00:00Z'));
+      await insAudit('brief', brief, 'transition:[Submitted]->[In Review]', new Date('2026-06-04T02:00:00Z')); // 48h wait
+      await insAudit('brief', brief, 'transition:[In Review]->[Approved]', new Date('2026-06-04T04:00:00Z'));
+
+      await runSnapshotJob(sql, nowJul);
+      const snap = await getSnapshot(sql, director(), am, JUNE);
+      const kra = compByName(snap.components, 'kecepatan_review_am')!;
+      expect(kra.included).toBe(true);
+      expect(kra.raw).toBe(0); // same 48h/24h -> 200% -> OA-1 floor 0
+      const rev = compByName(snap.components, 'revision_escalation_rate')!;
+      expect(rev.included).toBe(true);
+      expect(rev.raw).toBe(100); // one approved Task, zero revision-flagged
+    },
+  );
+
+  it('does NOT extend to KOL or Live Stream — neither runs a Brief through brief_task', async () => {
+    const am = uid('EMP-AMLT9X');
+    const client = uid('CLI-AMLT9X');
+    const svc = uid('SVC-AMLT9X');
+    const brief = uid('BRF-AMLT9X');
+    await insEmployee(am, 'Account', 'ZZ-AM-Jab');
+    await insRoleMapping('Account', 'ZZ-AM-Jab', 'Account', 'staff');
+    await insClient(client, am);
+    await insService(svc, client);
+    await sql`insert into briefs (id, service_id, title, status, assigned_division, assigned_pic, sla_target_hours, created_by)
+      values (${brief}, ${svc}, 'B', '[Approved]', 'KOL', 'ZZ-PIC-AMLT9X', 24, 'ZZ-TEST')`;
+    await insAudit('brief', brief, 'transition:[To Do]->[In Progress]', new Date('2026-06-01T02:00:00Z'));
+    await insAudit('brief', brief, 'transition:[In Progress]->[Submitted]', new Date('2026-06-02T02:00:00Z'));
+    await insAudit('brief', brief, 'transition:[Submitted]->[In Review]', new Date('2026-06-04T02:00:00Z'));
+    await insAudit('brief', brief, 'transition:[In Review]->[Approved]', new Date('2026-06-04T04:00:00Z'));
+
+    await runSnapshotJob(sql, nowJul);
+    const snap = await getSnapshot(sql, director(), am, JUNE);
+    const kra = compByName(snap.components, 'kecepatan_review_am')!;
+    expect(kra.included).toBe(false); // portfolio still empty — KOL never joined it
+    const rev = compByName(snap.components, 'revision_escalation_rate')!;
+    expect(rev.included).toBe(false);
+  });
+});
