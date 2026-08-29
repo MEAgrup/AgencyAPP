@@ -300,3 +300,73 @@ The Ad Campaign is a **living** record that **outlives** its setup Brief (M8 §2
 - **Keterlambatan BUKAN status.** Sebuah tugas bisa terlambat lalu tetap diselesaikan; menjadikannya status akan menuntut edge dari setiap state dan menghilangkan fakta "pernah terlambat" begitu tugasnya beres. Ia diturunkan saat baca dari `due_date` + `selesai_pada` + `status` dalam kalender **WIB** (aturan rumah #4), dan ketiga jangkarnya dibekukan trigger `trg_internal_tasks_jangkar` — termasuk `due_date`, karena menggesernya adalah cara termudah menghapus keterlambatan dari catatan performa. `[Dibatalkan]` tidak pernah dihitung terlambat: pekerjaannya ditarik, bukan dilewatkan.
 - **Notifikasi (katalog v9 + v10).** Masuk `[Ditugaskan]` ⇒ `penugasan_ditugaskan` (→PIC). Masuk `[Selesai]` ⇒ `penugasan_selesai` (→pemberi tugas). Masuk `[Dibatalkan]` ⇒ `penugasan_dibatalkan` (→PIC — tanpa ini PIC terus mengerjakan pekerjaan yang sudah ditarik). Di luar transisi, job harian `penugasan_reminder_tick` mengirim `penugasan_mendekati_jatuh_tempo` (H-1, **→PIC saja**: pengingat yang ditembuskan ke atasan berhenti jadi pengingat) dan `penugasan_jatuh_tempo` (**→PIC + pemberi tugas + lead divisi** — di sinilah atasan memang perlu tahu). Keduanya **sekali saja**, dijaga penanda searah `pengingat_h1_terkirim`/`jatuh_tempo_terkirim` (trigger menolak reset).
 - Prefix `TSK-YYYYMM-NNNN` (registry). RLS `internal_tasks_select` + `GRANT SELECT TO authenticated` (tanpa GRANT, `readAsActor` ditolak sebelum policy sempat dievaluasi — `rls_checks` §43). Migrasi `20260814110000_penugasan_internal.sql` + `20260814120000_penugasan_notif_jatuh_tempo.sql`.
+
+## 18. Tahapan Produksi Brief (`brief_stage`) — mesin #22.. (M16), lapisan lead time per divisi
+
+**Satu mesin per pipeline divisi**, semuanya menulis kolom `briefs.production_stage` lewat `sm_transition` yang sudah ada:
+
+```
+p_machine     = stage_pipeline.machine_name
+p_entity_type = 'brief_stage'        ← WAJIB, lihat "Namespace log" di bawah
+p_table       = 'briefs'
+p_id_col      = 'id'
+p_status_col  = 'production_stage'
+```
+
+Karena `sm_transition` sudah generik (`p_table`/`p_id_col`/`p_status_col`), **tidak ada satu baris pun fungsi SQL engine yang berubah** — mesin baru = baris di `sm_machines` + `sm_edges` + `sm_terminal_states`, murni migrasi.
+
+### Namespace log — kenapa `entity_type='brief_stage'`, bukan `'brief'`
+
+`sm_transition` menulis baris audit `'transition:' || from || '->' || to` dengan `entity_type = p_entity_type`. `computeMetrics` (M12) membaca `audit_log` dengan filter `entity_type='brief'` + `action like 'transition:%'`.
+
+Menulis transisi tahapan sebagai `entity_type='brief'` membuat baris tahapan **ikut terbaca sebagai transisi status** dan merusak turnaround, Speed Score, dan revision count SETIAP Brief. `audit_log.entity_type` adalah `varchar(64)` tanpa constraint, jadi namespace terpisah gratis, dan `loadTransitions` (`packages/domain/src/transitions.ts`) dipakai apa adanya dengan argumen `'brief_stage'`.
+
+### Pipeline yang di-seed
+
+| Divisi | Deliverable | Tahapan (hk = hari kerja) |
+|---|---|---|
+| Creative | Content Production | `Cek Brief AM` → `Script` (1) → `QC internal` (1) → `Shooting` (1) → `Edit` (1) → ⟨`QC Account Service`⟩ (1) → ⟨`Revisi`⟩ (1) → `Jadwal Posting` (1) |
+| KOL | — | `Cek Brief AM` → `Buat Campaign` (1) → `Approach Creator & Sebar Link Product` (3) → `Buat & Update Daftar Creator` (1) → `Nego & Dealing Creator` (2) → `Approval Sampel` (1, gate KLIEN) → `Follow up Video Creator` (14) → `QC & Approval Video Creator` (14) |
+| Live Stream | — | `Terima Sampel` → `Briefing Klien Live` → `Live Start` |
+| AI Optimizer | Optimasi SKU | `Cek Brief AM` → `Ambil SKU` → `Riset` → `Perbaikan` → `QC` → `Approve` (gate AM) → `Terapkan` |
+| AI Optimizer | AI Video | `Cek Brief AM` → `Script` → `Generate AI` → `Edit` → `QC` → `Jadwal Posting` |
+| Store Operation | — | **pipeline kosong** — divisi aktif, daftar pekerjaan menyusul (`DECISIONS.md` LT-2) |
+
+Ads **tidak punya mesin tahapan sendiri**: status `Setting`/`Running`/`Hold`/`End` dipetakan ke mesin `ADC-` (§14) supaya tidak ada dua sumber kebenaran untuk "iklan lagi jalan".
+
+### ⟨…⟩ = checkpoint yang DIPETAKAN, bukan state
+
+`stage_definition.sumber` menentukan asal sebuah checkpoint:
+
+- `'stage'` — punya state sendiri di mesin ini; durasi dari `audit_log` `entity_type='brief_stage'`.
+- `'status_brief'` — **tidak menyimpan apa pun**; `status_dipetakan` menunjuk status Brief yang sudah ada, durasinya diturunkan dari log status itu (`entity_type='brief'`). Dipakai untuk `QC Account Service` = `[In Review]` dan `Revisi` = `[Revision Requested]`.
+
+Mendaftarkan keduanya sebagai state tersendiri akan membuat dua kolom mengklaim fakta yang sama ("AM sedang me-review") dan memaksa sinkronisasi dua arah. Memetakannya justru **memunculkan** angka yang selama ini tersembunyi tanpa menambah satu baris data pun.
+
+### Hubungan dengan mesin `brief_task` (§7)
+
+Keduanya berjalan berdampingan pada baris `briefs` yang sama, di kolom berbeda — `status` vs `production_stage`. Mesin tahapan **tidak pernah menulis kolom `status`** (aturan rumah #2).
+
+Satu-satunya kaitan ditegakkan **satu arah** sebagai guard di `task.submitTask`: Brief tidak boleh masuk `[Submitted]` sebelum tahapannya mencapai state terminal pipeline.
+
+### Gate pihak luar menghentikan jam
+
+`stage_definition.gate_pihak` ∈ {`NULL`, `'AM'`, `'KLIEN'`}. Tahap ber-gate `KLIEN` (mis. `Approval Sampel`) dicatat durasinya tapi **dikeluarkan** dari lead time divisi — perlakuan identik dengan interval `[Blocked]` (M12 Rule 7). Menunggu klien bukan kelambatan tim.
+
+### Cek Brief AM — gerbang intake wajib semua divisi
+
+Tahap pertama setiap pipeline. Divisi memilih *Terima & proses* (lanjut) atau *Brief Dikembalikan ke AM* + alasan terstruktur (Creative: brief kurang jelas / sampel belum diterima / talent tidak tersedia / properti tidak tersedia / lokasi butuh approval — KOL: brief kurang jelas / data tidak lengkap). Inilah rentang yang menjawab "lead time dari AM ke team".
+
+- Durasi **tidak disimpan** — seluruh angka lead time diturunkan dari `audit_log`, satuan **hari kerja** lewat `working_days_between` (Sen–Jum minus `hari_libur`).
+- Target per tahap: default `stage_definition.target_hari_kerja`, override per Brief di `brief_stage_sla` (gerbang `isLead(division)`, pola `setSlaTarget` M12). Tanpa target ⇒ `N/A`, tidak pernah di-default diam-diam.
+- Migrasi: lihat `docs/backlog/LEADTIME_BACKLOG.md` Fase 2.
+
+## 19. Permintaan `REQ-` (M16 §5.5) — mesin #.., permintaan divisi yang TERKAIT KLIEN
+`[Diajukan]` → `[Diproses]` → `[Selesai]`; `[Diajukan]` | `[Diproses]` → `[Ditolak]`. Terminal: `[Selesai]`, `[Ditolak]`.
+
+Jenis: `Top-up Saldo` (Ads → AM), `Contract Creator` (KOL), `Creator Payment Approval` (KOL → Finance, menyambung `CPR-` M9 yang sudah ada).
+
+- **Kenapa entitas sendiri, bukan `TSK-` (§17).** `internal_tasks` sengaja **tidak punya** `client_id`/`service_id` — §17 menyatakan melonggarkannya "akan membongkar gerbang pembayaran M4/M5". Permintaan Top-up Saldo jelas terkait klien (saldo iklan klien), jadi ia tidak boleh menumpang di sana. Sebaliknya ia juga bukan "Task" M12 (= Asset | Creator Booking | Brief-as-task), karena bukan deliverable yang di-review AM.
+- Deadline **1 hari kerja** lewat `working_days_between` — bukan 24 jam, bukan 1 hari kalendar (keputusan pemilik; requirement semula menulis keduanya).
+- **Keterlambatan bukan status**: diturunkan saat baca dari `due_date` + `selesai_pada` + `status` dalam WIB, dengan trigger pembeku `due_date` — pola persis §17, karena menggeser `due_date` adalah cara termudah menghapus keterlambatan dari catatan performa.
+- Prefix `REQ-YYYYMM-NNNN` (registry; `REQ` diverifikasi bebas).
