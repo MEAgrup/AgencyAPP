@@ -1,5 +1,11 @@
 # HANDOFF — Mulai dari sini untuk melanjutkan M16/M17
 
+> ### ⚠️ Ada handoff bernomor lebih tinggi
+> Baca **`docs/handoff/HANDOFF_M16_PR252_20260829.md` DULU** — PR #252 (7
+> keputusan §2 di bawah + 2 fix bug FE Ads) dibuka sesi 2026-08-29 dan
+> statusnya (CI/merge) berubah cepat. Dokumen ini tetap referensi utuh untuk
+> teks asli 11 pertanyaan §2, tapi bukan lagi yang paling mutakhir soal PR.
+
 > **Baca dokumen ini SEBELUM menyentuh apa pun terkait M16/M17.** Ia adalah
 > ringkasan navigasi ke dokumen yang sudah ada di repo — tidak menduplikasi
 > isinya, hanya memberi tahu urutan baca, apa yang benar-benar tersisa, dan
