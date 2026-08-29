@@ -1,5 +1,10 @@
 # RENCANA INDUK — M16 Lead Time per Tahapan Divisi + M17 AI Optimizer
 
+> **Sesi baru yang melanjutkan M16/M17: baca
+> `docs/handoff/HANDOFF_M16_SESI_LANJUTAN.md` LEBIH DULU** — ringkasan
+> navigasi + urutan baca + jebakan yang sudah ditemukan, supaya tidak perlu
+> membaca ulang seluruh riwayat chat yang melahirkan dokumen ini.
+>
 > **Dokumen ini adalah rujukan konteks/keputusan/desain untuk M16+M17.**
 > Ia TIDAK menduplikasi status tiket — status hidup **satu-satunya** di
 > `docs/backlog/LEADTIME_BACKLOG.md` (diperbarui oleh sesi yang benar-benar
