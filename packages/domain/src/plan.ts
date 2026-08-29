@@ -474,23 +474,74 @@ export async function getPlanDetail(
 ): Promise<PlanDetail> {
   const plan = await getPlan(sql, actor, id);
 
-  const targets = await sql<
-    {
-      plan_id: string;
-      channel: string;
-      metric: string;
-      nilai_strategi: string | number;
-      nilai_dipakai: string | number;
-      arah: 'naik' | 'turun' | 'tetap';
-      persen_perubahan: string | number;
-      alasan: string | null;
-      bukti_file: string | null;
-      status_persetujuan: string | null;
-    }[]
-  >`select * from plan_target where plan_id = ${id} order by channel, metric`;
+  // P-2 (kecepatan loading) — dua fase, bukan enam round-trip berurutan.
+  //
+  // Fase 1 adalah semua yang hanya butuh `plan.id` / `plan` itu sendiri; tak
+  // satu pun membaca baris hasil query lain, jadi keenamnya dikirim bersama
+  // (postgres.js baru menembakkan query saat `.then` dipanggil — `Promise.all`
+  // menerbitkannya sekaligus). Fase 2 HANYA `plan_row_week`, dan ia tetap
+  // berurutan karena memang bergantung pada `rowIds` yang dipungut dari
+  // `plan_row` — satu-satunya ketergantungan data yang nyata di sini.
+  const [targets, rows, actuals, reviewRows, flags, defisitTerbawa] = await Promise.all([
+    sql<
+      {
+        plan_id: string;
+        channel: string;
+        metric: string;
+        nilai_strategi: string | number;
+        nilai_dipakai: string | number;
+        arah: 'naik' | 'turun' | 'tetap';
+        persen_perubahan: string | number;
+        alasan: string | null;
+        bukti_file: string | null;
+        status_persetujuan: string | null;
+      }[]
+    >`select * from plan_target where plan_id = ${id} order by channel, metric`,
 
-  const rows = await sql<Record<string, unknown>[]>`
-    select * from plan_row where plan_id = ${id} order by id`;
+    sql<Record<string, unknown>[]>`
+      select * from plan_row where plan_id = ${id} order by id`,
+
+    sql<
+      {
+        plan_id: string;
+        channel: string;
+        metric: string;
+        sumber: 'manual' | 'otomatis';
+        nilai: string | number;
+        file_bukti: string | null;
+        tanggal_ambil: string | Date | null;
+        sengketa: string | null;
+      }[]
+    >`select * from plan_actual where plan_id = ${id} order by channel, metric`,
+
+    sql<
+      {
+        plan_id: string;
+        yang_jalan: string | null;
+        yang_tidak_jalan: string | null;
+        diagnosa_gap: 'strategi_salah' | 'eksekusi_tidak_jalan' | null;
+        diagnosa_gap_bukti: string | null;
+        rekomendasi: string | null;
+        perlu_revisi: boolean | null;
+        materi_klien: string | null;
+      }[]
+    >`select * from plan_review where plan_id = ${id}`,
+
+    sql<
+      {
+        id: number;
+        plan_id: string;
+        plan_row_id: number | null;
+        jenis: string;
+        detail: string | null;
+        ack_spv_oleh: string | null;
+        ack_spv_pada: string | Date | null;
+      }[]
+    >`select * from plan_flag where plan_id = ${id} order by id`,
+
+    priorPeriodDeficit(sql, plan),
+  ]);
+
   const rowIds = rows.map((r) => r.id as number);
 
   const weeks =
@@ -500,46 +551,6 @@ export async function getPlanDetail(
           select * from plan_row_week
            where plan_row_id = any(${rowIds})
            order by plan_row_id, minggu_no`;
-
-  const actuals = await sql<
-    {
-      plan_id: string;
-      channel: string;
-      metric: string;
-      sumber: 'manual' | 'otomatis';
-      nilai: string | number;
-      file_bukti: string | null;
-      tanggal_ambil: string | Date | null;
-      sengketa: string | null;
-    }[]
-  >`select * from plan_actual where plan_id = ${id} order by channel, metric`;
-
-  const reviewRows = await sql<
-    {
-      plan_id: string;
-      yang_jalan: string | null;
-      yang_tidak_jalan: string | null;
-      diagnosa_gap: 'strategi_salah' | 'eksekusi_tidak_jalan' | null;
-      diagnosa_gap_bukti: string | null;
-      rekomendasi: string | null;
-      perlu_revisi: boolean | null;
-      materi_klien: string | null;
-    }[]
-  >`select * from plan_review where plan_id = ${id}`;
-
-  const flags = await sql<
-    {
-      id: number;
-      plan_id: string;
-      plan_row_id: number | null;
-      jenis: string;
-      detail: string | null;
-      ack_spv_oleh: string | null;
-      ack_spv_pada: string | Date | null;
-    }[]
-  >`select * from plan_flag where plan_id = ${id} order by id`;
-
-  const defisitTerbawa = await priorPeriodDeficit(sql, plan);
 
   return {
     plan,
@@ -2038,15 +2049,19 @@ async function loadCloseReadiness(
   planId: string,
   reducedReview: boolean,
 ): Promise<CloseReadiness> {
-  const targets = await tx<{ channel: string; metric: string; nilai_dipakai: string | number }[]>`
-    select channel, metric, nilai_dipakai from plan_target where plan_id = ${planId}`;
-  const actuals = await tx<
-    { channel: string; metric: string; sumber: 'manual' | 'otomatis'; nilai: string | number }[]
-  >`select channel, metric, sumber, nilai from plan_actual where plan_id = ${planId}`;
-  const rows = await tx<
-    { status_baris: PlanRow['statusBaris']; status_baris_alasan: string | null }[]
-  >`select status_baris, status_baris_alasan from plan_row where plan_id = ${planId}`;
-  const review = await tx<PlanReviewDbRow[]>`select * from plan_review where plan_id = ${planId}`;
+  // P-2: four reads of the same `planId`, none of them reading another's rows.
+  // Issued together they cost one round trip inside the close transaction.
+  const [targets, actuals, rows, review] = await Promise.all([
+    tx<{ channel: string; metric: string; nilai_dipakai: string | number }[]>`
+      select channel, metric, nilai_dipakai from plan_target where plan_id = ${planId}`,
+    tx<
+      { channel: string; metric: string; sumber: 'manual' | 'otomatis'; nilai: string | number }[]
+    >`select channel, metric, sumber, nilai from plan_actual where plan_id = ${planId}`,
+    tx<
+      { status_baris: PlanRow['statusBaris']; status_baris_alasan: string | null }[]
+    >`select status_baris, status_baris_alasan from plan_row where plan_id = ${planId}`,
+    tx<PlanReviewDbRow[]>`select * from plan_review where plan_id = ${planId}`,
+  ]);
   return checkCloseReadiness({
     targets: targets.map((t) => ({
       channel: t.channel,
