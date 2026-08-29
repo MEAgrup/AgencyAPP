@@ -26,9 +26,9 @@ Semua yang di bawah ini adalah **choke point global**: berkas tunggal dengan inv
 |---|---|---|
 | F-1 | Migrasi `division_registry` + seed (6 divisi existing + AI Optimizer + Store Operation) | Fondasi yang dibaca kedua stream |
 | F-2 | `packages/core/src/division.ts` + registry test | idem |
-| F-3 | Ganti 8 array divisi hardcode | Menyentuh `strategi.ts`, `account.ts`, `recap.ts`, `plan.ts`, `board.ts`, `performance.ts`, `web-internal/src/lib/{penugasan,tasks}.ts` — **semua berkas milik kedua stream**. Wajib selesai sebelum siapa pun menyentuhnya |
+| F-3 | Ganti 8 daftar divisi duplikat | 5 di backend (`account.ALLOWED_DIVISIONS` + `BRIEF_ASSIGNABLE_DIVISIONS`, `strategi.DISPATCH_DIVISIONS`, `recap.DIVISIONS`, `plan.PLAN_ROW_DIVISI_PIC`) + 3 di `web-internal` (`penugasan.ts`, `tasks.ts`, `strategi.ts`) — **berkas milik kedua stream**. `board.ts` dan `performance.ts` TIDAK termasuk: yang satu switch perilaku per-divisi (divisi baru jatuh ke `default` = rollup `brief_task`, justru benar), yang satu konstanta role individual |
 | F-4 | Registrasi **SELURUH** event notifikasi baru (stage **dan** `REQ-`) dalam **SATU** bump `CATALOG_VERSIONS` | `notification.test.ts` meng-assert `events()` == Σ `eventCount` per versi, dan `notif_catalog.reals.test.ts` meng-assert TS `CATALOG` ≡ DB `notif_events` set-equal pada (event_type, catalog_version, resolver). Dua stream masing-masing menambah versi ⇒ invariant pecah dua kali |
-| F-5 | Naikkan gate `notif_events COUNT(*) == 34` di `scripts/db-rebuild.sh` | Berkas gate tunggal, angkanya hardcode |
+| F-5 | Naikkan gate hitungan di `scripts/db-rebuild.sh` **dan** `.github/workflows/ci.yml` (tabel 122→123, entity_prefix 35→36, notif_events 58→65; sm_machines TETAP 23) | Angka yang sama hidup di DUA berkas — menaikkan salah satu saja membuat lokal hijau sementara CI merah (persis yang terjadi pada PR #170) |
 | F-6 | Daftarkan prefix `REQ` di `packages/core/src/ident.ts` + tabel `entity_prefix` | `ident.registry.test.ts` memindai seluruh call site; prefix wajib terdaftar di **dua** tempat |
 | F-7 | Taruh dua anchor komentar di `apps/api/src/lib/wire.ts` | Memberi tiap stream titik sisip sendiri yang berjauhan (lihat §4) |
 
@@ -39,9 +39,25 @@ Semua yang di bawah ini adalah **choke point global**: berkas tunggal dengan inv
 Setelah F di-commit dan di-push, catat SHA-nya di sini:
 
 ```
-Commit fondasi F: <isi setelah F mendarat>
+Commit fondasi F: lihat `git log --oneline --grep "M16 fondasi"` pada branch di bawah
 Branch dasar    : claude/buildplan-lead-time-tracking-g62d2i
 ```
+
+**Status F: ✅ SELESAI & terverifikasi dengan DB nyata** (Postgres lokal, bukan
+di-skip): `scripts/db-rebuild.sh` 128 migrasi + seluruh gate lolos
+(tabel **123**, entity_prefix **36**, sm_machines **23**, notif_events **65**),
+`@cdps/core` 290/290, `@cdps/db` 53/53, `@cdps/domain` **1484/1485** (1 e2e
+skip), `@cdps/api` 383/383, `web-internal` 374/374, `tsc --noEmit` bersih di
+kelima paket.
+
+Dua tes existing diubah — keduanya asersi keanggotaan daftar, bukan perilaku:
+- `notification.test.ts` — versi katalog 11 → 12.
+- `strategi.test.ts` "keeps I-2 divisions identical…" — dulu menuntut
+  `DISPATCH_DIVISIONS` sama PERSIS dengan `ALLOWED_DIVISIONS`. Registry
+  memisahkan dua sifat yang ternyata memang berbeda: Store Operation adalah
+  tujuan dispatch yang sah tapi belum punya `TASK_CATALOG`. Asersinya diganti
+  jadi arah yang benar-benar harus dijaga: setiap divisi ber-kuota WAJIB bisa
+  dipilih di I-2.
 
 ---
 

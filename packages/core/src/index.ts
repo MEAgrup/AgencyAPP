@@ -12,6 +12,9 @@
  * - notification: 15 FROZEN events catalog + emit wrapper (SQL notify_emit) ✅
  * - visibility: M6A §4.1 / Rule 16 two-tier client visibility + FROZEN
  *   hard-internal set (mirrored by a DB CHECK — the two must not diverge) ✅
+ * - division: registry divisi (M16) — satu sumber untuk "divisi apa saja yang
+ *   ada dan boleh apa", menggantikan sembilan literal duplikat. Dual-home
+ *   dengan tabel `division_registry` ✅
  * - baseline: Skor Kondisi Toko dari export TikTok (riset awal, pra-onboarding) ✅
  * - report: laporan performa klien mingguan/bulanan dari export yang sama ✅
  *
@@ -34,6 +37,7 @@ export * as statemachine from './statemachine';
 export * as audit from './audit';
 export * as notification from './notification';
 export * as visibility from './visibility';
+export * as division from './division';
 export * as interview from './interview';
 export * as baseline from './baseline';
 export * as report from './report';

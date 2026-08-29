@@ -46,7 +46,7 @@
  * Reference: docs/prd/CDPS_Module6A_Strategi.md.
  */
 
-import { ident, interview as iv, money, notification, permission, statemachine, visibility } from '@cdps/core';
+import { division, ident, interview as iv, money, notification, permission, statemachine, visibility } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import {
   ACCOUNT_DIVISION,
@@ -247,8 +247,8 @@ export type LaporanMetric = TargetMetric;
  * table carries Live Stream briefs (they skip the task machine and end at a
  * vendor tracker), so the dispatch order has to be able to name it.
  */
-export const DISPATCH_DIVISIONS = ['Creative', 'Ads', 'KOL', 'Live Stream'] as const;
-export type DispatchDivision = (typeof DISPATCH_DIVISIONS)[number];
+export const DISPATCH_DIVISIONS: readonly string[] = division.dispatchNames();
+export type DispatchDivision = string;
 
 /** G-1 — §4 says "Repeatable struct (min 2)". One phase is not a calendar. */
 export const FASE_MIN = 2;

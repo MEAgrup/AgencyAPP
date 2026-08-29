@@ -34,7 +34,7 @@
  * Reference: backend/internal/module6_account/{account,strategy}.go.
  */
 
-import { bi, notification, permission, statemachine } from '@cdps/core';
+import { bi, division, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import { onBriefReachedTerminal, validateBriefApproval } from './board';
 import {
@@ -373,7 +373,7 @@ const MACHINE_SERVICE = 'service';
  * `BRIEF_ASSIGNABLE_DIVISIONS` below instead — the two lists diverge on
  * purpose, not by omission.
  */
-export const ALLOWED_DIVISIONS = ['Creative', 'Ads', 'KOL', 'Live Stream'] as const;
+export const ALLOWED_DIVISIONS: readonly string[] = division.kuotaSatuanNames();
 
 /**
  * Divisions a Brief may be assigned to (PC-8, both the manual STR- path and the
@@ -383,7 +383,7 @@ export const ALLOWED_DIVISIONS = ['Creative', 'Ads', 'KOL', 'Live Stream'] as co
  * either is read via the generic `/tasks` division queue, not a dedicated
  * division board (owner decision, docs/DECISIONS.md 2026-08-27).
  */
-export const BRIEF_ASSIGNABLE_DIVISIONS = ['Creative', 'Ads', 'KOL', 'Live Stream', 'Account', 'Ops'] as const;
+export const BRIEF_ASSIGNABLE_DIVISIONS: readonly string[] = division.briefAssignableNames();
 
 /**
  * QA revisi 2026-08-12 — the ±20% tolerance band the AM may adjust the client's
@@ -418,6 +418,16 @@ export const TASK_CATALOG: Record<
   ],
   Ads: [{ jenis: 'ads_spent', label: 'Ads spent (Rp)', money: true }],
   'Live Stream': [{ jenis: 'live_stream', label: 'Jumlah live stream' }],
+  // M17 — dua deliverable divisi AI Optimizer. `jenis` sengaja TIDAK memakai
+  // `sku_optimize` (sudah dipakai Creative): kuota per divisi disimpan per
+  // (divisi, jenis), dan nama yang sama di dua divisi membuat laporan yang
+  // menjumlahkan per `jenis` diam-diam mencampur pekerjaan dua tim.
+  // `division.registry` menuntut baris ini ada — `punyaKuotaSatuan: true` tanpa
+  // entri di sini akan meng-crash comparator `normalizeTasks`.
+  'AI Optimizer': [
+    { jenis: 'sku_optimize_ai', label: 'Jumlah SKU optimize (AI)' },
+    { jenis: 'ai_video', label: 'Jumlah AI video' },
+  ],
 };
 
 /** One planned unit-of-work quota for a division (jumlah is exact numeric-as-string). */

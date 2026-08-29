@@ -211,7 +211,7 @@ export const TRIGGER_REVISI_LABELS: {
  * the task machine and end at a vendor tracker, so the dispatch order has to be
  * able to name one.
  */
-export const DISPATCH_DIVISIONS = ['Creative', 'Ads', 'KOL', 'Live Stream'] as const;
+export { DISPATCH_DIVISIONS } from './divisions';
 
 /** H-1 — §4's three impact/likelihood levels. */
 export const RISK_LEVELS: { value: RiskLevel; label: string }[] = [

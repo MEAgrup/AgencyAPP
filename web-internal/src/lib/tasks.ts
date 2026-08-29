@@ -197,14 +197,7 @@ export const TASK_STATUSES = [
 // its briefs never render action buttons — kept in the list for read visibility.
 // Account/Ops have no dedicated division board either — this generic queue is
 // the only place their Briefs are visible (owner decision, DECISIONS.md 2026-08-27).
-export const DIVISIONS = [
-  'Creative',
-  'Ads',
-  'KOL',
-  'Live Stream',
-  'Account',
-  'Ops',
-] as const;
+export { DIVISI_KERJA as DIVISIONS } from './divisions';
 
 // ---- Read functions (borrowed M6/M7/M11/M15 endpoints) ----
 

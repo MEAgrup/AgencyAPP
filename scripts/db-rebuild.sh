@@ -140,10 +140,19 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "122"
-check "entity_prefix"    "select count(*) from entity_prefix"    "35"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "123"
+check "entity_prefix"    "select count(*) from entity_prefix"    "36"
 check "sm_machines"      "select count(*) from sm_machines"      "23"
-check "notif_events"     "select count(*) from notif_events"     "58"
+check "notif_events"     "select count(*) from notif_events"     "65"
+# 123 = 122 + division_registry (M16 fondasi, 20260829001000: divisi sebagai
+#       DATA, menggantikan delapan daftar duplikat). 36 = 35 + REQ (Permintaan
+#       terkait klien, M16 §5.5 — didaftarkan di fondasi supaya dua stream
+#       paralel tidak sama-sama menyentuh registry prefix). 65 = 58 + 7 event
+#       katalog v12 (3 Brief + 2 tahapan + 2 Permintaan) — SATU bump untuk
+#       KEDUA stream: invariant menjumlahkan event_count per versi, jadi dua
+#       bump terpisah memecahkannya dua kali. Mesin TETAP 23 (mesin tahapan
+#       milik Akun A, mesin REQ milik Akun B, masing-masing di migrasinya
+#       sendiri). Lihat docs/handoff/PARALEL_M16_DUA_AKUN.md.
 # 21 = 20 + mesin #18 `weekly_result_recap` (Modul 6D D-02, 20260813020000:
 #      Terjadwal→Terbuka→Ditutup|Ditutup Otomatis→(Head)Terbuka). nol tabel/prefix
 #      baru di D-02.

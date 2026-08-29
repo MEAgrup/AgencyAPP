@@ -99,6 +99,13 @@ export const PREFIXES = {
   // to a paying client. `TSK` was free in the registry. Machine `internal_task`;
   // registered in entity_prefix by 20260814110000_penugasan_internal.sql.
   TSK: { entity: 'Penugasan Internal (internal task)', module: 'Penugasan' },
+  // M16 §5.5 — permintaan divisi yang TERKAIT KLIEN (Top-up Saldo, Contract
+  // Creator, Creator Payment Approval). Sengaja BUKAN `TSK-`: `internal_tasks`
+  // tidak punya `client_id`/`service_id` karena melonggarkannya "akan
+  // membongkar gerbang pembayaran M4/M5" (STATE_MACHINES §17); dan bukan Task
+  // M12 karena bukan deliverable yang di-review AM. Didaftarkan di fondasi
+  // M16 supaya stream paralel tidak sama-sama menyentuh registry ini.
+  REQ: { entity: 'Permintaan (client-linked request)', module: 'M16' },
 } as const satisfies Record<string, PrefixInfo>;
 
 /** A registered prefix string (e.g. 'CLI', 'TRX'). */

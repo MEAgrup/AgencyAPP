@@ -5971,3 +5971,26 @@ export function clientReportDetailToWire(d: report.ReportDetail): ClientReportDe
     berkas: d.berkas.map(clientReportBerkasToWire),
   };
 }
+
+// ===========================================================================
+// === ANCHOR WIRE A (M16 tahapan) ===
+// ---------------------------------------------------------------------------
+// Akun A (stream "Tahapan & Metrik") menulis SELURUH `*ToWire` miliknya di
+// bawah baris ini dan TIDAK menyentuh blok B. Dua anchor sengaja dipisah
+// supaya dua stream paralel menyisip di titik yang berjauhan dan git me-merge
+// keduanya tanpa konflik (docs/handoff/PARALEL_M16_DUA_AKUN.md §4).
+//
+// Ingat aturan batas camelCase↔snake_case: badan respons wire adalah
+// snake_case, dan kunci yang HILANG lebih berbahaya daripada null — kirim
+// `null` eksplisit, jangan `omitempty`. Route yang mengirim objek domain
+// mentah adalah bug kelas O43: halamannya blank walau route menjawab 200.
+// ===========================================================================
+
+
+// ===========================================================================
+// === ANCHOR WIRE B (M16 ads/permintaan) ===
+// ---------------------------------------------------------------------------
+// Akun B (stream "Divisi & Permintaan") menulis SELURUH `*ToWire` miliknya di
+// bawah baris ini dan TIDAK menyentuh blok A. Aturan snake_case / `null`
+// eksplisit yang sama berlaku.
+// ===========================================================================

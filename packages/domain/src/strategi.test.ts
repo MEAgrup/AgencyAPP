@@ -3407,8 +3407,18 @@ describeDb('A-09b closed sets do not drift', () => {
     }
   });
 
-  it('keeps I-2 divisions identical to the Brief-receiving divisions', async () => {
-    expect([...DISPATCH_DIVISIONS]).toEqual([...ALLOWED_DIVISIONS]);
+  it('keeps every quota-bearing division dispatchable (I-2 ⊇ kuota satuan)', async () => {
+    // Sampai M16 kedua daftar identik, jadi tes ini menuntut kesamaan persis.
+    // Registry divisi memisahkan dua sifat yang ternyata memang berbeda:
+    // Store Operation adalah tujuan dispatch Strategi yang sah TAPI belum
+    // punya entri `TASK_CATALOG` (daftar pekerjaannya menyusul — DECISIONS.md
+    // LT-2), dan menyalakan kuota tanpa entri itu akan meng-crash comparator
+    // `normalizeTasks`. Yang benar-benar harus dijaga adalah arah ini: setiap
+    // divisi yang punya kuota satuan WAJIB bisa dipilih di I-2, kalau tidak
+    // AM tidak punya cara menurunkan kuota itu jadi Brief.
+    const dispatch = new Set(DISPATCH_DIVISIONS);
+    const takBisaDidispatch = ALLOWED_DIVISIONS.filter((d) => !dispatch.has(d));
+    expect(takBisaDidispatch).toEqual([]);
   });
 
   it('keeps E-2 roles identical in TS and in the DB CHECK', async () => {

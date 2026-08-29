@@ -19,7 +19,7 @@
  *
  * See `docs/STATE_MACHINES.md` §15 and migration 20260813020000_m6d_wrr_machine.sql.
  */
-import { notification, permission, statemachine } from '@cdps/core';
+import { division, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import {
   ACCOUNT_DIVISION,
@@ -186,7 +186,7 @@ export const MANUAL_ELIGIBLE_METRICS: readonly string[] = ['total_view', 'view_o
 /** RM-C metrics that must be present (filled or `—`) before a recap closes (Rule 8). */
 export const REQUIRED_AT_CLOSE_METRICS: readonly string[] = ['total_view', 'ctr', 'cvr'];
 /** Valid division names for a division note (RM-D6). */
-const DIVISIONS: readonly string[] = ['Creative', 'Ads', 'KOL', 'Live Stream'];
+const DIVISIONS: readonly string[] = division.kuotaSatuanNames();
 
 // --- Read models -----------------------------------------------------------
 
