@@ -727,10 +727,19 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                       </option>
                     ))}
                   </select>
-                  <span className="muted" style={{ fontSize: 11 }}>
-                    Pilih dulu — Aksi, Kuota/Satuan &amp; Divisi PIC di bawah terisi otomatis dari
-                    Section E (bisa diubah).
-                  </span>
+                  {pillars.length === 0 ? (
+                    <span className="muted" style={{ fontSize: 11, color: '#b45309' }}>
+                      Dropdown ini kosong bukan karena error — Strategi induk ({detail?.plan.strategi_id})
+                      belum punya satu pun pilar Section E (E-3…E-10, termasuk Konten &amp; Kreatif).
+                      Setiap baris Plan otomatis tercatat &quot;Di Luar Strategi&quot; sampai Section E
+                      diisi lewat revisi Strategi.
+                    </span>
+                  ) : (
+                    <span className="muted" style={{ fontSize: 11 }}>
+                      Pilih dulu — Aksi, Kuota/Satuan &amp; Divisi PIC di bawah terisi otomatis dari
+                      Section E (bisa diubah).
+                    </span>
+                  )}
                 </label>
               )}
               {plan.lingkup === 'klien' &&
