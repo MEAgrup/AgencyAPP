@@ -105,6 +105,64 @@ describe('computeMetrics (§5.1/§5.2)', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// M16 §6 (LT-30/LT-31) — AM review latency split out of turnaroundHours.
+// ---------------------------------------------------------------------------
+describe('computeMetrics — M16 §6 AM review latency split (LT-30/LT-31)', () => {
+  const d = (day: number, h: number): Date => new Date(Date.UTC(2026, 7, day, h, 0, 0)); // Aug 2026
+
+  it('matches the PRD §6.2 worked example exactly (SLA 24h)', () => {
+    // Mon 09:00 In Progress → Tue 09:00 Submitted (24h kerja, tepat target) →
+    // Thu 09:00 AM opens In Review (48h AM belum buka) → Thu 11:00 Approved (2h review).
+    const evs: Transition[] = [
+      { to: '[In Progress]', at: d(3, 9) },
+      { to: '[Submitted]', at: d(4, 9) },
+      { to: '[In Review]', at: d(6, 9) },
+      { to: '[Approved]', at: d(6, 11) },
+    ];
+    const m = computeMetrics(evs, 24);
+    expect(m.turnaroundHours).toBe(74); // UNCHANGED basis — PRD §6.3 continuity
+    expect(m.speedScorePct).toBeCloseTo((74 / 24) * 100, 6); // old basis, still 308.33% — untouched
+    expect(m.turnaroundKerjaHours).toBe(24);
+    expect(m.waktuAmBelumBukaHours).toBe(48);
+    expect(m.waktuAmReviewHours).toBe(2);
+    expect(m.speedScoreKerjaPct).toBe(100);
+    expect(m.speedScoreKerjaDisplay).toBe('100.00%');
+  });
+
+  it('sums the AM-wait windows across EVERY revision cycle, not just the first', () => {
+    const evs: Transition[] = [
+      ev('[In Progress]', 0), ev('[Submitted]', 2), ev('[In Review]', 3), ev('[Revision Requested]', 4),
+      ev('[In Progress]', 5), ev('[Submitted]', 8), ev('[In Review]', 9), ev('[Approved]', 10),
+    ];
+    const m = computeMetrics(evs, 100);
+    expect(m.waktuAmBelumBukaHours).toBe(2); // (3-2) + (9-8)
+    expect(m.waktuAmReviewHours).toBe(2); // (4-3) + (10-9)
+    expect(m.turnaroundKerjaHours).toBe(6); // span 0→10 (10h) minus both (2h+2h)
+  });
+
+  it('is null before approval, same gate as turnaroundHours', () => {
+    const m = computeMetrics([ev('[In Progress]', 0), ev('[Submitted]', 2)], 24);
+    expect(m.turnaroundHours).toBeNull();
+    expect(m.turnaroundKerjaHours).toBeNull();
+    expect(m.waktuAmBelumBukaHours).toBeNull();
+    expect(m.waktuAmReviewHours).toBeNull();
+    expect(m.speedScoreKerjaDisplay).toBe('N/A');
+  });
+
+  it('subtracts [Blocked] from turnaroundKerjaHours too (same span turnaroundHours uses)', () => {
+    const evs: Transition[] = [
+      ev('[In Progress]', 0), ev('[Blocked]', 2), ev('[In Progress]', 5),
+      ev('[Submitted]', 6), ev('[In Review]', 7), ev('[Approved]', 8),
+    ];
+    const m = computeMetrics(evs, 10);
+    expect(m.turnaroundHours).toBe(5); // 8-0 minus 3h blocked
+    expect(m.waktuAmBelumBukaHours).toBe(1); // 7-6
+    expect(m.waktuAmReviewHours).toBe(1); // 8-7
+    expect(m.turnaroundKerjaHours).toBe(3); // 5-1-1
+  });
+});
+
 describe('task predicates', () => {
   const row = { division: 'Creative', assignedPic: '', ownerAm: 'ZZ-SINTA' };
   it('canExecute: division staff/lead (or the assigned PIC); AM + other divisions denied', () => {

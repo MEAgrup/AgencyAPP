@@ -191,6 +191,9 @@ export interface Brief {
   revision_flagged: boolean; // only accurate on GetBrief (detail)
   created_by: string;
   created_at: string;
+  // M16 — null untuk divisi tanpa pipeline tahapan (mis. Store Operation).
+  stage_pipeline_code: string | null;
+  production_stage: string | null;
 }
 
 export interface BriefInput {

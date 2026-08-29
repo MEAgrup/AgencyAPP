@@ -117,3 +117,6 @@ export * as portal from './portal';
 export * as notification from './notification';
 export * as audit from './audit';
 export * as engine from './engine';
+// M16 (Akun A "Tahapan & Metrik") — mesin tahapan produksi per Brief + lead time.
+export * as stage from './stage';
+export * as leadtime from './leadtime';

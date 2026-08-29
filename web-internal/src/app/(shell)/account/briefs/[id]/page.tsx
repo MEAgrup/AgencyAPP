@@ -17,6 +17,7 @@ import {
   type Brief,
 } from '@/lib/account';
 import StatusBadge from '@/components/StatusBadge';
+import StageTimelinePanel from '@/components/StageTimelinePanel';
 import { transitionTo } from '@/lib/transition';
 
 export default function BriefDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -209,6 +210,12 @@ export default function BriefDetailPage({ params }: { params: Promise<{ id: stri
           </div>
         </div>
       </section>
+
+      <StageTimelinePanel
+        briefId={brief.id}
+        assignedDivision={brief.assigned_division}
+        canReview={!readOnly && (role?.division === brief.assigned_division || !!role?.director)}
+      />
 
       {isAMReviewer && (canReview || canDecide) && (
         <section className="card">

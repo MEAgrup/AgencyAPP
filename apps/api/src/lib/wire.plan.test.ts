@@ -343,6 +343,8 @@ describe('briefInheritResultToWire (RAB-16 — one-click inheritance)', () => {
           revisionFlagged: false,
           createdBy: 'EMP-1',
           createdAt: new Date('2026-08-18T00:00:00Z'),
+          stagePipelineCode: null,
+          productionStage: null,
         },
       ],
       skipped: [{ planRowId: 7, reason: 'di_luar' }],
