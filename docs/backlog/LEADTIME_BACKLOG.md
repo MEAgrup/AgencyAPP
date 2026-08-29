@@ -122,22 +122,24 @@ untuk `stage.ts`): `docs/handoff/HANDOFF_M16_AKUN_B.md`.
 
 ---
 
-## Uji wajib (lintas fase)
+## Uji wajib (lintas fase) — ✅ SEMUA 14 diverifikasi saat langkah penggabungan (DB rebuild + full suite, 2026-08-29)
 
-1. **Tidak-tercampur:** `computeMetrics` identik sebelum/sesudah tahapan aktif — bukti `entity_type='brief_stage'`.
-2. **Registry:** `division_registry` (DB) ≡ konstanta TS.
-3. **Paritas Fase 1:** suite existing lulus tanpa perubahan.
-4. **Hari kerja:** tahap mulai Jumat target 1 hk ⇒ jatuh tempo **Senin**; sisipkan tanggal ke `hari_libur` ⇒ jatuh tempo bergeser (kasus Lebaran).
-5. **Gate klien:** menunggu Approval Sampel **tidak** menambah lead time divisi KOL.
-6. **Latensi AM:** PIC mulai Sen 09:00, submit Sel 09:00, AM buka Kam 09:00, approve Kam 11:00, SLA 24 jam ⇒ `turnaround`=**74** (tetap), `turnaroundKerja`=**24**, `waktuAmBelumBuka`=**48**, `waktuAmReview`=**2**, Speed kerja=**100%**.
-7. **End-Date Ads:** hold 3 hari lalu resume ⇒ `end_date` maju 3 hari; hold lagi 2 hari ⇒ maju 2 hari lagi.
-8. **Bobot nol:** dengan `kecepatan_review_am` bobot 0, skor tiap AM **identik** dengan sebelumnya. Lalu set bobot ⇒ Σ=100 ditegakkan server.
-9. **Cutover:** `PERF-` periode tertutup **tidak berubah**; periode berjalan satu definisi untuk semua staff.
-10. **Divisi tanpa pipeline:** Brief ke Store Operation bisa didispatch, `Cek Brief AM` terukur, nol error.
-11. **Extensibility:** seed pipeline Store Operation lewat migrasi baru **tanpa menyentuh kode TS**.
-12. **Transisi ilegal ditolak di DB** (mis. `Script → Jadwal Posting`), buktikan lewat `execute_sql`.
-13. **`route-parity.test.ts` dengan `KNOWN_GAPS` kosong.**
-14. **Fixture Alpha Digital** (`wave1_uat.e2e.test.ts`) tetap lulus.
+1. ✅ **Tidak-tercampur:** `computeMetrics` identik sebelum/sesudah tahapan aktif — bukti `entity_type='brief_stage'`. (`leadtime.test.ts`, `task.test.ts`)
+2. ✅ **Registry:** `division_registry` (DB) ≡ konstanta TS. (`packages/db/src/division.registry.test.ts`)
+3. ✅ **Paritas Fase 1:** suite existing lulus tanpa perubahan. (full suite hijau — lihat §14 di bawah)
+4. ✅ **Hari kerja:** tahap mulai Jumat target 1 hk ⇒ jatuh tempo **Senin**; sisipkan tanggal ke `hari_libur` ⇒ jatuh tempo bergeser (kasus Lebaran). (`leadtime.test.ts` — "inserting a national holiday between the two dates shifts the due date (Lebaran case)")
+5. ✅ **Gate klien:** menunggu Approval Sampel **tidak** menambah lead time divisi KOL. (`leadtime.test.ts` — "gate_pihak='KLIEN' is recorded but excluded from totalHariKerja (Rule 9)")
+6. ✅ **Latensi AM:** PIC mulai Sen 09:00, submit Sel 09:00, AM buka Kam 09:00, approve Kam 11:00, SLA 24 jam ⇒ `turnaround`=**74** (tetap), `turnaroundKerja`=**24**, `waktuAmBelumBuka`=**48**, `waktuAmReview`=**2**, Speed kerja=**100%**. (`task.test.ts` — "matches the PRD §6.2 worked example exactly (SLA 24h)")
+7. ✅ **End-Date Ads:** hold 3 hari lalu resume ⇒ `end_date` maju 3 hari; hold lagi 2 hari ⇒ maju 2 hari lagi. (`ads.test.ts` — LT-42 suite)
+8. ✅ **Bobot nol:** dengan `kecepatan_review_am` bobot 0, skor tiap AM **identik** dengan sebelumnya. Lalu set bobot ⇒ Σ=100 ditegakkan server. (`performance.test.ts` — "LT-32/LT-33: a weight-0 component NEVER shifts the profile")
+9. ✅ **Cutover:** `PERF-` periode tertutup **tidak berubah**; periode berjalan satu definisi untuk semua staff. (`performance.test.ts` snapshot-immutability suite, tidak disentuh M16)
+10. ✅ **Divisi tanpa pipeline:** Brief ke Store Operation bisa didispatch, `Cek Brief AM` terukur, nol error. (`stage.test.ts` — "a Store Operation Brief is born with NO pipeline (Rule 12)")
+11. ✅ **Extensibility:** seed pipeline Store Operation lewat migrasi baru **tanpa menyentuh kode TS**. (Rule 12 di `stage.ts` membaca `stage_pipeline` murni dari data — dibuktikan lewat item 10 memakai divisi TANPA baris seed)
+12. ✅ **Transisi ilegal ditolak di DB** (mis. `Script → Jadwal Posting`). (`stage.test.ts` — `advanceStage(...'Jadwal Posting')` menolak dengan `ConflictError`, `sm_transition`)
+13. ✅ **`route-parity.test.ts` dengan `KNOWN_GAPS` kosong.** (`apps/api/src/lib/route-parity.test.ts` — `KNOWN_GAPS = new Set([])`)
+14. ✅ **Fixture Alpha Digital** (`wave1_uat.e2e.test.ts`) tetap lulus — 31/31 langkah, `UAT=1` terhadap DB gabungan hasil merge Akun A + Akun B.
+
+**Uji lintas-stream tambahan (§5 `PARALEL_M16_DUA_AKUN.md`, ditulis khusus untuk langkah penggabungan Akun B):** `packages/domain/src/m16_cross_stream.test.ts` — Brief AI Optimizer (`Optimasi SKU`) berjalan lewat pipeline tahapan NYATA milik Akun A (`stage.ts`, seed `AI_OPT_SKU`) sampai `Terapkan`, deliverable-nya (Asset `asset_type='Optimasi SKU'`) `[Approved]`, dan terhitung `jumlah_produksi=1` di `wrr_divisi` lewat `wrr_aggregate` milik Akun B — satu jalur yang menyentuh kedua stream sekaligus, bukan duplikat cakupan test per-stream. ✅ Lulus.
 
 ## Aturan operasional
 

@@ -140,19 +140,24 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "127"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "128"
 check "entity_prefix"    "select count(*) from entity_prefix"    "36"
-check "sm_machines"      "select count(*) from sm_machines"      "28"
+check "sm_machines"      "select count(*) from sm_machines"      "29"
 check "notif_events"     "select count(*) from notif_events"     "65"
+# 128 = 127 + 1 tabel Akun B Fase 4 (20260831040000_req_permintaan.sql):
+#       `permintaan` (REQ-, M16 §5.5). 29 = 28 + 1 mesin `permintaan`
+#       ([Diajukan]->[Diproses]->[Selesai]|[Ditolak], STATE_MACHINES §19).
+#       Nol prefix/event baru (sudah dibereskan Tahap F). Angka final ini
+#       ditulis di LANGKAH PENGGABUNGAN §5 PARALEL_M16_DUA_AKUN.md, setelah
+#       kedua stream digabung dan dihitung ulang dari database gabungan yang
+#       SEBENARNYA (bukan dijumlahkan manual) — lihat HANDOFF_M16_AKUN_B.md.
 # 127 = 123 + 4 tabel M16 Akun A Fase 2 (20260830010000_m16_stage_schema.sql):
 #       stage_pipeline, stage_definition, brief_stage_sla, brief_review. 28 =
 #       23 + 5 mesin tahapan (20260830020000_m16_stage_seed.sql: stage_creative,
 #       stage_kol, stage_live, stage_ai_opt_sku, stage_ai_opt_video). Nol prefix/
 #       event baru (sudah dibereskan Tahap F). Menyimpang dari anotasi "F saja"
 #       di docs/handoff/PARALEL_M16_DUA_AKUN.md §4 — dicatat sebagai deviasi
-#       sadar di HANDOFF_M16_AKUN_A.md §4. Akun B / langkah penggabungan
-#       menaikkan lagi di atas 127/28 untuk delta mereka sendiri (mesin REQ +
-#       tabel Ads/Permintaan).
+#       sadar di HANDOFF_M16_AKUN_A.md §4.
 # 123 = 122 + division_registry (M16 fondasi, 20260829001000: divisi sebagai
 #       DATA, menggantikan delapan daftar duplikat). 36 = 35 + REQ (Permintaan
 #       terkait klien, M16 §5.5 — didaftarkan di fondasi supaya dua stream
