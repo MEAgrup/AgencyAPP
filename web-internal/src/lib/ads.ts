@@ -130,18 +130,30 @@ export const ENTRY_METHOD_OPTIONS = ['Manual', 'File Export'] as const;
 // Optimization change type — only these five accepted server-side.
 export const CHANGE_TYPE_OPTIONS = ['Budget', 'Targeting', 'Creative Swap', 'Schedule', 'Other'] as const;
 
-// Ad Campaign statuses (STATE_MACHINES §14) — birth [Paused], terminal [Ended].
-export const CAMPAIGN_STATUSES = ['[Paused]', '[Active]', '[Ended]'] as const;
+// Tipe Iklan (M16 LT-41) — mandatory on create (ads.ts createCampaign
+// MSG_INVALID_TIPE_IKLAN); missing here meant every /ads create-campaign
+// submission failed [data tidak lengkap...] with no field in the form to fix it.
+export const TIPE_IKLAN_OPTIONS = ['GMV Max Product', 'GMV Max Live', 'TTAM'] as const;
+
+// Ad Campaign statuses (STATE_MACHINES §14) — birth [Setting] (M16 LT-40,
+// ADC_SETTING_STATE), terminal [Ended]. [Setting] used to read '[Paused]' here;
+// a freshly created campaign's real status never matched any of the three
+// checks below, so it rendered as an unrecognized gray badge and its own
+// "Luncurkan" button never appeared.
+export const CAMPAIGN_STATUSES = ['[Setting]', '[Paused]', '[Active]', '[Ended]'] as const;
 
 // ---------------------------------------------------------------------------
 // Local badge-tone map for campaign lifecycle status.
-// lib/status.ts (shared) has no entry for [Active]/[Paused]/[Ended] and is out of
-// scope to edit for this build stream, so per the build convention ("duplicate
-// helpers locally in lib/ads.ts") we map the three verbatim statuses here rather
-// than let them all fall through to the default gray tone.
+// lib/status.ts (shared) has no entry for [Setting]/[Active]/[Paused]/[Ended]
+// and is out of scope to edit for this build stream, so per the build
+// convention ("duplicate helpers locally in lib/ads.ts") we map the four
+// verbatim statuses here rather than let them all fall through to the
+// default gray tone.
 // ---------------------------------------------------------------------------
 export function campaignBadgeTone(status: string): BadgeTone {
   switch (status) {
+    case '[Setting]':
+      return 'blue';
     case '[Active]':
       return 'green';
     case '[Paused]':
@@ -170,6 +182,7 @@ export interface CampaignInput {
   start_date: string; // "YYYY-MM-DD"
   end_date: string; // "YYYY-MM-DD"
   target_kpi: string;
+  tipe_iklan: string; // M16 LT-41 — mandatory server-side, see TIPE_IKLAN_OPTIONS
 }
 
 // POST /briefs/{id}/campaigns → Campaign (object directly, not wrapped).
