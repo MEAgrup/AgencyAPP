@@ -221,7 +221,7 @@ check "notif_events"     "select count(*) from notif_events"     "65"
 check "notif_katalog_sesuai" "select case when (select count(*) from notif_events) = (select coalesce(sum(event_count),0) from notif_catalog_versions) then 1 else 0 end" "1"
 check "employees"        "select count(*) from employees"        "10"
 check "role_mappings"    "select count(*) from role_mappings"    "12"
-check "master_services"  "select count(*) from master_services"  "4"
+check "master_services"  "select count(*) from master_services"  "6"
 check "demo_tasks"       "select count(*) from demo_tasks"       "1"
 
 echo "→ invariant SQL"

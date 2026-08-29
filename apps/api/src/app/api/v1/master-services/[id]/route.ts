@@ -23,6 +23,8 @@ interface ServiceBody {
   active?: boolean;
   requires_strategy_plan?: boolean;
   plan_tier?: string;
+  /** M16 LT-42 / M17 §5.4 — hari kalender. Absent/undefined = tidak berlaku. */
+  durasi_jasa?: number;
   effective_from?: string;
 }
 
@@ -46,6 +48,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
       active: b.active,
       requiresStrategyPlan: b.requires_strategy_plan,
       planTier: b.plan_tier as msl.ServiceInput['planTier'],
+      durasiJasa: b.durasi_jasa,
       effectiveFrom: b.effective_from ?? '',
     });
     return json({ id, version_no: versionNo });

@@ -6869,6 +6869,136 @@ export async function openRevision(
   });
 }
 
+// ===========================================================================
+// M17 §4 — AI Optimizer "Terapkan" sinkronisasi SKU balik ke STRG (LT-54).
+// ---------------------------------------------------------------------------
+// Tahap Terapkan (pipeline Optimasi SKU, M17 §3.1, mesin milik Akun A di
+// `stage.ts`) mengumpulkan SKU yang berubah beserta nilai sebelum→sesudah dan
+// memanggil `syncAiOptimizerSkuRevision` di SINI untuk menuliskannya balik ke
+// STRG — SATU-SATUNYA jalur yang menyentuh dokumen modul lain, jadi ketat:
+// selalu lewat mesin `strategi` yang sudah ada (Aktif -> Draft Revisi ->
+// Diajukan), TIDAK PERNAH UPDATE langsung ke dokumen Aktif (M17 Rule 4).
+// ===========================================================================
+
+/** One SKU field changed by the Optimasi SKU pipeline, before → after (M17 §4 Rule 1). */
+export interface AiOptimizerSkuChange {
+  sku: string;
+  /** e.g. 'judul' | 'deskripsi' | 'atribut' | 'foto' — merged into strategi_pillar.detail. */
+  field: string;
+  before: string | null;
+  after: string;
+}
+
+/** Outcome of syncing one client's batch of SKU changes for one resolved STRG. */
+export interface AiOptimizerSyncResult {
+  sku: string;
+  field: string;
+  status: 'synced' | 'ditunda';
+  /** The Draft Revisi's id when synced. */
+  strategiId: string | null;
+  /** BI-shaped reason when ditunda (no Aktif STRG carries the SKU, an in-flight revision already exists, H-2 trigger not declared, actor not the owning AM, ...). */
+  alasanTunda: string | null;
+}
+
+/**
+ * syncAiOptimizerSkuRevision (M17 §4) pushes AI Optimizer's SKU edits back into
+ * STRG as a NUMBERED revision through the existing `strategi` machine — never
+ * a silent write to `Aktif`. Per SKU, it resolves the client's Aktif STRG that
+ * actually carries that SKU (a client may run more than one active
+ * Full-Management contract, DECISIONS.md 2026-08-28 "STRG list yg ada di akun
+ * tersebut"), groups changes by the resolved Strategi, opens ONE revision per
+ * Strategi via the existing `openRevision` (trigger `'lainnya'` — the H-2
+ * catch-all), merges each changed field into its `strategi_pillar.detail`, and
+ * submits the revision (`Diajukan`) so it queues for the SAME approval a human
+ * revision would need (Rule 4: "tidak menembus aturan freeze/approval STRG").
+ *
+ * DEFERRED — not forced, not thrown as a hard failure for the whole batch —
+ * when: no Aktif STRG carries the SKU, the client's Strategi already has an
+ * in-flight revision blocking a new one (`MSG_STRATEGI_EXISTS`), the H-2
+ * trigger vocabulary this contract declared has no `'lainnya'` entry, or the
+ * calling actor is not that Strategi's owning AM (`openRevision`'s own gate).
+ * The parent Brief may still finish regardless (M17 §4 Rule 4) — the caller in
+ * `stage.ts` does not gate the `Terapkan` transition on this result.
+ */
+export async function syncAiOptimizerSkuRevision(
+  sql: Sql,
+  actor: Actor,
+  clientId: string,
+  briefId: string,
+  changes: AiOptimizerSkuChange[],
+): Promise<AiOptimizerSyncResult[]> {
+  if (changes.length === 0) {
+    return [];
+  }
+  // Resolve each SKU to the (at most one) Aktif Strategi of this client whose
+  // Section E-3 pillar list actually carries it. Plain read — no transaction
+  // needed yet, so this works whether `sql` is a fresh pool client or (from a
+  // caller already inside its own transaction) a TransactionSql.
+  const byStrategi = new Map<string, AiOptimizerSkuChange[]>();
+  const results: AiOptimizerSyncResult[] = [];
+  for (const change of changes) {
+    const match = await sql<{ strategi_id: string }[]>`
+      select sp.strategi_id
+        from strategi_pillar sp
+        join strategi s on s.id = sp.strategi_id
+       where s.client_id = ${clientId} and s.status = ${STRATEGI_AKTIF}
+         and sp.jenis = 'sku' and sp.sku = ${change.sku}
+       limit 1`;
+    if (match.length === 0) {
+      results.push({
+        sku: change.sku, field: change.field, status: 'ditunda', strategiId: null,
+        alasanTunda: `SKU "${change.sku}" tidak ditemukan di STRG Aktif klien ini`,
+      });
+      continue;
+    }
+    const list = byStrategi.get(match[0].strategi_id) ?? [];
+    list.push(change);
+    byStrategi.set(match[0].strategi_id, list);
+  }
+
+  // One Strategi at a time, EACH its own top-level transaction (never nested —
+  // `openRevision`/`submitStrategi` already open their own via `withTransaction`).
+  // A failure on one Strategi (no in-flight-revision slot, H-2 trigger not
+  // declared, actor not the owning AM, ...) is caught and reported `ditunda`
+  // WITHOUT blocking the rest of the batch — exactly the deferral M17 §4 Rule 4
+  // asks for, just applied per-STRG instead of only per-client.
+  for (const [strategiId, list] of byStrategi) {
+    try {
+      const opened = await openRevision(sql, actor, strategiId, {
+        triggerRevisi: ['lainnya'],
+        alasanRevisi: `Sinkronisasi otomatis hasil Optimasi SKU — Brief ${briefId}`,
+        asumsiGugur: [],
+      });
+      await withTransaction(sql, async (tx) => {
+        for (const c of list) {
+          await tx`
+            update strategi_pillar
+               set detail = detail || jsonb_build_object(${c.field}::text, ${c.after}::text),
+                   updated_at = now()
+             where strategi_id = ${opened.id} and jenis = 'sku' and sku = ${c.sku}`;
+        }
+        await executors(tx).audit.insertAudit({
+          entityType: ENTITY_STRATEGI, entityId: opened.id, actorEmployeeId: actor.employeeId,
+          action: 'ai_optimizer_sku_sync',
+          beforeJson: { brief_id: briefId, changes: list.map((c) => ({ sku: c.sku, field: c.field, before: c.before })) },
+          afterJson: { brief_id: briefId, changes: list.map((c) => ({ sku: c.sku, field: c.field, after: c.after })) },
+          createdBy: actor.employeeId,
+        });
+      });
+      await submitStrategi(sql, actor, opened.id);
+      for (const c of list) {
+        results.push({ sku: c.sku, field: c.field, status: 'synced', strategiId: opened.id, alasanTunda: null });
+      }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : '[sinkronisasi STRG gagal]';
+      for (const c of list) {
+        results.push({ sku: c.sku, field: c.field, status: 'ditunda', strategiId: null, alasanTunda: reason });
+      }
+    }
+  }
+  return results;
+}
+
 /**
  * expireStrategi closes an active Strategi at contract end (Rule 14).
  *

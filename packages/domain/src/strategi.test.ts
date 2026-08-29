@@ -138,6 +138,7 @@ import {
   LEADING_INDICATOR_MAX,
   TARGET_METRICS,
   submitStrategi,
+  syncAiOptimizerSkuRevision,
   targetKey,
   trenBaseline,
   updateHeader,
@@ -4211,5 +4212,116 @@ describeDb('baseline gate — no second gate (RAB-11 DoD / RAB-13)', () => {
        where name ilike '%baseline%' or name ilike '%acc%'
           or name ilike 'riset_awal_%' or name ilike '%_acc'`;
     expect(secondGate).toEqual([]);
+  });
+});
+
+/**
+ * M17 §4 (LT-54) — AI Optimizer's "Terapkan" stage sync-back. Pushes SKU
+ * edits into STRG as a NUMBERED revision through the EXISTING `strategi`
+ * machine (Aktif -> Draft Revisi -> Diajukan) — never a silent UPDATE to the
+ * Aktif document.
+ */
+describeDb('syncAiOptimizerSkuRevision (M17 §4 / LT-54)', () => {
+  /** Same shared fixture as everywhere else, plus a `jenis:'sku'` pillar and
+   * an H-2 `'lainnya'` trigger declaration — the two things `openRevision`
+   * needs that the base fixture does not carry. */
+  async function seedAktifWithSku(sku = 'SKU-HERO-1'): Promise<{ clientId: string; strategiId: string }> {
+    const { serviceId, strategiId } = await seedSubmittable();
+    await saveTriggerRevisi(sql, am(), strategiId, [
+      { kode: 'pencapaian_di_bawah_target', ambang: 80 },
+      { kode: 'stok_kosong', ambang: 14 },
+      { kode: 'lainnya', catatan: 'Sinkronisasi otomatis AI Optimizer' },
+    ]);
+    await savePillars(sql, am(), strategiId, [
+      { jenis: 'tidak_dikerjakan', aksi: 'tanpa reshoot foto di M1' },
+      { jenis: 'harga', sku: 'RAK-A', floorPrice: '79000.00', hargaPromo: '85000.00' },
+      { jenis: 'sku', sku, peran: 'hero' },
+    ]);
+    // D-8 is optional at submit (⟳ 2026-08-26 DECISIONS) — stripped here so
+    // `openRevision`'s Rule 13(c) ("cite a broken assumption") does not apply.
+    // An AI Optimizer sync has nothing assumption-related to cite; the whole
+    // point of `syncAiOptimizerSkuRevision` is to defer rather than fabricate
+    // one, and a client WITH assumptions declared genuinely does defer here —
+    // that gap is real and documented in HANDOFF_M16_AKUN_B.md.
+    await sql`delete from strategi_assumption where strategi_id = ${strategiId}`;
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    return { clientId, strategiId };
+  }
+
+  it('opens a numbered Draft Revisi, merges the changed field into strategi_pillar.detail, and submits it (Diajukan) — never touching Aktif', async () => {
+    const { clientId, strategiId } = await seedAktifWithSku('SKU-HERO-1');
+    const results = await syncAiOptimizerSkuRevision(sql, am(), clientId, 'BRF-FAKE-0001', [
+      { sku: 'SKU-HERO-1', field: 'judul', before: 'Judul Lama', after: 'Judul Baru SEO' },
+    ]);
+    expect(results).toHaveLength(1);
+    expect(results[0].status).toBe('synced');
+    expect(results[0].strategiId).not.toBeNull();
+    expect(results[0].strategiId).not.toBe(strategiId); // a NEW version, not the original
+
+    // The original Aktif version is untouched.
+    const original = await sql<{ status: string }[]>`select status from strategi where id = ${strategiId}`;
+    expect(original[0].status).toBe(STRATEGI_AKTIF);
+
+    // The new revision is Diajukan (queued for the SAME human approval a
+    // manual revision needs — Rule 4, never auto-approved) and carries the
+    // merged field on its own copy of the SKU pillar.
+    const rev = await sql<{ status: string }[]>`select status from strategi where id = ${results[0].strategiId}`;
+    expect(rev[0].status).toBe(STRATEGI_DIAJUKAN);
+    const pillar = await sql<{ detail: Record<string, unknown> }[]>`
+      select detail from strategi_pillar
+       where strategi_id = ${results[0].strategiId} and jenis = 'sku' and sku = 'SKU-HERO-1'`;
+    expect(pillar[0].detail).toMatchObject({ judul: 'Judul Baru SEO' });
+
+    // An audit_log row with the REAL actor (not SYSTEM) carries the full
+    // before/after — house rule #3, and M17 §4 Rule 3 explicitly.
+    const audit = await sql<{ actor_employee_id: string; before_json: unknown; after_json: unknown }[]>`
+      select actor_employee_id, before_json, after_json from audit_log
+       where entity_type = 'strategi' and entity_id = ${results[0].strategiId} and action = 'ai_optimizer_sku_sync'`;
+    expect(audit[0].actor_employee_id).toBe('ZZ-AM');
+    expect(JSON.stringify(audit[0].after_json)).toContain('Judul Baru SEO');
+  });
+
+  it('defers (does not throw) when the SKU is not found in any Aktif STRG for the client', async () => {
+    const { clientId } = await seedAktifWithSku('SKU-HERO-1');
+    const results = await syncAiOptimizerSkuRevision(sql, am(), clientId, 'BRF-FAKE-0002', [
+      { sku: 'SKU-TIDAK-ADA', field: 'judul', after: 'x', before: null },
+    ]);
+    expect(results).toEqual([{
+      sku: 'SKU-TIDAK-ADA', field: 'judul', status: 'ditunda', strategiId: null,
+      alasanTunda: expect.stringContaining('SKU-TIDAK-ADA'),
+    }]);
+  });
+
+  it('defers when an in-flight revision already blocks a new one — never bypasses the freeze', async () => {
+    const { clientId, strategiId } = await seedAktifWithSku('SKU-HERO-1');
+    // A revision is already open (Draft Revisi) — openRevision's own
+    // MSG_STRATEGI_EXISTS guard should block a second one, caught here as a
+    // deferral rather than a thrown error breaking the whole Terapkan flow.
+    await openRevision(sql, am(), strategiId, {
+      triggerRevisi: ['stok_kosong'], alasanRevisi: 'revisi manual lain sedang berjalan', asumsiGugur: ['A1'],
+    });
+    const results = await syncAiOptimizerSkuRevision(sql, am(), clientId, 'BRF-FAKE-0003', [
+      { sku: 'SKU-HERO-1', field: 'judul', after: 'x', before: null },
+    ]);
+    expect(results[0].status).toBe('ditunda');
+    expect(results[0].alasanTunda).toContain(MSG_STRATEGI_EXISTS.replace(/[[\]]/g, ''));
+  });
+
+  it('a SKU is resolved against the RIGHT client — never matched across clients', async () => {
+    const first = await seedAktifWithSku('SKU-A');
+    await seedAktifWithSku('SKU-B'); // a second, unrelated client+STRG carrying a different SKU
+    const results = await syncAiOptimizerSkuRevision(sql, am(), first.clientId, 'BRF-FAKE-0004', [
+      { sku: 'SKU-A', field: 'deskripsi', after: 'Deskripsi A baru', before: null },
+    ]);
+    expect(results[0].status).toBe('synced');
+    // SKU-B belongs to a DIFFERENT client's STRG, so asking for it under
+    // `first`'s client_id is correctly deferred, not silently cross-matched.
+    const crossClient = await syncAiOptimizerSkuRevision(sql, am(), first.clientId, 'BRF-FAKE-0005', [
+      { sku: 'SKU-B', field: 'deskripsi', after: 'x', before: null },
+    ]);
+    expect(crossClient[0].status).toBe('ditunda');
   });
 });

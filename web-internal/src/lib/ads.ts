@@ -40,7 +40,9 @@ export interface Campaign {
   start_date: string; // "YYYY-MM-DD"
   end_date: string; // "YYYY-MM-DD"
   target_kpi: string;
-  status: string; // [Paused] | [Active] | [Ended]
+  status: string; // [Setting] | [Active] | [Paused] | [Ended] (M16 LT-40)
+  tipe_iklan: string; // M16 LT-41 — GMV Max Product | GMV Max Live | TTAM
+  additional_days: number; // M16 LT-42 (Ads Management Date)
   total_spend: number;
   total_spend_display: string;
   total_gmv: number;
@@ -54,6 +56,16 @@ export interface Campaign {
   escalation_flagged: boolean; // streak >= 2
   created_by: string;
   created_at: string; // RFC3339
+}
+
+// M16 LT-42 — Ads Management Date. end_date is a READ-ONLY derivation, never
+// stored; recomputed every read (house rule #4). GET /campaigns/{id}/management-date.
+export interface AdsManagementDate {
+  start_date: string; // "YYYY-MM-DD"
+  durasi_jasa: number; // hari kalender, dari Master Service List
+  additional_days: number; // manual (mis. libur Lebaran)
+  total_hari_hold: number; // diturunkan dari riwayat transisi Hold, tidak disimpan
+  end_date: string; // "YYYY-MM-DD" — start_date + durasi_jasa + additional_days + total_hari_hold
 }
 
 // module8_ads.MetricEntry (metrics.go:42-52). NOTE: response carries NO ctr/cvr.

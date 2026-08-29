@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { account, activity, admin, ads, auth, board, campaign, client, creative, demo, directory, finance, health, internaltask, kol, leads, livestream, marketing, milestone, msl, notification, performance, portal, sales, stage, task } from '@cdps/domain';
+import { account, activity, admin, ads, auth, board, campaign, client, creative, demo, directory, finance, health, internaltask, kol, leads, livestream, marketing, milestone, msl, notification, performance, portal, req, sales, stage, task } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -75,6 +75,7 @@ export function mapError(err: unknown): Response {
     err instanceof milestone.ValidationError ||
     err instanceof internaltask.ValidationError ||
     err instanceof stage.ValidationError ||
+    err instanceof req.ValidationError ||
     err instanceof notification.ValidationError ||
     err instanceof admin.ValidationError ||
     err instanceof auth.PasswordPolicyError
@@ -102,6 +103,7 @@ export function mapError(err: unknown): Response {
     err instanceof milestone.NotFoundError ||
     err instanceof internaltask.NotFoundError ||
     err instanceof stage.NotFoundError ||
+    err instanceof req.NotFoundError ||
     err instanceof admin.NotFoundError ||
     err instanceof auth.EmployeeNotFoundError
   ) {
@@ -128,6 +130,7 @@ export function mapError(err: unknown): Response {
     err instanceof milestone.ForbiddenError ||
     err instanceof internaltask.ForbiddenError ||
     err instanceof stage.ForbiddenError ||
+    err instanceof req.ForbiddenError ||
     err instanceof portal.ForbiddenError ||
     err instanceof admin.ForbiddenError ||
     err instanceof directory.ForbiddenError ||
@@ -161,6 +164,7 @@ export function mapError(err: unknown): Response {
     err instanceof milestone.ConflictError ||
     err instanceof internaltask.ConflictError ||
     err instanceof stage.ConflictError ||
+    err instanceof req.ConflictError ||
     err instanceof admin.ConflictError
   ) {
     // Lifecycle conflicts: a dedup block, an un-closable attempt, a lead whose

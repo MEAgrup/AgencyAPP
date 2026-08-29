@@ -18,7 +18,9 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   return handle(async () => {
     const actor = requireActor(request);
     const { id } = await ctx.params;
-    const v = await ads.listWeeklyReports(db(), actor, id);
+    // M16 LT-43 — ?jenis= selects Weekly (default) | Mini | Monthly | Content Analysis.
+    const jenis = new URL(request.url).searchParams.get('jenis') ?? undefined;
+    const v = await ads.listWeeklyReports(db(), actor, id, undefined, jenis);
     return json(adsWeeklyReportViewToWire(v));
   });
 }
