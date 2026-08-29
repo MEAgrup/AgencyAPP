@@ -1970,6 +1970,41 @@ describeDb('Rule 13 — a revision is a new row, and n stays Aktif', () => {
     ).rejects.toThrow(MSG_REVISION_INCOMPLETE);
   });
 
+  it('LT-13: { otomatis: true } waives the broken-assumption requirement even when D-8 has rows', async () => {
+    const { strategiId } = await seedSubmittable();
+    await submitStrategi(sql, am(), strategiId);
+    await approveStrategi(sql, spv(), strategiId);
+    // seedSubmittable leaves three D-8 rows (A1/A2/A3) — the same fixture
+    // that `still refuses an empty broken-assumption list…` above proves
+    // still binds Rule 13(c) for a HUMAN revision. `otomatis: true` is the
+    // only thing that differs here.
+    const v2 = await openRevision(
+      sql,
+      am(),
+      strategiId,
+      { triggerRevisi: ['stok_kosong'], alasanRevisi: 'sinkron otomatis AI Optimizer', asumsiGugur: [] },
+      { otomatis: true },
+    );
+    expect(v2.versiNo).toBe(2);
+    expect(v2.status).toBe(STRATEGI_DRAFT_REVISI);
+    // Rule 13(a)(b) — trigger + reason — are NOT waived by `otomatis`.
+    await expect(
+      openRevision(
+        sql,
+        am(),
+        strategiId,
+        { triggerRevisi: [], alasanRevisi: 'sinkron otomatis AI Optimizer', asumsiGugur: [] },
+        { otomatis: true },
+      ),
+    ).rejects.toThrow(MSG_REVISION_INCOMPLETE);
+    // Provenance stays honest: a distinct peristiwa, not a disguised
+    // `revisi_dibuka`, and `asumsi_gugur` genuinely empty (not fabricated).
+    const [version] = await sql<{ peristiwa: string; asumsi_gugur: string[] }[]>`
+      select peristiwa, asumsi_gugur from strategi_version where strategi_id = ${v2.id}`;
+    expect(version.peristiwa).toBe('revisi_dibuka_otomatis');
+    expect(version.asumsi_gugur).toEqual([]);
+  });
+
   it('waives the broken-assumption requirement when D-8 was never filled (owner QA 2026-08-26)', async () => {
     const { strategiId } = await seedSubmittable();
     await saveAssumptions(sql, am(), strategiId, []);
@@ -4237,13 +4272,13 @@ describeDb('syncAiOptimizerSkuRevision (M17 §4 / LT-54)', () => {
       { jenis: 'harga', sku: 'RAK-A', floorPrice: '79000.00', hargaPromo: '85000.00' },
       { jenis: 'sku', sku, peran: 'hero' },
     ]);
-    // D-8 is optional at submit (⟳ 2026-08-26 DECISIONS) — stripped here so
-    // `openRevision`'s Rule 13(c) ("cite a broken assumption") does not apply.
-    // An AI Optimizer sync has nothing assumption-related to cite; the whole
-    // point of `syncAiOptimizerSkuRevision` is to defer rather than fabricate
-    // one, and a client WITH assumptions declared genuinely does defer here —
-    // that gap is real and documented in HANDOFF_M16_AKUN_B.md.
-    await sql`delete from strategi_assumption where strategi_id = ${strategiId}`;
+    // D-8 assumptions from `seedSubmittable` (A1/A2/A3) are LEFT IN PLACE —
+    // `syncAiOptimizerSkuRevision` calls `openRevision(..., { otomatis: true })`
+    // (LT-13), which bypasses Rule 13(c) for a machine-opened revision
+    // unconditionally, so a client WITH assumptions declared no longer
+    // defers here (see the dedicated test below; before LT-13 this used to
+    // delete the rows to sidestep a real gap, documented in
+    // HANDOFF_M16_AKUN_B.md and closed in DECISIONS.md 2026-08-29).
     await submitStrategi(sql, am(), strategiId);
     await approveStrategi(sql, spv(), strategiId);
     const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
@@ -4282,6 +4317,50 @@ describeDb('syncAiOptimizerSkuRevision (M17 §4 / LT-54)', () => {
        where entity_type = 'strategi' and entity_id = ${results[0].strategiId} and action = 'ai_optimizer_sku_sync'`;
     expect(audit[0].actor_employee_id).toBe('ZZ-AM');
     expect(JSON.stringify(audit[0].after_json)).toContain('Judul Baru SEO');
+  });
+
+  it('LT-13: syncs (never DEFERs) a client that HAS Section D assumptions recorded, via a machine-marked revision', async () => {
+    const { clientId, strategiId } = await seedAktifWithSku('SKU-HERO-1');
+    // Before LT-13, `openRevision`'s Rule 13(c) demanded `asumsiGugur` the
+    // instant this Strategi had ≥1 `strategi_assumption` row — and a machine
+    // can never author that human reason, so this genuinely DEFERRED. The
+    // fixture's 3 rows (A1/A2/A3, from `seedSubmittable`) are left in place —
+    // not stripped — specifically to prove that gap is closed.
+    const before = await sql<{ n: number }[]>`
+      select count(*)::int as n from strategi_assumption where strategi_id = ${strategiId}`;
+    expect(before[0].n).toBe(3);
+
+    const results = await syncAiOptimizerSkuRevision(sql, am(), clientId, 'BRF-FAKE-0001b', [
+      { sku: 'SKU-HERO-1', field: 'judul', before: 'Judul Lama', after: 'Judul Baru SEO' },
+    ]);
+    expect(results[0].status).toBe('synced'); // NOT 'ditunda' — the LT-13 gap
+    const revId = results[0].strategiId!;
+
+    // Machine-opened revisions record a DIFFERENT, honest peristiwa — never a
+    // disguised `revisi_dibuka` — and clear Rule 13(c) with an empty
+    // `asumsi_gugur`, while Rule 13(a)(b) (trigger + reason) still hold.
+    const [version] = await sql<{
+      peristiwa: string; trigger_revisi: string[]; alasan_revisi: string | null; asumsi_gugur: string[];
+    }[]>`
+      select peristiwa, trigger_revisi, alasan_revisi, asumsi_gugur from strategi_version
+       where strategi_id = ${revId} and peristiwa like 'revisi_dibuka%'`;
+    expect(version.peristiwa).toBe('revisi_dibuka_otomatis');
+    expect(version.trigger_revisi).toEqual(['lainnya']);
+    expect(version.alasan_revisi).toContain('BRF-FAKE-0001b');
+    expect(version.asumsi_gugur).toEqual([]);
+
+    // The `open_revision_otomatis` audit row records `otomatis: true` — LT-13
+    // is auditable, not a silent code-path fork.
+    const [audit] = await sql<{ after_json: { otomatis?: boolean } }[]>`
+      select after_json from audit_log
+       where entity_type = 'strategi' and entity_id = ${revId} and action = 'open_revision_otomatis'`;
+    expect(audit.after_json.otomatis).toBe(true);
+
+    // The assumption rows themselves were never touched — LT-13 bypasses the
+    // CITATION requirement, it does not delete or fabricate the assumptions.
+    const after = await sql<{ n: number }[]>`
+      select count(*)::int as n from strategi_assumption where strategi_id = ${strategiId}`;
+    expect(after[0].n).toBe(3);
   });
 
   it('defers (does not throw) when the SKU is not found in any Aktif STRG for the client', async () => {

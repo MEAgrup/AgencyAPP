@@ -6825,9 +6825,29 @@ export interface RevisionInput {
    * Required only if the version being revised has at least one assumption
    * recorded — since D-8 is no longer a submit gate (⟳ 2026-08-26 DECISIONS),
    * a Strategi can reach `Aktif` with zero rows in `strategi_assumption`, and
-   * there is nothing to cite. May be empty in that case.
+   * there is nothing to cite. May be empty in that case, and always empty on
+   * an `otomatis` revision (see `OpenRevisionOptions`) — the DB enforces this
+   * the same way either way (`ck_strver_revisi_lengkap` / `trg_strver_asumsi_gugur`,
+   * migrations 20260826010000 + 20260831080000).
    */
   asumsiGugur: string[];
+}
+
+/** LT-13 (DECISIONS.md 2026-08-31 M16 Akun B / owner direction (a), 2026-08-29). */
+export interface OpenRevisionOptions {
+  /**
+   * True only for a revision opened by a machine, not a human — currently
+   * `syncAiOptimizerSkuRevision` (M17 §4/LT-54). Bypasses Rule 13(c) (the
+   * broken-assumption citation): a machine can never honestly author the
+   * human reason an assumption broke, so requiring it made auto-sync DEFER
+   * for almost every client with a Section D assumption on file (LT-13).
+   * Rule 13(a)(b) — trigger + free-text reason — still apply in full; only
+   * (c) is skipped, and it is skipped by recording a DIFFERENT peristiwa
+   * (`revisi_dibuka_otomatis`) so the provenance stays honest in
+   * `strategi_version` rather than papering over a human-only field. Never
+   * set this from a human-facing route.
+   */
+  otomatis?: boolean;
 }
 
 /**
@@ -6843,18 +6863,22 @@ export async function openRevision(
   actor: Actor,
   id: string,
   input: RevisionInput,
+  opts?: OpenRevisionOptions,
 ): Promise<Strategi> {
+  const otomatis = opts?.otomatis ?? false;
   const alasan = (input.alasanRevisi ?? '').trim();
   const triggers = (input.triggerRevisi ?? []).map((t) => t.trim()).filter(Boolean);
   const gugur = (input.asumsiGugur ?? []).map((a) => a.trim()).filter(Boolean);
-  // Rule 13(c) only binds if there is something to cite. D-8 is no longer a
-  // submit gate (⟳ 2026-08-26 DECISIONS), so a Strategi may reach `Aktif` with
-  // zero assumptions ever recorded — demanding a broken one in that case would
-  // make the FIRST revision permanently unopenable, which is worse than the
-  // requirement it was meant to enforce.
+  // Rule 13(c) only binds if there is something to cite AND this is a human
+  // revision. D-8 is no longer a submit gate (⟳ 2026-08-26 DECISIONS), so a
+  // Strategi may reach `Aktif` with zero assumptions ever recorded — demanding
+  // a broken one in that case would make the FIRST revision permanently
+  // unopenable, which is worse than the requirement it was meant to enforce.
+  // An `otomatis` revision skips (c) unconditionally (LT-13) — see
+  // `OpenRevisionOptions.otomatis`.
   const existingAssumptions = await sql<{ n: number }[]>`
     select count(*)::int as n from strategi_assumption where strategi_id = ${id}`;
-  const asumsiRequired = existingAssumptions[0].n > 0;
+  const asumsiRequired = !otomatis && existingAssumptions[0].n > 0;
   if (triggers.length === 0 || alasan === '' || (asumsiRequired && gugur.length === 0)) {
     throw new ValidationError(MSG_REVISION_INCOMPLETE);
   }
@@ -6945,22 +6969,31 @@ export async function openRevision(
 
     // The J-3 declaration belongs to the NEW version: it is the reason that
     // version exists, and the §9 metric counts revisions, not archives.
-    await appendEvent(tx, newId, head.versiNo + 1, 'revisi_dibuka', actor.employeeId, null, {
-      triggerRevisi: triggers,
-      alasanRevisi: alasan,
-      asumsiGugur: gugur,
-    });
+    // `otomatis` writes a DIFFERENT peristiwa (LT-13) — not a flag on the same
+    // row — so `strategi_version` stays an honest record of who opened this:
+    // a human (`revisi_dibuka`, Rule 13 a+b+c) or a machine (`revisi_dibuka_otomatis`,
+    // Rule 13 a+b only, `ck_strver_revisi_lengkap` / migration 20260831080000).
+    await appendEvent(
+      tx,
+      newId,
+      head.versiNo + 1,
+      otomatis ? 'revisi_dibuka_otomatis' : 'revisi_dibuka',
+      actor.employeeId,
+      null,
+      { triggerRevisi: triggers, alasanRevisi: alasan, asumsiGugur: gugur },
+    );
     await ex.audit.insertAudit({
       entityType: ENTITY_STRATEGI,
       entityId: newId,
       actorEmployeeId: actor.employeeId,
-      action: 'open_revision',
+      action: otomatis ? 'open_revision_otomatis' : 'open_revision',
       beforeJson: { versi_sebelumnya: head.id, versi_no: head.versiNo },
       afterJson: {
         versi_no: head.versiNo + 1,
         trigger_revisi: triggers,
         alasan_revisi: alasan,
         asumsi_gugur: gugur,
+        otomatis,
       },
       createdBy: actor.employeeId,
     });
@@ -7008,9 +7041,18 @@ export interface AiOptimizerSyncResult {
  * Full-Management contract, DECISIONS.md 2026-08-28 "STRG list yg ada di akun
  * tersebut"), groups changes by the resolved Strategi, opens ONE revision per
  * Strategi via the existing `openRevision` (trigger `'lainnya'` — the H-2
- * catch-all), merges each changed field into its `strategi_pillar.detail`, and
- * submits the revision (`Diajukan`) so it queues for the SAME approval a human
- * revision would need (Rule 4: "tidak menembus aturan freeze/approval STRG").
+ * catch-all, `otomatis: true` — LT-13), merges each changed field into its
+ * `strategi_pillar.detail`, and submits the revision (`Diajukan`) so it queues
+ * for the SAME approval a human revision would need (Rule 4: "tidak menembus
+ * aturan freeze/approval STRG").
+ *
+ * `otomatis: true` (LT-13, DECISIONS.md 2026-08-31/2026-08-29 owner direction
+ * (a)) is what lets this sync clients that HAVE recorded a Section D
+ * assumption — a machine can never author the human reason one broke (Rule
+ * 13(c)), so before LT-13 this DEFERRED for almost every active client. It
+ * still writes a distinct, honest provenance (`revisi_dibuka_otomatis`, not a
+ * disguised `revisi_dibuka`) and Rule 13(a)(b) — trigger + reason — still
+ * apply in full.
  *
  * DEFERRED — not forced, not thrown as a hard failure for the whole batch —
  * when: no Aktif STRG carries the SKU, the client's Strategi already has an
@@ -7064,11 +7106,21 @@ export async function syncAiOptimizerSkuRevision(
   // asks for, just applied per-STRG instead of only per-client.
   for (const [strategiId, list] of byStrategi) {
     try {
-      const opened = await openRevision(sql, actor, strategiId, {
-        triggerRevisi: ['lainnya'],
-        alasanRevisi: `Sinkronisasi otomatis hasil Optimasi SKU — Brief ${briefId}`,
-        asumsiGugur: [],
-      });
+      const opened = await openRevision(
+        sql,
+        actor,
+        strategiId,
+        {
+          triggerRevisi: ['lainnya'],
+          alasanRevisi: `Sinkronisasi otomatis hasil Optimasi SKU — Brief ${briefId}`,
+          asumsiGugur: [],
+        },
+        // LT-13 (a): a machine can never author the human reason a D-8
+        // assumption broke, so this never carries one — `otomatis: true`
+        // is what lets it clear Rule 13(c) instead of DEFER-ing for every
+        // client that has ever recorded a Section D assumption.
+        { otomatis: true },
+      );
       await withTransaction(sql, async (tx) => {
         for (const c of list) {
           await tx`
