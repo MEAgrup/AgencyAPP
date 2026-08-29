@@ -24,6 +24,7 @@
 
 import { division, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
+import { allowedTransitions } from './engine';
 import { computeStageLeadTime, type StageDef, type StageLeadTimeSummary } from './leadtime';
 import { loadTransitions, transitionsOf } from './transitions';
 
@@ -425,6 +426,43 @@ export interface StageOverview {
   productionStage: string | null;
   review: { keputusan: Keputusan; alasanKode: string | null; catatan: string; actorEmployeeId: string; createdAt: Date } | null;
   leadTime: StageLeadTimeSummary;
+  nextStages: NextStage[];
+}
+
+/**
+ * One valid forward edge out of the Brief's CURRENT `production_stage` (LT-60
+ * — Live Stream had no FE way to drive `advanceStage` at all; every pipeline
+ * benefits from the same read). Sourced from `engine.allowedTransitions`
+ * (`private.sm_allowed_transitions`, SECURITY DEFINER) — NEVER a direct
+ * `select … from sm_edges`, which 42501s under `readAsActor`'s RLS session
+ * exactly like the `GET /attempts/{id}` incident this function's own doc
+ * comment describes (QA live 2026-08-03, `20260803123327_rls_sm_edges_read_path.sql`).
+ * Also never `stage_definition.urutan` order, which would silently
+ * mis-describe any pipeline that ever grows a real branch beyond
+ * `Cek Brief AM`.
+ *
+ * `STAGE_RETURNED` is always excluded: that edge belongs to `reviewBrief`
+ * (needs `alasan_kode`, appends `brief_review`) — surfacing it here would
+ * let a caller drive the SAME edge through `advanceStage` and skip that
+ * bookkeeping entirely. It is only ever a destination out of
+ * `STAGE_CEK_BRIEF_AM`, so filtering it out is safe for every other state.
+ */
+export interface NextStage {
+  stageCode: string;
+  label: string;
+}
+
+async function listNextStages(tx: Queryable, pipelineCode: string, from: string): Promise<NextStage[]> {
+  const pipeline = await pipelineByCode(tx, pipelineCode);
+  const toStates = (await allowedTransitions(tx, pipeline.machineName, from)).filter((s) => s !== STAGE_RETURNED);
+  if (toStates.length === 0) {
+    return [];
+  }
+  const rows = await tx<{ stage_code: string; label: string }[]>`
+    select stage_code, label from stage_definition
+     where pipeline_code = ${pipelineCode} and stage_code = any(${toStates})`;
+  const labelOf = new Map(rows.map((r) => [r.stage_code, r.label]));
+  return toStates.map((code) => ({ stageCode: code, label: labelOf.get(code) ?? code }));
 }
 
 /** getStageOverview is the GET-route composition: defs + review + full lead-time timeline. */
@@ -468,9 +506,14 @@ export async function getStageOverview(sql: Queryable, actor: Actor, briefId: st
     sql, defs, transitionsOf(stageLog, briefId), transitionsOf(statusLog, briefId), overrides,
     r.created_at, review?.createdAt ?? null,
   );
+  const nextStages =
+    r.stage_pipeline_code === null || r.production_stage === null
+      ? []
+      : await listNextStages(sql, r.stage_pipeline_code, r.production_stage);
 
   return {
     briefId: r.id, stagePipelineCode: r.stage_pipeline_code, productionStage: r.production_stage, review, leadTime,
+    nextStages,
   };
 }
 

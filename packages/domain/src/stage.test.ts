@@ -110,6 +110,10 @@ const storeOpsBrief = (): BriefInput => ({
   title: 'Banding Pelanggaran', assignedDivision: 'Store Operation', deliverableType: 'Banding',
   quantityTarget: 1, dueDate: '2026-09-15', priority: 'High',
 });
+const liveStreamBrief = (): BriefInput => ({
+  title: 'Live TikTok Shop', assignedDivision: 'Live Stream', deliverableType: 'Sesi Live',
+  quantityTarget: 1, dueDate: '2026-09-15', priority: 'High',
+});
 
 afterAll(async () => {
   if (sql) await sql.end();
@@ -349,5 +353,48 @@ describeDb('getStageOverview / lead time (PRD §5.3, Rule 9)', () => {
     const qcAccount = overview.leadTime.stages.find((s) => s.stageCode === 'QC Account Service');
     expect(qcAccount?.sumber).toBe('status_brief');
     expect(qcAccount?.masukPada).not.toBeNull(); // entered [In Review] → checkpoint opened
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getStageOverview.nextStages — LT-60 (Live Stream input by internal team on
+// the vendor's behalf; every other pipeline benefits from the same read).
+// ---------------------------------------------------------------------------
+describeDb('getStageOverview.nextStages (LT-60)', () => {
+  it('walks the Live Stream pipeline one advanceStage-able edge at a time, and is empty at the terminal', async () => {
+    const { svcId, amId } = await fixture();
+    await registerEmployee('ZZ-STG-LIVE', 'Live Stream', 'ZZ-STG-LIVE-JAB');
+    const liveStaff: Actor = { employeeId: 'ZZ-STG-LIVE', divisi: 'Live Stream', role: permission.makeRole({ division: 'Live Stream', level: 'staff' }) };
+    const b = await createBrief(sql, accountStaff(amId), svcId, liveStreamBrief());
+
+    // Live Stream never has a 'Cek Brief AM' state (HANDOFF §1.2) — born
+    // straight onto the pipeline's initial_state.
+    let overview = await getStageOverview(sql, accountStaff(amId), b.id);
+    expect(overview.productionStage).toBe('Terima Sampel');
+    expect(overview.nextStages).toEqual([{ stageCode: 'Briefing Klien Live', label: 'Briefing Klien Live' }]);
+
+    await advanceStage(sql, liveStaff, b.id, 'Briefing Klien Live');
+    overview = await getStageOverview(sql, accountStaff(amId), b.id);
+    expect(overview.nextStages).toEqual([{ stageCode: 'Live Start', label: 'Live Start' }]);
+
+    await advanceStage(sql, liveStaff, b.id, 'Live Start');
+    overview = await getStageOverview(sql, accountStaff(amId), b.id);
+    expect(overview.productionStage).toBe('Live Start'); // pipeline terminal
+    expect(overview.nextStages).toEqual([]);
+  });
+
+  it("never includes 'Brief Dikembalikan ke AM' — that edge belongs to reviewBrief, not advanceStage", async () => {
+    const { svcId, amId } = await fixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, creativeBrief());
+    const overview = await getStageOverview(sql, accountStaff(amId), b.id);
+    expect(overview.productionStage).toBe('Cek Brief AM');
+    expect(overview.nextStages).toEqual([{ stageCode: 'Script', label: 'Script' }]); // NOT also STAGE_RETURNED
+  });
+
+  it('is empty for a Brief with no pipeline (Store Operation, Rule 12)', async () => {
+    const { svcId, amId } = await fixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, storeOpsBrief());
+    const overview = await getStageOverview(sql, accountStaff(amId), b.id);
+    expect(overview.nextStages).toEqual([]);
   });
 });
