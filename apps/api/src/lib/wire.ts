@@ -6084,6 +6084,12 @@ export interface StageIntakeWire {
   hari_kerja: number;
 }
 
+/** One valid forward edge out of the Brief's current `production_stage` (LT-60). */
+export interface NextStageWire {
+  stage_code: string;
+  label: string;
+}
+
 /** GET /briefs/{id}/stage response (PRD §5.1/§5.3 combined: pipeline state + review decision + full lead-time timeline). */
 export interface StageOverviewWire {
   brief_id: string;
@@ -6094,6 +6100,7 @@ export interface StageOverviewWire {
   total_hari_kerja: number | null;
   tahap_aktif: string | null;
   intake: StageIntakeWire;
+  next_stages: NextStageWire[];
 }
 
 export function stageOverviewToWire(o: stage.StageOverview): StageOverviewWire {
@@ -6130,6 +6137,7 @@ export function stageOverviewToWire(o: stage.StageOverview): StageOverviewWire {
       keluar_pada: o.leadTime.intake.keluarPada === null ? null : o.leadTime.intake.keluarPada.toISOString(),
       hari_kerja: o.leadTime.intake.hariKerja,
     },
+    next_stages: o.nextStages.map((n) => ({ stage_code: n.stageCode, label: n.label })),
   };
 }
 

@@ -52,6 +52,12 @@ export interface StageIntake {
   hari_kerja: number;
 }
 
+/** One valid forward edge out of the Brief's current `production_stage` (LT-60). Mirrors `NextStageWire`. */
+export interface NextStage {
+  stage_code: string;
+  label: string;
+}
+
 /** GET /briefs/{id}/stage response. Mirrors `StageOverviewWire`. */
 export interface StageOverview {
   brief_id: string;
@@ -62,6 +68,7 @@ export interface StageOverview {
   total_hari_kerja: number | null;
   tahap_aktif: string | null;
   intake: StageIntake;
+  next_stages: NextStage[];
 }
 
 export function getBriefStage(briefId: string): Promise<StageOverview> {

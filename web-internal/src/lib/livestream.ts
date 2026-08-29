@@ -257,3 +257,39 @@ export function listLiveStreamBriefQueue(): Promise<{ data: LiveStreamBrief[] }>
 export function canManageLiveStream(role: Role | null): boolean {
   return Boolean(role && (role.director || role.division.toLowerCase() === 'account'));
 }
+
+// ---------------------------------------------------------------------------
+// Role helpers — UX gating ONLY (CLAUDE.md #6). Server is always the final
+// authority; these merely hide/disable controls a role clearly cannot use.
+// Duplicated locally per house convention (mirrors lib/creative.ts's helpers).
+// ---------------------------------------------------------------------------
+
+export function isDirector(role: Role | null): boolean {
+  return !!role?.director;
+}
+
+/** OD is read-only across every M16 stage write endpoint — hide all action buttons. */
+export function isODOnly(role: Role | null): boolean {
+  return !!role?.od && !role?.director;
+}
+
+/**
+ * The CDPS division string, verbatim from `role_mappings` (domain
+ * `division.registry` code `LIVE`, `nama = 'Live Stream'`). Distinct from
+ * `canManageLiveStream` above: that gate is M10 Session/GMV governance (owning
+ * AM or Director, per `module10_livestream` — no division check at all), while
+ * this one is M16 tahapan-produksi governance (`stage.canExecuteStage`,
+ * division staff/lead or Director) — the internal team that reports the
+ * vendor's progress on CDPS's behalf (LT-60), which is a DIFFERENT population
+ * than the client's AM.
+ */
+export const LIVE_STREAM_DIVISION = 'Live Stream';
+
+export function isLiveStreamDivision(role: Role | null): boolean {
+  return !!role && role.division === LIVE_STREAM_DIVISION;
+}
+
+/** canAdvanceStage (LT-60): Director, or Live Stream division staff/lead — mirrors `stage.canExecuteStage`. */
+export function canAdvanceLiveStage(role: Role | null): boolean {
+  return !isODOnly(role) && (isDirector(role) || isLiveStreamDivision(role));
+}

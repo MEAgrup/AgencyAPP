@@ -18,7 +18,7 @@
 | 2b | Metrik kecepatan + skor AM | ✅ SELESAI (Akun A) |
 | 3 | Ads | ✅ SELESAI (Akun B) |
 | 4 | `REQ-` + AI Optimizer | ✅ SELESAI (Akun B) |
-| 5 | Portal vendor Live | ⬜ (b) TERBLOKIR |
+| 5 | Portal vendor Live | (a) ✅ SELESAI · (b) ⬜ TERBLOKIR |
 
 ---
 
@@ -60,7 +60,7 @@ Dua tes diubah, keduanya asersi keanggotaan daftar: `notification.test.ts` v11�
 | LT-25 | ✅ Route `apps/api` + `*ToWire` | `GET/POST .../briefs/{id}/stage[/review]`, ANCHOR WIRE A. `KNOWN_GAPS` tetap kosong |
 | LT-26 | ✅ Guard `task.submitTask` | `MSG_STAGE_NOT_COMPLETE`, satu arah lewat `sm_terminal_states` |
 | LT-27 | ✅ 5 event notifikasi + tick harian | `stage_overdue_tick` (`20260830030000`), idempoten lewat `notifications` (nol kolom/tabel penanda baru — HANDOFF §1.6) |
-| LT-28 | ✅ FE: `StageTimelinePanel` (account/creative/kol brief detail) | Read-only timeline + Cek Brief AM. `advanceStage` UI menyusul (belum ada route baca "next edges") |
+| LT-28 | ✅ FE: `StageTimelinePanel` (account/creative/kol/livestream brief detail) | Read-only timeline + Cek Brief AM + `advanceStage` UI ("Lanjutkan", LT-60) — `getStageOverview.nextStages` fills the "next edges" read gap this row used to note |
 
 **Uji kunci:** `computeMetrics` untuk Brief yang sama wajib **identik** dengan sebelum fitur ini ada (bukti namespace `brief_stage` bekerja).
 
@@ -115,7 +115,7 @@ untuk `stage.ts`): `docs/handoff/HANDOFF_M16_AKUN_B.md`.
 
 | # | Isi | Status |
 |---|---|---|
-| LT-60 | Input tahapan Live oleh tim internal atas nama vendor | ⬜ — dikerjakan **lebih dulu** agar lead time Live tidak tersandera |
+| LT-60 | Input tahapan Live oleh tim internal atas nama vendor | ✅ **SELESAI** — gate `stage.canExecuteStage` yang sudah ada (division staff/lead Live Stream, atau Director); `StageTimelinePanel` dipasang di halaman detail Brief Live Stream + tombol "Lanjutkan" baru (`getStageOverview.nextStages`, `stage.test.ts` "getStageOverview.nextStages (LT-60)"). Nol migrasi baru. Detail: `DECISIONS.md` 2026-08-29 "LT-60 SELESAI" |
 | LT-61 | Login vendor sendiri (realm auth eksternal) | 🔴 **TERBLOKIR** |
 
 > 🔴 **LT-61 blocker nyata.** CDPS belum punya realm auth eksternal sama sekali. M15 Client
