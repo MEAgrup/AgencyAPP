@@ -39,9 +39,16 @@ Semua yang di bawah ini adalah **choke point global**: berkas tunggal dengan inv
 Setelah F di-commit dan di-push, catat SHA-nya di sini:
 
 ```
-Commit fondasi F: lihat `git log --oneline --grep "M16 fondasi"` pada branch di bawah
+Commit fondasi F: 7fefa2d (mendarat via 2b71dba + 7fefa2d)
 Branch dasar    : claude/buildplan-lead-time-tracking-g62d2i
+Branch Akun A   : claude/m16-akun-a-tahapan-metrik
+Branch Akun B   : claude/m16-akun-b-divisi-permintaan
 ```
+
+Kedua branch di atas dibuat dari `claude/buildplan-lead-time-tracking-g62d2i`
+pada commit `7fefa2d` (`git checkout -b <branch> claude/buildplan-lead-time-tracking-g62d2i`),
+lalu di-push ke `origin` dengan nama itu persis — nama ini sudah dipakai di
+langkah penggabungan §5 di bawah, jangan diganti tanpa memperbarui §5 juga.
 
 **Status F: ✅ SELESAI & terverifikasi dengan DB nyata** (Postgres lokal, bukan
 di-skip): `scripts/db-rebuild.sh` 128 migrasi + seluruh gate lolos
@@ -156,13 +163,13 @@ git fetch origin
 
 # 2. Gabung A lebih dulu (ia pemilik tabel yang di-referensikan)
 git checkout claude/buildplan-lead-time-tracking-g62d2i
-git merge --no-ff origin/<branch-akun-A>
+git merge --no-ff origin/claude/m16-akun-a-tahapan-metrik
 scripts/db-rebuild.sh --yes            # 127+ migrasi, semua gate
 npm test -w packages/core -w packages/domain -w packages/db
 npm test -w apps/api && npm test -w web-internal
 
 # 3. Baru gabung B
-git merge --no-ff origin/<branch-akun-B>
+git merge --no-ff origin/claude/m16-akun-b-divisi-permintaan
 scripts/db-rebuild.sh --yes
 npm test -w packages/core -w packages/domain -w packages/db
 npm test -w apps/api && npm test -w web-internal
