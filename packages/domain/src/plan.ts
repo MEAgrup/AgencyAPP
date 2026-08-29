@@ -27,7 +27,7 @@
  * *their own rows* is an RLS arm on `plan_row`, not a whole-Plan grant.
  */
 
-import { ident, notification, permission, statemachine } from '@cdps/core';
+import { division, ident, notification, permission, statemachine } from '@cdps/core';
 import {
   executors,
   withTransaction,
@@ -2121,14 +2121,7 @@ const PLAN_ROW_VISIBILITAS: readonly PlanRow['visibilitas'][] = ['Bagikan ke Kli
  * value would sail through `createPlanRow` and only surface later, silently,
  * as a `divisi_pic_tidak_valid` skip when the row is inherited into a Brief.
  */
-const PLAN_ROW_DIVISI_PIC: readonly string[] = [
-  'Creative',
-  'Ads',
-  'KOL',
-  'Live Stream',
-  'Account',
-  'Ops',
-];
+const PLAN_ROW_DIVISI_PIC: readonly string[] = division.briefAssignableNames();
 /** PC-8 — the division PIC is not one of the six §5 values. */
 export const MSG_PLAN_ROW_DIVISI_PIC_INVALID = '[divisi PIC baris rencana tidak valid]';
 

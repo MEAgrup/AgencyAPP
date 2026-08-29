@@ -161,6 +161,28 @@ describe('pure scoring core', () => {
     expect(profile).toBeCloseTo(87, 3); // 0.5×84 + 0.25×100 + 0.25×80
   });
 
+  it('LT-32/LT-33: a weight-0 component NEVER shifts the profile, whether included or excluded (bobot nol invariant)', () => {
+    // Mirrors the "AM profile" fixture above (§2 Rule 2 profile) plus the new
+    // M16 §6.4 component `kecepatan_review_am`, registered at weight 0
+    // (DECISIONS.md 2026-08-28 / migration 20260830040000). Uji wajib §8
+    // "Bobot nol" — the profile must come out byte-identical to the
+    // three-component AM whether the new component is present and INCLUDED
+    // (with some arbitrary raw value) or EXCLUDED (no target configured yet).
+    const weights = { chr_average: 45, complaint_resolution_speed: 22.5, revision_escalation_rate: 22.5, recap_discipline: 10, kecepatan_review_am: 0 };
+    const base = [
+      { name: 'chr_average', included: true, raw: 85, reason: '', diagnostic: false },
+      { name: 'revision_escalation_rate', included: true, raw: 100, reason: '', diagnostic: false },
+    ];
+    const without = scoreProfile(weights, base);
+    const withIncluded = scoreProfile(weights, [...base, { name: 'kecepatan_review_am', included: true, raw: 40, reason: '', diagnostic: false }]);
+    const withExcluded = scoreProfile(weights, [...base, { name: 'kecepatan_review_am', included: false, raw: 0, reason: 'target belum dikonfigurasi', diagnostic: false }]);
+    expect(withIncluded.profileOk).toBe(true);
+    expect(withIncluded.profile).toBeCloseTo(without.profile, 9);
+    expect(withExcluded.profile).toBeCloseTo(without.profile, 9);
+    const kra = withIncluded.comps.find((c) => c.name === 'kecepatan_review_am')!;
+    expect(kra.effectiveWeight).toBe(0); // weight 0 ⇒ zero contribution however it normalizes
+  });
+
   it('diagnostic component reported, unweighted', () => {
     const { comps, profile, profileOk } = scoreProfile({ creator_count: 100 }, [
       { name: COMP_CREATOR_COUNT, included: true, raw: 50, reason: '', diagnostic: false },
@@ -682,5 +704,86 @@ describeDb('config: Σ≠100 rejected; gate Director-only', () => {
       .rejects.toBeInstanceOf(ForbiddenError);
     await expect(setTarget(sql, director(), { roleType: ROLE_ADS, component: COMP_GMV_IMPACT, periodStart: '2026-06-01', targetValue: 999, isPlaceholder: false }))
       .resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LT-33 — AI Optimizer / Store Operation: brand-new role types, weight 0.
+// ---------------------------------------------------------------------------
+describeDb('LT-33: AI Optimizer / Store Operation role types (registered at weight 0)', () => {
+  /** A Brief-as-task in `division`, [Approved] within SLA in June (mirrors insAdsBrief, parametrized). */
+  async function insDivisionBrief(id: string, svcId: string, pic: string, division: string, sla: number, turnaroundH: number): Promise<void> {
+    await sql`insert into briefs (id, service_id, title, status, assigned_division, assigned_pic, sla_target_hours, created_by)
+      values (${id}, ${svcId}, 'B', '[Approved]', ${division}, ${pic}, ${sla}, 'ZZ-TEST')`;
+    const start = new Date('2026-06-10T00:00:00Z');
+    await insAudit('brief', id, 'transition:[To Do]->[In Progress]', start);
+    await insAudit('brief', id, 'transition:[In Review]->[Approved]', new Date(start.getTime() + turnaroundH * 3_600_000));
+  }
+
+  it.each(['AI Optimizer', 'Store Operation'])('%s: the role type is wired end to end, but renders "—" — every component registered at weight 0', async (division) => {
+    const staff = uid('EMP-NEWDIV');
+    const client = uid('CLI-NEWDIV');
+    const svc = uid('SVC-NEWDIV');
+    const brief = uid('BRF-NEWDIV');
+    await insEmployee(staff, division, 'ZZ-NEWDIV-Jab');
+    await insRoleMapping(division, 'ZZ-NEWDIV-Jab', division, 'staff');
+    await insEmployee('ZZ-AM-NEWDIV', 'Account', 'ZZ-AM-Jab');
+    await insClient(client, 'ZZ-AM-NEWDIV');
+    await insService(svc, client);
+    await insDivisionBrief(brief, svc, staff, division, 10, 5); // 5h/10h SLA → Speed transform 100
+
+    await runSnapshotJob(sql, nowJul);
+    const snap = await getSnapshot(sql, director(), staff, JUNE);
+    expect(snap.roleType).toBe(division); // roleTypeOfDivision resolved correctly, gatherProfile did not crash
+    const speed = compByName(snap.components, COMP_SPEED_SCORE)!;
+    expect(speed.baseWeight).toBe(0); // migration 20260830040000
+    expect(speed.effectiveWeight).toBe(0);
+    // scoreProfile's all-zero-availableBase shape (same as the existing
+    // "all-excluded → profileOk false" test above): every component reports
+    // included=false / raw=null at the OUTPUT layer once availableBase is 0,
+    // even though gatherProfile genuinely computed a real candidate upstream
+    // (this Brief WAS approved within SLA) — the raw value simply never
+    // reaches components_json when nothing has weight to show it with.
+    expect(speed.included).toBe(false);
+    expect(speed.raw).toBeNull();
+    expect(snap.profileScore).toBeNull();
+    expect(snap.scoreDisplay).toBe('—');
+    expect(snap.finalScore).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LT-32 — kecepatan_review_am wiring: a real AM portfolio produces the component.
+// ---------------------------------------------------------------------------
+describeDb('LT-32: kecepatan_review_am wiring (AM)', () => {
+  it('is computed from the real AM portfolio waktuAmBelumBukaHours (48h wait, no target configured → excluded)', async () => {
+    const am = uid('EMP-AMK');
+    const client = uid('CLI-AMK');
+    const svc = uid('SVC-AMK');
+    const brief = uid('BRF-AMK');
+    await insEmployee(am, 'Account', 'ZZ-AM-Jab');
+    await insRoleMapping('Account', 'ZZ-AM-Jab', 'Account', 'staff');
+    await insClient(client, am);
+    await insService(svc, client);
+    // Ads brief: PIC submits promptly, AM opens 48h later — pure AM latency.
+    await sql`insert into briefs (id, service_id, title, status, assigned_division, assigned_pic, sla_target_hours, created_by)
+      values (${brief}, ${svc}, 'B', '[Approved]', 'Ads', 'ZZ-PIC-AMK', 24, 'ZZ-TEST')`;
+    await insAudit('brief', brief, 'transition:[To Do]->[In Progress]', new Date('2026-06-01T02:00:00Z'));
+    await insAudit('brief', brief, 'transition:[In Progress]->[Submitted]', new Date('2026-06-02T02:00:00Z'));
+    await insAudit('brief', brief, 'transition:[Submitted]->[In Review]', new Date('2026-06-04T02:00:00Z')); // 48h wait
+    await insAudit('brief', brief, 'transition:[In Review]->[Approved]', new Date('2026-06-04T04:00:00Z'));
+
+    await runSnapshotJob(sql, nowJul);
+    const snap = await getSnapshot(sql, director(), am, JUNE);
+    const kra = compByName(snap.components, 'kecepatan_review_am');
+    expect(kra).toBeDefined();
+    expect(kra!.baseWeight).toBe(0); // migration 20260830040000
+    expect(kra!.included).toBe(false); // no perf_period_targets row yet → excluded, not silently defaulted
+    // Revision Escalation Rate now also has a real portfolio Task to fold —
+    // proof `amPortfolioApprovedInPeriod` (shared with kecepatan_review_am) did
+    // not break the existing component's own math.
+    const rev = compByName(snap.components, 'revision_escalation_rate')!;
+    expect(rev.included).toBe(true);
+    expect(rev.raw).toBe(100); // one approved Task, zero revision-flagged
   });
 });

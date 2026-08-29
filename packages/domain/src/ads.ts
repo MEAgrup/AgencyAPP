@@ -33,6 +33,9 @@ export const ADS_DIVISION = 'Ads';
 export const ACCOUNT_DIVISION = 'Account';
 
 // Ad Campaign statuses — the ad_campaign machine (STATE_MACHINES §14).
+// [Setting] (M16 LT-40) is the NEW birth status — replaces [Paused] as the
+// "not launched yet" state. [Paused] now means ONLY "was Active, held" (Hold).
+export const STATUS_SETTING = '[Setting]';
 export const STATUS_PAUSED = '[Paused]';
 export const STATUS_ACTIVE = '[Active]';
 export const STATUS_ENDED = '[Ended]';
@@ -45,6 +48,11 @@ const MACHINE_AD_CAMPAIGN = 'ad_campaign';
 const VALID_PLATFORMS = new Set(['Shopee Ads', 'TikTok Shop Ads', 'Social Ads']);
 const VALID_ENTRY_METHODS = new Set(['Manual', 'File Export']);
 const VALID_CHANGE_TYPES = new Set(['Budget', 'Targeting', 'Creative Swap', 'Schedule', 'Other']);
+// Tipe Iklan (M16 LT-41, kamus istilah 2026-08-28 — bukan "Campaign").
+export const VALID_TIPE_IKLAN = new Set(['GMV Max Product', 'GMV Max Live', 'TTAM']);
+// Jenis laporan Ads (M16 LT-43) — 'Weekly' adalah mekanisme asli M8 (default).
+export const VALID_JENIS_LAPORAN = new Set(['Weekly', 'Mini', 'Monthly', 'Content Analysis']);
+const JENIS_LAPORAN_DEFAULT = 'Weekly';
 const RE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 // --- Verbatim BI messages (M8). Each mirrors a Go sentinel 1:1. ---
@@ -77,6 +85,10 @@ export const MSG_KPI_BELOW_STANDARD =
   '[target KPI GMV di bawah standar minimum (pertumbuhan 20% per kuartal dari baseline), perlu persetujuan SPV Ads]';
 export const MSG_BAD_AMOUNT = '[nilai uang tidak valid]';
 export const MSG_BAD_COUNT = '[nilai clicks/impressions/conversions harus bilangan bulat ≥ 0]';
+// M16 LT-41 (Tipe Iklan) / LT-42 (Ads Management Date) / LT-43 (jenis laporan).
+export const MSG_INVALID_TIPE_IKLAN = '[tipe iklan tidak valid]';
+export const MSG_NEGATIVE_ADDITIONAL_DAYS = '[hari tambahan tidak boleh negatif]';
+export const MSG_INVALID_JENIS_LAPORAN = '[jenis laporan tidak valid]';
 
 // --- Errors (ads-scoped; mapped in apps/api http.ts). ---
 
@@ -234,6 +246,8 @@ export interface CampaignInput {
   startDate: string; // YYYY-MM-DD
   endDate: string; // YYYY-MM-DD
   targetKpi: string;
+  /** Tipe Iklan (M16 LT-41) — GMV Max Product | GMV Max Live | TTAM. Wajib. */
+  tipeIklan: string;
 }
 
 /** One Ad Campaign (ADC-) with its derived performance view (§9.3 + §5). */
@@ -249,6 +263,10 @@ export interface Campaign {
   endDate: string;
   targetKpi: string;
   status: string;
+  /** M16 LT-41. */
+  tipeIklan: string;
+  /** M16 LT-42 (Ads Management Date) — hari tambahan manual (mis. libur Lebaran). */
+  additionalDays: number;
   totalSpend: number;
   totalSpendDisplay: string;
   totalGmv: number;
@@ -262,6 +280,15 @@ export interface Campaign {
   escalationFlagged: boolean;
   createdBy: string;
   createdAt: Date;
+}
+
+/** Ads Management Date (M16 LT-42) — end_date turunan read-only, tidak disimpan. */
+export interface AdsManagementDate {
+  startDate: string;
+  durasiJasa: number;
+  additionalDays: number;
+  totalHariHold: number;
+  endDate: string;
 }
 
 /** A §9.4 Metric Entry input. */
@@ -321,7 +348,8 @@ export interface Optimization {
 /**
  * createCampaign creates an Ad Campaign under an Ads Brief (§4 Rule 1). Creatable
  * while the parent Brief is [In Progress], by Ads staff/lead or Director. Born
- * [Paused] (held, no real spend until launched). One Brief can spawn multiple.
+ * [Setting] (M16 LT-40 — not launched yet, no real spend). One Brief can spawn
+ * multiple.
  */
 export async function createCampaign(sql: Sql, actor: Actor, briefId: string, input: CampaignInput): Promise<Campaign> {
   const now = new Date();
@@ -349,12 +377,16 @@ export async function createCampaign(sql: Sql, actor: Actor, briefId: string, in
     const platform = (input.platform ?? '').trim();
     const objective = (input.objective ?? '').trim();
     const targetKpi = (input.targetKpi ?? '').trim();
-    if (platform === '' || objective === '' || targetKpi === '' ||
+    const tipeIklan = (input.tipeIklan ?? '').trim();
+    if (platform === '' || objective === '' || targetKpi === '' || tipeIklan === '' ||
       (input.budget ?? '').trim() === '' || (input.startDate ?? '').trim() === '' || (input.endDate ?? '').trim() === '') {
       throw new ValidationError(bi.INCOMPLETE_DATA);
     }
     if (!VALID_PLATFORMS.has(platform)) {
       throw new ValidationError(MSG_INVALID_PLATFORM);
+    }
+    if (!VALID_TIPE_IKLAN.has(tipeIklan)) {
+      throw new ValidationError(MSG_INVALID_TIPE_IKLAN);
     }
     let budget: money.Money;
     try {
@@ -380,17 +412,18 @@ export async function createCampaign(sql: Sql, actor: Actor, briefId: string, in
 
     const id = await ex.ident.identNext('ADC', now);
     await tx`
-      insert into ad_campaigns (id, brief_id, client_id, platform, objective, budget, start_date, end_date, target_kpi, status, created_by)
-      values (${id}, ${briefId}, ${brief.client_id}, ${platform}, ${objective}, ${money.decimal(budget)}, ${start}, ${end}, ${targetKpi}, ${STATUS_PAUSED}, ${actor.employeeId})`;
+      insert into ad_campaigns (id, brief_id, client_id, platform, objective, budget, start_date, end_date, target_kpi, tipe_iklan, status, created_by)
+      values (${id}, ${briefId}, ${brief.client_id}, ${platform}, ${objective}, ${money.decimal(budget)}, ${start}, ${end}, ${targetKpi}, ${tipeIklan}, ${STATUS_SETTING}, ${actor.employeeId})`;
     await ex.audit.insertAudit({
       entityType: 'ad_campaign', entityId: id, actorEmployeeId: actor.employeeId, action: 'create',
       beforeJson: null,
-      afterJson: { status: STATUS_PAUSED, brief_id: briefId, client_id: brief.client_id, platform, budget: money.decimal(budget) },
+      afterJson: { status: STATUS_SETTING, brief_id: briefId, client_id: brief.client_id, platform, tipe_iklan: tipeIklan, budget: money.decimal(budget) },
       createdBy: actor.employeeId,
     });
     return {
       id, briefId, clientId: brief.client_id, platform, objective, budget: Number(budget) / 100,
-      budgetDisplay: money.format(budget), startDate: start, endDate: end, targetKpi, status: STATUS_PAUSED,
+      budgetDisplay: money.format(budget), startDate: start, endDate: end, targetKpi, status: STATUS_SETTING,
+      tipeIklan, additionalDays: 0,
       totalSpend: 0, totalSpendDisplay: money.format(0n), totalGmv: 0, totalGmvDisplay: money.format(0n),
       roas: null, roasDisplay: '—', linkedAssetIds: [], metricEntryCount: 0, optimizationCount: 0,
       underperformingStreak: 0, escalationFlagged: false, createdBy: actor.employeeId, createdAt: now,
@@ -459,6 +492,109 @@ async function driveLifecycle(sql: Sql, actor: Actor, campaignId: string, to: st
     }
     return res;
   });
+}
+
+/**
+ * setAdditionalDays sets the Ads Management Date's manual extra-days input
+ * (M16 LT-42 — e.g. Lebaran holidays). Ads staff/lead or Director. Never
+ * negative; `end_date` (computed by `computeAdsManagementEndDate`) simply moves
+ * with it, since nothing derived is stored.
+ */
+export async function setAdditionalDays(sql: Sql, actor: Actor, campaignId: string, days: number): Promise<void> {
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    await lockCampaign(tx, campaignId);
+    if (!canManageCampaign(actor)) {
+      throw new ForbiddenError(MSG_CAMPAIGN_MANAGE_FORBIDDEN);
+    }
+    if (!Number.isInteger(days) || days < 0) {
+      throw new ValidationError(MSG_NEGATIVE_ADDITIONAL_DAYS);
+    }
+    const before = await tx<{ additional_days: number }[]>`
+      select additional_days from ad_campaigns where id = ${campaignId}`;
+    await tx`update ad_campaigns set additional_days = ${days} where id = ${campaignId}`;
+    await ex.audit.insertAudit({
+      entityType: 'ad_campaign', entityId: campaignId, actorEmployeeId: actor.employeeId,
+      action: 'set_additional_days',
+      beforeJson: { additional_days: Number(before[0]?.additional_days ?? 0) },
+      afterJson: { additional_days: days },
+      createdBy: actor.employeeId,
+    });
+  });
+}
+
+/**
+ * computeAdsManagementEndDate (M16 §4.2 LT-42) — `end_date` is a READ-ONLY
+ * derivation (house rule #4), never stored:
+ *   end_date = start_date + durasi_jasa + additional_days + total_hari_hold
+ *
+ * `durasi_jasa` comes from the MASTER SERVICE LIST version pinned on the
+ * parent Brief's Service (`services.master_service_id`/`master_version_no` —
+ * the same pin `msl.ts effectiveAt` reads), defaulting to 0 when the pinned
+ * version has none. `total_hari_hold` is NEVER a column — it is summed from
+ * the `ad_campaign` machine's own `[Active]->[Paused]->[Active]` transition
+ * history in `audit_log` (mirrors `blockedMs()`, M12), so `end_date` moves by
+ * itself every time the campaign is resumed and stays fully recomputable from
+ * the log. An ONGOING hold (paused right now, not yet resumed) does not extend
+ * it yet — the PRD is explicit that the date "bergerak sendiri setiap iklan
+ * di-resume", i.e. at resume time, not while still held.
+ */
+export async function computeAdsManagementEndDate(sql: Queryable, actor: Actor, campaignId: string): Promise<AdsManagementDate> {
+  await campaignViewGate(sql, actor, campaignId);
+  const rows = await sql<{ start_date: string | Date; additional_days: number; brief_id: string }[]>`
+    select start_date, additional_days, brief_id from ad_campaigns where id = ${campaignId}`;
+  if (rows.length === 0) {
+    throw new NotFoundError(MSG_CAMPAIGN_NOT_FOUND);
+  }
+  const row = rows[0];
+  const startDate = dateStr(row.start_date);
+  const additionalDays = Number(row.additional_days);
+
+  const msvRows = await sql<{ durasi_jasa: number | null }[]>`
+    select msv.durasi_jasa
+      from briefs b
+      join services sv on sv.id = b.service_id
+      join master_service_versions msv
+        on msv.service_id = sv.master_service_id and msv.version_no = sv.master_version_no
+     where b.id = ${row.brief_id}`;
+  const durasiJasa = msvRows.length > 0 ? Number(msvRows[0].durasi_jasa ?? 0) : 0;
+
+  const totalHariHold = await computeTotalHariHold(sql, campaignId);
+  const endDate = addCalendarDays(startDate, durasiJasa + additionalDays + totalHariHold);
+  return { startDate, durasiJasa, additionalDays, totalHariHold, endDate };
+}
+
+/**
+ * computeTotalHariHold sums CALENDAR days (not hari kerja — Ads Management Date
+ * is a subscription-period concept, like `lead_time_restock_hari`, not a
+ * production lead-time metric) between each completed `[Active]->[Paused]` and
+ * its following `[Paused]->[Active]` in the immutable transition log. An
+ * unresolved (still-paused) hold contributes nothing — see function header.
+ */
+async function computeTotalHariHold(sql: Queryable, campaignId: string): Promise<number> {
+  const rows = await sql<{ action: string; created_at: Date }[]>`
+    select action, created_at from audit_log
+     where entity_type = 'ad_campaign' and entity_id = ${campaignId}
+       and (action like 'transition:%->[Paused]' or action like 'transition:%->[Active]')
+     order by created_at asc, id asc`;
+  let total = 0;
+  let pausedAt: Date | null = null;
+  for (const r of rows) {
+    if (r.action.endsWith('->[Paused]')) {
+      pausedAt = r.created_at;
+    } else if (r.action.endsWith('->[Active]') && pausedAt !== null) {
+      total += Math.round((r.created_at.getTime() - pausedAt.getTime()) / 86400000);
+      pausedAt = null;
+    }
+  }
+  return total;
+}
+
+/** addCalendarDays adds `days` (may be 0) calendar days to a YYYY-MM-DD string. */
+function addCalendarDays(dateStr_: string, days: number): string {
+  const d = new Date(`${dateStr_}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 /** allLinkedAssetsApproved: at least one currently-linked Asset AND all approved (§4 Rule 2 / §12). */
@@ -749,10 +885,10 @@ export async function getCampaign(sql: Queryable, actor: Actor, campaignId: stri
   const rows = await sql<
     { id: string; brief_id: string; client_id: string; platform: string; objective: string; budget: string;
       start_date: string | Date; end_date: string | Date; target_kpi: string; status: string; created_by: string;
-      created_at: Date; assigned_am_id: string | null }[]
+      created_at: Date; assigned_am_id: string | null; tipe_iklan: string; additional_days: number }[]
   >`
     select c.id, c.brief_id, c.client_id, c.platform, c.objective, c.budget, c.start_date, c.end_date,
-           c.target_kpi, c.status, c.created_by, c.created_at, cl.assigned_am_id
+           c.target_kpi, c.status, c.created_by, c.created_at, cl.assigned_am_id, c.tipe_iklan, c.additional_days
       from ad_campaigns c join clients cl on cl.id = c.client_id where c.id = ${campaignId}`;
   if (rows.length === 0) {
     throw new NotFoundError(MSG_CAMPAIGN_NOT_FOUND);
@@ -767,7 +903,7 @@ export async function getCampaign(sql: Queryable, actor: Actor, campaignId: stri
     id: row.id, briefId: row.brief_id, clientId: row.client_id, platform: row.platform, objective: row.objective,
     budget: Number(budget) / 100, budgetDisplay: money.format(budget), startDate: dateStr(row.start_date),
     endDate: dateStr(row.end_date), targetKpi: row.target_kpi, status: row.status, createdBy: row.created_by,
-    createdAt: row.created_at, ...derived,
+    createdAt: row.created_at, tipeIklan: row.tipe_iklan, additionalDays: Number(row.additional_days), ...derived,
   };
 }
 
@@ -1080,6 +1216,8 @@ export interface WeeklyReportRow {
   terisi: boolean;
   /** A finished week with no report: the discipline signal the owner asked for. */
   terlambat: boolean;
+  /** M16 LT-43 — Weekly (default) | Mini | Monthly | Content Analysis. */
+  jenis: string;
   analisa: string;
   saran: string;
   kendala: string;
@@ -1104,6 +1242,13 @@ export interface WeeklyReportInput {
   analisa: string;
   saran: string;
   kendala?: string;
+  /**
+   * M16 LT-43 — Weekly (default) | Mini | Monthly | Content Analysis. Several
+   * jenis may coexist for the SAME ISO week (mis. Weekly dan Monthly di-file
+   * pada minggu yang sama saat bulan tutup); the same jenis for the same week
+   * stays append-only-once (`MSG_LAPORAN_SUDAH_ADA`).
+   */
+  jenis?: string;
 }
 
 /**
@@ -1165,10 +1310,14 @@ export async function listWeeklyReports(
   actor: Actor,
   briefId: string,
   now: Date = new Date(),
+  jenis: string = JENIS_LAPORAN_DEFAULT,
 ): Promise<WeeklyReportView> {
   const brief = await loadAdsBrief(sql, briefId);
   if (!canViewCampaign(actor, brief.ownerAm)) {
     throw new ForbiddenError(MSG_CAMPAIGN_VIEW_FORBIDDEN);
+  }
+  if (!VALID_JENIS_LAPORAN.has(jenis)) {
+    throw new ValidationError(MSG_INVALID_JENIS_LAPORAN);
   }
   const start = await firstInProgressAt(sql, briefId);
   if (start === null) {
@@ -1180,7 +1329,7 @@ export async function listWeeklyReports(
   const shown = dipotong ? weeks.slice(weeks.length - MAX_MINGGU) : weeks;
 
   const realisasi = await weeklyRealisasi(sql, briefId);
-  const filed = await readFiledReports(sql, briefId);
+  const filed = await readFiledReports(sql, briefId, jenis);
   const thisWeek = tz.isoWeekOf(now);
   const today = tz.dateString(now);
 
@@ -1194,7 +1343,7 @@ export async function listWeeklyReports(
     return {
       briefId, isoYear: w.isoYear, isoWeek: w.isoWeek, mingguMulai: w.mondayDate, mingguAkhir: w.sundayDate,
       metrik: metricRows(r),
-      berjalan, terisi: f !== null, terlambat,
+      berjalan, terisi: f !== null, terlambat, jenis,
       analisa: f?.analisa ?? '', saran: f?.saran ?? '', kendala: f?.kendala ?? '',
       diisiOleh: f?.createdBy ?? '', diisiPada: f?.createdAt ?? null,
     };
@@ -1229,6 +1378,10 @@ export async function fileWeeklyReport(
       throw new ValidationError(MSG_LAPORAN_NARASI_WAJIB);
     }
     const kendala = (input.kendala ?? '').trim();
+    const jenis = (input.jenis ?? '').trim() === '' ? JENIS_LAPORAN_DEFAULT : (input.jenis as string).trim();
+    if (!VALID_JENIS_LAPORAN.has(jenis)) {
+      throw new ValidationError(MSG_INVALID_JENIS_LAPORAN);
+    }
 
     const raw = (input.mingguMulai ?? '').trim();
     let week: tz.IsoWeek;
@@ -1265,23 +1418,24 @@ export async function fileWeeklyReport(
 
     const dup = await tx<{ n: string }[]>`
       select count(*) as n from ads_weekly_reports
-       where brief_id = ${briefId} and iso_year = ${week.isoYear} and iso_week = ${week.isoWeek}`;
+       where brief_id = ${briefId} and iso_year = ${week.isoYear} and iso_week = ${week.isoWeek}
+         and jenis_laporan = ${jenis}`;
     if (Number(dup[0].n) > 0) {
       throw new ConflictError(MSG_LAPORAN_SUDAH_ADA);
     }
 
     await tx`
       insert into ads_weekly_reports
-        (brief_id, iso_year, iso_week, minggu_mulai, minggu_akhir, analisa, saran, kendala, created_by)
+        (brief_id, iso_year, iso_week, minggu_mulai, minggu_akhir, analisa, saran, kendala, jenis_laporan, created_by)
       values
         (${briefId}, ${week.isoYear}, ${week.isoWeek}, ${week.mondayDate}, ${week.sundayDate},
-         ${analisa}, ${saran}, ${kendala === '' ? null : kendala}, ${actor.employeeId})`;
+         ${analisa}, ${saran}, ${kendala === '' ? null : kendala}, ${jenis}, ${actor.employeeId})`;
 
     await executors(tx).audit.insertAudit({
       entityType: 'brief', entityId: briefId, actorEmployeeId: actor.employeeId,
       action: 'ads_weekly_report',
       beforeJson: null,
-      afterJson: { iso_year: week.isoYear, iso_week: week.isoWeek, minggu_mulai: week.mondayDate, kendala: kendala !== '' },
+      afterJson: { iso_year: week.isoYear, iso_week: week.isoWeek, minggu_mulai: week.mondayDate, jenis_laporan: jenis, kendala: kendala !== '' },
       createdBy: actor.employeeId,
     });
 
@@ -1292,7 +1446,7 @@ export async function fileWeeklyReport(
       mingguMulai: week.mondayDate, mingguAkhir: week.sundayDate,
       metrik: metricRows(r),
       berjalan: week.isoWeek === thisWeek.isoWeek && week.isoYear === thisWeek.isoYear,
-      terisi: true, terlambat: false,
+      terisi: true, terlambat: false, jenis,
       analisa, saran, kendala, diisiOleh: actor.employeeId, diisiPada: now,
     };
   });
@@ -1403,13 +1557,13 @@ interface FiledReport {
   createdAt: Date;
 }
 
-async function readFiledReports(sql: Queryable, briefId: string): Promise<Map<string, FiledReport>> {
+async function readFiledReports(sql: Queryable, briefId: string, jenis: string = JENIS_LAPORAN_DEFAULT): Promise<Map<string, FiledReport>> {
   const rows = await sql<
     { iso_year: number | string; iso_week: number | string; analisa: string; saran: string;
       kendala: string | null; created_by: string; created_at: Date }[]
   >`
     select iso_year, iso_week, analisa, saran, kendala, created_by, created_at
-      from ads_weekly_reports where brief_id = ${briefId}`;
+      from ads_weekly_reports where brief_id = ${briefId} and jenis_laporan = ${jenis}`;
   const out = new Map<string, FiledReport>();
   for (const r of rows) {
     out.set(weekKey(Number(r.iso_year), Number(r.iso_week)), {

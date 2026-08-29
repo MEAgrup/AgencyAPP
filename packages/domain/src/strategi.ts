@@ -46,7 +46,7 @@
  * Reference: docs/prd/CDPS_Module6A_Strategi.md.
  */
 
-import { ident, interview as iv, money, notification, permission, statemachine, visibility } from '@cdps/core';
+import { division, ident, interview as iv, money, notification, permission, statemachine, visibility } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import {
   ACCOUNT_DIVISION,
@@ -247,8 +247,8 @@ export type LaporanMetric = TargetMetric;
  * table carries Live Stream briefs (they skip the task machine and end at a
  * vendor tracker), so the dispatch order has to be able to name it.
  */
-export const DISPATCH_DIVISIONS = ['Creative', 'Ads', 'KOL', 'Live Stream'] as const;
-export type DispatchDivision = (typeof DISPATCH_DIVISIONS)[number];
+export const DISPATCH_DIVISIONS: readonly string[] = division.dispatchNames();
+export type DispatchDivision = string;
 
 /** G-1 — §4 says "Repeatable struct (min 2)". One phase is not a calendar. */
 export const FASE_MIN = 2;
@@ -6825,9 +6825,29 @@ export interface RevisionInput {
    * Required only if the version being revised has at least one assumption
    * recorded — since D-8 is no longer a submit gate (⟳ 2026-08-26 DECISIONS),
    * a Strategi can reach `Aktif` with zero rows in `strategi_assumption`, and
-   * there is nothing to cite. May be empty in that case.
+   * there is nothing to cite. May be empty in that case, and always empty on
+   * an `otomatis` revision (see `OpenRevisionOptions`) — the DB enforces this
+   * the same way either way (`ck_strver_revisi_lengkap` / `trg_strver_asumsi_gugur`,
+   * migrations 20260826010000 + 20260831080000).
    */
   asumsiGugur: string[];
+}
+
+/** LT-13 (DECISIONS.md 2026-08-31 M16 Akun B / owner direction (a), 2026-08-29). */
+export interface OpenRevisionOptions {
+  /**
+   * True only for a revision opened by a machine, not a human — currently
+   * `syncAiOptimizerSkuRevision` (M17 §4/LT-54). Bypasses Rule 13(c) (the
+   * broken-assumption citation): a machine can never honestly author the
+   * human reason an assumption broke, so requiring it made auto-sync DEFER
+   * for almost every client with a Section D assumption on file (LT-13).
+   * Rule 13(a)(b) — trigger + free-text reason — still apply in full; only
+   * (c) is skipped, and it is skipped by recording a DIFFERENT peristiwa
+   * (`revisi_dibuka_otomatis`) so the provenance stays honest in
+   * `strategi_version` rather than papering over a human-only field. Never
+   * set this from a human-facing route.
+   */
+  otomatis?: boolean;
 }
 
 /**
@@ -6843,18 +6863,22 @@ export async function openRevision(
   actor: Actor,
   id: string,
   input: RevisionInput,
+  opts?: OpenRevisionOptions,
 ): Promise<Strategi> {
+  const otomatis = opts?.otomatis ?? false;
   const alasan = (input.alasanRevisi ?? '').trim();
   const triggers = (input.triggerRevisi ?? []).map((t) => t.trim()).filter(Boolean);
   const gugur = (input.asumsiGugur ?? []).map((a) => a.trim()).filter(Boolean);
-  // Rule 13(c) only binds if there is something to cite. D-8 is no longer a
-  // submit gate (⟳ 2026-08-26 DECISIONS), so a Strategi may reach `Aktif` with
-  // zero assumptions ever recorded — demanding a broken one in that case would
-  // make the FIRST revision permanently unopenable, which is worse than the
-  // requirement it was meant to enforce.
+  // Rule 13(c) only binds if there is something to cite AND this is a human
+  // revision. D-8 is no longer a submit gate (⟳ 2026-08-26 DECISIONS), so a
+  // Strategi may reach `Aktif` with zero assumptions ever recorded — demanding
+  // a broken one in that case would make the FIRST revision permanently
+  // unopenable, which is worse than the requirement it was meant to enforce.
+  // An `otomatis` revision skips (c) unconditionally (LT-13) — see
+  // `OpenRevisionOptions.otomatis`.
   const existingAssumptions = await sql<{ n: number }[]>`
     select count(*)::int as n from strategi_assumption where strategi_id = ${id}`;
-  const asumsiRequired = existingAssumptions[0].n > 0;
+  const asumsiRequired = !otomatis && existingAssumptions[0].n > 0;
   if (triggers.length === 0 || alasan === '' || (asumsiRequired && gugur.length === 0)) {
     throw new ValidationError(MSG_REVISION_INCOMPLETE);
   }
@@ -6945,28 +6969,186 @@ export async function openRevision(
 
     // The J-3 declaration belongs to the NEW version: it is the reason that
     // version exists, and the §9 metric counts revisions, not archives.
-    await appendEvent(tx, newId, head.versiNo + 1, 'revisi_dibuka', actor.employeeId, null, {
-      triggerRevisi: triggers,
-      alasanRevisi: alasan,
-      asumsiGugur: gugur,
-    });
+    // `otomatis` writes a DIFFERENT peristiwa (LT-13) — not a flag on the same
+    // row — so `strategi_version` stays an honest record of who opened this:
+    // a human (`revisi_dibuka`, Rule 13 a+b+c) or a machine (`revisi_dibuka_otomatis`,
+    // Rule 13 a+b only, `ck_strver_revisi_lengkap` / migration 20260831080000).
+    await appendEvent(
+      tx,
+      newId,
+      head.versiNo + 1,
+      otomatis ? 'revisi_dibuka_otomatis' : 'revisi_dibuka',
+      actor.employeeId,
+      null,
+      { triggerRevisi: triggers, alasanRevisi: alasan, asumsiGugur: gugur },
+    );
     await ex.audit.insertAudit({
       entityType: ENTITY_STRATEGI,
       entityId: newId,
       actorEmployeeId: actor.employeeId,
-      action: 'open_revision',
+      action: otomatis ? 'open_revision_otomatis' : 'open_revision',
       beforeJson: { versi_sebelumnya: head.id, versi_no: head.versiNo },
       afterJson: {
         versi_no: head.versiNo + 1,
         trigger_revisi: triggers,
         alasan_revisi: alasan,
         asumsi_gugur: gugur,
+        otomatis,
       },
       createdBy: actor.employeeId,
     });
 
     return loadStrategiRow(tx, newId);
   });
+}
+
+// ===========================================================================
+// M17 §4 — AI Optimizer "Terapkan" sinkronisasi SKU balik ke STRG (LT-54).
+// ---------------------------------------------------------------------------
+// Tahap Terapkan (pipeline Optimasi SKU, M17 §3.1, mesin milik Akun A di
+// `stage.ts`) mengumpulkan SKU yang berubah beserta nilai sebelum→sesudah dan
+// memanggil `syncAiOptimizerSkuRevision` di SINI untuk menuliskannya balik ke
+// STRG — SATU-SATUNYA jalur yang menyentuh dokumen modul lain, jadi ketat:
+// selalu lewat mesin `strategi` yang sudah ada (Aktif -> Draft Revisi ->
+// Diajukan), TIDAK PERNAH UPDATE langsung ke dokumen Aktif (M17 Rule 4).
+// ===========================================================================
+
+/** One SKU field changed by the Optimasi SKU pipeline, before → after (M17 §4 Rule 1). */
+export interface AiOptimizerSkuChange {
+  sku: string;
+  /** e.g. 'judul' | 'deskripsi' | 'atribut' | 'foto' — merged into strategi_pillar.detail. */
+  field: string;
+  before: string | null;
+  after: string;
+}
+
+/** Outcome of syncing one client's batch of SKU changes for one resolved STRG. */
+export interface AiOptimizerSyncResult {
+  sku: string;
+  field: string;
+  status: 'synced' | 'ditunda';
+  /** The Draft Revisi's id when synced. */
+  strategiId: string | null;
+  /** BI-shaped reason when ditunda (no Aktif STRG carries the SKU, an in-flight revision already exists, H-2 trigger not declared, actor not the owning AM, ...). */
+  alasanTunda: string | null;
+}
+
+/**
+ * syncAiOptimizerSkuRevision (M17 §4) pushes AI Optimizer's SKU edits back into
+ * STRG as a NUMBERED revision through the existing `strategi` machine — never
+ * a silent write to `Aktif`. Per SKU, it resolves the client's Aktif STRG that
+ * actually carries that SKU (a client may run more than one active
+ * Full-Management contract, DECISIONS.md 2026-08-28 "STRG list yg ada di akun
+ * tersebut"), groups changes by the resolved Strategi, opens ONE revision per
+ * Strategi via the existing `openRevision` (trigger `'lainnya'` — the H-2
+ * catch-all, `otomatis: true` — LT-13), merges each changed field into its
+ * `strategi_pillar.detail`, and submits the revision (`Diajukan`) so it queues
+ * for the SAME approval a human revision would need (Rule 4: "tidak menembus
+ * aturan freeze/approval STRG").
+ *
+ * `otomatis: true` (LT-13, DECISIONS.md 2026-08-31/2026-08-29 owner direction
+ * (a)) is what lets this sync clients that HAVE recorded a Section D
+ * assumption — a machine can never author the human reason one broke (Rule
+ * 13(c)), so before LT-13 this DEFERRED for almost every active client. It
+ * still writes a distinct, honest provenance (`revisi_dibuka_otomatis`, not a
+ * disguised `revisi_dibuka`) and Rule 13(a)(b) — trigger + reason — still
+ * apply in full.
+ *
+ * DEFERRED — not forced, not thrown as a hard failure for the whole batch —
+ * when: no Aktif STRG carries the SKU, the client's Strategi already has an
+ * in-flight revision blocking a new one (`MSG_STRATEGI_EXISTS`), the H-2
+ * trigger vocabulary this contract declared has no `'lainnya'` entry, or the
+ * calling actor is not that Strategi's owning AM (`openRevision`'s own gate).
+ * The parent Brief may still finish regardless (M17 §4 Rule 4) — the caller in
+ * `stage.ts` does not gate the `Terapkan` transition on this result.
+ */
+export async function syncAiOptimizerSkuRevision(
+  sql: Sql,
+  actor: Actor,
+  clientId: string,
+  briefId: string,
+  changes: AiOptimizerSkuChange[],
+): Promise<AiOptimizerSyncResult[]> {
+  if (changes.length === 0) {
+    return [];
+  }
+  // Resolve each SKU to the (at most one) Aktif Strategi of this client whose
+  // Section E-3 pillar list actually carries it. Plain read — no transaction
+  // needed yet, so this works whether `sql` is a fresh pool client or (from a
+  // caller already inside its own transaction) a TransactionSql.
+  const byStrategi = new Map<string, AiOptimizerSkuChange[]>();
+  const results: AiOptimizerSyncResult[] = [];
+  for (const change of changes) {
+    const match = await sql<{ strategi_id: string }[]>`
+      select sp.strategi_id
+        from strategi_pillar sp
+        join strategi s on s.id = sp.strategi_id
+       where s.client_id = ${clientId} and s.status = ${STRATEGI_AKTIF}
+         and sp.jenis = 'sku' and sp.sku = ${change.sku}
+       limit 1`;
+    if (match.length === 0) {
+      results.push({
+        sku: change.sku, field: change.field, status: 'ditunda', strategiId: null,
+        alasanTunda: `SKU "${change.sku}" tidak ditemukan di STRG Aktif klien ini`,
+      });
+      continue;
+    }
+    const list = byStrategi.get(match[0].strategi_id) ?? [];
+    list.push(change);
+    byStrategi.set(match[0].strategi_id, list);
+  }
+
+  // One Strategi at a time, EACH its own top-level transaction (never nested —
+  // `openRevision`/`submitStrategi` already open their own via `withTransaction`).
+  // A failure on one Strategi (no in-flight-revision slot, H-2 trigger not
+  // declared, actor not the owning AM, ...) is caught and reported `ditunda`
+  // WITHOUT blocking the rest of the batch — exactly the deferral M17 §4 Rule 4
+  // asks for, just applied per-STRG instead of only per-client.
+  for (const [strategiId, list] of byStrategi) {
+    try {
+      const opened = await openRevision(
+        sql,
+        actor,
+        strategiId,
+        {
+          triggerRevisi: ['lainnya'],
+          alasanRevisi: `Sinkronisasi otomatis hasil Optimasi SKU — Brief ${briefId}`,
+          asumsiGugur: [],
+        },
+        // LT-13 (a): a machine can never author the human reason a D-8
+        // assumption broke, so this never carries one — `otomatis: true`
+        // is what lets it clear Rule 13(c) instead of DEFER-ing for every
+        // client that has ever recorded a Section D assumption.
+        { otomatis: true },
+      );
+      await withTransaction(sql, async (tx) => {
+        for (const c of list) {
+          await tx`
+            update strategi_pillar
+               set detail = detail || jsonb_build_object(${c.field}::text, ${c.after}::text),
+                   updated_at = now()
+             where strategi_id = ${opened.id} and jenis = 'sku' and sku = ${c.sku}`;
+        }
+        await executors(tx).audit.insertAudit({
+          entityType: ENTITY_STRATEGI, entityId: opened.id, actorEmployeeId: actor.employeeId,
+          action: 'ai_optimizer_sku_sync',
+          beforeJson: { brief_id: briefId, changes: list.map((c) => ({ sku: c.sku, field: c.field, before: c.before })) },
+          afterJson: { brief_id: briefId, changes: list.map((c) => ({ sku: c.sku, field: c.field, after: c.after })) },
+          createdBy: actor.employeeId,
+        });
+      });
+      await submitStrategi(sql, actor, opened.id);
+      for (const c of list) {
+        results.push({ sku: c.sku, field: c.field, status: 'synced', strategiId: opened.id, alasanTunda: null });
+      }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : '[sinkronisasi STRG gagal]';
+      for (const c of list) {
+        results.push({ sku: c.sku, field: c.field, status: 'ditunda', strategiId: null, alasanTunda: reason });
+      }
+    }
+  }
+  return results;
 }
 
 /**

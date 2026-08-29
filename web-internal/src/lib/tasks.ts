@@ -111,6 +111,12 @@ export interface Metrics {
   revision_flagged: boolean;
   approved_at: string | null;
   approved_period_wib: string;
+  // M16 §6 — AM review latency, split out of turnaround_hours (unchanged above).
+  turnaround_kerja_hours: number | null;
+  waktu_am_belum_buka_hours: number | null;
+  waktu_am_review_hours: number | null;
+  speed_score_kerja_pct: number | null;
+  speed_score_kerja_display: string;
 }
 
 // module12_task.BlockRequest — returned by the block-request POST edges.
@@ -197,14 +203,7 @@ export const TASK_STATUSES = [
 // its briefs never render action buttons — kept in the list for read visibility.
 // Account/Ops have no dedicated division board either — this generic queue is
 // the only place their Briefs are visible (owner decision, DECISIONS.md 2026-08-27).
-export const DIVISIONS = [
-  'Creative',
-  'Ads',
-  'KOL',
-  'Live Stream',
-  'Account',
-  'Ops',
-] as const;
+export { DIVISI_KERJA as DIVISIONS } from './divisions';
 
 // ---- Read functions (borrowed M6/M7/M11/M15 endpoints) ----
 

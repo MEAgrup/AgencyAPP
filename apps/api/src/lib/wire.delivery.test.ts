@@ -197,6 +197,8 @@ describe('M6 briefToWire (Brief entity — creative.ts/tasks.ts Brief)', () => {
     revisionFlagged: false,
     createdBy: '2409230432',
     createdAt: new Date('2026-07-19T02:00:00Z'),
+    stagePipelineCode: 'CREATIVE_CONTENT',
+    productionStage: 'Script',
   };
 
   it('maps every Brief field to its snake_case wire key', () => {
@@ -222,6 +224,8 @@ describe('M6 briefToWire (Brief entity — creative.ts/tasks.ts Brief)', () => {
       revision_flagged: false,
       created_by: '2409230432',
       created_at: '2026-07-19T02:00:00.000Z',
+      stage_pipeline_code: 'CREATIVE_CONTENT',
+      production_stage: 'Script',
     });
     expectNoCamelKeys(briefToWire(full));
   });
@@ -302,6 +306,11 @@ describe('M12 metricsToWire (recompute-from-log Task metrics)', () => {
     revisionFlagged: false,
     approvedAt: new Date('2026-07-22T05:00:00Z'),
     approvedPeriodWib: '2026-07',
+    turnaroundKerjaHours: 20,
+    waktuAmBelumBukaHours: 8,
+    waktuAmReviewHours: 2.5,
+    speedScoreKerjaPct: 41.67,
+    speedScoreKerjaDisplay: '41.67%',
   };
 
   it('maps every Metrics field, all keys always present (no omitempty)', () => {
@@ -320,6 +329,11 @@ describe('M12 metricsToWire (recompute-from-log Task metrics)', () => {
       revision_flagged: false,
       approved_at: '2026-07-22T05:00:00.000Z',
       approved_period_wib: '2026-07',
+      turnaround_kerja_hours: 20,
+      waktu_am_belum_buka_hours: 8,
+      waktu_am_review_hours: 2.5,
+      speed_score_kerja_pct: 41.67,
+      speed_score_kerja_display: '41.67%',
     });
     expectNoCamelKeys(metricsToWire(full));
   });
@@ -534,6 +548,8 @@ describe('M8 campaignToWire (Campaign + derived §5 performance view)', () => {
     endDate: '2026-07-31',
     targetKpi: 'ROAS 4x',
     status: '[Active]',
+    tipeIklan: 'GMV Max Product',
+    additionalDays: 0,
     totalSpend: 8000000,
     totalSpendDisplay: 'Rp. 8.000.000,00',
     totalGmv: 31000000,
@@ -562,6 +578,8 @@ describe('M8 campaignToWire (Campaign + derived §5 performance view)', () => {
       end_date: '2026-07-31',
       target_kpi: 'ROAS 4x',
       status: '[Active]',
+      tipe_iklan: 'GMV Max Product',
+      additional_days: 0,
       total_spend: 8000000,
       total_spend_display: 'Rp. 8.000.000,00',
       total_gmv: 31000000,

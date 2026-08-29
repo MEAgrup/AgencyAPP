@@ -173,8 +173,8 @@ const wire = parseInterfaces(readFileSync(WIRE_TS, 'utf8'));
 const FE_FILES = [
   'account.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'contract.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
-  'livestream.ts', 'penugasan.ts', 'plan.ts',
-  'performance.ts', 'portal.ts', 'recap.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
+  'livestream.ts', 'penugasan.ts', 'permintaan.ts', 'plan.ts',
+  'performance.ts', 'portal.ts', 'recap.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'stage.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
 ];
 
 const fe = new Map<string, Parsed>();
@@ -531,6 +531,10 @@ const WIRE_TO_FE: Record<string, string> = {
   AdsWeeklyMetricWire: 'ads-weekly.ts::AdsWeeklyMetric',
   AdsWeeklyReportWire: 'ads-weekly.ts::AdsWeeklyReport',
   AdsWeeklyReportViewWire: 'ads-weekly.ts::AdsWeeklyReportView',
+  // M16 §4.2 Ads Management Date (LT-42)
+  AdsManagementDateWire: 'ads.ts::AdsManagementDate',
+  // M16 §5.5 Permintaan (REQ-)
+  PermintaanWire: 'permintaan.ts::Permintaan',
   // M9 KOL
   BookingWire: 'kol.ts::Booking',
   MonthlyKolReportWire: 'kol.ts::MonthlyKolReport',
@@ -583,6 +587,12 @@ const WIRE_TO_FE: Record<string, string> = {
   AuditEntryWire: 'types.ts::AuditEntry',
   DemoTaskWire: 'types.ts::DemoTask',
   DemoTaskDetailWire: 'types.ts::DemoTaskDetail',
+  // M16 — Tahapan Produksi Brief (lead time per divisi)
+  StageDefWire: 'stage.ts::StageDef',
+  StageLeadTimeRowWire: 'stage.ts::StageLeadTimeRow',
+  StageReviewWire: 'stage.ts::StageReview',
+  StageIntakeWire: 'stage.ts::StageIntake',
+  StageOverviewWire: 'stage.ts::StageOverview',
 };
 
 /**

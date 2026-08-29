@@ -140,10 +140,33 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "122"
-check "entity_prefix"    "select count(*) from entity_prefix"    "35"
-check "sm_machines"      "select count(*) from sm_machines"      "23"
-check "notif_events"     "select count(*) from notif_events"     "58"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "128"
+check "entity_prefix"    "select count(*) from entity_prefix"    "36"
+check "sm_machines"      "select count(*) from sm_machines"      "29"
+check "notif_events"     "select count(*) from notif_events"     "65"
+# 128 = 127 + 1 tabel Akun B Fase 4 (20260831040000_req_permintaan.sql):
+#       `permintaan` (REQ-, M16 §5.5). 29 = 28 + 1 mesin `permintaan`
+#       ([Diajukan]->[Diproses]->[Selesai]|[Ditolak], STATE_MACHINES §19).
+#       Nol prefix/event baru (sudah dibereskan Tahap F). Angka final ini
+#       ditulis di LANGKAH PENGGABUNGAN §5 PARALEL_M16_DUA_AKUN.md, setelah
+#       kedua stream digabung dan dihitung ulang dari database gabungan yang
+#       SEBENARNYA (bukan dijumlahkan manual) — lihat HANDOFF_M16_AKUN_B.md.
+# 127 = 123 + 4 tabel M16 Akun A Fase 2 (20260830010000_m16_stage_schema.sql):
+#       stage_pipeline, stage_definition, brief_stage_sla, brief_review. 28 =
+#       23 + 5 mesin tahapan (20260830020000_m16_stage_seed.sql: stage_creative,
+#       stage_kol, stage_live, stage_ai_opt_sku, stage_ai_opt_video). Nol prefix/
+#       event baru (sudah dibereskan Tahap F). Menyimpang dari anotasi "F saja"
+#       di docs/handoff/PARALEL_M16_DUA_AKUN.md §4 — dicatat sebagai deviasi
+#       sadar di HANDOFF_M16_AKUN_A.md §4.
+# 123 = 122 + division_registry (M16 fondasi, 20260829001000: divisi sebagai
+#       DATA, menggantikan delapan daftar duplikat). 36 = 35 + REQ (Permintaan
+#       terkait klien, M16 §5.5 — didaftarkan di fondasi supaya dua stream
+#       paralel tidak sama-sama menyentuh registry prefix). 65 = 58 + 7 event
+#       katalog v12 (3 Brief + 2 tahapan + 2 Permintaan) — SATU bump untuk
+#       KEDUA stream: invariant menjumlahkan event_count per versi, jadi dua
+#       bump terpisah memecahkannya dua kali. Mesin dulu TETAP 23 di fondasi
+#       (mesin tahapan milik Akun A, mesin REQ milik Akun B, masing-masing di
+#       migrasinya sendiri). Lihat docs/handoff/PARALEL_M16_DUA_AKUN.md.
 # 21 = 20 + mesin #18 `weekly_result_recap` (Modul 6D D-02, 20260813020000:
 #      Terjadwal→Terbuka→Ditutup|Ditutup Otomatis→(Head)Terbuka). nol tabel/prefix
 #      baru di D-02.
@@ -203,7 +226,7 @@ check "notif_events"     "select count(*) from notif_events"     "58"
 check "notif_katalog_sesuai" "select case when (select count(*) from notif_events) = (select coalesce(sum(event_count),0) from notif_catalog_versions) then 1 else 0 end" "1"
 check "employees"        "select count(*) from employees"        "10"
 check "role_mappings"    "select count(*) from role_mappings"    "12"
-check "master_services"  "select count(*) from master_services"  "4"
+check "master_services"  "select count(*) from master_services"  "6"
 check "demo_tasks"       "select count(*) from demo_tasks"       "1"
 
 echo "→ invariant SQL"

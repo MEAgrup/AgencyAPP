@@ -185,12 +185,25 @@ jobs:
       #      penugasan_mendekati_jatuh_tempo, penugasan_jatuh_tempo,
       #      penugasan_dibatalkan; 20260814120000). Nol mesin/tabel baru (dua
       #      KOLOM penanda idempotensi) ⇒ 23 mesin TETAP.
-      - name: Verify migration seed counts (23 machines, 58 events, catalog registry consistent)
+            # M16 fondasi (20260829001000): +1 tabel `division_registry` (122→123),
+      # +1 prefix REQ (35→36), +7 event katalog v12 (58→65). Mesin TETAP 23 —
+      # mesin tahapan (Akun A) & mesin REQ (Akun B) datang di migrasi mereka
+      # sendiri. Katalog dinaikkan SEKALI untuk KEDUA stream paralel: invariant
+      # menjumlahkan event_count per versi, jadi dua bump terpisah memecahkannya
+      # dua kali (docs/handoff/PARALEL_M16_DUA_AKUN.md F-4).
+            # M16 Akun A Fase 2 (20260830020000_m16_stage_seed.sql): +5 mesin
+      # tahapan (stage_creative, stage_kol, stage_live, stage_ai_opt_sku,
+      # stage_ai_opt_video), 23 → 28. Nol event katalog baru (sudah dibereskan
+      # Tahap F v12) ⇒ notif_events TETAP 65.
+      # M16 Akun B Fase 4 (20260831040000_req_permintaan.sql): +1 mesin
+      # `permintaan` (REQ-, M16 §5.5), 28 → 29. Ditulis di langkah penggabungan
+      # §5 PARALEL_M16_DUA_AKUN.md setelah dihitung ulang dari DB gabungan.
+      - name: Verify migration seed counts (29 machines, 65 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
-               if (select count(*) from sm_machines) <> 23 then raise exception 'expected 23 machines'; end if;
-               if (select count(*) from notif_events) <> 58 then raise exception 'expected 58 events'; end if;
+               if (select count(*) from sm_machines) <> 29 then raise exception 'expected 29 machines'; end if;
+               if (select count(*) from notif_events) <> 65 then raise exception 'expected 65 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
                  then raise exception 'notif_events does not match the registered catalog versions'; end if;
@@ -205,7 +218,7 @@ jobs:
             "do \$\$ begin
                if (select count(*) from employees) <> 10 then raise exception 'expected 10 employees'; end if;
                if (select count(*) from role_mappings) <> 12 then raise exception 'expected 12 role_mappings'; end if;
-               if (select count(*) from master_services) <> 4 then raise exception 'expected 4 master_services (3 seed + Komisi dari migrasi 20260806050000; seed not idempotent?)'; end if;
+               if (select count(*) from master_services) <> 6 then raise exception 'expected 6 master_services (3 seed + Komisi 20260806050000 + AI Video + Optimasi SKU 20260831070000 M17 LT-53; seed not idempotent?)'; end if;
                if (select count(*) from demo_tasks) <> 1 then raise exception 'expected 1 demo_task (seed not idempotent?)'; end if;
              end \$\$;"
       # KEEP IN STEP WITH `scripts/db-rebuild.sh` — the same gate lives in both
@@ -285,16 +298,28 @@ jobs:
       #       IDENTITY / kunci alami / versi integer ⇒ entity_prefix TETAP 35;
       #       nol mesin baru ⇒ sm_machines TETAP 23; nol event ⇒ notif_events TETAP 57.
       #
+      # M16 Akun A Fase 2 (20260830010000_m16_stage_schema.sql): +4 tabel
+      # (stage_pipeline, stage_definition, brief_stage_sla, brief_review),
+      # 123 → 127. Menyimpang dari anotasi "F saja" di
+      # docs/handoff/PARALEL_M16_DUA_AKUN.md §4 — dicatat sebagai deviasi sadar
+      # di HANDOFF_M16_AKUN_A.md §4 (instruksi tugas menuntut db-rebuild.sh
+      # dibuktikan hijau dengan DB nyata).
+      # M16 Akun B Fase 4 (20260831040000_req_permintaan.sql): +1 tabel
+      # `permintaan` (REQ-, M16 §5.5), 127 → 128. Angka final ditulis di langkah
+      # penggabungan §5 setelah dihitung ulang dari DB gabungan yang sebenarnya
+      # (lihat HANDOFF_M16_AKUN_B.md) — bukan dijumlahkan manual dari kedua
+      # stream.
+      #
       # ⚠️ INI GATE KEDUA UNTUK ANGKA YANG SAMA — `scripts/db-rebuild.sh` punya
       # `check "tabel public"` sendiri. Naikkan KEDUANYA dalam satu commit;
       # menaikkan salah satu saja membuat lokal hijau sementara CI merah (persis
       # yang terjadi pada PR #170).
-      - name: Verify table count (expect 122)
+      - name: Verify table count (expect 128)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 122
+          test "$n" -eq 128
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this
@@ -307,11 +332,11 @@ jobs:
       #
       # ⚠️ GATE KEDUA untuk angka yang sama — `scripts/db-rebuild.sh` punya
       # `check "entity_prefix"` sendiri. Naikkan KEDUANYA dalam satu commit.
-      - name: Verify entity_prefix registry (expect 35)
+      - name: Verify entity_prefix registry (expect 36)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc "select count(*) from entity_prefix;")
           echo "entity_prefix rows: $n"
-          test "$n" -eq 35
+          test "$n" -eq 36
       - name: Invariant — ID generator (gap-free, WIB period)
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/ident_checks.sql
       - name: Invariant — append-only history (immutability)
