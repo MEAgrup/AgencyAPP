@@ -158,7 +158,7 @@ afterEach(async () => {
 });
 
 describeDb('createPermintaan (§5.5)', () => {
-  it('Top-up Saldo routes to the client\'s owning AM, due in 1 hari kerja', async () => {
+  it('Top-up Saldo routes to Finance (LT-11, no named employee), due in 1 hari kerja', async () => {
     const { clientId, briefId } = await clientBrief('Ads');
     const p = await createPermintaan(sql, adsStaff(), {
       jenis: JENIS_TOPUP_SALDO, judul: 'Top-up saldo Rp 5jt', briefId,
@@ -166,10 +166,20 @@ describeDb('createPermintaan (§5.5)', () => {
     expect(p.id).toMatch(/^REQ-\d{6}-\d{4}$/);
     expect(p.status).toBe(STATUS_DIAJUKAN);
     expect(p.clientId).toBe(clientId);
-    expect(p.tujuanDivisi).toBe('Account');
-    expect(p.tujuanEmployeeId).toBe('ZZ-SINTA'); // the client's assigned_am_id
+    expect(p.tujuanDivisi).toBe('Finance');
+    expect(p.tujuanEmployeeId).toBeNull();
     expect(p.dueDate > p.createdAt.toISOString().slice(0, 10)).toBe(true); // strictly forward
     expect(p.terlambatBerjalan).toBe(false);
+  });
+
+  it('Contract Creator routes to the client\'s owning AM (LT-11 — the only jenis that does)', async () => {
+    const { clientId, briefId } = await clientBrief('KOL');
+    const p = await createPermintaan(sql, kolStaff(), {
+      jenis: JENIS_CONTRACT_CREATOR, judul: 'Kontrak creator baru', briefId,
+    });
+    expect(p.clientId).toBe(clientId);
+    expect(p.tujuanDivisi).toBe('Account');
+    expect(p.tujuanEmployeeId).toBe('ZZ-SINTA'); // the client's assigned_am_id
   });
 
   it('rejects an unknown jenis and a missing mandatory field', async () => {
@@ -216,8 +226,8 @@ describeDb('createPermintaan (§5.5)', () => {
 
 describeDb('lifecycle (§5.5 / STATE_MACHINES §19)', () => {
   it('drives [Diajukan] -> [Diproses] -> [Selesai], and rejects an out-of-order transition', async () => {
-    const { briefId } = await clientBrief('Ads');
-    const p = await createPermintaan(sql, adsStaff(), { jenis: JENIS_TOPUP_SALDO, judul: 'x', briefId });
+    const { briefId } = await clientBrief('KOL');
+    const p = await createPermintaan(sql, kolStaff(), { jenis: JENIS_CONTRACT_CREATOR, judul: 'x', briefId });
     // Only the resolved tujuan (or Director) may process.
     await expect(processPermintaan(sql, kolStaff(), p.id)).rejects.toBeInstanceOf(ForbiddenError);
     const processed = await processPermintaan(sql, am(), p.id);
@@ -232,8 +242,8 @@ describeDb('lifecycle (§5.5 / STATE_MACHINES §19)', () => {
   });
 
   it('rejects with a mandatory reason, from either open state', async () => {
-    const { briefId } = await clientBrief('Ads');
-    const p = await createPermintaan(sql, adsStaff(), { jenis: JENIS_TOPUP_SALDO, judul: 'x', briefId });
+    const { briefId } = await clientBrief('KOL');
+    const p = await createPermintaan(sql, kolStaff(), { jenis: JENIS_CONTRACT_CREATOR, judul: 'x', briefId });
     await expect(rejectPermintaan(sql, am(), p.id, '')).rejects.toBeInstanceOf(ValidationError);
     const rejected = await rejectPermintaan(sql, am(), p.id, 'Saldo klien masih cukup');
     expect(rejected.status).toBe(STATUS_DITOLAK);
@@ -245,8 +255,8 @@ describeDb('lifecycle (§5.5 / STATE_MACHINES §19)', () => {
 
 describeDb('keterlambatan derived at read time (§5.5)', () => {
   it('flags terlambat_berjalan once due_date has passed, and never for a [Ditolak] request', async () => {
-    const { briefId } = await clientBrief('Ads');
-    const p = await createPermintaan(sql, adsStaff(), { jenis: JENIS_TOPUP_SALDO, judul: 'x', briefId });
+    const { briefId } = await clientBrief('KOL');
+    const p = await createPermintaan(sql, kolStaff(), { jenis: JENIS_CONTRACT_CREATOR, judul: 'x', briefId });
     // due_date is frozen — simulate "today is past due" by reading with a future `now`.
     const future = new Date(Date.parse(`${p.dueDate}T00:00:00Z`) + 3 * 86400000);
     const late = await getPermintaan(sql, am(), p.id, future);
@@ -260,8 +270,8 @@ describeDb('keterlambatan derived at read time (§5.5)', () => {
   });
 
   it('due_date is frozen — cannot be shifted after creation', async () => {
-    const { briefId } = await clientBrief('Ads');
-    const p = await createPermintaan(sql, adsStaff(), { jenis: JENIS_TOPUP_SALDO, judul: 'x', briefId });
+    const { briefId } = await clientBrief('KOL');
+    const p = await createPermintaan(sql, kolStaff(), { jenis: JENIS_CONTRACT_CREATOR, judul: 'x', briefId });
     await expect(sql`update permintaan set due_date = due_date + 10 where id = ${p.id}`)
       .rejects.toThrow(/due_date beku/);
   });
@@ -269,15 +279,15 @@ describeDb('keterlambatan derived at read time (§5.5)', () => {
 
 describeDb('reads (§5.5)', () => {
   it('listPermintaanForClient / listPermintaanQueue view-gate correctly', async () => {
-    const { clientId, briefId } = await clientBrief('Ads');
-    await createPermintaan(sql, adsStaff(), { jenis: JENIS_TOPUP_SALDO, judul: 'x', briefId });
+    const { clientId, briefId } = await clientBrief('KOL');
+    await createPermintaan(sql, kolStaff(), { jenis: JENIS_CONTRACT_CREATOR, judul: 'x', briefId });
     const forClient = await listPermintaanForClient(sql, am(), clientId);
     expect(forClient.length).toBe(1);
-    const forOutsider = await listPermintaanForClient(sql, kolStaff(), clientId);
+    const forOutsider = await listPermintaanForClient(sql, adsStaff(), clientId);
     expect(forOutsider.length).toBe(0); // view-gated out per row
 
     const queue = await listPermintaanQueue(sql, am(), 'Account');
     expect(queue.some((r) => r.clientId === clientId)).toBe(true);
-    await expect(listPermintaanQueue(sql, kolStaff(), 'Account')).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(listPermintaanQueue(sql, adsStaff(), 'Account')).rejects.toBeInstanceOf(ForbiddenError);
   });
 });

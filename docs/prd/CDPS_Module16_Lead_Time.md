@@ -79,7 +79,7 @@ Status Ads dipetakan ke mesin **`ADC-`** yang sudah ada — `ADC-` tetap satu-sa
 - **Tipe Iklan:** `GMV Max Product` · `GMV Max Live` · `TTAM`
 - **Ads Management Date** — `end_date` adalah turunan read-only (aturan rumah #4):
   `end_date = start_date + durasi_jasa + additional_days + total_hari_hold`
-  **Hari hold memperpanjang End-Date**: masa management tidak hangus saat iklan dipause. `total_hari_hold` diturunkan dari riwayat transisi `Hold`, jadi `end_date` bergerak sendiri setiap iklan di-resume dan tetap recomputable dari log. `additional_days` untuk tambahan seperti libur Lebaran. `durasi_jasa` dari Service/Master Service List.
+  **Hari hold memperpanjang End-Date**: masa management tidak hangus saat iklan dipause. `total_hari_hold` diturunkan dari riwayat transisi `Hold`, jadi `end_date` bergerak sendiri setiap iklan di-resume dan tetap recomputable dari log. `additional_days` untuk tambahan seperti libur Lebaran. `durasi_jasa` dari Service/Master Service List. **Satuan seluruh komponen di atas: HARI KALENDER, bukan hari kerja** (LT-10, dikonfirmasi pemilik 2026-08-29).
 - **Reporting Ads** (dikirim ke divisi terkait): `Weekly Report` memakai `ads_weekly_reports` yang **sudah ada**; ditambah `Mini Report`, `Monthly Report`, `Content Analysis`.
 
 ### 4.3 KOL
@@ -163,7 +163,7 @@ Deteksi pelanggaran lewat tick harian, pola `interview_daily_tick`.
 
 Entitas baru untuk permintaan yang **terkait klien**, dipisahkan dari `TSK-` Penugasan Internal yang sengaja tidak punya `client_id`/`service_id`.
 
-`REQ-YYYYMM-NNNN`, parent Brief/Service, `jenis` ∈ {`Top-up Saldo`, `Contract Creator`, `Creator Payment Approval`}, mesin `[Diajukan]` → `[Diproses]` → `[Selesai]` / `[Ditolak]`.
+`REQ-YYYYMM-NNNN`, parent Brief/Service, `jenis` ∈ {`Top-up Saldo`, `Contract Creator`, `Creator Payment Approval`}, mesin `[Diajukan]` → `[Diproses]` → `[Selesai]` / `[Ditolak]`. Routing tujuan (LT-11, dikonfirmasi pemilik 2026-08-29): `Top-up Saldo` → **Finance**, `Contract Creator` → **AM pemilik klien** (satu-satunya jenis yang dirute ke AM), `Creator Payment Approval` → **Finance**.
 
 Deadline **1 hari kerja**. Keterlambatan **diturunkan saat baca** dari `due_date` + `selesai_pada` (WIB), meniru `internal_tasks` — termasuk trigger pembeku `due_date`, karena menggesernya adalah cara termudah menghapus keterlambatan dari catatan performa. `Creator Payment Approval` menyambung ke `CPR-` (M9) yang sudah ada, tidak menggantikannya.
 
