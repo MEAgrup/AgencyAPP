@@ -7,13 +7,17 @@
 // Read-only timeline (PRD §7 Success Metric 1: "AM bisa menyebutkan tanpa
 // bertanya ke divisi tahap mana yang sedang berjalan dan sudah berapa hari
 // kerja") + the Cek Brief AM intake decision (PRD §2 Rule 10) when the
-// caller says the viewer may act on it — `advanceStage` itself is NOT wired
-// here yet (needs the pipeline's possible next edges exposed by a read
-// route; left for a follow-up, noted in HANDOFF_M16_AKUN_A.md).
+// caller says the viewer may act on it, + advancing to the next tahap
+// (LT-60 — `advanceStage` reads its valid destinations off `next_stages`,
+// which the server derives straight from `sm_edges`; never guessed from
+// `stages` ordering, so a pipeline that later grows a real branch beyond
+// `Cek Brief AM` still renders correctly here). `next_stages` never
+// includes the `Brief Dikembalikan ke AM` edge — that one is `reviewBrief`'s,
+// shown only in the Cek Brief AM block below, never both at once.
 
 import { useCallback, useEffect, useState } from 'react';
 import { errorMessage } from '@/lib/api';
-import { getBriefStage, reviewBriefStage, type StageOverview } from '@/lib/stage';
+import { advanceBriefStage, getBriefStage, reviewBriefStage, type StageOverview } from '@/lib/stage';
 
 const STATUS_BADGE: Record<string, string> = {
   belum_mulai: 'badge-gray',
@@ -49,12 +53,22 @@ export default function StageTimelinePanel({
   briefId,
   assignedDivision,
   canReview,
+  canAdvance = canReview,
 }: {
   briefId: string;
   /** brief.assigned_division — picks the alasan_kode list for "Dikembalikan". */
   assignedDivision: string;
   /** true when the viewer is division staff/lead (or Director) for this Brief — shows the Cek Brief AM actions. */
   canReview: boolean;
+  /**
+   * true when the viewer may drive `advanceStage` (LT-60) — shown once the
+   * intake decision is out of the way. Separate from `canReview` because the
+   * two backend gates differ once a PIC is assigned (`canExecuteStage`
+   * restricts to that PIC or the lead; `canReviewBrief` does not) — most
+   * callers pass the same boolean today, so this defaults to `canReview`
+   * rather than making every existing page pass it explicitly.
+   */
+  canAdvance?: boolean;
 }) {
   const [overview, setOverview] = useState<StageOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -86,6 +100,19 @@ export default function StageTimelinePanel({
     setSubmitting(true);
     try {
       await reviewBriefStage(briefId, { keputusan: 'Diterima' });
+      await load();
+    } catch (err) {
+      setActionError(errorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleAdvance(to: string) {
+    setActionError(null);
+    setSubmitting(true);
+    try {
+      await advanceBriefStage(briefId, to);
       await load();
     } catch (err) {
       setActionError(errorMessage(err));
@@ -193,6 +220,25 @@ export default function StageTimelinePanel({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {canAdvance && !pendingReview && overview.next_stages.length > 0 && (
+        <div className="stack" style={{ gap: 10 }}>
+          {actionError && <div className="alert alertError" role="alert">{actionError}</div>}
+          <div className="row" style={{ gap: 10 }}>
+            {overview.next_stages.map((ns) => (
+              <button
+                key={ns.stage_code}
+                type="button"
+                className="btn btnPrimary"
+                disabled={submitting}
+                onClick={() => handleAdvance(ns.stage_code)}
+              >
+                {submitting ? 'Memproses...' : `Lanjutkan ke ${ns.label}`}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

@@ -593,6 +593,7 @@ const WIRE_TO_FE: Record<string, string> = {
   StageReviewWire: 'stage.ts::StageReview',
   StageIntakeWire: 'stage.ts::StageIntake',
   StageOverviewWire: 'stage.ts::StageOverview',
+  NextStageWire: 'stage.ts::NextStage', // LT-60
 };
 
 /**

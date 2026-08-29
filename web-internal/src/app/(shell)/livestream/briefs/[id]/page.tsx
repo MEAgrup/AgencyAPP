@@ -5,11 +5,13 @@ import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import StatusBadge from '@/components/StatusBadge';
+import StageTimelinePanel from '@/components/StageTimelinePanel';
 import {
   BRIEF_APPROVED_STATUS,
   BRIEF_DISPATCHED_STATUS,
   BRIEF_VOIDED_STATUS,
   PLATFORM_OPTIONS,
+  canAdvanceLiveStage,
   canManageLiveStream,
   confidenceBadgeTone,
   createSession,
@@ -208,6 +210,12 @@ export default function LiveStreamBriefDetailPage({ params }: { params: Promise<
           </div>
         )}
       </section>
+
+      <StageTimelinePanel
+        briefId={brief.id}
+        assignedDivision={brief.assigned_division}
+        canReview={canAdvanceLiveStage(role)}
+      />
 
       <section className="card">
         <div className="cardHeader">

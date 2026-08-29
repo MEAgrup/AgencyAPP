@@ -13,11 +13,16 @@
 
 **M16 (Lead Time per Tahapan Divisi) dan M17 (AI Optimizer) sudah selesai
 dibangun, sudah di-review, sudah merge ke `main`, dan sudah di produksi
-(`CDPS SG`).** Yang tersisa adalah pekerjaan kecil dan tidak mendesak:
-8 keputusan implementasi menunggu konfirmasi pemilik, satu fase yang sengaja
-diblokir security spec, dan dua item dokumentasi drift yang tidak terkait
-M16 sama sekali. Tidak ada satu pun dari sisa ini yang menghalangi fitur
-berjalan di produksi hari ini.
+(`CDPS SG`).** **Update sesi berikutnya (masih 2026-08-29): LT-60 (input
+tahapan Live oleh tim internal), O61 (back-port 2 migrasi hardening), dan O62
+(verifikasi migrasi `m6a_section_d` — ternyata BUKAN duplikat, sudah
+direkonsiliasi 2026-08-08 lewat O59) SEMUANYA SELESAI juga** — lihat
+`docs/DECISIONS.md` baris terbaru "LT-60 SELESAI" dan "O61/O62 DITUTUP".
+Yang tersisa sekarang: 8 keputusan implementasi menunggu konfirmasi pemilik
+(`LT-4`..`LT-11`), bobot/daftar kerja divisi baru (`LT-1`/`LT-2`), halaman FE
+Ads/Permintaan, dan satu fase yang sengaja diblokir security spec (`LT-61`).
+Tidak ada satu pun dari sisa ini yang menghalangi fitur berjalan di produksi
+hari ini.
 
 ---
 
@@ -47,15 +52,19 @@ membaca ulang seluruh riwayat chat sebelumnya.
 Semuanya **single-track** (satu sesi, tidak dipecah paralel — keputusan
 pemilik 2026-08-29, dicatat `DECISIONS.md`).
 
+**Sudah selesai (jangan diulang):** LT-60 (`StageTimelinePanel` + tombol
+"Lanjutkan" di halaman detail Brief Live Stream, `getStageOverview.nextStages`
+baru), O61 (2 berkas back-port ditambahkan), O62 (diverifikasi bukan
+duplikat — sudah rekonsiliasi O59 sejak 2026-08-08). Detail lengkap:
+`docs/DECISIONS.md` baris "LT-60 SELESAI" dan "O61/O62 DITUTUP", keduanya
+2026-08-29.
+
 | # | Isi | Butuh apa | Mendesak? |
 |---|---|---|---|
 | — | Sodorkan `LT-4`..`LT-11` ke pemilik untuk konfirmasi | Membaca 8 baris `DECISIONS.md` §Open, mengajukan lewat `AskUserQuestion` atau kanal lain | Tidak — nol yang memblokir fitur berjalan |
 | LT-1 | Bobot `perf_kpi_weights` final untuk `kecepatan_review_am` + divisi baru | Keputusan COO, satu tulisan config, nol deploy | Tidak — bobot 0 aman selamanya sampai diputuskan |
 | LT-2 | Daftar & urutan pekerjaan Store Operation | Keputusan pemilik, lalu satu migrasi seed `stage_pipeline` | Tidak — divisi berfungsi tanpa pipeline |
-| LT-60 | Input tahapan Live oleh tim internal atas nama vendor | Implementasi baru, tidak bergantung apa pun | Bisa dikerjakan kapan saja |
 | — | Halaman FE penuh untuk Ads/Permintaan | Implementasi baru — PR #247 baru bawa type declaration wire | Kalau tim mulai memakai fitur Ads/Permintaan |
-| O61 | Back-port 2 migrasi hardening keamanan live-only sebagai berkas riwayat | Sesi fokus tersendiri, **tidak terkait M16** | Tidak — live sudah benar |
-| O62 | Verifikasi migrasi `m6a_section_d` yang ter-apply 2× di live | Sesi fokus tersendiri, **tidak terkait M16** | Tidak — belum ada gejala kerusakan |
 | LT-61 | Login vendor sendiri (realm auth eksternal) | 🔴 **Terblokir** — butuh spec keamanan client-portal-style yang belum ditulis | **Jangan mulai** sampai spec itu ada |
 
 **Kalau Anda ditugaskan modul CDPS lain (bukan M16/M17):** dokumen-dokumen
