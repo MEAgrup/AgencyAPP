@@ -37,6 +37,7 @@
 import { bi, division, notification, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import { onBriefReachedTerminal, validateBriefApproval } from './board';
+import * as stage from './stage';
 import {
   effectiveGate,
   type GateDecision,
@@ -1621,6 +1622,10 @@ export interface Brief {
   revisionFlagged: boolean;
   createdBy: string;
   createdAt: Date;
+  /** M16 — pipeline resolved at birth (stage.resolvePipeline). Null = divisi tanpa pipeline (Rule 12). */
+  stagePipelineCode: string | null;
+  /** M16 — tahap aktif mesin tahapan. Ditulis HANYA lewat sm_transition (stage.ts) setelah pengisian awal ini. */
+  productionStage: string | null;
 }
 
 // --- Input validation ---
@@ -1692,16 +1697,26 @@ export async function insertBrief(
   const recurring = input.recurring === true;
   const recCount = recurring && (input.recurringCount ?? 0) > 0 ? input.recurringCount! : null;
 
+  // M16 (LT-20/§2 Rule 1/Rule 12) — resolve the ONE stage pipeline for this
+  // (division, deliverable_type), purely from data (stage.resolvePipeline).
+  // Divisi tanpa pipeline (mis. Store Operation) atau divisi tak terdaftar
+  // menghasilkan keduanya NULL — Brief tetap lahir normal (Rule 12), tidak ada
+  // gate di sini. `production_stage` diisi literal (initial_state pipeline)
+  // di baris INI SAJA — bukan lewat sm_transition (baris pertama sebuah mesin
+  // tidak "ditransisikan ke", pola yang sama dengan `status` di atas).
+  const pipeline = await stage.resolvePipeline(tx, input.assignedDivision, input.deliverableType);
+
   await tx`
     insert into briefs
       (id, service_id, strategy_id, plan_row_id, assigned_division, assigned_pic, deliverable_type,
        quantity_target, due_date, priority, recurring, recurring_frequency, recurring_count,
-       recurring_end_date, instructions, reference_attachments, title, status, created_by)
+       recurring_end_date, instructions, reference_attachments, title, status, created_by,
+       stage_pipeline_code, production_stage)
     values (${id}, ${serviceId}, ${strategyId}, ${planRowId}, ${input.assignedDivision}, ${orNull(input.assignedPic)},
       ${input.deliverableType}, ${input.quantityTarget}, ${input.dueDate.trim()}, ${input.priority}, ${recurring},
       ${orNull(input.recurringFrequency)}, ${recCount}, ${orNull(input.recurringEndDate)},
       ${orNull(input.instructions)}, ${orNull(input.referenceAttachments)}, ${input.title.trim()}, ${birth},
-      ${actor.employeeId})`;
+      ${actor.employeeId}, ${pipeline?.code ?? null}, ${pipeline?.initialState ?? null})`;
   await ex.audit.insertAudit({
     entityType: 'brief', entityId: id, actorEmployeeId: actor.employeeId, action: 'create',
     beforeJson: null,
@@ -1710,6 +1725,14 @@ export async function insertBrief(
       ...(planRowId !== null ? { plan_row_id: planRowId } : {}),
     },
     createdBy: actor.employeeId,
+  });
+  // M16 §5.4/LT-27 — closes the long-standing gap: dispatching a Brief to a
+  // division never notified anyone; the division had to poll its own queue
+  // (`listDivisionQueue`). Fires for BOTH birth paths (manual + one-click
+  // inheritance) since both funnel through this single Brief-birth point.
+  await notification.emit(ex.notify, {
+    event: notification.EVENTS.BriefDispatched, entityType: 'brief', entityId: id,
+    actor: actor.employeeId, division: input.assignedDivision,
   });
 
   return {
@@ -1720,6 +1743,7 @@ export async function insertBrief(
     recurringEndDate: (input.recurringEndDate ?? '').trim(), instructions: (input.instructions ?? '').trim(),
     referenceAttachments: (input.referenceAttachments ?? '').trim(), title: input.title.trim(), status: birth,
     revisionCount: 0, revisionFlagged: false, createdBy: actor.employeeId, createdAt: now,
+    stagePipelineCode: pipeline?.code ?? null, productionStage: pipeline?.initialState ?? null,
   };
 }
 
@@ -2076,13 +2100,16 @@ interface BriefRow {
   created_by: string;
   created_at: Date;
   assigned_am_id?: string | null;
+  stage_pipeline_code: string | null;
+  production_stage: string | null;
 }
 
 /** briefCols is the shared Brief column list (nested sql fragment). */
 function briefCols(sql: Queryable) {
   return sql`b.id, b.service_id, b.strategy_id, b.assigned_division, b.assigned_pic, b.deliverable_type,
     b.quantity_target, b.due_date, b.priority, b.recurring, b.recurring_frequency, b.recurring_count,
-    b.recurring_end_date, b.instructions, b.reference_attachments, b.title, b.status, b.created_by, b.created_at`;
+    b.recurring_end_date, b.instructions, b.reference_attachments, b.title, b.status, b.created_by, b.created_at,
+    b.stage_pipeline_code, b.production_stage`;
 }
 
 function rowToBrief(r: BriefRow): Brief {
@@ -2094,6 +2121,7 @@ function rowToBrief(r: BriefRow): Brief {
     recurringEndDate: r.recurring_end_date === null ? '' : dateStr(r.recurring_end_date),
     instructions: r.instructions ?? '', referenceAttachments: r.reference_attachments ?? '', title: r.title,
     status: r.status, revisionCount: 0, revisionFlagged: false, createdBy: r.created_by, createdAt: r.created_at,
+    stagePipelineCode: r.stage_pipeline_code, productionStage: r.production_stage,
   };
 }
 

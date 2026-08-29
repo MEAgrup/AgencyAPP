@@ -10,8 +10,8 @@
 |---|---|---|
 | 0 | Spec + keputusan | ✅ SELESAI |
 | 1 | Registry divisi (Tahap F) | ✅ SELESAI |
-| 2 | Pipeline tahapan + lead time | ⬜ |
-| 2b | Metrik kecepatan + skor AM | ⬜ |
+| 2 | Pipeline tahapan + lead time | ✅ SELESAI (Akun A) |
+| 2b | Metrik kecepatan + skor AM | ✅ SELESAI (Akun A) |
 | 3 | Ads | ⬜ |
 | 4 | `REQ-` + AI Optimizer | ⬜ |
 | 5 | Portal vendor Live | ⬜ (b) TERBLOKIR |
@@ -48,15 +48,15 @@ Dua tes diubah, keduanya asersi keanggotaan daftar: `notification.test.ts` v11�
 
 | # | Isi | Catatan |
 |---|---|---|
-| LT-20 | Migrasi `stage_pipeline` + `stage_definition` + `brief_stage_sla` + `brief_review` + kolom `briefs` + RLS | |
-| LT-21 | Seed `sm_machines`/`sm_edges`/`sm_terminal_states` per pipeline | Creative, KOL, Live, AI Opt ×2. Store Operation **kosong** |
-| LT-22 | `packages/domain/src/stage.ts` | `advanceStage`, `reviewBrief` (Cek Brief AM), gate AM/KLIEN. **`p_entity_type='brief_stage'`** |
-| LT-23 | `packages/domain/src/leadtime.ts` | `computeStageLeadTime` + `working_days_between` |
-| LT-24 | Override SLA per brief | Gerbang `isLead(division)`, pola `setSlaTarget` |
-| LT-25 | Route `apps/api` + `*ToWire` | snake_case, `null` eksplisit — **jangan** `omitempty`. `KNOWN_GAPS` wajib tetap kosong |
-| LT-26 | Guard `task.submitTask` | Tolak submit sebelum tahap terminal. Satu arah |
-| LT-27 | 6 event notifikasi + tick harian | Termasuk `brief_dispatched` yang menutup gap lama |
-| LT-28 | FE: strip tahapan, kolom lead time di board, panel AM | |
+| LT-20 | ✅ Migrasi `stage_pipeline` + `stage_definition` + `brief_stage_sla` + `brief_review` + kolom `briefs` + RLS | `20260830010000_m16_stage_schema.sql` |
+| LT-21 | ✅ Seed `sm_machines`/`sm_edges`/`sm_terminal_states` per pipeline | `20260830020000_m16_stage_seed.sql` — Creative, KOL, Live, AI Opt ×2. Store Operation **kosong** |
+| LT-22 | ✅ `packages/domain/src/stage.ts` | `advanceStage`, `reviewBrief` (Cek Brief AM), gate AM/KLIEN. **`p_entity_type='brief_stage'`** |
+| LT-23 | ✅ `packages/domain/src/leadtime.ts` | `computeStageLeadTime` + `working_days_between` |
+| LT-24 | ✅ Override SLA per brief | `stage.setStageSlaTarget`, gerbang `isLead(division)`, pola `setSlaTarget` |
+| LT-25 | ✅ Route `apps/api` + `*ToWire` | `GET/POST .../briefs/{id}/stage[/review]`, ANCHOR WIRE A. `KNOWN_GAPS` tetap kosong |
+| LT-26 | ✅ Guard `task.submitTask` | `MSG_STAGE_NOT_COMPLETE`, satu arah lewat `sm_terminal_states` |
+| LT-27 | ✅ 5 event notifikasi + tick harian | `stage_overdue_tick` (`20260830030000`), idempoten lewat `notifications` (nol kolom/tabel penanda baru — HANDOFF §1.6) |
+| LT-28 | ✅ FE: `StageTimelinePanel` (account/creative/kol brief detail) | Read-only timeline + Cek Brief AM. `advanceStage` UI menyusul (belum ada route baca "next edges") |
 
 **Uji kunci:** `computeMetrics` untuk Brief yang sama wajib **identik** dengan sebelum fitur ini ada (bukti namespace `brief_stage` bekerja).
 
@@ -66,10 +66,10 @@ Dua tes diubah, keduanya asersi keanggotaan daftar: `notification.test.ts` v11�
 
 | # | Isi | Catatan |
 |---|---|---|
-| LT-30 | `turnaroundKerjaHours` + `waktuAmBelumBuka` + `waktuAmReview` di `computeMetrics` | Pola `blockedMs()` pada rentang berbeda. `turnaroundHours` lama **tidak diubah** |
-| LT-31 | Speed Score divisi pindah + hitung ulang periode berjalan | Periode tertutup **tidak disentuh** |
-| LT-32 | Component key `kecepatan_review_am`, **bobot 0** | Rule 6 meredistribusi ⇒ nol skor bergeser |
-| LT-33 | `role_type` AI Optimizer + Store Operation, **bobot 0** | Jalur yang sama |
+| LT-30 | ✅ `turnaroundKerjaHours` + `waktuAmBelumBukaHours` + `waktuAmReviewHours` (+ `speedScoreKerjaPct`) di `computeMetrics` | Pola `blockedMs()` digeneralisasi (`intervalMs`, "next transition" bukan "search ahead" — lihat komentar task.ts). `turnaroundHours` lama **tidak diubah** |
+| LT-31 | ✅ Speed Score divisi pindah ke `speedScoreKerjaPct` | `previewCurrent` menghitung ulang live tiap request ⇒ periode berjalan otomatis terbarukan; snapshot periode tertutup (`runSnapshotJob`, fire-once + immutable) **tidak disentuh** |
+| LT-32 | ✅ Component key `kecepatan_review_am`, **bobot 0** | `perf_kpi_weights` migrasi `20260830040000`. Rule 6 meredistribusi ⇒ nol skor bergeser (dibuktikan unit test murni) |
+| LT-33 | ✅ `role_type` AI Optimizer + Store Operation, **bobot 0** | `perf_kpi_weights` migrasi sama; profil nyata dihitung (`briefDivisionCandidates`), hanya bobotnya 0 |
 
 **Tidak ada angka bobot di kode** — semuanya lewat `perf_kpi_weights` Director-gated (Σ=100 ditegakkan server).
 

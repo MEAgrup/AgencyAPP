@@ -292,12 +292,13 @@ describe('M6 account wire mappers', () => {
       recurring: false, recurringFrequency: '', recurringCount: 0, recurringEndDate: '', instructions: '',
       referenceAttachments: '', title: 'Promo', status: '[To Do]', revisionCount: 0, revisionFlagged: false,
       createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
+      stagePipelineCode: null, productionStage: null,
     };
     expect(briefToWire(b)).toEqual({
       id: 'BRF-202607-0001', service_id: 'SVC-1', assigned_division: 'Creative', deliverable_type: 'Video',
       quantity_target: 12, due_date: '2026-08-15', priority: 'High', recurring: false, title: 'Promo',
       status: '[To Do]', revision_count: 0, revision_flagged: false, created_by: 'EMP-SINTA',
-      created_at: '2026-07-01T00:00:00.000Z',
+      created_at: '2026-07-01T00:00:00.000Z', stage_pipeline_code: null, production_stage: null,
     });
   });
 
@@ -308,6 +309,7 @@ describe('M6 account wire mappers', () => {
       recurring: true, recurringFrequency: 'Weekly', recurringCount: 4, recurringEndDate: '2026-09-15',
       instructions: 'brief detail', referenceAttachments: 'link', title: 'Ads Q3', status: '[Approved]',
       revisionCount: 3, revisionFlagged: true, createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
+      stagePipelineCode: null, productionStage: null,
     };
     const w = briefToWire(b);
     expect(w.strategy_id).toBe('STR-1');
@@ -352,12 +354,16 @@ describe('M12 task wire mappers', () => {
       revisionTurnaroundHours: null, speedScorePct: 50, speedScoreDisplay: '50.00%',
       revisionSlaTargetHours: null, revisionSpeedScorePct: null, revisionSpeedScoreDisplay: 'N/A', revisionCount: 1,
       revisionFlagged: false, approvedAt: new Date('2026-07-01T00:00:00.000Z'), approvedPeriodWib: '2026-07',
+      turnaroundKerjaHours: 12, waktuAmBelumBukaHours: 0, waktuAmReviewHours: 0,
+      speedScoreKerjaPct: 50, speedScoreKerjaDisplay: '50.00%',
     };
     expect(metricsToWire(m)).toEqual({
       brief_id: 'BRF-1', status: '[Approved]', sla_target_hours: 24, turnaround_hours: 12,
       revision_turnaround_hours: null, speed_score_pct: 50, speed_score_display: '50.00%',
       revision_sla_target_hours: null, revision_speed_score_pct: null, revision_speed_score_display: 'N/A',
       revision_count: 1, revision_flagged: false, approved_at: '2026-07-01T00:00:00.000Z', approved_period_wib: '2026-07',
+      turnaround_kerja_hours: 12, waktu_am_belum_buka_hours: 0, waktu_am_review_hours: 0,
+      speed_score_kerja_pct: 50, speed_score_kerja_display: '50.00%',
     });
   });
 

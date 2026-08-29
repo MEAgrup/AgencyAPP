@@ -191,11 +191,15 @@ jobs:
       # sendiri. Katalog dinaikkan SEKALI untuk KEDUA stream paralel: invariant
       # menjumlahkan event_count per versi, jadi dua bump terpisah memecahkannya
       # dua kali (docs/handoff/PARALEL_M16_DUA_AKUN.md F-4).
-      - name: Verify migration seed counts (23 machines, 65 events, catalog registry consistent)
+            # M16 Akun A Fase 2 (20260830020000_m16_stage_seed.sql): +5 mesin
+      # tahapan (stage_creative, stage_kol, stage_live, stage_ai_opt_sku,
+      # stage_ai_opt_video), 23 → 28. Nol event katalog baru (sudah dibereskan
+      # Tahap F v12) ⇒ notif_events TETAP 65.
+      - name: Verify migration seed counts (28 machines, 65 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
-               if (select count(*) from sm_machines) <> 23 then raise exception 'expected 23 machines'; end if;
+               if (select count(*) from sm_machines) <> 28 then raise exception 'expected 28 machines'; end if;
                if (select count(*) from notif_events) <> 65 then raise exception 'expected 65 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
@@ -291,16 +295,24 @@ jobs:
       #       IDENTITY / kunci alami / versi integer ⇒ entity_prefix TETAP 35;
       #       nol mesin baru ⇒ sm_machines TETAP 23; nol event ⇒ notif_events TETAP 57.
       #
+      # M16 Akun A Fase 2 (20260830010000_m16_stage_schema.sql): +4 tabel
+      # (stage_pipeline, stage_definition, brief_stage_sla, brief_review),
+      # 123 → 127. Menyimpang dari anotasi "F saja" di
+      # docs/handoff/PARALEL_M16_DUA_AKUN.md §4 — dicatat sebagai deviasi sadar
+      # di HANDOFF_M16_AKUN_A.md §4 (instruksi tugas menuntut db-rebuild.sh
+      # dibuktikan hijau dengan DB nyata). Akun B / langkah penggabungan
+      # menaikkan lagi di atas 127 untuk delta mereka sendiri.
+      #
       # ⚠️ INI GATE KEDUA UNTUK ANGKA YANG SAMA — `scripts/db-rebuild.sh` punya
       # `check "tabel public"` sendiri. Naikkan KEDUANYA dalam satu commit;
       # menaikkan salah satu saja membuat lokal hijau sementara CI merah (persis
       # yang terjadi pada PR #170).
-      - name: Verify table count (expect 123)
+      - name: Verify table count (expect 127)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 123
+          test "$n" -eq 127
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this

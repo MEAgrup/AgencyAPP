@@ -44,11 +44,23 @@ export const ROLE_CREATIVE = 'Creative';
 export const ROLE_ADS = 'Ads';
 export const ROLE_KOL = 'KOL';
 export const ROLE_AM = 'AM';
+// M16/M17 (LT-33) — two brand-new role types, registered with WEIGHT 0 (Rule 6
+// redistributes; DECISIONS.md 2026-08-28 "kedua divisi baru = 0 sampai COO
+// menetapkan bobot"). Same lane as `kecepatan_review_am` (LT-32): the
+// components below are computed for real from day one, but nobody's score
+// moves until `perf_kpi_weights` gets a non-zero row for these role_types.
+export const ROLE_AI_OPT = 'AI Optimizer';
+export const ROLE_STORE_OPS = 'Store Operation';
 
 export const CREATIVE_DIVISION = 'Creative';
 export const ADS_DIVISION = 'Ads';
 export const KOL_DIVISION = 'KOL';
 export const ACCOUNT_DIVISION = 'Account';
+// M16/M17 (LT-33) — division labels match `division_registry.nama` exactly
+// (packages/core/src/division.ts DIVISIONS) — role type and division are 1:1
+// for these two, same as Creative/Ads/KOL.
+export const AI_OPT_DIVISION = 'AI Optimizer';
+export const STORE_OPS_DIVISION = 'Store Operation';
 
 // ---------------------------------------------------------------------------
 // Component keys (§2 Rule 2). Stable string keys — persisted in perf_kpi_weights,
@@ -82,6 +94,14 @@ export const COMP_RECAP_DISCIPLINE = 'recap_discipline';
 export const COMP_NOTE_COMPLIANCE = 'note_compliance';
 /** Diagnostic (reported, NEVER weighted — §2 Rule 2 KOL row). */
 export const COMP_SOURCING_TURNAROUND = 'sourcing_turnaround';
+/**
+ * M16 §6.4 (LT-32). AM Kecepatan Review: the OA-1 speed transform of the AM
+ * portfolio's mean `waktuAmBelumBukaHours` ([Submitted]→[In Review], PURE AM
+ * latency — task.ts) against a configurable target (Director, perf_period_targets).
+ * Registered at weight 0 (DECISIONS.md 2026-08-28) — Rule 6 redistributes, so no
+ * AM's score moves until the weight is actually set.
+ */
+export const COMP_KECEPATAN_REVIEW_AM = 'kecepatan_review_am';
 
 /**
  * modifierComponent maps a role type to the Module 13 Health-Score sub-component
@@ -141,7 +161,7 @@ export class NotFoundError extends Error {
 
 /** divisionOfRole maps a role type back to the CDPS division whose lead/SPV may see that staff's scores. */
 function divisionOfRole(roleType: string): string {
-  return roleType === ROLE_AM ? ACCOUNT_DIVISION : roleType; // Creative/Ads/KOL are 1:1
+  return roleType === ROLE_AM ? ACCOUNT_DIVISION : roleType; // Creative/Ads/KOL/AI Optimizer/Store Operation are 1:1
 }
 
 /** canView reports whether actor may see a snapshot for staffID in roleType (Rule 7). */
@@ -441,7 +461,7 @@ const DEFAULT_TARGET_DATE = '0001-01-01';
 const DEFAULT_TARGET_STAFF = '*';
 
 /** The closed set a config write may target. */
-const validRoleTypes = new Set([ROLE_CREATIVE, ROLE_ADS, ROLE_KOL, ROLE_AM]);
+const validRoleTypes = new Set([ROLE_CREATIVE, ROLE_ADS, ROLE_KOL, ROLE_AM, ROLE_AI_OPT, ROLE_STORE_OPS]);
 
 /** One (role_type, component) weight row. */
 export interface KPIWeight {
@@ -833,6 +853,12 @@ async function gatherProfile(
     case ROLE_AM:
       cands = await amCandidates(q, staffID, per, pt);
       break;
+    case ROLE_AI_OPT:
+      cands = await aiOptCandidates(q, staffID, per, pt);
+      break;
+    case ROLE_STORE_OPS:
+      cands = await storeOpsCandidates(q, staffID, per, pt);
+      break;
     default:
       return { cands: [], anyPlaceholder: false };
   }
@@ -872,6 +898,45 @@ async function normalized(
   return cand({ name: comp, included: true, raw: (actual / target) * 100 });
 }
 
+/**
+ * briefTaskMetricsApprovedInPeriod folds every `assigned_division`+`assigned_pic`
+ * Brief-as-task the staff owns, period-approved, into the shared quantity/speed/
+ * revision aggregates. Factored out of `adsCandidates` (M16/LT-33) so AI
+ * Optimizer and Store Operation — new divisions whose Briefs run through the
+ * SAME `brief_task` engine, no Asset layer — score off the identical
+ * definition rather than a second copy of this loop. Speed uses
+ * `speedScoreKerjaPct` (§6.2/LT-31: kerja basis, not the old turnaround basis).
+ */
+async function briefTaskMetricsApprovedInPeriod(
+  q: Queryable,
+  division: string,
+  staffID: string,
+  per: Period,
+): Promise<{ approvedInPeriod: number; slaJudged: number; speedSum: number; revisionSum: number }> {
+  const briefs = await q<{ id: string; sla_target_hours: string | null }[]>`
+    select id, sla_target_hours from briefs where assigned_pic = ${staffID} and assigned_division = ${division}`;
+  const briefLog = await loadTransitions(q, 'brief', briefs.map((r) => r.id));
+
+  let approvedInPeriod = 0;
+  let slaJudged = 0;
+  let speedSum = 0;
+  let revisionSum = 0;
+  for (const br of briefs) {
+    const sla = br.sla_target_hours === null ? null : Number(br.sla_target_hours);
+    const m = computeMetrics(transitionsOf(briefLog, br.id), sla);
+    if (m.approvedPeriodWib !== per.approvedTag) {
+      continue;
+    }
+    approvedInPeriod++;
+    revisionSum += m.revisionCount;
+    if (m.speedScoreKerjaPct !== null) {
+      slaJudged++;
+      speedSum += m.speedScoreKerjaPct;
+    }
+  }
+  return { approvedInPeriod, slaJudged, speedSum, revisionSum };
+}
+
 // ---- Creative (staff = assets.assigned_pic) ----
 
 async function creativeCandidates(q: Queryable, staffID: string, per: Period, pt: PlaceholderTracker): Promise<Candidate[]> {
@@ -897,9 +962,12 @@ async function creativeCandidates(q: Queryable, staffID: string, per: Period, pt
     if (ar.attributed_gmv !== null) {
       gmvSum += Number(money.parse(ar.attributed_gmv)) / 100;
     }
-    if (m.speedScorePct !== null) {
+    // M16 §6.2/LT-31 — Speed Score component reads the kerja basis (turnaround
+    // minus AM wait) from now on; `speedScorePct` (old basis) stays untouched
+    // for the FE side-by-side display (PRD §6.3).
+    if (m.speedScoreKerjaPct !== null) {
       slaJudged++;
-      speedSum += m.speedScorePct;
+      speedSum += m.speedScoreKerjaPct;
     }
   }
 
@@ -918,23 +986,8 @@ async function creativeCandidates(q: Queryable, staffID: string, per: Period, pt
 // ---- Ads (staff = setup Brief.assigned_pic; optimizations by actor) ----
 
 async function adsCandidates(q: Queryable, staffID: string, per: Period, pt: PlaceholderTracker): Promise<Candidate[]> {
-  const briefs = await q<{ id: string; sla_target_hours: string | null }[]>`
-    select id, sla_target_hours from briefs where assigned_pic = ${staffID} and assigned_division = ${ADS_BRIEF_DIVISION}`;
-
-  // P-1: one batched transition read for the whole brief set (was one per brief).
-  const briefLog = await loadTransitions(q, 'brief', briefs.map((r) => r.id));
-
-  let slaJudged = 0;
-  let speedSum = 0;
-  for (const br of briefs) {
-    const sla = br.sla_target_hours === null ? null : Number(br.sla_target_hours);
-    const m = computeMetrics(transitionsOf(briefLog, br.id), sla);
-    if (m.approvedPeriodWib !== per.approvedTag || m.speedScorePct === null) {
-      continue;
-    }
-    slaJudged++;
-    speedSum += m.speedScorePct;
-  }
+  const bt = await briefTaskMetricsApprovedInPeriod(q, ADS_BRIEF_DIVISION, staffID, per);
+  const { slaJudged, speedSum } = bt;
 
   const camp = await adsCampaignMetrics(q, staffID, per);
 
@@ -960,6 +1013,44 @@ async function adsCandidates(q: Queryable, staffID: string, per: Period, pt: Pla
   );
   cands.push(await normalized(q, ROLE_ADS, staffID, COMP_OPTIMIZATION_ACTIVITY, per, optCount, true, '', pt));
   cands.push(await divisionNoteCompliance(q, ADS_DIVISION, per));
+  return cands;
+}
+
+// ---- AI Optimizer (M17) / Store Operation (M16) — new divisions, LT-33 ----
+// Both weight-0 today (DECISIONS.md 2026-08-28); registered with the REAL
+// profile now (not a placeholder) so the numbers are already correct the day
+// Director sets a non-zero weight — the same lane `kecepatan_review_am` uses.
+
+async function aiOptCandidates(q: Queryable, staffID: string, per: Period, pt: PlaceholderTracker): Promise<Candidate[]> {
+  return briefDivisionCandidates(q, ROLE_AI_OPT, AI_OPT_DIVISION, staffID, per, pt);
+}
+
+async function storeOpsCandidates(q: Queryable, staffID: string, per: Period, pt: PlaceholderTracker): Promise<Candidate[]> {
+  return briefDivisionCandidates(q, ROLE_STORE_OPS, STORE_OPS_DIVISION, staffID, per, pt);
+}
+
+/**
+ * briefDivisionCandidates is the shared quantity+speed+revision profile for a
+ * plain Brief-as-task division with no Asset layer and no division-specific
+ * extras (ROAS, campaigns, creator bookings) — AI Optimizer and Store
+ * Operation. Neither has WRR division touches yet (Fase 4/LT-55, Akun B), so
+ * `divisionNoteCompliance` legitimately excludes + redistributes for both
+ * today — that is Rule 6 working as designed, not a bug to work around here.
+ */
+async function briefDivisionCandidates(
+  q: Queryable,
+  roleType: string,
+  division: string,
+  staffID: string,
+  per: Period,
+  pt: PlaceholderTracker,
+): Promise<Candidate[]> {
+  const bt = await briefTaskMetricsApprovedInPeriod(q, division, staffID, per);
+  const cands: Candidate[] = [];
+  cands.push(speedCandidate(bt.speedSum, bt.slaJudged));
+  cands.push(await normalized(q, roleType, staffID, COMP_OUTPUT_QUANTITY, per, bt.approvedInPeriod, true, '', pt));
+  cands.push(revisionCandidate(bt.revisionSum, bt.approvedInPeriod));
+  cands.push(await divisionNoteCompliance(q, division, per));
   return cands;
 }
 
@@ -1167,9 +1258,12 @@ async function amCandidates(q: Queryable, staffID: string, per: Period, pt: Plac
   const res = await amResolutionHours(q, staffID, per);
   cands.push(await complaintResolutionCandidate(q, staffID, res.avgHours, res.hasRes, per, pt));
 
-  // Revision Escalation Rate (inverse): fraction of the portfolio's period-approved
-  // Tasks that were revision-flagged (≥3 revisions, M12 Rule 15).
-  cands.push(await amRevisionEscalation(q, clientIDs, per));
+  // Revision Escalation Rate (inverse) + M16 §6.4/LT-32 Kecepatan Review AM
+  // share ONE portfolio gather (`amPortfolioApprovedInPeriod`) — same Tasks,
+  // same period-approved filter, two different folds over it.
+  const portfolio = await amPortfolioApprovedInPeriod(q, clientIDs, per);
+  cands.push(amRevisionEscalation(portfolio));
+  cands.push(await amReviewSpeedCandidate(q, staffID, portfolio, per, pt));
 
   // Weekly-Recap Discipline (D-14 / M14 §9): % of the AM's active-client weekly
   // recaps in the period the AM closed on time and never force-closed.
@@ -1289,54 +1383,107 @@ async function amResolutionHours(q: Queryable, staffID: string, per: Period): Pr
   return { avgHours: sum / n, hasRes: true };
 }
 
-/**
- * amRevisionEscalation = 100 − flaggedFraction × 100 over the AM portfolio's Tasks
- * (Creative Assets + Ads Briefs) approved in the period. Flagged = revision_count
- * ≥ 3 (M12 Rule 15), recomputed from the log.
- */
-async function amRevisionEscalation(q: Queryable, clientIDs: string[], per: Period): Promise<Candidate> {
-  let approved = 0;
-  let flagged = 0;
-  if (clientIDs.length > 0) {
-    // P-1: the whole portfolio in four round-trips (assets, briefs, and one batched
-    // transition read each) instead of O(clients × tasks). Client ids are primary
-    // keys of the AM's own portfolio, so `any(...)` covers exactly the same rows
-    // the per-client loop did — no cross-scope widening.
-    const assets = await q<{ id: string; sla_target_hours: string | null }[]>`
-      select a.id, a.sla_target_hours
-        from assets a join briefs b on b.id = a.brief_id
-        join services sv on sv.id = b.service_id
-       where sv.client_id = any(${clientIDs})`;
-    const briefs = await q<{ id: string; sla_target_hours: string | null }[]>`
-      select b.id, b.sla_target_hours
-        from briefs b join services sv on sv.id = b.service_id
-       where sv.client_id = any(${clientIDs}) and b.assigned_division = ${ADS_BRIEF_DIVISION}`;
-    const assetLog = await loadTransitions(q, 'asset', assets.map((r) => r.id));
-    const briefLog = await loadTransitions(q, 'brief', briefs.map((r) => r.id));
+/** One AM-portfolio Task's fold, period-approved-filtered — shared by Revision Escalation and Kecepatan Review AM (LT-32). */
+interface PortfolioTaskMetric {
+  revisionFlagged: boolean;
+  /** null when the Task was approved with no recorded AM wait (should not happen once M16 lands, but computeMetrics gates it the same way as turnaroundHours). */
+  waktuAmBelumBukaHours: number | null;
+}
 
-    const tasks: { log: Map<string, Transition[]>; id: string; sla: string | null }[] = [
-      ...assets.map((t) => ({ log: assetLog, id: t.id, sla: t.sla_target_hours })),
-      ...briefs.map((t) => ({ log: briefLog, id: t.id, sla: t.sla_target_hours })),
-    ];
-    for (const t of tasks) {
-      const sla = t.sla === null ? null : Number(t.sla);
-      const m = computeMetrics(transitionsOf(t.log, t.id), sla);
-      if (m.approvedPeriodWib !== per.approvedTag) {
-        continue;
-      }
-      approved++;
-      if (m.revisionFlagged) {
-        flagged++;
-      }
-    }
+/**
+ * amPortfolioApprovedInPeriod gathers the AM portfolio's Tasks (Creative Assets +
+ * Ads Briefs — SAME scope `amRevisionEscalation` has always used; M16/LT-33's new
+ * divisions are NOT added here, a deliberate scope decision left open in
+ * HANDOFF_M16_AKUN_A.md since both are weight-0 today and nobody's score moves
+ * either way), period-approved-filtered, ONE round-trip set (P-1) shared by both
+ * `amRevisionEscalation` and `amReviewSpeedCandidate` — same Tasks, two folds.
+ */
+async function amPortfolioApprovedInPeriod(q: Queryable, clientIDs: string[], per: Period): Promise<PortfolioTaskMetric[]> {
+  if (clientIDs.length === 0) {
+    return [];
   }
-  if (approved === 0) {
+  // P-1: the whole portfolio in four round-trips (assets, briefs, and one batched
+  // transition read each) instead of O(clients × tasks). Client ids are primary
+  // keys of the AM's own portfolio, so `any(...)` covers exactly the same rows
+  // the per-client loop did — no cross-scope widening.
+  const assets = await q<{ id: string; sla_target_hours: string | null }[]>`
+    select a.id, a.sla_target_hours
+      from assets a join briefs b on b.id = a.brief_id
+      join services sv on sv.id = b.service_id
+     where sv.client_id = any(${clientIDs})`;
+  const briefs = await q<{ id: string; sla_target_hours: string | null }[]>`
+    select b.id, b.sla_target_hours
+      from briefs b join services sv on sv.id = b.service_id
+     where sv.client_id = any(${clientIDs}) and b.assigned_division = ${ADS_BRIEF_DIVISION}`;
+  const assetLog = await loadTransitions(q, 'asset', assets.map((r) => r.id));
+  const briefLog = await loadTransitions(q, 'brief', briefs.map((r) => r.id));
+
+  const tasks: { log: Map<string, Transition[]>; id: string; sla: string | null }[] = [
+    ...assets.map((t) => ({ log: assetLog, id: t.id, sla: t.sla_target_hours })),
+    ...briefs.map((t) => ({ log: briefLog, id: t.id, sla: t.sla_target_hours })),
+  ];
+  const out: PortfolioTaskMetric[] = [];
+  for (const t of tasks) {
+    const sla = t.sla === null ? null : Number(t.sla);
+    const m = computeMetrics(transitionsOf(t.log, t.id), sla);
+    if (m.approvedPeriodWib !== per.approvedTag) {
+      continue;
+    }
+    out.push({ revisionFlagged: m.revisionFlagged, waktuAmBelumBukaHours: m.waktuAmBelumBukaHours });
+  }
+  return out;
+}
+
+/**
+ * amRevisionEscalation = 100 − flaggedFraction × 100 over the AM portfolio's
+ * period-approved Tasks. Flagged = revision_count ≥ 3 (M12 Rule 15), recomputed
+ * from the log (via `amPortfolioApprovedInPeriod`).
+ */
+function amRevisionEscalation(portfolio: PortfolioTaskMetric[]): Candidate {
+  if (portfolio.length === 0) {
     return cand({
       name: COMP_REVISION_ESCALATION_RATE, included: false,
       reason: 'tidak ada Task portofolio yang selesai [Approved] pada periode — dikecualikan + bobot didistribusi ulang',
     });
   }
-  return cand({ name: COMP_REVISION_ESCALATION_RATE, included: true, raw: 100 - (flagged / approved) * 100 });
+  const flagged = portfolio.filter((p) => p.revisionFlagged).length;
+  return cand({ name: COMP_REVISION_ESCALATION_RATE, included: true, raw: 100 - (flagged / portfolio.length) * 100 });
+}
+
+/**
+ * amReviewSpeedCandidate (M16 §6.4/LT-32) — the OA-1 speed transform of the mean
+ * `waktuAmBelumBukaHours` (PURE AM latency, [Submitted]→[In Review]) over the AM
+ * portfolio's period-approved Tasks, against a configurable target
+ * (`perf_period_targets`, same `targetFor` pattern as `complaintResolutionCandidate`).
+ * Registered at weight 0 (DECISIONS.md 2026-08-28) — this candidate is REAL from
+ * day one; only the weight is zero, so no AM's score moves until Director sets it.
+ */
+async function amReviewSpeedCandidate(
+  q: Queryable,
+  staffID: string,
+  portfolio: PortfolioTaskMetric[],
+  per: Period,
+  pt: PlaceholderTracker,
+): Promise<Candidate> {
+  const withAm = portfolio.filter((p) => p.waktuAmBelumBukaHours !== null);
+  if (withAm.length === 0) {
+    return cand({
+      name: COMP_KECEPATAN_REVIEW_AM, included: false,
+      reason: 'tidak ada Task portofolio yang selesai [Approved] pada periode — dikecualikan + bobot didistribusi ulang',
+    });
+  }
+  const avgHours = withAm.reduce((sum, p) => sum + (p.waktuAmBelumBukaHours ?? 0), 0) / withAm.length;
+  const { target, placeholder, ok } = await targetFor(q, ROLE_AM, staffID, COMP_KECEPATAN_REVIEW_AM, per.startDate, pt);
+  if (!ok || target === 0) {
+    return cand({
+      name: COMP_KECEPATAN_REVIEW_AM, included: false,
+      reason: 'target kecepatan review AM belum dikonfigurasi (O9) — dikecualikan + bobot didistribusi ulang',
+    });
+  }
+  if (placeholder) {
+    pt.used = true;
+  }
+  return cand({ name: COMP_KECEPATAN_REVIEW_AM, included: true, raw: transformSpeed((avgHours / target) * 100) });
 }
 
 // ---- shared candidate builders ----
@@ -1728,6 +1875,10 @@ function roleTypeOfDivision(division: string): string | null {
       return ROLE_KOL;
     case ACCOUNT_DIVISION:
       return ROLE_AM;
+    case AI_OPT_DIVISION:
+      return ROLE_AI_OPT;
+    case STORE_OPS_DIVISION:
+      return ROLE_STORE_OPS;
     default:
       return null;
   }
