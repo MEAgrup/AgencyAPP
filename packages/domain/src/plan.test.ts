@@ -35,7 +35,6 @@ import {
   MSG_PLAN_ADJUST_REJECT_NOTES_REQUIRED,
   MSG_PLAN_ADJUST_STATUS,
   MSG_PLAN_APPROVE_FORBIDDEN,
-  MSG_PLAN_CATATAN_PEMBUKA_REQUIRED,
   MSG_PLAN_FORBIDDEN,
   MSG_PLAN_NOT_FOUND,
   MSG_PLAN_RETURN_NOTES_REQUIRED,
@@ -530,12 +529,16 @@ describeDb('machine #16 (plan)', () => {
     const edges = await sql<{ from_state: string; to_state: string; require_lead: boolean }[]>`
       select from_state, to_state, require_lead from sm_edges where machine = 'plan'
        order by from_state, to_state`;
-    // The two period-1 SPV transitions are lead-gated; the auto ones are not.
+    // The two period-1 SPV transitions are lead-gated (vestigial since the
+    // 2026-08-28 deviation — see submitPlanPeriode's docstring — but still
+    // valid edges); the auto ones, and the 2026-08-28 direct bypass, are not.
     const approve = edges.find((e) => e.from_state === 'Diajukan' && e.to_state === 'Aktif');
     expect(approve?.require_lead).toBe(true);
     const auto = edges.find((e) => e.from_state === 'Terjadwal' && e.to_state === 'Aktif');
     expect(auto?.require_lead).toBe(false);
-    expect(edges).toHaveLength(9);
+    const bypass = edges.find((e) => e.from_state === 'Draft' && e.to_state === 'Aktif');
+    expect(bypass?.require_lead).toBe(false);
+    expect(edges).toHaveLength(10);
   });
 
   it('actually moves a period through sm_transition (Terjadwal → Draft), and blocks a bad edge', async () => {
@@ -903,29 +906,24 @@ async function statusOf(id: string): Promise<string> {
   return r[0].status;
 }
 
-describeDb('submitPlanPeriode (Draft → Diajukan)', () => {
-  it('lets the owning AM submit once the opening note is filled (PA-7)', async () => {
+describeDb('submitPlanPeriode (Draft → Aktif, direct — SPV approval bypassed 2026-08-28)', () => {
+  it('lets the owning AM activate period 1 directly, opening note optional (PA-7)', async () => {
     const f = await seedContractStrategi();
     const id = await seedPeriod(f, { status: 'Draft' });
-    // PA-7 is mandatory at submit — an empty opening is rejected first.
-    await expect(submitPlanPeriode(sql, am(), id)).rejects.toThrow(
-      MSG_PLAN_CATATAN_PEMBUKA_REQUIRED,
-    );
-    await expect(submitPlanPeriode(sql, am(), id)).rejects.toBeInstanceOf(ValidationError);
-    await sql`update plan set catatan_pembuka = 'Fokus akuisisi bulan 1' where id = ${id}`;
+    // PA-7 no longer gates submit (DECISIONS.md 2026-08-28) — an empty
+    // opening note no longer blocks the move.
     const plan = await submitPlanPeriode(sql, am(), id);
-    expect(plan.status).toBe('Diajukan');
+    expect(plan.status).toBe('Aktif');
   });
 
-  it('refuses an unrelated AM, and lets the machine confine it to period 1', async () => {
+  it('refuses an unrelated AM, and confines the direct move to a Draft period', async () => {
     const f = await seedContractStrategi();
     const draft = await seedPeriod(f, { periodeNo: 1, status: 'Draft' });
-    await sql`update plan set catatan_pembuka = 'x' where id = ${draft}`;
     await expect(submitPlanPeriode(sql, otherAm(), draft)).rejects.toThrow(MSG_PLAN_FORBIDDEN);
-    // A period 2..n never sits in Draft: with the note set, the move is still
-    // blocked because Terjadwal has no `→ Diajukan` edge (not a silent no-op).
+    // A period 2..n never sits in Draft. `Terjadwal → Aktif` IS a valid edge
+    // (the auto-activation job uses it), so the machine alone would let this
+    // through — the explicit status guard in submitPlanPeriode is what refuses it.
     const sched = await seedPeriod(f, { periodeNo: 2, status: 'Terjadwal' });
-    await sql`update plan set catatan_pembuka = 'x' where id = ${sched}`;
     await expect(submitPlanPeriode(sql, am(), sched)).rejects.toBeInstanceOf(ConflictError);
     expect(await statusOf(sched)).toBe('Terjadwal');
   });

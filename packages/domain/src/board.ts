@@ -783,38 +783,41 @@ export async function myTasks(sql: Queryable, actor: Actor, forEmployee = ''): P
   const today = tz.dateString(new Date());
   const cards: Card[] = [];
 
-  // Brief-as-task units the actor PICs (Ads and any single-unit Brief).
-  const briefRows = await sql<{ id: string; division: string; status: string; due_date: string | null; client_id: string }[]>`
-    select b.id, b.assigned_division as division, b.status, to_char(b.due_date,'YYYY-MM-DD') as due_date, sv.client_id
-      from briefs b join services sv on sv.id = b.service_id
-     where b.assigned_pic = ${target} order by b.id asc`;
+  // P-2 (kecepatan loading): empat sumber unit kerja, satu `target` yang sama,
+  // nol ketergantungan data di antaranya. Dikirim bersama; urutan kartu tetap
+  // ditentukan oleh urutan perulangan di bawah, bukan oleh urutan kedatangan.
+  const [briefRows, assetRows, bkgRows, lssRows] = await Promise.all([
+    // Brief-as-task units the actor PICs (Ads and any single-unit Brief).
+    sql<{ id: string; division: string; status: string; due_date: string | null; client_id: string }[]>`
+      select b.id, b.assigned_division as division, b.status, to_char(b.due_date,'YYYY-MM-DD') as due_date, sv.client_id
+        from briefs b join services sv on sv.id = b.service_id
+       where b.assigned_pic = ${target} order by b.id asc`,
+    // Creative Assets the actor PICs.
+    sql<{ id: string; division: string; status: string; due_date: string | null; client_id: string; brief_id: string }[]>`
+      select a.id, b.assigned_division as division, a.status, to_char(b.due_date,'YYYY-MM-DD') as due_date, sv.client_id, a.brief_id
+        from assets a join briefs b on b.id = a.brief_id join services sv on sv.id = b.service_id
+       where a.assigned_pic = ${target} order by a.id asc`,
+    // KOL Bookings the actor coordinates.
+    sql<{ id: string; division: string; status: string; due_date: string | null; client_id: string; brief_id: string }[]>`
+      select k.id, b.assigned_division as division, k.status, to_char(b.due_date,'YYYY-MM-DD') as due_date, sv.client_id, k.brief_id
+        from creator_bookings k join briefs b on b.id = k.brief_id join services sv on sv.id = b.service_id
+       where k.assigned_coordinator = ${target} order by k.id asc`,
+    // Live Stream Sessions of Briefs the actor PICs (LS has no per-session PIC; the AM on the LS Brief owns them).
+    sql<{ id: string; division: string; status: string; due_date: string | null; client_id: string; brief_id: string }[]>`
+      select l.id, b.assigned_division as division, l.status, to_char(b.due_date,'YYYY-MM-DD') as due_date, sv.client_id, l.brief_id
+        from live_stream_sessions l join briefs b on b.id = l.brief_id join services sv on sv.id = b.service_id
+       where b.assigned_pic = ${target} order by l.id asc`,
+  ]);
+
   for (const r of briefRows) {
     cards.push(makeUnitCard(r.id, ENTITY_BRIEF, r.id, r.division, r.client_id, r.status, briefTaskUniversal(r.status), r.due_date, today));
   }
-
-  // Creative Assets the actor PICs.
-  const assetRows = await sql<{ id: string; division: string; status: string; due_date: string | null; client_id: string; brief_id: string }[]>`
-    select a.id, b.assigned_division as division, a.status, to_char(b.due_date,'YYYY-MM-DD') as due_date, sv.client_id, a.brief_id
-      from assets a join briefs b on b.id = a.brief_id join services sv on sv.id = b.service_id
-     where a.assigned_pic = ${target} order by a.id asc`;
   for (const r of assetRows) {
     cards.push(makeUnitCard(r.id, 'asset', r.brief_id, r.division, r.client_id, r.status, briefTaskUniversal(r.status), r.due_date, today));
   }
-
-  // KOL Bookings the actor coordinates.
-  const bkgRows = await sql<{ id: string; division: string; status: string; due_date: string | null; client_id: string; brief_id: string }[]>`
-    select k.id, b.assigned_division as division, k.status, to_char(b.due_date,'YYYY-MM-DD') as due_date, sv.client_id, k.brief_id
-      from creator_bookings k join briefs b on b.id = k.brief_id join services sv on sv.id = b.service_id
-     where k.assigned_coordinator = ${target} order by k.id asc`;
   for (const r of bkgRows) {
     cards.push(makeUnitCard(r.id, 'booking', r.brief_id, r.division, r.client_id, r.status, kolUniversal([r.status]), r.due_date, today));
   }
-
-  // Live Stream Sessions of Briefs the actor PICs (LS has no per-session PIC; the AM on the LS Brief owns them).
-  const lssRows = await sql<{ id: string; division: string; status: string; due_date: string | null; client_id: string; brief_id: string }[]>`
-    select l.id, b.assigned_division as division, l.status, to_char(b.due_date,'YYYY-MM-DD') as due_date, sv.client_id, l.brief_id
-      from live_stream_sessions l join briefs b on b.id = l.brief_id join services sv on sv.id = b.service_id
-     where b.assigned_pic = ${target} order by l.id asc`;
   for (const r of lssRows) {
     cards.push(makeUnitCard(r.id, 'session', r.brief_id, r.division, r.client_id, r.status, lsUniversal(r.status), r.due_date, today));
   }

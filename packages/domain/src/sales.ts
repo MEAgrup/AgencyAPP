@@ -1765,14 +1765,59 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
     ownerNama: a.owner_nama, status: a.status, claimedAt: a.claimed_at, createdAt: a.created_at,
   };
 
-  const leadRows = await sql<{
-    id: string; lead_name: string; phone_number: string; email: string | null; source: string;
-    record_status: string; origin_campaign_id: string | null;
-    last_touch_campaign_id: string | null; winning_attempt_id: string | null;
-  }[]>`
-    select id, lead_name, phone_number, email, source, record_status,
-           origin_campaign_id, last_touch_campaign_id, winning_attempt_id
-    from leads where id = ${attempt.leadId}`;
+  // P-2 (kecepatan loading) — satu batch untuk seluruh panel attempt.
+  //
+  // Semuanya di-key oleh `id` attempt (atau `attempt.leadId` yang baru saja
+  // dibaca), dan tak satu pun memakai baris hasil query lain: form Qualified,
+  // baris layanannya, riwayat negosiasi, dan alasan Not Qualified adalah empat
+  // pertanyaan terpisah atas kunci yang sama. Berurutan, panel ini membayar
+  // lima round-trip sebelum baris proposal pertama pun dibaca.
+  //
+  // `qualified_form_services` ikut dibaca tanpa syarat: kalau tidak ada form
+  // Qualified, hasilnya kosong dan diabaikan — satu query yang mungkin mubazir
+  // lebih murah daripada satu round-trip ekstra yang pasti.
+  const [leadRows, qfRows, svcRows, propRows, nqRows, allowed] = await Promise.all([
+    sql<{
+      id: string; lead_name: string; phone_number: string; email: string | null; source: string;
+      record_status: string; origin_campaign_id: string | null;
+      last_touch_campaign_id: string | null; winning_attempt_id: string | null;
+    }[]>`
+      select id, lead_name, phone_number, email, source, record_status,
+             origin_campaign_id, last_touch_campaign_id, winning_attempt_id
+      from leads where id = ${attempt.leadId}`,
+
+    sql<QualifiedFormRow[]>`
+      select nama_pic, toko, kota, link_toko, kategori, platform, store_link,
+             gmv_baseline, target_gmv, marketing_budget
+      from qualified_forms where attempt_id = ${id}`,
+
+    sql<{
+      master_service_id: string; master_version_no: number; name: string; quantity: string;
+      unit: string | null; pricing_mode: string; standard_price: string;
+      input_amount: string | null; subtotal: string; commission_rule: string;
+    }[]>`
+      select master_service_id, master_version_no, name, quantity, unit, pricing_mode,
+             standard_price, input_amount, subtotal, commission_rule
+      from qualified_form_services where attempt_id = ${id} order by id`,
+
+    sql<{
+      id: string; version_no: number; proposed_by: string; proposed_by_nama: string;
+      decision_note: string | null; created_at: Date;
+    }[]>`
+      select np.id, np.version_no, np.proposed_by,
+             coalesce(e.nama, np.proposed_by) as proposed_by_nama,
+             np.decision_note, np.created_at
+      from negotiation_proposals np
+      left join employees e on e.employee_id = np.proposed_by
+      where np.attempt_id = ${id}
+      order by np.version_no asc`,
+
+    sql<{ reason: string }[]>`
+      select reason from prospect_attempt_nq_reasons where attempt_id = ${id} order by id`,
+
+    allowedTransitions(sql, ATTEMPT_MACHINE, attempt.status),
+  ]);
+
   if (leadRows.length === 0) {
     // Go returns the raw sql.ErrNoRows here; the FK makes this unreachable, but a
     // 404 beats leaking a driver error if the row is ever hidden by RLS.
@@ -1785,20 +1830,8 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
     lastTouchCampaignId: l.last_touch_campaign_id, winningAttemptId: l.winning_attempt_id,
   };
 
-  const qfRows = await sql<QualifiedFormRow[]>`
-    select nama_pic, toko, kota, link_toko, kategori, platform, store_link,
-           gmv_baseline, target_gmv, marketing_budget
-    from qualified_forms where attempt_id = ${id}`;
   let qualifiedForm: AttemptQualified | null = null;
   if (qfRows.length > 0) {
-    const svcRows = await sql<{
-      master_service_id: string; master_version_no: number; name: string; quantity: string;
-      unit: string | null; pricing_mode: string; standard_price: string;
-      input_amount: string | null; subtotal: string; commission_rule: string;
-    }[]>`
-      select master_service_id, master_version_no, name, quantity, unit, pricing_mode,
-             standard_price, input_amount, subtotal, commission_rule
-      from qualified_form_services where attempt_id = ${id} order by id`;
     qualifiedForm = {
       namaPic: qfRows[0].nama_pic, toko: qfRows[0].toko, kota: qfRows[0].kota,
       linkToko: qfRows[0].link_toko, kategori: qfRows[0].kategori, platform: qfRows[0].platform,
@@ -1813,51 +1846,52 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
     };
   }
 
-  const propRows = await sql<{
-    id: string; version_no: number; proposed_by: string; proposed_by_nama: string;
-    decision_note: string | null; created_at: Date;
-  }[]>`
-    select np.id, np.version_no, np.proposed_by,
-           coalesce(e.nama, np.proposed_by) as proposed_by_nama,
-           np.decision_note, np.created_at
-    from negotiation_proposals np
-    left join employees e on e.employee_id = np.proposed_by
-    where np.attempt_id = ${id}
-    order by np.version_no asc`;
-  const proposals: AttemptProposal[] = [];
-  for (const p of propRows) {
-    const lineRows = await sql<{
-      master_service_id: string; name: string; proposed_price: string;
-      commission_rule: string; payment_terms: string | null;
-    }[]>`
-      select npl.master_service_id, coalesce(qfs.name, latest.name, '') as name,
-             npl.proposed_price, npl.commission_rule, npl.payment_terms
-      from negotiation_proposal_lines npl
-      left join qualified_form_services qfs
-             on qfs.attempt_id = ${id} and qfs.master_service_id = npl.master_service_id
-      -- A service ADDED during negotiation / Edit Service has no Qualified
-      -- snapshot row, so its name comes from the MSL. Without this the
-      -- negotiation panel renders a priced line with a blank service name.
-      left join lateral (
-        select msv.name from master_service_versions msv
-        where msv.service_id = npl.master_service_id
-        order by msv.effective_from desc, msv.version_no desc
-        limit 1
-      ) latest on true
-      where npl.proposal_id = ${p.id}
-      order by npl.id`;
-    proposals.push({
-      id: p.id, versionNo: p.version_no, proposedBy: p.proposed_by,
-      proposedByNama: p.proposed_by_nama, decisionNote: p.decision_note, createdAt: p.created_at,
-      lines: lineRows.map((ln) => ({
-        masterServiceId: ln.master_service_id, name: ln.name, proposedPrice: ln.proposed_price,
-        commissionRule: ln.commission_rule, paymentTerms: ln.payment_terms,
-      })),
+  // P-2: the proposal LINES used to be read one query per proposal — an N+1
+  // whose cost grew with the length of the negotiation, which is precisely the
+  // attempt a salesperson opens most often. One `any($1)` read replaces it; the
+  // rows come back ordered by proposal and then by line id, so grouping them in
+  // JS reproduces the per-proposal ordering the loop produced.
+  const proposalIds = propRows.map((p) => p.id);
+  const lineRows =
+    proposalIds.length === 0
+      ? []
+      : await sql<{
+          proposal_id: string; master_service_id: string; name: string; proposed_price: string;
+          commission_rule: string; payment_terms: string | null;
+        }[]>`
+          select npl.proposal_id, npl.master_service_id,
+                 coalesce(qfs.name, latest.name, '') as name,
+                 npl.proposed_price, npl.commission_rule, npl.payment_terms
+          from negotiation_proposal_lines npl
+          left join qualified_form_services qfs
+                 on qfs.attempt_id = ${id} and qfs.master_service_id = npl.master_service_id
+          -- A service ADDED during negotiation / Edit Service has no Qualified
+          -- snapshot row, so its name comes from the MSL. Without this the
+          -- negotiation panel renders a priced line with a blank service name.
+          left join lateral (
+            select msv.name from master_service_versions msv
+            where msv.service_id = npl.master_service_id
+            order by msv.effective_from desc, msv.version_no desc
+            limit 1
+          ) latest on true
+          where npl.proposal_id = any(${proposalIds})
+          order by npl.proposal_id, npl.id`;
+
+  const linesByProposal = new Map<string, AttemptProposalLine[]>();
+  for (const ln of lineRows) {
+    const list = linesByProposal.get(ln.proposal_id) ?? [];
+    list.push({
+      masterServiceId: ln.master_service_id, name: ln.name, proposedPrice: ln.proposed_price,
+      commissionRule: ln.commission_rule, paymentTerms: ln.payment_terms,
     });
+    linesByProposal.set(ln.proposal_id, list);
   }
 
-  const nqRows = await sql<{ reason: string }[]>`
-    select reason from prospect_attempt_nq_reasons where attempt_id = ${id} order by id`;
+  const proposals: AttemptProposal[] = propRows.map((p) => ({
+    id: p.id, versionNo: p.version_no, proposedBy: p.proposed_by,
+    proposedByNama: p.proposed_by_nama, decisionNote: p.decision_note, createdAt: p.created_at,
+    lines: linesByProposal.get(p.id) ?? [],
+  }));
 
   return {
     attempt,
@@ -1865,7 +1899,7 @@ export async function getAttempt(sql: Queryable, id: string): Promise<AttemptDet
     qualifiedForm,
     proposals,
     nqReasons: nqRows.map((r) => r.reason),
-    allowedTransitions: await allowedTransitions(sql, ATTEMPT_MACHINE, attempt.status),
+    allowedTransitions: allowed,
   };
 }
 
@@ -1980,35 +2014,43 @@ export async function getClient(sql: Queryable, id: string): Promise<ClientDetai
   }
   const c = rows[0];
 
-  const platRows = await sql<
-    { id: string; platform: string; store_link: string | null; managed_since: Date | null; active: boolean }[]
-  >`
-    select id, platform, store_link, managed_since, active
-    from client_platforms where client_id = ${id} order by id`;
+  // P-2 (kecepatan loading) — platform, alokasi, layanan dan transaksi adalah
+  // empat pertanyaan atas `client_id` yang sama; tak satu pun membaca baris
+  // hasil query lain, jadi keempatnya berangkat bersama. Hanya `installments`
+  // yang tersisa berurutan di bawah, karena ia memang butuh id transaksi yang
+  // baru diketahui di sini.
+  const [platRows, allocRows, svcRows, trxRows] = await Promise.all([
+    sql<
+      { id: string; platform: string; store_link: string | null; managed_since: Date | null; active: boolean }[]
+    >`
+      select id, platform, store_link, managed_since, active
+      from client_platforms where client_id = ${id} order by id`,
 
-  const allocRows = await sql<
-    { salesperson_id: string; salesperson_nama: string; basis_points: number }[]
-  >`
-    select csa.salesperson_id, coalesce(e.nama, csa.salesperson_id) as salesperson_nama,
-           csa.basis_points
-    from client_sales_allocations csa
-    left join employees e on e.employee_id = csa.salesperson_id
-    where csa.client_id = ${id} order by csa.id`;
+    sql<
+      { salesperson_id: string; salesperson_nama: string; basis_points: number }[]
+    >`
+      select csa.salesperson_id, coalesce(e.nama, csa.salesperson_id) as salesperson_nama,
+             csa.basis_points
+      from client_sales_allocations csa
+      left join employees e on e.employee_id = csa.salesperson_id
+      where csa.client_id = ${id} order by csa.id`,
 
-  const svcRows = await sql<
-    { id: string; master_service_id: string; name: string; standard_price: string; commission_rule: string; status: string; requires_strategy_plan: boolean }[]
-  >`
-    select id, master_service_id, name, standard_price, commission_rule, status, requires_strategy_plan
-    from services where client_id = ${id} order by id`;
+    sql<
+      { id: string; master_service_id: string; name: string; standard_price: string; commission_rule: string; status: string; requires_strategy_plan: boolean }[]
+    >`
+      select id, master_service_id, name, standard_price, commission_rule, status, requires_strategy_plan
+      from services where client_id = ${id} order by id`,
 
-  const trxRows = await sql<
-    {
-      id: string; payment_intent_scheme: string; total_agreed_value: string; payment_status: string;
-      bermasalah: boolean; released_to_account_at: Date | null;
-    }[]
-  >`
-    select id, payment_intent_scheme, total_agreed_value, payment_status, bermasalah, released_to_account_at
-    from transactions where client_id = ${id} order by created_at desc, id desc limit 1`;
+    sql<
+      {
+        id: string; payment_intent_scheme: string; total_agreed_value: string; payment_status: string;
+        bermasalah: boolean; released_to_account_at: Date | null;
+      }[]
+    >`
+      select id, payment_intent_scheme, total_agreed_value, payment_status, bermasalah, released_to_account_at
+      from transactions where client_id = ${id} order by created_at desc, id desc limit 1`,
+  ]);
+
   let transaction: ClientTransaction | null = null;
   if (trxRows.length > 0) {
     const t = trxRows[0];

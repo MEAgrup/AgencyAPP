@@ -62,9 +62,17 @@ export const MSG_PLAN_APPROVE_FORBIDDEN =
 /** Rule 3 — returning period 1 requires a written note. */
 export const MSG_PLAN_RETURN_NOTES_REQUIRED =
   '[catatan wajib diisi saat mengembalikan periode Plan]';
-/** PA-7 — the opening note is mandatory before a period may be submitted. */
-export const MSG_PLAN_CATATAN_PEMBUKA_REQUIRED =
-  '[catatan pembuka wajib diisi sebelum periode Plan diajukan]';
+/**
+ * PA-7 is only ever editable on the Draft period 1, before it is submitted.
+ * PA-7 itself stopped gating submission on 2026-08-28 (docs/DECISIONS.md) —
+ * it is now an optional note, not a completeness requirement.
+ */
+export const MSG_PLAN_CATATAN_PEMBUKA_STATUS =
+  '[catatan pembuka hanya dapat diubah selama periode masih Draft]';
+/** Period 1 is the only period `submitPlanPeriode` may move — it is Draft-only. */
+export const MSG_PLAN_SUBMIT_STATUS = '[periode ini sudah tidak berstatus Draft]';
+/** approvePlanPeriode only ever acts on a period actually `Diajukan`. */
+export const MSG_PLAN_APPROVE_STATUS = '[periode ini belum diajukan]';
 
 // --- B-04: Rule 9 asymmetric target adjustment ---------------------------
 
@@ -466,23 +474,74 @@ export async function getPlanDetail(
 ): Promise<PlanDetail> {
   const plan = await getPlan(sql, actor, id);
 
-  const targets = await sql<
-    {
-      plan_id: string;
-      channel: string;
-      metric: string;
-      nilai_strategi: string | number;
-      nilai_dipakai: string | number;
-      arah: 'naik' | 'turun' | 'tetap';
-      persen_perubahan: string | number;
-      alasan: string | null;
-      bukti_file: string | null;
-      status_persetujuan: string | null;
-    }[]
-  >`select * from plan_target where plan_id = ${id} order by channel, metric`;
+  // P-2 (kecepatan loading) — dua fase, bukan enam round-trip berurutan.
+  //
+  // Fase 1 adalah semua yang hanya butuh `plan.id` / `plan` itu sendiri; tak
+  // satu pun membaca baris hasil query lain, jadi keenamnya dikirim bersama
+  // (postgres.js baru menembakkan query saat `.then` dipanggil — `Promise.all`
+  // menerbitkannya sekaligus). Fase 2 HANYA `plan_row_week`, dan ia tetap
+  // berurutan karena memang bergantung pada `rowIds` yang dipungut dari
+  // `plan_row` — satu-satunya ketergantungan data yang nyata di sini.
+  const [targets, rows, actuals, reviewRows, flags, defisitTerbawa] = await Promise.all([
+    sql<
+      {
+        plan_id: string;
+        channel: string;
+        metric: string;
+        nilai_strategi: string | number;
+        nilai_dipakai: string | number;
+        arah: 'naik' | 'turun' | 'tetap';
+        persen_perubahan: string | number;
+        alasan: string | null;
+        bukti_file: string | null;
+        status_persetujuan: string | null;
+      }[]
+    >`select * from plan_target where plan_id = ${id} order by channel, metric`,
 
-  const rows = await sql<Record<string, unknown>[]>`
-    select * from plan_row where plan_id = ${id} order by id`;
+    sql<Record<string, unknown>[]>`
+      select * from plan_row where plan_id = ${id} order by id`,
+
+    sql<
+      {
+        plan_id: string;
+        channel: string;
+        metric: string;
+        sumber: 'manual' | 'otomatis';
+        nilai: string | number;
+        file_bukti: string | null;
+        tanggal_ambil: string | Date | null;
+        sengketa: string | null;
+      }[]
+    >`select * from plan_actual where plan_id = ${id} order by channel, metric`,
+
+    sql<
+      {
+        plan_id: string;
+        yang_jalan: string | null;
+        yang_tidak_jalan: string | null;
+        diagnosa_gap: 'strategi_salah' | 'eksekusi_tidak_jalan' | null;
+        diagnosa_gap_bukti: string | null;
+        rekomendasi: string | null;
+        perlu_revisi: boolean | null;
+        materi_klien: string | null;
+      }[]
+    >`select * from plan_review where plan_id = ${id}`,
+
+    sql<
+      {
+        id: number;
+        plan_id: string;
+        plan_row_id: number | null;
+        jenis: string;
+        detail: string | null;
+        ack_spv_oleh: string | null;
+        ack_spv_pada: string | Date | null;
+      }[]
+    >`select * from plan_flag where plan_id = ${id} order by id`,
+
+    priorPeriodDeficit(sql, plan),
+  ]);
+
   const rowIds = rows.map((r) => r.id as number);
 
   const weeks =
@@ -492,46 +551,6 @@ export async function getPlanDetail(
           select * from plan_row_week
            where plan_row_id = any(${rowIds})
            order by plan_row_id, minggu_no`;
-
-  const actuals = await sql<
-    {
-      plan_id: string;
-      channel: string;
-      metric: string;
-      sumber: 'manual' | 'otomatis';
-      nilai: string | number;
-      file_bukti: string | null;
-      tanggal_ambil: string | Date | null;
-      sengketa: string | null;
-    }[]
-  >`select * from plan_actual where plan_id = ${id} order by channel, metric`;
-
-  const reviewRows = await sql<
-    {
-      plan_id: string;
-      yang_jalan: string | null;
-      yang_tidak_jalan: string | null;
-      diagnosa_gap: 'strategi_salah' | 'eksekusi_tidak_jalan' | null;
-      diagnosa_gap_bukti: string | null;
-      rekomendasi: string | null;
-      perlu_revisi: boolean | null;
-      materi_klien: string | null;
-    }[]
-  >`select * from plan_review where plan_id = ${id}`;
-
-  const flags = await sql<
-    {
-      id: number;
-      plan_id: string;
-      plan_row_id: number | null;
-      jenis: string;
-      detail: string | null;
-      ack_spv_oleh: string | null;
-      ack_spv_pada: string | Date | null;
-    }[]
-  >`select * from plan_flag where plan_id = ${id} order by id`;
-
-  const defisitTerbawa = await priorPeriodDeficit(sql, plan);
 
   return {
     plan,
@@ -986,38 +1005,89 @@ export function canApprovePlan(actor: Actor): boolean {
 }
 
 /**
- * submitPlanPeriode drives period 1 `Draft → Diajukan` (Flow step 2): the owning
- * AM hands the filled period to the SPV. The opening note PA-7 is mandatory at
- * submit — the one completeness field the schema carries today; the row/week
- * completeness checks land with their tickets (B-04…B-08) and extend this gate.
+ * saveCatatanPembuka — PA-7, the AM's opening note for a period. Writable only
+ * while the period is `Draft` (only period 1 is ever `Draft`; generation seeds
+ * 2..n at `Terjadwal`), so this is period 1's pre-submit note, not a running
+ * log — same shape as Rekap's RM-A6 `saveRecapPembuka`.
+ */
+export async function saveCatatanPembuka(
+  sql: Sql,
+  actor: Actor,
+  planId: string,
+  catatanPembuka: string,
+): Promise<Plan> {
+  const teks = (catatanPembuka ?? '').trim();
+  return withTransaction(sql, async (tx) => {
+    const plan = await loadPlanForUpdate(tx, planId);
+    const ownerAm = await ownerAmOfClient(tx, plan.clientId);
+    if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+    if (plan.status !== PLAN_DRAFT) throw new ConflictError(MSG_PLAN_CATATAN_PEMBUKA_STATUS);
+    await tx`update plan set catatan_pembuka = ${teks === '' ? null : teks} where id = ${planId}`;
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'catatan_pembuka_disimpan',
+      beforeJson: { catatan_pembuka: plan.catatanPembuka },
+      afterJson: { catatan_pembuka: teks },
+      createdBy: actor.employeeId,
+    });
+    return loadPlan(tx, planId);
+  });
+}
+
+/**
+ * submitPlanPeriode drives period 1 `Draft → Aktif` DIRECTLY: the owning AM
+ * activates the period themselves, with no SPV approval step in between.
+ *
+ * **DEVIASI PRD DISETUJUI PEMILIK, 2026-08-28 (docs/DECISIONS.md).** Rule 3 /
+ * Flow step 2 originally routed period 1 through `Diajukan` for a mandatory
+ * SPV approval, gated on the PA-7 opening note being filled. The owner asked
+ * to remove both gates so a period (and the Briefs it unlocks) can go out to
+ * the team without waiting on a human review: PA-7 is now optional (still
+ * writable via `saveCatatanPembuka`, just never checked here), and this
+ * function targets `Aktif` on the new `Draft → Aktif` edge instead of
+ * `Diajukan`. `approvePlanPeriode`/`returnPlanPeriode` and the `Diajukan`
+ * edges are left in place (harmless, PA-5 still lists the state) but nothing
+ * routes a period into `Diajukan` anymore — they're vestigial unless a future
+ * decision reinstates the approval step.
  *
  * Only period 1 is ever in `Draft` (generation seeds it there; 2..n start
- * `Terjadwal`), so the machine confines this to period 1 without a separate
- * guard — a `Terjadwal` period has no `→ Diajukan` edge and the engine blocks it.
+ * `Terjadwal`), but `Terjadwal → Aktif` is ALSO a valid edge (period 2..n's
+ * auto-activation job) — so unlike before, the machine alone can't confine
+ * this to period 1. The explicit status guard below does that job now.
  */
 export async function submitPlanPeriode(sql: Sql, actor: Actor, planId: string): Promise<Plan> {
   return withTransaction(sql, async (tx) => {
     const plan = await loadPlanForUpdate(tx, planId);
     const ownerAm = await ownerAmOfClient(tx, plan.clientId);
     if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
-    if ((plan.catatanPembuka ?? '').trim() === '') {
-      throw new ValidationError(MSG_PLAN_CATATAN_PEMBUKA_REQUIRED);
-    }
-    await transitionPlan(tx, actor, planId, PLAN_DIAJUKAN);
+    if (plan.status !== PLAN_DRAFT) throw new ConflictError(MSG_PLAN_SUBMIT_STATUS);
+    await transitionPlan(tx, actor, planId, PLAN_AKTIF);
     return loadPlan(tx, planId);
   });
 }
 
 /**
  * approvePlanPeriode drives period 1 `Diajukan → Aktif` (Rule 3) — the SPV's
- * approval, which is what switches the Plan mechanism on for the whole contract.
+ * approval. Vestigial since the 2026-08-28 deviation (docs/DECISIONS.md):
+ * `submitPlanPeriode` no longer routes through `Diajukan`, so nothing puts a
+ * period here anymore, but the function is left working for a period that
+ * reaches `Diajukan` some other way.
+ *
  * The `require_lead` edge already refuses a non-lead; this narrows it to the
  * Account division (Rule 3's SPV / Head of Account, not any division's lead).
+ * The explicit status guard matters MORE now than before: the same 2026-08-28
+ * migration added a `Draft → Aktif` edge for `submitPlanPeriode`'s direct move,
+ * which the engine would otherwise also accept here — this function must only
+ * ever act on an actually-`Diajukan` period, never skip straight from `Draft`.
  */
 export async function approvePlanPeriode(sql: Sql, actor: Actor, planId: string): Promise<Plan> {
   if (!canApprovePlan(actor)) throw new ForbiddenError(MSG_PLAN_APPROVE_FORBIDDEN);
   return withTransaction(sql, async (tx) => {
-    await loadPlanForUpdate(tx, planId); // lock + 404 before the move
+    const plan = await loadPlanForUpdate(tx, planId); // lock + 404 before the move
+    if (plan.status !== PLAN_DIAJUKAN) throw new ConflictError(MSG_PLAN_APPROVE_STATUS);
     await transitionPlan(tx, actor, planId, PLAN_AKTIF);
     return loadPlan(tx, planId);
   });
@@ -1979,15 +2049,19 @@ async function loadCloseReadiness(
   planId: string,
   reducedReview: boolean,
 ): Promise<CloseReadiness> {
-  const targets = await tx<{ channel: string; metric: string; nilai_dipakai: string | number }[]>`
-    select channel, metric, nilai_dipakai from plan_target where plan_id = ${planId}`;
-  const actuals = await tx<
-    { channel: string; metric: string; sumber: 'manual' | 'otomatis'; nilai: string | number }[]
-  >`select channel, metric, sumber, nilai from plan_actual where plan_id = ${planId}`;
-  const rows = await tx<
-    { status_baris: PlanRow['statusBaris']; status_baris_alasan: string | null }[]
-  >`select status_baris, status_baris_alasan from plan_row where plan_id = ${planId}`;
-  const review = await tx<PlanReviewDbRow[]>`select * from plan_review where plan_id = ${planId}`;
+  // P-2: four reads of the same `planId`, none of them reading another's rows.
+  // Issued together they cost one round trip inside the close transaction.
+  const [targets, actuals, rows, review] = await Promise.all([
+    tx<{ channel: string; metric: string; nilai_dipakai: string | number }[]>`
+      select channel, metric, nilai_dipakai from plan_target where plan_id = ${planId}`,
+    tx<
+      { channel: string; metric: string; sumber: 'manual' | 'otomatis'; nilai: string | number }[]
+    >`select channel, metric, sumber, nilai from plan_actual where plan_id = ${planId}`,
+    tx<
+      { status_baris: PlanRow['statusBaris']; status_baris_alasan: string | null }[]
+    >`select status_baris, status_baris_alasan from plan_row where plan_id = ${planId}`,
+    tx<PlanReviewDbRow[]>`select * from plan_review where plan_id = ${planId}`,
+  ]);
   return checkCloseReadiness({
     targets: targets.map((t) => ({
       channel: t.channel,

@@ -68,7 +68,7 @@ So P2 holds — periods run automatically — except on the one action where aut
 0. **This module describes the Full-Management Plan** (contract-scoped, Strategi-parented). For à la carte services, the Plan-gate determination and the Strategi-less **Plan Satuan** variant are specified in Module 6C — read §7 there for the field-level diff before implementing.
 1. Plan records are generated **only** on Strategi approval: `n` periods, `n` = contract months, boundaries per P7. No manual Plan creation.
 2. Period 1 starts as `Draft`. Periods 2…n start as `Terjadwal` (scheduled, not yet editable-as-active).
-3. **Period 1 requires SPV approval** (`Diajukan` → `Disetujui`). Its approval is what activates the Plan mechanism for the whole contract.
+3. ~~Period 1 requires SPV approval (`Diajukan` → `Disetujui`). Its approval is what activates the Plan mechanism for the whole contract.~~ **DEVIASI PRD DISETUJUI PEMILIK, 2026-08-28 (`docs/DECISIONS.md`).** The owner asked to remove this gate so a period — and the Briefs it unlocks — can reach the team without waiting on a human review. The owning AM now activates period 1 directly (`Draft` → `Aktif`); `Diajukan`/SPV approval is no longer part of the flow, though the state and the approve/return functions are left in place, unused, in case this is ever reinstated.
 4. Periods 2…n move `Terjadwal` → `Aktif` automatically at 00:00 WIB on their start date — **except** when a `Turun >10%` adjustment is pending (Rule 9), which holds the period in `Menunggu Persetujuan` until resolved. If unresolved by the start date, the period activates with the **original Strategi target** and the adjustment request is marked `Kedaluwarsa`. Execution is never blocked by an unanswered approval.
 5. Only one period is `Aktif` at a time. The previous period must be `Ditutup` before the next activates; if the AM has not closed it, the system force-closes with `Ditutup Otomatis` and flags incomplete actuals.
 6. **Plan rows are the unit of work.** Each row = one channel × one pillar × one action, with a division owner, a week, a quota, and a target. Every row must reference the Strategi pillar it descends from (`strategi_pillar_id`). A row with no strategy parent is possible but is flagged `Di Luar Strategi` and counted in the deviation metric.
@@ -101,7 +101,7 @@ Legend: **W** = wajib · **O** = opsional · **A** = auto/read-only · ↻ = per
 | PA-4 | Tanggal Besar | Tanggal besar dari Strategi G-2 yang jatuh di periode ini | Auto | A |
 | PA-5 | Status Periode | `Terjadwal` / `Draft` / `Diajukan` / `Menunggu Persetujuan` / `Aktif` / `Ditutup` / `Ditutup Otomatis` | Auto | A |
 | PA-6 | Defisit Terbawa | Akumulasi kekurangan dari periode sebelumnya (Rp) — tak bisa diedit | Auto | A |
-| PA-7 | Catatan Pembuka | Konteks periode ini menurut AM (mis. "fokus perbaikan listing, iklan ditahan") | Long text | W |
+| PA-7 | Catatan Pembuka | Konteks periode ini menurut AM (mis. "fokus perbaikan listing, iklan ditahan") | Long text | O *(sejak 2026-08-28, `docs/DECISIONS.md` — sebelumnya W, menggerbang submit periode 1)* |
 | PA-8 | Asumsi Strategi yang Dipantau | Asumsi D-8 yang relevan periode ini + statusnya | Auto + status toggle | W |
 
 ### SECTION P-B — Target Periode ↻ per channel
@@ -185,7 +185,7 @@ One row per planned work item. This is the table Briefs are created from.
 ### SECTION P-H — Persetujuan & Jejak
 | ID | Content | Req |
 |---|---|---|
-| PH-1 | **Periode 1:** AM submit → SPV `Disetujui`/`Dikembalikan` + catatan | W (periode 1) |
+| PH-1 | ~~**Periode 1:** AM submit → SPV `Disetujui`/`Dikembalikan` + catatan~~ **Periode 1: AM mengaktifkan langsung, tanpa persetujuan SPV** (DEVIASI PRD 2026-08-28, `docs/DECISIONS.md`) | — (dihapus) |
 | PH-2 | **Periode 2…n:** aktivasi otomatis — dicatat siapa/kapan (sistem) | A |
 | PH-3 | Persetujuan penyesuaian target turun >10% (SPV) | W (kondisional) |
 | PH-4 | Penutupan periode: oleh AM atau `Ditutup Otomatis` oleh sistem | A |
@@ -196,7 +196,7 @@ One row per planned work item. This is the table Briefs are created from.
 ## 6. Flow
 
 1. Strategi `Disetujui` → system generates `n` Plan periods. Period 1 = `Draft`, periods 2…n = `Terjadwal`, each pre-filled with targets from D-2 and a skeleton of rows from E + F (channel × pillar × quota).
-2. AM completes period 1: adjusts rows, sets weeks, priorities, prerequisites. Submits → SPV approves. Period 1 → `Aktif`.
+2. AM completes period 1: adjusts rows, sets weeks, priorities, prerequisites. ~~Submits → SPV approves.~~ AM activates it directly — period 1 → `Aktif` (no SPV approval step, DEVIASI PRD 2026-08-28, `docs/DECISIONS.md`; see Rule 3).
 3. Weekly rows auto-generate on activation (even split, re-weighted to big dates). AM may re-drag; weekly total must equal monthly.
 4. AM creates Briefs manually from rows. Each Brief inherits SKU, floor price, ACOS target, pillar, quota. *Error paths:* over-commitment → warning + reason; below floor price → SPV ack; row still `Belum dibuat` at period midpoint → SPV dashboard warning.
 5. Divisions execute. They can comment on rows and file `Keberatan Kapasitas`; they cannot edit quota/target/week.
@@ -243,7 +243,7 @@ Had the AM asked for −Rp 40jt (−19%), the period would have held at `Menungg
 
 **Relations.** `STRG` 1:N `PLAN`; `PLAN` 1:N `PLAN_ROW`; `PLAN_ROW` 1:N `PLAN_ROW_WEEK`; `PLAN_ROW` 1:N `BRIEF`. Every Brief carries `plan_row_id`, `plan_id`, `strategi_id`, `strategi_version` — a four-level trace from an executed Brief back to the strategy version that authorised it.
 
-**State machine (machine #16).** `Terjadwal` → `Draft` (period 1 only) → `Diajukan` → (`Disetujui` → `Aktif` | `Dikembalikan` → `Draft`); `Terjadwal` → `Aktif` (auto, periods 2…n); `Terjadwal` → `Menunggu Persetujuan` → `Aktif`; `Aktif` → `Ditutup` | `Ditutup Otomatis`. Transitions only via `sm_transition`.
+**State machine (machine #16).** `Terjadwal` → `Draft` (period 1 only) → `Aktif` DIRECTLY (AM, no SPV approval — 2026-08-28 deviation); `Terjadwal` → `Aktif` (auto, periods 2…n); `Terjadwal` → `Menunggu Persetujuan` → `Aktif`; `Aktif` → `Ditutup` | `Ditutup Otomatis`. Transitions only via `sm_transition`. The `Draft` → `Diajukan` → (`Disetujui` → `Aktif` | `Dikembalikan` → `Draft`) edges from the original design still exist in the schema (PA-5 still lists `Diajukan`) but nothing routes a period through them anymore.
 
 **Scheduled jobs.** (a) 00:00 WIB daily — activate periods whose start date is today, force-close overdue periods; (b) period midpoint — emit `Baris Belum Dieksekusi` warnings; (c) period close + 5 days — emit `plan_realisasi_belum_lengkap` if manual GMV is missing. All jobs idempotent, all timestamps `WIB_OFFSET_HOURS=7`.
 

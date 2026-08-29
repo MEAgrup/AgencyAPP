@@ -1,0 +1,22 @@
+-- CDPS — M6B machine #16 (`plan`): period 1 submit no longer waits on SPV
+-- approval, and PA-7 (Catatan Pembuka) no longer gates it either.
+--
+-- ## Kenapa (DEVIASI PRD DISETUJUI PEMILIK, 2026-08-28, docs/DECISIONS.md)
+-- Rule 3 routed period 1 `Draft → Diajukan → Aktif`, with the SPV/Head of
+-- Account approval as a mandatory human gate, and PA-7's opening note as a
+-- mandatory precondition to even reach `Diajukan`. Pemilik meminta keduanya
+-- dilepas: AM harus bisa membuat Plan periode 1 dan langsung mengirim Brief
+-- ke tim terkait tanpa menunggu satu pun gerbang manusia. `packages/domain/
+-- src/plan.ts` `submitPlanPeriode` sudah diubah untuk menargetkan `Aktif`
+-- langsung (bukan `Diajukan`) dan tidak lagi memeriksa `catatan_pembuka`;
+-- migrasi ini hanya menambah EDGE yang transisi itu butuhkan — data (B-01),
+-- bukan gerbang (gerbang tetap di TS, B-03).
+--
+-- `Draft → Diajukan` dan kedua edge `Diajukan → *` TETAP ADA (tidak dihapus):
+-- PA-5 masih mendaftar `Diajukan` sebagai state yang sah, dan `approvePlanPeriode`/
+-- `returnPlanPeriode` masih kode yang berfungsi — hanya saja sejak migrasi ini
+-- tidak ada jalur normal manapun yang lagi menaruh sebuah periode ke `Diajukan`.
+-- Edge itu sekarang vestigial, bukan dihapus, kalau suatu saat gerbang
+-- persetujuan ini diaktifkan kembali.
+INSERT INTO sm_edges (machine, from_state, to_state, require_lead) VALUES
+    ('plan', 'Draft', 'Aktif', false);

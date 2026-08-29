@@ -442,30 +442,40 @@ async function keluhanTerkaitMingguIni(sql: Queryable, clientId: string, mulai: 
 /** getRecapDetail — the full recap bundle, scope-gated (canReadRecap). */
 export async function getRecapDetail(sql: Queryable, actor: Actor, id: string): Promise<RecapDetail> {
   const recap = await loadRecap(sql, id);
-  const ownerAm = await ownerAmOfClient(sql, recap.clientId);
-  const touched = await touchedDivisions(sql, id);
+  // P-2: the scope check needs two facts about the same recap — who owns the
+  // client and which divisions touched it — and neither reads the other's rows.
+  const [ownerAm, touched] = await Promise.all([
+    ownerAmOfClient(sql, recap.clientId),
+    touchedDivisions(sql, id),
+  ]);
   if (!canReadRecap(actor, ownerAm, touched)) throw new ForbiddenError(MSG_RECAP_FORBIDDEN);
 
-  const divisiRows = await sql<{ recap_id: string; divisi: string; jumlah_produksi: number | string;
-    rincian: Record<string, unknown>; sengketa: string | null }[]>`
-    select recap_id, divisi, jumlah_produksi, rincian, sengketa
-      from wrr_divisi where recap_id = ${id} order by divisi`;
-  const metrikRows = await sql<{ recap_id: string; metrik: string; nilai: unknown; sumber: string;
-    file_bukti: string | null; tanggal_ambil: unknown; nilai_minggu_lalu: unknown; sengketa: string | null }[]>`
-    select recap_id, metrik, nilai, sumber, file_bukti, tanggal_ambil, nilai_minggu_lalu, sengketa
-      from wrr_metrik where recap_id = ${id} order by metrik`;
-  const catatanRows = await sql<{ recap_id: string; yang_bergerak: string | null; yang_tertahan: string | null;
-    fokus_minggu_depan: string | null; bahan_untuk_klien: string | null; catatan_metrik_tambahan: string | null }[]>`
-    select recap_id, yang_bergerak, yang_tertahan, fokus_minggu_depan, bahan_untuk_klien, catatan_metrik_tambahan
-      from wrr_catatan where recap_id = ${id}`;
-  const catatanDivisiRows = await sql<{ id: number; recap_id: string; divisi: string; catatan: string;
-    created_at: unknown; created_by: string }[]>`
-    select id, recap_id, divisi, catatan, created_at, created_by
-      from wrr_catatan_divisi where recap_id = ${id} order by created_at`;
-
-  // RM-A5 + RM-D4 — auto display lists derived over the recap's WIB week window.
-  const serviceAktif = await serviceAktifMingguIni(sql, recap.clientId, recap.mingguMulai, recap.mingguAkhir);
-  const keluhanTerkait = await keluhanTerkaitMingguIni(sql, recap.clientId, recap.mingguMulai, recap.mingguAkhir);
+  // P-2: the bundle itself — four child tables keyed by `recap_id` plus the two
+  // RM-A5/RM-D4 window derivations keyed by the recap's client and week. Six
+  // independent reads, one round trip, gated behind the permission check above
+  // so nothing is read for a caller who may not see this recap.
+  const [divisiRows, metrikRows, catatanRows, catatanDivisiRows, serviceAktif, keluhanTerkait] =
+    await Promise.all([
+      sql<{ recap_id: string; divisi: string; jumlah_produksi: number | string;
+        rincian: Record<string, unknown>; sengketa: string | null }[]>`
+        select recap_id, divisi, jumlah_produksi, rincian, sengketa
+          from wrr_divisi where recap_id = ${id} order by divisi`,
+      sql<{ recap_id: string; metrik: string; nilai: unknown; sumber: string;
+        file_bukti: string | null; tanggal_ambil: unknown; nilai_minggu_lalu: unknown; sengketa: string | null }[]>`
+        select recap_id, metrik, nilai, sumber, file_bukti, tanggal_ambil, nilai_minggu_lalu, sengketa
+          from wrr_metrik where recap_id = ${id} order by metrik`,
+      sql<{ recap_id: string; yang_bergerak: string | null; yang_tertahan: string | null;
+        fokus_minggu_depan: string | null; bahan_untuk_klien: string | null; catatan_metrik_tambahan: string | null }[]>`
+        select recap_id, yang_bergerak, yang_tertahan, fokus_minggu_depan, bahan_untuk_klien, catatan_metrik_tambahan
+          from wrr_catatan where recap_id = ${id}`,
+      sql<{ id: number; recap_id: string; divisi: string; catatan: string;
+        created_at: unknown; created_by: string }[]>`
+        select id, recap_id, divisi, catatan, created_at, created_by
+          from wrr_catatan_divisi where recap_id = ${id} order by created_at`,
+      // RM-A5 + RM-D4 — auto display lists derived over the recap's WIB week window.
+      serviceAktifMingguIni(sql, recap.clientId, recap.mingguMulai, recap.mingguAkhir),
+      keluhanTerkaitMingguIni(sql, recap.clientId, recap.mingguMulai, recap.mingguAkhir),
+    ]);
 
   return {
     recap,
