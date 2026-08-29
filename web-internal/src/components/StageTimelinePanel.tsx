@@ -14,10 +14,18 @@
 // `Cek Brief AM` still renders correctly here). `next_stages` never
 // includes the `Brief Dikembalikan ke AM` edge — that one is `reviewBrief`'s,
 // shown only in the Cek Brief AM block below, never both at once.
+//
+// LT-4 (pemilik 2026-08-29): the returned Brief is no longer a dead-end — the
+// edge BACK to `Cek Brief AM` is gate_pihak='AM', so it is the owning AM who
+// drives it, not the division. `canReview`/`canAdvance` are both division
+// gates and never cover an AM, hence `isAmOwner` below.
 
 import { useCallback, useEffect, useState } from 'react';
 import { errorMessage } from '@/lib/api';
 import { advanceBriefStage, getBriefStage, reviewBriefStage, type StageOverview } from '@/lib/stage';
+
+/** briefs.production_stage value the division parks a rejected Brief at (M16 LT-22). */
+const STAGE_RETURNED = 'Brief Dikembalikan ke AM';
 
 const STATUS_BADGE: Record<string, string> = {
   belum_mulai: 'badge-gray',
@@ -54,6 +62,7 @@ export default function StageTimelinePanel({
   assignedDivision,
   canReview,
   canAdvance = canReview,
+  isAmOwner = false,
 }: {
   briefId: string;
   /** brief.assigned_division — picks the alasan_kode list for "Dikembalikan". */
@@ -69,6 +78,14 @@ export default function StageTimelinePanel({
    * rather than making every existing page pass it explicitly.
    */
   canAdvance?: boolean;
+  /**
+   * LT-4 — true when the viewer is an Account-side reviewer (the Brief's AM, or
+   * Director). Used ONLY to surface the "kirim ulang" action while the Brief
+   * sits at `Brief Dikembalikan ke AM`, whose out-edge is gate_pihak='AM'. The
+   * server checks actual ownership (`stage.advanceStage`), so a non-owning
+   * Account viewer gets the verbatim BI 403 rather than a hidden button.
+   */
+  isAmOwner?: boolean;
 }) {
   const [overview, setOverview] = useState<StageOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -159,6 +176,9 @@ export default function StageTimelinePanel({
 
   const reasons = REASON_CODES[assignedDivision] ?? ['Brief kurang jelas'];
   const pendingReview = overview.review === null && overview.production_stage === 'Cek Brief AM';
+  // LT-4: the only stage an AM drives out of. Everything else stays on the
+  // division gate the caller passed.
+  const mayAdvance = canAdvance || (isAmOwner && overview.production_stage === STAGE_RETURNED);
 
   return (
     <section className="card">
@@ -223,7 +243,7 @@ export default function StageTimelinePanel({
         </div>
       )}
 
-      {canAdvance && !pendingReview && overview.next_stages.length > 0 && (
+      {mayAdvance && !pendingReview && overview.next_stages.length > 0 && (
         <div className="stack" style={{ gap: 10 }}>
           {actionError && <div className="alert alertError" role="alert">{actionError}</div>}
           <div className="row" style={{ gap: 10 }}>

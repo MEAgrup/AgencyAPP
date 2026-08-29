@@ -25,6 +25,18 @@ satu item implementasi yang menunggu tim mulai memakai fiturnya (halaman FE
 Ads/Permintaan). Nol yang mendesak — semuanya punya default aman sudah
 berjalan di produksi hari ini.
 
+> ### ✅ Pembaruan 2026-08-29 — LT-1 (sebagian), LT-3, LT-4 SUDAH DIJAWAB & DIPASANG
+>
+> Pemilik menjawab tiga dari sebelas pertanyaan; ketiganya sudah diimplementasi
+> sebagai migrasi data (`20260901010000`, `20260901020000`, `20260901030000`)
+> + satu prop FE, dengan test dan entri `DECISIONS.md` masing-masing. **§2 di
+> bawah dipertahankan apa adanya sebagai teks pertanyaan aslinya** — status
+> tiap baris ada di kepala baris itu. Yang benar-benar masih menunggu Anda:
+> **LT-2** ("akan saya berikan menyusul"), **LT-5..LT-11**, plus dua sisa
+> LT-1: konfirmasi angka target 24 jam dan bobot `role_type` AI Optimizer +
+> Store Operation. Status tiket otoritatif: `docs/backlog/LEADTIME_BACKLOG.md`
+> Fase 6.
+
 ---
 
 ## 1. Urutan baca
@@ -50,6 +62,15 @@ berjalan) → **pertanyaannya** → **contoh konkret** → **rekomendasi saya**.
 Menjawab salah satu TIDAK memblokir yang lain — bisa dicicil.
 
 ### LT-1 — Bobot skor AM/divisi baru (perlu COO)
+
+> ✅ **DIJAWAB SEBAGIAN 2026-08-29** — Anda menjawab "jalankan rekomendasi".
+> Bobot ditetapkan **10%** (lantai rentang 10–15% yang direkomendasikan, sama
+> persis preseden RM-9a yang dikutipnya); profil AM kini 40,5 / 20,25 / 20,25
+> / 9 / **10**. Menaikkannya ke 15% = satu migrasi, nol kode — bilang saja.
+> **Dua hal masih menunggu Anda:** (a) bobot saja ternyata tidak cukup —
+> komponennya dikecualikan selama tak ada baris target, jadi diseed target
+> **24 jam** ber-flag PLACEHOLDER; angka itu **belum Anda konfirmasi**.
+> (b) bobot `role_type` AI Optimizer + Store Operation tetap Σ=0.
 
 **Sekarang:** `kecepatan_review_am` (skor AM) dan `role_type` AI
 Optimizer + Store Operation semua berbobot **0** — lead time-nya sudah
@@ -77,6 +98,10 @@ gelombang pertama — bisa dinaikkan lagi setelah dilihat sebulan.
 
 ### LT-2 — Daftar & urutan kerja Store Operation
 
+> ⏳ **MENUNGGU ANDA 2026-08-29** — "akan saya berikan menyusul". Pipeline
+> `STORE_OPS` sengaja tetap kosong sampai daftarnya ada. LT-8 (alasan
+> pengembalian brief Store Operation) sengaja ditahan agar dijawab bersamanya.
+
 **Sekarang:** Divisi terdaftar, brief bisa didispatch, tapi pipeline
 kosong (tanpa tahapan) — sudah disebut tanpa urutan: **Banding
 Pelanggaran**, **Setup Promo Toko**, **QC Konten Toko**.
@@ -98,6 +123,11 @@ migrasi susulan begitu ada pengalaman nyata dari tim Store Operation.
 
 ### LT-3 — Target 14 hk KOL: per-tahap atau gabungan?
 
+> ✅ **DIJAWAB & SELESAI 2026-08-29** — "14 hari kerja hanya untuk follow up
+> memastikan video di post, sisanya buat sesuai standar". Terpasang:
+> `Follow up Video Creator` **14 hk**, `QC & Approval Video Creator` **1 hk**
+> (standar QC internal CDPS). PRD §4.3 + `STATE_MACHINES.md` §18 disesuaikan.
+
 **Sekarang:** `Follow up Video Creator` DAN `QC & Approval Video Creator`
 masing-masing target **14 hk** (jadi total bisa sampai 28 hk kalau
 keduanya penuh).
@@ -116,6 +146,12 @@ angka di seed, nol perubahan desain).
 ---
 
 ### LT-4 — Brief yang dikembalikan ke AM: perlu jalur kirim-ulang otomatis?
+
+> ✅ **DIJAWAB & SELESAI 2026-08-29** — "jalankan rekomendasi B". Edge balik
+> `Brief Dikembalikan ke AM → Cek Brief AM` terpasang di 4 pipeline, dan yang
+> menekan tombolnya adalah **AM pemilik klien** (atau Director), bukan divisi
+> yang menolak — itu butuh satu baris `stage_definition` ber-`gate_pihak='AM'`
+> di luar edge-nya, kalau tidak justru kebalikannya yang terjadi.
 
 **Sekarang:** `Brief Dikembalikan ke AM` adalah dead-end — begitu masuk
 situ, Brief mandek permanen di tahap itu. Divisi tetap bisa menulis alasan
@@ -210,6 +246,11 @@ Jawab bersamaan dengan LT-2, bukan terpisah.
 ---
 
 ### LT-9 — Perluas skor AM ke portofolio AI Optimizer/Store Operation?
+
+> ⏳ **MASIH MENUNGGU ANDA** — LT-1 sudah dijawab tetapi ini tidak disinggung,
+> jadi cakupan portofolio dibiarkan apa adanya. Taruhannya kini lebih besar:
+> `kecepatan_review_am` sudah berbobot 10% (bukan 0), jadi memperluas
+> portofolio sekarang menggerakkan **dua** komponen skor AM, bukan satu.
 
 **Sekarang:** `kecepatan_review_am` (bobot 0, LT-1) sengaja BELUM
 mencakup Brief AI Optimizer/Store Operation, walau keduanya sejak M16

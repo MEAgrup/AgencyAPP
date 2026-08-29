@@ -26,6 +26,7 @@ import {
   COMP_CHR_AVERAGE,
   COMP_CREATOR_COUNT,
   COMP_GMV_IMPACT,
+  COMP_KECEPATAN_REVIEW_AM,
   COMP_NOTE_COMPLIANCE,
   COMP_OPTIMIZATION_ACTIVITY,
   COMP_RECAP_DISCIPLINE,
@@ -240,6 +241,62 @@ describe('pure scoring core', () => {
     const rd = compByName(comps, COMP_RECAP_DISCIPLINE)!;
     expect(rd.baseWeight).toBe(10);
     expect(rd.effectiveWeight).toBeCloseTo(10, 6);
+  });
+
+  // LT-1 (pemilik/COO 2026-08-29, migrasi 20260901010000): `kecepatan_review_am`
+  // carved PROPORTIONALLY out of the post-D-14 AM profile at 10%. Same safety
+  // invariant as D-14 — an AM with no review-speed data that period scores
+  // EXACTLY as they did before LT-1.
+  const AM_WEIGHTS_LT1 = {
+    chr_average: 40.5,
+    complaint_resolution_speed: 20.25,
+    revision_escalation_rate: 20.25,
+    recap_discipline: 9,
+    kecepatan_review_am: 10,
+  };
+
+  it('LT-1: the AM profile still sums to 100 after the carve', () => {
+    expect(Object.values(AM_WEIGHTS_LT1).reduce((a, b) => a + b, 0)).toBeCloseTo(100, 9);
+  });
+
+  it('LT-1: proportional carve — excluding kecepatan_review_am restores the pre-LT-1 profile', () => {
+    const base = [
+      { name: COMP_CHR_AVERAGE, included: true, raw: 80, reason: '', diagnostic: false },
+      { name: 'complaint_resolution_speed', included: true, raw: 100, reason: '', diagnostic: false },
+      { name: 'revision_escalation_rate', included: true, raw: 100, reason: '', diagnostic: false },
+      { name: COMP_RECAP_DISCIPLINE, included: true, raw: 50, reason: '', diagnostic: false },
+    ];
+    const { comps, profile } = scoreProfile(AM_WEIGHTS_LT1, [
+      ...base,
+      { name: COMP_KECEPATAN_REVIEW_AM, included: false, raw: 0, reason: 'no portfolio task', diagnostic: false },
+    ]);
+    const eff = Object.fromEntries(comps.map((c) => [c.name, c.effectiveWeight]));
+    // Renormalised survivors == the pre-LT-1 45/22.5/22.5/10 exactly.
+    expect(eff[COMP_CHR_AVERAGE]).toBeCloseTo(45, 6);
+    expect(eff['complaint_resolution_speed']).toBeCloseTo(22.5, 6);
+    expect(eff['revision_escalation_rate']).toBeCloseTo(22.5, 6);
+    expect(eff[COMP_RECAP_DISCIPLINE]).toBeCloseTo(10, 6);
+    expect(eff[COMP_KECEPATAN_REVIEW_AM]).toBe(0);
+    // …and therefore the identical profile to the D-14 case above: 86.
+    expect(profile).toBeCloseTo(86, 3);
+  });
+
+  it('LT-1: kecepatan_review_am carries its 10% when present', () => {
+    const { comps, profile, profileOk } = scoreProfile(AM_WEIGHTS_LT1, [
+      { name: COMP_CHR_AVERAGE, included: true, raw: 80, reason: '', diagnostic: false },
+      { name: 'complaint_resolution_speed', included: true, raw: 100, reason: '', diagnostic: false },
+      { name: 'revision_escalation_rate', included: true, raw: 100, reason: '', diagnostic: false },
+      { name: COMP_RECAP_DISCIPLINE, included: true, raw: 50, reason: '', diagnostic: false },
+      { name: COMP_KECEPATAN_REVIEW_AM, included: true, raw: 0, reason: '', diagnostic: false },
+    ]);
+    expect(profileOk).toBe(true);
+    // 0.405×80 + 0.2025×100 + 0.2025×100 + 0.09×50 + 0.10×0 = 32.4+20.25+20.25+4.5 = 77.4.
+    // The pre-LT-1 profile for the same AM was 86 — an AM who never opens a
+    // brief on time now visibly loses those points. That is the whole point.
+    expect(profile).toBeCloseTo(77.4, 3);
+    const kra = compByName(comps, COMP_KECEPATAN_REVIEW_AM)!;
+    expect(kra.baseWeight).toBe(10);
+    expect(kra.effectiveWeight).toBeCloseTo(10, 6);
   });
 });
 
@@ -756,7 +813,7 @@ describeDb('LT-33: AI Optimizer / Store Operation role types (registered at weig
 // LT-32 — kecepatan_review_am wiring: a real AM portfolio produces the component.
 // ---------------------------------------------------------------------------
 describeDb('LT-32: kecepatan_review_am wiring (AM)', () => {
-  it('is computed from the real AM portfolio waktuAmBelumBukaHours (48h wait, no target configured → excluded)', async () => {
+  it('is computed from the real AM portfolio waktuAmBelumBukaHours, weighted 10% against the 24h target (LT-1)', async () => {
     const am = uid('EMP-AMK');
     const client = uid('CLI-AMK');
     const svc = uid('SVC-AMK');
@@ -777,8 +834,19 @@ describeDb('LT-32: kecepatan_review_am wiring (AM)', () => {
     const snap = await getSnapshot(sql, director(), am, JUNE);
     const kra = compByName(snap.components, 'kecepatan_review_am');
     expect(kra).toBeDefined();
-    expect(kra!.baseWeight).toBe(0); // migration 20260830040000
-    expect(kra!.included).toBe(false); // no perf_period_targets row yet → excluded, not silently defaulted
+    // LT-1 (pemilik/COO 2026-08-29, migrasi 20260901010000): weight carved from
+    // 0 to a real 10%, and the (placeholder) 24h target seeded in the same
+    // migration — without that target row the component would still be silently
+    // excluded and the whole decision would be a no-op.
+    expect(kra!.baseWeight).toBe(10);
+    expect(kra!.included).toBe(true);
+    // 48h actual against a 24h target = 200% ⇒ OA-1 transform 200−200 = 0.
+    // This is exactly the PRD §6.1 scenario the module was built for: the AM
+    // who opens the brief two days late now carries that themselves.
+    expect(kra!.raw).toBe(0);
+    // The target is a PLACEHOLDER (O9 still open) and the snapshot says so
+    // rather than passing 24h off as a confirmed business figure.
+    expect(snap.targetsPlaceholder).toBe(true);
     // Revision Escalation Rate now also has a real portfolio Task to fold —
     // proof `amPortfolioApprovedInPeriod` (shared with kecepatan_review_am) did
     // not break the existing component's own math.

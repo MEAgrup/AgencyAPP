@@ -84,13 +84,13 @@ Status Ads dipetakan ke mesin **`ADC-`** yang sudah ada — `ADC-` tetap satu-sa
 
 ### 4.3 KOL
 
-`Cek Brief AM → Buat Campaign (1hk) → Approach Creator & Sebar Link Product (3hk) → Buat & Update Daftar Creator (1hk) → Nego & Dealing Creator (2hk) → Approval Sampel (1hk, gate KLIEN) → Follow up Video Creator (14hk) → QC & Approval Video Creator (14hk)`
+`Cek Brief AM → Buat Campaign (1hk) → Approach Creator & Sebar Link Product (3hk) → Buat & Update Daftar Creator (1hk) → Nego & Dealing Creator (2hk) → Approval Sampel (1hk, gate KLIEN) → Follow up Video Creator (14hk) → QC & Approval Video Creator (1hk)`
 
 - Alasan pengembalian brief: `Brief kurang jelas` · `Data tidak lengkap`.
 - **Tipe Program KOL:** `Open-plan` · `Targeted-plan` · `TAP` · `Influencer/BA`.
   **TAP** = program TikTok yang membagi komisi seller langsung antara creator dan agency. **BA** = Brand Ambassador untuk produk seller. Keduanya teks tampilan, tidak jadi logika.
 - `BKG-` (Creator Booking, M9) **tidak disentuh** — tahapan ada di level Brief.
-- Dua tahap terakhir bertarget 14 hk walau bergantung creator eksternal (keputusan pemilik: tanpa deadline tahap ini paling mudah menggantung). Lihat `DECISIONS.md` LT-3.
+- `Follow up Video Creator` bertarget 14 hk walau bergantung creator eksternal (keputusan pemilik: tanpa deadline tahap ini paling mudah menggantung). Jendela 14 hk itu **hanya** miliknya — LT-3 dijawab pemilik 2026-08-29 ("14 hari kerja hanya untuk follow up memastikan video di post, sisanya buat sesuai standar"), jadi `QC & Approval Video Creator` memakai standar QC internal CDPS = 1 hk, sama dengan setiap checkpoint QC lain. Lihat `DECISIONS.md` LT-3.
 
 ### 4.4 Live Stream
 

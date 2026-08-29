@@ -324,7 +324,7 @@ Menulis transisi tahapan sebagai `entity_type='brief'` membuat baris tahapan **i
 | Divisi | Deliverable | Tahapan (hk = hari kerja) |
 |---|---|---|
 | Creative | Content Production | `Cek Brief AM` → `Script` (1) → `QC internal` (1) → `Shooting` (1) → `Edit` (1) → ⟨`QC Account Service`⟩ (1) → ⟨`Revisi`⟩ (1) → `Jadwal Posting` (1) |
-| KOL | — | `Cek Brief AM` → `Buat Campaign` (1) → `Approach Creator & Sebar Link Product` (3) → `Buat & Update Daftar Creator` (1) → `Nego & Dealing Creator` (2) → `Approval Sampel` (1, gate KLIEN) → `Follow up Video Creator` (14) → `QC & Approval Video Creator` (14) |
+| KOL | — | `Cek Brief AM` → `Buat Campaign` (1) → `Approach Creator & Sebar Link Product` (3) → `Buat & Update Daftar Creator` (1) → `Nego & Dealing Creator` (2) → `Approval Sampel` (1, gate KLIEN) → `Follow up Video Creator` (14) → `QC & Approval Video Creator` (1) |
 | Live Stream | — | `Terima Sampel` → `Briefing Klien Live` → `Live Start` |
 | AI Optimizer | Optimasi SKU | `Cek Brief AM` → `Ambil SKU` → `Riset` → `Perbaikan` → `QC` → `Approve` (gate AM) → `Terapkan` |
 | AI Optimizer | AI Video | `Cek Brief AM` → `Script` → `Generate AI` → `Edit` → `QC` → `Jadwal Posting` |
@@ -358,6 +358,13 @@ Tahap pertama setiap pipeline. Divisi memilih *Terima & proses* (lanjut) atau *B
 - Durasi **tidak disimpan** — seluruh angka lead time diturunkan dari `audit_log`, satuan **hari kerja** lewat `working_days_between` (Sen–Jum minus `hari_libur`).
 - Target per tahap: default `stage_definition.target_hari_kerja`, override per Brief di `brief_stage_sla` (gerbang `isLead(division)`, pola `setSlaTarget` M12). Tanpa target ⇒ `N/A`, tidak pernah di-default diam-diam.
 - Migrasi: lihat `docs/backlog/LEADTIME_BACKLOG.md` Fase 2.
+
+**Kirim ulang brief yang dikembalikan (LT-4, pemilik 2026-08-29).** `Brief Dikembalikan ke AM` bukan lagi dead-end: ada edge balik `Brief Dikembalikan ke AM → Cek Brief AM` pada keempat pipeline yang punya state itu (Creative, KOL, AI Optimizer SKU, AI Optimizer Video — Live Stream tidak punya `Cek Brief AM` sama sekali, LT-5). Detail yang menentukan:
+
+- Checkpoint itu didaftarkan `gate_pihak='AM'`, `urutan=99`, target `NULL`. Gerbangnya PERAN — **AM pemilik klien (atau Director) yang mengirim ulang**, bukan divisi yang menolak. Tanpa baris `stage_definition` itu, `advanceStage` jatuh ke gerbang divisi dan hasilnya kebalikan dari yang dimaksud.
+- `sm_terminal_states` **tetap** tidak memuatnya: guard `submitTask` (Rule 11) membaca tabel itu, dan brief yang dikembalikan justru belum dikerjakan. Edge keluar tidak menjadikannya tahap sukses.
+- `brief_review` tetap **append-once**: pengembalian pertama adalah catatan permanen dan kiriman ulang tidak menghapusnya. Setelah kembali ke `Cek Brief AM`, divisi melanjutkannya lewat `advanceStage` ke tahap kerja pertama — `reviewBrief` kedua tetap 409.
+- `urutan=99` menjaga checkpoint cabang ini selalu di baris terakhir timeline; Brief yang tidak pernah dikembalikan mendapat `N/A` di baris itu, nol kontribusi ke `totalHariKerja`.
 
 ## 19. Permintaan `REQ-` (M16 §5.5) — mesin #.., permintaan divisi yang TERKAIT KLIEN
 `[Diajukan]` → `[Diproses]` → `[Selesai]`; `[Diajukan]` | `[Diproses]` → `[Ditolak]`. Terminal: `[Selesai]`, `[Ditolak]`.

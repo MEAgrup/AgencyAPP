@@ -19,6 +19,23 @@
 | 3 | Ads | ✅ SELESAI (Akun B) |
 | 4 | `REQ-` + AI Optimizer | ✅ SELESAI (Akun B) |
 | 5 | Portal vendor Live | (a) ✅ SELESAI · (b) ⬜ TERBLOKIR |
+| 6 | Resolusi keputusan pemilik (LT-1..LT-11) | 🟡 BERJALAN — LT-1 (sebagian) / LT-3 / LT-4 ✅ terpasang 2026-08-29 |
+
+---
+
+## Fase 6 — Resolusi keputusan pemilik
+
+Bukan pekerjaan baru: tiap baris di sini adalah satu pertanyaan §2 handoff yang dijawab
+pemilik, dipasang sebagai **data** (migrasi seed/config), bukan desain baru. Yang belum
+terjawab tetap berjalan dengan default amannya di produksi hari ini.
+
+| # | Isi | Status |
+|---|---|---|
+| LT-1 | Bobot `kecepatan_review_am` di profil AM | 🟡 **SEBAGIAN** — bobot **10%** di-carve proporsional (45/22,5/22,5/10 → 40,5/20,25/20,25/9 + 10), Σ=100; PLUS target normalisasi **24 jam** ber-`is_placeholder=true` tanpa mana komponennya akan tetap dikecualikan dan keputusan ini jadi no-op. Migrasi `20260901010000_lt1_am_review_weight.sql`; test `performance.test.ts` "LT-1: proportional carve" / "LT-1: kecepatan_review_am carries its 10%" + integrasi `LT-32: kecepatan_review_am wiring`. **Sisa terbuka:** konfirmasi angka 24 jam, dan bobot `role_type` AI Optimizer + Store Operation (tetap Σ=0) |
+| LT-2 | Daftar & urutan kerja Store Operation | ⬜ **MENUNGGU PEMILIK** — "akan saya berikan menyusul" (2026-08-29). Pipeline `STORE_OPS` sengaja masih kosong (Rule 12); menyeednya = satu migrasi, nol kode TS |
+| LT-3 | Target 14 hk KOL: per-tahap atau gabungan | ✅ **SELESAI** — 14 hk hanya `Follow up Video Creator`; `QC & Approval Video Creator` → 1 hk (standar QC). Migrasi `20260901020000_lt3_kol_qc_target.sql`; PRD §4.3 + `STATE_MACHINES.md` §18 disesuaikan |
+| LT-4 | Jalur kirim-ulang brief yang dikembalikan | ✅ **SELESAI** — edge `Brief Dikembalikan ke AM → Cek Brief AM` di 4 pipeline + `stage_definition` ber-`gate_pihak='AM'` (tanpa itu justru divisi, bukan AM, yang bisa mengirim ulang) + prop FE `isAmOwner` di `StageTimelinePanel`. Migrasi `20260901030000_lt4_kirim_ulang_brief.sql`; test `stage.test.ts` "LT-4: …" ×3 |
+| LT-5..LT-11 | Sisa pertanyaan pemilik | ⬜ **MENUNGGU PEMILIK** — semua punya default aman yang sudah berjalan; lihat `docs/handoff/HANDOFF_M16_SESI_LANJUTAN.md` §2 |
 
 ---
 

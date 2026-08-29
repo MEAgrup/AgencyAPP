@@ -215,6 +215,10 @@ export default function BriefDetailPage({ params }: { params: Promise<{ id: stri
         briefId={brief.id}
         assignedDivision={brief.assigned_division}
         canReview={!readOnly && (role?.division === brief.assigned_division || !!role?.director)}
+        // LT-4: this is the AM's own view of the Brief, and the "kirim ulang"
+        // edge out of `Brief Dikembalikan ke AM` is theirs to drive — the
+        // canReview gate above is a DIVISION gate and never covers an AM.
+        isAmOwner={isAMReviewer}
       />
 
       {isAMReviewer && (canReview || canDecide) && (
