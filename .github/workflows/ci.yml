@@ -309,17 +309,22 @@ jobs:
       # penggabungan §5 setelah dihitung ulang dari DB gabungan yang sebenarnya
       # (lihat HANDOFF_M16_AKUN_B.md) — bukan dijumlahkan manual dari kedua
       # stream.
+      # Kinerja Sales S-02/§3a (20260901020000 + 20260901030000): +2 tabel
+      # `sales_targets` (Sales OKR, kunci alami) + `sales_level_labels`
+      # (jabatan→label Level Sales, katalog dual-home), 128 → 130. Nol prefix
+      # baru (kunci alami keduanya) ⇒ entity_prefix TETAP 36; nol status ⇒
+      # sm_machines TETAP 29; nol event ⇒ notif_events TETAP 65.
       #
       # ⚠️ INI GATE KEDUA UNTUK ANGKA YANG SAMA — `scripts/db-rebuild.sh` punya
       # `check "tabel public"` sendiri. Naikkan KEDUANYA dalam satu commit;
       # menaikkan salah satu saja membuat lokal hijau sementara CI merah (persis
       # yang terjadi pada PR #170).
-      - name: Verify table count (expect 128)
+      - name: Verify table count (expect 130)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 128
+          test "$n" -eq 130
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this

@@ -140,10 +140,15 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "128"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "130"
 check "entity_prefix"    "select count(*) from entity_prefix"    "36"
 check "sm_machines"      "select count(*) from sm_machines"      "29"
 check "notif_events"     "select count(*) from notif_events"     "65"
+# 130 = 128 + 2 tabel Kinerja Sales S-02/§3a (20260901020000_sales_targets.sql +
+#       20260901030000_sales_level_labels.sql): `sales_targets` (Sales OKR) +
+#       `sales_level_labels` (jabatan→label Level Sales). Nol prefix baru (kunci
+#       alami) ⇒ entity_prefix TETAP 36; nol status ⇒ sm_machines TETAP 29; nol
+#       event ⇒ notif_events TETAP 65.
 # 128 = 127 + 1 tabel Akun B Fase 4 (20260831040000_req_permintaan.sql):
 #       `permintaan` (REQ-, M16 §5.5). 29 = 28 + 1 mesin `permintaan`
 #       ([Diajukan]->[Diproses]->[Selesai]|[Ditolak], STATE_MACHINES §19).

@@ -174,7 +174,7 @@ const FE_FILES = [
   'account.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'contract.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts', 'penugasan.ts', 'permintaan.ts', 'plan.ts',
-  'performance.ts', 'portal.ts', 'recap.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'stage.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
+  'performance.ts', 'portal.ts', 'recap.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'stage.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
 ];
 
 const fe = new Map<string, Parsed>();
@@ -334,6 +334,11 @@ function walkPairs(): { pairs: Pair[]; unfollowed: Unfollowed[] } {
  * next endpoint cannot quietly ship an unchecked shape.
  */
 const WIRE_TO_FE: Record<string, string> = {
+  // Kinerja Sales (M0 §7.1) — salesperf.ts
+  SalesPerfRowWire: 'salesperf.ts::SalesPerfRow',
+  SalesPerfMonthRowWire: 'salesperf.ts::SalesPerfMonthRow',
+  LeadSourceRowWire: 'salesperf.ts::LeadSourceRow',
+  SalesTargetWire: 'salesperf.ts::SalesTarget',
   // M0 sales — quote preview, attempt list/detail
   LineQuoteWire: 'sales.ts::LineQuote',
   QuoteWire: 'sales.ts::Quote',

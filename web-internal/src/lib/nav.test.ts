@@ -70,6 +70,7 @@ describe('visibleNav — Sales', () => {
     // Own: M0 workspace + closing calculator, M1 Leads (canReadPool), M4 clients.
     expect(seen).toContain('/sales');
     expect(seen).toContain('/sales/kalkulator');
+    expect(seen).toContain('/sales/kinerja');
     expect(seen).toContain('/leads');
     expect(seen).toContain('/clients');
     // Not Sales': the QA finding behind PR #58.
@@ -128,6 +129,7 @@ describe('visibleNav — the delivery divisions (symmetry)', () => {
       for (const href of [
         '/sales',
         '/sales/kalkulator',
+        '/sales/kinerja',
         '/leads',
         '/marketing',
         '/marketing/performance',

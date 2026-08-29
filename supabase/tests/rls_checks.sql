@@ -1105,6 +1105,15 @@ RESET ROLE;
 --     kesebelasnya sekaligus — diusulkan sebagai **O60**, sengaja tidak
 --     dikerjakan di dalam tiket fitur: mengubah semantik invariant bersama
 --     supaya tiket sendiri hijau adalah cara paling mudah kehilangan gerbang.
+--
+--     Kinerja Sales (S-01, DECISIONS 2026-08-29 #1): `prospect_attempts_select`
+--     DIHAPUS dari daftar — migrasi `20260901010000` memberinya arm
+--     `jwt_is_lead() AND EXISTS(... origin_division = jwt_division())`, jadi ia
+--     lulus detektor sekarang (menyusut, seperti yang diharapkan §ATURAN).
+--     `sales_level_labels_select` (§3a, migrasi `20260901030000`) DITAMBAHKAN —
+--     `USING (true)`, kelas yang sama dengan `master_services_select`: katalog
+--     murni jabatan→label level (nol PII, nol data klien), dibaca siapa pun yang
+--     terautentikasi. Keputusan visibility dicatat DECISIONS 2026-08-29 #3.
 -- ---------------------------------------------------------------------------
 RESET ROLE;
 DO $$
@@ -1121,7 +1130,8 @@ DECLARE
     'optimization_logs_select','plan_actual_select','plan_flag_select',
     'plan_gate_config_select','plan_review_select','plan_target_select',
     'prospect_attempt_nq_reasons_select',
-    'prospect_attempts_select','qualified_form_services_select','qualified_forms_select',
+    'qualified_form_services_select','qualified_forms_select',
+    'sales_level_labels_select',
     'stage_definition_select','stage_pipeline_select',
     'strategi_akses_select','strategi_assumption_select','strategi_baseline_bulan_select',
     'strategi_channel_select','strategi_diagnosa_select','strategi_dispatch_select',
