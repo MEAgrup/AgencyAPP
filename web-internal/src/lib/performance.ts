@@ -19,12 +19,16 @@ export const KPI_COMPONENTS = [
   'complaint_resolution_speed',
   'revision_escalation_rate',
   'recap_discipline', // D-14: Disiplin Rekap Mingguan (AM)
-  'note_compliance', // D-14: Kepatuhan Catatan Mingguan (Creative/Ads/KOL)
+  'note_compliance', // D-14: Kepatuhan Catatan Mingguan (Creative/Ads/KOL/AI Optimizer/Store Operation)
   'sourcing_turnaround', // diagnostic only untuk KOL
+  'kecepatan_review_am', // M16 §6.4 — bobot AWAL 0 (Rule 6 meredistribusi); DECISIONS.md LT-1
 ] as const;
 
-export const ROLE_TYPES = ['Creative', 'Ads', 'KOL', 'AM'] as const;
-export const DIVISIONS = ['Creative', 'Ads', 'KOL', 'Account'] as const; // Account = AM
+// M16/M17 — AI Optimizer + Store Operation ditambahkan dengan bobot AWAL 0 di
+// setiap komponen (DECISIONS.md 2026-08-28 + LT-1); lead time-nya terukur sejak
+// hari pertama tapi belum menggerakkan skor sampai Director menetapkan angkanya.
+export const ROLE_TYPES = ['Creative', 'Ads', 'KOL', 'AM', 'AI Optimizer', 'Store Operation'] as const;
+export const DIVISIONS = ['Creative', 'Ads', 'KOL', 'Account', 'AI Optimizer', 'Store Operation'] as const; // Account = AM
 
 // Individual component in snapshot
 export interface SnapshotComponent {

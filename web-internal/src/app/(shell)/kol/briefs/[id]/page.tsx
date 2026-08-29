@@ -22,6 +22,7 @@ import {
   type CreatorList,
 } from '@/lib/kol';
 import StatusBadge from '@/components/StatusBadge';
+import StageTimelinePanel from '@/components/StageTimelinePanel';
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return '—';
@@ -325,6 +326,8 @@ export default function KolBriefDetailPage({ params }: { params: Promise<{ id: s
           </div>
         </div>
       </section>
+
+      <StageTimelinePanel briefId={brief.id} assignedDivision={brief.assigned_division} canReview={canCreate} />
 
       <section className="card">
         <div className="cardHeader">

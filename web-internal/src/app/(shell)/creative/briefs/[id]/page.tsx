@@ -18,6 +18,7 @@ import {
   type Brief,
 } from '@/lib/creative';
 import StatusBadge from '@/components/StatusBadge';
+import StageTimelinePanel from '@/components/StageTimelinePanel';
 
 /**
  * "Assign Team untuk Creative Production" — the Brief breakdown of M7 §3 Rule 4 as
@@ -248,6 +249,12 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
           </div>
         </div>
       </section>
+
+      <StageTimelinePanel
+        briefId={brief.id}
+        assignedDivision={brief.assigned_division}
+        canReview={!isODOnly(role) && (isCreativeDivision(role) || isDirector(role))}
+      />
 
       <section className="card">
         <div className="cardHeader">

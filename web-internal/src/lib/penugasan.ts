@@ -28,16 +28,7 @@ export const PENUGASAN_STATUSES = [
  * the non-delivery divisions — a Director tasking Finance or Sales is exactly
  * the case M12 has no room for.
  */
-export const PENUGASAN_DIVISIONS = [
-  'Sales',
-  'Marketing',
-  'Finance',
-  'Account',
-  'Creative',
-  'Ads',
-  'KOL',
-  'Live Stream',
-] as const;
+export { PENUGASAN_DIVISIONS } from './divisions';
 
 /** One TSK- row. Mirrors `InternalTaskWire` in apps/api/src/lib/wire.ts. */
 export interface Penugasan {

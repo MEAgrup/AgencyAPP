@@ -74,6 +74,7 @@ describe('masterServiceToWire', () => {
       active: true,
       requiresStrategyPlan: false,
       planTier: 'ditentukan_am',
+      durasiJasa: 30,
       versionNo: 3,
       effectiveFrom: '2026-07-01',
     };
@@ -93,6 +94,7 @@ describe('masterServiceToWire', () => {
       active: true,
       requires_strategy_plan: false,
       plan_tier: 'ditentukan_am',
+      durasi_jasa: 30,
       version_no: 3,
       effective_from: '2026-07-01',
     });
@@ -292,12 +294,13 @@ describe('M6 account wire mappers', () => {
       recurring: false, recurringFrequency: '', recurringCount: 0, recurringEndDate: '', instructions: '',
       referenceAttachments: '', title: 'Promo', status: '[To Do]', revisionCount: 0, revisionFlagged: false,
       createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
+      stagePipelineCode: null, productionStage: null,
     };
     expect(briefToWire(b)).toEqual({
       id: 'BRF-202607-0001', service_id: 'SVC-1', assigned_division: 'Creative', deliverable_type: 'Video',
       quantity_target: 12, due_date: '2026-08-15', priority: 'High', recurring: false, title: 'Promo',
       status: '[To Do]', revision_count: 0, revision_flagged: false, created_by: 'EMP-SINTA',
-      created_at: '2026-07-01T00:00:00.000Z',
+      created_at: '2026-07-01T00:00:00.000Z', stage_pipeline_code: null, production_stage: null,
     });
   });
 
@@ -308,6 +311,7 @@ describe('M6 account wire mappers', () => {
       recurring: true, recurringFrequency: 'Weekly', recurringCount: 4, recurringEndDate: '2026-09-15',
       instructions: 'brief detail', referenceAttachments: 'link', title: 'Ads Q3', status: '[Approved]',
       revisionCount: 3, revisionFlagged: true, createdBy: 'EMP-SINTA', createdAt: new Date('2026-07-01T00:00:00.000Z'),
+      stagePipelineCode: null, productionStage: null,
     };
     const w = briefToWire(b);
     expect(w.strategy_id).toBe('STR-1');
@@ -352,12 +356,16 @@ describe('M12 task wire mappers', () => {
       revisionTurnaroundHours: null, speedScorePct: 50, speedScoreDisplay: '50.00%',
       revisionSlaTargetHours: null, revisionSpeedScorePct: null, revisionSpeedScoreDisplay: 'N/A', revisionCount: 1,
       revisionFlagged: false, approvedAt: new Date('2026-07-01T00:00:00.000Z'), approvedPeriodWib: '2026-07',
+      turnaroundKerjaHours: 12, waktuAmBelumBukaHours: 0, waktuAmReviewHours: 0,
+      speedScoreKerjaPct: 50, speedScoreKerjaDisplay: '50.00%',
     };
     expect(metricsToWire(m)).toEqual({
       brief_id: 'BRF-1', status: '[Approved]', sla_target_hours: 24, turnaround_hours: 12,
       revision_turnaround_hours: null, speed_score_pct: 50, speed_score_display: '50.00%',
       revision_sla_target_hours: null, revision_speed_score_pct: null, revision_speed_score_display: 'N/A',
       revision_count: 1, revision_flagged: false, approved_at: '2026-07-01T00:00:00.000Z', approved_period_wib: '2026-07',
+      turnaround_kerja_hours: 12, waktu_am_belum_buka_hours: 0, waktu_am_review_hours: 0,
+      speed_score_kerja_pct: 50, speed_score_kerja_display: '50.00%',
     });
   });
 
@@ -425,7 +433,8 @@ describe('M8 ads wire mappers', () => {
     const c: ads.Campaign = {
       id: 'ADC-202607-0001', briefId: 'BRF-1', clientId: 'CLI-1', platform: 'Shopee Ads', objective: 'Sales',
       budget: 8000000, budgetDisplay: 'Rp. 8.000.000,00', startDate: '2026-07-01', endDate: '2026-08-31',
-      targetKpi: 'ROAS ≥ 4x', status: '[Active]', totalSpend: 1000000, totalSpendDisplay: 'Rp. 1.000.000,00',
+      targetKpi: 'ROAS ≥ 4x', status: '[Active]', tipeIklan: 'GMV Max Product', additionalDays: 0,
+      totalSpend: 1000000, totalSpendDisplay: 'Rp. 1.000.000,00',
       totalGmv: 4000000, totalGmvDisplay: 'Rp. 4.000.000,00', roas: 4, roasDisplay: '4x', linkedAssetIds: ['AST-1'],
       metricEntryCount: 1, optimizationCount: 0, underperformingStreak: 0, escalationFlagged: false,
       createdBy: 'ZZ-ADV', createdAt: new Date('2026-07-01T00:00:00.000Z'),
@@ -437,6 +446,8 @@ describe('M8 ads wire mappers', () => {
     expect(w.linked_asset_ids).toEqual(['AST-1']);
     expect(w.escalation_flagged).toBe(false);
     expect(w.created_at).toBe('2026-07-01T00:00:00.000Z');
+    expect(w.tipe_iklan).toBe('GMV Max Product');
+    expect(w.additional_days).toBe(0);
   });
 
   it('metricEntryToWire + optimizationToWire map their records', () => {

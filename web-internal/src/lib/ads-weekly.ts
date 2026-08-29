@@ -32,6 +32,7 @@ export interface AdsWeeklyReport {
   berjalan: boolean;
   terisi: boolean;
   terlambat: boolean;
+  jenis: string; // M16 LT-43 — Weekly (default) | Mini | Monthly | Content Analysis
   analisa: string;
   saran: string;
   kendala: string;

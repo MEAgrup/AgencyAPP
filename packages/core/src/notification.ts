@@ -144,6 +144,25 @@ export const EVENTS = {
   // convention (the PRD never spelled an identifier for it) — like m6.client.assigned.
   AdsRoasUnderperforming: 'm8.ads.roas_underperforming', // -> owning AM + SPV Ads
 
+  // --- v12 (M16 lead time + M17). SATU bump untuk SELURUH event kedua stream
+  // paralel (docs/handoff/PARALEL_M16_DUA_AKUN.md F-4): invariant di sini
+  // menjumlahkan `eventCount` per versi DAN `notif_catalog.reals.test.ts`
+  // membandingkan TS↔DB set-equal, jadi dua bump terpisah akan memecahkan
+  // keduanya dua kali. Emitter dipasang stream masing-masing — mendaftarkan
+  // event tanpa emitter aman, gate-nya membandingkan NAMA, bukan pemanggil.
+
+  // Menutup lubang lama: dispatch Brief ke divisi selama ini TIDAK punya
+  // notifikasi sama sekali, divisi harus memantau antriannya sendiri.
+  BriefDispatched: 'm16.brief.dispatched',             // -> lead divisi tujuan
+  BriefDiterimaDivisi: 'm16.brief.diterima_divisi',    // -> AM pemilik klien
+  BriefDikembalikan: 'm16.brief.dikembalikan',         // -> AM pemilik klien (+ alasan)
+  // HANYA untuk tahap ber-gate (`gate_pihak` AM/KLIEN) — memberi tahu AM setiap
+  // tahap maju akan membanjiri dia dengan 7 notifikasi per Brief.
+  TahapButuhAksiAm: 'm16.tahap.butuh_aksi_am',         // -> AM pemilik klien
+  TahapLewatTarget: 'm16.tahap.lewat_target',          // -> PIC + lead divisi + AM
+  PermintaanDiajukan: 'm16.permintaan.diajukan',       // -> tujuan (AM / Finance)
+  PermintaanJatuhTempo: 'm16.permintaan.jatuh_tempo',  // -> pengaju + tujuan + lead
+
 } as const;
 
 /** A cataloged event type. */
@@ -238,6 +257,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
       'M8 Ads eskalasi ROAS underperforming — 1 event (m8.ads.roas_underperforming: ROAS < target 2 periode berturut → AM pemilik + SPV Ads)',
     eventCount: 1,
     decisionRef: 'docs/DECISIONS.md 2026-08-18 (C4 — pemilik setuju membuka satu event katalog)',
+  },
+  {
+    version: 12,
+    description:
+      'M16 Lead Time + M17 — 7 event: 3 Brief (dispatched → lead divisi tujuan, menutup lubang "dispatch tanpa notifikasi"; diterima_divisi / dikembalikan → AM pemilik), 2 tahapan (butuh_aksi_am HANYA untuk tahap ber-gate; lewat_target → PIC + lead + AM), 2 Permintaan REQ- (diajukan, jatuh_tempo). Didaftarkan sekaligus dalam SATU bump karena dua stream paralel mengerjakan emitternya masing-masing.',
+    eventCount: 7,
+    decisionRef: 'docs/DECISIONS.md 2026-08-28 (M16) + docs/handoff/PARALEL_M16_DUA_AKUN.md F-4',
   },
 ] as const;
 
@@ -373,6 +399,17 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
   // --- v11 (M8 Ads — C4). Description/resolver must match the migration seed
   // (20260818040000_m8_roas_underperforming_notif.sql). ---
   [EVENTS.AdsRoasUnderperforming]: { description: 'ROAS di bawah target 2 periode berturut (§8 Rule 4 / M8-OA-5) — ke AM pemilik + SPV Ads', resolver: 'explicitOrLeads', version: 11 },
+
+  // --- v12 (M16 Lead Time + M17). Description/resolver WAJIB sama persis
+  // dengan seed migrasi 20260829001000_m16_fondasi.sql — `notif_catalog.reals.test.ts`
+  // membandingkan (event_type, catalog_version, resolver) set-equal TS↔DB. ---
+  [EVENTS.BriefDispatched]: { description: 'Brief didispatch AM ke divisi — ke lead divisi tujuan', resolver: 'leadsOfDivision', version: 12 },
+  [EVENTS.BriefDiterimaDivisi]: { description: 'Divisi menerima & memproses Brief (Cek Brief AM) — ke AM pemilik klien', resolver: 'explicit', version: 12 },
+  [EVENTS.BriefDikembalikan]: { description: 'Brief dikembalikan ke AM oleh divisi + alasan terstruktur — ke AM pemilik klien', resolver: 'explicit', version: 12 },
+  [EVENTS.TahapButuhAksiAm]: { description: 'Tahapan mencapai gate yang menunggu AM/klien — ke AM pemilik klien', resolver: 'explicit', version: 12 },
+  [EVENTS.TahapLewatTarget]: { description: 'Tahapan melewati target hari kerjanya — ke PIC + lead divisi + AM pemilik', resolver: 'explicitOrLeads', version: 12 },
+  [EVENTS.PermintaanDiajukan]: { description: 'Permintaan (REQ-) diajukan divisi — ke tujuan (AM / Finance)', resolver: 'explicitOrLeads', version: 12 },
+  [EVENTS.PermintaanJatuhTempo]: { description: 'Permintaan (REQ-) lewat jatuh tempo 1 hari kerja — ke pengaju + tujuan + lead divisi', resolver: 'explicitOrLeads', version: 12 },
 };
 
 /** All registered event types (introspection / tests). */

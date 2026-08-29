@@ -1091,6 +1091,16 @@ RESET ROLE;
 --     jwt_division()`. Induk `briefs_select` membawa arm-nya inline jadi TIDAK di
 --     sini; lingkupnya tak melebar sedikit pun dari induknya (siapa boleh melihat
 --     brief-nya, boleh melihat laporan mingguannya).
+--     Baris `stage_pipeline_select`/`stage_definition_select` (M16 Akun A Fase 2,
+--     20260830010000) BUKAN false-negative dan bukan tabel anak — keduanya
+--     genuinely `USING (true)`, kelas yang sama dengan `master_services_select`/
+--     `employees_select`/`notifications_select` yang sudah di ledger ini:
+--     definisi PROSES (nama tahap, urutan, target hari kerja per pipeline), nol
+--     data klien/karyawan sensitif, dibaca siapa pun yang terautentikasi supaya
+--     FE panel tahapan (LT-28) tidak butuh join lewat helper SECURITY DEFINER
+--     untuk menampilkan sekadar daftar tahapan. Kandidat baris DECISIONS.md baru
+--     (dipindahkan Akun A ke `docs/handoff/HANDOFF_M16_AKUN_A.md`, bukan ditulis
+--     langsung — aturan emas §0.3 `PARALEL_M16_DUA_AKUN.md`).
 --     Membuat detektor menembus satu tingkat indireksi akan MENGHAPUS
 --     kesebelasnya sekaligus — diusulkan sebagai **O60**, sengaja tidak
 --     dikerjakan di dalam tiket fitur: mengubah semantik invariant bersama
@@ -1112,6 +1122,7 @@ DECLARE
     'plan_gate_config_select','plan_review_select','plan_target_select',
     'prospect_attempt_nq_reasons_select',
     'prospect_attempts_select','qualified_form_services_select','qualified_forms_select',
+    'stage_definition_select','stage_pipeline_select',
     'strategi_akses_select','strategi_assumption_select','strategi_baseline_bulan_select',
     'strategi_channel_select','strategi_diagnosa_select','strategi_dispatch_select',
     'strategi_fase_select','strategi_field_visibility_select',

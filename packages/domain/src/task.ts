@@ -77,6 +77,8 @@ export const MSG_BLOCK_REQUEST_NOT_FOUND = '[permintaan block tidak ditemukan]';
 export const MSG_BLOCK_REQUEST_CLOSED = '[permintaan block sudah diproses]';
 /** An Asset cannot be submitted without an output link (M7 §4 Rule 3, verbatim PRD). */
 export const MSG_OUTPUT_LINK_REQUIRED = '[link output wajib diisi sebelum submit]';
+/** M16 §2 Rule 11 / LT-26 — a Brief may not enter [Submitted] before its stage pipeline reaches a terminal state. */
+export const MSG_STAGE_NOT_COMPLETE = '[tahapan produksi brief ini belum mencapai tahap akhir]';
 
 // ---------------------------------------------------------------------------
 // Task sources (§ source.go). One registered canonical-Task row type each; only
@@ -347,6 +349,7 @@ async function driveExecEdge(
     // complete (≥1 linked Creative Asset). No-op for non-Ads divisions and Assets.
     if (to === STATUS_SUBMITTED && src.table === 'briefs') {
       await validateBriefSubmit(tx, id, r.division);
+      await validateStageComplete(tx, id); // M16 §2 Rule 11 (LT-26) — one-way guard, see comment on the function
     }
     // Link gate: a link-requiring source (Asset) must carry an output link before
     // [Submitted] (§4 Rule 3). Persist it in the same transaction as the move.
@@ -366,6 +369,38 @@ async function driveExecEdge(
     await propagate(tx, actor, src, r);
     return res;
   });
+}
+
+/**
+ * validateStageComplete is the M16 §2 Rule 11 (LT-26) guard: a Brief may not
+ * enter [Submitted] before its `production_stage` reaches the stage pipeline's
+ * TERMINAL state (`sm_terminal_states`, keyed by the pipeline's `machine_name`).
+ * Enforced ONE-WAY here — the stage machine (`stage.ts`) never drives this
+ * `status` column itself (aturan rumah #2); this is the single place the two
+ * machines' progress is compared. A Brief with no pipeline at all
+ * (`stage_pipeline_code` null — Rule 12, e.g. Store Operation) is unrestricted:
+ * there is nothing to finish. Queries `stage_pipeline`/`sm_terminal_states`
+ * directly rather than importing `stage.ts`, to keep this module's only
+ * dependency on M16 a plain read (no cross-module coupling for one guard).
+ */
+async function validateStageComplete(tx: Queryable, briefId: string): Promise<void> {
+  const rows = await tx<{ stage_pipeline_code: string | null; production_stage: string | null; machine_name: string | null }[]>`
+    select b.stage_pipeline_code, b.production_stage, sp.machine_name
+      from briefs b
+      left join stage_pipeline sp on sp.code = b.stage_pipeline_code
+     where b.id = ${briefId}`;
+  if (rows.length === 0) {
+    return; // not-found is handled by the caller's own lockTask read
+  }
+  const r = rows[0];
+  if (r.stage_pipeline_code === null || r.machine_name === null) {
+    return; // Rule 12 — divisi tanpa pipeline, nol tahapan untuk diselesaikan
+  }
+  const terminal = await tx<{ n: string }[]>`
+    select count(*) as n from sm_terminal_states where machine = ${r.machine_name} and state = ${r.production_stage}`;
+  if (Number(terminal[0].n) === 0) {
+    throw new ConflictError(MSG_STAGE_NOT_COMPLETE);
+  }
 }
 
 /**
@@ -843,6 +878,21 @@ export interface Metrics {
   revisionFlagged: boolean;
   approvedAt: Date | null;
   approvedPeriodWib: string; // "YYYY-MM" (WIB), "" if not approved
+  // --- M16 §6 / LT-30 — AM review latency, split out of turnaroundHours. ---
+  // `turnaroundHours` above is UNCHANGED (PRD §6.3 cutover: kept byte-identical
+  // so historical PERF- snapshots stay reproducible, and shown side-by-side in
+  // FE for 1-2 periods). These three are the new numbers layered on top, all
+  // from the SAME log, all null under the same gate as turnaroundHours (no
+  // first [In Progress] / first [Approved] pair yet).
+  /** turnaroundHours MINUS the AM wait window (waktuAmBelumBuka + waktuAmReview) — division Speed Score basis from now on (§6.2). */
+  turnaroundKerjaHours: number | null;
+  /** [Submitted] → [In Review] — PURE AM latency (the only one of the three that gets a KPI weight, §6.4). */
+  waktuAmBelumBukaHours: number | null;
+  /** [In Review] → [Approved] — may include client consultation time; diagnostic, never weighted. */
+  waktuAmReviewHours: number | null;
+  /** turnaroundKerjaHours ÷ sla (Rule 12 math, same as speedScorePct) — the number M14 division Speed Score components read from now on (§6.2/LT-31). `speedScorePct` above is kept UNCHANGED for the side-by-side display. */
+  speedScoreKerjaPct: number | null;
+  speedScoreKerjaDisplay: string;
 }
 
 /** One status change: the state entered and when. */
@@ -878,16 +928,45 @@ export function computeMetrics(
     }
   }
   let turnaroundHours: number | null = null;
+  let turnaroundKerjaHours: number | null = null;
+  let waktuAmBelumBukaHours: number | null = null;
+  let waktuAmReviewHours: number | null = null;
   let approvedAt: Date | null = null;
   let approvedPeriodWib = '';
   if (firstInProg !== null && firstApproved !== null) {
-    const totalMs = firstApproved.getTime() - firstInProg.getTime() - blockedMs(evs, firstInProg, firstApproved);
+    const blocked = intervalMs(evs, firstInProg, firstApproved, STATUS_BLOCKED);
+    const totalMs = firstApproved.getTime() - firstInProg.getTime() - blocked;
     turnaroundHours = totalMs / MS_PER_HOUR;
     approvedAt = firstApproved;
     approvedPeriodWib = tz.dateString(firstApproved).slice(0, 7); // "YYYY-MM" (WIB), matches Go's "2006-01"
+
+    // M16 §6 (LT-30) — same interval-sum SHAPE as blockedMs, on the two windows
+    // that make up "waiting on/for the AM" (§6.2 table): [Submitted]→[In Review]
+    // is pure AM latency, [In Review]→[Approved] may include client back-and-forth.
+    // Both summed across EVERY submit/revision cycle within [firstInProg,
+    // firstApproved) — a Brief with revision rounds waits on the AM more than
+    // once, and each wait counts (mirrors how blockedMs already sums every
+    // [Blocked] interval, not just the first).
+    //
+    // intervalMs closes each window at the IMMEDIATELY NEXT transition, whatever
+    // it is — NOT "search ahead for a specific destination state". [In Review]
+    // has two possible next states ([Approved] or [Revision Requested]), so
+    // searching ahead for [Approved] specifically would skip straight past an
+    // intervening revision round and attribute a much later Approved to an
+    // earlier, unrelated review window. [Blocked] doesn't have this ambiguity
+    // (its only edge is → [In Progress]), so this is a no-op change for it.
+    const amBelumBukaMs = intervalMs(evs, firstInProg, firstApproved, STATUS_SUBMITTED);
+    const amReviewMs = intervalMs(evs, firstInProg, firstApproved, STATUS_IN_REVIEW);
+    waktuAmBelumBukaHours = amBelumBukaMs / MS_PER_HOUR;
+    waktuAmReviewHours = amReviewMs / MS_PER_HOUR;
+    turnaroundKerjaHours = (totalMs - amBelumBukaMs - amReviewMs) / MS_PER_HOUR;
   }
   const revisionTurnaroundHours = revisionTurnaround(evs);
   const [speedScorePct, speedScoreDisplay] = speedScore(turnaroundHours, sla);
+  // M16 §6.2/LT-31 — the kerja-basis Speed Score division components read from
+  // now on. Same `speedScore()` math as the (unchanged) line above, over
+  // `turnaroundKerjaHours` instead of `turnaroundHours`.
+  const [speedScoreKerjaPct, speedScoreKerjaDisplay] = speedScore(turnaroundKerjaHours, sla);
   // Revision speed score = revision turnaround ÷ revision SLA (M7-OA-3). Null revision
   // SLA (always for a Brief-as-task) → "N/A"; a zero revision SLA → "—".
   const [revisionSpeedScorePct, revisionSpeedScoreDisplay] = speedScore(revisionTurnaroundHours, revisionSla);
@@ -895,27 +974,35 @@ export function computeMetrics(
     slaTargetHours: sla, turnaroundHours, revisionTurnaroundHours, speedScorePct, speedScoreDisplay,
     revisionSlaTargetHours: revisionSla, revisionSpeedScorePct, revisionSpeedScoreDisplay,
     revisionCount, revisionFlagged: revisionCount >= REVISION_FLAG_THRESHOLD, approvedAt, approvedPeriodWib,
+    turnaroundKerjaHours, waktuAmBelumBukaHours, waktuAmReviewHours, speedScoreKerjaPct, speedScoreKerjaDisplay,
   };
 }
 
-/** blockedMs sums every [Blocked] → [In Progress] interval beginning within [start, end). */
-function blockedMs(evs: Transition[], start: Date, end: Date): number {
+/**
+ * intervalMs sums every `fromState` → next-transition interval that BEGINS
+ * within [start, end) (capped at `end` if the next transition falls after it,
+ * or never arrives). "Next transition" is deliberately the IMMEDIATELY
+ * following event, not a search ahead for one particular destination state:
+ * [Blocked] only ever resumes via [In Progress], so that reduces to the same
+ * thing for the original use (turnaround's blocked-time exclusion), but
+ * [In Review] can go to EITHER [Approved] or [Revision Requested] (M16 §6,
+ * LT-30) — searching ahead for [Approved] specifically would skip straight
+ * past an intervening revision round and misattribute a much later approval
+ * to an earlier, unrelated review window.
+ */
+function intervalMs(evs: Transition[], start: Date, end: Date, fromState: string): number {
   let sum = 0;
   for (let i = 0; i < evs.length; i++) {
-    if (evs[i].to !== STATUS_BLOCKED) {
+    if (evs[i].to !== fromState) {
       continue;
     }
-    const tb = evs[i].at;
-    if (tb.getTime() < start.getTime() || tb.getTime() >= end.getTime()) {
+    const tFrom = evs[i].at;
+    if (tFrom.getTime() < start.getTime() || tFrom.getTime() >= end.getTime()) {
       continue;
     }
-    for (let j = i + 1; j < evs.length; j++) {
-      if (evs[j].to === STATUS_IN_PROGRESS) {
-        const tr = evs[j].at.getTime() > end.getTime() ? end.getTime() : evs[j].at.getTime();
-        sum += tr - tb.getTime();
-        break;
-      }
-    }
+    const next = i + 1 < evs.length ? evs[i + 1].at : end;
+    const tTo = next.getTime() > end.getTime() ? end.getTime() : next.getTime();
+    sum += tTo - tFrom.getTime();
   }
   return sum;
 }
