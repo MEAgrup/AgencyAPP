@@ -84,19 +84,21 @@ Status Ads dipetakan ke mesin **`ADC-`** yang sudah ada — `ADC-` tetap satu-sa
 
 ### 4.3 KOL
 
-`Cek Brief AM → Buat Campaign (1hk) → Approach Creator & Sebar Link Product (3hk) → Buat & Update Daftar Creator (1hk) → Nego & Dealing Creator (2hk) → Approval Sampel (1hk, gate KLIEN) → Follow up Video Creator (14hk) → QC & Approval Video Creator (14hk)`
+`Cek Brief AM → Buat Campaign (1hk) → Approach Creator & Sebar Link Product (3hk) → Buat & Update Daftar Creator (1hk) → Nego & Dealing Creator (2hk) → Approval Sampel (1hk, gate KLIEN) → Follow up Video Creator (14hk) → QC & Approval Video Creator (1hk)`
 
 - Alasan pengembalian brief: `Brief kurang jelas` · `Data tidak lengkap`.
 - **Tipe Program KOL:** `Open-plan` · `Targeted-plan` · `TAP` · `Influencer/BA`.
   **TAP** = program TikTok yang membagi komisi seller langsung antara creator dan agency. **BA** = Brand Ambassador untuk produk seller. Keduanya teks tampilan, tidak jadi logika.
 - `BKG-` (Creator Booking, M9) **tidak disentuh** — tahapan ada di level Brief.
-- Dua tahap terakhir bertarget 14 hk walau bergantung creator eksternal (keputusan pemilik: tanpa deadline tahap ini paling mudah menggantung). Lihat `DECISIONS.md` LT-3.
+- `Follow up Video Creator` bertarget 14 hk walau bergantung creator eksternal (keputusan pemilik: tanpa deadline tahap ini paling mudah menggantung). Jendela 14 hk itu **hanya** miliknya — LT-3 dijawab pemilik 2026-08-29 ("14 hari kerja hanya untuk follow up memastikan video di post, sisanya buat sesuai standar"), jadi `QC & Approval Video Creator` memakai standar QC internal CDPS = 1 hk, sama dengan setiap checkpoint QC lain. Lihat `DECISIONS.md` LT-3.
 
 ### 4.4 Live Stream
 
-`Terima Sampel → Briefing Klien Live → Live Start`
+`Terima Brief AM (gerbang intake, gate_pihak=AM keluar) → Terima Sampel → Briefing Klien Live → Live Start`
 
 Pelaporan progres vendor. **Tidak menyentuh mesin `LSS-`** sama sekali — rekonsiliasi vendor M10 tetap utuh. Menyimpang dari M6 §6 Rule 2 + M10 yang menyatakan Live tanpa status kerja internal; dicatat di `DECISIONS.md`.
+
+**LT-5 (pemilik 2026-08-29): Live Stream bukan lagi pengecualian dari gerbang intake wajib §2 Rule 10.** Ia mendapat checkpoint pertama yang sama seperti keempat pipeline lain — secara `stage_code` PERSIS `Cek Brief AM` (supaya `reviewBrief` menggerakkannya lewat kontrak yang sudah ada, nol kode TS), tapi **label tampil "Terima Brief AM"** sesuai permintaan pemilik ("nama baru yg lebih relevan" — pekerjaan Live dikerjakan vendor, jadi "menerima brief dari AM" lebih pas daripada "memeriksa"). Divergensi label/kode ini adalah kasus pertama LT-7 dipakai sungguhan. Brief yang dikembalikan bisa dikirim ulang lewat edge balik yang sama seperti LT-4 (gerbang `gate_pihak='AM'`). Lihat `DECISIONS.md` LT-5.
 
 ### 4.5 AI Optimizer (M17)
 
@@ -215,7 +217,9 @@ Berlaku **seketika**. Periode yang sudah ditutup **tidak disentuh**; periode yan
 
 Component key baru `kecepatan_review_am` (sumber: `waktuAmBelumBuka`) didaftarkan dengan **bobot 0**. M14 Rule 6 meredistribusi bobot komponen yang tidak tersedia, jadi **tidak ada skor AM yang bergeser** sampai Director menetapkan angkanya lewat `perf_kpi_weights` — data, bukan kode, dengan Σ per `role_type` = 100 ditegakkan server. Lihat `DECISIONS.md` LT-1.
 
----
+**LT-1 DIPUTUS (pemilik/COO, 2026-08-29):** bobot ditetapkan **10%**, di-carve proporsional dari profil AM (45/22,5/22,5/10 → 40,5/20,25/20,25/9 + 10). Target normalisasi diseed **24 jam**, `is_placeholder=true` (angka belum dikonfirmasi COO).
+
+**LT-9 DIPUTUS (pemilik, 2026-08-29, "ya perlu diperluas"):** portofolio Task yang mengumpankan `kecepatan_review_am` DAN `revision_escalation_rate` (komponen skor AM yang sudah ada) diperluas dari Creative Assets + Ads Briefs menjadi **Creative Assets + Briefs-as-Task di Ads, AI Optimizer, DAN Store Operation** — ketiganya sama-sama mengalir lewat mesin `brief_task` (§7). KOL dan Live Stream TIDAK ikut: KOL dilacak lewat `BKG-` Creator Booking (entitas berbeda), Live Stream adalah pelaporan progres vendor tanpa status kerja `brief_task` internal (§4.4).
 
 ## 7. Success Metrics
 

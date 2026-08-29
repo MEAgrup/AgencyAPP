@@ -1,5 +1,11 @@
 # HANDOFF — Mulai dari sini untuk melanjutkan M16/M17
 
+> ### ⚠️ Ada handoff bernomor lebih tinggi
+> Baca **`docs/handoff/HANDOFF_M16_PR252_20260829.md` DULU** — PR #252 (7
+> keputusan §2 di bawah + 2 fix bug FE Ads) dibuka sesi 2026-08-29 dan
+> statusnya (CI/merge) berubah cepat. Dokumen ini tetap referensi utuh untuk
+> teks asli 11 pertanyaan §2, tapi bukan lagi yang paling mutakhir soal PR.
+
 > **Baca dokumen ini SEBELUM menyentuh apa pun terkait M16/M17.** Ia adalah
 > ringkasan navigasi ke dokumen yang sudah ada di repo — tidak menduplikasi
 > isinya, hanya memberi tahu urutan baca, apa yang benar-benar tersisa, dan
@@ -24,6 +30,21 @@ bawah) plus satu item terblokir spec keamanan (`LT-61`, jangan disentuh) dan
 satu item implementasi yang menunggu tim mulai memakai fiturnya (halaman FE
 Ads/Permintaan). Nol yang mendesak — semuanya punya default aman sudah
 berjalan di produksi hari ini.
+
+> ### ✅ Pembaruan 2026-08-29 (dua putaran) — 7 dari 11 pertanyaan SUDAH DIJAWAB & DIPASANG
+>
+> Pemilik menjawab **LT-1 (sebagian), LT-3, LT-4, LT-5, LT-6, LT-7, LT-9**
+> lewat dua putaran percakapan sesi ini; semuanya sudah diimplementasi —
+> migrasi data untuk LT-1/3/4/5 (`20260901010000`..`20260901040000`), satu
+> perubahan kode TS untuk LT-9 (`performance.ts`, portofolio skor AM), dan
+> LT-6/LT-7 murni konfirmasi tertulis (nol kode). Semua disertai test +
+> entri `DECISIONS.md` masing-masing. **§2 di bawah dipertahankan apa adanya
+> sebagai teks pertanyaan aslinya** — status tiap baris ada di kepala baris
+> itu. Yang benar-benar masih menunggu Anda: **LT-2 & LT-8** ("menyusul",
+> sengaja dijawab bersamaan), **LT-10, LT-11**, plus dua sisa LT-1:
+> konfirmasi angka target 24 jam dan bobot `role_type` AI Optimizer + Store
+> Operation. Status tiket otoritatif: `docs/backlog/LEADTIME_BACKLOG.md`
+> Fase 6.
 
 ---
 
@@ -51,6 +72,15 @@ Menjawab salah satu TIDAK memblokir yang lain — bisa dicicil.
 
 ### LT-1 — Bobot skor AM/divisi baru (perlu COO)
 
+> ✅ **DIJAWAB SEBAGIAN 2026-08-29** — Anda menjawab "jalankan rekomendasi".
+> Bobot ditetapkan **10%** (lantai rentang 10–15% yang direkomendasikan, sama
+> persis preseden RM-9a yang dikutipnya); profil AM kini 40,5 / 20,25 / 20,25
+> / 9 / **10**. Menaikkannya ke 15% = satu migrasi, nol kode — bilang saja.
+> **Dua hal masih menunggu Anda:** (a) bobot saja ternyata tidak cukup —
+> komponennya dikecualikan selama tak ada baris target, jadi diseed target
+> **24 jam** ber-flag PLACEHOLDER; angka itu **belum Anda konfirmasi**.
+> (b) bobot `role_type` AI Optimizer + Store Operation tetap Σ=0.
+
 **Sekarang:** `kecepatan_review_am` (skor AM) dan `role_type` AI
 Optimizer + Store Operation semua berbobot **0** — lead time-nya sudah
 terukur dan terlihat, tapi belum menggerakkan skor siapa pun.
@@ -77,6 +107,10 @@ gelombang pertama — bisa dinaikkan lagi setelah dilihat sebulan.
 
 ### LT-2 — Daftar & urutan kerja Store Operation
 
+> ⏳ **MENUNGGU ANDA 2026-08-29** — "akan saya berikan menyusul". Pipeline
+> `STORE_OPS` sengaja tetap kosong sampai daftarnya ada. LT-8 (alasan
+> pengembalian brief Store Operation) sengaja ditahan agar dijawab bersamanya.
+
 **Sekarang:** Divisi terdaftar, brief bisa didispatch, tapi pipeline
 kosong (tanpa tahapan) — sudah disebut tanpa urutan: **Banding
 Pelanggaran**, **Setup Promo Toko**, **QC Konten Toko**.
@@ -98,6 +132,11 @@ migrasi susulan begitu ada pengalaman nyata dari tim Store Operation.
 
 ### LT-3 — Target 14 hk KOL: per-tahap atau gabungan?
 
+> ✅ **DIJAWAB & SELESAI 2026-08-29** — "14 hari kerja hanya untuk follow up
+> memastikan video di post, sisanya buat sesuai standar". Terpasang:
+> `Follow up Video Creator` **14 hk**, `QC & Approval Video Creator` **1 hk**
+> (standar QC internal CDPS). PRD §4.3 + `STATE_MACHINES.md` §18 disesuaikan.
+
 **Sekarang:** `Follow up Video Creator` DAN `QC & Approval Video Creator`
 masing-masing target **14 hk** (jadi total bisa sampai 28 hk kalau
 keduanya penuh).
@@ -116,6 +155,12 @@ angka di seed, nol perubahan desain).
 ---
 
 ### LT-4 — Brief yang dikembalikan ke AM: perlu jalur kirim-ulang otomatis?
+
+> ✅ **DIJAWAB & SELESAI 2026-08-29** — "jalankan rekomendasi B". Edge balik
+> `Brief Dikembalikan ke AM → Cek Brief AM` terpasang di 4 pipeline, dan yang
+> menekan tombolnya adalah **AM pemilik klien** (atau Director), bukan divisi
+> yang menolak — itu butuh satu baris `stage_definition` ber-`gate_pihak='AM'`
+> di luar edge-nya, kalau tidak justru kebalikannya yang terjadi.
 
 **Sekarang:** `Brief Dikembalikan ke AM` adalah dead-end — begitu masuk
 situ, Brief mandek permanen di tahap itu. Divisi tetap bisa menulis alasan
@@ -136,6 +181,13 @@ daripada harus membuat Brief baru untuk pekerjaan yang sama.
 ---
 
 ### LT-5 — Live Stream sengaja tanpa `Cek Brief AM`?
+
+> ✅ **DIJAWAB & SELESAI 2026-08-29** — "Live Stream buat Cek Brief AM /
+> Terima Brief AM (nama baru yg lebih relevan)". Terpasang: checkpoint
+> pertama Live tetap `stage_code='Cek Brief AM'` (supaya mesinnya digerakkan
+> lewat kontrak `reviewBrief` yang sama, nol kode TS), tapi tampil sebagai
+> **"Terima Brief AM"** — kasus pertama label berbeda dari kode (LT-7).
+> Edge kirim-ulang LT-4 ikut dipasang untuk Live juga.
 
 **Sekarang:** Live Stream langsung mulai di `Terima Sampel`, tidak pernah
 melewati state `Cek Brief AM` — walau PRD menulis gerbang itu "wajib di
@@ -159,6 +211,10 @@ proses booking terpisah.
 
 ### LT-6 — Konfirmasi arti `gate_pihak='AM'`
 
+> ✅ **DIKONFIRMASI 2026-08-29** — "jalankan rekomendasi" (rekomendasinya
+> sendiri murni konfirmasi). Betul: gerbang PERAN, tahap TETAP terhitung
+> lead time. Nol kode berubah, didokumentasikan di `STATE_MACHINES.md` §18.
+
 **Sekarang:** `gate_pihak='AM'` diperlakukan sebagai gerbang **peran**
 (hanya AM pemilik klien/Director yang boleh menjalankan transisi keluar
 dari tahap itu) — bukan pengecualian dari lead time. Contoh: tahap
@@ -176,6 +232,11 @@ segera kalaupun jawabannya "ya sudah benar".
 ---
 
 ### LT-7 — Label tampil tahap ≠ kode tahap?
+
+> ✅ **DIKONFIRMASI 2026-08-29** — "aman dibiarkan kosmetik". Tetap identik
+> di mana pun, kecuali SATU pengecualian yang kini benar-benar memakainya:
+> checkpoint intake Live Stream (LT-5), kode `Cek Brief AM` / label
+> `Terima Brief AM`.
 
 **Sekarang:** `stage_definition.label` (nama yang tampil di UI) diisi
 identik dengan `stage_code` (kode internal) — mis. "Script" tampil sebagai
@@ -210,6 +271,17 @@ Jawab bersamaan dengan LT-2, bukan terpisah.
 ---
 
 ### LT-9 — Perluas skor AM ke portofolio AI Optimizer/Store Operation?
+
+> ✅ **DIJAWAB & SELESAI 2026-08-29** — "Ya perlu diperluas". Portofolio
+> `amPortfolioApprovedInPeriod` (dipakai `revision_escalation_rate` DAN
+> `kecepatan_review_am`) sekarang mencakup Brief Ads + AI Optimizer + Store
+> Operation. KOL dan Live Stream tetap di luar (entitas/mesin berbeda). Ini
+> perubahan KODE (bukan migrasi data) — lihat `performance.ts`.
+
+> ⏳ **MASIH MENUNGGU ANDA** — LT-1 sudah dijawab tetapi ini tidak disinggung,
+> jadi cakupan portofolio dibiarkan apa adanya. Taruhannya kini lebih besar:
+> `kecepatan_review_am` sudah berbobot 10% (bukan 0), jadi memperluas
+> portofolio sekarang menggerakkan **dua** komponen skor AM, bukan satu.
 
 **Sekarang:** `kecepatan_review_am` (bobot 0, LT-1) sengaja BELUM
 mencakup Brief AI Optimizer/Store Operation, walau keduanya sejak M16

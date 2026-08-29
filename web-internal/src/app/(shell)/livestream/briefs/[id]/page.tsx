@@ -215,6 +215,13 @@ export default function LiveStreamBriefDetailPage({ params }: { params: Promise<
         briefId={brief.id}
         assignedDivision={brief.assigned_division}
         canReview={canAdvanceLiveStage(role)}
+        // LT-5 (Live Stream now has its own Cek Brief AM / "Terima Brief AM"
+        // gate) + LT-4 symmetry: the resend edge out of `Brief Dikembalikan ke
+        // AM` is gate_pihak='AM', so it belongs to the client's AM, not the
+        // Live Stream team that rejected it — canAdvanceLiveStage above is a
+        // DIVISION gate and never covers the AM. canManageLiveStream is this
+        // page's own existing UX approximation of "owning AM or Director".
+        isAmOwner={canManageLiveStream(role)}
       />
 
       <section className="card">

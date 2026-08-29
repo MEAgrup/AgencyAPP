@@ -1391,12 +1391,24 @@ interface PortfolioTaskMetric {
 }
 
 /**
+ * LT-9 (pemilik 2026-08-29, "ya perlu diperluas"). The AM portfolio's Brief-as-Task
+ * side now covers every division whose Briefs flow through the `brief_task`
+ * submit/review machine (`status`, not `production_stage`) — Ads, AND the two
+ * M16 divisions that landed on the SAME machine (AI Optimizer, Store Operation).
+ * Both are still weight-0 role_types (LT-1) for their OWN score, but that is
+ * orthogonal to whether their Briefs count in the AM's portfolio — the AM is
+ * scored on latency/revision regardless of which division the client's work
+ * sits in. Live Stream/KOL are excluded on purpose: neither runs a Brief
+ * through this status machine (Live is vendor progress reporting; KOL work is
+ * tracked via `BKG-` Creator Bookings, a different entity entirely).
+ */
+const AM_PORTFOLIO_BRIEF_DIVISIONS = [ADS_BRIEF_DIVISION, AI_OPT_DIVISION, STORE_OPS_DIVISION];
+
+/**
  * amPortfolioApprovedInPeriod gathers the AM portfolio's Tasks (Creative Assets +
- * Ads Briefs — SAME scope `amRevisionEscalation` has always used; M16/LT-33's new
- * divisions are NOT added here, a deliberate scope decision left open in
- * HANDOFF_M16_AKUN_A.md since both are weight-0 today and nobody's score moves
- * either way), period-approved-filtered, ONE round-trip set (P-1) shared by both
- * `amRevisionEscalation` and `amReviewSpeedCandidate` — same Tasks, two folds.
+ * Briefs-as-Tasks across `AM_PORTFOLIO_BRIEF_DIVISIONS`, LT-9), period-approved-
+ * filtered, ONE round-trip set (P-1) shared by both `amRevisionEscalation` and
+ * `amReviewSpeedCandidate` — same Tasks, two folds.
  */
 async function amPortfolioApprovedInPeriod(q: Queryable, clientIDs: string[], per: Period): Promise<PortfolioTaskMetric[]> {
   if (clientIDs.length === 0) {
@@ -1414,7 +1426,7 @@ async function amPortfolioApprovedInPeriod(q: Queryable, clientIDs: string[], pe
   const briefs = await q<{ id: string; sla_target_hours: string | null }[]>`
     select b.id, b.sla_target_hours
       from briefs b join services sv on sv.id = b.service_id
-     where sv.client_id = any(${clientIDs}) and b.assigned_division = ${ADS_BRIEF_DIVISION}`;
+     where sv.client_id = any(${clientIDs}) and b.assigned_division = any(${AM_PORTFOLIO_BRIEF_DIVISIONS})`;
   const assetLog = await loadTransitions(q, 'asset', assets.map((r) => r.id));
   const briefLog = await loadTransitions(q, 'brief', briefs.map((r) => r.id));
 
