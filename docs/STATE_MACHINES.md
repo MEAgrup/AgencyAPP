@@ -373,7 +373,7 @@ Tahap pertama setiap pipeline. Divisi memilih *Terima & proses* (lanjut) atau *B
 ## 19. Permintaan `REQ-` (M16 §5.5) — mesin #.., permintaan divisi yang TERKAIT KLIEN
 `[Diajukan]` → `[Diproses]` → `[Selesai]`; `[Diajukan]` | `[Diproses]` → `[Ditolak]`. Terminal: `[Selesai]`, `[Ditolak]`.
 
-Jenis: `Top-up Saldo` (Ads → AM), `Contract Creator` (KOL), `Creator Payment Approval` (KOL → Finance, menyambung `CPR-` M9 yang sudah ada).
+Jenis: `Top-up Saldo` (Ads → **Finance**, LT-11), `Contract Creator` (KOL → **AM pemilik klien**, satu-satunya jenis yang dirute ke AM — LT-11), `Creator Payment Approval` (KOL → Finance, menyambung `CPR-` M9 yang sudah ada). Routing dikonfirmasi pemilik 2026-08-29 (LT-11); sebelumnya Top-up Saldo & Contract Creator berdua dirute ke AM sebagai tebakan implementasi.
 
 - **Kenapa entitas sendiri, bukan `TSK-` (§17).** `internal_tasks` sengaja **tidak punya** `client_id`/`service_id` — §17 menyatakan melonggarkannya "akan membongkar gerbang pembayaran M4/M5". Permintaan Top-up Saldo jelas terkait klien (saldo iklan klien), jadi ia tidak boleh menumpang di sana. Sebaliknya ia juga bukan "Task" M12 (= Asset | Creator Booking | Brief-as-task), karena bukan deliverable yang di-review AM.
 - Deadline **1 hari kerja** lewat `working_days_between` — bukan 24 jam, bukan 1 hari kalendar (keputusan pemilik; requirement semula menulis keduanya).

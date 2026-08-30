@@ -19,7 +19,7 @@
 | 3 | Ads | ✅ SELESAI (Akun B) |
 | 4 | `REQ-` + AI Optimizer | ✅ SELESAI (Akun B) |
 | 5 | Portal vendor Live | (a) ✅ SELESAI · (b) ⬜ TERBLOKIR |
-| 6 | Resolusi keputusan pemilik (LT-1..LT-11) | 🟡 BERJALAN — LT-1 (sebagian) / LT-3 / LT-4 ✅ terpasang 2026-08-29 |
+| 6 | Resolusi keputusan pemilik (LT-1..LT-11) | 🟡 BERJALAN — LT-1 (sebagian) / LT-3 / LT-4 / LT-5 / LT-10 / LT-11 ✅ terpasang/dikonfirmasi 2026-08-29; LT-2/LT-8 masih menunggu pemilik |
 
 ---
 
@@ -40,7 +40,8 @@ terjawab tetap berjalan dengan default amannya di produksi hari ini.
 | LT-7 | Label tampil tahap ≠ kode tahap? | ✅ **SELESAI** — dikonfirmasi aman dibiarkan identik; satu-satunya pengecualian sekarang adalah checkpoint intake Live Stream (LT-5) |
 | LT-9 | Perluas skor AM ke portofolio AI Optimizer/Store Operation | ✅ **SELESAI** — `amPortfolioApprovedInPeriod` digeneralisasi ke `AM_PORTFOLIO_BRIEF_DIVISIONS = [Ads, AI Optimizer, Store Operation]` (KOL/Live Stream tetap di luar — entitas/mesin berbeda). Ini kode TS, bukan data. Test `performance.test.ts` "LT-9: …" ×2 |
 | LT-2, LT-8 | Daftar Store Operation + alasan pengembalian brief-nya | ⬜ **MENUNGGU PEMILIK** — "menyusul". LT-8 sengaja ditahan agar dijawab bersama LT-2 |
-| LT-10, LT-11 | Ads Management Date satuan hari · Routing Permintaan | ⬜ **MENUNGGU PEMILIK** — default aman sudah berjalan; lihat `docs/handoff/HANDOFF_M16_SESI_LANJUTAN.md` §2 |
+| LT-10 | Ads Management Date satuan hari | ✅ **SELESAI** — dikonfirmasi HARI KALENDER; nol kode berubah (implementasi `addCalendarDays` sudah benar sejak awal). PRD §Ads Management Date + `DATA_MODEL.md` M16 diperjelas eksplisit |
+| LT-11 | Routing Permintaan (`REQ-`) | ✅ **SELESAI** — `Top-up Saldo`→Finance, `Contract Creator`→AM pemilik klien (satu-satunya jenis ke AM), `Creator Payment Approval`→Finance (tidak berubah). Kode `resolveTujuan` (`req.ts`), nol migrasi (tidak ada CHECK constraint jenis↔tujuan_divisi). Test `req.test.ts`: assersi Top-up Saldo→Finance + test baru Contract Creator→AM; lifecycle/keterlambatan/reads dipindah dari Top-up Saldo ke Contract Creator supaya cakupan AM-routing tetap teruji |
 
 ---
 
