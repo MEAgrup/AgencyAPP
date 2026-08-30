@@ -5,11 +5,10 @@
 > minimum for Module 15's Client Portal). Raised by
 > `docs/handoff/HANDOFF_LT60_SELESAI_LT61_SPEC_20260830.md`.
 
-**Status: IMPLEMENTED (core) 2026-09-03.** Auth realm, data model, and the
-`packages/domain`/`apps/api` write/read gates are built and tested (§9). Not
-built: any vendor-facing FE (`web-internal` gained zero vendor UI; a vendor
-today can only be exercised via the API directly) — that is follow-up work,
-not part of this spec's minimum.
+**Status: IMPLEMENTED (core + FE) 2026-08-30.** Auth realm, data model, and the
+`packages/domain`/`apps/api` write/read gates are built and tested (§9). The
+vendor-facing FE (`web-internal` `/vendor/*` route group) is now built too —
+see §5/§8 and `docs/handoff/HANDOFF_LT61_CORE_SELESAI_FE_VENDOR_20260830.md`.
 
 ## 0. Scope decisions (owner)
 
@@ -153,10 +152,11 @@ log results** — everything up to `[Completed]`, never reconciliation:
 
 ## 5. Rate limiting
 
-- Not built in this pass — there is no vendor-facing login page yet (no FE),
-  so there is nothing to rate-limit today. Applies to whatever mechanism
-  gets chosen once a vendor login page exists (reuse the mechanism M15
-  picks, if it exists by then, rather than inventing a second one).
+- **Decided 2026-08-30 (owner, `AskUserQuestion` when the FE was built):**
+  rely on Supabase Auth's own default login rate limiting — no CDPS-side
+  mechanism (no counter table, no in-memory limiter). M15's Client Portal is
+  free to pick the same or a different mechanism independently; this is not
+  a shared component.
 
 ## 6. Session expiry
 
@@ -170,11 +170,8 @@ log results** — everything up to `[Completed]`, never reconciliation:
   `vendors.id`). No admin screen — revisit only if vendor count stops being
   tiny.
 
-## 8. What was NOT built (explicitly out of scope of this pass)
+## 8. What was NOT built (explicitly out of scope)
 
-- Any vendor-facing FE. `web-internal` has zero new pages; a vendor can only
-  be exercised by calling the API directly with a vendor-realm token today.
-- Rate limiting (§5 — nothing to rate-limit without a login page yet).
 - An admin UI for vendor account provisioning (§7).
 - Solving the multi-vendor-per-client case (§2).
 
@@ -188,14 +185,48 @@ log results** — everything up to `[Completed]`, never reconciliation:
 - `packages/domain/src/livestream.ts` — `canVendorWriteSession`,
   `resolveLiveVendorId`, `edge()`'s `allowVendor` opt-in,
   `createSession`/`confirmByVendor`/`logResults` extended,
-  `listVendorSessions` (+ `livestream.test.ts` "LT-61: vendor self-service").
+  `listVendorSessions`, `listVendorBriefs` (FE brief-discovery gap fix, see
+  handoff §3.2) (+ `livestream.test.ts` "LT-61: vendor self-service" and
+  "listVendorBriefs").
+- `packages/domain/src/auth.ts` — `getVendorMe` (the vendor `/me` read model,
+  parallel to `getMe`; + `auth.test.ts` coverage incl. under real RLS).
 - `apps/api/src/lib/auth.ts` (`requireActor` vendor fallback), `db.ts`
-  (`actorClaims` vendor branch), `wire.ts` (`SessionWire.vendor_id`), new
-  route `GET /api/v1/vendor/sessions`.
-- `web-internal/src/lib/livestream.ts` — `Session.vendor_id` (FE type kept
-  in shape-parity lock-step with the wire; no page consumes it yet).
+  (`actorClaims` vendor branch), `wire.ts` (`SessionWire.vendor_id`,
+  `VendorBriefWire`).
+- **Login fix (2026-08-30):** `POST /auth/login` branches on
+  `permission.isVendorActor` — before this, a vendor with a correct password
+  still got a 401, because the route unconditionally ran `auth.getMe`
+  (an `employees` lookup) regardless of actor kind. See
+  `docs/handoff/HANDOFF_LT61_CORE_SELESAI_FE_VENDOR_20260830.md` §2 for the
+  exact failure trace.
+- New routes: `GET /api/v1/vendor/sessions` (core), `GET /api/v1/vendor/me`,
+  `GET /api/v1/vendor/briefs` (2026-08-30).
+- **`GET /vendor/briefs` reads via `db()`, not `readAsActor`** — the SELECT
+  policies on `briefs`/`services`/`clients`/`strategi`/`strategi_pillar` are
+  all keyed on an employee claim, so under real RLS they evaluate false for
+  every vendor and the read would come back silently empty even for a
+  legitimately assigned vendor. `listVendorBriefs` already re-verifies
+  ownership per row in TS (`resolveLiveVendorId`), so `db()` costs no
+  authorization — same shape as the `recap.ts` precedent
+  (`DECISIONS.md` 2026-08-14, M6D D-09b). Proven red-then-green in
+  `livestream.test.ts` via `withClaims`. `GET /vendor/me` stays on
+  `readAsActor`: `vendors_select` is `TO authenticated USING (true)`
+  (open master data, same policy `vendor.getVendor` already relies on for
+  employees), also proven under `withClaims` in `auth.test.ts`.
+- `web-internal/src/lib/livestream.ts` — `Session.vendor_id`, `VendorBrief`,
+  `listVendorSessions`/`listVendorBriefs`; `web-internal/src/lib/types.ts` —
+  `VendorProfile`/`VendorMeResponse`; `web-internal/src/lib/vendor-auth-context.tsx`
+  — the vendor realm's own auth context (separate from `auth-context.tsx`,
+  own `/vendor/me` read model, own sessionStorage key).
+- `web-internal/src/app/vendor/**` — the FE itself: `layout.tsx` (guard +
+  minimal header, no Sidebar/internal nav), `login/page.tsx`, `page.tsx`
+  (Session list), `sessions/new/page.tsx` (create — Brief picker via
+  `listVendorBriefs`), `sessions/[id]/page.tsx` (confirm + log-results;
+  deliberately does NOT fetch the parent Brief, unlike the internal
+  equivalent — `GET /briefs/{id}` gates on employee-only reads).
 - Table-count gates bumped 133→134 (`scripts/db-rebuild.sh`, `.github/workflows/ci.yml`)
-  — `vendor_accounts` only; zero new prefix/machine/notif event.
+  — `vendor_accounts` only; zero new prefix/machine/notif event. The FE pass
+  added zero migrations (134/37/30/67 unchanged).
 
 ## 10. Reference
 

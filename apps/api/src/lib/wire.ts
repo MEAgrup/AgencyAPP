@@ -1728,6 +1728,17 @@ export function sessionToWire(s: livestream.Session): SessionWire {
   return w;
 }
 
+/** LT-61 FE — one Brief a vendor may create a new Session under. */
+export interface VendorBriefWire {
+  id: string;
+  client_toko: string;
+}
+
+/** Maps a domain VendorBrief (camelCase) to the snake_case wire shape. */
+export function vendorBriefToWire(b: livestream.VendorBrief): VendorBriefWire {
+  return { id: b.id, client_toko: b.clientToko };
+}
+
 // --- M3 Campaign (acquisition CMP-): mirror the Go module3_campaign JSON tags ---
 
 /** module3_campaign.Campaign — the acquisition Campaign (CMP-) record (end_date nullable). */

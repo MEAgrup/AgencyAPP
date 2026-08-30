@@ -552,6 +552,8 @@ const WIRE_TO_FE: Record<string, string> = {
   CreatorListWire: 'kol.ts::CreatorList',
   // M10 live stream
   SessionWire: 'livestream.ts::Session',
+  // LT-61 FE — vendor's own Brief-discovery list (§3.2 gap)
+  VendorBriefWire: 'livestream.ts::VendorBrief',
   // M11 board
   DependencyWire: 'board.ts::Dependency',
   CardWire: 'board.ts::Card',

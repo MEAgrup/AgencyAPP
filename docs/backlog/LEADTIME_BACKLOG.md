@@ -139,7 +139,7 @@ untuk `stage.ts`): `docs/handoff/HANDOFF_M16_AKUN_B.md`.
 | # | Isi | Status |
 |---|---|---|
 | LT-60 | Input tahapan Live oleh tim internal atas nama vendor | ✅ **SELESAI** — gate `stage.canExecuteStage` yang sudah ada (division staff/lead Live Stream, atau Director); `StageTimelinePanel` dipasang di halaman detail Brief Live Stream + tombol "Lanjutkan" baru (`getStageOverview.nextStages`, `stage.test.ts` "getStageOverview.nextStages (LT-60)"). Nol migrasi baru. Detail: `DECISIONS.md` 2026-08-29 "LT-60 SELESAI" |
-| LT-61 | Login vendor sendiri (realm auth eksternal) | ✅ **SELESAI (core) 2026-09-03** — FE vendor belum dibangun |
+| LT-61 | Login vendor sendiri (realm auth eksternal) | ✅ **SELESAI (core + FE) 2026-08-30** |
 
 > ✅ **LT-61 core selesai.** Realm auth non-HRIS pertama CDPS: `vendor_accounts`
 > (Supabase Auth → `vendors.id`) + cabang baru `custom_access_token_hook` +
@@ -160,12 +160,45 @@ untuk `stage.ts`): `docs/handoff/HANDOFF_M16_AKUN_B.md`.
 > prefix/mesin/event baru). Test: `livestream.test.ts` "LT-61: vendor
 > self-service" (6 kasus) + `permission.test.ts`. Full suite hijau (core 293,
 > db 53, domain 1617, api 383, web-internal 379) + `db-rebuild.sh --yes` (156
-> migrasi). **Belum dibangun** (didokumentasikan, bukan celah diam-diam): FE
-> vendor apa pun (nol halaman `web-internal` baru — vendor baru bisa diakses
-> lewat API langsung), rate limiting (belum ada halaman login untuk dibatasi),
-> admin UI provisioning, kasus multi-vendor-per-klien. Spec lengkap + detail
-> implementasi: `docs/prd/CDPS_Module10_Addendum_LT61_Vendor_Portal_Spec.md`;
-> keputusan: `DECISIONS.md` 2026-09-03 "LT-61 SELESAI (core)".
+> migrasi). Spec lengkap + detail implementasi:
+> `docs/prd/CDPS_Module10_Addendum_LT61_Vendor_Portal_Spec.md`; keputusan:
+> `DECISIONS.md` 2026-09-03 "LT-61 SELESAI (core)".
+>
+> ✅ **LT-61 FE selesai (2026-08-30).** Route group baru `/vendor` di
+> `web-internal` (layout + auth-context TERPISAH dari realm karyawan — lihat
+> `docs/handoff/HANDOFF_LT61_CORE_SELESAI_FE_VENDOR_20260830.md` §3 untuk
+> jawaban `AskUserQuestion`): `/vendor/login`, `/vendor` (daftar Session),
+> `/vendor/sessions/new` (buat jadwal), `/vendor/sessions/{id}` (konfirmasi +
+> catat hasil). **Blocker teknis diperbaiki lebih dulu:** `POST /auth/login`
+> sekarang bercabang pada `permission.isVendorActor` — sebelumnya vendor
+> dengan password benar tetap 401 karena `auth.getMe` selalu query `employees`
+> (lihat handoff §2). Endpoint baru: `GET /vendor/me` (profil vendor) dan
+> `GET /vendor/briefs` (Brief yang terbuka untuk Session baru — menutup celah
+> "vendor tidak tahu Brief id"-nya, lihat handoff §3.2); keduanya + login
+> ditambah `auth.getVendorMe`/`livestream.listVendorBriefs`. **Temuan RLS
+> selama build:** `listVendorBriefs` menyentuh `briefs`/`services`/`clients`/
+> `strategi`/`strategi_pillar` — keempatnya berpolicy SELECT berbasis klaim
+> KARYAWAN (`jwt_employee_id()`/`jwt_division()`/`jwt_is_lead()`), jadi lewat
+> `readAsActor` (RLS) hasilnya SELALU kosong untuk vendor manapun, walau
+> gate TS-nya benar. Diperbaiki dengan pola yang sama persis dengan preseden
+> `recap.ts` (`DECISIONS.md` 2026-08-14, M6D D-09b): route bacanya lewat
+> `db()` (privileged), bukan `readAsActor` — otorisasi sudah lengkap di TS
+> (`resolveLiveVendorId` dicocokkan ulang per baris), jadi `db()` tidak
+> mengurangi keamanan. Dibuktikan MERAH-lalu-HIJAU: satu test di
+> `livestream.test.ts` menjalankan `listVendorBriefs` lewat `withClaims`
+> (RLS nyata) dan membuktikan hasilnya `[]` walau vendornya valid — alasan
+> persis kenapa route memakai `db()`. `GET /vendor/me` sebaliknya AMAN lewat
+> `readAsActor`: `vendors_select` sudah `TO authenticated USING (true)`
+> (tabel master terbuka, preseden `vendor.getVendor`), dibuktikan hijau lewat
+> `withClaims` juga (`auth.test.ts`). Rate limiting login: **diserahkan ke
+> default Supabase Auth** (keputusan pemilik, bukan mekanisme baru di CDPS —
+> lihat `AskUserQuestion` di sesi ini). **Belum dibangun** (tak berubah dari
+> spec §8): admin UI provisioning akun vendor, kasus multi-vendor-per-klien.
+> Test baru: `auth.test.ts` (+3, termasuk RLS), `livestream.test.ts`
+> (+6 `listVendorBriefs`, termasuk RLS). Full suite hijau: core 293, db 53,
+> domain 1620, api 383, web-internal 379; typecheck + build (`web-internal`
+> + `apps/api`) bersih; nol migrasi/tabel/prefix/mesin/event baru (134/37/30/67
+> TETAP).
 
 ---
 
