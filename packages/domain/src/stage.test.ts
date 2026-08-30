@@ -168,7 +168,7 @@ describeDb('reviewBrief (Cek Brief AM)', () => {
     expect(notifs.some((n) => n.recipient_employee_id === amId)).toBe(true);
   });
 
-  it('Dikembalikan requires a valid alasan_kode for the division, and dead-ends at Brief Dikembalikan ke AM', async () => {
+  it('Dikembalikan requires a valid alasan_kode for the division, and parks the Brief at Brief Dikembalikan ke AM', async () => {
     const { svcId, amId } = await fixture();
     const b = await createBrief(sql, accountStaff(amId), svcId, creativeBrief());
 
@@ -180,6 +180,65 @@ describeDb('reviewBrief (Cek Brief AM)', () => {
     await reviewBrief(sql, creativeStaff(), b.id, { keputusan: 'Dikembalikan', alasanKode: 'Sampel belum diterima', catatan: 'menunggu klien' });
     const overview = await getStageOverview(sql, accountStaff(amId), b.id);
     expect(overview.productionStage).toBe(STAGE_RETURNED);
+  });
+
+  // LT-4 (pemilik 2026-08-29, rekomendasi B): the returned Brief is no longer a
+  // dead-end — the SAME Brief goes back to `Cek Brief AM`, driven by the owning
+  // AM (gate_pihak='AM'), never by the division that rejected it.
+  it('LT-4: the owning AM sends the returned Brief back to Cek Brief AM', async () => {
+    const { svcId, amId } = await fixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, creativeBrief());
+    await reviewBrief(sql, creativeStaff(), b.id, { keputusan: 'Dikembalikan', alasanKode: 'Brief kurang jelas' });
+
+    // The destination is offered off sm_edges, not guessed from urutan.
+    let overview = await getStageOverview(sql, accountStaff(amId), b.id);
+    expect(overview.productionStage).toBe(STAGE_RETURNED);
+    expect(overview.nextStages).toEqual([{ stageCode: 'Cek Brief AM', label: 'Cek Brief AM' }]);
+
+    await advanceStage(sql, accountStaff(amId), b.id, 'Cek Brief AM');
+    overview = await getStageOverview(sql, accountStaff(amId), b.id);
+    expect(overview.productionStage).toBe('Cek Brief AM');
+    // brief_review is append-ONCE (aturan rumah #3): the original rejection is
+    // still the permanent record, the resend does not erase it.
+    expect(overview.review?.keputusan).toBe('Dikembalikan');
+    // …and the division picks it up again through the ordinary work edge, not
+    // through a second reviewBrief (which stays a conflict).
+    await expect(reviewBrief(sql, creativeStaff(), b.id, { keputusan: 'Diterima' })).rejects.toBeInstanceOf(ConflictError);
+    await advanceStage(sql, creativeStaff(), b.id, 'Script');
+    overview = await getStageOverview(sql, accountStaff(amId), b.id);
+    expect(overview.productionStage).toBe('Script');
+  });
+
+  it('LT-4: the rejecting division may NOT drive the resend — gate_pihak=AM', async () => {
+    const { svcId, amId } = await fixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, creativeBrief());
+    await reviewBrief(sql, creativeStaff(), b.id, { keputusan: 'Dikembalikan', alasanKode: 'Brief kurang jelas' });
+
+    await expect(advanceStage(sql, creativeStaff(), b.id, 'Cek Brief AM')).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(advanceStage(sql, creativeLead(), b.id, 'Cek Brief AM')).rejects.toBeInstanceOf(ForbiddenError);
+    // A different AM is not the owning AM either.
+    await expect(advanceStage(sql, accountStaff('ZZ-STG-AM2'), b.id, 'Cek Brief AM')).rejects.toBeInstanceOf(ForbiddenError);
+    // Director always may (Role Matrix §4).
+    await advanceStage(sql, director(), b.id, 'Cek Brief AM');
+    const overview = await getStageOverview(sql, accountStaff(amId), b.id);
+    expect(overview.productionStage).toBe('Cek Brief AM');
+  });
+
+  // LT-4 puts a `stage_definition` row behind the returned stage so the AM gate
+  // exists at all. It must stay invisible on the timeline of a Brief that was
+  // never returned — no phantom row, no contribution to totalHariKerja.
+  it('LT-4: the returned checkpoint stays N/A on a Brief that was never returned', async () => {
+    const { svcId, amId } = await fixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, creativeBrief());
+    await reviewBrief(sql, creativeStaff(), b.id, { keputusan: 'Diterima' });
+    const overview = await getStageOverview(sql, accountStaff(amId), b.id);
+    const row = overview.leadTime.stages.find((r) => r.stageCode === STAGE_RETURNED)!;
+    expect(row).toBeDefined();
+    expect(row.urutan).toBe(99); // always last — it is a branch, not a step
+    expect(row.masukPada).toBeNull();
+    expect(row.keluarPada).toBeNull();
+    expect(row.hariKerja).toBeNull();
+    expect(row.status).toBe('tidak_berlaku');
   });
 
   it('is one-time — a second review on the same Brief is a conflict', async () => {
@@ -367,9 +426,16 @@ describeDb('getStageOverview.nextStages (LT-60)', () => {
     const liveStaff: Actor = { employeeId: 'ZZ-STG-LIVE', divisi: 'Live Stream', role: permission.makeRole({ division: 'Live Stream', level: 'staff' }) };
     const b = await createBrief(sql, accountStaff(amId), svcId, liveStreamBrief());
 
-    // Live Stream never has a 'Cek Brief AM' state (HANDOFF §1.2) — born
-    // straight onto the pipeline's initial_state.
+    // LT-5 (pemilik 2026-08-29): Live Stream now gets the same intake gate as
+    // every other pipeline — born at 'Cek Brief AM' (displayed as "Terima
+    // Brief AM", LT-7), 'Brief Dikembalikan ke AM' filtered out of nextStages
+    // exactly like every other pipeline's intake state.
     let overview = await getStageOverview(sql, accountStaff(amId), b.id);
+    expect(overview.productionStage).toBe('Cek Brief AM');
+    expect(overview.nextStages).toEqual([{ stageCode: 'Terima Sampel', label: 'Terima Sampel' }]);
+
+    await reviewBrief(sql, liveStaff, b.id, { keputusan: 'Diterima' }); // → Terima Sampel
+    overview = await getStageOverview(sql, accountStaff(amId), b.id);
     expect(overview.productionStage).toBe('Terima Sampel');
     expect(overview.nextStages).toEqual([{ stageCode: 'Briefing Klien Live', label: 'Briefing Klien Live' }]);
 
@@ -381,6 +447,38 @@ describeDb('getStageOverview.nextStages (LT-60)', () => {
     overview = await getStageOverview(sql, accountStaff(amId), b.id);
     expect(overview.productionStage).toBe('Live Start'); // pipeline terminal
     expect(overview.nextStages).toEqual([]);
+  });
+
+  // LT-5: the label the pemilik asked for ("Terima Brief AM") is cosmetic
+  // (LT-7) — the underlying stage_code stays the literal 'Cek Brief AM' that
+  // reviewBrief's STAGE_CEK_BRIEF_AM constant hardcodes, so the machine drives
+  // exactly like every other pipeline's intake gate.
+  it('LT-5: Live Stream intake is labelled "Terima Brief AM" but keyed on the same Cek Brief AM state', async () => {
+    const { svcId, amId } = await fixture();
+    const b = await createBrief(sql, accountStaff(amId), svcId, liveStreamBrief());
+    const overview = await getStageOverview(sql, accountStaff(amId), b.id);
+    const row = overview.leadTime.stages.find((r) => r.stageCode === 'Cek Brief AM')!;
+    expect(row).toBeDefined();
+    expect(row.label).toBe('Terima Brief AM');
+  });
+
+  // LT-5 + LT-4 symmetry: Live Stream's returned Brief resends the same way
+  // the other four pipelines' do, driven by the owning AM.
+  it('LT-5: a rejected Live Stream Brief resends to Cek Brief AM through the same AM gate as LT-4', async () => {
+    const { svcId, amId } = await fixture();
+    await registerEmployee('ZZ-STG-LIVE2', 'Live Stream', 'ZZ-STG-LIVE2-JAB');
+    const liveStaff: Actor = { employeeId: 'ZZ-STG-LIVE2', divisi: 'Live Stream', role: permission.makeRole({ division: 'Live Stream', level: 'staff' }) };
+    const b = await createBrief(sql, accountStaff(amId), svcId, liveStreamBrief());
+    await reviewBrief(sql, liveStaff, b.id, { keputusan: 'Dikembalikan', alasanKode: 'Brief kurang jelas' });
+
+    let overview = await getStageOverview(sql, accountStaff(amId), b.id);
+    expect(overview.productionStage).toBe(STAGE_RETURNED);
+    expect(overview.nextStages).toEqual([{ stageCode: 'Cek Brief AM', label: 'Terima Brief AM' }]);
+
+    await expect(advanceStage(sql, liveStaff, b.id, 'Cek Brief AM')).rejects.toBeInstanceOf(ForbiddenError);
+    await advanceStage(sql, accountStaff(amId), b.id, 'Cek Brief AM');
+    overview = await getStageOverview(sql, accountStaff(amId), b.id);
+    expect(overview.productionStage).toBe('Cek Brief AM');
   });
 
   it("never includes 'Brief Dikembalikan ke AM' — that edge belongs to reviewBrief, not advanceStage", async () => {

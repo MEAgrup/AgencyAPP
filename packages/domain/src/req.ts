@@ -8,9 +8,10 @@
  * Booking | Brief-as-task) — it is not a deliverable an AM reviews.
  *
  * Machine `[Diajukan] -> [Diproses] -> [Selesai]` / `[Diajukan]|[Diproses] ->
- * [Ditolak]`, three `jenis`: `Top-up Saldo` (Ads -> AM), `Contract Creator`
- * (KOL -> AM), `Creator Payment Approval` (KOL -> Finance, connects to the
- * EXISTING `CPR-` M9 machine via `cprId` — this module never replaces it).
+ * [Ditolak]`, three `jenis`: `Top-up Saldo` (Ads -> Finance, LT-11), `Contract
+ * Creator` (KOL -> AM), `Creator Payment Approval` (KOL -> Finance, connects
+ * to the EXISTING `CPR-` M9 machine via `cprId` — this module never replaces
+ * it).
  *
  * House rules honored: REQ id minted only after validation passes; due_date
  * frozen by a DB trigger; lateness is derived AT READ TIME from
@@ -163,7 +164,7 @@ export interface PermintaanInput {
   serviceId?: string;
   /** Required (and ONLY valid) when jenis === 'Creator Payment Approval'. */
   cprId?: string;
-  /** Override the resolved AM target (Top-up Saldo / Contract Creator only). */
+  /** Override the resolved AM target (Contract Creator only — the sole jenis that routes to a named AM). */
   tujuanEmployeeId?: string;
 }
 
@@ -320,13 +321,18 @@ async function resolveParent(tx: Queryable, briefId: string | undefined, service
   throw new ValidationError(MSG_PARENT_REQUIRED);
 }
 
-/** resolveTujuan — Creator Payment Approval always routes to Finance (division, no named employee). */
+/**
+ * resolveTujuan (LT-11, pemilik 2026-08-29): Top-up Saldo dan Creator Payment
+ * Approval keduanya rute ke Finance (division, no named employee — sama
+ * seperti CPA sudah lakukan). Contract Creator SATU-SATUNYA jenis yang
+ * dirute ke AM pemilik klien (override manual tetap hanya berlaku untuknya).
+ */
 function resolveTujuan(
   jenis: string,
   assignedAmId: string | null,
   overrideEmployeeId: string | undefined,
 ): { tujuanDivisi: string; tujuanEmployeeId: string | null } {
-  if (jenis === JENIS_CREATOR_PAYMENT_APPROVAL) {
+  if (jenis === JENIS_CREATOR_PAYMENT_APPROVAL || jenis === JENIS_TOPUP_SALDO) {
     return { tujuanDivisi: DIVISION_FINANCE, tujuanEmployeeId: null };
   }
   const override = (overrideEmployeeId ?? '').trim();
@@ -338,8 +344,8 @@ function resolveTujuan(
 /**
  * createPermintaan mints a REQ- id ONLY after every mandatory field passes
  * (house rule #1), resolves client_id from the Brief/Service parent, resolves
- * the tujuan (AM for Top-up Saldo/Contract Creator, Finance division for
- * Creator Payment Approval), computes `due_date` = created_at + 1 HARI KERJA
+ * the tujuan (AM for Contract Creator, Finance division for Top-up Saldo and
+ * Creator Payment Approval — LT-11), computes `due_date` = created_at + 1 HARI KERJA
  * via the DB helper `add_working_days` (never reimplemented in TS — mirrors
  * `working_days_between`'s own house-rule precedent), and emits
  * `m16.permintaan.diajukan`.

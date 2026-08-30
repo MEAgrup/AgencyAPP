@@ -324,8 +324,8 @@ Menulis transisi tahapan sebagai `entity_type='brief'` membuat baris tahapan **i
 | Divisi | Deliverable | Tahapan (hk = hari kerja) |
 |---|---|---|
 | Creative | Content Production | `Cek Brief AM` → `Script` (1) → `QC internal` (1) → `Shooting` (1) → `Edit` (1) → ⟨`QC Account Service`⟩ (1) → ⟨`Revisi`⟩ (1) → `Jadwal Posting` (1) |
-| KOL | — | `Cek Brief AM` → `Buat Campaign` (1) → `Approach Creator & Sebar Link Product` (3) → `Buat & Update Daftar Creator` (1) → `Nego & Dealing Creator` (2) → `Approval Sampel` (1, gate KLIEN) → `Follow up Video Creator` (14) → `QC & Approval Video Creator` (14) |
-| Live Stream | — | `Terima Sampel` → `Briefing Klien Live` → `Live Start` |
+| KOL | — | `Cek Brief AM` → `Buat Campaign` (1) → `Approach Creator & Sebar Link Product` (3) → `Buat & Update Daftar Creator` (1) → `Nego & Dealing Creator` (2) → `Approval Sampel` (1, gate KLIEN) → `Follow up Video Creator` (14) → `QC & Approval Video Creator` (1) |
+| Live Stream | — | `Cek Brief AM` (label "Terima Brief AM", LT-5) → `Terima Sampel` → `Briefing Klien Live` → `Live Start` |
 | AI Optimizer | Optimasi SKU | `Cek Brief AM` → `Ambil SKU` → `Riset` → `Perbaikan` → `QC` → `Approve` (gate AM) → `Terapkan` |
 | AI Optimizer | AI Video | `Cek Brief AM` → `Script` → `Generate AI` → `Edit` → `QC` → `Jadwal Posting` |
 | Store Operation | — | **pipeline kosong** — divisi aktif, daftar pekerjaan menyusul (`DECISIONS.md` LT-2) |
@@ -351,6 +351,8 @@ Satu-satunya kaitan ditegakkan **satu arah** sebagai guard di `task.submitTask`:
 
 `stage_definition.gate_pihak` ∈ {`NULL`, `'AM'`, `'KLIEN'`}. Tahap ber-gate `KLIEN` (mis. `Approval Sampel`) dicatat durasinya tapi **dikeluarkan** dari lead time divisi — perlakuan identik dengan interval `[Blocked]` (M12 Rule 7). Menunggu klien bukan kelambatan tim.
 
+**`gate_pihak='AM'` DIKONFIRMASI (LT-6, pemilik 2026-08-29): gerbang PERAN, bukan pengecualian lead time.** Tahap ber-gate `AM` (mis. `Approve` AI Optimizer SKU, `Brief Dikembalikan ke AM`) TETAP terhitung dalam lead time divisi — hanya AM pemilik klien (atau Director) yang boleh menjalankan transisi keluarnya. Interpretasi konservatif ini sudah berjalan sejak awal; tidak ada kode yang berubah untuk LT-6, murni konfirmasi tertulis di sini.
+
 ### Cek Brief AM — gerbang intake wajib semua divisi
 
 Tahap pertama setiap pipeline. Divisi memilih *Terima & proses* (lanjut) atau *Brief Dikembalikan ke AM* + alasan terstruktur (Creative: brief kurang jelas / sampel belum diterima / talent tidak tersedia / properti tidak tersedia / lokasi butuh approval — KOL: brief kurang jelas / data tidak lengkap). Inilah rentang yang menjawab "lead time dari AM ke team".
@@ -359,10 +361,19 @@ Tahap pertama setiap pipeline. Divisi memilih *Terima & proses* (lanjut) atau *B
 - Target per tahap: default `stage_definition.target_hari_kerja`, override per Brief di `brief_stage_sla` (gerbang `isLead(division)`, pola `setSlaTarget` M12). Tanpa target ⇒ `N/A`, tidak pernah di-default diam-diam.
 - Migrasi: lihat `docs/backlog/LEADTIME_BACKLOG.md` Fase 2.
 
+**Live Stream mendapat gerbang intake (LT-5, pemilik 2026-08-29).** Live Stream tidak lagi jadi pengecualian §2 Rule 10 — `stage_live` kini punya checkpoint pertama `stage_code='Cek Brief AM'` (persis literal yang `reviewBrief`/`STAGE_CEK_BRIEF_AM` hardcode, supaya mesinnya digerakkan lewat kontrak yang sama tanpa kode TS berubah) dengan **`label='Terima Brief AM'`** — kasus pertama LT-7 (label boleh berbeda dari kode) benar-benar dipakai. `sm_machines.initial_state` pindah dari `'Terima Sampel'` ke `'Cek Brief AM'`; Brief Live yang sudah ada (masih di `'Terima Sampel'`) tidak disentuh. Edge `'Cek Brief AM' -> 'Brief Dikembalikan ke AM'` WAJIB ikut dipasang — bukan opsional — karena `reviewBrief` dengan `keputusan='Dikembalikan'` selalu mencoba transisi itu begitu `production_stage` adalah `'Cek Brief AM'`, tanpa memandang divisi.
+
+**Kirim ulang brief yang dikembalikan (LT-4, pemilik 2026-08-29).** `Brief Dikembalikan ke AM` bukan lagi dead-end: ada edge balik `Brief Dikembalikan ke AM → Cek Brief AM` pada kelima pipeline yang punya state itu (Creative, KOL, AI Optimizer SKU, AI Optimizer Video, dan sejak LT-5 juga Live Stream). Detail yang menentukan:
+
+- Checkpoint itu didaftarkan `gate_pihak='AM'`, `urutan=99`, target `NULL`. Gerbangnya PERAN — **AM pemilik klien (atau Director) yang mengirim ulang**, bukan divisi yang menolak. Tanpa baris `stage_definition` itu, `advanceStage` jatuh ke gerbang divisi dan hasilnya kebalikan dari yang dimaksud.
+- `sm_terminal_states` **tetap** tidak memuatnya: guard `submitTask` (Rule 11) membaca tabel itu, dan brief yang dikembalikan justru belum dikerjakan. Edge keluar tidak menjadikannya tahap sukses.
+- `brief_review` tetap **append-once**: pengembalian pertama adalah catatan permanen dan kiriman ulang tidak menghapusnya. Setelah kembali ke `Cek Brief AM`, divisi melanjutkannya lewat `advanceStage` ke tahap kerja pertama — `reviewBrief` kedua tetap 409.
+- `urutan=99` menjaga checkpoint cabang ini selalu di baris terakhir timeline; Brief yang tidak pernah dikembalikan mendapat `N/A` di baris itu, nol kontribusi ke `totalHariKerja`.
+
 ## 19. Permintaan `REQ-` (M16 §5.5) — mesin #.., permintaan divisi yang TERKAIT KLIEN
 `[Diajukan]` → `[Diproses]` → `[Selesai]`; `[Diajukan]` | `[Diproses]` → `[Ditolak]`. Terminal: `[Selesai]`, `[Ditolak]`.
 
-Jenis: `Top-up Saldo` (Ads → AM), `Contract Creator` (KOL), `Creator Payment Approval` (KOL → Finance, menyambung `CPR-` M9 yang sudah ada).
+Jenis: `Top-up Saldo` (Ads → **Finance**, LT-11), `Contract Creator` (KOL → **AM pemilik klien**, satu-satunya jenis yang dirute ke AM — LT-11), `Creator Payment Approval` (KOL → Finance, menyambung `CPR-` M9 yang sudah ada). Routing dikonfirmasi pemilik 2026-08-29 (LT-11); sebelumnya Top-up Saldo & Contract Creator berdua dirute ke AM sebagai tebakan implementasi.
 
 - **Kenapa entitas sendiri, bukan `TSK-` (§17).** `internal_tasks` sengaja **tidak punya** `client_id`/`service_id` — §17 menyatakan melonggarkannya "akan membongkar gerbang pembayaran M4/M5". Permintaan Top-up Saldo jelas terkait klien (saldo iklan klien), jadi ia tidak boleh menumpang di sana. Sebaliknya ia juga bukan "Task" M12 (= Asset | Creator Booking | Brief-as-task), karena bukan deliverable yang di-review AM.
 - Deadline **1 hari kerja** lewat `working_days_between` — bukan 24 jam, bukan 1 hari kalendar (keputusan pemilik; requirement semula menulis keduanya).

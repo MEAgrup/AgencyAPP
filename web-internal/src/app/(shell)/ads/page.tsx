@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/auth-context';
 import StatusBadge from '@/components/StatusBadge';
 import {
   PLATFORM_OPTIONS,
+  TIPE_IKLAN_OPTIONS,
   createCampaign,
   listAdsBriefQueue,
   type AdsBrief,
@@ -42,6 +43,7 @@ export default function AdsWorkspacePage() {
   // Buat kampanye
   const [briefId, setBriefId] = useState('');
   const [platform, setPlatform] = useState<string>(PLATFORM_OPTIONS[0]);
+  const [tipeIklan, setTipeIklan] = useState<string>(TIPE_IKLAN_OPTIONS[0]);
   const [objective, setObjective] = useState('');
   const [budget, setBudget] = useState('');
   const [startDate, setStartDate] = useState('');
@@ -92,6 +94,7 @@ export default function AdsWorkspacePage() {
         start_date: startDate,
         end_date: endDate,
         target_kpi: targetKpi,
+        tipe_iklan: tipeIklan,
       });
       router.push(`/ads/${campaign.id}`);
     } catch (err) {
@@ -252,15 +255,25 @@ export default function AdsWorkspacePage() {
                 <input id="create-end" type="date" required value={endDate} onChange={(e) => setEndDate(e.target.value)} />
               </div>
             </div>
-            <div className="field">
-              <label htmlFor="create-kpi">Target KPI</label>
-              <input
-                id="create-kpi"
-                required
-                placeholder="mis. ROAS ≥ 4x / GMV target Rp 50.000.000"
-                value={targetKpi}
-                onChange={(e) => setTargetKpi(e.target.value)}
-              />
+            <div className="formRow">
+              <div className="field">
+                <label htmlFor="create-kpi">Target KPI</label>
+                <input
+                  id="create-kpi"
+                  required
+                  placeholder="mis. ROAS ≥ 4x / GMV target Rp 50.000.000"
+                  value={targetKpi}
+                  onChange={(e) => setTargetKpi(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="create-tipe-iklan">Tipe Iklan</label>
+                <select id="create-tipe-iklan" value={tipeIklan} onChange={(e) => setTipeIklan(e.target.value)}>
+                  {TIPE_IKLAN_OPTIONS.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div>
               <button

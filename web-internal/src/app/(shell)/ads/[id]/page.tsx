@@ -282,7 +282,14 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
   }
 
   const roasTyped = isRoasTarget(campaign.target_kpi);
+  // M16 LT-40 (ADC_SETTING_STATE): a campaign is born [Setting], not [Paused]
+  // — the ad_campaign machine only has edges [Setting]->[Active]/[Ended], no
+  // [Setting]->[Paused]. Every launch guardrail below that used to gate on
+  // isPaused alone also applies at birth: a freshly created campaign needs
+  // the same brief-approved + asset-linked checks before it can go [Active].
+  const isSetting = campaign.status === '[Setting]';
   const isPaused = campaign.status === '[Paused]';
+  const canLaunch = isSetting || isPaused;
   const isActive = campaign.status === '[Active]';
   const isEnded = campaign.status === '[Ended]';
   const hasLinkedAssets = campaign.linked_asset_ids.length > 0;
@@ -380,13 +387,13 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
           <h2>Aset Kreatif Tertaut</h2>
         </div>
 
-        {isPaused && !hasLinkedAssets && (
+        {canLaunch && !hasLinkedAssets && (
           <div className="alert alertError" role="alert">
             Belum ada aset kreatif tertaut. Kampanye tidak dapat diluncurkan sebelum minimal satu aset
             kreatif [Approved] ditautkan.
           </div>
         )}
-        {isPaused && brief && brief.status !== '[Approved]' && (
+        {canLaunch && brief && brief.status !== '[Approved]' && (
           <div className="alert alertError" role="alert">
             Brief setup ({brief.id}) berstatus {brief.status} &mdash; kampanye tidak dapat diluncurkan
             sebelum brief [Approved].
@@ -460,7 +467,7 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
           </div>
           {lifecycleError && <div className="alert alertError" role="alert">{lifecycleError}</div>}
           <div className="row" style={{ gap: 10 }}>
-            {isPaused && (
+            {canLaunch && (
               <button
                 type="button"
                 className="btn btnPrimary"
