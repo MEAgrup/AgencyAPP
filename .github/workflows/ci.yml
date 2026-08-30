@@ -198,12 +198,18 @@ jobs:
       # M16 Akun B Fase 4 (20260831040000_req_permintaan.sql): +1 mesin
       # `permintaan` (REQ-, M16 §5.5), 28 → 29. Ditulis di langkah penggabungan
       # §5 PARALEL_M16_DUA_AKUN.md setelah dihitung ulang dari DB gabungan.
-      - name: Verify migration seed counts (29 machines, 65 events, catalog registry consistent)
+      # Kinerja Sales R-03 (20260902020000_renewal_request.sql): +1 mesin
+      # `renewal_request` (RNW-, STATE_MACHINES.md §20), 29 → 30. Nol event
+      # katalog baru dari migrasi ini sendiri.
+      # Kinerja Sales R-04 (20260902030000_renewal_notif.sql, katalog v13): +2
+      # event (`m0.renewal.pending_approval`/`m0.renewal.decision`, sama peran
+      # persis dengan `m0.negotiation.*`), 65 → 67. Nol mesin baru.
+      - name: Verify migration seed counts (30 machines, 67 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
-               if (select count(*) from sm_machines) <> 29 then raise exception 'expected 29 machines'; end if;
-               if (select count(*) from notif_events) <> 65 then raise exception 'expected 65 events'; end if;
+               if (select count(*) from sm_machines) <> 30 then raise exception 'expected 30 machines'; end if;
+               if (select count(*) from notif_events) <> 67 then raise exception 'expected 67 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
                  then raise exception 'notif_events does not match the registered catalog versions'; end if;
@@ -309,17 +315,25 @@ jobs:
       # penggabungan §5 setelah dihitung ulang dari DB gabungan yang sebenarnya
       # (lihat HANDOFF_M16_AKUN_B.md) — bukan dijumlahkan manual dari kedua
       # stream.
+      # Kinerja Sales S-02/§3a (20260901020000 + 20260901030000): +2 tabel
+      # `sales_targets` (Sales OKR, kunci alami) + `sales_level_labels`
+      # (jabatan→label Level Sales, katalog dual-home), 128 → 130. Nol prefix
+      # baru (kunci alami keduanya) ⇒ entity_prefix TETAP 36; nol status ⇒
+      # sm_machines TETAP 29; nol event ⇒ notif_events TETAP 65.
+      # Kinerja Sales R-03 (20260902020000_renewal_request.sql): +3 tabel
+      # `renewal_requests`/`renewal_proposals`/`renewal_proposal_lines`,
+      # 130 → 133. +1 prefix RNW (36→37, di bawah), +1 mesin (29→30, di atas).
       #
       # ⚠️ INI GATE KEDUA UNTUK ANGKA YANG SAMA — `scripts/db-rebuild.sh` punya
       # `check "tabel public"` sendiri. Naikkan KEDUANYA dalam satu commit;
       # menaikkan salah satu saja membuat lokal hijau sementara CI merah (persis
       # yang terjadi pada PR #170).
-      - name: Verify table count (expect 128)
+      - name: Verify table count (expect 133)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 128
+          test "$n" -eq 133
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this
@@ -329,14 +343,15 @@ jobs:
       # 33 = 32 + WRR (Modul 6D D-01, 20260813010000: Rekap Hasil Mingguan).
       # 34 = 33 + MLS (T-4c, 20260814070000: Client Milestone).
       # 35 = 34 + TSK (20260814110000: Penugasan Internal).
+      # 37 = 36 + RNW (Kinerja Sales R-03, 20260902020000: Renewal Request).
       #
       # ⚠️ GATE KEDUA untuk angka yang sama — `scripts/db-rebuild.sh` punya
       # `check "entity_prefix"` sendiri. Naikkan KEDUANYA dalam satu commit.
-      - name: Verify entity_prefix registry (expect 36)
+      - name: Verify entity_prefix registry (expect 37)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc "select count(*) from entity_prefix;")
           echo "entity_prefix rows: $n"
-          test "$n" -eq 36
+          test "$n" -eq 37
       - name: Invariant — ID generator (gap-free, WIB period)
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/ident_checks.sql
       - name: Invariant — append-only history (immutability)

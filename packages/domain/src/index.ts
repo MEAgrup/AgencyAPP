@@ -124,3 +124,11 @@ export * as leadtime from './leadtime';
 // entity. Deliberately not `internaltask` (which is sengaja WITHOUT client_id)
 // nor `task` M12 (not a deliverable an AM reviews).
 export * as req from './req';
+// Kinerja Sales (M0 §7.1) — Sales analytics dashboard + OKR. New file (not an
+// addition to `sales.ts`), pure read-model over the existing money-path tables
+// + `sales_targets` (new, natural key). See RENCANA_KINERJA_SALES.md.
+export * as salesperf from './salesperf';
+// R-03 (Kinerja Sales) — renewal/cross-sell request on an EXISTING client.
+// Parallel to `sales.ts`'s attempt-anchored negotiation/closing, not a reuse
+// of it (nol LEAD-/PRSP- palsu). See renewal.ts's header + STATE_MACHINES §20.
+export * as renewal from './renewal';

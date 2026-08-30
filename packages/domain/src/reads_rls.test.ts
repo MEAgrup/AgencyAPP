@@ -433,4 +433,76 @@ describeDb('read models under RLS (O37)', () => {
     // The field the page reads to render its action buttons at all.
     expect(detail.allowedTransitions.length).toBeGreaterThan(0);
   });
+
+  /**
+   * S-01 (Kinerja Sales, RENCANA_KINERJA_SALES.md §2/§5). Head Sales never got
+   * the "Lead/SPV = division-wide" arm (CLAUDE.md #6) on the four tables its own
+   * dashboard depends on — `prospect_attempts`, `clients`, `transactions`,
+   * `installments` — so `salesperf.bySalesperson` would have silently shown a
+   * Head/SPV Sales only their OWN rows, exactly the class of bug O37/O46/O48
+   * already fixed for other divisions. Asserted on all four tables, for three
+   * actors: a Sales lead reading a TEAMMATE's row (must see), the teammate's own
+   * peer at STAFF level (must NOT — staff = own data only), and a lead of an
+   * unrelated division (must NOT — division-wide is bounded by division).
+   */
+  it('lets a Sales lead read a teammate\'s attempt/client/transaction/installment — the S-01 fix', async () => {
+    const OWNER_STAFF = 'ZZR-SLS-STAFF';
+    const CLI = 'CLI-ZZR-S01';
+    const TRX = 'TRX-ZZR-S01';
+    const INST = 'INST-ZZR-S01';
+    const LEAD = 'LEAD-ZZR-S01';
+    const PRSP = 'PRSP-ZZR-S01';
+    await sql`
+      insert into leads (id, lead_name, phone_number, phone_norm, source, origin_division,
+                         record_status, created_by)
+      values (${LEAD}, 'RLS S-01 Fixture', '0899000222', '62899000222', 'Scouting', 'Sales',
+              '[Closed-Success]', ${OWNER_STAFF})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into prospect_attempts (id, lead_id, owner_employee_id, status, claimed_at, created_by)
+      values (${PRSP}, ${LEAD}, ${OWNER_STAFF}, 'Closed-Success', now(), ${OWNER_STAFF})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into clients (id, lead_id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, transaction_id, created_by)
+      values (${CLI}, ${LEAD}, 'RLS S-01 Toko', 'Ibu RLS', 'Jakarta', 'Fashion', 'https://shopee/zzrs01',
+              '5000000.00', '8000000.00', ${OWNER_STAFF}, ${OWNER_STAFF}, ${TRX}, ${OWNER_STAFF})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into transactions (id, client_id, payment_intent_scheme, total_agreed_value, payment_status, created_by)
+      values (${TRX}, ${CLI}, '[Lunas]', '5000000.00', '[Menunggu Verifikasi]', ${OWNER_STAFF})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into installments (id, transaction_id, installment_no, amount, status, created_by)
+      values (${INST}, ${TRX}, 1, '5000000.00', '[Belum Jatuh Tempo]', ${OWNER_STAFF})
+      on conflict (id) do nothing`;
+
+    try {
+      const countRow = (n: unknown): number => Number((n as { n: string }[])[0].n);
+      const readAll = async (empClaims: string) =>
+        withClaims(sql, empClaims, (tx) =>
+          tx<{ n: string }[]>`
+            select (select count(*) from prospect_attempts where id = ${PRSP})
+                 + (select count(*) from clients where id = ${CLI})
+                 + (select count(*) from transactions where id = ${TRX})
+                 + (select count(*) from installments where id = ${INST}) as n`,
+        );
+
+      const asLead = await readAll(claims({ employeeId: 'ZZR-SLS-LEAD', division: 'Sales', level: 'lead' }));
+      expect(countRow(asLead), 'Sales lead must see all 4 rows of a teammate — the S-01 fix').toBe(4);
+
+      const asPeerStaff = await readAll(claims({ employeeId: 'ZZR-SLS-PEER', division: 'Sales', level: 'staff' }));
+      expect(countRow(asPeerStaff), 'Sales STAFF must not see a peer\'s rows — staff is own-data-only').toBe(0);
+
+      const asOtherDivisionLead = await readAll(claims({ employeeId: 'ZZR-OTHERLEAD', division: 'Creative', level: 'lead' }));
+      expect(countRow(asOtherDivisionLead), 'a lead of an UNRELATED division must see nothing').toBe(0);
+    } finally {
+      await sql`delete from installments where id = ${INST}`;
+      await sql`delete from transactions where id = ${TRX}`;
+      await sql`delete from contracts where client_id = ${CLI}`;
+      await sql`delete from clients where id = ${CLI}`;
+      await sql`delete from prospect_attempts where id = ${PRSP}`;
+      await sql`delete from leads where id = ${LEAD}`;
+    }
+  });
 });

@@ -47,6 +47,7 @@ import {
 import { getBoard, UNIVERSAL_COLUMNS, type Card } from '@/lib/board';
 import BoardCard from '../../board/BoardCard';
 import ReportPanel from '@/components/clients/ReportPanel';
+import RenewalPanel from '@/components/clients/RenewalPanel';
 
 const VOIDED_STATUS = '[Cancelled — Service Voided]';
 const ON_HOLD_STATUS = '[On Hold]';
@@ -61,7 +62,7 @@ function formatDate(value: string | null | undefined) {
 export default function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const { role } = useAuth();
+  const { role, employee } = useAuth();
   // The Service hub (§4/§5) is an Account-division page — `account.getService`
   // admits the owning AM, Account lead, OD and Director. Sales/Finance read this
   // client record too, and a link that 403s for them is worse than no link.
@@ -637,6 +638,13 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           </div>
         )}
       </section>
+
+      <RenewalPanel
+        clientId={id}
+        salesPicId={client.sales_pic_id}
+        role={role}
+        employeeId={employee?.employee_id ?? null}
+      />
 
       {canManageInterview && (
         <section className="card" id="interview">

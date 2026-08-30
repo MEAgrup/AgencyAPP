@@ -7,7 +7,7 @@
  */
 import { money, tz } from '@cdps/core';
 import type { interview as ivcore } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, report, req, risetAwal, sales, stage, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, stage, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -2283,6 +2283,51 @@ export function attemptDetailToWire(d: sales.AttemptDetail): AttemptDetailWire {
     })),
     nq_reasons: d.nqReasons,
     allowed_transitions: d.allowedTransitions,
+  };
+}
+
+// --- R-03 (Kinerja Sales) — renewal/cross-sell (RNW-) on an existing client ---
+
+/** One `renewal_requests` row — web-internal's `Renewal` (lib/renewal.ts). */
+export interface RenewalWire {
+  id: string;
+  client_id: string;
+  jenis: string;
+  proposed_by: string;
+  status: string;
+  decision_note: string | null;
+  contract_id: string | null;
+  transaction_id: string | null;
+  created_at: string;
+  created_by: string;
+}
+
+export function renewalToWire(r: renewal.RenewalRequest): RenewalWire {
+  return {
+    id: r.id, client_id: r.clientId, jenis: r.jenis, proposed_by: r.proposedBy, status: r.status,
+    decision_note: r.decisionNote, contract_id: r.contractId, transaction_id: r.transactionId,
+    created_at: r.createdAt.toISOString(), created_by: r.createdBy,
+  };
+}
+
+/** One priced line of the newest proposal version — web-internal's `RenewalLine`. */
+export interface RenewalLineWire {
+  master_service_id: string;
+  proposed_price: string;
+  commission_rule: string;
+}
+
+/** GET /clients/{id}/renewals/{rid} — web-internal's `RenewalDetail`. */
+export interface RenewalDetailWire extends RenewalWire {
+  lines: RenewalLineWire[];
+}
+
+export function renewalDetailToWire(r: renewal.RenewalDetail): RenewalDetailWire {
+  return {
+    ...renewalToWire(r),
+    lines: r.lines.map((l) => ({
+      master_service_id: l.masterServiceId, proposed_price: l.proposedPrice, commission_rule: l.commissionRule,
+    })),
   };
 }
 
@@ -6213,5 +6258,151 @@ export function toPermintaanInput(b: {
     jenis: b.jenis ?? '', judul: b.judul ?? '', deskripsi: b.deskripsi ?? '',
     briefId: b.brief_id ?? '', serviceId: b.service_id ?? '',
     cprId: b.cpr_id ?? '', tujuanEmployeeId: b.tujuan_employee_id ?? '',
+  };
+}
+
+// --- Kinerja Sales (M0 §7.1) — salesperf.ts. Every field mapped explicitly:
+// a route that ever forwards the domain object raw is the O43 class of bug
+// (blank page on a 200) — see salesperf.ts's own header. ---
+
+export interface SalesPerfRowWire {
+  salesperson_id: string;
+  nama: string;
+  level_sales: string;
+  leads_registered: number;
+  leads_scouting: number;
+  contacted: number;
+  qualified: number;
+  non_qualified: number;
+  nq_breakdown: Record<string, number>;
+  negotiating: number;
+  closed_success: number;
+  closed_lost: number;
+  closing_rate_pct: number | null;
+  qualified_rate_pct: number | null;
+  avg_deal_cycle_days: number | null;
+  effort_follow_up: number;
+  effort_visit: number;
+  effort_online_meeting: number;
+  klien_baru: string;
+  klien_perpanjangan: string;
+  klien_cross_sell: string;
+  klien_count: string;
+  omzet: string;
+  omzet_idr: string;
+  komisi_kontrak: string;
+  komisi_kontrak_idr: string;
+  komisi_diakui: string;
+  komisi_diakui_idr: string;
+  target_omzet: string | null;
+  target_omzet_idr: string | null;
+  pencapaian_pct: number | null;
+  sisa_target: string | null;
+  sisa_target_idr: string | null;
+  sisa_per_minggu: string | null;
+  sisa_per_minggu_idr: string | null;
+  sisa_per_hari: string | null;
+  sisa_per_hari_idr: string | null;
+  mom_pct: number | null;
+}
+
+export function salesPerfRowToWire(r: salesperf.SalesPerfRow): SalesPerfRowWire {
+  return {
+    salesperson_id: r.salespersonId, nama: r.nama, level_sales: r.levelSales,
+    leads_registered: r.leadsRegistered, leads_scouting: r.leadsScouting,
+    contacted: r.contacted, qualified: r.qualified, non_qualified: r.nonQualified,
+    nq_breakdown: r.nqBreakdown, negotiating: r.negotiating,
+    closed_success: r.closedSuccess, closed_lost: r.closedLost,
+    closing_rate_pct: r.closingRatePct, qualified_rate_pct: r.qualifiedRatePct,
+    avg_deal_cycle_days: r.avgDealCycleDays,
+    effort_follow_up: r.effortFollowUp, effort_visit: r.effortVisit, effort_online_meeting: r.effortOnlineMeeting,
+    klien_baru: r.klienBaru, klien_perpanjangan: r.klienPerpanjangan, klien_cross_sell: r.klienCrossSell, klien_count: r.klienCount,
+    omzet: r.omzet, omzet_idr: r.omzetIdr,
+    komisi_kontrak: r.komisiKontrak, komisi_kontrak_idr: r.komisiKontrakIdr,
+    komisi_diakui: r.komisiDiakui, komisi_diakui_idr: r.komisiDiakuiIdr,
+    target_omzet: r.targetOmzet, target_omzet_idr: r.targetOmzetIdr, pencapaian_pct: r.pencapaianPct,
+    sisa_target: r.sisaTarget, sisa_target_idr: r.sisaTargetIdr,
+    sisa_per_minggu: r.sisaPerMinggu, sisa_per_minggu_idr: r.sisaPerMingguIdr,
+    sisa_per_hari: r.sisaPerHari, sisa_per_hari_idr: r.sisaPerHariIdr,
+    mom_pct: r.momPct,
+  };
+}
+
+export interface SalesPerfMonthRowWire extends SalesPerfRowWire {
+  period: string;
+}
+
+export function salesPerfMonthRowToWire(r: salesperf.SalesPerfMonthRow): SalesPerfMonthRowWire {
+  return { ...salesPerfRowToWire(r), period: r.period };
+}
+
+export interface LeadSourceRowWire {
+  period: string;
+  source: string;
+  campaign_id: string | null;
+  campaign_name: string | null;
+  salesperson_id: string | null;
+  leads: number;
+  qualified: number;
+  non_qualified: number;
+  closing: number;
+  conversion_rate_pct: number | null;
+  omzet: string;
+  omzet_idr: string;
+  nq_breakdown: Record<string, number>;
+}
+
+export function leadSourceRowToWire(r: salesperf.LeadSourceRow): LeadSourceRowWire {
+  return {
+    period: r.period, source: r.source, campaign_id: r.campaignId, campaign_name: r.campaignName,
+    salesperson_id: r.salespersonId, leads: r.leads, qualified: r.qualified, non_qualified: r.nonQualified,
+    closing: r.closing, conversion_rate_pct: r.conversionRatePct,
+    omzet: r.omzet, omzet_idr: r.omzetIdr, nq_breakdown: r.nqBreakdown,
+  };
+}
+
+export interface SalesTargetWire {
+  salesperson_id: string;
+  period_start: string;
+  period_kind: string;
+  metric_key: string;
+  metric_param: string | null;
+  metric_param_idr: string | null;
+  target_value: string;
+  target_value_idr: string | null;
+  actual_value: string | null;
+  actual_value_idr: string | null;
+  achieved_pct: number | null;
+  updated_at: string;
+  updated_by: string;
+}
+
+export function salesTargetToWire(t: salesperf.TargetRow): SalesTargetWire {
+  return {
+    salesperson_id: t.salespersonId, period_start: t.periodStart, period_kind: t.periodKind,
+    metric_key: t.metricKey, metric_param: t.metricParam, metric_param_idr: t.metricParamIdr,
+    target_value: t.targetValue, target_value_idr: t.targetValueIdr,
+    actual_value: t.actualValue, actual_value_idr: t.actualValueIdr, achieved_pct: t.achievedPct,
+    updated_at: t.updatedAt.toISOString(), updated_by: t.updatedBy,
+  };
+}
+
+/** Request body → SetTargetInput (PUT /sales/targets). */
+export function toSetTargetInput(b: {
+  salesperson_id?: string; period_start?: string; period_kind?: string;
+  metric_key?: string; metric_param?: string; target_value?: string;
+}): salesperf.SetTargetInput {
+  const periodKind = b.period_kind === 'tahun' ? 'tahun' : b.period_kind === 'kuartal' ? 'kuartal' : 'bulan';
+  // metric_key is passed through AS-IS, unvalidated here — an unknown/missing
+  // value must surface as `salesperf.ValidationError` from `setTarget`'s own
+  // `METRIC_KEYS.includes` check, not be silently coerced to 'omzet' (a wrong
+  // silent default is worse than an explicit rejection, CLAUDE.md wire rule).
+  return {
+    salespersonId: b.salesperson_id ?? '',
+    periodStart: b.period_start ?? '',
+    periodKind,
+    metricKey: (b.metric_key ?? '') as salesperf.MetricKey,
+    metricParam: b.metric_param,
+    targetValue: b.target_value ?? '',
   };
 }

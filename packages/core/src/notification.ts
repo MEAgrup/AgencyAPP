@@ -28,6 +28,9 @@ export type Resolver = 'explicit' | 'leadsOfDivision' | 'explicitOrLeads';
 export const EVENTS = {
   NegotiationPendingApproval: 'm0.negotiation.pending_approval', // -> Sales Head/SPV
   NegotiationDecision: 'm0.negotiation.decision', // -> Salesperson
+  // R-03 (Kinerja Sales) — renewal/cross-sell, same shape as the two above.
+  RenewalPendingApproval: 'm0.renewal.pending_approval', // -> Sales Head/SPV
+  RenewalDecision: 'm0.renewal.decision', // -> the proposer
   InstallmentDue: 'm0m5.installment.due', // -> Sales PIC + Finance
   ContractNotReceived: 'm5.contract.not_received', // -> Finance + SPV
   ComplaintLogged: 'm6.complaint.logged', // -> AM + SPV Account
@@ -265,6 +268,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
     eventCount: 7,
     decisionRef: 'docs/DECISIONS.md 2026-08-28 (M16) + docs/handoff/PARALEL_M16_DUA_AKUN.md F-4',
   },
+  {
+    version: 13,
+    description:
+      'R-03 (Kinerja Sales) — 2 event renewal/cross-sell (m0.renewal.pending_approval → Sales Head/SPV saat baris custom menunggu persetujuan; m0.renewal.decision → pengaju saat diputuskan)',
+    eventCount: 2,
+    decisionRef: 'docs/DECISIONS.md 2026-08-29 (Kinerja Sales #5)',
+  },
 ] as const;
 
 /** The catalog version currently in force. */
@@ -311,6 +321,8 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
 
   [EVENTS.NegotiationPendingApproval]: { description: 'Negotiation Pending Approval submitted', resolver: 'leadsOfDivision', version: 1 },
   [EVENTS.NegotiationDecision]: { description: 'Negotiation decision', resolver: 'explicit', version: 1 },
+  [EVENTS.RenewalPendingApproval]: { description: 'Renewal/cross-sell Pending Approval submitted', resolver: 'leadsOfDivision', version: 13 },
+  [EVENTS.RenewalDecision]: { description: 'Renewal/cross-sell decision', resolver: 'explicit', version: 13 },
   [EVENTS.InstallmentDue]: { description: 'Installment due/overdue', resolver: 'explicitOrLeads', version: 1 },
   [EVENTS.ContractNotReceived]: { description: 'Contract not received 7 days after routing', resolver: 'explicitOrLeads', version: 1 },
   [EVENTS.ComplaintLogged]: { description: 'Complaint logged (any door)', resolver: 'explicitOrLeads', version: 1 },
