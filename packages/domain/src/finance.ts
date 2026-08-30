@@ -729,9 +729,15 @@ export async function commissionAchievement(sql: Queryable, transactionId: strin
   // Total deal commission = Σ over services of rule(applied to its agreed price).
   // A voided Service (M4-OA-5) is excluded — no commission accrues for work that
   // will not be delivered (the Transaction total itself stays immutable).
+  //
+  // R-03 (Kinerja Sales — Renewal): scoped by `transaction_id`, NOT `client_id`.
+  // A client may now carry more than one Transaction over time (a renewal/
+  // cross-sell closing on the SAME client, R-03) — filtering by client_id
+  // would pull every closing's Services/allocations into one number and let
+  // two independent deals contaminate each other's commission.
   const svcRows = await sql<{ standard_price: string; commission_rule: string }[]>`
     select standard_price, commission_rule from services
-    where client_id = ${trx.clientId} and status <> '[Cancelled — Service Voided]'`;
+    where transaction_id = ${trx.id} and status <> '[Cancelled — Service Voided]'`;
   let totalCommission = 0n;
   for (const s of svcRows) {
     totalCommission += computeCommission(parseCommissionRule(s.commission_rule), money.parse(s.standard_price));
@@ -742,7 +748,7 @@ export async function commissionAchievement(sql: Queryable, transactionId: strin
 
   const allocRows = await sql<{ salesperson_id: string; basis_points: number }[]>`
     select salesperson_id, basis_points from client_sales_allocations
-    where client_id = ${trx.clientId} order by id`;
+    where transaction_id = ${trx.id} order by id`;
   const shares: CommissionShare[] = allocRows.map((a) => ({
     salespersonId: a.salesperson_id, basisPoints: a.basis_points,
     recognizedCommission: money.decimal(money.proRata(recognized, BigInt(a.basis_points), 10000n)),
@@ -1928,9 +1934,12 @@ export async function createSchedule(
     }
     const trx = rows[0];
 
+    // R-03: scoped to THIS transaction's allocation — a client may now carry
+    // more than one closing (renewal), and "member" should mean "credited on
+    // the deal being scheduled", not "credited on ANY deal this client ever had".
     const memberRows = await tx<{ one: number }[]>`
       select 1 as one from client_sales_allocations
-      where client_id = ${trx.client_id} and salesperson_id = ${actor.employeeId} limit 1`;
+      where transaction_id = ${trx.id} and salesperson_id = ${actor.employeeId} limit 1`;
     if (!canCreateSchedule(actor, trx.sales_pic_id ?? '', memberRows.length > 0)) {
       throw new ForbiddenError();
     }

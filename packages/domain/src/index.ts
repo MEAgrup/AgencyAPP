@@ -127,3 +127,7 @@ export * as req from './req';
 // Kinerja Sales (M0 §7.1) + Sales OKR — pure read-model, new file (sales.ts
 // is already 2000+ lines; same separation marketing.ts keeps from campaign.ts).
 export * as salesperf from './salesperf';
+// Kinerja Sales R-03 — Renewal/Cross-Sell from the Client Record. Own state
+// machine (contract_renewal) + entity (RNW-); reuses sales.ts's pricing/
+// allocation/payment-scheme validators rather than re-deriving them.
+export * as renewal from './renewal';

@@ -5,12 +5,8 @@
 -- DUPLIKAT, karena tidak ada cara menandai bahwa suatu kesepakatan adalah
 -- lanjutan dari klien yang sudah ada. `contracts` (O57) sudah tepat sebagai
 -- rumahnya: kesepakatan kedua pada `CLI-` yang sama = perpanjangan; `SVC-` baru
--- di luar cakupan kontrak berjalan = cross-sell. Kolom ini HANYA
--- mengklasifikasikan kontrak yang sudah ada — pintu untuk MEMBUAT kontrak
--- perpanjangan dari Client Record (R-03/R-04) sengaja BELUM dibangun (garis
--- stop §6: `canWriteContract` masih Account-only, dan setiap kontrak baru
--- mewajibkan siklus Strategi/Plan — mesin yang sedang diperbaiki paralel).
--- Deviasi PRD M0 §6 dicatat di docs/DECISIONS.md.
+-- di luar cakupan kontrak berjalan = cross-sell. Deviasi PRD M0 §6 dicatat di
+-- docs/DECISIONS.md.
 --
 -- BENTUK. Diklasifikasikan SEKALI di titik pembuatan kontrak (bukan angka
 -- turunan yang berubah-ubah setiap kali dibaca) — house rule #3: kontrak yang
@@ -19,18 +15,23 @@
 -- perpanjangan); FK ke `contracts(id)` sendiri (self-referencing), bukan
 -- komposit dengan client_id karena baris induk & anak SELALU klien yang sama
 -- (ditegakkan CHECK di bawah lewat subquery TIDAK bisa — jadi ditegakkan di
--- domain saat R-03 membangun pintunya; di sini murni skema).
+-- domain oleh `renewal.ts`, yang membangun pintunya di R-03; di sini murni
+-- skema). `transaction_id` menaut kontrak ke closing yang MELAHIRKANNYA —
+-- dipakai `salesperf.ts` untuk mengklasifikasikan SATU closing (bukan
+-- seluruh klien) sebagai baru/perpanjangan/cross-sell; NULL untuk kontrak
+-- yang dibuat lewat jalur Account biasa (`contract.ts`, tidak terikat satu
+-- closing tertentu).
 --
--- Nol prefix baru (CTR- sudah terdaftar), nol perubahan FK ke tabel lain,
--- tidak menyentuh `strategi`/`services`. Backfill: semua kontrak existing
--- (hasil migrasi O57, semuanya lahir dari jalur "kontrak pertama sebuah
--- klien") diberi `'baru'` lewat DEFAULT — tidak ada baris yang perlu
--- diklasifikasi ulang secara eksplisit karena tabel ini baru berisi data sejak
--- 20260807120000 dan belum ada jalur produksi yang membuat 'perpanjangan'.
+-- Nol prefix baru (CTR- sudah terdaftar), nol perubahan FK ke tabel lain di
+-- luar `transactions`, tidak menyentuh `strategi`/`services`. Backfill: semua
+-- kontrak existing (hasil migrasi O57, semuanya lahir dari jalur "kontrak
+-- pertama sebuah klien") diberi `'baru'` lewat DEFAULT, `transaction_id`
+-- tetap NULL (kontrak Account biasa, tidak lahir dari satu closing R-03).
 
 ALTER TABLE contracts
     ADD COLUMN jenis varchar(16) NOT NULL DEFAULT 'baru',
-    ADD COLUMN contract_sebelumnya_id varchar(32) NULL;
+    ADD COLUMN contract_sebelumnya_id varchar(32) NULL,
+    ADD COLUMN transaction_id varchar(32) NULL;
 
 ALTER TABLE contracts
     ADD CONSTRAINT ck_contracts_jenis CHECK (jenis IN ('baru', 'perpanjangan', 'cross_sell'));
@@ -38,6 +39,10 @@ ALTER TABLE contracts
 ALTER TABLE contracts
     ADD CONSTRAINT fk_contracts_sebelumnya
     FOREIGN KEY (contract_sebelumnya_id) REFERENCES contracts (id);
+
+ALTER TABLE contracts
+    ADD CONSTRAINT fk_contracts_transaction
+    FOREIGN KEY (transaction_id) REFERENCES transactions (id);
 
 -- contract_sebelumnya_id hanya sah menyertai jenis='perpanjangan' — sebuah
 -- kontrak 'baru'/'cross_sell' tidak boleh diam-diam menaut ke rantai
@@ -47,12 +52,16 @@ ALTER TABLE contracts
         (jenis = 'perpanjangan') OR (contract_sebelumnya_id IS NULL));
 
 CREATE INDEX idx_contracts_sebelumnya ON contracts (contract_sebelumnya_id);
+CREATE INDEX idx_contracts_transaction ON contracts (transaction_id);
 
 COMMENT ON COLUMN contracts.jenis IS
   'R-01 (Kinerja Sales) — diklasifikasikan SEKALI saat kontrak dibuat: baru | '
-  'perpanjangan | cross_sell. Default baru (setiap kontrak hari ini adalah '
-  'kontrak pertama kliennya — pintu perpanjangan/cross-sell dari Client '
-  'Record belum dibangun, R-03 garis stop).';
+  'perpanjangan | cross_sell.';
 COMMENT ON COLUMN contracts.contract_sebelumnya_id IS
-  'R-01 — rantai perpanjangan. NULL kecuali jenis=perpanjangan. Diisi hanya '
-  'oleh pintu R-03 (belum dibangun); nol baris terisi sampai saat itu.';
+  'R-01 — rantai perpanjangan. NULL kecuali jenis=perpanjangan. Diisi oleh '
+  'pintu R-03 (renewal.ts::closeRenewal).';
+COMMENT ON COLUMN contracts.transaction_id IS
+  'R-01/R-03 — closing yang melahirkan kontrak ini (renewal.ts::closeRenewal). '
+  'NULL untuk kontrak dari jalur Account biasa (contract.ts), yang tidak '
+  'terikat satu closing tertentu. Dipakai salesperf.ts untuk mengklasifikasi '
+  'SATU closing, bukan seluruh riwayat klien.';

@@ -202,10 +202,10 @@ afterEach(async () => {
   await sql`delete from transaction_change_requests where created_by like 'ZZ-%'`;
   await sql`delete from payment_verifications where created_by like 'ZZ-%'`;
   await sql`delete from installments where created_by like 'ZZ-%'`;
-  await sql`delete from transactions where created_by like 'ZZ-%'`;
-  await sql`delete from services where created_by like 'ZZ-%'`;
-  await sql`delete from client_platforms where created_by like 'ZZ-%'`;
   await sql`delete from client_sales_allocations where created_by like 'ZZ-%'`;
+  await sql`delete from services where created_by like 'ZZ-%'`;
+  await sql`delete from transactions where created_by like 'ZZ-%'`;
+  await sql`delete from client_platforms where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
   await sql`delete from negotiation_proposal_lines where created_by like 'ZZ-%'`;

@@ -440,13 +440,27 @@ interface ClientRow {
 }
 
 /**
- * loadClientRows is the money/klien basis: one row per (salesperson, client)
- * allocation, carrying the weighted share, the transaction to price it against,
- * the closing period, and whether the client's contract chain already contains
- * a perpanjangan/cross_sell agreement (R-02). A client with NO `contracts` row
- * at all (Contract creation is a separate Account-side step, not automatic at
- * closing) is unambiguously 'baru' by elimination — it has never been through
- * the renewal door, because that door (R-03) does not exist yet.
+ * loadClientRows is the money/klien basis: one row per (salesperson,
+ * TRANSACTION) allocation, carrying the weighted share, the transaction to
+ * price it against, the closing period, and whether THIS SPECIFIC closing's
+ * contract (if any) is a perpanjangan/cross_sell (R-02/R-03).
+ *
+ * R-03 changed the scope here from "per client" to "per transaction" — a
+ * client may now carry more than one closing (the original + any renewal/
+ * cross-sell), each with its OWN allocation row (`transaction_id`, migration
+ * 20260901080000) and, when it went through the renewal door, its OWN
+ * contract (`contracts.transaction_id`, migration 20260901060000). A closing
+ * with NO `contracts` row tied to it at all (Contract creation via Account's
+ * own door is a separate step, not automatic — or this is the client's very
+ * first, non-renewal closing) is unambiguously 'baru' by elimination — it
+ * never went through the renewal door, because ONLY that door sets
+ * `contracts.transaction_id`.
+ *
+ * The closing TIMESTAMP is read from the SAME audit row `close()`/
+ * `closeRenewal()` both write (`entity_type='client', action='closing'`),
+ * matched by `after_json->>'transaction_id'` — a client's audit trail can now
+ * hold more than one 'closing' row (one per TRX-), so matching by entity_id
+ * alone (as before R-03) would always resolve to the EARLIEST one.
  */
 async function loadClientRows(sql: Queryable, rosterIds: string[], f: SalesPerfFilter): Promise<ClientRow[]> {
   if (rosterIds.length === 0) {
@@ -459,13 +473,14 @@ async function loadClientRows(sql: Queryable, rosterIds: string[], f: SalesPerfF
     select csa.salesperson_id, csa.client_id, t.id as transaction_id, t.total_agreed_value,
            csa.basis_points,
            coalesce((select min(al.created_at) from audit_log al
-                      where al.entity_type = 'client' and al.entity_id = c.id and al.action = 'closing'),
+                      where al.entity_type = 'client' and al.entity_id = c.id and al.action = 'closing'
+                        and al.after_json->>'transaction_id' = t.id),
                      c.created_at) as closed_at,
-           exists (select 1 from contracts ct where ct.client_id = c.id and ct.jenis = 'perpanjangan') as has_perpanjangan,
-           exists (select 1 from contracts ct where ct.client_id = c.id and ct.jenis = 'cross_sell') as has_cross_sell
+           exists (select 1 from contracts ct where ct.transaction_id = t.id and ct.jenis = 'perpanjangan') as has_perpanjangan,
+           exists (select 1 from contracts ct where ct.transaction_id = t.id and ct.jenis = 'cross_sell') as has_cross_sell
       from client_sales_allocations csa
+      join transactions t on t.id = csa.transaction_id
       join clients c on c.id = csa.client_id
-      join transactions t on t.id = c.transaction_id
       join leads l on l.id = c.lead_id
      where csa.salesperson_id = any(${rosterIds})
        and (${f.source}::text is null or l.source = ${f.source})

@@ -96,14 +96,20 @@ export interface Contract {
   catatan: string | null;
   /**
    * R-01 (Kinerja Sales) — baru | perpanjangan | cross_sell. Set once at
-   * creation (DB default 'baru'); NOT a status, never re-derived. Every
-   * contract created through this module today is 'baru' — the renewal/
-   * cross-sell door from the Client Record (R-03) is not built yet
-   * (RENCANA_KINERJA_SALES.md §6 garis stop).
+   * creation (DB default 'baru'); NOT a status, never re-derived. Contracts
+   * created through THIS module (Account's own door) are always 'baru' — a
+   * 'perpanjangan'/'cross_sell' contract is born exclusively through the
+   * Client Record renewal door (`renewal.ts::closeRenewal`, R-03).
    */
   jenis: string;
   /** Renewal chain link — non-null only when jenis = 'perpanjangan'. */
   contractSebelumnyaId: string | null;
+  /**
+   * The closing (TRX-) that birthed this contract, when it came through the
+   * R-03 renewal door — null for a contract created via Account's own
+   * `createContract`/`ensureContractForService` (not tied to one closing).
+   */
+  transactionId: string | null;
   createdAt: string;
   updatedAt: string;
   createdBy: string;
@@ -126,6 +132,7 @@ interface ContractRow {
   catatan: string | null;
   jenis: string;
   contract_sebelumnya_id: string | null;
+  transaction_id: string | null;
   created_at: string | Date;
   updated_at: string | Date;
   created_by: string;
@@ -146,6 +153,7 @@ function rowToContract(r: ContractRow): Contract {
     catatan: r.catatan,
     jenis: r.jenis,
     contractSebelumnyaId: r.contract_sebelumnya_id,
+    transactionId: r.transaction_id,
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
     createdBy: r.created_by,

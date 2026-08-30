@@ -495,9 +495,9 @@ INSERT INTO role_mappings (divisi, jabatan, division, level, created_by) VALUES
   ('CREATIVE', 'VIDEOGRAPHER RLS', 'Creative', 'staff', 'SYSTEM');
 
 INSERT INTO services (id, client_id, master_service_id, master_version_no, name, standard_price,
-                      commission_rule, status, created_by)
+                      commission_rule, status, transaction_id, created_by)
 VALUES ('SVC-RLS-0001', 'CLI-RLS-0001', 'MSV-RLS-0001', 1, 'rls service', 9000000,
-        '10% of standard price', 'Ongoing', 'EMP-RLS-SLS1');
+        '10% of standard price', 'Ongoing', 'TRX-RLS-0001', 'EMP-RLS-SLS1');
 
 -- Brief milik divisi CREATIVE. `assigned_division` inilah yang diresolusi helper.
 INSERT INTO briefs (id, service_id, title, status, assigned_division, created_by)

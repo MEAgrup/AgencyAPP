@@ -1039,8 +1039,11 @@ async function standardLines(tx: Queryable, attemptId: string): Promise<Proposal
  * subtotal for the given quantity/nominal plus that version's own commission_rule.
  * That is why an added service needs no price on the wire — the client cannot
  * compute rupiah (CLAUDE.md #4), and a price it did compute could not be trusted.
+ *
+ * Exported for `renewal.ts` (R-03) — the renewal/cross-sell negotiation proposal
+ * reuses this SAME pricing/custom-term resolution rather than re-deriving it.
  */
-async function resolveProposalLine(
+export async function resolveProposalLine(
   tx: Queryable,
   l: ProposalLine,
   now: Date,
@@ -1272,16 +1275,23 @@ export function validateParties(c: ClosingParties): void {
   }
 }
 
-/** resolvePIC returns the Commission & Payment PIC, defaulting to Primary when solo. */
-function resolvePIC(c: ClosingParties): string {
+/**
+ * resolvePIC returns the Commission & Payment PIC, defaulting to Primary when
+ * solo. Exported for `renewal.ts` (R-03) — reused as-is, not re-derived.
+ */
+export function resolvePIC(c: ClosingParties): string {
   if (c.allocations.length === 1 || (c.commissionPaymentPicId ?? '').trim() === '') {
     return c.primarySalespersonId;
   }
   return c.commissionPaymentPicId as string;
 }
 
-/** validateShape enforces the payment-scheme ↔ schedule shape (M0 §6 rule 5). */
-function validateShape(input: ClosingInput): void {
+/**
+ * validateShape enforces the payment-scheme ↔ schedule shape (M0 §6 rule 5).
+ * Exported for `renewal.ts` (R-03) — a renewal closing carries the SAME
+ * payment-scheme/schedule rules as a fresh closing, reused as-is.
+ */
+export function validateShape(input: ClosingInput): void {
   validateParties(input.parties);
   if (!PAYMENT_SCHEMES.has(input.paymentScheme)) {
     throw new IncompleteError();
@@ -1408,33 +1418,10 @@ export async function close(
         values (${clientId}, ${platformName}, ${qf.store_link}, ${nullDate(input.managedSince)}, ${actor.employeeId})`;
     }
 
-    // 3) Sales allocation (Σ = 100% = 10000 bp, read-only snapshot).
-    for (const al of input.parties.allocations) {
-      await tx`
-        insert into client_sales_allocations (client_id, salesperson_id, basis_points, created_by)
-        values (${clientId}, ${al.salespersonId}, ${al.basisPoints}, ${actor.employeeId})`;
-    }
-
-    // 4) Services (SVC- per line, born [Awaiting Onboarding]); inherit the pinned
-    //    MSL version's "Requires Strategy Plan" flag AND plan_tier (M6 §2, M6C
-    //    S4). Both must travel together — a service pinned to the `ditentukan_am`
-    //    middle tier that only got `requires_strategy_plan` would silently fall
-    //    back to the `plan_tier` column default (`tanpa_plan`), skipping the G-B
-    //    determination gate entirely instead of leaving it pending (the exact
-    //    class of bug M6C Rule 1 warns about — see `nextOnboardingStep`).
-    for (const l of lines) {
-      const svcId = await ex.ident.identNext('SVC', now);
-      await tx`
-        insert into services
-          (id, client_id, master_service_id, master_version_no, name, standard_price, commission_rule,
-           status, requires_strategy_plan, plan_tier, created_by)
-        values
-          (${svcId}, ${clientId}, ${l.masterServiceId}, ${l.versionNo}, ${l.name}, ${l.proposedPrice},
-           ${l.commissionRule}, ${SERVICE_STATUS_AWAITING_ONBOARDING}, ${l.requiresStrategyPlan}, ${l.planTier},
-           ${actor.employeeId})`;
-    }
-
-    // 5) Transaction (TRX-) born awaiting Finance verification.
+    // 3) Transaction (TRX-) born awaiting Finance verification. Minted BEFORE
+    //    the allocation/services rows below (R-03) — both now carry
+    //    `transaction_id` so a second closing on the same client (renewal)
+    //    never mixes its money with the first one's.
     const trxId = await ex.ident.identNext('TRX', now);
     await tx`
       insert into transactions
@@ -1442,6 +1429,38 @@ export async function close(
       values
         (${trxId}, ${clientId}, ${input.paymentScheme}, ${money.decimal(total)}, ${TRX_STATUS_MENUNGGU}, ${actor.employeeId})`;
     await tx`update clients set transaction_id = ${trxId}, payment_intent = ${input.paymentScheme} where id = ${clientId}`;
+
+    // 4) Sales allocation (Σ = 100% = 10000 bp, read-only snapshot). R-03:
+    //    scoped to THIS transaction (`transaction_id`) — a renewal's closing
+    //    credits whoever processes IT, independent of the original closing's
+    //    allocation (`client_id` is kept alongside for the cross-transaction
+    //    "every sales ever credited" queries, see migration 20260901080000).
+    for (const al of input.parties.allocations) {
+      await tx`
+        insert into client_sales_allocations (client_id, transaction_id, salesperson_id, basis_points, created_by)
+        values (${clientId}, ${trxId}, ${al.salespersonId}, ${al.basisPoints}, ${actor.employeeId})`;
+    }
+
+    // 5) Services (SVC- per line, born [Awaiting Onboarding]); inherit the pinned
+    //    MSL version's "Requires Strategy Plan" flag AND plan_tier (M6 §2, M6C
+    //    S4). Both must travel together — a service pinned to the `ditentukan_am`
+    //    middle tier that only got `requires_strategy_plan` would silently fall
+    //    back to the `plan_tier` column default (`tanpa_plan`), skipping the G-B
+    //    determination gate entirely instead of leaving it pending (the exact
+    //    class of bug M6C Rule 1 warns about — see `nextOnboardingStep`).
+    //    R-03: `transaction_id` set so `finance.commissionAchievement` can
+    //    price THIS closing's Services alone (see migration 20260901100000).
+    for (const l of lines) {
+      const svcId = await ex.ident.identNext('SVC', now);
+      await tx`
+        insert into services
+          (id, client_id, transaction_id, master_service_id, master_version_no, name, standard_price, commission_rule,
+           status, requires_strategy_plan, plan_tier, created_by)
+        values
+          (${svcId}, ${clientId}, ${trxId}, ${l.masterServiceId}, ${l.versionNo}, ${l.name}, ${l.proposedPrice},
+           ${l.commissionRule}, ${SERVICE_STATUS_AWAITING_ONBOARDING}, ${l.requiresStrategyPlan}, ${l.planTier},
+           ${actor.employeeId})`;
+    }
 
     // 6) Installments (INST-) for scheduled schemes.
     const installments = input.installments ?? [];
@@ -1481,9 +1500,10 @@ export async function close(
 
 /**
  * validateScheduleTotal enforces that scheduled installments sum exactly to the
- * transaction total for Termin / Bayar di Belakang (M5 §4).
+ * transaction total for Termin / Bayar di Belakang (M5 §4). Exported for
+ * `renewal.ts` (R-03) — reused as-is.
  */
-function validateScheduleTotal(input: ClosingInput, total: money.Money): void {
+export function validateScheduleTotal(input: ClosingInput, total: money.Money): void {
   if (input.paymentScheme !== PAYMENT_SCHEME_TERMIN && input.paymentScheme !== PAYMENT_SCHEME_DI_BELAKANG) {
     return;
   }

@@ -3688,6 +3688,7 @@ export interface ContractWire {
   catatan: string | null;
   jenis: string;
   contract_sebelumnya_id: string | null;
+  transaction_id: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -3703,6 +3704,7 @@ export function contractToWire(c: contract.Contract): ContractWire {
     catatan: c.catatan,
     jenis: c.jenis,
     contract_sebelumnya_id: c.contractSebelumnyaId,
+    transaction_id: c.transactionId,
     created_by: c.createdBy,
     created_at: c.createdAt,
     updated_at: c.updatedAt,

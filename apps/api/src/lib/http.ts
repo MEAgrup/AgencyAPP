@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { account, activity, admin, ads, auth, board, campaign, client, creative, demo, directory, finance, health, internaltask, kol, leads, livestream, marketing, milestone, msl, notification, performance, portal, req, sales, salesperf, stage, task } from '@cdps/domain';
+import { account, activity, admin, ads, auth, board, campaign, client, creative, demo, directory, finance, health, internaltask, kol, leads, livestream, marketing, milestone, msl, notification, performance, portal, req, renewal, sales, salesperf, stage, task } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -167,7 +167,8 @@ export function mapError(err: unknown): Response {
     err instanceof internaltask.ConflictError ||
     err instanceof stage.ConflictError ||
     err instanceof req.ConflictError ||
-    err instanceof admin.ConflictError
+    err instanceof admin.ConflictError ||
+    err instanceof renewal.ContractMismatchError
   ) {
     // Lifecycle conflicts: a dedup block, an un-closable attempt, a lead whose
     // win was already resolved, or a full-verification blocked on a missing

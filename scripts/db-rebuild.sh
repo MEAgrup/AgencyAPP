@@ -140,11 +140,19 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "129"
-check "entity_prefix"    "select count(*) from entity_prefix"    "36"
-check "sm_machines"      "select count(*) from sm_machines"      "29"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "130"
+check "entity_prefix"    "select count(*) from entity_prefix"    "37"
+check "sm_machines"      "select count(*) from sm_machines"      "30"
 check "notif_events"     "select count(*) from notif_events"     "65"
-# 129 = 128 + 1 tabel Kinerja Sales S-02 (20260901070000_s02_sales_targets.sql):
+# 130 = 129 + 1 tabel Kinerja Sales R-03 (20260901090000_r03_contract_renewals.sql):
+#       `contract_renewals` (RNW-). 37 = 36 + 1 prefix RNW. 30 = 29 + 1 mesin
+#       `contract_renewal` (Draft→Negotiation→Closed|Cancelled, replikasi
+#       sub-alur negosiasi prospect_attempt tanpa Lead/Prospect). Nol event
+#       baru (v1 tanpa notifikasi renewal, katalog v1 tetap 65 — lihat
+#       docs/DECISIONS.md). `client_sales_allocations` dapat kolom
+#       transaction_id (20260901080000) — nol tabel/prefix/mesin baru dari
+#       migrasi itu, murni ALTER TABLE.
+# Sebelumnya 129 = 128 + 1 tabel Kinerja Sales S-02 (20260901070000_s02_sales_targets.sql):
 #       `sales_targets`. Nol prefix baru (kunci alami), nol mesin/event baru
 #       (config, bukan lifecycle). Sebelumnya 128 = 127 + 1 tabel Akun B Fase 4
 #       (20260831040000_req_permintaan.sql): `permintaan` (REQ-, M16 §5.5).
