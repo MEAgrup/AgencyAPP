@@ -2,189 +2,213 @@
 
 > Forward requirement for LT-61 (`docs/backlog/LEADTIME_BACKLOG.md` Fase 5b),
 > written in the style of `CDPS_Phase0_Foundation_v2.md` §11 (the equivalent
-> minimum for Module 15's Client Portal). **This is the spec gate LT-61 was
-> waiting on** (`docs/handoff/HANDOFF_LT60_SELESAI_LT61_SPEC_20260830.md`).
-> Scope decisions in §0 were confirmed by the product owner 2026-08-30; the
-> remaining items in §7 (Open) still need an answer before implementation
-> starts. **No migration, `packages/domain`, or FE code for LT-61 should be
-> written until §7 is empty and this file's status line below reads Approved.**
+> minimum for Module 15's Client Portal). Raised by
+> `docs/handoff/HANDOFF_LT60_SELESAI_LT61_SPEC_20260830.md`.
 
-**Status: DRAFT — owner has confirmed scope (§0) but has not yet signed off
-on the detailed mechanics below (§1–§6). Record the sign-off as a new
-`docs/DECISIONS.md` Decided row before starting implementation.**
+**Status: IMPLEMENTED (core) 2026-09-03.** Auth realm, data model, and the
+`packages/domain`/`apps/api` write/read gates are built and tested (§9). Not
+built: any vendor-facing FE (`web-internal` gained zero vendor UI; a vendor
+today can only be exercised via the API directly) — that is follow-up work,
+not part of this spec's minimum.
 
-## 0. Scope decisions (owner, 2026-08-30)
+## 0. Scope decisions (owner)
 
-Answered directly by the product owner when this session picked up the
-LT-61 blocker documented in the 2026-08-30 handoff:
+Round 1 (2026-08-30, via `AskUserQuestion` after the handoff):
 
 1. **This spec is independent of M15's Client Portal spec (`O5`).** LT-61
-   does not wait for `O5` to be written or approved. The two problems are
-   structurally identical (a first external, non-HRIS auth realm) but the
-   vendor's data surface is far narrower than the full Client Board, so
-   they are allowed to proceed on separate timelines.
+   does not wait for `O5`. The two problems are structurally identical (a
+   first external, non-HRIS auth realm) but the vendor's data surface is far
+   narrower than the full Client Board, so they proceed on separate timelines.
 2. **Auth realm: a real Supabase Auth account per vendor user** — not the
    login-less `strategi_share_token`/`/s/{token}` pattern (2026-08-09
-   precedent). The vendor gets an actual login, kept in a realm that is
-   structurally separate from the HRIS-synced `employees` population (§1).
+   precedent). Structurally separate from the HRIS-synced `employees`
+   population (§1).
 3. **Write scope: the vendor fills Live Stream Session (`LSS-`) result
-   fields directly.** This replaces the AM re-typing a vendor-supplied
-   report into `logResults` (`packages/domain/src/livestream.ts`) — the
-   vendor becomes the actor for the **result-entry edge** of the `LSS-`
-   machine. It does **not** touch reconciliation (§4 below pins the exact
-   edge boundary).
+   fields directly** (`logResults`) instead of the AM re-typing a
+   vendor-supplied report.
+
+Round 2 (2026-08-30, answering §7's 4 mechanical questions):
+
+1. **The vendor ALSO gets `confirmByVendor`** (schedule creation/confirmation)
+   — not only `logResults`. Concretely: *"Vendor pihak yang membuat jadwal,
+   dan AM yang memberikan info jadwal ke klien"* — the vendor is now the
+   party that sets the Session's request/schedule fields
+   (`createSession`), and the AM's role for scheduling becomes relaying
+   that schedule to the client (out-of-system; no new CDPS state for this).
+   `createSession`'s owning-AM/Director gate is therefore ALSO extended,
+   additively, to the assigned vendor (§4).
+2. **`vendor_id` sourcing: recommendation (a) accepted** — copied
+   automatically from the client's Aktif Strategi `live` pillar
+   (`strategi_pillar.vendor_id` where `jenis='live'`), not picked manually
+   by the AM. Known, documented limitation: a client is assumed to have AT
+   MOST ONE live-stream vendor at a time (§2).
+3. **Session expiry: same as an employee session** — *"Vendor tetap login
+   sepanjang hari"* (stays logged in all day, like a normal work session).
+   No shorter TTL, no new mechanism (§6).
+4. **Provisioning: recommendation accepted** — manual insert into
+   `vendor_accounts`, no admin UI (vendor count is tiny; build a screen only
+   if that stops being true).
 
 ## 1. Auth realm
 
 - Vendor users are **not** rows in `employees` and **never** flow through
-  HRIS sync. They must never acquire `app_metadata.employee_id` — that
-  claim is the single load-bearing assumption of `packages/core/src/permission.ts`
-  (`Actor.employeeId`, `actorFromClaims` throws on an empty one) and of
-  every `jwt_*` RLS helper. Do not attempt to satisfy LT-61 by inserting a
-  synthetic `employees` row for a vendor — that reuses the wrong population
-  and would make a vendor indistinguishable from staff everywhere else in
-  the system (permission matrix, roster, notifications, performance).
-- Concretely: a new `vendor_accounts` table (Supabase Auth `user_id` →
-  `vendor_id` FK to `vendors`, per-account `status_aktif`), and a
-  **second, separate branch** in `public.custom_access_token_hook`
-  (`supabase/migrations/20260723071013_supabase_auth.sql`) — or a second
-  hook function, whichever keeps the employee branch untouched — that
-  looks up `vendor_accounts` instead of `employees`/`role_mappings` and
-  stamps `app_metadata.vendor_id` (never `employee_id`, never `division`).
-  The employee branch's behavior must be provably unchanged (regression
-  test: an employee token's claims are byte-identical before/after this
-  hook is extended).
-- A brand-new `VendorActor` type lives beside `permission.Actor`, never
-  merged into it. Route handlers that serve vendor-facing endpoints resolve
-  a `VendorActor` and pass it only into the new vendor-facing domain
-  functions in §4 — they must be physically incapable of reaching any
-  route or domain function gated on `permission.Actor`.
-- Same Supabase project (`CDPS SG`) is fine — "separate realm" here means
-  a separate claim shape, separate RLS policies, and a separate actor type
-  in code, not a second Supabase project. (Flag if the owner intended a
-  literally separate project; not assumed here.)
+  HRIS sync, and never acquire `app_metadata.employee_id`.
+- **Design actually used** (simpler than the round-1 draft's "brand-new
+  `VendorActor` type" idea): a vendor Actor reuses the SAME
+  `permission.Actor` shape as an employee, with:
+  - `employeeId = vendors.id` (e.g. `"VND-202608-0001"`) — non-empty,
+    human-legible in `audit_log`, and guaranteed disjoint from HRIS
+    employee ids by prefix convention. This satisfies `sm_transition`'s
+    non-empty-actor requirement and `audit_log.actor_employee_id`'s
+    `NOT NULL` with **zero schema change** to that table (it already has no
+    physical FK to `employees` — `20260722053824_init.sql`).
+  - `vendorId = vendors.id` (same value, explicit field) — the ONLY thing
+    any gate checks to recognize a vendor Actor (`permission.isVendorActor`).
+  - `role = makeRole({})` — every field empty/false.
+
+  Because every OTHER gate in the codebase keys off `role.division`/
+  `role.director`/`role.od`/`isLead`, a vendor Actor is a silent no-op
+  everywhere except the few call sites that explicitly check `vendorId`
+  (`packages/domain/src/livestream.ts`). No new actor type, no new plumbing
+  through the route/domain layers — `confirmByVendor(sql, actor, id)` takes
+  the exact same `Actor` whether `actor` is an employee or a vendor.
+- Built: `vendor_accounts` table (Supabase Auth `auth_user_id` PK →
+  `vendor_id` FK, `status_aktif`) + `vendor_claims(uuid)` resolver + a second
+  branch in `public.custom_access_token_hook` that tries `employees` first
+  (untouched — same body, same order) and falls back to `vendor_accounts`,
+  injecting ONLY `vendor_id`. Migration:
+  `supabase/migrations/20260903010000_lt61_vendor_auth.sql`.
+- `packages/core/src/permission.ts`: `actorFromVendorClaims(claims)` (mirrors
+  `actorFromClaims`, throws on missing `vendor_id`). `apps/api/src/lib/auth.ts`
+  `requireActor`/`actorFromToken` tries the employee mapping first, falls
+  back to the vendor mapping — one unified entry point, no separate
+  "vendor routes".
+- Same Supabase project (`CDPS SG`) — "separate realm" means a separate
+  claim shape, separate RLS policies, and (now) a separate Actor field, not
+  a second Supabase project.
 
 ## 2. Data isolation
 
-- **Gap found while writing this spec:** no table today links a Live
-  Stream Brief or Session to a specific `vendors.id`. `vendor_id` only
-  exists on `strategi_pillar`/`strategi_resource` (`20260806064000_m6a_strategi.sql`,
-  the pillar/resource assignment, CHECK-restricted to `jenis='live'`) — it
-  is a **live, editable** assignment on the client's strategy, not a
-  stable fact stamped on a Brief. LT-61 needs the latter: a `vendor_id`
-  column on `live_stream_sessions` (or on the parent Brief — pick one,
-  Session is more precise since a recurring Brief could in principle
-  change vendors between periods) that is **stamped once at creation and
-  never edited**, same immutability pattern as `data_confidence_tier`.
-- **Open question this raises:** at Session-creation time, is the
-  `vendor_id` copied from the client's current `strategi_pillar` (`jenis='live'`)
-  row, or does the owning AM pick it explicitly on the request form? Either
-  is workable; the spec needs the owner/head-dev's steer per the house rule
-  that requires all cross-module FK sourcing decisions to be explicit, not
-  inferred by whoever implements it.
-- RLS: a new `jwt_vendor_id()` helper (mirrors `jwt_division()`/`jwt_is_lead()`
-  in shape, **kept in a clearly vendor-only naming lane** — never merged
-  into the `jwt_division`/`jwt_is_lead` family those helpers' callers
-  already assume means "an employee"). New policy on `live_stream_sessions`:
-  a vendor-realm JWT may `SELECT`/`UPDATE` only rows where
-  `vendor_id = jwt_vendor_id()`, and only via the narrow update path in §4
-  (never a raw table-level UPDATE grant — the state machine still owns the
-  status column per house rule #2).
-- The vendor never sees the parent Brief's full record (client name may be
-  visible per Brief; other financial/strategy fields must not be) — the
-  read surface is a **new vendor-facing read model**, not a permission-
-  trimmed reuse of the internal `getSession`/`listBriefSessions` shape
-  (same principle `web-client-portal/README.md` states for the Client
-  Portal: "never a permission-trimmed internal view").
+- **Gap found while writing this spec, now closed:** `live_stream_sessions.vendor_id`
+  (nullable `varchar(32)` FK to `vendors`) is stamped ONCE at Session
+  creation (`packages/domain/src/livestream.ts` `resolveLiveVendorId`) from
+  the client's Aktif Strategi `live` pillar, and never written again by any
+  UPDATE path — same immutability pattern as `data_confidence_tier`.
+  `resolveLiveVendorId` picks the most recently touched `live` pillar row
+  when more than one exists (`order by updated_at desc limit 1`) rather than
+  erroring — **a genuinely multi-vendor-per-client live setup (e.g. one
+  vendor per channel) is a known, accepted limitation, not solved here.**
+  A Session created before the client had an Aktif Strategi `live` pillar
+  gets `vendor_id = null` — the pre-LT-61, AM-only path keeps working
+  exactly as before for it.
+- RLS: `jwt_vendor_id()` helper (mirrors `jwt_division()`'s shape, kept in
+  its own naming lane) + `live_stream_sessions_select` amended to also allow
+  `vendor_id IS NOT NULL AND vendor_id = jwt_vendor_id()`. This is
+  read-side defense in depth only — writes go through `db()` (privileged
+  service role, RLS bypassed) + the TS gate, per `DECISIONS.md` O37; the RLS
+  amendment does not change that for this table.
+- **Read surface, as actually built:** the vendor reads the SAME `Session`
+  shape (`getSession`/`listBriefSessions`, now also `listVendorSessions` for
+  a vendor with no Brief id in hand) as the AM/Director path — no bespoke
+  vendor read model was built. This satisfies the isolation intent without
+  extra surface because `Session` already excludes the Brief/Client/
+  financial context (it carries only `briefId` as an opaque string, no
+  joined client name, no money fields outside this Session's own GMV) —
+  unlike the Client Portal's much wider Client Board, there was nothing left
+  to trim.
 
 ## 3. Audit trail for a non-employee actor
 
-- `audit_log.actor_employee_id` is `varchar(64) NOT NULL` with **no
-  physical FK** to `employees` (`20260722053824_init.sql`) — so it can
-  hold a non-employee identifier without a schema change, but every
-  existing reader of this column assumes an `employees.employee_id` join
-  works. Recommend a new nullable `actor_type` column (`'employee'` default
-  vs `'vendor'`) alongside a vendor-distinguishable value in
-  `actor_employee_id` (e.g. the `vendor_accounts` id, never colliding with
-  an `EMP-`-shaped id) — additive only; the table's existing
-  no-UPDATE/no-DELETE triggers are untouched and every historical row
-  keeps reading exactly as it does today.
-- Every vendor action (result submission, and anything else granted under
-  §4) gets its own immutable `audit_log` row exactly like an employee
-  action — no exception to house rule #3.
+- **Resolved simpler than the round-1 draft assumed:** no schema change to
+  `audit_log` was needed. `sm_transition`'s `p_actor_employee_id` parameter
+  is passed through as-is from `Actor.employeeId` — a vendor Actor's
+  `employeeId` already holds its `vendors.id`, which is non-empty,
+  human-legible, and safe (no `actor_type` column was added; that idea from
+  the earlier draft is superseded).
+- Every vendor action gets its own immutable `audit_log` row exactly like an
+  employee action — no exception to house rule #3.
 
-## 4. Write scope — pinned to one edge
+## 4. Write scope
 
-- **In scope:** `logResults` (`[Confirmed by Vendor]` → `[Completed]`,
-  `packages/domain/src/livestream.ts`) becomes reachable by the owning
-  vendor (`session.vendor_id === actor.vendorId`), in addition to the
-  existing owning-AM/Director gate — **additive**, the AM/Director path is
-  never removed (an AM must still be able to log results on the vendor's
-  behalf when the vendor doesn't self-serve, e.g. a one-off vendor without
-  an account yet).
-- **Explicitly out of scope**, all remaining unchanged (owning AM/Director
-  only, per `canManageSession`):
-  - `confirmByVendor` (`[Requested]` → `[Confirmed by Vendor]`) — schedule
-    confirmation stays AM-entered. (Flagged as an open question below —
-    the owner's answer covered "session results," not schedule
-    confirmation; do not fold this edge in without asking.)
-  - `reconcile` / `flagDiscrepancy` (`[Completed]` → `[Reconciled]` /
-    `[Discrepancy Flagged]`) — reconciliation is inherently the AM
-    checking the vendor's own numbers; a vendor reconciling itself defeats
-    the purpose of the machine as documented in `livestream.ts`'s header
-    ("what the vendor actually delivered" vs. "what MEA requested" — two
-    independent sides of the same check).
-  - `createSession`, `reopenBrief` — vendor never initiates a request or
-    reopens a Brief.
-- Field-level validation for the vendor-submitted result (mandatory
-  `actualDatetime`/`actualDurationHours`/`ordersGenerated`/`gmv`/
-  `vendorReportLink`, exact same BI `[...]` messages) is unchanged from
-  `logResults` today — the vendor hits the same validation, just as a
-  different actor.
+Per round-2 decision #1, the vendor's write scope is **create + confirm +
+log results** — everything up to `[Completed]`, never reconciliation:
+
+- **In scope, additive to the existing owning-AM/Director gate** (the AM
+  path is NEVER removed — needed when a vendor has no CDPS account yet):
+  - `createSession` (`[Requested]` birth) — the vendor now sets the request/
+    schedule fields itself. Gated by `canVendorWriteSession(actor,
+    resolveLiveVendorId(...))`, resolved from the Brief's client BEFORE the
+    gate check (the Session doesn't exist yet to carry its own `vendor_id`).
+  - `confirmByVendor` (`[Requested]` → `[Confirmed by Vendor]`).
+  - `logResults` (`[Confirmed by Vendor]` → `[Completed]`) — same mandatory
+    fields/BI messages as before, just reachable by a second actor.
+- **Out of scope, unreachable by construction:**
+  - `reconcile` / `flagDiscrepancy` (`→ [Reconciled]` / `[Discrepancy
+    Flagged]`) — the AM checking the vendor's own numbers is the entire
+    point of the machine. `edge()` (the shared transition driver) takes an
+    explicit `allowVendor` opt-in per call site; `reconcile`/
+    `flagDiscrepancy` never pass it, so no future edit to
+    `canVendorWriteSession` can accidentally open these two.
+  - `reopenBrief` — vendor never reopens a Brief.
 
 ## 5. Rate limiting
 
-- Vendor login must be rate-limited per the same minimum Phase 0 v2 §11
-  sets for Client Portal login (Supabase Auth's built-in limits are the
-  floor; add an app-layer throttle on the vendor login route if the
-  vendor's login page is public-facing, matching whatever mechanism gets
-  chosen for M15 login when that spec is written — do not invent a second
-  mechanism if one already exists by then).
-- No complaint-form-equivalent exists on this surface, so §11's second
-  rate-limit target does not apply here.
+- Not built in this pass — there is no vendor-facing login page yet (no FE),
+  so there is nothing to rate-limit today. Applies to whatever mechanism
+  gets chosen once a vendor login page exists (reuse the mechanism M15
+  picks, if it exists by then, rather than inventing a second one).
 
 ## 6. Session expiry
 
-- Recommend **shorter than the internal employee session TTL** (external
-  realm, occasional usage pattern — a vendor logs in around scheduled live
-  sessions, not daily). Exact TTL is an **Open** item (§7) — needs the
-  same number the owner would pick for M15, or its own number if M15
-  hasn't set a precedent yet by the time LT-61 implements.
+- Per round-2 decision #3: same as an employee session — the existing
+  GoTrue project default. No new mechanism, no per-realm TTL.
 
-## 7. Open (must be answered before implementation)
+## 7. Provisioning
 
-| # | Question | Needed from |
-|---|---|---|
-| 1 | Does the vendor also get `confirmByVendor` (schedule confirmation), or only `logResults` (result entry)? §4 currently pins ONLY `logResults` because that's the literal scope the owner confirmed 2026-08-30 — confirm or extend. | Owner |
-| 2 | `vendor_id` on `live_stream_sessions`: copied from `strategi_pillar` (`jenis='live'`) at creation, or picked explicitly by the AM on the request form? | Owner / head dev |
-| 3 | Exact vendor session TTL. | Owner |
-| 4 | Does the vendor's Supabase Auth account get provisioned by a Director-only admin screen (mirrors employee onboarding) or a one-off manual insert given the vendor count is tiny (per handoff §4 point 1, "kemungkinan sangat sedikit")? | Owner / head dev |
+- Per round-2 decision #4: manual `INSERT INTO vendor_accounts` (pairing a
+  Supabase Auth user, created via the Dashboard or the Admin API, with a
+  `vendors.id`). No admin screen — revisit only if vendor count stops being
+  tiny.
 
-## 8. Reference
+## 8. What was NOT built (explicitly out of scope of this pass)
+
+- Any vendor-facing FE. `web-internal` has zero new pages; a vendor can only
+  be exercised by calling the API directly with a vendor-realm token today.
+- Rate limiting (§5 — nothing to rate-limit without a login page yet).
+- An admin UI for vendor account provisioning (§7).
+- Solving the multi-vendor-per-client case (§2).
+
+## 9. Built (reference)
+
+- `supabase/migrations/20260903010000_lt61_vendor_auth.sql` — `vendor_accounts`,
+  `live_stream_sessions.vendor_id`, `vendor_claims`, the hook's vendor
+  branch, `jwt_vendor_id()`, the amended `live_stream_sessions_select` policy.
+- `packages/core/src/permission.ts` — `Actor.vendorId`, `isVendorActor`,
+  `actorFromVendorClaims` (+ `permission.test.ts` coverage).
+- `packages/domain/src/livestream.ts` — `canVendorWriteSession`,
+  `resolveLiveVendorId`, `edge()`'s `allowVendor` opt-in,
+  `createSession`/`confirmByVendor`/`logResults` extended,
+  `listVendorSessions` (+ `livestream.test.ts` "LT-61: vendor self-service").
+- `apps/api/src/lib/auth.ts` (`requireActor` vendor fallback), `db.ts`
+  (`actorClaims` vendor branch), `wire.ts` (`SessionWire.vendor_id`), new
+  route `GET /api/v1/vendor/sessions`.
+- `web-internal/src/lib/livestream.ts` — `Session.vendor_id` (FE type kept
+  in shape-parity lock-step with the wire; no page consumes it yet).
+- Table-count gates bumped 133→134 (`scripts/db-rebuild.sh`, `.github/workflows/ci.yml`)
+  — `vendor_accounts` only; zero new prefix/machine/notif event.
+
+## 10. Reference
 
 - `docs/handoff/HANDOFF_LT60_SELESAI_LT61_SPEC_20260830.md` — the handoff
-  that raised this blocker and its question framework (§4 there maps to
-  §0/§1–§6 here).
-- `packages/domain/src/livestream.ts` — `LSS-` machine, `canManageSession`,
-  `logResults`/`confirmByVendor`/`reconcile`/`flagDiscrepancy`.
-- `packages/core/src/permission.ts` — `Actor`/`Role`, the closed
-  employee-only assumption this spec deliberately does not touch.
-- `supabase/migrations/20260723071013_supabase_auth.sql` — `custom_access_token_hook`.
+  that raised this blocker and its question framework.
+- `packages/domain/src/livestream.ts` — `LSS-` machine.
+- `packages/core/src/permission.ts` — `Actor`/`Role`.
+- `supabase/migrations/20260723071013_supabase_auth.sql` — `custom_access_token_hook`
+  (employee branch, untouched by this addendum).
 - `supabase/migrations/20260806063000_m6a_vendor.sql`,
   `20260806064000_m6a_strategi.sql` — `vendors` master record,
-  `strategi_pillar.vendor_id`/`strategi_resource.vendor_id` (the only
-  existing vendor-identity FK in the schema today).
+  `strategi_pillar.vendor_id`.
 - `docs/prd/CDPS_Phase0_Foundation_v2.md` §11 — the M15 minimum this
   addendum mirrors.
-- `web-client-portal/README.md` — the separate-realm / allow-list contract
-  already agreed for Client Portal; §2/§4 here follow the same shape.
+- `web-client-portal/README.md` — the separate-realm contract already
+  agreed for Client Portal.

@@ -869,6 +869,7 @@ describe('M10 sessionToWire (Live Stream Session)', () => {
   const full: livestream.Session = {
     id: 'LSS-202607-0001',
     briefId: 'BRF-202607-0001',
+    vendorId: 'VND-202607-0001',
     platform: 'TikTok Shop Live',
     requestedDatetime: new Date('2026-07-20T12:00:00Z'),
     targetDurationHours: 2,
@@ -893,6 +894,7 @@ describe('M10 sessionToWire (Live Stream Session)', () => {
     expect(sessionToWire(full)).toEqual({
       id: 'LSS-202607-0001',
       brief_id: 'BRF-202607-0001',
+      vendor_id: 'VND-202607-0001',
       platform: 'TikTok Shop Live',
       requested_datetime: '2026-07-20T12:00:00.000Z',
       target_duration_hours: 2,

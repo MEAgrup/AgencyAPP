@@ -45,6 +45,7 @@
 
 import { bi, money, notification, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
+import { STRATEGI_AKTIF } from './strategi';
 
 /** Authenticated employee + resolved role (from @cdps/core permission). */
 export type Actor = permission.Actor;
@@ -184,6 +185,15 @@ export class ConflictError extends Error {
 // Permission gates (§6.1). This is a TRACKER the owning AM owns, NOT an execution
 // division. Every WRITE edge is the owning AM or Director; the read gate adds
 // OD/Director (everywhere) and Account lead/SPV (division-wide, incl. discrepancies).
+//
+// LT-61 adds a SECOND, narrower write gate (`canVendorWriteSession`) for the
+// vendor Actor itself, additive to (never replacing) the AM/Director gate above.
+// It is deliberately its own function, not folded into `canManageSession`,
+// because it must NOT apply to every edge: `edge()` below takes an explicit
+// `allowVendor` opt-in per caller, so reconcile/flagDiscrepancy — the AM
+// checking the vendor's own numbers — stay unreachable by construction for a
+// vendor Actor, no matter how this file's gates evolve. See
+// docs/prd/CDPS_Module10_Addendum_LT61_Vendor_Portal_Spec.md §4.
 // ---------------------------------------------------------------------------
 
 /** canManageSession: create/results/reconcile/flag/reopen — owning AM or Director. */
@@ -191,13 +201,28 @@ export function canManageSession(actor: Actor, ownerAM: string | null): boolean 
   return actor.role.director || (!!ownerAM && actor.employeeId === ownerAM);
 }
 
-/** canSeeSession: OD/Director everywhere; Account lead/SPV division-wide; owning AM. */
-export function canSeeSession(actor: Actor, ownerAM: string | null): boolean {
+/**
+ * canVendorWriteSession (LT-61): the vendor Actor assigned to this Session's
+ * `vendor_id`. `actor.vendorId` is undefined for every employee Actor, so this
+ * is always false for the AM/Director population — purely additive.
+ */
+export function canVendorWriteSession(actor: Actor, sessionVendorId: string | null): boolean {
+  return !!sessionVendorId && !!actor.vendorId && actor.vendorId === sessionVendorId;
+}
+
+/**
+ * canSeeSession: OD/Director everywhere; Account lead/SPV division-wide; owning
+ * AM; OR (LT-61) the vendor Actor this Session belongs to.
+ */
+export function canSeeSession(actor: Actor, ownerAM: string | null, sessionVendorId: string | null = null): boolean {
   if (permission.canReadAll(actor)) {
     return true; // OD / Director
   }
   if (permission.isLead(actor, ACCOUNT_DIVISION)) {
     return true; // Account lead / SPV (division-wide)
+  }
+  if (canVendorWriteSession(actor, sessionVendorId)) {
+    return true; // LT-61: the assigned vendor reads its own Session
   }
   return !!ownerAM && actor.employeeId === ownerAM;
 }
@@ -230,6 +255,10 @@ export interface ResultInput {
 export interface Session {
   id: string;
   briefId: string;
+  /** VND- id of the vendor entitled to self-serve this Session (LT-61), or null
+   *  when unresolved at creation (e.g. no Aktif Strategi live pillar yet) —
+   *  the AM keeps entering results on the vendor's behalf in that case. */
+  vendorId: string | null;
   platform: string;
   requestedDatetime: Date;
   targetDurationHours: number;
@@ -273,8 +302,8 @@ export async function createSession(
     const ex = executors(tx);
 
     // Lock the parent Brief and join up to the owning AM (the §6.1 authority).
-    const rows = await tx<{ assigned_division: string; status: string; assigned_am_id: string | null }[]>`
-      select b.assigned_division, b.status, c.assigned_am_id
+    const rows = await tx<{ assigned_division: string; status: string; assigned_am_id: string | null; client_id: string }[]>`
+      select b.assigned_division, b.status, c.assigned_am_id, c.id as client_id
       from briefs b
       join services sv on sv.id = b.service_id
       join clients c on c.id = sv.client_id
@@ -282,7 +311,7 @@ export async function createSession(
     if (rows.length === 0) {
       throw new NotFoundError(MSG_BRIEF_NOT_FOUND);
     }
-    const { assigned_division: division, status: briefStatus, assigned_am_id: ownerAM } = rows[0];
+    const { assigned_division: division, status: briefStatus, assigned_am_id: ownerAM, client_id: clientId } = rows[0];
     if (division !== LIVE_STREAM_DIVISION) {
       throw new ConflictError(MSG_NOT_LIVE_STREAM_BRIEF);
     }
@@ -294,7 +323,10 @@ export async function createSession(
     if (briefStatus !== BRIEF_VENDOR_DISPATCHED) {
       throw new ConflictError(MSG_BRIEF_NOT_OPEN);
     }
-    if (!canManageSession(actor, ownerAM)) {
+    // LT-61: resolve the client's live-stream vendor BEFORE the gate check, so a
+    // vendor Actor creating its own Session request is judged against it too.
+    const vendorId = await resolveLiveVendorId(tx, clientId);
+    if (!canManageSession(actor, ownerAM) && !canVendorWriteSession(actor, vendorId)) {
       throw new ForbiddenError(MSG_SESSION_MANAGE_FORBIDDEN);
     }
 
@@ -313,11 +345,11 @@ export async function createSession(
     await tx`
       insert into live_stream_sessions
         (id, brief_id, platform, requested_datetime, target_duration_hours,
-         products_talent, special_instructions, status, data_confidence_tier, created_by)
+         products_talent, special_instructions, status, data_confidence_tier, vendor_id, created_by)
       values
         (${id}, ${briefId}, ${platform}, ${requestedAt}, ${targetDur},
          ${nullTrim(input.productsTalent)}, ${nullTrim(input.specialInstructions)}, ${LSS_REQUESTED},
-         ${DATA_CONFIDENCE_VENDOR_REPORTED}, ${actor.employeeId})`;
+         ${DATA_CONFIDENCE_VENDOR_REPORTED}, ${vendorId}, ${actor.employeeId})`;
     await ex.audit.insertAudit({
       entityType: 'live_stream_session', entityId: id, actorEmployeeId: actor.employeeId, action: 'create',
       beforeJson: null, afterJson: { status: LSS_REQUESTED, brief_id: briefId, platform },
@@ -325,13 +357,37 @@ export async function createSession(
     });
 
     return {
-      id, briefId, platform, requestedDatetime: requestedAt, targetDurationHours: targetDur,
+      id, briefId, vendorId, platform, requestedDatetime: requestedAt, targetDurationHours: targetDur,
       productsTalent: (input.productsTalent ?? '').trim(), specialInstructions: (input.specialInstructions ?? '').trim(),
       status: LSS_REQUESTED, actualDatetime: null, actualDurationHours: null, viewersPeak: null, viewersAvg: null,
       ordersGenerated: null, gmv: null, gmvDisplay: '', vendorReportLink: '', reconciliationNotes: '',
       dataConfidenceTier: DATA_CONFIDENCE_VENDOR_REPORTED, createdBy: actor.employeeId, createdAt: now,
     };
   });
+}
+
+/**
+ * resolveLiveVendorId (LT-61) looks up the client's assigned live-stream vendor:
+ * the `vendor_id` on the `live` pillar of the client's Aktif Strategi, if any.
+ *
+ * A client is assumed to have AT MOST ONE live-stream vendor at a time — a
+ * genuinely multi-vendor live setup (e.g. one per channel) is a known,
+ * documented gap (spec §2), not solved here; `limit 1` picks the most recently
+ * touched `live` pillar row deterministically rather than erroring. Returns
+ * null when there is no Aktif Strategi, no `live` pillar, or no vendor on it —
+ * the Session is then created with `vendor_id = null` and only the owning
+ * AM/Director can act on it (the pre-LT-61 path, unchanged).
+ */
+async function resolveLiveVendorId(tx: Queryable, clientId: string): Promise<string | null> {
+  const rows = await tx<{ vendor_id: string }[]>`
+    select sp.vendor_id
+    from strategi_pillar sp
+    join strategi s on s.id = sp.strategi_id
+    where s.client_id = ${clientId} and s.status = ${STRATEGI_AKTIF}
+      and sp.jenis = 'live' and sp.vendor_id is not null
+    order by sp.updated_at desc
+    limit 1`;
+  return rows.length > 0 ? rows[0].vendor_id : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -348,12 +404,13 @@ interface SessionRow {
   status: string;
   briefStatus: string;
   ownerAM: string | null;
+  vendorId: string | null;
 }
 
 /** lockSession row-locks a Session and joins up to the parent Brief + owning AM. */
 async function lockSession(tx: Queryable, id: string): Promise<SessionRow> {
-  const rows = await tx<{ id: string; brief_id: string; status: string; brief_status: string; assigned_am_id: string | null }[]>`
-    select ls.id, ls.brief_id, ls.status, b.status as brief_status, c.assigned_am_id
+  const rows = await tx<{ id: string; brief_id: string; status: string; brief_status: string; assigned_am_id: string | null; vendor_id: string | null }[]>`
+    select ls.id, ls.brief_id, ls.status, b.status as brief_status, c.assigned_am_id, ls.vendor_id
     from live_stream_sessions ls
     join briefs b on b.id = ls.brief_id
     join services sv on sv.id = b.service_id
@@ -363,7 +420,10 @@ async function lockSession(tx: Queryable, id: string): Promise<SessionRow> {
     throw new NotFoundError(MSG_SESSION_NOT_FOUND);
   }
   const r = rows[0];
-  return { id: r.id, briefId: r.brief_id, status: r.status, briefStatus: r.brief_status, ownerAM: r.assigned_am_id };
+  return {
+    id: r.id, briefId: r.brief_id, status: r.status, briefStatus: r.brief_status,
+    ownerAM: r.assigned_am_id, vendorId: r.vendor_id,
+  };
 }
 
 /** A hook run inside the transaction with the locked row (pre- or post-transition). */
@@ -372,10 +432,15 @@ type Hook = (tx: Queryable, ex: ReturnType<typeof executors>, r: SessionRow) => 
 /**
  * edge is the shared, gated driver for one Session transition. It locks the row,
  * freezes Sessions of a voided Brief (scope: void interaction — no further moves),
- * applies the §6.1 owning-AM/Director gate, pins the allowed source states (so each
- * caller means exactly its edge(s)), runs an optional `mutate` (field write / gate)
- * BEFORE the status changes, drives the engine, runs an optional `post` hook, and —
- * for a move into [Reconciled] — recomputes the parent Brief roll-up. All atomic.
+ * applies the §6.1 owning-AM/Director gate — plus (LT-61) the assigned vendor's own
+ * gate when the caller opts in via `allowVendor` — pins the allowed source states
+ * (so each caller means exactly its edge(s)), runs an optional `mutate` (field
+ * write / gate) BEFORE the status changes, drives the engine, runs an optional
+ * `post` hook, and — for a move into [Reconciled] — recomputes the parent Brief
+ * roll-up. All atomic.
+ *
+ * `allowVendor` defaults to false: reconcile/flagDiscrepancy never pass it, so a
+ * vendor Actor cannot reach them no matter how `canVendorWriteSession` evolves.
  */
 async function edge(
   sql: Sql,
@@ -385,6 +450,7 @@ async function edge(
   to: string,
   mutate?: Hook,
   post?: Hook,
+  opts?: { allowVendor?: boolean },
 ): Promise<statemachine.TransitionResult> {
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
@@ -393,7 +459,8 @@ async function edge(
     if (r.briefStatus === BRIEF_VOIDED) {
       throw new ConflictError(MSG_BRIEF_VOIDED);
     }
-    if (!canManageSession(actor, r.ownerAM)) {
+    const vendorAllowed = !!opts?.allowVendor && canVendorWriteSession(actor, r.vendorId);
+    if (!canManageSession(actor, r.ownerAM) && !vendorAllowed) {
       throw new ForbiddenError(MSG_SESSION_MANAGE_FORBIDDEN);
     }
     if (!from.includes(r.status)) {
@@ -422,18 +489,23 @@ async function edge(
 }
 
 /**
- * confirmByVendor logs the vendor accepting the schedule: [Requested] → [Confirmed
- * by Vendor] (§3 Rule 3). Vendor confirmation arrives out-of-system; the AM records it.
+ * confirmByVendor logs the schedule being confirmed: [Requested] → [Confirmed by
+ * Vendor] (§3 Rule 3). Two ways in as of LT-61: the owning AM/Director records a
+ * vendor confirmation that arrived out-of-system (the original, still-supported
+ * path — a vendor without a CDPS account), OR the assigned vendor itself
+ * confirms directly (`allowVendor: true`).
  */
 export async function confirmByVendor(sql: Sql, actor: Actor, id: string): Promise<statemachine.TransitionResult> {
-  return edge(sql, actor, id, [LSS_REQUESTED], LSS_CONFIRMED);
+  return edge(sql, actor, id, [LSS_REQUESTED], LSS_CONFIRMED, undefined, undefined, { allowVendor: true });
 }
 
 /**
  * logResults enters the vendor-reported result and completes the Session:
  * [Confirmed by Vendor] → [Completed] (§4 Flow 2). Gate (§4 Rule 2 / §6.3): actual
  * datetime, actual duration, orders, GMV and the Vendor Report Link are all
- * mandatory; viewers optional.
+ * mandatory; viewers optional. As of LT-61 the assigned vendor may enter its own
+ * result directly (`allowVendor: true`), additive to the owning AM/Director path
+ * (still needed for a vendor without a CDPS account).
  */
 export async function logResults(sql: Sql, actor: Actor, id: string, input: ResultInput): Promise<statemachine.TransitionResult> {
   return edge(sql, actor, id, [LSS_CONFIRMED], LSS_COMPLETED, async (tx) => {
@@ -463,7 +535,7 @@ export async function logResults(sql: Sql, actor: Actor, id: string, input: Resu
           viewers_peak = ${input.viewersPeak ?? null}, viewers_avg = ${input.viewersAvg ?? null},
           orders_generated = ${input.ordersGenerated}, gmv = ${money.decimal(gmv)}, vendor_report_link = ${link}
       where id = ${id}`;
-  });
+  }, undefined, { allowVendor: true });
 }
 
 /**
@@ -606,6 +678,7 @@ export async function reopenBrief(sql: Sql, actor: Actor, briefId: string): Prom
 interface SessionScanRow {
   id: string;
   brief_id: string;
+  vendor_id: string | null;
   platform: string;
   requested_datetime: Date;
   target_duration_hours: string;
@@ -637,7 +710,7 @@ function scanSession(r: SessionScanRow): { session: Session; ownerAM: string | n
   }
   return {
     session: {
-      id: r.id, briefId: r.brief_id, platform: r.platform, requestedDatetime: r.requested_datetime,
+      id: r.id, briefId: r.brief_id, vendorId: r.vendor_id, platform: r.platform, requestedDatetime: r.requested_datetime,
       targetDurationHours: Number(r.target_duration_hours), productsTalent: r.products_talent,
       specialInstructions: r.special_instructions, status: r.status, actualDatetime: r.actual_datetime,
       actualDurationHours: r.actual_duration_hours === null ? null : Number(r.actual_duration_hours),
@@ -655,7 +728,7 @@ function scanSession(r: SessionScanRow): { session: Session; ownerAM: string | n
  */
 export async function getSession(sql: Queryable, actor: Actor, sessionId: string): Promise<Session> {
   const rows = await sql<SessionScanRow[]>`
-    select ls.id, ls.brief_id, ls.platform, ls.requested_datetime, ls.target_duration_hours,
+    select ls.id, ls.brief_id, ls.vendor_id, ls.platform, ls.requested_datetime, ls.target_duration_hours,
            coalesce(ls.products_talent, '') as products_talent,
            coalesce(ls.special_instructions, '') as special_instructions, ls.status,
            ls.actual_datetime, ls.actual_duration_hours, ls.viewers_peak, ls.viewers_avg,
@@ -671,7 +744,7 @@ export async function getSession(sql: Queryable, actor: Actor, sessionId: string
     throw new NotFoundError(MSG_SESSION_NOT_FOUND);
   }
   const { session, ownerAM } = scanSession(rows[0]);
-  if (!canSeeSession(actor, ownerAM)) {
+  if (!canSeeSession(actor, ownerAM, session.vendorId)) {
     throw new ForbiddenError(MSG_SESSION_VIEW_FORBIDDEN);
   }
   return session;
@@ -682,8 +755,8 @@ export async function getSession(sql: Queryable, actor: Actor, sessionId: string
  * progress), ordered by id. Same read gate, resolved from the parent Brief's AM.
  */
 export async function listBriefSessions(sql: Queryable, actor: Actor, briefId: string): Promise<Session[]> {
-  const meta = await sql<{ assigned_division: string; assigned_am_id: string | null }[]>`
-    select b.assigned_division, c.assigned_am_id
+  const meta = await sql<{ assigned_division: string; assigned_am_id: string | null; client_id: string }[]>`
+    select b.assigned_division, c.assigned_am_id, c.id as client_id
     from briefs b join services sv on sv.id = b.service_id join clients c on c.id = sv.client_id
     where b.id = ${briefId}`;
   if (meta.length === 0) {
@@ -692,11 +765,15 @@ export async function listBriefSessions(sql: Queryable, actor: Actor, briefId: s
   if (meta[0].assigned_division !== LIVE_STREAM_DIVISION) {
     throw new ConflictError(MSG_NOT_LIVE_STREAM_BRIEF);
   }
-  if (!canSeeSession(actor, meta[0].assigned_am_id)) {
+  // LT-61: a Brief's Sessions all share the same client, so the client's live
+  // vendor (resolveLiveVendorId) is a single, brief-level read gate — same
+  // "one vendor per client" simplification `createSession` stamps rows with.
+  const vendorId = await resolveLiveVendorId(sql, meta[0].client_id);
+  if (!canSeeSession(actor, meta[0].assigned_am_id, vendorId)) {
     throw new ForbiddenError(MSG_SESSION_VIEW_FORBIDDEN);
   }
   const rows = await sql<SessionScanRow[]>`
-    select ls.id, ls.brief_id, ls.platform, ls.requested_datetime, ls.target_duration_hours,
+    select ls.id, ls.brief_id, ls.vendor_id, ls.platform, ls.requested_datetime, ls.target_duration_hours,
            coalesce(ls.products_talent, '') as products_talent,
            coalesce(ls.special_instructions, '') as special_instructions, ls.status,
            ls.actual_datetime, ls.actual_duration_hours, ls.viewers_peak, ls.viewers_avg,
@@ -708,6 +785,31 @@ export async function listBriefSessions(sql: Queryable, actor: Actor, briefId: s
     join services sv on sv.id = b.service_id
     join clients c on c.id = sv.client_id
     where ls.brief_id = ${briefId} order by ls.id asc`;
+  return rows.map((r) => scanSession(r).session);
+}
+
+/**
+ * listVendorSessions (LT-61) — every Session assigned to the calling vendor
+ * Actor, across all Briefs/clients, newest request first. The vendor-facing
+ * counterpart to `listBriefSessions` (which needs a Brief id the vendor has no
+ * way to already know). Read-only; the AM/Director list path is unaffected.
+ */
+export async function listVendorSessions(sql: Queryable, actor: Actor): Promise<Session[]> {
+  const vendorId = actor.vendorId;
+  if (!vendorId) {
+    return [];
+  }
+  const rows = await sql<SessionScanRow[]>`
+    select ls.id, ls.brief_id, ls.vendor_id, ls.platform, ls.requested_datetime, ls.target_duration_hours,
+           coalesce(ls.products_talent, '') as products_talent,
+           coalesce(ls.special_instructions, '') as special_instructions, ls.status,
+           ls.actual_datetime, ls.actual_duration_hours, ls.viewers_peak, ls.viewers_avg,
+           ls.orders_generated, ls.gmv, coalesce(ls.vendor_report_link, '') as vendor_report_link,
+           coalesce(ls.reconciliation_notes, '') as reconciliation_notes, ls.data_confidence_tier,
+           ls.created_by, ls.created_at, null as assigned_am_id
+    from live_stream_sessions ls
+    where ls.vendor_id = ${vendorId}
+    order by ls.requested_datetime desc`;
   return rows.map((r) => scanSession(r).session);
 }
 
