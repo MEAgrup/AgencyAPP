@@ -18,7 +18,7 @@
 | 2b | Metrik kecepatan + skor AM | ✅ SELESAI (Akun A) |
 | 3 | Ads | ✅ SELESAI (Akun B) |
 | 4 | `REQ-` + AI Optimizer | ✅ SELESAI (Akun B) |
-| 5 | Portal vendor Live | (a) ✅ SELESAI · (b) ⬜ TERBLOKIR |
+| 5 | Portal vendor Live | (a) ✅ SELESAI · (b) 🟡 SPEC DRAFT — menunggu `O63` |
 | 6 | Resolusi keputusan pemilik (LT-1..LT-11) | 🟡 BERJALAN — LT-1 (sebagian) / LT-3 / LT-4 / LT-5 / LT-10 / LT-11 ✅ terpasang/dikonfirmasi 2026-08-29; LT-2/LT-8 masih menunggu pemilik |
 
 ---
@@ -139,13 +139,19 @@ untuk `stage.ts`): `docs/handoff/HANDOFF_M16_AKUN_B.md`.
 | # | Isi | Status |
 |---|---|---|
 | LT-60 | Input tahapan Live oleh tim internal atas nama vendor | ✅ **SELESAI** — gate `stage.canExecuteStage` yang sudah ada (division staff/lead Live Stream, atau Director); `StageTimelinePanel` dipasang di halaman detail Brief Live Stream + tombol "Lanjutkan" baru (`getStageOverview.nextStages`, `stage.test.ts` "getStageOverview.nextStages (LT-60)"). Nol migrasi baru. Detail: `DECISIONS.md` 2026-08-29 "LT-60 SELESAI" |
-| LT-61 | Login vendor sendiri (realm auth eksternal) | 🔴 **TERBLOKIR** |
+| LT-61 | Login vendor sendiri (realm auth eksternal) | 🟡 **SPEC DRAFT DITULIS 2026-08-30, MENUNGGU `O63`** |
 
-> 🔴 **LT-61 blocker nyata.** CDPS belum punya realm auth eksternal sama sekali. M15 Client
-> Portal — satu-satunya portal eksternal — masih ditunda, diblok O4+O5 menunggu spec
-> keamanan (`WAVE3_GAP_AUDIT.md`), dan Build Plan menempatkan portal paling akhir
-> *setelah* spec itu. Memberi vendor pihak-ketiga login mendahului gate tersebut.
-> LT-61 = workstream sendiri menunggu spec keamanan yang sama.
+> 🟡 **LT-61 — cakupan sudah diputuskan pemilik 2026-08-30, mekanik detail masih terbuka.**
+> Pemilik sudah menjawab 3 pertanyaan cakupan (lewat `AskUserQuestion`, dipicu
+> `HANDOFF_LT60_SELESAI_LT61_SPEC_20260830.md`): (1) LT-61 **tidak** menunggu spec M15
+> Client Portal (`O5`) — jalan sebagai spec sendiri yang lebih sempit; (2) auth realm =
+> **akun Supabase Auth sungguhan** per vendor (bukan pola share-token login-less); (3)
+> write scope = vendor **mengisi hasil `LSS-` (`logResults`) langsung**, menggantikan AM
+> mengetik ulang laporan vendor — reconciliation (`reconcile`/`flagDiscrepancy`) TETAP
+> AM/Direksi saja. Draf spec penuh (realm/isolasi data/audit/rate-limit/session-expiry):
+> `docs/prd/CDPS_Module10_Addendum_LT61_Vendor_Portal_Spec.md`. **4 pertanyaan mekanik
+> tersisa di §7 file itu (= `DECISIONS.md` `O63`)** — jangan mulai migrasi/kode domain/FE
+> sampai keempatnya terjawab dan spec disetujui penuh (baris Decided baru).
 
 ---
 
