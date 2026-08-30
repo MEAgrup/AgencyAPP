@@ -31,6 +31,7 @@
  * Reference: docs/prd/CDPS_Module6A_Strategi.md §7 ("New prerequisite entity").
  */
 
+import bcrypt from 'bcryptjs';
 import { ident, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import {
@@ -41,6 +42,7 @@ import {
   ValidationError,
   type Actor,
 } from './account';
+import { BCRYPT_COST, DEFAULT_TEMP_PASSWORD } from './employees';
 
 // ---------------------------------------------------------------------------
 // Vocabulary (M6A §7 table). Exported so routes and tests name the same values
@@ -89,6 +91,12 @@ export const MSG_INVALID_PERCENT = '[persentase bagi hasil harus di antara 0 dan
 export const MSG_NEGATIVE_RATE = '[tarif vendor tidak boleh negatif]';
 /** Another vendor already carries this name (case-insensitive). */
 export const MSG_VENDOR_EXISTS = '[vendor dengan nama ini sudah terdaftar]';
+/** No `vendor_accounts` row for this vendor (deactivate/reactivate target). */
+export const MSG_VENDOR_ACCOUNT_NOT_FOUND = '[akun vendor tidak ditemukan]';
+/** The vendor already has an active login account. */
+export const MSG_VENDOR_ACCOUNT_EXISTS = '[vendor ini sudah memiliki akun aktif]';
+/** The email is already the login for a different account (employee or vendor). */
+export const MSG_VENDOR_ACCOUNT_EMAIL_EXISTS = '[email tersebut sudah digunakan akun lain]';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -467,4 +475,224 @@ async function lockVendor(sql: Queryable, id: string): Promise<Vendor> {
     throw new NotFoundError(MSG_VENDOR_NOT_FOUND);
   }
   return rowToVendor(rows[0]);
+}
+
+/** True for a Postgres unique-violation (SQLSTATE 23505). Mirror of report.ts. */
+function isUniqueViolation(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && (e as { code?: string }).code === '23505';
+}
+
+// ---------------------------------------------------------------------------
+// Vendor accounts (LT-61 follow-up) — admin UI for provisioning a vendor's own
+// login. Reverses the "no admin UI, manual insert only" call in
+// CDPS_Module10_Addendum_LT61_Vendor_Portal_Spec.md §7 (owner decision, see
+// DECISIONS.md the day this was built). WRITES share the vendor record's own
+// authority (canManageVendor: Account lead / Head of Account / Director) —
+// the people trusted to manage a vendor's master data are trusted to manage
+// whether it can log in. READS additionally admit OD (Phase 0 §4: "OD =
+// read-only everywhere"), mirroring admin.ts's canReadAdmin/canWriteAdmin
+// split for role_mappings/employee_layered_roles — `vendor_accounts` is
+// authentication data (email + login status), so unlike the open-read
+// `vendors` master record it is NOT readable by every employee.
+// ---------------------------------------------------------------------------
+
+/** Director/OD/Account-lead may READ the vendor-account roster. OD is read-only. */
+export function canReadVendorAccounts(actor: Actor): boolean {
+  return canManageVendor(actor) || actor.role.od;
+}
+
+/** One row of the admin vendor-account screen — a vendor joined to its login, if any. */
+export interface VendorAccountRow {
+  vendorId: string;
+  namaVendor: string;
+  /** Null when the vendor has never been provisioned an account. */
+  authUserId: string | null;
+  email: string | null;
+  /** Null (not false) when there is no account at all — distinct from "deactivated". */
+  statusAktif: boolean | null;
+  createdAt: string | null;
+  createdBy: string | null;
+}
+
+interface VendorAccountDbRow {
+  vendor_id: string;
+  auth_user_id: string;
+  email: string | null;
+  status_aktif: boolean;
+  created_at: string | Date;
+  created_by: string;
+}
+
+/**
+ * listVendorAccounts returns EVERY vendor (active or not — an admin managing
+ * accounts must see all of them) alongside its login status, for the admin
+ * screen. `list_vendor_accounts()` is privileged (`vendor_accounts` is
+ * default-deny internal data, same class as `role_mappings` — admin.ts), so
+ * this takes the SAME privileged client the caller already used for
+ * `listVendors`; the gate below is what makes that safe.
+ */
+export async function listVendorAccounts(sql: Sql, actor: Actor): Promise<VendorAccountRow[]> {
+  if (!canReadVendorAccounts(actor)) {
+    throw new ForbiddenError(MSG_VENDOR_FORBIDDEN);
+  }
+  const vendors = await listVendors(sql, { includeInactive: true });
+  const accounts = await sql<VendorAccountDbRow[]>`select * from list_vendor_accounts()`;
+  // A vendor can carry more than one historical row (deactivate then
+  // re-provision) — keep only the most recent per vendor_id, same "current
+  // account" notion setVendorAccountStatus uses. Map-of-array collapses
+  // duplicate keys to whichever entry iterates last, which is NOT
+  // creation-order, so this picks explicitly rather than relying on that.
+  const byVendor = new Map<string, VendorAccountDbRow>();
+  for (const a of accounts) {
+    const cur = byVendor.get(a.vendor_id);
+    if (!cur || new Date(a.created_at) > new Date(cur.created_at)) {
+      byVendor.set(a.vendor_id, a);
+    }
+  }
+  return vendors.map((v) => {
+    const a = byVendor.get(v.id);
+    return {
+      vendorId: v.id,
+      namaVendor: v.namaVendor,
+      authUserId: a?.auth_user_id ?? null,
+      email: a?.email ?? null,
+      statusAktif: a ? a.status_aktif : null,
+      createdAt: a ? new Date(a.created_at).toISOString() : null,
+      createdBy: a?.created_by ?? null,
+    };
+  });
+}
+
+/** Input for provisioning one vendor's login account. */
+export interface ProvisionVendorAccountInput {
+  vendorId: string;
+  email: string;
+  /** Optional initial temp password; blank => employees.ts DEFAULT_TEMP_PASSWORD. */
+  tempPassword?: string;
+}
+
+/**
+ * provisionVendorAccount mints a login for one vendor: a GoTrue `auth.users` +
+ * `auth.identities` row (via `provision_vendor_account`, mirroring
+ * `import_employee_credentials`'s direct-bcrypt-import shape — apps/api has no
+ * service-role key, so this SQL path is the only way to create a GoTrue user)
+ * plus the `vendor_accounts` link row, in one transaction.
+ *
+ * Guards, in order: gate, mandatory fields, vendor exists (`lockVendor`), no
+ * ACTIVE account already exists for it (`uq_vendor_accounts_active_vendor` is
+ * the real guarantee; this pre-check turns the race into a clean BI message
+ * for the common case). A duplicate LOGIN EMAIL (across employees or other
+ * vendors — GoTrue enforces one globally) surfaces as a Postgres unique
+ * violation from `provision_vendor_account` itself, translated here rather
+ * than pre-checked, because `auth.users` is never read directly from TS
+ * (house convention — every touch of `auth.*` goes through a SECURITY DEFINER
+ * function, per `admin_set_employee_password.sql`'s header).
+ *
+ * On a plain-Postgres stack (CI/local, no `auth` schema) this throws — unlike
+ * `linkAuthUsers`'s silent no-op, this runs from one explicit admin action and
+ * must not report false success.
+ */
+export async function provisionVendorAccount(
+  sql: Sql,
+  actor: Actor,
+  input: ProvisionVendorAccountInput,
+): Promise<VendorAccountRow> {
+  if (!canManageVendor(actor)) {
+    throw new ForbiddenError(MSG_VENDOR_FORBIDDEN);
+  }
+  const vendorId = (input.vendorId ?? '').trim();
+  const email = (input.email ?? '').trim().toLowerCase();
+  if (vendorId === '' || email === '') {
+    throw new ValidationError(MSG_INCOMPLETE);
+  }
+
+  return withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const vendor = await lockVendor(tx, vendorId);
+
+    const existing = await tx<{ auth_user_id: string }[]>`
+      select auth_user_id from vendor_accounts where vendor_id = ${vendorId} and status_aktif`;
+    if (existing.length > 0) {
+      throw new ConflictError(MSG_VENDOR_ACCOUNT_EXISTS);
+    }
+
+    const temp = (input.tempPassword ?? '').trim() || DEFAULT_TEMP_PASSWORD;
+    const hash = bcrypt.hashSync(temp, BCRYPT_COST);
+
+    let authUserId: string;
+    try {
+      const rows = await tx<{ id: string }[]>`
+        select provision_vendor_account(${vendorId}, ${email}, ${hash}, ${actor.employeeId}) as id`;
+      authUserId = rows[0]!.id;
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        throw new ConflictError(MSG_VENDOR_ACCOUNT_EMAIL_EXISTS);
+      }
+      throw err;
+    }
+
+    await ex.audit.insertAudit({
+      entityType: 'vendor_account',
+      entityId: vendorId,
+      actorEmployeeId: actor.employeeId,
+      action: 'create',
+      beforeJson: null,
+      afterJson: { email, status_aktif: true },
+      createdBy: actor.employeeId,
+    });
+
+    return {
+      vendorId,
+      namaVendor: vendor.namaVendor,
+      authUserId,
+      email,
+      statusAktif: true,
+      createdAt: new Date().toISOString(),
+      createdBy: actor.employeeId,
+    };
+  });
+}
+
+/**
+ * setVendorAccountStatus deactivates/reactivates a vendor's login (+ audit),
+ * driving `set_vendor_account_status` (mirror of `set_employee_banned`).
+ * Never deletes the row — a mistaken deactivation must be reversible, and the
+ * account's history (who provisioned it, when) stays intact.
+ */
+export async function setVendorAccountStatus(
+  sql: Sql,
+  actor: Actor,
+  vendorId: string,
+  statusAktif: boolean,
+): Promise<void> {
+  if (!canManageVendor(actor)) {
+    throw new ForbiddenError(MSG_VENDOR_FORBIDDEN);
+  }
+  const id = (vendorId ?? '').trim();
+  if (id === '') {
+    throw new ValidationError(MSG_INCOMPLETE);
+  }
+  await withTransaction(sql, async (tx) => {
+    const ex = executors(tx);
+    const rows = await tx<{ auth_user_id: string; status_aktif: boolean }[]>`
+      select auth_user_id, status_aktif from vendor_accounts
+       where vendor_id = ${id}
+       order by created_at desc
+       limit 1
+       for update`;
+    if (rows.length === 0) {
+      throw new NotFoundError(MSG_VENDOR_ACCOUNT_NOT_FOUND);
+    }
+    const before = rows[0];
+    await tx`select set_vendor_account_status(${before.auth_user_id}::uuid, ${statusAktif})`;
+    await ex.audit.insertAudit({
+      entityType: 'vendor_account',
+      entityId: id,
+      actorEmployeeId: actor.employeeId,
+      action: statusAktif ? 'reactivate' : 'deactivate',
+      beforeJson: { status_aktif: before.status_aktif },
+      afterJson: { status_aktif: statusAktif },
+      createdBy: actor.employeeId,
+    });
+  });
 }

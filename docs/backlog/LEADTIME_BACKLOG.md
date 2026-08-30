@@ -139,7 +139,7 @@ untuk `stage.ts`): `docs/handoff/HANDOFF_M16_AKUN_B.md`.
 | # | Isi | Status |
 |---|---|---|
 | LT-60 | Input tahapan Live oleh tim internal atas nama vendor | ✅ **SELESAI** — gate `stage.canExecuteStage` yang sudah ada (division staff/lead Live Stream, atau Director); `StageTimelinePanel` dipasang di halaman detail Brief Live Stream + tombol "Lanjutkan" baru (`getStageOverview.nextStages`, `stage.test.ts` "getStageOverview.nextStages (LT-60)"). Nol migrasi baru. Detail: `DECISIONS.md` 2026-08-29 "LT-60 SELESAI" |
-| LT-61 | Login vendor sendiri (realm auth eksternal) | ✅ **SELESAI (core + FE) 2026-08-30** |
+| LT-61 | Login vendor sendiri (realm auth eksternal) | ✅ **SELESAI (core + FE + admin provisioning UI) 2026-08-30** |
 
 > ✅ **LT-61 core selesai.** Realm auth non-HRIS pertama CDPS: `vendor_accounts`
 > (Supabase Auth → `vendors.id`) + cabang baru `custom_access_token_hook` +
@@ -199,6 +199,21 @@ untuk `stage.ts`): `docs/handoff/HANDOFF_M16_AKUN_B.md`.
 > domain 1620, api 383, web-internal 379; typecheck + build (`web-internal`
 > + `apps/api`) bersih; nol migrasi/tabel/prefix/mesin/event baru (134/37/30/67
 > TETAP).
+>
+> ✅ **LT-61 admin provisioning UI selesai (2026-08-30, sesi terpisah).**
+> Membalik keputusan "no admin UI" di atas — pemilik minta layar dibangun
+> setelah jumlah vendor bertambah. `web-internal` `admin/vendor-accounts`
+> (nav "Akun Vendor", gate sama dengan `vendor.canManageVendor` + OD baca).
+> Tiga fungsi SQL baru (`20260904010000_lt61_vendor_account_admin_ui.sql`):
+> `provision_vendor_account` (pola sama `import_employee_credentials`),
+> `set_vendor_account_status` (pola sama `set_employee_banned`),
+> `list_vendor_accounts` (baca privileged, join `auth.users.email`). Nol
+> tabel baru (134/37/30/67 TETAP) — hanya index unik parsial
+> `uq_vendor_accounts_active_vendor` (satu akun aktif per vendor). Domain:
+> `vendor.ts` `listVendorAccounts`/`provisionVendorAccount`/
+> `setVendorAccountStatus` + `canReadVendorAccounts`. Detail:
+> `DECISIONS.md` 2026-08-30 "LT-61 follow-up — admin UI for vendor account
+> provisioning", spec §7/§8 diperbarui.
 
 ---
 

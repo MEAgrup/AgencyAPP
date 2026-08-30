@@ -3733,6 +3733,35 @@ export function vendorToWire(v: vendor.Vendor): VendorWire {
   };
 }
 
+/**
+ * LT-61 follow-up — one row of the admin vendor-account (provisioning)
+ * screen. `auth_user_id`/`email`/`status_aktif`/`created_at`/`created_by` are
+ * all null together for a vendor that has never been provisioned an account —
+ * `status_aktif: null` is deliberately distinct from `false` (no account, vs.
+ * an account that exists but is deactivated).
+ */
+export interface VendorAccountWire {
+  vendor_id: string;
+  nama_vendor: string;
+  auth_user_id: string | null;
+  email: string | null;
+  status_aktif: boolean | null;
+  created_at: string | null;
+  created_by: string | null;
+}
+
+export function vendorAccountToWire(r: vendor.VendorAccountRow): VendorAccountWire {
+  return {
+    vendor_id: r.vendorId,
+    nama_vendor: r.namaVendor,
+    auth_user_id: r.authUserId,
+    email: r.email,
+    status_aktif: r.statusAktif,
+    created_at: r.createdAt,
+    created_by: r.createdBy,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // O57 — Contract (CTR-)
 // ---------------------------------------------------------------------------

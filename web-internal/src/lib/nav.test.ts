@@ -173,6 +173,11 @@ describe('visibleNav — Account', () => {
     expect(seen).not.toContain('/marketing');
     expect(seen).not.toContain('/leads');
   });
+
+  it('Account LEAD sees Akun Vendor (LT-61 follow-up); staff does not', () => {
+    expect(hrefs(role('Account', 'lead'))).toContain('/admin/vendor-accounts');
+    expect(hrefs(role('Account', 'staff'))).not.toContain('/admin/vendor-accounts');
+  });
 });
 
 describe('visibleNav — Alat (embedded HTML tools)', () => {
@@ -299,6 +304,7 @@ describe('visibleNav — layered OD / Director', () => {
       '/leads',
       '/sales',
       '/admin/employees',
+      '/admin/vendor-accounts',
       '/portal/management',
     ]) {
       expect(seen, `OD should see ${href}`).toContain(href);

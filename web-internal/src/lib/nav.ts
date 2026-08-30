@@ -262,6 +262,15 @@ const ADMIN_LINKS: NavItem[] = [
     label: 'Hari Libur',
     access: (role) => Boolean(role.director || role.od),
   },
+  // LT-61 follow-up: provisioning a vendor's own login. Same authority as
+  // vendor.canManageVendor (Account lead / Director) — the people who manage
+  // the vendor record manage whether it can log in — plus OD read-only.
+  {
+    href: '/admin/vendor-accounts',
+    label: 'Akun Vendor',
+    access: (role) =>
+      Boolean(role.director || role.od || (role.level === 'lead' && role.division === 'Account')),
+  },
 ];
 
 /** The full navigation model, before role filtering. */
