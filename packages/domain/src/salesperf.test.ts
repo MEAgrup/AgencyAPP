@@ -374,33 +374,76 @@ describeDb('bySource (View 3 — DASHBOARD LEAD)', () => {
     expect(total).toBe(2);
     const nq = rows.find((r) => r.nonQualified > 0);
     expect(nq?.nqBreakdown).toEqual({ 'Budget tidak sesuai': 1 });
+    // KS-3: sheet 3's "Convertion Rate" column — closing ÷ leads. Both fixture
+    // leads are Scouting/no-campaign (one group): 1 of 2 closed → 50%.
+    const win = rows.find((r) => r.closing > 0)!;
+    expect(win.leads).toBe(2);
+    expect(win.conversionRatePct).toBe(50);
+  });
+
+  it('conversionRatePct is null on division-by-zero, never NaN (house rule #7)', async () => {
+    const rows = await bySource(sql, director('ZZSP-DIR'), { period: { from: '190001', to: '190001' }, salespersonId: SLS1, source: null, campaignId: null });
+    expect(rows).toHaveLength(0); // no leads that far back — the empty-set case, not a div-zero one, but proves the shape never throws
   });
 });
 
 describeDb('sales_targets (View 4 — Sales OKR)', () => {
   it('Director/OD may set; Sales (staff or lead) may not', async () => {
     await expect(
-      setTarget(sql, salesLead(SLSLEAD), { salespersonId: SLS1, periodStart: '2026-06-01', periodKind: 'bulan', targetOmzet: '8000000.00' }),
+      setTarget(sql, salesLead(SLSLEAD), { salespersonId: SLS1, periodStart: '2026-06-01', periodKind: 'bulan', metricKey: 'omzet', targetValue: '8000000.00' }),
     ).rejects.toThrow(MSG_FORBIDDEN);
 
-    await setTarget(sql, odActor('ZZSP-OD'), { salespersonId: SLS1, periodStart: '2026-06-01', periodKind: 'bulan', targetOmzet: '8000000.00' });
+    await setTarget(sql, odActor('ZZSP-OD'), { salespersonId: SLS1, periodStart: '2026-06-01', periodKind: 'bulan', metricKey: 'omzet', targetValue: '8000000.00' });
     const targets = await listTargets(sql, director('ZZSP-DIR'), '2026-06-01');
     const mine = targets.find((t) => t.salespersonId === SLS1);
-    expect(mine?.targetOmzet).toBe('8000000.00');
-    expect(mine?.targetOmzetIdr).toBe('Rp. 8.000.000,00');
+    expect(mine?.targetValue).toBe('8000000.00');
+    expect(mine?.targetValueIdr).toBe('Rp. 8.000.000,00');
+    expect(mine?.actualValue).toBe('10000000.00'); // recomputed live from the fixture's June closing
   });
 
   it('rejects a missing/negative target with the house incomplete message', async () => {
     await expect(
-      setTarget(sql, director('ZZSP-DIR'), { salespersonId: SLS1, periodStart: '2026-06-01', periodKind: 'bulan', targetOmzet: '' }),
+      setTarget(sql, director('ZZSP-DIR'), { salespersonId: SLS1, periodStart: '2026-06-01', periodKind: 'bulan', metricKey: 'omzet', targetValue: '' }),
     ).rejects.toThrow(MSG_INCOMPLETE);
     await expect(
-      setTarget(sql, director('ZZSP-DIR'), { salespersonId: '', periodStart: '2026-06-01', periodKind: 'bulan', targetOmzet: '1000.00' }),
+      setTarget(sql, director('ZZSP-DIR'), { salespersonId: '', periodStart: '2026-06-01', periodKind: 'bulan', metricKey: 'omzet', targetValue: '1000.00' }),
+    ).rejects.toThrow(MSG_INCOMPLETE);
+    // klien_count_min_kontrak REQUIRES metricParam; omzet must NOT carry one.
+    await expect(
+      setTarget(sql, director('ZZSP-DIR'), { salespersonId: SLS1, periodStart: '2026-07-01', periodKind: 'kuartal', metricKey: 'klien_count_min_kontrak', targetValue: '30' }),
+    ).rejects.toThrow(MSG_INCOMPLETE);
+    await expect(
+      setTarget(sql, director('ZZSP-DIR'), { salespersonId: SLS1, periodStart: '2026-06-01', periodKind: 'bulan', metricKey: 'omzet', metricParam: '1', targetValue: '8000000.00' }),
     ).rejects.toThrow(MSG_INCOMPLETE);
   });
 
+  it('sets and reads back the three non-omzet OKR metrics the owner actually described (KS-4)', async () => {
+    // "closing ratio 35% dari qualified leads"
+    await setTarget(sql, director('ZZSP-DIR'), { salespersonId: SLS1, periodStart: '2026-06-01', periodKind: 'bulan', metricKey: 'closing_ratio_qualified_pct', targetValue: '35' });
+    // "30 klien dengan minimal kontrak Rp10jt / kuartal"
+    await setTarget(sql, director('ZZSP-DIR'), { salespersonId: SLS1, periodStart: '2026-04-01', periodKind: 'kuartal', metricKey: 'klien_count_min_kontrak', metricParam: '10000000', targetValue: '30' });
+    // "closing minimal 3 klien dari scouting / kuartal"
+    await setTarget(sql, director('ZZSP-DIR'), { salespersonId: SLS1, periodStart: '2026-04-01', periodKind: 'kuartal', metricKey: 'scouting_closing_count', targetValue: '3' });
+
+    const monthly = await listTargets(sql, director('ZZSP-DIR'), '2026-06-01');
+    const ratio = monthly.find((t) => t.salespersonId === SLS1 && t.metricKey === 'closing_ratio_qualified_pct')!;
+    expect(ratio.targetValue).toBe('35.00');
+    expect(ratio.targetValueIdr).toBeNull(); // not Rupiah — never formatted as one
+    expect(ratio.actualValue).toBe('100.00'); // 1 closedSuccess / 1 qualified in the fixture
+
+    const quarterly = await listTargets(sql, director('ZZSP-DIR'), '2026-04-01');
+    const klien = quarterly.find((t) => t.metricKey === 'klien_count_min_kontrak')!;
+    expect(klien.metricParam).toBe('10000000.00');
+    expect(klien.metricParamIdr).toBe('Rp. 10.000.000,00');
+    expect(klien.actualValue).toBe('1.00'); // the fixture's one CLI, Rp 10.000.000 >= threshold
+
+    const scouting = quarterly.find((t) => t.metricKey === 'scouting_closing_count')!;
+    expect(scouting.actualValue).toBe('1.00'); // the fixture's LEAD_WIN is source=Scouting
+    expect(scouting.achievedPct).toBe(33); // 1 / 3 target, rounded
+  });
+
   it('pencapaian/sisa target reflect the OKR set above; a closed month renders sisa-per-hari "—" (null)', async () => {
-    await setTarget(sql, director('ZZSP-DIR'), { salespersonId: SLS1, periodStart: '2026-06-01', periodKind: 'bulan', targetOmzet: '8000000.00' });
+    await setTarget(sql, director('ZZSP-DIR'), { salespersonId: SLS1, periodStart: '2026-06-01', periodKind: 'bulan', metricKey: 'omzet', targetValue: '8000000.00' });
     const rows = await bySalesperson(sql, director('ZZSP-DIR'), { period: PERIOD, salespersonId: SLS1, source: null, campaignId: null });
     const r = rows[0];
     expect(r.targetOmzet).toBe('8000000.00');

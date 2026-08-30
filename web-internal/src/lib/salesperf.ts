@@ -74,18 +74,45 @@ export interface LeadSourceRow {
   qualified: number;
   non_qualified: number;
   closing: number;
+  conversion_rate_pct: number | null; // "—" when null
   omzet: string;
   omzet_idr: string;
   nq_breakdown: Record<string, number>;
+}
+
+// Sales OKR metric catalog (mirrors salesperf.METRIC_KEYS — a closed list,
+// never a free-text metric). See salesperf.ts's MetricKey doc for the owner's
+// concrete OKR examples behind each one (KS-4).
+export const METRIC_KEYS = [
+  'omzet', 'closing_ratio_qualified_pct', 'klien_count_min_kontrak', 'scouting_closing_count',
+] as const;
+export type MetricKey = (typeof METRIC_KEYS)[number];
+
+export const METRIC_LABELS: Record<MetricKey, string> = {
+  omzet: 'Omzet (Rp)',
+  closing_ratio_qualified_pct: 'Closing Ratio dari Qualified (%)',
+  klien_count_min_kontrak: 'Jumlah Klien dgn Minimal Kontrak',
+  scouting_closing_count: 'Closing dari Scouting',
+};
+
+/** True only for the one metric with a threshold parameter — mirrors salesperf.metricNeedsParam. */
+export function metricNeedsParam(k: MetricKey): boolean {
+  return k === 'klien_count_min_kontrak';
 }
 
 // salesperf.TargetRow (View 4 — Sales OKR).
 export interface SalesTarget {
   salesperson_id: string;
   period_start: string; // "YYYY-MM-DD"
-  period_kind: string; // 'bulan' | 'tahun'
-  target_omzet: string;
-  target_omzet_idr: string;
+  period_kind: string; // 'bulan' | 'kuartal' | 'tahun'
+  metric_key: string;
+  metric_param: string | null; // Rupiah threshold, only for klien_count_min_kontrak
+  metric_param_idr: string | null;
+  target_value: string; // unit depends on metric_key
+  target_value_idr: string | null; // only for 'omzet'
+  actual_value: string | null; // recomputed live; "—" when null (division-by-zero)
+  actual_value_idr: string | null;
+  achieved_pct: number | null;
   updated_at: string;
   updated_by: string;
 }
@@ -139,9 +166,11 @@ export function listSalesTargets(periodStart: string): Promise<{ data: SalesTarg
 
 export interface SetSalesTargetInput {
   salesperson_id: string;
-  period_start: string; // "YYYY-MM-01" (bulan) or "YYYY-01-01" (tahun)
-  period_kind: 'bulan' | 'tahun';
-  target_omzet: string;
+  period_start: string; // "YYYY-MM-01" (bulan/kuartal) or "YYYY-01-01" (tahun)
+  period_kind: 'bulan' | 'kuartal' | 'tahun';
+  metric_key: MetricKey;
+  metric_param?: string; // required for klien_count_min_kontrak, omitted otherwise
+  target_value: string;
 }
 
 // PUT /sales/targets — OD/Director only (server-gated; M0 §7.1).

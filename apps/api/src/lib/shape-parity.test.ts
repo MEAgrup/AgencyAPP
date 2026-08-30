@@ -174,7 +174,7 @@ const FE_FILES = [
   'account.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'contract.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts', 'penugasan.ts', 'permintaan.ts', 'plan.ts',
-  'performance.ts', 'portal.ts', 'recap.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'stage.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
+  'performance.ts', 'portal.ts', 'recap.ts', 'renewal.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'stage.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
 ];
 
 const fe = new Map<string, Parsed>();
@@ -350,6 +350,10 @@ const WIRE_TO_FE: Record<string, string> = {
   AttemptDetailWire: 'sales.ts::AttemptDetail',
   AttemptDetailAttemptWire: 'sales.ts::AttemptDetailAttempt',
   AttemptDetailLeadWire: 'sales.ts::AttemptDetailLead',
+  // R-03/R-04 (Kinerja Sales) — renewal/cross-sell (RNW-) on an existing client.
+  RenewalWire: 'renewal.ts::Renewal',
+  RenewalLineWire: 'renewal.ts::RenewalLine',
+  RenewalDetailWire: 'renewal.ts::RenewalDetail',
   // A REQUEST body, not a response — the only one in `wire.ts` with a named
   // interface, because three routes share its mapper (`toProposalLines`). It is
   // registered rather than exempted: the mechanical check is exactly the right one

@@ -5,8 +5,8 @@
 > lain) — perbarui di sini setiap tiket baru selesai.
 >
 > Spec: `docs/prd/CDPS_Module0_Sales.md` §7.1/§8, `CDPS_Module1_Leads_Database.md` §7.
-> Keputusan: `docs/DECISIONS.md` baris 2026-08-29 (cari "Kinerja Sales") — 4 baris
-> Decided + KS-1..KS-4 Open.
+> Keputusan: `docs/DECISIONS.md` baris 2026-08-29 (cari "Kinerja Sales") — 5 baris
+> Decided (R-03 = #5) + KS-1..KS-4 (semua terjawab; KS-4b masih Open).
 > Bukan modul PRD baru — bagian M0 yang tidak pernah ditiketkan (nol hit di
 > `docs/backlog/` sebelum berkas ini).
 
@@ -16,7 +16,8 @@
 |---|---|---|
 | A (S-01..S-05) | RLS fix + `sales_targets` + read-model + route + UI | ✅ SELESAI |
 | B (R-01/R-02) | `contracts.jenis` + read-model renewal mix | ✅ SELESAI |
-| B (R-03/R-04) | Pintu tulis renewal dari Client Record + UI | ⬛ **GARIS STOP** — lihat §3 |
+| B (R-03) | Domain + API renewal/cross-sell (propose/decide/resubmit/execute) | ✅ SELESAI — lihat §3 |
+| B (R-04) | UI tombol "Perpanjangan / Cross Sell" di Client Record | ✅ SELESAI — lihat §3 |
 
 ---
 
@@ -44,23 +45,33 @@
 | R-01 | ✅ Migrasi `contracts.jenis` | `20260901040000_contracts_jenis.sql` — `jenis ∈ baru\|perpanjangan\|cross_sell` (default `baru`) + `contract_sebelumnya_id` nullable FK self. Backfill semua kontrak eksisting sebagai `baru`. Nol prefix baru, nol perubahan FK ke `strategi`/`services` |
 | R-02 | ✅ Read-model | `salesperf.ts` membaca `contracts.jenis` per klien (weighted by `client_sales_allocations.basis_points`), mengisi `klienBaru`/`klienPerpanjangan`/`klienCrossSell`/`klienCount` di `SalesPerfRow`. Dicakup tes `salesperf.test.ts` "aggregates the full funnel..." (`klienBaru: '1.00'` dari fixture) |
 
-### ⬛ GARIS STOP — berhenti sampai pekerjaan Account selesai
+### ✅ R-03 — dibangun (GARIS STOP dicabut, lihat `DECISIONS.md` Kinerja Sales #5)
 
-| # | Isi | Kenapa berhenti |
+| # | Isi | Catatan |
 |---|---|---|
-| R-03 | ⬛ Pintu renewal dari Client Record | Membuka `canWriteContract` (`contract.ts:141`, hari ini hanya AM pemilik/Account lead/Director) untuk Sales, **dan** setiap kontrak baru mewajibkan siklus Strategi+Plan baru (M6A Rule 2 "exactly one active Strategi per Contract", M6B B-02 "n periode Plan = n bulan kontrak") — mesin yang sedang diperbaiki paralel. Prasyarat: (1) pekerjaan Account Service mendarat `main`; (2) KS-2 (`DECISIONS.md` Open) — kredit alokasi + aturan komisi perpanjangan |
-| R-04 | ⬛ UI tombol "Perpanjangan / Cross Sell" di `/clients/[id]` + notifikasi | Menunggu R-03 |
+| R-03 | ✅ `packages/domain/src/renewal.ts` (baru) — `renewal_requests`/`renewal_proposals`/`renewal_proposal_lines`, mesin `renewal_request` (`RNW-`, `sm_machines` #30) | Migrasi `20260902020000_renewal_request.sql`. Paralel ke `sales.ts`'s attempt-anchored negotiation (nol `LEAD-`/`PRSP-` palsu, keputusan pemilik `#4`); harga baris dipatok ulang `sales.resolveProposalLine` (di-export ulang khusus). `proposeRenewal`/`resubmitRenewal`/`decideRenewal`/`executeRenewal`. GARIS STOP semula (`canWriteContract`/siklus Strategi+Plan baru) TIDAK PERNAH tersentuh — eksekusi menulis `CTR-`/`SVC-` langsung, permission `renewal.canWriteRenewal` berdiri sendiri, `contract.ensureContractForService` yang sudah ada memvalidasi/menerima Contract yang sudah terisi persis seperti Service kelahiran closing biasa. **KS-2**: eksekusi MENGGANTI SELURUH `client_sales_allocations` klien (bukan menambah) — kredit lama dihapus, kredit baru dari alokasi eksekusi ditulis; `clients.sales_pic_id`/`commission_payment_pic_id` ikut pindah. Tes: `packages/domain/src/renewal.test.ts` (23 kasus — permission unit, propose/decide/resubmit/execute penuh, KS-2 penggantian alokasi eksplisit termasuk split, chaining `contract_sebelumnya_id` lintas dua renewal, 404/Forbidden/NotClosable) |
+
+**Terverifikasi dengan DB nyata:** `scripts/db-rebuild.sh --yes` — 150 migrasi, gate **133/37/30/65**, `rls_checks`/`ident_checks`/`immutability_checks`/`auth_claims_checks` semua PASS. Full suite: core (tidak disentuh), db (tidak disentuh), domain (2266 tes lolos termasuk `renewal.test.ts` 23/23 + `sales.test.ts` 57/57 tidak regresi), api (383 tes lolos, `shape-parity`/`route-parity` belum menyentuh renewal — lihat R-03b di bawah untuk rute API).
+
+### ✅ R-03b + R-04 — route API + UI
+
+| # | Isi | Catatan |
+|---|---|---|
+| R-03b | ✅ Route API renewal | `GET/POST /clients/{id}/renewals`, `GET /clients/{id}/renewals/{rid}`, `POST .../resubmit`, `POST .../decision`, `POST .../execute` — shell tipis atas `renewal.ts`. `RenewalWire`/`RenewalLineWire`/`RenewalDetailWire` di `wire.ts`; `renewal.*Error` sudah ter-map `http.ts` (reuse instance `sales.*Error`, nol perubahan `mapError`). Terdaftar `shape-parity.test.ts` `WIRE_TO_FE` + `FE_FILES`. `getRenewalDetail` (baru, `renewal.ts`) menambah "lines" ke `RenewalRequest` untuk layar review/decide/execute — dites `renewal.test.ts` |
+| R-04 | ✅ UI tombol "Perpanjangan / Cross Sell" | `web-internal/src/lib/renewal.ts` (wrapper API, reuse `ProposalLineInput`/`ClosingParties`/`ClosingInstallmentInput` dari `sales.ts` — nol tipe duplikat) + `web-internal/src/components/clients/RenewalPanel.tsx` (self-fetching, pola `MilestonesSection`/`ReportPanel`), dipasang di `/clients/[id]`. Riwayat request + form ajukan (jenis, no-nego, editor jasa) + per-baris: decide (Sales Lead/Director) / resubmit (setelah Reject) / eksekusi (durasi+tanggal+alokasi+skema pembayaran, KS-2 dicatat eksplisit di label form "kredit ini MENGGANTI seluruh alokasi lama klien"). Notifikasi terpisah TIDAK ditambah — event catalog (Phase 0 v2 §9) FROZEN 15-event, dan `renewal_request` sudah mewarisi notifikasi state-machine standar (belum event bernama khusus; dicatat sebagai lingkup masa depan, bukan gap tersembunyi) |
+
+**Terverifikasi dengan DB nyata:** `scripts/db-rebuild.sh --yes` — 150 migrasi, gate **133/37/30/65** tidak berubah dari R-03 (R-03b/R-04 nol migrasi baru). Full suite bersih (single clean run pasca rebuild — run kedua tanpa rebuild ulang mewarisi flakiness pre-existing `admin.test.ts`/`client.test.ts` dari akumulasi `audit_log`, tidak terkait perubahan ini): api 23/23 file (`shape-parity`/`route-parity`/`body-parity` semua PASS dengan endpoint renewal terdaftar), domain 65/66 file (1 skip UAT, `renewal.test.ts` 24/24), web-internal 27/27 file (374 tes, termasuk typecheck bersih atas `RenewalPanel.tsx`/`lib/renewal.ts`).
 
 ---
 
-## 1. Yang tidak dikerjakan (lihat `DECISIONS.md` Kinerja Sales #3 + §Open)
+## 1. Yang tidak dikerjakan (lihat `DECISIONS.md` Kinerja Sales #1..#5 + §Open)
 
 | Item | Status |
 |---|---|
 | Chat Pagi/Total/Sisa, Blaster, Jumlah Respon, Call | ❌ tidak dibuat — nol sumber CDPS |
 | Istilah "Seller"/"Affiliator" | ❌ tidak diperkenalkan — Qualified/Non-Qualified dipertahankan |
-| Tiering T1–T5 | ❓ KS-1, Open — perlu definisi Cena |
-| R-03/R-04 | ⬛ berhenti — lihat §3 |
-| Role type `Sales` di M14 + skor `PERF-` | ❓ KS-4, Open — bobot 0 mengikuti preseden LT-32/LT-33 |
+| Tiering T1–T5 | ✅ KS-1 dijawab — TIDAK DIBANGUN, nilai komisi yang dihitung manual (ambang berubah per kuartal) |
+| Notifikasi renewal bernama khusus | ⏸ tidak ditambah — event catalog FROZEN (Phase 0 v2 §9); `renewal_request` mewarisi notifikasi state-machine standar |
+| Role type `Sales` di M14 + skor `PERF-` | ❓ KS-4b, Open — bobot 0 mengikuti preseden LT-32/LT-33 |
 | Snapshot Level Sales per periode | ⏸ terima "level saat ini"; revisit hanya kalau level dipakai komisi/skor |
-| Sheet ketiga (`19pfVwm…`) | ❓ KS-3, Open — tidak bisa diakses, minta dibagikan ulang |
+| Sheet ketiga (`19pfVwm…`) | ✅ KS-3 dijawab — rekap per campaign, sudah tercakup `salesperf.bySource` (View 3) |

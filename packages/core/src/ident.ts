@@ -106,6 +106,12 @@ export const PREFIXES = {
   // M12 karena bukan deliverable yang di-review AM. Didaftarkan di fondasi
   // M16 supaya stream paralel tidak sama-sama menyentuh registry ini.
   REQ: { entity: 'Permintaan (client-linked request)', module: 'M16' },
+  // Kinerja Sales R-03 — the renewal/cross-sell REQUEST (parent of its
+  // versioned `renewal_proposals`, mirrors `prospect_attempts` ~
+  // `negotiation_proposals`). Anchored to an EXISTING client — deliberately
+  // its own machine/table pair, not `negotiation_proposals` (attempt_id-only)
+  // and not a new `PRSP-`/`LEAD-` (owner decision: "nol LEAD-/PRSP- palsu").
+  RNW: { entity: 'Renewal/cross-sell request', module: 'M0 (Kinerja Sales R-03)' },
 } as const satisfies Record<string, PrefixInfo>;
 
 /** A registered prefix string (e.g. 'CLI', 'TRX'). */

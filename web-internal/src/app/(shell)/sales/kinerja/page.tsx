@@ -6,11 +6,15 @@ import { useAuth } from '@/lib/auth-context';
 import { SOURCES } from '@/lib/leads';
 import {
   listSalesTargets,
+  METRIC_KEYS,
+  METRIC_LABELS,
+  metricNeedsParam,
   salesPerfByMonth,
   salesPerfBySalesperson,
   salesPerfBySource,
   setSalesTarget,
   type LeadSourceRow,
+  type MetricKey,
   type SalesPerfMonthRow,
   type SalesPerfRow,
   type SalesTarget,
@@ -21,6 +25,13 @@ type Tab = 'sales' | 'bulan' | 'sumber' | 'target';
 /** "—" for a null ratio/day/money field — the server already decided division-by-zero, never recompute. */
 function dash(v: string | number | null): string {
   return v === null ? '—' : String(v);
+}
+
+/** Renders a metric-keyed OKR value in its own unit: Rupiah when the server sent an `_idr` sibling, a percentage for the ratio metric, a plain count otherwise. Never re-derives the unit from the metric_key string itself — that stays server-decided. */
+function formatMetricValue(value: string | null, valueIdr: string | null, metricKey: string): string {
+  if (value === null) return '—';
+  if (valueIdr !== null) return valueIdr;
+  return metricKey === 'closing_ratio_qualified_pct' ? `${Number(value)}%` : String(Number(value));
 }
 
 export default function KinerjaSalesPage() {
@@ -76,7 +87,9 @@ export default function KinerjaSalesPage() {
   // --- Target edit form (Director/OD only) ---
   const [editSalesperson, setEditSalesperson] = useState('');
   const [editAmount, setEditAmount] = useState('');
-  const [editKind, setEditKind] = useState<'bulan' | 'tahun'>('bulan');
+  const [editKind, setEditKind] = useState<'bulan' | 'kuartal' | 'tahun'>('bulan');
+  const [editMetric, setEditMetric] = useState<MetricKey>('omzet');
+  const [editParam, setEditParam] = useState('');
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
@@ -92,10 +105,13 @@ export default function KinerjaSalesPage() {
         salesperson_id: editSalesperson,
         period_start: periodStart,
         period_kind: editKind,
-        target_omzet: editAmount,
+        metric_key: editMetric,
+        metric_param: metricNeedsParam(editMetric) ? editParam : undefined,
+        target_value: editAmount,
       });
       setEditSalesperson('');
       setEditAmount('');
+      setEditParam('');
       await load();
     } catch (err) {
       setEditError(errorMessage(err));
@@ -270,7 +286,7 @@ export default function KinerjaSalesPage() {
                 <thead>
                   <tr>
                     <th>Periode</th><th>Sumber</th><th>Campaign</th><th>Leads</th>
-                    <th>Qualified</th><th>Non-Qualified</th><th>Closing</th><th>Omzet</th>
+                    <th>Qualified</th><th>Non-Qualified</th><th>Closing</th><th>Conversion Rate</th><th>Omzet</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -283,6 +299,7 @@ export default function KinerjaSalesPage() {
                       <td>{r.qualified}</td>
                       <td>{r.non_qualified}</td>
                       <td>{r.closing}</td>
+                      <td>{dash(r.conversion_rate_pct === null ? null : `${r.conversion_rate_pct}%`)}</td>
                       <td>{r.omzet_idr}</td>
                     </tr>
                   ))}
@@ -301,15 +318,30 @@ export default function KinerjaSalesPage() {
                   <input id="target-sales" type="text" required value={editSalesperson} onChange={(e) => setEditSalesperson(e.target.value)} />
                 </div>
                 <div className="field">
-                  <label htmlFor="target-kind">Jenis</label>
-                  <select id="target-kind" value={editKind} onChange={(e) => setEditKind(e.target.value as 'bulan' | 'tahun')}>
+                  <label htmlFor="target-kind">Jenis Periode</label>
+                  <select id="target-kind" value={editKind} onChange={(e) => setEditKind(e.target.value as 'bulan' | 'kuartal' | 'tahun')}>
                     <option value="bulan">Bulanan</option>
+                    <option value="kuartal">Kuartalan</option>
                     <option value="tahun">Tahunan</option>
                   </select>
                 </div>
                 <div className="field">
-                  <label htmlFor="target-amount">Target Omzet (Rp)</label>
-                  <input id="target-amount" type="text" required placeholder="10000000" value={editAmount} onChange={(e) => setEditAmount(e.target.value)} />
+                  <label htmlFor="target-metric">Metrik OKR</label>
+                  <select id="target-metric" value={editMetric} onChange={(e) => setEditMetric(e.target.value as MetricKey)}>
+                    {METRIC_KEYS.map((k) => (
+                      <option key={k} value={k}>{METRIC_LABELS[k]}</option>
+                    ))}
+                  </select>
+                </div>
+                {metricNeedsParam(editMetric) && (
+                  <div className="field">
+                    <label htmlFor="target-param">Ambang Nilai Kontrak (Rp)</label>
+                    <input id="target-param" type="text" required placeholder="10000000" value={editParam} onChange={(e) => setEditParam(e.target.value)} />
+                  </div>
+                )}
+                <div className="field">
+                  <label htmlFor="target-amount">Nilai Target</label>
+                  <input id="target-amount" type="text" required placeholder={editMetric === 'omzet' ? '10000000' : editMetric === 'closing_ratio_qualified_pct' ? '35' : '30'} value={editAmount} onChange={(e) => setEditAmount(e.target.value)} />
                 </div>
                 <div className="field" style={{ alignSelf: 'flex-end' }}>
                   <button type="submit" className="btn btnPrimary btnSm" disabled={editSubmitting}>
@@ -325,15 +357,22 @@ export default function KinerjaSalesPage() {
               <div className="table-wrap">
                 <table className="table">
                   <thead>
-                    <tr><th>Sales</th><th>Periode</th><th>Jenis</th><th>Target</th><th>Diperbarui</th></tr>
+                    <tr>
+                      <th>Sales</th><th>Periode</th><th>Jenis</th><th>Metrik</th>
+                      <th>Ambang</th><th>Target</th><th>Realisasi</th><th>Pencapaian</th><th>Diperbarui</th>
+                    </tr>
                   </thead>
                   <tbody>
                     {targets.map((t) => (
-                      <tr key={`${t.salesperson_id}-${t.period_start}-${t.period_kind}`}>
+                      <tr key={`${t.salesperson_id}-${t.period_start}-${t.period_kind}-${t.metric_key}`}>
                         <td>{t.salesperson_id}</td>
                         <td>{t.period_start}</td>
                         <td>{t.period_kind}</td>
-                        <td>{t.target_omzet_idr}</td>
+                        <td>{METRIC_LABELS[t.metric_key as MetricKey] ?? t.metric_key}</td>
+                        <td>{t.metric_param_idr ?? '—'}</td>
+                        <td>{formatMetricValue(t.target_value, t.target_value_idr, t.metric_key)}</td>
+                        <td>{formatMetricValue(t.actual_value, t.actual_value_idr, t.metric_key)}</td>
+                        <td>{dash(t.achieved_pct === null ? null : `${t.achieved_pct}%`)}</td>
                         <td>{t.updated_by}</td>
                       </tr>
                     ))}

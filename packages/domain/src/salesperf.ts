@@ -186,26 +186,69 @@ export interface LeadSourceRow {
   qualified: number;
   nonQualified: number;
   closing: number;
+  /** closing ÷ leads × 100, null on division-by-zero (house rule #7). Matches sheet 3's "Convertion Rate" column (KS-3). */
+  conversionRatePct: number | null;
   omzet: string;
   omzetIdr: string;
   nqBreakdown: Record<string, number>;
 }
 
+/** Sales OKR period bucket. 'kuartal' added when the plan's omzet-only design turned out not to cover the owner's real OKR examples (KS-4) — periodStart for kuartal is the 1st of the quarter's FIRST month, same "one anchor date" convention as 'tahun' (1 Jan). */
+export type PeriodKind = 'bulan' | 'kuartal' | 'tahun';
+
+/**
+ * Sales OKR metric catalog — CLOSED list, mirrored by the DB CHECK
+ * (`ck_sales_targets_metric_key`) so a caller can never invent a metric that
+ * has no formula. Owner's concrete examples (chat 2026-08-29, KS-4):
+ *   - 'omzet': "capai omzet Rp X" — Rupiah. The only metric View 1's
+ *     `okrFields` reads (unaffected by the other three).
+ *   - 'closing_ratio_qualified_pct': "closing ratio 35% dari qualified leads"
+ *     — closedSuccess ÷ qualified, DELIBERATELY different from the existing
+ *     `closingRatePct` (closedSuccess ÷ (closedSuccess+closedLost)).
+ *   - 'klien_count_min_kontrak': "30 klien dengan minimal kontrak Rp10jt" —
+ *     a client HEADCOUNT gated by a per-target Rupiah floor (`metricParam`).
+ *   - 'scouting_closing_count': "closing minimal 3 klien dari scouting" — a
+ *     closing headcount narrowed to one lead source.
+ */
+export type MetricKey = 'omzet' | 'closing_ratio_qualified_pct' | 'klien_count_min_kontrak' | 'scouting_closing_count';
+
+export const METRIC_KEYS: readonly MetricKey[] = [
+  'omzet', 'closing_ratio_qualified_pct', 'klien_count_min_kontrak', 'scouting_closing_count',
+];
+
+/** True for the one metric that carries a threshold parameter (mirrors `ck_sales_targets_metric_param`). */
+export function metricNeedsParam(k: MetricKey): boolean {
+  return k === 'klien_count_min_kontrak';
+}
+
 export interface TargetRow {
   salespersonId: string;
   periodStart: string;
-  periodKind: 'bulan' | 'tahun';
-  targetOmzet: string;
-  targetOmzetIdr: string;
+  periodKind: PeriodKind;
+  metricKey: MetricKey;
+  /** Decimal string (Rupiah threshold), only for 'klien_count_min_kontrak'. */
+  metricParam: string | null;
+  metricParamIdr: string | null;
+  /** Unit depends on metricKey: Rupiah (omzet), percentage points, or a plain count. */
+  targetValue: string;
+  targetValueIdr: string | null;
+  /** Recomputed live from the log every call (house rule #4) — never stored. Null on a genuine division-by-zero (house rule #7), e.g. zero qualified leads for the ratio metric. */
+  actualValue: string | null;
+  actualValueIdr: string | null;
+  /** actualValue ÷ targetValue × 100. Null when actualValue is null or targetValue is 0. */
+  achievedPct: number | null;
   updatedAt: Date;
   updatedBy: string;
 }
 
 export interface SetTargetInput {
   salespersonId: string;
-  periodStart: string; // "YYYY-MM-01" (bulan) or "YYYY-01-01" (tahun)
-  periodKind: 'bulan' | 'tahun';
-  targetOmzet: string; // decimal string, house money format
+  periodStart: string; // "YYYY-MM-01" (bulan/kuartal) or "YYYY-01-01" (tahun)
+  periodKind: PeriodKind;
+  metricKey: MetricKey;
+  /** Rupiah threshold — required for 'klien_count_min_kontrak', must be absent otherwise. */
+  metricParam?: string | null;
+  targetValue: string; // decimal string; unit depends on metricKey (see MetricKey)
 }
 
 // ---------------------------------------------------------------------------
@@ -662,13 +705,14 @@ function nullOkr() {
 /** okrFields resolves the target/achievement/momentum block for exactly one salesperson + one "YYYYMM" month (house format — callers pass `toYyyymm`-normalized strings, see `bySalesperson`/`byMonth`). */
 async function okrFields(sql: Queryable, salespersonId: string, month: string, omzet: money.Money) {
   const periodStart = `${month.slice(0, 4)}-${month.slice(4, 6)}-01`;
-  const targetRows = await sql<{ target_omzet: string }[]>`
-    select target_omzet from sales_targets
-     where salesperson_id = ${salespersonId} and period_start = ${periodStart}::date and period_kind = 'bulan'`;
+  const targetRows = await sql<{ target_value: string }[]>`
+    select target_value from sales_targets
+     where salesperson_id = ${salespersonId} and period_start = ${periodStart}::date
+       and period_kind = 'bulan' and metric_key = 'omzet'`;
   if (targetRows.length === 0) {
     return nullOkr();
   }
-  const target = money.parse(targetRows[0].target_omzet);
+  const target = money.parse(targetRows[0].target_value);
   const pencapaianPct = target === 0n ? null : roundPctMoney(omzet, target);
   const sisa = target > omzet ? target - omzet : 0n;
 
@@ -771,7 +815,7 @@ export async function bySource(sql: Queryable, actor: Actor, f: SalesPerfFilter)
         period, source: l.source, campaignId: l.origin_campaign_id,
         campaignName: l.origin_campaign_id === null ? null : campaignName.get(l.origin_campaign_id) ?? null,
         salespersonId: f.salespersonId,
-        leads: 0, qualified: 0, nonQualified: 0, closing: 0, omzet: '0.00', omzetIdr: EM_DASH, nqBreakdown: {},
+        leads: 0, qualified: 0, nonQualified: 0, closing: 0, conversionRatePct: null, omzet: '0.00', omzetIdr: EM_DASH, nqBreakdown: {},
       };
       groups.set(key, g);
     }
@@ -793,6 +837,12 @@ export async function bySource(sql: Queryable, actor: Actor, f: SalesPerfFilter)
       }
     }
   }
+  // conversionRatePct (KS-3, sheet 3's "Convertion Rate") needs each group's
+  // FINAL leads/closing totals, so it is a second pass rather than an
+  // incremental update above.
+  for (const g of groups.values()) {
+    g.conversionRatePct = g.leads === 0 ? null : roundPct(g.closing, g.leads);
+  }
   return [...groups.values()].sort((a, b) => a.period.localeCompare(b.period) || a.source.localeCompare(b.source));
 }
 
@@ -800,63 +850,192 @@ export async function bySource(sql: Queryable, actor: Actor, f: SalesPerfFilter)
 // Sales OKR (`sales_targets`) — View 4.
 // ---------------------------------------------------------------------------
 
+/** periodRangeFor turns (periodStart, periodKind) into the "YYYYMM" range `gather`/`inPeriod` need — kuartal = periodStart's month plus the next two. */
+function periodRangeFor(periodStart: string, periodKind: PeriodKind): PeriodFilter {
+  const y = Number(periodStart.slice(0, 4));
+  const m = Number(periodStart.slice(5, 7));
+  if (periodKind === 'tahun') {
+    return { from: `${y}01`, to: `${y}12` };
+  }
+  if (periodKind === 'kuartal') {
+    const endDate = new Date(Date.UTC(y, m - 1 + 2, 1));
+    const to = `${endDate.getUTCFullYear()}${String(endDate.getUTCMonth() + 1).padStart(2, '0')}`;
+    return { from: `${y}${String(m).padStart(2, '0')}`, to };
+  }
+  const bulan = `${y}${String(m).padStart(2, '0')}`;
+  return { from: bulan, to: bulan };
+}
+
+/**
+ * computeMetricActual derives the CURRENT value of one OKR metric for one
+ * salesperson over one period — recomputed from the log every call (house
+ * rule #4), nothing stored. Returns null on a genuine division-by-zero
+ * (house rule #7) — e.g. `closing_ratio_qualified_pct` with zero qualified
+ * leads has no defined ratio, not a zero one.
+ */
+async function computeMetricActual(
+  sql: Queryable,
+  salespersonId: string,
+  periodStart: string,
+  periodKind: PeriodKind,
+  metricKey: MetricKey,
+  metricParam: string | null,
+): Promise<string | null> {
+  const range = periodRangeFor(periodStart, periodKind);
+  if (metricKey === 'omzet' || metricKey === 'closing_ratio_qualified_pct') {
+    const acc = await gather(sql, [salespersonId], { period: range, salespersonId, source: null, campaignId: null }, false);
+    const a = acc.get(salespersonId) ?? emptyAcc();
+    if (metricKey === 'omzet') {
+      return money.decimal(a.omzet);
+    }
+    // closing_ratio_qualified_pct = closedSuccess ÷ qualified — deliberately
+    // NOT `closingRatePct` (closedSuccess ÷ (closedSuccess+closedLost)); see
+    // MetricKey's doc comment for why the owner's OKR names a different ratio.
+    return a.qualified === 0 ? null : roundPct(a.closedSuccess, a.qualified).toFixed(2);
+  }
+  if (metricKey === 'klien_count_min_kontrak') {
+    const threshold = money.decimal(money.parse(metricParam ?? '0'));
+    const rows = await sql<{ n: string }[]>`
+      select count(distinct cl.id) as n
+        from clients cl
+        join contracts c on c.client_id = cl.id
+        join transactions t on t.id = cl.transaction_id
+        join client_sales_allocations a on a.client_id = cl.id
+       where a.salesperson_id = ${salespersonId}
+         and a.basis_points > 0
+         and t.total_agreed_value >= ${threshold}::numeric
+         and wib_period(c.created_at) between ${range.from} and ${range.to}`;
+    return rows[0].n;
+  }
+  // scouting_closing_count: closings (first ->Closed-Success) whose LEAD
+  // source is 'Scouting' — reuses the same first-per-stage reduction the rest
+  // of this module uses, so a closing counted here can never disagree with
+  // `closedSuccess` on the main dashboard.
+  const events = await loadStageEventsByOwner(sql, [salespersonId]);
+  const closedInPeriod = events.filter((e) => e.stage === 'closedSuccess' && inPeriod(range, e.at)).map((e) => e.attemptId);
+  if (closedInPeriod.length === 0) {
+    return '0';
+  }
+  const rows = await sql<{ n: string }[]>`
+    select count(distinct pa.id) as n
+      from prospect_attempts pa
+      join leads l on l.id = pa.lead_id
+     where pa.id = any(${closedInPeriod}) and l.source = 'Scouting'`;
+  return rows[0].n;
+}
+
+/** Whether metricKey's raw value is Rupiah — the only case an `_idr` sibling field is meaningful. */
+function metricIsMoney(k: MetricKey): boolean {
+  return k === 'omzet';
+}
+
+async function toTargetRow(sql: Queryable, r: {
+  salesperson_id: string; period_start: string | Date; period_kind: PeriodKind; metric_key: MetricKey;
+  metric_param: string | null; target_value: string; updated_at: Date; updated_by: string;
+}): Promise<TargetRow> {
+  const periodStart = typeof r.period_start === 'string' ? r.period_start : r.period_start.toISOString().slice(0, 10);
+  const actual = await computeMetricActual(sql, r.salesperson_id, periodStart, r.period_kind, r.metric_key, r.metric_param);
+  const target = money.parse(r.target_value); // exact decimal math regardless of unit (Rupiah/percent/count)
+  const isMoney = metricIsMoney(r.metric_key);
+  return {
+    salespersonId: r.salesperson_id,
+    periodStart,
+    periodKind: r.period_kind,
+    metricKey: r.metric_key,
+    metricParam: r.metric_param === null ? null : money.decimal(money.parse(r.metric_param)),
+    metricParamIdr: r.metric_param === null ? null : money.format(money.parse(r.metric_param)),
+    targetValue: money.decimal(target),
+    targetValueIdr: isMoney ? money.format(target) : null,
+    actualValue: actual === null ? null : money.decimal(money.parse(actual)),
+    actualValueIdr: isMoney && actual !== null ? money.format(money.parse(actual)) : null,
+    achievedPct: actual === null || target === 0n ? null : roundPctMoney(money.parse(actual), target),
+    updatedAt: r.updated_at,
+    updatedBy: r.updated_by,
+  };
+}
+
 /** listTargets: every target for one period bucket, gated the same as `scopeFor` (staff = own row, lead/SPV = division, OD/Director = all). */
 export async function listTargets(sql: Queryable, actor: Actor, periodStart: string): Promise<TargetRow[]> {
   const scope = scopeFor(actor);
   if (scope === null) throw new ForbiddenError();
-  const rows = await sql<{ salesperson_id: string; period_start: string | Date; period_kind: 'bulan' | 'tahun'; target_omzet: string; updated_at: Date; updated_by: string }[]>`
-    select salesperson_id, period_start, period_kind, target_omzet, updated_at, updated_by
+  const rows = await sql<{ salesperson_id: string; period_start: string | Date; period_kind: PeriodKind; metric_key: MetricKey; metric_param: string | null; target_value: string; updated_at: Date; updated_by: string }[]>`
+    select salesperson_id, period_start, period_kind, metric_key, metric_param, target_value, updated_at, updated_by
       from sales_targets where period_start = ${periodStart}::date
-      order by salesperson_id`;
+      order by salesperson_id, metric_key`;
   const filtered = scope.ownOnly ? rows.filter((r) => r.salesperson_id === actor.employeeId) : rows;
-  return filtered.map((r) => ({
-    salespersonId: r.salesperson_id,
-    periodStart: typeof r.period_start === 'string' ? r.period_start : r.period_start.toISOString().slice(0, 10),
-    periodKind: r.period_kind,
-    targetOmzet: money.decimal(money.parse(r.target_omzet)),
-    targetOmzetIdr: money.format(money.parse(r.target_omzet)),
-    updatedAt: r.updated_at,
-    updatedBy: r.updated_by,
-  }));
+  return Promise.all(filtered.map((r) => toTargetRow(sql, r)));
 }
 
 const RE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** setTarget: OD/Director only (M0 §7.1 — Sales itself never writes its own OKR). Upserts the natural-key row and appends to `audit_log`. */
+/** setTarget: OD/Director only (M0 §7.1 — Sales itself never writes its own OKR). Upserts the natural-key row (now keyed by metric too) and appends to `audit_log`. */
 export async function setTarget(sql: Sql, actor: Actor, input: SetTargetInput): Promise<void> {
   if (!canManageTargets(actor)) {
     throw new ForbiddenError();
   }
   const salespersonId = (input.salespersonId ?? '').trim();
   const periodStart = (input.periodStart ?? '').trim();
-  if (salespersonId === '' || !RE_DATE.test(periodStart) || (input.periodKind !== 'bulan' && input.periodKind !== 'tahun')) {
+  const periodKind = input.periodKind;
+  const metricKey = input.metricKey;
+  if (
+    salespersonId === '' ||
+    !RE_DATE.test(periodStart) ||
+    (periodKind !== 'bulan' && periodKind !== 'kuartal' && periodKind !== 'tahun') ||
+    !METRIC_KEYS.includes(metricKey)
+  ) {
     throw new ValidationError();
   }
   let amt: money.Money;
   try {
-    amt = money.parse((input.targetOmzet ?? '').trim());
+    amt = money.parse((input.targetValue ?? '').trim());
   } catch {
     throw new ValidationError();
   }
   if (amt < 0n) {
     throw new ValidationError();
   }
+  const needsParam = metricNeedsParam(metricKey);
+  const rawParam = (input.metricParam ?? '').toString().trim();
+  // Mirrors the DB CHECK (ck_sales_targets_metric_param): the param is
+  // MANDATORY for klien_count_min_kontrak and FORBIDDEN for every other
+  // metric — a param silently ignored (or silently missing) would make the
+  // target mean something different from what the caller typed.
+  if (needsParam && rawParam === '') {
+    throw new ValidationError();
+  }
+  if (!needsParam && rawParam !== '') {
+    throw new ValidationError();
+  }
+  let param: money.Money | null = null;
+  if (needsParam) {
+    try {
+      param = money.parse(rawParam);
+    } catch {
+      throw new ValidationError();
+    }
+    if (param < 0n) {
+      throw new ValidationError();
+    }
+  }
+  const paramDecimal = param === null ? null : money.decimal(param);
 
   await withTransaction(sql, async (tx) => {
     const ex = executors(tx);
-    const prev = await tx<{ target_omzet: string }[]>`
-      select target_omzet from sales_targets
-       where salesperson_id = ${salespersonId} and period_start = ${periodStart}::date and period_kind = ${input.periodKind}`;
+    const prev = await tx<{ target_value: string; metric_param: string | null }[]>`
+      select target_value, metric_param from sales_targets
+       where salesperson_id = ${salespersonId} and period_start = ${periodStart}::date
+         and period_kind = ${periodKind} and metric_key = ${metricKey}`;
     await tx`
-      insert into sales_targets (salesperson_id, period_start, period_kind, target_omzet, updated_by)
-      values (${salespersonId}, ${periodStart}::date, ${input.periodKind}, ${money.decimal(amt)}, ${actor.employeeId})
-      on conflict (salesperson_id, period_start, period_kind)
-      do update set target_omzet = excluded.target_omzet, updated_by = excluded.updated_by, updated_at = now()`;
+      insert into sales_targets (salesperson_id, period_start, period_kind, metric_key, metric_param, target_value, updated_by)
+      values (${salespersonId}, ${periodStart}::date, ${periodKind}, ${metricKey}, ${paramDecimal}, ${money.decimal(amt)}, ${actor.employeeId})
+      on conflict (salesperson_id, period_start, period_kind, metric_key)
+      do update set target_value = excluded.target_value, metric_param = excluded.metric_param,
+                    updated_by = excluded.updated_by, updated_at = now()`;
     await ex.audit.insertAudit({
-      entityType: 'sales_targets', entityId: `${salespersonId}/${periodStart}/${input.periodKind}`,
+      entityType: 'sales_targets', entityId: `${salespersonId}/${periodStart}/${periodKind}/${metricKey}`,
       actorEmployeeId: actor.employeeId, action: prev.length === 0 ? 'target_set' : 'target_edited',
-      beforeJson: prev.length === 0 ? null : { target_omzet: prev[0].target_omzet },
-      afterJson: { target_omzet: money.decimal(amt) }, createdBy: actor.employeeId,
+      beforeJson: prev.length === 0 ? null : { target_value: prev[0].target_value, metric_param: prev[0].metric_param },
+      afterJson: { target_value: money.decimal(amt), metric_param: paramDecimal }, createdBy: actor.employeeId,
     });
   });
 }

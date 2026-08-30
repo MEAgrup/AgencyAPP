@@ -1039,8 +1039,12 @@ async function standardLines(tx: Queryable, attemptId: string): Promise<Proposal
  * subtotal for the given quantity/nominal plus that version's own commission_rule.
  * That is why an added service needs no price on the wire — the client cannot
  * compute rupiah (CLAUDE.md #4), and a price it did compute could not be trusted.
+ *
+ * Exported so `renewal.ts` (R-03) can price a renewal/cross-sell proposal line
+ * with the EXACT same MSL/custom-term rule this module uses for a fresh
+ * closing — one pricing engine, not two that could drift.
  */
-async function resolveProposalLine(
+export async function resolveProposalLine(
   tx: Queryable,
   l: ProposalLine,
   now: Date,
@@ -1185,9 +1189,12 @@ const PAYMENT_SCHEMES = new Set<string>([
 ]);
 
 /** Initial statuses birthed at closing (match the seeded machines verbatim). */
-const TRX_STATUS_MENUNGGU = '[Menunggu Verifikasi]';
-const INST_STATUS_BELUM_JATUH_TEMPO = '[Belum Jatuh Tempo]';
-const SERVICE_STATUS_AWAITING_ONBOARDING = '[Awaiting Onboarding]';
+// Exported (alongside the birth-time constants below) so `renewal.ts` (R-03)
+// births a Service/Transaction/Installment in the SAME initial state a fresh
+// closing does — one set of "what a brand-new row looks like" constants.
+export const TRX_STATUS_MENUNGGU = '[Menunggu Verifikasi]';
+export const INST_STATUS_BELUM_JATUH_TEMPO = '[Belum Jatuh Tempo]';
+export const SERVICE_STATUS_AWAITING_ONBOARDING = '[Awaiting Onboarding]';
 
 /** 100% expressed in integer basis points (exact Σ check — no float). */
 export const FULL_ALLOCATION_BP = 10000;
@@ -1272,16 +1279,16 @@ export function validateParties(c: ClosingParties): void {
   }
 }
 
-/** resolvePIC returns the Commission & Payment PIC, defaulting to Primary when solo. */
-function resolvePIC(c: ClosingParties): string {
+/** resolvePIC returns the Commission & Payment PIC, defaulting to Primary when solo. Exported for `renewal.ts` (R-03) — same parties shape, same rule. */
+export function resolvePIC(c: ClosingParties): string {
   if (c.allocations.length === 1 || (c.commissionPaymentPicId ?? '').trim() === '') {
     return c.primarySalespersonId;
   }
   return c.commissionPaymentPicId as string;
 }
 
-/** validateShape enforces the payment-scheme ↔ schedule shape (M0 §6 rule 5). */
-function validateShape(input: ClosingInput): void {
+/** validateShape enforces the payment-scheme ↔ schedule shape (M0 §6 rule 5). Exported so `renewal.ts` (R-03) validates a renewal/cross-sell's parties+payment shape with the same rule, not a second copy. */
+export function validateShape(input: ClosingInput): void {
   validateParties(input.parties);
   if (!PAYMENT_SCHEMES.has(input.paymentScheme)) {
     throw new IncompleteError();
@@ -1481,9 +1488,10 @@ export async function close(
 
 /**
  * validateScheduleTotal enforces that scheduled installments sum exactly to the
- * transaction total for Termin / Bayar di Belakang (M5 §4).
+ * transaction total for Termin / Bayar di Belakang (M5 §4). Exported for
+ * `renewal.ts` (R-03) — a renewal's execution needs the identical check.
  */
-function validateScheduleTotal(input: ClosingInput, total: money.Money): void {
+export function validateScheduleTotal(input: ClosingInput, total: money.Money): void {
   if (input.paymentScheme !== PAYMENT_SCHEME_TERMIN && input.paymentScheme !== PAYMENT_SCHEME_DI_BELAKANG) {
     return;
   }
