@@ -47,6 +47,7 @@ import {
 import { getBoard, UNIVERSAL_COLUMNS, type Card } from '@/lib/board';
 import BoardCard from '../../board/BoardCard';
 import ReportPanel from '@/components/clients/ReportPanel';
+import RenewalPanel from '@/components/clients/RenewalPanel';
 
 const VOIDED_STATUS = '[Cancelled — Service Voided]';
 const ON_HOLD_STATUS = '[On Hold]';
@@ -525,6 +526,8 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           </div>
         )}
       </section>
+
+      <RenewalPanel clientId={id} salesPicId={client.sales_pic_id} />
 
       <section className="card">
         <div className="cardHeader">

@@ -7,7 +7,7 @@
  */
 import { money, tz } from '@cdps/core';
 import type { interview as ivcore } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, report, req, risetAwal, sales, salesperf, stage, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, stage, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -3720,6 +3720,33 @@ export function contractFromWire(v: unknown): contract.ContractInput {
     tanggalAkhir: String(b.tanggal_akhir ?? ''),
     catatan:
       b.catatan === undefined || b.catatan === null ? null : String(b.catatan),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// R-03 — Contract Renewal/Cross-Sell Request (RNW-)
+// ---------------------------------------------------------------------------
+
+/** A renewal/cross-sell request opened from a Client Record (M0 §7.1, R-03). */
+export interface RenewalWire {
+  id: string;
+  client_id: string;
+  jenis: string;
+  contract_sebelumnya_id: string | null;
+  status: string;
+  created_at: string;
+  created_by: string;
+}
+
+export function renewalToWire(r: renewal.Renewal): RenewalWire {
+  return {
+    id: r.id,
+    client_id: r.clientId,
+    jenis: r.jenis,
+    contract_sebelumnya_id: r.contractSebelumnyaId,
+    status: r.status,
+    created_at: r.createdAt.toISOString(),
+    created_by: r.createdBy,
   };
 }
 

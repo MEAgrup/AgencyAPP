@@ -7,9 +7,11 @@
 > persis per klaim, karena itulah satu-satunya sumber status yang bisa
 > diverifikasi tanpa membaca ulang seluruh rencana.
 >
-> Keputusan: `docs/DECISIONS.md` baris 2026-08-30 (cari "KINERJA SALES") — 5
-> baris Decided (termasuk "SP-2 RESOLVED + R-03 domain layer mendarat") +
-> SP-1/SP-3 Open (SP-2 sudah resolved, baris riwayatnya tetap ada di tabel Open).
+> Keputusan: `docs/DECISIONS.md` baris 2026-08-30 (cari "KINERJA SALES") — 6
+> baris Decided (termasuk "SP-2 RESOLVED + R-03 domain layer mendarat" dan
+> "R-04 mendarat") + SP-1/SP-3 Open (SP-2 sudah resolved, baris riwayatnya
+> tetap ada di tabel Open). **Stream B (renewal/cross-sell) SELESAI penuh —
+> nol garis stop tersisa.**
 > Permission: `PERMISSIONS.md` §M0 Sales (baris "Kinerja Sales dashboard").
 
 ## 0. Status
@@ -18,7 +20,7 @@
 |---|---|---|
 | A (S-01..S-05) | Dashboard Kinerja Sales | ✅ SELESAI |
 | B additive (R-01/R-02) | `contracts.jenis` + read-model | ✅ SELESAI |
-| B pintu (R-03/R-04) | Renewal dari Client Record | 🟡 **SEBAGIAN** — R-03 lapisan domain ✅ SELESAI & diuji (SP-2 resolved); route API/wire/FE/UI (R-04) BELUM dibangun |
+| B pintu (R-03/R-04) | Renewal dari Client Record | ✅ **SELESAI** — R-03 lapisan domain + R-04 route API/wire/FE/UI semuanya mendarat & diuji |
 
 ---
 
@@ -50,7 +52,7 @@
 | R-01 | Migrasi `contracts.jenis` + `contract_sebelumnya_id` | ✅ **SELESAI** — `20260901060000_r01_contract_jenis.sql`. DEFAULT `'baru'`, CHECK 3 nilai, FK self-referencing nullable, CHECK bentuk (non-null hanya saat `perpanjangan`). Nol prefix baru, nol FK ke tabel lain. `contract.ts` (`Contract`/`ContractRow`/`rowToContract`) + wire (`ContractWire`/`contractToWire`) + FE type (`web-internal/src/lib/contract.ts`) diperbarui supaya kolom baru tidak jadi bug kelas O43 (`shape-parity.test.ts` menegakkannya) |
 | R-02 | Read-model `salesperf.ts` membaca `contracts.jenis` | ✅ **SELESAI** — kolom `klienBaru`/`klienPerpanjangan`/`klienCrossSell` tertimbang `client_sales_allocations.basis_points`. Klien tanpa baris `contracts` sama sekali → `'baru'` by elimination (sah karena R-03 belum ada) |
 | R-03 | Pintu renewal — mesin status sendiri `contract_renewal` (bukan `canWriteContract`/Account, bukan menumpang `prospect_attempt`), faktorkan ulang validator `sales.ts` (harga/alokasi/skema), closing melahirkan CTR-/SVC-/TRX- baru pada klien yang SAMA | ✅ **SELESAI (domain layer)** — SP-2 resolved 2026-08-30 (kredit alokasi ikut sales yang memproses; komisi = sama dengan penjualan baru). Modul `packages/domain/src/renewal.ts` (+ `renewal.test.ts`, 13 kasus). Migrasi `20260901080000` (alokasi/services di-scope `transaction_id`), `20260901090000` (prefix `RNW`, mesin `contract_renewal`, `contract_renewals`, penambat ganda `negotiation_proposals`), `20260901100000` (`services.transaction_id`). Fix regresi kritis: `finance.commissionAchievement` + `salesperf.ts::loadClientRows` sebelumnya query by `client_id` — dengan >1 transaksi/klien ini mencampur komisi/omzet; diperbaiki query by `transaction_id`, diverifikasi test eksplisit. **Strategi kontrak baru tetap manual AM** (tidak otomatis); **cross-sell selalu kontrak baru terpisah** (tidak menempel kontrak aktif). Detail desain: `DECISIONS.md` 2026-08-30 "SP-2 RESOLVED", `STATE_MACHINES.md` §20, `DATA_MODEL.md` (entitas `RNW-`), `PERMISSIONS.md` §M0 Sales. **BELUM ADA**: route API (`POST/GET /api/v1/clients/{id}/renewals`, `/renewals/{id}`, `/negotiation`, `/decision`, `/accept-counter`, `/cancel`, `/close`), wire mapper (`RenewalWire`, `apps/api/src/lib/wire.ts`), FE lib (`web-internal/src/lib/renewal.ts`) — itu R-04 |
-| R-04 | UI tombol "Perpanjangan/Cross Sell" di `/clients/[id]` + notifikasi + route API/wire yang menghubungkannya ke R-03 | ⛔ **BELUM DIKERJAKAN** — R-03 domain layer sudah siap dipakai; tersisa murni pekerjaan permukaan (route handler tipis + wire + FE type + tombol/form), bukan menunggu keputusan baru |
+| R-04 | UI tombol "Perpanjangan/Cross Sell" di `/clients/[id]` + route API/wire yang menghubungkannya ke R-03 | ✅ **SELESAI** — 7 route tipis `apps/api/src/app/api/v1/{clients/[id]/renewals, renewals/[id], renewals/[id]/negotiation, .../negotiation/resubmit, .../negotiation/decision, .../negotiation/accept, .../cancel, .../close}` (semua `db()` + gate TS `renewal.ts`, pola persis `contract.ts`/`/attempts/[id]/negotiation`). Wire `RenewalWire`/`renewalToWire` (`apps/api/src/lib/wire.ts`, terdaftar `WIRE_TO_FE` → `renewal.ts::Renewal`). FE lib `web-internal/src/lib/renewal.ts` (tipe `Renewal`/`RenewalCreateInput`/`RenewalClosingInput`, fungsi fetch untuk semua 7 endpoint). UI `web-internal/src/components/clients/RenewalPanel.tsx` — dipasang di `/clients/[id]` tepat setelah "Sales Allocation": daftar permintaan + accordion detail per baris (buka Draft, negosiasi standard/custom, keputusan Superior, terima counter/kirim ulang, Closing Form lengkap dengan alokasi+PIC+payment scheme+installment+jendela kontrak, batal). Editor set jasa DIDUPLIKASI dari pola `/sales/[id]` (bukan diimpor — versi asal tidak diekspor sebagai komponen bersama). **Notifikasi belum ditambahkan** — R-03/R-04 tidak menambah event baru ke katalog v1 (di luar cakupan; lihat catatan di bawah). |
 
 ---
 
@@ -85,3 +87,11 @@
 3. Typecheck dijalankan terpisah untuk `packages/domain` DAN `apps/api` (isolatedModules `apps/api` menangkap satu error re-export yang tidak muncul saat mengetik `packages/domain` sendirian — `export type { ... } from './sales'` bukan `export { ... }`).
 4. Regresi kritis yang diverifikasi eksplisit (`renewal.test.ts` "negotiation + close"): setelah renewal baru closing pada klien yang sudah punya transaksi lama, `commissionAchievement` transaksi LAMA tetap tidak berubah (900.000, 10% dari 9.000.000) sementara transaksi BARU (renewal) menghitung sendiri (500.000, 10% dari 5.000.000) — membuktikan fix scoping `transaction_id` di `finance.ts`/`salesperf.ts` benar-benar mengisolasi uang antar closing pada klien yang sama.
 5. Belum dijalankan: route API/wire/FE/UI R-04 belum ada, jadi belum ada apa pun untuk diverifikasi di lapisan itu.
+
+## 11. Verifikasi R-04 (sesi lanjutan, permukaan)
+
+1. `apps/api` typecheck + `npm test -w @cdps/api` — hijau bersih 383/383, termasuk `shape-parity.test.ts` (11/11, `RenewalWire` terdaftar `WIRE_TO_FE` → `renewal.ts::Renewal`) dan `route-parity.test.ts` (5/5, `KNOWN_GAPS` tetap kosong — 7 route renewal baru otomatis lolos scan FE↔API karena `web-internal/src/lib/renewal.ts` memanggil semuanya).
+2. `web-internal` typecheck — bersih (satu error PRA-ADA `riset-awal.ts`/`xlsx`, tak terkait, sama seperti sesi R-03). `npm test` 379/379 (tidak berubah — `RenewalPanel.tsx` belum punya test unit sendiri, murni fetch-wrapper + form seperti `ReportPanel.tsx`/`MilestonesSection`).
+3. `npm run lint` (`apps/api` bersih; `web-internal` satu error PRA-ADA di `admin/employees/page.tsx`, file yang tidak disentuh sesi ini — dikonfirmasi via `git status`).
+4. Local `/clients/[id]` belum dijalankan lewat browser sungguhan (skill `run`) — di luar cakupan verifikasi non-interaktif sesi ini; typecheck + shape/route-parity membuktikan kontraknya, bukan tampilannya.
+5. **Yang BENAR-BENAR BELUM ADA setelah R-04 (bukan garis stop, murni belum diminta)**: event notifikasi untuk siklus renewal (katalog v1 tetap 65 — menambahnya butuh keputusan pemilik per CLAUDE.md §8, di luar cakupan R-03/R-04 yang disepakati); uji visual browser.
