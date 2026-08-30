@@ -174,7 +174,7 @@ const FE_FILES = [
   'account.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'contract.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts', 'penugasan.ts', 'permintaan.ts', 'plan.ts',
-  'performance.ts', 'portal.ts', 'recap.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'stage.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
+  'performance.ts', 'portal.ts', 'recap.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'stage.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
 ];
 
 const fe = new Map<string, Parsed>();
@@ -429,6 +429,11 @@ const WIRE_TO_FE: Record<string, string> = {
   // type is a converter this guard cannot check.
   // O57 — the Contract (CTR-) the Strategi hangs off.
   ContractWire: 'contract.ts::Contract',
+  // Kinerja Sales (M0 §7.1) + Sales OKR — RENCANA_KINERJA_SALES.md S-04/S-05.
+  SalesPerfRowWire: 'salesperf.ts::SalesPerfRow',
+  SalesPerfMonthRowWire: 'salesperf.ts::SalesPerfMonthRow',
+  LeadSourceRowWire: 'salesperf.ts::LeadSourceRow',
+  SalesTargetWire: 'salesperf.ts::SalesTarget',
   VendorWire: 'strategi.ts::Vendor',
   VendorDocumentWire: 'strategi.ts::VendorDocument',
   StrategiWire: 'strategi.ts::Strategi',

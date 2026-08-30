@@ -82,6 +82,11 @@ const RE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 // Shape
 // ---------------------------------------------------------------------------
 
+/** Classification set by R-01 (Kinerja Sales) — fixed once, at creation. */
+export const JENIS_BARU = 'baru';
+export const JENIS_PERPANJANGAN = 'perpanjangan';
+export const JENIS_CROSS_SELL = 'cross_sell';
+
 export interface Contract {
   id: string;
   clientId: string;
@@ -89,6 +94,16 @@ export interface Contract {
   tanggalMulai: string;
   tanggalAkhir: string;
   catatan: string | null;
+  /**
+   * R-01 (Kinerja Sales) — baru | perpanjangan | cross_sell. Set once at
+   * creation (DB default 'baru'); NOT a status, never re-derived. Every
+   * contract created through this module today is 'baru' — the renewal/
+   * cross-sell door from the Client Record (R-03) is not built yet
+   * (RENCANA_KINERJA_SALES.md §6 garis stop).
+   */
+  jenis: string;
+  /** Renewal chain link — non-null only when jenis = 'perpanjangan'. */
+  contractSebelumnyaId: string | null;
   createdAt: string;
   updatedAt: string;
   createdBy: string;
@@ -109,6 +124,8 @@ interface ContractRow {
   tanggal_mulai: string | Date;
   tanggal_akhir: string | Date;
   catatan: string | null;
+  jenis: string;
+  contract_sebelumnya_id: string | null;
   created_at: string | Date;
   updated_at: string | Date;
   created_by: string;
@@ -127,6 +144,8 @@ function rowToContract(r: ContractRow): Contract {
     tanggalMulai: isoDate(r.tanggal_mulai),
     tanggalAkhir: isoDate(r.tanggal_akhir),
     catatan: r.catatan,
+    jenis: r.jenis,
+    contractSebelumnyaId: r.contract_sebelumnya_id,
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
     createdBy: r.created_by,

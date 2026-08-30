@@ -7,7 +7,7 @@
  */
 import { money, tz } from '@cdps/core';
 import type { interview as ivcore } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, report, req, risetAwal, sales, stage, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, report, req, risetAwal, sales, salesperf, stage, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -3686,6 +3686,8 @@ export interface ContractWire {
   tanggal_mulai: string;
   tanggal_akhir: string;
   catatan: string | null;
+  jenis: string;
+  contract_sebelumnya_id: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -3699,6 +3701,8 @@ export function contractToWire(c: contract.Contract): ContractWire {
     tanggal_mulai: c.tanggalMulai,
     tanggal_akhir: c.tanggalAkhir,
     catatan: c.catatan,
+    jenis: c.jenis,
+    contract_sebelumnya_id: c.contractSebelumnyaId,
     created_by: c.createdBy,
     created_at: c.createdAt,
     updated_at: c.updatedAt,
@@ -6213,5 +6217,141 @@ export function toPermintaanInput(b: {
     jenis: b.jenis ?? '', judul: b.judul ?? '', deskripsi: b.deskripsi ?? '',
     briefId: b.brief_id ?? '', serviceId: b.service_id ?? '',
     cprId: b.cpr_id ?? '', tujuanEmployeeId: b.tujuan_employee_id ?? '',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Kinerja Sales (M0 §7.1) + Sales OKR — RENCANA_KINERJA_SALES.md S-04.
+// ---------------------------------------------------------------------------
+
+/** salesperf.SalesPerfRow wire shape — money fields cross as pre-formatted IDR
+ * strings (bigint cannot serialize, house rule: client never re-derives money).
+ * Percentages cross as raw `number | null` (JSON-safe, same pattern as
+ * PerfComponentWire) — null renders "—" at the UI layer (house rule #7). */
+export interface SalesPerfRowWire {
+  salesperson_id: string;
+  nama: string;
+  level_sales: string;
+  leads_registered: number;
+  leads_scouting: number;
+  contacted: number;
+  qualified: number;
+  non_qualified: number;
+  nq_breakdown: Record<string, number>;
+  negotiating: number;
+  closed_success: number;
+  closed_lost: number;
+  closing_rate_pct: number | null;
+  qualified_rate_pct: number | null;
+  avg_deal_cycle_days: number | null;
+  effort_follow_up: number;
+  effort_visit: number;
+  effort_online_meeting: number;
+  klien_baru: string;
+  klien_perpanjangan: string;
+  klien_cross_sell: string;
+  klien_count: string;
+  omzet_idr: string;
+  komisi_kontrak_idr: string;
+  komisi_diakui_idr: string;
+  target_omzet_idr: string | null;
+  pencapaian_pct: number | null;
+  sisa_target_idr: string | null;
+  sisa_per_minggu_idr: string | null;
+  sisa_per_hari_idr: string | null;
+  mom_pct: number | null;
+}
+
+export function salesPerfRowToWire(r: salesperf.SalesPerfRow): SalesPerfRowWire {
+  return {
+    salesperson_id: r.salespersonId,
+    nama: r.nama,
+    level_sales: r.levelSales,
+    leads_registered: r.leadsRegistered,
+    leads_scouting: r.leadsScouting,
+    contacted: r.contacted,
+    qualified: r.qualified,
+    non_qualified: r.nonQualified,
+    nq_breakdown: r.nqBreakdown,
+    negotiating: r.negotiating,
+    closed_success: r.closedSuccess,
+    closed_lost: r.closedLost,
+    closing_rate_pct: r.closingRatePct,
+    qualified_rate_pct: r.qualifiedRatePct,
+    avg_deal_cycle_days: r.avgDealCycleDays,
+    effort_follow_up: r.effortFollowUp,
+    effort_visit: r.effortVisit,
+    effort_online_meeting: r.effortOnlineMeeting,
+    klien_baru: r.klienBaru,
+    klien_perpanjangan: r.klienPerpanjangan,
+    klien_cross_sell: r.klienCrossSell,
+    klien_count: r.klienCount,
+    omzet_idr: money.format(r.omzet),
+    komisi_kontrak_idr: money.format(r.komisiKontrak),
+    komisi_diakui_idr: money.format(r.komisiDiakui),
+    target_omzet_idr: r.targetOmzet === null ? null : money.format(r.targetOmzet),
+    pencapaian_pct: r.pencapaianPct,
+    sisa_target_idr: r.sisaTarget === null ? null : money.format(r.sisaTarget),
+    sisa_per_minggu_idr: r.sisaPerMinggu === null ? null : money.format(r.sisaPerMinggu),
+    sisa_per_hari_idr: r.sisaPerHari === null ? null : money.format(r.sisaPerHari),
+    mom_pct: r.momPct,
+  };
+}
+
+export interface SalesPerfMonthRowWire extends SalesPerfRowWire {
+  period: string;
+}
+
+export function salesPerfMonthRowToWire(r: salesperf.SalesPerfMonthRow): SalesPerfMonthRowWire {
+  return { ...salesPerfRowToWire(r), period: r.period };
+}
+
+export interface LeadSourceRowWire {
+  period: string;
+  source: string;
+  campaign_id: string | null;
+  campaign_name: string | null;
+  salesperson_id: string | null;
+  leads: number;
+  qualified: number;
+  non_qualified: number;
+  closing: number;
+  omzet_idr: string;
+  nq_breakdown: Record<string, number>;
+}
+
+export function leadSourceRowToWire(r: salesperf.LeadSourceRow): LeadSourceRowWire {
+  return {
+    period: r.period,
+    source: r.source,
+    campaign_id: r.campaignId,
+    campaign_name: r.campaignName,
+    salesperson_id: r.salespersonId,
+    leads: r.leads,
+    qualified: r.qualified,
+    non_qualified: r.nonQualified,
+    closing: r.closing,
+    omzet_idr: money.format(r.omzet),
+    nq_breakdown: r.nqBreakdown,
+  };
+}
+
+export interface SalesTargetWire {
+  salesperson_id: string;
+  period_start: string;
+  period_kind: string;
+  target_omzet_idr: string;
+  updated_at: string;
+  updated_by: string;
+}
+
+export function salesTargetToWire(t: salesperf.TargetRow): SalesTargetWire {
+  return {
+    salesperson_id: t.salespersonId,
+    period_start: t.periodStart,
+    period_kind: t.periodKind,
+    target_omzet_idr: money.format(t.targetOmzet),
+    updated_at: t.updatedAt.toISOString(),
+    updated_by: t.updatedBy,
   };
 }

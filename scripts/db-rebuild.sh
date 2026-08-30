@@ -140,12 +140,15 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "128"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "129"
 check "entity_prefix"    "select count(*) from entity_prefix"    "36"
 check "sm_machines"      "select count(*) from sm_machines"      "29"
 check "notif_events"     "select count(*) from notif_events"     "65"
-# 128 = 127 + 1 tabel Akun B Fase 4 (20260831040000_req_permintaan.sql):
-#       `permintaan` (REQ-, M16 §5.5). 29 = 28 + 1 mesin `permintaan`
+# 129 = 128 + 1 tabel Kinerja Sales S-02 (20260901070000_s02_sales_targets.sql):
+#       `sales_targets`. Nol prefix baru (kunci alami), nol mesin/event baru
+#       (config, bukan lifecycle). Sebelumnya 128 = 127 + 1 tabel Akun B Fase 4
+#       (20260831040000_req_permintaan.sql): `permintaan` (REQ-, M16 §5.5).
+#       29 = 28 + 1 mesin `permintaan`
 #       ([Diajukan]->[Diproses]->[Selesai]|[Ditolak], STATE_MACHINES §19).
 #       Nol prefix/event baru (sudah dibereskan Tahap F). Angka final ini
 #       ditulis di LANGKAH PENGGABUNGAN §5 PARALEL_M16_DUA_AKUN.md, setelah

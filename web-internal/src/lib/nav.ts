@@ -131,6 +131,10 @@ const MAIN_LINKS: NavItem[] = [
 const ACQUISITION_LINKS: NavItem[] = [
   // M0 §9: the attempt workspace is Sales'.
   { href: '/sales', label: 'Sales Workspace', access: ownedBy(SALES) },
+  // M0 §7.1 Kinerja Sales dashboard (RENCANA_KINERJA_SALES.md). `ownedBy`
+  // already includes OD/Director (read-everywhere); Sales staff/lead both see
+  // it, row-scope (own vs division-wide) is the server's `salesperf.scopeFor`.
+  { href: '/sales/kinerja', label: 'Kinerja Sales', access: ownedBy(SALES) },
   // Hard server gate: `leads.canReadPool` (Sales any level) + `leads.leadListScope`
   // (Marketing any level, Sales lead). Every other division gets a 403, not an
   // empty list. Whether Sales STAFF should also reach the Database (M1 §9.1

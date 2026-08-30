@@ -285,6 +285,88 @@ describeDb('read models under RLS (O37)', () => {
   });
 
   /**
+   * S-01 (Kinerja Sales, 2026-08-30, `RENCANA_KINERJA_SALES.md` §2/§5).
+   *
+   * Before `20260901050000_rls_sales_lead_scope.sql`, `prospect_attempts_select`
+   * and `installments_select` had NO arm at all for a Sales lead reading a
+   * teammate's row (only `owner_employee_id`/individual ownership), and
+   * `clients_select` had an Account-lead arm but no Sales one. A Head Sales
+   * reading the Kinerja Sales dashboard through `readAsActor` therefore saw
+   * ONLY their own attempts/clients/installments — division-wide in name,
+   * own-only in practice, silently.
+   *
+   * This proves the fix closed: a Sales LEAD sees a teammate's rows on all
+   * three tables; a Sales STAFF (same division, not the owner) still does
+   * not (staff = own data only, PRD Role Matrix); a lead of a FOREIGN
+   * division sees none of it either (division-wide, not read-everywhere).
+   */
+  it('S-01: a Sales lead reads a teammate\'s attempt/client/installment; Sales staff and a foreign-division lead do not', async () => {
+    const LEAD = 'LEAD-ZZR-S01';
+    const PRSP = 'PRSP-ZZR-S01';
+    const CLI = 'CLI-ZZR-S01';
+    const TRX = 'TRX-ZZR-S01';
+    const INST = 'INST-ZZR-S01';
+    const TEAMMATE = 'ZZR-S01-OWNER'; // the Sales staffer who owns everything below
+
+    await sql`
+      insert into leads (id, lead_name, phone_number, phone_norm, source, origin_division,
+                         record_status, created_by)
+      values (${LEAD}, 'S-01 RLS Fixture', '0899000222', '62899000222', 'Scouting', 'Sales',
+              'active', ${TEAMMATE})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into prospect_attempts (id, lead_id, owner_employee_id, status, claimed_at, created_by)
+      values (${PRSP}, ${LEAD}, ${TEAMMATE}, 'New Lead', now(), ${TEAMMATE})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into clients (id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, created_by)
+      values (${CLI}, 'S-01 RLS Fixture', 'Ibu RLS', 'Jakarta', 'Fashion', 'https://shopee/zzr-s01',
+              '9000000.00', '12000000.00', ${TEAMMATE}, ${TEAMMATE}, ${TEAMMATE})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into transactions (id, client_id, payment_intent_scheme, total_agreed_value,
+                               payment_status, created_by)
+      values (${TRX}, ${CLI}, '[Termin]', '9000000.00', '[Menunggu Verifikasi]', ${TEAMMATE})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into installments (id, transaction_id, installment_no, amount, due_date, status, created_by)
+      values (${INST}, ${TRX}, 1, '9000000.00', current_date, '[Belum Jatuh Tempo]', ${TEAMMATE})
+      on conflict (id) do nothing`;
+
+    const countAs = async (claimSet: string, table: string, idCol: string, id: string): Promise<number> => {
+      const rows = await withClaims(sql, claimSet, (tx) =>
+        tx<{ n: string }[]>`select count(*) as n from ${tx(table)} where ${tx(idCol)} = ${id}`,
+      );
+      return Number(rows[0].n);
+    };
+
+    try {
+      const salesLead = claims({ employeeId: 'ZZR-S01-LEAD', division: 'Sales', level: 'lead' });
+      expect(await countAs(salesLead, 'prospect_attempts', 'id', PRSP), 'Sales lead → attempt').toBe(1);
+      expect(await countAs(salesLead, 'clients', 'id', CLI), 'Sales lead → client').toBe(1);
+      expect(await countAs(salesLead, 'installments', 'id', INST), 'Sales lead → installment').toBe(1);
+
+      const salesStaff = claims({ employeeId: 'ZZR-S01-STAFF', division: 'Sales', level: 'staff' });
+      expect(await countAs(salesStaff, 'prospect_attempts', 'id', PRSP), 'Sales staff (not owner) → attempt').toBe(0);
+      expect(await countAs(salesStaff, 'clients', 'id', CLI), 'Sales staff (not owner) → client').toBe(0);
+      expect(await countAs(salesStaff, 'installments', 'id', INST), 'Sales staff (not owner) → installment').toBe(0);
+
+      const foreignLead = claims({ employeeId: OUTSIDER, division: 'Creative', level: 'lead' });
+      expect(await countAs(foreignLead, 'prospect_attempts', 'id', PRSP), 'foreign-division lead → attempt').toBe(0);
+      expect(await countAs(foreignLead, 'clients', 'id', CLI), 'foreign-division lead → client').toBe(0);
+      expect(await countAs(foreignLead, 'installments', 'id', INST), 'foreign-division lead → installment').toBe(0);
+    } finally {
+      await sql`delete from installments where id = ${INST}`;
+      await sql`delete from transactions where id = ${TRX}`;
+      await sql`delete from contracts where client_id = ${CLI}`;
+      await sql`delete from clients where id = ${CLI}`;
+      await sql`delete from prospect_attempts where id = ${PRSP}`;
+      await sql`delete from leads where id = ${LEAD}`;
+    }
+  });
+
+  /**
    * O52 (QA 2026-08-04, keputusan pemilik 2026-08-07 → pilihan (b)).
    *
    * `loadBrief`/`assetSelect` joined `services` + `clients` for one column —

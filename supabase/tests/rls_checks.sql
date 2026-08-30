@@ -1121,7 +1121,7 @@ DECLARE
     'optimization_logs_select','plan_actual_select','plan_flag_select',
     'plan_gate_config_select','plan_review_select','plan_target_select',
     'prospect_attempt_nq_reasons_select',
-    'prospect_attempts_select','qualified_form_services_select','qualified_forms_select',
+    'qualified_form_services_select','qualified_forms_select',
     'stage_definition_select','stage_pipeline_select',
     'strategi_akses_select','strategi_assumption_select','strategi_baseline_bulan_select',
     'strategi_channel_select','strategi_diagnosa_select','strategi_dispatch_select',

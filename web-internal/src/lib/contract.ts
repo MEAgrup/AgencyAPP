@@ -16,6 +16,11 @@ export interface Contract {
   tanggal_mulai: string;
   tanggal_akhir: string;
   catatan: string | null;
+  // R-01 (Kinerja Sales) — classified once at creation. 'baru' for every
+  // contract created today; the renewal/cross-sell door (R-03) is not built
+  // yet, so `contract_sebelumnya_id` is always null in practice for now.
+  jenis: string;
+  contract_sebelumnya_id: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;

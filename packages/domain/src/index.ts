@@ -124,3 +124,6 @@ export * as leadtime from './leadtime';
 // entity. Deliberately not `internaltask` (which is sengaja WITHOUT client_id)
 // nor `task` M12 (not a deliverable an AM reviews).
 export * as req from './req';
+// Kinerja Sales (M0 §7.1) + Sales OKR — pure read-model, new file (sales.ts
+// is already 2000+ lines; same separation marketing.ts keeps from campaign.ts).
+export * as salesperf from './salesperf';
