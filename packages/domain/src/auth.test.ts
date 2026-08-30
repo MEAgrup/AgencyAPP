@@ -5,11 +5,13 @@
  *   employee profile and combines it with the JWT-resolved role, inside a
  *   rolled-back transaction (nothing persists). A missing/inactive employee
  *   surfaces as NotFoundError (the route maps that to a 401).
+ * - getVendorMe (LT-61): the vendor-realm counterpart — reads `vendors` by
+ *   `actor.vendorId` instead of `employees` by `actor.employeeId`.
  */
 import { afterAll, describe, expect, it } from 'vitest';
-import { createClient, type Sql, type TransactionSql } from '@cdps/db';
+import { createClient, withClaims, type Sql, type TransactionSql } from '@cdps/db';
 import { permission } from '@cdps/core';
-import { getMe, NotFoundError } from './auth';
+import { getMe, getVendorMe, NotFoundError } from './auth';
 
 const URL = process.env.DATABASE_URL;
 const describeDb = describe.skipIf(!URL);
@@ -77,6 +79,65 @@ describeDb('getMe (integration)', () => {
         return getMe(tx, actor('ZZ-OFF'));
       }),
     ).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+/** LT-61: a vendor Actor — employeeId = vendorId, Role all-empty. */
+const vendorActor = (vendorId: string): permission.Actor => ({
+  employeeId: vendorId, vendorId, role: permission.makeRole({}),
+});
+
+async function insertVendor(tx: TransactionSql, id: string): Promise<void> {
+  await tx`
+    insert into vendors (id, nama_vendor, jenis_layanan, pic_nama, pic_kontak, skema_biaya, tarif, catatan_kinerja, created_by)
+    values (${id}, 'Vendor Live ZZ', 'live_stream', 'PIC Vendor', '0800000000', 'per_sesi', '1000000.00',
+            'catatan internal rahasia', 'ZZ-ADMIN')`;
+}
+
+describeDb('getVendorMe (integration, LT-61)', () => {
+  it("returns the vendor's own profile, never the internal catatan_kinerja", async () => {
+    const me = await inRollback(async (tx) => {
+      await insertVendor(tx, 'ZZ-VND-ME-1');
+      return getVendorMe(tx, vendorActor('ZZ-VND-ME-1'));
+    });
+    expect(me).toEqual({ vendor_id: 'ZZ-VND-ME-1', nama_vendor: 'Vendor Live ZZ' });
+  });
+
+  it('throws NotFoundError for an unknown vendor', async () => {
+    await expect(
+      inRollback((tx) => getVendorMe(tx, vendorActor('ZZ-VND-NOPE'))),
+    ).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getVendorMe under REAL RLS (O37 / reads_rls.test.ts pattern) — proves
+// `readAsActor` (apps/api's route for both `POST /auth/login`'s vendor branch
+// and `GET /vendor/me`) is safe to use here, unlike `listVendorBriefs`
+// (packages/domain/src/livestream.test.ts): `vendors_select` is
+// `TO authenticated USING (true)` — the same "shared master list, no row scope
+// needed" policy `vendor.getVendor`/`listVendors` already rely on for
+// employees — so it evaluates true for a vendor claim too, with zero
+// migration change. `withClaims` needs a COMMITTED row (it opens its own
+// transaction on the shared connection), so this uses real insert/delete
+// rather than `inRollback`.
+// ---------------------------------------------------------------------------
+describeDb('getVendorMe under RLS (readAsActor) — the route\'s actual access mode', () => {
+  const VND_ID = 'ZZ-VND-RLS-ME-1';
+
+  afterAll(async () => {
+    await sql`delete from vendors where id = ${VND_ID}`;
+  });
+
+  it('a vendor reads its own profile through readAsActor (vendors_select USING(true))', async () => {
+    await sql`
+      insert into vendors (id, nama_vendor, jenis_layanan, pic_nama, pic_kontak, skema_biaya, tarif, created_by)
+      values (${VND_ID}, 'Vendor RLS ZZ', 'live_stream', 'PIC Vendor', '0800000000', 'per_sesi', '1000000.00', 'ZZ-ADMIN')
+      on conflict (id) do nothing`;
+
+    const claims = JSON.stringify({ app_metadata: { vendor_id: VND_ID } });
+    const me = await withClaims(sql, claims, (tx) => getVendorMe(tx, vendorActor(VND_ID)));
+    expect(me).toEqual({ vendor_id: VND_ID, nama_vendor: 'Vendor RLS ZZ' });
   });
 });
 

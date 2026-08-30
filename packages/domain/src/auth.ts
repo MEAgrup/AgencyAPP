@@ -45,6 +45,11 @@ export class NotFoundError extends Error {
   }
 }
 
+/** LT-61: an employee Actor called a vendor-only surface (`GET /vendor/me`,
+ *  `GET /vendor/briefs`). Distinct from `NotFoundError`: the session itself is
+ *  valid, it is simply the wrong realm for this endpoint. */
+export const MSG_NOT_VENDOR_ACCOUNT = '[akun ini bukan akun vendor]';
+
 /**
  * getMe reads the actor's active employee row and combines it with the role
  * already resolved from the JWT claims. Only active employees resolve — a
@@ -60,6 +65,36 @@ export async function getMe(sql: Queryable, actor: Actor): Promise<Me> {
     throw new NotFoundError();
   }
   return { employee: rows[0], role: actor.role };
+}
+
+/**
+ * Vendor profile as returned on the vendor `/me` surface (LT-61 FE). Kept
+ * snake_case for the same reason as `MeEmployee` — this IS the public wire
+ * contract, not a domain shape @/lib/wire.ts translates. Deliberately narrow:
+ * `vendors.catatan_kinerja` is MEA-internal performance notes about the
+ * vendor (M6A §7) and must never reach the vendor whose performance it
+ * describes.
+ */
+export interface VendorMe {
+  vendor_id: string;
+  nama_vendor: string;
+}
+
+/**
+ * getVendorMe reads the calling vendor's own profile (LT-61). Unlike `getMe`,
+ * no separate active-account check is needed here: `vendor_claims` (migration
+ * 20260903010000) already omits the JWT's `vendor_id` claim entirely for a
+ * `vendor_accounts.status_aktif = false` account, so a deactivated vendor
+ * never resolves to a vendor Actor in the first place (see
+ * `apps/api/src/lib/auth.ts` `requireActor`).
+ */
+export async function getVendorMe(sql: Queryable, actor: Actor): Promise<VendorMe> {
+  const rows = await sql<{ id: string; nama_vendor: string }[]>`
+    select id, nama_vendor from vendors where id = ${actor.vendorId ?? actor.employeeId}`;
+  if (rows.length === 0) {
+    throw new NotFoundError();
+  }
+  return { vendor_id: rows[0].id, nama_vendor: rows[0].nama_vendor };
 }
 
 // ---------------------------------------------------------------------------

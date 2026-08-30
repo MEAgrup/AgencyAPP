@@ -813,6 +813,49 @@ export async function listVendorSessions(sql: Queryable, actor: Actor): Promise<
   return rows.map((r) => scanSession(r).session);
 }
 
+/** One open Live Stream Brief a vendor may create a new Session under (LT-61 FE). */
+export interface VendorBrief {
+  id: string;
+  clientToko: string;
+}
+
+/**
+ * listVendorBriefs (LT-61 FE) — every Live Stream Brief the calling vendor Actor
+ * may create a new Session under via the existing `POST /briefs/{id}/sessions`.
+ *
+ * Solves a discovery gap the FE-only work surfaces: the vendor has
+ * `listVendorSessions` for its own Sessions, but a Session does not exist
+ * until a Brief id is known, and a vendor has no other way to learn one
+ * (HANDOFF_LT61_CORE_SELESAI_FE_VENDOR_20260830.md §3.2). Read-only; no new
+ * write scope. A Brief qualifies when it is open for new Sessions
+ * (`assigned_division = Live Stream`, `status = [Dispatched to Vendor]` —
+ * `createSession`'s own gate, MSG_BRIEF_NOT_OPEN) AND `resolveLiveVendorId`
+ * — the SAME client-vendor resolution `createSession` itself uses — picks
+ * this vendor. Reusing that resolver (rather than a second query) keeps this
+ * list from ever showing a Brief `createSession` would then reject.
+ */
+export async function listVendorBriefs(sql: Queryable, actor: Actor): Promise<VendorBrief[]> {
+  const vendorId = actor.vendorId;
+  if (!vendorId) {
+    return [];
+  }
+  const rows = await sql<{ id: string; client_id: string; toko: string }[]>`
+    select b.id, c.id as client_id, c.toko
+    from briefs b
+    join services sv on sv.id = b.service_id
+    join clients c on c.id = sv.client_id
+    where b.assigned_division = ${LIVE_STREAM_DIVISION} and b.status = ${BRIEF_VENDOR_DISPATCHED}
+    order by b.id desc`;
+  const out: VendorBrief[] = [];
+  for (const r of rows) {
+    const resolved = await resolveLiveVendorId(sql, r.client_id);
+    if (resolved === vendorId) {
+      out.push({ id: r.id, clientToko: r.toko });
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers.
 // ---------------------------------------------------------------------------

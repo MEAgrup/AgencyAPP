@@ -13,7 +13,7 @@
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { permission } from '@cdps/core';
-import { createClient, type Sql } from '@cdps/db';
+import { createClient, withClaims, type Sql } from '@cdps/db';
 import { leads, sales } from './index';
 import {
   BRIEF_APPROVED,
@@ -38,6 +38,7 @@ import {
   flagDiscrepancy,
   getSession,
   listBriefSessions,
+  listVendorBriefs,
   listVendorSessions,
   logResults,
   reconcile,
@@ -559,5 +560,68 @@ describeDb('LT-61: vendor self-service (create / confirm / results — never rec
     expect(mine.map((x) => x.id)).toEqual([s.id]);
     expect(await listVendorSessions(sql, vendorActor('ZZ-VND-OTHER'))).toEqual([]);
     expect(await listVendorSessions(sql, am())).toEqual([]); // an employee Actor is never a vendor
+  });
+});
+
+describeDb('listVendorBriefs (LT-61 FE — §3.2 discovery gap)', () => {
+  it('lists an open Live Stream Brief the vendor is assigned to, with the client name', async () => {
+    const { briefId, clientId } = await dispatchedBriefWithClient();
+    const vendorId = await seedLiveVendor(clientId);
+
+    const rows = await listVendorBriefs(sql, vendorActor(vendorId));
+    expect(rows).toEqual([{ id: briefId, clientToko: 'Alpha Digital' }]);
+  });
+
+  it('excludes a Brief already [Approved] — createSession would reject it anyway (MSG_BRIEF_NOT_OPEN)', async () => {
+    const clientId = await closedClient();
+    const vendorId = await seedLiveVendor(clientId);
+    await seedLsBrief(clientId, BRIEF_APPROVED);
+
+    expect(await listVendorBriefs(sql, vendorActor(vendorId))).toEqual([]);
+  });
+
+  it('excludes a Brief whose division is not Live Stream, even on a client the vendor is assigned to', async () => {
+    const clientId = await closedClient();
+    const vendorId = await seedLiveVendor(clientId);
+    await seedLsBrief(clientId, BRIEF_VENDOR_DISPATCHED, 'KOL');
+
+    expect(await listVendorBriefs(sql, vendorActor(vendorId))).toEqual([]);
+  });
+
+  it('excludes a Brief assigned to a DIFFERENT vendor', async () => {
+    const { clientId } = await dispatchedBriefWithClient();
+    await seedLiveVendor(clientId);
+
+    expect(await listVendorBriefs(sql, vendorActor('ZZ-VND-OTHER'))).toEqual([]);
+  });
+
+  it('returns [] for an employee Actor — never a vendor', async () => {
+    const { clientId } = await dispatchedBriefWithClient();
+    await seedLiveVendor(clientId);
+
+    expect(await listVendorBriefs(sql, am())).toEqual([]);
+  });
+
+  /** LT-61 FE — a vendor claim envelope, matching apps/api `actorClaims`. */
+  const vendorClaims = (vendorId: string): string => JSON.stringify({ app_metadata: { vendor_id: vendorId } });
+
+  it('would come back spuriously EMPTY under RLS (readAsActor) — why the route uses db() instead (see route file)', async () => {
+    // `briefs`/`services`/`clients`/`strategi`/`strategi_pillar` all key their
+    // SELECT policy off an EMPLOYEE claim (jwt_employee_id()/jwt_division()/
+    // jwt_is_lead()); a vendor JWT carries only vendor_id, so none of them ever
+    // evaluate true for it — even for a vendor legitimately assigned to the
+    // Brief. This is the same class of gap the recap.ts `db()` precedent
+    // documents (DECISIONS.md 2026-08-14, M6D D-09b): a read model that gates
+    // fully in TS and touches a sub-table RLS was never taught about it.
+    const { briefId, clientId } = await dispatchedBriefWithClient();
+    const vendorId = await seedLiveVendor(clientId);
+
+    const underRls = await withClaims(sql, vendorClaims(vendorId), (tx) => listVendorBriefs(tx, vendorActor(vendorId)));
+    expect(underRls).toEqual([]); // the gap — NOT the desired behavior
+
+    // The same call over the privileged connection (what apps/api/src/app/api/v1/
+    // vendor/briefs/route.ts actually does via db()) sees it correctly.
+    const privileged = await listVendorBriefs(sql, vendorActor(vendorId));
+    expect(privileged).toEqual([{ id: briefId, clientToko: 'Alpha Digital' }]);
   });
 });
