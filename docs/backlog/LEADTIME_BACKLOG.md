@@ -18,7 +18,7 @@
 | 2b | Metrik kecepatan + skor AM | ✅ SELESAI (Akun A) |
 | 3 | Ads | ✅ SELESAI (Akun B) |
 | 4 | `REQ-` + AI Optimizer | ✅ SELESAI (Akun B) |
-| 5 | Portal vendor Live | (a) ✅ SELESAI · (b) ✅ SELESAI (core) — FE vendor belum dibangun |
+| 5 | Portal vendor Live | (a) ✅ SELESAI · (b) ✅ SELESAI (core + FE, 2026-08-30) |
 | 6 | Resolusi keputusan pemilik (LT-1..LT-11) | 🟡 BERJALAN — LT-1 (sebagian) / LT-3 / LT-4 / LT-5 / LT-10 / LT-11 ✅ terpasang/dikonfirmasi 2026-08-29; LT-2/LT-8 masih menunggu pemilik |
 
 ---
