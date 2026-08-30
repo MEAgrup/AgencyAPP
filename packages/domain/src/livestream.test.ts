@@ -32,11 +32,13 @@ import {
   ValidationError,
   canManageSession,
   canSeeSession,
+  canVendorWriteSession,
   confirmByVendor,
   createSession,
   flagDiscrepancy,
   getSession,
   listBriefSessions,
+  listVendorSessions,
   logResults,
   reconcile,
   reopenBrief,
@@ -60,6 +62,8 @@ const kolLead = (): Actor => ({
 });
 const od = (): Actor => ({ employeeId: 'ZZ-OD', divisi: 'Management', role: permission.makeRole({ od: true }) });
 const director = (): Actor => ({ employeeId: 'ZZ-DIR', divisi: 'Management', role: permission.makeRole({ director: true }) });
+/** LT-61: a vendor Actor — employeeId = vendorId, Role all-empty. */
+const vendorActor = (vendorId: string): Actor => ({ employeeId: vendorId, vendorId, role: permission.makeRole({}) });
 
 // ---------------------------------------------------------------------------
 // Unit: §6.1 permission predicates (no DB).
@@ -74,7 +78,7 @@ describe('§6.1 permission predicates', () => {
     expect(canManageSession(am(), null)).toBe(false); // no owner resolved
   });
 
-  it('canSeeSession: OD/Director everywhere, Account lead division-wide, owning AM', () => {
+  it('canSeeSession: OD/Director everywhere, Account lead division-wide, owning AM, LT-61 assigned vendor', () => {
     expect(canSeeSession(od(), 'ZZ-AM')).toBe(true);
     expect(canSeeSession(director(), 'ZZ-AM')).toBe(true);
     expect(canSeeSession(accountLead(), 'ZZ-AM')).toBe(true); // division-wide
@@ -82,6 +86,17 @@ describe('§6.1 permission predicates', () => {
     expect(canSeeSession(otherAm(), 'ZZ-AM')).toBe(false); // a different AM, not the owner
     expect(canSeeSession(kolLead(), 'ZZ-AM')).toBe(false); // another division's lead
     expect(canSeeSession(budi(), 'ZZ-AM')).toBe(false); // sales staff
+    expect(canSeeSession(vendorActor('VND-1'), 'ZZ-AM', 'VND-1')).toBe(true); // LT-61: assigned vendor
+    expect(canSeeSession(vendorActor('VND-2'), 'ZZ-AM', 'VND-1')).toBe(false); // a different vendor
+    expect(canSeeSession(vendorActor('VND-1'), 'ZZ-AM', null)).toBe(false); // no vendor resolved on this Session
+  });
+
+  it('canVendorWriteSession (LT-61): additive, never true for an employee Actor', () => {
+    expect(canVendorWriteSession(vendorActor('VND-1'), 'VND-1')).toBe(true);
+    expect(canVendorWriteSession(vendorActor('VND-2'), 'VND-1')).toBe(false);
+    expect(canVendorWriteSession(vendorActor('VND-1'), null)).toBe(false);
+    expect(canVendorWriteSession(director(), 'VND-1')).toBe(false); // no vendorId on an employee Actor
+    expect(canVendorWriteSession(am(), 'VND-1')).toBe(false);
   });
 });
 
@@ -148,6 +163,41 @@ async function dispatchedBrief(): Promise<string> {
   return seedLsBrief(await closedClient());
 }
 
+/** Same as `dispatchedBrief`, but also returns the client id (LT-61 vendor fixtures need it). */
+async function dispatchedBriefWithClient(): Promise<{ briefId: string; clientId: string }> {
+  const clientId = await closedClient();
+  const briefId = await seedLsBrief(clientId);
+  return { briefId, clientId };
+}
+
+/**
+ * seedLiveVendor (LT-61) gives `clientId` an Aktif Strategi with a `live` pillar
+ * assigned to a fresh `vendors` row, and returns that vendor's id —
+ * `createSession`'s `resolveLiveVendorId` reads exactly this shape. Off-machine
+ * inserts (same precedent as `seedLsBrief`): a real Strategi engine flow is not
+ * needed to prove the LT-61 wiring reads the right column.
+ */
+async function seedLiveVendor(clientId: string): Promise<string> {
+  const vendorId = `ZZ-VND-${String(Date.now()).slice(-9)}${seq++}`;
+  await sql`
+    insert into vendors (id, nama_vendor, jenis_layanan, pic_nama, pic_kontak, skema_biaya, tarif, created_by)
+    values (${vendorId}, 'Vendor Live ZZ', 'live_stream', 'PIC Vendor', '0800000000', 'per_sesi', '1000000.00', 'ZZ-ADMIN')`;
+  // strategi is keyed by (contract_id, client_id) since O57 (service_id/durasi/
+  // jendela moved to `contracts`) — a bare Strategi fixture needs one first.
+  const contractId = `ZZ-CTR-${String(Date.now()).slice(-9)}${seq++}`;
+  await sql`
+    insert into contracts (id, client_id, durasi_bulan, tanggal_mulai, tanggal_akhir, created_by)
+    values (${contractId}, ${clientId}, 6, '2026-01-01', '2026-07-01', 'ZZ-ADMIN')`;
+  const strategiId = `ZZ-STRG-${String(Date.now()).slice(-9)}${seq++}`;
+  await sql`
+    insert into strategi (id, contract_id, client_id, status, created_by)
+    values (${strategiId}, ${contractId}, ${clientId}, 'Aktif', 'ZZ-ADMIN')`;
+  await sql`
+    insert into strategi_pillar (strategi_id, jenis, vendor_id, created_by)
+    values (${strategiId}, 'live', ${vendorId}, 'ZZ-ADMIN')`;
+  return vendorId;
+}
+
 const goodRequest = {
   platform: PLATFORM_TIKTOK,
   requestedDatetime: '2026-08-01 15:00:00',
@@ -185,6 +235,9 @@ afterEach(async () => {
   await sql`delete from briefs where created_by like 'ZZ-%'`;
   await sql`delete from installments where created_by like 'ZZ-%'`;
   await sql`delete from transactions where created_by like 'ZZ-%'`;
+  // LT-61 fixtures: strategi_pillar cascades off strategi (fk ON DELETE CASCADE).
+  await sql`delete from strategi where created_by like 'ZZ-%'`;
+  await sql`delete from vendors where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from client_platforms where created_by like 'ZZ-%'`;
   await sql`delete from client_sales_allocations where created_by like 'ZZ-%'`;
@@ -413,5 +466,98 @@ describeDb('reads (§6.1)', () => {
     expect(list.map((x) => x.id)).toEqual([s1.id, s2.id].sort());
 
     await expect(getSession(sql, am(), 'LSS-000000-0000')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describeDb('LT-61: vendor self-service (create / confirm / results — never reconcile)', () => {
+  it('createSession stamps vendor_id from the client Aktif Strategi live pillar, or null when unresolved', async () => {
+    const { briefId, clientId } = await dispatchedBriefWithClient();
+    const vendorId = await seedLiveVendor(clientId);
+
+    const withVendor = await createSession(sql, am(), briefId, goodRequest);
+    expect(withVendor.vendorId).toBe(vendorId);
+
+    // A different client with no Aktif Strategi live pillar: vendor_id stays
+    // null — the pre-LT-61 path (AM-only) keeps working exactly as before.
+    const bare = await dispatchedBrief();
+    const noVendor = await createSession(sql, am(), bare, goodRequest);
+    expect(noVendor.vendorId).toBeNull();
+  });
+
+  it('the assigned vendor may create its own request once it has a Session-worthy Brief', async () => {
+    const { briefId, clientId } = await dispatchedBriefWithClient();
+    const vendorId = await seedLiveVendor(clientId);
+
+    const s = await createSession(sql, vendorActor(vendorId), briefId, goodRequest);
+    expect(s.vendorId).toBe(vendorId);
+    expect(s.status).toBe(LSS_REQUESTED);
+
+    // A DIFFERENT vendor (not assigned to this client) may not.
+    await expect(createSession(sql, vendorActor('ZZ-VND-OTHER'), briefId, goodRequest)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('the assigned vendor may confirm its own schedule and log its own results — additive to the AM path', async () => {
+    const { briefId, clientId } = await dispatchedBriefWithClient();
+    const vendorId = await seedLiveVendor(clientId);
+    const va = vendorActor(vendorId);
+
+    const s = await createSession(sql, am(), briefId, goodRequest); // AM still may create, unchanged
+    expect(s.vendorId).toBe(vendorId);
+
+    const c = await confirmByVendor(sql, va, s.id);
+    expect(c.ok).toBe(true);
+
+    const r = await logResults(sql, va, s.id, goodResult);
+    expect(r.ok).toBe(true);
+
+    const view = await getSession(sql, am(), s.id);
+    expect(view.status).toBe(LSS_COMPLETED);
+    expect(view.gmv).toBe('5000000.00');
+  });
+
+  it('a vendor NOT assigned to this Session is forbidden on confirm/results, even with a valid vendor Actor', async () => {
+    const { briefId, clientId } = await dispatchedBriefWithClient();
+    await seedLiveVendor(clientId);
+    const s = await createSession(sql, am(), briefId, goodRequest);
+
+    const stranger = vendorActor('ZZ-VND-STRANGER');
+    await expect(confirmByVendor(sql, stranger, s.id)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(logResults(sql, stranger, s.id, goodResult)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('the assigned vendor is FORBIDDEN from reconcile/flagDiscrepancy — those stay AM/Director-only by construction', async () => {
+    const { briefId, clientId } = await dispatchedBriefWithClient();
+    const vendorId = await seedLiveVendor(clientId);
+    const va = vendorActor(vendorId);
+
+    const s = await createSession(sql, am(), briefId, goodRequest);
+    await confirmByVendor(sql, va, s.id);
+    await logResults(sql, va, s.id, goodResult);
+
+    await expect(reconcile(sql, va, s.id)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(flagDiscrepancy(sql, va, s.id, 'selisih GMV')).rejects.toBeInstanceOf(ForbiddenError);
+
+    // The AM path still closes it out normally.
+    const rec = await reconcile(sql, am(), s.id);
+    expect(rec.ok).toBe(true);
+  });
+
+  it('getSession / listBriefSessions / listVendorSessions honor the vendor read scope', async () => {
+    const { briefId, clientId } = await dispatchedBriefWithClient();
+    const vendorId = await seedLiveVendor(clientId);
+    const va = vendorActor(vendorId);
+    const s = await createSession(sql, am(), briefId, goodRequest);
+
+    expect((await getSession(sql, va, s.id)).id).toBe(s.id);
+    await expect(getSession(sql, vendorActor('ZZ-VND-OTHER'), s.id)).rejects.toBeInstanceOf(ForbiddenError);
+
+    const list = await listBriefSessions(sql, va, briefId);
+    expect(list.map((x) => x.id)).toEqual([s.id]);
+    await expect(listBriefSessions(sql, vendorActor('ZZ-VND-OTHER'), briefId)).rejects.toBeInstanceOf(ForbiddenError);
+
+    const mine = await listVendorSessions(sql, va);
+    expect(mine.map((x) => x.id)).toEqual([s.id]);
+    expect(await listVendorSessions(sql, vendorActor('ZZ-VND-OTHER'))).toEqual([]);
+    expect(await listVendorSessions(sql, am())).toEqual([]); // an employee Actor is never a vendor
   });
 });

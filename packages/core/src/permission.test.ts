@@ -3,11 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
   type Actor,
   actorFromClaims,
+  actorFromVendorClaims,
   canManageAdmin,
   canReadAll,
   canReadDivision,
   canWrite,
   isLead,
+  isVendorActor,
   makeRole,
 } from './permission';
 
@@ -117,5 +119,30 @@ describe('actorFromClaims (JWT app_metadata → Actor)', () => {
     expect(() => actorFromClaims({ employee_id: '' })).toThrow(/employee_id missing/);
     expect(() => actorFromClaims(null)).toThrow(/employee_id missing/);
     expect(() => actorFromClaims(undefined)).toThrow(/employee_id missing/);
+  });
+});
+
+// LT-61: the second, structurally separate auth realm — a vendor Actor is a
+// no-op everywhere except the vendorId-aware gates in livestream.ts.
+describe('actorFromVendorClaims (LT-61 vendor JWT app_metadata → Actor)', () => {
+  it('builds a vendor Actor with employeeId=vendorId and an all-empty Role', () => {
+    const a = actorFromVendorClaims({ vendor_id: 'VND-202608-0001' });
+    expect(a).toEqual<Actor>({
+      employeeId: 'VND-202608-0001',
+      vendorId: 'VND-202608-0001',
+      role: makeRole({}),
+    });
+    expect(isVendorActor(a)).toBe(true);
+  });
+
+  it('throws when vendor_id is missing or empty (unresolved vendor actor)', () => {
+    expect(() => actorFromVendorClaims({})).toThrow(/vendor_id missing/);
+    expect(() => actorFromVendorClaims({ vendor_id: '' })).toThrow(/vendor_id missing/);
+    expect(() => actorFromVendorClaims(null)).toThrow(/vendor_id missing/);
+    expect(() => actorFromVendorClaims(undefined)).toThrow(/vendor_id missing/);
+  });
+
+  it('isVendorActor is false for a normal employee Actor', () => {
+    expect(isVendorActor(actorFromClaims({ employee_id: 'EMP-1' }))).toBe(false);
   });
 });

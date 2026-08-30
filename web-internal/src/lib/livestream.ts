@@ -52,6 +52,8 @@ import type { Role } from '@/lib/types';
 export interface Session {
   id: string;
   brief_id: string;
+  /** LT-61: the vendor entitled to self-serve this Session, or null when unresolved. */
+  vendor_id: string | null;
   platform: string;
   requested_datetime: string;
   target_duration_hours: number;

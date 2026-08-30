@@ -25,7 +25,7 @@
  * one caller's identity into the next request.
  */
 import { createClient, withClaims, type Sql, type TransactionSql } from '@cdps/db';
-import type { permission } from '@cdps/core';
+import { permission } from '@cdps/core';
 
 let client: Sql | undefined;
 
@@ -51,9 +51,17 @@ export function db(): Sql {
  * source of truth. Booleans are emitted as real JSON booleans because
  * `jwt_is_od()`/`jwt_is_director()` cast the value with `::boolean`.
  *
+ * LT-61: a vendor Actor (`permission.isVendorActor`) emits ONLY `vendor_id` —
+ * never `employee_id`/division/level/od/director — so `jwt_vendor_id()`
+ * resolves and every employee-keyed RLS predicate evaluates false/null for it,
+ * the same round-trip guarantee on the vendor realm's one claim.
+ *
  * Exported for unit testing (no DB required).
  */
 export function actorClaims(actor: permission.Actor): string {
+  if (permission.isVendorActor(actor)) {
+    return JSON.stringify({ app_metadata: { vendor_id: actor.vendorId } });
+  }
   return JSON.stringify({
     app_metadata: {
       employee_id: actor.employeeId,

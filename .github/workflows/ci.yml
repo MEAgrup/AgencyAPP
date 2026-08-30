@@ -324,16 +324,21 @@ jobs:
       # `renewal_requests`/`renewal_proposals`/`renewal_proposal_lines`,
       # 130 → 133. +1 prefix RNW (36→37, di bawah), +1 mesin (29→30, di atas).
       #
+      # 134 = 133 + vendor_accounts (20260903010000_lt61_vendor_auth.sql, LT-61:
+      #       the Live Stream vendor's Supabase Auth link table). Nol prefix baru
+      #       (auth_user_id PK) ⇒ entity_prefix TETAP 37; nol mesin baru ⇒
+      #       sm_machines TETAP 30; nol event katalog ⇒ notif_events TETAP 67.
+      #
       # ⚠️ INI GATE KEDUA UNTUK ANGKA YANG SAMA — `scripts/db-rebuild.sh` punya
       # `check "tabel public"` sendiri. Naikkan KEDUANYA dalam satu commit;
       # menaikkan salah satu saja membuat lokal hijau sementara CI merah (persis
       # yang terjadi pada PR #170).
-      - name: Verify table count (expect 133)
+      - name: Verify table count (expect 134)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 133
+          test "$n" -eq 134
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this
