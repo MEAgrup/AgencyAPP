@@ -19,6 +19,8 @@
 | B (R-03) | Domain + API renewal/cross-sell (propose/decide/resubmit/execute) | ✅ SELESAI — lihat §3 |
 | B (R-04) | UI tombol "Perpanjangan / Cross Sell" di Client Record | ✅ SELESAI — lihat §3 |
 
+**Produksi (2026-08-30):** ketujuh migrasi Kinerja Sales (`20260901010000_rls_sales_lead_scope` .. `20260902030000_renewal_notif`) DI-PUSH ke `CDPS SG` live via `apply_migration`. Gate live diverifikasi 133 tabel/37 prefix/30 mesin/67 event (cocok lokal), `get_advisors security` nol temuan baru. Uji visual browser di production BELUM dijalankan (network policy sesi Claude memblokir `*.vercel.app` — lihat `DECISIONS.md` Kinerja Sales #7); pemilik memeriksa sendiri.
+
 ---
 
 ## Stream A — Dashboard
@@ -71,7 +73,7 @@
 | Chat Pagi/Total/Sisa, Blaster, Jumlah Respon, Call | ❌ tidak dibuat — nol sumber CDPS |
 | Istilah "Seller"/"Affiliator" | ❌ tidak diperkenalkan — Qualified/Non-Qualified dipertahankan |
 | Tiering T1–T5 | ✅ KS-1 dijawab — TIDAK DIBANGUN, nilai komisi yang dihitung manual (ambang berubah per kuartal) |
-| Notifikasi renewal bernama khusus | ⏸ tidak ditambah — event catalog FROZEN (Phase 0 v2 §9); `renewal_request` mewarisi notifikasi state-machine standar |
+| Notifikasi renewal bernama khusus | ✅ **DITAMBAH kemudian** (katalog v13, `20260902030000_renewal_notif.sql`, lihat `DECISIONS.md` Kinerja Sales #6) — `m0.renewal.pending_approval`/`.decision`. Baris ini menjadi usang saat notifikasi dibangun; dibiarkan dulu tak terkoreksi sampai audit ini |
 | Role type `Sales` di M14 + skor `PERF-` | ❓ KS-4b, Open — bobot 0 mengikuti preseden LT-32/LT-33 |
 | Snapshot Level Sales per periode | ⏸ terima "level saat ini"; revisit hanya kalau level dipakai komisi/skor |
 | Sheet ketiga (`19pfVwm…`) | ✅ KS-3 dijawab — rekap per campaign, sudah tercakup `salesperf.bySource` (View 3) |
