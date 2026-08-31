@@ -21,13 +21,18 @@
  * `employeeId` holds `client_contacts.auth_user_id`, which `employees`/
  * `vendors` do not have either — checked before `auth.getMe`/`auth.getVendorMe`
  * so a client contact never hits either query.
+ *
+ * M15-C2 follow-up also adds a per-IP rate limit (spec §5.2 OQ-5,
+ * DECISIONS.md O64) — 10 attempts/IP/15min, applied UNIFORMLY across all
+ * three realms since this endpoint is shared and can't tell them apart until
+ * after GoTrue has already run. See auth.enforceLoginRateLimit's doc comment.
  */
 import { account, auth, clientPortalAuth } from '@cdps/domain';
 import { permission } from '@cdps/core';
 import { actorFromToken, sessionCookie } from '@/lib/auth';
 import { passwordGrant } from '@/lib/gotrue';
 import { db, readAsActor } from '@/lib/db';
-import { BadRequestError, handle, json, readJson, UnauthorizedError } from '@/lib/http';
+import { BadRequestError, clientIp, handle, json, readJson, UnauthorizedError } from '@/lib/http';
 
 export async function POST(request: Request): Promise<Response> {
   return handle(async () => {
@@ -37,6 +42,8 @@ export async function POST(request: Request): Promise<Response> {
     if (!email || !password) {
       throw new BadRequestError('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
     }
+
+    await auth.enforceLoginRateLimit(db(), clientIp(request));
 
     const session = await passwordGrant(email, password);
     const secret = process.env.SUPABASE_JWT_SECRET ?? '';

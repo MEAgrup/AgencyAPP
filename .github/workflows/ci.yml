@@ -356,17 +356,22 @@ jobs:
       #       adds ZERO tables. Nol prefix baru (auth_user_id PK) ⇒
       #       entity_prefix TETAP 37; nol mesin baru ⇒ sm_machines TETAP 30;
       #       nol event katalog ⇒ notif_events TETAP 67.
+      # 136 = 135 + login_rate_limit_attempts (20260906010000_login_rate_limit.sql,
+      #       M15-C2 follow-up: uniform per-IP login throttle counter, spec
+      #       §5.2 OQ-5, DECISIONS.md O64 closed). Nol prefix baru (bigserial
+      #       PK) ⇒ entity_prefix TETAP 37; nol mesin baru ⇒ sm_machines TETAP
+      #       30; nol event katalog ⇒ notif_events TETAP 67.
       #
       # ⚠️ INI GATE KEDUA UNTUK ANGKA YANG SAMA — `scripts/db-rebuild.sh` punya
       # `check "tabel public"` sendiri. Naikkan KEDUANYA dalam satu commit;
       # menaikkan salah satu saja membuat lokal hijau sementara CI merah (persis
       # yang terjadi pada PR #170).
-      - name: Verify table count (expect 135)
+      - name: Verify table count (expect 136)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 135
+          test "$n" -eq 136
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this

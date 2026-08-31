@@ -27,14 +27,21 @@ then sends the contact to `/login?reason=idle`. This is enforced at this
 app's layer only — the underlying GoTrue token TTL is unchanged (would also
 shorten the employee/vendor realms' all-day sessions).
 
-**Still not built, within the auth cluster itself**: the app-level per-IP
-rate limits on login (10/IP/15min) and the future complaint form
-(5/contact/hr + 20/IP/hr) — spec §5.2 OQ-5's numbers are decided, the
-enforcing code is follow-up work (login's shared-endpoint architecture
-— `apps/api`'s `/auth/login` serves employee/vendor/client-contact alike —
-needs a deliberate design call on how to scope a Portal-only limit before
-it's implemented; not done silently here). Login currently relies on
-GoTrue's own protections only.
+**Login rate limiting (spec §5.2, OQ-5) built** (2026-08-31 follow-up,
+`docs/DECISIONS.md` O64): 10 attempts/IP/15min, enforced in `apps/api`
+(`packages/domain/src/auth.ts` `enforceLoginRateLimit`, called from
+`POST /auth/login` before GoTrue is even reached). Applied **uniformly**
+across all three CDPS auth realms, not Portal-only — `/auth/login` is one
+shared endpoint that only knows which realm resolved AFTER GoTrue
+authenticates, so a Portal-only gate would have needed a weaker,
+spoofable header check; the owner picked the uniform, more robust option.
+Nothing to build here in `web-client-portal` itself — a 429 from this
+endpoint surfaces through the existing `ApiError`/`errorMessage()` path
+like any other login failure.
+
+**Still not built**: the complaint-form rate limit (5/contact/hr +
+20/IP/hr, spec §5.2) — waits on the complaint-form cluster itself (no
+endpoint exists yet to gate).
 
 **Deployed** (2026-08-31): Vercel project `web-client-portal` (team `meagency`), linked to this repo, root directory `web-client-portal`, same one-project-per-app pattern as `web-internal-mea`/`agency-app-api`. No env vars needed — the app only reads `BACKEND_URL`, which already falls back to the real `agency-app-api.vercel.app` in production. Live at `web-client-portal.vercel.app`; a custom domain (e.g. `portal.meagency.co.id`) is still an owner decision, not done here.
 

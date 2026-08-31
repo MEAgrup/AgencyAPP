@@ -140,6 +140,11 @@ export const MSG_OLD_PASSWORD_MISMATCH = '[password lama tidak sesuai]';
 export const MSG_SET_PASSWORD_DENIED = '[anda tidak memiliki akses untuk mengatur password karyawan ini]';
 export const MSG_EMPLOYEE_NOT_FOUND = '[karyawan tidak ditemukan]';
 
+/** NEW string — no Go precedent (Go never had per-IP login throttling). M15-C2
+ *  follow-up, spec §5.2 OQ-5, DECISIONS.md O64 (2026-08-31). */
+export const MSG_LOGIN_RATE_LIMITED =
+  '[terlalu banyak percobaan login dari alamat ini, silahkan coba lagi dalam 15 menit]';
+
 /** Password fails the length policy (carries the verbatim BI message). */
 export class PasswordPolicyError extends Error {
   constructor(message: string) {
@@ -172,6 +177,44 @@ export class EmployeeNotFoundError extends Error {
   constructor() {
     super(MSG_EMPLOYEE_NOT_FOUND);
     this.name = 'AuthEmployeeNotFoundError';
+  }
+}
+
+/** Too many login attempts from this IP within the window (→ 429). */
+export class RateLimitedError extends Error {
+  constructor() {
+    super(MSG_LOGIN_RATE_LIMITED);
+    this.name = 'AuthRateLimitedError';
+  }
+}
+
+const LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 10;
+const LOGIN_RATE_LIMIT_WINDOW_MINUTES = 15;
+
+/**
+ * enforceLoginRateLimit — spec M15-C2 §5.2 (OQ-5: 10/IP/15min), applied
+ * UNIFORMLY to every `POST /auth/login` attempt regardless of which realm
+ * ultimately resolves (employee / LT-61 vendor / M15-C2 client-contact).
+ *
+ * The spec's number was written for the Client Portal specifically, but
+ * `/auth/login` is ONE shared endpoint across all three realms, branching by
+ * resolved Actor only AFTER GoTrue authenticates — too late to gate repeated
+ * bad-password attempts per-realm. See DECISIONS.md 2026-08-31 (O64 closed)
+ * for the full reasoning: a uniform ceiling only ADDS protection for
+ * employee/vendor logins (GoTrue's own baseline still applies underneath); it
+ * never restricts a legitimate human logging in ten times in fifteen minutes.
+ *
+ * DB-backed (`check_login_rate_limit`, 20260906010000_login_rate_limit.sql),
+ * not in-memory: `apps/api` runs as Vercel serverless functions, where an
+ * in-process counter would not reliably survive between invocations.
+ */
+export async function enforceLoginRateLimit(sql: Queryable, ipAddress: string): Promise<void> {
+  const rows = await sql<{ allowed: boolean }[]>`
+    select public.check_login_rate_limit(
+      ${ipAddress}, ${LOGIN_RATE_LIMIT_MAX_ATTEMPTS}, ${LOGIN_RATE_LIMIT_WINDOW_MINUTES}
+    ) as allowed`;
+  if (rows[0]?.allowed !== true) {
+    throw new RateLimitedError();
   }
 }
 

@@ -26,6 +26,20 @@ export class BadRequestError extends Error {
   }
 }
 
+/**
+ * Best-effort client IP from Vercel's `x-forwarded-for` (left-most entry is
+ * the original client — see Vercel's proxy docs). Falls back to a fixed
+ * sentinel so a request with no header still lands in a (shared,
+ * conservative) rate-limit bucket rather than bypassing the limiter
+ * entirely. Used by the login rate limiter (M15-C2 §5.2 OQ-5); reusable for
+ * the complaint-form limiter when that surface is built.
+ */
+export function clientIp(request: Request): string {
+  const xff = request.headers.get('x-forwarded-for');
+  const first = xff?.split(',')[0]?.trim();
+  return first && first !== '' ? first : 'unknown';
+}
+
 /** JSON response helper. */
 export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -182,6 +196,9 @@ export function mapError(err: unknown): Response {
   }
   if (err instanceof BadRequestError) {
     return errorJson(err.message, 400);
+  }
+  if (err instanceof auth.RateLimitedError) {
+    return errorJson(err.message, 429);
   }
   // Unmapped throw → 500. Log the real error server-side (never in the client
   // body) so production 500s are diagnosable in the platform logs.
