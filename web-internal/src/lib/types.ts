@@ -21,6 +21,22 @@ export interface MeResponse {
   role: Role;
 }
 
+/**
+ * LT-61 — a Live Stream vendor's own profile, returned by `POST /auth/login`
+ * (vendor branch) and `GET /vendor/me`. Deliberately narrow: unlike `Employee`,
+ * there is no `role` (a vendor Actor's role is always empty — see
+ * packages/core/src/permission.ts) and no internal fields (`vendors.catatan_kinerja`
+ * is MEA-internal and never sent here).
+ */
+export interface VendorProfile {
+  vendor_id: string;
+  nama_vendor: string;
+}
+
+export interface VendorMeResponse {
+  vendor: VendorProfile;
+}
+
 export interface NotificationItem {
   id: string;
   event_type: string;

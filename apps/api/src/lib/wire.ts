@@ -1676,6 +1676,8 @@ export function scanHoursReminderResultToWire(r: creative.ScanHoursReminderResul
 export interface SessionWire {
   id: string;
   brief_id: string;
+  /** LT-61: the vendor entitled to self-serve this Session, or null when unresolved. */
+  vendor_id: string | null;
   platform: string;
   requested_datetime: string;
   target_duration_hours: number;
@@ -1701,6 +1703,7 @@ export function sessionToWire(s: livestream.Session): SessionWire {
   const w: SessionWire = {
     id: s.id,
     brief_id: s.briefId,
+    vendor_id: s.vendorId,
     platform: s.platform,
     requested_datetime: s.requestedDatetime.toISOString(),
     target_duration_hours: s.targetDurationHours,
@@ -1723,6 +1726,17 @@ export function sessionToWire(s: livestream.Session): SessionWire {
   if (s.vendorReportLink) w.vendor_report_link = s.vendorReportLink;
   if (s.reconciliationNotes) w.reconciliation_notes = s.reconciliationNotes;
   return w;
+}
+
+/** LT-61 FE — one Brief a vendor may create a new Session under. */
+export interface VendorBriefWire {
+  id: string;
+  client_toko: string;
+}
+
+/** Maps a domain VendorBrief (camelCase) to the snake_case wire shape. */
+export function vendorBriefToWire(b: livestream.VendorBrief): VendorBriefWire {
+  return { id: b.id, client_toko: b.clientToko };
 }
 
 // --- M3 Campaign (acquisition CMP-): mirror the Go module3_campaign JSON tags ---

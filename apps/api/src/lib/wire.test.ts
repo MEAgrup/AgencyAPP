@@ -506,6 +506,7 @@ describe('sessionToWire', () => {
   const base: livestream.Session = {
     id: 'LSS-202608-0001',
     briefId: 'BRF-202608-0001',
+    vendorId: null,
     platform: 'TikTok Shop Live',
     requestedDatetime: new Date('2026-08-01T15:00:00.000Z'),
     targetDurationHours: 2,
@@ -530,6 +531,7 @@ describe('sessionToWire', () => {
     expect(sessionToWire(base)).toEqual({
       id: 'LSS-202608-0001',
       brief_id: 'BRF-202608-0001',
+      vendor_id: null,
       platform: 'TikTok Shop Live',
       requested_datetime: '2026-08-01T15:00:00.000Z',
       target_duration_hours: 2,

@@ -140,10 +140,14 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "133"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "134"
 check "entity_prefix"    "select count(*) from entity_prefix"    "37"
 check "sm_machines"      "select count(*) from sm_machines"      "30"
 check "notif_events"     "select count(*) from notif_events"     "67"
+# 134 = 133 + vendor_accounts (20260903010000_lt61_vendor_auth.sql, LT-61: the
+#       Live Stream vendor's Supabase Auth link table). Nol prefix baru
+#       (auth_user_id PK, bukan PREFIX- id) ⇒ entity_prefix TETAP 37; nol mesin
+#       baru ⇒ sm_machines TETAP 30; nol event katalog ⇒ notif_events TETAP 67.
 # 133 = 130 + 3 tabel Kinerja Sales R-03 (20260902020000_renewal_request.sql):
 #       `renewal_requests` (parent) + `renewal_proposals` + `renewal_proposal_lines`
 #       (versioned line-item snapshot, pola negotiation_proposals/_lines). +1

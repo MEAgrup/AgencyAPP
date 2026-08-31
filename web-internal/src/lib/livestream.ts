@@ -52,6 +52,8 @@ import type { Role } from '@/lib/types';
 export interface Session {
   id: string;
   brief_id: string;
+  /** LT-61: the vendor entitled to self-serve this Session, or null when unresolved. */
+  vendor_id: string | null;
   platform: string;
   requested_datetime: string;
   target_duration_hours: number;
@@ -230,6 +232,28 @@ export function reopenBrief(id: string): Promise<ReopenBriefResult> {
 // gating; M10 never mutates the Brief directly except via reopenBrief above.
 export function getBrief(id: string): Promise<LiveStreamBrief> {
   return api.get<LiveStreamBrief>(`/briefs/${id}`);
+}
+
+// LT-61 FE — one open Live Stream Brief the calling vendor may create a new
+// Session under (POST /briefs/{id}/sessions). Solves the discovery gap: a
+// vendor has no Brief id in hand otherwise (see listVendorSessions below).
+export interface VendorBrief {
+  id: string;
+  client_toko: string;
+}
+
+// GET /vendor/sessions → {data: Session[]} — every Session assigned to the
+// calling vendor Actor, across all Briefs/clients (LT-61). The vendor-realm
+// counterpart to listBriefSessions, which needs a Brief id a vendor has no
+// way to already know.
+export function listVendorSessions(): Promise<{ data: Session[] }> {
+  return api.get<{ data: Session[] }>('/vendor/sessions');
+}
+
+// GET /vendor/briefs → {data: VendorBrief[]} — open Briefs the calling vendor
+// may create a new Session under (LT-61 FE).
+export function listVendorBriefs(): Promise<{ data: VendorBrief[] }> {
+  return api.get<{ data: VendorBrief[] }>('/vendor/briefs');
 }
 
 // GET /divisions/livestream/brief-queue — borrowed M6/M12 division queue (see

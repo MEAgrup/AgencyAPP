@@ -617,10 +617,20 @@ dDb('timeline kelola klien (langkah 1–3)', () => {
 
     // Register every one of the last 7 calendar days as a holiday: the elapsed
     // working-day count must collapse to zero.
+    //
+    // Bounds MUST be wib_date(now()), not current_date: working_days_between's
+    // callers (getKelolaKlienTimeline) compute d_from/d_to via wib_date (WIB =
+    // UTC+7, house rule — 20260722052710_pg_foundation.sql), while `current_date`
+    // is the session's raw (UTC) date. Those two disagree for 7 hours every day
+    // (17:00–23:59 UTC, i.e. 00:00–06:59 WIB, when WIB has already rolled to the
+    // next calendar day) — a CI run landing in that window marked the wrong last
+    // day as a holiday and left `wib_date(now())` itself as an ordinary Monday,
+    // so `hariKerja` came back 1, not 0. Caught failing in CI at 17:01–17:17 UTC
+    // (2026-08-30), reproduced locally at the same wall-clock time.
     await sql`
       insert into hari_libur (tanggal, keterangan, created_by)
       select d::date, 'CI libur', 'CI'
-        from generate_series(current_date - interval '8 days', current_date, interval '1 day') g(d)
+        from generate_series(wib_date(now()) - interval '8 days', wib_date(now()), interval '1 day') g(d)
       on conflict (tanggal) do nothing`;
     try {
       const after = await interview.getKelolaKlienTimeline(sql, OWNER, id);

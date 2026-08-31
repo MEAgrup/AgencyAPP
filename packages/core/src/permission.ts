@@ -32,6 +32,17 @@ export interface Role {
 /**
  * Authenticated employee plus resolved role, threaded through the engine and
  * handlers.
+ *
+ * `vendorId` (LT-61) marks the second, structurally separate case: a Live
+ * Stream vendor account, never an HRIS-synced employee. A vendor Actor's
+ * `employeeId` holds the vendor's own `vendors.id` (e.g. "VND-202608-0001") —
+ * merely a non-empty, human-legible, guaranteed-non-HRIS-colliding identifier
+ * for `sm_transition`/`audit_log`, which require a non-empty actor id — and
+ * `role` is always `makeRole({})` (every field empty/false). Every OTHER gate
+ * in the system keys off `role.division`/`role.director`/`role.od`/`isLead`,
+ * so a vendor Actor is a no-op everywhere except the few call sites that
+ * explicitly check `vendorId` (packages/domain/src/livestream.ts). See
+ * docs/prd/CDPS_Module10_Addendum_LT61_Vendor_Portal_Spec.md.
  */
 export interface Actor {
   employeeId: string;
@@ -40,6 +51,12 @@ export interface Actor {
   divisi?: string; // raw HRIS division
   jabatan?: string; // raw HRIS jabatan
   role: Role;
+  vendorId?: string; // LT-61: set ONLY for a Live Stream vendor Actor.
+}
+
+/** isVendorActor reports whether `a` is a vendor Actor (LT-61), not an employee. */
+export function isVendorActor(a: Actor): boolean {
+  return !!a.vendorId;
 }
 
 /** Convenience constructor filling optional fields. */
@@ -149,4 +166,24 @@ export function actorFromClaims(claims: unknown): Actor {
       director: m.director === true,
     },
   };
+}
+
+/**
+ * actorFromVendorClaims (LT-61) rebuilds a vendor Actor from the JWT
+ * `app_metadata` claim on the OTHER branch `custom_access_token_hook` can take
+ * (migration 20260903010000): a token resolved against `vendor_accounts`
+ * instead of `employees`, carrying only `vendor_id` — never `employee_id`.
+ *
+ * Throws when `vendor_id` is absent/empty, mirroring `actorFromClaims`'s
+ * unresolved-actor handling. Callers try `actorFromClaims` first and fall back
+ * to this only when that throws (see apps/api/src/lib/auth.ts requireActor) —
+ * a claim with neither key is unauthenticated either way.
+ */
+export function actorFromVendorClaims(claims: unknown): Actor {
+  const m = (claims ?? {}) as Record<string, unknown>;
+  const vendorId = typeof m.vendor_id === 'string' ? m.vendor_id : '';
+  if (vendorId === '') {
+    throw new Error('permission: app_metadata.vendor_id missing — unresolved vendor actor');
+  }
+  return { employeeId: vendorId, vendorId, role: makeRole({}) };
 }
