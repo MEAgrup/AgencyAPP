@@ -140,10 +140,17 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "134"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "135"
 check "entity_prefix"    "select count(*) from entity_prefix"    "37"
 check "sm_machines"      "select count(*) from sm_machines"      "30"
 check "notif_events"     "select count(*) from notif_events"     "67"
+# 135 = 134 + client_contacts (20260905010000_m15c2_client_portal_auth.sql,
+#       M15-C2: the Client Portal contact's Supabase Auth link table — third
+#       non-HRIS realm, same shape as vendor_accounts). The companion migration
+#       20260905020000 (admin provisioning functions) adds ZERO tables. Nol
+#       prefix baru (auth_user_id PK, bukan PREFIX- id) ⇒ entity_prefix TETAP
+#       37; nol mesin baru ⇒ sm_machines TETAP 30; nol event katalog ⇒
+#       notif_events TETAP 67.
 # 134 = 133 + vendor_accounts (20260903010000_lt61_vendor_auth.sql, LT-61: the
 #       Live Stream vendor's Supabase Auth link table). Nol prefix baru
 #       (auth_user_id PK, bukan PREFIX- id) ⇒ entity_prefix TETAP 37; nol mesin

@@ -86,17 +86,17 @@ CREATE TABLE client_contacts (
 2. **Self-service email** — kontak meminta link reset dikirim ke email terdaftar. Ini permukaan BARU untuk CDPS (belum ada jalur pengiriman email sebelumnya di codebase manapun) — pakai kapabilitas bawaan Supabase Auth (GoTrue `recover`/reset-password endpoint + SMTP terkonfigurasi di project Supabase `CDPS SG`), bukan sistem email custom. Implikasi implementasi (dicatat, bukan dikarang di sini — detail teknis SMTP/template masuk klaster kerja tersendiri): butuh SMTP provider dikonfigurasi di Supabase project settings, template email di-review sebelum go-live (Bahasa Indonesia, bukan default Inggris GoTrue), dan endpoint recover Supabase Auth sudah rate-limited bawaan olehnya (di luar §5.2 app-level).
 - Non-disclosure tetap berlaku pada kedua jalur (§5.3) — permintaan reset untuk email yang tidak terdaftar sebagai kontak aktif TIDAK membocorkan keberadaannya (Supabase Auth `recover` sudah generik secara default; jalur admin-set tinggal AM tidak pernah diberi tahu "email tidak ditemukan" secara berbeda dari "berhasil dikirim").
 
-### 3.4 Kebijakan password & lockout (OQ-10 RESOLVED — identik realm karyawan/vendor)
-**Keputusan pemilik (2026-08-31): reuse persis, tanpa pengetatan khusus.**
+### 3.4 Kebijakan password & lockout (OQ-10 RESOLVED — identik realm karyawan/vendor, DIKOREKSI saat implementasi)
+**Keputusan pemilik (2026-08-31): reuse persis, tanpa pengetatan khusus.** Ditemukan saat implementasi (klaster auth, sesi yang sama): "reuse persis" untuk **lockout** ternyata berarti **TIDAK ADA lockout kustom sama sekali** — draft OQ-10 semula menulis "5x/15menit" berdasarkan pola pra-migrasi-Supabase yang sudah tidak berlaku. `packages/domain/src/auth.ts` (realm karyawan) mendokumentasikan eksplisit: sejak login pindah ke Supabase Auth (GoTrue), lockout **sengaja tidak di-port** — GoTrue sendiri yang memegang rate limiting login, dan lockout kustom kedua "hanya akan memberi rasa aman palsu". Kolom `employee_credentials.failed_attempts`/`locked_until` adalah sisa tabel transit pra-GoTrue, tidak lagi dibaca jalur login manapun. **Client Portal mengikuti arsitektur yang sungguhan berlaku sekarang**, bukan draft yang sudah usang — lihat `DECISIONS.md` 2026-08-31 (entri klaster auth) untuk detail temuan.
 
 | Parameter | Nilai (sama seluruh realm — karyawan, vendor, Portal) |
 |---|---|
 | Panjang password | Min 8 karakter, max 72 byte (batas bcrypt) |
 | Hash | bcrypt DefaultCost (via Supabase Auth GoTrue, bukan implementasi custom) |
-| Lockout | 5 percobaan gagal berturut-turut → kunci 15 menit; sukses reset counter |
+| Lockout | **Tidak ada tabel/counter kustom** — GoTrue yang memegang rate limiting login, identik realm karyawan/vendor |
 | Enumerasi akun | `[email atau password salah]` generik — kontak nonaktif dianggap sama dengan email tidak ditemukan (§5.3) |
 
-Pertahanan tambahan untuk permukaan publik BUKAN lewat memperketat angka ini, melainkan lewat rate limit per-IP terpisah di depannya (§5.2, OQ-5).
+Pertahanan tambahan untuk permukaan publik BUKAN lewat lockout kustom, melainkan lewat rate limit per-IP terpisah di depan login (§5.2, OQ-5) — angkanya sudah diputuskan, implementasinya **BELUM** ditulis di klaster auth ini (lihat §5.2: dicatat sebagai kerja klaster berikutnya, GoTrue sendiri sudah memberi baseline non-nol untuk login sementara ini).
 
 ### 3.5 Sesi (OQ-3 RESOLVED — 4 jam idle)
 **Keputusan pemilik (2026-08-31): 4 jam idle timeout** (bukan default GoTrue sepanjang hari seperti realm karyawan/vendor — Portal adalah realm satu-satunya yang menghadap publik, jadi mendapat kebijakan TTL sendiri, bukan reuse).
@@ -141,10 +141,10 @@ Arah sebaliknya (satu kontak, banyak Client) **diputuskan pemilik tidak berlaku*
 - Pola immutability sama dengan seluruh sistem (CLAUDE.md #3): tidak ada UPDATE/DELETE pada baris audit Portal; entity_type baru diusulkan mis. `client_contact` / `client_contact_session`, mirror pola `employee_credential` di audit log internal.
 - Log akses (bukan hanya aksi tulis) bernilai forensik tinggi di realm publik — kalau terjadi kebocoran, tim harus bisa menjawab "kontak mana yang mengakses apa, kapan" tanpa harus merekonstruksi dari log server mentah.
 
-### 5.2 Rate limiting (OQ-5 RESOLVED — angka default app-level)
-**Keputusan pemilik (2026-08-31): pakai angka default yang wajar sekarang**, ditegakkan di lapisan app/DB (proyek belum punya WAF/infra jaringan) — disesuaikan lagi nanti dari data trafik nyata, bukan dikunci permanen:
-- **Login** — lockout per-akun (§3.4, 5x/15menit) DITAMBAH rate limit per-IP: **maksimal 10 percobaan per-IP per-15 menit** (lebih longgar dari lockout per-akun karena satu IP kantor/warnet klien bisa mewakili beberapa kontak sah).
-- **Form komplain** — endpoint tulis satu-satunya di realm ini: **maksimal 5 submit per-kontak per-jam** DAN **maksimal 20 submit per-IP per-jam**, plus validasi ukuran/tipe attachment (detail teknis attachment belum di-scope PRD — dicatat, bukan diasumsikan, diselesaikan saat klaster komplain form diimplementasikan).
+### 5.2 Rate limiting (OQ-5 RESOLVED — angka default app-level; implementasi BELUM ditulis)
+**Keputusan pemilik (2026-08-31): pakai angka default yang wajar sekarang**, ditegakkan di lapisan app/DB (proyek belum punya WAF/infra jaringan) — disesuaikan lagi nanti dari data trafik nyata, bukan dikunci permanen. **Angka-angka ini RESOLVED sebagai keputusan; kode penegaknya belum ditulis di klaster auth (§3) yang dibangun 2026-08-31** — dicatat sebagai kerja follow-up, bukan diam-diam dilewati:
+- **Login** — DITAMBAH rate limit per-IP: **maksimal 10 percobaan per-IP per-15 menit**. Tanpa lockout per-akun kustom sebagai lapisan lain (§3.4, dikoreksi — GoTrue yang memegang itu); baseline sementara sebelum ambang di atas ditulis adalah apa pun proteksi bawaan GoTrue.
+- **Form komplain** — endpoint tulis satu-satunya di realm ini: **maksimal 5 submit per-kontak per-jam** DAN **maksimal 20 submit per-IP per-jam**, plus validasi ukuran/tipe attachment (detail teknis attachment belum di-scope PRD — dicatat, bukan diasumsikan). Diimplementasikan bersamaan klaster complaint form (belum dibangun).
 - Kedua ambang di atas adalah **starting point**, bukan angka final selamanya — revisi berikutnya (naik/turun) cukup lewat entri `DECISIONS.md` baru begitu ada data trafik nyata, tidak perlu putaran Open Question lagi.
 
 ### 5.3 Non-disclosure keberadaan akun
@@ -188,12 +188,12 @@ Sembilan dari sepuluh OQ draft asli dijawab langsung oleh pemilik (dua putaran `
 | OQ-2 | Reset password: email self-service, atau admin/AM-only? | ✅ **Keduanya.** Admin/AM-set (selalu tersedia, nol dependensi) DAN self-service email via Supabase Auth GoTrue (permukaan baru, butuh SMTP+template — detail teknis masuk klaster implementasi). | §3.3 |
 | OQ-3 | Angka final session TTL Portal. | ✅ **4 jam, idle timeout.** Realm satu-satunya dengan TTL custom (bukan reuse default GoTrue sepanjang hari seperti karyawan/vendor). | §3.5 |
 | OQ-4 | Siapa berwenang provisioning kontak klien baru? | ✅ **AM (Client miliknya sendiri) + Account lead/Director (Client mana pun).** Gate meniru bentuk `canManageVendor` LT-61. | §3.2 |
-| OQ-5 | Nilai konkret rate limiting per-IP. | ✅ **Login: 10/IP/15menit** (di atas lockout 5x/akun). **Form komplain: 5/kontak/jam + 20/IP/jam.** App-level, starting point — revisi lanjutan cukup entri `DECISIONS.md` baru. | §5.2 |
+| OQ-5 | Nilai konkret rate limiting per-IP. | ✅ **Login: 10/IP/15menit. Form komplain: 5/kontak/jam + 20/IP/jam.** App-level, starting point. **Angka RESOLVED; implementasi belum ditulis** (follow-up, klaster auth 2026-08-31 tidak mencakupnya). | §5.2 |
 | OQ-6 | Apakah Portal menampilkan status invoice/pembayaran? | ✅ **Tidak — dikeluarkan sepenuhnya dari v1.** Klausa pengecualian M15 Rule 7 dibaca sebagai frasa sisa, bukan fitur nyata. | §4.2 |
 | OQ-7 (=O4) | Apakah `mea-client-reporting` embeddable? | ✅ **Ya, dikonfirmasi pemilik.** Opsi A (embed native) adalah arah final. | §6 |
 | OQ-8 | Mekanisme token pass-through ke `mea-client-reporting`. | ⏳ **TETAP TERBUKA** — bergantung arsitektur sistem eksternal itu, diselesaikan saat klaster embed benar-benar dikerjakan (butuh koordinasi dengan pemilik `mea-client-reporting`). Tidak memblokir klaster lain. | §6 |
 | OQ-9 | Apakah revisi draft ini cukup untuk menutup O5, atau butuh review terpisah? | ✅ **Draft yang direvisi ini cukup** — O5 ditutup dalam sesi yang sama, dicatat `DECISIONS.md` 2026-08-31. | — |
-| OQ-10 | Lockout & panjang password: reuse persis, atau diperketat? | ✅ **Reuse persis realm karyawan/vendor** — 5x/15menit, 8–72 karakter. Pertahanan tambahan lewat rate limit per-IP (OQ-5), bukan memperketat angka ini. | §3.4 |
+| OQ-10 | Lockout & panjang password: reuse persis, atau diperketat? | ✅ **Reuse persis realm karyawan/vendor** — 8–72 karakter, hash bcrypt. **Dikoreksi saat implementasi**: "reuse persis" untuk lockout berarti **nol lockout kustom** — realm karyawan sudah tidak punya itu sejak migrasi GoTrue (GoTrue sendiri memegang rate limiting login), draft awal "5x/15menit" sudah usang. Lihat `DECISIONS.md` 2026-08-31. | §3.4 |
 
 ---
 

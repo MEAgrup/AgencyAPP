@@ -92,6 +92,7 @@ export * as account from './account';
 export * as plangate from './plangate';
 export * as contract from './contract';
 export * as vendor from './vendor';
+export * as clientPortalAuth from './client-portal-auth';
 export * as strategi from './strategi';
 export * as interview from './interview';
 export * as risetAwal from './riset-awal';

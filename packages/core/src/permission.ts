@@ -43,6 +43,17 @@ export interface Role {
  * so a vendor Actor is a no-op everywhere except the few call sites that
  * explicitly check `vendorId` (packages/domain/src/livestream.ts). See
  * docs/prd/CDPS_Module10_Addendum_LT61_Vendor_Portal_Spec.md.
+ *
+ * `clientContactId`/`clientId` (M15-C2) mark the THIRD, equally separate case:
+ * a Client Portal contact, never an employee or a vendor. A client-contact
+ * Actor's `employeeId` holds `client_contacts.auth_user_id` (a uuid — client
+ * contacts have no ID-prefix registry entry, docs/M15C2_CLIENT_PORTAL_SECURITY_SPEC.md
+ * §3.1) and `role` is always `makeRole({})`, same no-op-everywhere-else
+ * property as a vendor Actor. `clientId` is the one addition neither employee
+ * nor vendor Actors carry: the Client this contact is scoped to, needed for
+ * per-Client data isolation (spec §4.3) since — unlike a vendor, which is
+ * globally one row — a Client can have MANY contacts, so "which Client" is
+ * not recoverable from `employeeId` alone.
  */
 export interface Actor {
   employeeId: string;
@@ -52,11 +63,18 @@ export interface Actor {
   jabatan?: string; // raw HRIS jabatan
   role: Role;
   vendorId?: string; // LT-61: set ONLY for a Live Stream vendor Actor.
+  clientContactId?: string; // M15-C2: set ONLY for a Client Portal contact Actor.
+  clientId?: string; // M15-C2: the Client `clientContactId` is scoped to.
 }
 
 /** isVendorActor reports whether `a` is a vendor Actor (LT-61), not an employee. */
 export function isVendorActor(a: Actor): boolean {
   return !!a.vendorId;
+}
+
+/** isClientContactActor reports whether `a` is a Client Portal contact Actor (M15-C2). */
+export function isClientContactActor(a: Actor): boolean {
+  return !!a.clientContactId;
 }
 
 /** Convenience constructor filling optional fields. */
@@ -186,4 +204,27 @@ export function actorFromVendorClaims(claims: unknown): Actor {
     throw new Error('permission: app_metadata.vendor_id missing — unresolved vendor actor');
   }
   return { employeeId: vendorId, vendorId, role: makeRole({}) };
+}
+
+/**
+ * actorFromClientContactClaims (M15-C2) rebuilds a Client Portal contact
+ * Actor from the JWT `app_metadata` claim on the THIRD branch
+ * `custom_access_token_hook` can take (migration 20260905010000): a token
+ * resolved against `client_contacts` instead of `employees`/`vendor_accounts`,
+ * carrying `client_contact_id` + `client_id` — never `employee_id`/`vendor_id`.
+ *
+ * Throws when either key is absent/empty, mirroring `actorFromClaims`/
+ * `actorFromVendorClaims`'s unresolved-actor handling. Callers try
+ * `actorFromClaims` then `actorFromVendorClaims` first and fall back to this
+ * only when both throw (see apps/api/src/lib/auth.ts requireActor) — a claim
+ * with none of the three keys is unauthenticated either way.
+ */
+export function actorFromClientContactClaims(claims: unknown): Actor {
+  const m = (claims ?? {}) as Record<string, unknown>;
+  const clientContactId = typeof m.client_contact_id === 'string' ? m.client_contact_id : '';
+  const clientId = typeof m.client_id === 'string' ? m.client_id : '';
+  if (clientContactId === '' || clientId === '') {
+    throw new Error('permission: app_metadata.client_contact_id/client_id missing — unresolved client-contact actor');
+  }
+  return { employeeId: clientContactId, clientContactId, clientId, role: makeRole({}) };
 }

@@ -16,12 +16,17 @@
  * always queried `employees` by `actor.employeeId`, which for a vendor Actor
  * holds `vendors.id` — a row that table does not have. `permission.isVendorActor`
  * is checked BEFORE `auth.getMe` runs, so a vendor never hits that query at all.
+ *
+ * M15-C2 adds a THIRD branch, same reasoning: a client-contact Actor's
+ * `employeeId` holds `client_contacts.auth_user_id`, which `employees`/
+ * `vendors` do not have either — checked before `auth.getMe`/`auth.getVendorMe`
+ * so a client contact never hits either query.
  */
-import { auth } from '@cdps/domain';
+import { account, auth, clientPortalAuth } from '@cdps/domain';
 import { permission } from '@cdps/core';
 import { actorFromToken, sessionCookie } from '@/lib/auth';
 import { passwordGrant } from '@/lib/gotrue';
-import { readAsActor } from '@/lib/db';
+import { db, readAsActor } from '@/lib/db';
 import { BadRequestError, handle, json, readJson, UnauthorizedError } from '@/lib/http';
 
 export async function POST(request: Request): Promise<Response> {
@@ -39,14 +44,25 @@ export async function POST(request: Request): Promise<Response> {
 
     let profile: unknown;
     try {
-      // Same scoped read as GET /me / GET /vendor/me: the token is already
-      // verified, so the profile lookup runs under RLS (self-read) rather than
-      // as service role.
-      profile = permission.isVendorActor(actor)
-        ? { vendor: await readAsActor(actor, (sql) => auth.getVendorMe(sql, actor)) }
-        : await readAsActor(actor, (sql) => auth.getMe(sql, actor));
+      // client_contacts is "internal murni" (zero grant to `authenticated`),
+      // so its own-profile read goes through the privileged client like the
+      // admin roster functions do — see getClientContactMe's doc comment.
+      // Employee/vendor self-reads still run under RLS (readAsActor) via
+      // auth.getMe/getVendorMe, unchanged.
+      if (permission.isClientContactActor(actor)) {
+        profile = { contact: await clientPortalAuth.getClientContactMe(db(), actor) };
+      } else if (permission.isVendorActor(actor)) {
+        profile = { vendor: await readAsActor(actor, (sql) => auth.getVendorMe(sql, actor)) };
+      } else {
+        profile = await readAsActor(actor, (sql) => auth.getMe(sql, actor));
+      }
     } catch (err) {
-      if (err instanceof auth.NotFoundError) {
+      // account.NotFoundError is what getClientContactMe throws (M15-C2) —
+      // caught alongside auth.NotFoundError (employee/vendor) so a resolved-
+      // but-gone-or-deactivated actor of ANY realm gets the same "session
+      // invalid" message here, rather than a bare 404 that reads oddly on a
+      // login attempt.
+      if (err instanceof auth.NotFoundError || err instanceof account.NotFoundError) {
         throw new UnauthorizedError('[sesi tidak valid, silahkan login kembali]');
       }
       throw err;
