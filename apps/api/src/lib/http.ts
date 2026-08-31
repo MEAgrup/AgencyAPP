@@ -55,6 +55,7 @@ export function mapError(err: unknown): Response {
     err instanceof sales.CustomTermRequiresNegotiationError ||
     err instanceof sales.AllocationTotalError ||
     err instanceof sales.TooManySalespeopleError ||
+    err instanceof sales.BadCommissionRuleError ||
     err instanceof msl.IncompleteError ||
     err instanceof finance.IncompleteError ||
     err instanceof finance.OverVerificationError ||
