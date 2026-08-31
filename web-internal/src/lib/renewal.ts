@@ -63,6 +63,13 @@ export interface RenewalDetail extends Renewal {
   lines: RenewalLine[];
 }
 
+/** GET /renewals row — cross-client, for the "Perlu Persetujuan Saya" inbox. */
+export interface RenewalListRow extends Renewal {
+  client_toko: string;
+  client_nama_pic: string;
+  proposed_by_nama: string;
+}
+
 export interface ExecuteRenewalInput {
   durasi_bulan: number;
   tanggal_mulai: string; // YYYY-MM-DD
@@ -80,6 +87,12 @@ export interface ExecuteRenewalResult {
 /** GET /clients/{id}/renewals — every renewal/cross-sell offer for this client, newest first. */
 export function listRenewals(clientId: string): Promise<Renewal[]> {
   return api.get<Renewal[]>(`/clients/${clientId}/renewals`);
+}
+
+/** GET /renewals[?status=] — every renewal/cross-sell request across clients, newest first (the "Perlu Persetujuan Saya" inbox). */
+export function listAllRenewals(status?: string): Promise<{ data: RenewalListRow[] }> {
+  const q = status ? `?status=${encodeURIComponent(status)}` : '';
+  return api.get<{ data: RenewalListRow[] }>(`/renewals${q}`);
 }
 
 /** GET /clients/{id}/renewals/{rid} — one request + its newest priced line set. */

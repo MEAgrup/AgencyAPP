@@ -14,6 +14,7 @@ import { api, errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { formatIDR } from '@/lib/money';
 import { extractStatusLabel, summarizeJson } from '@/lib/audit';
+import CommissionRuleInput from '@/components/CommissionRuleInput';
 import type { AuditEntry, MasterService } from '@/lib/types';
 import {
   MAX_SERVICES,
@@ -220,12 +221,11 @@ function ProposalLinesEditor({
                   )}
                   {custom && (
                     <td>
-                      <input
-                        aria-label={`Commission Rule baris ${idx + 1}`}
-                        placeholder="kosong = rule standar"
+                      <CommissionRuleInput
+                        idPrefix={`sales-line-${idx}`}
                         value={l.commission_rule}
                         disabled={disabled}
-                        onChange={(e) => update(idx, 'commission_rule', e.target.value)}
+                        onChange={(v) => update(idx, 'commission_rule', v)}
                       />
                     </td>
                   )}

@@ -2324,6 +2324,22 @@ export function renewalToWire(r: renewal.RenewalRequest): RenewalWire {
   };
 }
 
+/** GET /renewals row — `renewal.listRenewals`'s cross-client shape for the "Perlu Persetujuan Saya" inbox — web-internal's `RenewalListRow`. */
+export interface RenewalListRowWire extends RenewalWire {
+  client_toko: string;
+  client_nama_pic: string;
+  proposed_by_nama: string;
+}
+
+export function renewalListRowToWire(r: renewal.RenewalListRow): RenewalListRowWire {
+  return {
+    ...renewalToWire(r),
+    client_toko: r.clientToko,
+    client_nama_pic: r.clientNamaPic,
+    proposed_by_nama: r.proposedByNama,
+  };
+}
+
 /** One priced line of the newest proposal version — web-internal's `RenewalLine`. */
 export interface RenewalLineWire {
   master_service_id: string;

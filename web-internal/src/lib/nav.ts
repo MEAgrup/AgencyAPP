@@ -135,6 +135,12 @@ const ACQUISITION_LINKS: NavItem[] = [
   // already covers OD/Director (nav.ts:85-87) — the per-row scope (staff = own,
   // lead/SPV = division) is `salesperf.scopeFor`'s job, not the menu's.
   { href: '/sales/kinerja', label: 'Kinerja Sales', access: ownedBy(SALES) },
+  // "Perlu Persetujuan Saya" — Sales negotiation attempts + Renewal/Cross-Sell
+  // requests in Pending Approval, combined (owner decision 2026-08-31, scoped
+  // small on purpose — see the page's own doc comment). Both reads are
+  // RLS-scoped exactly like /sales (staff = own, lead/SPV = division-wide,
+  // OD/Director = everywhere via ownedBy), so the gate mirrors /sales' own.
+  { href: '/persetujuan', label: 'Perlu Persetujuan Saya', access: ownedBy(SALES) },
   // Hard server gate: `leads.canReadPool` (Sales any level) + `leads.leadListScope`
   // (Marketing any level, Sales lead). Every other division gets a 403, not an
   // empty list. Whether Sales STAFF should also reach the Database (M1 §9.1

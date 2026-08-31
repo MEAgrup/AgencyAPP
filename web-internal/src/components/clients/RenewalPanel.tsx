@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
+import CommissionRuleInput from '@/components/CommissionRuleInput';
 import type { Role } from '@/lib/types';
 import type { MasterService } from '@/lib/types';
 import { formatIDR } from '@/lib/money';
@@ -163,11 +164,11 @@ function LinesEditor({
                   )}
                   {custom && (
                     <td>
-                      <input
-                        aria-label={`Commission Rule baris ${idx + 1}`}
-                        placeholder="kosong = rule standar"
-                        value={l.commission_rule} disabled={disabled}
-                        onChange={(e) => update(idx, 'commission_rule', e.target.value)}
+                      <CommissionRuleInput
+                        idPrefix={`rnw-line-${idx}`}
+                        value={l.commission_rule}
+                        disabled={disabled}
+                        onChange={(v) => update(idx, 'commission_rule', v)}
                       />
                     </td>
                   )}
