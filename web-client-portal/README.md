@@ -3,9 +3,11 @@
 External-facing Client Portal for MEA Agency clients. **Not built in Sprint 0.**
 
 ## Status
-Empty shell placeholder per Sprint 0 ticket **S0-01**. Implemented in **Wave 3**
-(Module 15), only after the Client Portal security spec is written
-(Phase 0 v2 §11).
+Empty shell placeholder per Sprint 0 ticket **S0-01**. Wave 3 (Module 15) —
+prerequisites **O4** (embeddability) and **O5** (security spec) are now
+**RESOLVED** (`docs/DECISIONS.md`, 2026-08-31; final spec
+`docs/M15C2_CLIENT_PORTAL_SECURITY_SPEC.md`). Implementation has not started
+yet — this remains a shell until the first M15-C2 cluster PR lands.
 
 ## Separate auth realm (non-negotiable)
 This app is a **separate authentication realm** from the internal system:
