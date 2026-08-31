@@ -132,16 +132,18 @@ export interface BlockRequest {
 }
 
 // module12_task.PendingBlockRequest — one open request in the SPV/Lead approval
-// queue (surfaced only via /portal/team). `source` tells us which edge family to
-// call for approve/reject ("brief" -> /tasks/…, "asset" -> /assets/…).
+// queue (surfaced via /portal/team's block_queue). `source` tells us which edge
+// family to call for approve/reject ("brief" -> /tasks/…, "asset" -> /assets/…).
 export interface PendingBlockRequest {
   id: string;
   source: TaskSource;
   entity_id: string;
   division: string;
   client_id: string;
+  toko: string;
   reason: string;
   requested_by: string;
+  requested_by_nama: string;
   created_at: string;
 }
 

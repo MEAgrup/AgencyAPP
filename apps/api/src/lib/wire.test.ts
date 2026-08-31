@@ -382,12 +382,12 @@ describe('M12 task wire mappers', () => {
 
   it('pendingBlockRequestToWire maps a PendingBlockRequest', () => {
     const b: task.PendingBlockRequest = {
-      id: 'BBR-1', source: 'brief', entityId: 'BRF-1', division: 'Creative', clientId: 'CLI-1',
-      reason: 'wait', requestedBy: 'ZZ-C', createdAt: new Date('2026-07-01T00:00:00.000Z'),
+      id: 'BBR-1', source: 'brief', entityId: 'BRF-1', division: 'Creative', clientId: 'CLI-1', toko: 'Toko C',
+      reason: 'wait', requestedBy: 'ZZ-C', requestedByNama: 'Zizi', createdAt: new Date('2026-07-01T00:00:00.000Z'),
     };
     expect(pendingBlockRequestToWire(b)).toEqual({
-      id: 'BBR-1', source: 'brief', entity_id: 'BRF-1', division: 'Creative', client_id: 'CLI-1',
-      reason: 'wait', requested_by: 'ZZ-C', created_at: '2026-07-01T00:00:00.000Z',
+      id: 'BBR-1', source: 'brief', entity_id: 'BRF-1', division: 'Creative', client_id: 'CLI-1', toko: 'Toko C',
+      reason: 'wait', requested_by: 'ZZ-C', requested_by_nama: 'Zizi', created_at: '2026-07-01T00:00:00.000Z',
     });
   });
 });

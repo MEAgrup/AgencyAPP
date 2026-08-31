@@ -398,8 +398,10 @@ describe('M12 pendingBlockRequestToWire (SPV/Lead approval queue row)', () => {
     entityId: 'BRF-202607-0001',
     division: 'Creative',
     clientId: 'CLI-202607-0001',
+    toko: 'Toko Creative',
     reason: 'menunggu aset',
     requestedBy: '2409230432',
+    requestedByNama: 'Budi',
     createdAt: new Date('2026-07-19T02:00:00Z'),
   };
 
@@ -410,8 +412,10 @@ describe('M12 pendingBlockRequestToWire (SPV/Lead approval queue row)', () => {
       entity_id: 'BRF-202607-0001',
       division: 'Creative',
       client_id: 'CLI-202607-0001',
+      toko: 'Toko Creative',
       reason: 'menunggu aset',
       requested_by: '2409230432',
+      requested_by_nama: 'Budi',
       created_at: '2026-07-19T02:00:00.000Z',
     });
     expectNoCamelKeys(pendingBlockRequestToWire(full));

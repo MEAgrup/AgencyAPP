@@ -726,3 +726,27 @@ export function resolveComplaint(id: string, notes: string): Promise<TransitionR
 export function closeComplaint(id: string): Promise<TransitionResult> {
   return api.post<TransitionResult>(`/complaints/${id}/close`);
 }
+
+// ---------------------------------------------------------------------------
+// "Perlu Persetujuan Saya" (2026-08-31) — account.PendingStrategyReview.
+// ---------------------------------------------------------------------------
+
+// account.PendingStrategyReview — one Strategy & Plan waiting on Account
+// lead/Director: a fresh submission, or a pending GMV adjustment.
+export interface PendingStrategyReview {
+  strategy_id: string;
+  service_id: string;
+  client_id: string;
+  toko: string;
+  nama_pic: string;
+  status: string;
+  gmv_adjustment_status: string;
+  created_by: string;
+  created_by_nama: string;
+  created_at: string;
+}
+
+/** GET /account/strategy-reviews — every Strategy & Plan Account lead/Director may still decide on, oldest first. */
+export function listPendingStrategyReviews(): Promise<{ data: PendingStrategyReview[] }> {
+  return api.get<{ data: PendingStrategyReview[] }>('/account/strategy-reviews');
+}

@@ -577,3 +577,26 @@ export function listKolBriefQueue(): Promise<{ data: Brief[] }> {
 // PATCH is not exposed by lib/api.ts (only get/post/put/delete). M9 has no
 // PATCH endpoint in scope (m9 brief "TIDAK TERSEDIA" #5 — Booking base fields
 // are immutable after create), so no local patch() helper is needed here.
+
+// ---------------------------------------------------------------------------
+// "Perlu Persetujuan Saya" (2026-08-31) — kol.PendingEscalation.
+// ---------------------------------------------------------------------------
+
+// kol.PendingEscalation — one Booking in [Escalated - Creator Unresponsive].
+export interface PendingEscalation {
+  booking_id: string;
+  brief_id: string;
+  client_id: string;
+  toko: string;
+  creator_name: string;
+  division: string;
+  coordinator: string;
+  coordinator_nama: string;
+  owner_am: string;
+  updated_at: string;
+}
+
+/** GET /kol/escalations — every Booking in [Escalated - Creator Unresponsive], oldest first. */
+export function listPendingEscalations(): Promise<{ data: PendingEscalation[] }> {
+  return api.get<{ data: PendingEscalation[] }>('/kol/escalations');
+}

@@ -197,6 +197,56 @@ export function canManageBooking(actor: Actor): boolean {
   return permission.isLead(actor, KOL_DIVISION);
 }
 
+/** One Booking sitting in [Escalated - Creator Unresponsive], waiting on continue/drop. */
+export interface PendingEscalation {
+  bookingId: string;
+  briefId: string;
+  clientId: string;
+  toko: string;
+  creatorName: string;
+  division: string;
+  coordinator: string;
+  coordinatorNama: string;
+  ownerAm: string;
+  updatedAt: Date;
+}
+
+/**
+ * pendingEscalations lists every Booking in [Escalated - Creator Unresponsive],
+ * oldest first — the "Perlu Persetujuan Saya" queue for whoever may resolve it
+ * (`canContinueEscalation`'s set: the owning AM, the assigned Coordinator, KOL
+ * Team Leader, or Director; §10.1 / M9-OA-6). `creator_bookings_select` RLS has
+ * no division-lead arm (only the assigned coordinator / creator / read-all),
+ * so this reads unscoped and filters in TS — same posture as
+ * `task.pendingBlockRequests`.
+ */
+export async function pendingEscalations(sql: Queryable, actor: Actor): Promise<PendingEscalation[]> {
+  const rows = await sql<{
+    id: string; brief_id: string; client_id: string; toko: string; creator_name: string;
+    division: string; coordinator: string | null; coordinator_nama: string | null;
+    owner_am: string | null; updated_at: Date;
+  }[]>`
+    select cb.id, cb.brief_id, sv.client_id, c.toko, cb.creator_name, b.assigned_division as division,
+           cb.assigned_coordinator as coordinator, co.nama as coordinator_nama,
+           c.assigned_am_id as owner_am, cb.updated_at
+      from creator_bookings cb
+      join briefs b on b.id = cb.brief_id
+      join services sv on sv.id = b.service_id
+      join clients c on c.id = sv.client_id
+      left join employees co on co.employee_id = cb.assigned_coordinator
+     where cb.status = ${BKG_ESCALATED}
+     order by cb.updated_at asc, cb.id asc`;
+  return rows
+    .filter((r) => canContinueEscalation(actor, {
+      division: r.division, coordinator: r.coordinator ?? '', ownerAm: r.owner_am ?? '',
+    }))
+    .map((r) => ({
+      bookingId: r.id, briefId: r.brief_id, clientId: r.client_id, toko: r.toko, creatorName: r.creator_name,
+      division: r.division, coordinator: r.coordinator ?? '', coordinatorNama: r.coordinator_nama ?? r.coordinator ?? '',
+      ownerAm: r.owner_am ?? '', updatedAt: r.updated_at,
+    }));
+}
+
 /** canLogHours: the assigned Coordinator, the KOL lead, or Director. */
 export function canLogHours(actor: Actor, r: { coordinator: string }): boolean {
   if (actor.role.director) {
