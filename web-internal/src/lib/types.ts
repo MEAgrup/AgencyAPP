@@ -64,6 +64,21 @@ export interface AdminEmployee {
 }
 
 /**
+ * One row of the admin vendor-account screen (LT-61 follow-up) — a vendor
+ * joined to its login, if any. `status_aktif: null` (not `false`) means the
+ * vendor has never been provisioned an account at all.
+ */
+export interface VendorAccount {
+  vendor_id: string;
+  nama_vendor: string;
+  auth_user_id: string | null;
+  email: string | null;
+  status_aktif: boolean | null;
+  created_at: string | null;
+  created_by: string | null;
+}
+
+/**
  * One row of GET /employees/assignable — the payload of every assignment
  * dropdown (AM, Brief/Task/Asset PIC, Booking Coordinator).
  *

@@ -5,10 +5,13 @@
 > minimum for Module 15's Client Portal). Raised by
 > `docs/handoff/HANDOFF_LT60_SELESAI_LT61_SPEC_20260830.md`.
 
-**Status: IMPLEMENTED (core + FE) 2026-08-30.** Auth realm, data model, and the
-`packages/domain`/`apps/api` write/read gates are built and tested (§9). The
-vendor-facing FE (`web-internal` `/vendor/*` route group) is now built too —
-see §5/§8 and `docs/handoff/HANDOFF_LT61_CORE_SELESAI_FE_VENDOR_20260830.md`.
+**Status: IMPLEMENTED (core + FE + admin provisioning UI) 2026-08-30.** Auth
+realm, data model, and the `packages/domain`/`apps/api` write/read gates are
+built and tested (§9). The vendor-facing FE (`web-internal` `/vendor/*` route
+group) is built — see §5/§8 and
+`docs/handoff/HANDOFF_LT61_CORE_SELESAI_FE_VENDOR_20260830.md`. The admin
+provisioning screen (`web-internal` `admin/vendor-accounts`) originally
+deferred in §7/§8 is now built too — see §7.
 
 ## 0. Scope decisions (owner)
 
@@ -165,15 +168,29 @@ log results** — everything up to `[Completed]`, never reconciliation:
 
 ## 7. Provisioning
 
-- Per round-2 decision #4: manual `INSERT INTO vendor_accounts` (pairing a
-  Supabase Auth user, created via the Dashboard or the Admin API, with a
-  `vendors.id`). No admin screen — revisit only if vendor count stops being
-  tiny.
+- **Superseded 2026-08-30 (owner):** the original decision below no longer
+  holds — vendor count grew past "tiny", the condition it was contingent on.
+  An admin screen is now built: `web-internal` `admin/vendor-accounts`
+  (Account lead / Director write, OD read), backed by three new SECURITY
+  DEFINER SQL functions (`supabase/migrations/20260904010000_lt61_vendor_account_admin_ui.sql`):
+  `provision_vendor_account` (mints `auth.users`+`auth.identities`, same shape
+  as `import_employee_credentials` — still the only path available, since
+  `apps/api` has no service-role key), `set_vendor_account_status` (mirrors
+  `set_employee_banned`), `list_vendor_accounts` (privileged read, joins
+  `auth.users.email`). One active account per vendor at a time
+  (`uq_vendor_accounts_active_vendor`); deactivating frees the vendor for
+  re-provisioning, the old row stays for history. See `DECISIONS.md`
+  2026-08-30 ("LT-61 follow-up — admin UI for vendor account provisioning")
+  for the full rationale.
+- ~~Original decision (round 2, 2026-08-30): manual `INSERT INTO
+  vendor_accounts` (pairing a Supabase Auth user, created via the Dashboard or
+  the Admin API, with a `vendors.id`). No admin screen — revisit only if
+  vendor count stops being tiny.~~
 
 ## 8. What was NOT built (explicitly out of scope)
 
-- An admin UI for vendor account provisioning (§7).
-- Solving the multi-vendor-per-client case (§2).
+- ~~An admin UI for vendor account provisioning~~ — **built 2026-08-30, see §7.**
+- Solving the multi-vendor-per-client case (§2) — still not built.
 
 ## 9. Built (reference)
 
