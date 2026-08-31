@@ -18,13 +18,23 @@ embedded report (`mea-client-reporting` — OQ-8, token pass-through mechanism
 still open), and the complaint submission form. `(portal)/page.tsx` is a
 placeholder landing page until those land.
 
-**Also not yet built, within the auth cluster itself**: the app-level per-IP
+**4-hour idle session TTL (spec §3.5) built** (`src/lib/idle-timeout.ts`,
+wired into `api.ts`/`portal-auth-context.tsx`/`(portal)/layout.tsx`): every
+API call records activity in `localStorage`; the portal shell checks on
+mount and every minute after, and past 4 idle hours calls a real logout
+(revokes the GoTrue session server-side, not just a client-side redirect)
+then sends the contact to `/login?reason=idle`. This is enforced at this
+app's layer only — the underlying GoTrue token TTL is unchanged (would also
+shorten the employee/vendor realms' all-day sessions).
+
+**Still not built, within the auth cluster itself**: the app-level per-IP
 rate limits on login (10/IP/15min) and the future complaint form
 (5/contact/hr + 20/IP/hr) — spec §5.2 OQ-5's numbers are decided, the
-enforcing code is follow-up work. Login currently relies on GoTrue's own
-protections only. Also not built: the 4-hour idle session TTL (spec §3.5) —
-sessions currently follow the project-wide GoTrue default, same as every
-other realm, until this app's own idle-timeout mechanism is added.
+enforcing code is follow-up work (login's shared-endpoint architecture
+— `apps/api`'s `/auth/login` serves employee/vendor/client-contact alike —
+needs a deliberate design call on how to scope a Portal-only limit before
+it's implemented; not done silently here). Login currently relies on
+GoTrue's own protections only.
 
 **Infra prerequisites NOT satisfiable from this repo** (owner action):
 self-service email reset needs SMTP configured on the Supabase project
@@ -43,9 +53,9 @@ employee-local realm and the LT-61 vendor realm) — `client_contacts`
   part of the HRIS employee sync used by `web-internal` / the CDPS backend
   (`docs/HRIS_API_CONTRACT.md`, Phase 0 v2 §8).
 - Session TTL is a custom 4-hour idle timeout (spec §3.5) — NOT the
-  project-wide GoTrue default every other realm uses. That enforcement lives
-  at this app's layer, not yet implemented (tracked as follow-up work; the
-  auth cluster itself does not need it to function correctly today).
+  project-wide GoTrue default every other realm uses. Enforced at this app's
+  layer (`src/lib/idle-timeout.ts`), never a change to the shared GoTrue
+  project TTL.
 - Data access is a **strict per-Client allow-list** enforced at the query layer
   (Module 15 §6.1) — **never** a permission-trimmed view of internal data.
   This applies to the surfaces not yet built (Service Progress, Health,

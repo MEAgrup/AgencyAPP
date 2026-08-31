@@ -5,6 +5,8 @@
 // Next apps with no shared build today; if a third realm needs the same
 // wrapper, extracting a shared `@cdps/web-client` package becomes worth it.
 
+import { touchActivity } from './idle-timeout';
+
 const API_BASE = '/api/v1';
 
 export class ApiError extends Error {
@@ -28,6 +30,9 @@ function errorBody(body: unknown): string | null {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  // Every API call counts as contact activity (spec §3.5 idle timeout) —
+  // recorded here rather than at each call site so no caller can forget it.
+  touchActivity();
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {

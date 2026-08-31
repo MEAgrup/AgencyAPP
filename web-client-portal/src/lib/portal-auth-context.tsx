@@ -11,6 +11,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api } from '@/lib/api';
+import { clearActivity } from '@/lib/idle-timeout';
 import type { ClientContactMeResponse, ClientContactProfile } from '@/lib/types';
 
 interface PortalAuthState {
@@ -103,6 +104,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setContact(null);
       writeCachedContact(null);
+      clearActivity();
     }
   }, []);
 
