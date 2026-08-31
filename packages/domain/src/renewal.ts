@@ -211,6 +211,46 @@ export async function listRenewalsForClient(sql: Queryable, actor: Actor, client
   return rows.map(rowToRenewal);
 }
 
+/** One `renewal_requests` row plus the client display fields the "Perlu Persetujuan Saya" inbox needs. */
+export interface RenewalListRow extends RenewalRequest {
+  clientToko: string;
+  clientNamaPic: string;
+  proposedByNama: string;
+}
+
+interface RenewalListSqlRow extends RenewalRow {
+  toko: string;
+  nama_pic: string;
+  proposed_by_nama: string;
+}
+
+/**
+ * listRenewals returns renewal/cross-sell requests ACROSS every client, newest
+ * first, optionally narrowed to one status — mirrors `sales.listAttempts`'s
+ * shape exactly: row-scope is RLS's job (`renewal_requests_select`, Sales
+ * lead/Director see division/everywhere), the status filter is not. Unlike
+ * `listRenewalsForClient` (one client, TS-gated by that client's Sales PIC),
+ * this has no single client to gate on, so it leans on RLS the same way
+ * `listAttempts` does — built for the "Perlu Persetujuan Saya" inbox, which
+ * needs every request pending a decision, not one client at a time.
+ */
+export async function listRenewals(sql: Queryable, filter: { status?: string } = {}): Promise<RenewalListRow[]> {
+  const status = filter.status?.trim() ?? '';
+  const rows = await sql<RenewalListSqlRow[]>`
+    select r.*, c.toko, c.nama_pic, coalesce(e.nama, r.proposed_by) as proposed_by_nama
+    from renewal_requests r
+    join clients c on c.id = r.client_id
+    left join employees e on e.employee_id = r.proposed_by
+    where (${status} = '' or r.status = ${status})
+    order by r.created_at desc, r.id desc`;
+  return rows.map((r) => ({
+    ...rowToRenewal(r),
+    clientToko: r.toko,
+    clientNamaPic: r.nama_pic,
+    proposedByNama: r.proposed_by_nama,
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Proposal — pricing reused VERBATIM from sales.ts (resolveProposalLine).
 // ---------------------------------------------------------------------------

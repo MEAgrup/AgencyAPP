@@ -354,6 +354,7 @@ const WIRE_TO_FE: Record<string, string> = {
   RenewalWire: 'renewal.ts::Renewal',
   RenewalLineWire: 'renewal.ts::RenewalLine',
   RenewalDetailWire: 'renewal.ts::RenewalDetail',
+  RenewalListRowWire: 'renewal.ts::RenewalListRow',
   // A REQUEST body, not a response — the only one in `wire.ts` with a named
   // interface, because three routes share its mapper (`toProposalLines`). It is
   // registered rather than exempted: the mechanical check is exactly the right one
