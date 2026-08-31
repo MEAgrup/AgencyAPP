@@ -36,6 +36,8 @@ needs a deliberate design call on how to scope a Portal-only limit before
 it's implemented; not done silently here). Login currently relies on
 GoTrue's own protections only.
 
+**Deployed** (2026-08-31): Vercel project `web-client-portal` (team `meagency`), linked to this repo, root directory `web-client-portal`, same one-project-per-app pattern as `web-internal-mea`/`agency-app-api`. No env vars needed — the app only reads `BACKEND_URL`, which already falls back to the real `agency-app-api.vercel.app` in production. Live at `web-client-portal.vercel.app`; a custom domain (e.g. `portal.meagency.co.id`) is still an owner decision, not done here.
+
 **Infra prerequisites NOT satisfiable from this repo** (owner action):
 self-service email reset needs SMTP configured on the Supabase project
 (`CDPS SG`) plus the `web-client-portal` deploy URL added to the project's
