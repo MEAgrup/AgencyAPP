@@ -1,0 +1,206 @@
+/* Same token/primitive set as web-internal/src/app/globals.css (subset — only
+   what this app's pages actually use), so the Client Portal reads as the same
+   product family without sharing a build. Keep values in sync by hand if the
+   internal app's palette changes. */
+
+:root {
+  --color-bg: #f4f5f7;
+  --color-surface: #ffffff;
+  --color-border: #e1e4ea;
+  --color-text: #1c2130;
+  --color-text-muted: #6b7280;
+  --color-primary: #2f5fda;
+  --color-primary-dark: #24469f;
+  --color-primary-bg: #eaf0fe;
+  --color-danger: #c0392b;
+  --color-danger-bg: #fdecea;
+  --color-success: #1f8a4c;
+  --color-success-bg: #e7f7ee;
+
+  --badge-amber-bg: #fef3d6;
+  --badge-amber-fg: #92620a;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  min-height: 100%;
+  color: var(--color-text);
+  background: var(--color-bg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+h1, h2, h3, h4 {
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+h1 { font-size: 22px; }
+h2 { font-size: 18px; }
+h3 { font-size: 15px; }
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.pageLoading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  color: var(--color-text-muted);
+}
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  padding: 20px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.btnPrimary {
+  background: var(--color-primary);
+  color: #fff;
+}
+.btnPrimary:hover:not(:disabled) {
+  background: var(--color-primary-dark);
+}
+
+.btnSecondary {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+.btnSecondary:hover:not(:disabled) {
+  background: var(--color-bg);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.field input {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.field input:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.alert {
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid transparent;
+}
+
+.alertError {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border-color: #f3c6c0;
+}
+
+.alertSuccess {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border-color: #bfe8cf;
+}
+
+.alertInfo {
+  background: var(--color-primary-bg);
+  color: var(--color-primary-dark);
+  border-color: #cfdcfb;
+}
+
+.alertWarning {
+  background: var(--badge-amber-bg);
+  color: var(--badge-amber-fg);
+  border-color: #f2dda6;
+}
+
+.muted {
+  color: var(--color-text-muted);
+}

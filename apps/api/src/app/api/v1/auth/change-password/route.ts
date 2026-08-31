@@ -20,8 +20,16 @@
  *
  * Not blocked by the forced-change gate — a user who MUST change their password
  * has to be able to reach exactly this endpoint.
+ *
+ * M15-C2: a client-contact Actor branches the same way the login route does
+ * — `getClientContactMe` (privileged read, `client_contacts` is internal
+ * murni) instead of `auth.getMe`, and `clearClientContactMustChangePassword`
+ * instead of `auth.clearMustChangePassword`. The GoTrue exchange itself
+ * (re-grant with old password, `updatePassword`) is realm-agnostic and
+ * unchanged — it is the same GoTrue user record either way.
  */
-import { auth } from '@cdps/domain';
+import { auth, clientPortalAuth } from '@cdps/domain';
+import { permission } from '@cdps/core';
 import { requireActor, sessionCookie } from '@/lib/auth';
 import { db, readAsActor } from '@/lib/db';
 import { passwordGrant, updatePassword } from '@/lib/gotrue';
@@ -41,8 +49,10 @@ export async function POST(request: Request): Promise<Response> {
     auth.validatePassword(newPassword);
 
     // The grant needs the email; the JWT carries only claims, so read the profile.
-    const me = await readAsActor(actor, (sql) => auth.getMe(sql, actor));
-    const email = me.employee.email;
+    const isContact = permission.isClientContactActor(actor);
+    const email = isContact
+      ? (await clientPortalAuth.getClientContactMe(db(), actor)).email
+      : (await readAsActor(actor, (sql) => auth.getMe(sql, actor))).employee.email;
 
     let session;
     try {
@@ -54,7 +64,11 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     await updatePassword(session.access_token, newPassword);
-    await auth.clearMustChangePassword(db(), actor);
+    if (isContact) {
+      await clientPortalAuth.clearClientContactMustChangePassword(db(), actor);
+    } else {
+      await auth.clearMustChangePassword(db(), actor);
+    }
 
     // Re-grant so the browser leaves with a cookie minted from the NEW password.
     let fresh;

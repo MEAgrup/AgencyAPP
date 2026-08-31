@@ -3,11 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
   type Actor,
   actorFromClaims,
+  actorFromClientContactClaims,
   actorFromVendorClaims,
   canManageAdmin,
   canReadAll,
   canReadDivision,
   canWrite,
+  isClientContactActor,
   isLead,
   isVendorActor,
   makeRole,
@@ -144,5 +146,40 @@ describe('actorFromVendorClaims (LT-61 vendor JWT app_metadata → Actor)', () =
 
   it('isVendorActor is false for a normal employee Actor', () => {
     expect(isVendorActor(actorFromClaims({ employee_id: 'EMP-1' }))).toBe(false);
+  });
+});
+
+// M15-C2: the third, structurally separate auth realm — a client-contact
+// Actor is a no-op everywhere except the isClientContactActor-aware gates.
+describe('actorFromClientContactClaims (M15-C2 client-contact JWT app_metadata → Actor)', () => {
+  it('builds a client-contact Actor with employeeId=clientContactId, clientId set, and an all-empty Role', () => {
+    const a = actorFromClientContactClaims({
+      client_contact_id: '11111111-1111-1111-1111-111111111111',
+      client_id: 'CLI-202608-0001',
+    });
+    expect(a).toEqual<Actor>({
+      employeeId: '11111111-1111-1111-1111-111111111111',
+      clientContactId: '11111111-1111-1111-1111-111111111111',
+      clientId: 'CLI-202608-0001',
+      role: makeRole({}),
+    });
+    expect(isClientContactActor(a)).toBe(true);
+  });
+
+  it('throws when client_contact_id or client_id is missing or empty', () => {
+    expect(() => actorFromClientContactClaims({})).toThrow(/client_contact_id\/client_id missing/);
+    expect(() =>
+      actorFromClientContactClaims({ client_contact_id: 'x' }),
+    ).toThrow(/client_contact_id\/client_id missing/);
+    expect(() =>
+      actorFromClientContactClaims({ client_id: 'CLI-202608-0001' }),
+    ).toThrow(/client_contact_id\/client_id missing/);
+    expect(() => actorFromClientContactClaims(null)).toThrow(/client_contact_id\/client_id missing/);
+    expect(() => actorFromClientContactClaims(undefined)).toThrow(/client_contact_id\/client_id missing/);
+  });
+
+  it('isClientContactActor is false for a normal employee or vendor Actor', () => {
+    expect(isClientContactActor(actorFromClaims({ employee_id: 'EMP-1' }))).toBe(false);
+    expect(isClientContactActor(actorFromVendorClaims({ vendor_id: 'VND-202608-0001' }))).toBe(false);
   });
 });

@@ -104,6 +104,47 @@ export async function signOut(accessToken: string, fetchImpl?: FetchLike): Promi
  * successful grant seconds ago, so a rejection means GoTrue refused the change
  * (e.g. same-password reuse policy), not bad credentials.
  */
+/**
+ * requestPasswordRecovery (M15-C2) triggers GoTrue's own password-recovery
+ * email via `POST /auth/v1/recover` — the first self-service email flow in
+ * CDPS (docs/M15C2_CLIENT_PORTAL_SECURITY_SPEC.md §3.3 jalur 2). GoTrue's
+ * `recover` endpoint already returns 200 regardless of whether `email`
+ * resolves to a user (built-in non-disclosure); the CALLER additionally only
+ * invokes this when `email` is confirmed to belong to an ACTIVE
+ * `client_contacts` row (see `client.findClientContactByEmailForReset`), so
+ * an employee/vendor email never reaches this function at all — the realm
+ * boundary is enforced before this call, not by it.
+ *
+ * `redirectTo` must be present in the Supabase project's allowed redirect
+ * URL list (Dashboard → Auth → URL Configuration) — an infra prerequisite,
+ * not something this code can configure.
+ *
+ * Never throws on a 4xx (GoTrue's own non-disclosure) — only a genuine
+ * transport/5xx failure surfaces, and even that should not block the
+ * caller's generic "ok" response (best-effort, like `signOut`).
+ */
+export async function requestPasswordRecovery(
+  email: string,
+  redirectTo: string,
+  fetchImpl?: FetchLike,
+): Promise<void> {
+  const { url, anonKey, fetchImpl: fi } = config(fetchImpl);
+  const doFetch = fi ?? fetch;
+  try {
+    await doFetch(`${url}/auth/v1/recover?redirect_to=${encodeURIComponent(redirectTo)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+      },
+      body: JSON.stringify({ email }),
+    });
+  } catch {
+    // best-effort — the caller always reports generic success (non-disclosure)
+  }
+}
+
 export async function updatePassword(
   accessToken: string,
   newPassword: string,

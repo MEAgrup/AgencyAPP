@@ -1,0 +1,42 @@
+.wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: linear-gradient(180deg, #eef2fb 0%, #f4f5f7 100%);
+}
+
+.panel {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.brand {
+  text-align: center;
+}
+
+.brand h1 {
+  font-size: 20px;
+}
+
+.brand p {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.links {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.links a {
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 600;
+}

@@ -59,4 +59,32 @@ describe('actorClaims', () => {
     expect(m.od).toBe(false);
     expect(m.director).toBe(false);
   });
+
+  // M15-C2: a client-contact Actor emits ONLY client_contact_id/client_id —
+  // never the five employee claims — so every employee-keyed RLS predicate
+  // evaluates false/null for it (jwt_client_contact_id()/jwt_client_id()
+  // resolve instead). Mirrors the vendor Actor round-trip guarantee.
+  it('emits ONLY client_contact_id/client_id for a client-contact Actor', () => {
+    const contactActor: permission.Actor = {
+      employeeId: '11111111-1111-1111-1111-111111111111',
+      clientContactId: '11111111-1111-1111-1111-111111111111',
+      clientId: 'CLI-202608-0001',
+      role: permission.makeRole({}),
+    };
+    const m = appMetadata(contactActor);
+    expect(Object.keys(m).sort()).toEqual(['client_contact_id', 'client_id']);
+    expect(m.client_contact_id).toBe('11111111-1111-1111-1111-111111111111');
+    expect(m.client_id).toBe('CLI-202608-0001');
+  });
+
+  it('round-trips a client-contact Actor through actorFromClientContactClaims unchanged', () => {
+    const original: permission.Actor = {
+      employeeId: '22222222-2222-2222-2222-222222222222',
+      clientContactId: '22222222-2222-2222-2222-222222222222',
+      clientId: 'CLI-202608-0002',
+      role: permission.makeRole({}),
+    };
+    const back = permission.actorFromClientContactClaims(appMetadata(original));
+    expect(back).toEqual(original);
+  });
 });

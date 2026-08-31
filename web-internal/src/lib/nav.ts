@@ -277,6 +277,15 @@ const ADMIN_LINKS: NavItem[] = [
     access: (role) =>
       Boolean(role.director || role.od || (role.level === 'lead' && role.division === 'Account')),
   },
+  // M15-C2: provisioning Client Portal contacts. Same authority as managing
+  // the contact itself (canManageOneClientContact) — Account lead/Director
+  // for any Client, plain Account staff (AM) for their own — plus OD
+  // read-only, mirroring the vendor-accounts split.
+  {
+    href: '/admin/client-contacts',
+    label: 'Kontak Klien (Portal)',
+    access: (role) => Boolean(role.director || role.od || role.division === 'Account'),
+  },
 ];
 
 /** The full navigation model, before role filtering. */
