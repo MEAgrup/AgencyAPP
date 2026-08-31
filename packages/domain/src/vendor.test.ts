@@ -15,16 +15,23 @@ import { ident, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import { ConflictError, ForbiddenError, ValidationError } from './account';
 import {
+  MSG_INCOMPLETE,
   MSG_RATE_MISMATCH,
+  MSG_VENDOR_ACCOUNT_EXISTS,
+  MSG_VENDOR_ACCOUNT_NOT_FOUND,
   MSG_VENDOR_EXISTS,
+  MSG_VENDOR_NOT_FOUND,
   VENDOR_STATUS_AKTIF,
   VENDOR_STATUS_BLACKLIST,
   VENDOR_STATUS_NONAKTIF,
   canManageVendor,
   createVendor,
   getVendor,
+  listVendorAccounts,
   listVendors,
   normalizeVendorInput,
+  provisionVendorAccount,
+  setVendorAccountStatus,
   setVendorStatus,
   updateVendor,
   type VendorInput,
@@ -140,6 +147,9 @@ afterAll(async () => {
 
 afterEach(async () => {
   if (!sql) return;
+  // vendor_accounts.vendor_id FK-references vendors — clear it first or the
+  // vendors delete below fails on any test that provisioned/faked an account.
+  await sql`delete from vendor_accounts where vendor_id in (select id from vendors where created_by like 'ZZ-%')`;
   // audit_log is append-only and is never cleaned; every test uses a name unique
   // per RUN so its assertions cannot depend on run history.
   await sql`delete from vendors where created_by like 'ZZ-%'`;
@@ -309,5 +319,165 @@ describeDb('listVendors — a picker, not an archive', () => {
     const onlyTalent = (await listVendors(sql, { jenisLayanan: 'talent' })).map((v) => v.id);
     expect(onlyTalent).toContain(talent.id);
     expect(onlyTalent).not.toContain(live.id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Vendor accounts (LT-61 follow-up — admin UI for provisioning). CI/local
+// Postgres has no `auth` schema, so the actual GoTrue-user-minting half of
+// `provisionVendorAccount` cannot run here (same limitation as
+// `linkAuthUsers` in employees.test.ts) — every guard BEFORE that point
+// (gate, validation, not-found, already-has-an-account) is fully covered, and
+// one test documents that the plain-Postgres stack fails loudly rather than
+// reporting false success.
+// ---------------------------------------------------------------------------
+
+/** Inserts a `vendor_accounts` row directly — no FK to auth.users on plain PG. */
+async function fakeAccount(
+  vendorId: string,
+  opts: { statusAktif?: boolean; createdAt?: Date } = {},
+): Promise<string> {
+  const rows = await sql<{ auth_user_id: string }[]>`
+    insert into vendor_accounts (auth_user_id, vendor_id, status_aktif, created_at, created_by)
+    values (gen_random_uuid(), ${vendorId}, ${opts.statusAktif ?? true},
+            ${opts.createdAt ?? new Date()}, 'ZZ-SEED')
+    returning auth_user_id`;
+  return rows[0].auth_user_id;
+}
+
+describeDb('provisionVendorAccount', () => {
+  it('refuses a staff AM', async () => {
+    const v = await createVendor(sql, spv(), { ...base, namaVendor: uniqueName() });
+    await expect(
+      provisionVendorAccount(sql, am(), { vendorId: v.id, email: 'vendor@example.test' }),
+    ).rejects.toThrow(ForbiddenError);
+  });
+
+  it('refuses OD — read-only does not extend to provisioning a login', async () => {
+    const v = await createVendor(sql, spv(), { ...base, namaVendor: uniqueName() });
+    await expect(
+      provisionVendorAccount(sql, od(), { vendorId: v.id, email: 'vendor@example.test' }),
+    ).rejects.toThrow(ForbiddenError);
+  });
+
+  it('rejects blank vendor id or email', async () => {
+    await expect(
+      provisionVendorAccount(sql, spv(), { vendorId: '', email: 'x@example.test' }),
+    ).rejects.toThrow(MSG_INCOMPLETE);
+    const v = await createVendor(sql, spv(), { ...base, namaVendor: uniqueName() });
+    await expect(
+      provisionVendorAccount(sql, spv(), { vendorId: v.id, email: '  ' }),
+    ).rejects.toThrow(MSG_INCOMPLETE);
+  });
+
+  it('rejects an unknown vendor id', async () => {
+    await expect(
+      provisionVendorAccount(sql, spv(), { vendorId: 'VND-209901-0000', email: 'x@example.test' }),
+    ).rejects.toThrow(MSG_VENDOR_NOT_FOUND);
+  });
+
+  it('refuses a vendor that already has an active account', async () => {
+    const v = await createVendor(sql, spv(), { ...base, namaVendor: uniqueName() });
+    await fakeAccount(v.id, { statusAktif: true });
+    await expect(
+      provisionVendorAccount(sql, spv(), { vendorId: v.id, email: 'second@example.test' }),
+    ).rejects.toThrow(MSG_VENDOR_ACCOUNT_EXISTS);
+  });
+
+  it('allows re-provisioning once the old account is deactivated', async () => {
+    const v = await createVendor(sql, spv(), { ...base, namaVendor: uniqueName() });
+    await fakeAccount(v.id, { statusAktif: false });
+    // Passes every TS-side guard; fails only at the GoTrue-minting step, which
+    // this plain-Postgres stack cannot run — see the suite header.
+    await expect(
+      provisionVendorAccount(sql, spv(), { vendorId: v.id, email: 'third@example.test' }),
+    ).rejects.toThrow(/auth\.users/);
+  });
+
+  it('fails loudly (not silently) on a stack with no auth schema', async () => {
+    const v = await createVendor(sql, spv(), { ...base, namaVendor: uniqueName() });
+    await expect(
+      provisionVendorAccount(sql, spv(), { vendorId: v.id, email: 'new@example.test' }),
+    ).rejects.toThrow(/auth\.users/);
+  });
+});
+
+describeDb('setVendorAccountStatus', () => {
+  it('refuses a staff AM', async () => {
+    const v = await createVendor(sql, spv(), { ...base, namaVendor: uniqueName() });
+    await fakeAccount(v.id);
+    await expect(setVendorAccountStatus(sql, am(), v.id, false)).rejects.toThrow(ForbiddenError);
+  });
+
+  it('rejects a blank vendor id', async () => {
+    await expect(setVendorAccountStatus(sql, spv(), '', false)).rejects.toThrow(MSG_INCOMPLETE);
+  });
+
+  it('refuses a vendor with no account at all', async () => {
+    const v = await createVendor(sql, spv(), { ...base, namaVendor: uniqueName() });
+    await expect(setVendorAccountStatus(sql, spv(), v.id, false)).rejects.toThrow(
+      MSG_VENDOR_ACCOUNT_NOT_FOUND,
+    );
+  });
+
+  it('deactivates then reactivates, writing one audit row per move', async () => {
+    const v = await createVendor(sql, spv(), { ...base, namaVendor: uniqueName() });
+    const uid = await fakeAccount(v.id, { statusAktif: true });
+
+    await setVendorAccountStatus(sql, spv(), v.id, false);
+    let row = await sql<{ status_aktif: boolean }[]>`
+      select status_aktif from vendor_accounts where auth_user_id = ${uid}`;
+    expect(row[0].status_aktif).toBe(false);
+
+    await setVendorAccountStatus(sql, spv(), v.id, true);
+    row = await sql<{ status_aktif: boolean }[]>`
+      select status_aktif from vendor_accounts where auth_user_id = ${uid}`;
+    expect(row[0].status_aktif).toBe(true);
+
+    const audit = await sql<{ action: string }[]>`
+      select action from audit_log where entity_type = 'vendor_account' and entity_id = ${v.id}
+       order by id asc`;
+    expect(audit.map((a) => a.action)).toEqual(['deactivate', 'reactivate']);
+  });
+});
+
+describeDb('listVendorAccounts', () => {
+  it('refuses a staff AM', async () => {
+    await expect(listVendorAccounts(sql, am())).rejects.toThrow(ForbiddenError);
+  });
+
+  it('allows OD to read (Phase 0 §4: OD is read-only everywhere)', async () => {
+    const rows = await listVendorAccounts(sql, od());
+    expect(Array.isArray(rows)).toBe(true);
+  });
+
+  it('reports null account fields for a vendor with no account', async () => {
+    const v = await createVendor(sql, spv(), { ...base, namaVendor: uniqueName() });
+    const rows = await listVendorAccounts(sql, spv());
+    const row = rows.find((r) => r.vendorId === v.id);
+    expect(row).toBeDefined();
+    expect(row?.authUserId).toBeNull();
+    expect(row?.statusAktif).toBeNull();
+    expect(row?.email).toBeNull();
+  });
+
+  it('reports the account for a vendor that has one', async () => {
+    const v = await createVendor(sql, spv(), { ...base, namaVendor: uniqueName() });
+    const uid = await fakeAccount(v.id, { statusAktif: false });
+    const rows = await listVendorAccounts(sql, spv());
+    const row = rows.find((r) => r.vendorId === v.id);
+    expect(row?.authUserId).toBe(uid);
+    expect(row?.statusAktif).toBe(false);
+  });
+
+  it('surfaces only the MOST RECENT account when a vendor has account history', async () => {
+    const v = await createVendor(sql, spv(), { ...base, namaVendor: uniqueName() });
+    const old = new Date(Date.now() - 60_000);
+    await fakeAccount(v.id, { statusAktif: false, createdAt: old });
+    const uid = await fakeAccount(v.id, { statusAktif: true, createdAt: new Date() });
+    const rows = await listVendorAccounts(sql, spv());
+    const row = rows.find((r) => r.vendorId === v.id);
+    expect(row?.authUserId).toBe(uid);
+    expect(row?.statusAktif).toBe(true);
   });
 });

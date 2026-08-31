@@ -189,9 +189,13 @@ export function verifyJwt(token: string, secret: string, now: number = Date.now(
  * LT-61 adds a second, structurally separate fallback for a vendor token
  * (app_metadata.vendor_id, never employee_id — see
  * packages/core/src/permission.ts actorFromVendorClaims and
- * supabase/migrations/20260903010000_lt61_vendor_auth.sql). A token resolving
- * to neither (hook injected nothing) is unauthorized — mirroring RLS, which
- * would deny every row anyway.
+ * supabase/migrations/20260903010000_lt61_vendor_auth.sql). M15-C2 adds a
+ * THIRD fallback for a Client Portal contact token (app_metadata.
+ * client_contact_id/client_id, never employee_id/vendor_id — see
+ * actorFromClientContactClaims and
+ * supabase/migrations/20260905010000_m15c2_client_portal_auth.sql). A token
+ * resolving to none of the three (hook injected nothing) is unauthorized —
+ * mirroring RLS, which would deny every row anyway.
  */
 export function actorFromToken(token: string, secret: string, now?: number): Actor {
   const payload = verifyJwt(token, secret, now);
@@ -201,7 +205,11 @@ export function actorFromToken(token: string, secret: string, now?: number): Act
     try {
       return permission.actorFromVendorClaims(payload.app_metadata);
     } catch {
-      throw new UnauthorizedError('token carries no CDPS employee or vendor claim');
+      try {
+        return permission.actorFromClientContactClaims(payload.app_metadata);
+      } catch {
+        throw new UnauthorizedError('token carries no CDPS employee, vendor, or client-contact claim');
+      }
     }
   }
 }

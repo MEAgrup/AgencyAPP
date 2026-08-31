@@ -1,18 +1,18 @@
-# CDPS — M15-C2 Client Portal: Security Spec (DRAFT)
+# CDPS — M15-C2 Client Portal: Security Spec (RESOLVED)
 
-**Status:** DRAFT — menunggu keputusan **O5** (spec keamanan) dan **O4** (embeddability `mea-client-reporting`). Dokumen ini adalah **bahan keputusan, BUKAN izin memulai koding M15-C2.** Client Portal tetap **DITUNDA resmi** (`docs/DECISIONS.md`, entri 2026-07-18) sampai O4 dan O5 sama-sama diputuskan manusia.
+**Status:** **RESOLVED — O4 dan O5 CLOSED 2026-08-31** (`docs/DECISIONS.md`, entri 2026-08-31 "M15-C2 O4+O5 resolved"). Sembilan dari sepuluh Open Question §7 draft asli sudah dijawab pemilik (dua putaran `AskUserQuestion`, pola identik LT-61) dan sudah dilipat ke dalam dokumen ini — satu sisanya (OQ-8, token pass-through embed) tetap terbuka sebagai detail teknis klaster embed, bukan blocker M15-C2 (lihat §6, §7). §3 (autentikasi) direvisi total dari pola `backend/internal/auth/local.go` (Go, sudah dipensiunkan) ke pola realm auth non-HRIS **LT-61 vendor** (`supabase/migrations/20260903010000_lt61_vendor_auth.sql`) — preseden CDPS pertama yang SUNGGUHAN dibangun di stack TS/Supabase saat ini. Dokumen ini sekarang adalah **spec final** untuk implementasi M15-C2 (Rules → Flow → Example → System Requirements → PR kecil per klaster, pola sama seperti M15-C1).
 
-**Tanggal:** 2026-07-20
-**Penulis:** Orchestrator (Fable) + eksekutor Sonnet, sesi 2026-07-20
-**Reviewer yang diharapkan:** Nerissa, Yohan, dan head dev (belum ditandatangani siapa pun — lihat §7 Open Questions)
-**Prasyarat untuk:** O5 (`docs/DECISIONS.md` Open #O5); menutup O5 TIDAK otomatis membuka M15-C2 — pembukaan tetap butuh keputusan manusia terpisah sesuai entri 2026-07-18.
+**Tanggal draft asli:** 2026-07-20. **Tanggal revisi/closing:** 2026-08-31.
+**Penulis:** Orchestrator (Fable) + eksekutor Sonnet, sesi 2026-07-20 (draft); Sonnet, sesi 2026-08-31 (revisi + closing O4/O5).
+**Disetujui oleh:** Pemilik produk, via `AskUserQuestion` sesi 2026-08-31 (dua putaran — lihat §7 untuk jawaban per OQ).
+**Prasyarat untuk:** M15-C2 boleh mulai dikoding — closing O4+O5 di sini ADALAH keputusan manusia yang dimaksud entri 2026-07-18 (bukan langkah otomatis terpisah; jawaban pemilik atas §7 sesi ini yang menutupnya).
 
 **Dibaca bersama:**
 - `CLAUDE.md` — `web-client-portal` = **separate auth realm**, strict allow-list data layer, never a permission-trimmed internal view.
 - `docs/prd/CDPS_Phase0_Foundation_v2.md` §11 — baseline keamanan minimum (dikutip penuh di §1 di bawah).
 - `docs/prd/CDPS_Module15_Client_Team_Portal.md` §2, §6.1 — surface data Client Portal (C2).
-- `docs/DECISIONS.md` — entri 2026-07-18 (penundaan M15-C2), O4/O5 (Open), dan entri 2026-07-19 (`AUTH DIREDESAIN`) yang menjelaskan pola auth lokal internal yang jadi rujukan/kontras di sini.
-- `backend/internal/auth/local.go`, `backend/internal/auth/session.go`, `docs/handoff/AUTH_UAT_RUNBOOK.md` — implementasi auth lokal internal yang sudah live (realm karyawan), dipakai sebagai pola yang **sebagian dicontoh, sebagian sengaja dibedakan** untuk realm eksternal (lihat §3).
+- `docs/DECISIONS.md` — entri 2026-07-18 (penundaan M15-C2), entri 2026-08-31 (O4/O5 resolved, jawaban §7), dan entri 2026-08-30 (LT-61, preseden realm auth non-HRIS yang ditiru §3).
+- `supabase/migrations/20260903010000_lt61_vendor_auth.sql` + `packages/core/src/permission.ts` (`isVendorActor`/`actorFromVendorClaims`) — pola realm auth non-HRIS TS/Supabase yang **ditiru langsung** untuk Client Portal (lihat §3), menggantikan rujukan `backend/internal/auth/local.go` yang sudah pensiun di draft asli.
 
 ---
 
@@ -55,41 +55,66 @@ Client Portal adalah **satu-satunya permukaan yang menghadap publik** di seluruh
 
 ## 3. Autentikasi Klien
 
-### 3.1 Provisioning (model, bukan keputusan final — lihat OQ-4)
-Tidak ada self-registrasi. Model yang selaras dengan realm eksternal + house convention "tidak ada jalur mutasi tanpa pemilik yang jelas":
-- AM (atau admin) **mengundang** kontak klien dengan nama + email; sistem membuat baris kontak berstatus belum aktif + password temporer (mirror pola `SetPassword` internal, `must_change_password=1`), ATAU mengirim link set-password sekali-pakai bertenggat (butuh keputusan email — lihat OQ-2).
-- Kontak WAJIB ganti password sebelum mengakses surface lain (gate identik pola internal: `must_change_password` blocking, `local.go` §`MustChangePassword`).
-- Kontak dapat **dinonaktifkan** oleh AM/admin (bukan dihapus — riwayat komplain yang sudah mereka submit tetap immutable & atributed ke ID kontak, konsisten house convention #3).
+**Pola dasar: realm Supabase Auth kedua, meniru LT-61 vendor (bukan `local.go` Go yang sudah pensiun).** LT-61 membuktikan bentuknya: satu tabel link "internal murni" (RLS on, nol policy, nol grant selain lewat fungsi SECURITY DEFINER) menghubungkan satu Supabase Auth user ke satu baris domain; `*_claims(uuid)` resolver + cabang baru di `custom_access_token_hook` yang mengembalikan NULL diam-diam untuk user tak-cocok (tidak mengganggu cabang employee/vendor yang sudah ada); `jwt_*_id()` helper RLS. Client Portal adalah realm non-HRIS **ketiga** dengan bentuk yang sama, skala lebih besar (banyak kontak per Client, bukan satu vendor per akun).
 
-### 3.2 Kebijakan password & lockout
-Diselaraskan dengan baseline internal (`backend/internal/auth/local.go`), dengan penyesuaian untuk permukaan publik:
+### 3.1 Model data ↔ Client (OQ-1 RESOLVED)
+**Keputusan pemilik (2026-08-31): satu kontak klien = tepat satu Client, selamanya.** Tidak ada kasus "satu kontak, banyak Client" yang perlu didukung v1. Konsekuensi skema: `client_contacts.client_id` adalah kolom FK tetap (bukan tabel junction, bukan selector "ganti Client aktif" di UI) — persis pola `vendor_accounts.vendor_id` LT-61 (satu FK tetap, bukan N:M).
 
-| Parameter | Pola internal (karyawan) | Usulan realm Portal |
-|---|---|---|
-| Panjang password | Min 8 karakter, max 72 byte (batas bcrypt) | **Sama** — tidak ada alasan melonggarkan untuk publik; justru kandidat diperketat (lihat OQ-5) |
-| Hash | bcrypt DefaultCost | **Sama** |
-| Lockout | 5 percobaan gagal berturut-turut → kunci 15 menit; sukses reset counter | **Sama sebagai default**, tapi permukaan publik lebih rawan credential-stuffing terdistribusi (banyak IP) — pertimbangkan tambahan rate limit **per-IP** di depan lockout per-akun (§5.2), bukan pengganti |
-| Reset lupa password | Tanpa self-service/email — admin set password temporer (keputusan 2026-07-19, khusus karyawan) | **OPEN QUESTION (OQ-2)** — klien eksternal biasanya mengharapkan jalur email self-service; keputusan "no email" internal punya alasan spesifik (HRIS terpisah, admin selalu ada). Untuk klien, "hubungi AM by WhatsApp" adalah opsi konsisten dengan pola M15 Rule 6 (semua follow-up lewat AM), tapi ini keputusan produk, bukan keputusan teknis — jangan diasumsikan |
-| Enumerasi akun | `[email atau password salah]` generik, employee tidak aktif dianggap sama dengan email tidak ditemukan | **Sama pola**, wajib direplikasi persis (§5.3) |
+```sql
+CREATE TABLE client_contacts (
+    auth_user_id uuid         NOT NULL PRIMARY KEY,
+    client_id    varchar(32)  NOT NULL REFERENCES clients (id),
+    nama         varchar(255) NOT NULL,
+    email        varchar(255) NOT NULL,
+    status_aktif boolean      NOT NULL DEFAULT true,
+    created_at   timestamptz  NOT NULL DEFAULT now(),
+    created_by   varchar(64)  NOT NULL
+);
+```
+(Bentuk indikatif untuk implementasi — nama kolom final ditentukan saat migrasi ditulis, konsisten konvensi snake_case DB.)
 
-### 3.3 Sesi
-- **Cookie terpisah** dari `cdps_session` internal — nama berbeda (mis. `cdps_portal_session`), tabel sesi terpisah (`client_contact_sessions` atau setara), tidak pernah dibaca oleh middleware auth internal dan sebaliknya.
-- **Atribut cookie wajib** (di atas baseline internal yang saat ini HANYA `HttpOnly` + `SameSite=Lax`, TANPA `Secure` eksplisit — lihat `backend/internal/httpapi/auth_handlers.go`): untuk realm publik, **`Secure` wajib eksplisit** (portal hanya boleh dilayani via HTTPS — tidak ada asumsi jaringan kantor terpercaya seperti internal), `HttpOnly` wajib, `SameSite=Strict` diusulkan sebagai default lebih ketat dari `Lax` internal (Portal tidak butuh navigasi cross-site apa pun kecuali skenario embed §6 — jika embed dipilih dan butuh `SameSite=None`, itu trade-off eksplisit yang harus dicatat, bukan default diam-diam).
-- **TTL lebih pendek** dari 12 jam internal — usulan draft: 2–4 jam idle/absolute (OPEN QUESTION OQ-3, angka final butuh keputusan produk, bukan dikarang di sini).
-- Ganti password → revoke semua sesi LAIN milik kontak yang sama (pola identik `RevokeOtherSessions`); admin menonaktifkan kontak → revoke SEMUA sesi kontak itu (pola identik `RevokeAllSessions`).
+### 3.2 Provisioning (OQ-4 RESOLVED)
+**Keputusan pemilik (2026-08-31): AM (Client miliknya sendiri) + Account lead/Director (Client mana pun).** Gate meniru bentuk `canManageVendor` LT-61 persis, diselaraskan ke scope Account:
+- Tidak ada self-registrasi. AM/Account lead/Director **mengundang** kontak klien dengan nama + email → baris `client_contacts` dibuat berstatus belum aktif.
+- Provisioning menghasilkan **password sementara** (`must_change_password=1`, pola `import_employee_credentials`/`provision_vendor_account` — termasuk fix `email_change=''` yang sudah ditambal untuk kedua fungsi itu, WAJIB direplikasi di sini, bukan diulang lagi latennya) — jalur admin-set selalu ada terlepas dari email (§3.3).
+- Kontak WAJIB ganti password sebelum mengakses surface lain (gate `must_change_password`, pola identik internal/vendor).
+- Kontak dapat **dinonaktifkan** oleh AM (Client sendiri)/Account lead/Director (bukan dihapus — riwayat komplain yang sudah mereka submit tetap immutable & atributed ke ID kontak, house convention #3), pola `set_vendor_account_status`.
 
-### 3.4 Force-change & reset admin
-- Force-change pada login pertama: pola identik internal (`must_change_password` gate blocking semua surface lain sebelum ganti password).
-- Reset oleh AM/admin: konsisten dengan tanpa-email internal ATAU jalur email — **lihat OQ-2, tidak diputuskan di sini.**
+### 3.3 Reset password (OQ-2 RESOLVED — DUA jalur, bukan salah satu)
+**Keputusan pemilik (2026-08-31): keduanya didukung**, bukan salah satu:
+1. **Admin/AM-set** — pola identik provisioning (§3.2): AM (Client sendiri)/Account lead/Director men-set password sementara baru untuk kontak yang terkunci/lupa password, `must_change_password=1` lagi. Jalur ini SELALU tersedia (nol dependensi email), dan satu-satunya jalur untuk kontak yang emailnya sendiri tidak lagi bisa diakses.
+2. **Self-service email** — kontak meminta link reset dikirim ke email terdaftar. Ini permukaan BARU untuk CDPS (belum ada jalur pengiriman email sebelumnya di codebase manapun) — pakai kapabilitas bawaan Supabase Auth (GoTrue `recover`/reset-password endpoint + SMTP terkonfigurasi di project Supabase `CDPS SG`), bukan sistem email custom. Implikasi implementasi (dicatat, bukan dikarang di sini — detail teknis SMTP/template masuk klaster kerja tersendiri): butuh SMTP provider dikonfigurasi di Supabase project settings, template email di-review sebelum go-live (Bahasa Indonesia, bukan default Inggris GoTrue), dan endpoint recover Supabase Auth sudah rate-limited bawaan olehnya (di luar §5.2 app-level).
+- Non-disclosure tetap berlaku pada kedua jalur (§5.3) — permintaan reset untuk email yang tidak terdaftar sebagai kontak aktif TIDAK membocorkan keberadaannya (Supabase Auth `recover` sudah generik secara default; jalur admin-set tinggal AM tidak pernah diberi tahu "email tidak ditemukan" secara berbeda dari "berhasil dikirim").
+
+### 3.4 Kebijakan password & lockout (OQ-10 RESOLVED — identik realm karyawan/vendor, DIKOREKSI saat implementasi)
+**Keputusan pemilik (2026-08-31): reuse persis, tanpa pengetatan khusus.** Ditemukan saat implementasi (klaster auth, sesi yang sama): "reuse persis" untuk **lockout** ternyata berarti **TIDAK ADA lockout kustom sama sekali** — draft OQ-10 semula menulis "5x/15menit" berdasarkan pola pra-migrasi-Supabase yang sudah tidak berlaku. `packages/domain/src/auth.ts` (realm karyawan) mendokumentasikan eksplisit: sejak login pindah ke Supabase Auth (GoTrue), lockout **sengaja tidak di-port** — GoTrue sendiri yang memegang rate limiting login, dan lockout kustom kedua "hanya akan memberi rasa aman palsu". Kolom `employee_credentials.failed_attempts`/`locked_until` adalah sisa tabel transit pra-GoTrue, tidak lagi dibaca jalur login manapun. **Client Portal mengikuti arsitektur yang sungguhan berlaku sekarang**, bukan draft yang sudah usang — lihat `DECISIONS.md` 2026-08-31 (entri klaster auth) untuk detail temuan.
+
+| Parameter | Nilai (sama seluruh realm — karyawan, vendor, Portal) |
+|---|---|
+| Panjang password | Min 8 karakter, max 72 byte (batas bcrypt) |
+| Hash | bcrypt DefaultCost (via Supabase Auth GoTrue, bukan implementasi custom) |
+| Lockout | **Tidak ada tabel/counter kustom** — GoTrue yang memegang rate limiting login, identik realm karyawan/vendor |
+| Enumerasi akun | `[email atau password salah]` generik — kontak nonaktif dianggap sama dengan email tidak ditemukan (§5.3) |
+
+Pertahanan tambahan untuk permukaan publik BUKAN lewat lockout kustom, melainkan lewat rate limit per-IP terpisah di depan login (§5.2, OQ-5) — angkanya sudah diputuskan, implementasinya **BELUM** ditulis di klaster auth ini (lihat §5.2: dicatat sebagai kerja klaster berikutnya, GoTrue sendiri sudah memberi baseline non-nol untuk login sementara ini).
+
+### 3.5 Sesi (OQ-3 RESOLVED — 4 jam idle)
+**Keputusan pemilik (2026-08-31): 4 jam idle timeout** (bukan default GoTrue sepanjang hari seperti realm karyawan/vendor — Portal adalah realm satu-satunya yang menghadap publik, jadi mendapat kebijakan TTL sendiri, bukan reuse).
+- Realm terpisah total dari sesi karyawan/vendor by construction (Supabase Auth user berbeda, `client_contacts` bukan `employees`/`vendor_accounts`) — tidak ada cookie/token yang bisa "menembus" ke realm lain.
+- Idle timeout 4 jam berarti sesi Portal butuh mekanisme refresh/expiry yang lebih pendek dari default project — diimplementasikan di lapisan `web-client-portal` (cek `last_activity` per request/refresh token TTL custom untuk realm ini), bukan mengubah TTL project Supabase secara global (yang akan ikut memendekkan sesi karyawan/vendor).
+- Ganti password → revoke semua sesi LAIN milik kontak yang sama; admin menonaktifkan kontak → revoke SEMUA sesi kontak itu (pola `set_vendor_account_status` yang men-nonaktifkan; mekanisme revoke sesi Supabase Auth per-user).
+
+### 3.6 Force-change
+Force-change pada login pertama (password sementara dari §3.2/§3.3 jalur admin-set): pola identik internal/vendor — `must_change_password` gate blocking semua surface lain sebelum ganti password.
 
 ---
 
 ## 4. Otorisasi & Isolasi Data
 
-### 4.1 Model akun ↔ Client
+### 4.1 Model akun ↔ Client (OQ-1 RESOLVED — lihat §3.1)
 M15 §6.1 mengonfirmasi: **multi-contact per Client** — beberapa kontak bernama per Client, masing-masing login sendiri, semua melihat scoped view yang **identik** (tidak ada tiering internal antar-kontak di v1; lihat M15 Rule 1 & contoh Alpha Digital §5 — dua kontak sama-sama melihat Service Progress & Health Summary yang sama, bukan subset personal).
 
-PRD **tidak menyebutkan** apakah satu kontak bisa terhubung ke **lebih dari satu Client** (mis. agensi/vendor pihak ketiga yang menangani beberapa akun klien MEA sekaligus, atau grup perusahaan dengan beberapa Client ID). Seluruh narasi M15 §2/§4/§6.1 ditulis dari sudut pandang "satu Client, banyak kontak" — tidak pernah dari sudut "satu kontak, banyak Client". **Ini ditulis sebagai OPEN QUESTION (OQ-1)**, bukan diasumsikan N:1 atau N:M secara sepihak — konsekuensi desainnya besar (apakah `client_contacts` punya satu `client_id` tetap, atau butuh tabel junction + selector "ganti Client aktif" di UI).
+Arah sebaliknya (satu kontak, banyak Client) **diputuskan pemilik tidak berlaku** (§3.1): `client_contacts.client_id` adalah FK tetap satu-ke-satu, bukan N:M — skema paling sederhana yang konsisten dengan seluruh narasi M15 §2/§4/§6.1 ("satu Client, banyak kontak").
 
 ### 4.2 Allow-list field per surface (dari M15 §2, §6.1 — bukan tabel baru, transkripsi eksplisit dari PRD)
 
@@ -99,13 +124,13 @@ PRD **tidak menyebutkan** apakah satu kontak bisa terhubung ke **lebih dari satu
 | **Embedded Report** | Output `mea-client-reporting` yang memang ditujukan untuk Client (template existing) | — (surface ini didefinisikan oleh sistem laporan yang sudah ada, bukan field baru; lihat §6 untuk mekanisme render) |
 | **Health Summary** | HANYA label band: "On Track" / "Needs Attention" / "Action Needed" (M15 §2 Rule 4) | Skor numerik 0–100 mentah maupun capped; breakdown per komponen (Revision Burden, Complaints, dll.); formula/bobot apa pun |
 | **Complaint form (submit)** | Field TULIS: deskripsi, attachment opsional, severity tag pilihan-klien opsional (M15 §6.1) → membuat `CPL-` `source=Client Portal` + `submitting_contact_id` | Tidak ada field BACA di surface ini — M15 Rule 6 confirmed: **submit-only**, tidak ada log komplain personal yang ditampilkan ke klien |
-| **Larangan lintas-surface eksplisit** (M15 §2 Rule 7, "Explicit exclusion list") | — | Detail Transaction/payment admin **di luar** status invoice/pembayaran milik Client sendiri (lihat **OQ-6** — surface invoice/payment ITU SENDIRI tidak pernah didefinisikan Rule/Flow mana pun, hanya disebut di klausa pengecualian); nama staf/workload staf; data Team Performance (M14); `BRF-`/`AST-`/`BKG-`/task ID internal; data Client LAIN mana pun |
+| **Larangan lintas-surface eksplisit** (M15 §2 Rule 7, "Explicit exclusion list") | — | **Seluruh** detail Transaction/payment admin, termasuk status invoice/pembayaran milik Client sendiri (lihat **OQ-6, RESOLVED** — pemilik memutuskan 2026-08-31: klausa pengecualian M15 Rule 7 dibaca sebagai frasa sisa, BUKAN fitur nyata; Portal v1 TIDAK menampilkan surface invoice/payment sama sekali — tidak dirancang di Rule/Flow M15 manapun, sengaja tidak ditambahkan); nama staf/workload staf; data Team Performance (M14); `BRF-`/`AST-`/`BKG-`/task ID internal; data Client LAIN mana pun |
 
 **Larangan mutlak (ulang, eksplisit dari M15 §2 Rule 7 + prinsip §2.2 di atas):** komisi, skor performa tim (individu maupun rollup), audit log internal (Module log operasional, bukan audit-per-kontak milik Portal sendiri — lihat §5.1), dan data Client lain dalam bentuk apa pun (termasuk agregat lintas-klien apa pun — Management Dashboard M15 §6.3 adalah surface **internal-only**, Director/OD, dan TIDAK PERNAH punya padanan di Client Portal).
 
 ### 4.3 Isolasi teknis
 - Setiap query read-model Portal WAJIB `WHERE client_id = :session_client_id` (atau setara) — tidak ada endpoint yang menerima `client_id` sebagai parameter permintaan yang dipercaya mentah-mentah dari client-side; ID di request (kalau ada) harus divalidasi SAMA DENGAN `client_id` yang terikat sesi, bukan dipakai sebagai sumber kebenaran.
-- Read-model Portal idealnya berupa **package/paket kode terpisah** (mis. `internal/module15_client_portal` sebagai gambaran struktur, mirror pola `module15_portal` yang sudah ada untuk Team Portal internal) yang TIDAK mengimpor query internal Module 11 secara langsung — hanya lewat fungsi proyeksi allow-list yang eksplisit mengembalikan DTO terbatas (bukan struct internal penuh yang lalu di-serialize sebagian).
+- Read-model Portal idealnya berupa **modul domain terpisah** (mis. `packages/domain/src/client-portal.ts`, mirror pola `packages/domain/src/portal.ts` yang sudah ada untuk Team Portal internal) yang TIDAK mengimpor query internal Module 11 secara langsung — hanya lewat fungsi proyeksi allow-list yang eksplisit mengembalikan DTO terbatas (bukan objek domain penuh yang lalu di-serialize sebagian), dijaga `apps/api/src/lib/wire.ts` untuk terjemahan camelCase↔snake_case (CLAUDE.md).
 
 ---
 
@@ -116,10 +141,11 @@ PRD **tidak menyebutkan** apakah satu kontak bisa terhubung ke **lebih dari satu
 - Pola immutability sama dengan seluruh sistem (CLAUDE.md #3): tidak ada UPDATE/DELETE pada baris audit Portal; entity_type baru diusulkan mis. `client_contact` / `client_contact_session`, mirror pola `employee_credential` di audit log internal.
 - Log akses (bukan hanya aksi tulis) bernilai forensik tinggi di realm publik — kalau terjadi kebocoran, tim harus bisa menjawab "kontak mana yang mengakses apa, kapan" tanpa harus merekonstruksi dari log server mentah.
 
-### 5.2 Rate limiting
-Wajib pada MINIMAL dua titik (Phase 0 §11 eksplisit):
-- **Login** — lockout per-akun (pola §3.2) + rate limit per-IP/per-endpoint di depan (nilai konkret = OPEN QUESTION OQ-5; realm publik butuh pertahanan berlapis yang tidak dibutuhkan realm karyawan di jaringan tertutup).
-- **Form komplain** — endpoint tulis satu-satunya di realm ini, rawan spam/flood; rate limit per-kontak DAN per-IP, plus validasi ukuran/tipe attachment (detail teknis attachment belum di-scope PRD — dicatat, bukan diasumsikan).
+### 5.2 Rate limiting (OQ-5 RESOLVED — angka default app-level; implementasi BELUM ditulis)
+**Keputusan pemilik (2026-08-31): pakai angka default yang wajar sekarang**, ditegakkan di lapisan app/DB (proyek belum punya WAF/infra jaringan) — disesuaikan lagi nanti dari data trafik nyata, bukan dikunci permanen. **Angka-angka ini RESOLVED sebagai keputusan; kode penegaknya belum ditulis di klaster auth (§3) yang dibangun 2026-08-31** — dicatat sebagai kerja follow-up, bukan diam-diam dilewati:
+- **Login** — DITAMBAH rate limit per-IP: **maksimal 10 percobaan per-IP per-15 menit**. Tanpa lockout per-akun kustom sebagai lapisan lain (§3.4, dikoreksi — GoTrue yang memegang itu); baseline sementara sebelum ambang di atas ditulis adalah apa pun proteksi bawaan GoTrue.
+- **Form komplain** — endpoint tulis satu-satunya di realm ini: **maksimal 5 submit per-kontak per-jam** DAN **maksimal 20 submit per-IP per-jam**, plus validasi ukuran/tipe attachment (detail teknis attachment belum di-scope PRD — dicatat, bukan diasumsikan). Diimplementasikan bersamaan klaster complaint form (belum dibangun).
+- Kedua ambang di atas adalah **starting point**, bukan angka final selamanya — revisi berikutnya (naik/turun) cukup lewat entri `DECISIONS.md` baru begitu ada data trafik nyata, tidak perlu putaran Open Question lagi.
 
 ### 5.3 Non-disclosure keberadaan akun
 - Pesan login gagal **generik**, tidak membedakan "email tidak terdaftar" vs "password salah" vs "kontak dinonaktifkan" — pola identik `[email atau password salah]` internal. String BI final untuk realm Portal (termasuk apakah reuse string yang sama persis atau string baru khusus Portal) **diotorisasi via DECISIONS saat implementasi** — tidak dikarang di draft ini.
@@ -127,11 +153,13 @@ Wajib pada MINIMAL dua titik (Phase 0 §11 eksplisit):
 
 ---
 
-## 6. Embed (O4) — dua opsi, tanpa keputusan
+## 6. Embed (O4 RESOLVED — Opsi A dikonfirmasi)
 
-M15 §6.1 sudah confirmed secara PRODUK bahwa laporan **native embedded**, bukan link-out (M15 §7 item 3, "Reports: link-out vs embed → Confirmed: Natively embedded"). Namun O4 (`docs/DECISIONS.md`) mencatat pengecekan **teknis** embeddability `mea-client-reporting` belum pernah dilakukan — keputusan produk "embed" sudah ada, tapi kelayakan tekniknya belum diverifikasi. Build Plan §R2 (dirujuk tugas ini) meminta opsi fallback anggun kalau embed ternyata tidak layak secara teknis. Dua opsi berikut disiapkan sebagai bahan, **tanpa memutuskan salah satu**:
+M15 §6.1 sudah confirmed secara PRODUK bahwa laporan **native embedded**, bukan link-out (M15 §7 item 3, "Reports: link-out vs embed → Confirmed: Natively embedded"). **O4 (cek teknis embeddability) RESOLVED 2026-08-31** — pemilik mengonfirmasi `mea-client-reporting` embeddable (dijawab langsung, tanpa perlu sesi ini melakukan probe header `X-Frame-Options`/CSP sendiri — sesi ini tidak punya URL/akses ke sistem tersebut). **Opsi A di bawah adalah arah final** untuk implementasi; Opsi B tetap didokumentasikan sebagai fallback tercatat (Build Plan §R2) bila implementasi nyata nanti menemukan kendala teknis yang tidak terlihat dari jawaban ini — bukan opsi yang masih terbuka untuk dipilih sepihak.
 
-### Opsi A — Embed native (arah yang sudah confirmed produk, M15 §6.1)
+**Catatan sisa: OQ-8 (mekanisme token pass-through) BELUM terjawab** — bergantung pada arsitektur/API `mea-client-reporting` yang berada di luar scope repo ini; ini detail implementasi klaster embed itu sendiri (butuh koordinasi dengan pemilik sistem tersebut saat klaster itu dikerjakan), bukan blocker untuk klaster lain (auth, read-model Service Progress/Health, complaint form) mulai dikerjakan lebih dulu.
+
+### Opsi A — Embed native (dikonfirmasi, M15 §6.1 + O4 2026-08-31)
 - Mekanisme: `<iframe>` (atau setara) yang me-render output `mea-client-reporting` di dalam frame Portal.
 - **Prasyarat teknis (O4):** `mea-client-reporting` harus mengizinkan embedding — server laporan itu wajib TIDAK mengirim `X-Frame-Options: DENY`/`SAMEORIGIN` yang memblokir origin Portal, dan/atau CSP `frame-ancestors` di sisi laporan wajib mengizinkan origin `web-client-portal` secara eksplisit (allow-list origin, bukan wildcard).
 - **Implikasi keamanan:**
@@ -140,31 +168,33 @@ M15 §6.1 sudah confirmed secara PRODUK bahwa laporan **native embedded**, bukan
   - Origin laporan HARUS HTTPS (mixed-content di dalam frame Portal HTTPS adalah kebocoran otomatis oleh browser).
   - Risiko clickjacking terbalik (Portal yang di-embed oleh situs pihak ketiga) juga harus ditutup di sisi Portal sendiri — `frame-ancestors 'none'` di CSP Portal, KECUALI ada kebutuhan eksplisit sebaliknya (tidak ada di PRD).
 
-### Opsi B — Link-out dengan degradasi anggun (fallback bila O4 = tidak layak)
+### Opsi B — Link-out dengan degradasi anggun (fallback tercatat, TIDAK dipakai v1 — lihat catatan §6 di atas)
 - Mekanisme: Portal menampilkan ringkasan/tautan "Buka Laporan" yang membuka `mea-client-reporting` di tab/window baru, BUKAN di dalam frame Portal.
 - **Implikasi keamanan:**
   - Lebih sederhana secara CSP (tidak ada `frame-src` lintas-origin untuk diamankan) tapi menyimpang dari keputusan produk M15 §7 item 3 ("Confirmed: Natively embedded") — kalau opsi ini dipilih, itu **override** keputusan produk yang sudah confirmed, bukan sekadar detail teknis, dan wajib dicatat sebagai entri baru di `docs/DECISIONS.md` (bukan diam-diam dipilih eksekutor) — konsisten aturan CLAUDE.md.
   - Handoff sesi (SSO-lite) dari Portal ke laporan tetap perlu diamankan: kalau link-out membawa token akses (query param atau redirect ber-token), token itu harus tervalidasi scoped ke Client yang sama dengan sesi Portal — tidak boleh jadi URL yang bisa di-share/di-tebak untuk mengakses laporan Client lain.
 
-**Kesimpulan §6:** pilihan A vs B TIDAK diputuskan di dokumen ini — keduanya butuh cek teknis O4 dan/atau keputusan produk eksplisit sebelum salah satu diimplementasikan.
+**Kesimpulan §6:** Opsi A (embed native) adalah arah final, dikonfirmasi pemilik 2026-08-31 (O4 RESOLVED). Opsi B tetap didokumentasikan sebagai fallback Build Plan §R2 kalau implementasi nyata menemukan kendala teknis baru — bukan pilihan terbuka.
 
 ---
 
-## 7. OPEN QUESTIONS — wajib diputuskan manusia sebelum koding M15-C2
+## 7. OPEN QUESTIONS — status akhir (RESOLVED 2026-08-31)
 
-| # | Pertanyaan | Kenapa tidak bisa diasumsikan | Butuh dari |
+Sembilan dari sepuluh OQ draft asli dijawab langsung oleh pemilik (dua putaran `AskUserQuestion`, sesi 2026-08-31); satu (OQ-8) tetap terbuka sebagai detail teknis klaster embed, bukan blocker M15-C2 secara keseluruhan (§6).
+
+| # | Pertanyaan | Keputusan | Lihat |
 |---|---|---|---|
-| OQ-1 | Satu kontak klien ↔ satu Client, atau bisakah satu kontak terhubung ke banyak Client? | M15 §2/§6.1 hanya menulis dari sudut "satu Client, banyak kontak" — arah sebaliknya tidak pernah disebut. Menentukan skema `client_contacts` (kolom `client_id` tetap vs tabel junction + Client selector di UI). | Yohan / product |
-| OQ-2 | Reset password klien: jalur email self-service, atau admin/AM-only seperti realm karyawan (keputusan 2026-07-19)? | Keputusan "tanpa email" internal punya alasan spesifik ke karyawan (HRIS terpisah); klien eksternal biasanya berharap self-service. Keputusan produk, bukan teknis. | Nerissa / Yohan |
-| OQ-3 | Angka final session TTL Portal (usulan draft 2–4 jam) dan idle-timeout vs absolute-timeout. | Draft ini hanya mengusulkan "lebih pendek dari 12 jam internal" — angka pasti perlu keputusan produk/keamanan, bukan dikarang eksekutor. | Head dev + Nerissa |
-| OQ-4 | Siapa yang berwenang mengundang/provisioning kontak klien baru — AM saja, AM+Account Lead, atau termasuk admin non-AM? | PRD M15 tidak merinci mekanisme provisioning kontak sama sekali (hanya menyebut hasilnya: "multi-contact confirmed"). | Yohan / product |
-| OQ-5 | Nilai konkret rate limiting per-IP (login & form komplain) — ambang percobaan, jendela waktu, mekanisme block (captcha? IP throttle? WAF?). | Phase 0 §11 mewajibkan rate limiting tapi tidak memberi angka; realm publik butuh pertahanan berlapis di luar lockout per-akun yang sudah ada di pola internal. | Head dev (kemungkinan butuh infra/WAF di luar kode aplikasi) |
-| OQ-6 | Apakah Client Portal benar-benar menampilkan status invoice/pembayaran milik Client sendiri (tersirat oleh klausa pengecualian M15 §2 Rule 7: "beyond the Client's own invoice/payment status"), padahal TIDAK ADA Rule/Flow di M15 §2–§6 yang mendefinisikan surface ini? | Ambiguitas PRD langsung — klausa pengecualian menyiratkan sebuah fitur yang tidak pernah dirancang di modul yang sama. Sesuai CLAUDE.md: PRD ambigu/dua bagian modul bertentangan → STOP, jangan pilih sendiri. Kalau fitur ini memang dimaksud ada, field allow-list-nya (status Lunas/Belum Lunas/Bayar Sebagian? nominal? tanggal jatuh tempo?) harus dirinci dulu sebelum masuk §4.2. | Yohan (klarifikasi PRD M15 vs M5) |
-| OQ-7 | O4 — apakah `mea-client-reporting` benar-benar embeddable (header `X-Frame-Options`/CSP `frame-ancestors` di sisi laporan)? | Belum pernah dicek secara teknis (dicatat di `docs/DECISIONS.md` sebagai Open, "cek teknis 1 hari"). Menentukan Opsi A vs B di §6. | Head dev (cek teknis, ±1 hari) |
-| OQ-8 | Mekanisme token pass-through/handoff sesi ke `mea-client-reporting` (kalau Opsi A dipilih) — token sesi khusus-scoped seperti apa, siapa yang menerbitkan (Portal atau sistem laporan)? | Bergantung pada arsitektur `mea-client-reporting` yang berada di luar scope backend CDPS saat ini — tidak bisa dirancang tanpa tahu API/kontrak sistem tersebut. | Head dev + pemilik `mea-client-reporting` |
-| OQ-9 | Apakah spec ini (dokumen ini sendiri) sudah dianggap "O5 RESOLVED", atau masih butuh satu putaran review eksplisit oleh head dev sebelum dicatat closed di `docs/DECISIONS.md`? | Dokumen ini ditulis sebagai draf oleh eksekutor — bukan otoritas untuk menutup Open Item sendiri. Perlu keputusan manusia eksplisit (siapa mereview, kapan, dan apakah ada revisi sebelum sign-off). | Nerissa / Yohan / head dev |
-| OQ-10 | Ambang lockout & panjang password Portal: reuse persis 5x/15menit & 8–72 karakter internal, atau diperketat khusus realm publik? | §3.2 mengusulkan "sama sebagai default" tapi mencatat rawan credential-stuffing terdistribusi sebagai alasan potensial memperketat — bukan keputusan final. | Head dev |
+| OQ-1 | Satu kontak klien ↔ satu Client, atau banyak Client? | ✅ **Selalu satu Client per kontak.** `client_contacts.client_id` FK tetap, bukan junction table. | §3.1, §4.1 |
+| OQ-2 | Reset password: email self-service, atau admin/AM-only? | ✅ **Keduanya.** Admin/AM-set (selalu tersedia, nol dependensi) DAN self-service email via Supabase Auth GoTrue (permukaan baru, butuh SMTP+template — detail teknis masuk klaster implementasi). | §3.3 |
+| OQ-3 | Angka final session TTL Portal. | ✅ **4 jam, idle timeout.** Realm satu-satunya dengan TTL custom (bukan reuse default GoTrue sepanjang hari seperti karyawan/vendor). | §3.5 |
+| OQ-4 | Siapa berwenang provisioning kontak klien baru? | ✅ **AM (Client miliknya sendiri) + Account lead/Director (Client mana pun).** Gate meniru bentuk `canManageVendor` LT-61. | §3.2 |
+| OQ-5 | Nilai konkret rate limiting per-IP. | ✅ **Login: 10/IP/15menit. Form komplain: 5/kontak/jam + 20/IP/jam.** App-level, starting point. **Angka RESOLVED; implementasi belum ditulis** (follow-up, klaster auth 2026-08-31 tidak mencakupnya). | §5.2 |
+| OQ-6 | Apakah Portal menampilkan status invoice/pembayaran? | ✅ **Tidak — dikeluarkan sepenuhnya dari v1.** Klausa pengecualian M15 Rule 7 dibaca sebagai frasa sisa, bukan fitur nyata. | §4.2 |
+| OQ-7 (=O4) | Apakah `mea-client-reporting` embeddable? | ✅ **Ya, dikonfirmasi pemilik.** Opsi A (embed native) adalah arah final. | §6 |
+| OQ-8 | Mekanisme token pass-through ke `mea-client-reporting`. | ⏳ **TETAP TERBUKA** — bergantung arsitektur sistem eksternal itu, diselesaikan saat klaster embed benar-benar dikerjakan (butuh koordinasi dengan pemilik `mea-client-reporting`). Tidak memblokir klaster lain. | §6 |
+| OQ-9 | Apakah revisi draft ini cukup untuk menutup O5, atau butuh review terpisah? | ✅ **Draft yang direvisi ini cukup** — O5 ditutup dalam sesi yang sama, dicatat `DECISIONS.md` 2026-08-31. | — |
+| OQ-10 | Lockout & panjang password: reuse persis, atau diperketat? | ✅ **Reuse persis realm karyawan/vendor** — 8–72 karakter, hash bcrypt. **Dikoreksi saat implementasi**: "reuse persis" untuk lockout berarti **nol lockout kustom** — realm karyawan sudah tidak punya itu sejak migrasi GoTrue (GoTrue sendiri memegang rate limiting login), draft awal "5x/15menit" sudah usang. Lihat `DECISIONS.md` 2026-08-31. | §3.4 |
 
 ---
 
-**Catatan penutup:** Dokumen ini TIDAK menambah kode, migrasi, endpoint, string BI, atau entitas apa pun. Tidak ada file lain yang disentuh. Begitu O4 dan O5 (dokumen ini setelah direview — lihat OQ-9) diputuskan manusia, M15-C2 dapat dijadwalkan ulang sebagai klaster kerja normal (Rules → Flow → Example → System Requirements → PR kecil per klaster, pola yang sama seperti M15-C1).
+**Catatan penutup:** Dokumen ini sekarang **RESOLVED** — O4 dan O5 CLOSED (`docs/DECISIONS.md`, entri 2026-08-31). M15-C2 boleh dijadwalkan sebagai klaster kerja normal (Rules → Flow → Example → System Requirements → PR kecil per klaster, pola yang sama seperti M15-C1) mulai dari sesi berikutnya, dengan OQ-8 (token pass-through embed) diselesaikan saat klaster embed itu sendiri dikerjakan — bukan sebelum klaster lain (auth realm, read-model Service Progress/Health, complaint form) dimulai.

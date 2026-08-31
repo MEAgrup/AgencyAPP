@@ -3,9 +3,10 @@
  * No DB, no Next — pure shape translation.
  */
 import { describe, expect, it } from 'vitest';
-import type { account, admin, ads, audit, auth, campaign, client, creative, demo, finance, kol, leads, livestream, marketing, msl, notification, sales, task } from '@cdps/domain';
+import type { account, admin, ads, audit, auth, campaign, client, creative, demo, finance, kol, leads, livestream, marketing, msl, notification, sales, task, vendor } from '@cdps/domain';
 import {
   adminEmployeeToWire,
+  vendorAccountToWire,
   attemptDetailToWire,
   attemptRowToWire,
   demoTaskDetailToWire,
@@ -913,6 +914,46 @@ describe('adminEmployeeToWire', () => {
 
   it('a never-synced employee renders synced_at as null, not a bogus date', () => {
     expect(adminEmployeeToWire({ ...row, syncedAt: null }).synced_at).toBeNull();
+  });
+});
+
+describe('vendorAccountToWire (LT-61 follow-up — admin provisioning screen)', () => {
+  it('emits snake_case with an account present', () => {
+    const row: vendor.VendorAccountRow = {
+      vendorId: 'VND-202608-0001',
+      namaVendor: 'PT Live Kita',
+      authUserId: '11111111-1111-1111-1111-111111111111',
+      email: 'vendor@example.test',
+      statusAktif: true,
+      createdAt: '2026-09-04T00:00:00.000Z',
+      createdBy: 'ZZ-DIR',
+    };
+    expect(vendorAccountToWire(row)).toEqual({
+      vendor_id: 'VND-202608-0001',
+      nama_vendor: 'PT Live Kita',
+      auth_user_id: '11111111-1111-1111-1111-111111111111',
+      email: 'vendor@example.test',
+      status_aktif: true,
+      created_at: '2026-09-04T00:00:00.000Z',
+      created_by: 'ZZ-DIR',
+    });
+  });
+
+  it('renders every account field as null for a vendor with no account — never omitted (O43)', () => {
+    const row: vendor.VendorAccountRow = {
+      vendorId: 'VND-202608-0002',
+      namaVendor: 'PT Belum Login',
+      authUserId: null,
+      email: null,
+      statusAktif: null,
+      createdAt: null,
+      createdBy: null,
+    };
+    const wire = vendorAccountToWire(row) as unknown as Record<string, unknown>;
+    for (const key of ['auth_user_id', 'email', 'status_aktif', 'created_at', 'created_by']) {
+      expect(wire).toHaveProperty(key);
+      expect(wire[key]).toBeNull();
+    }
   });
 });
 

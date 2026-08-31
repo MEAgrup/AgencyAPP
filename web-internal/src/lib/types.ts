@@ -64,6 +64,39 @@ export interface AdminEmployee {
 }
 
 /**
+ * One row of the admin vendor-account screen (LT-61 follow-up) — a vendor
+ * joined to its login, if any. `status_aktif: null` (not `false`) means the
+ * vendor has never been provisioned an account at all.
+ */
+export interface VendorAccount {
+  vendor_id: string;
+  nama_vendor: string;
+  auth_user_id: string | null;
+  email: string | null;
+  status_aktif: boolean | null;
+  created_at: string | null;
+  created_by: string | null;
+}
+
+/**
+ * M15-C2 — one row of the admin client-contacts (Client Portal provisioning)
+ * screen. Unlike `VendorAccount`, a row only ever exists for a contact that
+ * HAS been provisioned — a Client can have zero-to-many contacts, so there is
+ * no "unprovisioned" placeholder row to represent.
+ */
+export interface ClientContactAccount {
+  auth_user_id: string;
+  client_id: string;
+  nama_klien: string;
+  nama: string;
+  email: string | null;
+  status_aktif: boolean;
+  must_change_password: boolean;
+  created_at: string;
+  created_by: string;
+}
+
+/**
  * One row of GET /employees/assignable — the payload of every assignment
  * dropdown (AM, Brief/Task/Asset PIC, Booking Coordinator).
  *

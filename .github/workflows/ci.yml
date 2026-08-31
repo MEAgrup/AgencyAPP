@@ -63,6 +63,27 @@ jobs:
             cd web-internal && npm test
           fi
 
+  # M15-C2 — Client Portal, a wholly separate Next app (own auth realm, own
+  # deploy) from web-internal. Same skip-until-present shape as web-internal's
+  # own job above, for the same reason (frontend not always present yet during
+  # earlier build order).
+  web-client-portal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build web-client-portal (skips until the app exists)
+        run: |
+          if [ -f web-client-portal/package.json ]; then
+            cd web-client-portal && npm ci && npm run build
+          else
+            echo "web-client-portal/ not present yet — M15-C2 not started. Skipping."
+          fi
+      - name: Test web-client-portal
+        run: |
+          if [ -f web-client-portal/package.json ]; then
+            cd web-client-portal && npm test
+          fi
+
   # @cdps/api — the API route handlers (Fase 1 langkah 4). Typecheck the whole app
   # (route handlers + libs against the @cdps/* source) and run the framework-free
   # lib unit tests (JWT verification, error mapping). No DB / no Next build here —
@@ -328,17 +349,24 @@ jobs:
       #       the Live Stream vendor's Supabase Auth link table). Nol prefix baru
       #       (auth_user_id PK) ⇒ entity_prefix TETAP 37; nol mesin baru ⇒
       #       sm_machines TETAP 30; nol event katalog ⇒ notif_events TETAP 67.
+      # 135 = 134 + client_contacts (20260905010000_m15c2_client_portal_auth.sql,
+      #       M15-C2: the Client Portal contact's Supabase Auth link table —
+      #       third non-HRIS realm, same shape as vendor_accounts). The
+      #       companion migration 20260905020000 (admin provisioning functions)
+      #       adds ZERO tables. Nol prefix baru (auth_user_id PK) ⇒
+      #       entity_prefix TETAP 37; nol mesin baru ⇒ sm_machines TETAP 30;
+      #       nol event katalog ⇒ notif_events TETAP 67.
       #
       # ⚠️ INI GATE KEDUA UNTUK ANGKA YANG SAMA — `scripts/db-rebuild.sh` punya
       # `check "tabel public"` sendiri. Naikkan KEDUANYA dalam satu commit;
       # menaikkan salah satu saja membuat lokal hijau sementara CI merah (persis
       # yang terjadi pada PR #170).
-      - name: Verify table count (expect 134)
+      - name: Verify table count (expect 135)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 134
+          test "$n" -eq 135
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this

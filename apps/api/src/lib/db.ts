@@ -54,13 +54,21 @@ export function db(): Sql {
  * LT-61: a vendor Actor (`permission.isVendorActor`) emits ONLY `vendor_id` —
  * never `employee_id`/division/level/od/director — so `jwt_vendor_id()`
  * resolves and every employee-keyed RLS predicate evaluates false/null for it,
- * the same round-trip guarantee on the vendor realm's one claim.
+ * the same round-trip guarantee on the vendor realm's one claim. M15-C2: a
+ * client-contact Actor (`permission.isClientContactActor`) emits ONLY
+ * `client_contact_id`/`client_id`, the same shape of guarantee for
+ * `jwt_client_contact_id()`/`jwt_client_id()`.
  *
  * Exported for unit testing (no DB required).
  */
 export function actorClaims(actor: permission.Actor): string {
   if (permission.isVendorActor(actor)) {
     return JSON.stringify({ app_metadata: { vendor_id: actor.vendorId } });
+  }
+  if (permission.isClientContactActor(actor)) {
+    return JSON.stringify({
+      app_metadata: { client_contact_id: actor.clientContactId, client_id: actor.clientId },
+    });
   }
   return JSON.stringify({
     app_metadata: {

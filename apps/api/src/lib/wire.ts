@@ -7,7 +7,7 @@
  */
 import { money, tz } from '@cdps/core';
 import type { interview as ivcore } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, stage, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, clientPortalAuth, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, stage, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -3818,6 +3818,71 @@ export function vendorToWire(v: vendor.Vendor): VendorWire {
     dokumen: v.dokumen.map((d) => ({ nama: d.nama, url: d.url })),
     created_by: v.createdBy,
     created_at: v.createdAt,
+  };
+}
+
+/**
+ * LT-61 follow-up — one row of the admin vendor-account (provisioning)
+ * screen. `auth_user_id`/`email`/`status_aktif`/`created_at`/`created_by` are
+ * all null together for a vendor that has never been provisioned an account —
+ * `status_aktif: null` is deliberately distinct from `false` (no account, vs.
+ * an account that exists but is deactivated).
+ */
+export interface VendorAccountWire {
+  vendor_id: string;
+  nama_vendor: string;
+  auth_user_id: string | null;
+  email: string | null;
+  status_aktif: boolean | null;
+  created_at: string | null;
+  created_by: string | null;
+}
+
+export function vendorAccountToWire(r: vendor.VendorAccountRow): VendorAccountWire {
+  return {
+    vendor_id: r.vendorId,
+    nama_vendor: r.namaVendor,
+    auth_user_id: r.authUserId,
+    email: r.email,
+    status_aktif: r.statusAktif,
+    created_at: r.createdAt,
+    created_by: r.createdBy,
+  };
+}
+
+/**
+ * M15-C2 — one row of the admin client-contacts (Client Portal provisioning)
+ * screen. Unlike `VendorAccountWire`, every field is non-null: a row here
+ * only ever exists for a contact that HAS been provisioned (there is no
+ * "unprovisioned Client" placeholder row the way vendor's screen shows every
+ * vendor — a Client legitimately has zero-to-many contacts, so "no contact
+ * yet" is simply the absence of a row, not a null-filled one).
+ */
+export interface ClientContactAccountWire {
+  auth_user_id: string;
+  client_id: string;
+  nama_klien: string;
+  nama: string;
+  email: string | null;
+  status_aktif: boolean;
+  must_change_password: boolean;
+  created_at: string;
+  created_by: string;
+}
+
+export function clientContactAccountToWire(
+  r: clientPortalAuth.ClientContactRow,
+): ClientContactAccountWire {
+  return {
+    auth_user_id: r.authUserId,
+    client_id: r.clientId,
+    nama_klien: r.namaKlien,
+    nama: r.nama,
+    email: r.email,
+    status_aktif: r.statusAktif,
+    must_change_password: r.mustChangePassword,
+    created_at: r.createdAt,
+    created_by: r.createdBy,
   };
 }
 

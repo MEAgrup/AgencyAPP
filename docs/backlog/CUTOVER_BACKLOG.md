@@ -32,7 +32,7 @@
 | **C-03** | ~~UAT paritas end-to-end~~ ✅ **SELESAI 2026-07-31 — dijalankan terhadap deployment produksi, FAIL 0** | — | — | — |
 | **C-04** | Cutover data + aktor produksi | 🟠 P1 | 2–4 hari | **YA** |
 | **C-05** | Retire Go: arsip `backend/`, bersihkan CI & config Railway | 🟡 P2 | 0,5 hari | tidak (sesudahnya) |
-| **C-06** | `web-client-portal` (M15-C2) | ⚪ ditunda | — | **TIDAK** (by design) |
+| **C-06** | `web-client-portal` (M15-C2) | ⚪ belum dimulai (O4/O5 RESOLVED 2026-08-31) | — | **TIDAK** (by design) |
 
 **Urutan wajib:** ~~C-00~~ ✅ → ~~C-01~~ ✅ → ~~C-02~~ ✅ → ~~C-03~~ ✅ → **C-04** → (gate go/no-go manusia) → C-05.
 C-06 di luar jalur cutover.
@@ -420,9 +420,9 @@ Baru dikerjakan **setelah** gate go/no-go GO. Sesuai OQ-8: Go+MySQL **diarsip re
 
 ---
 
-## C-06 — `web-client-portal` (M15-C2) ⚪ ditunda by design
+## C-06 — `web-client-portal` (M15-C2) ⚪ belum dimulai — O4/O5 RESOLVED, siap diklaster
 
-Masih hanya `README.md`. Ditunda resmi (DECISIONS 2026-07-18) menunggu security spec — bahan ada di `docs/M15C2_CLIENT_PORTAL_SECURITY_SPEC.md`; prasyarat **O4/O5** (termasuk OQ-5 embeddability `mea-client-reporting`, masih open). **Realm auth terpisah + data layer allow-list** — bukan view internal yang di-trim izin (`CLAUDE.md`). Tidak memblokir cutover.
+Masih hanya `README.md` — belum ada kode/migrasi ditulis. Prasyarat **O4/O5 RESOLVED 2026-08-31** (`docs/DECISIONS.md`; spec final `docs/M15C2_CLIENT_PORTAL_SECURITY_SPEC.md`, kesepuluh Open Question dijawab pemilik). M15-C2 boleh dijadwalkan sebagai klaster kerja normal (Rules → Flow → Example → System Requirements → PR kecil per klaster, pola M15-C1) — auth realm mengikuti pola LT-61 vendor (`supabase/migrations/20260903010000_lt61_vendor_auth.sql`), bukan `local.go` Go yang sudah pensiun. **Realm auth terpisah + data layer allow-list** — bukan view internal yang di-trim izin (`CLAUDE.md`). Tidak memblokir cutover.
 
 ---
 
