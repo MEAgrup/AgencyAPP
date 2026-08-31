@@ -104,16 +104,25 @@ BEGIN
 
   v_uid := gen_random_uuid();
 
+  -- email_change has no table-level DEFAULT '' on auth.users (unlike
+  -- confirmation_token/recovery_token/etc, which all do) — omitting it here
+  -- would reproduce the exact bug fixed in
+  -- 20260902040000_fix_import_employee_credentials_email_change.sql (a NULL
+  -- row makes GoTrue 500 on every login, since it scans the column into a
+  -- non-nullable Go string). Included explicitly from the start.
   EXECUTE $q$
     INSERT INTO auth.users
       (instance_id, id, aud, role, email, encrypted_password,
        email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+       email_change,
        created_at, updated_at)
     VALUES
       ('00000000-0000-0000-0000-000000000000', $1, 'authenticated', 'authenticated',
        $2, $3, now(),
        jsonb_build_object('provider','email','providers', jsonb_build_array('email')),
-       '{}'::jsonb, now(), now())
+       '{}'::jsonb,
+       '',
+       now(), now())
   $q$
   USING v_uid, p_email, p_bcrypt_hash;
 
