@@ -203,6 +203,21 @@ table {
   background: var(--color-bg);
 }
 
+/* Unselected state of a toggle chip (e.g. H-2 trigger / D-8 asumsi pickers in
+   the A-12 revision dialog). Unlike .btnGhost — used for one-off actions
+   (Hapus, Tambah) where a borderless look is fine — a chip that is still
+   clickable-but-off must not read as plain text next to real plain text, or
+   the AM never discovers it needs a click to satisfy a required field. */
+.btnChip {
+  background: transparent;
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+}
+.btnChip:hover:not(:disabled) {
+  background: var(--color-bg);
+  border-color: var(--color-text-muted);
+}
+
 .btnSm {
   padding: 5px 10px;
   font-size: 12px;
