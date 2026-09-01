@@ -128,6 +128,15 @@ export interface PlanFlag {
   ack_spv_pada: string | null;
 }
 
+/** A Brief already produced from one `plan_row` (RAB-16 "Berikan Brief"). A row
+ *  absent here has no Brief yet. */
+export interface PlanRowBrief {
+  plan_row_id: number;
+  brief_id: string;
+  status: string;
+  assigned_division: string;
+}
+
 /** The whole period bundle a Plan page renders in one load (Section P-A…P-G). */
 export interface PlanDetail {
   plan: Plan;
@@ -138,6 +147,7 @@ export interface PlanDetail {
   review: PlanReview | null;
   flags: PlanFlag[];
   defisit_terbawa: number;
+  briefs: PlanRowBrief[];
 }
 
 /** RAB-16 — one row NOT briefed by the one-click inherit, and why. `reason` is a

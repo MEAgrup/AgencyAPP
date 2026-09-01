@@ -3742,6 +3742,23 @@ export function planFlagToWire(f: plan.PlanFlag): PlanFlagWire {
   };
 }
 
+/** A Brief already produced from one `plan_row` (RAB-16). Serves `plan.ts::PlanRowBrief`. */
+export interface PlanRowBriefWire {
+  plan_row_id: number;
+  brief_id: string;
+  status: string;
+  assigned_division: string;
+}
+
+function planRowBriefToWire(b: plan.PlanRowBrief): PlanRowBriefWire {
+  return {
+    plan_row_id: b.planRowId,
+    brief_id: b.briefId,
+    status: b.status,
+    assigned_division: b.assignedDivision,
+  };
+}
+
 /**
  * The whole period bundle a Plan page renders in one load (Section P-A…P-G).
  * Serves `plan.ts::PlanDetail`. Every child list crosses its own named converter
@@ -3757,6 +3774,7 @@ export interface PlanDetailWire {
   review: PlanReviewWire | null;
   flags: PlanFlagWire[];
   defisit_terbawa: number;
+  briefs: PlanRowBriefWire[];
 }
 
 export function planDetailToWire(d: plan.PlanDetail): PlanDetailWire {
@@ -3769,6 +3787,7 @@ export function planDetailToWire(d: plan.PlanDetail): PlanDetailWire {
     review: d.review === null ? null : planReviewToWire(d.review),
     flags: d.flags.map(planFlagToWire),
     defisit_terbawa: d.defisitTerbawa,
+    briefs: d.briefs.map(planRowBriefToWire),
   };
 }
 

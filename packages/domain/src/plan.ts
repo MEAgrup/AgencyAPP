@@ -339,6 +339,22 @@ export interface PlanDetail {
    * contributes nothing — only an adjustment that actually took effect does.
    */
   defisitTerbawa: number;
+  /**
+   * One entry per `plan_row` that already produced a Brief (RAB-16
+   * `inheritBriefsFromPlan`) — read-only, so the "Berikan Brief" panel can link
+   * straight to the resulting Brief instead of leaving the AM to guess whether
+   * one exists. A row absent here has no Brief yet. Added 2026-09 (owner
+   * report: no way to see/open the Brief a row turned into).
+   */
+  briefs: PlanRowBrief[];
+}
+
+/** A Brief already produced from one `plan_row` of this period (see `PlanDetail.briefs`). */
+export interface PlanRowBrief {
+  planRowId: number;
+  briefId: string;
+  status: string;
+  assignedDivision: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -544,13 +560,21 @@ export async function getPlanDetail(
 
   const rowIds = rows.map((r) => r.id as number);
 
-  const weeks =
+  // Both queries below depend only on `rowIds` (not on each other) — batched
+  // the same P-2 way as fase 1 above, rather than two sequential round-trips.
+  const [weeks, briefRows] = await Promise.all([
     rowIds.length === 0
-      ? []
-      : await sql<{ id: number; plan_row_id: number; minggu_no: number; kuota: string | number }[]>`
+      ? Promise.resolve([])
+      : sql<{ id: number; plan_row_id: number; minggu_no: number; kuota: string | number }[]>`
           select * from plan_row_week
            where plan_row_id = any(${rowIds})
-           order by plan_row_id, minggu_no`;
+           order by plan_row_id, minggu_no`,
+    rowIds.length === 0
+      ? Promise.resolve([])
+      : sql<{ id: string; plan_row_id: number; status: string; assigned_division: string }[]>`
+          select id, plan_row_id, status, assigned_division from briefs
+           where plan_row_id = any(${rowIds})`,
+  ]);
 
   return {
     plan,
@@ -606,6 +630,12 @@ export async function getPlanDetail(
       ackSpvPada: optIso(f.ack_spv_pada),
     })),
     defisitTerbawa,
+    briefs: briefRows.map((b) => ({
+      planRowId: num(b.plan_row_id),
+      briefId: b.id,
+      status: b.status,
+      assignedDivision: b.assigned_division,
+    })),
   };
 }
 

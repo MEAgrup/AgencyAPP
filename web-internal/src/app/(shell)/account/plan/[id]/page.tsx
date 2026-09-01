@@ -323,7 +323,11 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
   if (loadError) return <div className="alert alertError">{loadError}</div>;
   if (!detail) return <div className="alert alertError">[Plan tidak ditemukan]</div>;
 
-  const { plan, targets, rows } = detail;
+  const { plan, targets, rows, briefs } = detail;
+  // plan_row_id -> the Brief it already produced (RAB-16). A row absent here
+  // has no Brief yet — the "Berikan Brief" table's Brief column falls back to
+  // "—" for it, never a dead link.
+  const briefByRow = new Map(briefs.map((b) => [b.plan_row_id, b]));
   const status = plan.status;
   const canAddRow = canWrite && (status === 'Draft' || status === 'Aktif');
   const canSubmit = canWrite && status === 'Draft';
@@ -949,6 +953,8 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
           <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
             Isi jatuh tempo + prioritas per baris; sisanya (divisi, kuota, satuan, hasil, SKU
             sasaran, budget) diwarisi otomatis ke instruksi Brief. Baris tanpa isian dilewati.
+            Baris yang sudah punya Brief menampilkan link ke detailnya di kolom &quot;Brief&quot;
+            (jatuh tempo/prioritas terkunci — Brief-nya sudah dibuat, bukan lagi diedit dari sini).
           </p>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ fontSize: 13, minWidth: 760 }}>
@@ -960,12 +966,15 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                   <th style={{ textAlign: 'left' }}>Budget</th>
                   <th style={{ textAlign: 'left' }}>Jatuh tempo</th>
                   <th style={{ textAlign: 'left' }}>Prioritas Brief</th>
+                  <th style={{ textAlign: 'left' }}>Brief</th>
                 </tr>
               </thead>
               <tbody>
                 {rows
                   .filter((r) => r.kuota > 0)
-                  .map((r) => (
+                  .map((r) => {
+                    const brief = briefByRow.get(r.id);
+                    return (
                     <tr key={r.id}>
                       <td style={{ paddingRight: 8 }}>
                         {PILAR_LABEL[r.pilar] ?? r.pilar} · {r.divisi_pic}
@@ -979,6 +988,7 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                         <input
                           type="date"
                           value={fills[r.id]?.due_date ?? ''}
+                          disabled={brief !== undefined}
                           onChange={(e) =>
                             setFills({
                               ...fills,
@@ -993,6 +1003,7 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                       <td style={{ paddingRight: 8 }}>
                         <select
                           value={fills[r.id]?.priority ?? ''}
+                          disabled={brief !== undefined}
                           onChange={(e) =>
                             setFills({
                               ...fills,
@@ -1009,8 +1020,19 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                           ))}
                         </select>
                       </td>
+                      <td style={{ paddingRight: 8 }}>
+                        {brief ? (
+                          <span className="row" style={{ gap: 6, alignItems: 'center' }}>
+                            <Link href={`/account/briefs/${brief.brief_id}`}>{brief.brief_id}</Link>
+                            <StatusBadge status={brief.status} />
+                          </span>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
                     </tr>
-                  ))}
+                    );
+                  })}
               </tbody>
             </table>
           </div>
