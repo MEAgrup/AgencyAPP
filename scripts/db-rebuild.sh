@@ -140,10 +140,16 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "135"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "136"
 check "entity_prefix"    "select count(*) from entity_prefix"    "37"
 check "sm_machines"      "select count(*) from sm_machines"      "30"
 check "notif_events"     "select count(*) from notif_events"     "67"
+# 136 = 135 + login_rate_limit_attempts (20260831180358_login_rate_limit.sql —
+#       reconstructed 2026-09-01 from the live `supabase_migrations` ledger;
+#       the table was already applied to CDPS SG with no local file, see
+#       docs/DECISIONS.md). "Internal murni" (zero RLS policy, zero grant) ⇒
+#       nol prefix/mesin/event baru: entity_prefix/sm_machines/notif_events
+#       TETAP 37/30/67.
 # 135 = 134 + client_contacts (20260905010000_m15c2_client_portal_auth.sql,
 #       M15-C2: the Client Portal contact's Supabase Auth link table — third
 #       non-HRIS realm, same shape as vendor_accounts). The companion migration
