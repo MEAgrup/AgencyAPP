@@ -56,6 +56,13 @@ const CREATIVE = 'Creative';
 const ADS = 'Ads';
 const KOL = 'KOL';
 const LIVE_STREAM = 'Live Stream';
+// M16/M17 (DECISIONS.md 2026-08-28/2026-09-01): two later divisions, registered
+// in `division_registry` / `packages/core/src/division.ts`. Neither has a
+// bespoke board page yet (no /ai-optimizer or /store-ops, unlike the four
+// above) — both reach their Brief queue through /tasks (division mode),
+// mirroring how Account/Ops already work without a dedicated board.
+const AI_OPTIMIZER = 'AI Optimizer';
+const STORE_OPS = 'Store Operation';
 
 /**
  * Case-insensitive division match. `/me` returns canonical capitalized
@@ -179,22 +186,42 @@ const DELIVERY_LINKS: NavItem[] = [
       isLead(role, CREATIVE) ||
       isLead(role, ADS) ||
       isLead(role, KOL) ||
-      isLead(role, LIVE_STREAM),
+      isLead(role, LIVE_STREAM) ||
+      // AI Optimizer joined the RM-D6 division-note machinery in M17
+      // (`wrr_divisi`/`wrr_catatan_divisi` CHECK, migration
+      // 20260831060000) — recap.ts DIVISIONS (`kuotaSatuanNames()`) now
+      // includes it. Store Operation stays OUT of that CHECK (no task
+      // quota yet, LT-2 still open) so it does not get this gate.
+      isLead(role, AI_OPTIMIZER),
   },
-  // M12: `/my-tasks` is own-scoped, and Task PICs are staff of the four
-  // execution divisions (`account.ALLOWED_DIVISIONS`); the AM sees the tasks of
-  // clients they own (`task.canViewTask`). Sales/Marketing/Finance are never
-  // task owners.
+  // M12: `/my-tasks` is own-scoped, and Task PICs are staff of the execution
+  // divisions (`account.ALLOWED_DIVISIONS` = `division.kuotaSatuanNames()`,
+  // which grew to include AI Optimizer in M17); the AM sees the tasks of
+  // clients they own (`task.canViewTask`, which has no division allowlist at
+  // all — any division's staff/lead can view their own division's tasks).
+  // Store Operation has no task-quota catalog yet (LT-2 open) but its Briefs
+  // still flow through the same brief_task engine and its queue is already
+  // reachable here (`DIVISI_KERJA`, lib/divisions.ts) — included for the same
+  // "hiding something reachable = regression" reason as the rest.
+  // Sales/Marketing/Finance are never task owners.
   {
     href: '/tasks',
     label: 'Task Execution',
-    access: ownedBy(ACCOUNT, CREATIVE, ADS, KOL, LIVE_STREAM),
+    access: ownedBy(ACCOUNT, CREATIVE, ADS, KOL, LIVE_STREAM, AI_OPTIMIZER, STORE_OPS),
   },
-  // The four division Brief queues — see divisionQueue().
+  // The four bespoke division Brief-queue boards — see divisionQueue().
   { href: '/creative', label: 'Creative', access: divisionQueue(CREATIVE) },
   { href: '/ads', label: 'Ads', access: divisionQueue(ADS) },
   { href: '/kol', label: 'KOL', access: divisionQueue(KOL) },
   { href: '/livestream', label: 'Live Stream', access: divisionQueue(LIVE_STREAM) },
+  // AI Optimizer / Store Operation (M16/M17, DECISIONS.md 2026-09-01): same
+  // read gate as the four boards above (`divisionQueue` mirrors
+  // `account.listDivisionQueue` exactly — the same server call `/tasks` makes
+  // in "division mode") but neither has a bespoke board page yet — both land
+  // on the generic Task Execution queue, prefiltered via `?division=`. Swap
+  // the href for a dedicated page if/when one is built.
+  { href: '/tasks?division=AI+Optimizer', label: 'AI Optimizer', access: divisionQueue(AI_OPTIMIZER) },
+  { href: '/tasks?division=Store+Operation', label: 'Store Operation', access: divisionQueue(STORE_OPS) },
 ];
 
 // Alat mandiri — utilitas HTML self-contained yang di-embed via iframe

@@ -7,7 +7,17 @@ import type { Role } from '@/lib/types';
 import { visibleNav, type NavItem } from '@/lib/nav';
 import styles from './Shell.module.css';
 
+/**
+ * Plain pathname match. A couple of nav items carry a query string
+ * (`/tasks?division=...` — AI Optimizer / Store Operation, DECISIONS.md
+ * 2026-09-01, parked on the generic Task Execution queue in lieu of a bespoke
+ * board page); those are deliberately never marked active — telling them apart
+ * from plain "Task Execution" would need `useSearchParams()` here, which would
+ * need a Suspense boundary around every page this shell renders, more than a
+ * nav-highlight nicety is worth. They still navigate and filter correctly.
+ */
 function isActive(pathname: string, href: string) {
+  if (href.includes('?')) return false;
   if (href === '/') return pathname === '/';
   return pathname === href || pathname.startsWith(`${href}/`);
 }

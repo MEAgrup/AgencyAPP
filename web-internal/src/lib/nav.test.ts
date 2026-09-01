@@ -113,6 +113,25 @@ describe('visibleNav — the delivery divisions (symmetry)', () => {
     { division: 'Live Stream', own: '/livestream', foreign: ['/creative', '/ads', '/kol'] },
   ];
 
+  it('AI Optimizer / Store Operation staff see their own filtered Task Execution link, not the bespoke boards', () => {
+    for (const [division, own] of [
+      ['AI Optimizer', '/tasks?division=AI+Optimizer'],
+      ['Store Operation', '/tasks?division=Store+Operation'],
+    ] as const) {
+      const seen = hrefs(role(division, 'staff'));
+      expect(seen, `${division} staff should see ${own}`).toContain(own);
+      expect(seen, `${division} staff should still see /tasks`).toContain('/tasks');
+      for (const href of ['/creative', '/ads', '/kol', '/livestream']) {
+        expect(seen, `${division} must not see ${href}`).not.toContain(href);
+      }
+    }
+  });
+
+  it('AI Optimizer and Store Operation do not see each other\'s filtered link', () => {
+    expect(hrefs(role('AI Optimizer', 'staff'))).not.toContain('/tasks?division=Store+Operation');
+    expect(hrefs(role('Store Operation', 'staff'))).not.toContain('/tasks?division=AI+Optimizer');
+  });
+
   for (const { division, own, foreign } of cases) {
     it(`${division} staff sees only its own Brief queue`, () => {
       const seen = hrefs(role(division, 'staff'));
@@ -238,15 +257,22 @@ describe('visibleNav — Rekap Mingguan (M6D two-party access)', () => {
   });
 
   it('a lead of a touching execution division sees it (fills their division note)', () => {
-    for (const division of ['Creative', 'Ads', 'KOL', 'Live Stream']) {
+    // AI Optimizer joined this list in M17 (wrr_divisi/wrr_catatan_divisi CHECK,
+    // migration 20260831060000) — recap.ts DIVISIONS now includes it.
+    for (const division of ['Creative', 'Ads', 'KOL', 'Live Stream', 'AI Optimizer']) {
       expect(hrefs(role(division, 'lead')), `${division} lead should see /account/rekap`).toContain('/account/rekap');
     }
   });
 
   it('execution-division STAFF do NOT see it (RM-D6 note is lead-scoped)', () => {
-    for (const division of ['Creative', 'Ads', 'KOL', 'Live Stream']) {
+    for (const division of ['Creative', 'Ads', 'KOL', 'Live Stream', 'AI Optimizer']) {
       expect(hrefs(role(division, 'staff')), `${division} staff must not see /account/rekap`).not.toContain('/account/rekap');
     }
+  });
+
+  it('Store Operation never sees it (no task-quota / wrr_divisi row yet, LT-2 open)', () => {
+    expect(hrefs(role('Store Operation', 'lead'))).not.toContain('/account/rekap');
+    expect(hrefs(role('Store Operation', 'staff'))).not.toContain('/account/rekap');
   });
 
   it('Sales / Marketing / Finance leads never see it (not a touching division)', () => {
@@ -306,6 +332,8 @@ describe('visibleNav — layered OD / Director', () => {
       '/admin/employees',
       '/admin/vendor-accounts',
       '/portal/management',
+      '/tasks?division=AI+Optimizer',
+      '/tasks?division=Store+Operation',
     ]) {
       expect(seen, `OD should see ${href}`).toContain(href);
     }
