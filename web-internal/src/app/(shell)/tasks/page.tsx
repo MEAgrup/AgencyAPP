@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { Suspense, useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { isAccountLead, isAccountStaff } from '@/lib/account';
@@ -21,7 +22,7 @@ type ViewMode = 'mine' | 'division';
 // use their own engines) — they show read-only, without a link into task detail.
 const EXECUTABLE_TYPES = new Set(['brief', 'asset']);
 
-export default function TasksListPage() {
+function TasksListPage() {
   const { role } = useAuth();
   // An AM landing here looking for "how do I onboard my new client" is looking in
   // the wrong module: M12 executes work that ALREADY exists as a Brief or Asset,
@@ -30,8 +31,14 @@ export default function TasksListPage() {
   // place that owns it.
   const showOnboardingPointer = isAccountStaff(role) || isAccountLead(role);
 
-  const [mode, setMode] = useState<ViewMode>('mine');
-  const [division, setDivision] = useState<string>('');
+  // `?division=` prefills "Antrian Divisi" so a sidebar link can point straight
+  // at one division's Brief queue (AI Optimizer / Store Operation, DECISIONS.md
+  // 2026-09-01 — neither has a bespoke board page like /creative or /kol, so
+  // their nav item lands here instead). Blank param = unchanged 'mine' default.
+  const initialDivision = useSearchParams().get('division') ?? '';
+
+  const [mode, setMode] = useState<ViewMode>(initialDivision ? 'division' : 'mine');
+  const [division, setDivision] = useState<string>(initialDivision);
   const [assigneeInput, setAssigneeInput] = useState('');
   const [appliedAssignee, setAppliedAssignee] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
@@ -272,5 +279,13 @@ export default function TasksListPage() {
         )}
       </section>
     </div>
+  );
+}
+
+export default function TasksPage() {
+  return (
+    <Suspense fallback={<div className="stack"><p className="muted">Memuat...</p></div>}>
+      <TasksListPage />
+    </Suspense>
   );
 }
