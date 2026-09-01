@@ -228,6 +228,11 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
   // Brief one-click: per-row { due_date, priority } the AM fills before inheriting.
   const [fills, setFills] = useState<Record<number, { due_date: string; priority: string }>>({});
   const [inheritMsg, setInheritMsg] = useState<string | null>(null);
+  // true when the last run skipped at least one row as `di_luar` — that reason means
+  // the row itself carries no Service/pilar anchor (PC-3 was left "Di Luar Strategi/Service"
+  // at creation), which the AM cannot fix by re-clicking; the hint below points at the
+  // one real remedy (Section E on the Strategi, then a newly-anchored row).
+  const [inheritDiLuarHint, setInheritDiLuarHint] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -352,6 +357,7 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
     setActing(true);
     setError(null);
     setInheritMsg(null);
+    setInheritDiLuarHint(false);
     try {
       const res = await inheritBriefsFromPlan(id, list);
       const skipTxt = res.skipped
@@ -360,6 +366,7 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
       setInheritMsg(
         `${res.created.length} Brief dibuat` + (skipTxt ? ` · dilewati — ${skipTxt}` : ''),
       );
+      setInheritDiLuarHint(res.skipped.some((s) => s.reason === 'di_luar'));
       await load();
     } catch (err) {
       setError(errorMessage(err));
@@ -938,7 +945,7 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
       {/* -------- Brief one-click (RAB-16) -------- */}
       {canInherit && rows.some((r) => r.kuota > 0) && (
         <div className="card">
-          <div className="cardHeader">Warisi baris jadi Brief (satu klik)</div>
+          <div className="cardHeader">Berikan Brief (satu klik)</div>
           <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
             Isi jatuh tempo + prioritas per baris; sisanya (divisi, kuota, satuan, hasil, SKU
             sasaran, budget) diwarisi otomatis ke instruksi Brief. Baris tanpa isian dilewati.
@@ -1014,10 +1021,18 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
               disabled={acting}
               onClick={() => void runInherit()}
             >
-              Warisi semua
+              Berikan Brief
             </button>
             {inheritMsg && <span className="muted" style={{ fontSize: 12 }}>{inheritMsg}</span>}
           </div>
+          {inheritDiLuarHint && (
+            <p className="muted" style={{ fontSize: 11, color: '#b45309', marginTop: 8 }}>
+              &ldquo;Baris di luar strategi/service&rdquo; berarti baris itu sendiri tidak menunjuk pilar
+              Strategi atau Service manapun — tidak bisa diperbaiki dengan klik ulang. Baris yang sudah
+              dibuat tidak bisa diedit; isi dulu Section E (pilar) di Strategi lewat revisi, lalu buat
+              baris Plan baru yang menunjuk pilar tersebut (atau ke Service tertentu untuk Plan Satuan).
+            </p>
+          )}
         </div>
       )}
 
