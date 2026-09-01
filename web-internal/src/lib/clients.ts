@@ -105,6 +105,24 @@ export function voidService(serviceId: string): Promise<VoidResult> {
   return api.post<VoidResult>(`/services/${serviceId}/void`);
 }
 
+// client.PendingHoldRequest — one Service in [Hold Requested], for the
+// "Perlu Persetujuan Saya" queue (GET /services/hold-requests).
+export interface PendingHoldRequest {
+  service_id: string;
+  client_id: string;
+  toko: string;
+  nama_pic: string;
+  service_name: string;
+  owner_am: string | null;
+  owner_am_nama: string;
+  updated_at: string;
+}
+
+/** GET /services/hold-requests — every Service in [Hold Requested], oldest first (Head of Account / Director). */
+export function listPendingHoldRequests(): Promise<{ data: PendingHoldRequest[] }> {
+  return api.get<{ data: PendingHoldRequest[] }>('/services/hold-requests');
+}
+
 /** T-2b: AM MENGAJUKAN hold ([In Execution] → [Hold Requested]); reason wajib. Head lalu ACC/tolak. */
 export function requestHoldService(serviceId: string, reason: string): Promise<{ ok: boolean }> {
   return api.post<{ ok: boolean }>(`/services/${serviceId}/hold`, { reason });

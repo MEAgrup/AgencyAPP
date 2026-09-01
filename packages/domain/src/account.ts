@@ -1096,6 +1096,50 @@ export async function listStrategies(sql: Queryable, actor: Actor): Promise<Stra
   return rows.map(rowToStrategy);
 }
 
+/** One Strategy & Plan waiting on the Head of Account's call — either a fresh submission or a pending GMV adjustment. */
+export interface PendingStrategyReview {
+  strategyId: string;
+  serviceId: string;
+  clientId: string;
+  toko: string;
+  namaPic: string;
+  status: string;
+  gmvAdjustmentStatus: string;
+  createdBy: string;
+  createdByNama: string;
+  createdAt: Date;
+}
+
+/**
+ * pendingStrategyReviews lists every Strategy & Plan `canApproveStrategy` may
+ * still act on — [Strategy Submitted for Approval], or an out-of-tolerance GMV
+ * adjustment stuck at `menunggu_persetujuan` — oldest first. The "Perlu
+ * Persetujuan Saya" queue for Account lead / Director. `strategy_plans_select`
+ * RLS also lets the owning AM read their own row (so they can watch it), but
+ * this is an approval queue, not a visibility list — gates explicitly and
+ * returns empty for anyone who cannot actually decide.
+ */
+export async function pendingStrategyReviews(sql: Queryable, actor: Actor): Promise<PendingStrategyReview[]> {
+  if (!canApproveStrategy(actor)) return [];
+  const rows = await sql<{
+    id: string; service_id: string; client_id: string; toko: string; nama_pic: string;
+    status: string; gmv_adjustment_status: string; created_by: string; created_by_nama: string | null; created_at: Date;
+  }[]>`
+    select sp.id, sp.service_id, sv.client_id, c.toko, c.nama_pic, sp.status, sp.gmv_adjustment_status,
+           sp.created_by, coalesce(e.nama, sp.created_by) as created_by_nama, sp.created_at
+      from strategy_plans sp
+      join services sv on sv.id = sp.service_id
+      join clients c on c.id = sv.client_id
+      left join employees e on e.employee_id = sp.created_by
+     where sp.status = ${STRATEGY_STATUS_SUBMITTED} or sp.gmv_adjustment_status = ${GMV_ADJ_PENDING}
+     order by sp.created_at asc, sp.id asc`;
+  return rows.map((r) => ({
+    strategyId: r.id, serviceId: r.service_id, clientId: r.client_id, toko: r.toko, namaPic: r.nama_pic,
+    status: r.status, gmvAdjustmentStatus: r.gmv_adjustment_status,
+    createdBy: r.created_by, createdByNama: r.created_by_nama ?? r.created_by, createdAt: r.created_at,
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // The AM's Service queue (§3 Rule 4) — the only door into §4/§5.
 //

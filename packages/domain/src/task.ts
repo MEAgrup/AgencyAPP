@@ -705,8 +705,10 @@ export interface PendingBlockRequest {
   entityId: string;
   division: string;
   clientId: string;
+  toko: string;
   reason: string;
   requestedBy: string;
+  requestedByNama: string;
   createdAt: Date;
 }
 
@@ -718,22 +720,28 @@ export interface PendingBlockRequest {
  */
 export async function pendingBlockRequests(sql: Queryable, actor: Actor): Promise<PendingBlockRequest[]> {
   const briefRows = await sql<
-    { id: string; entity_id: string; division: string; client_id: string; reason: string; requested_by: string; created_at: Date }[]
+    { id: string; entity_id: string; division: string; client_id: string; toko: string; reason: string; requested_by: string; requested_by_nama: string | null; created_at: Date }[]
   >`
-    select r.id, r.brief_id as entity_id, b.assigned_division as division, sv.client_id, r.reason, r.requested_by, r.created_at
+    select r.id, r.brief_id as entity_id, b.assigned_division as division, sv.client_id, c.toko, r.reason,
+           r.requested_by, coalesce(e.nama, r.requested_by) as requested_by_nama, r.created_at
       from brief_block_requests r
       join briefs b on b.id = r.brief_id
       join services sv on sv.id = b.service_id
+      join clients c on c.id = sv.client_id
+      left join employees e on e.employee_id = r.requested_by
      where r.status = 'pending'
      order by r.created_at asc, r.id asc`;
   const assetRows = await sql<
-    { id: string; entity_id: string; division: string; client_id: string; reason: string; requested_by: string; created_at: Date }[]
+    { id: string; entity_id: string; division: string; client_id: string; toko: string; reason: string; requested_by: string; requested_by_nama: string | null; created_at: Date }[]
   >`
-    select r.id, r.asset_id as entity_id, b.assigned_division as division, sv.client_id, r.reason, r.requested_by, r.created_at
+    select r.id, r.asset_id as entity_id, b.assigned_division as division, sv.client_id, c.toko, r.reason,
+           r.requested_by, coalesce(e.nama, r.requested_by) as requested_by_nama, r.created_at
       from asset_block_requests r
       join assets a on a.id = r.asset_id
       join briefs b on b.id = a.brief_id
       join services sv on sv.id = b.service_id
+      join clients c on c.id = sv.client_id
+      left join employees e on e.employee_id = r.requested_by
      where r.status = 'pending'
      order by r.created_at asc, r.id asc`;
   const rows = [
@@ -743,8 +751,9 @@ export async function pendingBlockRequests(sql: Queryable, actor: Actor): Promis
   return rows
     .filter((r) => permission.isLead(actor, r.division))
     .map((r) => ({
-      id: r.id, source: r.source, entityId: r.entity_id, division: r.division, clientId: r.client_id,
-      reason: r.reason, requestedBy: r.requested_by, createdAt: r.created_at,
+      id: r.id, source: r.source, entityId: r.entity_id, division: r.division, clientId: r.client_id, toko: r.toko,
+      reason: r.reason, requestedBy: r.requested_by, requestedByNama: r.requested_by_nama ?? r.requested_by,
+      createdAt: r.created_at,
     }));
 }
 

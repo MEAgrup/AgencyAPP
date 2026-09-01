@@ -412,6 +412,28 @@ export function toStrategyInput(b: {
   };
 }
 
+/** GET /account/strategy-reviews row — the "Perlu Persetujuan Saya" Strategi queue. */
+export interface PendingStrategyReviewWire {
+  strategy_id: string;
+  service_id: string;
+  client_id: string;
+  toko: string;
+  nama_pic: string;
+  status: string;
+  gmv_adjustment_status: string;
+  created_by: string;
+  created_by_nama: string;
+  created_at: string;
+}
+
+export function pendingStrategyReviewToWire(r: account.PendingStrategyReview): PendingStrategyReviewWire {
+  return {
+    strategy_id: r.strategyId, service_id: r.serviceId, client_id: r.clientId, toko: r.toko, nama_pic: r.namaPic,
+    status: r.status, gmv_adjustment_status: r.gmvAdjustmentStatus,
+    created_by: r.createdBy, created_by_nama: r.createdByNama, created_at: r.createdAt.toISOString(),
+  };
+}
+
 // --- M6 Account & Service, Cluster 3 (Briefs) ---
 
 /** module6_account.Brief — a Brief record (path-dependent + recurring fields omitempty). */
@@ -706,15 +728,22 @@ export function blockRequestToWire(b: task.BlockRequest): BlockRequestWire {
   };
 }
 
-/** module12_task.PendingBlockRequest — one open request in the SPV/Lead queue. */
+/**
+ * module12_task.PendingBlockRequest — one open request in the SPV/Lead queue.
+ * `toko`/`requested_by_nama` (2026-08-31, "Perlu Persetujuan Saya") let the
+ * combined approval inbox show a client name instead of a bare id — additive,
+ * `/portal/team`'s `block_queue` gets them too.
+ */
 export interface PendingBlockRequestWire {
   id: string;
   source: string;
   entity_id: string;
   division: string;
   client_id: string;
+  toko: string;
   reason: string;
   requested_by: string;
+  requested_by_nama: string;
   created_at: string;
 }
 
@@ -725,8 +754,10 @@ export function pendingBlockRequestToWire(b: task.PendingBlockRequest): PendingB
     entity_id: b.entityId,
     division: b.division,
     client_id: b.clientId,
+    toko: b.toko,
     reason: b.reason,
     requested_by: b.requestedBy,
+    requested_by_nama: b.requestedByNama,
     created_at: b.createdAt.toISOString(),
   };
 }
@@ -2361,6 +2392,28 @@ export function renewalDetailToWire(r: renewal.RenewalDetail): RenewalDetailWire
   };
 }
 
+/** GET /kol/escalations row — the "Perlu Persetujuan Saya" KOL escalation queue (§10.1). */
+export interface PendingEscalationWire {
+  booking_id: string;
+  brief_id: string;
+  client_id: string;
+  toko: string;
+  creator_name: string;
+  division: string;
+  coordinator: string;
+  coordinator_nama: string;
+  owner_am: string;
+  updated_at: string;
+}
+
+export function pendingEscalationToWire(r: kol.PendingEscalation): PendingEscalationWire {
+  return {
+    booking_id: r.bookingId, brief_id: r.briefId, client_id: r.clientId, toko: r.toko, creator_name: r.creatorName,
+    division: r.division, coordinator: r.coordinator, coordinator_nama: r.coordinatorNama, owner_am: r.ownerAm,
+    updated_at: r.updatedAt.toISOString(),
+  };
+}
+
 // --- M4 Client Record detail (Go clientView / serviceViews) ---
 
 /** module4_client.ServiceLine — web-internal's `ServiceLine` (lib/clients.ts). */
@@ -2939,6 +2992,25 @@ export function financeScanResultToWire(s: finance.ScanSummary): FinanceScanResu
     overdue_flagged: s.markedOverdue,
     h3_reminders_sent: s.upcomingNotified,
     contract_flags_raised: s.contractFlagged,
+  };
+}
+
+/** GET /services/hold-requests row — the "Perlu Persetujuan Saya" Hold Service queue (T-2b). */
+export interface PendingHoldRequestWire {
+  service_id: string;
+  client_id: string;
+  toko: string;
+  nama_pic: string;
+  service_name: string;
+  owner_am: string | null;
+  owner_am_nama: string;
+  updated_at: string;
+}
+
+export function pendingHoldRequestToWire(r: client.PendingHoldRequest): PendingHoldRequestWire {
+  return {
+    service_id: r.serviceId, client_id: r.clientId, toko: r.toko, nama_pic: r.namaPic, service_name: r.serviceName,
+    owner_am: r.ownerAm, owner_am_nama: r.ownerAmNama, updated_at: r.updatedAt.toISOString(),
   };
 }
 

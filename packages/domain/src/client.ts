@@ -646,6 +646,46 @@ export async function rejectHold(sql: Sql, actor: Actor, serviceId: string, reas
   });
 }
 
+/** One Service sitting in [Hold Requested], waiting on the Head of Account's call. */
+export interface PendingHoldRequest {
+  serviceId: string;
+  clientId: string;
+  toko: string;
+  namaPic: string;
+  serviceName: string;
+  ownerAm: string | null;
+  ownerAmNama: string;
+  updatedAt: Date;
+}
+
+/**
+ * pendingHoldRequests lists every Service in [Hold Requested], oldest first —
+ * the "Perlu Persetujuan Saya" queue for Head of Account / Director
+ * (`canApproveHold`'s exact set). Row read itself is RLS-scoped
+ * (`services_select`'s Account-lead-division arm already covers this), but an
+ * owning AM would ALSO pass that RLS arm for their own client — this is an
+ * approval queue, not a visibility list, so it gates explicitly and returns
+ * empty for anyone who cannot actually decide.
+ */
+export async function pendingHoldRequests(sql: Queryable, actor: Actor): Promise<PendingHoldRequest[]> {
+  if (!canApproveHold(actor)) return [];
+  const rows = await sql<{
+    id: string; client_id: string; toko: string; nama_pic: string; name: string;
+    assigned_am_id: string | null; owner_am_nama: string | null; updated_at: Date;
+  }[]>`
+    select s.id, s.client_id, c.toko, c.nama_pic, s.name, c.assigned_am_id,
+           coalesce(am.nama, c.assigned_am_id) as owner_am_nama, s.updated_at
+      from services s
+      join clients c on c.id = s.client_id
+      left join employees am on am.employee_id = c.assigned_am_id
+     where s.status = ${SERVICE_HOLD_REQUESTED}
+     order by s.updated_at asc, s.id asc`;
+  return rows.map((r) => ({
+    serviceId: r.id, clientId: r.client_id, toko: r.toko, namaPic: r.nama_pic, serviceName: r.name,
+    ownerAm: r.assigned_am_id, ownerAmNama: r.owner_am_nama ?? '', updatedAt: r.updated_at,
+  }));
+}
+
 /**
  * resumeService moves a Service [On Hold] → [In Execution] (T-2b). Head of Account
  * / Director. Audited; notifies the owning AM. A Service not [On Hold] is rejected

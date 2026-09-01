@@ -107,6 +107,16 @@ const MAIN_LINKS: NavItem[] = [
   // (Phase 0 §9 — notifications are per-recipient) / MSL read is open to any
   // authenticated actor (only editing is gated: msl.canEditMasterServices).
   { href: '/', label: 'Dashboard' },
+  // "Perlu Persetujuan Saya" — every real pending-approval queue combined:
+  // Sales negotiation, Renewal/Cross-Sell, Finance TCR, Lead Delete, Hold
+  // Service, M12 Block, KOL escalation, Strategi review (owner decision
+  // 2026-08-31 — started Sales+Renewal only, widened to all ~8 on request;
+  // Plan Gate / Interview left out, see the page's own doc comment for why).
+  // Each section is its own already-scoped read (RLS or an explicit
+  // `canApprove*` gate) — this menu item is visible to every division that
+  // owns at least one queue; an empty page for anyone else is the honest
+  // answer, same posture as `/leads/delete-requests` (nav.ts header note).
+  { href: '/persetujuan', label: 'Perlu Persetujuan Saya', access: ownedBy(SALES, ACCOUNT, FINANCE, KOL) },
   // Ungated on purpose: every authenticated employee must be able to reach their
   // own password change — including one whose account is under a forced change.
   { href: '/akun/password', label: 'Ganti Password' },
@@ -135,12 +145,6 @@ const ACQUISITION_LINKS: NavItem[] = [
   // already covers OD/Director (nav.ts:85-87) — the per-row scope (staff = own,
   // lead/SPV = division) is `salesperf.scopeFor`'s job, not the menu's.
   { href: '/sales/kinerja', label: 'Kinerja Sales', access: ownedBy(SALES) },
-  // "Perlu Persetujuan Saya" — Sales negotiation attempts + Renewal/Cross-Sell
-  // requests in Pending Approval, combined (owner decision 2026-08-31, scoped
-  // small on purpose — see the page's own doc comment). Both reads are
-  // RLS-scoped exactly like /sales (staff = own, lead/SPV = division-wide,
-  // OD/Director = everywhere via ownedBy), so the gate mirrors /sales' own.
-  { href: '/persetujuan', label: 'Perlu Persetujuan Saya', access: ownedBy(SALES) },
   // Hard server gate: `leads.canReadPool` (Sales any level) + `leads.leadListScope`
   // (Marketing any level, Sales lead). Every other division gets a 403, not an
   // empty list. Whether Sales STAFF should also reach the Database (M1 §9.1
