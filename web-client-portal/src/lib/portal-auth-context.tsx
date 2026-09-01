@@ -6,11 +6,15 @@
  * sessionStorage-cache-then-revalidate pattern), adapted to a standalone app
  * rather than a route group sharing a tree with an internal `AuthProvider`.
  *
- * `POST /auth/logout` is realm-agnostic (clears the shared session cookie
- * only) — reused as-is, same as the vendor realm does.
+ * `POST /auth/logout` is shared with every realm, but this one passes
+ * `{realm: 'client-portal'}` so it clears THIS realm's own cookie
+ * (`cdps_client_access_token`) rather than the general one employee/vendor
+ * share — see `logout()` below and the route's doc comment for why
+ * (2026-09-01, Client Portal sharing app.meagency.co.id with web-internal).
  */
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api } from '@/lib/api';
+import { clearActivity } from '@/lib/idle-timeout';
 import type { ClientContactMeResponse, ClientContactProfile } from '@/lib/types';
 
 interface PortalAuthState {
@@ -99,10 +103,16 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await api.post('/auth/logout');
+      // { realm: 'client-portal' } tells the shared /auth/logout which
+      // cookie to clear — Client Portal now shares app.meagency.co.id with
+      // web-internal, so a browser can hold both an internal AND a
+      // client-contact session cookie; logging out here must not also end
+      // the other one. See apps/api/.../auth/logout/route.ts's doc comment.
+      await api.post('/auth/logout', { realm: 'client-portal' });
     } finally {
       setContact(null);
       writeCachedContact(null);
+      clearActivity();
     }
   }, []);
 

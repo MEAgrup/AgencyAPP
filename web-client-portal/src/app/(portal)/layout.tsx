@@ -11,13 +11,22 @@
  * an admin screen happens to display. (The employee realm has the DB flag but
  * no working UI enforcement anywhere yet — noted as a gap by the research
  * that went into this cluster; Client Portal does not inherit that gap.)
+ *
+ * ALSO enforces the 4-hour idle timeout (spec §3.5, OQ-3) — checked once on
+ * mount (catches a tab reopened after being idle past the mark) and every
+ * minute after that (catches a tab left open and running). A real logout
+ * (revokes the GoTrue session server-side, not just a client-side redirect)
+ * followed by `/login?reason=idle`, same message surface the login page
+ * already reads for other flows.
  */
 import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { usePortalAuth } from '@/lib/portal-auth-context';
+import { checkIdleExpired } from '@/lib/idle-timeout';
 import styles from './portal.module.css';
 
 const PASSWORD_PATH = '/akun/password';
+const IDLE_CHECK_INTERVAL_MS = 60_000;
 
 // NOTE: `PortalAuthProvider` is mounted once in the ROOT layout
 // (src/app/layout.tsx), not here — unlike web-internal (which needs an
@@ -42,6 +51,20 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
       router.replace(PASSWORD_PATH);
     }
   }, [loading, contact, mustChange, pathname, router]);
+
+  useEffect(() => {
+    if (loading || !contact) return;
+
+    async function enforceIdleTimeout() {
+      if (!checkIdleExpired()) return;
+      await logout();
+      router.replace('/login?reason=idle');
+    }
+
+    enforceIdleTimeout();
+    const id = setInterval(enforceIdleTimeout, IDLE_CHECK_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [loading, contact, logout, router]);
 
   if (loading) {
     return <div className="pageLoading">Memuat...</div>;

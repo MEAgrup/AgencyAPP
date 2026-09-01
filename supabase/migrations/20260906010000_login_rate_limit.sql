@@ -27,15 +27,6 @@
 --      recording (a blocked attempt doesn't itself consume budget, so the
 --      window clears on schedule rather than being extended by the very
 --      requests it's blocking).
---
--- RECONCILIATION NOTE (2026-09-01): this file did not exist in the repo even
--- though the table+function were already live on CDPS SG (applied directly,
--- version 20260831180358) — reconstructed verbatim from
--- `supabase_migrations.schema_migrations.statements` so `db-rebuild.sh` and
--- any future `supabase db push` stay honest against production. NOT wired
--- into `apps/api` yet: `POST /auth/login` does not call
--- `check_login_rate_limit` — the DB half shipped, the TS half did not. See
--- docs/DECISIONS.md for the open item.
 -- ============================================================================
 
 CREATE TABLE login_rate_limit_attempts (

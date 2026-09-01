@@ -10,8 +10,12 @@
  * layout) because they read different endpoints and store different keys;
  * mounting both costs one harmless extra `/me` request on `/vendor/*` pages.
  *
- * `POST /auth/logout` is realm-agnostic (it only clears the shared session
- * cookie), so it is reused as-is — see apps/api/src/app/api/v1/auth/logout/route.ts.
+ * `POST /auth/logout` is reused as-is with no body — employee and vendor
+ * share the same session cookie (`cdps_access_token`), so the default
+ * (no `{realm: ...}` hint) clears exactly that one, same as `auth-context.tsx`.
+ * The Client Portal realm has its own separate cookie and passes an explicit
+ * hint instead — see apps/api/src/app/api/v1/auth/logout/route.ts's doc
+ * comment for why (2026-09-01, Client Portal sharing app.meagency.co.id).
  */
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api } from '@/lib/api';

@@ -23,7 +23,7 @@
  */
 import { auth, clientPortalAuth } from '@cdps/domain';
 import { permission } from '@cdps/core';
-import { actorFromToken, sessionCookie } from '@/lib/auth';
+import { actorFromToken, CLIENT_PORTAL_SESSION_COOKIE, sessionCookie } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { updatePassword } from '@/lib/gotrue';
 import { BadRequestError, handle, json, readJson } from '@/lib/http';
@@ -50,7 +50,7 @@ export async function POST(request: Request): Promise<Response> {
     const res = json({ status: 'ok' });
     // Recovery tokens carry their own exp claim; reuse it as the cookie TTL —
     // there is no separate `expires_in` here the way a fresh grant returns one.
-    res.headers.append('Set-Cookie', sessionCookie(accessToken, 3600));
+    res.headers.append('Set-Cookie', sessionCookie(accessToken, 3600, CLIENT_PORTAL_SESSION_COOKIE));
     return res;
   });
 }

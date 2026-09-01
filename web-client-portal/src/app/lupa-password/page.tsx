@@ -12,6 +12,7 @@
  * directly, same as the message below says.
  */
 import { useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { api, errorMessage } from '@/lib/api';
 import styles from '../login/page.module.css';
 
@@ -78,7 +79,7 @@ export default function LupaPasswordPage() {
         )}
 
         <div className={styles.links}>
-          <a href="/login">Kembali ke halaman masuk</a>
+          <Link href="/login">Kembali ke halaman masuk</Link>
         </div>
       </div>
     </div>

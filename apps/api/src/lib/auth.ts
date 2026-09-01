@@ -228,8 +228,25 @@ export function bearerToken(req: Request): string {
  * Name of the httpOnly cookie holding the GoTrue access token. The auth BFF
  * (/api/v1/auth/login) sets it; web-internal sends it back automatically with
  * `credentials: 'include'`, so browser pages never handle the token directly.
+ * Employee and vendor sessions both use this one — vendor already shares
+ * `web-internal`'s deploy/host, so it was never at risk of colliding with
+ * the employee cookie for a different reason (different browser, in
+ * practice) than the one below.
  */
 export const SESSION_COOKIE = 'cdps_access_token';
+
+/**
+ * Separate cookie for the client-contact realm (M15-C2). Owner decision
+ * 2026-09-01 (DECISIONS.md): Client Portal is served under
+ * `app.meagency.co.id/klien/*` — the SAME host as `web-internal` — so an
+ * employee/vendor session and a client-contact session in the same browser
+ * (an AM checking their own dashboard AND the Client Portal, say) would
+ * otherwise fight over one cookie slot, each login silently logging the
+ * other out. A second, independently-named cookie lets both coexist; see
+ * `tokenFromRequest`'s fallback below for how a request resolves whichever
+ * one applies.
+ */
+export const CLIENT_PORTAL_SESSION_COOKIE = 'cdps_client_access_token';
 
 /** Reads a named cookie from the request's Cookie header, or null. */
 export function cookieValue(req: Request, name: string): string | null {
@@ -262,6 +279,26 @@ export function tokenFromRequest(req: Request): string {
 }
 
 /**
+ * Same as `tokenFromRequest`, but reads the CLIENT-PORTAL cookie instead of
+ * the general one. Deliberately a separate function rather than a fallback
+ * inside `tokenFromRequest` — a fallback would mean whichever cookie
+ * happens to be checked first always wins when a browser holds BOTH at once
+ * (see CLIENT_PORTAL_SESSION_COOKIE's doc comment), silently resolving the
+ * WRONG realm's actor for whichever route loses the race. Each realm's own
+ * routes should ask for their own cookie explicitly instead of guessing.
+ */
+export function clientContactTokenFromRequest(req: Request): string {
+  const header = req.headers.get('authorization') ?? '';
+  const [scheme, value] = header.split(' ');
+  if (scheme?.toLowerCase() === 'bearer' && value) {
+    return value.trim();
+  }
+  const cookie = cookieValue(req, CLIENT_PORTAL_SESSION_COOKIE);
+  if (cookie) return cookie;
+  throw new UnauthorizedError('[sesi tidak valid, silahkan login kembali]');
+}
+
+/**
  * requireActor is the handler entry point: resolve the access token (bearer OR
  * session cookie), verify it, and resolve the Actor. Throws UnauthorizedError
  * (→ 401) when anything is missing or invalid.
@@ -271,15 +308,25 @@ export function requireActor(req: Request): Actor {
   return actorFromToken(tokenFromRequest(req), secret);
 }
 
-/** Serializes the Set-Cookie header that stores the session token (httpOnly,
- *  SameSite=Lax, Secure in production). `maxAgeSec` mirrors the token TTL. */
-export function sessionCookie(token: string, maxAgeSec: number): string {
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${secure}`;
+/** Same as `requireActor`, but for the client-contact realm's own routes
+ *  (see `clientContactTokenFromRequest`). */
+export function requireClientContactActor(req: Request): Actor {
+  const secret = process.env.SUPABASE_JWT_SECRET ?? '';
+  return actorFromToken(clientContactTokenFromRequest(req), secret);
 }
 
-/** Serializes the Set-Cookie header that clears the session token (logout). */
-export function clearedSessionCookie(): string {
+/** Serializes the Set-Cookie header that stores the session token (httpOnly,
+ *  SameSite=Lax, Secure in production). `maxAgeSec` mirrors the token TTL.
+ *  `cookieName` defaults to the general realm cookie; pass
+ *  `CLIENT_PORTAL_SESSION_COOKIE` for a client-contact session. */
+export function sessionCookie(token: string, maxAgeSec: number, cookieName: string = SESSION_COOKIE): string {
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
+  return `${cookieName}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${secure}`;
+}
+
+/** Serializes the Set-Cookie header that clears the session token (logout).
+ *  `cookieName` defaults to the general realm cookie, same as `sessionCookie`. */
+export function clearedSessionCookie(cookieName: string = SESSION_COOKIE): string {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  return `${cookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
 }

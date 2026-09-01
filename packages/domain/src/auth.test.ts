@@ -11,7 +11,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { createClient, withClaims, type Sql, type TransactionSql } from '@cdps/db';
 import { permission } from '@cdps/core';
-import { getMe, getVendorMe, NotFoundError } from './auth';
+import { enforceLoginRateLimit, getMe, getVendorMe, NotFoundError, RateLimitedError } from './auth';
 
 const URL = process.env.DATABASE_URL;
 const describeDb = describe.skipIf(!URL);
@@ -158,6 +158,7 @@ import {
   MAX_PASSWORD_BYTES,
   MIN_PASSWORD_LEN,
   MSG_EMPLOYEE_NOT_FOUND,
+  MSG_LOGIN_RATE_LIMITED,
   MSG_PASSWORD_INCOMPLETE,
   MSG_PASSWORD_TOO_LONG,
   MSG_PASSWORD_WEAK,
@@ -454,5 +455,41 @@ describe('password BI messages are the exact ported strings', () => {
     expect(MSG_SET_PASSWORD_DENIED).toBe('[anda tidak memiliki akses untuk mengatur password karyawan ini]');
     expect(MSG_EMPLOYEE_NOT_FOUND).toBe('[karyawan tidak ditemukan]');
     expect(MSG_PASSWORD_INCOMPLETE).toBe('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
+  });
+});
+
+describeDb('enforceLoginRateLimit (M15-C2 §5.2 OQ-5, DECISIONS O64)', () => {
+  it('allows attempts under the ceiling and blocks the one that crosses it', async () => {
+    await inRollback(async (tx) => {
+      const ip = '203.0.113.10'; // TEST-NET-3 (RFC 5737) — never a real caller
+
+      for (let i = 0; i < 10; i++) {
+        await expect(enforceLoginRateLimit(tx, ip)).resolves.toBeUndefined();
+      }
+      await expect(enforceLoginRateLimit(tx, ip)).rejects.toBeInstanceOf(RateLimitedError);
+    });
+  });
+
+  it('carries the exact BI rate-limit message', async () => {
+    await inRollback(async (tx) => {
+      const ip = '203.0.113.11';
+      for (let i = 0; i < 10; i++) {
+        await enforceLoginRateLimit(tx, ip);
+      }
+      await expect(enforceLoginRateLimit(tx, ip)).rejects.toThrow(MSG_LOGIN_RATE_LIMITED);
+    });
+  });
+
+  it('tracks each IP independently', async () => {
+    await inRollback(async (tx) => {
+      const blocked = '203.0.113.12';
+      const other = '203.0.113.13';
+      for (let i = 0; i < 10; i++) {
+        await enforceLoginRateLimit(tx, blocked);
+      }
+      await expect(enforceLoginRateLimit(tx, blocked)).rejects.toBeInstanceOf(RateLimitedError);
+      // A different IP still has its own full budget.
+      await expect(enforceLoginRateLimit(tx, other)).resolves.toBeUndefined();
+    });
   });
 });
