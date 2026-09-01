@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { api, errorMessage } from '@/lib/api';
 import { usePortalAuth } from '@/lib/portal-auth-context';
 import type { ClientContactMeResponse } from '@/lib/types';
@@ -96,7 +97,7 @@ export default function LoginPage() {
           </button>
         </form>
         <div className={styles.links}>
-          <a href="/lupa-password">Lupa password?</a>
+          <Link href="/lupa-password">Lupa password?</Link>
         </div>
       </div>
     </div>

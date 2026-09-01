@@ -12,6 +12,21 @@ const backendURL =
     ? 'https://agency-app-api.vercel.app'
     : 'http://127.0.0.1:3001');
 
+// Owner decision 2026-09-01 (DECISIONS.md): Client Portal is reachable under
+// THIS domain (app.meagency.co.id/klien/*) rather than its own — Next.js
+// "multi zones" pattern, same proxy technique as the backendURL rewrite
+// above, just fronting a second Next.js app instead of the API. The other
+// app owns `basePath: '/klien'` (web-client-portal/next.config.ts) so its
+// own routes/assets already expect the prefix; this rewrite only needs to
+// forward it unchanged. `CLIENT_PORTAL_URL` wins when set (per-environment),
+// otherwise the deployed web-client-portal in production, its local dev port
+// otherwise (run it with `-p 3002` while web-internal runs on 3000).
+const clientPortalURL =
+  process.env.CLIENT_PORTAL_URL ??
+  (process.env.NODE_ENV === 'production'
+    ? 'https://web-client-portal.vercel.app'
+    : 'http://127.0.0.1:3002');
+
 const nextConfig: NextConfig = {
   // Dev-only: allow accessing the dev server via 127.0.0.1 as well as localhost
   // (Next 16 blocks cross-origin requests to /_next/* dev resources by default).
@@ -21,6 +36,10 @@ const nextConfig: NextConfig = {
       {
         source: '/api/v1/:path*',
         destination: `${backendURL}/api/v1/:path*`,
+      },
+      {
+        source: '/klien/:path*',
+        destination: `${clientPortalURL}/klien/:path*`,
       },
     ];
   },

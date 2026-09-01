@@ -43,13 +43,17 @@ like any other login failure.
 20/IP/hr, spec §5.2) — waits on the complaint-form cluster itself (no
 endpoint exists yet to gate).
 
-**Deployed** (2026-08-31): Vercel project `web-client-portal` (team `meagency`), linked to this repo, root directory `web-client-portal`, same one-project-per-app pattern as `web-internal-mea`/`agency-app-api`. No env vars needed — the app only reads `BACKEND_URL`, which already falls back to the real `agency-app-api.vercel.app` in production. Live at `web-client-portal.vercel.app`; a custom domain (e.g. `portal.meagency.co.id`) is still an owner decision, not done here.
+**Deployed** (2026-08-31): Vercel project `web-client-portal` (team `meagency`), linked to this repo, root directory `web-client-portal`, same one-project-per-app pattern as `web-internal-mea`/`agency-app-api`. No env vars needed — the app only reads `BACKEND_URL`, which already falls back to the real `agency-app-api.vercel.app` in production.
+
+**Served under `app.meagency.co.id/klien/*`** (2026-09-01 follow-up, owner decision — `docs/DECISIONS.md`), not its own domain: `basePath: '/klien'` here (`next.config.ts`) + a matching path rewrite in `web-internal/next.config.ts` (Next.js "multi zones" — the exact proxy technique this repo already uses for the `apps/api` backend, just fronting a second Next.js app instead). `web-client-portal.vercel.app` itself is still live and still works (Vercel domain, unchanged) — it's now also reachable at `app.meagency.co.id/klien/*` via the proxy. **Every route in this app moved** (`/klien/login`, `/klien/`, `/klien/akun/password`, `/klien/lupa-password`, `/klien/reset-password`) — `next/link`/`useRouter` handle the prefix automatically; the few plain `<a href>` tags that predate this were switched to `next/link` since a raw anchor is NOT basePath-aware. **Session cookie split**: since Client Portal now shares a host with `web-internal`, `apps/api` gives the client-contact realm its own cookie (`CLIENT_PORTAL_SESSION_COOKIE`, distinct from employee/vendor's `SESSION_COOKIE`) so an AM with an internal session open who also logs into the Portal in the same browser doesn't silently log one or the other out — see `apps/api/src/lib/auth.ts`'s doc comments on `CLIENT_PORTAL_SESSION_COOKIE`/`requireClientContactActor`.
 
 **Infra prerequisites NOT satisfiable from this repo** (owner action):
 self-service email reset needs SMTP configured on the Supabase project
-(`CDPS SG`) plus the `web-client-portal` deploy URL added to the project's
-allowed redirect URLs — the code path is complete and correct, but no email
-actually sends until both are configured.
+(`CDPS SG`) plus the redirect URL added to the project's allowed list —
+now that the Portal has a real domain path, that should be
+`https://app.meagency.co.id/klien/reset-password` — the code path is
+complete and correct, but no email actually sends until both are
+configured.
 
 ## Separate auth realm (non-negotiable)
 

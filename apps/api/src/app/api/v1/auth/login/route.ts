@@ -26,10 +26,18 @@
  * DECISIONS.md O64) — 10 attempts/IP/15min, applied UNIFORMLY across all
  * three realms since this endpoint is shared and can't tell them apart until
  * after GoTrue has already run. See auth.enforceLoginRateLimit's doc comment.
+ *
+ * Client Portal is now served under `app.meagency.co.id/klien/*` — the SAME
+ * host as `web-internal` (owner decision 2026-09-01, DECISIONS.md) — so a
+ * client-contact session gets its OWN cookie (`CLIENT_PORTAL_SESSION_COOKIE`)
+ * instead of sharing `SESSION_COOKIE` with employee/vendor: otherwise an AM
+ * with an internal session open who also logs into the Client Portal in the
+ * same browser would silently log one or the other out, since both would be
+ * writing the same cookie slot.
  */
 import { account, auth, clientPortalAuth } from '@cdps/domain';
 import { permission } from '@cdps/core';
-import { actorFromToken, sessionCookie } from '@/lib/auth';
+import { actorFromToken, CLIENT_PORTAL_SESSION_COOKIE, sessionCookie } from '@/lib/auth';
 import { passwordGrant } from '@/lib/gotrue';
 import { db, readAsActor } from '@/lib/db';
 import { BadRequestError, clientIp, handle, json, readJson, UnauthorizedError } from '@/lib/http';
@@ -75,8 +83,9 @@ export async function POST(request: Request): Promise<Response> {
       throw err;
     }
 
+    const cookieName = permission.isClientContactActor(actor) ? CLIENT_PORTAL_SESSION_COOKIE : undefined;
     const res = json(profile);
-    res.headers.append('Set-Cookie', sessionCookie(session.access_token, session.expires_in));
+    res.headers.append('Set-Cookie', sessionCookie(session.access_token, session.expires_in, cookieName));
     return res;
   });
 }

@@ -12,7 +12,16 @@ const backendURL =
     ? 'https://agency-app-api.vercel.app'
     : 'http://127.0.0.1:3001');
 
+// Owner decision 2026-09-01 (DECISIONS.md): Client Portal is served under
+// app.meagency.co.id/klien/* rather than its own domain — Next.js "multi
+// zones" pattern, mirrored by the matching rewrite in
+// web-internal/next.config.ts. `basePath` makes every route/asset/next/link
+// navigation in THIS app resolve under `/klien` automatically; a handful of
+// plain <a href> tags that predate this were switched to next/link (see
+// src/app/login, /lupa-password, /reset-password) since a raw anchor does
+// NOT get basePath-prefixed the way next/link and useRouter do.
 const nextConfig: NextConfig = {
+  basePath: '/klien',
   allowedDevOrigins: ['127.0.0.1'],
   async rewrites() {
     return [

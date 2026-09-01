@@ -10,16 +10,25 @@
  *
  * A wrong-realm caller (valid employee/vendor session) gets 403
  * `[akun ini bukan akun kontak klien]`, not 401 — the session itself is fine.
+ *
+ * Reads `requireClientContactActor` (the CLIENT_PORTAL_SESSION_COOKIE-only
+ * accessor), not the general `requireActor` — Client Portal now shares
+ * `app.meagency.co.id` with `web-internal`, so a browser can legitimately
+ * hold BOTH cookies at once (an AM's own internal session, and a
+ * client-contact session used to check the Portal). This route is called on
+ * every Portal page load to hydrate the session, so it must always resolve
+ * the CLIENT cookie specifically — reading the general one first would make
+ * the Portal appear broken for exactly the AMs who need to verify it works.
  */
 import { account, auth, clientPortalAuth } from '@cdps/domain';
 import { permission } from '@cdps/core';
-import { requireActor } from '@/lib/auth';
+import { requireClientContactActor } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { handle, json, UnauthorizedError } from '@/lib/http';
 
 export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    const actor = requireClientContactActor(request);
     if (!permission.isClientContactActor(actor)) {
       throw new auth.ForbiddenError(clientPortalAuth.MSG_NOT_CLIENT_CONTACT);
     }

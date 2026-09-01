@@ -12,6 +12,7 @@
  */
 import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { api, errorMessage } from '@/lib/api';
 import { usePortalAuth } from '@/lib/portal-auth-context';
 import { parseAccessTokenFromHash } from '@/lib/recovery-token';
@@ -72,7 +73,7 @@ export default function ResetPasswordPage() {
               Link ini tidak valid atau sudah kedaluwarsa. Silakan minta link baru.
             </div>
             <div className={styles.links}>
-              <a href="/lupa-password">Minta link baru</a>
+              <Link href="/lupa-password">Minta link baru</Link>
             </div>
           </div>
         ) : (
