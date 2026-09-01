@@ -52,12 +52,30 @@ function formatDateTime(value: string) {
   return new Date(value).toLocaleString('id-ID');
 }
 
+const SECTION_LABELS = [
+  'Negosiasi Sales',
+  'Renewal/Cross-Sell',
+  'Finance — Perubahan Skema Pembayaran',
+  'Permintaan Hapus Lead',
+  'Permintaan Hold Service',
+  'Eskalasi KOL',
+  'Review Strategi & Plan',
+  'Permintaan Block Task — M12',
+] as const;
+
 export default function PerluPersetujuanPage() {
   const { role } = useAuth();
   // M12 Block Request comes from /portal/team, which 403s for anyone not a
   // division lead / Director (portal.go's own gate) — mirror the existing
   // /tasks/block-requests page's guard rather than firing a call sure to fail.
-  const canViewBlockQueue = Boolean(role?.director || role?.level === 'lead');
+  // A Director has no guaranteed home division (`docs/handoff/FE_SMOKE_REPORT_
+  // 20260719.md` #1 — the same `division kosong` 403 the dedicated
+  // /tasks/block-requests page already defers on): `getTeamPortal()` with no
+  // division param resolves to `actor.role.division`, and an empty one still
+  // 403s even for a Director. Only fire the call when a division actually
+  // resolves; a director-without-division simply sees this one section empty,
+  // same as they would on /tasks/block-requests.
+  const canViewBlockQueue = Boolean(role?.level === 'lead' || (role?.director && role.division));
 
   const [attempts, setAttempts] = useState<AttemptRow[] | null>(null);
   const [renewals, setRenewals] = useState<RenewalListRow[] | null>(null);
@@ -69,30 +87,41 @@ export default function PerluPersetujuanPage() {
   const [strategyReviews, setStrategyReviews] = useState<PendingStrategyReview[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Per-source failures — one queue erroring must not blank the other seven;
+  // this page's whole point is merging independently-scoped reads.
+  const [sectionErrors, setSectionErrors] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
+    setSectionErrors([]);
     try {
-      const [attemptRes, renewalRes, tcrRes, deleteRes, holdRes, escalationRes, strategyRes, blockRes] =
-        await Promise.all([
-          listAttempts(ATTEMPT_PENDING),
-          listAllRenewals(RENEWAL_PENDING),
-          listSchemeChangeQueue(),
-          listDeleteRequests(),
-          listPendingHoldRequests(),
-          listPendingEscalations(),
-          listPendingStrategyReviews(),
-          canViewBlockQueue ? getTeamPortal() : Promise.resolve(null),
-        ]);
-      setAttempts(attemptRes.data);
-      setRenewals(renewalRes.data);
-      setTcrs(tcrRes.data);
-      setDeleteRequests(deleteRes.data);
-      setHoldRequests(holdRes.data);
-      setEscalations(escalationRes.data);
-      setStrategyReviews(strategyRes.data);
-      setBlockRequests(blockRes ? blockRes.block_queue : []);
+      const results = await Promise.allSettled([
+        listAttempts(ATTEMPT_PENDING),
+        listAllRenewals(RENEWAL_PENDING),
+        listSchemeChangeQueue(),
+        listDeleteRequests(),
+        listPendingHoldRequests(),
+        listPendingEscalations(),
+        listPendingStrategyReviews(),
+        canViewBlockQueue ? getTeamPortal() : Promise.resolve(null),
+      ]);
+      const [attemptRes, renewalRes, tcrRes, deleteRes, holdRes, escalationRes, strategyRes, blockRes] = results;
+      setAttempts(attemptRes.status === 'fulfilled' ? attemptRes.value.data : []);
+      setRenewals(renewalRes.status === 'fulfilled' ? renewalRes.value.data : []);
+      setTcrs(tcrRes.status === 'fulfilled' ? tcrRes.value.data : []);
+      setDeleteRequests(deleteRes.status === 'fulfilled' ? deleteRes.value.data : []);
+      setHoldRequests(holdRes.status === 'fulfilled' ? holdRes.value.data : []);
+      setEscalations(escalationRes.status === 'fulfilled' ? escalationRes.value.data : []);
+      setStrategyReviews(strategyRes.status === 'fulfilled' ? strategyRes.value.data : []);
+      setBlockRequests(
+        blockRes.status === 'fulfilled' && blockRes.value ? blockRes.value.block_queue : [],
+      );
+      setSectionErrors(
+        results
+          .map((r, i) => (r.status === 'rejected' ? `${SECTION_LABELS[i]}: ${errorMessage(r.reason)}` : null))
+          .filter((msg): msg is string => msg !== null),
+      );
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -128,10 +157,22 @@ export default function PerluPersetujuanPage() {
 
       {loading && <p className="muted">Memuat...</p>}
       {loadError && <div className="alert alertError" role="alert">{loadError}</div>}
+      {!loading && sectionErrors.length > 0 && (
+        <div className="alert alertError" role="alert">
+          {sectionErrors.length === 1
+            ? `Gagal memuat satu antrian: ${sectionErrors[0]}`
+            : 'Gagal memuat beberapa antrian:'}
+          {sectionErrors.length > 1 && (
+            <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+              {sectionErrors.map((msg) => <li key={msg}>{msg}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
 
       {!loading && !loadError && (
         <>
-          {total === 0 && (
+          {total === 0 && sectionErrors.length === 0 && (
             <div className="emptyState">Tidak ada yang menunggu persetujuan saat ini.</div>
           )}
 
