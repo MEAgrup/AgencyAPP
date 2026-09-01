@@ -8,8 +8,11 @@ import {
   actorFromToken,
   bearerToken,
   clearedSessionCookie,
+  clientContactTokenFromRequest,
+  CLIENT_PORTAL_SESSION_COOKIE,
   cookieValue,
   requireActor,
+  requireClientContactActor,
   SESSION_COOKIE,
   sessionCookie,
   tokenFromRequest,
@@ -38,6 +41,11 @@ function sign(
 
 const staffClaims = {
   app_metadata: { employee_id: 'EMP-1', division: 'Sales', level: 'staff', od: false, director: false },
+  exp: Math.floor(Date.now() / 1000) + 3600,
+};
+
+const clientContactClaims = {
+  app_metadata: { client_contact_id: 'CC-1', client_id: 'CLI-1' },
   exp: Math.floor(Date.now() / 1000) + 3600,
 };
 
@@ -201,6 +209,37 @@ describe('tokenFromRequest', () => {
   it('throws the BI session string when neither is present', () => {
     expect(() => tokenFromRequest(new Request('http://x/'))).toThrow(/\[sesi tidak valid/);
   });
+
+  it('ignores the client-portal cookie even when present — a different accessor reads that one', () => {
+    const req = new Request('http://x/', { headers: { cookie: `${CLIENT_PORTAL_SESSION_COOKIE}=client.tok` } });
+    expect(() => tokenFromRequest(req)).toThrow(/\[sesi tidak valid/);
+  });
+});
+
+describe('clientContactTokenFromRequest', () => {
+  it('prefers the Authorization bearer header', () => {
+    const req = new Request('http://x/', {
+      headers: { authorization: 'Bearer header.tok', cookie: `${CLIENT_PORTAL_SESSION_COOKIE}=cookie.tok` },
+    });
+    expect(clientContactTokenFromRequest(req)).toBe('header.tok');
+  });
+
+  it('falls back to the client-portal cookie', () => {
+    const req = new Request('http://x/', { headers: { cookie: `${CLIENT_PORTAL_SESSION_COOKIE}=cookie.tok` } });
+    expect(clientContactTokenFromRequest(req)).toBe('cookie.tok');
+  });
+
+  it('ignores the general session cookie even when present — the two never mix', () => {
+    // Both cookies coexisting is the exact scenario this split exists for (an
+    // AM's own internal session alongside a client-contact session they are
+    // using to check the Portal, same browser, same host).
+    const req = new Request('http://x/', { headers: { cookie: `${SESSION_COOKIE}=general.tok` } });
+    expect(() => clientContactTokenFromRequest(req)).toThrow(/\[sesi tidak valid/);
+  });
+
+  it('throws the BI session string when neither is present', () => {
+    expect(() => clientContactTokenFromRequest(new Request('http://x/'))).toThrow(/\[sesi tidak valid/);
+  });
 });
 
 describe('sessionCookie / clearedSessionCookie', () => {
@@ -215,6 +254,18 @@ describe('sessionCookie / clearedSessionCookie', () => {
   it('clears the cookie with Max-Age=0', () => {
     const c = clearedSessionCookie();
     expect(c).toContain(`${SESSION_COOKIE}=;`);
+    expect(c).toContain('Max-Age=0');
+  });
+
+  it('writes the client-portal cookie name when passed explicitly', () => {
+    const c = sessionCookie('a.b.c', 3600, CLIENT_PORTAL_SESSION_COOKIE);
+    expect(c).toContain(`${CLIENT_PORTAL_SESSION_COOKIE}=a.b.c`);
+    expect(c).not.toContain(`${SESSION_COOKIE}=a.b.c`);
+  });
+
+  it('clears the client-portal cookie name when passed explicitly', () => {
+    const c = clearedSessionCookie(CLIENT_PORTAL_SESSION_COOKIE);
+    expect(c).toContain(`${CLIENT_PORTAL_SESSION_COOKIE}=;`);
     expect(c).toContain('Max-Age=0');
   });
 });
@@ -240,5 +291,33 @@ describe('requireActor', () => {
   it('throws when no token is present at all', () => {
     process.env.SUPABASE_JWT_SECRET = SECRET;
     expect(() => requireActor(new Request('http://x/'))).toThrow(UnauthorizedError);
+  });
+});
+
+describe('requireClientContactActor', () => {
+  const prev = process.env.SUPABASE_JWT_SECRET;
+  afterEach(() => {
+    process.env.SUPABASE_JWT_SECRET = prev;
+  });
+
+  it('resolves the client-contact actor from its own cookie', () => {
+    process.env.SUPABASE_JWT_SECRET = SECRET;
+    const req = new Request('http://x/', {
+      headers: { cookie: `${CLIENT_PORTAL_SESSION_COOKIE}=${sign(clientContactClaims)}` },
+    });
+    const actor = requireClientContactActor(req);
+    expect(actor.clientContactId).toBe('CC-1');
+    expect(actor.clientId).toBe('CLI-1');
+  });
+
+  it('does not resolve from the general session cookie, even a valid one', () => {
+    process.env.SUPABASE_JWT_SECRET = SECRET;
+    const req = new Request('http://x/', { headers: { cookie: `${SESSION_COOKIE}=${sign(staffClaims)}` } });
+    expect(() => requireClientContactActor(req)).toThrow(UnauthorizedError);
+  });
+
+  it('throws when no token is present at all', () => {
+    process.env.SUPABASE_JWT_SECRET = SECRET;
+    expect(() => requireClientContactActor(new Request('http://x/'))).toThrow(UnauthorizedError);
   });
 });

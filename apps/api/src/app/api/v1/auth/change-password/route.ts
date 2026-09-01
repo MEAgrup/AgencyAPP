@@ -27,17 +27,39 @@
  * instead of `auth.clearMustChangePassword`. The GoTrue exchange itself
  * (re-grant with old password, `updatePassword`) is realm-agnostic and
  * unchanged — it is the same GoTrue user record either way.
+ *
+ * Actor resolution tries the general session cookie FIRST, falling back to
+ * the client-contact one (`requireClientContactActor`) only if that is
+ * absent — see CLIENT_PORTAL_SESSION_COOKIE's doc comment for why they are
+ * separate cookies now that both realms share `app.meagency.co.id`. This is
+ * the one route both realms hit through the SAME handler (unlike
+ * `/client-portal/me`, which always wants the client cookie specifically),
+ * so it cannot use a single fixed accessor. Known, accepted limitation: if a
+ * browser holds BOTH cookies at once (e.g. an AM's own internal session,
+ * plus a client-contact session they are also logged into to check the
+ * Portal), this always resolves the employee/vendor actor — changing
+ * password from the Client Portal UI in that specific dual-session state
+ * would then fail with a confusing (but safe — no data crosses realms)
+ * `OldPasswordError`, not a wrong-account write. Narrow enough in practice
+ * (this route is only hit when a user actively changes their password, not
+ * on every page load) that it was not worth a route-specific redesign.
  */
 import { auth, clientPortalAuth } from '@cdps/domain';
 import { permission } from '@cdps/core';
-import { requireActor, sessionCookie } from '@/lib/auth';
+import { CLIENT_PORTAL_SESSION_COOKIE, requireActor, requireClientContactActor, sessionCookie } from '@/lib/auth';
 import { db, readAsActor } from '@/lib/db';
 import { passwordGrant, updatePassword } from '@/lib/gotrue';
 import { BadRequestError, handle, json, readJson, UnauthorizedError } from '@/lib/http';
 
 export async function POST(request: Request): Promise<Response> {
   return handle(async () => {
-    const actor = requireActor(request);
+    let actor;
+    try {
+      actor = requireActor(request);
+    } catch (err) {
+      if (!(err instanceof UnauthorizedError)) throw err;
+      actor = requireClientContactActor(request);
+    }
     const body = await readJson<{ old_password?: string; new_password?: string }>(request);
     const oldPassword = body.old_password ?? '';
     const newPassword = body.new_password ?? '';
@@ -80,8 +102,9 @@ export async function POST(request: Request): Promise<Response> {
       throw new UnauthorizedError('[password berhasil diubah, silahkan login kembali]');
     }
 
+    const cookieName = isContact ? CLIENT_PORTAL_SESSION_COOKIE : undefined;
     const res = json({ status: 'ok' });
-    res.headers.append('Set-Cookie', sessionCookie(fresh.access_token, fresh.expires_in));
+    res.headers.append('Set-Cookie', sessionCookie(fresh.access_token, fresh.expires_in, cookieName));
     return res;
   });
 }

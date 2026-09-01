@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { api, errorMessage } from '@/lib/api';
 import { usePortalAuth } from '@/lib/portal-auth-context';
 import type { ClientContactMeResponse } from '@/lib/types';
@@ -14,12 +15,24 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [idleNotice, setIdleNotice] = useState(false);
 
   useEffect(() => {
     if (!loading && contact) {
       router.replace('/');
     }
   }, [loading, contact, router]);
+
+  // Read via window.location rather than useSearchParams — same reasoning as
+  // recovery-token.ts reading window.location.hash directly: avoids the
+  // Suspense-boundary requirement useSearchParams imposes, for one flag this
+  // simple. Set by (portal)/layout.tsx's idle-timeout redirect (spec §3.5).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (new URLSearchParams(window.location.search).get('reason') === 'idle') {
+      setIdleNotice(true);
+    }
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -51,6 +64,11 @@ export default function LoginPage() {
         </div>
         <form className="card form" onSubmit={handleSubmit}>
           <h2>Masuk</h2>
+          {!error && idleNotice && (
+            <div className="alert alertWarning" role="status">
+              Sesi Anda berakhir karena tidak aktif selama 4 jam. Silakan login kembali.
+            </div>
+          )}
           {error && <div className="alert alertError" role="alert">{error}</div>}
           <div className="field">
             <label htmlFor="email">Email</label>
@@ -79,7 +97,7 @@ export default function LoginPage() {
           </button>
         </form>
         <div className={styles.links}>
-          <a href="/lupa-password">Lupa password?</a>
+          <Link href="/lupa-password">Lupa password?</Link>
         </div>
       </div>
     </div>
