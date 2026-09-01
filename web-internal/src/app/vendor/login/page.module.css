@@ -4,7 +4,7 @@
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: linear-gradient(180deg, #eef2fb 0%, #f4f5f7 100%);
+  background: linear-gradient(180deg, var(--color-primary-bg) 0%, var(--color-bg) 100%);
 }
 
 .panel {

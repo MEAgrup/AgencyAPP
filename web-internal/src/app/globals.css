@@ -4,9 +4,13 @@
   --color-border: #e1e4ea;
   --color-text: #1c2130;
   --color-text-muted: #6b7280;
-  --color-primary: #2f5fda;
-  --color-primary-dark: #24469f;
-  --color-primary-bg: #eaf0fe;
+  /* Brand palette — matched to meagency.co.id (teal-green header/CTAs, orange
+     logo mark as a sparing secondary accent). */
+  --color-primary: #0e7d5c;
+  --color-primary-dark: #095e45;
+  --color-primary-bg: #e2f3ec;
+  --color-accent: #f5841f;
+  --color-accent-dark: #cf6c12;
   --color-link: var(--color-primary);
   --color-link-hover: var(--color-primary-dark);
   --color-danger: #c0392b;

@@ -9,9 +9,15 @@
   --color-border: #e1e4ea;
   --color-text: #1c2130;
   --color-text-muted: #6b7280;
-  --color-primary: #2f5fda;
-  --color-primary-dark: #24469f;
-  --color-primary-bg: #eaf0fe;
+  /* Brand palette — matched to meagency.co.id (teal-green header/CTAs); kept
+     in sync by hand with web-internal/src/app/globals.css (see header note). */
+  --color-primary: #0e7d5c;
+  --color-primary-dark: #095e45;
+  --color-primary-bg: #e2f3ec;
+  --color-accent: #f5841f;
+  --color-accent-dark: #cf6c12;
+  --color-link: var(--color-primary);
+  --color-link-hover: var(--color-primary-dark);
   --color-danger: #c0392b;
   --color-danger-bg: #fdecea;
   --color-success: #1f8a4c;
@@ -52,9 +58,16 @@ body {
   line-height: 1.5;
 }
 
+/* Plain links get a distinct brand color so clickable text reads as clickable
+   at a glance (mirrors web-internal). `.btn` is excluded so this can't win a
+   specificity tie against its own color rules on hover. */
 a {
-  color: inherit;
+  color: var(--color-link);
   text-decoration: none;
+}
+
+a:hover:not(.btn) {
+  color: var(--color-link-hover);
 }
 
 h1, h2, h3, h4 {
