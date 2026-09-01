@@ -1078,7 +1078,7 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                           <button
                             key={kode}
                             type="button"
-                            className={on ? 'btn btnSecondary btnSm' : 'btn btnGhost btnSm'}
+                            className={on ? 'btn btnSecondary btnSm' : 'btn btnChip btnSm'}
                             onClick={() =>
                               setRevisi({
                                 ...revisi,
@@ -1106,7 +1106,7 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                         <button
                           key={a.kode}
                           type="button"
-                          className={on ? 'btn btnSecondary btnSm' : 'btn btnGhost btnSm'}
+                          className={on ? 'btn btnSecondary btnSm' : 'btn btnChip btnSm'}
                           title={a.asumsi}
                           onClick={() =>
                             setRevisi({
