@@ -7,6 +7,8 @@
   --color-primary: #2f5fda;
   --color-primary-dark: #24469f;
   --color-primary-bg: #eaf0fe;
+  --color-link: var(--color-primary);
+  --color-link-hover: var(--color-primary-dark);
   --color-danger: #c0392b;
   --color-danger-bg: #fdecea;
   --color-success: #1f8a4c;
@@ -59,9 +61,17 @@ body {
   line-height: 1.5;
 }
 
+/* Plain links get a distinct brand color so clickable text reads as clickable
+   at a glance. Buttons (`.btn*`) and the sidebar nav (`.navLink*`) render as
+   <a> too but own their color/hover states already — excluded here so this
+   rule never fights their (lower-specificity) color declarations. */
 a {
-  color: inherit;
+  color: var(--color-link);
   text-decoration: none;
+}
+
+a:hover:not(.btn):not(.navLink):not(.navLinkActive) {
+  color: var(--color-link-hover);
 }
 
 h1, h2, h3, h4 {
