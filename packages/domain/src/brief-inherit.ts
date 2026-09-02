@@ -25,15 +25,26 @@
  * PC-3 gives a row exactly one origin, and a Brief needs a Service (FK NOT NULL):
  *   - `service_id` (Plan Satuan / an explicitly-tied row) → that Service. Always
  *     unambiguous — the row names it.
- *   - `strategi_pillar_id` (Full-Management) → the Strategi is per-CONTRACT
- *     (`strategi.contract_id`), not per-service, and a contract may carry several
- *     services, so a pillar names no single Service. We brief onto the contract's
- *     Service only when it has EXACTLY ONE; a contract with several services is
- *     `service_ambigu` (skipped, not guessed) — the AM ties those rows to a
- *     service explicitly. Open question logged in docs/DECISIONS.md 2026-08-18.
- *   - `di_luar_strategi` / `di_luar_service` → no Service anchor: SKIPPED
- *     (`di_luar`). Auto-briefing off-strategy work would invent a target the row
- *     explicitly says it does not have.
+ *   - `strategi_pillar_id` OR `di_luar_strategi` on a Full-Management (`kontrak`)
+ *     Plan → the contract's Service. Corrected 2026-09-02 (docs/DECISIONS.md,
+ *     owner report — a repeat, escalating complaint that "Di Luar Strategi" rows
+ *     could never reach a division): CDPS_Module6B_Plan.md §1 Rule 6 is explicit
+ *     that "a row with no strategy parent is possible" — `Di Luar Strategi` is a
+ *     GOVERNANCE flag (PG-1 deviation metric, target <15%), not a delivery block;
+ *     the row still carries "a division owner ... a quota, and a target" like any
+ *     other. The original 2026-08-18 exclusion reasoned "auto-briefing off-
+ *     strategy work would invent a target the row explicitly says it does not
+ *     have" — but the target in question is only WHICH Service the Brief lands
+ *     on, the identical ambiguity a pillar-origin row already resolves the same
+ *     way (the contract's Service, when it has exactly one — `service_ambigu`,
+ *     skipped not guessed, when it has several). A contract is Full-Management
+ *     regardless of how a row's work maps onto Strategi pillars, so the same
+ *     resolution is correct for both origins.
+ *   - `di_luar_service` (Plan Satuan/`klien` only, Rule 9) → genuinely names NO
+ *     purchased service — Module 6C Rule 9 calls this literal scope creep, not a
+ *     governance flag — SKIPPED (`di_luar`), unchanged. `di_luar_strategi` on a
+ *     `klien` Plan (no contract to fall back on) also stays skipped — Satuan's
+ *     PRD-defined "Di Luar" analogue is `di_luar_service` (Rule 9), not this one.
  */
 import { bi } from '@cdps/core';
 import { withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
@@ -276,12 +287,17 @@ export async function inheritBriefsFromPlan(
         skip('sudah_diwarisi');
         continue;
       }
-      // PC-3 origin → Service. di_luar_* rows have no Service anchor; a pillar
-      // row leans on the contract's sole Service (or is skipped if ambiguous).
+      // PC-3 origin → Service. A pillar row, and a `di_luar_strategi` row on a
+      // Full-Management (kontrak) Plan alike, lean on the contract's sole
+      // Service (or are skipped if ambiguous) — "Di Luar Strategi" is a
+      // governance flag (PG-1), not a delivery block (see file header,
+      // 2026-09-02 correction). `di_luar_service` (Plan Satuan only) and
+      // `di_luar_strategi` on a Plan with no contract (Satuan again) genuinely
+      // name no Service — those stay skipped.
       let serviceId: string;
       if (row.serviceId) {
         serviceId = row.serviceId;
-      } else if (row.strategiPillarId !== null) {
+      } else if (row.strategiPillarId !== null || (row.diLuarStrategi && plan.contractId !== null)) {
         if (contractSvc.ambiguous) {
           skip('service_ambigu');
           continue;

@@ -332,11 +332,16 @@ describeDb('inheritBriefsFromPlan (RAB-16)', () => {
     expect(count[0].n).toBe(1);
   });
 
-  it('skips di-luar, zero-quota, and invalid-division rows with reasons; still briefs the good one', async () => {
+  it('skips zero-quota and invalid-division rows with reasons; still briefs the good one AND a di-luar row on the contract sole Service', async () => {
     const f = await seedFullMgmt();
     const planId = await seedPeriod(f, { status: 'Aktif' });
     const good = await seedRow(planId, { service_id: f.serviceId, pilar: 'konten', divisi_pic: 'Creative', kuota: 5 });
-    const diLuar = await seedRow(planId, { di_luar_strategi: true, di_luar_alasan: 'scope creep', kuota: 3 });
+    // "Di Luar Strategi" on a Full-Management Plan is a governance flag (PG-1),
+    // not a delivery block (Module 6B §1 Rule 6) — it still lands on the
+    // contract's sole Service, same as a pillar-origin row (2026-09-02 fix).
+    const diLuar = await seedRow(planId, {
+      di_luar_strategi: true, di_luar_alasan: 'scope creep', divisi_pic: 'Ads', kuota: 3,
+    });
     const zero = await seedRow(planId, { service_id: f.serviceId, kuota: 0 });
     const badDiv = await seedRow(planId, { service_id: f.serviceId, divisi_pic: 'Finance', kuota: 4 });
 
@@ -346,11 +351,44 @@ describeDb('inheritBriefsFromPlan (RAB-16)', () => {
       priority: 'Low',
     }));
     const res = await inheritBriefsFromPlan(sql, am(), planId, fills);
-    expect(res.created.map((b) => b.assignedDivision)).toEqual(['Creative']);
+    expect(res.created.map((b) => b.assignedDivision).sort()).toEqual(['Ads', 'Creative']);
+    expect(res.created.every((b) => b.serviceId === f.serviceId)).toBe(true);
     const byRow = Object.fromEntries(res.skipped.map((s) => [s.planRowId, s.reason]));
-    expect(byRow[diLuar]).toBe('di_luar');
     expect(byRow[zero]).toBe('kuota_nol');
     expect(byRow[badDiv]).toBe('divisi_pic_tidak_valid');
+  });
+
+  it('still skips di_luar_strategi with no Service anchor: a Plan Satuan (klien, no contract) row', async () => {
+    const clientId = await seedClient();
+    const planId = await seedPeriod({ clientId, contractId: null, strategiId: null }, { status: 'Aktif', lingkup: 'klien' });
+    const rowId = await seedRow(planId, {
+      di_luar_strategi: true, di_luar_alasan: 'belum ada service cocok', divisi_pic: 'Ads', kuota: 3,
+    });
+
+    const res = await inheritBriefsFromPlan(sql, am(), planId, [
+      { planRowId: rowId, dueDate: '2026-09-30', priority: 'Low' },
+    ]);
+    expect(res.created).toHaveLength(0);
+    expect(res.skipped).toEqual([{ planRowId: rowId, reason: 'di_luar' }]);
+  });
+
+  it('service_ambigu applies identically to a pillar row and a di_luar_strategi row on a multi-service contract', async () => {
+    const f = await seedFullMgmt();
+    const secondService = await seedService(f.clientId);
+    await sql`update services set contract_id = ${f.contractId} where id = ${secondService}`;
+    const planId = await seedPeriod(f, { status: 'Aktif' });
+    const pillarId = await seedPillar(f.strategiId);
+    const pillarRow = await seedRow(planId, { strategi_pillar_id: pillarId, kuota: 5 });
+    const diLuarRow = await seedRow(planId, { di_luar_strategi: true, di_luar_alasan: 'x', kuota: 3 });
+
+    const res = await inheritBriefsFromPlan(sql, am(), planId, [
+      { planRowId: pillarRow, dueDate: '2026-09-30', priority: 'Low' },
+      { planRowId: diLuarRow, dueDate: '2026-09-30', priority: 'Low' },
+    ]);
+    expect(res.created).toHaveLength(0);
+    const byRow = Object.fromEntries(res.skipped.map((s) => [s.planRowId, s.reason]));
+    expect(byRow[pillarRow]).toBe('service_ambigu');
+    expect(byRow[diLuarRow]).toBe('service_ambigu');
   });
 
   it('skips a row with no AM fill (tanpa_jadwal) — AM only briefs what they scheduled', async () => {
