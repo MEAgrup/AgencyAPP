@@ -4,6 +4,7 @@ import { use, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { isHttpUrl } from '@/lib/url';
 import {
   BRIEF_IN_REVIEW,
   BRIEF_SUBMITTED,
@@ -201,8 +202,10 @@ export default function BriefDetailPage({ params }: { params: Promise<{ id: stri
           <div>
             <div className="muted" style={{ fontSize: 12 }}>Referensi / Lampiran</div>
             <div>
-              {brief.reference_attachments ? (
+              {brief.reference_attachments && isHttpUrl(brief.reference_attachments) ? (
                 <a href={brief.reference_attachments} target="_blank" rel="noreferrer">Lihat</a>
+              ) : brief.reference_attachments ? (
+                <span title="Bukan link — tidak bisa diklik">{brief.reference_attachments}</span>
               ) : (
                 '—'
               )}

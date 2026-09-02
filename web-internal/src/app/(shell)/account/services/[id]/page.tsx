@@ -1261,7 +1261,12 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
             </div>
             <div className="field">
               <label htmlFor="b-refs">Referensi / Lampiran (link, opsional)</label>
-              <input id="b-refs" value={bRefs} onChange={(e) => setBRefs(e.target.value)} />
+              <input
+                id="b-refs"
+                placeholder="https://drive.google.com/..."
+                value={bRefs}
+                onChange={(e) => setBRefs(e.target.value)}
+              />
             </div>
             {planGated && (
               <label className="row" style={{ gap: 8, fontSize: 13 }}>
