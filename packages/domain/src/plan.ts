@@ -124,6 +124,23 @@ export const MSG_PLAN_ROW_DILUAR_ALASAN_REQUIRED =
  *  scope, §8 Permissions: AM writes P-A…P-F on `Draft`/`Aktif`). */
 export const MSG_PLAN_ROW_CREATE_STATUS =
   '[baris rencana hanya dapat ditambah saat periode berstatus Draft atau Aktif]';
+/**
+ * Owner-added 2026-09-02 (docs/DECISIONS.md): a row created "Di Luar
+ * Strategi/Service" (PC-3) had no path back — Section E of the Strategi being
+ * empty at creation time is a data STATE, not an AM decision, and once filled
+ * later the already-created row still could not point at the real pillar/
+ * service. `updatePlanRowOrigin`/`deletePlanRow` close that gap, gated to the
+ * same Draft/Aktif write window as `createPlanRow`.
+ */
+export const MSG_PLAN_ROW_EDIT_STATUS =
+  '[asal baris rencana hanya dapat diubah saat periode berstatus Draft atau Aktif]';
+export const MSG_PLAN_ROW_DELETE_STATUS =
+  '[baris rencana hanya dapat dihapus saat periode berstatus Draft atau Aktif]';
+/** A row that already produced a Brief (RAB-16) is locked — the Brief already
+ *  carries its own copy of the row's data (§8 four-level trace); changing or
+ *  removing the row after that would silently orphan what the division sees. */
+export const MSG_PLAN_ROW_ALREADY_BRIEFED =
+  '[baris ini sudah punya Brief — asal baris tidak bisa diubah, dan barisnya tidak bisa dihapus]';
 /** Rule 7 — a re-drag whose weekly quotas do not sum to the monthly quota. */
 export const MSG_PLAN_WEEK_SUM_MISMATCH =
   '[distribusi mingguan harus berjumlah sama dengan kuota bulanan baris]';
@@ -2309,6 +2326,152 @@ export async function createPlanRow(
     });
 
     return loadPlanRow(tx, newId);
+  });
+}
+
+/** PC-3 origin fields an AM may change on an existing row (see `MSG_PLAN_ROW_EDIT_STATUS`). */
+export interface UpdatePlanRowOriginInput {
+  strategiPillarId?: number | null;
+  serviceId?: string | null;
+  diLuarStrategi?: boolean;
+  diLuarService?: boolean;
+  diLuarAlasan?: string | null;
+}
+
+/**
+ * updatePlanRowOrigin re-points an existing row's PC-3 origin — the fix for a
+ * row born "Di Luar Strategi/Service" while Section E was empty and later
+ * filled (or a Service that now exists to tie it to instead). Mirrors
+ * `createPlanRow`'s exactly-one-origin gate (`ck_plan_row_asal_tunggal`)
+ * verbatim; every other PC field is untouched. Locked once the row has
+ * produced a Brief (RAB-16) — the Brief already carries its own copy of the
+ * row (§8 four-level trace), so changing the row afterward would silently
+ * diverge from what the division already sees.
+ */
+export async function updatePlanRowOrigin(
+  sql: Sql,
+  actor: Actor,
+  rowId: number,
+  input: UpdatePlanRowOriginInput,
+): Promise<PlanRow> {
+  const strategiPillarId = input.strategiPillarId ?? null;
+  const serviceId = (input.serviceId ?? null) || null;
+  const diLuarStrategi = input.diLuarStrategi === true;
+  const diLuarService = input.diLuarService === true;
+  const originCount =
+    (strategiPillarId !== null ? 1 : 0) +
+    (serviceId !== null ? 1 : 0) +
+    (diLuarStrategi ? 1 : 0) +
+    (diLuarService ? 1 : 0);
+  if (originCount !== 1) throw new ValidationError(MSG_PLAN_ROW_ASAL_INVALID);
+  const diLuarAlasan = (input.diLuarAlasan ?? '').trim() || null;
+  if ((diLuarStrategi || diLuarService) && diLuarAlasan === null) {
+    throw new ValidationError(MSG_PLAN_ROW_DILUAR_ALASAN_REQUIRED);
+  }
+
+  return withTransaction(sql, async (tx) => {
+    const rr = await tx<
+      {
+        plan_id: string;
+        strategi_pillar_id: number | null;
+        service_id: string | null;
+        di_luar_strategi: boolean;
+        di_luar_service: boolean;
+        di_luar_alasan: string | null;
+      }[]
+    >`
+      select plan_id, strategi_pillar_id, service_id, di_luar_strategi, di_luar_service, di_luar_alasan
+        from plan_row where id = ${rowId} for update`;
+    if (rr.length === 0) throw new NotFoundError(MSG_PLAN_ROW_NOT_FOUND);
+    const before = rr[0];
+    const planId = before.plan_id;
+
+    const plan = await loadPlanForUpdate(tx, planId);
+    const ownerAm = await ownerAmOfClient(tx, plan.clientId);
+    if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+    if (plan.status !== PLAN_DRAFT && plan.status !== PLAN_AKTIF) {
+      throw new ConflictError(MSG_PLAN_ROW_EDIT_STATUS);
+    }
+
+    const briefed = await tx<{ id: string }[]>`select id from briefs where plan_row_id = ${rowId} limit 1`;
+    if (briefed.length > 0) throw new ConflictError(MSG_PLAN_ROW_ALREADY_BRIEFED);
+
+    await tx`
+      update plan_row
+         set strategi_pillar_id = ${strategiPillarId}, service_id = ${serviceId},
+             di_luar_strategi = ${diLuarStrategi}, di_luar_service = ${diLuarService},
+             di_luar_alasan = ${diLuarAlasan}
+       where id = ${rowId}`;
+
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'baris_asal_diubah',
+      beforeJson: {
+        plan_row_id: rowId,
+        strategi_pillar_id: before.strategi_pillar_id,
+        service_id: before.service_id,
+        di_luar_strategi: before.di_luar_strategi,
+        di_luar_service: before.di_luar_service,
+        di_luar_alasan: before.di_luar_alasan,
+      },
+      afterJson: {
+        plan_row_id: rowId,
+        strategi_pillar_id: strategiPillarId,
+        service_id: serviceId,
+        di_luar_strategi: diLuarStrategi,
+        di_luar_service: diLuarService,
+        di_luar_alasan: diLuarAlasan,
+      },
+      createdBy: actor.employeeId,
+    });
+
+    return loadPlanRow(tx, rowId);
+  });
+}
+
+/**
+ * deletePlanRow removes a work-row that was never inherited into a Brief —
+ * e.g. one born "Di Luar" by mistake, or a genuine duplicate. Hard delete
+ * rather than a status flag: `plan_row` has no "dibatalkan"/"salah input"
+ * value in PC-14 (`status_baris`), and inventing one only for this would be a
+ * new enum value nothing else reads. `plan_row_week`/`plan_flag` cascade
+ * (their own FKs, `ON DELETE CASCADE`); a linked Brief cannot exist here (the
+ * gate below throws first), so `fk_briefs_plan_row ON DELETE SET NULL` never
+ * actually fires. The full before-state rides in the audit row — immutable,
+ * no update/delete path of its own (CLAUDE.md #3) — so the deletion stays
+ * traceable even though the live row is gone.
+ */
+export async function deletePlanRow(sql: Sql, actor: Actor, rowId: number): Promise<void> {
+  await withTransaction(sql, async (tx) => {
+    const rr = await tx<Record<string, unknown>[]>`select * from plan_row where id = ${rowId} for update`;
+    if (rr.length === 0) throw new NotFoundError(MSG_PLAN_ROW_NOT_FOUND);
+    const planId = rr[0].plan_id as string;
+
+    const plan = await loadPlanForUpdate(tx, planId);
+    const ownerAm = await ownerAmOfClient(tx, plan.clientId);
+    if (!canWritePlan(actor, ownerAm)) throw new ForbiddenError(MSG_PLAN_FORBIDDEN);
+    if (plan.status !== PLAN_DRAFT && plan.status !== PLAN_AKTIF) {
+      throw new ConflictError(MSG_PLAN_ROW_DELETE_STATUS);
+    }
+
+    const briefed = await tx<{ id: string }[]>`select id from briefs where plan_row_id = ${rowId} limit 1`;
+    if (briefed.length > 0) throw new ConflictError(MSG_PLAN_ROW_ALREADY_BRIEFED);
+
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'baris_dihapus',
+      beforeJson: rr[0],
+      afterJson: null,
+      createdBy: actor.employeeId,
+    });
+
+    await tx`delete from plan_row where id = ${rowId}`;
   });
 }
 
