@@ -197,6 +197,16 @@ export interface CreatePlanRowBody {
   visibilitas?: string;
 }
 
+/** PC-3 origin fields for `updatePlanRowOrigin` — same shape as the create-row
+ *  origin fields, everything else on the row is untouched. */
+export interface UpdatePlanRowOriginBody {
+  strategi_pillar_id?: number | null;
+  service_id?: string | null;
+  di_luar_strategi?: boolean;
+  di_luar_service?: boolean;
+  di_luar_alasan?: string | null;
+}
+
 export interface AdjustTargetBody {
   channel: string;
   metric: string;
@@ -250,6 +260,17 @@ export function activatePlanPeriode(id: string): Promise<Plan> {
 
 export function createPlanRow(id: string, body: CreatePlanRowBody): Promise<PlanRow> {
   return api.post<PlanRow>(`/plan/${id}/rows`, body);
+}
+
+/** Re-points an existing row's PC-3 origin (owner-added 2026-09-02) — locked
+ *  once the row has already produced a Brief. */
+export function updatePlanRowOrigin(rowId: number, body: UpdatePlanRowOriginBody): Promise<PlanRow> {
+  return api.put<PlanRow>(`/plan/rows/${rowId}`, body);
+}
+
+/** Removes a row that was never inherited into a Brief. */
+export function deletePlanRow(rowId: number): Promise<{ deleted: boolean }> {
+  return api.delete<{ deleted: boolean }>(`/plan/rows/${rowId}`);
 }
 
 export function adjustPlanTarget(id: string, body: AdjustTargetBody): Promise<PlanTarget> {

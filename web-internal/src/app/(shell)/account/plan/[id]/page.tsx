@@ -28,7 +28,7 @@
  * so rather than pretending the period can be closed here.
  */
 
-import { use, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, use, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -42,11 +42,13 @@ import {
   activatePlanPeriode,
   approvePlanPeriode,
   createPlanRow,
+  deletePlanRow,
   getPlanDetail,
   inheritBriefsFromPlan,
   returnPlanPeriode,
   saveCatatanPembuka,
   submitPlanPeriode,
+  updatePlanRowOrigin,
   type CreatePlanRowBody,
   type PlanDetail,
   type PlanRow,
@@ -156,6 +158,20 @@ function blankRow(channel: string): RowDraft {
   };
 }
 
+/**
+ * Owner-added 2026-09-02 (docs/DECISIONS.md): re-pointing PC-3 on an existing
+ * row — the fix for a row born "Di Luar Strategi/Service" while Section E was
+ * empty, once it's later filled (or a Service appears to tie it to instead).
+ * A separate, smaller draft than `RowDraft`: only the origin fields, since
+ * `updatePlanRowOrigin` never touches anything else on the row.
+ */
+interface OriginEdit {
+  rowId: number;
+  strategiPillarId: string;
+  serviceId: string;
+  diLuarKind: 'strategi' | 'service';
+}
+
 function parseSkuSasaran(s: string): string[] {
   return s
     .split(',')
@@ -240,6 +256,7 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
 
   const [returnNote, setReturnNote] = useState('');
   const [rowDraft, setRowDraft] = useState<RowDraft | null>(null);
+  const [originEdit, setOriginEdit] = useState<OriginEdit | null>(null);
   const [pembuka, setPembuka] = useState('');
 
   // Brief one-click: per-row { due_date, priority } the AM fills before inheriting.
@@ -360,6 +377,46 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
       await createPlanRow(id, rowDraftToBody(rowDraft, plan.lingkup));
       setRowDraft(null);
     });
+  };
+
+  function startOriginEdit(r: PlanRow) {
+    setOriginEdit({
+      rowId: r.id,
+      strategiPillarId: r.strategi_pillar_id !== null ? String(r.strategi_pillar_id) : '',
+      serviceId: r.service_id ?? '',
+      diLuarKind: r.di_luar_service ? 'service' : 'strategi',
+    });
+  }
+
+  const saveOriginEdit = async () => {
+    if (!originEdit) return;
+    const isKlien = plan.lingkup === 'klien';
+    const pillarId = originEdit.strategiPillarId.trim() ? Number(originEdit.strategiPillarId) : null;
+    const serviceId = isKlien && originEdit.serviceId.trim() ? originEdit.serviceId.trim() : null;
+    const hasOrigin = pillarId !== null || serviceId !== null;
+    const diLuarStrategi = !hasOrigin && (!isKlien || originEdit.diLuarKind === 'strategi');
+    const diLuarService = !hasOrigin && isKlien && originEdit.diLuarKind === 'service';
+    const diLuarAlasan = diLuarStrategi
+      ? DEFAULT_DILUAR_ALASAN.strategi
+      : diLuarService
+        ? DEFAULT_DILUAR_ALASAN.service
+        : null;
+    await act(async () => {
+      await updatePlanRowOrigin(originEdit.rowId, {
+        strategi_pillar_id: pillarId,
+        service_id: serviceId,
+        di_luar_strategi: diLuarStrategi,
+        di_luar_service: diLuarService,
+        di_luar_alasan: diLuarAlasan,
+      });
+      setOriginEdit(null);
+    });
+  };
+
+  const handleDeleteRow = async (r: PlanRow) => {
+    const label = `${PILAR_LABEL[r.pilar] ?? r.pilar} · ${r.divisi_pic}`;
+    if (!window.confirm(`Hapus baris "${label}"? Tindakan ini tidak bisa dibatalkan.`)) return;
+    await act(() => deletePlanRow(r.id));
   };
 
   const runInherit = async () => {
@@ -576,13 +633,17 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                   <th style={{ textAlign: 'left' }}>Minggu</th>
                   <th style={{ textAlign: 'left' }}>Prioritas</th>
                   <th style={{ textAlign: 'left' }}>Status</th>
+                  <th style={{ textAlign: 'left' }}>Kelola</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r: PlanRow) => {
                   const wk = weeksByRow.get(r.id);
+                  const briefed = briefByRow.get(r.id) !== undefined;
+                  const canManageOrigin = canWrite && !briefed && (status === 'Draft' || status === 'Aktif');
                   return (
-                    <tr key={r.id}>
+                    <Fragment key={r.id}>
+                    <tr>
                       <td style={{ paddingRight: 8 }}>{r.channel}</td>
                       <td style={{ paddingRight: 8 }}>{PILAR_LABEL[r.pilar] ?? r.pilar}</td>
                       <td style={{ paddingRight: 8 }}>
@@ -612,7 +673,135 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                       </td>
                       <td style={{ paddingRight: 8 }}>{r.prioritas}</td>
                       <td style={{ paddingRight: 8 }}>{r.status_baris}</td>
+                      <td style={{ paddingRight: 8, whiteSpace: 'nowrap' }}>
+                        {briefed ? (
+                          <span className="muted" style={{ fontSize: 11 }}>Sudah punya Brief</span>
+                        ) : canManageOrigin ? (
+                          <span className="row" style={{ gap: 6 }}>
+                            <button
+                              type="button"
+                              className="btn btnGhost btnSm"
+                              disabled={acting}
+                              onClick={() => startOriginEdit(r)}
+                            >
+                              Ubah asal
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btnGhost btnSm"
+                              disabled={acting}
+                              onClick={() => void handleDeleteRow(r)}
+                            >
+                              Hapus
+                            </button>
+                          </span>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
                     </tr>
+                    {originEdit && originEdit.rowId === r.id && (
+                      <tr>
+                        <td colSpan={9} style={{ background: 'var(--bg-subtle, #f7f7f7)', padding: 8 }}>
+                          <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                            {plan.lingkup === 'klien' ? (
+                              <label className="field">
+                                <span className="muted" style={{ fontSize: 12 }}>
+                                  Turunan (PC-3) — Service atau Strategi klien, kosongkan ⇒ di luar
+                                </span>
+                                <select
+                                  value={
+                                    originEdit.serviceId
+                                      ? `service:${originEdit.serviceId}`
+                                      : originEdit.strategiPillarId
+                                        ? `pillar:${originEdit.strategiPillarId}`
+                                        : ''
+                                  }
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val.startsWith('service:')) {
+                                      setOriginEdit({ ...originEdit, serviceId: val.slice('service:'.length), strategiPillarId: '' });
+                                    } else if (val.startsWith('pillar:')) {
+                                      setOriginEdit({ ...originEdit, strategiPillarId: val.slice('pillar:'.length), serviceId: '' });
+                                    } else {
+                                      setOriginEdit({ ...originEdit, serviceId: '', strategiPillarId: '' });
+                                    }
+                                  }}
+                                >
+                                  <option value="">— Di luar (pilih jenis di bawah) —</option>
+                                  {clientServices.length > 0 && (
+                                    <optgroup label="Service">
+                                      {clientServices.map((s) => (
+                                        <option key={s.id} value={`service:${s.id}`}>
+                                          {s.id} · {s.name}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  )}
+                                  {clientPillars.length > 0 && (
+                                    <optgroup label="Strategi (STRG milik klien)">
+                                      {clientPillars.map(({ strategiId, pillar: p }) => (
+                                        <option key={p.id} value={`pillar:${p.id}`}>
+                                          {strategiId} · #{p.id} {PILAR_LABEL[p.jenis] ?? p.jenis}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  )}
+                                </select>
+                              </label>
+                            ) : (
+                              <label className="field">
+                                <span className="muted" style={{ fontSize: 12 }}>Turunan pilar Strategi (PC-3)</span>
+                                <select
+                                  value={originEdit.strategiPillarId}
+                                  onChange={(e) => setOriginEdit({ ...originEdit, strategiPillarId: e.target.value })}
+                                >
+                                  <option value="">— Di Luar Strategi —</option>
+                                  {pillars.map((p) => (
+                                    <option key={p.id} value={String(p.id)}>
+                                      #{p.id} {PILAR_LABEL[p.jenis] ?? p.jenis}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            )}
+                            {plan.lingkup === 'klien' &&
+                              !originEdit.serviceId.trim() &&
+                              !originEdit.strategiPillarId.trim() && (
+                                <label className="field">
+                                  <span className="muted" style={{ fontSize: 12 }}>Jenis di luar</span>
+                                  <select
+                                    value={originEdit.diLuarKind}
+                                    onChange={(e) =>
+                                      setOriginEdit({ ...originEdit, diLuarKind: e.target.value as 'strategi' | 'service' })
+                                    }
+                                  >
+                                    <option value="strategi">Di Luar Strategi</option>
+                                    <option value="service">Di Luar Service</option>
+                                  </select>
+                                </label>
+                              )}
+                            <button
+                              type="button"
+                              className="btn btnPrimary btnSm"
+                              disabled={acting}
+                              onClick={() => void saveOriginEdit()}
+                            >
+                              Simpan asal
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btnGhost btnSm"
+                              disabled={acting}
+                              onClick={() => setOriginEdit(null)}
+                            >
+                              Batal
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>

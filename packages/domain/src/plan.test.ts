@@ -47,6 +47,9 @@ import {
   MSG_PLAN_ROW_ASAL_INVALID,
   MSG_PLAN_ROW_DILUAR_ALASAN_REQUIRED,
   MSG_PLAN_ROW_CREATE_STATUS,
+  MSG_PLAN_ROW_EDIT_STATUS,
+  MSG_PLAN_ROW_DELETE_STATUS,
+  MSG_PLAN_ROW_ALREADY_BRIEFED,
   MSG_PLAN_TARGET_NOT_FOUND,
   MSG_ACTUAL_BUKTI_REQUIRED,
   MSG_ACTUAL_METRIC_NOT_MANUAL,
@@ -94,6 +97,8 @@ import {
   computePeriods,
   contractDeficit,
   createPlanRow,
+  updatePlanRowOrigin,
+  deletePlanRow,
   distributeWeeks,
   fileSengketa,
   forceClosePlanPeriode,
@@ -794,6 +799,140 @@ describeDb('createPlanRow (RAB-14, Section P-C)', () => {
     const aktif = await seedPeriod(f, { status: 'Aktif', periodeNo: 3 });
     const row = await createPlanRow(sql, am(), aktif, good);
     expect(row.statusBaris).toBe('Rencana');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// updatePlanRowOrigin / deletePlanRow — owner-added 2026-09-02 (docs/DECISIONS.md):
+// a row born "Di Luar Strategi/Service" while Section E was empty had no way
+// back once Section E was later filled.
+// ---------------------------------------------------------------------------
+
+describeDb('updatePlanRowOrigin (PC-3 re-point)', () => {
+  it('re-points a Di-Luar row onto a real pilar, clears the alasan, and audits it', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriod(f, { status: 'Draft' });
+    const row = await createPlanRow(sql, am(), id, {
+      channel: 'Shopee', pilar: 'iklan', kuota: 3, divisiPic: 'Ads', diLuarStrategi: true, diLuarAlasan: 'Section E kosong',
+    });
+    const pillarRows = await sql<{ id: number }[]>`
+      insert into strategi_pillar (strategi_id, jenis, created_by)
+      values (${f.strategiId}, 'iklan', 'ZZ-AM') returning id`;
+    const pillarId = Number(pillarRows[0].id);
+
+    const updated = await updatePlanRowOrigin(sql, am(), row.id, { strategiPillarId: pillarId });
+    expect(updated.strategiPillarId).toBe(pillarId);
+    expect(updated.diLuarStrategi).toBe(false);
+    expect(updated.diLuarAlasan).toBeNull();
+
+    const audit = await sql<{ action: string; after_json: { strategi_pillar_id?: number } }[]>`
+      select action, after_json from audit_log
+       where entity_type = 'plan' and entity_id = ${id} and action = 'baris_asal_diubah'`;
+    expect(audit).toHaveLength(1);
+    expect(audit[0].after_json.strategi_pillar_id).toBe(pillarId);
+  });
+
+  it('demands exactly one origin, same as createPlanRow', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriod(f, { status: 'Draft' });
+    const row = await createPlanRow(sql, am(), id, {
+      channel: 'Shopee', pilar: 'iklan', kuota: 3, divisiPic: 'Ads', diLuarStrategi: true, diLuarAlasan: 'x',
+    });
+    await expect(updatePlanRowOrigin(sql, am(), row.id, {})).rejects.toThrow(MSG_PLAN_ROW_ASAL_INVALID);
+    await expect(
+      updatePlanRowOrigin(sql, am(), row.id, { strategiPillarId: 1, diLuarStrategi: true, diLuarAlasan: 'x' }),
+    ).rejects.toThrow(MSG_PLAN_ROW_ASAL_INVALID);
+    await expect(
+      updatePlanRowOrigin(sql, am(), row.id, { diLuarStrategi: true }),
+    ).rejects.toThrow(MSG_PLAN_ROW_DILUAR_ALASAN_REQUIRED);
+  });
+
+  it('is locked once the row has produced a Brief (RAB-16)', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriod(f, { status: 'Aktif' });
+    const pillarRows = await sql<{ id: number }[]>`
+      insert into strategi_pillar (strategi_id, jenis, created_by)
+      values (${f.strategiId}, 'iklan', 'ZZ-AM') returning id`;
+    const pillarId = Number(pillarRows[0].id);
+    const row = await createPlanRow(sql, am(), id, {
+      channel: 'Shopee', pilar: 'iklan', kuota: 3, divisiPic: 'Ads', strategiPillarId: pillarId,
+    });
+    const result = await inheritBriefsFromPlan(sql, am(), id, [
+      { planRowId: row.id, dueDate: '2026-09-30', priority: 'Low' },
+    ]);
+    expect(result.created).toHaveLength(1);
+
+    await expect(
+      updatePlanRowOrigin(sql, am(), row.id, { diLuarStrategi: true, diLuarAlasan: 'x' }),
+    ).rejects.toThrow(MSG_PLAN_ROW_ALREADY_BRIEFED);
+  });
+
+  it('is write-scoped and only on Draft/Aktif', async () => {
+    const f = await seedContractStrategi();
+    const draft = await seedPeriod(f, { status: 'Draft' });
+    const row = await createPlanRow(sql, am(), draft, {
+      channel: 'Shopee', pilar: 'iklan', kuota: 3, divisiPic: 'Ads', diLuarStrategi: true, diLuarAlasan: 'x',
+    });
+    await expect(
+      updatePlanRowOrigin(sql, otherAm(), row.id, { diLuarStrategi: true, diLuarAlasan: 'y' }),
+    ).rejects.toThrow(MSG_PLAN_FORBIDDEN);
+
+    const terjadwal = await seedPeriod(f, { status: 'Terjadwal', periodeNo: 2 });
+    const row2Id = await sql<{ id: number }[]>`
+      insert into plan_row (plan_id, channel, pilar, di_luar_strategi, di_luar_alasan, kuota, divisi_pic, created_by)
+      values (${terjadwal}, 'Shopee', 'iklan', true, 'x', 3, 'Ads', 'ZZ-AM') returning id`;
+    await expect(
+      updatePlanRowOrigin(sql, am(), Number(row2Id[0].id), { diLuarStrategi: true, diLuarAlasan: 'y' }),
+    ).rejects.toThrow(MSG_PLAN_ROW_EDIT_STATUS);
+  });
+});
+
+describeDb('deletePlanRow (owner-added 2026-09-02)', () => {
+  it('removes a never-briefed row and audits the before-state', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriod(f, { status: 'Draft' });
+    const row = await createPlanRow(sql, am(), id, {
+      channel: 'Shopee', pilar: 'iklan', kuota: 3, divisiPic: 'Ads', diLuarStrategi: true, diLuarAlasan: 'x',
+    });
+
+    await deletePlanRow(sql, am(), row.id);
+
+    const detail = await getPlanDetail(sql, am(), id);
+    expect(detail.rows.map((r) => r.id)).not.toContain(row.id);
+    const audit = await sql<{ before_json: { plan_row_id?: number; id?: number } }[]>`
+      select before_json from audit_log
+       where entity_type = 'plan' and entity_id = ${id} and action = 'baris_dihapus'`;
+    expect(audit).toHaveLength(1);
+    expect(Number(audit[0].before_json.id)).toBe(row.id);
+  });
+
+  it('is locked once the row has produced a Brief (RAB-16)', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriod(f, { status: 'Aktif' });
+    const pillarRows = await sql<{ id: number }[]>`
+      insert into strategi_pillar (strategi_id, jenis, created_by)
+      values (${f.strategiId}, 'iklan', 'ZZ-AM') returning id`;
+    const row = await createPlanRow(sql, am(), id, {
+      channel: 'Shopee', pilar: 'iklan', kuota: 3, divisiPic: 'Ads', strategiPillarId: Number(pillarRows[0].id),
+    });
+    await inheritBriefsFromPlan(sql, am(), id, [{ planRowId: row.id, dueDate: '2026-09-30', priority: 'Low' }]);
+
+    await expect(deletePlanRow(sql, am(), row.id)).rejects.toThrow(MSG_PLAN_ROW_ALREADY_BRIEFED);
+  });
+
+  it('is write-scoped and only on Draft/Aktif', async () => {
+    const f = await seedContractStrategi();
+    const draft = await seedPeriod(f, { status: 'Draft' });
+    const row = await createPlanRow(sql, am(), draft, {
+      channel: 'Shopee', pilar: 'iklan', kuota: 3, divisiPic: 'Ads', diLuarStrategi: true, diLuarAlasan: 'x',
+    });
+    await expect(deletePlanRow(sql, otherAm(), row.id)).rejects.toThrow(MSG_PLAN_FORBIDDEN);
+
+    const terjadwal = await seedPeriod(f, { status: 'Terjadwal', periodeNo: 2 });
+    const row2Id = await sql<{ id: number }[]>`
+      insert into plan_row (plan_id, channel, pilar, di_luar_strategi, di_luar_alasan, kuota, divisi_pic, created_by)
+      values (${terjadwal}, 'Shopee', 'iklan', true, 'x', 3, 'Ads', 'ZZ-AM') returning id`;
+    await expect(deletePlanRow(sql, am(), Number(row2Id[0].id))).rejects.toThrow(MSG_PLAN_ROW_DELETE_STATUS);
   });
 });
 
