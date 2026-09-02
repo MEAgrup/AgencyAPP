@@ -289,7 +289,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     // Opening Kelola Klien STARTS riset awal (langkah 1) — the server stamps the
     // clock. The call resumes an already-open session rather than starting a
     // second one, so coming back here does not reset that clock.
-    if (!window.confirm('Buka Kelola Klien untuk klien ini? Riset awal mulai terhitung sejak sekarang.')) {
+    if (!window.confirm('Mulai Riset & Interview untuk klien ini? Riset awal mulai terhitung sejak sekarang.')) {
       return;
     }
     setInterviewError(null);
@@ -532,8 +532,9 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           sama), dan pertanyaannya wajar: kenapa bukan satu tabel saja? Karena
           barisnya bukan benda yang sama dan tidak punya kunci bersama:
             - `Services` = SVC-, satu baris per JASA yang dibeli (lahir dari
-              closing / renewal). Pintunya: Onboarding & Brief, Hold, Void.
-            - `Kelola Klien` = ITV-, satu baris per SESI riset awal + interview
+              closing / renewal). Pintunya: "Kelola Klien" (hub layanan: Plan →
+              Strategy & Plan → Brief), Hold, Void.
+            - `Riset & Interview Klien` = ITV-, satu baris per SESI riset awal + interview
               + verdict. `interview.service_id` boleh null: sesi tingkat KLIEN
               tidak menempel pada Service mana pun (domain `openKelolaKlien`),
               jadi menggabungkannya jadi satu tabel akan memaksa baris yatim.
@@ -550,8 +551,9 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
 
         <h3 style={{ fontSize: 14, marginBottom: 2 }}>Services &mdash; yang dibeli klien</h3>
         <p className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
-          Satu baris per jasa (SVC-) yang lahir dari closing atau renewal. Di sinilah eksekusinya
-          dibuka: Onboarding &amp; Brief, pengajuan Hold, sampai Void.
+          Satu baris per jasa (SVC-) yang lahir dari closing atau renewal. <strong>Kelola Klien</strong>{' '}
+          membuka hub layanan &mdash; tentukan kebutuhan Plan, susun Strategy &amp; Plan, lalu buat
+          Brief. Di sini juga pengajuan Hold dan Void.
         </p>
         {voidError && <div className="alert alertError" role="alert">{voidError}</div>}
         {voidMessage && <div className="alert alertSuccess" role="status">{voidMessage}</div>}
@@ -570,7 +572,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                   <th>Nama</th>
                   <th>Harga Standar</th>
                   <th>Status</th>
-                  {canManageInterview && <th>Kelola Klien</th>}
+                  {canManageInterview && <th>Riset &amp; Interview</th>}
                   <th></th>
                 </tr>
               </thead>
@@ -613,7 +615,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                             href={`/account/services/${encodeURIComponent(s.id)}`}
                             className="btn btnPrimary btnSm"
                           >
-                            Onboarding &amp; Brief
+                            Kelola Klien
                           </Link>
                         )}
                         {canRequestHold && s.status === IN_EXECUTION_STATUS && (
@@ -683,7 +685,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
         {canManageInterview && (
           <>
             <h3 id="interview" style={{ fontSize: 14, margin: '22px 0 2px', scrollMarginTop: 16 }}>
-              Kelola Klien &mdash; riset awal, interview &amp; verdict
+              Riset &amp; Interview Klien &mdash; riset awal, interview &amp; verdict
             </h3>
             <p className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
               Satu baris per <strong>sesi</strong> (ITV-), bukan per jasa: riset awal &rarr; jadwal
@@ -771,14 +773,14 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
               </div>
             ) : (
               <p className="muted" style={{ fontSize: 13 }}>
-                Belum ada sesi Kelola Klien yang tercatat untuk klien ini. Gunakan tombol di bawah untuk
+                Belum ada sesi Riset &amp; Interview yang tercatat untuk klien ini. Gunakan tombol di bawah untuk
                 membukanya — riset awal langsung mulai terhitung, dan sesi muncul di sini begitu riset awal
                 disubmit, jadwal diisi, atau interview dimulai.
               </p>
             )}
 
             <button type="button" className="btn btnPrimary" disabled={creatingInterview} onClick={handleOpenInterview}>
-              {creatingInterview ? 'Membuka…' : 'Kelola Klien (mulai riset awal)'}
+              {creatingInterview ? 'Membuka…' : 'Mulai Riset & Interview'}
             </button>
           </>
         )}

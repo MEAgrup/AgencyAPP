@@ -98,7 +98,7 @@ export default function HariLiburPage() {
       <div>
         <h1 style={{ marginBottom: 4 }}>Hari Libur Nasional</h1>
         <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
-          Dipakai untuk menghitung <strong>hari kerja</strong> pada timeline Kelola Klien (riset awal,
+          Dipakai untuk menghitung <strong>hari kerja</strong> pada timeline Riset &amp; Interview (riset awal,
           interview meeting, brand strategy). Tanggal yang terdaftar di sini tidak dihitung sebagai hari
           kerja — sama seperti Sabtu &amp; Minggu.
         </p>

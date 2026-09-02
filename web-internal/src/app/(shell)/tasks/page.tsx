@@ -108,7 +108,7 @@ function TasksListPage() {
       {showOnboardingPointer && (
         <section className="card">
           <div className="cardHeader">
-            <h2>Onboarding klien baru?</h2>
+            <h2>Kelola klien baru?</h2>
           </div>
           <p className="muted" style={{ fontSize: 13 }}>
             Halaman ini mengeksekusi task yang <strong>sudah ada</strong>. Task lahir dari Brief, dan Brief
