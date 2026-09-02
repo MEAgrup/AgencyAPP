@@ -74,13 +74,45 @@ BEGIN
     -- akuntabilitas minggu itu. Boleh diedit = boleh menulis ulang sejarah setelah
     -- angkanya diketahui, jadi UPDATE/DELETE ditutup dan koreksi ditulis sebagai
     -- laporan minggu berikutnya (aturan rumah #3).
+    -- `client_report_insight` (20260908010000) is the narrative half of a client
+    -- report, kept append-only for a reason that is easy to miss: it is the ONLY
+    -- record of what a client was actually shown. The numbers are already frozen
+    -- in `client_reports.payload`, but the sentences the client read are what a
+    -- dispute is about ("you told us to scale this"). An editable revision row
+    -- would let a published claim be rewritten after the fact, with the published
+    -- pin still pointing at it — so UPDATE and DELETE are both closed and a
+    -- correction is a NEW revision plus a re-publish (aturan rumah #3).
     FOREACH t IN ARRAY ARRAY['client_health_snapshots', 'performance_snapshots',
-                             'prospect_activities', 'ads_weekly_reports'] LOOP
+                             'prospect_activities', 'ads_weekly_reports',
+                             'client_report_insight'] LOOP
         ASSERT (
             SELECT count(*) FROM information_schema.triggers
             WHERE event_object_table = t AND action_statement LIKE '%forbid_mutation%'
         ) = 2, format('%s must carry both no_update and no_delete guards', t);
     END LOOP;
+
+    ---------------------------------------------------------------------------
+    -- `client_reports` carries a BESPOKE freeze function (client_reports_frozen)
+    -- rather than forbid_mutation, so the loop above cannot see it — and it is
+    -- load-bearing beyond its own table: the whole editable-insight design
+    -- (20260908010000) exists BECAUSE this trigger blocks every UPDATE, not just
+    -- updates to `payload`. If someone ever relaxed it to be column-selective,
+    -- the correct move would be to store the edited insight in `payload` and
+    -- delete two tables — so the day this assertion fails is the day that design
+    -- must be revisited, not the day the assertion gets deleted.
+    ---------------------------------------------------------------------------
+    ASSERT (
+        SELECT count(*) FROM information_schema.triggers
+        WHERE event_object_table = 'client_reports'
+          AND action_statement LIKE '%client_reports_frozen%'
+          AND event_manipulation = 'UPDATE'
+    ) = 1, 'client_reports must stay frozen against UPDATE (client_reports_frozen)';
+
+    ASSERT (
+        SELECT count(*) FROM information_schema.triggers
+        WHERE event_object_table = 'client_report_berkas'
+          AND action_statement LIKE '%client_report_berkas_frozen%'
+    ) >= 1, 'client_report_berkas must stay frozen (provenance of a frozen report)';
 END $$;
 
 ROLLBACK;

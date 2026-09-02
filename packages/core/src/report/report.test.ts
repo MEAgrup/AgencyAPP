@@ -13,7 +13,9 @@ import { periodeOf, readSheet, type Aoa, type Sheet } from '../baseline';
 import {
   detectTtam, gmvRunRateBulanan, hariAntara, prorateBench, renderBody, rentangOf,
   renderReportHtml, REPORT_BENCH_V1, resolveRentang, runReport, scale,
-  type ReportSlots,
+  INSIGHT_MAX, INSIGHT_MAX_POIN, InsightDraftError, normalizeInsightDraft,
+  MSG_ADA_MARKUP, MSG_POIN_KOSONG, MSG_REK_TAK_LENGKAP, MSG_RINGKASAN_WAJIB,
+  type PayloadInsight, type ReportSlots,
 } from './index';
 
 // ── fixtures ────────────────────────────────────────────────────────────────
@@ -360,5 +362,115 @@ describe('render', () => {
     expect(body).not.toContain('NaN');
     expect(body).not.toContain('undefined');
     expect(body).not.toContain('[object Object]');
+  });
+});
+
+// ── insight yang disunting AM ───────────────────────────────────────────────
+const fullPayload = () => run({
+  shop_tt: shopTt(), live_toko: liveToko(), prod_tt: prodTt(), ads_prod: adsProd(), aff_kr: affKr(),
+}).payload;
+
+describe('insight override di renderer', () => {
+  const OVERRIDE: PayloadInsight = {
+    ringkasan: 'RINGKASAN SUNTINGAN AM',
+    poin: ['POIN SUNTINGAN SATU', 'POIN SUNTINGAN DUA'],
+    rekomendasi_tinggi: [
+      { judul: 'REK TINGGI SUNTINGAN', target: 'T', dampak: 'D', timeline: '2 minggu' },
+    ],
+    rekomendasi_sedang: [],
+    outlook: 'OUTLOOK SUNTINGAN AM',
+    indikator: [{ nama: 'IND SUNTINGAN', target: '99%' }],
+  };
+
+  it('renders the override text instead of the engine narrative', () => {
+    const p = fullPayload();
+    const html = renderReportHtml(p, 'klien', OVERRIDE);
+    expect(html).toContain('RINGKASAN SUNTINGAN AM');
+    expect(html).toContain('POIN SUNTINGAN SATU');
+    expect(html).toContain('REK TINGGI SUNTINGAN');
+    expect(html).toContain('OUTLOOK SUNTINGAN AM');
+    expect(html).toContain('IND SUNTINGAN');
+    // and the engine's own sentences are GONE, not merely pushed down the page
+    expect(html).not.toContain(p.insight.ringkasan);
+    expect(html).not.toContain(p.insight.outlook);
+  });
+
+  it('is byte-identical to today’s output when no override is passed', () => {
+    const p = fullPayload();
+    // The regression that matters: adding the parameter must not shift one byte
+    // for the thousands of reports that will never be edited.
+    expect(renderBody(p, 'klien')).toEqual(renderBody(p, 'klien', undefined));
+    expect(renderBody(p, 'klien')).toEqual(renderBody(p, 'klien', p.insight));
+    expect(renderReportHtml(p, 'internal')).toEqual(renderReportHtml(p, 'internal', p.insight));
+  });
+
+  it('escapes override text — an AM pasting markup cannot inject it', () => {
+    const html = renderBody(fullPayload(), 'klien', { ...OVERRIDE, ringkasan: '<img src=x onerror=1>' });
+    expect(html).not.toContain('<img src=x');
+    expect(html).toContain('&lt;img src=x');
+  });
+
+  it('keeps the client mode free of internal blocks even with an override', () => {
+    const html = renderReportHtml(fullPayload(), 'klien', OVERRIDE);
+    expect(html).not.toContain('INTERNAL');
+    expect(html).not.toContain('badge-int">INTERNAL');
+  });
+});
+
+describe('normalizeInsightDraft', () => {
+  const ok = {
+    ringkasan: '  Ringkasan yang wajar  ',
+    poin: ['  poin satu  ', '', '   ', 'poin dua'],
+    rekomendasi_tinggi: [{ judul: 'J', target: 'T', dampak: 'D', timeline: '1 minggu' }],
+    rekomendasi_sedang: [{ judul: '', target: '', dampak: '', timeline: '' }],
+    outlook: 'Outlook wajar',
+    indikator: [{ nama: 'N', target: 'X' }, { nama: '', target: '' }],
+  };
+
+  it('trims, drops blank list rows, and preserves author order', () => {
+    const out = normalizeInsightDraft(ok);
+    expect(out.ringkasan).toBe('Ringkasan yang wajar');
+    expect(out.poin).toEqual(['poin satu', 'poin dua']);
+    expect(out.rekomendasi_sedang).toEqual([]);
+    expect(out.indikator).toEqual([{ nama: 'N', target: 'X' }]);
+  });
+
+  it('refuses blank required prose rather than falling back to the engine text', () => {
+    expect(() => normalizeInsightDraft({ ...ok, ringkasan: '   ' }))
+      .toThrow(MSG_RINGKASAN_WAJIB);
+    expect(() => normalizeInsightDraft({ ...ok, outlook: '' }))
+      .toThrow('[outlook periode berikutnya wajib diisi]');
+    expect(() => normalizeInsightDraft({ ...ok, poin: ['', '  '] })).toThrow(MSG_POIN_KOSONG);
+  });
+
+  it('refuses a partly filled recommendation card', () => {
+    expect(() => normalizeInsightDraft({
+      ...ok, rekomendasi_tinggi: [{ judul: 'J', target: '', dampak: 'D', timeline: '1 minggu' }],
+    })).toThrow(MSG_REK_TAK_LENGKAP);
+  });
+
+  it('refuses markup in any field', () => {
+    expect(() => normalizeInsightDraft({ ...ok, ringkasan: 'naik <b>20%</b>' }))
+      .toThrow(MSG_ADA_MARKUP);
+    expect(() => normalizeInsightDraft({ ...ok, poin: ['a > b'] })).toThrow(MSG_ADA_MARKUP);
+  });
+
+  it('enforces length and list ceilings, naming the field', () => {
+    expect(() => normalizeInsightDraft({ ...ok, ringkasan: 'x'.repeat(INSIGHT_MAX.ringkasan + 1) }))
+      .toThrow(`[teks ringkasan eksekutif melebihi ${INSIGHT_MAX.ringkasan} karakter]`);
+    expect(() => normalizeInsightDraft({
+      ...ok, poin: Array.from({ length: INSIGHT_MAX_POIN + 1 }, (_, i) => `p${i}`),
+    })).toThrow(`[maksimal ${INSIGHT_MAX_POIN} poin key insight]`);
+  });
+
+  it('throws InsightDraftError so the API can map it to 400', () => {
+    expect(() => normalizeInsightDraft({})).toThrow(InsightDraftError);
+  });
+
+  it('accepts an engine-produced insight unchanged (round-trip)', () => {
+    // The engine's own narrative must survive its own gate — otherwise revisi 0
+    // could not be stored, and "kembalikan ke insight mesin" would be impossible.
+    const engine = fullPayload().insight;
+    expect(normalizeInsightDraft(engine)).toEqual(engine);
   });
 });

@@ -184,3 +184,16 @@ export function buildReportPayload(M: ReportMetrics, sk: Skor, I: Insights, opts
 }
 
 export type ReportPayload = ReturnType<typeof buildReportPayload>;
+
+/**
+ * The narrative half of the payload — the ONLY part a human may rewrite.
+ *
+ * `client_reports.payload` is frozen by a DB trigger (house rule #3), so an
+ * AM's edited insight can never be written back into it. It is stored as an
+ * append-only revision beside the report (`client_report_insight`) and handed
+ * to `renderBody`/`renderReportHtml` as an override. This type is that
+ * contract: the shape the engine produces IS the shape a revision must keep,
+ * so a stored revision and a freshly-computed one are interchangeable at
+ * render time and no third vocabulary exists.
+ */
+export type PayloadInsight = ReportPayload['insight'];

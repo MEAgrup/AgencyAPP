@@ -18,7 +18,7 @@
  * and no Ads Manager files must not receive a report that jumps from 8 to 10.
  */
 import { dec, esc, num, pct, rp } from '../baseline/angka';
-import type { ReportPayload } from './payload';
+import type { PayloadInsight, ReportPayload } from './payload';
 
 export type RenderMode = 'klien' | 'internal';
 
@@ -98,7 +98,7 @@ export function chartData(p: ReportPayload): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 // Sections
 // ---------------------------------------------------------------------------
-function seksiRingkasan(p: ReportPayload, mode: RenderMode): string {
+function seksiRingkasan(p: ReportPayload, mode: RenderMode, I: PayloadInsight): string {
   const k = p.kpi;
   const cards = [
     kpi('GMV TikTok Shop', rpPendek(k.gmv), `${num(k.pesanan)} pesanan`, k.perubahan.gmv),
@@ -114,7 +114,7 @@ function seksiRingkasan(p: ReportPayload, mode: RenderMode): string {
     ? ''
     : '<p class="text-xs text-amber-600 mt-2">Rentang tanggal tidak terbaca dari berkas export — panjang periode memakai nilai baku, sehingga ambang volume (sesi LIVE, klik produk) memakai asumsi.</p>';
   return `${grid(cards)}
-  <div class="mt-4 p-4 bg-white rounded-xl border border-slate-100 insight-card"><p class="text-sm font-medium text-slate-700">${esc(p.insight.ringkasan)}</p></div>
+  <div class="mt-4 p-4 bg-white rounded-xl border border-slate-100 insight-card"><p class="text-sm font-medium text-slate-700">${esc(I.ringkasan)}</p></div>
   <p class="text-xs text-slate-400 mt-2">Perbandingan periode diambil langsung dari baris "Perubahan persentase" pada berkas Analitik Toko TikTok.</p>${catatan}${mode === 'internal' ? `
   <p class="text-xs text-slate-400 mt-1"><span class="badge-int">INTERNAL</span> Mesin ${esc(p.engine_versi)} • benchmark versi ${p.benchmark_versi ?? DASH} • GMV ${esc(p.periode.definisi_gmv)} • ${p.periode.hari} hari.</p>` : ''}`;
 }
@@ -371,11 +371,15 @@ const STYLE = `body{font-family:'Inter',system-ui,sans-serif;background:#f8fafc;
 table{border-collapse:collapse}`;
 
 /** The report body (no `<html>` wrapper) — what an embedding page drops in. */
-export function renderBody(p: ReportPayload, mode: RenderMode): string {
+export function renderBody(p: ReportPayload, mode: RenderMode, insight?: PayloadInsight): string {
+  // One resolution point for the whole document: an explicit override (the
+  // AM's stored revision) or the engine's own narrative. Never a per-section
+  // choice — a page mixing edited and generated prose reads as two authors.
+  const I: PayloadInsight = insight ?? p.insight;
   const seksi: [string, string][] = [];
   const add = (judul: string, html: string): void => { if (html) seksi.push([judul, html]); };
 
-  add('Ringkasan Eksekutif', seksiRingkasan(p, mode));
+  add('Ringkasan Eksekutif', seksiRingkasan(p, mode, I));
   if (p.kpi.harian.length) add('Tren Harian', '<div class="bg-white rounded-xl border border-slate-100 p-5"><canvas id="c_harian" height="100"></canvas></div>');
   add('Sumber GMV', seksiKanal(p, mode));
   add('GMV Max Ads', seksiIklan(p, mode));
@@ -385,13 +389,13 @@ export function renderBody(p: ReportPayload, mode: RenderMode): string {
   add('Matriks Produk 4 Kuadran', seksiProduk(p));
   add('Affiliate & Kreator', seksiAfiliasi(p, mode));
   add('Tokopedia', seksiTokopedia(p));
-  add('Key Insights', `<div class="bg-white rounded-xl border border-slate-100 p-5 md:p-6"><ol class="space-y-3">${p.insight.poin.map((t, i) => `<li class="flex gap-3"><span class="flex-shrink-0 w-6 h-6 bg-teal-100 text-teal-700 rounded-full flex items-center justify-center text-xs font-bold">${i + 1}</span><span class="text-sm">${esc(t)}</span></li>`).join('')}</ol></div>`);
+  add('Key Insights', `<div class="bg-white rounded-xl border border-slate-100 p-5 md:p-6"><ol class="space-y-3">${I.poin.map((t, i) => `<li class="flex gap-3"><span class="flex-shrink-0 w-6 h-6 bg-teal-100 text-teal-700 rounded-full flex items-center justify-center text-xs font-bold">${i + 1}</span><span class="text-sm">${esc(t)}</span></li>`).join('')}</ol></div>`);
   add('Rekomendasi & Action Plan', `<div class="mb-4"><h3 class="text-sm font-bold text-red-700 mb-2">Prioritas Tinggi</h3>
-    <div class="grid md:grid-cols-2 gap-3">${p.insight.rekomendasi_tinggi.map((r) => rekCard(r, 'tinggi')).join('') || '<div class="text-sm text-slate-500">Tidak ada prioritas tinggi.</div>'}</div></div>
+    <div class="grid md:grid-cols-2 gap-3">${I.rekomendasi_tinggi.map((r) => rekCard(r, 'tinggi')).join('') || '<div class="text-sm text-slate-500">Tidak ada prioritas tinggi.</div>'}</div></div>
     <div><h3 class="text-sm font-bold text-amber-700 mb-2">Prioritas Sedang</h3>
-    <div class="grid md:grid-cols-2 gap-3">${p.insight.rekomendasi_sedang.map((r) => rekCard(r, 'sedang')).join('') || '<div class="text-sm text-slate-500">—</div>'}</div></div>`);
-  add('Outlook Periode Berikutnya', `<div class="bg-teal-50 border border-teal-100 rounded-xl p-5 md:p-6"><p class="text-slate-700 mb-4 text-sm">${esc(p.insight.outlook)}</p>
-    ${grid(p.insight.indikator.map((m) => kpi(m.nama, m.target)))}</div>`);
+    <div class="grid md:grid-cols-2 gap-3">${I.rekomendasi_sedang.map((r) => rekCard(r, 'sedang')).join('') || '<div class="text-sm text-slate-500">—</div>'}</div></div>`);
+  add('Outlook Periode Berikutnya', `<div class="bg-teal-50 border border-teal-100 rounded-xl p-5 md:p-6"><p class="text-slate-700 mb-4 text-sm">${esc(I.outlook)}</p>
+    ${grid(I.indikator.map((m) => kpi(m.nama, m.target)))}</div>`);
 
   const body = seksi.map(([judul, html], i) =>
     `<section class="mb-8"><h2 class="font-display text-xl md:text-2xl font-bold text-slate-900 mb-4">${i + 1}. ${esc(judul)}</h2>${html}</section>`).join('');
@@ -412,7 +416,7 @@ export function renderBody(p: ReportPayload, mode: RenderMode): string {
 }
 
 /** A complete, self-contained HTML document — what the AM downloads or forwards. */
-export function renderReportHtml(p: ReportPayload, mode: RenderMode): string {
+export function renderReportHtml(p: ReportPayload, mode: RenderMode, insight?: PayloadInsight): string {
   const judul = `${p.periode.tipe === 'mingguan' ? 'Weekly' : 'Monthly'} Report — ${p.klien.toko || p.klien.nama || ''} ${p.periode.mulai || ''}`;
   return `<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>${esc(judul)}${mode === 'internal' ? ' — Internal' : ''}</title>
@@ -420,7 +424,7 @@ export function renderReportHtml(p: ReportPayload, mode: RenderMode): string {
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@600;700&display=swap">
 <style>${STYLE}</style></head>
-<body data-mode="${mode}"><div class="max-w-screen-xl mx-auto px-4 md:px-6 py-8">${renderBody(p, mode)}</div>
+<body data-mode="${mode}"><div class="max-w-screen-xl mx-auto px-4 md:px-6 py-8">${renderBody(p, mode, insight)}</div>
 <script>window.CHART_DATA=${JSON.stringify(chartData(p))};</script>
 <script>${CHART_BOOT}</script></body></html>`;
 }
