@@ -95,7 +95,7 @@ describe('planTargetToWire (Section P-B / Rule 9)', () => {
 });
 
 describe('planRowToWire (Section P-C)', () => {
-  it('carries all 27 fields, arrays and carry-over included', () => {
+  it('carries all 28 fields, arrays and carry-over included', () => {
     const r: plan.PlanRow = {
       id: 42,
       planId: 'PLAN-202608-0001',
@@ -116,6 +116,7 @@ describe('planRowToWire (Section P-C)', () => {
       prioritas: 'Wajib',
       hasilDiharapkan: 'ACOS <= 18%',
       prasyarat: null,
+      instruksiBrief: 'https://drive.google.com/drive/folders/xyz',
       statusBaris: 'Rencana',
       statusBarisAlasan: null,
       visibilitas: 'Bagikan ke Klien',
@@ -132,6 +133,7 @@ describe('planRowToWire (Section P-C)', () => {
     expect(w.sku_sasaran).toEqual(['SKU-1', 'SKU-2']);
     expect(w.minggu_sasaran).toEqual([1, 3]);
     expect(w.hasil_diharapkan).toBe('ACOS <= 18%');
+    expect(w.instruksi_brief).toBe('https://drive.google.com/drive/folders/xyz');
     expect(w.status_baris).toBe('Rencana');
     expect(w.keputusan_carryover).toBeNull();
   });

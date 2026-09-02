@@ -703,11 +703,14 @@ describeDb('createPlanRow (RAB-14, Section P-C)', () => {
       satuan: 'kampanye',
       divisiPic: 'Ads',
       hasilDiharapkan: 'ACOS <= 18%',
+      instruksiBrief: 'https://drive.google.com/drive/folders/xyz',
     });
     expect(row.id).toBeGreaterThan(0);
     expect(row.planId).toBe(id);
     expect(row.diLuarStrategi).toBe(true);
     expect(row.kuota).toBe(40);
+    // Owner-added 2026-09-02, not a PC-numbered field (docs/DECISIONS.md).
+    expect(row.instruksiBrief).toBe('https://drive.google.com/drive/folders/xyz');
     // A fresh row is born Rencana, un-carried, not settable by the caller (PC-14).
     expect(row.statusBaris).toBe('Rencana');
     expect(row.terbawa).toBe(false);
@@ -721,6 +724,15 @@ describeDb('createPlanRow (RAB-14, Section P-C)', () => {
     const detail = await getPlanDetail(sql, am(), id);
     expect(detail.rows).toHaveLength(1);
     expect(detail.rows[0].id).toBe(row.id);
+  });
+
+  it('defaults instruksiBrief to null when the AM leaves it blank', async () => {
+    const f = await seedContractStrategi();
+    const id = await seedPeriod(f, { status: 'Draft' });
+    const row = await createPlanRow(sql, am(), id, {
+      channel: 'Shopee', pilar: 'iklan', kuota: 3, divisiPic: 'Ads', diLuarStrategi: true, diLuarAlasan: 'x',
+    });
+    expect(row.instruksiBrief).toBeNull();
   });
 
   it('demands exactly one origin (PC-3 / ck_plan_row_asal_tunggal), before the DB CHECK', async () => {

@@ -30,6 +30,7 @@ interface CreateRowBody {
   prioritas?: plan.PlanRow['prioritas'];
   hasil_diharapkan?: string;
   prasyarat?: string | null;
+  instruksi_brief?: string | null;
   visibilitas?: plan.PlanRow['visibilitas'];
 }
 
@@ -56,6 +57,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       prioritas: b.prioritas,
       hasilDiharapkan: b.hasil_diharapkan,
       prasyarat: b.prasyarat ?? null,
+      instruksiBrief: b.instruksi_brief ?? null,
       visibilitas: b.visibilitas,
     });
     return json(planRowToWire(row), 201);

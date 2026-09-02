@@ -115,7 +115,10 @@ interface RowDraft {
   hasil_diharapkan: string;
   /** PC-5 — comma-separated SKUs; parsed to an array at submit. */
   sku_sasaran: string;
-  prasyarat: string;
+  /** Owner-added 2026-09-02, not a PC-numbered PRD field: free text or a link
+   *  (e.g. Google Drive) attached to this row — carried into the inherited
+   *  Brief (RAB-16). */
+  instruksi_brief: string;
   visibilitas: string;
   /** Origin (PC-3): a Strategi pillar id (Plan kontrak — its own STRG; Plan
    *  klien — any `Aktif` STRG belonging to the client), or empty ⇒ no pillar. */
@@ -130,7 +133,6 @@ interface RowDraft {
   /** Which "di luar" flag to send when NEITHER origin above is picked on a Plan
    *  klien row (Plan kontrak always means Di Luar Strategi — no choice needed). */
   di_luar_kind: 'strategi' | 'service';
-  di_luar_alasan: string;
 }
 
 function blankRow(channel: string): RowDraft {
@@ -146,12 +148,11 @@ function blankRow(channel: string): RowDraft {
     prioritas: 'Wajib',
     hasil_diharapkan: '',
     sku_sasaran: '',
-    prasyarat: '',
+    instruksi_brief: '',
     visibilitas: 'Bagikan ke Klien',
     strategi_pillar_id: '',
     service_id: '',
     di_luar_kind: 'strategi',
-    di_luar_alasan: '',
   };
 }
 
@@ -161,6 +162,17 @@ function parseSkuSasaran(s: string): string[] {
     .map((sku) => sku.trim())
     .filter((sku) => sku !== '');
 }
+
+// Owner decision 2026-09-02 (docs/DECISIONS.md): the AM no longer types a
+// reason for "di luar" — an empty Section E (or no matching Service) already
+// IS the reason, and asking the AM to restate it in words was friction with
+// no payoff. The DB (`ck_plan_row_di_luar_alasan`) still requires non-blank
+// text whenever a row has no Service/pilar anchor, so this default satisfies
+// that gate without a migration or a visible form field.
+const DEFAULT_DILUAR_ALASAN: Record<'strategi' | 'service', string> = {
+  strategi: 'Belum ada pilar Strategi (Section E) yang cocok untuk baris ini.',
+  service: 'Belum ada Service klien yang cocok untuk baris ini.',
+};
 
 function rowDraftToBody(d: RowDraft, lingkup: string): CreatePlanRowBody {
   // PC-3 exactly-one origin (`ck_plan_row_asal_tunggal`). Plan kontrak (Full
@@ -177,7 +189,11 @@ function rowDraftToBody(d: RowDraft, lingkup: string): CreatePlanRowBody {
   const hasOrigin = pillarId !== null || serviceId !== null;
   const diLuarStrategi = !hasOrigin && (!isKlien || d.di_luar_kind === 'strategi');
   const diLuarService = !hasOrigin && isKlien && d.di_luar_kind === 'service';
-  const diLuar = diLuarStrategi || diLuarService;
+  const diLuarAlasan = diLuarStrategi
+    ? DEFAULT_DILUAR_ALASAN.strategi
+    : diLuarService
+      ? DEFAULT_DILUAR_ALASAN.service
+      : null;
   return {
     channel: d.channel,
     pilar: d.pilar,
@@ -185,7 +201,7 @@ function rowDraftToBody(d: RowDraft, lingkup: string): CreatePlanRowBody {
     service_id: serviceId,
     di_luar_strategi: diLuarStrategi,
     di_luar_service: diLuarService,
-    di_luar_alasan: diLuar ? d.di_luar_alasan.trim() || null : null,
+    di_luar_alasan: diLuarAlasan,
     aksi: d.aksi.trim(),
     kuota: d.kuota.trim() ? Number(d.kuota) : 0,
     satuan: d.satuan.trim(),
@@ -195,7 +211,8 @@ function rowDraftToBody(d: RowDraft, lingkup: string): CreatePlanRowBody {
     prioritas: d.prioritas,
     hasil_diharapkan: d.hasil_diharapkan.trim(),
     sku_sasaran: parseSkuSasaran(d.sku_sasaran),
-    prasyarat: d.prasyarat.trim() || null,
+    prasyarat: null,
+    instruksi_brief: d.instruksi_brief.trim() || null,
     visibilitas: d.visibilitas,
   };
 }
@@ -769,24 +786,6 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                     </select>
                   </label>
                 )}
-              {(plan.lingkup === 'klien'
-                ? rowDraft.service_id.trim() === '' && rowDraft.strategi_pillar_id.trim() === ''
-                : rowDraft.strategi_pillar_id.trim() === '') && (
-                <label className="field">
-                  <span className="muted" style={{ fontSize: 12 }}>
-                    Alasan{' '}
-                    {plan.lingkup === 'klien'
-                      ? rowDraft.di_luar_kind === 'service'
-                        ? 'di luar service'
-                        : 'di luar strategi'
-                      : 'di luar strategi'}
-                  </span>
-                  <input
-                    value={rowDraft.di_luar_alasan}
-                    onChange={(e) => setRowDraft({ ...rowDraft, di_luar_alasan: e.target.value })}
-                  />
-                </label>
-              )}
               <label className="field">
                 <span className="muted" style={{ fontSize: 12 }}>Pilar (PC-2)</span>
                 <select
@@ -904,14 +903,6 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                 />
               </label>
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Prasyarat (PC-12, opsional)</span>
-                <input
-                  placeholder="mis. akses Affiliate Center disetujui"
-                  value={rowDraft.prasyarat}
-                  onChange={(e) => setRowDraft({ ...rowDraft, prasyarat: e.target.value })}
-                />
-              </label>
-              <label className="field">
                 <span className="muted" style={{ fontSize: 12 }}>Visibilitas (PC-17)</span>
                 <select
                   value={rowDraft.visibilitas}
@@ -923,6 +914,20 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                 </select>
               </label>
             </div>
+
+            <label className="field" style={{ display: 'block' }}>
+              <span className="muted" style={{ fontSize: 12 }}>Instruksi Brief (opsional)</span>
+              <textarea
+                placeholder="Teks instruksi lengkap untuk Brief, atau tempel link Google Drive"
+                rows={3}
+                value={rowDraft.instruksi_brief}
+                onChange={(e) => setRowDraft({ ...rowDraft, instruksi_brief: e.target.value })}
+              />
+              <span className="muted" style={{ fontSize: 11 }}>
+                Ikut diwariskan ke Brief saat &quot;Berikan Brief&quot; diklik — link (mis. Google
+                Drive) otomatis muncul sebagai Referensi/Lampiran yang bisa diklik divisi.
+              </span>
+            </label>
 
             <div className="row" style={{ gap: 8 }}>
               <button
