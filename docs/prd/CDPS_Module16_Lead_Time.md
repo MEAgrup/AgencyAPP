@@ -149,7 +149,7 @@ Kalau transisi tahapan ditulis sebagai `entity_type='brief'`, baris tahapan akan
 
 `computeStageLeadTime(stageEvents, statusEvents, defs, overrides)` mengembalikan per tahap: `masukPada`, `keluarPada`, `hariKerja`, `targetHariKerja`, `status`; plus `totalHariKerja` dan `tahapAktif`.
 
-Kosakata status per tahap memakai yang sudah dipakai timeline Kelola Klien: `belum_mulai` · `tepat_waktu` · `mendekati_batas` · `terlambat` · `tidak_berlaku`.
+Kosakata status per tahap memakai yang sudah dipakai timeline Riset & Interview Klien: `belum_mulai` · `tepat_waktu` · `mendekati_batas` · `terlambat` · `tidak_berlaku`.
 
 Pembagian nol → `—`. Target kosong → `N/A`. Keduanya mengikuti konvensi `speedScore()` M12.
 

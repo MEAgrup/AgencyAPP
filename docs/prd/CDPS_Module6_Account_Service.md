@@ -34,6 +34,7 @@ Expected result: every Service has a clear, auditable path from "bought" to "bei
   - **Direct path:** `[Awaiting Onboarding]` → `[Direct Breakdown]` → `[Briefed]` → `[In Execution]`.
 - **A single Client Record can have Services on both paths simultaneously** — e.g. Alpha Digital's "TikTok Shop Full Management" runs Plan-gated while their "Single KOL Booking" add-on runs Direct, in parallel, under the same AM.
 - This status lives **on the Service**, not on the Client — the Client Record itself has no single "onboarding status"; its state is the sum of its Services' states.
+- **Nama layar (diganti pemilik 2026-09-02 — `DECISIONS.md`).** The Service hub that walks this path (`/account/services/{id}`: plan gate → Strategy & Plan → Brief) is labelled **"Kelola Klien"** in the UI; the button on the Client Record that opens it used to read "Onboarding & Brief", and the hub heading used to read "Status Onboarding". That name was **taken over from** the Interview session, which is now called "Riset & Interview Klien" (Module 6 Interview) — so in the UI, "Kelola Klien" means *this* module, not the interview. The word "onboarding" survives only where it is a **stored value**: the status `[Awaiting Onboarding]` above, and code identifiers that name it (`nextOnboardingStep`, `SERVICE_AWAITING_ONBOARDING`). Renaming those would mean a migration that rewrites `audit_log` history, so they stay.
 
 ---
 

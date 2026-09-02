@@ -407,7 +407,7 @@ count is asserted against a **version registry** (O55), not a literal. The live 
 | v2 | M6A §7 D12 (4 Strategi) + M6B §9 (6 Plan) + M6C §10 (3 Gate) + `m6.client.assigned` (O53) | 14 | 31 |
 | v3 | M5-OA-7 — 2 Finance (transaction-change ACC) | 2 | 33 |
 | v4 | M6A §4 D-7 — 1 Strategi (Sanggahan Target) | 1 | 34 |
-| v5 | Interview / Kelola Klien tab 1 — 9 events | 9 | 43 |
+| v5 | Interview / Riset & Interview Klien tab 1 — 9 events | 9 | 43 |
 | v6 | Interview part 2 — 1 event (prasyarat menggantung) | 1 | **44** |
 
 So **the catalog is at v6 = 44 today**, not 31. (The "31" the owner saw is the running total *at the end of

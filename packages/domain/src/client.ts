@@ -655,7 +655,26 @@ export interface PendingHoldRequest {
   serviceName: string;
   ownerAm: string | null;
   ownerAmNama: string;
+  /**
+   * When the hold was ASKED FOR. Sourced from the `service_hold_requested` audit
+   * row, falling back to the Service's birth timestamp: `services` has no
+   * `updated_at` column and never did (`20260722053923_wave1_money_path.sql`),
+   * so the original `select s.updated_at` here made this whole queue answer 500
+   * — the reason `/persetujuan` renders per-section errors and this section was
+   * always one of them.
+   */
   updatedAt: Date;
+  /**
+   * The MANDATORY reason the AM typed on `requestHold`. It is only ever written
+   * to the audit row (`service_hold_requested`.after_json.reason) — services has
+   * no column for it — so the queue reads it back from there. Without it the Head
+   * is asked to approve a pause with no stated cause, which is the one fact the
+   * decision actually turns on. Empty string when the audit row is unreadable
+   * (RLS: a requester outside the approver's division) — render `—`, never a lie.
+   */
+  reason: string;
+  requestedBy: string;
+  requestedByNama: string;
 }
 
 /**
@@ -672,17 +691,35 @@ export async function pendingHoldRequests(sql: Queryable, actor: Actor): Promise
   const rows = await sql<{
     id: string; client_id: string; toko: string; nama_pic: string; name: string;
     assigned_am_id: string | null; owner_am_nama: string | null; updated_at: Date;
+    reason: string | null; requested_by: string | null; requested_by_nama: string | null;
   }[]>`
     select s.id, s.client_id, c.toko, c.nama_pic, s.name, c.assigned_am_id,
-           coalesce(am.nama, c.assigned_am_id) as owner_am_nama, s.updated_at
+           coalesce(am.nama, c.assigned_am_id) as owner_am_nama,
+           coalesce(req.created_at, s.created_at) as updated_at,
+           req.reason, req.actor_employee_id as requested_by,
+           coalesce(reqe.nama, req.actor_employee_id) as requested_by_nama
       from services s
       join clients c on c.id = s.client_id
       left join employees am on am.employee_id = c.assigned_am_id
+      -- The stated cause of the pause. LATERAL + limit 1 = the LATEST request:
+      -- a Service can be held, resumed and held again, and the Head must read
+      -- the reason for the request in front of them, not the first one ever.
+      left join lateral (
+        select a.after_json->>'reason' as reason, a.actor_employee_id, a.created_at
+          from audit_log a
+         where a.entity_type = 'service' and a.entity_id = s.id
+           and a.action = 'service_hold_requested'
+         order by a.created_at desc, a.id desc
+         limit 1
+      ) req on true
+      left join employees reqe on reqe.employee_id = req.actor_employee_id
      where s.status = ${SERVICE_HOLD_REQUESTED}
-     order by s.updated_at asc, s.id asc`;
+     order by coalesce(req.created_at, s.created_at) asc, s.id asc`;
   return rows.map((r) => ({
     serviceId: r.id, clientId: r.client_id, toko: r.toko, namaPic: r.nama_pic, serviceName: r.name,
     ownerAm: r.assigned_am_id, ownerAmNama: r.owner_am_nama ?? '', updatedAt: r.updated_at,
+    reason: r.reason ?? '', requestedBy: r.requested_by ?? '',
+    requestedByNama: r.requested_by_nama ?? '',
   }));
 }
 

@@ -195,6 +195,28 @@ table {
   background: #f7d9d5;
 }
 
+/* Approve / Reject pair — "Perlu Persetujuan Saya" (dan setiap antrian ACC lain).
+   Sengaja SOLID dan berpasangan: pada halaman persetujuan kedua tombol berdiri
+   bersebelahan di setiap kartu, jadi keduanya harus terbaca sebagai satu pilihan
+   biner dalam sekali lihat — hijau = setujui, merah = tolak. `.btnDanger` (merah
+   lembut di atas latar terang) dipertahankan untuk aksi merusak yang berdiri
+   SENDIRIAN (Void Service, Hapus) dan tidak boleh seberat pasangan ini. */
+.btnApprove {
+  background: var(--color-success);
+  color: #fff;
+}
+.btnApprove:hover:not(:disabled) {
+  background: #17703c;
+}
+
+.btnReject {
+  background: var(--color-danger);
+  color: #fff;
+}
+.btnReject:hover:not(:disabled) {
+  background: #a32f23;
+}
+
 .btnGhost {
   background: transparent;
   color: var(--color-text-muted);

@@ -337,7 +337,7 @@ export default function MasterServicesPage() {
                 <option value="plan_wajib">{TIER_LABELS.plan_wajib}</option>
               </select>
               <span className="muted" style={{ fontSize: 12 }}>
-                Menentukan jalur onboarding layanan ini. <strong>Plan Wajib</strong> selalu menuntut
+                Menentukan jalur Kelola Klien layanan ini. <strong>Plan Wajib</strong> selalu menuntut
                 Strategi &amp; Plan sebelum Brief; <strong>Plan Ditentukan AM</strong> menampilkan form
                 penentuan dan mencatat keputusan AM; <strong>Tanpa Plan</strong> langsung ke Brief.
                 Perubahan hanya berlaku untuk layanan yang di-closing SETELAH versi ini — engagement
