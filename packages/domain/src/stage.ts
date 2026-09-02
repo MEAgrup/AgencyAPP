@@ -102,6 +102,17 @@ export interface Pipeline {
  * (AI Optimizer's two rows vs everyone else's one). Divisi tanpa baris
  * `stage_pipeline` (mis. Store Operation) atau divisi tak terdaftar → null,
  * BUKAN error — caller (insertBrief) menyimpan Brief dengan kedua kolom NULL.
+ *
+ * ⚠️ JOIN `sm_machines` DI SINI SAH HANYA KARENA INI JALUR TULIS. `initialState`
+ * memang dibutuhkan (`account.insertBrief` menuliskannya ke
+ * `briefs.production_stage`), dan `sm_machines` ada di grup RLS "internal murni"
+ * — SELECT dicabut dari `authenticated`, nol policy
+ * (`20260723064438_rls_baseline.sql`, invariant `supabase/tests/rls_checks.sql`
+ * §9). `insertBrief` berjalan di `withTransaction` (koneksi privileged), jadi
+ * join ini tidak pernah bertemu RLS. **Jangan panggil fungsi ini dari jalur baca
+ * `readAsActor`** — itu akan 42501 persis seperti `pipelineByCode` pada QA live
+ * 2026-09-02 (lihat komentarnya di bawah). Butuh pipeline di jalur baca? Pakai
+ * `pipelineByCode`, yang sengaja tidak menyentuh `sm_machines`.
  */
 export async function resolvePipeline(tx: Queryable, divisionNama: string, deliverableType: string): Promise<Pipeline | null> {
   const code = division.byNama(divisionNama)?.code;
@@ -122,16 +133,46 @@ export async function resolvePipeline(tx: Queryable, divisionNama: string, deliv
   return { code: rows[0].code, machineName: rows[0].machine_name, initialState: rows[0].initial_state };
 }
 
-async function pipelineByCode(tx: Queryable, code: string): Promise<Pipeline> {
-  const rows = await tx<{ code: string; machine_name: string; initial_state: string }[]>`
-    select sp.code, sp.machine_name, sm.initial_state
-      from stage_pipeline sp
-      join sm_machines sm on sm.name = sp.machine_name
-     where sp.code = ${code}`;
+/**
+ * Apa yang penelepon `pipelineByCode` sungguh-sungguh pakai: kode pipeline +
+ * nama mesinnya. SENGAJA tanpa `initialState` — lihat komentar fungsinya.
+ */
+type PipelineRef = Pick<Pipeline, 'code' | 'machineName'>;
+
+/**
+ * pipelineByCode membaca pipeline dari kodenya — **hanya dari `stage_pipeline`,
+ * TANPA join `sm_machines`.**
+ *
+ * KENAPA TANPA JOIN (QA live 2026-09-02, pelapor Yohan/Director). Fungsi ini dulu
+ * menjoin `sm_machines` untuk mengambil `initial_state`. Itu tidak pernah
+ * meledak selama penggunanya hanya jalur TULIS (`advanceStage`, `reviewBrief` —
+ * keduanya di `withTransaction`, koneksi privileged). LT-60 menambahkan
+ * `listNextStages` ke dalam `getStageOverview`, yang berjalan di bawah
+ * `readAsActor` (`SET LOCAL ROLE authenticated`) — dan `sm_machines` ada di grup
+ * RLS "internal murni" (SELECT dicabut, nol policy). Hasilnya
+ * `42501 permission denied for table sm_machines`, yang `mapError` tidak
+ * memetakan: `GET /briefs/{id}/stage` menjawab 500 dan panel "Tahapan Produksi"
+ * merender "internal server error" telanjang di `/creative/briefs/BRF-…`.
+ *
+ * Ini KELAS BUG YANG SAMA dengan insiden `sm_edges` 2026-08-03 yang melahirkan
+ * `private.sm_allowed_transitions` (lihat `engine.ts`) — dan doc comment
+ * `listNextStages` sudah memperingatkan soal `sm_edges` secara eksplisit, tapi
+ * join `sm_machines` yang menumpang lewat `pipelineByCode` lolos dari mata.
+ *
+ * Perbaikannya tidak butuh migrasi maupun fungsi SECURITY DEFINER baru:
+ * KETIGA penelepon hanya memakai `machineName`, dan `machine_name` memang
+ * kolom `stage_pipeline` — tabel yang `authenticated` BOLEH baca. `initial_state`
+ * cuma beban yang tak pernah dipakai di sini. Satu-satunya yang benar-benar
+ * butuh `initialState` adalah `resolvePipeline` (jalur tulis `insertBrief`), dan
+ * ia mempertahankan join-nya.
+ */
+async function pipelineByCode(tx: Queryable, code: string): Promise<PipelineRef> {
+  const rows = await tx<{ code: string; machine_name: string }[]>`
+    select code, machine_name from stage_pipeline where code = ${code}`;
   if (rows.length === 0) {
     throw new ConflictError(MSG_NO_PIPELINE);
   }
-  return { code: rows[0].code, machineName: rows[0].machine_name, initialState: rows[0].initial_state };
+  return { code: rows[0].code, machineName: rows[0].machine_name };
 }
 
 interface StageDefDbRow {

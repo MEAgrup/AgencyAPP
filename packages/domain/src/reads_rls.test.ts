@@ -562,4 +562,92 @@ describeDb('read models under RLS (O37)', () => {
       await sql`delete from clients where id = ${CLI}`;
     }
   });
+
+  /**
+   * The SECOND 500 on the same panel (QA live 2026-09-02, pelapor Yohan/Director)
+   * — and the reason this case exists as its own test rather than a tweak to the
+   * one above.
+   *
+   * That test pins `stage_pipeline_code`/`production_stage` to NULL on purpose
+   * (Rule 12), which means `getStageOverview` returns `defs: []` and
+   * `nextStages: []` WITHOUT ever calling `listNextStages`. So the entire
+   * pipeline branch — the branch every real M16 Brief takes — went unexercised
+   * under RLS. `listNextStages` → `pipelineByCode` was joining `sm_machines`,
+   * a table in the RLS baseline's "pure internal" group (SELECT revoked from
+   * `authenticated`, zero policies), and answered
+   * `42501 permission denied for table sm_machines` → unmapped → 500 →
+   * "internal server error" in the Tahapan Produksi panel of
+   * `/creative/briefs/BRF-202609-0001`.
+   *
+   * So this Brief is deliberately the SHAPE THAT BROKE: a real pipeline code and
+   * a real `production_stage`. `nextStages` non-empty is the assertion that
+   * distinguishes "the read path resolved" from "the branch was skipped" — an
+   * empty array is exactly what the un-exercised branch also returns, so
+   * asserting merely "did not throw" would have passed on the buggy code too.
+   */
+  it('resolves nextStages under RLS without hitting sm_machines — the pipelineByCode 500', async () => {
+    const CLI = 'CLI-ZZR-0902';
+    const SVC = 'SVC-ZZR-0902';
+    const BRF = 'BRF-ZZR-0902';
+    const AM = 'ZZR-AM902';
+    await sql`
+      insert into clients (id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, assigned_am_id,
+                           released_to_account_at, created_by)
+      values (${CLI}, 'RLS 0902 Fixture', 'Ibu RLS', 'Jakarta', 'Fashion', 'https://shopee/zzr902',
+              '9000000.00', '12000000.00', ${OWNER}, ${OWNER}, ${AM}, now(), ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                            commission_rule, status, created_by)
+      values (${SVC}, ${CLI}, 'MSV-ZZR-0902', 1, 'rls 0902 service', '9000000.00',
+              '10% of standard price', 'Ongoing', ${AM})
+      on conflict (id) do nothing`;
+    // Read the pipeline + its opening stage from the seeded registry rather than
+    // hardcoding 'CREATIVE_CONTENT'/'Cek Brief AM': the point of the test is the
+    // RLS grant, and a renamed stage code must not turn this into a false green.
+    const [pipe] = await sql<{ code: string; initial_state: string }[]>`
+      select sp.code, sm.initial_state
+        from stage_pipeline sp
+        join sm_machines sm on sm.name = sp.machine_name
+       where sp.division_code = 'CREATIVE' and sp.aktif = true
+       order by (sp.deliverable_type is not null) desc
+       limit 1`;
+    expect(pipe, 'no active Creative stage_pipeline seeded').toBeDefined();
+    await sql`
+      insert into briefs (id, service_id, title, status, assigned_division,
+                          stage_pipeline_code, production_stage, created_by)
+      values (${BRF}, ${SVC}, 'rls 0902 brief', '[To Do]', 'Creative',
+              ${pipe.code}, ${pipe.initial_state}, ${AM})
+      on conflict (id) do nothing`;
+
+    const amClaims = claims({ employeeId: AM, division: 'Account', level: 'staff' });
+    const amActor = actor(AM, 'Account', 'staff');
+    try {
+      const overview = await withClaims(sql, amClaims, (tx) => getStageOverview(tx, amActor, BRF));
+      expect(overview.stagePipelineCode).toBe(pipe.code);
+      expect(overview.productionStage).toBe(pipe.initial_state);
+      // The branch actually ran: a forward edge out of the opening stage exists
+      // (Cek Brief AM -> Script for Creative), and the return edge is filtered.
+      expect(overview.nextStages.length).toBeGreaterThan(0);
+      expect(overview.nextStages.map((n) => n.stageCode)).not.toContain('Brief Dikembalikan ke AM');
+      // The pipeline's checkpoints came back too, i.e. listStageDefs resolved.
+      expect(overview.leadTime.stages.length).toBeGreaterThan(0);
+      // Every next stage is a REAL checkpoint of this pipeline, and carries a
+      // label. (Deliberately not `label !== stageCode`: the seeded Creative
+      // pipeline labels each stage with its own code, so that would fail on
+      // correct data — the containment check is what actually proves the
+      // stage_definition reads resolved under RLS.)
+      const defCodes = overview.leadTime.stages.map((st) => st.stageCode);
+      for (const n of overview.nextStages) {
+        expect(defCodes).toContain(n.stageCode);
+        expect(n.label.trim()).not.toBe('');
+      }
+    } finally {
+      await sql`delete from briefs where id = ${BRF}`;
+      await sql`delete from services where id = ${SVC}`;
+      await sql`delete from contracts where client_id = ${CLI}`;
+      await sql`delete from clients where id = ${CLI}`;
+    }
+  });
 });
