@@ -25,7 +25,9 @@
 --
 --   * `client_report_publikasi` — satu baris per laporan; `status` ditulis
 --     EKSKLUSIF oleh `sm_transition` (mesin `client_report`), dan
---     `insight_revisi` MEMAKU revisi mana yang dilihat klien.
+--     `insight_revisi` MEMAKU revisi mana yang dilihat klien. Paku itu tidak
+--     dihapus saat pencabutan — ia jejak "revisi mana yang sudah dibaca klien";
+--     yang menentukan keterbacaan adalah `status`.
 --
 -- MENGAPA DIPAKU, BUKAN "revisi terbaru menang". Kalau klien selalu membaca
 -- revisi terbaru, setiap simpanan setengah jadi langsung terbit — AM tidak
@@ -90,6 +92,14 @@ CREATE TABLE client_report_insight (
     catatan_revisi     text         NULL,           -- kenapa disunting (jejak, bukan syarat)
     created_at         timestamptz  NOT NULL DEFAULT now(),
     created_by         varchar(64)  NOT NULL,
+    -- SENGAJA TANPA CASCADE, berbeda dari `client_report_berkas`. Tabel ini
+    -- menolak DELETE (trigger di bawah), jadi CASCADE tak mungkin berjalan —
+    -- mendeklarasikannya hanya menukar pesan galat yang jelas ("melanggar
+    -- foreign key") dengan yang membingungkan ("client_report_insight is
+    -- append-only: DELETE forbidden") pada operasi yang sama-sama gagal.
+    -- Konsekuensinya memang: laporan yang punya revisi insight TIDAK bisa
+    -- dihapus. Itu benar — kalau teksnya sudah pernah dibaca klien, riwayatnya
+    -- bukan milik siapa pun untuk dibuang (aturan rumah #3).
     CONSTRAINT fk_cri_report FOREIGN KEY (report_id) REFERENCES client_reports (id),
     CONSTRAINT uq_cri_revisi UNIQUE (report_id, revisi),
     CONSTRAINT ck_cri_revisi CHECK (revisi >= 0),
@@ -138,7 +148,7 @@ CREATE TABLE client_report_publikasi (
     created_at       timestamptz  NOT NULL DEFAULT now(),
     created_by       varchar(64)  NOT NULL,
     updated_at       timestamptz  NOT NULL DEFAULT now(),
-    CONSTRAINT fk_crp_report FOREIGN KEY (report_id) REFERENCES client_reports (id),
+    CONSTRAINT fk_crp_report FOREIGN KEY (report_id) REFERENCES client_reports (id) ON DELETE CASCADE,
     -- Paku dan status tidak boleh berbeda pendapat: kalau tayang, harus jelas
     -- REVISI MANA yang tayang dan sejak kapan. Tanpa CHECK ini, sebuah baris
     -- `[Terbit]` dengan insight_revisi NULL akan membuat route klien memilih
@@ -149,10 +159,24 @@ CREATE TABLE client_report_publikasi (
     CONSTRAINT ck_crp_cabut_lengkap CHECK (
         status <> '[Dicabut]'
         OR (dicabut_pada IS NOT NULL AND dicabut_oleh IS NOT NULL AND btrim(coalesce(alasan_cabut, '')) <> '')),
-    -- Laporan yang dicabut tidak boleh menyisakan paku: satu baris tersisa
-    -- akan tetap lolos filter "ada revisi terpaku" di query portal.
-    CONSTRAINT ck_crp_dicabut_tanpa_paku CHECK (status <> '[Dicabut]' OR insight_revisi IS NULL),
     CONSTRAINT ck_crp_revisi CHECK (insight_revisi IS NULL OR insight_revisi >= 0)
+    -- CATATAN, sengaja TIDAK ada `status='[Dicabut]' ⇒ insight_revisi IS NULL`.
+    -- Dua alasan, satu praktis satu substantif.
+    --
+    -- Praktis: kedua CHECK di atas mengikat KOMBINASI kolom, sementara kolom
+    -- `status` hanya boleh ditulis `sm_transition` — jadi pencabutan selalu DUA
+    -- pernyataan (stamp lalu transisi). CHECK yang juga melarang paku saat
+    -- `[Dicabut]` membuat kedua urutan mustahil: stamp-dulu melanggar
+    -- ck_crp_terbit_lengkap (paku hilang padahal masih `[Terbit]`),
+    -- transisi-dulu melanggar ck_crp_cabut_lengkap (sudah `[Dicabut]` tapi
+    -- alasan belum ada). Constraint yang tak punya urutan valid bukan penjaga,
+    -- ia hanya jalan buntu.
+    --
+    -- Substantif: paku yang DIPERTAHANKAN justru fakta yang paling berguna
+    -- setelah pencabutan — "revisi mana yang sudah dibaca klien sebelum kami
+    -- tarik". Yang menentukan keterbacaan adalah `status`, dan SETIAP jalur baca
+    -- klien (query portal + policy RLS) menggerbangnya pada `[Terbit]`, jadi
+    -- paku sisa tak pernah menjadikan laporan tercabut terbaca.
 );
 
 CREATE INDEX idx_crp_status ON client_report_publikasi (status);

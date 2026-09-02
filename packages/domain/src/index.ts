@@ -115,6 +115,12 @@ export * as livestream from './livestream';
 export * as campaign from './campaign';
 export * as marketing from './marketing';
 export * as portal from './portal';
+// Client Portal (M15-C2) — the EXTERNAL realm's read-model. Deliberately NOT
+// part of `portal` (the internal Team Portal) and deliberately not built from
+// its queries: spec §6.1 requires a strict allow-list of its own, "never a
+// permission-trimmed copy of Module 11". `clientPortalAuth` above is the
+// account half (login/provisioning); this is the data half.
+export * as clientPortal from './client-portal';
 export * as notification from './notification';
 export * as audit from './audit';
 export * as engine from './engine';

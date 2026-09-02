@@ -22,11 +22,24 @@ import {
   canWriteReport,
   createReport,
   getReport,
+  getReportInsight,
   listReports,
+  MSG_ALASAN_CABUT_WAJIB,
+  MSG_BELUM_TERBIT,
   MSG_SUDAH_ADA,
+  MSG_SUDAH_TERBIT,
+  MSG_TAK_ADA_PERUBAHAN,
+  publishReport,
   renderReport,
+  republishReport,
+  resetReportInsight,
+  revokeReport,
+  saveReportInsight,
+  STATUS_DICABUT,
+  STATUS_DRAF,
+  STATUS_TERBIT,
 } from './report';
-import { ConflictError, ForbiddenError } from './account';
+import { ConflictError, ForbiddenError, ValidationError } from './account';
 
 // ---------------------------------------------------------------------------
 // Pure gate unit tests (no DB)
@@ -132,7 +145,19 @@ async function totalSalesOf(client: string): Promise<number> {
 
 afterEach(async () => {
   if (!sql) return;
-  await sql`delete from client_reports where client_id like 'ZZR-CLI-%'`; // berkas CASCADE
+  // `client_report_insight` genuinely refuses DELETE (append-only, no CASCADE),
+  // so a fixture cannot tidy up through the product path — the same situation as
+  // `prospect_activities` in activity.test.ts. Step around the guard as the
+  // owning superuser, and put it straight back even if the delete throws, so a
+  // failure here can never leave the table writable for the next test.
+  await sql`alter table client_report_insight disable trigger trg_cri_no_delete`;
+  try {
+    await sql`delete from client_report_insight where report_id in (
+      select id from client_reports where client_id like 'ZZR-CLI-%')`;
+    await sql`delete from client_reports where client_id like 'ZZR-CLI-%'`; // berkas + publikasi CASCADE
+  } finally {
+    await sql`alter table client_report_insight enable trigger trg_cri_no_delete`;
+  }
   await sql`delete from client_platforms where client_id like 'ZZR-CLI-%'`;
   await sql`delete from clients where id like 'ZZR-CLI-%'`;
 });
@@ -269,5 +294,165 @@ describeDb('reads — listReports / getReport / renderReport', () => {
     expect(klien).not.toContain(' — Internal');
     // Internal-only score-note blocks are BUILT for internal, never for klien.
     expect(internal.length).toBeGreaterThan(klien.length);
+  });
+});
+
+// ===========================================================================
+// Insight yang bisa disunting + gerbang publikasi (migrasi 20260908010000)
+// ===========================================================================
+const DRAF_AM = {
+  ringkasan: 'Suntingan AM: GMV naik karena kampanye Ramadan, bukan tren dasar.',
+  poin: ['Poin AM satu', 'Poin AM dua'],
+  rekomendasi_tinggi: [{ judul: 'Kunci stok hero SKU', target: 'Stok 30 hari', dampak: 'Cegah kehabisan', timeline: '2 minggu' }],
+  rekomendasi_sedang: [],
+  outlook: 'Suntingan AM: tahan budget sampai listing beres.',
+  indikator: [{ nama: 'Target CVR', target: '2,0%' }],
+};
+
+/** How many rows the PORTAL's own filter would return for this report id. */
+async function listPortalReports(db: Sql, _a: unknown, id: number): Promise<number> {
+  const rows = await db<{ n: string }[]>`
+    select count(*)::text as n from client_reports r
+      join client_report_publikasi p on p.report_id = r.id
+     where r.id = ${id} and p.status = '[Terbit]' and p.insight_revisi is not null`;
+  return Number(rows[0].n);
+}
+
+async function laporanBaru(): Promise<{ client: string; id: number }> {
+  const client = await seedClient();
+  const pid = await seedPlatform(client);
+  const d = await createReport(sql, actorAm, client, {
+    clientPlatformId: pid, periodeTipe: 'bulanan', files: [fileFrom('toko.xlsx', shopTtAoa())],
+  });
+  return { client, id: d.id };
+}
+
+describeDb('insight laporan — revisi & paku', () => {
+  it('a new report is born [Draf] with revisi 0 = the engine snapshot', async () => {
+    const { id } = await laporanBaru();
+    const b = await getReportInsight(sql, actorAm, id);
+    expect(b.publikasi.status).toBe(STATUS_DRAF);
+    expect(b.publikasi.insightRevisi).toBeNull();
+    expect(b.mesin.revisi).toBe(0);
+    expect(b.mesin.sumber).toBe('mesin');
+    expect(b.terbaru.revisi).toBe(0);
+    expect(b.terpaku).toBeNull();
+    expect(b.mesin.insight.ringkasan.length).toBeGreaterThan(0);
+  });
+
+  it('saving an edit appends a revision and changes NOTHING for the client', async () => {
+    const { id } = await laporanBaru();
+    const b = await saveReportInsight(sql, actorAm, id, DRAF_AM, 'konteks Ramadan');
+    expect(b.terbaru.revisi).toBe(1);
+    expect(b.terbaru.sumber).toBe('manual');
+    expect(b.terbaru.catatanRevisi).toBe('konteks Ramadan');
+    // The engine snapshot survives untouched — that is what reset copies back.
+    expect(b.mesin.revisi).toBe(0);
+    expect(b.mesin.insight.ringkasan).not.toBe(DRAF_AM.ringkasan);
+    // Still unpublished: a save is not an announcement.
+    expect(b.publikasi.status).toBe(STATUS_DRAF);
+    expect(b.publikasi.insightRevisi).toBeNull();
+  });
+
+  it('a rejected draft consumes no revision number', async () => {
+    const { id } = await laporanBaru();
+    await expect(saveReportInsight(sql, actorAm, id, { ...DRAF_AM, ringkasan: '  ' }))
+      .rejects.toThrow('[ringkasan eksekutif wajib diisi]');
+    const b = await getReportInsight(sql, actorAm, id);
+    expect(b.terbaru.revisi).toBe(0);
+  });
+
+  it('publishing pins the latest revision; internal previews the newer one', async () => {
+    const { id } = await laporanBaru();
+    await saveReportInsight(sql, actorAm, id, DRAF_AM);
+    const pub = await publishReport(sql, actorAm, id);
+    expect(pub.status).toBe(STATUS_TERBIT);
+    expect(pub.insightRevisi).toBe(1);
+    expect(pub.diterbitkanOleh).toBe(OWNER);
+
+    // Client render uses revisi 1 (the pinned one).
+    const klien = await renderReport(sql, actorAm, id, 'klien');
+    expect(klien).toContain('Poin AM satu');
+
+    // Save revisi 2 — the client must NOT see it until republished.
+    const b2 = await saveReportInsight(sql, actorAm, id, { ...DRAF_AM, ringkasan: 'REVISI DUA BELUM TERBIT' });
+    expect(b2.adaPerubahanBelumTerbit).toBe(true);
+    expect(b2.publikasi.insightRevisi).toBe(1);
+    const klien2 = await renderReport(sql, actorAm, id, 'klien');
+    expect(klien2).not.toContain('REVISI DUA BELUM TERBIT');
+    const internal = await renderReport(sql, actorAm, id, 'internal');
+    expect(internal).toContain('REVISI DUA BELUM TERBIT');
+
+    // Republish moves the pin.
+    const pub2 = await republishReport(sql, actorAm, id);
+    expect(pub2.insightRevisi).toBe(2);
+    expect(await renderReport(sql, actorAm, id, 'klien')).toContain('REVISI DUA BELUM TERBIT');
+  });
+
+  it('republish refuses when there is nothing new to publish', async () => {
+    const { id } = await laporanBaru();
+    await publishReport(sql, actorAm, id);
+    await expect(republishReport(sql, actorAm, id)).rejects.toThrow(MSG_TAK_ADA_PERUBAHAN);
+  });
+
+  it('publish refuses on an already-published report; republish refuses on a draft', async () => {
+    const { id } = await laporanBaru();
+    await expect(republishReport(sql, actorAm, id)).rejects.toThrow(MSG_BELUM_TERBIT);
+    await publishReport(sql, actorAm, id);
+    await expect(publishReport(sql, actorAm, id)).rejects.toThrow(MSG_SUDAH_TERBIT);
+  });
+
+  it('reset brings back the engine text as a NEW revision, keeping the edit on file', async () => {
+    const { id } = await laporanBaru();
+    const b0 = await getReportInsight(sql, actorAm, id);
+    const mesinText = b0.mesin.insight.ringkasan;
+    await saveReportInsight(sql, actorAm, id, DRAF_AM);
+    const b = await resetReportInsight(sql, actorAm, id);
+    expect(b.terbaru.revisi).toBe(2);
+    expect(b.terbaru.sumber).toBe('manual'); // a copy, not a second baseline
+    expect(b.terbaru.insight.ringkasan).toBe(mesinText);
+  });
+
+  it('revoke clears the pin and needs a reason; the client can no longer read it', async () => {
+    const { id } = await laporanBaru();
+    await publishReport(sql, actorAm, id);
+    await expect(revokeReport(sql, actorAm, id, '   ')).rejects.toThrow(ValidationError);
+    await expect(revokeReport(sql, actorAm, id, '   ')).rejects.toThrow(MSG_ALASAN_CABUT_WAJIB);
+    const pub = await revokeReport(sql, actorAm, id, 'salah berkas');
+    expect(pub.status).toBe(STATUS_DICABUT);
+    expect(pub.alasanCabut).toBe('salah berkas');
+    // The pin SURVIVES a revocation on purpose — it records which revision the
+    // client had already read. Readability is governed by `status`, so keeping
+    // it exposes nothing.
+    expect(pub.insightRevisi).toBe(0);
+    await expect(listPortalReports(sql, actorAm, id)).resolves.toBe(0);
+    // And it can be published again afterwards — [Dicabut] is not a dead end.
+    const again = await publishReport(sql, actorAm, id);
+    expect(again.status).toBe(STATUS_TERBIT);
+    expect(again.insightRevisi).toBe(0);
+    expect(again.alasanCabut).toBeNull();
+  });
+
+  it('OD reads the insight but may not edit or publish it', async () => {
+    const { id } = await laporanBaru();
+    await expect(getReportInsight(sql, actorOd, id)).resolves.toBeTruthy();
+    await expect(saveReportInsight(sql, actorOd, id, DRAF_AM)).rejects.toThrow(ForbiddenError);
+    await expect(publishReport(sql, actorOd, id)).rejects.toThrow(ForbiddenError);
+    await expect(revokeReport(sql, actorOd, id, 'x')).rejects.toThrow(ForbiddenError);
+  });
+
+  it('an AM from another client cannot read, edit, or publish', async () => {
+    const { id } = await laporanBaru();
+    await expect(getReportInsight(sql, actorStray, id)).rejects.toThrow(ForbiddenError);
+    await expect(saveReportInsight(sql, actorStray, id, DRAF_AM)).rejects.toThrow(ForbiddenError);
+    await expect(publishReport(sql, actorStray, id)).rejects.toThrow(ForbiddenError);
+  });
+
+  it('every revision row is immutable — a correction is a new revision', async () => {
+    const { id } = await laporanBaru();
+    await saveReportInsight(sql, actorAm, id, DRAF_AM);
+    await expect(sql`update client_report_insight set ringkasan = 'x' where report_id = ${id}`)
+      .rejects.toThrow();
+    await expect(sql`delete from client_report_insight where report_id = ${id}`).rejects.toThrow();
   });
 });
