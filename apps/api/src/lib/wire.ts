@@ -3590,6 +3590,7 @@ export interface PlanRowWire {
   prioritas: string;
   hasil_diharapkan: string;
   prasyarat: string | null;
+  instruksi_brief: string | null;
   status_baris: string;
   status_baris_alasan: string | null;
   visibilitas: string;
@@ -3621,6 +3622,7 @@ export function planRowToWire(r: plan.PlanRow): PlanRowWire {
     prioritas: r.prioritas,
     hasil_diharapkan: r.hasilDiharapkan,
     prasyarat: r.prasyarat,
+    instruksi_brief: r.instruksiBrief,
     status_baris: r.statusBaris,
     status_baris_alasan: r.statusBarisAlasan,
     visibilitas: r.visibilitas,

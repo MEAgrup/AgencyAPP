@@ -52,6 +52,7 @@ function planRow(over: Partial<PlanRow> = {}): PlanRow {
     prioritas: 'Penting',
     hasilDiharapkan: 'ROAS >= 8',
     prasyarat: null,
+    instruksiBrief: null,
     statusBaris: 'Rencana',
     statusBarisAlasan: null,
     visibilitas: 'Bagikan ke Klien',
@@ -110,6 +111,27 @@ describe('planRowToBriefInput (pure projection)', () => {
     const b = planRowToBriefInput(planRow({ skuSasaran: [], budget: null }), FILL);
     expect(b.instructions).not.toContain('SKU Sasaran');
     expect(b.instructions).not.toContain('Budget');
+  });
+
+  // Owner-added 2026-09-02 (not a PC-numbered field): free text or a link the
+  // AM attaches to the row, e.g. because there is no other way to hand the
+  // division the Brief's actual content before "Berikan Brief" is clicked.
+  it('appends free-text instruksiBrief to the trace without touching referenceAttachments', () => {
+    const b = planRowToBriefInput(planRow({ instruksiBrief: 'Fokus ke rak promo bulan ini' }), FILL);
+    expect(b.instructions).toContain('Instruksi Brief: Fokus ke rak promo bulan ini');
+    expect(b.referenceAttachments).toBeUndefined();
+  });
+
+  it('also lands a URL-shaped instruksiBrief on referenceAttachments (e.g. Google Drive)', () => {
+    const url = 'https://drive.google.com/drive/folders/abc123';
+    const b = planRowToBriefInput(planRow({ instruksiBrief: url }), FILL);
+    expect(b.instructions).toContain(`Instruksi Brief: ${url}`);
+    expect(b.referenceAttachments).toBe(url);
+  });
+
+  it('omits the Instruksi Brief line entirely when the row has none', () => {
+    const b = planRowToBriefInput(planRow({ instruksiBrief: null }), FILL);
+    expect(b.instructions).not.toContain('Instruksi Brief');
   });
 });
 

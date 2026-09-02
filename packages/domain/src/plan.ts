@@ -266,6 +266,14 @@ export interface PlanRow {
   prioritas: 'Wajib' | 'Penting' | 'Kalau Sempat';
   hasilDiharapkan: string;
   prasyarat: string | null;
+  /**
+   * Owner-added 2026-09-02 (docs/DECISIONS.md) — NOT a PC-numbered PRD field.
+   * Free-form brief instructions, or a link (e.g. Google Drive), the AM
+   * attaches to this row. Consumed only by `brief-inherit.ts`'s
+   * `planRowToBriefInput` (RAB-16) — never gated, never a Brief column of its
+   * own (same "lossy-by-design" trace pattern as SKU Sasaran/Budget).
+   */
+  instruksiBrief: string | null;
   statusBaris: 'Rencana' | 'Jalan' | 'Selesai' | 'Sebagian' | 'Tidak Dikerjakan';
   statusBarisAlasan: string | null;
   visibilitas: 'Bagikan ke Klien' | 'Internal Saja';
@@ -733,6 +741,7 @@ function rowToPlanRow(r: Record<string, unknown>): PlanRow {
     prioritas: r.prioritas as PlanRow['prioritas'],
     hasilDiharapkan: r.hasil_diharapkan as string,
     prasyarat: (r.prasyarat as string | null) ?? null,
+    instruksiBrief: (r.instruksi_brief as string | null) ?? null,
     statusBaris: r.status_baris as PlanRow['statusBaris'],
     statusBarisAlasan: (r.status_baris_alasan as string | null) ?? null,
     visibilitas: r.visibilitas as PlanRow['visibilitas'],
@@ -2181,6 +2190,7 @@ export interface CreatePlanRowInput {
   prioritas?: PlanRow['prioritas']; // PC-10
   hasilDiharapkan?: string; // PC-11
   prasyarat?: string | null; // PC-12
+  instruksiBrief?: string | null; // owner-added 2026-09-02, not a PC field
   visibilitas?: PlanRow['visibilitas']; // PC-17
 }
 
@@ -2249,6 +2259,7 @@ export async function createPlanRow(
   const satuan = input.satuan ?? '';
   const hasilDiharapkan = input.hasilDiharapkan ?? '';
   const prasyarat = (input.prasyarat ?? '').trim() || null;
+  const instruksiBrief = (input.instruksiBrief ?? '').trim() || null;
   const skuSasaran = input.skuSasaran ?? [];
   const mingguSasaran = input.mingguSasaran ?? [];
 
@@ -2265,12 +2276,12 @@ export async function createPlanRow(
         plan_id, channel, pilar,
         strategi_pillar_id, service_id, di_luar_strategi, di_luar_service, di_luar_alasan,
         aksi, sku_sasaran, kuota, satuan, budget, divisi_pic, minggu_sasaran,
-        prioritas, hasil_diharapkan, prasyarat, visibilitas, created_by)
+        prioritas, hasil_diharapkan, prasyarat, instruksi_brief, visibilitas, created_by)
       values (
         ${planId}, ${channel}, ${pilar},
         ${strategiPillarId}, ${serviceId}, ${diLuarStrategi}, ${diLuarService}, ${diLuarAlasan},
         ${aksi}, ${tx.json(skuSasaran as JsonParam)}, ${kuota}, ${satuan}, ${budget}, ${divisiPic}, ${tx.json(mingguSasaran as JsonParam)},
-        ${prioritas}, ${hasilDiharapkan}, ${prasyarat}, ${visibilitas}, ${actor.employeeId})
+        ${prioritas}, ${hasilDiharapkan}, ${prasyarat}, ${instruksiBrief}, ${visibilitas}, ${actor.employeeId})
       returning id`;
     const newId = num(inserted[0].id);
 
@@ -2709,7 +2720,7 @@ async function copyRowToPeriod(
       (plan_id, channel, pilar, strategi_pillar_id, service_id,
        di_luar_strategi, di_luar_service, di_luar_alasan,
        aksi, sku_sasaran, kuota, satuan, budget, divisi_pic, minggu_sasaran,
-       prioritas, hasil_diharapkan, prasyarat,
+       prioritas, hasil_diharapkan, prasyarat, instruksi_brief,
        status_baris, status_baris_alasan, visibilitas,
        keberatan_kapasitas, keberatan_alasan,
        terbawa, periode_asal_id, keputusan_carryover, created_by)
@@ -2720,7 +2731,7 @@ async function copyRowToPeriod(
        ${source.aksi}, ${tx.json((source.skuSasaran ?? []) as JsonParam)},
        ${source.kuota}, ${source.satuan}, ${source.budget}, ${source.divisiPic},
        ${tx.json((source.mingguSasaran ?? []) as JsonParam)},
-       ${source.prioritas}, ${source.hasilDiharapkan}, ${source.prasyarat},
+       ${source.prioritas}, ${source.hasilDiharapkan}, ${source.prasyarat}, ${source.instruksiBrief},
        'Rencana', null, ${source.visibilitas},
        false, null,
        true, ${periodeAsalId}, null, ${actor.employeeId})

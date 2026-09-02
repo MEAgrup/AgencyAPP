@@ -121,6 +121,14 @@ function formatSkuSasaran(items: unknown[]): string {
 }
 
 /**
+ * True when `instruksiBrief` (owner-added 2026-09-02, free text OR a link —
+ * e.g. Google Drive) looks like a web link rather than plain instructions.
+ */
+function looksLikeUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+/**
  * planRowToBriefInput is THE single projection of a `plan_row` onto a Brief. Only
  * `dueDate` + `priority` come from the AM (`fill`); everything else is inherited.
  *
@@ -140,6 +148,12 @@ function formatSkuSasaran(items: unknown[]): string {
  * that live on the row already — dropping them here forced the division to go
  * back to the AM (or the Plan page) for numbers the AM had already committed,
  * exactly the "isi dari nol" complaint. Both now ride in the instructions trace.
+ *
+ * Owner request (2026-09-02): `instruksiBrief` (free text OR a link, e.g. Google
+ * Drive — not a PC-numbered field) is ALWAYS appended to the instructions trace
+ * as text, and ADDITIONALLY lands on `referenceAttachments` when it looks like a
+ * URL, so the Brief detail page's "Referensi / Lampiran" renders it as a
+ * clickable link instead of the division having to copy it out of the trace.
  */
 export function planRowToBriefInput(row: PlanRow, fill: BriefInheritFill): BriefInput {
   const satuan = (row.satuan ?? '').trim();
@@ -148,6 +162,7 @@ export function planRowToBriefInput(row: PlanRow, fill: BriefInheritFill): Brief
   const deliverableType = satuan || aksi || row.pilar;
   const title = hasil || `${row.pilar} — ${row.channel}`;
   const skuSasaran = formatSkuSasaran(row.skuSasaran);
+  const instruksiBrief = (row.instruksiBrief ?? '').trim();
   const instructions = [
     `Kanal: ${row.channel}`,
     `Pilar: ${row.pilar}`,
@@ -155,6 +170,7 @@ export function planRowToBriefInput(row: PlanRow, fill: BriefInheritFill): Brief
     skuSasaran ? `SKU Sasaran: ${skuSasaran}` : '',
     row.budget !== null ? `Budget: Rp ${row.budget.toLocaleString('id-ID')}` : '',
     row.prasyarat ? `Prasyarat: ${(row.prasyarat ?? '').trim()}` : '',
+    instruksiBrief ? `Instruksi Brief: ${instruksiBrief}` : '',
   ]
     .filter((s) => s !== '')
     .join('\n');
@@ -166,6 +182,7 @@ export function planRowToBriefInput(row: PlanRow, fill: BriefInheritFill): Brief
     dueDate: fill.dueDate,
     priority: fill.priority,
     instructions,
+    referenceAttachments: looksLikeUrl(instruksiBrief) ? instruksiBrief : undefined,
   };
 }
 

@@ -70,6 +70,10 @@ export interface PlanRow {
   prioritas: string;
   hasil_diharapkan: string;
   prasyarat: string | null;
+  /** Owner-added 2026-09-02, not a PC-numbered PRD field: free text or a link
+   *  (e.g. Google Drive) attached to this row, carried into the inherited
+   *  Brief's instructions/reference_attachments (RAB-16). */
+  instruksi_brief: string | null;
   status_baris: string;
   status_baris_alasan: string | null;
   visibilitas: string;
@@ -189,6 +193,7 @@ export interface CreatePlanRowBody {
   prioritas?: string;
   hasil_diharapkan?: string;
   prasyarat?: string | null;
+  instruksi_brief?: string | null;
   visibilitas?: string;
 }
 
