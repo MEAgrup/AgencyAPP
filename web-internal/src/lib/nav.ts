@@ -110,9 +110,12 @@ function divisionQueue(division: string): (role: Role) => boolean {
 // ---------------------------------------------------------------------------
 
 const MAIN_LINKS: NavItem[] = [
-  // Universal: own dashboard / demo harness / own notification inbox
-  // (Phase 0 §9 — notifications are per-recipient) / MSL read is open to any
-  // authenticated actor (only editing is gated: msl.canEditMasterServices).
+  // Universal: own dashboard / own notification inbox (Phase 0 §9 —
+  // notifications are per-recipient) / MSL read is open to any authenticated
+  // actor (only editing is gated: msl.canEditMasterServices).
+  // `/demo-tasks` (M12 demo harness) is deliberately off this menu (owner
+  // request, Nerissa, 2026-09-02) — the page and its API stay reachable by
+  // direct link, this only trims the sidebar.
   { href: '/', label: 'Dashboard' },
   // "Perlu Persetujuan Saya" — every real pending-approval queue combined:
   // Sales negotiation, Renewal/Cross-Sell, Finance TCR, Lead Delete, Hold
@@ -127,7 +130,6 @@ const MAIN_LINKS: NavItem[] = [
   // Ungated on purpose: every authenticated employee must be able to reach their
   // own password change — including one whose account is under a forced change.
   { href: '/akun/password', label: 'Ganti Password' },
-  { href: '/demo-tasks', label: 'Demo Tasks' },
   { href: '/notifications', label: 'Notifikasi' },
   { href: '/master-services', label: 'Master Service List' },
   // M0 closing tool (quote preview feeds the Closing form). Sales-owned per
