@@ -957,9 +957,11 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
           <div className="cardHeader">Berikan Brief (satu klik)</div>
           <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
             Isi jatuh tempo + prioritas per baris; sisanya (divisi, kuota, satuan, hasil, SKU
-            sasaran, budget) diwarisi otomatis ke instruksi Brief. Baris tanpa isian dilewati.
-            Baris yang sudah punya Brief menampilkan link ke detailnya di kolom &quot;Brief&quot;
-            (jatuh tempo/prioritas terkunci — Brief-nya sudah dibuat, bukan lagi diedit dari sini).
+            sasaran, budget, Instruksi Brief) diwarisi otomatis ke instruksi Brief — kolom
+            &quot;Instruksi Brief&quot; di bawah menunjukkan persis isi yang akan diwariskan (arahkan
+            kursor untuk teks penuh). Baris tanpa isian jatuh tempo/prioritas dilewati. Baris yang
+            sudah punya Brief menampilkan link ke detailnya di kolom &quot;Brief&quot; (jatuh
+            tempo/prioritas terkunci — Brief-nya sudah dibuat, bukan lagi diedit dari sini).
           </p>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ fontSize: 13, minWidth: 760 }}>
@@ -969,6 +971,7 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                   <th style={{ textAlign: 'left' }}>Kuota</th>
                   <th style={{ textAlign: 'left' }}>Hasil diharapkan</th>
                   <th style={{ textAlign: 'left' }}>Budget</th>
+                  <th style={{ textAlign: 'left' }}>Instruksi Brief</th>
                   <th style={{ textAlign: 'left' }}>Jatuh tempo</th>
                   <th style={{ textAlign: 'left' }}>Prioritas Brief</th>
                   <th style={{ textAlign: 'left' }}>Brief</th>
@@ -989,6 +992,24 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                       </td>
                       <td style={{ paddingRight: 8 }}>{r.hasil_diharapkan || '—'}</td>
                       <td style={{ paddingRight: 8 }}>{formatIDR(r.budget)}</td>
+                      <td style={{ paddingRight: 8, maxWidth: 220 }}>
+                        {r.instruksi_brief ? (
+                          <span
+                            title={r.instruksi_brief}
+                            style={{
+                              display: 'block',
+                              maxWidth: 220,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {r.instruksi_brief}
+                          </span>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
                       <td style={{ paddingRight: 8 }}>
                         <input
                           type="date"
