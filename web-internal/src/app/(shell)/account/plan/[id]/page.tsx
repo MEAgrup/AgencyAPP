@@ -1264,10 +1264,11 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
           </div>
           {inheritDiLuarHint && (
             <p className="muted" style={{ fontSize: 11, color: '#b45309', marginTop: 8 }}>
-              &ldquo;Baris di luar strategi/service&rdquo; berarti baris itu sendiri tidak menunjuk pilar
-              Strategi atau Service manapun — tidak bisa diperbaiki dengan klik ulang. Baris yang sudah
-              dibuat tidak bisa diedit; isi dulu Section E (pilar) di Strategi lewat revisi, lalu buat
-              baris Plan baru yang menunjuk pilar tersebut (atau ke Service tertentu untuk Plan Satuan).
+              &ldquo;Baris di luar strategi/service&rdquo; sekarang hanya muncul untuk baris Plan Satuan
+              (klien) yang belum menunjuk Service manapun — di Plan kontrak (Full Management), baris
+              &ldquo;Di Luar Strategi&rdquo; otomatis diwariskan ke Service tunggal kontrak, bukan lagi
+              dilewati. Kalau tetap muncul di sini: pakai &ldquo;Ubah asal&rdquo; di tabel Baris rencana
+              kerja untuk menunjuk baris ke pilar Strategi atau Service yang benar.
             </p>
           )}
         </div>
