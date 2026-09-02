@@ -3005,12 +3005,17 @@ export interface PendingHoldRequestWire {
   owner_am: string | null;
   owner_am_nama: string;
   updated_at: string;
+  /** Alasan wajib yang diketik AM saat mengajukan hold (dari audit `service_hold_requested`). */
+  reason: string;
+  requested_by: string;
+  requested_by_nama: string;
 }
 
 export function pendingHoldRequestToWire(r: client.PendingHoldRequest): PendingHoldRequestWire {
   return {
     service_id: r.serviceId, client_id: r.clientId, toko: r.toko, nama_pic: r.namaPic, service_name: r.serviceName,
     owner_am: r.ownerAm, owner_am_nama: r.ownerAmNama, updated_at: r.updatedAt.toISOString(),
+    reason: r.reason, requested_by: r.requestedBy, requested_by_nama: r.requestedByNama,
   };
 }
 

@@ -115,7 +115,12 @@ export interface PendingHoldRequest {
   service_name: string;
   owner_am: string | null;
   owner_am_nama: string;
+  /** Waktu hold DIMINTA (dari audit `service_hold_requested`; fallback lahirnya Service). */
   updated_at: string;
+  /** Alasan wajib yang diketik AM saat mengajukan hold; '' kalau baris auditnya tak terbaca. */
+  reason: string;
+  requested_by: string;
+  requested_by_nama: string;
 }
 
 /** GET /services/hold-requests — every Service in [Hold Requested], oldest first (Head of Account / Director). */
