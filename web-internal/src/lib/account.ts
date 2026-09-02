@@ -123,6 +123,14 @@ export const TASK_CATALOG: Record<string, { jenis: string; label: string; money?
   ],
   Ads: [{ jenis: 'ads_spent', label: 'Ads spent (Rp)', money: true }],
   'Live Stream': [{ jenis: 'live_stream', label: 'Jumlah live stream' }],
+  // M17 — cermin ini SEMPAT KETINGGALAN dari `packages/domain/src/account.ts`
+  // (ditemukan 2026-09-02): divisi AI Optimizer sudah ber-`punyaKuotaSatuan`
+  // sejak 2026-08-28, jadi form kuota komitmen merender NOL input untuk divisi
+  // yang server-side sudah menerimanya. Ditambahkan sesuai domain, verbatim.
+  'AI Optimizer': [
+    { jenis: 'sku_optimize_ai', label: 'Jumlah SKU optimize (AI)' },
+    { jenis: 'ai_video', label: 'Jumlah AI video' },
+  ],
 };
 
 export interface StrategyRequirement {

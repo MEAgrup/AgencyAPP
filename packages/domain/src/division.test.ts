@@ -15,7 +15,7 @@
  * `false` sampai `TASK_CATALOG` punya barisnya (DECISIONS.md LT-2).
  */
 import { describe, expect, it } from 'vitest';
-import { division } from '@cdps/core';
+import { division, plantask } from '@cdps/core';
 import { ALLOWED_DIVISIONS, BRIEF_ASSIGNABLE_DIVISIONS, TASK_CATALOG } from './account';
 import { DISPATCH_DIVISIONS } from './strategi';
 
@@ -56,6 +56,51 @@ describe('M16 registry divisi ↔ TASK_CATALOG', () => {
     expect(BRIEF_ASSIGNABLE_DIVISIONS).toContain('AI Optimizer');
     expect(BRIEF_ASSIGNABLE_DIVISIONS).toContain('Store Operation');
     expect(ALLOWED_DIVISIONS).toContain('AI Optimizer');
+    expect(ALLOWED_DIVISIONS).not.toContain('Store Operation');
+  });
+});
+
+/**
+ * Jembatan katalog komitmen (Strategi) ↔ katalog baris kerja (Plan P-C).
+ *
+ * `PLAN_TASK_CATALOG` memakai `jenis` yang SAMA dengan `TASK_CATALOG` supaya
+ * kuota yang dijanjikan di Strategi dan baris yang benar-benar direncanakan di
+ * Plan bisa dijoin per `jenis` tanpa tabel pemetaan. Arahnya SATU: tiap jenis
+ * komitmen harus punya rumah di Plan (kalau tidak, kuota itu tak bisa
+ * direncanakan sama sekali) — tapi tidak sebaliknya, karena Plan sengaja
+ * menawarkan lebih (`jam_live` dari M6A F-4, dan tiga pekerjaan Store Operation
+ * yang belum punya pipeline `stage_definition`, DECISIONS.md LT-2).
+ */
+describe('TASK_CATALOG ↔ PLAN_TASK_CATALOG (jembatan `jenis`)', () => {
+  it('setiap jenis komitmen Strategi bisa direncanakan sebagai baris Plan', () => {
+    const hilang: string[] = [];
+    for (const [nama, list] of Object.entries(TASK_CATALOG)) {
+      const planJenis = new Set(plantask.jenisFor(nama).map((j) => j.jenis));
+      for (const t of list) if (!planJenis.has(t.jenis)) hilang.push(`${nama}/${t.jenis}`);
+    }
+    expect(hilang).toEqual([]);
+  });
+
+  it('flag `money` sepakat di kedua katalog untuk jenis yang sama', () => {
+    // Kalau hanya satu katalog menandainya Rupiah, satu form merender input
+    // hitungan untuk angka miliaran dan yang lain input IDR.
+    const beda: string[] = [];
+    for (const [nama, list] of Object.entries(TASK_CATALOG)) {
+      for (const t of list) {
+        const p = plantask.jenisFor(nama).find((j) => j.jenis === t.jenis);
+        if (p && (p.money === true) !== (t.money === true)) beda.push(`${nama}/${t.jenis}`);
+      }
+    }
+    expect(beda).toEqual([]);
+  });
+
+  it('Store Operation punya jenis task Plan walau TANPA kuota satuan Strategi', () => {
+    // Ini justru buktinya ketiga flag registry terpisah itu berguna: pemilik
+    // meratifikasi tiga pekerjaan Store Operation untuk baris Plan (2026-09-02)
+    // tanpa menyalakan `punyaKuotaSatuan` — yang akan menuntut entri
+    // TASK_CATALOG + baris `wrr_divisi` yang LT-2 belum putuskan.
+    expect(plantask.punyaKatalog('Store Operation')).toBe(true);
+    expect(TASK_CATALOG['Store Operation']).toBeUndefined();
     expect(ALLOWED_DIVISIONS).not.toContain('Store Operation');
   });
 });
