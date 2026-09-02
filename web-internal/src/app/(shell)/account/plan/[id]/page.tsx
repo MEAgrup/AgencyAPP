@@ -5,10 +5,40 @@
  *
  * This is the layer where a Strategi's arah becomes "kerjaan minggu ini": the
  * PLAN- period, its per-channel targets (P-B), and — the point of the screen —
- * the **baris rencana kerja** (P-C): one row per channel × pilar × aksi carrying
- * a **kuota + satuan** ("40 video", "36 jam live", "30 kreator"), a division PIC,
- * and its weeks. That table is the "pembagian jumlah pekerjaan dengan target
- * baseline" the owner asked for.
+ * **Penugasan task ke divisi** (P-C): one row per channel × pilar × aksi
+ * carrying a **kuota + satuan** ("40 video", "36 jam live", "30 kreator", "5
+ * promo"), a division PIC, and its weeks. That table is the "pembagian jumlah
+ * pekerjaan dengan target baseline" the owner asked for.
+ *
+ * ## Where Strategi stops (owner decision 2026-09-02, docs/DECISIONS.md)
+ *
+ * **P-B is the only Strategi-derived section on this page.** P-C used to open
+ * with a "Turunan pilar Strategi (PC-3)" dropdown reading the Strategi's Section
+ * E, and every row that picked nothing was badged `Di Luar Strategi` in amber.
+ * In practice Section E is empty on most Strategi, so the dropdown was empty,
+ * every row got the badge, and the AM read a warning about a deviation they had
+ * no way to avoid. The owner's call: a P-C row is a **task handed to a
+ * division**, not a restatement of the strategy. So on a kontrak (Full
+ * Management) Plan the picker and the badge are gone; the `di_luar_strategi`
+ * column and the PG-1 governance metric are untouched, they just stopped
+ * shouting per row. Briefing still works — `brief-inherit.ts` resolves a kontrak
+ * `di_luar_strategi` row onto the contract's sole Service.
+ *
+ * **Plan klien (Satuan) keeps its picker**, deliberately: its origin is a real
+ * choice (a purchased Service, or a pillar borrowed from any `Aktif` STRG the
+ * client has) and `di_luar_service` is unbriefable scope creep under M6C Rule 9,
+ * so removing it there would make every Satuan row undeliverable.
+ *
+ * ## Task detail follows the satuan
+ *
+ * PC-6's unit used to be free text, which meant one deliverable was recorded as
+ * "video", "vidio" and "video seller" by three AMs and any report summing per
+ * satuan split one number three ways. Picking a **Divisi PIC** now yields a
+ * **Jenis task** dropdown of that division's registered deliverables, and the
+ * satuan follows from the jenis (`@/lib/plantask`, mirroring
+ * `packages/core/src/plantask.ts`). An Ads `money` jenis renders a Rupiah input
+ * and fills PC-7 budget with the same figure. "Lainnya" keeps the free-text
+ * escape hatch, and is the only path for Account/Ops, which have no catalog.
  *
  * ## Why rows are added by hand here
  *
@@ -38,6 +68,12 @@ import { formatIDR } from '@/lib/money';
 import { getStrategi, listStrategiQueue, type StrategiPillar } from '@/lib/strategi';
 import { getClient, type ServiceLine } from '@/lib/clients';
 import { suggestRowFromPillar } from '@/lib/plan-row-suggest';
+import { JENIS_LAINNYA, PIC_GROUPS, findJenis, jenisBySatuan, jenisFor } from '@/lib/plantask';
+import {
+  jenisDefaults,
+  kuotaBudget,
+  taskDefaultsFor,
+} from '@/lib/plan-task-draft';
 import {
   activatePlanPeriode,
   approvePlanPeriode,
@@ -68,10 +104,14 @@ const PILAR: { value: string; label: string }[] = [
 ];
 const PILAR_LABEL: Record<string, string> = Object.fromEntries(PILAR.map((p) => [p.value, p.label]));
 
-// All six PC-8 divisions (BRIEF_ASSIGNABLE_DIVISIONS in account.ts). Account/Ops
-// rows also inherit a Brief (owner decision, docs/DECISIONS.md 2026-08-27) —
-// read via the generic /tasks division queue, since neither has a dedicated board.
-const DIVISI_PIC = ['Creative', 'Ads', 'KOL', 'Live Stream', 'Account', 'Ops'];
+// PC-8 divisions come from `@/lib/plantask` PIC_GROUPS now, NOT a literal here.
+// The literal this replaced listed six — it predated the M16/M17 registry and so
+// hid AI Optimizer and Store Operation, which `division_registry` and
+// `createPlanRow` have accepted since 2026-08-28: the owner could not assign a
+// Plan row to either division even though the server would have taken it
+// (reported 2026-09-02). Account/Ops stay in the picker's second group — their
+// Briefs are read via the generic /tasks division queue (owner decision,
+// docs/DECISIONS.md 2026-08-27), which is not a reason to hide them.
 const ROW_PRIORITAS = ['Wajib', 'Penting', 'Kalau Sempat'];
 const BRIEF_PRIORITAS = ['Low', 'Medium', 'High'];
 
@@ -109,7 +149,20 @@ interface RowDraft {
   pilar: string;
   aksi: string;
   kuota: string;
+  /**
+   * PC-6 unit — now DERIVED from `jenis_task` rather than typed, except on the
+   * `JENIS_LAINNYA` path. Kept as its own field because it is what actually
+   * reaches `plan_row.satuan`; `jenis_task` is form state only (no DB column —
+   * see `@/lib/plantask` on why (divisi_pic, satuan) recovers it).
+   */
   satuan: string;
+  /**
+   * Which of the PIC division's registered deliverables this row is (owner
+   * request 2026-09-02: "detail task sesuai satuannya"). `JENIS_LAINNYA` ⇒ the
+   * free-text `satuan` input comes back, for work the catalog does not name
+   * yet and for Account/Ops which have no catalog at all.
+   */
+  jenis_task: string;
   budget: string;
   divisi_pic: string;
   minggu_sasaran: number[];
@@ -122,8 +175,10 @@ interface RowDraft {
    *  Brief (RAB-16). */
   instruksi_brief: string;
   visibilitas: string;
-  /** Origin (PC-3): a Strategi pillar id (Plan kontrak — its own STRG; Plan
-   *  klien — any `Aktif` STRG belonging to the client), or empty ⇒ no pillar. */
+  /** Origin (PC-3), Plan klien (Satuan) ONLY: a pillar id from any `Aktif` STRG
+   *  belonging to the client, or empty ⇒ no pillar. Kontrak Plans no longer
+   *  offer a pillar at all (owner 2026-09-02 — see the file header), so this
+   *  field stays empty there and `rowDraftToBody` ignores it. */
   strategi_pillar_id: string;
   /** Origin (PC-3), Plan klien (Satuan) only: a purchased Service id, or empty
    *  ⇒ no service. Plan klien has no single Strategi to descend from (M6C
@@ -133,7 +188,8 @@ interface RowDraft {
    *  (owner QA, SVC-202608-0008). */
   service_id: string;
   /** Which "di luar" flag to send when NEITHER origin above is picked on a Plan
-   *  klien row (Plan kontrak always means Di Luar Strategi — no choice needed). */
+   *  klien row. A kontrak row is always `di_luar_strategi` now — by design, not
+   *  as a fallback — so this is never consulted there. */
   di_luar_kind: 'strategi' | 'service';
 }
 
@@ -143,7 +199,7 @@ function blankRow(channel: string): RowDraft {
     pilar: 'konten',
     aksi: '',
     kuota: '',
-    satuan: '',
+    ...taskDefaultsFor('Creative'),
     budget: '',
     divisi_pic: 'Creative',
     minggu_sasaran: [],
@@ -180,27 +236,43 @@ function parseSkuSasaran(s: string): string[] {
 }
 
 // Owner decision 2026-09-02 (docs/DECISIONS.md): the AM no longer types a
-// reason for "di luar" — an empty Section E (or no matching Service) already
-// IS the reason, and asking the AM to restate it in words was friction with
-// no payoff. The DB (`ck_plan_row_di_luar_alasan`) still requires non-blank
-// text whenever a row has no Service/pilar anchor, so this default satisfies
-// that gate without a migration or a visible form field.
+// reason for "di luar" — and on a kontrak Plan there is no longer a question to
+// answer at all, since P-B is the only Strategi-derived section and a P-C row is
+// a task for a division. The DB (`ck_plan_row_di_luar_alasan`) still requires
+// non-blank text whenever a row has no Service/pilar anchor, so these defaults
+// satisfy that gate without a migration or a visible form field.
+//
+// The `strategi` string is worth reading carefully: it is what an auditor or a
+// PG-1 report sees on every kontrak row from now on, so it must state the
+// DESIGN, not a fault. The old wording ("belum ada pilar Strategi yang cocok")
+// implied an unfinished Section E, which would be a standing false accusation.
 const DEFAULT_DILUAR_ALASAN: Record<'strategi' | 'service', string> = {
-  strategi: 'Belum ada pilar Strategi (Section E) yang cocok untuk baris ini.',
+  strategi:
+    'Baris rencana kerja tidak diturunkan dari pilar Strategi — hanya Target periode (P-B) yang diturunkan dari Strategi (keputusan pemilik 2026-09-02).',
   service: 'Belum ada Service klien yang cocok untuk baris ini.',
 };
 
 function rowDraftToBody(d: RowDraft, lingkup: string): CreatePlanRowBody {
-  // PC-3 exactly-one origin (`ck_plan_row_asal_tunggal`). Plan kontrak (Full
-  // Management) rows only ever get a pillar from their own STRG, or Di Luar
-  // Strategi. Plan klien (Satuan) rows have two legitimate anchors — a Service,
-  // or a pillar borrowed from ANY `Aktif` STRG the client has (owner decision
-  // 2026-08-28, DECISIONS.md) — and only fall back to an explicit "di luar"
-  // flag (AM's choice of kind) when neither is picked. Forcing every Plan
-  // Satuan row into `di_luar_strategi` regardless of what the AM picked was the
-  // original bug (owner QA, SVC-202608-0008).
+  // PC-3 exactly-one origin (`ck_plan_row_asal_tunggal`).
+  //
+  // PLAN KONTRAK (Full Management): no origin picker at all any more. The owner
+  // decided 2026-09-02 that Strategi derivation belongs to Section P-B (the
+  // period targets) and to nothing else — a P-C row is a task handed to a
+  // division, not a restatement of the strategy. So a kontrak row is always
+  // born `di_luar_strategi` with the standing reason below, which is exactly
+  // what it already was in practice: PC-3's dropdown reads Section E, Section E
+  // is empty on most Strategi, and every row landed here anyway — just after
+  // the AM read an amber warning implying they had done something wrong.
+  // Briefing is unaffected: `brief-inherit.ts` resolves a kontrak
+  // `di_luar_strategi` row onto the contract's sole Service (2026-09-02 fix).
+  //
+  // PLAN KLIEN (Satuan) KEEPS its picker, and that is not an oversight. Its two
+  // anchors are a purchased Service or a pillar borrowed from any `Aktif` STRG
+  // the client has (owner decision 2026-08-28) — and `di_luar_service` is
+  // literal scope creep under M6C Rule 9, which `brief-inherit.ts` refuses to
+  // brief. Dropping the picker there would make every Satuan row unbriefable.
   const isKlien = lingkup === 'klien';
-  const pillarId = d.strategi_pillar_id.trim() ? Number(d.strategi_pillar_id) : null;
+  const pillarId = isKlien && d.strategi_pillar_id.trim() ? Number(d.strategi_pillar_id) : null;
   const serviceId = isKlien && d.service_id.trim() ? d.service_id.trim() : null;
   const hasOrigin = pillarId !== null || serviceId !== null;
   const diLuarStrategi = !hasOrigin && (!isKlien || d.di_luar_kind === 'strategi');
@@ -210,6 +282,9 @@ function rowDraftToBody(d: RowDraft, lingkup: string): CreatePlanRowBody {
     : diLuarService
       ? DEFAULT_DILUAR_ALASAN.service
       : null;
+  // PC-6 quota + PC-7 budget — see `kuotaBudget` on why a `money` jenis writes
+  // the same Rupiah figure to both, and why the quota must not be left 0.
+  const { kuota, budget } = kuotaBudget(d.divisi_pic, d.jenis_task, d.kuota, d.budget);
   return {
     channel: d.channel,
     pilar: d.pilar,
@@ -219,9 +294,9 @@ function rowDraftToBody(d: RowDraft, lingkup: string): CreatePlanRowBody {
     di_luar_service: diLuarService,
     di_luar_alasan: diLuarAlasan,
     aksi: d.aksi.trim(),
-    kuota: d.kuota.trim() ? Number(d.kuota) : 0,
+    kuota,
     satuan: d.satuan.trim(),
-    budget: d.budget.trim() ? Number(d.budget) : null,
+    budget,
     divisi_pic: d.divisi_pic,
     minggu_sasaran: d.minggu_sasaran,
     prioritas: d.prioritas,
@@ -241,7 +316,6 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
   const canApprove = !readOnly && (isAccountLead(role) || !!role?.director);
 
   const [detail, setDetail] = useState<PlanDetail | null>(null);
-  const [pillars, setPillars] = useState<StrategiPillar[]>([]);
   const [clientServices, setClientServices] = useState<ServiceLine[]>([]);
   // Plan klien (Satuan) origin, part 2 (owner decision 2026-08-28, DECISIONS.md):
   // besides the client's Services, the AM may also tie a row to a pillar of ANY
@@ -275,17 +349,15 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
       const d = await getPlanDetail(id);
       setDetail(d);
       setPembuka(d.plan.catatan_pembuka ?? '');
-      // Origin dropdown for new rows. Plan kontrak (Full Management): the
-      // Strategi's pillars. Plan klien (Satuan, M6C §7/§9) has no Strategi at
-      // all — its origin is the client's purchased Services instead, else every
-      // row would have nothing to pick from the pillar dropdown and default to
-      // Di Luar Strategi (owner QA, SVC-202608-0008). Both fetches are advisory
-      // — a failure must not fail the page (rows can still be added "di luar").
-      if (d.plan.strategi_id) {
-        getStrategi(d.plan.strategi_id)
-          .then((s) => setPillars(s.pillars))
-          .catch(() => setPillars([]));
-      }
+      // Origin dropdown for new rows — PLAN KLIEN (Satuan) ONLY. The kontrak
+      // Plan's own `getStrategi(strategi_id)` fetch that used to sit here is
+      // gone with the PC-3 pillar dropdown it fed (owner 2026-09-02: Strategi
+      // derivation lives in Section P-B alone). Satuan has no Strategi of its
+      // own (M6C §7/§9), so its origin is the client's purchased Services, plus
+      // pillars borrowed from any `Aktif` STRG the client has — without both,
+      // every Satuan row would default to an unbriefable "di luar" (owner QA,
+      // SVC-202608-0008). These fetches are advisory: a failure must not fail
+      // the page, since rows can still be added "di luar".
       if (d.plan.lingkup === 'klien') {
         getClient(d.plan.client_id)
           .then((c) => setClientServices(c.client.services))
@@ -363,6 +435,14 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
   // "—" for it, never a dead link.
   const briefByRow = new Map(briefs.map((b) => [b.plan_row_id, b]));
   const status = plan.status;
+  /**
+   * Plan klien (Satuan, M6C §7) vs Plan kontrak (Full Management). The split
+   * decides whether Section P-C shows a PC-3 origin picker at all: only Satuan
+   * still has a real choice to make there (Service vs borrowed STRG pillar),
+   * and only Satuan has an origin — `di_luar_service` — that makes a row
+   * unbriefable. See `rowDraftToBody` for the full reasoning.
+   */
+  const isKlien = plan.lingkup === 'klien';
   const canAddRow = canWrite && (status === 'Draft' || status === 'Aktif');
   const canSubmit = canWrite && status === 'Draft';
   const canDecide = canApprove && status === 'Diajukan';
@@ -561,7 +641,11 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
 
       {/* -------- P-B targets -------- */}
       <div className="card">
-        <div className="cardHeader">Target periode (P-B)</div>
+        <div className="cardHeader">Target periode (P-B) — diturunkan dari Strategi</div>
+        <p className="muted" style={{ fontSize: 12, marginTop: -4 }}>
+          Ini satu-satunya bagian Plan yang diturunkan dari Strategi (D-2/D-4). Baris rencana kerja
+          di bawah adalah penugasan ke divisi, bukan turunan Strategi.
+        </p>
         {targets.length === 0 ? (
           <p className="muted" style={{ fontSize: 13 }}>
             Belum ada target — target diturunkan dari Strategi D-2 saat periode dibuat.
@@ -598,11 +682,11 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
         )}
       </div>
 
-      {/* -------- P-C work rows (the "jumlah pekerjaan") -------- */}
+      {/* -------- P-C work rows — the task-assignment section -------- */}
       <div className="card">
         <div className="row" style={{ alignItems: 'center', gap: 8 }}>
           <div className="cardHeader" style={{ flex: 1, marginBottom: 0 }}>
-            Baris rencana kerja (P-C) — {rows.length}
+            Penugasan task ke divisi (P-C) — {rows.length}
           </div>
           {canAddRow && rowDraft === null && (
             <button
@@ -617,8 +701,10 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
 
         {rows.length === 0 ? (
           <p className="muted" style={{ fontSize: 13, marginTop: 8 }}>
-            Belum ada baris kerja. Pecah target/komitmen jadi kuota konkret di sini (mis. 40 video,
-            30 kreator, 36 jam live) — tiap baris nanti jadi satu Brief.
+            Belum ada task. Pecah target P-B di atas jadi pekerjaan konkret per divisi operasional —
+            Creative, Ads, KOL, Live Stream, AI Optimizer, Store Operation — lengkap dengan jumlah
+            dan satuannya (mis. 40 video, 30 kreator, 36 jam live, 5 promo). Tiap baris nanti jadi
+            satu Brief ke divisi itu.
           </p>
         ) : (
           <div style={{ overflowX: 'auto', marginTop: 8 }}>
@@ -640,7 +726,14 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                 {rows.map((r: PlanRow) => {
                   const wk = weeksByRow.get(r.id);
                   const briefed = briefByRow.get(r.id) !== undefined;
-                  const canManageOrigin = canWrite && !briefed && (status === 'Draft' || status === 'Aktif');
+                  // Re-pointing PC-3 only means something where PC-3 is still a
+                  // choice — Plan klien (Satuan), whose rows anchor to a Service
+                  // or a borrowed STRG pillar. On a kontrak Plan every row is
+                  // `di_luar_strategi` by design now (owner 2026-09-02), so
+                  // "Ubah asal" would open a picker with one option.
+                  const canManageOrigin =
+                    isKlien && canWrite && !briefed && (status === 'Draft' || status === 'Aktif');
+                  const jenis = jenisBySatuan(r.divisi_pic, r.satuan);
                   return (
                     <Fragment key={r.id}>
                     <tr>
@@ -648,11 +741,14 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                       <td style={{ paddingRight: 8 }}>{PILAR_LABEL[r.pilar] ?? r.pilar}</td>
                       <td style={{ paddingRight: 8 }}>
                         {r.aksi}
-                        {r.di_luar_strategi && (
-                          <span className="badge badge-amber" style={{ marginLeft: 6 }}>
-                            Di Luar Strategi
-                          </span>
-                        )}
+                        {/* `Di Luar Strategi` is no longer surfaced on a kontrak
+                            Plan: since P-B is the only Strategi-derived section
+                            (owner 2026-09-02), every P-C row carries the flag and
+                            a badge on all of them flags nothing. The column and
+                            PG-1 are untouched — the governance metric still
+                            counts, it just stopped shouting at the AM per row.
+                            `Di Luar Service` is a different animal (M6C Rule 9:
+                            real scope creep, unbriefable) and stays. */}
                         {r.di_luar_service && (
                           <span className="badge badge-amber" style={{ marginLeft: 6 }}>
                             Di Luar Service
@@ -660,7 +756,20 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                         )}
                       </td>
                       <td style={{ paddingRight: 8, whiteSpace: 'nowrap' }}>
-                        <strong>{r.kuota}</strong> {r.satuan}
+                        {jenis?.money ? (
+                          <strong>{formatIDR(r.kuota)}</strong>
+                        ) : (
+                          <>
+                            <strong>{r.kuota}</strong> {r.satuan}
+                          </>
+                        )}
+                        {/* Which registered deliverable this is. Recovered from
+                            (divisi_pic, satuan) — there is no `jenis_task`
+                            column, on purpose (see `@/lib/plantask`). A row whose
+                            satuan was typed free-hand simply shows no label. */}
+                        {jenis && (
+                          <div className="muted" style={{ fontSize: 11 }}>{jenis.label}</div>
+                        )}
                         {wk && wk.length > 0 && (
                           <div className="muted" style={{ fontSize: 11 }}>
                             {wk.map((w) => `M${w.minggu_no}:${w.kuota}`).join(' · ')}
@@ -704,69 +813,56 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                       <tr>
                         <td colSpan={9} style={{ background: 'var(--bg-subtle, #f7f7f7)', padding: 8 }}>
                           <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                            {plan.lingkup === 'klien' ? (
-                              <label className="field">
-                                <span className="muted" style={{ fontSize: 12 }}>
-                                  Turunan (PC-3) — Service atau Strategi klien, kosongkan ⇒ di luar
-                                </span>
-                                <select
-                                  value={
-                                    originEdit.serviceId
-                                      ? `service:${originEdit.serviceId}`
-                                      : originEdit.strategiPillarId
-                                        ? `pillar:${originEdit.strategiPillarId}`
-                                        : ''
+                            {/* Satuan-only — the kontrak branch that used to sit
+                                here was unreachable once `canManageOrigin`
+                                required `isKlien`, and a dead second copy of the
+                                pillar dropdown is exactly the drift this page
+                                keeps being bitten by. */}
+                            <label className="field">
+                              <span className="muted" style={{ fontSize: 12 }}>
+                                Turunan (PC-3) — Service atau Strategi klien, kosongkan ⇒ di luar
+                              </span>
+                              <select
+                                value={
+                                  originEdit.serviceId
+                                    ? `service:${originEdit.serviceId}`
+                                    : originEdit.strategiPillarId
+                                      ? `pillar:${originEdit.strategiPillarId}`
+                                      : ''
+                                }
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (val.startsWith('service:')) {
+                                    setOriginEdit({ ...originEdit, serviceId: val.slice('service:'.length), strategiPillarId: '' });
+                                  } else if (val.startsWith('pillar:')) {
+                                    setOriginEdit({ ...originEdit, strategiPillarId: val.slice('pillar:'.length), serviceId: '' });
+                                  } else {
+                                    setOriginEdit({ ...originEdit, serviceId: '', strategiPillarId: '' });
                                   }
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    if (val.startsWith('service:')) {
-                                      setOriginEdit({ ...originEdit, serviceId: val.slice('service:'.length), strategiPillarId: '' });
-                                    } else if (val.startsWith('pillar:')) {
-                                      setOriginEdit({ ...originEdit, strategiPillarId: val.slice('pillar:'.length), serviceId: '' });
-                                    } else {
-                                      setOriginEdit({ ...originEdit, serviceId: '', strategiPillarId: '' });
-                                    }
-                                  }}
-                                >
-                                  <option value="">— Di luar (pilih jenis di bawah) —</option>
-                                  {clientServices.length > 0 && (
-                                    <optgroup label="Service">
-                                      {clientServices.map((s) => (
-                                        <option key={s.id} value={`service:${s.id}`}>
-                                          {s.id} · {s.name}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                  )}
-                                  {clientPillars.length > 0 && (
-                                    <optgroup label="Strategi (STRG milik klien)">
-                                      {clientPillars.map(({ strategiId, pillar: p }) => (
-                                        <option key={p.id} value={`pillar:${p.id}`}>
-                                          {strategiId} · #{p.id} {PILAR_LABEL[p.jenis] ?? p.jenis}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                  )}
-                                </select>
-                              </label>
-                            ) : (
-                              <label className="field">
-                                <span className="muted" style={{ fontSize: 12 }}>Turunan pilar Strategi (PC-3)</span>
-                                <select
-                                  value={originEdit.strategiPillarId}
-                                  onChange={(e) => setOriginEdit({ ...originEdit, strategiPillarId: e.target.value })}
-                                >
-                                  <option value="">— Di Luar Strategi —</option>
-                                  {pillars.map((p) => (
-                                    <option key={p.id} value={String(p.id)}>
-                                      #{p.id} {PILAR_LABEL[p.jenis] ?? p.jenis}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                            )}
-                            {plan.lingkup === 'klien' &&
-                              !originEdit.serviceId.trim() &&
+                                }}
+                              >
+                                <option value="">— Di luar (pilih jenis di bawah) —</option>
+                                {clientServices.length > 0 && (
+                                  <optgroup label="Service">
+                                    {clientServices.map((s) => (
+                                      <option key={s.id} value={`service:${s.id}`}>
+                                        {s.id} · {s.name}
+                                      </option>
+                                    ))}
+                                  </optgroup>
+                                )}
+                                {clientPillars.length > 0 && (
+                                  <optgroup label="Strategi (STRG milik klien)">
+                                    {clientPillars.map(({ strategiId, pillar: p }) => (
+                                      <option key={p.id} value={`pillar:${p.id}`}>
+                                        {strategiId} · #{p.id} {PILAR_LABEL[p.jenis] ?? p.jenis}
+                                      </option>
+                                    ))}
+                                  </optgroup>
+                                )}
+                              </select>
+                            </label>
+                            {!originEdit.serviceId.trim() &&
                               !originEdit.strategiPillarId.trim() && (
                                 <label className="field">
                                   <span className="muted" style={{ fontSize: 12 }}>Jenis di luar</span>
@@ -831,14 +927,21 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                   />
                 )}
               </label>
-              {/* PC-3 origin. Plan kontrak (Full Management) only ever has one
-                  STRG to descend from. Plan klien (Satuan) has none of its own
-                  (M6C §7/§9) — its origin is either one of the client's
-                  Services, or a pillar borrowed from any `Aktif` STRG the
-                  client has (owner decision 2026-08-28, DECISIONS.md) — never
-                  a bare fallback to Di Luar Strategi regardless of what the AM
-                  actually picked (owner QA, SVC-202608-0008). */}
-              {plan.lingkup === 'klien' ? (
+              {/* PC-3 origin — PLAN KLIEN (Satuan) ONLY.
+                  The kontrak (Full Management) pillar dropdown that used to sit
+                  in the `else` here is GONE: the owner decided 2026-09-02 that
+                  Strategi derivation belongs to Section P-B alone, so a P-C row
+                  is a task for a division rather than a restatement of Section
+                  E. It also never worked as advertised — Section E is empty on
+                  most Strategi, so the dropdown was empty, every row became
+                  "Di Luar Strategi" anyway, and the AM read an amber warning
+                  about it each time.
+                  Satuan keeps its picker because its origin is a real choice
+                  (a purchased Service, or a pillar borrowed from any `Aktif`
+                  STRG the client has — owner decision 2026-08-28) and because
+                  `di_luar_service` is unbriefable scope creep under M6C Rule 9
+                  (owner QA, SVC-202608-0008). See `rowDraftToBody`. */}
+              {isKlien && (
                 <label className="field">
                   <span className="muted" style={{ fontSize: 12 }}>
                     Turunan (PC-3) — Service atau Strategi klien, kosongkan ⇒ di luar
@@ -909,57 +1012,8 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                     Aksi, Kuota/Satuan &amp; Divisi PIC di bawah (bisa diubah).
                   </span>
                 </label>
-              ) : (
-                <label className="field">
-                  <span className="muted" style={{ fontSize: 12 }}>
-                    Turunan pilar Strategi (PC-3) — kosongkan ⇒ Di Luar Strategi
-                  </span>
-                  <select
-                    value={rowDraft.strategi_pillar_id}
-                    onChange={(e) => {
-                      const pillarId = e.target.value;
-                      const pillar = pillars.find((p) => String(p.id) === pillarId);
-                      setRowDraft((d) => {
-                        if (!d) return d;
-                        if (!pillar) return { ...d, strategi_pillar_id: pillarId };
-                        const s = suggestRowFromPillar(pillar);
-                        return {
-                          ...d,
-                          strategi_pillar_id: pillarId,
-                          aksi: d.aksi.trim() ? d.aksi : s.aksi,
-                          kuota: d.kuota.trim() ? d.kuota : s.kuota,
-                          satuan: d.satuan.trim() ? d.satuan : s.satuan,
-                          divisi_pic: s.divisiPic ?? d.divisi_pic,
-                          sku_sasaran: d.sku_sasaran.trim() ? d.sku_sasaran : s.skuSasaran.join(', '),
-                        };
-                      });
-                    }}
-                  >
-                    <option value="">— Di Luar Strategi —</option>
-                    {pillars.map((p) => (
-                      <option key={p.id} value={String(p.id)}>
-                        #{p.id} {PILAR_LABEL[p.jenis] ?? p.jenis}
-                        {p.channel ? ` · ${p.channel}` : ''}
-                        {p.aksi ? ` · ${p.aksi.slice(0, 40)}` : ''}
-                      </option>
-                    ))}
-                  </select>
-                  {pillars.length === 0 ? (
-                    <span className="muted" style={{ fontSize: 11, color: '#b45309' }}>
-                      Dropdown ini kosong bukan karena error — Strategi induk ({detail?.plan.strategi_id})
-                      belum punya satu pun pilar Section E (E-3…E-10, termasuk Konten &amp; Kreatif).
-                      Setiap baris Plan otomatis tercatat &quot;Di Luar Strategi&quot; sampai Section E
-                      diisi lewat revisi Strategi.
-                    </span>
-                  ) : (
-                    <span className="muted" style={{ fontSize: 11 }}>
-                      Pilih dulu — Aksi, Kuota/Satuan &amp; Divisi PIC di bawah terisi otomatis dari
-                      Section E (bisa diubah).
-                    </span>
-                  )}
-                </label>
               )}
-              {plan.lingkup === 'klien' &&
+              {isKlien &&
                 rowDraft.service_id.trim() === '' &&
                 rowDraft.strategi_pillar_id.trim() === '' && (
                   <label className="field">
@@ -986,20 +1040,73 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
                   ))}
                 </select>
               </label>
+              {/* PC-8 — the division this task is handed to. Grouped so the six
+                  delivery divisions the owner named (Creative, Ads, KOL, Live
+                  Stream, AI Optimizer, Store Operation) read as one set, with
+                  Account/Ops kept below rather than dropped: PC-8 allows them
+                  and existing rows use them. Picking a division RESETS the jenis
+                  task + satuan below — a Creative deliverable on an Ads row is
+                  never what the AM meant, and silently keeping it would write a
+                  satuan that `jenisBySatuan` can no longer resolve. */}
               <label className="field">
                 <span className="muted" style={{ fontSize: 12 }}>Divisi PIC (PC-8)</span>
                 <select
                   value={rowDraft.divisi_pic}
-                  onChange={(e) => setRowDraft({ ...rowDraft, divisi_pic: e.target.value })}
+                  onChange={(e) => {
+                    const divisi = e.target.value;
+                    setRowDraft((d) =>
+                      d ? { ...d, divisi_pic: divisi, ...taskDefaultsFor(divisi) } : d,
+                    );
+                  }}
                 >
-                  {DIVISI_PIC.map((d) => (
-                    <option key={d} value={d}>{d}</option>
+                  {PIC_GROUPS.map((g) => (
+                    <optgroup key={g.label} label={g.label}>
+                      {g.divisi.map((d) => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
               </label>
+              {/* PC-6, first half — WHICH deliverable, which decides the unit.
+                  This is the owner's "detail task sesuai satuannya" (2026-09-02):
+                  satuan used to be free text, so one deliverable was recorded as
+                  "video", "vidio" and "video seller" by three AMs and any report
+                  summing per satuan split one number three ways. The catalog is
+                  `@/lib/plantask`, mirroring `packages/core/src/plantask.ts`. */}
+              <label className="field">
+                <span className="muted" style={{ fontSize: 12 }}>Jenis task (PC-6)</span>
+                <select
+                  value={rowDraft.jenis_task}
+                  onChange={(e) => {
+                    // "Lainnya" clears the derived satuan so the AM types their
+                    // own; a catalog pick overwrites whatever was there, since
+                    // the unit follows from the deliverable (`jenisDefaults`).
+                    const next = jenisDefaults(rowDraft.divisi_pic, e.target.value);
+                    setRowDraft((d) => (d ? { ...d, ...next } : d));
+                  }}
+                >
+                  {jenisFor(rowDraft.divisi_pic).map((j) => (
+                    <option key={j.jenis} value={j.jenis}>
+                      {j.label} — per {j.satuan}
+                    </option>
+                  ))}
+                  <option value={JENIS_LAINNYA}>Lainnya (satuan diisi sendiri)</option>
+                </select>
+                <span className="muted" style={{ fontSize: 11 }}>
+                  {jenisFor(rowDraft.divisi_pic).length === 0
+                    ? `${rowDraft.divisi_pic} mengerjakan pekerjaan internalnya sendiri — belum ada daftar deliverable bersatuan, jadi isi satuannya sendiri di bawah.`
+                    : 'Satuan di bawah ikut jenis yang dipilih. Pakai "Lainnya" untuk kerja yang belum ada di daftar.'}
+                </span>
+              </label>
             </div>
 
-            <label className="field" style={{ display: 'block' }}>
+            {/* No `style={{ display: 'block' }}` on these full-width fields:
+                `.field` is already a flex column and `.stack` above stretches it,
+                so forcing `block` only turned the inline <span> label into a
+                sibling of a shrink-wrapped input — the broken layout the owner
+                screenshotted 2026-09-02. */}
+            <label className="field">
               <span className="muted" style={{ fontSize: 12 }}>Aksi (PC-4) — kerja konkret</span>
               <input
                 placeholder='mis. "rewrite listing 7 SKU Pareto"'
@@ -1008,45 +1115,78 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
               />
             </label>
 
-            <div className="formRow">
-              <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Kuota (PC-6)</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={rowDraft.kuota}
-                  onChange={(e) => setRowDraft({ ...rowDraft, kuota: e.target.value })}
-                />
-              </label>
-              <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Satuan</span>
-                <input
-                  placeholder="video / kreator / jam live / listing"
-                  value={rowDraft.satuan}
-                  onChange={(e) => setRowDraft({ ...rowDraft, satuan: e.target.value })}
-                />
-              </label>
-              <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Budget (PC-7, opsional)</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={rowDraft.budget}
-                  onChange={(e) => setRowDraft({ ...rowDraft, budget: e.target.value })}
-                />
-              </label>
-              <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Prioritas (PC-10)</span>
-                <select
-                  value={rowDraft.prioritas}
-                  onChange={(e) => setRowDraft({ ...rowDraft, prioritas: e.target.value })}
-                >
-                  {ROW_PRIORITAS.map((p) => (
-                    <option key={p} value={p}>{p}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            {/* PC-6, second half — HOW MUCH, in the unit the jenis above fixed.
+                For a `money` jenis (Ads spent) the single figure the AM types is
+                both the quota and PC-7 budget: PC-7 is "Rp yang dialokasikan ke
+                baris ini", which for an ads-spend row IS that number. So the
+                separate Budget input is hidden and the helper text says the
+                field is being filled — rather than asking for the same Rupiah
+                twice and letting the two copies drift. */}
+            {(() => {
+              const jenis = findJenis(rowDraft.divisi_pic, rowDraft.jenis_task);
+              const isMoney = jenis?.money === true;
+              const kuotaNum = rowDraft.kuota.trim() ? Number(rowDraft.kuota) : null;
+              return (
+                <div className="formRow">
+                  <label className="field">
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      {isMoney ? `${jenis.label} (Rp) — PC-6` : 'Kuota (PC-6)'}
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={isMoney ? 1000 : 1}
+                      placeholder={isMoney ? '15000000' : undefined}
+                      value={rowDraft.kuota}
+                      onChange={(e) => setRowDraft({ ...rowDraft, kuota: e.target.value })}
+                    />
+                    {isMoney && kuotaNum !== null && Number.isFinite(kuotaNum) && (
+                      <span className="muted" style={{ fontSize: 11 }}>
+                        {formatIDR(kuotaNum)} — Budget (PC-7) otomatis diisi angka ini.
+                      </span>
+                    )}
+                  </label>
+                  <label className="field">
+                    <span className="muted" style={{ fontSize: 12 }}>Satuan</span>
+                    <input
+                      placeholder="mis. listing / akun / laporan"
+                      value={rowDraft.satuan}
+                      readOnly={jenis !== undefined}
+                      aria-readonly={jenis !== undefined}
+                      title={
+                        jenis !== undefined
+                          ? `Satuan mengikuti jenis task "${jenis.label}". Pilih "Lainnya" untuk mengisi sendiri.`
+                          : undefined
+                      }
+                      style={jenis !== undefined ? { background: 'var(--bg-subtle, #f2f2f2)' } : undefined}
+                      onChange={(e) => setRowDraft({ ...rowDraft, satuan: e.target.value })}
+                    />
+                  </label>
+                  {!isMoney && (
+                    <label className="field">
+                      <span className="muted" style={{ fontSize: 12 }}>Budget (PC-7, opsional)</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={rowDraft.budget}
+                        onChange={(e) => setRowDraft({ ...rowDraft, budget: e.target.value })}
+                      />
+                    </label>
+                  )}
+                  <label className="field">
+                    <span className="muted" style={{ fontSize: 12 }}>Prioritas (PC-10)</span>
+                    <select
+                      value={rowDraft.prioritas}
+                      onChange={(e) => setRowDraft({ ...rowDraft, prioritas: e.target.value })}
+                    >
+                      {ROW_PRIORITAS.map((p) => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              );
+            })()}
 
             {/* minggu sasaran */}
             <div>
@@ -1074,7 +1214,7 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
               </div>
             </div>
 
-            <label className="field" style={{ display: 'block' }}>
+            <label className="field">
               <span className="muted" style={{ fontSize: 12 }}>Hasil yang diharapkan (PC-11)</span>
               <input
                 value={rowDraft.hasil_diharapkan}
@@ -1104,7 +1244,7 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
               </label>
             </div>
 
-            <label className="field" style={{ display: 'block' }}>
+            <label className="field">
               <span className="muted" style={{ fontSize: 12 }}>Instruksi Brief (opsional)</span>
               <textarea
                 placeholder="Teks instruksi lengkap untuk Brief, atau tempel link Google Drive"
@@ -1264,11 +1404,21 @@ export default function PlanPeriodePage({ params }: { params: Promise<{ id: stri
           </div>
           {inheritDiLuarHint && (
             <p className="muted" style={{ fontSize: 11, color: '#b45309', marginTop: 8 }}>
-              &ldquo;Baris di luar strategi/service&rdquo; sekarang hanya muncul untuk baris Plan Satuan
-              (klien) yang belum menunjuk Service manapun — di Plan kontrak (Full Management), baris
-              &ldquo;Di Luar Strategi&rdquo; otomatis diwariskan ke Service tunggal kontrak, bukan lagi
-              dilewati. Kalau tetap muncul di sini: pakai &ldquo;Ubah asal&rdquo; di tabel Baris rencana
-              kerja untuk menunjuk baris ke pilar Strategi atau Service yang benar.
+              {isKlien ? (
+                <>
+                  Baris ini dilewati karena belum menunjuk Service manapun (&ldquo;Di Luar
+                  Service&rdquo; = penambahan lingkup di luar yang klien beli, M6C Rule 9). Pakai
+                  &ldquo;Ubah asal&rdquo; di tabel Baris rencana kerja untuk menunjuk baris ke Service
+                  atau pilar Strategi yang benar, lalu klik &ldquo;Berikan Brief&rdquo; lagi.
+                </>
+              ) : (
+                <>
+                  Baris dilewati sebagai &ldquo;di luar&rdquo; padahal ini Plan kontrak — baris kontrak
+                  seharusnya otomatis diwariskan ke Service tunggal kontrak. Kalau ini muncul,
+                  kontraknya kemungkinan punya lebih dari satu Service (&ldquo;service belum
+                  jelas&rdquo;) — laporkan supaya bisa ditelusuri.
+                </>
+              )}
             </p>
           )}
         </div>
