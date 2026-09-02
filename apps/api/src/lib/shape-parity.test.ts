@@ -431,6 +431,7 @@ const WIRE_TO_FE: Record<string, string> = {
   PlanReviewWire: 'plan.ts::PlanReview',
   PlanFlagWire: 'plan.ts::PlanFlag',
   PlanDetailWire: 'plan.ts::PlanDetail',
+  PlanRowBriefWire: 'plan.ts::PlanRowBrief',
   // RAB-16 — one-click Brief inheritance result (created Briefs + skipped rows).
   BriefInheritResultWire: 'plan.ts::BriefInheritResult',
   BriefInheritSkipWire: 'plan.ts::BriefInheritSkip',

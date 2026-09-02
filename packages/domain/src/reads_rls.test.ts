@@ -29,6 +29,7 @@ import { staffLanding } from './portal';
 import { reminderDashboard } from './finance';
 import { allowedTransitions } from './engine';
 import { getAttempt } from './sales';
+import { getStageOverview } from './stage';
 
 const URL = process.env.DATABASE_URL;
 const describeDb = describe.skipIf(!URL);
@@ -503,6 +504,62 @@ describeDb('read models under RLS (O37)', () => {
       await sql`delete from clients where id = ${CLI}`;
       await sql`delete from prospect_attempts where id = ${PRSP}`;
       await sql`delete from leads where id = ${LEAD}`;
+    }
+  });
+
+  /**
+   * `working_days_between` fix (2026-09-07, `20260907020000_fix_working_days_
+   * between_security_definer.sql`). `GET /briefs/{id}/stage` (M16 Tahapan
+   * Produksi) computes lead time through `readAsActor` — RLS role
+   * `authenticated` — but `working_days_between` reads `hari_libur`, a table
+   * deliberately locked to service-role-only access
+   * (`20260813000000_kelola_klien_sla.sql`). Before the fix that function was
+   * plain SECURITY INVOKER, so it ran with the CALLER's (authenticated)
+   * privileges and 42501-ed — production symptom: "Tahapan Produksi" answered
+   * a bare "internal server error" for every viewer, on every Brief. Same
+   * empirical-probe shape as the O52/O51 tests above: prove the read model
+   * resolves under a real RLS session, not just under the privileged pool.
+   */
+  it('computes Brief stage lead time under RLS without hitting hari_libur — the working_days_between 500', async () => {
+    const CLI = 'CLI-ZZR-0907';
+    const SVC = 'SVC-ZZR-0907';
+    const BRF = 'BRF-ZZR-0907';
+    const AM = 'ZZR-AM907';
+    await sql`
+      insert into clients (id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, assigned_am_id,
+                           released_to_account_at, created_by)
+      values (${CLI}, 'RLS 0907 Fixture', 'Ibu RLS', 'Jakarta', 'Fashion', 'https://shopee/zzr907',
+              '9000000.00', '12000000.00', ${OWNER}, ${OWNER}, ${AM}, now(), ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                            commission_rule, status, created_by)
+      values (${SVC}, ${CLI}, 'MSV-ZZR-0907', 1, 'rls 0907 service', '9000000.00',
+              '10% of standard price', 'Ongoing', ${AM})
+      on conflict (id) do nothing`;
+    // stage_pipeline_code/production_stage NULL on purpose — mirrors a Brief
+    // created before M16 (or any division with no pipeline row, Rule 12), the
+    // exact shape of the Brief that tripped this in production.
+    await sql`
+      insert into briefs (id, service_id, title, status, assigned_division, created_by)
+      values (${BRF}, ${SVC}, 'rls 0907 brief', '[In Progress]', 'Creative', ${AM})
+      on conflict (id) do nothing`;
+
+    const amClaims = claims({ employeeId: AM, division: 'Account', level: 'staff' });
+    const amActor = actor(AM, 'Account', 'staff');
+    try {
+      const overview = await withClaims(sql, amClaims, (tx) => getStageOverview(tx, amActor, BRF));
+      expect(overview.briefId).toBe(BRF);
+      expect(overview.stagePipelineCode).toBeNull();
+      // `intake.hariKerja` is the one field that always calls working_days_between,
+      // pipeline or not (Rule 12) — a number (not a thrown 42501) is the assertion.
+      expect(typeof overview.leadTime.intake.hariKerja).toBe('number');
+    } finally {
+      await sql`delete from briefs where id = ${BRF}`;
+      await sql`delete from services where id = ${SVC}`;
+      await sql`delete from contracts where client_id = ${CLI}`;
+      await sql`delete from clients where id = ${CLI}`;
     }
   });
 });

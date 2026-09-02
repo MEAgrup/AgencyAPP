@@ -25,6 +25,7 @@ import { permission } from '@cdps/core';
 import { createClient, withTransaction, type Sql } from '@cdps/db';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from './account';
 import { createStrategi } from './strategi';
+import { inheritBriefsFromPlan } from './brief-inherit';
 import {
   BIG_DATE_WEIGHT,
   DOWNWARD_APPROVAL_THRESHOLD_PCT,
@@ -433,6 +434,10 @@ afterAll(async () => {
 
 afterEach(async () => {
   if (!sql) return;
+  // Briefs first (FK -> services; plan_row_id is SET NULL on row drop, not
+  // cascaded, so a leftover Brief would otherwise block the `services` delete
+  // below — same ordering as brief-inherit.test.ts's own cleanup).
+  await sql`delete from briefs where created_by like 'ZZ-%'`;
   await sql`delete from service_plan_gate where created_by like 'ZZ-%'`;
   // Also catch periods the tick job (`SISTEM`) generated for a test client.
   await sql`delete from plan where created_by like 'ZZ-%' or client_id like 'ZZ-CLI-%'`;
@@ -800,6 +805,40 @@ describeDb('reads', () => {
     expect(detail.rows).toHaveLength(1);
     expect(detail.rows[0].diLuarService).toBe(true);
     expect(detail.review).toBeNull();
+    expect(detail.briefs).toEqual([]);
+  });
+
+  it('surfaces a Brief already inherited from a plan_row (owner report 2026-09-01: no way to open the resulting Brief from the Plan page)', async () => {
+    const f = await seedContractStrategi();
+    const planId = await seedPeriod(f, { status: 'Aktif' });
+    const pillarRows = await sql<{ id: number }[]>`
+      insert into strategi_pillar (strategi_id, jenis, created_by)
+      values (${f.strategiId}, 'iklan', 'ZZ-AM') returning id`;
+    const pillarId = Number(pillarRows[0].id);
+    const briefedRow = await sql<{ id: number }[]>`
+      insert into plan_row (plan_id, channel, pilar, strategi_pillar_id, aksi, kuota, satuan, divisi_pic, hasil_diharapkan, created_by)
+      values (${planId}, 'Shopee', 'iklan', ${pillarId}, 'boost', 10, 'kampanye', 'Ads', 'ROAS >= 8', 'ZZ-AM')
+      returning id`;
+    const rowId = Number(briefedRow[0].id);
+    // A second row that never got a Brief — must stay ABSENT from `.briefs`,
+    // not a null placeholder (the FE tells the two apart by map membership).
+    await sql`
+      insert into plan_row (plan_id, channel, pilar, di_luar_strategi, di_luar_alasan, aksi, kuota, satuan, divisi_pic, hasil_diharapkan, created_by)
+      values (${planId}, 'Shopee', 'konten', true, 'di luar cakupan', 'edit', 5, 'video', 'Creative', 'x', 'ZZ-AM')`;
+
+    const result = await inheritBriefsFromPlan(sql, am(), planId, [
+      { planRowId: rowId, dueDate: '2026-09-30', priority: 'High' },
+    ]);
+    expect(result.created).toHaveLength(1);
+
+    const detail = await getPlanDetail(sql, am(), planId);
+    expect(detail.briefs).toHaveLength(1);
+    expect(detail.briefs[0]).toMatchObject({
+      planRowId: rowId,
+      briefId: result.created[0].id,
+      status: result.created[0].status,
+      assignedDivision: 'Ads',
+    });
   });
 
   it('hides a period from an unrelated AM and 404s a missing id', async () => {

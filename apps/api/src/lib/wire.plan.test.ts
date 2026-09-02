@@ -249,6 +249,7 @@ describe('planDetailToWire (the P-A…P-G read bundle)', () => {
       review: null,
       flags: [],
       defisitTerbawa: 10000000,
+      briefs: [],
     };
     const w = planDetailToWire(d);
     noCamel(w);
@@ -260,6 +261,7 @@ describe('planDetailToWire (the P-A…P-G read bundle)', () => {
     // empty child lists stay arrays, review stays null
     expect(w.targets).toEqual([]);
     expect(w.review).toBeNull();
+    expect(w.briefs).toEqual([]);
   });
 
   it('maps a populated review and each child list element to snake_case', () => {
@@ -304,6 +306,9 @@ describe('planDetailToWire (the P-A…P-G read bundle)', () => {
         },
       ],
       defisitTerbawa: 0,
+      briefs: [
+        { planRowId: 5, briefId: 'BRF-202608-0001', status: '[To Do]', assignedDivision: 'Ads' },
+      ],
     };
     const w = planDetailToWire(d);
     noCamel(w);
@@ -314,6 +319,13 @@ describe('planDetailToWire (the P-A…P-G read bundle)', () => {
     expect(w.review?.yang_jalan).toBe('ok');
     expect(w.flags[0].jenis).toBe('di_luar_strategi');
     w.flags.forEach(noCamel);
+    expect(w.briefs[0]).toEqual({
+      plan_row_id: 5,
+      brief_id: 'BRF-202608-0001',
+      status: '[To Do]',
+      assigned_division: 'Ads',
+    });
+    w.briefs.forEach(noCamel);
   });
 });
 

@@ -1091,7 +1091,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
             <div style={{ marginBottom: 12 }}>
               <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
                 Strategi (STRG-) sudah disetujui. Pilih periode Plan di bawah, lalu pakai{' '}
-                <strong>&ldquo;Warisi baris jadi Brief (satu klik)&rdquo;</strong> di halaman periode
+                <strong>&ldquo;Berikan Brief (satu klik)&rdquo;</strong> di halaman periode
                 &mdash; kuota, divisi PIC, dan hasil yang diharapkan per baris sudah terisi dari Plan;
                 Anda hanya melengkapi jatuh tempo &amp; prioritas.
               </p>
