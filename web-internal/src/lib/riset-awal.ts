@@ -99,8 +99,13 @@ export interface ConfirmIsianItemWire {
 // ---------------------------------------------------------------------------
 // Browser-only adapter: xlsx binary → rows + sha256
 // ---------------------------------------------------------------------------
-/** SHA-256 of the raw bytes (provenance identity; the server stores no binary). */
-async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
+/**
+ * SHA-256 of the raw bytes (provenance identity; the server stores no binary).
+ * Exported because every browser-side export reader needs the same fingerprint —
+ * `report.ts`'s Shopee/SKU-Screener readers reuse this one rather than each
+ * hashing its own way (a second digest routine could silently disagree).
+ */
+export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, '0'))

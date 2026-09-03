@@ -6940,3 +6940,26 @@ export function trackerRowToWire(t: skuscreener.TrackerRow): TrackerRowWire {
     created_at: t.createdAt, created_by: t.createdBy, updated_at: t.updatedAt,
   };
 }
+
+// ---------------------------------------------------------------------------
+// SH-06 — the exclude-campaign picker on the Shopee report form.
+// ---------------------------------------------------------------------------
+export interface ShopeeAdsCampaignOptionWire {
+  id: string;
+  objective: string;
+  tipe_iklan: string;
+  start_date: string;
+  end_date: string;
+  budget: string;
+}
+
+export function shopeeAdsCampaignOptionToWire(c: report.ShopeeAdsCampaignOption): ShopeeAdsCampaignOptionWire {
+  return {
+    id: c.id,
+    objective: c.objective,
+    tipe_iklan: c.tipeIklan,
+    start_date: c.startDate,
+    end_date: c.endDate,
+    budget: c.budget,
+  };
+}

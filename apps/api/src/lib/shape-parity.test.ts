@@ -543,6 +543,8 @@ const WIRE_TO_FE: Record<string, string> = {
   // Gelombang 3 — MEA SKU Screener (SC-08). No page consumes these yet
   // (UI is a later ticket) — the FE type file exists purely so this guard
   // watches the shape from day one.
+  // SH-06 — exclude-campaign picker on the Shopee report form.
+  ShopeeAdsCampaignOptionWire: 'report.ts::ShopeeAdsCampaignOption',
   ScreeningRunSummaryWire: 'skuscreener.ts::ScreeningRunSummary',
   ScreeningRunDetailWire: 'skuscreener.ts::ScreeningRunDetail',
   DecisionLogEntryWire: 'skuscreener.ts::DecisionLogEntry',

@@ -18,6 +18,7 @@ import { createCampaign, type CampaignInput } from './ads';
 import { ConflictError, ForbiddenError, ValidationError } from './account';
 import {
   createReportShopee,
+  listShopeeAdsCampaignsForPeriod,
   MSG_BISNIS_HOME_WAJIB,
   MSG_PERIODE_LABEL_WAJIB,
   MSG_PERIODE_TAK_TERBACA,
@@ -310,5 +311,58 @@ describeDb('SH-06 — auto Metric Entry (MTR-) from the report\'s combined Ads n
     // this gated the same way as a manual logMetricEntry call.
     await createReportShopee(sql, actorAm, client, bulanInput(pid));
     expect(await metricEntriesOf(campaign)).toHaveLength(1);
+  });
+});
+
+describeDb('listShopeeAdsCampaignsForPeriod — the exclude-campaign picker (SH-06 UI)', () => {
+  it('returns exactly the campaigns the split would touch, with display fields', async () => {
+    const client = await seedClient();
+    const inWindow = await activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31');
+    const partial = await activeShopeeAdsCampaign(client, '2026-08-15', '2026-09-15');
+    const outside = await activeShopeeAdsCampaign(client, '2026-01-01', '2026-01-31');
+    const rows = await listShopeeAdsCampaignsForPeriod(sql, actorAm, client, '2026-08-01', '2026-08-31');
+    const ids = rows.map((r) => r.id);
+    expect(ids).toContain(inWindow);
+    expect(ids).toContain(partial); // partial overlap counts, same as the split
+    expect(ids).not.toContain(outside);
+    const one = rows.find((r) => r.id === inWindow)!;
+    expect(one.tipeIklan).toBe('GMV Max Product');
+    expect(one.startDate).toBe('2026-08-01');
+    expect(one.endDate).toBe('2026-08-31');
+    // House rule #7 — money crosses this boundary formatted, never raw.
+    expect(one.budget).toBe('Rp. 8.000.000,00');
+  });
+
+  it('agrees with the split it describes: a [Paused] campaign is offered by neither', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    const paused = await activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31');
+    await sql`update ad_campaigns set status = '[Paused]' where id = ${paused}`;
+    expect(await listShopeeAdsCampaignsForPeriod(sql, actorAm, client, '2026-08-01', '2026-08-31')).toEqual([]);
+    await createReportShopee(sql, actorAm, client, bulanInput(pid));
+    expect(await metricEntriesOf(paused)).toHaveLength(0);
+  });
+
+  it('an empty window is an empty list, not an error — the report is still creatable', async () => {
+    const client = await seedClient();
+    expect(await listShopeeAdsCampaignsForPeriod(sql, actorAm, client, '2026-08-01', '2026-08-31')).toEqual([]);
+  });
+
+  it('rejects a missing or inverted period with the exact BI message', async () => {
+    const client = await seedClient();
+    await expect(listShopeeAdsCampaignsForPeriod(sql, actorAm, client, '', '2026-08-31'))
+      .rejects.toThrow(MSG_PERIODE_TAK_TERBACA);
+    await expect(listShopeeAdsCampaignsForPeriod(sql, actorAm, client, '2026-08-31', '2026-08-01'))
+      .rejects.toThrow(MSG_PERIODE_TAK_TERBACA);
+  });
+
+  it('is READ scope, not write scope: an OD may look, a foreign AM may not', async () => {
+    const client = await seedClient();
+    await activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31');
+    const od = { employeeId: 'ZZRS-OD', role: permission.makeRole({ division: 'Account', level: 'staff', od: true }) };
+    expect(await listShopeeAdsCampaignsForPeriod(sql, od, client, '2026-08-01', '2026-08-31')).toHaveLength(1);
+    const stray = { employeeId: 'ZZRS-OTHER', role: permission.makeRole({ division: 'Account', level: 'staff' }) };
+    await expect(listShopeeAdsCampaignsForPeriod(sql, stray, client, '2026-08-01', '2026-08-31'))
+      .rejects.toThrow(ForbiddenError);
   });
 });

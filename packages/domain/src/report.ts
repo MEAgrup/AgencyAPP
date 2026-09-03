@@ -1192,3 +1192,62 @@ export async function revokeReport(sql: Sql, actor: Actor, reportId: number, ala
     return publikasiOf(tx, reportId);
   });
 }
+
+/**
+ * One active `Shopee Ads` campaign the report's ads figure would be split
+ * across (SH-06). `budget` is the house-formatted string (rule #7), not a
+ * number — the form only displays it, and every other money field crossing
+ * this boundary is already a formatted string.
+ */
+export interface ShopeeAdsCampaignOption {
+  id: string;
+  objective: string;
+  tipeIklan: string;
+  startDate: string;
+  endDate: string;
+  budget: string;
+}
+
+/**
+ * The active `Shopee Ads` campaigns whose dates overlap a period — i.e. exactly
+ * the set `attributeShopeeAdsMetricEntries` would split this report's combined
+ * ads spend/omzet across (SH-06).
+ *
+ * A read for the upload form's "exclude campaign" list, and deliberately the
+ * SAME predicate the split itself uses (`findOverlappingShopeeAdsCampaigns`,
+ * `ads.ts`): the AM must not be offered a list assembled by a second copy of
+ * "which campaigns overlap", because a copy can disagree with the split it is
+ * supposed to describe. This function only adds the DISPLAY columns on top of
+ * the ids that predicate returns.
+ *
+ * Read scope, not write scope: `canReadReport`, same as `listReports` — seeing
+ * which campaigns a report would touch is a read, and an OD must be able to
+ * check it without being able to create the report.
+ */
+export async function listShopeeAdsCampaignsForPeriod(
+  sql: Queryable, actor: Actor, clientId: string, periodeMulai: string, periodeAkhir: string,
+): Promise<ShopeeAdsCampaignOption[]> {
+  const ownerAm = await ownerAmOfClient(sql, clientId);
+  if (!canReadReport(actor, ownerAm)) throw new ForbiddenError(MSG_FORBIDDEN);
+  const mulai = (periodeMulai ?? '').trim();
+  const akhir = (periodeAkhir ?? '').trim();
+  if (!mulai || !akhir || report.hariAntara(mulai, akhir) <= 0) {
+    throw new ValidationError(MSG_PERIODE_TAK_TERBACA);
+  }
+  const overlapping = await findOverlappingShopeeAdsCampaigns(sql, clientId, mulai, akhir);
+  if (overlapping.length === 0) return [];
+  const ids = overlapping.map((c) => c.id);
+  const rows = await sql<Record<string, unknown>[]>`
+    select id, objective, tipe_iklan, start_date, end_date, budget
+      from ad_campaigns
+     where id = any(${ids})
+     order by id`;
+  return rows.map((r) => ({
+    id: r.id as string,
+    objective: r.objective as string,
+    tipeIklan: r.tipe_iklan as string,
+    startDate: dateStr(r.start_date),
+    endDate: dateStr(r.end_date),
+    budget: money.format(money.parse(String(r.budget))),
+  }));
+}
