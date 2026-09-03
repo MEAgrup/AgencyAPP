@@ -20,6 +20,8 @@
  *   lewat `jenis` yang sama ✅
  * - baseline: Skor Kondisi Toko dari export TikTok (riset awal, pra-onboarding) ✅
  * - report: laporan performa klien mingguan/bulanan dari export yang sama ✅
+ * - adsscanner: alat kerja skor SKU/bucket/realokasi budget per platform
+ *   (`adsscanner.tiktok` — TikTok SKU Triage, DECISIONS.md O67) ✅
  *
  * All implementations must maintain house-rule compliance (CLAUDE.md §Non-negotiable):
  * - State machines server-side enforced + exact Bahasa Indonesia [...] messages
@@ -45,3 +47,4 @@ export * as plantask from './plantask';
 export * as interview from './interview';
 export * as baseline from './baseline';
 export * as report from './report';
+export * as adsscanner from './adsscanner';
