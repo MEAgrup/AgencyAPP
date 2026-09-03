@@ -1,15 +1,17 @@
-# CDPS — Module 6 (Interview): **Kelola Klien → Interview & Kualifikasi**
+# CDPS — Module 6 (Interview): **Riset & Interview Klien → Interview & Kualifikasi**
 
 > **Scope of this document.** The field-level and behavioural specification of the **Interview** step (entity `ITV-`, "Kualifikasi Klien") inside the client-management flow that Account Service runs after a client is handed over from Sales. It also specifies **Riset Awal** (the mandatory baseline step that precedes Interview) and the two things people keep confusing: the client-qualification **Blok C verdict** and the store-analysis **Skor Kondisi Toko**.
 >
 > **Why this document exists.** The Interview module was built before it had a PRD; its rules ended up scattered across `docs/DECISIONS.md`, `docs/STATE_MACHINES.md`, the handoff chain (SESI27–31), and the code itself. That scatter is the **root of the drift** the owner kept feeling ("a decision written in three places, contradicting itself"). This file is the single canonical spec. Where it and older text disagree, **this document plus the owner decisions logged in `DECISIONS.md` win** (SESI31 §0.2 — the owner suspended CLAUDE.md's "PRD wins" rule for the five RAB-19 points; those corrections are folded in here).
 >
 > **Body text: English. Field labels, statuses, verdicts, and BI messages: Bahasa Indonesia** (CDPS convention). BI validation strings are quoted verbatim in `[...]`.
+>
+> **Nama layar (diganti pemilik 2026-09-02 — `DECISIONS.md`).** Sesi ini dulu bernama **"Kelola Klien"**; sekarang **"Riset & Interview Klien"** (tombol: **"Mulai Riset & Interview"**). Alasannya: "Kelola Klien" terbaca sebagai "ubah data klien" padahal isinya riset awal + interview. Nama "Kelola Klien" **dipakai ulang** untuk pintu hub layanan di Module 6 §4/§5 (tentukan kebutuhan Plan → Strategy & Plan → Brief), yang dulu berlabel "Onboarding & Brief" — jadi kata itu kini menunjuk tempat lain. Yang **tidak** ikut berganti, dan memang tidak boleh: identifier kode `openKelolaKlien`, tabel `kelola_klien_sla_config`, dan status mesin seperti `[Awaiting Onboarding]` — semuanya nilai/nama yang tersimpan, bukan label.
 
 ## Contents
 1. Background
 2. Locked decisions (owner + logged)
-3. The 5-step Kelola Klien flow
+3. The 5-step Riset & Interview Klien flow
 4. Riset Awal (step 1) — the mandatory baseline
 5. Interview state machine (mesin #19)
 6. Interview sections (Blok B) and the 12-section status map
@@ -18,7 +20,7 @@
 9. **The hard boundary: Skor Kondisi Toko vs Blok C verdict**
 10. Interview → Strategi handoff (prefill)
 11. Permissions & visibility
-12. Kelola Klien SLA timeline
+12. Riset & Interview Klien SLA timeline
 13. Example — Alpha Digital
 14. System Requirements
 15. Open Assumptions
@@ -62,9 +64,9 @@ Owner decisions of 2026-08-17 (SESI31 §1) and the RAB decisions of 2026-08-18 (
 
 ---
 
-## 3. The 5-step Kelola Klien flow
+## 3. The 5-step Riset & Interview Klien flow
 
-The owner-defined lifecycle (SESI31 §0.1). Steps 1–3 are the *measured* "Kelola Klien" span (each with an SLA, §12):
+The owner-defined lifecycle (SESI31 §0.1). Steps 1–3 are the *measured* "Riset & Interview Klien" span (each with an SLA, §12):
 
 1. **Klien masuk** → managed by the Account Service team (handover from Sales/M0).
 2. **Riset Awal** — the AM logs into the client's store and records the baseline via the seller-centre export tool; some Riset Awal fields auto-fill (§4).
@@ -72,7 +74,7 @@ The owner-defined lifecycle (SESI31 §0.1). Steps 1–3 are the *measured* "Kelo
 4. **Strategi** — the AM composes the Strategi (Module 6A); needs ACC Head/SPV approval.
 5. **Brief** — one click: the Strategi/Plan is inherited into Briefs for the relevant divisions; the AM fills only the rest (Module 6B, RAB-16).
 
-Opening "Kelola Klien" **resumes** the client's open session or mints a fresh `ITV-` if none is open (`openKelolaKlien`); it does **not** mint a new interview on every click — that would move the Riset Awal start anchor and corrupt the SLA measurement.
+Opening "Riset & Interview Klien" **resumes** the client's open session or mints a fresh `ITV-` if none is open (`openKelolaKlien`); it does **not** mint a new interview on every click — that would move the Riset Awal start anchor and corrupt the SLA measurement.
 
 ---
 
@@ -82,7 +84,7 @@ Opening "Kelola Klien" **resumes** the client's open session or mints a fresh `I
 
 ### 4.1 Machine #20 (`riset_awal`)
 - States: **`Berjalan` → `Selesai`** (`Selesai` terminal, no re-open edge). Driven exclusively by `sm_transition(machine='riset_awal', table='interview_riset_awal', id_col='interview_id')`.
-- Table `interview_riset_awal` is a 1:1 child of `interview`, **PK = `interview_id`** — no own ID prefix. Born in the **same transaction** as the interview when the AM clicks "Kelola Klien" (`createInterview` → `startRisetAwal`). There is **no "start" button**; opening the page *is* the start (`dimulai_pada`).
+- Table `interview_riset_awal` is a 1:1 child of `interview`, **PK = `interview_id`** — no own ID prefix. Born in the **same transaction** as the interview when the AM clicks "Mulai Riset & Interview" (`createInterview` → `startRisetAwal`). There is **no "start" button**; opening the page *is* the start (`dimulai_pada`).
 - `submitRisetAwal` stamps `disubmit_pada`/`disubmit_oleh` and transitions in one transaction. A second submit is a `ConflictError [riset awal sudah disubmit]`, not a no-op.
 - **Duration is not a stored column** — derived at read (`disubmit_pada − dimulai_pada`, floored minutes); `—` while running (house rules #4/#7).
 - Anchors are frozen by trigger `trg_riset_awal_jangkar`: changing `dimulai_pada`, overwriting `disubmit_pada`, or reverting from `Selesai` is rejected in the DB, even on service-role.
@@ -287,13 +289,13 @@ Versioning (I9): `versi_no` (default 1), `interview_induk_id`, `versi_sebelumnya
 
 ---
 
-## 12. Kelola Klien SLA timeline
+## 12. Riset & Interview Klien SLA timeline
 
 A **measurement**, not a machine (`kelola_klien_sla_config` v1; working days Mon–Fri minus `hari_libur`, via SQL `working_days_between`). Statuses: `belum_mulai`, `tepat_waktu`, `mendekati_batas`, `terlambat`, `tidak_berlaku`.
 
 | Step | target–batas (working days) | start anchor | done anchor |
 |---|---|---|---|
-| 1 · Riset Awal | 2–3 | `interview_riset_awal.dimulai_pada` (klik Kelola Klien) | `disubmit_pada` |
+| 1 · Riset Awal | 2–3 | `interview_riset_awal.dimulai_pada` (klik "Mulai Riset & Interview") | `disubmit_pada` |
 | 2 · Interview Meeting | 1–2 | `disubmit_pada` | `interview.meeting_diamankan_pada` (first of → Terjadwal / → Sedang Berlangsung) |
 | 3 · Brand Strategy | 5–7 | `interview.selesai_pada` (→ Selesai / Selesai Dengan Catatan) | `strategi.diajukan_pada` **or** `strategy_plans.diajukan_pada` |
 
@@ -303,7 +305,7 @@ Anchors 2 & 3 are stamped by trigger `trg_interview_stamp_timeline`. Over-batas 
 
 ## 13. Example — Alpha Digital
 
-Alpha Digital (the seed fixture) is a full-management TikTok Shop + Shopee client. Flow: the AM opens Kelola Klien → a `riset_awal` (`Berjalan`) and `ITV-YYYYMM-NNNN` are born together. The AM pulls the TikTok seller-centre + Ads export → `riset_awal_analisa` (`analisa_penuh`, a computed `skor`, `kondisi_toko`) and pulls Shopee manually → a `manual` row (`belum_dapat_diukur`). AOV and SKU auto-fill B2-9/B2-3 (confirmed). Riset Awal is submitted → the prerequisite gate opens → the interview starts. The AM answers Blok B (asking only what the data did not already say); Blok C scores server-side. A troubled TikTok store (low Skor Kondisi Toko, TANTANGAN) with strong economics (high Blok C, `growth_ready`) is exactly the client MEA wants — the two scores stay separate, and neither blocks the Strategi that follows.
+Alpha Digital (the seed fixture) is a full-management TikTok Shop + Shopee client. Flow: the AM opens Riset & Interview Klien → a `riset_awal` (`Berjalan`) and `ITV-YYYYMM-NNNN` are born together. The AM pulls the TikTok seller-centre + Ads export → `riset_awal_analisa` (`analisa_penuh`, a computed `skor`, `kondisi_toko`) and pulls Shopee manually → a `manual` row (`belum_dapat_diukur`). AOV and SKU auto-fill B2-9/B2-3 (confirmed). Riset Awal is submitted → the prerequisite gate opens → the interview starts. The AM answers Blok B (asking only what the data did not already say); Blok C scores server-side. A troubled TikTok store (low Skor Kondisi Toko, TANTANGAN) with strong economics (high Blok C, `growth_ready`) is exactly the client MEA wants — the two scores stay separate, and neither blocks the Strategi that follows.
 
 *Note:* the automated fixture used in tests seeds an interview **without** a Riset Awal to prove Blok C scores identically when no confirmed isian exists (§8.3); the product flow above always runs Riset Awal first.
 
@@ -335,4 +337,4 @@ Alpha Digital (the seed fixture) is a full-management TikTok Shop + Shopee clien
 - **Gate adherence:** 100% of started interviews have a submitted Riset Awal with a confirmed baseline per active platform (the gate makes this structural).
 - **Verdict integrity:** no verdict ever changes without a human-confirmed input (server-merge + frozen `nilai_usulan`); the verdict∩kondisi_toko CI test never goes red.
 - **Handoff completeness:** every completed interview yields a prefilled Strategi draft (suggestion-only), reducing Strategi start time.
-- **SLA visibility:** every Kelola Klien session shows a live 3-step SLA status; over-batas steps raise exactly one flag each.
+- **SLA visibility:** every Riset & Interview Klien session shows a live 3-step SLA status; over-batas steps raise exactly one flag each.

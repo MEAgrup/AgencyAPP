@@ -20,6 +20,7 @@ import {
 import {
   EDITABLE_FIELDS,
   PAYMENT_INTENT_OPTIONS,
+  PAYMENT_STATUS_MENUNGGU_VERIFIKASI,
   PLATFORM_OPTIONS,
   addPlatform,
   editClient,
@@ -289,7 +290,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     // Opening Kelola Klien STARTS riset awal (langkah 1) — the server stamps the
     // clock. The call resumes an already-open session rather than starting a
     // second one, so coming back here does not reset that clock.
-    if (!window.confirm('Buka Kelola Klien untuk klien ini? Riset awal mulai terhitung sejak sekarang.')) {
+    if (!window.confirm('Mulai Riset & Interview untuk klien ini? Riset awal mulai terhitung sejak sekarang.')) {
       return;
     }
     setInterviewError(null);
@@ -315,6 +316,13 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   }
 
   const allocationTotalPct = client.sales_allocation.reduce((sum, a) => sum + a.basis_points, 0) / 100;
+
+  // Payment Intent locks the moment the linked transaction's first
+  // verification lands (payment_status moves off Menunggu Verifikasi) —
+  // mirrors client.setPaymentIntent's own IntentLockedError, so the form is
+  // never shown for a save the server would reject anyway.
+  const paymentIntentLocked =
+    client.payment_status !== '' && client.payment_status !== PAYMENT_STATUS_MENUNGGU_VERIFIKASI;
 
   return (
     <div className="stack">
@@ -399,6 +407,43 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
               )}
             </div>
           </div>
+        </div>
+
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--color-border)' }}>
+          <h3 style={{ fontSize: 14, marginBottom: 8 }}>Payment Intent</h3>
+          <p className="muted" style={{ marginBottom: 8 }}>
+            Nilai saat ini:{' '}
+            {client.payment_intent ? <span className="badge badge-blue">{client.payment_intent}</span> : '—'}
+          </p>
+          {paymentIntentLocked ? (
+            <p className="muted" style={{ fontSize: 13 }}>
+              Payment Intent terkunci — pembayaran sudah diverifikasi, transaksi sudah selesai.
+            </p>
+          ) : (
+            <form className="form" onSubmit={handleSetIntent}>
+              {intentError && <div className="alert alertError" role="alert">{intentError}</div>}
+              {intentMessage && <div className="alert alertSuccess" role="status">{intentMessage}</div>}
+              <div className="stack" style={{ gap: 6 }}>
+                {PAYMENT_INTENT_OPTIONS.map((opt) => (
+                  <label key={opt} className="row" style={{ gap: 8, fontSize: 13 }}>
+                    <input
+                      type="radio"
+                      name="payment_intent"
+                      value={opt}
+                      checked={intentChoice === opt}
+                      onChange={() => setIntentChoice(opt)}
+                    />
+                    {opt}
+                  </label>
+                ))}
+              </div>
+              <div>
+                <button type="submit" className="btn btnPrimary" disabled={intentSubmitting || !intentChoice}>
+                  {intentSubmitting ? 'Menyimpan...' : 'Simpan Payment Intent'}
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       </section>
 
@@ -527,10 +572,34 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
         )}
       </section>
 
-      <section className="card">
+      {/* Delivery Klien — SATU tempat, dua tabel yang sengaja tetap terpisah.
+          Keduanya memang terlihat mirip (tabel ber-ID di halaman klien yang
+          sama), dan pertanyaannya wajar: kenapa bukan satu tabel saja? Karena
+          barisnya bukan benda yang sama dan tidak punya kunci bersama:
+            - `Services` = SVC-, satu baris per JASA yang dibeli (lahir dari
+              closing / renewal). Pintunya: "Kelola Klien" (hub layanan: Plan →
+              Strategy & Plan → Brief), Hold, Void.
+            - `Riset & Interview Klien` = ITV-, satu baris per SESI riset awal + interview
+              + verdict. `interview.service_id` boleh null: sesi tingkat KLIEN
+              tidak menempel pada Service mana pun (domain `openKelolaKlien`),
+              jadi menggabungkannya jadi satu tabel akan memaksa baris yatim.
+          Yang bisa diperbaiki — dan diperbaiki di sini — adalah navigasinya:
+          keduanya dulu terpisah oleh panel Renewal, sekarang berdampingan di
+          bawah satu judul, masing-masing dengan satu kalimat penjelas, dan
+          barisnya saling menaut (Service → sesi yang mencakupnya, dan
+          sebaliknya). Anchor `#interview` dipertahankan: Service hub
+          menautkannya. */}
+      <section className="card" id="delivery">
         <div className="cardHeader">
-          <h2>Services</h2>
+          <h2>Delivery Klien</h2>
         </div>
+
+        <h3 style={{ fontSize: 14, marginBottom: 2 }}>Services &mdash; yang dibeli klien</h3>
+        <p className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+          Satu baris per jasa (SVC-) yang lahir dari closing atau renewal. <strong>Kelola Klien</strong>{' '}
+          membuka hub layanan &mdash; tentukan kebutuhan Plan, susun Strategy &amp; Plan, lalu buat
+          Brief. Di sini juga pengajuan Hold dan Void.
+        </p>
         {voidError && <div className="alert alertError" role="alert">{voidError}</div>}
         {voidMessage && <div className="alert alertSuccess" role="status">{voidMessage}</div>}
         {/* The Service ID is not decoration: every M6 §4/§5 door is keyed by it
@@ -548,6 +617,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                   <th>Nama</th>
                   <th>Harga Standar</th>
                   <th>Status</th>
+                  {canManageInterview && <th>Riset &amp; Interview</th>}
                   <th></th>
                 </tr>
               </thead>
@@ -564,6 +634,25 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                     <td>{s.name}</td>
                     <td>{s.standard_price}</td>
                     <td><StatusBadge status={s.status} /></td>
+                    {/* Tautan silang ke tabel di bawah. Pertanyaan "sesi Kelola
+                        Klien mana yang menutupi jasa ini?" dulu hanya bisa
+                        dijawab dengan membandingkan dua tabel pakai mata. */}
+                    {canManageInterview && (
+                      <td>
+                        {(() => {
+                          const iv = interviews.find((row) => row.service_id === s.id);
+                          if (iv) return <Link href={`/account/interview/${iv.id}`}>{iv.id}</Link>;
+                          const umum = interviews.find((row) => row.service_id === null);
+                          return umum ? (
+                            <span className="muted" style={{ fontSize: 12 }}>
+                              <Link href={`/account/interview/${umum.id}`}>{umum.id}</Link> (sesi klien)
+                            </span>
+                          ) : (
+                            <span className="muted">&mdash;</span>
+                          );
+                        })()}
+                      </td>
+                    )}
                     <td>
                       <div className="row" style={{ gap: 8 }}>
                         {canOpenServiceHub && s.status !== VOIDED_STATUS && (
@@ -571,7 +660,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                             href={`/account/services/${encodeURIComponent(s.id)}`}
                             className="btn btnPrimary btnSm"
                           >
-                            Onboarding &amp; Brief
+                            Kelola Klien
                           </Link>
                         )}
                         {canRequestHold && s.status === IN_EXECUTION_STATUS && (
@@ -637,6 +726,109 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             </table>
           </div>
         )}
+
+        {canManageInterview && (
+          <>
+            <h3 id="interview" style={{ fontSize: 14, margin: '22px 0 2px', scrollMarginTop: 16 }}>
+              Riset &amp; Interview Klien &mdash; riset awal, interview &amp; verdict
+            </h3>
+            <p className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+              Satu baris per <strong>sesi</strong> (ITV-), bukan per jasa: riset awal &rarr; jadwal
+              &rarr; interview &rarr; verdict &rarr; prasyarat. Sesi tanpa Service berlaku untuk
+              seluruh klien; sesi yang menyebut Service hanya mencakup jasa itu.
+            </p>
+            {interviewError && <div className="alert alertError" role="alert">{interviewError}</div>}
+            {interviewsError && <div className="alert alertError" role="alert">{interviewsError}</div>}
+
+            {/* Riwayat Kelola Klien — sessions with saved work: a submitted riset
+                awal, a schedule, a started/submitted interview, or a cancellation
+                (blank never-touched attempts are filtered server-side). A running
+                riset awal is reached through the button below, which resumes. */}
+            {interviews.length > 0 ? (
+              <div className="table-wrap" style={{ marginBottom: 12 }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Interview ID</th>
+                      <th>Cakupan</th>
+                      <th>Status</th>
+                      <th>Riset awal</th>
+                      <th>Verdict</th>
+                      <th>Prasyarat</th>
+                      <th>Dibuat</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {interviews.map((iv) => (
+                      <tr key={iv.id}>
+                        <td>
+                          <Link href={`/account/interview/${iv.id}`}>{iv.id}</Link>
+                          {iv.versi_no > 1 && (
+                            <span className="muted" style={{ fontSize: 12 }}> · v{iv.versi_no}</span>
+                          )}
+                        </td>
+                        {/* Sisi lain tautan silang. Sesi tanpa service_id BERLAKU
+                            untuk seluruh klien (domain `openKelolaKlien`) — itu
+                            fakta, bukan data yang hilang, jadi jangan '—'. */}
+                        <td>
+                          {iv.service_id ? (
+                            <Link href={`/account/services/${encodeURIComponent(iv.service_id)}`}>
+                              {iv.service_id}
+                            </Link>
+                          ) : (
+                            <span className="muted" style={{ fontSize: 12 }}>Seluruh klien</span>
+                          )}
+                        </td>
+                        <td>
+                          <span className={`badge badge-${interviewStatusTone(iv.status)}`}>{iv.status}</span>
+                        </td>
+                        {/* Langkah 1 — the measured research step. `—` while it is
+                            still running: an unfinished step has no duration yet. */}
+                        <td>
+                          {iv.riset_awal_status ? (
+                            <>
+                              <span className={`badge badge-${risetAwalStatusTone(iv.riset_awal_status)}`}>
+                                {iv.riset_awal_status}
+                              </span>{' '}
+                              <span className="muted" style={{ fontSize: 12 }}>
+                                {formatDurasiMenit(iv.riset_awal_durasi_menit)}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
+                        <td>
+                          {iv.verdict ? (
+                            <span className={`badge badge-${verdictTone(iv.verdict)}`}>
+                              {VERDICT_LABELS[iv.verdict] ?? iv.verdict}
+                            </span>
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
+                        <td>
+                          {iv.prasyarat_status ? (PRASYARAT_LABELS[iv.prasyarat_status] ?? iv.prasyarat_status) : '—'}
+                        </td>
+                        <td>{formatDate(iv.created_at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="muted" style={{ fontSize: 13 }}>
+                Belum ada sesi Riset &amp; Interview yang tercatat untuk klien ini. Gunakan tombol di bawah untuk
+                membukanya — riset awal langsung mulai terhitung, dan sesi muncul di sini begitu riset awal
+                disubmit, jadwal diisi, atau interview dimulai.
+              </p>
+            )}
+
+            <button type="button" className="btn btnPrimary" disabled={creatingInterview} onClick={handleOpenInterview}>
+              {creatingInterview ? 'Membuka…' : 'Mulai Riset & Interview'}
+            </button>
+          </>
+        )}
       </section>
 
       <RenewalPanel
@@ -645,124 +837,6 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
         role={role}
         employeeId={employee?.employee_id ?? null}
       />
-
-      {canManageInterview && (
-        <section className="card" id="interview">
-          <div className="cardHeader">
-            <h2>Kelola Klien · Interview &amp; Kualifikasi</h2>
-          </div>
-          {interviewError && <div className="alert alertError" role="alert">{interviewError}</div>}
-          {interviewsError && <div className="alert alertError" role="alert">{interviewsError}</div>}
-
-          {/* Riwayat Kelola Klien — sessions with saved work: a submitted riset
-              awal, a schedule, a started/submitted interview, or a cancellation
-              (blank never-touched attempts are filtered server-side). A running
-              riset awal is reached through the button below, which resumes. */}
-          {interviews.length > 0 ? (
-            <div className="table-wrap" style={{ marginBottom: 12 }}>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Interview ID</th>
-                    <th>Status</th>
-                    <th>Riset awal</th>
-                    <th>Verdict</th>
-                    <th>Prasyarat</th>
-                    <th>Dibuat</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {interviews.map((iv) => (
-                    <tr key={iv.id}>
-                      <td>
-                        <Link href={`/account/interview/${iv.id}`}>{iv.id}</Link>
-                        {iv.versi_no > 1 && (
-                          <span className="muted" style={{ fontSize: 12 }}> · v{iv.versi_no}</span>
-                        )}
-                      </td>
-                      <td>
-                        <span className={`badge badge-${interviewStatusTone(iv.status)}`}>{iv.status}</span>
-                      </td>
-                      {/* Langkah 1 — the measured research step. `—` while it is
-                          still running: an unfinished step has no duration yet. */}
-                      <td>
-                        {iv.riset_awal_status ? (
-                          <>
-                            <span className={`badge badge-${risetAwalStatusTone(iv.riset_awal_status)}`}>
-                              {iv.riset_awal_status}
-                            </span>{' '}
-                            <span className="muted" style={{ fontSize: 12 }}>
-                              {formatDurasiMenit(iv.riset_awal_durasi_menit)}
-                            </span>
-                          </>
-                        ) : (
-                          <span className="muted">—</span>
-                        )}
-                      </td>
-                      <td>
-                        {iv.verdict ? (
-                          <span className={`badge badge-${verdictTone(iv.verdict)}`}>
-                            {VERDICT_LABELS[iv.verdict] ?? iv.verdict}
-                          </span>
-                        ) : (
-                          <span className="muted">—</span>
-                        )}
-                      </td>
-                      <td>
-                        {iv.prasyarat_status ? (PRASYARAT_LABELS[iv.prasyarat_status] ?? iv.prasyarat_status) : '—'}
-                      </td>
-                      <td>{formatDate(iv.created_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="muted" style={{ fontSize: 13 }}>
-              Belum ada sesi Kelola Klien yang tercatat untuk klien ini. Gunakan tombol di bawah untuk
-              membukanya — riset awal langsung mulai terhitung, dan sesi muncul di sini begitu riset awal
-              disubmit, jadwal diisi, atau interview dimulai.
-            </p>
-          )}
-
-          <button type="button" className="btn btnPrimary" disabled={creatingInterview} onClick={handleOpenInterview}>
-            {creatingInterview ? 'Membuka…' : 'Kelola Klien (mulai riset awal)'}
-          </button>
-        </section>
-      )}
-
-      <section className="card">
-        <div className="cardHeader">
-          <h2>Payment Intent</h2>
-        </div>
-        <p className="muted">
-          Nilai saat ini:{' '}
-          {client.payment_intent ? <span className="badge badge-blue">{client.payment_intent}</span> : '—'}
-        </p>
-        <form className="form" onSubmit={handleSetIntent}>
-          {intentError && <div className="alert alertError" role="alert">{intentError}</div>}
-          {intentMessage && <div className="alert alertSuccess" role="status">{intentMessage}</div>}
-          <div className="stack" style={{ gap: 6 }}>
-            {PAYMENT_INTENT_OPTIONS.map((opt) => (
-              <label key={opt} className="row" style={{ gap: 8, fontSize: 13 }}>
-                <input
-                  type="radio"
-                  name="payment_intent"
-                  value={opt}
-                  checked={intentChoice === opt}
-                  onChange={() => setIntentChoice(opt)}
-                />
-                {opt}
-              </label>
-            ))}
-          </div>
-          <div>
-            <button type="submit" className="btn btnPrimary" disabled={intentSubmitting || !intentChoice}>
-              {intentSubmitting ? 'Menyimpan...' : 'Simpan Payment Intent'}
-            </button>
-          </div>
-        </form>
-      </section>
 
       <section className="card">
         <div className="cardHeader">

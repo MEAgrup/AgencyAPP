@@ -59,7 +59,7 @@ export default function TimelinePanel({ timeline }: { timeline: KelolaKlienTimel
   return (
     <section className="card">
       <div className="cardHeader">
-        <span>Timeline Kelola Klien</span>
+        <span>Timeline Riset &amp; Interview</span>
         {terlambat.length > 0 && (
           <span className="badge badge-red">
             {terlambat.length} langkah terlambat

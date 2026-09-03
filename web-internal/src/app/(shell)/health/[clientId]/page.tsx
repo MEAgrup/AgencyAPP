@@ -520,7 +520,7 @@ export default function ClientHealthDetailPage({ params }: { params: Promise<{ c
           <div className="cardHeader">
             <div>
               <h2>Kesiapan Klien (Interview)</h2>
-              <p className="muted">Konteks onboarding — advisory, tidak memengaruhi skor.</p>
+              <p className="muted">Konteks Kelola Klien — advisory, tidak memengaruhi skor.</p>
             </div>
             <Link href={`/clients/${encodeURIComponent(clientId)}`} className="btn btnSecondary btnSm">
               Detail Klien →

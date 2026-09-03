@@ -43,6 +43,11 @@ export interface Client {
   commission_payment_pic_id: string;
   transaction_id: string;
   payment_intent: string;
+  /** Linked transaction's payment_status ('' when no transaction). Only ever
+   *  moves MENUNGGU → SEBAGIAN/LUNAS on the first verification (M5) — the FE
+   *  uses this to lock the Payment Intent editor once verification has
+   *  started, mirroring `client.setPaymentIntent`'s IntentLockedError. */
+  payment_status: string;
   released_to_account_at: string | null;
   platforms: Platform[];
   sales_allocation: Allocation[];
@@ -86,6 +91,11 @@ export const PAYMENT_INTENT_OPTIONS = [
   '[Bayar di Belakang]',
 ] as const;
 
+/** Transaction `payment_status` before any verification has landed
+ *  (finance.ts PAYMENT_MENUNGGU) — the only state in which Payment Intent
+ *  is still editable server-side. */
+export const PAYMENT_STATUS_MENUNGGU_VERIFIKASI = '[Menunggu Verifikasi]';
+
 /** Platform List checklist (M0 §4.3 — verbatim from the PRD). Shared by the Sales
  *  Qualified Lead Form and the Client Record Platform List editor so the two
  *  never drift. Each selection becomes its own `client_platforms` row (M4-OA-2:
@@ -115,7 +125,12 @@ export interface PendingHoldRequest {
   service_name: string;
   owner_am: string | null;
   owner_am_nama: string;
+  /** Waktu hold DIMINTA (dari audit `service_hold_requested`; fallback lahirnya Service). */
   updated_at: string;
+  /** Alasan wajib yang diketik AM saat mengajukan hold; '' kalau baris auditnya tak terbaca. */
+  reason: string;
+  requested_by: string;
+  requested_by_nama: string;
 }
 
 /** GET /services/hold-requests — every Service in [Hold Requested], oldest first (Head of Account / Director). */

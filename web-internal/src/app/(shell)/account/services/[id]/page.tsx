@@ -395,7 +395,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
     if (!service) return;
     // Opening Kelola Klien STARTS riset awal (langkah 1); the call resumes this
     // service's open session if there is one, so the clock is never reset.
-    if (!window.confirm('Buka Kelola Klien untuk layanan ini? Riset awal mulai terhitung sejak sekarang.')) {
+    if (!window.confirm('Mulai Riset & Interview untuk layanan ini? Riset awal mulai terhitung sejak sekarang.')) {
       return;
     }
     setInterviewError(null);
@@ -523,7 +523,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
       <div className="alert alertInfo" role="status">
         <strong>Alur layanan (5 langkah):</strong> Riset Awal → Interview → Strategi
         (STRG-, perlu ACC Head/SPV) → Plan → Brief satu-klik. Mulai dari{' '}
-        <strong>&ldquo;Kelola Klien (mulai riset awal)&rdquo;</strong> di bawah.
+        <strong>&ldquo;Mulai Riset &amp; Interview&rdquo;</strong> di bawah.
       </div>
 
       {serviceError && <div className="alert alertError" role="alert">{serviceError}</div>}
@@ -534,7 +534,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
       {service && (
         <section className="card">
           <div className="cardHeader">
-            <h2>Status Onboarding</h2>
+            <h2>Status Kelola Klien</h2>
             <StatusBadge status={service.status} />
           </div>
           <div className="grid2">
@@ -579,14 +579,14 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
         </section>
       )}
 
-      {/* Interview / Kelola Klien launch. The interview qualifies the client and
+      {/* "Riset & Interview Klien" launch. The interview qualifies the client and
           feeds the Strategy that follows, so its entry point belongs on the
           Service hub too — not only on the Client Record. Without a door here the
           page reads as "view only" for a step the AM actually starts from here. */}
       {service && canWrite && (
         <section className="card">
           <div className="cardHeader">
-            <h2>Kelola Klien · Riset Awal, Interview &amp; Kualifikasi</h2>
+            <h2>Riset &amp; Interview Klien &middot; Riset Awal, Interview &amp; Kualifikasi</h2>
           </div>
           {interviewError && <div className="alert alertError" role="alert">{interviewError}</div>}
           <p className="muted" style={{ fontSize: 13 }}>
@@ -601,7 +601,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
             disabled={creatingInterview}
             onClick={handleOpenInterview}
           >
-            {creatingInterview ? 'Membuka…' : 'Kelola Klien (mulai riset awal)'}
+            {creatingInterview ? 'Membuka…' : 'Mulai Riset & Interview'}
           </button>
         </section>
       )}
@@ -865,15 +865,15 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
           )}
       </section>
 
-      {/* Interview ("Kelola Klien") shortcut. Interview is a per-CLIENT record
+      {/* "Riset & Interview Klien" shortcut. Interview is a per-CLIENT record
           (M6 Interview §I1), so the create/open door stays on the client page;
           this is only a deep-link there so the Service hub is not a dead end for
           someone who needs the client's qualification. Hidden by default (SESI31)
-          as a duplicate of the primary "Kelola Klien" card above. */}
+          as a duplicate of the primary "Riset & Interview Klien" card above. */}
       {SHOW_CLIENT_INTERVIEW_SHORTCUT && service && canManageInterview && (
         <section className="card">
           <div className="cardHeader">
-            <h2>Kelola Klien &middot; Interview &amp; Kualifikasi</h2>
+            <h2>Riset &amp; Interview Klien</h2>
           </div>
           <p className="muted" style={{ fontSize: 13 }}>
             Interview &amp; kualifikasi dikelola di tingkat klien (bukan per layanan). Buka halaman
@@ -884,7 +884,7 @@ export default function ServiceHubPage({ params }: { params: Promise<{ id: strin
             href={`/clients/${encodeURIComponent(service.client_id)}#interview`}
             className="btn btnPrimary btnSm"
           >
-            Buka Kelola Klien
+            Buka Riset &amp; Interview
           </Link>
         </section>
       )}

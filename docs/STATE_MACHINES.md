@@ -156,14 +156,14 @@ All else blocked: `[transisi status tidak diizinkan]`.
 - Kedua edge `require_lead = false`: dormansi dijalankan job service-role; reaktivasi dijalankan saat AM menentukan service baru butuh Plan (gerbang kepemilikan di `plangate.decideGate`/`openOrJoinPlanSatuanTx`, bukan lead).
 - **Rule 6 (buka/gabung)** bukan mesin ini: membuka rantai (baris `plan_satuan` + periode 1 `Draft`), menggabung (link ke periode berjalan), dan reaktivasi dijalankan `openOrJoinPlanSatuanTx`, dipanggil di transaksi `decideGate` saat `keputusan_am='butuh_plan'`. Hanya transisi `Aktif ⇄ Dorman` yang lewat mesin #17.
 
-## 6f. Riset Awal — mesin #20 (langkah 1 "Kelola Klien", QA pemilik 2026-08-12)
+## 6f. Riset Awal — mesin #20 (langkah 1 "Riset & Interview Klien", QA pemilik 2026-08-12)
 
 `Berjalan → Selesai` (Selesai terminal). Hidup di `interview_riset_awal.status`, tabel anak 1:1 dari `interview`
 (PK `interview_id`, tanpa prefix ID sendiri), digerakkan `sm_transition(machine='riset_awal', table='interview_riset_awal', id_col='interview_id')`.
 
 | From | To | Who | Effect |
 |---|---|---|---|
-| *(baris lahir)* | `Berjalan` | AM (otomatis) | Baris dibuat di transaksi yang SAMA dengan `interview` saat AM klik "Kelola Klien". `dimulai_pada` = jangkar mulai. **Tidak ada tombol "mulai"** — membuka halaman ITU mulainya |
+| *(baris lahir)* | `Berjalan` | AM (otomatis) | Baris dibuat di transaksi yang SAMA dengan `interview` saat AM klik "Mulai Riset & Interview". `dimulai_pada` = jangkar mulai. **Tidak ada tombol "mulai"** — membuka halaman ITU mulainya |
 | `Berjalan` | `Selesai` | AM pemegang klien / Account lead / Director | `submitRisetAwal`: tulis `disubmit_pada`/`disubmit_oleh` lalu transisi di satu transaksi. Submit kedua = `ConflictError` `[riset awal sudah disubmit]`, bukan no-op |
 
 - **Nol edge buka-kembali.** Kembali ke `Berjalan` akan memindahkan jangkar yang justru jadi alasan langkah ini ada; kalau revisi memang dibutuhkan, itu keputusan pemilik dulu (belum ada).
@@ -191,7 +191,7 @@ dihitung `working_days_between`):
 
 | Langkah | Target–batas | Jangkar mulai | Jangkar selesai |
 |---|---|---|---|
-| 1 · Riset Awal | 2–3 hk | `interview_riset_awal.dimulai_pada` (klik Kelola Klien) | `disubmit_pada` |
+| 1 · Riset Awal | 2–3 hk | `interview_riset_awal.dimulai_pada` (klik "Mulai Riset & Interview") | `disubmit_pada` |
 | 2 · Interview Meeting | 1–2 hk | `interview_riset_awal.disubmit_pada` | `interview.meeting_diamankan_pada` — mana yang lebih dulu antara `→ Terjadwal` dan `→ Sedang Berlangsung` |
 | 3 · Brand Strategy | 5–7 hk | `interview.selesai_pada` (`→ Selesai` / `Selesai Dengan Catatan`) | `strategi.diajukan_pada` ATAU `strategy_plans.diajukan_pada` (AM mengajukan) |
 

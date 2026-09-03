@@ -209,7 +209,7 @@ export default function AccountWorkspacePage() {
       const am = amCandidates?.find((e) => e.employee_id === res.assigned_am);
       setAssignMessage(
         `AM ${am ? `${am.nama} (${res.assigned_am})` : res.assigned_am} ditugaskan untuk ${res.client_id}. ` +
-          'Semua layanan klien ini kini ada di antrean onboarding AM tersebut.',
+          'Semua layanan klien ini kini ada di antrean Kelola Klien AM tersebut.',
       );
       setAssignTarget(null);
       setAssignAmId('');
@@ -311,7 +311,7 @@ export default function AccountWorkspacePage() {
               className={`btn btnSm ${serviceFilter === 'onboarding' ? 'btnPrimary' : 'btnSecondary'}`}
               onClick={() => setServiceFilter('onboarding')}
             >
-              Perlu Onboarding
+              Perlu Dikelola
             </button>
             <button
               type="button"
@@ -333,7 +333,7 @@ export default function AccountWorkspacePage() {
         {!servicesLoading && !servicesError && visibleServices && visibleServices.length === 0 && (
           <div className="emptyState">
             {serviceFilter === 'onboarding'
-              ? 'Tidak ada layanan yang menunggu onboarding.'
+              ? 'Tidak ada layanan yang menunggu dikelola.'
               : 'Belum ada layanan klien yang terlihat untuk peran Anda.'}
           </div>
         )}
