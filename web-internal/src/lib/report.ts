@@ -225,15 +225,26 @@ export function revokeReport(reportId: number, alasan: string): Promise<ReportPu
 }
 
 /**
- * Mirrors `report.canWriteReport` (server is the real gate): the owning AM, an
- * Account lead, or a Director. OD reads everywhere but never writes.
+ * Can this role POSSIBLY write a report insight? Mirrors the role limb of
+ * `report.canWriteReport`, and deliberately NOT its row limb.
+ *
+ * The server gate is "Director, OR an Account lead, OR the client's own AM".
+ * This page does not know who the owning AM is (`ReportPanel` receives the
+ * client id and its platforms, not the client's assignment), so the honest UI
+ * gate is the part that IS knowable: OD never writes anywhere, and a division
+ * outside Account never writes a client report. An Account staff member sees
+ * the controls and, if the client is not theirs, gets the server's
+ * `[Anda tidak berhak mengakses laporan klien ini]` — which the panel shows.
+ *
+ * Deliberate choice: hiding the button for every Account staffer would hide it
+ * from the exact person it is for. Showing a refusable button beats hiding a
+ * usable one, as long as the refusal is legible — and it is.
  */
-export function canPublishReportUi(role: Role | null, employeeId: string | null, ownerAm: string | null): boolean {
+export function canPublishReportUi(role: Role | null): boolean {
   if (!role) return false;
   if (role.director) return true;
   if (role.od) return false;
-  if (role.division === 'Account' && role.level === 'lead') return true;
-  return ownerAm !== null && ownerAm !== '' && ownerAm === employeeId;
+  return role.division === 'Account';
 }
 
 /** Human label for a publication status, for the panel's badge. */
