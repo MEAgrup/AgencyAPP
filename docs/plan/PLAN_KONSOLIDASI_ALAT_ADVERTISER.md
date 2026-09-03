@@ -2,7 +2,7 @@
 
 **Pemilik permintaan:** Yohan Agustian (Director, PT MEA Agensi Digital)
 **Dibuat:** 2026-09-03 · **Branch:** `claude/cdps-advertiser-tools-consolidation-xxpzow` · **PR:** [#276](https://github.com/MEAgrup/AgencyAPP/pull/276)
-**Status (2026-09-03, setelah PR [#277](https://github.com/MEAgrup/AgencyAPP/pull/277) merge):** Gelombang 1 **SELESAI & sudah di live**. Gelombang 2 (Shopee, SH-01…SH-07) dan Gelombang 3 (SKU Screener, SC-00…SC-09) **SELESAI di `main`, termasuk UI** — dan **migrasinya SUDAH diterapkan ke `CDPS SG` live** (2026-09-03, lewat `apply_migration`: `gelombang3_sku_screener` + `sh01_shopee_report_engine`; `entity_prefix` 39, relasi 144, semua gate cocok dengan lokal). **UAT dengan export Shopee ASLI sudah dijalankan** (Fim Motor Juli 2026, 15 berkas — engine LOLOS, semua angka cocok ke berkas mentah): `docs/handoff/UAT_SHOPEE_FIM_MOTOR_20260903.md`. Tiga keputusan pemilik yang muncul dari UAT itu **sudah dijawab dan ditindaklanjuti hari yang sama** (SHP-1 opsi C: `gmv_kotor`=Pesanan Dibuat & `gmv_net`=Pesanan Dibayar, `clients.total_sales` ikut Dibayar; SHP-2 ambang skor dibiarkan; SHP-3 pengenalan nama berkas mentah Shopee ditambahkan — deteksi export asli naik dari 8/15 ke **15/15 tanpa override**). Lihat `DECISIONS.md` dan §7 dokumen UAT. Gelombang 4 (TikTok Ads Scanner) belum dimulai: engine `packages/core/src/adsscanner/tiktok/` sudah ada, migrasi + domain + UI belum.
+**Status (2026-09-03, setelah PR [#277](https://github.com/MEAgrup/AgencyAPP/pull/277) merge):** Gelombang 1 **SELESAI & sudah di live**. Gelombang 2 (Shopee, SH-01…SH-07) dan Gelombang 3 (SKU Screener, SC-00…SC-09) **SELESAI di `main`, termasuk UI** — dan **migrasinya SUDAH diterapkan ke `CDPS SG` live** (2026-09-03, lewat `apply_migration`: `gelombang3_sku_screener` + `sh01_shopee_report_engine`; `entity_prefix` 39, relasi 144, semua gate cocok dengan lokal). **UAT dengan export Shopee ASLI sudah dijalankan** (Fim Motor Juli 2026, 15 berkas — engine LOLOS, semua angka cocok ke berkas mentah): `docs/handoff/UAT_SHOPEE_FIM_MOTOR_20260903.md`. Tiga keputusan pemilik yang muncul dari UAT itu **sudah dijawab dan ditindaklanjuti hari yang sama** (SHP-1 opsi C: `gmv_kotor`=Pesanan Dibuat & `gmv_net`=Pesanan Dibayar, `clients.total_sales` ikut Dibayar; SHP-2 ambang skor dibiarkan; SHP-3 pengenalan nama berkas mentah Shopee ditambahkan — deteksi export asli naik dari 8/15 ke **15/15 tanpa override**). Lihat `DECISIONS.md` dan §7 dokumen UAT. **Gelombang 4 (TikTok Ads Scanner) — AS-01..AS-04 SELESAI** (2026-09-03): engine `packages/core/src/adsscanner/tiktok/` (O67) kini punya lapisan penyimpanannya — migrasi `20260910010000` (`adsscanner_run` ASR- + `adsscanner_benchmark` berversi 34 kategori; tabel 143→145, `entity_prefix` 39→40), `packages/domain/src/adsscanner.ts`, dan 6 rute API (`POST /clients/{id}/adsscanner/scan`, `GET /clients/{id}/adsscanner/runs`, `GET /adsscanner/runs/{id}`, `.../html`, `GET /adsscanner/portfolio`, `GET /adsscanner/categories`) + tipe FE `web-internal/src/lib/adsscanner.ts`. Mengikuti **O69**: tabel CDPS baru mirror `screening_run`, **BUKAN** `client_reports` — ini alat kerja INTERNAL divisi Ads dan sengaja nol permukaan Client Portal. **Yang tersisa: UI (AS-05).** Migrasinya BELUM diterapkan ke live — lihat §7.
 **Handoff eksekusi:** `docs/handoff/HANDOFF_INSIGHT_EDITABLE_CLIENT_PORTAL_20260908.md`
 **Tiket kecil:** `docs/backlog/CLIENT_REPORT_PORTAL_BACKLOG.md`
 
@@ -130,9 +130,27 @@ Prefix baru: `SCR-` (screening run, dipakai Modul A **dan** B lewat kolom `jenis
 
 ---
 
-## 7. GELOMBANG 4 (menyusul) — TikTok Ads Scanner
+## 7. GELOMBANG 4 (✅ AS-01..AS-04 SELESAI, UI menyusul) — TikTok Ads Scanner
 
-Pemilik akan membuat HTML-nya **setelah build ini selesai**. Yang dicatat di sini adalah **slot dan kontraknya**, bukan spesifikasi fiturnya — belum ada alatnya untuk dibaca, jadi **jangan mengarang aturannya**.
+> **Status 2026-09-03.** Dua premis §7 ini sudah kedaluwarsa dan dibiarkan sebagai riwayat, bukan panduan:
+> alatnya TIDAK "menyusul" — HTML-nya sudah ada dan diarsipkan di SC-00
+> (`docs/design/TIKTOK_ADS_SCANNER.html`); dan jalurnya sudah DIPILIH, bukan masih terbuka.
+>
+> **Jalur (b) PORT PENUH** dipilih di O67, dengan alasan yang persis aturan pemisah di bawah: angkanya
+> menggerakkan keputusan sistem (skor SKU, 6 bucket, realokasi budget), jadi skor yang tak bisa dihitung ulang
+> server-side akan melanggar aturan rumah #4. Karena itu paragraf "Kalau embed" di bawah **tidak berlaku**.
+>
+> **Satu poin di bawah TERBALIK di kenyataan, dan itu keputusan sadar:** "Insight editable + portal klien
+> Gelombang 1 langsung berlaku kalau outputnya masuk `client_reports`" — outputnya justru **sengaja TIDAK**
+> masuk `client_reports`. Scan Ads Scanner adalah alat kerja internal (SKU mana dimatikan, budget dipindah ke
+> mana); baris `client_reports` punya permukaan Client Portal, jadi menaruhnya di sana berarti satu kelalaian
+> gerbang publikasi = strategi bidding internal terkirim ke klien. Tiga alasan lengkapnya ada di header migrasi
+> `20260910010000` dan di `DECISIONS.md` (baris Gelombang 4). Ia tetap memakai `renderReportHtml` engine-nya
+> sendiri lewat `GET /adsscanner/runs/{id}/html` — bukan sistem desain kedua, sesuai maksud AS-04.
+>
+> **Sisa pekerjaan: AS-05 (UI)** — lihat `docs/backlog/CLIENT_REPORT_PORTAL_BACKLOG.md`. Dan **migrasinya belum
+> diterapkan ke `CDPS SG` live**: pakai `apply_migration` per berkas, JANGAN `supabase db push` (O65), dengan
+> pola empat langkah di `docs/handoff/HANDOFF_ADVERTISER_TOOLS_SESI5_20260903.md` §2.
 
 **Dua jalur masuk yang sudah terbukti, pilih sadar:**
 

@@ -7,7 +7,7 @@
  */
 import { money, tz } from '@cdps/core';
 import type { interview as ivcore, report as coreReport } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, skuscreener, stage, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, adsscanner, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, skuscreener, stage, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -6961,5 +6961,80 @@ export function shopeeAdsCampaignOptionToWire(c: report.ShopeeAdsCampaignOption)
     start_date: c.startDate,
     end_date: c.endDate,
     budget: c.budget,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Gelombang 4 (TikTok Ads Scanner) — `adsscanner_run` wire shapes.
+//
+// `payload`/`konfigurasi`/`sumber_berkas` cross the boundary as `unknown`, the
+// same way `screening_run`'s do: they are engine-shaped jsonb whose interior
+// the FE renders generically, and re-declaring 40+ SkuResult fields on the wire
+// would create a second, drift-prone copy of a `@cdps/core` type. The FE reads
+// them through the engine's own exported types.
+// ---------------------------------------------------------------------------
+export interface AdsScanRunSummaryWire {
+  id: string;
+  client_id: string;
+  kategori: string;
+  mode: string;
+  minggu_mulai: string | null;
+  benchmark_versi: number;
+  created_at: string;
+  created_by: string;
+}
+
+export interface AdsScanRunDetailWire extends AdsScanRunSummaryWire {
+  payload_schema: string;
+  konfigurasi: unknown;
+  payload: unknown;
+  sumber_berkas: unknown;
+}
+
+export interface AdsScanPortfolioRowWire extends AdsScanRunSummaryWire {
+  client_toko: string | null;
+  client_nama_pic: string | null;
+  vonis: string | null;
+  total_gmv: number | null;
+  total_spend: number | null;
+  blended_roi: number | null;
+  pool_realokasi: number | null;
+  sku_total: number | null;
+}
+
+export function adsScanRunSummaryToWire(r: adsscanner.AdsScanRunSummary): AdsScanRunSummaryWire {
+  return {
+    id: r.id,
+    client_id: r.clientId,
+    kategori: r.kategori,
+    mode: r.mode,
+    minggu_mulai: r.mingguMulai,
+    benchmark_versi: r.benchmarkVersi,
+    created_at: r.createdAt,
+    created_by: r.createdBy,
+  };
+}
+
+export function adsScanRunDetailToWire(d: adsscanner.AdsScanRunDetail): AdsScanRunDetailWire {
+  return {
+    ...adsScanRunSummaryToWire(d),
+    payload_schema: d.payloadSchema,
+    konfigurasi: d.konfigurasi ?? null,
+    payload: d.payload ?? null,
+    sumber_berkas: d.sumberBerkas ?? null,
+  };
+}
+
+export function adsScanPortfolioRowToWire(r: adsscanner.AdsScanPortfolioRow): AdsScanPortfolioRowWire {
+  return {
+    ...adsScanRunSummaryToWire(r),
+    client_toko: r.clientToko,
+    client_nama_pic: r.clientNamaPic,
+    vonis: r.vonis,
+    total_gmv: r.totalGmv,
+    total_spend: r.totalSpend,
+    blended_roi: r.blendedRoi,
+    pool_realokasi: r.poolRealokasi,
+    sku_total: r.skuTotal,
   };
 }
