@@ -29,7 +29,7 @@
  *    `MSG_AMBIGU` dan minta AM konfirmasi tipe (`tipeOverride`), tak menebak diam2.
  *  - **null eksplisit, bukan omitempty**: setiap kolom opsional ditulis `null`.
  */
-import { baseline, permission, report, reportShopee, statemachine } from '@cdps/core';
+import { baseline, money, permission, report, reportShopee, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import {
   ACCOUNT_DIVISION,
@@ -39,6 +39,7 @@ import {
   ValidationError,
   type Actor,
 } from './account';
+import { findOverlappingShopeeAdsCampaigns, insertMetricEntryFromReportEngine } from './ads';
 import { MSG_AMBIGU, MSG_PLATFORM_INACTIVE, MSG_PLATFORM_NOT_FOUND } from './riset-awal';
 
 // ---------------------------------------------------------------------------
@@ -58,6 +59,9 @@ export const MSG_SUDAH_TERBIT = '[laporan sudah diterbitkan — cabut dulu sebel
 export const MSG_BELUM_TERBIT = '[laporan belum diterbitkan]';
 export const MSG_ALASAN_CABUT_WAJIB = '[alasan pencabutan wajib diisi]';
 export const MSG_TAK_ADA_PERUBAHAN = '[tidak ada revisi insight baru untuk diterbitkan]';
+// SH-06 — createReportShopee (below).
+export const MSG_BISNIS_HOME_WAJIB = '[berkas Bisnis — Home wajib ada untuk membuat laporan Shopee]';
+export const MSG_PERIODE_LABEL_WAJIB = '[label periode laporan wajib diisi]';
 
 // ---------------------------------------------------------------------------
 // Publication machine (migrasi 20260908010000, STATE_MACHINES §21)
@@ -121,6 +125,32 @@ export interface CreateReportInput {
   periodeAkhir?: string | null;
 }
 
+/**
+ * SH-06 — Shopee has no machine-readable date range in its exports at all (see
+ * `@cdps/core` `report/shopee/run.ts` header): unlike `CreateReportInput`,
+ * `periodeMulai`/`periodeAkhir` are NOT an occasional fallback here — they are
+ * the ONLY source, every time.
+ */
+export interface CreateReportShopeeInput {
+  clientPlatformId: number;
+  periodeTipe: report.PeriodeTipe;
+  files: ReportSheetFileInput[];
+  /** Free-text period label for the payload (tool `periodName`, e.g. "Juni 2026") — display only. */
+  periode: string;
+  periodeMulai: string;
+  periodeAkhir: string;
+  /**
+   * SH-06 — Ad Campaign ids the AM excludes from the auto Metric-Entry
+   * even-split (see `attributeShopeeAdsMetricEntries`). Confirmed with the
+   * owner (Yohan, `AskUserQuestion` 2026-09-03): when N campaigns overlap the
+   * report's period, the report's OWN combined ads spend/omzet — it cannot be
+   * split by campaign from the file itself — is divided EVENLY across them so
+   * the sum recomputes back to the true total; excluding a campaign here
+   * removes it from that split (its own number, if any, stays manual).
+   */
+  excludeCampaignIds?: string[];
+}
+
 export interface ReportSummary {
   id: number;
   clientId: string;
@@ -136,7 +166,10 @@ export interface ReportSummary {
   gmvNet: number;
   gmvKotor: number;
   gmvRunrateBulanan: number;
-  benchmarkVersi: number;
+  /** Set for `cdps.report.tiktok.v1` rows; null for Shopee rows (see `benchmarkVersiShopee`). */
+  benchmarkVersi: number | null;
+  /** Set for `cdps.report.shopee.v1` rows only — `report_benchmark_shopee.versi` used to score this report. */
+  benchmarkVersiShopee: number | null;
   engineVersi: string;
   /** Which report engine wrote this row — `cdps.report.tiktok.v1` (default) or `cdps.report.shopee.v1`. Selects the renderer in `renderReport`. */
   payloadSchema: string;
@@ -476,6 +509,228 @@ async function recomputeTotalSales(tx: TransactionSql, actor: Actor, clientId: s
 }
 
 // ---------------------------------------------------------------------------
+// createReportShopee — SH-06: same shape as createReport (TikTok), scored by
+// `@cdps/core` reportShopee instead. Two real divergences, both because the
+// Shopee tool the engine was ported from works differently, not because this
+// module chose to: (1) NO date-range detection at all (periodeMulai/Akhir are
+// mandatory inputs, never resolved from a file); (2) after the report is
+// stored, an auto Metric Entry (MTR-, `entry_method='File Export'`) is
+// attributed to the client's overlapping active Shopee Ads campaign(s) — see
+// `attributeShopeeAdsMetricEntries`. Undocumented on the TikTok side because
+// M8 Ads campaigns in this codebase are not (yet) platform-matched to a
+// TikTok report the same way; SH-06 was scoped to Shopee only.
+// ---------------------------------------------------------------------------
+export async function createReportShopee(sql: Sql, actor: Actor, clientId: string, input: CreateReportShopeeInput): Promise<ReportDetail> {
+  return withTransaction(sql, async (tx) => {
+    if (input.periodeTipe !== 'mingguan' && input.periodeTipe !== 'bulanan') {
+      throw new ValidationError(MSG_TIPE_PERIODE);
+    }
+
+    const cli = await tx<{ nama_pic: string | null; toko: string | null; kategori: string | null; assigned_am_id: string | null }[]>`
+      select nama_pic, toko, kategori, assigned_am_id from clients where id = ${clientId}`;
+    if (cli.length === 0) throw new NotFoundError(MSG_CLIENT_NOT_FOUND);
+    const c = cli[0];
+    if (!canWriteReport(actor, c.assigned_am_id)) throw new ForbiddenError(MSG_FORBIDDEN);
+
+    if (!input.clientPlatformId) throw new ValidationError(MSG_PLATFORM_NOT_FOUND);
+    const plat = await tx<{ platform: string; active: boolean; client_id: string; store_link: string | null }[]>`
+      select platform, active, client_id, store_link from client_platforms
+       where id = ${input.clientPlatformId} for update`;
+    if (plat.length === 0 || plat[0].client_id !== clientId) throw new NotFoundError(MSG_PLATFORM_NOT_FOUND);
+    if (!plat[0].active) throw new ValidationError(MSG_PLATFORM_INACTIVE);
+    const platform = plat[0].platform;
+
+    if (!input.files || input.files.length === 0) throw new ValidationError(MSG_NO_FILES);
+
+    // Shopee has NO file-derived range (unlike TikTok's resolveRentang) — the
+    // AM's dates are the only source, always. hariAntara/gmvRunRateBulanan are
+    // the exact same platform-agnostic date-math TikTok's createReport uses.
+    const periodeMulai = (input.periodeMulai ?? '').trim();
+    const periodeAkhir = (input.periodeAkhir ?? '').trim();
+    const hari = periodeMulai && periodeAkhir ? report.hariAntara(periodeMulai, periodeAkhir) : 0;
+    if (!periodeMulai || !periodeAkhir || hari <= 0) throw new ValidationError(MSG_PERIODE_TAK_TERBACA);
+    const periode = (input.periode ?? '').trim();
+    if (!periode) throw new ValidationError(MSG_PERIODE_LABEL_WAJIB);
+
+    // Detect each file: the team's manual filename convention first, content
+    // signature as fallback (reportShopee.detectModule) — see that module's
+    // header for why Shopee cannot go content-first the way TikTok's baseline
+    // does (ads_toko/ads_produk/ads_banner share one identical column layout).
+    const slots: reportShopee.ShopeeSlots = {};
+    const berkasMeta: { file: ReportSheetFileInput; type: string | null; rows: number }[] = [];
+    const validModules = new Set<string>(reportShopee.ALL_SHOPEE_MODULES);
+    for (const f of input.files) {
+      const aoa = f.aoa as unknown[][];
+      let type: string | null = null;
+      if (f.tipeOverride && validModules.has(f.tipeOverride)) {
+        type = f.tipeOverride;
+      } else {
+        const d = reportShopee.detectModule(f.filename, aoa);
+        type = d ? d.module : null;
+      }
+      if (type) slots[type as reportShopee.ShopeeModule] = aoa;
+      berkasMeta.push({ file: f, type, rows: aoa.length });
+    }
+    // Same pre-check the engine itself would throw (verbatim BI message), done
+    // here so it lands as a 400 (ValidationError), not an unmapped Error.
+    if (!slots.bisnis_home) throw new ValidationError(MSG_BISNIS_HOME_WAJIB);
+
+    const bm = await tx<{ versi: number; nilai: reportShopee.ShopeeBench }[]>`
+      select versi, nilai from report_benchmark_shopee where aktif = true order by versi desc limit 1`;
+    if (bm.length === 0) throw new ValidationError(MSG_BENCHMARK_KOSONG);
+    const bench = bm[0].nilai;
+    const benchmarkVersiShopee = bm[0].versi;
+
+    const generatedAt = serverGeneratedAt();
+    const result = reportShopee.runShopeeReport(slots, {
+      bench,
+      benchmarkVersi: benchmarkVersiShopee,
+      klien: {
+        nama: c.nama_pic, toko: c.toko, platform, kategori: c.kategori,
+        account_manager: c.assigned_am_id, store_link: plat[0].store_link ?? null,
+      },
+      generatedAt,
+      periode,
+    });
+
+    // The Shopee tool's own `definisi_gmv` is 'gross' (payload.ts) — it never
+    // produced a separate net figure the way TikTok's engine does, so
+    // gmv_kotor == gmv_net here. Not a bug: there is no second number to store.
+    const gmvNet = round2(result.payload.kpi.gmv ?? 0);
+    const gmvKotor = gmvNet;
+    const runrate = round2(report.gmvRunRateBulanan(gmvNet, input.periodeTipe, hari));
+
+    // Same house invariant as createReport (TikTok) — raw upload rows are
+    // transient, only the derived payload + per-file provenance persist.
+    let reportId: number;
+    try {
+      const ins = await tx<{ id: number }[]>`
+        insert into client_reports
+          (client_id, client_platform_id, platform, periode_tipe, periode_mulai, periode_akhir,
+           hari_periode, rentang_dari_berkas, payload, skor, skor_label, gmv_net, gmv_kotor,
+           gmv_runrate_bulanan, payload_schema, benchmark_versi_shopee, engine_versi, kelengkapan_file, created_by)
+        values
+          (${clientId}, ${input.clientPlatformId}, ${platform}, ${input.periodeTipe},
+           ${periodeMulai}, ${periodeAkhir}, ${hari}, false,
+           ${tx.json(result.payload as unknown as JsonParam)}, ${result.skor.total}, ${result.skor.label},
+           ${gmvNet}, ${gmvKotor}, ${runrate}, 'cdps.report.shopee.v1', ${benchmarkVersiShopee},
+           ${reportShopee.ENGINE_VERSI}, ${tx.json((result.payload.kelengkapan_file ?? null) as JsonParam)}, ${actor.employeeId})
+        returning id`;
+      reportId = ins[0].id;
+    } catch (e) {
+      if (isUniqueViolation(e)) throw new ConflictError(MSG_SUDAH_ADA);
+      throw e;
+    }
+
+    for (const b of berkasMeta) {
+      await tx`
+        insert into client_report_berkas
+          (report_id, nama_berkas, sha256, ukuran_bytes, tipe_terdeteksi, tipe_override,
+           jumlah_baris, periode, created_by)
+        values
+          (${reportId}, ${b.file.filename}, ${b.file.sha256}, ${b.file.ukuranBytes},
+           ${b.type ?? null}, ${b.file.tipeOverride ?? null}, ${b.rows}, null, ${actor.employeeId})`;
+    }
+
+    await tx`
+      insert into client_report_insight
+        (report_id, revisi, sumber, ringkasan, poin, rekomendasi_tinggi,
+         rekomendasi_sedang, outlook, indikator, created_by)
+      values
+        (${reportId}, 0, ${INSIGHT_SUMBER_MESIN}, ${result.payload.insight.ringkasan},
+         ${tx.json(result.payload.insight.poin as unknown as JsonParam)},
+         ${tx.json(result.payload.insight.rekomendasi_tinggi as unknown as JsonParam)},
+         ${tx.json(result.payload.insight.rekomendasi_sedang as unknown as JsonParam)},
+         ${result.payload.insight.outlook},
+         ${tx.json(result.payload.insight.indikator as unknown as JsonParam)},
+         ${actor.employeeId})`;
+    await tx`
+      insert into client_report_publikasi (report_id, status, created_by)
+      values (${reportId}, ${STATUS_DRAF}, ${actor.employeeId})`;
+
+    await recomputeTotalSales(tx, actor, clientId, reportId, runrate);
+
+    // SH-06: the report's own combined Ads numbers become an auto Metric Entry
+    // — the "no manual upload" path for M6D RM-C. See function doc for the
+    // even-split mechanism (confirmed with the owner).
+    await attributeShopeeAdsMetricEntries(
+      tx, actor, clientId, reportId, periodeMulai, periodeAkhir,
+      result.payload.kesehatan.ads, input.excludeCampaignIds ?? [],
+    );
+
+    return getReportById(tx, reportId);
+  });
+}
+
+/**
+ * attributeShopeeAdsMetricEntries — SH-06's "no manual upload" path for M6D
+ * RM-C1/C2/C6 (GMV Eksekusi / ROAS / Ad Spend — all `otomatis`, all read from
+ * `metric_entries`). A Shopee report gives ONE combined ads spend/omzet figure
+ * (`M.health.ads`, already Σ across ads_toko+ads_produk+ads_banner+ads_live —
+ * the file itself cannot say which of the client's several `Shopee Ads`
+ * campaigns each rupiah belongs to).
+ *
+ * Mechanism confirmed with the owner (Yohan, `AskUserQuestion` 2026-09-03,
+ * worked through with a concrete two-campaign example before confirming):
+ *  - Find every ACTIVE `Shopee Ads` campaign of this client whose
+ *    [start_date, end_date] overlaps the report's period, MINUS
+ *    `excludeCampaignIds` (the AM's override — "campaign ini dikerjakan
+ *    sendiri sama klien", entered manually instead).
+ *  - Zero matches → nothing to attach to. No MTR- is created; the report
+ *    itself still saves normally and the AM can still log a Metric Entry by
+ *    hand exactly as today (this function only ever ADDS a row, never blocks
+ *    the report).
+ *  - N ≥ 1 matches → the total is divided EVENLY (floor, minor units) across
+ *    all N, so Σ across campaigns reconstructs the report's true total
+ *    exactly — the split is what's approximate, never the sum. One `MTR-`
+ *    per matched campaign, `entry_method='File Export'`.
+ *  - `omzet` is `null`, not `0`, when ads ran with no attributable sales at
+ *    all (rule 1, `metrik.ts` header) — but `metric_entries.gmv` is NOT NULL,
+ *    so a null omzet here is written as Rp0 (a genuine zero once it reaches a
+ *    money column — the "no data at all" distinction lives in the payload,
+ *    not in this derived row).
+ *  - No ads data in the report at all (`ads` is null, i.e. none of
+ *    ads_toko/produk/banner/live were uploaded) → nothing to attribute,
+ *    silently skipped — same as zero matches.
+ *
+ * Deliberately scoped to spend/gmv only for this pass — RM-C4/C5 (CTR/CVR)
+ * stay "Otomatis + manual fallback" per the PRD either way, so leaving them
+ * unpopulated here does not regress the fallback contract.
+ */
+async function attributeShopeeAdsMetricEntries(
+  tx: TransactionSql, actor: Actor, clientId: string, reportId: number,
+  periodeMulai: string, periodeAkhir: string,
+  ads: { spend: number | null; omzet: number | null } | null,
+  excludeCampaignIds: string[],
+): Promise<void> {
+  const spendVal = ads?.spend ?? 0;
+  const omzetVal = ads?.omzet ?? 0;
+  if (!ads || !(spendVal > 0 || omzetVal > 0)) return;
+
+  const candidates = await findOverlappingShopeeAdsCampaigns(tx, clientId, periodeMulai, periodeAkhir);
+  const excluded = new Set(excludeCampaignIds);
+  const targets = candidates.filter((c) => !excluded.has(c.id));
+  if (targets.length === 0) return;
+
+  const n = BigInt(targets.length);
+  const spendTotal = money.parse(spendVal.toFixed(2));
+  const gmvTotal = money.parse(omzetVal.toFixed(2));
+  const spendShare = money.decimal(spendTotal / n);
+  const gmvShare = money.decimal(gmvTotal / n);
+
+  for (const target of targets) {
+    await insertMetricEntryFromReportEngine(
+      tx, actor.employeeId, target.id,
+      { periodStart: periodeMulai, periodEnd: periodeAkhir, spend: spendShare, gmv: gmvShare },
+      {
+        source: 'shopee_report', report_id: reportId,
+        split_of: targets.length, split_campaign_ids: targets.map((t) => t.id),
+      },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Reads — scope-gated (cross-scope service-role read + in-app gate, pola O52)
 // ---------------------------------------------------------------------------
 function rowToSummary(r: Record<string, unknown>): ReportSummary {
@@ -494,7 +749,11 @@ function rowToSummary(r: Record<string, unknown>): ReportSummary {
     gmvNet: numOf(r.gmv_net),
     gmvKotor: numOf(r.gmv_kotor),
     gmvRunrateBulanan: numOf(r.gmv_runrate_bulanan),
-    benchmarkVersi: numOf(r.benchmark_versi),
+    // Exactly one of these is non-null per row (ck_report_benchmark_by_schema,
+    // migrasi 20260909010000) — numOrNull, NOT numOf, so a Shopee row's null
+    // benchmark_versi (TikTok column) never silently reads as 0.
+    benchmarkVersi: numOrNull(r.benchmark_versi),
+    benchmarkVersiShopee: numOrNull(r.benchmark_versi_shopee),
     engineVersi: r.engine_versi as string,
     payloadSchema: r.payload_schema as string,
     createdAt: isoTs(r.created_at),
@@ -509,7 +768,7 @@ export async function listReports(sql: Queryable, actor: Actor, clientId: string
   const rows = await sql<Record<string, unknown>[]>`
     select id, client_id, client_platform_id, platform, periode_tipe, periode_mulai, periode_akhir,
            hari_periode, rentang_dari_berkas, skor, skor_label, gmv_net, gmv_kotor,
-           gmv_runrate_bulanan, benchmark_versi, engine_versi, payload_schema, created_at, created_by
+           gmv_runrate_bulanan, benchmark_versi, benchmark_versi_shopee, engine_versi, payload_schema, created_at, created_by
       from client_reports
      where client_id = ${clientId}
      order by periode_akhir desc, id desc`;
@@ -531,7 +790,7 @@ async function getReportById(sql: Queryable, reportId: number): Promise<ReportDe
   const rows = await sql<Record<string, unknown>[]>`
     select id, client_id, client_platform_id, platform, periode_tipe, periode_mulai, periode_akhir,
            hari_periode, rentang_dari_berkas, skor, skor_label, gmv_net, gmv_kotor,
-           gmv_runrate_bulanan, benchmark_versi, engine_versi, payload_schema, created_at, created_by,
+           gmv_runrate_bulanan, benchmark_versi, benchmark_versi_shopee, engine_versi, payload_schema, created_at, created_by,
            payload, kelengkapan_file
       from client_reports where id = ${reportId}`;
   if (rows.length === 0) throw new NotFoundError(MSG_REPORT_NOT_FOUND);

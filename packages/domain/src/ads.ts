@@ -24,7 +24,7 @@
  */
 
 import { bi, money, notification, permission, statemachine, tz } from '@cdps/core';
-import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
+import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;
@@ -777,7 +777,6 @@ function budgetChangeOver50(before: string, after: string): boolean {
 export async function logMetricEntry(sql: Sql, actor: Actor, campaignId: string, input: MetricInput): Promise<MetricEntry> {
   const now = new Date();
   return withTransaction(sql, async (tx) => {
-    const ex = executors(tx);
     const r = await lockCampaign(tx, campaignId);
     if (!canManageCampaign(actor)) {
       throw new ForbiddenError(MSG_CAMPAIGN_MANAGE_FORBIDDEN);
@@ -811,45 +810,145 @@ export async function logMetricEntry(sql: Sql, actor: Actor, campaignId: string,
     const conversions = validCount(input.conversions);
     const [pStart, pEnd] = parsePeriod(input.periodStart, input.periodEnd);
 
-    const id = await ex.ident.identNext('MTR', now);
-    await tx`
-      insert into metric_entries (id, campaign_id, period_start, period_end, spend, gmv, ctr, cvr,
-        clicks, impressions, conversions, entry_method, entered_by, created_by)
-      values (${id}, ${campaignId}, ${pStart}, ${pEnd}, ${money.decimal(spend)}, ${money.decimal(gmv)},
-        ${input.ctr ?? null}, ${input.cvr ?? null},
-        ${clicks}, ${impressions}, ${conversions}, ${method}, ${actor.employeeId}, ${actor.employeeId})`;
-    // §7 Flow 1: snapshot the linked Assets at this moment (Creative-Swap-safe basis).
-    const linked = await currentlyLinkedAssets(tx, campaignId);
-    for (const assetId of linked) {
-      await tx`insert into metric_entry_assets (metric_entry_id, asset_id) values (${id}, ${assetId})`;
-    }
-    await ex.audit.insertAudit({
-      entityType: 'ad_campaign', entityId: campaignId, actorEmployeeId: actor.employeeId, action: 'metric_entry_logged',
-      beforeJson: null, afterJson: { metric_entry_id: id, spend: money.decimal(spend), gmv: money.decimal(gmv), linked_assets: linked },
-      createdBy: actor.employeeId,
+    return writeMetricEntryRow(tx, r, campaignId, now, {
+      periodStart: pStart, periodEnd: pEnd, spend, gmv,
+      ctr: input.ctr ?? null, cvr: input.cvr ?? null, clicks, impressions, conversions,
+      entryMethod: method, actorEmployeeId: actor.employeeId, auditExtra: null,
     });
-    // §7 Flow 1: recompute Attributed GMV for each Asset this entry touched.
-    for (const assetId of linked) {
-      await recomputeAssetAttribution(tx, assetId);
-    }
-    // §8 Rule 4 / M8-OA-5 (C4): escalate when ROAS falls below target for 2
-    // consecutive periods. Emit exactly at the transition to a streak of 2 — the
-    // entry just inserted is what moved it there — so this fires once per episode
-    // without a marker column (a 3rd under-target period keeps streak >= 3 and
-    // does not re-emit; a good period resets it, and a fresh 2-streak re-fires).
-    if (await computeUnderTargetStreak(tx, campaignId, r.targetKpi) === 2) {
-      await notification.emit(ex.notify, {
-        event: notification.EVENTS.AdsRoasUnderperforming,
-        entityType: 'ad_campaign', entityId: campaignId, actor: actor.employeeId,
-        division: ADS_DIVISION,
-        explicitRecipients: r.ownerAm ? [r.ownerAm] : [],
-      });
-    }
-    return {
-      id, campaignId, periodStart: pStart, periodEnd: pEnd, spend: Number(spend) / 100, gmv: Number(gmv) / 100,
-      entryMethod: method, enteredBy: actor.employeeId, createdAt: now,
-    };
   });
+}
+
+/**
+ * Shared write for one §9.4 Metric Entry — the exact insert/snapshot/audit/
+ * attribution/ROAS-streak sequence, factored out so `logMetricEntry` (a direct
+ * Ads-division action, gated by `canManageCampaign`) and
+ * `insertMetricEntryFromReportEngine` (an ENGINE write, SH-06 — see below, gated
+ * by its OWN caller's write-scope instead) can never drift apart. `r` must
+ * already be a locked, non-`[Ended]` campaign row — both callers check that
+ * themselves, at the point where their own error messages/gates apply.
+ */
+async function writeMetricEntryRow(
+  tx: TransactionSql, r: CampaignRow, campaignId: string, now: Date,
+  args: {
+    periodStart: string; periodEnd: string; spend: money.Money; gmv: money.Money;
+    ctr: number | null; cvr: number | null;
+    clicks: number | null; impressions: number | null; conversions: number | null;
+    entryMethod: string; actorEmployeeId: string;
+    /** Extra fields merged into the audit row's `afterJson` — provenance for engine-written entries (SH-06). */
+    auditExtra: Record<string, unknown> | null;
+  },
+): Promise<MetricEntry> {
+  const ex = executors(tx);
+  const id = await ex.ident.identNext('MTR', now);
+  await tx`
+    insert into metric_entries (id, campaign_id, period_start, period_end, spend, gmv, ctr, cvr,
+      clicks, impressions, conversions, entry_method, entered_by, created_by)
+    values (${id}, ${campaignId}, ${args.periodStart}, ${args.periodEnd}, ${money.decimal(args.spend)}, ${money.decimal(args.gmv)},
+      ${args.ctr}, ${args.cvr},
+      ${args.clicks}, ${args.impressions}, ${args.conversions}, ${args.entryMethod}, ${args.actorEmployeeId}, ${args.actorEmployeeId})`;
+  // §7 Flow 1: snapshot the linked Assets at this moment (Creative-Swap-safe basis).
+  const linked = await currentlyLinkedAssets(tx, campaignId);
+  for (const assetId of linked) {
+    await tx`insert into metric_entry_assets (metric_entry_id, asset_id) values (${id}, ${assetId})`;
+  }
+  await ex.audit.insertAudit({
+    entityType: 'ad_campaign', entityId: campaignId, actorEmployeeId: args.actorEmployeeId, action: 'metric_entry_logged',
+    beforeJson: null,
+    afterJson: {
+      metric_entry_id: id, spend: money.decimal(args.spend), gmv: money.decimal(args.gmv), linked_assets: linked,
+      ...(args.auditExtra ?? {}),
+    },
+    createdBy: args.actorEmployeeId,
+  });
+  // §7 Flow 1: recompute Attributed GMV for each Asset this entry touched.
+  for (const assetId of linked) {
+    await recomputeAssetAttribution(tx, assetId);
+  }
+  // §8 Rule 4 / M8-OA-5 (C4): escalate when ROAS falls below target for 2
+  // consecutive periods. Emit exactly at the transition to a streak of 2 — the
+  // entry just inserted is what moved it there — so this fires once per episode
+  // without a marker column (a 3rd under-target period keeps streak >= 3 and
+  // does not re-emit; a good period resets it, and a fresh 2-streak re-fires).
+  if (await computeUnderTargetStreak(tx, campaignId, r.targetKpi) === 2) {
+    await notification.emit(ex.notify, {
+      event: notification.EVENTS.AdsRoasUnderperforming,
+      entityType: 'ad_campaign', entityId: campaignId, actor: args.actorEmployeeId,
+      division: ADS_DIVISION,
+      explicitRecipients: r.ownerAm ? [r.ownerAm] : [],
+    });
+  }
+  return {
+    id, campaignId, periodStart: args.periodStart, periodEnd: args.periodEnd,
+    spend: Number(args.spend) / 100, gmv: Number(args.gmv) / 100,
+    entryMethod: args.entryMethod, enteredBy: args.actorEmployeeId, createdAt: now,
+  };
+}
+
+/**
+ * insertMetricEntryFromReportEngine — SH-06: the Shopee Report Engine's own
+ * write of a Metric Entry (`entry_method='File Export'`) parsed straight from
+ * an uploaded export, so RM-C (M6D §"SECTION RM-C") reads `otomatis` GMV/Spend
+ * from Ads without the AM re-typing what the report already carries.
+ *
+ * Deliberately does NOT gate on `canManageCampaign` — the caller (an Account
+ * AM creating a CLIENT'S report, `report.ts::createReportShopee`) is not
+ * necessarily Ads division, and this is not "an Ads-division action on this
+ * campaign" in the §9.1 sense; it is the report engine's own derived write,
+ * same class as `report.ts::recomputeTotalSales` writing `clients.total_sales`
+ * without an Ads/Finance gate. The MONEY invariants `logMetricEntry` enforces
+ * (non-negative, campaign not `[Ended]`, campaign must exist) are enforced
+ * here too — only the ACTOR gate differs; the two entrypoints otherwise share
+ * `writeMetricEntryRow` so nothing else can drift.
+ *
+ * Must run inside the CALLER's transaction (report creation) — takes `tx`
+ * directly, like `report.ts::recomputeTotalSales`, not `sql`/`withTransaction`.
+ */
+export async function insertMetricEntryFromReportEngine(
+  tx: TransactionSql, actorEmployeeId: string, campaignId: string,
+  input: { periodStart: string; periodEnd: string; spend: string; gmv: string },
+  auditExtra: Record<string, unknown>,
+): Promise<MetricEntry> {
+  const now = new Date();
+  const r = await lockCampaign(tx, campaignId);
+  if (r.status === STATUS_ENDED) {
+    throw new ConflictError(MSG_CAMPAIGN_ENDED);
+  }
+  let spend: money.Money;
+  let gmv: money.Money;
+  try {
+    spend = money.parse(input.spend);
+    gmv = money.parse(input.gmv);
+  } catch {
+    throw new ValidationError(MSG_BAD_AMOUNT);
+  }
+  if (spend < 0n || gmv < 0n) {
+    throw new ValidationError(MSG_NEGATIVE_AMOUNT);
+  }
+  const [pStart, pEnd] = parsePeriod(input.periodStart, input.periodEnd);
+  return writeMetricEntryRow(tx, r, campaignId, now, {
+    periodStart: pStart, periodEnd: pEnd, spend, gmv,
+    ctr: null, cvr: null, clicks: null, impressions: null, conversions: null,
+    entryMethod: 'File Export', actorEmployeeId, auditExtra,
+  });
+}
+
+/**
+ * findOverlappingShopeeAdsCampaigns — candidates for SH-06 auto-attribution:
+ * this client's ACTIVE `Shopee Ads` campaigns whose [start_date, end_date]
+ * overlaps the report's [periodeMulai, periodeAkhir]. Read-only (no lock —
+ * `insertMetricEntryFromReportEngine` locks each campaign it actually writes
+ * to); the caller decides the split, this only resolves the candidate set.
+ */
+export async function findOverlappingShopeeAdsCampaigns(
+  sql: Queryable, clientId: string, periodeMulai: string, periodeAkhir: string,
+): Promise<{ id: string; ownerAm: string | null }[]> {
+  const rows = await sql<{ id: string; assigned_am_id: string | null }[]>`
+    select c.id, cl.assigned_am_id
+      from ad_campaigns c join clients cl on cl.id = c.client_id
+     where c.client_id = ${clientId} and c.platform = 'Shopee Ads' and c.status = ${STATUS_ACTIVE}
+       and c.start_date <= ${periodeAkhir} and c.end_date >= ${periodeMulai}
+     order by c.id`;
+  return rows.map((r) => ({ id: r.id, ownerAm: r.assigned_am_id }));
 }
 
 /**

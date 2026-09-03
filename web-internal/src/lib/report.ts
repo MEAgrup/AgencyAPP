@@ -36,7 +36,10 @@ export interface ClientReportSummary {
   gmv_net: number;
   gmv_kotor: number;
   gmv_runrate_bulanan: number;
-  benchmark_versi: number;
+  /** TikTok rows only; null for Shopee rows (see `benchmark_versi_shopee`). */
+  benchmark_versi: number | null;
+  /** Shopee rows only (`cdps.report.shopee.v1`); null for TikTok rows. */
+  benchmark_versi_shopee: number | null;
   engine_versi: string;
   created_at: string;
   created_by: string;

@@ -6204,7 +6204,8 @@ export interface ClientReportSummaryWire {
   gmv_net: number;
   gmv_kotor: number;
   gmv_runrate_bulanan: number;
-  benchmark_versi: number;
+  benchmark_versi: number | null;
+  benchmark_versi_shopee: number | null;
   engine_versi: string;
   created_at: string;
   created_by: string;
@@ -6245,6 +6246,7 @@ export function clientReportSummaryToWire(r: report.ReportSummary): ClientReport
     gmv_kotor: r.gmvKotor,
     gmv_runrate_bulanan: r.gmvRunrateBulanan,
     benchmark_versi: r.benchmarkVersi,
+    benchmark_versi_shopee: r.benchmarkVersiShopee,
     engine_versi: r.engineVersi,
     // `payloadSchema` (domain) is deliberately NOT surfaced here — `renderReport`
     // dispatches on it server-side before wire serialisation ever runs, and

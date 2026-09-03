@@ -7,6 +7,33 @@
 
 ---
 
+## 0.0 UPDATE 2026-09-03 (sesi lanjutan, sama hari) — SH-06 SUDAH LANDED
+
+Sesi lanjutan (branch `claude/advertiser-tools-consolidation-waves-6tl68h`, sama
+seperti di bawah) mengerjakan **SH-06** — item paling bernilai di §6 lama.
+Ringkasan lengkap ada di `docs/DECISIONS.md` (cari entri SH-06 tanggal
+2026-09-03, DI ATAS entri Gelombang 2/3/4 di bawah ini). Poin cepat:
+
+- `createReportShopee` (`packages/domain/src/report.ts`) + atribusi otomatis
+  Metric Entry (`MTR-`, `entry_method='File Export'`) ke Ad Campaign Shopee
+  klien yang overlap — dibagi RATA kalau >1 campaign cocok (mekanisme
+  dikonfirmasi Yohan lewat `AskUserQuestion`, BUKAN ditebak).
+- O68 dan O69 (di §2 bawah) SUDAH DITUTUP Yohan sesi ini — jangan tanya ulang.
+- Route API baru `POST /api/v1/clients/{id}/reports/shopee`. **UI
+  `web-internal` MASIH belum dikerjakan** (sengaja, sama pola G2/G3) — kalau
+  sesi berikutnya diminta lanjutkan, itu titik mulainya (form upload + daftar
+  campaign untuk exclude).
+- Verifikasi ulang independen di keadaan akhir: `db-rebuild.sh --yes` 171
+  migrasi/143 tabel lolos, `@cdps/core` 500/500, `@cdps/db` 53/53,
+  `@cdps/domain` **1731/1731 (1 skip)** (+15 dari baseline 1716, test baru
+  `report.shopee.domain.test.ts`), `@cdps/api` 398/398, `web-internal` 441/441
+  + tsc bersih, typecheck 4 workspace backend bersih.
+- §1.1, §1.2, §2, §6 di bawah ini SEBAGIAN SUDAH USANG (ditulis SEBELUM SH-06
+  landing) — baca §0.0 ini dulu sebagai koreksi sebelum percaya isi di
+  bawahnya soal SH-06/O68/O69.
+
+---
+
 ## 0. Posisi persis — SALIN INI KE SESI BERIKUTNYA
 
 | | |
