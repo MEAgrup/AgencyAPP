@@ -25,6 +25,8 @@
  *   (R09-R12) ✅
  * - adsscanner: alat kerja skor SKU/bucket/realokasi budget per platform
  *   (`adsscanner.tiktok` — TikTok SKU Triage, DECISIONS.md O67) ✅
+ * - reportShopee: sibling report engine untuk Shopee (`cdps.report.shopee.v1`),
+ *   Gelombang 2 dari plan konsolidasi alat advertiser ✅
  *
  * All implementations must maintain house-rule compliance (CLAUDE.md §Non-negotiable):
  * - State machines server-side enforced + exact Bahasa Indonesia [...] messages
@@ -52,3 +54,4 @@ export * as baseline from './baseline';
 export * as report from './report';
 export * as skuscreener from './skuscreener';
 export * as adsscanner from './adsscanner';
+export * as reportShopee from './report/shopee';

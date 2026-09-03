@@ -34,31 +34,31 @@ export function rpPendek(v: number | null | undefined): string {
   return 'Rp' + Math.round(v).toLocaleString('id-ID');
 }
 
-const badge = (v: number | null | undefined): string => {
+export const badge = (v: number | null | undefined): string => {
   if (v == null) return '';
   const naik = v >= 0;
   return `<span class="${naik ? 'text-emerald-600' : 'text-red-600'} text-xs font-semibold">${naik ? '▲' : '▼'} ${dec(Math.abs(v) * 100, 1)}%</span>`;
 };
 
-function kpi(judul: string, nilai: string, sub = '', delta?: number | null): string {
+export function kpi(judul: string, nilai: string, sub = '', delta?: number | null): string {
   return `<div class="kpi-card bg-white rounded-xl border border-slate-100 p-4">
   <div class="text-[0.7rem] font-semibold text-slate-500 uppercase tracking-wide">${esc(judul)}</div>
   <div class="kpi-value text-teal-700 mt-1">${esc(nilai)}</div>
   <div class="text-xs text-slate-500 mt-1">${esc(sub)} ${delta === undefined ? '' : badge(delta)}</div></div>`;
 }
 
-const grid = (cards: string[], cols = 4): string =>
+export const grid = (cards: string[], cols = 4): string =>
   `<div class="grid grid-cols-2 md:grid-cols-${cols} gap-3">${cards.join('')}</div>`;
 
-const kosong = (teks: string): string =>
+export const kosong = (teks: string): string =>
   `<div class="bg-white rounded-xl border border-slate-100 p-6 text-sm text-slate-500">${esc(teks)}</div>`;
 
-function tabel(head: string[], baris: string[], align: ('l' | 'r')[] = []): string {
+export function tabel(head: string[], baris: string[], align: ('l' | 'r')[] = []): string {
   const th = head.map((h, i) => `<th class="pb-2 ${align[i] === 'r' ? 'text-right' : 'text-left'}">${esc(h)}</th>`).join('');
   return `<div class="overflow-x-auto"><table class="w-full text-xs"><thead><tr class="border-b">${th}</tr></thead><tbody>${baris.join('') || `<tr><td colspan="${head.length}" class="py-3 text-slate-400">Tidak ada data pada periode ini.</td></tr>`}</tbody></table></div>`;
 }
 
-const td = (v: string, r = false): string => `<td class="py-2 ${r ? 'text-right' : ''}">${v}</td>`;
+export const td = (v: string, r = false): string => `<td class="py-2 ${r ? 'text-right' : ''}">${v}</td>`;
 
 /**
  * An internal-only remark card. The icon is not decoration: these are the blocks
@@ -66,12 +66,12 @@ const td = (v: string, r = false): string => `<td class="py-2 ${r ? 'text-right'
  * neutral note gets read last. Mirrors the owner's engine, which marks the same
  * three findings the same way.
  */
-const kartuInternal = (judul: string, isi: string, warna = 'slate', ikon = 'fa-circle-info'): string =>
+export const kartuInternal = (judul: string, isi: string, warna = 'slate', ikon = 'fa-circle-info'): string =>
   `<div class="bg-${warna}-50 border border-${warna}-200 rounded-xl p-4 text-sm">
   <div class="font-semibold text-${warna}-800 mb-1"><i class="fa-solid ${esc(ikon)} mr-1.5"></i>${esc(judul)} <span class="badge-int">INTERNAL</span></div>
   <p class="text-${warna}-700 text-xs">${isi}</p></div>`;
 
-function rekCard(r: { judul: string; target: string; dampak: string; timeline: string }, tone: 'tinggi' | 'sedang'): string {
+export function rekCard(r: { judul: string; target: string; dampak: string; timeline: string }, tone: 'tinggi' | 'sedang'): string {
   return `<div class="bg-white rounded-xl border-l-4 ${tone === 'tinggi' ? 'border-red-500' : 'border-amber-500'} shadow-sm p-4">
   <h4 class="font-semibold text-slate-900 text-sm">${esc(r.judul)}</h4>
   <p class="text-xs text-slate-500 mt-1"><span class="font-semibold">Target:</span> ${esc(r.target)}</p>
@@ -79,7 +79,8 @@ function rekCard(r: { judul: string; target: string; dampak: string; timeline: s
   <p class="text-xs text-slate-500"><span class="font-semibold">Timeline:</span> ${esc(r.timeline)}</p></div>`;
 }
 
-const KUADRAN_META: Record<string, [string, string, string]> = {
+/** Exported so `shopee/render.ts` can reuse the same quadrant palette/labels rather than inventing a second one — the concept (traffic × closing) is identical between the two engines. */
+export const KUADRAN_META: Record<string, [string, string, string]> = {
   bintang: ['Produk Bintang', '#059669', 'Traffic tinggi + closing tinggi — jaga stok, naikkan budget'],
   hidden_gem: ['Hidden Gem', '#3B82F6', 'Closing bagus tapi traffic kecil — dorong exposure (iklan/LIVE/kreator)'],
   bocor_traffic: ['Bocor Traffic', '#EA580C', 'Ramai diklik tapi gagal closing — benahi harga/foto/deskripsi/ulasan'],
@@ -116,7 +117,7 @@ export function chartData(p: ReportPayload): Record<string, unknown> {
  * magnitude in a normal store, and a linear radius turns the top seller into a
  * disc that swallows the plot while everything else becomes a dot.
  */
-function quadBubble(
+export function quadBubble(
   buckets: Record<string, { produk: { nama: string; gmv: number | null; klik: number | null; cvr: number | null }[] }>,
   amb: { klik_tinggi: number | null; cvr_tinggi: number | null },
 ): Record<string, unknown> {
@@ -180,7 +181,7 @@ function seksiRingkasan(p: ReportPayload, mode: RenderMode, I: PayloadInsight): 
  * The ring colour follows the same three bands as the dimension cards, so the
  * ring and the tiles below it can never disagree.
  */
-function gauge(total: number): string {
+export function gauge(total: number): string {
   const t = Number.isFinite(total) ? Math.max(0, Math.min(10, total)) : 0;
   const deg = Math.round((t / 10) * 360);
   const c = t >= 8 ? '#047857' : t >= 6 ? '#B45309' : '#B91C1C';
@@ -489,7 +490,7 @@ const CHART_BOOT = `
  * The HTML body has its own defence (`esc()` on every interpolation); this is
  * the script-context equivalent, and the two are not interchangeable.
  */
-function jsonForScript(v: unknown): string {
+export function jsonForScript(v: unknown): string {
   return JSON.stringify(v)
     .replace(/</g, '\\u003c')
     .replace(/>/g, '\\u003e')

@@ -140,10 +140,17 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "142"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "143"
 check "entity_prefix"    "select count(*) from entity_prefix"    "39"
 check "sm_machines"      "select count(*) from sm_machines"      "31"
 check "notif_events"     "select count(*) from notif_events"     "67"
+# 143 = 142 + 1 tabel Gelombang 2 Shopee Report Engine
+#       (20260909010000_sh01_shopee_report_engine.sql): `report_benchmark_shopee`
+#       (padanan Shopee dari `report_benchmark`, berversi/append-only, POLICY
+#       nol/default-deny). `client_reports` dapat kolom baru lewat ALTER TABLE
+#       (payload_schema, benchmark_versi_shopee) TANPA tabel baru — nol prefix
+#       baru, nol mesin baru, nol event katalog baru, semua tiga gerbang lain
+#       TETAP di angka Gelombang 3 di bawah.
 # 142 = 139 + 3 tabel Gelombang 3 SKU Screener SC-01..SC-07
 #       (20260908050000_gelombang3_sku_screener.sql): `screening_run` (Modul
 #       A/B, SCR-, payload beku), `ads_decision_log` (Modul C, ADL-,

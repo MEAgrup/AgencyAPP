@@ -6246,6 +6246,11 @@ export function clientReportSummaryToWire(r: report.ReportSummary): ClientReport
     gmv_runrate_bulanan: r.gmvRunrateBulanan,
     benchmark_versi: r.benchmarkVersi,
     engine_versi: r.engineVersi,
+    // `payloadSchema` (domain) is deliberately NOT surfaced here — `renderReport`
+    // dispatches on it server-side before wire serialisation ever runs, and
+    // adding it to the wire DTO with no FE consumer would fail shape-parity
+    // (O43 c: no wire key without an FE type declaring it). Add it here only
+    // alongside real FE-side use of it.
     created_at: r.createdAt,
     created_by: r.createdBy,
   };

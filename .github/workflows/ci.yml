@@ -380,17 +380,23 @@ jobs:
       #       status) ⇒ sm_machines TETAP 31; nol event katalog baru ⇒
       #       notif_events TETAP 67. Schema-only pass — lihat DECISIONS.md
       #       2026-09-08 (Gelombang 3).
+      # 143 = 142 + 1 tabel Gelombang 2 Shopee Report Engine
+      #       (20260909010000_sh01_shopee_report_engine.sql): `report_benchmark_shopee`
+      #       (padanan Shopee dari `report_benchmark`, berversi/append-only).
+      #       `client_reports` dapat kolom baru (payload_schema,
+      #       benchmark_versi_shopee) lewat ALTER TABLE — TANPA tabel baru. Nol
+      #       prefix/mesin/event katalog baru.
       #
       # ⚠️ INI GATE KEDUA UNTUK ANGKA YANG SAMA — `scripts/db-rebuild.sh` punya
       # `check "tabel public"` sendiri. Naikkan KEDUANYA dalam satu commit;
       # menaikkan salah satu saja membuat lokal hijau sementara CI merah (persis
       # yang terjadi pada PR #170).
-      - name: Verify table count (expect 142)
+      - name: Verify table count (expect 143)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 142
+          test "$n" -eq 143
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this
