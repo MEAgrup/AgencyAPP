@@ -27,3 +27,32 @@
   width: 100%;
   margin: 0 auto;
 }
+
+.nav {
+  display: flex;
+  gap: 4px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--color-border);
+  background: #fff;
+  overflow-x: auto;
+}
+
+.navLink,
+.navLinkActive {
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  color: var(--color-text-muted);
+}
+
+.navLink:hover {
+  color: var(--color-link-hover);
+}
+
+.navLinkActive {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
