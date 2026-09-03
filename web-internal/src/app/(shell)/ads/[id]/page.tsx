@@ -307,6 +307,16 @@ export default function AdCampaignDetailPage({ params }: { params: Promise<{ id:
             Klien: <Link href={`/clients/${campaign.client_id}`}>{campaign.client_id}</Link>
             {' '}&middot; Brief: {campaign.brief_id}
           </p>
+          {/* The advertiser's route INTO the SKU Screener. `clients_select`
+              (RLS) has no Ads arm, so an advertiser cannot list clients to find
+              this id — this page is where they already have it, so the link
+              carries it (see the screening page's own header for why the client
+              is a field there and not a picker). */}
+          <p className="muted" style={{ marginTop: 4 }}>
+            <Link href={`/ads/screening?client=${encodeURIComponent(campaign.client_id)}`}>
+              Screening SKU klien ini &rarr;
+            </Link>
+          </p>
         </div>
         <div className="row" style={{ gap: 8 }}>
           {roasTyped && campaign.escalation_flagged && (

@@ -162,6 +162,42 @@ describe('visibleNav — the delivery divisions (symmetry)', () => {
   }
 });
 
+describe('visibleNav — Screening SKU (Gelombang 3)', () => {
+  it('is on the menu for Ads staff and Ads lead', () => {
+    expect(hrefs(role('Ads', 'staff'))).toContain('/ads/screening');
+    expect(hrefs(role('Ads', 'lead'))).toContain('/ads/screening');
+  });
+
+  it('is NOT on the menu for the other delivery divisions', () => {
+    for (const division of ['Creative', 'KOL', 'Live Stream', 'AI Optimizer', 'Store Operation']) {
+      expect(hrefs(role(division, 'staff')), `${division} must not see /ads/screening`)
+        .not.toContain('/ads/screening');
+    }
+  });
+
+  it('is NOT on the menu for an Account lead — deliberately unlike /ads itself', () => {
+    // `/ads` is a Brief queue, so `divisionQueue` lets an Account lead in for
+    // dispatch monitoring. The screener is not a queue: it is the Ads division's
+    // own pre-campaign tool, gated by `canUseSkuScreener` (which mirrors the
+    // server write gate). This asymmetry is the point, so it is asserted.
+    const seen = hrefs(role('Account', 'lead'));
+    expect(seen).toContain('/ads');
+    expect(seen).not.toContain('/ads/screening');
+  });
+
+  it('is on the menu for Director and for a layered OD (read-everywhere oversight)', () => {
+    expect(hrefs(role('Sales', 'staff', { director: true }))).toContain('/ads/screening');
+    expect(hrefs(role('Sales', 'staff', { od: true }))).toContain('/ads/screening');
+  });
+
+  it('is hidden from Sales / Marketing / Finance', () => {
+    for (const division of ['Sales', 'Marketing', 'Finance']) {
+      expect(hrefs(role(division, 'staff')), `${division} must not see /ads/screening`)
+        .not.toContain('/ads/screening');
+    }
+  });
+});
+
 describe('visibleNav — Account', () => {
   it('Account staff (AM) sees its workspace, tasks, health and clients', () => {
     const seen = hrefs(role('Account', 'staff'));
