@@ -2207,8 +2207,18 @@ async function deriveBriefRevisionCount(sql: Queryable, briefId: string): Promis
 // Ported from backend/internal/module6_account/complaint.go.
 // ===========================================================================
 
-/** Complaint Source values (§9.5). Only door #2 is wired here. */
+/**
+ * Complaint Source values (§9.5). Door #2 is the AM-via-WhatsApp channel (this
+ * module); door #3 is the Client Portal form (`client-portal.ts`), which shares
+ * `insertComplaint` below so both doors obey ONE set of complaint rules. Door #1
+ * (Sales) has no wired value yet.
+ */
 export const COMPLAINT_SOURCE_WHATSAPP = 'WhatsApp (AM-logged)';
+export const COMPLAINT_SOURCE_CLIENT_PORTAL = 'Client Portal';
+
+export const COMPLAINT_SEVERITY_LOW = 'Low';
+export const COMPLAINT_SEVERITY_MEDIUM = 'Medium';
+export const COMPLAINT_SEVERITY_HIGH = 'High';
 
 /** Complaint lifecycle states (STATE_MACHINES §11). */
 export const COMPLAINT_STATUS_OPEN = '[Open]';
@@ -2217,7 +2227,14 @@ export const COMPLAINT_STATUS_RESOLVED = '[Resolved]';
 export const COMPLAINT_STATUS_CLOSED = '[Closed]';
 
 const MACHINE_COMPLAINT = 'complaint';
-const ALLOWED_SEVERITIES = new Set(['Low', 'Medium', 'High']);
+const ALLOWED_SEVERITIES = new Set([
+  COMPLAINT_SEVERITY_LOW, COMPLAINT_SEVERITY_MEDIUM, COMPLAINT_SEVERITY_HIGH,
+]);
+
+/** The severity vocabulary, shared with door #3 so the portal cannot invent a fourth. */
+export function isAllowedSeverity(severity: string): boolean {
+  return ALLOWED_SEVERITIES.has(severity);
+}
 
 // --- Verbatim BI messages (M6 §8/§9.5). ---
 
@@ -2286,6 +2303,79 @@ function validateComplaint(input: ComplaintInput): void {
 }
 
 /**
+ * The complaint INSERT itself — shared by every door (§8/§9.5).
+ *
+ * Extracted when the Client Portal became door #3 (M15 Rule 5). Its whole point
+ * is that a portal-submitted complaint is "routed to the AM exactly like a
+ * WhatsApp-sourced one — no separate workflow": the `CPL-` id, the birth status,
+ * the AM assignment, the audit row and the notification all happen here, once.
+ * A second copy in the portal module would be a second complaint policy, and the
+ * first thing to drift would be the notification nobody notices is missing.
+ *
+ * The CALLER owns authorisation and the client-visibility check; this function
+ * assumes both already passed. It does not validate severity either — door #2
+ * validates through `validateComplaint`, door #3 through `isAllowedSeverity` —
+ * because the two doors have genuinely different required-field rules (a client
+ * may omit severity; an AM may not).
+ */
+export interface InsertComplaintArgs {
+  clientId: string;
+  source: string;
+  description: string;
+  severity: string;
+  status: string;
+  relatedRef?: string | null;
+  /** The AM the complaint is routed to. Resolved from the client when omitted. */
+  assignedTo?: string | null;
+  /** Client Portal only (M15 Rule 5): which named contact pressed send. */
+  submittingContactId?: string | null;
+  /** Audit/notification actor: an employee id, or a contact id for door #3. */
+  actorId: string;
+  now?: Date;
+}
+
+export async function insertComplaint(tx: TransactionSql, args: InsertComplaintArgs): Promise<string> {
+  const ex = executors(tx);
+  const now = args.now ?? new Date();
+  // Route to the owning AM. Door #2 already loaded it (and passes it in); door #3
+  // has no employee context at all, so it is resolved here rather than making the
+  // portal read `clients` — which would put an internal table in the portal's
+  // query surface for no gain.
+  let assignedTo = args.assignedTo ?? null;
+  if (assignedTo == null) {
+    const rows = await tx<{ assigned_am_id: string | null }[]>`
+      select assigned_am_id from clients where id = ${args.clientId}`;
+    assignedTo = rows[0]?.assigned_am_id ?? null;
+  }
+  const id = await ex.ident.identNext('CPL', now);
+  await tx`
+    insert into complaints
+      (id, client_id, related_ref, source, description, severity, status, assigned_to,
+       submitting_contact_id, created_by)
+    values (${id}, ${args.clientId}, ${orNull(args.relatedRef ?? '')}, ${args.source},
+      ${args.description}, ${args.severity}, ${args.status}, ${assignedTo},
+      ${args.submittingContactId ?? null}, ${args.actorId})`;
+  await ex.audit.insertAudit({
+    entityType: 'complaint', entityId: id, actorEmployeeId: args.actorId, action: 'create',
+    beforeJson: null,
+    afterJson: {
+      status: args.status, client_id: args.clientId, severity: args.severity, source: args.source,
+      submitting_contact_id: args.submittingContactId ?? null,
+    },
+    createdBy: args.actorId,
+  });
+  // EvComplaintLogged (FROZEN catalog) → AM + SPV Account (explicitOrLeads).
+  // Door #3 reuses it verbatim: an AM must not have to learn a second inbox to
+  // find out a client complained, and the catalog stays at 67 events.
+  await notification.emit(ex.notify, {
+    event: notification.EVENTS.ComplaintLogged, entityType: 'complaint', entityId: id,
+    actor: args.actorId, division: ACCOUNT_DIVISION,
+    explicitRecipients: assignedTo ? [assignedTo] : [],
+  });
+  return id;
+}
+
+/**
  * logComplaint records a WhatsApp complaint against a released client (door #2,
  * §8). Owning AM (or Director) only; Source fixed to WhatsApp (AM-logged); CPL-
  * id minted after validation; assigned_to defaults to the owning AM; birth
@@ -2311,23 +2401,16 @@ export async function logComplaint(sql: Sql, actor: Actor, clientId: string, inp
       await validateRelatedRef(tx, clientId, relatedRef);
     }
 
-    const id = await ex.ident.identNext('CPL', now);
-    await tx`
-      insert into complaints
-        (id, client_id, related_ref, source, description, severity, status, assigned_to, created_by)
-      values (${id}, ${clientId}, ${orNull(relatedRef)}, ${COMPLAINT_SOURCE_WHATSAPP}, ${input.description.trim()},
-        ${input.severity}, ${COMPLAINT_STATUS_OPEN}, ${ownerAm}, ${actor.employeeId})`;
-    await ex.audit.insertAudit({
-      entityType: 'complaint', entityId: id, actorEmployeeId: actor.employeeId, action: 'create',
-      beforeJson: null,
-      afterJson: { status: COMPLAINT_STATUS_OPEN, client_id: clientId, severity: input.severity, source: COMPLAINT_SOURCE_WHATSAPP },
-      createdBy: actor.employeeId,
-    });
-    // EvComplaintLogged (FROZEN catalog) → AM + SPV Account (explicitOrLeads).
-    await notification.emit(ex.notify, {
-      event: notification.EVENTS.ComplaintLogged, entityType: 'complaint', entityId: id,
-      actor: actor.employeeId, division: ACCOUNT_DIVISION,
-      explicitRecipients: ownerAm ? [ownerAm] : [],
+    const id = await insertComplaint(tx, {
+      clientId,
+      source: COMPLAINT_SOURCE_WHATSAPP,
+      description: input.description.trim(),
+      severity: input.severity,
+      status: COMPLAINT_STATUS_OPEN,
+      relatedRef: relatedRef === '' ? null : relatedRef,
+      assignedTo: ownerAm,
+      actorId: actor.employeeId,
+      now,
     });
 
     return {

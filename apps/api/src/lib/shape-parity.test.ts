@@ -35,6 +35,24 @@ import { describe, expect, it } from 'vitest';
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const WIRE_TS = join(REPO_ROOT, 'apps/api/src/lib/wire.ts');
 const FE_LIB = join(REPO_ROOT, 'web-internal/src/lib');
+/**
+ * The SECOND front-end app. `web-client-portal` is a separate Next project with
+ * its own `lib/`, and until the M15-C2 read-model shipped it had no response
+ * shapes at all — so this guard only ever watched `web-internal`. Its DTOs are
+ * the narrowest in the system (the §4.2 allow-list is a list of FIELDS), which
+ * makes them the ones most worth watching: a field added to a portal wire type
+ * without the FE declaring it is a field a client receives that nobody designed.
+ * Keyed `klien/types.ts::X` so the existing `file::Type` splitting is untouched.
+ */
+const FE_LIB_PORTAL = join(REPO_ROOT, 'web-client-portal/src/lib');
+const PORTAL_PREFIX = 'klien/';
+
+/** Resolve a file key to its absolute path — one place, two apps. */
+function feSourcePath(file: string): string {
+  return file.startsWith(PORTAL_PREFIX)
+    ? join(FE_LIB_PORTAL, file.slice(PORTAL_PREFIX.length))
+    : join(FE_LIB, file);
+}
 
 /** One parsed `export interface` — its own keys plus whatever it extends. */
 interface Parsed {
@@ -174,12 +192,14 @@ const FE_FILES = [
   'account.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'contract.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts', 'penugasan.ts', 'permintaan.ts', 'plan.ts',
-  'performance.ts', 'portal.ts', 'recap.ts', 'renewal.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'stage.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
+  'performance.ts', 'portal.ts', 'recap.ts', 'renewal.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'skuscreener.ts', 'stage.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
+  // web-client-portal (M15-C2) — the external realm's own app, see FE_LIB_PORTAL.
+  'klien/types.ts',
 ];
 
 const fe = new Map<string, Parsed>();
 for (const file of FE_FILES) {
-  for (const [name, parsed] of parseInterfaces(readFileSync(join(FE_LIB, file), 'utf8'))) {
+  for (const [name, parsed] of parseInterfaces(readFileSync(feSourcePath(file), 'utf8'))) {
     fe.set(`${file}::${name}`, parsed);
   }
 }
@@ -213,7 +233,7 @@ function flattenFe(qualified: string): string[] {
  */
 const feImports = new Map<string, Map<string, string>>();
 for (const file of FE_FILES) {
-  const source = readFileSync(join(FE_LIB, file), 'utf8');
+  const source = readFileSync(feSourcePath(file), 'utf8');
   const map = new Map<string, string>();
   const re = /import\s+type\s*\{([^}]+)\}\s*from\s*'@\/lib\/(\w[\w-]*)'/g;
   for (let m = re.exec(source); m !== null; m = re.exec(source)) {
@@ -514,6 +534,33 @@ const WIRE_TO_FE: Record<string, string> = {
   ClientReportSummaryWire: 'report.ts::ClientReportSummary',
   ClientReportBerkasWire: 'report.ts::ClientReportBerkas',
   ClientReportDetailWire: 'report.ts::ClientReportDetail',
+  // Insight editable + gerbang publikasi (migrasi 20260908010000).
+  ReportInsightWire: 'report.ts::ReportInsight',
+  ReportRekomendasiWire: 'report.ts::Rekomendasi',
+  ReportIndikatorWire: 'report.ts::Indikator',
+  ReportInsightRevisiWire: 'report.ts::ReportInsightRevisi',
+  ReportPublikasiWire: 'report.ts::ReportPublikasi',
+  // Gelombang 3 — MEA SKU Screener (SC-08). No page consumes these yet
+  // (UI is a later ticket) — the FE type file exists purely so this guard
+  // watches the shape from day one.
+  ScreeningRunSummaryWire: 'skuscreener.ts::ScreeningRunSummary',
+  ScreeningRunDetailWire: 'skuscreener.ts::ScreeningRunDetail',
+  DecisionLogEntryWire: 'skuscreener.ts::DecisionLogEntry',
+  TrackerMetricsWire: 'skuscreener.ts::TrackerMetrics',
+  TrackerRowWire: 'skuscreener.ts::TrackerRow',
+  ReportInsightBundleWire: 'report.ts::ReportInsightBundle',
+  // A REQUEST body (same reasoning as ProposalLineBody above): the insight the
+  // editor PUTs. Paired with the FE's `ReportInsight` — the same six fields the
+  // engine emits and the renderer consumes, so the editor cannot send a seventh
+  // field or rename one without this failing.
+  InsightDraftBody: 'report.ts::ReportInsight',
+  // Client Portal (M15-C2) — paired against `web-client-portal`'s own lib, the
+  // second FE app this guard now covers (see FE_LIB_PORTAL).
+  PortalReportRowWire: 'klien/types.ts::PortalReportRow',
+  PortalServiceProgressWire: 'klien/types.ts::PortalServiceProgress',
+  PortalHealthWire: 'klien/types.ts::PortalHealthSummary',
+  PortalComplaintAckWire: 'klien/types.ts::PortalComplaintAck',
+
   BriefWire: 'account.ts::Brief',
   ComplaintWire: 'account.ts::Complaint',
   // M6D rekap hasil mingguan (WRR-) — D-09b

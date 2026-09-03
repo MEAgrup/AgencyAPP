@@ -13,6 +13,7 @@ export * from './detect';
 export * from './metrik';
 export * from './skor';
 export * from './insight';
+export * from './insight-edit';
 export * from './payload';
 export * from './run';
 export * from './render';

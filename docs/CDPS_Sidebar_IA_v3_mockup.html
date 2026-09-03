@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CDPS — Rancangan Sidebar v3</title>
+<style>
+  :root{
+    --ink:#16211C; --ink-soft:#5B6B63; --line:#DFE4E0;
+    --paper:#FFFFFF; --shell:#F2F4F2; --green:#1F5B45;
+    --green-soft:#E4EDE8; --amber:#B4611A; --rail:270px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    color:var(--ink);background:var(--shell);font-size:14.5px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .app{display:grid;grid-template-columns:var(--rail) 1fr;min-height:100vh}
+
+  .rail{background:var(--paper);border-right:1px solid var(--line);display:flex;flex-direction:column;
+    position:sticky;top:0;height:100vh}
+  .brand{padding:18px 18px 14px;border-bottom:1px solid var(--line)}
+  .brand b{display:block;font-size:19px;letter-spacing:-.2px;color:var(--green)}
+  .brand span{font-size:12.5px;color:var(--ink-soft)}
+  .rolebar{padding:12px 14px 10px;border-bottom:1px solid var(--line)}
+  .rolebar label{display:block;font-size:11.5px;color:var(--ink-soft);margin-bottom:5px}
+  .rolebar select,.search input{width:100%;padding:7px 9px;font:inherit;font-size:13px;
+    border:1px solid var(--line);border-radius:7px;background:#FBFCFB;color:var(--ink)}
+  .search{padding:12px 14px 8px}
+  .search-wrap{position:relative}
+  .search kbd{position:absolute;right:7px;top:50%;transform:translateY(-50%);
+    font-family:ui-monospace,SFMono-Regular,monospace;font-size:10.5px;color:var(--ink-soft);
+    background:#EEF1EF;border-radius:4px;padding:2px 5px}
+  .nav{flex:1;overflow-y:auto;padding:4px 8px 28px}
+  .nav::-webkit-scrollbar{width:8px}
+  .nav::-webkit-scrollbar-thumb{background:#DDE3DF;border-radius:8px}
+  .grp{margin:2px 0}
+  .grp-btn{width:100%;display:flex;align-items:center;gap:8px;background:none;border:0;font:inherit;
+    font-size:12.5px;font-weight:600;color:var(--ink-soft);padding:8px;border-radius:7px;cursor:pointer;text-align:left}
+  .grp-btn:hover{background:#F6F8F7;color:var(--ink)}
+  .grp-btn .chev{margin-left:auto;font-size:10px;color:#9AA8A1;transition:transform .16s ease}
+  .grp[data-open="true"] .grp-btn .chev{transform:rotate(90deg)}
+  .grp[data-open="true"] .grp-btn{color:var(--ink)}
+  .grp-items{display:none;padding:2px 0 8px}
+  .grp[data-open="true"] .grp-items{display:block}
+  a.item{display:flex;align-items:center;gap:9px;padding:7px 9px 7px 26px;border-radius:7px;
+    color:var(--ink);text-decoration:none;font-size:13.5px}
+  a.item:hover{background:#F4F7F5}
+  a.item.on{background:var(--green-soft);color:var(--green);font-weight:600}
+  a.item .dot{width:5px;height:5px;border-radius:50%;background:#C7D2CC;flex:0 0 auto}
+  a.item.on .dot{background:var(--green)}
+  .count{margin-left:auto;font-size:11.5px;font-weight:600;background:#F0E4D8;color:var(--amber);
+    border-radius:20px;padding:1px 7px}
+  .sub-btn{width:100%;display:flex;align-items:center;gap:9px;padding:7px 9px 7px 26px;border:0;
+    background:none;font:inherit;font-size:13.5px;color:var(--ink);border-radius:7px;cursor:pointer;text-align:left}
+  .sub-btn:hover{background:#F4F7F5}
+  .sub-btn .chev{margin-left:auto;font-size:10px;color:#9AA8A1;transition:transform .16s ease}
+  .sub[data-open="true"] .sub-btn .chev{transform:rotate(90deg)}
+  .sub-items{display:none}
+  .sub[data-open="true"] .sub-items{display:block}
+  .sub-items a.item{padding-left:44px;font-size:13px}
+  :focus-visible{outline:2px solid var(--green);outline-offset:2px}
+  .rail-foot{border-top:1px solid var(--line);padding:10px 14px;font-size:12px;color:var(--ink-soft);
+    display:flex;gap:8px;align-items:center}
+  .avatar{width:26px;height:26px;border-radius:50%;background:var(--green);color:#fff;
+    display:grid;place-items:center;font-size:11.5px;font-weight:600}
+
+  .canvas{padding:34px 42px 70px;max-width:1000px}
+  .eyebrow{font-size:12.5px;color:var(--ink-soft)}
+  h1{font-size:27px;letter-spacing:-.4px;margin:4px 0 10px;font-weight:650}
+  .lede{max-width:66ch;color:#3C4A44;margin:0 0 26px}
+  h2{font-size:16.5px;margin:34px 0 10px;letter-spacing:-.1px}
+  p{margin:0 0 12px}
+  .panel{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:20px 22px}
+  .rules{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+  .rule{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:16px 17px}
+  .rule b{display:block;margin-bottom:4px;font-size:14px}
+  .rule span{font-size:13px;color:var(--ink-soft)}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;background:var(--paper);
+    border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  th{text-align:left;font-weight:600;font-size:12.5px;color:var(--ink-soft);padding:10px 14px;
+    background:#F8FAF9;border-bottom:1px solid var(--line)}
+  td{padding:9px 14px;border-bottom:1px solid #EDF1EF;vertical-align:top}
+  tr:last-child td{border-bottom:0}
+  td.to{color:var(--green);font-weight:600}
+  .tag{display:inline-block;font-size:11.5px;padding:1px 7px;border-radius:20px;background:#EEF1EF;color:var(--ink-soft)}
+  .tag.out{background:#F6E6DA;color:var(--amber)}
+  ul{margin:0 0 12px;padding-left:20px}
+  li{margin-bottom:7px}
+  .note{font-size:13px;color:var(--ink-soft)}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+  @media (max-width:900px){.app{grid-template-columns:1fr}.rail{position:static;height:auto}.canvas{padding:24px 20px 60px}}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <aside class="rail">
+    <div class="brand"><b>CDPS</b><span>MEA Agency</span></div>
+    <div class="rolebar">
+      <label for="role">Lihat sidebar sebagai</label>
+      <select id="role">
+        <option value="direktur">Direktur</option>
+        <option value="head">Head / SPV Account</option>
+        <option value="am">Account Manager</option>
+        <option value="sales">Sales</option>
+        <option value="finance">Finance</option>
+        <option value="exec">Creative / Ads / KOL / Live</option>
+        <option value="admin">Admin &amp; HR</option>
+      </select>
+    </div>
+    <div class="search">
+      <div class="search-wrap">
+        <input id="q" type="search" placeholder="Cari menu" aria-label="Cari menu">
+        <kbd>⌘K</kbd>
+      </div>
+    </div>
+    <nav class="nav" id="nav" aria-label="Menu utama"></nav>
+    <div class="rail-foot"><div class="avatar">Y</div><div>Yohan · Direktur</div></div>
+  </aside>
+
+  <main class="canvas">
+    <div class="eyebrow">Rancangan struktur navigasi · revisi 2 · 3 Sep 2026</div>
+    <h1>Sidebar CDPS — 9 kelompok kerja</h1>
+    <p class="lede">Revisi ini menutup tiga catatan lu: divisi pengerjaan klien dikumpulkan di
+      Delivery, kelompok "Portal" dibubarkan karena isinya bukan portal klien, dan tiap menu
+      portal dinamai sesuai pekerjaan yang dibukanya — bukan nama teknis modulnya.</p>
+
+    <div class="rules">
+      <div class="rule"><b>Delivery = tempat semua divisi</b><span>Account &amp; Service, AI Optimizer,
+        Ads, Creative, KOL, Live Stream, Store Operation kumpul di satu induk "Papan Divisi".</span></div>
+      <div class="rule"><b>"Portal" hilang</b><span>Isinya halaman cek kinerja, bukan portal klien.
+        Yang benar-benar portal klien cuma pengelolaan login kontak.</span></div>
+      <div class="rule"><b>Label dinamai dari pekerjaannya</b><span>Portal Tim → Kinerja Divisi.
+        Manajemen → Pantauan Risiko Klien. Orang baru langsung tahu isinya.</span></div>
+      <div class="rule"><b>Kinerja pribadi naik ke Beranda</b><span>Portal Saya isinya task + skor
+        diri sendiri, jadi tempatnya di kotak masuk pribadi paling atas.</span></div>
+    </div>
+
+    <h2>Perubahan dari revisi sebelumnya</h2>
+    <table>
+      <thead><tr><th style="width:31%">Menu</th><th style="width:31%">Jadi</th><th>Alasan</th></tr></thead>
+      <tbody>
+        <tr><td>Account &amp; Service</td><td class="to">Delivery › Papan Divisi</td><td>Divisi yang megang klien di tahap delivery, bukan data klien.</td></tr>
+        <tr><td>AI Optimizer</td><td class="to">Delivery › Papan Divisi</td><td>Sama — divisi pengerjaan, bukan alat bantu.</td></tr>
+        <tr><td>Eksekusi Kanal <span class="tag">nama lama</span></td><td class="to">Papan Divisi</td><td>Isinya divisi, dan Account &amp; Service serta AI Optimizer bukan kanal.</td></tr>
+        <tr><td>Portal Saya</td><td class="to">Beranda › Kinerja Saya</td><td>Landing pribadi: task terbuka + skor bulan berjalan.</td></tr>
+        <tr><td>Portal Tim</td><td class="to">Tim › Kinerja Divisi</td><td>Rollup skor divisi + klien divisi + antrian block-request.</td></tr>
+        <tr><td>Manajemen</td><td class="to">Klien › Pantauan Risiko Klien</td><td>Semua klien × Client Health, default urut At Risk dulu.</td></tr>
+        <tr><td>Kontak Klien (Portal)</td><td class="to">Admin › Akses Portal Klien</td><td>Ini satu-satunya menu yang benar-benar soal portal klien: kelola login kontak.</td></tr>
+        <tr><td>Alat AI <span class="tag">nama lama</span></td><td class="to">Alat Bantu AM</td><td>Tinggal Co-Pilot AM + Baseline Riset Toko setelah AI Optimizer pindah.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Tiga menu yang isinya tumpang tindih</h2>
+    <div class="panel">
+      <p>Setelah dinamai ulang, kelihatan ada pasangan menu yang menampilkan hal yang mirip.
+        Ini bukan masalah navigasi, tapi perlu lu putuskan sebelum dev merapikan label:</p>
+      <ul>
+        <li><b>Kinerja Saya vs Tugas Saya</b> — Portal Saya sudah menampilkan daftar task terbuka
+          milik sendiri. Kalau isinya sama persis dengan menu Tugas Saya, sisakan satu.
+          Saran gw: Tugas Saya dihapus, kartunya sudah ada di Kinerja Saya.</li>
+        <li><b>Kinerja Divisi vs Team Performance</b> — dua-duanya skor per staf per divisi.
+          Kalau memang beda (satu landing SPV, satu laporan lintas divisi untuk Head), bedakan
+          namanya jadi "Kinerja Divisi Saya" dan "Kinerja Semua Divisi".</li>
+        <li><b>Pantauan Risiko Klien vs Client Health</b> — Management Dashboard adalah tampilan
+          semua klien dari data Client Health yang sama. Kalau Client Health cuma versi per klien,
+          jadikan halaman detail yang dibuka dari baris di Pantauan Risiko, bukan menu terpisah.</li>
+      </ul>
+      <p class="note">Kalau ketiganya digabung, sidebar turun dari 33 jadi 30 item dan Beranda cuma
+        punya 3 baris.</p>
+    </div>
+
+    <h2>Sisa keputusan</h2>
+    <div class="panel">
+      <ul>
+        <li><b>Kinerja Sales &amp; Performa Marketing</b> tetap gw taruh di dalam Akuisisi, sesuai
+          pola yang lu setujui: satu kelompok berisi seluruh pekerjaan divisinya, termasuk laporannya.</li>
+        <li><b>Papan Divisi</b> bisa disaring otomatis: staf Creative langsung mendarat di papannya
+          sendiri dan cuma lihat satu baris, sementara AM dan Head lihat tujuh-tujuhnya.</li>
+        <li><b>Tim + Admin</b> masih bisa digabung kalau 9 header dirasa banyak.</li>
+      </ul>
+    </div>
+  </main>
+</div>
+
+<script>
+const ALL = ["direktur","head","am","sales","finance","exec","admin"];
+const GROUPS = [
+  { id:"beranda", name:"Beranda", open:true, items:[
+    {n:"Dashboard", r:ALL},
+    {n:"Kinerja Saya", r:ALL},
+    {n:"Tugas Saya", r:ALL},
+    {n:"Persetujuan", r:["direktur","head"], c:17},
+  ]},
+  { id:"akuisisi", name:"Akuisisi", items:[
+    {n:"Leads", r:["direktur","head","sales"], c:8},
+    {n:"Sales Workspace", r:["direktur","head","sales"]},
+    {n:"Campaign Marketing", r:["direktur","sales"]},
+    {n:"Kinerja Sales", r:["direktur","head","sales"]},
+    {n:"Performa Marketing", r:["direktur","sales"]},
+  ]},
+  { id:"katalog", name:"Katalog & Penawaran", items:[
+    {n:"Master Service List", r:ALL},
+    {n:"Kalkulator Penawaran", r:["direktur","head","sales","am"]},
+  ]},
+  { id:"klien", name:"Klien", items:[
+    {n:"Direktori Klien", r:["direktur","head","am","sales","finance"]},
+    {n:"Pantauan Risiko Klien", r:["direktur","head","am"]},
+    {n:"Client Health", r:["direktur","head","am"]},
+  ]},
+  { id:"delivery", name:"Delivery", items:[
+    {n:"Task Execution", r:["direktur","head","am","exec"], c:23},
+    {n:"Rekap Mingguan", r:["direktur","head","am"]},
+    {sub:"Papan Divisi", r:["direktur","head","am","exec"], items:[
+      {n:"Account & Service", r:["direktur","head","am"]},
+      {n:"AI Optimizer", r:["direktur","head","am","exec"]},
+      {n:"Ads", r:["direktur","head","am","exec"]},
+      {n:"Creative", r:["direktur","head","am","exec"]},
+      {n:"KOL", r:["direktur","head","am","exec"]},
+      {n:"Live Stream", r:["direktur","head","am","exec"]},
+      {n:"Store Operation", r:["direktur","head","am","exec"]},
+    ]},
+  ]},
+  { id:"alat", name:"Alat Bantu AM", items:[
+    {n:"Co-Pilot AM", r:["direktur","head","am"]},
+    {n:"Baseline Riset Toko", r:["direktur","head","am","sales"]},
+  ]},
+  { id:"keuangan", name:"Keuangan", items:[
+    {n:"Finance", r:["direktur","finance"]},
+    {n:"Reminder Pembayaran", r:["direktur","finance","head"], c:4},
+  ]},
+  { id:"tim", name:"Tim", items:[
+    {n:"Penugasan Internal", r:["direktur","head","am","exec"]},
+    {n:"Kinerja Divisi", r:["direktur","head"]},
+    {n:"Team Performance", r:["direktur","head"]},
+  ]},
+  { id:"admin", name:"Admin", items:[
+    {n:"Karyawan", r:["direktur","admin"]},
+    {n:"Role Mapping", r:["direktur","admin"]},
+    {n:"Hari Libur", r:["direktur","admin"]},
+    {n:"Akun Vendor", r:["direktur","admin","head"]},
+    {n:"Akses Portal Klien", r:["direktur","admin","head","am"]},
+  ]},
+];
+
+const nav=document.getElementById("nav"), roleSel=document.getElementById("role"), q=document.getElementById("q");
+let active="Dashboard", openGroup="beranda", openSubs=new Set(["Papan Divisi"]);
+const vis=(r,role)=>!r||r.includes(role);
+
+function itemEl(it){
+  const a=document.createElement("a");
+  a.className="item"+(it.n===active?" on":"");
+  a.href="#";
+  a.innerHTML=`<span class="dot"></span><span>${it.n}</span>`+(it.c?`<span class="count">${it.c}</span>`:"");
+  a.onclick=e=>{e.preventDefault();active=it.n;render();};
+  return a;
+}
+function render(){
+  const role=roleSel.value, term=q.value.trim().toLowerCase();
+  nav.innerHTML="";
+  GROUPS.forEach(g=>{
+    const rows=[];
+    g.items.forEach(it=>{
+      if(it.sub){
+        if(!vis(it.r,role))return;
+        const kids=it.items.filter(k=>vis(k.r,role)&&(!term||k.n.toLowerCase().includes(term)));
+        const subHit=it.sub.toLowerCase().includes(term);
+        if(!kids.length&&!(term&&subHit))return;
+        rows.push({type:"sub",label:it.sub,kids:kids.length?kids:it.items.filter(k=>vis(k.r,role))});
+      } else {
+        if(!vis(it.r,role))return;
+        if(term&&!it.n.toLowerCase().includes(term))return;
+        rows.push({type:"item",it});
+      }
+    });
+    if(!rows.length)return;
+    const isOpen=term?true:(openGroup===g.id);
+    const wrap=document.createElement("div");
+    wrap.className="grp"; wrap.dataset.open=isOpen;
+    const btn=document.createElement("button");
+    btn.className="grp-btn";
+    btn.innerHTML=`<span>${g.name}</span><span class="chev">▶</span>`;
+    btn.setAttribute("aria-expanded",isOpen);
+    btn.onclick=()=>{openGroup=(openGroup===g.id?null:g.id);q.value="";render();};
+    wrap.appendChild(btn);
+    const box=document.createElement("div"); box.className="grp-items";
+    rows.forEach(r=>{
+      if(r.type==="item"){box.appendChild(itemEl(r.it));return;}
+      const sw=document.createElement("div"); sw.className="sub";
+      const subOpen=term?true:openSubs.has(r.label);
+      sw.dataset.open=subOpen;
+      const sb=document.createElement("button");
+      sb.className="sub-btn";
+      sb.innerHTML=`<span class="dot"></span><span>${r.label}</span><span class="chev">▶</span>`;
+      sb.setAttribute("aria-expanded",subOpen);
+      sb.onclick=()=>{openSubs.has(r.label)?openSubs.delete(r.label):openSubs.add(r.label);render();};
+      sw.appendChild(sb);
+      const si=document.createElement("div"); si.className="sub-items";
+      r.kids.forEach(k=>si.appendChild(itemEl(k)));
+      sw.appendChild(si); box.appendChild(sw);
+    });
+    wrap.appendChild(box); nav.appendChild(wrap);
+  });
+}
+roleSel.onchange=()=>{openGroup="beranda";q.value="";render();};
+q.oninput=render;
+document.addEventListener("keydown",e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="k"){e.preventDefault();q.focus();}});
+render();
+</script>
+</body>
+</html>

@@ -140,10 +140,37 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "136"
-check "entity_prefix"    "select count(*) from entity_prefix"    "37"
-check "sm_machines"      "select count(*) from sm_machines"      "30"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "143"
+check "entity_prefix"    "select count(*) from entity_prefix"    "39"
+check "sm_machines"      "select count(*) from sm_machines"      "31"
 check "notif_events"     "select count(*) from notif_events"     "67"
+# 143 = 142 + 1 tabel Gelombang 2 Shopee Report Engine
+#       (20260909010000_sh01_shopee_report_engine.sql): `report_benchmark_shopee`
+#       (padanan Shopee dari `report_benchmark`, berversi/append-only, POLICY
+#       nol/default-deny). `client_reports` dapat kolom baru lewat ALTER TABLE
+#       (payload_schema, benchmark_versi_shopee) TANPA tabel baru — nol prefix
+#       baru, nol mesin baru, nol event katalog baru, semua tiga gerbang lain
+#       TETAP di angka Gelombang 3 di bawah.
+# 142 = 139 + 3 tabel Gelombang 3 SKU Screener SC-01..SC-07
+#       (20260908050000_gelombang3_sku_screener.sql): `screening_run` (Modul
+#       A/B, SCR-, payload beku), `ads_decision_log` (Modul C, ADL-,
+#       append-only, R13-R16), `optimization_tracker` (Modul D, anak
+#       screening_run PK (screening_id,product_code), NOL prefix sendiri). +2
+#       prefix SCR/ADL (37→39). Nol mesin baru (screening_run tidak punya
+#       siklus status — sekali dihitung, beku; ads_decision_log append-only
+#       tanpa status; optimization_tracker mutable tapi tanpa status field) ⇒
+#       sm_machines TETAP 31; nol event katalog baru ⇒ notif_events TETAP 67.
+#       Schema-only pass — belum ada domain/route layer (SC-08 + wrapper
+#       domain menyusul tiket lain). Lihat DECISIONS.md 2026-09-08 (Gelombang 3).
+# 139 = 136 + 3 tabel klaster C1 insight/publikasi laporan klien
+#       (20260908010000_c1_laporan_insight_publikasi.sql): `client_report_insight`
+#       (revisi teks, append-only), `client_report_publikasi` (status + revisi
+#       yang dipaku), `complaint_rate_limit_attempts` (spec §5.2, pola
+#       login_rate_limit_attempts). Nol prefix baru (kedua tabel pertama
+#       ber-PK/FK report_id bigint, bukan PREFIX- id) ⇒ entity_prefix TETAP 37;
+#       +1 mesin `client_report` (30→31, STATE_MACHINES.md §21); nol event
+#       katalog baru — komplain portal memakai `m6.complaint.logged` yang sudah
+#       ada ⇒ notif_events TETAP 67. Lihat DECISIONS.md 2026-09-08.
 # 136 = 135 + login_rate_limit_attempts (20260906010000_login_rate_limit.sql,
 #       M15-C2 follow-up: uniform per-IP login throttle counter, spec §5.2
 #       OQ-5, DECISIONS.md O64 closed). Nol prefix baru (bigserial PK) ⇒

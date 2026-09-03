@@ -1114,6 +1114,23 @@ RESET ROLE;
 --     `USING (true)`, kelas yang sama dengan `master_services_select`: katalog
 --     murni jabatan→label level (nol PII, nol data klien), dibaca siapa pun yang
 --     terautentikasi. Keputusan visibility dicatat DECISIONS 2026-08-29 #3.
+--
+--     Client Portal (C1 insight/publikasi, DECISIONS 2026-09-08):
+--     `client_reports_sel_portal`, `client_report_publikasi_sel_portal`, dan
+--     `client_report_insight_sel_portal` DITAMBAHKAN. Ketiganya melayani realm
+--     KONTAK KLIEN, bukan karyawan — arm lead/divisi di sana bukan cuma tak
+--     berguna, tapi salah: kontak klien tidak punya divisi, dan menambahkan
+--     `jwt_is_lead() AND jwt_division()='Account'` akan memberi setiap lead MEA
+--     jalur baca KEDUA yang melewati gerbang `[Terbit]` — persis kebocoran yang
+--     policy ini ada untuk menutup. Yang menggantikan arm itu adalah tiga
+--     syarat yang lebih sempit dari arm divisi mana pun: `client_id =
+--     jwt_client_id()` (klaim realm klien; NULL untuk karyawan, jadi policy ini
+--     mati total bagi mereka), status laporan `[Terbit]`, dan — untuk baris
+--     insight — revisi harus yang DIPAKU di `insight_revisi`. Kebalikan dari
+--     "tanpa arm ⇒ lebih longgar": ini permukaan baca paling sempit di skema.
+--     Sisi karyawan tabel yang sama (`client_report_insight_sel`,
+--     `client_report_publikasi_sel`) tetap memakai arm inline seperti
+--     `client_report_berkas_sel`, jadi tidak masuk daftar ini.
 -- ---------------------------------------------------------------------------
 RESET ROLE;
 DO $$
@@ -1121,7 +1138,9 @@ DECLARE
   actual text[];
   expected text[] := ARRAY[
     'ad_campaign_assets_select','ad_campaigns_select','ads_weekly_reports_select','campaigns_select',
-    'client_platforms_select','client_sales_allocations_select','complaints_select',
+    'client_platforms_select','client_report_insight_sel_portal',
+    'client_report_publikasi_sel_portal','client_reports_sel_portal',
+    'client_sales_allocations_select','complaints_select',
     'creator_bookings_select','creator_lists_select','creator_payment_requests_select',
     'dependencies_select','employees_select','live_stream_sessions_select',
     'marketing_performance_records_select','master_service_versions_select',

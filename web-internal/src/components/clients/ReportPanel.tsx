@@ -9,17 +9,22 @@
  * runs the engine, stores the report, and rewrites `clients.total_sales`. The
  * rendered report is downloaded as HTML in Klien or Internal mode.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { errorMessage } from '@/lib/api';
 import { parseExportFile, type ParsedExport } from '@/lib/riset-awal';
 import {
   createClientReport,
   getClientReports,
+  getReportInsight,
+  labelStatusPublikasi,
   reportHtmlUrl,
+  STATUS_DICABUT,
+  STATUS_TERBIT,
   type ClientReportSummary,
   type PeriodeTipe,
 } from '@/lib/report';
 import { type Platform } from '@/lib/clients';
+import InsightEditor from '@/components/clients/InsightEditor';
 
 /** AM file-type override, '' = let the server detect (own-vs-affiliate ambiguity). */
 const TIPE_OVERRIDE_OPTIONS: Array<{ value: string; label: string }> = [
@@ -39,6 +44,12 @@ function rupiah(v: number | null): string {
   return `Rp ${Math.round(v).toLocaleString('id-ID')}`;
 }
 
+function publikasiTone(status: string | undefined): string {
+  if (status === STATUS_TERBIT) return 'badge badgeSuccess';
+  if (status === STATUS_DICABUT) return 'badge badgeDanger';
+  return 'badge badgeWarning';
+}
+
 function skorTone(label: string | null): string {
   if (label === 'SEHAT') return 'badge badgeSuccess';
   if (label === 'PERLU PERHATIAN') return 'badge badgeWarning';
@@ -50,6 +61,19 @@ export default function ReportPanel({ clientId, platforms }: { clientId: string;
   const active = platforms.filter((p) => p.active);
   const [reports, setReports] = useState<ClientReportSummary[]>([]);
   const [loadErr, setLoadErr] = useState<string | null>(null);
+  /** Which report's insight editor is expanded. One at a time — the editor is
+   *  tall, and two open at once invites editing the wrong period. */
+  const [openInsight, setOpenInsight] = useState<number | null>(null);
+  /**
+   * Publication status per report id, for the list badge.
+   *
+   * The list endpoint returns `ClientReportSummary`, which has no publication
+   * row (that lives on the DETAIL shape), so the badge is fetched separately.
+   * Deliberately NOT added to the summary DTO: the list is read on every client
+   * page load, and widening it for a badge would make every one of those reads
+   * carry the insight join too.
+   */
+  const [statusMap, setStatusMap] = useState<Record<number, string>>({});
 
   const [platformId, setPlatformId] = useState<number>(active[0]?.client_platform_id ?? 0);
   const [tipe, setTipe] = useState<PeriodeTipe>('bulanan');
@@ -64,8 +88,18 @@ export default function ReportPanel({ clientId, platforms }: { clientId: string;
 
   const reload = useCallback(async () => {
     try {
-      setReports(await getClientReports(clientId));
+      const rows = await getClientReports(clientId);
+      setReports(rows);
       setLoadErr(null);
+      // Badges are best-effort: a failure here must not blank the report list,
+      // so each lookup is settled independently and a rejection just leaves that
+      // row's badge unset rather than throwing away the rows themselves.
+      const settled = await Promise.allSettled(rows.map((r) => getReportInsight(r.id)));
+      const next: Record<number, string> = {};
+      settled.forEach((res, i) => {
+        if (res.status === 'fulfilled') next[rows[i].id] = res.value.publikasi.status;
+      });
+      setStatusMap(next);
     } catch (e) {
       setLoadErr(errorMessage(e));
     }
@@ -268,12 +302,14 @@ export default function ReportPanel({ clientId, platforms }: { clientId: string;
                   <th>Tipe</th>
                   <th>Skor</th>
                   <th>GMV / bulan (run-rate)</th>
+                  <th>Klien</th>
                   <th>Unduh</th>
                 </tr>
               </thead>
               <tbody>
                 {reports.map((r) => (
-                  <tr key={r.id}>
+                  <Fragment key={r.id}>
+                  <tr>
                     <td>{r.platform}</td>
                     <td>
                       {r.periode_mulai} – {r.periode_akhir}
@@ -286,10 +322,30 @@ export default function ReportPanel({ clientId, platforms }: { clientId: string;
                     </td>
                     <td>{rupiah(r.gmv_runrate_bulanan)}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>
+                      <span className={publikasiTone(statusMap[r.id])}>
+                        {labelStatusPublikasi(statusMap[r.id] ?? '')}
+                      </span>{' '}
+                      <button
+                        type="button"
+                        className="btn btnGhost btnSm"
+                        onClick={() => setOpenInsight((cur) => (cur === r.id ? null : r.id))}
+                      >
+                        {openInsight === r.id ? 'tutup insight' : 'insight & terbit'}
+                      </button>
+                    </td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
                       <a className="btn btnGhost btnSm" href={reportHtmlUrl(r.id, 'klien')} target="_blank" rel="noreferrer">Klien</a>{' '}
                       <a className="btn btnGhost btnSm" href={reportHtmlUrl(r.id, 'internal')} target="_blank" rel="noreferrer">Internal</a>
                     </td>
                   </tr>
+                  {openInsight === r.id && (
+                    <tr>
+                      <td colSpan={7} style={{ background: 'var(--paper, #F6F8FA)' }}>
+                        <InsightEditor reportId={r.id} onPublikasiChange={() => void reload()} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

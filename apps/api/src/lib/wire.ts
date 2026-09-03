@@ -6,8 +6,8 @@
  * other way inline in each route (`toInput`).
  */
 import { money, tz } from '@cdps/core';
-import type { interview as ivcore } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, clientPortalAuth, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, stage, strategi, task, vendor } from '@cdps/domain';
+import type { interview as ivcore, report as coreReport } from '@cdps/core';
+import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, skuscreener, stage, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -6204,7 +6204,8 @@ export interface ClientReportSummaryWire {
   gmv_net: number;
   gmv_kotor: number;
   gmv_runrate_bulanan: number;
-  benchmark_versi: number;
+  benchmark_versi: number | null;
+  benchmark_versi_shopee: number | null;
   engine_versi: string;
   created_at: string;
   created_by: string;
@@ -6225,6 +6226,7 @@ export interface ClientReportDetailWire extends ClientReportSummaryWire {
   payload: unknown;
   kelengkapan_file: unknown;
   berkas: ClientReportBerkasWire[];
+  publikasi: ReportPublikasiWire;
 }
 
 export function clientReportSummaryToWire(r: report.ReportSummary): ClientReportSummaryWire {
@@ -6244,7 +6246,13 @@ export function clientReportSummaryToWire(r: report.ReportSummary): ClientReport
     gmv_kotor: r.gmvKotor,
     gmv_runrate_bulanan: r.gmvRunrateBulanan,
     benchmark_versi: r.benchmarkVersi,
+    benchmark_versi_shopee: r.benchmarkVersiShopee,
     engine_versi: r.engineVersi,
+    // `payloadSchema` (domain) is deliberately NOT surfaced here — `renderReport`
+    // dispatches on it server-side before wire serialisation ever runs, and
+    // adding it to the wire DTO with no FE consumer would fail shape-parity
+    // (O43 c: no wire key without an FE type declaring it). Add it here only
+    // alongside real FE-side use of it.
     created_at: r.createdAt,
     created_by: r.createdBy,
   };
@@ -6269,7 +6277,214 @@ export function clientReportDetailToWire(d: report.ReportDetail): ClientReportDe
     payload: d.payload ?? null,
     kelengkapan_file: d.kelengkapanFile ?? null,
     berkas: d.berkas.map(clientReportBerkasToWire),
+    publikasi: reportPublikasiToWire(d.publikasi),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Insight yang bisa disunting + publikasi (migrasi 20260908010000)
+// ---------------------------------------------------------------------------
+/**
+ * The narrative, in the SAME snake_case shape the engine payload uses
+ * (`payload.insight`). Deliberately not a new vocabulary: the editor loads a
+ * revision, the renderer consumes a revision, and the engine produces one — if
+ * the wire shape differed, one of those three would need a translation layer
+ * that could disagree with the other two.
+ */
+/** One recommendation card. Named, not inline: shape-parity follows references
+ *  on both sides, and an inline object is a shape it cannot check. */
+export interface ReportRekomendasiWire {
+  judul: string;
+  target: string;
+  dampak: string;
+  timeline: string;
+}
+
+/** One leading indicator for the outlook block. */
+export interface ReportIndikatorWire {
+  nama: string;
+  target: string;
+}
+
+export interface ReportInsightWire {
+  ringkasan: string;
+  poin: string[];
+  rekomendasi_tinggi: ReportRekomendasiWire[];
+  rekomendasi_sedang: ReportRekomendasiWire[];
+  outlook: string;
+  indikator: ReportIndikatorWire[];
+}
+
+export interface ReportInsightRevisiWire {
+  revisi: number;
+  sumber: string;
+  insight: ReportInsightWire;
+  catatan_revisi: string | null;
+  created_at: string;
+  created_by: string;
+}
+
+export interface ReportPublikasiWire {
+  status: string;
+  insight_revisi: number | null;
+  diterbitkan_pada: string | null;
+  diterbitkan_oleh: string | null;
+  dicabut_pada: string | null;
+  dicabut_oleh: string | null;
+  alasan_cabut: string | null;
+}
+
+export interface ReportInsightBundleWire {
+  report_id: number;
+  publikasi: ReportPublikasiWire;
+  terbaru: ReportInsightRevisiWire;
+  mesin: ReportInsightRevisiWire;
+  terpaku: ReportInsightRevisiWire | null;
+  ada_perubahan_belum_terbit: boolean;
+}
+
+function reportInsightToWire(i: report.ReportInsightRevisi['insight']): ReportInsightWire {
+  return {
+    ringkasan: i.ringkasan,
+    poin: [...i.poin],
+    rekomendasi_tinggi: i.rekomendasi_tinggi.map((r) => ({ ...r })),
+    rekomendasi_sedang: i.rekomendasi_sedang.map((r) => ({ ...r })),
+    outlook: i.outlook,
+    indikator: i.indikator.map((m) => ({ ...m })),
+  };
+}
+
+export function reportInsightRevisiToWire(r: report.ReportInsightRevisi): ReportInsightRevisiWire {
+  return {
+    revisi: r.revisi,
+    sumber: r.sumber,
+    insight: reportInsightToWire(r.insight),
+    catatan_revisi: r.catatanRevisi,
+    created_at: r.createdAt,
+    created_by: r.createdBy,
+  };
+}
+
+export function reportPublikasiToWire(p: report.ReportPublikasi): ReportPublikasiWire {
+  return {
+    status: p.status,
+    insight_revisi: p.insightRevisi,
+    diterbitkan_pada: p.diterbitkanPada,
+    diterbitkan_oleh: p.diterbitkanOleh,
+    dicabut_pada: p.dicabutPada,
+    dicabut_oleh: p.dicabutOleh,
+    alasan_cabut: p.alasanCabut,
+  };
+}
+
+export function reportInsightBundleToWire(b: report.ReportInsightBundle): ReportInsightBundleWire {
+  return {
+    report_id: b.reportId,
+    publikasi: reportPublikasiToWire(b.publikasi),
+    terbaru: reportInsightRevisiToWire(b.terbaru),
+    mesin: reportInsightRevisiToWire(b.mesin),
+    terpaku: b.terpaku === null ? null : reportInsightRevisiToWire(b.terpaku),
+    ada_perubahan_belum_terbit: b.adaPerubahanBelumTerbit,
+  };
+}
+
+/**
+ * The inbound half — the editor's PUT body.
+ *
+ * Typed as the contract the FE editor is written against (shape-parity compares
+ * it to `report.ts::ReportInsight`, so a seventh field or a renamed one fails a
+ * test). Every field is OPTIONAL because absence is a real case the server must
+ * answer with a `[...]` message, not a TypeError.
+ *
+ * The types here are documentation, not a runtime guarantee — the same is true
+ * of `ProposalLineBody`. Judgement stays in `report.normalizeInsightDraft`
+ * (core), which owns every limit and every Bahasa-Indonesia message and treats
+ * its input as `unknown`, because an HTTP body can be anything regardless of
+ * what TypeScript believes.
+ */
+export interface InsightDraftBody {
+  ringkasan?: string;
+  poin?: string[];
+  rekomendasi_tinggi?: ReportRekomendasiWire[];
+  rekomendasi_sedang?: ReportRekomendasiWire[];
+  outlook?: string;
+  indikator?: ReportIndikatorWire[];
+}
+
+export function toInsightDraft(b: InsightDraftBody): coreReport.InsightDraft {
+  // Passed through UNTOUCHED, including empty strings and absent keys: core
+  // decides what is missing and says so in Bahasa Indonesia. Defaulting here
+  // would turn "the AM left it blank" into "the AM wrote an empty sentence".
+  return {
+    ringkasan: b.ringkasan,
+    poin: b.poin,
+    rekomendasi_tinggi: b.rekomendasi_tinggi,
+    rekomendasi_sedang: b.rekomendasi_sedang,
+    outlook: b.outlook,
+    indikator: b.indikator,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Client Portal read-model (M15-C2) — the ALLOW-LIST surfaces
+//
+// These four are the narrowest wire shapes in this file, and that is the point:
+// the spec's §4.2 allow-list is a list of FIELDS, so the DTO is where it is
+// enforced. Adding a field here is a visibility decision, not a convenience.
+// ---------------------------------------------------------------------------
+export interface PortalReportRowWire {
+  report_id: number;
+  platform: string;
+  periode_tipe: string;
+  periode_mulai: string;
+  periode_akhir: string;
+  diterbitkan_pada: string | null;
+}
+
+export function portalReportRowToWire(r: clientPortal.PortalReportRow): PortalReportRowWire {
+  return {
+    report_id: r.reportId,
+    platform: r.platform,
+    periode_tipe: r.periodeTipe,
+    periode_mulai: r.periodeMulai,
+    periode_akhir: r.periodeAkhir,
+    diterbitkan_pada: r.diterbitkanPada,
+  };
+}
+
+export interface PortalServiceProgressWire {
+  nama_layanan: string;
+  label: string;
+  jumlah_pekerjaan: number;
+  jumlah_selesai: number;
+}
+
+export function portalServiceProgressToWire(p: clientPortal.PortalServiceProgress): PortalServiceProgressWire {
+  return {
+    nama_layanan: p.namaLayanan,
+    label: p.label,
+    jumlah_pekerjaan: p.jumlahPekerjaan,
+    jumlah_selesai: p.jumlahSelesai,
+  };
+}
+
+export interface PortalHealthWire {
+  /** Band LABEL only (M15 Rule 4). There is no numeric field and must never be. */
+  label: string | null;
+  periode_akhir: string | null;
+}
+
+export function portalHealthToWire(h: clientPortal.PortalHealthSummary): PortalHealthWire {
+  return { label: h.label, periode_akhir: h.periodeAkhir };
+}
+
+export interface PortalComplaintAckWire {
+  complaint_id: string;
+  pesan: string;
+}
+
+export function portalComplaintAckToWire(a: clientPortal.PortalComplaintAck): PortalComplaintAckWire {
+  return { complaint_id: a.complaintId, pesan: a.pesan };
 }
 
 // ===========================================================================
@@ -6609,5 +6824,119 @@ export function toSetTargetInput(b: {
     metricKey: (b.metric_key ?? '') as salesperf.MetricKey,
     metricParam: b.metric_param,
     targetValue: b.target_value ?? '',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Gelombang 3 — MEA SKU Screener (SC-08). snake_case wire; `payload`/
+// `sumber_berkas` are opaque jsonb passed through verbatim (no FE consumer
+// yet — see skuscreener.ts's route files, same deferred-UI pattern as SH-06).
+// Deliberately NOT registered in shape-parity.test.ts's WIRE_TO_FE map: that
+// guard is opt-in, and there is nothing in web-internal to check parity
+// against until the UI lands.
+// ---------------------------------------------------------------------------
+export interface ScreeningRunSummaryWire {
+  id: string;
+  client_id: string;
+  jenis: string;
+  created_at: string;
+  created_by: string;
+}
+
+export interface ScreeningRunDetailWire extends ScreeningRunSummaryWire {
+  target_roas: number | null;
+  cpc_pasar_kategori: number | null;
+  faktor_cr_iklan: number | null;
+  min_klik_sesudah: number | null;
+  payload: unknown;
+  sumber_berkas: unknown;
+}
+
+export function screeningRunSummaryToWire(r: skuscreener.ScreeningRunSummary): ScreeningRunSummaryWire {
+  return { id: r.id, client_id: r.clientId, jenis: r.jenis, created_at: r.createdAt, created_by: r.createdBy };
+}
+export function screeningRunDetailToWire(d: skuscreener.ScreeningRunDetail): ScreeningRunDetailWire {
+  return {
+    ...screeningRunSummaryToWire(d),
+    target_roas: d.targetRoas, cpc_pasar_kategori: d.cpcPasarKategori, faktor_cr_iklan: d.faktorCrIklan,
+    min_klik_sesudah: d.minKlikSesudah, payload: d.payload ?? null, sumber_berkas: d.sumberBerkas ?? null,
+  };
+}
+
+export interface DecisionLogEntryWire {
+  id: string;
+  client_id: string;
+  screening_id: string | null;
+  advertiser_id: string;
+  platform: string;
+  object_type: string;
+  object_name: string;
+  momen: string;
+  sop_stage: string;
+  decision: string;
+  metric_key: string;
+  metric_value: number;
+  metric_target: number;
+  status_vs_target: string;
+  spend_7d: number | null;
+  gmv_7d: number | null;
+  roas_result: number | null;
+  verdict: string | null;
+  reviews_decision_id: string | null;
+  premature: boolean;
+  notes: string | null;
+  created_at: string;
+  created_by: string;
+}
+
+export function decisionLogEntryToWire(d: skuscreener.DecisionLogEntry): DecisionLogEntryWire {
+  return {
+    id: d.id, client_id: d.clientId, screening_id: d.screeningId, advertiser_id: d.advertiserId,
+    platform: d.platform, object_type: d.objectType, object_name: d.objectName, momen: d.momen,
+    sop_stage: d.sopStage, decision: d.decision, metric_key: d.metricKey, metric_value: d.metricValue,
+    metric_target: d.metricTarget, status_vs_target: d.statusVsTarget, spend_7d: d.spend7d, gmv_7d: d.gmv7d,
+    roas_result: d.roasResult, verdict: d.verdict, reviews_decision_id: d.reviewsDecisionId,
+    premature: d.premature, notes: d.notes, created_at: d.createdAt, created_by: d.createdBy,
+  };
+}
+
+export interface TrackerMetricsWire {
+  views: number;
+  clicks: number;
+  ctr: number;
+  cr: number;
+  orders: number;
+}
+
+export interface TrackerRowWire {
+  screening_id: string;
+  product_code: string;
+  product_name: string;
+  client_id: string;
+  change_date: string;
+  initial_route: string;
+  change_type: string;
+  metric_evaluated: string;
+  before: TrackerMetricsWire;
+  after: TrackerMetricsWire | null;
+  delta_ctr_pct: number | null;
+  delta_cr_pct: number | null;
+  delta_metric_pct: number | null;
+  verdict: string;
+  budget_decision: string | null;
+  notes: string | null;
+  created_at: string;
+  created_by: string;
+  updated_at: string;
+}
+
+export function trackerRowToWire(t: skuscreener.TrackerRow): TrackerRowWire {
+  return {
+    screening_id: t.screeningId, product_code: t.productCode, product_name: t.productName, client_id: t.clientId,
+    change_date: t.changeDate, initial_route: t.initialRoute, change_type: t.changeType,
+    metric_evaluated: t.metricEvaluated, before: t.before, after: t.after,
+    delta_ctr_pct: t.deltaCtrPct, delta_cr_pct: t.deltaCrPct, delta_metric_pct: t.deltaMetricPct,
+    verdict: t.verdict, budget_decision: t.budgetDecision, notes: t.notes,
+    created_at: t.createdAt, created_by: t.createdBy, updated_at: t.updatedAt,
   };
 }

@@ -20,6 +20,7 @@
  * already reads for other flows.
  */
 import { useEffect } from 'react';
+import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { usePortalAuth } from '@/lib/portal-auth-context';
 import { checkIdleExpired } from '@/lib/idle-timeout';
@@ -27,6 +28,18 @@ import styles from './portal.module.css';
 
 const PASSWORD_PATH = '/akun/password';
 const IDLE_CHECK_INTERVAL_MS = 60_000;
+
+/**
+ * The whole portal, in four links. This IS the allow-list made visible: there
+ * is no invoice page, no team page, no complaint history — not hidden behind a
+ * permission, simply not built (spec §4.2, OQ-6, M15 Rule 6).
+ */
+const NAV = [
+  { href: '/', label: 'Ringkasan' },
+  { href: '/laporan', label: 'Laporan' },
+  { href: '/progres', label: 'Progres Layanan' },
+  { href: '/komplain', label: 'Ajukan Komplain' },
+];
 
 // NOTE: `PortalAuthProvider` is mounted once in the ROOT layout
 // (src/app/layout.tsx), not here — unlike web-internal (which needs an
@@ -96,6 +109,21 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
           Keluar
         </button>
       </header>
+      {/* Hidden while the force-change gate is up: a contact who must change
+          their password should have exactly one thing to do. */}
+      {!mustChange && (
+        <nav className={styles.nav}>
+          {NAV.map((n) => (
+            <Link
+              key={n.href}
+              href={n.href}
+              className={pathname === n.href ? styles.navLinkActive : styles.navLink}
+            >
+              {n.label}
+            </Link>
+          ))}
+        </nav>
+      )}
       <main className={styles.content}>
         {mustChange && (
           <div className="alert alertWarning" style={{ marginBottom: 16 }}>

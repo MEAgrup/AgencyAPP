@@ -326,7 +326,7 @@ export const NAV_SECTIONS: NavSection[] = [
   { title: null, items: MAIN_LINKS },
   { title: 'Akuisisi', items: ACQUISITION_LINKS },
   { title: 'Delivery', items: DELIVERY_LINKS },
-  { title: 'Alat', items: TOOLS_LINKS },
+  { title: 'AI Tools MEA', items: TOOLS_LINKS },
   { title: 'Visibilitas', items: VISIBILITY_LINKS },
   { title: 'Portal', items: PORTAL_LINKS },
   { title: 'Admin', items: ADMIN_LINKS },

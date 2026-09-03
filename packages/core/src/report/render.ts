@@ -18,7 +18,7 @@
  * and no Ads Manager files must not receive a report that jumps from 8 to 10.
  */
 import { dec, esc, num, pct, rp } from '../baseline/angka';
-import type { ReportPayload } from './payload';
+import type { PayloadInsight, ReportPayload } from './payload';
 
 export type RenderMode = 'klien' | 'internal';
 
@@ -34,38 +34,44 @@ export function rpPendek(v: number | null | undefined): string {
   return 'Rp' + Math.round(v).toLocaleString('id-ID');
 }
 
-const badge = (v: number | null | undefined): string => {
+export const badge = (v: number | null | undefined): string => {
   if (v == null) return '';
   const naik = v >= 0;
   return `<span class="${naik ? 'text-emerald-600' : 'text-red-600'} text-xs font-semibold">${naik ? '▲' : '▼'} ${dec(Math.abs(v) * 100, 1)}%</span>`;
 };
 
-function kpi(judul: string, nilai: string, sub = '', delta?: number | null): string {
+export function kpi(judul: string, nilai: string, sub = '', delta?: number | null): string {
   return `<div class="kpi-card bg-white rounded-xl border border-slate-100 p-4">
   <div class="text-[0.7rem] font-semibold text-slate-500 uppercase tracking-wide">${esc(judul)}</div>
   <div class="kpi-value text-teal-700 mt-1">${esc(nilai)}</div>
   <div class="text-xs text-slate-500 mt-1">${esc(sub)} ${delta === undefined ? '' : badge(delta)}</div></div>`;
 }
 
-const grid = (cards: string[], cols = 4): string =>
+export const grid = (cards: string[], cols = 4): string =>
   `<div class="grid grid-cols-2 md:grid-cols-${cols} gap-3">${cards.join('')}</div>`;
 
-const kosong = (teks: string): string =>
+export const kosong = (teks: string): string =>
   `<div class="bg-white rounded-xl border border-slate-100 p-6 text-sm text-slate-500">${esc(teks)}</div>`;
 
-function tabel(head: string[], baris: string[], align: ('l' | 'r')[] = []): string {
+export function tabel(head: string[], baris: string[], align: ('l' | 'r')[] = []): string {
   const th = head.map((h, i) => `<th class="pb-2 ${align[i] === 'r' ? 'text-right' : 'text-left'}">${esc(h)}</th>`).join('');
   return `<div class="overflow-x-auto"><table class="w-full text-xs"><thead><tr class="border-b">${th}</tr></thead><tbody>${baris.join('') || `<tr><td colspan="${head.length}" class="py-3 text-slate-400">Tidak ada data pada periode ini.</td></tr>`}</tbody></table></div>`;
 }
 
-const td = (v: string, r = false): string => `<td class="py-2 ${r ? 'text-right' : ''}">${v}</td>`;
+export const td = (v: string, r = false): string => `<td class="py-2 ${r ? 'text-right' : ''}">${v}</td>`;
 
-const kartuInternal = (judul: string, isi: string, warna = 'slate'): string =>
+/**
+ * An internal-only remark card. The icon is not decoration: these are the blocks
+ * an AM scans for during a review, and a burning-budget card that looks like a
+ * neutral note gets read last. Mirrors the owner's engine, which marks the same
+ * three findings the same way.
+ */
+export const kartuInternal = (judul: string, isi: string, warna = 'slate', ikon = 'fa-circle-info'): string =>
   `<div class="bg-${warna}-50 border border-${warna}-200 rounded-xl p-4 text-sm">
-  <div class="font-semibold text-${warna}-800 mb-1">${esc(judul)} <span class="badge-int">INTERNAL</span></div>
+  <div class="font-semibold text-${warna}-800 mb-1"><i class="fa-solid ${esc(ikon)} mr-1.5"></i>${esc(judul)} <span class="badge-int">INTERNAL</span></div>
   <p class="text-${warna}-700 text-xs">${isi}</p></div>`;
 
-function rekCard(r: { judul: string; target: string; dampak: string; timeline: string }, tone: 'tinggi' | 'sedang'): string {
+export function rekCard(r: { judul: string; target: string; dampak: string; timeline: string }, tone: 'tinggi' | 'sedang'): string {
   return `<div class="bg-white rounded-xl border-l-4 ${tone === 'tinggi' ? 'border-red-500' : 'border-amber-500'} shadow-sm p-4">
   <h4 class="font-semibold text-slate-900 text-sm">${esc(r.judul)}</h4>
   <p class="text-xs text-slate-500 mt-1"><span class="font-semibold">Target:</span> ${esc(r.target)}</p>
@@ -73,7 +79,8 @@ function rekCard(r: { judul: string; target: string; dampak: string; timeline: s
   <p class="text-xs text-slate-500"><span class="font-semibold">Timeline:</span> ${esc(r.timeline)}</p></div>`;
 }
 
-const KUADRAN_META: Record<string, [string, string, string]> = {
+/** Exported so `shopee/render.ts` can reuse the same quadrant palette/labels rather than inventing a second one — the concept (traffic × closing) is identical between the two engines. */
+export const KUADRAN_META: Record<string, [string, string, string]> = {
   bintang: ['Produk Bintang', '#059669', 'Traffic tinggi + closing tinggi — jaga stok, naikkan budget'],
   hidden_gem: ['Hidden Gem', '#3B82F6', 'Closing bagus tapi traffic kecil — dorong exposure (iklan/LIVE/kreator)'],
   bocor_traffic: ['Bocor Traffic', '#EA580C', 'Ramai diklik tapi gagal closing — benahi harga/foto/deskripsi/ulasan'],
@@ -92,13 +99,57 @@ export function chartData(p: ReportPayload): Record<string, unknown> {
     kanal: { labels: p.kanal.items.map((x) => x.label), values: p.kanal.items.map((x) => x.nilai ?? 0) },
     iklan: p.iklan ? { labels: ['GMV Max LIVE', 'GMV Max Product'], pendapatan: [p.iklan.live.pendapatan ?? 0, p.iklan.product.pendapatan ?? 0], biaya: [p.iklan.live.biaya ?? 0, p.iklan.product.biaya ?? 0] } : null,
     liveHari: p.live ? { labels: p.live.per_hari.map((d) => d.label), gmv: p.live.per_hari.map((d) => d.gmv ?? 0), gmvPerJam: p.live.per_hari.map((d) => d.gmv_per_jam ?? 0) } : null,
+    quadRel: p.produk ? quadBubble(p.produk.relatif, p.produk.ambang.relatif) : null,
+    quadBench: p.produk ? quadBubble(p.produk.benchmark, p.produk.ambang.benchmark) : null,
   };
+}
+
+/**
+ * The 4-quadrant scatter, as Chart.js bubble datasets — one per quadrant, so
+ * the legend doubles as the key and a click hides a whole class of product.
+ *
+ * x = product clicks (traffic), y = CVR as a percentage (closing), r scaled
+ * from GMV. The threshold lines come from the SAME `ambang` the routing used:
+ * a chart drawn against different cut-offs than the table beside it would be
+ * worse than no chart.
+ *
+ * GMV → radius is a SQUARE-ROOT scale, not linear. GMV spans three orders of
+ * magnitude in a normal store, and a linear radius turns the top seller into a
+ * disc that swallows the plot while everything else becomes a dot.
+ */
+export function quadBubble(
+  buckets: Record<string, { produk: { nama: string; gmv: number | null; klik: number | null; cvr: number | null }[] }>,
+  amb: { klik_tinggi: number | null; cvr_tinggi: number | null },
+): Record<string, unknown> {
+  const maxGmv = Math.max(1, ...Object.values(buckets).flatMap((b) => b.produk.map((x) => x.gmv ?? 0)));
+  const sets = Object.entries(KUADRAN_META)
+    .filter(([q]) => q !== 'no_data')
+    .map(([q, [label, warna]]) => ({
+      label,
+      warna,
+      data: (buckets[q]?.produk ?? [])
+        // Clicks must be > 0, not merely non-null: the x axis is LOGARITHMIC, so
+        // x=0 has no position on it and Chart.js drops the point silently — a
+        // legend that counts five products while four are visible is worse than
+        // one that counts four. A product with zero clicks genuinely has no
+        // place on a traffic axis; the distribution bars beside the chart still
+        // count it, which is where "Tidak Tayang" belongs.
+        .filter((x) => x.klik != null && x.klik > 0 && x.cvr != null)
+        .map((x) => ({
+          x: x.klik as number,
+          y: (x.cvr as number) * 100,
+          r: 4 + Math.sqrt((x.gmv ?? 0) / maxGmv) * 14,
+          nama: x.nama,
+        })),
+    }))
+    .filter((d) => d.data.length > 0);
+  return { sets, klikTinggi: amb.klik_tinggi, cvrTinggi: amb.cvr_tinggi == null ? null : amb.cvr_tinggi * 100 };
 }
 
 // ---------------------------------------------------------------------------
 // Sections
 // ---------------------------------------------------------------------------
-function seksiRingkasan(p: ReportPayload, mode: RenderMode): string {
+function seksiRingkasan(p: ReportPayload, mode: RenderMode, I: PayloadInsight): string {
   const k = p.kpi;
   const cards = [
     kpi('GMV TikTok Shop', rpPendek(k.gmv), `${num(k.pesanan)} pesanan`, k.perubahan.gmv),
@@ -114,9 +165,29 @@ function seksiRingkasan(p: ReportPayload, mode: RenderMode): string {
     ? ''
     : '<p class="text-xs text-amber-600 mt-2">Rentang tanggal tidak terbaca dari berkas export — panjang periode memakai nilai baku, sehingga ambang volume (sesi LIVE, klik produk) memakai asumsi.</p>';
   return `${grid(cards)}
-  <div class="mt-4 p-4 bg-white rounded-xl border border-slate-100 insight-card"><p class="text-sm font-medium text-slate-700">${esc(p.insight.ringkasan)}</p></div>
+  <div class="mt-4 p-4 bg-white rounded-xl border border-slate-100 insight-card"><p class="text-sm font-medium text-slate-700">${esc(I.ringkasan)}</p></div>
   <p class="text-xs text-slate-400 mt-2">Perbandingan periode diambil langsung dari baris "Perubahan persentase" pada berkas Analitik Toko TikTok.</p>${catatan}${mode === 'internal' ? `
   <p class="text-xs text-slate-400 mt-1"><span class="badge-int">INTERNAL</span> Mesin ${esc(p.engine_versi)} • benchmark versi ${p.benchmark_versi ?? DASH} • GMV ${esc(p.periode.definisi_gmv)} • ${p.periode.hari} hari.</p>` : ''}`;
+}
+
+/**
+ * The overall score as a ring, drawn with `conic-gradient`.
+ *
+ * CSS rather than a canvas on purpose: the PDF export rasterises the page, and a
+ * Chart.js gauge that has not finished animating rasterises blank — the number a
+ * client looks at first would be the one missing from the file they keep. A
+ * gradient has no animation to miss.
+ *
+ * The ring colour follows the same three bands as the dimension cards, so the
+ * ring and the tiles below it can never disagree.
+ */
+export function gauge(total: number): string {
+  const t = Number.isFinite(total) ? Math.max(0, Math.min(10, total)) : 0;
+  const deg = Math.round((t / 10) * 360);
+  const c = t >= 8 ? '#047857' : t >= 6 ? '#B45309' : '#B91C1C';
+  return `<div class="gauge" style="background:conic-gradient(${c} ${deg}deg, #E2E8F0 ${deg}deg)">
+    <div class="gauge-val"><span class="gauge-num" style="color:${c}">${dec(t, 1)}</span>
+      <span class="gauge-max">dari 10</span></div></div>`;
 }
 
 function seksiSkor(p: ReportPayload, mode: RenderMode): string {
@@ -130,8 +201,10 @@ function seksiSkor(p: ReportPayload, mode: RenderMode): string {
   <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
     <div><h2 class="font-display text-lg md:text-xl font-bold text-slate-900">Skor Performa Keseluruhan</h2>
       <p class="text-sm text-slate-500">Bobot standar MEA untuk TikTok Shop</p></div>
-    <div class="text-right"><div class="text-4xl md:text-5xl font-bold text-teal-700">${dec(p.skor.total, 1)} <span class="text-2xl text-slate-400">/10</span></div>
-      <div class="text-sm font-semibold text-${warna(p.skor.total)}-700">${esc(p.skor.label)}</div></div></div>
+    <div class="flex items-center gap-4">
+      ${gauge(p.skor.total)}
+      <div class="text-right"><div class="text-sm font-semibold text-${warna(p.skor.total)}-700">${esc(p.skor.label)}</div>
+        <div class="text-xs text-slate-500 mt-0.5">${p.skor.dimensi.length} dimensi berbobot</div></div></div></div>
   <div class="grid grid-cols-2 md:grid-cols-6 gap-3">${dims}</div></div>`;
 }
 
@@ -161,8 +234,8 @@ function seksiIklan(p: ReportPayload, mode: RenderMode): string {
   const live = a.top_live.slice(0, 8).map((l) => `<tr class="border-b last:border-0">${td(esc(l.waktu.slice(0, 16)))}${td(`<b>${rp(l.pendapatan)}</b>`, true)}${td(rp(l.biaya), true)}${td(l.roi == null ? DASH : dec(l.roi, 1) + 'x', true)}${td(num(l.tayangan), true)}</tr>`);
 
   const internal = mode !== 'internal' ? '' : `<div class="mt-4 grid md:grid-cols-2 gap-3">
-    ${kartuInternal('Budget Terbakar', `${num(a.budget_terbakar.materi)} materi product ads menghabiskan <b>${rp(a.budget_terbakar.belanja)}</b> (${pct(a.budget_terbakar.persen_belanja, 0)} dari belanja product ads) tanpa satu pun pesanan.${a.live_tanpa_penjualan.sesi ? ` ${a.live_tanpa_penjualan.sesi} sesi GMV Max LIVE berbiaya ${rp(a.live_tanpa_penjualan.belanja)} juga nol penjualan.` : ''}`, 'red')}
-    ${kartuInternal('Retensi Tayangan LIVE', `Hanya ${pct(a.live.hold_10s, 1)} tayangan iklan LIVE bertahan sampai 10 detik (${num(a.live.tayangan_10s)} dari ${num(a.live.tayangan)}). Indikator kekuatan hook 3 detik pertama host.`)}
+    ${kartuInternal('Budget Terbakar', `${num(a.budget_terbakar.materi)} materi product ads menghabiskan <b>${rp(a.budget_terbakar.belanja)}</b> (${pct(a.budget_terbakar.persen_belanja, 0)} dari belanja product ads) tanpa satu pun pesanan.${a.live_tanpa_penjualan.sesi ? ` ${a.live_tanpa_penjualan.sesi} sesi GMV Max LIVE berbiaya ${rp(a.live_tanpa_penjualan.belanja)} juga nol penjualan.` : ''}`, 'red', 'fa-fire-flame-curved')}
+    ${kartuInternal('Retensi Tayangan LIVE', `Hanya ${pct(a.live.hold_10s, 1)} tayangan iklan LIVE bertahan sampai 10 detik (${num(a.live.tayangan_10s)} dari ${num(a.live.tayangan)}). Indikator kekuatan hook 3 detik pertama host.`, 'slate', 'fa-arrows-left-right-to-line')}
   </div>`;
 
   return `${grid([
@@ -186,7 +259,7 @@ function seksiLive(p: ReportPayload, mode: RenderMode): string {
   if (!L) return kosong('Berkas LIVE tidak diunggah.');
   const top = L.top_sesi.map((s, i) => `<tr class="border-b last:border-0">${td(String(i + 1))}${td(esc(s.waktu.slice(0, 16)))}${td(`<b>${rp(s.gmv)}</b>`, true)}${td(dec(s.jam, 1) + 'j', true)}${td(rp(s.gmv_per_jam), true)}${td(num(s.penonton), true)}</tr>`);
   const internal = mode !== 'internal' || !L.tanpa_penjualan.sesi ? '' :
-    `<div class="mt-4">${kartuInternal('Jam Siaran Tanpa Hasil', `<b>${L.tanpa_penjualan.sesi} dari ${L.sesi} sesi</b> (${pct(L.tanpa_penjualan.persen, 0)}) nol penjualan, setara <b>${dec(L.tanpa_penjualan.jam, 0)} jam</b> siaran. Ini biaya host & operasional yang belum menghasilkan.`, 'amber')}</div>`;
+    `<div class="mt-4">${kartuInternal('Jam Siaran Tanpa Hasil', `<b>${L.tanpa_penjualan.sesi} dari ${L.sesi} sesi</b> (${pct(L.tanpa_penjualan.persen, 0)}) nol penjualan, setara <b>${dec(L.tanpa_penjualan.jam, 0)} jam</b> siaran. Ini biaya host & operasional yang belum menghasilkan.`, 'amber', 'fa-hourglass-half')}</div>`;
   return `${grid([
     kpi('GMV LIVE', rpPendek(L.gmv), `${num(L.sesi)} sesi / ${dec(L.jam, 1)} jam`),
     kpi('GMV per Jam', rpPendek(L.gmv_per_jam), `rata-rata ${dec(L.durasi_rata, 1)} jam/sesi`),
@@ -243,9 +316,19 @@ function seksiProduk(p: ReportPayload): string {
     .concat(Q.benchmark.bocor_traffic.produk as never[], Q.benchmark.hidden_gem.produk as never[])
     .sort((a, b) => (b.gmv ?? 0) - (a.gmv ?? 0)).slice(0, 12)
     .map((x, i) => `<tr class="border-b last:border-0">${td(String(i + 1))}${td(esc(x.nama.slice(0, 55)))}${td(num(x.klik), true)}${td(pct(x.cvr, 2), true)}${td(`<b>${rp(x.gmv)}</b>`, true)}</tr>`);
+  // Bars AND bubbles, not one instead of the other: the bars answer "how many
+  // products are in trouble" at a glance, the bubbles answer "which ones, and
+  // how far off" — two different questions a client asks in that order.
   return `<div class="grid md:grid-cols-2 gap-4">
     ${panel('Mode Relatif', 'antar produk toko ini', Q.relatif as never, Q.ambang.relatif)}
     ${panel('Mode Benchmark', 'vs target MEA', Q.benchmark as never, Q.ambang.benchmark)}</div>
+  <div class="grid md:grid-cols-2 gap-4 mt-4">
+    <div class="bg-white rounded-xl border border-slate-100 p-5">
+      <h3 class="font-semibold text-sm text-slate-600 mb-3">Sebaran Produk — Mode Relatif</h3>
+      <canvas id="c_quad_rel" height="260"></canvas></div>
+    <div class="bg-white rounded-xl border border-slate-100 p-5">
+      <h3 class="font-semibold text-sm text-slate-600 mb-3">Sebaran Produk — vs Benchmark</h3>
+      <canvas id="c_quad_bench" height="260"></canvas></div></div>
   <div class="mt-3 p-3 bg-slate-50 rounded-lg text-xs text-slate-600"><b>Cara baca:</b> traffic = klik produk, closing = CVR/CTOR.${legenda}</div>
   <div class="mt-4 bg-white rounded-xl border border-slate-100 p-5"><h3 class="font-semibold text-slate-700 mb-3">Top Produk by GMV</h3>
     ${tabel(['#', 'Produk', 'Klik', 'CVR', 'GMV'], top, ['l', 'l', 'r', 'r', 'r'])}</div>`;
@@ -257,7 +340,7 @@ function seksiAfiliasi(p: ReportPayload, mode: RenderMode): string {
   const top = A.top_kreator.slice(0, 12).map((c, i) => `<tr class="border-b last:border-0">${td(String(i + 1))}${td(esc(c.nama))}${td(`<b>${rp(c.gmv)}</b>`, true)}${td(num(c.konten), true)}${td(num(c.pesanan), true)}</tr>`);
   const nempel = A.posting_tanpa_hasil_list.map((c) => `<tr class="border-b last:border-0">${td(esc(c.nama))}${td(num(c.konten), true)}${td(num(c.tayangan), true)}${td('<span class="text-red-600 font-semibold">Rp. 0,00</span>', true)}</tr>`);
   const refundWarn = A.refund_rate != null && A.refund_rate > 0.2
-    ? `<div class="mb-4 bg-red-50 border border-red-200 rounded-xl p-4 text-sm"><div class="font-semibold text-red-800 mb-1">Refund Affiliate Tinggi</div>
+    ? `<div class="mb-4 bg-red-50 border border-red-200 rounded-xl p-4 text-sm"><div class="font-semibold text-red-800 mb-1"><i class="fa-solid fa-triangle-exclamation mr-1.5"></i>Refund Affiliate Tinggi</div>
        <p class="text-red-700 text-xs">${pct(A.refund_rate, 0)} dari GMV affiliate (<b>${rp(A.refund)}</b>) berakhir refund. GMV bersih hanya <b>${rp(A.gmv_bersih)}</b>. Cek kualitas closing kreator dan kesesuaian ekspektasi produk.</p></div>` : '';
   const internalPanel = mode !== 'internal' ? '' : `<div class="bg-white rounded-xl border border-slate-100 p-5">
       <h3 class="font-semibold text-sm text-slate-600 mb-1">Posting Tanpa Hasil <span class="badge-int">INTERNAL</span></h3>
@@ -361,40 +444,142 @@ const CHART_BOOT = `
   {type:'bar',label:'GMV',data:C.liveHari.gmv,backgroundColor:T},
   {type:'line',label:'GMV/jam',data:C.liveHari.gmvPerJam,borderColor:O,borderWidth:2,pointRadius:3,yAxisID:'y1'}]},
   options:{scales:{y1:{type:'linear',position:'right',grid:{drawOnChartArea:false}}}}});
+ // 4-quadrant bubble plots. The x axis is LOGARITHMIC on purpose: product
+ // clicks span orders of magnitude, and on a linear axis every product but the
+ // top few collapses onto the y-axis — hiding exactly the low-traffic,
+ // high-closing corner ("hidden gem") the quadrant exists to surface.
+ function quad(id,Q){
+  var c=el(id); if(!c||!Q||!Q.sets||!Q.sets.length) return;
+  var lines=[];
+  if(Q.klikTinggi) lines.push({type:'line',data:[{x:Q.klikTinggi,y:0},{x:Q.klikTinggi,y:100}],borderColor:'rgba(100,116,139,.45)',borderWidth:1,borderDash:[4,4],pointRadius:0,showLine:true,fill:false,label:'ambang klik'});
+  if(Q.cvrTinggi) lines.push({type:'line',data:[{x:1,y:Q.cvrTinggi},{x:1e7,y:Q.cvrTinggi}],borderColor:'rgba(100,116,139,.45)',borderWidth:1,borderDash:[4,4],pointRadius:0,showLine:true,fill:false,label:'ambang CVR'});
+  var maxY=0; Q.sets.forEach(function(s){s.data.forEach(function(d){if(d.y>maxY)maxY=d.y;});});
+  new Chart(c,{type:'bubble',
+   data:{datasets:Q.sets.map(function(s){return {label:s.label,data:s.data,backgroundColor:s.warna+'B3',borderColor:s.warna};}).concat(lines)},
+   options:{plugins:{legend:{position:'bottom',labels:{boxWidth:8,font:{size:10},filter:function(i){return i.text.indexOf('ambang')!==0;}}},
+     tooltip:{callbacks:{label:function(ctx){var d=ctx.raw||{};return (d.nama||'')+' \u2014 '+(d.x||0)+' klik, CVR '+(d.y||0).toFixed(2)+'%';}}}},
+    scales:{x:{type:'logarithmic',title:{display:true,text:'Klik produk'}},
+      y:{title:{display:true,text:'CVR (%)'},min:0,suggestedMax:Math.max(1,maxY*1.15)}}}});
+ }
+ quad('c_quad_rel',C.quadRel); quad('c_quad_bench',C.quadBench);
 })();`;
+
+/**
+ * "Unduh PDF" for the standalone document.
+ *
+ * Deliberately NOT in `renderBody`: the Portal page frames the document and has
+ * its own download affordance, and a button inside the frame would also land in
+ * the PDF of itself. `.no-print` plus the `@media print` rule keeps it out of a
+ * browser Ctrl-P too.
+ *
+ * `avoid-all` page-breaking is what stops a KPI card or a table row being sliced
+ * across two pages — the failure everyone notices immediately in a client PDF.
+ */
+/**
+ * Serialise a value for embedding inside a `<script>` block.
+ *
+ * `JSON.stringify` escapes quotes and backslashes but NOT `<` — so a value
+ * containing `</script>` closes the tag early and everything after it is parsed
+ * as HTML. That is a real vector here, not a theoretical one: `CHART_DATA`
+ * carries PRODUCT NAMES, which come from the client's own catalogue, and a
+ * product called `</script><script>…` would execute in the browser of whoever
+ * opened the report — including the client it was sent to.
+ *
+ * Escaping `<`, `>` and `&` as `\uXXXX` keeps the JSON byte-for-byte valid (they
+ * are ordinary JS string escapes) while making an early tag close impossible.
+ * The HTML body has its own defence (`esc()` on every interpolation); this is
+ * the script-context equivalent, and the two are not interchangeable.
+ */
+export function jsonForScript(v: unknown): string {
+  return JSON.stringify(v)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026');
+}
+
+const PDF_BOOT = `
+(function(){
+ var b=document.getElementById('btnPdf'); if(!b) return;
+ if(typeof html2pdf==='undefined'){b.style.display='none';return;}
+ b.addEventListener('click',function(){
+  var el=document.getElementById('reportBody'); if(!el) return;
+  var old=b.innerHTML; b.disabled=true;
+  b.innerHTML='<i class="fa-solid fa-spinner fa-spin mr-1"></i> Membuat PDF...';
+  html2pdf().set({margin:[8,8,8,8],filename:(window.REPORT_PDF_NAME||'laporan')+'.pdf',
+   image:{type:'jpeg',quality:0.95},html2canvas:{scale:2,useCORS:true,logging:false},
+   jsPDF:{unit:'mm',format:'a4',orientation:'portrait'},
+   pagebreak:{mode:['avoid-all','css','legacy']}})
+   .from(el).save()
+   .then(function(){b.innerHTML=old;b.disabled=false;})
+   .catch(function(){b.innerHTML=old;b.disabled=false;});
+ });
+})();`;
+
+/** `Laporan-Alpha-Digital-2026-08-01` — no spaces, and the mode is marked so an
+ *  internal PDF cannot be mistaken for the client's copy after it is saved. */
+function pdfName(p: ReportPayload, mode: RenderMode): string {
+  const toko = (p.klien.toko || p.klien.nama || 'klien').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '');
+  const per = p.periode.mulai || String(p.periode.hari) + 'hari';
+  return `Laporan-${toko}-${per}${mode === 'internal' ? '-INTERNAL' : ''}`;
+}
 
 const STYLE = `body{font-family:'Inter',system-ui,sans-serif;background:#f8fafc;color:#0f172a}
 .font-display{font-family:'Poppins',system-ui,sans-serif}
 .kpi-value{font-size:1.6rem;line-height:1.15;font-weight:700}
 .insight-card{border-left:4px solid #0F766E}
 .badge-int{background:#EEF2FF;color:#4338CA;font-size:.65rem;padding:1px 6px;border-radius:99px;font-weight:700}
-table{border-collapse:collapse}`;
+table{border-collapse:collapse}
+/* Section-heading icon chip. Sized in em so it tracks the heading at every
+   breakpoint instead of needing a second rule per screen size. */
+.sec-ico{display:inline-flex;align-items:center;justify-content:center;
+  width:1.6em;height:1.6em;flex:0 0 1.6em;border-radius:.5em;
+  background:#CCFBF1;color:#0F766E;font-size:.62em}
+/* Circular score gauge. conic-gradient, zero dependencies — a canvas here would
+   mean the score disappears from the PDF export (html2canvas rasterises the
+   page, and a chart that has not finished animating rasterises blank). */
+.gauge{position:relative;width:104px;height:104px;flex:0 0 104px;border-radius:50%}
+.gauge::after{content:'';position:absolute;inset:9px;border-radius:50%;background:#fff}
+.gauge-val{position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;z-index:1;line-height:1}
+.gauge-num{font-size:1.55rem;font-weight:800;letter-spacing:-.02em}
+.gauge-max{font-size:.62rem;color:#64748B;margin-top:1px}
+@media print{.no-print{display:none!important}}`;
 
 /** The report body (no `<html>` wrapper) — what an embedding page drops in. */
-export function renderBody(p: ReportPayload, mode: RenderMode): string {
-  const seksi: [string, string][] = [];
-  const add = (judul: string, html: string): void => { if (html) seksi.push([judul, html]); };
+export function renderBody(p: ReportPayload, mode: RenderMode, insight?: PayloadInsight): string {
+  // One resolution point for the whole document: an explicit override (the
+  // AM's stored revision) or the engine's own narrative. Never a per-section
+  // choice — a page mixing edited and generated prose reads as two authors.
+  const I: PayloadInsight = insight ?? p.insight;
+  // [judul, html, ikon]. The icon is a PARAMETER of the section table rather
+  // than markup pasted into each block, so a new section cannot forget one and
+  // the icon set stays readable as a list.
+  const seksi: [string, string, string][] = [];
+  const add = (judul: string, html: string, ikon = 'fa-circle-dot'): void => {
+    if (html) seksi.push([judul, html, ikon]);
+  };
 
-  add('Ringkasan Eksekutif', seksiRingkasan(p, mode));
-  if (p.kpi.harian.length) add('Tren Harian', '<div class="bg-white rounded-xl border border-slate-100 p-5"><canvas id="c_harian" height="100"></canvas></div>');
-  add('Sumber GMV', seksiKanal(p, mode));
-  add('GMV Max Ads', seksiIklan(p, mode));
-  add('TikTok Ads Manager (Brand & Upper Funnel)', seksiAdsManager(p, mode));
-  add('LIVE Performance', seksiLive(p, mode));
-  add('Video Performance', seksiVideo(p, mode));
-  add('Matriks Produk 4 Kuadran', seksiProduk(p));
-  add('Affiliate & Kreator', seksiAfiliasi(p, mode));
-  add('Tokopedia', seksiTokopedia(p));
-  add('Key Insights', `<div class="bg-white rounded-xl border border-slate-100 p-5 md:p-6"><ol class="space-y-3">${p.insight.poin.map((t, i) => `<li class="flex gap-3"><span class="flex-shrink-0 w-6 h-6 bg-teal-100 text-teal-700 rounded-full flex items-center justify-center text-xs font-bold">${i + 1}</span><span class="text-sm">${esc(t)}</span></li>`).join('')}</ol></div>`);
+  add('Ringkasan Eksekutif', seksiRingkasan(p, mode, I), 'fa-chart-line');
+  if (p.kpi.harian.length) add('Tren Harian', '<div class="bg-white rounded-xl border border-slate-100 p-5"><canvas id="c_harian" height="100"></canvas></div>', 'fa-arrow-trend-up');
+  add('Sumber GMV', seksiKanal(p, mode), 'fa-diagram-project');
+  add('GMV Max Ads', seksiIklan(p, mode), 'fa-bullseye');
+  add('TikTok Ads Manager (Brand & Upper Funnel)', seksiAdsManager(p, mode), 'fa-bullhorn');
+  add('LIVE Performance', seksiLive(p, mode), 'fa-video');
+  add('Video Performance', seksiVideo(p, mode), 'fa-film');
+  add('Matriks Produk 4 Kuadran', seksiProduk(p), 'fa-table-cells-large');
+  add('Affiliate & Kreator', seksiAfiliasi(p, mode), 'fa-users');
+  add('Tokopedia', seksiTokopedia(p), 'fa-store');
+  add('Key Insights', `<div class="bg-white rounded-xl border border-slate-100 p-5 md:p-6"><ol class="space-y-3">${I.poin.map((t, i) => `<li class="flex gap-3"><span class="flex-shrink-0 w-6 h-6 bg-teal-100 text-teal-700 rounded-full flex items-center justify-center text-xs font-bold">${i + 1}</span><span class="text-sm">${esc(t)}</span></li>`).join('')}</ol></div>`, 'fa-lightbulb');
   add('Rekomendasi & Action Plan', `<div class="mb-4"><h3 class="text-sm font-bold text-red-700 mb-2">Prioritas Tinggi</h3>
-    <div class="grid md:grid-cols-2 gap-3">${p.insight.rekomendasi_tinggi.map((r) => rekCard(r, 'tinggi')).join('') || '<div class="text-sm text-slate-500">Tidak ada prioritas tinggi.</div>'}</div></div>
+    <div class="grid md:grid-cols-2 gap-3">${I.rekomendasi_tinggi.map((r) => rekCard(r, 'tinggi')).join('') || '<div class="text-sm text-slate-500">Tidak ada prioritas tinggi.</div>'}</div></div>
     <div><h3 class="text-sm font-bold text-amber-700 mb-2">Prioritas Sedang</h3>
-    <div class="grid md:grid-cols-2 gap-3">${p.insight.rekomendasi_sedang.map((r) => rekCard(r, 'sedang')).join('') || '<div class="text-sm text-slate-500">—</div>'}</div></div>`);
-  add('Outlook Periode Berikutnya', `<div class="bg-teal-50 border border-teal-100 rounded-xl p-5 md:p-6"><p class="text-slate-700 mb-4 text-sm">${esc(p.insight.outlook)}</p>
-    ${grid(p.insight.indikator.map((m) => kpi(m.nama, m.target)))}</div>`);
+    <div class="grid md:grid-cols-2 gap-3">${I.rekomendasi_sedang.map((r) => rekCard(r, 'sedang')).join('') || '<div class="text-sm text-slate-500">—</div>'}</div></div>`, 'fa-list-check');
+  add('Outlook Periode Berikutnya', `<div class="bg-teal-50 border border-teal-100 rounded-xl p-5 md:p-6"><p class="text-slate-700 mb-4 text-sm">${esc(I.outlook)}</p>
+    ${grid(I.indikator.map((m) => kpi(m.nama, m.target)))}</div>`, 'fa-flag-checkered');
 
-  const body = seksi.map(([judul, html], i) =>
-    `<section class="mb-8"><h2 class="font-display text-xl md:text-2xl font-bold text-slate-900 mb-4">${i + 1}. ${esc(judul)}</h2>${html}</section>`).join('');
+  const body = seksi.map(([judul, html, ikon], i) =>
+    `<section class="mb-8"><h2 class="font-display text-xl md:text-2xl font-bold text-slate-900 mb-4 flex items-center gap-3">
+      <span class="sec-ico"><i class="fa-solid ${esc(ikon)}"></i></span>${i + 1}. ${esc(judul)}</h2>${html}</section>`).join('');
 
   const label = p.periode.tipe === 'mingguan' ? 'Weekly Report' : 'Monthly Report';
   const rentang = p.periode.mulai ? `${p.periode.mulai} → ${p.periode.akhir}` : `${p.periode.hari} hari`;
@@ -412,15 +597,25 @@ export function renderBody(p: ReportPayload, mode: RenderMode): string {
 }
 
 /** A complete, self-contained HTML document — what the AM downloads or forwards. */
-export function renderReportHtml(p: ReportPayload, mode: RenderMode): string {
+export function renderReportHtml(p: ReportPayload, mode: RenderMode, insight?: PayloadInsight): string {
   const judul = `${p.periode.tipe === 'mingguan' ? 'Weekly' : 'Monthly'} Report — ${p.klien.toko || p.klien.nama || ''} ${p.periode.mulai || ''}`;
   return `<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>${esc(judul)}${mode === 'internal' ? ' — Internal' : ''}</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@600;700&display=swap">
 <style>${STYLE}</style></head>
-<body data-mode="${mode}"><div class="max-w-screen-xl mx-auto px-4 md:px-6 py-8">${renderBody(p, mode)}</div>
-<script>window.CHART_DATA=${JSON.stringify(chartData(p))};</script>
-<script>${CHART_BOOT}</script></body></html>`;
+<body data-mode="${mode}"><div class="max-w-screen-xl mx-auto px-4 md:px-6 py-8">
+<div class="no-print flex justify-end mb-2">
+  <button id="btnPdf" type="button" class="text-xs font-semibold text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-100 rounded-full px-3 py-1.5">
+    <i class="fa-solid fa-file-pdf mr-1"></i> Unduh PDF
+  </button>
+</div>
+<div id="reportBody">${renderBody(p, mode, insight)}</div></div>
+<script>window.CHART_DATA=${jsonForScript(chartData(p))};</script>
+<script>window.REPORT_PDF_NAME=${jsonForScript(pdfName(p, mode))};</script>
+<script>${CHART_BOOT}</script>
+<script>${PDF_BOOT}</script></body></html>`;
 }

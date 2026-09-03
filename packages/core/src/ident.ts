@@ -112,6 +112,20 @@ export const PREFIXES = {
   // its own machine/table pair, not `negotiation_proposals` (attempt_id-only)
   // and not a new `PRSP-`/`LEAD-` (owner decision: "nol LEAD-/PRSP- palsu").
   RNW: { entity: 'Renewal/cross-sell request', module: 'M0 (Kinerja Sales R-03)' },
+  // Gelombang 3 (SKU Screener, `docs/plan/PLAN_KONSOLIDASI_ALAT_ADVERTISER.md`
+  // §6) — one screening RUN (Modul A "screening/routing" or Modul B
+  // "sebelum/sesudah"), disambiguated by the `jenis` column on the same
+  // table/prefix (not two separate prefixes — the plan is explicit that SCR
+  // is shared by both). Schema-only this pass (SC-01..SC-07): no domain/route
+  // layer mints this prefix yet, hence no call site in the M6A §7 scan below.
+  SCR: { entity: 'Screening run (SKU Screener Modul A/B)', module: 'Gelombang 3 (SKU Screener)' },
+  // Gelombang 3 — Ads Decision Log (Modul C, R13-R16): a PRE-campaign,
+  // per-SKU decision ladder, append-only. Deliberately a SEPARATE entity from
+  // `OPT-` (M8 Optimization Log, which logs changes to an already-RUNNING ad
+  // campaign) — see the long comment on `ads_decision_log` in the Gelombang 3
+  // migration for the full "why two tables, not one" rationale. Schema-only
+  // this pass: no domain/route layer mints this prefix yet.
+  ADL: { entity: 'Ads Decision Log entry (SKU Screener Modul C)', module: 'Gelombang 3 (SKU Screener)' },
 } as const satisfies Record<string, PrefixInfo>;
 
 /** A registered prefix string (e.g. 'CLI', 'TRX'). */

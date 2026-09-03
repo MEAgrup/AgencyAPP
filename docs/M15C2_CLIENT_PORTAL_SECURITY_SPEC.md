@@ -178,6 +178,23 @@ M15 §6.1 sudah confirmed secara PRODUK bahwa laporan **native embedded**, bukan
 
 ---
 
+### CATATAN IMPLEMENTASI 2026-09-08 — OQ-8 TERTUTUP DENGAN SENDIRINYA (same-origin)
+
+> Dokumen ini berstatus RESOLVED, jadi bagian di atas TIDAK ditulis ulang. Catatan ini ditambahkan sebagai lapisan bertanggal, sesuai aturan append-only `DECISIONS.md`.
+
+Yang berubah saat klaster embed benar-benar dikerjakan: **laporannya tidak datang dari sistem eksternal.** Engine laporan klien sudah ada di dalam CDPS sejak 2026-08-19 (`packages/core/src/report/**`, tabel `client_reports`, lahir dari gap audit "Kelas C1" — bukan dari PRD, itulah kenapa §6 tidak mengetahuinya) dan lebih detail daripada HTML yang dipakai tim: 13 seksi vs 12, termasuk seksi TikTok Ads Manager yang HTML-nya tak punya; blok internal DIBUANG dari string alih-alih `display:none`; benchmark berversi sehingga skornya recomputable.
+
+Akibatnya:
+
+- **OQ-8 (mekanisme token pass-through) tidak perlu dijawab, ia lenyap.** Tak ada origin kedua ⇒ tak ada token untuk dilewatkan. Portal memuat `GET /api/v1/client-portal/reports/{id}/html` di iframe **same-origin**: browser mengirim cookie sesi Portal sendiri, server me-resolve kontaknya lewat `requireClientContactActor`, dan gerbang `[Terbit]` + scope klien ditegakkan di query DAN policy RLS.
+- **M15 Rule 3 ("natively embedded") tetap terpenuhi**; yang menyimpang hanya MEKANISME §6 Opsi A (yang mengasumsikan origin eksternal). Dicatat sebagai deviasi di `DECISIONS.md` 2026-09-08 sesuai aturan rumah.
+- **`frame-src` tidak perlu menyebut host eksternal**: CSP Portal `frame-src 'self'` + `frame-ancestors 'none'` (dipasang `web-client-portal/next.config.ts`). Dokumen laporannya membawa CSP-nya sendiri yang lebih ketat (di route handler), meng-allow-list tepat host CDN yang tag-nya rujuk (Tailwind, Chart.js, FontAwesome, Google Fonts) — eksplisit, bukan wildcard. Mem-vendor aset itu lokal dicatat sebagai perbaikan lanjutan, bukan blocker.
+- **§5.2 rate limit form komplain: DIBANGUN.** `check_complaint_rate_limit` (5/kontak/jam + 20/IP/jam) — angka spec dipakai apa adanya, pola persis `login_rate_limit_attempts`. Baris "masih menunggu klasternya" di §5.2 sudah tidak berlaku.
+- **§5.1 audit level-BACA: DIBANGUN.** Setiap `view:reports`/`view:report`/`view:progress`/`view:health` dan `submit:complaint` menulis baris `audit_log` dengan `entity_type='client_contact'` dan aktor = id KONTAK (bukan id klien, yang akan meratakan dua kontak jadi satu aktor tak terbedakan).
+- **§4.2 allow-list ditegakkan di DTO**, dan sejak 2026-09-08 dijaga tes: `apps/api/src/lib/shape-parity.test.ts` sekarang memindai `web-client-portal/src/lib/types.ts` juga, jadi field yang ditambahkan ke wire portal tanpa dideklarasikan FE menggagalkan tes.
+
+---
+
 ## 7. OPEN QUESTIONS — status akhir (RESOLVED 2026-08-31)
 
 Sembilan dari sepuluh OQ draft asli dijawab langsung oleh pemilik (dua putaran `AskUserQuestion`, sesi 2026-08-31); satu (OQ-8) tetap terbuka sebagai detail teknis klaster embed, bukan blocker M15-C2 secara keseluruhan (§6).
