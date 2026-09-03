@@ -140,10 +140,21 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "139"
-check "entity_prefix"    "select count(*) from entity_prefix"    "37"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "142"
+check "entity_prefix"    "select count(*) from entity_prefix"    "39"
 check "sm_machines"      "select count(*) from sm_machines"      "31"
 check "notif_events"     "select count(*) from notif_events"     "67"
+# 142 = 139 + 3 tabel Gelombang 3 SKU Screener SC-01..SC-07
+#       (20260908050000_gelombang3_sku_screener.sql): `screening_run` (Modul
+#       A/B, SCR-, payload beku), `ads_decision_log` (Modul C, ADL-,
+#       append-only, R13-R16), `optimization_tracker` (Modul D, anak
+#       screening_run PK (screening_id,product_code), NOL prefix sendiri). +2
+#       prefix SCR/ADL (37→39). Nol mesin baru (screening_run tidak punya
+#       siklus status — sekali dihitung, beku; ads_decision_log append-only
+#       tanpa status; optimization_tracker mutable tapi tanpa status field) ⇒
+#       sm_machines TETAP 31; nol event katalog baru ⇒ notif_events TETAP 67.
+#       Schema-only pass — belum ada domain/route layer (SC-08 + wrapper
+#       domain menyusul tiket lain). Lihat DECISIONS.md 2026-09-08 (Gelombang 3).
 # 139 = 136 + 3 tabel klaster C1 insight/publikasi laporan klien
 #       (20260908010000_c1_laporan_insight_publikasi.sql): `client_report_insight`
 #       (revisi teks, append-only), `client_report_publikasi` (status + revisi
