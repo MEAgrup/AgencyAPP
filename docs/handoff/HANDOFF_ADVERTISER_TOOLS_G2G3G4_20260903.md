@@ -12,7 +12,8 @@
 | | |
 |---|---|
 | **Repo** | `MEAgrup/AgencyAPP` |
-| **Branch kerja** | `claude/advertiser-tools-consolidation-waves-6tl68h` — sudah di-push ke origin, tidak ada PR (belum diminta pemilik) |
+| **Branch kerja** | `claude/advertiser-tools-consolidation-waves-6tl68h` — sudah di-push ke origin |
+| **PR** | [#277](https://github.com/MEAgrup/AgencyAPP/pull/277), draft, base `main`. **Bergantung pada #276** — branch ini bercabang dari branch #276, jadi diff #277 saat ini mencakup #276 + kerja baru; akan menyusut otomatis begitu #276 merge. Jangan merge #277 sebelum #276. |
 | **Bukan branch PR #276** | PR #276 (`claude/cdps-advertiser-tools-consolidation-xxpzow`, Gelombang 1) masih **draft terpisah, belum di-review/di-merge pemilik**. Branch kita bercabang dari sana (sudah membawa seluruh histori Gelombang 1) tapi Gelombang 2/3/4 di bawah ini HANYA ada di branch kita, BUKAN di PR #276. |
 | **Migrasi baru** | 3 migrasi, SEMUA LOKAL SAJA — **BELUM diterapkan ke live** (`CDPS SG`, project id `egddxfcnrtecheiykhlf`): `20260908050000_gelombang3_sku_screener.sql`, `20260909010000_sh01_shopee_report_engine.sql`. (Gelombang 4 nol migrasi — lihat §1.3.) |
 | **Gerbang hitungan (lokal, terverifikasi)** | tabel **143** · `entity_prefix` **39** (37→39, +`SCR-`/+`ADL-`) · `sm_machines` **31** (tak berubah) · `notif_events` **67** (tak berubah) — sudah dinaikkan di `scripts/db-rebuild.sh` **DAN** `.github/workflows/ci.yml` di commit yang sama (aturan rumah, lihat §4 poin 2) |
