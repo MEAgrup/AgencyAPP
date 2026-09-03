@@ -20,6 +20,7 @@ import {
 import {
   EDITABLE_FIELDS,
   PAYMENT_INTENT_OPTIONS,
+  PAYMENT_STATUS_MENUNGGU_VERIFIKASI,
   PLATFORM_OPTIONS,
   addPlatform,
   editClient,
@@ -316,6 +317,13 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
 
   const allocationTotalPct = client.sales_allocation.reduce((sum, a) => sum + a.basis_points, 0) / 100;
 
+  // Payment Intent locks the moment the linked transaction's first
+  // verification lands (payment_status moves off Menunggu Verifikasi) —
+  // mirrors client.setPaymentIntent's own IntentLockedError, so the form is
+  // never shown for a save the server would reject anyway.
+  const paymentIntentLocked =
+    client.payment_status !== '' && client.payment_status !== PAYMENT_STATUS_MENUNGGU_VERIFIKASI;
+
   return (
     <div className="stack">
       <div>
@@ -399,6 +407,43 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
               )}
             </div>
           </div>
+        </div>
+
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--color-border)' }}>
+          <h3 style={{ fontSize: 14, marginBottom: 8 }}>Payment Intent</h3>
+          <p className="muted" style={{ marginBottom: 8 }}>
+            Nilai saat ini:{' '}
+            {client.payment_intent ? <span className="badge badge-blue">{client.payment_intent}</span> : '—'}
+          </p>
+          {paymentIntentLocked ? (
+            <p className="muted" style={{ fontSize: 13 }}>
+              Payment Intent terkunci — pembayaran sudah diverifikasi, transaksi sudah selesai.
+            </p>
+          ) : (
+            <form className="form" onSubmit={handleSetIntent}>
+              {intentError && <div className="alert alertError" role="alert">{intentError}</div>}
+              {intentMessage && <div className="alert alertSuccess" role="status">{intentMessage}</div>}
+              <div className="stack" style={{ gap: 6 }}>
+                {PAYMENT_INTENT_OPTIONS.map((opt) => (
+                  <label key={opt} className="row" style={{ gap: 8, fontSize: 13 }}>
+                    <input
+                      type="radio"
+                      name="payment_intent"
+                      value={opt}
+                      checked={intentChoice === opt}
+                      onChange={() => setIntentChoice(opt)}
+                    />
+                    {opt}
+                  </label>
+                ))}
+              </div>
+              <div>
+                <button type="submit" className="btn btnPrimary" disabled={intentSubmitting || !intentChoice}>
+                  {intentSubmitting ? 'Menyimpan...' : 'Simpan Payment Intent'}
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       </section>
 
@@ -792,39 +837,6 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
         role={role}
         employeeId={employee?.employee_id ?? null}
       />
-
-      <section className="card">
-        <div className="cardHeader">
-          <h2>Payment Intent</h2>
-        </div>
-        <p className="muted">
-          Nilai saat ini:{' '}
-          {client.payment_intent ? <span className="badge badge-blue">{client.payment_intent}</span> : '—'}
-        </p>
-        <form className="form" onSubmit={handleSetIntent}>
-          {intentError && <div className="alert alertError" role="alert">{intentError}</div>}
-          {intentMessage && <div className="alert alertSuccess" role="status">{intentMessage}</div>}
-          <div className="stack" style={{ gap: 6 }}>
-            {PAYMENT_INTENT_OPTIONS.map((opt) => (
-              <label key={opt} className="row" style={{ gap: 8, fontSize: 13 }}>
-                <input
-                  type="radio"
-                  name="payment_intent"
-                  value={opt}
-                  checked={intentChoice === opt}
-                  onChange={() => setIntentChoice(opt)}
-                />
-                {opt}
-              </label>
-            ))}
-          </div>
-          <div>
-            <button type="submit" className="btn btnPrimary" disabled={intentSubmitting || !intentChoice}>
-              {intentSubmitting ? 'Menyimpan...' : 'Simpan Payment Intent'}
-            </button>
-          </div>
-        </form>
-      </section>
 
       <section className="card">
         <div className="cardHeader">

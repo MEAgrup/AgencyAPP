@@ -2457,6 +2457,11 @@ export interface ClientDetailWire {
   commission_payment_pic_id: string;
   transaction_id: string;
   payment_intent: string;
+  /** Linked transaction's payment_status ('' when no transaction). Not part
+   *  of Go's `clientView` — added for the Payment Intent lock on the client
+   *  page (owner request, Nerissa, 2026-09-02): FE hides the editable form
+   *  once verification has moved this past PAYMENT_MENUNGGU. */
+  payment_status: string;
   released_to_account_at: string | null;
   platforms: PlatformWire[];
   sales_allocation: AllocationWire[];
@@ -2490,6 +2495,12 @@ function idr(decimal: string): string {
  * `transaction` are deliberately NOT emitted: Go's clientView has no such keys,
  * and the FE `Client` type does not declare them. The installment schedule
  * reaches the FE through the M5 transaction endpoints instead.
+ *
+ * `payment_status` is the one deliberate exception to "no key beyond Go's
+ * clientView": it flattens `c.transaction?.paymentStatus` so the Payment
+ * Intent editor (merged into "Identitas & Baseline", 2026-09-02) can lock
+ * itself once verification has started, mirroring
+ * `client.setPaymentIntent`'s own IntentLockedError check server-side.
  */
 export function clientDetailToWire(c: sales.ClientDetail): ClientDetailWire {
   return {
@@ -2508,6 +2519,7 @@ export function clientDetailToWire(c: sales.ClientDetail): ClientDetailWire {
     commission_payment_pic_id: c.commissionPaymentPicId,
     transaction_id: c.transactionId ?? '',
     payment_intent: c.paymentIntent ?? '',
+    payment_status: c.transaction?.paymentStatus ?? '',
     released_to_account_at: c.releasedToAccountAt ? c.releasedToAccountAt.toISOString() : null,
     platforms: c.platforms.map((p) => ({
       client_platform_id: p.clientPlatformId,

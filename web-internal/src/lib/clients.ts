@@ -43,6 +43,11 @@ export interface Client {
   commission_payment_pic_id: string;
   transaction_id: string;
   payment_intent: string;
+  /** Linked transaction's payment_status ('' when no transaction). Only ever
+   *  moves MENUNGGU → SEBAGIAN/LUNAS on the first verification (M5) — the FE
+   *  uses this to lock the Payment Intent editor once verification has
+   *  started, mirroring `client.setPaymentIntent`'s IntentLockedError. */
+  payment_status: string;
   released_to_account_at: string | null;
   platforms: Platform[];
   sales_allocation: Allocation[];
@@ -85,6 +90,11 @@ export const PAYMENT_INTENT_OPTIONS = [
   '[Termin]',
   '[Bayar di Belakang]',
 ] as const;
+
+/** Transaction `payment_status` before any verification has landed
+ *  (finance.ts PAYMENT_MENUNGGU) — the only state in which Payment Intent
+ *  is still editable server-side. */
+export const PAYMENT_STATUS_MENUNGGU_VERIFIKASI = '[Menunggu Verifikasi]';
 
 /** Platform List checklist (M0 §4.3 — verbatim from the PRD). Shared by the Sales
  *  Qualified Lead Form and the Client Record Platform List editor so the two

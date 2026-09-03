@@ -776,6 +776,7 @@ describe('M4 clientDetailToWire (O41 #1 — the Client Record contract)', () => 
       commission_payment_pic_id: 'EMP-BUDI',
       transaction_id: 'TRX-202607-0001',
       payment_intent: '[Termin]',
+      payment_status: '',
       released_to_account_at: null,
       platforms: [
         { client_platform_id: 1, platform: 'Shopee', store_link: 'https://shopee/alpha', managed_since: '2026-05-01', active: true },
@@ -796,8 +797,8 @@ describe('M4 clientDetailToWire (O41 #1 — the Client Record contract)', () => 
     for (const key of [
       'id', 'nama_pic', 'toko', 'kota', 'link_toko', 'kategori', 'gmv_baseline', 'target_gmv',
       'total_sales', 'marketing_budget', 'origin_campaign_id', 'sales_pic_id',
-      'commission_payment_pic_id', 'transaction_id', 'payment_intent', 'released_to_account_at',
-      'platforms', 'sales_allocation', 'services',
+      'commission_payment_pic_id', 'transaction_id', 'payment_intent', 'payment_status',
+      'released_to_account_at', 'platforms', 'sales_allocation', 'services',
     ]) {
       expect(wire).toHaveProperty(key);
     }
@@ -812,6 +813,19 @@ describe('M4 clientDetailToWire (O41 #1 — the Client Record contract)', () => 
     for (const absent of ['lead_id', 'winning_attempt_id', 'sales_pic_nama', 'created_at', 'transaction']) {
       expect(absent in wire).toBe(false);
     }
+  });
+
+  it('flattens the linked transaction payment_status; empty string when unlinked', () => {
+    const wire = clientDetailToWire({
+      ...detail,
+      transaction: {
+        id: 'TRX-202607-0001', paymentIntentScheme: '[Termin]', totalAgreedValue: '9000000.00',
+        paymentStatus: '[Terverifikasi - Sebagian]', bermasalah: false, releasedToAccountAt: null,
+        installments: [],
+      },
+    });
+    expect(wire.payment_status).toBe('[Terverifikasi - Sebagian]');
+    expect(clientDetailToWire(detail).payment_status).toBe('');
   });
 
   it('nullable money stays null; a null origin campaign / intent becomes an empty string', () => {

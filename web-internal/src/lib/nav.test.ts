@@ -26,7 +26,6 @@ const UNIVERSAL = [
   // Ungated by design (O44(c)): an employee under a forced password change must
   // be able to reach the change form, so this can never be role-gated.
   '/akun/password',
-  '/demo-tasks',
   '/notifications',
   '/master-services',
   // M11 My Tasks is the universal cross-Client work view; the per-Client Client

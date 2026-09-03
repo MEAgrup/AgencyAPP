@@ -668,6 +668,10 @@ const APPROVED_DIVERGENCE: Record<string, { keys: string[]; decision: string }> 
       'link_toko', 'gmv_baseline', 'target_gmv', 'total_sales', 'marketing_budget',
       'origin_campaign_id', 'commission_payment_pic_id', 'transaction_id',
       'platforms', 'sales_allocation', 'services',
+      // 'payment_status' (added 2026-09-02 for the Client Record's Payment
+      // Intent lock) is the same narrow-roster story as the rest of this
+      // list — the roster page never reads it, only GET /clients/{id} does.
+      'payment_status',
     ],
     decision: 'DECISIONS O43 (a), owner 2026-07-29',
   },
