@@ -366,3 +366,72 @@ describeDb('listShopeeAdsCampaignsForPeriod — the exclude-campaign picker (SH-
       .rejects.toThrow(ForbiddenError);
   });
 });
+
+describeDb('SHP-1 — gmv_kotor (Pesanan Dibuat) vs gmv_net (Pesanan Dibayar)', () => {
+  /**
+   * The real export's shape: the same table once per order status, each behind
+   * its own `__SHEET__:` marker (what `parseShopeeExportFile` emits). Ratios
+   * mirror Fim Motor — paid well below created because of cancellations.
+   */
+  const homeTigaBagian = (): unknown[][] => [
+    ['__SHEET__:Pesanan Dibuat'],
+    HOME_HEADER,
+    ['Total', 'Rp100.000.000', '1.000', 'Rp100.000', '5.000', '50.000', '2,00%', '200', 'Rp18.000.000', '10', 'Rp1.000.000', '900', '300', '600', '50', '20,00%'],
+    ['01/08/2026', 'Rp3.000.000', '30', 'Rp100.000', '150', '2.000', '1,50%', '2', 'Rp50.000', '0', 'Rp0', '25', '10', '15', '2', '10,00%'],
+    ['__SHEET__:Pesanan Siap Dikirim'],
+    HOME_HEADER,
+    ['Total', 'Rp93.000.000', '930', 'Rp100.000', '5.000', '50.000', '1,86%', '20', 'Rp2.000.000', '5', 'Rp500.000', '860', '280', '580', '50', '19,00%'],
+    ['__SHEET__:Pesanan Dibayar'],
+    HOME_HEADER,
+    ['Total', 'Rp82.000.000', '820', 'Rp100.000', '5.000', '50.000', '1,64%', '0', 'Rp0', '0', 'Rp0', '790', '260', '530', '50', '18,00%'],
+  ];
+  const homeTigaFile = () => ({
+    filename: '[bisnis]-Home && Agustus 2026 && ZZRS && 2026-09-01.xlsx',
+    aoa: homeTigaBagian(), sha256: SHA, ukuranBytes: 4096,
+  });
+
+  const totalSalesOf = async (client: string): Promise<number> => {
+    const r = await sql<{ total_sales: string }[]>`select total_sales from clients where id = ${client}`;
+    return Number(r[0].total_sales);
+  };
+
+  it('stores the two figures SEPARATELY — kotor = dibuat, bersih = dibayar', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    const d = await createReportShopee(sql, actorAm, client, bulanInput(pid, [homeTigaFile()]));
+    expect(d.gmvKotor).toBeCloseTo(100_000_000, 0);
+    expect(d.gmvNet).toBeCloseTo(82_000_000, 0);
+    // The whole point of SHP-1: these are no longer the same number.
+    expect(d.gmvNet).not.toBeCloseTo(d.gmvKotor, 0);
+  });
+
+  it('clients.total_sales follows the PAID figure — that is what Health Score M13 reads', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    await createReportShopee(sql, actorAm, client, bulanInput(pid, [homeTigaFile()]));
+    // 31-day monthly period → run-rate == the period figure, so total_sales is
+    // the paid number, not the gross one.
+    expect(await totalSalesOf(client)).toBeCloseTo(82_000_000, 0);
+  });
+
+  it('payload records WHERE the net figure came from', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    const d = await createReportShopee(sql, actorAm, client, bulanInput(pid, [homeTigaFile()]));
+    const p = d.payload as { periode: { gmv_bersih_sumber: string }; kpi: { dibayar: { gmv: number } | null } };
+    expect(p.periode.gmv_bersih_sumber).toBe('pesanan_dibayar');
+    expect(p.kpi.dibayar?.gmv).toBeCloseTo(82_000_000, 0);
+  });
+
+  it('a two-section export falls back to gross AND says so — never gross silently labelled net', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    const d = await createReportShopee(sql, actorAm, client, bulanInput(pid, [homeFile()]));
+    // The fixture homeFile() has only "Pesanan Dibuat".
+    expect(d.gmvNet).toBeCloseTo(100_000_000, 0);
+    expect(d.gmvKotor).toBeCloseTo(100_000_000, 0);
+    const p = d.payload as { periode: { gmv_bersih_sumber: string }; kpi: { dibayar: unknown } };
+    expect(p.periode.gmv_bersih_sumber).toBe('tidak_tersedia');
+    expect(p.kpi.dibayar).toBeNull();
+  });
+});

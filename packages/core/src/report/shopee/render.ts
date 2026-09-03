@@ -108,8 +108,20 @@ function seksiSkor(p: ShopeeReportPayload, mode: RenderMode): string {
 function seksiRingkasan(p: ShopeeReportPayload, I: ShopeePayloadInsight): string {
   const k = p.kpi;
   const cancel = (k.pesanan ?? 0) > 0 ? (k.batal_pesanan ?? 0) / (k.pesanan as number) : null;
+  // SHP-1 — kotor and bersih side by side, with the gap named rather than left
+  // for the reader to subtract. When the export has no paid section the card
+  // says so instead of repeating the gross figure under a "bersih" label.
+  const bersih = k.dibayar;
+  const gap = bersih != null && k.gmv != null && bersih.gmv != null ? k.gmv - bersih.gmv : null;
   const cards = [
-    kpi('Total GMV (Dibuat)', rpPendek(k.gmv), `${num(k.pesanan)} pesanan • ${num(k.pembeli)} pembeli`),
+    kpi('GMV Kotor (Pesanan Dibuat)', rpPendek(k.gmv), `${num(k.pesanan)} pesanan • ${num(k.pembeli)} pembeli`),
+    bersih == null
+      ? kpi('GMV Bersih (Pesanan Dibayar)', DASH, 'export tidak memuat bagian Pesanan Dibayar')
+      : kpi(
+          'GMV Bersih (Pesanan Dibayar)',
+          rpPendek(bersih.gmv),
+          `${num(bersih.pesanan)} pesanan • selisih ${rpPendek(gap)} dari kotor`,
+        ),
     kpi('GMV Siap Kirim', rpPendek(k.siap_kirim.gmv), `${num(k.siap_kirim.pesanan)} pesanan • CR ${pct(k.siap_kirim.cvr)}`),
     kpi('ROAS Ads Shopee', p.kesehatan.ads?.roas == null ? DASH : dec(p.kesehatan.ads.roas, 2) + 'x', `spend ${rpPendek(p.kesehatan.ads?.spend)}`),
     kpi('Pengunjung Toko', num(k.pengunjung), `CR ${pct(k.cvr)}`),

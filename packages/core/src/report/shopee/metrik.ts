@@ -198,14 +198,44 @@ function parseHomeSection(rows: Aoa, startIdx: number): HomeSection {
   return { summary, daily };
 }
 
-export interface BisnisHome { pesanan_dibuat: HomeSection | null; pesanan_siap_dikirim: HomeSection | null }
+/**
+ * The Bisnis — Home export carries the SAME table three times, once per order
+ * status. All three are read (SHP-1):
+ *
+ *  - `pesanan_dibuat` — orders CREATED. The headline figure Seller Centre's own
+ *    dashboard shows, and what the report calls GMV kotor.
+ *  - `pesanan_siap_dikirim` — orders ready to ship.
+ *  - `pesanan_dibayar` — orders PAID. Money that actually arrived, and what the
+ *    report calls GMV bersih.
+ *
+ * Reading only the first two (as this parser did until the Fim Motor UAT,
+ * `docs/handoff/UAT_SHOPEE_FIM_MOTOR_20260903.md`) meant the paid figure did not
+ * exist anywhere in CDPS, so `gmv_kotor` and `gmv_net` were filled with the
+ * identical number and `clients.total_sales` counted cancelled orders as sales.
+ * For that export the gap was Rp 295.710.122 — 18,2%.
+ *
+ * `pesanan_dibayar` stays NULLABLE: older exports (and the engine's own
+ * fixtures) legitimately have only two sections, and a missing section must read
+ * as "not stated", never as zero.
+ */
+export interface BisnisHome {
+  pesanan_dibuat: HomeSection | null;
+  pesanan_siap_dikirim: HomeSection | null;
+  pesanan_dibayar: HomeSection | null;
+}
 
 export function parseBisnisHome(rows: Aoa): BisnisHome {
   const iD = findRow(rows, 'pesanan dibuat');
   const iS = findRow(rows, 'pesanan siap dikirim', (iD >= 0 ? iD : 0) + 1);
-  const out: BisnisHome = { pesanan_dibuat: null, pesanan_siap_dikirim: null };
+  // Searched AFTER the "siap dikirim" section on purpose: the same workbook
+  // later carries sheets named "(pesanan dibayar)Asal Penjualan" and
+  // "(pesanan dibayar)Kontribusi …", which also contain the phrase. Starting
+  // past the earlier sections keeps the FIRST hit the summary table itself.
+  const iB = findRow(rows, 'pesanan dibayar', (iS >= 0 ? iS : iD >= 0 ? iD : 0) + 1);
+  const out: BisnisHome = { pesanan_dibuat: null, pesanan_siap_dikirim: null, pesanan_dibayar: null };
   if (iD >= 0) out.pesanan_dibuat = parseHomeSection(rows, iD);
   if (iS >= 0) out.pesanan_siap_dikirim = parseHomeSection(rows, iS);
+  if (iB >= 0) out.pesanan_dibayar = parseHomeSection(rows, iB);
   if (!out.pesanan_dibuat && !out.pesanan_siap_dikirim) throw new Error('[Home: section pesanan tidak dikenali]');
   return out;
 }
@@ -854,12 +884,14 @@ export interface KpiPesananDibuat {
   batal_pesanan: number | null; batal_nilai: number | null; retur_pesanan: number | null; retur_nilai: number | null;
 }
 export interface KpiPesananSiap { gmv: number | null; pesanan: number | null; cr: number | null }
+/** SHP-1 — orders PAID. `null` (the whole object) when the export has no such section; never a fabricated 0. */
+export interface KpiPesananDibayar { gmv: number | null; pesanan: number | null; cr: number | null }
 export interface AffiliateRingkasan {
   top_products: AffItem[]; top_creators: AffItem[]; total_omzet: number | null; total_komisi: number | null;
   total_creators: number; total_products: number;
 }
 export interface ShopeeMetrics {
-  kpi_utama: { pesanan_dibuat: KpiPesananDibuat; pesanan_siap_dikirim: KpiPesananSiap };
+  kpi_utama: { pesanan_dibuat: KpiPesananDibuat; pesanan_siap_dikirim: KpiPesananSiap; pesanan_dibayar: KpiPesananDibayar | null };
   daily: DailyRow[];
   kuadran: Kuadrans | null;
   health: Health;
@@ -883,6 +915,10 @@ const ZERO_ACTIVITY_MODULES = ['bisnis_live', 'promo_diskon', 'layanan_broadcast
 export function buildShopeeMetrics(parsed: ParsedShopee, bench: ShopeeBench): ShopeeMetrics {
   const sd = parsed.bisnis_home?.pesanan_dibuat?.summary ?? {};
   const ss = parsed.bisnis_home?.pesanan_siap_dikirim?.summary ?? {};
+  // NOT `?? {}` like the two above: the ABSENCE of this section has to stay
+  // distinguishable from a section full of nulls, because `gmv_net` falls back
+  // to the gross figure only when the section is genuinely missing (SHP-1).
+  const sb = parsed.bisnis_home?.pesanan_dibayar?.summary ?? null;
   const kuadran = parsed.bisnis_produk ? computeQuadrants(parsed.bisnis_produk, bench) : null;
   const zero = ZERO_ACTIVITY_MODULES.filter((m) => {
     const mod = parsed[m];
@@ -904,6 +940,7 @@ export function buildShopeeMetrics(parsed: ParsedShopee, bench: ShopeeBench): Sh
         retur_pesanan: sd.pesanan_retur ?? null, retur_nilai: sd.penjualan_retur ?? null,
       },
       pesanan_siap_dikirim: { gmv: ss.penjualan ?? null, pesanan: ss.pesanan ?? null, cr: ss.tingkat_konversi ?? null },
+      pesanan_dibayar: sb ? { gmv: sb.penjualan ?? null, pesanan: sb.pesanan ?? null, cr: sb.tingkat_konversi ?? null } : null,
     },
     daily: parsed.bisnis_home?.pesanan_dibuat?.daily ?? [],
     kuadran, health: computeHealth(parsed, bench), kanal: computeChannels(parsed),

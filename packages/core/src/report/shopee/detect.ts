@@ -91,6 +91,96 @@ export function parseFilename(name: string): ParsedFilename | null {
 }
 
 // ---------------------------------------------------------------------------
+// RAW Seller Centre filename (second name layer) — SHP-3.
+//
+// WHY THIS EXISTS. UAT with a real export (Fim Motor, Juli 2026, 15 files —
+// `docs/handoff/UAT_SHOPEE_FIM_MOTOR_20260903.md`) showed that Seller Centre's
+// OWN filenames match neither the team's manual convention nor, for most
+// modules, any content signature: `parseFilename` returned null for all 15,
+// and the content fallback got 8 right, **3 into the WRONG SLOT**, and 4 not at
+// all. A wrong slot is worse than no slot: the Affiliate section silently fills
+// with search-ads numbers and the report shows no sign of it.
+//
+// So the AM had exactly two options, both manual and both repeated monthly:
+// rename 15 files, or set 15 dropdowns. This layer removes the source of the
+// mistake instead (owner decision SHP-3, `docs/DECISIONS.md`).
+//
+// ORDER MATTERS, twice over:
+//  1. This runs AFTER the team convention (`parseFilename`) — an explicitly
+//     renamed file still wins, because that rename is a human statement of
+//     intent and this is only a guess about a machine-generated name.
+//  2. Inside this table, the FIRST match wins, so narrower patterns are listed
+//     before broader ones that would also match. `chat_broadcast` must precede
+//     `chat`, or every broadcast export lands in `layanan_chat`.
+//
+// CONFIDENCE, stated honestly per row below. Nine patterns name their module
+// unambiguously. Three are a READING of the export's purpose, marked `⚠️` — and
+// they are the ads trio, where being wrong costs the least: `ads_toko`,
+// `ads_produk` and `ads_banner` are parsed by the SAME parser (`parseAdsCsv`)
+// and SUMMED together for every computed figure (spend, omzet, ROAS, ACOS,
+// health flags). Mixing them up moves a campaign between two display lists and
+// changes no number at all. Verified on the real export: the two ads files are
+// disjoint (Σ biaya 127.142.120 + 6.200.000 = 133.342.120, exactly the engine's
+// total), so this layer cannot introduce double counting either.
+//
+// The per-file dropdown in `web-internal` stays the override for everything
+// here — this layer removes routine work, it does not claim to be always right.
+// ---------------------------------------------------------------------------
+/**
+ * `[substring of the lowercased basename, module]`, first match wins.
+ *
+ * Substring rather than regex on purpose: Seller Centre appends its own
+ * timestamps, shop names and date ranges around a stable stem
+ * (`parentskudetail.20260701_20260731.xlsx`,
+ * `fim_motor.shopee-shop-stats.20260701-20260731.xlsx`), so the stem is the
+ * only durable part to key on.
+ */
+const RAW_NAME_PATTERNS: ReadonlyArray<readonly [string, ShopeeModule]> = [
+  // — narrower first —
+  ['chat_broadcast', 'layanan_broadcast'],   // must precede 'chat'
+  ['chatbroadcast', 'layanan_broadcast'],
+  ['broadcast', 'layanan_broadcast'],
+  // — unambiguous stems —
+  ['shop-stats', 'bisnis_home'],             // <shop>.shopee-shop-stats.<range>
+  ['parentskudetail', 'bisnis_produk'],
+  ['live_streaming', 'bisnis_live'],
+  ['video-overview', 'bisnis_video'],
+  ['flash_sale', 'promo_flashsale'],         // In_Shop_Flash_Sale_Metrics
+  ['flashsale', 'promo_flashsale'],
+  ['discount', 'promo_diskon'],
+  ['voucher', 'promo_voucher'],
+  ['amsaffiliateperformance', 'aff_creator'], // AMS = per-creator affiliate report
+  ['productperformance', 'aff_product'],      // AMS product-level affiliate report
+  // — ⚠️ a reading of purpose, not a stated type. See CONFIDENCE above: these
+  //   three slots share one parser and are summed, so a mix-up costs no number.
+  ['semua-iklan-live', 'ads_live'],           // ⚠️ Data-Semua-Iklan-Live
+  ['iklan-live', 'ads_live'],                 // ⚠️
+  ['keseluruhan', 'ads_toko'],                // ⚠️ Data+Keseluruhan+Iklan+Shopee
+  ['search-ads', 'ads_produk'],               // ⚠️ Search-Ads-Overall-Data
+  // — 'chat' LAST among the layanan family, so broadcast never falls here —
+  ['chat', 'layanan_chat'],
+];
+
+/**
+ * Recognise a raw Seller Centre export name. Returns null for anything not in
+ * the table — a null here simply hands the file to the content fallback, the
+ * same as before this layer existed.
+ *
+ * `Laporan-tanpa-judul-…` (Meta CPAS) is deliberately ABSENT: "untitled report"
+ * says nothing about its type, and the content signature already detects it
+ * correctly. Guessing from a name that carries no information would be the
+ * wrong-slot failure this layer exists to remove.
+ */
+export function detectModuleFromRawName(filename: string): ShopeeModule | null {
+  const dot = filename.lastIndexOf('.');
+  const base = (dot >= 0 ? filename.slice(0, dot) : filename).toLowerCase();
+  for (const [needle, mod] of RAW_NAME_PATTERNS) {
+    if (base.includes(needle)) return mod;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Content signature (fallback)
 // ---------------------------------------------------------------------------
 const cell = (v: unknown): string => (v == null ? '' : String(v).trim());
@@ -149,10 +239,24 @@ export function detectModuleFromContent(aoa: Aoa): ShopeeModule | null {
   return null;
 }
 
-/** Filename convention first, content signature as fallback. */
+/**
+ * Three layers, in order of how much the name actually TELLS us (SHP-3):
+ *
+ *  1. the team's manual rename convention — a human statement of intent;
+ *  2. the raw Seller Centre export name — a machine-generated but stable stem;
+ *  3. the content signature — the last resort, and the one UAT showed puts
+ *     files in the WRONG slot when it has to guess (see `RAW_NAME_PATTERNS`).
+ *
+ * `info` is non-null only for layer 1, because only that convention carries the
+ * period/client/date metadata `ParsedFilename` describes. A layer-2 or layer-3
+ * match resolves the MODULE and nothing else — callers already treat a null
+ * `info` as "no filename metadata", so this needs no new shape.
+ */
 export function detectModule(filename: string, aoa: Aoa): { module: ShopeeModule; info: ParsedFilename | null } | null {
   const info = parseFilename(filename);
   if (info) return { module: info.module, info };
+  const byRawName = detectModuleFromRawName(filename);
+  if (byRawName) return { module: byRawName, info: null };
   const byContent = detectModuleFromContent(aoa);
   return byContent ? { module: byContent, info: null } : null;
 }

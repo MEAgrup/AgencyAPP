@@ -593,11 +593,31 @@ export async function createReportShopee(sql: Sql, actor: Actor, clientId: strin
       periode,
     });
 
-    // The Shopee tool's own `definisi_gmv` is 'gross' (payload.ts) — it never
-    // produced a separate net figure the way TikTok's engine does, so
-    // gmv_kotor == gmv_net here. Not a bug: there is no second number to store.
-    const gmvNet = round2(result.payload.kpi.gmv ?? 0);
-    const gmvKotor = gmvNet;
+    // SHP-1 (owner decision 2026-09-03, after the Fim Motor UAT). The Bisnis —
+    // Home export carries the same table per order status, and the engine now
+    // reads all three (`reportShopee.parseBisnisHome`):
+    //
+    //   gmv_kotor = Pesanan DIBUAT  — the headline Seller Centre shows;
+    //   gmv_net   = Pesanan DIBAYAR — money that actually arrived.
+    //
+    // This matters beyond the report: `gmv_runrate_bulanan` derives from
+    // `gmvNet`, and `recomputeTotalSales` reads that column into
+    // `clients.total_sales`, which Health Score M13 reads in turn. So the owner
+    // choosing "bersih = dibayar" moves the client's health score onto paid
+    // money — deliberately, and only for reports created from here on (the
+    // table is frozen; old rows are never rewritten).
+    //
+    // For the Fim Motor export the two differ by Rp 295.710.122 (18,2%): the
+    // gross figure included Rp 359.295.534 of cancelled orders.
+    //
+    // FALLBACK, stated rather than silent: an export with no Pesanan Dibayar
+    // section (older exports, and the engine's own two-section fixtures) leaves
+    // `kpi.dibayar` null. Net then falls back to the gross figure — the only
+    // number that exists — and `payload.periode.gmv_bersih_sumber` records
+    // `tidak_tersedia` so both the renderer and any later reader can tell this
+    // row's "net" apart from a genuinely paid-based one.
+    const gmvKotor = round2(result.payload.kpi.gmv ?? 0);
+    const gmvNet = round2(result.payload.kpi.dibayar?.gmv ?? result.payload.kpi.gmv ?? 0);
     const runrate = round2(report.gmvRunRateBulanan(gmvNet, input.periodeTipe, hari));
 
     // Same house invariant as createReport (TikTok) — raw upload rows are

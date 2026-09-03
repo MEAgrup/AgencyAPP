@@ -26,13 +26,18 @@ payload.
 **Tiga hal butuh keputusan pemilik** (§4) — bukan bug kode, tapi pilihan
 bisnis yang saat ini diambil diam-diam oleh implementasi.
 
+> **⚠️ §2–§4 memotret keadaan SEBELUM perbaikan.** Ketiga temuan sudah dijawab
+> pemilik dan ditindaklanjuti pada hari yang sama — hasilnya, termasuk UAT yang
+> dijalankan ULANG dengan kode baru, ada di **§7**. Baca §7 untuk keadaan
+> sekarang; §2–§4 tetap ada sebagai dasar keputusannya.
+
 ---
 
 ## 2. Angka yang dihasilkan, dan cek-ulangnya ke berkas mentah
 
 | Yang dilaporkan engine | Nilai | Cek ulang ke berkas mentah | Cocok? |
 |---|---|---|---|
-| GMV (`gmv_net`) | Rp 1.624.937.476 | sheet `Pesanan Dibuat` kolom *Total Penjualan (IDR)* = `1.624.937.476` | ✅ persis |
+| GMV | Rp 1.624.937.476 | sheet `Pesanan Dibuat` kolom *Total Penjualan (IDR)* = `1.624.937.476` | ✅ persis |
 | Pesanan | 13.568 | sheet yang sama, *Total Pesanan* | ✅ persis |
 | CR toko | 2,46% | sheet yang sama, *Tingkat Konversi Pesanan* = `2,46%` | ✅ persis |
 | AOV | Rp 119.762 | *Penjualan per Pesanan* = `119.762,49` | ✅ (dibulatkan) |
@@ -205,3 +210,55 @@ Berkas mentah **tidak** disimpan di repo (data klien). Yang perlu diulang:
 
 Atau lewat UI: `/clients/{id}` → panel Laporan Performa → mesin **Shopee** →
 unggah 15 berkas → set dropdown modul per berkas → isi periode → Buat Laporan.
+
+---
+
+## 7. SESUDAH PERBAIKAN — SHP-1 & SHP-3 dibangun, UAT dijalankan ULANG
+
+Pemilik menjawab ketiga temuan pada hari yang sama (SHP-1 opsi C dengan
+`total_sales` ikut **Dibayar**, SHP-2 **biarkan**, SHP-3 **jalankan
+rekomendasi**). Kode dibangun, lalu 15 berkas yang SAMA dijalankan ulang —
+kali ini dengan **NOL override manual**, semua diserahkan ke deteksi server.
+
+### 7.1 Deteksi: 8 benar → **15/15 benar**
+
+| | Sebelum | Sesudah |
+|---|---|---|
+| Benar | 8 | **15** |
+| **Salah slot** | **3** | **0** |
+| Tak terdeteksi | 4 | **0** |
+| Slot terisi | 8/17 | **15/17** (2 sisa memang tak ada berkasnya) |
+
+Tiga yang tadinya salah slot sekarang benar: `Chat_Broadcast_overview` →
+`layanan_broadcast` (dulu `bisnis_video`), `Data+Keseluruhan+Iklan` →
+`ads_toko` (dulu `aff_creator`), `Search-Ads-Overall-Data` → `ads_produk`
+(dulu `aff_creator`). Tabrakan dua berkas di slot `bisnis_video` juga hilang.
+
+### 7.2 GMV kotor vs bersih: dua angka berbeda, sumbernya dinyatakan
+
+| | Nilai | Asal |
+|---|---|---|
+| `gmv_kotor` | **Rp 1.624.937.476** | bagian *Pesanan Dibuat* |
+| `gmv_net` | **Rp 1.329.227.354** | bagian *Pesanan Dibayar* (baru diparse) |
+| `clients.total_sales` | **Rp 1.329.227.354** | ikut `gmv_net` → **Health Score M13 kini berbasis uang yang masuk** |
+| `payload.periode.gmv_bersih_sumber` | `pesanan_dibayar` | bukan fallback |
+| Skor | **5,7 KRITIS** (tak berubah) | SHP-2: ambang dibiarkan |
+
+Selisih kotor−bersih Rp 295.710.122 sekarang **tampil di laporan** sebagai dua
+kartu berdampingan plus keterangan selisihnya, bukan disembunyikan di satu
+angka.
+
+### 7.3 Yang TETAP belum diuji
+
+Sama seperti §5 dan tidak berubah: laporan belum diterbitkan ke kontak klien
+sungguhan, atribusi `MTR-` belum kena data nyata (klien uji tak punya kampanye
+`Shopee Ads` aktif), dan render HTML-nya belum dibuka di browser untuk data
+ini. Ketiganya milik pemilik/AM, bukan sesi Claude.
+
+### 7.4 Catatan untuk laporan yang SUDAH ada
+
+`client_reports` beku untuk UPDATE (aturan rumah #3), jadi **laporan yang sudah
+dibuat tidak dihitung ulang** — `gmv_net` mereka tetap berisi angka gross.
+Hanya laporan yang dibuat SETELAH perubahan ini yang memakai basis Dibayar. Di
+live belum ada satu laporan Shopee pun, jadi praktisnya tidak ada baris lama
+yang terpengaruh; untuk TikTok aturan ini tidak berubah sama sekali.
