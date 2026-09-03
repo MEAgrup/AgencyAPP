@@ -192,3 +192,16 @@ Repo **tidak punya** PR template (dicek: `.github/pull_request_template.md`, `.g
 **web-client-portal:** `src/app/(portal)/{laporan,laporan/[id],progres,komplain}/page.tsx` · `page.tsx` · `layout.tsx` · `lib/portal-data.ts` (baru) · `lib/types.ts` · `next.config.ts` (CSP)
 **Guard:** `apps/api/src/lib/shape-parity.test.ts` (kini memindai `web-client-portal` juga) · `supabase/tests/{immutability,rls}_checks.sql`
 **Dokumen:** `docs/DECISIONS.md` (5 entri 2026-09-08) · `docs/STATE_MACHINES.md` §21 · `docs/DATA_MODEL.md` · `docs/M15C2_CLIENT_PORTAL_SECURITY_SPEC.md` (catatan bertanggal) · `docs/backlog/CLIENT_REPORT_PORTAL_BACKLOG.md`
+
+---
+
+## 9. Update sesi lanjutan (2026-09-03, branch `claude/advertiser-tools-consolidation-waves-6tl68h`)
+
+**§5.1(b) ditutup.** Item yang sengaja dibiarkan terbuka ("masih terbuka, BUKAN milik saya") — `working_days_between` SECURITY DEFINER bisa dieksekusi `anon` — ditambal migrasi `20260908040000_fix_working_days_between_execute_surface.sql`: `REVOKE EXECUTE … FROM public, anon` + `GRANT … TO authenticated, service_role` (bukan dikunci total ke `service_role` seperti `check_complaint_rate_limit`, karena fungsi ini memang perlu dipanggil `authenticated` lewat `readAsActor`). Diverifikasi lokal (db-rebuild 169 migrasi hijau, domain 1716/1716, db 53/53) sebelum `apply_migration` ke live; advisor Supabase tidak lagi melaporkan `anon_security_definer_function_executable` untuk fungsi ini. Entri `DECISIONS.md` 2026-09-03.
+
+**Gelombang 2 (Shopee) dan Gelombang 3 (SKU Screener) BELUM DIMULAI — diblokir data, bukan diputuskan ditunda.** Dicek dulu sebelum menulis kode apa pun:
+
+- `docs/design/README.md` hanya memuat `BASELINE_TOOL_TIKTOK_v1.html`. **Tidak ada berkas sumber Shopee Report Engine di repo** (17 modul, 12 seksi) — §5 rencana ini cuma ringkasan tanda tangan/bobot, bukan kolom asli/rumus asli. Menulis `detect.ts`/`metrik.ts`/`skor.ts` dari ringkasan itu = menebak nama kolom dan rumus, persis yang `docs/design/README.md` peringatkan eksplisit ("minta pemilik menempelkan ulang versi aslinya… jangan menebak"). **Perlu:** pemilik/tim advertiser tempel ulang HTML Shopee Report Engine (pola yang sama dengan `BASELINE_TOOL_TIKTOK_v1.html`), disimpan ke `docs/design/` sebelum SH-01 dimulai.
+- **SC-00 belum bisa dikerjakan** — PRD SKU Screener v1.0 (R01–R16, asumsi A01–A10) tidak ada di repo sebagai berkas; tidak ada yang bisa dikonfirmasi tanpa teksnya. **Perlu:** pemilik tempel PRD-nya (atau daftar A01–A10 saja) supaya SC-00 bisa masuk `DECISIONS.md` sebagai `SCR-1..SCR-10` sebelum SC-01 dimulai.
+
+Kedua hal ini ditanyakan ke Nerissa (COO) di sesi yang sama.
