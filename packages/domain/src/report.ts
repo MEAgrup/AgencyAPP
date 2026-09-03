@@ -29,7 +29,7 @@
  *    `MSG_AMBIGU` dan minta AM konfirmasi tipe (`tipeOverride`), tak menebak diam2.
  *  - **null eksplisit, bukan omitempty**: setiap kolom opsional ditulis `null`.
  */
-import { baseline, permission, report, statemachine } from '@cdps/core';
+import { baseline, permission, report, reportShopee, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import {
   ACCOUNT_DIVISION,
@@ -138,6 +138,8 @@ export interface ReportSummary {
   gmvRunrateBulanan: number;
   benchmarkVersi: number;
   engineVersi: string;
+  /** Which report engine wrote this row — `cdps.report.tiktok.v1` (default) or `cdps.report.shopee.v1`. Selects the renderer in `renderReport`. */
+  payloadSchema: string;
   createdAt: string;
   createdBy: string;
 }
@@ -494,6 +496,7 @@ function rowToSummary(r: Record<string, unknown>): ReportSummary {
     gmvRunrateBulanan: numOf(r.gmv_runrate_bulanan),
     benchmarkVersi: numOf(r.benchmark_versi),
     engineVersi: r.engine_versi as string,
+    payloadSchema: r.payload_schema as string,
     createdAt: isoTs(r.created_at),
     createdBy: r.created_by as string,
   };
@@ -506,7 +509,7 @@ export async function listReports(sql: Queryable, actor: Actor, clientId: string
   const rows = await sql<Record<string, unknown>[]>`
     select id, client_id, client_platform_id, platform, periode_tipe, periode_mulai, periode_akhir,
            hari_periode, rentang_dari_berkas, skor, skor_label, gmv_net, gmv_kotor,
-           gmv_runrate_bulanan, benchmark_versi, engine_versi, created_at, created_by
+           gmv_runrate_bulanan, benchmark_versi, engine_versi, payload_schema, created_at, created_by
       from client_reports
      where client_id = ${clientId}
      order by periode_akhir desc, id desc`;
@@ -528,7 +531,7 @@ async function getReportById(sql: Queryable, reportId: number): Promise<ReportDe
   const rows = await sql<Record<string, unknown>[]>`
     select id, client_id, client_platform_id, platform, periode_tipe, periode_mulai, periode_akhir,
            hari_periode, rentang_dari_berkas, skor, skor_label, gmv_net, gmv_kotor,
-           gmv_runrate_bulanan, benchmark_versi, engine_versi, created_at, created_by,
+           gmv_runrate_bulanan, benchmark_versi, engine_versi, payload_schema, created_at, created_by,
            payload, kelengkapan_file
       from client_reports where id = ${reportId}`;
   if (rows.length === 0) throw new NotFoundError(MSG_REPORT_NOT_FOUND);
@@ -558,6 +561,13 @@ async function getReportById(sql: Queryable, reportId: number): Promise<ReportDe
  * renderReport — the report as standalone HTML, scope-gated. `internal` mode
  * adds the audit blocks MEA keeps to itself; `klien` omits them (never hides
  * them with CSS — the renderer simply does not build the string).
+ *
+ * Dispatches by `payload_schema` (Gelombang 2, SH-05): `cdps.report.shopee.v1`
+ * renders with the Shopee engine (`@cdps/core` `reportShopee`), everything
+ * else (including rows that predate the column, defaulted to
+ * `cdps.report.tiktok.v1`) renders with the original TikTok engine. Both
+ * engines share the exact `insight` shape (`PayloadInsight`), so
+ * `insightForMode`/`publikasi` need no schema-awareness at all.
  */
 export async function renderReport(sql: Queryable, actor: Actor, reportId: number, mode: report.RenderMode): Promise<string> {
   const d = await getReport(sql, actor, reportId);
@@ -566,6 +576,9 @@ export async function renderReport(sql: Queryable, actor: Actor, reportId: numbe
   // now). A null means this report predates the revision tables, so the frozen
   // payload's own engine text stands — the text that report was built with.
   const insight = await insightForMode(sql, reportId, mode, d.publikasi);
+  if (d.payloadSchema === 'cdps.report.shopee.v1') {
+    return reportShopee.renderReportHtml(d.payload as reportShopee.ShopeeReportPayload, mode, insight ?? undefined);
+  }
   return report.renderReportHtml(d.payload as report.ReportPayload, mode, insight ?? undefined);
 }
 
