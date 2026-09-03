@@ -1,7 +1,9 @@
 # HANDOFF — Insight Laporan Editable + Client Portal (Gelombang 1 SELESAI)
 
-**Tanggal:** 2026-09-08 · **Branch:** `claude/cdps-advertiser-tools-consolidation-xxpzow` (7 commit, sudah di-push)
-**Pemilik permintaan:** Yohan (Director) · **Rencana penuh:** `docs/backlog/CLIENT_REPORT_PORTAL_BACKLOG.md`
+**Tanggal:** 2026-09-08, **diperbarui 2026-09-03** (migrasi sudah di-push ke live — lihat §0 dan §5.1)
+**Branch:** `claude/cdps-advertiser-tools-consolidation-xxpzow` (sudah di-push)
+**Pemilik permintaan:** Yohan (Director)
+**Rencana penuh:** `docs/plan/PLAN_KONSOLIDASI_ALAT_ADVERTISER.md` · **Tiket kecil:** `docs/backlog/CLIENT_REPORT_PORTAL_BACKLOG.md`
 
 ---
 
@@ -9,9 +11,10 @@
 
 | | |
 |---|---|
-| **Branch kerja** | `claude/cdps-advertiser-tools-consolidation-xxpzow` — sudah di-push, **7 commit di atas `171c72f`** |
+| **Branch kerja** | `claude/cdps-advertiser-tools-consolidation-xxpzow` — sudah di-push, **10 commit di atas `171c72f`** |
 | **PR** | Lihat §6. Kalau belum ada, **buat sebagai draft** (owner belum me-review) |
-| **Migrasi baru** | `20260908010000_c1_laporan_insight_publikasi.sql` dan `20260908020000_sm_transition_id_type_aware.sql` — **BELUM di-push ke `CDPS SG` live**. Lihat §5, itu aksi berikutnya yang paling penting |
+| **Migrasi baru** | **3 berkas, SEMUA SUDAH DI-PUSH ke `CDPS SG` live 2026-09-03** — `20260908010000_c1_laporan_insight_publikasi.sql`, `20260908020000_sm_transition_id_type_aware.sql`, `20260908030000_fix_complaint_rate_limit_execute_surface.sql`. Live: **168 migrasi, 139 tabel, 31 mesin**. Detail + cara push yang BENAR di §5.1 |
+| **⚠ Cara push** | **JANGAN `supabase db push` di proyek ini** — ledger versi live berbeda wholesale dari nama berkas repo (isi skema sama). Pakai `apply_migration` per berkas. Lihat §5.1 dan `DECISIONS.md` 2026-09-03 / `O65` |
 | **Gerbang hitungan** | tabel `139` · `entity_prefix` **37 (tak berubah)** · `sm_machines` **31** (30→31) · `notif_events` **67 (tak berubah)** — sudah dinaikkan di `ci.yml` DAN `scripts/db-rebuild.sh` |
 | **Status suite** | Semua hijau, dijalankan dengan Postgres nyata — angkanya di §4. Jangan percaya baris ini, jalankan ulang |
 | **Postgres lokal** | `service postgresql start` lalu `DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/cdps"`. **Tanpa ini 60+ berkas tes hanya "skip", dan skip BUKAN lulus** |
@@ -113,16 +116,27 @@ Skrip verifikasinya ada di scratchpad sesi ini (`render-check.mjs`, `parity.mjs`
 
 ## 5. AKSI BERIKUTNYA — urutan wajib
 
-### 5.1 🔴 Push 2 migrasi ke `CDPS SG` live (paling penting)
+### 5.1 ✅ SELESAI 2026-09-03 — 3 migrasi sudah di `CDPS SG` live
 
-Belum dilakukan. Keduanya **aditif dan aman**, tapi urutannya penting:
+Ketiganya diterapkan lewat `mcp__Supabase__apply_migration` (proyek `egddxfcnrtecheiykhlf`), berurutan:
 
-1. `20260908010000_c1_laporan_insight_publikasi.sql` — 3 tabel + 1 mesin + kolom `complaints` + fungsi rate limit + policy RLS.
-2. `20260908020000_sm_transition_id_type_aware.sql` — `CREATE OR REPLACE FUNCTION sm_transition`. **Ini menyentuh fungsi yang dipakai 31 mesin**, jadi push-nya sesudah (1) dan verifikasi satu transisi mesin lama masih jalan setelahnya.
+1. `20260908010000_c1_laporan_insight_publikasi.sql`
+2. `20260908020000_sm_transition_id_type_aware.sql`
+3. `20260908030000_fix_complaint_rate_limit_execute_surface.sql` — **lahir dari temuan pasca-push**, lihat di bawah
 
-Pakai `mcp__Supabase__apply_migration` atau `supabase db push` — **JANGAN `psql -f`** (itu yang melahirkan drift O38).
+**Keadaan live setelahnya (diverifikasi, bukan diasumsikan):** 168 migrasi · **139 tabel** · **31 mesin** · `client_report` initial `[Draf]`, 3 edge, **0 terminal state** · `entity_prefix` **37** (tak berubah) · `notif_events` **67** (tak berubah) · 5 policy baru · 2 trigger append-only di `client_report_insight`.
 
-Sesudah push, verifikasi di live: `select count(*) from sm_machines` harus **31**, dan `select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'` harus **139**.
+#### Tiga hal yang ditemukan saat push — baca sebelum push berikutnya
+
+**(a) 🔴 `supabase db push` TIDAK BOLEH dipakai di proyek ini.** Ledger versi live memakai cap detik-nyata (`20260902041244`), berkas repo bernama bulat (`20260902040000`). Keduanya hanya sama sampai `20260807120000`; sesudah itu live punya ~100 versi yang tak ada sebagai berkas dan repo punya ~100 berkas yang versinya tak ada di live. **Isi skemanya justru cocok** — sebelum push live 136 tabel / 30 mesin / 37 prefix / 67 event, identik dengan `db-rebuild.sh` lokal. Jadi `db push` akan mencoba menerapkan ULANG ~100 migrasi yang isinya sudah ada dan gagal massal. **Yang benar:** `apply_migration` untuk berkas tertentu, dan pastikan prasyaratnya ada di live lewat kueri katalog — **jangan** berasumsi "nomor lebih kecil berarti sudah jalan", nomor di dua sisi tidak sebanding. Repo juga punya **4 pasang berkas ber-versi kembar** (`20260901010000`–`20260901040000`). Semua ini jadi `O65` di `DECISIONS.md`; keputusannya milik pemilik.
+
+**(b) 🟢 Bug keamanan di migrasi saya sendiri, ditangkap advisor Supabase.** `20260908010000` §5 menutup `check_complaint_rate_limit` dengan `REVOKE ALL … FROM anon` lalu `… FROM authenticated`. **Itu tidak mencabut apa pun**: Postgres memberi `EXECUTE` ke `PUBLIC` untuk setiap fungsi baru dan kedua role itu mewarisi lewat PUBLIC. Karena fungsinya MENULIS dan ambangnya per-kontak, pemanggil tanpa login bisa memanggil `/rest/v1/rpc/check_complaint_rate_limit` berulang dengan uuid kontak seorang klien sampai kuotanya habis — **DoS pada satu-satunya pintu komplain mandiri** (M15 Rule 5). Uuid kontak ada di klaim JWT portal, jadi bukan rahasia. Ditambal `20260908030000` dengan pola saudara kandungnya (`20260906010000` baris 69–70): `REVOKE EXECUTE … FROM public, anon, authenticated` + `GRANT … TO service_role`. Diverifikasi `has_function_privilege`: `anon=false, authenticated=false, service_role=true`.
+
+> **Pelajaran yang berlaku umum:** setiap `SECURITY DEFINER` baru wajib `REVOKE EXECUTE … FROM public` — bukan hanya dari `anon`/`authenticated`. Kalau menulis fungsi seperti ini lagi, salin baris 69–70 `20260906010000`, jangan tulis dari ingatan.
+>
+> **Masih terbuka, BUKAN milik saya:** advisor juga menandai `public.working_days_between(date, date)` bisa dieksekusi `anon` (SECURITY DEFINER sejak `20260907020000`, sebelum sesi ini). Dampaknya jauh lebih kecil — ia hanya menghitung hari kerja dari `hari_libur`, nol tulis, nol rahasia — jadi **sengaja tidak saya sentuh** supaya tiket ini tidak melebar. Tapi ia kelas yang sama dan layak satu tiket sendiri.
+
+**(c) Verifikasi transisi mesin lama dilakukan TANPA menyentuh data produksi.** Migrasi (2) mengganti `sm_transition` yang dipakai 31 mesin, jadi klaim "nol regresi" harus dibuktikan di live, bukan hanya lokal. Caranya: satu blok `DO $$ … $$` yang menjalankan transisi NYATA lalu `RAISE EXCEPTION` di akhir supaya seluruh transaksi di-rollback. Enam hal diuji dan lulus semua: (1) `service` varchar `[Awaiting Onboarding]→[Briefed]` + kolomnya benar-benar berubah, (2) `interview` varchar `Belum Dijadwalkan→Terjadwal`, (3) edge tidak sah tetap `blocked`, (4) gerbang role tetap `role_denied`, (5) `client_report` **bigint** balas `not_found` dengan rapi — inilah jalur yang dulu meledak `operator does not exist: bigint = text`, (6) actor wajib tetap ditegakkan. Sesudahnya diperiksa: `services` kembali `[Awaiting Onboarding]`, `interview` kembali `Belum Dijadwalkan`, **0 baris `audit_log` dengan `actor_employee_id='EMP-TEST'`**. Pola ini layak dipakai ulang untuk verifikasi apa pun di produksi.
 
 ### 5.2 PR + review pemilik
 Draft PR (§6). Pemilik belum melihat UI-nya. Yang paling perlu dilihat langsung:
@@ -134,7 +148,7 @@ Draft PR (§6). Pemilik belum melihat UI-nya. Yang paling perlu dilihat langsung
 Semua verifikasi pakai fixture. **Belum ada** laporan dari export Seller Center asli yang diterbitkan lalu dibaca kontak klien sungguhan di browser. Itu langkah UAT yang harus dijalankan pemilik/AM.
 
 ### 5.4 Kemudian: Gelombang 2 → 3 → 4
-Tiket lengkap di `docs/backlog/CLIENT_REPORT_PORTAL_BACKLOG.md`. Ringkas:
+**Rencana penuh empat gelombang: `docs/plan/PLAN_KONSOLIDASI_ALAT_ADVERTISER.md`** (aturan porting, pemetaan `OPT-` vs `ADL-`, kontrak Gelombang 4, verifikasi). Tiket kecil di `docs/backlog/CLIENT_REPORT_PORTAL_BACKLOG.md`. Ringkas:
 - **Gelombang 2 (Shopee):** SH-01..SH-06. Yang paling bernilai: **SH-06** — buat `MTR-` (Metric Entry, `entry_method='File Export'`) dari hasil parse. **Itulah jalur "tidak upload manual" untuk M6D RM-C**, BUKAN menulis `wrr_metrik` langsung (baris `otomatis` di sana UPDATE-blocked, itu invariant beku).
 - **Gelombang 3 (SKU Screener):** **SC-00 dulu** — 10 asumsi terbuka PRD (A01–A10) wajib dikonfirmasi pemilik sebelum sprint; A08 (default ROAS Fase 1 = 3,57) dan A03 (Kode Produk sebagai primary key) paling berdampak.
 - **Gelombang 4 (Ads Scanner):** tunggu HTML dari pemilik, lalu putuskan embed vs port dengan aturan: **angka cuma dibaca manusia → embed; angka menggerakkan keputusan sistem → port.**
@@ -161,6 +175,10 @@ Repo **tidak punya** PR template (dicek: `.github/pull_request_template.md`, `.g
 - **`ON DELETE CASCADE` pada tabel yang menolak DELETE adalah kebohongan skema** — CASCADE tak mungkin jalan, dan mendeklarasikannya cuma menukar pesan galat yang jelas dengan yang membingungkan. Konsekuensi yang diterima: laporan yang punya revisi insight tidak bisa dihapus.
 - **Gerbang `ledger O48` di `rls_checks.sql` bekerja.** Tiga policy realm klien memang tanpa arm lead/divisi, dan itu BENAR (kontak klien tak punya divisi; menambahkannya memberi setiap lead MEA jalur baca kedua yang melewati gerbang `[Terbit]`). Ledger-nya diperpanjang **dengan alasan tertulis di berkas ujinya**, sesuai jalur yang dokumen itu sendiri tetapkan.
 - **1 error lint `react-hooks/static-components`** di `web-internal/src/app/(shell)/admin/employees/page.tsx` — **PRE-EXISTING**, terbukti identik saat seluruh perubahan ini di-stash. Di luar cakupan, sengaja tidak diperbaiki di sini.
+- **🔴 `supabase db push` akan gagal massal di proyek ini** — ledger versi live ≠ nama berkas repo (isi skema sama). Pakai `apply_migration` per berkas, dan cek prasyarat lewat kueri katalog. Nomor migrasi di dua sisi TIDAK sebanding, jadi "nomornya lebih kecil, pasti sudah jalan" adalah kesimpulan yang salah. Detail: §5.1(a), `DECISIONS.md` 2026-09-03, `O65`.
+- **`REVOKE ALL … FROM anon` TIDAK menutup fungsi baru.** Postgres memberi `EXECUTE` ke `PUBLIC`; `anon`/`authenticated` mewarisi lewat sana. Setiap `SECURITY DEFINER` baru wajib `REVOKE EXECUTE … FROM public, anon, authenticated` + `GRANT … TO service_role` — salin `20260906010000` baris 69–70. Ini bukan teori: migrasi saya sendiri kena, dan akibatnya DoS pada pintu komplain. Detail: §5.1(b).
+- **Menjalankan suite penuh DUA KALI di satu DB tanpa rebuild memunculkan 2 kegagalan palsu.** `admin.test.ts > hari libur (integration)` dan `client.test.ts > Hold Service two-step` menghitung baris `audit_log`, jadi run kedua menghitung sisa run pertama ("expected 7 to be 1"). Di DB bersih keduanya lulus (domain **1716 lulus, 0 gagal, 1 skip**). Kalau melihat kegagalan berbentuk `expected N to be 1`, **rebuild dulu** sebelum mencari bug — dan jangan sebaliknya: jangan mengira ia hijau kalau belum pernah dijalankan di DB bersih.
+- **Verifikasi di produksi TIDAK harus meninggalkan jejak.** Bungkus transisi/insert nyata dalam `DO $$ … RAISE EXCEPTION … $$` supaya seluruhnya rollback, lalu buktikan nol jejaknya (status kembali + `count(*)=0` di `audit_log`). Ini yang dipakai untuk membuktikan `sm_transition` baru tidak meregresi 30 mesin lama di live. Detail: §5.1(c).
 
 ---
 
