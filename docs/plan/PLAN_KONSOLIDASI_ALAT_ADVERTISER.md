@@ -2,7 +2,7 @@
 
 **Pemilik permintaan:** Yohan Agustian (Director, PT MEA Agensi Digital)
 **Dibuat:** 2026-09-03 · **Branch:** `claude/cdps-advertiser-tools-consolidation-xxpzow` · **PR:** [#276](https://github.com/MEAgrup/AgencyAPP/pull/276)
-**Status:** Gelombang 1 **SELESAI & sudah di live**. Gelombang 2–4 belum dimulai.
+**Status (2026-09-03, setelah PR [#277](https://github.com/MEAgrup/AgencyAPP/pull/277) merge):** Gelombang 1 **SELESAI & sudah di live**. Gelombang 2 (Shopee, SH-01…SH-07) dan Gelombang 3 (SKU Screener, SC-00…SC-09) **SELESAI di `main`, termasuk UI** — tapi **migrasinya belum diterapkan ke `CDPS SG` live** (`20260908050000` SKU Screener + `20260909010000` Shopee engine; lihat handoff terbaru §Live). Gelombang 4 (TikTok Ads Scanner) belum dimulai: engine `packages/core/src/adsscanner/tiktok/` sudah ada, migrasi + domain + UI belum.
 **Handoff eksekusi:** `docs/handoff/HANDOFF_INSIGHT_EDITABLE_CLIENT_PORTAL_20260908.md`
 **Tiket kecil:** `docs/backlog/CLIENT_REPORT_PORTAL_BACKLOG.md`
 
