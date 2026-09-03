@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import { periodeOf, readSheet, type Aoa, type Sheet } from '../baseline';
 import {
-  detectTtam, gmvRunRateBulanan, hariAntara, prorateBench, renderBody, rentangOf,
+  chartData, detectTtam, gmvRunRateBulanan, hariAntara, prorateBench, renderBody, rentangOf,
   renderReportHtml, REPORT_BENCH_V1, resolveRentang, runReport, scale,
   INSIGHT_MAX, INSIGHT_MAX_POIN, InsightDraftError, normalizeInsightDraft,
   MSG_ADA_MARKUP, MSG_POIN_KOSONG, MSG_REK_TAK_LENGKAP, MSG_RINGKASAN_WAJIB,
@@ -472,5 +472,88 @@ describe('normalizeInsightDraft', () => {
     // could not be stored, and "kembalikan ke insight mesin" would be impossible.
     const engine = fullPayload().insight;
     expect(normalizeInsightDraft(engine)).toEqual(engine);
+  });
+});
+
+// ── polish tampilan (§1.8) ─────────────────────────────────────────────────
+describe('paritas visual dokumen laporan', () => {
+  it('loads FontAwesome and gives every section heading an icon', () => {
+    const html = renderReportHtml(fullPayload(), 'klien');
+    expect(html).toContain('font-awesome/6.5.1');
+    // Every NUMBERED section, not just the first: an icon set with holes reads
+    // as a rendering bug rather than a design. The score block's own <h2> is
+    // deliberately excluded — it sits above the numbering, is already carried by
+    // the gauge beside it, and a chip there would compete with it.
+    const withIcon = [...html.matchAll(/<span class="sec-ico"><i class="fa-solid ([\w-]+)"><\/i><\/span>(\d+)\./g)];
+    const numbered = [...html.matchAll(/<h2[^>]*>[\s\S]{0,120}?(\d+)\.\s/g)];
+    expect(withIcon.length).toBe(numbered.length);
+    expect(withIcon.map((m) => Number(m[2]))).toEqual(withIcon.map((_, i) => i + 1));
+    expect(new Set(withIcon.map((m) => m[1])).size).toBeGreaterThan(5);
+  });
+
+  it('draws the two quadrant bubble charts, with the SAME thresholds the routing used', () => {
+    const p = fullPayload();
+    const html = renderReportHtml(p, 'klien');
+    expect(html).toContain('id="c_quad_rel"');
+    expect(html).toContain('id="c_quad_bench"');
+    const d = chartData(p) as { quadRel: { klikTinggi: number; cvrTinggi: number } | null };
+    expect(d.quadRel).not.toBeNull();
+    // A chart drawn against different cut-offs than the table beside it would be
+    // worse than no chart, so this is asserted rather than eyeballed.
+    expect(d.quadRel?.klikTinggi).toBe(p.produk?.ambang.relatif.klik_tinggi);
+    expect(d.quadRel?.cvrTinggi).toBeCloseTo((p.produk?.ambang.relatif.cvr_tinggi ?? 0) * 100, 6);
+  });
+
+  it('leaves a zero-click product off the log axis, and says so in the count', () => {
+    const p = fullPayload();
+    const d = chartData(p) as { quadRel: { sets: { data: { x: number }[] }[] } };
+    const semua = d.quadRel.sets.flatMap((s) => s.data);
+    // The fixture has 5 products; "Belum Tayang" has 0 clicks and cannot be
+    // plotted on a logarithmic axis, so the chart must carry 4 — not 5 with one
+    // silently dropped by Chart.js.
+    expect(semua.length).toBe(4);
+    expect(semua.every((pt) => pt.x > 0)).toBe(true);
+  });
+
+  it('renders the score as a CSS ring, so it survives the PDF rasteriser', () => {
+    const html = renderReportHtml(fullPayload(), 'klien');
+    expect(html).toContain('class="gauge"');
+    expect(html).toContain('conic-gradient');
+    // No canvas for the score: an unfinished chart animation rasterises blank,
+    // and the number a client looks at first would be missing from their file.
+    expect(html).not.toContain('id="c_skor"');
+  });
+
+  it('offers a PDF download in the document but keeps it out of the PDF and the print', () => {
+    const html = renderReportHtml(fullPayload(), 'klien');
+    expect(html).toContain('id="btnPdf"');
+    expect(html).toContain('html2pdf');
+    expect(html).toContain('class="no-print');
+    expect(html).toContain('@media print{.no-print{display:none!important}}');
+    // The button lives OUTSIDE #reportBody — html2pdf renders that element, so a
+    // button inside it would appear in the PDF of itself.
+    const body = html.indexOf('id="reportBody"');
+    expect(html.indexOf('id="btnPdf"')).toBeLessThan(body);
+  });
+
+  it('escapes CHART_DATA for script context — a product name cannot close the tag', () => {
+    // The real vector: CHART_DATA carries PRODUCT NAMES from the client's own
+    // catalogue, and JSON.stringify does not escape `<`.
+    const evil = parse(sheetAoa(PROD_HEADER, [
+      ['</script><script>alert(1)</script>', 'P9', 'Rp40.000.000', '900', '20.000', '3,00%', '27', '30'],
+    ], META_BULAN), 'p.xlsx');
+    const html = renderReportHtml(run({ shop_tt: shopTt(), prod_tt: evil }).payload, 'klien');
+    expect(html).not.toContain('</script><script>alert(1)');
+    expect(html).toContain('\\u003c');
+    // and the data still round-trips: escaped, not dropped.
+    expect(html).toContain('\\u003c/script\\u003e');
+  });
+
+  it('names the PDF after the store, and marks an internal one as internal', () => {
+    const p = fullPayload();
+    expect(renderReportHtml(p, 'klien')).toContain('REPORT_PDF_NAME');
+    expect(renderReportHtml(p, 'internal')).toContain('-INTERNAL');
+    // A client's copy must never carry the internal marker.
+    expect(renderReportHtml(p, 'klien')).not.toContain('-INTERNAL');
   });
 });
