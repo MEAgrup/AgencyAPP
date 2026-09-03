@@ -16,6 +16,7 @@
  */
 import { api } from './api';
 import { type ParsedExport } from './riset-awal';
+import { type Role } from './types';
 
 // ---------------------------------------------------------------------------
 // Wire types (snake_case) — mirror apps/api `clientReport*ToWire`.
@@ -56,7 +57,68 @@ export interface ClientReportDetail extends ClientReportSummary {
   payload: unknown;
   kelengkapan_file: unknown;
   berkas: ClientReportBerkas[];
+  publikasi: ReportPublikasi;
 }
+
+// ---------------------------------------------------------------------------
+// Insight yang bisa disunting + gerbang publikasi
+// ---------------------------------------------------------------------------
+export interface Rekomendasi {
+  judul: string;
+  target: string;
+  dampak: string;
+  timeline: string;
+}
+
+export interface Indikator {
+  nama: string;
+  target: string;
+}
+
+/** The six editable fields — the same shape the engine payload uses. */
+export interface ReportInsight {
+  ringkasan: string;
+  poin: string[];
+  rekomendasi_tinggi: Rekomendasi[];
+  rekomendasi_sedang: Rekomendasi[];
+  outlook: string;
+  indikator: Indikator[];
+}
+
+export interface ReportInsightRevisi {
+  revisi: number;
+  sumber: string;
+  insight: ReportInsight;
+  catatan_revisi: string | null;
+  created_at: string;
+  created_by: string;
+}
+
+export interface ReportPublikasi {
+  status: string;
+  /** The revision the CLIENT reads. Null while not published. */
+  insight_revisi: number | null;
+  diterbitkan_pada: string | null;
+  diterbitkan_oleh: string | null;
+  dicabut_pada: string | null;
+  dicabut_oleh: string | null;
+  alasan_cabut: string | null;
+}
+
+export interface ReportInsightBundle {
+  report_id: number;
+  publikasi: ReportPublikasi;
+  /** Highest revision on file — what the internal preview renders. */
+  terbaru: ReportInsightRevisi;
+  /** Revisi 0, the engine snapshot. */
+  mesin: ReportInsightRevisi;
+  terpaku: ReportInsightRevisi | null;
+  ada_perubahan_belum_terbit: boolean;
+}
+
+export const STATUS_DRAF = '[Draf]';
+export const STATUS_TERBIT = '[Terbit]';
+export const STATUS_DICABUT = '[Dicabut]';
 
 export type PeriodeTipe = 'mingguan' | 'bulanan';
 export type ReportMode = 'klien' | 'internal';
@@ -111,4 +173,74 @@ export function getClientReport(reportId: number): Promise<ClientReportDetail> {
  */
 export function reportHtmlUrl(reportId: number, mode: ReportMode): string {
   return `/api/v1/reports/${reportId}/html?mode=${mode}`;
+}
+
+// ---------------------------------------------------------------------------
+// Insight & publikasi — API client
+// ---------------------------------------------------------------------------
+/** GET /reports/{id}/insight — engine text, latest edit, and the pinned revision. */
+export function getReportInsight(reportId: number): Promise<ReportInsightBundle> {
+  return api.get<ReportInsightBundle>(`/reports/${reportId}/insight`);
+}
+
+/**
+ * PUT /reports/{id}/insight — append the edited narrative as a new revision.
+ *
+ * Saving deliberately changes NOTHING the client sees, even on a published
+ * report: publishing is a separate, explicit act. That is what makes it safe to
+ * save mid-thought.
+ */
+export function saveReportInsight(
+  reportId: number, insight: ReportInsight, catatanRevisi?: string | null,
+): Promise<ReportInsightBundle> {
+  return api.put<ReportInsightBundle>(`/reports/${reportId}/insight`, {
+    ringkasan: insight.ringkasan,
+    poin: insight.poin,
+    rekomendasi_tinggi: insight.rekomendasi_tinggi,
+    rekomendasi_sedang: insight.rekomendasi_sedang,
+    outlook: insight.outlook,
+    indikator: insight.indikator,
+    catatan_revisi: catatanRevisi ?? null,
+  });
+}
+
+/** POST /reports/{id}/insight/reset — bring back the engine text as a new revision. */
+export function resetReportInsight(reportId: number): Promise<ReportInsightBundle> {
+  return api.post<ReportInsightBundle>(`/reports/${reportId}/insight/reset`, {});
+}
+
+/** POST /reports/{id}/publish — publish, pinning the latest revision. */
+export function publishReport(reportId: number): Promise<ReportPublikasi> {
+  return api.post<ReportPublikasi>(`/reports/${reportId}/publish`, {});
+}
+
+/** POST /reports/{id}/republish — move the pin to the newest revision. */
+export function republishReport(reportId: number): Promise<ReportPublikasi> {
+  return api.post<ReportPublikasi>(`/reports/${reportId}/republish`, {});
+}
+
+/** POST /reports/{id}/revoke — withdraw it from the client. Reason mandatory. */
+export function revokeReport(reportId: number, alasan: string): Promise<ReportPublikasi> {
+  return api.post<ReportPublikasi>(`/reports/${reportId}/revoke`, { alasan });
+}
+
+/**
+ * Mirrors `report.canWriteReport` (server is the real gate): the owning AM, an
+ * Account lead, or a Director. OD reads everywhere but never writes.
+ */
+export function canPublishReportUi(role: Role | null, employeeId: string | null, ownerAm: string | null): boolean {
+  if (!role) return false;
+  if (role.director) return true;
+  if (role.od) return false;
+  if (role.division === 'Account' && role.level === 'lead') return true;
+  return ownerAm !== null && ownerAm !== '' && ownerAm === employeeId;
+}
+
+/** Human label for a publication status, for the panel's badge. */
+export function labelStatusPublikasi(status: string): string {
+  switch (status) {
+    case STATUS_TERBIT: return 'Terbit ke klien';
+    case STATUS_DICABUT: return 'Dicabut';
+    default: return 'Draf — belum dilihat klien';
+  }
 }

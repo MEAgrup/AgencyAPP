@@ -8,7 +8,7 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { account, activity, admin, ads, auth, board, campaign, client, creative, demo, directory, finance, health, internaltask, kol, leads, livestream, marketing, milestone, msl, notification, performance, portal, req, sales, salesperf, stage, task } from '@cdps/domain';
+import { account, activity, admin, ads, auth, board, campaign, client, clientPortal, creative, demo, directory, finance, health, internaltask, kol, leads, livestream, marketing, milestone, msl, notification, performance, portal, req, sales, salesperf, stage, task } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -94,6 +94,7 @@ export function mapError(err: unknown): Response {
     err instanceof notification.ValidationError ||
     err instanceof admin.ValidationError ||
     err instanceof salesperf.ValidationError ||
+    err instanceof clientPortal.PortalValidationError ||
     err instanceof auth.PasswordPolicyError
   ) {
     return errorJson(err.message, 400); // exact BI [...] message (or internal sentinel)
@@ -121,6 +122,7 @@ export function mapError(err: unknown): Response {
     err instanceof stage.NotFoundError ||
     err instanceof req.NotFoundError ||
     err instanceof admin.NotFoundError ||
+    err instanceof clientPortal.PortalNotFoundError ||
     err instanceof auth.EmployeeNotFoundError
   ) {
     return errorJson(err.message, 404);
@@ -148,6 +150,7 @@ export function mapError(err: unknown): Response {
     err instanceof stage.ForbiddenError ||
     err instanceof req.ForbiddenError ||
     err instanceof portal.ForbiddenError ||
+    err instanceof clientPortal.PortalForbiddenError ||
     err instanceof admin.ForbiddenError ||
     err instanceof directory.ForbiddenError ||
     err instanceof salesperf.ForbiddenError ||
@@ -197,7 +200,9 @@ export function mapError(err: unknown): Response {
   if (err instanceof BadRequestError) {
     return errorJson(err.message, 400);
   }
-  if (err instanceof auth.RateLimitedError) {
+  // 429 — the two app-level throttles: login (all realms) and the Client
+  // Portal complaint form (spec §5.2). Both carry a BI `[...]` message.
+  if (err instanceof auth.RateLimitedError || err instanceof clientPortal.PortalRateLimitedError) {
     return errorJson(err.message, 429);
   }
   // Unmapped throw → 500. Log the real error server-side (never in the client

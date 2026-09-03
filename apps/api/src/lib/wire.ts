@@ -6,8 +6,8 @@
  * other way inline in each route (`toInput`).
  */
 import { money, tz } from '@cdps/core';
-import type { interview as ivcore } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, clientPortalAuth, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, stage, strategi, task, vendor } from '@cdps/domain';
+import type { interview as ivcore, report as coreReport } from '@cdps/core';
+import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, stage, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -6208,6 +6208,7 @@ export interface ClientReportDetailWire extends ClientReportSummaryWire {
   payload: unknown;
   kelengkapan_file: unknown;
   berkas: ClientReportBerkasWire[];
+  publikasi: ReportPublikasiWire;
 }
 
 export function clientReportSummaryToWire(r: report.ReportSummary): ClientReportSummaryWire {
@@ -6252,7 +6253,214 @@ export function clientReportDetailToWire(d: report.ReportDetail): ClientReportDe
     payload: d.payload ?? null,
     kelengkapan_file: d.kelengkapanFile ?? null,
     berkas: d.berkas.map(clientReportBerkasToWire),
+    publikasi: reportPublikasiToWire(d.publikasi),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Insight yang bisa disunting + publikasi (migrasi 20260908010000)
+// ---------------------------------------------------------------------------
+/**
+ * The narrative, in the SAME snake_case shape the engine payload uses
+ * (`payload.insight`). Deliberately not a new vocabulary: the editor loads a
+ * revision, the renderer consumes a revision, and the engine produces one — if
+ * the wire shape differed, one of those three would need a translation layer
+ * that could disagree with the other two.
+ */
+/** One recommendation card. Named, not inline: shape-parity follows references
+ *  on both sides, and an inline object is a shape it cannot check. */
+export interface ReportRekomendasiWire {
+  judul: string;
+  target: string;
+  dampak: string;
+  timeline: string;
+}
+
+/** One leading indicator for the outlook block. */
+export interface ReportIndikatorWire {
+  nama: string;
+  target: string;
+}
+
+export interface ReportInsightWire {
+  ringkasan: string;
+  poin: string[];
+  rekomendasi_tinggi: ReportRekomendasiWire[];
+  rekomendasi_sedang: ReportRekomendasiWire[];
+  outlook: string;
+  indikator: ReportIndikatorWire[];
+}
+
+export interface ReportInsightRevisiWire {
+  revisi: number;
+  sumber: string;
+  insight: ReportInsightWire;
+  catatan_revisi: string | null;
+  created_at: string;
+  created_by: string;
+}
+
+export interface ReportPublikasiWire {
+  status: string;
+  insight_revisi: number | null;
+  diterbitkan_pada: string | null;
+  diterbitkan_oleh: string | null;
+  dicabut_pada: string | null;
+  dicabut_oleh: string | null;
+  alasan_cabut: string | null;
+}
+
+export interface ReportInsightBundleWire {
+  report_id: number;
+  publikasi: ReportPublikasiWire;
+  terbaru: ReportInsightRevisiWire;
+  mesin: ReportInsightRevisiWire;
+  terpaku: ReportInsightRevisiWire | null;
+  ada_perubahan_belum_terbit: boolean;
+}
+
+function reportInsightToWire(i: report.ReportInsightRevisi['insight']): ReportInsightWire {
+  return {
+    ringkasan: i.ringkasan,
+    poin: [...i.poin],
+    rekomendasi_tinggi: i.rekomendasi_tinggi.map((r) => ({ ...r })),
+    rekomendasi_sedang: i.rekomendasi_sedang.map((r) => ({ ...r })),
+    outlook: i.outlook,
+    indikator: i.indikator.map((m) => ({ ...m })),
+  };
+}
+
+export function reportInsightRevisiToWire(r: report.ReportInsightRevisi): ReportInsightRevisiWire {
+  return {
+    revisi: r.revisi,
+    sumber: r.sumber,
+    insight: reportInsightToWire(r.insight),
+    catatan_revisi: r.catatanRevisi,
+    created_at: r.createdAt,
+    created_by: r.createdBy,
+  };
+}
+
+export function reportPublikasiToWire(p: report.ReportPublikasi): ReportPublikasiWire {
+  return {
+    status: p.status,
+    insight_revisi: p.insightRevisi,
+    diterbitkan_pada: p.diterbitkanPada,
+    diterbitkan_oleh: p.diterbitkanOleh,
+    dicabut_pada: p.dicabutPada,
+    dicabut_oleh: p.dicabutOleh,
+    alasan_cabut: p.alasanCabut,
+  };
+}
+
+export function reportInsightBundleToWire(b: report.ReportInsightBundle): ReportInsightBundleWire {
+  return {
+    report_id: b.reportId,
+    publikasi: reportPublikasiToWire(b.publikasi),
+    terbaru: reportInsightRevisiToWire(b.terbaru),
+    mesin: reportInsightRevisiToWire(b.mesin),
+    terpaku: b.terpaku === null ? null : reportInsightRevisiToWire(b.terpaku),
+    ada_perubahan_belum_terbit: b.adaPerubahanBelumTerbit,
+  };
+}
+
+/**
+ * The inbound half — the editor's PUT body.
+ *
+ * Typed as the contract the FE editor is written against (shape-parity compares
+ * it to `report.ts::ReportInsight`, so a seventh field or a renamed one fails a
+ * test). Every field is OPTIONAL because absence is a real case the server must
+ * answer with a `[...]` message, not a TypeError.
+ *
+ * The types here are documentation, not a runtime guarantee — the same is true
+ * of `ProposalLineBody`. Judgement stays in `report.normalizeInsightDraft`
+ * (core), which owns every limit and every Bahasa-Indonesia message and treats
+ * its input as `unknown`, because an HTTP body can be anything regardless of
+ * what TypeScript believes.
+ */
+export interface InsightDraftBody {
+  ringkasan?: string;
+  poin?: string[];
+  rekomendasi_tinggi?: ReportRekomendasiWire[];
+  rekomendasi_sedang?: ReportRekomendasiWire[];
+  outlook?: string;
+  indikator?: ReportIndikatorWire[];
+}
+
+export function toInsightDraft(b: InsightDraftBody): coreReport.InsightDraft {
+  // Passed through UNTOUCHED, including empty strings and absent keys: core
+  // decides what is missing and says so in Bahasa Indonesia. Defaulting here
+  // would turn "the AM left it blank" into "the AM wrote an empty sentence".
+  return {
+    ringkasan: b.ringkasan,
+    poin: b.poin,
+    rekomendasi_tinggi: b.rekomendasi_tinggi,
+    rekomendasi_sedang: b.rekomendasi_sedang,
+    outlook: b.outlook,
+    indikator: b.indikator,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Client Portal read-model (M15-C2) — the ALLOW-LIST surfaces
+//
+// These four are the narrowest wire shapes in this file, and that is the point:
+// the spec's §4.2 allow-list is a list of FIELDS, so the DTO is where it is
+// enforced. Adding a field here is a visibility decision, not a convenience.
+// ---------------------------------------------------------------------------
+export interface PortalReportRowWire {
+  report_id: number;
+  platform: string;
+  periode_tipe: string;
+  periode_mulai: string;
+  periode_akhir: string;
+  diterbitkan_pada: string | null;
+}
+
+export function portalReportRowToWire(r: clientPortal.PortalReportRow): PortalReportRowWire {
+  return {
+    report_id: r.reportId,
+    platform: r.platform,
+    periode_tipe: r.periodeTipe,
+    periode_mulai: r.periodeMulai,
+    periode_akhir: r.periodeAkhir,
+    diterbitkan_pada: r.diterbitkanPada,
+  };
+}
+
+export interface PortalServiceProgressWire {
+  nama_layanan: string;
+  label: string;
+  jumlah_pekerjaan: number;
+  jumlah_selesai: number;
+}
+
+export function portalServiceProgressToWire(p: clientPortal.PortalServiceProgress): PortalServiceProgressWire {
+  return {
+    nama_layanan: p.namaLayanan,
+    label: p.label,
+    jumlah_pekerjaan: p.jumlahPekerjaan,
+    jumlah_selesai: p.jumlahSelesai,
+  };
+}
+
+export interface PortalHealthWire {
+  /** Band LABEL only (M15 Rule 4). There is no numeric field and must never be. */
+  label: string | null;
+  periode_akhir: string | null;
+}
+
+export function portalHealthToWire(h: clientPortal.PortalHealthSummary): PortalHealthWire {
+  return { label: h.label, periode_akhir: h.periodeAkhir };
+}
+
+export interface PortalComplaintAckWire {
+  complaint_id: string;
+  pesan: string;
+}
+
+export function portalComplaintAckToWire(a: clientPortal.PortalComplaintAck): PortalComplaintAckWire {
+  return { complaint_id: a.complaintId, pesan: a.pesan };
 }
 
 // ===========================================================================
