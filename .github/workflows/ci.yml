@@ -371,17 +371,26 @@ jobs:
       #       §5.2 OQ-5, DECISIONS.md O64 closed). Nol prefix baru (bigserial
       #       PK) ⇒ entity_prefix TETAP 37; nol mesin baru ⇒ sm_machines TETAP
       #       30; nol event katalog ⇒ notif_events TETAP 67.
+      # 142 = 139 + 3 tabel Gelombang 3 SKU Screener SC-01..SC-07
+      #       (20260908050000_gelombang3_sku_screener.sql): `screening_run`
+      #       (Modul A/B, SCR-, payload beku), `ads_decision_log` (Modul C,
+      #       ADL-, append-only, R13-R16), `optimization_tracker` (Modul D,
+      #       anak screening_run, PK (screening_id,product_code), NOL prefix
+      #       sendiri). Nol mesin baru (tak satu pun tabel ini punya siklus
+      #       status) ⇒ sm_machines TETAP 31; nol event katalog baru ⇒
+      #       notif_events TETAP 67. Schema-only pass — lihat DECISIONS.md
+      #       2026-09-08 (Gelombang 3).
       #
       # ⚠️ INI GATE KEDUA UNTUK ANGKA YANG SAMA — `scripts/db-rebuild.sh` punya
       # `check "tabel public"` sendiri. Naikkan KEDUANYA dalam satu commit;
       # menaikkan salah satu saja membuat lokal hijau sementara CI merah (persis
       # yang terjadi pada PR #170).
-      - name: Verify table count (expect 139)
+      - name: Verify table count (expect 142)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 139
+          test "$n" -eq 142
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this
@@ -392,14 +401,16 @@ jobs:
       # 34 = 33 + MLS (T-4c, 20260814070000: Client Milestone).
       # 35 = 34 + TSK (20260814110000: Penugasan Internal).
       # 37 = 36 + RNW (Kinerja Sales R-03, 20260902020000: Renewal Request).
+      # 39 = 37 + SCR + ADL (Gelombang 3 SKU Screener SC-01..SC-07,
+      #      20260908050000_gelombang3_sku_screener.sql).
       #
       # ⚠️ GATE KEDUA untuk angka yang sama — `scripts/db-rebuild.sh` punya
       # `check "entity_prefix"` sendiri. Naikkan KEDUANYA dalam satu commit.
-      - name: Verify entity_prefix registry (expect 37)
+      - name: Verify entity_prefix registry (expect 39)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc "select count(*) from entity_prefix;")
           echo "entity_prefix rows: $n"
-          test "$n" -eq 37
+          test "$n" -eq 39
       - name: Invariant — ID generator (gap-free, WIB period)
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/ident_checks.sql
       - name: Invariant — append-only history (immutability)
