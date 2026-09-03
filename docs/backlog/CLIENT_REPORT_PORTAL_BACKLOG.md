@@ -78,12 +78,14 @@ Catatan: hasil screening **tidak** mengisi RM-C — screening bukan realisasi, i
 
 ---
 
-## Gelombang 4 (✅ AS-01..AS-04 SELESAI, UI menyusul) — TikTok Ads Scanner
+## Gelombang 4 (✅ SELESAI — AS-01..AS-05) — TikTok Ads Scanner
 
 HTML pemiliknya ternyata SUDAH ada dan diarsipkan di SC-00 (`docs/design/TIKTOK_ADS_SCANNER.html`, judul asli
 "MEA SKU Triage — Panel Advertiser"), jadi catatan "alatnya belum ada untuk dibaca" di bawah sudah usang.
-Engine murninya mendarat lebih dulu (O67), dan **migrasi + domain + rute mendarat 2026-09-03**
-(`20260910010000`, `packages/domain/src/adsscanner.ts`, 6 rute). Yang tersisa hanya **AS-05 (UI)**.
+Engine murninya mendarat lebih dulu (O67); **migrasi + domain + rute** dan kemudian **UI (AS-05)**
+mendarat 2026-09-03 (`20260910010000`, `packages/domain/src/adsscanner.ts`, 6 rute,
+`/ads/scanner`). **Nol tiket kode tersisa.** Sisa non-kode: menerapkan migrasi ke live (setelah
+PR merge) dan UAT dengan export TikTok Shop ASLI — sisi TikTok belum pernah kena data nyata.
 
 | # | Tiket |
 |---|---|
@@ -91,4 +93,4 @@ Engine murninya mendarat lebih dulu (O67), dan **migrasi + domain + rute mendara
 | AS-02 ✅ | **Tidak berlaku — jalur embed tidak dipilih.** Yang relevan dari tiket ini tetap dipenuhi jalur port: payload berversi `cdps.adsscanner.tiktok.v1` ✅, `generated_at` diinjeksi server (jam WIB) bukan `new Date()` browser ✅, dan server me-re-derive SEMUA field yang menggerakkan keputusan — bukan sekadar sebagian, karena browser hanya mengubah xlsx→AoA + hash (RAB-04) dan tidak menghitung apa pun. Teks aslinya: Kalau embed: SheetJS di-vendor lokal (`public/tools/xlsx.full.min.js` sudah ada), payload berversi `cdps.adsscanner.tiktok.v1`, importer server **me-re-derive** field yang menggerakkan keputusan; identitas klien + `generated_at` diinjeksi server (jam WIB), bukan `new Date()` browser |
 | AS-03 ✅ | **Selesai di O67** — `packages/core/src/adsscanner/tiktok/` mengikuti bentuk `report/` persis (`detect`→`metrik`→`skor`→`insight`→`payload`→`render`→`run`), murni & DOM-free, benchmark berversi (`ADSSCANNER_BENCH_V1` → tabel `adsscanner_benchmark` v1, 34 kategori). Teks aslinya: Kalau port: ikuti bentuk `report/` — `detect` → `metrik` → `skor` → `insight` → `payload` → `render` → `run`, murni & DOM-free, benchmark berversi |
 | AS-04 ✅ | **Outputnya BUKAN laporan klien — diputus 2026-09-03 (di atas O69).** Scan Ads Scanner adalah alat kerja INTERNAL divisi Ads (SKU mana di-scale/dimatikan, budget dipindah ke mana), jadi ia TIDAK masuk `client_reports` dan sengaja tidak punya permukaan Client Portal; tiga alasannya ada di header migrasi `20260910010000` dan di baris `DECISIONS.md`. Ia tetap memakai `renderReportHtml` engine-nya sendiri (bukan sistem desain kedua) lewat `GET /adsscanner/runs/{id}/html`. Teks aslinya: Kalau outputnya laporan klien: pakai `renderBody`/`renderReportHtml` yang ada + polish CR-10, bukan sistem desain kedua. Insight editable + portal klien langsung berlaku kalau masuk `client_reports` dengan `payload_schema` sendiri (kolom SH-04) |
-| AS-05 | **UI — belum dikerjakan.** Halaman kerja divisi Ads: (a) form scan (pilih klien, kategori dari `GET /adsscanner/categories`, minggu, unggah 4 slot + tukar video kreator/toko saat `video_kind_ambigu`, ambang opsional), (b) tampilan satu scan (embed `GET /adsscanner/runs/{id}/html`, atau render dari `payload`), (c) **portofolio lintas klien** dari `GET /adsscanner/portfolio` — inilah layar yang jadi alasan O69 memilih tabel sendiri, jadi jangan diturunkan jadi tab di halaman satu klien. Gate `canUseAdsScanner`/`canRunAdsScan` sudah ada di `web-internal/src/lib/adsscanner.ts`; tinggal halaman + baris nav. Pola yang tinggal diikuti: `/ads/screening` (SC-09) |
+| AS-05 ✅ | **UI mendarat** — `/ads/scanner`, tiga layar: **Portofolio** (scan terakhir tiap klien, diurut dari pool realokasi terbesar — layar yang jadi alasan O69, jadi tab DEFAULT dan top-level, bukan tab di halaman satu klien), **Scan baru** (unggah 4 export sekaligus, slot dideteksi server, override paksa-slot + tukar jenis video per berkas), **Hasil scan** (SKU dikelompokkan per bucket, bucket diurut dari uang bocor dulu). `adsscanner-ui.ts` + 19 test — termasuk pemakuan DUA arah bahwa `fmtPct` di sini mengalikan 100 (payload fraksi) sementara `skuscreener-ui.ts:fmtPct` tidak (payload percent-number). Baris nav ber-gate `canUseAdsScanner`. ID klien tetap kolom (SCR-UI-1), tapi Portofolio memberi tombol "scan baru" per klien sehingga beban mengetik hanya di scan PERTAMA |
