@@ -21,10 +21,11 @@
  * a change_type Module B never asked for.
  */
 
-const relDeltaPct = (before: number, after: number): number => {
+/** Relative delta, percent: (after/before - 1) × 100. NaN when there's no valid `before` basis. */
+export function relDeltaPct(before: number, after: number): number {
   if (!isFinite(before) || !(before > 0) || !isFinite(after)) return NaN;
   return (after / before - 1) * 100;
-};
+}
 
 // ── R09: SKU key matching ───────────────────────────────────────────────
 

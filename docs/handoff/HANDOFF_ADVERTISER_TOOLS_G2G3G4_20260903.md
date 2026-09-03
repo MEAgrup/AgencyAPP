@@ -34,6 +34,18 @@ Ringkasan lengkap ada di `docs/DECISIONS.md` (cari entri SH-06 tanggal
 
 ---
 
+## 0.0.1 UPDATE 2026-09-03 (sesi lanjutan KEDUA, sama hari) — SC-08 SUDAH LANDED
+
+Baca **`HANDOFF_ADVERTISER_TOOLS_SC08_20260903.md`** (berkas terpisah, di
+folder yang sama) dulu — itu handoff terbaru dan yang paling lengkap untuk
+posisi sekarang. Ringkas: MEA SKU Screener (Gelombang 3) sekarang punya
+domain layer + rute API penuh (`packages/domain/src/skuscreener.ts`,
+Modul A-D), bukan cuma schema. `@cdps/domain` 1756/1756 (1 skip). Belum ada
+UI `web-internal` untuk SH-06 maupun SC-08 — itu pekerjaan terbesar yang
+tersisa.
+
+---
+
 ## 0. Posisi persis — SALIN INI KE SESI BERIKUTNYA
 
 | | |

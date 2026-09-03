@@ -192,7 +192,7 @@ const FE_FILES = [
   'account.ts', 'ads.ts', 'ads-weekly.ts', 'block-requests.ts', 'board.ts', 'clients.ts', 'contract.ts', 'creative.ts',
   'finance.ts', 'health.ts', 'interview.ts', 'kol.ts', 'leads.ts', 'marketing.ts', 'milestone.ts',
   'livestream.ts', 'penugasan.ts', 'permintaan.ts', 'plan.ts',
-  'performance.ts', 'portal.ts', 'recap.ts', 'renewal.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'stage.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
+  'performance.ts', 'portal.ts', 'recap.ts', 'renewal.ts', 'report.ts', 'riset-awal.ts', 'sales.ts', 'salesperf.ts', 'skuscreener.ts', 'stage.ts', 'strategi.ts', 'tasks.ts', 'types.ts',
   // web-client-portal (M15-C2) — the external realm's own app, see FE_LIB_PORTAL.
   'klien/types.ts',
 ];
@@ -540,6 +540,14 @@ const WIRE_TO_FE: Record<string, string> = {
   ReportIndikatorWire: 'report.ts::Indikator',
   ReportInsightRevisiWire: 'report.ts::ReportInsightRevisi',
   ReportPublikasiWire: 'report.ts::ReportPublikasi',
+  // Gelombang 3 — MEA SKU Screener (SC-08). No page consumes these yet
+  // (UI is a later ticket) — the FE type file exists purely so this guard
+  // watches the shape from day one.
+  ScreeningRunSummaryWire: 'skuscreener.ts::ScreeningRunSummary',
+  ScreeningRunDetailWire: 'skuscreener.ts::ScreeningRunDetail',
+  DecisionLogEntryWire: 'skuscreener.ts::DecisionLogEntry',
+  TrackerMetricsWire: 'skuscreener.ts::TrackerMetrics',
+  TrackerRowWire: 'skuscreener.ts::TrackerRow',
   ReportInsightBundleWire: 'report.ts::ReportInsightBundle',
   // A REQUEST body (same reasoning as ProposalLineBody above): the insight the
   // editor PUTs. Paired with the FE's `ReportInsight` — the same six fields the

@@ -121,6 +121,9 @@ export * as portal from './portal';
 // permission-trimmed copy of Module 11". `clientPortalAuth` above is the
 // account half (login/provisioning); this is the data half.
 export * as clientPortal from './client-portal';
+// Gelombang 3 (SKU Screener, SC-08) — Modul A/B/C/D domain layer over the
+// schema-only migration 20260908050000. See skuscreener.ts's file header.
+export * as skuscreener from './skuscreener';
 export * as notification from './notification';
 export * as audit from './audit';
 export * as engine from './engine';

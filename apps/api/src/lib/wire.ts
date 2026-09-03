@@ -7,7 +7,7 @@
  */
 import { money, tz } from '@cdps/core';
 import type { interview as ivcore, report as coreReport } from '@cdps/core';
-import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, stage, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, skuscreener, stage, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -6824,5 +6824,119 @@ export function toSetTargetInput(b: {
     metricKey: (b.metric_key ?? '') as salesperf.MetricKey,
     metricParam: b.metric_param,
     targetValue: b.target_value ?? '',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Gelombang 3 — MEA SKU Screener (SC-08). snake_case wire; `payload`/
+// `sumber_berkas` are opaque jsonb passed through verbatim (no FE consumer
+// yet — see skuscreener.ts's route files, same deferred-UI pattern as SH-06).
+// Deliberately NOT registered in shape-parity.test.ts's WIRE_TO_FE map: that
+// guard is opt-in, and there is nothing in web-internal to check parity
+// against until the UI lands.
+// ---------------------------------------------------------------------------
+export interface ScreeningRunSummaryWire {
+  id: string;
+  client_id: string;
+  jenis: string;
+  created_at: string;
+  created_by: string;
+}
+
+export interface ScreeningRunDetailWire extends ScreeningRunSummaryWire {
+  target_roas: number | null;
+  cpc_pasar_kategori: number | null;
+  faktor_cr_iklan: number | null;
+  min_klik_sesudah: number | null;
+  payload: unknown;
+  sumber_berkas: unknown;
+}
+
+export function screeningRunSummaryToWire(r: skuscreener.ScreeningRunSummary): ScreeningRunSummaryWire {
+  return { id: r.id, client_id: r.clientId, jenis: r.jenis, created_at: r.createdAt, created_by: r.createdBy };
+}
+export function screeningRunDetailToWire(d: skuscreener.ScreeningRunDetail): ScreeningRunDetailWire {
+  return {
+    ...screeningRunSummaryToWire(d),
+    target_roas: d.targetRoas, cpc_pasar_kategori: d.cpcPasarKategori, faktor_cr_iklan: d.faktorCrIklan,
+    min_klik_sesudah: d.minKlikSesudah, payload: d.payload ?? null, sumber_berkas: d.sumberBerkas ?? null,
+  };
+}
+
+export interface DecisionLogEntryWire {
+  id: string;
+  client_id: string;
+  screening_id: string | null;
+  advertiser_id: string;
+  platform: string;
+  object_type: string;
+  object_name: string;
+  momen: string;
+  sop_stage: string;
+  decision: string;
+  metric_key: string;
+  metric_value: number;
+  metric_target: number;
+  status_vs_target: string;
+  spend_7d: number | null;
+  gmv_7d: number | null;
+  roas_result: number | null;
+  verdict: string | null;
+  reviews_decision_id: string | null;
+  premature: boolean;
+  notes: string | null;
+  created_at: string;
+  created_by: string;
+}
+
+export function decisionLogEntryToWire(d: skuscreener.DecisionLogEntry): DecisionLogEntryWire {
+  return {
+    id: d.id, client_id: d.clientId, screening_id: d.screeningId, advertiser_id: d.advertiserId,
+    platform: d.platform, object_type: d.objectType, object_name: d.objectName, momen: d.momen,
+    sop_stage: d.sopStage, decision: d.decision, metric_key: d.metricKey, metric_value: d.metricValue,
+    metric_target: d.metricTarget, status_vs_target: d.statusVsTarget, spend_7d: d.spend7d, gmv_7d: d.gmv7d,
+    roas_result: d.roasResult, verdict: d.verdict, reviews_decision_id: d.reviewsDecisionId,
+    premature: d.premature, notes: d.notes, created_at: d.createdAt, created_by: d.createdBy,
+  };
+}
+
+export interface TrackerMetricsWire {
+  views: number;
+  clicks: number;
+  ctr: number;
+  cr: number;
+  orders: number;
+}
+
+export interface TrackerRowWire {
+  screening_id: string;
+  product_code: string;
+  product_name: string;
+  client_id: string;
+  change_date: string;
+  initial_route: string;
+  change_type: string;
+  metric_evaluated: string;
+  before: TrackerMetricsWire;
+  after: TrackerMetricsWire | null;
+  delta_ctr_pct: number | null;
+  delta_cr_pct: number | null;
+  delta_metric_pct: number | null;
+  verdict: string;
+  budget_decision: string | null;
+  notes: string | null;
+  created_at: string;
+  created_by: string;
+  updated_at: string;
+}
+
+export function trackerRowToWire(t: skuscreener.TrackerRow): TrackerRowWire {
+  return {
+    screening_id: t.screeningId, product_code: t.productCode, product_name: t.productName, client_id: t.clientId,
+    change_date: t.changeDate, initial_route: t.initialRoute, change_type: t.changeType,
+    metric_evaluated: t.metricEvaluated, before: t.before, after: t.after,
+    delta_ctr_pct: t.deltaCtrPct, delta_cr_pct: t.deltaCrPct, delta_metric_pct: t.deltaMetricPct,
+    verdict: t.verdict, budget_decision: t.budgetDecision, notes: t.notes,
+    created_at: t.createdAt, created_by: t.createdBy, updated_at: t.updatedAt,
   };
 }
