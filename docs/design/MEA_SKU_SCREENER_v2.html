@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MEA SKU Screener v2 — screening, optimasi, sebelum/sesudah</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{--ink:#101B2D;--ink-2:#38465C;--ink-3:#6B7A91;--paper:#F4F6F9;--card:#FFF;--line:#DCE2EB;
+--indigo:#2B4FD9;--indigo-soft:#EAEEFC;--pass:#0C6B4F;--pass-soft:#E4F2EC;--fail:#A32E2E;--fail-soft:#FBEAEA;
+--warn:#8A5B0B;--warn-soft:#FBF1DE;--cool:#1F5E8C;--cool-soft:#E6F0F7;
+--mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;--sans:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
+*{box-sizing:border-box}html,body{margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;
+-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+.wrap{max-width:1240px;margin:0 auto;padding:26px 18px 80px}
+header{border-bottom:2px solid var(--ink);padding-bottom:16px;margin-bottom:22px}
+h1{margin:0;font-size:clamp(21px,3.2vw,30px);font-weight:800;letter-spacing:-.025em}
+.formula{font-family:var(--mono);font-size:13px;color:var(--indigo);background:var(--indigo-soft);
+display:inline-block;padding:5px 10px;border-radius:3px;margin-top:8px;font-weight:600}
+.sub{color:var(--ink-2);font-size:14px;max-width:74ch;margin:9px 0 0}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px;border-bottom:1px solid var(--line)}
+.tab{padding:10px 15px;font-weight:700;font-size:14px;cursor:pointer;border:1px solid transparent;
+border-bottom:none;border-radius:5px 5px 0 0;color:var(--ink-3);background:none}
+.tab[aria-selected=true]{background:var(--card);border-color:var(--line);color:var(--ink)}
+.panel{display:none}.panel.on{display:block}
+.stage{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:18px 20px;margin-bottom:16px}
+.stage-head{display:flex;align-items:baseline;gap:11px;margin-bottom:14px}
+.stage-num{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--card);background:var(--ink);
+width:23px;height:23px;border-radius:50%;display:grid;place-items:center;flex:0 0 23px}
+.stage-title{font-weight:700;font-size:16px;letter-spacing:-.01em}
+.stage-note{color:var(--ink-3);font-size:13px;margin-left:auto;text-align:right}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+label{display:block;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2);margin-bottom:5px}
+.hint{font-size:12px;color:var(--ink-3);margin-top:4px;font-weight:400;text-transform:none;letter-spacing:0}
+input[type=text],input[type=number],select{width:100%;padding:9px 11px;border:1px solid var(--line);
+border-radius:4px;font-family:var(--mono);font-size:14px;background:var(--card);color:var(--ink)}
+input[type=file]{width:100%;padding:13px;border:1.5px dashed var(--line);border-radius:4px;font-size:13px;background:var(--paper);cursor:pointer}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--indigo);outline-offset:1px}
+button{font-family:var(--sans);font-weight:700;font-size:14px;cursor:pointer;border-radius:4px;
+border:1px solid var(--ink);background:var(--ink);color:var(--card);padding:10px 19px}
+button.ghost{background:transparent;color:var(--ink)}button.ghost:hover{background:var(--paper)}
+button:hover{background:var(--ink-2);border-color:var(--ink-2)}
+.actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:16px}
+.cards{display:grid;gap:11px;grid-template-columns:repeat(auto-fit,minmax(146px,1fr));margin-bottom:18px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:13px 15px}
+.kpi .k{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3)}
+.kpi .v{font-family:var(--mono);font-size:22px;font-weight:700;margin-top:4px;letter-spacing:-.02em}
+.kpi .n{font-size:12px;color:var(--ink-3);margin-top:3px}
+.kpi.bad .v{color:var(--fail)}.kpi.good .v{color:var(--pass)}.kpi.warn .v{color:var(--warn)}.kpi.cool .v{color:var(--cool)}
+.tablewrap{background:var(--card);border:1px solid var(--line);border-radius:6px;overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{background:var(--ink);color:var(--card);font-size:11px;font-weight:700;text-transform:uppercase;
+letter-spacing:.05em;padding:9px 8px;text-align:left;white-space:nowrap;position:sticky;top:0}
+td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+td.num{font-family:var(--mono);text-align:right;white-space:nowrap}
+.pill{display:inline-block;font-size:11px;font-weight:800;padding:3px 7px;border-radius:3px;
+text-transform:uppercase;letter-spacing:.03em;white-space:nowrap}
+.pill.scale{background:var(--pass-soft);color:var(--pass)}
+.pill.ads{background:var(--indigo-soft);color:var(--indigo)}
+.pill.img{background:var(--warn-soft);color:var(--warn)}
+.pill.desc{background:var(--cool-soft);color:var(--cool)}
+.pill.park{background:#EEF0F3;color:var(--ink-3)}
+.pill.up{background:var(--pass-soft);color:var(--pass)}
+.pill.down{background:var(--fail-soft);color:var(--fail)}
+.pill.flat{background:#EEF0F3;color:var(--ink-3)}
+.delta{font-family:var(--mono);font-weight:700}
+.delta.up{color:var(--pass)}.delta.down{color:var(--fail)}
+.msg{padding:11px 13px;border-radius:4px;font-size:13px;margin-top:12px;display:none}
+.msg.err{background:var(--fail-soft);color:var(--fail);border:1px solid #EBC3C3;display:block}
+.msg.ok{background:var(--pass-soft);color:var(--pass);border:1px solid #C2E0D3;display:block}
+.trap{background:var(--warn-soft);border-left:3px solid var(--warn);padding:11px 13px;font-size:13px;
+color:#5C3D07;border-radius:0 4px 4px 0;margin-top:14px}
+.note{font-size:13px;color:var(--ink-2);background:var(--paper);border:1px solid var(--line);
+padding:11px 13px;border-radius:4px;margin-top:12px}
+.lever{font-size:12px;color:var(--ink-2);max-width:36ch;line-height:1.4}
+footer{margin-top:30px;padding-top:14px;border-top:1px solid var(--line);font-size:12px;color:var(--ink-3)}
+.res{display:none}
+</style></head><body><div class="wrap">
+
+<header>
+<h1>MEA SKU Screener v2</h1>
+<div class="formula">CPC maksimum = AOV &times; CR &divide; target ROAS</div>
+<p class="sub">Tiga pekerjaan berbeda: cari calon SKU potensial (klien baru, tanpa perlu data iklan), routing SKU mana yang di-scale dan mana yang dioptimasi, lalu bandingkan performa sebelum dan sesudah optimasi. Semua hitungan jalan di browser, tidak ada data yang dikirim.</p>
+</header>
+
+<div class="tabs" role="tablist">
+  <button class="tab" role="tab" aria-selected="true" data-p="p1">1 &middot; Screening &amp; routing</button>
+  <button class="tab" role="tab" aria-selected="false" data-p="p2">2 &middot; Sebelum vs sesudah</button>
+  <button class="tab" role="tab" aria-selected="false" data-p="p3">Cara baca</button>
+</div>
+
+<!-- ============ PANEL 1 ============ -->
+<div class="panel on" id="p1">
+<section class="stage">
+  <div class="stage-head"><span class="stage-num">1</span><span class="stage-title">Masukkan data</span>
+  <span class="stage-note">File iklan opsional</span></div>
+  <div class="grid">
+    <div><label for="fBiz">Bisnis Saya &rarr; Performa Produk (.xlsx) &mdash; wajib</label>
+      <input type="file" id="fBiz" accept=".xlsx,.xls">
+      <div class="hint">Cukup ini saja untuk klien baru yang belum pernah beriklan.</div></div>
+    <div><label for="fAds">Laporan Iklan Produk / CPC (.csv) &mdash; opsional</label>
+      <input type="file" id="fAds" accept=".csv">
+      <div class="hint">Kalau ada, CPC nyata dipakai sebagai pembanding CPC maksimum.</div></div>
+  </div>
+  <div class="trap"><strong>Kenapa lewat tool ini.</strong> Ekspor Shopee menulis angka sebagai teks titik-ribuan. Angka bertitik satu seperti <span style="font-family:var(--mono)">740.900</span> dibaca spreadsheet berlokal Amerika jadi <span style="font-family:var(--mono)">740,9</span> &mdash; salah 1.000 kali, dan hanya menyerang klien ber-GMV kecil.</div>
+</section>
+
+<section class="stage">
+  <div class="stage-head"><span class="stage-num">2</span><span class="stage-title">Setel target &amp; pembanding</span>
+  <span class="stage-note">Target ROAS ikut fase klien</span></div>
+  <div class="grid">
+    <div><label for="klien">Nama klien</label><input type="text" id="klien" placeholder="Welmer"></div>
+    <div><label for="target">Target ROAS</label><input type="number" id="target" value="4" min="0.5" step="0.1">
+      <div class="hint">Fase 1 pakai ROAS floor kontribusi (harga jual &divide; kontribusi), bukan 7. Ambil dari tab EKONOMI_KLIEN.</div></div>
+    <div><label for="cpcPasar">CPC pasar kategori (Rp)</label><input type="number" id="cpcPasar" placeholder="mis. 300" min="1">
+      <div class="hint">Acuan dari klien sehat sekategori. Dipakai menilai apakah CPC maksimum SKU realistis.</div></div>
+    <div><label for="faktor">Faktor CR iklan</label><input type="number" id="faktor" value="1" min="0.1" max="3" step="0.1">
+      <div class="hint">CR iklan &divide; CR organik. Klien sehat MEA 1,4&ndash;2,1. Biarkan 1 untuk konservatif.</div></div>
+  </div>
+  <div class="actions"><button id="run">Jalankan screening</button><button id="reset" class="ghost">Reset</button></div>
+  <div class="msg" id="msg"></div>
+</section>
+
+<section class="res" id="res1">
+  <div class="cards" id="kpi1"></div>
+  <div class="tablewrap"><table id="t1"><thead><tr>
+    <th>SKU</th><th>Views</th><th>CTR</th><th>CR</th><th>Pesanan</th><th>AOV</th>
+    <th>CPC maksimum</th><th>vs CPC pasar</th><th>Rute</th><th>Yang dikerjakan</th>
+  </tr></thead><tbody></tbody></table></div>
+  <div class="actions">
+    <button id="csv1">Unduh hasil screening (.csv)</button>
+    <button id="csv1b" class="ghost">Unduh baris untuk Tracker Optimasi (.csv)</button>
+  </div>
+</section>
+</div>
+
+<!-- ============ PANEL 2 ============ -->
+<div class="panel" id="p2">
+<section class="stage">
+  <div class="stage-head"><span class="stage-num">1</span><span class="stage-title">Masukkan dua periode</span>
+  <span class="stage-note">Panjang periode harus sama</span></div>
+  <div class="grid">
+    <div><label for="fA">Periode SEBELUM (.xlsx)</label><input type="file" id="fA" accept=".xlsx,.xls">
+      <div class="hint">Performa Produk sebelum gambar/deskripsi/harga diubah.</div></div>
+    <div><label for="fB">Periode SESUDAH (.xlsx)</label><input type="file" id="fB" accept=".xlsx,.xls">
+      <div class="hint">Periode dengan panjang hari yang sama setelah perubahan.</div></div>
+    <div><label for="minKlik">Klik minimum agar dinilai</label><input type="number" id="minKlik" value="20" min="1">
+      <div class="hint">Di bawah ini hasilnya belum bisa dibaca, bukan berarti gagal.</div></div>
+  </div>
+  <div class="actions"><button id="run2">Bandingkan</button></div>
+  <div class="msg" id="msg2"></div>
+</section>
+<section class="res" id="res2">
+  <div class="cards" id="kpi2"></div>
+  <div class="tablewrap"><table id="t2"><thead><tr>
+    <th>SKU</th><th>Views &Delta;</th><th>CTR sebelum</th><th>CTR sesudah</th><th>CTR &Delta;</th>
+    <th>CR sebelum</th><th>CR sesudah</th><th>CR &Delta;</th><th>Pesanan</th><th>GMV &Delta;</th><th>Putusan</th>
+  </tr></thead><tbody></tbody></table></div>
+  <div class="actions"><button id="csv2">Unduh perbandingan (.csv)</button></div>
+</section>
+</div>
+
+<!-- ============ PANEL 3 ============ -->
+<div class="panel" id="p3">
+<section class="stage">
+  <div class="stage-head"><span class="stage-num">?</span><span class="stage-title">Cara baca hasilnya</span></div>
+  <div class="note"><strong>Lima rute, dan masing-masing pekerjaannya beda.</strong> Pembandingnya median toko itu sendiri, bukan angka lintas klien &mdash; jadi tool ini tetap jalan untuk klien baru tanpa riwayat iklan.
+  <ul>
+    <li><span class="pill scale">Scale</span> CTR dan CR di atas median, views sudah tinggi. Naikkan budget bertahap maksimum +30% per hari.</li>
+    <li><span class="pill ads">Kandidat iklan</span> CTR dan CR di atas median tapi views masih rendah. <strong>Ini kandidat iklan terbaik untuk klien baru:</strong> closing sudah terbukti, yang kurang cuma traffic. Iklan memperbesar yang sudah jalan.</li>
+    <li><span class="pill img">Optimasi gambar/judul</span> Views tinggi tapi CTR di bawah median. Orang lihat, tidak klik. Perbaiki gambar utama, judul, harga tampil, badge. Jangan diiklankan dulu &mdash; klik akan mahal.</li>
+    <li><span class="pill desc">Optimasi deskripsi/harga</span> CTR bagus tapi CR di bawah median. Orang klik, tidak beli. Perbaiki deskripsi, foto detail, ukuran, ulasan, voucher, harga.</li>
+    <li><span class="pill park">Parkir</span> Traffic dan closing dua-duanya lemah. Jangan dibelanjakan sekarang.</li>
+  </ul></div>
+  <div class="note"><strong>CPC maksimum</strong> = AOV &times; CR &divide; target ROAS. Ini plafon yang boleh dibayar per klik supaya target ROAS masih kena. Kalau CPC maksimum sebuah SKU lebih kecil dari CPC pasar kategori, SKU itu belum layak diiklankan &mdash; naikkan CR atau AOV dulu. Setelah CR naik lewat optimasi deskripsi, CPC maksimumnya ikut naik, dan SKU-nya bisa masuk iklan.</div>
+  <div class="note"><strong>Urutan kerja yang benar untuk klien baru:</strong> screening (tab 1) &rarr; kerjakan optimasi pada SKU rute gambar/deskripsi &rarr; jalankan iklan tipis pada rute kandidat iklan &rarr; setelah 14 hari, bandingkan dua periode (tab 2) &rarr; scale budget hanya pada SKU yang putusannya membaik.</div>
+  <div class="note"><strong>Yang tidak dijawab tool ini:</strong> stok, harga kompetitor, dan kelayakan komersial klien (margin, biaya platform, service fee). Tiga itu ada di Kalkulator ROAS dan Standar Angka.</div>
+</section>
+</div>
+
+<footer>Dipakai bersama <strong>Standar Angka MEA Ads</strong>, <strong>Kalkulator ROAS/AOV</strong>, <strong>Log Keputusan</strong>, dan <strong>Tracker Optimasi &amp; Scale</strong>.</footer>
+</div>
+
+<script>
+function idNum(v){
+  if(v===null||v===undefined) return NaN;
+  if(typeof v==='number') return v;
+  let s=String(v).trim();
+  if(s===''||s==='-'||s.toLowerCase()==='nan') return NaN;
+  s=s.replace(/\s/g,'').replace(/%/g,'').replace(/^Rp/i,'');
+  const neg=/^\(.*\)$/.test(s); if(neg) s=s.slice(1,-1);
+  const d=s.includes('.'), c=s.includes(',');
+  if(d&&c){s=s.replace(/\./g,'').replace(',','.');}
+  else if(c){s=s.replace(',','.');}
+  else if(d){const p=s.split('.'); if(p.slice(1).every(x=>x.length===3)) s=p.join('');}
+  const n=parseFloat(s); return neg?-n:n;
+}
+const rp=n=>isFinite(n)?'Rp'+Math.round(n).toLocaleString('id-ID'):'—';
+const pc=n=>isFinite(n)?n.toFixed(2).replace('.',',')+'%':'—';
+const x2=n=>isFinite(n)?n.toFixed(2).replace('.',','):'—';
+const int=n=>isFinite(n)?Math.round(n).toLocaleString('id-ID'):'—';
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const $=i=>document.getElementById(i);
+function say(el,t,ok){el.textContent=t;el.className='msg '+(ok?'ok':'err');}
+const readBuf=f=>new Promise((s,j)=>{const r=new FileReader();r.onload=()=>s(r.result);r.onerror=()=>j(new Error('Gagal membaca '+f.name));r.readAsArrayBuffer(f)});
+const readTxt=f=>new Promise((s,j)=>{const r=new FileReader();r.onload=()=>s(r.result);r.onerror=()=>j(new Error('Gagal membaca '+f.name));r.readAsText(f)});
+function parseCSV(t){const rows=[];let row=[],c='',q=false;t=t.replace(/^﻿/,'');
+  for(let i=0;i<t.length;i++){const ch=t[i];
+    if(q){if(ch==='"'){if(t[i+1]==='"'){c+='"';i++}else q=false}else c+=ch}
+    else{if(ch==='"')q=true;else if(ch===','){row.push(c);c=''}
+      else if(ch==='\n'){row.push(c);rows.push(row);row=[];c=''}else if(ch!=='\r')c+=ch}}
+  if(c!==''||row.length){row.push(c);rows.push(row)}return rows}
+
+function bacaBiz(buf){
+  const wb=XLSX.read(buf,{type:'array',cellText:true,raw:false});
+  const nm=wb.SheetNames.find(n=>n.toLowerCase().includes('performa'))||wb.SheetNames[0];
+  const rows=XLSX.utils.sheet_to_json(wb.Sheets[nm],{header:1,raw:false,defval:''});
+  if(!rows.length) throw new Error('Sheet performa produk kosong.');
+  const h=rows[0].map(x=>String(x).trim()), at=p=>h.findIndex(x=>x.startsWith(p));
+  const iV=at('Kode Variasi'),iP=at('Produk'),iK=at('Kode Produk'),iG=at('Total Penjualan'),
+        iVw=at('Jumlah Produk Dilihat'),iCl=at('Produk Diklik'),iCt=at('Persentase Klik'),
+        iCr=at('Tingkat Konversi Pesanan'),iO=at('Pesanan Dibuat');
+  if(iG<0||iO<0||iVw<0) throw new Error('Kolom Total Penjualan / Pesanan Dibuat / Jumlah Produk Dilihat tidak ditemukan. Pastikan ini ekspor Bisnis Saya → Performa Produk.');
+  const out=[];
+  for(let r=1;r<rows.length;r++){
+    const row=rows[r]; if(!row||!row.length) continue;
+    const kv=String(row[iV]??'').trim(); if(kv!=='-'&&kv!=='') continue;
+    const views=idNum(row[iVw]); if(!(views>0)) continue;
+    const orders=idNum(row[iO])||0, gmv=idNum(row[iG])||0;
+    out.push({kode:iK>=0?String(row[iK]??'').trim():'', produk:String(row[iP]??'(tanpa nama)').trim(),
+      gmv, orders, views, clicks:idNum(row[iCl])||0, ctr:idNum(row[iCt]), cr:idNum(row[iCr]),
+      aov: orders>0?gmv/orders:NaN});
+  }
+  if(!out.length) throw new Error('Tidak ada SKU induk dengan views di file ini.');
+  return out;
+}
+function cpcAds(rows){
+  let hd=-1;
+  for(let i=0;i<Math.min(rows.length,20);i++){
+    if(rows[i].some(c=>String(c).trim()==='Biaya')&&rows[i].some(c=>String(c).trim()==='Jumlah Klik')){hd=i;break}}
+  if(hd<0) throw new Error('Ini sepertinya bukan Laporan Iklan Produk/CPC Shopee.');
+  const h=rows[hd].map(c=>String(c).trim()),iB=h.indexOf('Biaya'),iK=h.indexOf('Jumlah Klik');
+  let b=0,k=0;
+  for(let r=hd+1;r<rows.length;r++){const x=idNum(rows[r][iB]),y=idNum(rows[r][iK]);
+    if(isFinite(x))b+=x; if(isFinite(y))k+=y}
+  if(!(k>0)) throw new Error('Total klik nol, CPC tidak bisa dihitung.');
+  return b/k;
+}
+const med=a=>{const s=a.filter(x=>isFinite(x)).sort((p,q)=>p-q);
+  if(!s.length) return NaN; const m=Math.floor(s.length/2);
+  return s.length%2?s[m]:(s[m-1]+s[m])/2};
+
+/* ---------- tab ---------- */
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected',x===t));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('on',p.id===t.dataset.p));
+}));
+$('reset').addEventListener('click',()=>location.reload());
+
+/* ---------- PANEL 1 ---------- */
+let BIZ=null,CPC=null,H1=null;
+$('fBiz').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;
+  try{BIZ=bacaBiz(await readBuf(f));say($('msg'),BIZ.length+' SKU induk dengan views terbaca.',true)}
+  catch(err){BIZ=null;say($('msg'),err.message,false)}});
+$('fAds').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;
+  try{CPC=cpcAds(parseCSV(await readTxt(f)));
+    if(!$('cpcPasar').value)$('cpcPasar').value=Math.round(CPC);
+    say($('msg'),'CPC nyata klien Rp'+int(CPC)+'. Dipakai sebagai pembanding.',true)}
+  catch(err){CPC=null;say($('msg'),err.message,false)}});
+
+$('run').addEventListener('click',()=>{
+  if(!BIZ){say($('msg'),'File Performa Produk belum dimasukkan.',false);return}
+  const target=parseFloat($('target').value)||4, faktor=parseFloat($('faktor').value)||1;
+  const cpcPasar=parseFloat($('cpcPasar').value)||CPC||null;
+  const mCTR=Math.max(med(BIZ.filter(s=>s.views>=200).map(s=>s.ctr))||0,2);
+  const mCR =Math.max(med(BIZ.filter(s=>s.clicks>=20).map(s=>s.cr))||0,0.5);
+  const mVw =med(BIZ.map(s=>s.views));
+  const rows=BIZ.map(s=>{
+    const crI=(isFinite(s.cr)?s.cr:0)/100*faktor;
+    const cpcMax=(isFinite(s.aov)&&crI>0)?s.aov*crI/target:NaN;
+    const ctrOK=isFinite(s.ctr)&&s.ctr>=mCTR, crOK=isFinite(s.cr)&&s.cr>=mCR, vHigh=s.views>=mVw;
+    let rute,kelas,kerja;
+    if(ctrOK&&crOK&&vHigh){rute='SCALE';kelas='scale';
+      kerja='Naikkan budget bertahap maks +30%/hari. Jangan ubah kreatif bersamaan.';}
+    else if(ctrOK&&crOK){rute='KANDIDAT IKLAN';kelas='ads';
+      kerja='Closing terbukti, traffic kurang. Kandidat iklan terbaik — mulai tipis, catat di Log Keputusan.';}
+    else if(!ctrOK&&vHigh){rute='OPTIMASI GAMBAR/JUDUL';kelas='img';
+      kerja='Dilihat '+int(s.views)+'x tapi CTR '+pc(s.ctr)+' di bawah median '+pc(mCTR)+'. Perbaiki gambar utama, judul, harga tampil. Jangan diiklankan dulu.';}
+    else if(ctrOK&&!crOK){rute='OPTIMASI DESKRIPSI/HARGA';kelas='desc';
+      kerja='Diklik tapi CR '+pc(s.cr)+' di bawah median '+pc(mCR)+'. Perbaiki deskripsi, foto detail, ukuran, ulasan, voucher, harga.';}
+    else {rute='PARKIR';kelas='park';kerja='Traffic dan closing dua-duanya lemah. Jangan dibelanjakan sekarang.';}
+    let vs='—',vsKelas='flat';
+    if(isFinite(cpcMax)&&cpcPasar){
+      const r=cpcMax/cpcPasar;
+      vs=x2(r)+'×'; vsKelas=r>=1?'up':'down';
+      if(r<1&&kelas!=='img'&&kelas!=='desc'){
+        kerja='CPC maksimum '+rp(cpcMax)+' masih di bawah CPC pasar '+rp(cpcPasar)+'. Naikkan CR atau AOV dulu — kalau diiklankan sekarang, tiap klik sudah rugi.';}
+    }
+    return {...s,crI:crI*100,cpcMax,rute,kelas,kerja,vs,vsKelas};
+  }).sort((a,b)=>(isFinite(b.cpcMax)?b.cpcMax:-1)-(isFinite(a.cpcMax)?a.cpcMax:-1));
+  H1={rows,target,cpcPasar,klien:$('klien').value.trim()||'(klien)',mCTR,mCR,mVw};
+  const c=k=>rows.filter(r=>r.kelas===k).length;
+  $('kpi1').innerHTML=[
+    ['SKU dianalisa',rows.length,'punya views di periode ini',''],
+    ['Siap scale',c('scale'),'CTR & CR di atas median',c('scale')?'good':''],
+    ['Kandidat iklan',c('ads'),'closing bagus, traffic kurang','cool'],
+    ['Optimasi gambar',c('img'),'dilihat, jarang diklik',c('img')?'warn':''],
+    ['Optimasi deskripsi',c('desc'),'diklik, jarang closing',c('desc')?'warn':''],
+    ['Parkir',c('park'),'jangan dibelanjakan',''],
+    ['Median toko','CTR '+pc(mCTR),'CR '+pc(mCR)+' · views '+int(mVw),''],
+  ].map(([k,v,n,cl])=>`<div class="kpi ${cl}"><div class="k">${k}</div><div class="v">${v}</div><div class="n">${n}</div></div>`).join('');
+  $('t1').querySelector('tbody').innerHTML=rows.map(r=>`<tr>
+    <td>${esc(r.produk).slice(0,60)}</td><td class="num">${int(r.views)}</td><td class="num">${pc(r.ctr)}</td>
+    <td class="num">${pc(r.cr)}</td><td class="num">${int(r.orders)}</td><td class="num">${rp(r.aov)}</td>
+    <td class="num">${rp(r.cpcMax)}</td><td class="num"><span class="pill ${r.vsKelas}">${r.vs}</span></td>
+    <td><span class="pill ${r.kelas}">${r.rute}</span></td><td class="lever">${esc(r.kerja)}</td></tr>`).join('');
+  $('res1').style.display='block';
+  const siap=c('scale')+c('ads');
+  say($('msg'), siap? siap+' SKU siap dibelanjakan ('+c('scale')+' scale, '+c('ads')+' kandidat iklan baru). '+(c('img')+c('desc'))+' SKU perlu dioptimasi dulu — itu pekerjaan yang menaikkan CPC maksimum tanpa menambah budget.'
+    : 'Belum ada SKU yang siap dibelanjakan. '+(c('img')+c('desc'))+' SKU perlu perbaikan gambar/deskripsi dulu. Ini normal untuk klien baru — kerjakan optimasi, lalu bandingkan lagi di tab 2.', siap>0);
+  $('res1').scrollIntoView({behavior:'smooth',block:'start'});
+});
+
+/* ---------- PANEL 2 ---------- */
+let A=null,B=null,H2=null;
+$('fA').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;
+  try{A=bacaBiz(await readBuf(f));say($('msg2'),'Periode SEBELUM: '+A.length+' SKU.',true)}
+  catch(err){A=null;say($('msg2'),err.message,false)}});
+$('fB').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;
+  try{B=bacaBiz(await readBuf(f));say($('msg2'),'Periode SESUDAH: '+B.length+' SKU.',true)}
+  catch(err){B=null;say($('msg2'),err.message,false)}});
+
+$('run2').addEventListener('click',()=>{
+  if(!A||!B){say($('msg2'),'Kedua file periode harus dimasukkan.',false);return}
+  const minK=parseFloat($('minKlik').value)||20;
+  const key=s=>s.kode||s.produk.toLowerCase();
+  const mapA=new Map(A.map(s=>[key(s),s]));
+  const rows=[];
+  B.forEach(b=>{const a=mapA.get(key(b)); if(!a) return;
+    const dCTR=(isFinite(a.ctr)&&a.ctr>0&&isFinite(b.ctr))?(b.ctr/a.ctr-1)*100:NaN;
+    const dCR =(isFinite(a.cr)&&a.cr>0&&isFinite(b.cr))?(b.cr/a.cr-1)*100:NaN;
+    const dVw =a.views>0?(b.views/a.views-1)*100:NaN;
+    const dGmv=a.gmv>0?(b.gmv/a.gmv-1)*100:NaN;
+    let putusan,kelas;
+    if(b.clicks<minK){putusan='BELUM CUKUP DATA';kelas='flat';}
+    else if((isFinite(dCTR)&&dCTR>=20)||(isFinite(dCR)&&dCR>=20)){putusan='MEMBAIK — scale up';kelas='up';}
+    else if((isFinite(dCTR)&&dCTR<=-10)||(isFinite(dCR)&&dCR<=-10)){putusan='MEMBURUK — kembalikan';kelas='down';}
+    else {putusan='TIDAK BERUBAH';kelas='flat';}
+    rows.push({...b,a,dCTR,dCR,dVw,dGmv,putusan,kelas});
+  });
+  if(!rows.length){say($('msg2'),'Tidak ada SKU yang cocok antara dua file. Cek apakah dua file ini dari toko yang sama.',false);return}
+  rows.sort((p,q)=>(isFinite(q.dCR)?q.dCR:-999)-(isFinite(p.dCR)?p.dCR:-999));
+  H2={rows,klien:$('klien').value.trim()||'(klien)'};
+  const c=k=>rows.filter(r=>r.kelas===k).length;
+  const naik=rows.filter(r=>isFinite(r.dCR)&&r.clicks>=minK);
+  $('kpi2').innerHTML=[
+    ['SKU terbanding',rows.length,'cocok di dua periode',''],
+    ['Membaik',c('up'),'CTR atau CR naik ≥20%',c('up')?'good':''],
+    ['Memburuk',c('down'),'turun ≥10% — kembalikan',c('down')?'bad':''],
+    ['Belum cukup data',c('flat'),'klik di bawah ambang',''],
+    ['Median Δ CR',naik.length?pc(med(naik.map(r=>r.dCR))):'—','pergeseran konversi toko','cool'],
+  ].map(([k,v,n,cl])=>`<div class="kpi ${cl}"><div class="k">${k}</div><div class="v">${v}</div><div class="n">${n}</div></div>`).join('');
+  const d=v=>isFinite(v)?`<span class="delta ${v>=0?'up':'down'}">${v>=0?'+':''}${v.toFixed(0)}%</span>`:'—';
+  $('t2').querySelector('tbody').innerHTML=rows.map(r=>`<tr>
+    <td>${esc(r.produk).slice(0,52)}</td><td class="num">${d(r.dVw)}</td>
+    <td class="num">${pc(r.a.ctr)}</td><td class="num">${pc(r.ctr)}</td><td class="num">${d(r.dCTR)}</td>
+    <td class="num">${pc(r.a.cr)}</td><td class="num">${pc(r.cr)}</td><td class="num">${d(r.dCR)}</td>
+    <td class="num">${int(r.a.orders)} → ${int(r.orders)}</td><td class="num">${d(r.dGmv)}</td>
+    <td><span class="pill ${r.kelas}">${r.putusan}</span></td></tr>`).join('');
+  $('res2').style.display='block';
+  say($('msg2'), c('up')+' SKU membaik dan boleh dinaikkan budget-nya. '+c('down')+' memburuk — kembalikan ke versi sebelumnya. Catat tiap perubahan di Tracker Optimasi supaya jenis perubahan yang paling sering berhasil kelihatan.', c('up')>0);
+  $('res2').scrollIntoView({behavior:'smooth',block:'start'});
+});
+
+/* ---------- unduh ---------- */
+function unduh(n,i){const b=new Blob(['﻿'+i],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=n;a.click();URL.revokeObjectURL(a.href)}
+const q=v=>'"'+String(v).replace(/"/g,'""')+'"';
+const slug=s=>s.replace(/\W+/g,'-').toLowerCase();
+const tgl=()=>{const d=new Date();return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear()};
+
+$('csv1').addEventListener('click',()=>{if(!H1)return;
+  const h=['Klien','Kode Produk','SKU','Views','CTR %','CR %','Pesanan','AOV','CPC maksimum','Target ROAS','CPC pasar','Rute','Yang dikerjakan'];
+  const b=H1.rows.map(r=>[H1.klien,r.kode,r.produk,r.views,r.ctr,r.cr,r.orders,Math.round(r.aov||0),
+    isFinite(r.cpcMax)?Math.round(r.cpcMax):'',H1.target,H1.cpcPasar||'',r.rute,r.kerja].map(q).join(','));
+  unduh('screening-'+slug(H1.klien)+'.csv',[h.map(q).join(','),...b].join('\n'))});
+
+$('csv1b').addEventListener('click',()=>{if(!H1)return;
+  const h=['Tanggal','Klien','Kode Produk','SKU','Rute awal','Jenis perubahan','CTR sebelum','CR sebelum','Views sebelum','Pesanan sebelum','CTR sesudah','CR sesudah','Views sesudah','Pesanan sesudah','Catatan'];
+  const jenis=r=>r.kelas==='img'?'Gambar utama':(r.kelas==='desc'?'Deskripsi':'');
+  const b=H1.rows.filter(r=>r.kelas==='img'||r.kelas==='desc').map(r=>[tgl(),H1.klien,r.kode,r.produk,r.rute,
+    jenis(r),r.ctr,r.cr,r.views,r.orders,'','','','',r.kerja].map(q).join(','));
+  unduh('tracker-optimasi-'+slug(H1.klien)+'.csv',[h.map(q).join(','),...b].join('\n'))});
+
+$('csv2').addEventListener('click',()=>{if(!H2)return;
+  const h=['Klien','Kode Produk','SKU','Views sebelum','Views sesudah','Delta views %','CTR sebelum','CTR sesudah','Delta CTR %','CR sebelum','CR sesudah','Delta CR %','Pesanan sebelum','Pesanan sesudah','GMV sebelum','GMV sesudah','Delta GMV %','Putusan'];
+  const f=v=>isFinite(v)?v.toFixed(1):'';
+  const b=H2.rows.map(r=>[H2.klien,r.kode,r.produk,r.a.views,r.views,f(r.dVw),r.a.ctr,r.ctr,f(r.dCTR),
+    r.a.cr,r.cr,f(r.dCR),r.a.orders,r.orders,r.a.gmv,r.gmv,f(r.dGmv),r.putusan].map(q).join(','));
+  unduh('sebelum-sesudah-'+slug(H2.klien)+'.csv',[h.map(q).join(','),...b].join('\n'))});
+</script></body></html>

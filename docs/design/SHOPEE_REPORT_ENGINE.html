@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MEA Shopee Report Engine</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@600;700&display=swap');
+body{font-family:'Inter',system-ui,sans-serif}
+.font-display{font-family:'Poppins',system-ui,sans-serif}
+.kpi-value{font-size:1.75rem;line-height:1.1;font-weight:700}
+.kpi-card{transition:transform .2s,box-shadow .2s}
+.kpi-card:hover{transform:translateY(-2px);box-shadow:0 10px 15px -3px rgba(0,0,0,.1)}
+.status-green{background:#D1FAE5;color:#065F46}.status-yellow{background:#FEF3C7;color:#92400E}
+.status-red{background:#FEE2E2;color:#991B1B}.status-gray{background:#F1F5F9;color:#475569}
+.insight-card{border-left:4px solid #0F766E}
+.dropzone{transition:all .2s}.dropzone.drag{background:#CCFBF1;border-color:#0F766E}
+@media print{.no-print{display:none}}
+</style>
+</head>
+<body class="bg-slate-50">
+<nav class="bg-white border-b border-slate-200 sticky top-0 z-50 no-print">
+  <div class="max-w-screen-xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 bg-teal-700 rounded-2xl flex items-center justify-center"><i class="fa-solid fa-chart-line text-white text-xl"></i></div>
+      <div><span class="font-display text-2xl font-bold tracking-tight text-slate-900">MEA</span><span class="font-display text-2xl font-bold tracking-tight text-teal-700">Report Engine</span></div>
+    </div>
+    <div id="exportBar" class="hidden items-center gap-2">
+      <button onclick="downloadPDF(this)" class="px-3 py-2 bg-teal-700 hover:bg-teal-800 text-white text-sm font-semibold rounded-full"><i class="fa-solid fa-file-pdf mr-1"></i> Download PDF</button>
+      <button onclick="downloadHTML()" class="px-3 py-2 bg-slate-700 hover:bg-slate-800 text-white text-sm font-semibold rounded-full"><i class="fa-solid fa-code mr-1"></i> Download HTML</button>
+      <button onclick="copyHTML()" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-full"><i class="fa-solid fa-copy mr-1"></i> <span id="copyLbl">Copy HTML</span></button>
+    </div>
+  </div>
+</nav>
+
+<div class="max-w-screen-xl mx-auto px-6 py-8">
+  <!-- UPLOAD PANEL -->
+  <div id="uploadPanel">
+    <div class="text-center mb-6">
+      <h1 class="font-display text-3xl font-bold text-slate-900">Generate Laporan Bulanan Shopee</h1>
+      <p class="text-slate-500 mt-2">Upload semua file export Shopee (.xlsx) + iklan/affiliate (.csv). Laporan langsung dibuat otomatis.</p>
+    </div>
+    <div class="grid md:grid-cols-3 gap-4 mb-6">
+      <div class="bg-white rounded-xl border border-slate-100 p-4"><div class="text-sm font-semibold text-slate-700 mb-1"><i class="fa-solid fa-file-excel text-teal-600 mr-1"></i> File Utama (.xlsx)</div><p class="text-xs text-slate-500">Home, Produk, Kesehatan Toko, Voucher, Chat, Live, Diskon, Broadcast, Meta</p></div>
+      <div class="bg-white rounded-xl border border-slate-100 p-4"><div class="text-sm font-semibold text-slate-700 mb-1"><i class="fa-solid fa-file-csv text-orange-600 mr-1"></i> File Tambahan (.csv)</div><p class="text-xs text-slate-500">Ads Toko, Ads Produk, Ads Live, Ads Banner, Shopee Video, Affiliate Product & Creator</p></div>
+      <div class="bg-white rounded-xl border border-slate-100 p-4"><div class="text-sm font-semibold text-slate-700 mb-1"><i class="fa-solid fa-circle-check text-teal-600 mr-1"></i> Nama File</div><p class="text-xs text-slate-500">Biarkan sesuai unduhan (mis. <span class="font-mono">[bisnis]-Home && ...</span>). Engine deteksi otomatis.</p></div>
+    </div>
+    <label id="dropzone" class="dropzone block border-2 border-dashed border-slate-300 rounded-2xl p-12 text-center cursor-pointer bg-white hover:bg-slate-50">
+      <input type="file" id="fileInput" class="hidden" multiple accept=".xlsx,.csv">
+      <i class="fa-solid fa-cloud-arrow-up text-5xl text-teal-600 mb-3"></i>
+      <div class="text-lg font-semibold text-slate-700">Tarik & lepas file di sini, atau klik untuk pilih</div>
+      <div class="text-sm text-slate-500 mt-1">Bisa pilih banyak file sekaligus (.xlsx & .csv)</div>
+    </label>
+    <div class="mt-4 flex items-center justify-center gap-3 flex-wrap">
+      <input id="clientName" placeholder="Nama Klien (mis. EzzyConnect)" class="px-4 py-2 border border-slate-300 rounded-lg text-sm w-56">
+      <input id="periodName" placeholder="Periode (mis. Juni 2026)" class="px-4 py-2 border border-slate-300 rounded-lg text-sm w-56">
+      <span class="text-xs text-slate-400">Opsional — auto-isi dari nama file</span>
+    </div>
+    <div id="fileList" class="mt-6 grid md:grid-cols-3 gap-2"></div>
+    <div id="statusMsg" class="mt-4 text-center text-sm"></div>
+  </div>
+
+  <!-- REPORT -->
+  <div id="reportContainer" class="hidden"></div>
+  <div class="text-center mt-8 no-print">
+    <button id="resetBtn" onclick="resetAll()" class="hidden px-4 py-2 text-sm text-slate-500 hover:text-slate-700"><i class="fa-solid fa-rotate-left mr-1"></i> Upload file lain / mulai ulang</button>
+  </div>
+</div>
+
+<script>
+// ===== engine port (from artifact) + FIXES =====
+const NA = new Set(['-', '--', '', 'n/a', 'tidak terbatas', 'null', 'undefined']);
+function parseNumber(val, locale='id'){
+  if(val===null||val===undefined) return null;
+  if(typeof val==='number') return isNaN(val)?null:val;
+  let s=String(val).trim();
+  if(NA.has(s.toLowerCase())) return null;
+  const m=s.match(/^(\d{1,3}):(\d{2}):(\d{2})$/);
+  if(m) return (+m[1])*3600+(+m[2])*60+(+m[3]);
+  const isPct=s.includes('%');
+  s=s.replace(/Rp/gi,'').replace(/%/g,'').replace(/\s/g,'').replace(/ /g,'');
+  if(NA.has(s.toLowerCase())||s==='') return null;
+  const neg=s.startsWith('-'); s=s.replace(/^[+-]/,''); if(!s) return null;
+  try{
+    if(locale==='id'){
+      if(s.includes(',')){ s=s.replace(/\./g,'').replace(',','.'); }
+      else{ const parts=s.split('.'); if(parts.length===2&&parts[1].length<=2&&parts[0].length<=3){} else{ s=s.replace(/\./g,''); } }
+    } else { s=s.replace(/,/g,''); }
+    let num=parseFloat(s); if(isNaN(num)) return null; if(neg) num=-num; if(isPct) num=num/100; return num;
+  }catch(e){ return null; }
+}
+function parseIntId(val,locale='id'){ const n=parseNumber(val,locale); return n===null?null:Math.round(n); }
+
+// FIX: sheet marker detector
+const SHEET_MARK='__SHEET__:';
+function isSheetMarker(row){ return !!row && row.length>=1 && typeof row[0]==='string' && row[0].startsWith(SHEET_MARK); }
+
+const MODULE_MAP={'bisnis|home':'bisnis_home','bisnis|produk':'bisnis_produk','bisnis|live':'bisnis_live','ads|toko':'ads_toko','ads|produk':'ads_produk','aff|product':'aff_product','aff|creator':'aff_creator','promo|diskon':'promo_diskon','promo|voucher':'promo_voucher','promo|flashsale':'promo_flashsale','layanan|chat':'layanan_chat','layanan|chatbroadcast':'layanan_broadcast','meta|':'meta','bisnis|kesehatan':'bisnis_kesehatan','bisnis|video':'bisnis_video','ads|live':'ads_live','ads|banner':'ads_banner'};
+function parseFilename(name){
+  const dot=name.lastIndexOf('.'); const base=dot>=0?name.slice(0,dot):name; const ext=dot>=0?name.slice(dot+1).toLowerCase():'';
+  if(ext!=='xlsx'&&ext!=='csv') return null;
+  const m=base.match(/\[(\w+)\](?:-(\w+))?/); if(!m) return null;
+  const prefix=m[1].toLowerCase(); const subtype=m[2]?m[2].toLowerCase():'';
+  const module=MODULE_MAP[`${prefix}|${subtype}`]; if(!module) return null;
+  const parts=base.split('&&').map(p=>p.trim()); let client=null,date=null,period=null;
+  if(parts.length>=3){ date=parts[parts.length-1]; client=parts[parts.length-2]; period=parts.length>=4?parts[parts.length-3]:parts[1]; }
+  return {module,client,period,date,ext,filename:name};
+}
+function mapHeader(headerRow,keyCols){
+  const hmap={}; const used=new Set();
+  const lowered=headerRow.map(h=>h==null?'':String(h).trim().toLowerCase());
+  for(const key in keyCols){ let found=false;
+    for(const kw of keyCols[key]){ for(let j=0;j<lowered.length;j++){ if(lowered[j]===kw&&!used.has(j)){hmap[key]=j;used.add(j);found=true;break;} } if(found) break; }
+    if(found) continue;
+    for(const kw of keyCols[key]){ for(let j=0;j<lowered.length;j++){ if(lowered[j].includes(kw)&&!used.has(j)){hmap[key]=j;used.add(j);found=true;break;} } if(found) break; }
+  }
+  return hmap;
+}
+function findRow(rows,needle,start=0,col=0){ const nl=needle.toLowerCase(); for(let i=start;i<rows.length;i++){ const c=rows[i]&&rows[i][col]!==undefined?rows[i][col]:null; if(c!=null&&String(c).toLowerCase().includes(nl)) return i; } return -1; }
+function wideRowdict(row,hmap,strKeys=[]){ const d={}; for(const key in hmap){ const j=hmap[key]; const v=j<row.length?row[j]:null; d[key]=strKeys.includes(key)?(v!=null?String(v).trim():null):parseNumber(v);} return d; }
+
+const HOME_HDR={penjualan:['total penjualan (idr)','total penjualan'],pesanan:['total pesanan'],penjualan_per_pesanan:['penjualan per pesanan'],produk_diklik:['produk diklik'],pengunjung:['total pengunjung'],tingkat_konversi:['tingkat konversi pesanan','tingkat konversi'],pesanan_batal:['pesanan dibatalkan'],penjualan_batal:['penjualan dibatalkan'],pesanan_retur:['pesanan dikembalikan'],penjualan_retur:['penjualan dikembalikan'],total_pembeli:['pembeli'],pembeli_baru:['total pembeli baru'],pembeli_lama:['total pembeli saat ini'],potensi_pembeli:['total potensi pembeli'],persen_pembeli_kembali:['tingkat pembelian berulang']};
+function parseHomeSection(rows,startIdx){
+  let hi=-1;
+  for(let i=startIdx;i<Math.min(startIdx+6,rows.length);i++){ const c0=rows[i]&&rows[i][0]!=null?String(rows[i][0]).trim().toLowerCase():''; if(c0==='tanggal'||c0==='periode waktu'){hi=i;break;} }
+  if(hi<0) throw new Error("Header 'Tanggal' tidak ketemu di Home");
+  const hmap=mapHeader(rows[hi],HOME_HDR);
+  const rowdict=r=>{ const d={tanggal:r&&r[0]!=null?String(r[0]).trim():null}; for(const key in hmap) d[key]=parseNumber(r[hmap[key]]); return d; };
+  const summary=rowdict(rows[hi+1]);
+  const daily=[];
+  for(let i=hi+2;i<rows.length;i++){ const r=rows[i]; if(isSheetMarker(r)) break; const c0=r&&r[0]!=null?String(r[0]).trim():''; if(!c0) continue; const lc=c0.toLowerCase(); if(lc==='tanggal'||lc==='periode waktu') continue; if(!/^\d/.test(c0)) break; daily.push(rowdict(r)); }
+  return {summary,daily};
+}
+function parseBisnisHome(rows){
+  const iD=findRow(rows,'pesanan dibuat');
+  const iS=findRow(rows,'pesanan siap dikirim',(iD>=0?iD:0)+1);
+  const out={};
+  if(iD>=0) out.pesanan_dibuat=parseHomeSection(rows,iD);
+  if(iS>=0) out.pesanan_siap_dikirim=parseHomeSection(rows,iS);
+  if(!out.pesanan_dibuat&&!out.pesanan_siap_dikirim) throw new Error('Home: section tidak dikenali');
+  return out;
+}
+const PRODUK_HDR={kode_produk:['kode produk'],nama_produk:['produk'],nama_variasi:['nama variasi'],status:['status produk saat ini','status produk'],produk_dilihat:['jumlah produk dilihat','dilihat'],produk_diklik:['produk diklik'],pengunjung_produk:['pengunjung produk (kunjungan)','pengunjung produk'],pesanan_dibuat:['pesanan dibuat'],penjualan_dibuat:['total penjualan (pesanan dibuat) (idr)','total penjualan (pesanan dibuat)'],pembeli_dibuat:['total pembeli (pesanan dibuat)'],cr_pesanan_dibuat:['tingkat konversi (pesanan yang dibuat)'],pesanan_siap:['pesanan siap dikirim'],penjualan_siap:['penjualan (pesanan siap dikirim) (idr)','penjualan (pesanan siap dikirim)'],cr_siap:['tingkat konversi (pesanan siap dikirim)']};
+function parseBisnisProduk(rows){
+  let hi=-1;
+  for(let i=0;i<rows.length;i++){ const joined=(rows[i]||[]).map(c=>c==null?'':String(c).toLowerCase()).join(' '); if(joined.includes('kode produk')&&joined.includes('variasi')){hi=i;break;} }
+  if(hi<0) throw new Error('Header produk tidak ketemu');
+  const hmap=mapHeader(rows[hi],PRODUK_HDR);
+  const products=[],variations=[];
+  for(let i=hi+1;i<rows.length;i++){
+    const r=rows[i];
+    if(isSheetMarker(r)) break;   // FIX: stop at next sheet (only parse first product table)
+    if(!r||r.every(c=>c==null||String(c).trim()==='')) continue;
+    const get=k=>(k in hmap&&hmap[k]<r.length)?r[hmap[k]]:null;
+    const namaVar=get('nama_variasi')!=null?String(get('nama_variasi')).trim():'-';
+    const kode=get('kode_produk')!=null?String(get('kode_produk')).trim():null;
+    if(!kode) continue;
+    const rec={kode_produk:kode,nama_produk:get('nama_produk')!=null?String(get('nama_produk')).trim():null,nama_variasi:namaVar,status:get('status')!=null?String(get('status')).trim():null,produk_dilihat:parseIntId(get('produk_dilihat')),produk_diklik:parseIntId(get('produk_diklik')),pengunjung_produk:parseIntId(get('pengunjung_produk')),pesanan_dibuat:parseIntId(get('pesanan_dibuat')),penjualan_dibuat:parseNumber(get('penjualan_dibuat')),pembeli_dibuat:parseIntId(get('pembeli_dibuat')),cr_pesanan_dibuat:parseNumber(get('cr_pesanan_dibuat')),pesanan_siap:parseIntId(get('pesanan_siap')),penjualan_siap:parseNumber(get('penjualan_siap')),cr_siap:parseNumber(get('cr_siap'))};
+    if(namaVar==='-'||namaVar===''||namaVar==='None') products.push(rec); else variations.push(rec);
+  }
+  return {products,variations};
+}
+function genericZero(rows){ let total=0; for(const r of rows) for(let j=1;j<(r||[]).length;j++){ const n=parseNumber(r[j]); if(n) total+=Math.abs(n);} return {raw_rows:rows.length,has_activity:total>0}; }
+const VOUCHER_HDR={penjualan_dibuat:['penjualan (pesanan dibuat) (idr)','penjualan (pesanan dibuat)'],klaim:['klaim'],pesanan_dibuat:['pesanan (pesanan dibuat)'],usage_dibuat:['tingkat penggunaan (pesanan dibuat)'],pembeli_dibuat:['pembeli (pesanan dibuat)'],biaya_dibuat:['total biaya (pesanan dibuat) (idr)','total biaya (pesanan dibuat)']};
+const VOUCHER_DET={nama:['nama voucher'],klaim:['klaim'],pesanan_dibuat:['pesanan (pesanan dibuat)'],penjualan_dibuat:['penjualan (pesanan dibuat) (idr)','penjualan (pesanan dibuat)'],biaya_dibuat:['total biaya (pesanan dibuat) (idr)','total biaya']};
+function parseVoucher(rows){
+  const out={summary:{},vouchers:[],daily:[]};
+  const iH=findRow(rows,'periode waktu'); if(iH>=0) out.summary=wideRowdict(rows[iH+1],mapHeader(rows[iH],VOUCHER_HDR));
+  const iD=findRow(rows,'waktu promo');
+  if(iD>=0){ const hmap=mapHeader(rows[iD],VOUCHER_HDR); for(let i=iD+1;i<rows.length;i++){ const r=rows[i]; if(isSheetMarker(r)) break; const c0=r&&r[0]!=null?String(r[0]).trim():''; if(!c0||!/^\d/.test(c0)) break; const d=wideRowdict(r,hmap); d.tanggal=c0; out.daily.push(d);} }
+  let iV=-1; for(let i=0;i<rows.length;i++){ const c0=rows[i]&&rows[i][0]!=null?String(rows[i][0]).trim().toLowerCase():''; if(c0==='nama voucher'){iV=i;break;} }
+  if(iV>=0){ const hmap=mapHeader(rows[iV],VOUCHER_DET); for(let i=iV+1;i<rows.length;i++){ const r=rows[i]; if(isSheetMarker(r)) break; const c0=r&&r[0]!=null?String(r[0]).trim():''; if(!c0) break; out.vouchers.push(wideRowdict(r,hmap,['nama']));} }
+  return out;
+}
+const CHAT_HDR={pengunjung:['pengunjung'],chat_masuk:['jumlah chat'],pengunjung_bertanya:['pengunjung bertanya'],pertanyaan_diajukan:['pertanyaan diajukan'],chat_dibalas:['chat dibalas'],chat_belum_dibalas:['chat belum dibalas'],waktu_respon_detik:['waktu respon rata-rata'],csat:['csat %','csat'],response_rate:['tingkat konversi (jumlah chat yang direspon)','persentase chat dibalas'],pembeli_dari_chat:['total pembeli'],pesanan_dari_chat:['total pesanan'],penjualan_dari_chat:['penjualan (idr)','penjualan'],konversi_chat_dibalas:['tingkat konversi (chat dibalas)']};
+function parseChat(rows){
+  const out={summary:{},daily:[]};
+  const iH=findRow(rows,'periode waktu'); if(iH>=0) out.summary=wideRowdict(rows[iH+1],mapHeader(rows[iH],CHAT_HDR));
+  const iG=findRow(rows,'grafik kriteria');
+  if(iG>=0){ let iD=-1; for(let i=iG;i<Math.min(iG+4,rows.length);i++){ const c0=rows[i]&&rows[i][0]!=null?String(rows[i][0]).trim().toLowerCase():''; if(c0==='tanggal'){iD=i;break;} }
+    if(iD>=0){ const hmap=mapHeader(rows[iD],CHAT_HDR); for(let i=iD+1;i<rows.length;i++){ const r=rows[i]; if(isSheetMarker(r)) break; const c0=r&&r[0]!=null?String(r[0]).trim():''; if(!c0||!/^\d/.test(c0)) break; const d=wideRowdict(r,hmap); d.tanggal=c0; out.daily.push(d);} } }
+  return out;
+}
+const META_HDR={minggu:['minggu'],kampanye:['nama kampanye'],spend:['jumlah yang dibelanjakan'],purchase_value:['nilai konversi pembelian khusus'],roas:['roas pembelian'],purchases:['pembelian dengan item bersama'],impressions:['impresi'],clicks:['klik tautan'],ctr:['ctr'],atc:['penambahan ke keranjang belanja dengan item']};
+function parseMeta(rows){
+  const out={summary:{},weekly:[]}; let hi=-1;
+  for(let i=0;i<rows.length;i++){ const joined=(rows[i]||[]).map(c=>c==null?'':String(c).toLowerCase()).join(' '); if(joined.includes('minggu')&&joined.includes('dibelanjakan')){hi=i;break;} }
+  if(hi<0) throw new Error('Header Meta tidak ketemu');
+  const hmap=mapHeader(rows[hi],META_HDR);
+  const rowdict=r=>{ const d={}; for(const key in hmap){ const v=hmap[key]<r.length?r[hmap[key]]:null; d[key]=(key==='minggu'||key==='kampanye')?(v!=null?String(v).trim():null):parseNumber(v,'en'); } return d; };
+  for(let i=hi+1;i<rows.length;i++){ const r=rows[i]; if(isSheetMarker(r)) break; if(!r||r.every(c=>c==null||String(c).trim()==='')) continue; const d=rowdict(r); if(!d.minggu){ if(d.spend!=null) out.summary=d; } else out.weekly.push(d); }
+  return out;
+}
+function parseAdsCsv(rows){
+  let hi=-1;
+  for(let i=0;i<rows.length;i++){ const low=(rows[i]||[]).map(c=>c==null?'':String(c).toLowerCase()).join(','); if((low.includes('iklan')||low.includes('nama'))&&(low.includes('dilihat')||low.includes('impress'))){hi=i;break;} }
+  if(hi<0) throw new Error('Header CSV ads tidak ketemu');
+  const header=rows[hi].map(h=>String(h==null?'':h).trim().toLowerCase());
+  const col=(...kws)=>{ for(const kw of kws) for(let j=0;j<header.length;j++) if(header[j].includes(kw)) return j; return -1; };
+  const colExact=(...names)=>{ for(const nm of names) for(let j=0;j<header.length;j++) if(header[j]===nm) return j; return -1; };
+  const cNama=colExact('nama iklan')>=0?colExact('nama iklan'):col('nama iklan','nama');
+  const cStatus=colExact('status'),cDilihat=colExact('dilihat'),cKlik=colExact('jumlah klik');
+  const cCtr=colExact('persentase klik'),cOmzet=colExact('omzet penjualan'),cBiaya=colExact('biaya');
+  const cPesanan=colExact('pesanan'),cTerjual=colExact('produk terjual');
+  let cRoas=colExact('efektifitas iklan','efektivitas iklan'); let cAcos=-1;
+  for(let j=0;j<header.length;j++) if(header[j].includes('(acos)')&&!header[j].includes('langsung')){cAcos=j;break;}
+  const items=[];
+  for(let i=hi+1;i<rows.length;i++){ const r=rows[i]; if(!r||r.every(x=>String(x==null?'':x).trim()==='')) continue; const nama=cNama>=0&&cNama<r.length?String(r[cNama]).trim():''; if(!nama) continue; const g=ci=>(ci>=0&&ci<r.length)?parseNumber(r[ci],'en'):null; items.push({nama,status:cStatus>=0&&cStatus<r.length?String(r[cStatus]).trim():null,dilihat:g(cDilihat),klik:g(cKlik),ctr:g(cCtr),omzet:g(cOmzet),biaya:g(cBiaya),roas:g(cRoas),acos:g(cAcos),pesanan:g(cPesanan),produk_terjual:g(cTerjual)}); }
+  return {items};
+}
+function parseAffCsv(rows,nameKws){
+  let hi=-1;
+  for(let i=0;i<rows.length;i++){ const low=(rows[i]||[]).map(c=>c==null?'':String(c).toLowerCase()).join(','); if(low.includes('omzet')&&nameKws.some(k=>low.includes(k))){hi=i;break;} }
+  if(hi<0) hi=0;
+  const header=rows[hi].map(h=>String(h==null?'':h).trim().toLowerCase());
+  const col=(...kws)=>{ for(const kw of kws) for(let j=0;j<header.length;j++) if(header[j].includes(kw)) return j; return -1; };
+  const cName=col(...nameKws),cOmzet=col('omzet'),cTerjual=col('terjual'),cPesanan=col('pesanan'),cClicks=col('click','klik'),cKomisi=col('komisi'),cRoi=col('roi'),cPembeli=col('total pembeli'),cBaru=col('pembeli baru');
+  const items=[];
+  for(let i=hi+1;i<rows.length;i++){ const r=rows[i]; if(!r||r.every(x=>String(x==null?'':x).trim()==='')) continue; const nm=cName>=0&&cName<r.length?String(r[cName]).trim():''; if(!nm) continue; const g=ci=>(ci>=0&&ci<r.length)?parseNumber(r[ci],'en'):null; items.push({nama:nm,omzet:g(cOmzet),produk_terjual:g(cTerjual),pesanan:g(cPesanan),clicks:g(cClicks),komisi:g(cKomisi),roi:g(cRoi),total_pembeli:g(cPembeli),pembeli_baru:g(cBaru)}); }
+  return {items};
+}
+
+// ===== MODUL BARU v2: Kesehatan Toko, Shopee Video, Iklan Live, Identitas Toko =====
+function parseKesehatan(rows){
+  let hi=-1;
+  for(let i=0;i<rows.length;i++){ const j=(rows[i]||[]).map(c=>c==null?'':String(c).toLowerCase()).join(' '); if(j.includes('poin pinalti')||j.includes('poin penalti')){hi=i;break;} }
+  const penalti=[];
+  if(hi>=0){ for(let i=hi+1;i<rows.length;i++){ const r=rows[i]; if(isSheetMarker(r)) break; if(!r||r.every(c=>c==null||String(c).trim()==='')) continue; const poin=parseNumber(r[0]); const desk=r.length>1&&r[1]!=null?String(r[1]).trim():''; const dur=r.length>2&&r[2]!=null?String(r[2]).trim():''; if(poin==null&&!desk) continue; penalti.push({poin:poin||0,deskripsi:desk,durasi:dur}); } }
+  return {poin_total:penalti.reduce((a,x)=>a+(x.poin||0),0),penalti,uploaded:true};
+}
+const VIDEO_HDR={penjualan_dibuat:['penjualan(pesanan dibuat)'],penjualan_siap:['penjualan(pesanan siap dikirim)'],pesanan_dibuat:['pesanan(pesanan dibuat)'],pesanan_siap:['pesanan(pesanan siap dikirim)'],produk_terjual:['produk terjual(pesanan dibuat)'],penonton:['penonton'],ditonton:['ditonton'],penonton_efektif:['penonton efektif'],ctr:['persentase klik'],pembeli:['pembeli(pesanan dibuat)'],atc:['tambah ke keranjang'],klik_produk:['klik produk'],suka:['suka'],share:['share'],komentar:['komentar'],follower_baru:['pengikut baru dari video'],completion:['tingkat video selesai ditonton']};
+function parseVideo(rows){
+  let hi=-1;
+  for(let i=0;i<rows.length;i++){ const r=rows[i]||[]; if(r.some(c=>c!=null&&String(c).trim().toLowerCase()==='periode data')){hi=i;break;} }
+  if(hi<0) throw new Error('Header Shopee Video tidak ketemu');
+  const hmap=mapHeader(rows[hi],VIDEO_HDR);
+  let dataRow=null;
+  for(let i=hi+1;i<Math.min(hi+5,rows.length);i++){ const r=rows[i]; if(r&&r[0]!=null&&String(r[0]).trim()!==''){dataRow=r;break;} }
+  const summary={};
+  if(dataRow) for(const key in hmap){ const j=hmap[key]; summary[key]=parseNumber(j<dataRow.length?dataRow[j]:null); }
+  const sumber=[];
+  for(let i=0;i<rows.length;i++){ const r=rows[i]||[];
+    for(let j=0;j<r.length;j++){ const c=r[j]!=null?String(r[j]).trim():''; const lc=c.toLowerCase();
+      if(lc.startsWith('kunjungan - sumber penonton - ')&&!lc.includes('semua sumber')){
+        const label=c.slice('kunjungan - sumber penonton - '.length);
+        const hr=rows[i+1]||[], vr=rows[i+2]||[];
+        const find=kw=>{ for(let x=0;x<hr.length;x++){ const h=hr[x]!=null?String(hr[x]).trim().toLowerCase():''; if(h===kw) return x; } for(let x=0;x<hr.length;x++){ const h=hr[x]!=null?String(hr[x]).trim().toLowerCase():''; if(h.includes(kw)) return x; } return -1; };
+        const g=x=>x>=0&&x<vr.length?parseNumber(vr[x]):null;
+        sumber.push({label,ditonton:g(find('ditonton')),penonton:g(find('penonton')),penonton_efektif:g(find('penonton efektif'))});
+      }
+    }
+  }
+  const has_activity=(summary.ditonton||0)>0||(summary.penjualan_dibuat||0)>0;
+  return {summary,sumber,has_activity};
+}
+function parseAdsLive(rows){
+  let hi=-1;
+  for(let i=0;i<rows.length;i++){ const low=(rows[i]||[]).map(c=>c==null?'':String(c).toLowerCase()).join(','); if(low.includes('nama iklan')&&low.includes('penonton')){hi=i;break;} }
+  if(hi<0) throw new Error('Header CSV Iklan Live tidak ketemu');
+  const header=rows[hi].map(h=>String(h==null?'':h).trim().toLowerCase());
+  const cx=(...names)=>{ for(const nm of names) for(let j=0;j<header.length;j++) if(header[j]===nm) return j; return -1; };
+  const cNama=cx('nama iklan'),cStatus=cx('status'),cPenonton=cx('penonton'),cPesanan=cx('pesanan'),cCr=cx('tingkat konversi'),cOmzet=cx('omzet penjualan'),cBiaya=cx('biaya'),cRoas=cx('efektifitas iklan','efektivitas iklan');
+  const items=[];
+  for(let i=hi+1;i<rows.length;i++){ const r=rows[i]; if(!r||r.every(x=>String(x==null?'':x).trim()==='')) continue; const nama=cNama>=0&&cNama<r.length?String(r[cNama]).trim():''; if(!nama) continue; const g=ci=>(ci>=0&&ci<r.length)?parseNumber(r[ci],'en'):null; items.push({nama,status:cStatus>=0&&cStatus<r.length?String(r[cStatus]||'').trim():null,penonton:g(cPenonton),pesanan:g(cPesanan),cr:g(cCr),omzet:g(cOmzet),biaya:g(cBiaya),roas:g(cRoas)}); }
+  return {items};
+}
+function extractIdentity(rows){
+  let id=null,nama=null;
+  let seen=0;
+  for(let i=0;i<rows.length&&seen<14;i++){ const r=rows[i]; if(!r||isSheetMarker(r)) continue; seen++;
+    const c0=r[0]!=null?String(r[0]).trim().toLowerCase():'';
+    if(c0==='id toko'&&r.length>1&&r[1]!=null) id=String(r[1]).trim();
+    if(c0==='nama toko'&&r.length>1&&r[1]!=null) nama=String(r[1]).trim();
+  }
+  if(!id&&!nama) return null;
+  return {id:id||(nama?nama.toLowerCase():null),nama};
+}
+const PARSERS={bisnis_home:parseBisnisHome,bisnis_produk:parseBisnisProduk,bisnis_live:genericZero,ads_toko:parseAdsCsv,ads_produk:parseAdsCsv,aff_product:rows=>parseAffCsv(rows,['nama produk','produk']),aff_creator:rows=>parseAffCsv(rows,['username','kreator','creator','nama']),promo_diskon:genericZero,promo_voucher:parseVoucher,promo_flashsale:genericZero,layanan_chat:parseChat,layanan_broadcast:genericZero,meta:parseMeta,bisnis_kesehatan:parseKesehatan,bisnis_video:parseVideo,ads_live:parseAdsLive,ads_banner:parseAdsCsv};
+const CONFIG={kuadran:{cr_basis:'pesanan_per_pengunjung',percentile:{traffic_high_pct:0.75,traffic_low_pct:0.25,cr_high_pct:0.75,cr_low_pct:0.25},absolute:{traffic:{low_max:150,high_min:500},conversion:{low_max:0.02,high_min:0.04}},medium_traffic_high_if_cr_high:true,medium_cr_high_if_traffic_high:true,sleeper_visitor_max:50},health:{roas_good:4,roas_warn:2,acos_good:0.25,acos_warn:0.40,ctr_good:0.005,cr_good:0.015,csat_good:0.85,chat_respon_max_detik:3600},layanan:{chat_response_rate_good:0.95,chat_order_conversion_good:0.20,csat_good:0.85,chat_respon_max_detik:3600,cancel_rate_good:0.05,cancel_rate_warn:0.10}};
+function percentile(sorted,pct){ if(!sorted.length) return null; if(sorted.length===1) return sorted[0]; const k=pct*(sorted.length-1),f=Math.floor(k),c=Math.min(f+1,sorted.length-1); return sorted[f]+(sorted[c]-sorted[f])*(k-f); }
+function bandFrom(v,low,high){ if(v==null) return null; if(v<=low) return 'low'; if(v>=high) return 'high'; return 'medium'; }
+function resolveBand(tB,cB,traffic,cr,tHigh,cHigh,kc){ let tRes=tB; if(tB==='medium') tRes=(kc.medium_traffic_high_if_cr_high&&cr!=null&&cr>=cHigh)?'high':'low'; let cRes=cB; if(cB==='medium') cRes=(kc.medium_cr_high_if_traffic_high&&traffic!=null&&traffic>=tHigh)?'high':'low'; const map={'high|high':'bintang','low|high':'hidden_gem','high|low':'bocor_traffic','low|low':'evaluasi'}; return map[`${tRes}|${cRes}`]; }
+function emptyBuckets(){ return {bintang:[],hidden_gem:[],bocor_traffic:[],evaluasi:[],tidur:[],tidak_tayang:[],no_data:[]}; }
+function computeQuadrants(produk,cfg){
+  const kc=cfg.kuadran,basis=kc.cr_basis,sleeper=kc.sleeper_visitor_max;
+  const recs=produk.products.map(p=>{ const traffic=p.pengunjung_produk; let cr=null; if(basis==='pesanan_per_pengunjung') cr=(traffic&&p.pesanan_dibuat!=null)?p.pesanan_dibuat/traffic:null; else cr=p.cr_pesanan_dibuat; return {...p,cr_dipakai:cr}; });
+  const aktif=recs.filter(r=>(r.pengunjung_produk||0)>=sleeper&&r.cr_dipakai!=null);
+  const tVals=aktif.map(r=>r.pengunjung_produk).sort((a,b)=>a-b); const cVals=aktif.map(r=>r.cr_dipakai).sort((a,b)=>a-b);
+  const pc=kc.percentile; const tLowP=percentile(tVals,pc.traffic_low_pct),tHighP=percentile(tVals,pc.traffic_high_pct),cLowP=percentile(cVals,pc.cr_low_pct),cHighP=percentile(cVals,pc.cr_high_pct); const ab=kc.absolute;
+  function classify(mode){ const b=emptyBuckets(); for(const r of recs){ const traffic=r.pengunjung_produk,cr=r.cr_dipakai; if(traffic==null||traffic===0){b.tidak_tayang.push(r);continue;} if(cr==null){b.no_data.push(r);continue;} if(traffic<sleeper){b.tidur.push(r);continue;} let tLow,tHigh,cLow,cHigh; if(mode==='relatif'){tLow=tLowP;tHigh=tHighP;cLow=cLowP;cHigh=cHighP;} else {tLow=ab.traffic.low_max;tHigh=ab.traffic.high_min;cLow=ab.conversion.low_max;cHigh=ab.conversion.high_min;} const tB=bandFrom(traffic,tLow,tHigh),cB=bandFrom(cr,cLow,cHigh); const q=resolveBand(tB,cB,traffic,cr,tHigh,cHigh,kc); b[q].push(r);} for(const k in b) b[k].sort((x,y)=>(y.penjualan_dibuat||0)-(x.penjualan_dibuat||0)); return b; }
+  return {mode_relatif:classify('relatif'),mode_absolute:classify('absolute'),cr_basis:basis,thresholds:{relatif:{traffic_low:tLowP,traffic_high:tHighP,cr_low:cLowP,cr_high:cHighP,n_produk_aktif:aktif.length},absolute:{traffic_low:ab.traffic.low_max,traffic_high:ab.traffic.high_min,cr_low:ab.conversion.low_max,cr_high:ab.conversion.high_min}}};
+}
+function flag(v,good,warn,higher=true){ if(v==null) return '⚪'; if(higher){ if(v>=good) return '🟢'; if(v>=warn) return '🟡'; return '🔴'; } else { if(v<=good) return '🟢'; if(v<=warn) return '🟡'; return '🔴'; } }
+function computeHealth(parsed,cfg){
+  const h=cfg.health,out={}; const home=parsed.bisnis_home||{}; const s=(home.pesanan_dibuat||{}).summary||{};
+  if(Object.keys(s).length) out.cr_toko={nilai:s.tingkat_konversi,flag:flag(s.tingkat_konversi,h.cr_good,h.cr_good*0.6)};
+  let adsItems=[]; for(const m of ['ads_toko','ads_produk','ads_live','ads_banner']) adsItems=adsItems.concat((parsed[m]||{}).items||[]);
+  if(adsItems.length){ const spend=adsItems.reduce((a,i)=>a+(i.biaya||0),0),omzet=adsItems.reduce((a,i)=>a+(i.omzet||0),0),dilihat=adsItems.reduce((a,i)=>a+(i.dilihat||0),0),klik=adsItems.reduce((a,i)=>a+(i.klik||0),0); const roas=spend?omzet/spend:null,acos=omzet?spend/omzet:null,ctr=dilihat?klik/dilihat:null; out.ads={spend,omzet,roas,acos,ctr,flag_roas:flag(roas,h.roas_good,h.roas_warn),flag_acos:flag(acos,h.acos_good,h.acos_warn,false),flag_ctr:flag(ctr,h.ctr_good,h.ctr_good*0.5)}; }
+  const chat=(parsed.layanan_chat||{}).summary||{};
+  if(Object.keys(chat).length){ const lay=cfg.layanan,rr=chat.response_rate,pb=chat.pengunjung_bertanya,pembeli=chat.pembeli_dari_chat; const oc=(pb&&pembeli!=null)?pembeli/pb:null; out.chat={response_rate:rr,flag_response_rate:flag(rr,lay.chat_response_rate_good,lay.chat_response_rate_good*0.9),order_conversion:oc,order_conversion_pembeli:pembeli,order_conversion_penanya:pb,flag_order_conversion:flag(oc,lay.chat_order_conversion_good,lay.chat_order_conversion_good*0.6),csat:chat.csat,flag_csat:flag(chat.csat,lay.csat_good,lay.csat_good*0.85),respon_detik:chat.waktu_respon_detik,flag_respon:flag(chat.waktu_respon_detik,lay.chat_respon_max_detik,lay.chat_respon_max_detik*2,false)}; }
+  const meta=(parsed.meta||{}).summary||{}; if(Object.keys(meta).length) out.meta={roas:meta.roas,flag_roas:flag(meta.roas,2,1)};
+  return out;
+}
+function computeChannels(parsed){
+  const home=parsed.bisnis_home||{}; const gmv=((home.pesanan_dibuat||{}).summary||{}).penjualan; const ch={gmv_total:gmv,kanal:{}}; if(!gmv) return ch;
+  const add=(name,val)=>{ if(val) ch.kanal[name]={nilai:val,persen:val/gmv}; };
+  let adsOmzet=0; for(const m of ['ads_toko','ads_produk','ads_live','ads_banner']) adsOmzet+=((parsed[m]||{}).items||[]).reduce((a,i)=>a+(i.omzet||0),0);
+  add('shopee_ads',adsOmzet); add('affiliate',((parsed.aff_product||{}).items||[]).reduce((a,i)=>a+(i.omzet||0),0)); add('voucher',((parsed.promo_voucher||{}).summary||{}).penjualan_dibuat); add('chat',((parsed.layanan_chat||{}).summary||{}).penjualan_dari_chat); add('meta_cpas',((parsed.meta||{}).summary||{}).purchase_value); add('shopee_video',((parsed.bisnis_video||{}).summary||{}).penjualan_dibuat);
+  return ch;
+}
+function buildReportData(parsed,found,client,period,cfg){
+  const home=parsed.bisnis_home||{}; const sd=(home.pesanan_dibuat||{}).summary||{}; const ss=(home.pesanan_siap_dikirim||{}).summary||{};
+  const kuadran=parsed.bisnis_produk?computeQuadrants(parsed.bisnis_produk,cfg):null;
+  const zero=['bisnis_live','promo_diskon','layanan_broadcast','bisnis_video'].filter(m=>parsed[m]&&!parsed[m].has_activity);
+  const affProd=(parsed.aff_product||{}).items||[];
+  const affCre=(((parsed.aff_creator||{}).items)||[]).slice().sort((a,b)=>(b.omzet||0)-(a.omzet||0));   // FIX
+  const totalOmzet=affProd.length?affProd.reduce((a,i)=>a+(i.omzet||0),0):affCre.reduce((a,i)=>a+(i.omzet||0),0);
+  const totalKomisi=affProd.length?affProd.reduce((a,i)=>a+(i.komisi||0),0):affCre.reduce((a,i)=>a+(i.komisi||0),0);
+  return {
+    client,period,files_used:found,
+    kpi_utama:{pesanan_dibuat:{gmv:sd.penjualan,pesanan:sd.pesanan,aov:sd.penjualan_per_pesanan,pengunjung:sd.pengunjung,cr:sd.tingkat_konversi,produk_diklik:sd.produk_diklik,pembeli:sd.total_pembeli,pembeli_baru:sd.pembeli_baru,repeat_rate:sd.persen_pembeli_kembali,batal_pesanan:sd.pesanan_batal,batal_nilai:sd.penjualan_batal,retur_pesanan:sd.pesanan_retur,retur_nilai:sd.penjualan_retur},pesanan_siap_dikirim:{gmv:ss.penjualan,pesanan:ss.pesanan,cr:ss.tingkat_konversi}},
+    daily:(home.pesanan_dibuat||{}).daily||[],
+    kuadran,health:computeHealth(parsed,cfg),kanal:computeChannels(parsed),
+    voucher:parsed.promo_voucher,chat:parsed.layanan_chat,meta:parsed.meta,
+    ads:{toko:(parsed.ads_toko||{}).items||[],produk:(parsed.ads_produk||{}).items||[],live:(parsed.ads_live||{}).items||[],banner:(parsed.ads_banner||{}).items||[]},
+    affiliate:{top_products:affProd.slice(0,10),top_creators:affCre.slice(0,10),total_omzet:totalOmzet,total_komisi:totalKomisi,total_creators:affCre.length,total_products:affProd.length},  // FIX
+    kesehatan_toko:parsed.bisnis_kesehatan||null,video:parsed.bisnis_video||null,zero_activity:zero,dropped:['bundling']
+  };
+}
+function scoreRoas(r){ const a=r.health.ads; if(!a) return [5,'no ads']; const roas=a.roas||0; let s; if(roas>=6) s=10; else if(roas>=4) s=7+(roas-4)*1.5; else if(roas>=2) s=4+(roas-2)*1.5; else s=Math.max(1,roas*3); return [Math.round(Math.min(10,s)*10)/10,`ROAS overall ${roas.toFixed(2)}x`]; }
+function scaleV(v,low,high,invert=false){ if(v==null) return 5; let x=(v-low)/(high-low); x=Math.max(0,Math.min(1,x)); return Math.round((invert?10*(1-x):10*x)*10)/10; }
+function scoreTraffic(r){ const a=r.health.ads||{}; const ctr=a.ctr||0,cr=r.kpi_utama.pesanan_dibuat.cr||0; const c=Math.round((scaleV(ctr,0.005,0.03)+scaleV(cr,0.02,0.06))/2*10)/10; return [c,`CTR ads ${(ctr*100).toFixed(2)}%, CR toko ${(cr*100).toFixed(2)}%`]; }
+function scoreConv(r){ const k=r.kpi_utama.pesanan_dibuat; const cr=k.cr||0,repeat=k.repeat_rate||0,pesanan=k.pesanan||1,batal=k.batal_pesanan||0; const cancel=batal/pesanan; const c=Math.round((scaleV(cr,0.02,0.06)*0.5+scaleV(repeat,0.10,0.30)*0.2+scaleV(cancel,0.02,0.20,true)*0.3)*10)/10; return [c,`CR ${(cr*100).toFixed(2)}%, repeat ${(repeat*100).toFixed(2)}%, cancel ${(cancel*100).toFixed(1)}%`]; }
+function scoreProduct(r){ const kd=r.kuadran||{}; const b=kd.mode_absolute||kd.mode_relatif||{}; const aktif=['bintang','hidden_gem','bocor_traffic','evaluasi'].reduce((a,q)=>a+(b[q]||[]).length,0); if(!aktif) return [3,'no produk aktif']; const bintang=(b.bintang||[]).length,hidden=(b.hidden_gem||[]).length,bocor=(b.bocor_traffic||[]).length,evaluasi=(b.evaluasi||[]).length; const good=(bintang+hidden)/aktif,bad=(bocor+evaluasi)/aktif; let s=Math.round((3+good*7-bad*4)*10)/10; s=Math.max(0,Math.min(10,s)); return [s,`${bintang} bintang, ${hidden} hidden gem, ${bocor} bocor traffic, ${evaluasi} evaluasi (vs benchmark)`]; }
+function scoreLive(r){ if((r.zero_activity||[]).includes('bisnis_live')) return [1,'Tidak ada sesi live streaming']; return [5,'Ada aktivitas live']; }
+function scoreKesehatanToko(r){ const kt=r.kesehatan_toko; if(!kt) return [5,'file Kesehatan Toko tidak diupload']; const p=kt.poin_total||0; if(p===0) return [10,'0 poin penalti — toko bersih']; const s=p===1?5:p===2?3:1; const d=(kt.penalti[0]||{}).deskripsi||''; return [s,`${p} poin penalti aktif — ${d.slice(0,45)}`]; }
+const DIMENSI=[['roas_channel','ROAS & Channel',0.22,scoreRoas],['traffic_quality','Traffic Quality',0.22,scoreTraffic],['conversion_retention','Conversion & Retention',0.18,scoreConv],['product_performance','Product Performance',0.14,scoreProduct],['live_streaming','Live Streaming',0.12,scoreLive],['kesehatan_toko','Kesehatan Toko',0.12,scoreKesehatanToko]];
+function computeScores(r){ let total=0; const detail=[]; for(const [key,label,bobot,fn] of DIMENSI){ const [s,why]=fn(r); const contrib=Math.round(s*bobot*100)/100; total+=contrib; detail.push({key,label,bobot,skor:s,kontribusi:contrib,catatan:why}); } total=Math.round(total*10)/10; const lbl=total>=8?'SEHAT':total>=6?'PERLU PERHATIAN':'KRITIS'; return {total,label:lbl,dimensi:detail}; }
+function runPipeline(fileEntries,client,period,cfg=CONFIG){
+  const found={},parsed={},errors={};
+  for(const fe of fileEntries){ const info=parseFilename(fe.filename); if(!info) continue; found[info.module]=info.filename; try{ parsed[info.module]=PARSERS[info.module](fe.rows); }catch(e){ errors[info.module]=e.message; } }
+  const report=buildReportData(parsed,found,client,period,cfg); const scores=computeScores(report);
+  return {report,scores,errors,parsed};
+}
+
+// ================= INSIGHTS + RENDER + UI =================
+function fmtRp(n){ if(n==null) return '—'; return 'Rp '+Math.round(n).toLocaleString('id-ID'); }
+function fmtNum(n){ if(n==null) return '—'; if(typeof n==='number' && n!==Math.round(n)) return n.toLocaleString('id-ID',{minimumFractionDigits:2,maximumFractionDigits:2}); return Math.round(n).toLocaleString('id-ID'); }
+function fmtPct(n,d=2){ if(n==null) return '—'; return (n*100).toFixed(d).replace('.',',')+'%'; }
+function esc(s){ if(s==null) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function ruleBasedInsights(report, scores){
+  const k=report.kpi_utama.pesanan_dibuat, adsH=report.health.ads||{}, kanal=report.kanal.kanal||{};
+  const kd=report.kuadran||{}, kb=kd.mode_absolute||kd.mode_relatif||{}, zero=report.zero_activity||[];
+  const pesanan=k.pesanan||0, batal=k.batal_pesanan||0, cancel=pesanan?batal/pesanan:0, batalNilai=k.batal_nilai||0;
+  const ins=[];
+  const kanalArr=Object.entries(kanal).sort((a,b)=>b[1].nilai-a[1].nilai);
+  if(kanalArr.length){ const t=kanalArr[0]; ins.push(`${t[0].replace(/_/g,' ')} adalah kanal terbesar (${fmtRp(t[1].nilai)}, ${fmtPct(t[1].persen,1)} dari GMV).`); }
+  if(adsH.roas){ const r=adsH.roas; if(r>=4) ins.push(`ROAS ads Shopee ${r.toFixed(2)}x — di atas benchmark sehat (4x).`); else if(r>=2) ins.push(`ROAS ads Shopee ${r.toFixed(2)}x — masih efisien tapi ada ruang optimasi.`); else ins.push(`ROAS ads Shopee ${r.toFixed(2)}x — DI BAWAH BENCHMARK, perlu audit kampanye.`); }
+  if(cancel){ const e=cancel>0.10?'🚨':cancel>0.05?'⚠️':'✓'; ins.push(`${e} Cancel rate ${fmtPct(cancel,1)} (${batal} pesanan, kerugian ${fmtRp(batalNilai)}).`+(cancel>0.10?' Jauh di atas benchmark 5%.':'')); }
+  if(k.repeat_rate){ const rr=k.repeat_rate; ins.push(`Repeat rate ${fmtPct(rr,1)} — ${rr>0.25?'kuat':rr>0.15?'moderat':'lemah, retensi perlu diperkuat'}.`); }
+  const nB=(kb.bintang||[]).length,nH=(kb.hidden_gem||[]).length,nBc=(kb.bocor_traffic||[]).length,nE=(kb.evaluasi||[]).length,nT=(kb.tidur||[]).length,nA=(kb.tidak_tayang||[]).length;
+  ins.push(`Portofolio produk (vs benchmark): ${nB} bintang, ${nH} hidden gem, ${nBc} bocor traffic, ${nE} evaluasi, ${nT} tidur, ${nA} tidak tayang.`);
+  const rekT=[];
+  if(cancel>0.08) rekT.push({judul:'Turunkan cancel rate',target:`Cancel rate <7% (saat ini ${fmtPct(cancel,1)})`,dampak:`Recover ${fmtRp(batalNilai*0.6)} GMV/bulan`,timeline:'2 minggu'});
+  if(zero.includes('bisnis_live')) rekT.push({judul:'Aktifkan Live Streaming',target:'Minimum 3 sesi/minggu, fokus produk top',dampak:'Potensi +Rp 8-12jt GMV/bulan (benchmark seller sejenis)',timeline:'Mulai minggu 1'});
+  if(nBc>=2) rekT.push({judul:'Audit produk bocor traffic',target:`Perbaiki PDP ${nBc} produk (traffic tinggi, CR rendah)`,dampak:'Setiap +0,5% CR di produk high-traffic = +Rp 2-5jt GMV',timeline:'1-3 minggu'});
+  const rekS=[];
+  if(adsH.acos&&adsH.acos>0.20) rekS.push({judul:'Optimasi ACOS ads',target:`ACOS <20% (saat ini ${fmtPct(adsH.acos,1)})`,dampak:'Hemat biaya iklan tanpa turunkan omzet',timeline:'1-2 minggu'});
+  const meta=(report.meta||{}).summary||{};
+  if(meta.roas!=null&&meta.roas<2) rekS.push({judul:'Review kampanye Meta CPAS',target:`ROAS Meta >2x (saat ini ${meta.roas.toFixed(2)}x)`,dampak:'Pause kampanye di bawah 1x, alokasi ke best performer',timeline:'1 minggu'});
+  const chatH=report.health.chat||{};
+  if(chatH.csat!=null&&chatH.csat<0.85) rekS.push({judul:'Perbaiki CSAT chat',target:`CSAT >85% (saat ini ${fmtPct(chatH.csat,1)})`,dampak:'Kepuasan pembeli naik → repeat rate naik',timeline:'1 bulan'});
+  if(nH>=2) rekS.push({judul:'Scale produk Hidden Gem',target:`Naikkan traffic ${nH} produk (CR sudah bagus, tinggal expose)`,dampak:'Konversi tinggi × traffic baru = GMV baru cepat',timeline:'1-2 minggu'});
+  // ===== v2: penalti, shopee video, iklan live =====
+  const ktI=report.kesehatan_toko;
+  if(ktI&&ktI.poin_total>0){ const p0=ktI.penalti[0]||{}; ins.unshift(`🚨 ${ktI.poin_total} poin penalti aktif — ${p0.deskripsi||'pelanggaran kebijakan'} (${p0.durasi||''}). Traffic organik ditekan platform & toko dibatasi ikut promosi.`); rekT.unshift({judul:'Pulihkan kesehatan toko (penalti aktif)',target:'0 poin penalti — bereskan penyebab pelanggaran & cegah pelanggaran baru',dampak:'Traffic organik & akses promosi Shopee (flash sale, voucher, campaign) pulih setelah masa penalti berakhir',timeline:'Segera — penalti berlaku '+(p0.durasi||'s.d. akhir masa penalti')}); }
+  if(report.video&&report.video.has_activity){ const v=report.video.summary; ins.push(`Shopee Video menyumbang ${fmtRp(v.penjualan_dibuat)} GMV dari ${fmtNum(v.pesanan_dibuat)} pesanan — ${fmtNum(v.ditonton)} tayangan, CTR ${fmtPct(v.ctr)}, ${fmtNum(v.atc)} add-to-cart.`); if((v.ditonton||0)<5000) rekS.push({judul:'Scale produksi Shopee Video',target:'Rutin 3-5 video/minggu dengan produk ter-tag di semua video',dampak:'Tayangan naik → traffic gratis → GMV video naik proporsional (CR video sudah terbukti)',timeline:'Mulai minggu 1'}); }
+  else if(zero.includes('bisnis_video')) rekS.push({judul:'Aktifkan Shopee Video',target:'Minimal 3 video/minggu dengan produk ter-tag',dampak:'Kanal traffic gratis — benchmark seller sejenis +5-10% GMV',timeline:'Mulai minggu 1'});
+  const lvIns=report.ads.live||[];
+  if(lvIns.length){ const lo=lvIns.reduce((a,i)=>a+(i.omzet||0),0), lb=lvIns.reduce((a,i)=>a+(i.biaya||0),0); const lr=lb?lo/lb:0; ins.push(`Iklan Live: omzet ${fmtRp(lo)} dengan biaya ${fmtRp(lb)} (ROAS ${lr.toFixed(2)}x).`); if(lr<2) rekT.push({judul:'Evaluasi Iklan Live (ROAS rendah)',target:`ROAS Iklan Live >2x (saat ini ${lr.toFixed(2)}x)`,dampak:'Stop bakar budget — perbaiki kualitas live (host, jam tayang, produk unggulan) sebelum scale iklan',timeline:'1-2 minggu'}); }
+  const bnIns=report.ads.banner||[];
+  if(bnIns.length){ const bo=bnIns.reduce((a,i)=>a+(i.omzet||0),0), bb=bnIns.reduce((a,i)=>a+(i.biaya||0),0); const br=bb?bo/bb:0; if(bb>0) ins.push(`Search Brand Ads (Banner): omzet ${fmtRp(bo)} dengan biaya ${fmtRp(bb)} (ROAS ${br.toFixed(2)}x).`); }
+  const gmv=k.gmv||0;
+  const outlook=`Target GMV bulan depan: Rp ${Math.round(gmv*1.15/1e6)}–${Math.round(gmv*1.30/1e6)} juta (+15–30% dari ${fmtRp(gmv)}). Fokus: eksekusi rekomendasi prioritas tinggi + scale kanal terbaik. Jaga cancel rate <7% dan ROAS ads >5x.`;
+  const peng=k.pengunjung||0, cr=k.cr||0;
+  const leading=[
+    {nama:'Target Pengunjung Toko',target:`${Math.round(peng*1.35).toLocaleString('id-ID')} (+35%)`},
+    {nama:'Target CR Toko',target:`${((cr+0.01)*100).toFixed(2)}% (saat ini ${fmtPct(cr)})`},
+    {nama:'Target ROAS Ads',target:`>${Math.max(6,(adsH.roas||5)+0.5).toFixed(1)}x`},
+    {nama:'Target Cancel Rate',target:'<7%'},
+  ];
+  return {
+    exec_summary:`GMV bulan ini ${fmtRp(gmv)} dari ${Math.round(pesanan)} pesanan (${Math.round(k.pembeli||0)} pembeli, ${fmtPct(k.repeat_rate||0)} repeat).`,
+    perhatian_utama:`Skor performa keseluruhan ${scores.total}/10 — ${scores.label}. `+((report.kesehatan_toko&&report.kesehatan_toko.poin_total>0)?`⚠️ Penalti aktif ${report.kesehatan_toko.poin_total} poin — prioritas #1 bulan ini. `:'')+(cancel>0.08?`Cancel rate ${fmtPct(cancel,1)} adalah isu paling mendesak. `:'')+(zero.includes('bisnis_live')?'Live streaming tidak aktif — potensi kanal besar terlewat.':''),
+    key_insights:ins, rekomendasi_tinggi:rekT, rekomendasi_sedang:rekS, outlook_next_month:outlook, leading_metrics:leading, source:'rule_based',
+  };
+}
+
+const QMETA={bintang:['🏆 Produk Bintang','#059669'],hidden_gem:['💎 Hidden Gem','#3B82F6'],bocor_traffic:['🕳️ Bocor Traffic','#EA580C'],evaluasi:['⚰️ Evaluasi','#DC2626'],tidur:['😴 Produk Tidur','#94A3B8'],tidak_tayang:['📦 Tidak Tayang','#CBD5E1'],no_data:['❓ No Data','#E2E8F0']};
+
+function computeChartData(report){
+  const daily=report.daily||[];
+  const kanalArr=Object.entries(report.kanal.kanal||{}).sort((a,b)=>b[1].nilai-a[1].nilai);
+  const adsToko=report.ads.toko||[], adsProduk=report.ads.produk||[];
+  const isSGM=i=>i.nama.toLowerCase().includes('shop gmv max');
+  const agg=items=>items.reduce((a,i)=>({o:a.o+(i.omzet||0),b:a.b+(i.biaya||0)}),{o:0,b:0});
+  const sgm=agg(adsProduk.filter(isSGM)), pa=agg(adsProduk.filter(i=>!isSGM(i))), tk=agg(adsToko);
+  const lvC=(report.ads.live||[]).reduce((a,i)=>({o:a.o+(i.omzet||0),b:a.b+(i.biaya||0)}),{o:0,b:0}), bnC=agg(report.ads.banner||[]);
+  const meta=(report.meta||{}).summary||{};
+  const adsLabels=['Shop GMV Max','Product Ads','Iklan Toko','Iklan Live','Search Brand Ads'], adsOmzet=[sgm.o,pa.o,tk.o,lvC.o,bnC.o], adsBiaya=[sgm.b,pa.b,tk.b,lvC.b,bnC.b];
+  if(meta.spend){ adsLabels.push('Meta CPAS'); adsOmzet.push(meta.purchase_value||0); adsBiaya.push(meta.spend||0); }
+  const qds=buckets=>{ const ds=[]; for(const q in QMETA){ const [label,color]=QMETA[q]; const pts=(buckets[q]||[]).filter(p=>p.pengunjung_produk&&p.cr_dipakai!=null).map(p=>({x:p.pengunjung_produk,y:p.cr_dipakai,r:Math.min(30,Math.max(4,Math.pow((p.penjualan_dibuat||0)/1e6,0.5)*3)),gmv:p.penjualan_dibuat||0,label:(p.nama_produk||'').slice(0,40)})); if(pts.length) ds.push({label,backgroundColor:color+'cc',data:pts}); } return ds; };
+  const kd=report.kuadran||{};
+  return {
+    daily:{labels:daily.map(d=>(d.tanggal||'').slice(0,5)),gmv:daily.map(d=>d.penjualan||0),pesanan:daily.map(d=>d.pesanan||0)},
+    kanal:{labels:kanalArr.map(x=>x[0].replace(/_/g,' ')),values:kanalArr.map(x=>x[1].nilai)},
+    ads:{labels:adsLabels,omzet:adsOmzet,biaya:adsBiaya},
+    quadRel:qds(kd.mode_relatif||{}), quadAbs:qds(kd.mode_absolute||{}),
+    video:(report.video&&report.video.sumber&&report.video.sumber.length?{labels:report.video.sumber.filter(s=>(s.ditonton||0)>0).map(s=>s.label),ditonton:report.video.sumber.filter(s=>(s.ditonton||0)>0).map(s=>s.ditonton||0)}:null),
+  };
+}
+
+function initCharts(root, C){
+  const T='#0F766E', TL='rgba(15,118,110,.15)', O='#EA580C', A='#F59E0B';
+  const g=id=>root.getElementById(id);
+  if(g('chart_daily')) new Chart(g('chart_daily'),{type:'line',data:{labels:C.daily.labels,datasets:[
+    {label:'GMV Pesanan Dibuat (Rp)',data:C.daily.gmv,borderColor:T,backgroundColor:TL,fill:true,tension:.3,borderWidth:2,pointRadius:3},
+    {label:'Pesanan',data:C.daily.pesanan,borderColor:O,backgroundColor:'rgba(234,88,12,.1)',fill:false,tension:.3,borderWidth:2,pointRadius:3,yAxisID:'y1'}]},
+    options:{responsive:true,interaction:{intersect:false,mode:'index'},scales:{y:{ticks:{callback:v=>'Rp '+(v/1e6).toFixed(1)+'jt'}},y1:{type:'linear',position:'right',grid:{drawOnChartArea:false},title:{display:true,text:'Pesanan'}}}}});
+  if(g('chart_kanal')) new Chart(g('chart_kanal'),{type:'bar',data:{labels:C.kanal.labels,datasets:[{label:'GMV terattribusi (Rp)',data:C.kanal.values,backgroundColor:[T,'#059669',A,'#3B82F6','#8B5CF6','#EC4899']}]},options:{indexAxis:'y',plugins:{legend:{display:false}}}});
+  if(g('chart_ads')) new Chart(g('chart_ads'),{type:'bar',data:{labels:C.ads.labels,datasets:[{label:'Omzet',data:C.ads.omzet,backgroundColor:T},{label:'Biaya',data:C.ads.biaya,backgroundColor:O}]},options:{scales:{y:{ticks:{callback:v=>'Rp '+(v/1e6).toFixed(1)+'jt'}}}}});
+  const qc=(id,ds)=>{ if(g(id)&&ds.length) new Chart(g(id),{type:'bubble',data:{datasets:ds},options:{plugins:{legend:{labels:{boxWidth:10,font:{size:10}}},tooltip:{callbacks:{label:ctx=>ctx.raw.label+' — Rp '+(ctx.raw.gmv/1e6).toFixed(1)+'jt (CR '+(ctx.raw.y*100).toFixed(1)+'%)'}}},scales:{x:{title:{display:true,text:'Pengunjung'},type:'logarithmic'},y:{title:{display:true,text:'CR'},ticks:{callback:v=>(v*100).toFixed(1)+'%'}}}}}); };
+  qc('chart_quad_rel',C.quadRel); qc('chart_quad_abs',C.quadAbs);
+  if(g('chart_video_sumber')&&C.video&&C.video.labels.length) new Chart(g('chart_video_sumber'),{type:'doughnut',data:{labels:C.video.labels,datasets:[{data:C.video.ditonton,backgroundColor:['#0F766E','#EA580C','#F59E0B','#3B82F6','#8B5CF6','#EC4899','#64748B','#94A3B8']}]},options:{plugins:{legend:{position:'right',labels:{boxWidth:10,font:{size:10}}}}}});
+}
+
+function kpiCard(title,value,sub){ return `<div class="kpi-card bg-white rounded-xl border border-slate-100 p-4"><div class="text-xs font-semibold text-slate-500 uppercase tracking-wide">${esc(title)}</div><div class="kpi-value text-teal-700 mt-1">${esc(value)}</div><div class="text-xs text-slate-500 mt-1">${esc(sub)}</div></div>`; }
+function dimCard(d){ const c=d.skor>=8?'green':d.skor>=6?'yellow':'red'; return `<div class="bg-${c}-50 border border-${c}-100 rounded-lg p-3"><div class="text-xs font-semibold text-slate-500 uppercase tracking-wide">${esc(d.label)}</div><div class="text-2xl font-bold text-${c}-700 mt-1">${d.skor}</div><div class="text-xs text-slate-500">${Math.round(d.bobot*100)}% • kontrib: ${d.kontribusi}</div><div class="text-xs text-slate-600 mt-1">${esc((d.catatan||'').slice(0,60))}</div></div>`; }
+function rekCard(r,tone){ const c=tone==='tinggi'?'red':'amber'; return `<div class="bg-white rounded-xl border-l-4 border-${c}-500 shadow-sm p-4"><h4 class="font-semibold text-slate-900">${esc(r.judul)}</h4><p class="text-xs text-slate-500 mt-1"><span class="font-semibold">Target:</span> ${esc(r.target)}</p><p class="text-xs text-slate-500"><span class="font-semibold">Dampak:</span> ${esc(r.dampak)}</p><p class="text-xs text-slate-500"><span class="font-semibold">Timeline:</span> ${esc(r.timeline)}</p></div>`; }
+function st(flag,txt){ const m={'🟢':'green','🟡':'yellow','🔴':'red','⚪':'gray'}; return `<span class="px-2 py-1 rounded-full text-xs status-${m[flag]||'gray'}">${flag} ${esc(txt)}</span>`; }
+
+function reportBodyHTML(report,scores,insights){
+  const k=report.kpi_utama.pesanan_dibuat, ks=report.kpi_utama.pesanan_siap_dikirim, adsH=report.health.ads||{};
+  const kpi=[
+    kpiCard('Total GMV (Dibuat)',fmtRp(k.gmv),`${fmtNum(k.pesanan)} pesanan • ${fmtNum(k.pembeli)} pembeli`),
+    kpiCard('GMV Siap Kirim',fmtRp(ks.gmv),`${fmtNum(ks.pesanan)} pesanan • CR ${fmtPct(ks.cr)}`),
+    kpiCard('ROAS Ads Shopee',`${(adsH.roas||0).toFixed(2)}x`,`${adsH.flag_roas||''} spend ${fmtRp(adsH.spend)}`),
+    kpiCard('Pengunjung Toko',fmtNum(k.pengunjung),`CR ${fmtPct(k.cr)}`),
+    kpiCard('Pembeli Baru',fmtNum(k.pembeli_baru),`${fmtPct((k.pembeli_baru||0)/(k.pembeli||1))} dari total`),
+    kpiCard('Repeat Rate',fmtPct(k.repeat_rate),'% pembelian ulang'),
+    kpiCard('Cancel Rate',fmtPct((k.batal_pesanan||0)/(k.pesanan||1)),`${fmtNum(k.batal_pesanan)} pesanan • rugi ${fmtRp(k.batal_nilai)}`),
+    kpiCard('AOV',fmtRp(k.aov),'average order value'),
+  ].join('');
+  const dim=scores.dimensi.map(dimCard).join('');
+  const scoreColor=scores.total>=8?'green':scores.total>=6?'yellow':'red';
+  const kanalArr=Object.entries(report.kanal.kanal||{}).sort((a,b)=>b[1].nilai-a[1].nilai);
+  const kanalRows=kanalArr.map(([n,v])=>`<tr class="border-b last:border-0"><td class="py-2">${esc(n.replace(/_/g,' '))}</td><td class="text-right font-semibold">${fmtRp(v.nilai)}</td><td class="text-right text-slate-500">${fmtPct(v.persen)}</td></tr>`).join('');
+  const adsToko=report.ads.toko||[], adsProduk=report.ads.produk||[];
+  const isSGM=i=>i.nama.toLowerCase().includes('shop gmv max');
+  const agg=items=>items.reduce((a,i)=>({o:a.o+(i.omzet||0),b:a.b+(i.biaya||0),k:a.k+(i.klik||0),v:a.v+(i.dilihat||0)}),{o:0,b:0,k:0,v:0});
+  const sgm=agg(adsProduk.filter(isSGM)),pa=agg(adsProduk.filter(i=>!isSGM(i))),tk=agg(adsToko);
+  const lvItems=report.ads.live||[], bnItems=report.ads.banner||[];
+  const lvA=lvItems.reduce((a,i)=>({o:a.o+(i.omzet||0),b:a.b+(i.biaya||0),p:a.p+(i.penonton||0),ps:a.ps+(i.pesanan||0)}),{o:0,b:0,p:0,ps:0});
+  const bnA=agg(bnItems);
+  const meta=(report.meta||{}).summary||{};
+  const adsRow=(label,x)=>{const roas=x.b?x.o/x.b:0,acos=x.o?x.b/x.o:0;return `<div class="border-b py-2 last:border-0"><div class="flex justify-between items-center"><span class="font-semibold text-sm">${esc(label)}</span><span class="text-lg font-bold text-teal-700">${roas.toFixed(2)}x</span></div><div class="text-xs text-slate-500 grid grid-cols-2 gap-1 mt-1"><span>Omzet: ${fmtRp(x.o)}</span><span>Biaya: ${fmtRp(x.b)}</span><span>Klik: ${fmtNum(x.k)}</span><span>ACOS: ${fmtPct(acos)}</span></div></div>`;};
+  const liveRow=(label,x)=>{const roas=x.b?x.o/x.b:0;return `<div class="border-b py-2 last:border-0"><div class="flex justify-between items-center"><span class="font-semibold text-sm">${esc(label)}</span><span class="text-lg font-bold text-teal-700">${roas.toFixed(2)}x</span></div><div class="text-xs text-slate-500 grid grid-cols-2 gap-1 mt-1"><span>Omzet: ${fmtRp(x.o)}</span><span>Biaya: ${fmtRp(x.b)}</span><span>Penonton: ${fmtNum(x.p)}</span><span>Pesanan: ${fmtNum(x.ps)}</span></div></div>`;};
+  let adsBreak='<h3 class="font-semibold text-sm text-slate-600 mb-3">Rincian per Sumber</h3>'+adsRow('4.1 Iklan Otomatis (Shop GMV Max)',sgm)+adsRow('4.2 Iklan Individu & Grup (Product Ads)',pa)+adsRow('4.3 Iklan Toko',tk);
+  if(lvItems.length) adsBreak+=liveRow('4.4 Iklan Live',lvA);
+  if(bnItems.length) adsBreak+=adsRow('4.5 Search Brand Ads (Banner)',bnA);
+  if(meta.spend) adsBreak+=adsRow('4.6 Meta CPAS',{o:meta.purchase_value||0,b:meta.spend||0,k:meta.clicks||0,v:meta.impressions||0});
+  const adsSummary=[
+    kpiCard('Total Omzet Ads',fmtRp(adsH.omzet),`ROAS ${(adsH.roas||0).toFixed(2)}x`),
+    kpiCard('Total Biaya',fmtRp(adsH.spend),`ACOS ${fmtPct(adsH.acos)}`),
+    kpiCard('Total Klik',fmtNum(sgm.k+pa.k+tk.k+bnA.k),`CTR ${fmtPct(adsH.ctr)}`),
+    kpiCard('Total Impresi',fmtNum(sgm.v+pa.v+tk.v+bnA.v),''),
+  ].join('');
+  const kd=report.kuadran||{}, bRel=kd.mode_relatif||{}, bAbs=kd.mode_absolute||{}, thr=kd.thresholds||{};
+  const distHTML=b=>{const tot=Object.values(b).reduce((a,v)=>a+v.length,0)||1;let o='';for(const q in QMETA){const [label,color]=QMETA[q];const n=(b[q]||[]).length;if(n===0&&!['bintang','hidden_gem','bocor_traffic','evaluasi'].includes(q))continue;const p=n/tot*100;o+=`<div><div class="flex justify-between text-xs mb-0.5"><span>${esc(label)}</span><span class="font-semibold">${n}</span></div><div class="w-full bg-slate-100 rounded-full h-1.5"><div style="width:${p.toFixed(0)}%;background:${color}" class="h-1.5 rounded-full"></div></div></div>`;}return o;};
+  const tr=thr.relatif||{},ta=thr.absolute||{};
+  const tl=v=>v!=null?fmtNum(Math.round(v)):'—', cl=v=>v!=null?fmtPct(v):'—';
+  let benchGap='';
+  const aktifAbs=['bintang','hidden_gem','bocor_traffic','evaluasi'].flatMap(q=>bAbs[q]||[]);
+  const traffics=aktifAbs.map(p=>p.pengunjung_produk||0).sort((a,b)=>a-b);
+  const bH=ta.traffic_high||0;
+  if(traffics.length){const avg=traffics.reduce((a,b)=>a+b,0)/traffics.length;const below=traffics.filter(t=>t<bH).length;const pctB=below/traffics.length*100;const maxT=traffics[traffics.length-1];
+    if(avg<bH){benchGap=`<div class="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-lg text-xs text-slate-700"><i class="fa-solid fa-chart-simple text-amber-600 mr-1"></i> Rata-rata traffic produk <b>${fmtNum(Math.round(avg))} pengunjung/bulan</b> — masih <b>di bawah benchmark ideal ${fmtNum(Math.round(bH))}</b>. ${pctB.toFixed(0)}% produk belum capai target traffic. Produk teratas pun hanya ${fmtNum(Math.round(maxT))} pengunjung.<div class="mt-1"><b>Artinya:</b> mayoritas produk konversinya sudah bagus (banyak Hidden Gem & Bintang), tapi <b>kekurangan traffic/exposure</b> — bukan masalah produk. Prioritas: dorong traffic (ads, konten, live, affiliate) ke produk CR tinggi.</div></div>`;}
+    else benchGap=`<div class="mt-3 p-3 bg-teal-50 border border-teal-100 rounded-lg text-xs text-slate-700">Rata-rata traffic produk ${fmtNum(Math.round(avg))} pengunjung/bulan — sudah di atas benchmark ${fmtNum(Math.round(bH))}. Fokus jaga konversi & retensi.</div>`;}
+  const findQ=(b,kode)=>{for(const q in b)for(const it of b[q])if(it.kode_produk===kode)return q;return '';};
+  const allRecs={};for(const b of [bRel,bAbs])for(const q in b)for(const p of b[q])allRecs[p.kode_produk]=p;
+  const top=Object.values(allRecs).sort((a,b)=>(b.penjualan_dibuat||0)-(a.penjualan_dibuat||0)).slice(0,10);
+  const topRows=top.map((p,i)=>{const qr=findQ(bRel,p.kode_produk),qa=findQ(bAbs,p.kode_produk);const [lr,cr]=QMETA[qr]||['—','#94A3B8'],[la,ca]=QMETA[qa]||['—','#94A3B8'];
+    return `<tr class="border-b last:border-0"><td class="py-2">${i+1}</td><td class="py-2">${esc((p.nama_produk||'').slice(0,55))}</td><td class="text-right">${fmtNum(p.pengunjung_produk)}</td><td class="text-right">${fmtNum(p.pesanan_dibuat)}</td><td class="text-right font-semibold">${fmtRp(p.penjualan_dibuat)}</td><td class="text-right">${fmtPct(p.cr_dipakai)}</td><td><span class="text-xs px-2 py-1 rounded-full" style="background:${cr}22;color:${cr}">${esc(lr)}</span></td><td><span class="text-xs px-2 py-1 rounded-full" style="background:${ca}22;color:${ca}">${esc(la)}</span></td></tr>`;}).join('');
+  const aff=report.affiliate;
+  const affKpi=[kpiCard('Total GMV Affiliate',fmtRp(aff.total_omzet),''),kpiCard('Total Komisi',fmtRp(aff.total_komisi),aff.total_komisi?`ROI ${(aff.total_omzet/aff.total_komisi).toFixed(1)}x`:''),kpiCard('Total Affiliate',fmtNum(aff.total_creators),`${fmtNum(aff.total_creators)} creator • top 10 di bawah`),kpiCard('Kontribusi Affiliate',k.gmv?fmtPct(aff.total_omzet/k.gmv):'—','% dari GMV toko')].join('');
+  const affRows=aff.top_creators.slice(0,10).map((c,i)=>`<tr class="border-b last:border-0"><td class="py-2">${i+1}</td><td>${esc(c.nama)}</td><td class="text-right font-semibold">${fmtRp(c.omzet)}</td><td class="text-right">${fmtNum(c.pesanan)}</td><td class="text-right">${fmtRp(c.komisi)}</td></tr>`).join('');
+  const vs=(report.voucher||{}).summary||{};
+  const vKpi=[kpiCard('GMV Voucher',fmtRp(vs.penjualan_dibuat),''),kpiCard('Biaya Voucher',fmtRp(vs.biaya_dibuat),''),kpiCard('Klaim',fmtNum(vs.klaim),`pesanan ${fmtNum(vs.pesanan_dibuat)}`),kpiCard('Usage Rate',fmtPct(vs.usage_dibuat),'pesanan/klaim')].join('');
+  const chatH=report.health.chat||{}, zero=report.zero_activity||[];
+  let health='';
+  if(Object.keys(chatH).length){
+    health+=`<tr class="border-b"><td class="py-2">Tingkat Chat Direspon</td><td class="text-right">${fmtPct(chatH.response_rate)}</td><td class="text-right text-slate-500">&gt;95%</td><td>${st(chatH.flag_response_rate||'⚪','direspon')}</td></tr>`;
+    const detOc=chatH.order_conversion_penanya?`${fmtNum(chatH.order_conversion_pembeli)} pembeli / ${fmtNum(chatH.order_conversion_penanya)} penanya`:'';
+    health+=`<tr class="border-b"><td class="py-2">Konversi Order dari Chat<div class="text-xs text-slate-400">${detOc}</div></td><td class="text-right">${fmtPct(chatH.order_conversion)}</td><td class="text-right text-slate-500">&gt;20%</td><td>${st(chatH.flag_order_conversion||'⚪','order')}</td></tr>`;
+    health+=`<tr class="border-b"><td class="py-2">CSAT Chat</td><td class="text-right">${fmtPct(chatH.csat)}</td><td class="text-right text-slate-500">&gt;85%</td><td>${st(chatH.flag_csat||'⚪','CSAT')}</td></tr>`;
+    const rs=chatH.respon_detik||0,hh=Math.floor(rs/3600),mm=Math.floor((rs%3600)/60);
+    health+=`<tr class="border-b"><td class="py-2">Waktu Respon Chat</td><td class="text-right">${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}</td><td class="text-right text-slate-500">&lt;1 jam</td><td>${st(chatH.flag_respon||'⚪','')}</td></tr>`;
+  }
+  const cancel=(k.batal_pesanan||0)/(k.pesanan||1);const cf=cancel<0.05?'🟢':cancel<0.10?'🟡':'🔴';
+  health+=`<tr class="border-b"><td class="py-2">Cancel Rate</td><td class="text-right">${fmtPct(cancel)}<div class="text-xs text-slate-400">${fmtNum(k.batal_pesanan)} pesanan • ${fmtRp(k.batal_nilai)}</div></td><td class="text-right text-slate-500">&lt;5%</td><td>${st(cf,'cancel')}</td></tr>`;
+  health+=`<tr class="border-b"><td class="py-2">Retur</td><td class="text-right">${fmtNum(k.retur_pesanan)} pesanan (${fmtRp(k.retur_nilai)})</td><td class="text-right text-slate-500">&lt;1%</td><td>${st((k.retur_pesanan||0)<5?'🟢':'🟡','retur')}</td></tr>`;
+  if(zero.includes('bisnis_live')) health+=`<tr class="border-b"><td class="py-2">Live Streaming</td><td class="text-right">0 sesi</td><td class="text-right text-slate-500">≥3 sesi/mg</td><td>${st('🔴','tidak aktif')}</td></tr>`;
+  if(zero.includes('layanan_broadcast')) health+=`<tr class="border-b"><td class="py-2">Chat Broadcast</td><td class="text-right">0 broadcast</td><td class="text-right text-slate-500">rutin</td><td>${st('🔴','tidak aktif')}</td></tr>`;
+  if(zero.includes('bisnis_video')) health+=`<tr class="border-b"><td class="py-2">Shopee Video</td><td class="text-right">0 aktivitas</td><td class="text-right text-slate-500">aktif</td><td>${st('🔴','tidak aktif')}</td></tr>`;
+  if(report.kesehatan_toko) health+=`<tr class="border-b"><td class="py-2">Poin Penalti</td><td class="text-right">${fmtNum(report.kesehatan_toko.poin_total)} poin</td><td class="text-right text-slate-500">0 poin</td><td>${st(report.kesehatan_toko.poin_total>0?'🔴':'🟢',report.kesehatan_toko.poin_total>0?'penalti aktif':'bersih')}</td></tr>`;
+  // ===== Shopee Video section data =====
+  const vAct=report.video&&report.video.has_activity, vS=(report.video||{}).summary||{};
+  const vInteraksi=(vS.suka||0)+(vS.share||0)+(vS.komentar||0);
+  const vKpiCards=vAct?[
+    kpiCard('GMV Video (Dibuat)',fmtRp(vS.penjualan_dibuat),`${fmtNum(vS.pesanan_dibuat)} pesanan`),
+    kpiCard('GMV Siap Kirim',fmtRp(vS.penjualan_siap),`${fmtNum(vS.pesanan_siap)} pesanan`),
+    kpiCard('Ditonton',fmtNum(vS.ditonton),`${fmtNum(vS.penonton)} penonton unik`),
+    kpiCard('Penonton Efektif',fmtNum(vS.penonton_efektif),vS.penonton?`>3 detik • ${fmtPct((vS.penonton_efektif||0)/vS.penonton)} dari penonton`:'>3 detik'),
+    kpiCard('CTR Video',fmtPct(vS.ctr),`${fmtNum(vS.klik_produk)} klik produk`),
+    kpiCard('Add to Cart',fmtNum(vS.atc),''),
+    kpiCard('Interaksi',fmtNum(vInteraksi),`${fmtNum(vS.suka)} suka • ${fmtNum(vS.share)} share • ${fmtNum(vS.komentar)} komentar`),
+    kpiCard('Follower Baru',fmtNum(vS.follower_baru),`completion ${fmtPct(vS.completion)}`),
+  ].join(''):'';
+  const vSumber=((report.video||{}).sumber||[]).filter(s=>(s.ditonton||0)>0).sort((a,b)=>(b.ditonton||0)-(a.ditonton||0));
+  const vSumberRows=vSumber.map(s=>`<tr class="border-b last:border-0"><td class="py-2">${esc(s.label)}</td><td class="text-right">${fmtNum(s.ditonton)}</td><td class="text-right">${fmtNum(s.penonton)}</td><td class="text-right">${fmtNum(s.penonton_efektif)}</td></tr>`).join('');
+  const videoSection=vAct?`<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">${vKpiCards}</div><div class="grid md:grid-cols-2 gap-4"><div class="bg-white rounded-xl border border-slate-100 p-5"><h3 class="font-semibold text-sm text-slate-600 mb-3">Sumber Penonton (berdasarkan Ditonton)</h3><canvas id="chart_video_sumber" height="200"></canvas></div><div class="bg-white rounded-xl border border-slate-100 p-5 overflow-x-auto"><table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="pb-2">Sumber</th><th class="text-right">Ditonton</th><th class="text-right">Penonton</th><th class="text-right">Efektif (&gt;3s)</th></tr></thead><tbody>${vSumberRows}</tbody></table></div></div>`:`<div class="bg-white rounded-xl border border-slate-100 p-6 text-sm text-slate-500"><i class="fa-solid fa-video-slash mr-1"></i> ${report.video?'Tidak ada aktivitas Shopee Video di periode ini — kanal traffic gratis yang belum dimanfaatkan.':'File Shopee Video tidak diupload.'}</div>`;
+  // ===== Kesehatan toko / penalti =====
+  const ktR=report.kesehatan_toko; let penaltiHTML='';
+  if(ktR&&ktR.poin_total>0){ const rowsP=ktR.penalti.map(x=>`<div class="flex justify-between items-start gap-3 py-2 border-b border-red-100 last:border-0"><div><div class="font-semibold text-sm text-red-800">${esc(x.deskripsi)}</div><div class="text-xs text-red-600">${esc(x.durasi)}</div></div><div class="text-lg font-bold text-red-700 whitespace-nowrap">${fmtNum(x.poin)} poin</div></div>`).join('');
+    penaltiHTML=`<div class="mb-4 bg-red-50 border border-red-200 rounded-xl p-5"><h3 class="font-semibold text-red-800 mb-1"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Penalti Aktif — ${fmtNum(ktR.poin_total)} Poin</h3><p class="text-xs text-red-700 mb-2">Poin penalti menekan traffic organik: produk lebih sulit ditemukan di pencarian & rekomendasi, dan toko dibatasi/dilarang ikut program promosi Shopee selama masa penalti berjalan.</p>${rowsP}</div>`; }
+  else if(ktR) penaltiHTML=`<div class="mb-4 bg-teal-50 border border-teal-100 rounded-xl p-4 text-sm text-slate-700"><i class="fa-solid fa-shield-halved text-teal-600 mr-1"></i> <b>0 poin penalti</b> — kesehatan toko bersih, tidak ada pembatasan dari platform.</div>`;
+  // ===== File beda toko yang ditolak =====
+  let rejectedHTML=''; if((report.files_rejected||[]).length){ rejectedHTML=`<div class="mb-6 bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 no-print"><i class="fa-solid fa-triangle-exclamation mr-1"></i> <b>${report.files_rejected.length} file ditolak karena identitas toko berbeda:</b> ${report.files_rejected.map(f=>esc(f)).join('; ')}. Data file tersebut TIDAK dimasukkan ke laporan — pastikan semua export berasal dari toko yang sama.</div>`; }
+  const insHTML=insights.key_insights.map((t,i)=>`<li class="flex gap-3"><span class="flex-shrink-0 w-6 h-6 bg-teal-100 text-teal-700 rounded-full flex items-center justify-center text-xs font-bold">${i+1}</span><span>${esc(t)}</span></li>`).join('');
+  const rekTHTML=insights.rekomendasi_tinggi.map(r=>rekCard(r,'tinggi')).join('')||'<div class="text-sm text-slate-500">Tidak ada rekomendasi prioritas tinggi.</div>';
+  const rekSHTML=insights.rekomendasi_sedang.map(r=>rekCard(r,'sedang')).join('')||'<div class="text-sm text-slate-500">—</div>';
+  const leadHTML=insights.leading_metrics.map(m=>kpiCard(m.nama,m.target,'')).join('');
+  const nFiles=Object.keys(report.files_used||{}).length;
+
+  return `
+<div class="flex items-end justify-between mb-8 flex-wrap gap-4">
+  <div><div class="flex items-center gap-3"><h1 class="font-display text-4xl font-bold tracking-tight text-slate-900">Monthly Report</h1><div class="px-3 py-1 bg-teal-100 text-teal-700 text-xs font-bold rounded-full">${esc(report.period)}</div></div>
+  <p class="text-lg text-slate-600 mt-1">${esc(report.client)} • Performance & Strategic Analysis</p></div>
+</div>
+${rejectedHTML}<div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 mb-8">
+  <div class="flex flex-wrap items-center justify-between gap-4 mb-4"><div><h2 class="font-display text-xl font-bold text-slate-900">Skor Performa Keseluruhan</h2><p class="text-sm text-slate-500">Bobot berdasarkan standar MEA</p></div>
+  <div class="text-right"><div class="text-5xl font-bold text-teal-700">${scores.total} <span class="text-2xl text-slate-400">/10</span></div><div class="text-sm font-semibold text-${scoreColor}-700">${scores.label}</div></div></div>
+  <div class="grid grid-cols-2 md:grid-cols-6 gap-3">${dim}</div>
+  <div class="mt-4 p-3 bg-teal-50 rounded-lg text-sm text-slate-700"><i class="fa-solid fa-circle-info text-teal-600 mr-1"></i> ${esc(insights.perhatian_utama)}</div>
+</div>
+<section class="mb-8"><h2 class="font-display text-2xl font-bold text-slate-900 mb-4">1. Ringkasan Eksekutif</h2>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">${kpi}</div>
+  <div class="mt-4 p-4 bg-white rounded-xl border border-slate-100 insight-card"><p class="text-sm font-medium text-slate-700">${esc(insights.exec_summary)}</p></div></section>
+<section class="mb-8"><h2 class="font-display text-2xl font-bold text-slate-900 mb-4">2. Tren GMV Harian</h2>
+  <div class="bg-white rounded-xl border border-slate-100 p-5"><canvas id="chart_daily" height="100"></canvas></div></section>
+<section class="mb-8"><h2 class="font-display text-2xl font-bold text-slate-900 mb-4">3. Kontribusi per Channel</h2>
+  <div class="grid md:grid-cols-2 gap-4"><div class="bg-white rounded-xl border border-slate-100 p-5"><canvas id="chart_kanal" height="200"></canvas></div>
+  <div class="bg-white rounded-xl border border-slate-100 p-5 overflow-x-auto"><table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="pb-2">Channel</th><th class="pb-2 text-right">GMV</th><th class="pb-2 text-right">% GMV</th></tr></thead><tbody>${kanalRows}</tbody></table>
+  <p class="text-xs text-slate-500 mt-3"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Angka antar kanal saling overlap — satu transaksi bisa tercatat di ads + affiliate + voucher.</p></div></div></section>
+<section class="mb-8"><h2 class="font-display text-2xl font-bold text-slate-900 mb-4">4. Paid Ads Performance</h2>
+  <div class="grid md:grid-cols-4 gap-3 mb-4">${adsSummary}</div>
+  <div class="grid md:grid-cols-2 gap-4"><div class="bg-white rounded-xl border border-slate-100 p-5"><h3 class="font-semibold text-sm text-slate-600 mb-3">Omzet vs Biaya per Sumber</h3><canvas id="chart_ads" height="200"></canvas></div>
+  <div class="bg-white rounded-xl border border-slate-100 p-5">${adsBreak}</div></div></section>
+<section class="mb-8"><h2 class="font-display text-2xl font-bold text-slate-900 mb-1">5. Matriks Produk 4 Kuadran</h2>
+  <p class="text-sm text-slate-500 mb-4">Dua sudut pandang: <b>Relatif</b> (performa antar produk di toko ini) & <b>Benchmark</b> (vs target ideal).</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="bg-white rounded-xl border border-slate-100 p-5"><div class="flex items-center justify-between mb-2"><h3 class="font-semibold text-slate-700"><i class="fa-solid fa-arrows-left-right-to-line text-teal-600 mr-1"></i> Mode Relatif</h3><span class="text-xs px-2 py-1 bg-teal-50 text-teal-700 rounded-full">adaptif per toko</span></div>
+      <canvas id="chart_quad_rel" height="220"></canvas><p class="text-xs text-slate-500 mt-2">Batas: traffic ${tl(tr.traffic_low)}–${tl(tr.traffic_high)} pengunjung • CR ${cl(tr.cr_low)}–${cl(tr.cr_high)} (persentil 25/75 produk toko).</p><div class="space-y-1.5 mt-3">${distHTML(bRel)}</div></div>
+    <div class="bg-white rounded-xl border border-slate-100 p-5"><div class="flex items-center justify-between mb-2"><h3 class="font-semibold text-slate-700"><i class="fa-solid fa-bullseye text-orange-600 mr-1"></i> Mode Benchmark</h3><span class="text-xs px-2 py-1 bg-orange-50 text-orange-700 rounded-full">vs target ideal</span></div>
+      <canvas id="chart_quad_abs" height="220"></canvas><p class="text-xs text-slate-500 mt-2">Batas: traffic ${tl(ta.traffic_low)}–${tl(ta.traffic_high)} pengunjung • CR ${cl(ta.cr_low)}–${cl(ta.cr_high)} (benchmark tim MEA).</p><div class="space-y-1.5 mt-3">${distHTML(bAbs)}</div>${benchGap}</div>
+  </div>
+  <div class="mt-3 p-3 bg-slate-50 rounded-lg text-xs text-slate-600"><b>Cara baca:</b> Mode Relatif = "produk mana menonjol di toko saya sekarang". Mode Benchmark = "produk mana sudah/belum capai standar ideal". Produk bisa beda kuadran di dua mode — itu normal & informatif.</div>
+  <div class="mt-4 bg-white rounded-xl border border-slate-100 p-5 overflow-x-auto"><h3 class="font-semibold text-slate-700 mb-3">Top Produk (by GMV Pesanan Dibuat)</h3>
+    <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="pb-2">#</th><th>Produk</th><th class="text-right">Pengunjung</th><th class="text-right">Pesanan</th><th class="text-right">GMV</th><th class="text-right">CR</th><th>Relatif</th><th>Benchmark</th></tr></thead><tbody>${topRows}</tbody></table></div></section>
+<section class="mb-8"><h2 class="font-display text-2xl font-bold text-slate-900 mb-4">6. Shopee Video Performance</h2>${videoSection}</section>
+<section class="mb-8"><h2 class="font-display text-2xl font-bold text-slate-900 mb-4">7. Affiliate Performance</h2>
+  <div class="grid md:grid-cols-4 gap-3 mb-4">${affKpi}</div>
+  <div class="bg-white rounded-xl border border-slate-100 p-5 overflow-x-auto"><h3 class="font-semibold text-slate-700 mb-3">Top 10 Creator</h3><table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="pb-2">#</th><th>Creator</th><th class="text-right">GMV</th><th class="text-right">Pesanan</th><th class="text-right">Komisi</th></tr></thead><tbody>${affRows}</tbody></table></div></section>
+<section class="mb-8"><h2 class="font-display text-2xl font-bold text-slate-900 mb-4">8. Voucher & Promo</h2><div class="grid md:grid-cols-4 gap-3">${vKpi}</div></section>
+<section class="mb-8"><h2 class="font-display text-2xl font-bold text-slate-900 mb-4">9. Layanan & Kesehatan Toko</h2>
+  ${penaltiHTML}<div class="bg-white rounded-xl border border-slate-100 p-5 overflow-x-auto"><table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="pb-2">Metrik</th><th class="text-right">Nilai</th><th class="text-right">Target</th><th>Status</th></tr></thead><tbody>${health}</tbody></table></div></section>
+<section class="mb-8"><h2 class="font-display text-2xl font-bold text-slate-900 mb-4">10. Key Insights & Findings</h2>
+  <div class="bg-white rounded-xl border border-slate-100 p-6"><ol class="space-y-3">${insHTML}</ol></div></section>
+<section class="mb-8"><h2 class="font-display text-2xl font-bold text-slate-900 mb-4">11. Rekomendasi & Action Plan</h2>
+  <div class="mb-4"><h3 class="text-sm font-bold text-red-700 mb-2"><i class="fa-solid fa-fire mr-1"></i> Prioritas Tinggi</h3><div class="grid md:grid-cols-2 gap-3">${rekTHTML}</div></div>
+  <div><h3 class="text-sm font-bold text-amber-700 mb-2"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Prioritas Sedang</h3><div class="grid md:grid-cols-2 gap-3">${rekSHTML}</div></div></section>
+<section class="mb-8"><h2 class="font-display text-2xl font-bold text-slate-900 mb-4">12. Next Month Outlook</h2>
+  <div class="bg-teal-50 border border-teal-100 rounded-xl p-6"><p class="text-slate-700 mb-4">${esc(insights.outlook_next_month)}</p><div class="grid grid-cols-2 md:grid-cols-4 gap-3">${leadHTML}</div></div></section>
+<div class="text-center text-xs text-slate-500 mt-8 pt-6 border-t border-slate-200"><p>Dibuat oleh <span class="font-semibold">MEA Shopee Report Engine</span> • ${esc(report.period)} • ${nFiles} file • Narasi: ${insights.source}</p><p class="mt-1">${esc(report.client)} • Shopee Indonesia</p></div>`;
+}
+
+const MODULE_LABEL={bisnis_home:'Bisnis — Home',bisnis_produk:'Bisnis — Produk',bisnis_live:'Bisnis — Live',ads_toko:'Ads — Toko',ads_produk:'Ads — Produk',aff_product:'Affiliate — Product',aff_creator:'Affiliate — Creator',promo_diskon:'Promo — Diskon',promo_voucher:'Promo — Voucher',promo_flashsale:'Promo — Flashsale',layanan_chat:'Layanan — Chat',layanan_broadcast:'Layanan — Broadcast',meta:'Meta CPAS',bisnis_kesehatan:'Bisnis — Kesehatan Toko',bisnis_video:'Bisnis — Shopee Video',ads_live:'Ads — Live',ads_banner:'Ads — Banner (Search Brand)'};
+let LAST_REPORT=null,LAST_SCORES=null,LAST_INSIGHTS=null,LAST_CHART=null;
+
+const dz=document.getElementById('dropzone'),fi=document.getElementById('fileInput');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag');});
+dz.addEventListener('dragleave',()=>dz.classList.remove('drag'));
+dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag');handleFiles(e.dataTransfer.files);});
+fi.addEventListener('change',e=>handleFiles(e.target.files));
+
+function readFileEntry(file){
+  return new Promise((resolve)=>{
+    const info=parseFilename(file.name);
+    const reader=new FileReader();
+    if(file.name.toLowerCase().endsWith('.xlsx')){
+      reader.onload=()=>{try{
+        const wb=XLSX.read(new Uint8Array(reader.result),{type:'array'});
+        let rows=[];
+        for(const sn of wb.SheetNames){                       // FIX: baca SEMUA sheet + marker nama sheet
+          const ws=wb.Sheets[sn];
+          const sheetRows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null});
+          rows.push(['__SHEET__:'+sn]);
+          rows=rows.concat(sheetRows);
+        }
+        resolve({filename:file.name,rows,info});
+      }catch(e){resolve({filename:file.name,rows:[],info,error:e.message});}};
+      reader.readAsArrayBuffer(file);
+    }else{
+      reader.onload=()=>{try{const rows=Papa.parse(reader.result,{skipEmptyLines:false}).data;resolve({filename:file.name,rows,info});}catch(e){resolve({filename:file.name,rows:[],info,error:e.message});}};
+      reader.readAsText(file);
+    }
+  });
+}
+
+async function handleFiles(fileList){
+  const files=[...fileList].filter(f=>/\.(xlsx|csv)$/i.test(f.name));
+  if(!files.length){setStatus('Tidak ada file .xlsx/.csv terdeteksi.','red');return;}
+  setStatus('<i class="fa-solid fa-spinner fa-spin mr-1"></i> Membaca '+files.length+' file...','slate');
+  const entries=await Promise.all(files.map(readFileEntry));
+  // ===== v2: validasi identitas toko — file beda toko DITOLAK =====
+  for(const e of entries) e.identity=extractIdentity(e.rows||[]);
+  const idCount={};
+  for(const e of entries){ if(e.identity&&e.identity.id) idCount[e.identity.id]=(idCount[e.identity.id]||0)+1; }
+  let refId=null,maxC=0;
+  for(const id in idCount){ if(idCount[id]>maxC){maxC=idCount[id];refId=id;} }
+  let rejectedCount=0;
+  if(refId){ for(const e of entries){ if(e.identity&&e.identity.id&&e.identity.id!==refId){ e.rejected='beda toko: '+(e.identity.nama||e.identity.id); rejectedCount++; } } }
+  const fl=document.getElementById('fileList');fl.innerHTML='';
+  let auto_client=null,auto_period=null,recognized=0;
+  for(const e of entries){
+    const ok=e.info&&!e.error&&!e.rejected;if(ok){recognized++;if(!auto_client&&e.info.client)auto_client=e.info.client;if(!auto_period&&e.info.period)auto_period=e.info.period;}
+    let label;
+    if(e.rejected) label='<span class="text-red-600 font-semibold">'+(e.info?MODULE_LABEL[e.info.module]:e.filename)+' — DITOLAK ('+e.rejected+')</span>';
+    else label=ok?MODULE_LABEL[e.info.module]:e.filename+' (tidak dikenali)';
+    fl.innerHTML+='<div class="flex items-center gap-2 text-sm bg-white border border-slate-100 rounded-lg px-3 py-2"><i class="fa-solid '+(ok?'fa-circle-check text-teal-600':'fa-circle-xmark text-red-500')+'"></i><span class="truncate">'+label+'</span></div>';
+  }
+  if(auto_client&&!document.getElementById('clientName').value)document.getElementById('clientName').value=auto_client;
+  if(auto_period&&!document.getElementById('periodName').value)document.getElementById('periodName').value=auto_period;
+  const hasHome=entries.some(e=>e.info&&!e.rejected&&e.info.module==='bisnis_home');
+  if(!recognized){setStatus('File tidak dikenali. Pastikan nama file sesuai format unduhan Shopee.','red');return;}
+  if(!hasHome){setStatus('⚠️ File <b>[bisnis]-Home</b> wajib ada untuk generate laporan. Tambahkan file Home.','amber');return;}
+  setStatus('<i class="fa-solid fa-spinner fa-spin mr-1"></i> Menghitung & membuat laporan...','slate');
+  setTimeout(()=>generate(entries),100);
+}
+
+function generate(entries){
+  try{
+    const client=document.getElementById('clientName').value.trim()||'Klien';
+    const period=document.getElementById('periodName').value.trim()||'Periode Ini';
+    const active=entries.filter(e=>!e.rejected);
+    const {report,scores,errors}=runPipeline(active.map(e=>({filename:e.filename,rows:e.rows})),client,period);
+    report.files_rejected=entries.filter(e=>e.rejected).map(e=>(e.info?MODULE_LABEL[e.info.module]:e.filename)+' ('+e.rejected+')');
+    const insights=ruleBasedInsights(report,scores);
+    LAST_REPORT=report;LAST_SCORES=scores;LAST_INSIGHTS=insights;LAST_CHART=computeChartData(report);
+    document.getElementById('reportContainer').innerHTML=reportBodyHTML(report,scores,insights);
+    document.getElementById('reportContainer').classList.remove('hidden');
+    document.getElementById('uploadPanel').classList.add('hidden');
+    document.getElementById('exportBar').classList.remove('hidden');document.getElementById('exportBar').classList.add('flex');
+    document.getElementById('resetBtn').classList.remove('hidden');
+    initCharts(document,LAST_CHART);
+    window.scrollTo(0,0);
+  }catch(e){setStatus('Gagal generate: '+e.message,'red');console.error(e);}
+}
+
+function setStatus(msg,color){const el=document.getElementById('statusMsg');const c={red:'text-red-600',amber:'text-amber-600',slate:'text-slate-500',teal:'text-teal-600'}[color]||'text-slate-500';el.className='mt-4 text-center text-sm '+c;el.innerHTML=msg;}
+
+function resetAll(){document.getElementById('reportContainer').innerHTML='';document.getElementById('reportContainer').classList.add('hidden');document.getElementById('uploadPanel').classList.remove('hidden');document.getElementById('exportBar').classList.add('hidden');document.getElementById('resetBtn').classList.add('hidden');document.getElementById('fileList').innerHTML='';document.getElementById('statusMsg').innerHTML='';fi.value='';}
+
+function buildStandalone(){
+  const body=reportBodyHTML(LAST_REPORT,LAST_SCORES,LAST_INSIGHTS);
+  const chartJson=JSON.stringify(LAST_CHART);
+  return `<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Report ${LAST_REPORT.client} ${LAST_REPORT.period}</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"><\/script>
+<script src="https://cdn.tailwindcss.com"><\/script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@600;700&display=swap');body{font-family:'Inter',sans-serif;background:#f8fafc}.font-display{font-family:'Poppins',sans-serif}.kpi-value{font-size:1.75rem;line-height:1.1;font-weight:700}.status-green{background:#D1FAE5;color:#065F46}.status-yellow{background:#FEF3C7;color:#92400E}.status-red{background:#FEE2E2;color:#991B1B}.status-gray{background:#F1F5F9;color:#475569}.insight-card{border-left:4px solid #0F766E}</style></head>
+<body class="bg-slate-50"><div class="max-w-screen-xl mx-auto px-6 py-8">${body}</div>
+<script>const CHART_DATA=${chartJson};(${initCharts.toString()})(document,CHART_DATA);<\/script></body></html>`;
+}
+
+function downloadHTML(){
+  const blob=new Blob([buildStandalone()],{type:'text/html'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='Report_'+LAST_REPORT.client.replace(/\s+/g,'-')+'_'+LAST_REPORT.period.replace(/\s+/g,'-')+'.html';
+  a.click();URL.revokeObjectURL(a.href);
+}
+function copyHTML(){
+  const html=buildStandalone();
+  navigator.clipboard.writeText(html).then(()=>{const l=document.getElementById('copyLbl');l.textContent='Tersalin!';setTimeout(()=>l.textContent='Copy HTML',1500);}).catch(()=>{const ta=document.createElement('textarea');ta.value=html;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();const l=document.getElementById('copyLbl');l.textContent='Tersalin!';setTimeout(()=>l.textContent='Copy HTML',1500);});
+}
+function downloadPDF(btn){
+  const el=document.getElementById('reportContainer');const old=btn.innerHTML;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin mr-1"></i> Membuat PDF...';btn.disabled=true;
+  const opt={margin:[8,8,8,8],filename:'Report_'+LAST_REPORT.client.replace(/\s+/g,'-')+'_'+LAST_REPORT.period.replace(/\s+/g,'-')+'.pdf',image:{type:'jpeg',quality:0.95},html2canvas:{scale:2,useCORS:true,logging:false},jsPDF:{unit:'mm',format:'a4',orientation:'portrait'},pagebreak:{mode:['avoid-all','css','legacy']}};
+  html2pdf().set(opt).from(el).save().then(()=>{btn.innerHTML=old;btn.disabled=false;}).catch(e=>{btn.innerHTML=old;btn.disabled=false;alert('PDF gagal: '+e.message);});
+}
+</script>
+</body>
+</html>
