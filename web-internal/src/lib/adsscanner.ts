@@ -51,6 +51,160 @@ export interface AdsScanPortfolioRow extends AdsScanRunSummary {
   sku_total: number | null;
 }
 
+// ---------------------------------------------------------------------------
+// Payload readers — the interior of the opaque `payload`, typed for rendering.
+//
+// These are NOT wire types (the wire declares `payload: unknown`, deliberately
+// — see `wire.ts`): they are a narrowed VIEW of the `cdps.adsscanner.tiktok.v1`
+// jsonb, covering only the fields the pages actually draw. The engine owns the
+// full shape in `@cdps/core`; anything not listed here is simply not rendered.
+//
+// ⚠️ UNITS. `ctr`/`ctor`/`crVv`/etc. in this payload are FRACTIONS (`0.05`
+// means 5%), because the engine's cell parser turns a `"5%"` cell into `0.05`
+// (`baseline/angka.ts:n` divides by 100 when it sees `%`). That is the OPPOSITE
+// of the SKU Screener payload, whose `ctr`/`cr` are percent-NUMBERS (`2.0`
+// means 2%). Rendering either with the other's formatter is off by 100×, so the
+// two pages deliberately have separate formatters — see `adsscanner-ui.ts`.
+// ---------------------------------------------------------------------------
+export const ADSSCANNER_SCHEMA = 'cdps.adsscanner.tiktok.v1';
+
+/** One SKU's row as stored (subset — the engine's `SkuResult` has ~40 fields). */
+export interface AdsScanSku {
+  pid: string;
+  pidFull: string;
+  nama: string;
+  status: string;
+  gmv: number;
+  pesanan: number;
+  /** null when there were no orders — no basis, render `—`. */
+  aov: number | null;
+  /** FRACTION. null when there were no impressions. */
+  ctr: number | null;
+  /** FRACTION. null when there were no clicks. */
+  ctor: number | null;
+  impresi: number;
+  klik: number;
+  adCost: number;
+  adRev: number;
+  adOrders: number;
+  adCreatives: number;
+  konten: number;
+  /** null when there was no ad spend. */
+  roi: number | null;
+  /** null when there were no ad orders. */
+  cpa: number | null;
+  /** FRACTION share of GMV from creators; null when GMV is 0. */
+  gmvKreatorPct: number | null;
+  gate: string;
+  blockers: string[];
+  skor: number;
+  skorRinci: { konten: number; gmv: number; efisiensi: number; ctr: number; ctor: number };
+  diagnosa: string;
+  bucket: string;
+  aksi: string;
+  budgetHarian: number;
+}
+
+/** Ad spend landing on a product absent from Analitik Produk ("SKU mati"). */
+export interface AdsScanOrphan {
+  pid: string;
+  cost: number;
+  rev: number;
+  creatives: number;
+  kampanye: string[];
+}
+
+export interface AdsScanRealokasiRow {
+  pid: string;
+  nama: string;
+  bucket: string;
+  skor: number;
+  tambahan: number;
+}
+
+export interface AdsScanAngleRow {
+  angle: string;
+  jumlah: number;
+  menang: number;
+  /** FRACTION. */
+  winRate: number;
+  gpmMedian: number;
+  gmv: number;
+  vv: number;
+  lolosBenchmark: boolean;
+}
+
+/** Account-level rollup. Every ratio is null, never 0, when its denominator is 0. */
+export interface AdsScanRingkasan {
+  kategori: string;
+  benchmark: { roi: number | null; tr: number | null; gpm: number | null };
+  skuTotal: number;
+  skuAktifGmv: number;
+  skuSiap: number;
+  skuKering: number;
+  totalGmv: number;
+  totalSpend: number;
+  totalRev: number;
+  blendedRoi: number | null;
+  /** FRACTION of spend going to content-dry SKUs; null when there was no spend. */
+  pctSpendKering: number | null;
+  pctSpendKuat: number | null;
+  orphanSpend: number;
+  orphanSku: number;
+  kontenKreator: number;
+  kontenToko: number;
+  kreatorUnik: number;
+  videoBerGmvPct: number | null;
+  poolRealokasi: number;
+  medCtr: number;
+  medCtor: number;
+}
+
+export interface AdsScanPayload {
+  schema: string;
+  generated_at: string;
+  klien: { nama: string | null; account_manager: string | null; kategori: string; periode_minggu: string | null; minggu_mulai: string | null };
+  benchmark_versi: number | null;
+  benchmark_kategori: { roi: number | null; tr: number | null; gpm: number | null };
+  gpm_benchmark_rupiah: number;
+  ringkasan: AdsScanRingkasan;
+  flags: string[];
+  vonis: { label: string; cls: string };
+  sku: AdsScanSku[];
+  orphan: AdsScanOrphan[];
+  realokasi: { pool: number; rows: AdsScanRealokasiRow[] };
+  angles: { kreator: AdsScanAngleRow[]; toko: AdsScanAngleRow[] };
+  kelengkapan_file: Partial<Record<string, boolean>>;
+}
+
+/** The scan payload, or null when the row is not a `cdps.adsscanner.tiktok.v1` one. */
+export function readAdsScanPayload(payload: unknown): AdsScanPayload | null {
+  const schema = payload && typeof payload === 'object' ? String((payload as { schema?: unknown }).schema ?? '') : '';
+  return schema === ADSSCANNER_SCHEMA ? (payload as AdsScanPayload) : null;
+}
+
+/** One entry of `sumber_berkas`, as the server wrote it. */
+export interface AdsScanBerkas {
+  nama_berkas: string;
+  sha256: string;
+  ukuran_bytes: number;
+  /** The detected slot, or null when nothing recognised the file. */
+  peran: string | null;
+  video_kind?: string;
+  /** True when the video kind came from the fallback heuristic — offer the AM a swap. */
+  video_kind_ambigu?: boolean;
+  baris: number;
+}
+
+export function readAdsScanBerkas(v: unknown): AdsScanBerkas[] {
+  return Array.isArray(v) ? (v as AdsScanBerkas[]) : [];
+}
+
+/** The stored `AdsScannerConfig`, or null. Read for display (which thresholds this scan ran with). */
+export function readAdsScanCfg(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === 'object' ? (v as Record<string, unknown>) : null;
+}
+
 /** One decoded upload, ready to POST. `aoa` is the raw sheet — the SERVER decides which of the 4 slots it is. */
 export interface ParsedAdsScanExport {
   nama_berkas: string;
@@ -171,9 +325,18 @@ export async function adsScanCategories(): Promise<string[]> {
   return res.data;
 }
 
-/** The URL of a scan's rendered HTML — for an iframe or a new tab, same shape as the report renderer's. */
-export function adsScanHtmlPath(id: string): string {
-  return `/adsscanner/runs/${encodeURIComponent(id)}/html`;
+/**
+ * The URL of a scan's rendered HTML — for a new tab or an iframe.
+ *
+ * Returns the FULL same-origin path including `/api/v1`, matching
+ * `report.ts:reportHtmlUrl`: this is a browser-navigable URL, not an `api.*`
+ * path, so the prefix belongs here rather than at each call site where it could
+ * be forgotten. Auth rides on the session cookie (`api.ts` uses
+ * `credentials: 'include'` and sets no Authorization header), so a plain
+ * anchor to this URL is authenticated like any other request.
+ */
+export function adsScanHtmlUrl(id: string): string {
+  return `/api/v1/adsscanner/runs/${encodeURIComponent(id)}/html`;
 }
 
 // ---------------------------------------------------------------------------
