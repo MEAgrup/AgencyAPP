@@ -18,8 +18,8 @@ dari `origin/main` **setelah** PR #277 merge
 | **Repo / branch** | `MEAgrup/AgencyAPP`, `claude/advertiser-tools-consolidation-handoff-96gswr` |
 | **PR #276 / #277** | **SUDAH MERGE.** `origin/main` = `d6b8554` saat sesi ini mulai, dan branch ini dimulai persis dari sana. Jangan cari #277 lagi. |
 | **Yang landed sesi ini** | Dua commit: (1) `b69e69b` UI laporan Shopee (SH-07), (2) `ce8f4eb` UI SKU Screener Modul A/B/C/D (SC-09). Plus commit dokumen. |
-| **Sisa rencana 4-gelombang** | Gelombang 1 ✅ (di live) · Gelombang 2 ✅ (kode + UI, **belum di live**) · Gelombang 3 ✅ (kode + UI, **belum di live**) · **Gelombang 4 belum dimulai** |
-| **⚠️ Live `CDPS SG` tertinggal 2 migrasi** | Lihat §4. Ini satu-satunya hal di handoff ini yang **butuh keputusan manusia**, bukan kode. |
+| **Sisa rencana 4-gelombang** | Gelombang 1 ✅ · Gelombang 2 ✅ · Gelombang 3 ✅ — ketiganya kode + UI + **migrasi sudah di live** · **Gelombang 4 belum dimulai** |
+| **Live `CDPS SG`** | ✅ SINKRON dengan `main` — 2 migrasi diterapkan 2026-09-03 (§4). Keputusan pemilik yang tersisa: **SHP-1..SHP-3** dari UAT export asli. |
 
 ---
 
@@ -198,40 +198,76 @@ diblokir di lingkungan sesi ini), jadi ralatnya hidup di sini.
 
 ---
 
-## 4. ⚠️ BUTUH KEPUTUSAN MANUSIA — live `CDPS SG` tertinggal 2 migrasi
+## 4. Live `CDPS SG` — SUDAH SINKRON (2 migrasi diterapkan 2026-09-03)
 
-Diperiksa sesi ini lewat `mcp__Supabase__list_migrations` (read-only, project
-`egddxfcnrtecheiykhlf`):
+Pemilik (Nerissa) memilih **opsi C**: terapkan migrasi **dan** UAT dengan export
+Shopee asli. Keduanya dikerjakan sesi ini.
 
-| | |
-|---|---|
-| Migrasi terakhir di live | `fix_working_days_between_execute_surface` (= berkas repo `20260908040000`) |
-| Ada di `main`, **BELUM di live** | `20260908050000_gelombang3_sku_screener.sql`, `20260909010000_sh01_shopee_report_engine.sql` |
+**Yang diterapkan** — lewat `mcp__Supabase__apply_migration`, satu per satu,
+urut, project `egddxfcnrtecheiykhlf`:
 
-**Artinya:** begitu `main` ter-deploy, halaman `/ads/screening` dan form
-laporan Shopee akan 500 di produksi — tabelnya belum ada di sana. Kode dan DB
-live saat ini tidak sinkron.
+| Berkas repo | Nama di ledger live | Versi ledger |
+|---|---|---|
+| `20260908050000_gelombang3_sku_screener.sql` | `gelombang3_sku_screener` | `20260903160219` |
+| `20260909010000_sh01_shopee_report_engine.sql` | `sh01_shopee_report_engine` | `20260903160257` |
 
-**Menerapkannya adalah tindakan produksi yang sulit dibalik, jadi TIDAK
-dilakukan sesi ini tanpa persetujuan eksplisit.** Kalau sudah disetujui:
+Nama & versi ledger live **berbeda** dari nama berkas repo — itu bukan kesalahan
+sesi ini, itu O65 yang sudah lama terbuka (ledger live memakai timestamp saat
+apply). Karena itulah `apply_migration`, **bukan `supabase db push`**: `db push`
+membandingkan nama berkas dengan ledger dan bisa salah menilai apa yang sudah
+ada.
 
-1. Terapkan **lewat `mcp__Supabase__apply_migration`**, satu per satu, urut
-   (`20260908050000` dulu, lalu `20260909010000`) — **BUKAN**
-   `supabase db push` (lihat O65: ledger live memakai nama berbeda dari berkas
-   repo; `db push` bisa salah menilai apa yang sudah ada).
-2. Sesudahnya verifikasi ulang gate hitungan di live: `entity_prefix` harus
-   **39** (bukan 37 — dua prefix baru `SCR-` dan `ADL-`), tabel bertambah 4
-   (`screening_run`, `ads_decision_log`, `optimization_tracker`,
-   `report_benchmark_shopee`), `sm_machines` tetap **31**, `notif_events` tetap
-   **67**.
-3. `report_benchmark_shopee` harus punya **satu baris `aktif = true`** — tanpa
-   itu `createReportShopee` menolak dengan `[benchmark laporan belum
-   dikonfigurasi]`. Migrasi `20260909010000` yang menyeednya; pastikan
-   baris itu benar-benar ada di live setelah apply.
-4. Belum pernah ada satu laporan pun (TikTok maupun Shopee) yang dibuat dari
-   export **ASLI** lalu dibaca kontak klien sungguhan — semua verifikasi masih
-   fixture. UAT itu milik pemilik/AM, bukan sesi Claude (sisa Gelombang 1 yang
-   masih terbuka).
+**Diperiksa SEBELUM apply** (bukan sesudah — kalau ada drift, apply-nya yang
+harus dibatalkan, bukan diperbaiki belakangan):
+
+- Daftar relasi live vs lokal-pra-migrasi di-diff **dua arah**: 140 vs 140,
+  keduanya KOSONG. Nol drift.
+- `client_reports` **0 baris** di live. Ini yang membuat
+  `ck_report_benchmark_by_schema` aman: CHECK yang ditambahkan ke tabel berisi
+  data akan memvalidasi baris lama, dan di sini tidak ada baris lama.
+- DDL kedua berkas di-grep lebih dulu: nol `DROP`, nol `UPDATE`, nol
+  `TRUNCATE`. Murni 4 `CREATE TABLE`, kolom baru ber-`DEFAULT`, satu `NOT NULL`
+  dilonggarkan, 2 `CHECK`, RLS + policy + trigger.
+
+**Diperiksa SESUDAH apply** — semua cocok persis dengan angka lokal:
+
+```
+entity_prefix        37 → 39   (SCR, ADL)
+relasi public       140 → 144  (screening_run, ads_decision_log,
+                                optimization_tracker, report_benchmark_shopee)
+sm_machines            31      (tak berubah — benar, tak ada mesin baru)
+notif_events           67      (tak berubah — benar, tak ada event baru)
+report_benchmark_shopee  1 baris aktif, versi 1
+client_reports         +payload_schema, +benchmark_versi_shopee,
+                       benchmark_versi jadi NULLABLE, 2 CHECK baru
+RLS                    aktif di 4 tabel, 3 policy SELECT
+trigger                6 terpasang
+```
+
+**Yang masih milik pemilik, bukan kode:** UAT ini berhenti di "laporan terbentuk
+& angkanya benar". Belum ada laporan Shopee di live, dan belum ada satu pun
+laporan yang diterbitkan lalu dibaca kontak klien sungguhan.
+
+### Tiga keputusan pemilik yang MUNCUL dari UAT
+
+Laporan lengkap: **`docs/handoff/UAT_SHOPEE_FIM_MOTOR_20260903.md`**. Ringkas:
+
+- **SHP-1 🔴 GMV mana yang dilaporkan** — engine memakai "Pesanan Dibuat"
+  (Rp 1.624.937.476), yang memuat Rp 383,9 juta (23,6%) pesanan batal + retur.
+  "Pesanan Dibayar" (Rp 1.329.227.354) ada di berkas tapi **tidak diparse sama
+  sekali**. `gmv_net` adalah penulis tunggal `clients.total_sales` → Health
+  Score M13, jadi ini menggerakkan skor, bukan cuma tampilan.
+- **SHP-2 🟡 label KRITIS** — skor 5,7 (<6) padahal ROAS 9,63× dan ketiga flag
+  iklan hijau. Penariknya batal 20,5% dan Live Streaming. Isinya jujur;
+  pertanyaannya kata yang dibaca klien.
+- **SHP-3 🟡 instruksi kerja AM** — deteksi otomatis pada nama berkas MENTAH
+  Seller Centre: 8 benar, **3 salah slot**, 4 tak terdeteksi. Salah slot tidak
+  meninggalkan jejak di laporan. Sampai pengenalan nama mentah ditambahkan ke
+  engine, instruksi AM harus **pakai dropdown modul per berkas**, bukan
+  mengandalkan "Otomatis".
+
+Ketiganya ada di `DECISIONS.md` tabel Open. **Jangan** memutuskan sendiri di
+sesi berikutnya — SHP-1 khususnya mengubah angka yang sudah dilaporkan ke klien.
 
 ---
 
@@ -245,15 +281,26 @@ dilakukan sesi ini tanpa persetujuan eksplisit.** Kalau sudah disetujui:
    yang belum ada: migrasi, domain layer, rute, UI. Pola yang tinggal diikuti
    persis: `20260908050000` + `packages/domain/src/skuscreener.ts` +
    `/ads/screening` yang baru landed sesi ini.
-2. **Terapkan 2 migrasi ke live** — setelah pemilik setuju (§4).
-3. **SCR-UI-1** — tanyakan ke Yohan/Nerissa apakah divisi Ads perlu bisa
+2. **SHP-1 dulu kalau pemilik sudah menjawab** — itu satu-satunya temuan UAT
+   yang mengubah ANGKA (GMV yang dilaporkan + `clients.total_sales` → Health
+   Score M13). Kalau jawabannya opsi C, kerjanya: parser bagian ke-3
+   ("Pesanan Dibayar") di `report/shopee/metrik.ts` → `gmv_kotor` vs `gmv_net`
+   diisi angka BERBEDA di `createReportShopee` → renderer menampilkan keduanya.
+   Laporan lama tidak bisa dihitung ulang (tabel beku) — hanya laporan baru
+   yang ikut aturan baru, dan itu harus dikatakan ke pemilik.
+3. **SHP-3 (opsi C)** — tambah pengenalan nama berkas MENTAH Shopee ke
+   `report/shopee/detect.ts` sebagai lapisan nama KEDUA, dijalankan setelah
+   konvensi tim dan SEBELUM fallback tanda-tangan isi. 14 pola ada di
+   `UAT_SHOPEE_FIM_MOTOR_20260903.md` §4.3. Aditif, tapi tetap butuh entri
+   `DECISIONS.md` karena menambah aturan yang tidak ada di alat aslinya.
+4. **SCR-UI-1** — tanyakan ke Yohan/Nerissa apakah divisi Ads perlu bisa
    me-list klien. Kalau ya, itu rute picker sempit + entri `DECISIONS.md`,
    bukan pelebaran `clients_select` apa adanya.
-4. **Sidebar IA v3** (`docs/CDPS_Sidebar_IA_v3.md`) — masih track terpisah dan
+5. **Sidebar IA v3** (`docs/CDPS_Sidebar_IA_v3.md`) — masih track terpisah dan
    masih butuh keputusan produk untuk 3 pasang halaman yang mungkin duplikat.
    Catatan baru: menu bertambah satu baris sesi ini (`/ads/screening`), jadi
    kalau reorganisasi dikerjakan, hitung ulang dari `nav.ts` yang sekarang.
-5. **PR untuk branch ini** — belum dibuat; pemilik belum memintanya. Jangan
+6. **PR untuk branch ini** — belum dibuat; pemilik belum memintanya. Jangan
    buat tanpa diminta (aturan rumah sesi ini), dan jangan merge apa pun atas
    inisiatif sendiri.
 
@@ -279,6 +326,11 @@ client, `canUseSkuScreener`/`canWriteSkuScreener`),
 (satu baris + gate), `web-internal/src/app/(shell)/ads/[id]/page.tsx` (tautan
 masuk), test `skuscreener-ui.test.ts` / `skuscreener.test.ts` /
 `nav.test.ts`.
+
+**UAT export asli:** `docs/handoff/UAT_SHOPEE_FIM_MOTOR_20260903.md` — 15
+berkas Fim Motor Juli 2026, tabel cek-ulang angka ke berkas mentah, tabel
+deteksi per berkas, dan tiga keputusan pemilik SHP-1..SHP-3 dengan hitungan
+untung-ruginya.
 
 **Rencana & backlog:** `docs/plan/PLAN_KONSOLIDASI_ALAT_ADVERTISER.md` (baris
 Status sudah diperbarui), `docs/backlog/CLIENT_REPORT_PORTAL_BACKLOG.md`
