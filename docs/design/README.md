@@ -19,7 +19,7 @@ dari aturan bisnis yang sama"*). Sesudah port, satu-satunya sumber kebenaran ada
 | `SHOPEE_REPORT_ENGINE.html` | Pemilik, 2026-09-03 — unggahan asli (bukan ketikan ulang) | `packages/core/src/report/shopee/` (Gelombang 2, tiket **SH-01..SH-06**, `docs/plan/PLAN_KONSOLIDASI_ALAT_ADVERTISER.md` §5) | **belum diport** |
 | `MEA_SKU_SCREENER_v2.html` | Pemilik, 2026-09-03 — unggahan asli, "MEA SKU Screener v2" | `packages/core/src/skuscreener/` (Gelombang 3, tiket **SC-01..SC-08**, plan §6) | **belum diport** |
 | `PRD_MEA_SKU_SCREENER_v1.0.md` | Pemilik, 2026-09-03 — ekstraksi teks dari `.docx` asli (Dev asal: Hans, 27 Jul 2026) | Spesifikasi R01–R16 untuk `packages/core/src/skuscreener/`; A01–A10 dikonfirmasi di `DECISIONS.md` (**SC-00**) | **R01–R06, R09–R12 dikonfirmasi ada di kode `MEA_SKU_SCREENER_v2.html`; R07/R08/R13–R16 TIDAK ada di HTML — lihat catatan di bawah** |
-| `TIKTOK_ADS_SCANNER.html` | Pemilik, 2026-09-03 — unggahan asli, "MEA SKU Triage — Panel Advertiser" | Gelombang 4 (`docs/plan/PLAN_KONSOLIDASI_ALAT_ADVERTISER.md` §7) — jalur (embed vs port) **belum diputuskan** | **belum diputuskan jalurnya, jadi belum diport** |
+| `TIKTOK_ADS_SCANNER.html` | Pemilik, 2026-09-03 — unggahan asli, "MEA SKU Triage — Panel Advertiser" | Gelombang 4 — **PORT PENUH** ke `packages/core/src/adsscanner/tiktok/` (`DECISIONS.md` O67, 2026-09-03) | **belum diport — jalur sudah diputuskan, kode belum ditulis** |
 
 ### `BASELINE_TOOL_TIKTOK_v1.html`
 
@@ -113,9 +113,11 @@ diselaraskan diam-diam:**
   terpisah lalu mengetik hasilnya di sini. **Keputusan porting: apakah CDPS mengotomasi R07/R08
   dari data ekonomi klien yang sudah tersimpan (kalau ada), atau tetap manual seperti tool
   ini?** Dicatat sebagai open question — lihat `DECISIONS.md`.
-- **A08 (default target ROAS Fase 1) — PRD bilang 3,57 (hasil formula R07 dengan margin 40%,
-  platform 12%), HTML shipped memakai default polos `4`.** Dua sumber kebenaran pemilik sendiri
-  tidak sepakat. **Tidak ditebak** — lihat `DECISIONS.md` untuk status resolusi.
+- **A08 (default target ROAS Fase 1) — RESOLVED (`DECISIONS.md` O66, 2026-09-03): pemilik
+  memilih ikuti HTML shipped (default `4`), R07/R08 (floor otomatis dari margin/biaya-platform)
+  TETAP TIDAK diimplementasikan.** Port SC-04 meniru tool apa adanya: input manual, default `4`.
+  PRD §6 A08 (3,57) dan §2.2 R07/R08 adalah deviasi PRD yang disengaja, bukan celah yang
+  terlewat.
 - A02/A03/A06 (nama sheet fallback, Kode Produk opsional dengan fallback nama, header CSV ads
   dicari dinamis bukan hardcode baris ke-7) — **sudah dijawab oleh kode HTML sendiri** lewat
   fallback defensif; port harus meniru pola fallback yang sama, bukan asumsi PRD yang lebih
@@ -163,9 +165,12 @@ berbobot (konten 35%, GMV 25%, efisiensi ROI 20%, CTR 10%, CTOR 10%), 6 bucket k
 UP, PERLU OPTIMASI, STOK VIDEO CUKUP, BANGUN KONTEN, BOROS, DIBLOKIR), realokasi budget lintas
 SKU, dan mesin klasifikasi angle konten (9 kategori dari regex caption).
 
-**Jalur porting (embed vs port) BELUM DIPUTUSKAN** — lihat plan §7 aturan pemisahnya: "angka
-cuma dibaca manusia → embed; angka menggerakkan keputusan sistem → port". Alat ini jelas
-**menggerakkan keputusan** (bucket routing, realokasi budget dalam Rupiah) sehingga condong ke
-jalur **port**, tapi ini keputusan arsitektur yang harus dicatat eksplisit di `DECISIONS.md`
-sebelum kode ditulis, bukan diasumsikan dari observasi ini. Jangan mulai men-port sebelum entri
-`DECISIONS.md` ada.
+**Jalur porting: PORT PENUH ke `packages/core/`, RESOLVED (`DECISIONS.md` O67, 2026-09-03).**
+Pemilik memilih port (bukan embed) — alasan yang sama dengan rekomendasi: alat ini
+**menggerakkan keputusan** (bucket routing, skor SKU, realokasi budget dalam Rupiah), bukan
+sekadar dibaca manusia, persis aturan pemisah plan §7. Ini pekerjaan sebesar Shopee Report
+Engine — tiket/commit TERPISAH dari Gelombang 2/3, ikuti bentuk `report/`: `detect.ts` →
+`metrik.ts` → `skor.ts` → `insight.ts` → `payload.ts` (`cdps.adsscanner.tiktok.v1`) →
+`render.ts` → `run.ts`. **Belum diputuskan** (turunan, ambil saat kode ditulis): apakah
+portofolio multi-klien `localStorage` alat aslinya ikut diport jadi state per-klien CDPS, atau
+tetap fitur lokal yang tidak diikutkan.
