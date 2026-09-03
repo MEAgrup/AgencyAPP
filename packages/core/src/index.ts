@@ -23,6 +23,8 @@
  * - skuscreener: MEA SKU Screener (Gelombang 3) — routing SKU (R05), CPC
  *   Maksimum + anti-rule (R06), median toko iteratif (R04), before/after
  *   (R09-R12) ✅
+ * - adsscanner: alat kerja skor SKU/bucket/realokasi budget per platform
+ *   (`adsscanner.tiktok` — TikTok SKU Triage, DECISIONS.md O67) ✅
  *
  * All implementations must maintain house-rule compliance (CLAUDE.md §Non-negotiable):
  * - State machines server-side enforced + exact Bahasa Indonesia [...] messages
@@ -49,3 +51,4 @@ export * as interview from './interview';
 export * as baseline from './baseline';
 export * as report from './report';
 export * as skuscreener from './skuscreener';
+export * as adsscanner from './adsscanner';
