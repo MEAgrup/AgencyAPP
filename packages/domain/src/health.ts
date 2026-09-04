@@ -783,17 +783,29 @@ interface PortfolioRawRow {
 
 /**
  * portfolio lists every ACTIVE client (RM-2: ≥1 non-terminal service) the actor
- * may view. Same gate as the per-client view — canScope to enter, then each row
- * kept only when canView admits it (owner-AM / Account-lead / OD / Director) — so
- * the table never widens the M13 read scope: the row filter IS the canView
- * predicate the detail page already applies, no RLS change (M6D D-12 / DECISIONS
- * O48). Read via a plain connection like the recap reads (multi sub-table read; a
- * spurious RLS blank on a sub-select would drop rows, not raise), gated in TS.
+ * may view. Same gate as the per-client view — canScope to enter, then the SAME
+ * row scope `canView` applies (owner-AM / Account-lead / OD / Director) — so the
+ * table never widens the M13 read scope: the row filter IS the canView predicate
+ * the detail page already applies, no RLS change (M6D D-12 / DECISIONS O48). Read
+ * via a plain connection like the recap reads (multi sub-table read; a spurious
+ * RLS blank on a sub-select would drop rows, not raise), gated in TS.
+ *
+ * P2 §8: the scope is now a `WHERE` predicate, not a post-fetch `.filter()` —
+ * an AM's portfolio query fetches only their own clients instead of every
+ * active client company-wide and discarding the rest in TS. `ownerScope`
+ * mirrors `canView`'s own branches exactly: director/OD/Account-lead see
+ * everything (unrestricted, same as before); only the AM (Account, staff)
+ * case narrows to `assigned_am_id = own id`, `canView`'s one row-owner check.
  */
 export async function portfolio(sql: Queryable, actor: Actor): Promise<PortfolioRow[]> {
   if (!canScope(actor)) {
     throw new ForbiddenError();
   }
+  const seesEveryone = actor.role.director || actor.role.od
+    || (actor.role.division === ACCOUNT_DIVISION && actor.role.level === permission.LevelLead);
+  // '' sentinel (never a bare SQL NULL bind, same pattern as salesperf.gather's
+  // sourceFilter/campaignFilter) — "" means "no owner restriction".
+  const ownerScope = seesEveryone ? '' : actor.employeeId;
   const rows = await sql<PortfolioRawRow[]>`
     select
       c.id as client_id,
@@ -829,9 +841,9 @@ export async function portfolio(sql: Queryable, actor: Actor): Promise<Portfolio
       select 1 from services s
        where s.client_id = c.id
          and s.status not in ('Done', '[Cancelled — Service Voided]'))
+      and (${ownerScope} = '' or c.assigned_am_id = ${ownerScope})
     order by c.toko asc, c.id asc`;
   return rows
-    .filter((r) => canView(actor, r.owner_am))
     .map((r) => {
       const band = r.band ?? '';
       const prev = r.prev_band ?? '';
