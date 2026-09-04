@@ -26,6 +26,11 @@ const EXACT_MAP: Record<string, BadgeTone> = {
   '[Dikerjakan]': 'blue',
   '[Selesai]': 'green',
   '[Dibatalkan]': 'darkgray',
+  // L1 (Revisi Sales/Creative/Performa) — attempt yang menua otomatis (3 hari
+  // diam). Substring 'unrespon' tidak cocok heuristik manapun di bawah, jadi
+  // tanpa baris ini akan jatuh ke 'gray' — tak terbedakan dari `[To Do]`,
+  // padahal ini sinyal butuh-perhatian (belum Not Qualified, tapi mangkrak).
+  '[Unrespon]': 'amber',
 };
 
 export function badgeTone(status: string): BadgeTone {

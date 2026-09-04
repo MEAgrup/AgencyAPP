@@ -315,15 +315,68 @@ export function reworkAsset(sql: Sql, actor: Actor, assetId: string): Promise<st
 }
 
 /**
- * driveExecEdge is the shared, gated engine driver for the division-side edges of
- * any source. requireFrom pins the expected current state so Start and Rework stay
- * distinct even though both target [In Progress]; a wrong source state is rejected
- * (nothing changes). submitLink is persisted when a link-gated source (Asset)
- * enters [Submitted] (§4 Rule 3). After the move, effects propagate atomically: a
- * Brief-as-task leaving [To Do] advances its Service; an Asset transition recomputes
- * its parent Brief's roll-up (which itself advances the Service). (The M8 Ads
- * pre-[Submitted] submit guard is deferred until M8 is ported — nil-safe.)
+ * execEdgeTx is the shared, gated engine driver for the division-side edges of
+ * any source — the transaction BODY, so a caller already holding a transaction
+ * (C2's batch primitives) can drive many edges inside ONE transaction instead of
+ * one-transaction-per-edge. requireFrom pins the expected current state so Start
+ * and Rework stay distinct even though both target [In Progress]; a wrong source
+ * state is rejected (nothing changes). submitLink is persisted when a link-gated
+ * source (Asset) enters [Submitted] (§4 Rule 3). After the move, effects
+ * propagate atomically: a Brief-as-task leaving [To Do] advances its Service; an
+ * Asset transition recomputes its parent Brief's roll-up (which itself advances
+ * the Service) — UNLESS `opts.propagate` is explicitly `false` (a batch caller
+ * that recomputes the roll-up ONCE after its whole loop, not per row). (The M8
+ * Ads pre-[Submitted] submit guard is deferred until M8 is ported — nil-safe.)
  */
+async function execEdgeTx(
+  tx: Queryable,
+  actor: Actor,
+  src: TaskSource,
+  id: string,
+  requireFrom: string,
+  to: string,
+  submitLink: string,
+  opts?: { propagate?: boolean },
+): Promise<statemachine.TransitionResult> {
+  const ex = executors(tx);
+  const r = await lockTask(tx, src, id);
+  if (r.status === STATUS_VENDOR_DISPATCHED) {
+    throw new ConflictError(MSG_NOT_A_TASK);
+  }
+  if (!canExecute(actor, r)) {
+    throw new ForbiddenError(MSG_EXEC_FORBIDDEN);
+  }
+  if (r.status !== requireFrom) {
+    throw new ConflictError(bi.TRANSITION_NOT_ALLOWED); // pin the source state
+  }
+  // §4 Rule 3 (M8): an Ads Brief-as-task cannot submit until its Ad Campaign is
+  // complete (≥1 linked Creative Asset). No-op for non-Ads divisions and Assets.
+  if (to === STATUS_SUBMITTED && src.table === 'briefs') {
+    await validateBriefSubmit(tx, id, r.division);
+    await validateStageComplete(tx, id); // M16 §2 Rule 11 (LT-26) — one-way guard, see comment on the function
+  }
+  // Link gate: a link-requiring source (Asset) must carry an output link before
+  // [Submitted] (§4 Rule 3). Persist it in the same transaction as the move.
+  if (to === STATUS_SUBMITTED && src.submitLinkCol) {
+    const link = (submitLink ?? '').trim();
+    if (link === '') {
+      throw new ValidationError(MSG_OUTPUT_LINK_REQUIRED);
+    }
+    await tx`update ${tx(src.table)} set ${tx(src.submitLinkCol)} = ${link} where id = ${id}`;
+  }
+  const res = await statemachine.transition(ex.sm, {
+    machine: MACHINE_BRIEF_TASK, entityType: src.entityType, table: src.table, entityId: id, to, actor,
+  });
+  if (!res.ok) {
+    throw transitionError(res);
+  }
+  if (opts?.propagate ?? true) {
+    await propagate(tx, actor, src, r);
+  }
+  return res;
+}
+
+/** driveExecEdge opens its own transaction around execEdgeTx — every existing single-edge caller (startAsset/submitAsset/reworkAsset/…) is unchanged. */
 async function driveExecEdge(
   sql: Sql,
   actor: Actor,
@@ -333,42 +386,7 @@ async function driveExecEdge(
   to: string,
   submitLink: string,
 ): Promise<statemachine.TransitionResult> {
-  return withTransaction(sql, async (tx) => {
-    const ex = executors(tx);
-    const r = await lockTask(tx, src, id);
-    if (r.status === STATUS_VENDOR_DISPATCHED) {
-      throw new ConflictError(MSG_NOT_A_TASK);
-    }
-    if (!canExecute(actor, r)) {
-      throw new ForbiddenError(MSG_EXEC_FORBIDDEN);
-    }
-    if (r.status !== requireFrom) {
-      throw new ConflictError(bi.TRANSITION_NOT_ALLOWED); // pin the source state
-    }
-    // §4 Rule 3 (M8): an Ads Brief-as-task cannot submit until its Ad Campaign is
-    // complete (≥1 linked Creative Asset). No-op for non-Ads divisions and Assets.
-    if (to === STATUS_SUBMITTED && src.table === 'briefs') {
-      await validateBriefSubmit(tx, id, r.division);
-      await validateStageComplete(tx, id); // M16 §2 Rule 11 (LT-26) — one-way guard, see comment on the function
-    }
-    // Link gate: a link-requiring source (Asset) must carry an output link before
-    // [Submitted] (§4 Rule 3). Persist it in the same transaction as the move.
-    if (to === STATUS_SUBMITTED && src.submitLinkCol) {
-      const link = (submitLink ?? '').trim();
-      if (link === '') {
-        throw new ValidationError(MSG_OUTPUT_LINK_REQUIRED);
-      }
-      await tx`update ${tx(src.table)} set ${tx(src.submitLinkCol)} = ${link} where id = ${id}`;
-    }
-    const res = await statemachine.transition(ex.sm, {
-      machine: MACHINE_BRIEF_TASK, entityType: src.entityType, table: src.table, entityId: id, to, actor,
-    });
-    if (!res.ok) {
-      throw transitionError(res);
-    }
-    await propagate(tx, actor, src, r);
-    return res;
-  });
+  return withTransaction(sql, (tx) => execEdgeTx(tx, actor, src, id, requireFrom, to, submitLink));
 }
 
 /**
@@ -416,6 +434,204 @@ async function propagate(tx: Queryable, actor: Actor, src: TaskSource, r: TaskRo
   if (r.status === STATUS_TODO) {
     await onBriefLeavesToDo(tx, actor, r.serviceId); // §5 Flow 3 (idempotent)
   }
+}
+
+// ---------------------------------------------------------------------------
+// Batch execution (C2, Revisi Sales/Creative/Performa) — submit/start many
+// Assets of one Brief in a single screen instead of one submit-link prompt
+// per Asset. Creative-only surface (C3), but written division-generic like
+// the rest of this file — nothing here assumes `division === 'Creative'`.
+// ---------------------------------------------------------------------------
+
+/**
+ * The same BI strings as `creative.MSG_ASSET_NOT_FOUND` / `MSG_BRIEF_NOT_FOUND`
+ * — NOT imported from `creative.ts`, because `creative.ts` imports
+ * `recomputeBriefRollup` FROM this file; importing back would be a cycle. Kept
+ * byte-identical to their creative.ts originals (creative.test.ts / task.test.ts
+ * each assert against their own exported constant, so a hand-edit that lets
+ * the two drift apart fails a test, not silently).
+ */
+const MSG_BATCH_ASSET_NOT_FOUND = '[aset tidak ditemukan]';
+const MSG_BATCH_BRIEF_NOT_FOUND = '[brief tidak ditemukan]';
+
+/** One requested line for `submitAssetBatch` — an Asset id + its output link. */
+export interface AssetExecLine {
+  assetId: string;
+  outputLink?: string;
+}
+
+/** The verdict for one row of a batch, applied or not. */
+export interface AssetExecRowResult {
+  rowNumber: number;
+  assetId: string;
+  sequenceNo: number;
+  applied: boolean;
+  fromStatus: string;
+  toStatus: string;
+  reason: string;
+}
+
+/** The full report of one `submitAssetBatch`/`startAssetBatch` call. */
+export interface AssetExecBatchReport {
+  applied: number;
+  rejected: number;
+  briefId: string;
+  briefStatus: string;
+  rows: AssetExecRowResult[];
+  rejections: AssetExecRowResult[];
+}
+
+/** One locked Asset row, as read for batch verdict + execution. */
+interface BatchAssetRow {
+  assetId: string;
+  sequenceNo: number;
+  status: string;
+  assignedPic: string;
+  division: string;
+}
+
+/**
+ * lockBriefAssetsForBatch locks the Brief first (`for update`, same first-lock
+ * as `creative.lockAssetableBrief` — a fan-out and a bulk-submit on the same
+ * Brief now serialize instead of interleaving), then locks exactly the
+ * requested Assets that belong to it, in `sequence_no` order — every batch
+ * primitive in the system takes its locks in this same order.
+ */
+async function lockBriefAssetsForBatch(
+  tx: Queryable,
+  briefId: string,
+  assetIds: readonly string[],
+): Promise<{ briefStatus: string; assets: Map<string, BatchAssetRow> }> {
+  const brief = await tx<{ status: string }[]>`select status from briefs where id = ${briefId} for update`;
+  if (brief.length === 0) {
+    throw new NotFoundError(MSG_BATCH_BRIEF_NOT_FOUND);
+  }
+  const rows = await tx<
+    { id: string; sequence_no: number; status: string; assigned_pic: string | null; assigned_division: string }[]
+  >`
+    select a.id, a.sequence_no, a.status, a.assigned_pic, b.assigned_division
+      from assets a
+      join briefs b on b.id = a.brief_id
+     where a.brief_id = ${briefId} and a.id = any(${assetIds})
+     order by a.sequence_no asc
+     for update`;
+  const assets = new Map<string, BatchAssetRow>();
+  for (const r of rows) {
+    assets.set(r.id, {
+      assetId: r.id, sequenceNo: Number(r.sequence_no), status: r.status,
+      assignedPic: r.assigned_pic ?? '', division: r.assigned_division,
+    });
+  }
+  return { briefStatus: brief[0].status, assets };
+}
+
+/**
+ * verdictFor is the pure-read judgment shared by both batch doors: does this
+ * asset (belonging to the given Brief) actually exist, may this actor drive
+ * it, is it in the expected source state, and — submit only — does it carry
+ * a non-blank output link? All four are readable from the already-locked
+ * row + line, never a write.
+ */
+function verdictFor(
+  actor: Actor,
+  asset: BatchAssetRow | undefined,
+  requireFrom: string,
+  to: string,
+  outputLink: string | undefined,
+): { ok: true } | { ok: false; reason: string } {
+  if (asset === undefined) {
+    return { ok: false, reason: MSG_BATCH_ASSET_NOT_FOUND };
+  }
+  if (!canExecute(actor, asset)) {
+    return { ok: false, reason: MSG_EXEC_FORBIDDEN };
+  }
+  if (asset.status !== requireFrom) {
+    return { ok: false, reason: bi.TRANSITION_NOT_ALLOWED };
+  }
+  if (to === STATUS_SUBMITTED && (outputLink ?? '').trim() === '') {
+    return { ok: false, reason: MSG_OUTPUT_LINK_REQUIRED };
+  }
+  return { ok: true };
+}
+
+/**
+ * execAssetBatch is the shared three-phase engine for `submitAssetBatch` /
+ * `startAssetBatch`: (1) judge every row under the lock — pure reads only;
+ * (2) any rejection → return the report AS-IS, nothing written (an import
+ * door commits row-by-row because a rejection there is a business outcome
+ * only discoverable by trying to write; here every rejection reason is
+ * knowable in advance, so a half-submitted Brief is a worse failure mode
+ * than "fix row 7 and resubmit"); (3) all clean → drive every edge with
+ * `propagate:false` and recompute the Brief roll-up exactly ONCE at the end,
+ * not once per row.
+ */
+async function execAssetBatch(
+  sql: Sql,
+  actor: Actor,
+  briefId: string,
+  requireFrom: string,
+  to: string,
+  lines: readonly { assetId: string; outputLink?: string }[],
+): Promise<AssetExecBatchReport> {
+  if (lines.length === 0) {
+    throw new ValidationError(bi.INCOMPLETE_DATA);
+  }
+  return withTransaction(sql, async (tx) => {
+    const { briefStatus, assets } = await lockBriefAssetsForBatch(tx, briefId, lines.map((l) => l.assetId));
+
+    const rows: AssetExecRowResult[] = lines.map((line, i) => {
+      const asset = assets.get(line.assetId);
+      const verdict = verdictFor(actor, asset, requireFrom, to, line.outputLink);
+      return {
+        rowNumber: i + 1,
+        assetId: line.assetId,
+        sequenceNo: asset?.sequenceNo ?? 0,
+        applied: verdict.ok,
+        fromStatus: asset?.status ?? '',
+        toStatus: verdict.ok ? to : '',
+        reason: verdict.ok ? '' : verdict.reason,
+      };
+    });
+    const rejections = rows.filter((r) => !r.applied);
+    if (rejections.length > 0) {
+      return { applied: 0, rejected: rejections.length, briefId, briefStatus, rows, rejections };
+    }
+
+    for (const line of lines) {
+      await execEdgeTx(tx, actor, SOURCE_ASSET, line.assetId, requireFrom, to, line.outputLink ?? '', { propagate: false });
+    }
+    await recomputeBriefRollup(tx, actor, briefId);
+    const after = await tx<{ status: string }[]>`select status from briefs where id = ${briefId}`;
+    return { applied: rows.length, rejected: 0, briefId, briefStatus: after[0].status, rows, rejections: [] };
+  });
+}
+
+/**
+ * submitAssetBatch drives many `[In Progress]` Assets of one Brief to
+ * `[Submitted]` in one screen (C3 "Submit Output Massal") instead of one
+ * `window.prompt` per Asset. Never creates an Asset — `createAssetBatch`
+ * remains the only door that allocates a Sequence # / spends `quantity_target`;
+ * this only moves Assets that already exist.
+ */
+export function submitAssetBatch(
+  sql: Sql, actor: Actor, briefId: string, lines: readonly AssetExecLine[],
+): Promise<AssetExecBatchReport> {
+  return execAssetBatch(sql, actor, briefId, STATUS_IN_PROGRESS, STATUS_SUBMITTED, lines);
+}
+
+/**
+ * startAssetBatch drives many `[To Do]` Assets of one Brief to `[In Progress]`
+ * — a deliberately SEPARATE door from `submitAssetBatch`, not a single click
+ * to `[Submitted]`: M7 §5 Rule 1 defines Turnaround as `[Submitted]` minus
+ * `[In Progress]`, and that timestamp pair feeds Speed Score (§8 Rule 1,
+ * RM-9a — 28.5% of M14 Creative). Auto-starting on submit would set both
+ * timestamps to the same instant and make Turnaround (and Speed Score)
+ * meaningless forever.
+ */
+export function startAssetBatch(
+  sql: Sql, actor: Actor, briefId: string, assetIds: readonly string[],
+): Promise<AssetExecBatchReport> {
+  return execAssetBatch(sql, actor, briefId, STATUS_TODO, STATUS_IN_PROGRESS, assetIds.map((assetId) => ({ assetId })));
 }
 
 // ---------------------------------------------------------------------------

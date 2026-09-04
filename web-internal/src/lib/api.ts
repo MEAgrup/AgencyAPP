@@ -80,6 +80,18 @@ export const api = {
   delete: <T,>(path: string): Promise<T> => request<T>(path, { method: 'DELETE' }),
 };
 
+/**
+ * Halaman terbesar yang boleh diminta sekali jalan — cermin `page.MAX_LIMIT` di
+ * server (P2 §6). Server tetap otoritasnya dan meng-clamp nilai di atas ini.
+ *
+ * Dipakai oleh layar yang BUKAN daftar yang bisa digulir bertahap, melainkan
+ * butuh himpunan lengkap dalam satu tarikan: inbox persetujuan (baris yang tak
+ * pernah tampil tak pernah disetujui) dan lookup yang dijoin ke data lain
+ * (nama campaign untuk baris metrik). Untuk daftar biasa, pakai tombol
+ * "Muat lebih banyak", bukan konstanta ini.
+ */
+export const MAX_PAGE_LIMIT = 500;
+
 /** Extracts the verbatim [...] message from any thrown value, with a safe fallback. */
 export function errorMessage(err: unknown): string {
   if (err instanceof ApiError) return err.message;

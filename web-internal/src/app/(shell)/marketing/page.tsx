@@ -43,18 +43,39 @@ export default function MarketingWorkspacePage() {
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
+  // P2 §6: server memaginasi. `nextCursor` null = sudah halaman terakhir.
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await listCampaigns();
       setCampaigns(res.data);
+      setNextCursor(res.next_cursor);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // Menyambung, bukan mengganti.
+  async function loadMore() {
+    if (nextCursor === null) return;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const res = await listCampaigns({ cursor: nextCursor });
+      setCampaigns((prev) => [...(prev ?? []), ...res.data]);
+      setNextCursor(res.next_cursor);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   useEffect(() => {
     // Cermin gate server: role tanpa akses tidak pernah fetch (brief commit 70b27d0).
@@ -224,6 +245,13 @@ export default function MarketingWorkspacePage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+          {nextCursor !== null && (
+            <div className="row" style={{ justifyContent: 'center', marginTop: 12 }}>
+              <button type="button" className="btn btnSecondary" disabled={loadingMore} onClick={loadMore}>
+                {loadingMore ? 'Memuat...' : 'Muat lebih banyak'}
+              </button>
             </div>
           )}
         </section>

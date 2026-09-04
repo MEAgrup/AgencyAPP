@@ -8,7 +8,7 @@
  *   behaviour as the centerpiece test.
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { money, permission } from '@cdps/core';
+import { money, page, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import { leads } from './index';
 import {
@@ -22,6 +22,7 @@ import {
   getRenewalDetail,
   JENIS_CROSS_SELL,
   JENIS_PERPANJANGAN,
+  listRenewals,
   listRenewalsForClient,
   MSG_CLIENT_NOT_FOUND,
   MSG_RENEWAL_NOT_FOUND,
@@ -527,6 +528,32 @@ describeDb('reads', () => {
 
     await expect(listRenewalsForClient(sql, andi(), clientId)).rejects.toBeInstanceOf(ForbiddenError);
     expect(await listRenewalsForClient(sql, director(), clientId)).toHaveLength(2);
+  });
+
+  it('listRenewals pages by keyset across clients, and is unbounded when unasked (P2 §6)', async () => {
+    const svc = await seedService('SVC-ZZ-RN-PAGE');
+    const clientId = await closedClient(budi(), svc);
+    const a = await proposeRenewal(sql, budi(), clientId, JENIS_PERPANJANGAN, [customLine(svc)], false);
+    await decideRenewal(sql, salesLead(), a.id, DECISION_REJECT, 'x');
+    const b = await proposeRenewal(sql, budi(), clientId, JENIS_CROSS_SELL, [standardLine(svc)], true);
+
+    const unbounded = await listRenewals(sql);
+    expect(unbounded.nextCursor).toBeNull();
+    const allIds = unbounded.rows.map((r) => r.id);
+    expect(allIds).toEqual(expect.arrayContaining([a.id, b.id]));
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 100; guard++) {
+      const p: page.Page<{ id: string }> = await listRenewals(sql, {
+        page: { limit: 1, cursor: cursor === null ? null : page.decodeCursor(cursor) },
+      });
+      seen.push(...p.rows.map((r) => r.id));
+      if (p.nextCursor === null) break;
+      cursor = p.nextCursor;
+    }
+    expect(seen).toEqual(allIds);
+    expect(new Set(seen).size).toBe(seen.length);
   });
 
   it('getRenewalDetail carries the newest priced line set (what R-04 review/decide/execute reads)', async () => {

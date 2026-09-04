@@ -755,6 +755,81 @@ export async function commissionAchievement(sql: Queryable, transactionId: strin
   };
 }
 
+/**
+ * commissionAchievementBatch is `commissionAchievement` for many Transaction ids
+ * at once — 4 batched queries (`= any($ids)`) instead of 4 per id (P2 §7, the
+ * `salesperf.gather` N+1 named in the perf diagnosis). Same math, same rounding,
+ * verified against the single-id function's own output for the same deals in
+ * `finance.test.ts` ("commissionAchievementBatch ... matches commissionAchievement
+ * one-by-one"). A missing/unknown id is simply
+ * absent from the returned Map (the single-id function throws NotFoundError
+ * instead — callers here already scope ids from their own transaction rows, so
+ * "not found" cannot happen and a Map lookup miss would be a bug in the caller,
+ * not a data condition to report).
+ */
+export async function commissionAchievementBatch(
+  sql: Queryable,
+  transactionIds: readonly string[],
+): Promise<Map<string, CommissionAchievementView>> {
+  const result = new Map<string, CommissionAchievementView>();
+  if (transactionIds.length === 0) {
+    return result;
+  }
+  const ids = [...new Set(transactionIds)];
+
+  const trxRows = await sql<{ id: string; client_id: string; total_agreed_value: string }[]>`
+    select id, client_id, total_agreed_value from transactions where id = any(${ids})`;
+  const trxById = new Map(trxRows.map((r) => [r.id, r]));
+
+  const verRows = await sql<{ transaction_id: string; total: string | null }[]>`
+    select transaction_id, coalesce(sum(amount), 0)::text as total
+    from payment_verifications where transaction_id = any(${ids}) group by transaction_id`;
+  const verifiedByTrx = new Map(verRows.map((r) => [r.transaction_id, money.parse(r.total ?? '0')]));
+
+  const clientIds = [...new Set(trxRows.map((r) => r.client_id))];
+  const svcRows = clientIds.length === 0 ? [] : await sql<{ client_id: string; standard_price: string; commission_rule: string }[]>`
+    select client_id, standard_price, commission_rule from services
+    where client_id = any(${clientIds}) and status <> '[Cancelled — Service Voided]'`;
+  const svcByClient = new Map<string, { standard_price: string; commission_rule: string }[]>();
+  for (const s of svcRows) {
+    const list = svcByClient.get(s.client_id) ?? [];
+    list.push(s);
+    svcByClient.set(s.client_id, list);
+  }
+
+  const allocRows = clientIds.length === 0 ? [] : await sql<{ client_id: string; salesperson_id: string; basis_points: number }[]>`
+    select client_id, salesperson_id, basis_points from client_sales_allocations
+    where client_id = any(${clientIds}) order by client_id, id`;
+  const allocByClient = new Map<string, { salesperson_id: string; basis_points: number }[]>();
+  for (const a of allocRows) {
+    const list = allocByClient.get(a.client_id) ?? [];
+    list.push(a);
+    allocByClient.set(a.client_id, list);
+  }
+
+  for (const id of ids) {
+    const trx = trxById.get(id);
+    if (trx === undefined) continue;
+    const totalAgreed = money.parse(trx.total_agreed_value);
+    const verified = verifiedByTrx.get(id) ?? 0n;
+    let totalCommission = 0n;
+    for (const s of svcByClient.get(trx.client_id) ?? []) {
+      totalCommission += computeCommission(parseCommissionRule(s.commission_rule), money.parse(s.standard_price));
+    }
+    const recognized = totalAgreed > 0n ? money.proRata(totalCommission, verified, totalAgreed) : 0n;
+    const shares: CommissionShare[] = (allocByClient.get(trx.client_id) ?? []).map((a) => ({
+      salespersonId: a.salesperson_id, basisPoints: a.basis_points,
+      recognizedCommission: money.decimal(money.proRata(recognized, BigInt(a.basis_points), 10000n)),
+    }));
+    result.set(id, {
+      transactionId: id, clientId: trx.client_id, totalAgreedValue: money.decimal(totalAgreed),
+      amountVerified: money.decimal(verified), totalDealCommission: money.decimal(totalCommission),
+      recognizedCommission: money.decimal(recognized), shares,
+    });
+  }
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // Reminder scan + dashboard (M5 §6) + soft 7-day contract flag (§7 Rule 3).
 //

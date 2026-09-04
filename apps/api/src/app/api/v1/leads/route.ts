@@ -10,6 +10,7 @@
  * only on a co-pursuit join — a NON-error `notice` (BI). A dedup block surfaces
  * as 409 with the verbatim BI message (shared error mapper).
  */
+import { page } from '@cdps/core';
 import { leads } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
 import { db, readAsActor } from '@/lib/db';
@@ -34,16 +35,24 @@ export async function GET(request: Request): Promise<Response> {
     // else's (§6 Pool claim), `any`/`1` = either. It is a convenience cut, never
     // the security boundary: RLS (`leads_select`) already decides which rows
     // exist for this actor, and this can only subtract from that.
+    //
+    // P2 §6: ALWAYS paged. `?limit=` (clamped, default page.DEFAULT_LIMIT) and
+    // `?cursor=` (opaque, from the previous response's `next_cursor`). This is
+    // the request path — the one the perf diagnosis found unbounded — so it
+    // never asks for the whole table; the CSV export is the deliberate
+    // exception and reads the same domain function with no page request.
     const params = new URL(request.url).searchParams;
     const mine = params.get('mine');
-    const rows = await readAsActor(actor, (sql) => leads.leadsDatabase(sql, {
+    const req = page.parseRequest(params.get('limit'), params.get('cursor'));
+    const result = await readAsActor(actor, (sql) => leads.leadsDatabase(sql, {
       status: params.get('status') ?? undefined,
       q: params.get('q') ?? undefined,
       source: params.get('source') ?? undefined,
       mineEmployeeId: mine ? actor.employeeId : undefined,
       mineMode: leads.parseMineMode(mine),
+      page: req,
     }));
-    return json({ data: rows.map(leadRowToWire) });
+    return json({ data: result.rows.map(leadRowToWire), next_cursor: result.nextCursor });
   });
 }
 

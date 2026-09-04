@@ -52,14 +52,16 @@
  * the Follow Up/Visit/Online Meeting split here is one new grouped query over
  * `prospect_activities` — same table, same shape as `activity.effortByAttempt`,
  * just batched across owners instead of one attempt at a time.
- * `finance.commissionAchievement` — reused verbatim per transaction; its own
- * `shares[]` is ALREADY the allocation-weighted recognized commission, so it is
- * summed directly rather than re-derived.
+ * `finance.commissionAchievementBatch` (P2 §7 — the batched sibling of
+ * `commissionAchievement`, same math, one round of `= any($ids)` queries
+ * instead of one call per transaction) — its own `shares[]` is ALREADY the
+ * allocation-weighted recognized commission, so it is summed directly rather
+ * than re-derived.
  */
 
 import { money, permission, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
-import { commissionAchievement } from './finance';
+import { commissionAchievementBatch } from './finance';
 import { SALES_DIVISION } from './leads';
 
 export type Actor = permission.Actor;
@@ -345,6 +347,16 @@ type Stage = 'contacted' | 'qualified' | 'nonQualified' | 'negotiating' | 'close
 /** bucketOf maps a raw `prospect_attempts.status` (the transition's `to`) to the funnel stage it represents, or null for a status this dashboard does not track (e.g. `Blocked`, the negotiation sub-states beyond the first). */
 function bucketOf(status: string): Stage | null {
   if (status === 'Contacted') return 'contacted';
+  // L5 (Revisi Sales/Creative/Performa) — an attempt can now age straight
+  // New Lead -> [Unrespon] (L1), never passing through a 'transition:...
+  // ->Contacted' row at all. Without this, firstPerAttemptStage() would
+  // never register a 'contacted' event for that attempt, yet a later
+  // [Unrespon] -> Not Qualified (auto, L3) DOES register 'nonQualified' —
+  // the funnel could then show nonQualified exceeding contacted, which
+  // reads as a bug even though the underlying counts are correct.
+  // [Unrespon] itself is "attempt was engaged with, not yet Qualified" —
+  // the same semantic bucket as Contacted.
+  if (status === '[Unrespon]') return 'contacted';
   if (status === 'Qualified') return 'qualified';
   if (status === 'Not Qualified') return 'nonQualified';
   if (status.startsWith('Negotiation - ')) return 'negotiating';
@@ -565,8 +577,8 @@ async function gather(
     allocByClient.set(a.client_id, list);
   }
   const txnIds = [...new Set(clientRows.map((c) => c.transaction_id).filter((t): t is string => t !== null))];
-  const achievements = await Promise.all(txnIds.map((t) => commissionAchievement(sql, t)));
-  const achByTxn = new Map(achievements.map((v, i) => [txnIds[i], v]));
+  // P2 §7 — one batch of 4 queries instead of 4 queries × N transactions.
+  const achByTxn = await commissionAchievementBatch(sql, txnIds);
 
   for (const c of clientRows) {
     if (!inPeriod(filter.period, c.contract_created_at)) continue;
@@ -866,75 +878,129 @@ function periodRangeFor(periodStart: string, periodKind: PeriodKind): PeriodFilt
   return { from: bulan, to: bulan };
 }
 
-/**
- * computeMetricActual derives the CURRENT value of one OKR metric for one
- * salesperson over one period — recomputed from the log every call (house
- * rule #4), nothing stored. Returns null on a genuine division-by-zero
- * (house rule #7) — e.g. `closing_ratio_qualified_pct` with zero qualified
- * leads has no defined ratio, not a zero one.
- */
-async function computeMetricActual(
-  sql: Queryable,
-  salespersonId: string,
-  periodStart: string,
-  periodKind: PeriodKind,
-  metricKey: MetricKey,
-  metricParam: string | null,
-): Promise<string | null> {
-  const range = periodRangeFor(periodStart, periodKind);
-  if (metricKey === 'omzet' || metricKey === 'closing_ratio_qualified_pct') {
-    const acc = await gather(sql, [salespersonId], { period: range, salespersonId, source: null, campaignId: null }, false);
-    const a = acc.get(salespersonId) ?? emptyAcc();
-    if (metricKey === 'omzet') {
-      return money.decimal(a.omzet);
-    }
-    // closing_ratio_qualified_pct = closedSuccess ÷ qualified — deliberately
-    // NOT `closingRatePct` (closedSuccess ÷ (closedSuccess+closedLost)); see
-    // MetricKey's doc comment for why the owner's OKR names a different ratio.
-    return a.qualified === 0 ? null : roundPct(a.closedSuccess, a.qualified).toFixed(2);
-  }
-  if (metricKey === 'klien_count_min_kontrak') {
-    const threshold = money.decimal(money.parse(metricParam ?? '0'));
-    const rows = await sql<{ n: string }[]>`
-      select count(distinct cl.id) as n
-        from clients cl
-        join contracts c on c.client_id = cl.id
-        join transactions t on t.id = cl.transaction_id
-        join client_sales_allocations a on a.client_id = cl.id
-       where a.salesperson_id = ${salespersonId}
-         and a.basis_points > 0
-         and t.total_agreed_value >= ${threshold}::numeric
-         and wib_period(c.created_at) between ${range.from} and ${range.to}`;
-    return rows[0].n;
-  }
-  // scouting_closing_count: closings (first ->Closed-Success) whose LEAD
-  // source is 'Scouting' — reuses the same first-per-stage reduction the rest
-  // of this module uses, so a closing counted here can never disagree with
-  // `closedSuccess` on the main dashboard.
-  const events = await loadStageEventsByOwner(sql, [salespersonId]);
-  const closedInPeriod = events.filter((e) => e.stage === 'closedSuccess' && inPeriod(range, e.at)).map((e) => e.attemptId);
-  if (closedInPeriod.length === 0) {
-    return '0';
-  }
-  const rows = await sql<{ n: string }[]>`
-    select count(distinct pa.id) as n
-      from prospect_attempts pa
-      join leads l on l.id = pa.lead_id
-     where pa.id = any(${closedInPeriod}) and l.source = 'Scouting'`;
-  return rows[0].n;
-}
 
 /** Whether metricKey's raw value is Rupiah — the only case an `_idr` sibling field is meaningful. */
 function metricIsMoney(k: MetricKey): boolean {
   return k === 'omzet';
 }
 
-async function toTargetRow(sql: Queryable, r: {
+type TargetSourceRow = {
   salesperson_id: string; period_start: string | Date; period_kind: PeriodKind; metric_key: MetricKey;
   metric_param: string | null; target_value: string; updated_at: Date; updated_by: string;
-}): Promise<TargetRow> {
-  const periodStart = typeof r.period_start === 'string' ? r.period_start : r.period_start.toISOString().slice(0, 10);
-  const actual = await computeMetricActual(sql, r.salesperson_id, periodStart, r.period_kind, r.metric_key, r.metric_param);
+};
+
+function normalizeDate(d: string | Date): string {
+  return typeof d === 'string' ? d : d.toISOString().slice(0, 10);
+}
+
+/** One `sales_targets` row's identity within a batch, for the actuals-lookup Map (P2 §7). */
+function targetRowKey(salespersonId: string, metricKey: MetricKey): string {
+  return `${salespersonId}::${metricKey}`;
+}
+
+/**
+ * computeMetricActualsBatch derives the CURRENT value of every OKR metric row
+ * `listTargets` is about to render, in one pass (P2 §7, the perf diagnosis's
+ * other named N+1 — this replaced the old one-row-at-a-time
+ * `computeMetricActual`): one `gather` call per distinct (period, periodKind)
+ * bucket instead of one per row for 'omzet'/'closing_ratio_qualified_pct', one
+ * batched `loadStageEventsByOwner` + one batched scouting-source lookup
+ * instead of two queries per row for 'scouting_closing_count'.
+ * 'klien_count_min_kontrak' stays one query per row — its threshold
+ * (`metric_param`) can differ row to row, so there is no shared `= any($ids)`
+ * shape to batch into. Same math, same rounding, same null-on-division-by-zero
+ * (house rule #7) as before — covered by `listTargets`'s own existing
+ * per-metric assertions in `salesperf.test.ts` (all four `metricKey`s, exact
+ * expected values), which this refactor left behaviorally unchanged.
+ */
+async function computeMetricActualsBatch(sql: Queryable, rows: readonly TargetSourceRow[]): Promise<Map<string, string | null>> {
+  const result = new Map<string, string | null>();
+  if (rows.length === 0) return result;
+
+  // omzet / closing_ratio_qualified_pct — batch by (periodStart, periodKind).
+  const gatherRows = rows.filter((r) => r.metric_key === 'omzet' || r.metric_key === 'closing_ratio_qualified_pct');
+  const byRange = new Map<string, { range: PeriodFilter; ids: Set<string>; rows: TargetSourceRow[] }>();
+  for (const r of gatherRows) {
+    const periodStart = normalizeDate(r.period_start);
+    const key = `${periodStart}::${r.period_kind}`;
+    let bucket = byRange.get(key);
+    if (bucket === undefined) {
+      bucket = { range: periodRangeFor(periodStart, r.period_kind), ids: new Set(), rows: [] };
+      byRange.set(key, bucket);
+    }
+    bucket.ids.add(r.salesperson_id);
+    bucket.rows.push(r);
+  }
+  for (const bucket of byRange.values()) {
+    const acc = await gather(sql, [...bucket.ids], { period: bucket.range, salespersonId: null, source: null, campaignId: null }, false);
+    for (const r of bucket.rows) {
+      const a = acc.get(r.salesperson_id) ?? emptyAcc();
+      const val = r.metric_key === 'omzet'
+        ? money.decimal(a.omzet)
+        : (a.qualified === 0 ? null : roundPct(a.closedSuccess, a.qualified).toFixed(2));
+      result.set(targetRowKey(r.salesperson_id, r.metric_key), val);
+    }
+  }
+
+  // scouting_closing_count — one batched stage-event load + one batched
+  // scouting-source lookup across every row's closed-in-period attempts.
+  const scoutRows = rows.filter((r) => r.metric_key === 'scouting_closing_count');
+  if (scoutRows.length > 0) {
+    const scoutIds = [...new Set(scoutRows.map((r) => r.salesperson_id))];
+    const events = await loadStageEventsByOwner(sql, scoutIds);
+    const closedByOwner = new Map<string, { attemptId: string; at: Date }[]>();
+    for (const e of events) {
+      if (e.stage !== 'closedSuccess') continue;
+      const list = closedByOwner.get(e.ownerOrLead) ?? [];
+      list.push({ attemptId: e.attemptId, at: e.at });
+      closedByOwner.set(e.ownerOrLead, list);
+    }
+    const closedInPeriodByRow = new Map<TargetSourceRow, string[]>();
+    const allAttemptIds = new Set<string>();
+    for (const r of scoutRows) {
+      const range = periodRangeFor(normalizeDate(r.period_start), r.period_kind);
+      const ids = (closedByOwner.get(r.salesperson_id) ?? [])
+        .filter((c) => inPeriod(range, c.at))
+        .map((c) => c.attemptId);
+      closedInPeriodByRow.set(r, ids);
+      ids.forEach((id) => allAttemptIds.add(id));
+    }
+    const scoutingAttemptIds = allAttemptIds.size === 0 ? new Set<string>() : new Set(
+      (await sql<{ id: string }[]>`
+        select pa.id from prospect_attempts pa join leads l on l.id = pa.lead_id
+         where pa.id = any(${[...allAttemptIds]}) and l.source = 'Scouting'`
+      ).map((r) => r.id),
+    );
+    for (const r of scoutRows) {
+      const ids = closedInPeriodByRow.get(r) ?? [];
+      const n = ids.filter((id) => scoutingAttemptIds.has(id)).length;
+      result.set(targetRowKey(r.salesperson_id, r.metric_key), String(n));
+    }
+  }
+
+  // klien_count_min_kontrak — distinct threshold per row, kept per-row.
+  for (const r of rows) {
+    if (r.metric_key !== 'klien_count_min_kontrak') continue;
+    const range = periodRangeFor(normalizeDate(r.period_start), r.period_kind);
+    const threshold = money.decimal(money.parse(r.metric_param ?? '0'));
+    const cnt = await sql<{ n: string }[]>`
+      select count(distinct cl.id) as n
+        from clients cl
+        join contracts c on c.client_id = cl.id
+        join transactions t on t.id = cl.transaction_id
+        join client_sales_allocations a on a.client_id = cl.id
+       where a.salesperson_id = ${r.salesperson_id}
+         and a.basis_points > 0
+         and t.total_agreed_value >= ${threshold}::numeric
+         and wib_period(c.created_at) between ${range.from} and ${range.to}`;
+    result.set(targetRowKey(r.salesperson_id, r.metric_key), cnt[0].n);
+  }
+
+  return result;
+}
+
+function toTargetRow(r: TargetSourceRow, actual: string | null): TargetRow {
+  const periodStart = normalizeDate(r.period_start);
   const target = money.parse(r.target_value); // exact decimal math regardless of unit (Rupiah/percent/count)
   const isMoney = metricIsMoney(r.metric_key);
   return {
@@ -958,12 +1024,13 @@ async function toTargetRow(sql: Queryable, r: {
 export async function listTargets(sql: Queryable, actor: Actor, periodStart: string): Promise<TargetRow[]> {
   const scope = scopeFor(actor);
   if (scope === null) throw new ForbiddenError();
-  const rows = await sql<{ salesperson_id: string; period_start: string | Date; period_kind: PeriodKind; metric_key: MetricKey; metric_param: string | null; target_value: string; updated_at: Date; updated_by: string }[]>`
+  const rows = await sql<TargetSourceRow[]>`
     select salesperson_id, period_start, period_kind, metric_key, metric_param, target_value, updated_at, updated_by
       from sales_targets where period_start = ${periodStart}::date
       order by salesperson_id, metric_key`;
   const filtered = scope.ownOnly ? rows.filter((r) => r.salesperson_id === actor.employeeId) : rows;
-  return Promise.all(filtered.map((r) => toTargetRow(sql, r)));
+  const actuals = await computeMetricActualsBatch(sql, filtered);
+  return filtered.map((r) => toTargetRow(r, actuals.get(targetRowKey(r.salesperson_id, r.metric_key)) ?? null));
 }
 
 const RE_DATE = /^\d{4}-\d{2}-\d{2}$/;

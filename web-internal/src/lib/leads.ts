@@ -11,7 +11,7 @@
 // file codes against that contract, not against Go source that doesn't exist
 // yet). No money fields on this surface — all values here are plain strings.
 
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 
 // ---------------------------------------------------------------------------
 // Existing endpoints (module1_leads.Lead / Attempt / RegisterInput / bulk.go)
@@ -263,14 +263,19 @@ export function claimLead(leadId: string): Promise<{ attempt: AttemptStub }> {
   return api.post<{ attempt: AttemptStub }>(`/leads/${leadId}/claim`);
 }
 
-// GET /leads/pool[?q=&source=] — q mencari nama ATAU nomor telepon (substring,
-// case-insensitive); source menyaring persis satu nilai dari SOURCES.
-export function listPool(params?: { q?: string; source?: string }): Promise<{ data: PoolRow[] }> {
+// GET /leads/pool[?q=&source=&limit=&cursor=] — q mencari nama ATAU nomor
+// telepon (substring, case-insensitive); source menyaring persis satu nilai
+// dari SOURCES. P2 §6: dipaginasi server-side, lihat catatan di `listLeads`.
+export function listPool(
+  params?: { q?: string; source?: string; limit?: number; cursor?: string },
+): Promise<{ data: PoolRow[]; next_cursor: string | null }> {
   const search = new URLSearchParams();
   if (params?.q) search.set('q', params.q);
   if (params?.source) search.set('source', params.source);
+  if (params?.limit) search.set('limit', String(params.limit));
+  if (params?.cursor) search.set('cursor', params.cursor);
   const qs = search.toString();
-  return api.get<{ data: PoolRow[] }>(`/leads/pool${qs ? `?${qs}` : ''}`);
+  return api.get<{ data: PoolRow[]; next_cursor: string | null }>(`/leads/pool${qs ? `?${qs}` : ''}`);
 }
 
 // Mode kepemilikan untuk tab "Lead Saya" (keputusan pemilik 2026-08-06):
@@ -286,23 +291,83 @@ export const MINE_MODE_LABELS: Record<MineMode, string> = {
   any: 'Semua lead saya',
 };
 
-// GET /leads[?status=&q=&source=&mine=<mode>] — `mine` mempersempit ke lead
-// milik aktor. Ia KENYAMANAN, bukan batas keamanan: baris yang boleh dibaca
-// tetap ditentukan RLS `leads_select`.
+// GET /leads[?status=&q=&source=&mine=<mode>&limit=&cursor=] — `mine`
+// mempersempit ke lead milik aktor. Ia KENYAMANAN, bukan batas keamanan: baris
+// yang boleh dibaca tetap ditentukan RLS `leads_select`.
+//
+// P2 §6: endpoint ini SELALU dipaginasi server-side. `next_cursor` berisi
+// penanda halaman berikutnya, `null` kalau sudah halaman terakhir. Kirim balik
+// nilai itu sebagai `cursor` untuk mengambil lanjutannya. Cursor bersifat
+// buram — jangan diurai atau dibangun sendiri di FE.
 export function listLeads(
-  params?: { status?: string; q?: string; source?: string; mine?: MineMode },
-): Promise<{ data: LeadRow[] }> {
+  params?: { status?: string; q?: string; source?: string; mine?: MineMode; limit?: number; cursor?: string },
+): Promise<{ data: LeadRow[]; next_cursor: string | null }> {
   const search = new URLSearchParams();
   if (params?.status) search.set('status', params.status);
   if (params?.q) search.set('q', params.q);
   if (params?.source) search.set('source', params.source);
   if (params?.mine) search.set('mine', params.mine);
+  if (params?.limit) search.set('limit', String(params.limit));
+  if (params?.cursor) search.set('cursor', params.cursor);
   const qs = search.toString();
-  return api.get<{ data: LeadRow[] }>(`/leads${qs ? `?${qs}` : ''}`);
+  return api.get<{ data: LeadRow[]; next_cursor: string | null }>(`/leads${qs ? `?${qs}` : ''}`);
 }
 
 export function getLead(id: string): Promise<LeadDetail> {
   return api.get<LeadDetail>(`/leads/${id}`);
+}
+
+/** Query string for GET /leads/export — pure, so it's unit-testable without a DOM. */
+export function exportLeadsCsvUrl(params?: { status?: string; q?: string; source?: string }): string {
+  const search = new URLSearchParams();
+  if (params?.status) search.set('status', params.status);
+  if (params?.q) search.set('q', params.q);
+  if (params?.source) search.set('source', params.source);
+  const qs = search.toString();
+  return `/api/v1/leads/export${qs ? `?${qs}` : ''}`;
+}
+
+/** Extracts `filename="..."` from a `Content-Disposition` header, or a fallback. */
+export function filenameFromContentDisposition(header: string | null): string {
+  const match = /filename="([^"]+)"/.exec(header ?? '');
+  return match?.[1] ?? 'leads-database.csv';
+}
+
+// GET /leads/export[?status=&q=&source=] (E1/E2, Director-only) — CSV, not
+// JSON, so `api.get` (which always `JSON.parse`s the body) cannot be used
+// here: a CSV response would silently become `null`. Raw `fetch()` instead,
+// mirroring the blob-download mechanics already proven at
+// `(shell)/leads/page.tsx` `downloadRejectionsCsv` — the difference is the
+// bytes come FROM the server here, not built client-side.
+export async function exportLeadsCsv(
+  params?: { status?: string; q?: string; source?: string },
+): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(exportLeadsCsvUrl(params), { credentials: 'include' });
+  } catch {
+    throw new ApiError('[Terjadi kesalahan, silahkan coba lagi.]', 0);
+  }
+  if (!res.ok) {
+    let message = '[Terjadi kesalahan, silahkan coba lagi.]';
+    try {
+      const body = (await res.json()) as { error?: unknown };
+      if (typeof body.error === 'string') message = body.error;
+    } catch {
+      // body wasn't JSON — keep the fallback.
+    }
+    throw new ApiError(message, res.status);
+  }
+
+  const blob = await res.blob();
+  const filename = filenameFromContentDisposition(res.headers.get('content-disposition'));
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ---- Hapus lead (AJUKAN → ACC Head) ----

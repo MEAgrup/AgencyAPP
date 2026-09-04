@@ -33,7 +33,7 @@
  * Reference: backend/internal/module3_campaign/{campaign,lifecycle,read,rollup}.go.
  */
 
-import { bi, money, permission, statemachine, tz } from '@cdps/core';
+import { bi, money, page, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 
 /** Authenticated employee + resolved role. */
@@ -489,17 +489,36 @@ export async function getCampaign(sql: Queryable, actor: Actor, campaignId: stri
  * listCampaigns returns the Campaigns visible to the actor (§5): a Marketing
  * lead/head, OD or Director sees ALL; a Marketing staff sees only OWN campaigns;
  * any other division is denied (ForbiddenError). Newest first.
+ *
+ * `pageReq` (P2 §6) is the optional keyset page. Absent means UNBOUNDED, and
+ * that is load-bearing here rather than merely convenient: `marketing.dashboard`
+ * calls this to compute a metric bundle for EVERY campaign the actor may see.
+ * A default page there would not make the dashboard faster, it would make it
+ * wrong — silently reporting on the first N campaigns. Only the request path
+ * (`GET /marketing/campaigns`) passes a page.
  */
-export async function listCampaigns(sql: Queryable, actor: Actor): Promise<Campaign[]> {
+export async function listCampaigns(
+  sql: Queryable,
+  actor: Actor,
+  pageReq?: page.PageRequest,
+): Promise<page.Page<Campaign>> {
   const seeAll = permission.canReadDivision(actor, MARKETING_DIVISION); // Marketing lead, OD, Director
   const ownOnly = !seeAll && actor.role.division === MARKETING_DIVISION;
   if (!seeAll && !ownOnly) {
     throw new ForbiddenError(MSG_FORBIDDEN);
   }
-  const rows = ownOnly
-    ? await sql<CampaignRow[]>`${selectCampaign(sql)} where owner_employee_id = ${actor.employeeId} order by created_at desc, id desc`
-    : await sql<CampaignRow[]>`${selectCampaign(sql)} order by created_at desc, id desc`;
-  return rows.map(rowToCampaign);
+  // '' sentinel instead of two query branches: the owner cut and the keyset cut
+  // now compose, and there is one query string to keep correct rather than two
+  // that could drift.
+  const ownerFilter = ownOnly ? actor.employeeId : '';
+  const b = page.sqlBounds(pageReq);
+  const rows = await sql<CampaignRow[]>`
+    ${selectCampaign(sql)}
+     where (${ownerFilter} = '' or owner_employee_id = ${ownerFilter})
+       and (created_at, id) < (${b.at}, ${b.id})
+     order by created_at desc, id desc
+     limit ${b.limit}::bigint`;
+  return page.paginate(rows.map(rowToCampaign), pageReq, (c) => ({ createdAt: c.createdAt, id: c.id }));
 }
 
 /**

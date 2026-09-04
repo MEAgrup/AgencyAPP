@@ -258,6 +258,7 @@ export const PAYMENT_SCHEMES = [
 export const ATTEMPT_STATUSES = [
   'New Lead',
   'Contacted',
+  '[Unrespon]', // L1 (Revisi Sales/Creative/Performa) — auto-aged, 3 hari diam
   'Qualified',
   'Not Qualified',
   'Negotiation - Pending Approval',
@@ -272,9 +273,17 @@ export const ATTEMPT_STATUSES = [
 
 // ---- Read functions ----
 
-export function listAttempts(status?: string): Promise<{ data: AttemptRow[] }> {
-  const q = status ? `?status=${encodeURIComponent(status)}` : '';
-  return api.get<{ data: AttemptRow[] }>(`/attempts${q}`);
+// GET /attempts[?status=&limit=&cursor=] — P2 §6: dipaginasi server-side.
+export function listAttempts(
+  status?: string,
+  params?: { limit?: number; cursor?: string },
+): Promise<{ data: AttemptRow[]; next_cursor: string | null }> {
+  const search = new URLSearchParams();
+  if (status) search.set('status', status);
+  if (params?.limit) search.set('limit', String(params.limit));
+  if (params?.cursor) search.set('cursor', params.cursor);
+  const qs = search.toString();
+  return api.get<{ data: AttemptRow[]; next_cursor: string | null }>(`/attempts${qs ? `?${qs}` : ''}`);
 }
 
 export function getAttempt(id: string): Promise<AttemptDetail> {

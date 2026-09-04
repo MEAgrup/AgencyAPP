@@ -8,7 +8,7 @@
  *   test namespaces its ids with `ZZ-` and afterEach deletes the rows it made.
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { bi, money, permission } from '@cdps/core';
+import { bi, money, page, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import { leads } from './index';
 import {
@@ -901,13 +901,56 @@ describeDb('closing', () => {
     expect(lead[0].winning_attempt_id).toBe(budiReg.attempt.id);
     void res;
   });
+
+  it('closing a contested pool lead still wins when the competitor already aged to [Unrespon] (L1 §1.2)', async () => {
+    // Regression guard for the ranjau in docs/backlog/REVISI_CDPS_SALES_CREATIVE_PERFORMA.md
+    // L1 §1.2: resolveWin closes every non-terminal sibling attempt to
+    // [Closed - Kalah Kompetisi], inside the Closing transaction, and THROWS if
+    // any of those transitions fails. Without the [Unrespon] -> [Closed - Kalah
+    // Kompetisi] edge, an attempt that aged to [Unrespon] while its sibling was
+    // closing would fail that transition and roll back the ENTIRE close (no
+    // Client/Transaction/Service created) with an unhelpful error.
+    const svc = await seedService('SVC-ZZ-WIN-UNRESPON');
+    const phone = uniquePhone();
+    const budiReg = await leads.register(sql, budi(), { leadName: 'Contested Unrespon Co', phoneNumber: phone });
+    const andiReg = await leads.register(sql, andi(), { leadName: 'Contested Unrespon Co', phoneNumber: phone });
+    expect(andiReg.lead.id).toBe(budiReg.lead.id);
+
+    // Andi's attempt ages to [Unrespon] (simulating the daily tick, L3) while
+    // still sitting in New Lead — a real sibling state, not a hypothetical one.
+    const aged = await sql<{ ok: boolean }[]>`
+      select (sm_transition('prospect_attempt', 'prospect_attempt', 'prospect_attempts',
+        'id', 'status', ${andiReg.attempt.id}, '[Unrespon]', 'SISTEM', true, false)->>'ok')::boolean as ok`;
+    expect(aged[0].ok).toBe(true);
+    expect(await status(andiReg.attempt.id)).toBe('[Unrespon]');
+
+    // Budi drives his attempt to Auto Approved and closes — must NOT throw/roll back.
+    await markContacted(sql, budi(), budiReg.attempt.id);
+    await submitQualifiedForm(sql, budi(), budiReg.attempt.id, {
+      namaPic: 'PIC', toko: 'Contested Unrespon Co', kota: 'JKT', linkToko: 'https://x', kategori: 'x', platform: 'Shopee',
+      gmvBaseline: '1000000', targetGmv: '2000000', services: [{ masterServiceId: svc, quantity: 1 }],
+    });
+    await submitNegotiation(sql, budi(), budiReg.attempt.id, [], true);
+    const res = await close(sql, budi(), budiReg.attempt.id, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+
+    expect(res.clientId).toMatch(/^CLI-\d{6}-\d{4}$/);
+    expect(await status(budiReg.attempt.id)).toBe('Closed-Success');
+    // The [Unrespon] sibling is closed out, same as a live competitor would be.
+    expect(await status(andiReg.attempt.id)).toBe('[Closed - Kalah Kompetisi]');
+    const lead = await sql<{ winning_attempt_id: string }[]>`
+      select winning_attempt_id from leads where id = ${budiReg.lead.id}`;
+    expect(lead[0].winning_attempt_id).toBe(budiReg.attempt.id);
+  });
 });
 
 describeDb('read models', () => {
   it('listAttempts returns attempts newest-first with lead + owner', async () => {
     const svc = await seedService('SVC-ZZ-LIST');
     const attemptId = await qualifiedAttempt(budi(), svc);
-    const rows = await listAttempts(sql);
+    const rows = (await listAttempts(sql)).rows;
     const mine = rows.find((r) => r.id === attemptId);
     expect(mine).toBeDefined();
     expect(mine!.ownerEmployeeId).toBe('ZZ-BUDI');
@@ -927,15 +970,39 @@ describeDb('read models', () => {
   it('listAttempts narrows to one status when asked', async () => {
     const svc = await seedService('SVC-ZZ-FILTER');
     const attemptId = await qualifiedAttempt(budi(), svc);
-    const qualified = await listAttempts(sql, { status: 'Qualified' });
+    const qualified = (await listAttempts(sql, { status: 'Qualified' })).rows;
     expect(qualified.some((r) => r.id === attemptId)).toBe(true);
     expect(qualified.every((r) => r.status === 'Qualified')).toBe(true);
     // An unmatched filter must return nothing, not silently fall back to "all".
-    expect(await listAttempts(sql, { status: 'Closed-Lost' })).not.toContainEqual(
+    expect((await listAttempts(sql, { status: 'Closed-Lost' })).rows).not.toContainEqual(
       expect.objectContaining({ id: attemptId }),
     );
     // Absent/blank filter still means "no filter".
-    expect((await listAttempts(sql, {})).some((r) => r.id === attemptId)).toBe(true);
+    expect((await listAttempts(sql, {})).rows.some((r) => r.id === attemptId)).toBe(true);
+  });
+
+  it('listAttempts pages by keyset, and stays unbounded when no page is asked for (P2 §6)', async () => {
+    const svc = await seedService('SVC-ZZ-PAGE');
+    const a = await qualifiedAttempt(budi(), svc);
+    const b = await qualifiedAttempt(budi(), svc);
+
+    const unbounded = await listAttempts(sql);
+    expect(unbounded.nextCursor).toBeNull();
+    const allIds = unbounded.rows.map((r) => r.id);
+    expect(allIds).toEqual(expect.arrayContaining([a, b]));
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 100; guard++) {
+      const p: page.Page<{ id: string }> = await listAttempts(sql, {
+        page: { limit: 1, cursor: cursor === null ? null : page.decodeCursor(cursor) },
+      });
+      seen.push(...p.rows.map((r) => r.id));
+      if (p.nextCursor === null) break;
+      cursor = p.nextCursor;
+    }
+    expect(seen).toEqual(allIds); // same order, no duplicate, nothing skipped
+    expect(new Set(seen).size).toBe(seen.length);
   });
 
   it('getAttempt assembles attempt + lead + qualified form + proposal history', async () => {

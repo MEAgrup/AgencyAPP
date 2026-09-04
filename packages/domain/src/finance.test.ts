@@ -27,6 +27,7 @@ import {
   ChangeDecidedError,
   ChangePendingError,
   commissionAchievement,
+  commissionAchievementBatch,
   ContractRequiredError,
   flagBermasalah,
   ForbiddenError,
@@ -448,6 +449,36 @@ describeDb('read models', () => {
 
   it('getPaymentStatus 404s on an unknown transaction', async () => {
     await expect(getPaymentStatus(sql, 'TRX-000000-0000')).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('commissionAchievementBatch (P2 §7) matches commissionAchievement one-by-one, for several deals at once', async () => {
+    const dealA = await closedDeal(sales.PAYMENT_SCHEME_TERMIN, [
+      { amount: '3000000', dueDate: '2026-06-15' },
+      { amount: '6000000', dueDate: '2026-07-15' },
+    ]);
+    const dealB = await closedDeal(sales.PAYMENT_SCHEME_TERMIN, [
+      { amount: '4000000', dueDate: '2026-06-15' },
+      { amount: '5000000', dueDate: '2026-07-15' },
+    ]);
+    await verifyPayment(sql, financeStaff(), { transactionId: dealA.transactionId, installmentId: dealA.installmentIds[0], amount: '3000000', receivedDate: '2026-06-15' });
+    await verifyPayment(sql, financeStaff(), { transactionId: dealB.transactionId, installmentId: dealB.installmentIds[0], amount: '4000000', receivedDate: '2026-06-15' });
+
+    const [singleA, singleB] = await Promise.all([
+      commissionAchievement(sql, dealA.transactionId),
+      commissionAchievement(sql, dealB.transactionId),
+    ]);
+    // Duplicate id in the input + an unknown id: de-duplicated, and the unknown
+    // id is simply absent from the Map (never thrown, unlike the single-id fn).
+    const batch = await commissionAchievementBatch(sql, [dealA.transactionId, dealB.transactionId, dealA.transactionId, 'TRX-000000-0000']);
+    expect(batch.size).toBe(2);
+    expect(batch.get(dealA.transactionId)).toEqual(singleA);
+    expect(batch.get(dealB.transactionId)).toEqual(singleB);
+    expect(batch.has('TRX-000000-0000')).toBe(false);
+  });
+
+  it('commissionAchievementBatch returns an empty Map for an empty id list, no query issued', async () => {
+    const batch = await commissionAchievementBatch(sql, []);
+    expect(batch.size).toBe(0);
   });
 });
 

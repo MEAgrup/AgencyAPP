@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { errorMessage } from '@/lib/api';
+import { errorMessage, MAX_PAGE_LIMIT } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import {
   listCampaigns,
@@ -37,7 +37,12 @@ export default function PerformanceMarketingPage() {
     setError(null);
     try {
       const [campaignsRes, metricsRes] = await Promise.all([
-        listCampaigns(),
+        // Bukan daftar yang digulir: ini LOOKUP yang dijoin ke baris metrik di
+        // bawah (`campaignMap`). Dashboard metriknya sendiri tidak dipaginasi
+        // (P2 §6 — `marketing.dashboard` sengaja unbounded), jadi lookup-nya
+        // harus menutupi jumlah yang sama; kalau tidak, baris metrik di luar
+        // satu halaman kehilangan nama campaign-nya tanpa error apa pun.
+        listCampaigns({ limit: MAX_PAGE_LIMIT }),
         performanceDashboard(),
       ]);
       setCampaigns(campaignsRes.data);

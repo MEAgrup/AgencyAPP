@@ -48,6 +48,8 @@ import StatusBadge from '@/components/StatusBadge';
 // Status literals mirrored from ATTEMPT_STATUSES (module0_sales/sales.go).
 const S_NEW = 'New Lead';
 const S_CONTACTED = 'Contacted';
+// L1/L4 (Revisi Sales/Creative/Performa) — auto-aged after 3 hari diam.
+const S_UNRESPON = '[Unrespon]';
 const S_QUALIFIED = 'Qualified';
 const S_PENDING = 'Negotiation - Pending Approval';
 const S_AUTO = 'Negotiation - Auto Approved';
@@ -1146,6 +1148,21 @@ export default function AttemptDetailPage({ params }: { params: Promise<{ id: st
           <div className="cardHeader">
             <h2>Aksi</h2>
           </div>
+          <button type="button" className="btn btnPrimary" disabled={pending !== null} onClick={handleContacted}>
+            {pending === 'contacted' ? 'Memproses...' : 'Tandai Contacted'}
+          </button>
+        </section>
+      )}
+
+      {/* [Unrespon] → Tandai Contacted (jalan pulang — L1/L4). Sama persis
+          dengan cabang New Lead: markContacted generik atas sm_transition,
+          edge [Unrespon]->Contacted require_lead=false. */}
+      {status === S_UNRESPON && canAct && allowed_transitions.includes(S_CONTACTED) && (
+        <section className="card">
+          <div className="cardHeader">
+            <h2>Aksi</h2>
+          </div>
+          <p className="muted">Lead ini menua otomatis karena 3 hari tidak ada perubahan status. Hubungi ulang untuk melanjutkan.</p>
           <button type="button" className="btn btnPrimary" disabled={pending !== null} onClick={handleContacted}>
             {pending === 'contacted' ? 'Memproses...' : 'Tandai Contacted'}
           </button>
