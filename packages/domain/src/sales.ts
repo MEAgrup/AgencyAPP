@@ -28,7 +28,7 @@
  * backend/internal/admin/master_service.go (EffectiveAt / ServiceView).
  */
 
-import { bi, money, notification, permission, statemachine, tz } from '@cdps/core';
+import { bi, money, notification, page, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { effectiveAt, type ServiceView } from './msl';
 import { resolveWin } from './leads';
@@ -55,6 +55,8 @@ export const STATUS_NEG_REVISION = 'Negotiation - Revision Required';
 export const STATUS_NEG_REJECTED = 'Negotiation - Rejected';
 export const STATUS_CLOSED_SUCCESS = 'Closed-Success';
 export const STATUS_CLOSED_LOST = 'Closed-Lost';
+/** L1 (Revisi Sales/Creative/Performa) — auto-aged, non-terminal (STATE_MACHINES.md §1). */
+export const STATUS_UNRESPON = '[Unrespon]';
 
 /**
  * Qualified Lead Form service cap (M0 §4.3).
@@ -714,6 +716,30 @@ export async function setNotQualified(
     }
     return attemptTransition(executors(tx).sm, attemptId, STATUS_NOT_QUALIFIED, actor);
   });
+}
+
+/** Result of one `leads_unrespon_tick` run — see `runUnresponTick`. */
+export interface UnresponTickResult {
+  unrespon: number;
+  autoNotQualified: number;
+}
+
+/**
+ * runUnresponTick drives the daily "lead aging" sweep (L1/L3, `docs/backlog/
+ * REVISI_CDPS_SALES_CREATIVE_PERFORMA.md`). The work itself lives in the SQL
+ * function `leads_unrespon_tick` (migration 20260911060000) — pg_cron calls it
+ * directly on Supabase, so this is the manual/backfill entry point over the
+ * SAME function (pola `stage.runStageOverdueTick`). This is attempt-machine
+ * work (per-sales), not `leads.record_status` — hence living here, not in
+ * `leads.ts`. Idempotent (each attempt ages at most once per threshold
+ * crossed); `now` is a parameter so tests can pin the WIB day.
+ */
+export async function runUnresponTick(sql: Sql, now?: Date): Promise<UnresponTickResult> {
+  const rows =
+    now === undefined
+      ? await sql<{ r: { unrespon: number; auto_not_qualified: number } }[]>`select leads_unrespon_tick() as r`
+      : await sql<{ r: { unrespon: number; auto_not_qualified: number } }[]>`select leads_unrespon_tick(${now}) as r`;
+  return { unrespon: rows[0].r.unrespon, autoNotQualified: rows[0].r.auto_not_qualified };
 }
 
 // ===========================================================================
@@ -1607,12 +1633,17 @@ function toAttemptRow(r: AttemptRow): AttemptListRow {
  * narrowed to one status. Ports Go's ListAttempts: Go narrows rows to the actor
  * in SQL (`canListAttempts`), here that scoping is RLS's job — the status filter
  * is not, and it is the one the client's status tabs depend on.
+ *
+ * `page` (P2 §6) is the optional keyset page over `created_at desc, id desc`.
+ * Absent = unbounded (internal callers keep the whole set); the request path
+ * passes one.
  */
 export async function listAttempts(
   sql: Queryable,
-  filter: { status?: string } = {},
-): Promise<AttemptListRow[]> {
+  filter: { status?: string; page?: page.PageRequest } = {},
+): Promise<page.Page<AttemptListRow>> {
   const status = filter.status?.trim() ?? '';
+  const b = page.sqlBounds(filter.page);
   const rows = await sql<AttemptRow[]>`
     select pa.id, pa.lead_id, l.lead_name, l.phone_number, l.source, pa.owner_employee_id,
            coalesce(e.nama, pa.owner_employee_id) as owner_nama,
@@ -1621,8 +1652,10 @@ export async function listAttempts(
     join leads l on l.id = pa.lead_id
     left join employees e on e.employee_id = pa.owner_employee_id
     where (${status} = '' or pa.status = ${status})
-    order by pa.created_at desc, pa.id desc`;
-  return rows.map(toAttemptRow);
+      and (pa.created_at, pa.id) < (${b.at}, ${b.id})
+    order by pa.created_at desc, pa.id desc
+    limit ${b.limit}::bigint`;
+  return page.paginate(rows.map(toAttemptRow), filter.page, (r) => ({ createdAt: r.createdAt, id: r.id }));
 }
 
 /** The attempt block of the detail view — Go's AttemptCore. */

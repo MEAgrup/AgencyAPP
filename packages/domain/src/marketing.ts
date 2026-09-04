@@ -417,6 +417,12 @@ async function attributedAndCollected(sql: Queryable, c: Campaign): Promise<{ at
 /**
  * junkBreakdown returns the Not-Qualified reason counts for this campaign's Origin leads
  * (§4 r9). Labels VERBATIM; ordered by count desc then label for a stable presentation.
+ *
+ * Excludes `created_by = 'SISTEM'` rows (L5, Revisi Sales/Creative/Performa —
+ * `docs/DECISIONS.md` REV-3): since L1/L3, `[Tidak ada respon]` can be written
+ * by the daily `leads_unrespon_tick` job when a lead simply sat untouched 3+14
+ * days, not by a sales judgment call on the LEAD's quality. Counting those
+ * here would measure sales inattention as if it were campaign junk.
  */
 async function junkBreakdown(sql: Queryable, campaignId: string): Promise<JunkReason[]> {
   const rows = await sql<{ reason: string; c: string }[]>`
@@ -425,6 +431,7 @@ async function junkBreakdown(sql: Queryable, campaignId: string): Promise<JunkRe
       join prospect_attempts pa on pa.id = r.attempt_id
       join leads l on l.id = pa.lead_id
      where l.origin_campaign_id = ${campaignId}
+       and r.created_by <> 'SISTEM'
      group by r.reason
      order by c desc, r.reason`;
   return rows.map((r) => ({ reason: r.reason, count: Number(r.c) }));
@@ -439,7 +446,10 @@ async function junkBreakdown(sql: Queryable, campaignId: string): Promise<JunkRe
 export async function dashboard(sql: Queryable, actor: Actor): Promise<Metrics[]> {
   let campaigns: Campaign[];
   try {
-    campaigns = await listCampaigns(sql, actor);
+    // NO page request (P2 §6): this dashboard reports on EVERY campaign the
+    // actor may see. Bounding it here would not make it faster, it would make
+    // it wrong — silently reporting on the first page only.
+    campaigns = (await listCampaigns(sql, actor)).rows;
   } catch (e) {
     mapCampaignErr(e);
   }

@@ -26,7 +26,7 @@
 
 import { bi, notification, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
-import { recomputeBriefRollup } from './task';
+import { recomputeBriefRollup, STATUS_SUBMITTED, type AssetExecBatchReport, type AssetExecRowResult } from './task';
 
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;
@@ -388,39 +388,50 @@ export async function requestAssetRevision(sql: Sql, actor: Actor, assetId: stri
 }
 
 /**
- * driveReviewEdge is the shared owner-gated engine driver for the AM review edges.
- * It locks the Asset, enforces the owning-AM gate, drives the edge, records the
- * mandatory feedback (revision only), fires the §6 Rule 4 flag on the 3rd revision,
- * and recomputes the parent Brief's roll-up — all in one transaction.
+ * reviewEdgeTx is the shared owner-gated engine driver BODY for the AM review
+ * edges — locks the Asset, enforces the owning-AM gate, drives the edge, records
+ * the mandatory feedback (revision only), fires the §6 Rule 4 flag on the 3rd
+ * revision, and (unless `opts.propagate` is `false`) recomputes the parent
+ * Brief's roll-up. Split from its transaction wrapper the same way C1 split
+ * `task.execEdgeTx` from `driveExecEdge` — C4's batch review/approve drive many
+ * edges inside ONE transaction and recompute the roll-up once at the end.
  */
-async function driveReviewEdge(sql: Sql, actor: Actor, assetId: string, to: string, feedback: string): Promise<statemachine.TransitionResult> {
-  return withTransaction(sql, async (tx) => {
-    const ex = executors(tx);
-    const { briefId, division } = await lockAssetOwner(tx, actor, assetId);
-    const res = await statemachine.transition(ex.sm, {
-      machine: MACHINE_BRIEF_TASK, entityType: 'asset', table: 'assets', entityId: assetId, to, actor,
-    });
-    if (!res.ok) {
-      throw res.code === 'role_denied' ? new ForbiddenError(res.message) : new ConflictError(res.message);
-    }
-    if (to === STATUS_REVISION_REQ) {
-      // §6 Rule 1: mandatory feedback recorded immutably in the audit log.
-      await ex.audit.insertAudit({
-        entityType: 'asset', entityId: assetId, actorEmployeeId: actor.employeeId, action: 'revision_feedback',
-        beforeJson: null, afterJson: { feedback }, createdBy: actor.employeeId,
-      });
-      // §6 Rule 4: fire the per-Asset Quality flag on the exact 3rd revision (once).
-      if (await deriveAssetRevisionCount(tx, assetId) === ASSET_REVISION_FLAG_THRESHOLD) {
-        await notification.emit(ex.notify, {
-          event: notification.EVENTS.RevisionCountFlag, entityType: 'asset', entityId: assetId,
-          actor: actor.employeeId, division,
-        });
-      }
-    }
-    // M7 §2: recompute the parent Brief's roll-up after every Asset status change.
-    await recomputeBriefRollup(tx, actor, briefId);
-    return res;
+async function reviewEdgeTx(
+  tx: Queryable, actor: Actor, assetId: string, to: string, feedback: string,
+  opts?: { propagate?: boolean },
+): Promise<statemachine.TransitionResult> {
+  const ex = executors(tx);
+  const { briefId, division } = await lockAssetOwner(tx, actor, assetId);
+  const res = await statemachine.transition(ex.sm, {
+    machine: MACHINE_BRIEF_TASK, entityType: 'asset', table: 'assets', entityId: assetId, to, actor,
   });
+  if (!res.ok) {
+    throw res.code === 'role_denied' ? new ForbiddenError(res.message) : new ConflictError(res.message);
+  }
+  if (to === STATUS_REVISION_REQ) {
+    // §6 Rule 1: mandatory feedback recorded immutably in the audit log.
+    await ex.audit.insertAudit({
+      entityType: 'asset', entityId: assetId, actorEmployeeId: actor.employeeId, action: 'revision_feedback',
+      beforeJson: null, afterJson: { feedback }, createdBy: actor.employeeId,
+    });
+    // §6 Rule 4: fire the per-Asset Quality flag on the exact 3rd revision (once).
+    if (await deriveAssetRevisionCount(tx, assetId) === ASSET_REVISION_FLAG_THRESHOLD) {
+      await notification.emit(ex.notify, {
+        event: notification.EVENTS.RevisionCountFlag, entityType: 'asset', entityId: assetId,
+        actor: actor.employeeId, division,
+      });
+    }
+  }
+  // M7 §2: recompute the parent Brief's roll-up after every Asset status change.
+  if (opts?.propagate ?? true) {
+    await recomputeBriefRollup(tx, actor, briefId);
+  }
+  return res;
+}
+
+/** driveReviewEdge opens its own transaction around reviewEdgeTx — reviewAsset/approveAsset/requestAssetRevision are unchanged. */
+function driveReviewEdge(sql: Sql, actor: Actor, assetId: string, to: string, feedback: string): Promise<statemachine.TransitionResult> {
+  return withTransaction(sql, (tx) => reviewEdgeTx(tx, actor, assetId, to, feedback));
 }
 
 /**
@@ -442,6 +453,125 @@ async function lockAssetOwner(tx: Queryable, actor: Actor, assetId: string): Pro
     throw new ForbiddenError(MSG_REVIEW_FORBIDDEN);
   }
   return { briefId: rows[0].brief_id, division: rows[0].assigned_division };
+}
+
+// ---------------------------------------------------------------------------
+// AM review batch (C4, Revisi Sales/Creative/Performa) — "cek, hitung & acc":
+// review/approve many Assets of one Brief at once. Two SEPARATE doors, not one
+// click to [Approved] — [Submitted]->[In Review]->[Approved] are two engine
+// edges, and M16 §6 / LT-30 derive waktuAmBelumBukaHours/waktuAmReviewHours
+// from those two timestamps; collapsing them would grind both to ~0 forever.
+// No bulk request-revision: M7 §6 Rule 1 requires feedback tied to one
+// specific Asset, so that edge stays single-Asset (requestAssetRevision).
+// ---------------------------------------------------------------------------
+
+/** One locked Asset row, as read for AM-batch verdict + execution. */
+interface BatchReviewAssetRow {
+  assetId: string;
+  sequenceNo: number;
+  status: string;
+  ownerAm: string;
+}
+
+/**
+ * lockBriefAssetsForReviewBatch locks the Brief first (`for update` — same
+ * first-lock as the exec batch in task.ts, and as `lockAssetableBrief`), then
+ * the requested Assets in `sequence_no` order — the one lock order every batch
+ * primitive in the system uses.
+ */
+async function lockBriefAssetsForReviewBatch(
+  tx: Queryable,
+  briefId: string,
+  assetIds: readonly string[],
+): Promise<{ briefStatus: string; assets: Map<string, BatchReviewAssetRow> }> {
+  const brief = await tx<{ status: string }[]>`select status from briefs where id = ${briefId} for update`;
+  if (brief.length === 0) {
+    throw new NotFoundError(MSG_BRIEF_NOT_FOUND);
+  }
+  const rows = await tx<{ id: string; sequence_no: number; status: string; assigned_am_id: string | null }[]>`
+    select a.id, a.sequence_no, a.status, c.assigned_am_id
+      from assets a
+      join briefs b on b.id = a.brief_id
+      join services sv on sv.id = b.service_id
+      join clients c on c.id = sv.client_id
+     where a.brief_id = ${briefId} and a.id = any(${assetIds})
+     order by a.sequence_no asc
+     for update`;
+  const assets = new Map<string, BatchReviewAssetRow>();
+  for (const r of rows) {
+    assets.set(r.id, { assetId: r.id, sequenceNo: Number(r.sequence_no), status: r.status, ownerAm: r.assigned_am_id ?? '' });
+  }
+  return { briefStatus: brief[0].status, assets };
+}
+
+/** verdictForReview is the pure-read judgment shared by review/approve: does
+ *  this Asset (belonging to the Brief) exist, is the actor its owning AM or
+ *  Director, and is it in the expected source state? */
+function verdictForReview(
+  actor: Actor, asset: BatchReviewAssetRow | undefined, requireFrom: string,
+): { ok: true } | { ok: false; reason: string } {
+  if (asset === undefined) {
+    return { ok: false, reason: MSG_ASSET_NOT_FOUND };
+  }
+  if (!actor.role.director && asset.ownerAm !== actor.employeeId) {
+    return { ok: false, reason: MSG_REVIEW_FORBIDDEN };
+  }
+  if (asset.status !== requireFrom) {
+    return { ok: false, reason: bi.TRANSITION_NOT_ALLOWED };
+  }
+  return { ok: true };
+}
+
+/**
+ * reviewAssetBatch/approveAssetBatch share this three-phase engine (same shape
+ * as task.execAssetBatch): judge every row under lock (pure reads), any
+ * rejection -> return the report as-is with nothing written, all clean ->
+ * drive every edge with propagate:false and recompute the Brief roll-up once.
+ */
+async function reviewApproveAssetBatch(
+  sql: Sql, actor: Actor, briefId: string, requireFrom: string, to: string, assetIds: readonly string[],
+): Promise<AssetExecBatchReport> {
+  if (assetIds.length === 0) {
+    throw new ValidationError(bi.INCOMPLETE_DATA);
+  }
+  return withTransaction(sql, async (tx) => {
+    const { briefStatus, assets } = await lockBriefAssetsForReviewBatch(tx, briefId, assetIds);
+
+    const rows: AssetExecRowResult[] = assetIds.map((assetId, i) => {
+      const asset = assets.get(assetId);
+      const verdict = verdictForReview(actor, asset, requireFrom);
+      return {
+        rowNumber: i + 1,
+        assetId,
+        sequenceNo: asset?.sequenceNo ?? 0,
+        applied: verdict.ok,
+        fromStatus: asset?.status ?? '',
+        toStatus: verdict.ok ? to : '',
+        reason: verdict.ok ? '' : verdict.reason,
+      };
+    });
+    const rejections = rows.filter((r) => !r.applied);
+    if (rejections.length > 0) {
+      return { applied: 0, rejected: rejections.length, briefId, briefStatus, rows, rejections };
+    }
+
+    for (const assetId of assetIds) {
+      await reviewEdgeTx(tx, actor, assetId, to, '', { propagate: false });
+    }
+    await recomputeBriefRollup(tx, actor, briefId);
+    const after = await tx<{ status: string }[]>`select status from briefs where id = ${briefId}`;
+    return { applied: rows.length, rejected: 0, briefId, briefStatus: after[0].status, rows, rejections: [] };
+  });
+}
+
+/** reviewAssetBatch pulls many [Submitted] Assets of one Brief into [In Review] at once. */
+export function reviewAssetBatch(sql: Sql, actor: Actor, briefId: string, assetIds: readonly string[]): Promise<AssetExecBatchReport> {
+  return reviewApproveAssetBatch(sql, actor, briefId, STATUS_SUBMITTED, STATUS_IN_REVIEW, assetIds);
+}
+
+/** approveAssetBatch approves many [In Review] Assets of one Brief at once. */
+export function approveAssetBatch(sql: Sql, actor: Actor, briefId: string, assetIds: readonly string[]): Promise<AssetExecBatchReport> {
+  return reviewApproveAssetBatch(sql, actor, briefId, STATUS_IN_REVIEW, STATUS_APPROVED, assetIds);
 }
 
 // --- Hours Logged (§5 Rule 2) ---

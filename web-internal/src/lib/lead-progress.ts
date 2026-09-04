@@ -52,6 +52,7 @@ export function isTerminalAttempt(status: string): boolean {
 export const ATTEMPT_NEXT_STEP: Record<string, string> = {
   'New Lead': 'Tandai Contacted',
   Contacted: 'Isi Qualified Lead Form (data toko)',
+  '[Unrespon]': 'Hubungi ulang & tandai Contacted',
   Qualified: 'Ajukan negosiasi',
   'Negotiation - Pending Approval': 'Menunggu keputusan Superior',
   'Negotiation - Revision Required': 'Terima counter atau resubmit proposal',

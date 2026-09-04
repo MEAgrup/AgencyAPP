@@ -10,7 +10,7 @@
  *   reassign target validation + append-only audit, and the derived rollups.
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { bi, money, permission } from '@cdps/core';
+import { bi, money, page, permission } from '@cdps/core';
 import { createClient, withClaims, type Sql } from '@cdps/db';
 import {
   campaignClients,
@@ -288,13 +288,13 @@ describeDb('Get/List visibility (§5)', () => {
     const cLia = await createCampaign(sql, lia, validInput());
     const cDina = await createCampaign(sql, dina, validInput());
 
-    const liaList = await listCampaigns(sql, lia);
+    const liaList = (await listCampaigns(sql, lia)).rows;
     expect(liaList.map((c) => c.id)).toEqual([cLia.id]);
     await expect(getCampaign(sql, lia, cDina.id)).rejects.toThrow(ForbiddenError);
 
-    expect((await listCampaigns(sql, mktLead('ZZ-MHEAD'))).length).toBeGreaterThanOrEqual(2);
-    expect((await listCampaigns(sql, od('ZZ-OD'))).length).toBeGreaterThanOrEqual(2);
-    expect((await listCampaigns(sql, director('ZZ-DIR'))).length).toBeGreaterThanOrEqual(2);
+    expect((await listCampaigns(sql, mktLead('ZZ-MHEAD'))).rows.length).toBeGreaterThanOrEqual(2);
+    expect((await listCampaigns(sql, od('ZZ-OD'))).rows.length).toBeGreaterThanOrEqual(2);
+    expect((await listCampaigns(sql, director('ZZ-DIR'))).rows.length).toBeGreaterThanOrEqual(2);
 
     await expect(listCampaigns(sql, salesStaff('ZZ-SAL'))).rejects.toThrow(ForbiddenError);
     await expect(getCampaign(sql, salesStaff('ZZ-SAL'), cLia.id)).rejects.toThrow(ForbiddenError);
@@ -567,5 +567,44 @@ describeDb('campaignClients (M3-G1 — §4 Rule 4 / Flow 2 drill-down)', () => {
     await expect(campaignClients(sql, mktStaff('ZZ-DINA'), cmp.id)).rejects.toThrow(ForbiddenError);
     await expect(campaignClients(sql, mktStaff('ZZ-LIA'), 'CMP-999999-9999')).rejects.toThrow(NotFoundError);
     await expect(campaignClients(sql, od('ZZ-OD'), cmp.id)).resolves.toBeTruthy();
+  });
+});
+
+describeDb('listCampaigns — keyset pagination (P2 §6)', () => {
+  it('pages for the request path, and stays UNBOUNDED for marketing.dashboard', async () => {
+    const lead = mktLead('ZZ-MHEAD');
+    await createCampaign(sql, lead, validInput());
+    await createCampaign(sql, lead, validInput());
+    await createCampaign(sql, lead, validInput());
+
+    // No page request → everything, no cursor. This is the contract
+    // `marketing.dashboard` depends on: it computes metrics over EVERY campaign,
+    // so a default page here would make the dashboard wrong, not fast.
+    const unbounded = await listCampaigns(sql, lead);
+    expect(unbounded.nextCursor).toBeNull();
+    const allIds = unbounded.rows.map((c) => c.id);
+    expect(allIds.length).toBeGreaterThanOrEqual(3);
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 100; guard++) {
+      const p: page.Page<{ id: string }> = await listCampaigns(sql, lead, {
+        limit: 2, cursor: cursor === null ? null : page.decodeCursor(cursor),
+      });
+      seen.push(...p.rows.map((c) => c.id));
+      if (p.nextCursor === null) break;
+      cursor = p.nextCursor;
+    }
+    expect(seen).toEqual(allIds); // same order, nothing duplicated or skipped
+    expect(new Set(seen).size).toBe(seen.length);
+  });
+
+  it('keeps the §5 owner scope while paging — a staff still sees only their own', async () => {
+    const lia = mktStaff('ZZ-LIA');
+    const own = await createCampaign(sql, lia, validInput());
+    await createCampaign(sql, mktStaff('ZZ-DINA'), validInput());
+
+    const p = await listCampaigns(sql, lia, { limit: 50, cursor: null });
+    expect(p.rows.map((c) => c.id)).toEqual([own.id]);
   });
 });

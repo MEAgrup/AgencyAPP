@@ -9,6 +9,30 @@
 - Negotiation states: `Negotiation - Pending Approval` → { `Negotiation - Approved` | `Negotiation - Revision Required` | `Negotiation - Rejected` }; Revision Required → (accept ⇒ Approved) | (resubmit ⇒ Pending Approval, new version); `Negotiation - Rejected` → (resubmit ⇒ Pending Approval, new version) | `Closed-Lost` (DECISIONS O16); No-nego path ⇒ `Negotiation - Auto Approved`. Closing only from Approved/Auto Approved.
 - **Edit Service sebelum closing** (M0 §5.1, keputusan pemilik 2026-08-07): `Negotiation - Approved` / `Negotiation - Auto Approved` → `Negotiation - Pending Approval` (versi proposal baru, `require_lead = false` seperti seluruh edge masuk Pending Approval yang digerakkan sales; migrasi `20260807040000_edit_service_reapproval.sql`). Edge ini HANYA dipakai revisi ber-harga **custom** — revisi dengan harga standar MSL menulis versi proposal baru **tanpa transisi status sama sekali**, jadi tidak melewati mesin ini.
 
+**`[Unrespon]` — bukan terminal (DEVIASI PRD, keputusan pemilik 2026-09-04, lihat
+`docs/DECISIONS.md` REV-1/REV-2, `docs/backlog/REVISI_CDPS_SALES_CREATIVE_PERFORMA.md`
+L1).** M1 §2/§9.3 tidak menyebut status ini — ditambahkan atas permintaan pemilik:
+lead yang didaftarkan tapi tidak digerakkan sales mangkrak tanpa jaring pengaman.
+Mengikuti gaya bracket §2 `[Deleted]`, tapi untuk mesin **attempt** (per-sales), bukan
+mesin **record** (registry pusat) — `leads.record_status` tidak disentuh sama sekali.
+
+| From | To | `require_lead` | Effect |
+|---|---|---|---|
+| `New Lead` | `[Unrespon]` | true | job harian `leads_unrespon_tick` — 3 hari diam sejak transisi status terakhir (audit log), WIB kalender |
+| `Contacted` | `[Unrespon]` | true | idem |
+| `[Unrespon]` | `Contacted` | false | sales hidupkan lagi sendiri — jam penuaan reset (jangkar berikutnya = audit row `[Unrespon]` terbaru) |
+| `[Unrespon]` | `Not Qualified` | false | auto setelah 14 hari diam di `[Unrespon]`, alasan `[Tidak ada respon]` (M1-OA-8, `created_by='SISTEM'`); atau tutup manual lebih awal |
+| `[Unrespon]` | `[Closed - Kalah Kompetisi]` | false | wajib — tanpa edge ini, `leads.resolveWin` gagal menutup deal pada lead Pool yang satu attempt-nya sudah menua, dan ROLLBACK seluruh Closing (§1.2 backlog L1) |
+
+- **Tidak ada edge `[Unrespon]` → `Qualified`** — M0 §4: `Qualified` hanya lewat submit
+  Qualified Form dari `Contacted`. Jalur hidup lagi = `[Unrespon]` → `Contacted` → form.
+- Kedua edge penuaan `require_lead=true` — digerakkan sistem/Head, bukan pintu kabur
+  sales; job SQL memanggil `sm_transition(..., 'SISTEM', true, false)`.
+- `[Unrespon]` **tidak** masuk `TERMINAL_ATTEMPT_STATUSES` (`packages/domain/src/leads.ts`)
+  — tetap terhitung `open_attempt_count`, tetap ditutup `resolveWin` saat lead menang di
+  tempat lain (sama seperti attempt `Contacted` biasa).
+- Jangkar jam turunan murni `audit_log` (aturan rumah #4) — tanpa kolom `unrespon_at` baru.
+
 ### Log aktivitas prospek — SENGAJA BUKAN MESIN (keputusan pemilik 2026-08-06)
 `prospect_activities` (`ACT-`) mencatat Follow Up / Jadwal Meeting / Online Meeting / Visit / Lainnya
 dari status `Qualified` sampai state negosiasi terakhir. Ia **tidak punya kolom status**, tidak muncul

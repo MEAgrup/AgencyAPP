@@ -587,6 +587,13 @@ const WIRE_TO_FE: Record<string, string> = {
   // A REQUEST body (same reasoning as ProposalLineBody above): the fan-out batch
   // line the FE sends per PIC, mapped by `toAssetAssignments`.
   AssetAssignmentWire: 'creative.ts::AssetAssignmentInput',
+  // C2 (Revisi Sales/Creative/Performa) — Submit Output Massal. AssetExecLineWire
+  // is a REQUEST body (same reasoning as ProposalLineBody/AssetAssignmentWire);
+  // the other two are the batch report response, shared by submit-batch/
+  // start-batch/review-batch/approve-batch.
+  AssetExecLineWire: 'creative.ts::AssetExecLine',
+  AssetExecRowResultWire: 'creative.ts::AssetExecRowResult',
+  AssetExecBatchReportWire: 'creative.ts::AssetExecBatchReport',
   OutputEntryWire: 'creative.ts::DailyOutputEntry',
   DailyOutputDayWire: 'creative.ts::DailyOutputDay',
   ScanHoursReminderResultWire: 'creative.ts::ReminderScanResult',

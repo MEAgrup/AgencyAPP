@@ -9,7 +9,7 @@
  *   request queue with its notifications, and taskMetrics recompute-from-log.
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { permission } from '@cdps/core';
+import { bi, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import {
   approveBlockRequest,
@@ -21,13 +21,17 @@ import {
   computeMetrics,
   ConflictError,
   ForbiddenError,
+  MSG_EXEC_FORBIDDEN,
+  MSG_OUTPUT_LINK_REQUIRED,
   NotFoundError,
   pendingBlockRequests,
   rejectBlockRequest,
   resumeTask,
   reworkTask,
   setSlaTarget,
+  startAssetBatch,
   startTask,
+  submitAssetBatch,
   submitBlockRequest,
   submitTask,
   taskMetrics,
@@ -258,6 +262,26 @@ const notifCount = async (recipient: string, event: string, entityId: string): P
     select count(*) as n from notifications
     where recipient_employee_id = ${recipient} and event_type = ${event} and entity_id = ${entityId}`)[0].n);
 
+async function insertAsset(
+  id: string, briefId: string, sequenceNo: number, status: string, pic: string | null = null,
+): Promise<void> {
+  await sql`
+    insert into assets (id, brief_id, asset_type, sequence_no, assigned_pic, status, created_by)
+    values (${id}, ${briefId}, 'Video', ${sequenceNo}, ${pic}, ${status}, 'ZZ-TEST')`;
+}
+const assetStatus = async (id: string): Promise<string> =>
+  (await sql<{ status: string }[]>`select status from assets where id = ${id}`)[0].status;
+const assetOutputLink = async (id: string): Promise<string | null> =>
+  (await sql<{ output_link: string | null }[]>`select output_link from assets where id = ${id}`)[0].output_link;
+const assetTransitionAuditCount = async (id: string): Promise<number> =>
+  Number((await sql<{ n: string }[]>`
+    select count(*) as n from audit_log
+     where entity_type = 'asset' and entity_id = ${id} and action like 'transition:%'`)[0].n);
+const briefTransitionAuditCount = async (id: string): Promise<number> =>
+  Number((await sql<{ n: string }[]>`
+    select count(*) as n from audit_log
+     where entity_type = 'brief' and entity_id = ${id} and action like 'transition:%'`)[0].n);
+
 afterAll(async () => {
   if (sql) await sql.end();
 });
@@ -265,6 +289,8 @@ afterEach(async () => {
   if (!sql) return;
   // notifications + audit_log are append-only; never cleaned (assertions scope by entity id).
   await sql`delete from brief_block_requests where created_by like 'ZZ-%'`;
+  await sql`delete from asset_block_requests where created_by like 'ZZ-%'`;
+  await sql`delete from assets where created_by like 'ZZ-%'`;
   await sql`delete from briefs where created_by like 'ZZ-%'`;
   await sql`delete from services where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
@@ -310,6 +336,134 @@ describeDb('execution edges (§3)', () => {
     const ls = await briefFixture('[Dispatched to Vendor]');
     await expect(startTask(sql, creativeStaff(), ls.briefId)).rejects.toBeInstanceOf(ConflictError);
     await expect(startTask(sql, creativeStaff(), 'BRF-GHOST-0')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describeDb('submitAssetBatch / startAssetBatch (C2, Revisi Sales/Creative/Performa)', () => {
+  it('atomicity: one bad row rejects the WHOLE batch — nothing written, not even the good rows', async () => {
+    const { briefId } = await briefFixture('[In Progress]');
+    const ready = [uid('AST'), uid('AST'), uid('AST'), uid('AST')];
+    for (const [i, id] of ready.entries()) {
+      await insertAsset(id, briefId, i + 1, '[In Progress]', 'ZZ-C');
+    }
+    const stillTodo = uid('AST');
+    await insertAsset(stillTodo, briefId, 5, '[To Do]', 'ZZ-C');
+
+    const lines = [...ready, stillTodo].map((assetId) => ({ assetId, outputLink: 'https://drive/x' }));
+    const report = await submitAssetBatch(sql, creativeStaff('ZZ-C'), briefId, lines);
+    expect(report.applied).toBe(0);
+    expect(report.rejected).toBe(1);
+    expect(report.rows).toHaveLength(5);
+    expect(report.rejections).toHaveLength(1);
+    expect(report.rejections[0].assetId).toBe(stillTodo);
+    expect(report.rejections[0].reason).toBe(bi.TRANSITION_NOT_ALLOWED);
+
+    // Re-read all five: zero moved, zero link written, zero new transition row.
+    for (const id of ready) {
+      expect(await assetStatus(id)).toBe('[In Progress]');
+      expect(await assetOutputLink(id)).toBeNull();
+      expect(await assetTransitionAuditCount(id)).toBe(0);
+    }
+    expect(await assetStatus(stillTodo)).toBe('[To Do]');
+    expect(await briefStatus(briefId)).toBe('[In Progress]'); // roll-up never ran
+  });
+
+  it('one rejection case per BI constant, asserted against the exported constant', async () => {
+    const { briefId } = await briefFixture('[In Progress]');
+
+    // Not found — id belongs to a different Brief entirely.
+    const other = await briefFixture('[In Progress]');
+    const foreignAsset = uid('AST');
+    await insertAsset(foreignAsset, other.briefId, 1, '[In Progress]', 'ZZ-C');
+    const notFound = await submitAssetBatch(sql, creativeStaff('ZZ-C'), briefId, [{ assetId: foreignAsset, outputLink: 'x' }]);
+    expect(notFound.rejections[0].reason).toBe('[aset tidak ditemukan]');
+
+    // Forbidden — an Ads staff cannot execute a Creative asset.
+    const forbiddenAsset = uid('AST');
+    await insertAsset(forbiddenAsset, briefId, 1, '[In Progress]', null);
+    const forbidden = await submitAssetBatch(sql, adsStaff(), briefId, [{ assetId: forbiddenAsset, outputLink: 'x' }]);
+    expect(forbidden.rejections[0].reason).toBe(MSG_EXEC_FORBIDDEN);
+
+    // Wrong source state — still [To Do].
+    const todoAsset = uid('AST');
+    await insertAsset(todoAsset, briefId, 2, '[To Do]', 'ZZ-C');
+    const wrongState = await submitAssetBatch(sql, creativeStaff('ZZ-C'), briefId, [{ assetId: todoAsset, outputLink: 'x' }]);
+    expect(wrongState.rejections[0].reason).toBe(bi.TRANSITION_NOT_ALLOWED);
+
+    // Blank output link.
+    const noLinkAsset = uid('AST');
+    await insertAsset(noLinkAsset, briefId, 3, '[In Progress]', 'ZZ-C');
+    const noLink = await submitAssetBatch(sql, creativeStaff('ZZ-C'), briefId, [{ assetId: noLinkAsset, outputLink: '  ' }]);
+    expect(noLink.rejections[0].reason).toBe(MSG_OUTPUT_LINK_REQUIRED);
+  });
+
+  it('§2 Rule 1 exec gate applies per row, not to the whole call: Director always allowed', async () => {
+    const { briefId } = await briefFixture('[In Progress]');
+    const id = uid('AST');
+    await insertAsset(id, briefId, 1, '[In Progress]', 'ZZ-C');
+    const report = await submitAssetBatch(sql, director(), briefId, [{ assetId: id, outputLink: 'https://drive/x' }]);
+    expect(report.applied).toBe(1);
+    expect(await assetStatus(id)).toBe('[Submitted]');
+  });
+
+  it('clean batch of N applies all N, writes exactly N asset audit rows (not one shared row), and turnaround differs per asset', async () => {
+    const { briefId } = await briefFixture('[In Progress]');
+    const ids = [uid('AST'), uid('AST'), uid('AST')];
+    for (const [i, id] of ids.entries()) {
+      await insertAsset(id, briefId, i + 1, '[To Do]', 'ZZ-C');
+    }
+    // Start them at DIFFERENT times (own transactions) so each has its own
+    // [In Progress] timestamp — proves a later batch submit doesn't collapse
+    // per-asset turnaround to one shared number (M7 §5 Rule 1 / Speed Score).
+    for (const id of ids) {
+      const r = await startAssetBatch(sql, creativeStaff('ZZ-C'), briefId, [id]);
+      expect(r.applied).toBe(1);
+    }
+    const startedAt = new Map<string, Date>();
+    for (const id of ids) {
+      const [row] = await sql<{ created_at: Date }[]>`
+        select created_at from audit_log
+         where entity_type = 'asset' and entity_id = ${id} and action = 'transition:[To Do]->[In Progress]'`;
+      startedAt.set(id, row.created_at);
+      // Space them out so the timestamps are unambiguously distinct even on a fast machine.
+      await new Promise((r2) => setTimeout(r2, 5));
+    }
+    expect(new Set([...startedAt.values()].map((d) => d.getTime())).size).toBe(ids.length);
+
+    const lines = ids.map((assetId) => ({ assetId, outputLink: 'https://drive/x' }));
+    const report = await submitAssetBatch(sql, creativeStaff('ZZ-C'), briefId, lines);
+    expect(report.applied).toBe(ids.length);
+    expect(report.rejected).toBe(0);
+    expect(report.rows.map((r) => r.sequenceNo)).toEqual([1, 2, 3]);
+
+    for (const id of ids) {
+      expect(await assetStatus(id)).toBe('[Submitted]');
+      expect(await assetTransitionAuditCount(id)).toBe(2); // start + submit, PER asset
+    }
+    // The [In Progress] timestamps recorded above still differ — the submit
+    // batch didn't rewrite or collapse them.
+    expect(new Set([...startedAt.values()].map((d) => d.getTime())).size).toBe(ids.length);
+
+    // All 3 of 3 assets reached [Submitted] -> the Brief roll-up follows, in
+    // ONE chain of transitions (no duplicate [In Progress]->[Submitted] hop).
+    expect(await briefStatus(briefId)).toBe('[Submitted]');
+    expect(await briefTransitionAuditCount(briefId)).toBe(1);
+  });
+
+  it('startAssetBatch drives [To Do] -> [In Progress] only — never auto-advances to [Submitted]', async () => {
+    const { briefId } = await briefFixture('[In Progress]');
+    const id = uid('AST');
+    await insertAsset(id, briefId, 1, '[To Do]', 'ZZ-C');
+    const report = await startAssetBatch(sql, creativeStaff('ZZ-C'), briefId, [id]);
+    expect(report.applied).toBe(1);
+    expect(await assetStatus(id)).toBe('[In Progress]');
+  });
+
+  it('rejects an empty batch and an unknown Brief without touching anything', async () => {
+    const { briefId } = await briefFixture('[In Progress]');
+    await expect(submitAssetBatch(sql, creativeStaff('ZZ-C'), briefId, [])).rejects.toBeInstanceOf(ValidationError);
+    await expect(submitAssetBatch(sql, creativeStaff('ZZ-C'), 'BRF-GHOST-0', [{ assetId: 'AST-GHOST-0' }]))
+      .rejects.toBeInstanceOf(NotFoundError);
   });
 });
 

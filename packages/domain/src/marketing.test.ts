@@ -94,8 +94,8 @@ async function seedAttempt(id: string, leadId: string, reached: boolean): Promis
   await sql`insert into audit_log (entity_type, entity_id, actor_employee_id, action, created_by)
     values ('prospect_attempt', ${id}, 'ZZ-SAL', ${action}, 'ZZ-SAL')`;
 }
-async function seedNQReason(attemptId: string, reason: string): Promise<void> {
-  await sql`insert into prospect_attempt_nq_reasons (attempt_id, reason, created_by) values (${attemptId}, ${reason}, 'ZZ-SAL')`;
+async function seedNQReason(attemptId: string, reason: string, createdBy = 'ZZ-SAL'): Promise<void> {
+  await sql`insert into prospect_attempt_nq_reasons (attempt_id, reason, created_by) values (${attemptId}, ${reason}, ${createdBy})`;
 }
 async function seedWonClient(clientId: string, trxId: string, leadId: string, origin: string, totalDec: string, winAt: Date): Promise<void> {
   await sql`
@@ -127,7 +127,12 @@ afterEach(async () => {
   await sql`delete from payment_verifications where created_by like 'ZZ-%'`;
   await sql`delete from installments where created_by like 'ZZ-%'`;
   await sql`delete from transactions where created_by like 'ZZ-%'`;
-  await sql`delete from prospect_attempt_nq_reasons where created_by like 'ZZ-%'`;
+  // By attempt, not by the reason row's own created_by: L5 (Revisi Sales/
+  // Creative/Performa) tests seed a SISTEM-authored reason on a ZZ- attempt,
+  // which the old `created_by like 'ZZ-%'` filter would leave behind and
+  // then trip the FK on the next line.
+  await sql`delete from prospect_attempt_nq_reasons where attempt_id in
+    (select id from prospect_attempts where created_by like 'ZZ-%')`;
   await sql`delete from prospect_attempts where created_by like 'ZZ-%'`;
   await sql`delete from contracts where created_by like 'ZZ-%'`;
   await sql`delete from clients where created_by like 'ZZ-%'`;
@@ -382,6 +387,26 @@ describeDb('Auto-Metrics (§4) recompute-from-log', () => {
       { reason: '[Bukan seller]', count: 2 },
       { reason: '[Tidak ada respon]', count: 1 },
     ]);
+  });
+
+  it('junk breakdown excludes SISTEM-authored reasons (L5, Revisi Sales/Creative/Performa)', async () => {
+    // A lead the daily leads_unrespon_tick job auto-closed (L1/L3) for simply
+    // sitting untouched is not a judgment call about THIS campaign's lead
+    // quality — counting it would measure sales inattention as if it were junk.
+    const cid = await activeWithRecord('ZZ-LIA', '5000000');
+    const leadHuman = uid('LEAD');
+    const leadAuto = uid('LEAD');
+    const prspHuman = uid('PRSP');
+    const prspAuto = uid('PRSP');
+    await seedLead(leadHuman, ph(), cid, cid);
+    await seedLead(leadAuto, ph(), cid, cid);
+    await seedAttempt(prspHuman, leadHuman, false);
+    await seedAttempt(prspAuto, leadAuto, false);
+    await seedNQReason(prspHuman, '[Bukan seller]', 'ZZ-SAL');
+    await seedNQReason(prspAuto, '[Tidak ada respon]', 'SISTEM');
+
+    const m = await metrics(sql, mktStaff('ZZ-LIA'), cid);
+    expect(m.junkBreakdown).toEqual([{ reason: '[Bukan seller]', count: 1 }]);
   });
 });
 

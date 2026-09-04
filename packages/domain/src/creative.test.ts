@@ -10,10 +10,11 @@
  *   flag, Hours Logged, asset metrics with the revision speed score, and reads.
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { permission } from '@cdps/core';
+import { bi, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import {
   approveAsset,
+  approveAssetBatch,
   canCreateAsset,
   canLogHours,
   canRunHoursReminderScan,
@@ -28,12 +29,15 @@ import {
   listBriefAssets,
   listMyAssets,
   logHours,
+  MSG_ASSET_NOT_FOUND,
   MSG_INVALID_PIC,
   MSG_INVALID_QUANTITY,
   MSG_QUANTITY_EXCEEDS_TARGET,
+  MSG_REVIEW_FORBIDDEN,
   NotFoundError,
   requestAssetRevision,
   reviewAsset,
+  reviewAssetBatch,
   runHoursReminderScan,
   scanHoursReminders,
   ValidationError,
@@ -360,6 +364,112 @@ describeDb('Asset review + revision loop (§6)', () => {
     const flag = await sql<{ n: string }[]>`
       select count(*) as n from notifications where recipient_employee_id='ZZ-CLEAD' and event_type='m12.revision_count.flag' and entity_id=${a.id}`;
     expect(Number(flag[0].n)).toBe(1);
+  });
+});
+
+describeDb('reviewAssetBatch / approveAssetBatch (C4, Revisi Sales/Creative/Performa)', () => {
+  /** N Assets driven to [Submitted] via the real division-side flow (not raw SQL). */
+  async function submittedAssets(briefId: string, staff: Actor, n: number): Promise<string[]> {
+    const ids: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const a = await createAsset(sql, staff, briefId, { sequenceNo: i + 1 });
+      await startAsset(sql, staff, a.id);
+      await submitAsset(sql, staff, a.id, `https://drive/${a.id}`);
+      ids.push(a.id);
+    }
+    return ids;
+  }
+
+  it('atomicity: one bad row rejects the WHOLE batch — nothing written', async () => {
+    const { briefId } = await creativeBrief(4);
+    await registerStaff('ZZ-C', 'Creative', 'staff');
+    const staff = creativeStaff('ZZ-C');
+    const submitted = await submittedAssets(briefId, staff, 3);
+    const stillInProgress = await createAsset(sql, staff, briefId, { sequenceNo: 4 });
+    await startAsset(sql, staff, stillInProgress.id);
+
+    const report = await reviewAssetBatch(sql, am(), briefId, [...submitted, stillInProgress.id]);
+    expect(report.applied).toBe(0);
+    expect(report.rejected).toBe(1);
+    expect(report.rejections[0].assetId).toBe(stillInProgress.id);
+    expect(report.rejections[0].reason).toBe(bi.TRANSITION_NOT_ALLOWED);
+
+    for (const id of submitted) {
+      expect(await assetStatus(id)).toBe('[Submitted]'); // untouched
+    }
+    expect(await assetStatus(stillInProgress.id)).toBe('[In Progress]');
+    // Brief never reached [Submitted] in the first place — quantity_target is 4 and
+    // only 3/4 Assets are Submitted (the 4th is [In Progress]), so rollupTarget was
+    // already pinned at [In Progress] before this batch call. The rejected batch
+    // must leave it exactly there — proof the roll-up recompute never ran.
+    expect(await briefStatus(briefId)).toBe('[In Progress]');
+  });
+
+  it('one rejection case per BI constant, asserted against the exported constant', async () => {
+    const { briefId } = await creativeBrief(3);
+    await registerStaff('ZZ-C', 'Creative', 'staff');
+    const staff = creativeStaff('ZZ-C');
+
+    // Not found — id belongs to a different Brief.
+    const other = await creativeBrief(1);
+    await registerStaff('ZZ-C2', 'Creative', 'staff');
+    const [foreignAsset] = await submittedAssets(other.briefId, creativeStaff('ZZ-C2'), 1);
+    const notFound = await reviewAssetBatch(sql, am(), briefId, [foreignAsset]);
+    expect(notFound.rejections[0].reason).toBe(MSG_ASSET_NOT_FOUND);
+
+    // Forbidden — a different AM does not own this client.
+    const [submitted] = await submittedAssets(briefId, staff, 1);
+    const forbidden = await reviewAssetBatch(sql, am('ZZ-OTHER-AM'), briefId, [submitted]);
+    expect(forbidden.rejections[0].reason).toBe(MSG_REVIEW_FORBIDDEN);
+
+    // Wrong source state — approve before review.
+    const wrongState = await approveAssetBatch(sql, am(), briefId, [submitted]);
+    expect(wrongState.rejections[0].reason).toBe(bi.TRANSITION_NOT_ALLOWED);
+  });
+
+  it('§4 Flow 3 gate applies per row: Director always allowed, even without owning the client', async () => {
+    const { briefId } = await creativeBrief(1);
+    await registerStaff('ZZ-C', 'Creative', 'staff');
+    const [id] = await submittedAssets(briefId, creativeStaff('ZZ-C'), 1);
+    const report = await reviewAssetBatch(sql, director(), briefId, [id]);
+    expect(report.applied).toBe(1);
+    expect(await assetStatus(id)).toBe('[In Review]');
+  });
+
+  it('clean batch of N applies all N and writes exactly N asset audit rows; two SEPARATE doors reach [Approved]', async () => {
+    const { briefId } = await creativeBrief(3);
+    await registerStaff('ZZ-C', 'Creative', 'staff');
+    const ids = await submittedAssets(briefId, creativeStaff('ZZ-C'), 3);
+
+    const reviewReport = await reviewAssetBatch(sql, am(), briefId, ids);
+    expect(reviewReport.applied).toBe(3);
+    expect(reviewReport.rejected).toBe(0);
+    for (const id of ids) {
+      expect(await assetStatus(id)).toBe('[In Review]');
+    }
+    expect(await briefStatus(briefId)).toBe('[In Review]');
+
+    // Approving is a SEPARATE call/edge — one review-batch click does not
+    // also approve (M16 §6/LT-30: waktuAmReviewHours needs the two
+    // timestamps to stay distinct).
+    expect(await briefStatus(briefId)).not.toBe('[Approved]');
+
+    const approveReport = await approveAssetBatch(sql, am(), briefId, ids);
+    expect(approveReport.applied).toBe(3);
+    for (const id of ids) {
+      expect(await assetStatus(id)).toBe('[Approved]');
+      const n = await sql<{ n: string }[]>`
+        select count(*) as n from audit_log where entity_type = 'asset' and entity_id = ${id} and action like 'transition:%'`;
+      // start + submit + review + approve = 4 transitions, per Asset.
+      expect(Number(n[0].n)).toBe(4);
+    }
+    expect(await briefStatus(briefId)).toBe('[Approved]');
+  });
+
+  it('rejects an empty batch and an unknown Brief without touching anything', async () => {
+    const { briefId } = await creativeBrief(1);
+    await expect(reviewAssetBatch(sql, am(), briefId, [])).rejects.toBeInstanceOf(ValidationError);
+    await expect(reviewAssetBatch(sql, am(), 'BRF-GHOST-0', ['AST-GHOST-0'])).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 

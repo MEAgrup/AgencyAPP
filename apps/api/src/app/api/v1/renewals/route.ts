@@ -7,6 +7,7 @@
  * Persetujuan Saya" inbox (Sales lead / Director), which needs Renewal
  * requests across clients, not `GET /clients/{id}/renewals`'s one-client view.
  */
+import { page } from '@cdps/core';
 import { renewal } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
 import { readAsActor } from '@/lib/db';
@@ -16,8 +17,11 @@ import { renewalListRowToWire } from '@/lib/wire';
 export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
     const actor = requireActor(request);
-    const status = new URL(request.url).searchParams.get('status') ?? '';
-    const rows = await readAsActor(actor, (sql) => renewal.listRenewals(sql, { status }));
-    return json({ data: rows.map(renewalListRowToWire) });
+    // P2 §6: paged (?limit=, ?cursor=).
+    const params = new URL(request.url).searchParams;
+    const status = params.get('status') ?? '';
+    const req = page.parseRequest(params.get('limit'), params.get('cursor'));
+    const result = await readAsActor(actor, (sql) => renewal.listRenewals(sql, { status, page: req }));
+    return json({ data: result.rows.map(renewalListRowToWire), next_cursor: result.nextCursor });
   });
 }

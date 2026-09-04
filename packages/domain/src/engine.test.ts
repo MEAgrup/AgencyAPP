@@ -77,4 +77,78 @@ describeDb('allowedTransitions', () => {
     const after = await sql<{ n: number }[]>`select count(*)::int as n from sm_edges`;
     expect(after[0].n).toBe(before[0].n);
   });
+
+  describe('[Unrespon] (L1, docs/backlog/REVISI_CDPS_SALES_CREATIVE_PERFORMA.md)', () => {
+    /** Throwaway lead + attempt pair for a single test; caller deletes both. */
+    const seedAttempt = async (attemptId: string, status: string): Promise<{ leadId: string }> => {
+      const lead = await sql<{ id: string }[]>`
+        insert into leads (id, lead_name, phone_number, phone_norm, source, origin_division, record_status, created_by)
+        values (${`LD-999999-${attemptId.slice(-4)}`}, 'ZZ Engine Test', '0800', '0800', 'Manual', 'Sales', 'active', 'ZZ-STAFF')
+        returning id`;
+      await sql`
+        insert into prospect_attempts (id, lead_id, owner_employee_id, status, created_by)
+        values (${attemptId}, ${lead[0].id}, 'ZZ-STAFF', ${status}, 'ZZ-STAFF')`;
+      return { leadId: lead[0].id };
+    };
+    const cleanupAttempt = async (attemptId: string, leadId: string): Promise<void> => {
+      await sql`delete from prospect_attempts where id = ${attemptId}`;
+      await sql`delete from leads where id = ${leadId}`;
+    };
+
+    it('has exactly the three legal exits, bracketed status last (byte order)', async () => {
+      expect(await allowedTransitions(sql, 'prospect_attempt', '[Unrespon]')).toEqual([
+        'Contacted', 'Not Qualified', '[Closed - Kalah Kompetisi]',
+      ]);
+    });
+
+    it('New Lead and Contacted can both age into it', async () => {
+      expect(await allowedTransitions(sql, 'prospect_attempt', 'New Lead'))
+        .toContain('[Unrespon]');
+      expect(await allowedTransitions(sql, 'prospect_attempt', 'Contacted'))
+        .toContain('[Unrespon]');
+    });
+
+    it('has no edge to Qualified — the only door back in is via the Qualified Form (M0 §4)', async () => {
+      expect(await allowedTransitions(sql, 'prospect_attempt', '[Unrespon]'))
+        .not.toContain('Qualified');
+    });
+
+    it('an edge outside the table (e.g. straight to Qualified) is blocked, not silently allowed', async () => {
+      const attemptId = 'PA-999999-0002';
+      const { leadId } = await seedAttempt(attemptId, '[Unrespon]');
+      try {
+        const res = await sql<{ ok: boolean; code: string }[]>`
+          select (r->>'ok')::boolean as ok, r->>'code' as code from (
+            select sm_transition('prospect_attempt', 'prospect_attempt', 'prospect_attempts',
+              'id', 'status', ${attemptId}, 'Qualified', 'SISTEM', true, true) as r
+          ) s`;
+        expect(res[0].ok).toBe(false);
+        expect(res[0].code).toBe('blocked');
+        expect(await sql<{ status: string }[]>`select status from prospect_attempts where id = ${attemptId}`)
+          .toEqual([{ status: '[Unrespon]' }]); // nothing written on a blocked transition
+      } finally {
+        await cleanupAttempt(attemptId, leadId);
+      }
+    });
+
+    it('require_lead is enforced by SQL itself — a staff actor gets role_denied + the exact BI message', async () => {
+      // Real row, real edge (New Lead -> [Unrespon], require_lead=true), actor
+      // WITHOUT director/lead — this must be rejected by sm_transition itself,
+      // not just by the TypeScript layer (CLAUDE.md §2: enforcement is in the DB).
+      const attemptId = 'PA-999999-0001';
+      const { leadId } = await seedAttempt(attemptId, 'New Lead');
+      try {
+        const res = await sql<{ ok: boolean; code: string; message: string }[]>`
+          select (r->>'ok')::boolean as ok, r->>'code' as code, r->>'message' as message from (
+            select sm_transition('prospect_attempt', 'prospect_attempt', 'prospect_attempts',
+              'id', 'status', ${attemptId}, '[Unrespon]', 'ZZ-STAFF', false, false) as r
+          ) s`;
+        expect(res[0].ok).toBe(false);
+        expect(res[0].code).toBe('role_denied');
+        expect(res[0].message).toBe('[anda tidak memiliki akses untuk melakukan transisi ini]');
+      } finally {
+        await cleanupAttempt(attemptId, leadId);
+      }
+    });
+  });
 });

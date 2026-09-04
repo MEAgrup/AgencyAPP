@@ -166,6 +166,13 @@ export const EVENTS = {
   PermintaanDiajukan: 'm16.permintaan.diajukan',       // -> tujuan (AM / Finance)
   PermintaanJatuhTempo: 'm16.permintaan.jatuh_tempo',  // -> pengaju + tujuan + lead
 
+  // ----- catalog v14 (Revisi Sales/Creative/Performa L2) — 2 lead-aging events -----
+  // Emitted by the daily job `leads_unrespon_tick` (SQL, 20260911060000_m1_unrespon_tick.sql)
+  // — a lead being pulled off a salesperson's desk by the SYSTEM is exactly the
+  // kind of silent change that erodes trust in the system if it isn't announced.
+  AttemptUnrespon: 'm1.attempt.unrespon',                       // -> attempt owner
+  AttemptAutoNotQualified: 'm1.attempt.auto_not_qualified',     // -> attempt owner
+
 } as const;
 
 /** A cataloged event type. */
@@ -274,6 +281,13 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
       'R-03 (Kinerja Sales) — 2 event renewal/cross-sell (m0.renewal.pending_approval → Sales Head/SPV saat baris custom menunggu persetujuan; m0.renewal.decision → pengaju saat diputuskan)',
     eventCount: 2,
     decisionRef: 'docs/DECISIONS.md 2026-08-29 (Kinerja Sales #5)',
+  },
+  {
+    version: 14,
+    description:
+      'Revisi Sales/Creative/Performa L2 — 2 event lead aging otomatis (m1.attempt.unrespon → pemilik attempt saat New Lead/Contacted menua 3 hari diam; m1.attempt.auto_not_qualified → pemilik attempt saat [Unrespon] menua 14 hari, auto Not Qualified). Emitter: job harian leads_unrespon_tick.',
+    eventCount: 2,
+    decisionRef: 'docs/DECISIONS.md 2026-09-04 (REV-1..REV-4, permintaan Nerissa/COO)',
   },
 ] as const;
 
@@ -422,6 +436,11 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
   [EVENTS.TahapLewatTarget]: { description: 'Tahapan melewati target hari kerjanya — ke PIC + lead divisi + AM pemilik', resolver: 'explicitOrLeads', version: 12 },
   [EVENTS.PermintaanDiajukan]: { description: 'Permintaan (REQ-) diajukan divisi — ke tujuan (AM / Finance)', resolver: 'explicitOrLeads', version: 12 },
   [EVENTS.PermintaanJatuhTempo]: { description: 'Permintaan (REQ-) lewat jatuh tempo 1 hari kerja — ke pengaju + tujuan + lead divisi', resolver: 'explicitOrLeads', version: 12 },
+
+  // --- v14 (Revisi Sales/Creative/Performa L2). Description/resolver WAJIB sama
+  // persis dengan seed migrasi 20260911050000_m1_unrespon_notif.sql. ---
+  [EVENTS.AttemptUnrespon]: { description: 'Attempt menua ke [Unrespon] setelah 3 hari diam — ke pemilik attempt', resolver: 'explicit', version: 14 },
+  [EVENTS.AttemptAutoNotQualified]: { description: 'Attempt auto Not Qualified setelah 14 hari diam di [Unrespon] — ke pemilik attempt', resolver: 'explicit', version: 14 },
 };
 
 /** All registered event types (introspection / tests). */

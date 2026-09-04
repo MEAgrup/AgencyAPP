@@ -16,6 +16,7 @@ import {
   listLeads,
   listPool,
   bulkImportLeads,
+  exportLeadsCsv,
   rejectLeadDelete,
   requestLeadDelete,
   type BulkReport,
@@ -162,7 +163,7 @@ export default function LeadsPage() {
       {/* canRequestDelete mencerminkan permission.canWrite: Director selalu, sisanya
           butuh scope divisi (OD murni tanpa divisi tidak bisa menulis). */}
       {activeTab === 'database' && (
-        <DatabaseTab canRequestDelete={isDirector || (role?.division ?? '') !== ''} />
+        <DatabaseTab canRequestDelete={isDirector || (role?.division ?? '') !== ''} canExport={isDirector} />
       )}
       {activeTab === 'import' && <ImportTab />}
       {activeTab === 'deleteQueue' && (
@@ -205,6 +206,10 @@ function MineTab({ canRequestDelete }: { canRequestDelete: boolean }) {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleteNotice, setDeleteNotice] = useState<string | null>(null);
 
+  // P2 §6: server memaginasi. `nextCursor` null = sudah halaman terakhir.
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -215,12 +220,35 @@ function MineTab({ canRequestDelete }: { canRequestDelete: boolean }) {
         source: appliedSource || undefined,
       });
       setRows(res.data);
+      setNextCursor(res.next_cursor);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
   }, [mode, appliedQ, appliedSource]);
+
+  // Menyambung, bukan mengganti — dan cursor selalu dari respons TERAKHIR, jadi
+  // ganti filter (yang memanggil `load` ulang) otomatis mereset paginasinya.
+  async function loadMore() {
+    if (nextCursor === null) return;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const res = await listLeads({
+        mine: mode,
+        q: appliedQ || undefined,
+        source: appliedSource || undefined,
+        cursor: nextCursor,
+      });
+      setRows((prev) => [...(prev ?? []), ...res.data]);
+      setNextCursor(res.next_cursor);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   useEffect(() => {
     load();
@@ -406,6 +434,14 @@ function MineTab({ canRequestDelete }: { canRequestDelete: boolean }) {
           </table>
         </div>
       )}
+      {nextCursor !== null && (
+        <div className="row" style={{ justifyContent: 'center', marginTop: 12 }}>
+          <button type="button" className="btn btnSecondary" disabled={loadingMore} onClick={loadMore}>
+            {loadingMore ? 'Memuat...' : 'Muat lebih banyak'}
+          </button>
+        </div>
+      )}
+
     </section>
   );
 }
@@ -431,18 +467,44 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
   const [appliedQ, setAppliedQ] = useState('');
   const [appliedSource, setAppliedSource] = useState('');
 
+  // P2 §6: server memaginasi. `nextCursor` null = sudah halaman terakhir.
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await listPool({ q: appliedQ || undefined, source: appliedSource || undefined });
       setRows(res.data);
+      setNextCursor(res.next_cursor);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
   }, [appliedQ, appliedSource]);
+
+  // Menyambung, bukan mengganti — dan cursor selalu dari respons TERAKHIR, jadi
+  // ganti filter (yang memanggil `load` ulang) otomatis mereset paginasinya.
+  async function loadMore() {
+    if (nextCursor === null) return;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const res = await listPool({
+        q: appliedQ || undefined,
+        source: appliedSource || undefined,
+        cursor: nextCursor,
+      });
+      setRows((prev) => [...(prev ?? []), ...res.data]);
+      setNextCursor(res.next_cursor);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   useEffect(() => {
     load();
@@ -566,6 +628,14 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
           </table>
         </div>
       )}
+      {nextCursor !== null && (
+        <div className="row" style={{ justifyContent: 'center', marginTop: 12 }}>
+          <button type="button" className="btn btnSecondary" disabled={loadingMore} onClick={loadMore}>
+            {loadingMore ? 'Memuat...' : 'Muat lebih banyak'}
+          </button>
+        </div>
+      )}
+
     </section>
   );
 }
@@ -574,10 +644,12 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
 // Database tab
 // ---------------------------------------------------------------------------
 
-function DatabaseTab({ canRequestDelete }: { canRequestDelete: boolean }) {
+function DatabaseTab({ canRequestDelete, canExport }: { canRequestDelete: boolean; canExport: boolean }) {
   const [rows, setRows] = useState<LeadRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   // Pengajuan hapus inline: alasan WAJIB, jadi tombol per baris tidak bisa
   // langsung mengirim — ia membuka satu baris input di bawah lead-nya.
@@ -594,6 +666,10 @@ function DatabaseTab({ canRequestDelete }: { canRequestDelete: boolean }) {
   const [appliedStatus, setAppliedStatus] = useState('');
   const [appliedSource, setAppliedSource] = useState('');
 
+  // P2 §6: server memaginasi. `nextCursor` null = sudah halaman terakhir.
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -604,12 +680,35 @@ function DatabaseTab({ canRequestDelete }: { canRequestDelete: boolean }) {
         source: appliedSource || undefined,
       });
       setRows(res.data);
+      setNextCursor(res.next_cursor);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
   }, [appliedStatus, appliedQ, appliedSource]);
+
+  // Menyambung, bukan mengganti — dan cursor selalu dari respons TERAKHIR, jadi
+  // ganti filter (yang memanggil `load` ulang) otomatis mereset paginasinya.
+  async function loadMore() {
+    if (nextCursor === null) return;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const res = await listLeads({
+        status: appliedStatus || undefined,
+        q: appliedQ || undefined,
+        source: appliedSource || undefined,
+        cursor: nextCursor,
+      });
+      setRows((prev) => [...(prev ?? []), ...res.data]);
+      setNextCursor(res.next_cursor);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   useEffect(() => {
     load();
@@ -636,6 +735,29 @@ function DatabaseTab({ canRequestDelete }: { canRequestDelete: boolean }) {
       setDeleteError(errorMessage(err));
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  // E2: meneruskan filter yang SUDAH DITERAPKAN (appliedQ/appliedStatus/
+  // appliedSource), bukan draft input yang belum ditekan "Terapkan".
+  //
+  // Sejak P2 §6 tabelnya dipaginasi, jadi isi file = seluruh baris yang cocok
+  // FILTER, bukan cuma halaman yang kebetulan sudah dimuat di layar. Itu yang
+  // benar untuk sebuah export (route `/leads/export` sengaja tidak paginasi),
+  // tapi bedanya perlu dikatakan ke pengguna — lihat catatan di bawah tombol.
+  async function exportCsv() {
+    setExportError(null);
+    setExporting(true);
+    try {
+      await exportLeadsCsv({
+        status: appliedStatus || undefined,
+        q: appliedQ || undefined,
+        source: appliedSource || undefined,
+      });
+    } catch (err) {
+      setExportError(errorMessage(err));
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -677,12 +799,23 @@ function DatabaseTab({ canRequestDelete }: { canRequestDelete: boolean }) {
             Terapkan
           </button>
         </div>
+        {canExport && (
+          <div className="field" style={{ justifyContent: 'flex-end' }}>
+            <label>&nbsp;</label>
+            <button type="button" className="btn btnSecondary btnSm" disabled={exporting} onClick={exportCsv}>
+              {exporting ? 'Mengekspor...' : 'Export CSV'}
+            </button>
+          </div>
+        )}
       </form>
       <p className="muted" style={{ fontSize: 12 }}>
         Baris yang bisa Anda baca ditentukan server (staff = data sendiri). Untuk melihat khusus lead
-        Anda sendiri, buka tab <strong>Lead Saya</strong>.
+        Anda sendiri, buka tab <strong>Lead Saya</strong>. Tabel dimuat bertahap — klik{' '}
+        <strong>Muat lebih banyak</strong> di bawah untuk menambah baris.
+        {canExport && ' Export CSV berisi SEMUA baris yang cocok filter, bukan hanya yang sudah dimuat.'}
       </p>
 
+      {exportError && <div className="alert alertError" role="alert">{exportError}</div>}
       {deleteError && <div className="alert alertError" role="alert">{deleteError}</div>}
       {deleteNotice && <div className="alert alertSuccess" role="status">{deleteNotice}</div>}
       {loading && <p className="muted">Memuat...</p>}
@@ -796,6 +929,14 @@ function DatabaseTab({ canRequestDelete }: { canRequestDelete: boolean }) {
           </table>
         </div>
       )}
+      {nextCursor !== null && (
+        <div className="row" style={{ justifyContent: 'center', marginTop: 12 }}>
+          <button type="button" className="btn btnSecondary" disabled={loadingMore} onClick={loadMore}>
+            {loadingMore ? 'Memuat...' : 'Muat lebih banyak'}
+          </button>
+        </div>
+      )}
+
     </section>
   );
 }

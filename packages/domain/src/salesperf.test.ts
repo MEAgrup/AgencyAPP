@@ -462,3 +462,64 @@ describe('ForbiddenError / ValidationError', () => {
     expect(new ValidationError().message).toBe(MSG_INCOMPLETE);
   });
 });
+
+describeDb('bucketOf recognizes [Unrespon] (L5, Revisi Sales/Creative/Performa)', () => {
+  // Own fixture, own period — deliberately NOT layered onto the shared SLS1
+  // fixture above, so this stays a self-contained regression rather than a
+  // silent dependency on that beforeAll's exact totals.
+  const SLS_UR = 'ZZSP-UR-SLS';
+  const LEAD_UR = 'LEAD-ZZSPUR-0001';
+  const PRSP_UR = 'PRSP-ZZSPUR-0001';
+  const UR_PERIOD = { from: '202607', to: '202607' };
+
+  beforeAll(async () => {
+    if (!sql) return;
+    await sql`
+      insert into employees (employee_id, nama, email, divisi, jabatan, status_aktif, created_by)
+      values (${SLS_UR}, 'ZZSP Unrespon Sales', 'zzsp.ur@example.test', 'SALES', 'SALES JASA', true, 'SYSTEM')
+      on conflict (employee_id) do nothing`;
+    await sql`
+      insert into leads (id, lead_name, phone_number, phone_norm, source, origin_division,
+                         record_status, created_at, created_by)
+      values (${LEAD_UR}, 'ZZSP Unrespon', '0899100099', '62899100099', 'Scouting', 'Sales',
+              'active', '2026-07-01 03:00:00+00', ${SLS_UR})
+      on conflict (id) do nothing`;
+    // The attempt NEVER passes through a 'transition:...->Contacted' row — it
+    // ages straight New Lead -> [Unrespon] (L1), then auto-NQ (L3). Before L5
+    // this attempt would have contributed to nonQualified with ZERO
+    // contribution to contacted, so the funnel could show nonQualified > contacted.
+    await sql`
+      insert into prospect_attempts (id, lead_id, owner_employee_id, status, claimed_at, created_at, created_by)
+      values (${PRSP_UR}, ${LEAD_UR}, ${SLS_UR}, 'Not Qualified', '2026-07-01 03:00:00+00', '2026-07-01 03:00:00+00', 'SISTEM')
+      on conflict (id) do nothing`;
+    await sql`
+      insert into audit_log (entity_type, entity_id, actor_employee_id, action, created_at, created_by) values
+        ('prospect_attempt', ${PRSP_UR}, 'SISTEM', 'transition:New Lead->[Unrespon]', '2026-07-04 03:00:00+00', 'SISTEM'),
+        ('prospect_attempt', ${PRSP_UR}, 'SISTEM', 'transition:[Unrespon]->Not Qualified', '2026-07-18 03:00:00+00', 'SISTEM')
+      on conflict do nothing`;
+    await sql`
+      insert into prospect_attempt_nq_reasons (attempt_id, reason, created_at, created_by)
+      values (${PRSP_UR}, '[Tidak ada respon]', '2026-07-18 03:00:00+00', 'SISTEM')
+      on conflict do nothing`;
+  });
+
+  afterAll(async () => {
+    if (!sql) return;
+    await sql`delete from prospect_attempt_nq_reasons where attempt_id = ${PRSP_UR}`;
+    // audit_log is append-only — the ZZSPUR- rows stay until the next db-rebuild,
+    // same rationale as the shared fixture above.
+    await sql`delete from prospect_attempts where id = ${PRSP_UR}`;
+    await sql`delete from leads where id = ${LEAD_UR}`;
+    await sql`delete from employees where employee_id = ${SLS_UR}`;
+  });
+
+  it('counts the [Unrespon]-only attempt as contacted, not just nonQualified', async () => {
+    const rows = await bySalesperson(sql, director('ZZSPUR-DIR'), {
+      period: UR_PERIOD, salespersonId: SLS_UR, source: null, campaignId: null,
+    });
+    const r = rows.find((row) => row.salespersonId === SLS_UR)!;
+    expect(r.contacted).toBe(1); // was 0 before L5 — bucketOf('[Unrespon]') === null
+    expect(r.nonQualified).toBe(1);
+    expect(r.nqBreakdown).toEqual({ '[Tidak ada respon]': 1 });
+  });
+});

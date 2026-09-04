@@ -1,5 +1,14 @@
 # HANDOFF — LANJUT SEMUA BUILD (peta pekerjaan sisa se-proyek)
 
+> ### 🔴 BLOCKER LIVE BARU (2026-09-04, sesudah PR #287): **4 migrasi menunggu di-apply**
+> `HANDOFF_REVISI_SALES_CREATIVE_PERFORMA_20260904.md` (SESI 4) mendaratkan 13 dari 14
+> tiket rencana Nerissa — `[Unrespon]` lead aging, export CSV Leads, Creative massal,
+> dan empat tiket performa — lewat **PR #287** (`main@24dcbba`). Gate lokal kini
+> **145/40/31/69** (event katalog naik ke v14). **Merge-nya TIDAK menyentuh DB live**,
+> jadi empat migrasi baru masih menunggu `apply_migration` ke `CDPS SG`. Itu pekerjaan
+> pertama sesi berikutnya, menggantikan §0 #1 dokumen ini yang sudah selesai.
+> Satu tiket sengaja ditahan: **P2 §5** (pangkas round-trip `withClaims`).
+>
 > ### ⚠️ BACA `HANDOFF_LANJUT_SEMUA_BUILD_SESI3_20260904.md` LEBIH DULU
 > Sesi paralel menghabiskan **SELURUH §0 nomor 1–3** dokumen ini selagi PR-nya masih
 > draft, lewat PR **#282** (`main@9a55613`) dan **#283/#284/#285** (`main@c28545b`).

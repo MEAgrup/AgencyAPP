@@ -79,6 +79,8 @@ export default function CreativeAssetDetailPage({ params }: { params: Promise<{ 
   const [execSubmitting, setExecSubmitting] = useState(false);
   const [execError, setExecError] = useState<string | null>(null);
   const [execMessage, setExecMessage] = useState<string | null>(null);
+  // Link output (C3, Revisi Sales/Creative/Performa) — field inline, bukan window.prompt.
+  const [submitLinkInput, setSubmitLinkInput] = useState('');
 
   // Review AM (review/approve/request-revision)
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
@@ -221,10 +223,15 @@ export default function CreativeAssetDetailPage({ params }: { params: Promise<{ 
     runExec(() => startAsset(id), 'Asset dimulai');
   }
 
-  function handleSubmit() {
-    const link = window.prompt('Link output hasil kerja (wajib untuk submit):');
-    if (!link) return;
-    runExec(() => submitAsset(id, link), 'Asset disubmit');
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    const link = submitLinkInput.trim();
+    if (link === '') {
+      setExecError('[link output wajib diisi sebelum submit]');
+      return;
+    }
+    await runExec(() => submitAsset(id, link), 'Asset disubmit');
+    setSubmitLinkInput('');
   }
 
   function handleRework() {
@@ -564,33 +571,47 @@ export default function CreativeAssetDetailPage({ params }: { params: Promise<{ 
         {blockMessage && <div className="alert alertSuccess" role="status">{blockMessage}</div>}
 
         {hasExecAction ? (
-          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-            {showStart && (
-              <button type="button" className="btn btnPrimary" disabled={execSubmitting} onClick={handleStart}>
-                {execSubmitting ? 'Memproses...' : 'Mulai Kerjakan'}
-              </button>
-            )}
+          <>
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              {showStart && (
+                <button type="button" className="btn btnPrimary" disabled={execSubmitting} onClick={handleStart}>
+                  {execSubmitting ? 'Memproses...' : 'Mulai Kerjakan'}
+                </button>
+              )}
+              {showRework && (
+                <button type="button" className="btn btnPrimary" disabled={execSubmitting} onClick={handleRework}>
+                  {execSubmitting ? 'Memproses...' : 'Kerjakan Ulang (Rework)'}
+                </button>
+              )}
+              {showResume && (
+                <button type="button" className="btn btnSecondary" disabled={execSubmitting} onClick={handleResume}>
+                  {execSubmitting ? 'Memproses...' : 'Lanjutkan dari Blocked'}
+                </button>
+              )}
+              {showRequestBlock && (
+                <button type="button" className="btn btnDanger" disabled={blockSubmitting} onClick={handleRequestBlock}>
+                  {blockSubmitting ? 'Memproses...' : 'Ajukan Block'}
+                </button>
+              )}
+            </div>
             {showSubmit && (
-              <button type="button" className="btn btnPrimary" disabled={execSubmitting} onClick={handleSubmit}>
-                {execSubmitting ? 'Memproses...' : 'Submit'}
-              </button>
+              <form className="row" style={{ gap: 8, marginTop: 8, alignItems: 'flex-end' }} onSubmit={handleSubmit}>
+                <div className="field" style={{ flex: 1 }}>
+                  <label htmlFor="submit-link">Link output hasil kerja</label>
+                  <input
+                    id="submit-link"
+                    type="text"
+                    value={submitLinkInput}
+                    onChange={(e) => setSubmitLinkInput(e.target.value)}
+                    placeholder="https://drive.google.com/..."
+                  />
+                </div>
+                <button type="submit" className="btn btnPrimary" disabled={execSubmitting}>
+                  {execSubmitting ? 'Memproses...' : 'Submit'}
+                </button>
+              </form>
             )}
-            {showRework && (
-              <button type="button" className="btn btnPrimary" disabled={execSubmitting} onClick={handleRework}>
-                {execSubmitting ? 'Memproses...' : 'Kerjakan Ulang (Rework)'}
-              </button>
-            )}
-            {showResume && (
-              <button type="button" className="btn btnSecondary" disabled={execSubmitting} onClick={handleResume}>
-                {execSubmitting ? 'Memproses...' : 'Lanjutkan dari Blocked'}
-              </button>
-            )}
-            {showRequestBlock && (
-              <button type="button" className="btn btnDanger" disabled={blockSubmitting} onClick={handleRequestBlock}>
-                {blockSubmitting ? 'Memproses...' : 'Ajukan Block'}
-              </button>
-            )}
-          </div>
+          </>
         ) : (
           <p className="muted">Tidak ada aksi eksekusi yang tersedia untuk Anda pada status ini.</p>
         )}

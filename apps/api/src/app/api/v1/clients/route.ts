@@ -9,6 +9,7 @@
  * with an undefined list. See DECISIONS O43 for the open question about whether
  * these rows should carry Go's full clientView instead of this projection.
  */
+import { page } from '@cdps/core';
 import { client } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
 import { readAsActor } from '@/lib/db';
@@ -18,7 +19,10 @@ import { clientListRowToWire } from '@/lib/wire';
 export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
     const actor = requireActor(request);
-    const clients = await readAsActor(actor, (sql) => client.listClients(sql));
-    return json({ data: clients.map(clientListRowToWire) });
+    // P2 §6: paged (?limit=, ?cursor=).
+    const params = new URL(request.url).searchParams;
+    const req = page.parseRequest(params.get('limit'), params.get('cursor'));
+    const result = await readAsActor(actor, (sql) => client.listClients(sql, req));
+    return json({ data: result.rows.map(clientListRowToWire), next_cursor: result.nextCursor });
   });
 }

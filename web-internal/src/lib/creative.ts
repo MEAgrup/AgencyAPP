@@ -254,6 +254,99 @@ export function listBriefAssets(briefId: string): Promise<{ data: Asset[] }> {
   return api.get<{ data: Asset[] }>(`/briefs/${briefId}/assets`);
 }
 
+// ---------------------------------------------------------------------------
+// Submit Output Massal (C2/C3, Revisi Sales/Creative/Performa) — submit/start
+// many Assets of one Brief at once, replacing one window.prompt per Asset.
+// ---------------------------------------------------------------------------
+
+/** One requested line: an Asset id + (submit only) its output link. */
+export interface AssetExecLine {
+  asset_id: string;
+  output_link?: string;
+}
+
+/** One row's verdict in a batch report — every key always present. */
+export interface AssetExecRowResult {
+  row_number: number;
+  asset_id: string;
+  sequence_no: number;
+  applied: boolean;
+  from_status: string;
+  to_status: string;
+  reason: string;
+}
+
+/** The full report of one submit-batch/start-batch/review-batch/approve-batch call. */
+export interface AssetExecBatchReport {
+  applied: number;
+  rejected: number;
+  brief_id: string;
+  brief_status: string;
+  rows: AssetExecRowResult[];
+  rejections: AssetExecRowResult[];
+}
+
+/** Submit many [In Progress] Assets to [Submitted] at once. All-or-nothing —
+ *  see AssetExecBatchReport.rejections for what to fix and resubmit. */
+export function submitAssetBatch(briefId: string, lines: AssetExecLine[]): Promise<AssetExecBatchReport> {
+  return api.post<AssetExecBatchReport>(`/briefs/${briefId}/assets/submit-batch`, { rows: lines });
+}
+
+/** Start many [To Do] Assets ([In Progress]) at once — a separate action from
+ *  submit (Turnaround/Speed Score depend on the two timestamps staying distinct). */
+export function startAssetBatch(briefId: string, assetIds: string[]): Promise<AssetExecBatchReport> {
+  return api.post<AssetExecBatchReport>(`/briefs/${briefId}/assets/start-batch`, {
+    rows: assetIds.map((asset_id) => ({ asset_id })),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Review & Approve Massal (C4, Revisi Sales/Creative/Performa) — the AM's side
+// of the batch screen: review many [Submitted] Assets, approve many
+// [In Review] Assets, one screen instead of one window.prompt per Asset.
+// ---------------------------------------------------------------------------
+
+/** Review many [Submitted] Assets ([In Review]) at once. All-or-nothing. */
+export function reviewAssetBatch(briefId: string, assetIds: string[]): Promise<AssetExecBatchReport> {
+  return api.post<AssetExecBatchReport>(`/briefs/${briefId}/assets/review-batch`, {
+    rows: assetIds.map((asset_id) => ({ asset_id })),
+  });
+}
+
+/** Approve many [In Review] Assets ([Approved]) at once — a separate door from
+ *  review (§4 Flow 3: review and approve are distinct actions). All-or-nothing. */
+export function approveAssetBatch(briefId: string, assetIds: string[]): Promise<AssetExecBatchReport> {
+  return api.post<AssetExecBatchReport>(`/briefs/${briefId}/assets/approve-batch`, {
+    rows: assetIds.map((asset_id) => ({ asset_id })),
+  });
+}
+
+/** distributeLinks' result: what actually landed on rows, and what didn't fit. */
+export interface DistributeLinksResult {
+  /** Up to `rowCount` links, in paste order — index i goes to submittable row i. */
+  links: string[];
+  /** Total non-blank lines found in the pasted text. */
+  totalPasted: number;
+  /** How many pasted links had no row left to go to (`totalPasted - links.length`, floored at 0). */
+  leftover: number;
+}
+
+/**
+ * distributeLinks (C3) splits pasted text into one link per line — trimmed,
+ * blank lines dropped, capped at `rowCount` — so pasting 30 links into a
+ * textarea fills 30 submit rows in one paste instead of one field at a time.
+ * Pure and DOM-free on purpose: this repo tests UI logic this way (no jsdom
+ * dependency), not by simulating the paste event itself.
+ */
+export function distributeLinks(pasted: string, rowCount: number): DistributeLinksResult {
+  const all = pasted
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const links = all.slice(0, Math.max(0, rowCount));
+  return { links, totalPasted: all.length, leftover: Math.max(0, all.length - rowCount) };
+}
+
 // module7_creative.MyAssetQueueItem — the personal Asset queue (M7 §3 Rule 2:
 // "all Assets assigned to them, across all Briefs/clients, sorted by due date").
 // due_date / sla_* arrive as JSON `null` when unset (not omitted) — this is a
