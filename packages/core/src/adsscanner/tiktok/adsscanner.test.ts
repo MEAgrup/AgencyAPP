@@ -303,21 +303,29 @@ describe('skor.ts — bucket routing (all 6 rules)', () => {
   const gate = (konten: number) => baseSkuBase({ crVid: konten });
 
   it('DIBLOKIR — blocked (inactive status) wins regardless of gate/ad spend', () => {
-    // NOTE: the tool's own inactive-status check is `!/aktif/i.test(status)`
-    // — a bare substring test with no word-boundary, so any status
-    // containing the letters "aktif" (which includes "Nonaktif" and
-    // "Dinonaktifkan" — the negated forms!) reads as ACTIVE, not blocked.
-    // That looks like a latent bug in the tool, ported faithfully (not in
-    // this pass's required-fix list) and flagged in the porting report for
-    // a human to confirm against real TikTok Seller Center status strings.
-    // This test uses a status word the check DOES catch, to test the
-    // blocker branch as actually written.
     const s = { ...gate(1000), status: 'Dihapus', adCost: 500000 };
     expect(scoreSku(s, baseCtx()).bucket).toBe('DIBLOKIR');
   });
-  it('FLAGGED — "Nonaktif" contains "aktif" as a substring, so the tool\'s own regex does NOT treat it as inactive (ported as-is, see note above)', () => {
-    const s = { ...gate(1000), status: 'Nonaktif', adCost: 500000 };
+  it('active status ("Aktif") is not blocked', () => {
+    const s = { ...gate(1000), status: 'Aktif', adCost: 500000 };
     expect(scoreSku(s, baseCtx()).blockers).toEqual([]);
+  });
+  // Regression for handoff docs/handoff/HANDOFF_LANJUT_SEMUA_BUILD_20260904.md
+  // §1.3: the tool's original check was a bare `/aktif/i` substring test
+  // with no word boundary, so "Nonaktif"/"Dinonaktifkan" (they contain the
+  // letters "aktif" too) read as ACTIVE and were never blocked. Fixed to
+  // `\baktif\b` — these two now correctly land in DIBLOKIR.
+  it('DIBLOKIR — "Nonaktif" is correctly read as inactive, not as containing "aktif"', () => {
+    const s = { ...gate(1000), status: 'Nonaktif', adCost: 500000 };
+    const scored = scoreSku(s, baseCtx());
+    expect(scored.blockers).toEqual(['Produk tidak aktif (Nonaktif)']);
+    expect(scored.bucket).toBe('DIBLOKIR');
+  });
+  it('DIBLOKIR — "Dinonaktifkan" is correctly read as inactive, not as containing "aktif"', () => {
+    const s = { ...gate(1000), status: 'Dinonaktifkan', adCost: 500000 };
+    const scored = scoreSku(s, baseCtx());
+    expect(scored.blockers).toEqual(['Produk tidak aktif (Dinonaktifkan)']);
+    expect(scored.bucket).toBe('DIBLOKIR');
   });
 
   it('DIBLOKIR — blacklisted product ID', () => {
