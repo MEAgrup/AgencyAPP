@@ -18,6 +18,7 @@ import { createCampaign, type CampaignInput } from './ads';
 import { ConflictError, ForbiddenError, ValidationError } from './account';
 import {
   createReportShopee,
+  listShopeeAdsCampaignsForPeriod,
   MSG_BISNIS_HOME_WAJIB,
   MSG_PERIODE_LABEL_WAJIB,
   MSG_PERIODE_TAK_TERBACA,
@@ -310,5 +311,127 @@ describeDb('SH-06 — auto Metric Entry (MTR-) from the report\'s combined Ads n
     // this gated the same way as a manual logMetricEntry call.
     await createReportShopee(sql, actorAm, client, bulanInput(pid));
     expect(await metricEntriesOf(campaign)).toHaveLength(1);
+  });
+});
+
+describeDb('listShopeeAdsCampaignsForPeriod — the exclude-campaign picker (SH-06 UI)', () => {
+  it('returns exactly the campaigns the split would touch, with display fields', async () => {
+    const client = await seedClient();
+    const inWindow = await activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31');
+    const partial = await activeShopeeAdsCampaign(client, '2026-08-15', '2026-09-15');
+    const outside = await activeShopeeAdsCampaign(client, '2026-01-01', '2026-01-31');
+    const rows = await listShopeeAdsCampaignsForPeriod(sql, actorAm, client, '2026-08-01', '2026-08-31');
+    const ids = rows.map((r) => r.id);
+    expect(ids).toContain(inWindow);
+    expect(ids).toContain(partial); // partial overlap counts, same as the split
+    expect(ids).not.toContain(outside);
+    const one = rows.find((r) => r.id === inWindow)!;
+    expect(one.tipeIklan).toBe('GMV Max Product');
+    expect(one.startDate).toBe('2026-08-01');
+    expect(one.endDate).toBe('2026-08-31');
+    // House rule #7 — money crosses this boundary formatted, never raw.
+    expect(one.budget).toBe('Rp. 8.000.000,00');
+  });
+
+  it('agrees with the split it describes: a [Paused] campaign is offered by neither', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    const paused = await activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31');
+    await sql`update ad_campaigns set status = '[Paused]' where id = ${paused}`;
+    expect(await listShopeeAdsCampaignsForPeriod(sql, actorAm, client, '2026-08-01', '2026-08-31')).toEqual([]);
+    await createReportShopee(sql, actorAm, client, bulanInput(pid));
+    expect(await metricEntriesOf(paused)).toHaveLength(0);
+  });
+
+  it('an empty window is an empty list, not an error — the report is still creatable', async () => {
+    const client = await seedClient();
+    expect(await listShopeeAdsCampaignsForPeriod(sql, actorAm, client, '2026-08-01', '2026-08-31')).toEqual([]);
+  });
+
+  it('rejects a missing or inverted period with the exact BI message', async () => {
+    const client = await seedClient();
+    await expect(listShopeeAdsCampaignsForPeriod(sql, actorAm, client, '', '2026-08-31'))
+      .rejects.toThrow(MSG_PERIODE_TAK_TERBACA);
+    await expect(listShopeeAdsCampaignsForPeriod(sql, actorAm, client, '2026-08-31', '2026-08-01'))
+      .rejects.toThrow(MSG_PERIODE_TAK_TERBACA);
+  });
+
+  it('is READ scope, not write scope: an OD may look, a foreign AM may not', async () => {
+    const client = await seedClient();
+    await activeShopeeAdsCampaign(client, '2026-08-01', '2026-08-31');
+    const od = { employeeId: 'ZZRS-OD', role: permission.makeRole({ division: 'Account', level: 'staff', od: true }) };
+    expect(await listShopeeAdsCampaignsForPeriod(sql, od, client, '2026-08-01', '2026-08-31')).toHaveLength(1);
+    const stray = { employeeId: 'ZZRS-OTHER', role: permission.makeRole({ division: 'Account', level: 'staff' }) };
+    await expect(listShopeeAdsCampaignsForPeriod(sql, stray, client, '2026-08-01', '2026-08-31'))
+      .rejects.toThrow(ForbiddenError);
+  });
+});
+
+describeDb('SHP-1 — gmv_kotor (Pesanan Dibuat) vs gmv_net (Pesanan Dibayar)', () => {
+  /**
+   * The real export's shape: the same table once per order status, each behind
+   * its own `__SHEET__:` marker (what `parseShopeeExportFile` emits). Ratios
+   * mirror Fim Motor — paid well below created because of cancellations.
+   */
+  const homeTigaBagian = (): unknown[][] => [
+    ['__SHEET__:Pesanan Dibuat'],
+    HOME_HEADER,
+    ['Total', 'Rp100.000.000', '1.000', 'Rp100.000', '5.000', '50.000', '2,00%', '200', 'Rp18.000.000', '10', 'Rp1.000.000', '900', '300', '600', '50', '20,00%'],
+    ['01/08/2026', 'Rp3.000.000', '30', 'Rp100.000', '150', '2.000', '1,50%', '2', 'Rp50.000', '0', 'Rp0', '25', '10', '15', '2', '10,00%'],
+    ['__SHEET__:Pesanan Siap Dikirim'],
+    HOME_HEADER,
+    ['Total', 'Rp93.000.000', '930', 'Rp100.000', '5.000', '50.000', '1,86%', '20', 'Rp2.000.000', '5', 'Rp500.000', '860', '280', '580', '50', '19,00%'],
+    ['__SHEET__:Pesanan Dibayar'],
+    HOME_HEADER,
+    ['Total', 'Rp82.000.000', '820', 'Rp100.000', '5.000', '50.000', '1,64%', '0', 'Rp0', '0', 'Rp0', '790', '260', '530', '50', '18,00%'],
+  ];
+  const homeTigaFile = () => ({
+    filename: '[bisnis]-Home && Agustus 2026 && ZZRS && 2026-09-01.xlsx',
+    aoa: homeTigaBagian(), sha256: SHA, ukuranBytes: 4096,
+  });
+
+  const totalSalesOf = async (client: string): Promise<number> => {
+    const r = await sql<{ total_sales: string }[]>`select total_sales from clients where id = ${client}`;
+    return Number(r[0].total_sales);
+  };
+
+  it('stores the two figures SEPARATELY — kotor = dibuat, bersih = dibayar', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    const d = await createReportShopee(sql, actorAm, client, bulanInput(pid, [homeTigaFile()]));
+    expect(d.gmvKotor).toBeCloseTo(100_000_000, 0);
+    expect(d.gmvNet).toBeCloseTo(82_000_000, 0);
+    // The whole point of SHP-1: these are no longer the same number.
+    expect(d.gmvNet).not.toBeCloseTo(d.gmvKotor, 0);
+  });
+
+  it('clients.total_sales follows the PAID figure — that is what Health Score M13 reads', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    await createReportShopee(sql, actorAm, client, bulanInput(pid, [homeTigaFile()]));
+    // 31-day monthly period → run-rate == the period figure, so total_sales is
+    // the paid number, not the gross one.
+    expect(await totalSalesOf(client)).toBeCloseTo(82_000_000, 0);
+  });
+
+  it('payload records WHERE the net figure came from', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    const d = await createReportShopee(sql, actorAm, client, bulanInput(pid, [homeTigaFile()]));
+    const p = d.payload as { periode: { gmv_bersih_sumber: string }; kpi: { dibayar: { gmv: number } | null } };
+    expect(p.periode.gmv_bersih_sumber).toBe('pesanan_dibayar');
+    expect(p.kpi.dibayar?.gmv).toBeCloseTo(82_000_000, 0);
+  });
+
+  it('a two-section export falls back to gross AND says so — never gross silently labelled net', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    const d = await createReportShopee(sql, actorAm, client, bulanInput(pid, [homeFile()]));
+    // The fixture homeFile() has only "Pesanan Dibuat".
+    expect(d.gmvNet).toBeCloseTo(100_000_000, 0);
+    expect(d.gmvKotor).toBeCloseTo(100_000_000, 0);
+    const p = d.payload as { periode: { gmv_bersih_sumber: string }; kpi: { dibayar: unknown } };
+    expect(p.periode.gmv_bersih_sumber).toBe('tidak_tersedia');
+    expect(p.kpi.dibayar).toBeNull();
   });
 });

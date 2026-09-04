@@ -23,6 +23,7 @@
  * `[Bermasalah]` transaction, M5-OA-5, without owning the Finance queue).
  */
 import { EMBEDDED_TOOLS } from './embedded-tools';
+import { canUseSkuScreener } from './skuscreener';
 import type { Role } from './types';
 
 export interface NavItem {
@@ -214,6 +215,14 @@ const DELIVERY_LINKS: NavItem[] = [
   // The four bespoke division Brief-queue boards — see divisionQueue().
   { href: '/creative', label: 'Creative', access: divisionQueue(CREATIVE) },
   { href: '/ads', label: 'Ads', access: divisionQueue(ADS) },
+  // Gelombang 3 (PLAN_KONSOLIDASI_ALAT_ADVERTISER §6): the SKU Screener is the
+  // Ads division's own pre-campaign tool, not a Brief queue — so it does NOT
+  // use divisionQueue() (which lets an Account lead in for dispatch
+  // monitoring). Its gate is `canUseSkuScreener`, the SAME predicate
+  // `/ads/screening` guards itself with: Ads staff/lead (server write gate
+  // `skuscreener.canWriteSku`) plus Director/OD (read-everywhere, Role Matrix
+  // §4). One predicate, no drift — the posture `embedded-tools.ts` takes.
+  { href: '/ads/screening', label: 'Screening SKU', access: canUseSkuScreener },
   { href: '/kol', label: 'KOL', access: divisionQueue(KOL) },
   { href: '/livestream', label: 'Live Stream', access: divisionQueue(LIVE_STREAM) },
   // AI Optimizer / Store Operation (M16/M17, DECISIONS.md 2026-09-01): same

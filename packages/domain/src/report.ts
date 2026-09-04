@@ -593,11 +593,31 @@ export async function createReportShopee(sql: Sql, actor: Actor, clientId: strin
       periode,
     });
 
-    // The Shopee tool's own `definisi_gmv` is 'gross' (payload.ts) — it never
-    // produced a separate net figure the way TikTok's engine does, so
-    // gmv_kotor == gmv_net here. Not a bug: there is no second number to store.
-    const gmvNet = round2(result.payload.kpi.gmv ?? 0);
-    const gmvKotor = gmvNet;
+    // SHP-1 (owner decision 2026-09-03, after the Fim Motor UAT). The Bisnis —
+    // Home export carries the same table per order status, and the engine now
+    // reads all three (`reportShopee.parseBisnisHome`):
+    //
+    //   gmv_kotor = Pesanan DIBUAT  — the headline Seller Centre shows;
+    //   gmv_net   = Pesanan DIBAYAR — money that actually arrived.
+    //
+    // This matters beyond the report: `gmv_runrate_bulanan` derives from
+    // `gmvNet`, and `recomputeTotalSales` reads that column into
+    // `clients.total_sales`, which Health Score M13 reads in turn. So the owner
+    // choosing "bersih = dibayar" moves the client's health score onto paid
+    // money — deliberately, and only for reports created from here on (the
+    // table is frozen; old rows are never rewritten).
+    //
+    // For the Fim Motor export the two differ by Rp 295.710.122 (18,2%): the
+    // gross figure included Rp 359.295.534 of cancelled orders.
+    //
+    // FALLBACK, stated rather than silent: an export with no Pesanan Dibayar
+    // section (older exports, and the engine's own two-section fixtures) leaves
+    // `kpi.dibayar` null. Net then falls back to the gross figure — the only
+    // number that exists — and `payload.periode.gmv_bersih_sumber` records
+    // `tidak_tersedia` so both the renderer and any later reader can tell this
+    // row's "net" apart from a genuinely paid-based one.
+    const gmvKotor = round2(result.payload.kpi.gmv ?? 0);
+    const gmvNet = round2(result.payload.kpi.dibayar?.gmv ?? result.payload.kpi.gmv ?? 0);
     const runrate = round2(report.gmvRunRateBulanan(gmvNet, input.periodeTipe, hari));
 
     // Same house invariant as createReport (TikTok) — raw upload rows are
@@ -1191,4 +1211,63 @@ export async function revokeReport(sql: Sql, actor: Actor, reportId: number, ala
     await pubTransition(tx, actor, reportId, STATUS_DICABUT);
     return publikasiOf(tx, reportId);
   });
+}
+
+/**
+ * One active `Shopee Ads` campaign the report's ads figure would be split
+ * across (SH-06). `budget` is the house-formatted string (rule #7), not a
+ * number — the form only displays it, and every other money field crossing
+ * this boundary is already a formatted string.
+ */
+export interface ShopeeAdsCampaignOption {
+  id: string;
+  objective: string;
+  tipeIklan: string;
+  startDate: string;
+  endDate: string;
+  budget: string;
+}
+
+/**
+ * The active `Shopee Ads` campaigns whose dates overlap a period — i.e. exactly
+ * the set `attributeShopeeAdsMetricEntries` would split this report's combined
+ * ads spend/omzet across (SH-06).
+ *
+ * A read for the upload form's "exclude campaign" list, and deliberately the
+ * SAME predicate the split itself uses (`findOverlappingShopeeAdsCampaigns`,
+ * `ads.ts`): the AM must not be offered a list assembled by a second copy of
+ * "which campaigns overlap", because a copy can disagree with the split it is
+ * supposed to describe. This function only adds the DISPLAY columns on top of
+ * the ids that predicate returns.
+ *
+ * Read scope, not write scope: `canReadReport`, same as `listReports` — seeing
+ * which campaigns a report would touch is a read, and an OD must be able to
+ * check it without being able to create the report.
+ */
+export async function listShopeeAdsCampaignsForPeriod(
+  sql: Queryable, actor: Actor, clientId: string, periodeMulai: string, periodeAkhir: string,
+): Promise<ShopeeAdsCampaignOption[]> {
+  const ownerAm = await ownerAmOfClient(sql, clientId);
+  if (!canReadReport(actor, ownerAm)) throw new ForbiddenError(MSG_FORBIDDEN);
+  const mulai = (periodeMulai ?? '').trim();
+  const akhir = (periodeAkhir ?? '').trim();
+  if (!mulai || !akhir || report.hariAntara(mulai, akhir) <= 0) {
+    throw new ValidationError(MSG_PERIODE_TAK_TERBACA);
+  }
+  const overlapping = await findOverlappingShopeeAdsCampaigns(sql, clientId, mulai, akhir);
+  if (overlapping.length === 0) return [];
+  const ids = overlapping.map((c) => c.id);
+  const rows = await sql<Record<string, unknown>[]>`
+    select id, objective, tipe_iklan, start_date, end_date, budget
+      from ad_campaigns
+     where id = any(${ids})
+     order by id`;
+  return rows.map((r) => ({
+    id: r.id as string,
+    objective: r.objective as string,
+    tipeIklan: r.tipe_iklan as string,
+    startDate: dateStr(r.start_date),
+    endDate: dateStr(r.end_date),
+    budget: money.format(money.parse(String(r.budget))),
+  }));
 }

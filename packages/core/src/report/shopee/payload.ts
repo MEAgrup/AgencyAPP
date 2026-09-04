@@ -62,6 +62,7 @@ const penaltiRingkas = (x: KesehatanToko['penalti'][number]) => ({ poin: x.poin,
 export function buildShopeeReportPayload(M: ShopeeMetrics, sk: Skor, I: Insights, opts: PayloadOptionsShopee) {
   const k = M.kpi_utama.pesanan_dibuat;
   const s = M.kpi_utama.pesanan_siap_dikirim;
+  const b = M.kpi_utama.pesanan_dibayar;
   const kanalArr = Object.entries(M.kanal.kanal).sort((a, b) => b[1].nilai - a[1].nilai);
   return {
     schema: 'cdps.report.shopee.v1' as const,
@@ -69,12 +70,24 @@ export function buildShopeeReportPayload(M: ShopeeMetrics, sk: Skor, I: Insights
     generated_at: opts.generatedAt,
     sumber: 'MEA CDPS Report Engine v1 — export Shopee Seller Centre & Ads Center',
     klien: { ...opts.klien },
-    periode: { label: opts.periode, definisi_gmv: 'gross' as const },
+    periode: {
+      label: opts.periode,
+      // `gross` describes `kpi.gmv` (orders CREATED) — unchanged, owner decision
+      // SHP-1 keeps that as the headline. `gmv_bersih_sumber` says where the NET
+      // figure came from, so a report built from an export WITHOUT the paid
+      // section never silently presents gross as net.
+      definisi_gmv: 'gross' as const,
+      gmv_bersih_sumber: (b ? 'pesanan_dibayar' : 'tidak_tersedia') as 'pesanan_dibayar' | 'tidak_tersedia',
+    },
     kpi: {
       gmv: r(k.gmv), pesanan: r(k.pesanan), aov: r(k.aov), pengunjung: r(k.pengunjung), cvr: fx(k.cr, 5),
       produk_diklik: r(k.produk_diklik), pembeli: r(k.pembeli), pembeli_baru: r(k.pembeli_baru), repeat_rate: fx(k.repeat_rate, 4),
       batal_pesanan: r(k.batal_pesanan), batal_nilai: r(k.batal_nilai), retur_pesanan: r(k.retur_pesanan), retur_nilai: r(k.retur_nilai),
       siap_kirim: { gmv: r(s.gmv), pesanan: r(s.pesanan), cvr: fx(s.cr, 5) },
+      // SHP-1 — orders PAID. `null` when the export has no such section, which
+      // is what `periode.gmv_bersih_sumber` reports; the renderer then says so
+      // instead of printing the gross figure under a "bersih" label.
+      dibayar: b ? { gmv: r(b.gmv), pesanan: r(b.pesanan), cvr: fx(b.cr, 5) } : null,
       harian: M.daily.map((d) => ({ tanggal: d.tanggal, gmv: r(d.nilai.penjualan), pesanan: r(d.nilai.pesanan) })),
     },
     kanal: { gmv: r(M.kanal.gmv_total), items: kanalArr.map(([nama, v]) => ({ nama, nilai: r(v.nilai), persen: fx(v.persen, 4) })) },

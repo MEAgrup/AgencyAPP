@@ -8,6 +8,20 @@
  * (`parseExportFile`, reused from Riset Awal); the server detects each file,
  * runs the engine, stores the report, and rewrites `clients.total_sales`. The
  * rendered report is downloaded as HTML in Klien or Internal mode.
+ *
+ * ## Two engines, one panel
+ *
+ * Gelombang 2 added a second engine (`cdps.report.shopee.v1`). Its inputs differ
+ * enough from TikTok's that the form is its own component (`ShopeeReportForm`
+ * — see its header). This panel owns what both share: the store picker, the
+ * period type, and the report list with the insight editor and publication
+ * badges below.
+ *
+ * The engine is CHOSEN, not inferred. `client_platforms.platform` is free text
+ * (M4 rows can even read "TikTok Shop, Shopee"), and neither report endpoint
+ * checks it against the engine — so guessing silently would post a Shopee
+ * workbook at the TikTok parser on a badly named store. The radio is
+ * pre-selected from the store name and stays the AM's to change.
  */
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { errorMessage } from '@/lib/api';
@@ -25,6 +39,7 @@ import {
 } from '@/lib/report';
 import { type Platform } from '@/lib/clients';
 import InsightEditor from '@/components/clients/InsightEditor';
+import ShopeeReportForm from '@/components/clients/ShopeeReportForm';
 
 /** AM file-type override, '' = let the server detect (own-vs-affiliate ambiguity). */
 const TIPE_OVERRIDE_OPTIONS: Array<{ value: string; label: string }> = [
@@ -37,6 +52,17 @@ const TIPE_OVERRIDE_OPTIONS: Array<{ value: string; label: string }> = [
 
 interface UploadedFile extends ParsedExport {
   tipe: string;
+}
+
+type Engine = 'tiktok' | 'shopee';
+
+/**
+ * Pre-select the engine from the store name. A guess, and treated as one — the
+ * AM can override it, because `platform` is free text and a combined row
+ * ("TikTok Shop, Shopee") matches both.
+ */
+function engineFor(platform: string | undefined): Engine {
+  return (platform ?? '').toLowerCase().includes('shopee') ? 'shopee' : 'tiktok';
 }
 
 function rupiah(v: number | null): string {
@@ -76,6 +102,7 @@ export default function ReportPanel({ clientId, platforms }: { clientId: string;
   const [statusMap, setStatusMap] = useState<Record<number, string>>({});
 
   const [platformId, setPlatformId] = useState<number>(active[0]?.client_platform_id ?? 0);
+  const [engine, setEngine] = useState<Engine>(engineFor(active[0]?.platform));
   const [tipe, setTipe] = useState<PeriodeTipe>('bulanan');
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [net, setNet] = useState(true);
@@ -180,13 +207,41 @@ export default function ReportPanel({ clientId, platforms }: { clientId: string;
 
           <div className="field">
             <label>Toko</label>
-            <select value={platformId} disabled={saving} onChange={(e) => setPlatformId(Number(e.target.value))}>
+            <select
+              value={platformId}
+              disabled={saving}
+              onChange={(e) => {
+                const id = Number(e.target.value);
+                setPlatformId(id);
+                // Re-guess on every store change: switching to a Shopee store and
+                // silently keeping the TikTok form is the exact mistake the radio
+                // exists to prevent.
+                setEngine(engineFor(active.find((p) => p.client_platform_id === id)?.platform));
+              }}
+            >
               {active.map((p) => (
                 <option key={p.client_platform_id} value={p.client_platform_id}>
                   {p.platform}
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="field">
+            <label>Mesin laporan</label>
+            <div style={{ display: 'flex', gap: 16 }}>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input type="radio" name="engine" checked={engine === 'tiktok'} disabled={saving}
+                  onChange={() => setEngine('tiktok')} /> TikTok Shop
+              </label>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input type="radio" name="engine" checked={engine === 'shopee'} disabled={saving}
+                  onChange={() => setEngine('shopee')} /> Shopee
+              </label>
+            </div>
+            <span className="muted" style={{ fontSize: 12 }}>
+              Terpilih dari nama toko; ganti bila salah. Export Shopee tidak terbaca mesin TikTok dan sebaliknya.
+            </span>
           </div>
 
           <div className="field">
@@ -203,88 +258,99 @@ export default function ReportPanel({ clientId, platforms }: { clientId: string;
             </div>
           </div>
 
-          <div className="field">
-            <label>Export dari Seller Center / Ads Manager (.xlsx)</label>
-            <input
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              multiple
-              disabled={parsing || saving}
-              onChange={(e) => {
-                void onPick(e.target.files);
-                e.target.value = '';
-              }}
-            />
-            {parsing && <span className="muted" style={{ fontSize: 12 }}>Membaca berkas…</span>}
-          </div>
-
-          {files.length > 0 && (
-            <table className="table" style={{ fontSize: 13 }}>
-              <thead>
-                <tr>
-                  <th>Berkas</th>
-                  <th>Ukuran</th>
-                  <th>Tipe (jika perlu)</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {files.map((f, i) => (
-                  <tr key={`${f.filename}-${f.sha256.slice(0, 8)}-${i}`}>
-                    <td>{f.filename}</td>
-                    <td className="muted">{Math.round(f.ukuran_bytes / 1024)} KB</td>
-                    <td>
-                      <select
-                        value={f.tipe}
-                        disabled={saving}
-                        onChange={(e) => setFiles((prev) => prev.map((x, idx) => (idx === i ? { ...x, tipe: e.target.value } : x)))}
-                        style={{ fontSize: 12, padding: '4px 8px' }}
-                      >
-                        {TIPE_OVERRIDE_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>{o.label}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btnGhost btnSm"
-                        disabled={saving}
-                        onClick={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))}
-                      >
-                        hapus
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-
-          <div className="field">
-            <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input type="checkbox" checked={net} disabled={saving} onChange={(e) => setNet(e.target.checked)} />
-              GMV Bersih (net — standar MEA)
-            </label>
-          </div>
-
-          <div className="field">
-            <label>Akun TikTok toko sendiri (dipisah koma — untuk memisahkan afiliasi)</label>
-            <input value={linked} disabled={saving} placeholder="@tokoklien, @tokoklien.id"
-              onChange={(e) => setLinked(e.target.value)} />
-          </div>
-
-          <div className="field">
-            <label>Periode (opsional — hanya dipakai bila rentang tak terbaca dari berkas)</label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input type="date" value={periodeMulai} disabled={saving} onChange={(e) => setPeriodeMulai(e.target.value)} />
-              <input type="date" value={periodeAkhir} disabled={saving} onChange={(e) => setPeriodeAkhir(e.target.value)} />
+          {engine === 'tiktok' ? (
+            <>
+            <div className="field">
+              <label>Export dari Seller Center / Ads Manager (.xlsx)</label>
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                multiple
+                disabled={parsing || saving}
+                onChange={(e) => {
+                  void onPick(e.target.files);
+                  e.target.value = '';
+                }}
+              />
+              {parsing && <span className="muted" style={{ fontSize: 12 }}>Membaca berkas…</span>}
             </div>
-          </div>
 
-          <button type="button" className="btn btnPrimary btnSm" disabled={saving || parsing} onClick={submit}>
-            {saving ? 'Membuat laporan…' : 'Buat Laporan'}
-          </button>
+            {files.length > 0 && (
+              <table className="table" style={{ fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    <th>Berkas</th>
+                    <th>Ukuran</th>
+                    <th>Tipe (jika perlu)</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {files.map((f, i) => (
+                    <tr key={`${f.filename}-${f.sha256.slice(0, 8)}-${i}`}>
+                      <td>{f.filename}</td>
+                      <td className="muted">{Math.round(f.ukuran_bytes / 1024)} KB</td>
+                      <td>
+                        <select
+                          value={f.tipe}
+                          disabled={saving}
+                          onChange={(e) => setFiles((prev) => prev.map((x, idx) => (idx === i ? { ...x, tipe: e.target.value } : x)))}
+                          style={{ fontSize: 12, padding: '4px 8px' }}
+                        >
+                          {TIPE_OVERRIDE_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btnGhost btnSm"
+                          disabled={saving}
+                          onClick={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                        >
+                          hapus
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            <div className="field">
+              <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input type="checkbox" checked={net} disabled={saving} onChange={(e) => setNet(e.target.checked)} />
+                GMV Bersih (net — standar MEA)
+              </label>
+            </div>
+
+            <div className="field">
+              <label>Akun TikTok toko sendiri (dipisah koma — untuk memisahkan afiliasi)</label>
+              <input value={linked} disabled={saving} placeholder="@tokoklien, @tokoklien.id"
+                onChange={(e) => setLinked(e.target.value)} />
+            </div>
+
+            <div className="field">
+              <label>Periode (opsional — hanya dipakai bila rentang tak terbaca dari berkas)</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input type="date" value={periodeMulai} disabled={saving} onChange={(e) => setPeriodeMulai(e.target.value)} />
+                <input type="date" value={periodeAkhir} disabled={saving} onChange={(e) => setPeriodeAkhir(e.target.value)} />
+              </div>
+            </div>
+
+            <button type="button" className="btn btnPrimary btnSm" disabled={saving || parsing} onClick={submit}>
+              {saving ? 'Membuat laporan…' : 'Buat Laporan'}
+            </button>
+            </>
+          ) : (
+            <ShopeeReportForm
+              clientId={clientId}
+              clientPlatformId={platformId}
+              periodeTipe={tipe}
+              onCreated={() => void reload()}
+            />
+          )}
         </div>
       )}
 

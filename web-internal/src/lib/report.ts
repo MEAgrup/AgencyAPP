@@ -15,7 +15,7 @@
  * `clientReport*ToWire` exactly (shape-parity guards it).
  */
 import { api } from './api';
-import { type ParsedExport } from './riset-awal';
+import { sha256Hex, type ParsedExport } from './riset-awal';
 import { type Role } from './types';
 
 // ---------------------------------------------------------------------------
@@ -257,4 +257,146 @@ export function labelStatusPublikasi(status: string): string {
     case STATUS_DICABUT: return 'Dicabut';
     default: return 'Draf — belum dilihat klien';
   }
+}
+
+// ---------------------------------------------------------------------------
+// Shopee (Gelombang 2, SH-06) — browser-side reader + API client
+// ---------------------------------------------------------------------------
+/**
+ * The 17 Shopee file slots, for the upload table's manual override.
+ *
+ * A UI-side copy of `@cdps/core` `SHOPEE_MODULE_LABEL` — `web-internal` is a
+ * standalone Next app with no `@cdps/core` dependency, and these are LABELS,
+ * not rules: the detection (`detectModule`) and every threshold stay
+ * server-side. Same precedent as `ReportPanel`'s TikTok `TIPE_OVERRIDE_OPTIONS`.
+ * The value strings must match `ShopeeModule` exactly — the server drops an
+ * unknown `tipe_override` and falls back to detection, so a typo here would
+ * silently ignore the AM's choice.
+ */
+export const SHOPEE_MODULE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: 'bisnis_home', label: 'Bisnis — Home' },
+  { value: 'bisnis_produk', label: 'Bisnis — Produk' },
+  { value: 'bisnis_live', label: 'Bisnis — Live' },
+  { value: 'bisnis_kesehatan', label: 'Bisnis — Kesehatan Toko' },
+  { value: 'bisnis_video', label: 'Bisnis — Shopee Video' },
+  { value: 'ads_toko', label: 'Ads — Toko' },
+  { value: 'ads_produk', label: 'Ads — Produk' },
+  { value: 'ads_live', label: 'Ads — Live' },
+  { value: 'ads_banner', label: 'Ads — Banner (Search Brand)' },
+  { value: 'aff_product', label: 'Affiliate — Product' },
+  { value: 'aff_creator', label: 'Affiliate — Creator' },
+  { value: 'promo_diskon', label: 'Promo — Diskon' },
+  { value: 'promo_voucher', label: 'Promo — Voucher' },
+  { value: 'promo_flashsale', label: 'Promo — Flashsale' },
+  { value: 'layanan_chat', label: 'Layanan — Chat' },
+  { value: 'layanan_broadcast', label: 'Layanan — Broadcast' },
+  { value: 'meta', label: 'Meta CPAS' },
+];
+
+/** Row emitted between worksheets so server parsers stop at their own table. */
+const SHEET_MARK = '__SHEET__:';
+
+/**
+ * Parse ONE Shopee export the way the Shopee engine expects it.
+ *
+ * Two differences from `parseExportFile` (TikTok), both required by
+ * `@cdps/core` `report/shopee`:
+ *
+ *  1. **Every worksheet is read, not just the first.** A single Shopee export
+ *     bundles several tables across sheets, and `metrik.ts` needs all of them.
+ *  2. **A `__SHEET__:name` marker row precedes each sheet.** Every
+ *     section-scanning parser in `metrik.ts` breaks on `isSheetMarker`, which is
+ *     what stops one sheet's table from being read into the next. The marker is
+ *     emitted before EVERY sheet (the first included) so the shape does not
+ *     depend on how many sheets the workbook happens to have; parsers locate
+ *     their header by search, so a leading marker row is inert.
+ *
+ * The browser still does nothing but decode and hash — detection, scoring, and
+ * every threshold stay server-side (PLAN §3 rule 4).
+ */
+export async function parseShopeeExportFile(file: File): Promise<ParsedExport> {
+  const buf = await file.arrayBuffer();
+  const XLSX = await import('xlsx');
+  const wb = XLSX.read(buf, { type: 'array' });
+  const aoa: unknown[][] = [];
+  for (const name of wb.SheetNames) {
+    aoa.push([`${SHEET_MARK}${name}`]);
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], {
+      header: 1,
+      raw: false,
+      defval: '',
+    });
+    for (const r of rows) aoa.push(r as unknown[]);
+  }
+  return {
+    filename: file.name,
+    aoa,
+    sha256: await sha256Hex(buf),
+    ukuran_bytes: file.size,
+  };
+}
+
+/** One active `Shopee Ads` campaign overlapping the report period (SH-06 split). */
+export interface ShopeeAdsCampaignOption {
+  id: string;
+  objective: string;
+  tipe_iklan: string;
+  start_date: string;
+  end_date: string;
+  budget: string;
+}
+
+/**
+ * GET /clients/{id}/reports/shopee/campaigns — the active `Shopee Ads`
+ * campaigns whose dates overlap the period, i.e. exactly the set the report's
+ * combined ads figure would be split across.
+ *
+ * Read-only, and deliberately the SAME server-side overlap predicate the
+ * attribution itself uses (`findOverlappingShopeeAdsCampaigns`) — a UI-side
+ * re-derivation of "which campaigns overlap" could show the AM a different
+ * list from the one the split actually uses.
+ */
+export async function listShopeeAdsCampaigns(
+  clientId: string, periodeMulai: string, periodeAkhir: string,
+): Promise<ShopeeAdsCampaignOption[]> {
+  const q = `periode_mulai=${encodeURIComponent(periodeMulai)}&periode_akhir=${encodeURIComponent(periodeAkhir)}`;
+  const res = await api.get<{ data: ShopeeAdsCampaignOption[] }>(
+    `/clients/${clientId}/reports/shopee/campaigns?${q}`,
+  );
+  return res.data;
+}
+
+/**
+ * POST /clients/{id}/reports/shopee — build ONE Shopee report.
+ *
+ * Unlike TikTok, the period is never derived from the files: `periode`,
+ * `periodeMulai` and `periodeAkhir` are all REQUIRED by the server
+ * (`createReportShopee`), so the form asks for them outright instead of
+ * offering them as an "only if unreadable" fallback.
+ *
+ * `excludeCampaignIds` removes a campaign from the even split of the report's
+ * combined ads spend/omzet into Metric Entries (`MTR-`) — the "no manual
+ * upload" path for M6D RM-C.
+ */
+export async function createClientReportShopee(
+  clientId: string,
+  input: {
+    clientPlatformId: number;
+    periodeTipe: PeriodeTipe;
+    files: ParsedExport[];
+    periode: string;
+    periodeMulai: string;
+    periodeAkhir: string;
+    excludeCampaignIds?: string[];
+  },
+): Promise<ClientReportDetail> {
+  return api.post<ClientReportDetail>(`/clients/${clientId}/reports/shopee`, {
+    client_platform_id: input.clientPlatformId,
+    periode_tipe: input.periodeTipe,
+    files: input.files,
+    periode: input.periode,
+    periode_mulai: input.periodeMulai,
+    periode_akhir: input.periodeAkhir,
+    exclude_campaign_ids: input.excludeCampaignIds ?? [],
+  });
 }

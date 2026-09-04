@@ -19,7 +19,7 @@ import type { ShopeeReportPayload } from './payload';
 import { renderBody, renderReportHtml } from './render';
 import { runShopeeReport } from './run';
 import { REPORT_BENCH_SHOPEE_V1 } from './bench';
-import { detectModule, detectModuleFromContent, parseFilename } from './detect';
+import { detectModule, detectModuleFromContent, detectModuleFromRawName, parseFilename } from './detect';
 import type { Aoa } from '../../baseline/types';
 import type { ShopeeSlots } from './types';
 
@@ -450,6 +450,172 @@ describe('detectModuleFromContent — fallback for a CDPS upload without the man
     expect(byContent?.module).toBe('bisnis_produk');
     expect(byContent?.info).toBeNull();
 
+    expect(detectModule('random-export.csv', adsToko())).toBeNull();
+  });
+});
+
+// ── SHP-1: GMV kotor (dibuat) vs GMV bersih (dibayar) ──────────────────────
+describe('parseBisnisHome — three order-status sections (SHP-1)', () => {
+  /**
+   * The real export's shape: the SAME table three times, one per order status,
+   * each preceded by its `__SHEET__:` marker (what the browser reader emits).
+   * Numbers mirror the Fim Motor proportions — paid < ready-to-ship < created.
+   */
+  const homeTigaBagian = (): Aoa => [
+    ['__SHEET__:Pesanan Dibuat'],
+    HOME_HEADER,
+    ['Total', 'Rp100.000.000', '1.000', 'Rp100.000', '5.000', '50.000', '2,00%', '50', 'Rp5.000.000', '10', 'Rp1.000.000', '900', '300', '600', '50', '20,00%'],
+    ['01/08/2026', 'Rp3.000.000', '30', 'Rp100.000', '150', '2.000', '1,50%', '2', 'Rp50.000', '0', 'Rp0', '25', '10', '15', '2', '10,00%'],
+    ['__SHEET__:Pesanan Siap Dikirim'],
+    HOME_HEADER,
+    ['Total', 'Rp93.000.000', '930', 'Rp100.000', '5.000', '50.000', '1,86%', '20', 'Rp2.000.000', '5', 'Rp500.000', '860', '280', '580', '50', '19,00%'],
+    ['__SHEET__:Pesanan Dibayar'],
+    HOME_HEADER,
+    ['Total', 'Rp82.000.000', '820', 'Rp100.000', '5.000', '50.000', '1,64%', '0', 'Rp0', '0', 'Rp0', '790', '260', '530', '50', '18,00%'],
+    // Decoys: the same workbook carries these AFTER the summary tables, and
+    // both contain the phrase "pesanan dibayar". The parser must not latch on.
+    ['__SHEET__:(pesanan dibayar)Asal Penjualan'],
+    ['Halaman Produk'],
+  ];
+
+  it('reads all three sections, each with its own totals', () => {
+    const h = parseBisnisHome(homeTigaBagian());
+    expect(h.pesanan_dibuat?.summary.penjualan).toBe(100_000_000);
+    expect(h.pesanan_siap_dikirim?.summary.penjualan).toBe(93_000_000);
+    expect(h.pesanan_dibayar?.summary.penjualan).toBe(82_000_000);
+    expect(h.pesanan_dibayar?.summary.pesanan).toBe(820);
+  });
+
+  it('finds the Pesanan Dibayar SUMMARY table, not the "(pesanan dibayar)…" sheets that follow it', () => {
+    // Those later sheets have no Tanggal header, so latching onto one would
+    // throw. Passing proves the search starts past the earlier sections.
+    const h = parseBisnisHome(homeTigaBagian());
+    expect(h.pesanan_dibayar?.summary.penjualan).toBe(82_000_000);
+  });
+
+  it('leaves pesanan_dibayar NULL for a two-section export — absent is not zero', () => {
+    const h = parseBisnisHome(bisnisHomeAoa());
+    expect(h.pesanan_dibuat).not.toBeNull();
+    expect(h.pesanan_dibayar).toBeNull();
+  });
+
+  it('payload: kpi.dibayar carries the paid figures and periode names its source', () => {
+    const p = run({ ...slotsFull(), bisnis_home: homeTigaBagian() }).payload;
+    expect(p.kpi.gmv).toBe(100_000_000);
+    expect(p.kpi.dibayar).not.toBeNull();
+    expect(p.kpi.dibayar?.gmv).toBe(82_000_000);
+    expect(p.kpi.dibayar?.pesanan).toBe(820);
+    expect(p.periode.gmv_bersih_sumber).toBe('pesanan_dibayar');
+    // The gross headline is untouched (owner decision SHP-1 keeps Dibuat).
+    expect(p.periode.definisi_gmv).toBe('gross');
+  });
+
+  it('payload: a two-section export says tidak_tersedia rather than passing gross off as net', () => {
+    const p = run(slotsFull()).payload;
+    expect(p.kpi.dibayar).toBeNull();
+    expect(p.periode.gmv_bersih_sumber).toBe('tidak_tersedia');
+  });
+
+  it('render: both cards are present, and the gap between them is named', () => {
+    const html = renderBody(run({ ...slotsFull(), bisnis_home: homeTigaBagian() }).payload, 'klien');
+    expect(html).toContain('GMV Kotor (Pesanan Dibuat)');
+    expect(html).toContain('GMV Bersih (Pesanan Dibayar)');
+    expect(html).toContain('selisih');
+  });
+
+  it('render: without a paid section the bersih card says so instead of repeating the gross number', () => {
+    const html = renderBody(run(slotsFull()).payload, 'klien');
+    expect(html).toContain('GMV Bersih (Pesanan Dibayar)');
+    expect(html).toContain('export tidak memuat bagian Pesanan Dibayar');
+  });
+});
+
+// ── SHP-3: raw Seller Centre filenames ─────────────────────────────────────
+describe('detectModuleFromRawName — the real Seller Centre export names (SHP-3)', () => {
+  /**
+   * The EXACT 15 filenames from the UAT export (Fim Motor, Juli 2026 —
+   * `docs/handoff/UAT_SHOPEE_FIM_MOTOR_20260903.md`). Before this layer the
+   * content fallback got 8 right, 3 into the WRONG slot and 4 not at all; these
+   * are the names that proved it, so they are the fixture.
+   */
+  const REAL_NAMES: ReadonlyArray<readonly [string, string | null]> = [
+    ['fim_motor.shopee-shop-stats.20260701-20260731.xlsx', 'bisnis_home'],
+    ['parentskudetail.20260701_20260731.xlsx', 'bisnis_produk'],
+    ['live_streaming_01072026-31072026.xlsx', 'bisnis_live'],
+    ['video-overview-v3_1m_2026-07-31_h4hr6t1_1786349868376.csv', 'bisnis_video'],
+    ['Data+Keseluruhan+Iklan+Shopee-01_07_2026-31_07_2026.csv', 'ads_toko'],
+    ['Search-Ads-Overall-Data-01_07_2026-31_07_2026.csv', 'ads_produk'],
+    ['Data-Semua-Iklan-Live-01_07_2026-31_07_2026.csv', 'ads_live'],
+    ['ProductPerformance_202608101517.csv', 'aff_product'],
+    ['AMSAffiliatePerformance_202608101516.csv', 'aff_creator'],
+    ['discount_20260701-20260731.xlsx', 'promo_diskon'],
+    ['voucher_20260701-20260731.xlsx', 'promo_voucher'],
+    ['In_Shop_Flash_Sale_Metrics_01072026-31072026.xlsx', 'promo_flashsale'],
+    ['chat_20260701_20260731.xlsx', 'layanan_chat'],
+    ['Chat_Broadcast_overview_20260701-20260731.xlsx', 'layanan_broadcast'],
+    // Meta CPAS is deliberately NOT name-detected: "untitled report" carries no
+    // type information, and its content signature already gets it right.
+    ['Laporan-tanpa-judul-Jul-1-2026-hingga-Jul-31-2026.xlsx', null],
+  ];
+
+  for (const [name, expected] of REAL_NAMES) {
+    it(`${expected ?? 'null (by design)'} ← ${name}`, () => {
+      expect(detectModuleFromRawName(name)).toBe(expected);
+    });
+  }
+
+  it('puts the broadcast export in layanan_broadcast, not layanan_chat — the order the table depends on', () => {
+    // Both names contain "chat"; only ordering keeps them apart. This is the
+    // single wrong-slot the UAT hit hardest (broadcast → bisnis_video before).
+    expect(detectModuleFromRawName('Chat_Broadcast_overview_20260701-20260731.xlsx')).toBe('layanan_broadcast');
+    expect(detectModuleFromRawName('chat_20260701_20260731.xlsx')).toBe('layanan_chat');
+  });
+
+  it('is case-insensitive and ignores the extension', () => {
+    expect(detectModuleFromRawName('PARENTSKUDETAIL.20260701.XLSX')).toBe('bisnis_produk');
+    expect(detectModuleFromRawName('parentskudetail.20260701_20260731.csv')).toBe('bisnis_produk');
+  });
+
+  it('returns null for a name it does not recognise, handing the file to the content fallback', () => {
+    expect(detectModuleFromRawName('laporan-apa-ini.xlsx')).toBeNull();
+    expect(detectModuleFromRawName('')).toBeNull();
+    expect(detectModuleFromRawName('no-extension-at-all')).toBeNull();
+  });
+});
+
+describe('detectModule — three layers in priority order (SHP-3)', () => {
+  it('the team rename convention still WINS over a raw name inside the same string', () => {
+    // A file renamed to the convention AND still carrying the raw stem must
+    // follow the human's rename, not the machine's stem — otherwise an AM's
+    // explicit correction is silently ignored.
+    const d = detectModule('[layanan]-chat && Juli 2026 && Fim && 2026-08-01.xlsx', bisnisHomeAoa());
+    expect(d?.module).toBe('layanan_chat');
+    expect(d?.info).not.toBeNull();
+  });
+
+  it('a raw name WINS over the content signature — the wrong-slot fix', () => {
+    // The broadcast export's CONTENT reads as bisnis_video (that was the UAT
+    // failure). With the name layer the content signature never gets asked.
+    const d = detectModule('Chat_Broadcast_overview_20260701-20260731.xlsx', bisnisVideoAoa());
+    expect(d?.module).toBe('layanan_broadcast');
+    expect(d?.info).toBeNull();
+  });
+
+  it('the content signature still runs when neither name layer matches', () => {
+    const d = detectModule('laporan-toko-tanpa-rename.xlsx', bisnisProdukAoa());
+    expect(d?.module).toBe('bisnis_produk');
+    expect(d?.info).toBeNull();
+  });
+
+  it('resolves the ads trio the content signature provably cannot', () => {
+    // KNOWN LIMITATION above: these three share one column layout, so content
+    // returns null. The raw name is the only thing that separates them.
+    expect(detectModuleFromContent(adsToko())).toBeNull();
+    expect(detectModule('Data+Keseluruhan+Iklan+Shopee-01_07_2026-31_07_2026.csv', adsToko())?.module).toBe('ads_toko');
+    expect(detectModule('Search-Ads-Overall-Data-01_07_2026-31_07_2026.csv', adsToko())?.module).toBe('ads_produk');
+  });
+
+  it('still returns null for a file nothing can identify', () => {
     expect(detectModule('random-export.csv', adsToko())).toBeNull();
   });
 });
