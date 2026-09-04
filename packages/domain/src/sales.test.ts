@@ -850,6 +850,49 @@ describeDb('closing', () => {
     expect(lead[0].winning_attempt_id).toBe(budiReg.attempt.id);
     void res;
   });
+
+  it('closing a contested pool lead still wins when the competitor already aged to [Unrespon] (L1 §1.2)', async () => {
+    // Regression guard for the ranjau in docs/backlog/REVISI_CDPS_SALES_CREATIVE_PERFORMA.md
+    // L1 §1.2: resolveWin closes every non-terminal sibling attempt to
+    // [Closed - Kalah Kompetisi], inside the Closing transaction, and THROWS if
+    // any of those transitions fails. Without the [Unrespon] -> [Closed - Kalah
+    // Kompetisi] edge, an attempt that aged to [Unrespon] while its sibling was
+    // closing would fail that transition and roll back the ENTIRE close (no
+    // Client/Transaction/Service created) with an unhelpful error.
+    const svc = await seedService('SVC-ZZ-WIN-UNRESPON');
+    const phone = uniquePhone();
+    const budiReg = await leads.register(sql, budi(), { leadName: 'Contested Unrespon Co', phoneNumber: phone });
+    const andiReg = await leads.register(sql, andi(), { leadName: 'Contested Unrespon Co', phoneNumber: phone });
+    expect(andiReg.lead.id).toBe(budiReg.lead.id);
+
+    // Andi's attempt ages to [Unrespon] (simulating the daily tick, L3) while
+    // still sitting in New Lead — a real sibling state, not a hypothetical one.
+    const aged = await sql<{ ok: boolean }[]>`
+      select (sm_transition('prospect_attempt', 'prospect_attempt', 'prospect_attempts',
+        'id', 'status', ${andiReg.attempt.id}, '[Unrespon]', 'SISTEM', true, false)->>'ok')::boolean as ok`;
+    expect(aged[0].ok).toBe(true);
+    expect(await status(andiReg.attempt.id)).toBe('[Unrespon]');
+
+    // Budi drives his attempt to Auto Approved and closes — must NOT throw/roll back.
+    await markContacted(sql, budi(), budiReg.attempt.id);
+    await submitQualifiedForm(sql, budi(), budiReg.attempt.id, {
+      namaPic: 'PIC', toko: 'Contested Unrespon Co', kota: 'JKT', linkToko: 'https://x', kategori: 'x', platform: 'Shopee',
+      gmvBaseline: '1000000', targetGmv: '2000000', services: [{ masterServiceId: svc, quantity: 1 }],
+    });
+    await submitNegotiation(sql, budi(), budiReg.attempt.id, [], true);
+    const res = await close(sql, budi(), budiReg.attempt.id, {
+      parties: { primarySalespersonId: 'ZZ-BUDI', allocations: [{ salespersonId: 'ZZ-BUDI', basisPoints: 10000 }] },
+      paymentScheme: PAYMENT_SCHEME_LUNAS,
+    });
+
+    expect(res.clientId).toMatch(/^CLI-\d{6}-\d{4}$/);
+    expect(await status(budiReg.attempt.id)).toBe('Closed-Success');
+    // The [Unrespon] sibling is closed out, same as a live competitor would be.
+    expect(await status(andiReg.attempt.id)).toBe('[Closed - Kalah Kompetisi]');
+    const lead = await sql<{ winning_attempt_id: string }[]>`
+      select winning_attempt_id from leads where id = ${budiReg.lead.id}`;
+    expect(lead[0].winning_attempt_id).toBe(budiReg.attempt.id);
+  });
 });
 
 describeDb('read models', () => {
