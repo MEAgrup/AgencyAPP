@@ -167,7 +167,7 @@ export const EVENTS = {
   PermintaanJatuhTempo: 'm16.permintaan.jatuh_tempo',  // -> pengaju + tujuan + lead
 
   // ----- catalog v14 (Revisi Sales/Creative/Performa L2) — 2 lead-aging events -----
-  // Emitted by the daily job `leads_unrespon_tick` (SQL, 20260911020000_m1_unrespon_tick.sql)
+  // Emitted by the daily job `leads_unrespon_tick` (SQL, 20260911060000_m1_unrespon_tick.sql)
   // — a lead being pulled off a salesperson's desk by the SYSTEM is exactly the
   // kind of silent change that erodes trust in the system if it isn't announced.
   AttemptUnrespon: 'm1.attempt.unrespon',                       // -> attempt owner
@@ -438,7 +438,7 @@ export const CATALOG: Record<EventType, CatalogEntry> = {
   [EVENTS.PermintaanJatuhTempo]: { description: 'Permintaan (REQ-) lewat jatuh tempo 1 hari kerja — ke pengaju + tujuan + lead divisi', resolver: 'explicitOrLeads', version: 12 },
 
   // --- v14 (Revisi Sales/Creative/Performa L2). Description/resolver WAJIB sama
-  // persis dengan seed migrasi 20260911015000_m1_unrespon_notif.sql. ---
+  // persis dengan seed migrasi 20260911050000_m1_unrespon_notif.sql. ---
   [EVENTS.AttemptUnrespon]: { description: 'Attempt menua ke [Unrespon] setelah 3 hari diam — ke pemilik attempt', resolver: 'explicit', version: 14 },
   [EVENTS.AttemptAutoNotQualified]: { description: 'Attempt auto Not Qualified setelah 14 hari diam di [Unrespon] — ke pemilik attempt', resolver: 'explicit', version: 14 },
 };

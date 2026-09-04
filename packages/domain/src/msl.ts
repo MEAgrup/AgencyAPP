@@ -32,6 +32,10 @@ import {
   TIER_TANPA_PLAN,
   type PlanTier,
 } from './plangate_rules';
+// Same reasoning for the commission grammar: `commission_rule` is pure (its only
+// import is @cdps/core), so the catalog admin can enforce the rule the pricing
+// calculator will later read WITHOUT importing `sales` (DECISIONS O73).
+import { parseCommissionRule } from './commission_rule';
 
 /** Authenticated employee + resolved role. */
 export type Actor = permission.Actor;
@@ -311,7 +315,10 @@ interface NormalizedInput extends Required<Omit<ServiceInput, 'category' | 'unit
 /**
  * normalizeInput validates the MSL v2 calculator fields, applying the flat
  * default and normalizing passthrough's unit price to "0". Invalid input throws
- * IncompleteError (the house default — no new strings invented).
+ * IncompleteError (the house default — no new strings invented), EXCEPT for a
+ * malformed `commission_rule`, which throws BadCommissionRuleError so the Sales
+ * Head is told what shape to type instead of "lengkapi pertanyaan wajib" for a
+ * field they did fill in (DECISIONS O73).
  */
 function normalizeInput(inp: ServiceInput): NormalizedInput {
   const name = (inp.name ?? '').trim();
@@ -320,6 +327,13 @@ function normalizeInput(inp: ServiceInput): NormalizedInput {
   if (name === '' || commissionRule === '' || effectiveFrom === '') {
     throw new IncompleteError();
   }
+  // Grammar gate (DECISIONS O14/O73). Before O73 this module accepted ANY
+  // non-empty string, and 56 of the 96 catalog versions in `CDPS SG` were saved
+  // with rules the calculator cannot read ("0", free prose). The cost landed on
+  // the wrong person: the row saved fine here, then the Qualified Lead Form
+  // refused every one of those services in front of a salesperson. Reject at the
+  // keyboard of the one who can actually fix it.
+  parseCommissionRule(commissionRule);
   const pricingMode = (inp.pricingMode ?? '') === '' ? PRICING_FLAT : (inp.pricingMode as string);
   if (!PRICING_MODES.has(pricingMode)) {
     throw new IncompleteError();

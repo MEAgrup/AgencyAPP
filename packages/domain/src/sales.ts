@@ -250,55 +250,28 @@ export function parseWholeQty(s: string): bigint | null {
 }
 
 // ===========================================================================
-// Commission rule grammar (commission.go). Only the two documented shapes:
-//   "<N>% of standard price"   percentage of the line deal value
-//   "flat Rp <N>"              fixed rupiah amount (dots = thousands separators)
+// Commission rule grammar (commission.go). The rule itself now lives in
+// `commission_rule.ts` so the MSL admin (`msl.ts`) can gate it on WRITE without
+// importing this module — see that file's header (DECISIONS O73). Re-exported
+// here so every existing `sales.parseCommissionRule` / `sales.CommissionRule` /
+// `sales.BadCommissionRuleError` call site (apps/api error mapping, the seed
+// validator, finance, renewal) keeps working unchanged.
 // ===========================================================================
 
-const RE_PCT = /^(\d+)(?:\.(\d+))?% of standard price$/;
-const RE_FLAT = /^flat Rp (\d+|\d{1,3}(?:\.\d{3})+)$/;
+import {
+  computeCommission,
+  parseCommissionRule,
+  type CommissionRule,
+} from './commission_rule';
 
-/** A parsed, immutable commission rule for one service. */
-export interface CommissionRule {
-  raw: string;
-  isFlat: boolean;
-  flat: money.Money;
-  pctNum: bigint;
-  pctScale: number;
-}
-
-/** Thrown when a commission_rule string is not one of the two documented shapes. */
-export class BadCommissionRuleError extends Error {
-  constructor(rule: string) {
-    super(`module0_sales: unrecognized commission_rule: ${JSON.stringify(rule)}`);
-    this.name = 'BadCommissionRuleError';
-  }
-}
-
-/** parseCommissionRule parses an MSL commission_rule string (DECISIONS O14). */
-export function parseCommissionRule(rule: string): CommissionRule {
-  const r = rule.trim();
-  const pct = RE_PCT.exec(r);
-  if (pct) {
-    const whole = pct[1];
-    const frac = pct[2] ?? '';
-    return { raw: r, isFlat: false, flat: 0n, pctNum: BigInt(whole + frac), pctScale: frac.length };
-  }
-  const flat = RE_FLAT.exec(r);
-  if (flat) {
-    const digits = flat[1].replace(/\./g, ''); // dots are thousands separators
-    return { raw: r, isFlat: true, flat: money.parse(digits), pctNum: 0n, pctScale: 0 };
-  }
-  throw new BadCommissionRuleError(rule);
-}
-
-/** computeCommission returns the commission for one service given its deal value. */
-export function computeCommission(rule: CommissionRule, dealValue: money.Money): money.Money {
-  if (rule.isFlat) {
-    return rule.flat;
-  }
-  return money.percentOf(dealValue, rule.pctNum, rule.pctScale);
-}
+export {
+  BadCommissionRuleError,
+  computeCommission,
+  isCommissionRule,
+  parseCommissionRule,
+  RULE_ZERO_PCT,
+  type CommissionRule,
+} from './commission_rule';
 
 // ---------------------------------------------------------------------------
 // Service line + quote (commission.go BuildQuote).
@@ -754,7 +727,7 @@ export interface UnresponTickResult {
 /**
  * runUnresponTick drives the daily "lead aging" sweep (L1/L3, `docs/backlog/
  * REVISI_CDPS_SALES_CREATIVE_PERFORMA.md`). The work itself lives in the SQL
- * function `leads_unrespon_tick` (migration 20260911020000) — pg_cron calls it
+ * function `leads_unrespon_tick` (migration 20260911060000) — pg_cron calls it
  * directly on Supabase, so this is the manual/backfill entry point over the
  * SAME function (pola `stage.runStageOverdueTick`). This is attempt-machine
  * work (per-sales), not `leads.record_status` — hence living here, not in

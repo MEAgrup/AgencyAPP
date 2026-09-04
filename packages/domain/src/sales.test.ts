@@ -8,14 +8,16 @@
  *   test namespaces its ids with `ZZ-` and afterEach deletes the rows it made.
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { money, page, permission } from '@cdps/core';
+import { bi, money, page, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import { leads } from './index';
 import {
   acceptCounter,
   AllocationTotalError,
+  BadCommissionRuleError,
   buildQuote,
   close,
+  computeCommission,
   computeSubtotal,
   type Actor,
   CustomTermRequiresNegotiationError,
@@ -34,6 +36,7 @@ import {
   NotFoundError,
   MSG_MAX_SERVICES,
   NotClosableError,
+  isCommissionRule,
   parseCommissionRule,
   PAYMENT_SCHEME_LUNAS,
   PAYMENT_SCHEME_TERMIN,
@@ -43,6 +46,7 @@ import {
   PRICING_FLAT,
   PRICING_MIN_FLOOR,
   PRICING_PASSTHROUGH,
+  RULE_ZERO_PCT,
   type ProposalLine,
   resubmitNegotiation,
   reviseServices,
@@ -132,8 +136,55 @@ describe('parseCommissionRule', () => {
     expect(r.flat).toBe(rp('500000'));
   });
 
-  it('rejects an unrecognized rule', () => {
-    expect(() => parseCommissionRule('half of the deal')).toThrow(/unrecognized/);
+  it('rejects an unrecognized rule with a bracketed BI message (O73)', () => {
+    // The message reaches two humans: the Sales Head typing into the MSL form,
+    // and (only if a bad row ever survives the write gate) a salesperson on the
+    // Qualified Lead Form. Both need Bahasa Indonesia in `[...]` naming the fix
+    // — the raw English `module0_sales: unrecognized commission_rule: "0"` is
+    // exactly what the QA report caught in production.
+    expect(() => parseCommissionRule('half of the deal')).toThrow(BadCommissionRuleError);
+    let msg = '';
+    try {
+      parseCommissionRule('half of the deal');
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(bi.isBracketed(msg)).toBe(true);
+    expect(msg).toContain('Master Service List');
+    expect(msg).toContain('half of the deal');
+  });
+
+  it('rejects the shapes that actually broke the catalog (O73)', () => {
+    // The 56 real rows: a bare "0" and free Indonesian prose. Neither may be
+    // guessed into a number — a guess here silently mis-pays a salesperson.
+    for (const bad of [
+      '0',
+      'komisi berdasarkan spend budget perhitungan dari omzet iklan',
+      '1%-2% dari all omzet bisnis tiktok',
+      'komisi dari kenaikan omzet 50 juta keatas dari rata rata omzet 6 bulan terakhir sebelum di kelola mea',
+    ]) {
+      expect(isCommissionRule(bad)).toBe(false);
+    }
+    // …and the two canonical shapes the O73 backfill normalizes them to.
+    expect(isCommissionRule(RULE_ZERO_PCT)).toBe(true);
+    expect(isCommissionRule('flat Rp 0')).toBe(true);
+    expect(computeCommission(parseCommissionRule(RULE_ZERO_PCT), rp('12000000'))).toBe(0n);
+    expect(computeCommission(parseCommissionRule('flat Rp 0'), rp('12000000'))).toBe(0n);
+  });
+
+  it('keeps a long/bracketed bad rule from breaking the [...] invariant (O73)', () => {
+    // The offending value is echoed back so the admin sees WHICH rule failed;
+    // it is user-typed, so it must not be able to smuggle a `]` (or a newline,
+    // or a paragraph) into the house message shape.
+    const nasty = `komisi ]${'x'.repeat(200)}\n[aneh`;
+    let msg = '';
+    try {
+      parseCommissionRule(nasty);
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(bi.isBracketed(msg)).toBe(true);
+    expect(msg.length).toBeLessThan(200);
   });
 });
 

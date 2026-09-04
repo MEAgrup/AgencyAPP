@@ -225,7 +225,7 @@ jobs:
       # Kinerja Sales R-04 (20260902030000_renewal_notif.sql, katalog v13): +2
       # event (`m0.renewal.pending_approval`/`m0.renewal.decision`, sama peran
       # persis dengan `m0.negotiation.*`), 65 → 67. Nol mesin baru.
-      # Revisi Sales/Creative/Performa L2 (20260911015000_m1_unrespon_notif.sql,
+      # Revisi Sales/Creative/Performa L2 (20260911050000_m1_unrespon_notif.sql,
       # katalog v14): +2 event (`m1.attempt.unrespon`/`m1.attempt.auto_not_qualified`,
       # keduanya resolver 'explicit' -> pemilik attempt; emitter job
       # leads_unrespon_tick), 67 → 69. Nol mesin baru (L1 hanya menambah

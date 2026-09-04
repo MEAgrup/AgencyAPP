@@ -147,7 +147,7 @@ check "notif_events"     "select count(*) from notif_events"     "69"
 # 69 = 67 + 2 event Revisi Sales/Creative/Performa L2 (katalog v14:
 #      m1.attempt.unrespon / m1.attempt.auto_not_qualified, keduanya resolver
 #      'explicit' -> pemilik attempt; emitter job leads_unrespon_tick).
-#      20260911015000_m1_unrespon_notif.sql. Nol tabel/prefix/mesin baru ⇒
+#      20260911050000_m1_unrespon_notif.sql. Nol tabel/prefix/mesin baru ⇒
 #      145 tabel/40 prefix/31 mesin TETAP. Lihat
 #      docs/backlog/REVISI_CDPS_SALES_CREATIVE_PERFORMA.md L2.
 # 145 = 143 + 2 tabel Gelombang 4 TikTok Ads Scanner

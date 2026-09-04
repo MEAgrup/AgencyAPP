@@ -71,7 +71,7 @@ Approved`, `Blocked`, `[Closed - Kalah Kompetisi]` (otomatis).
 
 ### L1 · Migrasi state `[Unrespon]` + edge
 
-`supabase/migrations/20260911010000_m1_unrespon_state.sql` — 5 edge baru pada
+`supabase/migrations/20260911040000_m1_unrespon_state.sql` — 5 edge baru pada
 mesin `prospect_attempt`:
 
 | from | to | `require_lead` | alasan |
@@ -102,7 +102,7 @@ Kompetisi]']`; closing deal pada lead ber-saudara `[Unrespon]` berhasil.
 
 ### L2 · Notif katalog v14 (blocker: L1)
 
-Berkas migrasi terpisah `20260911015000_m1_unrespon_notif.sql` (supaya
+Berkas migrasi terpisah `20260911050000_m1_unrespon_notif.sql` (supaya
 "tanpa notifikasi" = penghapusan file, bukan bedah):
 
 | event | penerima |
@@ -121,7 +121,7 @@ membandingkan DB↔TS per-nama.
 Pola **pg_cron di dalam migrasi** (bukan Vercel Cron — job siklus-hidup, bukan
 rollup periodik):
 
-- `20260911020000_m1_unrespon_tick.sql` — `public.leads_unrespon_tick(p_now
+- `20260911060000_m1_unrespon_tick.sql` — `public.leads_unrespon_tick(p_now
   timestamptz default now()) returns jsonb`, SECURITY DEFINER, `REVOKE EXECUTE
   FROM public`, pg_cron dibungkus `IF EXISTS (... pg_available_extensions ...)`.
   Jadwal `'30 22 * * *'` = 05:30 WIB.
@@ -464,7 +464,7 @@ semua tes lain; di produksi ia hanya muncul sebagai halaman lambat.
   (header `x-vercel-id`) dan pengaruhnya ke p95 tidak bisa diukur dari sesi
   ini** — sandbox ini tidak punya akses deploy/dashboard Vercel produksi.
   Perlu diverifikasi sesudah deploy berikutnya.
-- **Indeks:** `20260911005000_p1_perf_indexes.sql` diterapkan bersih di
+- **Indeks:** `20260911030000_p1_perf_indexes.sql` diterapkan bersih di
   `db-rebuild.sh --yes` (173 migrasi, gate tetap 145/40/31/67). Kolom & urutan
   indeks dicocokkan ke `ORDER BY` yang benar-benar dipakai (`leads.ts:936`
   `order by created_at desc, id desc` cocok `idx_leads_created_at`). Tabel
