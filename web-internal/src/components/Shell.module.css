@@ -86,6 +86,21 @@
   gap: 2px;
   padding-bottom: 6px;
 }
+/* ⚠️ WAJIB, jangan hapus. Aturan `[hidden] { display: none }` datang dari
+   stylesheet BAWAAN BROWSER, dan stylesheet penulis SELALU mengalahkannya —
+   jadi `display: flex` di atas membuat grup yang "tertutup" tetap terlihat
+   walau `hidden` terpasang dan `aria-expanded="false"`. Ketahuan hanya lewat
+   screenshot browser sungguhan (2026-09-04): 534 tes hijau, accordion-nya
+   tidak melipat apa pun. Sama untuk panel sub-grup di bawah. */
+.navGroupItems[hidden],
+.navSubItems[hidden] {
+  display: none;
+}
+.navSubItems {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 .navChevron {
   font-size: 10px;
   line-height: 1;

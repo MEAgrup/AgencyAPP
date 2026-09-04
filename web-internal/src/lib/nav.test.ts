@@ -5,6 +5,8 @@
  * The assertions encode the SERVER gates the table mirrors; if a server gate
  * moves, this file should fail and be updated together with `nav.ts`.
  */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { Role } from './types';
 import {
@@ -710,5 +712,36 @@ describe('perilaku rail (Sidebar IA v3 §5)', () => {
     it('kueri tanpa hasil mengembalikan daftar kosong, bukan seluruh menu', () => {
       expect(filterNav(sections, 'zzz-tidak-ada')).toEqual([]);
     });
+  });
+});
+
+
+// ══════════════════════════════════════════════════════════════════════════
+describe('accordion benar-benar melipat (regresi CSS, 2026-09-04)', () => {
+  // Bug yang lolos 534 tes dan hanya ketahuan dari screenshot browser: panel
+  // grup diberi `hidden`, tapi `.navGroupItems { display: flex }` (stylesheet
+  // PENULIS) mengalahkan `[hidden] { display: none }` (stylesheet BAWAAN
+  // BROWSER) — jadi setiap grup "tertutup" tetap memperlihatkan isinya walau
+  // chevron-nya `▸` dan `aria-expanded="false"`.
+  //
+  // Tak ada DOM di test suite ini, jadi yang dikunci adalah SEBABNYA: selama
+  // panelnya diberi `display` oleh sebuah kelas, kelas itu WAJIB punya
+  // pasangan `[hidden]`-nya. Tes ini membaca CSS-nya sebagai teks — kasar,
+  // tapi persis menutup lubang yang jebol.
+  const css = readFileSync(
+    fileURLToPath(new URL('../components/Shell.module.css', import.meta.url)),
+    'utf8',
+  );
+
+  it('setiap panel yang bisa dilipat punya aturan [hidden] tandingannya', () => {
+    for (const cls of ['navGroupItems', 'navSubItems']) {
+      expect(css, `.${cls} memberi display lewat kelas, jadi butuh .${cls}[hidden]`)
+        .toMatch(new RegExp(`\\.${cls}\\[hidden\\]`));
+    }
+  });
+
+  it('aturan [hidden] itu menyetel display:none', () => {
+    const blok = css.slice(css.indexOf('.navGroupItems[hidden]'));
+    expect(blok.slice(0, blok.indexOf('}'))).toContain('display: none');
   });
 });

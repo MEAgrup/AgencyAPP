@@ -126,7 +126,7 @@ export default function Sidebar({ role }: { role: Role | null }) {
             {expanded ? '▾' : '▸'}
           </span>
         </button>
-        <div id={panelId} hidden={!expanded}>
+        <div id={panelId} hidden={!expanded} className={styles.navSubItems}>
           {node.items.map((i) => renderLink(i, true))}
         </div>
       </div>
