@@ -420,9 +420,21 @@ Baru dikerjakan **setelah** gate go/no-go GO. Sesuai OQ-8: Go+MySQL **diarsip re
 
 ---
 
-## C-06 — `web-client-portal` (M15-C2) ⚪ belum dimulai — O4/O5 RESOLVED, siap diklaster
+## C-06 — `web-client-portal` (M15-C2) 🟡 SEBAGIAN BESAR MENDARAT lewat Gelombang 1 — O4/O5 RESOLVED
 
-Masih hanya `README.md` — belum ada kode/migrasi ditulis. Prasyarat **O4/O5 RESOLVED 2026-08-31** (`docs/DECISIONS.md`; spec final `docs/M15C2_CLIENT_PORTAL_SECURITY_SPEC.md`, kesepuluh Open Question dijawab pemilik). M15-C2 boleh dijadwalkan sebagai klaster kerja normal (Rules → Flow → Example → System Requirements → PR kecil per klaster, pola M15-C1) — auth realm mengikuti pola LT-61 vendor (`supabase/migrations/20260903010000_lt61_vendor_auth.sql`), bukan `local.go` Go yang sudah pensiun. **Realm auth terpisah + data layer allow-list** — bukan view internal yang di-trim izin (`CLAUDE.md`). Tidak memblokir cutover.
+> ### ✅ Dikoreksi 2026-09-04 — paragraf di bawah ("masih hanya `README.md`") sudah BASI
+> `web-client-portal` punya **9 halaman** di `main`: `login`, `lupa-password`,
+> `reset-password`, `(portal)/` beranda, `(portal)/laporan`, `(portal)/laporan/[id]`,
+> `(portal)/progres`, `(portal)/komplain`, `(portal)/akun/password` — plus **realm auth
+> terpisah**, data layer allow-list, CSP, dan **19 tes** dengan `npm run build` sukses.
+> Semua mendarat lewat **CR-09** (Gelombang 1, `HANDOFF_INSIGHT_EDITABLE_CLIENT_PORTAL_20260908.md`),
+> di atas domain `client-portal.ts` (22 tes) + `client-portal-auth.ts` dan 5 rute portal.
+> **Sisa C-06 = audit ulang M15-G3…G7 terhadap yang sudah ada**, bukan membangun dari nol.
+> Yang secara sadar TIDAK dibangun di Gelombang 1 dan tetap terbuka: surface
+> invoice/pembayaran (OQ-6: nol di v1) dan riwayat komplain untuk klien (M15 Rule 6
+> submit-only).
+
+_Paragraf asli 2026-07-28:_ Masih hanya `README.md` — belum ada kode/migrasi ditulis. Prasyarat **O4/O5 RESOLVED 2026-08-31** (`docs/DECISIONS.md`; spec final `docs/M15C2_CLIENT_PORTAL_SECURITY_SPEC.md`, kesepuluh Open Question dijawab pemilik). M15-C2 boleh dijadwalkan sebagai klaster kerja normal (Rules → Flow → Example → System Requirements → PR kecil per klaster, pola M15-C1) — auth realm mengikuti pola LT-61 vendor (`supabase/migrations/20260903010000_lt61_vendor_auth.sql`), bukan `local.go` Go yang sudah pensiun. **Realm auth terpisah + data layer allow-list** — bukan view internal yang di-trim izin (`CLAUDE.md`). Tidak memblokir cutover.
 
 ---
 

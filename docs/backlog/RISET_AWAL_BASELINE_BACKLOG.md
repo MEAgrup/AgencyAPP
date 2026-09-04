@@ -4,7 +4,20 @@
 > Handoff: **`docs/handoff/HANDOFF_M6ABC_SESI31.md`** — baca §0 dan §4 sebelum tiket pertama.
 > Arsip tool: `docs/design/BASELINE_TOOL_TIKTOK_v1.html` (rujukan port, satu arah).
 >
-> **Status: nol kode.** Melanjutkan "bagian 2" yang SESI30 §3 tinggalkan.
+> ### ✅ STATUS SEBENARNYA (dikoreksi 2026-09-04): **RAB-01…RAB-20 SELESAI**
+> Baris di bawah — *"Status: nol kode"* — adalah status **saat berkas ini disusun
+> 2026-08-17** dan **tidak pernah diperbarui**; seluruh Wave A–E sudah mendarat sesudahnya
+> tanpa berkas ini ikut dicentang. Bukti di `main`: `packages/core/src/baseline/` (16
+> berkas) · `packages/domain/src/riset-awal.ts` + `riset-awal.integration.test.ts` +
+> `riset-awal-baseline.rls.test.ts` · migrasi `20260817000000_riset_awal_baseline_schema.sql`
+> · rute `/api/v1/interview/{id}/baseline` dan `…/baseline/confirm` ·
+> `web-internal/src/components/interview/RisetAwalPanel.tsx` · **`docs/prd/CDPS_Module6_Interview.md`
+> sudah dibuat** (RAB-18). Wave D ditutup PR #180, Wave E (RAB-19 koreksi PRD + RAB-20
+> registry docs) ditutup commit `6cc26ca` / PR #181.
+> **Jangan bangun ulang tiket mana pun dari berkas ini.** Ia sekarang berguna sebagai
+> catatan desain (kenapa tiap keputusan diambil), bukan sebagai papan status.
+>
+> _Status asli 2026-08-17:_ **nol kode.** Melanjutkan "bagian 2" yang SESI30 §3 tinggalkan.
 > Masuk **M6 / Wave 2** — tak ada wave digeser (`CDPS_Build_Plan.md:81-87`).
 
 ## 0. Prasyarat & gerbang
