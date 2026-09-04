@@ -10,6 +10,7 @@
  * returning an empty board, and rows are additionally filtered by RLS because
  * the query runs through `readAsActor`.
  */
+import { page } from '@cdps/core';
 import { leads } from '@cdps/domain';
 import { requireActor } from '@/lib/auth';
 import { readAsActor } from '@/lib/db';
@@ -24,11 +25,14 @@ export async function GET(request: Request): Promise<Response> {
     }
     // Optional ?q=<name/phone>&source=<Source> — the pool grows monotonically,
     // so finding one lead in it needs a search, not scrolling.
+    // P2 §6: paged (?limit=, ?cursor=). The pool grows monotonically, which is
+    // exactly why it must not be read whole on every board load.
     const params = new URL(request.url).searchParams;
-    const rows = await readAsActor(actor, (sql) => leads.poolBoard(sql, actor.employeeId, {
+    const result = await readAsActor(actor, (sql) => leads.poolBoard(sql, actor.employeeId, {
       q: params.get('q') ?? undefined,
       source: params.get('source') ?? undefined,
+      page: page.parseRequest(params.get('limit'), params.get('cursor')),
     }));
-    return json({ data: rows.map(poolRowToWire) });
+    return json({ data: result.rows.map(poolRowToWire), next_cursor: result.nextCursor });
   });
 }

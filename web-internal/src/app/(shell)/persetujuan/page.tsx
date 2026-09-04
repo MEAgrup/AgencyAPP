@@ -116,6 +116,9 @@ import DecisionActions, { type DecisionKind } from '@/components/persetujuan/Dec
 import PriceComparison from '@/components/persetujuan/PriceComparison';
 
 const ATTEMPT_PENDING = 'Negotiation - Pending Approval';
+// Cermin page.MAX_LIMIT di server (nilai di atas itu tetap di-clamp server —
+// ini hanya supaya inbox meminta halaman terbesar yang diizinkan sekali jalan).
+const ATTEMPTS_INBOX_LIMIT = 500;
 const RENEWAL_PENDING = 'Pending Approval';
 
 /**
@@ -1104,6 +1107,11 @@ export default function PerluPersetujuanPage() {
   const canDropEscalation = !readOnly && canDropBooking(role);
 
   const [attempts, setAttempts] = useState<AttemptRow[] | null>(null);
+  // P2 §6: /attempts is paged. This is an APPROVAL INBOX — an item that never
+  // renders never gets approved — so it asks for the server's maximum page and
+  // says so out loud on the (unlikely) day even that is not enough, rather than
+  // silently dropping the tail.
+  const [attemptsTruncated, setAttemptsTruncated] = useState(false);
   const [renewals, setRenewals] = useState<RenewalListRow[] | null>(null);
   const [tcrs, setTcrs] = useState<SchemeChangeRequest[] | null>(null);
   const [deleteRequests, setDeleteRequests] = useState<DeleteRequestQueueRow[] | null>(null);
@@ -1125,7 +1133,7 @@ export default function PerluPersetujuanPage() {
     setSectionErrors([]);
     try {
       const results = await Promise.allSettled([
-        listAttempts(ATTEMPT_PENDING),
+        listAttempts(ATTEMPT_PENDING, { limit: ATTEMPTS_INBOX_LIMIT }),
         listAllRenewals(RENEWAL_PENDING),
         listSchemeChangeQueue(),
         listDeleteRequests(),
@@ -1136,6 +1144,7 @@ export default function PerluPersetujuanPage() {
       ]);
       const [attemptRes, renewalRes, tcrRes, deleteRes, holdRes, escalationRes, strategyRes, blockRes] = results;
       setAttempts(attemptRes.status === 'fulfilled' ? attemptRes.value.data : []);
+      setAttemptsTruncated(attemptRes.status === 'fulfilled' && attemptRes.value.next_cursor !== null);
       setRenewals(renewalRes.status === 'fulfilled' ? renewalRes.value.data : []);
       setTcrs(tcrRes.status === 'fulfilled' ? tcrRes.value.data : []);
       setDeleteRequests(deleteRes.status === 'fulfilled' ? deleteRes.value.data : []);
@@ -1268,6 +1277,12 @@ export default function PerluPersetujuanPage() {
             count={counts.nego}
             hint="Harga di bawah/atas standar Master Service List wajib disetujui Sales Lead / Director sebelum closing (M0 §6)."
           >
+            {attemptsTruncated && (
+              <div className="alert alertInfo" role="status">
+                Antrean ini melebihi {ATTEMPTS_INBOX_LIMIT} baris &mdash; yang tampil adalah yang paling
+                baru. Selesaikan sebagian dulu, lalu muat ulang halaman untuk melihat sisanya.
+              </div>
+            )}
             {attempts?.map((a, i) => (
               <NegotiationCard
                 key={a.id}

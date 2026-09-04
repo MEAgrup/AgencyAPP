@@ -10,18 +10,39 @@ export default function ClientsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // P2 §6: server memaginasi. `nextCursor` null = sudah halaman terakhir.
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await listClients();
       setClients(res.data);
+      setNextCursor(res.next_cursor);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // Menyambung, bukan mengganti.
+  async function loadMore() {
+    if (nextCursor === null) return;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const res = await listClients({ cursor: nextCursor });
+      setClients((prev) => [...(prev ?? []), ...res.data]);
+      setNextCursor(res.next_cursor);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   useEffect(() => {
     load();
@@ -84,6 +105,13 @@ export default function ClientsPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {nextCursor !== null && (
+          <div className="row" style={{ justifyContent: 'center', marginTop: 12 }}>
+            <button type="button" className="btn btnSecondary" disabled={loadingMore} onClick={loadMore}>
+              {loadingMore ? 'Memuat...' : 'Muat lebih banyak'}
+            </button>
           </div>
         )}
       </section>

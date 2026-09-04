@@ -8,7 +8,7 @@
  *   test namespaces its ids with `ZZ-` and afterEach deletes the rows it made.
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { money, permission } from '@cdps/core';
+import { money, page, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import { leads } from './index';
 import {
@@ -899,7 +899,7 @@ describeDb('read models', () => {
   it('listAttempts returns attempts newest-first with lead + owner', async () => {
     const svc = await seedService('SVC-ZZ-LIST');
     const attemptId = await qualifiedAttempt(budi(), svc);
-    const rows = await listAttempts(sql);
+    const rows = (await listAttempts(sql)).rows;
     const mine = rows.find((r) => r.id === attemptId);
     expect(mine).toBeDefined();
     expect(mine!.ownerEmployeeId).toBe('ZZ-BUDI');
@@ -919,15 +919,39 @@ describeDb('read models', () => {
   it('listAttempts narrows to one status when asked', async () => {
     const svc = await seedService('SVC-ZZ-FILTER');
     const attemptId = await qualifiedAttempt(budi(), svc);
-    const qualified = await listAttempts(sql, { status: 'Qualified' });
+    const qualified = (await listAttempts(sql, { status: 'Qualified' })).rows;
     expect(qualified.some((r) => r.id === attemptId)).toBe(true);
     expect(qualified.every((r) => r.status === 'Qualified')).toBe(true);
     // An unmatched filter must return nothing, not silently fall back to "all".
-    expect(await listAttempts(sql, { status: 'Closed-Lost' })).not.toContainEqual(
+    expect((await listAttempts(sql, { status: 'Closed-Lost' })).rows).not.toContainEqual(
       expect.objectContaining({ id: attemptId }),
     );
     // Absent/blank filter still means "no filter".
-    expect((await listAttempts(sql, {})).some((r) => r.id === attemptId)).toBe(true);
+    expect((await listAttempts(sql, {})).rows.some((r) => r.id === attemptId)).toBe(true);
+  });
+
+  it('listAttempts pages by keyset, and stays unbounded when no page is asked for (P2 §6)', async () => {
+    const svc = await seedService('SVC-ZZ-PAGE');
+    const a = await qualifiedAttempt(budi(), svc);
+    const b = await qualifiedAttempt(budi(), svc);
+
+    const unbounded = await listAttempts(sql);
+    expect(unbounded.nextCursor).toBeNull();
+    const allIds = unbounded.rows.map((r) => r.id);
+    expect(allIds).toEqual(expect.arrayContaining([a, b]));
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 100; guard++) {
+      const p: page.Page<{ id: string }> = await listAttempts(sql, {
+        page: { limit: 1, cursor: cursor === null ? null : page.decodeCursor(cursor) },
+      });
+      seen.push(...p.rows.map((r) => r.id));
+      if (p.nextCursor === null) break;
+      cursor = p.nextCursor;
+    }
+    expect(seen).toEqual(allIds); // same order, no duplicate, nothing skipped
+    expect(new Set(seen).size).toBe(seen.length);
   });
 
   it('getAttempt assembles attempt + lead + qualified form + proposal history', async () => {

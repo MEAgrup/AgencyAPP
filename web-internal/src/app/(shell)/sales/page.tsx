@@ -68,18 +68,44 @@ export default function SalesWorkspacePage() {
   // authority and answers [data tidak lengkap...]; this only marks the field.
   const campaignRequired = campaignRequiredForSource(source);
 
+  // P2 §6: server memaginasi. `nextCursor` null = sudah halaman terakhir.
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const res = await listAttempts();
+      // Filter status dijalankan SERVER (query param), bukan menyaring array
+      // yang sudah diambil — pola yang sama dengan tab Pool/Database. Sejak
+      // P2 §6 daftar ini dipaginasi, jadi menyaring di klien akan menyaring
+      // HALAMAN, bukan datanya: tab status bisa tampak kosong padahal barisnya
+      // ada di halaman berikutnya.
+      const res = await listAttempts(statusFilter === 'Semua' ? undefined : statusFilter);
       setAttempts(res.data);
+      setNextCursor(res.next_cursor);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [statusFilter]);
+
+  // Menyambung, bukan mengganti.
+  async function loadMore() {
+    if (nextCursor === null) return;
+    setLoadingMore(true);
+    setLoadError(null);
+    try {
+      const res = await listAttempts(statusFilter === 'Semua' ? undefined : statusFilter, { cursor: nextCursor });
+      setAttempts((prev) => [...(prev ?? []), ...res.data]);
+      setNextCursor(res.next_cursor);
+    } catch (err) {
+      setLoadError(errorMessage(err));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   useEffect(() => {
     load();
@@ -157,8 +183,6 @@ export default function SalesWorkspacePage() {
     }
   }
 
-  const filtered =
-    attempts?.filter((a) => statusFilter === 'Semua' || a.status === statusFilter) ?? null;
 
   return (
     <div className="stack">
@@ -341,10 +365,10 @@ export default function SalesWorkspacePage() {
 
         {loading && <p className="muted">Memuat...</p>}
         {loadError && <div className="alert alertError" role="alert">{loadError}</div>}
-        {!loading && !loadError && filtered && filtered.length === 0 && (
+        {!loading && !loadError && attempts && attempts.length === 0 && (
           <div className="emptyState">Tidak ada attempt yang cocok dengan filter.</div>
         )}
-        {!loading && !loadError && filtered && filtered.length > 0 && (
+        {!loading && !loadError && attempts && attempts.length > 0 && (
           <div className="table-wrap">
             <table className="table">
               <thead>
@@ -359,7 +383,7 @@ export default function SalesWorkspacePage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((a) => (
+                {attempts.map((a) => (
                   <tr key={a.id}>
                     <td><Link href={`/sales/${a.id}`}>{a.id}</Link></td>
                     <td>{a.lead_name}</td>
@@ -372,6 +396,13 @@ export default function SalesWorkspacePage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {nextCursor !== null && (
+          <div className="row" style={{ justifyContent: 'center', marginTop: 12 }}>
+            <button type="button" className="btn btnSecondary" disabled={loadingMore} onClick={loadMore}>
+              {loadingMore ? 'Memuat...' : 'Muat lebih banyak'}
+            </button>
           </div>
         )}
       </section>

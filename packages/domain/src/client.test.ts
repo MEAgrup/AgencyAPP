@@ -9,7 +9,7 @@
  *   pipeline. Ids namespaced `ZZ-`; afterEach deletes what it made.
  */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { money, permission } from '@cdps/core';
+import { money, page, permission } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
 import { finance, leads, sales } from './index';
 import {
@@ -542,12 +542,38 @@ describeDb('Hold Service two-step (T-2b / RM-2)', () => {
 describeDb('listClients (M4 §6)', () => {
   it('returns the client roster newest-first with sales PIC', async () => {
     const clientId = await closedClient();
-    const rows = await listClients(sql);
+    const rows = (await listClients(sql)).rows;
     const mine = rows.find((r) => r.id === clientId);
     expect(mine).toBeDefined();
     expect(mine!.toko).toBe('Alpha Digital');
     expect(mine!.salesPicId).toBe('ZZ-BUDI');
     expect(mine!.paymentIntent).toBe(sales.PAYMENT_SCHEME_LUNAS);
+  });
+});
+
+describeDb('listClients — keyset pagination (P2 §6)', () => {
+  it('pages the roster and, unpaged, still returns everything', async () => {
+    const a = await closedClient();
+    const b = await closedClient();
+
+    const unbounded = await listClients(sql);
+    expect(unbounded.nextCursor).toBeNull(); // no request → everything, no "next"
+    const allIds = unbounded.rows.map((r) => r.id);
+    expect(allIds).toEqual(expect.arrayContaining([a, b]));
+
+    // Walk it one row at a time: same rows, same order, none twice.
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 100; guard++) {
+      const p: page.Page<{ id: string }> = await listClients(sql, {
+        limit: 1, cursor: cursor === null ? null : page.decodeCursor(cursor),
+      });
+      seen.push(...p.rows.map((r) => r.id));
+      if (p.nextCursor === null) break;
+      cursor = p.nextCursor;
+    }
+    expect(seen).toEqual(allIds);
+    expect(new Set(seen).size).toBe(seen.length);
   });
 });
 

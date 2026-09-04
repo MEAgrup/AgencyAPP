@@ -103,8 +103,16 @@ export const PAYMENT_STATUS_MENUNGGU_VERIFIKASI = '[Menunggu Verifikasi]';
  *  Lead Form's joined selection back into one row per platform. */
 export const PLATFORM_OPTIONS = ['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Others'] as const;
 
-export function listClients(): Promise<{ data: Client[] }> {
-  return api.get<{ data: Client[] }>('/clients');
+// GET /clients[?limit=&cursor=] — P2 §6: dipaginasi server-side. `next_cursor`
+// null = halaman terakhir; kirim balik sebagai `cursor` untuk lanjutannya.
+export function listClients(
+  params?: { limit?: number; cursor?: string },
+): Promise<{ data: Client[]; next_cursor: string | null }> {
+  const search = new URLSearchParams();
+  if (params?.limit) search.set('limit', String(params.limit));
+  if (params?.cursor) search.set('cursor', params.cursor);
+  const qs = search.toString();
+  return api.get<{ data: Client[]; next_cursor: string | null }>(`/clients${qs ? `?${qs}` : ''}`);
 }
 
 export function getClient(id: string): Promise<{ client: Client }> {

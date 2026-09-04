@@ -132,7 +132,7 @@ describeDb('read models under RLS (O37)', () => {
   it('filters the Pool board by the caller, not by the connection', async () => {
     await seed();
     const outsider = await withClaims(sql, claims({ employeeId: OUTSIDER, division: 'Creative', level: 'staff' }), (tx) =>
-      poolBoard(tx, OUTSIDER),
+      poolBoard(tx, OUTSIDER).then((p) => p.rows),
     );
     expect(outsider.some((r) => r.id === LEAD_ID)).toBe(false);
   });

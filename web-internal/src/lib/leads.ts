@@ -263,14 +263,19 @@ export function claimLead(leadId: string): Promise<{ attempt: AttemptStub }> {
   return api.post<{ attempt: AttemptStub }>(`/leads/${leadId}/claim`);
 }
 
-// GET /leads/pool[?q=&source=] — q mencari nama ATAU nomor telepon (substring,
-// case-insensitive); source menyaring persis satu nilai dari SOURCES.
-export function listPool(params?: { q?: string; source?: string }): Promise<{ data: PoolRow[] }> {
+// GET /leads/pool[?q=&source=&limit=&cursor=] — q mencari nama ATAU nomor
+// telepon (substring, case-insensitive); source menyaring persis satu nilai
+// dari SOURCES. P2 §6: dipaginasi server-side, lihat catatan di `listLeads`.
+export function listPool(
+  params?: { q?: string; source?: string; limit?: number; cursor?: string },
+): Promise<{ data: PoolRow[]; next_cursor: string | null }> {
   const search = new URLSearchParams();
   if (params?.q) search.set('q', params.q);
   if (params?.source) search.set('source', params.source);
+  if (params?.limit) search.set('limit', String(params.limit));
+  if (params?.cursor) search.set('cursor', params.cursor);
   const qs = search.toString();
-  return api.get<{ data: PoolRow[] }>(`/leads/pool${qs ? `?${qs}` : ''}`);
+  return api.get<{ data: PoolRow[]; next_cursor: string | null }>(`/leads/pool${qs ? `?${qs}` : ''}`);
 }
 
 // Mode kepemilikan untuk tab "Lead Saya" (keputusan pemilik 2026-08-06):

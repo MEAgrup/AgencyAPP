@@ -29,7 +29,7 @@
  * Reference: backend/internal/module4_client/{edit,locks,reads,intent}.go.
  */
 
-import { bi, money, notification, permission, statemachine } from '@cdps/core';
+import { bi, money, notification, page, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import * as finance from './finance';
 
@@ -906,8 +906,16 @@ export interface ClientListRow {
   createdAt: Date;
 }
 
-/** listClients returns the client roster (RLS-scoped per §6), newest first. */
-export async function listClients(sql: Queryable): Promise<ClientListRow[]> {
+/**
+ * listClients returns the client roster (RLS-scoped per §6), newest first.
+ *
+ * `pageReq` (P2 §6) is the optional keyset page over the same `created_at desc,
+ * id desc` ordering. Absent = unbounded, so any caller that needs the whole
+ * roster (an aggregation, an export) keeps getting it; the request path passes
+ * one.
+ */
+export async function listClients(sql: Queryable, pageReq?: page.PageRequest): Promise<page.Page<ClientListRow>> {
+  const b = page.sqlBounds(pageReq);
   const rows = await sql<
     {
       id: string; toko: string; nama_pic: string; kota: string; kategori: string;
@@ -920,12 +928,15 @@ export async function listClients(sql: Queryable): Promise<ClientListRow[]> {
            c.payment_intent, c.released_to_account_at, c.created_at
     from clients c
     left join employees e on e.employee_id = c.sales_pic_id
-    order by c.created_at desc, c.id desc`;
-  return rows.map((r) => ({
+    where (c.created_at, c.id) < (${b.at}, ${b.id})
+    order by c.created_at desc, c.id desc
+    limit ${b.limit}::bigint`;
+  const mapped = rows.map((r) => ({
     id: r.id, toko: r.toko, namaPic: r.nama_pic, kota: r.kota, kategori: r.kategori,
     salesPicId: r.sales_pic_id, salesPicNama: r.sales_pic_nama, assignedAmId: r.assigned_am_id,
     paymentIntent: r.payment_intent, releasedToAccountAt: r.released_to_account_at, createdAt: r.created_at,
   }));
+  return page.paginate(mapped, pageReq, (r) => ({ createdAt: r.createdAt, id: r.id }));
 }
 
 // Re-export a shared read (M4 basic Client Record) from the sales read model, so

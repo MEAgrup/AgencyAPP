@@ -65,7 +65,7 @@ describeDb('poolBoard', () => {
     // Andi claims it → one open attempt, and it is Andi's.
     await claim(sql, andi(), id);
 
-    const forAndi = await poolBoard(sql, 'ZZ-ANDI');
+    const forAndi = (await poolBoard(sql, 'ZZ-ANDI')).rows;
     const rowA = forAndi.find((r) => r.id === id);
     expect(rowA).toBeDefined();
     expect(rowA!.openAttemptCount).toBe(1);
@@ -73,14 +73,14 @@ describeDb('poolBoard', () => {
     expect(rowA!.stale).toBe(false); // just created
 
     // Same board from Budi's view: the open attempt is not his.
-    const forBudi = await poolBoard(sql, 'ZZ-BUDI');
+    const forBudi = (await poolBoard(sql, 'ZZ-BUDI')).rows;
     expect(forBudi.find((r) => r.id === id)!.myOpenAttempt).toBe(false);
   });
 
   it('flags a [Pool] lead older than 24h as stale', async () => {
     const id = await poolLead('Pool Stale');
     await sql`update leads set created_at = now() - interval '25 hours' where id = ${id}`;
-    const rows = await poolBoard(sql, 'ZZ-BUDI');
+    const rows = (await poolBoard(sql, 'ZZ-BUDI')).rows;
     expect(rows.find((r) => r.id === id)!.stale).toBe(true);
   });
 
@@ -96,16 +96,16 @@ describeDb('poolBoard', () => {
     await sql`update prospect_attempts set status = 'Closed-Lost' where lead_id = ${lead.id}`;
     await sql`update leads set record_status = '[Pool]' where id = ${lead.id}`;
 
-    const byName = await poolBoard(sql, 'ZZ-BUDI', { q: 'Kwitang' });
+    const byName = (await poolBoard(sql, 'ZZ-BUDI', { q: 'Kwitang' })).rows;
     expect(byName.some((r) => r.id === lead.id)).toBe(true);
 
-    const byMiss = await poolBoard(sql, 'ZZ-BUDI', { q: 'tidak-ada-xyz' });
+    const byMiss = (await poolBoard(sql, 'ZZ-BUDI', { q: 'tidak-ada-xyz' })).rows;
     expect(byMiss.some((r) => r.id === lead.id)).toBe(false);
 
-    const bySource = await poolBoard(sql, 'ZZ-BUDI', { source: 'Event' });
+    const bySource = (await poolBoard(sql, 'ZZ-BUDI', { source: 'Event' })).rows;
     expect(bySource.some((r) => r.id === lead.id)).toBe(true);
 
-    const byOtherSource = await poolBoard(sql, 'ZZ-BUDI', { source: 'Scouting' });
+    const byOtherSource = (await poolBoard(sql, 'ZZ-BUDI', { source: 'Scouting' })).rows;
     expect(byOtherSource.some((r) => r.id === lead.id)).toBe(false);
   });
 });
@@ -376,6 +376,34 @@ describeDb('leadsDatabase — keyset pagination (P2 §6)', () => {
     });
     const p = await leadsDatabase(sql, { q: 'Cari Saya', page: { limit: 10, cursor: null } });
     expect(p.rows.map((r) => r.id)).toEqual([lead.id]);
+    expect(p.nextCursor).toBeNull();
+  });
+});
+
+describeDb('poolBoard — keyset pagination (P2 §6)', () => {
+  it('walks every pool lead exactly once and matches the unbounded read', async () => {
+    for (let i = 0; i < 4; i++) await poolLead(`Pool Page ${i}`);
+    const unbounded = (await poolBoard(sql, 'ZZ-BUDI')).rows.map((r) => r.id);
+    expect(unbounded.length).toBeGreaterThanOrEqual(4);
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 50; guard++) {
+      const p: page.Page<{ id: string }> = await poolBoard(sql, 'ZZ-BUDI', {
+        page: { limit: 2, cursor: cursor === null ? null : page.decodeCursor(cursor) },
+      });
+      seen.push(...p.rows.map((r) => r.id));
+      if (p.nextCursor === null) break;
+      cursor = p.nextCursor;
+    }
+    expect(seen).toEqual(unbounded);
+    expect(new Set(seen).size).toBe(seen.length);
+  });
+
+  it('an absent page request stays unbounded', async () => {
+    for (let i = 0; i < 3; i++) await poolLead(`Pool Unbounded ${i}`);
+    const p = await poolBoard(sql, 'ZZ-BUDI');
+    expect(p.rows.length).toBeGreaterThanOrEqual(3);
     expect(p.nextCursor).toBeNull();
   });
 });

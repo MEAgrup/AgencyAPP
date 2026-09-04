@@ -467,18 +467,44 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
   const [appliedQ, setAppliedQ] = useState('');
   const [appliedSource, setAppliedSource] = useState('');
 
+  // P2 §6: server memaginasi. `nextCursor` null = sudah halaman terakhir.
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await listPool({ q: appliedQ || undefined, source: appliedSource || undefined });
       setRows(res.data);
+      setNextCursor(res.next_cursor);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
   }, [appliedQ, appliedSource]);
+
+  // Menyambung, bukan mengganti — dan cursor selalu dari respons TERAKHIR, jadi
+  // ganti filter (yang memanggil `load` ulang) otomatis mereset paginasinya.
+  async function loadMore() {
+    if (nextCursor === null) return;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const res = await listPool({
+        q: appliedQ || undefined,
+        source: appliedSource || undefined,
+        cursor: nextCursor,
+      });
+      setRows((prev) => [...(prev ?? []), ...res.data]);
+      setNextCursor(res.next_cursor);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   useEffect(() => {
     load();
@@ -602,6 +628,14 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
           </table>
         </div>
       )}
+      {nextCursor !== null && (
+        <div className="row" style={{ justifyContent: 'center', marginTop: 12 }}>
+          <button type="button" className="btn btnSecondary" disabled={loadingMore} onClick={loadMore}>
+            {loadingMore ? 'Memuat...' : 'Muat lebih banyak'}
+          </button>
+        </div>
+      )}
+
     </section>
   );
 }

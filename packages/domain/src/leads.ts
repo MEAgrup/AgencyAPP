@@ -1074,11 +1074,12 @@ export interface PoolBoardRow {
 export async function poolBoard(
   sql: Queryable,
   actorEmployeeId: string,
-  filter: { q?: string; source?: string } = {},
-): Promise<PoolBoardRow[]> {
+  filter: { q?: string; source?: string; page?: page.PageRequest } = {},
+): Promise<page.Page<PoolBoardRow>> {
   const q = filter.q?.trim() ?? '';
   const like = `%${q}%`;
   const source = filter.source?.trim() ?? '';
+  const b = page.sqlBounds(filter.page);
   const rows = await sql<{
     id: string; lead_name: string; phone_number: string; source: string;
     origin_campaign_id: string | null; created_at: Date;
@@ -1095,12 +1096,15 @@ export async function poolBoard(
     where l.record_status = ${RECORD_POOL}
       and (${q} = '' or l.lead_name ilike ${like} or l.phone_number ilike ${like})
       and (${source} = '' or l.source = ${source})
-    order by l.created_at desc, l.id desc`;
-  return rows.map((r) => ({
+      and (l.created_at, l.id) < (${b.at}, ${b.id})
+    order by l.created_at desc, l.id desc
+    limit ${b.limit}::bigint`;
+  const mapped = rows.map((r) => ({
     id: r.id, leadName: r.lead_name, phoneNumber: r.phone_number, source: r.source,
     originCampaignId: r.origin_campaign_id, createdAt: r.created_at,
     stale: r.stale, openAttemptCount: Number(r.open_attempt_count), myOpenAttempt: r.my_open_attempt,
   }));
+  return page.paginate(mapped, filter.page, (r) => ({ createdAt: r.createdAt, id: r.id }));
 }
 
 /**

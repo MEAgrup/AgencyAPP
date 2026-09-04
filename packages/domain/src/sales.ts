@@ -28,7 +28,7 @@
  * backend/internal/admin/master_service.go (EffectiveAt / ServiceView).
  */
 
-import { bi, money, notification, permission, statemachine, tz } from '@cdps/core';
+import { bi, money, notification, page, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { effectiveAt, type ServiceView } from './msl';
 import { resolveWin } from './leads';
@@ -1660,12 +1660,17 @@ function toAttemptRow(r: AttemptRow): AttemptListRow {
  * narrowed to one status. Ports Go's ListAttempts: Go narrows rows to the actor
  * in SQL (`canListAttempts`), here that scoping is RLS's job — the status filter
  * is not, and it is the one the client's status tabs depend on.
+ *
+ * `page` (P2 §6) is the optional keyset page over `created_at desc, id desc`.
+ * Absent = unbounded (internal callers keep the whole set); the request path
+ * passes one.
  */
 export async function listAttempts(
   sql: Queryable,
-  filter: { status?: string } = {},
-): Promise<AttemptListRow[]> {
+  filter: { status?: string; page?: page.PageRequest } = {},
+): Promise<page.Page<AttemptListRow>> {
   const status = filter.status?.trim() ?? '';
+  const b = page.sqlBounds(filter.page);
   const rows = await sql<AttemptRow[]>`
     select pa.id, pa.lead_id, l.lead_name, l.phone_number, l.source, pa.owner_employee_id,
            coalesce(e.nama, pa.owner_employee_id) as owner_nama,
@@ -1674,8 +1679,10 @@ export async function listAttempts(
     join leads l on l.id = pa.lead_id
     left join employees e on e.employee_id = pa.owner_employee_id
     where (${status} = '' or pa.status = ${status})
-    order by pa.created_at desc, pa.id desc`;
-  return rows.map(toAttemptRow);
+      and (pa.created_at, pa.id) < (${b.at}, ${b.id})
+    order by pa.created_at desc, pa.id desc
+    limit ${b.limit}::bigint`;
+  return page.paginate(rows.map(toAttemptRow), filter.page, (r) => ({ createdAt: r.createdAt, id: r.id }));
 }
 
 /** The attempt block of the detail view — Go's AttemptCore. */
