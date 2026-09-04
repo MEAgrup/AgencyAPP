@@ -157,6 +157,46 @@ describe('detect.ts — file signatures', () => {
     expect(FILE_SIGS.map((s) => s.key)).toEqual(['analitik', 'ads', 'video', 'adslive']);
   });
 
+  // O70 (DECISIONS.md 2026-09-04, UAT Avitaskin) — export "Analitik Produk"
+  // yang SEBENARNYA adalah tabel 176 kolom dalam 5 seksi (`Semua`,
+  // `LIVE penjual`, `Video penjual`, `Afiliasi`, `Kartu produk penjual`) dengan
+  // 30 nama kolom yang berulang di tiap seksi. Fixture 14-kolom di file ini
+  // tidak punya nama berulang sama sekali, jadi bug "yang terakhir menang"
+  // hanya bisa muncul di data sungguhan — tiga tes berikut menguncinya.
+  describe('rowsToObjects — kolom bernama sama (bentuk export ASLI, O70)', () => {
+    /** Potongan setia dari export asli: header yang sama muncul lagi di seksi berikutnya. */
+    const multiSeksi: Aoa = [
+      ['Tanggal analisis: 01/07/2026~31/07/2026'],
+      [],
+      ['', '', '', '', 'Semua', 'Semua', '', 'Kartu produk penjual', 'Kartu produk penjual'],
+      ['Nama', 'ID Produk', 'Rentang GMV', 'Status daftar produk', 'GMV', 'Impresi produk', 'Perolehan GMV', 'GMV', 'Impresi produk'],
+      ['Produk A', '1731432176719595405', 'GMV ≥250', 'Aktif', 'Rp10.945.407', '410147', 'Rp1.891.251', 'Rp1.891.251', '12474'],
+    ];
+
+    it('memakai kemunculan PERTAMA (seksi "Semua"), bukan yang terakhir', () => {
+      const rows = rowsToObjects(multiSeksi, 3);
+      expect(rows).toHaveLength(1);
+      // Angka nyata dari export Avitaskin Juli 2026: total toko, BUKAN
+      // sub-seksi kartu produk (Rp1.891.251 / 12.474 impresi).
+      expect(rows[0]['GMV']).toBe('Rp10.945.407');
+      expect(rows[0]['Impresi produk']).toBe('410147');
+    });
+
+    it('kemunculan berikutnya tetap tersimpan di kunci bersuffix — tak ada kolom yang hilang', () => {
+      const rows = rowsToObjects(multiSeksi, 3);
+      expect(rows[0]['GMV#7']).toBe('Rp1.891.251');
+      expect(rows[0]['Impresi produk#8']).toBe('12474');
+    });
+
+    it('kolom yang namanya unik tidak tersentuh aturan ini', () => {
+      const rows = rowsToObjects(multiSeksi, 3);
+      expect(rows[0]['Nama']).toBe('Produk A');
+      expect(rows[0]['Status daftar produk']).toBe('Aktif');
+      expect(rows[0]['Perolehan GMV']).toBe('Rp1.891.251');
+      expect(rows[0]['GMV#4']).toBeUndefined();
+    });
+  });
+
   describe('classifyVideoKind', () => {
     it('reads "toko" from a filename hint', () => {
       expect(classifyVideoKind([], 'video-bisnis-agustus.xlsx')).toEqual({ kind: 'toko', ambiguous: false });
