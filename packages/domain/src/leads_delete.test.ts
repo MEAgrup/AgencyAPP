@@ -528,10 +528,10 @@ describeDb('[Deleted] consequences on reads', () => {
     const req = await requestDelete(sql, budi(), leadId, 'coba');
     await approveDelete(sql, sitiHead(), req.id);
 
-    const unfiltered = await leadsDatabase(sql, {});
+    const unfiltered = (await leadsDatabase(sql, {})).rows;
     expect(unfiltered.map((r) => r.id)).not.toContain(leadId);
 
-    const asked = await leadsDatabase(sql, { status: RECORD_DELETED });
+    const asked = (await leadsDatabase(sql, { status: RECORD_DELETED })).rows;
     expect(asked.map((r) => r.id)).toContain(leadId);
 
     // And it is never unreachable: by-id still resolves.

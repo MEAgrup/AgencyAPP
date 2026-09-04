@@ -286,19 +286,26 @@ export const MINE_MODE_LABELS: Record<MineMode, string> = {
   any: 'Semua lead saya',
 };
 
-// GET /leads[?status=&q=&source=&mine=<mode>] — `mine` mempersempit ke lead
-// milik aktor. Ia KENYAMANAN, bukan batas keamanan: baris yang boleh dibaca
-// tetap ditentukan RLS `leads_select`.
+// GET /leads[?status=&q=&source=&mine=<mode>&limit=&cursor=] — `mine`
+// mempersempit ke lead milik aktor. Ia KENYAMANAN, bukan batas keamanan: baris
+// yang boleh dibaca tetap ditentukan RLS `leads_select`.
+//
+// P2 §6: endpoint ini SELALU dipaginasi server-side. `next_cursor` berisi
+// penanda halaman berikutnya, `null` kalau sudah halaman terakhir. Kirim balik
+// nilai itu sebagai `cursor` untuk mengambil lanjutannya. Cursor bersifat
+// buram — jangan diurai atau dibangun sendiri di FE.
 export function listLeads(
-  params?: { status?: string; q?: string; source?: string; mine?: MineMode },
-): Promise<{ data: LeadRow[] }> {
+  params?: { status?: string; q?: string; source?: string; mine?: MineMode; limit?: number; cursor?: string },
+): Promise<{ data: LeadRow[]; next_cursor: string | null }> {
   const search = new URLSearchParams();
   if (params?.status) search.set('status', params.status);
   if (params?.q) search.set('q', params.q);
   if (params?.source) search.set('source', params.source);
   if (params?.mine) search.set('mine', params.mine);
+  if (params?.limit) search.set('limit', String(params.limit));
+  if (params?.cursor) search.set('cursor', params.cursor);
   const qs = search.toString();
-  return api.get<{ data: LeadRow[] }>(`/leads${qs ? `?${qs}` : ''}`);
+  return api.get<{ data: LeadRow[]; next_cursor: string | null }>(`/leads${qs ? `?${qs}` : ''}`);
 }
 
 export function getLead(id: string): Promise<LeadDetail> {

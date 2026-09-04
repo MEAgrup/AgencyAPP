@@ -98,6 +98,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   MslIncompleteError: 400, // msl.IncompleteError
   OutstandingTotalError: 400, // finance.OutstandingTotalError
   OverVerificationError: 400, // finance.OverVerificationError
+  PageCursorError: 400, // core page.PageCursorError — a cursor this server did not mint
   PerformanceValidationError: 400, // performance.ValidationError
   ReqValidationError: 400, // req.ValidationError
   SalesIncompleteError: 400, // sales.IncompleteError

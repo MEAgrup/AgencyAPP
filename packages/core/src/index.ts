@@ -4,6 +4,10 @@
  * This package exports the following engines (ported incrementally per phase):
  * - money: Commission, allocation (Σ=100%), installment rollup, ROAS math ✅
  * - tz: WIB (UTC+7, no DST) calendar-date bucketing ✅
+ * - page: keyset ("cursor") pagination over the house `created_at desc, id
+ *   desc` list ordering — opaque cursor, over-fetch-by-one has-more probe,
+ *   unbounded when no page is requested so internal aggregations never
+ *   silently see one page (P2 §6) ✅
  * - permission: Role matrix predicates (staff/lead/SPV/OD/Director/layered) ✅
  * - bi: house-wide Bahasa Indonesia core messages + [...] invariant helpers ✅
  * - ident: prefix registry + ID format/parse + nextId wrapper (SQL ident_next) ✅
@@ -39,6 +43,7 @@
  */
 
 export * as money from './money';
+export * as page from './page';
 export * as tz from './tz';
 export * as permission from './permission';
 export * as bi from './bi';

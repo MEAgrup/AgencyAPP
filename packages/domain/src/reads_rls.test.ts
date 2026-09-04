@@ -105,7 +105,7 @@ describeDb('read models under RLS (O37)', () => {
   it('hides a lead from an unrelated division — the leak O37 described', async () => {
     await seed();
     const rows = await withClaims(sql, claims({ employeeId: OUTSIDER, division: 'Creative', level: 'staff' }), (tx) =>
-      leadsDatabase(tx, {}),
+      leadsDatabase(tx, {}).then((page) => page.rows),
     );
     expect(rows.some((r) => r.id === LEAD_ID)).toBe(false);
   });
@@ -113,7 +113,7 @@ describeDb('read models under RLS (O37)', () => {
   it('still shows the lead to its creator', async () => {
     await seed();
     const rows = await withClaims(sql, claims({ employeeId: OWNER, division: 'Marketing', level: 'staff' }), (tx) =>
-      leadsDatabase(tx, {}),
+      leadsDatabase(tx, {}).then((page) => page.rows),
     );
     expect(rows.some((r) => r.id === LEAD_ID)).toBe(true);
   });
@@ -121,11 +121,11 @@ describeDb('read models under RLS (O37)', () => {
   it('shows it to a Director (read-everywhere) but not via an empty claim set', async () => {
     await seed();
     const asDirector = await withClaims(sql, claims({ employeeId: 'ZZR-DIR', director: true }), (tx) =>
-      leadsDatabase(tx, {}),
+      leadsDatabase(tx, {}).then((page) => page.rows),
     );
     expect(asDirector.some((r) => r.id === LEAD_ID)).toBe(true);
 
-    const anonymous = await withClaims(sql, '{}', (tx) => leadsDatabase(tx, {}));
+    const anonymous = (await withClaims(sql, '{}', (tx) => leadsDatabase(tx, {}))).rows;
     expect(anonymous.some((r) => r.id === LEAD_ID)).toBe(false);
   });
 

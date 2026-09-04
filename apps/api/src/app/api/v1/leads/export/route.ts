@@ -57,7 +57,10 @@ export async function GET(request: Request): Promise<Response> {
 
     const params = new URL(request.url).searchParams;
     const mine = params.get('mine');
-    const rows = await readAsActor(actor, (sql) => leads.leadsDatabase(sql, {
+    // Deliberately NO page request (P2 §6): an export of "the first 100 rows"
+    // is not an export. `leadsDatabase` is unbounded when none is passed, and
+    // EXPORT_ROW_CAP below is this endpoint's own, explicit bound.
+    const { rows } = await readAsActor(actor, (sql) => leads.leadsDatabase(sql, {
       status: params.get('status') ?? undefined,
       q: params.get('q') ?? undefined,
       source: params.get('source') ?? undefined,

@@ -29,7 +29,7 @@
  * Reference: backend/internal/module1_leads/{leads,dedup,normalize,reads}.go.
  */
 
-import { bi, ident, notification, permission, statemachine } from '@cdps/core';
+import { bi, ident, notification, page, permission, statemachine } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 // Single source of truth for the CDPS division label (Go keeps a module-local
 // copy in module1_leads/bulk.go; here one exported constant serves both).
@@ -1175,14 +1175,23 @@ export interface LeadsDbRow {
  * has to mean to the people using the board — but remain reachable by asking for
  * `status='[Deleted]'` explicitly, and by id, because the row and its audit trail
  * are never destroyed (house rule #3).
+ *
+ * `page` (P2 §6) makes this a keyset page over the SAME `created_at desc, id
+ * desc` ordering the P1 index covers. It is OPTIONAL and absent means unbounded
+ * — the CSV export reads through this very function and must still get every
+ * row (up to its own explicit cap), so bounding by default here would silently
+ * truncate an export. The request path (`GET /leads`) always passes one.
+ * Filters compose with the cursor because they are all server-side: narrowing
+ * by status/q/source simply pages a smaller result set.
  */
 export async function leadsDatabase(
   sql: Queryable,
   filter: {
     status?: string; q?: string; source?: string;
     mineEmployeeId?: string; mineMode?: MineMode;
+    page?: page.PageRequest;
   } = {},
-): Promise<LeadsDbRow[]> {
+): Promise<page.Page<LeadsDbRow>> {
   const status = filter.status?.trim() ?? '';
   const q = filter.q?.trim() ?? '';
   const like = `%${q}%`;
@@ -1193,6 +1202,7 @@ export async function leadsDatabase(
   // with fixed parameters — no branch builds a different query.
   const wantRegistered = mine !== '' && (mode === MINE_ANY || mode === MINE_REGISTERED);
   const wantClaimed = mine !== '' && (mode === MINE_ANY || mode === MINE_CLAIMED);
+  const b = page.sqlBounds(filter.page);
   const rows = await sql<{
     id: string; lead_name: string; phone_number: string; email: string | null;
     source: string; origin_division: string; origin_campaign_id: string | null;
@@ -1218,8 +1228,10 @@ export async function leadsDatabase(
            or (${wantClaimed} and exists(
                  select 1 from prospect_attempts pa3
                   where pa3.lead_id = l.id and pa3.owner_employee_id = ${mine})))
-    order by l.created_at desc, l.id desc`;
-  return rows.map((r) => ({
+      and (l.created_at, l.id) < (${b.at}, ${b.id})
+    order by l.created_at desc, l.id desc
+    limit ${b.limit}::bigint`;
+  const mapped = rows.map((r) => ({
     id: r.id, leadName: r.lead_name, phoneNumber: r.phone_number, email: r.email,
     source: r.source, originDivision: r.origin_division, originCampaignId: r.origin_campaign_id,
     lastTouchCampaignId: r.last_touch_campaign_id, recordStatus: r.record_status,
@@ -1227,6 +1239,7 @@ export async function leadsDatabase(
     openAttemptCount: Number(r.open_attempt_count),
     registeredByMe: r.registered_by_me, claimedByMe: r.claimed_by_me,
   }));
+  return page.paginate(mapped, filter.page, (r) => ({ createdAt: r.createdAt, id: r.id }));
 }
 
 /** The lead block of the detail view (contract §5) — LeadsDbRow minus the rollup. */
