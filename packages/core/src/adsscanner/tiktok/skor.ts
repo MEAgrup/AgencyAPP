@@ -74,14 +74,15 @@ function contentGate(konten: number, cfg: Pick<AdsScannerConfig, 'gateScale' | '
 
 function findBlockers(s: SkuBase, cfg: Pick<AdsScannerConfig, 'minAov' | 'blacklist'>): string[] {
   const blockers: string[] = [];
-  // ⚠️ Ported VERBATIM from the tool — NOT fixed. `/aktif/i` is a bare
-  // substring test with no word boundary, so "Nonaktif"/"Dinonaktifkan"
-  // (the NEGATED forms — they contain the letters "aktif" too) read as
-  // ACTIVE, not blocked. Flagged in the porting report for a human to
-  // confirm against real TikTok Seller Center status strings before
-  // deciding whether this is an intentional match against the platform's
-  // actual (different) status vocabulary or a latent tool bug.
-  if (s.status && !/aktif/i.test(s.status)) blockers.push(`Produk tidak aktif (${s.status})`);
+  // FIX (handoff docs/handoff/HANDOFF_LANJUT_SEMUA_BUILD_20260904.md §1.3):
+  // the tool's own check was a bare `/aktif/i` substring test with no word
+  // boundary, so "Nonaktif"/"Dinonaktifkan" (the NEGATED forms — they
+  // contain the letters "aktif" too) read as ACTIVE and were never
+  // blocked. `\b` anchors the match to the whole word "aktif" (still
+  // matches "Aktif" / "Tidak Aktif"), so it stops misreading a negated
+  // status without needing the full real TikTok status vocabulary
+  // (still unverified against a real export — see handoff §1.2 UAT).
+  if (s.status && !/\baktif\b/i.test(s.status)) blockers.push(`Produk tidak aktif (${s.status})`);
   if (cfg.minAov > 0 && s.aov != null && s.aov > 0 && s.aov < cfg.minAov) {
     blockers.push(`AOV Rp${Math.round(s.aov).toLocaleString('id-ID')} di bawah ambang Rp${cfg.minAov.toLocaleString('id-ID')}`);
   }
