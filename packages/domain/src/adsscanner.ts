@@ -282,7 +282,12 @@ function detectFiles(files: readonly AdsScanFileInput[]): DetectedFiles {
       headerRow = t.FILE_SIGS.find((s) => s.key === type)?.headerRow ?? 0;
     } else {
       const d = t.detectAoa(aoa);
-      if (d && d.type === 'wrong_summary') throw new ValidationError(MSG_RINGKASAN_DATA);
+      // Sebut NAMA berkasnya. UAT Avitaskin (2026-09-04): AM menyeret satu folder
+      // export (12 berkas) dan seluruh scan ditolak oleh satu berkas
+      // "Shop Analytics" tanpa petunjuk yang mana — sama seperti `MSG_AMBIGU`
+      // di mesin laporan, pesan ini menempelkan nama berkasnya di belakang
+      // string BI-nya (string `[...]`-nya sendiri tidak berubah).
+      if (d && d.type === 'wrong_summary') throw new ValidationError(`${MSG_RINGKASAN_DATA} ${f.namaBerkas}`);
       if (d) {
         type = d.type;
         headerRow = d.headerRow;

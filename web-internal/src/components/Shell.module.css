@@ -3,15 +3,21 @@
   min-height: 100vh;
 }
 
+/* Sidebar IA v3 §5.7: rail 270px, selalu mengembang, sticky setinggi layar,
+   dengan area gulir sendiri — daftar 9 grup lebih panjang dari layar pendek. */
 .sidebar {
-  width: 232px;
+  width: 270px;
   flex-shrink: 0;
   background: var(--color-surface);
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   padding: 20px 14px;
-  gap: 22px;
+  gap: 16px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
 }
 
 .logo {
@@ -37,13 +43,122 @@
   gap: 2px;
 }
 
+/* Judul grup adalah TOMBOL (§5.8), bukan teks: ia membuka/menutup grupnya.
+   Semua reset tombol di sini karena `.btn` global membawa gaya yang salah. */
 .navSection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--color-text-muted);
-  padding: 14px 10px 4px;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+}
+.navSection:hover {
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+/* Cincin fokus yang terlihat (§5.8) — untuk tombol grup maupun tautan. */
+.navSection:focus-visible,
+.navSubHeader:focus-visible,
+.navLink:focus-visible,
+.navSearchInput:focus-visible {
+  outline: 2px solid var(--color-primary-dark);
+  outline-offset: 1px;
+}
+.navGroup {
+  display: flex;
+  flex-direction: column;
+}
+.navGroupItems {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 6px;
+}
+/* ⚠️ WAJIB, jangan hapus. Aturan `[hidden] { display: none }` datang dari
+   stylesheet BAWAAN BROWSER, dan stylesheet penulis SELALU mengalahkannya —
+   jadi `display: flex` di atas membuat grup yang "tertutup" tetap terlihat
+   walau `hidden` terpasang dan `aria-expanded="false"`. Ketahuan hanya lewat
+   screenshot browser sungguhan (2026-09-04): 534 tes hijau, accordion-nya
+   tidak melipat apa pun. Sama untuk panel sub-grup di bawah. */
+.navGroupItems[hidden],
+.navSubItems[hidden] {
+  display: none;
+}
+.navSubItems {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.navChevron {
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.7;
+}
+/* Sub-grup (kedalaman 2, hanya `Papan Divisi`). */
+.navSubGroup {
+  display: flex;
+  flex-direction: column;
+}
+.navSubHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+}
+.navSubHeader:hover {
+  background: var(--color-bg);
+}
+/* Kotak cari (§5.3). */
+.navSearch {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.navSearchInput {
+  width: 100%;
+  padding: 7px 34px 7px 10px;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.navSearchHint {
+  position: absolute;
+  right: 8px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+.navEmpty {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  padding: 8px 10px;
+  margin: 0;
 }
 
 .navLink {
@@ -55,6 +170,20 @@
   font-size: 13px;
   font-weight: 500;
   color: var(--color-text);
+  transition: background-color 120ms ease;
+}
+/* §5.8 — hormati prefers-reduced-motion. */
+@media (prefers-reduced-motion: reduce) {
+  .navLink {
+    transition: none;
+  }
+}
+/* Tautan di dalam sub-grup: satu tingkat menjorok, dengan garis penanda. */
+.navLinkNested {
+  margin-left: 10px;
+  padding-left: 12px;
+  border-left: 1px solid var(--color-border);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 
 .navLink:hover {

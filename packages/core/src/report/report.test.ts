@@ -81,6 +81,16 @@ const affKr = (): Sheet => parse(sheetAoa(AFF_HEADER, [
   ['Toko Resmi', 'Rp30.000.000', '10', '5', '0', '200', 'Rp0', 'Rp0'],
 ], META_BULAN), 'aff.xlsx');
 
+// Video — O71 (keputusan pemilik 2026-09-04): satu baris TANPA caption tapi
+// ber-`ID Video` (di export asli ada 16 baris begini, 15 di antaranya VV > 0),
+// dan satu baris keterangan/tooltip yang tak punya identitas sama sekali.
+const VID_HEADER = ['Informasi Video', 'Nama Kreator', 'ID Video', 'Waktu', 'GMV dari video (Rp)', 'GPM (Rp)', 'VV', 'CTOR (pesanan SKU)'];
+const vidToko = (): Sheet => parse(sheetAoa(VID_HEADER, [
+  ['Promo Agustus #promo', 'Toko Resmi', 'v1', '2026/08/05 10:00', 'Rp2.000.000', 'Rp100.000', '20.000', '1,20%'],
+  ['', 'Toko Resmi', 'v2', '2026/08/12 09:00', 'Rp0', 'Rp0', '5.000', '0'],
+  ['', '', '', '', '', '', '', ''],
+], META_BULAN), 'video-toko.xlsx');
+
 const KLIEN = { nama: 'PT Alpha', toko: 'Alpha Store', platform: 'TikTok Shop', kategori: 'Fashion', account_manager: 'EMP-001', store_link: null };
 const GEN_AT = '2026-09-01T03:00:00.000Z';
 
@@ -255,6 +265,30 @@ describe('runReport', () => {
 });
 
 // ── skor ────────────────────────────────────────────────────────────────────
+describe('video tanpa caption (O71)', () => {
+  it('tetap dihitung sebagai video — caption itu judul, bukan identitas', () => {
+    const M = run({ shop_tt: shopTt(), vid_toko: vidToko() }).M;
+    // 2 video nyata; baris tanpa caption DAN tanpa ID Video (keterangan/tooltip
+    // di bawah header export) tetap dibuang.
+    expect(M.video?.total).toBe(2);
+    expect(M.video?.toko).toBe(2);
+  });
+
+  it('diberi nama "(tanpa caption)", bukan string kosong', () => {
+    const M = run({ shop_tt: shopTt(), vid_toko: vidToko() }).M;
+    const judul = M.video?.topViews.map((v) => v.judul) ?? [];
+    expect(judul).toContain('(tanpa caption)');
+    expect(judul).not.toContain('');
+  });
+
+  it('penyebut "video ada penjualan" ikut memperhitungkannya', () => {
+    const M = run({ shop_tt: shopTt(), vid_toko: vidToko() }).M;
+    // 1 dari 2 punya GMV — kalau baris tanpa caption dibuang, ini jadi 1/1.
+    expect(M.video?.adaPenjualan).toBe(1);
+    expect(M.video?.salesRate).toBeCloseTo(0.5, 6);
+  });
+});
+
 describe('skor', () => {
   it('weights the six dimensions to exactly 1.00', () => {
     const sk = run({ shop_tt: shopTt() }).skor;

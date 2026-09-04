@@ -364,9 +364,22 @@ function videoRows(d: Sheet, afiliasi: boolean): { items: VideoItem[]; extra: Re
   const extra: Record<string, (number | null)[]> = { likes: [], komentar: [], dibagikan: [], klik: [], dilihat: [], keLive: [], follow: [] };
   for (const row of d.rows) {
     const judul = r.s(row, 'Informasi Video');
-    if (!judul) continue;
+    const videoId = r.s(row, 'ID Video');
+    // O71 (keputusan pemilik 2026-09-04, temuan UAT Avitaskin): caption KOSONG
+    // bukan alasan membuang sebuah video. Caption itu JUDUL, bukan identitas —
+    // `ID Video` yang identitas, dan di export asli ia terisi di 664/664 baris
+    // sementara 16 baris (15 di antaranya VV > 0) tak bercaption. Membuangnya
+    // mengecilkan PENYEBUT "video ada penjualan" tanpa alasan.
+    // Baris tanpa keduanya (mis. baris keterangan/tooltip di bawah header
+    // export Afiliasi) tetap dibuang — itulah yang filter ini sebenarnya untuk.
+    // `../baseline/metrik.ts:video` sudah memakai kunci yang sama
+    // (`ID Video != null || Informasi Video != null`); ini menyamakan mesin
+    // laporan dengannya, bukan membuat aturan ketiga.
+    if (!judul && !videoId) continue;
     items.push({
-      judul: judul.replace(/\s+/g, ' ').trim(),
+      // Placeholder, bukan string kosong — sama seperti `'(tanpa judul)'` pada
+      // kreatif iklan di atas, supaya baris tetap terbaca di tabel laporan.
+      judul: judul ? judul.replace(/\s+/g, ' ').trim() : '(tanpa caption)',
       kreator: r.s(row, 'Nama Kreator'),
       waktu: r.s(row, 'Waktu'),
       gmv: r.g(row, 'GMV dari video (Rp)'),

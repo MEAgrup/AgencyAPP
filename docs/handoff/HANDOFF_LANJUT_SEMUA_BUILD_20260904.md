@@ -1,18 +1,28 @@
 # HANDOFF — LANJUT SEMUA BUILD (peta pekerjaan sisa se-proyek)
 
-> ### ⚠️ BACA `HANDOFF_LANJUT_SEMUA_BUILD_SESI2_20260904.md` LEBIH DULU
-> Sesi paralel mengerjakan tiga butir §0 dokumen ini dan mendaratkannya lewat **PR #282**
-> (`main@9a55613`) selagi PR dokumen ini masih draft. Yang **sudah tidak berlaku** di sini:
+> ### ⚠️ BACA `HANDOFF_LANJUT_SEMUA_BUILD_SESI3_20260904.md` LEBIH DULU
+> Sesi paralel menghabiskan **SELURUH §0 nomor 1–3** dokumen ini selagi PR-nya masih
+> draft, lewat PR **#282** (`main@9a55613`) dan **#283/#284/#285** (`main@c28545b`).
+> Rantai lanjutannya: SESI2 → **SESI3 (terbaru)**. Yang **sudah tidak berlaku** di sini:
 > - **§0 #1 / §1.1** — migrasi `20260910010000_gelombang4_adsscanner` **SUDAH diterapkan
 >   ke live `CDPS SG`**; gerbangnya kini 145/40/31/67. Jangan apply ulang.
+> - **§0 #2 / §1.2** — **UAT export TikTok ASLI sudah dijalankan.** Ia menemukan dua bug
+>   nyata yang sudah diperbaiki: **O70** (export Analitik Produk asli ternyata 5 seksi,
+>   kolom dibaca dari seksi yang salah — `f339916`) dan **O71** (video tanpa caption
+>   ikut dihitung, dinamai "(tanpa caption)" — `a4ba14a`). Ini persis yang §1.2
+>   perkirakan akan ditemukan.
 > - **§0 #3 / §1.3** — bug O67 `!/aktif/i.test(status)` **SUDAH diperbaiki** (batas kata),
 >   commit `2230e08`.
 > - **§3 B-03** — ternyata **sudah mendarat**; barisnya di `M6ABC_BACKLOG.md` yang basi,
 >   bukan tiketnya yang terbuka. Ini contoh keempat dari pola yang §5 dokumen ini catat.
 >
+> Yang **baru** dan tidak ada di dokumen ini: **Sidebar IA v3** (9 grup, accordion, kotak
+> cari, Papan Divisi) + grup nav "MEA AI Tools", dan temuan **O72** — invariant "nol
+> `SECURITY DEFINER` untuk `anon`" ternyata tidak punya penjaganya.
+>
 > Sisanya — **§2** (enam keputusan pemilik), **§3** tiket lain, **§4** gate cutover,
 > **§5** tiga backlog basi, **§7** aturan rumah & jebakan lingkungan — **tetap berlaku
-> apa adanya** dan tidak diduplikasi di SESI2.
+> apa adanya** dan tidak diduplikasi di SESI2/SESI3.
 
 > Dibuat 2026-09-04 di atas `main@35b7046`. **Ini bukan handoff satu fitur.** Handoff
 > sebelumnya (`HANDOFF_ADVERTISER_TOOLS_SESI7_20260904.md`) menutup rantai Gelombang 1–4
