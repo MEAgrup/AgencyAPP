@@ -345,6 +345,16 @@ type Stage = 'contacted' | 'qualified' | 'nonQualified' | 'negotiating' | 'close
 /** bucketOf maps a raw `prospect_attempts.status` (the transition's `to`) to the funnel stage it represents, or null for a status this dashboard does not track (e.g. `Blocked`, the negotiation sub-states beyond the first). */
 function bucketOf(status: string): Stage | null {
   if (status === 'Contacted') return 'contacted';
+  // L5 (Revisi Sales/Creative/Performa) — an attempt can now age straight
+  // New Lead -> [Unrespon] (L1), never passing through a 'transition:...
+  // ->Contacted' row at all. Without this, firstPerAttemptStage() would
+  // never register a 'contacted' event for that attempt, yet a later
+  // [Unrespon] -> Not Qualified (auto, L3) DOES register 'nonQualified' —
+  // the funnel could then show nonQualified exceeding contacted, which
+  // reads as a bug even though the underlying counts are correct.
+  // [Unrespon] itself is "attempt was engaged with, not yet Qualified" —
+  // the same semantic bucket as Contacted.
+  if (status === '[Unrespon]') return 'contacted';
   if (status === 'Qualified') return 'qualified';
   if (status === 'Not Qualified') return 'nonQualified';
   if (status.startsWith('Negotiation - ')) return 'negotiating';
