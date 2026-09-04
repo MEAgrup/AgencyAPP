@@ -434,13 +434,13 @@ Tahap 1, satu langkah per PR, suite penuh hijau di antara keduanya.
 | C2 | `submitAssetBatch` + `startAssetBatch` + route + wire + test | C1 | ⬜ |
 | C3 | Kartu "Submit Output Massal" + `distributeLinks` | C2 | ⬜ |
 | C4 | `reviewAssetBatch`/`approveAssetBatch` + kartu AM | C2 | ⬜ |
-| L1 | Migrasi state `[Unrespon]` + edge (termasuk edge Kalah Kompetisi) | — | ⬜ |
-| L2 | Notif katalog v14 (berkas terpisah) | L1 | ⬜ |
-| L3 | `leads_unrespon_tick` + wrapper TS + route internal + pg_cron | L1, L2 | ⬜ |
-| L4 | Cermin FE (`status.ts`, `sales.ts`, `lead-progress.ts`, tombol) | L1 | ⬜ |
-| L5 | `junkBreakdown` kecualikan `SISTEM` + `bucketOf` kenal `[Unrespon]` | L3 | ⬜ |
-| E1 | `GET /leads/export` + gerbang Director + helper CSV | — | ⬜ |
-| E2 | Tombol export di `DatabaseTab` + asertion route-parity | E1 | ⬜ |
+| L1 | Migrasi state `[Unrespon]` + edge (termasuk edge Kalah Kompetisi) | — | ✅ |
+| L2 | Notif katalog v14 (berkas terpisah) | L1 | ✅ |
+| L3 | `leads_unrespon_tick` + wrapper TS + route internal + pg_cron | L1, L2 | ✅ |
+| L4 | Cermin FE (`status.ts`, `sales.ts`, `lead-progress.ts`, tombol) | L1 | ✅ |
+| L5 | `junkBreakdown` kecualikan `SISTEM` + `bucketOf` kenal `[Unrespon]` | L3 | ✅ |
+| E1 | `GET /leads/export` + gerbang Director + helper CSV | — | ✅ |
+| E2 | Tombol export di `DatabaseTab` + asertion route-parity | E1 | ✅ |
 | P2 | Performa Tahap 2 (round-trip, pagination, N+1, health) | P1 | ⬜ |
 
 ---
