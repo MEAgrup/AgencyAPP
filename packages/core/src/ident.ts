@@ -126,6 +126,16 @@ export const PREFIXES = {
   // migration for the full "why two tables, not one" rationale. Schema-only
   // this pass: no domain/route layer mints this prefix yet.
   ADL: { entity: 'Ads Decision Log entry (SKU Screener Modul C)', module: 'Gelombang 3 (SKU Screener)' },
+  // Gelombang 4 (TikTok Ads Scanner, `docs/plan/PLAN_KONSOLIDASI_ALAT_ADVERTISER.md`
+  // §7) — one weekly SCAN of one client's TikTok Shop exports: which SKUs to
+  // scale/optimise/kill, plus the budget reallocation pool. ONE prefix, not
+  // two like Gelombang 3: the only ID-bearing entity here is the run itself
+  // (`adsscanner_benchmark` is keyed by `versi integer`, the same shape as
+  // `report_benchmark`/`report_benchmark_shopee`, not a prefixed entity).
+  // Deliberately NOT stored in `client_reports` — this is an INTERNAL Ads
+  // tool with no Client Portal surface (O69, and the long "kenapa bukan
+  // client_reports" note in the Gelombang 4 migration).
+  ASR: { entity: 'Ads Scanner run (TikTok Ads Scanner)', module: 'Gelombang 4 (TikTok Ads Scanner)' },
 } as const satisfies Record<string, PrefixInfo>;
 
 /** A registered prefix string (e.g. 'CLI', 'TRX'). */

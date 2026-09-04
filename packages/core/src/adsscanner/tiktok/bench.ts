@@ -12,7 +12,7 @@
  * a new versioned constant rather than editing this one in place.
  *
  * Source: tool comment — "Sumber: sheet benchmark MEA. ROI update 31 Des
- * 2025, TR & GPM update 26 Apr 2026." 33 TikTok Shop Level-3 categories.
+ * 2025, TR & GPM update 26 Apr 2026." 34 TikTok Shop Level-3 categories.
  * `roi`/`tr`/`gpm` may each be `null` for a category with no measured
  * benchmark (e.g. Gaming & Consoles has no ROI/TR data at all) — that is a
  * real "not measured", not a zero, and score/insight code must treat it as
@@ -58,7 +58,7 @@ export const ADSSCANNER_BENCH_V1: AdsScannerBench = {
   'Music & Collectibles': { roi: null, tr: null, gpm: 1.36 },
 };
 
-/** Runtime list of the 33 recognised categories, for validating an `adsscanner_benchmark` row / populating a category picker. */
+/** Runtime list of the 34 recognised categories, for validating an `adsscanner_benchmark` row / populating a category picker. */
 export const ALL_ADSSCANNER_CATEGORIES: readonly string[] = Object.keys(ADSSCANNER_BENCH_V1).sort();
 
 const EMPTY_BENCH = { roi: null, tr: null, gpm: null } as const;

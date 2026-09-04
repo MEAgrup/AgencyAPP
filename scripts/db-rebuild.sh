@@ -140,10 +140,19 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "143"
-check "entity_prefix"    "select count(*) from entity_prefix"    "39"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "145"
+check "entity_prefix"    "select count(*) from entity_prefix"    "40"
 check "sm_machines"      "select count(*) from sm_machines"      "31"
 check "notif_events"     "select count(*) from notif_events"     "67"
+# 145 = 143 + 2 tabel Gelombang 4 TikTok Ads Scanner
+#       (20260910010000_gelombang4_adsscanner.sql): `adsscanner_run` (ASR-,
+#       satu baris per scan mingguan satu klien, SELURUH baris beku) dan
+#       `adsscanner_benchmark` (kategori→{roi,tr,gpm} berversi/append-only,
+#       POLICY nol/default-deny — pola sama report_benchmark_shopee). +1
+#       prefix ASR (39→40). Nol mesin baru (scan tidak punya siklus status —
+#       sekali dihitung, beku) ⇒ sm_machines TETAP 31; nol event katalog baru
+#       ⇒ notif_events TETAP 67 (alat kerja internal divisi Ads; tak ada
+#       seorang pun yang harus belajar inbox kedua untuk memakainya).
 # 143 = 142 + 1 tabel Gelombang 2 Shopee Report Engine
 #       (20260909010000_sh01_shopee_report_engine.sql): `report_benchmark_shopee`
 #       (padanan Shopee dari `report_benchmark`, berversi/append-only, POLICY

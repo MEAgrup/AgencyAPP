@@ -24,6 +24,7 @@
  */
 import { EMBEDDED_TOOLS } from './embedded-tools';
 import { canUseSkuScreener } from './skuscreener';
+import { canUseAdsScanner } from './adsscanner';
 import type { Role } from './types';
 
 export interface NavItem {
@@ -223,6 +224,19 @@ const DELIVERY_LINKS: NavItem[] = [
   // `skuscreener.canWriteSku`) plus Director/OD (read-everywhere, Role Matrix
   // §4). One predicate, no drift — the posture `embedded-tools.ts` takes.
   { href: '/ads/screening', label: 'Screening SKU', access: canUseSkuScreener },
+  // Gelombang 4 (PLAN §7): the TikTok Ads Scanner — the weekly "which SKUs to
+  // scale / kill and where to move budget" scan. Same posture and the same
+  // reasoning as the line above: an Ads-division tool, NOT a Brief queue, so
+  // its gate is `canUseAdsScanner` — the SAME predicate `/ads/scanner` guards
+  // itself with (Ads staff/lead per the server write gate
+  // `adsscanner.canWriteAdsScan`, plus Director/OD read-everywhere).
+  //
+  // A SEPARATE line from Screening SKU on purpose: the two answer different
+  // questions at different points in the funnel (which SKU deserves ad budget
+  // at all vs. how the budget already spent is performing this week), they read
+  // different exports, and they store to different tables. Folding them into
+  // one menu entry would hide whichever the advertiser did not open first.
+  { href: '/ads/scanner', label: 'Ads Scanner', access: canUseAdsScanner },
   { href: '/kol', label: 'KOL', access: divisionQueue(KOL) },
   { href: '/livestream', label: 'Live Stream', access: divisionQueue(LIVE_STREAM) },
   // AI Optimizer / Store Operation (M16/M17, DECISIONS.md 2026-09-01): same

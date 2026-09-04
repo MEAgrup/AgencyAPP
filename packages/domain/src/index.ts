@@ -124,6 +124,10 @@ export * as clientPortal from './client-portal';
 // Gelombang 3 (SKU Screener, SC-08) — Modul A/B/C/D domain layer over the
 // schema-only migration 20260908050000. See skuscreener.ts's file header.
 export * as skuscreener from './skuscreener';
+// Gelombang 4 (TikTok Ads Scanner, AS-01..AS-04) — domain layer over migration
+// 20260910010000 (`adsscanner_run`, `adsscanner_benchmark`). Internal Ads tool:
+// deliberately no Client Portal surface — see adsscanner.ts's file header.
+export * as adsscanner from './adsscanner';
 export * as notification from './notification';
 export * as audit from './audit';
 export * as engine from './engine';

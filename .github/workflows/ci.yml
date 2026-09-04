@@ -380,6 +380,14 @@ jobs:
       #       status) ⇒ sm_machines TETAP 31; nol event katalog baru ⇒
       #       notif_events TETAP 67. Schema-only pass — lihat DECISIONS.md
       #       2026-09-08 (Gelombang 3).
+      # 145 = 143 + 2 tabel Gelombang 4 TikTok Ads Scanner
+      #       (20260910010000_gelombang4_adsscanner.sql): `adsscanner_run`
+      #       (ASR-, satu baris per scan mingguan satu klien, SELURUH baris
+      #       beku — UPDATE dan DELETE) dan `adsscanner_benchmark`
+      #       (kategori→{roi,tr,gpm} berversi/append-only, POLICY nol).
+      #       +1 prefix ASR ⇒ entity_prefix 39→40. Nol mesin baru ⇒
+      #       sm_machines TETAP 31; nol event katalog baru ⇒ notif_events
+      #       TETAP 67.
       # 143 = 142 + 1 tabel Gelombang 2 Shopee Report Engine
       #       (20260909010000_sh01_shopee_report_engine.sql): `report_benchmark_shopee`
       #       (padanan Shopee dari `report_benchmark`, berversi/append-only).
@@ -391,12 +399,12 @@ jobs:
       # `check "tabel public"` sendiri. Naikkan KEDUANYA dalam satu commit;
       # menaikkan salah satu saja membuat lokal hijau sementara CI merah (persis
       # yang terjadi pada PR #170).
-      - name: Verify table count (expect 143)
+      - name: Verify table count (expect 145)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 143
+          test "$n" -eq 145
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this
@@ -412,11 +420,11 @@ jobs:
       #
       # ⚠️ GATE KEDUA untuk angka yang sama — `scripts/db-rebuild.sh` punya
       # `check "entity_prefix"` sendiri. Naikkan KEDUANYA dalam satu commit.
-      - name: Verify entity_prefix registry (expect 39)
+      - name: Verify entity_prefix registry (expect 40)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc "select count(*) from entity_prefix;")
           echo "entity_prefix rows: $n"
-          test "$n" -eq 39
+          test "$n" -eq 40
       - name: Invariant — ID generator (gap-free, WIB period)
         run: psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -q -f supabase/tests/ident_checks.sql
       - name: Invariant — append-only history (immutability)
