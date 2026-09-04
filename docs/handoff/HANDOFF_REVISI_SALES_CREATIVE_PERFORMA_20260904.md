@@ -9,7 +9,12 @@
 > **`docs/backlog/REVISI_CDPS_SALES_CREATIVE_PERFORMA.md`** — baca itu untuk
 > detail per-tiket; dokumen ini hanya posisi & sisa.
 >
-> Branch: `claude/handoff-navigasi-mea-ai-tools-t0iw6o` · PR: **#287**
+> **PR #287 SUDAH DI-MERGE ke `main`** (`19f1edd`, 2026-09-04) — CI hijau 6/6 pada
+> `1710583` termasuk `backend` dan `db-and-migrations`, plus 3 deploy Vercel.
+> Branch: `claude/handoff-navigasi-mea-ai-tools-t0iw6o`.
+>
+> ⚠️ **Merge TIDAK menyentuh database live.** Empat migrasi masih menunggu
+> di-apply ke `CDPS SG` — itu pekerjaan pertama sesi berikutnya, lihat §1.1.
 
 ---
 
@@ -23,8 +28,7 @@
 | **P** Performa | P1 (region+indeks+`http.ts`) · P2 §6 pagination · P2 §7 N+1 · P2 §8 `canView`→SQL | ✅ 4/4 |
 | **P** Performa | **P2 §5 — pangkas round-trip `withClaims`** | ⬜ **SENGAJA ditahan — lihat §3** |
 
-Semua sudah di-merge dengan `main` terbaru (O73) dan **hijau penuh** di tree
-gabungan itu.
+Semua sudah mendarat di `main` lewat PR #287 dan **hijau penuh**.
 
 ---
 
@@ -44,11 +48,15 @@ lint               1 error PRE-EXISTING di admin/employees (tidak disentuh sesi 
 Gate `notif_events` naik **67 → 69** (L2, katalog v14). Tabel/prefix/mesin
 **TETAP** 145/40/31.
 
-### 1.1 ⚠️ Migrasi: BELUM di-apply ke live `CDPS SG`
+### 1.1 ⚠️ PEKERJAAN PERTAMA SESI BERIKUTNYA — apply 4 migrasi ke live `CDPS SG`
 
-Empat migrasi branch ini **pending** — sudah dicek lewat MCP Supabase
-(`list_migrations` pada `egddxfcnrtecheiykhlf`), live berhenti di
-`o73_commission_rule_grammar`:
+Kode sudah di `main`, **database live belum**. Sampai langkah ini dijalankan,
+`[Unrespon]` tidak akan pernah terjadi di produksi: edge-nya belum ada, katalog
+notif masih v13, dan job hariannya belum terpasang.
+
+Terakhir dicek lewat MCP Supabase (`list_migrations` pada
+`egddxfcnrtecheiykhlf`), live berhenti di `o73_commission_rule_grammar` —
+keempat berkas ini belum ada di sana:
 
 | berkas | isi |
 |---|---|
@@ -225,8 +233,9 @@ ia cuma muncul sebagai halaman lambat.
 1. **Baca** `docs/backlog/REVISI_CDPS_SALES_CREATIVE_PERFORMA.md` (tabel
    "Urutan Pengerjaan" = status per tiket) dan §Open `docs/DECISIONS.md`
    (REV-1..REV-4).
-2. **Kalau PR #287 sudah merge:** apply 4 migrasi ke `CDPS SG` lewat
-   `apply_migration` (urutan §1.1), lalu verifikasi pg_cron (§1.2).
+2. **Apply 4 migrasi ke `CDPS SG`** lewat `apply_migration` (urutan §1.1), lalu
+   verifikasi pg_cron (§1.2). PR #287 sudah merge — ini tidak lagi menunggu
+   apa pun, dan sampai selesai fitur `[Unrespon]` mati di produksi.
 3. **Kalau mau lanjut P2 §5:** ukur dulu (§4). Jangan mulai tanpa angka.
 4. **Sisa proyek lain** (SESI3 §3, gate cutover C-05, PR #281 draft, PR #171
    terbuka sejak 15 Agu) **tidak disentuh sesi ini** — carry-over apa adanya.
