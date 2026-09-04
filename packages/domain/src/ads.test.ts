@@ -715,13 +715,16 @@ describeDb('M16 LT-40/LT-41: state [Setting] + Tipe Iklan', () => {
 });
 
 describeDb('M16 LT-42: Ads Management Date (end_date turunan)', () => {
+  // `commission_rule` is irrelevant to end_date, but it still has to be a real
+  // rule: O73 put the O14 grammar behind a CHECK, and this fixture used to write
+  // the placeholder 'flat' (which is a pricing_mode, not a rule).
   async function seedMasterService(durasiJasaHari: number | null): Promise<string> {
     const msvId = uid('MSV');
     await sql`insert into master_services (id, created_by) values (${msvId}, 'ZZ-TEST')`;
     await sql`
       insert into master_service_versions
         (service_id, version_no, name, standard_price, commission_rule, pricing_mode, durasi_jasa, effective_from, created_by)
-      values (${msvId}, 1, 'Ads Management', '5000000', 'flat', 'flat', ${durasiJasaHari}, '2026-01-01', 'ZZ-TEST')`;
+      values (${msvId}, 1, 'Ads Management', '5000000', '10% of standard price', 'flat', ${durasiJasaHari}, '2026-01-01', 'ZZ-TEST')`;
     return msvId;
   }
 

@@ -304,9 +304,26 @@ export default function MasterServicesPage() {
               <input
                 id="commission_rule"
                 required
+                placeholder="10% of standard price"
                 value={form.commission_rule}
                 onChange={(e) => setForm((f) => ({ ...f, commission_rule: e.target.value }))}
               />
+              {/*
+                Bentuk yang dibaca kalkulator hanya dua, dan sampai O73 tidak ada
+                satu pun petunjuk di layar ini — 56 dari 96 versi katalog akhirnya
+                tersimpan dengan aturan yang tidak bisa dihitung ("0", prosa),
+                dan yang menanggung akibatnya sales di Qualified Lead Form.
+                Server sekarang menolaknya, tapi ditolak setelah mengetik itu
+                pelajaran yang mahal; tulis aturannya di sebelah kolomnya.
+              */}
+              <span className="muted" style={{ fontSize: 12 }}>
+                Dua bentuk yang dikenali: <code>10% of standard price</code> atau{' '}
+                <code>flat Rp 500.000</code>. Jasa tanpa komisi ditulis{' '}
+                <code>0% of standard price</code>. Komisi yang nominalnya
+                dirundingkan per-deal: pakai <code>flat Rp 0</code> di sini,
+                jelaskan rumusnya di Catatan Harga, lalu tagih lewat layanan
+                &ldquo;Komisi&rdquo;.
+              </span>
             </div>
             <div className="field">
               <label htmlFor="price_note">Catatan Harga</label>
