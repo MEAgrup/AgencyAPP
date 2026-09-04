@@ -13,6 +13,8 @@
 | 2 | **O70** — Ads Scanner baca kolom dari seksi yang salah (86% GMV hilang) | ✅ **DIPERBAIKI + dites** |
 | 3 | Rename grup sidebar → **"MEA AI Tools"** + kunci visibilitas per divisi | ✅ **SELESAI** (§2) |
 | 3b | **Sidebar IA v3 diimplementasi** — 9 grup, accordion, kotak cari, Papan Divisi | ✅ **SELESAI** (§2) — badge §5.4 ditunda |
+| 3c | **Diuji di browser sungguhan** + 1 bug accordion ditemukan & diperbaiki | ✅ **SELESAI** (§2.1) |
+| 3d | Cek migrasi Supabase yang belum diterapkan ke live | ✅ **NIHIL** — live & repo cocok persis (§5) |
 | 4 | Jawab 6 keputusan pemilik (SESI2 §2) | ⬜ belum — 2 pertanyaan BARU sesi ini (O71, O70-b) **sudah dijawab & ditindaklanjuti**, §3 |
 | 5 | Tiket kode tersisa (SESI2 §3) | ⬜ belum tersentuh |
 | 6 | Gate GO cutover → C-05 | ⬜ belum |
@@ -123,10 +125,35 @@ Saat sesi ini dimulai, jawaban atas *"plan navigasi sudah sampai mana?"* adalah:
 fungsi murni (`isActiveHref`/`sectionOfRoute`/`filterNav`) supaya bisa dites tanpa
 DOM; `Sidebar.tsx` tinggal renderer.
 
-⚠️ **Belum diuji di browser sungguhan** — build, lint, typecheck dan 534 tes
-hijau, tapi rail-nya belum pernah dibuka mata manusia. Kalau ada sesi dengan
-`apps/api` + DB hidup, buka `/` dan periksa accordion, ⌘K, dan lipatan Papan
-Divisi.
+### 2.1 ✅ Diuji di browser — dan itu menemukan bug yang 534 tes lewatkan
+
+`apps/api` di :3001 + `web-internal` di :3000 di atas DB lokal, sesi JWT
+di-mint lokal (GoTrue live TIDAK dipakai — lihat §6.2 untuk caranya), Chromium
+via Playwright, 5 keadaan, **nol error console**:
+
+| Keadaan | Hasil |
+|---|---|
+| Direktur di `/` | hanya **Beranda** terbuka; 4 tautan terlihat dari 37 |
+| Direktur di `/creative` | **Delivery** + sub-grup **Papan Divisi** terbuka sendiri, `Creative` bertanda aktif |
+| cari `"papan"` | hanya **Delivery › Papan Divisi**, 7 papan |
+| staff Creative di `/creative` | **auto-scope: SATU papan** (Creative); 5 grup |
+| staff Finance di `/finance` | 5 grup, Keuangan terbuka, nol menu Admin/Delivery |
+
+🔴 **Bug yang ketahuan hanya dari screenshot:** accordion-nya **tidak melipat
+apa pun**. `aria-expanded="false"` benar, chevron `▸` benar, `hidden` terpasang
+— tapi setiap grup "tertutup" tetap memperlihatkan seluruh isinya.
+
+Sebabnya spesifisitas CSS: `[hidden] { display: none }` datang dari stylesheet
+**bawaan browser**, dan stylesheet penulis selalu mengalahkannya — jadi
+`.navGroupItems { display: flex }` membatalkan atribut `hidden`. Sudah
+diperbaiki (`.navGroupItems[hidden] { display: none }`, plus `.navSubItems`
+untuk panel sub-grup yang belum berkelas).
+
+**Pelajaran yang layak dibawa:** 534 tes hijau tidak membuktikan UI bekerja.
+Suite ini tak punya DOM, jadi penjaganya sekarang mengunci **sebabnya**: dua tes
+membaca `Shell.module.css` sebagai teks dan menuntut setiap kelas panel punya
+aturan `[hidden]` tandingan. Diverifikasi dengan menghapus aturannya (kedua tes
+gagal) lalu dikembalikan (lolos).
 
 ---
 
@@ -158,25 +185,119 @@ status "siap"/"belum"** di berkas backlog.
 
 ---
 
-## 5. Catatan teknis untuk sesi berikutnya
+## 5. Supabase — TIDAK ada push yang menggantung
 
-1. **DB lokal wajib bersih sebelum `npm test`.** Baris UAT yang ditinggalkan di
-   `clients` membuat 2 tes `portal.test.ts` (management dashboard, Rule 11)
-   gagal — bukan regresi kode. `adsscanner_run` immutable jadi tak bisa
-   di-`delete`; jalan keluarnya `scripts/db-rebuild.sh --yes`.
-2. **Postgres di sandbox tidak jalan otomatis**: `pg_ctlcluster 16 main start`,
-   lalu set password (`alter user postgres with password 'postgres'`) supaya
-   `DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/cdps` bisa dipakai.
-3. **`npm install` di root DAN di `web-internal`** — dua lockfile terpisah.
-4. Export asli klien **tidak** disimpan di repo. Cara mengulang UAT ada di §6
-   dokumen UAT.
+Diperiksa langsung ke proyek live `CDPS SG` (`egddxfcnrtecheiykhlf`):
 
-## 6. Prompt siap tempel untuk chat berikutnya
+| Gerbang | Live | Repo (hasil `db-rebuild.sh`) | |
+|---|---|---|---|
+| tabel `public` | 145 | 145 | ✅ |
+| `entity_prefix` | 40 | 40 | ✅ |
+| `sm_machines` | 31 | 31 | ✅ |
+| `notif_events` | 67 | 67 | ✅ |
 
-> Baca `docs/handoff/HANDOFF_LANJUT_SEMUA_BUILD_SESI3_20260904.md` lalu
-> `UAT_TIKTOK_AVITASKIN_20260904.md`. Cek status PR #281 dan dua pertanyaan baru
-> (O71, O70-b) — kalau belum dijawab, tanyakan ke Nerissa. Lalu pilih SATU tiket
-> "nol — siap" dari SESI2 §3 (X-08, CR-12, O60, O59-b, O47b sisa),
-> **verifikasi dulu ke kode** sebelum menulis apa pun, baca PRD terkait penuh,
-> kerjakan dengan tes. Jangan mulai Sidebar IA v3 penuh sebelum 3 pertanyaan
-> duplikat halaman (§2) dijawab.
+Migrasi terakhir di ledger live adalah `20260910010000_gelombang4_adsscanner`
+(diterapkan sesi lalu), dan itu **berkas terakhir** di `supabase/migrations/`
+(172 berkas). Sesi ini **nol** migrasi baru. Jadi: tak ada yang perlu di-push.
+
+**Sekalian menutup satu kebingungan dari handoff SESI2 §1.1**, yang mencatat
+"live 146 tabel vs baseline 144/145 — kemungkinan drift kecil". Bukan drift:
+`information_schema.tables` **tanpa** filter `table_type` ikut menghitung 1
+VIEW (`interview_verdict`). Diukur benar: `pg_tables` = 145 = `base_table` =
+145 = repo. Tidak pernah ada drift; itu perbedaan cara menghitung.
+
+Catatan ledger (**O65**, masih terbuka): ledger live punya **178** baris untuk
+172 berkas repo, karena baris-baris awal dibuat lewat `apply_migration` dengan
+nama yang tidak persis nama berkas (dan ada dua baris `m6a_section_d`).
+Skema-nya identik — yang berbeda hanya penamaan riwayat. Itu sebabnya
+membandingkan **per nama** akan menyesatkan, dan perbandingan yang benar adalah
+lewat empat gerbang di atas.
+
+`get_advisors security` sesudahnya: **nol temuan baru**. Yang ada semuanya
+pre-existing dan sudah pernah dicatat — 29 `rls_enabled_no_policy` pada tabel
+config yang memang hanya dibaca service-role (pola SENGAJA), view
+`interview_verdict` SECURITY DEFINER, 7 `function_search_path_mutable` (WARN),
+4 fungsi SECURITY DEFINER yang bisa dieksekusi peran `authenticated`
+(`jwt_owns_client_am`, `jwt_owns_interview_am`, `working_days_between`,
+`wrr_reaggregate_on_close`), dan proteksi password-bocor GoTrue yang masih mati.
+
+> ⚠️ Satu koreksi kecil untuk pembaca handoff lama: `working_days_between`
+> ditutup dari **`anon`** (migrasi `20260908040000`), **bukan** dari
+> `authenticated` — ia masih muncul di advisor. Kalau memang harus ditutup dari
+> `authenticated` juga, itu tiket tersendiri, bukan regresi.
+
+---
+
+## 6. Catatan teknis untuk sesi berikutnya
+
+### 6.1 DB lokal wajib bersih sebelum `npm test`
+
+Baris UAT yang ditinggalkan di `clients` membuat 2 tes `portal.test.ts`
+(management dashboard, Rule 11) gagal — **bukan** regresi kode. `adsscanner_run`
+immutable jadi tak bisa di-`delete`; jalan keluarnya `scripts/db-rebuild.sh --yes`.
+
+### 6.2 Cara menyalakan stack lokal + login TANPA GoTrue live
+
+Ini yang dipakai untuk screenshot §2.1, dan layak diulang:
+
+```bash
+pg_ctlcluster 16 main start
+su postgres -c "psql -c \"alter user postgres with password 'postgres';\""
+scripts/db-rebuild.sh --yes
+
+# API di :3001
+cd apps/api && DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/cdps" \
+  SUPABASE_JWT_SECRET="<rahasia-lokal-apa-saja>" npx next dev -p 3001
+
+# web-internal di :3000
+cd web-internal && BACKEND_URL="http://127.0.0.1:3001" npx next dev -p 3000
+```
+
+Login tidak bisa dipakai lokal (`POST /auth/login` menukar kredensial ke GoTrue
+**live**). Gantinya: **mint JWT HS256 sendiri** dengan rahasia yang sama, isi
+`app_metadata` = `{employee_id, division, level, od, director}` (bentuknya
+`permission.actorFromClaims`), lalu pasang sebagai cookie `cdps_access_token`.
+Karyawan seed yang berguna: `EMP-0009` (Direktur), `EMP-0002` (AM),
+`EMP-0003` (Creative staff), `EMP-0007` (Finance).
+
+Playwright: paket `playwright` di repo mengharap build browser 1234 sementara
+sandbox punya 1194 — **jangan** `playwright install`, cukup
+`chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' })`.
+
+### 6.3 Dua hal lain
+
+- **`npm install` di root DAN di `web-internal`** — dua lockfile terpisah.
+- **Ada 1 error eslint PRE-EXISTING** di
+  `web-internal/src/app/(shell)/admin/employees/page.tsx:447`
+  (`react-hooks/static-components` — `<PositionOptions />` dibuat saat render).
+  Gagal juga di tree bersih, **bukan** dari perubahan sesi ini, tapi ia membuat
+  `eslint src` merah — jangan salah sangka itu ulah perubahan Anda.
+- Export asli klien **tidak** disimpan di repo. Cara mengulang UAT ada di §6
+  dokumen UAT.
+
+---
+
+## 7. Kerja berikutnya yang paling jelas
+
+Diurut dari yang paling siap:
+
+1. **Badge angka sidebar (§5.4 IA v3)** — satu-satunya bagian IA v3 yang
+   sengaja ditunda. Butuh 4 endpoint hitungan di `apps/api` (Persetujuan, Leads,
+   Task Execution, Reminder Pembayaran) yang masing-masing ber-scope peran +
+   tes izin, lalu satu hook di rail. Aturannya sudah ditulis di dokumen: scoped
+   ke pemakai, sembunyi saat 0, `99+` di atas 99.
+2. **Tiket "nol — siap" dari SESI2 §3** — X-08, CR-12, O60, O59-b, O47b sisa.
+   Ulangi cek yang menemukan B-03 basi: `ls` artefak kodenya dulu.
+3. **6 keputusan pemilik SESI2 §2** yang masih menahan kode (SCR-UI-1,
+   LT-2+LT-8, LT-1 sisa, KS-4/KS-4b, X-12, O65).
+4. **Gate GO cutover → C-05** (pensiun Go).
+
+## 8. Prompt siap tempel untuk chat berikutnya
+
+> Baca `docs/handoff/HANDOFF_LANJUT_SEMUA_BUILD_SESI3_20260904.md` (dan
+> `UAT_TIKTOK_AVITASKIN_20260904.md` kalau menyentuh mesin TikTok). Cek dulu
+> status PR sesi ini dan PR #281. Lalu pilih SATU pekerjaan dari §7 —
+> **verifikasi dulu ke kode** sebelum menulis apa pun (pola §1.3 SESI2), baca
+> PRD terkait penuh, kerjakan dengan tes. Kalau menyentuh UI, **nyalakan stack
+> lokal dan lihat hasilnya di browser** (§6.2) — sesi ini membuktikan 534 tes
+> hijau tidak membuktikan UI bekerja.
