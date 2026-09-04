@@ -258,6 +258,7 @@ export const PAYMENT_SCHEMES = [
 export const ATTEMPT_STATUSES = [
   'New Lead',
   'Contacted',
+  '[Unrespon]', // L1 (Revisi Sales/Creative/Performa) — auto-aged, 3 hari diam
   'Qualified',
   'Not Qualified',
   'Negotiation - Pending Approval',

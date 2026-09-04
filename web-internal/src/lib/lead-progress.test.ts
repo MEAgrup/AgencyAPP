@@ -64,6 +64,11 @@ describe('isTerminalAttempt', () => {
     expect(nextStepLabel('New Lead')).toBe('Tandai Contacted');
     expect(nextStepLabel('Contacted')).toBe('Isi Qualified Lead Form (data toko)');
   });
+
+  it('[Unrespon] (L1/L4) points back at reviving the attempt, not a dead end', () => {
+    expect(nextStepLabel('[Unrespon]')).toBe('Hubungi ulang & tandai Contacted');
+    expect(isTerminalAttempt('[Unrespon]')).toBe(false);
+  });
 });
 
 describe('leadProgress — which attempt the panel points at', () => {
