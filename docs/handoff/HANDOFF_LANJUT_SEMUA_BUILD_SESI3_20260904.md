@@ -18,6 +18,7 @@
 | 4 | Jawab 6 keputusan pemilik (SESI2 §2) | ⬜ belum — 2 pertanyaan BARU sesi ini (O71, O70-b) **sudah dijawab & ditindaklanjuti**, §3 |
 | 5 | Tiket kode tersisa (SESI2 §3) | ⬜ belum tersentuh |
 | 6 | Gate GO cutover → C-05 | ⬜ belum |
+| — | **PR #283 (seluruh kerja sesi ini) — sudah DI-MERGE ke `main`** (`d51866f`) | ✅ CI hijau 6/6 + 3 deploy Vercel sebelum merge |
 | — | PR #281 masih draft (SESI2 §5) | ⬜ masih perlu keputusan Nerissa/Yohan |
 
 ---
@@ -295,8 +296,10 @@ Diurut dari yang paling siap:
 ## 8. Prompt siap tempel untuk chat berikutnya
 
 > Baca `docs/handoff/HANDOFF_LANJUT_SEMUA_BUILD_SESI3_20260904.md` (dan
-> `UAT_TIKTOK_AVITASKIN_20260904.md` kalau menyentuh mesin TikTok). Cek dulu
-> status PR sesi ini dan PR #281. Lalu pilih SATU pekerjaan dari §7 —
+> `UAT_TIKTOK_AVITASKIN_20260904.md` kalau menyentuh mesin TikTok). PR #283
+> sudah di-merge, jadi `main` sudah memuat semuanya — yang masih menggantung
+> hanya **PR #281** (draft, butuh keputusan Nerissa/Yohan). Lalu pilih SATU
+> pekerjaan dari §7 —
 > **verifikasi dulu ke kode** sebelum menulis apa pun (pola §1.3 SESI2), baca
 > PRD terkait penuh, kerjakan dengan tes. Kalau menyentuh UI, **nyalakan stack
 > lokal dan lihat hasilnya di browser** (§6.2) — sesi ini membuktikan 534 tes
