@@ -390,13 +390,46 @@ Tulis sebagai komentar di fungsi domain.
 **Risiko:** langkah 5–6 menyentuh jalur baca setiap modul — PR terpisah dari
 Tahap 1, satu langkah per PR, suite penuh hijau di antara keduanya.
 
+### P1 — catatan pengukuran (2026-09-04)
+
+- **Region:** `apps/api/vercel.json` sebelumnya tanpa kunci `regions` (dikonfirmasi
+  dengan membaca berkasnya langsung, bukan tebakan) → default Vercel `iad1`.
+  Ditambahkan `"regions": ["sin1"]`. **Konfirmasi region produksi AKTUAL
+  (header `x-vercel-id`) dan pengaruhnya ke p95 tidak bisa diukur dari sesi
+  ini** — sandbox ini tidak punya akses deploy/dashboard Vercel produksi.
+  Perlu diverifikasi sesudah deploy berikutnya.
+- **Indeks:** `20260911005000_p1_perf_indexes.sql` diterapkan bersih di
+  `db-rebuild.sh --yes` (173 migrasi, gate tetap 145/40/31/67). Kolom & urutan
+  indeks dicocokkan ke `ORDER BY` yang benar-benar dipakai (`leads.ts:936`
+  `order by created_at desc, id desc` cocok `idx_leads_created_at`). Tabel
+  lokal terlalu kecil (fixture Alpha Digital, puluhan baris) untuk planner
+  memilih index scan atas seq scan — itu keputusan planner yang BENAR pada
+  skala itu, bukan bukti indeksnya salah; nilainya baru terlihat pada volume
+  produksi. Tidak dipaksakan `EXPLAIN` palsu.
+- **`http.ts`:** sebelumnya `import { account, ...} from '@cdps/domain'` (29
+  modul) hanya untuk rantai `instanceof` di `mapError`. Diganti dispatch
+  berbasis `Error.name` (tabel 117 entri, dibangkitkan dari `this.name` tiap
+  kelas error yang benar-benar dipakai `mapError`, diverifikasi nol tabrakan
+  nama lintas status — satu tabrakan yang ada, `NotFoundError` milik
+  `demo`/`auth`, aman karena `auth.NotFoundError` selalu ditangkap inline oleh
+  `/me` dan `/vendor/me` sebelum sempat sampai `mapError`). `http.ts` sekarang
+  nol impor `@cdps/domain` — setiap route hanya membundel modul domain yang
+  benar-benar dipanggilnya. **Nol perubahan status/pesan** — 20/20 test lama
+  `http.test.ts` hijau tanpa diubah, plus 398/398 test `apps/api` penuh hijau.
+- **Baseline lokal untuk P2** (`bench/bench.ts` + `bench/claims-bench.ts`,
+  DB sintetis `cdps_bench`, bukan bukti p95 produksi — lihat `bench/README.md`):
+  `health.portfolio` 1 query, `health.preview` 9, `perf.previewCurrent` AM 11 /
+  Creative 8 / Ads 11 / KOL 8, `perf.teamRollup` 1; `withClaims` sequential vs
+  pipelined ~1.0ms vs ~1.0ms per read di loopback (P2 §5 akan memangkas RTT,
+  bukan ms lokal — nilainya di WAN). Angka ini jadi pembanding "before" P2.
+
 ---
 
 ## Urutan Pengerjaan
 
 | # | Tiket | Ketergantungan | Status |
 |---|---|---|---|
-| P1 | Performa Tahap 1 (region + indeks + `http.ts`) + ukur | — | ⬜ |
+| P1 | Performa Tahap 1 (region + indeks + `http.ts`) + ukur | — | ✅ (lihat catatan pengukuran di bawah) |
 | C1 | Refactor `execEdgeTx` (nol perubahan perilaku) | — | ⬜ |
 | C2 | `submitAssetBatch` + `startAssetBatch` + route + wire + test | C1 | ⬜ |
 | C3 | Kartu "Submit Output Massal" + `distributeLinks` | C2 | ⬜ |

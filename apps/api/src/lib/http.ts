@@ -8,7 +8,6 @@
  * Next.
  */
 import type { statemachine } from '@cdps/core';
-import { account, activity, admin, ads, auth, board, campaign, client, clientPortal, creative, demo, directory, finance, health, internaltask, kol, leads, livestream, marketing, milestone, msl, notification, performance, portal, req, sales, salesperf, stage, task } from '@cdps/domain';
 
 /** 401 — no/invalid credentials. */
 export class UnauthorizedError extends Error {
@@ -57,153 +56,162 @@ export function errorJson(message: string, status: number): Response {
  * mapError turns a thrown error into a Response. Domain errors map to their
  * canonical status; the message is passed through verbatim (BI `[...]` for
  * validation). Unknown errors become an opaque 500 (never leak internals).
+ *
+ * Dispatch is by `Error.name`, not `instanceof`, so this module never imports
+ * `@cdps/domain` — importing the barrel (29 modules) here pulled all of it
+ * into every route's lambda bundle, just for this `instanceof` chain (P1,
+ * `docs/backlog/REVISI_CDPS_SALES_CREATIVE_PERFORMA.md` Bagian 4). Every
+ * domain error class already sets a module-qualified `this.name` (e.g.
+ * `'SalesForbiddenError'`), so name lookup is exact — no two classes with
+ * different statuses share a name (verified against every `packages/domain/src`
+ * error class at the time this table was generated; `apps/api/src/lib/
+ * http.test.ts` pins the full matrix). `auth.NotFoundError` and demo's bare
+ * `NotFoundError` DO share the literal name `'NotFoundError'`, but
+ * `auth.NotFoundError` is always caught inline by its two callers (`/me`,
+ * `/vendor/me`) before it would ever reach `mapError` — see those route files.
  */
+const STATUS_BY_ERROR_NAME: Record<string, number> = {
+  // 400
+  AccountValidationError: 400, // account.ValidationError
+  ActivityIncompleteError: 400, // activity.IncompleteError
+  AdminValidationError: 400, // admin.ValidationError
+  AdsValidationError: 400, // ads.ValidationError
+  AllocationTotalError: 400, // sales.AllocationTotalError
+  AuthPasswordPolicyError: 400, // auth.PasswordPolicyError
+  BadCommissionRuleError: 400, // sales.BadCommissionRuleError
+  BoardValidationError: 400, // board.ValidationError
+  CampaignValidationError: 400, // campaign.ValidationError
+  ClientIncompleteError: 400, // client.IncompleteError
+  ClientPortalValidationError: 400, // clientPortal.PortalValidationError
+  CreativeValidationError: 400, // creative.ValidationError
+  CustomTermRequiresNegotiationError: 400, // sales.CustomTermRequiresNegotiationError
+  FinanceIncompleteError: 400, // finance.IncompleteError
+  IncompleteError: 400, // demo.IncompleteError
+  InternalTaskValidationError: 400, // internaltask.ValidationError
+  KolValidationError: 400, // kol.ValidationError
+  LeadIncompleteError: 400, // leads.IncompleteError
+  LeadTooManyProspectsError: 400, // leads.TooManyProspectsError
+  LiveStreamIncompleteError: 400, // livestream.IncompleteError
+  LiveStreamValidationError: 400, // livestream.ValidationError
+  MarketingValidationError: 400, // marketing.ValidationError
+  MilestoneValidationError: 400, // milestone.ValidationError
+  MslIncompleteError: 400, // msl.IncompleteError
+  OutstandingTotalError: 400, // finance.OutstandingTotalError
+  OverVerificationError: 400, // finance.OverVerificationError
+  PerformanceValidationError: 400, // performance.ValidationError
+  ReqValidationError: 400, // req.ValidationError
+  SalesIncompleteError: 400, // sales.IncompleteError
+  SalesPerfValidationError: 400, // salesperf.ValidationError
+  SalesTooManyServicesError: 400, // sales.TooManyServicesError
+  ScheduleTotalError: 400, // finance.ScheduleTotalError
+  StageValidationError: 400, // stage.ValidationError
+  TaskValidationError: 400, // task.ValidationError
+  TooManySalespeopleError: 400, // sales.TooManySalespeopleError
+  ValidationError: 400, // notification.ValidationError
+  // 401 — OldPasswordError is 401 like Go's handleChangePassword: the request
+  // was well-formed, the CURRENT password just did not match.
+  AuthOldPasswordError: 401, // auth.OldPasswordError
+  // 403
+  AccountForbiddenError: 403, // account.ForbiddenError
+  AdminForbiddenError: 403, // admin.ForbiddenError
+  AdsForbiddenError: 403, // ads.ForbiddenError
+  AuthForbiddenError: 403, // auth.ForbiddenError
+  BoardForbiddenError: 403, // board.ForbiddenError
+  CampaignForbiddenError: 403, // campaign.ForbiddenError
+  ClientForbiddenError: 403, // client.ForbiddenError
+  ClientPortalForbiddenError: 403, // clientPortal.PortalForbiddenError
+  CreativeForbiddenError: 403, // creative.ForbiddenError
+  DirectoryForbiddenError: 403, // directory.ForbiddenError
+  FinanceForbiddenError: 403, // finance.ForbiddenError
+  ForbiddenError: 403, // demo.ForbiddenError
+  HealthForbiddenError: 403, // health.ForbiddenError
+  InternalTaskForbiddenError: 403, // internaltask.ForbiddenError
+  KolForbiddenError: 403, // kol.ForbiddenError
+  LeadForbiddenError: 403, // leads.ForbiddenError
+  LiveStreamForbiddenError: 403, // livestream.ForbiddenError
+  MarketingForbiddenError: 403, // marketing.ForbiddenError
+  MilestoneForbiddenError: 403, // milestone.ForbiddenError
+  MslForbiddenError: 403, // msl.ForbiddenError
+  PerformanceForbiddenError: 403, // performance.ForbiddenError
+  PortalForbiddenError: 403, // portal.ForbiddenError
+  ReqForbiddenError: 403, // req.ForbiddenError
+  SalesForbiddenError: 403, // sales.ForbiddenError
+  SalesPerfForbiddenError: 403, // salesperf.ForbiddenError
+  StageForbiddenError: 403, // stage.ForbiddenError
+  TaskForbiddenError: 403, // task.ForbiddenError
+  // 404
+  AccountNotFoundError: 404, // account.NotFoundError
+  AdminNotFoundError: 404, // admin.NotFoundError
+  AdsNotFoundError: 404, // ads.NotFoundError
+  AuthEmployeeNotFoundError: 404, // auth.EmployeeNotFoundError
+  BoardNotFoundError: 404, // board.NotFoundError
+  CampaignNotFoundError: 404, // campaign.NotFoundError
+  ClientNotFoundError: 404, // client.NotFoundError
+  ClientPortalNotFoundError: 404, // clientPortal.PortalNotFoundError
+  CreativeNotFoundError: 404, // creative.NotFoundError
+  FinanceNotFoundError: 404, // finance.NotFoundError
+  HealthNotFoundError: 404, // health.NotFoundError
+  InternalTaskNotFoundError: 404, // internaltask.NotFoundError
+  KolNotFoundError: 404, // kol.NotFoundError
+  LeadNotFoundError: 404, // leads.NotFoundError
+  LiveStreamNotFoundError: 404, // livestream.NotFoundError
+  MarketingNotFoundError: 404, // marketing.NotFoundError
+  MilestoneNotFoundError: 404, // milestone.NotFoundError
+  NotFoundError: 404, // demo.NotFoundError (see auth.NotFoundError note above)
+  PerformanceNotFoundError: 404, // performance.NotFoundError
+  ReqNotFoundError: 404, // req.NotFoundError
+  SalesNotFoundError: 404, // sales.NotFoundError
+  ServiceNotFoundError: 404, // msl.ServiceNotFoundError
+  StageNotFoundError: 404, // stage.NotFoundError
+  TaskNotFoundError: 404, // task.NotFoundError
+  // 409 — lifecycle conflicts: a dedup block, an un-closable attempt, a lead
+  // whose win was already resolved, or a full-verification blocked on a
+  // missing contract. 409 with the verbatim message where BI applies.
+  AccountConflictError: 409, // account.ConflictError
+  ActivityStageError: 409, // activity.StageError
+  AdminConflictError: 409, // admin.ConflictError
+  AdsConflictError: 409, // ads.ConflictError
+  BoardConflictError: 409, // board.ConflictError
+  ChangeDecidedError: 409, // finance.ChangeDecidedError
+  ChangePendingError: 409, // finance.ChangePendingError
+  ContractRequiredError: 409, // finance.ContractRequiredError
+  CreativeConflictError: 409, // creative.ConflictError
+  IntentLockedError: 409, // client.IntentLockedError
+  InternalTaskConflictError: 409, // internaltask.ConflictError
+  KolConflictError: 409, // kol.ConflictError
+  LeadAlreadyResolvedError: 409, // leads.AlreadyResolvedError
+  LeadBlockedError: 409, // leads.BlockedError
+  LiveStreamConflictError: 409, // livestream.ConflictError
+  LockedFieldError: 409, // client.LockedFieldError
+  MarketingDuplicateError: 409, // marketing.DuplicateError
+  MilestoneConflictError: 409, // milestone.ConflictError
+  NoOutstandingError: 409, // finance.NoOutstandingError
+  NotClosableError: 409, // sales.NotClosableError
+  ReqConflictError: 409, // req.ConflictError
+  ScheduleExistsError: 409, // finance.ScheduleExistsError
+  SchemeLockedError: 409, // finance.SchemeLockedError
+  SchemeNoScheduleError: 409, // finance.SchemeNoScheduleError
+  ServiceStateError: 409, // client.ServiceStateError
+  StageConflictError: 409, // stage.ConflictError
+  TaskConflictError: 409, // task.ConflictError
+  // 429 — the two app-level throttles: login (all realms) and the Client
+  // Portal complaint form (spec §5.2). Both carry a BI `[...]` message.
+  AuthRateLimitedError: 429, // auth.RateLimitedError
+  ClientPortalRateLimitedError: 429, // clientPortal.PortalRateLimitedError
+};
+
 export function mapError(err: unknown): Response {
-  if (
-    err instanceof demo.IncompleteError ||
-    err instanceof leads.IncompleteError ||
-    err instanceof leads.TooManyProspectsError ||
-    err instanceof sales.IncompleteError ||
-    err instanceof activity.IncompleteError ||
-    err instanceof sales.TooManyServicesError ||
-    err instanceof sales.CustomTermRequiresNegotiationError ||
-    err instanceof sales.AllocationTotalError ||
-    err instanceof sales.TooManySalespeopleError ||
-    err instanceof sales.BadCommissionRuleError ||
-    err instanceof msl.IncompleteError ||
-    err instanceof finance.IncompleteError ||
-    err instanceof finance.OverVerificationError ||
-    err instanceof finance.ScheduleTotalError ||
-    err instanceof finance.OutstandingTotalError ||
-    err instanceof client.IncompleteError ||
-    err instanceof account.ValidationError ||
-    err instanceof task.ValidationError ||
-    err instanceof creative.ValidationError ||
-    err instanceof ads.ValidationError ||
-    err instanceof kol.ValidationError ||
-    err instanceof performance.ValidationError ||
-    err instanceof board.ValidationError ||
-    err instanceof livestream.IncompleteError ||
-    err instanceof livestream.ValidationError ||
-    err instanceof campaign.ValidationError ||
-    err instanceof marketing.ValidationError ||
-    err instanceof milestone.ValidationError ||
-    err instanceof internaltask.ValidationError ||
-    err instanceof stage.ValidationError ||
-    err instanceof req.ValidationError ||
-    err instanceof notification.ValidationError ||
-    err instanceof admin.ValidationError ||
-    err instanceof salesperf.ValidationError ||
-    err instanceof clientPortal.PortalValidationError ||
-    err instanceof auth.PasswordPolicyError
-  ) {
-    return errorJson(err.message, 400); // exact BI [...] message (or internal sentinel)
-  }
-  if (
-    err instanceof demo.NotFoundError ||
-    err instanceof leads.NotFoundError ||
-    err instanceof sales.NotFoundError ||
-    err instanceof msl.ServiceNotFoundError ||
-    err instanceof finance.NotFoundError ||
-    err instanceof client.NotFoundError ||
-    err instanceof account.NotFoundError ||
-    err instanceof task.NotFoundError ||
-    err instanceof creative.NotFoundError ||
-    err instanceof ads.NotFoundError ||
-    err instanceof kol.NotFoundError ||
-    err instanceof performance.NotFoundError ||
-    err instanceof health.NotFoundError ||
-    err instanceof board.NotFoundError ||
-    err instanceof livestream.NotFoundError ||
-    err instanceof campaign.NotFoundError ||
-    err instanceof marketing.NotFoundError ||
-    err instanceof milestone.NotFoundError ||
-    err instanceof internaltask.NotFoundError ||
-    err instanceof stage.NotFoundError ||
-    err instanceof req.NotFoundError ||
-    err instanceof admin.NotFoundError ||
-    err instanceof clientPortal.PortalNotFoundError ||
-    err instanceof auth.EmployeeNotFoundError
-  ) {
-    return errorJson(err.message, 404);
-  }
-  if (
-    err instanceof demo.ForbiddenError ||
-    err instanceof leads.ForbiddenError ||
-    err instanceof sales.ForbiddenError ||
-    err instanceof msl.ForbiddenError ||
-    err instanceof finance.ForbiddenError ||
-    err instanceof client.ForbiddenError ||
-    err instanceof account.ForbiddenError ||
-    err instanceof task.ForbiddenError ||
-    err instanceof creative.ForbiddenError ||
-    err instanceof ads.ForbiddenError ||
-    err instanceof kol.ForbiddenError ||
-    err instanceof performance.ForbiddenError ||
-    err instanceof health.ForbiddenError ||
-    err instanceof board.ForbiddenError ||
-    err instanceof livestream.ForbiddenError ||
-    err instanceof campaign.ForbiddenError ||
-    err instanceof marketing.ForbiddenError ||
-    err instanceof milestone.ForbiddenError ||
-    err instanceof internaltask.ForbiddenError ||
-    err instanceof stage.ForbiddenError ||
-    err instanceof req.ForbiddenError ||
-    err instanceof portal.ForbiddenError ||
-    err instanceof clientPortal.PortalForbiddenError ||
-    err instanceof admin.ForbiddenError ||
-    err instanceof directory.ForbiddenError ||
-    err instanceof salesperf.ForbiddenError ||
-    err instanceof auth.ForbiddenError
-  ) {
-    return errorJson(err.message, 403);
-  }
-  if (
-    err instanceof leads.BlockedError ||
-    err instanceof sales.NotClosableError ||
-    err instanceof activity.StageError ||
-    err instanceof leads.AlreadyResolvedError ||
-    err instanceof finance.ContractRequiredError ||
-    err instanceof finance.SchemeLockedError ||
-    err instanceof finance.SchemeNoScheduleError ||
-    err instanceof finance.ScheduleExistsError ||
-    err instanceof finance.NoOutstandingError ||
-    err instanceof finance.ChangePendingError ||
-    err instanceof finance.ChangeDecidedError ||
-    err instanceof client.LockedFieldError ||
-    err instanceof client.IntentLockedError ||
-    err instanceof client.ServiceStateError ||
-    err instanceof account.ConflictError ||
-    err instanceof task.ConflictError ||
-    err instanceof creative.ConflictError ||
-    err instanceof ads.ConflictError ||
-    err instanceof kol.ConflictError ||
-    err instanceof board.ConflictError ||
-    err instanceof livestream.ConflictError ||
-    err instanceof marketing.DuplicateError ||
-    err instanceof milestone.ConflictError ||
-    err instanceof internaltask.ConflictError ||
-    err instanceof stage.ConflictError ||
-    err instanceof req.ConflictError ||
-    err instanceof admin.ConflictError
-  ) {
-    // Lifecycle conflicts: a dedup block, an un-closable attempt, a lead whose
-    // win was already resolved, or a full-verification blocked on a missing
-    // contract. 409 with the verbatim message where BI applies.
-    return errorJson(err.message, 409);
-  }
-  if (err instanceof UnauthorizedError || err instanceof auth.OldPasswordError) {
-    // OldPasswordError is 401 like Go's handleChangePassword: the request was
-    // well-formed, the CURRENT password just did not match.
+  if (err instanceof UnauthorizedError) {
     return errorJson(err.message, 401);
   }
   if (err instanceof BadRequestError) {
     return errorJson(err.message, 400);
   }
-  // 429 — the two app-level throttles: login (all realms) and the Client
-  // Portal complaint form (spec §5.2). Both carry a BI `[...]` message.
-  if (err instanceof auth.RateLimitedError || err instanceof clientPortal.PortalRateLimitedError) {
-    return errorJson(err.message, 429);
+  if (err instanceof Error) {
+    const status = STATUS_BY_ERROR_NAME[err.name];
+    if (status !== undefined) {
+      return errorJson(err.message, status);
+    }
   }
   // Unmapped throw → 500. Log the real error server-side (never in the client
   // body) so production 500s are diagnosable in the platform logs.
