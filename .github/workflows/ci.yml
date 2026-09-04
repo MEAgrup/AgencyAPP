@@ -225,12 +225,17 @@ jobs:
       # Kinerja Sales R-04 (20260902030000_renewal_notif.sql, katalog v13): +2
       # event (`m0.renewal.pending_approval`/`m0.renewal.decision`, sama peran
       # persis dengan `m0.negotiation.*`), 65 → 67. Nol mesin baru.
-      - name: Verify migration seed counts (31 machines, 67 events, catalog registry consistent)
+      # Revisi Sales/Creative/Performa L2 (20260911015000_m1_unrespon_notif.sql,
+      # katalog v14): +2 event (`m1.attempt.unrespon`/`m1.attempt.auto_not_qualified`,
+      # keduanya resolver 'explicit' -> pemilik attempt; emitter job
+      # leads_unrespon_tick), 67 → 69. Nol mesin baru (L1 hanya menambah
+      # sm_edges pada mesin prospect_attempt yang sudah ada — 31 TETAP).
+      - name: Verify migration seed counts (31 machines, 69 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
                if (select count(*) from sm_machines) <> 31 then raise exception 'expected 31 machines'; end if;
-               if (select count(*) from notif_events) <> 67 then raise exception 'expected 67 events'; end if;
+               if (select count(*) from notif_events) <> 69 then raise exception 'expected 69 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
                  then raise exception 'notif_events does not match the registered catalog versions'; end if;
