@@ -1,5 +1,19 @@
 # HANDOFF — LANJUT SEMUA BUILD (peta pekerjaan sisa se-proyek)
 
+> ### ⚠️ BACA `HANDOFF_LANJUT_SEMUA_BUILD_SESI2_20260904.md` LEBIH DULU
+> Sesi paralel mengerjakan tiga butir §0 dokumen ini dan mendaratkannya lewat **PR #282**
+> (`main@9a55613`) selagi PR dokumen ini masih draft. Yang **sudah tidak berlaku** di sini:
+> - **§0 #1 / §1.1** — migrasi `20260910010000_gelombang4_adsscanner` **SUDAH diterapkan
+>   ke live `CDPS SG`**; gerbangnya kini 145/40/31/67. Jangan apply ulang.
+> - **§0 #3 / §1.3** — bug O67 `!/aktif/i.test(status)` **SUDAH diperbaiki** (batas kata),
+>   commit `2230e08`.
+> - **§3 B-03** — ternyata **sudah mendarat**; barisnya di `M6ABC_BACKLOG.md` yang basi,
+>   bukan tiketnya yang terbuka. Ini contoh keempat dari pola yang §5 dokumen ini catat.
+>
+> Sisanya — **§2** (enam keputusan pemilik), **§3** tiket lain, **§4** gate cutover,
+> **§5** tiga backlog basi, **§7** aturan rumah & jebakan lingkungan — **tetap berlaku
+> apa adanya** dan tidak diduplikasi di SESI2.
+
 > Dibuat 2026-09-04 di atas `main@35b7046`. **Ini bukan handoff satu fitur.** Handoff
 > sebelumnya (`HANDOFF_ADVERTISER_TOOLS_SESI7_20260904.md`) menutup rantai Gelombang 1–4
 > alat advertiser. Dokumen ini menjawab pertanyaan yang lebih besar: **apa saja yang belum
