@@ -390,7 +390,7 @@ Tulis sebagai komentar di fungsi domain.
 **Risiko:** langkah 5–6 menyentuh jalur baca setiap modul — PR terpisah dari
 Tahap 1, satu langkah per PR, suite penuh hijau di antara keduanya.
 
-### P2 — status 2026-09-04: 7 & 8 selesai, 5 & 6 SENGAJA belum dikerjakan
+### P2 — status 2026-09-04: 6, 7 & 8 selesai; 5 SENGAJA belum dikerjakan
 
 Langkah 7 (`commissionAchievementBatch` + `computeMetricActualsBatch`,
 `packages/domain/src/finance.ts` + `salesperf.ts`) dan langkah 8
@@ -399,8 +399,10 @@ Langkah 7 (`commissionAchievementBatch` + `computeMetricActualsBatch`,
 modul, nol perubahan kontrak wire, nol perubahan perilaku (dibuktikan test
 lama yang tidak diubah tetap hijau), jadi aman dikerjakan sampai selesai.
 
-Langkah 5 dan 6 **BELUM dikerjakan** — bukan lupa, sengaja berhenti di sini
-untuk konfirmasi Nerissa dulu, karena beda kelas risiko dari 7/8:
+Langkah 6 (pagination) juga selesai — rinciannya di bawah.
+
+Langkah 5 **BELUM dikerjakan** — bukan lupa, sengaja berhenti, karena beda
+kelas risiko dari 6/7/8:
 
 - **Langkah 5** (round-trip `withClaims`) menyentuh mekanisme yang menegakkan
   RLS di SETIAP request baca (`packages/db/src/client.ts` — CLAUDE.md:
@@ -412,15 +414,47 @@ untuk konfirmasi Nerissa dulu, karena beda kelas risiko dari 7/8:
   sama di pooler transaction-mode. Ini bukan lagi soal performa murni —
   angka produksi (p95 region Vercel) yang jadi alasan langkah ini juga belum
   bisa diukur dari sandbox (lihat catatan P1 di bawah).
-- **Langkah 6** (pagination `LIMIT`+keyset di 6 pembacaan daftar) mengubah
-  kontrak wire di 6 endpoint sekaligus (butuh update FE + `shape-parity` per
-  endpoint) — besar, bukan berisiko-keamanan, tapi tetap layak direview
-  per-PR sesuai catatan risiko rencana ini sendiri, bukan diborong sekaligus.
+Rekomendasi untuk langkah 5: jalankan sebagai PR sendiri SETELAH region
+produksi aktual diverifikasi memberi dampak nyata (butuh akses dashboard
+Vercel produksi, tidak tersedia dari sesi ini) — kalau dampaknya kecil,
+menyentuh mekanisme RLS demi itu tidak sepadan.
 
-Rekomendasi: jalankan 5 dan 6 sebagai PR terpisah SETELAH Nerissa konfirmasi
-(a) region produksi aktual sudah diverifikasi memberi dampak nyata (butuh
-akses dashboard Vercel produksi, tidak tersedia dari sesi ini), dan (b) daftar
-6 endpoint mana yang mau dipaginasi duluan.
+### P2 §6 — pagination keyset (selesai 2026-09-04)
+
+Mesinnya `packages/core/src/page.ts` (cursor buram base64url, probe
+over-fetch-by-one, `LIMIT NULL` = unbounded). **Tanpa page request = unbounded**
+— itu bagian yang menanggung beban, bukan sekadar kenyamanan: `marketing.dashboard`
+menghitung metrik atas SETIAP campaign, jadi halaman default di sana bukan
+membuatnya cepat melainkan membuatnya SALAH. Hanya jalur request yang meminta
+halaman.
+
+Enam pembacaan yang dibatasi + konsumen FE-nya:
+
+| Domain | Route | FE |
+|---|---|---|
+| `leads.leadsDatabase` | `GET /leads` | tab Lead Saya + Database, tombol "Muat lebih banyak" |
+| `leads.poolBoard` | `GET /leads/pool` | tab Pool, tombol "Muat lebih banyak" |
+| `client.listClients` | `GET /clients` | halaman Klien, tombol "Muat lebih banyak" |
+| `sales.listAttempts` | `GET /attempts` | Sales Workspace (+ filter status dipindah ke server) |
+| `campaign.listCampaigns` | `GET /marketing/campaigns` | halaman Marketing, tombol "Muat lebih banyak" |
+| `renewal.listRenewals` | `GET /renewals` | inbox Persetujuan |
+
+Yang SENGAJA tidak dipaginasi, dengan alasannya:
+
+- `GET /leads/export` — export "100 baris pertama" bukan export. Batasnya
+  `EXPORT_ROW_CAP` sendiri.
+- `marketing.dashboard` → `listCampaigns` tanpa page (lihat di atas).
+- Inbox Persetujuan (`/persetujuan`) dan lookup campaign di halaman
+  Marketing Performance meminta `MAX_PAGE_LIMIT` sekali tarik, bukan tombol
+  bertahap: baris antrean yang tak pernah tampil tak pernah disetujui, dan
+  lookup yang dijoin ke baris metrik harus menutupi jumlah yang sama. Kalau
+  bahkan itu terlampaui, inbox mengatakannya di layar — tidak diam-diam
+  memotong ekornya.
+
+Penjaga regresi: `apps/api/src/lib/page-parity.test.ts` — memindai bahwa
+keenam route tetap memenuhi DUA sisi kontrak (`page.parseRequest` DAN
+`next_cursor`). Balik ke pembacaan unbounded itu lolos typecheck dan lolos
+semua tes lain; di produksi ia hanya muncul sebagai halaman lambat.
 
 ### P1 — catatan pengukuran (2026-09-04)
 
@@ -475,8 +509,8 @@ akses dashboard Vercel produksi, tidak tersedia dari sesi ini), dan (b) daftar
 | E2 | Tombol export di `DatabaseTab` + asertion route-parity | E1 | ✅ |
 | P2.7 | Batch 2 N+1 `salesperf` (`commissionAchievementBatch`, `computeMetricActualsBatch`) | P1 | ✅ |
 | P2.8 | `health.portfolio` `canView` → predikat SQL, bukan `.filter()` | P1 | ✅ |
+| P2.6 | Pagination `LIMIT`+keyset di 6 pembacaan daftar (ubah kontrak wire + FE) | P1 | ✅ |
 | P2.5 | Pangkas round-trip `withClaims` (pipeline/`onconnect`+`RESET`, `idle_timeout`) | P1 | ⬜ — lihat catatan risiko di bawah |
-| P2.6 | Pagination `LIMIT`+keyset di 6 pembacaan daftar (ubah kontrak wire + FE) | P1 | ⬜ — lihat catatan risiko di bawah |
 
 ---
 

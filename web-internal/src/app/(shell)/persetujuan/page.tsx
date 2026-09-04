@@ -46,7 +46,7 @@
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { api, errorMessage } from '@/lib/api';
+import { api, errorMessage, MAX_PAGE_LIMIT } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import type { MasterService } from '@/lib/types';
 import { formatIDR } from '@/lib/money';
@@ -116,9 +116,6 @@ import DecisionActions, { type DecisionKind } from '@/components/persetujuan/Dec
 import PriceComparison from '@/components/persetujuan/PriceComparison';
 
 const ATTEMPT_PENDING = 'Negotiation - Pending Approval';
-// Cermin page.MAX_LIMIT di server (nilai di atas itu tetap di-clamp server —
-// ini hanya supaya inbox meminta halaman terbesar yang diizinkan sekali jalan).
-const ATTEMPTS_INBOX_LIMIT = 500;
 const RENEWAL_PENDING = 'Pending Approval';
 
 /**
@@ -1113,6 +1110,7 @@ export default function PerluPersetujuanPage() {
   // silently dropping the tail.
   const [attemptsTruncated, setAttemptsTruncated] = useState(false);
   const [renewals, setRenewals] = useState<RenewalListRow[] | null>(null);
+  const [renewalsTruncated, setRenewalsTruncated] = useState(false);
   const [tcrs, setTcrs] = useState<SchemeChangeRequest[] | null>(null);
   const [deleteRequests, setDeleteRequests] = useState<DeleteRequestQueueRow[] | null>(null);
   const [holdRequests, setHoldRequests] = useState<PendingHoldRequest[] | null>(null);
@@ -1133,8 +1131,8 @@ export default function PerluPersetujuanPage() {
     setSectionErrors([]);
     try {
       const results = await Promise.allSettled([
-        listAttempts(ATTEMPT_PENDING, { limit: ATTEMPTS_INBOX_LIMIT }),
-        listAllRenewals(RENEWAL_PENDING),
+        listAttempts(ATTEMPT_PENDING, { limit: MAX_PAGE_LIMIT }),
+        listAllRenewals(RENEWAL_PENDING, { limit: MAX_PAGE_LIMIT }),
         listSchemeChangeQueue(),
         listDeleteRequests(),
         listPendingHoldRequests(),
@@ -1146,6 +1144,7 @@ export default function PerluPersetujuanPage() {
       setAttempts(attemptRes.status === 'fulfilled' ? attemptRes.value.data : []);
       setAttemptsTruncated(attemptRes.status === 'fulfilled' && attemptRes.value.next_cursor !== null);
       setRenewals(renewalRes.status === 'fulfilled' ? renewalRes.value.data : []);
+      setRenewalsTruncated(renewalRes.status === 'fulfilled' && renewalRes.value.next_cursor !== null);
       setTcrs(tcrRes.status === 'fulfilled' ? tcrRes.value.data : []);
       setDeleteRequests(deleteRes.status === 'fulfilled' ? deleteRes.value.data : []);
       setHoldRequests(holdRes.status === 'fulfilled' ? holdRes.value.data : []);
@@ -1279,7 +1278,7 @@ export default function PerluPersetujuanPage() {
           >
             {attemptsTruncated && (
               <div className="alert alertInfo" role="status">
-                Antrean ini melebihi {ATTEMPTS_INBOX_LIMIT} baris &mdash; yang tampil adalah yang paling
+                Antrean ini melebihi {MAX_PAGE_LIMIT} baris &mdash; yang tampil adalah yang paling
                 baru. Selesaikan sebagian dulu, lalu muat ulang halaman untuk melihat sisanya.
               </div>
             )}
@@ -1301,6 +1300,12 @@ export default function PerluPersetujuanPage() {
             count={counts.renewal}
             hint="Penawaran perpanjangan atau jasa tambahan untuk klien berjalan (R-03)."
           >
+            {renewalsTruncated && (
+              <div className="alert alertInfo" role="status">
+                Antrean ini melebihi {MAX_PAGE_LIMIT} baris &mdash; yang tampil adalah yang paling baru.
+                Selesaikan sebagian dulu, lalu muat ulang halaman untuk melihat sisanya.
+              </div>
+            )}
             {renewals?.map((r, i) => (
               <RenewalCard
                 key={r.id}

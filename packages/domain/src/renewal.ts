@@ -49,7 +49,7 @@
  * Service — this module hands it a `CTR-`/`SVC-` exactly like a fresh
  * closing does, and the AM picks it up through the existing flow.
  */
-import { money, notification, permission, statemachine, tz } from '@cdps/core';
+import { money, notification, page, permission, statemachine, tz } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import { effectiveAt } from './msl';
 import {
@@ -233,22 +233,31 @@ interface RenewalListSqlRow extends RenewalRow {
  * this has no single client to gate on, so it leans on RLS the same way
  * `listAttempts` does — built for the "Perlu Persetujuan Saya" inbox, which
  * needs every request pending a decision, not one client at a time.
+ *
+ * `page` (P2 §6) is the optional keyset page; absent = unbounded.
  */
-export async function listRenewals(sql: Queryable, filter: { status?: string } = {}): Promise<RenewalListRow[]> {
+export async function listRenewals(
+  sql: Queryable,
+  filter: { status?: string; page?: page.PageRequest } = {},
+): Promise<page.Page<RenewalListRow>> {
   const status = filter.status?.trim() ?? '';
+  const b = page.sqlBounds(filter.page);
   const rows = await sql<RenewalListSqlRow[]>`
     select r.*, c.toko, c.nama_pic, coalesce(e.nama, r.proposed_by) as proposed_by_nama
     from renewal_requests r
     join clients c on c.id = r.client_id
     left join employees e on e.employee_id = r.proposed_by
     where (${status} = '' or r.status = ${status})
-    order by r.created_at desc, r.id desc`;
-  return rows.map((r) => ({
+      and (r.created_at, r.id) < (${b.at}, ${b.id})
+    order by r.created_at desc, r.id desc
+    limit ${b.limit}::bigint`;
+  const mapped = rows.map((r) => ({
     ...rowToRenewal(r),
     clientToko: r.toko,
     clientNamaPic: r.nama_pic,
     proposedByNama: r.proposed_by_nama,
   }));
+  return page.paginate(mapped, filter.page, (r) => ({ createdAt: r.createdAt, id: r.id }));
 }
 
 // ---------------------------------------------------------------------------

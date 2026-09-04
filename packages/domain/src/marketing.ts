@@ -446,7 +446,10 @@ async function junkBreakdown(sql: Queryable, campaignId: string): Promise<JunkRe
 export async function dashboard(sql: Queryable, actor: Actor): Promise<Metrics[]> {
   let campaigns: Campaign[];
   try {
-    campaigns = await listCampaigns(sql, actor);
+    // NO page request (P2 §6): this dashboard reports on EVERY campaign the
+    // actor may see. Bounding it here would not make it faster, it would make
+    // it wrong — silently reporting on the first page only.
+    campaigns = (await listCampaigns(sql, actor)).rows;
   } catch (e) {
     mapCampaignErr(e);
   }

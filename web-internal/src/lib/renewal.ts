@@ -89,10 +89,19 @@ export function listRenewals(clientId: string): Promise<Renewal[]> {
   return api.get<Renewal[]>(`/clients/${clientId}/renewals`);
 }
 
-/** GET /renewals[?status=] — every renewal/cross-sell request across clients, newest first (the "Perlu Persetujuan Saya" inbox). */
-export function listAllRenewals(status?: string): Promise<{ data: RenewalListRow[] }> {
-  const q = status ? `?status=${encodeURIComponent(status)}` : '';
-  return api.get<{ data: RenewalListRow[] }>(`/renewals${q}`);
+/** GET /renewals[?status=&limit=&cursor=] — every renewal/cross-sell request
+ *  across clients, newest first (the "Perlu Persetujuan Saya" inbox).
+ *  P2 §6: dipaginasi server-side; `next_cursor` null = halaman terakhir. */
+export function listAllRenewals(
+  status?: string,
+  params?: { limit?: number; cursor?: string },
+): Promise<{ data: RenewalListRow[]; next_cursor: string | null }> {
+  const search = new URLSearchParams();
+  if (status) search.set('status', status);
+  if (params?.limit) search.set('limit', String(params.limit));
+  if (params?.cursor) search.set('cursor', params.cursor);
+  const qs = search.toString();
+  return api.get<{ data: RenewalListRow[]; next_cursor: string | null }>(`/renewals${qs ? `?${qs}` : ''}`);
 }
 
 /** GET /clients/{id}/renewals/{rid} — one request + its newest priced line set. */

@@ -203,9 +203,16 @@ export function createCampaign(input: CampaignInput): Promise<Campaign> {
   return api.post<Campaign>(`/marketing/campaigns`, input);
 }
 
-// GET /marketing/campaigns → {data: Campaign[]} (newest first).
-export function listCampaigns(): Promise<{ data: Campaign[] }> {
-  return api.get<{ data: Campaign[] }>(`/marketing/campaigns`);
+// GET /marketing/campaigns[?limit=&cursor=] → {data, next_cursor} (newest
+// first). P2 §6: dipaginasi server-side; `next_cursor` null = halaman terakhir.
+export function listCampaigns(
+  params?: { limit?: number; cursor?: string },
+): Promise<{ data: Campaign[]; next_cursor: string | null }> {
+  const search = new URLSearchParams();
+  if (params?.limit) search.set('limit', String(params.limit));
+  if (params?.cursor) search.set('cursor', params.cursor);
+  const qs = search.toString();
+  return api.get<{ data: Campaign[]; next_cursor: string | null }>(`/marketing/campaigns${qs ? `?${qs}` : ''}`);
 }
 
 // GET /marketing/campaigns/selectable → {data: SelectableCampaign[]}: EVERY

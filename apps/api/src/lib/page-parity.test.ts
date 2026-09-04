@@ -23,16 +23,16 @@ import { describe, expect, it } from 'vitest';
 const API_ROOT = join(__dirname, '..', 'app', 'api', 'v1');
 
 /**
- * The list reads P2 §6 bounded — the six the perf diagnosis named, minus
- * `marketing/campaigns` and `renewals`, which are handled in their own commits.
- * A route may only leave this list with a DECISIONS.md entry saying why an
- * unbounded read became acceptable again.
+ * All six list reads P2 §6 bounded. A route may only leave this list with a
+ * DECISIONS.md entry saying why an unbounded read became acceptable again.
  */
 const PAGED_ROUTES = [
   'leads/route.ts',
   'leads/pool/route.ts',
   'clients/route.ts',
   'attempts/route.ts',
+  'marketing/campaigns/route.ts',
+  'renewals/route.ts',
 ];
 
 /**
