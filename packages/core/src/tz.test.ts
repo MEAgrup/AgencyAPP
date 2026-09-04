@@ -1,6 +1,6 @@
 // Ported 1:1 from backend/internal/core/tz/tz_test.go.
 import { describe, expect, it } from 'vitest';
-import { WIB_OFFSET_HOURS, addDaysToDate, dateString, daysBetween, isoWeekOf, isoWeekOfDate, period } from './tz';
+import { WIB_OFFSET_HOURS, addDaysToDate, dateString, dateTimeString, daysBetween, isoWeekOf, isoWeekOfDate, period } from './tz';
 
 // Helper: build a UTC instant the way the Go tests do (time.Date(..., time.UTC)).
 const utc = (y: number, mo: number, d: number, h = 0, mi = 0): Date =>
@@ -21,6 +21,18 @@ describe('date / dateString cross-midnight bucket', () => {
   it('2026-07-17T05:00Z is still 2026-07-17 in WIB', () => {
     // 2026-07-17T05:00:00Z == 2026-07-17 12:00 WIB -> still 17 Jul.
     expect(dateString(utc(2026, 7, 17, 5, 0))).toBe('2026-07-17');
+  });
+});
+
+describe('dateTimeString (E1 export display formatting)', () => {
+  it('formats the full WIB wall-clock, not just the date', () => {
+    // 2026-09-01T16:30:00Z == 2026-09-01 23:30:00 WIB.
+    expect(dateTimeString(utc(2026, 9, 1, 16, 30))).toBe('2026-09-01 23:30:00');
+  });
+
+  it('crosses midnight into the next WIB day, same as dateString', () => {
+    // 2026-07-16T18:30:00Z == 2026-07-17 01:30:00 WIB.
+    expect(dateTimeString(utc(2026, 7, 16, 18, 30))).toBe('2026-07-17 01:30:00');
   });
 });
 

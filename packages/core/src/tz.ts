@@ -59,6 +59,25 @@ export function dateString(t: Date): string {
 }
 
 /**
+ * dateTimeString formats the WIB wall-clock of t as "YYYY-MM-DD HH:mm:ss" —
+ * DISPLAY formatting for a human reader (e.g. a CSV export opened in
+ * Jakarta), not the calendar-bucketing this file's header rule governs. An
+ * export that rendered `created_at` as raw ISO UTC would read "kemarin
+ * 23:30" for a lead created at 06:30 WIB today — a 7-hour reading error, not
+ * a rounding nicety.
+ */
+export function dateTimeString(t: Date): string {
+  const shifted = new Date(t.getTime() + OFFSET_MS);
+  const y = shifted.getUTCFullYear();
+  const mo = shifted.getUTCMonth() + 1;
+  const d = shifted.getUTCDate();
+  const h = shifted.getUTCHours();
+  const mi = shifted.getUTCMinutes();
+  const s = shifted.getUTCSeconds();
+  return `${pad(y, 4)}-${pad(mo, 2)}-${pad(d, 2)} ${pad(h, 2)}:${pad(mi, 2)}:${pad(s, 2)}`;
+}
+
+/**
  * period formats the WIB calendar month of t as "YYYYMM" — the house-ID month
  * bucket (PREFIX-YYYYMM-NNNN).
  */
