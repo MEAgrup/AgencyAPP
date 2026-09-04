@@ -287,7 +287,7 @@ export const CATALOG_VERSIONS: readonly CatalogVersion[] = [
     description:
       'Revisi Sales/Creative/Performa L2 — 2 event lead aging otomatis (m1.attempt.unrespon → pemilik attempt saat New Lead/Contacted menua 3 hari diam; m1.attempt.auto_not_qualified → pemilik attempt saat [Unrespon] menua 14 hari, auto Not Qualified). Emitter: job harian leads_unrespon_tick.',
     eventCount: 2,
-    decisionRef: 'docs/backlog/REVISI_CDPS_SALES_CREATIVE_PERFORMA.md L1/L2 (permintaan Nerissa, COO, 2026-09-04)',
+    decisionRef: 'docs/DECISIONS.md 2026-09-04 (REV-1..REV-4, permintaan Nerissa/COO)',
   },
 ] as const;
 
