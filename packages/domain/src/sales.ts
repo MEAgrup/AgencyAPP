@@ -55,6 +55,8 @@ export const STATUS_NEG_REVISION = 'Negotiation - Revision Required';
 export const STATUS_NEG_REJECTED = 'Negotiation - Rejected';
 export const STATUS_CLOSED_SUCCESS = 'Closed-Success';
 export const STATUS_CLOSED_LOST = 'Closed-Lost';
+/** L1 (Revisi Sales/Creative/Performa) — auto-aged, non-terminal (STATE_MACHINES.md §1). */
+export const STATUS_UNRESPON = '[Unrespon]';
 
 /**
  * Qualified Lead Form service cap (M0 §4.3).
@@ -741,6 +743,30 @@ export async function setNotQualified(
     }
     return attemptTransition(executors(tx).sm, attemptId, STATUS_NOT_QUALIFIED, actor);
   });
+}
+
+/** Result of one `leads_unrespon_tick` run — see `runUnresponTick`. */
+export interface UnresponTickResult {
+  unrespon: number;
+  autoNotQualified: number;
+}
+
+/**
+ * runUnresponTick drives the daily "lead aging" sweep (L1/L3, `docs/backlog/
+ * REVISI_CDPS_SALES_CREATIVE_PERFORMA.md`). The work itself lives in the SQL
+ * function `leads_unrespon_tick` (migration 20260911020000) — pg_cron calls it
+ * directly on Supabase, so this is the manual/backfill entry point over the
+ * SAME function (pola `stage.runStageOverdueTick`). This is attempt-machine
+ * work (per-sales), not `leads.record_status` — hence living here, not in
+ * `leads.ts`. Idempotent (each attempt ages at most once per threshold
+ * crossed); `now` is a parameter so tests can pin the WIB day.
+ */
+export async function runUnresponTick(sql: Sql, now?: Date): Promise<UnresponTickResult> {
+  const rows =
+    now === undefined
+      ? await sql<{ r: { unrespon: number; auto_not_qualified: number } }[]>`select leads_unrespon_tick() as r`
+      : await sql<{ r: { unrespon: number; auto_not_qualified: number } }[]>`select leads_unrespon_tick(${now}) as r`;
+  return { unrespon: rows[0].r.unrespon, autoNotQualified: rows[0].r.auto_not_qualified };
 }
 
 // ===========================================================================
