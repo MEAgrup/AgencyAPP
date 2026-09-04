@@ -860,6 +860,68 @@ export function toAssetAssignments(rows: AssetAssignmentWire[] | undefined): cre
   return (rows ?? []).map((r) => ({ assignedPic: r.assigned_pic ?? '', quantity: Number(r.quantity ?? NaN) }));
 }
 
+// --- C2 (Revisi Sales/Creative/Performa) — bulk submit/start/review/approve. ---
+
+/** One requested line on the wire: an Asset id + (submit only) its output link. */
+export interface AssetExecLineWire {
+  asset_id?: string;
+  output_link?: string;
+}
+
+/** Request body → AssetExecLine[]. A missing/blank asset_id is carried through
+ *  (not filtered out) so the domain's own MSG_ASSET_NOT_FOUND answers it, same
+ *  reasoning as toAssetAssignments' NaN quantity. */
+export function toAssetExecLines(rows: AssetExecLineWire[] | undefined): task.AssetExecLine[] {
+  return (rows ?? []).map((r) => ({ assetId: r.asset_id ?? '', outputLink: r.output_link }));
+}
+
+/** One row's verdict in a batch report. Every key ALWAYS present, explicit
+ *  values ('' / 0, never omitted) — deliberately NOT `assetToWire`'s
+ *  spread-conditional style (O43): a batch report is read for exactly the
+ *  rejected rows, and a missing key there is a silent "everything is fine". */
+export interface AssetExecRowResultWire {
+  row_number: number;
+  asset_id: string;
+  sequence_no: number;
+  applied: boolean;
+  from_status: string;
+  to_status: string;
+  reason: string;
+}
+
+export function assetExecRowResultToWire(r: task.AssetExecRowResult): AssetExecRowResultWire {
+  return {
+    row_number: r.rowNumber,
+    asset_id: r.assetId,
+    sequence_no: r.sequenceNo,
+    applied: r.applied,
+    from_status: r.fromStatus,
+    to_status: r.toStatus,
+    reason: r.reason,
+  };
+}
+
+/** The full report of one submit-batch/start-batch/review-batch/approve-batch call. */
+export interface AssetExecBatchReportWire {
+  applied: number;
+  rejected: number;
+  brief_id: string;
+  brief_status: string;
+  rows: AssetExecRowResultWire[];
+  rejections: AssetExecRowResultWire[];
+}
+
+export function assetExecBatchReportToWire(r: task.AssetExecBatchReport): AssetExecBatchReportWire {
+  return {
+    applied: r.applied,
+    rejected: r.rejected,
+    brief_id: r.briefId,
+    brief_status: r.briefStatus,
+    rows: r.rows.map(assetExecRowResultToWire),
+    rejections: r.rejections.map(assetExecRowResultToWire),
+  };
+}
+
 // --- M8 Ads ---
 
 /** module8_ads.Campaign — an Ad Campaign with its derived §5 performance view. */

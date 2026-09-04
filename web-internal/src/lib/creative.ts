@@ -254,6 +254,52 @@ export function listBriefAssets(briefId: string): Promise<{ data: Asset[] }> {
   return api.get<{ data: Asset[] }>(`/briefs/${briefId}/assets`);
 }
 
+// ---------------------------------------------------------------------------
+// Submit Output Massal (C2/C3, Revisi Sales/Creative/Performa) — submit/start
+// many Assets of one Brief at once, replacing one window.prompt per Asset.
+// ---------------------------------------------------------------------------
+
+/** One requested line: an Asset id + (submit only) its output link. */
+export interface AssetExecLine {
+  asset_id: string;
+  output_link?: string;
+}
+
+/** One row's verdict in a batch report — every key always present. */
+export interface AssetExecRowResult {
+  row_number: number;
+  asset_id: string;
+  sequence_no: number;
+  applied: boolean;
+  from_status: string;
+  to_status: string;
+  reason: string;
+}
+
+/** The full report of one submit-batch/start-batch/review-batch/approve-batch call. */
+export interface AssetExecBatchReport {
+  applied: number;
+  rejected: number;
+  brief_id: string;
+  brief_status: string;
+  rows: AssetExecRowResult[];
+  rejections: AssetExecRowResult[];
+}
+
+/** Submit many [In Progress] Assets to [Submitted] at once. All-or-nothing —
+ *  see AssetExecBatchReport.rejections for what to fix and resubmit. */
+export function submitAssetBatch(briefId: string, lines: AssetExecLine[]): Promise<AssetExecBatchReport> {
+  return api.post<AssetExecBatchReport>(`/briefs/${briefId}/assets/submit-batch`, { rows: lines });
+}
+
+/** Start many [To Do] Assets ([In Progress]) at once — a separate action from
+ *  submit (Turnaround/Speed Score depend on the two timestamps staying distinct). */
+export function startAssetBatch(briefId: string, assetIds: string[]): Promise<AssetExecBatchReport> {
+  return api.post<AssetExecBatchReport>(`/briefs/${briefId}/assets/start-batch`, {
+    rows: assetIds.map((asset_id) => ({ asset_id })),
+  });
+}
+
 // module7_creative.MyAssetQueueItem — the personal Asset queue (M7 §3 Rule 2:
 // "all Assets assigned to them, across all Briefs/clients, sorted by due date").
 // due_date / sla_* arrive as JSON `null` when unset (not omitted) — this is a
