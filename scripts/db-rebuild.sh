@@ -117,6 +117,41 @@ echo "→ drop + create \"$DB_NAME\""
 qadmin "DROP DATABASE IF EXISTS \"$DB_NAME\" WITH (FORCE)"
 qadmin "CREATE DATABASE \"$DB_NAME\""
 
+# --- Tiru DEFAULT PRIVILEGES Supabase SEBELUM migrasi -------------------------
+# Proyek Supabase memasang `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL
+# ON TABLES/FUNCTIONS TO anon, authenticated, service_role`. Postgres polos
+# TIDAK, dan selisih itu melahirkan satu kelas cacat yang STRUKTURAL tidak bisa
+# merah di sini: sebuah migrasi menulis `REVOKE EXECUTE ... FROM PUBLIC` (yang
+# tidak menyentuh hibah eksplisit per-role), lokal tampak bersih, dan di
+# produksi fungsi SECURITY DEFINER-nya bisa dipanggil `anon`.
+#
+# Sudah terjadi TIGA KALI, dan ketiganya hanya ketahuan karena seseorang membaca
+# ACL live sesudah apply — nol test merah:
+#   1. wrr_monday_job / wrr_reminder_tick / penugasan_reminder_tick (2026-08-14)
+#   2. stage_overdue_tick / permintaan_reminder_tick        (2026-08-31)
+#   3. leads_unrespon_tick                                  (2026-09-04)
+#
+# Menyalakannya di sini membuat DB lokal & CI setia pada produksi, sehingga
+# gerbang `rls_checks` §44 punya arti. Role dibuat lebih dulu karena
+# ALTER DEFAULT PRIVILEGES menuntutnya ada; migrasi rls_baseline membuat role
+# yang sama dengan IF NOT EXISTS, jadi ia melewatinya tanpa keluhan.
+# Lewat BERKAS + qfile(), bukan q() -c: SQL ini multi-baris dan memakai $$,
+# yang tidak selamat melewati pembungkus `su postgres -c "psql ... -c \"…\""`.
+# qfile() sudah menangani staging world-readable untuk mode `su`.
+echo "→ tiru default privileges Supabase (anon/authenticated/service_role)"
+SUPABASE_GRANTS_SQL="$(mktemp --suffix=.sql)"
+trap 'rm -f "$SUPABASE_GRANTS_SQL"' EXIT
+cat > "$SUPABASE_GRANTS_SQL" <<'SQLSETUP'
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='anon') THEN CREATE ROLE anon NOLOGIN; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='service_role') THEN CREATE ROLE service_role NOLOGIN BYPASSRLS; END IF;
+END $$;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES    TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated, service_role;
+SQLSETUP
+qfile "$SUPABASE_GRANTS_SQL"
+
 echo "→ terapkan ${#MIGRATIONS[@]} migrasi (urut lexicographic — urutan berkas ADALAH urutan apply)"
 for f in "${MIGRATIONS[@]}"; do
   printf '   %s' "$(basename "$f")"
