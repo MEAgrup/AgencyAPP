@@ -20,6 +20,7 @@
 | 6 | Gate GO cutover → C-05 | ⬜ belum |
 | — | **PR #283 (seluruh kerja sesi ini) — sudah DI-MERGE ke `main`** (`d51866f`) | ✅ CI hijau 6/6 + 3 deploy Vercel sebelum merge |
 | — | PR #281 masih draft (SESI2 §5) | ⬜ masih perlu keputusan Nerissa/Yohan |
+| — | **PR #171 masih terbuka sejak 15 Agu** — migrasinya sudah mendarat lewat jalur lain, tapi **invariant `rls_checks` §44 belum ada** (§5.1) | 🟠 keadaan aman hari ini, tapi tak ada yang menjaganya |
 
 ---
 
@@ -222,6 +223,51 @@ config yang memang hanya dibaca service-role (pola SENGAJA), view
 (`jwt_owns_client_am`, `jwt_owns_interview_am`, `working_days_between`,
 `wrr_reaggregate_on_close`), dan proteksi password-bocor GoTrue yang masih mati.
 
+### 5.1 ⚠️ Dua PR masih terbuka — dan #171 menyimpan satu invariant yang HILANG
+
+`list_pull_requests state=open` mengembalikan **dua**, bukan satu:
+
+**PR #281** (draft, 4 Sep) — peta pekerjaan sisa + koreksi 3 backlog basi.
+Masih butuh keputusan Nerissa/Yohan: merge, atau tutup sebagai superseded.
+Tidak blocking kode.
+
+**PR #171** (BUKAN draft, 15 Agu — **tiga minggu terbuka**) — pengerasan
+`SECURITY DEFINER` dari `anon`. Diperiksa sesi ini: **sebagian besar isinya
+sudah mendarat lewat jalur lain**, tapi bagian yang paling tahan lama justru
+belum.
+
+Sudah ada di `main` (di-rename ke nama ledger live, rekonsiliasi O65):
+`20260815094622_harden_job_execute_surface.sql` dan
+`20260815105659_harden_secdef_execute_sweep.sql`. Keadaan ACL live **dan** DB
+lokal hasil repo sudah sesuai yang PR itu tuju — diprobe langsung:
+`wrr_monday_job` / `wrr_reminder_tick` / `penugasan_reminder_tick` /
+`wrr_aggregate` tertutup untuk `anon` **dan** `authenticated`;
+`jwt_owns_client_am` / `jwt_owns_interview_am` tertutup untuk `anon` tapi tetap
+terbuka untuk `authenticated` (wajib — 10 policy `TO authenticated` bergantung
+padanya).
+
+**Yang TIDAK mendarat, dan ini yang penting:**
+
+1. **Gerbang invariant `rls_checks.sql` §44** — `grep -c prosecdef
+   supabase/tests/rls_checks.sql` = **0**. Artinya **tidak ada apa pun** yang
+   mencegah migrasi berikutnya membuka kembali EXECUTE `anon` pada sebuah
+   fungsi `SECURITY DEFINER`. Keadaannya benar hari ini; yang tidak ada adalah
+   yang menjaganya tetap benar.
+2. **Peniruan `ALTER DEFAULT PRIVILEGES` di `scripts/db-rebuild.sh` + `ci.yml`**
+   — `grep -c "DEFAULT PRIVILEGES"` = **0** di keduanya.
+
+Butir 2 melemahkan butir 1 lebih jauh, dan ini yang paling mudah salah dibaca:
+DB lokal terlihat "sudah aman" **sebagian karena Postgres polos tidak punya
+default privileges Supabase sama sekali** — ACL-nya bersih dengan sendirinya.
+Jadi kalimat "lokal cocok dengan live" di atas **bukan** bukti gerbangnya
+bekerja; justru itu argumen PR #171 sendiri: kelas cacat ini **secara
+struktural tidak bisa merah di CI** selama lingkungannya tidak ditiru.
+
+**Rekomendasi** (keputusan pemilik): tutup #171 sebagai superseded untuk bagian
+migrasinya, lalu selamatkan dua butir di atas sebagai tiket kecil tersendiri —
+bukan merge PR-nya apa adanya, karena basisnya (`5a8483f`) sudah 3 minggu
+tertinggal dan dua migrasinya kini akan bentrok dengan nama yang sudah ada.
+
 > ⚠️ Satu koreksi kecil untuk pembaca handoff lama: `working_days_between`
 > ditutup dari **`anon`** (migrasi `20260908040000`), **bukan** dari
 > `authenticated` — ia masih muncul di advisor. Kalau memang harus ditutup dari
@@ -289,9 +335,14 @@ Diurut dari yang paling siap:
    ke pemakai, sembunyi saat 0, `99+` di atas 99.
 2. **Tiket "nol — siap" dari SESI2 §3** — X-08, CR-12, O60, O59-b, O47b sisa.
    Ulangi cek yang menemukan B-03 basi: `ls` artefak kodenya dulu.
-3. **6 keputusan pemilik SESI2 §2** yang masih menahan kode (SCR-UI-1,
+3. **Selamatkan dua butir dari PR #171** (§5.1) — gerbang invariant
+   `rls_checks` §44 (nol fungsi `SECURITY DEFINER` boleh dieksekusi `anon`,
+   dengan daftar putih eksplisit untuk 5 helper predikat RLS) + peniruan
+   `ALTER DEFAULT PRIVILEGES` Supabase di `db-rebuild.sh` & `ci.yml`. Nol
+   migrasi baru; ini murni gerbang + kesetiaan lingkungan.
+4. **6 keputusan pemilik SESI2 §2** yang masih menahan kode (SCR-UI-1,
    LT-2+LT-8, LT-1 sisa, KS-4/KS-4b, X-12, O65).
-4. **Gate GO cutover → C-05** (pensiun Go).
+5. **Gate GO cutover → C-05** (pensiun Go).
 
 ## 8. Prompt siap tempel untuk chat berikutnya
 
