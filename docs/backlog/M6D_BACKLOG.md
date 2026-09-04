@@ -5,7 +5,19 @@
 > Keputusan & 3 fork arsitektur: `docs/DECISIONS.md` 2026-08-12.
 > Mesin #18: `docs/STATE_MACHINES.md` §15. Entitas `WRR-`: `docs/DATA_MODEL.md`.
 >
-> **Status: SPEC-ONLY. Belum ada migrasi/kode.** Diurut **akhir Wave 2**, sesudah
+> ### ✅ STATUS SEBENARNYA (dikoreksi 2026-09-04): **M6D TERBANGUN PENUH**
+> Baris di bawah — *"SPEC-ONLY, belum ada migrasi/kode"* — adalah status **saat berkas ini
+> disusun 2026-08-12**. Modulnya mendarat sehari kemudian dan berkas ini tidak pernah
+> diperbarui. Bukti di `main`: **12 migrasi** `20260813*_m6d_wrr_*` (schema, machine,
+> autoblock, aggregate, manual, close_guards, notif_v7, job, rollup, domain_rls) +
+> `20260818010000_m6d_wrr_freeze_on_close.sql` + `20260831060000_ai_optimizer_wrr_aggregate.sql`
+> · `packages/domain/src/recap.ts` dengan **8** berkas tes · rute `/api/v1/rekap/**` (detail,
+> metrik, sengketa, narasi, catatan-divisi, close) + `/plan/{id}/rekap-rollup` · halaman
+> `web-internal/src/app/(shell)/account/rekap/[id]`. Sudah pula lewat gap-audit Wave 2
+> (temuan A1 ⇒ `trg_wrr_reaggregate_on_close`).
+> **Jangan bangun ulang.** Dependensi M7/M8/M9/M10 di §0 sudah terpenuhi semua.
+>
+> _Status asli 2026-08-12:_ **SPEC-ONLY. Belum ada migrasi/kode.** Diurut **akhir Wave 2**, sesudah
 > M7/M8/M9/M10 mengekspos metrik auto (dependensi sama seperti M6B P-E, lihat
 > M6B PA-3). Jangan mulai sebelum sumber metrik divisi hijau — kalau tidak,
 > RM-B/RM-C tak punya sumber dan seluruh modul jadi entry manual (melanggar R3).
