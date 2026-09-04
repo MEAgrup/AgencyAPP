@@ -315,15 +315,68 @@ export function reworkAsset(sql: Sql, actor: Actor, assetId: string): Promise<st
 }
 
 /**
- * driveExecEdge is the shared, gated engine driver for the division-side edges of
- * any source. requireFrom pins the expected current state so Start and Rework stay
- * distinct even though both target [In Progress]; a wrong source state is rejected
- * (nothing changes). submitLink is persisted when a link-gated source (Asset)
- * enters [Submitted] (§4 Rule 3). After the move, effects propagate atomically: a
- * Brief-as-task leaving [To Do] advances its Service; an Asset transition recomputes
- * its parent Brief's roll-up (which itself advances the Service). (The M8 Ads
- * pre-[Submitted] submit guard is deferred until M8 is ported — nil-safe.)
+ * execEdgeTx is the shared, gated engine driver for the division-side edges of
+ * any source — the transaction BODY, so a caller already holding a transaction
+ * (C2's batch primitives) can drive many edges inside ONE transaction instead of
+ * one-transaction-per-edge. requireFrom pins the expected current state so Start
+ * and Rework stay distinct even though both target [In Progress]; a wrong source
+ * state is rejected (nothing changes). submitLink is persisted when a link-gated
+ * source (Asset) enters [Submitted] (§4 Rule 3). After the move, effects
+ * propagate atomically: a Brief-as-task leaving [To Do] advances its Service; an
+ * Asset transition recomputes its parent Brief's roll-up (which itself advances
+ * the Service) — UNLESS `opts.propagate` is explicitly `false` (a batch caller
+ * that recomputes the roll-up ONCE after its whole loop, not per row). (The M8
+ * Ads pre-[Submitted] submit guard is deferred until M8 is ported — nil-safe.)
  */
+async function execEdgeTx(
+  tx: Queryable,
+  actor: Actor,
+  src: TaskSource,
+  id: string,
+  requireFrom: string,
+  to: string,
+  submitLink: string,
+  opts?: { propagate?: boolean },
+): Promise<statemachine.TransitionResult> {
+  const ex = executors(tx);
+  const r = await lockTask(tx, src, id);
+  if (r.status === STATUS_VENDOR_DISPATCHED) {
+    throw new ConflictError(MSG_NOT_A_TASK);
+  }
+  if (!canExecute(actor, r)) {
+    throw new ForbiddenError(MSG_EXEC_FORBIDDEN);
+  }
+  if (r.status !== requireFrom) {
+    throw new ConflictError(bi.TRANSITION_NOT_ALLOWED); // pin the source state
+  }
+  // §4 Rule 3 (M8): an Ads Brief-as-task cannot submit until its Ad Campaign is
+  // complete (≥1 linked Creative Asset). No-op for non-Ads divisions and Assets.
+  if (to === STATUS_SUBMITTED && src.table === 'briefs') {
+    await validateBriefSubmit(tx, id, r.division);
+    await validateStageComplete(tx, id); // M16 §2 Rule 11 (LT-26) — one-way guard, see comment on the function
+  }
+  // Link gate: a link-requiring source (Asset) must carry an output link before
+  // [Submitted] (§4 Rule 3). Persist it in the same transaction as the move.
+  if (to === STATUS_SUBMITTED && src.submitLinkCol) {
+    const link = (submitLink ?? '').trim();
+    if (link === '') {
+      throw new ValidationError(MSG_OUTPUT_LINK_REQUIRED);
+    }
+    await tx`update ${tx(src.table)} set ${tx(src.submitLinkCol)} = ${link} where id = ${id}`;
+  }
+  const res = await statemachine.transition(ex.sm, {
+    machine: MACHINE_BRIEF_TASK, entityType: src.entityType, table: src.table, entityId: id, to, actor,
+  });
+  if (!res.ok) {
+    throw transitionError(res);
+  }
+  if (opts?.propagate ?? true) {
+    await propagate(tx, actor, src, r);
+  }
+  return res;
+}
+
+/** driveExecEdge opens its own transaction around execEdgeTx — every existing single-edge caller (startAsset/submitAsset/reworkAsset/…) is unchanged. */
 async function driveExecEdge(
   sql: Sql,
   actor: Actor,
@@ -333,42 +386,7 @@ async function driveExecEdge(
   to: string,
   submitLink: string,
 ): Promise<statemachine.TransitionResult> {
-  return withTransaction(sql, async (tx) => {
-    const ex = executors(tx);
-    const r = await lockTask(tx, src, id);
-    if (r.status === STATUS_VENDOR_DISPATCHED) {
-      throw new ConflictError(MSG_NOT_A_TASK);
-    }
-    if (!canExecute(actor, r)) {
-      throw new ForbiddenError(MSG_EXEC_FORBIDDEN);
-    }
-    if (r.status !== requireFrom) {
-      throw new ConflictError(bi.TRANSITION_NOT_ALLOWED); // pin the source state
-    }
-    // §4 Rule 3 (M8): an Ads Brief-as-task cannot submit until its Ad Campaign is
-    // complete (≥1 linked Creative Asset). No-op for non-Ads divisions and Assets.
-    if (to === STATUS_SUBMITTED && src.table === 'briefs') {
-      await validateBriefSubmit(tx, id, r.division);
-      await validateStageComplete(tx, id); // M16 §2 Rule 11 (LT-26) — one-way guard, see comment on the function
-    }
-    // Link gate: a link-requiring source (Asset) must carry an output link before
-    // [Submitted] (§4 Rule 3). Persist it in the same transaction as the move.
-    if (to === STATUS_SUBMITTED && src.submitLinkCol) {
-      const link = (submitLink ?? '').trim();
-      if (link === '') {
-        throw new ValidationError(MSG_OUTPUT_LINK_REQUIRED);
-      }
-      await tx`update ${tx(src.table)} set ${tx(src.submitLinkCol)} = ${link} where id = ${id}`;
-    }
-    const res = await statemachine.transition(ex.sm, {
-      machine: MACHINE_BRIEF_TASK, entityType: src.entityType, table: src.table, entityId: id, to, actor,
-    });
-    if (!res.ok) {
-      throw transitionError(res);
-    }
-    await propagate(tx, actor, src, r);
-    return res;
-  });
+  return withTransaction(sql, (tx) => execEdgeTx(tx, actor, src, id, requireFrom, to, submitLink));
 }
 
 /**
