@@ -2,6 +2,14 @@
 
 Date: 3 Sep 2026 · Owner: Yohan · Supersedes v2 · Scope: navigation grouping & display labels only
 
+> **Amandemen 2026-09-04 (permintaan pemilik, `docs/DECISIONS.md`).** Grup `ALAT BANTU AM`
+> di §2 dibaca sebagai **`MEA AI Tools`** — itulah label yang sudah terpasang di
+> `web-internal/src/lib/nav.ts`; isinya tetap daftar alat bantu **HTML**
+> (`embedded-tools.ts` → `/tools/[slug]`), dan judul grupnya hanya tampil untuk divisi
+> yang punya akses ke minimal satu alat di dalamnya (dikunci oleh `nav.test.ts`).
+> Selebihnya dokumen ini **belum diimplementasikan**: reorganisasi 9 grup, pembubaran
+> grup "Portal", dan rename item lain masih menunggu 3 keputusan produk di §4.
+
 Revision driven by three corrections:
 1. Account & Service and AI Optimizer are **delivery divisions that manage clients**, not client data / tools.
 2. The group name "Portal Klien" is wrong for what those pages actually are.

@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Role } from './types';
 import { NAV_SECTIONS, visibleNav } from './nav';
+import { EMBEDDED_TOOLS } from './embedded-tools';
 
 function role(division: string, level: string, extra: Partial<Role> = {}): Role {
   return { division, level, od: false, director: false, ...extra };
@@ -231,6 +232,89 @@ describe('visibleNav — Account', () => {
   it('Account LEAD sees Akun Vendor (LT-61 follow-up); staff does not', () => {
     expect(hrefs(role('Account', 'lead'))).toContain('/admin/vendor-accounts');
     expect(hrefs(role('Account', 'staff'))).not.toContain('/admin/vendor-accounts');
+  });
+});
+
+describe('visibleNav — grup "MEA AI Tools" (daftar alat bantu HTML)', () => {
+  // Owner request 2026-09-04: grup alat bantu AM bernama "MEA AI Tools", isinya
+  // daftar alat bantu HTML, dan judul grupnya HANYA tampil untuk divisi yang
+  // punya akses ke setidaknya satu alat di dalamnya.
+  const TITLE = 'MEA AI Tools';
+
+  function toolsSection(r: Role | null) {
+    return visibleNav(r).find((s) => s.title === TITLE);
+  }
+
+  it('judul grupnya persis "MEA AI Tools" (bukan "Alat"/"AI Tools MEA" yang lama)', () => {
+    const titles = NAV_SECTIONS.map((s) => s.title);
+    expect(titles).toContain(TITLE);
+    expect(titles).not.toContain('Alat');
+    expect(titles).not.toContain('AI Tools MEA');
+    expect(titles).not.toContain('Alat Bantu AM');
+  });
+
+  it('isinya HANYA alat HTML terdaftar di EMBEDDED_TOOLS (satu registry, bukan salinan)', () => {
+    const section = NAV_SECTIONS.find((s) => s.title === TITLE);
+    expect(section, 'grup MEA AI Tools harus ada di NAV_SECTIONS').toBeDefined();
+    expect(section!.items.length).toBeGreaterThan(0);
+    for (const item of section!.items) {
+      const slug = item.href.replace('/tools/', '');
+      expect(item.href, `${item.href} harus menunjuk /tools/<slug>`).toBe(`/tools/${slug}`);
+      expect(
+        Object.keys(EMBEDDED_TOOLS),
+        `${slug} harus terdaftar di embedded-tools.ts`,
+      ).toContain(slug);
+      // Menu dan guard halaman WAJIB memakai predikat yang sama — kalau ini
+      // berbeda, satu peran bisa melihat menu tapi ditolak halamannya.
+      expect(item.access, `${slug} harus memakai predikat EMBEDDED_TOOLS`).toBe(
+        EMBEDDED_TOOLS[slug].access,
+      );
+    }
+  });
+
+  it('setiap baris di grup ini bergerbang — tak satu pun boleh universal', () => {
+    // Kalau satu baris tak bergerbang, `visibleNav` tak pernah membuang seksinya
+    // dan judul "MEA AI Tools" bocor ke divisi yang tidak punya akses sama sekali.
+    const section = NAV_SECTIONS.find((s) => s.title === TITLE)!;
+    for (const item of section.items) {
+      expect(typeof item.access, `${item.href} harus punya access()`).toBe('function');
+    }
+  });
+
+  it('judul grup MUNCUL untuk divisi yang punya akses (Account, Creative) dan layer read-all', () => {
+    for (const r of [
+      role('Account', 'staff'),
+      role('Account', 'lead'),
+      role('Creative', 'staff'),
+      role('Sales', 'staff', { director: true }),
+      role('Sales', 'staff', { od: true }),
+    ]) {
+      expect(toolsSection(r), `${r.division}/${r.level} harus melihat grup ${TITLE}`).toBeDefined();
+    }
+  });
+
+  it('judul grup HILANG SEPENUHNYA untuk divisi tanpa akses', () => {
+    for (const division of [
+      'Sales',
+      'Marketing',
+      'Finance',
+      'Ads',
+      'KOL',
+      'Live Stream',
+      'AI Optimizer',
+      'Store Operation',
+    ]) {
+      for (const level of ['staff', 'lead']) {
+        expect(
+          toolsSection(role(division, level)),
+          `${division} ${level} tidak boleh melihat judul grup ${TITLE}`,
+        ).toBeUndefined();
+      }
+    }
+  });
+
+  it('judul grup hilang selama peran masih dimuat (/me belum kembali)', () => {
+    expect(toolsSection(null)).toBeUndefined();
   });
 });
 

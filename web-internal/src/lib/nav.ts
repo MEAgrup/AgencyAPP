@@ -249,12 +249,22 @@ const DELIVERY_LINKS: NavItem[] = [
   { href: '/tasks?division=Store+Operation', label: 'Store Operation', access: divisionQueue(STORE_OPS) },
 ];
 
-// Alat mandiri — utilitas HTML self-contained yang di-embed via iframe
-// (`@/lib/embedded-tools` + `/tools/[slug]`). Ini BUKAN halaman ber-data CDPS:
-// tidak ada panggilan API di dalamnya, jadi tidak ada gerbang server untuk
-// di-mirror. Menu di-trim murni sebagai kenyamanan — daftarkan ke divisi yang
-// memakainya (deep link tetap jalan untuk yang lain). Lihat DECISIONS.md
-// 2026-08-21 "Embed alat HTML AM di CDPS".
+// Grup "MEA AI Tools" — daftar alat bantu HTML self-contained yang di-embed via
+// iframe (`@/lib/embedded-tools` + `/tools/[slug]`). Ini BUKAN halaman ber-data
+// CDPS: tidak ada panggilan API di dalamnya, jadi tidak ada gerbang server untuk
+// di-mirror — `access` pada tiap entri `EMBEDDED_TOOLS` adalah SATU-SATUNYA
+// tempat akses ditegakkan, dipakai bersama oleh menu ini dan guard halaman
+// `/tools/[slug]`. Lihat DECISIONS.md 2026-08-21 "Embed alat HTML AM di CDPS"
+// dan 2026-09-04 (rename grup + visibilitas per divisi).
+//
+// ⚠️ Berbeda dari sisa tabel ini, di grup ini setiap baris WAJIB bergerbang:
+// judul grup hanya muncul untuk divisi yang benar-benar punya akses (`visibleNav`
+// membuang seksi yang kosong), jadi satu baris tanpa `access` akan membocorkan
+// judul grup ke SEMUA divisi. Dikunci oleh tes di `nav.test.ts`.
+//
+// Menambah alat: taruh `.html` di `public/tools/`, daftarkan di
+// `embedded-tools.ts` (berikut predikat aksesnya), lalu tambahkan satu baris di
+// sini yang memakai predikat itu — jangan salin ulang predikatnya.
 const TOOLS_LINKS: NavItem[] = [
   // "AM - baseline riset" (MEA Video Factory): AM memakai tab Baseline (turunkan
   // CDPS Section B dari export TikTok Shop) + Papan; CC / Leader Video memakai
@@ -349,7 +359,7 @@ export const NAV_SECTIONS: NavSection[] = [
   { title: null, items: MAIN_LINKS },
   { title: 'Akuisisi', items: ACQUISITION_LINKS },
   { title: 'Delivery', items: DELIVERY_LINKS },
-  { title: 'AI Tools MEA', items: TOOLS_LINKS },
+  { title: 'MEA AI Tools', items: TOOLS_LINKS },
   { title: 'Visibilitas', items: VISIBILITY_LINKS },
   { title: 'Portal', items: PORTAL_LINKS },
   { title: 'Admin', items: ADMIN_LINKS },
