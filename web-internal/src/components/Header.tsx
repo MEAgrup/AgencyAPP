@@ -42,6 +42,14 @@ export default function Header({ employee, role }: { employee: Employee; role: R
             )}
           </span>
         </Link>
+        {/* Sidebar IA v3 §2 "Avatar menu": Notifikasi · Ganti Password · Keluar.
+            Ketiganya tinggal di header, bukan di rail — `/akun/password` pindah
+            ke sini saat rail disusun ulang jadi 9 grup (2026-09-04). Ia TIDAK
+            bergerbang peran, dan itu disengaja (O44(c)): karyawan yang sedang
+            dipaksa ganti password harus bisa menjangkau formnya. */}
+        <Link href="/akun/password" className="btn btnSecondary" title="Ganti Password">
+          Ganti Password
+        </Link>
         <button type="button" className="btn btnSecondary" onClick={handleLogout}>
           Keluar
         </button>

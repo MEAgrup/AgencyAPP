@@ -49,7 +49,35 @@ export function detectAoa(rowsRaw: Aoa): DetectResult {
   return null;
 }
 
-/** Turn the AoA into header-keyed row objects, starting one row after `headerRow`. Mirrors tool `rowsToObjects`. */
+/**
+ * Turn the AoA into header-keyed row objects, starting one row after `headerRow`.
+ *
+ * **Kolom dengan NAMA SAMA: yang PERTAMA menang**, kemunculan berikutnya
+ * disimpan di bawah kunci bersuffix `nama#<indeks kolom>` — persis aturan
+ * `../../baseline/sheet.ts:readSheet`, supaya satu repo tidak punya dua aturan
+ * untuk masalah yang sama, dan tidak ada kolom yang hilang diam-diam.
+ *
+ * ⚠️ Ini SATU-SATUNYA titik yang MENYIMPANG dari tool asalnya
+ * (`docs/design/TIKTOK_ADS_SCANNER.html:414-431`, `o[hdr[c]] = v` polos ⇒ yang
+ * TERAKHIR menang) — dan penyimpangannya disengaja, lihat `docs/DECISIONS.md`
+ * 2026-09-04 "O70". Alasannya terbukti dari export ASLI (UAT Avitaskin Juli
+ * 2026, `docs/handoff/UAT_TIKTOK_AVITASKIN_20260904.md`): "Analitik Produk"
+ * yang sebenarnya bukan tabel datar — ia **176 kolom dalam 5 seksi**
+ * (baris di ATAS header memberi label seksi: `Semua`, `LIVE penjual`,
+ * `Video penjual`, `Afiliasi`, `Kartu produk penjual`) dan **30 nama kolom
+ * berulang di tiap seksi** (`GMV`, `Pesanan SKU`, `Impresi produk`, `CTR`,
+ * `CTOR (pesanan SKU)`, …).
+ *
+ * Dengan aturan tool (terakhir menang), SETIAP metrik headline SKU terbaca dari
+ * seksi TERAKHIR — "Kartu produk penjual" — bukan dari total toko:
+ * ΣGMV terbaca Rp3.743.633 padahal totalnya Rp26.560.049 (86% GMV hilang),
+ * Σimpresi 55.345 vs 832.842. Angka yang benar ada di kemunculan PERTAMA
+ * (seksi `Semua`), dan itu terkonfirmasi silang: Σ kolom pertama persis sama
+ * dengan GMV di export Analitik Toko (`shop_tt`) untuk periode yang sama.
+ *
+ * Fixture 14-kolom di test lama tidak punya nama berulang sama sekali, jadi
+ * bug ini tidak mungkin muncul sebelum ada export sungguhan.
+ */
 export function rowsToObjects(rowsRaw: Aoa, headerRow: number): Row[] {
   const hdr = (rowsRaw[headerRow] ?? []).map(cellText);
   const out: Row[] = [];
@@ -61,7 +89,8 @@ export function rowsToObjects(rowsRaw: Aoa, headerRow: number): Row[] {
     for (let c = 0; c < hdr.length; c++) {
       if (!hdr[c]) continue;
       const v = r[c];
-      o[hdr[c]] = v;
+      // First occurrence wins; a later same-named column keeps its own key.
+      o[Object.prototype.hasOwnProperty.call(o, hdr[c]) ? `${hdr[c]}#${c}` : hdr[c]] = v;
       if (v !== null && v !== undefined && String(v).trim() !== '') any = true;
     }
     if (any) out.push(o);

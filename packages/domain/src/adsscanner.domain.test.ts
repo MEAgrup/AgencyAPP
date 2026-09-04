@@ -226,6 +226,13 @@ describeDb('runAdsScan — validation gates (BI messages, exact)', () => {
       .rejects.toThrow(MSG_RINGKASAN_DATA);
   });
 
+  it('menyebut NAMA berkas yang salah — satu unggahan bisa berisi belasan berkas (UAT 2026-09-04)', async () => {
+    const client = await seedClient();
+    const wrong = file('Shop Analytics_Key metrics.xlsx', [['Ringkasan data'], [], [], []]);
+    await expect(runAdsScan(sql, actorAdvertiser, scanInput(client, [analitikFile(), wrong])))
+      .rejects.toThrow('Shop Analytics_Key metrics.xlsx');
+  });
+
   it('rejects an upload where NOTHING was recognised', async () => {
     const client = await seedClient();
     const junk = file('acak.xlsx', [['kolom', 'ngawur'], ['a', 'b']]);
