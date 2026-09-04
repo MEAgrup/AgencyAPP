@@ -12,6 +12,7 @@
 | 1 | **UAT dua engine TikTok dengan export ASLI** (SESI2 §0 baris 2) | ✅ **SELESAI** — dan menemukan 1 bug berat, lihat §1.1 |
 | 2 | **O70** — Ads Scanner baca kolom dari seksi yang salah (86% GMV hilang) | ✅ **DIPERBAIKI + dites** |
 | 3 | Rename grup sidebar → **"MEA AI Tools"** + kunci visibilitas per divisi | ✅ **SELESAI** (§2) |
+| 3b | **Sidebar IA v3 diimplementasi** — 9 grup, accordion, kotak cari, Papan Divisi | ✅ **SELESAI** (§2) — badge §5.4 ditunda |
 | 4 | Jawab 6 keputusan pemilik (SESI2 §2) | ⬜ belum — 2 pertanyaan BARU sesi ini (O71, O70-b) **sudah dijawab & ditindaklanjuti**, §3 |
 | 5 | Tiket kode tersisa (SESI2 §3) | ⬜ belum tersentuh |
 | 6 | Gate GO cutover → C-05 | ⬜ belum |
@@ -80,32 +81,52 @@ di handoff SESI2 §1.2 tertutup.
 
 ---
 
-## 2. Navigasi — status sebenarnya
+## 2. Navigasi — Sidebar IA v3 SUDAH mendarat
 
-Pertanyaan pemilik sesi ini: *"plan perubahan navigasi sudah sampai mana?"*
+Saat sesi ini dimulai, jawaban atas *"plan navigasi sudah sampai mana?"* adalah:
+**spek ada, implementasi nol** — kecuali satu label grup. Sekarang tidak lagi.
 
-- **Spek ADA, implementasi BELUM.** `docs/CDPS_Sidebar_IA_v3.md` +
-  `docs/CDPS_Sidebar_IA_v3_mockup.html` (dikirim 2026-09-03) adalah reorganisasi
-  penuh: 9 grup, 30-33 item, grup "Portal" dibubarkan, banyak rename.
-  **Nol** dari reorganisasi itu ada di kode.
-- **Yang sudah mendarat hanya label grup alat bantu**: `Alat` → `AI Tools MEA`
-  (2026-09-03) → **`MEA AI Tools`** (sesi ini, permintaan pemilik).
-- **Yang menahan sisanya:** §4 dokumen IA v3 — **3 pasang halaman yang mungkin
-  duplikat** (Kinerja Saya vs Tugas Saya · Kinerja Divisi vs Team Performance ·
-  Pantauan Risiko Klien vs Client Health). Itu keputusan PRODUK, bukan navigasi;
-  jangan pilih sendiri mana yang di-drop.
+**Yang terpasang** (`web-internal/src/lib/nav.ts` + `Sidebar.tsx`):
 
-Yang dikerjakan sesi ini di `web-internal/src/lib/nav.ts`:
-label grup jadi **`MEA AI Tools`**; isinya tetap daftar alat bantu HTML dari
-`embedded-tools.ts` (`AM - baseline riset`, `AM Co-Pilot`); **visibilitas
-dikunci** oleh 6 tes baru — judul grup hilang sepenuhnya untuk 8 divisi tanpa
-akses, dan setiap baris di grup ini WAJIB bergerbang dengan predikat dari
-registry (satu baris tanpa gerbang akan membocorkan judul grup ke semua divisi,
-karena `visibleNav` hanya membuang seksi yang KOSONG).
+- **9 grup** sesuai IA v3 §2: Beranda · Akuisisi · Katalog & Penawaran · Klien ·
+  Delivery · MEA AI Tools · Keuangan · Tim · Admin.
+- **Grup "Portal" dibubarkan**: `Portal Saya`→Beranda `Kinerja Saya`,
+  `Portal Tim`→Tim `Kinerja Divisi`, `Manajemen`→Klien `Pantauan Risiko Klien`,
+  `Kontak Klien (Portal)`→Admin `Akses Portal Klien`. Plus `Klien`→`Direktori
+  Klien`, `Perlu Persetujuan Saya`→`Persetujuan`.
+- **`Notifikasi` + `Ganti Password` pindah ke header** (v3 §2 "Avatar menu") —
+  bel & Keluar sudah ada di sana, `Ganti Password` ditambahkan. Tetap tanpa
+  gerbang, alasan O44(c) yang sama.
+- **Accordion** (satu grup terbuka; grup rute aktif terbuka saat muat),
+  **kotak cari ⌘K/Ctrl+K**, **sub-grup `Papan Divisi`** kedalaman-2 yang
+  mengingat lipatannya di localStorage, rail 270px sticky, a11y penuh.
+- **Auto-scope Papan Divisi** ternyata bukan aturan baru: ia jatuh dari
+  `divisionQueue` yang sudah ada. Creative staff melihat satu papan; Direktur/OD
+  tujuh.
 
-`/ads/screening` dan `/ads/scanner` **sengaja tetap di grup Delivery** — keduanya
-sudah jadi halaman React ber-API/ber-RLS milik divisi Ads, bukan HTML yang
-di-embed.
+**Empat penyimpangan dari dokumen, semuanya disengaja & tercatat:**
+
+1. **Badge angka (§5.4) DITUNDA** — pilihan pemilik. Tiap badge butuh endpoint
+   hitungan sendiri di `apps/api` (Persetujuan, Leads, Task Execution, Reminder)
+   berikut tes izin per peran. **Itu tiket berikutnya kalau badge dimau.**
+2. **§4 dijawab pemilik: ketiga pasang halaman DIPERTAHANKAN** → 33 item, bukan
+   30. Ketiganya beda kemampuan, bukan cuma scope (lihat DECISIONS 2026-09-04).
+3. **Label dua alat di MEA AI Tools tidak diubah** — pemilik hanya minta nama
+   grupnya.
+4. **`Screening SKU` + `Ads Scanner` ditambahkan ke Delivery** — mendarat sesudah
+   v3 ditulis; keduanya halaman React ber-API/ber-RLS milik divisi Ads, bukan
+   HTML embed, jadi bukan anggota grup MEA AI Tools.
+
+**Yang menjaga supaya tidak ada halaman kehilangan pintu:** satu tes menyebutkan
+37 href satu per satu dan gagal kalau salah satunya hilang dari model, plus tes
+"tidak ada href ganda". Logika accordion & pencarian dipindah ke `nav.ts` sebagai
+fungsi murni (`isActiveHref`/`sectionOfRoute`/`filterNav`) supaya bisa dites tanpa
+DOM; `Sidebar.tsx` tinggal renderer.
+
+⚠️ **Belum diuji di browser sungguhan** — build, lint, typecheck dan 534 tes
+hijau, tapi rail-nya belum pernah dibuka mata manusia. Kalau ada sesi dengan
+`apps/api` + DB hidup, buka `/` dan periksa accordion, ⌘K, dan lipatan Papan
+Divisi.
 
 ---
 

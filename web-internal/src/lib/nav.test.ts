@@ -7,27 +7,34 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Role } from './types';
-import { NAV_SECTIONS, visibleNav } from './nav';
+import {
+  filterNav, isActiveHref, isSubGroup, NAV_SECTIONS, sectionOfRoute, visibleLinks, visibleNav,
+  type NavItem,
+} from './nav';
 import { EMBEDDED_TOOLS } from './embedded-tools';
 
 function role(division: string, level: string, extra: Partial<Role> = {}): Role {
   return { division, level, od: false, director: false, ...extra };
 }
 
-/** Flat set of hrefs a role may see. */
+/** Flat set of hrefs a role may see — sub-groups (Papan Divisi) flattened. */
 function hrefs(r: Role | null): string[] {
-  return visibleNav(r).flatMap((s) => s.items.map((i) => i.href));
+  return visibleLinks(r).map((i) => i.href);
 }
 
-const ALL_HREFS = NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.href));
+/** Every link in the model, sub-groups flattened, before any role filtering. */
+const ALL_ITEMS: NavItem[] = NAV_SECTIONS.flatMap((s) =>
+  s.items.flatMap((n) => (isSubGroup(n) ? n.items : [n])),
+);
+const ALL_HREFS = ALL_ITEMS.map((i) => i.href);
 
 // Items with no gate at all — visible to every authenticated role.
 const UNIVERSAL = [
   '/',
-  // Ungated by design (O44(c)): an employee under a forced password change must
-  // be able to reach the change form, so this can never be role-gated.
-  '/akun/password',
-  '/notifications',
+  // `/akun/password` dan `/notifications` TIDAK lagi di rail — sejak IA v3
+  // keduanya tinggal di header ("Avatar menu", §2), lihat `Header.tsx`.
+  // `/akun/password` tetap tanpa gerbang di sana, alasan yang sama (O44(c)):
+  // karyawan yang dipaksa ganti password harus bisa menjangkau formnya.
   '/master-services',
   // M11 My Tasks is the universal cross-Client work view; the per-Client Client
   // Board moved into the Client Record (DECISIONS 2026-08-14), so `/board`
@@ -257,7 +264,9 @@ describe('visibleNav — grup "MEA AI Tools" (daftar alat bantu HTML)', () => {
     const section = NAV_SECTIONS.find((s) => s.title === TITLE);
     expect(section, 'grup MEA AI Tools harus ada di NAV_SECTIONS').toBeDefined();
     expect(section!.items.length).toBeGreaterThan(0);
-    for (const item of section!.items) {
+    // Grup ini datar — tak ada sub-grup di dalamnya, jadi setiap simpul tautan.
+    expect(section!.items.every((n) => !isSubGroup(n))).toBe(true);
+    for (const item of section!.items as NavItem[]) {
       const slug = item.href.replace('/tools/', '');
       expect(item.href, `${item.href} harus menunjuk /tools/<slug>`).toBe(`/tools/${slug}`);
       expect(
@@ -276,7 +285,7 @@ describe('visibleNav — grup "MEA AI Tools" (daftar alat bantu HTML)', () => {
     // Kalau satu baris tak bergerbang, `visibleNav` tak pernah membuang seksinya
     // dan judul "MEA AI Tools" bocor ke divisi yang tidak punya akses sama sekali.
     const section = NAV_SECTIONS.find((s) => s.title === TITLE)!;
-    for (const item of section.items) {
+    for (const item of section.items as NavItem[]) {
       expect(typeof item.access, `${item.href} harus punya access()`).toBe('function');
     }
   });
@@ -498,5 +507,208 @@ describe('visibleNav — section shape', () => {
   it('keeps division casing tolerant (lowercased HRIS mappings still match)', () => {
     expect(hrefs(role('sales', 'staff'))).toContain('/sales');
     expect(hrefs(role('live stream', 'staff'))).toContain('/livestream');
+  });
+});
+
+
+// ══════════════════════════════════════════════════════════════════════════
+describe('Sidebar IA v3 — struktur 9 grup', () => {
+  // `docs/CDPS_Sidebar_IA_v3.md` §2. Grup dan LABEL adalah kontraknya; rute,
+  // prefix entitas dan nomor modul sengaja tidak disentuh (§7 dokumen itu).
+  const GRUP = [
+    'Beranda',
+    'Akuisisi',
+    'Katalog & Penawaran',
+    'Klien',
+    'Delivery',
+    'MEA AI Tools',
+    'Keuangan',
+    'Tim',
+    'Admin',
+  ];
+
+  it('sembilan grup, dalam urutan dokumen, semuanya berjudul', () => {
+    expect(NAV_SECTIONS.map((s) => s.title)).toEqual(GRUP);
+    // Grup "Portal" dibubarkan (v3 §1): tiga dari empat halamannya pindah ke
+    // Beranda / Tim / Klien, satu ke Admin.
+    expect(NAV_SECTIONS.map((s) => s.title)).not.toContain('Portal');
+    expect(NAV_SECTIONS.map((s) => s.title)).not.toContain('Visibilitas');
+  });
+
+  it('label v3 dipakai, label lama sudah tidak ada', () => {
+    const label = (href: string) => ALL_ITEMS.find((i) => i.href === href)?.label;
+    expect(label('/portal')).toBe('Kinerja Saya');           // was "Portal Saya"
+    expect(label('/portal/team')).toBe('Kinerja Divisi');    // was "Portal Tim"
+    expect(label('/portal/management')).toBe('Pantauan Risiko Klien'); // was "Manajemen"
+    expect(label('/admin/client-contacts')).toBe('Akses Portal Klien'); // was "Kontak Klien (Portal)"
+    expect(label('/clients')).toBe('Direktori Klien');       // was "Klien"
+    expect(label('/persetujuan')).toBe('Persetujuan');       // was "Perlu Persetujuan Saya"
+  });
+
+  it('setiap halaman yang dulu ada di menu masih terjangkau — nol regresi', () => {
+    // Kalau satu href hilang dari model, sebuah halaman jadi tak punya pintu.
+    // `/akun/password` dan `/notifications` PINDAH ke header (Avatar menu, §2),
+    // jadi keduanya sengaja tidak ada di sini.
+    for (const href of [
+      '/', '/portal', '/board/my-tasks', '/persetujuan',
+      '/leads', '/sales', '/marketing', '/sales/kinerja', '/marketing/performance',
+      '/master-services', '/sales/kalkulator',
+      '/clients', '/portal/management', '/health',
+      '/tasks', '/account/rekap', '/account', '/ads', '/creative', '/kol', '/livestream',
+      '/tasks?division=AI+Optimizer', '/tasks?division=Store+Operation',
+      '/ads/screening', '/ads/scanner',
+      '/tools/video-factory', '/tools/am-copilot',
+      '/finance', '/finance/reminders',
+      '/penugasan', '/portal/team', '/performance',
+      '/admin/employees', '/admin/role-mappings', '/admin/hari-libur',
+      '/admin/vendor-accounts', '/admin/client-contacts',
+    ]) {
+      expect(ALL_HREFS, `${href} hilang dari model navigasi`).toContain(href);
+    }
+  });
+
+  it('tidak ada href ganda — satu halaman satu pintu', () => {
+    expect(new Set(ALL_HREFS).size).toBe(ALL_HREFS.length);
+  });
+
+  describe('sub-grup "Papan Divisi" (kedalaman 2)', () => {
+    const papan = () => {
+      const delivery = NAV_SECTIONS.find((s) => s.title === 'Delivery')!;
+      return delivery.items.find((n) => isSubGroup(n) && n.label === 'Papan Divisi');
+    };
+
+    it('ada di Delivery dan memuat tujuh papan divisi', () => {
+      const g = papan();
+      expect(g, 'sub-grup Papan Divisi harus ada di Delivery').toBeDefined();
+      expect(isSubGroup(g!) && g!.items.map((i) => i.label)).toEqual([
+        'Account & Service', 'AI Optimizer', 'Ads', 'Creative', 'KOL', 'Live Stream', 'Store Operation',
+      ]);
+    });
+
+    it('kedalaman berhenti di 2 — tak ada sub-grup di dalam sub-grup', () => {
+      for (const s of NAV_SECTIONS) {
+        for (const n of s.items) {
+          if (!isSubGroup(n)) continue;
+          expect(n.items.every((i) => !isSubGroup(i)), `${n.label} memuat sub-grup bersarang`).toBe(true);
+        }
+      }
+    });
+
+    it('auto-scope (§5.6): eksekutor kanal hanya melihat papan divisinya sendiri', () => {
+      const papanOf = (r: Role) => {
+        const delivery = visibleNav(r).find((s) => s.title === 'Delivery');
+        const g = delivery?.items.find((n) => isSubGroup(n));
+        return g && isSubGroup(g) ? g.items.map((i) => i.label) : [];
+      };
+      expect(papanOf(role('Creative', 'staff'))).toEqual(['Creative']);
+      expect(papanOf(role('KOL', 'staff'))).toEqual(['KOL']);
+      expect(papanOf(role('Live Stream', 'lead'))).toEqual(['Live Stream']);
+    });
+
+    it('auto-scope (§5.6): Direktur/OD melihat ketujuhnya', () => {
+      const papanOf = (r: Role) => {
+        const delivery = visibleNav(r).find((s) => s.title === 'Delivery');
+        const g = delivery?.items.find((n) => isSubGroup(n));
+        return g && isSubGroup(g) ? g.items.length : 0;
+      };
+      expect(papanOf(role('Management', 'staff', { director: true }))).toBe(7);
+      expect(papanOf(role('Management', 'staff', { od: true }))).toBe(7);
+    });
+
+    it('sub-grup yang jadi kosong ikut hilang, tidak menyisakan judul menggantung', () => {
+      // Sales tidak punya satu pun papan divisi — dan memang tidak melihat
+      // grup Delivery sama sekali.
+      const delivery = visibleNav(role('Sales', 'staff')).find((s) => s.title === 'Delivery');
+      expect(delivery).toBeUndefined();
+      // Finance juga bukan pemilik task mana pun.
+      expect(visibleNav(role('Finance', 'staff')).find((s) => s.title === 'Delivery')).toBeUndefined();
+    });
+  });
+
+  it('tiga pasang "mungkin duplikat" (§4) SEMUANYA dipertahankan — keputusan pemilik 2026-09-04', () => {
+    // Ketiganya beda kemampuan, bukan cuma beda scope: Tugas Saya punya filter
+    // divisi + "Lihat Tugas Staff Lain"; Team Performance universal + halaman
+    // Konfigurasi bobot; Client Health punya trigger Pemindaian Skor.
+    for (const href of ['/portal', '/board/my-tasks', '/portal/team', '/performance', '/portal/management', '/health']) {
+      expect(ALL_HREFS, `${href} tidak boleh dihapus`).toContain(href);
+    }
+  });
+});
+
+
+// ══════════════════════════════════════════════════════════════════════════
+describe('perilaku rail (Sidebar IA v3 §5)', () => {
+  // Bagian MURNI dari `Sidebar.tsx` — accordion & pencarian. Ini yang bisa
+  // diam-diam rusak tanpa ada tes yang menjerit.
+  const sections = visibleNav(role('Management', 'staff', { director: true }));
+
+  describe('isActiveHref', () => {
+    it('mencocokkan rute persis dan anaknya', () => {
+      expect(isActiveHref('/clients', '/clients')).toBe(true);
+      expect(isActiveHref('/clients/CLI-1', '/clients')).toBe(true);
+      expect(isActiveHref('/clientsX', '/clients')).toBe(false);
+    });
+
+    it('Dashboard hanya aktif di "/" persis — bukan di setiap halaman', () => {
+      expect(isActiveHref('/', '/')).toBe(true);
+      expect(isActiveHref('/clients', '/')).toBe(false);
+    });
+
+    it('item ber-query string tidak pernah ditandai aktif (batasan yang disengaja)', () => {
+      expect(isActiveHref('/tasks', '/tasks?division=AI+Optimizer')).toBe(false);
+    });
+  });
+
+  describe('sectionOfRoute — grup mana yang terbuka saat halaman dimuat (§5.1)', () => {
+    it('menemukan grup dari tautan biasa', () => {
+      expect(sectionOfRoute(sections, '/finance/reminders')).toBe('Keuangan');
+      expect(sectionOfRoute(sections, '/admin/employees')).toBe('Admin');
+    });
+
+    it('menemukan grup dari tautan DI DALAM sub-grup (Papan Divisi)', () => {
+      expect(sectionOfRoute(sections, '/creative')).toBe('Delivery');
+      expect(sectionOfRoute(sections, '/kol/briefs/BRF-1')).toBe('Delivery');
+    });
+
+    it('null untuk rute yang tidak ada di menu (mis. halaman detail lepas)', () => {
+      expect(sectionOfRoute(sections, '/demo-tasks')).toBeNull();
+    });
+  });
+
+  describe('filterNav — kotak cari (§5.3)', () => {
+    const titles = (q: string) => filterNav(sections, q).map((s) => s.title);
+    const labels = (q: string) =>
+      filterNav(sections, q).flatMap((s) => s.items.flatMap((n) => (isSubGroup(n) ? n.items : [n]))).map((i) => i.label);
+
+    it('kueri kosong mengembalikan model apa adanya', () => {
+      expect(filterNav(sections, '')).toBe(sections);
+      expect(filterNav(sections, '   ')).toBe(sections);
+    });
+
+    it('menyaring per label item dan membuang grup yang tak menyisakan apa pun', () => {
+      expect(labels('reminder')).toEqual(['Reminder Pembayaran']);
+      expect(titles('reminder')).toEqual(['Keuangan']);
+    });
+
+    it('judul grup yang cocok mempertahankan SELURUH isinya', () => {
+      // Mencari nama grup harus memperlihatkan isinya, bukan grup kosong.
+      expect(titles('keuangan')).toEqual(['Keuangan']);
+      expect(labels('keuangan')).toEqual(['Finance', 'Reminder Pembayaran']);
+    });
+
+    it('mencari ke DALAM sub-grup, dan judul sub-grup yang cocok membawa seluruh papannya', () => {
+      expect(labels('creative')).toContain('Creative');
+      expect(labels('papan')).toEqual([
+        'Account & Service', 'AI Optimizer', 'Ads', 'Creative', 'KOL', 'Live Stream', 'Store Operation',
+      ]);
+    });
+
+    it('tidak peduli huruf besar-kecil dan spasi di ujung', () => {
+      expect(labels('  KARYAWAN ')).toEqual(['Karyawan']);
+    });
+
+    it('kueri tanpa hasil mengembalikan daftar kosong, bukan seluruh menu', () => {
+      expect(filterNav(sections, 'zzz-tidak-ada')).toEqual([]);
+    });
   });
 });

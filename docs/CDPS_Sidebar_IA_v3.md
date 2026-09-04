@@ -2,13 +2,28 @@
 
 Date: 3 Sep 2026 · Owner: Yohan · Supersedes v2 · Scope: navigation grouping & display labels only
 
-> **Amandemen 2026-09-04 (permintaan pemilik, `docs/DECISIONS.md`).** Grup `ALAT BANTU AM`
-> di §2 dibaca sebagai **`MEA AI Tools`** — itulah label yang sudah terpasang di
-> `web-internal/src/lib/nav.ts`; isinya tetap daftar alat bantu **HTML**
-> (`embedded-tools.ts` → `/tools/[slug]`), dan judul grupnya hanya tampil untuk divisi
-> yang punya akses ke minimal satu alat di dalamnya (dikunci oleh `nav.test.ts`).
-> Selebihnya dokumen ini **belum diimplementasikan**: reorganisasi 9 grup, pembubaran
-> grup "Portal", dan rename item lain masih menunggu 3 keputusan produk di §4.
+> ## ✅ Status implementasi — 2026-09-04
+>
+> Dokumen ini **sudah diimplementasikan** di `web-internal/src/lib/nav.ts` +
+> `Sidebar.tsx` (`docs/DECISIONS.md` 2026-09-04). Terpasang: 9 grup §2, pembubaran
+> grup "Portal", semua rename label, accordion §5.1, kotak cari ⌘K §5.3, sub-grup
+> `Papan Divisi` kedalaman-2 dengan localStorage §5.2, auto-scope §5.6, rail 270px
+> sticky §5.7, dan a11y §5.8.
+>
+> **Empat penyimpangan, semuanya disengaja:**
+> 1. **§5.4 badge angka DITUNDA** — tiap badge butuh endpoint hitungan tersendiri di
+>    `apps/api` berikut tes izin per peran (pekerjaan backend, bukan navigasi).
+> 2. **§4 dijawab pemilik: ketiga pasang halaman DIPERTAHANKAN** (33 item, bukan 30).
+>    Pembacaan kode: ketiganya beda kemampuan, bukan cuma beda scope — `Tugas Saya`
+>    punya filter divisi + "Lihat Tugas Staff Lain"; `Team Performance` universal +
+>    halaman Konfigurasi bobot; `Client Health` punya aksi Pemindaian Skor.
+> 3. **Grup `ALAT BANTU AM` bernama `MEA AI Tools`** (permintaan pemilik), dan label
+>    kedua alatnya TIDAK diubah — `AM - baseline riset` & `AM Co-Pilot` tetap, bukan
+>    `Baseline Riset Toko`/`Co-Pilot AM` seperti usulan §2, karena pemilik hanya
+>    meminta nama grupnya yang berganti.
+> 4. **Delivery memuat 2 item tambahan**, `Screening SKU` dan `Ads Scanner` — keduanya
+>    mendarat sesudah dokumen ini ditulis (3 Sep), jadi §2 tak memuatnya; menghapusnya
+>    berarti dua halaman tanpa pintu.
 
 Revision driven by three corrections:
 1. Account & Service and AI Optimizer are **delivery divisions that manage clients**, not client data / tools.
