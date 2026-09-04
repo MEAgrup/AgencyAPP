@@ -1,5 +1,5 @@
 // Typed wrapper over lib/api.ts for Module 13 (Client Health) endpoints.
-// Shapes mirror backend/internal/module13_health/{snapshot.go,health.go,roas.go}
+// Shapes mirror archive/backend-go/internal/module13_health/{snapshot.go,health.go,roas.go}
 // exactly — read from the handler code, never invented. All fields computed
 // server-side (score, band, weights, component metrics); frontend renders
 // read-only from JSON, never recalculates.
@@ -92,7 +92,7 @@ export function getComponentLabel(name: string): string {
 }
 
 // UX gating for M13 write actions (run scan / ROAS toggle). Mirrors backend
-// canRunScan/canToggleROAS (backend/internal/module13_health/service.go:76-95)
+// canRunScan/canToggleROAS (archive/backend-go/internal/module13_health/service.go:76-95)
 // short-circuit order exactly: Director always allowed (even when layered with
 // OD, CLAUDE.md #6); otherwise Account division (staff/lead) without an OD
 // layer. UX-only — the server remains the authority on permissions.

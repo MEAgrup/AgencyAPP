@@ -1,5 +1,5 @@
 // Typed wrapper over lib/api.ts for Module 11 (Unified Board / PM Kanban).
-// Shapes mirror backend/internal/httpapi/board_handlers.go +
+// Shapes mirror archive/backend-go/internal/httpapi/board_handlers.go +
 // internal/module11_board/{board.go,views.go} exactly (Card struct views.go:29-42,
 // Dependency struct board.go:118-130) — read from the brief, never invented.
 // No money fields in this module. Everything here is read-mostly: the only

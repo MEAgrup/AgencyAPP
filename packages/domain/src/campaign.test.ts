@@ -1,6 +1,6 @@
 /**
  * Tests for M3 Campaign (campaign.ts). Ported from Go's
- * backend/internal/module3_campaign/{campaign,rollup}_test.go.
+ * archive/backend-go/internal/module3_campaign/{campaign,rollup}_test.go.
  *
  * - Unit: the §5/§6.1 authority predicates (no DB).
  * - Integration (skipped unless DATABASE_URL is set): create validation +

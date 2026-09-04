@@ -1,7 +1,7 @@
 /**
  * CDPS role model and the global permission matrix from PERMISSIONS.md.
  *
- * Ported 1:1 from backend/internal/core/permission/permission.go.
+ * Ported 1:1 from archive/backend-go/internal/core/permission/permission.go.
  *
  * Universal pattern:
  *   - Staff        = own data only

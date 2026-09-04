@@ -23,7 +23,7 @@
  * Campaign existence + §5 visibility gate and the 1:1 Online/Offline read — never
  * duplicating that logic or those columns. It emits NO notification event (catalog FROZEN).
  *
- * Reference: backend/internal/module2_marketing/{marketing,metrics}.go.
+ * Reference: archive/backend-go/internal/module2_marketing/{marketing,metrics}.go.
  */
 
 import { money, permission, tz } from '@cdps/core';

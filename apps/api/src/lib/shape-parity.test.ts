@@ -14,7 +14,7 @@
  *
  * Each of those was found by a human reading two files side by side. That does
  * not scale to 80+ converters, and — the part that actually forces the issue —
- * it stops being possible at all once C-05 archives `backend/`, because the Go
+ * it stops being possible at all once C-05 archives `archive/backend-go/`, because the Go
  * struct tags are the oracle those readings were checked against.
  *
  * So this test asserts the pair mechanically, against the source of truth that
@@ -25,7 +25,7 @@
  *
  * Deliberately NOT a Go diff: Go is frozen and about to be archived, and two
  * endpoints (`/transactions/{id}/commission`, `/payment`) have no Go handler at
- * all. Anchoring to Go would make this test die with `backend/`.
+ * all. Anchoring to Go would make this test die with `archive/backend-go/`.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

@@ -24,7 +24,7 @@
  * module is reads plus delegation to the owning modules. The external Client Portal
  * (M15-C2) is a separate blocked track and lives nowhere in this file.
  *
- * Reference: backend/internal/module15_portal/portal.go.
+ * Reference: archive/backend-go/internal/module15_portal/portal.go.
  */
 
 import { permission } from '@cdps/core';

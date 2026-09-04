@@ -1,4 +1,4 @@
-// Ported 1:1 from backend/internal/core/money/money_test.go.
+// Ported 1:1 from archive/backend-go/internal/core/money/money_test.go.
 import { describe, expect, it } from 'vitest';
 import { BadAmountError, decimal, format, mul, parse, percentOf, proRata, type Money } from './money';
 

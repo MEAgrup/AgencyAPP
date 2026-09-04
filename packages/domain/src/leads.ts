@@ -26,7 +26,7 @@
  * order): campaign linkage / Source auto-derivation (M3, Wave 3) and the
  * Marketing bulk-import door (M1 §3).
  *
- * Reference: backend/internal/module1_leads/{leads,dedup,normalize,reads}.go.
+ * Reference: archive/backend-go/internal/module1_leads/{leads,dedup,normalize,reads}.go.
  */
 
 import { bi, ident, notification, page, permission, statemachine } from '@cdps/core';
@@ -985,7 +985,7 @@ const OPEN_ATTEMPT_TERMINAL: string[] = [...TERMINAL_ATTEMPT_STATUSES];
 // ---------------------------------------------------------------------------
 // Read-scope gates (DECISIONS O37, opsi (c) — app-layer half).
 //
-// Ported 1:1 from `backend/internal/module1_leads/reads.go` (canReadPool /
+// Ported 1:1 from `archive/backend-go/internal/module1_leads/reads.go` (canReadPool /
 // leadListScope / canReadLead). RLS filters ROWS; these gates decide whether the
 // caller may reach the endpoint at all, so a wrong-division actor gets a 403
 // with the exact BI message instead of a silently empty list — the behaviour the

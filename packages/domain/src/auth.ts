@@ -98,7 +98,7 @@ export async function getVendorMe(sql: Queryable, actor: Actor): Promise<VendorM
 }
 
 // ---------------------------------------------------------------------------
-// Password management (O44(c)) — ported from backend/internal/auth/local.go.
+// Password management (O44(c)) — ported from archive/backend-go/internal/auth/local.go.
 //
 // WHERE THE PASSWORD ACTUALLY LIVES. On this stack the authority is GoTrue
 // (`auth.users.encrypted_password`); `employee_credentials` is only the transit

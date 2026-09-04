@@ -1,5 +1,5 @@
 /**
- * The DB-touching half of mslseed — port of `backend/cmd/mslseed/engine.go`.
+ * The DB-touching half of mslseed — port of `archive/backend-go/cmd/mslseed/engine.go`.
  *
  * Given already-parsed rows and an actor, `execute`:
  *   1. validates EVERY row (format-level, via `rowToServiceInput`) and aborts

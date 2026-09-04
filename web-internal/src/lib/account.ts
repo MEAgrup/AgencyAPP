@@ -1,6 +1,6 @@
 // Typed wrapper over lib/api.ts for Module 6 (Account & Service) endpoints.
-// Shapes mirror backend/internal/httpapi/account_handlers.go +
-// backend/internal/module6_account/{account,strategy,brief,brief_review,complaint}.go
+// Shapes mirror archive/backend-go/internal/httpapi/account_handlers.go +
+// archive/backend-go/internal/module6_account/{account,strategy,brief,brief_review,complaint}.go
 // exactly (json tags read from the handler/view structs) — never invented.
 //
 // Notes read from the FE brief recon (fe_briefs/m6.md):

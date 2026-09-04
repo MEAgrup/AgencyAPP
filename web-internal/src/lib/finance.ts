@@ -1,5 +1,5 @@
 // Typed wrapper over lib/api.ts for Module 5 (Admin & Finance) endpoints.
-// Shapes mirror backend/internal/httpapi/finance_handlers.go +
+// Shapes mirror archive/backend-go/internal/httpapi/finance_handlers.go +
 // intent_reminder_handlers.go (trxView / instViews / reminderViews /
 // outstandingViews / BermasalahStatus) exactly. Money fields arrive
 // pre-formatted ("Rp. X.XXX.XXX,00") by the backend and are rendered as-is.

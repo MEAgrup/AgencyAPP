@@ -30,7 +30,7 @@
  *   - every computed field (turnaround, speed score, revision count) is DERIVED
  *     from the immutable transition log, never stored (house rules 3/4).
  *
- * Reference: backend/internal/module12_task/{source,task,assign,block,metrics}.go.
+ * Reference: archive/backend-go/internal/module12_task/{source,task,assign,block,metrics}.go.
  */
 
 import { bi, notification, permission, statemachine, tz } from '@cdps/core';

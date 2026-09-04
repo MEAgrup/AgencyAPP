@@ -1,4 +1,4 @@
-// Ported 1:1 from backend/internal/core/tz/tz_test.go.
+// Ported 1:1 from archive/backend-go/internal/core/tz/tz_test.go.
 import { describe, expect, it } from 'vitest';
 import { WIB_OFFSET_HOURS, addDaysToDate, dateString, dateTimeString, daysBetween, isoWeekOf, isoWeekOfDate, period } from './tz';
 

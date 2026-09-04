@@ -33,8 +33,8 @@
  * Go handlers, no new strings); every write appends an audit row; reads are
  * gated per Phase 0 §4 (Director writes; Director/OD read).
  *
- * Reference: backend/internal/admin/roles.go, backend/internal/admin/employees.go,
- * backend/internal/httpapi/admin_handlers.go.
+ * Reference: archive/backend-go/internal/admin/roles.go, archive/backend-go/internal/admin/employees.go,
+ * archive/backend-go/internal/httpapi/admin_handlers.go.
  */
 
 import { permission } from '@cdps/core';

@@ -1,6 +1,6 @@
 // Typed wrapper over lib/api.ts for Module 8 (Ads) endpoints.
-// Shapes mirror backend/internal/module8_ads/{read.go,metrics.go,optimization.go}
-// + backend/internal/httpapi/ads_handlers.go EXACTLY (json tags read from source) —
+// Shapes mirror archive/backend-go/internal/module8_ads/{read.go,metrics.go,optimization.go}
+// + archive/backend-go/internal/httpapi/ads_handlers.go EXACTLY (json tags read from source) —
 // never invented. Reconciled against fe_briefs/m8.md (the single endpoint source).
 //
 // Money contract (m8 brief §"CATATAN"/gotcha #4):

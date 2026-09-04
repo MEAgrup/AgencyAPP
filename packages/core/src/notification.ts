@@ -2,7 +2,7 @@
  * In-app notification center — TypeScript catalog + wrapper over the SQL
  * function `notify_emit` (migration 20260723055732_statemachine.sql).
  *
- * Ported from backend/internal/core/notification. The event catalog is FROZEN,
+ * Ported from archive/backend-go/internal/core/notification. The event catalog is FROZEN,
  * and since O55 (DECISIONS 2026-08-07) "frozen" means VERSIONED rather than
  * "pinned to a literal": every event belongs to a catalog version, each version
  * is a registered row in `notif_catalog_versions`, and the invariant asserts the

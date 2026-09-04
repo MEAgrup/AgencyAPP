@@ -1,7 +1,7 @@
 /**
  * Append-only audit log — TypeScript writer over the immutable `audit_log` table.
  *
- * Ported from backend/internal/core/audit. Immutability is enforced at the
+ * Ported from archive/backend-go/internal/core/audit. Immutability is enforced at the
  * storage layer by the `forbid_mutation()` BEFORE UPDATE/DELETE triggers on
  * `audit_log` (migration 20260722053824_init) — there is deliberately NO update
  * or delete code path here, exactly like the Go package.

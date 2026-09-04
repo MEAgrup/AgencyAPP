@@ -1,7 +1,7 @@
 // Typed wrapper over lib/api.ts for Module 9 (KOL) endpoints.
 //
 // Source of truth: fe_briefs/m9.md (the ONE endpoint contract for this build
-// stream) + backend/internal/module9_kol/*.go + httpapi/routes_kol.go /
+// stream) + archive/backend-go/internal/module9_kol/*.go + httpapi/routes_kol.go /
 // kol_handlers.go referenced there. Shapes mirror the backend structs EXACTLY
 // (json tags as documented in m9.md §3) — never invented.
 //

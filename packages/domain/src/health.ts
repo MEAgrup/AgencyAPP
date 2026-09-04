@@ -10,7 +10,7 @@
  * (Rule 10). Everything a snapshot persists is recomputable from the immutable
  * event/timestamp logs of the source modules (house rule 4).
  *
- * Reference: backend/internal/module13_health/*.go.
+ * Reference: archive/backend-go/internal/module13_health/*.go.
  */
 
 import { money, notification, permission, tz } from '@cdps/core';

@@ -1,3 +1,9 @@
+# ⛔ DEPRECATED 2026-09-04 (C-05) — dump final MySQL SUDAH diambil dan disimpan
+# di luar GitHub (dikonfirmasi pemilik 2026-09-04), dan service Railway-nya
+# dimatikan. Workflow ini SENGAJA tidak dihapus: selama Railway belum benar-benar
+# mati, ia satu-satunya jalan mengambil dump sekali lagi tanpa laptop ber-klien
+# MySQL. Hapus bersama service Railway-nya, bukan sebelum.
+#
 # ============================================================================
 # Backup MySQL Railway + OQ-2 — gate GO butir 6 (CUTOVER_BACKLOG §2).
 #

@@ -31,7 +31,7 @@
  * Deferred to later clusters (same file): Briefs (§5/§6), Brief review, and
  * Complaints (§8).
  *
- * Reference: backend/internal/module6_account/{account,strategy}.go.
+ * Reference: archive/backend-go/internal/module6_account/{account,strategy}.go.
  */
 
 import { bi, division, notification, permission, statemachine } from '@cdps/core';
@@ -349,7 +349,7 @@ export async function reassignAM(
 
 // ===========================================================================
 // Cluster 2 — Strategy & Plan (§2 / §4), the plan-gated execution path.
-// Ported from backend/internal/module6_account/strategy.go.
+// Ported from archive/backend-go/internal/module6_account/strategy.go.
 // ===========================================================================
 
 /** STR- machine states (STATE_MACHINES §6a) and the parent-Service targets. */
@@ -1567,7 +1567,7 @@ function transitionError(res: statemachine.TransitionResult & { ok: false }): Er
 
 // ===========================================================================
 // Cluster 3 — Service → Brief breakdown (§5) and dispatch (§6).
-// Ported from backend/internal/module6_account/brief.go.
+// Ported from archive/backend-go/internal/module6_account/brief.go.
 // ===========================================================================
 
 /** Brief lifecycle + Service target states (STATE_MACHINES §6/§7). */
@@ -2008,7 +2008,7 @@ export async function listServiceBriefs(sql: Queryable, actor: Actor, serviceId:
 
 // ===========================================================================
 // Cluster 4 part A — Revision routing / AM-side review edges (§7).
-// Ported from backend/internal/module6_account/brief_review.go.
+// Ported from archive/backend-go/internal/module6_account/brief_review.go.
 // ===========================================================================
 
 /**
@@ -2204,7 +2204,7 @@ async function deriveBriefRevisionCount(sql: Queryable, briefId: string): Promis
 
 // ===========================================================================
 // Cluster 4 part B — Complaint door #2 (§8), the AM-via-WhatsApp channel.
-// Ported from backend/internal/module6_account/complaint.go.
+// Ported from archive/backend-go/internal/module6_account/complaint.go.
 // ===========================================================================
 
 /**

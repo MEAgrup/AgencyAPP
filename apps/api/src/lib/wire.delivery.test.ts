@@ -13,7 +13,7 @@
  * and the shared wire.test.ts is not edited by either account (see
  * docs/backlog/PENSIUN_GO_STATUS_DAN_TASK_PARALEL.md §3.1).
  *
- * Oracle for key names & nullability: the json tags in backend/internal/moduleN.
+ * Oracle for key names & nullability: the json tags in archive/backend-go/internal/moduleN.
  * Oracle for a key's PRESENCE (absent vs explicit null): the web-internal FE
  * type it serves — a MISSING key blanks the page, an explicit null does not
  * (O43 lesson), so where the FE declares `x | null` we send null and where it

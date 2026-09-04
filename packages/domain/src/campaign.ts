@@ -30,7 +30,7 @@
  *
  * Module 3 emits NO notification event (the catalog is FROZEN).
  *
- * Reference: backend/internal/module3_campaign/{campaign,lifecycle,read,rollup}.go.
+ * Reference: archive/backend-go/internal/module3_campaign/{campaign,lifecycle,read,rollup}.go.
  */
 
 import { bi, money, page, permission, statemachine, tz } from '@cdps/core';
