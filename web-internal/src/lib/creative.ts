@@ -300,6 +300,27 @@ export function startAssetBatch(briefId: string, assetIds: string[]): Promise<As
   });
 }
 
+// ---------------------------------------------------------------------------
+// Review & Approve Massal (C4, Revisi Sales/Creative/Performa) — the AM's side
+// of the batch screen: review many [Submitted] Assets, approve many
+// [In Review] Assets, one screen instead of one window.prompt per Asset.
+// ---------------------------------------------------------------------------
+
+/** Review many [Submitted] Assets ([In Review]) at once. All-or-nothing. */
+export function reviewAssetBatch(briefId: string, assetIds: string[]): Promise<AssetExecBatchReport> {
+  return api.post<AssetExecBatchReport>(`/briefs/${briefId}/assets/review-batch`, {
+    rows: assetIds.map((asset_id) => ({ asset_id })),
+  });
+}
+
+/** Approve many [In Review] Assets ([Approved]) at once — a separate door from
+ *  review (§4 Flow 3: review and approve are distinct actions). All-or-nothing. */
+export function approveAssetBatch(briefId: string, assetIds: string[]): Promise<AssetExecBatchReport> {
+  return api.post<AssetExecBatchReport>(`/briefs/${briefId}/assets/approve-batch`, {
+    rows: assetIds.map((asset_id) => ({ asset_id })),
+  });
+}
+
 /** distributeLinks' result: what actually landed on rows, and what didn't fit. */
 export interface DistributeLinksResult {
   /** Up to `rowCount` links, in paste order — index i goes to submittable row i. */

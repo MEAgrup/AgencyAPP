@@ -433,7 +433,7 @@ Tahap 1, satu langkah per PR, suite penuh hijau di antara keduanya.
 | C1 | Refactor `execEdgeTx` (nol perubahan perilaku) | — | ⬜ |
 | C2 | `submitAssetBatch` + `startAssetBatch` + route + wire + test | C1 | ⬜ |
 | C3 | Kartu "Submit Output Massal" + `distributeLinks` | C2 | ⬜ |
-| C4 | `reviewAssetBatch`/`approveAssetBatch` + kartu AM | C2 | ⬜ |
+| C4 | `reviewAssetBatch`/`approveAssetBatch` + kartu AM | C2 | ✅ |
 | L1 | Migrasi state `[Unrespon]` + edge (termasuk edge Kalah Kompetisi) | — | ✅ |
 | L2 | Notif katalog v14 (berkas terpisah) | L1 | ✅ |
 | L3 | `leads_unrespon_tick` + wrapper TS + route internal + pg_cron | L1, L2 | ✅ |
