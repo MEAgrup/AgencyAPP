@@ -9,6 +9,7 @@
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { money, permission, tz } from '@cdps/core';
 import { createClient, type Sql } from '@cdps/db';
+import { BadCommissionRuleError } from './commission_rule';
 import {
   type Actor,
   canEditMasterServices,
@@ -167,6 +168,56 @@ describeDb('createService', () => {
       name: 'x', standardPrice: '1000', commissionRule: 'flat Rp 100', effectiveFrom: '2020-01-01',
       planTier: 'wajib' as never,
     })).rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  it('rejects a commission_rule the calculator cannot read (O73)', async () => {
+    // The defect this test exists for: before O73 the MSL form accepted ANY
+    // non-empty string, so 56 of 96 catalog versions in production were saved
+    // with rules like "0" or free Indonesian prose. Nothing complained here —
+    // the bill arrived later, as `module0_sales: unrecognized commission_rule`
+    // in front of a salesperson whose Qualified Lead Form was filled correctly.
+    // Reject at the keyboard of the person who can fix it.
+    for (const bad of [
+      '0',
+      'komisi berdasarkan spend budget perhitungan dari omzet iklan',
+      '1%-2% dari all omzet bisnis tiktok',
+      '10 % of standard price',
+    ]) {
+      await expect(createService(sql, salesLead(), {
+        name: 'x', standardPrice: '1000', commissionRule: bad, effectiveFrom: '2020-01-01',
+      })).rejects.toBeInstanceOf(BadCommissionRuleError);
+    }
+  });
+
+  it('refuses a bad commission_rule in the DB too, not only in TS (O73)', async () => {
+    // The TS gate above is the one that produces a usable BI message, but it is
+    // not the enforcer: CLAUDE.md puts the rule in the DB so psql, a seed
+    // script, or a future client cannot route around it. If this INSERT ever
+    // succeeds, `ck_msv_commission_rule_grammar` has been dropped and the
+    // production data can rot again exactly the way it did.
+    // Made through the domain first so the row has a real parent — the point is
+    // the CHECK, not a foreign key firing before it.
+    const id = await createService(sql, salesLead(), {
+      name: 'ZZ Probe Grammar', standardPrice: '1000',
+      commissionRule: 'flat Rp 100', effectiveFrom: '2020-01-01',
+    });
+    await expect(sql`
+      insert into master_service_versions
+        (service_id, version_no, name, standard_price, commission_rule, effective_from, created_by)
+      values (${id}, 2, 'ZZ Probe Grammar', 1000, '0', DATE '2020-01-02', 'ZZ-o73')
+    `).rejects.toThrow(/ck_msv_commission_rule_grammar/);
+  });
+
+  it('accepts a version whose rule is zero commission, written canonically (O73)', async () => {
+    // "This service earns no commission" is a legitimate, common catalog entry
+    // (37 rows had it before O73 and 44 more meant it). The gate must not make
+    // it unsayable — only unsayable as a bare "0".
+    const id = await createService(sql, salesLead(), {
+      name: 'ZZ Jasa Tanpa Komisi', standardPrice: '12000000',
+      commissionRule: '0% of standard price', effectiveFrom: '2020-01-01',
+    });
+    const v = await effectiveAt(sql, id, TODAY);
+    expect(v.commissionRule).toBe('0% of standard price');
   });
 
   it('persists the tier the Sales Head chose, and the DB agrees with TS (O54)', async () => {
