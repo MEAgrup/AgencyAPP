@@ -390,6 +390,38 @@ Tulis sebagai komentar di fungsi domain.
 **Risiko:** langkah 5–6 menyentuh jalur baca setiap modul — PR terpisah dari
 Tahap 1, satu langkah per PR, suite penuh hijau di antara keduanya.
 
+### P2 — status 2026-09-04: 7 & 8 selesai, 5 & 6 SENGAJA belum dikerjakan
+
+Langkah 7 (`commissionAchievementBatch` + `computeMetricActualsBatch`,
+`packages/domain/src/finance.ts` + `salesperf.ts`) dan langkah 8
+(`health.portfolio` — predikat `canView` dipindah ke `WHERE` SQL,
+`packages/domain/src/health.ts`) selesai — keduanya perubahan internal satu
+modul, nol perubahan kontrak wire, nol perubahan perilaku (dibuktikan test
+lama yang tidak diubah tetap hijau), jadi aman dikerjakan sampai selesai.
+
+Langkah 5 dan 6 **BELUM dikerjakan** — bukan lupa, sengaja berhenti di sini
+untuk konfirmasi Nerissa dulu, karena beda kelas risiko dari 7/8:
+
+- **Langkah 5** (round-trip `withClaims`) menyentuh mekanisme yang menegakkan
+  RLS di SETIAP request baca (`packages/db/src/client.ts` — CLAUDE.md:
+  "Penegakan aturan ada di DB... RLS memikul row-scope"). Pola
+  `onconnect`+`RESET` yang diusulkan rencana berarti tidak lagi membungkus
+  tiap baca dalam `BEGIN...COMMIT` — perlu jaminan `RESET ROLE`/`RESET ALL`
+  yang tidak pernah gagal (termasuk di jalur error), atau klaim/role sesi
+  SEBELUMNYA bisa bocor ke request berikutnya yang memakai ulang koneksi yang
+  sama di pooler transaction-mode. Ini bukan lagi soal performa murni —
+  angka produksi (p95 region Vercel) yang jadi alasan langkah ini juga belum
+  bisa diukur dari sandbox (lihat catatan P1 di bawah).
+- **Langkah 6** (pagination `LIMIT`+keyset di 6 pembacaan daftar) mengubah
+  kontrak wire di 6 endpoint sekaligus (butuh update FE + `shape-parity` per
+  endpoint) — besar, bukan berisiko-keamanan, tapi tetap layak direview
+  per-PR sesuai catatan risiko rencana ini sendiri, bukan diborong sekaligus.
+
+Rekomendasi: jalankan 5 dan 6 sebagai PR terpisah SETELAH Nerissa konfirmasi
+(a) region produksi aktual sudah diverifikasi memberi dampak nyata (butuh
+akses dashboard Vercel produksi, tidak tersedia dari sesi ini), dan (b) daftar
+6 endpoint mana yang mau dipaginasi duluan.
+
 ### P1 — catatan pengukuran (2026-09-04)
 
 - **Region:** `apps/api/vercel.json` sebelumnya tanpa kunci `regions` (dikonfirmasi
@@ -430,9 +462,9 @@ Tahap 1, satu langkah per PR, suite penuh hijau di antara keduanya.
 | # | Tiket | Ketergantungan | Status |
 |---|---|---|---|
 | P1 | Performa Tahap 1 (region + indeks + `http.ts`) + ukur | — | ✅ (lihat catatan pengukuran di bawah) |
-| C1 | Refactor `execEdgeTx` (nol perubahan perilaku) | — | ⬜ |
-| C2 | `submitAssetBatch` + `startAssetBatch` + route + wire + test | C1 | ⬜ |
-| C3 | Kartu "Submit Output Massal" + `distributeLinks` | C2 | ⬜ |
+| C1 | Refactor `execEdgeTx` (nol perubahan perilaku) | — | ✅ |
+| C2 | `submitAssetBatch` + `startAssetBatch` + route + wire + test | C1 | ✅ |
+| C3 | Kartu "Submit Output Massal" + `distributeLinks` | C2 | ✅ |
 | C4 | `reviewAssetBatch`/`approveAssetBatch` + kartu AM | C2 | ✅ |
 | L1 | Migrasi state `[Unrespon]` + edge (termasuk edge Kalah Kompetisi) | — | ✅ |
 | L2 | Notif katalog v14 (berkas terpisah) | L1 | ✅ |
@@ -441,7 +473,10 @@ Tahap 1, satu langkah per PR, suite penuh hijau di antara keduanya.
 | L5 | `junkBreakdown` kecualikan `SISTEM` + `bucketOf` kenal `[Unrespon]` | L3 | ✅ |
 | E1 | `GET /leads/export` + gerbang Director + helper CSV | — | ✅ |
 | E2 | Tombol export di `DatabaseTab` + asertion route-parity | E1 | ✅ |
-| P2 | Performa Tahap 2 (round-trip, pagination, N+1, health) | P1 | ⬜ |
+| P2.7 | Batch 2 N+1 `salesperf` (`commissionAchievementBatch`, `computeMetricActualsBatch`) | P1 | ✅ |
+| P2.8 | `health.portfolio` `canView` → predikat SQL, bukan `.filter()` | P1 | ✅ |
+| P2.5 | Pangkas round-trip `withClaims` (pipeline/`onconnect`+`RESET`, `idle_timeout`) | P1 | ⬜ — lihat catatan risiko di bawah |
+| P2.6 | Pagination `LIMIT`+keyset di 6 pembacaan daftar (ubah kontrak wire + FE) | P1 | ⬜ — lihat catatan risiko di bawah |
 
 ---
 
