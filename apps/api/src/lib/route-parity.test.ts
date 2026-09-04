@@ -75,4 +75,15 @@ describe('FE↔API route parity', () => {
     expect(routes).not.toContain('GET /reminders');
     expect(routes).not.toContain('POST /reminders/scan');
   });
+
+  it('serves GET /leads/export (E1/E2)', () => {
+    // Positive assertion, not a KNOWN_GAPS entry: `web-internal`'s
+    // exportLeadsCsv() calls this with a raw fetch(), not `api.get()` (a CSV
+    // body can't go through JSON.parse), so `feCalls()`'s `CALL_RE`
+    // (`parity-scan.ts`) — which only recognizes `api.get/post/...` call
+    // sites — can never see it and this route can never be flagged missing
+    // by the generic scan either way. This line is the only thing that would
+    // catch the route file going missing.
+    expect(routes).toContain('GET /leads/export');
+  });
 });

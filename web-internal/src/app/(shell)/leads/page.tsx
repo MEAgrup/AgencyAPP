@@ -16,6 +16,7 @@ import {
   listLeads,
   listPool,
   bulkImportLeads,
+  exportLeadsCsv,
   rejectLeadDelete,
   requestLeadDelete,
   type BulkReport,
@@ -162,7 +163,7 @@ export default function LeadsPage() {
       {/* canRequestDelete mencerminkan permission.canWrite: Director selalu, sisanya
           butuh scope divisi (OD murni tanpa divisi tidak bisa menulis). */}
       {activeTab === 'database' && (
-        <DatabaseTab canRequestDelete={isDirector || (role?.division ?? '') !== ''} />
+        <DatabaseTab canRequestDelete={isDirector || (role?.division ?? '') !== ''} canExport={isDirector} />
       )}
       {activeTab === 'import' && <ImportTab />}
       {activeTab === 'deleteQueue' && (
@@ -574,10 +575,12 @@ function PoolTab({ canClaim }: { canClaim: boolean }) {
 // Database tab
 // ---------------------------------------------------------------------------
 
-function DatabaseTab({ canRequestDelete }: { canRequestDelete: boolean }) {
+function DatabaseTab({ canRequestDelete, canExport }: { canRequestDelete: boolean; canExport: boolean }) {
   const [rows, setRows] = useState<LeadRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   // Pengajuan hapus inline: alasan WAJIB, jadi tombol per baris tidak bisa
   // langsung mengirim — ia membuka satu baris input di bawah lead-nya.
@@ -639,6 +642,25 @@ function DatabaseTab({ canRequestDelete }: { canRequestDelete: boolean }) {
     }
   }
 
+  // E2: file selalu cocok dengan tabel di layar — meneruskan filter yang
+  // SUDAH DITERAPKAN (appliedQ/appliedStatus/appliedSource), bukan draft
+  // input yang belum ditekan "Terapkan".
+  async function exportCsv() {
+    setExportError(null);
+    setExporting(true);
+    try {
+      await exportLeadsCsv({
+        status: appliedStatus || undefined,
+        q: appliedQ || undefined,
+        source: appliedSource || undefined,
+      });
+    } catch (err) {
+      setExportError(errorMessage(err));
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <section className="card">
       <div className="cardHeader">
@@ -677,12 +699,21 @@ function DatabaseTab({ canRequestDelete }: { canRequestDelete: boolean }) {
             Terapkan
           </button>
         </div>
+        {canExport && (
+          <div className="field" style={{ justifyContent: 'flex-end' }}>
+            <label>&nbsp;</label>
+            <button type="button" className="btn btnSecondary btnSm" disabled={exporting} onClick={exportCsv}>
+              {exporting ? 'Mengekspor...' : 'Export CSV'}
+            </button>
+          </div>
+        )}
       </form>
       <p className="muted" style={{ fontSize: 12 }}>
         Baris yang bisa Anda baca ditentukan server (staff = data sendiri). Untuk melihat khusus lead
         Anda sendiri, buka tab <strong>Lead Saya</strong>.
       </p>
 
+      {exportError && <div className="alert alertError" role="alert">{exportError}</div>}
       {deleteError && <div className="alert alertError" role="alert">{deleteError}</div>}
       {deleteNotice && <div className="alert alertSuccess" role="status">{deleteNotice}</div>}
       {loading && <p className="muted">Memuat...</p>}
