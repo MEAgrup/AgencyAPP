@@ -12,7 +12,7 @@
 | 1 | **UAT dua engine TikTok dengan export ASLI** (SESI2 §0 baris 2) | ✅ **SELESAI** — dan menemukan 1 bug berat, lihat §1.1 |
 | 2 | **O70** — Ads Scanner baca kolom dari seksi yang salah (86% GMV hilang) | ✅ **DIPERBAIKI + dites** |
 | 3 | Rename grup sidebar → **"MEA AI Tools"** + kunci visibilitas per divisi | ✅ **SELESAI** (§2) |
-| 4 | Jawab 6 keputusan pemilik (SESI2 §2) | ⬜ belum — **+2 baru** (O71, O70-b, §3) |
+| 4 | Jawab 6 keputusan pemilik (SESI2 §2) | ⬜ belum — 2 pertanyaan BARU sesi ini (O71, O70-b) **sudah dijawab & ditindaklanjuti**, §3 |
 | 5 | Tiket kode tersisa (SESI2 §3) | ⬜ belum tersentuh |
 | 6 | Gate GO cutover → C-05 | ⬜ belum |
 | — | PR #281 masih draft (SESI2 §5) | ⬜ masih perlu keputusan Nerissa/Yohan |
@@ -68,9 +68,13 @@ di handoff SESI2 §1.2 tertutup.
 
 ### 1.4 Temuan kecil
 
-- 🟡 **O71 (BARU, belum diperbaiki)** — Report Engine membuang video yang
-  captionnya kosong (16 video, 15 di antaranya VV>0) dari penyebut. Butuh
-  keputusan pemilik karena mengubahnya menggeser angka semua laporan lama.
+- ✅ **O71 (dijawab pemilik, diperbaiki)** — Report Engine membuang video yang
+  captionnya kosong (16 video, 15 di antaranya VV>0) dari penyebut. Pemilik:
+  **tetap dihitung, diberi nama `(tanpa caption)`**. Baris kini dibuang hanya
+  bila caption DAN `ID Video` sama-sama kosong. Terverifikasi ke export asli:
+  34 dari **664** (dari 648).
+- ✅ **O70-b (dijawab pemilik)** — Ads Scanner **belum dipakai di aplikasi**,
+  jadi tak ada scan produksi yang perlu dijalankan ulang setelah O70.
 - ✅ Pesan `[berkas ini ekspor "Ringkasan data"…]` kini **menyebut nama
   berkasnya** — sebelumnya satu folder 12 berkas ditolak tanpa petunjuk yang mana.
 
@@ -111,12 +115,16 @@ Enam yang lama tidak berubah (SESI2 §2: SCR-UI-1, LT-2+LT-8, LT-1 sisa,
 KS-4/KS-4b, X-12, O65). Dua tambahan sesi ini, keduanya di `DECISIONS.md` bagian
 `Open`:
 
-| # | Pertanyaan | Kalau tidak dijawab |
-|---|---|---|
-| **O71** 🟡 | Video tanpa caption: hitung sebagai video (kunci `ID Video`) atau tetap dibuang? | Penyebut "video ada penjualan" kurang ~2,4% di tiap laporan TikTok |
-| **O70-b** 🟡 | Adakah scan Ads Scanner **produksi** sebelum 2026-09-04? Kalau ada, wajib scan ulang (`adsscanner_run` immutable) | Angka pra-O70 terbaca sebagai kebenaran di laporan klien |
+Dua pertanyaan yang lahir dari UAT sesi ini **sudah dijawab pemilik pada hari
+yang sama** dan sudah ditindaklanjuti — nol yang menggantung:
 
-Plus pertanyaan navigasi §2 (3 pasang halaman duplikat) yang menahan Sidebar IA v3.
+| # | Pertanyaan | Jawaban | Tindak lanjut |
+|---|---|---|---|
+| **O71** | Video tanpa caption: hitung atau buang? | **Hitung**, beri nama `(tanpa caption)` | ✅ dibangun + 3 tes |
+| **O70-b** | Ada scan Ads Scanner produksi sebelum 2026-09-04? | **Belum dipakai di aplikasi** | ✅ nol pekerjaan retroaktif |
+
+Yang masih menahan: 6 keputusan lama SESI2 §2, plus pertanyaan navigasi §2
+(3 pasang halaman duplikat) yang menahan Sidebar IA v3.
 
 ---
 

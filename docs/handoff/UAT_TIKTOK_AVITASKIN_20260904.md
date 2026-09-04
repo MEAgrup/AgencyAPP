@@ -179,16 +179,16 @@ benar**"*. Data nyata itu sekarang ada, lengkap dengan oracle silang-berkasnya.
 - `adsscanner.domain` **37/37** lolos di DB lokal.
 - Jalur produksi diulang setelah perbaikan: `ringkasan.totalGmv` = **26.560.049**.
 
-> ⚠️ **Scan yang sudah tersimpan sebelum perbaikan ini memuat angka yang salah.**
-> Di live baru ada scan hasil uji; kalau ternyata ada scan produksi sebelum
-> 2026-09-04, ia harus dijalankan ulang — `adsscanner_run` immutable (house rule
-> #3), jadi caranya scan baru, bukan update.
+> ✅ **Tidak ada pekerjaan retroaktif.** Pemilik mengonfirmasi (2026-09-04) Ads
+> Scanner **belum dipakai di aplikasi** — baris `adsscanner_run` yang ada hanya
+> hasil uji, jadi tak ada scan produksi yang perlu dijalankan ulang (O70-b,
+> `DECISIONS.md`).
 
 ---
 
 ## 4. Dua temuan kecil
 
-### 4.1 🟡 16 video hilang dari penyebut Report Engine (belum diperbaiki)
+### 4.1 ✅ 16 video hilang dari penyebut Report Engine (O71 — dijawab & diperbaiki)
 
 `report/metrik.ts:videoRows` membuang baris yang `Informasi Video`-nya kosong
 (`if (!judul) continue;`). Di data Avitaskin ada **16 video tanpa caption, 15 di
@@ -197,9 +197,15 @@ penjualan" seharusnya "34 dari **664**" (5,25% → 5,12%).
 
 Bukan bug parsing: baris itu memang tak bercaption. Tapi caption adalah judul,
 bukan identitas — `ID Video` yang identitas, dan ia terisi di semua 664 baris.
-**Belum diubah**: mengganti kunci "baris ini video atau bukan" dari caption ke
-`ID Video` menggeser angka setiap laporan yang pernah dibuat, jadi itu keputusan
-pemilik, bukan keputusan sesi UAT. Diusulkan sebagai **O71** (§5).
+
+**Keputusan pemilik 2026-09-04: video tanpa caption TETAP dihitung, diberi nama
+`(tanpa caption)`.** Sudah dibangun: baris dibuang hanya bila caption **dan**
+`ID Video` sama-sama kosong (baris keterangan/tooltip — target asli filter itu).
+Diverifikasi ulang ke export asli: **34 dari 664** (225 toko + 439 afiliasi,
+persis jumlah baris berkasnya). Aturan barunya sama dengan
+`baseline/metrik.ts:video` yang sudah memakai kunci itu sejak awal, dan
+placeholder-nya mengikuti `'(tanpa judul)'` pada kreatif iklan di file yang sama.
+3 tes baru.
 
 ### 4.2 ✅ Pesan "Ringkasan data" kini menyebut nama berkasnya (diperbaiki)
 
@@ -216,10 +222,13 @@ disengaja terhadap salah-unduh yang paling sering terjadi.
 
 ## 5. Untuk pemilik
 
-| # | Pertanyaan | Kalau tidak dijawab |
-|---|---|---|
-| **O71** 🟡 | Video tanpa caption: hitung sebagai video (kunci `ID Video`) atau tetap dibuang? | Penyebut "video ada penjualan" tetap kurang ~2,4% di setiap laporan TikTok |
-| **O70-b** 🟡 | Apakah ada scan Ads Scanner PRODUKSI sebelum 2026-09-04 yang perlu dijalankan ulang? | Angka salah (§3.2) tetap terbaca sebagai kebenaran di laporan klien |
+**Kedua pertanyaan dokumen ini sudah dijawab pada hari yang sama** — tak ada yang
+menggantung dari UAT ini:
+
+| # | Pertanyaan | Jawaban pemilik | Tindak lanjut |
+|---|---|---|---|
+| **O71** | Video tanpa caption: hitung atau buang? | **Hitung**, beri nama `(tanpa caption)` | ✅ dibangun + 3 tes (§4.1) |
+| **O70-b** | Ada scan Ads Scanner produksi sebelum 2026-09-04? | **Belum dipakai di aplikasi** | ✅ nol pekerjaan retroaktif |
 
 Kosakata status produk TikTok kini **terverifikasi data nyata**: `Aktif` /
 `Nonaktif` di export Analitik Produk (dan `Active` di export produk yang lain).
