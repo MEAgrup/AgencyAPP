@@ -300,6 +300,32 @@ export function startAssetBatch(briefId: string, assetIds: string[]): Promise<As
   });
 }
 
+/** distributeLinks' result: what actually landed on rows, and what didn't fit. */
+export interface DistributeLinksResult {
+  /** Up to `rowCount` links, in paste order — index i goes to submittable row i. */
+  links: string[];
+  /** Total non-blank lines found in the pasted text. */
+  totalPasted: number;
+  /** How many pasted links had no row left to go to (`totalPasted - links.length`, floored at 0). */
+  leftover: number;
+}
+
+/**
+ * distributeLinks (C3) splits pasted text into one link per line — trimmed,
+ * blank lines dropped, capped at `rowCount` — so pasting 30 links into a
+ * textarea fills 30 submit rows in one paste instead of one field at a time.
+ * Pure and DOM-free on purpose: this repo tests UI logic this way (no jsdom
+ * dependency), not by simulating the paste event itself.
+ */
+export function distributeLinks(pasted: string, rowCount: number): DistributeLinksResult {
+  const all = pasted
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const links = all.slice(0, Math.max(0, rowCount));
+  return { links, totalPasted: all.length, leftover: Math.max(0, all.length - rowCount) };
+}
+
 // module7_creative.MyAssetQueueItem — the personal Asset queue (M7 §3 Rule 2:
 // "all Assets assigned to them, across all Briefs/clients, sorted by due date").
 // due_date / sla_* arrive as JSON `null` when unset (not omitted) — this is a

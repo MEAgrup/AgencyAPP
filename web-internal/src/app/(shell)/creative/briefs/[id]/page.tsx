@@ -10,12 +10,16 @@ import EmployeePicker from '@/components/EmployeePicker';
 import {
   CREATIVE_DIVISION,
   createAssetBatch,
+  distributeLinks,
   getBrief,
   isCreativeDivision,
   isDirector,
   isODOnly,
   listBriefAssets,
+  startAssetBatch,
+  submitAssetBatch,
   type Asset,
+  type AssetExecBatchReport,
   type Brief,
 } from '@/lib/creative';
 import StatusBadge from '@/components/StatusBadge';
@@ -60,6 +64,17 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createMessage, setCreateMessage] = useState<string | null>(null);
+
+  // Submit Output Massal (C3, Revisi Sales/Creative/Performa): satu layar, semua
+  // link Asset [In Progress] sekaligus — bukan window.prompt satu per satu.
+  const [pasteText, setPasteText] = useState('');
+  const [pasteCounter, setPasteCounter] = useState<string | null>(null);
+  const [linkInputs, setLinkInputs] = useState<Record<string, string>>({});
+  const [massalSubmitting, setMassalSubmitting] = useState(false);
+  const [massalError, setMassalError] = useState<string | null>(null);
+  const [massalReport, setMassalReport] = useState<AssetExecBatchReport | null>(null);
+  const [startSubmitting, setStartSubmitting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -155,6 +170,76 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
       setCreateError(errorMessage(err));
     } finally {
       setCreateSubmitting(false);
+    }
+  }
+
+  // Asset yang siap disubmit ([In Progress]), urut sequence_no — sama urutan
+  // dengan tabel Asset di atas.
+  const submittableAssets = (assets ?? [])
+    .filter((a) => a.status === '[In Progress]')
+    .sort((a, b) => a.sequence_no - b.sequence_no);
+  const todoAssets = (assets ?? [])
+    .filter((a) => a.status === '[To Do]')
+    .sort((a, b) => a.sequence_no - b.sequence_no);
+  const pastedLinkCount = pasteText.split(/\r?\n/).map((s) => s.trim()).filter((s) => s.length > 0).length;
+
+  function handleDistribute() {
+    const result = distributeLinks(pasteText, submittableAssets.length);
+    const next: Record<string, string> = { ...linkInputs };
+    submittableAssets.forEach((a, i) => {
+      if (result.links[i] !== undefined) {
+        next[a.id] = result.links[i];
+      }
+    });
+    setLinkInputs(next);
+    const placed = result.links.length;
+    setPasteCounter(
+      result.leftover > 0
+        ? `${placed} link ditempel ke ${placed} dari ${submittableAssets.length} baris — ${result.leftover} link berlebih diabaikan.`
+        : `${placed} link ditempel ke ${placed} dari ${submittableAssets.length} baris.`,
+    );
+  }
+
+  async function handleSubmitMassal() {
+    setMassalError(null);
+    setMassalReport(null);
+    // Hanya baris yang sudah diisi — mengosongkan sebuah baris berarti "belum
+    // disubmit sekarang", bukan error; server tetap all-or-nothing atas baris
+    // yang DIKIRIM.
+    const lines = submittableAssets
+      .filter((a) => (linkInputs[a.id] ?? '').trim() !== '')
+      .map((a) => ({ asset_id: a.id, output_link: linkInputs[a.id] }));
+    if (lines.length === 0) {
+      setMassalError('[data tidak lengkap, silahkan lengkapi semua pertanyaan wajib!]');
+      return;
+    }
+    setMassalSubmitting(true);
+    try {
+      const report = await submitAssetBatch(id, lines);
+      setMassalReport(report);
+      if (report.rejected === 0) {
+        setLinkInputs({});
+        setPasteText('');
+        setPasteCounter(null);
+        await load();
+      }
+    } catch (err) {
+      setMassalError(errorMessage(err));
+    } finally {
+      setMassalSubmitting(false);
+    }
+  }
+
+  async function handleStartBatch() {
+    setStartError(null);
+    setStartSubmitting(true);
+    try {
+      await startAssetBatch(id, todoAssets.map((a) => a.id));
+      await load();
+    } catch (err) {
+      setStartError(errorMessage(err));
+    } finally {
+      setStartSubmitting(false);
     }
   }
 
@@ -299,6 +384,115 @@ export default function CreativeBriefDetailPage({ params }: { params: Promise<{ 
           </div>
         )}
       </section>
+
+      {canCreateAsset && (todoAssets.length > 0 || submittableAssets.length > 0) && (
+        <section className="card">
+          <div className="cardHeader">
+            <h2>Submit Output Massal</h2>
+          </div>
+          <p className="muted" style={{ fontSize: 13 }}>
+            Isi link output semua Asset yang sedang dikerjakan dalam satu layar, lalu submit sekali —
+            bukan satu prompt per Asset.
+          </p>
+
+          {todoAssets.length > 0 && (
+            <div className="stack" style={{ marginBottom: 16 }}>
+              <p className="muted" style={{ fontSize: 13 }}>
+                {todoAssets.length} Asset masih <StatusBadge status="[To Do]" /> — mulai kerjakan dulu
+                sebelum bisa mengisi link output.
+              </p>
+              {startError && <div className="alert alertError" role="alert">{startError}</div>}
+              <button type="button" className="btn btnSecondary btnSm" disabled={startSubmitting} onClick={handleStartBatch}>
+                {startSubmitting ? 'Memproses...' : `Mulai Kerjakan (${todoAssets.length} Asset)`}
+              </button>
+            </div>
+          )}
+
+          {submittableAssets.length > 0 && (
+            <>
+              <div className="field">
+                <label htmlFor="paste-links">Tempel semua link (satu per baris)</label>
+                <textarea
+                  id="paste-links"
+                  rows={5}
+                  value={pasteText}
+                  onChange={(e) => setPasteText(e.target.value)}
+                  placeholder={'https://drive.google.com/...\nhttps://drive.google.com/...'}
+                />
+                <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 6 }}>
+                  <button type="button" className="btn btnSecondary btnSm" onClick={handleDistribute} disabled={pastedLinkCount === 0}>
+                    Sebar ke baris
+                  </button>
+                  {pasteCounter && <span className="muted" style={{ fontSize: 12 }}>{pasteCounter}</span>}
+                </div>
+              </div>
+
+              {massalError && <div className="alert alertError" role="alert">{massalError}</div>}
+              {massalReport && massalReport.rejected > 0 && (
+                <div className="alert alertError" role="alert">
+                  <div>{massalReport.rejected} baris ditolak — tidak ada yang tersimpan, perbaiki lalu submit ulang:</div>
+                  <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                    {massalReport.rejections.map((r) => (
+                      <li key={r.asset_id}>Baris {r.row_number} ({r.asset_id}): {r.reason}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {massalReport && massalReport.rejected === 0 && (
+                <div className="alert alertSuccess" role="status">
+                  {massalReport.applied} Asset berhasil disubmit.
+                </div>
+              )}
+
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Urutan</th>
+                      <th>ID</th>
+                      <th>PIC</th>
+                      <th>Link Output</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {submittableAssets.map((a) => {
+                      const val = linkInputs[a.id] ?? '';
+                      return (
+                        <tr key={a.id}>
+                          <td>{a.sequence_no}</td>
+                          <td><Link href={`/creative/assets/${a.id}`}>{a.id}</Link></td>
+                          <td>{a.assigned_pic || '—'}</td>
+                          <td>
+                            <input
+                              aria-label={`Link output ${a.id}`}
+                              type="text"
+                              value={val}
+                              onChange={(e) => setLinkInputs((prev) => ({ ...prev, [a.id]: e.target.value }))}
+                              placeholder="https://..."
+                              style={val !== '' && !isHttpUrl(val) ? { borderColor: 'var(--color-warning, #b58105)' } : undefined}
+                            />
+                            {val !== '' && !isHttpUrl(val) && (
+                              <div className="muted" style={{ fontSize: 11 }}>Sepertinya bukan link — server tidak memblokir ini, hanya pengingat.</div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
+                <button type="button" className="btn btnPrimary" disabled={massalSubmitting} onClick={handleSubmitMassal}>
+                  {massalSubmitting
+                    ? 'Mengirim...'
+                    : `Submit (${submittableAssets.filter((a) => (linkInputs[a.id] ?? '').trim() !== '').length} baris terisi)`}
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
 
       {canCreateAsset && (
         <section className="card">
