@@ -12,6 +12,7 @@ export * from './bench';
 export * from './detect';
 export * from './metrik';
 export * from './skor';
+export * from './tahap';
 export * from './insight';
 export * from './insight-edit';
 export * from './payload';

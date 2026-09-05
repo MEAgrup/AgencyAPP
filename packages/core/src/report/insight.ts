@@ -12,6 +12,7 @@
 import { dec, pct, rp } from '../baseline/angka';
 import type { ReportMetrics } from './metrik';
 import type { Skor } from './skor';
+import { ALL_TAHAP, TAHAP_LABEL, type TahapNarasi, type TahapReport } from './tahap';
 import type { PeriodeTipe, Rekomendasi, ReportBench } from './types';
 
 export interface Insights {
@@ -21,6 +22,8 @@ export interface Insights {
   rekomendasiSedang: Rekomendasi[];
   outlook: string;
   indikator: { nama: string; target: string }[];
+  /** R3 — one paragraph per buyer-journey stage. Always three entries, in order. */
+  tahapNarasi: TahapNarasi[];
 }
 
 interface Kata { lalu: string; depan: string; ini: string }
@@ -35,7 +38,7 @@ export function kataPeriode(tipe: PeriodeTipe): Kata {
 const num = (v: number | null | undefined): string =>
   v == null || !isFinite(v) ? '—' : Math.round(v).toLocaleString('id-ID');
 
-export function buildInsights(M: ReportMetrics, sk: Skor, B: ReportBench, tipe: PeriodeTipe): Insights {
+export function buildInsights(M: ReportMetrics, sk: Skor, B: ReportBench, tipe: PeriodeTipe, T: TahapReport): Insights {
   const K = kataPeriode(tipe);
   const poin: string[] = [];
   const tinggi: Rekomendasi[] = [];
@@ -220,5 +223,32 @@ export function buildInsights(M: ReportMetrics, sk: Skor, B: ReportBench, tipe: 
   const delta = k.mom.gmv != null ? ` (${k.mom.gmv >= 0 ? '+' : ''}${pct(k.mom.gmv, 2)} vs ${K.lalu})` : '';
   const ringkasan = `GMV ${rp(k.gmv)} dari ${num(k.pesanan)} pesanan dan ${num(k.pembeli)} pembeli${delta}. Skor performa ${dec(sk.total, 1)}/10 — ${sk.label}.`;
 
-  return { ringkasan, poin, rekomendasiTinggi: tinggi, rekomendasiSedang: sedang, outlook, indikator };
+  return { ringkasan, poin, rekomendasiTinggi: tinggi, rekomendasiSedang: sedang, outlook, indikator, tahapNarasi: narasiTahap(T, K) };
+}
+
+/**
+ * The machine's first draft of the per-stage prose — a starting point the AM
+ * rewrites, not a verdict.
+ *
+ * It stays deliberately thin: it states what the stage's own numbers are, names
+ * the one figure a reader would otherwise have to hunt for, and stops. Anything
+ * richer would be the engine guessing at context it does not have (why the
+ * budget was pointed where it was, what the client agreed to this period) — and
+ * a confident-sounding wrong paragraph is harder for an AM to fix than an
+ * obviously bare one. A stage with no numbers at all says so plainly rather
+ * than filling the space.
+ */
+function narasiTahap(T: TahapReport, K: Kata): TahapNarasi[] {
+  return ALL_TAHAP.map((key) => {
+    const b = T.blok.find((x) => x.key === key);
+    const terukur = (b?.metrik ?? []).filter((x) => x.nilai != null);
+    const fokus = b?.fokus ? ` Tahap ini adalah fokus kerja ${K.ini}.` : '';
+    const belanja = b?.belanja == null
+      ? ''
+      : ` Investasi media di tahap ini ${rp(b.belanja)}${b.belanjaPersen == null ? '' : ` (${pct(b.belanjaPersen, 1)} dari total)`}.`;
+    const teks = terukur.length === 0
+      ? `Belum ada angka yang bisa dibaca untuk tahap ini pada periode ini — berkas sumbernya belum diunggah.${fokus}`
+      : `${terukur.length} metrik terbaca di tahap ini pada periode ini.${belanja}${fokus}`;
+    return { tahap: key, judul: `Catatan tahap ${TAHAP_LABEL[key]}`, teks };
+  });
 }

@@ -78,7 +78,14 @@ export interface Indikator {
   target: string;
 }
 
-/** The six editable fields — the same shape the engine payload uses. */
+/** R3 — the AM's paragraph for one buyer-journey stage. */
+export interface TahapNarasi {
+  tahap: TahapKey;
+  judul: string;
+  teks: string;
+}
+
+/** The seven editable fields — the same shape the engine payload uses. */
 export interface ReportInsight {
   ringkasan: string;
   poin: string[];
@@ -86,6 +93,7 @@ export interface ReportInsight {
   rekomendasi_sedang: Rekomendasi[];
   outlook: string;
   indikator: Indikator[];
+  tahap_narasi: TahapNarasi[];
 }
 
 export interface ReportInsightRevisi {
@@ -174,8 +182,44 @@ export function getClientReport(reportId: number): Promise<ClientReportDetail> {
  * JSON). `internal` carries MEA's audit blocks; `klien` is what the client
  * receives. The route resolves the actor from the session cookie.
  */
-export function reportHtmlUrl(reportId: number, mode: ReportMode): string {
-  return `/api/v1/reports/${reportId}/html?mode=${mode}`;
+/**
+ * The rendered report's URL.
+ *
+ * `download` is what separates the two buttons the panel shows per mode.
+ * Without it the browser opens the document in a tab (a preview); with it the
+ * API answers `Content-Disposition: attachment` and the file lands in the
+ * downloads folder under a name that says which mode it is. The button labelled
+ * "Unduh" used to do the former, which is why both now exist explicitly.
+ */
+export function reportHtmlUrl(reportId: number, mode: ReportMode, download = false): string {
+  return `/api/v1/reports/${reportId}/html?mode=${mode}${download ? '&download=1' : ''}`;
+}
+
+/** R3 — the three buyer-journey stages. `''` in the UI means "not set". */
+export type TahapKey = 'awareness' | 'consideration' | 'conversion';
+
+export const TAHAP_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '', label: 'Belum ditetapkan' },
+  { value: 'awareness', label: 'Awareness' },
+  { value: 'consideration', label: 'Consideration' },
+  { value: 'conversion', label: 'Conversion' },
+];
+
+export function labelTahap(v: string | null): string {
+  return TAHAP_OPTIONS.find((o) => o.value === (v ?? ''))?.label ?? (v ?? '');
+}
+
+/**
+ * PUT /clients/{id}/platforms/{pid}/tahap-fokus — set or clear the store's stage.
+ *
+ * Sent as `''` to clear, because that is what the blank `<option>` submits and
+ * translating it here would hide the one state the field must be able to return
+ * to. The server echoes what it stored, so the caller renders the truth rather
+ * than its own optimism.
+ */
+export function setTahapFokus(clientId: string, platformId: number, tahap: string): Promise<{ tahap_fokus: string | null }> {
+  return api.put<{ tahap_fokus: string | null }>(
+    `/clients/${clientId}/platforms/${platformId}/tahap-fokus`, { tahap });
 }
 
 // ---------------------------------------------------------------------------
@@ -203,6 +247,7 @@ export function saveReportInsight(
     rekomendasi_sedang: insight.rekomendasi_sedang,
     outlook: insight.outlook,
     indikator: insight.indikator,
+    tahap_narasi: insight.tahap_narasi,
     catatan_revisi: catatanRevisi ?? null,
   });
 }

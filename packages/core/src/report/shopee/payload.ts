@@ -146,6 +146,11 @@ export function buildShopeeReportPayload(M: ShopeeMetrics, sk: Skor, I: Insights
       rekomendasi_sedang: I.rekomendasiSedang,
       outlook: I.outlook,
       indikator: I.indikator,
+      // Always present, always `[]` for now — see `insight.ts`. The KEY has to
+      // exist: `ShopeePayloadInsight` and `PayloadInsight` being the same shape
+      // is what lets one editor and one stored revision serve both engines, and
+      // a missing key is worse than an empty one (O43).
+      tahap_narasi: I.tahapNarasi,
     },
     benchmark_versi: opts.benchmarkVersi,
     benchmark_dipakai: { ...opts.bench },

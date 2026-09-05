@@ -2494,6 +2494,9 @@ export interface PlatformWire {
   store_link?: string;
   managed_since: string | null;
   active: boolean;
+  /** R3 — 'awareness' | 'consideration' | 'conversion', or null when the AM has not set one.
+   *  Explicit null, never omitted: a missing key blanks the selector on a 200 (O43). */
+  tahap_fokus: string | null;
 }
 
 /** client_sales_allocations row — web-internal's `Allocation` (lib/clients.ts). */
@@ -2589,6 +2592,7 @@ export function clientDetailToWire(c: sales.ClientDetail): ClientDetailWire {
       store_link: p.storeLink ?? undefined,
       managed_since: p.managedSince ? tz.dateString(p.managedSince) : null,
       active: p.active,
+      tahap_fokus: p.tahapFokus ?? null,
     })),
     sales_allocation: c.allocations.map((a) => ({
       salesperson_id: a.salespersonId,
@@ -6368,6 +6372,13 @@ export interface ReportIndikatorWire {
   target: string;
 }
 
+/** R3 — one paragraph of stage prose (`client_report_insight.tahap_narasi`). */
+export interface ReportTahapNarasiWire {
+  tahap: string;
+  judul: string;
+  teks: string;
+}
+
 export interface ReportInsightWire {
   ringkasan: string;
   poin: string[];
@@ -6375,6 +6386,7 @@ export interface ReportInsightWire {
   rekomendasi_sedang: ReportRekomendasiWire[];
   outlook: string;
   indikator: ReportIndikatorWire[];
+  tahap_narasi: ReportTahapNarasiWire[];
 }
 
 export interface ReportInsightRevisiWire {
@@ -6413,6 +6425,7 @@ function reportInsightToWire(i: report.ReportInsightRevisi['insight']): ReportIn
     rekomendasi_sedang: i.rekomendasi_sedang.map((r) => ({ ...r })),
     outlook: i.outlook,
     indikator: i.indikator.map((m) => ({ ...m })),
+    tahap_narasi: i.tahap_narasi.map((n) => ({ ...n })),
   };
 }
 
@@ -6471,6 +6484,7 @@ export interface InsightDraftBody {
   rekomendasi_sedang?: ReportRekomendasiWire[];
   outlook?: string;
   indikator?: ReportIndikatorWire[];
+  tahap_narasi?: ReportTahapNarasiWire[];
 }
 
 export function toInsightDraft(b: InsightDraftBody): coreReport.InsightDraft {
@@ -6484,6 +6498,7 @@ export function toInsightDraft(b: InsightDraftBody): coreReport.InsightDraft {
     rekomendasi_sedang: b.rekomendasi_sedang,
     outlook: b.outlook,
     indikator: b.indikator,
+    tahap_narasi: b.tahap_narasi,
   };
 }
 

@@ -47,7 +47,7 @@
  * RLS repeats the same predicate at the row level (migrasi 20260908010000), so a
  * mistake here is caught there and vice versa.
  */
-import { permission, report } from '@cdps/core';
+import { permission, report, reportShopee } from '@cdps/core';
 import { executors, withTransaction, type Queryable, type Sql } from '@cdps/db';
 import * as board from './board';
 import {
@@ -220,8 +220,8 @@ export async function listReports(sql: Queryable, actor: Actor): Promise<PortalR
 export async function reportHtml(sql: Queryable, actor: Actor, reportId: number): Promise<string> {
   const scope = contactScope(actor);
   const rows = await sql<Record<string, unknown>[]>`
-    select r.payload, i.ringkasan, i.poin, i.rekomendasi_tinggi, i.rekomendasi_sedang,
-           i.outlook, i.indikator
+    select r.payload, r.payload_schema, i.ringkasan, i.poin, i.rekomendasi_tinggi, i.rekomendasi_sedang,
+           i.outlook, i.indikator, i.tahap_narasi
       from client_reports r
       join client_report_publikasi p on p.report_id = r.id
       join client_report_insight i
@@ -238,9 +238,21 @@ export async function reportHtml(sql: Queryable, actor: Actor, reportId: number)
     rekomendasi_sedang: (r.rekomendasi_sedang ?? []) as report.PayloadInsight['rekomendasi_sedang'],
     outlook: r.outlook as string,
     indikator: (r.indikator ?? []) as report.PayloadInsight['indikator'],
+    // Empty for revisions written before R3 — see `report.rowToInsightRevisi`.
+    tahap_narasi: (r.tahap_narasi ?? []) as report.PayloadInsight['tahap_narasi'],
   };
   // 'klien' is hardcoded, not a parameter: there is no argument a client request
   // could carry that should ever produce the internal render.
+  //
+  // The SCHEMA dispatch mirrors `report.renderReport` deliberately. Without it
+  // every published Shopee report reached TikTok's renderer, which reads keys
+  // (`kpi.harian`, `kanal.items`) a Shopee payload does not have — so the one
+  // page the client came to the Portal for threw instead of rendering. Rows that
+  // predate the column default to the TikTok engine, exactly as they do
+  // internally.
+  if (r.payload_schema === 'cdps.report.shopee.v1') {
+    return reportShopee.renderReportHtml(r.payload as reportShopee.ShopeeReportPayload, 'klien', insight);
+  }
   return report.renderReportHtml(r.payload as report.ReportPayload, 'klien', insight);
 }
 

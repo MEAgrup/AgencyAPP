@@ -13,10 +13,20 @@ import type { Insights } from './insight';
 import type { ProdukRec, ReportMetrics } from './metrik';
 import { ALL_KUADRAN } from './metrik';
 import type { Skor } from './skor';
+import type { TahapReport } from './tahap';
 import { ALL_TTAM_TYPES, type PeriodeTipe, type ReportBench, type ReportFileType, type Rentang } from './types';
 
-/** The current report-engine version, stamped on every stored report (#4). */
-export const ENGINE_VERSI = 'cdps-report-v1';
+/**
+ * The current report-engine version, stamped on every stored report (#4).
+ *
+ * `v1.1` = R3, the buyer-journey layer. The `schema` string stays
+ * `cdps.report.tiktok.v1` because the change is purely ADDITIVE (one new key);
+ * the renderer and the Health module read the same v1 keys they always did.
+ * What the bump buys is the ability to tell, from a stored row alone, whether
+ * `payload.tahap` should be there — a v1 report predates the layer and its
+ * payload is frozen, so it can never be backfilled.
+ */
+export const ENGINE_VERSI = 'cdps-report-v1.1';
 
 export interface KlienIdentitas {
   nama: string | null;
@@ -42,6 +52,12 @@ export interface PayloadOptions {
   benchDasar: ReportBench;
   benchmarkVersi: number | null;
   slots: Partial<Record<ReportFileType, boolean>>;
+  /**
+   * R3 — the buyer-journey layer, already built by `buildTahap`. Passed in
+   * rather than built here so this module stays what its name says: the shape
+   * of the stored object, with no arithmetic of its own.
+   */
+  tahap: TahapReport;
 }
 
 const r = (v: number | null | undefined): number | null =>
@@ -166,6 +182,29 @@ export function buildReportPayload(M: ReportMetrics, sk: Skor, I: Insights, opts
         }
       : null,
     skor: { total: sk.total, label: sk.label, dimensi: sk.dimensi.map((d) => ({ key: d.key, label: d.label, bobot: d.bobot, skor: d.skor, catatan: d.catatan })) },
+    // R3 — the same numbers, re-read as Awareness → Consideration → Conversion.
+    // `fokus` is the ONE human decision in the whole payload, and it is a label,
+    // never a figure: it is stamped from `client_platforms.tahap_fokus` at
+    // generation time so moving a shop to the next stage next month cannot
+    // retroactively change what an already-issued report claims.
+    tahap: {
+      fokus: opts.tahap.fokus,
+      belanja_total: opts.tahap.belanjaTotal,
+      konversi_total: {
+        nilai: opts.tahap.konversiTotal.nilai,
+        band: { ...opts.tahap.konversiTotal.band },
+        flag: opts.tahap.konversiTotal.flag,
+      },
+      funnel: opts.tahap.funnel.map((f) => ({
+        key: f.key, label: f.label, nilai: f.nilai, lolos: f.lolos, lolos_dari: f.lolosDari,
+        band: f.band ? { good: f.band.good, warn: f.band.warn } : null, flag: f.flag, catatan: f.catatan,
+      })),
+      blok: opts.tahap.blok.map((b) => ({
+        key: b.key, label: b.label, tujuan: b.tujuan, fokus: b.fokus,
+        belanja: b.belanja, belanja_persen: b.belanjaPersen,
+        metrik: b.metrik.map((x) => ({ key: x.key, label: x.label, nilai: x.nilai, satuan: x.satuan, flag: x.flag })),
+      })),
+    },
     insight: {
       ringkasan: I.ringkasan,
       poin: I.poin,
@@ -173,6 +212,12 @@ export function buildReportPayload(M: ReportMetrics, sk: Skor, I: Insights, opts
       rekomendasi_sedang: I.rekomendasiSedang,
       outlook: I.outlook,
       indikator: I.indikator,
+      // R3 — the per-stage prose, in the SAME block as every other narrative
+      // field. It belongs here for one reason: `PayloadInsight` is the contract
+      // "what the engine writes is what a revision must keep", and a stage
+      // narrative the AM can rewrite but the engine cannot draft would break it
+      // — reset-to-machine would have nothing to copy back.
+      tahap_narasi: I.tahapNarasi,
     },
     benchmark_versi: opts.benchmarkVersi,
     benchmark_dipakai: { ...opts.bench },

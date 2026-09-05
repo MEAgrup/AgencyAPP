@@ -17,6 +17,16 @@
  * period type, and the report list with the insight editor and publication
  * badges below.
  *
+ * ## Tahap fokus (R3)
+ *
+ * The store picker carries one more field: which buyer-journey stage this shop
+ * is chasing. It lives HERE, beside the store it describes, because it is read
+ * at generation time and stamped into the report — an AM who is about to press
+ * "Buat Laporan" is exactly the person who should see, and be able to correct,
+ * what the report is about to claim. It is saved immediately on change rather
+ * than with the report: it describes the SHOP, not this one report, and the next
+ * report should inherit it without anyone retyping it.
+ *
  * The engine is CHOSEN, not inferred. `client_platforms.platform` is free text
  * (M4 rows can even read "TikTok Shop, Shopee"), and neither report endpoint
  * checks it against the engine — so guessing silently would post a Shopee
@@ -32,6 +42,8 @@ import {
   getReportInsight,
   labelStatusPublikasi,
   reportHtmlUrl,
+  setTahapFokus,
+  TAHAP_OPTIONS,
   STATUS_DICABUT,
   STATUS_TERBIT,
   type ClientReportSummary,
@@ -102,6 +114,12 @@ export default function ReportPanel({ clientId, platforms }: { clientId: string;
   const [statusMap, setStatusMap] = useState<Record<number, string>>({});
 
   const [platformId, setPlatformId] = useState<number>(active[0]?.client_platform_id ?? 0);
+  // Seeded from the server and then owned locally, keyed by store: switching
+  // stores must show THAT store's stage, not the last one looked at.
+  const [tahapMap, setTahapMap] = useState<Record<number, string>>(
+    () => Object.fromEntries(platforms.map((p) => [p.client_platform_id, p.tahap_fokus ?? ''])));
+  const [tahapBusy, setTahapBusy] = useState(false);
+  const [tahapErr, setTahapErr] = useState<string | null>(null);
   const [engine, setEngine] = useState<Engine>(engineFor(active[0]?.platform));
   const [tipe, setTipe] = useState<PeriodeTipe>('bulanan');
   const [files, setFiles] = useState<UploadedFile[]>([]);
@@ -225,6 +243,40 @@ export default function ReportPanel({ clientId, platforms }: { clientId: string;
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="field">
+            <label>Tahap fokus toko ini</label>
+            <select
+              value={tahapMap[platformId] ?? ''}
+              disabled={saving || tahapBusy || !platformId}
+              onChange={(e) => {
+                const nilai = e.target.value;
+                const sebelum = tahapMap[platformId] ?? '';
+                // Optimistic, then reconciled with what the server echoes back —
+                // and rolled back on failure, so the dropdown never shows a stage
+                // the report will not actually carry.
+                setTahapMap((m) => ({ ...m, [platformId]: nilai }));
+                setTahapBusy(true);
+                setTahapErr(null);
+                setTahapFokus(clientId, platformId, nilai)
+                  .then((r) => setTahapMap((m) => ({ ...m, [platformId]: r.tahap_fokus ?? '' })))
+                  .catch((x) => {
+                    setTahapMap((m) => ({ ...m, [platformId]: sebelum }));
+                    setTahapErr(errorMessage(x));
+                  })
+                  .finally(() => setTahapBusy(false));
+              }}
+            >
+              {TAHAP_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            <div className="note" style={{ fontSize: 12 }}>
+              Dipakai laporan berikutnya untuk menandai tahap mana yang sedang dikejar.
+              Laporan yang sudah dibuat tidak ikut berubah.
+            </div>
+            {tahapErr && <div className="alert alertError" style={{ fontSize: 13 }}>{tahapErr}</div>}
           </div>
 
           <div className="field">
@@ -369,7 +421,7 @@ export default function ReportPanel({ clientId, platforms }: { clientId: string;
                   <th>Skor</th>
                   <th>GMV / bulan (run-rate)</th>
                   <th>Klien</th>
-                  <th>Unduh</th>
+                  <th>Lihat / Unduh</th>
                 </tr>
               </thead>
               <tbody>
@@ -400,8 +452,14 @@ export default function ReportPanel({ clientId, platforms }: { clientId: string;
                       </button>
                     </td>
                     <td style={{ whiteSpace: 'nowrap' }}>
-                      <a className="btn btnGhost btnSm" href={reportHtmlUrl(r.id, 'klien')} target="_blank" rel="noreferrer">Klien</a>{' '}
-                      <a className="btn btnGhost btnSm" href={reportHtmlUrl(r.id, 'internal')} target="_blank" rel="noreferrer">Internal</a>
+                      {/* Four actions, not two. The old pair was labelled "Unduh"
+                          but opened a tab, so an AM sending the report to a client
+                          had to Ctrl+S it into a file called `html.html`. Preview
+                          and download are different jobs and now say so. */}
+                      <a className="btn btnGhost btnSm" href={reportHtmlUrl(r.id, 'klien')} target="_blank" rel="noreferrer">Lihat Klien</a>{' '}
+                      <a className="btn btnGhost btnSm" href={reportHtmlUrl(r.id, 'klien', true)}>Unduh Klien</a>{' '}
+                      <a className="btn btnGhost btnSm" href={reportHtmlUrl(r.id, 'internal')} target="_blank" rel="noreferrer">Lihat Internal</a>{' '}
+                      <a className="btn btnGhost btnSm" href={reportHtmlUrl(r.id, 'internal', true)}>Unduh Internal</a>
                     </td>
                   </tr>
                   {openInsight === r.id && (

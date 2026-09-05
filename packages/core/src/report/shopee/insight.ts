@@ -143,5 +143,11 @@ export function buildInsights(M: ShopeeMetrics, sk: Skor): Insights {
 
   const ringkasan = `GMV bulan ini ${rp(k.gmv)} dari ${num(k.pesanan)} pesanan (${num(k.pembeli)} pembeli, ${pct(k.repeat_rate)} repeat). Skor performa keseluruhan ${dec(sk.total, 1)}/10 — ${sk.label}.`;
 
-  return { ringkasan, poin, rekomendasiTinggi: tinggi, rekomendasiSedang: sedang, outlook, indikator };
+  // R3 — Shopee has no buyer-journey layer yet (that engine's exports carry a
+  // different funnel), so it drafts NO stage prose. The empty array is not a
+  // placeholder: it is what keeps `Insights` — and therefore the single
+  // `client_report_insight` row shape both engines write — identical across the
+  // two. A Shopee revision saved through the shared editor round-trips
+  // unchanged; the day Shopee gets its own stages, only this line moves.
+  return { ringkasan, poin, rekomendasiTinggi: tinggi, rekomendasiSedang: sedang, outlook, indikator, tahapNarasi: [] };
 }

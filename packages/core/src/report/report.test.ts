@@ -15,6 +15,7 @@ import {
   renderReportHtml, REPORT_BENCH_V1, resolveRentang, runReport, scale,
   INSIGHT_MAX, INSIGHT_MAX_POIN, InsightDraftError, normalizeInsightDraft,
   MSG_ADA_MARKUP, MSG_POIN_KOSONG, MSG_REK_TAK_LENGKAP, MSG_RINGKASAN_WAJIB,
+  MSG_TAHAP_GANDA, MSG_TAHAP_TAK_DIKENAL, MSG_TAHAP_TAK_LENGKAP,
   type PayloadInsight, type ReportSlots,
 } from './index';
 
@@ -414,6 +415,7 @@ describe('insight override di renderer', () => {
     rekomendasi_sedang: [],
     outlook: 'OUTLOOK SUNTINGAN AM',
     indikator: [{ nama: 'IND SUNTINGAN', target: '99%' }],
+    tahap_narasi: [{ tahap: 'awareness', judul: 'JUDUL TAHAP SUNTINGAN', teks: 'TEKS TAHAP SUNTINGAN' }],
   };
 
   it('renders the override text instead of the engine narrative', () => {
@@ -589,5 +591,251 @@ describe('paritas visual dokumen laporan', () => {
     expect(renderReportHtml(p, 'internal')).toContain('-INTERNAL');
     // A client's copy must never carry the internal marker.
     expect(renderReportHtml(p, 'klien')).not.toContain('-INTERNAL');
+  });
+});
+
+// ── R3: tahap (Awareness → Consideration → Conversion) ──────────────────────
+const ttamSheet = (extra: string[], rows: unknown[][]): Sheet =>
+  parse(sheetAoa(['Ad group name', 'Primary status', 'Spend', 'Impressions', 'Reach', 'Clicks (destination)', ...extra], rows, 'Ads 2026-08-01 ~ 2026-08-31'), 'ttam.xlsx');
+
+/** Showcase export — the ONLY file that carries store-wide Add to Cart. */
+const ttamShowcase = (atc = '800'): Sheet => ttamSheet(
+  ['Checkouts initiated (Shop)', 'Adds to cart (Shop)', 'Product page views (Shop)'],
+  [['AG1', 'Active', '1400000', '200000', '150000', '16000', '300', atc, '15000']],
+);
+const ttamVideoViews = (): Sheet => ttamSheet(
+  ['Video views', 'CPM'],
+  [['AG1', 'Active', '4900000', '1600000', '900000', '2000', '1500000', '3014']],
+);
+const ttamFollows = (): Sheet => ttamSheet(['Paid follows'], [['AG1', 'Active', '1200000', '90000', '900', '1100']]);
+
+const runTahap = (slots: ReportSlots, fokus: 'awareness' | 'consideration' | 'conversion' | null = null) =>
+  runReport(slots, { periodeTipe: 'bulanan', klien: KLIEN, generatedAt: GEN_AT, benchmarkVersi: 1, tahapFokus: fokus });
+
+describe('tahap — funnel', () => {
+  it('reads the rungs off the store export and computes each pass-through against the rung above', () => {
+    const t = runTahap({ shop_tt: shopTt() }).payload.tahap;
+    const by = (k: string) => t.funnel.find((f) => f.key === k)!;
+    expect(by('impresi').nilai).toBe(500_000);
+    expect(by('klik').nilai).toBe(20_000);
+    // 20.000 / 500.000
+    expect(by('klik').lolos).toBe(0.04);
+    expect(by('klik').lolos_dari).toBe('Impresi produk');
+    expect(by('pengunjung').nilai).toBe(50_000);
+    expect(by('pesanan').nilai).toBe(1_000);
+  });
+
+  it('leaves Add to Cart NULL — not 0 — when the Showcase Ads export is absent, and says why', () => {
+    const atc = runTahap({ shop_tt: shopTt() }).payload.tahap.funnel.find((f) => f.key === 'atc')!;
+    expect(atc.nilai).toBeNull();
+    expect(atc.lolos).toBeNull();
+    expect(atc.catatan).toMatch(/Showcase Ads/);
+    // The rung below it still measures against the last rung that HAD a number.
+    const pesanan = runTahap({ shop_tt: shopTt() }).payload.tahap.funnel.find((f) => f.key === 'pesanan')!;
+    expect(pesanan.lolos_dari).toBe('Pengunjung toko');
+  });
+
+  it('fills Add to Cart from the Showcase export when it IS uploaded', () => {
+    const t = runTahap({ shop_tt: shopTt(), ttam_showcase: ttamShowcase() }).payload.tahap;
+    const atc = t.funnel.find((f) => f.key === 'atc')!;
+    expect(atc.nilai).toBe(800);
+    expect(atc.lolos_dari).toBe('Pengunjung toko');
+    expect(t.funnel.find((f) => f.key === 'pesanan')!.lolos_dari).toBe('Add to Cart');
+  });
+
+  it('judges NO step-to-step rate — their denominator moves with which files were uploaded', () => {
+    for (const slots of [{ shop_tt: shopTt() }, { shop_tt: shopTt(), ttam_showcase: ttamShowcase() }]) {
+      const t = runTahap(slots).payload.tahap;
+      for (const f of t.funnel) {
+        expect(f.band).toBeNull();
+        expect(f.flag).toBe('kosong');
+      }
+    }
+  });
+
+  it('judges end-to-end conversion instead, against cvr_toko — the ratio that benchmark describes', () => {
+    const t = runTahap({ shop_tt: shopTt() }).payload.tahap;
+    expect(t.konversi_total.band).toEqual(REPORT_BENCH_V1.cvr_toko);
+    // 1.000 / 50.000 = 2%, above the 1,5% green line.
+    expect(t.konversi_total.nilai).toBeCloseTo(0.02, 5);
+    expect(t.konversi_total.flag).toBe('hijau');
+  });
+
+  it('does NOT turn green just because the ads file made add-to-cart the denominator', () => {
+    // A store converting 42 of 20.543 visitors is far below cvr_toko. Measured
+    // against add-to-cart (42 of 849) the same store looks healthy — which is
+    // exactly the misreading this split exists to prevent.
+    const lemah = parse(sheetAoa(SHOP_TT_HEADER, [
+      ['Total nilai penjualan', 'Rp1.965.624', 'Rp0', '20.543', 'Rp0', '42', '0,19%',
+        'Rp46.801', '40', '60', '1.323.015', '24.618', 'Rp0', 'Rp0', 'Rp0'],
+    ], META_BULAN), 'toko-lemah.xlsx');
+    const t = runTahap({ shop_tt: lemah, ttam_showcase: ttamShowcase('849') }).payload.tahap;
+    expect(t.funnel.find((f) => f.key === 'pesanan')!.lolos_dari).toBe('Add to Cart');
+    expect(t.konversi_total.flag).toBe('merah');
+  });
+
+  it('never divides by zero — a store with no impressions yields null, not NaN or Infinity', () => {
+    const zero = parse(sheetAoa(SHOP_TT_HEADER, [
+      ['Total nilai penjualan', 'Rp0', 'Rp0', '0', 'Rp0', '0', '0,00%', 'Rp0', '0', '0', '0', '0', 'Rp0', 'Rp0', 'Rp0'],
+    ], META_BULAN), 'toko-nol.xlsx');
+    const t = runTahap({ shop_tt: zero }).payload.tahap;
+    for (const f of t.funnel) {
+      expect(f.lolos === null || Number.isFinite(f.lolos)).toBe(true);
+    }
+  });
+});
+
+describe('tahap — belanja & fokus', () => {
+  it('splits media spend by what each campaign type is optimised for, and the parts sum to the total', () => {
+    const t = runTahap({
+      shop_tt: shopTt(), ads_prod: adsProd(),
+      ttam_videoviews: ttamVideoViews(), ttam_follows: ttamFollows(), ttam_showcase: ttamShowcase(),
+    }).payload.tahap;
+    const b = (k: string) => t.blok.find((x) => x.key === k)!;
+    expect(b('awareness').belanja).toBe(4_900_000 + 1_200_000);
+    expect(b('consideration').belanja).toBe(1_400_000);
+    expect(b('conversion').belanja).toBe(1_500_000); // GMV Max only
+    expect(t.belanja_total).toBe(4_900_000 + 1_200_000 + 1_400_000 + 1_500_000);
+    const jumlah = t.blok.reduce((a, x) => a + (x.belanja ?? 0), 0);
+    expect(jumlah).toBe(t.belanja_total);
+  });
+
+  it('reports no spend at all — rather than Rp0 — when neither ads export was uploaded', () => {
+    const t = runTahap({ shop_tt: shopTt() }).payload.tahap;
+    expect(t.belanja_total).toBeNull();
+    for (const b of t.blok) expect(b.belanja).toBeNull();
+  });
+
+  it('stamps the focus stage the AM chose, and marks exactly one block', () => {
+    const t = runTahap({ shop_tt: shopTt() }, 'awareness').payload.tahap;
+    expect(t.fokus).toBe('awareness');
+    expect(t.blok.filter((b) => b.fokus).map((b) => b.key)).toEqual(['awareness']);
+  });
+
+  it('accepts no focus at all — the report still renders all three stages', () => {
+    const t = runTahap({ shop_tt: shopTt() }).payload.tahap;
+    expect(t.fokus).toBeNull();
+    expect(t.blok.filter((b) => b.fokus)).toHaveLength(0);
+    expect(t.blok.map((b) => b.key)).toEqual(['awareness', 'consideration', 'conversion']);
+  });
+});
+
+describe('tahap — render', () => {
+  const full = () => runTahap({
+    shop_tt: shopTt(), live_toko: liveToko(), prod_tt: prodTt(), ads_prod: adsProd(), aff_kr: affKr(),
+    ttam_showcase: ttamShowcase(), ttam_videoviews: ttamVideoViews(),
+  }, 'awareness').payload;
+
+  it('renders the funnel and all three stage sections, ahead of the source-by-source ones', () => {
+    const html = renderBody(full(), 'klien');
+    expect(html).toContain('Perjalanan Pembeli');
+    expect(html).toContain('Tahap 1 — Awareness');
+    expect(html).toContain('Tahap 2 — Consideration');
+    expect(html).toContain('Tahap 3 — Conversion');
+    expect(html).toContain('FOKUS PERIODE INI');
+    expect(html.indexOf('Perjalanan Pembeli')).toBeLessThan(html.indexOf('Sumber GMV'));
+  });
+
+  it('shows an absent Add to Cart as an em dash with its reason, never as zero', () => {
+    const html = renderBody(runTahap({ shop_tt: shopTt() }).payload, 'klien');
+    expect(html).toContain('hanya terbaca dari export Showcase Ads');
+    expect(html).not.toContain('NaN');
+    expect(html).not.toContain('undefined');
+  });
+
+  it('keeps the benchmark band OUT of the client HTML and IN the internal one', () => {
+    const p = full();
+    expect(renderBody(p, 'klien')).not.toContain('Rentang sehat');
+    expect(renderBody(p, 'internal')).toContain('Rentang sehat');
+    // …and the end-to-end conversion line is shown to BOTH, only its band is internal.
+    expect(renderBody(p, 'klien')).toContain('Konversi ujung ke ujung');
+    expect(renderBody(p, 'internal')).toContain('sehat');
+  });
+
+  it('skips the whole layer for a pre-R3 report, whose frozen payload can never carry it', () => {
+    const p = full();
+    // A stored v1 row: `tahap` was simply not a key the engine wrote back then.
+    const lama = { ...p } as Record<string, unknown>;
+    delete lama.tahap;
+    const html = renderBody(lama as unknown as typeof p, 'klien');
+    expect(html).not.toContain('Perjalanan Pembeli');
+    expect(html).not.toContain('Tahap 1 —');
+    // …and the rest of the report is unaffected.
+    expect(html).toContain('Ringkasan Eksekutif');
+    expect(html).toContain('Sumber GMV');
+    expect(html).not.toContain('undefined');
+  });
+
+  it('drops every rung with no number from the chart instead of plotting it as zero', () => {
+    const c = chartData(runTahap({ shop_tt: shopTt() }).payload) as { funnel: { labels: string[]; values: number[] } };
+    expect(c.funnel.labels).not.toContain('Add to Cart');
+    expect(c.funnel.values.every((v) => v > 0)).toBe(true);
+  });
+});
+
+describe('tahap — narasi yang disunting AM', () => {
+  it('drafts one paragraph per stage, in funnel order', () => {
+    const I = runTahap({ shop_tt: shopTt() }).payload.insight;
+    expect(I.tahap_narasi.map((n) => n.tahap)).toEqual(['awareness', 'consideration', 'conversion']);
+    for (const n of I.tahap_narasi) expect(n.teks.length).toBeGreaterThan(0);
+  });
+
+  it('renders the AM\'s paragraph instead of the engine\'s', () => {
+    const p = runTahap({ shop_tt: shopTt() }).payload;
+    const override: PayloadInsight = {
+      ...p.insight,
+      tahap_narasi: [{ tahap: 'consideration', judul: 'JUDUL AM', teks: 'TEKS AM' }],
+    };
+    const html = renderBody(p, 'klien', override);
+    expect(html).toContain('JUDUL AM');
+    expect(html).toContain('TEKS AM');
+    expect(html).not.toContain(p.insight.tahap_narasi[1].teks);
+  });
+
+  it('normalises stage prose to funnel order however the form submitted it', () => {
+    const out = normalizeInsightDraft({
+      ringkasan: 'R', poin: ['P'], outlook: 'O',
+      tahap_narasi: [
+        { tahap: 'conversion', judul: 'C', teks: 'c' },
+        { tahap: 'awareness', judul: 'A', teks: 'a' },
+      ],
+    });
+    expect(out.tahap_narasi.map((n) => n.tahap)).toEqual(['awareness', 'conversion']);
+  });
+
+  it('drops a wholly blank row, refuses a half-filled one, and refuses an unknown stage', () => {
+    const base = { ringkasan: 'R', poin: ['P'], outlook: 'O' };
+    expect(normalizeInsightDraft({ ...base, tahap_narasi: [{ tahap: 'awareness', judul: '', teks: '' }] }).tahap_narasi).toEqual([]);
+    expect(() => normalizeInsightDraft({ ...base, tahap_narasi: [{ tahap: 'awareness', judul: 'A', teks: '' }] }))
+      .toThrow(MSG_TAHAP_TAK_LENGKAP);
+    expect(() => normalizeInsightDraft({ ...base, tahap_narasi: [{ tahap: 'retention', judul: 'A', teks: 'a' }] }))
+      .toThrow(MSG_TAHAP_TAK_DIKENAL);
+  });
+
+  it('refuses two paragraphs for the same stage', () => {
+    expect(() => normalizeInsightDraft({
+      ringkasan: 'R', poin: ['P'], outlook: 'O',
+      tahap_narasi: [
+        { tahap: 'awareness', judul: 'A', teks: 'a' },
+        { tahap: 'awareness', judul: 'B', teks: 'b' },
+      ],
+    })).toThrow(MSG_TAHAP_GANDA);
+  });
+
+  it('refuses markup in stage prose, like every other narrative field', () => {
+    expect(() => normalizeInsightDraft({
+      ringkasan: 'R', poin: ['P'], outlook: 'O',
+      tahap_narasi: [{ tahap: 'awareness', judul: 'A', teks: '<script>x</script>' }],
+    })).toThrow(MSG_ADA_MARKUP);
+  });
+
+  it('leaves the report NUMBERS untouched no matter what the AM writes', () => {
+    const p = runTahap({ shop_tt: shopTt(), ttam_showcase: ttamShowcase() }).payload;
+    const sebelum = JSON.stringify(p.tahap);
+    renderBody(p, 'klien', {
+      ...p.insight,
+      tahap_narasi: [{ tahap: 'conversion', judul: 'X', teks: 'Y' }],
+    });
+    expect(JSON.stringify(p.tahap)).toBe(sebelum);
   });
 });
