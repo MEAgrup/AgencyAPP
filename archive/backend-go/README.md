@@ -47,5 +47,6 @@ C-05 — kode di sini beku, jadi menjalankannya hanya membuang waktu CI dan bisa
 ## Config yang sudah mati
 
 `Dockerfile` dan `railway.json` di direktori ini menyasar deployment Railway yang
-**dimatikan** sebagai bagian C-05. Keduanya ditandai deprecated, bukan dihapus, supaya
+**dilepas** sebagai bagian C-05 (mematikan service-nya adalah butir terakhir C-05,
+eksekusi pemilik). Keduanya ditandai deprecated, bukan dihapus, supaya
 riwayat deployment tetap bisa dibaca.
