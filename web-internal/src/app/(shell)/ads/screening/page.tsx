@@ -34,7 +34,7 @@
  * `DECISIONS.md` entry rather than a quiet edit inside a UI ticket; it is filed
  * as the open question SCR-UI-1.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { errorMessage } from '@/lib/api';
@@ -78,7 +78,7 @@ function berkas(p: { filename: string; sha256: string; ukuran_bytes: number }, p
   return { nama_berkas: p.filename, sha256: p.sha256, ukuran_bytes: p.ukuran_bytes, peran };
 }
 
-export default function SkuScreenerPage() {
+function SkuScreenerWorkspace() {
   const { role, loading } = useAuth();
   const initialClient = useSearchParams().get('client') ?? '';
 
@@ -550,5 +550,23 @@ export default function SkuScreenerPage() {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * `useSearchParams()` di SkuScreenerWorkspace membuat halaman ini butuh
+ * batas <Suspense> saat prerender.
+ *
+ * Hari ini ketiadaannya KEBETULAN tidak memerahkan build: `(shell)/layout.tsx`
+ * mengembalikan "Memuat…" selagi `loading`, jadi badan halaman tak pernah
+ * dieksekusi saat prerender. Itu kebetulan yang rapuh — ia berhenti berlaku
+ * begitu layout-nya merender anaknya lebih awal. Pola ini sama dengan
+ * `tasks/page.tsx` dan `account/rekap/page.tsx`.
+ */
+export default function SkuScreenerPage() {
+  return (
+    <Suspense fallback={<div className="stack"><p className="muted">Memuat...</p></div>}>
+      <SkuScreenerWorkspace />
+    </Suspense>
   );
 }

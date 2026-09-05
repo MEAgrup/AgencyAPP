@@ -60,3 +60,6 @@ export * as report from './report';
 export * as skuscreener from './skuscreener';
 export * as adsscanner from './adsscanner';
 export * as reportShopee from './report/shopee';
+// CR-12 — aset dokumen laporan yang ditempel (CSS, ikon, Chart.js, boot Print).
+// Diekspor supaya tes di luar `packages/core` bisa memeriksa isinya.
+export * as docassets from './docassets';

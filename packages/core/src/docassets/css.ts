@@ -1,0 +1,662 @@
+/**
+ * Stylesheet dokumen laporan — statis, ditempel, nol permintaan ke CDN.
+ *
+ * MENGGANTIKAN Tailwind play CDN (`<script src="https://cdn.tailwindcss.com">`),
+ * yang bukan stylesheet melainkan COMPILER yang jalan di browser: begitu skrip
+ * itu tidak termuat, dokumennya tidak sekadar kehilangan warna — seluruh tata
+ * letaknya runtuh jadi satu kolom teks polos. Itu terjadi pada berkas yang AM
+ * unduh lalu KIRIM KE KLIEN, di jaringan yang MEA tidak kendalikan.
+ *
+ * ⚠️ PENJAGANYA `css-parity.test.ts`, dan itu wajib. Tes itu merender seluruh
+ * fixture ketiga renderer di kedua mode, menarik setiap token dari setiap
+ * `class="…"`, dan menuntut setiap token punya definisi di sini. Tanpa tes itu,
+ * satu kelas yang kelewat adalah bug VISUAL SENYAP — laporan klien tampak rusak
+ * dan nol tes berwarna merah. Alasannya sama persis dengan
+ * `route-parity.test.ts` / `shape-parity.test.ts`.
+ *
+ * Skala warna & jarak sengaja LENGKAP (50–900 untuk enam palet), bukan hanya
+ * rona yang kebetulan dipakai hari ini. Renderer menyusun kelas secara dinamis
+ * (`bg-${warna}-50`, `text-${warna(skor)}-700`); memangkasnya ke yang terpakai
+ * berarti pemanggil baru yang sah diam-diam kehilangan gayanya.
+ */
+
+/**
+ * Tumpukan font sistem — keputusan pemilik 2026-09-05, opsi "Ringan".
+ *
+ * Sebelumnya `'Inter'` dan `'Poppins'` dari Google Fonts. Nama itu hanya
+ * berarti apa-apa kalau `fonts.googleapis.com` terjangkau; kalau tidak, browser
+ * jatuh ke font default tanpa satu pun pesan. Memakai font sistem membuat
+ * hasilnya SAMA di jaringan mana pun. Ini satu-satunya beda kasat mata yang
+ * CR-12 perkenalkan, dan pemilik sudah menyetujuinya.
+ */
+export const FONT_TUBUH =
+  'ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif';
+
+/** Judul memakai tumpukan yang sama, dibedakan oleh bobot 700 — bukan keluarga
+ *  font kedua yang belum tentu ada. */
+export const FONT_JUDUL = FONT_TUBUH;
+
+/** Stylesheet lengkap dokumen laporan. */
+export const DOC_CSS = `/* ── dasar ─────────────────────────────────────────────────────────────── */
+*,::before,::after{box-sizing:border-box;border-width:0;border-style:solid;border-color:#e2e8f0}
+html{-webkit-text-size-adjust:100%;line-height:1.5}
+body{margin:0;font-family:${FONT_TUBUH};font-size:14px;line-height:1.5;
+  background:#f8fafc;color:#0f172a;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit;margin:0}
+p,figure,blockquote,dl,dd{margin:0}
+ol,ul{list-style:none;margin:0;padding:0}
+table{border-collapse:collapse;text-indent:0;border-color:inherit}
+th{text-align:inherit;font-weight:inherit}
+button{font:inherit;color:inherit;margin:0;padding:0;background:none;border:0;cursor:pointer}
+canvas{display:block;max-width:100%}
+b,strong{font-weight:600}
+img,svg,video{display:block;max-width:100%}
+.text-slate-50{color:#f8fafc}
+.bg-slate-50{background-color:#f8fafc}
+.border-slate-50{border-color:#f8fafc}
+.text-slate-100{color:#f1f5f9}
+.bg-slate-100{background-color:#f1f5f9}
+.border-slate-100{border-color:#f1f5f9}
+.text-slate-200{color:#e2e8f0}
+.bg-slate-200{background-color:#e2e8f0}
+.border-slate-200{border-color:#e2e8f0}
+.text-slate-300{color:#cbd5e1}
+.bg-slate-300{background-color:#cbd5e1}
+.border-slate-300{border-color:#cbd5e1}
+.text-slate-400{color:#94a3b8}
+.bg-slate-400{background-color:#94a3b8}
+.border-slate-400{border-color:#94a3b8}
+.text-slate-500{color:#64748b}
+.bg-slate-500{background-color:#64748b}
+.border-slate-500{border-color:#64748b}
+.text-slate-600{color:#475569}
+.bg-slate-600{background-color:#475569}
+.border-slate-600{border-color:#475569}
+.text-slate-700{color:#334155}
+.bg-slate-700{background-color:#334155}
+.border-slate-700{border-color:#334155}
+.text-slate-800{color:#1e293b}
+.bg-slate-800{background-color:#1e293b}
+.border-slate-800{border-color:#1e293b}
+.text-slate-900{color:#0f172a}
+.bg-slate-900{background-color:#0f172a}
+.border-slate-900{border-color:#0f172a}
+.text-teal-50{color:#f0fdfa}
+.bg-teal-50{background-color:#f0fdfa}
+.border-teal-50{border-color:#f0fdfa}
+.text-teal-100{color:#ccfbf1}
+.bg-teal-100{background-color:#ccfbf1}
+.border-teal-100{border-color:#ccfbf1}
+.text-teal-200{color:#99f6e4}
+.bg-teal-200{background-color:#99f6e4}
+.border-teal-200{border-color:#99f6e4}
+.text-teal-300{color:#5eead4}
+.bg-teal-300{background-color:#5eead4}
+.border-teal-300{border-color:#5eead4}
+.text-teal-400{color:#2dd4bf}
+.bg-teal-400{background-color:#2dd4bf}
+.border-teal-400{border-color:#2dd4bf}
+.text-teal-500{color:#14b8a6}
+.bg-teal-500{background-color:#14b8a6}
+.border-teal-500{border-color:#14b8a6}
+.text-teal-600{color:#0d9488}
+.bg-teal-600{background-color:#0d9488}
+.border-teal-600{border-color:#0d9488}
+.text-teal-700{color:#0f766e}
+.bg-teal-700{background-color:#0f766e}
+.border-teal-700{border-color:#0f766e}
+.text-teal-800{color:#115e59}
+.bg-teal-800{background-color:#115e59}
+.border-teal-800{border-color:#115e59}
+.text-teal-900{color:#134e4a}
+.bg-teal-900{background-color:#134e4a}
+.border-teal-900{border-color:#134e4a}
+.text-emerald-50{color:#ecfdf5}
+.bg-emerald-50{background-color:#ecfdf5}
+.border-emerald-50{border-color:#ecfdf5}
+.text-emerald-100{color:#d1fae5}
+.bg-emerald-100{background-color:#d1fae5}
+.border-emerald-100{border-color:#d1fae5}
+.text-emerald-200{color:#a7f3d0}
+.bg-emerald-200{background-color:#a7f3d0}
+.border-emerald-200{border-color:#a7f3d0}
+.text-emerald-300{color:#6ee7b7}
+.bg-emerald-300{background-color:#6ee7b7}
+.border-emerald-300{border-color:#6ee7b7}
+.text-emerald-400{color:#34d399}
+.bg-emerald-400{background-color:#34d399}
+.border-emerald-400{border-color:#34d399}
+.text-emerald-500{color:#10b981}
+.bg-emerald-500{background-color:#10b981}
+.border-emerald-500{border-color:#10b981}
+.text-emerald-600{color:#059669}
+.bg-emerald-600{background-color:#059669}
+.border-emerald-600{border-color:#059669}
+.text-emerald-700{color:#047857}
+.bg-emerald-700{background-color:#047857}
+.border-emerald-700{border-color:#047857}
+.text-emerald-800{color:#065f46}
+.bg-emerald-800{background-color:#065f46}
+.border-emerald-800{border-color:#065f46}
+.text-emerald-900{color:#064e3b}
+.bg-emerald-900{background-color:#064e3b}
+.border-emerald-900{border-color:#064e3b}
+.text-amber-50{color:#fffbeb}
+.bg-amber-50{background-color:#fffbeb}
+.border-amber-50{border-color:#fffbeb}
+.text-amber-100{color:#fef3c7}
+.bg-amber-100{background-color:#fef3c7}
+.border-amber-100{border-color:#fef3c7}
+.text-amber-200{color:#fde68a}
+.bg-amber-200{background-color:#fde68a}
+.border-amber-200{border-color:#fde68a}
+.text-amber-300{color:#fcd34d}
+.bg-amber-300{background-color:#fcd34d}
+.border-amber-300{border-color:#fcd34d}
+.text-amber-400{color:#fbbf24}
+.bg-amber-400{background-color:#fbbf24}
+.border-amber-400{border-color:#fbbf24}
+.text-amber-500{color:#f59e0b}
+.bg-amber-500{background-color:#f59e0b}
+.border-amber-500{border-color:#f59e0b}
+.text-amber-600{color:#d97706}
+.bg-amber-600{background-color:#d97706}
+.border-amber-600{border-color:#d97706}
+.text-amber-700{color:#b45309}
+.bg-amber-700{background-color:#b45309}
+.border-amber-700{border-color:#b45309}
+.text-amber-800{color:#92400e}
+.bg-amber-800{background-color:#92400e}
+.border-amber-800{border-color:#92400e}
+.text-amber-900{color:#78350f}
+.bg-amber-900{background-color:#78350f}
+.border-amber-900{border-color:#78350f}
+.text-red-50{color:#fef2f2}
+.bg-red-50{background-color:#fef2f2}
+.border-red-50{border-color:#fef2f2}
+.text-red-100{color:#fee2e2}
+.bg-red-100{background-color:#fee2e2}
+.border-red-100{border-color:#fee2e2}
+.text-red-200{color:#fecaca}
+.bg-red-200{background-color:#fecaca}
+.border-red-200{border-color:#fecaca}
+.text-red-300{color:#fca5a5}
+.bg-red-300{background-color:#fca5a5}
+.border-red-300{border-color:#fca5a5}
+.text-red-400{color:#f87171}
+.bg-red-400{background-color:#f87171}
+.border-red-400{border-color:#f87171}
+.text-red-500{color:#ef4444}
+.bg-red-500{background-color:#ef4444}
+.border-red-500{border-color:#ef4444}
+.text-red-600{color:#dc2626}
+.bg-red-600{background-color:#dc2626}
+.border-red-600{border-color:#dc2626}
+.text-red-700{color:#b91c1c}
+.bg-red-700{background-color:#b91c1c}
+.border-red-700{border-color:#b91c1c}
+.text-red-800{color:#991b1b}
+.bg-red-800{background-color:#991b1b}
+.border-red-800{border-color:#991b1b}
+.text-red-900{color:#7f1d1d}
+.bg-red-900{background-color:#7f1d1d}
+.border-red-900{border-color:#7f1d1d}
+.text-indigo-50{color:#eef2ff}
+.bg-indigo-50{background-color:#eef2ff}
+.border-indigo-50{border-color:#eef2ff}
+.text-indigo-100{color:#e0e7ff}
+.bg-indigo-100{background-color:#e0e7ff}
+.border-indigo-100{border-color:#e0e7ff}
+.text-indigo-200{color:#c7d2fe}
+.bg-indigo-200{background-color:#c7d2fe}
+.border-indigo-200{border-color:#c7d2fe}
+.text-indigo-300{color:#a5b4fc}
+.bg-indigo-300{background-color:#a5b4fc}
+.border-indigo-300{border-color:#a5b4fc}
+.text-indigo-400{color:#818cf8}
+.bg-indigo-400{background-color:#818cf8}
+.border-indigo-400{border-color:#818cf8}
+.text-indigo-500{color:#6366f1}
+.bg-indigo-500{background-color:#6366f1}
+.border-indigo-500{border-color:#6366f1}
+.text-indigo-600{color:#4f46e5}
+.bg-indigo-600{background-color:#4f46e5}
+.border-indigo-600{border-color:#4f46e5}
+.text-indigo-700{color:#4338ca}
+.bg-indigo-700{background-color:#4338ca}
+.border-indigo-700{border-color:#4338ca}
+.text-indigo-800{color:#3730a3}
+.bg-indigo-800{background-color:#3730a3}
+.border-indigo-800{border-color:#3730a3}
+.text-indigo-900{color:#312e81}
+.bg-indigo-900{background-color:#312e81}
+.border-indigo-900{border-color:#312e81}
+.text-white{color:#fff}.bg-white{background-color:#fff}.border-white{border-color:#fff}
+.hover\\:bg-teal-100:hover{background-color:#ccfbf1}
+.m-0{margin:0px}
+.mx-0{margin-left:0px;margin-right:0px}
+.my-0{margin-top:0px;margin-bottom:0px}
+.mt-0{margin-top:0px}
+.mr-0{margin-right:0px}
+.mb-0{margin-bottom:0px}
+.ml-0{margin-left:0px}
+.m-1{margin:0.25rem}
+.mx-1{margin-left:0.25rem;margin-right:0.25rem}
+.my-1{margin-top:0.25rem;margin-bottom:0.25rem}
+.mt-1{margin-top:0.25rem}
+.mr-1{margin-right:0.25rem}
+.mb-1{margin-bottom:0.25rem}
+.ml-1{margin-left:0.25rem}
+.m-2{margin:0.5rem}
+.mx-2{margin-left:0.5rem;margin-right:0.5rem}
+.my-2{margin-top:0.5rem;margin-bottom:0.5rem}
+.mt-2{margin-top:0.5rem}
+.mr-2{margin-right:0.5rem}
+.mb-2{margin-bottom:0.5rem}
+.ml-2{margin-left:0.5rem}
+.m-3{margin:0.75rem}
+.mx-3{margin-left:0.75rem;margin-right:0.75rem}
+.my-3{margin-top:0.75rem;margin-bottom:0.75rem}
+.mt-3{margin-top:0.75rem}
+.mr-3{margin-right:0.75rem}
+.mb-3{margin-bottom:0.75rem}
+.ml-3{margin-left:0.75rem}
+.m-4{margin:1rem}
+.mx-4{margin-left:1rem;margin-right:1rem}
+.my-4{margin-top:1rem;margin-bottom:1rem}
+.mt-4{margin-top:1rem}
+.mr-4{margin-right:1rem}
+.mb-4{margin-bottom:1rem}
+.ml-4{margin-left:1rem}
+.m-5{margin:1.25rem}
+.mx-5{margin-left:1.25rem;margin-right:1.25rem}
+.my-5{margin-top:1.25rem;margin-bottom:1.25rem}
+.mt-5{margin-top:1.25rem}
+.mr-5{margin-right:1.25rem}
+.mb-5{margin-bottom:1.25rem}
+.ml-5{margin-left:1.25rem}
+.m-6{margin:1.5rem}
+.mx-6{margin-left:1.5rem;margin-right:1.5rem}
+.my-6{margin-top:1.5rem;margin-bottom:1.5rem}
+.mt-6{margin-top:1.5rem}
+.mr-6{margin-right:1.5rem}
+.mb-6{margin-bottom:1.5rem}
+.ml-6{margin-left:1.5rem}
+.m-8{margin:2rem}
+.mx-8{margin-left:2rem;margin-right:2rem}
+.my-8{margin-top:2rem;margin-bottom:2rem}
+.mt-8{margin-top:2rem}
+.mr-8{margin-right:2rem}
+.mb-8{margin-bottom:2rem}
+.ml-8{margin-left:2rem}
+.m-10{margin:2.5rem}
+.mx-10{margin-left:2.5rem;margin-right:2.5rem}
+.my-10{margin-top:2.5rem;margin-bottom:2.5rem}
+.mt-10{margin-top:2.5rem}
+.mr-10{margin-right:2.5rem}
+.mb-10{margin-bottom:2.5rem}
+.ml-10{margin-left:2.5rem}
+.m-12{margin:3rem}
+.mx-12{margin-left:3rem;margin-right:3rem}
+.my-12{margin-top:3rem;margin-bottom:3rem}
+.mt-12{margin-top:3rem}
+.mr-12{margin-right:3rem}
+.mb-12{margin-bottom:3rem}
+.ml-12{margin-left:3rem}
+.m-0\\.5{margin:0.125rem}
+.mx-0\\.5{margin-left:0.125rem;margin-right:0.125rem}
+.my-0\\.5{margin-top:0.125rem;margin-bottom:0.125rem}
+.mt-0\\.5{margin-top:0.125rem}
+.mr-0\\.5{margin-right:0.125rem}
+.mb-0\\.5{margin-bottom:0.125rem}
+.ml-0\\.5{margin-left:0.125rem}
+.m-1\\.5{margin:0.375rem}
+.mx-1\\.5{margin-left:0.375rem;margin-right:0.375rem}
+.my-1\\.5{margin-top:0.375rem;margin-bottom:0.375rem}
+.mt-1\\.5{margin-top:0.375rem}
+.mr-1\\.5{margin-right:0.375rem}
+.mb-1\\.5{margin-bottom:0.375rem}
+.ml-1\\.5{margin-left:0.375rem}
+.m-2\\.5{margin:0.625rem}
+.mx-2\\.5{margin-left:0.625rem;margin-right:0.625rem}
+.my-2\\.5{margin-top:0.625rem;margin-bottom:0.625rem}
+.mt-2\\.5{margin-top:0.625rem}
+.mr-2\\.5{margin-right:0.625rem}
+.mb-2\\.5{margin-bottom:0.625rem}
+.ml-2\\.5{margin-left:0.625rem}
+.m-3\\.5{margin:0.875rem}
+.mx-3\\.5{margin-left:0.875rem;margin-right:0.875rem}
+.my-3\\.5{margin-top:0.875rem;margin-bottom:0.875rem}
+.mt-3\\.5{margin-top:0.875rem}
+.mr-3\\.5{margin-right:0.875rem}
+.mb-3\\.5{margin-bottom:0.875rem}
+.ml-3\\.5{margin-left:0.875rem}
+.p-0{padding:0px}
+.px-0{padding-left:0px;padding-right:0px}
+.py-0{padding-top:0px;padding-bottom:0px}
+.pt-0{padding-top:0px}
+.pr-0{padding-right:0px}
+.pb-0{padding-bottom:0px}
+.pl-0{padding-left:0px}
+.p-1{padding:0.25rem}
+.px-1{padding-left:0.25rem;padding-right:0.25rem}
+.py-1{padding-top:0.25rem;padding-bottom:0.25rem}
+.pt-1{padding-top:0.25rem}
+.pr-1{padding-right:0.25rem}
+.pb-1{padding-bottom:0.25rem}
+.pl-1{padding-left:0.25rem}
+.p-2{padding:0.5rem}
+.px-2{padding-left:0.5rem;padding-right:0.5rem}
+.py-2{padding-top:0.5rem;padding-bottom:0.5rem}
+.pt-2{padding-top:0.5rem}
+.pr-2{padding-right:0.5rem}
+.pb-2{padding-bottom:0.5rem}
+.pl-2{padding-left:0.5rem}
+.p-3{padding:0.75rem}
+.px-3{padding-left:0.75rem;padding-right:0.75rem}
+.py-3{padding-top:0.75rem;padding-bottom:0.75rem}
+.pt-3{padding-top:0.75rem}
+.pr-3{padding-right:0.75rem}
+.pb-3{padding-bottom:0.75rem}
+.pl-3{padding-left:0.75rem}
+.p-4{padding:1rem}
+.px-4{padding-left:1rem;padding-right:1rem}
+.py-4{padding-top:1rem;padding-bottom:1rem}
+.pt-4{padding-top:1rem}
+.pr-4{padding-right:1rem}
+.pb-4{padding-bottom:1rem}
+.pl-4{padding-left:1rem}
+.p-5{padding:1.25rem}
+.px-5{padding-left:1.25rem;padding-right:1.25rem}
+.py-5{padding-top:1.25rem;padding-bottom:1.25rem}
+.pt-5{padding-top:1.25rem}
+.pr-5{padding-right:1.25rem}
+.pb-5{padding-bottom:1.25rem}
+.pl-5{padding-left:1.25rem}
+.p-6{padding:1.5rem}
+.px-6{padding-left:1.5rem;padding-right:1.5rem}
+.py-6{padding-top:1.5rem;padding-bottom:1.5rem}
+.pt-6{padding-top:1.5rem}
+.pr-6{padding-right:1.5rem}
+.pb-6{padding-bottom:1.5rem}
+.pl-6{padding-left:1.5rem}
+.p-8{padding:2rem}
+.px-8{padding-left:2rem;padding-right:2rem}
+.py-8{padding-top:2rem;padding-bottom:2rem}
+.pt-8{padding-top:2rem}
+.pr-8{padding-right:2rem}
+.pb-8{padding-bottom:2rem}
+.pl-8{padding-left:2rem}
+.p-10{padding:2.5rem}
+.px-10{padding-left:2.5rem;padding-right:2.5rem}
+.py-10{padding-top:2.5rem;padding-bottom:2.5rem}
+.pt-10{padding-top:2.5rem}
+.pr-10{padding-right:2.5rem}
+.pb-10{padding-bottom:2.5rem}
+.pl-10{padding-left:2.5rem}
+.p-12{padding:3rem}
+.px-12{padding-left:3rem;padding-right:3rem}
+.py-12{padding-top:3rem;padding-bottom:3rem}
+.pt-12{padding-top:3rem}
+.pr-12{padding-right:3rem}
+.pb-12{padding-bottom:3rem}
+.pl-12{padding-left:3rem}
+.p-0\\.5{padding:0.125rem}
+.px-0\\.5{padding-left:0.125rem;padding-right:0.125rem}
+.py-0\\.5{padding-top:0.125rem;padding-bottom:0.125rem}
+.pt-0\\.5{padding-top:0.125rem}
+.pr-0\\.5{padding-right:0.125rem}
+.pb-0\\.5{padding-bottom:0.125rem}
+.pl-0\\.5{padding-left:0.125rem}
+.p-1\\.5{padding:0.375rem}
+.px-1\\.5{padding-left:0.375rem;padding-right:0.375rem}
+.py-1\\.5{padding-top:0.375rem;padding-bottom:0.375rem}
+.pt-1\\.5{padding-top:0.375rem}
+.pr-1\\.5{padding-right:0.375rem}
+.pb-1\\.5{padding-bottom:0.375rem}
+.pl-1\\.5{padding-left:0.375rem}
+.p-2\\.5{padding:0.625rem}
+.px-2\\.5{padding-left:0.625rem;padding-right:0.625rem}
+.py-2\\.5{padding-top:0.625rem;padding-bottom:0.625rem}
+.pt-2\\.5{padding-top:0.625rem}
+.pr-2\\.5{padding-right:0.625rem}
+.pb-2\\.5{padding-bottom:0.625rem}
+.pl-2\\.5{padding-left:0.625rem}
+.p-3\\.5{padding:0.875rem}
+.px-3\\.5{padding-left:0.875rem;padding-right:0.875rem}
+.py-3\\.5{padding-top:0.875rem;padding-bottom:0.875rem}
+.pt-3\\.5{padding-top:0.875rem}
+.pr-3\\.5{padding-right:0.875rem}
+.pb-3\\.5{padding-bottom:0.875rem}
+.pl-3\\.5{padding-left:0.875rem}
+.mx-auto{margin-left:auto;margin-right:auto}
+.gap-0{gap:0px}
+.space-y-0>:not([hidden])~:not([hidden]){margin-top:0px}
+.w-0{width:0px}.h-0{height:0px}
+.gap-1{gap:0.25rem}
+.space-y-1>:not([hidden])~:not([hidden]){margin-top:0.25rem}
+.w-1{width:0.25rem}.h-1{height:0.25rem}
+.gap-2{gap:0.5rem}
+.space-y-2>:not([hidden])~:not([hidden]){margin-top:0.5rem}
+.w-2{width:0.5rem}.h-2{height:0.5rem}
+.gap-3{gap:0.75rem}
+.space-y-3>:not([hidden])~:not([hidden]){margin-top:0.75rem}
+.w-3{width:0.75rem}.h-3{height:0.75rem}
+.gap-4{gap:1rem}
+.space-y-4>:not([hidden])~:not([hidden]){margin-top:1rem}
+.w-4{width:1rem}.h-4{height:1rem}
+.gap-5{gap:1.25rem}
+.space-y-5>:not([hidden])~:not([hidden]){margin-top:1.25rem}
+.w-5{width:1.25rem}.h-5{height:1.25rem}
+.gap-6{gap:1.5rem}
+.space-y-6>:not([hidden])~:not([hidden]){margin-top:1.5rem}
+.w-6{width:1.5rem}.h-6{height:1.5rem}
+.gap-8{gap:2rem}
+.space-y-8>:not([hidden])~:not([hidden]){margin-top:2rem}
+.w-8{width:2rem}.h-8{height:2rem}
+.gap-10{gap:2.5rem}
+.space-y-10>:not([hidden])~:not([hidden]){margin-top:2.5rem}
+.w-10{width:2.5rem}.h-10{height:2.5rem}
+.gap-12{gap:3rem}
+.space-y-12>:not([hidden])~:not([hidden]){margin-top:3rem}
+.w-12{width:3rem}.h-12{height:3rem}
+.gap-0\\.5{gap:0.125rem}
+.space-y-0\\.5>:not([hidden])~:not([hidden]){margin-top:0.125rem}
+.w-0\\.5{width:0.125rem}.h-0\\.5{height:0.125rem}
+.gap-1\\.5{gap:0.375rem}
+.space-y-1\\.5>:not([hidden])~:not([hidden]){margin-top:0.375rem}
+.w-1\\.5{width:0.375rem}.h-1\\.5{height:0.375rem}
+.gap-2\\.5{gap:0.625rem}
+.space-y-2\\.5>:not([hidden])~:not([hidden]){margin-top:0.625rem}
+.w-2\\.5{width:0.625rem}.h-2\\.5{height:0.625rem}
+.gap-3\\.5{gap:0.875rem}
+.space-y-3\\.5>:not([hidden])~:not([hidden]){margin-top:0.875rem}
+.w-3\\.5{width:0.875rem}.h-3\\.5{height:0.875rem}
+.text-xs{font-size:0.75rem;line-height:1rem}
+.text-sm{font-size:0.875rem;line-height:1.25rem}
+.text-base{font-size:1rem;line-height:1.5rem}
+.text-lg{font-size:1.125rem;line-height:1.75rem}
+.text-xl{font-size:1.25rem;line-height:1.75rem}
+.text-2xl{font-size:1.5rem;line-height:2rem}
+.text-3xl{font-size:1.875rem;line-height:2.25rem}
+.text-4xl{font-size:2.25rem;line-height:2.5rem}
+.text-\\[10px\\]{font-size:10px;line-height:1.35}
+.text-\\[11px\\]{font-size:11px;line-height:1.35}
+.text-\\[0\\.6rem\\]{font-size:0.6rem;line-height:1.35}
+.text-\\[0\\.65rem\\]{font-size:0.65rem;line-height:1.35}
+.text-\\[0\\.7rem\\]{font-size:0.7rem;line-height:1.35}
+.font-medium{font-weight:500}.font-semibold{font-weight:600}.font-bold{font-weight:700}
+.font-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+.uppercase{text-transform:uppercase}
+.tracking-tight{letter-spacing:-.025em}.tracking-wide{letter-spacing:.025em}
+.text-left{text-align:left}.text-right{text-align:right}.text-center{text-align:center}
+.whitespace-nowrap{white-space:nowrap}.align-top{vertical-align:top}
+.grid{display:grid}.flex{display:flex}.inline-flex{display:inline-flex}.block{display:block}
+.grid-cols-1{grid-template-columns:repeat(1,minmax(0,1fr))}
+.grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.grid-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.grid-cols-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.grid-cols-5{grid-template-columns:repeat(5,minmax(0,1fr))}
+.grid-cols-6{grid-template-columns:repeat(6,minmax(0,1fr))}
+.flex-wrap{flex-wrap:wrap}.flex-col{flex-direction:column}.flex-shrink-0,.shrink-0{flex-shrink:0}.flex-1{flex:1 1 0%}
+.items-center{align-items:center}.items-end{align-items:flex-end}.items-start{align-items:flex-start}
+.justify-between{justify-content:space-between}.justify-center{justify-content:center}.justify-end{justify-content:flex-end}
+.overflow-x-auto{overflow-x:auto}.overflow-hidden{overflow:hidden}
+.w-full{width:100%}.h-full{height:100%}
+.max-w-screen-xl{max-width:1280px}.max-w-\\[260px\\]{max-width:260px}.max-w-\\[320px\\]{max-width:320px}
+.relative{position:relative}.absolute{position:absolute}
+.border{border-width:1px}.border-0{border-width:0}.border-2{border-width:2px}
+.border-t{border-top-width:1px}.border-b{border-bottom-width:1px}.border-l{border-left-width:1px}.border-r{border-right-width:1px}
+.border-l-4{border-left-width:4px}.border-t-4{border-top-width:4px}
+.last\\:border-0:last-child{border-width:0}
+.rounded{border-radius:.25rem}.rounded-md{border-radius:.375rem}.rounded-lg{border-radius:.5rem}.rounded-xl{border-radius:.75rem}.rounded-2xl{border-radius:1rem}.rounded-full{border-radius:9999px}
+.rounded-r-lg{border-top-right-radius:.5rem;border-bottom-right-radius:.5rem}.rounded-l-lg{border-top-left-radius:.5rem;border-bottom-left-radius:.5rem}
+.shadow-sm{box-shadow:0 1px 2px 0 rgba(15,23,42,.06)}.shadow{box-shadow:0 1px 3px 0 rgba(15,23,42,.1),0 1px 2px -1px rgba(15,23,42,.1)}
+@media (min-width:768px){
+.md\\:m-0{margin:0px}
+.md\\:mx-0{margin-left:0px;margin-right:0px}
+.md\\:my-0{margin-top:0px;margin-bottom:0px}
+.md\\:m-1{margin:0.25rem}
+.md\\:mx-1{margin-left:0.25rem;margin-right:0.25rem}
+.md\\:my-1{margin-top:0.25rem;margin-bottom:0.25rem}
+.md\\:m-2{margin:0.5rem}
+.md\\:mx-2{margin-left:0.5rem;margin-right:0.5rem}
+.md\\:my-2{margin-top:0.5rem;margin-bottom:0.5rem}
+.md\\:m-3{margin:0.75rem}
+.md\\:mx-3{margin-left:0.75rem;margin-right:0.75rem}
+.md\\:my-3{margin-top:0.75rem;margin-bottom:0.75rem}
+.md\\:m-4{margin:1rem}
+.md\\:mx-4{margin-left:1rem;margin-right:1rem}
+.md\\:my-4{margin-top:1rem;margin-bottom:1rem}
+.md\\:m-5{margin:1.25rem}
+.md\\:mx-5{margin-left:1.25rem;margin-right:1.25rem}
+.md\\:my-5{margin-top:1.25rem;margin-bottom:1.25rem}
+.md\\:m-6{margin:1.5rem}
+.md\\:mx-6{margin-left:1.5rem;margin-right:1.5rem}
+.md\\:my-6{margin-top:1.5rem;margin-bottom:1.5rem}
+.md\\:m-8{margin:2rem}
+.md\\:mx-8{margin-left:2rem;margin-right:2rem}
+.md\\:my-8{margin-top:2rem;margin-bottom:2rem}
+.md\\:m-10{margin:2.5rem}
+.md\\:mx-10{margin-left:2.5rem;margin-right:2.5rem}
+.md\\:my-10{margin-top:2.5rem;margin-bottom:2.5rem}
+.md\\:m-12{margin:3rem}
+.md\\:mx-12{margin-left:3rem;margin-right:3rem}
+.md\\:my-12{margin-top:3rem;margin-bottom:3rem}
+.md\\:m-0\\.5{margin:0.125rem}
+.md\\:mx-0\\.5{margin-left:0.125rem;margin-right:0.125rem}
+.md\\:my-0\\.5{margin-top:0.125rem;margin-bottom:0.125rem}
+.md\\:m-1\\.5{margin:0.375rem}
+.md\\:mx-1\\.5{margin-left:0.375rem;margin-right:0.375rem}
+.md\\:my-1\\.5{margin-top:0.375rem;margin-bottom:0.375rem}
+.md\\:m-2\\.5{margin:0.625rem}
+.md\\:mx-2\\.5{margin-left:0.625rem;margin-right:0.625rem}
+.md\\:my-2\\.5{margin-top:0.625rem;margin-bottom:0.625rem}
+.md\\:m-3\\.5{margin:0.875rem}
+.md\\:mx-3\\.5{margin-left:0.875rem;margin-right:0.875rem}
+.md\\:my-3\\.5{margin-top:0.875rem;margin-bottom:0.875rem}
+.md\\:p-0{padding:0px}
+.md\\:px-0{padding-left:0px;padding-right:0px}
+.md\\:py-0{padding-top:0px;padding-bottom:0px}
+.md\\:p-1{padding:0.25rem}
+.md\\:px-1{padding-left:0.25rem;padding-right:0.25rem}
+.md\\:py-1{padding-top:0.25rem;padding-bottom:0.25rem}
+.md\\:p-2{padding:0.5rem}
+.md\\:px-2{padding-left:0.5rem;padding-right:0.5rem}
+.md\\:py-2{padding-top:0.5rem;padding-bottom:0.5rem}
+.md\\:p-3{padding:0.75rem}
+.md\\:px-3{padding-left:0.75rem;padding-right:0.75rem}
+.md\\:py-3{padding-top:0.75rem;padding-bottom:0.75rem}
+.md\\:p-4{padding:1rem}
+.md\\:px-4{padding-left:1rem;padding-right:1rem}
+.md\\:py-4{padding-top:1rem;padding-bottom:1rem}
+.md\\:p-5{padding:1.25rem}
+.md\\:px-5{padding-left:1.25rem;padding-right:1.25rem}
+.md\\:py-5{padding-top:1.25rem;padding-bottom:1.25rem}
+.md\\:p-6{padding:1.5rem}
+.md\\:px-6{padding-left:1.5rem;padding-right:1.5rem}
+.md\\:py-6{padding-top:1.5rem;padding-bottom:1.5rem}
+.md\\:p-8{padding:2rem}
+.md\\:px-8{padding-left:2rem;padding-right:2rem}
+.md\\:py-8{padding-top:2rem;padding-bottom:2rem}
+.md\\:p-10{padding:2.5rem}
+.md\\:px-10{padding-left:2.5rem;padding-right:2.5rem}
+.md\\:py-10{padding-top:2.5rem;padding-bottom:2.5rem}
+.md\\:p-12{padding:3rem}
+.md\\:px-12{padding-left:3rem;padding-right:3rem}
+.md\\:py-12{padding-top:3rem;padding-bottom:3rem}
+.md\\:p-0\\.5{padding:0.125rem}
+.md\\:px-0\\.5{padding-left:0.125rem;padding-right:0.125rem}
+.md\\:py-0\\.5{padding-top:0.125rem;padding-bottom:0.125rem}
+.md\\:p-1\\.5{padding:0.375rem}
+.md\\:px-1\\.5{padding-left:0.375rem;padding-right:0.375rem}
+.md\\:py-1\\.5{padding-top:0.375rem;padding-bottom:0.375rem}
+.md\\:p-2\\.5{padding:0.625rem}
+.md\\:px-2\\.5{padding-left:0.625rem;padding-right:0.625rem}
+.md\\:py-2\\.5{padding-top:0.625rem;padding-bottom:0.625rem}
+.md\\:p-3\\.5{padding:0.875rem}
+.md\\:px-3\\.5{padding-left:0.875rem;padding-right:0.875rem}
+.md\\:py-3\\.5{padding-top:0.875rem;padding-bottom:0.875rem}
+.md\\:text-xs{font-size:0.75rem;line-height:1rem}
+.md\\:text-sm{font-size:0.875rem;line-height:1.25rem}
+.md\\:text-base{font-size:1rem;line-height:1.5rem}
+.md\\:text-lg{font-size:1.125rem;line-height:1.75rem}
+.md\\:text-xl{font-size:1.25rem;line-height:1.75rem}
+.md\\:text-2xl{font-size:1.5rem;line-height:2rem}
+.md\\:text-3xl{font-size:1.875rem;line-height:2.25rem}
+.md\\:text-4xl{font-size:2.25rem;line-height:2.5rem}
+.md\\:text-\\[10px\\]{font-size:10px;line-height:1.35}
+.md\\:text-\\[11px\\]{font-size:11px;line-height:1.35}
+.md\\:text-\\[0\\.6rem\\]{font-size:0.6rem;line-height:1.35}
+.md\\:text-\\[0\\.65rem\\]{font-size:0.65rem;line-height:1.35}
+.md\\:text-\\[0\\.7rem\\]{font-size:0.7rem;line-height:1.35}
+.md\\:grid-cols-1{grid-template-columns:repeat(1,minmax(0,1fr))}
+.md\\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.md\\:grid-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.md\\:grid-cols-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.md\\:grid-cols-5{grid-template-columns:repeat(5,minmax(0,1fr))}
+.md\\:grid-cols-6{grid-template-columns:repeat(6,minmax(0,1fr))}
+}
+/* ── komponen dokumen ──────────────────────────────────────────────────── */
+.font-display{font-family:${FONT_JUDUL};font-weight:700}
+.kpi-value{font-size:1.6rem;line-height:1.15;font-weight:700}
+/* .kpi-card bukan hiasan: ia penanda "jangan dipotong" untuk Print. */
+.kpi-card{break-inside:avoid;page-break-inside:avoid}
+.insight-card{border-left:4px solid #0F766E}
+.badge-int{background:#EEF2FF;color:#4338CA;font-size:.65rem;padding:1px 6px;border-radius:99px;font-weight:700}
+.status-green{background:#D1FAE5;color:#065F46}
+.status-yellow{background:#FEF3C7;color:#92400E}
+.status-red{background:#FEE2E2;color:#991B1B}
+.status-gray{background:#F1F5F9;color:#475569}
+/* Chip ikon judul seksi. Diukur dalam em supaya mengikuti judul di setiap
+   breakpoint, bukan butuh aturan kedua per ukuran layar. */
+.sec-ico{display:inline-flex;align-items:center;justify-content:center;
+  width:1.6em;height:1.6em;flex:0 0 1.6em;border-radius:.5em;
+  background:#CCFBF1;color:#0F766E;font-size:.62em}
+/* Ikon SVG ditempel (CR-12). Tinggi 1em + lebar otomatis meniru cara Font
+   Awesome mode SVG merender glyph-nya, termasuk turunan garis dasar -.125em —
+   tanpa itu setiap ikon duduk terlalu tinggi terhadap teks di sebelahnya. */
+.fa-ico{display:inline-block;height:1em;width:auto;vertical-align:-.125em;overflow:visible}
+/* Cincin skor. conic-gradient, nol dependensi. */
+.gauge{position:relative;width:104px;height:104px;flex:0 0 104px;border-radius:50%}
+.gauge::after{content:'';position:absolute;inset:9px;border-radius:50%;background:#fff}
+.gauge-val{position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;z-index:1;line-height:1}
+.gauge-num{font-size:1.55rem;font-weight:800;letter-spacing:-.02em}
+.gauge-max{font-size:.62rem;color:#64748B;margin-top:1px}
+/* ── Print (tombol "Unduh PDF (Ctrl+P)") ───────────────────────────────── */
+@media print{
+  .no-print{display:none!important}
+  body{background:#fff}
+  /* TANPA ini seluruh warna kartu, badge, dan cincin skor HILANG di PDF —
+     browser membuang latar belakang saat mencetak kecuali diminta eksplisit. */
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+  /* Kartu/tabel/seksi yang terpotong dua halaman adalah kerusakan yang paling
+     cepat dilihat orang di PDF laporan klien. */
+  section,table,tr,.kpi-card,.gauge,.insight-card{break-inside:avoid;page-break-inside:avoid}
+  h1,h2,h3{break-after:avoid;page-break-after:avoid}
+  /* Chart.js menggambar ke canvas dengan tinggi yang responsif terhadap lebar
+     layar; dikunci di sini supaya satu chart tidak memakan satu halaman penuh. */
+  canvas{max-height:70mm!important;height:auto!important}
+}
+@page{margin:12mm}`;

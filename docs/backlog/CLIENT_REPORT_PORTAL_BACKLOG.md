@@ -34,7 +34,7 @@ tempat membacanya.
 - Komponen/bobot baru di Health Score M13 — laporan **ditampilkan**, tidak **dinilai**. `Satisfaction` tetap N/A sampai CSAT punya tiketnya sendiri.
 - Surface invoice/pembayaran di portal (OQ-6: nol di v1).
 - Riwayat komplain untuk klien (M15 Rule 6 submit-only).
-- Mem-vendor Tailwind/Chart.js/FontAwesome lokal untuk dokumen laporan — CSP-nya sudah allow-list eksplisit; ini perbaikan lanjutan (**CR-12**), bukan blocker.
+- ✅ **CR-12 SELESAI 2026-09-05** — Tailwind/Chart.js/FontAwesome/Google Fonts/html2pdf tidak lagi ditarik dari CDN. Aset dokumen laporan pindah ke `packages/core/src/docassets/` (CSS statis, 27 ikon SVG ditempel, Chart.js 4.4.0 ditempel, tombol PDF pakai Print browser), dipakai ketiga renderer. Font sistem menggantikan Inter/Poppins — satu-satunya beda kasat mata, disetujui pemilik (opsi "Ringan — nol permintaan internet"). CSP portal klien kini nol host eksternal. Dijaga `docassets/css-parity.test.ts` (setiap kelas yang dirender wajib punya aturan di `DOC_CSS`, terbukti menggigit) dan tes "nol permintaan keluar" di `docassets.test.ts` + `report-csp.test.ts`.
 - 1 error lint `react-hooks/static-components` di `web-internal/src/app/(shell)/admin/employees/page.tsx` — **PRE-EXISTING** (terbukti identik saat perubahan gelombang ini di-stash), di luar cakupan.
 
 ---

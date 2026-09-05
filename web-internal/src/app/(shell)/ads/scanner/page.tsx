@@ -33,7 +33,7 @@
  * RLS to give Ads a real client list remains a data-access decision needing a
  * `DECISIONS.md` entry, not a quiet edit inside a UI ticket.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { errorMessage } from '@/lib/api';
@@ -74,7 +74,7 @@ interface Staged extends ParsedAdsScanExport {
   video_kind_override?: 'kreator' | 'toko' | null;
 }
 
-export default function AdsScannerPage() {
+function AdsScannerWorkspace() {
   const { role, loading } = useAuth();
   const initialClient = useSearchParams().get('client') ?? '';
 
@@ -484,5 +484,23 @@ export default function AdsScannerPage() {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * `useSearchParams()` di AdsScannerWorkspace membuat halaman ini butuh
+ * batas <Suspense> saat prerender.
+ *
+ * Hari ini ketiadaannya KEBETULAN tidak memerahkan build: `(shell)/layout.tsx`
+ * mengembalikan "Memuat…" selagi `loading`, jadi badan halaman tak pernah
+ * dieksekusi saat prerender. Itu kebetulan yang rapuh — ia berhenti berlaku
+ * begitu layout-nya merender anaknya lebih awal. Pola ini sama dengan
+ * `tasks/page.tsx` dan `account/rekap/page.tsx`.
+ */
+export default function AdsScannerPage() {
+  return (
+    <Suspense fallback={<div className="stack"><p className="muted">Memuat...</p></div>}>
+      <AdsScannerWorkspace />
+    </Suspense>
   );
 }
