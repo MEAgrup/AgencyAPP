@@ -27,7 +27,12 @@ export const KPI_COMPONENTS = [
 // M16/M17 — AI Optimizer + Store Operation ditambahkan dengan bobot AWAL 0 di
 // setiap komponen (DECISIONS.md 2026-08-28 + LT-1); lead time-nya terukur sejak
 // hari pertama tapi belum menggerakkan skor sampai Director menetapkan angkanya.
-export const ROLE_TYPES = ['Creative', 'Ads', 'KOL', 'AM', 'AI Optimizer', 'Store Operation'] as const;
+// 'Sales' (KS-4b, DECISIONS.md 2026-09-05) beda kelas: TIDAK ada baris
+// `perf_kpi_weights` yang di-seed dan TIDAK terhubung ke job snapshot bulanan —
+// section-nya muncul kosong ("Total: 0.0%") sampai Director menetapkan
+// komponen + bobot lewat API (form "Ubah Bobot" di bawah baru bisa MENGUBAH
+// baris yang sudah ada, belum bisa MENAMBAH baris baru).
+export const ROLE_TYPES = ['Creative', 'Ads', 'KOL', 'AM', 'AI Optimizer', 'Store Operation', 'Sales'] as const;
 export const DIVISIONS = ['Creative', 'Ads', 'KOL', 'Account', 'AI Optimizer', 'Store Operation'] as const; // Account = AM
 
 // Individual component in snapshot

@@ -51,6 +51,25 @@ export const ROLE_AM = 'AM';
 // moves until `perf_kpi_weights` gets a non-zero row for these role_types.
 export const ROLE_AI_OPT = 'AI Optimizer';
 export const ROLE_STORE_OPS = 'Store Operation';
+// KS-4b (DECISIONS.md 2026-09-05, pemilik) — `Sales` DIDAFTARKAN sebagai
+// role_type M14, tapi HANYA di lapisan config (`validRoleTypes` di bawah):
+// Director bisa memanggil `setWeights`/`setTarget` untuk 'Sales' begitu
+// komponen + bobotnya disepakati. SENGAJA TIDAK diperlakukan seperti AI
+// Optimizer/Store Operation (LT-33): kedua role type itu punya candidate
+// provider nyata (`aiOptCandidates`/`storeOpsCandidates`, dari Brief) yang
+// membuat pendaftarannya ke `roleTypeOfDivision`/`runSnapshotJob` aman —
+// `profileOk` tetap bisa `false`, nol data dikarang. Sales beda: ia bukan
+// `division_registry` entry (lini bisnis sendiri — `sales.ts`/`salesperf.ts`,
+// bukan Brief/dispatch) DAN daftar komponen skornya belum disepakati (KS-4
+// menyingkap closing ratio belum pernah dihitung `salesperf.ts`). Mendaftarkan
+// ke `roleTypeOfDivision`/`runSnapshotJob` SEKARANG berarti setiap staff Sales
+// mulai mendapat snapshot bulanan IMMUTABLE (house rule 3 — tak bisa
+// dihapus/diperbaiki) berisi skor null tanpa provider apa pun, plus
+// notifikasi `PerformancePublished` kosong tiap bulan — melanggar persis
+// janji "nol skor siapa pun berubah" yang jadi alasan opsi bobot-0 dipilih.
+// Jadi: terdaftar di config, TIDAK terhubung ke job snapshot, sampai daftar
+// komponen nyata disepakati (lihat performance.test.ts).
+export const ROLE_SALES = 'Sales';
 
 export const CREATIVE_DIVISION = 'Creative';
 export const ADS_DIVISION = 'Ads';
@@ -461,7 +480,7 @@ const DEFAULT_TARGET_DATE = '0001-01-01';
 const DEFAULT_TARGET_STAFF = '*';
 
 /** The closed set a config write may target. */
-const validRoleTypes = new Set([ROLE_CREATIVE, ROLE_ADS, ROLE_KOL, ROLE_AM, ROLE_AI_OPT, ROLE_STORE_OPS]);
+const validRoleTypes = new Set([ROLE_CREATIVE, ROLE_ADS, ROLE_KOL, ROLE_AM, ROLE_AI_OPT, ROLE_STORE_OPS, ROLE_SALES]);
 
 /** One (role_type, component) weight row. */
 export interface KPIWeight {

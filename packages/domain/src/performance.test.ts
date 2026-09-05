@@ -37,6 +37,7 @@ import {
   getSnapshot,
   NotFoundError,
   ROLE_ADS,
+  ROLE_SALES,
   runScan,
   runSnapshotJob,
   scoreDisplay,
@@ -751,7 +752,9 @@ describeDb('config: Σ≠100 rejected; gate Director-only', () => {
     const good = { speed_score: 25, roas_attainment: 30, gmv_impact: 25, optimization_activity: 20 };
     await expect(setWeights(sql, director(), ROLE_ADS, good)).resolves.toBeUndefined();
     await expect(setWeights(sql, adsLead(), ROLE_ADS, good)).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(setWeights(sql, director(), 'Sales', good)).rejects.toBeInstanceOf(ValidationError);
+    // 'Sales' sendiri kini VALID (KS-4b, di bawah) — pakai role_type yang
+    // benar-benar tidak terdaftar untuk menjaga assersi ini.
+    await expect(setWeights(sql, director(), 'Bogus', good)).rejects.toBeInstanceOf(ValidationError);
     const n = Number(
       (await sql<{ n: string }[]>`select count(*) as n from audit_log where entity_type = 'perf_kpi_weights' and action = 'weights_set'`)[0].n,
     );
@@ -806,6 +809,46 @@ describeDb('LT-33: AI Optimizer / Store Operation role types (registered at weig
     expect(snap.profileScore).toBeNull();
     expect(snap.scoreDisplay).toBe('—');
     expect(snap.finalScore).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// KS-4b — `Sales` registered at the CONFIG layer only (DECISIONS.md 2026-09-05).
+// Deliberately NOT the LT-33 pattern above: Sales has no candidate provider and
+// is not a division_registry entry, so it must NOT reach runSnapshotJob yet —
+// that would mint a PERMANENT null-score snapshot + a hollow notification for
+// every real Sales employee, for a role type with zero components decided.
+// ---------------------------------------------------------------------------
+describeDb('KS-4b: Sales role type registered at weight 0 (config-only, not wired to snapshots)', () => {
+  it('Director can set/get weights for Sales (validRoleTypes), but the monthly job creates NO snapshot and sends NO notification for Sales staff', async () => {
+    const staff = uid('EMP-SALESM14');
+    await insEmployee(staff, 'Sales', 'ZZ-SALESM14-Jab');
+    await insRoleMapping('Sales', 'ZZ-SALESM14-Jab', 'Sales', 'staff');
+
+    // Config layer: Director CAN register real weights for Sales once the
+    // component list is decided — this is what "didaftarkan" buys today.
+    await expect(setWeights(sql, director(), ROLE_SALES, { closing_ratio: 100 })).resolves.toBeUndefined();
+    const weights = await sql<{ role_type: string; component: string; weight: string }[]>`
+      select role_type, component, weight from perf_kpi_weights where role_type = ${ROLE_SALES}`;
+    expect(weights).toEqual([{ role_type: 'Sales', component: 'closing_ratio', weight: '100.000' }]);
+
+    // Scoring layer: gatherProfile has no ROLE_SALES case (default branch),
+    // and roleTypeOfDivision has no 'Sales' case (division→null), so
+    // runSnapshotJob's `roleTypeFor` returns null for this staff and `continue`s
+    // — the same "no KPI Profile for this division/level" path as any
+    // profile-less division today. Prove it stays that way.
+    await runSnapshotJob(sql, nowJul);
+    await expect(getSnapshot(sql, director(), staff, JUNE)).rejects.toBeInstanceOf(NotFoundError);
+    const snapCount = Number(
+      (await sql<{ n: string }[]>`select count(*) as n from performance_snapshots where staff_id = ${staff}`)[0].n,
+    );
+    expect(snapCount).toBe(0);
+    const noteCount = Number(
+      (await sql<{ n: string }[]>`
+        select count(*) as n from notifications
+         where recipient_employee_id = ${staff} and event_type = 'm14.performance.published'`)[0].n,
+    );
+    expect(noteCount).toBe(0);
   });
 });
 
