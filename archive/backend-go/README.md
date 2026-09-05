@@ -31,7 +31,7 @@ git ls-tree -r 133f717 --name-only backend/
 ```
 
 Tag lokal `backend-go-final` menunjuk commit yang sama. **Tag itu belum ada di remote** —
-push-nya ditolak remote (lihat `docs/DECISIONS.md` entri C-05 2026-09-04). Commit SHA di
+push-nya diblokir **proxy sesi Claude**, bukan remote — write ke path git-refs/tags tidak diizinkan lewat proxy (dikonfirmasi 2026-09-05; lihat `docs/DECISIONS.md` entri C-05). Commit SHA di
 atas adalah jangkar yang sesungguhnya; tag hanya kenyamanan.
 
 ## Statusnya sebagai oracle paritas
