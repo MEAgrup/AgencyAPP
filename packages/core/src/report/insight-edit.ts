@@ -22,6 +22,7 @@
  *    carry markup even if a future renderer forgets to escape.
  */
 import type { PayloadInsight } from './payload';
+import { isTahapKey, TAHAP_LABEL, type TahapNarasi } from './tahap';
 import type { Rekomendasi } from './types';
 
 /** Per-field character ceilings. Generous for prose, hard enough to bound a row. */
@@ -35,12 +36,21 @@ export const INSIGHT_MAX = {
   rekTimeline: 60,
   indNama: 80,
   indTarget: 120,
+  tahapJudul: 120,
+  tahapTeks: 2000,
 } as const;
 
 /** List-length ceilings. A report with 40 "key" insights has none. */
 export const INSIGHT_MAX_POIN = 15;
 export const INSIGHT_MAX_REK = 8;
 export const INSIGHT_MAX_INDIKATOR = 8;
+/**
+ * One paragraph per stage, and only the three stages exist — so the ceiling is
+ * the stage count itself. A fourth row is not "too many", it is a row whose
+ * `tahap` key the renderer has nowhere to put; `MSG_TAHAP_TAK_DIKENAL` catches
+ * that case with a message that says which value was wrong.
+ */
+export const INSIGHT_MAX_TAHAP = 3;
 
 // ---------------------------------------------------------------------------
 // Messages (BI, house rule #5)
@@ -56,6 +66,9 @@ export const MSG_REK_TAK_LENGKAP =
 export const MSG_INDIKATOR_TAK_LENGKAP = '[setiap indikator wajib punya nama dan target]';
 export const MSG_ADA_MARKUP =
   '[teks insight tidak boleh memuat tanda < atau > — tulis sebagai teks biasa]';
+export const MSG_TAHAP_TAK_DIKENAL = '[tahap tidak dikenal — pilih Awareness, Consideration, atau Conversion]';
+export const MSG_TAHAP_GANDA = '[setiap tahap hanya boleh punya satu narasi]';
+export const MSG_TAHAP_TAK_LENGKAP = '[narasi tahap wajib punya judul dan teks]';
 
 /** `[teks "…" melebihi N karakter]` — names the offending field, not just "too long". */
 export function msgTerlaluPanjang(label: string, max: number): string {
@@ -75,6 +88,7 @@ export interface InsightDraft {
   rekomendasi_sedang?: unknown;
   outlook?: unknown;
   indikator?: unknown;
+  tahap_narasi?: unknown;
 }
 
 /** Thrown with a BI `[...]` message; the API maps it to 400. */
@@ -142,6 +156,39 @@ function normIndikator(rows: unknown[]): { nama: string; target: string }[] {
 }
 
 /**
+ * R3 — the per-stage prose.
+ *
+ * A blank row is dropped like every other list here, and a PARTLY filled one is
+ * refused for the same reason a half-written recommendation is: a stage heading
+ * with no body under it reads to the client as a section MEA forgot to finish.
+ * Order is normalised to Awareness → Consideration → Conversion regardless of
+ * how the form submitted it — the funnel only reads one way, and a report whose
+ * stage paragraphs run backwards is a rendering bug the AM cannot see coming.
+ */
+function normTahapNarasi(rows: unknown[]): TahapNarasi[] {
+  if (rows.length > INSIGHT_MAX_TAHAP) throw new InsightDraftError(MSG_TAHAP_GANDA);
+  const out: TahapNarasi[] = [];
+  const seen = new Set<string>();
+  for (const raw of rows) {
+    const r = (raw ?? {}) as Record<string, unknown>;
+    const judul = str(r.judul);
+    const teks = str(r.teks);
+    if (!judul && !teks) continue;
+    if (!isTahapKey(r.tahap)) throw new InsightDraftError(MSG_TAHAP_TAK_DIKENAL);
+    if (!judul || !teks) throw new InsightDraftError(MSG_TAHAP_TAK_LENGKAP);
+    if (seen.has(r.tahap)) throw new InsightDraftError(MSG_TAHAP_GANDA);
+    seen.add(r.tahap);
+    out.push({
+      tahap: r.tahap,
+      judul: bounded(judul, INSIGHT_MAX.tahapJudul, `judul narasi tahap ${TAHAP_LABEL[r.tahap]}`),
+      teks: bounded(teks, INSIGHT_MAX.tahapTeks, `teks narasi tahap ${TAHAP_LABEL[r.tahap]}`),
+    });
+  }
+  const urut = Object.keys(TAHAP_LABEL);
+  return out.sort((a, b) => urut.indexOf(a.tahap) - urut.indexOf(b.tahap));
+}
+
+/**
  * Validate + normalise an edited insight into the exact shape the renderer and
  * the engine both speak (`PayloadInsight`). Throws `InsightDraftError` with a
  * BI `[...]` message on the first problem; returns trimmed, bounded, markup-free
@@ -171,5 +218,6 @@ export function normalizeInsightDraft(d: InsightDraft): PayloadInsight {
     rekomendasi_sedang: normRekomendasi(asArray(d.rekomendasi_sedang), 'prioritas sedang'),
     outlook: bounded(outlook, INSIGHT_MAX.outlook, 'outlook'),
     indikator: normIndikator(asArray(d.indikator)),
+    tahap_narasi: normTahapNarasi(asArray(d.tahap_narasi)),
   };
 }

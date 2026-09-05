@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Editor insight laporan klien (C1 lanjutan) — the six narrative fields, and
+ * Editor insight laporan klien (C1 lanjutan) — the narrative fields, and
  * the gate that decides what the client actually reads.
  *
  * ## What is editable here, and what is not
@@ -9,7 +9,14 @@
  * The report's NUMBERS are immutable — `client_reports.payload` is frozen by a
  * DB trigger, and nothing on this screen offers to change one. What the AM
  * rewrites is the prose the client reads: the executive summary, the key
- * insights, the two recommendation lists, the outlook and its indicators.
+ * insights, the two recommendation lists, the outlook and its indicators, and
+ * (R3) one paragraph per buyer-journey stage.
+ *
+ * The stage paragraphs are the reason R3 needed an editor change at all. The
+ * stage TABLES are numbers and behave like every other number here — frozen,
+ * uneditable, recomputed from the export. The paragraph beside each table is
+ * where the AM says what the numbers meant, which is the half of the report the
+ * engine cannot write and the client actually reads.
  *
  * ## Why "Simpan" and "Terbitkan" are two buttons
  *
@@ -23,6 +30,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import {
+  TAHAP_OPTIONS,
   canPublishReportUi,
   getReportInsight,
   labelStatusPublikasi,
@@ -35,6 +43,8 @@ import {
   STATUS_TERBIT,
   type Indikator,
   type Rekomendasi,
+  type TahapKey,
+  type TahapNarasi,
   type ReportInsight,
   type ReportInsightBundle,
 } from '@/lib/report';
@@ -42,6 +52,9 @@ import {
 /** Blank rows the editor renders so there is always somewhere to type. */
 const REK_KOSONG: Rekomendasi = { judul: '', target: '', dampak: '', timeline: '' };
 const IND_KOSONG: Indikator = { nama: '', target: '' };
+
+/** The three stages, in funnel order — the order the report renders them in. */
+const TAHAP_URUT = TAHAP_OPTIONS.filter((o) => o.value !== '') as Array<{ value: TahapKey; label: string }>;
 
 function statusTone(status: string): string {
   if (status === STATUS_TERBIT) return 'badge badgeSuccess';
@@ -152,6 +165,45 @@ function IndEditor({
   );
 }
 
+/**
+ * One paragraph per stage.
+ *
+ * Renders a fixed row per stage rather than a list with an "add" button: there
+ * are exactly three stages and no fourth is possible, so an add/remove UI would
+ * only offer ways to produce a draft the server refuses. A stage left blank is
+ * simply dropped on save — that is how an AM removes a paragraph.
+ */
+function TahapEditor({
+  value, disabled, onChange,
+}: { value: TahapNarasi[]; disabled: boolean; onChange: (v: TahapNarasi[]) => void }) {
+  const setOne = (tahap: TahapKey, patch: Partial<TahapNarasi>) => {
+    const lain = value.filter((n) => n.tahap !== tahap);
+    const kini = value.find((n) => n.tahap === tahap) ?? { tahap, judul: '', teks: '' };
+    const baru = { ...kini, ...patch };
+    // Order is normalised on the server too; keeping it here as well means the
+    // form never renders the stages in a different order than the report does.
+    onChange([...lain, baru].sort(
+      (a, b) => TAHAP_URUT.findIndex((t) => t.value === a.tahap) - TAHAP_URUT.findIndex((t) => t.value === b.tahap)));
+  };
+  return (
+    <div className="stack" style={{ gap: 10 }}>
+      {TAHAP_URUT.map((t) => {
+        const n = value.find((x) => x.tahap === t.value) ?? { tahap: t.value, judul: '', teks: '' };
+        return (
+          <div key={t.value} className="stack" style={{ gap: 6, borderLeft: '3px solid var(--border)', paddingLeft: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 600 }}>{t.label}</div>
+            <input value={n.judul} disabled={disabled} placeholder="Judul paragraf (mis. Apa yang berhasil di tahap ini)"
+              onChange={(e) => setOne(t.value, { judul: e.target.value })} style={{ fontSize: 13 }} />
+            <textarea rows={3} value={n.teks} disabled={disabled}
+              placeholder="Kosongkan bila tahap ini tidak perlu diberi catatan"
+              onChange={(e) => setOne(t.value, { teks: e.target.value })} style={{ fontSize: 13 }} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function InsightEditor({ reportId, onPublikasiChange }: {
   reportId: number;
   /** Lets the parent list refresh its status badge without a full reload. */
@@ -228,9 +280,10 @@ export default function InsightEditor({ reportId, onPublikasiChange }: {
       {info && <div className="alert alertSuccess" style={{ fontSize: 13 }}>{info}</div>}
 
       <div className="note" style={{ fontSize: 12 }}>
-        Yang bisa disunting di sini hanya <strong>teks insight</strong>. Angka laporan
-        (GMV, ROAS, skor, tabel) berasal dari berkas export dan tidak bisa diubah —
-        kalau angkanya salah, buat laporan baru dari berkas yang benar.
+        Yang bisa disunting di sini hanya <strong>teks insight dan saran</strong>. Angka
+        laporan (GMV, ROAS, skor, tabel funnel, metrik per tahap) berasal dari berkas
+        export dan tidak bisa diubah — kalau angkanya salah, buat laporan baru dari
+        berkas yang benar.
       </div>
 
       <div className="field">
@@ -267,6 +320,12 @@ export default function InsightEditor({ reportId, onPublikasiChange }: {
         <label>Indikator</label>
         <IndEditor value={draft.indikator} disabled={!bolehTulis || busy}
           onChange={(v) => setDraft({ ...draft, indikator: v })} />
+      </div>
+
+      <div className="field">
+        <label>Narasi per Tahap (Awareness / Consideration / Conversion)</label>
+        <TahapEditor value={draft.tahap_narasi} disabled={!bolehTulis || busy}
+          onChange={(v) => setDraft({ ...draft, tahap_narasi: v })} />
       </div>
 
       {bolehTulis && (

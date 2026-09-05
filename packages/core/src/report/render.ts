@@ -19,6 +19,7 @@
  */
 import { dec, esc, num, pct, rp } from '../baseline/angka';
 import type { PayloadInsight, ReportPayload } from './payload';
+import { TAHAP_LABEL, type TahapKey } from './tahap';
 
 export type RenderMode = 'klien' | 'internal';
 
@@ -101,6 +102,22 @@ export function chartData(p: ReportPayload): Record<string, unknown> {
     liveHari: p.live ? { labels: p.live.per_hari.map((d) => d.label), gmv: p.live.per_hari.map((d) => d.gmv ?? 0), gmvPerJam: p.live.per_hari.map((d) => d.gmv_per_jam ?? 0) } : null,
     quadRel: p.produk ? quadBubble(p.produk.relatif, p.produk.ambang.relatif) : null,
     quadBench: p.produk ? quadBubble(p.produk.benchmark, p.produk.ambang.benchmark) : null,
+    // Only the rungs that HAVE a number reach the chart. A missing rung must not
+    // become a zero bar: on a log axis a zero is dropped silently, and on any
+    // axis it draws "nobody added to cart" for a file that simply was not
+    // uploaded. The table beside it names the gap in words instead.
+    funnel: p.tahap
+      ? {
+          labels: p.tahap.funnel.filter((f) => f.nilai != null).map((f) => f.label),
+          values: p.tahap.funnel.filter((f) => f.nilai != null).map((f) => f.nilai as number),
+        }
+      : null,
+    belanjaTahap: p.tahap && p.tahap.belanja_total
+      ? {
+          labels: p.tahap.blok.filter((b) => b.belanja != null).map((b) => b.label),
+          values: p.tahap.blok.filter((b) => b.belanja != null).map((b) => b.belanja as number),
+        }
+      : null,
   };
 }
 
@@ -168,6 +185,110 @@ function seksiRingkasan(p: ReportPayload, mode: RenderMode, I: PayloadInsight): 
   <div class="mt-4 p-4 bg-white rounded-xl border border-slate-100 insight-card"><p class="text-sm font-medium text-slate-700">${esc(I.ringkasan)}</p></div>
   <p class="text-xs text-slate-400 mt-2">Perbandingan periode diambil langsung dari baris "Perubahan persentase" pada berkas Analitik Toko TikTok.</p>${catatan}${mode === 'internal' ? `
   <p class="text-xs text-slate-400 mt-1"><span class="badge-int">INTERNAL</span> Mesin ${esc(p.engine_versi)} • benchmark versi ${p.benchmark_versi ?? DASH} • GMV ${esc(p.periode.definisi_gmv)} • ${p.periode.hari} hari.</p>` : ''}`;
+}
+
+/* -------------------------------------------------------------------------
+ * R3 — the buyer-journey layer (Awareness → Consideration → Conversion)
+ *
+ * Four sections that sit BETWEEN the executive summary and the source-by-source
+ * sections below. They add a reading, not numbers: every figure here is already
+ * in the payload, re-projected by `tahap.ts`.
+ *
+ * Both modes render them. The stage view is the client's answer to "how far
+ * along is my shop?", and MEA reads the same page the client does — `internal`
+ * only adds the benchmark band it was judged against, so an AM can see WHY a
+ * rung is amber without that reasoning sitting in a file the client forwards.
+ * ---------------------------------------------------------------------------- */
+
+const FLAG_WARNA: Record<string, string> = {
+  hijau: 'text-emerald-700', kuning: 'text-amber-700', merah: 'text-red-700', kosong: 'text-slate-400',
+};
+
+const TAHAP_IKON: Record<TahapKey, string> = {
+  awareness: 'fa-eye', consideration: 'fa-magnifying-glass-chart', conversion: 'fa-cart-shopping',
+};
+
+/** Format one stage metric by its own declared unit — the renderer's only job here. */
+function nilaiTahap(m: { nilai: number | null; satuan: string }): string {
+  if (m.nilai == null) return DASH;
+  if (m.satuan === 'rupiah') return rp(m.nilai);
+  if (m.satuan === 'persen') return pct(m.nilai, 2);
+  if (m.satuan === 'kali') return dec(m.nilai, 2) + 'x';
+  return num(m.nilai);
+}
+
+/**
+ * The funnel table + its bar chart.
+ *
+ * The "Rentang sehat" column is `—` for every rung but the last, and that is not
+ * an omission: only `pesanan/pengunjung` has a threshold in the versioned
+ * `report_benchmark`. Printing a range for the others would mean this file
+ * inventing an unversioned benchmark — the exact drift the engine was built to
+ * remove (see `tahap.ts` header). A range appears here the day one is
+ * calibrated, not the day a developer has an opinion.
+ */
+function seksiFunnel(p: ReportPayload, mode: RenderMode): string {
+  const t = p.tahap;
+  if (!t) return '';
+  const rows = t.funnel.map((f) => {
+    const lolos = f.lolos == null
+      ? `<span class="text-slate-400">${DASH}</span>`
+      : `<span class="${FLAG_WARNA[f.flag] ?? ''}">${pct(f.lolos, 2)}</span>`;
+    const dari = f.lolos_dari ? `<div class="text-[0.65rem] text-slate-400">dari ${esc(f.lolos_dari)}</div>` : '';
+    const nilai = f.nilai == null
+      ? `<span class="text-slate-400">${DASH}</span>${f.catatan ? `<div class="text-[0.65rem] text-slate-400">${esc(f.catatan)}</div>` : ''}`
+      : `<b>${num(f.nilai)}</b>`;
+    const band = f.band == null ? DASH : `${pct(f.band.warn, 1)}–${pct(f.band.good, 1)}`;
+    return `<tr class="border-b last:border-0">${td(esc(f.label))}${td(nilai, true)}${td(lolos + dari, true)}${mode === 'internal' ? td(band, true) : ''}</tr>`;
+  });
+  const head = ['Tahap', 'Jumlah', 'Lolos ke tahap ini'];
+  const align: ('l' | 'r')[] = ['l', 'r', 'r'];
+  if (mode === 'internal') { head.push('Rentang sehat'); align.push('r'); }
+  // End-to-end conversion, stated on its own line rather than as a row of the
+  // table: it is orders against VISITORS every time, which is what makes it the
+  // one rate here that can be judged (see `tahap.ts`).
+  const kt = t.konversi_total;
+  const ktBand = mode === 'internal'
+    ? ` <span class="text-slate-400">(sehat ${pct(kt.band.warn, 1)}–${pct(kt.band.good, 1)})</span>`
+    : '';
+  return `<div class="grid md:grid-cols-2 gap-4">
+  <div class="bg-white rounded-xl border border-slate-100 p-5"><canvas id="c_funnel" height="220"></canvas>
+    <p class="text-[0.7rem] text-slate-400 mt-2">Skala logaritmik agar seluruh tahap terlihat dalam satu tampilan.</p></div>
+  <div class="bg-white rounded-xl border border-slate-100 p-5">${tabel(head, rows, align)}
+    <p class="text-xs text-slate-600 mt-3">Konversi ujung ke ujung (pesanan dari pengunjung):
+      <b class="${FLAG_WARNA[kt.flag] ?? ''}">${pct(kt.nilai, 2)}</b>${ktBand}</p>
+    <p class="text-[0.7rem] text-slate-400 mt-2">Setiap baris tabel dibaca terhadap tahap terakhir yang angkanya tersedia, jadi pembaginya ikut berubah bila berkas iklan tidak diunggah — karena itu hanya konversi ujung ke ujung yang diberi penilaian.</p></div></div>`;
+}
+
+/** One stage: what it is for, the AM's paragraph, its spend share, its metrics. */
+function seksiTahap(p: ReportPayload, key: TahapKey, I: PayloadInsight): string {
+  const t = p.tahap;
+  if (!t) return '';
+  const b = t.blok.find((x) => x.key === key);
+  if (!b) return '';
+  const narasi = I.tahap_narasi.find((n) => n.tahap === key);
+  const lencana = b.fokus
+    ? '<span class="px-2 py-0.5 bg-teal-600 text-white text-[0.65rem] font-bold rounded-full">FOKUS PERIODE INI</span>'
+    : '';
+  const belanja = b.belanja == null
+    ? ''
+    : `<div class="text-xs text-slate-500 mt-1">Investasi media tahap ini <b>${rp(b.belanja)}</b>${b.belanja_persen == null ? '' : ` • ${pct(b.belanja_persen, 1)} dari total`}</div>`;
+  const kartu = b.metrik.map((m) =>
+    `<div class="bg-white rounded-xl border border-slate-100 p-4">
+      <div class="text-[0.7rem] font-semibold text-slate-500 uppercase tracking-wide">${esc(m.label)}</div>
+      <div class="kpi-value mt-1 ${FLAG_WARNA[m.flag] ?? 'text-teal-700'}">${nilaiTahap(m)}</div></div>`).join('');
+  // The AM's paragraph, when there is one. No fallback to a generated sentence:
+  // an empty stage narrative means the AM cleared it, and quietly restoring the
+  // engine's draft would put words back that a person deliberately removed.
+  const prosa = narasi
+    ? `<div class="mt-3 p-4 bg-white rounded-xl border border-slate-100 insight-card">
+        <div class="text-sm font-semibold text-slate-900">${esc(narasi.judul)}</div>
+        <p class="text-sm text-slate-700 mt-1">${esc(narasi.teks)}</p></div>`
+    : '';
+  return `<div class="bg-teal-50 border border-teal-100 rounded-xl p-4 mb-3">
+    <div class="flex items-center gap-2 flex-wrap"><span class="text-sm font-bold text-teal-800">Tujuan tahap ini</span>${lencana}</div>
+    <p class="text-sm text-slate-700 mt-1">${esc(b.tujuan)}</p>${belanja}</div>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3">${kartu}</div>${prosa}`;
 }
 
 /**
@@ -462,6 +583,13 @@ const CHART_BOOT = `
       y:{title:{display:true,text:'CVR (%)'},min:0,suggestedMax:Math.max(1,maxY*1.15)}}}});
  }
  quad('c_quad_rel',C.quadRel); quad('c_quad_bench',C.quadBench);
+ // Funnel: horizontal bars on a LOG x axis, for the same reason the quadrant
+ // uses one — impressions and orders differ by five orders of magnitude, and on
+ // a linear axis every rung below "klik" is an invisible sliver.
+ if(el('c_funnel')&&C.funnel&&C.funnel.values.length) new Chart(el('c_funnel'),{type:'bar',
+  data:{labels:C.funnel.labels,datasets:[{label:'Jumlah',data:C.funnel.values,backgroundColor:T,borderRadius:6}]},
+  options:{indexAxis:'y',plugins:{legend:{display:false}},
+   scales:{x:{type:'logarithmic',title:{display:true,text:'Jumlah orang / kejadian'}},y:{grid:{display:false}}}}});
 })();`;
 
 /**
@@ -560,6 +688,22 @@ export function renderBody(p: ReportPayload, mode: RenderMode, insight?: Payload
   };
 
   add('Ringkasan Eksekutif', seksiRingkasan(p, mode, I), 'fa-chart-line');
+  // R3 — the buyer-journey reading comes FIRST, before the source-by-source
+  // sections, because it is the frame the rest is read through: a one-month-old
+  // shop is legitimately heavy at Awareness, and a reader who meets the store
+  // CVR before that context reads a red number as a verdict.
+  //
+  // `p.tahap` is absent on reports generated before R3. Those payloads are
+  // FROZEN and can never be backfilled, so the layer is skipped rather than
+  // faked — the one place in this renderer where a missing key is tolerated
+  // instead of being the O43 bug, and only because the alternative is a page
+  // full of `—` that says nothing.
+  if (p.tahap) {
+    add('Perjalanan Pembeli', seksiFunnel(p, mode), 'fa-arrow-down-short-wide');
+    for (const [i, key] of (['awareness', 'consideration', 'conversion'] as TahapKey[]).entries()) {
+      add(`Tahap ${i + 1} — ${TAHAP_LABEL[key]}`, seksiTahap(p, key, I), TAHAP_IKON[key]);
+    }
+  }
   if (p.kpi.harian.length) add('Tren Harian', '<div class="bg-white rounded-xl border border-slate-100 p-5"><canvas id="c_harian" height="100"></canvas></div>', 'fa-arrow-trend-up');
   add('Sumber GMV', seksiKanal(p, mode), 'fa-diagram-project');
   add('GMV Max Ads', seksiIklan(p, mode), 'fa-bullseye');

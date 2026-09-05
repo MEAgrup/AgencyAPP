@@ -28,13 +28,16 @@ import {
   MSG_BELUM_TERBIT,
   MSG_SUDAH_ADA,
   MSG_SUDAH_TERBIT,
+  MSG_TAHAP_FOKUS_TAK_DIKENAL,
   MSG_TAK_ADA_PERUBAHAN,
   publishReport,
   renderReport,
+  renderReportForDownload,
   republishReport,
   resetReportInsight,
   revokeReport,
   saveReportInsight,
+  setTahapFokus,
   STATUS_DICABUT,
   STATUS_DRAF,
   STATUS_TERBIT,
@@ -454,5 +457,152 @@ describeDb('insight laporan — revisi & paku', () => {
     await expect(sql`update client_report_insight set ringkasan = 'x' where report_id = ${id}`)
       .rejects.toThrow();
     await expect(sql`delete from client_report_insight where report_id = ${id}`).rejects.toThrow();
+  });
+});
+
+// ===========================================================================
+// R3 — tahap fokus, funnel di payload, dan unduhan bernama
+// ===========================================================================
+describeDb('setTahapFokus — siapa yang boleh, dan apa yang tercatat', () => {
+  it('lets the OWNING AM set it, and echoes what was stored', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    expect(await setTahapFokus(sql, actorAm, client, pid, 'awareness')).toBe('awareness');
+    const rows = await sql<{ tahap_fokus: string | null }[]>`
+      select tahap_fokus from client_platforms where id = ${pid}`;
+    expect(rows[0].tahap_fokus).toBe('awareness');
+  });
+
+  it('treats the empty string a <select> submits as "clear", not as an error', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    await setTahapFokus(sql, actorAm, client, pid, 'conversion');
+    expect(await setTahapFokus(sql, actorAm, client, pid, '')).toBeNull();
+    expect(await setTahapFokus(sql, actorAm, client, pid, null)).toBeNull();
+  });
+
+  it('refuses an unknown stage with the BI message, and changes nothing', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    await setTahapFokus(sql, actorAm, client, pid, 'awareness');
+    await expect(setTahapFokus(sql, actorAm, client, pid, 'retention'))
+      .rejects.toThrow(MSG_TAHAP_FOKUS_TAK_DIKENAL);
+    const rows = await sql<{ tahap_fokus: string | null }[]>`
+      select tahap_fokus from client_platforms where id = ${pid}`;
+    expect(rows[0].tahap_fokus).toBe('awareness');
+  });
+
+  it('refuses a non-owning AM, and refuses OD — who may READ everything but writes nothing', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    await expect(setTahapFokus(sql, actorStray, client, pid, 'awareness')).rejects.toThrow();
+    await expect(setTahapFokus(sql, actorOd, client, pid, 'awareness')).rejects.toThrow();
+    const rows = await sql<{ tahap_fokus: string | null }[]>`
+      select tahap_fokus from client_platforms where id = ${pid}`;
+    expect(rows[0].tahap_fokus).toBeNull();
+  });
+
+  it('records the change before→after in the audit log', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    await setTahapFokus(sql, actorAm, client, pid, 'consideration');
+    const rows = await sql<{ before_json: unknown; after_json: unknown }[]>`
+      select before_json, after_json from audit_log
+       where entity_type = 'client' and entity_id = ${client} and action = 'tahap_fokus_diubah'`;
+    expect(rows).toHaveLength(1);
+    expect((rows[0].before_json as { tahap_fokus: string | null }).tahap_fokus).toBeNull();
+    expect((rows[0].after_json as { tahap_fokus: string | null }).tahap_fokus).toBe('consideration');
+  });
+});
+
+describeDb('tahap — stempel ke payload yang beku', () => {
+  it('stamps the stage in force at generation time', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    await setTahapFokus(sql, actorAm, client, pid, 'awareness');
+    const d = await createReport(sql, actorAm, client, {
+      clientPlatformId: pid, periodeTipe: 'bulanan', files: [fileFrom('toko.xlsx', shopTtAoa())],
+    });
+    expect((d.payload as { tahap: { fokus: string | null } }).tahap.fokus).toBe('awareness');
+  });
+
+  it('leaves an ALREADY-ISSUED report saying what it said when the shop moves on', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    await setTahapFokus(sql, actorAm, client, pid, 'awareness');
+    const d = await createReport(sql, actorAm, client, {
+      clientPlatformId: pid, periodeTipe: 'bulanan', files: [fileFrom('toko.xlsx', shopTtAoa())],
+    });
+    // The shop graduates to the next stage…
+    await setTahapFokus(sql, actorAm, client, pid, 'conversion');
+    // …and last month's report is unmoved. This is the whole reason the value is
+    // stamped rather than joined at read time.
+    const lagi = await getReport(sql, actorAm, d.id);
+    expect((lagi.payload as { tahap: { fokus: string | null } }).tahap.fokus).toBe('awareness');
+  });
+
+  it('accepts a store with no stage set — the report is still built', async () => {
+    const client = await seedClient();
+    const pid = await seedPlatform(client);
+    const d = await createReport(sql, actorAm, client, {
+      clientPlatformId: pid, periodeTipe: 'bulanan', files: [fileFrom('toko.xlsx', shopTtAoa())],
+    });
+    expect((d.payload as { tahap: { fokus: string | null } }).tahap.fokus).toBeNull();
+    const html = await renderReport(sql, actorAm, d.id, 'klien');
+    expect(html).toContain('Perjalanan Pembeli');
+    expect(html).not.toContain('FOKUS PERIODE INI');
+  });
+});
+
+describeDb('narasi tahap — revisi, dan angka yang tidak ikut berubah', () => {
+  it('stores the stage prose on the revision and leaves payload byte-identical', async () => {
+    const { id } = await laporanBaru();
+    const sebelum = JSON.stringify((await getReport(sql, actorAm, id)).payload);
+    await saveReportInsight(sql, actorAm, id, {
+      ...DRAF_AM,
+      tahap_narasi: [{ tahap: 'awareness', judul: 'Judul AM', teks: 'Teks AM' }],
+    }, null);
+    const b = await getReportInsight(sql, actorAm, id);
+    expect(b.terbaru.insight.tahap_narasi).toEqual([{ tahap: 'awareness', judul: 'Judul AM', teks: 'Teks AM' }]);
+    // The numbers are the point: an insight edit must not move one of them.
+    expect(JSON.stringify((await getReport(sql, actorAm, id)).payload)).toBe(sebelum);
+  });
+
+  it('carries the AM\'s stage prose into the client render, and the engine\'s before any edit', async () => {
+    const { id } = await laporanBaru();
+    expect(await renderReport(sql, actorAm, id, 'internal')).toContain('Catatan tahap Awareness');
+    await saveReportInsight(sql, actorAm, id, {
+      ...DRAF_AM,
+      tahap_narasi: [{ tahap: 'awareness', judul: 'Judul AM', teks: 'Teks AM' }],
+    }, null);
+    const html = await renderReport(sql, actorAm, id, 'internal');
+    expect(html).toContain('Teks AM');
+    expect(html).not.toContain('Catatan tahap Awareness');
+  });
+
+  it('copies the machine stage prose back on reset, rather than recomputing it', async () => {
+    const { id } = await laporanBaru();
+    const mesin = (await getReportInsight(sql, actorAm, id)).mesin.insight.tahap_narasi;
+    await saveReportInsight(sql, actorAm, id, { ...DRAF_AM, tahap_narasi: [] }, null);
+    const b = await resetReportInsight(sql, actorAm, id);
+    expect(b.terbaru.insight.tahap_narasi).toEqual(mesin);
+  });
+});
+
+describeDb('renderReportForDownload — nama berkas yang membedakan dua salinan', () => {
+  it('names the internal copy differently from the client copy', async () => {
+    const { id } = await laporanBaru();
+    const klien = await renderReportForDownload(sql, actorAm, id, 'klien');
+    const internal = await renderReportForDownload(sql, actorAm, id, 'internal');
+    expect(klien.namaBerkas).toBe('Laporan-Alpha-Digital-2026-08-01.html');
+    expect(internal.namaBerkas).toBe('Laporan-Alpha-Digital-2026-08-01-INTERNAL.html');
+    expect(internal.html.length).toBeGreaterThan(klien.html.length);
+  });
+
+  it('applies the same read scope as every other report read', async () => {
+    const { id } = await laporanBaru();
+    await expect(renderReportForDownload(sql, actorStray, id, 'klien')).rejects.toThrow();
+    // OD reads everywhere — including the internal copy.
+    await expect(renderReportForDownload(sql, actorOd, id, 'internal')).resolves.toBeTruthy();
   });
 });

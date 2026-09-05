@@ -62,6 +62,11 @@ export const MSG_TAK_ADA_PERUBAHAN = '[tidak ada revisi insight baru untuk diter
 // SH-06 — createReportShopee (below).
 export const MSG_BISNIS_HOME_WAJIB = '[berkas Bisnis — Home wajib ada untuk membuat laporan Shopee]';
 export const MSG_PERIODE_LABEL_WAJIB = '[label periode laporan wajib diisi]';
+export const MSG_TAHAP_FOKUS_TAK_DIKENAL =
+  '[tahap fokus tidak dikenal — pilih Awareness, Consideration, atau Conversion]';
+/** Re-exported so a route can answer a malformed platform id with the SAME
+ *  message the domain throws for a missing one — one string, one meaning. */
+export { MSG_PLATFORM_NOT_FOUND } from './riset-awal';
 
 // ---------------------------------------------------------------------------
 // Publication machine (migrasi 20260908010000, STATE_MACHINES §21)
@@ -302,8 +307,8 @@ export async function createReport(sql: Sql, actor: Actor, clientId: string, inp
     // The platform must be an ACTIVE store of THIS client (report anchored to the
     // toko, not the client — keputusan 4). A stale/foreign id is rejected.
     if (!input.clientPlatformId) throw new ValidationError(MSG_PLATFORM_NOT_FOUND);
-    const plat = await tx<{ platform: string; active: boolean; client_id: string; store_link: string | null }[]>`
-      select platform, active, client_id, store_link from client_platforms
+    const plat = await tx<{ platform: string; active: boolean; client_id: string; store_link: string | null; tahap_fokus: string | null }[]>`
+      select platform, active, client_id, store_link, tahap_fokus from client_platforms
        where id = ${input.clientPlatformId} for update`;
     if (plat.length === 0 || plat[0].client_id !== clientId) throw new NotFoundError(MSG_PLATFORM_NOT_FOUND);
     if (!plat[0].active) throw new ValidationError(MSG_PLATFORM_INACTIVE);
@@ -400,6 +405,14 @@ export async function createReport(sql: Sql, actor: Actor, clientId: string, inp
       },
       generatedAt, // server clock, never the browser's
       akunSendiri: input.linkedAccounts,
+      // R3 — the shop's CURRENT focus stage, read here and stamped into the
+      // frozen payload. Deliberately not an input field: the AM sets it on the
+      // store record (one place answers "where is this shop now"), and the row
+      // is locked `for update` above, so the value that reaches the payload is
+      // the one in force at generation time and cannot drift mid-transaction.
+      // Moving the shop to the next stage next month leaves this report saying
+      // exactly what it said the day it was issued.
+      tahapFokus: report.isTahapKey(plat[0].tahap_fokus) ? plat[0].tahap_fokus : null,
     });
 
     const gmvNet = round2(result.M.kpi.gmv);
@@ -453,7 +466,7 @@ export async function createReport(sql: Sql, actor: Actor, clientId: string, inp
     await tx`
       insert into client_report_insight
         (report_id, revisi, sumber, ringkasan, poin, rekomendasi_tinggi,
-         rekomendasi_sedang, outlook, indikator, created_by)
+         rekomendasi_sedang, outlook, indikator, tahap_narasi, created_by)
       values
         (${reportId}, 0, ${INSIGHT_SUMBER_MESIN}, ${result.payload.insight.ringkasan},
          ${tx.json(result.payload.insight.poin as unknown as JsonParam)},
@@ -461,6 +474,7 @@ export async function createReport(sql: Sql, actor: Actor, clientId: string, inp
          ${tx.json(result.payload.insight.rekomendasi_sedang as unknown as JsonParam)},
          ${result.payload.insight.outlook},
          ${tx.json(result.payload.insight.indikator as unknown as JsonParam)},
+         ${tx.json(result.payload.insight.tahap_narasi as unknown as JsonParam)},
          ${actor.employeeId})`;
     await tx`
       insert into client_report_publikasi (report_id, status, created_by)
@@ -655,7 +669,7 @@ export async function createReportShopee(sql: Sql, actor: Actor, clientId: strin
     await tx`
       insert into client_report_insight
         (report_id, revisi, sumber, ringkasan, poin, rekomendasi_tinggi,
-         rekomendasi_sedang, outlook, indikator, created_by)
+         rekomendasi_sedang, outlook, indikator, tahap_narasi, created_by)
       values
         (${reportId}, 0, ${INSIGHT_SUMBER_MESIN}, ${result.payload.insight.ringkasan},
          ${tx.json(result.payload.insight.poin as unknown as JsonParam)},
@@ -663,6 +677,7 @@ export async function createReportShopee(sql: Sql, actor: Actor, clientId: strin
          ${tx.json(result.payload.insight.rekomendasi_sedang as unknown as JsonParam)},
          ${result.payload.insight.outlook},
          ${tx.json(result.payload.insight.indikator as unknown as JsonParam)},
+         ${tx.json(result.payload.insight.tahap_narasi as unknown as JsonParam)},
          ${actor.employeeId})`;
     await tx`
       insert into client_report_publikasi (report_id, status, created_by)
@@ -861,6 +876,36 @@ export async function renderReport(sql: Queryable, actor: Actor, reportId: numbe
   return report.renderReportHtml(d.payload as report.ReportPayload, mode, insight ?? undefined);
 }
 
+/**
+ * renderReportForDownload — the same document, plus the filename it should be
+ * saved as.
+ *
+ * The name is built HERE, from the stored report, for one reason: the `-INTERNAL`
+ * suffix is the only thing distinguishing the two files once they are sitting in
+ * a downloads folder next to each other, and an AM about to attach one to a
+ * client email must be able to tell them apart at a glance. A caller-supplied
+ * name could omit it; this one cannot.
+ *
+ * Reuses the schema dispatch above rather than duplicating it — a Shopee report
+ * downloaded through this path must be the Shopee render, not a TikTok one with
+ * a Shopee name.
+ */
+export async function renderReportForDownload(
+  sql: Queryable, actor: Actor, reportId: number, mode: report.RenderMode,
+): Promise<{ html: string; namaBerkas: string }> {
+  const [html, d] = await Promise.all([
+    renderReport(sql, actor, reportId, mode),
+    getReport(sql, actor, reportId),
+  ]);
+  const toko = (d.payload as { klien?: { toko?: string | null; nama?: string | null } } | null)?.klien;
+  const nama = (toko?.toko || toko?.nama || 'klien').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '');
+  const periode = d.periodeMulai || `${d.hariPeriode}hari`;
+  return {
+    html,
+    namaBerkas: `Laporan-${nama}-${periode}${mode === 'internal' ? '-INTERNAL' : ''}.html`,
+  };
+}
+
 // ===========================================================================
 // Insight yang bisa disunting + gerbang publikasi (migrasi 20260908010000)
 // ===========================================================================
@@ -922,6 +967,10 @@ function rowToInsightRevisi(r: Record<string, unknown>): ReportInsightRevisi {
       rekomendasi_sedang: (r.rekomendasi_sedang ?? []) as report.PayloadInsight['rekomendasi_sedang'],
       outlook: r.outlook as string,
       indikator: (r.indikator ?? []) as report.PayloadInsight['indikator'],
+      // `?? []` is not defensive padding: revisions written before R3 predate the
+      // column, and `DEFAULT '[]'` only fills rows inserted after it. An older
+      // revision genuinely HAS no stage prose, and `[]` is that fact.
+      tahap_narasi: (r.tahap_narasi ?? []) as report.PayloadInsight['tahap_narasi'],
     },
     catatanRevisi: (r.catatan_revisi as string | null) ?? null,
     createdAt: isoTs(r.created_at),
@@ -930,13 +979,12 @@ function rowToInsightRevisi(r: Record<string, unknown>): ReportInsightRevisi {
 }
 
 const INSIGHT_COLS = `revisi, sumber, ringkasan, poin, rekomendasi_tinggi,
-  rekomendasi_sedang, outlook, indikator, catatan_revisi, created_at, created_by`;
+  rekomendasi_sedang, outlook, indikator, tahap_narasi, catatan_revisi, created_at, created_by`;
 
 /** Every stored revision of one report, oldest first (revisi 0 leads). */
 async function revisiOf(sql: Queryable, reportId: number): Promise<ReportInsightRevisi[]> {
   const rows = await sql<Record<string, unknown>[]>`
-    select revisi, sumber, ringkasan, poin, rekomendasi_tinggi,
-           rekomendasi_sedang, outlook, indikator, catatan_revisi, created_at, created_by
+    select ${sql.unsafe(INSIGHT_COLS)}
       from client_report_insight where report_id = ${reportId} order by revisi`;
   return rows.map(rowToInsightRevisi);
 }
@@ -1033,7 +1081,7 @@ async function insertRevisi(
   await tx`
     insert into client_report_insight
       (report_id, revisi, sumber, ringkasan, poin, rekomendasi_tinggi,
-       rekomendasi_sedang, outlook, indikator, catatan_revisi, created_by)
+       rekomendasi_sedang, outlook, indikator, tahap_narasi, catatan_revisi, created_by)
     values
       (${reportId}, ${revisi}, ${sumber}, ${insight.ringkasan},
        ${tx.json(insight.poin as unknown as JsonParam)},
@@ -1041,6 +1089,7 @@ async function insertRevisi(
        ${tx.json(insight.rekomendasi_sedang as unknown as JsonParam)},
        ${insight.outlook},
        ${tx.json(insight.indikator as unknown as JsonParam)},
+       ${tx.json(insight.tahap_narasi as unknown as JsonParam)},
        ${catatan == null || catatan.trim() === '' ? null : catatan.trim()}, ${actor.employeeId})`;
   const ex = executors(tx);
   await ex.audit.insertAudit({
@@ -1087,9 +1136,12 @@ export async function saveReportInsight(
 export async function resetReportInsight(sql: Sql, actor: Actor, reportId: number): Promise<ReportInsightBundle> {
   return withTransaction(sql, async (tx) => {
     await requireWritableReport(tx, actor, reportId);
+    // `INSIGHT_COLS`, not a third hand-written column list. A field that exists
+    // in the table but not in THIS list silently vanishes on reset — the AM
+    // presses "kembalikan ke insight mesin" and loses the one part the copy
+    // forgot, with nothing to indicate it happened.
     const rows = await tx<Record<string, unknown>[]>`
-      select revisi, sumber, ringkasan, poin, rekomendasi_tinggi,
-             rekomendasi_sedang, outlook, indikator, catatan_revisi, created_at, created_by
+      select ${tx.unsafe(INSIGHT_COLS)}
         from client_report_insight where report_id = ${reportId} and revisi = 0`;
     if (rows.length === 0) throw new NotFoundError(MSG_INSIGHT_NOT_FOUND);
     const mesin = rowToInsightRevisi(rows[0]).insight;
@@ -1244,6 +1296,67 @@ export interface ShopeeAdsCampaignOption {
  * which campaigns a report would touch is a read, and an OD must be able to
  * check it without being able to create the report.
  */
+/**
+ * R3 — set (or clear) the buyer-journey stage a store is chasing.
+ *
+ * ## Why this is not part of `updatePlatform`
+ *
+ * `client.updatePlatform` is gated on `canEditProfile`: Account LEAD, OD or
+ * Director. That is the right gate for the store's identity — its link, when MEA
+ * took it on, whether it is still on the list. The focus stage is not identity,
+ * it is a REPORTING judgement, and the person who makes it is the AM who writes
+ * the report. Routing it through the profile gate would leave the owning AM
+ * unable to set the one field the report asks them for, and would push a monthly
+ * decision onto a lead who is not in the conversation.
+ *
+ * So it uses `canWriteReport` — the same scope that already decides who may
+ * generate, edit and publish this client's reports. One decision, one gate.
+ *
+ * ## Why an inactive store is still allowed
+ *
+ * Deliberately no `active` check, unlike `createReport`. A store can be
+ * deactivated mid-month with a report for that month still to write, and the
+ * stage is read at generation time. Refusing here would block a correction to a
+ * period that has already happened.
+ *
+ * Audited before→after: this value ends up stamped on every future report, so
+ * "who moved this shop to Conversion, and when" has to be answerable.
+ */
+export async function setTahapFokus(
+  sql: Sql, actor: Actor, clientId: string, platformId: number, tahap: string | null,
+): Promise<report.TahapKey | null> {
+  const bersih = (tahap ?? '').trim();
+  // Empty string and null both mean "not set" — a <select> submits the empty
+  // option as '', and refusing that would make the field one-way.
+  const nilai: report.TahapKey | null = bersih === '' ? null : (bersih as report.TahapKey);
+  if (nilai !== null && !report.isTahapKey(nilai)) {
+    throw new ValidationError(MSG_TAHAP_FOKUS_TAK_DIKENAL);
+  }
+
+  return withTransaction(sql, async (tx) => {
+    // Throws MSG_CLIENT_NOT_FOUND itself when the client does not exist.
+    const ownerAm = await ownerAmOfClient(tx, clientId);
+    if (!canWriteReport(actor, ownerAm)) throw new ForbiddenError(MSG_FORBIDDEN);
+
+    const rows = await tx<{ tahap_fokus: string | null }[]>`
+      select tahap_fokus from client_platforms
+       where id = ${platformId} and client_id = ${clientId} for update`;
+    if (rows.length === 0) throw new NotFoundError(MSG_PLATFORM_NOT_FOUND);
+    const sebelum = rows[0].tahap_fokus;
+
+    await tx`update client_platforms set tahap_fokus = ${nilai} where id = ${platformId}`;
+    const ex = executors(tx);
+    await ex.audit.insertAudit({
+      entityType: 'client', entityId: clientId, actorEmployeeId: actor.employeeId,
+      action: 'tahap_fokus_diubah',
+      beforeJson: { platform_id: platformId, tahap_fokus: sebelum },
+      afterJson: { platform_id: platformId, tahap_fokus: nilai },
+      createdBy: actor.employeeId,
+    });
+    return nilai;
+  });
+}
+
 export async function listShopeeAdsCampaignsForPeriod(
   sql: Queryable, actor: Actor, clientId: string, periodeMulai: string, periodeAkhir: string,
 ): Promise<ShopeeAdsCampaignOption[]> {

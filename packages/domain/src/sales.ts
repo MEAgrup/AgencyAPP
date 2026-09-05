@@ -1925,6 +1925,8 @@ export interface ClientPlatformRow {
   storeLink: string | null;
   managedSince: Date | null;
   active: boolean;
+  /** R3 — buyer-journey stage this store is chasing, or null when unset (report.setTahapFokus). */
+  tahapFokus: string | null;
 }
 
 /** One salesperson's read-only achievement share (Σ = 10000 bp). */
@@ -2035,9 +2037,9 @@ export async function getClient(sql: Queryable, id: string): Promise<ClientDetai
   // baru diketahui di sini.
   const [platRows, allocRows, svcRows, trxRows] = await Promise.all([
     sql<
-      { id: string; platform: string; store_link: string | null; managed_since: Date | null; active: boolean }[]
+      { id: string; platform: string; store_link: string | null; managed_since: Date | null; active: boolean; tahap_fokus: string | null }[]
     >`
-      select id, platform, store_link, managed_since, active
+      select id, platform, store_link, managed_since, active, tahap_fokus
       from client_platforms where client_id = ${id} order by id`,
 
     sql<
@@ -2093,7 +2095,7 @@ export async function getClient(sql: Queryable, id: string): Promise<ClientDetai
     releasedToAccountAt: c.released_to_account_at, createdAt: c.created_at,
     platforms: platRows.map((p) => ({
       clientPlatformId: Number(p.id), platform: p.platform, storeLink: p.store_link,
-      managedSince: p.managed_since, active: p.active,
+      managedSince: p.managed_since, active: p.active, tahapFokus: p.tahap_fokus,
     })),
     allocations: allocRows.map((a) => ({
       salespersonId: a.salesperson_id, salespersonNama: a.salesperson_nama, basisPoints: a.basis_points,

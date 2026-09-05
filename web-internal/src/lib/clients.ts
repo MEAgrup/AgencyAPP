@@ -12,6 +12,8 @@ export interface Platform {
   store_link?: string;
   managed_since?: string | null;
   active: boolean;
+  /** R3 — tahap perjalanan pembeli yang sedang dikejar toko ini; null = belum ditetapkan. */
+  tahap_fokus: string | null;
 }
 
 export interface Allocation {

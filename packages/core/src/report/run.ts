@@ -17,6 +17,7 @@ import {
 } from './metrik';
 import { buildReportPayload, type KlienIdentitas, type ReportPayload } from './payload';
 import { computeSkor, type Skor } from './skor';
+import { buildTahap, type TahapKey, type TahapReport } from './tahap';
 import type { PeriodeTipe, ReportBench, ReportFileType, ReportSlots, Rentang } from './types';
 
 export interface RunReportOptions {
@@ -31,11 +32,18 @@ export interface RunReportOptions {
   generatedAt: string;
   /** The client's own linked TikTok handles, excluded from the creator pool. */
   akunSendiri?: string[];
+  /**
+   * R3 — the stage this shop is chasing, read from `client_platforms.tahap_fokus`
+   * at generation time and STAMPED into the payload. Null (the default) is a
+   * legitimate state: the report renders all three stages with no focus badge.
+   */
+  tahapFokus?: TahapKey | null;
 }
 
 export interface ReportResult {
   M: ReportMetrics;
   skor: Skor;
+  tahap: TahapReport;
   insight: Insights;
   payload: ReportPayload;
   rentang: Rentang;
@@ -92,7 +100,11 @@ export function runReport(slots: ReportSlots, opts: RunReportOptions): ReportRes
   };
 
   const skor = computeSkor(M, bench);
-  const insight = buildInsights(M, skor, bench, opts.periodeTipe);
+  // Order matters: the stage layer feeds `buildInsights`, which drafts one
+  // paragraph per stage. Both read the SAME `M` and the SAME pro-rated bench, so
+  // the prose can never describe a stage differently from the table beside it.
+  const tahap = buildTahap(M, bench, opts.tahapFokus ?? null);
+  const insight = buildInsights(M, skor, bench, opts.periodeTipe, tahap);
 
   const presence: Partial<Record<ReportFileType, boolean>> = {};
   for (const k of Object.keys(slots) as ReportFileType[]) if (slots[k]) presence[k] = true;
@@ -108,9 +120,10 @@ export function runReport(slots: ReportSlots, opts: RunReportOptions): ReportRes
     benchDasar,
     benchmarkVersi: opts.benchmarkVersi ?? null,
     slots: presence,
+    tahap,
   });
 
-  return { M, skor, insight, payload, rentang, rentangDariBerkas: dariBerkas };
+  return { M, skor, tahap, insight, payload, rentang, rentangDariBerkas: dariBerkas };
 }
 
 /**

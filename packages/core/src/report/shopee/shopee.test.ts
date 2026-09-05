@@ -392,6 +392,7 @@ describe('insight override — byte-identical regression', () => {
     ringkasan: 'RINGKASAN SUNTINGAN AM', poin: ['POIN SATU'],
     rekomendasi_tinggi: [{ judul: 'REK TINGGI', target: 'T', dampak: 'D', timeline: '2 minggu' }],
     rekomendasi_sedang: [], outlook: 'OUTLOOK SUNTINGAN', indikator: [{ nama: 'IND', target: '99%' }],
+    tahap_narasi: [],
   };
 
   it('renders the AM override text instead of the engine narrative, and drops it entirely (not merely hides it) — same contract as TikTok', () => {
@@ -625,7 +626,7 @@ describe('payload.insight shape matches TikTok\'s PayloadInsight exactly', () =>
   it('every key insight-edit.ts validates is present, and nothing extra', () => {
     const p = run(slotsFull()).payload;
     expect(Object.keys(p.insight).sort()).toEqual(
-      ['ringkasan', 'poin', 'rekomendasi_tinggi', 'rekomendasi_sedang', 'outlook', 'indikator'].sort(),
+      ['ringkasan', 'poin', 'rekomendasi_tinggi', 'rekomendasi_sedang', 'outlook', 'indikator', 'tahap_narasi'].sort(),
     );
   });
 });

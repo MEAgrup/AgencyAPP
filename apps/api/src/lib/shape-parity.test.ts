@@ -538,6 +538,7 @@ const WIRE_TO_FE: Record<string, string> = {
   ReportInsightWire: 'report.ts::ReportInsight',
   ReportRekomendasiWire: 'report.ts::Rekomendasi',
   ReportIndikatorWire: 'report.ts::Indikator',
+  ReportTahapNarasiWire: 'report.ts::TahapNarasi',
   ReportInsightRevisiWire: 'report.ts::ReportInsightRevisi',
   ReportPublikasiWire: 'report.ts::ReportPublikasi',
   // Gelombang 3 — MEA SKU Screener (SC-08). No page consumes these yet
