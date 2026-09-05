@@ -9,6 +9,43 @@
 
 ---
 
+> ## ⚠️ KOREKSI 2026-09-05 — dokumen ini SUDAH DIEKSEKUSI, dan tiga bagiannya keliru
+>
+> Seluruh §1 dan §3 sudah dikerjakan. Teks aslinya **sengaja dipertahankan utuh** di
+> bawah (jejak "kapan drift-nya mulai" itu sendiri informasi), tapi tiga bagian ini
+> **jangan dipakai sebagai dasar keputusan apa pun**:
+>
+> **§2.2 — angkanya BASI, dan premisnya terbalik.** Ditulis `clients` 0, `transactions`
+> 0, `leads` 6 "semuanya data uji". Dibaca dari live 2026-09-04: **`clients` 10,
+> `transactions` 11, `installments` 1, `leads` 348**, dengan dua transaksi dibuat sales
+> riil (`TRX-202608-0010` lindahijab.id **Rp. 72.150.000,00** `[Lunas]`; `TRX-202608-0009`
+> Julieete jewelery **Rp. 22.200.000,00**) dan 310 attempt aktif dipegang tim sales asli.
+> Jadi "rollback hampir GRATIS" **tidak berlaku lagi** — dan menurut kriteria dokumen ini
+> sendiri, jendelanya sudah tertutup sejak ±28 Agustus. **Angka N tidak pernah
+> ditetapkan karena sudah kehilangan artinya.** Gate GO C-04 diketok 2026-09-04 dan C-05
+> dieksekusi. Lihat `docs/DECISIONS.md` 2026-09-04 dan `CUTOVER_BACKLOG.md` §C-04/§C-05.
+>
+> **§3.1 — satu klaimnya salah.** Suntingan `+15/−9` pada
+> `20260814110000_penugasan_internal.sql` disebut "menyunting migrasi yang SUDAH
+> ter-apply ⇒ melanggar prinsip migrasi immutable". Diperiksa baris per baris:
+> **murni komentar, NOL perubahan SQL** — ia justru mengoreksi komentar yang salah fakta.
+> Itu perbaikan, bukan pelanggaran. Sisa analisa §3.1 **terbukti benar**, dan satu hal
+> justru TERLEWAT: diff `ci.yml` PR #171 juga **menghapus job `web-client-portal`**
+> (−21 baris). Hasil akhir: #171 ditutup superseded, gerbangnya diselamatkan lewat
+> **PR #290** (sudah merge, sudah di-apply ke live).
+>
+> **§5 butir 1 — sudah dilewati C-05.** "Jangan bangun apa pun di `backend/` — ia oracle
+> paritas saja" kini berbunyi: `backend/` sudah pindah ke **`archive/backend-go/`**, job
+> CI-nya dicabut, dan ia **bukan lagi** oracle paritas yang dijaga hijau. Rujukan paritas
+> bentuk respons: `apps/api/src/lib/shape-parity.test.ts`.
+>
+> **Yang terbukti tepat dan layak ditiru:** seluruh §1, terutama peringatan §1.3 bahwa
+> pg_cron bisa **gagal diam-diam** — itu memang jadi langkah verifikasi tersendiri, dan
+> job-nya memang terpasang. Juga inti §3 soal #171: dua migrasinya memang sudah di `main`,
+> dan nilainya memang seluruhnya ada di berkas gerbangnya.
+
+---
+
 ## 0. Kerjakan berurutan
 
 | # | Pekerjaan | Siapa | Blocking? |
