@@ -1,5 +1,12 @@
 # Deploy CDPS on Railway
 
+> ⛔ **DEPRECATED 2026-09-04 (C-05) — dokumen ARSIP, jangan diikuti.**
+> Service Railway dimatikan sebagai bagian C-05; `backend/` sudah pindah ke
+> `archive/backend-go/`. CDPS berjalan di **Vercel** (`apps/api` + `web-internal`)
+> di atas **Supabase/Postgres**. Dokumen ini disimpan supaya riwayat deployment
+> tetap bisa dibaca, bukan sebagai panduan. Runbook yang berlaku:
+> `docs/handoff/CUTOVER_C03_DEPLOYMENT_RUNBOOK.md`.
+
 This is a **monorepo** — the Go backend lives in `backend/` and the Next.js
 internal app in `web-internal/`. On Railway that becomes **three services in one
 project**, each pointed at its own directory:

@@ -39,7 +39,7 @@
  * explicitly inside the same transaction as the transition (finance/demo/sales
  * precedent), which is the identical atomic guarantee.
  *
- * Reference: backend/internal/module10_livestream/{livestream,session,lifecycle,
+ * Reference: archive/backend-go/internal/module10_livestream/{livestream,session,lifecycle,
  * rollup,reopen,read}.go.
  */
 

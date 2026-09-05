@@ -3,7 +3,7 @@
  * (`supabase/seed/msl_kalkulator.csv`, worksheet
  * `docs/handoff/MSL_KALKULATOR_VALIDASI.md`).
  *
- * Port of `backend/cmd/mslseed/csv.go`. Pure file-level parsing only: no DB, no
+ * Port of `archive/backend-go/cmd/mslseed/csv.go`. Pure file-level parsing only: no DB, no
  * validation of field values (that is `rowToServiceInput` in validate.ts).
  *
  * Go got RFC 4180 handling from `encoding/csv`; JS has no stdlib CSV reader, so

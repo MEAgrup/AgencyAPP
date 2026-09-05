@@ -28,8 +28,8 @@
  * path, which runs as service-role (RLS bypassed) and therefore has no policy
  * to lean on at all.
  *
- * Reference: backend/internal/core/notification/notification.go (inbox half),
- * backend/internal/httpapi/notification_handlers.go.
+ * Reference: archive/backend-go/internal/core/notification/notification.go (inbox half),
+ * archive/backend-go/internal/httpapi/notification_handlers.go.
  */
 
 import { permission } from '@cdps/core';

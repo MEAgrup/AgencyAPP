@@ -1,5 +1,5 @@
 // M15-C1 Team Portal (INTERNAL) — types + fungsi API 1:1 dengan
-// backend/internal/httpapi/portal_handlers.go + module15_portal/portal.go.
+// archive/backend-go/internal/httpapi/portal_handlers.go + module15_portal/portal.go.
 // Ketiga surface adalah read-model murni (Rule 8: nol entitas baru, nol write,
 // nol emisi) di atas M11/M12/M13/M14 — semua tipe modul di-reuse dari lib
 // modulnya, bukan diduplikasi.

@@ -1,6 +1,6 @@
 // Typed wrapper over lib/api.ts for Module 1 (Leads Database) endpoints.
 //
-// Register/bulk-import/claim shapes mirror backend/internal/module1_leads
+// Register/bulk-import/claim shapes mirror archive/backend-go/internal/module1_leads
 // exactly (json tags read from the Go structs):
 //   Lead / Attempt          (leads.go)         — returned by POST /leads, /claim
 //   RegisterInput            (leads.go)         — POST /leads body

@@ -1,6 +1,6 @@
 // Typed wrapper over lib/api.ts for Module 2 (Marketing Performance) + Module 3
-// (Campaign) endpoints. Shapes mirror backend/internal/module3_campaign/read.go,
-// backend/internal/module2_marketing/metrics.go + backend/internal/httpapi/
+// (Campaign) endpoints. Shapes mirror archive/backend-go/internal/module3_campaign/read.go,
+// archive/backend-go/internal/module2_marketing/metrics.go + archive/backend-go/internal/httpapi/
 // {campaign_handlers.go,marketing_handlers.go,routes_*.go} EXACTLY (json tags read
 // from source) — never invented. The backend source files above are the single
 // endpoint contract; re-verify there on any drift.

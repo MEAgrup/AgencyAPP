@@ -24,8 +24,8 @@
  * (module0_sales negotiation/closing/allocation.go) and the MSL admin CRUD
  * (internal/admin write path) — only the MSL READ needed for pricing is ported.
  *
- * Reference: backend/internal/module0_sales/{sales,pricing,commission,qualified}.go,
- * backend/internal/admin/master_service.go (EffectiveAt / ServiceView).
+ * Reference: archive/backend-go/internal/module0_sales/{sales,pricing,commission,qualified}.go,
+ * archive/backend-go/internal/admin/master_service.go (EffectiveAt / ServiceView).
  */
 
 import { bi, money, notification, page, permission, statemachine, tz } from '@cdps/core';

@@ -18,7 +18,7 @@
  *   - Immutable versions (INSERT-only); every create/version appends to audit.
  *   - Exact BI `[...]`: the house default gate + the edit-denied message.
  *
- * Reference: backend/internal/admin/master_service.go.
+ * Reference: archive/backend-go/internal/admin/master_service.go.
  */
 
 import { money, permission } from '@cdps/core';

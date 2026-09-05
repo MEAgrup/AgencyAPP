@@ -1,5 +1,5 @@
 // Typed wrapper over lib/api.ts for Module 4 (Client Record) endpoints.
-// Shapes mirror backend/internal/httpapi/client_handlers.go + intent_reminder_handlers.go
+// Shapes mirror archive/backend-go/internal/httpapi/client_handlers.go + intent_reminder_handlers.go
 // (clientView / clientEditBody / VoidResult) exactly — read from the handler code,
 // never invented. Money fields arrive pre-formatted ("Rp. X.XXX.XXX,00") by the
 // backend (money.Money.Format()) and are rendered as-is.

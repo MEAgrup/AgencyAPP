@@ -20,7 +20,7 @@
  * never stored as mutable running columns (rules 3/4); div-by-zero ROAS renders
  * "—", money "Rp. X.XXX.XXX,00" (rule 7).
  *
- * Reference: backend/internal/module8_ads/{ads,lifecycle,linkage,optimization,metrics,read}.go.
+ * Reference: archive/backend-go/internal/module8_ads/{ads,lifecycle,linkage,optimization,metrics,read}.go.
  */
 
 import { bi, money, notification, permission, statemachine, tz } from '@cdps/core';

@@ -1755,7 +1755,7 @@ export function scanHoursReminderResultToWire(r: creative.ScanHoursReminderResul
   return { reminders_sent: r.remindersSent };
 }
 
-// --- M10 Live Stream (contract mirrors backend/internal/module10_livestream
+// --- M10 Live Stream (contract mirrors archive/backend-go/internal/module10_livestream
 //     Session json tags + web-internal/src/lib/livestream.ts Session) ---
 
 /**

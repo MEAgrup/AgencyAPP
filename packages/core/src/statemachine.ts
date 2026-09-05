@@ -2,7 +2,7 @@
  * Declarative transition engine — TypeScript wrapper over the SQL function
  * `sm_transition` (migration 20260723055732_statemachine.sql).
  *
- * Ported from backend/internal/core/statemachine. The ACTUAL enforcement (row
+ * Ported from archive/backend-go/internal/core/statemachine. The ACTUAL enforcement (row
  * lock, edge validation, role gate, status UPDATE, immutable audit row) lives in
  * `sm_transition` inside a single DB transaction — NOT reimplemented in TS,
  * because "no raw UPDATE ever sets status" and the requireLead gate must hold

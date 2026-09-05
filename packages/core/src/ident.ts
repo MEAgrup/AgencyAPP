@@ -1,7 +1,7 @@
 /**
  * House ID scheme PREFIX-YYYYMM-NNNN (CLAUDE.md #1).
  *
- * Ported from backend/internal/core/ident. The **atomic, gap-free, rollback-safe
+ * Ported from archive/backend-go/internal/core/ident. The **atomic, gap-free, rollback-safe
  * allocation** lives in the Postgres function `ident_next(prefix, at)`
  * (migration 20260722060601_ident_next.sql) — NOT reimplemented in TypeScript,
  * because reproducing the row-lock/no-double-alloc guarantee outside a single DB

@@ -1,6 +1,6 @@
 /**
  * Tests for the mslseed plan/apply engine — port of
- * `backend/cmd/mslseed/engine_db_test.go`.
+ * `archive/backend-go/cmd/mslseed/engine_db_test.go`.
  *
  * - Unit: `sameService` (the idempotency no-op predicate).
  * - Integration (skipped unless DATABASE_URL is set): the real 32-row seed

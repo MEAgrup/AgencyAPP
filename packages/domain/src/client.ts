@@ -26,7 +26,7 @@
  * Also here now: the payment-intent handoff write (§5 — see setPaymentIntent) and
  * the §6 visibility read model (row scope enforced by RLS).
  *
- * Reference: backend/internal/module4_client/{edit,locks,reads,intent}.go.
+ * Reference: archive/backend-go/internal/module4_client/{edit,locks,reads,intent}.go.
  */
 
 import { bi, money, notification, page, permission, statemachine } from '@cdps/core';
@@ -774,7 +774,7 @@ export async function resumeService(sql: Sql, actor: Actor, serviceId: string, r
 // Installment schedules for Termin / Bayar di Belakang are built through M5's
 // `finance.createSchedule`; this module never creates installments.
 //
-// Port of backend/internal/module4_client/intent.go.
+// Port of archive/backend-go/internal/module4_client/intent.go.
 // ---------------------------------------------------------------------------
 
 /**

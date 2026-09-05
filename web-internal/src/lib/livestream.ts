@@ -1,6 +1,6 @@
 // Typed wrapper over lib/api.ts for Module 10 (Live Stream) endpoints.
-// Shapes mirror backend/internal/httpapi/{routes_livestream.go,livestream_handlers.go}
-// + backend/internal/module10_livestream/{livestream.go,lifecycle.go,session.go,read.go,
+// Shapes mirror archive/backend-go/internal/httpapi/{routes_livestream.go,livestream_handlers.go}
+// + archive/backend-go/internal/module10_livestream/{livestream.go,lifecycle.go,session.go,read.go,
 // reopen.go,rollup.go} EXACTLY (json tags read from source) — never invented.
 // Reconciled against fe_briefs/m10.md (the single endpoint source for this module).
 //

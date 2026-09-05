@@ -1,6 +1,6 @@
 /**
  * Tests for M2 Marketing (marketing.ts). Ported from Go's
- * backend/internal/module2_marketing/{marketing,metrics}_test.go.
+ * archive/backend-go/internal/module2_marketing/{marketing,metrics}_test.go.
  *
  * - Unit: the §3 Rule 5 / §5 Rule 3 manage gate (owner-only, not any-lead).
  * - Integration (skipped unless DATABASE_URL is set): record create/edit validation +

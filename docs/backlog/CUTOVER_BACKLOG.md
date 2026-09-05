@@ -30,11 +30,11 @@
 | **C-01** | ~~O37 — otorisasi read (RLS ter-bypass)~~ ✅ **SELESAI 2026-07-28** | — | — | — |
 | **C-02** | ~~Endpoint `notifications` di `apps/api`~~ ✅ **SELESAI 2026-07-28** | — | — | — |
 | **C-03** | ~~UAT paritas end-to-end~~ ✅ **SELESAI 2026-07-31 — dijalankan terhadap deployment produksi, FAIL 0** | — | — | — |
-| **C-04** | Cutover data + aktor produksi | 🟠 P1 | 2–4 hari | **YA** |
-| **C-05** | Retire Go: arsip `backend/`, bersihkan CI & config Railway | 🟡 P2 | 0,5 hari | tidak (sesudahnya) |
+| **C-04** | ~~Cutover data + aktor produksi~~ ✅ **DIKETOK 2026-09-04 — memformalkan cutover yang secara de facto SUDAH terjadi sejak ±28 Agustus** (lihat §C-04 + `DECISIONS.md`) | — | — | — |
+| **C-05** | ~~Retire Go: arsip `backend/`, bersihkan CI & config Railway~~ ✅ **SELESAI 2026-09-04** — `backend/` → `archive/backend-go/`, job CI `backend` dicabut, 5 config Railway ditandai deprecated, `CLAUDE.md` diperbarui. Butir 5 (matikan service Railway) **eksekusi pemilik** | — | — | — |
 | **C-06** | `web-client-portal` (M15-C2) | ⚪ belum dimulai (O4/O5 RESOLVED 2026-08-31) | — | **TIDAK** (by design) |
 
-**Urutan wajib:** ~~C-00~~ ✅ → ~~C-01~~ ✅ → ~~C-02~~ ✅ → ~~C-03~~ ✅ → **C-04** → (gate go/no-go manusia) → C-05.
+**Urutan wajib:** ~~C-00~~ ✅ → ~~C-01~~ ✅ → ~~C-02~~ ✅ → ~~C-03~~ ✅ → ~~C-04~~ ✅ → ~~(gate go/no-go manusia)~~ ✅ **GO 2026-09-04 (Nerissa, COO)** → ~~C-05~~ ✅. **Jalur cutover SELESAI.**
 C-06 di luar jalur cutover.
 
 **Total realistis: ~1,5–2 minggu kerja Claude** + gate keputusan manusia (Yohan & Nerissa, OQ-1).
@@ -394,7 +394,36 @@ baru buka gate C-04.
 
 ---
 
-## C-05 — Retire Go (setelah cutover terverifikasi) 🟡
+## C-05 — Retire Go ✅ **SELESAI 2026-09-04** (4 dari 5 butir; butir 5 eksekusi pemilik)
+
+> **Hasil eksekusi 2026-09-04, sesudah gate GO diketok Nerissa (COO):**
+> 1. ✅ Job CI `backend` (Go + service MySQL, 39 baris) **dicabut** dari `.github/workflows/ci.yml`.
+>    Job tersisa: `web-internal`, `web-client-portal`, `api`, `core-engines`, `db-and-migrations`.
+> 2. ✅ `backend/` → **`archive/backend-go/`** (328 berkas, `git mv` — terdeteksi rename, bukan
+>    hapus+tambah) + `archive/backend-go/README.md`. ⚠️ **Tag `backend-go-final` GAGAL di-push** —
+>    pembuatan tag diblokir **proxy sesi Claude** (`send-pack: unexpected disconnect`, 11 percobaan,
+>    annotated dan lightweight sama-sama gagal; REST API menjawab eksplisit "Write access to this GitHub
+>    API path is not permitted through this proxy" — jadi bukan ruleset repo dan bukan gangguan jaringan). Tag ADA secara lokal. Karena butir ini
+>    **memindahkan** dan bukan menghapus, isinya tetap terbaca di repo, jadi syarat "jangan hapus
+>    tanpa tag" tetap terpenuhi secara substansi — **jangkar permanennya commit `133f717`**
+>    (`git show 133f717:backend/cmd/import/main.go`). Kalau pemilik mau tag-nya ada di remote,
+>    push manual dengan kredensial sendiri.
+> 3. ✅ Lima config mati ditandai deprecated (bukan dihapus): `archive/backend-go/railway.json`,
+>    `web-internal/railway.json`, `archive/backend-go/Dockerfile`, `docs/DEPLOY_RAILWAY.md`, dan
+>    — di luar daftar asli — `.github/workflows/railway-mysql-backup.yml`, yang **sengaja
+>    dipertahankan** sampai service Railway benar-benar mati (ia satu-satunya jalan mengambil dump
+>    sekali lagi tanpa laptop ber-klien MySQL).
+> 4. ✅ `CLAUDE.md` §Stack diperbarui + entri `DECISIONS.md`. **78 komentar provenance** di 61
+>    berkas TS ikut dialihkan `backend/` → `archive/backend-go/`. Sed-nya menyingkap satu
+>    referensi yang ternyata **kode nyata, bukan komentar**: `GO_SEED_CSV` di
+>    `apps/api/scripts/mslseed/csv.test.ts` membaca `seed/msl_kalkulator.csv` dari pohon Go.
+>    Berbahaya karena tesnya `it.skipIf(!existsSync(...))` — path yang salah akan **diam-diam jadi
+>    skip**, bukan merah. Diverifikasi jalan: 16/16 hijau termasuk cek byte-identical.
+> 5. 🔶 **Matikan service Railway — eksekusi pemilik**, Claude tak punya akses. Dump final MySQL
+>    **sudah diambil & disimpan di luar GitHub** (dikonfirmasi pemilik 2026-09-04), jadi butir ini
+>    tinggal mematikan service-nya.
+
+### Spesifikasi asli (untuk rujukan)
 
 Baru dikerjakan **setelah** gate go/no-go GO. Sesuai OQ-8: Go+MySQL **diarsip read-only**.
 
@@ -445,16 +474,18 @@ _Paragraf asli 2026-07-28:_ Masih hanya `README.md` — belum ada kode/migrasi d
 - [x] **C-01 selesai** — O37 tertutup di DECISIONS (opsi c).
 - [x] **C-02 selesai** — badge & halaman notifikasi hidup (2026-07-28; §C-02 di atas sudah RESOLVED, kotak ini sebelumnya tertinggal tidak tercentang).
 - [x] **C-03 SELESAI 2026-07-31 — dijalankan terhadap deployment produksi, FAIL = 0.** Run `30600363211` (job `uat`, di-approve pemilik di environment `c03-production`): walk aturan rumah **22/22** · wave3 contract smoke **34/34** · auth smoke **13/13** — **PASS 69 · FAIL 0**, nol SKIP di ketiga skrip. **SKIP-1 dan SKIP-3 TERTUTUP.** Report: `docs/handoff/CUTOVER_UAT_REPORT_20260731.md`. **SKIP-2 (badge notifikasi) DIPINDAHKAN ke C-04, bukan dihapus** — keputusan `DECISIONS.md` 2026-07-31 (PR #87): ia QA UI, bukan paritas, dan menahan seluruh C-03 karena satu cek browser 3 menit menyembunyikan bahwa paritasnya sudah tuntas. 🟠 **Konsekuensi yang harus dibaca bersama C-04:** slot `finance_staff` walk terisi fixture O50 `9900000007` (report §5.3) ⇒ sesudah fixture dinonaktifkan, **walk wajib dijalankan ulang** — kalau tidak, discovery tidak menemukan aktor Finance dan baris itu jatuh jadi SKIP.
-- [~] **C-04 — SEBAGIAN.** ✅ MSL 32 layanan ber-versi di live (2026-07-28) · ✅ karyawan riil: **69** di `employees`/`employee_credentials`/`auth.users`/`auth.identities` (69/69/69/69) · ✅ **O42 dieksekusi 2026-07-29** — divisi `Marketing` hidup, `role_mappings` **39**. ~~❌ **O22** impor lead historis~~ → **GUGUR 2026-07-30** (konsekuensi O47: tooling ditinggalkan, produksi mulai dari data bersih) · ❌ keputusan aktor **O34/O26/O35/O9** · ❌ konfirmasi data Railway riil-atau-UAT · ⚠️ `Marketing`/`lead` kosong (struktur organisasi, keputusan sadar).
+- [x] **C-04 — SELESAI 2026-09-04 (diketok Nerissa, COO).** Yang mengubah statusnya bukan pekerjaan baru melainkan **pembacaan ulang live**: cutover ternyata sudah terjadi de facto sejak ±28 Agustus — `clients` **10**, `transactions` **11**, `installments` **1**, `leads` **348** (bukan 6 data uji seperti yang tercatat 31 Juli), dengan dua transaksi dibuat SALES RIIL: TRX-202608-0010 `lindahijab.id` Rp. 72.150.000,00 `[Lunas]` (Maya Amalia, SALES JASA) dan TRX-202608-0009 `Julieete jewelery` Rp. 22.200.000,00 (Mohamad Faesal, SALES JASA); 310 attempt aktif dipegang tim sales asli termasuk HEAD OF SALES JASA. Butir `❌ konfirmasi data Railway riil-atau-UAT` **gugur** — pertanyaannya sudah tidak relevan begitu produksi berjalan sebulan di Supabase. Butir aktor O34/O26/O35/O9 tetap terbuka sebagai pekerjaan operasional biasa, **bukan** penahan gate: tak satu pun menghalangi tim bekerja, dan menahan gate atasnya berarti pura-pura sistem belum dipakai padahal uang riil sudah masuk. _Status lama:_ ~~SEBAGIAN.~~ ✅ MSL 32 layanan ber-versi di live (2026-07-28) · ✅ karyawan riil: **69** di `employees`/`employee_credentials`/`auth.users`/`auth.identities` (69/69/69/69) · ✅ **O42 dieksekusi 2026-07-29** — divisi `Marketing` hidup, `role_mappings` **39**. ~~❌ **O22** impor lead historis~~ → **GUGUR 2026-07-30** (konsekuensi O47: tooling ditinggalkan, produksi mulai dari data bersih) · ❌ keputusan aktor **O34/O26/O35/O9** · ❌ konfirmasi data Railway riil-atau-UAT · ⚠️ `Marketing`/`lead` kosong (struktur organisasi, keputusan sadar).
 - [x] **Backup MySQL Railway terakhir tersimpan** + **OQ-2 terverifikasi untuk dekomisi** — **DITUTUP 2026-07-31.** Pemilik menyatakan berkasnya sudah diunduh, disimpan **di luar GitHub**, sha256 **cocok**, dan passphrase ada di password manager; **pelonggaran DoD penyimpanan disetujui** (1 salinan, tanpa PIC kedua — `DECISIONS.md` 2026-07-31 + report §6.1). Verifikasi 4 lapis, sha256, dan syarat "keluar dari GitHub" **tidak** ikut dilonggarkan. **✅ OQ-2 SELESAI 2026-07-31** (run `30604816629`): 50 tabel · 239 baris · **rantai FK jalur uang NOL** ⇒ C-04 butir 1 tidak aktif; batas DECISIONS 2026-07-29 tertutup. **✅ Dump diambil & terverifikasi 4 lapis** (run `30607919027`, sha256 `1b9ecffd…47cb3e`) — dan lapis 4 menyingkap bahwa `mysqldump` polos atas DB ini menghasilkan backup yang MySQL sendiri **tolak muat ulang** (7 trigger ber-`;` nyasar; lihat `BACKUP_MYSQL_RAILWAY_REPORT_20260731.md` §5.1). **❌ Sisa: berkasnya masih hanya artifact ber-retensi 30 hari** — butir ini baru boleh `[x]` sesudah tersimpan di luar GitHub dengan sha256 dicocokkan. Runbook: `docs/handoff/RUNBOOK_BACKUP_MYSQL_RAILWAY.md`. Sama seperti C-03, ia **tidak lagi butuh laptop dengan klien MySQL**: `.github/workflows/railway-mysql-backup.yml` menjalankannya dari GitHub Actions dengan dua repository secret. Dump diverifikasi 4 lapis (struktur · baris · 7 trigger imutabilitas · restore sungguhan) dan **wajib terenkripsi** — repo ini publik dan artifact-nya bisa diunduh siapa saja. Butir ini baru boleh dicentang setelah berkasnya tersimpan **di luar** GitHub (artifact kedaluwarsa 30 hari), sha256 cocok, dan report-nya di-commit.
-- [ ] **Rencana rollback disepakati** (Railway tetap hidup N hari pasca-cutover sebelum dimatikan). **Dokumen resmi: `docs/handoff/RENCANA_ROLLBACK_CUTOVER.md`** (PR #87) — kerangka lengkap; **dua prasyarat 🔶-nya (#1 backup, #2 OQ-2) sudah TERPENUHI 2026-07-31** lewat PR #86 dan diperbarui di §3.1. Sisa: prasyarat #3/#4 (Railway hidup? kredensial lama berlaku?) + **satu angka N yang disepakati Yohan+Nerissa**. Draf pertimbangan N = 14 hari ada di `RUNBOOK_BACKUP_MYSQL_RAILWAY.md` §7 (ditandai digantikan).
+- [x] **Rencana rollback DITUTUP 2026-09-04 — tanpa angka N, karena N sudah kehilangan artinya.** Keputusan Nerissa (COO): **opsi A — akui cutover sudah terjadi, matikan Railway.** Alasannya dihitung, bukan ditebak: rencana rollback (`RENCANA_ROLLBACK_CUTOVER.md` §0) menetapkan sendiri bahwa yang menutup jendela rollback **bukan tanggal melainkan transaksi riil pertama** — dan peristiwa itu sudah lewat ±28 Agustus. Sesudahnya rollback menuntut importer mundur menyusuri rantai FK `LEAD → ATTEMPT → CLIENT → SERVICE → TRX → INST` yang **sengaja tidak pernah dibangun** (O47). Jadi Railway yang tetap hidup N hari tidak membeli jalan mundur apa pun — ia hanya biaya bulanan plus rasa aman palsu. Nilai ARSIP data lama tetap aman: **dump final MySQL sudah diambil dan disimpan di luar GitHub (dikonfirmasi pemilik 2026-09-04)**. Jaring pengaman yang benar-benar dipakai adalah Skenario A (Vercel *Promote to Production* + backup Supabase), yang tidak menyentuh Railway sama sekali. _Butir lama:_ ~~(Railway tetap hidup N hari pasca-cutover sebelum dimatikan).~~ **Dokumen resmi: `docs/handoff/RENCANA_ROLLBACK_CUTOVER.md`** (PR #87) — kerangka lengkap; **dua prasyarat 🔶-nya (#1 backup, #2 OQ-2) sudah TERPENUHI 2026-07-31** lewat PR #86 dan diperbarui di §3.1. Sisa: prasyarat #3/#4 (Railway hidup? kredensial lama berlaku?) + **satu angka N yang disepakati Yohan+Nerissa**. Draf pertimbangan N = 14 hari ada di `RUNBOOK_BACKUP_MYSQL_RAILWAY.md` §7 (ditandai digantikan).
 
-> Legenda: `[x]` selesai · `[~]` sebagian/bersyarat · `[ ]` belum. **C-05 (retire Go) belum boleh
-> dimulai** — ia menunggu GO, dan **hanya** GO sejak O47 + retensi PII ditutup 2026-07-30.
-> Go masih berjalan di CI sebagai oracle paritas untuk **perilaku**; untuk **bentuk respons** ia
-> sudah tidak satu-satunya (`shape-parity.test.ts` ber-anchor tipe FE, selamat pasca-arsip).
+> Legenda: `[x]` selesai · `[~]` sebagian/bersyarat · `[ ]` belum.
+> **✅ GATE GO DIBUKA 2026-09-04 (Nerissa, COO) dan C-05 SUDAH DIEKSEKUSI hari yang sama.**
+> Go tidak lagi berjalan di CI — job `backend` dicabut. Oracle paritas untuk **bentuk respons**
+> adalah `shape-parity.test.ts` (ber-anchor tipe FE, selamat pasca-arsip); untuk **perilaku**,
+> `archive/backend-go/` boleh dibaca tapi tidak dijaga hijau lagi.
 
-**Sesudah GO:** eksekusi C-05.
+**Sesudah GO:** ~~eksekusi C-05~~ ✅ selesai 2026-09-04. Sisa satu-satunya: **matikan service
+Railway** (eksekusi pemilik — Claude tak punya akses Railway).
 
 ---
 

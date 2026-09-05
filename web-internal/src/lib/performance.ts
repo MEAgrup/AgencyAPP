@@ -1,5 +1,5 @@
 // Typed wrapper over lib/api.ts for Module 14 (Team Performance) endpoints.
-// Shapes mirror backend/internal/module14_performance/*.go exactly.
+// Shapes mirror archive/backend-go/internal/module14_performance/*.go exactly.
 // All score fields are numeric (0..100 range) or null. Field uang (IDR) tidak ada di modul ini.
 
 import { api } from '@/lib/api';

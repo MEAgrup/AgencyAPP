@@ -1,5 +1,5 @@
 /**
- * Tests for the mslseed CSV reader — port of `backend/cmd/mslseed/csv_test.go`,
+ * Tests for the mslseed CSV reader — port of `archive/backend-go/cmd/mslseed/csv_test.go`,
  * plus the cases Go got for free from `encoding/csv` and this hand-written parser
  * has to earn (embedded newlines, escaped quotes, CRLF, BOM).
  */
@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { parseCsv, parseRecords, WANT_HEADER } from './csv';
 
 const SEED_CSV = fileURLToPath(new URL('../../../../supabase/seed/msl_kalkulator.csv', import.meta.url));
-const GO_SEED_CSV = fileURLToPath(new URL('../../../../backend/seed/msl_kalkulator.csv', import.meta.url));
+const GO_SEED_CSV = fileURLToPath(new URL('../../../../archive/backend-go/seed/msl_kalkulator.csv', import.meta.url));
 
 const header = WANT_HEADER.join(',');
 

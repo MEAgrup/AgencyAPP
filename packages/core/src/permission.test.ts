@@ -1,4 +1,4 @@
-// Ported 1:1 from backend/internal/core/permission/permission_test.go.
+// Ported 1:1 from archive/backend-go/internal/core/permission/permission_test.go.
 import { describe, expect, it } from 'vitest';
 import {
   type Actor,

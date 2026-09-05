@@ -27,7 +27,7 @@
  * dispute flow + joint SPV resolution (M5-OA-5, schema in 0012), scheme change
  * mid-flight (M5-OA-6), and the soft 7-day contract flag (M5 §7 Rule 3).
  *
- * Reference: backend/internal/module5_finance/{verify,contract,reads}.go.
+ * Reference: archive/backend-go/internal/module5_finance/{verify,contract,reads}.go.
  */
 
 import { bi, money, notification, permission, statemachine, tz } from '@cdps/core';

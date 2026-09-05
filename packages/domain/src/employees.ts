@@ -22,7 +22,7 @@
  * All three steps run in ONE transaction (see importEmployees): a failed link
  * step rolls back the sync and provisioning too.
  *
- * Reference: backend/internal/hris/{source,sync}.go, backend/internal/auth/local.go
+ * Reference: archive/backend-go/internal/hris/{source,sync}.go, archive/backend-go/internal/auth/local.go
  * (SetPassword), supabase/migrations/20260723071013_supabase_auth.sql.
  */
 

@@ -9,6 +9,50 @@
 
 ---
 
+## 0. ⛔ JENDELA INI SUDAH TERTUTUP — dokumen di bawahnya ARSIP
+
+> **KOREKSI 2026-09-04.** Angka di bagian ini ditulis 31 Juli 2026 dan **sudah tidak benar**.
+> Dibiarkan apa adanya di bawah supaya jejaknya terbaca, tapi **jangan dipakai untuk mengambil
+> keputusan apa pun.** Siapa pun yang membaca versi lamanya akan menyimpulkan "rollback hampir
+> gratis" — dan itu **salah** sejak akhir Agustus.
+>
+> Dokumen ini menetapkan sendiri bahwa yang menutup jendela rollback **bukan tanggal, melainkan
+> satu peristiwa: transaksi riil pertama.** Dibaca dari live 2026-09-04, peristiwa itu **sudah
+> lewat sekitar 28 Agustus 2026**:
+>
+> | | Ditulis 2026-07-31 | Live 2026-09-04 |
+> |---|---|---|
+> | `clients` | 0 | **10** |
+> | `transactions` | 0 | **11** |
+> | `installments` | 0 | **1** |
+> | `leads` | 6 (semuanya data uji) | **348** |
+>
+> Dua di antaranya dibuat **sales riil**, bukan Yohan menguji:
+> - `TRX-202608-0010` · lindahijab.id · **Rp. 72.150.000,00** · `[Lunas]` · Maya Amalia (SALES JASA)
+> - `TRX-202608-0009` · Julieete jewelery · **Rp. 22.200.000,00** · `[Menunggu Verifikasi]` · Mohamad Faesal (SALES JASA)
+>
+> Dan 310 attempt aktif dipegang tim sales asli — Yusi Mudrikah (102), Cucu Nurhayati
+> **HEAD OF SALES JASA** (97), Zahrah (52), Gean (29), dst.
+>
+> **Konsekuensinya:** Skenario B (mundur ke Go + MySQL) **bukan lagi opsi nyata**. Ia menuntut
+> importer mundur menyusuri rantai FK `LEAD → ATTEMPT → CLIENT → SERVICE → TRX → INST` yang
+> sengaja tidak pernah dibangun (O47). Bukan "sulit" — **tidak ada**.
+>
+> **Keputusan pemilik 2026-09-04 (Nerissa, COO): opsi A — akui cutover sudah terjadi, matikan
+> Railway.** Angka N (Railway hidup berapa hari) **tidak pernah ditetapkan dan memang sudah
+> kehilangan artinya**: N hanya bermakna selama `clients`/`transactions` masih nol. Gate GO C-04
+> diketok hari yang sama; C-05 dieksekusi. Lihat `docs/backlog/CUTOVER_BACKLOG.md` §C-04/§C-05
+> dan `docs/DECISIONS.md` 2026-09-04.
+>
+> **Yang masih berlaku dari dokumen ini:** §1 (pemisahan Skenario A vs B), §2 (Skenario A —
+> rollback deployment Vercel) dan §4 (daftar hal yang tidak bisa dikembalikan). Itu saja.
+> **Skenario B dan seluruh §0 di bawah = arsip.**
+
+---
+
+<details>
+<summary>Teks asli 2026-07-31 (arsip — angkanya sudah salah, klik untuk baca)</summary>
+
 ## 0. Hal terpenting: rollback sekarang HAMPIR GRATIS, dan jendela itu akan tertutup
 
 Dibaca dari live `CDPS SG` hari ini:
@@ -34,6 +78,10 @@ dan **perkakas untuk itu sengaja tidak dibangun** (O47: `cmd/import` ditinggalka
 > pernah ada". Karena itu keputusan GO bukan *"apakah TS sudah siap"* saja — ia juga
 > *"apakah kita menerima bahwa mulai saat itu jalan mundur praktis tertutup"*.
 > Sebaiknya diputuskan sadar, bukan ditemukan belakangan.
+
+---
+
+</details>
 
 ---
 

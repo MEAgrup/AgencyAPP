@@ -5,15 +5,23 @@ Standalone internal system covering MEA Agency's full client lifecycle: lead int
 
 ## Stack & architecture (decided — do not change without a logged decision)
 
-> ### ⛔ GO + MYSQL SUDAH DIPENSIUNKAN — JANGAN BANGUN DI SANA
-> Stack CDPS bermigrasi ke **TypeScript + Supabase/Postgres** (keputusan
-> `docs/DECISIONS.md` 2026-07-29, "Pensiun Go"). `backend/` masih ada di repo untuk
-> **satu alasan saja**: ia adalah oracle paritas selama porting (O43). Ia **bukan**
-> stack produksi, tidak di-deploy, dan MySQL sudah tidak dipakai.
+> ### ⛔ GO + MYSQL SUDAH PENSIUN DAN SUDAH DIARSIP — JANGAN BANGUN DI SANA
 >
-> **Kalau ticket Anda bukan "bandingkan perilaku TS dengan Go", jangan sentuh
-> `backend/`.** Menambah fitur di Go berarti menulis kode yang akan dihapus di
-> C-05, dan lebih buruk: menciptakan versi kedua dari aturan bisnis yang sama.
+> Stack CDPS adalah **TypeScript + Supabase/Postgres** (keputusan `docs/DECISIONS.md`
+> 2026-07-29 "Pensiun Go"). **C-05 dieksekusi 2026-09-04:** `backend/` sudah **pindah ke
+> `archive/backend-go/`**, job CI `backend` sudah dicabut, dan service Railway dimatikan.
+> MySQL tidak dipakai sama sekali.
+>
+> `archive/backend-go/**` adalah **arsip read-only**. Ia disimpan untuk satu alasan:
+> sejak O47 memutuskan `cmd/import` ditinggalkan, di situlah spesifikasi tiga alur
+> klien itu masih bisa dibaca. Ia **bukan** stack produksi, tidak di-deploy, tidak
+> dijalankan CI, dan **bukan lagi** oracle paritas yang wajib dijaga hijau.
+>
+> **Jangan tulis apa pun di sana.** Menambah kode Go berarti menciptakan versi kedua
+> dari aturan bisnis yang sama, di pohon yang tidak dijalankan siapa pun.
+>
+> Untuk paritas **bentuk respons**, rujukannya `apps/api/src/lib/shape-parity.test.ts`
+> (ber-anchor tipe FE), bukan Go.
 
 - **Backend:** **TypeScript**, modular monolith. `apps/api` (Next.js route handlers,
   lapisan tipis) di atas `packages/domain` (satu modul per modul PRD: `sales`,
@@ -72,5 +80,5 @@ Sprint 0 (core engines + HRIS integration + Master Service List admin) → Wave 
 - Never invent fields, statuses, or transitions not in the PRD. Never rename BI labels.
 - Tests first for state machines and money math (commission, allocation Σ=100%, installment rollup, ROAS).
 - If an external dependency is unavailable (HRIS endpoint not ready), implement behind the sync interface with a CSV-import fallback — never hardcode employee data.
-- `backend/**` adalah **referensi read-only**. Boleh dibaca sebagai oracle paritas; jangan tambah fitur, jangan perbaiki bug produk di sana. Satu-satunya perubahan yang wajar adalah menjaga job `backend` tetap hijau sampai C-05 mencabutnya.
+- `archive/backend-go/**` adalah **arsip read-only** (C-05, 2026-09-04). Boleh dibaca sebagai rujukan riwayat; jangan tambah fitur, jangan perbaiki bug di sana, dan jangan bangunkan lagi job CI-nya. Keadaan terakhirnya pada jalur asli `backend/` ada di commit `133f717`.
 - Sebelum menambah endpoint: cek `apps/api/src/lib/route-parity.test.ts`. Setiap path yang dipanggil `web-internal` wajib dilayani `apps/api`. `KNOWN_GAPS` di sana harus tetap **kosong** — menambah satu baris berarti mengakui satu halaman tidak berfungsi, dan itu butuh entri `DECISIONS.md`.

@@ -16,8 +16,8 @@
  * the safe direction, so this port does not touch the policy; the divergence is
  * logged as an open question instead of being decided inside a read model.
  *
- * Reference: backend/internal/core/audit/audit.go (List/Filter),
- * backend/internal/httpapi/audit_handlers.go.
+ * Reference: archive/backend-go/internal/core/audit/audit.go (List/Filter),
+ * archive/backend-go/internal/httpapi/audit_handlers.go.
  */
 
 import type { Queryable } from '@cdps/db';

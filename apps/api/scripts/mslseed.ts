@@ -3,7 +3,7 @@
  * (`supabase/seed/msl_kalkulator.csv`, 32 services) into the Master Service List
  * on the Supabase stack.
  *
- * Port of Go's `backend/cmd/mslseed` (C-04, `docs/backlog/CUTOVER_BACKLOG.md`
+ * Port of Go's `archive/backend-go/cmd/mslseed` (C-04, `docs/backlog/CUTOVER_BACKLOG.md`
  * §C-04 item 4: `master_services` is still 0 rows on live, and NOTHING can be
  * closed until the MSL is populated). Writes go through
  * `msl.createService`/`msl.updateService` ONLY, so every row is validated,

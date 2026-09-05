@@ -1,6 +1,6 @@
 /**
  * The DB-touching half of `rolemapseed` — port of Go's
- * `backend/cmd/rolemapseed/engine.go`.
+ * `archive/backend-go/cmd/rolemapseed/engine.go`.
  *
  * Two phases, in this order, and the order is the point:
  *

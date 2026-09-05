@@ -8,7 +8,7 @@
  * module ports (`module0_sales`, `module5_finance`, …), NOT here.
  *
  * This file holds ONLY the messages that are already named engine-level
- * constants in `backend/internal/core` (shared across every module) plus the
+ * constants in `archive/backend-go/internal/core` (shared across every module) plus the
  * single global default from CLAUDE.md #5. Do NOT dump module-specific strings
  * here — port them alongside their module so the string stays next to the rule
  * that raises it (single source, no drift).

@@ -1,7 +1,7 @@
 /**
  * WIB (Waktu Indonesia Barat, Asia/Jakarta) calendar-date bucketing.
  *
- * Ported 1:1 from backend/internal/core/tz/tz.go.
+ * Ported 1:1 from archive/backend-go/internal/core/tz/tz.go.
  *
  * House rule (DECISIONS O20, 2026-07-17): every derivation that buckets an
  * instant into a calendar DAY or MONTH — the house-ID period, the payment

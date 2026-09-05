@@ -1,13 +1,13 @@
 // Typed wrapper over lib/api.ts for Module 0 (Sales) endpoints.
 //
-// Quote-preview shapes mirror backend/internal/module0_sales/commission.go
+// Quote-preview shapes mirror archive/backend-go/internal/module0_sales/commission.go
 // (LineQuote / Quote) and qualified.go (ServiceSelection) exactly — read from
 // the Go code, never invented. All money fields there are pre-formatted IDR
 // strings from the server (money.Money.Format()); the frontend never
 // recomputes them (CLAUDE.md #4).
 //
 // The attempt-lifecycle section below mirrors the EXISTING handlers in
-// backend/internal/httpapi/sales_handlers.go (module0_sales.QualifiedForm,
+// archive/backend-go/internal/httpapi/sales_handlers.go (module0_sales.QualifiedForm,
 // ProposalLine, ClosingParties/ClosingInput/ClosingResult, Allocation) plus
 // the NEW read endpoints (GET /attempts, GET /attempts/{id}) and the
 // POST /attempts/{id}/lost edge, whose shapes are FINAL per

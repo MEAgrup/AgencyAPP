@@ -22,7 +22,7 @@
  * Speed Score / Payment Status derived from the immutable log (rules 3/4); money
  * renders "Rp. X.XXX.XXX,00" (rule 7).
  *
- * Reference: backend/internal/module9_kol/*.go.
+ * Reference: archive/backend-go/internal/module9_kol/*.go.
  */
 
 import { bi, money, notification, permission, statemachine } from '@cdps/core';

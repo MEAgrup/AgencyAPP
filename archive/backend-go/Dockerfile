@@ -1,3 +1,8 @@
+# ⛔ DEPRECATED 2026-09-04 (C-05) — image ini menyasar deployment Railway yang
+# DIMATIKAN. Tidak dibangun, tidak di-deploy, tidak dijalankan CI. Disimpan
+# sebagai arsip riwayat deployment saja. Stack produksi: TypeScript +
+# Supabase/Postgres di Vercel (docs/DECISIONS.md 2026-07-29 "Pensiun Go").
+#
 # CDPS backend — Railway deploy image.
 # Build context is the backend/ directory (set the Railway service's
 # Root Directory to "backend"). Multi-stage: build the cdps API server, then

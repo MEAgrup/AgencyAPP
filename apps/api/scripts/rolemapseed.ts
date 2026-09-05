@@ -4,7 +4,7 @@
  * Director grants (`supabase/seed/layered_roles_riil.csv`) into a CDPS
  * deployment.
  *
- * Port of Go's `backend/cmd/rolemapseed` (DECISIONS 2026-07-29 "Fase 3"). The
+ * Port of Go's `archive/backend-go/cmd/rolemapseed` (DECISIONS 2026-07-29 "Fase 3"). The
  * admin UI (`/admin/role-mappings`) answers EDITING one rule; it does not answer
  * seeding 23 of them plus the layered grants on a fresh deployment, which is a
  * bootstrap step (see `docs/handoff/RUNBOOK_BOOTSTRAP_DEPLOYMENT_BARU.md`) and

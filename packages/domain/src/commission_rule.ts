@@ -24,7 +24,7 @@
  *   "<N>% of standard price"   percentage of that line's deal value
  *   "flat Rp <N>"              fixed rupiah amount (dots = thousands separators)
  *
- * Reference: backend/internal/module0_sales/commission.go (parity oracle).
+ * Reference: archive/backend-go/internal/module0_sales/commission.go (parity oracle).
  */
 
 import { money } from '@cdps/core';

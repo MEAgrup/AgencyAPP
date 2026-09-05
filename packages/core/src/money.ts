@@ -1,7 +1,7 @@
 /**
  * Shared IDR money type + house formatting (CLAUDE.md #7).
  *
- * Ported 1:1 from backend/internal/core/money/money.go. Money is stored as an
+ * Ported 1:1 from archive/backend-go/internal/core/money/money.go. Money is stored as an
  * integer number of *minor units* (hundredths of a rupiah) so all arithmetic is
  * exact — no float rounding ever touches a commission, allocation, or
  * installment total. Postgres `numeric(15,2)` columns round-trip through

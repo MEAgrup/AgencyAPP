@@ -1,6 +1,6 @@
 /**
  * Tests for mslseed row validation — port of the validation half of
- * `backend/cmd/mslseed/csv_test.go`. Pure: no DB.
+ * `archive/backend-go/cmd/mslseed/csv_test.go`. Pure: no DB.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

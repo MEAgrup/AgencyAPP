@@ -14,7 +14,7 @@
  *   - Status is written ONLY through sm_transition (never a raw UPDATE).
  *   - Every mutation appends to the audit log; block events emit catalog notifs.
  *
- * Reference: backend/internal/demo/task.go.
+ * Reference: archive/backend-go/internal/demo/task.go.
  */
 
 import { bi, ident, notification, permission, statemachine } from '@cdps/core';

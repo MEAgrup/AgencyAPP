@@ -1,7 +1,7 @@
 /**
  * Field-level validation of one seed CSV row into an `msl.ServiceInput`.
  *
- * Port of `backend/cmd/mslseed/validate.go`. Pure (no DB): the same enums and
+ * Port of `archive/backend-go/cmd/mslseed/validate.go`. Pure (no DB): the same enums and
  * rules as `msl.normalizeInput` — which stays the authoritative server-side gate
  * — but reported per row so a bad seed CSV fails fast with a usable line number
  * instead of a bare `[data tidak lengkap, silahkan lengkapi semua pertanyaan

@@ -21,7 +21,7 @@
  *     every later status move goes through the engine (house rule 2);
  *   - Revision Count is DERIVED from the immutable audit log, never stored (3/4).
  *
- * Reference: backend/internal/module7_creative/{asset,review,hours,asset_read}.go.
+ * Reference: archive/backend-go/internal/module7_creative/{asset,review,hours,asset_read}.go.
  */
 
 import { bi, notification, permission, statemachine, tz } from '@cdps/core';
