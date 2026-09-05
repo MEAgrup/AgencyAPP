@@ -9,10 +9,10 @@ Standalone internal system covering MEA Agency's full client lifecycle: lead int
 >
 > Stack CDPS adalah **TypeScript + Supabase/Postgres** (keputusan `docs/DECISIONS.md`
 > 2026-07-29 "Pensiun Go"). **C-05 dieksekusi 2026-09-04:** `backend/` sudah **pindah ke
-> `archive/backend-go/`**, job CI `backend` sudah dicabut, dan seluruh config Railway
-> ditandai deprecated. MySQL tidak dipakai sama sekali. (Mematikan service Railway-nya
-> sendiri adalah butir terakhir C-05 dan **eksekusi pemilik** — Claude tak punya akses
-> Railway; dump final MySQL sudah diambil dan disimpan di luar GitHub.)
+> `archive/backend-go/`**, job CI `backend` sudah dicabut, seluruh config Railway
+> ditandai deprecated, dan **service Railway-nya SUDAH DIHENTIKAN pemilik 2026-09-05**
+> (dump final MySQL diambil dan disimpan di luar GitHub lebih dulu). **C-05 selesai
+> 5/5 — jalur cutover TUTUP.** MySQL tidak dipakai sama sekali.
 >
 > `archive/backend-go/**` adalah **arsip read-only**. Ia disimpan untuk satu alasan:
 > sejak O47 memutuskan `cmd/import` ditinggalkan, di situlah spesifikasi tiga alur
