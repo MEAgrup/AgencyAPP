@@ -31,7 +31,7 @@
 | **C-02** | ~~Endpoint `notifications` di `apps/api`~~ ✅ **SELESAI 2026-07-28** | — | — | — |
 | **C-03** | ~~UAT paritas end-to-end~~ ✅ **SELESAI 2026-07-31 — dijalankan terhadap deployment produksi, FAIL 0** | — | — | — |
 | **C-04** | ~~Cutover data + aktor produksi~~ ✅ **DIKETOK 2026-09-04 — memformalkan cutover yang secara de facto SUDAH terjadi sejak ±28 Agustus** (lihat §C-04 + `DECISIONS.md`) | — | — | — |
-| **C-05** | ~~Retire Go: arsip `backend/`, bersihkan CI & config Railway~~ ✅ **SELESAI 2026-09-04** — `backend/` → `archive/backend-go/`, job CI `backend` dicabut, 5 config Railway ditandai deprecated, `CLAUDE.md` diperbarui. Butir 5 (matikan service Railway) **eksekusi pemilik** | — | — | — |
+| **C-05** | ~~Retire Go: arsip `backend/`, bersihkan CI & config Railway~~ ✅ **SELESAI 2026-09-04** — `backend/` → `archive/backend-go/`, job CI `backend` dicabut, 5 config Railway ditandai deprecated, `CLAUDE.md` diperbarui. Butir 5 (matikan service Railway) ✅ **selesai 2026-09-05 oleh pemilik — C-05 5/5** | — | — | — |
 | **C-06** | `web-client-portal` (M15-C2) | ⚪ belum dimulai (O4/O5 RESOLVED 2026-08-31) | — | **TIDAK** (by design) |
 
 **Urutan wajib:** ~~C-00~~ ✅ → ~~C-01~~ ✅ → ~~C-02~~ ✅ → ~~C-03~~ ✅ → ~~C-04~~ ✅ → ~~(gate go/no-go manusia)~~ ✅ **GO 2026-09-04 (Nerissa, COO)** → ~~C-05~~ ✅. **Jalur cutover SELESAI.**
@@ -419,9 +419,9 @@ baru buka gate C-04.
 >    `apps/api/scripts/mslseed/csv.test.ts` membaca `seed/msl_kalkulator.csv` dari pohon Go.
 >    Berbahaya karena tesnya `it.skipIf(!existsSync(...))` — path yang salah akan **diam-diam jadi
 >    skip**, bukan merah. Diverifikasi jalan: 16/16 hijau termasuk cek byte-identical.
-> 5. 🔶 **Matikan service Railway — eksekusi pemilik**, Claude tak punya akses. Dump final MySQL
->    **sudah diambil & disimpan di luar GitHub** (dikonfirmasi pemilik 2026-09-04), jadi butir ini
->    tinggal mematikan service-nya.
+> 5. ✅ **Matikan service Railway — SELESAI 2026-09-05, dieksekusi pemilik (Nerissa).** Dump final
+>    MySQL diambil & disimpan di luar GitHub lebih dulu (dikonfirmasi 2026-09-04). **C-05 kini 5/5
+>    dan jalur cutover Go/MySQL → TS/Supabase TUTUP SEPENUHNYA.**
 
 ### Spesifikasi asli (untuk rujukan)
 
@@ -484,8 +484,8 @@ _Paragraf asli 2026-07-28:_ Masih hanya `README.md` — belum ada kode/migrasi d
 > adalah `shape-parity.test.ts` (ber-anchor tipe FE, selamat pasca-arsip); untuk **perilaku**,
 > `archive/backend-go/` boleh dibaca tapi tidak dijaga hijau lagi.
 
-**Sesudah GO:** ~~eksekusi C-05~~ ✅ selesai 2026-09-04. Sisa satu-satunya: **matikan service
-Railway** (eksekusi pemilik — Claude tak punya akses Railway).
+**Sesudah GO:** ~~eksekusi C-05~~ ✅ **SELESAI PENUH.** Butir 1–4 dikerjakan 2026-09-04; butir 5
+(matikan service Railway) dieksekusi pemilik 2026-09-05. **Nol sisa — jalur cutover tutup.**
 
 ---
 
