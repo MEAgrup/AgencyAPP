@@ -1,5 +1,30 @@
 # PENSIUN GO — Status per 2026-07-30 & pembagian task 2 akun paralel
 
+> # ⚠️ DOKUMEN INI SUDAH SELESAI MASA PAKAINYA — BACA BANNER INI DULU
+>
+> **Ditutup 2026-09-06.** Seluruh isi di bawah ditulis ketika pensiun Go masih
+> BERJALAN, dan angka-angkanya ("Fase 5 ~15%", "Gabungan ~88%", "menunggu gate
+> GO") menggambarkan keadaan yang **sudah lewat**. Jangan dipakai sebagai status.
+>
+> **Keadaan sebenarnya per 2026-09-06 — pensiun Go SELESAI SEPENUHNYA:**
+>
+> | Yang dokumen ini bilang | Kenyataannya |
+> |---|---|
+> | Fase 4 gate manusia **~45%**, 5 butir terbuka | **SELESAI** — gate GO dilewati pemilik |
+> | Fase 5 (C-05) **~15%**, "belum boleh dimulai" | **SELESAI 5/5**, dieksekusi 2026-09-04 |
+> | Gabungan **~88%** | **100%** |
+> | `backend/` masih ada, "opsi hapus tidak lagi terhalang retensi" | `backend/` **sudah pindah** ke `archive/backend-go/`; job CI `backend` dicabut |
+> | Railway hidup, backup MySQL jadi gate | service Railway **DIHENTIKAN pemilik 2026-09-05**; dump final MySQL diambil & disimpan di luar GitHub lebih dulu |
+>
+> Rujukan yang MASIH BERLAKU, pakai ini sebagai gantinya:
+> `docs/DECISIONS.md` 2026-09-05 ("🟢 C-05 SELESAI 5/5 — service Railway
+> DIHENTIKAN pemilik; jalur cutover TUTUP SEPENUHNYA") dan `CLAUDE.md` §Stack
+> ("⛔ GO + MYSQL SUDAH PENSIUN DAN SUDAH DIARSIP").
+>
+> Dokumen ini disimpan sebagai **riwayat keputusan**, bukan sebagai peta kerja.
+> Satu-satunya bagian yang masih hidup: **O46** (§5 butir 3) — ia tidak pernah
+> memblokir cutover, hanya memblokir klaim paritas RLS, dan masih terbuka.
+
 > **Dokumen standalone.** Disusun 2026-07-30 di atas `main@a37e432`; **diperbarui terakhir
 > sesi 19** sesudah **#78 dan #80 di-merge** (`main@61f357b`) dan sesudah pemilik menjawab
 > **O47** + **retensi PII**. Semua paket paralel SELESAI dan **ada di `main`**.
@@ -40,8 +65,8 @@ Railway). **Nol butir sisa bisa dimajukan Claude tanpa akses atau otoritas pemil
 | **Fase 1** | O41 — 6 route hilang diport, `KNOWN_GAPS` kosong | 🟢 **SELESAI** — di `main` (#75) | **100%** |
 | **Fase 2** | O43 — paritas bentuk respons | 🟢 **SELESAI.** kelas-1 tutup (#76); kelas-2 **seluruh 54 converter** diaudit — 29 commerce/portal (B, #78) + 25 delivery (A, #79), **nol cacat di keduanya**, dikunci 44 test + gate otomatis. **Blind spot nested-inline juga ditutup (sesi 17):** 6 blok inline dinamai, gate turun rekursif, `NESTED_INLINE_UNCHECKED` **kosong** — dan ia menyingkap **satu lubang nyata** (`DemoTaskDetail.task.description`, lihat §A4) | **100%** |
 | **Fase 3** | 4 CLI Go tanpa padanan | 🟢 **SELESAI 4/4.** Tiga diputuskan & dieksekusi (#76, di `main`); **`cmd/import` DITINGGALKAN** — O47 RESOLVED 2026-07-30 (riwayat klien pra-CDPS cukup arsip spreadsheet). Konsekuensi: **T3 gugur** (`POST /leads/bulk` sendiri tetap hidup — jalur operasional, bukan historis) | **100%** |
-| **Fase 4** | Gate manusia (**5 butir**, dari 7) | 🔴 **nol butir bisa ditutup Claude** — semuanya butuh akses/otoritas pemilik. **Dua ditutup sesi 19:** O47 + retensi PII. Sebagian C-04 sudah jalan (MSL 32 layanan, 69 karyawan, O42, `role_mappings` 39) | **~45%** |
-| **Fase 5** | Pencabutan mekanis (C-05) | 🔴 belum boleh dimulai — tapi kini terkunci **gate GO saja**, tidak lagi O47. Yang sudah dikerjakan lebih awal: `CLAUDE.md` §Stack (#76) + **PII dikeluarkan dari `backend/`** (sesi 19) ⇒ opsi "hapus `backend/`" tidak lagi terhalang retensi | **~15%** |
+| **Fase 4** | Gate manusia (**5 butir**, dari 7) | 🟢 **SELESAI 2026-09-04/05** — gate GO dilewati pemilik. _(Teks lama: "nol butir bisa ditutup Claude — semuanya butuh akses/otoritas pemilik". Benar saat ditulis; pemiliknya sudah mengerjakannya.)_ | **100%** |
+| **Fase 5** | Pencabutan mekanis (C-05) | 🟢 **SELESAI 5/5, dieksekusi 2026-09-04.** `backend/` pindah ke `archive/backend-go/` (read-only), job CI `backend` dicabut, config Railway ditandai deprecated, dan **service Railway dihentikan pemilik 2026-09-05** setelah dump final MySQL diamankan di luar GitHub. Keadaan terakhir di jalur asli: commit `133f717` | **100%** |
 
 ### 1.2 Dibagi per siapa yang bisa mengerjakan — ini yang berguna
 
@@ -49,7 +74,7 @@ Railway). **Nol butir sisa bisa dimajukan Claude tanpa akses atau otoritas pemil
 |---|---|---|
 | **Engineering (Claude)** | **100%** *(~80% → ~85% Paket B → ~95% Paket A → ~98% sesi 17 → **100%** sesi 19)* | **Nol butir tersisa.** T3 **gugur** bersama O47, bukan tertunda. Fase 5 adalah pencabutan mekanis yang menunggu **gate GO** — bukan pekerjaan engineering yang belum selesai. Ditutup sesi 17: blind spot nested-inline · **T2b** · lint `@cdps/api` di job CI `--max-warnings 0` |
 | **Sisi pemilik (Yohan/Nerissa)** | **~55%** | C-03 eksekusi dari deployment · O46 · O34/O26/O35/O9 · backup MySQL + OQ-2 · rencana rollback. **Ditutup 2026-07-30: O47 · retensi PII** |
-| **Gabungan pensiun Go** | **~88%** | jalur kritisnya **100% sisi pemilik** — §5. Nol butir sisa bisa dimajukan Claude tanpa keputusan/akses pemilik |
+| **Gabungan pensiun Go** | **100%** | ✅ **TUTUP 2026-09-05.** Nol sisa. _(Angka lama: ~88%, "jalur kritisnya 100% sisi pemilik" — pemiliknya sudah menuntaskannya.)_ Satu-satunya yang masih terbuka dan TIDAK pernah memblokir cutover: **O46** (paritas RLS, §5 butir 3) |
 
 > ⚠️ **Koreksi terhadap angka lama.** PR #73 (handoff SESI12) menyatakan *"engineering ~95%"*.
 > Angka itu **terlalu optimistis, dan sudah terbukti begitu** — SESI13 menemukan seluruh lapisan
@@ -352,11 +377,13 @@ ditampilkan di bawah supaya jelas apa yang sudah tidak perlu ditanyakan lagi.
 | 3 | **O46** — 3 arm visibility RLS lebih sempit dari Go (`transactions_select` tanpa arm Sales-Lead · `audit_log_select` staff hanya lihat entri sendiri · arm Account pasca-rilis) | melonggarkan RLS = keputusan keamanan. Arahnya **lebih sempit** ⇒ nol kebocoran, tapi ada data tak terlihat | klaim *"apps/api paritas Go"* |
 | 4 | **O34 · O26 · O35 · O9** | aktor produksi + sub-tim Creative | **DoD C-04** ("nol fixture") |
 | ~~5~~ | ✅ **Retensi PII — DITUTUP 2026-07-30.** `backend/testdata/import_samples/` (7 CSV + README) **dihapus** dari repo; job `backend` diverifikasi tetap hijau. **Sisa yang masih terbuka:** PII masih ada di **histori git** — scrub butuh `git filter-repo` + re-clone terkoordinasi, keputusan & eksekusi pemilik | — | ~~C-05 opsi "hapus `backend/`"~~ — bebas |
-| 6 | **Backup MySQL Railway terakhir** + **OQ-2** (`SELECT count(*)` per tabel: minimal `leads`, `clients`, `transactions`) | butuh akses Railway | **gate GO** |
-| 7 | **Rencana rollback disepakati** (Railway hidup N hari pasca-cutover) | keputusan pemilik | **gate GO** |
+| ~~6~~ | ✅ **SELESAI** — backup MySQL Railway terakhir diambil, dump disimpan di luar GitHub (dikonfirmasi pemilik 2026-09-04). Laporan: `docs/handoff/BACKUP_MYSQL_RAILWAY_REPORT_20260731.md` | — | ~~gate GO~~ **dilewati** |
+| ~~7~~ | ✅ **SELESAI** — rencana rollback disepakati (`docs/handoff/RENCANA_ROLLBACK_CUTOVER.md`), masa siaganya habis, dan service Railway **dihentikan pemilik 2026-09-05**. Rollback ke Go tidak lagi mungkin, dan itu disengaja | — | ~~gate GO~~ **dilewati** |
 
-**Urutan tercepat menuju Go mati:** butir 1 (eksekusi C-03) → butir 4 → **gate GO** → butir 6 & 7
-→ Fase 5 (C-05). Butir 3 tidak memblokir cutover — ia hanya memblokir klaim paritas.
+~~**Urutan tercepat menuju Go mati:** butir 1 (eksekusi C-03) → butir 4 → **gate GO** → butir 6 & 7
+→ Fase 5 (C-05).**~~ **Seluruh urutan ini sudah dijalani sampai habis (2026-09-04/05).**
+Yang tersisa dari daftar ini hanya **butir 3 (O46)** — ia tidak pernah memblokir cutover,
+ia hanya memblokir klaim paritas RLS terhadap Go, dan Go-nya sekarang sudah mati.
 
 > **Yang berubah dari daftar sebelumnya:** butir 2 & 5 dulu berbunyi *"wajib sebelum `backend/`
 > diarsipkan"*. Keduanya kini terjawab, jadi **tidak ada lagi tenggat yang mendahului C-05** —

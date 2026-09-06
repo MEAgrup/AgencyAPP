@@ -513,18 +513,28 @@ describe('normalizeInsightDraft', () => {
 
 // ── polish tampilan (§1.8) ─────────────────────────────────────────────────
 describe('paritas visual dokumen laporan', () => {
-  it('loads FontAwesome and gives every section heading an icon', () => {
+  it('inlines every section-heading icon as SVG — no FontAwesome from a CDN', () => {
     const html = renderReportHtml(fullPayload(), 'klien');
-    expect(html).toContain('font-awesome/6.5.1');
+    // CR-12: the icons are pasted SVG, so a blocked CDN can no longer turn every
+    // section heading into an empty box in a file already sent to the client.
+    expect(html).not.toContain('font-awesome');
     // Every NUMBERED section, not just the first: an icon set with holes reads
     // as a rendering bug rather than a design. The score block's own <h2> is
     // deliberately excluded — it sits above the numbering, is already carried by
     // the gauge beside it, and a chip there would compete with it.
-    const withIcon = [...html.matchAll(/<span class="sec-ico"><i class="fa-solid ([\w-]+)"><\/i><\/span>(\d+)\./g)];
-    const numbered = [...html.matchAll(/<h2[^>]*>[\s\S]{0,120}?(\d+)\.\s/g)];
+    const withIcon = [...html.matchAll(/<span class="sec-ico"><svg class="fa-ico" viewBox="0 0 (\d+) 512"[\s\S]*?<\/svg><\/span>(\d+)\./g)];
+    // Jendela 1400 karakter, bukan 120: sejak CR-12 chip ikonnya adalah SVG
+    // ditempel yang path-nya bisa 900 karakter, jadi nomor seksinya duduk jauh
+    // lebih jauh dari `<h2`. Tetap dibatasi supaya <h2> blok skor yang TIDAK
+    // bernomor tidak menyerobot nomor seksi berikutnya.
+    const numbered = [...html.matchAll(/<h2[^>]*>[\s\S]{0,1400}?(\d+)\.\s/g)];
     expect(withIcon.length).toBe(numbered.length);
     expect(withIcon.map((m) => Number(m[2]))).toEqual(withIcon.map((_, i) => i + 1));
-    expect(new Set(withIcon.map((m) => m[1])).size).toBeGreaterThan(5);
+    // Distinct icons, read off the viewBox width + the path itself: an engine
+    // that quietly rendered the same glyph everywhere would still pass a
+    // count-only check.
+    const bentuk = new Set([...html.matchAll(/<span class="sec-ico"><svg[\s\S]*?d="([^"]+)"/g)].map((m) => m[1]));
+    expect(bentuk.size).toBeGreaterThan(5);
   });
 
   it('draws the two quadrant bubble charts, with the SAME thresholds the routing used', () => {
@@ -560,14 +570,19 @@ describe('paritas visual dokumen laporan', () => {
     expect(html).not.toContain('id="c_skor"');
   });
 
-  it('offers a PDF download in the document but keeps it out of the PDF and the print', () => {
+  it('offers a PDF download in the document but keeps it out of the print', () => {
     const html = renderReportHtml(fullPayload(), 'klien');
     expect(html).toContain('id="btnPdf"');
-    expect(html).toContain('html2pdf');
+    // CR-12: browser Print, not html2pdf from a CDN. The old bootstrap HID the
+    // button when the library failed to load, so a client on a network that
+    // blocks CDNs simply concluded MEA's report could not be saved at all.
+    expect(html).not.toContain('html2pdf');
+    expect(html).toContain('window.print()');
     expect(html).toContain('class="no-print');
-    expect(html).toContain('@media print{.no-print{display:none!important}}');
-    // The button lives OUTSIDE #reportBody — html2pdf renders that element, so a
-    // button inside it would appear in the PDF of itself.
+    expect(html).toContain('.no-print{display:none!important}');
+    expect(html).toContain('@media print');
+    // The button lives OUTSIDE #reportBody — it is the block the document is
+    // built around, so a button inside it would appear in the print of itself.
     const body = html.indexOf('id="reportBody"');
     expect(html.indexOf('id="btnPdf"')).toBeLessThan(body);
   });

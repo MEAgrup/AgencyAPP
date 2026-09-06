@@ -1272,6 +1272,104 @@ BEGIN
   END IF;
 END $$;
 
+-- ---------------------------------------------------------------------------
+-- 45. SCR-UI-1 — arm Ads di `clients_select` (migrasi 20260913010000).
+--
+--     Keputusan pemilik 2026-09-06, dua jawaban yang bersama-sama membentuk
+--     predikatnya: penanda "layanan Ads" adalah **adanya brief Ads**, dan klien
+--     yang layanan Ads-nya sudah selesai **tetap boleh dibaca riwayatnya**.
+--
+--     Dua arah yang harus dijaga sekaligus, dan melewatkan salah satunya
+--     membuat arm ini berbahaya atau tak berguna:
+--
+--       * kurang lebar ⇒ picker klien di /ads/screening & /ads/scanner jadi
+--         daftar KOSONG, dan gejalanya terlihat seperti bug UI, bukan RLS;
+--       * kelewat lebar ⇒ staff Ads membaca SELURUH klien, yang justru pilihan
+--         yang pemilik TOLAK.
+--
+--     Plus dua batas yang paling mudah bocor: divisi lain tidak ikut kebagian,
+--     dan klien yang brief-nya milik divisi LAIN tidak ikut terbawa.
+-- ---------------------------------------------------------------------------
+RESET ROLE;
+
+-- Empat klien, semuanya dimiliki orang lain (sales_pic/commission/created_by =
+-- EMP-RLS-OWNER, bukan aktor Ads) — supaya satu-satunya jalan aktor Ads bisa
+-- melihatnya adalah arm baru itu sendiri, bukan arm kepemilikan yang sudah ada.
+INSERT INTO clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline,
+                     target_gmv, sales_pic_id, commission_payment_pic_id, created_by)
+VALUES
+  ('CLI-RLS-ADS-AKTIF','PIC A', 'Toko Ads Aktif','Jakarta', 'http://x/a', 'Fashion', 0, 0, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER', 'EMP-RLS-OWNER'),
+  ('CLI-RLS-ADS-DONE', 'PIC B', 'Toko Ads Done', 'Jakarta', 'http://x/b', 'Fashion', 0, 0, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER', 'EMP-RLS-OWNER'),
+  ('CLI-RLS-ADS-LAIN', 'PIC C', 'Toko Brief Lain','Jakarta','http://x/c', 'Fashion', 0, 0, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER', 'EMP-RLS-OWNER'),
+  ('CLI-RLS-ADS-NOL',  'PIC D', 'Toko Tanpa Brief','Jakarta','http://x/d','Fashion', 0, 0, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER', 'EMP-RLS-OWNER');
+
+INSERT INTO services (id, client_id, master_service_id, master_version_no, name,
+                      standard_price, commission_rule, status, created_by)
+VALUES
+  ('SVC-RLS-AKTIF', 'CLI-RLS-ADS-AKTIF', 'MS-RLS', 1, 'Jasa Iklan', 0, 'none', '[In Execution]', 'EMP-RLS-OWNER'),
+  -- Layanan yang SUDAH SELESAI. Pembedanya HANYA status; brief Ads-nya identik.
+  -- Klien ini WAJIB tetap terlihat — itu jawaban "history" dari pemilik.
+  ('SVC-RLS-DONE',  'CLI-RLS-ADS-DONE',  'MS-RLS', 1, 'Jasa Iklan', 0, 'none', 'Done', 'EMP-RLS-OWNER'),
+  ('SVC-RLS-LAIN',  'CLI-RLS-ADS-LAIN',  'MS-RLS', 1, 'Jasa Konten',0, 'none', '[In Execution]', 'EMP-RLS-OWNER'),
+  -- Punya layanan, tapi NOL brief sama sekali.
+  ('SVC-RLS-NOL',   'CLI-RLS-ADS-NOL',   'MS-RLS', 1, 'Jasa Iklan', 0, 'none', '[In Execution]', 'EMP-RLS-OWNER');
+
+INSERT INTO briefs (id, service_id, title, status, assigned_division, created_by)
+VALUES
+  ('BRF-RLS-ADS1', 'SVC-RLS-AKTIF', 'brief ads',      '[Draft]', 'Ads',      'EMP-RLS-OWNER'),
+  ('BRF-RLS-ADS2', 'SVC-RLS-DONE',  'brief ads lama', '[Draft]', 'Ads',      'EMP-RLS-OWNER'),
+  -- Brief milik divisi LAIN: klien ini tidak boleh ikut terbawa.
+  ('BRF-RLS-CRE',  'SVC-RLS-LAIN',  'brief creative', '[Draft]', 'Creative', 'EMP-RLS-OWNER');
+
+SET LOCAL ROLE authenticated;
+
+-- Staff Ads (bukan lead, bukan pemilik satu pun klien di atas).
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-ADS","division":"Ads","level":"staff"}}', true);
+DO $$
+DECLARE terlihat text;
+BEGIN
+  SELECT string_agg(id, ', ' ORDER BY id) INTO terlihat
+    FROM clients WHERE id LIKE 'CLI-RLS-ADS-%';
+  IF terlihat IS DISTINCT FROM 'CLI-RLS-ADS-AKTIF, CLI-RLS-ADS-DONE' THEN
+    RAISE EXCEPTION
+      'SCR-UI-1 clients_select arm Ads: staff Ads harus melihat PERSIS klien yang punya brief Ads (termasuk yang layanannya sudah Done) — terlihat: %', coalesce(terlihat, '(nol)');
+  END IF;
+END $$;
+
+-- Batas 1: divisi lain TIDAK ikut kebagian arm ini.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRE","division":"Creative","level":"staff"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM clients WHERE id LIKE 'CLI-RLS-ADS-%') <> 0
+  THEN RAISE EXCEPTION 'SCR-UI-1: staff non-Ads tidak boleh ikut melihat klien lewat arm Ads'; END IF;
+END $$;
+
+-- Batas 2: LEAD divisi lain pun tidak — arm ini digerbang divisi, bukan level.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-CRE2","division":"Creative","level":"lead"}}', true);
+DO $$ BEGIN
+  IF (SELECT count(*) FROM clients WHERE id LIKE 'CLI-RLS-ADS-%') <> 0
+  THEN RAISE EXCEPTION 'SCR-UI-1: lead non-Ads tidak boleh ikut melihat klien lewat arm Ads'; END IF;
+END $$;
+
+-- Assert per-alasan, supaya pesan gagalnya menyebut PENYEBABNYA, bukan cuma
+-- jumlah yang tidak cocok.
+SELECT set_config('request.jwt.claims',
+  '{"app_metadata":{"employee_id":"EMP-RLS-ADS","division":"Ads","level":"staff"}}', true);
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM clients WHERE id = 'CLI-RLS-ADS-LAIN')
+  THEN RAISE EXCEPTION 'SCR-UI-1: klien yang brief-nya milik divisi LAIN tidak boleh terlihat'; END IF;
+  IF EXISTS (SELECT 1 FROM clients WHERE id = 'CLI-RLS-ADS-NOL')
+  THEN RAISE EXCEPTION 'SCR-UI-1: klien tanpa brief Ads sama sekali tidak boleh terlihat'; END IF;
+  -- Arah sebaliknya, dan ini yang paling mudah hilang kalau seseorang
+  -- "membersihkan" predikatnya dengan menambah filter status:
+  IF NOT EXISTS (SELECT 1 FROM clients WHERE id = 'CLI-RLS-ADS-DONE')
+  THEN RAISE EXCEPTION 'SCR-UI-1: klien yang layanan Ads-nya sudah Done HARUS tetap terlihat (keputusan pemilik 2026-09-06: riwayat tetap terbaca)'; END IF;
+END $$;
+
+RESET ROLE;
+
 ROLLBACK;
 
 \echo 'rls_checks: PASS'

@@ -18,6 +18,7 @@
  * and no Ads Manager files must not receive a report that jumps from 8 to 10.
  */
 import { dec, esc, num, pct, rp } from '../baseline/angka';
+import { ATRIBUSI_IKON, CHART_JS, DOC_CSS, ikon as ikonSvg, PRINT_BOOT, type IconName } from '../docassets';
 import type { PayloadInsight, ReportPayload } from './payload';
 import { TAHAP_LABEL, type TahapKey } from './tahap';
 
@@ -67,9 +68,11 @@ export const td = (v: string, r = false): string => `<td class="py-2 ${r ? 'text
  * neutral note gets read last. Mirrors the owner's engine, which marks the same
  * three findings the same way.
  */
-export const kartuInternal = (judul: string, isi: string, warna = 'slate', ikon = 'fa-circle-info'): string =>
+export type WarnaKartu = 'slate' | 'emerald' | 'amber' | 'red';
+
+export const kartuInternal = (judul: string, isi: string, warna: WarnaKartu = 'slate', ikon: IconName = 'fa-circle-info'): string =>
   `<div class="bg-${warna}-50 border border-${warna}-200 rounded-xl p-4 text-sm">
-  <div class="font-semibold text-${warna}-800 mb-1"><i class="fa-solid ${esc(ikon)} mr-1.5"></i>${esc(judul)} <span class="badge-int">INTERNAL</span></div>
+  <div class="font-semibold text-${warna}-800 mb-1">${ikonSvg(ikon, 'mr-1.5')}${esc(judul)} <span class="badge-int">INTERNAL</span></div>
   <p class="text-${warna}-700 text-xs">${isi}</p></div>`;
 
 export function rekCard(r: { judul: string; target: string; dampak: string; timeline: string }, tone: 'tinggi' | 'sedang'): string {
@@ -204,7 +207,7 @@ const FLAG_WARNA: Record<string, string> = {
   hijau: 'text-emerald-700', kuning: 'text-amber-700', merah: 'text-red-700', kosong: 'text-slate-400',
 };
 
-const TAHAP_IKON: Record<TahapKey, string> = {
+const TAHAP_IKON: Record<TahapKey, IconName> = {
   awareness: 'fa-eye', consideration: 'fa-magnifying-glass-chart', conversion: 'fa-cart-shopping',
 };
 
@@ -461,7 +464,7 @@ function seksiAfiliasi(p: ReportPayload, mode: RenderMode): string {
   const top = A.top_kreator.slice(0, 12).map((c, i) => `<tr class="border-b last:border-0">${td(String(i + 1))}${td(esc(c.nama))}${td(`<b>${rp(c.gmv)}</b>`, true)}${td(num(c.konten), true)}${td(num(c.pesanan), true)}</tr>`);
   const nempel = A.posting_tanpa_hasil_list.map((c) => `<tr class="border-b last:border-0">${td(esc(c.nama))}${td(num(c.konten), true)}${td(num(c.tayangan), true)}${td('<span class="text-red-600 font-semibold">Rp. 0,00</span>', true)}</tr>`);
   const refundWarn = A.refund_rate != null && A.refund_rate > 0.2
-    ? `<div class="mb-4 bg-red-50 border border-red-200 rounded-xl p-4 text-sm"><div class="font-semibold text-red-800 mb-1"><i class="fa-solid fa-triangle-exclamation mr-1.5"></i>Refund Affiliate Tinggi</div>
+    ? `<div class="mb-4 bg-red-50 border border-red-200 rounded-xl p-4 text-sm"><div class="font-semibold text-red-800 mb-1">${ikonSvg('fa-triangle-exclamation', 'mr-1.5')}Refund Affiliate Tinggi</div>
        <p class="text-red-700 text-xs">${pct(A.refund_rate, 0)} dari GMV affiliate (<b>${rp(A.refund)}</b>) berakhir refund. GMV bersih hanya <b>${rp(A.gmv_bersih)}</b>. Cek kualitas closing kreator dan kesesuaian ekspektasi produk.</p></div>` : '';
   const internalPanel = mode !== 'internal' ? '' : `<div class="bg-white rounded-xl border border-slate-100 p-5">
       <h3 class="font-semibold text-sm text-slate-600 mb-1">Posting Tanpa Hasil <span class="badge-int">INTERNAL</span></h3>
@@ -600,8 +603,10 @@ const CHART_BOOT = `
  * the PDF of itself. `.no-print` plus the `@media print` rule keeps it out of a
  * browser Ctrl-P too.
  *
- * `avoid-all` page-breaking is what stops a KPI card or a table row being sliced
- * across two pages — the failure everyone notices immediately in a client PDF.
+ * CR-12: the mechanism is now `window.print()` (`PRINT_BOOT` in `docassets`),
+ * not html2pdf from a CDN. The page-break rules that stop a KPI card or a table
+ * row being sliced across two pages moved with it, into `DOC_CSS`'s
+ * `@media print` block.
  */
 /**
  * Serialise a value for embedding inside a `<script>` block.
@@ -625,24 +630,6 @@ export function jsonForScript(v: unknown): string {
     .replace(/&/g, '\\u0026');
 }
 
-const PDF_BOOT = `
-(function(){
- var b=document.getElementById('btnPdf'); if(!b) return;
- if(typeof html2pdf==='undefined'){b.style.display='none';return;}
- b.addEventListener('click',function(){
-  var el=document.getElementById('reportBody'); if(!el) return;
-  var old=b.innerHTML; b.disabled=true;
-  b.innerHTML='<i class="fa-solid fa-spinner fa-spin mr-1"></i> Membuat PDF...';
-  html2pdf().set({margin:[8,8,8,8],filename:(window.REPORT_PDF_NAME||'laporan')+'.pdf',
-   image:{type:'jpeg',quality:0.95},html2canvas:{scale:2,useCORS:true,logging:false},
-   jsPDF:{unit:'mm',format:'a4',orientation:'portrait'},
-   pagebreak:{mode:['avoid-all','css','legacy']}})
-   .from(el).save()
-   .then(function(){b.innerHTML=old;b.disabled=false;})
-   .catch(function(){b.innerHTML=old;b.disabled=false;});
- });
-})();`;
-
 /** `Laporan-Alpha-Digital-2026-08-01` — no spaces, and the mode is marked so an
  *  internal PDF cannot be mistaken for the client's copy after it is saved. */
 function pdfName(p: ReportPayload, mode: RenderMode): string {
@@ -651,27 +638,7 @@ function pdfName(p: ReportPayload, mode: RenderMode): string {
   return `Laporan-${toko}-${per}${mode === 'internal' ? '-INTERNAL' : ''}`;
 }
 
-const STYLE = `body{font-family:'Inter',system-ui,sans-serif;background:#f8fafc;color:#0f172a}
-.font-display{font-family:'Poppins',system-ui,sans-serif}
-.kpi-value{font-size:1.6rem;line-height:1.15;font-weight:700}
-.insight-card{border-left:4px solid #0F766E}
-.badge-int{background:#EEF2FF;color:#4338CA;font-size:.65rem;padding:1px 6px;border-radius:99px;font-weight:700}
-table{border-collapse:collapse}
-/* Section-heading icon chip. Sized in em so it tracks the heading at every
-   breakpoint instead of needing a second rule per screen size. */
-.sec-ico{display:inline-flex;align-items:center;justify-content:center;
-  width:1.6em;height:1.6em;flex:0 0 1.6em;border-radius:.5em;
-  background:#CCFBF1;color:#0F766E;font-size:.62em}
-/* Circular score gauge. conic-gradient, zero dependencies — a canvas here would
-   mean the score disappears from the PDF export (html2canvas rasterises the
-   page, and a chart that has not finished animating rasterises blank). */
-.gauge{position:relative;width:104px;height:104px;flex:0 0 104px;border-radius:50%}
-.gauge::after{content:'';position:absolute;inset:9px;border-radius:50%;background:#fff}
-.gauge-val{position:absolute;inset:0;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;z-index:1;line-height:1}
-.gauge-num{font-size:1.55rem;font-weight:800;letter-spacing:-.02em}
-.gauge-max{font-size:.62rem;color:#64748B;margin-top:1px}
-@media print{.no-print{display:none!important}}`;
+
 
 /** The report body (no `<html>` wrapper) — what an embedding page drops in. */
 export function renderBody(p: ReportPayload, mode: RenderMode, insight?: PayloadInsight): string {
@@ -682,8 +649,8 @@ export function renderBody(p: ReportPayload, mode: RenderMode, insight?: Payload
   // [judul, html, ikon]. The icon is a PARAMETER of the section table rather
   // than markup pasted into each block, so a new section cannot forget one and
   // the icon set stays readable as a list.
-  const seksi: [string, string, string][] = [];
-  const add = (judul: string, html: string, ikon = 'fa-circle-dot'): void => {
+  const seksi: [string, string, IconName][] = [];
+  const add = (judul: string, html: string, ikon: IconName = 'fa-circle-dot'): void => {
     if (html) seksi.push([judul, html, ikon]);
   };
 
@@ -723,7 +690,7 @@ export function renderBody(p: ReportPayload, mode: RenderMode, insight?: Payload
 
   const body = seksi.map(([judul, html, ikon], i) =>
     `<section class="mb-8"><h2 class="font-display text-xl md:text-2xl font-bold text-slate-900 mb-4 flex items-center gap-3">
-      <span class="sec-ico"><i class="fa-solid ${esc(ikon)}"></i></span>${i + 1}. ${esc(judul)}</h2>${html}</section>`).join('');
+      <span class="sec-ico">${ikonSvg(ikon)}</span>${i + 1}. ${esc(judul)}</h2>${html}</section>`).join('');
 
   const label = p.periode.tipe === 'mingguan' ? 'Weekly Report' : 'Monthly Report';
   const rentang = p.periode.mulai ? `${p.periode.mulai} → ${p.periode.akhir}` : `${p.periode.hari} hari`;
@@ -733,9 +700,13 @@ export function renderBody(p: ReportPayload, mode: RenderMode, insight?: Payload
       ${mode === 'internal' ? '<div class="px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-bold rounded-full">VERSI INTERNAL</div>' : ''}</div>
     <p class="text-base md:text-lg text-slate-600 mt-1">${esc(p.klien.toko || p.klien.nama || '')} • ${esc(p.klien.platform)} — Performance &amp; Strategic Analysis</p></div></div>`;
 
+  // Atribusi ikon dirender di sini, bukan cuma di komentar `icons.ts`: CC BY 4.0
+  // menuntut atribusi pada KARYA YANG DIEDARKAN, dan yang diedarkan adalah
+  // berkas ini — yang dikirim AM ke klien.
   const kaki = `<div class="text-center text-xs text-slate-500 mt-8 pt-6 border-t border-slate-200">
     <p>Dibuat oleh <span class="font-semibold">MEA CDPS Report Engine</span> • ${esc(rentang)}</p>
-    <p class="mt-1">${esc(p.klien.toko || p.klien.nama || '')} • ${esc(p.klien.platform)}</p></div>`;
+    <p class="mt-1">${esc(p.klien.toko || p.klien.nama || '')} • ${esc(p.klien.platform)}</p>
+    <p class="mt-2 text-slate-400 text-[0.65rem]">${esc(ATRIBUSI_IKON)}</p></div>`;
 
   return head + seksiSkor(p, mode) + body + kaki;
 }
@@ -745,21 +716,17 @@ export function renderReportHtml(p: ReportPayload, mode: RenderMode, insight?: P
   const judul = `${p.periode.tipe === 'mingguan' ? 'Weekly' : 'Monthly'} Report — ${p.klien.toko || p.klien.nama || ''} ${p.periode.mulai || ''}`;
   return `<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>${esc(judul)}${mode === 'internal' ? ' — Internal' : ''}</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@600;700&display=swap">
-<style>${STYLE}</style></head>
+<style>${DOC_CSS}</style>
+<script>${CHART_JS}</script></head>
 <body data-mode="${mode}"><div class="max-w-screen-xl mx-auto px-4 md:px-6 py-8">
 <div class="no-print flex justify-end mb-2">
   <button id="btnPdf" type="button" class="text-xs font-semibold text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-100 rounded-full px-3 py-1.5">
-    <i class="fa-solid fa-file-pdf mr-1"></i> Unduh PDF
+    ${ikonSvg('fa-file-pdf', 'mr-1')} Unduh PDF (Ctrl+P)
   </button>
 </div>
 <div id="reportBody">${renderBody(p, mode, insight)}</div></div>
 <script>window.CHART_DATA=${jsonForScript(chartData(p))};</script>
 <script>window.REPORT_PDF_NAME=${jsonForScript(pdfName(p, mode))};</script>
 <script>${CHART_BOOT}</script>
-<script>${PDF_BOOT}</script></body></html>`;
+<script>${PRINT_BOOT}</script></body></html>`;
 }

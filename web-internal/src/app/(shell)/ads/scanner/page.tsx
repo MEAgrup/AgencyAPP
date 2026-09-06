@@ -33,7 +33,7 @@
  * RLS to give Ads a real client list remains a data-access decision needing a
  * `DECISIONS.md` entry, not a quiet edit inside a UI ticket.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { errorMessage } from '@/lib/api';
@@ -55,6 +55,7 @@ import {
 import { slotLabel } from '@/lib/adsscanner-ui';
 import PortfolioTable from '@/components/adsscanner/PortfolioTable';
 import ScanResultView from '@/components/adsscanner/ScanResultView';
+import AdsClientPicker from '@/components/AdsClientPicker';
 
 type Tab = 'portfolio' | 'scan' | 'hasil';
 
@@ -74,12 +75,14 @@ interface Staged extends ParsedAdsScanExport {
   video_kind_override?: 'kreator' | 'toko' | null;
 }
 
-export default function AdsScannerPage() {
+function AdsScannerWorkspace() {
   const { role, loading } = useAuth();
   const initialClient = useSearchParams().get('client') ?? '';
 
   const [tab, setTab] = useState<Tab>('portfolio');
-  const [clientInput, setClientInput] = useState(initialClient);
+  // SCR-UI-1: satu state saja. Dulu ada dua (`clientInput` yang diketik +
+  // `clientId` yang di-commit lewat tombol "Muat klien") karena mengetik ID
+  // butuh langkah konfirmasi; memilih dari daftar tidak.
   const [clientId, setClientId] = useState(initialClient);
 
   const [portfolio, setPortfolio] = useState<AdsScanPortfolioRow[]>([]);
@@ -228,7 +231,10 @@ export default function AdsScannerPage() {
             rows={portfolio}
             onOpenRun={(id) => void showRun(id)}
             onScanClient={canRun ? (cid) => {
-              setClientInput(cid);
+              // SCR-UI-1: satu state saja sekarang. Klien di Portofolio bisa
+              // saja di luar daftar picker (belum punya brief Ads) —
+              // `AdsClientPicker` menampilkannya sebagai opsi bayangan supaya
+              // alur ini tidak patah tanpa pesan.
               setClientId(cid);
               setTab('scan');
             } : undefined}
@@ -239,28 +245,15 @@ export default function AdsScannerPage() {
       {(tab === 'scan' || tab === 'hasil') && (
         <section className="card">
           <div className="row" style={{ gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div className="field" style={{ minWidth: 260 }}>
-              <label htmlFor="client">Klien</label>
-              <input
-                id="client"
-                value={clientInput}
-                placeholder="CLI-YYYYMM-NNNN"
-                onChange={(e) => setClientInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') setClientId(clientInput.trim()); }}
-              />
-            </div>
-            <button
-              type="button"
-              className="btn btnSecondary btnSm"
-              onClick={() => { setClientId(clientInput.trim()); setOpenRun(null); }}
-            >
-              Muat klien
-            </button>
+            <AdsClientPicker
+              value={clientId}
+              onChange={(id) => { setClientId(id); setOpenRun(null); }}
+            />
             {clientId && <span className="badge badge-blue">{clientId}</span>}
           </div>
           <span className="muted" style={{ fontSize: 12 }}>
-            ID klien ada di halaman kampanye Ads (baris &ldquo;Klien&rdquo;), atau pakai tombol &ldquo;scan
-            baru&rdquo; di tab Portofolio. Tautan <code>/ads/scanner?client=…</code> mengisi kolom ini otomatis.
+            Daftar berisi klien yang punya brief Ads. Tombol &ldquo;scan baru&rdquo; di tab
+            Portofolio dan tautan <code>/ads/scanner?client=…</code> memilihkannya otomatis.
           </span>
         </section>
       )}
@@ -484,5 +477,23 @@ export default function AdsScannerPage() {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * `useSearchParams()` di AdsScannerWorkspace membuat halaman ini butuh
+ * batas <Suspense> saat prerender.
+ *
+ * Hari ini ketiadaannya KEBETULAN tidak memerahkan build: `(shell)/layout.tsx`
+ * mengembalikan "Memuat…" selagi `loading`, jadi badan halaman tak pernah
+ * dieksekusi saat prerender. Itu kebetulan yang rapuh — ia berhenti berlaku
+ * begitu layout-nya merender anaknya lebih awal. Pola ini sama dengan
+ * `tasks/page.tsx` dan `account/rekap/page.tsx`.
+ */
+export default function AdsScannerPage() {
+  return (
+    <Suspense fallback={<div className="stack"><p className="muted">Memuat...</p></div>}>
+      <AdsScannerWorkspace />
+    </Suspense>
   );
 }

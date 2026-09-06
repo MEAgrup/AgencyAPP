@@ -17,6 +17,7 @@
  *    never the tool's own `fmtRp`/`fmtPct`.
  */
 import { dec, esc, num, pct, rp } from '../../baseline/angka';
+import { ATRIBUSI_IKON, CHART_JS, DOC_CSS, ikon as ikonSvg, PRINT_BOOT, type IconName } from '../../docassets';
 import {
   gauge, grid, jsonForScript, kartuInternal, kosong, kpi, KUADRAN_META, quadBubble, rekCard, rpPendek, tabel, td,
   type RenderMode,
@@ -99,7 +100,7 @@ function seksiSkor(p: ShopeeReportPayload, mode: RenderMode): string {
       <div class="text-right"><div class="text-sm font-semibold text-${warna(p.skor.total)}-700">${esc(p.skor.label)}</div>
         <div class="text-xs text-slate-500 mt-0.5">${p.skor.dimensi.length} dimensi berbobot</div></div></div></div>
   <div class="grid grid-cols-2 md:grid-cols-6 gap-3">${dims}</div>
-  <div class="mt-4 p-3 bg-teal-50 rounded-lg text-sm text-slate-700"><i class="fa-solid fa-circle-info text-teal-600 mr-1"></i> ${bits.map(esc).join(' ')}</div></div>`;
+  <div class="mt-4 p-3 bg-teal-50 rounded-lg text-sm text-slate-700">${ikonSvg('fa-circle-info', 'text-teal-600 mr-1')} ${bits.map(esc).join(' ')}</div></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,7 +142,7 @@ function seksiKanal(p: ShopeeReportPayload): string {
   return `<div class="grid md:grid-cols-2 gap-4">
   <div class="bg-white rounded-xl border border-slate-100 p-5"><canvas id="c_kanal" height="220"></canvas></div>
   <div class="bg-white rounded-xl border border-slate-100 p-5">${tabel(['Sumber GMV', 'GMV', 'Kontribusi'], rows, ['l', 'r', 'r'])}
-    <p class="text-xs text-slate-500 mt-3"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Angka antar kanal saling overlap — satu transaksi bisa tercatat di ads + affiliate + voucher.</p></div></div>`;
+    <p class="text-xs text-slate-500 mt-3">${ikonSvg('fa-triangle-exclamation', 'mr-1')} Angka antar kanal saling overlap — satu transaksi bisa tercatat di ads + affiliate + voucher.</p></div></div>`;
 }
 
 function seksiAds(p: ShopeeReportPayload, mode: RenderMode): string {
@@ -287,9 +288,9 @@ function seksiLayanan(p: ShopeeReportPayload): string {
   const kt = p.kesehatan_toko;
   if (kt && kt.poin_total > 0) {
     const list = kt.penalti.map((x) => `<div class="flex justify-between items-start gap-3 py-2 border-b border-red-100 last:border-0"><div><div class="font-semibold text-sm text-red-800">${esc(x.deskripsi)}</div><div class="text-xs text-red-600">${esc(x.durasi)}</div></div><div class="text-lg font-bold text-red-700 whitespace-nowrap">${num(x.poin)} poin</div></div>`).join('');
-    penaltiHTML = `<div class="mb-4 bg-red-50 border border-red-200 rounded-xl p-5"><h3 class="font-semibold text-red-800 mb-1"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Penalti Aktif — ${num(kt.poin_total)} Poin</h3><p class="text-xs text-red-700 mb-2">Poin penalti menekan traffic organik dan membatasi akses promosi Shopee selama masa penalti berjalan.</p>${list}</div>`;
+    penaltiHTML = `<div class="mb-4 bg-red-50 border border-red-200 rounded-xl p-5"><h3 class="font-semibold text-red-800 mb-1">${ikonSvg('fa-triangle-exclamation', 'mr-1')} Penalti Aktif — ${num(kt.poin_total)} Poin</h3><p class="text-xs text-red-700 mb-2">Poin penalti menekan traffic organik dan membatasi akses promosi Shopee selama masa penalti berjalan.</p>${list}</div>`;
   } else if (kt) {
-    penaltiHTML = `<div class="mb-4 bg-teal-50 border border-teal-100 rounded-xl p-4 text-sm text-slate-700"><i class="fa-solid fa-shield-halved text-teal-600 mr-1"></i> <b>0 poin penalti</b> — kesehatan toko bersih.</div>`;
+    penaltiHTML = `<div class="mb-4 bg-teal-50 border border-teal-100 rounded-xl p-4 text-sm text-slate-700">${ikonSvg('fa-shield-halved', 'text-teal-600 mr-1')} <b>0 poin penalti</b> — kesehatan toko bersih.</div>`;
   }
   return `${penaltiHTML}<div class="bg-white rounded-xl border border-slate-100 p-5">${tabel(['Metrik', 'Nilai', 'Target', 'Status'], rows, ['l', 'r', 'r', 'l'])}</div>`;
 }
@@ -325,51 +326,19 @@ const CHART_BOOT = `
  if(el('c_video_sumber')&&C.video&&C.video.labels.length) new Chart(el('c_video_sumber'),{type:'doughnut',data:{labels:C.video.labels,datasets:[{data:C.video.ditonton,backgroundColor:['#0F766E','#EA580C','#F59E0B','#3B82F6','#8B5CF6','#EC4899','#64748B','#94A3B8']}]},options:{plugins:{legend:{position:'right',labels:{boxWidth:10,font:{size:10}}}}}});
 })();`;
 
-const PDF_BOOT = `
-(function(){
- var b=document.getElementById('btnPdf'); if(!b) return;
- if(typeof html2pdf==='undefined'){b.style.display='none';return;}
- b.addEventListener('click',function(){
-  var el=document.getElementById('reportBody'); if(!el) return;
-  var old=b.innerHTML; b.disabled=true;
-  b.innerHTML='<i class="fa-solid fa-spinner fa-spin mr-1"></i> Membuat PDF...';
-  html2pdf().set({margin:[8,8,8,8],filename:(window.REPORT_PDF_NAME||'laporan')+'.pdf',
-   image:{type:'jpeg',quality:0.95},html2canvas:{scale:2,useCORS:true,logging:false},
-   jsPDF:{unit:'mm',format:'a4',orientation:'portrait'},
-   pagebreak:{mode:['avoid-all','css','legacy']}})
-   .from(el).save()
-   .then(function(){b.innerHTML=old;b.disabled=false;})
-   .catch(function(){b.innerHTML=old;b.disabled=false;});
- });
-})();`;
-
 function pdfName(p: ShopeeReportPayload, mode: RenderMode): string {
   const toko = (p.klien.toko || p.klien.nama || 'klien').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '');
   return `Laporan-Shopee-${toko}-${p.periode.label.replace(/\s+/g, '-')}${mode === 'internal' ? '-INTERNAL' : ''}`;
 }
 
-const STYLE = `body{font-family:'Inter',system-ui,sans-serif;background:#f8fafc;color:#0f172a}
-.font-display{font-family:'Poppins',system-ui,sans-serif}
-.kpi-value{font-size:1.6rem;line-height:1.15;font-weight:700}
-.insight-card{border-left:4px solid #0F766E}
-.badge-int{background:#EEF2FF;color:#4338CA;font-size:.65rem;padding:1px 6px;border-radius:99px;font-weight:700}
-.status-green{background:#D1FAE5;color:#065F46}.status-yellow{background:#FEF3C7;color:#92400E}
-.status-red{background:#FEE2E2;color:#991B1B}.status-gray{background:#F1F5F9;color:#475569}
-table{border-collapse:collapse}
-.sec-ico{display:inline-flex;align-items:center;justify-content:center;width:1.6em;height:1.6em;flex:0 0 1.6em;border-radius:.5em;background:#CCFBF1;color:#0F766E;font-size:.62em}
-.gauge{position:relative;width:104px;height:104px;flex:0 0 104px;border-radius:50%}
-.gauge::after{content:'';position:absolute;inset:9px;border-radius:50%;background:#fff}
-.gauge-val{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:1;line-height:1}
-.gauge-num{font-size:1.55rem;font-weight:800;letter-spacing:-.02em}
-.gauge-max{font-size:.62rem;color:#64748B;margin-top:1px}
-@media print{.no-print{display:none!important}}`;
+
 
 /** The report body (no `<html>` wrapper) — what an embedding page drops in. */
 export function renderBody(p: ShopeeReportPayload, mode: RenderMode, insight?: ShopeePayloadInsight): string {
   // One resolution point, exactly like TikTok's renderer: never a per-section choice.
   const I: ShopeePayloadInsight = insight ?? p.insight;
-  const seksi: [string, string, string][] = [];
-  const add = (judul: string, html: string, ikon = 'fa-circle-dot'): void => { if (html) seksi.push([judul, html, ikon]); };
+  const seksi: [string, string, IconName][] = [];
+  const add = (judul: string, html: string, ikon: IconName = 'fa-circle-dot'): void => { if (html) seksi.push([judul, html, ikon]); };
 
   add('Ringkasan Eksekutif', seksiRingkasan(p, I), 'fa-chart-line');
   if (p.kpi.harian.length) add('Tren GMV Harian', '<div class="bg-white rounded-xl border border-slate-100 p-5"><canvas id="c_harian" height="100"></canvas></div>', 'fa-arrow-trend-up');
@@ -389,7 +358,7 @@ export function renderBody(p: ShopeeReportPayload, mode: RenderMode, insight?: S
 
   const body = seksi.map(([judul, html, ikon], i) =>
     `<section class="mb-8"><h2 class="font-display text-xl md:text-2xl font-bold text-slate-900 mb-4 flex items-center gap-3">
-      <span class="sec-ico"><i class="fa-solid ${esc(ikon)}"></i></span>${i + 1}. ${esc(judul)}</h2>${html}</section>`).join('');
+      <span class="sec-ico">${ikonSvg(ikon)}</span>${i + 1}. ${esc(judul)}</h2>${html}</section>`).join('');
 
   const head = `<div class="flex items-end justify-between mb-6 flex-wrap gap-4">
     <div><div class="flex items-center gap-3 flex-wrap"><h1 class="font-display text-2xl md:text-4xl font-bold tracking-tight text-slate-900">Monthly Report</h1>
@@ -399,7 +368,8 @@ export function renderBody(p: ShopeeReportPayload, mode: RenderMode, insight?: S
 
   const kaki = `<div class="text-center text-xs text-slate-500 mt-8 pt-6 border-t border-slate-200">
     <p>Dibuat oleh <span class="font-semibold">MEA CDPS Report Engine</span> • ${esc(p.periode.label)}</p>
-    <p class="mt-1">${esc(p.klien.toko || p.klien.nama || '')} • ${esc(p.klien.platform)}</p></div>`;
+    <p class="mt-1">${esc(p.klien.toko || p.klien.nama || '')} • ${esc(p.klien.platform)}</p>
+    <p class="mt-2 text-slate-400 text-[0.65rem]">${esc(ATRIBUSI_IKON)}</p></div>`;
 
   return head + seksiSkor(p, mode) + body + kaki;
 }
@@ -409,21 +379,17 @@ export function renderReportHtml(p: ShopeeReportPayload, mode: RenderMode, insig
   const judul = `Monthly Report — ${p.klien.toko || p.klien.nama || ''} ${p.periode.label}`;
   return `<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>${esc(judul)}${mode === 'internal' ? ' — Internal' : ''}</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@600;700&display=swap">
-<style>${STYLE}</style></head>
+<style>${DOC_CSS}</style>
+<script>${CHART_JS}</script></head>
 <body data-mode="${mode}"><div class="max-w-screen-xl mx-auto px-4 md:px-6 py-8">
 <div class="no-print flex justify-end mb-2">
   <button id="btnPdf" type="button" class="text-xs font-semibold text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-100 rounded-full px-3 py-1.5">
-    <i class="fa-solid fa-file-pdf mr-1"></i> Unduh PDF
+    ${ikonSvg('fa-file-pdf', 'mr-1')} Unduh PDF (Ctrl+P)
   </button>
 </div>
 <div id="reportBody">${renderBody(p, mode, insight)}</div></div>
 <script>window.CHART_DATA=${jsonForScript(chartData(p))};</script>
 <script>window.REPORT_PDF_NAME=${jsonForScript(pdfName(p, mode))};</script>
 <script>${CHART_BOOT}</script>
-<script>${PDF_BOOT}</script></body></html>`;
+<script>${PRINT_BOOT}</script></body></html>`;
 }
