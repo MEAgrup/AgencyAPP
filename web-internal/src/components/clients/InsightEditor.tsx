@@ -250,7 +250,30 @@ export default function InsightEditor({ reportId, onPublikasiChange }: {
     }
   };
 
-  if (err && !bundle) return <div className="alert alertError" style={{ fontSize: 13 }}>{err}</div>;
+  // Owner QA 2026-09-06: sebelum ini cabang gagal-muat merender SATU kotak merah
+  // polos, tanpa jalan keluar. Waktu GET insight jatuh (bug RLS 42P17, PR #299)
+  // seluruh editor runtuh jadi kotak itu — dan itulah kenapa satu bug dilaporkan
+  // sebagai DUA masalah ("tak ada tombol edit" + "lihat insight 500"). Editor
+  // yang hilang tanpa jejak selalu terbaca sebagai fitur yang belum dibuat, jadi
+  // cabang ini sekarang menyebut apa yang gagal DAN menawarkan mencoba lagi.
+  if (err && !bundle) {
+    return (
+      <div className="alert alertError" style={{ fontSize: 13 }}>
+        <div>Insight laporan gagal dimuat: {err}</div>
+        <button
+          type="button"
+          className="btn btnGhost btnSm"
+          style={{ marginTop: 8 }}
+          onClick={() => {
+            setErr(null);
+            void load();
+          }}
+        >
+          Coba lagi
+        </button>
+      </div>
+    );
+  }
   if (!bundle || !draft) return <div className="muted" style={{ fontSize: 13 }}>Memuat insight…</div>;
 
   const pub = bundle.publikasi;

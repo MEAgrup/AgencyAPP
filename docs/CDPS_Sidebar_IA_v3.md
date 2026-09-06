@@ -21,9 +21,18 @@ Date: 3 Sep 2026 · Owner: Yohan · Supersedes v2 · Scope: navigation grouping 
 >    kedua alatnya TIDAK diubah — `AM - baseline riset` & `AM Co-Pilot` tetap, bukan
 >    `Baseline Riset Toko`/`Co-Pilot AM` seperti usulan §2, karena pemilik hanya
 >    meminta nama grupnya yang berganti.
-> 4. **Delivery memuat 2 item tambahan**, `Screening SKU` dan `Ads Scanner` — keduanya
->    mendarat sesudah dokumen ini ditulis (3 Sep), jadi §2 tak memuatnya; menghapusnya
->    berarti dua halaman tanpa pintu.
+> 4. **Dua item tambahan**, `Screening SKU` dan `Ads Scanner` — keduanya mendarat sesudah
+>    dokumen ini ditulis (3 Sep), jadi §2 tak memuatnya; menghapusnya berarti dua halaman
+>    tanpa pintu. Awalnya ditaruh di **Delivery**; **sejak 2026-09-06 keduanya PINDAH ke
+>    grup `MEA AI Tools`** atas permintaan pemilik, dengan label `Shopee Screening SKU` dan
+>    `TikTok Ads Scanner` (href tidak berubah). ⇒ **§2 dokumen ini tidak lagi menggambarkan
+>    menu apa adanya**: grup `MEA AI Tools` sekarang berisi EMPAT baris, dan divisi **Ads**
+>    kini melihat judul grup itu (hanya dua baris Ads-nya; dua alat HTML AM tetap tersaring).
+>    Lihat `docs/DECISIONS.md` 2026-09-06.
+> 5. **Baris `Sales` di §"Peran → grup" di bawah SALAH sejak awal** (dikoreksi 2026-09-06):
+>    ia menyebut Sales punya `Alat Bantu AM (Baseline Riset)`, padahal gerbang yang
+>    ditegakkan `embedded-tools.ts` (`creativeAccountOrReadAll`) **menolak Sales** — dan tes
+>    `nav.test.ts` memakukannya. Yang benar: Sales tidak melihat grup ini sama sekali.
 
 Revision driven by three corrections:
 1. Account & Service and AI Optimizer are **delivery divisions that manage clients**, not client data / tools.
@@ -112,7 +121,7 @@ Avatar menu (top right): `Notifikasi` · `Ganti Password` · `Keluar`
 | Account & Service → Klien | Delivery › Papan Divisi | It is a delivery division managing clients, not a client record page |
 | AI Optimizer → Alat AI | Delivery › Papan Divisi | Same — a division board, not an assist tool |
 | Sub-group "Eksekusi Kanal" | Sub-group "Papan Divisi" | Contents are divisions; Account & Service and AI Optimizer are not channels |
-| Group "Alat AI" (3 items) | Group "Alat Bantu AM" (2 items) | Only the two AM assist tools remain |
+| Group "Alat AI" (3 items) | Group "MEA AI Tools" (4 items sejak 2026-09-06) | Dua alat bantu AM + dua halaman Ads yang dipindah dari Delivery |
 | Group "Portal Klien" | dissolved | Its pages are performance/monitoring screens, not a client portal |
 | Portal Saya | Beranda › Kinerja Saya | |
 | Portal Tim | Tim › Kinerja Divisi | |
@@ -147,11 +156,11 @@ Collapsing all three: 33 → 30 items.
 | Role | Groups |
 |---|---|
 | Direktur | all 9 |
-| Head / SPV Account | Beranda, Akuisisi, Katalog, Klien, Delivery, Alat Bantu AM, Keuangan (Reminder), Tim, Admin (Akun Vendor, Akses Portal Klien) |
-| Account Manager | Beranda, Katalog, Klien, Delivery, Alat Bantu AM, Tim (Penugasan), Admin (Akses Portal Klien) |
-| Sales | Beranda, Akuisisi, Katalog, Klien (Direktori), Alat Bantu AM (Baseline Riset) |
+| Head / SPV Account | Beranda, Akuisisi, Katalog, Klien, Delivery, MEA AI Tools, Keuangan (Reminder), Tim, Admin (Akun Vendor, Akses Portal Klien) |
+| Account Manager | Beranda, Katalog, Klien, Delivery, MEA AI Tools, Tim (Penugasan), Admin (Akses Portal Klien) |
+| Sales | Beranda, Akuisisi, Katalog, Klien (Direktori) — **BUKAN** MEA AI Tools (gerbangnya menolak Sales; baris lama keliru, lihat deviasi 5) |
 | Finance | Beranda, Klien (Direktori), Keuangan |
-| Creative / Ads / KOL / Live / Store Ops | Beranda, Delivery (Task Execution + own division board), Tim (Penugasan) |
+| Creative / Ads / KOL / Live / Store Ops | Beranda, Delivery (Task Execution + own division board), Tim (Penugasan). **Creative** juga MEA AI Tools (dua alat HTML AM); **Ads** juga MEA AI Tools (hanya dua halaman Ads-nya, sejak 2026-09-06) |
 | Admin & HR | Beranda, Admin |
 
 Starting proposal only; Role Mapping in CDPS remains the source of truth.

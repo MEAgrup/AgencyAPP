@@ -11,9 +11,13 @@ import { describe, expect, it } from 'vitest';
 import type { Role } from './types';
 import {
   filterNav, isActiveHref, isSubGroup, NAV_SECTIONS, sectionOfRoute, visibleLinks, visibleNav,
-  type NavItem,
+  type NavItem, type NavNode,
 } from './nav';
 import { EMBEDDED_TOOLS } from './embedded-tools';
+// Predikat dua halaman Ads yang kini duduk di grup "MEA AI Tools" — di-import
+// supaya pencocokannya BY REFERENCE, bukan salinan (lihat blok grup di bawah).
+import { canUseSkuScreener } from './skuscreener';
+import { canUseAdsScanner } from './adsscanner';
 
 function role(division: string, level: string, extra: Partial<Role> = {}): Role {
   return { division, level, od: false, director: false, ...extra };
@@ -262,13 +266,34 @@ describe('visibleNav — grup "MEA AI Tools" (daftar alat bantu HTML)', () => {
     expect(titles).not.toContain('Alat Bantu AM');
   });
 
-  it('isinya HANYA alat HTML terdaftar di EMBEDDED_TOOLS (satu registry, bukan salinan)', () => {
+  // Dua halaman Ads yang pemilik pindahkan ke grup ini 2026-09-06. Mereka BUKAN
+  // alat HTML ter-embed, jadi mereka adalah satu-satunya pengecualian klausa
+  // "wajib /tools/*" di bawah — dan pengecualiannya DIDAFTAR di sini, bukan
+  // dilonggarkan jadi "apa saja boleh". Predikatnya tetap dicocokkan SECARA
+  // REFERENSI, sama ketatnya dengan alat ter-embed.
+  const ADS_PAGES_IN_GROUP: Record<string, (r: Role) => boolean> = {
+    '/ads/screening': canUseSkuScreener,
+    '/ads/scanner': canUseAdsScanner,
+  };
+
+  it('isinya HANYA alat HTML EMBEDDED_TOOLS atau dua halaman Ads terdaftar — predikat by-reference', () => {
     const section = NAV_SECTIONS.find((s) => s.title === TITLE);
     expect(section, 'grup MEA AI Tools harus ada di NAV_SECTIONS').toBeDefined();
     expect(section!.items.length).toBeGreaterThan(0);
     // Grup ini datar — tak ada sub-grup di dalamnya, jadi setiap simpul tautan.
     expect(section!.items.every((n) => !isSubGroup(n))).toBe(true);
     for (const item of section!.items as NavItem[]) {
+      const adsPredicate = ADS_PAGES_IN_GROUP[item.href];
+      if (adsPredicate) {
+        // (b) halaman Ads: predikatnya WAJIB objek fungsi yang sama yang dipakai
+        // halamannya sendiri — salinan akan lolos `toBe` hanya kalau identitasnya
+        // sama, jadi tes ini yang menangkap drift menu-vs-halaman.
+        expect(item.access, `${item.href} harus memakai predikat halamannya sendiri`).toBe(
+          adsPredicate,
+        );
+        continue;
+      }
+      // (a) alat HTML ter-embed: href WAJIB /tools/<slug> dan slug-nya terdaftar.
       const slug = item.href.replace('/tools/', '');
       expect(item.href, `${item.href} harus menunjuk /tools/<slug>`).toBe(`/tools/${slug}`);
       expect(
@@ -283,6 +308,28 @@ describe('visibleNav — grup "MEA AI Tools" (daftar alat bantu HTML)', () => {
     }
   });
 
+  it('keempat baris hadir: dua alat HTML + dua halaman Ads (pindah, bukan disalin)', () => {
+    const section = NAV_SECTIONS.find((s) => s.title === TITLE)!;
+    const inGroup = (section.items as NavItem[]).map((i) => i.href);
+    expect(inGroup).toEqual([
+      '/tools/video-factory',
+      '/tools/am-copilot',
+      '/ads/screening',
+      '/ads/scanner',
+    ]);
+    // "Pindah, bukan disalin": grup Delivery tidak boleh lagi memuat keduanya.
+    // `:574` (tanpa href ganda) menegakkan ini secara global; ini menyebutnya
+    // untuk dua href yang baru pindah supaya kegagalannya langsung terbaca.
+    const delivery = NAV_SECTIONS.find((s) => s.title === 'Delivery');
+    const deliveryHrefs = delivery
+      ? (delivery.items as NavNode[]).flatMap((n) =>
+          isSubGroup(n) ? n.items.map((i) => i.href) : [n.href],
+        )
+      : [];
+    expect(deliveryHrefs).not.toContain('/ads/screening');
+    expect(deliveryHrefs).not.toContain('/ads/scanner');
+  });
+
   it('setiap baris di grup ini bergerbang — tak satu pun boleh universal', () => {
     // Kalau satu baris tak bergerbang, `visibleNav` tak pernah membuang seksinya
     // dan judul "MEA AI Tools" bocor ke divisi yang tidak punya akses sama sekali.
@@ -292,11 +339,19 @@ describe('visibleNav — grup "MEA AI Tools" (daftar alat bantu HTML)', () => {
     }
   });
 
-  it('judul grup MUNCUL untuk divisi yang punya akses (Account, Creative) dan layer read-all', () => {
+  it('judul grup MUNCUL untuk divisi yang punya akses (Account, Creative, Ads) dan layer read-all', () => {
     for (const r of [
       role('Account', 'staff'),
       role('Account', 'lead'),
       role('Creative', 'staff'),
+      // Ads masuk daftar ini SEJAK pemilik memindahkan dua alat Ads ke grup ini
+      // (2026-09-06). Divisi Ads tidak punya akses ke dua alat HTML-nya, tapi ia
+      // punya akses ke dua halaman Ads — dan `visibleNav` menampilkan judul grup
+      // begitu SATU baris lolos, jadi ini konsekuensi yang disengaja dari
+      // pemindahan itu, bukan pelebaran akses: baris video-factory/am-copilot
+      // tetap tidak terlihat untuknya (dibuktikan tes berikutnya).
+      role('Ads', 'staff'),
+      role('Ads', 'lead'),
       role('Sales', 'staff', { director: true }),
       role('Sales', 'staff', { od: true }),
     ]) {
@@ -304,12 +359,26 @@ describe('visibleNav — grup "MEA AI Tools" (daftar alat bantu HTML)', () => {
     }
   });
 
+  it('Ads melihat HANYA dua halaman Ads di grup ini — bukan alat HTML AM', () => {
+    // Pemindahan 2026-09-06 tidak boleh jadi pintu belakang: judul grup kini
+    // tampil untuk Ads, tapi isinya harus tetap tersaring per baris.
+    for (const level of ['staff', 'lead']) {
+      const section = toolsSection(role('Ads', level));
+      expect(section, `Ads ${level} harus melihat grup ${TITLE}`).toBeDefined();
+      expect((section!.items as NavItem[]).map((i) => i.href)).toEqual([
+        '/ads/screening',
+        '/ads/scanner',
+      ]);
+    }
+  });
+
   it('judul grup HILANG SEPENUHNYA untuk divisi tanpa akses', () => {
+    // `Ads` DIKELUARKAN dari daftar ini oleh pemindahan 2026-09-06 (lihat dua tes
+    // di atas). Sisanya tidak punya akses ke satu baris pun di grup ini.
     for (const division of [
       'Sales',
       'Marketing',
       'Finance',
-      'Ads',
       'KOL',
       'Live Stream',
       'AI Optimizer',
