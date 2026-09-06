@@ -16,6 +16,19 @@
  * baris terakhir dibuang, karena peta sumbernya tidak ikut ditempel dan
  * acuannya akan menggantung.
  *
+ * ── CARA MEREGENERASI (kalau memang harus) ─────────────────────────────────
+ *   npm pack chart.js@4.4.0 && tar xzf chart.js-4.4.0.tgz
+ *   # ambil package/dist/chart.umd.js, buang baris `//# sourceMappingURL=…`,
+ *   # lalu tempel isinya ke dalam template literal `CHART_JS` di bawah dengan
+ *   # `\` → `\\`, backtick → `\backtick`, dan `${` → `\${` (kalau tidak,
+ *   # TypeScript memakan escape-nya dan pustakanya rusak diam-diam).
+ *   # Terakhir perbarui CHART_JS_SHA256 dengan sha256 dari string HASIL PARSE,
+ *   # bukan dari berkas .ts-nya:
+ *   #   node -e "import('./chartjs.ts').then(m=>console.log(
+ *   #     require('crypto').createHash('sha256').update(m.CHART_JS).digest('hex')))"
+ *   # Ambil dari npm, BUKAN dari cdnjs: proxy egress sesi Claude memblokir
+ *   # cdnjs, dan npm registry-nya terjangkau.
+ *
  * sha256 di atas diuji ulang di `docassets.test.ts`. Jadi "seseorang menyunting
  * berkas generated" muncul sebagai tes MERAH, bukan sebagai misteri chart yang
  * berperilaku aneh berbulan-bulan kemudian.

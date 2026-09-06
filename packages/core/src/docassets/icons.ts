@@ -20,6 +20,24 @@
  * Awesome BERVARIASI (384, 448, 512, 576, 640) walau tingginya selalu 512.
  * Memaksa satu viewBox akan memotong `fa-users` (640) dan menggelembungkan
  * `fa-lightbulb` (384).
+ *
+ * ── CARA MENAMBAH IKON ─────────────────────────────────────────────────────
+ * JANGAN salin path dari hasil pencarian web — versinya bisa beda dan hasilnya
+ * ikon yang bentuknya meleset tanpa ada yang sadar. Ambil dari paket resminya,
+ * versi yang SAMA (6.5.1):
+ *
+ *   npm pack @fortawesome/free-solid-svg-icons@6.5.1 && tar xzf fortawesome-*.tgz
+ *   node -e "const d=require('./package/faStore.js').definition;
+ *            console.log(d.icon[0], JSON.stringify(d.icon[4]))"
+ *
+ * Nama berkasnya = nama ikon dalam camelCase tanpa awalan `fa-`
+ * (`fa-table-cells-large` → `faTableCellsLarge.js`). `d.icon[0]` adalah lebar
+ * viewBox, `d.icon[4]` path-nya. Tempel sebagai satu baris `'fa-…': [lebar,
+ * 'path'],` di `P` di bawah — urut abjad.
+ *
+ * `docassets.test.ts` menurunkan daftar ikon yang WAJIB ada dari sumber
+ * renderer, bukan dari daftar yang diketik ulang, jadi ikon baru yang lupa
+ * didaftarkan di sini langsung jadi tes merah.
  */
 
 /** Baris atribusi CC BY 4.0 yang dirender di kaki dokumen. */
