@@ -1,7 +1,9 @@
 /**
- * SCR-UI-1 — divisi Ads me-LIST klien, dibatasi ke klien ber-layanan Ads AKTIF.
+ * SCR-UI-1 — divisi Ads me-LIST klien, dibatasi ke klien yang punya BRIEF ADS.
  *
- * Keputusan pemilik 2026-09-06. Yang diuji di sini adalah **himpunan baris yang
+ * Keputusan pemilik 2026-09-06, dua jawaban: penanda "layanan Ads" adalah
+ * **adanya brief Ads**, dan klien yang layanan Ads-nya sudah selesai **tetap
+ * boleh dibaca riwayatnya** — jadi nol filter status. Yang diuji di sini adalah **himpunan baris yang
  * benar-benar dikembalikan RLS** per peran, bukan sebuah predikat TS: untuk arm
  * ini memang TIDAK ADA cermin TS, dan itu disengaja. Jalur bacanya
  * `GET /api/v1/clients` → `readAsActor` → `client.listClients`, yang scope-nya
@@ -31,11 +33,13 @@ if (URL) sql = createClient(URL);
 
 const OWNER = 'EMP-0001';
 /** Empat klien yang membedakan keempat kasus batas. */
-const CLI_GATE = 'CLI-ZAD-GATE';   // layanan aktif, form G-B menyebut Ads
-const CLI_BRIEF = 'CLI-ZAD-BRIEF'; // layanan aktif, NOL form G-B, tapi ada brief Ads
-const CLI_LAIN = 'CLI-ZAD-LAIN';   // layanan aktif, form G-B TIDAK menyebut Ads
-const CLI_DONE = 'CLI-ZAD-DONE';   // jejak Ads identik CLI_GATE, tapi layanannya Done
-const SEMUA = [CLI_BRIEF, CLI_DONE, CLI_GATE, CLI_LAIN];
+const CLI_AKTIF = 'CLI-ZAD-AKTIF'; // brief Ads, layanan berjalan
+const CLI_DONE = 'CLI-ZAD-DONE';   // brief Ads, layanan sudah Done — WAJIB tetap terbaca
+const CLI_LAIN = 'CLI-ZAD-LAIN';   // brief-nya milik divisi lain
+const CLI_NOL = 'CLI-ZAD-NOL';     // punya layanan, NOL brief sama sekali
+const SEMUA = [CLI_AKTIF, CLI_DONE, CLI_LAIN, CLI_NOL];
+/** Yang boleh dilihat divisi Ads — dan hanya ini. */
+const TERLIHAT_ADS = [CLI_AKTIF, CLI_DONE];
 
 const claims = (o: { employeeId: string; division?: string; level?: string; od?: boolean; director?: boolean }): string =>
   JSON.stringify({
@@ -77,74 +81,62 @@ beforeAll(async () => {
       values (${id}, ${clientId}, 'MS-ZAD', 1, 'Jasa', 0, 'none', ${status}, ${OWNER})
       on conflict (id) do nothing`;
   };
-  await svc('SVC-ZAD-GATE', CLI_GATE, '[In Execution]');
-  await svc('SVC-ZAD-BRIEF', CLI_BRIEF, '[In Execution]');
+  await svc('SVC-ZAD-AKTIF', CLI_AKTIF, '[In Execution]');
   await svc('SVC-ZAD-LAIN', CLI_LAIN, '[In Execution]');
-  // Status terminal — pembeda TUNGGAL terhadap SVC-ZAD-GATE.
+  await svc('SVC-ZAD-NOL', CLI_NOL, '[In Execution]');
+  // Status terminal — pembeda TUNGGAL terhadap SVC-ZAD-AKTIF; brief Ads-nya identik.
   await svc('SVC-ZAD-DONE', CLI_DONE, 'Done');
 
-  const gate = async (serviceId: string, divisi: string): Promise<void> => {
+  const brief = async (id: string, serviceId: string, divisi: string): Promise<void> => {
     await sql`
-      insert into service_plan_gate
-        (service_id, tier_katalog, divisi_terlibat, deliverable, berulang,
-         sequence_dependency, laporan_periodik, pemicu_keras, pemicu_lunak,
-         config_version_no, rekomendasi, keputusan_am, kesesuaian,
-         tanggal_tinjau_ulang, decided_by, created_by)
-      values (${serviceId}, 'ditentukan_am', ${divisi}, 'd', false, false, false,
-              '[]'::jsonb, '[]'::jsonb, 1, 'butuh_plan', 'butuh_plan', 'sesuai',
-              current_date, ${OWNER}, ${OWNER})
-      on conflict do nothing`;
+      insert into briefs (id, service_id, title, status, assigned_division, created_by)
+      values (${id}, ${serviceId}, 'brief', '[Draft]', ${divisi}, ${OWNER})
+      on conflict (id) do nothing`;
   };
-  // 'Creative, Ads' BER-SPASI — bentuk yang benar-benar ditulis `plangate.ts`
-  // (`attrs.divisiTerlibat.join(', ')`). Predikat yang lupa membuang spasi gagal
-  // di sini, bukan diam-diam di produksi.
-  await gate('SVC-ZAD-GATE', 'Creative, Ads');
-  await gate('SVC-ZAD-DONE', 'Creative, Ads');
-  await gate('SVC-ZAD-LAIN', 'Creative');
-
-  // Jejak kedua: brief Ads TANPA baris service_plan_gate sama sekali — kasus
-  // layanan `plan_wajib` yang tidak pernah melewati form G-B.
-  await sql`
-    insert into briefs (id, service_id, title, status, assigned_division, created_by)
-    values ('BRF-ZAD-ADS', 'SVC-ZAD-BRIEF', 'brief ads', '[Draft]', 'Ads', ${OWNER})
-    on conflict (id) do nothing`;
+  await brief('BRF-ZAD-ADS1', 'SVC-ZAD-AKTIF', 'Ads');
+  await brief('BRF-ZAD-ADS2', 'SVC-ZAD-DONE', 'Ads');
+  // Brief milik divisi LAIN — klien ini tidak boleh ikut terbawa.
+  await brief('BRF-ZAD-CRE', 'SVC-ZAD-LAIN', 'Creative');
+  // CLI_NOL sengaja nol brief.
 });
 
 afterAll(async () => {
   if (!sql) return;
-  await sql`delete from briefs where id = 'BRF-ZAD-ADS'`;
-  await sql`delete from service_plan_gate where service_id like 'SVC-ZAD-%'`;
+  await sql`delete from briefs where id like 'BRF-ZAD-%'`;
   await sql`delete from services where id like 'SVC-ZAD-%'`;
   await sql`delete from clients where id like 'CLI-ZAD-%'`;
   await sql.end();
 });
 
 dDb('SCR-UI-1 — arm Ads di clients_select', () => {
-  it('staff Ads melihat PERSIS klien ber-layanan Ads aktif — dua jejak, bukan satu', async () => {
-    // Gate DAN brief. Kalau salah satu jejak dihapus dari predikat, salah satu
-    // dari kedua id ini hilang dan tes menyebut yang mana.
+  it('staff Ads melihat PERSIS klien yang punya brief Ads', async () => {
     expect(await terlihat({ employeeId: 'EMP-ZAD-ADS', division: 'Ads', level: 'staff' }))
-      .toEqual([CLI_BRIEF, CLI_GATE]);
+      .toEqual(TERLIHAT_ADS);
   });
 
   it('lead Ads melihat himpunan yang SAMA — arm ini digerbang divisi, bukan level', async () => {
     // Sengaja tidak memakai `jwt_is_lead()`: pembatasnya himpunan klien, bukan
     // jabatan. Staff Ads yang menjalankan scan butuh daftar ini, bukan cuma Head.
     expect(await terlihat({ employeeId: 'EMP-ZAD-ADSLEAD', division: 'Ads', level: 'lead' }))
-      .toEqual([CLI_BRIEF, CLI_GATE]);
+      .toEqual(TERLIHAT_ADS);
   });
 
-  it('klien yang form G-B-nya tidak menyebut Ads TIDAK terlihat', async () => {
+  it('klien yang brief-nya milik divisi LAIN tidak terlihat', async () => {
     const v = await terlihat({ employeeId: 'EMP-ZAD-ADS', division: 'Ads', level: 'staff' });
     expect(v).not.toContain(CLI_LAIN);
   });
 
-  it('klien yang layanan Ads-nya sudah Done TIDAK terlihat — itu arti kata "aktif"', async () => {
-    // Konsekuensi yang disengaja dari keputusan pemilik. Kalau tim Ads butuh
-    // membuka scan periode lalu untuk klien yang layanannya selesai, itu
-    // pelebaran yang butuh ketokan tersendiri (🔶 DECISIONS 2026-09-06).
+  it('klien tanpa brief sama sekali tidak terlihat', async () => {
     const v = await terlihat({ employeeId: 'EMP-ZAD-ADS', division: 'Ads', level: 'staff' });
-    expect(v).not.toContain(CLI_DONE);
+    expect(v).not.toContain(CLI_NOL);
+  });
+
+  it('klien yang layanan Ads-nya sudah Done TETAP terlihat — riwayat harus terbaca', async () => {
+    // Keputusan pemilik 2026-09-06. Ini yang paling mudah hilang tanpa sadar:
+    // menambahkan filter status ke predikat terasa seperti "membersihkan", dan
+    // efeknya adalah riwayat Ads lenyap dari picker tanpa satu pun galat.
+    const v = await terlihat({ employeeId: 'EMP-ZAD-ADS', division: 'Ads', level: 'staff' });
+    expect(v).toContain(CLI_DONE);
   });
 
   it.each([

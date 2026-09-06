@@ -232,7 +232,7 @@ function AdsScannerWorkspace() {
             onOpenRun={(id) => void showRun(id)}
             onScanClient={canRun ? (cid) => {
               // SCR-UI-1: satu state saja sekarang. Klien di Portofolio bisa
-              // saja di luar daftar picker (layanan Ads-nya sudah selesai) —
+              // saja di luar daftar picker (belum punya brief Ads) —
               // `AdsClientPicker` menampilkannya sebagai opsi bayangan supaya
               // alur ini tidak patah tanpa pesan.
               setClientId(cid);
@@ -252,7 +252,7 @@ function AdsScannerWorkspace() {
             {clientId && <span className="badge badge-blue">{clientId}</span>}
           </div>
           <span className="muted" style={{ fontSize: 12 }}>
-            Daftar berisi klien yang punya layanan Ads aktif. Tombol &ldquo;scan baru&rdquo; di tab
+            Daftar berisi klien yang punya brief Ads. Tombol &ldquo;scan baru&rdquo; di tab
             Portofolio dan tautan <code>/ads/scanner?client=…</code> memilihkannya otomatis.
           </span>
         </section>

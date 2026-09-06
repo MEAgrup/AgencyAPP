@@ -1,10 +1,18 @@
 -- ============================================================================
 -- SCR-UI-1 — divisi Ads boleh me-LIST klien, DIBATASI ke klien yang punya
---            layanan Ads aktif.
+--            brief Ads.
 --
--- Keputusan pemilik: arah "Ads boleh me-LIST klien" dijawab YA 2026-09-05
--- (DECISIONS "SCR-UI-1 DIJAWAB"), dan SCOPE-nya dijawab 2026-09-06:
--- **hanya klien ber-layanan Ads**, bukan seluruh klien.
+-- Keputusan pemilik, dua tahap:
+--   * 2026-09-05 — arah: "Ads boleh me-LIST klien" ⇒ YA.
+--   * 2026-09-06 — scope: hanya klien ber-layanan Ads, dan ketika ditanya apa
+--     yang MENANDAI sebuah layanan sebagai "layanan Ads", jawabannya
+--     **"ada brief Ads"**. Ditanya juga apakah klien yang layanan Ads-nya sudah
+--     selesai tetap boleh dibaca: **"tetap bisa dibaca historynya"**.
+--
+-- Kedua jawaban itu yang membentuk predikat di bawah, dan keduanya
+-- MENYEDERHANAKANNYA dibanding rancangan awal:
+--   * satu jejak (brief Ads), bukan gabungan dua jejak;
+--   * nol filter status layanan.
 --
 -- KENAPA INI MIGRASI, BUKAN PERUBAHAN UI. `/ads/screening` dan `/ads/scanner`
 -- meminta ID klien sebagai kolom teks justru KARENA gerbang baca klien hari ini
@@ -13,47 +21,37 @@
 -- ini akan jadi daftar kosong, bukan fitur.
 --
 -- ---------------------------------------------------------------------------
--- ⚠️ INTERPRETASI YANG DIPILIH — dicatat, BUKAN diputuskan diam-diam.
---     Lihat docs/DECISIONS.md 2026-09-06 (SCR-UI-1), butir 🔶.
+-- CATATAN UNTUK PEMBACA BERIKUTNYA — kenapa "brief Ads" dan bukan katalog.
 --
 -- Skema CDPS TIDAK punya satu pun field katalog yang menandai sebuah layanan
--- sebagai "milik divisi Ads". Diperiksa 2026-09-06:
+-- sebagai milik divisi Ads. Diperiksa 2026-09-06:
 --   * `master_service_versions.category` berisi PLATFORM (Shopee/TikTok/…),
 --     bukan divisi — dikonfirmasi terhadap `docs/handoff/MSL_DRAFT_KOMPILASI.csv`.
 --   * `services` sendiri nol kolom divisi.
--- Jadi "berlayanan Ads" harus disimpulkan dari jejak, dan hanya ada DUA jejak:
+-- Jadi "berlayanan Ads" HARUS disimpulkan dari jejak. Ada dua kandidat, dan
+-- pemilik memilih yang kedua:
+--   (a) `service_plan_gate.divisi_terlibat` — CSV yang diisi AM di form G-B.
+--   (b) `briefs.assigned_division` — pekerjaan yang benar-benar didispatch ke Ads.
 --
---   (a) `service_plan_gate.divisi_terlibat` — CSV nama divisi yang DIISI AM di
---       form G-B. Lengkap untuk layanan ber-tier `ditentukan_am`, tapi layanan
---       `plan_wajib` tidak pernah melewati form itu sehingga NOL barisnya.
---   (b) `briefs.assigned_division` — bukti terkuat bahwa Ads benar-benar
---       mengerjakan klien itu, tapi baru ada SETELAH brief pertama dibuat.
+-- (b) yang dipakai. Konsekuensinya diketahui dan diterima: klien yang layanan
+-- Ads-nya sudah ditutup di form G-B tapi **belum pernah punya brief Ads** tidak
+-- muncul di daftar. Itu tidak memblokir pekerjaan — jalur MENJALANKAN scan
+-- (`POST /clients/{id}/adsscanner/scan`) dan tab Portofolio memakai `db()`
+-- service-role dengan predikat TS, BUKAN `readAsActor`, jadi keduanya tidak
+-- pernah lewat `clients_select` sama sekali. Tautan `/ads/scanner?client=…`
+-- karenanya tetap berfungsi penuh untuk klien di luar daftar.
 --
--- Keduanya sendirian tidak lengkap, dan arah kesalahannya berbeda: (a) sendiri
--- menyembunyikan klien plan-wajib, (b) sendiri menyembunyikan klien yang justru
--- BARU dan paling butuh picker-nya (brief pertamanya belum ada). Dipakai
--- GABUNGAN (a) ATAU (b): setiap klien yang lolos punya bukti keterlibatan Ads
--- yang ditulis manusia — seorang AM menyebut Ads di form G-B, atau ada brief
--- Ads. Gabungan ini tetap JAUH lebih sempit daripada "seluruh klien" yang
--- pemilik tolak.
---
--- Kalau pemilik ingin lebih sempit/lebar, yang perlu diubah HANYA badan fungsi
--- `private.jwt_client_has_ads_service` di bawah — policy-nya tidak ikut
--- disentuh. Itu sebabnya predikatnya diisolasi jadi satu fungsi, bukan ditulis
--- inline di policy.
+-- Kalau scope-nya perlu diubah lagi, yang disunting HANYA badan fungsi
+-- `private.jwt_client_has_ads_brief` di bawah — policy-nya tidak ikut
+-- disentuh. Itu sebabnya predikatnya diisolasi jadi satu fungsi.
 -- ---------------------------------------------------------------------------
 --
--- "AKTIF" = status layanan BUKAN state terminal mesin `service`
--- (`Done`, `[Cancelled — Service Voided]`). Dibaca dari `sm_terminal_states`,
--- bukan dari dua string yang diketik ulang di sini: mesin statusnya bisa
--- bertambah state terminal, dan definisi "aktif" harus ikut tanpa ada yang
--- perlu ingat menyunting berkas ini.
---
--- Konsekuensi yang DISENGAJA dan perlu diketahui: klien yang seluruh layanan
--- Ads-nya sudah `Done` KELUAR dari daftar. Itu mengikuti kata "aktif" di
--- keputusan pemilik. Kalau tim Ads butuh membuka scan periode lalu untuk klien
--- yang layanannya sudah selesai, itu pelebaran yang butuh ketokan tersendiri —
--- 🔶 di DECISIONS.
+-- NOL FILTER STATUS, dan itu disengaja. Rancangan awal menyaring layanan yang
+-- sudah mencapai state terminal mesin `service` (`Done`,
+-- `[Cancelled — Service Voided]`). Pemilik membatalkannya 2026-09-06: riwayat
+-- harus tetap terbaca. Praktisnya itu berarti klien yang sudah selesai TETAP
+-- muncul, sehingga tim Ads bisa membuka scan periode lalu — yang memang inti
+-- kata "history" di jawaban pemilik.
 --
 -- Sifat: MEMPERLUAS SELECT saja (menambah satu arm, seluruh arm lama
 -- dipertahankan VERBATIM dari 20260901010000). Policy tulis tidak disentuh
@@ -62,13 +60,13 @@
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------
--- 1. Predikat "klien ini punya layanan Ads aktif".
+-- 1. Predikat "klien ini punya brief Ads".
 --
 --    SECURITY DEFINER dengan alasan yang sama persis dengan
 --    `private.jwt_owns_client` (20260723064438 §9): subqueri di dalamnya
---    membaca `services`/`briefs`/`service_plan_gate`, dan tanpa DEFINER ia akan
---    ikut ter-filter RLS tabel-tabel itu — menghasilkan under-expose berganda
---    dan risiko saling-rekursi. `search_path` dikunci.
+--    membaca `briefs`/`services`, dan tanpa DEFINER ia akan ikut ter-filter RLS
+--    tabel-tabel itu — menghasilkan under-expose berganda dan risiko
+--    saling-rekursi. `search_path` dikunci.
 --
 --    Ditaruh di skema `private`, bukan `public`, mengikuti relokasi
 --    20260727072443: skema itu tidak diekspos PostgREST, jadi tidak ada jalur
@@ -76,37 +74,22 @@
 --    didaftarkan ke allow-list §44 `rls_checks.sql` — pemindai di sana hanya
 --    menyapu `public`, sama seperti `jwt_owns_client` yang juga tidak ada di
 --    sana sejak dipindahkan.
+--
+--    `briefs` → klien lewat `services`: itu satu-satunya jalur yang ada
+--    (`briefs.service_id` → `services.id` → `services.client_id`).
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION private.jwt_client_has_ads_service(p_client_id text)
+CREATE OR REPLACE FUNCTION private.jwt_client_has_ads_brief(p_client_id text)
 RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path TO 'public', 'pg_temp'
 AS $$
-  SELECT
-    -- (a) Layanan AKTIF yang form G-B-nya menyebut divisi Ads.
-    EXISTS (
-      SELECT 1
-        FROM public.services s
-        JOIN public.service_plan_gate g ON g.service_id = s.id
-       WHERE s.client_id = p_client_id
-         AND s.status NOT IN (SELECT t.state FROM public.sm_terminal_states t
-                               WHERE t.machine = 'service')
-         -- `divisi_terlibat` adalah CSV yang disusun `attrs.divisiTerlibat.join(', ')`
-         -- (plangate.ts). Spasi dibuang sebelum dipecah supaya 'Creative, Ads'
-         -- dan 'Creative,Ads' dibaca sama.
-         AND 'Ads' = ANY (string_to_array(replace(g.divisi_terlibat, ' ', ''), ','))
-    )
-    OR
-    -- (b) Brief Ads pada salah satu layanan AKTIF klien ini.
-    EXISTS (
-      SELECT 1
-        FROM public.briefs b
-        JOIN public.services s2 ON s2.id = b.service_id
-       WHERE s2.client_id = p_client_id
-         AND s2.status NOT IN (SELECT t.state FROM public.sm_terminal_states t
-                                WHERE t.machine = 'service')
-         AND b.assigned_division = 'Ads'
-    )
+  SELECT EXISTS (
+    SELECT 1
+      FROM public.briefs b
+      JOIN public.services s ON s.id = b.service_id
+     WHERE s.client_id = p_client_id
+       AND b.assigned_division = 'Ads'
+  )
 $$;
 
 -- `authenticated` WAJIB bisa mengeksekusinya — ia dipanggil dari dalam ekspresi
@@ -114,22 +97,22 @@ $$;
 -- gagal, bukan cuma baca Ads. `anon` tidak boleh, dan `REVOKE ... FROM PUBLIC`
 -- TIDAK cukup di Supabase (default privileges memberi EXECUTE per-role) —
 -- sebut rolenya, idiom yang sama dengan 20260911070000/20260911080000.
-REVOKE EXECUTE ON FUNCTION private.jwt_client_has_ads_service(text) FROM public, anon;
-GRANT EXECUTE ON FUNCTION private.jwt_client_has_ads_service(text) TO authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION private.jwt_client_has_ads_brief(text) FROM public, anon;
+GRANT EXECUTE ON FUNCTION private.jwt_client_has_ads_brief(text) TO authenticated, service_role;
 
-COMMENT ON FUNCTION private.jwt_client_has_ads_service(text) IS
-  'SCR-UI-1 — klien ini punya layanan Ads AKTIF? Gabungan dua jejak: form G-B '
-  '(service_plan_gate.divisi_terlibat memuat "Ads") ATAU brief ber-assigned_division '
-  '"Ads". Skema CDPS nol field katalog "layanan ini milik Ads", jadi ini kesimpulan '
-  'dari jejak, bukan pembacaan fakta — interpretasinya dicatat di DECISIONS 2026-09-06 '
-  '(SCR-UI-1, butir 🔶). Melebarkan/menyempitkan scope Ads = ubah badan fungsi INI saja.';
+COMMENT ON FUNCTION private.jwt_client_has_ads_brief(text) IS
+  'SCR-UI-1 — klien ini punya brief yang didispatch ke divisi Ads? Dipakai arm Ads '
+  'di clients_select. Keputusan pemilik 2026-09-06: penanda "layanan Ads" adalah '
+  'ADANYA BRIEF ADS (skema CDPS nol field katalog divisi), dan riwayat tetap terbaca '
+  'sehingga TIDAK ada filter status layanan. Melebarkan/menyempitkan scope Ads = ubah '
+  'badan fungsi INI saja.';
 
 -- ---------------------------------------------------------------------------
 -- 2. clients_select — arm Ads, di atas definisi TERAKHIR (20260901010000/S-01).
 --
 --    Seluruh arm lama disalin VERBATIM. Arm Ads sengaja BERSYARAT GANDA
---    (`jwt_division() = 'Ads'` DAN punya layanan Ads): tanpa syarat pertama,
---    predikat mahal itu ikut dievaluasi untuk setiap pembaca lain; tanpa syarat
+--    (`jwt_division() = 'Ads'` DAN punya brief Ads): tanpa syarat pertama,
+--    predikat itu ikut dievaluasi untuk setiap pembaca lain; tanpa syarat
 --    kedua, ini jadi "Ads melihat seluruh klien" yang justru pemilik tolak.
 --
 --    Sengaja TANPA `jwt_is_lead()`: keputusan pemilik berbunyi "divisi Ads",
@@ -148,9 +131,9 @@ USING (jwt_can_read_all()
        OR jwt_division() = 'Finance'
        OR (jwt_is_lead() AND jwt_division() = 'Account')
        OR (jwt_is_lead() AND jwt_division() = 'Sales')
-       OR (jwt_division() = 'Ads' AND private.jwt_client_has_ads_service(clients.id)));
+       OR (jwt_division() = 'Ads' AND private.jwt_client_has_ads_brief(clients.id)));
 
 COMMENT ON POLICY clients_select ON public.clients IS
   'S-01 (Kinerja Sales): Head/SPV Sales membaca klien seluruh divisinya, sejajar arm Account. '
-  'SCR-UI-1 (2026-09-06): divisi Ads membaca klien yang punya layanan Ads AKTIF saja — '
-  'bukan seluruh klien; predikatnya private.jwt_client_has_ads_service.';
+  'SCR-UI-1 (2026-09-06): divisi Ads membaca klien yang punya brief Ads — bukan seluruh klien, '
+  'dan tanpa filter status supaya riwayat tetap terbaca; predikatnya private.jwt_client_has_ads_brief.';

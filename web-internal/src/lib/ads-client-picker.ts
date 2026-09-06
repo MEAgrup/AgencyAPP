@@ -6,11 +6,13 @@
 //
 // Tautan `?client=…` — dipakai tombol "scan baru" di tab Portofolio dan
 // disebut di teks bantuan kedua halaman — bisa membawa ID yang TIDAK ada di
-// daftar picker, karena scope-nya "layanan Ads AKTIF" dan layanan klien itu
-// bisa sudah `Done`. Sebuah `<select>` yang `value`-nya tidak cocok dengan
-// satu pun `<option>` akan JATUH ke opsi pertama tanpa memberi tahu siapa pun:
+// daftar picker, karena scope-nya "punya brief Ads" dan klien itu bisa belum
+// punya satu pun. Sebuah `<select>` yang `value`-nya tidak cocok dengan satu
+// pun `<option>` akan JATUH ke opsi pertama tanpa memberi tahu siapa pun:
 // halamannya lalu menampilkan scan klien yang SALAH, dengan ID yang benar
-// masih terpampang di tautan yang tadi diklik.
+// masih terpampang di tautan yang tadi diklik. Menjalankan scan-nya sendiri
+// tetap jalan: `POST /clients/{id}/adsscanner/scan` memakai `db()` service-role,
+// bukan `readAsActor`, jadi ia tidak pernah lewat `clients_select`.
 //
 // Dependency-free ON PURPOSE, preseden `employee-picker` / `campaign-picker`:
 // alias `@/` tidak diresolusi vitest, jadi logika yang bisa diuji tidak boleh
@@ -55,7 +57,7 @@ export function opsiPicker(
 ): { value: string; label: string }[] {
   const out = [{ value: '', label: opts.loading ? 'Memuat klien…' : '— pilih klien —' }];
   if (butuhOpsiBayangan(value, clients)) {
-    out.push({ value, label: `${value} (di luar daftar layanan Ads aktif)` });
+    out.push({ value, label: `${value} (di luar daftar klien Ads)` });
   }
   for (const c of clients) out.push({ value: c.id, label: adsClientLabel(c) });
   return out;

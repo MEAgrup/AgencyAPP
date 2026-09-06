@@ -2,8 +2,8 @@
  * Tes aturan sisi-klien picker klien Ads (SCR-UI-1).
  *
  * Yang load-bearing adalah opsi bayangan. Tanpa itu, tautan
- * `/ads/scanner?client=CLI-…` yang menunjuk klien di luar scope (layanan Ads-nya
- * sudah `Done`) membuat `<select>` jatuh diam-diam ke opsi pertama — halamannya
+ * `/ads/scanner?client=CLI-…` yang menunjuk klien di luar scope (belum punya
+ * brief Ads) membuat `<select>` jatuh diam-diam ke opsi pertama — halamannya
  * menampilkan scan klien LAIN sementara ID yang benar masih ada di tautan yang
  * barusan diklik. Itu kelas kesalahan yang tidak akan pernah dilaporkan sebagai
  * bug picker; ia dilaporkan sebagai "angkanya salah".
@@ -64,7 +64,7 @@ describe('opsiPicker', () => {
     // AM yang melihatnya harus paham kenapa kliennya tidak ada di daftar,
     // bukan mengira picker-nya rusak.
     const o = opsiPicker('CLI-202609-9999', DAFTAR, { loading: false });
-    expect(o[1]).toEqual({ value: 'CLI-202609-9999', label: 'CLI-202609-9999 (di luar daftar layanan Ads aktif)' });
+    expect(o[1]).toEqual({ value: 'CLI-202609-9999', label: 'CLI-202609-9999 (di luar daftar klien Ads)' });
   });
 
   it('nol opsi bayangan saat pilihannya memang ada — tidak ada duplikat', () => {

@@ -1275,18 +1275,20 @@ END $$;
 -- ---------------------------------------------------------------------------
 -- 45. SCR-UI-1 — arm Ads di `clients_select` (migrasi 20260913010000).
 --
---     Keputusan pemilik 2026-09-06: divisi Ads boleh me-LIST klien, TAPI hanya
---     klien yang punya layanan Ads AKTIF. Dua arah yang harus dijaga sekaligus,
---     dan melewatkan salah satunya membuat arm ini berbahaya atau tak berguna:
+--     Keputusan pemilik 2026-09-06, dua jawaban yang bersama-sama membentuk
+--     predikatnya: penanda "layanan Ads" adalah **adanya brief Ads**, dan klien
+--     yang layanan Ads-nya sudah selesai **tetap boleh dibaca riwayatnya**.
+--
+--     Dua arah yang harus dijaga sekaligus, dan melewatkan salah satunya
+--     membuat arm ini berbahaya atau tak berguna:
 --
 --       * kurang lebar ⇒ picker klien di /ads/screening & /ads/scanner jadi
 --         daftar KOSONG, dan gejalanya terlihat seperti bug UI, bukan RLS;
 --       * kelewat lebar ⇒ staff Ads membaca SELURUH klien, yang justru pilihan
 --         yang pemilik TOLAK.
 --
---     Keduanya diuji di bawah, plus dua batas yang paling mudah bocor: divisi
---     lain tidak ikut kebagian, dan layanan yang sudah terminal ("Done") KELUAR
---     dari daftar (itulah arti kata "aktif" di keputusan pemilik).
+--     Plus dua batas yang paling mudah bocor: divisi lain tidak ikut kebagian,
+--     dan klien yang brief-nya milik divisi LAIN tidak ikut terbawa.
 -- ---------------------------------------------------------------------------
 RESET ROLE;
 
@@ -1296,46 +1298,28 @@ RESET ROLE;
 INSERT INTO clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline,
                      target_gmv, sales_pic_id, commission_payment_pic_id, created_by)
 VALUES
-  ('CLI-RLS-ADS-GATE', 'PIC A', 'Toko Gate Ads', 'Jakarta', 'http://x/a', 'Fashion', 0, 0, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER', 'EMP-RLS-OWNER'),
-  ('CLI-RLS-ADS-BRIEF','PIC B', 'Toko Brief Ads','Jakarta', 'http://x/b', 'Fashion', 0, 0, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER', 'EMP-RLS-OWNER'),
-  ('CLI-RLS-ADS-LAIN', 'PIC C', 'Toko Non Ads',  'Jakarta', 'http://x/c', 'Fashion', 0, 0, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER', 'EMP-RLS-OWNER'),
-  ('CLI-RLS-ADS-DONE', 'PIC D', 'Toko Ads Done', 'Jakarta', 'http://x/d', 'Fashion', 0, 0, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER', 'EMP-RLS-OWNER');
+  ('CLI-RLS-ADS-AKTIF','PIC A', 'Toko Ads Aktif','Jakarta', 'http://x/a', 'Fashion', 0, 0, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER', 'EMP-RLS-OWNER'),
+  ('CLI-RLS-ADS-DONE', 'PIC B', 'Toko Ads Done', 'Jakarta', 'http://x/b', 'Fashion', 0, 0, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER', 'EMP-RLS-OWNER'),
+  ('CLI-RLS-ADS-LAIN', 'PIC C', 'Toko Brief Lain','Jakarta','http://x/c', 'Fashion', 0, 0, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER', 'EMP-RLS-OWNER'),
+  ('CLI-RLS-ADS-NOL',  'PIC D', 'Toko Tanpa Brief','Jakarta','http://x/d','Fashion', 0, 0, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER', 'EMP-RLS-OWNER');
 
 INSERT INTO services (id, client_id, master_service_id, master_version_no, name,
                       standard_price, commission_rule, status, created_by)
 VALUES
-  ('SVC-RLS-GATE',  'CLI-RLS-ADS-GATE',  'MS-RLS', 1, 'Jasa Iklan', 0, 'none', '[In Execution]', 'EMP-RLS-OWNER'),
-  ('SVC-RLS-BRIEF', 'CLI-RLS-ADS-BRIEF', 'MS-RLS', 1, 'Jasa Iklan', 0, 'none', '[In Execution]', 'EMP-RLS-OWNER'),
+  ('SVC-RLS-AKTIF', 'CLI-RLS-ADS-AKTIF', 'MS-RLS', 1, 'Jasa Iklan', 0, 'none', '[In Execution]', 'EMP-RLS-OWNER'),
+  -- Layanan yang SUDAH SELESAI. Pembedanya HANYA status; brief Ads-nya identik.
+  -- Klien ini WAJIB tetap terlihat — itu jawaban "history" dari pemilik.
+  ('SVC-RLS-DONE',  'CLI-RLS-ADS-DONE',  'MS-RLS', 1, 'Jasa Iklan', 0, 'none', 'Done', 'EMP-RLS-OWNER'),
   ('SVC-RLS-LAIN',  'CLI-RLS-ADS-LAIN',  'MS-RLS', 1, 'Jasa Konten',0, 'none', '[In Execution]', 'EMP-RLS-OWNER'),
-  -- Layanan Ads yang SUDAH SELESAI: jejaknya identik dengan SVC-RLS-GATE,
-  -- pembedanya HANYA status terminal. Ini yang membuktikan kata "aktif".
-  ('SVC-RLS-DONE',  'CLI-RLS-ADS-DONE',  'MS-RLS', 1, 'Jasa Iklan', 0, 'none', 'Done', 'EMP-RLS-OWNER');
+  -- Punya layanan, tapi NOL brief sama sekali.
+  ('SVC-RLS-NOL',   'CLI-RLS-ADS-NOL',   'MS-RLS', 1, 'Jasa Iklan', 0, 'none', '[In Execution]', 'EMP-RLS-OWNER');
 
--- Jejak (a): form G-B menyebut divisi. 'Creative, Ads' sengaja BER-SPASI —
--- itu bentuk yang benar-benar ditulis plangate.ts (`join(', ')`), dan predikat
--- yang lupa membuang spasi akan gagal di sini, bukan diam-diam di produksi.
-INSERT INTO service_plan_gate
-  (service_id, tier_katalog, divisi_terlibat, deliverable, berulang,
-   sequence_dependency, laporan_periodik, pemicu_keras, pemicu_lunak,
-   config_version_no, rekomendasi, keputusan_am, kesesuaian,
-   tanggal_tinjau_ulang, decided_by, created_by)
-VALUES
-  ('SVC-RLS-GATE', 'ditentukan_am', 'Creative, Ads', 'd', false, false, false,
-   '[]'::jsonb, '[]'::jsonb, 1, 'butuh_plan', 'butuh_plan', 'sesuai',
-   current_date, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER'),
-  ('SVC-RLS-DONE', 'ditentukan_am', 'Creative, Ads', 'd', false, false, false,
-   '[]'::jsonb, '[]'::jsonb, 1, 'butuh_plan', 'butuh_plan', 'sesuai',
-   current_date, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER'),
-  -- Klien pembanding: form G-B-nya ADA tapi TIDAK menyebut Ads.
-  ('SVC-RLS-LAIN', 'ditentukan_am', 'Creative', 'd', false, false, false,
-   '[]'::jsonb, '[]'::jsonb, 1, 'butuh_plan', 'butuh_plan', 'sesuai',
-   current_date, 'EMP-RLS-OWNER', 'EMP-RLS-OWNER');
-
--- Jejak (b): brief Ads, TANPA baris service_plan_gate sama sekali — inilah
--- kasus `plan_wajib` yang tidak pernah melewati form G-B, dan alasan predikatnya
--- gabungan dua jejak, bukan satu.
 INSERT INTO briefs (id, service_id, title, status, assigned_division, created_by)
-VALUES ('BRF-RLS-ADS', 'SVC-RLS-BRIEF', 'brief ads', '[Draft]', 'Ads', 'EMP-RLS-OWNER');
+VALUES
+  ('BRF-RLS-ADS1', 'SVC-RLS-AKTIF', 'brief ads',      '[Draft]', 'Ads',      'EMP-RLS-OWNER'),
+  ('BRF-RLS-ADS2', 'SVC-RLS-DONE',  'brief ads lama', '[Draft]', 'Ads',      'EMP-RLS-OWNER'),
+  -- Brief milik divisi LAIN: klien ini tidak boleh ikut terbawa.
+  ('BRF-RLS-CRE',  'SVC-RLS-LAIN',  'brief creative', '[Draft]', 'Creative', 'EMP-RLS-OWNER');
 
 SET LOCAL ROLE authenticated;
 
@@ -1347,9 +1331,9 @@ DECLARE terlihat text;
 BEGIN
   SELECT string_agg(id, ', ' ORDER BY id) INTO terlihat
     FROM clients WHERE id LIKE 'CLI-RLS-ADS-%';
-  IF terlihat IS DISTINCT FROM 'CLI-RLS-ADS-BRIEF, CLI-RLS-ADS-GATE' THEN
+  IF terlihat IS DISTINCT FROM 'CLI-RLS-ADS-AKTIF, CLI-RLS-ADS-DONE' THEN
     RAISE EXCEPTION
-      'SCR-UI-1 clients_select arm Ads: staff Ads harus melihat PERSIS klien ber-layanan Ads aktif (gate + brief) — terlihat: %', coalesce(terlihat, '(nol)');
+      'SCR-UI-1 clients_select arm Ads: staff Ads harus melihat PERSIS klien yang punya brief Ads (termasuk yang layanannya sudah Done) — terlihat: %', coalesce(terlihat, '(nol)');
   END IF;
 END $$;
 
@@ -1369,18 +1353,19 @@ DO $$ BEGIN
   THEN RAISE EXCEPTION 'SCR-UI-1: lead non-Ads tidak boleh ikut melihat klien lewat arm Ads'; END IF;
 END $$;
 
--- Arah sebaliknya — arm ini harus benar-benar MENGGIGIT, bukan sekadar ada:
--- kalau predikatnya dilonggarkan jadi "divisi Ads melihat semua klien", assert
--- di atas sudah merah karena CLI-RLS-ADS-LAIN dan -DONE ikut terlihat. Assert
--- terpisah ini mengunci alasan MASING-MASING supaya pesan gagalnya menyebut
--- penyebabnya, bukan cuma jumlah yang tidak cocok.
+-- Assert per-alasan, supaya pesan gagalnya menyebut PENYEBABNYA, bukan cuma
+-- jumlah yang tidak cocok.
 SELECT set_config('request.jwt.claims',
   '{"app_metadata":{"employee_id":"EMP-RLS-ADS","division":"Ads","level":"staff"}}', true);
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM clients WHERE id = 'CLI-RLS-ADS-LAIN')
-  THEN RAISE EXCEPTION 'SCR-UI-1: klien yang form G-B-nya TIDAK menyebut Ads tidak boleh terlihat'; END IF;
-  IF EXISTS (SELECT 1 FROM clients WHERE id = 'CLI-RLS-ADS-DONE')
-  THEN RAISE EXCEPTION 'SCR-UI-1: klien yang layanan Ads-nya sudah terminal (Done) tidak boleh terlihat — "aktif" kehilangan artinya'; END IF;
+  THEN RAISE EXCEPTION 'SCR-UI-1: klien yang brief-nya milik divisi LAIN tidak boleh terlihat'; END IF;
+  IF EXISTS (SELECT 1 FROM clients WHERE id = 'CLI-RLS-ADS-NOL')
+  THEN RAISE EXCEPTION 'SCR-UI-1: klien tanpa brief Ads sama sekali tidak boleh terlihat'; END IF;
+  -- Arah sebaliknya, dan ini yang paling mudah hilang kalau seseorang
+  -- "membersihkan" predikatnya dengan menambah filter status:
+  IF NOT EXISTS (SELECT 1 FROM clients WHERE id = 'CLI-RLS-ADS-DONE')
+  THEN RAISE EXCEPTION 'SCR-UI-1: klien yang layanan Ads-nya sudah Done HARUS tetap terlihat (keputusan pemilik 2026-09-06: riwayat tetap terbaca)'; END IF;
 END $$;
 
 RESET ROLE;
