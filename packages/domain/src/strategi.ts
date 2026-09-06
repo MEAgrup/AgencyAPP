@@ -1993,8 +1993,18 @@ export interface ChannelBaselineSuggestion {
   payloadTerbaca: boolean;
   /** The month the period figures describe, e.g. "Agu 2026". */
   periodeReferensi: string | null;
-  /** B-1.4 — period aggregate, matched to a single baseline month by label. */
+  /** B-1.4 — period aggregate, matched to a single baseline month by label.
+   *  TikTok calls it `refund_rate`, Shopee `batal_retur_rate`; the core mapper
+   *  reads both, so this is one field, not two. */
   refundRatePersen: number | null;
+  // B-4 — Shopee only, by the owner's 2026-09-06 decision (which closed open
+  // question §8 #1): Shopee exports Layanan/Chat + Kesehatan Toko, TikTok
+  // exports neither. `null` for TikTok, and null still means manual + still
+  // gates submit. Rating, jumlah ulasan and % pesanan terlambat have no export
+  // on EITHER platform and are deliberately absent from this contract.
+  chatResponseRatePersen: number | null;
+  chatResponseMenit: number | null;
+  poinPenalti: number | null;
   pengunjungPerBulan: number | null;
   conversionRatePersen: number | null;
   /** B-2.3 — always `null`. Organik as "the rest" is a fabricated number: shares
@@ -2183,6 +2193,9 @@ export async function getBaselinePrefill(
       payloadTerbaca: b.adaIsi,
       periodeReferensi: b.periodeReferensi,
       refundRatePersen: b.refundRatePersen,
+      chatResponseRatePersen: b.chatResponseRatePersen,
+      chatResponseMenit: b.chatResponseMenit,
+      poinPenalti: b.poinPenalti,
       pengunjungPerBulan: b.pengunjungPerBulan,
       conversionRatePersen: b.conversionRatePersen,
       trafikOrganikPersen: b.trafikOrganikPersen,

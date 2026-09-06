@@ -189,7 +189,7 @@ function AdsScannerWorkspace() {
       <div>
         <h1>Akses ditolak</h1>
         <p style={{ margin: '6px 0 0', color: '#5A7184', maxWidth: 640 }}>
-          Ads Scanner hanya untuk tim Ads (Advertiser / Lead Advertiser); Director &amp; OD dapat melihat untuk
+          TikTok Ads Scanner hanya untuk tim Ads (Advertiser / Lead Advertiser); Director &amp; OD dapat melihat untuk
           oversight.
         </p>
       </div>
@@ -199,7 +199,7 @@ function AdsScannerWorkspace() {
   return (
     <div className="stack" style={{ gap: 14 }}>
       <div>
-        <h1>Ads Scanner TikTok</h1>
+        <h1>TikTok Ads Scanner</h1>
         <p style={{ margin: '6px 0 0', color: '#5A7184', maxWidth: 880 }}>
           Scan mingguan per klien: SKU mana yang layak di-scale, mana yang boros, dan berapa budget yang harus
           dipindah. Semua aturan (skor 5 komponen, 6 bucket, gerbang konten, pool realokasi) dihitung di server

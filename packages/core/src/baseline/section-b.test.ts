@@ -7,7 +7,11 @@
  * (⇒ AM mengira sudah terisi dan mengajukan angka karangan).
  */
 import { describe, expect, it } from 'vitest';
+import { REPORT_BENCH_SHOPEE_V1 } from '../report/shopee/bench';
+import { BENCH_V1 } from './benchmark';
 import { mapPayloadToSectionB, pecahanKePersen } from './section-b';
+import { runShopeeBaseline, type ShopeeFileInput } from './shopee/run';
+import type { Aoa, HistRow } from './types';
 
 /** Payload minimal ber-bentuk `cdps.baseline.tiktok.v1` (hanya kunci yang dibaca). */
 const PAYLOAD = {
@@ -206,5 +210,182 @@ describe('pecahanKePersen', () => {
 describe('determinisme (aturan rumah #4)', () => {
   it('dua kali hitung dari payload yang sama ⇒ hasil identik', () => {
     expect(mapPayloadToSectionB(PAYLOAD)).toEqual(mapPayloadToSectionB(PAYLOAD));
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Bentuk Shopee — kunci yang BERBEDA nama / berbeda susunan dari TikTok
+// ---------------------------------------------------------------------------
+
+describe('mapPayloadToSectionB — bentuk payload Shopee', () => {
+  it('B-1.4 dibaca dari `batal_retur_rate` (nama Shopee) maupun `refund_rate` (nama TikTok)', () => {
+    expect(mapPayloadToSectionB({ toko: { batal_retur_rate: 0.06 } }).refundRatePersen).toBe(6);
+    expect(mapPayloadToSectionB({ toko: { refund_rate: 0.0412 } }).refundRatePersen).toBe(4.12);
+    // Nama TikTok menang bila keduanya ada — satu platform tidak pernah punya dua.
+    expect(
+      mapPayloadToSectionB({ toko: { refund_rate: 0.01, batal_retur_rate: 0.09 } }).refundRatePersen,
+    ).toBe(1);
+  });
+
+  it('blok video DATAR (Shopee) mengisi views + GMV; jumlah video tetap manual', () => {
+    // Shopee mengekspor performa video agregat, bukan daftar video — jadi tidak
+    // ada "berapa video tayang bulan ini" untuk dibaca, dan mengarangnya salah.
+    const s = mapPayloadToSectionB({
+      video: { ada_aktivitas: true, gmv: 12_000_000, pesanan: 140, ditonton: 850_000, penonton: 300_000, ctr: 0.02, completion: 0.31 },
+    });
+    expect(s.totalViews).toBe(850_000);
+    expect(s.gmvVideo).toBe('12000000');
+    expect(s.jumlahVideoPerBulan).toBeNull();
+  });
+
+  it('bentuk toko/afiliasi (TikTok) tidak ikut terbaca sebagai datar', () => {
+    const s = mapPayloadToSectionB({
+      video: { toko: { aktif: 40, vv: 900_000, gmv: 200_000 }, afiliasi: { aktif: 88, vv: 2_100_000, gmv: 300_000 }, ditonton: 999 },
+      });
+    // `ditonton` di level atas DIABAIKAN saat sub-blok toko/afiliasi ada.
+    expect(s.totalViews).toBe(3_000_000);
+    expect(s.gmvVideo).toBe('500000');
+  });
+
+  it('B-4: chat response rate, waktu respon (detik→menit) dan poin penalti', () => {
+    const s = mapPayloadToSectionB({
+      layanan: { response_rate: 0.95, waktu_respon_detik: 750 },
+      kesehatan_toko: { poin_total: 3 },
+    });
+    expect(s.chatResponseRatePersen).toBe(95);
+    expect(s.chatResponseMenit).toBe(13); // 750 dtk / 60 = 12,5 → 13
+    expect(s.poinPenalti).toBe(3);
+    expect(s.adaIsi).toBe(true);
+  });
+
+  it('B-4 TikTok tetap null seluruhnya — payload-nya memang tidak punya bloknya', () => {
+    const s = mapPayloadToSectionB(PAYLOAD);
+    expect(s.chatResponseRatePersen).toBeNull();
+    expect(s.chatResponseMenit).toBeNull();
+    expect(s.poinPenalti).toBeNull();
+  });
+
+  it('poin penalti 0 adalah TEMUAN (toko bersih), bukan absen', () => {
+    const s = mapPayloadToSectionB({ kesehatan_toko: { poin_total: 0 } });
+    expect(s.poinPenalti).toBe(0);
+  });
+
+  it('waktu respon di bawah 30 detik membulat ke 0 menit — resolusi kolomnya memang menit', () => {
+    expect(mapPayloadToSectionB({ layanan: { waktu_respon_detik: 20 } }).chatResponseMenit).toBe(0);
+    expect(mapPayloadToSectionB({ layanan: { waktu_respon_detik: null } }).chatResponseMenit).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Jahitan lintas-mesin — pemeta ini vs keluaran ASLI engine baseline Shopee
+// ---------------------------------------------------------------------------
+
+/**
+ * Tes ini sengaja menjalankan `runShopeeBaseline` yang sebenarnya, bukan payload
+ * karangan, karena satu-satunya cara B3 rusak diam-diam adalah B2 mengganti nama
+ * kunci: pemeta akan mengembalikan `null` untuk semuanya, Section B akan minta
+ * diisi manual, dan **tidak satu pun tes unit di kedua sisi akan memerah**.
+ * Fixture-nya bentuk export Shopee asli (header apa adanya), sama seperti
+ * `shopee-baseline.test.ts`.
+ */
+const HOME_HEADER = [
+  'Periode Waktu', 'Total Penjualan (IDR)', 'Total Pesanan', 'Penjualan per Pesanan', 'Produk Diklik',
+  'Total Pengunjung', 'Tingkat Konversi Pesanan', 'Pesanan Dibatalkan', 'Penjualan Dibatalkan',
+  'Pesanan Dikembalikan', 'Penjualan Dikembalikan', 'Pembeli', 'Total Pembeli Baru', 'Total Pembeli Saat Ini',
+  'Total Potensi Pembeli', 'Tingkat Pembelian Berulang',
+];
+const homeAoa = (): Aoa => [
+  ['Pesanan Dibuat'],
+  HOME_HEADER,
+  ['Total', 'Rp100.000.000', '1.000', 'Rp100.000', '5.000', '50.000', '2,00%', '50', 'Rp5.000.000', '10', 'Rp1.000.000', '900', '300', '600', '50', '20,00%'],
+];
+const produkAoa = (): Aoa => [
+  ['Kode Produk', 'Produk', 'Nama Variasi', 'Status Produk Saat Ini', 'Jumlah Produk Dilihat', 'Produk Diklik',
+    'Pengunjung Produk (Kunjungan)', 'Pesanan Dibuat', 'Total Penjualan (Pesanan Dibuat) (IDR)',
+    'Total Pembeli (Pesanan Dibuat)', 'Tingkat Konversi (Pesanan yang Dibuat)', 'Pesanan Siap Dikirim',
+    'Penjualan (Pesanan Siap Dikirim) (IDR)', 'Tingkat Konversi (Pesanan Siap Dikirim)'],
+  ['SKU-A', 'Produk Bintang', '-', 'Aktif', '5000', '900', '1000', '300', 'Rp80.000.000', '290', '30,00%', '280', 'Rp84.000.000', '28,00%'],
+  ['SKU-D', 'Produk Tidur', '-', 'Aktif', '10', '2', '20', '0', 'Rp0', '0', '-', '0', 'Rp0', '-'],
+];
+const chatAoa = (): Aoa => [
+  ['Periode Waktu', 'Pengunjung', 'Jumlah Chat', 'Pengunjung Bertanya', 'Pertanyaan Diajukan', 'Chat Dibalas', 'Chat Belum Dibalas', 'Waktu Respon Rata-rata', 'CSAT %', 'Persentase Chat Dibalas', 'Total Pembeli', 'Total Pesanan', 'Penjualan (IDR)', 'Tingkat Konversi (Chat Dibalas)'],
+  ['01-31 Agu', '5000', '800', '700', '750', '760', '40', '00:12:30', '90,00%', '95,00%', '150', '160', 'Rp16.000.000', '20,00%'],
+];
+const kesehatanAoa = (): Aoa => [
+  ['Poin Penalti', 'Deskripsi', 'Durasi'],
+  ['1', 'Pelanggaran larangan produk', '7 hari'],
+];
+const HIST_SHOPEE: HistRow[] = [
+  { key: '2026-06', label: 'Jun 2026', gmv: '90.000.000', order: '900', flag: 'normal' },
+  { key: '2026-07', label: 'Jul 2026', gmv: '95.000.000', order: '950', flag: 'normal' },
+  { key: '2026-08', label: 'Agu 2026', gmv: '100.000.000', order: '1.000', flag: 'normal' },
+];
+const f = (module: string, aoa: Aoa): ShopeeFileInput => ({
+  filename: `[${module.split('|')[0]}]-${module.split('|')[1]} && Agu 2026 && EzzyConnect && 2026-09-01.xlsx`,
+  aoa,
+});
+
+describe('jahitan B2→B3 — pemeta membaca keluaran ASLI engine baseline Shopee', () => {
+  const { payload } = runShopeeBaseline(
+    [f('bisnis|home', homeAoa()), f('bisnis|produk', produkAoa()), f('layanan|chat', chatAoa()), f('bisnis|kesehatan', kesehatanAoa())],
+    HIST_SHOPEE,
+    {
+      bench: REPORT_BENCH_SHOPEE_V1,
+      benchmarkVersi: 1,
+      benchRiwayat: BENCH_V1,
+      klien: { nama: 'PT Ezzy', toko: 'EzzyConnect', store_link: 'https://shopee.co.id/ezzy', kategori: 'Fashion', umur_toko_bulan: 18, account_manager: 'EMP-002' },
+      generatedAt: '2026-09-06T03:00:00.000Z',
+      periode: 'Agustus 2026',
+    },
+  );
+  const s = mapPayloadToSectionB(payload);
+
+  it('mengenali payload Shopee sebagai terbaca', () => {
+    expect(payload.schema).toBe('cdps.baseline.shopee.v1');
+    expect(s.schema).toBe('cdps.baseline.shopee.v1');
+    expect(s.adaIsi).toBe(true);
+    expect(s.periodeReferensi).toBe('Agustus 2026');
+  });
+
+  it('B-2 pengunjung + CR sampai ke Section B', () => {
+    expect(s.pengunjungPerBulan).toBe(50_000);
+    expect(s.conversionRatePersen).toBe(2);
+  });
+
+  it('B-1.4 % batal terbaca dari nama kunci Shopee', () => {
+    // (5.000.000 batal + 1.000.000 retur) / 100.000.000 = 6%
+    expect(s.refundRatePersen).toBe(6);
+  });
+
+  it('B-3 SKU terdaftar/aktif + Pareto + slow moving terbaca', () => {
+    expect(s.skuListed).toBe(2);
+    expect(s.skuAktif).toBe(1);
+    expect(s.skuPareto80).toBe(1);
+    expect(s.skuSlowMoving).toBe(1);
+    expect(s.topSku[0].nama).toBe('Produk Bintang');
+  });
+
+  it('B-4 Shopee terisi otomatis — keputusan pemilik 2026-09-06', () => {
+    expect(s.chatResponseRatePersen).toBe(95);
+    expect(s.chatResponseMenit).toBe(13); // 00:12:30 → 750 dtk → 13 menit
+    expect(s.poinPenalti).toBe(1);
+  });
+
+  it('yang Shopee memang tak punya tetap null — bukan nol', () => {
+    // `kreator_posting` sengaja absen dari payload Shopee (hanya 10 kreator
+    // teratas yang diekspor, jadi "berapa kreator menghasilkan penjualan" tidak
+    // bisa dihitung tanpa menebak) — lihat catatan di metrik-baseline.ts.
+    expect(s.affiliateAktif30Hari).toBeNull();
+    // Shopee Live hanya mengekspor "ada aktivitas", bukan jam/GMV.
+    expect(s.jamLivePerBulan).toBeNull();
+    expect(s.gmvLive).toBeNull();
+    // B-2.3: gmv_mix Shopee memakai taksonomi kanal yang BERBEDA dan saling
+    // tumpang tindih (shopee_ads / affiliate / voucher / chat / meta_cpas /
+    // shopee_video), bukan lima bucket TikTok. Pemetaannya butuh ketokan
+    // pemilik, jadi B-2.3 Shopee sengaja tetap manual — lihat DECISIONS.
+    expect(s.trafikVideoPersen).toBeNull();
+    expect(s.trafikLivePersen).toBeNull();
+    expect(s.trafikLuarPersen).toBeNull();
   });
 });

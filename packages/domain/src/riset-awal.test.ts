@@ -8,19 +8,54 @@ import {
   deriveIsianFromClient,
   deriveIsianFromManual,
   deriveIsianFromPayload,
+  mesinForPlatform,
   metodeForPlatform,
+  PARSER_VERSI,
+  PARSER_VERSI_SHOPEE,
   type BaselinePayloadLike,
   type ManualBaselineInput,
 } from './riset-awal';
 
 describe('RAB-04 · platform → method registry', () => {
-  it('TikTok Shop is the only full-engine platform; Tokopedia is thin; rest manual', () => {
+  it('TikTok Shop dan Shopee bermesin penuh; Tokopedia tipis; sisanya manual', () => {
     expect(metodeForPlatform('TikTok Shop')).toBe('analisa_penuh');
     expect(metodeForPlatform('tiktok shop')).toBe('analisa_penuh'); // case-insensitive
+    // B2 — sebelumnya 'manual'. Klien Shopee-only kini lolos gerbang riset awal
+    // dengan analisa ber-skor, bukan `belum_dapat_diukur`.
+    expect(metodeForPlatform('Shopee')).toBe('analisa_penuh');
+    expect(metodeForPlatform('shopee')).toBe('analisa_penuh');
     expect(metodeForPlatform('Tokopedia')).toBe('analisa_tipis');
-    expect(metodeForPlatform('Shopee')).toBe('manual');
     expect(metodeForPlatform('Lazada')).toBe('manual');
     expect(metodeForPlatform('Blibli')).toBe('manual');
+  });
+
+  it('mesinForPlatform memilih mesin, dan hanya untuk platform yang punya', () => {
+    expect(mesinForPlatform('TikTok Shop')).toBe('tiktok');
+    expect(mesinForPlatform('Shopee')).toBe('shopee');
+    expect(mesinForPlatform('Tokopedia')).toBeNull();
+    expect(mesinForPlatform('Lazada')).toBeNull();
+  });
+
+  it('versi parser dibedakan per mesin — satu skor, satu asal-usul (aturan rumah #4)', () => {
+    expect(PARSER_VERSI).toBe('cdps-baseline-v1');
+    expect(PARSER_VERSI_SHOPEE).toBe('cdps-baseline-shopee-v1');
+    expect(PARSER_VERSI).not.toBe(PARSER_VERSI_SHOPEE);
+  });
+});
+
+describe('RAB-05 · pemetaan auto-fill bekerja untuk KEDUA schema payload (paritas B2)', () => {
+  it('kunci yang dibaca bernama dan bersatuan sama di cdps.baseline.shopee.v1', () => {
+    const shopee: BaselinePayloadLike = {
+      schema: 'cdps.baseline.shopee.v1',
+      toko: { aov: 119762 },
+      produk: { sku_total: 523 },
+      gmv_baseline: { runrate_3m: 1601645825, cakupan_riwayat: 'cukup' },
+    };
+    const out = deriveIsianFromPayload(shopee);
+    // Nol cabang platform di `deriveIsianFromPayload` — itulah gunanya paritas.
+    expect(out.find((f) => f.fieldKey === 'B2-9')?.nilaiUang).toBe(11976200n);
+    expect(out.find((f) => f.fieldKey === 'B2-3')?.nilaiAngka).toBe(523);
+    expect(out.find((f) => f.fieldKey === 'B1-5')?.nilaiUang).toBe(BigInt(1601645825 * 3) * 100n);
   });
 });
 

@@ -121,6 +121,9 @@ function prefill(over: Partial<StrategiBaselinePrefill['channels'][number]>): St
         payload_terbaca: true,
         periode_referensi: null,
         refund_rate_persen: null,
+        chat_response_rate_persen: null,
+        chat_response_menit: null,
+        poin_penalti: null,
         pengunjung_per_bulan: null,
         conversion_rate_persen: null,
         trafik_organik_persen: null,
@@ -373,7 +376,9 @@ describe('ringkasBaseline — "yang manual tetap terlihat manual"', () => {
     expect(r.otomatis).toContain('Top SKU (B-3.3)');
     expect(r.belumTersedia).toContain('SKU penyumbang 80% GMV (B-3.2)');
     expect(r.belumTersedia).toContain('Tipe kampanye (B-5.3)');
-    expect(r.otomatis.length + r.belumTersedia.length).toBe(24);
+    // 24 field bersumber saat B3 mendarat, + 3 kolom B-4 yang export Shopee
+    // membawanya (keputusan pemilik 2026-09-06) = 27.
+    expect(r.otomatis.length + r.belumTersedia.length).toBe(27);
   });
 
   it('marks a legacy / manual payload as such rather than as 21 empty fields', () => {
@@ -390,5 +395,61 @@ describe('ringkasBaseline — "yang manual tetap terlihat manual"', () => {
   it('names the permanently-manual groups so the AM stops waiting for them', () => {
     expect(SELALU_MANUAL.join(' ')).toContain('B-4');
     expect(SELALU_MANUAL.join(' ')).toContain('B-9');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B-4 — Shopee terisi otomatis, TikTok tetap manual (keputusan pemilik 2026-09-06)
+// ---------------------------------------------------------------------------
+
+describe('mergeBaselinePrefill — B-4 kesehatan toko', () => {
+  const SHOPEE_B4 = {
+    channel: 'Shopee',
+    chat_response_rate_persen: 95,
+    chat_response_menit: 13,
+    poin_penalti: 1,
+  };
+
+  it('mengisi tiga kolom B-4 saat payload Shopee membawanya', () => {
+    const [ch] = mergeBaselinePrefill([blank('Shopee')], prefill(SHOPEE_B4));
+    expect(ch.chat_response_rate_persen).toBe('95');
+    expect(ch.chat_response_menit).toBe('13');
+    expect(ch.poin_penalti).toBe('1');
+  });
+
+  it('rating, jumlah ulasan dan % pesanan terlambat TETAP manual — tak ada export-nya', () => {
+    const [ch] = mergeBaselinePrefill([blank('Shopee')], prefill(SHOPEE_B4));
+    expect(ch.rating_toko).toBe('');
+    expect(ch.jumlah_ulasan).toBe('');
+    expect(ch.pesanan_terlambat_persen).toBe('');
+  });
+
+  it('TikTok: ketiganya null di wire ⇒ kolomnya tetap kosong dan tetap menggerbang', () => {
+    const [ch] = mergeBaselinePrefill([blank('TikTok Shop')], prefill({}));
+    expect(ch.chat_response_rate_persen).toBe('');
+    expect(ch.chat_response_menit).toBe('');
+    expect(ch.poin_penalti).toBe('');
+  });
+
+  it('poin penalti 0 tetap ditulis — toko bersih adalah TEMUAN, bukan kolom kosong', () => {
+    const [ch] = mergeBaselinePrefill([blank('Shopee')], prefill({ channel: 'Shopee', poin_penalti: 0 }));
+    expect(ch.poin_penalti).toBe('0');
+  });
+
+  it('tidak menimpa angka B-4 yang AM sudah ketik', () => {
+    const typed = { ...blank('Shopee'), poin_penalti: '9', chat_response_menit: '2' };
+    const [ch] = mergeBaselinePrefill([typed], prefill(SHOPEE_B4));
+    expect(ch.poin_penalti).toBe('9');
+    expect(ch.chat_response_menit).toBe('2');
+    expect(ch.chat_response_rate_persen).toBe('95');
+  });
+
+  it('ringkasan menghitung ketiganya sebagai field bersumber', () => {
+    const r = ringkasBaseline(prefill(SHOPEE_B4).channels[0]);
+    expect(r.otomatis).toContain('Chat response rate % (B-4.2)');
+    expect(r.otomatis).toContain('Poin penalti (B-4.4)');
+    expect(r.otomatis.length + r.belumTersedia.length).toBe(27);
+    // Yang benar-benar tidak punya export di platform mana pun tetap disebut.
+    expect(SELALU_MANUAL.join(' ')).toContain('B-4.1/B-4.3');
   });
 });

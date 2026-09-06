@@ -18,8 +18,12 @@
 // the AM corrected a figure must never undo the correction.
 //
 // What is still NOT seeded, on purpose:
-//   - B-4 (rating, ulasan, chat, late orders, penalty) — TikTok has no export for
-//     it at all (owner, 2026-09-06: "ini tidak ada export hanya bisa manual").
+//   - B-4 rating, jumlah ulasan, % pesanan terlambat — no export carries them on
+//     EITHER platform. (The other three B-4 fields DO get seeded on Shopee: the
+//     owner decided 2026-09-06 that Shopee's Layanan/Chat + Kesehatan Toko export
+//     fills chat response rate, response time and penalty points, while TikTok
+//     stays fully manual because it exports none of it. Two platforms, two data
+//     availabilities — not an inconsistency.)
 //   - per-month ad spend / ROAS / ACOS — the payload figure is a PERIOD aggregate;
 //     spreading it across months invents numbers the export never carried.
 //   - B-8, B-9, host/studio, and the sampling programme's payer — no source.
@@ -145,8 +149,13 @@ function mergeSectionBFigures(
   next.trafik_video_persen = isi(next.trafik_video_persen, s.trafik_video_persen);
   next.trafik_luar_persen = isi(next.trafik_luar_persen, s.trafik_luar_persen);
 
-  // B-3 SKU. `sku_pareto_80` / `sku_slow_moving` arrive once B1 extends the
-  // payload builder; until then they are null here and stay manual.
+  // B-4 Kesehatan Toko — Shopee only; on TikTok all three arrive null and the
+  // fields stay empty, still listed in the Kekurangan panel, still gating submit.
+  next.chat_response_rate_persen = isi(next.chat_response_rate_persen, s.chat_response_rate_persen);
+  next.chat_response_menit = isi(next.chat_response_menit, s.chat_response_menit);
+  next.poin_penalti = isi(next.poin_penalti, s.poin_penalti);
+
+  // B-3 SKU.
   next.sku_listed = isi(next.sku_listed, s.sku_listed);
   next.sku_aktif = isi(next.sku_aktif, s.sku_aktif);
   next.sku_pareto_80 = isi(next.sku_pareto_80, s.sku_pareto_80);
@@ -229,6 +238,9 @@ const FIELD_BERSUMBER: readonly [
   ['jam_live_per_bulan', 'Jam live per bulan (B-7.2)'],
   ['gmv_live', 'GMV dari live'],
   ['refund_rate_persen', '% batal (B-1.4)'],
+  ['chat_response_rate_persen', 'Chat response rate % (B-4.2)'],
+  ['chat_response_menit', 'Response time menit (B-4.2)'],
+  ['poin_penalti', 'Poin penalti (B-4.4)'],
 ];
 
 /**
@@ -238,7 +250,7 @@ const FIELD_BERSUMBER: readonly [
  * two apart will wait for an auto-fill that is never coming.
  */
 export const SELALU_MANUAL: readonly string[] = [
-  'B-4 kesehatan toko (rating, ulasan, chat, pesanan terlambat, poin penalti)',
+  'B-4.1/B-4.3 rating, jumlah ulasan, % pesanan terlambat (tidak ada export-nya di platform mana pun)',
   'B-5.1/B-5.2 belanja iklan & ROAS per bulan (payload hanya punya agregat periode)',
   'B-6.3 komisi open & target',
   'B-6.5 siapa yang menanggung program sampel',

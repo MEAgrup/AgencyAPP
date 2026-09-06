@@ -1507,7 +1507,7 @@ export default function SectionB({
                 />
               </label>
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Chat response rate % (B-4.2)</span>
+                <span className="muted" style={{ fontSize: 12 }}>Chat response rate % (B-4.2){dariRiset(sugg?.chat_response_rate_persen)}</span>
                 <input
                   type="number"
                   min={0}
@@ -1518,7 +1518,7 @@ export default function SectionB({
                 />
               </label>
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Response time (menit)</span>
+                <span className="muted" style={{ fontSize: 12 }}>Response time (menit){dariRiset(sugg?.chat_response_menit)}</span>
                 <input
                   type="number"
                   min={0}
@@ -1539,7 +1539,7 @@ export default function SectionB({
                 />
               </label>
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Poin penalti (B-4.4)</span>
+                <span className="muted" style={{ fontSize: 12 }}>Poin penalti (B-4.4){dariRiset(sugg?.poin_penalti)}</span>
                 <input
                   type="number"
                   min={0}

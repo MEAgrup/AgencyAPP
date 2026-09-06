@@ -5189,6 +5189,9 @@ export interface StrategiChannelBaselineSuggestionWire {
   payload_terbaca: boolean;
   periode_referensi: string | null;
   refund_rate_persen: number | null;
+  chat_response_rate_persen: number | null;
+  chat_response_menit: number | null;
+  poin_penalti: number | null;
   pengunjung_per_bulan: number | null;
   conversion_rate_persen: number | null;
   trafik_organik_persen: number | null;
@@ -5264,6 +5267,9 @@ export function strategiBaselinePrefillToWire(
       payload_terbaca: c.payloadTerbaca,
       periode_referensi: c.periodeReferensi ?? null,
       refund_rate_persen: c.refundRatePersen ?? null,
+      chat_response_rate_persen: c.chatResponseRatePersen ?? null,
+      chat_response_menit: c.chatResponseMenit ?? null,
+      poin_penalti: c.poinPenalti ?? null,
       pengunjung_per_bulan: c.pengunjungPerBulan ?? null,
       conversion_rate_persen: c.conversionRatePersen ?? null,
       trafik_organik_persen: c.trafikOrganikPersen ?? null,
@@ -6404,6 +6410,8 @@ export interface RisetAwalAnalisaWire {
   kondisi_toko: string;
   skor: number | null;
   benchmark_versi: number | null;
+  /** Terisi HANYA untuk baris Shopee — versi `report_benchmark_shopee` (B2). */
+  benchmark_versi_shopee: number | null;
   parser_versi: string | null;
   cakupan_riwayat: string | null;
   created_at: string;
@@ -6452,6 +6460,7 @@ export function risetAwalBaselineToWire(v: risetAwal.BaselineView): RisetAwalBas
       kondisi_toko: a.kondisiToko,
       skor: a.skor,
       benchmark_versi: a.benchmarkVersi,
+      benchmark_versi_shopee: a.benchmarkVersiShopee,
       parser_versi: a.parserVersi,
       cakupan_riwayat: a.cakupanRiwayat,
       created_at: a.createdAt,

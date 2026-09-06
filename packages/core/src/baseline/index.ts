@@ -26,3 +26,4 @@ export * from './temuan';
 export * from './payload';
 export * from './run';
 export * from './section-b';
+export * as shopee from './shopee';

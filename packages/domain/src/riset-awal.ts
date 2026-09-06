@@ -25,7 +25,8 @@
  *  - **null explicit, not omitempty**: every optional column is written as an
  *    explicit `null`.
  */
-import { baseline } from '@cdps/core';
+import { baseline, reportShopee } from '@cdps/core';
+const baselineShopee = baseline.shopee;
 import { withTransaction, type Queryable, type Sql, type TransactionSql } from '@cdps/db';
 import {
   ConflictError,
@@ -47,8 +48,14 @@ export const MSG_ISIAN_NOT_FOUND = '[isian riset awal tidak ditemukan]';
 export const MSG_NO_FILES = '[unggah minimal satu berkas export untuk analisa]';
 export const MSG_AMBIGU = '[tipe berkas tidak jelas (toko atau afiliasi) — konfirmasi tipe untuk berkas berikut]';
 
-/** The current baseline-engine version, recorded on every scored row (#4). */
+/** The current TikTok baseline-engine version, recorded on every scored row (#4). */
 export const PARSER_VERSI = 'cdps-baseline-v1';
+
+/** Idem, mesin Shopee (B2) — versi terpisah karena kodenya terpisah. */
+export const PARSER_VERSI_SHOPEE = baselineShopee.PARSER_VERSI_SHOPEE;
+
+/** Ambang Shopee belum ter-seed di `report_benchmark_shopee` (BI, aturan #5). */
+export const MSG_BENCHMARK_SHOPEE_KOSONG = '[benchmark Shopee belum dikonfigurasi]';
 
 /** The value type postgres.js `sql.json` accepts (jsonb serializer) — see plan.ts.
  *  Passing a JSON string with `::jsonb` double-encodes it; `tx.json()` is the
@@ -65,8 +72,28 @@ export type MetodeBaseline = 'analisa_penuh' | 'analisa_tipis' | 'manual';
 export function metodeForPlatform(platform: string): MetodeBaseline {
   const p = platform.trim().toLowerCase();
   if (p === 'tiktok shop') return 'analisa_penuh';
+  // B2 — Shopee kini punya mesinnya sendiri (`baseline.shopee`, di atas parser
+  // `report/shopee` yang sudah UAT dengan export asli). Konsekuensinya nyata dan
+  // disengaja: klien Shopee-only lolos `assertRisetAwalGate` dengan ANALISA
+  // ber-skor, bukan lagi entri manual `belum_dapat_diukur`.
+  if (p === 'shopee') return 'analisa_penuh';
   if (p === 'tokopedia') return 'analisa_tipis';
   return 'manual';
+}
+
+/**
+ * Mesin mana yang melayani sebuah platform `analisa_penuh`. Dipisah dari
+ * `metodeForPlatform` supaya penambahan mesin ketiga tidak menyentuh gerbang
+ * metode, dan supaya `submitBaseline` tak pernah mencocokkan nama platform
+ * dengan string di tengah alurnya.
+ */
+export type MesinBaseline = 'tiktok' | 'shopee';
+
+export function mesinForPlatform(platform: string): MesinBaseline | null {
+  const p = platform.trim().toLowerCase();
+  if (p === 'tiktok shop') return 'tiktok';
+  if (p === 'shopee') return 'shopee';
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +300,11 @@ export interface AnalisaPenuhInput {
   net?: boolean;
   /** CDPS linked TikTok account handles — disambiguates own vs affiliate (fix #3). */
   linkedAccounts?: string[];
+  /** SHOPEE saja — label periode bebas-teks yang AM isi (mis. "Juli 2026").
+   *  Export Shopee tidak membawa rentang tanggal yang bisa dibaca mesin, jadi
+   *  tidak ada yang bisa diturunkan darinya; jalur TikTok mengabaikan kolom ini
+   *  karena `periodeOf(sheet.meta)` sudah membacanya dari berkas. */
+  periode?: string | null;
 }
 
 export interface SubmitBaselineInput {
@@ -301,6 +333,8 @@ export interface AnalisaRow {
   kondisiToko: string;
   skor: number | null;
   benchmarkVersi: number | null;
+  /** Terisi HANYA untuk baris Shopee — versi `report_benchmark_shopee` (B2). */
+  benchmarkVersiShopee: number | null;
   parserVersi: string | null;
   cakupanRiwayat: string | null;
   createdAt: string;
@@ -383,8 +417,8 @@ export async function submitBaseline(sql: Sql, actor: Actor, id: string, input: 
 
     // The platform must be an ACTIVE store of THIS client (RAB-04: sub-sections
     // are derived from client_platforms, so a stale/foreign id is rejected).
-    const plat = await tx<{ platform: string; active: boolean; client_id: string }[]>`
-      select platform, active, client_id from client_platforms
+    const plat = await tx<{ platform: string; active: boolean; client_id: string; store_link: string | null }[]>`
+      select platform, active, client_id, store_link from client_platforms
        where id = ${input.clientPlatformId} for update`;
     if (plat.length === 0 || plat[0].client_id !== clientId) throw new NotFoundError(MSG_PLATFORM_NOT_FOUND);
     if (!plat[0].active) throw new ValidationError(MSG_PLATFORM_INACTIVE);
@@ -413,7 +447,84 @@ export async function submitBaseline(sql: Sql, actor: Actor, id: string, input: 
     let isian: IsianUsulan[];
     let berkasRows: SumberBerkasInput[];
 
-    if (metode === 'analisa_penuh') {
+    let benchmarkVersiShopee: number | null = null;
+
+    if (metode === 'analisa_penuh' && mesinForPlatform(platform) === 'shopee') {
+      // ── B2 — jalur Shopee ────────────────────────────────────────────────
+      // Nol parser baru: `baseline.shopee.runShopeeBaseline` memanggil mesin
+      // laporan Shopee (`report/shopee`) apa adanya dan hanya mengambil irisan
+      // baseline-nya. Identitas klien + jam tetap milik server (handoff §2.2).
+      const a = input.analisa;
+      if (!a || !a.files || a.files.length === 0) throw new ValidationError(MSG_NO_FILES);
+
+      const bm = await tx<{ versi: number; nilai: reportShopee.ShopeeBench }[]>`
+        select versi, nilai from report_benchmark_shopee where aktif = true order by versi desc limit 1`;
+      if (bm.length === 0) throw new ValidationError(MSG_BENCHMARK_SHOPEE_KOSONG);
+
+      const cli = await tx<{ nama_pic: string | null; toko: string | null; kategori: string | null; assigned_am_id: string | null }[]>`
+        select nama_pic, toko, kategori, assigned_am_id from clients where id = ${clientId}`;
+      const c = cli[0] ?? { nama_pic: null, toko: null, kategori: null, assigned_am_id: null };
+
+      const validModules = new Set<string>(reportShopee.ALL_SHOPEE_MODULES);
+      let result: baseline.shopee.ShopeeBaselineResult;
+      try {
+        result = baselineShopee.runShopeeBaseline(
+          a.files.map((f) => ({
+            filename: f.filename,
+            aoa: f.aoa as baseline.Aoa,
+            // `tipeOverride` datang dari dropdown per-berkas di FE. Nilai di luar
+            // 17 slot dibuang, bukan diteruskan — kalau tidak, string apa pun dari
+            // browser bisa memilih parser.
+            tipeOverride: f.tipeOverride && validModules.has(f.tipeOverride)
+              ? (f.tipeOverride as reportShopee.ShopeeModule) : null,
+          })),
+          a.hist ?? [],
+          {
+            bench: bm[0].nilai,
+            benchmarkVersi: bm[0].versi,
+            benchRiwayat: baseline.BENCH_V1,
+            klien: {
+              nama: c.nama_pic, toko: c.toko, store_link: plat[0].store_link ?? null,
+              kategori: c.kategori, umur_toko_bulan: null, account_manager: c.assigned_am_id,
+            },
+            generatedAt, // jam server, bukan jam browser
+            periode: a.periode ?? null,
+          },
+        );
+      } catch (e) {
+        // Pesan mesin sudah BI dan sudah menyebut berkasnya — teruskan sebagai
+        // ValidationError, jangan bungkus jadi 500.
+        throw new ValidationError(e instanceof Error ? e.message : MSG_NO_FILES);
+      }
+      const rp = result.payload;
+      payload = rp as unknown as Record<string, unknown>;
+      skor = rp.skor.total;
+      kondisiToko = rp.skor.kondisi_toko;
+      // Ambang Shopee tinggal di `report_benchmark_shopee`, bukan
+      // `riset_awal_benchmark` — jadi kolom benchmark yang terisi adalah yang
+      // Shopee (CHECK ck_analisa_benchmark_xor, migrasi B2).
+      benchmarkVersi = null;
+      benchmarkVersiShopee = bm[0].versi;
+      parserVersi = PARSER_VERSI_SHOPEE;
+      cakupan = rp.gmv_baseline.cakupan_riwayat ?? null;
+      kelengkapan = rp.kelengkapan_file ?? null;
+      periodeReferensi = rp.klien.periode_referensi ? { bulan: rp.klien.periode_referensi } : null;
+      // RAB-05 tidak perlu cabang: `toko.aov`, `produk.sku_total` dan
+      // `gmv_baseline.runrate_3m` bernama sama dan bersatuan sama di kedua
+      // payload — itulah gunanya paritas bentuk.
+      isian = deriveIsianFromPayload(rp as unknown as BaselinePayloadLike);
+      const byName = new Map(result.terdeteksi.map((t) => [t.filename, t.module]));
+      berkasRows = a.files.map((f) => ({
+        namaBerkas: f.filename,
+        sha256: f.sha256,
+        ukuranBytes: f.ukuranBytes,
+        tipeTerdeteksi: byName.get(f.filename) ?? null,
+        tipeOverride: f.tipeOverride ?? null,
+        jumlahBaris: f.aoa.length,
+        periode: a.periode ? { mulai: a.periode, akhir: a.periode } : null,
+        tanggalAmbil: f.tanggalAmbil ?? null,
+      }));
+    } else if (metode === 'analisa_penuh') {
       const a = input.analisa;
       if (!a || !a.files || a.files.length === 0) throw new ValidationError(MSG_NO_FILES);
 
@@ -527,13 +638,13 @@ export async function submitBaseline(sql: Sql, actor: Actor, id: string, input: 
     const inserted = await tx<{ id: number }[]>`
       insert into riset_awal_analisa
         (interview_id, client_platform_id, platform, metode_baseline, periode_referensi,
-         payload, kondisi_toko, skor, benchmark_versi, parser_versi, cakupan_riwayat,
-         kelengkapan_file, created_by)
+         payload, kondisi_toko, skor, benchmark_versi, benchmark_versi_shopee, parser_versi,
+         cakupan_riwayat, kelengkapan_file, created_by)
       values
         (${id}, ${input.clientPlatformId}, ${platform}, ${metode},
          ${periodeReferensi == null ? null : tx.json(periodeReferensi as JsonParam)},
          ${tx.json(payload as JsonParam)}, ${kondisiToko},
-         ${skor}, ${benchmarkVersi}, ${parserVersi}, ${cakupan},
+         ${skor}, ${benchmarkVersi}, ${benchmarkVersiShopee}, ${parserVersi}, ${cakupan},
          ${kelengkapan == null ? null : tx.json(kelengkapan as JsonParam)}, ${actor.employeeId})
       returning id`;
 
@@ -624,7 +735,7 @@ async function readBaseline(sql: Queryable, id: string): Promise<BaselineView> {
        order by cp.id`,
     sql<Record<string, unknown>[]>`
       select id, client_platform_id, platform, metode_baseline, kondisi_toko, skor,
-             benchmark_versi, parser_versi, cakupan_riwayat, created_at
+             benchmark_versi, benchmark_versi_shopee, parser_versi, cakupan_riwayat, created_at
         from riset_awal_analisa where interview_id = ${id} order by id`,
     sql<Record<string, unknown>[]>`
       select section, field_key, sumber, nilai_teks, nilai_angka, nilai_uang,
@@ -662,6 +773,7 @@ async function readBaseline(sql: Queryable, id: string): Promise<BaselineView> {
       kondisiToko: r.kondisi_toko as string,
       skor: numOrNull(r.skor),
       benchmarkVersi: numOrNull(r.benchmark_versi),
+      benchmarkVersiShopee: numOrNull(r.benchmark_versi_shopee),
       parserVersi: (r.parser_versi as string | null) ?? null,
       cakupanRiwayat: (r.cakupan_riwayat as string | null) ?? null,
       createdAt: (r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at)),

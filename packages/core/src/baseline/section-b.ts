@@ -68,7 +68,25 @@ export interface SectionBFromBaseline {
 
   // B-1.4 — agregat periode, BUKAN per bulan. Dipasangkan ke satu baris bulan
   // hanya bila labelnya persis sama dengan `periodeReferensi` (lihat §pemakai).
+  // TikTok menamainya `refund_rate`, Shopee `batal_retur_rate` — konsep yang
+  // sama (nilai batal+retur sebagai porsi GMV) dengan dua nama, jadi keduanya
+  // dibaca di sini alih-alih memaksa salah satu engine berganti nama kunci.
   refundRatePersen: number | null;
+
+  // B-4 Kesehatan Toko & Layanan
+  //
+  // Keputusan pemilik 2026-09-06 (menutup pertanyaan terbuka §8 #1): **B-4 Shopee
+  // DIISI OTOMATIS, B-4 TikTok TETAP MANUAL seluruhnya.** Itu bukan
+  // inkonsistensi — Shopee mengekspor Layanan/Chat dan Kesehatan Toko, TikTok
+  // tidak mengekspornya sama sekali. Ketiganya `null` untuk TikTok, dan `null`
+  // berarti Section B tetap memintanya, yang benar.
+  //
+  // `ratingToko`, `jumlahUlasan` dan `pesananTerlambatPersen` TIDAK ada di sini:
+  // tidak ada export yang membawanya di KEDUA platform ⇒ manual selamanya.
+  chatResponseRatePersen: number | null;
+  /** Kolom DB `integer` (menit). Shopee mengekspor DETIK — dikonversi di sini. */
+  chatResponseMenit: number | null;
+  poinPenalti: number | null;
 
   // B-2 Trafik & Konversi
   pengunjungPerBulan: number | null;
@@ -156,6 +174,19 @@ export function pecahanKePersen(v: unknown): number | null {
   return Math.round(n * 10000) / 100;
 }
 
+/**
+ * Detik → menit, dibulatkan. Kolom `strategi_channel.chat_response_menit` adalah
+ * `integer` bersatuan MENIT sementara Shopee mengekspor DETIK, jadi konversinya
+ * harus terjadi sekali di sini (aturan rumah: math di `packages/core`, nol
+ * hitung ulang di domain/FE). Resolusi kolomnya memang menit: waktu respon 20
+ * detik terbaca `0` — itu benar pada resolusi itu, dan jauh lebih berguna
+ * daripada mengosongkan B-4.2 padahal export-nya membawanya.
+ */
+function detikKeMenit(v: unknown): number | null {
+  const n = numOrNull(v);
+  return n === null ? null : Math.round(n / 60);
+}
+
 /** Jumlah yang null-preserving: null + null = null, null + 5 = 5. */
 function tambah(a: number | null, b: number | null): number | null {
   if (a === null && b === null) return null;
@@ -225,6 +256,17 @@ export function mapPayloadToSectionB(payload: unknown): SectionBFromBaseline {
   const videoAff = obj(video?.afiliasi);
   const liveToko = obj(live?.toko);
   const klien = obj(p?.klien);
+  // B-4: hanya Shopee yang mengekspor keduanya (keputusan pemilik 2026-09-06).
+  const layanan = obj(p?.layanan);
+  const kesehatan = obj(p?.kesehatan_toko);
+  /**
+   * Blok video Shopee DATAR — satu set angka untuk seluruh toko, tanpa pecahan
+   * toko/afiliasi seperti TikTok (Shopee tidak mengekspor pemisahannya). Dikenali
+   * dari ketiadaan KEDUA sub-blok itu, bukan dari `schema`: begitu sebuah engine
+   * baru memakai bentuk datar yang sama ia langsung ikut terbaca, dan tidak ada
+   * cabang per platform yang harus ditambah di sini.
+   */
+  const videoDatar = videoToko === null && videoAff === null ? video : null;
 
   const share = shareMix(mix);
   const gmvToko = numOrNull(toko?.gmv);
@@ -232,10 +274,14 @@ export function mapPayloadToSectionB(payload: unknown): SectionBFromBaseline {
 
   return {
     schema: str(p?.schema),
-    adaIsi: [toko, mix, produk, iklan, afiliasi, video, live].some((x) => x !== null),
+    adaIsi: [toko, mix, produk, iklan, afiliasi, video, live, layanan, kesehatan].some((x) => x !== null),
     periodeReferensi: str(klien?.periode_referensi),
 
-    refundRatePersen: pecahanKePersen(toko?.refund_rate),
+    refundRatePersen: pecahanKePersen(toko?.refund_rate ?? toko?.batal_retur_rate),
+
+    chatResponseRatePersen: pecahanKePersen(layanan?.response_rate),
+    chatResponseMenit: detikKeMenit(layanan?.waktu_respon_detik),
+    poinPenalti: numOrNull(kesehatan?.poin_total),
 
     pengunjungPerBulan: numOrNull(toko?.pengunjung),
     conversionRatePersen: pecahanKePersen(toko?.konversi),
@@ -276,12 +322,19 @@ export function mapPayloadToSectionB(payload: unknown): SectionBFromBaseline {
 
     // B-7.1 menghitung SELURUH video yang tayang di periode itu — toko + afiliasi.
     // `diposting_periode` hanya ada di sisi toko; sisi afiliasi membawa `aktif`.
+    // Bentuk datar tidak membawa JUMLAH video sama sekali (Shopee mengekspor
+    // performa agregat, bukan daftar video) ⇒ B-7.1 jumlah video tetap manual di
+    // sana. Views dan GMV-nya ada, jadi keduanya ikut terisi.
     jumlahVideoPerBulan: tambah(
       numOrNull(videoToko?.diposting_periode) ?? numOrNull(videoToko?.aktif),
       numOrNull(videoAff?.aktif),
     ),
-    totalViews: tambah(numOrNull(videoToko?.vv), numOrNull(videoAff?.vv)),
+    totalViews:
+      videoDatar !== null
+        ? numOrNull(videoDatar.ditonton)
+        : tambah(numOrNull(videoToko?.vv), numOrNull(videoAff?.vv)),
     gmvVideo: (() => {
+      if (videoDatar !== null) return money(videoDatar.gmv);
       const j = tambah(numOrNull(videoToko?.gmv), numOrNull(videoAff?.gmv));
       return j === null ? null : String(j);
     })(),

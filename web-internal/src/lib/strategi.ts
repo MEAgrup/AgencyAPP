@@ -1036,6 +1036,11 @@ export interface StrategiChannelBaselineSuggestion {
   /** B-1.4 — a period aggregate. Seeded into one baseline month only when that
    *  month's label matches `periode_referensi` exactly; never spread. */
   refund_rate_persen: number | null;
+  /** B-4 — Shopee only (owner decision 2026-09-06). `null` on TikTok ⇒ manual. */
+  chat_response_rate_persen: number | null;
+  /** Minutes. Shopee exports seconds; the conversion happens server-side. */
+  chat_response_menit: number | null;
+  poin_penalti: number | null;
   pengunjung_per_bulan: number | null;
   conversion_rate_persen: number | null;
   /** B-2.3 — always `null`: organik as a residual is a fabricated number
