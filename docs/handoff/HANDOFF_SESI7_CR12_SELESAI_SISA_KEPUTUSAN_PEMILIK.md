@@ -8,6 +8,21 @@
 > seluruhnya:** Prioritas 1 (apply migrasi R3 ke live), Prioritas 2 (CR-12,
 > delapan bagian), Prioritas 3 (beres-beres §4). Nol butir tersisa dari sana.
 >
+> ---
+>
+> ## ⚠️ DIPERBARUI 2026-09-06 — dua hal berubah setelah dokumen ini ditulis
+>
+> Dokumen ini ditulis saat SCR-UI-1 masih menunggu jawaban. Sejak itu:
+>
+> 1. **PR #297 DIBUKA** dan CI-nya hijau (§5 butir 1 selesai). PR itu membawa
+>    CR-12 **dan** SCR-UI-1.
+> 2. **SCR-UI-1 DIJAWAB PENUH DAN SUDAH DIBANGUN** — §3 di bawah masih
+>    menampilkannya sebagai pertanyaan terbuka; **itu sudah basi**, lihat §3.1.
+> 3. **Satu bug lama ditemukan** lewat data klien asli — lihat §3.2. Ia bukan
+>    bagian CR-12 maupun SCR-UI-1.
+>
+> ---
+>
 > ⚠️ **Jebakan penamaan berkas di folder ini masih berlaku.** Aturan `CLAUDE.md`
 > "baca handoff bernomor tertinggi lebih dulu" MENYESATKAN di sini:
 > `HANDOFF_INSIGHT_EDITABLE_CLIENT_PORTAL_20260908.md` punya tanggal nama berkas
@@ -127,12 +142,59 @@ Daftar sesi 6 §6, diperbarui. **Ini sekarang jalur kritis satu-satunya.**
 | ID | Pertanyaan | Yang terblokir | Berubah? |
 |---|---|---|---|
 | **O74** | Rentang sehat rasio antar-anak-tangga funnel: (a) berlaku semua kategori atau per kategori klien? (b) angka `good`/`warn` masing-masing? (c) ambangnya rate (period-independent) atau volume (perlu pro-rate mingguan)? | Kolom "Rentang sehat" di laporan **internal** berisi `—` untuk 4 dari 5 baris. Laporan tetap terbit, semua angkanya benar | tidak |
-| **SCR-UI-1** | Arah sudah YA (Ads boleh me-LIST klien), **scope belum**: semua klien, atau hanya klien ber-layanan Ads aktif? Pemilik sudah menulis default aman = hanya ber-layanan Ads | Picker klien Ads (melebarkan RLS `clients_select`) | tidak |
+| ~~**SCR-UI-1**~~ | ✅ **TERTUTUP 2026-09-06 — jangan tanya lagi.** Lihat §3.1 | — | ⚠️ **BASI** |
 | **KS-4** | Daftar komponen + bobot skor Sales di M14 (Σ=100) | Bobot M14 Sales. Registrasinya sudah mendarat dengan bobot 0 (PR #295) | ⚠️ klaim basi soal `closing_ratio` sudah dikoreksi sesi 6 — yang kosong **hanya bobotnya** |
 | **LT-2 / LT-8 / LT-1 sisa** | Daftar & urutan kerja Store Operation + alasan pengembalian brief | Pipeline `STORE_OPS` (satu migrasi seed, nol kode TS) + bobot dua role type | tidak |
 | **X-12** | Komponen disiplin periode Plan | Saran Claude sudah diajukan 2026-09-05, menunggu pemilik + OD | tidak |
 | **O65** | Rekonsiliasi ledger migrasi live — 4 pasang versi kembar terverifikasi nyata (`20260901010000` s/d `20260901040000`) | Tiket sendiri; rekomendasi O65 sendiri: bukan pekerjaan yang boleh menumpang tiket fitur | tidak |
 | **O46** | 3 arm visibility RLS lebih sempit dari Go | Klaim paritas RLS. **Tidak pernah memblokir cutover**, dan Go-nya sekarang sudah mati — jadi pertanyaannya berubah jadi "apakah masih relevan?" | ⚠️ konteksnya berubah, lihat §4 |
+
+### 3.1 SCR-UI-1 — TERTUTUP, sudah dibangun
+
+Pemilik menjawab **dua** pertanyaan 2026-09-06, dan keduanya menyederhanakan
+rancangannya:
+
+| Pertanyaan | Jawaban |
+|---|---|
+| Apa yang menandai layanan sebagai "layanan Ads"? | **"ada brief Ads"** ⇒ satu jejak (`briefs.assigned_division`), bukan gabungan dua |
+| Klien yang layanan Ads-nya selesai masih boleh dibaca? | **"tetap bisa dibaca historynya"** ⇒ **nol filter status** |
+
+Dibangun di `43574cc`: migrasi `20260913010000_scr_ui1_ads_client_scope.sql`
+(`private.jwt_client_has_ads_brief` + satu arm `clients_select`), komponen
+`AdsClientPicker`, `rls_checks.sql` §45, `ads-client-scope.rls.test.ts`.
+
+**Konteks yang WAJIB dibawa siapa pun yang menyentuh ini lagi:** skema CDPS
+tidak punya satu pun field katalog yang menandai layanan sebagai milik Ads —
+`master_service_versions.category` berisi PLATFORM, bukan divisi. Karena itu
+"berlayanan Ads" disimpulkan dari jejak, dan itu sebabnya pertanyaannya harus
+diajukan ke pemilik, bukan ditebak.
+
+⚠️ **Migrasinya BELUM di-apply ke live `CDPS SG`** — pelebaran permukaan baca di
+produksi, menunggu ketokan pemilik. Ini satu-satunya sisa SCR-UI-1.
+
+### 3.2 🐞 Bug lama yang ditemukan data klien asli — belum diperbaiki
+
+Verifikasi CR-12 dengan 11 berkas export **Cottonella** asli menyingkap ini:
+
+**`Showcase IC Cottonella.xlsx` salah terdeteksi sebagai `ttam_follows`, bukan
+`ttam_showcase`.** Berkas Showcase membawa kolom `Paid follows` SEKALIGUS
+`Adds to cart (Shop)`, dan `TTAM_ORDER` (`packages/core/src/report/detect.ts`)
+mengecek `follows` SEBELUM `showcase` — jadi yang cocok duluan menang.
+
+Tiga akibatnya, semuanya senyap:
+
+1. Baris **Add to Cart** di funnel R3 kosong permanen untuk export asli
+   (terbukti di render Cottonella) — padahal berkas Showcase adalah
+   satu-satunya sumber Add to Cart tingkat toko (handoff SESI 6 §2.3).
+2. Belanja kampanye Showcase dilaporkan sebagai belanja **Paid Follows** —
+   angka salah di laporan yang dibaca klien.
+3. Kalau berkas Followers dan Showcase dua-duanya diupload, keduanya rebutan
+   satu slot.
+
+Perbaikannya kecil: buat tanda tangan `ttam_follows` menolak berkas ber-kolom
+Shop-funnel, atau urutkan `TTAM_ORDER` dari yang paling spesifik. **Menunggu
+ketokan pemilik** apakah masuk PR #297 atau jadi tiket sendiri — ia bukan
+bagian CR-12 maupun SCR-UI-1.
 
 **Lapisan tahap Shopee** (R3 butir (g)) tetap tiket terpisah, dan masih masuk
 akal dikerjakan **setelah O74 dijawab** supaya benchmark tidak disentuh dua kali.
@@ -168,10 +230,9 @@ Itu pertanyaan yang lebih baik, dan pemilik perlu menjawabnya dalam bentuk itu.
 Diurutkan dari yang paling jelas manfaatnya. **Semuanya opsional**; nol di
 antaranya memblokir apa pun.
 
-1. **PR untuk `claude/cdps-migration-cr12-pnamxw` belum dibuat.** Sengaja —
-   belum diminta. Branch sudah di-push dan CI hijau; tinggal dibuka kalau
-   pemilik mau. Ini butir dengan nilai tertinggi karena kerjanya sudah selesai
-   dan hanya menunggu jalur review.
+1. ✅ **SELESAI — PR #297 sudah dibuka** (2026-09-06), CI hijau. Ia membawa
+   CR-12 **dan** SCR-UI-1; pemetaan commit→tiket ada di paling atas body PR.
+   Sisa keputusan pemilik di sini: apakah PR-nya dipecah jadi dua.
 2. **Lapisan tahap Shopee tanpa benchmark.** Kalau O74 lama dijawab, bagian
    tahap Shopee yang TIDAK bergantung rentang sehat (anak tangga funnel + tiga
    blok metrik + belanja per tahap) tetap bisa dikirim, dengan kolom "Rentang
