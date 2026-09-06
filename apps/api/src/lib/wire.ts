@@ -6184,6 +6184,8 @@ export interface RisetAwalAnalisaWire {
   kondisi_toko: string;
   skor: number | null;
   benchmark_versi: number | null;
+  /** Terisi HANYA untuk baris Shopee — versi `report_benchmark_shopee` (B2). */
+  benchmark_versi_shopee: number | null;
   parser_versi: string | null;
   cakupan_riwayat: string | null;
   created_at: string;
@@ -6232,6 +6234,7 @@ export function risetAwalBaselineToWire(v: risetAwal.BaselineView): RisetAwalBas
       kondisi_toko: a.kondisiToko,
       skor: a.skor,
       benchmark_versi: a.benchmarkVersi,
+      benchmark_versi_shopee: a.benchmarkVersiShopee,
       parser_versi: a.parserVersi,
       cakupan_riwayat: a.cakupanRiwayat,
       created_at: a.createdAt,

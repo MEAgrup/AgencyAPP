@@ -120,6 +120,8 @@ export function buildPayload(M: Metrics, H: HistStats, sc: Score, F: Finding[], 
     produk: M.prod
       ? {
           sku_total: M.prod.total, sku_ada_penjualan: M.prod.withSales, rate: fx(M.prod.rate, 4), top3_share: fx(M.prod.top3Share, 4), kuadran: M.prod.quad,
+          // B1 (B-3.2 / B-3.4) — turunan, bukan kolom export baru.
+          sku_pareto_80: skuPareto80(M.prod), sku_slow_moving: skuSlowMoving(M.prod),
           top_sku: M.prod.top.slice(0, 5).map((s) => ({ nama: s.nama, gmv: r(s.gmv), klik: r(s.klik), ctor: fx(s.ctor, 4) })),
         }
       : null,
@@ -128,6 +130,8 @@ export function buildPayload(M: Metrics, H: HistStats, sc: Score, F: Finding[], 
         ? {
             belanja: r(M.ads.spend), pendapatan_teratribusi: r(M.ads.rev), roas: fx(M.ads.roas, 2), biaya_per_pesanan: r(M.ads.cpo),
             setara_persen_gmv: T ? fx(div(M.ads.rev, T.gmv), 4) : null,
+            // B1 (B-5.3) — keduanya dari `byCamp`/`byMat` yang `ads()` sudah susun.
+            jumlah_kampanye: jumlahKampanye(M.ads.byCamp), tipe_materi: tipeMateriIklan(M.ads.byMat),
             // guardrail single-source (RM-3): jangan dijumlah dengan GMV organik.
             catatan: 'pendapatan teratribusi tumpang tindih dengan GMV afiliasi/organik, jangan dijumlah',
           }
@@ -151,3 +155,96 @@ export function buildPayload(M: Metrics, H: HistStats, sc: Score, F: Finding[], 
 
 /** The full baseline payload shape (inferred from the builder). */
 export type BaselinePayload = ReturnType<typeof buildPayload>;
+
+// ---------------------------------------------------------------------------
+// B1 — turunan Section B yang `Metrics` SUDAH bawa (nol parser baru).
+//
+// Keempat helper di bawah menutup B-3.2, B-3.4 dan B-5.3, yang sebelumnya AM
+// ketik ulang walau angkanya sudah ada di export yang sama. Semuanya murni:
+// input `ProdMetric`/`AdsMetric`, output angka atau `null` — tidak ada akses
+// sheet, tidak ada pembacaan ulang.
+//
+// Aturan yang mengikat keempatnya: **absen ≠ nol** (fix #2). Sebuah katalog
+// tanpa penjualan sama sekali dan sebuah katalog yang tidak diunggah harus
+// terbaca berbeda di Section B, karena yang pertama adalah temuan dan yang
+// kedua adalah kolom yang masih harus diisi AM.
+// ---------------------------------------------------------------------------
+
+/**
+ * B-3.2 — berapa SKU pertama (diurut GMV desc) yang menutup 80% Σ GMV.
+ *
+ * Batasnya `>=`: SKU yang membuat kumulatif MENYENTUH tepat 80% ikut dihitung,
+ * karena tanpa dia 80% itu belum tertutup. Σ GMV ≤ 0 ⇒ `null` — sebuah katalog
+ * tanpa omzet tidak punya "80% GMV" untuk dibagi, dan `0` di sana akan terbaca
+ * sebagai "nol SKU sudah cukup", kebalikan dari yang sebenarnya terjadi.
+ */
+export function skuPareto80(p: { rows: { gmv: number }[] }): number | null {
+  const positif = p.rows.map((s) => s.gmv).filter((g) => g > 0).sort((a, b) => b - a);
+  const total = positif.reduce((a, g) => a + g, 0);
+  if (total <= 0) return null;
+  const ambang = total * 0.8;
+  let kumulatif = 0;
+  for (let i = 0; i < positif.length; i++) {
+    kumulatif += positif[i];
+    // Toleransi float: Σ pecahan rupiah bisa meleset beberapa ULP dari ambang
+    // yang seharusnya persis tersentuh (uji "tepat di batas 80%").
+    if (kumulatif >= ambang - Math.abs(ambang) * 1e-9) return i + 1;
+  }
+  return positif.length;
+}
+
+/**
+ * B-3.4 — SKU terdaftar yang tidak menghasilkan penjualan sama sekali.
+ * `rows` kosong (katalog terunggah tapi nihil baris) ⇒ `0` yang jujur, bukan
+ * `null`: kita TAHU tidak ada SKU slow-moving karena tidak ada SKU apa pun.
+ */
+export function skuSlowMoving(p: { rows: { gmv: number }[] }): number {
+  return p.rows.filter((s) => s.gmv <= 0).length;
+}
+
+/**
+ * B-5.3 — registry TERTUTUP `Jenis materi iklan` (export Ads Manager) → key form.
+ *
+ * Hanya `Video` yang terkonfirmasi dari export asli (dipakai `metrik.ts:topVid`
+ * dan `report/metrik.ts`). Dua sisanya adalah PEMBACAAN atas menu Ads Manager,
+ * bukan nilai yang pernah kami lihat di berkas — karena itu pencocokannya
+ * longgar (substring, case-insensitive) dan apa pun yang tidak cocok DIBUANG,
+ * bukan diteruskan sebagai teks bebas. Section B-5.3 adalah daftar bergerbang;
+ * meloloskan label mentah ke sana berarti membuat nilai enum baru dari isi
+ * berkas klien.
+ */
+const MATERI_IKLAN: ReadonlyArray<readonly [RegExp, string]> = [
+  [/gmv\s*max/i, 'gmv_max'],
+  [/\blive\b/i, 'live_ads'],
+  [/\bvideo\b/i, 'video_ads'],
+];
+
+/**
+ * Peta `byMat` → daftar key form, dedup, urutan stabil (urutan registry di atas
+ * — bukan urutan kemunculan di berkas, supaya payload byte-identik saat dihitung
+ * ulang dari export yang sama tapi urutan barisnya berbeda).
+ *
+ * `null` ketika tidak satu pun key dikenali (termasuk `byMat` kosong): sebuah
+ * `[]` di Section B akan terbaca "iklan berjalan tanpa materi apa pun", padahal
+ * yang terjadi adalah kami tidak tahu jenisnya.
+ */
+export function tipeMateriIklan(byMat: Record<string, unknown>): string[] | null {
+  const ada = new Set<string>();
+  for (const label of Object.keys(byMat)) {
+    const hit = MATERI_IKLAN.find(([re]) => re.test(label));
+    if (hit) ada.add(hit[1]);
+  }
+  const out = MATERI_IKLAN.map(([, k]) => k).filter((k) => ada.has(k));
+  return out.length > 0 ? out : null;
+}
+
+/**
+ * B-5.3 — jumlah kampanye berbeda di export Ads Manager Produk/GMV Max.
+ * `byCamp` kosong ⇒ `null`, BUKAN `0`: itu terjadi ketika hanya berkas Ads LIVE
+ * yang diunggah (`ads.ada` tetap true lewat `rowsL`), jadi jumlah kampanyenya
+ * tidak diketahui — bukan nol.
+ */
+export function jumlahKampanye(byCamp: Record<string, unknown>): number | null {
+  const n = Object.keys(byCamp).length;
+  return n > 0 ? n : null;
+}

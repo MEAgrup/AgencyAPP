@@ -101,8 +101,16 @@ afterAll(async () => {
 /**
  * seedManualBaseline records a MANUAL baseline for every active platform of the
  * client (creating a Shopee platform if the client has none), leaving the
- * auto-filled isian UNCONFIRMED. Manual works for any marketplace, so a
- * Shopee-only client is served without a TikTok analysis (anti-deadlock, RAB-07).
+ * auto-filled isian UNCONFIRMED.
+ *
+ * `manualOverride: true` sejak B2. Sebelumnya Shopee memang `manual` menurut
+ * `metodeForPlatform`, jadi entri manual polos cukup. Sekarang Shopee bermesin,
+ * dan tanpa override submit-nya menuntut berkas export. Override adalah jalur
+ * pintas resmi (owner QA 2026-08-27) yang justru cocok di sini: yang diuji
+ * berkas-berkas ini adalah GERBANG riset awal, bukan mesin baseline — dan
+ * gerbangnya menuntut BARIS baseline per platform, bukan skor (anti-deadlock,
+ * RAB-07). Untuk platform yang memang tak bermesin (Lazada, dst.) flag ini
+ * diabaikan server, jadi helper ini tetap benar untuk semua platform.
  */
 async function seedManualBaseline(a: Actor, interviewId: string, clientId: string): Promise<void> {
   const plats = await sql<{ id: number }[]>`
@@ -120,6 +128,7 @@ async function seedManualBaseline(a: Actor, interviewId: string, clientId: strin
       await submitBaseline(sql, a, interviewId, {
         clientPlatformId: pid,
         manual: { gmvBulan: 5_000_000, order: 120, aov: 41_666, skuTotal: 15, belanjaIklan: 500_000, roas: 3.2 },
+        manualOverride: true,
       });
     }
   }
@@ -830,7 +839,7 @@ dDb('RAB-06 — riset awal scored inputs are server-authoritative', () => {
 // start the interview; at seed Shopee outnumbers TikTok 156×:16×.
 
 dDb('RAB-07 — prerequisite gate (interview needs riset awal)', () => {
-  it('anti-deadlock: a Shopee-only client finishes manual riset awal and starts the interview', async () => {
+  it('anti-deadlock: a Shopee-only client finishes riset awal via the no-upload shortcut and starts the interview', async () => {
     await sql`
       insert into clients (id, nama_pic, toko, kota, link_toko, kategori, gmv_baseline, target_gmv,
                            sales_pic_id, commission_payment_pic_id, assigned_am_id, created_by)
@@ -856,10 +865,14 @@ dDb('RAB-07 — prerequisite gate (interview needs riset awal)', () => {
     // The blocked attempts moved nothing.
     expect((await interview.getInterview(sql, OWNER, id)).interview.status).toBe(iv.INTERVIEW_STATES.BelumDijadwalkan);
 
-    // Manual baseline (Shopee has no engine) → belum_dapat_diukur, no score.
+    // Jalur pintas tanpa upload → belum_dapat_diukur, tanpa skor. Sejak B2
+    // Shopee PUNYA mesin, jadi yang membuka gerbang di sini adalah override AM,
+    // bukan ketiadaan mesin — dan itu justru poin anti-deadlock-nya: gerbang
+    // menuntut BARIS baseline per platform, bukan skor.
     await submitBaseline(sql, OWNER, id, {
       clientPlatformId: shopeeId,
       manual: { gmvBulan: 5_000_000, order: 120, aov: 41_666, skuTotal: 15, belanjaIklan: 500_000, roas: 3.2 },
+      manualOverride: true,
     });
 
     // Confirmed-but-not-submitted is still not enough: riset awal must be submitted.
