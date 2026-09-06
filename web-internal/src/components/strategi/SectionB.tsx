@@ -18,6 +18,7 @@
 
 import { useState } from 'react';
 import RepeatList from './RepeatList';
+import { SELALU_MANUAL, ringkasBaseline } from '@/lib/strategi-baseline-inherit';
 import {
   CAMPAIGN_TYPES,
   CHANNEL_STATES,
@@ -637,6 +638,58 @@ function InheritedChip() {
   );
 }
 
+/** B3 — the chip next to ONE field, shown only when the upload actually proposed
+ *  a value for it. A field the payload had no source for gets no chip: the AM
+ *  must be able to tell "already answered" from "still yours to type" at a
+ *  glance, which is the whole acceptance criterion for this wave. */
+function dariRiset(v: unknown) {
+  return v === null || v === undefined ? null : <> <InheritedChip /></>;
+}
+
+/**
+ * B3 — per-channel "what the one upload answered, and what is still manual".
+ *
+ * Three honest states, never a fourth that pretends:
+ *   - no analysis for this channel at all ⇒ say so;
+ *   - an old / manual payload ⇒ say that only the four legacy fields carry over,
+ *     rather than showing a wall of empty columns that looks like a bug;
+ *   - an analysed payload ⇒ count what came through and NAME what did not.
+ */
+function RingkasanOtomatis({ sugg }: { sugg: StrategiChannelBaselineSuggestion | null }) {
+  const r = ringkasBaseline(sugg);
+  if (!sugg) {
+    return (
+      <div className="alert alertInfo" style={{ fontSize: 12 }}>
+        Channel ini belum punya analisa Riset Awal — seluruh Section B diisi manual.
+      </div>
+    );
+  }
+  if (r.payloadLama) {
+    return (
+      <div className="alert alertInfo" style={{ fontSize: 12 }}>
+        Baseline channel ini dibuat sebelum mesin analisa (atau lewat entri manual), jadi
+        payload-nya hanya bisa mewariskan sumber data, periode, dan GMV/pesanan per bulan.
+        Sisanya diisi manual — bukan nol, memang belum ada angkanya.
+      </div>
+    );
+  }
+  return (
+    <div className="alert alertInfo" style={{ fontSize: 12 }}>
+      <strong>{r.otomatis.length} field terisi dari satu upload Riset Awal</strong>
+      {sugg.periode_referensi ? ` (periode ${sugg.periode_referensi})` : ''} · {r.belumTersedia.length}{' '}
+      field lain di grup yang sama belum ada sumbernya.
+      {r.belumTersedia.length > 0 && (
+        <div className="muted" style={{ marginTop: 4 }}>
+          Belum ada sumbernya: {r.belumTersedia.join(' · ')}
+        </div>
+      )}
+      <div className="muted" style={{ marginTop: 4 }}>
+        Selalu manual (tidak ada export-nya): {SELALU_MANUAL.join(' · ')}
+      </div>
+    </div>
+  );
+}
+
 export default function SectionB({
   draft,
   onChange,
@@ -797,6 +850,11 @@ export default function SectionB({
           </button>
         </div>
       )}
+
+      {/* B3 — what the single Riset Awal upload answered for THIS channel, and
+          what is still the AM's to type. Rendered above the form so the AM reads
+          it before starting, not after re-typing something already filled. */}
+      <RingkasanOtomatis sugg={sugg} />
 
       {/* ------------------------------------------------------------------ */}
       {/* B-0 Identity & status                                               */}
@@ -1162,7 +1220,7 @@ export default function SectionB({
             <div className="cardHeader">B-2 · Trafik &amp; Konversi</div>
             <div className="formRow">
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Pengunjung per bulan (B-2.1)</span>
+                <span className="muted" style={{ fontSize: 12 }}>Pengunjung per bulan (B-2.1){dariRiset(sugg?.pengunjung_per_bulan)}</span>
                 <input
                   type="number"
                   min={0}
@@ -1172,7 +1230,7 @@ export default function SectionB({
                 />
               </label>
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Conversion rate % (B-2.2)</span>
+                <span className="muted" style={{ fontSize: 12 }}>Conversion rate % (B-2.2){dariRiset(sugg?.conversion_rate_persen)}</span>
                 <input
                   type="number"
                   min={0}
@@ -1189,6 +1247,7 @@ export default function SectionB({
             <div style={{ marginTop: 8 }}>
               <span className="muted" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
                 Komposisi trafik / GMV-share (B-2.3) — apa adanya dari platform, boleh tumpang-tindih (tidak wajib 100%)
+                {dariRiset(sugg?.trafik_video_persen ?? sugg?.trafik_live_persen ?? sugg?.trafik_iklan_persen ?? sugg?.trafik_luar_persen)}
               </span>
               <div className="formRow">
                 {(
@@ -1254,7 +1313,7 @@ export default function SectionB({
             <div className="cardHeader">B-3 · Portofolio SKU</div>
             <div className="formRow">
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>SKU terdaftar (B-3.1)</span>
+                <span className="muted" style={{ fontSize: 12 }}>SKU terdaftar (B-3.1){dariRiset(sugg?.sku_listed)}</span>
                 <input
                   type="number"
                   min={0}
@@ -1264,7 +1323,7 @@ export default function SectionB({
                 />
               </label>
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>SKU aktif</span>
+                <span className="muted" style={{ fontSize: 12 }}>SKU aktif{dariRiset(sugg?.sku_aktif)}</span>
                 <input
                   type="number"
                   min={0}
@@ -1274,7 +1333,7 @@ export default function SectionB({
                 />
               </label>
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>SKU penyumbang 80% GMV (B-3.2)</span>
+                <span className="muted" style={{ fontSize: 12 }}>SKU penyumbang 80% GMV (B-3.2){dariRiset(sugg?.sku_pareto_80)}</span>
                 <input
                   type="number"
                   min={0}
@@ -1284,7 +1343,7 @@ export default function SectionB({
                 />
               </label>
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>SKU slow moving</span>
+                <span className="muted" style={{ fontSize: 12 }}>SKU slow moving{dariRiset(sugg?.sku_slow_moving)}</span>
                 <input
                   type="number"
                   min={0}
@@ -1312,7 +1371,9 @@ export default function SectionB({
             </div>
 
             <RepeatList<TopSkuDraft>
-              label={`B-3.3 · Top SKU berdasarkan GMV (maks ${TOP_SKU_MAX})`}
+              label={`B-3.3 · Top SKU berdasarkan GMV (maks ${TOP_SKU_MAX})${
+                sugg && sugg.top_sku.length > 0 ? " — nama & GMV terisi dari Riset Awal" : ""
+              }`}
               hint="Maksimal 5 SKU terlaris."
               rows={ch.top_sku}
               max={TOP_SKU_MAX}
@@ -1586,7 +1647,7 @@ export default function SectionB({
             )}
 
             <label className="field" style={{ display: 'block' }}>
-              <span className="muted" style={{ fontSize: 12 }}>Jumlah kampanye aktif (B-5.3)</span>
+              <span className="muted" style={{ fontSize: 12 }}>Jumlah kampanye aktif (B-5.3){dariRiset(sugg?.jumlah_kampanye_aktif)}</span>
               <input
                 type="number"
                 min={0}
@@ -1671,7 +1732,7 @@ export default function SectionB({
             <div className="cardHeader">B-6 · Affiliate</div>
             <div className="formRow">
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Affiliate aktif 30 hari (B-6.1)</span>
+                <span className="muted" style={{ fontSize: 12 }}>Affiliate aktif 30 hari (B-6.1){dariRiset(sugg?.affiliate_aktif_30hari)}</span>
                 <input
                   type="number"
                   min={0}
@@ -1681,7 +1742,7 @@ export default function SectionB({
                 />
               </label>
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>GMV dari affiliate</span>
+                <span className="muted" style={{ fontSize: 12 }}>GMV dari affiliate{dariRiset(sugg?.gmv_affiliate)}</span>
                 <input
                   value={ch.gmv_affiliate}
                   disabled={disabled}
@@ -1690,7 +1751,7 @@ export default function SectionB({
                 />
               </label>
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>% GMV dari affiliate (B-6.2)</span>
+                <span className="muted" style={{ fontSize: 12 }}>% GMV dari affiliate (B-6.2){dariRiset(sugg?.gmv_affiliate_persen)}</span>
                 <input
                   type="number"
                   min={0}
@@ -1725,7 +1786,9 @@ export default function SectionB({
             </div>
 
             <RepeatList<TopKreatorDraft>
-              label="B-6.4 · Top kreator berdasarkan GMV"
+              label={`B-6.4 · Top kreator berdasarkan GMV${
+                sugg && sugg.top_kreator.length > 0 ? " — terisi dari Riset Awal" : ""
+              }`}
               hint="Kreator affiliate terlaris di channel ini."
               rows={ch.top_kreator}
               onChange={(rows) => setCh({ top_kreator: rows })}
@@ -1774,7 +1837,7 @@ export default function SectionB({
                 </select>
               </label>
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Catatan program sampel</span>
+                <span className="muted" style={{ fontSize: 12 }}>Catatan program sampel{dariRiset(sugg?.sampel_terkirim)}</span>
                 <input
                   value={ch.program_sampel_catatan}
                   disabled={disabled}
@@ -1791,7 +1854,7 @@ export default function SectionB({
             <div className="cardHeader">B-7 · Konten &amp; Live</div>
             <div className="formRow">
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Video per bulan (B-7.1)</span>
+                <span className="muted" style={{ fontSize: 12 }}>Video per bulan (B-7.1){dariRiset(sugg?.jumlah_video_per_bulan)}</span>
                 <input
                   type="number"
                   min={0}
@@ -1801,7 +1864,7 @@ export default function SectionB({
                 />
               </label>
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Total views</span>
+                <span className="muted" style={{ fontSize: 12 }}>Total views{dariRiset(sugg?.total_views)}</span>
                 <input
                   type="number"
                   min={0}
@@ -1811,7 +1874,7 @@ export default function SectionB({
                 />
               </label>
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>GMV dari video</span>
+                <span className="muted" style={{ fontSize: 12 }}>GMV dari video{dariRiset(sugg?.gmv_video)}</span>
                 <input
                   value={ch.gmv_video}
                   disabled={disabled}
@@ -1822,7 +1885,7 @@ export default function SectionB({
             </div>
             <div className="formRow" style={{ marginTop: 6 }}>
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>Jam live per bulan (B-7.2)</span>
+                <span className="muted" style={{ fontSize: 12 }}>Jam live per bulan (B-7.2){dariRiset(sugg?.jam_live_per_bulan)}</span>
                 <input
                   type="number"
                   min={0}
@@ -1832,7 +1895,7 @@ export default function SectionB({
                 />
               </label>
               <label className="field">
-                <span className="muted" style={{ fontSize: 12 }}>GMV dari live</span>
+                <span className="muted" style={{ fontSize: 12 }}>GMV dari live{dariRiset(sugg?.gmv_live)}</span>
                 <input
                   value={ch.gmv_live}
                   disabled={disabled}

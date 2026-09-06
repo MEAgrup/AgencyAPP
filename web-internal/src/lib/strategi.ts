@@ -986,6 +986,22 @@ export interface StrategiGmvMixRincian {
   kartu_produk_dan_lain: number | null;
 }
 
+/** B-3.3 — one top-SKU row the baseline payload carries. `unit_terjual`,
+ *  `harga_jual` and `margin_persen` are NOT here: no export carries them, so
+ *  they stay manual (they are what B-3 margin math needs). */
+export interface StrategiTopSkuSuggestion {
+  nama: string;
+  gmv: string | null;
+  klik: number | null;
+  ctor_persen: number | null;
+}
+
+/** B-6.4 — one top-creator row the baseline payload carries. */
+export interface StrategiTopKreatorSuggestion {
+  nama: string;
+  gmv: string | null;
+}
+
 export interface StrategiChannelBaselineSuggestion {
   client_platform_id: number;
   platform: string;
@@ -1005,6 +1021,51 @@ export interface StrategiChannelBaselineSuggestion {
   aov: string | null;
   baseline_bulan: StrategiBaselineMonthSuggestion[];
   gmv_mix: StrategiGmvMixRincian | null;
+
+  // B3 — the ~15 Section B figures the payload already carried and the AM
+  // re-typed anyway (handoff Gelombang B §4.4). One mapper reads them for every
+  // payload schema; a key the payload has no source for arrives as `null`, which
+  // means "still manual" and still gates submit. Never `0`.
+  /** `payload.schema`, e.g. `cdps.baseline.tiktok.v1`. `null` on old payloads. */
+  payload_schema: string | null;
+  /** false ⇒ the payload predates this mapper (or is a manual baseline): only the
+   *  four legacy fields can be inherited, and the page must SAY so. */
+  payload_terbaca: boolean;
+  /** The month the period figures describe, e.g. "Agu 2026". */
+  periode_referensi: string | null;
+  /** B-1.4 — a period aggregate. Seeded into one baseline month only when that
+   *  month's label matches `periode_referensi` exactly; never spread. */
+  refund_rate_persen: number | null;
+  pengunjung_per_bulan: number | null;
+  conversion_rate_persen: number | null;
+  /** B-2.3 — always `null`: organik as a residual is a fabricated number
+   *  (DECISIONS 2026-08-22, shares may overlap and exceed 100). */
+  trafik_organik_persen: number | null;
+  trafik_iklan_persen: number | null;
+  /** B-2.3 — always `null`: affiliate GMV is already inside the video/LIVE buckets. */
+  trafik_affiliate_persen: number | null;
+  trafik_live_persen: number | null;
+  trafik_video_persen: number | null;
+  trafik_luar_persen: number | null;
+  sku_listed: number | null;
+  sku_aktif: number | null;
+  sku_pareto_80: number | null;
+  sku_slow_moving: number | null;
+  top_sku: StrategiTopSkuSuggestion[];
+  jumlah_kampanye_aktif: number | null;
+  /** Already filtered to the `CAMPAIGN_TYPES` taxonomy server-side. */
+  tipe_kampanye: string[];
+  affiliate_aktif_30hari: number | null;
+  gmv_affiliate: string | null;
+  gmv_affiliate_persen: number | null;
+  top_kreator: StrategiTopKreatorSuggestion[];
+  /** B-6.5 count only. WHO pays for the sampling programme is in no export ⇒ manual. */
+  sampel_terkirim: number | null;
+  jumlah_video_per_bulan: number | null;
+  total_views: number | null;
+  gmv_video: string | null;
+  jam_live_per_bulan: number | null;
+  gmv_live: string | null;
 }
 
 export interface StrategiBaselinePrefill {
@@ -1353,6 +1414,89 @@ export function getStrategiPrefill(id: string): Promise<StrategiPrefill | null> 
  *  has no scored interview / no analysis rows. Suggestion-only. */
 export function getBaselinePrefill(id: string): Promise<StrategiBaselinePrefill | null> {
   return api.get<StrategiBaselinePrefill | null>(`/strategi/${id}/baseline-prefill`);
+}
+
+// B4 — AM Co-Pilot usulan Section E (GET /strategi/{id}/copilot). Suggestions
+// only: nothing is saved until the AM ticks rows and `saveStrategiPillars` runs.
+export interface StrategiCopilotAngle {
+  judul: string;
+  akun: string | null;
+  gmv: number | null;
+  gpm: number | null;
+  vv: number | null;
+  tuntas: number | null;
+  ctr: number | null;
+  /** One BI line built from the real figures — identical on every recompute. */
+  ringkas: string;
+}
+
+export interface StrategiCopilotAturanTerkunci {
+  nilai: number;
+  label: string;
+  sudah_terlampaui: boolean;
+}
+
+export interface StrategiCopilotAksi {
+  kode: string;
+  pilar: string;
+  divisi: string;
+  /** `strategi_pillar.jenis`. */
+  jenis: string;
+  nama: string;
+  deskripsi: string;
+  jembatan: string;
+  unit: string;
+  arah: string;
+  minggu_terlihat: number;
+  field_id_bukti: string;
+  quick_win: boolean;
+  nilai_sekarang: number | null;
+  target_hitung: number | null;
+  aturan_terkunci: StrategiCopilotAturanTerkunci | null;
+  /** Why this action was proposed, from the real numbers + the benchmark used. */
+  alasan: string;
+  /** Ready for `strategi_pillar.target`. */
+  target: string;
+  /** V3 only — the angles already proven to sell. Empty otherwise. */
+  angle: StrategiCopilotAngle[];
+  catatan: string | null;
+}
+
+export interface StrategiCopilotPilar {
+  urutan: number;
+  pilar: string;
+  /** Grouping label. Goes into `detail`, NEVER `peran` (`ck_strpil_peran`). */
+  label: string;
+  jenis: string;
+  divisi: string;
+  skor_baseline: number | null;
+  aksi: StrategiCopilotAksi[];
+}
+
+export interface StrategiCopilotChannel {
+  client_platform_id: number;
+  platform: string;
+  channel: string;
+  channel_lain: string | null;
+  metode_baseline: string;
+  payload_schema: string | null;
+  payload_terbaca: boolean;
+  periode_referensi: string | null;
+  benchmark_versi: number | null;
+  /** BI sentences naming what could NOT be proposed, and why. */
+  catatan: string[];
+  pilar: StrategiCopilotPilar[];
+}
+
+export interface StrategiCopilotUsulan {
+  interview_id: string;
+  channels: StrategiCopilotChannel[];
+}
+
+/** B4 — the Section E draft the AM Co-Pilot rules propose, computed server-side.
+ *  `null` when the client has no scored interview / no analysis rows. */
+export function getStrategiCopilot(id: string): Promise<StrategiCopilotUsulan | null> {
+  return api.get<StrategiCopilotUsulan | null>(`/strategi/${id}/copilot`);
 }
 
 export function strategiKekurangan(id: string): Promise<StrategiKekurangan[]> {

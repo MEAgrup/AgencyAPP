@@ -77,7 +77,9 @@ import {
   checkCompleteness,
   createStrategi,
   expireStrategi,
+  PILLAR_KINDS,
   getBaselinePrefill,
+  susunPilarUsulan,
   getStrategi,
   getStrategiPrefill,
   listStrategiForService,
@@ -4045,6 +4047,18 @@ describeDb('getStrategiPrefill — Interview → Strategi bridge (RAB-09)', () =
 async function seedRisetAwalBaseline(
   interviewId: string,
   clientId: string,
+  /** Overrides for the TikTok payload blocks — used to stand in for the payload
+   *  B1 will produce. A row here is IMMUTABLE by trigger (house rule #3), so a
+   *  variant has to be seeded at insert time, never UPDATEd afterwards. */
+  overrides?: {
+    iklan?: {
+      belanja?: number;
+      roas?: number;
+      setara_persen_gmv?: number;
+      jumlah_kampanye?: number;
+      tipe_materi?: string[];
+    };
+  },
 ): Promise<{ tiktokId: number; shopeeId: number }> {
   // The analysis + provenance children FK to interview_riset_awal (the M6A step).
   await sql`
@@ -4082,8 +4096,36 @@ async function seedRisetAwalBaseline(
       live_toko: 0,
       kartu_produk_dan_lain: 73_000_000,
     },
-    toko: { aov: 100_000 },
-    iklan: { belanja: 8_000_000, roas: 3.5 },
+    // B3 §4.4 — the blocks the payload ALWAYS carried and Section B never read.
+    // `produk.sku_pareto_80` / `.sku_slow_moving` / `iklan.jumlah_kampanye` /
+    // `iklan.tipe_materi` are DELIBERATELY absent here: B1 (built in parallel) is
+    // what adds them to `buildPayload`, and until it lands they must arrive as
+    // `null`, not `0`. The test below pins exactly that.
+    klien: { periode_referensi: 'Agu 2026' },
+    toko: {
+      aov: 100_000,
+      gmv: 100_000_000,
+      refund_rate: 0.0412,
+      pengunjung: 520_000,
+      konversi: 0.0537,
+    },
+    produk: {
+      sku_total: 120,
+      sku_ada_penjualan: 44,
+      top_sku: [{ nama: 'Serum A', gmv: 25_000_000, klik: 3_400, ctor: 0.081 }],
+    },
+    afiliasi: {
+      kreator_posting: 37,
+      gmv: 15_000_000,
+      sampel_terkirim: 60,
+      top_kreator: [{ nama: 'kreator.satu', gmv: 8_000_000 }],
+    },
+    video: {
+      toko: { aktif: 40, diposting_periode: 31, vv: 900_000, gmv: 12_000_000 },
+      afiliasi: { aktif: 88, vv: 2_100_000, gmv: 15_000_000 },
+    },
+    live: { toko: { jam: 62.5, gmv: 0 } },
+    iklan: overrides?.iklan ?? { belanja: 8_000_000, roas: 3.5, setara_persen_gmv: 0.2881 },
   };
   await sql`
     insert into riset_awal_analisa
@@ -4205,6 +4247,189 @@ describeDb('getBaselinePrefill — riset awal baseline → Section B (RAB-11/RAB
     const serviceId = await seedService();
     const s = await createStrategi(sql, am(), serviceId, HEADER);
     await expect(getBaselinePrefill(sql, otherAm(), s.id)).rejects.toThrow(ForbiddenError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B3 — Section B terisi dari satu upload (handoff Gelombang B §4.3/§4.4)
+// ---------------------------------------------------------------------------
+
+describeDb('getBaselinePrefill — B3: the §4.4 figures the payload already carried', () => {
+  async function prefillTt() {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    await seedRisetAwalBaseline(interviewId, clientId);
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const prefill = await getBaselinePrefill(sql, am(), s.id);
+    return prefill!;
+  }
+
+  it('proposes B-2 / B-3 / B-6 / B-7 straight from the payload', async () => {
+    const tt = (await prefillTt()).channels.find((c) => c.channel === 'TikTok Shop')!;
+    expect(tt.payloadSchema).toBe('cdps.baseline.tiktok.v1');
+    expect(tt.payloadTerbaca).toBe(true);
+    expect(tt.periodeReferensi).toBe('Agu 2026');
+    // B-2
+    expect(tt.pengunjungPerBulan).toBe(520_000);
+    expect(tt.conversionRatePersen).toBe(5.37);
+    expect(tt.refundRatePersen).toBe(4.12);
+    // B-2.3: video/LIVE/luar from gmv_mix (Σ = 100jt), iklan from setara_persen_gmv
+    expect(tt.trafikVideoPersen).toBe(27);
+    expect(tt.trafikLivePersen).toBe(0);
+    expect(tt.trafikLuarPersen).toBe(73);
+    expect(tt.trafikIklanPersen).toBe(28.81);
+    // B-3
+    expect(tt.skuListed).toBe(120);
+    expect(tt.skuAktif).toBe(44);
+    expect(tt.topSku).toEqual([{ nama: 'Serum A', gmv: '25000000', klik: 3_400, ctorPersen: 8.1 }]);
+    // B-6
+    expect(tt.affiliateAktif30Hari).toBe(37);
+    expect(tt.gmvAffiliate).toBe('15000000');
+    expect(tt.gmvAffiliatePersen).toBe(15);
+    expect(tt.topKreator).toEqual([{ nama: 'kreator.satu', gmv: '8000000' }]);
+    expect(tt.sampelTerkirim).toBe(60);
+    // B-7
+    expect(tt.jumlahVideoPerBulan).toBe(31 + 88);
+    expect(tt.totalViews).toBe(3_000_000);
+    expect(tt.gmvVideo).toBe('27000000');
+    expect(tt.jamLivePerBulan).toBe(62.5);
+    expect(tt.gmvLive).toBe('0');
+  });
+
+  it('B-2.3: organik and affiliate stay null — a residual would be a fabricated number', async () => {
+    const tt = (await prefillTt()).channels.find((c) => c.channel === 'TikTok Shop')!;
+    expect(tt.trafikOrganikPersen).toBeNull();
+    expect(tt.trafikAffiliatePersen).toBeNull();
+  });
+
+  it('a key the payload has no source for is null, never 0 (absent ≠ zero)', async () => {
+    const tt = (await prefillTt()).channels.find((c) => c.channel === 'TikTok Shop')!;
+    // These four arrive once B1 extends `buildPayload`. Until then the AM must
+    // still be asked for them, and the Kekurangan panel must still name them.
+    expect(tt.skuPareto80).toBeNull();
+    expect(tt.skuSlowMoving).toBeNull();
+    expect(tt.jumlahKampanyeAktif).toBeNull();
+    expect(tt.tipeKampanye).toEqual([]);
+  });
+
+  it('a manual / legacy payload reports payloadTerbaca=false instead of zeroes', async () => {
+    const sh = (await prefillTt()).channels.find((c) => c.channel === 'Shopee')!;
+    expect(sh.metodeBaseline).toBe('manual');
+    expect(sh.payloadTerbaca).toBe(false);
+    expect(sh.pengunjungPerBulan).toBeNull();
+    expect(sh.conversionRatePersen).toBeNull();
+    expect(sh.skuListed).toBeNull();
+    expect(sh.topSku).toEqual([]);
+    expect(sh.jamLivePerBulan).toBeNull();
+  });
+
+  it('tipe_kampanye is filtered to the CAMPAIGN_TYPES taxonomy, free text dropped', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    // The payload B1 will produce, plus one material key nobody recognises.
+    await seedRisetAwalBaseline(interviewId, clientId, {
+      iklan: {
+        belanja: 8_000_000,
+        roas: 3.5,
+        jumlah_kampanye: 12,
+        tipe_materi: ['video_ads', 'kolaborasi_ajaib', 'gmv_max'],
+      },
+    });
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    const tt = (await getBaselinePrefill(sql, am(), s.id))!.channels.find(
+      (c) => c.channel === 'TikTok Shop',
+    )!;
+    expect(tt.jumlahKampanyeAktif).toBe(12);
+    expect(tt.tipeKampanye).toEqual(['video_ads', 'gmv_max']);
+  });
+
+  it('stays suggestion-only: nothing about B3 writes a channel row', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    await seedRisetAwalBaseline(interviewId, clientId);
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await getBaselinePrefill(sql, am(), s.id);
+    const [{ count }] = await sql<{ count: string }[]>`
+      select count(*)::text as count from strategi_channel where strategi_id = ${s.id}`;
+    expect(count).toBe('0');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B4 — susunPilarUsulan (AM Co-Pilot mengisi Section E dari server)
+// ---------------------------------------------------------------------------
+
+describeDb('susunPilarUsulan — Section E disusun server-side (B4)', () => {
+  async function seeded() {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    const { interviewId } = await seedScoredInterview(clientId);
+    const ids = await seedRisetAwalBaseline(interviewId, clientId);
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    return { serviceId, clientId, interviewId, strategiId: s.id, ...ids };
+  }
+
+  it('proposes one set of pillars per analysed platform, resolved from the same interview', async () => {
+    const { interviewId, strategiId, tiktokId, shopeeId } = await seeded();
+    const u = await susunPilarUsulan(sql, am(), strategiId);
+    expect(u).not.toBeNull();
+    // The SAME interview `getBaselinePrefill` resolves — one helper, no drift.
+    expect(u!.interviewId).toBe(interviewId);
+    expect(u!.channels.map((c) => c.clientPlatformId).sort()).toEqual([tiktokId, shopeeId].sort());
+    const tt = u!.channels.find((c) => c.clientPlatformId === tiktokId)!;
+    expect(tt.channel).toBe('TikTok Shop');
+    expect(tt.usulan.payloadTerbaca).toBe(true);
+  });
+
+  it('every proposed pillar carries a jenis from PILLAR_KINDS and a channel from D1', async () => {
+    const { strategiId } = await seeded();
+    const u = await susunPilarUsulan(sql, am(), strategiId);
+    for (const c of u!.channels) {
+      expect(['Shopee', 'TikTok Shop', 'Tokopedia', 'Lazada', 'Website', 'Lainnya']).toContain(c.channel);
+      for (const p of c.usulan.pilar) {
+        expect(PILLAR_KINDS).toContain(p.jenis);
+        expect(p.aksi.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('a manual baseline proposes nothing and says why — never a guessed pillar', async () => {
+    const { strategiId, shopeeId } = await seeded();
+    const u = await susunPilarUsulan(sql, am(), strategiId);
+    const sh = u!.channels.find((c) => c.clientPlatformId === shopeeId)!;
+    expect(sh.usulan.payloadTerbaca).toBe(false);
+    expect(sh.usulan.pilar).toEqual([]);
+    expect(sh.usulan.catatan.join(' ')).toContain('tidak memuat blok analisa');
+  });
+
+  it('is suggestion-only: reading it writes no strategi_pillar row', async () => {
+    const { strategiId } = await seeded();
+    await susunPilarUsulan(sql, am(), strategiId);
+    const [{ count }] = await sql<{ count: string }[]>`
+      select count(*)::text as count from strategi_pillar where strategi_id = ${strategiId}`;
+    expect(count).toBe('0');
+  });
+
+  it('returns null when the client has no riset awal analysis', async () => {
+    const serviceId = await seedService();
+    const [{ client_id: clientId }] = await sql<{ client_id: string }[]>`
+      select client_id from services where id = ${serviceId}`;
+    await seedScoredInterview(clientId);
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    expect(await susunPilarUsulan(sql, am(), s.id)).toBeNull();
+  });
+
+  it('refuses a non-owner AM — the same read gate as getStrategi / getBaselinePrefill', async () => {
+    const serviceId = await seedService();
+    const s = await createStrategi(sql, am(), serviceId, HEADER);
+    await expect(susunPilarUsulan(sql, otherAm(), s.id)).rejects.toThrow(ForbiddenError);
   });
 });
 

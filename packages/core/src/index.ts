@@ -23,6 +23,9 @@
  *   turunan dari jenis, bukan teks bebas) — dijoin ke account.TASK_CATALOG
  *   lewat `jenis` yang sama ✅
  * - baseline: Skor Kondisi Toko dari export TikTok (riset awal, pra-onboarding) ✅
+ * - copilot: mesin aturan AM Co-Pilot (katalog 4 pilar × 20 aksi, verdict,
+ *   run-rate vs floor, peringkat angle video) — dipindah dari tool HTML ke
+ *   server supaya Section E bisa disusun tanpa export/tempel JSON (B4) ✅
  * - report: laporan performa klien mingguan/bulanan dari export yang sama ✅
  * - skuscreener: MEA SKU Screener (Gelombang 3) — routing SKU (R05), CPC
  *   Maksimum + anti-rule (R06), median toko iteratif (R04), before/after
@@ -56,6 +59,7 @@ export * as division from './division';
 export * as plantask from './plantask';
 export * as interview from './interview';
 export * as baseline from './baseline';
+export * as copilot from './copilot';
 export * as report from './report';
 export * as skuscreener from './skuscreener';
 export * as adsscanner from './adsscanner';
