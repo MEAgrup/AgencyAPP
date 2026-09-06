@@ -22,6 +22,9 @@
  * - plantask: katalog jenis task per divisi untuk baris Plan P-C (satuan
  *   turunan dari jenis, bukan teks bebas) — dijoin ke account.TASK_CATALOG
  *   lewat `jenis` yang sama ✅
+ * - planpillar: pemetaan pilar Strategi Section E → baris kerja Plan P-C (M6B
+ *   §6 Flow langkah 1). Dual-home dengan cermin manual
+ *   `web-internal/src/lib/plan-row-suggest.ts` ✅
  * - baseline: Skor Kondisi Toko dari export TikTok (riset awal, pra-onboarding) ✅
  * - report: laporan performa klien mingguan/bulanan dari export yang sama ✅
  * - skuscreener: MEA SKU Screener (Gelombang 3) — routing SKU (R05), CPC
@@ -54,6 +57,7 @@ export * as notification from './notification';
 export * as visibility from './visibility';
 export * as division from './division';
 export * as plantask from './plantask';
+export * as planpillar from './planpillar';
 export * as interview from './interview';
 export * as baseline from './baseline';
 export * as report from './report';

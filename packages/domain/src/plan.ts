@@ -27,7 +27,7 @@
  * *their own rows* is an RLS arm on `plan_row`, not a whole-Plan grant.
  */
 
-import { division, ident, notification, permission, statemachine } from '@cdps/core';
+import { division, ident, notification, permission, planpillar, statemachine } from '@cdps/core';
 import {
   executors,
   withTransaction,
@@ -873,11 +873,16 @@ export interface GenerateSource {
  * chain. Regenerating the still-`Terjadwal` periods of a revised Strategi (Rule
  * 17: unstarted periods only) is a later ticket; this is initial generation.
  *
- * **No row skeleton yet.** Flow step 1 mentions seeding rows from E+F, but every
- * P-C field an AM must fill (`aksi`, `hasil_diharapkan`, `divisi_pic`) is `W`
- * with no PRD default, and `divisi_pic` is NOT NULL — auto-assigning a division
- * per pillar would be invented data. Left to the row form / an owner decision;
- * targets, which ARE fully specified by D-2, are seeded here.
+ * **Row skeleton (B5, 2026-09-06).** Flow step 1 asks for "a skeleton of rows
+ * from E + F (channel × pillar × quota)", and until B5 this function refused
+ * the whole of it because `divisi_pic` is NOT NULL and guessing a division per
+ * pillar would be invented data. That reasoning holds for `sku`/`harga`/
+ * `retensi` — and only for those three. Five pillar kinds have exactly one
+ * owning division (`planpillar.PILAR_TO_DIVISI`), so `seedRowsFromPillars`
+ * seeds period 1 from them, carrying `strategi_pillar_id` so the rows are NOT
+ * `di_luar_strategi` — the state that had flattened the PG-1 deviation metric
+ * to 100% (`docs/DECISIONS.md` 2026-09-02). Everything a pillar does not state
+ * (budget, weeks, priority) stays at its column default; nothing is invented.
  *
  * Runs inside the approval transaction (`approveStrategi`), so a failed
  * generation rolls the approval back with it.
@@ -941,9 +946,83 @@ export async function generatePlanPeriods(
       },
       createdBy: actor.employeeId,
     });
+    if (p.periodeNo === 1) await seedRowsFromPillars(tx, actor, s, id);
     ids.push(id);
   }
   return ids;
+}
+
+/**
+ * M6B §6 Flow step 1 — seed period 1's P-C rows from Strategi Section E.
+ *
+ * Only pillars that carry every NOT NULL column of `plan_row` **on their own**
+ * become rows; the rest are left for the AM and surfaced by the Plan page's
+ * "Pilar Strategi belum jadi baris kerja" panel, which reads the same three
+ * reasons `planpillar.seedRowFromPillar` returns. The judgement of which is
+ * which lives in `@cdps/core` (shared with the FE suggestion adapter) — this
+ * function only reads the two tables and writes what core hands it.
+ *
+ * **Not `createPlanRow`.** That is the AM's write path: it opens its own
+ * transaction and gates on `canWritePlan`, and neither can happen here — the
+ * approval transaction is already open and the actor is the approving SPV, not
+ * the owning AM. The insert below is the same shape and rides the same DB
+ * CHECKs; the difference is recorded in the audit action (`baris_disemai`, not
+ * `baris_dibuat`), so the log never claims a human typed these rows.
+ */
+async function seedRowsFromPillars(
+  tx: TransactionSql,
+  actor: Actor,
+  s: GenerateSource,
+  planId: string,
+): Promise<void> {
+  const pillars = await tx<
+    { id: string | number; jenis: string; channel: string | null; aksi: string | null; target: string | null; sku: string | null }[]
+  >`select id, jenis, channel, aksi, target, sku
+      from strategi_pillar where strategi_id = ${s.id} order by urutan asc, id asc`;
+  if (pillars.length === 0) return;
+
+  const channelRows = await tx<{ channel: string }[]>`
+    select channel from strategi_channel where strategi_id = ${s.id}`;
+  const channels = channelRows.map((c) => c.channel);
+
+  const ex = executors(tx);
+  for (const p of pillars) {
+    const pillarId = num(p.id);
+    const hasil = planpillar.seedRowFromPillar(
+      { id: pillarId, jenis: p.jenis, channel: p.channel, aksi: p.aksi, target: p.target, sku: p.sku },
+      channels,
+    );
+    if (!hasil.disemai) continue;
+    const r = hasil.row;
+
+    const inserted = await tx<{ id: string | number }[]>`
+      insert into plan_row (
+        plan_id, channel, pilar, strategi_pillar_id,
+        aksi, sku_sasaran, kuota, satuan, divisi_pic, hasil_diharapkan, created_by)
+      values (
+        ${planId}, ${r.channel}, ${r.pilar}, ${r.strategiPillarId},
+        ${r.aksi}, ${tx.json(r.skuSasaran as JsonParam)}, ${r.kuota}, ${r.satuan},
+        ${r.divisiPic}, ${r.hasilDiharapkan}, ${actor.employeeId})
+      returning id`;
+
+    await ex.audit.insertAudit({
+      entityType: ENTITY_PLAN,
+      entityId: planId,
+      actorEmployeeId: actor.employeeId,
+      action: 'baris_disemai',
+      beforeJson: null,
+      afterJson: {
+        plan_row_id: num(inserted[0].id),
+        strategi_pillar_id: r.strategiPillarId,
+        channel: r.channel,
+        pilar: r.pilar,
+        kuota: r.kuota,
+        satuan: r.satuan,
+        divisi_pic: r.divisiPic,
+      },
+      createdBy: actor.employeeId,
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
