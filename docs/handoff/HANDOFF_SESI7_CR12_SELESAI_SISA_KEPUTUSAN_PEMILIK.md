@@ -120,13 +120,17 @@ PDF pakai Print browser. CSP portal klien kini **nol host eksternal**.
 | Suite | Hasil |
 |---|---|
 | `packages/core` | **663** lulus (582 → 663, +81 tes CR-12) |
-| `packages/domain` | **1859** lulus + 1 skip (tidak berubah) |
+| `packages/domain` | **1870** lulus + 1 skip (1859 → 1870, +11 tes SCR-UI-1) |
 | `packages/db` | **53** lulus (tidak berubah) |
 | `apps/api` | **442** lulus (435 → 442, +7); `route-parity` `KNOWN_GAPS` **tetap kosong** |
-| `web-internal` | **553** lulus, `tsc` bersih, `npm run build` sukses |
+| `web-internal` | **563** lulus (553 → 563, +10 tes picker), `tsc` + eslint bersih, build 49 halaman |
 | `web-client-portal` | **19** lulus, `npm run build` sukses (10 route) |
-| `db-rebuild.sh --yes` | **180** migrasi, gerbang 145/40/31/69, keempat invariant lolos |
-| CI GitHub | **hijau** di `d082e94` (run #1676) |
+| `db-rebuild.sh --yes` | **181** migrasi (180 → 181, +migrasi SCR-UI-1), gerbang **145/40/31/69 tidak bergerak**, keempat invariant lolos |
+| CI GitHub | **hijau** di `0ecc392` — head PR #297 saat ini |
+
+⚠️ **Angka di tabel ini SUDAH termasuk SCR-UI-1** (diperbarui 2026-09-06). Kalau
+suite lu menghasilkan angka LEBIH KECIL dari ini, itu regresi — bukan versi lama
+yang belum ikut.
 
 ⚠️ **Koreksi angka terhadap handoff sesi 6:** `web-internal` build sekarang
 **49 halaman**, bukan 48. Itu **bukan** akibat CR-12 — angka 48 diukur sebelum
