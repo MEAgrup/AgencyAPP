@@ -33,14 +33,40 @@ interface TtamSpec {
 }
 
 /**
+ * Kolom funnel Shop — penanda ekspor **Showcase (Initiate Checkout)**.
+ *
+ * Dipakai DUA arah: sebagai tanda tangan `ttam_showcase`, dan sebagai
+ * PENYANGKALAN pada `ttam_follows`. Lihat catatan di `TTAM_TYPES`.
+ */
+const punyaFunnelShop = (i: Map<string, string>): boolean =>
+  hasCol(i, 'Checkouts initiated (Shop)') || hasCol(i, 'Adds to cart (Shop)');
+
+/**
  * The 4 Ads Manager signatures. Order matters: `showcase` also carries
  * "Video views", so the more specific checkout signature is tested first and
  * `videoviews` is the residual.
+ *
+ * ⚠️ `ttam_follows` WAJIB menyangkal kolom funnel Shop. Ekspor Showcase yang
+ * asli membawa `Paid follows` SEKALIGUS `Adds to cart (Shop)` +
+ * `Checkouts initiated (Shop)` — diverifikasi terhadap berkas Agustus 2026 milik
+ * klien Cottonella — sedangkan ekspor Followers yang asli membawa `Paid follows`
+ * dengan NOL kolom Shop. Tanpa penyangkalan itu, berkas Showcase cocok duluan
+ * sebagai `ttam_follows` dan tiga hal rusak diam-diam: baris Add to Cart di
+ * funnel R3 kosong permanen (berkas Showcase satu-satunya sumbernya di tingkat
+ * toko), belanja kampanye Showcase dilaporkan sebagai belanja Paid Follows di
+ * laporan yang DIBACA KLIEN, dan bila kedua berkas diunggah keduanya rebutan
+ * satu slot.
+ *
+ * Penyangkalan dipilih alih-alih sekadar menukar urutan `TTAM_ORDER`, karena
+ * dengan begini aturannya ada DI DALAM tanda tangan: `follows` berarti "ada
+ * paid follows DAN bukan funnel Shop". Urutan daftar yang tidak ditulis di mana
+ * pun adalah aturan yang bisa hilang pada suntingan berikutnya tanpa satu pun
+ * tes memerah.
  */
 export const TTAM_TYPES: Record<TtamType, TtamSpec> = {
   ttam_consideration: { l: 'Ads Manager — Brand Considerations', sig: (i) => hasCol(i, 'New consideration size') },
-  ttam_follows: { l: 'Ads Manager — Follows', sig: (i) => hasCol(i, 'Paid follows') },
-  ttam_showcase: { l: 'Ads Manager — Showcase (Initiate Checkout)', sig: (i) => hasCol(i, 'Checkouts initiated (Shop)') || hasCol(i, 'Adds to cart (Shop)') },
+  ttam_follows: { l: 'Ads Manager — Follows', sig: (i) => hasCol(i, 'Paid follows') && !punyaFunnelShop(i) },
+  ttam_showcase: { l: 'Ads Manager — Showcase (Initiate Checkout)', sig: punyaFunnelShop },
   ttam_videoviews: { l: 'Ads Manager — Video Views', sig: (i) => hasCol(i, 'Video views') && hasCol(i, 'CPM') },
 };
 

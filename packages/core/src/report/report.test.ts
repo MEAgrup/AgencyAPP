@@ -11,7 +11,8 @@
 import { describe, expect, it } from 'vitest';
 import { periodeOf, readSheet, type Aoa, type Sheet } from '../baseline';
 import {
-  chartData, detectTtam, gmvRunRateBulanan, hariAntara, prorateBench, renderBody, rentangOf,
+  chartData, colIndex, detectTtam, gmvRunRateBulanan, hariAntara, prorateBench, renderBody, rentangOf,
+  TTAM_ORDER, TTAM_TYPES,
   renderReportHtml, REPORT_BENCH_V1, resolveRentang, runReport, scale,
   INSIGHT_MAX, INSIGHT_MAX_POIN, InsightDraftError, normalizeInsightDraft,
   MSG_ADA_MARKUP, MSG_POIN_KOSONG, MSG_REK_TAK_LENGKAP, MSG_RINGKASAN_WAJIB,
@@ -325,6 +326,75 @@ describe('detectTtam', () => {
   it('does NOT mistake a Seller Center export for an Ads Manager one', () => {
     expect(detectTtam(shopTt())).toBeNull();
     expect(detectTtam(prodTt())).toBeNull();
+  });
+
+  // ── Regresi: header ekspor ASLI, bukan header sintetis ────────────────────
+  //
+  // Kedua daftar kolom di bawah DISALIN PERSIS dari export TikTok Ads Manager
+  // Agustus 2026 milik klien Cottonella, dan justru di situlah letak tesnya.
+  // Tes di atas memakai header sintetis SATU penanda (`ttam(['Paid follows'])`),
+  // dan itulah sebabnya bug ini hidup lama tanpa satu pun tes memerah: berkas
+  // Showcase yang asli membawa `Paid follows` SEKALIGUS kolom funnel Shop —
+  // kombinasi yang tidak pernah muncul di fixture mana pun.
+  //
+  // ⛔ JANGAN "rapikan" daftar ini jadi header minimal. Kolom yang terasa tidak
+  // relevan (`ad_status_list`, `Attribution source`, `Currency`) memang tidak
+  // dibaca engine, tapi keberadaannya yang apa adanya itulah yang membuat
+  // fixture ini mewakili berkas nyata.
+  const KOLOM_SHOWCASE_ASLI = [
+    'Ad group name', 'Primary status', 'ad_status_list', 'Paid follows', 'Spend',
+    'Impressions', 'Reach', 'Clicks (destination)', 'CPC (destination)', 'CTR (destination)',
+    'Product page views (Shop)', 'Adds to cart (Shop)', 'Checkouts initiated (Shop)',
+    'Value per checkout initiated (Shop)', 'Attribution source', 'Currency',
+  ];
+  const KOLOM_FOLLOWERS_ASLI = [
+    'Ad group name', 'Primary status', 'ad_status_list', 'Spend', 'Paid follows',
+    'Results', 'Cost per result', 'Attribution source', 'Currency',
+  ];
+  const asli = (cols: string[]): Sheet =>
+    parse(sheetAoa(cols, [cols.map((_, n) => (n === 0 ? 'AG1' : String(n)))], 'Ads 2026-08-01 ~ 2026-08-31'), 'asli.xlsx');
+
+  it('berkas Showcase ASLI terdeteksi ttam_showcase, BUKAN ttam_follows', () => {
+    // Ini bug yang diperbaiki. Sebelum perbaikan hasilnya `ttam_follows`, dan
+    // tiga akibatnya semuanya senyap: baris Add to Cart di funnel R3 kosong
+    // permanen (berkas ini satu-satunya sumbernya di tingkat toko), belanja
+    // kampanye Showcase dilaporkan sebagai belanja Paid Follows di laporan yang
+    // DIBACA KLIEN, dan bila kedua berkas diunggah keduanya rebutan satu slot.
+    expect(detectTtam(asli(KOLOM_SHOWCASE_ASLI))).toBe('ttam_showcase');
+  });
+
+  it('berkas Followers ASLI tetap terdeteksi ttam_follows', () => {
+    // Sisi lain dari perbaikan yang sama: penyangkalan kolom Shop tidak boleh
+    // ikut membunuh berkas Follows yang sah. Berkas Followers asli membawa
+    // `Paid follows` dengan NOL kolom Shop — itu yang membuat penyangkalannya
+    // aman, dan itu yang dipaku di sini.
+    expect(detectTtam(asli(KOLOM_FOLLOWERS_ASLI))).toBe('ttam_follows');
+  });
+
+  it('tanda tangan follows dan showcase saling eksklusif — aturannya di signature, bukan di urutan daftar', () => {
+    // Dipaku langsung ke `sig`, bukan lewat `detectTtam`, supaya perbaikannya
+    // tidak bisa diam-diam berubah jadi "kebetulan urutan TTAM_ORDER benar".
+    // Kalau suatu saat seseorang menukar urutan daftar, tes ini tetap hijau —
+    // dan kalau seseorang mencabut penyangkalannya, tes ini merah walau
+    // urutannya masih benar.
+    for (const cols of [KOLOM_SHOWCASE_ASLI, KOLOM_FOLLOWERS_ASLI]) {
+      const i = colIndex(asli(cols));
+      expect(TTAM_TYPES.ttam_follows.sig(i) && TTAM_TYPES.ttam_showcase.sig(i)).toBe(false);
+    }
+  });
+
+  it('deteksi keempat tipe tidak bergantung pada urutan TTAM_ORDER', () => {
+    // TTAM_ORDER dibalik: hasilnya harus sama persis. Ini yang membedakan
+    // perbaikan yang benar dari perbaikan yang cuma menggeser gejalanya.
+    const kasus: [string[], string][] = [
+      [KOLOM_SHOWCASE_ASLI, 'ttam_showcase'],
+      [KOLOM_FOLLOWERS_ASLI, 'ttam_follows'],
+    ];
+    for (const [cols, harap] of kasus) {
+      const i = colIndex(asli(cols));
+      const cocok = [...TTAM_ORDER].reverse().filter((t) => TTAM_TYPES[t].sig(i));
+      expect(cocok).toEqual([harap]);
+    }
   });
 
   it('drops the export\'s own "Total of N results" row instead of double-counting it', () => {

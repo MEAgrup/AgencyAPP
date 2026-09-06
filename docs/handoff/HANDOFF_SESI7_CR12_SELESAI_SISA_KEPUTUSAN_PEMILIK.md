@@ -187,7 +187,7 @@ repo dan live dibandingkan sekilas. Di CDPS ada dua yang begitu
 (`harden_job_execute_surface`, `harden_secdef_execute_sweep`) plus satu apply
 ganda lama (`m6a_section_d`). Cocokkan lewat **versi**, jangan lewat nama.
 
-### 3.2 🐞 Bug lama yang ditemukan data klien asli — belum diperbaiki
+### 3.2 ✅ Bug lama yang ditemukan data klien asli — SUDAH DIPERBAIKI
 
 Verifikasi CR-12 dengan 11 berkas export **Cottonella** asli menyingkap ini:
 
@@ -206,10 +206,32 @@ Tiga akibatnya, semuanya senyap:
 3. Kalau berkas Followers dan Showcase dua-duanya diupload, keduanya rebutan
    satu slot.
 
-Perbaikannya kecil: buat tanda tangan `ttam_follows` menolak berkas ber-kolom
-Shop-funnel, atau urutkan `TTAM_ORDER` dari yang paling spesifik. **Menunggu
-ketokan pemilik** apakah masuk PR #297 atau jadi tiket sendiri — ia bukan
-bagian CR-12 maupun SCR-UI-1.
+**Diperbaiki 2026-09-06 sebagai tiket TERPISAH** (bukan di PR #297) — pemilik
+mengetok pecah, dan itu memang tepat: bug ini mengubah angka di laporan yang
+dibaca klien, jadi ia layak review sendiri alih-alih nebeng di PR yang sudah
+membawa dua tiket.
+
+Dari dua kandidat perbaikan, yang dipakai adalah **tanda tangan `ttam_follows`
+menyangkal kolom funnel Shop**, BUKAN menukar urutan `TTAM_ORDER`. Alasannya:
+dengan penyangkalan, aturannya ada DI DALAM tanda tangan (`follows` = "ada paid
+follows DAN bukan funnel Shop"), sedangkan urutan daftar adalah aturan yang
+tidak tertulis di mana pun dan bisa hilang pada suntingan berikutnya tanpa satu
+pun tes memerah. Aman karena diverifikasi ke berkas asli: ekspor **Followers**
+yang asli membawa `Paid follows` dengan **nol** kolom Shop, sedangkan ekspor
+**Showcase** membawa keduanya.
+
+**Kenapa tes lama tidak menangkapnya, dan apa yang berubah.** Fixture lama
+memakai header sintetis SATU penanda (`ttam(['Paid follows'])`) — kombinasi yang
+membuat berkas asli bermasalah tidak pernah ada di fixture mana pun. Tes baru
+memakai **daftar kolom yang disalin persis** dari kedua export Cottonella.
+Dibuktikan menggigit DUA arah: mencabut penyangkalannya ⇒ 3 tes merah; dan
+"memperbaiki" dengan hanya menukar urutan `TTAM_ORDER` ⇒ 2 tes struktural TETAP
+merah walau perilakunya sudah benar, karena keduanya dipaku langsung ke `sig`,
+bukan ke hasil `detectTtam`.
+
+Terbukti di data asli sesudah perbaikan: berkas Showcase & Followers Cottonella
+masing-masing jatuh ke slot sendiri, dan baris funnel R3 yang tadinya kosong
+permanen kini berbunyi **Add to Cart = 446**.
 
 **Lapisan tahap Shopee** (R3 butir (g)) tetap tiket terpisah, dan masih masuk
 akal dikerjakan **setelah O74 dijawab** supaya benchmark tidak disentuh dua kali.
