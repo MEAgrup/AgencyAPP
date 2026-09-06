@@ -3,7 +3,9 @@
  *
  * DoD covered (docs/backlog/RISET_AWAL_BASELINE_BACKLOG.md):
  *  - a multi-platform client yields ONE riset_awal_analisa row per ACTIVE platform;
- *  - manual (Shopee) ⇒ belum_dapat_diukur + null score; TikTok Shop ⇒ scored;
+ *  - TikTok Shop dan Shopee ⇒ ber-skor lewat mesinnya masing-masing (B2), dengan
+ *    kolom benchmark yang BERBEDA (riset_awal_benchmark vs report_benchmark_shopee);
+ *    Lazada ⇒ manual, belum_dapat_diukur + skor null;
  *  - auto-fill (RAB-05) writes B2-9/B2-9 proposals with the right `sumber`;
  *  - the server re-stamps `generated_at` (never the browser clock);
  *  - a payload whose kondisi_toko disagrees with the score is rejected (#4);
@@ -79,6 +81,34 @@ const shopTtAoa = (): unknown[][] => {
     daily('02/08/2026', 'Rp4.000.000', '40'),
   ];
 };
+// ── Shopee (B2) ─────────────────────────────────────────────────────────────
+// Satu berkas "Bisnis — Home" saja: gerbang mesin Shopee hanya mewajibkan itu
+// (keputusan pemilik 2026-09-06), dan tes ini memang harus membuktikan bahwa
+// unggahan seadanya sudah menghasilkan skor.
+const SHOPEE_HOME_HEADER = [
+  'Periode Waktu', 'Total Penjualan (IDR)', 'Total Pesanan', 'Penjualan per Pesanan', 'Produk Diklik',
+  'Total Pengunjung', 'Tingkat Konversi Pesanan', 'Pesanan Dibatalkan', 'Penjualan Dibatalkan',
+  'Pesanan Dikembalikan', 'Penjualan Dikembalikan', 'Pembeli', 'Total Pembeli Baru', 'Total Pembeli Saat Ini',
+  'Total Potensi Pembeli', 'Tingkat Pembelian Berulang',
+];
+const shopeeHomeAoa = (): unknown[][] => [
+  ['Pesanan Dibuat'],
+  SHOPEE_HOME_HEADER,
+  ['Total', 'Rp80.000.000', '800', 'Rp100.000', '4.000', '40.000', '2,00%', '40', 'Rp4.000.000', '8', 'Rp800.000', '720', '240', '480', '40', '20,00%'],
+  ['01/08/2026', 'Rp2.500.000', '25', 'Rp100.000', '120', '1.500', '1,60%', '1', 'Rp40.000', '0', 'Rp0', '20', '8', '12', '2', '10,00%'],
+];
+// Nama berkas mentah Seller Centre — lapis deteksi ke-2 (`detectModuleFromRawName`),
+// jalur yang AM benar-benar pakai: mereka mengunggah apa adanya, tanpa rename.
+const shopeeHomeFile = (): SheetFileInput => ({
+  filename: 'ezzy.shopee-shop-stats.20260801-20260831.xlsx',
+  aoa: shopeeHomeAoa(), sha256: 'c'.repeat(64), ukuranBytes: 4096, tanggalAmbil: '2026-09-01',
+});
+const SHOPEE_HIST = [
+  { key: '2026-05', label: 'Mei 2026', gmv: '70.000.000', order: '700', flag: 'normal' as const },
+  { key: '2026-06', label: 'Jun 2026', gmv: '75.000.000', order: '750', flag: 'normal' as const },
+  { key: '2026-07', label: 'Jul 2026', gmv: '80.000.000', order: '800', flag: 'normal' as const },
+];
+
 const shopTtFile = (): SheetFileInput => ({
   filename: 'toko.xlsx', aoa: shopTtAoa(), sha256: 'a'.repeat(64), ukuranBytes: 2048, tanggalAmbil: '2026-08-18',
 });
@@ -167,19 +197,37 @@ dDb('submitBaseline — per-platform baseline + auto-fill', () => {
     expect(Date.parse(row[0].ga)).toBeGreaterThanOrEqual(before);
   });
 
-  it('Shopee manual: belum_dapat_diukur, null score, isian sumber=manual', async () => {
+  it('Shopee analisa_penuh (B2): mesin jalan di server, ber-skor, kondisi_toko terhitung', async () => {
     const view = await submitBaseline(sql, owner, ITV, {
       clientPlatformId: shopeeId,
-      manual: { gmvBulan: 5_000_000, order: 120, aov: 41_666, skuTotal: 15, belanjaIklan: 500_000, roas: 3.2 },
+      analisa: { files: [shopeeHomeFile()], hist: SHOPEE_HIST, periode: 'Agustus 2026' },
     });
     const sh = view.analisa.find((a) => a.clientPlatformId === shopeeId)!;
-    expect(sh.metodeBaseline).toBe('manual');
-    expect(sh.kondisiToko).toBe('belum_dapat_diukur');
-    expect(sh.skor).toBeNull();
-    // Manual re-proposes B2-9 with sumber=manual only if not already present; here
-    // B2-9 was created as analisa first (on conflict do nothing keeps the original).
-    expect(view.analisa).toHaveLength(2); // one row per active platform
+    expect(sh.metodeBaseline).toBe('analisa_penuh');
+    expect(typeof sh.skor).toBe('number');
+    expect(sh.kondisiToko).not.toBe('belum_dapat_diukur');
+    // Provenance benchmark: kolom SHOPEE yang terisi, kolom TikTok kosong —
+    // CHECK ck_analisa_benchmark_xor menegakkannya di DB (migrasi B2).
+    expect(sh.benchmarkVersiShopee).toBe(1);
+    expect(sh.benchmarkVersi).toBeNull();
+    expect(sh.parserVersi).toBe('cdps-baseline-shopee-v1');
+    expect(view.analisa).toHaveLength(2); // satu baris per platform aktif
+
+    const row = await sql<{ schema: string; skor: number }[]>`
+      select payload->>'schema' as schema, skor from riset_awal_analisa
+       where client_platform_id = ${shopeeId}`;
+    expect(row[0].schema).toBe('cdps.baseline.shopee.v1');
+    // Skala 0–100 (kolom integer + ck_analisa_skor_range), bukan 0–10 mentah.
+    expect(Number(row[0].skor)).toBeGreaterThan(10);
+    expect(Number(row[0].skor)).toBeLessThanOrEqual(100);
+
+    // Berkas terdeteksi lewat nama mentah Seller Centre, tanpa rename manual.
+    const berkas = await sql<{ tipe: string | null }[]>`
+      select tipe_terdeteksi as tipe from riset_awal_sumber_berkas
+       where interview_id = ${ITV} and sha256 = ${'c'.repeat(64)}`;
+    expect(berkas[0]?.tipe).toBe('bisnis_home');
   });
+
 
   it('a multi-platform client has exactly one analisa row per ACTIVE platform', async () => {
     const view = await getBaseline(sql, owner, ITV);
@@ -195,11 +243,23 @@ dDb('submitBaseline — per-platform baseline + auto-fill', () => {
     const slotIds = view.platforms.map((p) => p.clientPlatformId).sort();
     expect(slotIds).toEqual([tiktokId, shopeeId].sort());
     expect(slotIds).not.toContain(inactiveId);
-    // Method is derived server-side (single source metodeForPlatform): TikTok Shop
-    // gets the 5-pillar engine, Shopee falls back to minimal manual entry.
+    // Metode diturunkan server-side (satu sumber: metodeForPlatform). Sejak B2
+    // KEDUANYA bermesin — Shopee tak lagi jatuh ke entri manual.
     expect(view.platforms.find((p) => p.clientPlatformId === tiktokId)?.metode).toBe('analisa_penuh');
-    expect(view.platforms.find((p) => p.clientPlatformId === shopeeId)?.metode).toBe('manual');
+    expect(view.platforms.find((p) => p.clientPlatformId === shopeeId)?.metode).toBe('analisa_penuh');
     expect(view.platforms.find((p) => p.clientPlatformId === tiktokId)?.storeLink).toBe('https://tt.example');
+  });
+
+  it('Shopee tanpa berkas Bisnis — Home ditolak dengan pesan BI', async () => {
+    const fresh = await sql<{ id: number }[]>`
+      insert into client_platforms (client_id, platform, active, created_by)
+      values (${CLI}, 'Shopee', true, ${OWNER_AM}) returning id`;
+    await expect(
+      submitBaseline(sql, owner, ITV, {
+        clientPlatformId: Number(fresh[0].id),
+        analisa: { files: [{ filename: 'entah.xlsx', aoa: [['a']], sha256: 'd'.repeat(64), ukuranBytes: 10 }] },
+      }),
+    ).rejects.toThrow('[tipe berkas Shopee tidak dikenali');
   });
 
   it('TikTok Shop with manualOverride: opts out of the engine, treated as manual (owner QA 2026-08-27)', async () => {
@@ -222,6 +282,23 @@ dDb('submitBaseline — per-platform baseline + auto-fill', () => {
     // The slot itself still reports the platform's real capability (RAB-04 UI) —
     // manualOverride is a per-submission choice, not a change to what TikTok Shop is.
     expect(view.platforms.find((p) => p.clientPlatformId === overrideId)?.metode).toBe('analisa_penuh');
+  });
+
+  it('Lazada manual: belum_dapat_diukur, skor null (jalur tanpa mesin masih ada)', async () => {
+    const fresh = await sql<{ id: number }[]>`
+      insert into client_platforms (client_id, platform, active, created_by)
+      values (${CLI}, 'Lazada', true, ${OWNER_AM}) returning id`;
+    const id = Number(fresh[0].id);
+    const view = await submitBaseline(sql, owner, ITV, {
+      clientPlatformId: id,
+      manual: { gmvBulan: 5_000_000, order: 120, aov: 41_666, skuTotal: 15, belanjaIklan: 500_000, roas: 3.2 },
+    });
+    const lz = view.analisa.find((a) => a.clientPlatformId === id)!;
+    expect(lz.metodeBaseline).toBe('manual');
+    expect(lz.kondisiToko).toBe('belum_dapat_diukur');
+    expect(lz.skor).toBeNull();
+    expect(lz.benchmarkVersi).toBeNull();
+    expect(lz.benchmarkVersiShopee).toBeNull();
   });
 
   it('manualOverride is ignored for a platform that is already manual (nothing to opt out of)', async () => {
@@ -283,9 +360,10 @@ dDb('confirmIsian — per-number confirmation (keputusan 1)', () => {
     expect(before.semuaTerkonfirmasi).toBe(false);
     const usulanBefore = before.isian.find((f) => f.fieldKey === 'B2-9')!.nilaiUsulan;
 
-    // Confirm EVERY auto-filled number so the submit gate clears. Besides B2-9/B2-3,
-    // the Shopee manual baseline (gmvBulan Rp5jt) proposed B1-5 = Rp15jt (× 3);
-    // target_gmv is 0 in this seed so no B6-3 was proposed.
+    // Konfirmasi SETIAP angka auto-fill supaya gerbang submit terbuka. Selain
+    // B2-9/B2-3, baseline Shopee (riwayat 3 bulan) mengusulkan B1-5 dari
+    // `runrate_3m × 3` — jadi sumbernya `analisa`, bukan `manual`, sejak B2.
+    // target_gmv 0 di seed ini, jadi B6-3 tidak diusulkan.
     const after = await confirmIsian(sql, owner, ITV, [
       { section: 'B2', fieldKey: 'B2-9', nilaiUang: '17500000', dikonfirmasi: true },
       { section: 'B2', fieldKey: 'B2-3', nilaiAngka: 40, dikonfirmasi: true },
@@ -296,7 +374,7 @@ dDb('confirmIsian — per-number confirmation (keputusan 1)', () => {
     expect(b29.nilaiUang).toBe('17500000'); // corrected
     expect(b29.nilaiUsulan).toEqual(usulanBefore); // original proposal frozen
     const b15 = after.isian.find((f) => f.fieldKey === 'B1-5')!;
-    expect(b15.sumber).toBe('manual');
+    expect(b15.sumber).toBe('analisa');
     expect(b15.nilaiUang).toBe('1500000000');
     expect(after.semuaTerkonfirmasi).toBe(true);
   });

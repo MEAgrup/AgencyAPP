@@ -659,7 +659,13 @@ export const SHOPEE_PARSERS: Record<string, (rows: Aoa) => ParsedModule> = {
   bisnis_live: genericZero,
   ads_toko: parseAdsCsv,
   ads_produk: parseAdsCsv,
-  aff_product: (rows) => parseAffCsv(rows, ['nama produk', 'produk']),
+  // `'nama item'` FIRST: Seller Centre's own AMS product export
+  // (`ProductPerformance_*.csv`) heads the name column **Nama Item**, not
+  // "Nama Produk". Without it `col()` fell through to the loose `'produk'`
+  // keyword and matched **Produk Terjual** — so every affiliate product was
+  // named after its own sold quantity ("812", "391"). Found in UAT with the
+  // owner's real July 2026 export (SHP-4).
+  aff_product: (rows) => parseAffCsv(rows, ['nama item', 'nama produk', 'produk']),
   aff_creator: (rows) => parseAffCsv(rows, ['username', 'kreator', 'creator', 'nama']),
   promo_diskon: genericZero,
   promo_voucher: parseVoucher,
