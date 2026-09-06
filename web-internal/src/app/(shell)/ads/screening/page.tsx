@@ -61,6 +61,7 @@ import CompareResultTable from '@/components/skuscreener/CompareResultTable';
 import DecisionLogPanel, { type DecisionPrefill } from '@/components/skuscreener/DecisionLogPanel';
 import ScreeningResultTable from '@/components/skuscreener/ScreeningResultTable';
 import TrackerPanel, { type TrackerPrefill } from '@/components/skuscreener/TrackerPanel';
+import AdsClientPicker from '@/components/AdsClientPicker';
 
 type Tab = 'a' | 'b' | 'c' | 'd';
 
@@ -82,7 +83,7 @@ function SkuScreenerWorkspace() {
   const { role, loading } = useAuth();
   const initialClient = useSearchParams().get('client') ?? '';
 
-  const [clientInput, setClientInput] = useState(initialClient);
+  // SCR-UI-1: satu state saja — lihat catatan yang sama di `ads/scanner`.
   const [clientId, setClientId] = useState(initialClient);
   const [tab, setTab] = useState<Tab>('a');
 
@@ -289,33 +290,15 @@ function SkuScreenerWorkspace() {
 
       <section className="card">
         <div className="row" style={{ gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div className="field" style={{ minWidth: 260 }}>
-            <label htmlFor="client">Klien</label>
-            <input
-              id="client"
-              value={clientInput}
-              placeholder="CLI-YYYYMM-NNNN"
-              onChange={(e) => setClientInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') setClientId(clientInput.trim());
-              }}
-            />
-          </div>
-          <button
-            type="button"
-            className="btn btnSecondary btnSm"
-            onClick={() => {
-              setClientId(clientInput.trim());
-              setOpenRun(null);
-            }}
-          >
-            Muat klien
-          </button>
+          <AdsClientPicker
+            value={clientId}
+            onChange={(id) => { setClientId(id); setOpenRun(null); }}
+          />
           {clientId && <span className="badge badge-blue">{clientId}</span>}
         </div>
         <span className="muted" style={{ fontSize: 12 }}>
-          ID klien ada di halaman kampanye Ads (baris &ldquo;Klien&rdquo;). Tautan
-          <code> /ads/screening?client=…</code> mengisi kolom ini otomatis.
+          Daftar berisi klien yang punya layanan Ads aktif. Tautan
+          <code> /ads/screening?client=…</code> memilihkannya otomatis.
         </span>
       </section>
 

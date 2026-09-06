@@ -55,6 +55,7 @@ import {
 import { slotLabel } from '@/lib/adsscanner-ui';
 import PortfolioTable from '@/components/adsscanner/PortfolioTable';
 import ScanResultView from '@/components/adsscanner/ScanResultView';
+import AdsClientPicker from '@/components/AdsClientPicker';
 
 type Tab = 'portfolio' | 'scan' | 'hasil';
 
@@ -79,7 +80,9 @@ function AdsScannerWorkspace() {
   const initialClient = useSearchParams().get('client') ?? '';
 
   const [tab, setTab] = useState<Tab>('portfolio');
-  const [clientInput, setClientInput] = useState(initialClient);
+  // SCR-UI-1: satu state saja. Dulu ada dua (`clientInput` yang diketik +
+  // `clientId` yang di-commit lewat tombol "Muat klien") karena mengetik ID
+  // butuh langkah konfirmasi; memilih dari daftar tidak.
   const [clientId, setClientId] = useState(initialClient);
 
   const [portfolio, setPortfolio] = useState<AdsScanPortfolioRow[]>([]);
@@ -228,7 +231,10 @@ function AdsScannerWorkspace() {
             rows={portfolio}
             onOpenRun={(id) => void showRun(id)}
             onScanClient={canRun ? (cid) => {
-              setClientInput(cid);
+              // SCR-UI-1: satu state saja sekarang. Klien di Portofolio bisa
+              // saja di luar daftar picker (layanan Ads-nya sudah selesai) —
+              // `AdsClientPicker` menampilkannya sebagai opsi bayangan supaya
+              // alur ini tidak patah tanpa pesan.
               setClientId(cid);
               setTab('scan');
             } : undefined}
@@ -239,28 +245,15 @@ function AdsScannerWorkspace() {
       {(tab === 'scan' || tab === 'hasil') && (
         <section className="card">
           <div className="row" style={{ gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div className="field" style={{ minWidth: 260 }}>
-              <label htmlFor="client">Klien</label>
-              <input
-                id="client"
-                value={clientInput}
-                placeholder="CLI-YYYYMM-NNNN"
-                onChange={(e) => setClientInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') setClientId(clientInput.trim()); }}
-              />
-            </div>
-            <button
-              type="button"
-              className="btn btnSecondary btnSm"
-              onClick={() => { setClientId(clientInput.trim()); setOpenRun(null); }}
-            >
-              Muat klien
-            </button>
+            <AdsClientPicker
+              value={clientId}
+              onChange={(id) => { setClientId(id); setOpenRun(null); }}
+            />
             {clientId && <span className="badge badge-blue">{clientId}</span>}
           </div>
           <span className="muted" style={{ fontSize: 12 }}>
-            ID klien ada di halaman kampanye Ads (baris &ldquo;Klien&rdquo;), atau pakai tombol &ldquo;scan
-            baru&rdquo; di tab Portofolio. Tautan <code>/ads/scanner?client=…</code> mengisi kolom ini otomatis.
+            Daftar berisi klien yang punya layanan Ads aktif. Tombol &ldquo;scan baru&rdquo; di tab
+            Portofolio dan tautan <code>/ads/scanner?client=…</code> memilihkannya otomatis.
           </span>
         </section>
       )}
