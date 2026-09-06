@@ -173,8 +173,19 @@ tidak punya satu pun field katalog yang menandai layanan sebagai milik Ads —
 "berlayanan Ads" disimpulkan dari jejak, dan itu sebabnya pertanyaannya harus
 diajukan ke pemilik, bukan ditebak.
 
-⚠️ **Migrasinya BELUM di-apply ke live `CDPS SG`** — pelebaran permukaan baca di
-produksi, menunggu ketokan pemilik. Ini satu-satunya sisa SCR-UI-1.
+✅ **Migrasinya SUDAH di-apply ke live `CDPS SG` (2026-09-06)** atas ketokan
+pemilik, didahului audit drift repo↔live yang hasilnya nol push terlewat.
+Sesudah apply: gerbang tetap **145/40/31/69**, `EXECUTE` hanya `authenticated` +
+`service_role`, dan di data live staff Ads melihat **2 dari 10** klien
+(Creative: 0). Detail lengkap + tiga selisih nama ledger yang jinak ada di
+`docs/DECISIONS.md` baris 2026-09-06 "SCR-UI-1 DI-APPLY KE LIVE".
+
+**Jebakan untuk pembaca berikutnya:** ledger migrasi Supabase menyimpan nama
+berkas SAAT DI-APPLY, bukan nama berkas sekarang. Jadi setiap berkas migrasi
+yang pernah di-rename di repo akan TERLIHAT seperti migrasi yang hilang kalau
+repo dan live dibandingkan sekilas. Di CDPS ada dua yang begitu
+(`harden_job_execute_surface`, `harden_secdef_execute_sweep`) plus satu apply
+ganda lama (`m6a_section_d`). Cocokkan lewat **versi**, jangan lewat nama.
 
 ### 3.2 🐞 Bug lama yang ditemukan data klien asli — belum diperbaiki
 
