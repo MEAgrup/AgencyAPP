@@ -15,7 +15,7 @@ dari aturan bisnis yang sama"*). Sesudah port, satu-satunya sumber kebenaran ada
 
 | Berkas | Asal | Diport ke | Status |
 |---|---|---|---|
-| `BASELINE_TOOL_TIKTOK_v1.html` | Pemilik, 2026-08-17 (revisi ke-2) | `packages/core/src/baseline/` (tiket **RAB-02**) | **belum diport** |
+| `BASELINE_TOOL_TIKTOK_v1.html` | Pemilik, 2026-08-17 (revisi ke-2) | `packages/core/src/baseline/` (tiket **RAB-02**) | **SUDAH diport** — engine server hidup di `packages/core/src/baseline/` (17 berkas, `cdps.baseline.tiktok.v1`), dipanggil `apps/api/.../interview/[id]/baseline`. Baris ini sempat tertinggal menyebut "belum diport" (dikoreksi 2026-09-06) |
 | `SHOPEE_REPORT_ENGINE.html` | Pemilik, 2026-09-03 — unggahan asli (bukan ketikan ulang) | `packages/core/src/report/shopee/` (Gelombang 2, tiket **SH-01..SH-06**, `docs/plan/PLAN_KONSOLIDASI_ALAT_ADVERTISER.md` §5) | **belum diport** |
 | `MEA_SKU_SCREENER_v2.html` | Pemilik, 2026-09-03 — unggahan asli, "MEA SKU Screener v2" | `packages/core/src/skuscreener/` (Gelombang 3, tiket **SC-01..SC-08**, plan §6) | **belum diport** |
 | `PRD_MEA_SKU_SCREENER_v1.0.md` | Pemilik, 2026-09-03 — ekstraksi teks dari `.docx` asli (Dev asal: Hans, 27 Jul 2026) | Spesifikasi R01–R16 untuk `packages/core/src/skuscreener/`; A01–A10 dikonfirmasi di `DECISIONS.md` (**SC-00**) | **R01–R06, R09–R12 dikonfirmasi ada di kode `MEA_SKU_SCREENER_v2.html`; R07/R08/R13–R16 TIDAK ada di HTML — lihat catatan di bawah** |

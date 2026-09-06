@@ -284,21 +284,8 @@ const DELIVERY: NavNode[] = [
       isLead(role, AI_OPTIMIZER),
   },
   ...PAPAN_DIVISI,
-  // Gelombang 3 & 4 — dua alat kerja divisi Ads. IA v3 (3 Sep) ditulis sebelum
-  // keduanya mendarat, jadi §2-nya tidak memuatnya; mereka tinggal di sini,
-  // BUKAN di grup "MEA AI Tools", karena keduanya halaman React ber-API dan
-  // ber-RLS milik divisi Ads — bukan HTML yang di-embed (DECISIONS.md
-  // 2026-09-04). Mereka juga BUKAN antrean Brief, jadi tidak memakai
-  // divisionQueue() (yang mengizinkan Account lead masuk untuk memantau
-  // dispatch): gerbangnya `canUseSkuScreener`/`canUseAdsScanner`, predikat yang
-  // SAMA yang dipakai halamannya sendiri. Satu predikat, tanpa drift.
-  //
-  // Dua baris terpisah dengan sengaja: keduanya menjawab pertanyaan berbeda di
-  // titik funnel yang berbeda (SKU mana yang layak diiklankan sama sekali vs
-  // bagaimana performa budget yang sudah dibelanjakan minggu ini), membaca
-  // export yang berbeda, dan menyimpan ke tabel yang berbeda.
-  { href: '/ads/screening', label: 'Screening SKU', access: canUseSkuScreener },
-  { href: '/ads/scanner', label: 'Ads Scanner', access: canUseAdsScanner },
+  // Dua alat kerja divisi Ads (Gelombang 3 & 4) DIPINDAH ke grup "MEA AI Tools"
+  // atas permintaan pemilik 2026-09-06 — lihat catatan di grup itu.
 ];
 
 // ---------------------------------------------------------------------------
@@ -329,6 +316,29 @@ const MEA_AI_TOOLS: NavNode[] = [
   // export Strategi, keluarkan draft/JSON siap tempel ke Section C/D/E. Sama
   // audiens & predikat dengan "AM - baseline riset" di atas.
   { href: '/tools/am-copilot', label: 'AM Co-Pilot', access: EMBEDDED_TOOLS['am-copilot'].access },
+  // Dua alat Ads, DIPINDAH ke sini dari grup Delivery atas permintaan pemilik
+  // 2026-09-06 (DECISIONS.md) — mencabut keputusan 2026-09-04 yang menahannya di
+  // Delivery "karena keduanya halaman React ber-API, bukan HTML embed". Alasan
+  // pencabutannya: pengelompokan itu memakai CARA BANGUN sebagai kriteria,
+  // sedangkan pemilik memakai CARA PAKAI — bagi penggunanya keempat baris di grup
+  // ini sama-sama "alat bantu AI MEA".
+  //
+  // Konsekuensi yang disengaja: grup ini tidak lagi berisi HANYA alat HTML
+  // ter-embed, jadi klausa "wajib /tools/*" di `nav.test.ts` dilonggarkan untuk
+  // dua href ini saja. Yang TIDAK dilonggarkan: setiap baris tetap WAJIB
+  // bergerbang (itu yang menjaga judul grup tidak bocor), dan predikatnya tetap
+  // dicocokkan SECARA REFERENSI — `canUseSkuScreener`/`canUseAdsScanner` adalah
+  // predikat yang sama yang dipakai halamannya sendiri, bukan salinan.
+  //
+  // Href TIDAK berubah (`/ads/screening`, `/ads/scanner`): tautan sudah beredar
+  // dan tes anti-regresi memakukannya. Yang berubah hanya label + grup.
+  //
+  // Dua baris terpisah dengan sengaja: keduanya menjawab pertanyaan berbeda di
+  // titik funnel yang berbeda (SKU mana yang layak diiklankan sama sekali vs
+  // bagaimana performa budget yang sudah dibelanjakan minggu ini), membaca
+  // export yang berbeda, dan menyimpan ke tabel yang berbeda.
+  { href: '/ads/screening', label: 'Shopee Screening SKU', access: canUseSkuScreener },
+  { href: '/ads/scanner', label: 'TikTok Ads Scanner', access: canUseAdsScanner },
 ];
 
 // ---------------------------------------------------------------------------

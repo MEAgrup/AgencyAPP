@@ -241,7 +241,7 @@ function SkuScreenerWorkspace() {
       <div>
         <h1>Akses ditolak</h1>
         <p style={{ margin: '6px 0 0', color: '#5A7184', maxWidth: 640 }}>
-          Screening SKU hanya untuk tim Ads (Advertiser / Lead Advertiser); Director &amp; OD dapat melihat untuk
+          Shopee Screening SKU hanya untuk tim Ads (Advertiser / Lead Advertiser); Director &amp; OD dapat melihat untuk
           oversight.
         </p>
       </div>
@@ -280,7 +280,7 @@ function SkuScreenerWorkspace() {
   return (
     <div className="stack" style={{ gap: 14 }}>
       <div>
-        <h1>Screening SKU</h1>
+        <h1>Shopee Screening SKU</h1>
         <p style={{ margin: '6px 0 0', color: '#5A7184', maxWidth: 860 }}>
           MEA SKU Screener — memilih SKU mana yang layak diiklankan, mengukur hasil perubahannya, dan menyimpan
           alasannya. Semua aturan (median toko, rute, CPC maksimum, verdict) dihitung di server; halaman ini
