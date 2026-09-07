@@ -1,9 +1,10 @@
-# Handoff — **Gelombang C dibuka**: tujuh gerbang diketok, Showcase jadi dibangun
+# Handoff — **Gelombang C dibuka**: delapan gerbang diketok, Showcase jadi dibangun
 
 > **Baca ini dulu, lalu dua berkas ini, urut:**
-> 1. `docs/DECISIONS.md` — baris **2026-09-07 "TUJUH DARI DELAPAN GERBANG C/D DIKETOK"**
->    (isi ketokannya + konsekuensi yang WAJIB ikut dibangun), dan §Open baris
->    `C-4`, `C-5`, `D-3`.
+> 1. `docs/DECISIONS.md` — **dua** baris 2026-09-07: *"TUJUH DARI DELAPAN GERBANG
+>    C/D DIKETOK"* (isi ketokannya + konsekuensi yang WAJIB ikut dibangun) dan
+>    *"D-3 DIKETOK"* (kunci tutup buku). Lalu §Open baris `C-4` dan `C-5` — dua
+>    itu saja yang masih terbuka.
 > 2. `docs/handoff/UAT_GELOMBANG_B_20260907.md` — posisi Gelombang B, dan §5-nya
 >    (apa yang UAT itu **tidak** buktikan).
 >
@@ -19,9 +20,9 @@
 |---|---|
 | **Gelombang A · B1 · B2 · B3 · B4 · B5** | ✅ di `main` (PR #300 · #301 · #302 · #303) |
 | **Uji terima §10 butir 1–7** | ✅ **lunas 2026-09-07** — dijalankan lewat rute; 1 jahitan bocor ditemukan & ditutup |
-| **Gerbang keputusan C/D** | ✅ **7 dari 8 diketok 2026-09-07** |
+| **Gerbang keputusan C/D** | ✅ **8 dari 8 diketok 2026-09-07** |
 | **Gelombang C — Showcase Klien Terbaik** | ▶️ **BOLEH DIBANGUN SEKARANG** — ini pekerjaan sesi berikutnya |
-| **Gelombang D — laporan keuangan accrual** | ⏸️ **menunggu D-3** (kunci tutup buku) + `durasi_jasa` MSL |
+| **Gelombang D — laporan keuangan accrual** | ⏸️ aturan uangnya **lengkap**; sisa penghalangnya tinggal **DATA** — `durasi_jasa` MSL terisi 0/14 |
 
 **Nol migrasi baru** sejauh ini ⇒ repo dan live (`egddxfcnrtecheiykhlf`) tetap di
 **183** dan tidak drift.
@@ -87,22 +88,20 @@ sama dengan `0` vs `null` yang seluruh Gelombang B dibangun untuk mencegah.
 |---|---|---|
 | **C-5** | Di mana status izin klien (C-3) disimpan, dan siapa yang mencentangnya? Kolom di `clients` atau tabel izin tersendiri (kalau izinnya punya masa berlaku / dokumen lampiran)? Peran mana yang berhak mencentang — AM pemilik klien, atau Director saja? | **Ya** — daftar Showcase yang aman ditampilkan ke Sales |
 | **C-4** | Ambang "klien terbaik": skor minimum berapa, dan perlu minimal N periode laporan supaya kenaikannya terbukti bukan kebetulan? | Tidak — bangun jalan terus; **ambang jadi konstanta bernama di `@cdps/core` dengan nilai sementara yang halaman SEBUTKAN di layar**, bukan angka diam-diam |
-| **D-3** | Perlukah kunci tutup buku per bulan? | **Ya** — memblokir Gelombang D |
 
-**Catatan jujur soal D-3:** pada ketokan 2026-09-07 ada satu jawaban `"ya"` yang
-urutannya jatuh di antara D-4 dan D-2. **Tidak dicatat sebagai jawaban D-3**,
-karena bisa juga partikel kalimat D-4 — dan menebak jawaban yang menentukan
-apakah angka bulan lalu boleh berubah adalah persis yang aturan rumah larang.
-**Butuh konfirmasi satu kata dari pemilik.**
+**D-3 sudah diketok** (✅ ya, ada kunci tutup buku) — awalnya sengaja tidak dicatat
+karena jawabannya menggantung di antara dua pertanyaan lain, lalu dikonfirmasi.
+Jadi yang tersisa hanya dua di atas, dan **keduanya tentang Gelombang C**.
 
 ---
 
-## 4. Keputusan D yang SUDAH diketok (simpan untuk Gelombang D)
+## 4. Keputusan D yang SUDAH diketok — aturan uangnya LENGKAP (simpan untuk Gelombang D)
 
 | Gerbang | Ketokan | Yang harus dibangun sesuai itu |
 |---|---|---|
 | **D-4** | **Bruto dulu untuk harga; Sales/Finance yang memilih kena PPN atau tidak** | Nilai disimpan **bruto**; perlakuan PPN jadi **pilihan eksplisit per transaksi**. Mesin accrual **TIDAK** menghitung PPN sendiri — ia menyimpan nilai bruto + penanda pilihan, manusia yang memilih |
 | **D-2** | **Ya, `[On Hold]` menjeda pengakuan pendapatan** | Butuh riwayat hold (tanggal mulai/selesai) yang dibaca mesin laporan; skedul bergeser dan dihitung ulang. Risiko operasional: hold harus diinput saat kejadian, bukan diingat belakangan |
+| **D-3** | **Ya, ada kunci tutup buku per bulan** | Satu peran yang berwenang **menutup** buku bulanan · sesudah tertutup angka bulan itu **tidak bisa diedit** — koreksi hanya lewat **jurnal koreksi di bulan berjalan** yang ikut masuk audit log · mesin laporan membaca bulan tertutup dari **angka yang dibekukan**, bukan menghitung ulang dari data mentah |
 | **D-1** | **(a) HANGUS** | Layanan yang di-void di tengah periode diakui hanya untuk hari yang sudah jalan; sisanya tidak pernah diakui |
 | **E9-RETENSI** | **(a)** — pilar `retensi` tetap ikut pola `sku`/`harga`, AM yang memilih | **Nol perubahan kode.** `planpillar.PILAR_PILIH_DIVISI` sudah benar apa adanya |
 
