@@ -35,9 +35,14 @@ interface Props {
    * disengaja: picker yang menyempit lalu diam-diam kosong lebih buruk daripada
    * picker lebar.
    *
-   * ⚠️ Kolomnya lahir di Fondasi F (F-4) dan PENGISIANNYA belum mendarat, jadi
-   * hari ini pemanggilnya belum meneruskan apa pun ke sini. Prop-nya sudah ada
-   * supaya penyambungannya nanti satu baris, bukan pembongkaran komponen.
+   * Diteruskan pemanggilnya dari `campaign.source_creative_brief_id`
+   * (`ads.Campaign.sourceCreativeBriefId`, lewat `private.brief_source_creative_id`
+   * — lihat B-D6/B-D9 di `docs/handoff/HANDOFF_FEEDBACK_OD_JALUR_B.md`).
+   *
+   * ⚠️ Yang BELUM mendarat adalah PENGISIAN kolomnya saat AM membuat Brief Ads
+   * (A-req-2, berkas Jalur A). Sampai itu ada, nilainya `''` untuk Brief Ads
+   * yang dibuat lewat UI, jadi yang berlaku adalah fallback di bawah — dan itu
+   * memang perilaku yang benar, bukan kegagalan.
    */
   sourceBriefId?: string;
   /** ID aset yang sedang dipilih ('' = belum ada). */
