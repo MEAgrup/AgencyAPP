@@ -910,6 +910,7 @@ export default function StrategiFormPage({ params }: { params: Promise<{ id: str
                   onKetergantungan={(rows: KetergantunganDraft[]) =>
                     patch('sectionE', { ...drafts.sectionE, ketergantungan: rows })
                   }
+                  onApplyPillars={applyCockpitPillars}
                   disabled={!editable}
                 />
               )}

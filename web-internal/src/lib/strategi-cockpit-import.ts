@@ -48,6 +48,15 @@ import type { NarasiDraft } from '@/components/strategi/SectionE';
 
 export const COCKPIT_SCHEMA = 'mea.cockpit.v1';
 
+/**
+ * B4 — provenance for rows the SERVER-side Co-Pilot proposed (`susunPilarUsulan`),
+ * as opposed to a JSON pasted from the HTML tool. Both paths write the same row
+ * shape and the same `(jenis, channel, aksi)` identity, so `mergeCockpitPillars`
+ * still updates in place across them; `detail.sumber` is what tells an auditor
+ * which path a given row actually came from.
+ */
+export const COCKPIT_SCHEMA_COPILOT = 'cdps.copilot.usulan.v1';
+
 // ---------------------------------------------------------------------------
 // Payload shape — mirrors `ST` in MEA AM Cockpit v1.html closely enough to
 // read the fields this adapter needs; everything else on the real object is

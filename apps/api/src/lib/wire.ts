@@ -4991,6 +4991,146 @@ export function strategiPrefillToWire(p: strategi.StrategiPrefill): StrategiPref
   };
 }
 
+// --- B4: AM Co-Pilot usulan Section E (GET /strategi/{id}/copilot) ---------
+
+export interface StrategiCopilotAngleWire {
+  judul: string;
+  akun: string | null;
+  gmv: number | null;
+  gpm: number | null;
+  vv: number | null;
+  tuntas: number | null;
+  ctr: number | null;
+  ringkas: string;
+}
+
+export interface StrategiCopilotAturanTerkunciWire {
+  nilai: number;
+  label: string;
+  sudah_terlampaui: boolean;
+}
+
+export interface StrategiCopilotAksiWire {
+  kode: string;
+  pilar: string;
+  divisi: string;
+  jenis: string;
+  nama: string;
+  deskripsi: string;
+  jembatan: string;
+  unit: string;
+  arah: string;
+  minggu_terlihat: number;
+  field_id_bukti: string;
+  quick_win: boolean;
+  nilai_sekarang: number | null;
+  target_hitung: number | null;
+  aturan_terkunci: StrategiCopilotAturanTerkunciWire | null;
+  alasan: string;
+  target: string;
+  angle: StrategiCopilotAngleWire[];
+  catatan: string | null;
+}
+
+export interface StrategiCopilotPilarWire {
+  urutan: number;
+  pilar: string;
+  label: string;
+  jenis: string;
+  divisi: string;
+  skor_baseline: number | null;
+  aksi: StrategiCopilotAksiWire[];
+}
+
+export interface StrategiCopilotChannelWire {
+  client_platform_id: number;
+  platform: string;
+  channel: string;
+  channel_lain: string | null;
+  metode_baseline: string;
+  payload_schema: string | null;
+  payload_terbaca: boolean;
+  periode_referensi: string | null;
+  benchmark_versi: number | null;
+  catatan: string[];
+  pilar: StrategiCopilotPilarWire[];
+}
+
+export interface StrategiCopilotUsulanWire {
+  interview_id: string;
+  channels: StrategiCopilotChannelWire[];
+}
+
+/**
+ * The Co-Pilot proposal, camelCase domain → snake_case wire. Explicit `null`
+ * everywhere, never an omitted key (O43): a page that reads `nilai_sekarang`
+ * and gets `undefined` renders "—" for a figure the server actually had.
+ */
+export function strategiCopilotUsulanToWire(
+  u: strategi.StrategiCopilotUsulan,
+): StrategiCopilotUsulanWire {
+  return {
+    interview_id: u.interviewId,
+    channels: u.channels.map((c) => ({
+      client_platform_id: c.clientPlatformId,
+      platform: c.platform,
+      channel: c.channel,
+      channel_lain: c.channelLain ?? null,
+      metode_baseline: c.metodeBaseline,
+      payload_schema: c.usulan.schema ?? null,
+      payload_terbaca: c.usulan.payloadTerbaca,
+      periode_referensi: c.usulan.periodeReferensi ?? null,
+      benchmark_versi: c.usulan.benchmarkVersi ?? null,
+      catatan: [...c.usulan.catatan],
+      pilar: c.usulan.pilar.map((p) => ({
+        urutan: p.urutan,
+        pilar: p.pilar,
+        label: p.label,
+        jenis: p.jenis,
+        divisi: p.divisi,
+        skor_baseline: p.skorBaseline ?? null,
+        aksi: p.aksi.map((a) => ({
+          kode: a.kode,
+          pilar: a.pilar,
+          divisi: a.divisi,
+          jenis: a.jenis,
+          nama: a.nama,
+          deskripsi: a.deskripsi,
+          jembatan: a.jembatan,
+          unit: a.unit,
+          arah: a.arah,
+          minggu_terlihat: a.mingguTerlihat,
+          field_id_bukti: a.fieldIdBukti,
+          quick_win: a.quickWin,
+          nilai_sekarang: a.nilaiSekarang ?? null,
+          target_hitung: a.targetHitung ?? null,
+          aturan_terkunci:
+            a.aturanTerkunci === null
+              ? null
+              : {
+                  nilai: a.aturanTerkunci.nilai,
+                  label: a.aturanTerkunci.label,
+                  sudah_terlampaui: a.aturanTerkunci.sudahTerlampaui,
+                },
+          alasan: a.alasan,
+          target: a.target,
+          angle: a.angle.map((g) => ({
+            judul: g.judul,
+            akun: g.akun ?? null,
+            gmv: g.gmv ?? null,
+            gpm: g.gpm ?? null,
+            vv: g.vv ?? null,
+            tuntas: g.tuntas ?? null,
+            ctr: g.ctr ?? null,
+            ringkas: g.ringkas,
+          })),
+          catatan: a.catatan ?? null,
+        })),
+      })),
+    })),
+  };
+}
+
 // --- Riset awal baseline → Section B channel prefill (RAB-11 / RAB-12) ------
 
 export interface StrategiBaselineMonthSuggestionWire {
@@ -5007,6 +5147,21 @@ export interface StrategiGmvMixRincianWire {
   video_toko: number | null;
   live_toko: number | null;
   kartu_produk_dan_lain: number | null;
+}
+
+/** B-3.3 — one top-SKU row the baseline payload carries (no unit/harga/margin:
+ *  no export has them, so those three stay manual). */
+export interface StrategiTopSkuSuggestionWire {
+  nama: string;
+  gmv: string | null;
+  klik: number | null;
+  ctor_persen: number | null;
+}
+
+/** B-6.4 — one top-creator row the baseline payload carries. */
+export interface StrategiTopKreatorSuggestionWire {
+  nama: string;
+  gmv: string | null;
 }
 
 export interface StrategiChannelBaselineSuggestionWire {
@@ -5028,6 +5183,40 @@ export interface StrategiChannelBaselineSuggestionWire {
   aov: string | null;
   baseline_bulan: StrategiBaselineMonthSuggestionWire[];
   gmv_mix: StrategiGmvMixRincianWire | null;
+  // B3 — §4.4. `null` = the payload has no source for it ⇒ still manual, still
+  // gates submit. Emitted as an EXPLICIT null, never omitted (O43).
+  payload_schema: string | null;
+  payload_terbaca: boolean;
+  periode_referensi: string | null;
+  refund_rate_persen: number | null;
+  chat_response_rate_persen: number | null;
+  chat_response_menit: number | null;
+  poin_penalti: number | null;
+  pengunjung_per_bulan: number | null;
+  conversion_rate_persen: number | null;
+  trafik_organik_persen: number | null;
+  trafik_iklan_persen: number | null;
+  trafik_affiliate_persen: number | null;
+  trafik_live_persen: number | null;
+  trafik_video_persen: number | null;
+  trafik_luar_persen: number | null;
+  sku_listed: number | null;
+  sku_aktif: number | null;
+  sku_pareto_80: number | null;
+  sku_slow_moving: number | null;
+  top_sku: StrategiTopSkuSuggestionWire[];
+  jumlah_kampanye_aktif: number | null;
+  tipe_kampanye: string[];
+  affiliate_aktif_30hari: number | null;
+  gmv_affiliate: string | null;
+  gmv_affiliate_persen: number | null;
+  top_kreator: StrategiTopKreatorSuggestionWire[];
+  sampel_terkirim: number | null;
+  jumlah_video_per_bulan: number | null;
+  total_views: number | null;
+  gmv_video: string | null;
+  jam_live_per_bulan: number | null;
+  gmv_live: string | null;
 }
 
 export interface StrategiBaselinePrefillWire {
@@ -5074,6 +5263,43 @@ export function strategiBaselinePrefillToWire(
               live_toko: c.gmvMix.liveToko ?? null,
               kartu_produk_dan_lain: c.gmvMix.kartuProdukDanLain ?? null,
             },
+      payload_schema: c.payloadSchema ?? null,
+      payload_terbaca: c.payloadTerbaca,
+      periode_referensi: c.periodeReferensi ?? null,
+      refund_rate_persen: c.refundRatePersen ?? null,
+      chat_response_rate_persen: c.chatResponseRatePersen ?? null,
+      chat_response_menit: c.chatResponseMenit ?? null,
+      poin_penalti: c.poinPenalti ?? null,
+      pengunjung_per_bulan: c.pengunjungPerBulan ?? null,
+      conversion_rate_persen: c.conversionRatePersen ?? null,
+      trafik_organik_persen: c.trafikOrganikPersen ?? null,
+      trafik_iklan_persen: c.trafikIklanPersen ?? null,
+      trafik_affiliate_persen: c.trafikAffiliatePersen ?? null,
+      trafik_live_persen: c.trafikLivePersen ?? null,
+      trafik_video_persen: c.trafikVideoPersen ?? null,
+      trafik_luar_persen: c.trafikLuarPersen ?? null,
+      sku_listed: c.skuListed ?? null,
+      sku_aktif: c.skuAktif ?? null,
+      sku_pareto_80: c.skuPareto80 ?? null,
+      sku_slow_moving: c.skuSlowMoving ?? null,
+      top_sku: c.topSku.map((t) => ({
+        nama: t.nama,
+        gmv: t.gmv ?? null,
+        klik: t.klik ?? null,
+        ctor_persen: t.ctorPersen ?? null,
+      })),
+      jumlah_kampanye_aktif: c.jumlahKampanyeAktif ?? null,
+      tipe_kampanye: [...c.tipeKampanye],
+      affiliate_aktif_30hari: c.affiliateAktif30Hari ?? null,
+      gmv_affiliate: c.gmvAffiliate ?? null,
+      gmv_affiliate_persen: c.gmvAffiliatePersen ?? null,
+      top_kreator: c.topKreator.map((k) => ({ nama: k.nama, gmv: k.gmv ?? null })),
+      sampel_terkirim: c.sampelTerkirim ?? null,
+      jumlah_video_per_bulan: c.jumlahVideoPerBulan ?? null,
+      total_views: c.totalViews ?? null,
+      gmv_video: c.gmvVideo ?? null,
+      jam_live_per_bulan: c.jamLivePerBulan ?? null,
+      gmv_live: c.gmvLive ?? null,
     })),
   };
 }
