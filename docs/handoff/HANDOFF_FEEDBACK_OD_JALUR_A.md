@@ -105,6 +105,11 @@ nomor; keduanya benar di pohonnya masing-masing.
 | A-T7 | **Tidak ada gerbang pengajuan ganda.** Tombol "Ajukan ke Finance" yang ditekan dua kali (atau dua orang KOL di dua tab) akan menaruh DUA baris untuk pembayaran yang SAMA di antrean Finance. Ini cacat yang HAMPIR gw ciptakan sendiri lewat A-2, bukan cacat lama. | Ditutup di A-2: `MSG_CPA_SUDAH_BERJALAN` (409), diperiksa DI DALAM transaksi insert-nya. Yang `[Ditolak]` sengaja TIDAK menghalangi — penolakan sering karena rekening salah, dan memblokir perbaikannya akan mematikan pembayaran creator. |
 | A-T4 | **`admin.test.ts` "hari libur" tidak tahan dijalankan dua kali** atas DB yang sama: ia meng-assert `count(*) = 1` atas `audit_log` tanpa aktor unik, jadi jalan kedua melihat 7. `audit_log` menolak DELETE, jadi `afterEach` tidak bisa membersihkannya. Bukan bug produksi, dan **bukan** disebabkan A-5 — dibuktikan dengan `db-rebuild` lalu jalan ulang: 1991 lulus. Tapi ia memakan satu siklus dan akan memakan siklus Jalur B juga. Perbaikannya sudah ada polanya di repo: `aktorUnik()` (`showcase.test.ts`). | Belum diperbaiki — **di luar cakupan feedback OD**, dicatat supaya tidak dikira regresi. Kalau muncul: `db-rebuild` dulu, baru cari bug. |
 | A-T3 | **Service tidak punya jalur untuk SELESAI.** `[In Execution] → Done` ada di `sm_edges` tapi nol pemanggil di seluruh domain. | Dicatat O75 di F-6. **Butuh ketokan pemilik.** Di luar cakupan feedback. |
+| A-T8 | **K-2 dan Q3 saling menimpa soal qty, dan bacaan harfiah K-2 memendekkan kontrak.** K-2 menyebut sumber durasi `MAX(master_service_versions.durasi_bulan)`. Ketokan **Q3** (hari yang sama, pemilik yang sama) menyatakan `qty_menambah = 'durasi'` berarti **durasi total = qty × durasi_bulan** — contohnya sendiri "GMV Max beli 3 = 3 bulan". Dibaca harfiah, klien yang membeli 6 bulan GMV Max mendapat kontrak **1 bulan**, dan M6B melahirkan 1 periode Plan untuk kerja sama 6 bulan. A-4 karena itu memakai **MAX atas durasi EFEKTIF per baris** (qty dikalikan hanya untuk `qty_menambah = 'durasi'`). | ⚠️ **Butuh ketokan pemilik.** Kembali ke bacaan harfiah = **menghapus satu perkalian** di `sales.deriveDurasiBulan`, nol perubahan lain. Tesnya sudah memisahkan kedua kasus (`volume` tidak dikalikan, `durasi` dikalikan), jadi ketokan mana pun tinggal dipilih. |
+| A-T9 | **`durasi_bulan` NULL = "sekali jadi" (Q4), jadi ada closing yang SAH tanpa jendela kontrak.** Basket yang seluruh layanannya sekali-jadi tidak mencetak baris `contracts` sama sekali — bukan kontrak 1 bulan karangan. `ClosingResult.contractId` karena itu nullable. Override Sales tetap bisa memberinya jendela kalau memang ada retainer yang disepakati terpisah. | Ditutup di A-4, dikunci tes. Tidak butuh ketokan; dicatat supaya tidak dikira bug saat ada klien tanpa `CTR-`. |
+| A-T10 | **Turunan durasi bisa melebihi batas kontrak CDPS.** `ck_contracts_durasi` = 1..36; sebuah layanan `qty_menambah='durasi'` yang dibeli 40 unit menghasilkan 40. A-4 **membatasi ke 36 dan MENGATAKANNYA** (di `contracts.catatan` DAN baris audit) alih-alih menggagalkan closing — kehilangan deal yang sudah ditandatangani karena keanehan katalog adalah kerugian yang lebih besar daripada jendela yang terpotong dan tercatat. | Ditutup di A-4, dikunci tes. Kalau pemilik ingin closing GAGAL di kasus itu, ubah `Math.min` jadi lemparan — satu baris. |
+| A-T11 | **`count(*)` atas unit kerja Brief SALAH di bawah RLS, dan salahnya tidak terlihat.** Policy hidup: `assets_select` hanya membuka ke PIC/pembuat aset + LEAD divisi pemilik Brief; `creator_bookings_select` **tidak punya lengan divisi sama sekali**. Jadi lead KOL membaca "0 dari 8" atas Brief divisinya sendiri, dan lead Account membaca "0 dari 12" — angka yang terlihat benar, tidak seperti layar kosong yang terlihat rusak. | Ditutup di A-req-3 lewat `private.brief_created_count` (O52 opsi (b), migrasi `20260922100500`), nol policy dilebarkan. Dikunci tes RLS yang meng-assert PREMIS-nya lebih dulu, jadi ia gugur kalau policy dilebarkan alih-alih lulus karena alasan yang salah. |
+| A-T12 | **Sisa keluarga cacat yang sama, DI LUAR cakupan:** `creator_bookings_select` yang tanpa lengan divisi itu bukan hanya soal berhitung — AM pemilik klien dan lead KOL sama-sama tidak bisa MEMBUKA Booking-nya (404). Ini persisnya temuan pre-existing #2 Jalur B, dan bentuk perbaikannya sama dengan B-D4. | **Tidak ditambal**, di luar cakupan feedback OD. Dicatat supaya tidak hilang bersama tiket ini. |
 
 ## ⚠️ Utang UAT mata manusia
 
@@ -163,7 +168,31 @@ baru saja ditindak Finance akan **kosong di tempat**.
 
 ## Permintaan ke Jalur B (berkas milik B — JANGAN diedit dari sini)
 
-_(belum ada)_
+### Nol permintaan. Tiga pintu yang diminta Jalur B sudah TERBUKA.
+
+`A-req-1` · `A-req-2` · `A-req-3` selesai, dan ketiganya aditif — nol perubahan
+yang dibutuhkan di berkas Jalur B untuk membuatnya bekerja. Bentuk yang sudah
+tersedia, apa adanya:
+
+| Jalur B butuh | Bentuknya sekarang |
+|---|---|
+| B-3 — jendela + budget sebagai kolom sungguhan | `BriefInput.tanggalMulai` / `.tanggalAkhir` / `.budget` (string desimal mentah). Wire: `tanggal_mulai` · `tanggal_akhir` · `budget` · **`budget_display`** (sudah berformat `Rp. X.XXX.XXX,00`, aturan #7 — jangan format ulang). Cabang (c) `kol_reminder_tick` yang sudah MEMBACA `briefs.tanggal_akhir` langsung hidup begitu ada yang mengisinya. |
+| B-5 — pengisian `source_creative_brief_id` | `BriefInput.sourceCreativeBriefId`, diisi AM lewat picker di form Brief (muncul hanya saat divisi tujuan = Ads). Filter K-3 di `ads.Campaign.sourceCreativeBriefId` hidup tanpa perubahan di Jalur B. |
+| B-1a — pembilang "n dari N" di ANTREAN | `BriefWire.created_count` (dan `account.Brief.createdCount`). Penyebutnya `quantity_target` yang sudah ada. **Jangan** ganti dengan `count(*)` sendiri — lihat A-T11. |
+
+Tiga hal yang perlu Jalur B tahu supaya tidak bertabrakan:
+
+1. **`brief-inherit.ts` TIDAK disentuh** (berkas Jalur B, §2). `BriefInput`-nya
+   sekarang menerima ketiga field; yang memindahkan budget keluar dari teks
+   `instructions` (`brief-inherit.ts:181`) adalah Jalur B.
+2. **`briefToWire` bertambah 5 kunci** (`tanggal_mulai`, `tanggal_akhir`,
+   `budget`, `budget_display`, `created_count`, `source_creative_brief_id`).
+   Semuanya nol omitempty. Keempat tipe `Brief` FE milik Jalur B perlu ikut
+   mendeklarasikannya kalau halamannya mau membacanya — `web-internal/src/lib/account.ts`
+   sudah, sisanya milik Jalur B.
+3. **`account.listClientBriefs` + `GET /clients/{id}/briefs?division=` baru.**
+   Client-scoped daftar Brief, dipakai picker A-req-2. Kalau Jalur B butuh
+   daftar Brief per klien, pakai ini — jangan bikin rute kedua.
 
 ## Sisa pekerjaan Jalur A
 
@@ -171,9 +200,48 @@ _(belum ada)_
 |---|---|---|
 | A-1 | Nama klien di antrean approval Finance (render) | ✅ **SELESAI** — ⚠️ **utang UAT mata manusia**, lihat di bawah |
 | A-2 | Request pembayaran creator sampai ke Finance (+ migrasi RLS `…T10####`) | ✅ **SELESAI** — dua penyimpangan dari rencana, dicatat di bawah |
-| A-3 | Status CRO mentok `[Awaiting Onboarding]` — jahitan STRG- → gerbang Brief | belum |
-| A-4 | Durasi kerja sama pindah dari CRO ke closing Sales (K-2) | belum |
+| A-3 | Status CRO mentok `[Awaiting Onboarding]` — jahitan STRG- → gerbang Brief | ✅ **SELESAI** (`9e44f3e`) — lihat §"A-3 selesai" |
+| A-4 | Durasi kerja sama pindah dari CRO ke closing Sales (K-2) | ✅ **SELESAI** (`0c8a9a0`) — ⚠️ satu tafsir butuh ketokan, A-T8 |
 | A-5 | AM berhenti memilih nama staff Creative (K-1 sisi AM) — **memblokir B-4** | ✅ **SELESAI** — lihat di bawah |
+| A-req-1 | `BriefInput` + `Brief` membawa `tanggalMulai`/`tanggalAkhir`/`budget` (mengunci sisa B-3) | ✅ **SELESAI** (`897de64`) |
+| A-req-2 | `createBrief` mengisi `source_creative_brief_id` + picker-nya (mengunci sisa B-5) | ✅ **SELESAI** (`b586fb3`) |
+| A-req-3 | `created_count` pada baris antrean divisi (mengunci sisa B-1a) | ✅ **SELESAI** (`897de64`) |
+
+**Jalur A TUTUP.** Yang tersisa dari rencana induk: penggabungan Jalur B (PR
+#312) lalu Wave 3 Store Operation, plus utang UAT mata manusia di bawah.
+
+### A-3 selesai — jahitannya ada TIGA bagian, bukan dua
+
+Yang penting untuk pembaca berikutnya, karena dua bagian pertama saja tidak
+memperbaiki apa pun:
+
+1. `strategi.approveStrategi` mendorong Service `[Awaiting Onboarding]` →
+   `[Strategy Approved]` di transaksi yang sama, lewat
+   `account.advanceServicesToStrategyApproved`. **Lewat `contract_id`**, bukan
+   satu Service: O57 memindahkan Strategi ke perjanjian, dan satu kontrak bisa
+   menaungi beberapa layanan yang dibeli. Idempoten per baris ⇒ menyetujui
+   revisi (Rule 13) atas Service yang sudah `[Briefed]` adalah no-op, bukan edge
+   tak sah yang menggulung balik seluruh persetujuan.
+2. `account.guardBriefCreation` menerima STRG- `Aktif` sebagai **dinding kedua**
+   (`account.hasActiveStrategi`), untuk baris yang statusnya gagal bergerak.
+3. **`resolveBriefStrategy` — bagian yang hampir terlewat.** Membuka gerbang di
+   (2) saja hanya MEMINDAHKAN penolakan tiga baris ke bawah: Service plan-gated
+   di jalur M6A punya NOL baris `strategy_plans`, jadi fungsi itu melempar
+   `MSG_STRATEGY_REQUIRED` yang persis sama. Brief di jalur ini lahir tanpa
+   `strategy_id` MAUPUN `plan_row_id` — bentuk yang sudah dipakai Brief Direct.
+
+Backfill baris lama: `20260922100400`, lewat `sm_transition` beraktor `SISTEM`
+(bukan `UPDATE` mentah — aturan rumah #2/#3; setiap metrik durasi diturunkan
+dari stempel waktu baris audit itu). Tanpa backfill, perbaikan ini nol dampak
+untuk klien yang sudah berjalan: sebuah Strategi `Aktif` tidak bisa kembali ke
+`Diajukan`, jadi tidak ada "setujui ulang".
+
+**Tes jahitannya** (§6 rencana meminta ini eksplisit): `strategi.test.ts` blok
+`A-3` — approve STRG- → `createBrief` → bukan 409, satu tes yang memanggil KEDUA
+sisi sungguhan. Dibuktikan tidak vacuous: dengan lengan STRG- di
+`resolveBriefStrategy` dimatikan, tepat **3 tes jahitan merah, 5 tes batas tetap
+hijau** — termasuk tes (1) yang tetap HIJAU, yang justru buktinya bahwa
+memindahkan status Service saja tidak cukup.
 
 ### A-5 SUDAH MENDARAT — Jalur B boleh mulai B-4
 
@@ -198,3 +266,136 @@ tahu supaya sisi leader-nya nyambung, bukan bertumbukan:
 - **Brief kini sah lahir tanpa PIC** (`assignedPic === ''`), dan itu keadaan
   normal sekarang — bukan data yang kurang. Kalau layar Jalur B menampilkan PIC,
   render `—`, jangan `undefined` dan jangan anggap error.
+
+---
+
+## Konfirmasi ke Jalur B — `briefs_select` TIDAK ditambal dua kali
+
+Jalur B menambal `briefs_select` (arm staff divisi pelaksana) sendiri di migrasi
+`20260922200400`, PR #312. **Diperiksa terhadap rencana A-3/A-4: nol tabrakan.**
+
+- A-3 tidak menyentuh satu pun policy. Ia menyentuh `sm_edges` (tidak, bahkan
+  itu tidak — edge `service: [Awaiting Onboarding] → [Strategy Approved]` sudah
+  ada sejak `20260723055732`), dua fungsi domain, dan satu backfill lewat
+  `sm_transition`.
+- A-4 tidak menyentuh satu pun policy.
+- Migrasi Jalur A di sesi ini: `20260922100400` (backfill A-3, nol DDL) dan
+  `20260922100500` (satu fungsi `private.*`, A-req-3). **Nol `CREATE POLICY`,
+  nol `ALTER POLICY`, di kedua berkas.**
+- Stempel `…T10####` dipatuhi; `…T20####` milik Jalur B tidak disentuh.
+
+Konsekuensi arm itu yang RELEVAN bagi Jalur A, dicatat supaya tidak hilang: satu
+tes RLS A-req-3 yang seharusnya paling langsung — "staff divisi membaca 3 dari
+12" — **tidak bisa ditulis di branch ini**, karena tanpa arm Jalur B staff
+Creative tidak bisa membaca baris Brief-nya sama sekali. Tesnya karena itu
+ditulis dari dua kursi lain yang sama-sama salah hitung tanpa
+`private.brief_created_count` (lead KOL dan lead Account). **Sesudah PR #312
+mendarat, tambahkan kursi staff-divisi ke `reads_rls.test.ts`** — satu `it`,
+polanya sudah ada persis di sebelahnya.
+
+## Angka verifikasi §6 — apa adanya, sesudah `npm install`
+
+Dijalankan di atas `db-rebuild` bersih (jebakan A-T4: `audit_log` menolak
+DELETE, jadi menjalankan suite domain berkali-kali atas DB yang sama membuat tes
+berhitung-baris merah — rebuild dulu, baru simpulkan).
+
+```
+db-rebuild.sh   195 migrasi
+  gate: 146 tabel · 40 entity_prefix · 31 sm_machines · 73 notif_events
+        + notif_katalog_sesuai
+  invariant: ident_checks · immutability_checks · rls_checks · auth_claims_checks
+  → NOL counter digeser Jalur A. Dua migrasi sesi ini nol tabel/prefix/mesin/event.
+```
+
+| Suite | Acuan §6 | Sesudah A-3/A-4/A-req-1/2/3 |
+|---|---|---|
+| `packages/domain` (sendirian, pasca-rebuild) | 1994 (+1 skip) | **2031** (+1 skip) |
+| `packages/core` | 936 | **936** |
+| `packages/db` | 53 | **53** |
+| `apps/api` | 492 | **492** |
+| `web-internal` | 650 | **655** |
+| `web-client-portal` | 19 | **19** |
+
+`npm run typecheck --workspaces` sesudah `npm install`: empat workspace bersih.
+`cd web-internal && rm -rf .next && npx tsc --noEmit && npm run build`: bersih,
+seluruh halaman ter-compile. `npm run lint` (di `web-internal`): **1 error
+PRE-EXISTING** — `react-hooks/static-components` di `admin/employees/page.tsx`,
+sama persis dengan acuan §6, tidak disentuh sesi ini.
+
+Naik atau sama di setiap kolom, tidak pernah turun. `apps/api` tetap 492 karena
+tambahan sesi ini di sana adalah field pada tes wire yang SUDAH ada, bukan `it`
+baru — sengaja: satu `it` per field wire akan membuat berkas itu tumbuh tanpa
+menambah satu pun asersi yang tidak sudah dicakup `toEqual` penuhnya.
+
+### Dibuktikan tidak vacuous (dua kali, keduanya diukur)
+
+| Yang dimatikan | Yang merah | Yang tetap hijau |
+|---|---|---|
+| lengan STRG- di `resolveBriefStrategy` (A-3) | **3** tes jahitan | **5** tes batas, termasuk "Service pindah ke `[Strategy Approved]`" — buktinya memindahkan status saja tidak memperbaiki apa pun |
+| `private.brief_created_count` → `count(*)` biasa (A-req-3) | **2** tes RLS (0 bukan 2; 0 bukan 3) | seluruh suite domain lainnya — persis sebabnya cacat ini tidak bisa ditangkap tes domain biasa (koneksinya BYPASSRLS) |
+
+## ⚠️ Utang UAT mata manusia — BERTAMBAH, belum dibayar
+
+Utang A-1 (dan A-2) dari sesi sebelumnya **belum dibayar**, dan sesi ini
+menambah empat layar. Alasannya tidak berubah: repo ini tidak punya harness
+peramban (nol Playwright di `scripts/` dan `package.json`), dan Chromium memang
+sudah ada di container (`/opt/pw-browsers/chromium`) tapi yang kurang adalah
+harness + jalur login — itu pekerjaan tersendiri, bukan sisipan di dalam sesi
+build. Yang SUDAH dibuktikan untuk keempat layar baru: `tsc` bersih,
+`next build` sukses, dan rantai datanya utuh dari kueri sampai kunci wire
+(ada tes per mata rantai). Yang BELUM: ada mata yang melihatnya.
+
+| Yang perlu dilihat | Halaman | Penguji yang tepat |
+|---|---|---|
+| _(utang lama, A-1/A-2)_ nama toko baris pertama + `CLI-…` baris kedua; panel "Permintaan ke Finance" 8 kolom | `/finance`, `/finance/transactions/{id}`, `/persetujuan`, `/kol/payment-requests/{id}` | Finance, KOL |
+| _(utang lama, A-5)_ catatan pengganti field PIC — terbaca sebagai penjelasan, bukan error | `/account/services/{id}` | AM/CRO |
+| **BARU (A-4)** dua field "Durasi Kerja Sama (bulan)" + "Alasan Override" di form closing — alasannya `disabled` sampai durasi diisi, dan labelnya tidak memotong | `/sales/{id}` | Sales |
+| **BARU (A-4)** tiga field jendela kontrak di form Strategi tampil **terkunci** dengan kalimat "diambil dari kontrak CTR-… yang dibuat Sales saat closing" — terbaca sebagai penjelasan, bukan form rusak | `/account/services/{id}` | AM/CRO |
+| **BARU (A-req-2)** picker "Brief Creative sumber (opsional)" MUNCUL saat divisi tujuan diubah ke Ads dan HILANG saat diubah kembali | `/account/services/{id}` | AM |
+| **BARU (A-3)** langkah onboarding untuk Service ber-STRG-: tidak lagi menawarkan "Buat Strategy & Plan" untuk Strategi yang sudah `Aktif` | `/account`, `/account/services/{id}` | AM/CRO — **ini keluhan Account #5 sendiri**, jadi penguji paling tepatnya yang menulis keluhannya |
+
+## ⛔ Supabase live — masih NOL, dan daftarnya bertambah dua
+
+Aturan emas §0 #4 tidak berubah: hanya langkah penggabungan yang push ke live,
+**per berkas** lewat `apply_migration`, dalam urutan nama. **Nol
+`supabase db push`, nol migrasi di-apply ke live dari sesi ini.**
+
+Daftar migrasi Jalur A yang menunggu, dalam urutan apply:
+
+| Urutan | Berkas | Isi | Menghapus sesuatu? |
+|---|---|---|---|
+| 1 | `20260922100000_f2_private_brief_client_dan_pic.sql` | 4 fungsi `private.*` | tidak — aditif |
+| 2 | `20260922100100_f3_notif_feedback_od.sql` | katalog v15 | tidak — aditif |
+| 3 | `20260922100200_f4_briefs_jendela_budget_sumber.sql` | 4 kolom `briefs` + 3 CHECK + FK + indeks | tidak — aditif, semua nullable |
+| 4 | `20260922100300_a2_rls_cpr_lengan_finance.sql` | lengan Finance pada `creator_payment_requests_select` | tidak — policy dilebarkan |
+| 5 | **`20260922100400_a3_backfill_service_strategy_approved.sql`** | backfill status Service lewat `sm_transition` | tidak — nol DDL. **Menulis baris `audit_log`**, jadi ia TIDAK idempoten dalam arti "tidak meninggalkan jejak": jalan kedua menemukan nol kandidat dan tidak menulis apa pun, tapi jalan pertama memang mencatat satu baris per Service. Itu yang diinginkan. |
+| 6 | **`20260922100500_areq3_private_brief_created_count.sql`** | 1 fungsi `private.*` | tidak — aditif |
+
+Verifikasi sesudah apply untuk dua yang baru (jangan percaya `success: true`):
+
+```sql
+-- 5. backfill A-3: nol Service tertinggal
+select count(*) from services sv
+  join strategi s on s.contract_id = sv.contract_id
+ where sv.status = '[Awaiting Onboarding]' and s.status = 'Aktif';
+-- harus 0
+
+-- ...dan yang digerakkan meninggalkan jejaknya
+select count(*) from audit_log
+ where entity_type = 'service'
+   and action = 'transition:[Awaiting Onboarding]->[Strategy Approved]'
+   and actor_employee_id = 'SISTEM';
+-- sama dengan jumlah baris yang dilaporkan RAISE NOTICE saat apply
+
+-- 6. fungsi A-req-3 ada dan hanya bisa dipanggil authenticated/service_role
+select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'private' and proname = 'brief_created_count';
+-- 1 baris
+select has_function_privilege('anon', 'private.brief_created_count(text)', 'execute');
+-- harus false
+
+-- gerbang tabel TIDAK boleh berubah
+select count(*) from information_schema.tables
+ where table_schema = 'public' and table_type = 'BASE TABLE';
+-- harus 146
+```
