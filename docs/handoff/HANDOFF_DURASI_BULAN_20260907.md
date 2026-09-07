@@ -132,7 +132,7 @@ katalog → baru isi data.**
 | domain | 1977 (+1 skip) | **1988** (+11) |
 | web-internal | 640 | **650** (+10) |
 | web-client-portal | 19 | 19 |
-| migrasi `db-rebuild` | 185 | **187** |
+| migrasi `db-rebuild` | 185 | **188** |
 
 `npm run typecheck --workspaces` bersih di empat workspace (**sesudah**
 `npm install` — jebakan lama masih berlaku). `web-internal`: `tsc --noEmit`
@@ -158,6 +158,52 @@ Lint: 1 error **pre-existing** (`react-hooks/static-components` di
    gerbangnya. Yang dilakukan: panggilan tulisnya dipindah ke
    `saveMasterService()` di `lib/msl.ts`, mengikuti pola yang gerbang itu
    sendiri sebutkan. Dibuktikan masih hidup lewat mutasi.
+
+---
+
+## 6b. Keadaan LIVE — diterapkan dan diverifikasi
+
+Ketiga migrasi sudah di-apply ke `CDPS SG` **sesudah** PR #306 di-merge dan
+ketiga deploy Vercel produksi READY di commit merge. Diverifikasi lewat kueri
+katalog, bukan dari `success: true`:
+
+| | Hasil |
+|---|---|
+| kolom `durasi_jasa` | **hilang** |
+| `durasi_bulan` · `qty_menambah` | ada, **3 CHECK** terpasang |
+| nilai lama 30 hari | terkonversi ⇒ **1 bulan** |
+| tabel `public` | **146** (tetap) |
+| layanan aktif | **80** |
+| punya durasi | **42** (7×6 bln · 1×3 · 1×12 · 33×1) |
+| sekali jadi (NULL) | **38** |
+| `qty_menambah='durasi'` | **38** · `volume` **42** |
+| pelanggaran CHECK | **0** |
+| `unit` masih angka | **0** |
+
+Contoh terverifikasi: `GMV MAX MEA PRO` → 6 bulan, `unit=paket`, qty=durasi ·
+`Nano KOL` → NULL, volume · `Jasa Pengajuan Shopee Mall` → NULL, `unit=paket`.
+
+**Migrasi 188 lahir dari verifikasi, bukan dari membaca ulang migrasinya.**
+Sesudah 187 diterapkan, kueri melaporkan 16 layanan aktif masih ber-`unit`
+numerik — 187 hanya membersihkan grup A dan E, sementara grup B (9 ber-JAM) dan
+D (7 sekali jadi) juga ber-`unit`='1'. 188 memakai aturan *"unit yang isinya
+MURNI angka"*, bukan daftar nama; daftar nama persis cara 187 melewatkannya.
+
+### 🟠 Satu cacat yang diakui dan permanen
+
+Baris audit `koreksi_unit_sisa_angka` mencatat **44** layanan padahal hanya
+**16** yang benar-benar berubah. `INSERT` audit di 188 menyaring
+`WHERE active AND unit = 'paket'`, dan itu dievaluasi **SESUDAH** `UPDATE`-nya,
+jadi ikut mencocoki 28 layanan grup A/E yang `unit`-nya sudah `'paket'` sejak
+187. Data katalognya **benar**; yang keliru hanya narasi auditnya.
+
+Tidak diperbaiki dengan menghapus baris (`audit_log` menolak DELETE) maupun
+dengan menyunting 188 (sudah berjalan di live). **Cara membaca angkanya:** 44
+adalah jumlah layanan yang SEKARANG ber-`unit='paket'`; yang diubah 188 ada 16.
+
+**Pelajarannya:** filter `INSERT ... SELECT` audit yang membaca kolom yang baru
+saja di-`UPDATE` mencatat keadaan SESUDAH, bukan yang berubah. Filternya harus
+memakai daftar id dari `UPDATE ... RETURNING`, bukan predikat atas nilai barunya.
 
 ---
 
