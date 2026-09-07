@@ -15,12 +15,15 @@ branch — sesi Jalur A ditugaskan ke branch bernama lain daripada yang ditulis 
 rencana (`claude/cdps-user-feedback-account-a-igix3n`), dan SHA-nya yang mengikat.
 
 ```
-Commit fondasi F : b240f47d  (di branch claude/cdps-user-feedback-account-a-igix3n)
+Commit fondasi F : b240f47d  ← F-1..F-8 SELESAI; SUDAH di `main` lewat PR #310
 Branch Jalur B   : claude/cdps-user-feedback-70vbho-b
-Rebase           : dilakukan 2026-09-07 — B-3/B-4/B-5 pra-F dikerjakan lebih
-                   dulu dari origin/main @ b8a76246 (§0 rencana mengizinkannya),
-                   lalu di-rebase ke b240f47d. Hanya berkas ini yang konflik;
-                   wire.ts auto-merge (lihat "Catatan berkas bersama").
+Rebase           : DUA KALI. (1) B-3/B-4/B-5 pra-F dikerjakan lebih dulu dari
+                   origin/main @ b8a76246 (§0 rencana mengizinkannya), lalu
+                   di-rebase ke b240f47d. (2) Sesudah Jalur A merge PR #310
+                   (F + A-1 + A-2 + A-5) dan #311, di-rebase lagi ke
+                   origin/main @ e8cee053 — urutan §4 rencana ("A merge lebih
+                   dulu, B rebase sesudahnya"). Yang konflik hanya berkas ini
+                   (A mencatat SHA F di dalamnya); wire.ts auto-merge dua-duanya.
 ```
 
 ## Yang sudah disiapkan F untukmu
@@ -123,15 +126,21 @@ perubahan".
 | B-D4 | `assets_select` mendapat arm **AM pemilik klien / Account lead / divisi Ads (baca saja)**, migrasi `20260922200100`. Dua cacat: (1) AM pemilik NOL akses baca ke baris `assets` padahal ia satu-satunya peran yang boleh approve — **pre-existing**, panel review massal AM kosong & `GET /assets/{id}` 404; (2) B-5 membuat predikat TS meloloskan Ads sementara RLS mengosongkan barisnya. Nol arm TULIS. | ✅ terbangun |
 | B-D6 | **`source_creative_brief_id` diproyeksikan lewat KAMPANYE, bukan lewat `GET /briefs/{id}`** (`ads.Campaign.sourceCreativeBriefId`). Dua alasan: `account.getBrief` milik Jalur A, DAN halaman yang butuh nilai ini (picker aset di halaman kampanye) sudah membaca kampanyenya. `LEFT join briefs` — kampanye yang brief-nya tak terbaca tetap harus terbaca. | ✅ terbangun |
 | B-D7 | **Jendela pengingat campaign KOL = H-7, bukan H-1** (`kol_reminder_tick` cabang (c)). Campaign yang berakhir besok sudah tidak bisa diselamatkan — creator butuh waktu untuk brief, produksi, dan QC. H-1 tetap untuk Booking (satu deliverable, bukan campaign). Konsekuensi yang DITERIMA: pemberitahuan **sekali**, bukan eskalasi harian (pola `penugasan_reminder_tick`). | ✅ terbangun |
+| B-D10 | **`briefs_select` mendapat arm STAFF divisi pelaksana** (migrasi `20260922200400`). PERBAIKAN REGRESI: A-5 membuat Brief lahir tanpa `assigned_pic`, dan kolom itu satu-satunya jalan baca staff divisi — jadi PIC Aset tidak bisa membuka Brief induk pekerjaannya sendiri (`GET /assets/{id}` 404). Penyerasian dengan `account.canSeeBrief` yang sudah mengizinkannya; nol peran dapat akses baru. Nol arm TULIS. | ✅ terbangun |
 | B-D9 | **`private.brief_source_creative_id`** (migrasi `20260922200300`) — pintu O52 untuk `briefs.source_creative_brief_id`. Versi pertama B-5 memakai `left join briefs` di `ads.getCampaign`, dan itu SALAH: rutenya `readAsActor`, `briefs_select` nol arm staff divisi, jadi join-nya mengembalikan NULL untuk **satu-satunya divisi yang memakai field itu**. `LEFT` join tidak membuang barisnya — ia meng-NULL-kan kolomnya, jadi filter picker **diam-diam tidak pernah berlaku**. Nol galat, nol 403, seluruh suite hijau (koneksi tes domain BYPASSRLS). **Ditemukan UAT peramban.** | ✅ terbangun |
 | B-D8 | **`RollupBlocker` — enam sebab yang bisa dibedakan** (`task.diagnoseBriefRollup`), menggantikan empat exit senyap `recomputeBriefRollup`. ⛔ Semantik rollup TIDAK diubah: `allExist` dibiarkan apa adanya karena mengubahnya menggeser setiap metrik turunan, dan itu belum diketok. Kalau pemilik memutuskan Brief boleh menutup pada unit yang ADA (bukan pada `quantity_target`), itu satu perubahan di `rollupTarget` — dan diagnosis ini yang akan menunjukkan berapa Brief yang terdampak. | ✅ terbangun (semantiknya: ⚠️ perlu ketokan) |
 | B-D5 | **PRD M7 `M7-OA-1` ditandai SUPERSEDED oleh K-1.** Auto-assign-by-workload resmi ditinggalkan — ia memang belum pernah dibangun, dan tidak ada sinyal availability/workload di CDPS untuk membangunnya. Dicatat sebagai *retired*, bukan dihapus. | ✅ terbangun |
 
 ## Permintaan ke Jalur A (berkas milik A — JANGAN diedit dari sini)
 
-### 🚨 BLOKER A-5 — `briefs_select` tidak punya arm staff divisi
+### ✅ SELESAI (ditambal Jalur B) — `briefs_select` arm staff divisi · bekas BLOKER A-5
 
-**Baca ini sebelum mengerjakan A-5.**
+> **Status 2026-09-07, sesudah PR #310:** A-5 MENDARAT TANPA arm ini, jadi
+> peringatan di bawah berhenti jadi peringatan dan menjadi **regresi hidup di
+> `main`**. Jalur B memperbaikinya sendiri di migrasi
+> `20260922200400_b1_briefs_select_arm_staff_divisi.sql`. **Tidak ada lagi yang
+> perlu Jalur A lakukan untuk ini** — bagian ini disimpan sebagai catatan
+> sebab-akibat, bukan tagihan.
 
 `briefs_select` (`20260723064438_rls_baseline.sql`) berbunyi:
 
@@ -187,12 +196,45 @@ yang sudah ada** (`account.canSeeBrief`), bukan pelonggaran baru. Preseden bentu
 `clients_select` (opsi (a), sudah ditolak pemilik 2026-08-07) — ini arm pada
 `briefs_select` sendiri, atas kolom yang sudah ada di baris yang dievaluasi.
 
-**A-5 sebaiknya tidak mendarat sebelum arm itu ada**, atau halaman Brief seluruh
-divisi eksekusi mati bersamaan — dan matinya **404, bukan 403**, jadi terbaca
-sebagai "belum ada datanya", bukan sebagai masalah izin.
+#### Kenapa akhirnya ditambal dari Jalur B
 
-Jalur B tidak menambalnya sendiri: `briefs_select` policy bersama dan A-5 tiket
-Jalur A (aturan emas #2 + guard §0 "berhenti, tulis di handoff, tanya").
+Sesi ini semula **tidak** menambalnya: `briefs_select` policy bersama, dan A-5
+tiket Jalur A — menambal paralel persis yang aturan emas #2 dan guard §0
+("berhenti, tulis di handoff, tanya") larang. Peringatannya ditulis di sini
+SEBELUM A-5 mendarat. Tiga hal berubah sesudah PR #310:
+
+1. **A-5 sudah merge.** Bahaya yang dihindari aturan emas #2 adalah dua jalur
+   menyunting hal yang sama secara PARALEL. Itu tidak ada lagi.
+2. **Ini regresi hidup, bukan peringatan.** Diukur terhadap `main` sesudah A-5,
+   dengan Brief yang lahir tanpa PIC (keadaan normal sekarang menurut handoff
+   Jalur A sendiri): `staff Creative (PIC aset itu) → brief=0 · aset=1`. Karena
+   `creative.assetSelect` masih `join briefs`, `GET /assets/{id}` menjawab
+   **404 kepada PIC-nya sendiri**.
+3. **Ini PENYERASIAN, bukan pelonggaran.** `account.canSeeBrief` SUDAH
+   mengizinkan staff divisi pelaksana (`LevelStaff || LevelLead`). DB lebih ketat
+   daripada aturan yang ditulis di TS untuk baca yang sama, dan hasilnya **404,
+   bukan 403**. Nol peran mendapat akses yang `canSeeBrief` belum memberikannya.
+
+Migrasinya di blok stempel Jalur B (`…T20####`) — §2 rencana tidak
+mengalokasikan migrasi per-jalur, hanya blok stempelnya. Tes:
+`packages/domain/src/brief-scope.rls.test.ts` (7 tes, `withClaims`).
+**Dibuktikan tidak vacuous:** dengan policy pra-perbaikan dipasang ulang, tepat
+**2 tes arm baru merah**, 5 tes batas tetap hijau.
+
+⚠️ Efek samping yang dicatat jujur: arm ini membuat premis satu tes B-5
+(`ads.test.ts` — "staff Ads TIDAK melihat baris brief-nya") tidak benar lagi.
+Premisnya DIBALIK menjadi asersi atas keadaan baru, bukan dihapus (pola sama
+`rls_checks.sql` check 25 saat O48 Grup B membalikkannya), dan konsekuensinya
+ditulis di tes itu: sesudah arm ini `left join briefs` pun bekerja untuk staff
+Ads, jadi tes itu tidak lagi menangkap regresi ke bentuk join.
+`private.brief_source_creative_id` tetap dipertahankan karena ia tidak
+bergantung pada bentuk `briefs_select` sama sekali.
+
+Sisa keluarga cacat ini, **bukan** urusan feedback OD: `creative.assetSelect`
+(dan `kol.ts:233`) masih `join briefs` demi `b.assigned_division`, jadi
+keterlihatan Aset/Booking MENUMPANG keterlihatan Brief. Dengan arm di atas itu
+tidak berbahaya lagi, tapi tetap sambungan rapuh — perbaikan bersihnya helper
+`private.*` kedua untuk `assigned_division`. Dicatat, tidak dikerjakan.
 
 ### Tiga proyeksi kolom F-4 yang HANYA bisa dikerjakan Jalur A
 

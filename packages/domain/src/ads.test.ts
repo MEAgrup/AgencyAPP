@@ -245,9 +245,26 @@ describeDb('B-5 / K-3 — kampanye membawa Brief Creative sumbernya', () => {
     await sql`update briefs set source_creative_brief_id = ${creativeBrief} where id = ${briefId}`;
     const c = await createCampaign(sql, adsStaff(), briefId, goodInput());
 
-    // Premisnya lebih dulu: staff Ads memang TIDAK melihat baris brief-nya.
-    // Kalau suatu saat A-5 memperbaiki `briefs_select`, premis ini berubah dan
-    // baris ini yang memberi tahu — bukan kegagalan senyap di tempat lain.
+    // CATATAN SEJARAH — premis tes ini sudah BERUBAH, dan itu memang terdeteksi
+    // di sini alih-alih gagal senyap di tempat lain.
+    //
+    // Versi pertama meng-assert `count = 0`: staff Ads memang TIDAK melihat
+    // baris brief-nya, dan itulah yang membuat `left join briefs`
+    // meng-NULL-kan kolomnya. Migrasi `20260922200400` (arm STAFF divisi pada
+    // `briefs_select` — perbaikan regresi A-5) membuat premis itu tidak benar
+    // lagi, dan baris `expect` di bawahlah yang memberi tahu. Premisnya DIBALIK
+    // menjadi asersi atas keadaan baru alih-alih dihapus: pola sama
+    // `rls_checks.sql` check 25 ketika O48 Grup B membalikkannya.
+    //
+    // Konsekuensi yang jujur dicatat: sesudah arm itu, `left join briefs` pun
+    // akan bekerja untuk staff Ads, jadi tes ini TIDAK lagi menangkap regresi
+    // ke bentuk join. Yang masih ia jaga — dan itu yang penting — adalah bahwa
+    // kolomnya benar-benar terbaca lewat jalur baca yang SESUNGGUHNYA
+    // (`readAsActor`) oleh peran yang sesungguhnya memakainya.
+    // `private.brief_source_creative_id` dipertahankan karena ia tidak
+    // bergantung pada bentuk `briefs_select` sama sekali; alasan lengkapnya di
+    // migrasi `20260922200300`.
+    //
     // Klaimnya HARUS aktor yang sama dengan yang membuat kampanyenya
     // (`adsStaff()` = 'ZZ-ADV'): `ad_campaigns_select` membuka baris lewat
     // `created_by`, jadi klaim aktor lain akan 404 di gerbang kampanyenya dan
@@ -257,9 +274,9 @@ describeDb('B-5 / K-3 — kampanye membawa Brief Creative sumbernya', () => {
     });
     const terlihat = await withClaims(sql, klaim, (tx) =>
       tx<{ n: string }[]>`select count(*) as n from briefs where id = ${briefId}`);
-    expect(terlihat[0].n).toBe('0');
+    expect(terlihat[0].n).toBe('1'); // arm staff divisi, migrasi 20260922200400
 
-    // …dan kolomnya TETAP terbaca, karena jalurnya `private.*`.
+    // Kolomnya terbaca di bawah RLS lewat jalur `private.*`.
     const dibaca = await withClaims(sql, klaim, (tx) => getCampaign(tx, adsStaff(), c.id));
     expect(dibaca.sourceCreativeBriefId).toBe(creativeBrief);
   });
