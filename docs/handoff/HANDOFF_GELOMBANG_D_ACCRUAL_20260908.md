@@ -112,21 +112,42 @@ role.division === 'Finance' && role.level === 'lead'   // Senior/Lead Finance
 || role.director                                        // Director
 ```
 
-### 3.1 Dua turunan yang DIAMBIL SEBAGAI ASUMSI, bukan diketok
+### 3.1 Buka-ulang: DIKETOK, dan wewenangnya BERTINGKAT
 
-Ditulis terang-terangan supaya yang membangun tahu ia sedang berdiri di atas
-asumsi, bukan di atas ketokan (`DECISIONS.md` 2026-09-08):
+Pemilik mengoreksi asumsi awal ("tidak ada jalan buka-ulang") di hari yang sama:
+**bulan yang sudah ditutup BISA dibuka lagi, dan HANYA oleh `Director`.**
 
-1. **Jurnal koreksi** di bulan berjalan dibatasi ke peran yang **SAMA**.
-   Memperlebarnya berarti orang yang tidak boleh menutup buku tetap bisa
-   mengubah angkanya lewat pintu samping — dan kuncinya berhenti menjaga apa pun.
-2. **Tidak ada jalan buka-ulang** bulan yang sudah ditutup. D-3 berbunyi "tidak
-   bisa diedit sama sekali", dan koreksi lewat jurnal di bulan berjalan sudah
-   jadi jalan keluarnya.
+| Aksi | Siapa |
+|---|---|
+| **Menutup** bulan | `Finance` level `lead` **ATAU** `Director` |
+| **Membuka kembali** | **`Director` SAJA** |
 
-Kalau salah satunya keliru, **koreksinya sebelum mesin statusnya didaftarkan** —
-sesudah itu ia jadi transisi yang sudah tercatat di `audit_log` dan tidak bisa
-ditarik.
+`Finance` lead yang menutup **tidak bisa membatalkan tutupannya sendiri**.
+Asimetri itu yang membuat kuncinya tetap menjaga sesuatu — kalau peran yang sama
+bisa menutup dan membuka sesuka hati, "tertutup" tidak berarti apa-apa.
+
+Yang **tetap** berlaku: bulan tertutup tidak bisa DIEDIT selagi tertutup. Yang
+berubah: ada pintu untuk MEMBUKANYA lebih dulu, dan pintu itu lebih sempit.
+
+**Tiga konsekuensi yang WAJIB ikut dibangun** (`DECISIONS.md` 2026-09-08):
+
+1. Buka-ulang adalah **TRANSISI di mesin status**, dengan **alasan tertulis
+   wajib**, masuk `audit_log` seperti transisi lain — bukan `UPDATE` diam-diam.
+2. Angka beku **TIDAK dihapus** saat dibuka — ia jadi **versi**, supaya "berapa
+   angkanya waktu ditutup pertama kali" tetap bisa dijawab selamanya.
+3. Tutup-ulang membekukan angka **BARU**, dan **selisihnya terhadap versi
+   sebelumnya harus bisa ditampilkan**. Tanpa ini, buka-tutup jadi cara
+   mengubah angka keuangan yang tidak meninggalkan jejak apa pun.
+
+### 3.1a Satu turunan yang MASIH ASUMSI, belum diketok
+
+**Jurnal koreksi** di bulan berjalan dibatasi ke peran yang **SAMA dengan
+penutup** (`Finance` lead atau `Director`). Memperlebarnya berarti orang yang
+tidak boleh menutup buku tetap bisa mengubah angkanya lewat pintu samping.
+
+⚠️ Ini **asumsi**, bukan ketokan. Kalau keliru, **koreksinya sebelum mesin
+statusnya didaftarkan** — sesudah itu ia jadi transisi yang sudah tercatat di
+`audit_log` dan tidak bisa ditarik.
 
 ### 3.2 Yang belum ada sama sekali
 
@@ -134,9 +155,12 @@ Nol baris kode. Yang dibutuhkan D-3, berurutan:
 
 1. Tabel bulan-tertutup + **angka yang dibekukan** per bulan (mesin laporan
    membaca bulan tertutup dari sini, BUKAN menghitung ulang dari data mentah).
-2. Mesin status tutup-buku (`sm_machines` 31 → 32) dengan gerbang peran di atas.
+2. Mesin status tutup-buku (`sm_machines` 31 → 32) dengan **dua gerbang peran
+   yang BERBEDA**: tutup (Finance lead ATAU Director) dan buka-ulang
+   (Director SAJA). Satu gerbang untuk keduanya adalah cacatnya.
 3. Jalur **jurnal koreksi** di bulan berjalan, ikut masuk `audit_log`.
 4. Pagar: bulan tertutup menolak tulisan apa pun — di DB, bukan hanya di TS.
+5. **Versi angka beku** + tampilan selisih antar versi (§3.1 konsekuensi 2 & 3).
 
 Mesin accrual (§2.2) sudah memenuhi syaratnya: ia **deterministik dan bebas
 jam**, jadi angka beku bisa dibandingkan dengan hasil hitung ulang kapan saja
