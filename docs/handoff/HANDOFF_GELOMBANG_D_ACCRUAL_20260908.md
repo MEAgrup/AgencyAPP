@@ -22,8 +22,10 @@
 | **D langkah 3 — kunci tutup buku (D-3)** | 🟢 **SIAP DIBANGUN** — perannya diketok 2026-09-08: `Finance` level `lead` + `Director`. Belum ada kodenya. Lihat §3 |
 | **D langkah 4 — PPN (D-4)** | ✅ **SELESAI** — semua harga non-PPN; PPN tombol Sales per invoice. Lihat §4 |
 
-Migrasi: repo **191**, live **189** — **190 dan 191 BELUM diterapkan ke live.** Lihat §5.
-⚠️ **191 WAJIB MENYUSUL deploy kodenya**, tidak boleh mendahului. Alasannya di §5.
+Migrasi: repo **195** sesudah merge `main` (PR #310/#311 Feedback OD membawa
+empat migrasi tambahan yang JUGA belum di-live). **Live kurang ENAM**, bukan dua.
+Urutan apply + alasannya di §5 — dan **`20260923010000` (D-4) WAJIB MENYUSUL
+deploy kodenya**, tidak boleh mendahului.
 
 ---
 
@@ -338,12 +340,12 @@ cd ../web-client-portal && npx vitest run
 |---|---|---|
 | core | 935 | **982** (+47 accrual) |
 | db | 53 | 53 |
-| apps/api | 490 | 490 |
+| apps/api | 490 | **492** (+2 dari main) |
 | **catatan** | | shape-parity & round-trip FE **sempat merah** saat kunci PPN ditambah — itu tugasnya; keduanya hijau lagi sesudah kontrak FE dilengkapi |
-| domain | 1988 (+1 skip) | **2010** (+1 skip) (+8 pengakuan, +14 PPN) |
+| domain | 1988 (+1 skip) | **2016** (+1 skip) (+8 pengakuan, +14 PPN, sisanya dari main) |
 | web-internal | 650 | 650 |
 | web-client-portal | 19 | 19 |
-| migrasi `db-rebuild` | 189 | **191** |
+| migrasi `db-rebuild` | 189 | **195** (191 milik sesi ini + 4 dari main) |
 
 `entity_prefix` 40 · `sm_machines` 31 · `notif_events` 69 — **tidak berubah**
 (migrasi 190 murni kolom + data).
