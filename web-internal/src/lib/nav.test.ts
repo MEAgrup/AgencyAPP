@@ -624,7 +624,7 @@ describe('Sidebar IA v3 — struktur 9 grup', () => {
       '/', '/portal', '/board/my-tasks', '/persetujuan',
       '/leads', '/sales', '/marketing', '/sales/kinerja', '/marketing/performance',
       '/master-services', '/sales/kalkulator',
-      '/clients', '/portal/management', '/health',
+      '/clients', '/portal/management', '/health', '/showcase',
       '/tasks', '/account/rekap', '/account', '/ads', '/creative', '/kol', '/livestream',
       '/tasks?division=AI+Optimizer', '/tasks?division=Store+Operation',
       '/ads/screening', '/ads/scanner',
@@ -812,5 +812,44 @@ describe('accordion benar-benar melipat (regresi CSS, 2026-09-04)', () => {
   it('aturan [hidden] itu menyetel display:none', () => {
     const blok = css.slice(css.indexOf('.navGroupItems[hidden]'));
     expect(blok.slice(0, blok.indexOf('}'))).toContain('display: none');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Gelombang C — Showcase Klien Terbaik: pengecualian PERTAMA terhadap Role
+// Matrix Fase 0 §4 (C-1, keputusan pemilik 2026-09-07).
+//
+// Tes ini menyebut Sales EKSPLISIT (aturan rumah #6) supaya pelebaran diam-diam
+// ke halaman klien yang lain memerahkan CI, bukan ditemukan manusia. Ia
+// mencerminkan `packages/domain/src/showcase.ts` `canReadShowcase`.
+// ---------------------------------------------------------------------------
+describe('visibleNav — Showcase Klien Terbaik (C-1)', () => {
+  it('Sales staff DAN Sales lead melihatnya — inilah pengecualiannya', () => {
+    expect(hrefs(role('Sales', 'staff'))).toContain('/showcase');
+    expect(hrefs(role('Sales', 'lead'))).toContain('/showcase');
+  });
+
+  it('...dan pengecualian itu berhenti di SATU halaman: Sales tetap tak melihat halaman klien lain', () => {
+    const seen = hrefs(role('Sales', 'staff'));
+    for (const href of ['/health', '/portal/management', '/account', '/account/rekap']) {
+      expect(seen, `pengecualian C-1 melebar ke ${href} — itu butuh keputusan pemilik baru`).not.toContain(href);
+    }
+    // `/clients` memang sudah terbuka untuk Sales sejak M4 (PIC penjualan);
+    // disebut di sini supaya pembaca berikutnya tidak mengira ia bagian C-1.
+    expect(seen).toContain('/clients');
+  });
+
+  it('Account (AM & lead), OD, dan Director melihatnya', () => {
+    expect(hrefs(role('Account', 'staff'))).toContain('/showcase');
+    expect(hrefs(role('Account', 'lead'))).toContain('/showcase');
+    expect(hrefs(role('Sales', 'staff', { od: true }))).toContain('/showcase');
+    expect(hrefs(role('Sales', 'staff', { director: true }))).toContain('/showcase');
+  });
+
+  it('divisi lain TIDAK — pengecualiannya untuk Sales, bukan untuk "bukan Account"', () => {
+    for (const d of ['Creative', 'Ads', 'KOL', 'Live Stream', 'Finance', 'Marketing']) {
+      expect(hrefs(role(d, 'staff')), `${d} tidak boleh melihat /showcase`).not.toContain('/showcase');
+      expect(hrefs(role(d, 'lead')), `${d} lead tidak boleh melihat /showcase`).not.toContain('/showcase');
+    }
   });
 });

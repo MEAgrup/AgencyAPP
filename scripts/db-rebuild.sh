@@ -175,7 +175,7 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "145"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "146"
 check "entity_prefix"    "select count(*) from entity_prefix"    "40"
 check "sm_machines"      "select count(*) from sm_machines"      "31"
 check "notif_events"     "select count(*) from notif_events"     "69"
@@ -185,6 +185,16 @@ check "notif_events"     "select count(*) from notif_events"     "69"
 #      20260911050000_m1_unrespon_notif.sql. Nol tabel/prefix/mesin baru ⇒
 #      145 tabel/40 prefix/31 mesin TETAP. Lihat
 #      docs/backlog/REVISI_CDPS_SALES_CREATIVE_PERFORMA.md L2.
+# 146 = 145 + 1 tabel Gelombang C / gerbang C-5
+#       (20260916010000_c5_izin_pitch_klien.sql): `client_pitch_consents` —
+#       ledger append-only izin pemakaian angka klien di materi pitch (satu
+#       baris per peristiwa beri/cabut; status hari ini adalah TURUNAN dari
+#       baris terakhir, tidak disimpan). Keputusan pemilik 2026-09-07 atas C-5.
+#       Nol prefix baru (anak `clients`, PK identity, tak pernah disebut manusia
+#       lewat ID-nya — pola sama `client_reports`) ⇒ entity_prefix TETAP 40.
+#       Nol mesin baru (izin bukan siklus status: ia ledger, bukan entitas
+#       ber-lifecycle) ⇒ sm_machines TETAP 31. Nol event katalog baru
+#       ⇒ notif_events TETAP 69.
 # 145 = 143 + 2 tabel Gelombang 4 TikTok Ads Scanner
 #       (20260910010000_gelombang4_adsscanner.sql): `adsscanner_run` (ASR-,
 #       satu baris per scan mingguan satu klien, SELURUH baris beku) dan

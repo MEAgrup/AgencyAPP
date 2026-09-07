@@ -376,6 +376,16 @@ jobs:
       #       status) ⇒ sm_machines TETAP 31; nol event katalog baru ⇒
       #       notif_events TETAP 67. Schema-only pass — lihat DECISIONS.md
       #       2026-09-08 (Gelombang 3).
+      # 146 = 145 + 1 tabel Gelombang C / gerbang C-5
+      #       (20260916010000_c5_izin_pitch_klien.sql): `client_pitch_consents`
+      #       — ledger append-only izin pemakaian angka klien di materi pitch,
+      #       satu baris per peristiwa beri/cabut (UPDATE dan DELETE ditolak
+      #       trigger). Status hari ini adalah TURUNAN dari baris terakhir per
+      #       klien, tidak disimpan. Keputusan pemilik 2026-09-07 atas C-5.
+      #       Nol prefix baru (anak `clients`, PK identity — pola sama
+      #       `client_reports`) ⇒ entity_prefix TETAP 40; nol mesin baru ⇒
+      #       sm_machines TETAP 31; nol event katalog baru ⇒ notif_events
+      #       TETAP 69.
       # 145 = 143 + 2 tabel Gelombang 4 TikTok Ads Scanner
       #       (20260910010000_gelombang4_adsscanner.sql): `adsscanner_run`
       #       (ASR-, satu baris per scan mingguan satu klien, SELURUH baris
@@ -395,12 +405,12 @@ jobs:
       # `check "tabel public"` sendiri. Naikkan KEDUANYA dalam satu commit;
       # menaikkan salah satu saja membuat lokal hijau sementara CI merah (persis
       # yang terjadi pada PR #170).
-      - name: Verify table count (expect 145)
+      - name: Verify table count (expect 146)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 145
+          test "$n" -eq 146
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this

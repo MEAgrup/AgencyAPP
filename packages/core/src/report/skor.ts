@@ -16,6 +16,26 @@ export interface Skor {
   dimensi: SkorDimensi[];
 }
 
+/**
+ * Batas bawah tiap pita label. Dinaikkan dari angka telanjang di dalam ekspresi
+ * menjadi konstanta bernama karena sejak Gelombang C ia punya pembaca KEDUA:
+ * ambang Showcase (`showcase.ts`, gerbang C-4) memakai `SKOR_SEHAT_MIN` supaya
+ * "klien terbaik" berarti "klien yang mesin ini sebut SEHAT" — bukan ambang
+ * kedua yang bisa menyimpang diam-diam dari yang pertama saat pitanya
+ * dikalibrasi ulang.
+ *
+ * Mesin Shopee (`report/shopee/skor.ts`) memakai pita yang SAMA dan mengimpor
+ * dari sini; dua salinan angka ini pernah hidup berdampingan, dan dua salinan
+ * adalah satu kalibrasi ulang dari saling menyimpang.
+ */
+export const SKOR_SEHAT_MIN = 8;
+export const SKOR_PERHATIAN_MIN = 6;
+
+/** Label pita untuk sebuah total 0–10. SATU-SATUNYA tempat pita ini dibaca. */
+export function labelSkor(total: number): Skor['label'] {
+  return total >= SKOR_SEHAT_MIN ? 'SEHAT' : total >= SKOR_PERHATIAN_MIN ? 'PERLU PERHATIAN' : 'KRITIS';
+}
+
 /** Map a value onto 0–10 within [lo,hi], clamped. A null input is the neutral 5. */
 export function scale(v: number | null | undefined, lo: number, hi: number): number {
   if (v == null || !isFinite(v) || hi === lo) return 5;
@@ -111,5 +131,5 @@ export function computeSkor(M: ReportMetrics, B: ReportBench): Skor {
   }
 
   const total = Math.round(D.reduce((a, x) => a + x.skor * x.bobot, 0) * 10) / 10;
-  return { total, label: total >= 8 ? 'SEHAT' : total >= 6 ? 'PERLU PERHATIAN' : 'KRITIS', dimensi: D };
+  return { total, label: labelSkor(total), dimensi: D };
 }

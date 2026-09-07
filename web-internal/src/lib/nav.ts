@@ -208,6 +208,14 @@ const KLIEN: NavNode[] = [
   // (trigger scan M13), bukan sekadar membaca snapshot (keputusan pemilik
   // 2026-09-04 — keduanya dipertahankan).
   { href: '/health', label: 'Client Health', access: ownedBy(ACCOUNT) },
+  // Gelombang C — Showcase Klien Terbaik. Gerbangnya mencerminkan
+  // `domain/showcase.canReadShowcase`, dan ia adalah **satu-satunya baris di
+  // seluruh tabel ini yang memberi divisi Sales akses ke data klien**
+  // (keputusan pemilik C-1, 2026-09-07 — pengecualian pertama terhadap Role
+  // Matrix Fase 0 §4). Ditulis `ownedBy(ACCOUNT, SALES)` dan BUKAN dengan
+  // menambahkan SALES ke baris `/clients` di atas: pengecualiannya berlaku
+  // untuk SATU halaman, dan bentuk penulisannya harus membuat itu terlihat.
+  { href: '/showcase', label: 'Showcase Klien Terbaik', access: ownedBy(ACCOUNT, SALES) },
 ];
 
 // ---------------------------------------------------------------------------

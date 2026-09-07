@@ -5,9 +5,12 @@
  * stays camelCase, the route is the boundary. Request bodies are mapped the
  * other way inline in each route (`toInput`).
  */
-import { money, tz } from '@cdps/core';
+// `showcase` diimpor sebagai NILAI (bukan hanya tipe): `ALASAN_KALIMAT` adalah
+// tabel kalimat BI-nya, dan merakit kalimatnya di server adalah yang mencegah
+// halaman menyimpan terjemahan kedua yang bisa menyimpang dari ambangnya.
+import { money, showcase as coreShowcase, tz } from '@cdps/core';
 import type { interview as ivcore, report as coreReport } from '@cdps/core';
-import type { account, activity, admin, ads, adsscanner, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, skuscreener, stage, strategi, task, vendor } from '@cdps/domain';
+import type { account, activity, admin, ads, adsscanner, audit, auth, board, briefInherit, campaign, client, clientPortal, clientPortalAuth, contract, creative, demo, directory, finance, health, internaltask, interview, kol, leads, livestream, marketing, milestone, msl, notification, performance, plan, plangate, portal, recap, renewal, report, req, risetAwal, sales, salesperf, showcase, skuscreener, stage, strategi, task, vendor } from '@cdps/domain';
 
 /** MasterService as web-internal's `MasterService` type expects it. */
 export interface MasterServiceWire {
@@ -7343,4 +7346,160 @@ export function adsScanPortfolioRowToWire(r: adsscanner.AdsScanPortfolioRow): Ad
     pool_realokasi: r.poolRealokasi,
     sku_total: r.skuTotal,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Showcase Klien Terbaik + izin pitch (Gelombang C — C-1/C-2/C-3/C-4/C-5)
+//
+// `null` EKSPLISIT di mana pun nilainya boleh kosong, tidak pernah kunci yang
+// dihilangkan (kelas bug O43: halaman blank walau rute menjawab 200). Anchor-nya
+// `web-internal/src/lib/showcase.ts`; shape-parity yang menegakkannya.
+// ---------------------------------------------------------------------------
+export interface ShowcaseTrenWire {
+  awal: number;
+  akhir: number;
+  delta: number | null;
+}
+
+export interface ShowcaseKlienWire {
+  client_id: string;
+  toko: string;
+  kategori: string | null;
+  berizin: boolean;
+  periode_dinilai: number;
+  periode_mulai: string;
+  periode_akhir: string;
+  platform: string[];
+  skor_terakhir: number;
+  skor_label_terakhir: string | null;
+  tren_skor: ShowcaseTrenWire;
+  tren_gmv: ShowcaseTrenWire;
+}
+
+export interface ShowcaseTersisihWire {
+  client_id: string;
+  toko: string;
+  alasan: string;
+  /**
+   * Kalimat Bahasa Indonesia untuk `alasan`, dirakit di server dari
+   * `@cdps/core` `ALASAN_KALIMAT` — supaya halaman tidak menyimpan tabel
+   * terjemahan kedua yang bisa menyimpang dari ambangnya.
+   */
+  alasan_kalimat: string;
+  periode_berskor: number;
+  skor_terakhir: number | null;
+}
+
+export interface ShowcaseAmbangWire {
+  skor_min: number;
+  min_periode: number;
+  kalimat: string;
+  sumber: string;
+}
+
+export interface ShowcaseViewWire {
+  klien: ShowcaseKlienWire[];
+  tersisih: ShowcaseTersisihWire[];
+  ambang: ShowcaseAmbangWire;
+  disaring_izin: boolean;
+  disembunyikan_tanpa_izin: number;
+  total_laporan: number;
+  total_klien_ditimbang: number;
+}
+
+export interface IzinStatusWire {
+  client_id: string;
+  berizin: boolean;
+  berlaku_sampai: string | null;
+  dokumen_catatan: string | null;
+  sejak: string | null;
+  oleh_siapa: string | null;
+  kedaluwarsa: boolean;
+}
+
+export interface IzinPeristiwaWire {
+  id: number;
+  client_id: string;
+  aksi: string;
+  berlaku_sampai: string | null;
+  dokumen_catatan: string | null;
+  alasan: string | null;
+  created_at: string;
+  created_by: string;
+}
+
+export interface IzinPanelWire {
+  status: IzinStatusWire;
+  riwayat: IzinPeristiwaWire[];
+}
+
+function showcaseTrenToWire(t: coreShowcase.Tren): ShowcaseTrenWire {
+  return { awal: t.awal, akhir: t.akhir, delta: t.delta };
+}
+
+export function showcaseViewToWire(v: showcase.ShowcaseView): ShowcaseViewWire {
+  return {
+    klien: v.klien.map((k) => ({
+      client_id: k.clientId,
+      toko: k.toko,
+      kategori: k.kategori ?? null,
+      berizin: k.berizin,
+      periode_dinilai: k.periodeDinilai,
+      periode_mulai: k.periodeMulai,
+      periode_akhir: k.periodeAkhir,
+      platform: [...k.platform],
+      skor_terakhir: k.skorTerakhir,
+      skor_label_terakhir: k.skorLabelTerakhir ?? null,
+      tren_skor: showcaseTrenToWire(k.trenSkor),
+      tren_gmv: showcaseTrenToWire(k.trenGmv),
+    })),
+    tersisih: v.tersisih.map((t) => ({
+      client_id: t.clientId,
+      toko: t.toko,
+      alasan: t.alasan,
+      alasan_kalimat: coreShowcase.ALASAN_KALIMAT[t.alasan],
+      periode_berskor: t.periodeBerskor,
+      skor_terakhir: t.skorTerakhir ?? null,
+    })),
+    ambang: {
+      skor_min: v.ambang.skorMin,
+      min_periode: v.ambang.minPeriode,
+      kalimat: v.ambang.kalimat,
+      sumber: v.ambang.sumber,
+    },
+    disaring_izin: v.disaringIzin,
+    disembunyikan_tanpa_izin: v.disembunyikanTanpaIzin,
+    total_laporan: v.totalLaporan,
+    total_klien_ditimbang: v.totalKlienDitimbang,
+  };
+}
+
+export function izinStatusToWire(s: showcase.IzinStatus): IzinStatusWire {
+  return {
+    client_id: s.clientId,
+    berizin: s.berizin,
+    berlaku_sampai: s.berlakuSampai ?? null,
+    dokumen_catatan: s.dokumenCatatan ?? null,
+    // `sejak` adalah timestamptz; ISO supaya halaman tak menebak zonanya.
+    sejak: s.sejak === null ? null : s.sejak.toISOString(),
+    oleh_siapa: s.olehSiapa ?? null,
+    kedaluwarsa: s.kedaluwarsa,
+  };
+}
+
+export function izinPeristiwaToWire(p: showcase.IzinPeristiwa): IzinPeristiwaWire {
+  return {
+    id: p.id,
+    client_id: p.clientId,
+    aksi: p.aksi,
+    berlaku_sampai: p.berlakuSampai ?? null,
+    dokumen_catatan: p.dokumenCatatan ?? null,
+    alasan: p.alasan ?? null,
+    created_at: p.createdAt.toISOString(),
+    created_by: p.createdBy,
+  };
+}
+
+export function izinPanelToWire(s: showcase.IzinStatus, riwayat: showcase.IzinPeristiwa[]): IzinPanelWire {
+  return { status: izinStatusToWire(s), riwayat: riwayat.map(izinPeristiwaToWire) };
 }
