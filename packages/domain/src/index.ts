@@ -93,6 +93,10 @@ export * as finance from './finance';
 // (apa yang sudah masuk kasnya), modul ini memiliki pengakuan (bulan mana yang
 // mengakuinya) — dua pertanyaan berbeda atas uang yang sama.
 export * as accrual from './accrual';
+// Gelombang D D-3 — tutup buku bulanan + jurnal koreksi. Terpisah dari
+// `accrual`: `accrual` menjawab "berapa yang diakui layanan ini, dan kapan",
+// modul ini menjawab "angka bulan ini masih bergerak atau sudah beku".
+export * as tutupbuku from './tutupbuku';
 export * as client from './client';
 export * as account from './account';
 export * as plangate from './plangate';

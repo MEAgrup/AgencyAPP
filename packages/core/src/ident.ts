@@ -136,6 +136,16 @@ export const PREFIXES = {
   // tool with no Client Portal surface (O69, and the long "kenapa bukan
   // client_reports" note in the Gelombang 4 migration).
   ASR: { entity: 'Ads Scanner run (TikTok Ads Scanner)', module: 'Gelombang 4 (TikTok Ads Scanner)' },
+  // Gelombang D D-3 (tutup buku bulanan). Dua entitas ber-ID, dan yang KETIGA
+  // sengaja tidak punya prefix: `periode_buku_baris` (angka yang dibekukan)
+  // adalah anak `periode_buku` ber-PK identity, pola yang sama dengan
+  // `client_reports` — ia tidak pernah dirujuk manusia, hanya dibaca bersama
+  // bulannya.
+  //
+  // `PBK-` dicetak dengan stempel waktu hari PERTAMA bulan yang diwakilinya,
+  // bukan `now()`: buku Maret selalu `PBK-202603-0001` walau ditutup di April.
+  PBK: { entity: 'Periode Buku (tutup buku bulanan)', module: 'Gelombang D (D-3)' },
+  JRK: { entity: 'Jurnal Koreksi (koreksi bulan tertutup)', module: 'Gelombang D (D-3)' },
 } as const satisfies Record<string, PrefixInfo>;
 
 /** A registered prefix string (e.g. 'CLI', 'TRX'). */

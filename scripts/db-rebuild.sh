@@ -175,9 +175,9 @@ check() { # nama · sql · harapan
   if [[ "$got" == "$3" ]]; then printf '   ✓ %-28s %s\n' "$1" "$got"
   else printf '   ✗ %-28s %s (harusnya %s)\n' "$1" "$got" "$3"; fail=1; fi
 }
-check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "146"
-check "entity_prefix"    "select count(*) from entity_prefix"    "40"
-check "sm_machines"      "select count(*) from sm_machines"      "31"
+check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "149"
+check "entity_prefix"    "select count(*) from entity_prefix"    "42"
+check "sm_machines"      "select count(*) from sm_machines"      "32"
 check "notif_events"     "select count(*) from notif_events"     "69"
 # 69 = 67 + 2 event Revisi Sales/Creative/Performa L2 (katalog v14:
 #      m1.attempt.unrespon / m1.attempt.auto_not_qualified, keduanya resolver

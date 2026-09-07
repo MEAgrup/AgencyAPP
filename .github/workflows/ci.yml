@@ -221,11 +221,16 @@ jobs:
       # keduanya resolver 'explicit' -> pemilik attempt; emitter job
       # leads_unrespon_tick), 67 → 69. Nol mesin baru (L1 hanya menambah
       # sm_edges pada mesin prospect_attempt yang sudah ada — 31 TETAP).
-      - name: Verify migration seed counts (31 machines, 69 events, catalog registry consistent)
+      # Gelombang D D-3 (20260923010000_d3_tutup_buku.sql): +1 mesin
+      # `periode_buku` (SATU edge, Terbuka->Ditutup, TANPA jalan buka kembali),
+      # 31 -> 32. Nol event katalog baru — tidak ada entri di katalog Fase 0 v2
+      # §9 yang meminta notifikasi tutup buku, dan mengarang satu berarti
+      # mengarang entri katalog (lihat DECISIONS.md 2026-09-07).
+      - name: Verify migration seed counts (32 machines, 69 events, catalog registry consistent)
         run: |
           psql -h 127.0.0.1 -U postgres -d cdps -v ON_ERROR_STOP=1 -c \
             "do \$\$ begin
-               if (select count(*) from sm_machines) <> 31 then raise exception 'expected 31 machines'; end if;
+               if (select count(*) from sm_machines) <> 32 then raise exception 'expected 32 machines'; end if;
                if (select count(*) from notif_events) <> 69 then raise exception 'expected 69 events'; end if;
                if (select count(*) from notif_events)
                   <> (select coalesce(sum(event_count), 0) from notif_catalog_versions)
@@ -376,6 +381,15 @@ jobs:
       #       status) ⇒ sm_machines TETAP 31; nol event katalog baru ⇒
       #       notif_events TETAP 67. Schema-only pass — lihat DECISIONS.md
       #       2026-09-08 (Gelombang 3).
+      # 149 = 146 + 3 tabel Gelombang D / gerbang D-3
+      #       (20260923010000_d3_tutup_buku.sql): `periode_buku` (satu baris per
+      #       BULAN buku, PBK-, mesin #32 satu-edge tanpa jalan buka kembali),
+      #       `periode_buku_baris` (angka pengakuan yang DIBEKUKAN saat tutup,
+      #       append-only, anak `periode_buku` — nol prefix sendiri, PK
+      #       identity), dan `jurnal_koreksi` (JRK-, satu-satunya jalan
+      #       memperbaiki bulan tertutup, append-only, nilai BERTANDA).
+      #       +2 prefix (PBK, JRK) ⇒ entity_prefix 40→42. +1 mesin ⇒
+      #       sm_machines 31→32. Nol event katalog baru ⇒ notif_events TETAP 69.
       # 146 = 145 + 1 tabel Gelombang C / gerbang C-5
       #       (20260916010000_c5_izin_pitch_klien.sql): `client_pitch_consents`
       #       — ledger append-only izin pemakaian angka klien di materi pitch,
@@ -405,12 +419,12 @@ jobs:
       # `check "tabel public"` sendiri. Naikkan KEDUANYA dalam satu commit;
       # menaikkan salah satu saja membuat lokal hijau sementara CI merah (persis
       # yang terjadi pada PR #170).
-      - name: Verify table count (expect 146)
+      - name: Verify table count (expect 149)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc \
             "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE';")
           echo "public base tables: $n"
-          test "$n" -eq 146
+          test "$n" -eq 149
       # M6A §7: the prefix registry is the DB half of a two-mechanism guarantee —
       # 26 as-built prefixes + STRG/PLAN/VND + CTR (O57) + ITV (Interview). The TS
       # half (PREFIXES in packages/core/src/ident.ts) is asserted against this
@@ -426,7 +440,8 @@ jobs:
       #
       # ⚠️ GATE KEDUA untuk angka yang sama — `scripts/db-rebuild.sh` punya
       # `check "entity_prefix"` sendiri. Naikkan KEDUANYA dalam satu commit.
-      - name: Verify entity_prefix registry (expect 40)
+      # 42 = 40 + PBK/JRK (Gelombang D D-3, 20260923010000).
+      - name: Verify entity_prefix registry (expect 42)
         run: |
           n=$(psql -h 127.0.0.1 -U postgres -d cdps -tAc "select count(*) from entity_prefix;")
           echo "entity_prefix rows: $n"

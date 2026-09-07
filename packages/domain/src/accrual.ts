@@ -208,6 +208,57 @@ export async function jadwalKlien(sql: Queryable, actor: Actor, clientId: string
   return rows.map((r) => rakit(r, riwayat.get(r.id) ?? kosongRiwayat()));
 }
 
+/**
+ * jadwalSemua menjadwalkan SETIAP layanan terbeli seluruh klien — masukan
+ * penutupan buku bulanan (D-3).
+ *
+ * ⚠️ SENGAJA TANPA SARINGAN BULAN. Versi pertama fungsi ini menerima
+ * `sampaiBulan` dan membuang layanan yang `created_at`-nya lebih baru daripada
+ * akhir bulan itu, dengan alasan yang terdengar benar: layanan yang di-closing
+ * bulan Mei tidak bisa mengakui apa pun di bulan Maret. Saringan itu DICABUT.
+ *
+ * Alasannya bukan performa, melainkan kelas kesalahannya: sebuah saringan pada
+ * laporan KEUANGAN yang bisa membuang baris akan, saat ia keliru, menghasilkan
+ * laporan yang terlihat lengkap dan berjumlah kurang — dan tidak ada yang bisa
+ * melihat bedanya. Ia langsung terbukti bisa keliru: hari pengakuan diturunkan
+ * dari `audit_log`, dan sebuah baris transisi bisa bertanggal lebih awal
+ * daripada baris `services`-nya (koreksi riwayat, impor, backfill). Yang benar
+ * adalah membaca semuanya lalu memilih bulannya — dua kueri, apa pun jumlah
+ * layanannya (lihat catatan P-1 di `jadwalKlien`). Kalau suatu hari volumenya
+ * menuntut batas, batasnya harus datang dari `audit_log` (bulan transisi),
+ * bukan dari `services.created_at`.
+ */
+export async function jadwalSemua(sql: Queryable, actor: Actor): Promise<LayananJadwal[]> {
+  if (!canBacaAccrual(actor)) {
+    throw new ForbiddenError();
+  }
+  const rows = await sql<ServiceRow[]>`
+    select ${sql.unsafe(SERVICE_COLUMNS)}
+      from services s
+      join master_service_versions msv
+        on msv.service_id = s.master_service_id and msv.version_no = s.master_version_no
+      join clients c on c.id = s.client_id
+      left join qualified_form_services qfs
+        on qfs.attempt_id = c.winning_attempt_id and qfs.master_service_id = s.master_service_id
+     order by s.created_at asc, s.id asc`;
+  const riwayat = await riwayatTransisi(sql, rows.map((r) => r.id));
+  return rows.map((r) => rakit(r, riwayat.get(r.id) ?? kosongRiwayat()));
+}
+
+/**
+ * nilaiBulan mengembalikan berapa yang diakui satu layanan DI SATU BULAN
+ * kalender, `0n` kalau bulan itu tidak ada di jadwalnya.
+ *
+ * Nol dan ketiadaan baris sengaja DISAMAKAN di sini, dan hanya di sini: fungsi
+ * ini menjawab pertanyaan "berapa", dan jawabannya nol. Yang membedakan
+ * "diperiksa, hasilnya nol" dari "layanan ini tidak ada di bulan itu" adalah
+ * ADA-TIDAKNYA baris yang dibekukan — pertanyaan berbeda, dan `jadwal.baris`
+ * yang menjawabnya.
+ */
+export function nilaiBulan(j: LayananJadwal, bulan: string): money.Money {
+  return j.jadwal?.baris.find((b) => b.bulan === bulan)?.nilai ?? 0n;
+}
+
 /** rakit merakit satu `LayananJadwal` dari baris `services` + riwayat auditnya. */
 function rakit(r: ServiceRow, riwayat: Riwayat): LayananJadwal {
   const pengakuan = r.pengakuan as core.Pengakuan;
