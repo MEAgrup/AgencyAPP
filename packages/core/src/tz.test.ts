@@ -1,6 +1,6 @@
 // Ported 1:1 from archive/backend-go/internal/core/tz/tz_test.go.
 import { describe, expect, it } from 'vitest';
-import { WIB_OFFSET_HOURS, addDaysToDate, addMonthsToDate, dateString, dateTimeString, daysBetween, isoWeekOf, isoWeekOfDate, period } from './tz';
+import { WIB_OFFSET_HOURS, addDaysToDate, addMonthsToDate, dateString, dateTimeString, daysBetween, daysBetweenDate, isoWeekOf, isoWeekOfDate, period } from './tz';
 
 // Helper: build a UTC instant the way the Go tests do (time.Date(..., time.UTC)).
 const utc = (y: number, mo: number, d: number, h = 0, mi = 0): Date =>
@@ -119,5 +119,55 @@ describe('addMonthsToDate', () => {
     // 12 months of 30 days lands 5 days early and in the wrong month-end.
     expect(addMonthsToDate('2026-01-01', 12)).toBe('2027-01-01');
     expect(addDaysToDate('2026-01-01', 360)).toBe('2026-12-27');
+  });
+});
+
+/**
+ * daysBetweenDate — ditambahkan Gelombang D karena mesin accrual MEMBAGI UANG
+ * dengan angka ini, jadi off-by-one di sini adalah off-by-one di buku.
+ *
+ * Konvensinya HALF-OPEN, dan itu yang membuat aritmetika periode bisa disusun:
+ * "satu bulan dari 1 Januari" mencakup persis hari yang fungsi ini hitung ke
+ * tanggal akhirnya, jadi "berapa lama ia jalan" dan "kapan ia berakhir" tidak
+ * bisa berselisih satu hari.
+ */
+describe('daysBetweenDate', () => {
+  it('menghitung [dari, ke) — sebulan penuh Januari adalah 31, bukan 30 atau 32', () => {
+    expect(daysBetweenDate('2026-01-01', '2026-02-01')).toBe(31);
+  });
+
+  it('nol untuk tanggal yang sama, dan negatif kalau arahnya dibalik', () => {
+    expect(daysBetweenDate('2026-01-01', '2026-01-01')).toBe(0);
+    expect(daysBetweenDate('2026-02-01', '2026-01-01')).toBe(-31);
+  });
+
+  it('menyusun dengan addMonthsToDate: 31 Jan + 1 bulan = 28 hari (clamp, non-kabisat)', () => {
+    // Pasangan inilah yang dipakai mesin accrual, dan pasangan itu yang harus
+    // konsisten — bukan masing-masing fungsi sendiri-sendiri.
+    const mulai = '2026-01-31';
+    const akhir = addMonthsToDate(mulai, 1);
+    expect(akhir).toBe('2026-02-28');
+    expect(daysBetweenDate(mulai, akhir)).toBe(28);
+  });
+
+  it('tahun kabisat: 31 Jan 2028 + 1 bulan = 29 hari', () => {
+    expect(daysBetweenDate('2028-01-31', addMonthsToDate('2028-01-31', 1))).toBe(29);
+  });
+
+  it('menyeberang tahun dengan benar', () => {
+    expect(daysBetweenDate('2026-12-01', '2027-01-01')).toBe(31);
+    expect(daysBetweenDate('2026-01-01', '2027-01-01')).toBe(365);
+    expect(daysBetweenDate('2028-01-01', '2029-01-01')).toBe(366); // kabisat
+  });
+
+  it('menyusun dengan addDaysToDate untuk n hari apa pun', () => {
+    for (const n of [1, 7, 30, 45, 400]) {
+      expect(daysBetweenDate('2026-03-15', addDaysToDate('2026-03-15', n))).toBe(n);
+    }
+  });
+
+  it('menolak tanggal yang bukan tanggal, di kedua sisi', () => {
+    expect(() => daysBetweenDate('bukan-tanggal', '2026-01-01')).toThrow(RangeError);
+    expect(() => daysBetweenDate('2026-01-01', 'bukan-tanggal')).toThrow(RangeError);
   });
 });
