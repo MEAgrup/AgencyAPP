@@ -1141,7 +1141,15 @@ DECLARE
     'client_platforms_select','client_report_insight_sel_portal',
     'client_report_publikasi_sel_portal','client_reports_sel_portal',
     'client_sales_allocations_select','complaints_select',
-    'creator_bookings_select','creator_lists_select','creator_payment_requests_select',
+    -- `creator_payment_requests_select` DIKELUARKAN dari daftar ini 2026-09-07
+    -- (A-2, migrasi `20260922100300`): ia sekarang punya lengan
+    -- `public.jwt_division() = 'Finance'`. Bukan pelonggaran diam-diam —
+    -- `kol.canProcessPaymentRequest` sudah mengizinkan seluruh divisi Finance
+    -- sejak dulu, jadi policy-nya lah yang membantah gerbang domainnya, dan
+    -- akibatnya staf DAN lead Finance tidak bisa membuka CPR yang belum pernah
+    -- mereka sentuh (probe: 0 baris). `creator_bookings_select` TETAP di daftar
+    -- ini dengan sengaja: Finance tidak perlu membaca papan booking KOL.
+    'creator_bookings_select','creator_lists_select',
     'dependencies_select','employees_select','live_stream_sessions_select',
     'marketing_performance_records_select','master_service_versions_select',
     'master_services_select','metric_entries_select','metric_entry_assets_select',

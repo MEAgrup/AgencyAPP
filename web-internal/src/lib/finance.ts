@@ -32,6 +32,13 @@ export interface Transaction {
   contract_attachment: string;
   released_to_account_at: string | null;
   installments: Installment[];
+  /**
+   * Nama toko klien. Feedback OD 2026-09-07 Finance #1: antrean approval hanya
+   * menyebut `client_id`, dan Finance tidak menghafal `CLI-…`. Selalu terisi
+   * (join inner atas `client_id` yang NOT NULL), jadi non-opsional — kunci yang
+   * opsional di sini mengundang render `undefined`.
+   */
+  toko: string;
 }
 
 export interface BermasalahVote {

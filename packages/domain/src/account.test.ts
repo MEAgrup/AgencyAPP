@@ -57,9 +57,11 @@ import {
   ValidationError,
   workload,
   type Actor,
+  MSG_PIC_BUKAN_WEWENANG_AM,
   type BriefInput,
   type StrategyInput,
 } from './account';
+import { assignPic } from './task';
 
 const accountLead = (): Actor => ({
   employeeId: 'ZZ-ALEAD', divisi: 'Account', role: permission.makeRole({ division: 'Account', level: 'lead' }),
@@ -69,6 +71,9 @@ const accountStaff = (id = 'ZZ-AM'): Actor => ({
 });
 const salesLead = (): Actor => ({
   employeeId: 'ZZ-SL', divisi: 'Sales', role: permission.makeRole({ division: 'Sales', level: 'lead' }),
+});
+const creativeLead = (): Actor => ({
+  employeeId: 'ZZ-CLEAD', divisi: 'Creative', role: permission.makeRole({ division: 'Creative', level: 'lead' }),
 });
 const od = (): Actor => ({ employeeId: 'ZZ-OD', divisi: 'Management', role: permission.makeRole({ od: true }) });
 const director = (): Actor => ({ employeeId: 'ZZ-DIR', divisi: 'Management', role: permission.makeRole({ director: true }) });
@@ -897,6 +902,57 @@ describeDb('createBrief (§5)', () => {
     await expect(createBrief(sql, staff, svcId, { ...goodBrief(), assignedDivision: 'Finance' })).rejects.toBeInstanceOf(ValidationError);
     await expect(createBrief(sql, staff, svcId, { ...goodBrief(), priority: 'Urgent' })).rejects.toBeInstanceOf(ValidationError);
     await expect(createBrief(sql, staff, svcId, { ...goodBrief(), recurring: true })).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  /**
+   * K-1, sisi AM (A-5). Feedback Account #2: AM memilih nama staff Creative,
+   * padahal yang tahu siapa sedang longgar adalah lead divisi itu.
+   *
+   * Ini TES JAHITAN, bukan tes penolakan. Membuktikan "AM ditolak" saja akan
+   * hijau juga kalau A-5 dikerjakan dengan cara yang salah — yaitu menutup jalur
+   * penetapan PIC sama sekali dan membuat Brief tidak pernah punya PIC. Jadi
+   * kedua sisinya di-assert dalam satu tes: pintu AM TERTUTUP **dan** pintu lead
+   * TERBUKA, pada Brief yang sama.
+   *
+   * Sebelum A-5, `validateBrief` tidak memeriksa `assignedPic` sama sekali —
+   * menghapus picker di UI saja akan menyisakan `POST /services/{id}/briefs`
+   * menerima dan MENYIMPAN `assigned_pic`, sehingga K-1 berlaku hanya bagi orang
+   * yang memakai form.
+   */
+  it('K-1: AM tidak boleh menyebut PIC, tapi lead divisi tetap bisa menetapkannya', async () => {
+    const { svcId, amId } = await directFixture();
+
+    // Pintu AM: TERTUTUP, dan ditolak — bukan diterima lalu dibuang diam-diam.
+    await expect(
+      createBrief(sql, accountStaff(amId), svcId, { ...goodBrief(), assignedPic: 'EMP-0003' }),
+    ).rejects.toBeInstanceOf(ValidationError);
+    await expect(
+      createBrief(sql, accountStaff(amId), svcId, { ...goodBrief(), assignedPic: 'EMP-0003' }),
+    ).rejects.toThrow(MSG_PIC_BUKAN_WEWENANG_AM);
+    // Spasi bukan celah.
+    await expect(
+      createBrief(sql, accountStaff(amId), svcId, { ...goodBrief(), assignedPic: '   EMP-0003  ' }),
+    ).rejects.toBeInstanceOf(ValidationError);
+    // Director pun tidak — K-1 soal PERAN mana yang membagi pekerjaan, bukan
+    // soal siapa yang berkuasa. Kalau ini lolos, gerbangnya ada di tempat yang
+    // salah (di pemeriksaan izin, bukan di validasi input).
+    await expect(
+      createBrief(sql, director(), svcId, { ...goodBrief(), assignedPic: 'EMP-0003' }),
+    ).rejects.toBeInstanceOf(ValidationError);
+
+    // Brief lahir tanpa PIC, dan itu memang keadaan yang sah sekarang.
+    const brief = await createBrief(sql, accountStaff(amId), svcId, goodBrief());
+    expect(brief.assignedPic).toBe('');
+    expect(brief.assignedPicNama).toBe('');
+
+    // Pintu lead: TERBUKA. Inilah separuh yang membuat A-5 bukan regresi.
+    await assignPic(sql, creativeLead(), brief.id, 'EMP-0003');
+    const after = await sql<{ assigned_pic: string | null }[]>`
+      select assigned_pic from briefs where id = ${brief.id}`;
+    expect(after[0].assigned_pic).toBe('EMP-0003');
+
+    // …dan AM pemilik TIDAK boleh memakai pintu itu untuk menyelundup balik.
+    await expect(assignPic(sql, accountStaff(amId), brief.id, 'EMP-0003')).rejects.toBeTruthy();
   });
 
   it('strategy linkage: Direct rejects a strategy id; plan-gated requires the approved plan id', async () => {

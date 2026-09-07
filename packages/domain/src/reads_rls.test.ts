@@ -23,10 +23,10 @@ import { permission } from '@cdps/core';
 import { createClient, withClaims, type Sql } from '@cdps/db';
 import { leadsDatabase, poolBoard } from './leads';
 import { listClients } from './client';
-import { getBrief, listStrategies, serviceQueue, type Actor } from './account';
+import { getBrief, listDivisionQueue, listStrategies, serviceQueue, type Actor } from './account';
 import { getAsset } from './creative';
 import { staffLanding } from './portal';
-import { reminderDashboard } from './finance';
+import { financeQueue, reminderDashboard } from './finance';
 import { allowedTransitions } from './engine';
 import { getAttempt } from './sales';
 import { getStageOverview } from './stage';
@@ -205,6 +205,67 @@ describeDb('read models under RLS (O37)', () => {
   });
 
   /**
+   * Feedback OD 2026-09-07, Finance #1: the approval queue showed `client_id`
+   * only, and Finance does not memorise `CLI-…` ids. F-2 adds `join clients` to
+   * `financeQueue` for `clients.toko`.
+   *
+   * That join is the O52 shape — a read model joining `clients` for one column —
+   * and the ONLY reason it does not erase Finance's rows is the
+   * `jwt_division() = 'Finance'` arm on `clients_select`. Nothing in TS says so,
+   * so this test is where that dependency is written down: narrow the policy and
+   * the queue silently empties instead of failing loudly, exactly the QA
+   * 2026-08-04 defect one table over.
+   *
+   * `toko` is asserted by VALUE, not by presence: `join` + a null column would
+   * satisfy `toHaveProperty` while the page still renders blank.
+   */
+  it('gives Finance the client NAME on the approval queue, not just the id (Finance #1)', async () => {
+    const CLI = 'CLI-ZZR-0F02';
+    const TRX = 'TRX-ZZR-0F02';
+    await sql`
+      insert into clients (id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, payment_intent, created_by)
+      values (${CLI}, 'Toko Antrean Finance', 'Ibu F2', 'Bandung', 'Fashion', 'https://shopee/zzrf2',
+              '5000000.00', '9000000.00', ${OWNER}, ${OWNER}, '[Bayar Penuh]', ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into transactions (id, client_id, payment_intent_scheme, total_agreed_value,
+                               payment_status, created_by)
+      values (${TRX}, ${CLI}, '[Bayar Penuh]', '5000000.00', '[Menunggu Verifikasi]', ${OWNER})
+      on conflict (id) do nothing`;
+
+    try {
+      const finActor = actor('ZZR-FIN', 'Finance', 'staff');
+      const rows = await withClaims(
+        sql,
+        claims({ employeeId: 'ZZR-FIN', division: 'Finance', level: 'staff' }),
+        (tx) => financeQueue(tx, finActor),
+      );
+      const mine = rows.find((r) => r.id === TRX);
+      expect(mine, 'the join must not erase Finance’s own worklist row (O52 class)').toBeDefined();
+      expect(mine!.toko).toBe('Toko Antrean Finance');
+
+      // The premise, asserted rather than assumed: strip the Finance arm and this
+      // is what the queue would look like. An execution division has no arm on
+      // `clients_select`, so it reads zero client rows — which is precisely why
+      // the equivalent Brief-side join uses `private.*` instead of a raw join.
+      const cliVisibleToCreative = await withClaims(
+        sql,
+        claims({ employeeId: OUTSIDER, division: 'Creative', level: 'staff' }),
+        (tx) => tx<{ n: number }[]>`select count(*)::int as n from clients where id = ${CLI}`,
+      );
+      expect(
+        cliVisibleToCreative[0].n,
+        'premise broken: if any division can read clients, the O52 reasoning behind this join no longer holds',
+      ).toBe(0);
+    } finally {
+      await sql`delete from transactions where id = ${TRX}`;
+      await sql`delete from contracts where client_id = ${CLI}`;
+      await sql`delete from clients where id = ${CLI}`;
+    }
+  });
+
+  /**
    * QA account 2026-08-05. `20260805030100` opened `clients` for the Account lead
    * but stopped there, so the CHILDREN of those clients stayed invisible:
    * `services_select` and `strategy_plans_select` had ownership arms only. Two
@@ -358,6 +419,183 @@ describeDb('read models under RLS (O37)', () => {
     } finally {
       await sql`delete from assets where id = ${AST}`;
       await sql`delete from briefs where id = ${BRF}`;
+      await sql`delete from services where id = ${SVC}`;
+      await sql`delete from contracts where client_id = ${CLI}`;
+      await sql`delete from clients where id = ${CLI}`;
+    }
+  });
+
+  /**
+   * Feedback OD 2026-09-07, Creative #3: a division leader opening their own
+   * queue could not tell WHICH CLIENT a Brief belonged to — the column was the
+   * bare `service_id` — nor who was holding it. F-2 puts the brand and the PIC
+   * name on every Brief read.
+   *
+   * This is the same trap as O52 one table further out, so it is asserted the
+   * same way: through the real read model, under real RLS, as the execution
+   * division. A `join services join clients join employees` here would not blank
+   * the columns — it would DELETE the rows, and the leader's queue would look
+   * empty rather than wrong.
+   *
+   * Both names are asserted BY VALUE. `toBeDefined()` would pass on `''`, which
+   * is exactly the bug being fixed. `employees` is asserted invisible too: the
+   * PIC name cannot come from a join either, since `employees_select` is
+   * self-or-creator only — a leader may not read their own staff's row.
+   */
+  /**
+   * A-2 (feedback OD 2026-09-07, Finance #2). Ayam-telur, dan bentuknya sama
+   * dengan O52 tapi jawabannya BERBEDA — jadi ia diuji, bukan diasumsikan.
+   *
+   * `kol.canProcessPaymentRequest` mengizinkan seluruh divisi Finance. Yang
+   * membantahnya `creator_payment_requests_select`, yang hanya membuka baris ke
+   * `(requested_by, paid_by, created_by)`: staf Finance yang belum pernah
+   * menyentuh sebuah CPR tidak bisa MEMBUKA-nya, dan satu-satunya cara
+   * menyentuhnya adalah membukanya lebih dulu.
+   *
+   * Di sini policy-nya memang DILEBARKAN (O52 opsi (a)), bukan diganti fungsi
+   * `private.*`, karena yang Finance butuh adalah BARIS CPR-nya — seluruhnya,
+   * untuk dinilai lalu dibayar. Tidak ada "satu kolom" yang bisa diberikan
+   * sebagai gantinya. Yang dijaga tes ini adalah bahwa pelebaran itu tetap
+   * SEMPIT: Finance masuk, divisi lain tidak, dan `creator_bookings` tidak ikut
+   * terbuka hanya karena kebetulan bertetangga.
+   */
+  it('lets Finance read a CPR it has never touched — and nobody else (Finance #2)', async () => {
+    const CLI = 'CLI-ZZR-0A2';
+    const SVC = 'SVC-ZZR-0A2';
+    const BRF = 'BRF-ZZR-0A2';
+    const BKG = 'BKG-ZZR-0A2';
+    const CPR = 'CPR-ZZR-0A2';
+    const KOL = 'ZZR-KOLA2';
+    await sql`
+      insert into clients (id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, created_by)
+      values (${CLI}, 'RLS A2 Fixture', 'Ibu A2', 'Jakarta', 'Fashion', 'https://shopee/zzra2',
+              '9000000.00', '12000000.00', ${OWNER}, ${OWNER}, ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                            commission_rule, status, created_by)
+      values (${SVC}, ${CLI}, 'MSV-ZZR-0A2', 1, 'a2 service', '9000000.00', 'rule', 'Ongoing', ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into briefs (id, service_id, title, status, assigned_division, created_by)
+      values (${BRF}, ${SVC}, 'a2 brief', '[Draft]', 'KOL', ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into creator_bookings (id, brief_id, creator_name, platform, source_pool, agreed_rate,
+                                    status, created_by)
+      values (${BKG}, ${BRF}, 'Creator A2', 'TikTok', 'MCN MEA Roster', '2500000.00',
+              '[QC Passed]', ${KOL})
+      on conflict (id) do nothing`;
+    // requested_by / created_by keduanya KOL — jadi akses Finance di bawah
+    // TIDAK bisa datang dari kepemilikan, hanya dari lengan divisinya.
+    await sql`
+      insert into creator_payment_requests (id, booking_id, amount, payment_details, status,
+                                            requested_by, created_by)
+      values (${CPR}, ${BKG}, '2500000.00', 'Bank A2 999', '[Requested]', ${KOL}, ${KOL})
+      on conflict (id) do nothing`;
+
+    const lihatCpr = (c: string) =>
+      withClaims(sql, c, (tx) =>
+        tx<{ n: number }[]>`select count(*)::int as n from creator_payment_requests where id = ${CPR}`,
+      );
+
+    try {
+      // Staf Finance biasa — belum pernah menyentuh baris ini.
+      const finStaff = await lihatCpr(claims({ employeeId: 'ZZR-FIN', division: 'Finance', level: 'staff' }));
+      expect(finStaff[0].n, 'staf Finance harus bisa membuka CPR yang belum pernah ia sentuh').toBe(1);
+
+      // Dan lead-nya juga — probe A-2 menunjukkan ia SAMA butanya sebelum ini,
+      // jadi lengannya sengaja tidak dibatasi `jwt_is_lead()`.
+      const finLead = await lihatCpr(claims({ employeeId: 'ZZR-FIN2', division: 'Finance', level: 'lead' }));
+      expect(finLead[0].n).toBe(1);
+
+      // Pengajunya tetap melihat miliknya (lengan lama tidak dicabut).
+      const pengaju = await lihatCpr(claims({ employeeId: KOL, division: 'KOL', level: 'staff' }));
+      expect(pengaju[0].n).toBe(1);
+
+      // Yang TIDAK boleh ikut terbuka. Pelebaran policy tanpa batas yang diuji
+      // adalah cara kebocoran masuk sebagai "perbaikan".
+      for (const divisi of ['Creative', 'Ads', 'Sales', 'Account']) {
+        const lain = await lihatCpr(claims({ employeeId: OUTSIDER, division: divisi, level: 'lead' }));
+        expect(lain[0].n, `${divisi} tidak boleh membaca CPR`).toBe(0);
+      }
+
+      // `creator_bookings` sengaja TIDAK ikut dilebarkan: Finance tidak perlu
+      // membaca papan booking KOL, dan nominal yang mereka butuh ada di CPR-nya.
+      const bookingUntukFinance = await withClaims(
+        sql,
+        claims({ employeeId: 'ZZR-FIN', division: 'Finance', level: 'staff' }),
+        (tx) => tx<{ n: number }[]>`select count(*)::int as n from creator_bookings where id = ${BKG}`,
+      );
+      expect(bookingUntukFinance[0].n, 'pelebaran A-2 tidak boleh merembet ke creator_bookings').toBe(0);
+    } finally {
+      await sql`delete from creator_payment_requests where id = ${CPR}`;
+      await sql`delete from creator_bookings where id = ${BKG}`;
+      await sql`delete from briefs where id = ${BRF}`;
+      await sql`delete from services where id = ${SVC}`;
+      await sql`delete from contracts where client_id = ${CLI}`;
+      await sql`delete from clients where id = ${CLI}`;
+    }
+  });
+
+  it('names the brand and the PIC on a division’s Brief queue (Creative #3)', async () => {
+    const CLI = 'CLI-ZZR-0F2B';
+    const SVC = 'SVC-ZZR-0F2B';
+    const BRF = 'BRF-ZZR-0F2B';
+    const AM = 'ZZR-AMF2B';
+    const PIC = 'ZZR-PICF2B';
+    await sql`
+      insert into clients (id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, assigned_am_id,
+                           released_to_account_at, created_by)
+      values (${CLI}, 'Brand Antrean Divisi', 'Ibu F2B', 'Surabaya', 'Fashion', 'https://shopee/zzrf2b',
+              '9000000.00', '12000000.00', ${OWNER}, ${OWNER}, ${AM}, now(), ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                            commission_rule, status, created_by)
+      values (${SVC}, ${CLI}, 'MSV-ZZR-0F2B', 1, 'f2b service', '9000000.00',
+              '10% of standard price', 'Ongoing', ${AM})
+      on conflict (id) do nothing`;
+    // The PIC is a real employee row so the display name has something to find;
+    // it is NOT the reader and NOT the creator, so RLS on `employees` denies it.
+    await sql`
+      insert into employees (employee_id, nama, email, divisi, jabatan, created_by)
+      values (${PIC}, 'Rian PIC F2B', 'rian.f2b@zzr.test', 'Creative', 'Creative Designer', ${OWNER})
+      on conflict (employee_id) do nothing`;
+    await sql`
+      insert into briefs (id, service_id, title, status, assigned_division, assigned_pic, created_by)
+      values (${BRF}, ${SVC}, 'f2b brief', '[Draft]', 'Creative', ${PIC}, ${AM})
+      on conflict (id) do nothing`;
+
+    const leadClaims = claims({ employeeId: 'ZZR-CRELEADF', division: 'Creative', level: 'lead' });
+    const leadActor = actor('ZZR-CRELEADF', 'Creative', 'lead');
+    try {
+      // Premise: all three joined tables are invisible to this reader, so the
+      // values below can only have arrived through `private.*`.
+      const invisible = await withClaims(sql, leadClaims, (tx) =>
+        tx<{ svc: string; cli: string; emp: string }[]>`
+          select (select count(*) from services  where id = ${SVC}) as svc,
+                 (select count(*) from clients   where id = ${CLI}) as cli,
+                 (select count(*) from employees where employee_id = ${PIC}) as emp`,
+      );
+      expect(
+        Number(invisible[0].svc) + Number(invisible[0].cli) + Number(invisible[0].emp),
+        'premise broken: a join would work here, so this test no longer proves the private.* door is needed',
+      ).toBe(0);
+
+      const queue = await withClaims(sql, leadClaims, (tx) =>
+        listDivisionQueue(tx, leadActor, 'Creative'),
+      );
+      const mine = queue.find((b) => b.id === BRF);
+      expect(mine, 'the queue must still contain the Brief — a join would have erased it').toBeDefined();
+      expect(mine!.clientId).toBe(CLI);
+      expect(mine!.clientNama).toBe('Brand Antrean Divisi');
+      expect(mine!.assignedPicNama).toBe('Rian PIC F2B');
+    } finally {
+      await sql`delete from briefs where id = ${BRF}`;
+      await sql`delete from employees where employee_id = ${PIC}`;
       await sql`delete from services where id = ${SVC}`;
       await sql`delete from contracts where client_id = ${CLI}`;
       await sql`delete from clients where id = ${CLI}`;

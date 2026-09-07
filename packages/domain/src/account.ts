@@ -466,6 +466,19 @@ export const MSG_APPROVE_FORBIDDEN =
 export const MSG_REVISION_NOTES_REQUIRED = '[catatan revisi wajib diisi]';
 /** Divisions Involved contains a value outside the allowed set. */
 export const MSG_INVALID_DIVISIONS = '[divisi yang terlibat tidak valid]';
+
+/**
+ * K-1 (ketokan pemilik 2026-09-07, opsi B): AM memilih DIVISI tujuan, bukan nama
+ * staff. Yang membagi pekerjaan ke PIC adalah lead divisi itu, lewat
+ * `task.assignPic` / `task.assignAssetPic` — pintu yang sudah ada dan sudah
+ * digerbangi `canManageTask` (lead/SPV divisi tujuan atau Director).
+ *
+ * Pesannya menyebut SIAPA yang menetapkannya, bukan cuma "tidak boleh": seorang
+ * AM yang membaca "PIC tidak valid" akan mencoba nama lain. Yang perlu dia tahu
+ * adalah bahwa langkah itu bukan langkahnya lagi.
+ */
+export const MSG_PIC_BUKAN_WEWENANG_AM =
+  '[PIC ditetapkan lead divisi tujuan setelah Brief diterima, bukan saat Brief dibuat]';
 /** Actor may not read this Strategy & Plan (not owner AM / Account lead / OD / Director). */
 export const MSG_STRATEGY_FORBIDDEN = '[anda tidak memiliki akses ke Strategy & Plan ini]';
 /** M6C Rule 1: `ditentukan_am` tier with no recorded G-B decision blocks Brief creation. */
@@ -1623,7 +1636,17 @@ export const MSG_BRIEF_REVIEW_FORBIDDEN =
 
 // --- Types ---
 
-/** The M6 §9.4 Brief fields (mandatory: title, division, deliverableType, quantityTarget, dueDate, priority). */
+/**
+ * The M6 §9.4 Brief fields (mandatory: title, division, deliverableType,
+ * quantityTarget, dueDate, priority).
+ *
+ * ⚠️ `assignedPic` is no longer accepted from this input (K-1, 2026-09-07) —
+ * `validateBrief` rejects a non-empty value with `MSG_PIC_BUKAN_WEWENANG_AM`.
+ * The field is kept because `insertBrief` is shared with the M6B inheritance
+ * path and the column itself is still written, later, by `task.assignPic` (lead
+ * of the target division). Removing it here would only move the same
+ * always-empty value into a positional argument.
+ */
 export interface BriefInput {
   title: string;
   strategyId?: string;
@@ -1670,6 +1693,19 @@ export interface Brief {
   stagePipelineCode: string | null;
   /** M16 — tahap aktif mesin tahapan. Ditulis HANYA lewat sm_transition (stage.ts) setelah pengisian awal ini. */
   productionStage: string | null;
+  /**
+   * Klien di balik Brief ini (Creative #3). Lewat `private.brief_client_id`,
+   * BUKAN `join services` — lihat briefCols. '' kalau Service/klien tak ada.
+   */
+  clientId: string;
+  /** Nama toko klien (`clients.toko`). '' kalau klien tak ada. */
+  clientNama: string;
+  /**
+   * Nama PIC yang dipegangi Brief ini. '' kalau `assigned_pic` NULL; kalau
+   * terisi tapi karyawannya hilang, `private.employee_display_name` jatuh ke
+   * employee_id-nya — sebuah id masih lebih berguna daripada kolom kosong.
+   */
+  assignedPicNama: string;
 }
 
 // --- Input validation ---
@@ -1695,6 +1731,20 @@ function validateBrief(input: BriefInput): void {
   }
   if (!RE_DATE.test(due) || Number.isNaN(Date.parse(`${due}T00:00:00Z`))) {
     throw new ValidationError(bi.INCOMPLETE_DATA);
+  }
+  // K-1 — `assignedPic` TIDAK BOLEH datang dari jalur ini lagi. Sebelum ini
+  // `validateBrief` tidak memeriksanya sama sekali, jadi menghapus picker-nya di
+  // UI saja akan menyisakan pintu yang terbuka lebar: `POST /services/{id}/briefs`
+  // dengan `assigned_pic` masih akan diterima dan disimpan, dan K-1 akan berlaku
+  // hanya bagi orang yang memakai form. Ditolak, bukan diabaikan diam-diam —
+  // sebuah field yang dikirim lalu dibuang tanpa kabar adalah cara paling pasti
+  // membuat pemanggil percaya PIC-nya sudah tersimpan.
+  //
+  // Kolomnya sendiri TETAP HIDUP: `task.assignPic` (lead/SPV divisi tujuan, gate
+  // `canManageTask`) yang mengisinya, dan `ads.canFileWeeklyReport` ikut
+  // membacanya. Yang ditutup di sini hanya pintu masuk sisi AM.
+  if ((input.assignedPic ?? '').trim() !== '') {
+    throw new ValidationError(MSG_PIC_BUKAN_WEWENANG_AM);
   }
   // Recurring toggle: when on, its sub-fields become mandatory (§9.4).
   if (input.recurring) {
@@ -1779,6 +1829,14 @@ export async function insertBrief(
     actor: actor.employeeId, division: input.assignedDivision,
   });
 
+  // The three identity fields (Creative #3) are read back through the SAME
+  // `private.*` doors `briefCols` uses, rather than assembled from `input` here.
+  // A second derivation is a second answer waiting to drift: this path knows the
+  // PIC's id but not their name, and knows the Service but not the client — and
+  // a Brief born with `clientNama: ''` would render a blank column on exactly
+  // the screen this was meant to fix.
+  const ident = await briefIdentity(tx, id);
+
   return {
     id, serviceId, strategyId: strategyId ?? '', assignedDivision: input.assignedDivision,
     assignedPic: (input.assignedPic ?? '').trim(), deliverableType: input.deliverableType,
@@ -1788,6 +1846,34 @@ export async function insertBrief(
     referenceAttachments: (input.referenceAttachments ?? '').trim(), title: input.title.trim(), status: birth,
     revisionCount: 0, revisionFlagged: false, createdBy: actor.employeeId, createdAt: now,
     stagePipelineCode: pipeline?.code ?? null, productionStage: pipeline?.initialState ?? null,
+    clientId: ident.clientId, clientNama: ident.clientNama, assignedPicNama: ident.assignedPicNama,
+  };
+}
+
+/**
+ * briefIdentity reads the client + PIC identity of one Brief through the same
+ * `private.*` doors `briefCols` projects, for the paths that build a `Brief`
+ * without going through `rowToBrief` (Brief birth). Keeping the expressions in
+ * one place is the point — see briefCols for why they are functions and not
+ * joins (O52).
+ */
+async function briefIdentity(
+  sql: Queryable,
+  briefId: string,
+): Promise<{ clientId: string; clientNama: string; assignedPicNama: string }> {
+  const rows = await sql<{
+    client_id: string | null; client_nama: string | null; assigned_pic_nama: string | null;
+  }[]>`
+    select private.brief_client_id(b.id) as client_id,
+           private.brief_client_toko(b.id) as client_nama,
+           case when b.assigned_pic is null then null
+                else private.employee_display_name(b.assigned_pic) end as assigned_pic_nama
+      from briefs b where b.id = ${briefId}`;
+  const r = rows[0];
+  return {
+    clientId: r?.client_id ?? '',
+    clientNama: r?.client_nama ?? '',
+    assignedPicNama: r?.assigned_pic_nama ?? '',
   };
 }
 
@@ -2146,14 +2232,37 @@ interface BriefRow {
   assigned_am_id?: string | null;
   stage_pipeline_code: string | null;
   production_stage: string | null;
+  client_id: string | null;
+  client_nama: string | null;
+  assigned_pic_nama: string | null;
 }
 
-/** briefCols is the shared Brief column list (nested sql fragment). */
+/**
+ * briefCols is the shared Brief column list (nested sql fragment).
+ *
+ * Feedback OD 2026-09-07 Creative #3: a division leader could not tell which
+ * client a queued Brief belonged to — the column was the bare `service_id`. The
+ * three identity columns are added HERE, to the shared list, rather than to the
+ * one queue that reported it: `Brief` is one shape, and a field present on some
+ * reads and absent on others is the class O43 defect (a MISSING key blanks the
+ * page even though the route answered 200).
+ *
+ * They arrive through `private.*` SECURITY DEFINER functions, NOT through
+ * `join services join clients join employees`. This read runs under RLS
+ * (`readAsActor`) and its readers are the execution divisions, for whom all
+ * three of those policies erase the row outright — O52, decided as option (b)
+ * on 2026-08-07: answer the question through a function, never widen the policy.
+ * Same door `assigned_am_id` already walks through in loadBrief.
+ */
 function briefCols(sql: Queryable) {
   return sql`b.id, b.service_id, b.strategy_id, b.assigned_division, b.assigned_pic, b.deliverable_type,
     b.quantity_target, b.due_date, b.priority, b.recurring, b.recurring_frequency, b.recurring_count,
     b.recurring_end_date, b.instructions, b.reference_attachments, b.title, b.status, b.created_by, b.created_at,
-    b.stage_pipeline_code, b.production_stage`;
+    b.stage_pipeline_code, b.production_stage,
+    private.brief_client_id(b.id) as client_id,
+    private.brief_client_toko(b.id) as client_nama,
+    case when b.assigned_pic is null then null
+         else private.employee_display_name(b.assigned_pic) end as assigned_pic_nama`;
 }
 
 function rowToBrief(r: BriefRow): Brief {
@@ -2166,6 +2275,8 @@ function rowToBrief(r: BriefRow): Brief {
     instructions: r.instructions ?? '', referenceAttachments: r.reference_attachments ?? '', title: r.title,
     status: r.status, revisionCount: 0, revisionFlagged: false, createdBy: r.created_by, createdAt: r.created_at,
     stagePipelineCode: r.stage_pipeline_code, productionStage: r.production_stage,
+    clientId: r.client_id ?? '', clientNama: r.client_nama ?? '',
+    assignedPicNama: r.assigned_pic_nama ?? '',
   };
 }
 

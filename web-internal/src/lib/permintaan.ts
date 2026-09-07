@@ -35,6 +35,13 @@ export interface Permintaan {
   hari_terlambat: number;
   created_by: string;
   created_at: string; // RFC3339
+  // A-2 (Finance #2) — antrean Finance menyebut klien, pengaju, dan nominal.
+  // Non-opsional: `''` dikirim eksplisit, jadi halaman merender `—` alih-alih
+  // `undefined`.
+  toko: string;
+  diajukan_oleh_nama: string;
+  /** Sudah diformat `Rp. X.XXX.XXX,00`. `null` = bukan Creator Payment Approval. */
+  nominal: string | null;
 }
 
 export interface PermintaanPayload {

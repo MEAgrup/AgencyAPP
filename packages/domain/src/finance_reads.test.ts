@@ -216,6 +216,10 @@ describeDb('financeQueue', () => {
     expect(mine!.installments).toHaveLength(2);
     // proof_of_payment was the field missing from InstallmentRow entirely.
     expect(mine!.installments[0]).toHaveProperty('proofOfPayment');
+    // Feedback OD 2026-09-07 Finance #1: the queue named the client by id only.
+    // Asserted by value against the fixture's `toko` — `join` + a null column
+    // would pass a presence check and still render a blank column.
+    expect(mine!.toko).toBe('Alpha Digital');
   });
 
   /**
@@ -291,7 +295,10 @@ describeDb('loadTransactionAggregate', () => {
     await expect(loadTransactionAggregate(sql, accountLead(), transactionId))
       .rejects.toBeInstanceOf(NotFoundError);
     // Finance sees it all along.
-    expect((await loadTransactionAggregate(sql, financeStaff(), transactionId)).id).toBe(transactionId);
+    const loaded = await loadTransactionAggregate(sql, financeStaff(), transactionId);
+    expect(loaded.id).toBe(transactionId);
+    // The transaction-detail header names the client too (Finance #1).
+    expect(loaded.toko).toBe('Alpha Digital');
 
     await attachContract(sql, financeStaff(), transactionId, 'https://drive/contract.pdf');
     await verifyPayment(sql, financeStaff(), {

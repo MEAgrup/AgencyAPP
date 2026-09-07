@@ -178,7 +178,16 @@ check() { # nama · sql · harapan
 check "tabel public"     "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" "146"
 check "entity_prefix"    "select count(*) from entity_prefix"    "40"
 check "sm_machines"      "select count(*) from sm_machines"      "31"
-check "notif_events"     "select count(*) from notif_events"     "69"
+check "notif_events"     "select count(*) from notif_events"     "73"
+# 73 = 69 + 4 event Feedback OD 2026-09-07 (katalog v15,
+#      20260922100100_f3_notif_feedback_od.sql): `m6.brief.siap_review_am` dan
+#      `m6.brief.selesai` (resolver 'explicit' -> AM pemilik klien, menutup
+#      ujung diam yang dikeluhkan Account #3 & #4), `m9.booking.jatuh_tempo`
+#      dan `m9.campaign.mendekati_akhir` (resolver 'explicitOrLeads' ->
+#      koordinator KOL + AM, keluhan KOL #1). SATU bump untuk keempatnya —
+#      dua jalur paralel memasang emitternya masing-masing, dan mendaftarkan
+#      event tanpa emitter itu aman (gate membandingkan NAMA event). Nol
+#      tabel/prefix/mesin baru ⇒ 146 tabel/40 prefix/31 mesin TETAP.
 # 69 = 67 + 2 event Revisi Sales/Creative/Performa L2 (katalog v14:
 #      m1.attempt.unrespon / m1.attempt.auto_not_qualified, keduanya resolver
 #      'explicit' -> pemilik attempt; emitter job leads_unrespon_tick).
