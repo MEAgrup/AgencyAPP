@@ -87,6 +87,12 @@ export * as sales from './sales';
 export * as activity from './activity';
 export * as msl from './msl';
 export * as finance from './finance';
+// Gelombang D — jahitan mesin accrual: merakit masukan `core.accrual` dari
+// `services` + versi MSL yang dipin + riwayat transisi `audit_log`. Berdiri
+// sendiri dan BUKAN bagian dari `finance`: `finance` memiliki siklus pembayaran
+// (apa yang sudah masuk kasnya), modul ini memiliki pengakuan (bulan mana yang
+// mengakuinya) — dua pertanyaan berbeda atas uang yang sama.
+export * as accrual from './accrual';
 export * as client from './client';
 export * as account from './account';
 export * as plangate from './plangate';

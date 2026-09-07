@@ -3,6 +3,9 @@
  *
  * This package exports the following engines (ported incrementally per phase):
  * - money: Commission, allocation (Σ=100%), installment rollup, ROAS math ✅
+ * - accrual: jadwal pengakuan pendapatan per BULAN KALENDER untuk satu layanan
+ *   terbeli (Gelombang D) — pro-rata harian, hangus D-1, jeda hold D-2, tiga
+ *   nilai `pengakuan` D-KOM; nilai BRUTO apa adanya, nol hitungan PPN (D-4) ✅
  * - tz: WIB (UTC+7, no DST) calendar-date bucketing ✅
  * - page: keyset ("cursor") pagination over the house `created_at desc, id
  *   desc` list ordering — opaque cursor, over-fetch-by-one has-more probe,
