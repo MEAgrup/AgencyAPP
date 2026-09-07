@@ -181,9 +181,19 @@ export interface ShowcaseHasil {
 }
 
 /** Urut laporan ber-skor dari yang paling lama ke yang paling baru. */
-function berskorUrut(laporan: readonly LaporanRingkas[]): LaporanRingkas[] {
+/**
+ * Laporan yang PASTI ber-skor. Tipenya sengaja `LaporanRingkas & { skor: number }`
+ * dan bukan `LaporanRingkas`: predikat penyempit di `.filter()` di bawah tidak
+ * ada gunanya kalau anotasi kembalian melebarkannya lagi ke `number | null`,
+ * dan yang tersisa hanyalah `!` di setiap pembacanya — yaitu tepat titik di
+ * mana "laporan tanpa skor bukan laporan ber-skor nol" berhenti dijaga
+ * kompiler.
+ */
+type LaporanBerskor = LaporanRingkas & { skor: number };
+
+function berskorUrut(laporan: readonly LaporanRingkas[]): LaporanBerskor[] {
   return laporan
-    .filter((l): l is LaporanRingkas & { skor: number } => typeof l.skor === 'number')
+    .filter((l): l is LaporanBerskor => typeof l.skor === 'number')
     .slice()
     .sort((a, b) =>
       a.periodeAkhir === b.periodeAkhir ? a.id - b.id : a.periodeAkhir < b.periodeAkhir ? -1 : 1,
