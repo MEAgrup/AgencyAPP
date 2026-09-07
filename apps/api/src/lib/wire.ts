@@ -6990,6 +6990,14 @@ export interface PermintaanWire {
   hari_terlambat: number;
   created_by: string;
   created_at: string;
+  // A-2 (Finance #2) — antrean Finance menyebut KLIEN, PENGAJU, dan NOMINAL.
+  // Nol omitempty: `''` dan `null` dikirim eksplisit. `nominal` sudah diformat
+  // IDR di sini (`Rp. X.XXX.XXX,00`, aturan rumah #7) dan `null` untuk jenis
+  // yang bukan Creator Payment Approval — halaman merender `—`, bukan `Rp. 0`,
+  // karena nol rupiah dan "tidak ada nominal" bukan hal yang sama.
+  toko: string;
+  diajukan_oleh_nama: string;
+  nominal: string | null;
 }
 
 export function permintaanToWire(p: req.Permintaan): PermintaanWire {
@@ -7005,6 +7013,8 @@ export function permintaanToWire(p: req.Permintaan): PermintaanWire {
     alasan_ditolak: p.alasanDitolak, catatan_proses: p.catatanProses,
     terlambat_berjalan: p.terlambatBerjalan, selesai_terlambat: p.selesaiTerlambat, hari_terlambat: p.hariTerlambat,
     created_by: p.createdBy, created_at: p.createdAt.toISOString(),
+    toko: p.toko, diajukan_oleh_nama: p.diajukanOlehNama,
+    nominal: p.nominal === null ? null : idr(p.nominal),
   };
 }
 

@@ -24,6 +24,7 @@ import {
   listPermintaanForClient,
   listPermintaanQueue,
   MSG_CPA_REQUIRES_CPR,
+  MSG_CPA_SUDAH_BERJALAN,
   MSG_INVALID_JENIS,
   NotFoundError,
   processPermintaan,
@@ -180,6 +181,62 @@ describeDb('createPermintaan (§5.5)', () => {
     expect(p.clientId).toBe(clientId);
     expect(p.tujuanDivisi).toBe('Account');
     expect(p.tujuanEmployeeId).toBe('ZZ-SINTA'); // the client's assigned_am_id
+  });
+
+  /**
+   * A-2 (Finance #2). Halaman CPR hanya punya `booking_id` — `PaymentRequest`
+   * tidak pernah membawa `brief_id` — jadi tombol "Ajukan ke Finance" mengirim
+   * `cpr_id` SAJA, dan servernya menurunkan sendiri rantai
+   * CPR → booking → brief → service → client.
+   *
+   * Yang di-assert bukan cuma "tidak error": `clientId` HARUS klien di balik
+   * CPR-nya. Sebelum A-2, `brief_id` dan `cpr_id` tidak pernah dicocokkan satu
+   * sama lain, jadi sebuah REQ- bisa lahir menunjuk CPR klien A dengan
+   * `client_id` klien B — dan Finance akan menagih klien yang salah.
+   */
+  it('A-2: Creator Payment Approval cukup cpr_id — parent-nya diturunkan dari CPR', async () => {
+    const { clientId } = await clientBrief('KOL');
+    const cprId = await insertCpr(clientId);
+    const p = await createPermintaan(sql, kolStaff(), {
+      jenis: JENIS_CREATOR_PAYMENT_APPROVAL, judul: 'Approval bayar creator', cprId,
+    });
+    expect(p.clientId).toBe(clientId);
+    expect(p.cprId).toBe(cprId);
+    expect(p.tujuanDivisi).toBe('Finance');
+    // Brief-nya ikut terisi dari rantai itu, bukan dibiarkan null.
+    expect(p.briefId).not.toBeNull();
+    // Nominalnya datang dari baris CPR, bukan diketik pengaju.
+    expect(p.nominal).toBe('1000000.00');
+    // Dan nama toko + nama pengaju ikut, supaya antrean Finance tidak
+    // menyebut orang dan klien dengan id (keluhan Finance #1, layar lain).
+    expect(p.toko).toBe(clientId); // fixture menaruh id sebagai nama toko
+    expect(p.diajukanOlehNama).toBe('ZZ-KOL');
+  });
+
+  /**
+   * Tanpa gerbang ini, tombol yang ditekan dua kali — atau dua orang KOL di dua
+   * tab — menaruh DUA baris untuk pembayaran yang SAMA di antrean Finance.
+   * Antrean yang isinya duplikat adalah antrean yang berhenti dipercaya, dan
+   * "dibayar dua kali" adalah kerugian yang tidak boleh diambil sistem sendiri.
+   */
+  it('A-2: satu CPR tidak boleh punya dua Permintaan yang masih berjalan', async () => {
+    const { clientId } = await clientBrief('KOL');
+    const cprId = await insertCpr(clientId);
+    const first = await createPermintaan(sql, kolStaff(), {
+      jenis: JENIS_CREATOR_PAYMENT_APPROVAL, judul: 'Approval 1', cprId,
+    });
+    await expect(createPermintaan(sql, kolStaff(), {
+      jenis: JENIS_CREATOR_PAYMENT_APPROVAL, judul: 'Approval 2', cprId,
+    })).rejects.toThrow(MSG_CPA_SUDAH_BERJALAN);
+
+    // …tapi yang sudah DITOLAK tidak menghalangi pengajuan ulang: penolakan
+    // sering justru karena detail rekeningnya salah, dan memblokir perbaikannya
+    // akan membuat pembayaran creator mati di tempat.
+    await rejectPermintaan(sql, financeStaff(), first.id, 'rekening salah');
+    const retry = await createPermintaan(sql, kolStaff(), {
+      jenis: JENIS_CREATOR_PAYMENT_APPROVAL, judul: 'Approval 3', cprId,
+    });
+    expect(retry.id).not.toBe(first.id);
   });
 
   it('rejects an unknown jenis and a missing mandatory field', async () => {

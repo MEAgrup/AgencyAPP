@@ -442,6 +442,103 @@ describeDb('read models under RLS (O37)', () => {
    * PIC name cannot come from a join either, since `employees_select` is
    * self-or-creator only — a leader may not read their own staff's row.
    */
+  /**
+   * A-2 (feedback OD 2026-09-07, Finance #2). Ayam-telur, dan bentuknya sama
+   * dengan O52 tapi jawabannya BERBEDA — jadi ia diuji, bukan diasumsikan.
+   *
+   * `kol.canProcessPaymentRequest` mengizinkan seluruh divisi Finance. Yang
+   * membantahnya `creator_payment_requests_select`, yang hanya membuka baris ke
+   * `(requested_by, paid_by, created_by)`: staf Finance yang belum pernah
+   * menyentuh sebuah CPR tidak bisa MEMBUKA-nya, dan satu-satunya cara
+   * menyentuhnya adalah membukanya lebih dulu.
+   *
+   * Di sini policy-nya memang DILEBARKAN (O52 opsi (a)), bukan diganti fungsi
+   * `private.*`, karena yang Finance butuh adalah BARIS CPR-nya — seluruhnya,
+   * untuk dinilai lalu dibayar. Tidak ada "satu kolom" yang bisa diberikan
+   * sebagai gantinya. Yang dijaga tes ini adalah bahwa pelebaran itu tetap
+   * SEMPIT: Finance masuk, divisi lain tidak, dan `creator_bookings` tidak ikut
+   * terbuka hanya karena kebetulan bertetangga.
+   */
+  it('lets Finance read a CPR it has never touched — and nobody else (Finance #2)', async () => {
+    const CLI = 'CLI-ZZR-0A2';
+    const SVC = 'SVC-ZZR-0A2';
+    const BRF = 'BRF-ZZR-0A2';
+    const BKG = 'BKG-ZZR-0A2';
+    const CPR = 'CPR-ZZR-0A2';
+    const KOL = 'ZZR-KOLA2';
+    await sql`
+      insert into clients (id, toko, nama_pic, kota, kategori, link_toko, gmv_baseline, target_gmv,
+                           sales_pic_id, commission_payment_pic_id, created_by)
+      values (${CLI}, 'RLS A2 Fixture', 'Ibu A2', 'Jakarta', 'Fashion', 'https://shopee/zzra2',
+              '9000000.00', '12000000.00', ${OWNER}, ${OWNER}, ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into services (id, client_id, master_service_id, master_version_no, name, standard_price,
+                            commission_rule, status, created_by)
+      values (${SVC}, ${CLI}, 'MSV-ZZR-0A2', 1, 'a2 service', '9000000.00', 'rule', 'Ongoing', ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into briefs (id, service_id, title, status, assigned_division, created_by)
+      values (${BRF}, ${SVC}, 'a2 brief', '[Draft]', 'KOL', ${OWNER})
+      on conflict (id) do nothing`;
+    await sql`
+      insert into creator_bookings (id, brief_id, creator_name, platform, source_pool, agreed_rate,
+                                    status, created_by)
+      values (${BKG}, ${BRF}, 'Creator A2', 'TikTok', 'MCN MEA Roster', '2500000.00',
+              '[QC Passed]', ${KOL})
+      on conflict (id) do nothing`;
+    // requested_by / created_by keduanya KOL — jadi akses Finance di bawah
+    // TIDAK bisa datang dari kepemilikan, hanya dari lengan divisinya.
+    await sql`
+      insert into creator_payment_requests (id, booking_id, amount, payment_details, status,
+                                            requested_by, created_by)
+      values (${CPR}, ${BKG}, '2500000.00', 'Bank A2 999', '[Requested]', ${KOL}, ${KOL})
+      on conflict (id) do nothing`;
+
+    const lihatCpr = (c: string) =>
+      withClaims(sql, c, (tx) =>
+        tx<{ n: number }[]>`select count(*)::int as n from creator_payment_requests where id = ${CPR}`,
+      );
+
+    try {
+      // Staf Finance biasa — belum pernah menyentuh baris ini.
+      const finStaff = await lihatCpr(claims({ employeeId: 'ZZR-FIN', division: 'Finance', level: 'staff' }));
+      expect(finStaff[0].n, 'staf Finance harus bisa membuka CPR yang belum pernah ia sentuh').toBe(1);
+
+      // Dan lead-nya juga — probe A-2 menunjukkan ia SAMA butanya sebelum ini,
+      // jadi lengannya sengaja tidak dibatasi `jwt_is_lead()`.
+      const finLead = await lihatCpr(claims({ employeeId: 'ZZR-FIN2', division: 'Finance', level: 'lead' }));
+      expect(finLead[0].n).toBe(1);
+
+      // Pengajunya tetap melihat miliknya (lengan lama tidak dicabut).
+      const pengaju = await lihatCpr(claims({ employeeId: KOL, division: 'KOL', level: 'staff' }));
+      expect(pengaju[0].n).toBe(1);
+
+      // Yang TIDAK boleh ikut terbuka. Pelebaran policy tanpa batas yang diuji
+      // adalah cara kebocoran masuk sebagai "perbaikan".
+      for (const divisi of ['Creative', 'Ads', 'Sales', 'Account']) {
+        const lain = await lihatCpr(claims({ employeeId: OUTSIDER, division: divisi, level: 'lead' }));
+        expect(lain[0].n, `${divisi} tidak boleh membaca CPR`).toBe(0);
+      }
+
+      // `creator_bookings` sengaja TIDAK ikut dilebarkan: Finance tidak perlu
+      // membaca papan booking KOL, dan nominal yang mereka butuh ada di CPR-nya.
+      const bookingUntukFinance = await withClaims(
+        sql,
+        claims({ employeeId: 'ZZR-FIN', division: 'Finance', level: 'staff' }),
+        (tx) => tx<{ n: number }[]>`select count(*)::int as n from creator_bookings where id = ${BKG}`,
+      );
+      expect(bookingUntukFinance[0].n, 'pelebaran A-2 tidak boleh merembet ke creator_bookings').toBe(0);
+    } finally {
+      await sql`delete from creator_payment_requests where id = ${CPR}`;
+      await sql`delete from creator_bookings where id = ${BKG}`;
+      await sql`delete from briefs where id = ${BRF}`;
+      await sql`delete from services where id = ${SVC}`;
+      await sql`delete from contracts where client_id = ${CLI}`;
+      await sql`delete from clients where id = ${CLI}`;
+    }
+  });
+
   it('names the brand and the PIC on a division’s Brief queue (Creative #3)', async () => {
     const CLI = 'CLI-ZZR-0F2B';
     const SVC = 'SVC-ZZR-0F2B';

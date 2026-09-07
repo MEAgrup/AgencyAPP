@@ -7,12 +7,16 @@ import { useAuth } from '@/lib/auth-context';
 import {
   canFinanceAction,
   getPaymentRequest,
+  isDirector,
+  isKolDivision,
+  isODOnly,
   payPaymentRequest,
   paymentRequestBadgeTone,
   receivePaymentRequest,
   rejectPaymentRequest,
   type PaymentRequest,
 } from '@/lib/kol';
+import { createPermintaan } from '@/lib/permintaan';
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return '—';
@@ -36,6 +40,13 @@ export default function KolPaymentRequestDetailPage({ params }: { params: Promis
   const [rejectSubmitting, setRejectSubmitting] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
 
+  // A-2 — "Ajukan ke Finance": mencetak Permintaan (REQ-) bertujuan Finance
+  // supaya CPR ini muncul di ANTREAN mereka, bukan cuma bisa dibuka kalau
+  // id-nya sudah diketahui. Itu inti keluhan Finance #2.
+  const [ajukanBusy, setAjukanBusy] = useState(false);
+  const [ajukanError, setAjukanError] = useState<string | null>(null);
+  const [ajukanOk, setAjukanOk] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
@@ -52,6 +63,38 @@ export default function KolPaymentRequestDetailPage({ params }: { params: Promis
   useEffect(() => {
     load();
   }, [load]);
+
+  /**
+   * Mengajukan CPR ini ke antrean Finance.
+   *
+   * Payload-nya hanya `jenis` + `cpr_id` + `judul` — TANPA `brief_id`, dan itu
+   * bukan kelalaian: halaman ini memang tidak punya `brief_id` (`PaymentRequest`
+   * hanya membawa `booking_id`), dan servernya menurunkan seluruh rantai
+   * klien dari CPR-nya sendiri (`resolveParent`). Mengirim `brief_id` dari sini
+   * berarti menebak sesuatu yang sudah pasti di sisi server.
+   *
+   * Pengajuan ganda dijaga server (`MSG_CPA_SUDAH_BERJALAN` → 409), bukan oleh
+   * tombol yang disembunyikan: dua orang KOL di dua tab tidak bisa saling
+   * melihat state tombol satu sama lain.
+   */
+  async function handleAjukanKeFinance() {
+    if (!request) return;
+    setAjukanError(null);
+    setAjukanOk(null);
+    setAjukanBusy(true);
+    try {
+      const req = await createPermintaan({
+        jenis: 'Creator Payment Approval',
+        judul: `Approval pembayaran creator ${request.id} — ${request.amount_display}`,
+        cpr_id: request.id,
+      });
+      setAjukanOk(`${req.id} masuk antrean Finance, jatuh tempo ${req.due_date}.`);
+    } catch (err) {
+      setAjukanError(errorMessage(err));
+    } finally {
+      setAjukanBusy(false);
+    }
+  }
 
   async function handleReceive() {
     setActionError(null);
@@ -111,6 +154,10 @@ export default function KolPaymentRequestDetailPage({ params }: { params: Promis
   const canFinance = canFinanceAction(role);
   const isRequested = request.status === '[Requested]';
   const isReceived = request.status === '[Received by Finance]';
+  // Mirror `req.canCreate('Creator Payment Approval')` — divisi KOL yang
+  // mengajukan (dia yang mencetak CPR-nya), Director selalu boleh, dan OD
+  // tetap read-only (Phase 0 §4). Server tetap otoritas terakhir.
+  const canAjukan = !isODOnly(role) && (isDirector(role) || isKolDivision(role));
 
   return (
     <div className="stack">
@@ -163,6 +210,32 @@ export default function KolPaymentRequestDetailPage({ params }: { params: Promis
           )}
         </div>
       </section>
+
+      {/* A-2 — hanya saat masih `[Requested]`: sesudah Finance menerimanya,
+          mereka sudah melihatnya dan sebuah pengajuan tidak menambah apa pun. */}
+      {canAjukan && isRequested && (
+        <section className="card">
+          <div className="cardHeader">
+            <h2>Ajukan ke Finance</h2>
+          </div>
+          <p className="muted" style={{ fontSize: 13 }}>
+            Mencetak Permintaan (REQ-) supaya pembayaran ini muncul di antrean Finance dengan
+            jatuh tempo 1 hari kerja — bukan hanya bisa dibuka kalau id-nya sudah diketahui.
+          </p>
+          {ajukanError && <div className="alert alertError" role="alert">{ajukanError}</div>}
+          {ajukanOk && <div className="alert alertInfo" role="status">{ajukanOk}</div>}
+          <div>
+            <button
+              type="button"
+              className="btn btnPrimary"
+              disabled={ajukanBusy || ajukanOk !== null}
+              onClick={handleAjukanKeFinance}
+            >
+              {ajukanBusy ? 'Mengajukan...' : 'Ajukan ke Finance'}
+            </button>
+          </div>
+        </section>
+      )}
 
       {canFinance && (isRequested || isReceived) && (
         <section className="card">

@@ -62,6 +62,16 @@ export const MSG_SERVICE_NOT_FOUND = '[layanan tidak ditemukan]';
 export const MSG_CPA_REQUIRES_CPR = '[Creator Payment Approval wajib menyambung Creator Payment Request yang sudah ada]';
 export const MSG_CPR_NOT_FOUND = '[creator payment request tidak ditemukan]';
 export const MSG_REJECT_REASON_REQUIRED = '[alasan penolakan wajib diisi]';
+/**
+ * A-2: satu Creator Payment Request tidak boleh punya DUA Permintaan yang
+ * masih berjalan. Tanpa gerbang ini, tombol "Ajukan ke Finance" yang ditekan
+ * dua kali (atau dua orang KOL yang menekan tombol yang sama) menaruh dua baris
+ * untuk pembayaran YANG SAMA di antrean Finance — dan antrean yang isinya
+ * duplikat adalah cara antrean berhenti dipercaya. Yang sudah `[Selesai]` atau
+ * `[Ditolak]` tidak menghalangi: pengajuan ulang setelah ditolak memang sah.
+ */
+export const MSG_CPA_SUDAH_BERJALAN =
+  '[permintaan untuk creator payment request ini masih berjalan]';
 
 // --- Errors (req-scoped; mapped in apps/api http.ts) ---
 
@@ -197,6 +207,25 @@ export interface Permintaan {
   hariTerlambat: number;
   createdBy: string;
   createdAt: Date;
+  /**
+   * Nama toko klien (Finance #2). Antrean ini menyebut klien, dan `CLI-…` bukan
+   * jawaban — itu keluhan Finance #1 yang sama, satu layar berbeda. Lewat
+   * `private.client_toko`, BUKAN join: `listPermintaanQueue` juga dipakai
+   * antrean Account, dan seorang AM tidak punya lengan `clients_select` untuk
+   * klien yang bukan miliknya ⇒ join akan membuang barisnya (O52).
+   */
+  toko: string;
+  /** Nama pengaju. Lewat `private.employee_display_name` — `employees_select` self-or-creator saja. */
+  diajukanOlehNama: string;
+  /**
+   * Nominal yang diminta, desimal (wire yang memformatnya jadi Rp). Hanya ada
+   * untuk `Creator Payment Approval`, dari `creator_payment_requests.amount`
+   * milik `cprId`; `null` untuk jenis lain — dan `null` juga bila RLS memang
+   * tidak memberi aktor ini hak melihat angkanya, yang merupakan jawaban jujur,
+   * bukan kegagalan. Diambil lewat subquery skalar berkorelasi, BUKAN join:
+   * subquery menghasilkan NULL, sementara join membuang baris induknya.
+   */
+  nominal: string | null;
 }
 
 interface PermintaanRow {
@@ -221,8 +250,47 @@ interface PermintaanRow {
   catatan_proses: string;
   created_by: string;
   created_at: Date;
+  toko: string | null;
+  diajukan_oleh_nama: string | null;
+  nominal: string | null;
 }
 
+
+/**
+ * permintaanCols is the ONE projection all three Permintaan reads share.
+ *
+ * Sebelum A-2 daftar kolomnya disalin di tiga tempat (`getPermintaan`,
+ * `listPermintaanForClient`, `listPermintaanQueue`) — dan tiga salinan adalah
+ * cara paling andal membuat satu field baru hadir di sebagian baca dan hilang
+ * di sebagian lain. Kunci yang HILANG mengosongkan halaman walau route
+ * menjawab 200 (kelas O43), jadi ketiganya disatukan di sini lebih dulu.
+ *
+ * Tabel dialiaskan `p` supaya subquery `cpr` di bawah tidak ambigu.
+ *
+ * Ketiga field turunan datang lewat jalur yang SENGAJA berbeda-beda, dan
+ * alasannya bukan selera:
+ *   • `toko` dan `diajukan_oleh_nama` → fungsi `private.*` SECURITY DEFINER.
+ *     `listPermintaanQueue` juga melayani antrean Account, dan seorang AM tidak
+ *     punya lengan `clients_select` untuk klien yang bukan miliknya sementara
+ *     `employees_select` self-or-creator saja ⇒ join akan MEMBUANG barisnya
+ *     (O52, keputusan pemilik 2026-08-07 opsi (b)).
+ *   • `nominal` → subquery skalar berkorelasi atas `creator_payment_requests`,
+ *     yang sejak migrasi A-2 (`20260922100300`) punya lengan divisi Finance.
+ *     Di sini policy-nya memang dilebarkan (opsi (a)) karena yang Finance butuh
+ *     adalah BARIS CPR-nya, bukan satu kolom — lihat migrasinya. Subquery, bukan
+ *     join: ia menghasilkan NULL saat baris CPR tak terjangkau, sedangkan join
+ *     akan menghapus baris Permintaan-nya. `null` = "bukan CPA, atau bukan hak
+ *     Anda" — jawaban jujur, bukan kegagalan.
+ */
+function permintaanCols(sql: Queryable) {
+  return sql`p.id, p.jenis, p.judul, p.deskripsi, p.brief_id, p.service_id, p.client_id, p.cpr_id,
+    p.diajukan_oleh, p.diajukan_divisi, p.tujuan_divisi, p.tujuan_employee_id, p.due_date, p.status,
+    p.diproses_pada, p.selesai_pada, p.ditolak_pada, p.alasan_ditolak, p.catatan_proses,
+    p.created_by, p.created_at,
+    private.client_toko(p.client_id) as toko,
+    private.employee_display_name(p.diajukan_oleh) as diajukan_oleh_nama,
+    (select cpr.amount::text from creator_payment_requests cpr where cpr.id = p.cpr_id) as nominal`;
+}
 
 function dateStr(d: string | Date): string {
   return d instanceof Date ? d.toISOString().slice(0, 10) : String(d);
@@ -275,6 +343,8 @@ function toPermintaan(r: PermintaanRow, now: Date): Permintaan {
     alasanDitolak: r.alasan_ditolak, catatanProses: r.catatan_proses,
     terlambatBerjalan, selesaiTerlambat, hariTerlambat,
     createdBy: r.created_by, createdAt: r.created_at,
+    toko: r.toko ?? '', diajukanOlehNama: r.diajukan_oleh_nama ?? '',
+    nominal: r.nominal,
   };
 }
 
@@ -287,9 +357,51 @@ interface ParentInfo {
   resolvedServiceId: string | null;
 }
 
-async function resolveParent(tx: Queryable, briefId: string | undefined, serviceId: string | undefined): Promise<ParentInfo> {
+/**
+ * resolveParent finds the client (and AM) behind a Permintaan's parent.
+ *
+ * A-2 adds a THIRD way in: from the `cpr_id` itself, for Creator Payment
+ * Approval. Rantainya sudah ditentukan sepenuhnya oleh CPR-nya —
+ * `creator_payment_requests → creator_bookings → briefs → services → clients` —
+ * jadi meminta pemanggil ikut mengirim `brief_id` berarti menyuruhnya mencari
+ * sendiri sesuatu yang sudah diketahui di sini. Halaman CPR memang tidak
+ * memilikinya: `PaymentRequest` hanya membawa `booking_id`.
+ *
+ * Dan ini menutup satu lubang, bukan cuma memudahkan: sebelum ini `brief_id`
+ * dan `cpr_id` tidak pernah dicocokkan satu sama lain, sehingga sebuah REQ-
+ * bisa lahir menunjuk CPR milik klien A dengan `brief_id` klien B — dan
+ * `client_id`-nya akan ikut yang SALAH. Menurunkannya dari CPR membuat
+ * ketidakcocokan itu mustahil, bukan cuma tidak disengaja.
+ *
+ * Urutannya sengaja: `brief_id` eksplisit tetap menang bila dikirim, supaya
+ * jalur yang sudah ada tidak berubah perilaku.
+ */
+async function resolveParent(
+  tx: Queryable,
+  briefId: string | undefined,
+  serviceId: string | undefined,
+  cprId?: string,
+): Promise<ParentInfo> {
   const brief = (briefId ?? '').trim();
   const service = (serviceId ?? '').trim();
+  const cpr = (cprId ?? '').trim();
+  if (brief === '' && service === '' && cpr !== '') {
+    const rows = await tx<{ client_id: string; assigned_am_id: string | null; brief_id: string; service_id: string }[]>`
+      select sv.client_id, cl.assigned_am_id, bk.brief_id, b.service_id
+        from creator_payment_requests cpr
+        join creator_bookings bk on bk.id = cpr.booking_id
+        join briefs b on b.id = bk.brief_id
+        join services sv on sv.id = b.service_id
+        join clients cl on cl.id = sv.client_id
+       where cpr.id = ${cpr}`;
+    if (rows.length === 0) {
+      throw new NotFoundError(MSG_CPR_NOT_FOUND);
+    }
+    return {
+      clientId: rows[0].client_id, assignedAmId: rows[0].assigned_am_id,
+      resolvedBriefId: rows[0].brief_id, resolvedServiceId: rows[0].service_id,
+    };
+  }
   if (brief !== '') {
     const rows = await tx<{ client_id: string; assigned_am_id: string | null; service_id: string }[]>`
       select sv.client_id, cl.assigned_am_id, b.service_id
@@ -371,12 +483,21 @@ export async function createPermintaan(sql: Sql, actor: Actor, input: Permintaan
 
   return withTransaction(sql, async (tx) => {
     const ex = executors(tx);
-    const parent = await resolveParent(tx, input.briefId, input.serviceId);
+    const parent = await resolveParent(tx, input.briefId, input.serviceId, cprId);
 
     if (cprId !== '') {
       const cprRows = await tx<{ n: string }[]>`select count(*) as n from creator_payment_requests where id = ${cprId}`;
       if (Number(cprRows[0].n) === 0) {
         throw new NotFoundError(MSG_CPR_NOT_FOUND);
+      }
+      // Satu CPR, satu Permintaan berjalan (A-2). Diperiksa DI DALAM transaksi
+      // yang sama dengan insert-nya, jadi dua klik bersamaan tidak bisa
+      // sama-sama lolos pemeriksaan lalu sama-sama menulis.
+      const openRows = await tx<{ n: string }[]>`
+        select count(*) as n from permintaan
+         where cpr_id = ${cprId} and status in (${STATUS_DIAJUKAN}, ${STATUS_DIPROSES})`;
+      if (Number(openRows[0].n) > 0) {
+        throw new ConflictError(MSG_CPA_SUDAH_BERJALAN);
       }
     }
 
@@ -417,21 +538,59 @@ export async function createPermintaan(sql: Sql, actor: Actor, input: Permintaan
       due_date: dueDate, status: STATUS_DIAJUKAN,
       diproses_pada: null, selesai_pada: null, ditolak_pada: null, alasan_ditolak: '', catatan_proses: '',
       created_by: actor.employeeId, created_at: now,
+      // Dibaca balik lewat pintu yang SAMA, bukan disusun dari `actor`/`parent`
+      // di sini: turunan kedua adalah jawaban kedua yang bisa menyimpang, dan
+      // nominalnya memang tidak diketahui jalur ini (ia ada di baris CPR).
+      ...(await permintaanIdentity(tx, id)),
     }, now);
   });
 }
 
 // --- Lifecycle ---
 
+/**
+ * permintaanIdentity reads the three derived display fields through the SAME
+ * doors `permintaanCols` projects, for the paths that build a row WITHOUT that
+ * projection — Permintaan birth, and the post-write reads behind `lockPermintaan`.
+ *
+ * It exists because those paths must not use `permintaanCols`: a row being
+ * LOCKED has to be selected `for update` from the real table, and `for update`
+ * cannot be combined with the STABLE `private.*` calls and the correlated
+ * subquery in that projection (O52's own note: the write path keeps its lock and
+ * is deliberately left alone). Filling them in afterwards is the alternative to
+ * the thing that would actually break — swapping a lock for a read.
+ *
+ * Without this, `POST /permintaan/{id}/proses` would answer 200 with
+ * `toko: ''`, and the row the Finance panel just acted on would go blank in
+ * place: the O43 missing-key defect one step removed.
+ */
+async function permintaanIdentity(
+  tx: Queryable,
+  id: string,
+): Promise<Pick<PermintaanRow, 'toko' | 'diajukan_oleh_nama' | 'nominal'>> {
+  const rows = await tx<Pick<PermintaanRow, 'toko' | 'diajukan_oleh_nama' | 'nominal'>[]>`
+    select private.client_toko(p.client_id) as toko,
+           private.employee_display_name(p.diajukan_oleh) as diajukan_oleh_nama,
+           (select cpr.amount::text from creator_payment_requests cpr where cpr.id = p.cpr_id) as nominal
+      from permintaan p where p.id = ${id}`;
+  const r = rows[0];
+  return {
+    toko: r?.toko ?? '',
+    diajukan_oleh_nama: r?.diajukan_oleh_nama ?? '',
+    nominal: r?.nominal ?? null,
+  };
+}
+
 async function lockPermintaan(tx: Queryable, id: string): Promise<PermintaanRow> {
-  const rows = await tx<PermintaanRow[]>`select id, jenis, judul, deskripsi, brief_id, service_id, client_id, cpr_id,
+  const rows = await tx<Omit<PermintaanRow, 'toko' | 'diajukan_oleh_nama' | 'nominal'>[]>`
+    select id, jenis, judul, deskripsi, brief_id, service_id, client_id, cpr_id,
            diajukan_oleh, diajukan_divisi, tujuan_divisi, tujuan_employee_id, due_date, status,
            diproses_pada, selesai_pada, ditolak_pada, alasan_ditolak, catatan_proses, created_by, created_at
     from permintaan where id = ${id} for update`;
   if (rows.length === 0) {
     throw new NotFoundError(MSG_NOT_FOUND);
   }
-  return rows[0];
+  return { ...rows[0], ...(await permintaanIdentity(tx, id)) };
 }
 
 /** processPermintaan drives `[Diajukan]` → `[Diproses]`. Returns the updated row. */
@@ -500,10 +659,8 @@ export function rejectPermintaan(sql: Sql, actor: Actor, id: string, alasan: str
 
 /** getPermintaan returns one Permintaan with keterlambatan derived, view-gated. */
 export async function getPermintaan(sql: Queryable, actor: Actor, id: string, now: Date = new Date()): Promise<Permintaan> {
-  const rows = await sql<PermintaanRow[]>`select id, jenis, judul, deskripsi, brief_id, service_id, client_id, cpr_id,
-           diajukan_oleh, diajukan_divisi, tujuan_divisi, tujuan_employee_id, due_date, status,
-           diproses_pada, selesai_pada, ditolak_pada, alasan_ditolak, catatan_proses, created_by, created_at
-    from permintaan where id = ${id}`;
+  const rows = await sql<PermintaanRow[]>`
+    select ${permintaanCols(sql)} from permintaan p where p.id = ${id}`;
   if (rows.length === 0) {
     throw new NotFoundError(MSG_NOT_FOUND);
   }
@@ -517,10 +674,8 @@ export async function getPermintaan(sql: Queryable, actor: Actor, id: string, no
 /** listPermintaanForClient — every Permintaan tied to one client (view-gated per row). */
 export async function listPermintaanForClient(sql: Queryable, actor: Actor, clientId: string, now: Date = new Date()): Promise<Permintaan[]> {
   const rows = await sql<PermintaanRow[]>`
-    select id, jenis, judul, deskripsi, brief_id, service_id, client_id, cpr_id,
-           diajukan_oleh, diajukan_divisi, tujuan_divisi, tujuan_employee_id, due_date, status,
-           diproses_pada, selesai_pada, ditolak_pada, alasan_ditolak, catatan_proses, created_by, created_at
-    from permintaan where client_id = ${clientId} order by created_at desc`;
+    select ${permintaanCols(sql)} from permintaan p
+     where p.client_id = ${clientId} order by p.created_at desc`;
   return rows
     .filter((r) => canView(actor, r.diajukan_divisi, r.tujuan_divisi, r.diajukan_oleh, r.tujuan_employee_id))
     .map((r) => toPermintaan(r, now));
@@ -532,11 +687,8 @@ export async function listPermintaanQueue(sql: Queryable, actor: Actor, tujuanDi
     throw new ForbiddenError(MSG_VIEW_FORBIDDEN);
   }
   const rows = await sql<PermintaanRow[]>`
-    select id, jenis, judul, deskripsi, brief_id, service_id, client_id, cpr_id,
-           diajukan_oleh, diajukan_divisi, tujuan_divisi, tujuan_employee_id, due_date, status,
-           diproses_pada, selesai_pada, ditolak_pada, alasan_ditolak, catatan_proses, created_by, created_at
-    from permintaan
-     where tujuan_divisi = ${tujuanDivisi} and status in (${STATUS_DIAJUKAN}, ${STATUS_DIPROSES})
-     order by due_date asc, created_at asc`;
+    select ${permintaanCols(sql)} from permintaan p
+     where p.tujuan_divisi = ${tujuanDivisi} and p.status in (${STATUS_DIAJUKAN}, ${STATUS_DIPROSES})
+     order by p.due_date asc, p.created_at asc`;
   return rows.map((r) => toPermintaan(r, now));
 }

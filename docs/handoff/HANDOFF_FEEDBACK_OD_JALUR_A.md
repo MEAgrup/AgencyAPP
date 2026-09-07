@@ -100,6 +100,9 @@ nomor; keduanya benar di pohonnya masing-masing.
 |---|---|---|
 | A-T1 | **`join clients` di jalur Finance TIDAK mengulang O52** — `clients_select` yang HIDUP hari ini sudah punya lengan `jwt_division() = 'Finance'`, jauh lebih lebar daripada yang tertulis di `20260723064438_rls_baseline.sql`. Diverifikasi probe sebelum join ditulis, bukan dibaca dari berkas baseline. Pelajaran yang berlaku umum: **baca policy dari DB, jangan dari migrasi baseline** — sudah 190+ migrasi menumpuk di atasnya. | Ditutup di F-2. Dikunci tes (`reads_rls.test.ts` meng-assert premisnya juga, jadi ia gugur kalau policy berubah lagi). |
 | A-T2 | **O57 (b) hanya separuh bisa ditutup K-2.** Bagian durasi: tertutup. Bagian floor GMV: TIDAK — katalog tidak memuat angka GMV dan `contracts` tidak punya kolom GMV sama sekali. Dicatat O76, tidak diputuskan sepihak. | Ditulis di F-6 (`DECISIONS.md` O76). **Butuh ketokan pemilik.** |
+| A-T5 | **Lead Finance sama butanya dengan staf** terhadap CPR yang belum ia sentuh. Rencana A-2 menulis "staf Finance", tapi probe menunjukkan `jwt_is_lead()` tidak menolong sama sekali — `creator_payment_requests_select` tidak punya lengan divisi apa pun. Karena itu lengan yang ditambahkan **tidak** dibatasi ke lead: `public.jwt_division() = 'Finance'` saja. Membatasinya ke lead akan meninggalkan cacat yang sama untuk staf yang justru mengerjakan antreannya sehari-hari, dan `req.canProcess` memang sengaja membuka Creator Payment Approval ke Finance SEBAGAI DIVISI. | Ditutup di A-2, dikunci tes (`reads_rls.test.ts`, ikut meng-assert lead). |
+| A-T6 | **`brief_id` dan `cpr_id` tidak pernah dicocokkan satu sama lain** pada `createPermintaan`. Sebuah REQ- bisa lahir menunjuk CPR klien A dengan `brief_id` klien B — dan `client_id`-nya ikut yang SALAH, artinya Finance menagih klien yang salah. Ditemukan saat mengerjakan A-2, bukan bagian keluhan. | Ditutup di A-2: untuk CPA, parent-nya **diturunkan dari CPR** (`resolveParent` jalur ketiga), jadi ketidakcocokan itu mustahil, bukan cuma tak disengaja. `brief_id` eksplisit tetap menang bila dikirim, supaya jalur lama nol perubahan perilaku. |
+| A-T7 | **Tidak ada gerbang pengajuan ganda.** Tombol "Ajukan ke Finance" yang ditekan dua kali (atau dua orang KOL di dua tab) akan menaruh DUA baris untuk pembayaran yang SAMA di antrean Finance. Ini cacat yang HAMPIR gw ciptakan sendiri lewat A-2, bukan cacat lama. | Ditutup di A-2: `MSG_CPA_SUDAH_BERJALAN` (409), diperiksa DI DALAM transaksi insert-nya. Yang `[Ditolak]` sengaja TIDAK menghalangi — penolakan sering karena rekening salah, dan memblokir perbaikannya akan mematikan pembayaran creator. |
 | A-T4 | **`admin.test.ts` "hari libur" tidak tahan dijalankan dua kali** atas DB yang sama: ia meng-assert `count(*) = 1` atas `audit_log` tanpa aktor unik, jadi jalan kedua melihat 7. `audit_log` menolak DELETE, jadi `afterEach` tidak bisa membersihkannya. Bukan bug produksi, dan **bukan** disebabkan A-5 — dibuktikan dengan `db-rebuild` lalu jalan ulang: 1991 lulus. Tapi ia memakan satu siklus dan akan memakan siklus Jalur B juga. Perbaikannya sudah ada polanya di repo: `aktorUnik()` (`showcase.test.ts`). | Belum diperbaiki — **di luar cakupan feedback OD**, dicatat supaya tidak dikira regresi. Kalau muncul: `db-rebuild` dulu, baru cari bug. |
 | A-T3 | **Service tidak punya jalur untuk SELESAI.** `[In Execution] → Done` ada di `sm_edges` tapi nol pemanggil di seluruh domain. | Dicatat O75 di F-6. **Butuh ketokan pemilik.** Di luar cakupan feedback. |
 
@@ -115,6 +118,9 @@ tidak lewat:
 | Nama toko jadi baris pertama, `CLI-…` baris kedua — muat di lebar kolom, tidak membuat baris tabel jadi dua kali tinggi | `/finance` | Finance (yang menulis keluhan #1) |
 | Header transaksi: `Klien: Nama Toko (CLI-…)` | `/finance/transactions/{id}` | Finance |
 | Catatan pengganti field PIC di form Brief — terbaca sebagai penjelasan, bukan sebagai error | `/account/services/{id}` | AM/CRO (keluhan Account #2) |
+| Panel "Permintaan ke Finance" — 8 kolom, muat tanpa scroll horizontal; tombol Proses/Selesai/Tolak | `/finance` | Finance (keluhan #2) |
+| Kartu "Permintaan ke Finance" di antrean persetujuan | `/persetujuan` | Finance |
+| Tombol "Ajukan ke Finance" | `/kol/payment-requests/{id}` | KOL |
 
 **Kenapa belum dilakukan di sesi ini, apa adanya:** repo ini tidak punya harness
 peramban (nol Playwright di `scripts/` dan `package.json`; screenshot yang ada di
@@ -128,6 +134,33 @@ Markup-nya sengaja dijaga rendah risiko: satu `<Link>` plus satu
 `<div className="muted">` di dalam `<td>` yang sudah ada — pola yang sudah dipakai
 di halaman yang sama (panel perubahan skema, baris 94) dan di `EmployeePicker`.
 
+## Penyimpangan dari rencana (A-2) — keduanya disengaja
+
+**1. Nol entri nav baru.** Rencana A-2 meminta "entri nav di anchor Keuangan".
+Tidak gw tambahkan, karena antrean Permintaan Finance **sudah terjangkau dari nav
+lewat DUA entri yang ada**: `/finance` (grup Keuangan — panelnya di situ) dan
+`/persetujuan` (`ownedBy(SALES, ACCOUNT, FINANCE, KOL)` — sumber ke-9 di situ).
+Entri ketiga akan menunjuk `/finance` yang sama, jadi ia menambah kekacauan nav
+tanpa menambah satu pun jalur baru, dan memaksa `ALL_HREFS` di `nav.test.ts`
+berubah untuk tautan duplikat. Maksud rencananya — **queue-nya harus terjangkau**
+— sudah terpenuhi. Anchor `ANCHOR-NAV-KEUANGAN` tetap dipasang di F-7 dan tetap
+kosong, siap dipakai kalau nanti ada halaman Keuangan yang benar-benar baru.
+
+**2. `permintaanCols` — projeksi bersama, bukan tiga salinan.** Rencana tidak
+menyebut refactor ini, tapi daftar kolom Permintaan disalin di **tiga** tempat
+(`getPermintaan`, `listPermintaanForClient`, `listPermintaanQueue`), dan tiga
+salinan adalah cara paling andal membuat satu field baru hadir di sebagian baca
+dan hilang di sebagian lain — kelas O43 (halaman kosong walau route 200). Jadi
+ketiganya disatukan lebih dulu, baru field barunya ditambahkan sekali.
+
+`lockPermintaan` **sengaja tidak** memakai projeksi itu: baris yang dikunci harus
+di-`select ... for update` dari tabel aslinya, dan `for update` tidak bisa
+digabung dengan panggilan `private.*` yang STABLE plus subquery berkorelasi —
+catatan O52 sendiri menyatakan jalur tulis dibiarkan dengan kuncinya. Gantinya
+`permintaanIdentity()`, pola yang sama dengan `briefIdentity()` di F-2. Tanpa itu
+`POST /permintaan/{id}/proses` akan menjawab 200 dengan `toko: ''` dan baris yang
+baru saja ditindak Finance akan **kosong di tempat**.
+
 ## Permintaan ke Jalur B (berkas milik B — JANGAN diedit dari sini)
 
 _(belum ada)_
@@ -137,7 +170,7 @@ _(belum ada)_
 | # | Item | Status |
 |---|---|---|
 | A-1 | Nama klien di antrean approval Finance (render) | ✅ **SELESAI** — ⚠️ **utang UAT mata manusia**, lihat di bawah |
-| A-2 | Request pembayaran creator sampai ke Finance (+ migrasi RLS `…T10####`) | belum |
+| A-2 | Request pembayaran creator sampai ke Finance (+ migrasi RLS `…T10####`) | ✅ **SELESAI** — dua penyimpangan dari rencana, dicatat di bawah |
 | A-3 | Status CRO mentok `[Awaiting Onboarding]` — jahitan STRG- → gerbang Brief | belum |
 | A-4 | Durasi kerja sama pindah dari CRO ke closing Sales (K-2) | belum |
 | A-5 | AM berhenti memilih nama staff Creative (K-1 sisi AM) — **memblokir B-4** | ✅ **SELESAI** — lihat di bawah |
