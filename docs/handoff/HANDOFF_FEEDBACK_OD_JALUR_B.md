@@ -123,6 +123,7 @@ perubahan".
 | B-D4 | `assets_select` mendapat arm **AM pemilik klien / Account lead / divisi Ads (baca saja)**, migrasi `20260922200100`. Dua cacat: (1) AM pemilik NOL akses baca ke baris `assets` padahal ia satu-satunya peran yang boleh approve — **pre-existing**, panel review massal AM kosong & `GET /assets/{id}` 404; (2) B-5 membuat predikat TS meloloskan Ads sementara RLS mengosongkan barisnya. Nol arm TULIS. | ✅ terbangun |
 | B-D6 | **`source_creative_brief_id` diproyeksikan lewat KAMPANYE, bukan lewat `GET /briefs/{id}`** (`ads.Campaign.sourceCreativeBriefId`). Dua alasan: `account.getBrief` milik Jalur A, DAN halaman yang butuh nilai ini (picker aset di halaman kampanye) sudah membaca kampanyenya. `LEFT join briefs` — kampanye yang brief-nya tak terbaca tetap harus terbaca. | ✅ terbangun |
 | B-D7 | **Jendela pengingat campaign KOL = H-7, bukan H-1** (`kol_reminder_tick` cabang (c)). Campaign yang berakhir besok sudah tidak bisa diselamatkan — creator butuh waktu untuk brief, produksi, dan QC. H-1 tetap untuk Booking (satu deliverable, bukan campaign). Konsekuensi yang DITERIMA: pemberitahuan **sekali**, bukan eskalasi harian (pola `penugasan_reminder_tick`). | ✅ terbangun |
+| B-D9 | **`private.brief_source_creative_id`** (migrasi `20260922200300`) — pintu O52 untuk `briefs.source_creative_brief_id`. Versi pertama B-5 memakai `left join briefs` di `ads.getCampaign`, dan itu SALAH: rutenya `readAsActor`, `briefs_select` nol arm staff divisi, jadi join-nya mengembalikan NULL untuk **satu-satunya divisi yang memakai field itu**. `LEFT` join tidak membuang barisnya — ia meng-NULL-kan kolomnya, jadi filter picker **diam-diam tidak pernah berlaku**. Nol galat, nol 403, seluruh suite hijau (koneksi tes domain BYPASSRLS). **Ditemukan UAT peramban.** | ✅ terbangun |
 | B-D8 | **`RollupBlocker` — enam sebab yang bisa dibedakan** (`task.diagnoseBriefRollup`), menggantikan empat exit senyap `recomputeBriefRollup`. ⛔ Semantik rollup TIDAK diubah: `allExist` dibiarkan apa adanya karena mengubahnya menggeser setiap metrik turunan, dan itu belum diketok. Kalau pemilik memutuskan Brief boleh menutup pada unit yang ADA (bukan pada `quantity_target`), itu satu perubahan di `rollupTarget` — dan diagnosis ini yang akan menunjukkan berapa Brief yang terdampak. | ✅ terbangun (semantiknya: ⚠️ perlu ketokan) |
 | B-D5 | **PRD M7 `M7-OA-1` ditandai SUPERSEDED oleh K-1.** Auto-assign-by-workload resmi ditinggalkan — ia memang belum pernah dibangun, dan tidak ada sinyal availability/workload di CDPS untuk membangunnya. Dicatat sebagai *retired*, bukan dihapus. | ✅ terbangun |
 
@@ -286,11 +287,11 @@ empat workspace bersih.
 | `packages/core` | 930 | 935 | 936 | **936** |
 | `packages/db` | 53 | 53 | 53 | **53** |
 | `apps/api` | 490 | 491 | 491 | **491** |
-| `packages/domain` (sendirian, pasca-rebuild bersih) | 1977 (+1 skip) | 2012 | 2014 | **2028** (+1 skip) |
+| `packages/domain` (sendirian, pasca-rebuild bersih) | 1977 (+1 skip) | 2012 | 2014 | **2029** (+1 skip) |
 | `web-internal` | 640 | 670 | 670 | **677** |
 | `web-client-portal` | 19 | 19 | 19 | **19** |
 
-`scripts/db-rebuild.sh` terakhir: **195 migrasi**, gerbang **146 / 40 / 31 / 73**
+`scripts/db-rebuild.sh` terakhir: **196 migrasi**, gerbang **146 / 40 / 31 / 73**
 — tidak satu pun digeser Jalur B. Dua migrasi B terakhir nol tabel/prefix/mesin/
 event baru (satu baris `sm_edges`, satu policy `FOR SELECT`, empat kolom penanda).
 
@@ -319,7 +320,7 @@ dulu). `npm run lint`: 1 error **PRE-EXISTING**
 | **B-1b** event notifikasi benar-benar terkirim ke AM PEMILIK | `creative.test.ts` blok *"B-1"* — penerimanya di-assert (`ZZ-SINTA`, bukan aktornya), plus dua cabang negatif: Brief yang rollup-nya TIDAK menutup nol notifikasi, dan AM yang menggerakkan sendiri edge-nya tidak memberi tahu dirinya | ✅ |
 | **B-1a** `created < quantity_target` ⇒ layar mengatakan "n dari N" | `creative.test.ts` (blocker `unit_belum_lengkap` pada kasus 3-dari-12 yang SEMUANYA selesai; `nol_unit` / `menunggu_pekerjaan` / `selesai` / `di_luar_rantai` dibedakan) + `web-internal/src/lib/rollup-blocker.test.ts` (7 tes — keenam sebab menghasilkan kalimat BERBEDA) | ✅ |
 | **B-3** tick pengingat | `kol.test.ts` blok *"B-3"* (6 tes) — jam dinding DIPANCANG (`wib_date`), kedua sisi batas jendela H-7 di-expect, Booking terminal tidak diingatkan, idempotensi, dan penanda tidak bisa di-reset | ✅ |
-| **B-5** filter Brief sumber | `ads.test.ts` blok *"B-5 / K-3"* (2 tes) — diproyeksikan di KEDUA jalur baca (`createCampaign` + `getCampaign`), dan `''` bukan null saat tanpa sumber | ✅ |
+| **B-5** filter Brief sumber | `ads.test.ts` blok *"B-5 / K-3"* (3 tes) — diproyeksikan di KEDUA jalur baca (`createCampaign` + `getCampaign`), `''` bukan null saat tanpa sumber, dan **satu tes yang membaca DI BAWAH RLS** (`withClaims` + `SET LOCAL ROLE authenticated`, klaim divisi Ads) yang meng-assert premisnya dulu ("staff Ads memang tidak melihat baris brief-nya") lalu kolomnya tetap terbaca. Tes inilah yang akan menangkap regresi B-D9 — dua tes lainnya tidak bisa, karena koneksinya BYPASSRLS | ✅ |
 
 ### UAT mata manusia (§6) — DIJALANKAN, dan ia yang menemukan B-D4
 

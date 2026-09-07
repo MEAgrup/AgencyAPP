@@ -373,6 +373,11 @@ export async function createCampaign(sql: Sql, actor: Actor, briefId: string, in
     const ex = executors(tx);
     const briefRows = await tx<{ assigned_division: string; status: string; client_id: string; assigned_am_id: string | null; gmv_baseline: string; total_sales: string; source_creative_brief_id: string | null }[]>`
       select b.assigned_division, b.status, sv.client_id, cl.assigned_am_id, cl.gmv_baseline, cl.total_sales,
+             -- Jalur ini service-role (db()) di dalam transaksi tulis, jadi
+             -- kolomnya langsung sudah aman. Dibaca sebagai kolom (bukan lewat
+             -- private.*) karena barisnya SUDAH di-lock di query yang sama;
+             -- memanggil fungsi terpisah di sini menambah baca kedua atas baris
+             -- yang sama. Jalur BACA-nya (getCampaign) beda cerita.
              b.source_creative_brief_id
         from briefs b
         join services sv on sv.id = b.service_id
@@ -1021,13 +1026,19 @@ export async function getCampaign(sql: Queryable, actor: Actor, campaignId: stri
   >`
     select c.id, c.brief_id, c.client_id, c.platform, c.objective, c.budget, c.start_date, c.end_date,
            c.target_kpi, c.status, c.created_by, c.created_at, cl.assigned_am_id, c.tipe_iklan, c.additional_days,
-           b.source_creative_brief_id
+           -- B-5/K-3: Brief Creative sumber, lewat private.* dan BUKAN lewat
+           -- "left join briefs".
+           --
+           -- Join itu adalah versi pertama, dan ia SALAH: rute ini berjalan
+           -- readAsActor, briefs_select nol arm staff divisi, jadi join-nya
+           -- mengembalikan NULL untuk SATU-SATUNYA divisi yang memakai field
+           -- ini (Ads). LEFT join tidak membuang barisnya — ia meng-NULL-kan
+           -- kolomnya, jadi filter picker aset diam-diam tidak pernah berlaku.
+           -- Nol galat, nol 403, seluruh test hijau (koneksi tes domain
+           -- BYPASSRLS). Ditemukan UAT peramban. Kelas O52.
+           private.brief_source_creative_id(c.brief_id) as source_creative_brief_id
       from ad_campaigns c
       join clients cl on cl.id = c.client_id
-      -- B-5/K-3: brief setup kampanye. LEFT join — sebuah kampanye tanpa brief
-      -- yang bisa dibaca tetap harus terbaca; kehilangan barisnya di sini akan
-      -- membuat halaman kampanye 404 demi satu kolom opsional.
-      left join briefs b on b.id = c.brief_id
      where c.id = ${campaignId}`;
   if (rows.length === 0) {
     throw new NotFoundError(MSG_CAMPAIGN_NOT_FOUND);
