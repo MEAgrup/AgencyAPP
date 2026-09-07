@@ -15,8 +15,8 @@ branch — sesi Jalur A ditugaskan ke branch bernama lain daripada yang ditulis 
 rencana (`claude/cdps-user-feedback-account-a-igix3n`), dan SHA-nya yang mengikat.
 
 ```
-Commit fondasi F : (lihat "Isi F" di HANDOFF_FEEDBACK_OD_JALUR_A.md)
-Branch Jalur B   : claude/cdps-user-feedback-70vbho-b
+Commit fondasi F : b240f47d   ← F-1..F-8 SELESAI, 2026-09-07
+Branch Jalur B   : claude/cdps-user-feedback-70vbho-b (cabangkan dari b240f47d)
 ```
 
 ## Yang sudah disiapkan F untukmu

@@ -11,9 +11,9 @@
 ## Commit fondasi F
 
 ```
-Commit fondasi F : (diisi begitu F mendarat — lihat bagian "Isi F" di bawah)
+Commit fondasi F : b240f47d   ← F-1..F-8 SELESAI, 2026-09-07
 Branch Jalur A   : claude/cdps-user-feedback-account-a-igix3n
-Branch Jalur B   : dicabangkan dari commit F di atas
+Branch Jalur B   : claude/cdps-user-feedback-70vbho-b (cabangkan dari b240f47d)
 ```
 
 > ⚠️ **Catatan penamaan branch.** Rencana induk §0 menyebut branch
@@ -32,7 +32,7 @@ Branch Jalur B   : dicabangkan dari commit F di atas
 | F-3 + F-5 | `af12237a` | Katalog notifikasi **v15**, 4 event, SATU bump. Gate `notif_events` 69 → **73** di `db-rebuild.sh` DAN `ci.yml`. |
 | F-4 | `2aa77ed6` | Migrasi `20260922100200` — `briefs`: `tanggal_mulai`, `tanggal_akhir`, `budget`, `source_creative_brief_id`. |
 | F-6 | `352d9fb1` | `DECISIONS.md`: K-1…K-7, O57 (b) separuh ditutup, O75 + O76 baru. **Sentuhan terakhir ke DECISIONS.** |
-| F-7 + F-8 | (commit ini) | Dua anchor `nav.ts` + dua file handoff. |
+| F-7 + F-8 | `b240f47d` | Dua anchor `nav.ts` + dua file handoff. |
 
 ### Yang Jalur B perlu tahu dari F
 

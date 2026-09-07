@@ -1,6 +1,8 @@
 # Perbaikan CDPS dari "Feedback Final - OD" — eksekusi 2 akun paralel
 
-> **Status: 🟢 disetujui pemilik 2026-09-07, BELUM ada satu baris kode pun ditulis.**
+> **Status: 🟢 disetujui pemilik 2026-09-07. FONDASI F SELESAI (commit `b240f47d`,
+> 2026-09-07) — Jalur A lanjut A-1…A-5, Jalur B boleh bercabang.** Rincian F ada di
+> akhir §0.
 > Dokumen ini adalah titik mulai untuk dua sesi Claude yang berjalan bersamaan.
 > Baca §0 (aturan emas + guard) **sampai habis** sebelum menyentuh apa pun —
 > ada pekerjaan lain (sistem Finance / laporan otomatis) yang sedang jalan
@@ -134,10 +136,52 @@ F-1/F-2), sisa B-3 (butuh kolom F-4).
 Tulis SHA commit F di sini begitu mendarat, dan di kedua file handoff:
 
 ```
-Commit fondasi F : ________
-Branch dasar     : claude/cdps-user-feedback-70vbho
-Branch Jalur B   : claude/cdps-user-feedback-70vbho-b
+Commit fondasi F : b240f47d   ← F-1..F-8 SELESAI, mendarat 2026-09-07
+Branch dasar     : claude/cdps-user-feedback-account-a-igix3n
+Branch Jalur B   : claude/cdps-user-feedback-70vbho-b (cabangkan dari SHA di atas)
 ```
+
+> ⚠️ **Branch dasarnya berbeda dari yang ditulis di atas, dan itu bukan
+> improvisasi.** Sesi Akun A ditugaskan ke
+> `claude/cdps-user-feedback-account-a-igix3n` dengan larangan push ke branch
+> lain, jadi F mendarat di sana. **Yang mengikat Jalur B adalah SHA `b240f47d`**,
+> bukan nama branch — bercabanglah dari SHA itu.
+
+### F sudah mendarat — tujuh commit
+
+| # | Commit | Isi |
+|---|---|---|
+| F-2 (finance) | `25fb3f12` | `financeQueue` + `loadTransactionAggregate` `join clients` → `toko`. Commit PERTAMA, terkecil, berdiri sendiri (guard §0). |
+| F-2 (account) | `0390aadb` | Migrasi `20260922100000` — empat fungsi `private.*`; `briefCols` membawa `client_id`/`client_nama`/`assigned_pic_nama` di SETIAP baca Brief. |
+| F-1 | `aa908cbc` | `wire.ts` — `TransactionWire.toko` + tiga field `BriefWire` + **dua anchor**. Tipe FE ikut. |
+| F-3 + F-5 | `af12237a` | Katalog **v15**, 4 event, SATU bump. Gate `notif_events` 69 → **73** di `db-rebuild.sh` DAN `ci.yml` (satu commit — memisahkannya membuatnya merah di CI menurut konstruksinya sendiri). |
+| F-4 | `2aa77ed6` | Migrasi `20260922100200` — `briefs`: `tanggal_mulai`, `tanggal_akhir`, `budget`, `source_creative_brief_id` + 3 CHECK. |
+| F-6 | `352d9fb1` | `DECISIONS.md` — K-1…K-7, O57 (b) **separuh** ditutup, O75 + O76 baru. Sentuhan TERAKHIR ke DECISIONS. |
+| F-7 + F-8 | `b240f47d` | Dua anchor `nav.ts` + dua file handoff. |
+
+**Exit criteria §1 — semuanya lolos:** db-rebuild 192 migrasi dengan seluruh gate
+hijau (146 · 40 · 31 · **73** · `notif_katalog_sesuai`) dan keempat invariant SQL;
+`typecheck --workspaces` bersih SESUDAH `npm install`; domain **1990** (+1 skip,
+dijalankan sendirian sesudah db-rebuild) · core **936** · db **53** · api **490** ·
+web-internal **650** · web-client-portal **19** — semuanya naik atau sama, tidak ada
+yang turun; `shape-parity` hijau dengan field baru; `route-parity` hijau dengan
+`KNOWN_GAPS` **tetap kosong**; `ident.registry` + `notif_catalog.reals` hijau;
+`web-internal` `tsc --noEmit` bersih + `next build` sukses. Nol migrasi di-apply ke
+live, nol `supabase db push`.
+
+**Dua hal dari F yang perlu dibaca sebelum menyentuh Jalur B** (lengkapnya di
+`docs/handoff/HANDOFF_FEEDBACK_OD_JALUR_B.md`):
+
+1. **Perangkap O52 dibuktikan ulang dengan angkanya.** Satu Brief Creative, dibaca
+   sebagai lead Creative di bawah RLS: `from briefs` saja = **1** baris; +
+   `join services + clients + employees` = **0** baris; + `private.*` = **1** baris.
+   Join-nya tidak mengosongkan kolom — ia membuang barisnya, jadi halamannya tampak
+   KOSONG dan bukan salah.
+2. **`clients_select` yang HIDUP jauh lebih lebar daripada `rls_baseline.sql`** — ia
+   sudah punya lengan `Finance`, `Account` lead, `Sales` lead, dan `Ads`
+   ber-Brief-Ads. Karena itu `join clients` di jalur Finance (F-2) aman, dan karena
+   itu juga: **baca policy dari DB, jangan dari migrasi baseline.** Sudah 190+
+   migrasi menumpuk di atasnya. (Relevan langsung untuk B-5 — lengan Ads sudah ada.)
 
 ---
 
