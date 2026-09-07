@@ -235,14 +235,25 @@ hijau. Jangan mulai mencari bug sebelum itu.
 
 Utang §4 butir 1 handoff sebelumnya **lunas**. Yang tersisa, urut prioritas:
 
-1. **Gelombang C (Showcase Klien Terbaik)** atau **Gelombang D (laporan
-   keuangan accrual)** — rancangan keduanya di `HANDOFF_GELOMBANG_B_20260906.md`
-   §7. Baca peringatan di muka: halaman Showcase akan **KOSONG** hari ini
-   (laporan live pra-R3 payload-nya beku), dan skedul pendapatan hanya mencakup
-   3 dari 14 layanan. D menambah **satu** migrasi ⇒ 184.
-2. **Pertanyaan terbuka yang masih menggantung** (`DECISIONS.md` §Open): B23-SHP,
-   pemilik pilar `retensi` (E-9), dan lima pertanyaan Gelombang C/D.
-3. **Jahitan fixture terakhir** (§5 butir 2) — kalau pemilik mau ditutup, ia
+1. **Ketok delapan pertanyaan pemilik lebih dulu** — keputusan Nerissa (COO)
+   2026-09-07. Briefnya (opsi + untung-rugi + rekomendasi, dengan angka live yang
+   sudah diverifikasi):
+   `docs/handoff/KEPUTUSAN_PEMILIK_GELOMBANG_C_D_20260907.md`; barisnya di
+   `DECISIONS.md` §Open: `E9-RETENSI` · `C-1` · `C-2` · `C-3` · `D-1`…`D-4`.
+   C berhenti di **3** keputusan, D di **4** — jadi membangun keduanya sekarang
+   berarti membangun di atas tebakan.
+   ⚠️ **Koreksi terhadap handoff sebelumnya:** alasan "halaman Showcase KOSONG"
+   **bukan** payload beku. Payload laporan live justru lengkap (21 kunci, termasuk
+   `insight`); sebab sebenarnya **laporan klien baru 1 dan skornya 4,5 KRITIS**.
+   Nilai Gelombang C bergantung pada jumlah laporan yang masuk, bukan pada
+   backfill.
+2. **Dua pekerjaan yang tidak butuh keputusan siapa pun, dan memblokir nilai
+   C/D:** isi `durasi_jasa` MSL (**0 dari 14** layanan) dan naikkan jumlah laporan
+   klien (**1 dari 10** klien). Keduanya operasional, bukan dev.
+3. **Gelombang C / D** sesudah ketokan — rancangan di
+   `HANDOFF_GELOMBANG_B_20260906.md` §7 (§8-nya sudah dipindah, lihat butir 1).
+   D menambah **satu** migrasi ⇒ 184.
+4. **Jahitan fixture terakhir** (§5 butir 2) — kalau pemilik mau ditutup, ia
    butuh keputusan tentang bagaimana `web-internal` boleh melihat keluaran server
    asli di tesnya.
 
