@@ -197,6 +197,13 @@ export type PlanTier = 'plan_wajib' | 'ditentukan_am' | 'tanpa_plan';
  */
 export type QtyMenambah = 'durasi' | 'volume';
 
+/**
+ * KAPAN pendapatan sebuah layanan diakui mesin accrual (ketokan D-KOM
+ * 2026-09-07). TIDAK bisa diturunkan dari `durasi_bulan`: `Komisi` dan `Jasa
+ * Pengajuan Shopee Mall` sama-sama `durasi_bulan = null` dengan arti berbeda.
+ */
+export type Pengakuan = 'per_periode' | 'saat_selesai' | 'bulan_berikutnya';
+
 export interface MasterService {
   id: string;
   name: string;
@@ -218,6 +225,8 @@ export interface MasterService {
   durasi_bulan: number | null;
   /** Apa yang ditambah qty yang dibeli klien (Q3). */
   qty_menambah: QtyMenambah;
+  /** Kapan pendapatannya diakui (D-KOM). */
+  pengakuan: Pengakuan;
   version_no: number;
   effective_from: string;
 }

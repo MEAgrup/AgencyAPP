@@ -78,6 +78,7 @@ describe('masterServiceToWire', () => {
       planTier: 'ditentukan_am',
       durasiBulan: 6,
       qtyMenambah: 'durasi',
+      pengakuan: 'per_periode',
       versionNo: 3,
       effectiveFrom: '2026-07-01',
     };
@@ -99,6 +100,7 @@ describe('masterServiceToWire', () => {
       plan_tier: 'ditentukan_am',
       durasi_bulan: 6,
       qty_menambah: 'durasi',
+      pengakuan: 'per_periode',
       version_no: 3,
       effective_from: '2026-07-01',
     });
@@ -694,8 +696,12 @@ describe('M0 quote preview wire mapper (C-03 finding)', () => {
     ],
     // bigint — JSON.stringify throws on these; the mapper must drop them.
     estimasiNilai: 7_000_000n,
+    totalPPN: 770_000n,
+    nilaiDitagih: 7_770_000n,
     totalKomisi: 350_000n,
     estimasiNilaiIdr: 'Rp. 7.000.000,00',
+    totalPPNIdr: 'Rp. 770.000,00',
+    nilaiDitagihIdr: 'Rp. 7.770.000,00',
     totalKomisiIdr: 'Rp. 350.000,00',
   };
 
@@ -713,6 +719,8 @@ describe('M0 quote preview wire mapper (C-03 finding)', () => {
         },
       ],
       estimasi_nilai_idr: 'Rp. 7.000.000,00',
+      total_ppn_idr: 'Rp. 770.000,00',
+      nilai_ditagih_idr: 'Rp. 7.770.000,00',
       total_komisi_idr: 'Rp. 350.000,00',
     });
   });

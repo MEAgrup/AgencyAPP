@@ -33,6 +33,8 @@ export interface MasterServiceWire {
   durasi_bulan: number | null;
   /** 'durasi' | 'volume' — apa yang ditambah qty yang dibeli klien (Q3). */
   qty_menambah: string;
+  /** 'per_periode' | 'saat_selesai' | 'bulan_berikutnya' (D-KOM). */
+  pengakuan: string;
   version_no: number;
   effective_from: string;
 }
@@ -57,6 +59,7 @@ export function masterServiceToWire(v: msl.ServiceView): MasterServiceWire {
     plan_tier: v.planTier,
     durasi_bulan: v.durasiBulan,
     qty_menambah: v.qtyMenambah,
+    pengakuan: v.pengakuan,
     version_no: v.versionNo,
     effective_from: v.effectiveFrom,
   };
@@ -2182,13 +2185,19 @@ export interface LineQuoteWire {
   unit: string;
   standard_price_idr: string;
   komisi_idr: string;
+  /** ALWAYS non-PPN (D-4) — there is no per-line tax figure by design. */
   subtotal_idr: string;
 }
 
 /** module0_sales.Quote — web-internal's `Quote` (lib/sales.ts). */
 export interface QuoteWire {
   lines: LineQuoteWire[];
+  /** ALWAYS non-PPN — the accrual figure and the commission base (D-4). */
   estimasi_nilai_idr: string;
+  /** PPN on the whole invoice; `Rp. 0,00` unless Sales pressed "Include PPN". */
+  total_ppn_idr: string;
+  /** What the client is billed: base + PPN. */
+  nilai_ditagih_idr: string;
   total_komisi_idr: string;
 }
 
@@ -2213,6 +2222,8 @@ export function quoteToWire(q: sales.Quote): QuoteWire {
       subtotal_idr: l.subtotalIdr,
     })),
     estimasi_nilai_idr: q.estimasiNilaiIdr,
+    total_ppn_idr: q.totalPPNIdr,
+    nilai_ditagih_idr: q.nilaiDitagihIdr,
     total_komisi_idr: q.totalKomisiIdr,
   };
 }

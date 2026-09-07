@@ -297,7 +297,7 @@ describeDb('durasi_bulan', () => {
   it('persists on create and reads back as the same whole number of MONTHS', async () => {
     const id = await createService(sql, salesLead(), {
       name: 'Jasa berdurasi', standardPrice: '1000000', commissionRule: 'flat Rp 100',
-      effectiveFrom: '2020-01-01', active: true, durasiBulan: 6,
+      effectiveFrom: '2020-01-01', active: true, durasiBulan: 6, pengakuan: 'per_periode',
     });
     expect((await effectiveAt(sql, id, TODAY)).durasiBulan).toBe(6);
   });
@@ -305,11 +305,11 @@ describeDb('durasi_bulan', () => {
   it('SURVIVES an update that carries it forward — the version 2 that wiped it was the bug', async () => {
     const id = await createService(sql, salesLead(), {
       name: 'AI Video', standardPrice: '1000000', commissionRule: 'flat Rp 100',
-      effectiveFrom: '2020-01-01', active: true, durasiBulan: 1,
+      effectiveFrom: '2020-01-01', active: true, durasiBulan: 1, pengakuan: 'per_periode',
     });
     await updateService(sql, salesLead(), id, {
       name: 'AI Video (harga naik)', standardPrice: '1200000', commissionRule: 'flat Rp 100',
-      effectiveFrom: '2020-06-01', active: true, durasiBulan: 1,
+      effectiveFrom: '2020-06-01', active: true, durasiBulan: 1, pengakuan: 'per_periode',
     });
     const v2 = await effectiveAt(sql, id, TODAY);
     expect(v2.versionNo).toBe(2);
@@ -319,7 +319,7 @@ describeDb('durasi_bulan', () => {
   it('an update that omits it CLEARS it — full-replace semantics, stated so no caller is surprised', async () => {
     const id = await createService(sql, salesLead(), {
       name: 'Jasa berdurasi 2', standardPrice: '1000000', commissionRule: 'flat Rp 100',
-      effectiveFrom: '2020-01-01', active: true, durasiBulan: 6,
+      effectiveFrom: '2020-01-01', active: true, durasiBulan: 6, pengakuan: 'per_periode',
     });
     await updateService(sql, salesLead(), id, {
       name: 'Jasa berdurasi 2', standardPrice: '1000000', commissionRule: 'flat Rp 100',
@@ -360,6 +360,7 @@ describeDb('durasi_bulan', () => {
     const id = await createService(sql, salesLead(), {
       name: 'GMV Max', standardPrice: '1000000', commissionRule: 'flat Rp 100',
       effectiveFrom: '2020-01-01', active: true, durasiBulan: 1, qtyMenambah: 'durasi',
+      pengakuan: 'per_periode',
     });
     expect((await effectiveAt(sql, id, TODAY)).qtyMenambah).toBe('durasi');
   });
@@ -387,9 +388,109 @@ describeDb('durasi_bulan', () => {
   it('rejects a qty_menambah that is neither durasi nor volume', async () => {
     await expect(createService(sql, salesLead(), {
       name: 'x', standardPrice: '1000', commissionRule: 'flat Rp 100',
-      effectiveFrom: '2020-01-01', durasiBulan: 1,
+      effectiveFrom: '2020-01-01', durasiBulan: 1, pengakuan: 'per_periode',
       qtyMenambah: 'bulanan' as never,
     })).rejects.toBeInstanceOf(IncompleteError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// pengakuan (D-KOM, diketok 2026-09-07 opsi a) — KAPAN pendapatan diakui.
+//
+// Kolom ini ada justru karena ia TIDAK bisa diturunkan dari `durasi_bulan`:
+// `Komisi` dan `Jasa Pengajuan Shopee Mall` sama-sama `durasi_bulan = NULL`
+// dengan arti yang berbeda. Tes di bawah memakai dua nama itu apa adanya supaya
+// yang diuji adalah kasus nyata yang melahirkan kolomnya, bukan contoh karangan.
+// ---------------------------------------------------------------------------
+describeDb('pengakuan', () => {
+  it('tanpa durasi, boleh dihilangkan dan berarti saat_selesai — satu arti, bukan tebakan', async () => {
+    const id = await createService(sql, salesLead(), {
+      name: 'Jasa Pengajuan Shopee Mall', standardPrice: '1000000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', active: true,
+    });
+    expect((await effectiveAt(sql, id, TODAY)).pengakuan).toBe('saat_selesai');
+  });
+
+  it('MENOLAK layanan berdurasi yang tidak menyebut pengakuannya', async () => {
+    // Layanan berdurasi bisa sah `per_periode` maupun `saat_selesai`, dan
+    // menebak salah satunya diam-diam menempatkan pendapatan di bulan yang
+    // salah selama berbulan-bulan. Hari ini 42 dari 42 layanan berdurasi memang
+    // `per_periode` — tapi itu keadaan data, bukan aturan, dan menjadikannya
+    // default berarti menurunkan `pengakuan` dari `durasi_bulan` lagi.
+    await expect(createService(sql, salesLead(), {
+      name: 'GMV MAX MEA PRO', standardPrice: '1000000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', active: true, durasiBulan: 6,
+    })).rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  it('Komisi menyimpan bulan_berikutnya WALAU durasinya null — arti kedua di nilai kosong yang sama', async () => {
+    const komisi = await createService(sql, salesLead(), {
+      name: 'Komisi', standardPrice: '1000000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', active: true, pengakuan: 'bulan_berikutnya',
+    });
+    const mall = await createService(sql, salesLead(), {
+      name: 'Jasa Pengajuan Shopee Mall (2)', standardPrice: '1000000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', active: true, pengakuan: 'saat_selesai',
+    });
+    const a = await effectiveAt(sql, komisi, TODAY);
+    const b = await effectiveAt(sql, mall, TODAY);
+    expect(a.durasiBulan).toBeNull();
+    expect(b.durasiBulan).toBeNull();
+    expect(a.pengakuan).toBe('bulan_berikutnya');
+    expect(b.pengakuan).toBe('saat_selesai');
+  });
+
+  it('MENOLAK per_periode tanpa durasi — tidak ada periode untuk disebari', async () => {
+    await expect(createService(sql, salesLead(), {
+      name: 'x', standardPrice: '1000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', pengakuan: 'per_periode',
+    })).rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  it('DB juga menolak kombinasi itu, bukan hanya TS — CHECK-nya gerbang yang sebenarnya', async () => {
+    // Sama alasannya dengan `ck_msv_qty_durasi_butuh_durasi_bulan`: msl.ts bukan
+    // satu-satunya penulis tabel ini.
+    const msvId = 'MSV-209912-9002';
+    await sql`insert into master_services (id, created_by) values (${msvId}, 'ZZ-SLEAD')`;
+    await expect(sql`
+      insert into master_service_versions
+        (service_id, version_no, name, standard_price, commission_rule, pricing_mode,
+         durasi_bulan, pengakuan, effective_from, created_by)
+      values (${msvId}, 1, 'x', '1000', 'flat Rp 100', 'flat', null, 'per_periode', '2020-01-01', 'ZZ-SLEAD')`,
+    ).rejects.toThrow(/ck_msv_per_periode_butuh_durasi_bulan/);
+  });
+
+  it('DB menolak nilai pengakuan yang tidak ada dalam kosakata', async () => {
+    const msvId = 'MSV-209912-9003';
+    await sql`insert into master_services (id, created_by) values (${msvId}, 'ZZ-SLEAD')`;
+    await expect(sql`
+      insert into master_service_versions
+        (service_id, version_no, name, standard_price, commission_rule, pricing_mode,
+         durasi_bulan, pengakuan, effective_from, created_by)
+      values (${msvId}, 1, 'x', '1000', 'flat Rp 100', 'flat', null, 'kapan_kapan', '2020-01-01', 'ZZ-SLEAD')`,
+    ).rejects.toThrow(/ck_msv_pengakuan/);
+  });
+
+  it('menolak nilai pengakuan yang tidak dikenal di TS juga', async () => {
+    await expect(createService(sql, salesLead(), {
+      name: 'x', standardPrice: '1000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', pengakuan: 'kapan_kapan' as never,
+    })).rejects.toBeInstanceOf(IncompleteError);
+  });
+
+  it('ikut terbawa ke versi berikutnya, dan versi lama tetap membawa nilainya sendiri', async () => {
+    const id = await createService(sql, salesLead(), {
+      name: 'Store Management (Paket)', standardPrice: '1000000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-01-01', active: true, durasiBulan: 1, qtyMenambah: 'durasi',
+      pengakuan: 'per_periode',
+    });
+    await updateService(sql, salesLead(), id, {
+      name: 'Store Management (Paket)', standardPrice: '1200000', commissionRule: 'flat Rp 100',
+      effectiveFrom: '2020-06-01', active: true, pengakuan: 'saat_selesai',
+    });
+    expect((await effectiveAt(sql, id, TODAY)).pengakuan).toBe('saat_selesai');
+    const chain = await listVersions(sql, id);
+    expect(chain.find((v) => v.versionNo === 1)!.pengakuan).toBe('per_periode');
   });
 });
 
